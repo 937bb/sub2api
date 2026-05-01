@@ -111,6 +111,13 @@ type SystemSettings struct {
 	AffiliateRebateFreezeHours   int
 	AffiliateRebateDurationDays  int
 	AffiliateRebatePerInviteeCap float64
+	RedeemRebateEnabled          bool
+
+	// 余额模型设置（balance_entries）
+	BalanceExpiryEnabled         bool
+	BalanceExpiryWarningDays     int
+	BalanceDeductionOrder        string // "expiring_first" | "permanent_first"
+
 	DefaultUserRPMLimit          int
 	DefaultSubscriptions         []DefaultSubscriptionSetting
 

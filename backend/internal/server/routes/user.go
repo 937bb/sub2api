@@ -96,6 +96,24 @@ func RegisterUserRoutes(
 			announcements.POST("/:id/read", h.Announcement.MarkRead)
 		}
 
+		// 每日签到
+		checkin := user.Group("/checkin")
+		{
+			checkin.POST("", h.Checkin.Checkin)
+			checkin.GET("/status", h.Checkin.Status)
+			checkin.GET("/calendar", h.Checkin.Calendar)
+		}
+
+		// 排行榜
+		user.GET("/leaderboard", h.Leaderboard.GetLeaderboard)
+
+		// 余额明细
+		balanceEntries := user.Group("/balance-entries")
+		{
+			balanceEntries.GET("", h.BalanceEntry.List)
+			balanceEntries.GET("/summary", h.BalanceEntry.Summary)
+		}
+
 		// 卡密兑换
 		redeem := authenticated.Group("/redeem")
 		{

@@ -522,6 +522,12 @@ type adminServiceImpl struct {
 	defaultSubAssigner   DefaultSubscriptionAssigner
 	userSubRepo          UserSubscriptionRepository
 	privacyClientFactory PrivacyClientFactory
+	balanceEntryService  *BalanceEntryService
+}
+
+// SetBalanceEntryService 注入余额明细服务
+func (s *adminServiceImpl) SetBalanceEntryService(svc *BalanceEntryService) {
+	s.balanceEntryService = svc
 }
 
 type userGroupRateBatchReader interface {
@@ -847,6 +853,21 @@ func (s *adminServiceImpl) UpdateUserBalance(ctx context.Context, userID int64, 
 				logger.LegacyPrintf("service.admin", "invalidate user balance cache failed: user_id=%d err=%v", userID, err)
 			}
 		}()
+	}
+
+	// 记录余额明细
+	if s.balanceEntryService != nil && balanceDiff != 0 {
+		if balanceDiff > 0 {
+			s.balanceEntryService.RecordAddition(ctx, &AddBalanceInput{
+				UserID:      userID,
+				Amount:      balanceDiff,
+				BalanceType: BalanceTypePermanent,
+				Source:      BalanceSourceAdmin,
+				Note:        notes,
+			})
+		} else {
+			s.balanceEntryService.RecordDeduction(ctx, userID, -balanceDiff, BalanceSourceAdmin, notes)
+		}
 	}
 
 	if balanceDiff != 0 {

@@ -135,6 +135,12 @@ type AffiliateService struct {
 	settingService       *SettingService
 	authCacheInvalidator APIKeyAuthCacheInvalidator
 	billingCacheService  *BillingCacheService
+	balanceEntryService  *BalanceEntryService
+}
+
+// SetBalanceEntryService 注入余额明细服务
+func (s *AffiliateService) SetBalanceEntryService(svc *BalanceEntryService) {
+	s.balanceEntryService = svc
 }
 
 func NewAffiliateService(repo AffiliateRepository, settingService *SettingService, authCacheInvalidator APIKeyAuthCacheInvalidator, billingCacheService *BillingCacheService) *AffiliateService {
@@ -341,6 +347,16 @@ func (s *AffiliateService) TransferAffiliateQuota(ctx context.Context, userID in
 	}
 	if transferred > 0 {
 		s.invalidateAffiliateCaches(ctx, userID)
+		// 记录余额明细
+		if s.balanceEntryService != nil {
+			s.balanceEntryService.RecordAddition(ctx, &AddBalanceInput{
+				UserID:      userID,
+				Amount:      transferred,
+				BalanceType: BalanceTypePermanent,
+				Source:      BalanceSourceAffiliate,
+				Note:        "邀请返利提取",
+			})
+		}
 	}
 	return transferred, balance, nil
 }

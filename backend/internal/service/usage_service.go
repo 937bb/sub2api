@@ -58,6 +58,12 @@ type UsageService struct {
 	userRepo             UserRepository
 	entClient            *dbent.Client
 	authCacheInvalidator APIKeyAuthCacheInvalidator
+	balanceEntryService  *BalanceEntryService
+}
+
+// SetBalanceEntryService 注入余额明细服务
+func (s *UsageService) SetBalanceEntryService(svc *BalanceEntryService) {
+	s.balanceEntryService = svc
 }
 
 // NewUsageService 创建使用统计服务实例
@@ -126,6 +132,9 @@ func (s *UsageService) Create(ctx context.Context, req CreateUsageLogRequest) (*
 			return nil, fmt.Errorf("update user balance: %w", err)
 		}
 		balanceUpdated = true
+		if s.balanceEntryService != nil {
+			s.balanceEntryService.RecordDeduction(txCtx, req.UserID, req.ActualCost, BalanceSourceConsumption, "API consumption")
+		}
 	}
 
 	if tx != nil {

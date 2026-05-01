@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -80,6 +81,10 @@ type RedeemService struct {
 	billingCacheService  *BillingCacheService
 	entClient            *dbent.Client
 	authCacheInvalidator APIKeyAuthCacheInvalidator
+	affiliateService     *AffiliateService
+	settingService       *SettingService
+	balanceEntryService  *BalanceEntryService
+	redeemBonusService   *RedeemBonusService
 }
 
 // NewRedeemService 创建兑换码服务实例
@@ -101,6 +106,26 @@ func NewRedeemService(
 		entClient:            entClient,
 		authCacheInvalidator: authCacheInvalidator,
 	}
+}
+
+// SetAffiliateService 注入邀请返利服务（用于兑换码余额充值触发返利）
+func (s *RedeemService) SetAffiliateService(affiliateService *AffiliateService) {
+	s.affiliateService = affiliateService
+}
+
+// SetSettingService 注入系统设置服务（用于读取兑换码返利开关）
+func (s *RedeemService) SetSettingService(settingService *SettingService) {
+	s.settingService = settingService
+}
+
+// SetBalanceEntryService 注入余额明细服务
+func (s *RedeemService) SetBalanceEntryService(balanceEntryService *BalanceEntryService) {
+	s.balanceEntryService = balanceEntryService
+}
+
+// SetRedeemBonusService 注入兑换加成服务
+func (s *RedeemService) SetRedeemBonusService(redeemBonusService *RedeemBonusService) {
+	s.redeemBonusService = redeemBonusService
 }
 
 // GenerateRandomCode 生成随机兑换码
@@ -323,6 +348,20 @@ func (s *RedeemService) Redeem(ctx context.Context, userID int64, code string) (
 		if err := s.userRepo.UpdateBalance(txCtx, userID, amount); err != nil {
 			return nil, fmt.Errorf("update user balance: %w", err)
 		}
+		// 记录余额明细
+		if s.balanceEntryService != nil {
+			if amount > 0 {
+				s.balanceEntryService.RecordAddition(txCtx, &AddBalanceInput{
+					UserID:      userID,
+					Amount:      amount,
+					BalanceType: BalanceTypePermanent,
+					Source:      BalanceSourceRedeem,
+					Note:        fmt.Sprintf("兑换码 %s 充值", redeemCode.Code),
+				})
+			} else if amount < 0 {
+				s.balanceEntryService.RecordDeduction(txCtx, userID, -amount, BalanceSourceRefund, fmt.Sprintf("兑换码 %s 退款扣减", redeemCode.Code))
+			}
+		}
 
 	case RedeemTypeConcurrency:
 		delta := int(redeemCode.Value)
@@ -368,6 +407,12 @@ func (s *RedeemService) Redeem(ctx context.Context, userID int64, code string) (
 
 	// 事务提交成功后失效缓存
 	s.invalidateRedeemCaches(ctx, userID, redeemCode)
+
+	// 余额兑换码：异步触发邀请返利（不阻塞兑换流程）
+	if redeemCode.Type == RedeemTypeBalance && redeemCode.Value > 0 {
+		s.tryAccrueRedeemRebate(ctx, userID, redeemCode.Value)
+		s.tryApplyRedeemBonus(ctx, userID, redeemCode.Value)
+	}
 
 	// 重新获取更新后的兑换码
 	redeemCode, err = s.redeemRepo.GetByID(ctx, redeemCode.ID)
@@ -536,4 +581,56 @@ func (s *RedeemService) reduceOrCancelSubscription(ctx context.Context, userID, 
 	s.subscriptionService.InvalidateSubCache(userID, groupID)
 
 	return nil
+}
+
+// tryApplyRedeemBonus 余额兑换码成功后异步触发兑换加成。
+func (s *RedeemService) tryApplyRedeemBonus(ctx context.Context, userID int64, amount float64) {
+	if s.redeemBonusService == nil {
+		return
+	}
+	go func() {
+		bonusCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		isFirst := s.redeemBonusService.IsFirstBalanceRedeem(bonusCtx, userID, amount)
+		s.redeemBonusService.ApplyRedeemBonus(bonusCtx, userID, amount, isFirst)
+	}()
+}
+
+// tryAccrueRedeemRebate 余额兑换码成功后异步触发邀请返利。
+// 仅当「邀请返利总开关」和「兑换码返利开关」同时启用时才执行。
+// 失败仅记录日志，不影响兑换结果。
+func (s *RedeemService) tryAccrueRedeemRebate(ctx context.Context, userID int64, amount float64) {
+	if s.affiliateService == nil || s.settingService == nil {
+		return
+	}
+	if !s.settingService.IsAffiliateEnabled(ctx) || !s.settingService.IsRedeemRebateEnabled(ctx) {
+		return
+	}
+	go func() {
+		rebateCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		tx, err := s.entClient.Tx(rebateCtx)
+		if err != nil {
+			slog.Error("redeem_rebate: begin tx failed", "user_id", userID, "error", err)
+			return
+		}
+		defer func() { _ = tx.Rollback() }()
+
+		txCtx := dbent.NewTxContext(rebateCtx, tx)
+		rebateAmount, err := s.affiliateService.AccrueInviteRebate(txCtx, userID, amount)
+		if err != nil {
+			slog.Error("redeem_rebate: accrue failed", "user_id", userID, "amount", amount, "error", err)
+			return
+		}
+		if rebateAmount <= 0 {
+			return
+		}
+		if err := tx.Commit(); err != nil {
+			slog.Error("redeem_rebate: commit failed", "user_id", userID, "rebate", rebateAmount, "error", err)
+			return
+		}
+		slog.Info("redeem_rebate: applied", "user_id", userID, "recharge_amount", amount, "rebate_amount", rebateAmount)
+	}()
 }

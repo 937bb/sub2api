@@ -350,6 +350,9 @@ type OpenAIGatewayService struct {
 	openaiWSRetryMetrics  openAIWSRetryMetrics
 	responseHeaderFilter  *responseheaders.CompiledHeaderFilter
 	codexSnapshotThrottle *accountWriteThrottle
+	balanceEntryService    *BalanceEntryService
+	cashbackService        *CashbackService
+	offPeakPricingService  *OffPeakPricingService
 }
 
 // NewOpenAIGatewayService creates a new OpenAIGatewayService
@@ -487,6 +490,21 @@ func (s *OpenAIGatewayService) getCodexSnapshotThrottle() *accountWriteThrottle 
 	return defaultOpenAICodexSnapshotPersistThrottle
 }
 
+// SetBalanceEntryService 注入余额明细服务
+func (s *OpenAIGatewayService) SetBalanceEntryService(svc *BalanceEntryService) {
+	s.balanceEntryService = svc
+}
+
+// SetCashbackService 注入消费返现服务
+func (s *OpenAIGatewayService) SetCashbackService(svc *CashbackService) {
+	s.cashbackService = svc
+}
+
+// SetOffPeakPricingService 注入分时费率服务
+func (s *OpenAIGatewayService) SetOffPeakPricingService(svc *OffPeakPricingService) {
+	s.offPeakPricingService = svc
+}
+
 func (s *OpenAIGatewayService) billingDeps() *billingDeps {
 	return &billingDeps{
 		accountRepo:          s.accountRepo,
@@ -495,6 +513,7 @@ func (s *OpenAIGatewayService) billingDeps() *billingDeps {
 		billingCacheService:  s.billingCacheService,
 		deferredService:      s.deferredService,
 		balanceNotifyService: s.balanceNotifyService,
+		balanceEntryService:  s.balanceEntryService,
 	}
 }
 
@@ -5082,6 +5101,11 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		multiplier = resolver.Resolve(ctx, user.ID, *apiKey.GroupID, apiKey.Group.RateMultiplier)
 	}
 
+	// 分时费率折扣
+	if s.offPeakPricingService != nil {
+		multiplier = s.offPeakPricingService.ApplyMultiplier(ctx, multiplier)
+	}
+
 	var cost *CostBreakdown
 	var err error
 	billingModel := forwardResultBillingModel(result.Model, result.UpstreamModel)
@@ -5223,6 +5247,22 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		return billingErr
 	}
 	writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLog, "service.openai_gateway")
+
+	// 实时消费返现（异步，不阻塞主流程）
+	if !isSubscriptionBilling && cost.ActualCost > 0 && s.cashbackService != nil {
+		cashbackUserID := user.ID
+		cashbackAmount := cost.ActualCost
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					slog.Error("openai realtime cashback panic", "recover", r)
+				}
+			}()
+			cbCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			s.cashbackService.ApplyRealtimeCashback(cbCtx, cashbackUserID, cashbackAmount)
+		}()
+	}
 
 	return nil
 }

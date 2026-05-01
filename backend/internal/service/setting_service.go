@@ -1232,6 +1232,17 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	// Affiliate (邀请返利) feature switch
 	updates[SettingKeyAffiliateEnabled] = strconv.FormatBool(settings.AffiliateEnabled)
 
+	// Redeem rebate (兑换码返利) feature switch
+	updates[SettingKeyRedeemRebateEnabled] = strconv.FormatBool(settings.RedeemRebateEnabled)
+
+	// Balance entry model (余额明细) settings
+	updates[SettingKeyBalanceExpiryEnabled] = strconv.FormatBool(settings.BalanceExpiryEnabled)
+	updates[SettingKeyBalanceExpiryWarningDays] = strconv.Itoa(settings.BalanceExpiryWarningDays)
+	if settings.BalanceDeductionOrder == "" {
+		settings.BalanceDeductionOrder = "expiring_first"
+	}
+	updates[SettingKeyBalanceDeductionOrder] = settings.BalanceDeductionOrder
+
 	// Claude Code version check
 	updates[SettingKeyMinClaudeCodeVersion] = settings.MinClaudeCodeVersion
 	updates[SettingKeyMaxClaudeCodeVersion] = settings.MaxClaudeCodeVersion
@@ -1541,6 +1552,46 @@ func (s *SettingService) IsAffiliateEnabled(ctx context.Context) bool {
 		return false // 默认关闭
 	}
 	return value == "true"
+}
+
+// IsRedeemRebateEnabled 检查是否启用兑换码余额充值返利
+func (s *SettingService) IsRedeemRebateEnabled(ctx context.Context) bool {
+	value, err := s.settingRepo.GetValue(ctx, SettingKeyRedeemRebateEnabled)
+	if err != nil {
+		return false // 默认关闭
+	}
+	return value == "true"
+}
+
+// IsBalanceExpiryEnabled 检查是否启用余额过期功能
+func (s *SettingService) IsBalanceExpiryEnabled(ctx context.Context) bool {
+	value, err := s.settingRepo.GetValue(ctx, SettingKeyBalanceExpiryEnabled)
+	if err != nil {
+		return false
+	}
+	return value == "true"
+}
+
+// GetBalanceExpiryWarningDays 获取余额过期预警天数
+func (s *SettingService) GetBalanceExpiryWarningDays(ctx context.Context) int {
+	value, err := s.settingRepo.GetValue(ctx, SettingKeyBalanceExpiryWarningDays)
+	if err != nil {
+		return 3
+	}
+	v, err := strconv.Atoi(value)
+	if err != nil || v < 0 {
+		return 3
+	}
+	return v
+}
+
+// GetBalanceDeductionOrder 获取余额扣减顺序
+func (s *SettingService) GetBalanceDeductionOrder(ctx context.Context) string {
+	value, err := s.settingRepo.GetValue(ctx, SettingKeyBalanceDeductionOrder)
+	if err != nil || value == "" {
+		return "expiring_first"
+	}
+	return value
 }
 
 // GetAffiliateRebateRatePercent 读取并 clamp 全局返利比例。
@@ -1903,6 +1954,65 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		// Affiliate (邀请返利) feature (default disabled; opt-in)
 		SettingKeyAffiliateEnabled: "false",
 
+		// Redeem rebate (兑换码返利) feature (default disabled; opt-in)
+		SettingKeyRedeemRebateEnabled: "false",
+
+		// First redeem bonus (首次兑换加成) settings
+		SettingKeyFirstRedeemBonusEnabled:     "false",
+		SettingKeyFirstRedeemBonusMultiplier:  "2",
+		SettingKeyFirstRedeemBonusCap:         "0",
+		SettingKeyFirstRedeemBonusBalanceType: "permanent",
+		SettingKeyFirstRedeemBonusExpiryDays:  "0",
+
+		// Redeem bonus (常规兑换加成) settings
+		SettingKeyRedeemBonusEnabled:     "false",
+		SettingKeyRedeemBonusMode:        "percent",
+		SettingKeyRedeemBonusFixedAmount: "1",
+		SettingKeyRedeemBonusPercent:     "10",
+		SettingKeyRedeemBonusRandomMin:   "1",
+		SettingKeyRedeemBonusRandomMax:   "10",
+		SettingKeyRedeemBonusCap:         "0",
+		SettingKeyRedeemBonusMinAmount:   "0",
+		SettingKeyRedeemBonusBalanceType: "permanent",
+		SettingKeyRedeemBonusExpiryDays:  "0",
+
+		// Off-peak pricing (分时费率) settings
+		SettingKeyOffPeakPricingEnabled: "false",
+		SettingKeyOffPeakPricingRules:   "[]",
+
+		// Leaderboard (排行榜) settings
+		SettingKeyLeaderboardEnabled:     "false",
+		SettingKeyLeaderboardMaskEmail:   "true",
+		SettingKeyLeaderboardTopN:        "10",
+		SettingKeyLeaderboardRewardRules: "[]",
+
+		// Cashback (消费返现) settings
+		SettingKeyCashbackEnabled:     "false",
+		SettingKeyCashbackThreshold:   "1",
+		SettingKeyCashbackMode:        "percent",
+		SettingKeyCashbackFixedAmount: "0.1",
+		SettingKeyCashbackPercent:     "5",
+		SettingKeyCashbackRandomMin:   "1",
+		SettingKeyCashbackRandomMax:   "10",
+		SettingKeyCashbackBalanceType: "permanent",
+		SettingKeyCashbackExpiryDays:  "0",
+		SettingKeyCashbackCycle:       "daily",
+
+		// Checkin (每日签到) settings
+		SettingKeyCheckinEnabled:     "false",
+		SettingKeyCheckinMode:        "fixed",
+		SettingKeyCheckinFixedAmount: "0.01",
+		SettingKeyCheckinRandomMin:   "1",
+		SettingKeyCheckinRandomMax:   "10",
+		SettingKeyCheckinBalanceType: "permanent",
+		SettingKeyCheckinExpiryDays:  "0",
+		SettingKeyCheckinMilestones:  "[]",
+
+		// Balance entry model (余额明细) settings
+		SettingKeyBalanceExpiryEnabled:     "false",
+		SettingKeyBalanceExpiryWarningDays: "3",
+		SettingKeyBalanceDeductionOrder:    "expiring_first",
+
 		// Claude Code version check (default: empty = disabled)
 		SettingKeyMinClaudeCodeVersion: "",
 		SettingKeyMaxClaudeCodeVersion: "",
@@ -2241,6 +2351,21 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 
 	// Affiliate (邀请返利) feature (default: disabled; strict true)
 	result.AffiliateEnabled = settings[SettingKeyAffiliateEnabled] == "true"
+
+	// Redeem rebate (兑换码返利) feature (default: disabled; strict true)
+	result.RedeemRebateEnabled = settings[SettingKeyRedeemRebateEnabled] == "true"
+
+	// Balance entry model (余额明细) settings
+	result.BalanceExpiryEnabled = settings[SettingKeyBalanceExpiryEnabled] == "true"
+	if v, err := strconv.Atoi(settings[SettingKeyBalanceExpiryWarningDays]); err == nil && v >= 0 {
+		result.BalanceExpiryWarningDays = v
+	} else {
+		result.BalanceExpiryWarningDays = 3
+	}
+	result.BalanceDeductionOrder = settings[SettingKeyBalanceDeductionOrder]
+	if result.BalanceDeductionOrder == "" {
+		result.BalanceDeductionOrder = "expiring_first"
+	}
 
 	// Claude Code version check
 	result.MinClaudeCodeVersion = settings[SettingKeyMinClaudeCodeVersion]
@@ -3397,4 +3522,50 @@ func (s *SettingService) SetStreamTimeoutSettings(ctx context.Context, settings 
 	}
 
 	return s.settingRepo.Set(ctx, SettingKeyStreamTimeoutSettings, string(data))
+}
+
+// ─── Generic setting helpers ────────────────────────────────────────────────
+
+// GetBoolSetting 读取布尔类型设置，解析失败返回 defaultVal
+func (s *SettingService) GetBoolSetting(ctx context.Context, key string, defaultVal bool) bool {
+	value, err := s.settingRepo.GetValue(ctx, key)
+	if err != nil {
+		return defaultVal
+	}
+	return value == "true"
+}
+
+// GetStringSetting 读取字符串类型设置，空值返回 defaultVal
+func (s *SettingService) GetStringSetting(ctx context.Context, key string, defaultVal string) string {
+	value, err := s.settingRepo.GetValue(ctx, key)
+	if err != nil || value == "" {
+		return defaultVal
+	}
+	return value
+}
+
+// GetIntSetting 读取整数类型设置，解析失败返回 defaultVal
+func (s *SettingService) GetIntSetting(ctx context.Context, key string, defaultVal int) int {
+	value, err := s.settingRepo.GetValue(ctx, key)
+	if err != nil || value == "" {
+		return defaultVal
+	}
+	n, err := strconv.Atoi(value)
+	if err != nil {
+		return defaultVal
+	}
+	return n
+}
+
+// GetFloatSetting 读取浮点类型设置，解析失败返回 defaultVal
+func (s *SettingService) GetFloatSetting(ctx context.Context, key string, defaultVal float64) float64 {
+	value, err := s.settingRepo.GetValue(ctx, key)
+	if err != nil || value == "" {
+		return defaultVal
+	}
+	f, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		return defaultVal
+	}
+	return f
 }

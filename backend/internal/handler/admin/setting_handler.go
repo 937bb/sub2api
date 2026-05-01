@@ -189,6 +189,10 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		AffiliateRebateFreezeHours:             settings.AffiliateRebateFreezeHours,
 		AffiliateRebateDurationDays:            settings.AffiliateRebateDurationDays,
 		AffiliateRebatePerInviteeCap:           settings.AffiliateRebatePerInviteeCap,
+		RedeemRebateEnabled:                    settings.RedeemRebateEnabled,
+		BalanceExpiryEnabled:                   settings.BalanceExpiryEnabled,
+		BalanceExpiryWarningDays:               settings.BalanceExpiryWarningDays,
+		BalanceDeductionOrder:                  settings.BalanceDeductionOrder,
 		DefaultUserRPMLimit:                    settings.DefaultUserRPMLimit,
 		DefaultSubscriptions:                   defaultSubscriptions,
 		EnableModelFallback:                    settings.EnableModelFallback,
@@ -391,6 +395,10 @@ type UpdateSettingsRequest struct {
 	AffiliateRebateFreezeHours               *int                              `json:"affiliate_rebate_freeze_hours"`
 	AffiliateRebateDurationDays              *int                              `json:"affiliate_rebate_duration_days"`
 	AffiliateRebatePerInviteeCap             *float64                          `json:"affiliate_rebate_per_invitee_cap"`
+	RedeemRebateEnabled                      *bool                             `json:"redeem_rebate_enabled"`
+	BalanceExpiryEnabled                     *bool                             `json:"balance_expiry_enabled"`
+	BalanceExpiryWarningDays                 *int                              `json:"balance_expiry_warning_days"`
+	BalanceDeductionOrder                    *string                           `json:"balance_deduction_order"`
 	DefaultUserRPMLimit                      int                               `json:"default_user_rpm_limit"`
 	DefaultSubscriptions                     []dto.DefaultSubscriptionSetting  `json:"default_subscriptions"`
 	AuthSourceDefaultEmailBalance            *float64                          `json:"auth_source_default_email_balance"`
@@ -1365,6 +1373,30 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.AffiliateEnabled
 		}(),
+		RedeemRebateEnabled: func() bool {
+			if req.RedeemRebateEnabled != nil {
+				return *req.RedeemRebateEnabled
+			}
+			return previousSettings.RedeemRebateEnabled
+		}(),
+		BalanceExpiryEnabled: func() bool {
+			if req.BalanceExpiryEnabled != nil {
+				return *req.BalanceExpiryEnabled
+			}
+			return previousSettings.BalanceExpiryEnabled
+		}(),
+		BalanceExpiryWarningDays: func() int {
+			if req.BalanceExpiryWarningDays != nil {
+				return *req.BalanceExpiryWarningDays
+			}
+			return previousSettings.BalanceExpiryWarningDays
+		}(),
+		BalanceDeductionOrder: func() string {
+			if req.BalanceDeductionOrder != nil {
+				return *req.BalanceDeductionOrder
+			}
+			return previousSettings.BalanceDeductionOrder
+		}(),
 	}
 
 	authSourceDefaults := &service.AuthSourceDefaultSettings{
@@ -1558,6 +1590,10 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		AffiliateRebateFreezeHours:             updatedSettings.AffiliateRebateFreezeHours,
 		AffiliateRebateDurationDays:            updatedSettings.AffiliateRebateDurationDays,
 		AffiliateRebatePerInviteeCap:           updatedSettings.AffiliateRebatePerInviteeCap,
+		RedeemRebateEnabled:                    updatedSettings.RedeemRebateEnabled,
+		BalanceExpiryEnabled:                   updatedSettings.BalanceExpiryEnabled,
+		BalanceExpiryWarningDays:               updatedSettings.BalanceExpiryWarningDays,
+		BalanceDeductionOrder:                  updatedSettings.BalanceDeductionOrder,
 		DefaultUserRPMLimit:                    updatedSettings.DefaultUserRPMLimit,
 		DefaultSubscriptions:                   updatedDefaultSubscriptions,
 		EnableModelFallback:                    updatedSettings.EnableModelFallback,
@@ -2003,6 +2039,18 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	}
 	if before.AffiliateEnabled != after.AffiliateEnabled {
 		changed = append(changed, "affiliate_enabled")
+	}
+	if before.RedeemRebateEnabled != after.RedeemRebateEnabled {
+		changed = append(changed, "redeem_rebate_enabled")
+	}
+	if before.BalanceExpiryEnabled != after.BalanceExpiryEnabled {
+		changed = append(changed, "balance_expiry_enabled")
+	}
+	if before.BalanceExpiryWarningDays != after.BalanceExpiryWarningDays {
+		changed = append(changed, "balance_expiry_warning_days")
+	}
+	if before.BalanceDeductionOrder != after.BalanceDeductionOrder {
+		changed = append(changed, "balance_deduction_order")
 	}
 	changed = appendAuthSourceDefaultChanges(changed, beforeAuthSourceDefaults, afterAuthSourceDefaults)
 	return changed

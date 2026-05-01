@@ -570,6 +570,9 @@ type GatewayService struct {
 	debugGatewayBodyFile  atomic.Pointer[os.File] // non-nil when SUB2API_DEBUG_GATEWAY_BODY is set
 	tlsFPProfileService   *TLSFingerprintProfileService
 	balanceNotifyService  *BalanceNotifyService
+	balanceEntryService   *BalanceEntryService
+	cashbackService        *CashbackService
+	offPeakPricingService  *OffPeakPricingService
 }
 
 // NewGatewayService creates a new GatewayService
@@ -649,6 +652,21 @@ func NewGatewayService(
 		svc.initDebugGatewayBodyFile(path)
 	}
 	return svc
+}
+
+// SetBalanceEntryService 注入余额明细服务
+func (s *GatewayService) SetBalanceEntryService(svc *BalanceEntryService) {
+	s.balanceEntryService = svc
+}
+
+// SetCashbackService 注入消费返现服务
+func (s *GatewayService) SetCashbackService(svc *CashbackService) {
+	s.cashbackService = svc
+}
+
+// SetOffPeakPricingService 注入分时费率服务
+func (s *GatewayService) SetOffPeakPricingService(svc *OffPeakPricingService) {
+	s.offPeakPricingService = svc
 }
 
 // GenerateSessionHash 从预解析请求计算粘性会话 hash
@@ -7919,6 +7937,9 @@ func postUsageBilling(ctx context.Context, p *postUsageBillingParams, deps *bill
 			if err := deps.userRepo.DeductBalance(billingCtx, p.User.ID, cost.ActualCost); err != nil {
 				slog.Error("deduct balance failed", "user_id", p.User.ID, "error", err)
 			}
+			if deps.balanceEntryService != nil {
+				deps.balanceEntryService.RecordDeduction(billingCtx, p.User.ID, cost.ActualCost, BalanceSourceConsumption, "API consumption")
+			}
 		}
 	}
 
@@ -8191,6 +8212,7 @@ type billingDeps struct {
 	billingCacheService  *BillingCacheService
 	deferredService      *DeferredService
 	balanceNotifyService *BalanceNotifyService
+	balanceEntryService  *BalanceEntryService
 }
 
 func (s *GatewayService) billingDeps() *billingDeps {
@@ -8201,6 +8223,7 @@ func (s *GatewayService) billingDeps() *billingDeps {
 		billingCacheService:  s.billingCacheService,
 		deferredService:      s.deferredService,
 		balanceNotifyService: s.balanceNotifyService,
+		balanceEntryService:  s.balanceEntryService,
 	}
 }
 
@@ -8361,6 +8384,11 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 		multiplier = s.getUserGroupRateMultiplier(ctx, user.ID, *apiKey.GroupID, groupDefault)
 	}
 
+	// 分时费率折扣
+	if s.offPeakPricingService != nil {
+		multiplier = s.offPeakPricingService.ApplyMultiplier(ctx, multiplier)
+	}
+
 	// 确定计费模型
 	billingModel := forwardResultBillingModel(result.Model, result.UpstreamModel)
 	if input.BillingModelSource == BillingModelSourceChannelMapped && input.ChannelMappedModel != "" {
@@ -8432,6 +8460,22 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 		return billingErr
 	}
 	writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLog, "service.gateway")
+
+	// 实时消费返现（异步，不阻塞主流程）
+	if !isSubscriptionBilling && cost.ActualCost > 0 && s.cashbackService != nil {
+		cashbackUserID := user.ID
+		cashbackAmount := cost.ActualCost
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					slog.Error("realtime cashback panic", "recover", r)
+				}
+			}()
+			cbCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			s.cashbackService.ApplyRealtimeCashback(cbCtx, cashbackUserID, cashbackAmount)
+		}()
+	}
 
 	return nil
 }

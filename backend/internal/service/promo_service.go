@@ -29,6 +29,12 @@ type PromoService struct {
 	billingCacheService  *BillingCacheService
 	entClient            *dbent.Client
 	authCacheInvalidator APIKeyAuthCacheInvalidator
+	balanceEntryService  *BalanceEntryService
+}
+
+// SetBalanceEntryService 注入余额明细服务
+func (s *PromoService) SetBalanceEntryService(balanceEntryService *BalanceEntryService) {
+	s.balanceEntryService = balanceEntryService
 }
 
 // NewPromoService 创建优惠码服务实例
@@ -126,6 +132,16 @@ func (s *PromoService) ApplyPromoCode(ctx context.Context, userID int64, code st
 	// 增加用户余额
 	if err := s.userRepo.UpdateBalance(txCtx, userID, promoCode.BonusAmount); err != nil {
 		return fmt.Errorf("update user balance: %w", err)
+	}
+	// 记录余额明细
+	if s.balanceEntryService != nil && promoCode.BonusAmount > 0 {
+		s.balanceEntryService.RecordAddition(txCtx, &AddBalanceInput{
+			UserID:      userID,
+			Amount:      promoCode.BonusAmount,
+			BalanceType: BalanceTypePermanent,
+			Source:      BalanceSourcePromo,
+			Note:        fmt.Sprintf("优惠码 %s 赠送", promoCode.Code),
+		})
 	}
 
 	// 创建使用记录
