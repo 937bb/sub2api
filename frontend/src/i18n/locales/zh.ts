@@ -5296,6 +5296,8 @@ export default {
           label: '标签',
           labelPlaceholder: '如：夜间优惠',
           removeRule: '删除',
+          groups: '适用分组',
+          allGroups: '全部分组',
           hourSuffix: ':00',
           example: '例：22:00~07:00 设为 0.8 = 八折',
         },

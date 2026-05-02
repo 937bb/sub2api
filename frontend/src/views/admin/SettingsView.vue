@@ -5049,6 +5049,7 @@
                         <th class="px-2 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.offPeakPricing.startHour') }}</th>
                         <th class="px-2 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.offPeakPricing.endHour') }}</th>
                         <th class="px-2 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.offPeakPricing.multiplier') }}</th>
+                        <th class="px-2 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.offPeakPricing.groups') }}</th>
                         <th class="px-2 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.offPeakPricing.label') }}</th>
                         <th class="px-2 py-2"></th>
                       </tr>
@@ -5070,6 +5071,17 @@
                           </div>
                         </td>
                         <td class="px-2 py-2"><input v-model.number="rule.multiplier" type="number" step="0.01" min="0.01" max="10" class="input w-24" /></td>
+                        <td class="px-2 py-2">
+                          <select
+                            multiple
+                            class="input w-40 min-h-[36px]"
+                            :value="rule.group_ids"
+                            @change="rule.group_ids = Array.from(($event.target as HTMLSelectElement).selectedOptions, o => Number(o.value))"
+                          >
+                            <option v-for="g in allGroups" :key="g.id" :value="g.id">{{ g.name }}</option>
+                          </select>
+                          <p v-if="rule.group_ids.length === 0" class="mt-0.5 text-xs text-gray-400">{{ t('admin.settings.features.offPeakPricing.allGroups') }}</p>
+                        </td>
                         <td class="px-2 py-2"><input v-model="rule.label" type="text" class="input w-32" :placeholder="t('admin.settings.features.offPeakPricing.labelPlaceholder')" /></td>
                         <td class="px-2 py-2">
                           <button class="text-xs text-red-500 hover:text-red-700" @click="offPeakPricingRules.splice(idx, 1)">
@@ -5080,7 +5092,7 @@
                     </tbody>
                   </table>
                 </div>
-                <button class="btn btn-sm mt-2 text-xs" @click="offPeakPricingRules.push({ start_hour: 22, end_hour: 7, multiplier: 0.8, label: '' })">
+                <button class="btn btn-sm mt-2 text-xs" @click="offPeakPricingRules.push({ start_hour: 22, end_hour: 7, multiplier: 0.8, label: '', group_ids: [] })">
                   + {{ t('admin.settings.features.offPeakPricing.addRule') }}
                 </button>
               </div>
@@ -8322,6 +8334,7 @@ async function handleDeleteProvider() {
 onMounted(() => {
   loadSettings();
   loadSubscriptionGroups();
+  loadAllGroups();
   loadAdminApiKey();
   loadOverloadCooldownSettings();
   loadStreamTimeoutSettings();
@@ -8708,8 +8721,18 @@ interface OffPeakPricingRuleRow {
   end_hour: number;
   multiplier: number;
   label: string;
+  group_ids: number[];
 }
 const offPeakPricingRules = ref<OffPeakPricingRuleRow[]>([]);
+const allGroups = ref<AdminGroup[]>([]);
+
+async function loadAllGroups() {
+  try {
+    allGroups.value = await adminAPI.groups.getAll();
+  } catch {
+    allGroups.value = [];
+  }
+}
 
 function addCheckinMilestone() {
   checkinMilestones.value.push({ days: 7, amount: 1, balance_type: 'permanent', expiry_days: 0 });
@@ -8774,6 +8797,7 @@ watch(
           end_hour: Number(r.end_hour) || 0,
           multiplier: Number(r.multiplier) || 1,
           label: r.label || '',
+          group_ids: Array.isArray(r.group_ids) ? r.group_ids.map(Number) : [],
         }));
       }
     } catch {

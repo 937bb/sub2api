@@ -8394,7 +8394,7 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 
 	// 分时费率折扣
 	if s.offPeakPricingService != nil {
-		multiplier = s.offPeakPricingService.ApplyMultiplier(ctx, multiplier)
+		multiplier = s.offPeakPricingService.ApplyMultiplier(ctx, multiplier, apiKey.GroupID)
 	}
 
 	// 确定计费模型

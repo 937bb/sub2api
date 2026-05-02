@@ -15,6 +15,7 @@ type OffPeakPricingRule struct {
 	EndHour    int     `json:"end_hour"`    // 结束小时 (0-23)，支持跨天（如 22→7）
 	Multiplier float64 `json:"multiplier"`  // 费率倍数（如 0.8 = 八折）
 	Label      string  `json:"label"`       // 标签（如 "夜间优惠"）
+	GroupIDs   []int64 `json:"group_ids"`   // 适用分组 ID 列表（空=所有分组）
 }
 
 // OffPeakPricingService 分时费率服务（带缓存，避免每次请求解析 JSON）
@@ -37,9 +38,10 @@ func NewOffPeakPricingService(settingService *SettingService) *OffPeakPricingSer
 	}
 }
 
-// ApplyMultiplier 根据当前时间判断是否命中分时规则，返回调整后的 multiplier。
+// ApplyMultiplier 根据当前时间和分组判断是否命中分时规则，返回调整后的 multiplier。
+// groupID 为 nil 表示无分组（仅匹配 group_ids 为空的规则）。
 // 如果未开启或未命中规则，返回原始 multiplier 不变。
-func (s *OffPeakPricingService) ApplyMultiplier(ctx context.Context, baseMultiplier float64) float64 {
+func (s *OffPeakPricingService) ApplyMultiplier(ctx context.Context, baseMultiplier float64, groupID *int64) float64 {
 	if !s.isEnabled(ctx) {
 		return baseMultiplier
 	}
@@ -56,16 +58,20 @@ func (s *OffPeakPricingService) ApplyMultiplier(ctx context.Context, baseMultipl
 		if rule.Multiplier <= 0 {
 			continue
 		}
-		if matchHourRange(hour, rule.StartHour, rule.EndHour) {
-			return baseMultiplier * rule.Multiplier
+		if !matchHourRange(hour, rule.StartHour, rule.EndHour) {
+			continue
 		}
+		if !ruleMatchesGroup(rule.GroupIDs, groupID) {
+			continue
+		}
+		return baseMultiplier * rule.Multiplier
 	}
 
 	return baseMultiplier
 }
 
 // GetCurrentRule 获取当前生效的规则（供前端展示用）
-func (s *OffPeakPricingService) GetCurrentRule(ctx context.Context) *OffPeakPricingRule {
+func (s *OffPeakPricingService) GetCurrentRule(ctx context.Context, groupID *int64) *OffPeakPricingRule {
 	if !s.isEnabled(ctx) {
 		return nil
 	}
@@ -77,11 +83,28 @@ func (s *OffPeakPricingService) GetCurrentRule(ctx context.Context) *OffPeakPric
 		if rule.Multiplier <= 0 {
 			continue
 		}
-		if matchHourRange(hour, rule.StartHour, rule.EndHour) {
+		if matchHourRange(hour, rule.StartHour, rule.EndHour) && ruleMatchesGroup(rule.GroupIDs, groupID) {
 			return &rule
 		}
 	}
 	return nil
+}
+
+// ruleMatchesGroup 判断规则是否适用于指定分组。
+// group_ids 为空 → 适用所有分组；非空 → groupID 必须在列表中。
+func ruleMatchesGroup(ruleGroupIDs []int64, groupID *int64) bool {
+	if len(ruleGroupIDs) == 0 {
+		return true // 未指定分组 = 所有分组
+	}
+	if groupID == nil {
+		return false // 规则限定了分组，但请求无分组
+	}
+	for _, id := range ruleGroupIDs {
+		if id == *groupID {
+			return true
+		}
+	}
+	return false
 }
 
 // matchHourRange 判断 hour 是否在 [start, end) 范围内，支持跨天

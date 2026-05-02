@@ -5103,7 +5103,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 
 	// 分时费率折扣
 	if s.offPeakPricingService != nil {
-		multiplier = s.offPeakPricingService.ApplyMultiplier(ctx, multiplier)
+		multiplier = s.offPeakPricingService.ApplyMultiplier(ctx, multiplier, apiKey.GroupID)
 	}
 
 	var cost *CostBreakdown

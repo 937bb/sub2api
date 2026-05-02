@@ -5133,6 +5133,8 @@ export default {
           label: 'Label',
           labelPlaceholder: 'e.g. Night Discount',
           removeRule: 'Remove',
+          groups: 'Groups',
+          allGroups: 'All Groups',
           hourSuffix: ':00',
           example: 'e.g. 22:00~07:00 at 0.8 = 20% off',
         },
