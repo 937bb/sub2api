@@ -1,4 +1,5 @@
 <template>
+  <AppLayout>
   <div class="mx-auto max-w-4xl space-y-6 p-4 sm:p-6 lg:p-8">
     <!-- Header -->
     <div class="animate-fade-in">
@@ -102,12 +103,14 @@
       </div>
     </div>
   </div>
+  </AppLayout>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { leaderboardAPI, type LeaderboardResponse } from '@/api/leaderboard'
+import AppLayout from '@/components/layout/AppLayout.vue'
 import { LoadingSpinner, EmptyState } from '@/components/common'
 
 const { t } = useI18n()

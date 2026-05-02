@@ -297,6 +297,34 @@ export async function bindUserAuthIdentity(
   return data
 }
 
+// Balance entry item from balance_entries table (reward system)
+export interface BalanceEntryItem {
+  id: number
+  amount: number
+  remaining: number
+  balance_type: string
+  source: string
+  note: string
+  expires_at?: string | null
+  expired: boolean
+  created_at: string
+}
+
+/**
+ * Get user's balance entries (balance_entries table, includes checkin/leaderboard/cashback/redeem bonus)
+ */
+export async function getUserBalanceEntries(
+  id: number,
+  page: number = 1,
+  pageSize: number = 20
+): Promise<PaginatedResponse<BalanceEntryItem>> {
+  const { data } = await apiClient.get<PaginatedResponse<BalanceEntryItem>>(
+    `/admin/users/${id}/balance-entries`,
+    { params: { page, page_size: pageSize } }
+  )
+  return data
+}
+
 export const usersAPI = {
   list,
   getById,
@@ -309,6 +337,7 @@ export const usersAPI = {
   getUserApiKeys,
   getUserUsageStats,
   getUserBalanceHistory,
+  getUserBalanceEntries,
   replaceGroup,
   bindUserAuthIdentity
 }

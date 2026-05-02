@@ -4,6 +4,7 @@ import (
 	"context"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
@@ -20,15 +21,17 @@ type UserWithConcurrency struct {
 
 // UserHandler handles admin user management
 type UserHandler struct {
-	adminService       service.AdminService
-	concurrencyService *service.ConcurrencyService
+	adminService        service.AdminService
+	concurrencyService  *service.ConcurrencyService
+	balanceEntryService *service.BalanceEntryService
 }
 
 // NewUserHandler creates a new admin user handler
-func NewUserHandler(adminService service.AdminService, concurrencyService *service.ConcurrencyService) *UserHandler {
+func NewUserHandler(adminService service.AdminService, concurrencyService *service.ConcurrencyService, balanceEntryService *service.BalanceEntryService) *UserHandler {
 	return &UserHandler{
-		adminService:       adminService,
-		concurrencyService: concurrencyService,
+		adminService:        adminService,
+		concurrencyService:  concurrencyService,
+		balanceEntryService: balanceEntryService,
 	}
 }
 
@@ -476,4 +479,57 @@ func (h *UserHandler) GetUserRPMStatus(c *gin.Context) {
 	}
 
 	response.Success(c, status)
+}
+
+// GetBalanceEntries 获取用户余额明细（balance_entries 表）
+// GET /api/v1/admin/users/:id/balance-entries
+func (h *UserHandler) GetBalanceEntries(c *gin.Context) {
+	userID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid user ID")
+		return
+	}
+
+	if h.balanceEntryService == nil {
+		response.Success(c, gin.H{"items": []any{}, "total": 0, "page": 1, "page_size": 20, "pages": 1})
+		return
+	}
+
+	page, pageSize := response.ParsePagination(c)
+	offset := (page - 1) * pageSize
+
+	entries, total, err := h.balanceEntryService.ListByUser(c.Request.Context(), userID, offset, pageSize)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	type entryResp struct {
+		ID          int64      `json:"id"`
+		Amount      float64    `json:"amount"`
+		Remaining   float64    `json:"remaining"`
+		BalanceType string     `json:"balance_type"`
+		Source      string     `json:"source"`
+		Note        string     `json:"note"`
+		ExpiresAt   *time.Time `json:"expires_at,omitempty"`
+		Expired     bool       `json:"expired"`
+		CreatedAt   time.Time  `json:"created_at"`
+	}
+
+	items := make([]entryResp, 0, len(entries))
+	for _, e := range entries {
+		items = append(items, entryResp{
+			ID:          e.ID,
+			Amount:      e.Amount,
+			Remaining:   e.Remaining,
+			BalanceType: e.BalanceType,
+			Source:      e.Source,
+			Note:        e.Note,
+			ExpiresAt:   e.ExpiresAt,
+			Expired:     e.Expired,
+			CreatedAt:   e.CreatedAt,
+		})
+	}
+
+	response.Paginated(c, items, total, page, pageSize)
 }
