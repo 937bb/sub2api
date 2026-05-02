@@ -44,17 +44,8 @@
         </div>
       </div>
 
-      <!-- Tab switcher: Redeem History / Balance Entries -->
-      <div class="flex gap-2">
-        <button
-          class="rounded-lg px-4 py-2 text-sm font-medium transition-all"
-          :class="activeTab === 'history'
-            ? 'bg-primary-500 text-white shadow-glow'
-            : 'bg-white text-gray-600 hover:bg-gray-50 dark:bg-dark-800 dark:text-gray-300 dark:hover:bg-dark-700'"
-          @click="activeTab = 'history'"
-        >
-          {{ t('admin.users.tabRedeemHistory') }}
-        </button>
+      <!-- Tab switcher + Action buttons -->
+      <div class="flex items-center gap-2">
         <button
           class="rounded-lg px-4 py-2 text-sm font-medium transition-all"
           :class="activeTab === 'entries'
@@ -64,19 +55,16 @@
         >
           {{ t('admin.users.tabBalanceEntries') }}
         </button>
-      </div>
-
-      <!-- ==================== Tab: Redeem History ==================== -->
-      <template v-if="activeTab === 'history'">
-        <!-- Type filter + Action buttons -->
-        <div class="flex items-center gap-3">
-          <Select
-            v-model="typeFilter"
-            :options="typeOptions"
-            class="w-56"
-            @change="loadHistory(1)"
-          />
-          <!-- Deposit button - matches menu style -->
+        <button
+          class="rounded-lg px-4 py-2 text-sm font-medium transition-all"
+          :class="activeTab === 'history'
+            ? 'bg-primary-500 text-white shadow-glow'
+            : 'bg-white text-gray-600 hover:bg-gray-50 dark:bg-dark-800 dark:text-gray-300 dark:hover:bg-dark-700'"
+          @click="activeTab = 'history'"
+        >
+          {{ t('admin.users.tabRedeemHistory') }}
+        </button>
+        <div class="ml-auto flex gap-2">
           <button
             v-if="!hideActions"
             @click="emit('deposit')"
@@ -85,7 +73,6 @@
             <Icon name="plus" size="sm" class="text-emerald-500" :stroke-width="2" />
             {{ t('admin.users.deposit') }}
           </button>
-          <!-- Withdraw button - matches menu style -->
           <button
             v-if="!hideActions"
             @click="emit('withdraw')"
@@ -96,6 +83,19 @@
             </svg>
             {{ t('admin.users.withdraw') }}
           </button>
+        </div>
+      </div>
+
+      <!-- ==================== Tab: Redeem History ==================== -->
+      <template v-if="activeTab === 'history'">
+        <!-- Type filter -->
+        <div class="flex items-center gap-3">
+          <Select
+            v-model="typeFilter"
+            :options="typeOptions"
+            class="w-56"
+            @change="loadHistory(1)"
+          />
         </div>
 
         <!-- Loading -->
@@ -336,7 +336,7 @@ const entriesTotalPages = computed(() => Math.ceil(entriesTotal.value / entriesP
 // Watch modal open
 watch(() => props.show, (v) => {
   if (v && props.user) {
-    activeTab.value = 'history'
+    activeTab.value = 'entries'
     typeFilter.value = ''
     loadHistory(1)
     loadEntries(1)
