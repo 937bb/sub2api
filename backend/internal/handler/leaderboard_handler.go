@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"log/slog"
+
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
@@ -25,7 +27,11 @@ func NewLeaderboardHandler(leaderboardService *service.LeaderboardService, setti
 func (h *LeaderboardHandler) GetLeaderboard(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	if !h.settingService.GetBoolSetting(ctx, service.SettingKeyLeaderboardEnabled, false) {
+	enabled := h.settingService.GetBoolSetting(ctx, service.SettingKeyLeaderboardEnabled, false)
+	rawVal := h.settingService.GetStringSetting(ctx, service.SettingKeyLeaderboardEnabled, "<NOT_FOUND>")
+	slog.Info("leaderboard_handler: checking enabled", "key", service.SettingKeyLeaderboardEnabled, "raw_value", rawVal, "parsed_enabled", enabled)
+
+	if !enabled {
 		response.Success(c, gin.H{
 			"enabled":   false,
 			"yesterday": []any{},
