@@ -16,7 +16,7 @@ export interface LeaderboardResponse {
 
 export const leaderboardAPI = {
   async getLeaderboard(): Promise<LeaderboardResponse> {
-    const { data } = await apiClient.get<{ data: LeaderboardResponse }>('/user/leaderboard')
-    return data.data
+    const { data } = await apiClient.get<LeaderboardResponse>('/user/leaderboard')
+    return data
   },
 }
