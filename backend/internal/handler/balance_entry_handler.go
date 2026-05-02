@@ -59,7 +59,7 @@ func (h *BalanceEntryHandler) List(c *gin.Context) {
 
 	page, pageSize := response.ParsePagination(c)
 
-	entries, total, err := h.balanceEntryService.ListByUser(c.Request.Context(), subject.UserID, page, pageSize)
+	entries, total, err := h.balanceEntryService.ListByUser(c.Request.Context(), subject.UserID, page, pageSize, service.BalanceSourceConsumption)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return

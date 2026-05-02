@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"math"
+	"strings"
 	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
@@ -45,13 +46,25 @@ RETURNING id, created_at`,
 	return rows.Close()
 }
 
-func (r *balanceEntryRepository) ListByUser(ctx context.Context, userID int64, offset, limit int) ([]*service.BalanceEntry, int64, error) {
+func (r *balanceEntryRepository) ListByUser(ctx context.Context, userID int64, offset, limit int, excludeSources ...string) ([]*service.BalanceEntry, int64, error) {
 	client := clientFromContext(ctx, r.client)
+
+	// 构建排除条件
+	excludeClause := ""
+	args := []any{userID}
+	if len(excludeSources) > 0 {
+		placeholders := make([]string, len(excludeSources))
+		for i, src := range excludeSources {
+			placeholders[i] = fmt.Sprintf("$%d", len(args)+1)
+			args = append(args, src)
+		}
+		excludeClause = " AND source NOT IN (" + strings.Join(placeholders, ",") + ")"
+	}
 
 	// 总数
 	var total int64
 	countRows, err := client.QueryContext(ctx,
-		`SELECT COUNT(*) FROM balance_entries WHERE user_id = $1`, userID)
+		`SELECT COUNT(*) FROM balance_entries WHERE user_id = $1`+excludeClause, args...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("count balance_entries: %w", err)
 	}
@@ -66,12 +79,15 @@ func (r *balanceEntryRepository) ListByUser(ctx context.Context, userID int64, o
 	}
 
 	// 明细
-	rows, err := client.QueryContext(ctx, `
+	listArgs := append(args, limit, offset)
+	limitIdx := len(args) + 1
+	offsetIdx := len(args) + 2
+	rows, err := client.QueryContext(ctx, fmt.Sprintf(`
 SELECT id, user_id, amount, remaining, balance_type, source, note, expires_at, expired, created_at
 FROM balance_entries
-WHERE user_id = $1
+WHERE user_id = $1%s
 ORDER BY created_at DESC
-LIMIT $2 OFFSET $3`, userID, limit, offset)
+LIMIT $%d OFFSET $%d`, excludeClause, limitIdx, offsetIdx), listArgs...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("list balance_entries: %w", err)
 	}

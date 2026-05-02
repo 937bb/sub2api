@@ -246,9 +246,10 @@ func (s *BalanceEntryService) GetUserBalanceSummary(ctx context.Context, userID 
 }
 
 // ListByUser 获取用户余额明细（分页）
-func (s *BalanceEntryService) ListByUser(ctx context.Context, userID int64, page, pageSize int) ([]*BalanceEntry, int64, error) {
+// excludeSources: 排除指定来源的记录
+func (s *BalanceEntryService) ListByUser(ctx context.Context, userID int64, page, pageSize int, excludeSources ...string) ([]*BalanceEntry, int64, error) {
 	offset := (page - 1) * pageSize
-	return s.balanceEntryRepo.ListByUser(ctx, userID, offset, pageSize)
+	return s.balanceEntryRepo.ListByUser(ctx, userID, offset, pageSize, excludeSources...)
 }
 
 // SyncUserBalance 重算并同步用户余额（修复不一致场景）
