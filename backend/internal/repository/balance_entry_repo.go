@@ -212,17 +212,22 @@ func (r *balanceEntryRepository) DeductFromEntries(ctx context.Context, entries 
 		}
 		deduct := math.Min(e.Remaining, amount)
 
-		// 使用原子 CAS 操作避免并发超扣：只扣减 remaining 中实际可用的部分
-		var actualRemaining float64
+		// 使用 CTE + FOR UPDATE 锁行，原子扣减并返回实际扣减量
+		// 避免并发 goroutine 用快照值覆盖导致 remaining 漂移
+		var actualDeducted, newRemaining float64
 		rows, err := client.QueryContext(ctx,
-			`UPDATE balance_entries
-			 SET remaining = CASE
-			   WHEN remaining >= $1 THEN remaining - $1
-			   ELSE 0
-			 END
-			 WHERE id = $2 AND remaining > 0
-			 RETURNING remaining`,
-			deduct, e.ID)
+			`WITH pre AS (
+				SELECT id, remaining AS old_remaining
+				FROM balance_entries
+				WHERE id = $1 AND remaining > 0
+				FOR UPDATE
+			)
+			UPDATE balance_entries be
+			SET remaining = GREATEST(be.remaining - $2, 0)
+			FROM pre
+			WHERE be.id = pre.id
+			RETURNING pre.old_remaining - be.remaining AS deducted, be.remaining`,
+			e.ID, deduct)
 		if err != nil {
 			return totalDeducted, fmt.Errorf("deduct balance_entry %d: %w", e.ID, err)
 		}
@@ -230,18 +235,16 @@ func (r *balanceEntryRepository) DeductFromEntries(ctx context.Context, entries 
 			_ = rows.Close()
 			continue // entry already fully consumed by concurrent deduction
 		}
-		if err := rows.Scan(&actualRemaining); err != nil {
+		if err := rows.Scan(&actualDeducted, &newRemaining); err != nil {
 			_ = rows.Close()
-			return totalDeducted, fmt.Errorf("scan balance_entry %d remaining: %w", e.ID, err)
+			return totalDeducted, fmt.Errorf("scan balance_entry %d deducted: %w", e.ID, err)
 		}
 		_ = rows.Close()
 
-		// Calculate actual deducted amount based on DB result
-		actualDeducted := e.Remaining - actualRemaining
 		if actualDeducted < 0 {
 			actualDeducted = 0
 		}
-		e.Remaining = actualRemaining
+		e.Remaining = newRemaining
 		totalDeducted += actualDeducted
 		amount -= actualDeducted
 	}
