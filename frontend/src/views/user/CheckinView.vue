@@ -38,7 +38,7 @@
               <div class="text-center">
                 <p class="text-2xl font-bold text-amber-600 dark:text-amber-400">
                   <template v-if="status?.config?.mode === 'random'">
-                    {{ status.config.random_min }}~{{ status.config.random_max }}
+                    {{ Number(status.config.random_min).toFixed(2) }}~{{ Number(status.config.random_max).toFixed(2) }}
                   </template>
                   <template v-else>
                     {{ status?.config?.fixed_amount?.toFixed(2) ?? '0.00' }}

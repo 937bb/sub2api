@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math"
 	"math/rand"
 	"time"
 )
@@ -65,9 +66,10 @@ func (s *CheckinService) Checkin(ctx context.Context, userID int64) (*CheckinRec
 	switch config.Mode {
 	case "random":
 		if config.RandomMax > config.RandomMin && config.RandomMin >= 0 {
-			baseAmount = float64(config.RandomMin + rand.Intn(config.RandomMax-config.RandomMin+1))
+			baseAmount = config.RandomMin + rand.Float64()*(config.RandomMax-config.RandomMin)
+			baseAmount = math.Round(baseAmount*100) / 100
 		} else {
-			baseAmount = float64(config.RandomMin)
+			baseAmount = config.RandomMin
 		}
 	default: // "fixed"
 		baseAmount = config.FixedAmount
@@ -198,8 +200,8 @@ func (s *CheckinService) GetCheckinConfig(ctx context.Context) *CheckinConfig {
 		Enabled:     false,
 		Mode:        "fixed",
 		FixedAmount: 0.01,
-		RandomMin:   1,
-		RandomMax:   10,
+		RandomMin:   0.01,
+		RandomMax:   1.00,
 		BalanceType: BalanceTypePermanent,
 		ExpiryDays:  0,
 		Milestones:  nil,
@@ -212,8 +214,8 @@ func (s *CheckinService) GetCheckinConfig(ctx context.Context) *CheckinConfig {
 	config.Enabled = s.settingService.GetBoolSetting(ctx, SettingKeyCheckinEnabled, false)
 	config.Mode = s.settingService.GetStringSetting(ctx, SettingKeyCheckinMode, "fixed")
 	config.FixedAmount = s.settingService.GetFloatSetting(ctx, SettingKeyCheckinFixedAmount, 0.01)
-	config.RandomMin = s.settingService.GetIntSetting(ctx, SettingKeyCheckinRandomMin, 1)
-	config.RandomMax = s.settingService.GetIntSetting(ctx, SettingKeyCheckinRandomMax, 10)
+	config.RandomMin = s.settingService.GetFloatSetting(ctx, SettingKeyCheckinRandomMin, 1)
+	config.RandomMax = s.settingService.GetFloatSetting(ctx, SettingKeyCheckinRandomMax, 10)
 	config.BalanceType = s.settingService.GetStringSetting(ctx, SettingKeyCheckinBalanceType, BalanceTypePermanent)
 	config.ExpiryDays = s.settingService.GetIntSetting(ctx, SettingKeyCheckinExpiryDays, 0)
 

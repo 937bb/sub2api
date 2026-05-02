@@ -53,8 +53,8 @@ type checkinStatusResponse struct {
 type checkinConfigResponse struct {
 	Mode        string                       `json:"mode"`
 	FixedAmount float64                      `json:"fixed_amount,omitempty"`
-	RandomMin   int                          `json:"random_min,omitempty"`
-	RandomMax   int                          `json:"random_max,omitempty"`
+	RandomMin   float64                      `json:"random_min,omitempty"`
+	RandomMax   float64                      `json:"random_max,omitempty"`
 	BalanceType string                       `json:"balance_type"`
 	ExpiryDays  int                          `json:"expiry_days,omitempty"`
 	Milestones  []service.CheckinMilestone   `json:"milestones,omitempty"`

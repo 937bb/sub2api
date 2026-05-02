@@ -115,12 +115,13 @@ func (s *RedeemBonusService) applyRegularRedeemBonus(ctx context.Context, userID
 		percent := s.settingService.GetFloatSetting(ctx, SettingKeyRedeemBonusPercent, 10)
 		bonusAmount = redeemAmount * percent / 100
 	case "random":
-		rMin := s.settingService.GetIntSetting(ctx, SettingKeyRedeemBonusRandomMin, 1)
-		rMax := s.settingService.GetIntSetting(ctx, SettingKeyRedeemBonusRandomMax, 10)
+		rMin := s.settingService.GetFloatSetting(ctx, SettingKeyRedeemBonusRandomMin, 1)
+		rMax := s.settingService.GetFloatSetting(ctx, SettingKeyRedeemBonusRandomMax, 10)
 		if rMin > rMax {
 			rMin, rMax = rMax, rMin
 		}
-		bonusAmount = float64(rMin + rand.Intn(rMax-rMin+1))
+		bonusAmount = rMin + rand.Float64()*(rMax-rMin)
+		bonusAmount = math.Round(bonusAmount*100) / 100
 	default:
 		return
 	}

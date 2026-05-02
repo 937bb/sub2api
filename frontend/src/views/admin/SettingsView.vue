@@ -4655,9 +4655,9 @@
               <div v-if="form.redeem_bonus_mode === 'random'">
                 <label class="input-label">{{ t('admin.settings.features.redeemBonus.randomHint') }}</label>
                 <div class="mt-2 flex items-center gap-2">
-                  <input v-model.number="form.redeem_bonus_random_min" type="number" min="0" class="input w-24" :placeholder="t('admin.settings.features.redeemBonus.randomMin')" />
+                  <input v-model.number="form.redeem_bonus_random_min" type="number" min="0" step="0.01" class="input w-24" :placeholder="t('admin.settings.features.redeemBonus.randomMin')" />
                   <span class="text-gray-400">~</span>
-                  <input v-model.number="form.redeem_bonus_random_max" type="number" min="0" class="input w-24" :placeholder="t('admin.settings.features.redeemBonus.randomMax')" />
+                  <input v-model.number="form.redeem_bonus_random_max" type="number" min="0" step="0.01" class="input w-24" :placeholder="t('admin.settings.features.redeemBonus.randomMax')" />
                 </div>
               </div>
               <div>
@@ -4728,9 +4728,9 @@
               <div v-if="form.checkin_mode === 'random'">
                 <label class="input-label">{{ t('admin.settings.features.checkin.randomHint') }}</label>
                 <div class="mt-2 flex items-center gap-2">
-                  <input v-model.number="form.checkin_random_min" type="number" min="0" class="input w-24" :placeholder="t('admin.settings.features.checkin.randomMin')" />
+                  <input v-model.number="form.checkin_random_min" type="number" min="0" step="0.01" class="input w-24" :placeholder="t('admin.settings.features.checkin.randomMin')" />
                   <span class="text-gray-400">~</span>
-                  <input v-model.number="form.checkin_random_max" type="number" min="0" class="input w-24" :placeholder="t('admin.settings.features.checkin.randomMax')" />
+                  <input v-model.number="form.checkin_random_max" type="number" min="0" step="0.01" class="input w-24" :placeholder="t('admin.settings.features.checkin.randomMax')" />
                 </div>
               </div>
 
@@ -4990,9 +4990,9 @@
               <div v-if="form.cashback_mode === 'random'">
                 <label class="input-label">{{ t('admin.settings.features.cashback.randomHint') }}</label>
                 <div class="mt-2 flex items-center gap-2">
-                  <input v-model.number="form.cashback_random_min" type="number" min="0" class="input w-24" :placeholder="t('admin.settings.features.cashback.randomMin')" />
+                  <input v-model.number="form.cashback_random_min" type="number" min="0" step="0.01" class="input w-24" :placeholder="t('admin.settings.features.cashback.randomMin')" />
                   <span class="text-gray-400">~</span>
-                  <input v-model.number="form.cashback_random_max" type="number" min="0" class="input w-24" :placeholder="t('admin.settings.features.cashback.randomMax')" />
+                  <input v-model.number="form.cashback_random_max" type="number" min="0" step="0.01" class="input w-24" :placeholder="t('admin.settings.features.cashback.randomMax')" />
                 </div>
               </div>
               <div>
@@ -6282,8 +6282,8 @@ const form = reactive<SettingsForm>({
   redeem_bonus_mode: 'percent',
   redeem_bonus_fixed_amount: 1,
   redeem_bonus_percent: 10,
-  redeem_bonus_random_min: 1,
-  redeem_bonus_random_max: 10,
+  redeem_bonus_random_min: 0.01,
+  redeem_bonus_random_max: 1,
   redeem_bonus_cap: 0,
   redeem_bonus_min_amount: 0,
   redeem_bonus_balance_type: 'permanent',
@@ -6297,8 +6297,8 @@ const form = reactive<SettingsForm>({
   cashback_mode: 'percent',
   cashback_fixed_amount: 0.1,
   cashback_percent: 5,
-  cashback_random_min: 1,
-  cashback_random_max: 10,
+  cashback_random_min: 0.01,
+  cashback_random_max: 1,
   cashback_balance_type: 'permanent',
   cashback_expiry_days: 0,
   cashback_cycle: 'daily',
@@ -6307,8 +6307,8 @@ const form = reactive<SettingsForm>({
   checkin_enabled: false,
   checkin_mode: 'fixed',
   checkin_fixed_amount: 0.01,
-  checkin_random_min: 1,
-  checkin_random_max: 10,
+  checkin_random_min: 0.01,
+  checkin_random_max: 1,
   checkin_balance_type: 'permanent',
   checkin_expiry_days: 0,
   checkin_milestones: '[]',
@@ -7274,8 +7274,8 @@ async function saveSettings() {
       redeem_bonus_mode: form.redeem_bonus_mode || 'percent',
       redeem_bonus_fixed_amount: String(Math.max(0, Number(form.redeem_bonus_fixed_amount) || 0)),
       redeem_bonus_percent: String(Math.max(0, Math.min(100, Number(form.redeem_bonus_percent) || 0))),
-      redeem_bonus_random_min: String(Math.max(0, Math.floor(Number(form.redeem_bonus_random_min) || 0))),
-      redeem_bonus_random_max: String(Math.max(0, Math.floor(Number(form.redeem_bonus_random_max) || 0))),
+      redeem_bonus_random_min: String(Math.max(0, Number(form.redeem_bonus_random_min) || 0)),
+      redeem_bonus_random_max: String(Math.max(0, Number(form.redeem_bonus_random_max) || 0)),
       redeem_bonus_cap: String(Math.max(0, Number(form.redeem_bonus_cap) || 0)),
       redeem_bonus_min_amount: String(Math.max(0, Number(form.redeem_bonus_min_amount) || 0)),
       redeem_bonus_balance_type: form.redeem_bonus_balance_type || 'permanent',
@@ -7289,8 +7289,8 @@ async function saveSettings() {
       cashback_mode: form.cashback_mode || 'percent',
       cashback_fixed_amount: String(Math.max(0, Number(form.cashback_fixed_amount) || 0)),
       cashback_percent: String(Math.max(0, Math.min(100, Number(form.cashback_percent) || 0))),
-      cashback_random_min: String(Math.max(0, Math.floor(Number(form.cashback_random_min) || 0))),
-      cashback_random_max: String(Math.max(0, Math.floor(Number(form.cashback_random_max) || 0))),
+      cashback_random_min: String(Math.max(0, Number(form.cashback_random_min) || 0)),
+      cashback_random_max: String(Math.max(0, Number(form.cashback_random_max) || 0)),
       cashback_balance_type: form.cashback_balance_type || 'permanent',
       cashback_expiry_days: String(Math.max(0, Math.floor(Number(form.cashback_expiry_days) || 0))),
       cashback_cycle: form.cashback_cycle || 'daily',
@@ -7299,8 +7299,8 @@ async function saveSettings() {
       checkin_enabled: form.checkin_enabled,
       checkin_mode: form.checkin_mode || 'fixed',
       checkin_fixed_amount: String(form.checkin_fixed_amount || 0.01),
-      checkin_random_min: String(Math.max(0, Math.floor(Number(form.checkin_random_min) || 1))),
-      checkin_random_max: String(Math.max(0, Math.floor(Number(form.checkin_random_max) || 10))),
+      checkin_random_min: String(Math.max(0, Number(form.checkin_random_min) || 0.01)),
+      checkin_random_max: String(Math.max(0, Number(form.checkin_random_max) || 1)),
       checkin_balance_type: form.checkin_balance_type || 'permanent',
       checkin_expiry_days: String(Math.max(0, Math.floor(Number(form.checkin_expiry_days) || 0))),
       checkin_milestones: JSON.stringify(checkinMilestones.value),

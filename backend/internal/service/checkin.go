@@ -31,8 +31,8 @@ type CheckinConfig struct {
 	Enabled     bool                `json:"enabled"`
 	Mode        string              `json:"mode"`         // fixed / random
 	FixedAmount float64             `json:"fixed_amount"`
-	RandomMin   int                 `json:"random_min"`
-	RandomMax   int                 `json:"random_max"`
+	RandomMin   float64             `json:"random_min"`
+	RandomMax   float64             `json:"random_max"`
 	BalanceType string              `json:"balance_type"` // permanent / expirable
 	ExpiryDays  int                 `json:"expiry_days"`  // 有效期天数（仅 expirable 生效）
 	Milestones  []CheckinMilestone  `json:"milestones"`

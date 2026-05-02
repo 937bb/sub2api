@@ -95,12 +95,13 @@ func (s *CashbackService) applyCashback(ctx context.Context, userID int64, consu
 		percent := s.settingService.GetFloatSetting(ctx, SettingKeyCashbackPercent, 5)
 		cashbackAmount = consumeAmount * percent / 100
 	case "random":
-		rMin := s.settingService.GetIntSetting(ctx, SettingKeyCashbackRandomMin, 1)
-		rMax := s.settingService.GetIntSetting(ctx, SettingKeyCashbackRandomMax, 10)
+		rMin := s.settingService.GetFloatSetting(ctx, SettingKeyCashbackRandomMin, 1)
+		rMax := s.settingService.GetFloatSetting(ctx, SettingKeyCashbackRandomMax, 10)
 		if rMin > rMax {
 			rMin, rMax = rMax, rMin
 		}
-		cashbackAmount = float64(rMin + rand.Intn(rMax-rMin+1))
+		cashbackAmount = rMin + rand.Float64()*(rMax-rMin)
+		cashbackAmount = math.Round(cashbackAmount*100) / 100
 	default:
 		return
 	}
