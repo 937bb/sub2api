@@ -165,14 +165,21 @@ LIMIT $%d OFFSET $%d`, includeClause, limitIdx, offsetIdx), listArgs...)
 	return entries, total, nil
 }
 
-func (r *balanceEntryRepository) GetAvailableEntries(ctx context.Context, userID int64) ([]*service.BalanceEntry, error) {
+func (r *balanceEntryRepository) GetAvailableEntries(ctx context.Context, userID int64, deductionOrder string) ([]*service.BalanceEntry, error) {
 	client := clientFromContext(ctx, r.client)
+
+	// 根据扣减顺序决定排序方式
+	orderClause := "ORDER BY expires_at ASC NULLS LAST, created_at ASC" // expiring_first（默认）
+	if deductionOrder == "permanent_first" {
+		orderClause = "ORDER BY expires_at DESC NULLS FIRST, created_at ASC"
+	}
+
 	rows, err := client.QueryContext(ctx, `
 SELECT id, user_id, amount, remaining, balance_type, source, note, expires_at, expired, created_at
 FROM balance_entries
 WHERE user_id = $1 AND remaining > 0 AND expired = FALSE
   AND (expires_at IS NULL OR expires_at > NOW())
-ORDER BY expires_at ASC NULLS LAST, created_at ASC`, userID)
+`+orderClause, userID)
 	if err != nil {
 		return nil, fmt.Errorf("get available balance_entries: %w", err)
 	}
@@ -204,18 +211,39 @@ func (r *balanceEntryRepository) DeductFromEntries(ctx context.Context, entries 
 			continue
 		}
 		deduct := math.Min(e.Remaining, amount)
-		newRemaining := e.Remaining - deduct
 
-		_, err := client.ExecContext(ctx,
-			`UPDATE balance_entries SET remaining = $1 WHERE id = $2`,
-			newRemaining, e.ID)
+		// 使用原子 CAS 操作避免并发超扣：只扣减 remaining 中实际可用的部分
+		var actualRemaining float64
+		rows, err := client.QueryContext(ctx,
+			`UPDATE balance_entries
+			 SET remaining = CASE
+			   WHEN remaining >= $1 THEN remaining - $1
+			   ELSE 0
+			 END
+			 WHERE id = $2 AND remaining > 0
+			 RETURNING remaining`,
+			deduct, e.ID)
 		if err != nil {
 			return totalDeducted, fmt.Errorf("deduct balance_entry %d: %w", e.ID, err)
 		}
+		if !rows.Next() {
+			_ = rows.Close()
+			continue // entry already fully consumed by concurrent deduction
+		}
+		if err := rows.Scan(&actualRemaining); err != nil {
+			_ = rows.Close()
+			return totalDeducted, fmt.Errorf("scan balance_entry %d remaining: %w", e.ID, err)
+		}
+		_ = rows.Close()
 
-		e.Remaining = newRemaining
-		totalDeducted += deduct
-		amount -= deduct
+		// Calculate actual deducted amount based on DB result
+		actualDeducted := e.Remaining - actualRemaining
+		if actualDeducted < 0 {
+			actualDeducted = 0
+		}
+		e.Remaining = actualRemaining
+		totalDeducted += actualDeducted
+		amount -= actualDeducted
 	}
 
 	return totalDeducted, nil

@@ -66,15 +66,18 @@ func (s *BalanceEntryService) AddBalance(ctx context.Context, input *AddBalanceI
 	return entry, nil
 }
 
-// DeductBalance 扣减余额，按先过期后永久的顺序扣减 balance_entries，并同步 user.balance
+// DeductBalance 扣减余额，按配置的顺序扣减 balance_entries，并同步 user.balance
 // 返回实际扣减金额。允许透支（当可用余额不足时仍继续扣减 user.balance）。
 func (s *BalanceEntryService) DeductBalance(ctx context.Context, userID int64, amount float64, source, note string) (float64, error) {
 	if amount <= 0 {
 		return 0, nil
 	}
 
-	// 获取可用余额条目（已按 expires_at ASC NULLS LAST 排序）
-	entries, err := s.balanceEntryRepo.GetAvailableEntries(ctx, userID)
+	deductionOrder := "expiring_first"
+	if s.settingService != nil {
+		deductionOrder = s.settingService.GetBalanceDeductionOrder(ctx)
+	}
+	entries, err := s.balanceEntryRepo.GetAvailableEntries(ctx, userID, deductionOrder)
 	if err != nil {
 		return 0, fmt.Errorf("get available entries: %w", err)
 	}
@@ -114,7 +117,11 @@ func (s *BalanceEntryService) RecordDeduction(ctx context.Context, userID int64,
 	}
 
 	// 从可用条目中扣减 remaining
-	entries, err := s.balanceEntryRepo.GetAvailableEntries(ctx, userID)
+	deductionOrder := "expiring_first"
+	if s.settingService != nil {
+		deductionOrder = s.settingService.GetBalanceDeductionOrder(ctx)
+	}
+	entries, err := s.balanceEntryRepo.GetAvailableEntries(ctx, userID, deductionOrder)
 	if err != nil {
 		slog.Error("record deduction: get available entries failed", "user_id", userID, "error", err)
 	} else {
