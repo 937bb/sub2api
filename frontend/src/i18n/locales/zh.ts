@@ -1152,6 +1152,7 @@ export default {
     title: '消费排行榜',
     description: '查看消费排名和奖励信息',
     disabled: '排行榜功能未开启',
+    today: '今日排行',
     yesterday: '昨日排行',
     total: '近30天排行',
     rank: '排名',

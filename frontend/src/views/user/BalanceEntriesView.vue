@@ -69,7 +69,6 @@
                 <th class="px-4 py-3 font-medium text-gray-500 dark:text-gray-400">{{ t('balanceEntries.table.createdAt') }}</th>
                 <th class="px-4 py-3 font-medium text-gray-500 dark:text-gray-400">{{ t('balanceEntries.table.source') }}</th>
                 <th class="px-4 py-3 font-medium text-gray-500 dark:text-gray-400">{{ t('balanceEntries.table.amount') }}</th>
-                <th class="px-4 py-3 font-medium text-gray-500 dark:text-gray-400">{{ t('balanceEntries.table.remaining') }}</th>
                 <th class="px-4 py-3 font-medium text-gray-500 dark:text-gray-400">{{ t('balanceEntries.table.type') }}</th>
                 <th class="px-4 py-3 font-medium text-gray-500 dark:text-gray-400">{{ t('balanceEntries.table.expiresAt') }}</th>
                 <th class="px-4 py-3 font-medium text-gray-500 dark:text-gray-400">{{ t('balanceEntries.table.status') }}</th>
@@ -89,9 +88,6 @@
                 </td>
                 <td class="whitespace-nowrap px-4 py-3 text-sm font-medium" :class="entry.amount >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'">
                   {{ entry.amount >= 0 ? '+' : '' }}{{ entry.amount.toFixed(4) }}
-                </td>
-                <td class="whitespace-nowrap px-4 py-3 text-sm text-gray-600 dark:text-gray-300">
-                  {{ entry.remaining.toFixed(4) }}
                 </td>
                 <td class="whitespace-nowrap px-4 py-3">
                   <span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium"

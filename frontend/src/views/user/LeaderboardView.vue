@@ -17,20 +17,22 @@
       <EmptyState :title="t('leaderboard.disabled')" />
     </div>
 
-    <!-- Dual-column layout -->
-    <div v-else class="grid grid-cols-1 gap-6 animate-fade-in lg:grid-cols-2">
-      <!-- Yesterday -->
-      <div class="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-card dark:border-dark-700 dark:bg-dark-800">
+    <!-- Three-column layout -->
+    <div v-else class="grid grid-cols-1 gap-6 animate-fade-in lg:grid-cols-3">
+      <div
+        v-for="col in columns"
+        :key="col.key"
+        class="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-card dark:border-dark-700 dark:bg-dark-800"
+      >
         <div class="border-b border-gray-100 bg-gray-50/50 px-5 py-3 dark:border-dark-700 dark:bg-dark-900/50">
-          <h2 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('leaderboard.yesterday') }}</h2>
+          <h2 class="text-sm font-semibold text-gray-900 dark:text-white">{{ col.title }}</h2>
         </div>
         <div class="divide-y divide-gray-100 dark:divide-dark-700">
           <div
-            v-for="entry in (data?.yesterday || [])"
-            :key="'y-' + entry.rank"
-            class="flex items-center gap-3 px-5 py-3 transition-colors hover:bg-gray-50/50 dark:hover:bg-dark-700/50"
+            v-for="entry in col.entries"
+            :key="col.key + '-' + entry.rank"
+            class="flex items-center gap-3 px-5 py-2.5 transition-colors hover:bg-gray-50/50 dark:hover:bg-dark-700/50"
           >
-            <!-- Rank -->
             <span
               v-if="entry.rank <= 3"
               class="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-sm font-bold"
@@ -45,7 +47,6 @@
             <span v-else class="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center text-sm font-medium text-gray-400 dark:text-gray-500">
               {{ entry.rank }}
             </span>
-            <!-- User + cost -->
             <div class="min-w-0 flex-1">
               <p class="truncate text-sm text-gray-900 dark:text-white">{{ entry.email }}</p>
               <p class="text-xs text-gray-400 dark:text-gray-500">
@@ -58,51 +59,7 @@
             </span>
           </div>
         </div>
-        <div v-if="!data?.yesterday?.length" class="py-10 text-center text-sm text-gray-400 dark:text-gray-500">
-          {{ t('leaderboard.noData') }}
-        </div>
-      </div>
-
-      <!-- Total (30 days) -->
-      <div class="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-card dark:border-dark-700 dark:bg-dark-800">
-        <div class="border-b border-gray-100 bg-gray-50/50 px-5 py-3 dark:border-dark-700 dark:bg-dark-900/50">
-          <h2 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('leaderboard.total') }}</h2>
-        </div>
-        <div class="divide-y divide-gray-100 dark:divide-dark-700">
-          <div
-            v-for="entry in (data?.total || [])"
-            :key="'t-' + entry.rank"
-            class="flex items-center gap-3 px-5 py-3 transition-colors hover:bg-gray-50/50 dark:hover:bg-dark-700/50"
-          >
-            <!-- Rank -->
-            <span
-              v-if="entry.rank <= 3"
-              class="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-sm font-bold"
-              :class="{
-                'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400': entry.rank === 1,
-                'bg-gray-100 text-gray-600 dark:bg-gray-700/50 dark:text-gray-300': entry.rank === 2,
-                'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400': entry.rank === 3,
-              }"
-            >
-              {{ entry.rank === 1 ? '🥇' : entry.rank === 2 ? '🥈' : '🥉' }}
-            </span>
-            <span v-else class="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center text-sm font-medium text-gray-400 dark:text-gray-500">
-              {{ entry.rank }}
-            </span>
-            <!-- User + cost -->
-            <div class="min-w-0 flex-1">
-              <p class="truncate text-sm text-gray-900 dark:text-white">{{ entry.email }}</p>
-              <p class="text-xs text-gray-400 dark:text-gray-500">
-                {{ entry.requests.toLocaleString() }} {{ t('leaderboard.requests') }}
-                · {{ entry.tokens.toLocaleString() }} {{ t('leaderboard.tokens') }}
-              </p>
-            </div>
-            <span class="flex-shrink-0 text-sm font-semibold text-primary-600 dark:text-primary-400">
-              {{ t('leaderboard.unit') }}{{ entry.actual_cost.toFixed(4) }}
-            </span>
-          </div>
-        </div>
-        <div v-if="!data?.total?.length" class="py-10 text-center text-sm text-gray-400 dark:text-gray-500">
+        <div v-if="!col.entries.length" class="py-10 text-center text-sm text-gray-400 dark:text-gray-500">
           {{ t('leaderboard.noData') }}
         </div>
       </div>
@@ -112,7 +69,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { leaderboardAPI, type LeaderboardResponse } from '@/api/leaderboard'
 import AppLayout from '@/components/layout/AppLayout.vue'
@@ -122,6 +79,12 @@ const { t } = useI18n()
 
 const loading = ref(true)
 const data = ref<LeaderboardResponse | null>(null)
+
+const columns = computed(() => [
+  { key: 'today', title: t('leaderboard.today'), entries: data.value?.today || [] },
+  { key: 'yesterday', title: t('leaderboard.yesterday'), entries: data.value?.yesterday || [] },
+  { key: 'total', title: t('leaderboard.total'), entries: data.value?.total || [] },
+])
 
 onMounted(async () => {
   try {

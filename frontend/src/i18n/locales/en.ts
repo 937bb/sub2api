@@ -1148,6 +1148,7 @@ export default {
     title: 'Spending Leaderboard',
     description: 'View spending rankings and rewards',
     disabled: 'Leaderboard is not enabled',
+    today: 'Today',
     yesterday: 'Yesterday',
     total: 'Last 30 Days',
     rank: 'Rank',

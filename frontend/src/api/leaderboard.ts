@@ -10,6 +10,7 @@ export interface LeaderboardEntry {
 
 export interface LeaderboardResponse {
   enabled: boolean
+  today: LeaderboardEntry[]
   yesterday: LeaderboardEntry[]
   total: LeaderboardEntry[]
 }

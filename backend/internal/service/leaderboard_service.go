@@ -32,6 +32,7 @@ type LeaderboardEntry struct {
 
 // LeaderboardResponse 排行榜响应
 type LeaderboardResponse struct {
+	Today     []LeaderboardEntry `json:"today"`
 	Yesterday []LeaderboardEntry `json:"yesterday"`
 	Total     []LeaderboardEntry `json:"total"`
 }
@@ -59,18 +60,24 @@ func NewLeaderboardService(
 // GetLeaderboard 获取排行榜数据（昨日+总计）
 func (s *LeaderboardService) GetLeaderboard(ctx context.Context) (*LeaderboardResponse, error) {
 	if !s.settingService.GetBoolSetting(ctx, SettingKeyLeaderboardEnabled, false) {
-		return &LeaderboardResponse{Yesterday: []LeaderboardEntry{}, Total: []LeaderboardEntry{}}, nil
+		return &LeaderboardResponse{Today: []LeaderboardEntry{}, Yesterday: []LeaderboardEntry{}, Total: []LeaderboardEntry{}}, nil
 	}
 
 	topN := s.settingService.GetIntSetting(ctx, SettingKeyLeaderboardTopN, 10)
 	maskEmail := s.settingService.GetBoolSetting(ctx, SettingKeyLeaderboardMaskEmail, true)
 
 	now := time.Now()
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 	yesterdayStart := time.Date(now.Year(), now.Month(), now.Day()-1, 0, 0, 0, 0, now.Location())
-	yesterdayEnd := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+
+	// 今日排行
+	todayRanking, err := s.usageLogRepo.GetUserSpendingRanking(ctx, todayStart, now, topN)
+	if err != nil {
+		return nil, fmt.Errorf("get today ranking: %w", err)
+	}
 
 	// 昨日排行
-	yesterdayRanking, err := s.usageLogRepo.GetUserSpendingRanking(ctx, yesterdayStart, yesterdayEnd, topN)
+	yesterdayRanking, err := s.usageLogRepo.GetUserSpendingRanking(ctx, yesterdayStart, todayStart, topN)
 	if err != nil {
 		return nil, fmt.Errorf("get yesterday ranking: %w", err)
 	}
@@ -83,6 +90,7 @@ func (s *LeaderboardService) GetLeaderboard(ctx context.Context) (*LeaderboardRe
 	}
 
 	resp := &LeaderboardResponse{
+		Today:     s.rankingToEntries(todayRanking, maskEmail),
 		Yesterday: s.rankingToEntries(yesterdayRanking, maskEmail),
 		Total:     s.rankingToEntries(totalRanking, maskEmail),
 	}
