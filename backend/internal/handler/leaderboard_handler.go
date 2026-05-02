@@ -28,6 +28,7 @@ func (h *LeaderboardHandler) GetLeaderboard(c *gin.Context) {
 	if !h.settingService.GetBoolSetting(ctx, service.SettingKeyLeaderboardEnabled, false) {
 		response.Success(c, gin.H{
 			"enabled":   false,
+			"today":     []any{},
 			"yesterday": []any{},
 			"total":     []any{},
 		})
@@ -42,6 +43,7 @@ func (h *LeaderboardHandler) GetLeaderboard(c *gin.Context) {
 
 	response.Success(c, gin.H{
 		"enabled":   true,
+		"today":     data.Today,
 		"yesterday": data.Yesterday,
 		"total":     data.Total,
 	})

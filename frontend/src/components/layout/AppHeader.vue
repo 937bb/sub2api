@@ -277,9 +277,10 @@ async function loadCheckinStatus() {
   if (!user.value) return
   try {
     const status = await checkinAPI.getStatus()
-    checkinVisible.value = status.enabled
-    checkinDone.value = status.checked_in_today
-  } catch {
+    checkinVisible.value = !!status?.enabled
+    checkinDone.value = !!status?.checked_in_today
+  } catch (e) {
+    console.warn('[AppHeader] loadCheckinStatus failed:', e)
     checkinVisible.value = false
   }
 }
