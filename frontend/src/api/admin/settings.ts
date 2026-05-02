@@ -658,6 +658,62 @@ export interface UpdateSettingsRequest {
 
   // OpenAI fast/flex policy
   openai_fast_policy_settings?: OpenAIFastPolicySettings;
+
+  // Reward system: First redeem bonus
+  first_redeem_bonus_enabled?: boolean;
+  first_redeem_bonus_multiplier?: string;
+  first_redeem_bonus_cap?: string;
+  first_redeem_bonus_balance_type?: string;
+  first_redeem_bonus_expiry_days?: string;
+
+  // Reward system: Redeem bonus
+  redeem_bonus_enabled?: boolean;
+  redeem_bonus_mode?: string;
+  redeem_bonus_fixed_amount?: string;
+  redeem_bonus_percent?: string;
+  redeem_bonus_random_min?: string;
+  redeem_bonus_random_max?: string;
+  redeem_bonus_cap?: string;
+  redeem_bonus_min_amount?: string;
+  redeem_bonus_balance_type?: string;
+  redeem_bonus_expiry_days?: string;
+
+  // Reward system: Leaderboard
+  leaderboard_enabled?: boolean;
+  leaderboard_mask_email?: boolean;
+  leaderboard_top_n?: string;
+  leaderboard_reward_rules?: string;
+
+  // Reward system: Cashback
+  cashback_enabled?: boolean;
+  cashback_threshold?: string;
+  cashback_mode?: string;
+  cashback_fixed_amount?: string;
+  cashback_percent?: string;
+  cashback_random_min?: string;
+  cashback_random_max?: string;
+  cashback_balance_type?: string;
+  cashback_expiry_days?: string;
+  cashback_cycle?: string;
+
+  // Off-peak pricing
+  off_peak_pricing_enabled?: boolean;
+  off_peak_pricing_rules?: string;
+
+  // Check-in
+  checkin_enabled?: boolean;
+  checkin_mode?: string;
+  checkin_fixed_amount?: string;
+  checkin_random_min?: string;
+  checkin_random_max?: string;
+  checkin_balance_type?: string;
+  checkin_expiry_days?: string;
+  checkin_milestones?: string;
+
+  // Balance expiry
+  balance_expiry_enabled?: boolean;
+  balance_expiry_warning_days?: number;
+  balance_deduction_order?: string;
 }
 
 /**

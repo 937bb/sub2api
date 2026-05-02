@@ -121,11 +121,10 @@
         <!-- Pagination -->
         <div v-if="totalPages > 1" class="border-t border-gray-100 px-6 py-3 dark:border-dark-700">
           <Pagination
-            :current-page="currentPage"
-            :total-pages="totalPages"
-            :total-items="totalItems"
+            :page="currentPage"
+            :total="totalItems"
             :page-size="pageSize"
-            @page-change="handlePageChange"
+            @update:page="handlePageChange"
           />
         </div>
       </div>
