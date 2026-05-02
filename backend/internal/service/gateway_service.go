@@ -8100,6 +8100,14 @@ func finalizePostUsageBilling(p *postUsageBillingParams, deps *billingDeps, resu
 		}
 	} else if p.Cost.ActualCost > 0 && p.User != nil {
 		deps.billingCacheService.QueueDeductBalance(p.User.ID, p.Cost.ActualCost)
+		// 同步扣减 balance_entries 的 remaining（不操作 user.balance，repo.Apply 已处理）
+		if deps.balanceEntryService != nil {
+			go func() {
+				deductCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				deps.balanceEntryService.RecordDeduction(deductCtx, p.User.ID, p.Cost.ActualCost, BalanceSourceConsumption, "API consumption")
+			}()
+		}
 	}
 
 	if p.Cost.ActualCost > 0 && p.APIKey != nil && p.APIKey.HasRateLimits() {
