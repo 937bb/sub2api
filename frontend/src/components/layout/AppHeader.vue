@@ -294,7 +294,7 @@ async function doQuickCheckin() {
     const total = (result.base_amount || 0) + (result.milestone_amount || 0)
     appStore.showSuccess(t('checkin.quickSuccess', { amount: total.toFixed(4) }))
     // Refresh user balance
-    await authStore.fetchUser()
+    await authStore.refreshUser()
   } catch (e: any) {
     const msg = e?.response?.data?.message || e?.message || 'Check-in failed'
     appStore.showError(msg)
