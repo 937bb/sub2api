@@ -210,13 +210,39 @@ func (s *BalanceEntryService) ExpireBalances(ctx context.Context) ([]int64, erro
 }
 
 // GetUserBalanceSummary 获取用户余额汇总
+// TotalBalance = user.balance (真实余额)
+// PermanentBalance = user.balance - expirableBalance (永久部分)
+// ExpirableBalance / ExpiringSoon 来自 balance_entries 表
 func (s *BalanceEntryService) GetUserBalanceSummary(ctx context.Context, userID int64) (*BalanceSummary, error) {
-	soonDays := 7 // 默认 7 天内即将过期
+	soonDays := 7
 	if s.settingService != nil {
-		// 从设置中读取预警天数（后续实现）
 		_ = soonDays
 	}
-	return s.balanceEntryRepo.GetUserBalanceSummary(ctx, userID, soonDays)
+
+	// 从 balance_entries 获取有效期余额统计
+	entrySummary, err := s.balanceEntryRepo.GetUserBalanceSummary(ctx, userID, soonDays)
+	if err != nil {
+		return nil, err
+	}
+
+	// 从 user 表获取真实余额
+	user, err := s.userRepo.GetByID(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("get user for summary: %w", err)
+	}
+
+	// 永久余额 = 用户余额 - 有效期余额（不低于0）
+	permanentBalance := user.Balance - entrySummary.ExpirableBalance
+	if permanentBalance < 0 {
+		permanentBalance = 0
+	}
+
+	return &BalanceSummary{
+		TotalBalance:     user.Balance,
+		PermanentBalance: permanentBalance,
+		ExpirableBalance: entrySummary.ExpirableBalance,
+		ExpiringSoon:     entrySummary.ExpiringSoon,
+	}, nil
 }
 
 // ListByUser 获取用户余额明细（分页）
@@ -240,4 +266,53 @@ func (s *BalanceEntryService) SyncUserBalance(ctx context.Context, userID int64)
 		return nil
 	}
 	return s.userRepo.UpdateBalance(ctx, userID, diff)
+}
+
+// MigrateRedeemCodesToBalanceEntries 将 redeem_codes 中已使用的余额记录回填到 balance_entries
+// 跳过已经存在对应 balance_entry 的记录（通过 note LIKE '%兑换码%' 或 source='redeem'/'admin' 判断）
+// 返回迁移的条数
+func (s *BalanceEntryService) MigrateRedeemCodesToBalanceEntries(ctx context.Context) (int, error) {
+	client := s.entClient
+	if client == nil {
+		return 0, fmt.Errorf("ent client not available")
+	}
+
+	// 使用原生 SQL 批量插入：从 redeem_codes 中选出已使用的余额类型记录，
+	// 排除已经被迁移过的（通过检查 balance_entries 中是否已有同 user_id + 相似 note 的记录）
+	query := `
+INSERT INTO balance_entries (user_id, amount, remaining, balance_type, source, note, expired, created_at)
+SELECT
+    rc.used_by,
+    rc.value,
+    CASE WHEN rc.value > 0 THEN rc.value ELSE 0 END,
+    'permanent',
+    CASE
+        WHEN rc.type = 'admin_balance' THEN 'admin'
+        ELSE 'redeem'
+    END,
+    CASE
+        WHEN rc.type = 'admin_balance' THEN COALESCE(rc.notes, '管理员调整(历史迁移)')
+        ELSE '兑换码充值(历史迁移) ' || LEFT(rc.code, 8)
+    END,
+    FALSE,
+    COALESCE(rc.used_at, rc.created_at)
+FROM redeem_codes rc
+WHERE rc.status = 'used'
+  AND rc.used_by IS NOT NULL
+  AND rc.type IN ('balance', 'admin_balance')
+  AND NOT EXISTS (
+      SELECT 1 FROM balance_entries be
+      WHERE be.user_id = rc.used_by
+        AND be.amount = rc.value
+        AND be.created_at = COALESCE(rc.used_at, rc.created_at)
+  )`
+
+	result, err := client.ExecContext(ctx, query)
+	if err != nil {
+		return 0, fmt.Errorf("migrate redeem codes: %w", err)
+	}
+	affected, _ := result.RowsAffected()
+
+	slog.Info("migrate_redeem_codes: completed", "migrated", affected)
+	return int(affected), nil
 }

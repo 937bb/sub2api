@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -496,9 +497,8 @@ func (h *UserHandler) GetBalanceEntries(c *gin.Context) {
 	}
 
 	page, pageSize := response.ParsePagination(c)
-	offset := (page - 1) * pageSize
 
-	entries, total, err := h.balanceEntryService.ListByUser(c.Request.Context(), userID, offset, pageSize)
+	entries, total, err := h.balanceEntryService.ListByUser(c.Request.Context(), userID, page, pageSize)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -532,4 +532,24 @@ func (h *UserHandler) GetBalanceEntries(c *gin.Context) {
 	}
 
 	response.Paginated(c, items, total, page, pageSize)
+}
+
+// MigrateBalanceEntries 将 redeem_codes 中的历史余额记录迁移到 balance_entries
+// POST /api/v1/admin/users/migrate-balance-entries
+func (h *UserHandler) MigrateBalanceEntries(c *gin.Context) {
+	if h.balanceEntryService == nil {
+		response.BadRequest(c, "balance entry service not available")
+		return
+	}
+
+	migrated, err := h.balanceEntryService.MigrateRedeemCodesToBalanceEntries(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	response.Success(c, gin.H{
+		"migrated": migrated,
+		"message":  fmt.Sprintf("成功迁移 %d 条历史记录到余额明细", migrated),
+	})
 }
