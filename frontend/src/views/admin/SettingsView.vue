@@ -5072,15 +5072,13 @@
                         </td>
                         <td class="px-2 py-2"><input v-model.number="rule.multiplier" type="number" step="0.01" min="0.01" max="10" class="input w-24" /></td>
                         <td class="px-2 py-2">
-                          <select
-                            multiple
-                            class="input w-40 min-h-[36px]"
-                            :value="rule.group_ids"
-                            @change="rule.group_ids = Array.from(($event.target as HTMLSelectElement).selectedOptions, o => Number(o.value))"
-                          >
-                            <option v-for="g in allGroups" :key="g.id" :value="g.id">{{ g.name }}</option>
-                          </select>
-                          <p v-if="rule.group_ids.length === 0" class="mt-0.5 text-xs text-gray-400">{{ t('admin.settings.features.offPeakPricing.allGroups') }}</p>
+                          <MultiSelectDropdown
+                            v-model="rule.group_ids"
+                            :options="allGroupOptions"
+                            :placeholder="t('admin.settings.features.offPeakPricing.allGroups')"
+                            :empty-text="t('common.noGroupsAvailable')"
+                            class="w-44"
+                          />
                         </td>
                         <td class="px-2 py-2"><input v-model="rule.label" type="text" class="input w-32" :placeholder="t('admin.settings.features.offPeakPricing.labelPlaceholder')" /></td>
                         <td class="px-2 py-2">
@@ -6063,6 +6061,7 @@ import PaymentProviderDialog from "@/components/payment/PaymentProviderDialog.vu
 import GroupBadge from "@/components/common/GroupBadge.vue";
 import GroupOptionItem from "@/components/common/GroupOptionItem.vue";
 import Toggle from "@/components/common/Toggle.vue";
+import MultiSelectDropdown from "@/components/common/MultiSelectDropdown.vue";
 import ProxySelector from "@/components/common/ProxySelector.vue";
 import ImageUpload from "@/components/common/ImageUpload.vue";
 import BackupSettings from "@/views/admin/BackupView.vue";
@@ -8725,6 +8724,9 @@ interface OffPeakPricingRuleRow {
 }
 const offPeakPricingRules = ref<OffPeakPricingRuleRow[]>([]);
 const allGroups = ref<AdminGroup[]>([]);
+const allGroupOptions = computed(() =>
+  allGroups.value.map((g) => ({ value: g.id, label: g.name }))
+);
 
 async function loadAllGroups() {
   try {
