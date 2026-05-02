@@ -1122,6 +1122,7 @@ export default {
     button: 'Check In',
     alreadyCheckedIn: 'Checked In Today',
     success: 'Check-in successful!',
+    quickSuccess: 'Checked in! Reward ${amount}',
     disabled: 'Check-in is not enabled',
     streak: 'Streak',
     days: 'days',

@@ -1126,6 +1126,7 @@ export default {
     button: '立即签到',
     alreadyCheckedIn: '今日已签到',
     success: '签到成功！',
+    quickSuccess: '签到成功！奖励 ${amount}',
     disabled: '签到功能未开启',
     streak: '连续签到',
     days: '天',
