@@ -504,11 +504,11 @@ const getEntrySourceLabel = (source: string) => {
 const getEntryIcon = (source: string) => {
   switch (source) {
     case 'checkin': return 'check'
-    case 'leaderboard': return 'trophy'
+    case 'leaderboard': return 'badge'
     case 'cashback': return 'refresh'
-    case 'consumption': return 'minus'
+    case 'consumption': return 'bolt'
     case 'expiry_clear': return 'clock'
-    case 'admin': return 'settings'
+    case 'admin': return 'cog'
     default: return 'dollar'
   }
 }
