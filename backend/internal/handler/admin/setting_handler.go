@@ -193,6 +193,45 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		BalanceExpiryEnabled:                   settings.BalanceExpiryEnabled,
 		BalanceExpiryWarningDays:               settings.BalanceExpiryWarningDays,
 		BalanceDeductionOrder:                  settings.BalanceDeductionOrder,
+		FirstRedeemBonusEnabled:                settings.FirstRedeemBonusEnabled,
+		FirstRedeemBonusMultiplier:             settings.FirstRedeemBonusMultiplier,
+		FirstRedeemBonusCap:                    settings.FirstRedeemBonusCap,
+		FirstRedeemBonusBalanceType:            settings.FirstRedeemBonusBalanceType,
+		FirstRedeemBonusExpiryDays:             settings.FirstRedeemBonusExpiryDays,
+		RedeemBonusEnabled:                     settings.RedeemBonusEnabled,
+		RedeemBonusMode:                        settings.RedeemBonusMode,
+		RedeemBonusFixedAmount:                 settings.RedeemBonusFixedAmount,
+		RedeemBonusPercent:                     settings.RedeemBonusPercent,
+		RedeemBonusRandomMin:                   settings.RedeemBonusRandomMin,
+		RedeemBonusRandomMax:                   settings.RedeemBonusRandomMax,
+		RedeemBonusCap:                         settings.RedeemBonusCap,
+		RedeemBonusMinAmount:                   settings.RedeemBonusMinAmount,
+		RedeemBonusBalanceType:                 settings.RedeemBonusBalanceType,
+		RedeemBonusExpiryDays:                  settings.RedeemBonusExpiryDays,
+		CheckinEnabled:                         settings.CheckinEnabled,
+		CheckinMode:                            settings.CheckinMode,
+		CheckinFixedAmount:                     settings.CheckinFixedAmount,
+		CheckinRandomMin:                       settings.CheckinRandomMin,
+		CheckinRandomMax:                       settings.CheckinRandomMax,
+		CheckinBalanceType:                     settings.CheckinBalanceType,
+		CheckinExpiryDays:                      settings.CheckinExpiryDays,
+		CheckinMilestones:                      settings.CheckinMilestones,
+		LeaderboardEnabled:                     settings.LeaderboardEnabled,
+		LeaderboardMaskEmail:                   settings.LeaderboardMaskEmail,
+		LeaderboardTopN:                        settings.LeaderboardTopN,
+		LeaderboardRewardRules:                 settings.LeaderboardRewardRules,
+		CashbackEnabled:                        settings.CashbackEnabled,
+		CashbackThreshold:                      settings.CashbackThreshold,
+		CashbackMode:                           settings.CashbackMode,
+		CashbackFixedAmount:                    settings.CashbackFixedAmount,
+		CashbackPercent:                        settings.CashbackPercent,
+		CashbackRandomMin:                      settings.CashbackRandomMin,
+		CashbackRandomMax:                      settings.CashbackRandomMax,
+		CashbackBalanceType:                    settings.CashbackBalanceType,
+		CashbackExpiryDays:                     settings.CashbackExpiryDays,
+		CashbackCycle:                          settings.CashbackCycle,
+		OffPeakPricingEnabled:                  settings.OffPeakPricingEnabled,
+		OffPeakPricingRules:                    settings.OffPeakPricingRules,
 		DefaultUserRPMLimit:                    settings.DefaultUserRPMLimit,
 		DefaultSubscriptions:                   defaultSubscriptions,
 		EnableModelFallback:                    settings.EnableModelFallback,
@@ -504,6 +543,57 @@ type UpdateSettingsRequest struct {
 
 	// Affiliate (邀请返利) feature switch
 	AffiliateEnabled *bool `json:"affiliate_enabled"`
+
+	// First redeem bonus (首次兑换加成)
+	FirstRedeemBonusEnabled     *bool   `json:"first_redeem_bonus_enabled"`
+	FirstRedeemBonusMultiplier  *string `json:"first_redeem_bonus_multiplier"`
+	FirstRedeemBonusCap         *string `json:"first_redeem_bonus_cap"`
+	FirstRedeemBonusBalanceType *string `json:"first_redeem_bonus_balance_type"`
+	FirstRedeemBonusExpiryDays  *string `json:"first_redeem_bonus_expiry_days"`
+
+	// Redeem bonus (常规兑换加成)
+	RedeemBonusEnabled     *bool   `json:"redeem_bonus_enabled"`
+	RedeemBonusMode        *string `json:"redeem_bonus_mode"`
+	RedeemBonusFixedAmount *string `json:"redeem_bonus_fixed_amount"`
+	RedeemBonusPercent     *string `json:"redeem_bonus_percent"`
+	RedeemBonusRandomMin   *string `json:"redeem_bonus_random_min"`
+	RedeemBonusRandomMax   *string `json:"redeem_bonus_random_max"`
+	RedeemBonusCap         *string `json:"redeem_bonus_cap"`
+	RedeemBonusMinAmount   *string `json:"redeem_bonus_min_amount"`
+	RedeemBonusBalanceType *string `json:"redeem_bonus_balance_type"`
+	RedeemBonusExpiryDays  *string `json:"redeem_bonus_expiry_days"`
+
+	// Checkin (每日签到)
+	CheckinEnabled     *bool   `json:"checkin_enabled"`
+	CheckinMode        *string `json:"checkin_mode"`
+	CheckinFixedAmount *string `json:"checkin_fixed_amount"`
+	CheckinRandomMin   *string `json:"checkin_random_min"`
+	CheckinRandomMax   *string `json:"checkin_random_max"`
+	CheckinBalanceType *string `json:"checkin_balance_type"`
+	CheckinExpiryDays  *string `json:"checkin_expiry_days"`
+	CheckinMilestones  *string `json:"checkin_milestones"`
+
+	// Leaderboard (排行榜 + 奖励)
+	LeaderboardEnabled     *bool   `json:"leaderboard_enabled"`
+	LeaderboardMaskEmail   *bool   `json:"leaderboard_mask_email"`
+	LeaderboardTopN        *string `json:"leaderboard_top_n"`
+	LeaderboardRewardRules *string `json:"leaderboard_reward_rules"`
+
+	// Cashback (消费返现)
+	CashbackEnabled     *bool   `json:"cashback_enabled"`
+	CashbackThreshold   *string `json:"cashback_threshold"`
+	CashbackMode        *string `json:"cashback_mode"`
+	CashbackFixedAmount *string `json:"cashback_fixed_amount"`
+	CashbackPercent     *string `json:"cashback_percent"`
+	CashbackRandomMin   *string `json:"cashback_random_min"`
+	CashbackRandomMax   *string `json:"cashback_random_max"`
+	CashbackBalanceType *string `json:"cashback_balance_type"`
+	CashbackExpiryDays  *string `json:"cashback_expiry_days"`
+	CashbackCycle       *string `json:"cashback_cycle"`
+
+	// Off-peak pricing (分时费率)
+	OffPeakPricingEnabled *bool   `json:"off_peak_pricing_enabled"`
+	OffPeakPricingRules   *string `json:"off_peak_pricing_rules"`
 
 	// OpenAI fast/flex policy (optional, only updated when provided)
 	OpenAIFastPolicySettings *dto.OpenAIFastPolicySettings `json:"openai_fast_policy_settings,omitempty"`
@@ -1397,6 +1487,80 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.BalanceDeductionOrder
 		}(),
+		FirstRedeemBonusEnabled: func() bool {
+			if req.FirstRedeemBonusEnabled != nil {
+				return *req.FirstRedeemBonusEnabled
+			}
+			return previousSettings.FirstRedeemBonusEnabled
+		}(),
+		FirstRedeemBonusMultiplier:  stringPtrOrDefault(req.FirstRedeemBonusMultiplier, previousSettings.FirstRedeemBonusMultiplier),
+		FirstRedeemBonusCap:         stringPtrOrDefault(req.FirstRedeemBonusCap, previousSettings.FirstRedeemBonusCap),
+		FirstRedeemBonusBalanceType: stringPtrOrDefault(req.FirstRedeemBonusBalanceType, previousSettings.FirstRedeemBonusBalanceType),
+		FirstRedeemBonusExpiryDays:  stringPtrOrDefault(req.FirstRedeemBonusExpiryDays, previousSettings.FirstRedeemBonusExpiryDays),
+		RedeemBonusEnabled: func() bool {
+			if req.RedeemBonusEnabled != nil {
+				return *req.RedeemBonusEnabled
+			}
+			return previousSettings.RedeemBonusEnabled
+		}(),
+		RedeemBonusMode:        stringPtrOrDefault(req.RedeemBonusMode, previousSettings.RedeemBonusMode),
+		RedeemBonusFixedAmount: stringPtrOrDefault(req.RedeemBonusFixedAmount, previousSettings.RedeemBonusFixedAmount),
+		RedeemBonusPercent:     stringPtrOrDefault(req.RedeemBonusPercent, previousSettings.RedeemBonusPercent),
+		RedeemBonusRandomMin:   stringPtrOrDefault(req.RedeemBonusRandomMin, previousSettings.RedeemBonusRandomMin),
+		RedeemBonusRandomMax:   stringPtrOrDefault(req.RedeemBonusRandomMax, previousSettings.RedeemBonusRandomMax),
+		RedeemBonusCap:         stringPtrOrDefault(req.RedeemBonusCap, previousSettings.RedeemBonusCap),
+		RedeemBonusMinAmount:   stringPtrOrDefault(req.RedeemBonusMinAmount, previousSettings.RedeemBonusMinAmount),
+		RedeemBonusBalanceType: stringPtrOrDefault(req.RedeemBonusBalanceType, previousSettings.RedeemBonusBalanceType),
+		RedeemBonusExpiryDays:  stringPtrOrDefault(req.RedeemBonusExpiryDays, previousSettings.RedeemBonusExpiryDays),
+		CheckinEnabled: func() bool {
+			if req.CheckinEnabled != nil {
+				return *req.CheckinEnabled
+			}
+			return previousSettings.CheckinEnabled
+		}(),
+		CheckinMode:        stringPtrOrDefault(req.CheckinMode, previousSettings.CheckinMode),
+		CheckinFixedAmount: stringPtrOrDefault(req.CheckinFixedAmount, previousSettings.CheckinFixedAmount),
+		CheckinRandomMin:   stringPtrOrDefault(req.CheckinRandomMin, previousSettings.CheckinRandomMin),
+		CheckinRandomMax:   stringPtrOrDefault(req.CheckinRandomMax, previousSettings.CheckinRandomMax),
+		CheckinBalanceType: stringPtrOrDefault(req.CheckinBalanceType, previousSettings.CheckinBalanceType),
+		CheckinExpiryDays:  stringPtrOrDefault(req.CheckinExpiryDays, previousSettings.CheckinExpiryDays),
+		CheckinMilestones:  stringPtrOrDefault(req.CheckinMilestones, previousSettings.CheckinMilestones),
+		LeaderboardEnabled: func() bool {
+			if req.LeaderboardEnabled != nil {
+				return *req.LeaderboardEnabled
+			}
+			return previousSettings.LeaderboardEnabled
+		}(),
+		LeaderboardMaskEmail: func() bool {
+			if req.LeaderboardMaskEmail != nil {
+				return *req.LeaderboardMaskEmail
+			}
+			return previousSettings.LeaderboardMaskEmail
+		}(),
+		LeaderboardTopN:        stringPtrOrDefault(req.LeaderboardTopN, previousSettings.LeaderboardTopN),
+		LeaderboardRewardRules: stringPtrOrDefault(req.LeaderboardRewardRules, previousSettings.LeaderboardRewardRules),
+		CashbackEnabled: func() bool {
+			if req.CashbackEnabled != nil {
+				return *req.CashbackEnabled
+			}
+			return previousSettings.CashbackEnabled
+		}(),
+		CashbackThreshold:   stringPtrOrDefault(req.CashbackThreshold, previousSettings.CashbackThreshold),
+		CashbackMode:        stringPtrOrDefault(req.CashbackMode, previousSettings.CashbackMode),
+		CashbackFixedAmount: stringPtrOrDefault(req.CashbackFixedAmount, previousSettings.CashbackFixedAmount),
+		CashbackPercent:     stringPtrOrDefault(req.CashbackPercent, previousSettings.CashbackPercent),
+		CashbackRandomMin:   stringPtrOrDefault(req.CashbackRandomMin, previousSettings.CashbackRandomMin),
+		CashbackRandomMax:   stringPtrOrDefault(req.CashbackRandomMax, previousSettings.CashbackRandomMax),
+		CashbackBalanceType: stringPtrOrDefault(req.CashbackBalanceType, previousSettings.CashbackBalanceType),
+		CashbackExpiryDays:  stringPtrOrDefault(req.CashbackExpiryDays, previousSettings.CashbackExpiryDays),
+		CashbackCycle:       stringPtrOrDefault(req.CashbackCycle, previousSettings.CashbackCycle),
+		OffPeakPricingEnabled: func() bool {
+			if req.OffPeakPricingEnabled != nil {
+				return *req.OffPeakPricingEnabled
+			}
+			return previousSettings.OffPeakPricingEnabled
+		}(),
+		OffPeakPricingRules: stringPtrOrDefault(req.OffPeakPricingRules, previousSettings.OffPeakPricingRules),
 	}
 
 	authSourceDefaults := &service.AuthSourceDefaultSettings{
@@ -1594,6 +1758,45 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		BalanceExpiryEnabled:                   updatedSettings.BalanceExpiryEnabled,
 		BalanceExpiryWarningDays:               updatedSettings.BalanceExpiryWarningDays,
 		BalanceDeductionOrder:                  updatedSettings.BalanceDeductionOrder,
+		FirstRedeemBonusEnabled:                updatedSettings.FirstRedeemBonusEnabled,
+		FirstRedeemBonusMultiplier:             updatedSettings.FirstRedeemBonusMultiplier,
+		FirstRedeemBonusCap:                    updatedSettings.FirstRedeemBonusCap,
+		FirstRedeemBonusBalanceType:            updatedSettings.FirstRedeemBonusBalanceType,
+		FirstRedeemBonusExpiryDays:             updatedSettings.FirstRedeemBonusExpiryDays,
+		RedeemBonusEnabled:                     updatedSettings.RedeemBonusEnabled,
+		RedeemBonusMode:                        updatedSettings.RedeemBonusMode,
+		RedeemBonusFixedAmount:                 updatedSettings.RedeemBonusFixedAmount,
+		RedeemBonusPercent:                     updatedSettings.RedeemBonusPercent,
+		RedeemBonusRandomMin:                   updatedSettings.RedeemBonusRandomMin,
+		RedeemBonusRandomMax:                   updatedSettings.RedeemBonusRandomMax,
+		RedeemBonusCap:                         updatedSettings.RedeemBonusCap,
+		RedeemBonusMinAmount:                   updatedSettings.RedeemBonusMinAmount,
+		RedeemBonusBalanceType:                 updatedSettings.RedeemBonusBalanceType,
+		RedeemBonusExpiryDays:                  updatedSettings.RedeemBonusExpiryDays,
+		CheckinEnabled:                         updatedSettings.CheckinEnabled,
+		CheckinMode:                            updatedSettings.CheckinMode,
+		CheckinFixedAmount:                     updatedSettings.CheckinFixedAmount,
+		CheckinRandomMin:                       updatedSettings.CheckinRandomMin,
+		CheckinRandomMax:                       updatedSettings.CheckinRandomMax,
+		CheckinBalanceType:                     updatedSettings.CheckinBalanceType,
+		CheckinExpiryDays:                      updatedSettings.CheckinExpiryDays,
+		CheckinMilestones:                      updatedSettings.CheckinMilestones,
+		LeaderboardEnabled:                     updatedSettings.LeaderboardEnabled,
+		LeaderboardMaskEmail:                   updatedSettings.LeaderboardMaskEmail,
+		LeaderboardTopN:                        updatedSettings.LeaderboardTopN,
+		LeaderboardRewardRules:                 updatedSettings.LeaderboardRewardRules,
+		CashbackEnabled:                        updatedSettings.CashbackEnabled,
+		CashbackThreshold:                      updatedSettings.CashbackThreshold,
+		CashbackMode:                           updatedSettings.CashbackMode,
+		CashbackFixedAmount:                    updatedSettings.CashbackFixedAmount,
+		CashbackPercent:                        updatedSettings.CashbackPercent,
+		CashbackRandomMin:                      updatedSettings.CashbackRandomMin,
+		CashbackRandomMax:                      updatedSettings.CashbackRandomMax,
+		CashbackBalanceType:                    updatedSettings.CashbackBalanceType,
+		CashbackExpiryDays:                     updatedSettings.CashbackExpiryDays,
+		CashbackCycle:                          updatedSettings.CashbackCycle,
+		OffPeakPricingEnabled:                  updatedSettings.OffPeakPricingEnabled,
+		OffPeakPricingRules:                    updatedSettings.OffPeakPricingRules,
 		DefaultUserRPMLimit:                    updatedSettings.DefaultUserRPMLimit,
 		DefaultSubscriptions:                   updatedDefaultSubscriptions,
 		EnableModelFallback:                    updatedSettings.EnableModelFallback,
@@ -2132,6 +2335,13 @@ func float64ValueOrDefault(value *float64, fallback float64) float64 {
 }
 
 func intValueOrDefault(value *int, fallback int) int {
+	if value == nil {
+		return fallback
+	}
+	return *value
+}
+
+func stringPtrOrDefault(value *string, fallback string) string {
 	if value == nil {
 		return fallback
 	}

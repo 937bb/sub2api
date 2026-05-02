@@ -115,11 +115,62 @@ type SystemSettings struct {
 	RedeemRebateEnabled          bool                         `json:"redeem_rebate_enabled"`
 
 	// 余额模型设置
-	BalanceExpiryEnabled         bool   `json:"balance_expiry_enabled"`
-	BalanceExpiryWarningDays     int    `json:"balance_expiry_warning_days"`
-	BalanceDeductionOrder        string `json:"balance_deduction_order"`
+	BalanceExpiryEnabled     bool   `json:"balance_expiry_enabled"`
+	BalanceExpiryWarningDays int    `json:"balance_expiry_warning_days"`
+	BalanceDeductionOrder    string `json:"balance_deduction_order"`
 
-	DefaultUserRPMLimit          int                          `json:"default_user_rpm_limit"`
+	// 首次兑换加成 (F4)
+	FirstRedeemBonusEnabled     bool   `json:"first_redeem_bonus_enabled"`
+	FirstRedeemBonusMultiplier  string `json:"first_redeem_bonus_multiplier"`
+	FirstRedeemBonusCap         string `json:"first_redeem_bonus_cap"`
+	FirstRedeemBonusBalanceType string `json:"first_redeem_bonus_balance_type"`
+	FirstRedeemBonusExpiryDays  string `json:"first_redeem_bonus_expiry_days"`
+
+	// 常规兑换加成 (F5)
+	RedeemBonusEnabled     bool   `json:"redeem_bonus_enabled"`
+	RedeemBonusMode        string `json:"redeem_bonus_mode"`
+	RedeemBonusFixedAmount string `json:"redeem_bonus_fixed_amount"`
+	RedeemBonusPercent     string `json:"redeem_bonus_percent"`
+	RedeemBonusRandomMin   string `json:"redeem_bonus_random_min"`
+	RedeemBonusRandomMax   string `json:"redeem_bonus_random_max"`
+	RedeemBonusCap         string `json:"redeem_bonus_cap"`
+	RedeemBonusMinAmount   string `json:"redeem_bonus_min_amount"`
+	RedeemBonusBalanceType string `json:"redeem_bonus_balance_type"`
+	RedeemBonusExpiryDays  string `json:"redeem_bonus_expiry_days"`
+
+	// 每日签到 (F2)
+	CheckinEnabled     bool   `json:"checkin_enabled"`
+	CheckinMode        string `json:"checkin_mode"`
+	CheckinFixedAmount string `json:"checkin_fixed_amount"`
+	CheckinRandomMin   string `json:"checkin_random_min"`
+	CheckinRandomMax   string `json:"checkin_random_max"`
+	CheckinBalanceType string `json:"checkin_balance_type"`
+	CheckinExpiryDays  string `json:"checkin_expiry_days"`
+	CheckinMilestones  string `json:"checkin_milestones"`
+
+	// 排行榜 + 奖励 (F3)
+	LeaderboardEnabled     bool   `json:"leaderboard_enabled"`
+	LeaderboardMaskEmail   bool   `json:"leaderboard_mask_email"`
+	LeaderboardTopN        string `json:"leaderboard_top_n"`
+	LeaderboardRewardRules string `json:"leaderboard_reward_rules"`
+
+	// 消费返现 (F6)
+	CashbackEnabled     bool   `json:"cashback_enabled"`
+	CashbackThreshold   string `json:"cashback_threshold"`
+	CashbackMode        string `json:"cashback_mode"`
+	CashbackFixedAmount string `json:"cashback_fixed_amount"`
+	CashbackPercent     string `json:"cashback_percent"`
+	CashbackRandomMin   string `json:"cashback_random_min"`
+	CashbackRandomMax   string `json:"cashback_random_max"`
+	CashbackBalanceType string `json:"cashback_balance_type"`
+	CashbackExpiryDays  string `json:"cashback_expiry_days"`
+	CashbackCycle       string `json:"cashback_cycle"`
+
+	// 分时费率 (F7)
+	OffPeakPricingEnabled bool   `json:"off_peak_pricing_enabled"`
+	OffPeakPricingRules   string `json:"off_peak_pricing_rules"`
+
+	DefaultUserRPMLimit  int                          `json:"default_user_rpm_limit"`
 	DefaultSubscriptions         []DefaultSubscriptionSetting `json:"default_subscriptions"`
 
 	// Model fallback configuration

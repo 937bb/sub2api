@@ -1243,6 +1243,57 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	}
 	updates[SettingKeyBalanceDeductionOrder] = settings.BalanceDeductionOrder
 
+	// First redeem bonus (首次兑换加成)
+	updates[SettingKeyFirstRedeemBonusEnabled] = strconv.FormatBool(settings.FirstRedeemBonusEnabled)
+	updates[SettingKeyFirstRedeemBonusMultiplier] = settings.FirstRedeemBonusMultiplier
+	updates[SettingKeyFirstRedeemBonusCap] = settings.FirstRedeemBonusCap
+	updates[SettingKeyFirstRedeemBonusBalanceType] = settings.FirstRedeemBonusBalanceType
+	updates[SettingKeyFirstRedeemBonusExpiryDays] = settings.FirstRedeemBonusExpiryDays
+
+	// Redeem bonus (常规兑换加成)
+	updates[SettingKeyRedeemBonusEnabled] = strconv.FormatBool(settings.RedeemBonusEnabled)
+	updates[SettingKeyRedeemBonusMode] = settings.RedeemBonusMode
+	updates[SettingKeyRedeemBonusFixedAmount] = settings.RedeemBonusFixedAmount
+	updates[SettingKeyRedeemBonusPercent] = settings.RedeemBonusPercent
+	updates[SettingKeyRedeemBonusRandomMin] = settings.RedeemBonusRandomMin
+	updates[SettingKeyRedeemBonusRandomMax] = settings.RedeemBonusRandomMax
+	updates[SettingKeyRedeemBonusCap] = settings.RedeemBonusCap
+	updates[SettingKeyRedeemBonusMinAmount] = settings.RedeemBonusMinAmount
+	updates[SettingKeyRedeemBonusBalanceType] = settings.RedeemBonusBalanceType
+	updates[SettingKeyRedeemBonusExpiryDays] = settings.RedeemBonusExpiryDays
+
+	// Checkin (每日签到)
+	updates[SettingKeyCheckinEnabled] = strconv.FormatBool(settings.CheckinEnabled)
+	updates[SettingKeyCheckinMode] = settings.CheckinMode
+	updates[SettingKeyCheckinFixedAmount] = settings.CheckinFixedAmount
+	updates[SettingKeyCheckinRandomMin] = settings.CheckinRandomMin
+	updates[SettingKeyCheckinRandomMax] = settings.CheckinRandomMax
+	updates[SettingKeyCheckinBalanceType] = settings.CheckinBalanceType
+	updates[SettingKeyCheckinExpiryDays] = settings.CheckinExpiryDays
+	updates[SettingKeyCheckinMilestones] = settings.CheckinMilestones
+
+	// Leaderboard (排行榜 + 奖励)
+	updates[SettingKeyLeaderboardEnabled] = strconv.FormatBool(settings.LeaderboardEnabled)
+	updates[SettingKeyLeaderboardMaskEmail] = strconv.FormatBool(settings.LeaderboardMaskEmail)
+	updates[SettingKeyLeaderboardTopN] = settings.LeaderboardTopN
+	updates[SettingKeyLeaderboardRewardRules] = settings.LeaderboardRewardRules
+
+	// Cashback (消费返现)
+	updates[SettingKeyCashbackEnabled] = strconv.FormatBool(settings.CashbackEnabled)
+	updates[SettingKeyCashbackThreshold] = settings.CashbackThreshold
+	updates[SettingKeyCashbackMode] = settings.CashbackMode
+	updates[SettingKeyCashbackFixedAmount] = settings.CashbackFixedAmount
+	updates[SettingKeyCashbackPercent] = settings.CashbackPercent
+	updates[SettingKeyCashbackRandomMin] = settings.CashbackRandomMin
+	updates[SettingKeyCashbackRandomMax] = settings.CashbackRandomMax
+	updates[SettingKeyCashbackBalanceType] = settings.CashbackBalanceType
+	updates[SettingKeyCashbackExpiryDays] = settings.CashbackExpiryDays
+	updates[SettingKeyCashbackCycle] = settings.CashbackCycle
+
+	// Off-peak pricing (分时费率)
+	updates[SettingKeyOffPeakPricingEnabled] = strconv.FormatBool(settings.OffPeakPricingEnabled)
+	updates[SettingKeyOffPeakPricingRules] = settings.OffPeakPricingRules
+
 	// Claude Code version check
 	updates[SettingKeyMinClaudeCodeVersion] = settings.MinClaudeCodeVersion
 	updates[SettingKeyMaxClaudeCodeVersion] = settings.MaxClaudeCodeVersion
@@ -2366,6 +2417,57 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	if result.BalanceDeductionOrder == "" {
 		result.BalanceDeductionOrder = "expiring_first"
 	}
+
+	// First redeem bonus (首次兑换加成)
+	result.FirstRedeemBonusEnabled = settings[SettingKeyFirstRedeemBonusEnabled] == "true"
+	result.FirstRedeemBonusMultiplier = s.getStringOrDefault(settings, SettingKeyFirstRedeemBonusMultiplier, "2")
+	result.FirstRedeemBonusCap = s.getStringOrDefault(settings, SettingKeyFirstRedeemBonusCap, "0")
+	result.FirstRedeemBonusBalanceType = s.getStringOrDefault(settings, SettingKeyFirstRedeemBonusBalanceType, "permanent")
+	result.FirstRedeemBonusExpiryDays = s.getStringOrDefault(settings, SettingKeyFirstRedeemBonusExpiryDays, "0")
+
+	// Redeem bonus (常规兑换加成)
+	result.RedeemBonusEnabled = settings[SettingKeyRedeemBonusEnabled] == "true"
+	result.RedeemBonusMode = s.getStringOrDefault(settings, SettingKeyRedeemBonusMode, "percent")
+	result.RedeemBonusFixedAmount = s.getStringOrDefault(settings, SettingKeyRedeemBonusFixedAmount, "1")
+	result.RedeemBonusPercent = s.getStringOrDefault(settings, SettingKeyRedeemBonusPercent, "10")
+	result.RedeemBonusRandomMin = s.getStringOrDefault(settings, SettingKeyRedeemBonusRandomMin, "1")
+	result.RedeemBonusRandomMax = s.getStringOrDefault(settings, SettingKeyRedeemBonusRandomMax, "10")
+	result.RedeemBonusCap = s.getStringOrDefault(settings, SettingKeyRedeemBonusCap, "0")
+	result.RedeemBonusMinAmount = s.getStringOrDefault(settings, SettingKeyRedeemBonusMinAmount, "0")
+	result.RedeemBonusBalanceType = s.getStringOrDefault(settings, SettingKeyRedeemBonusBalanceType, "permanent")
+	result.RedeemBonusExpiryDays = s.getStringOrDefault(settings, SettingKeyRedeemBonusExpiryDays, "0")
+
+	// Checkin (每日签到)
+	result.CheckinEnabled = settings[SettingKeyCheckinEnabled] == "true"
+	result.CheckinMode = s.getStringOrDefault(settings, SettingKeyCheckinMode, "fixed")
+	result.CheckinFixedAmount = s.getStringOrDefault(settings, SettingKeyCheckinFixedAmount, "0.01")
+	result.CheckinRandomMin = s.getStringOrDefault(settings, SettingKeyCheckinRandomMin, "1")
+	result.CheckinRandomMax = s.getStringOrDefault(settings, SettingKeyCheckinRandomMax, "10")
+	result.CheckinBalanceType = s.getStringOrDefault(settings, SettingKeyCheckinBalanceType, "permanent")
+	result.CheckinExpiryDays = s.getStringOrDefault(settings, SettingKeyCheckinExpiryDays, "0")
+	result.CheckinMilestones = s.getStringOrDefault(settings, SettingKeyCheckinMilestones, "[]")
+
+	// Leaderboard (排行榜 + 奖励)
+	result.LeaderboardEnabled = settings[SettingKeyLeaderboardEnabled] == "true"
+	result.LeaderboardMaskEmail = settings[SettingKeyLeaderboardMaskEmail] != "false" // default true
+	result.LeaderboardTopN = s.getStringOrDefault(settings, SettingKeyLeaderboardTopN, "10")
+	result.LeaderboardRewardRules = s.getStringOrDefault(settings, SettingKeyLeaderboardRewardRules, "[]")
+
+	// Cashback (消费返现)
+	result.CashbackEnabled = settings[SettingKeyCashbackEnabled] == "true"
+	result.CashbackThreshold = s.getStringOrDefault(settings, SettingKeyCashbackThreshold, "1")
+	result.CashbackMode = s.getStringOrDefault(settings, SettingKeyCashbackMode, "percent")
+	result.CashbackFixedAmount = s.getStringOrDefault(settings, SettingKeyCashbackFixedAmount, "0.1")
+	result.CashbackPercent = s.getStringOrDefault(settings, SettingKeyCashbackPercent, "5")
+	result.CashbackRandomMin = s.getStringOrDefault(settings, SettingKeyCashbackRandomMin, "1")
+	result.CashbackRandomMax = s.getStringOrDefault(settings, SettingKeyCashbackRandomMax, "10")
+	result.CashbackBalanceType = s.getStringOrDefault(settings, SettingKeyCashbackBalanceType, "permanent")
+	result.CashbackExpiryDays = s.getStringOrDefault(settings, SettingKeyCashbackExpiryDays, "0")
+	result.CashbackCycle = s.getStringOrDefault(settings, SettingKeyCashbackCycle, "daily")
+
+	// Off-peak pricing (分时费率)
+	result.OffPeakPricingEnabled = settings[SettingKeyOffPeakPricingEnabled] == "true"
+	result.OffPeakPricingRules = s.getStringOrDefault(settings, SettingKeyOffPeakPricingRules, "[]")
 
 	// Claude Code version check
 	result.MinClaudeCodeVersion = settings[SettingKeyMinClaudeCodeVersion]

@@ -114,11 +114,62 @@ type SystemSettings struct {
 	RedeemRebateEnabled          bool
 
 	// 余额模型设置（balance_entries）
-	BalanceExpiryEnabled         bool
-	BalanceExpiryWarningDays     int
-	BalanceDeductionOrder        string // "expiring_first" | "permanent_first"
+	BalanceExpiryEnabled     bool
+	BalanceExpiryWarningDays int
+	BalanceDeductionOrder    string // "expiring_first" | "permanent_first"
 
-	DefaultUserRPMLimit          int
+	// 首次兑换加成 (F4)
+	FirstRedeemBonusEnabled     bool
+	FirstRedeemBonusMultiplier  string
+	FirstRedeemBonusCap         string
+	FirstRedeemBonusBalanceType string
+	FirstRedeemBonusExpiryDays  string
+
+	// 常规兑换加成 (F5)
+	RedeemBonusEnabled     bool
+	RedeemBonusMode        string
+	RedeemBonusFixedAmount string
+	RedeemBonusPercent     string
+	RedeemBonusRandomMin   string
+	RedeemBonusRandomMax   string
+	RedeemBonusCap         string
+	RedeemBonusMinAmount   string
+	RedeemBonusBalanceType string
+	RedeemBonusExpiryDays  string
+
+	// 每日签到 (F2)
+	CheckinEnabled     bool
+	CheckinMode        string
+	CheckinFixedAmount string
+	CheckinRandomMin   string
+	CheckinRandomMax   string
+	CheckinBalanceType string
+	CheckinExpiryDays  string
+	CheckinMilestones  string
+
+	// 排行榜 + 奖励 (F3)
+	LeaderboardEnabled    bool
+	LeaderboardMaskEmail  bool
+	LeaderboardTopN       string
+	LeaderboardRewardRules string
+
+	// 消费返现 (F6)
+	CashbackEnabled     bool
+	CashbackThreshold   string
+	CashbackMode        string
+	CashbackFixedAmount string
+	CashbackPercent     string
+	CashbackRandomMin   string
+	CashbackRandomMax   string
+	CashbackBalanceType string
+	CashbackExpiryDays  string
+	CashbackCycle       string
+
+	// 分时费率 (F7)
+	OffPeakPricingEnabled bool
+	OffPeakPricingRules   string
+
+	DefaultUserRPMLimit int
 	DefaultSubscriptions         []DefaultSubscriptionSetting
 
 	// Model fallback configuration
