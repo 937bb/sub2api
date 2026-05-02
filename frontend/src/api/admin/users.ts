@@ -316,11 +316,14 @@ export interface BalanceEntryItem {
 export async function getUserBalanceEntries(
   id: number,
   page: number = 1,
-  pageSize: number = 20
+  pageSize: number = 20,
+  source?: string
 ): Promise<PaginatedResponse<BalanceEntryItem>> {
+  const params: Record<string, any> = { page, page_size: pageSize }
+  if (source) params.source = source
   const { data } = await apiClient.get<PaginatedResponse<BalanceEntryItem>>(
     `/admin/users/${id}/balance-entries`,
-    { params: { page, page_size: pageSize } }
+    { params }
   )
   return data
 }

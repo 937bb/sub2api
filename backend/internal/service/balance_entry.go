@@ -50,6 +50,8 @@ type BalanceEntryRepository interface {
 	// ListByUser 查询用户余额明细（分页，按创建时间倒序）
 	// excludeSources: 排除指定来源的记录（为空则不排除）
 	ListByUser(ctx context.Context, userID int64, offset, limit int, excludeSources ...string) ([]*BalanceEntry, int64, error)
+	// ListByUserFiltered 查询用户余额明细（分页），支持按来源包含过滤
+	ListByUserFiltered(ctx context.Context, userID int64, offset, limit int, includeSources []string) ([]*BalanceEntry, int64, error)
 	// GetAvailableEntries 获取用户所有可用余额条目（remaining > 0 且未过期），按过期时间升序（NULLS LAST）
 	GetAvailableEntries(ctx context.Context, userID int64) ([]*BalanceEntry, error)
 	// DeductFromEntries 从指定条目列表中扣减指定金额，返回实际扣减的总金额

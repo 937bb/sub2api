@@ -1913,6 +1913,8 @@ export default {
       sourceConsumption: 'API Consumption',
       sourceExpiryClear: 'Expiry Clear',
       sourceRefund: 'Refund',
+      sourceFilterRecharge: 'Recharge / Admin',
+      sourceFilterBonus: 'Redeem Bonus',
       roles: {
         admin: 'Admin',
         user: 'User'

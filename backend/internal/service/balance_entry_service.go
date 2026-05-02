@@ -252,6 +252,12 @@ func (s *BalanceEntryService) ListByUser(ctx context.Context, userID int64, page
 	return s.balanceEntryRepo.ListByUser(ctx, userID, offset, pageSize, excludeSources...)
 }
 
+// ListByUserFiltered 获取用户余额明细（分页），按来源过滤
+func (s *BalanceEntryService) ListByUserFiltered(ctx context.Context, userID int64, page, pageSize int, includeSources []string) ([]*BalanceEntry, int64, error) {
+	offset := (page - 1) * pageSize
+	return s.balanceEntryRepo.ListByUserFiltered(ctx, userID, offset, pageSize, includeSources)
+}
+
 // SyncUserBalance 重算并同步用户余额（修复不一致场景）
 func (s *BalanceEntryService) SyncUserBalance(ctx context.Context, userID int64) error {
 	newBalance, err := s.balanceEntryRepo.SumRemainingByUser(ctx, userID)

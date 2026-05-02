@@ -498,7 +498,16 @@ func (h *UserHandler) GetBalanceEntries(c *gin.Context) {
 
 	page, pageSize := response.ParsePagination(c)
 
-	entries, total, err := h.balanceEntryService.ListByUser(c.Request.Context(), userID, page, pageSize)
+	// 支持按来源过滤：?source=checkin 或 ?source=checkin,leaderboard
+	var entries []*service.BalanceEntry
+	var total int64
+	sourceParam := c.Query("source")
+	if sourceParam != "" {
+		sources := strings.Split(sourceParam, ",")
+		entries, total, err = h.balanceEntryService.ListByUserFiltered(c.Request.Context(), userID, page, pageSize, sources)
+	} else {
+		entries, total, err = h.balanceEntryService.ListByUser(c.Request.Context(), userID, page, pageSize)
+	}
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return

@@ -44,26 +44,14 @@
         </div>
       </div>
 
-      <!-- Tab switcher + Action buttons -->
-      <div class="flex items-center gap-2">
-        <button
-          class="rounded-lg px-4 py-2 text-sm font-medium transition-all"
-          :class="activeTab === 'entries'
-            ? 'bg-primary-500 text-white shadow-glow'
-            : 'bg-white text-gray-600 hover:bg-gray-50 dark:bg-dark-800 dark:text-gray-300 dark:hover:bg-dark-700'"
-          @click="activeTab = 'entries'"
-        >
-          {{ t('admin.users.tabBalanceEntries') }}
-        </button>
-        <button
-          class="rounded-lg px-4 py-2 text-sm font-medium transition-all"
-          :class="activeTab === 'history'
-            ? 'bg-primary-500 text-white shadow-glow'
-            : 'bg-white text-gray-600 hover:bg-gray-50 dark:bg-dark-800 dark:text-gray-300 dark:hover:bg-dark-700'"
-          @click="activeTab = 'history'"
-        >
-          {{ t('admin.users.tabRedeemHistory') }}
-        </button>
+      <!-- Source filter + Action buttons -->
+      <div class="flex items-center gap-3">
+        <Select
+          v-model="sourceFilter"
+          :options="sourceOptions"
+          class="w-56"
+          @change="loadEntries(1)"
+        />
         <div class="ml-auto flex gap-2">
           <button
             v-if="!hideActions"
@@ -86,203 +74,96 @@
         </div>
       </div>
 
-      <!-- ==================== Tab: Redeem History ==================== -->
-      <template v-if="activeTab === 'history'">
-        <!-- Type filter -->
-        <div class="flex items-center gap-3">
-          <Select
-            v-model="typeFilter"
-            :options="typeOptions"
-            class="w-56"
-            @change="loadHistory(1)"
-          />
-        </div>
+      <!-- Loading -->
+      <div v-if="entriesLoading" class="flex justify-center py-8">
+        <svg class="h-8 w-8 animate-spin text-primary-500" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+        </svg>
+      </div>
 
-        <!-- Loading -->
-        <div v-if="loading" class="flex justify-center py-8">
-          <svg class="h-8 w-8 animate-spin text-primary-500" fill="none" viewBox="0 0 24 24">
-            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
-            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-          </svg>
-        </div>
+      <!-- Empty state -->
+      <div v-else-if="entries.length === 0" class="py-8 text-center">
+        <p class="text-sm text-gray-500">{{ t('admin.users.noBalanceHistory') }}</p>
+      </div>
 
-        <!-- Empty state -->
-        <div v-else-if="history.length === 0" class="py-8 text-center">
-          <p class="text-sm text-gray-500">{{ t('admin.users.noBalanceHistory') }}</p>
-        </div>
-
-        <!-- History list -->
-        <div v-else class="max-h-[28rem] space-y-3 overflow-y-auto">
-          <div
-            v-for="item in history"
-            :key="item.id"
-            class="rounded-xl border border-gray-200 bg-white p-4 dark:border-dark-600 dark:bg-dark-800"
-          >
-            <div class="flex items-start justify-between">
-              <!-- Left: type icon + description -->
-              <div class="flex items-start gap-3">
-                <div
-                  :class="[
-                    'flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg',
-                    getIconBg(item)
-                  ]"
-                >
-                  <Icon :name="getIconName(item)" size="sm" :class="getIconColor(item)" />
-                </div>
-                <div>
-                  <p class="text-sm font-medium text-gray-900 dark:text-white">
-                    {{ getItemTitle(item) }}
+      <!-- Entries list -->
+      <div v-else class="max-h-[28rem] space-y-3 overflow-y-auto">
+        <div
+          v-for="entry in entries"
+          :key="entry.id"
+          class="rounded-xl border border-gray-200 bg-white p-4 dark:border-dark-600 dark:bg-dark-800"
+        >
+          <div class="flex items-start justify-between">
+            <div class="flex items-start gap-3">
+              <div
+                :class="[
+                  'flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg',
+                  entry.amount >= 0 ? 'bg-emerald-100 dark:bg-emerald-900/30' : 'bg-red-100 dark:bg-red-900/30'
+                ]"
+              >
+                <Icon :name="getEntryIcon(entry.source)" size="sm" :class="entry.amount >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'" />
+              </div>
+              <div>
+                <p class="text-sm font-medium text-gray-900 dark:text-white">
+                  {{ getEntrySourceLabel(entry.source) }}
+                </p>
+                <p v-if="entry.note" class="mt-0.5 text-xs text-gray-500 dark:text-dark-400" :title="entry.note">
+                  {{ entry.note.length > 60 ? entry.note.substring(0, 55) + '...' : entry.note }}
+                </p>
+                <div class="mt-0.5 flex items-center gap-2">
+                  <p class="text-xs text-gray-400 dark:text-dark-500">
+                    {{ formatDateTime(entry.created_at) }}
                   </p>
-                  <!-- Notes (admin adjustment reason) -->
-                  <p
-                    v-if="item.notes"
-                    class="mt-0.5 text-xs text-gray-500 dark:text-dark-400"
-                    :title="item.notes"
+                  <span
+                    class="rounded px-1.5 py-0.5 text-xs"
+                    :class="entry.balance_type === 'permanent'
+                      ? 'bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400'
+                      : 'bg-amber-50 text-amber-600 dark:bg-amber-900/20 dark:text-amber-400'"
                   >
-                    {{ item.notes.length > 60 ? item.notes.substring(0, 55) + '...' : item.notes }}
-                  </p>
-                  <p class="mt-0.5 text-xs text-gray-400 dark:text-dark-500">
-                    {{ formatDateTime(item.used_at || item.created_at) }}
-                  </p>
+                    {{ entry.balance_type === 'permanent' ? t('admin.users.entryPermanent') : t('admin.users.entryExpirable') }}
+                  </span>
+                  <span v-if="entry.expired" class="rounded bg-red-50 px-1.5 py-0.5 text-xs text-red-600 dark:bg-red-900/20 dark:text-red-400">
+                    {{ t('admin.users.entryExpired') }}
+                  </span>
                 </div>
               </div>
-              <!-- Right: value -->
-              <div class="text-right">
-                <p :class="['text-sm font-semibold', getValueColor(item)]">
-                  {{ formatValue(item) }}
-                </p>
-                <p
-                  v-if="isAdminType(item.type)"
-                  class="text-xs text-gray-400 dark:text-dark-500"
-                >
-                  {{ t('redeem.adminAdjustment') }}
-                </p>
-                <p
-                  v-else
-                  class="font-mono text-xs text-gray-400 dark:text-dark-500"
-                >
-                  {{ item.code.slice(0, 8) }}...
-                </p>
-              </div>
+            </div>
+            <div class="text-right">
+              <p :class="['text-sm font-semibold', entry.amount >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400']">
+                {{ entry.amount >= 0 ? '+' : '' }}${{ entry.amount.toFixed(4) }}
+              </p>
+              <p v-if="entry.amount > 0" class="text-xs text-gray-400 dark:text-dark-500">
+                {{ t('admin.users.entryRemaining') }}: ${{ entry.remaining.toFixed(4) }}
+              </p>
+              <p v-if="entry.expires_at" class="text-xs text-gray-400 dark:text-dark-500">
+                {{ t('admin.users.entryExpiresAt') }}: {{ formatDateTime(entry.expires_at) }}
+              </p>
             </div>
           </div>
         </div>
+      </div>
 
-        <!-- Pagination -->
-        <div v-if="totalPages > 1" class="flex items-center justify-center gap-2 pt-2">
-          <button
-            :disabled="currentPage <= 1"
-            class="btn btn-secondary px-3 py-1 text-sm"
-            @click="loadHistory(currentPage - 1)"
-          >
-            {{ t('pagination.previous') }}
-          </button>
-          <span class="text-sm text-gray-500 dark:text-dark-400">
-            {{ currentPage }} / {{ totalPages }}
-          </span>
-          <button
-            :disabled="currentPage >= totalPages"
-            class="btn btn-secondary px-3 py-1 text-sm"
-            @click="loadHistory(currentPage + 1)"
-          >
-            {{ t('pagination.next') }}
-          </button>
-        </div>
-      </template>
-
-      <!-- ==================== Tab: Balance Entries ==================== -->
-      <template v-if="activeTab === 'entries'">
-        <!-- Loading -->
-        <div v-if="entriesLoading" class="flex justify-center py-8">
-          <svg class="h-8 w-8 animate-spin text-primary-500" fill="none" viewBox="0 0 24 24">
-            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
-            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-          </svg>
-        </div>
-
-        <!-- Empty state -->
-        <div v-else-if="entries.length === 0" class="py-8 text-center">
-          <p class="text-sm text-gray-500">{{ t('admin.users.noBalanceEntries') }}</p>
-        </div>
-
-        <!-- Entries list -->
-        <div v-else class="max-h-[28rem] space-y-3 overflow-y-auto">
-          <div
-            v-for="entry in entries"
-            :key="entry.id"
-            class="rounded-xl border border-gray-200 bg-white p-4 dark:border-dark-600 dark:bg-dark-800"
-          >
-            <div class="flex items-start justify-between">
-              <div class="flex items-start gap-3">
-                <div
-                  :class="[
-                    'flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg',
-                    entry.amount >= 0 ? 'bg-emerald-100 dark:bg-emerald-900/30' : 'bg-red-100 dark:bg-red-900/30'
-                  ]"
-                >
-                  <Icon :name="getEntryIcon(entry.source)" size="sm" :class="entry.amount >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'" />
-                </div>
-                <div>
-                  <p class="text-sm font-medium text-gray-900 dark:text-white">
-                    {{ getEntrySourceLabel(entry.source) }}
-                  </p>
-                  <p v-if="entry.note" class="mt-0.5 text-xs text-gray-500 dark:text-dark-400" :title="entry.note">
-                    {{ entry.note.length > 60 ? entry.note.substring(0, 55) + '...' : entry.note }}
-                  </p>
-                  <div class="mt-0.5 flex items-center gap-2">
-                    <p class="text-xs text-gray-400 dark:text-dark-500">
-                      {{ formatDateTime(entry.created_at) }}
-                    </p>
-                    <span
-                      class="rounded px-1.5 py-0.5 text-xs"
-                      :class="entry.balance_type === 'permanent'
-                        ? 'bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400'
-                        : 'bg-amber-50 text-amber-600 dark:bg-amber-900/20 dark:text-amber-400'"
-                    >
-                      {{ entry.balance_type === 'permanent' ? t('admin.users.entryPermanent') : t('admin.users.entryExpirable') }}
-                    </span>
-                    <span v-if="entry.expired" class="rounded bg-red-50 px-1.5 py-0.5 text-xs text-red-600 dark:bg-red-900/20 dark:text-red-400">
-                      {{ t('admin.users.entryExpired') }}
-                    </span>
-                  </div>
-                </div>
-              </div>
-              <div class="text-right">
-                <p :class="['text-sm font-semibold', entry.amount >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400']">
-                  {{ entry.amount >= 0 ? '+' : '' }}${{ entry.amount.toFixed(4) }}
-                </p>
-                <p v-if="entry.amount > 0" class="text-xs text-gray-400 dark:text-dark-500">
-                  {{ t('admin.users.entryRemaining') }}: ${{ entry.remaining.toFixed(4) }}
-                </p>
-                <p v-if="entry.expires_at" class="text-xs text-gray-400 dark:text-dark-500">
-                  {{ t('admin.users.entryExpiresAt') }}: {{ formatDateTime(entry.expires_at) }}
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Pagination -->
-        <div v-if="entriesTotalPages > 1" class="flex items-center justify-center gap-2 pt-2">
-          <button
-            :disabled="entriesPage <= 1"
-            class="btn btn-secondary px-3 py-1 text-sm"
-            @click="loadEntries(entriesPage - 1)"
-          >
-            {{ t('pagination.previous') }}
-          </button>
-          <span class="text-sm text-gray-500 dark:text-dark-400">
-            {{ entriesPage }} / {{ entriesTotalPages }}
-          </span>
-          <button
-            :disabled="entriesPage >= entriesTotalPages"
-            class="btn btn-secondary px-3 py-1 text-sm"
-            @click="loadEntries(entriesPage + 1)"
-          >
-            {{ t('pagination.next') }}
-          </button>
-        </div>
-      </template>
+      <!-- Pagination -->
+      <div v-if="entriesTotalPages > 1" class="flex items-center justify-center gap-2 pt-2">
+        <button
+          :disabled="entriesPage <= 1"
+          class="btn btn-secondary px-3 py-1 text-sm"
+          @click="loadEntries(entriesPage - 1)"
+        >
+          {{ t('pagination.previous') }}
+        </button>
+        <span class="text-sm text-gray-500 dark:text-dark-400">
+          {{ entriesPage }} / {{ entriesTotalPages }}
+        </span>
+        <button
+          :disabled="entriesPage >= entriesTotalPages"
+          class="btn btn-secondary px-3 py-1 text-sm"
+          @click="loadEntries(entriesPage + 1)"
+        >
+          {{ t('pagination.next') }}
+        </button>
+      </div>
     </div>
   </BaseDialog>
 </template>
@@ -290,7 +171,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { adminAPI, type BalanceHistoryItem, type BalanceEntryItem } from '@/api/admin'
+import { adminAPI, type BalanceEntryItem } from '@/api/admin'
 import { formatDateTime } from '@/utils/format'
 import type { AdminUser } from '@/types'
 import BaseDialog from '@/components/common/BaseDialog.vue'
@@ -301,75 +182,38 @@ const props = defineProps<{ show: boolean; user: AdminUser | null; hideActions?:
 const emit = defineEmits(['close', 'deposit', 'withdraw'])
 const { t } = useI18n()
 
-const activeTab = ref<'history' | 'entries'>('history')
-
-// ==================== Redeem History ====================
-const history = ref<BalanceHistoryItem[]>([])
-const loading = ref(false)
-const currentPage = ref(1)
-const total = ref(0)
-const totalRecharged = ref(0)
-const pageSize = 15
-const typeFilter = ref('')
-
-const totalPages = computed(() => Math.ceil(total.value / pageSize) || 1)
-
-// Type filter options
-const typeOptions = computed(() => [
-  { value: '', label: t('admin.users.allTypes') },
-  { value: 'balance', label: t('admin.users.typeBalance') },
-  { value: 'admin_balance', label: t('admin.users.typeAdminBalance') },
-  { value: 'concurrency', label: t('admin.users.typeConcurrency') },
-  { value: 'admin_concurrency', label: t('admin.users.typeAdminConcurrency') },
-  { value: 'subscription', label: t('admin.users.typeSubscription') }
-])
-
 // ==================== Balance Entries ====================
 const entries = ref<BalanceEntryItem[]>([])
 const entriesLoading = ref(false)
 const entriesPage = ref(1)
 const entriesTotal = ref(0)
 const entriesPageSize = 15
+const totalRecharged = ref(0)
+const sourceFilter = ref('')
 
 const entriesTotalPages = computed(() => Math.ceil(entriesTotal.value / entriesPageSize) || 1)
+
+// Source filter options
+const sourceOptions = computed(() => [
+  { value: '', label: t('admin.users.allTypes') },
+  { value: 'redeem,admin', label: t('admin.users.sourceFilterRecharge') },
+  { value: 'checkin', label: t('admin.users.sourceCheckin') },
+  { value: 'leaderboard', label: t('admin.users.sourceLeaderboard') },
+  { value: 'cashback', label: t('admin.users.sourceCashback') },
+  { value: 'redeem_bonus,first_redeem_bonus', label: t('admin.users.sourceFilterBonus') },
+  { value: 'consumption', label: t('admin.users.sourceConsumption') },
+  { value: 'expiry_clear', label: t('admin.users.sourceExpiryClear') },
+  { value: 'refund', label: t('admin.users.sourceRefund') },
+])
 
 // Watch modal open
 watch(() => props.show, (v) => {
   if (v && props.user) {
-    activeTab.value = 'entries'
-    typeFilter.value = ''
-    loadHistory(1)
+    sourceFilter.value = ''
     loadEntries(1)
+    loadTotalRecharged()
   }
 })
-
-// Watch tab switch to load entries if needed
-watch(activeTab, (tab) => {
-  if (tab === 'entries' && entries.value.length === 0 && !entriesLoading.value) {
-    loadEntries(1)
-  }
-})
-
-const loadHistory = async (page: number) => {
-  if (!props.user) return
-  loading.value = true
-  currentPage.value = page
-  try {
-    const res = await adminAPI.users.getUserBalanceHistory(
-      props.user.id,
-      page,
-      pageSize,
-      typeFilter.value || undefined
-    )
-    history.value = res.items || []
-    total.value = res.total || 0
-    totalRecharged.value = res.total_recharged || 0
-  } catch (error) {
-    console.error('Failed to load balance history:', error)
-  } finally {
-    loading.value = false
-  }
-}
 
 const loadEntries = async (page: number) => {
   if (!props.user) return
@@ -379,7 +223,8 @@ const loadEntries = async (page: number) => {
     const res = await adminAPI.users.getUserBalanceEntries(
       props.user.id,
       page,
-      entriesPageSize
+      entriesPageSize,
+      sourceFilter.value || undefined
     )
     entries.value = res.items || []
     entriesTotal.value = res.total || 0
@@ -390,96 +235,17 @@ const loadEntries = async (page: number) => {
   }
 }
 
-// Helper: check if admin type
-const isAdminType = (type: string) => type === 'admin_balance' || type === 'admin_concurrency'
-
-// Helper: check if balance type (includes admin_balance)
-const isBalanceType = (type: string) => type === 'balance' || type === 'admin_balance'
-
-// Helper: check if subscription type
-const isSubscriptionType = (type: string) => type === 'subscription'
-
-// Icon name based on type
-const getIconName = (item: BalanceHistoryItem) => {
-  if (isBalanceType(item.type)) return 'dollar'
-  if (isSubscriptionType(item.type)) return 'badge'
-  return 'bolt' // concurrency
-}
-
-// Icon background color
-const getIconBg = (item: BalanceHistoryItem) => {
-  if (isBalanceType(item.type)) {
-    return item.value >= 0
-      ? 'bg-emerald-100 dark:bg-emerald-900/30'
-      : 'bg-red-100 dark:bg-red-900/30'
-  }
-  if (isSubscriptionType(item.type)) return 'bg-purple-100 dark:bg-purple-900/30'
-  return item.value >= 0
-    ? 'bg-blue-100 dark:bg-blue-900/30'
-    : 'bg-orange-100 dark:bg-orange-900/30'
-}
-
-// Icon text color
-const getIconColor = (item: BalanceHistoryItem) => {
-  if (isBalanceType(item.type)) {
-    return item.value >= 0
-      ? 'text-emerald-600 dark:text-emerald-400'
-      : 'text-red-600 dark:text-red-400'
-  }
-  if (isSubscriptionType(item.type)) return 'text-purple-600 dark:text-purple-400'
-  return item.value >= 0
-    ? 'text-blue-600 dark:text-blue-400'
-    : 'text-orange-600 dark:text-orange-400'
-}
-
-// Value text color
-const getValueColor = (item: BalanceHistoryItem) => {
-  if (isBalanceType(item.type)) {
-    return item.value >= 0
-      ? 'text-emerald-600 dark:text-emerald-400'
-      : 'text-red-600 dark:text-red-400'
-  }
-  if (isSubscriptionType(item.type)) return 'text-purple-600 dark:text-purple-400'
-  return item.value >= 0
-    ? 'text-blue-600 dark:text-blue-400'
-    : 'text-orange-600 dark:text-orange-400'
-}
-
-// Item title
-const getItemTitle = (item: BalanceHistoryItem) => {
-  switch (item.type) {
-    case 'balance':
-      return t('redeem.balanceAddedRedeem')
-    case 'admin_balance':
-      return item.value >= 0 ? t('redeem.balanceAddedAdmin') : t('redeem.balanceDeductedAdmin')
-    case 'concurrency':
-      return t('redeem.concurrencyAddedRedeem')
-    case 'admin_concurrency':
-      return item.value >= 0 ? t('redeem.concurrencyAddedAdmin') : t('redeem.concurrencyReducedAdmin')
-    case 'subscription':
-      return t('redeem.subscriptionAssigned')
-    default:
-      return t('common.unknown')
+const loadTotalRecharged = async () => {
+  if (!props.user) return
+  try {
+    const res = await adminAPI.users.getUserBalanceHistory(props.user.id, 1, 1)
+    totalRecharged.value = res.total_recharged || 0
+  } catch {
+    totalRecharged.value = 0
   }
 }
 
-// Format display value
-const formatValue = (item: BalanceHistoryItem) => {
-  if (isBalanceType(item.type)) {
-    const sign = item.value >= 0 ? '+' : ''
-    return `${sign}$${item.value.toFixed(2)}`
-  }
-  if (isSubscriptionType(item.type)) {
-    const days = item.validity_days || Math.round(item.value)
-    const groupName = item.group?.name || ''
-    return groupName ? `${days}d - ${groupName}` : `${days}d`
-  }
-  // concurrency types
-  const sign = item.value >= 0 ? '+' : ''
-  return `${sign}${item.value}`
-}
-
-// ==================== Balance Entry Helpers ====================
+// ==================== Entry Helpers ====================
 const sourceLabels: Record<string, string> = {
   recharge: 'admin.users.sourceRecharge',
   redeem: 'admin.users.sourceRedeem',
@@ -509,6 +275,9 @@ const getEntryIcon = (source: string) => {
     case 'consumption': return 'bolt'
     case 'expiry_clear': return 'clock'
     case 'admin': return 'cog'
+    case 'redeem_bonus':
+    case 'first_redeem_bonus': return 'gift'
+    case 'refund': return 'refresh'
     default: return 'dollar'
   }
 }

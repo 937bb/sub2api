@@ -1970,6 +1970,8 @@ export default {
       sourceConsumption: 'API 消费扣减',
       sourceExpiryClear: '过期清理',
       sourceRefund: '退款',
+      sourceFilterRecharge: '充值/管理员调整',
+      sourceFilterBonus: '兑换加成',
       // Settings Dropdowns
       filterSettings: '筛选设置',
       columnSettings: '列设置',

@@ -107,6 +107,64 @@ LIMIT $%d OFFSET $%d`, excludeClause, limitIdx, offsetIdx), listArgs...)
 	return entries, total, nil
 }
 
+func (r *balanceEntryRepository) ListByUserFiltered(ctx context.Context, userID int64, offset, limit int, includeSources []string) ([]*service.BalanceEntry, int64, error) {
+	client := clientFromContext(ctx, r.client)
+
+	includeClause := ""
+	args := []any{userID}
+	if len(includeSources) > 0 {
+		placeholders := make([]string, len(includeSources))
+		for i, src := range includeSources {
+			placeholders[i] = fmt.Sprintf("$%d", len(args)+1)
+			args = append(args, src)
+		}
+		includeClause = " AND source IN (" + strings.Join(placeholders, ",") + ")"
+	}
+
+	var total int64
+	countRows, err := client.QueryContext(ctx,
+		`SELECT COUNT(*) FROM balance_entries WHERE user_id = $1`+includeClause, args...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("count balance_entries: %w", err)
+	}
+	defer func() { _ = countRows.Close() }()
+	if countRows.Next() {
+		if err := countRows.Scan(&total); err != nil {
+			return nil, 0, err
+		}
+	}
+	if err := countRows.Close(); err != nil {
+		return nil, 0, err
+	}
+
+	listArgs := append(args, limit, offset)
+	limitIdx := len(args) + 1
+	offsetIdx := len(args) + 2
+	rows, err := client.QueryContext(ctx, fmt.Sprintf(`
+SELECT id, user_id, amount, remaining, balance_type, source, note, expires_at, expired, created_at
+FROM balance_entries
+WHERE user_id = $1%s
+ORDER BY created_at DESC
+LIMIT $%d OFFSET $%d`, includeClause, limitIdx, offsetIdx), listArgs...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list balance_entries: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	entries := make([]*service.BalanceEntry, 0)
+	for rows.Next() {
+		e, err := scanBalanceEntry(rows)
+		if err != nil {
+			return nil, 0, err
+		}
+		entries = append(entries, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	return entries, total, nil
+}
+
 func (r *balanceEntryRepository) GetAvailableEntries(ctx context.Context, userID int64) ([]*service.BalanceEntry, error) {
 	client := clientFromContext(ctx, r.client)
 	rows, err := client.QueryContext(ctx, `
