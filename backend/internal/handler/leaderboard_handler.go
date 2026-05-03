@@ -27,10 +27,11 @@ func (h *LeaderboardHandler) GetLeaderboard(c *gin.Context) {
 
 	if !h.settingService.GetBoolSetting(ctx, service.SettingKeyLeaderboardEnabled, false) {
 		response.Success(c, gin.H{
-			"enabled":   false,
-			"today":     []any{},
-			"yesterday": []any{},
-			"total":     []any{},
+			"enabled":      false,
+			"today":        []any{},
+			"yesterday":    []any{},
+			"total":        []any{},
+			"reward_rules": []any{},
 		})
 		return
 	}
@@ -41,10 +42,14 @@ func (h *LeaderboardHandler) GetLeaderboard(c *gin.Context) {
 		return
 	}
 
+	// 解析奖励规则供前端展示
+	rewardRules := h.leaderboardService.GetRewardRulesForDisplay(ctx)
+
 	response.Success(c, gin.H{
-		"enabled":   true,
-		"today":     data.Today,
-		"yesterday": data.Yesterday,
-		"total":     data.Total,
+		"enabled":      true,
+		"today":        data.Today,
+		"yesterday":    data.Yesterday,
+		"total":        data.Total,
+		"reward_rules": rewardRules,
 	})
 }

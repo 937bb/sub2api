@@ -1159,6 +1159,12 @@ export default {
     tokens: 'Tokens',
     noData: 'No ranking data yet',
     unit: '$',
+    rewardTitle: 'Reward Rules',
+    rewardSettleHint: 'Settled daily based on yesterday\'s ranking',
+    rankLabel: 'Rank #{rank}',
+    rewardFixed: 'Reward ${amount}',
+    rewardPercent: '{percent}% of yesterday\'s spending',
+    rewardExpiry: 'Valid for {days} days',
   },
 
   // Profile

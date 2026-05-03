@@ -8,11 +8,20 @@ export interface LeaderboardEntry {
   tokens: number
 }
 
+export interface LeaderboardRewardRule {
+  rank: number
+  mode: 'fixed' | 'percent'
+  amount: number
+  balance_type: string
+  expiry_days: number
+}
+
 export interface LeaderboardResponse {
   enabled: boolean
   today: LeaderboardEntry[]
   yesterday: LeaderboardEntry[]
   total: LeaderboardEntry[]
+  reward_rules: LeaderboardRewardRule[]
 }
 
 export const leaderboardAPI = {

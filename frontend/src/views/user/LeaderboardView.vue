@@ -17,8 +17,55 @@
       <EmptyState :title="t('leaderboard.disabled')" />
     </div>
 
+    <template v-else>
+    <!-- Reward Rules Banner -->
+    <div v-if="rewardRules.length > 0" class="animate-fade-in overflow-hidden rounded-xl border border-amber-200 bg-gradient-to-r from-amber-50 to-orange-50 dark:border-amber-800/40 dark:from-amber-900/20 dark:to-orange-900/20">
+      <div class="flex items-center gap-2 border-b border-amber-200/60 px-5 py-3 dark:border-amber-800/30">
+        <svg class="h-5 w-5 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v13m0-13V6a2 2 0 112 2h-2zm0 0V5.5A2.5 2.5 0 109.5 8H12zm-7 4h14M5 12a2 2 0 110-4h14a2 2 0 110 4M5 12v7a2 2 0 002 2h10a2 2 0 002-2v-7" />
+        </svg>
+        <h2 class="text-sm font-semibold text-amber-800 dark:text-amber-300">{{ t('leaderboard.rewardTitle') }}</h2>
+        <span class="ml-auto text-xs text-amber-600/70 dark:text-amber-400/60">{{ t('leaderboard.rewardSettleHint') }}</span>
+      </div>
+      <div class="grid grid-cols-1 gap-3 px-5 py-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        <div
+          v-for="rule in rewardRules"
+          :key="rule.rank"
+          class="flex items-center gap-3 rounded-lg border border-amber-200/50 bg-white/60 px-4 py-3 dark:border-amber-800/20 dark:bg-dark-800/40"
+        >
+          <span
+            class="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-sm font-bold"
+            :class="{
+              'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-400': rule.rank === 1,
+              'bg-gray-100 text-gray-600 dark:bg-gray-700/50 dark:text-gray-300': rule.rank === 2,
+              'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-400': rule.rank === 3,
+              'bg-amber-50 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400': rule.rank > 3,
+            }"
+          >
+            {{ rule.rank <= 3 ? (rule.rank === 1 ? '🥇' : rule.rank === 2 ? '🥈' : '🥉') : `#${rule.rank}` }}
+          </span>
+          <div class="min-w-0 flex-1">
+            <p class="text-sm font-medium text-gray-900 dark:text-white">
+              {{ t('leaderboard.rankLabel', { rank: rule.rank }) }}
+            </p>
+            <p class="text-xs text-amber-700 dark:text-amber-400">
+              <template v-if="rule.mode === 'fixed'">
+                {{ t('leaderboard.rewardFixed', { amount: rule.amount }) }}
+              </template>
+              <template v-else>
+                {{ t('leaderboard.rewardPercent', { percent: rule.amount }) }}
+              </template>
+              <span v-if="rule.balance_type === 'expirable' && rule.expiry_days > 0" class="ml-1 text-amber-500/70 dark:text-amber-500/50">
+                ({{ t('leaderboard.rewardExpiry', { days: rule.expiry_days }) }})
+              </span>
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Three-column layout -->
-    <div v-else class="grid grid-cols-1 gap-6 animate-fade-in lg:grid-cols-3">
+    <div class="grid grid-cols-1 gap-6 animate-fade-in lg:grid-cols-3">
       <div
         v-for="col in columns"
         :key="col.key"
@@ -64,6 +111,7 @@
         </div>
       </div>
     </div>
+    </template>
   </div>
   </AppLayout>
 </template>
@@ -85,6 +133,11 @@ const columns = computed(() => [
   { key: 'yesterday', title: t('leaderboard.yesterday'), entries: data.value?.yesterday || [] },
   { key: 'total', title: t('leaderboard.total'), entries: data.value?.total || [] },
 ])
+
+const rewardRules = computed(() => {
+  const rules = data.value?.reward_rules || []
+  return [...rules].sort((a, b) => a.rank - b.rank)
+})
 
 onMounted(async () => {
   try {

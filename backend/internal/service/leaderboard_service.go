@@ -217,3 +217,36 @@ func (s *LeaderboardService) RunDailyReward(ctx context.Context) {
 		slog.Info("leaderboard_reward: applied", "user_id", item.UserID, "rank", rule.Rank, "bonus", bonusAmount)
 	}
 }
+
+// LeaderboardRewardRuleDisplay 面向前端展示的奖励规则（不含敏感信息）
+type LeaderboardRewardRuleDisplay struct {
+	Rank        int     `json:"rank"`
+	Mode        string  `json:"mode"`
+	Amount      float64 `json:"amount"`
+	BalanceType string  `json:"balance_type"`
+	ExpiryDays  int     `json:"expiry_days"`
+}
+
+// GetRewardRulesForDisplay 获取排行榜奖励规则供前端展示
+func (s *LeaderboardService) GetRewardRulesForDisplay(ctx context.Context) []LeaderboardRewardRuleDisplay {
+	rulesJSON := s.settingService.GetStringSetting(ctx, SettingKeyLeaderboardRewardRules, "[]")
+	var rules []LeaderboardRewardRule
+	if err := json.Unmarshal([]byte(rulesJSON), &rules); err != nil {
+		return []LeaderboardRewardRuleDisplay{}
+	}
+
+	display := make([]LeaderboardRewardRuleDisplay, 0, len(rules))
+	for _, r := range rules {
+		if r.Amount <= 0 {
+			continue
+		}
+		display = append(display, LeaderboardRewardRuleDisplay{
+			Rank:        r.Rank,
+			Mode:        r.Mode,
+			Amount:      r.Amount,
+			BalanceType: r.BalanceType,
+			ExpiryDays:  r.ExpiryDays,
+		})
+	}
+	return display
+}

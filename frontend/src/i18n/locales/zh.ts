@@ -1163,6 +1163,12 @@ export default {
     tokens: 'Tokens',
     noData: '暂无排行数据',
     unit: '$',
+    rewardTitle: '排行榜奖励机制',
+    rewardSettleHint: '每日凌晨根据昨日排名自动结算',
+    rankLabel: '第 {rank} 名',
+    rewardFixed: '奖励 ${amount}',
+    rewardPercent: '返还昨日消费 {percent}%',
+    rewardExpiry: '{days}天有效',
   },
 
   // Profile
