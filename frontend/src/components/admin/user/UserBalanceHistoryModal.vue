@@ -200,6 +200,7 @@ const sourceOptions = computed(() => [
   { value: 'checkin', label: t('admin.users.sourceCheckin') },
   { value: 'leaderboard', label: t('admin.users.sourceLeaderboard') },
   { value: 'cashback', label: t('admin.users.sourceCashback') },
+  { value: 'affiliate', label: t('admin.users.sourceAffiliate') },
   { value: 'redeem_bonus,first_redeem_bonus', label: t('admin.users.sourceFilterBonus') },
   { value: 'consumption', label: t('admin.users.sourceConsumption') },
   { value: 'expiry_clear', label: t('admin.users.sourceExpiryClear') },
