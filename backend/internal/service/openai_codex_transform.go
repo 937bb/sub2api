@@ -468,7 +468,7 @@ func stringifyCodexContentText(value any) string {
 func normalizeCodexModel(model string) string {
 	model = strings.TrimSpace(model)
 	if model == "" {
-		return "gpt-5.4"
+		return "gpt-5.5"
 	}
 	if mapped, ok := normalizeKnownCodexModel(model); ok {
 		return mapped
