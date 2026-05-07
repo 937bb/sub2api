@@ -107,63 +107,8 @@ const (
 	SettingKeyAffiliateRebateFreezeHours       = "affiliate_rebate_freeze_hours"       // 返利冻结期（小时，0=不冻结）
 	SettingKeyAffiliateRebateDurationDays      = "affiliate_rebate_duration_days"      // 返利有效期（天，0=永久）
 	SettingKeyAffiliateRebatePerInviteeCap     = "affiliate_rebate_per_invitee_cap"    // 单人返利上限（0=无上限）
-	SettingKeyRedeemRebateEnabled             = "redeem_rebate_enabled"               // 兑换码余额充值是否触发邀请返利（默认关闭）
-
-	// 每日签到设置
-	SettingKeyCheckinEnabled     = "checkin_enabled"      // 签到功能总开关
-	SettingKeyCheckinMode        = "checkin_mode"         // 基础奖励模式：fixed / random
-	SettingKeyCheckinFixedAmount = "checkin_fixed_amount"  // 固定模式奖励金额
-	SettingKeyCheckinRandomMin   = "checkin_random_min"    // 随机模式最小值
-	SettingKeyCheckinRandomMax   = "checkin_random_max"    // 随机模式最大值
-	SettingKeyCheckinBalanceType = "checkin_balance_type"  // 基础奖励余额类型：permanent / expirable
-	SettingKeyCheckinExpiryDays  = "checkin_expiry_days"   // 基础奖励有效期天数（仅 expirable 生效）
-	SettingKeyCheckinMilestones  = "checkin_milestones"    // 里程碑规则（JSON 数组）
-
-	// 首次兑换加成 (F4)
-	SettingKeyFirstRedeemBonusEnabled     = "first_redeem_bonus_enabled"      // 开关
-	SettingKeyFirstRedeemBonusMultiplier  = "first_redeem_bonus_multiplier"   // 加成倍率（如 2 表示双倍，即额外给 1x）
-	SettingKeyFirstRedeemBonusCap        = "first_redeem_bonus_cap"          // 加成上限（0=无上限）
-	SettingKeyFirstRedeemBonusBalanceType = "first_redeem_bonus_balance_type" // 加成余额类型
-	SettingKeyFirstRedeemBonusExpiryDays = "first_redeem_bonus_expiry_days"  // 有效期天数
-
-	// 常规兑换加成 (F5)
-	SettingKeyRedeemBonusEnabled     = "redeem_bonus_enabled"      // 开关
-	SettingKeyRedeemBonusMode        = "redeem_bonus_mode"         // fixed / percent / random
-	SettingKeyRedeemBonusFixedAmount = "redeem_bonus_fixed_amount"  // 固定金额
-	SettingKeyRedeemBonusPercent     = "redeem_bonus_percent"       // 百分比
-	SettingKeyRedeemBonusRandomMin   = "redeem_bonus_random_min"    // 随机最小
-	SettingKeyRedeemBonusRandomMax   = "redeem_bonus_random_max"    // 随机最大
-	SettingKeyRedeemBonusCap         = "redeem_bonus_cap"           // 加成上限（0=无上限）
-	SettingKeyRedeemBonusMinAmount   = "redeem_bonus_min_amount"    // 最低触发金额
-	SettingKeyRedeemBonusBalanceType = "redeem_bonus_balance_type"  // 余额类型
-	SettingKeyRedeemBonusExpiryDays  = "redeem_bonus_expiry_days"   // 有效期天数
-
-	// 排行榜 + 奖励 (F3)
-	SettingKeyLeaderboardEnabled     = "leaderboard_enabled"      // 开关
-	SettingKeyLeaderboardMaskEmail   = "leaderboard_mask_email"   // 用户名脱敏
-	SettingKeyLeaderboardTopN        = "leaderboard_top_n"        // 展示 TopN
-	SettingKeyLeaderboardRewardRules = "leaderboard_reward_rules" // 奖励规则 JSON
-
-	// 消费返现 (F6)
-	SettingKeyCashbackEnabled     = "cashback_enabled"      // 开关
-	SettingKeyCashbackThreshold   = "cashback_threshold"    // 消费门槛
-	SettingKeyCashbackMode        = "cashback_mode"         // fixed / percent / random
-	SettingKeyCashbackFixedAmount = "cashback_fixed_amount"  // 固定金额
-	SettingKeyCashbackPercent     = "cashback_percent"       // 百分比
-	SettingKeyCashbackRandomMin   = "cashback_random_min"    // 随机最小
-	SettingKeyCashbackRandomMax   = "cashback_random_max"    // 随机最大
-	SettingKeyCashbackBalanceType = "cashback_balance_type"  // 余额类型
-	SettingKeyCashbackExpiryDays  = "cashback_expiry_days"   // 有效期天数
-	SettingKeyCashbackCycle       = "cashback_cycle"         // 结算周期：realtime / daily
-
-	// 分时费率 (F7)
-	SettingKeyOffPeakPricingEnabled = "off_peak_pricing_enabled" // 开关
-	SettingKeyOffPeakPricingRules   = "off_peak_pricing_rules"   // 规则 JSON：[{start_hour,end_hour,multiplier,label}]
-
-	// 余额模型设置（balance_entries）
-	SettingKeyBalanceExpiryEnabled            = "balance_expiry_enabled"               // 余额过期功能开关（默认关闭）
-	SettingKeyBalanceExpiryWarningDays        = "balance_expiry_warning_days"          // 余额过期预警天数（默认3）
-	SettingKeyBalanceDeductionOrder           = "balance_deduction_order"              // 余额扣减顺序：expiring_first / permanent_first（默认 expiring_first）
+	SettingKeyRiskControlEnabled               = "risk_control_enabled"                // 是否启用风控中心入口与审计链路
+	SettingKeyContentModerationConfig          = "content_moderation_config"           // 内容审计配置（JSON）
 
 	// 邮件服务设置
 	SettingKeySMTPHost     = "smtp_host"      // SMTP服务器地址
@@ -230,6 +175,18 @@ const (
 	SettingKeyOIDCConnectUserInfoIDPath       = "oidc_connect_userinfo_id_path"
 	SettingKeyOIDCConnectUserInfoUsernamePath = "oidc_connect_userinfo_username_path"
 
+	// GitHub / Google 邮箱快捷登录设置
+	SettingKeyGitHubOAuthEnabled             = "github_oauth_enabled"
+	SettingKeyGitHubOAuthClientID            = "github_oauth_client_id"
+	SettingKeyGitHubOAuthClientSecret        = "github_oauth_client_secret"
+	SettingKeyGitHubOAuthRedirectURL         = "github_oauth_redirect_url"
+	SettingKeyGitHubOAuthFrontendRedirectURL = "github_oauth_frontend_redirect_url"
+	SettingKeyGoogleOAuthEnabled             = "google_oauth_enabled"
+	SettingKeyGoogleOAuthClientID            = "google_oauth_client_id"
+	SettingKeyGoogleOAuthClientSecret        = "google_oauth_client_secret"
+	SettingKeyGoogleOAuthRedirectURL         = "google_oauth_redirect_url"
+	SettingKeyGoogleOAuthFrontendRedirectURL = "google_oauth_frontend_redirect_url"
+
 	// OEM设置
 	SettingKeySiteName                    = "site_name"                     // 网站名称
 	SettingKeySiteLogo                    = "site_logo"                     // 网站Logo (base64)
@@ -273,6 +230,16 @@ const (
 	SettingKeyAuthSourceDefaultWeChatSubscriptions     = "auth_source_default_wechat_subscriptions"
 	SettingKeyAuthSourceDefaultWeChatGrantOnSignup     = "auth_source_default_wechat_grant_on_signup"
 	SettingKeyAuthSourceDefaultWeChatGrantOnFirstBind  = "auth_source_default_wechat_grant_on_first_bind"
+	SettingKeyAuthSourceDefaultGitHubBalance           = "auth_source_default_github_balance"
+	SettingKeyAuthSourceDefaultGitHubConcurrency       = "auth_source_default_github_concurrency"
+	SettingKeyAuthSourceDefaultGitHubSubscriptions     = "auth_source_default_github_subscriptions"
+	SettingKeyAuthSourceDefaultGitHubGrantOnSignup     = "auth_source_default_github_grant_on_signup"
+	SettingKeyAuthSourceDefaultGitHubGrantOnFirstBind  = "auth_source_default_github_grant_on_first_bind"
+	SettingKeyAuthSourceDefaultGoogleBalance           = "auth_source_default_google_balance"
+	SettingKeyAuthSourceDefaultGoogleConcurrency       = "auth_source_default_google_concurrency"
+	SettingKeyAuthSourceDefaultGoogleSubscriptions     = "auth_source_default_google_subscriptions"
+	SettingKeyAuthSourceDefaultGoogleGrantOnSignup     = "auth_source_default_google_grant_on_signup"
+	SettingKeyAuthSourceDefaultGoogleGrantOnFirstBind  = "auth_source_default_google_grant_on_first_bind"
 	SettingKeyForceEmailOnThirdPartySignup             = "force_email_on_third_party_signup"
 
 	// 管理员 API Key
@@ -344,6 +311,9 @@ const (
 	// SettingKeyOverloadCooldownSettings stores JSON config for 529 overload cooldown handling.
 	SettingKeyOverloadCooldownSettings = "overload_cooldown_settings"
 
+	// SettingKeyRateLimit429CooldownSettings stores JSON config for 429 fallback cooldown handling.
+	SettingKeyRateLimit429CooldownSettings = "rate_limit_429_cooldown_settings"
+
 	// =========================
 	// Stream Timeout Handling
 	// =========================
@@ -412,3 +382,59 @@ const (
 
 // AdminAPIKeyPrefix is the prefix for admin API keys (distinct from user "sk-" keys).
 const AdminAPIKeyPrefix = "admin-"
+
+// =========================
+// Custom Feature Settings (Fork-specific)
+// =========================
+const (
+	// 签到功能
+	SettingKeyCheckinEnabled     = "checkin_enabled"       // 签到功能总开关
+	SettingKeyCheckinMode        = "checkin_mode"          // 基础奖励模式：fixed / random
+	SettingKeyCheckinFixedAmount = "checkin_fixed_amount"  // 固定模式奖励金额
+	SettingKeyCheckinRandomMin   = "checkin_random_min"    // 随机模式最小值
+	SettingKeyCheckinRandomMax   = "checkin_random_max"    // 随机模式最大值
+	SettingKeyCheckinBalanceType = "checkin_balance_type"  // 基础奖励余额类型：permanent / expirable
+	SettingKeyCheckinExpiryDays  = "checkin_expiry_days"   // 基础奖励有效期天数（仅 expirable 生效）
+	SettingKeyCheckinMilestones  = "checkin_milestones"    // 里程碑规则（JSON 数组）
+
+	// 首次兑换加成
+	SettingKeyFirstRedeemBonusEnabled     = "first_redeem_bonus_enabled"      // 开关
+	SettingKeyFirstRedeemBonusMultiplier  = "first_redeem_bonus_multiplier"   // 加成倍率（如 2 表示双倍，即额外给 1x）
+	SettingKeyFirstRedeemBonusCap        = "first_redeem_bonus_cap"          // 加成上限（0=无上限）
+	SettingKeyFirstRedeemBonusBalanceType = "first_redeem_bonus_balance_type" // 加成余额类型
+	SettingKeyFirstRedeemBonusExpiryDays = "first_redeem_bonus_expiry_days"  // 有效期天数
+
+	// 常规兑换加成
+	SettingKeyRedeemBonusEnabled     = "redeem_bonus_enabled"       // 开关
+	SettingKeyRedeemBonusMode        = "redeem_bonus_mode"          // fixed / percent / random
+	SettingKeyRedeemBonusFixedAmount = "redeem_bonus_fixed_amount"  // 固定金额
+	SettingKeyRedeemBonusPercent     = "redeem_bonus_percent"       // 百分比
+	SettingKeyRedeemBonusRandomMin   = "redeem_bonus_random_min"    // 随机最小
+	SettingKeyRedeemBonusRandomMax   = "redeem_bonus_random_max"    // 随机最大
+	SettingKeyRedeemBonusCap         = "redeem_bonus_cap"           // 加成上限（0=无上限）
+	SettingKeyRedeemBonusMinAmount   = "redeem_bonus_min_amount"    // 最低触发金额
+	SettingKeyRedeemBonusBalanceType = "redeem_bonus_balance_type"  // 余额类型
+	SettingKeyRedeemBonusExpiryDays  = "redeem_bonus_expiry_days"   // 有效期天数
+
+	// 排行榜
+	SettingKeyLeaderboardEnabled     = "leaderboard_enabled"      // 开关
+	SettingKeyLeaderboardMaskEmail   = "leaderboard_mask_email"   // 用户名脱敏
+	SettingKeyLeaderboardTopN        = "leaderboard_top_n"        // 展示 TopN
+	SettingKeyLeaderboardRewardRules = "leaderboard_reward_rules" // 奖励规则 JSON
+
+	// 消费返现
+	SettingKeyCashbackEnabled     = "cashback_enabled"       // 开关
+	SettingKeyCashbackThreshold   = "cashback_threshold"     // 消费门槛
+	SettingKeyCashbackMode        = "cashback_mode"          // fixed / percent / random
+	SettingKeyCashbackFixedAmount = "cashback_fixed_amount"  // 固定金额
+	SettingKeyCashbackPercent     = "cashback_percent"       // 百分比
+	SettingKeyCashbackRandomMin   = "cashback_random_min"    // 随机最小
+	SettingKeyCashbackRandomMax   = "cashback_random_max"    // 随机最大
+	SettingKeyCashbackBalanceType = "cashback_balance_type"  // 余额类型
+	SettingKeyCashbackExpiryDays  = "cashback_expiry_days"   // 有效期天数
+	SettingKeyCashbackCycle       = "cashback_cycle"         // 结算周期：realtime / daily
+
+	// 低峰定价
+	SettingKeyOffPeakPricingEnabled = "off_peak_pricing_enabled" // 开关
+	SettingKeyOffPeakPricingRules   = "off_peak_pricing_rules"   // 规则 JSON：[{start_hour,end_hour,multiplier,label}]
+)

@@ -6,12 +6,12 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"log/slog"
 	"strings"
 	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 )
 
@@ -28,6 +28,15 @@ const (
 	redeemRateLimitDuration = time.Hour
 	redeemLockDuration      = 10 * time.Second // 锁超时时间，防止死锁
 )
+
+type ctxKeySkipRedeemAffiliate struct{}
+
+// ContextSkipRedeemAffiliate returns a context that suppresses the redeem-level
+// affiliate rebate. Used by payment fulfillment which handles rebate separately
+// via applyAffiliateRebateForOrder (with audit-log deduplication).
+func ContextSkipRedeemAffiliate(ctx context.Context) context.Context {
+	return context.WithValue(ctx, ctxKeySkipRedeemAffiliate{}, true)
+}
 
 // RedeemCache defines cache operations for redeem service
 type RedeemCache interface {
@@ -96,6 +105,7 @@ func NewRedeemService(
 	billingCacheService *BillingCacheService,
 	entClient *dbent.Client,
 	authCacheInvalidator APIKeyAuthCacheInvalidator,
+	affiliateService *AffiliateService,
 ) *RedeemService {
 	return &RedeemService{
 		redeemRepo:           redeemRepo,
@@ -105,12 +115,8 @@ func NewRedeemService(
 		billingCacheService:  billingCacheService,
 		entClient:            entClient,
 		authCacheInvalidator: authCacheInvalidator,
+		affiliateService:     affiliateService,
 	}
-}
-
-// SetAffiliateService 注入邀请返利服务（用于兑换码余额充值触发返利）
-func (s *RedeemService) SetAffiliateService(affiliateService *AffiliateService) {
-	s.affiliateService = affiliateService
 }
 
 // SetSettingService 注入系统设置服务（用于读取兑换码返利开关）
@@ -408,9 +414,9 @@ func (s *RedeemService) Redeem(ctx context.Context, userID int64, code string) (
 	// 事务提交成功后失效缓存
 	s.invalidateRedeemCaches(ctx, userID, redeemCode)
 
-	// 余额兑换码：异步触发邀请返利（不阻塞兑换流程）
+	// 余额类正数兑换码触发邀请返利（best-effort，失败不影响兑换结果）
 	if redeemCode.Type == RedeemTypeBalance && redeemCode.Value > 0 {
-		s.tryAccrueRedeemRebate(ctx, userID, redeemCode.Value)
+		s.tryAccrueAffiliateRebateForRedeem(ctx, userID, redeemCode.Value)
 		s.tryApplyRedeemBonus(ctx, userID, redeemCode.Value)
 	}
 
@@ -461,6 +467,40 @@ func (s *RedeemService) invalidateRedeemCaches(ctx context.Context, userID int64
 			}()
 		}
 	}
+}
+
+func (s *RedeemService) tryAccrueAffiliateRebateForRedeem(ctx context.Context, userID int64, amount float64) {
+	if ctx.Value(ctxKeySkipRedeemAffiliate{}) != nil {
+		return
+	}
+	if s.affiliateService == nil {
+		return
+	}
+	if !s.affiliateService.IsEnabled(ctx) {
+		return
+	}
+	rebate, err := s.affiliateService.AccrueInviteRebate(ctx, userID, amount)
+	if err != nil {
+		logger.LegacyPrintf("service.redeem", "[Redeem] affiliate rebate failed for user %d amount %.2f: %v", userID, amount, err)
+		return
+	}
+	if rebate > 0 {
+		logger.LegacyPrintf("service.redeem", "[Redeem] affiliate rebate accrued %.8f for inviter of user %d", rebate, userID)
+	}
+}
+
+// tryApplyRedeemBonus 余额兑换码成功后异步触发兑换加成
+func (s *RedeemService) tryApplyRedeemBonus(ctx context.Context, userID int64, amount float64) {
+	if s.redeemBonusService == nil {
+		return
+	}
+	go func() {
+		bonusCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		isFirst := s.redeemBonusService.IsFirstBalanceRedeem(bonusCtx, userID, amount)
+		s.redeemBonusService.ApplyRedeemBonus(bonusCtx, userID, amount, isFirst)
+	}()
 }
 
 // GetByID 根据ID获取兑换码
@@ -581,56 +621,4 @@ func (s *RedeemService) reduceOrCancelSubscription(ctx context.Context, userID, 
 	s.subscriptionService.InvalidateSubCache(userID, groupID)
 
 	return nil
-}
-
-// tryApplyRedeemBonus 余额兑换码成功后异步触发兑换加成。
-func (s *RedeemService) tryApplyRedeemBonus(ctx context.Context, userID int64, amount float64) {
-	if s.redeemBonusService == nil {
-		return
-	}
-	go func() {
-		bonusCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-
-		isFirst := s.redeemBonusService.IsFirstBalanceRedeem(bonusCtx, userID, amount)
-		s.redeemBonusService.ApplyRedeemBonus(bonusCtx, userID, amount, isFirst)
-	}()
-}
-
-// tryAccrueRedeemRebate 余额兑换码成功后异步触发邀请返利。
-// 仅当「邀请返利总开关」和「兑换码返利开关」同时启用时才执行。
-// 失败仅记录日志，不影响兑换结果。
-func (s *RedeemService) tryAccrueRedeemRebate(ctx context.Context, userID int64, amount float64) {
-	if s.affiliateService == nil || s.settingService == nil {
-		return
-	}
-	if !s.settingService.IsAffiliateEnabled(ctx) || !s.settingService.IsRedeemRebateEnabled(ctx) {
-		return
-	}
-	go func() {
-		rebateCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-
-		tx, err := s.entClient.Tx(rebateCtx)
-		if err != nil {
-			slog.Error("redeem_rebate: begin tx failed", "user_id", userID, "error", err)
-			return
-		}
-		defer func() { _ = tx.Rollback() }()
-
-		txCtx := dbent.NewTxContext(rebateCtx, tx)
-		rebateAmount, err := s.affiliateService.AccrueInviteRebate(txCtx, userID, amount)
-		if err != nil {
-			slog.Error("redeem_rebate: accrue failed", "user_id", userID, "amount", amount, "error", err)
-			return
-		}
-		if rebateAmount <= 0 {
-			return
-		}
-		if err := tx.Commit(); err != nil {
-			slog.Error("redeem_rebate: commit failed", "user_id", userID, "rebate", rebateAmount, "error", err)
-			return
-		}
-		slog.Info("redeem_rebate: applied", "user_id", userID, "recharge_amount", amount, "rebate_amount", rebateAmount)
-	}()
 }

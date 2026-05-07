@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>937AI</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{
+  font-family:'Inter',sans-serif;
+  background:#05050a;color:#fff;
+  overflow-x:hidden;
+  -webkit-font-smoothing:antialiased;
+}
+
+/* ===== SPACE BACKGROUND ===== */
+.space-bg{
+  position:fixed;inset:0;z-index:0;
+  background:
+    radial-gradient(ellipse 80% 50% at 50% 20%, rgba(30,10,60,0.5) 0%, transparent 60%),
+    radial-gradient(ellipse 60% 40% at 70% 70%, rgba(10,30,80,0.4) 0%, transparent 50%),
+    radial-gradient(ellipse 50% 60% at 20% 80%, rgba(5,40,60,0.3) 0%, transparent 50%),
+    #05050a;
+}
+.space-bg::before{
+  content:'';position:absolute;inset:0;
+  background-image:
+    radial-gradient(1px 1px at 10% 20%, rgba(255,255,255,0.8) 0%, transparent 100%),
+    radial-gradient(1px 1px at 25% 45%, rgba(255,255,255,0.6) 0%, transparent 100%),
+    radial-gradient(1.5px 1.5px at 40% 15%, rgba(200,220,255,0.9) 0%, transparent 100%),
+    radial-gradient(1px 1px at 55% 65%, rgba(255,255,255,0.5) 0%, transparent 100%),
+    radial-gradient(1px 1px at 70% 30%, rgba(255,255,255,0.7) 0%, transparent 100%),
+    radial-gradient(1.5px 1.5px at 85% 55%, rgba(180,200,255,0.8) 0%, transparent 100%),
+    radial-gradient(1px 1px at 15% 70%, rgba(255,255,255,0.5) 0%, transparent 100%),
+    radial-gradient(1px 1px at 30% 85%, rgba(255,255,255,0.6) 0%, transparent 100%),
+    radial-gradient(1px 1px at 60% 10%, rgba(255,255,255,0.7) 0%, transparent 100%),
+    radial-gradient(1.5px 1.5px at 90% 80%, rgba(200,180,255,0.7) 0%, transparent 100%),
+    radial-gradient(1px 1px at 5% 50%, rgba(255,255,255,0.5) 0%, transparent 100%),
+    radial-gradient(1px 1px at 48% 42%, rgba(255,255,255,0.6) 0%, transparent 100%),
+    radial-gradient(1px 1px at 75% 88%, rgba(255,255,255,0.5) 0%, transparent 100%),
+    radial-gradient(1px 1px at 35% 30%, rgba(255,255,255,0.4) 0%, transparent 100%),
+    radial-gradient(1.5px 1.5px at 62% 52%, rgba(220,200,255,0.7) 0%, transparent 100%),
+    radial-gradient(1px 1px at 18% 92%, rgba(255,255,255,0.5) 0%, transparent 100%),
+    radial-gradient(1px 1px at 82% 12%, rgba(255,255,255,0.6) 0%, transparent 100%),
+    radial-gradient(1px 1px at 45% 78%, rgba(255,255,255,0.4) 0%, transparent 100%),
+    radial-gradient(1px 1px at 92% 42%, rgba(255,255,255,0.5) 0%, transparent 100%),
+    radial-gradient(1px 1px at 8% 35%, rgba(255,255,255,0.6) 0%, transparent 100%);
+  animation:twinkle 8s ease-in-out infinite alternate;
+}
+.space-bg::after{
+  content:'';position:absolute;inset:0;
+  background-image:
+    radial-gradient(1px 1px at 12% 25%, rgba(255,255,255,0.7) 0%, transparent 100%),
+    radial-gradient(1px 1px at 28% 58%, rgba(255,255,255,0.5) 0%, transparent 100%),
+    radial-gradient(1px 1px at 42% 82%, rgba(255,255,255,0.6) 0%, transparent 100%),
+    radial-gradient(1.5px 1.5px at 58% 35%, rgba(200,210,255,0.8) 0%, transparent 100%),
+    radial-gradient(1px 1px at 72% 68%, rgba(255,255,255,0.5) 0%, transparent 100%),
+    radial-gradient(1px 1px at 88% 22%, rgba(255,255,255,0.6) 0%, transparent 100%),
+    radial-gradient(1px 1px at 95% 75%, rgba(255,255,255,0.4) 0%, transparent 100%),
+    radial-gradient(1px 1px at 3% 88%, rgba(255,255,255,0.5) 0%, transparent 100%),
+    radial-gradient(1.5px 1.5px at 33% 12%, rgba(180,200,255,0.7) 0%, transparent 100%),
+    radial-gradient(1px 1px at 52% 92%, rgba(255,255,255,0.5) 0%, transparent 100%),
+    radial-gradient(1px 1px at 67% 8%, rgba(255,255,255,0.6) 0%, transparent 100%),
+    radial-gradient(1px 1px at 78% 48%, rgba(255,255,255,0.4) 0%, transparent 100%),
+    radial-gradient(1px 1px at 22% 62%, rgba(255,255,255,0.5) 0%, transparent 100%),
+    radial-gradient(1px 1px at 38% 38%, rgba(255,255,255,0.6) 0%, transparent 100%),
+    radial-gradient(1px 1px at 85% 92%, rgba(255,255,255,0.4) 0%, transparent 100%);
+  animation:twinkle 10s ease-in-out infinite alternate-reverse;
+}
+@keyframes twinkle{0%{opacity:0.6}100%{opacity:1}}
+
+/* Nebula glow */
+.nebula{
+  position:fixed;z-index:1;pointer-events:none;
+  border-radius:50%;
+  filter:blur(80px);
+  animation:drift 30s ease-in-out infinite;
+}
+.nebula-1{
+  width:50vw;height:50vw;
+  top:-15%;left:-5%;
+  background:radial-gradient(circle,rgba(80,40,150,0.15),transparent 70%);
+}
+.nebula-2{
+  width:40vw;height:40vw;
+  bottom:5%;right:-5%;
+  background:radial-gradient(circle,rgba(20,60,120,0.2),transparent 70%);
+  animation-delay:-10s;animation-duration:35s;
+}
+.nebula-3{
+  width:30vw;height:30vw;
+  top:40%;left:50%;
+  background:radial-gradient(circle,rgba(10,80,100,0.1),transparent 70%);
+  animation-delay:-20s;animation-duration:40s;
+}
+@keyframes drift{
+  0%,100%{transform:translate(0,0)}
+  25%{transform:translate(20px,-15px)}
+  50%{transform:translate(-10px,20px)}
+  75%{transform:translate(15px,10px)}
+}
+
+/* Shooting star */
+.shooting-star{
+  position:fixed;z-index:2;pointer-events:none;
+  width:120px;height:1px;
+  background:linear-gradient(90deg,rgba(255,255,255,0.8),transparent);
+  border-radius:1px;
+  opacity:0;
+  animation:shoot 6s linear infinite;
+}
+.shooting-star:nth-child(1){top:15%;left:10%;transform:rotate(-25deg);animation-delay:0s}
+.shooting-star:nth-child(2){top:35%;left:60%;transform:rotate(-30deg);animation-delay:3s;width:80px}
+@keyframes shoot{
+  0%{opacity:0;transform:translateX(0) rotate(-25deg)}
+  2%{opacity:1}
+  8%{opacity:0;transform:translateX(300px) rotate(-25deg)}
+  100%{opacity:0}
+}
+
+/* ===== UI LAYER ===== */
+#app{position:relative;z-index:10}
+
+nav{
+  position:fixed;top:0;width:100%;padding:1.5rem 4vw;
+  display:flex;justify-content:space-between;align-items:center;
+  z-index:1000;
+  background:rgba(5,5,10,0.4);
+  backdrop-filter:blur(24px) saturate(1.2);
+  border-bottom:1px solid rgba(255,255,255,0.04);
+}
+.logo{
+  font-size:1.15rem;font-weight:600;
+  letter-spacing:0.06em;
+  color:rgba(255,255,255,0.9);
+  text-decoration:none;
+}
+.nav-links{display:flex;gap:2.5rem;align-items:center}
+.nav-links a{font-size:0.82rem;color:rgba(255,255,255,0.45);text-decoration:none;transition:color 0.3s;letter-spacing:0.02em}
+.nav-links a:hover{color:rgba(255,255,255,0.9)}
+.nav-cta{
+  padding:0.5rem 1.5rem;border-radius:6px;
+  background:rgba(255,255,255,0.06);
+  border:1px solid rgba(255,255,255,0.1);
+  color:rgba(255,255,255,0.85)!important;
+  transition:all 0.3s ease;
+}
+.nav-cta:hover{background:rgba(255,255,255,0.12)!important;border-color:rgba(255,255,255,0.2)}
+
+/* Hero */
+.hero{
+  min-height:100vh;
+  display:flex;align-items:center;justify-content:center;
+  text-align:center;padding:0 2rem;
+}
+.hero-inner{max-width:800px;animation:fadeUp 1.5s ease-out both}
+@keyframes fadeUp{from{opacity:0;transform:translateY(30px)}to{opacity:1;transform:translateY(0)}}
+
+.hero h1{
+  font-size:clamp(2.5rem,6vw,4.5rem);
+  font-weight:200;
+  letter-spacing:-0.03em;
+  line-height:1.15;
+  margin-bottom:1.8rem;
+  color:#fff;
+}
+.hero h1 span{
+  background:linear-gradient(135deg,#60a5fa,#a78bfa,#60a5fa);
+  background-size:200% 200%;
+  -webkit-background-clip:text;
+  -webkit-text-fill-color:transparent;
+  background-clip:text;
+  animation:gradient 6s ease infinite;
+}
+@keyframes gradient{0%,100%{background-position:0% 50%}50%{background-position:100% 50%}}
+
+.hero p{
+  font-size:clamp(0.95rem,1.3vw,1.1rem);
+  color:rgba(255,255,255,0.4);
+  line-height:1.9;margin-bottom:3rem;
+  font-weight:300;max-width:550px;margin-left:auto;margin-right:auto;
+}
+.hero-btn{
+  display:inline-flex;align-items:center;gap:0.6rem;
+  padding:0.9rem 2.5rem;border-radius:50px;
+  background:linear-gradient(135deg,rgba(96,165,250,0.15),rgba(167,139,250,0.15));
+  border:1px solid rgba(96,165,250,0.3);
+  color:#fff;font-size:0.9rem;font-weight:400;
+  text-decoration:none;
+  transition:all 0.4s ease;
+  letter-spacing:0.02em;
+}
+.hero-btn:hover{
+  background:linear-gradient(135deg,rgba(96,165,250,0.25),rgba(167,139,250,0.25));
+  border-color:rgba(96,165,250,0.5);
+  transform:translateY(-2px);
+  box-shadow:0 10px 40px rgba(96,165,250,0.15);
+}
+.hero-btn svg{width:16px;height:16px;opacity:0.7}
+
+/* Features */
+.features{padding:10vh 4vw 15vh;max-width:1100px;margin:0 auto}
+.features-header{text-align:center;margin-bottom:5rem}
+.features-header span{
+  display:inline-block;font-size:0.72rem;
+  letter-spacing:0.2em;text-transform:uppercase;
+  color:rgba(96,165,250,0.7);margin-bottom:1rem;
+  font-weight:500;
+}
+.features-header h2{
+  font-size:clamp(1.8rem,3.5vw,2.6rem);
+  font-weight:200;color:rgba(255,255,255,0.9);
+}
+.features-grid{
+  display:grid;
+  grid-template-columns:repeat(3,1fr);
+  gap:1px;
+  background:rgba(255,255,255,0.04);
+  border-radius:16px;
+  overflow:hidden;
+  border:1px solid rgba(255,255,255,0.04);
+}
+.f-card{
+  padding:2.5rem 2rem;
+  background:rgba(5,5,10,0.8);
+  backdrop-filter:blur(10px);
+  transition:background 0.4s;
+}
+.f-card:hover{background:rgba(20,20,40,0.8)}
+.f-card h3{font-size:0.95rem;font-weight:500;margin-bottom:0.7rem;color:rgba(255,255,255,0.85)}
+.f-card p{font-size:0.82rem;color:rgba(255,255,255,0.35);line-height:1.7;font-weight:300}
+
+/* Footer */
+footer{
+  padding:3rem 4vw;text-align:center;
+  font-size:0.72rem;color:rgba(255,255,255,0.2);
+  border-top:1px solid rgba(255,255,255,0.04);
+}
+
+@media(max-width:768px){
+  .nav-links a:not(.nav-cta){display:none}
+  .features-grid{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+
+<!-- Background layers -->
+<div class="space-bg"></div>
+<div class="nebula nebula-1"></div>
+<div class="nebula nebula-2"></div>
+<div class="nebula nebula-3"></div>
+<div class="shooting-star"></div>
+<div class="shooting-star"></div>
+
+<!-- UI -->
+<div id="app">
+  <nav>
+    <a href="/" class="logo">937AI</a>
+    <div class="nav-links">
+      <a href="#features">Features</a>
+      <a href="#">Docs</a>
+      <a href="#" class="nav-cta">Console</a>
+    </div>
+  </nav>
+
+  <section class="hero">
+    <div class="hero-inner">
+      <h1>One API.<br><span>Every Model.</span></h1>
+      <p>Unified access to all frontier AI models through a single, elegant endpoint. Intelligent routing, real-time observability, zero complexity.</p>
+      <a href="#" class="hero-btn">
+        Get Started Free
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+      </a>
+    </div>
+  </section>
+
+  <section id="features" class="features">
+    <div class="features-header">
+      <span>Infrastructure</span>
+      <h2>Engineered for Scale</h2>
+    </div>
+    <div class="features-grid">
+      <div class="f-card"><h3>Unified Protocol</h3><p>OpenAI-compatible interface. Switch models with one parameter change. Zero SDK rewrites.</p></div>
+      <div class="f-card"><h3>Smart Routing</h3><p>Automatic failover with sub-millisecond health checks. Always the fastest node.</p></div>
+      <div class="f-card"><h3>Token Billing</h3><p>Real-time per-token cost tracking. Full transparency, zero hidden fees.</p></div>
+      <div class="f-card"><h3>Usage Rewards</h3><p>Active builders earn credits back through tiered rebates. Build more, save more.</p></div>
+      <div class="f-card"><h3>Dynamic Pricing</h3><p>Rates follow demand curves. Batch jobs during off-peak for maximum savings.</p></div>
+      <div class="f-card"><h3>Observability</h3><p>Stream logs, latency heatmaps, error diagnostics. Debug anything instantly.</p></div>
+    </div>
+  </section>
+
+  <footer>&copy; 2026 937AI &middot; All systems operational</footer>
+</div>
+</body>
+</html>

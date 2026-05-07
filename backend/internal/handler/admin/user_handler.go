@@ -2,10 +2,8 @@ package admin
 
 import (
 	"context"
-	"fmt"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
@@ -482,83 +480,62 @@ func (h *UserHandler) GetUserRPMStatus(c *gin.Context) {
 	response.Success(c, status)
 }
 
-// GetBalanceEntries 获取用户余额明细（balance_entries 表）
-// GET /api/v1/admin/users/:id/balance-entries
-func (h *UserHandler) GetBalanceEntries(c *gin.Context) {
-	userID, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		response.BadRequest(c, "Invalid user ID")
-		return
-	}
-
-	if h.balanceEntryService == nil {
-		response.Success(c, gin.H{"items": []any{}, "total": 0, "page": 1, "page_size": 20, "pages": 1})
-		return
-	}
-
-	page, pageSize := response.ParsePagination(c)
-
-	// 支持按来源过滤：?source=checkin 或 ?source=checkin,leaderboard
-	var entries []*service.BalanceEntry
-	var total int64
-	sourceParam := c.Query("source")
-	if sourceParam != "" {
-		sources := strings.Split(sourceParam, ",")
-		entries, total, err = h.balanceEntryService.ListByUserFiltered(c.Request.Context(), userID, page, pageSize, sources)
-	} else {
-		entries, total, err = h.balanceEntryService.ListByUser(c.Request.Context(), userID, page, pageSize)
-	}
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-
-	type entryResp struct {
-		ID          int64      `json:"id"`
-		Amount      float64    `json:"amount"`
-		Remaining   float64    `json:"remaining"`
-		BalanceType string     `json:"balance_type"`
-		Source      string     `json:"source"`
-		Note        string     `json:"note"`
-		ExpiresAt   *time.Time `json:"expires_at,omitempty"`
-		Expired     bool       `json:"expired"`
-		CreatedAt   time.Time  `json:"created_at"`
-	}
-
-	items := make([]entryResp, 0, len(entries))
-	for _, e := range entries {
-		items = append(items, entryResp{
-			ID:          e.ID,
-			Amount:      e.Amount,
-			Remaining:   e.Remaining,
-			BalanceType: e.BalanceType,
-			Source:      e.Source,
-			Note:        e.Note,
-			ExpiresAt:   e.ExpiresAt,
-			Expired:     e.Expired,
-			CreatedAt:   e.CreatedAt,
-		})
-	}
-
-	response.Paginated(c, items, total, page, pageSize)
+// BatchUpdateConcurrency 批量修改用户并发数
+// POST /api/v1/admin/users/batch-concurrency
+type BatchUpdateConcurrencyRequest struct {
+	UserIDs     []int64 `json:"user_ids"`
+	All         bool    `json:"all"`
+	Concurrency int     `json:"concurrency"`
+	Mode        string  `json:"mode" binding:"required,oneof=set add"`
 }
 
-// MigrateBalanceEntries 将 redeem_codes 中的历史余额记录迁移到 balance_entries
-// POST /api/v1/admin/users/migrate-balance-entries
-func (h *UserHandler) MigrateBalanceEntries(c *gin.Context) {
-	if h.balanceEntryService == nil {
-		response.BadRequest(c, "balance entry service not available")
+func (h *UserHandler) BatchUpdateConcurrency(c *gin.Context) {
+	var req BatchUpdateConcurrencyRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	if !req.All && len(req.UserIDs) == 0 {
+		response.BadRequest(c, "user_ids is required unless all=true")
+		return
+	}
+	if len(req.UserIDs) > 500 {
+		response.BadRequest(c, "user_ids cannot exceed 500")
 		return
 	}
 
-	migrated, err := h.balanceEntryService.MigrateRedeemCodesToBalanceEntries(c.Request.Context())
+	var userIDs []int64
+	if req.All {
+		// Fetch all user IDs via pagination
+		page := 1
+		const pageSize = 500
+		for {
+			users, _, err := h.adminService.ListUsers(c.Request.Context(), page, pageSize, service.UserListFilters{}, "id", "asc")
+			if err != nil {
+				response.ErrorFrom(c, err)
+				return
+			}
+			for _, u := range users {
+				userIDs = append(userIDs, u.ID)
+			}
+			if len(users) < pageSize {
+				break
+			}
+			page++
+		}
+	} else {
+		userIDs = req.UserIDs
+	}
+
+	if len(userIDs) == 0 {
+		response.Success(c, gin.H{"affected": 0})
+		return
+	}
+
+	affected, err := h.adminService.BatchUpdateConcurrency(c.Request.Context(), userIDs, req.Concurrency, req.Mode)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
-
-	response.Success(c, gin.H{
-		"migrated": migrated,
-		"message":  fmt.Sprintf("成功迁移 %d 条历史记录到余额明细", migrated),
-	})
+	response.Success(c, gin.H{"affected": affected})
 }
