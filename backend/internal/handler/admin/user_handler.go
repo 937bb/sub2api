@@ -2,8 +2,10 @@ package admin
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
@@ -538,4 +540,85 @@ func (h *UserHandler) BatchUpdateConcurrency(c *gin.Context) {
 		return
 	}
 	response.Success(c, gin.H{"affected": affected})
+}
+
+// GetBalanceEntries 获取用户余额明细
+// GET /api/v1/admin/users/:id/balance-entries
+func (h *UserHandler) GetBalanceEntries(c *gin.Context) {
+	userID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid user ID")
+		return
+	}
+
+	if h.balanceEntryService == nil {
+		response.Success(c, gin.H{"items": []any{}, "total": 0, "page": 1, "page_size": 20, "pages": 1})
+		return
+	}
+
+	page, pageSize := response.ParsePagination(c)
+
+	// 支持按来源过滤：?source=checkin 或 ?source=checkin,leaderboard
+	var entries []*service.BalanceEntry
+	var total int64
+	sourceParam := c.Query("source")
+	if sourceParam != "" {
+		sources := strings.Split(sourceParam, ",")
+		entries, total, err = h.balanceEntryService.ListByUserFiltered(c.Request.Context(), userID, page, pageSize, sources)
+	} else {
+		entries, total, err = h.balanceEntryService.ListByUser(c.Request.Context(), userID, page, pageSize)
+	}
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	type entryResp struct {
+		ID          int64      `json:"id"`
+		Amount      float64    `json:"amount"`
+		Remaining   float64    `json:"remaining"`
+		BalanceType string     `json:"balance_type"`
+		Source      string     `json:"source"`
+		Note        string     `json:"note"`
+		ExpiresAt   *time.Time `json:"expires_at,omitempty"`
+		Expired     bool       `json:"expired"`
+		CreatedAt   time.Time  `json:"created_at"`
+	}
+
+	items := make([]entryResp, 0, len(entries))
+	for _, e := range entries {
+		items = append(items, entryResp{
+			ID:          e.ID,
+			Amount:      e.Amount,
+			Remaining:   e.Remaining,
+			BalanceType: e.BalanceType,
+			Source:      e.Source,
+			Note:        e.Note,
+			ExpiresAt:   e.ExpiresAt,
+			Expired:     e.Expired,
+			CreatedAt:   e.CreatedAt,
+		})
+	}
+
+	response.Paginated(c, items, total, page, pageSize)
+}
+
+// MigrateBalanceEntries 将 redeem_codes 中的历史余额记录迁移到 balance_entries
+// POST /api/v1/admin/users/migrate-balance-entries
+func (h *UserHandler) MigrateBalanceEntries(c *gin.Context) {
+	if h.balanceEntryService == nil {
+		response.BadRequest(c, "balance entry service not available")
+		return
+	}
+
+	migrated, err := h.balanceEntryService.MigrateRedeemCodesToBalanceEntries(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	response.Success(c, gin.H{
+		"migrated": migrated,
+		"message":  fmt.Sprintf("成功迁移 %d 条历史记录到余额明细", migrated),
+	})
 }

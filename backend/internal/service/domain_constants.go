@@ -107,6 +107,10 @@ const (
 	SettingKeyAffiliateRebateFreezeHours       = "affiliate_rebate_freeze_hours"       // 返利冻结期（小时，0=不冻结）
 	SettingKeyAffiliateRebateDurationDays      = "affiliate_rebate_duration_days"      // 返利有效期（天，0=永久）
 	SettingKeyAffiliateRebatePerInviteeCap     = "affiliate_rebate_per_invitee_cap"    // 单人返利上限（0=无上限）
+	SettingKeyRedeemRebateEnabled              = "redeem_rebate_enabled"               // 兑换码余额充值返利开关
+	SettingKeyBalanceExpiryEnabled             = "balance_expiry_enabled"              // 余额过期功能开关
+	SettingKeyBalanceExpiryWarningDays         = "balance_expiry_warning_days"         // 余额过期预警天数
+	SettingKeyBalanceDeductionOrder            = "balance_deduction_order"             // 余额扣减顺序（expiring_first / permanent_first）
 	SettingKeyRiskControlEnabled               = "risk_control_enabled"                // 是否启用风控中心入口与审计链路
 	SettingKeyContentModerationConfig          = "content_moderation_config"           // 内容审计配置（JSON）
 
