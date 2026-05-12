@@ -48,6 +48,37 @@
                 {{ platformLabel(p) }}
               </button>
             </div>
+
+            <!-- Group filter pills -->
+            <div v-if="availableGroups.length > 1" class="flex flex-wrap items-center gap-1.5">
+              <span class="text-[10px] font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">{{ t('modelPlaza.filterByGroup') }}:</span>
+              <button
+                type="button"
+                :class="[
+                  'rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition-colors',
+                  selectedGroupId === 0
+                    ? 'border-primary-500 bg-primary-500/10 text-primary-600 dark:text-primary-400'
+                    : 'border-gray-200 text-gray-500 hover:border-gray-300 dark:border-dark-600 dark:text-gray-400 dark:hover:border-dark-500'
+                ]"
+                @click="selectedGroupId = 0"
+              >
+                {{ t('modelPlaza.allGroups') }}
+              </button>
+              <button
+                v-for="g in availableGroups"
+                :key="g.id"
+                type="button"
+                :class="[
+                  'rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition-colors',
+                  selectedGroupId === g.id
+                    ? 'border-primary-500 bg-primary-500/10 text-primary-600 dark:text-primary-400'
+                    : 'border-gray-200 text-gray-500 hover:border-gray-300 dark:border-dark-600 dark:text-gray-400 dark:hover:border-dark-500'
+                ]"
+                @click="selectedGroupId = g.id"
+              >
+                {{ g.name }}
+              </button>
+            </div>
           </div>
 
           <!-- Right: stats + refresh -->
@@ -195,10 +226,12 @@ const appStore = useAppStore()
 
 // ── State ──
 const models = ref<ModelPlazaModel[]>([])
+const allGroups = ref<Array<{ id: number; name: string; platform: string }>>([])
 const userGroupRates = ref<Record<number, number>>({})
 const loading = ref(false)
 const searchQuery = ref('')
 const selectedPlatform = ref('')
+const selectedGroupId = ref(0)
 
 // ── Available platforms ──
 const availablePlatforms = computed(() => {
@@ -209,6 +242,11 @@ const availablePlatforms = computed(() => {
   return Array.from(set).sort()
 })
 
+// ── Available groups (deduplicated) ──
+const availableGroups = computed(() => {
+  return allGroups.value
+})
+
 // ── Filter ──
 const filteredModels = computed(() => {
   let list = models.value
@@ -216,6 +254,11 @@ const filteredModels = computed(() => {
   // Platform filter
   if (selectedPlatform.value) {
     list = list.filter(m => m.platform === selectedPlatform.value)
+  }
+
+  // Group filter
+  if (selectedGroupId.value) {
+    list = list.filter(m => m.groups.some(g => g.id === selectedGroupId.value))
   }
 
   // Search filter
@@ -248,6 +291,7 @@ async function loadData() {
       }),
     ])
     models.value = resp.models || []
+    allGroups.value = resp.groups || []
     userGroupRates.value = rates
   } catch (err: unknown) {
     appStore.showError(extractApiErrorMessage(err, t('common.error')))

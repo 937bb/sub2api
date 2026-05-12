@@ -1002,6 +1002,8 @@ export default {
     description: '浏览所有可用模型、定价与可访问的分组',
     searchPlaceholder: '搜索模型、平台或分组...',
     allPlatforms: '全部',
+    allGroups: '全部分组',
+    filterByGroup: '按分组筛选',
     empty: '暂无可用模型',
     noPricing: '未配置定价',
     modelCount: '{count} 个模型',

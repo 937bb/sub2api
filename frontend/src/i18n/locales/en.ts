@@ -998,6 +998,8 @@ export default {
     description: 'Browse all available models, their pricing and accessible groups',
     searchPlaceholder: 'Search models, platforms or groups...',
     allPlatforms: 'All',
+    allGroups: 'All Groups',
+    filterByGroup: 'Filter by group',
     empty: 'No models available',
     noPricing: 'Pricing not configured',
     modelCount: '{count} models',
