@@ -27,7 +27,7 @@ services:
     build:
       context: ..
       dockerfile: Dockerfile
-    image: sub2api:dev
+    image: sub2api:custom
     container_name: sub2api
     restart: unless-stopped
     ulimits:
