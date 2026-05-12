@@ -359,6 +359,7 @@ export default {
     groups: '分组管理',
     channels: '渠道管理',
     availableChannels: '可用渠道',
+    modelPlaza: '模型广场',
     subscriptions: '订阅管理',
     accounts: '账号管理',
     proxies: 'IP管理',
@@ -993,6 +994,34 @@ export default {
       unitPerMillion: '/ 1M token',
       unitPerRequest: '/ 次'
     }
+  },
+
+  // 模型广场（用户端）
+  modelPlaza: {
+    title: '模型广场',
+    description: '浏览所有可用模型、定价与可访问的分组',
+    searchPlaceholder: '搜索模型、平台或分组...',
+    allPlatforms: '全部',
+    empty: '暂无可用模型',
+    noPricing: '未配置定价',
+    modelCount: '{count} 个模型',
+    availableGroups: '可用分组',
+    exclusiveGroup: '管理员授权的专属分组',
+    publicGroup: '对所有用户开放的公开分组',
+    pricing: {
+      input: '输入',
+      output: '输出',
+      cacheWrite: '缓存写入',
+      cacheRead: '缓存读取',
+      imageOutput: '图片输出',
+      perRequest: '每次请求',
+      modeToken: '按 Token',
+      modePerRequest: '按次',
+      modeImage: '按图片',
+      unitPerMillion: '/ 1M token',
+      unitPerRequest: '/ 次',
+      hasTieredPricing: '{count} 条阶梯定价规则',
+    },
   },
 
   affiliate: {

@@ -359,6 +359,7 @@ export default {
     groups: 'Groups',
     channels: 'Channels',
     availableChannels: 'Available Channels',
+    modelPlaza: 'Model Plaza',
     subscriptions: 'Subscriptions',
     accounts: 'Accounts',
     proxies: 'Proxies',
@@ -989,6 +990,34 @@ export default {
       unitPerMillion: '/ 1M tokens',
       unitPerRequest: '/ request'
     }
+  },
+
+  // Model Plaza (user-facing)
+  modelPlaza: {
+    title: 'Model Plaza',
+    description: 'Browse all available models, their pricing and accessible groups',
+    searchPlaceholder: 'Search models, platforms or groups...',
+    allPlatforms: 'All',
+    empty: 'No models available',
+    noPricing: 'Pricing not configured',
+    modelCount: '{count} models',
+    availableGroups: 'Available Groups',
+    exclusiveGroup: 'Exclusive group granted by admin',
+    publicGroup: 'Public group open to all users',
+    pricing: {
+      input: 'Input',
+      output: 'Output',
+      cacheWrite: 'Cache Write',
+      cacheRead: 'Cache Read',
+      imageOutput: 'Image Output',
+      perRequest: 'Per Request',
+      modeToken: 'Per Token',
+      modePerRequest: 'Per Request',
+      modeImage: 'Per Image',
+      unitPerMillion: '/ 1M tokens',
+      unitPerRequest: '/ request',
+      hasTieredPricing: '{count} tiered pricing rules',
+    },
   },
 
   affiliate: {
