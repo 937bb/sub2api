@@ -34,8 +34,7 @@ services:
       nofile:
         soft: 100000
         hard: 100000
-    ports:
-      - "${BIND_HOST:-0.0.0.0}:${SERVER_PORT:-8080}:8080"
+    network_mode: host
     volumes:
       # Local directory mapping for easy migration
       - ./data:/app/data
@@ -52,14 +51,14 @@ services:
       # Server Configuration
       # =======================================================================
       - SERVER_HOST=0.0.0.0
-      - SERVER_PORT=8080
+      - SERVER_PORT=${SERVER_PORT:-8080}
       - SERVER_MODE=${SERVER_MODE:-release}
       - RUN_MODE=${RUN_MODE:-standard}
 
       # =======================================================================
       # Database Configuration (PostgreSQL)
       # =======================================================================
-      - DATABASE_HOST=postgres
+      - DATABASE_HOST=${DATABASE_HOST:-postgres}
       - DATABASE_PORT=5432
       - DATABASE_USER=${POSTGRES_USER:-sub2api}
       - DATABASE_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
@@ -73,7 +72,7 @@ services:
       # =======================================================================
       # Redis Configuration
       # =======================================================================
-      - REDIS_HOST=redis
+      - REDIS_HOST=${REDIS_HOST:-redis}
       - REDIS_PORT=6379
       - REDIS_PASSWORD=${REDIS_PASSWORD:-}
       - REDIS_DB=${REDIS_DB:-0}
