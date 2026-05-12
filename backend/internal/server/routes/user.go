@@ -76,6 +76,9 @@ func RegisterUserRoutes(
 			channels.GET("/available", h.AvailableChannel.List)
 		}
 
+		// 模型广场（基于分组+全局定价，不依赖渠道配置）
+		authenticated.GET("/model-plaza", h.ModelPlaza.List)
+
 		// 使用记录
 		usage := authenticated.Group("/usage")
 		{

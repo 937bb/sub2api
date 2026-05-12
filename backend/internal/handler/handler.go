@@ -56,6 +56,7 @@ type Handlers struct {
 	Payment          *PaymentHandler
 	PaymentWebhook   *PaymentWebhookHandler
 	AvailableChannel *AvailableChannelHandler
+	ModelPlaza       *ModelPlazaHandler
 	BalanceEntry     *BalanceEntryHandler
 	Checkin          *CheckinHandler
 	Leaderboard      *LeaderboardHandler

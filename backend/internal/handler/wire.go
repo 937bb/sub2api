@@ -102,6 +102,7 @@ func ProvideHandlers(
 	paymentHandler *PaymentHandler,
 	paymentWebhookHandler *PaymentWebhookHandler,
 	availableChannelHandler *AvailableChannelHandler,
+	modelPlazaHandler *ModelPlazaHandler,
 	balanceEntryHandler *BalanceEntryHandler,
 	checkinHandler *CheckinHandler,
 	leaderboardHandler *LeaderboardHandler,
@@ -125,6 +126,7 @@ func ProvideHandlers(
 		Payment:          paymentHandler,
 		PaymentWebhook:   paymentWebhookHandler,
 		AvailableChannel: availableChannelHandler,
+		ModelPlaza:       modelPlazaHandler,
 		BalanceEntry:     balanceEntryHandler,
 		Checkin:          checkinHandler,
 		Leaderboard:      leaderboardHandler,
@@ -149,6 +151,7 @@ var ProviderSet = wire.NewSet(
 	NewPaymentHandler,
 	NewPaymentWebhookHandler,
 	NewAvailableChannelHandler,
+	NewModelPlazaHandler,
 	NewCheckinHandler,
 	NewLeaderboardHandler,
 

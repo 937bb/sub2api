@@ -109,74 +109,27 @@
 
               <!-- Pricing section -->
               <div v-if="model.pricing" class="mb-3 space-y-1.5">
-                <!-- Billing mode -->
-                <div class="flex items-center gap-1.5">
-                  <span class="rounded-full bg-primary-100 px-2 py-0.5 text-[10px] font-medium text-primary-700 dark:bg-primary-900/30 dark:text-primary-300">
-                    {{ billingModeLabel(model.pricing.billing_mode) }}
-                  </span>
-                </div>
-
-                <!-- Token pricing -->
-                <template v-if="model.pricing.billing_mode === BILLING_MODE_TOKEN">
-                  <div class="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px]">
-                    <div v-if="model.pricing.input_price != null" class="flex items-baseline justify-between">
-                      <span class="text-gray-500 dark:text-gray-400">{{ t('modelPlaza.pricing.input') }}</span>
-                      <span class="font-medium text-gray-800 dark:text-gray-200">{{ formatPrice(model.pricing.input_price) }}</span>
-                    </div>
-                    <div v-if="model.pricing.output_price != null" class="flex items-baseline justify-between">
-                      <span class="text-gray-500 dark:text-gray-400">{{ t('modelPlaza.pricing.output') }}</span>
-                      <span class="font-medium text-gray-800 dark:text-gray-200">{{ formatPrice(model.pricing.output_price) }}</span>
-                    </div>
-                    <div v-if="model.pricing.cache_write_price != null" class="flex items-baseline justify-between">
-                      <span class="text-gray-500 dark:text-gray-400">{{ t('modelPlaza.pricing.cacheWrite') }}</span>
-                      <span class="font-medium text-gray-800 dark:text-gray-200">{{ formatPrice(model.pricing.cache_write_price) }}</span>
-                    </div>
-                    <div v-if="model.pricing.cache_read_price != null" class="flex items-baseline justify-between">
-                      <span class="text-gray-500 dark:text-gray-400">{{ t('modelPlaza.pricing.cacheRead') }}</span>
-                      <span class="font-medium text-gray-800 dark:text-gray-200">{{ formatPrice(model.pricing.cache_read_price) }}</span>
-                    </div>
-                    <div v-if="model.pricing.image_output_price != null && model.pricing.image_output_price > 0" class="flex items-baseline justify-between">
-                      <span class="text-gray-500 dark:text-gray-400">{{ t('modelPlaza.pricing.imageOutput') }}</span>
-                      <span class="font-medium text-gray-800 dark:text-gray-200">{{ formatPrice(model.pricing.image_output_price) }}</span>
-                    </div>
+                <div class="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px]">
+                  <div v-if="model.pricing.input_price != null" class="flex items-baseline justify-between">
+                    <span class="text-gray-500 dark:text-gray-400">{{ t('modelPlaza.pricing.input') }}</span>
+                    <span class="font-medium text-gray-800 dark:text-gray-200">{{ formatPrice(model.pricing.input_price) }}</span>
                   </div>
-                </template>
-
-                <!-- Per-request pricing -->
-                <div
-                  v-else-if="model.pricing.billing_mode === BILLING_MODE_PER_REQUEST && model.pricing.per_request_price != null"
-                  class="text-[11px]"
-                >
-                  <div class="flex items-baseline justify-between">
-                    <span class="text-gray-500 dark:text-gray-400">{{ t('modelPlaza.pricing.perRequest') }}</span>
-                    <span class="font-medium text-gray-800 dark:text-gray-200">
-                      {{ formatPrice(model.pricing.per_request_price, 1) }}
-                      <span class="ml-0.5 text-gray-400 dark:text-gray-500">{{ t('modelPlaza.pricing.unitPerRequest') }}</span>
-                    </span>
+                  <div v-if="model.pricing.output_price != null" class="flex items-baseline justify-between">
+                    <span class="text-gray-500 dark:text-gray-400">{{ t('modelPlaza.pricing.output') }}</span>
+                    <span class="font-medium text-gray-800 dark:text-gray-200">{{ formatPrice(model.pricing.output_price) }}</span>
                   </div>
-                </div>
-
-                <!-- Image pricing -->
-                <div
-                  v-else-if="model.pricing.billing_mode === BILLING_MODE_IMAGE && model.pricing.image_output_price != null"
-                  class="text-[11px]"
-                >
-                  <div class="flex items-baseline justify-between">
+                  <div v-if="model.pricing.cache_write_price != null" class="flex items-baseline justify-between">
+                    <span class="text-gray-500 dark:text-gray-400">{{ t('modelPlaza.pricing.cacheWrite') }}</span>
+                    <span class="font-medium text-gray-800 dark:text-gray-200">{{ formatPrice(model.pricing.cache_write_price) }}</span>
+                  </div>
+                  <div v-if="model.pricing.cache_read_price != null" class="flex items-baseline justify-between">
+                    <span class="text-gray-500 dark:text-gray-400">{{ t('modelPlaza.pricing.cacheRead') }}</span>
+                    <span class="font-medium text-gray-800 dark:text-gray-200">{{ formatPrice(model.pricing.cache_read_price) }}</span>
+                  </div>
+                  <div v-if="model.pricing.image_output_price != null && model.pricing.image_output_price > 0" class="flex items-baseline justify-between">
                     <span class="text-gray-500 dark:text-gray-400">{{ t('modelPlaza.pricing.imageOutput') }}</span>
-                    <span class="font-medium text-gray-800 dark:text-gray-200">
-                      {{ formatPrice(model.pricing.image_output_price, 1) }}
-                      <span class="ml-0.5 text-gray-400 dark:text-gray-500">{{ t('modelPlaza.pricing.unitPerRequest') }}</span>
-                    </span>
+                    <span class="font-medium text-gray-800 dark:text-gray-200">{{ formatPrice(model.pricing.image_output_price) }}</span>
                   </div>
-                </div>
-
-                <!-- Tiered pricing indicator -->
-                <div
-                  v-if="model.pricing.intervals && model.pricing.intervals.length > 0"
-                  class="mt-1 flex items-center gap-1 text-[10px] text-gray-500 dark:text-gray-400"
-                >
-                  <Icon name="infoCircle" size="xs" class="h-3 w-3" />
-                  {{ t('modelPlaza.pricing.hasTieredPricing', { count: model.pricing.intervals.length }) }}
                 </div>
               </div>
               <div v-else class="mb-3 text-[11px] text-gray-400 dark:text-gray-500">
@@ -214,16 +167,6 @@
                     </template>
                   </span>
                 </div>
-                <!-- Channel names -->
-                <div class="mt-1.5 flex flex-wrap gap-1">
-                  <span
-                    v-for="ch in model.channels"
-                    :key="ch"
-                    class="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-500 dark:bg-dark-700 dark:text-gray-400"
-                  >
-                    {{ ch }}
-                  </span>
-                </div>
               </div>
             </div>
           </div>
@@ -240,85 +183,27 @@ import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
 import PlatformIcon from '@/components/common/PlatformIcon.vue'
-import userChannelsAPI, { type UserAvailableChannel, type UserSupportedModelPricing, type UserAvailableGroup } from '@/api/channels'
+import modelPlazaAPI, { type ModelPlazaModel, type ModelPlazaGroup } from '@/api/modelPlaza'
 import userGroupsAPI from '@/api/groups'
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { platformBadgeClass, platformBorderClass, platformAccentBarClass, platformLabel } from '@/utils/platformColors'
-import { BILLING_MODE_TOKEN, BILLING_MODE_PER_REQUEST, BILLING_MODE_IMAGE } from '@/constants/channel'
 import type { GroupPlatform } from '@/types'
 
 const { t } = useI18n()
 const appStore = useAppStore()
 
 // ── State ──
-const channels = ref<UserAvailableChannel[]>([])
+const models = ref<ModelPlazaModel[]>([])
 const userGroupRates = ref<Record<number, number>>({})
 const loading = ref(false)
 const searchQuery = ref('')
 const selectedPlatform = ref('')
 
-// ── Aggregated model type ──
-interface AggregatedModel {
-  name: string
-  platform: string
-  pricing: UserSupportedModelPricing | null
-  groups: Array<UserAvailableGroup & { channel_name: string }>
-  channels: string[]
-}
-
-// ── Transform: channel-centric → model-centric ──
-const aggregatedModels = computed<AggregatedModel[]>(() => {
-  const modelMap = new Map<string, AggregatedModel>()
-
-  for (const ch of channels.value) {
-    for (const section of ch.platforms) {
-      for (const model of section.supported_models) {
-        const key = `${model.platform}::${model.name}`
-        let entry = modelMap.get(key)
-        if (!entry) {
-          entry = {
-            name: model.name,
-            platform: model.platform,
-            pricing: model.pricing,
-            groups: [],
-            channels: [],
-          }
-          modelMap.set(key, entry)
-        }
-        // Merge groups (deduplicate by id)
-        const existingGroupIds = new Set(entry.groups.map(g => g.id))
-        for (const g of section.groups) {
-          if (!existingGroupIds.has(g.id)) {
-            entry.groups.push({ ...g, channel_name: ch.name })
-            existingGroupIds.add(g.id)
-          }
-        }
-        // Merge channel names
-        if (!entry.channels.includes(ch.name)) {
-          entry.channels.push(ch.name)
-        }
-        // Use pricing from whichever channel provides it
-        if (!entry.pricing && model.pricing) {
-          entry.pricing = model.pricing
-        }
-      }
-    }
-  }
-
-  // Sort: models with pricing first, then alphabetically
-  const result = Array.from(modelMap.values())
-  result.sort((a, b) => {
-    if (a.platform !== b.platform) return a.platform.localeCompare(b.platform)
-    return a.name.localeCompare(b.name)
-  })
-  return result
-})
-
 // ── Available platforms ──
 const availablePlatforms = computed(() => {
   const set = new Set<string>()
-  for (const m of aggregatedModels.value) {
+  for (const m of models.value) {
     set.add(m.platform)
   }
   return Array.from(set).sort()
@@ -326,7 +211,7 @@ const availablePlatforms = computed(() => {
 
 // ── Filter ──
 const filteredModels = computed(() => {
-  let list = aggregatedModels.value
+  let list = models.value
 
   // Platform filter
   if (selectedPlatform.value) {
@@ -339,23 +224,12 @@ const filteredModels = computed(() => {
     list = list.filter(m =>
       m.name.toLowerCase().includes(q) ||
       m.platform.toLowerCase().includes(q) ||
-      m.groups.some(g => g.name.toLowerCase().includes(q)) ||
-      m.channels.some(ch => ch.toLowerCase().includes(q))
+      m.groups.some(g => g.name.toLowerCase().includes(q))
     )
   }
 
   return list
 })
-
-// ── Helpers ──
-function billingModeLabel(mode: string): string {
-  switch (mode) {
-    case BILLING_MODE_TOKEN: return t('modelPlaza.pricing.modeToken')
-    case BILLING_MODE_PER_REQUEST: return t('modelPlaza.pricing.modePerRequest')
-    case BILLING_MODE_IMAGE: return t('modelPlaza.pricing.modeImage')
-    default: return mode
-  }
-}
 
 function formatRate(rate: number): string {
   if (rate === Math.floor(rate)) return String(rate)
@@ -366,14 +240,14 @@ function formatRate(rate: number): string {
 async function loadData() {
   loading.value = true
   try {
-    const [list, rates] = await Promise.all([
-      userChannelsAPI.getAvailable(),
+    const [resp, rates] = await Promise.all([
+      modelPlazaAPI.getModelPlaza(),
       userGroupsAPI.getUserGroupRates().catch((err: unknown) => {
         console.error('Failed to load user group rates:', err)
         return {} as Record<number, number>
       }),
     ])
-    channels.value = list
+    models.value = resp.models || []
     userGroupRates.value = rates
   } catch (err: unknown) {
     appStore.showError(extractApiErrorMessage(err, t('common.error')))
@@ -382,7 +256,7 @@ async function loadData() {
   }
 }
 
-// ── Price formatting ──
+// ── Price formatting ── (prices are per-token from LiteLLM, scale to per-1M tokens)
 function formatPrice(value: number | null | undefined, scale: number = 1e6): string {
   if (value == null) return '-'
   const scaled = value * scale

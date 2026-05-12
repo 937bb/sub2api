@@ -576,6 +576,33 @@ func (s *PricingService) GetModelPricing(modelName string) *LiteLLMModelPricing 
 	return nil
 }
 
+// ModelPricingEntry is a single model entry returned by ListAll.
+type ModelPricingEntry struct {
+	Name     string              `json:"name"`
+	Provider string              `json:"provider"`
+	Mode     string              `json:"mode"`
+	Pricing  *LiteLLMModelPricing `json:"pricing"`
+}
+
+// ListAll returns a snapshot of all loaded model pricing entries.
+// Used by the Model Plaza feature to display available models without
+// depending on the channels configuration.
+func (s *PricingService) ListAll() []ModelPricingEntry {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	out := make([]ModelPricingEntry, 0, len(s.pricingData))
+	for name, p := range s.pricingData {
+		out = append(out, ModelPricingEntry{
+			Name:     name,
+			Provider: p.LiteLLMProvider,
+			Mode:     p.Mode,
+			Pricing:  p,
+		})
+	}
+	return out
+}
+
 func (s *PricingService) buildModelLookupCandidates(modelLower string) []string {
 	// Prefer canonical model name first (this also improves billing compatibility with "models/xxx").
 	candidates := []string{
