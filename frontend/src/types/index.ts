@@ -1590,6 +1590,10 @@ export interface ExtendSubscriptionRequest {
   days: number
 }
 
+export interface SwitchSubscriptionGroupRequest {
+  group_id: number
+}
+
 // ==================== Query Parameters ====================
 
 export interface UsageQueryParams {
