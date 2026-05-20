@@ -2333,6 +2333,294 @@
             </div>
           </div>
 
+          <!-- DingTalk Connect OAuth 登录 -->
+          <div class="card">
+            <div
+              class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
+            >
+              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+                {{ t("admin.settings.dingtalk.title") }}
+              </h2>
+              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                {{ t("admin.settings.dingtalk.description") }}
+              </p>
+            </div>
+            <div class="space-y-5 p-6">
+              <div class="flex items-center justify-between">
+                <div>
+                  <label class="font-medium text-gray-900 dark:text-white">{{
+                    t("admin.settings.dingtalk.enable")
+                  }}</label>
+                  <p class="text-sm text-gray-500 dark:text-gray-400">
+                    {{ t("admin.settings.dingtalk.enableHint") }}
+                  </p>
+                </div>
+                <Toggle v-model="form.dingtalk_connect_enabled" />
+              </div>
+
+              <div
+                v-if="form.dingtalk_connect_enabled"
+                class="border-t border-gray-100 pt-4 dark:border-dark-700"
+              >
+                <div class="grid grid-cols-1 gap-6">
+                  <div>
+                    <label
+                      class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
+                    >
+                      {{ t("admin.settings.dingtalk.clientId") }}
+                    </label>
+                    <input
+                      v-model="form.dingtalk_connect_client_id"
+                      type="text"
+                      class="input font-mono text-sm"
+                      :placeholder="
+                        t('admin.settings.dingtalk.clientIdPlaceholder')
+                      "
+                    />
+                    <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                      {{ t("admin.settings.dingtalk.clientIdHint") }}
+                    </p>
+                  </div>
+
+                  <div>
+                    <label
+                      class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
+                    >
+                      {{ t("admin.settings.dingtalk.clientSecret") }}
+                    </label>
+                    <input
+                      v-model="form.dingtalk_connect_client_secret"
+                      type="password"
+                      class="input font-mono text-sm"
+                      :placeholder="
+                        form.dingtalk_connect_client_secret_configured
+                          ? t(
+                              'admin.settings.dingtalk.clientSecretConfiguredPlaceholder',
+                            )
+                          : t('admin.settings.dingtalk.clientSecretPlaceholder')
+                      "
+                    />
+                    <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                      {{
+                        form.dingtalk_connect_client_secret_configured
+                          ? t(
+                              "admin.settings.dingtalk.clientSecretConfiguredHint",
+                            )
+                          : t("admin.settings.dingtalk.clientSecretHint")
+                      }}
+                    </p>
+                  </div>
+
+                  <div>
+                    <label
+                      class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
+                    >
+                      {{ t("admin.settings.dingtalk.redirectUrl") }}
+                    </label>
+                    <input
+                      v-model="form.dingtalk_connect_redirect_url"
+                      type="url"
+                      class="input font-mono text-sm"
+                      :placeholder="
+                        t('admin.settings.dingtalk.redirectUrlPlaceholder')
+                      "
+                    />
+                    <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                      {{ t("admin.settings.dingtalk.redirectUrlHint") }}
+                    </p>
+                  </div>
+
+                  <!-- Corp Restriction Policy -->
+                  <div class="border-t border-gray-100 pt-4 dark:border-dark-700">
+                    <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      {{ t("admin.settings.dingtalk.corpPolicy.label") }}
+                    </label>
+                    <p class="mb-3 text-xs text-gray-500 dark:text-gray-400">
+                      {{ t("admin.settings.dingtalk.corpPolicy.hint") }}
+                    </p>
+                    <div class="space-y-2">
+                      <label class="flex cursor-pointer items-center gap-3">
+                        <input
+                          v-model="form.dingtalk_connect_corp_restriction_policy"
+                          type="radio"
+                          value="none"
+                          class="h-4 w-4 text-primary-600"
+                        />
+                        <span class="text-sm text-gray-700 dark:text-gray-300">
+                          {{ t("admin.settings.dingtalk.corpPolicy.none") }}
+                        </span>
+                      </label>
+                      <label class="flex cursor-pointer items-center gap-3">
+                        <input
+                          v-model="form.dingtalk_connect_corp_restriction_policy"
+                          type="radio"
+                          value="internal_only"
+                          class="h-4 w-4 text-primary-600"
+                        />
+                        <span class="text-sm text-gray-700 dark:text-gray-300">
+                          {{ t("admin.settings.dingtalk.corpPolicy.internalOnly") }}
+                        </span>
+                      </label>
+                    </div>
+                  </div>
+
+                  <!-- bypass_registration toggle（仅 internal_only 模式下可见可用） -->
+                  <div
+                    v-if="form.dingtalk_connect_corp_restriction_policy === 'internal_only'"
+                    class="flex items-center justify-between pt-4 border-t border-gray-100 dark:border-dark-700"
+                  >
+                    <div>
+                      <label class="font-medium text-gray-900 dark:text-white">{{
+                        t("admin.settings.dingtalk.bypassRegistration")
+                      }}</label>
+                      <p class="text-sm text-gray-500 dark:text-gray-400">
+                        {{ t("admin.settings.dingtalk.bypassRegistrationHint") }}
+                      </p>
+                    </div>
+                    <Toggle v-model="form.dingtalk_connect_bypass_registration" />
+                  </div>
+
+                  <!-- 身份同步开关（仅 internal_only 模式下可见） -->
+                  <div
+                    v-if="form.dingtalk_connect_corp_restriction_policy === 'internal_only'"
+                    class="pt-4 border-t border-gray-100 dark:border-dark-700 space-y-2"
+                  >
+                    <div class="flex items-center justify-between">
+                      <div>
+                        <label class="font-medium text-gray-900 dark:text-white">{{
+                          t("admin.settings.dingtalk.syncDisplayName")
+                        }}</label>
+                        <p class="text-sm text-gray-500 dark:text-gray-400">
+                          {{ t("admin.settings.dingtalk.syncDisplayNameHint") }}
+                        </p>
+                      </div>
+                      <Toggle v-model="form.dingtalk_connect_sync_display_name" />
+                    </div>
+                    <div v-if="form.dingtalk_connect_sync_display_name" class="space-y-2">
+                      <div class="flex items-center gap-2">
+                        <label class="text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap min-w-[5rem]">
+                          {{ t("admin.settings.dingtalk.syncDisplayNameTarget") }}
+                        </label>
+                        <input
+                          v-model="form.dingtalk_connect_sync_display_name_attr_key"
+                          type="text"
+                          placeholder="dingtalk_name"
+                          class="input text-sm flex-1 max-w-xs"
+                        />
+                      </div>
+                      <div class="flex items-center gap-2">
+                        <label class="text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap min-w-[5rem]">
+                          {{ t("admin.settings.dingtalk.syncAttrDisplayName") }}
+                        </label>
+                        <input
+                          v-model="form.dingtalk_connect_sync_display_name_attr_name"
+                          type="text"
+                          placeholder="钉钉姓名"
+                          class="input text-sm flex-1 max-w-xs"
+                        />
+                      </div>
+                    </div>
+                    <p v-if="form.dingtalk_connect_sync_display_name" class="text-xs text-gray-400 dark:text-gray-500">
+                      {{ t("admin.settings.dingtalk.syncDisplayNameTargetHint") }}
+                    </p>
+                  </div>
+                  <div
+                    v-if="form.dingtalk_connect_corp_restriction_policy === 'internal_only'"
+                    class="pt-4 border-t border-gray-100 dark:border-dark-700 space-y-2"
+                  >
+                    <div class="flex items-center justify-between">
+                      <div>
+                        <label class="font-medium text-gray-900 dark:text-white">{{
+                          t("admin.settings.dingtalk.syncCorpEmail")
+                        }}</label>
+                        <p class="text-sm text-gray-500 dark:text-gray-400">
+                          {{ t("admin.settings.dingtalk.syncCorpEmailHint") }}
+                        </p>
+                        <p class="text-xs text-amber-600 dark:text-amber-400 mt-1">
+                          {{ t("admin.settings.dingtalk.syncCorpEmailPermissionHint") }}
+                        </p>
+                      </div>
+                      <Toggle v-model="form.dingtalk_connect_sync_corp_email" />
+                    </div>
+                    <div v-if="form.dingtalk_connect_sync_corp_email" class="space-y-2">
+                      <div class="flex items-center gap-2">
+                        <label class="text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap min-w-[5rem]">
+                          {{ t("admin.settings.dingtalk.syncCorpEmailTarget") }}
+                        </label>
+                        <input
+                          v-model="form.dingtalk_connect_sync_corp_email_attr_key"
+                          type="text"
+                          placeholder="dingtalk_email"
+                          class="input text-sm flex-1 max-w-xs"
+                        />
+                      </div>
+                      <div class="flex items-center gap-2">
+                        <label class="text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap min-w-[5rem]">
+                          {{ t("admin.settings.dingtalk.syncAttrDisplayName") }}
+                        </label>
+                        <input
+                          v-model="form.dingtalk_connect_sync_corp_email_attr_name"
+                          type="text"
+                          placeholder="钉钉企业邮箱"
+                          class="input text-sm flex-1 max-w-xs"
+                        />
+                      </div>
+                    </div>
+                    <p v-if="form.dingtalk_connect_sync_corp_email" class="text-xs text-gray-400 dark:text-gray-500">
+                      {{ t("admin.settings.dingtalk.syncCorpEmailTargetHint") }}
+                    </p>
+                  </div>
+                  <div
+                    v-if="form.dingtalk_connect_corp_restriction_policy === 'internal_only'"
+                    class="pt-4 border-t border-gray-100 dark:border-dark-700 space-y-2"
+                  >
+                    <div class="flex items-center justify-between">
+                      <div>
+                        <label class="font-medium text-gray-900 dark:text-white">{{
+                          t("admin.settings.dingtalk.syncDept")
+                        }}</label>
+                        <p class="text-sm text-gray-500 dark:text-gray-400">
+                          {{ t("admin.settings.dingtalk.syncDeptHint") }}
+                        </p>
+                        <p class="text-xs text-amber-600 dark:text-amber-400 mt-1">
+                          {{ t("admin.settings.dingtalk.syncDeptPermissionHint") }}
+                        </p>
+                      </div>
+                      <Toggle v-model="form.dingtalk_connect_sync_dept" />
+                    </div>
+                    <div v-if="form.dingtalk_connect_sync_dept" class="space-y-2">
+                      <div class="flex items-center gap-2">
+                        <label class="text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap min-w-[5rem]">
+                          {{ t("admin.settings.dingtalk.syncDeptTarget") }}
+                        </label>
+                        <input
+                          v-model="form.dingtalk_connect_sync_dept_attr_key"
+                          type="text"
+                          placeholder="dingtalk_department"
+                          class="input text-sm flex-1 max-w-xs"
+                        />
+                      </div>
+                      <div class="flex items-center gap-2">
+                        <label class="text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap min-w-[5rem]">
+                          {{ t("admin.settings.dingtalk.syncAttrDisplayName") }}
+                        </label>
+                        <input
+                          v-model="form.dingtalk_connect_sync_dept_attr_name"
+                          type="text"
+                          placeholder="钉钉部门"
+                          class="input text-sm flex-1 max-w-xs"
+                        />
+                      </div>
+                    </div>
+                    <p v-if="form.dingtalk_connect_sync_dept" class="text-xs text-gray-400 dark:text-gray-500">
+                      {{ t("admin.settings.dingtalk.syncDeptTargetHint") }}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <!-- Generic OIDC OAuth 登录 -->
           <div class="card">
             <div
@@ -3477,6 +3765,36 @@
                   {{
                     t(
                       "admin.settings.gatewayForwarding.antigravityUserAgentVersionHint",
+                    )
+                  }}
+                </p>
+              </div>
+
+              <!-- OpenAI Codex UA -->
+              <div>
+                <label
+                  class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
+                >
+                  {{
+                    t(
+                      "admin.settings.gatewayForwarding.openaiCodexUserAgent",
+                    )
+                  }}
+                </label>
+                <input
+                  v-model="form.openai_codex_user_agent"
+                  type="text"
+                  class="input w-full font-mono text-sm"
+                  :placeholder="
+                    t(
+                      'admin.settings.gatewayForwarding.openaiCodexUserAgentPlaceholder',
+                    )
+                  "
+                />
+                <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                  {{
+                    t(
+                      "admin.settings.gatewayForwarding.openaiCodexUserAgentHint",
                     )
                   }}
                 </p>
@@ -4886,18 +5204,6 @@
                 </p>
               </div>
 
-              <div class="flex items-center justify-between">
-                <div>
-                  <label class="input-label">
-                    {{ t('admin.settings.features.affiliate.redeemRebate') }}
-                  </label>
-                  <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                    {{ t('admin.settings.features.affiliate.redeemRebateHint') }}
-                  </p>
-                </div>
-                <Toggle v-model="form.redeem_rebate_enabled" />
-              </div>
-
               <!-- 专属用户管理 -->
               <div class="border-t border-gray-100 pt-6 dark:border-dark-700">
                 <div class="mb-3 flex items-center justify-between">
@@ -5199,535 +5505,6 @@
               >
                 {{ affiliateBatchModal.saving ? t('common.saving') : t('common.save') }}
               </button>
-            </div>
-          </div>
-        </div>
-
-        <!-- First Redeem Bonus Settings -->
-        <div class="card">
-          <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
-            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-              {{ t('admin.settings.features.firstRedeemBonus.title') }}
-            </h2>
-            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-              {{ t('admin.settings.features.firstRedeemBonus.description') }}
-            </p>
-          </div>
-          <div class="space-y-6 p-6">
-            <div class="flex items-center justify-between">
-              <div>
-                <label class="input-label">{{ t('admin.settings.features.firstRedeemBonus.enabled') }}</label>
-                <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.firstRedeemBonus.enabledHint') }}</p>
-              </div>
-              <Toggle v-model="form.first_redeem_bonus_enabled" />
-            </div>
-            <div v-if="form.first_redeem_bonus_enabled" class="space-y-6">
-              <div>
-                <label class="input-label">{{ t('admin.settings.features.firstRedeemBonus.multiplier') }}</label>
-                <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.firstRedeemBonus.multiplierHint') }}</p>
-                <input v-model.number="form.first_redeem_bonus_multiplier" type="number" step="0.1" min="1" class="input mt-2 w-32" />
-              </div>
-              <div>
-                <label class="input-label">{{ t('admin.settings.features.firstRedeemBonus.cap') }}</label>
-                <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.firstRedeemBonus.capHint') }}</p>
-                <input v-model.number="form.first_redeem_bonus_cap" type="number" step="0.01" min="0" class="input mt-2 w-32" />
-              </div>
-              <div>
-                <label class="input-label">{{ t('admin.settings.features.firstRedeemBonus.balanceType') }}</label>
-                <select v-model="form.first_redeem_bonus_balance_type" class="input mt-2 w-48">
-                  <option value="permanent">{{ t('admin.settings.features.firstRedeemBonus.permanent') }}</option>
-                  <option value="expirable">{{ t('admin.settings.features.firstRedeemBonus.expirable') }}</option>
-                </select>
-              </div>
-              <div v-if="form.first_redeem_bonus_balance_type === 'expirable'">
-                <label class="input-label">{{ t('admin.settings.features.firstRedeemBonus.expiryDays') }}</label>
-                <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.firstRedeemBonus.expiryDaysHint') }}</p>
-                <input v-model.number="form.first_redeem_bonus_expiry_days" type="number" min="1" max="3650" class="input mt-2 w-32" />
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Regular Redeem Bonus Settings -->
-        <div class="card">
-          <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
-            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-              {{ t('admin.settings.features.redeemBonus.title') }}
-            </h2>
-            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-              {{ t('admin.settings.features.redeemBonus.description') }}
-            </p>
-          </div>
-          <div class="space-y-6 p-6">
-            <div class="flex items-center justify-between">
-              <div>
-                <label class="input-label">{{ t('admin.settings.features.redeemBonus.enabled') }}</label>
-                <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.redeemBonus.enabledHint') }}</p>
-              </div>
-              <Toggle v-model="form.redeem_bonus_enabled" />
-            </div>
-            <div v-if="form.redeem_bonus_enabled" class="space-y-6">
-              <div>
-                <label class="input-label">{{ t('admin.settings.features.redeemBonus.mode') }}</label>
-                <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.redeemBonus.modeHint') }}</p>
-                <select v-model="form.redeem_bonus_mode" class="input mt-2 w-48">
-                  <option value="fixed">{{ t('admin.settings.features.redeemBonus.modeFixed') }}</option>
-                  <option value="percent">{{ t('admin.settings.features.redeemBonus.modePercent') }}</option>
-                  <option value="random">{{ t('admin.settings.features.redeemBonus.modeRandom') }}</option>
-                </select>
-              </div>
-              <div v-if="form.redeem_bonus_mode === 'fixed'">
-                <label class="input-label">{{ t('admin.settings.features.redeemBonus.fixedAmount') }}</label>
-                <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.redeemBonus.fixedAmountHint') }}</p>
-                <input v-model.number="form.redeem_bonus_fixed_amount" type="number" step="0.01" min="0" class="input mt-2 w-32" />
-              </div>
-              <div v-if="form.redeem_bonus_mode === 'percent'">
-                <label class="input-label">{{ t('admin.settings.features.redeemBonus.percent') }}</label>
-                <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.redeemBonus.percentHint') }}</p>
-                <input v-model.number="form.redeem_bonus_percent" type="number" step="0.1" min="0" max="100" class="input mt-2 w-32" />
-              </div>
-              <div v-if="form.redeem_bonus_mode === 'random'">
-                <label class="input-label">{{ t('admin.settings.features.redeemBonus.randomHint') }}</label>
-                <div class="mt-2 flex items-center gap-2">
-                  <input v-model.number="form.redeem_bonus_random_min" type="number" min="0" step="0.01" class="input w-24" :placeholder="t('admin.settings.features.redeemBonus.randomMin')" />
-                  <span class="text-gray-400">~</span>
-                  <input v-model.number="form.redeem_bonus_random_max" type="number" min="0" step="0.01" class="input w-24" :placeholder="t('admin.settings.features.redeemBonus.randomMax')" />
-                </div>
-              </div>
-              <div>
-                <label class="input-label">{{ t('admin.settings.features.redeemBonus.cap') }}</label>
-                <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.redeemBonus.capHint') }}</p>
-                <input v-model.number="form.redeem_bonus_cap" type="number" step="0.01" min="0" class="input mt-2 w-32" />
-              </div>
-              <div>
-                <label class="input-label">{{ t('admin.settings.features.redeemBonus.minAmount') }}</label>
-                <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.redeemBonus.minAmountHint') }}</p>
-                <input v-model.number="form.redeem_bonus_min_amount" type="number" step="0.01" min="0" class="input mt-2 w-32" />
-              </div>
-              <div>
-                <label class="input-label">{{ t('admin.settings.features.redeemBonus.balanceType') }}</label>
-                <select v-model="form.redeem_bonus_balance_type" class="input mt-2 w-48">
-                  <option value="permanent">{{ t('admin.settings.features.redeemBonus.permanent') }}</option>
-                  <option value="expirable">{{ t('admin.settings.features.redeemBonus.expirable') }}</option>
-                </select>
-              </div>
-              <div v-if="form.redeem_bonus_balance_type === 'expirable'">
-                <label class="input-label">{{ t('admin.settings.features.redeemBonus.expiryDays') }}</label>
-                <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.redeemBonus.expiryDaysHint') }}</p>
-                <input v-model.number="form.redeem_bonus_expiry_days" type="number" min="1" max="3650" class="input mt-2 w-32" />
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Checkin Settings -->
-        <div class="card">
-          <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
-            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-              {{ t('admin.settings.features.checkin.title') }}
-            </h2>
-            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-              {{ t('admin.settings.features.checkin.description') }}
-            </p>
-          </div>
-          <div class="space-y-6 p-6">
-            <!-- Enabled -->
-            <div class="flex items-center justify-between">
-              <div>
-                <label class="input-label">{{ t('admin.settings.features.checkin.enabled') }}</label>
-                <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.checkin.enabledHint') }}</p>
-              </div>
-              <Toggle v-model="form.checkin_enabled" />
-            </div>
-
-            <div v-if="form.checkin_enabled" class="space-y-6">
-              <!-- Mode -->
-              <div>
-                <label class="input-label">{{ t('admin.settings.features.checkin.mode') }}</label>
-                <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.checkin.modeHint') }}</p>
-                <select v-model="form.checkin_mode" class="input mt-2 w-48">
-                  <option value="fixed">{{ t('admin.settings.features.checkin.modeFixed') }}</option>
-                  <option value="random">{{ t('admin.settings.features.checkin.modeRandom') }}</option>
-                </select>
-              </div>
-
-              <!-- Fixed Amount -->
-              <div v-if="form.checkin_mode === 'fixed'">
-                <label class="input-label">{{ t('admin.settings.features.checkin.fixedAmount') }}</label>
-                <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.checkin.fixedAmountHint') }}</p>
-                <input v-model.number="form.checkin_fixed_amount" type="number" step="0.01" min="0" class="input mt-2 w-32" />
-              </div>
-
-              <!-- Random Range -->
-              <div v-if="form.checkin_mode === 'random'">
-                <label class="input-label">{{ t('admin.settings.features.checkin.randomHint') }}</label>
-                <div class="mt-2 flex items-center gap-2">
-                  <input v-model.number="form.checkin_random_min" type="number" min="0" step="0.01" class="input w-24" :placeholder="t('admin.settings.features.checkin.randomMin')" />
-                  <span class="text-gray-400">~</span>
-                  <input v-model.number="form.checkin_random_max" type="number" min="0" step="0.01" class="input w-24" :placeholder="t('admin.settings.features.checkin.randomMax')" />
-                </div>
-              </div>
-
-              <!-- Balance Type -->
-              <div>
-                <label class="input-label">{{ t('admin.settings.features.checkin.balanceType') }}</label>
-                <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.checkin.balanceTypeHint') }}</p>
-                <select v-model="form.checkin_balance_type" class="input mt-2 w-48">
-                  <option value="permanent">{{ t('admin.settings.features.checkin.permanent') }}</option>
-                  <option value="expirable">{{ t('admin.settings.features.checkin.expirable') }}</option>
-                </select>
-              </div>
-
-              <!-- Expiry Days -->
-              <div v-if="form.checkin_balance_type === 'expirable'">
-                <label class="input-label">{{ t('admin.settings.features.checkin.expiryDays') }}</label>
-                <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.checkin.expiryDaysHint') }}</p>
-                <input v-model.number="form.checkin_expiry_days" type="number" min="1" max="3650" class="input mt-2 w-32" />
-              </div>
-
-              <!-- Milestones -->
-              <div class="border-t border-gray-100 pt-6 dark:border-dark-700">
-                <div class="mb-3 flex items-center justify-between">
-                  <div>
-                    <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.settings.features.checkin.milestones') }}</h3>
-                    <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.checkin.milestonesHint') }}</p>
-                  </div>
-                  <button type="button" class="btn btn-primary btn-sm" @click="addCheckinMilestone">
-                    + {{ t('admin.settings.features.checkin.addMilestone') }}
-                  </button>
-                </div>
-                <div v-if="checkinMilestones.length > 0" class="overflow-x-auto">
-                  <table class="w-full text-left text-sm">
-                    <thead class="border-b border-gray-100 bg-gray-50/50 dark:border-dark-700 dark:bg-dark-800/50">
-                      <tr>
-                        <th class="px-3 py-2 font-medium text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.checkin.milestoneDays') }}</th>
-                        <th class="px-3 py-2 font-medium text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.checkin.milestoneAmount') }}</th>
-                        <th class="px-3 py-2 font-medium text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.checkin.milestoneBalanceType') }}</th>
-                        <th class="px-3 py-2 font-medium text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.checkin.milestoneExpiryDays') }}</th>
-                        <th class="px-3 py-2"></th>
-                      </tr>
-                    </thead>
-                    <tbody class="divide-y divide-gray-100 dark:divide-dark-700">
-                      <tr v-for="(ms, idx) in checkinMilestones" :key="idx">
-                        <td class="px-3 py-2">
-                          <input v-model.number="ms.days" type="number" min="1" class="input w-20" />
-                        </td>
-                        <td class="px-3 py-2">
-                          <input v-model.number="ms.amount" type="number" step="0.01" min="0" class="input w-24" />
-                        </td>
-                        <td class="px-3 py-2">
-                          <select v-model="ms.balance_type" class="input w-28">
-                            <option value="permanent">{{ t('admin.settings.features.checkin.permanent') }}</option>
-                            <option value="expirable">{{ t('admin.settings.features.checkin.expirable') }}</option>
-                          </select>
-                        </td>
-                        <td class="px-3 py-2">
-                          <input v-model.number="ms.expiry_days" type="number" min="0" class="input w-20" :disabled="ms.balance_type !== 'expirable'" />
-                        </td>
-                        <td class="px-3 py-2">
-                          <button type="button" class="text-red-500 hover:text-red-700 dark:hover:text-red-400" @click="removeCheckinMilestone(idx)">
-                            {{ t('admin.settings.features.checkin.removeMilestone') }}
-                          </button>
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Balance Model Settings -->
-        <div class="card">
-          <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
-            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-              {{ t('admin.settings.features.balanceModel.title') }}
-            </h2>
-            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-              {{ t('admin.settings.features.balanceModel.description') }}
-            </p>
-          </div>
-          <div class="space-y-6 p-6">
-            <!-- Balance Expiry Enabled -->
-            <div class="flex items-center justify-between">
-              <div>
-                <label class="input-label">
-                  {{ t('admin.settings.features.balanceModel.expiryEnabled') }}
-                </label>
-                <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                  {{ t('admin.settings.features.balanceModel.expiryEnabledHint') }}
-                </p>
-              </div>
-              <Toggle v-model="form.balance_expiry_enabled" />
-            </div>
-
-            <div v-if="form.balance_expiry_enabled" class="space-y-6">
-              <!-- Warning Days -->
-              <div>
-                <label class="input-label">
-                  {{ t('admin.settings.features.balanceModel.warningDays') }}
-                </label>
-                <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                  {{ t('admin.settings.features.balanceModel.warningDaysHint') }}
-                </p>
-                <input
-                  v-model.number="form.balance_expiry_warning_days"
-                  type="number"
-                  min="1"
-                  max="90"
-                  class="input mt-2 w-32"
-                />
-              </div>
-
-              <!-- Deduction Order -->
-              <div>
-                <label class="input-label">
-                  {{ t('admin.settings.features.balanceModel.deductionOrder') }}
-                </label>
-                <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                  {{ t('admin.settings.features.balanceModel.deductionOrderHint') }}
-                </p>
-                <select v-model="form.balance_deduction_order" class="input mt-2 w-64">
-                  <option value="expiring_first">{{ t('admin.settings.features.balanceModel.expiringFirst') }}</option>
-                  <option value="permanent_first">{{ t('admin.settings.features.balanceModel.permanentFirst') }}</option>
-                </select>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Leaderboard Settings -->
-        <div class="card">
-          <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
-            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-              {{ t('admin.settings.features.leaderboard.title') }}
-            </h2>
-            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-              {{ t('admin.settings.features.leaderboard.description') }}
-            </p>
-          </div>
-          <div class="space-y-6 p-6">
-            <div class="flex items-center justify-between">
-              <div>
-                <label class="input-label">{{ t('admin.settings.features.leaderboard.enabled') }}</label>
-                <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.leaderboard.enabledHint') }}</p>
-              </div>
-              <Toggle v-model="form.leaderboard_enabled" />
-            </div>
-            <div v-if="form.leaderboard_enabled" class="space-y-6">
-              <div class="flex items-center justify-between">
-                <div>
-                  <label class="input-label">{{ t('admin.settings.features.leaderboard.maskEmail') }}</label>
-                  <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.leaderboard.maskEmailHint') }}</p>
-                </div>
-                <Toggle v-model="form.leaderboard_mask_email" />
-              </div>
-              <div>
-                <label class="input-label">{{ t('admin.settings.features.leaderboard.topN') }}</label>
-                <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.leaderboard.topNHint') }}</p>
-                <input v-model.number="form.leaderboard_top_n" type="number" min="1" max="100" class="input mt-2 w-32" />
-              </div>
-              <!-- Reward Rules Table -->
-              <div>
-                <label class="input-label">{{ t('admin.settings.features.leaderboard.rewardRules') }}</label>
-                <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.leaderboard.rewardRulesHint') }}</p>
-                <div class="mt-3 overflow-x-auto">
-                  <table class="w-full text-sm">
-                    <thead>
-                      <tr class="border-b border-gray-200 dark:border-dark-600">
-                        <th class="px-2 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.leaderboard.ruleRank') }}</th>
-                        <th class="px-2 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.leaderboard.ruleMode') }}</th>
-                        <th class="px-2 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.leaderboard.ruleAmount') }}</th>
-                        <th class="px-2 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.leaderboard.ruleBalanceType') }}</th>
-                        <th class="px-2 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.leaderboard.ruleExpiryDays') }}</th>
-                        <th class="px-2 py-2"></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr v-for="(rule, idx) in leaderboardRewardRules" :key="idx" class="border-b border-gray-100 dark:border-dark-700">
-                        <td class="px-2 py-2"><input v-model.number="rule.rank" type="number" min="1" class="input w-16" /></td>
-                        <td class="px-2 py-2">
-                          <select v-model="rule.mode" class="input w-28">
-                            <option value="fixed">{{ t('admin.settings.features.leaderboard.modeFixed') }}</option>
-                            <option value="percent">{{ t('admin.settings.features.leaderboard.modePercent') }}</option>
-                          </select>
-                        </td>
-                        <td class="px-2 py-2"><input v-model.number="rule.amount" type="number" step="0.01" min="0" class="input w-24" /></td>
-                        <td class="px-2 py-2">
-                          <select v-model="rule.balance_type" class="input w-24">
-                            <option value="permanent">{{ t('admin.settings.features.leaderboard.permanent') }}</option>
-                            <option value="expirable">{{ t('admin.settings.features.leaderboard.expirable') }}</option>
-                          </select>
-                        </td>
-                        <td class="px-2 py-2"><input v-model.number="rule.expiry_days" type="number" min="0" class="input w-20" /></td>
-                        <td class="px-2 py-2">
-                          <button class="text-xs text-red-500 hover:text-red-700" @click="leaderboardRewardRules.splice(idx, 1)">
-                            {{ t('admin.settings.features.leaderboard.removeRule') }}
-                          </button>
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-                <button class="btn btn-sm mt-2 text-xs" @click="leaderboardRewardRules.push({ rank: leaderboardRewardRules.length + 1, mode: 'fixed', amount: 1, balance_type: 'permanent', expiry_days: 0 })">
-                  + {{ t('admin.settings.features.leaderboard.addRule') }}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Cashback Settings -->
-        <div class="card">
-          <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
-            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-              {{ t('admin.settings.features.cashback.title') }}
-            </h2>
-            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-              {{ t('admin.settings.features.cashback.description') }}
-            </p>
-          </div>
-          <div class="space-y-6 p-6">
-            <div class="flex items-center justify-between">
-              <div>
-                <label class="input-label">{{ t('admin.settings.features.cashback.enabled') }}</label>
-                <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.cashback.enabledHint') }}</p>
-              </div>
-              <Toggle v-model="form.cashback_enabled" />
-            </div>
-            <div v-if="form.cashback_enabled" class="space-y-6">
-              <div>
-                <label class="input-label">{{ t('admin.settings.features.cashback.threshold') }}</label>
-                <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.cashback.thresholdHint') }}</p>
-                <input v-model.number="form.cashback_threshold" type="number" step="0.01" min="0" class="input mt-2 w-32" />
-              </div>
-              <div>
-                <label class="input-label">{{ t('admin.settings.features.cashback.mode') }}</label>
-                <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.cashback.modeHint') }}</p>
-                <select v-model="form.cashback_mode" class="input mt-2 w-48">
-                  <option value="fixed">{{ t('admin.settings.features.cashback.modeFixed') }}</option>
-                  <option value="percent">{{ t('admin.settings.features.cashback.modePercent') }}</option>
-                  <option value="random">{{ t('admin.settings.features.cashback.modeRandom') }}</option>
-                </select>
-              </div>
-              <div v-if="form.cashback_mode === 'fixed'">
-                <label class="input-label">{{ t('admin.settings.features.cashback.fixedAmount') }}</label>
-                <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.cashback.fixedAmountHint') }}</p>
-                <input v-model.number="form.cashback_fixed_amount" type="number" step="0.01" min="0" class="input mt-2 w-32" />
-              </div>
-              <div v-if="form.cashback_mode === 'percent'">
-                <label class="input-label">{{ t('admin.settings.features.cashback.percent') }}</label>
-                <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.cashback.percentHint') }}</p>
-                <input v-model.number="form.cashback_percent" type="number" step="0.1" min="0" max="100" class="input mt-2 w-32" />
-              </div>
-              <div v-if="form.cashback_mode === 'random'">
-                <label class="input-label">{{ t('admin.settings.features.cashback.randomHint') }}</label>
-                <div class="mt-2 flex items-center gap-2">
-                  <input v-model.number="form.cashback_random_min" type="number" min="0" step="0.01" class="input w-24" :placeholder="t('admin.settings.features.cashback.randomMin')" />
-                  <span class="text-gray-400">~</span>
-                  <input v-model.number="form.cashback_random_max" type="number" min="0" step="0.01" class="input w-24" :placeholder="t('admin.settings.features.cashback.randomMax')" />
-                </div>
-              </div>
-              <div>
-                <label class="input-label">{{ t('admin.settings.features.cashback.balanceType') }}</label>
-                <select v-model="form.cashback_balance_type" class="input mt-2 w-48">
-                  <option value="permanent">{{ t('admin.settings.features.cashback.permanent') }}</option>
-                  <option value="expirable">{{ t('admin.settings.features.cashback.expirable') }}</option>
-                </select>
-              </div>
-              <div v-if="form.cashback_balance_type === 'expirable'">
-                <label class="input-label">{{ t('admin.settings.features.cashback.expiryDays') }}</label>
-                <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.cashback.expiryDaysHint') }}</p>
-                <input v-model.number="form.cashback_expiry_days" type="number" min="1" max="3650" class="input mt-2 w-32" />
-              </div>
-              <div>
-                <label class="input-label">{{ t('admin.settings.features.cashback.cycle') }}</label>
-                <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.cashback.cycleHint') }}</p>
-                <select v-model="form.cashback_cycle" class="input mt-2 w-64">
-                  <option value="realtime">{{ t('admin.settings.features.cashback.cycleRealtime') }}</option>
-                  <option value="daily">{{ t('admin.settings.features.cashback.cycleDaily') }}</option>
-                </select>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Off-Peak Pricing Settings -->
-        <div class="card">
-          <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
-            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-              {{ t('admin.settings.features.offPeakPricing.title') }}
-            </h2>
-            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-              {{ t('admin.settings.features.offPeakPricing.description') }}
-            </p>
-          </div>
-          <div class="space-y-6 p-6">
-            <div class="flex items-center justify-between">
-              <div>
-                <label class="input-label">{{ t('admin.settings.features.offPeakPricing.enabled') }}</label>
-                <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.offPeakPricing.enabledHint') }}</p>
-              </div>
-              <Toggle v-model="form.off_peak_pricing_enabled" />
-            </div>
-            <div v-if="form.off_peak_pricing_enabled" class="space-y-4">
-              <div>
-                <label class="input-label">{{ t('admin.settings.features.offPeakPricing.rules') }}</label>
-                <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.offPeakPricing.rulesHint') }}</p>
-                <p class="mt-1 text-xs text-primary-500 dark:text-primary-400">{{ t('admin.settings.features.offPeakPricing.example') }}</p>
-                <div class="mt-3 overflow-x-auto">
-                  <table class="w-full text-sm">
-                    <thead>
-                      <tr class="border-b border-gray-200 dark:border-dark-600">
-                        <th class="px-2 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.offPeakPricing.startHour') }}</th>
-                        <th class="px-2 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.offPeakPricing.endHour') }}</th>
-                        <th class="px-2 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.offPeakPricing.multiplier') }}</th>
-                        <th class="px-2 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.offPeakPricing.groups') }}</th>
-                        <th class="px-2 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.offPeakPricing.label') }}</th>
-                        <th class="px-2 py-2"></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr v-for="(rule, idx) in offPeakPricingRules" :key="idx" class="border-b border-gray-100 dark:border-dark-700">
-                        <td class="px-2 py-2">
-                          <div class="flex items-center gap-1">
-                            <select v-model.number="rule.start_hour" class="input w-20">
-                              <option v-for="h in 24" :key="h-1" :value="h-1">{{ String(h-1).padStart(2,'0') }}:00</option>
-                            </select>
-                          </div>
-                        </td>
-                        <td class="px-2 py-2">
-                          <div class="flex items-center gap-1">
-                            <select v-model.number="rule.end_hour" class="input w-20">
-                              <option v-for="h in 24" :key="h-1" :value="h-1">{{ String(h-1).padStart(2,'0') }}:00</option>
-                            </select>
-                          </div>
-                        </td>
-                        <td class="px-2 py-2"><input v-model.number="rule.multiplier" type="number" step="0.01" min="0.01" max="10" class="input w-24" /></td>
-                        <td class="px-2 py-2">
-                          <MultiSelectDropdown
-                            v-model="rule.group_ids"
-                            :options="allGroupOptions"
-                            :placeholder="t('admin.settings.features.offPeakPricing.allGroups')"
-                            :empty-text="t('common.noGroupsAvailable')"
-                            class="w-44"
-                          />
-                        </td>
-                        <td class="px-2 py-2"><input v-model="rule.label" type="text" class="input w-32" :placeholder="t('admin.settings.features.offPeakPricing.labelPlaceholder')" /></td>
-                        <td class="px-2 py-2">
-                          <button class="text-xs text-red-500 hover:text-red-700" @click="offPeakPricingRules.splice(idx, 1)">
-                            {{ t('admin.settings.features.offPeakPricing.removeRule') }}
-                          </button>
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-                <button class="btn btn-sm mt-2 text-xs" @click="offPeakPricingRules.push({ start_hour: 22, end_hour: 7, multiplier: 0.8, label: '', group_ids: [] })">
-                  + {{ t('admin.settings.features.offPeakPricing.addRule') }}
-                </button>
-              </div>
             </div>
           </div>
         </div>
@@ -6096,6 +5873,38 @@
                       >
                     </div>
                   </div>
+                  <div>
+                    <label class="input-label">{{
+                      t("admin.settings.payment.alipayForceQRCode")
+                    }}</label>
+                    <div class="flex items-center gap-2">
+                      <button
+                        type="button"
+                        :class="[
+                          'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+                          form.payment_alipay_force_qrcode
+                            ? 'bg-primary-500'
+                            : 'bg-gray-300 dark:bg-dark-600',
+                        ]"
+                        @click="
+                          form.payment_alipay_force_qrcode =
+                            !form.payment_alipay_force_qrcode
+                        "
+                      >
+                        <span
+                          :class="[
+                            'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                            form.payment_alipay_force_qrcode
+                              ? 'translate-x-5'
+                              : 'translate-x-0',
+                          ]"
+                        />
+                      </button>
+                      <span class="text-sm text-gray-500 dark:text-gray-400">{{
+                        t("admin.settings.payment.alipayForceQRCodeHint")
+                      }}</span>
+                    </div>
+                  </div>
                 </div>
                 <!-- Row 4: Enabled payment types (provider badges like sub2apipay) -->
                 <div>
@@ -6446,6 +6255,9 @@
               </div>
             </div>
           </div>
+
+          <EmailTemplateEditor />
+
           <!-- Balance Low Notification -->
           <div class="card">
             <div
@@ -6700,10 +6512,10 @@ import PaymentProviderDialog from "@/components/payment/PaymentProviderDialog.vu
 import GroupBadge from "@/components/common/GroupBadge.vue";
 import GroupOptionItem from "@/components/common/GroupOptionItem.vue";
 import Toggle from "@/components/common/Toggle.vue";
-import MultiSelectDropdown from "@/components/common/MultiSelectDropdown.vue";
 import ProxySelector from "@/components/common/ProxySelector.vue";
 import ImageUpload from "@/components/common/ImageUpload.vue";
 import BackupSettings from "@/views/admin/BackupView.vue";
+import EmailTemplateEditor from "@/views/admin/settings/EmailTemplateEditor.vue";
 import { useClipboard } from "@/composables/useClipboard";
 import { affiliatesAPI, type AffiliateAdminEntry, type SimpleUser as AffiliateSimpleUser } from "@/api/admin/affiliates";
 import { extractApiErrorMessage, extractI18nErrorMessage } from "@/utils/apiError";
@@ -6959,6 +6771,7 @@ type SettingsForm = Omit<
   smtp_password: string;
   turnstile_secret_key: string;
   linuxdo_connect_client_secret: string;
+  dingtalk_connect_client_secret: string;
   wechat_connect_app_secret: string;
   wechat_connect_open_app_secret: string;
   wechat_connect_mp_app_secret: string;
@@ -6971,48 +6784,6 @@ type SettingsForm = Omit<
   google_oauth_client_secret: string;
   force_email_on_third_party_signup: boolean;
   openai_advanced_scheduler_enabled: boolean;
-  balance_expiry_enabled: boolean;
-  balance_expiry_warning_days: number;
-  balance_deduction_order: string;
-  first_redeem_bonus_enabled: boolean;
-  first_redeem_bonus_multiplier: number;
-  first_redeem_bonus_cap: number;
-  first_redeem_bonus_balance_type: string;
-  first_redeem_bonus_expiry_days: number;
-  redeem_bonus_enabled: boolean;
-  redeem_bonus_mode: string;
-  redeem_bonus_fixed_amount: number;
-  redeem_bonus_percent: number;
-  redeem_bonus_random_min: number;
-  redeem_bonus_random_max: number;
-  redeem_bonus_cap: number;
-  redeem_bonus_min_amount: number;
-  redeem_bonus_balance_type: string;
-  redeem_bonus_expiry_days: number;
-  leaderboard_enabled: boolean;
-  leaderboard_mask_email: boolean;
-  leaderboard_top_n: number;
-  leaderboard_reward_rules: string;
-  cashback_enabled: boolean;
-  cashback_threshold: number;
-  cashback_mode: string;
-  cashback_fixed_amount: number;
-  cashback_percent: number;
-  cashback_random_min: number;
-  cashback_random_max: number;
-  cashback_balance_type: string;
-  cashback_expiry_days: number;
-  cashback_cycle: string;
-  off_peak_pricing_enabled: boolean;
-  off_peak_pricing_rules: string;
-  checkin_enabled: boolean;
-  checkin_mode: string;
-  checkin_fixed_amount: number;
-  checkin_random_min: number;
-  checkin_random_max: number;
-  checkin_balance_type: string;
-  checkin_expiry_days: number;
-  checkin_milestones: string;
 };
 
 const form = reactive<SettingsForm>({
@@ -7033,49 +6804,6 @@ const form = reactive<SettingsForm>({
   affiliate_rebate_freeze_hours: 0,
   affiliate_rebate_duration_days: 0,
   affiliate_rebate_per_invitee_cap: 0,
-  redeem_rebate_enabled: false,
-  first_redeem_bonus_enabled: false,
-  first_redeem_bonus_multiplier: 2,
-  first_redeem_bonus_cap: 0,
-  first_redeem_bonus_balance_type: 'permanent',
-  first_redeem_bonus_expiry_days: 0,
-  redeem_bonus_enabled: false,
-  redeem_bonus_mode: 'percent',
-  redeem_bonus_fixed_amount: 1,
-  redeem_bonus_percent: 10,
-  redeem_bonus_random_min: 0.01,
-  redeem_bonus_random_max: 1,
-  redeem_bonus_cap: 0,
-  redeem_bonus_min_amount: 0,
-  redeem_bonus_balance_type: 'permanent',
-  redeem_bonus_expiry_days: 0,
-  leaderboard_enabled: false,
-  leaderboard_mask_email: true,
-  leaderboard_top_n: 10,
-  leaderboard_reward_rules: '[]',
-  cashback_enabled: false,
-  cashback_threshold: 1,
-  cashback_mode: 'percent',
-  cashback_fixed_amount: 0.1,
-  cashback_percent: 5,
-  cashback_random_min: 0.01,
-  cashback_random_max: 1,
-  cashback_balance_type: 'permanent',
-  cashback_expiry_days: 0,
-  cashback_cycle: 'daily',
-  off_peak_pricing_enabled: false,
-  off_peak_pricing_rules: '[]',
-  checkin_enabled: false,
-  checkin_mode: 'fixed',
-  checkin_fixed_amount: 0.01,
-  checkin_random_min: 0.01,
-  checkin_random_max: 1,
-  checkin_balance_type: 'permanent',
-  checkin_expiry_days: 0,
-  checkin_milestones: '[]',
-  balance_expiry_enabled: false,
-  balance_expiry_warning_days: 3,
-  balance_deduction_order: 'expiring_first',
   default_concurrency: 1,
   default_subscriptions: [],
   force_email_on_third_party_signup: false,
@@ -7110,6 +6838,7 @@ const form = reactive<SettingsForm>({
   payment_cancel_rate_limit_window: 1,
   payment_cancel_rate_limit_unit: "day",
   payment_cancel_rate_limit_window_mode: "rolling",
+  payment_alipay_force_qrcode: false,
   table_default_page_size: tablePageSizeDefault,
   table_page_size_options: [10, 20, 50, 100],
   custom_menu_items: [] as Array<{
@@ -7145,6 +6874,24 @@ const form = reactive<SettingsForm>({
   linuxdo_connect_client_secret: "",
   linuxdo_connect_client_secret_configured: false,
   linuxdo_connect_redirect_url: "",
+  // DingTalk Connect OAuth 登录
+  dingtalk_connect_enabled: false,
+  dingtalk_connect_client_id: "",
+  dingtalk_connect_client_secret: "",
+  dingtalk_connect_client_secret_configured: false,
+  dingtalk_connect_redirect_url: "",
+  dingtalk_connect_corp_restriction_policy: "none",
+  dingtalk_connect_internal_corp_id: "",
+  dingtalk_connect_bypass_registration: false,
+  dingtalk_connect_sync_corp_email: false,
+  dingtalk_connect_sync_display_name: false,
+  dingtalk_connect_sync_dept: false,
+  dingtalk_connect_sync_corp_email_attr_key: "dingtalk_email",
+  dingtalk_connect_sync_display_name_attr_key: "dingtalk_name",
+  dingtalk_connect_sync_dept_attr_key: "dingtalk_department",
+  dingtalk_connect_sync_corp_email_attr_name: "钉钉企业邮箱",
+  dingtalk_connect_sync_display_name_attr_name: "钉钉姓名",
+  dingtalk_connect_sync_dept_attr_name: "钉钉部门",
   wechat_connect_enabled: false,
   wechat_connect_app_id: "",
   wechat_connect_app_secret: "",
@@ -7229,6 +6976,7 @@ const form = reactive<SettingsForm>({
   enable_anthropic_cache_ttl_1h_injection: false,
   rewrite_message_cache_control: false,
   antigravity_user_agent_version: "",
+  openai_codex_user_agent: "",
   // Balance & quota notification
   balance_low_notify_enabled: false,
   balance_low_notify_threshold: 0,
@@ -7283,6 +7031,14 @@ const authSourceDefaultsMeta = computed(() => [
     description: localText(
       "通过 Google 已验证邮箱首次注册或首次绑定时应用。",
       "Applied on first signup or first bind through a verified Google email.",
+    ),
+  },
+  {
+    source: "dingtalk" as AuthSourceType,
+    title: "钉钉",
+    description: localText(
+      "通过钉钉首次注册或首次绑定时应用。",
+      "Applied on first signup or first bind through DingTalk.",
     ),
   },
 ]);
@@ -7868,6 +7624,7 @@ async function loadSettings() {
     smtpPasswordManuallyEdited.value = false;
     form.turnstile_secret_key = "";
     form.linuxdo_connect_client_secret = "";
+    form.dingtalk_connect_client_secret = "";
     form.github_oauth_client_secret = "";
     form.google_oauth_client_secret = "";
     form.wechat_connect_app_secret = "";
@@ -8187,49 +7944,6 @@ async function saveSettings() {
       affiliate_rebate_freeze_hours: Math.max(0, Math.min(720, Number(form.affiliate_rebate_freeze_hours) || 0)),
       affiliate_rebate_duration_days: Math.max(0, Math.min(3650, Math.floor(Number(form.affiliate_rebate_duration_days) || 0))),
       affiliate_rebate_per_invitee_cap: Math.max(0, Number(form.affiliate_rebate_per_invitee_cap) || 0),
-      redeem_rebate_enabled: form.redeem_rebate_enabled,
-      first_redeem_bonus_enabled: form.first_redeem_bonus_enabled,
-      first_redeem_bonus_multiplier: String(Math.max(1, Number(form.first_redeem_bonus_multiplier) || 2)),
-      first_redeem_bonus_cap: String(Math.max(0, Number(form.first_redeem_bonus_cap) || 0)),
-      first_redeem_bonus_balance_type: form.first_redeem_bonus_balance_type || 'permanent',
-      first_redeem_bonus_expiry_days: String(Math.max(0, Math.floor(Number(form.first_redeem_bonus_expiry_days) || 0))),
-      redeem_bonus_enabled: form.redeem_bonus_enabled,
-      redeem_bonus_mode: form.redeem_bonus_mode || 'percent',
-      redeem_bonus_fixed_amount: String(Math.max(0, Number(form.redeem_bonus_fixed_amount) || 0)),
-      redeem_bonus_percent: String(Math.max(0, Math.min(100, Number(form.redeem_bonus_percent) || 0))),
-      redeem_bonus_random_min: String(Math.max(0, Number(form.redeem_bonus_random_min) || 0)),
-      redeem_bonus_random_max: String(Math.max(0, Number(form.redeem_bonus_random_max) || 0)),
-      redeem_bonus_cap: String(Math.max(0, Number(form.redeem_bonus_cap) || 0)),
-      redeem_bonus_min_amount: String(Math.max(0, Number(form.redeem_bonus_min_amount) || 0)),
-      redeem_bonus_balance_type: form.redeem_bonus_balance_type || 'permanent',
-      redeem_bonus_expiry_days: String(Math.max(0, Math.floor(Number(form.redeem_bonus_expiry_days) || 0))),
-      leaderboard_enabled: form.leaderboard_enabled,
-      leaderboard_mask_email: form.leaderboard_mask_email,
-      leaderboard_top_n: String(Math.max(1, Math.min(100, Math.floor(Number(form.leaderboard_top_n) || 10)))),
-      leaderboard_reward_rules: JSON.stringify(leaderboardRewardRules.value),
-      cashback_enabled: form.cashback_enabled,
-      cashback_threshold: String(Math.max(0, Number(form.cashback_threshold) || 0)),
-      cashback_mode: form.cashback_mode || 'percent',
-      cashback_fixed_amount: String(Math.max(0, Number(form.cashback_fixed_amount) || 0)),
-      cashback_percent: String(Math.max(0, Math.min(100, Number(form.cashback_percent) || 0))),
-      cashback_random_min: String(Math.max(0, Number(form.cashback_random_min) || 0)),
-      cashback_random_max: String(Math.max(0, Number(form.cashback_random_max) || 0)),
-      cashback_balance_type: form.cashback_balance_type || 'permanent',
-      cashback_expiry_days: String(Math.max(0, Math.floor(Number(form.cashback_expiry_days) || 0))),
-      cashback_cycle: form.cashback_cycle || 'daily',
-      off_peak_pricing_enabled: form.off_peak_pricing_enabled,
-      off_peak_pricing_rules: JSON.stringify(offPeakPricingRules.value),
-      checkin_enabled: form.checkin_enabled,
-      checkin_mode: form.checkin_mode || 'fixed',
-      checkin_fixed_amount: String(form.checkin_fixed_amount || 0.01),
-      checkin_random_min: String(Math.max(0, Number(form.checkin_random_min) || 0.01)),
-      checkin_random_max: String(Math.max(0, Number(form.checkin_random_max) || 1)),
-      checkin_balance_type: form.checkin_balance_type || 'permanent',
-      checkin_expiry_days: String(Math.max(0, Math.floor(Number(form.checkin_expiry_days) || 0))),
-      checkin_milestones: JSON.stringify(checkinMilestones.value),
-      balance_expiry_enabled: form.balance_expiry_enabled,
-      balance_expiry_warning_days: Math.max(1, Math.min(90, Math.floor(Number(form.balance_expiry_warning_days) || 3))),
-      balance_deduction_order: form.balance_deduction_order || 'expiring_first',
       default_concurrency: form.default_concurrency,
       default_subscriptions: normalizedDefaultSubscriptions,
       force_email_on_third_party_signup: form.force_email_on_third_party_signup,
@@ -8263,6 +7977,24 @@ async function saveSettings() {
       linuxdo_connect_client_secret:
         form.linuxdo_connect_client_secret || undefined,
       linuxdo_connect_redirect_url: form.linuxdo_connect_redirect_url,
+      dingtalk_connect_enabled: form.dingtalk_connect_enabled,
+      dingtalk_connect_client_id: form.dingtalk_connect_client_id,
+      dingtalk_connect_client_secret:
+        form.dingtalk_connect_client_secret || undefined,
+      dingtalk_connect_redirect_url: form.dingtalk_connect_redirect_url,
+      dingtalk_connect_corp_restriction_policy:
+        form.dingtalk_connect_corp_restriction_policy,
+      dingtalk_connect_internal_corp_id: form.dingtalk_connect_internal_corp_id,
+      dingtalk_connect_bypass_registration: form.dingtalk_connect_bypass_registration,
+      dingtalk_connect_sync_corp_email: form.dingtalk_connect_sync_corp_email,
+      dingtalk_connect_sync_display_name: form.dingtalk_connect_sync_display_name,
+      dingtalk_connect_sync_dept: form.dingtalk_connect_sync_dept,
+      dingtalk_connect_sync_corp_email_attr_key: form.dingtalk_connect_sync_corp_email_attr_key,
+      dingtalk_connect_sync_display_name_attr_key: form.dingtalk_connect_sync_display_name_attr_key,
+      dingtalk_connect_sync_dept_attr_key: form.dingtalk_connect_sync_dept_attr_key,
+      dingtalk_connect_sync_corp_email_attr_name: form.dingtalk_connect_sync_corp_email_attr_name,
+      dingtalk_connect_sync_display_name_attr_name: form.dingtalk_connect_sync_display_name_attr_name,
+      dingtalk_connect_sync_dept_attr_name: form.dingtalk_connect_sync_dept_attr_name,
       wechat_connect_enabled: form.wechat_connect_enabled,
       wechat_connect_app_id:
         form.wechat_connect_open_app_id ||
@@ -8345,6 +8077,8 @@ async function saveSettings() {
       rewrite_message_cache_control: form.rewrite_message_cache_control,
       antigravity_user_agent_version:
         form.antigravity_user_agent_version?.trim() || "",
+      openai_codex_user_agent:
+        form.openai_codex_user_agent?.trim() || "",
       // Payment configuration
       payment_enabled: form.payment_enabled,
       risk_control_enabled: form.risk_control_enabled,
@@ -8372,6 +8106,7 @@ async function saveSettings() {
       payment_cancel_rate_limit_unit: form.payment_cancel_rate_limit_unit,
       payment_cancel_rate_limit_window_mode:
         form.payment_cancel_rate_limit_window_mode,
+      payment_alipay_force_qrcode: form.payment_alipay_force_qrcode,
       openai_advanced_scheduler_enabled: form.openai_advanced_scheduler_enabled,
       // Balance & quota notification
       balance_low_notify_enabled: form.balance_low_notify_enabled,
@@ -8445,6 +8180,7 @@ async function saveSettings() {
     smtpPasswordManuallyEdited.value = false;
     form.turnstile_secret_key = "";
     form.linuxdo_connect_client_secret = "";
+    form.dingtalk_connect_client_secret = "";
     form.github_oauth_client_secret = "";
     form.google_oauth_client_secret = "";
     form.wechat_connect_app_secret = "";
@@ -9301,7 +9037,6 @@ async function handleDeleteProvider() {
 onMounted(() => {
   loadSettings();
   loadSubscriptionGroups();
-  loadAllGroups();
   loadAdminApiKey();
   loadOverloadCooldownSettings();
   loadRateLimit429CooldownSettings();
@@ -9664,118 +9399,19 @@ watch(
   },
 );
 
-// ─── Checkin Milestones ──────────────────────────────────────────────────
-
-interface CheckinMilestoneRow {
-  days: number;
-  amount: number;
-  balance_type: string;
-  expiry_days: number;
-}
-
-const checkinMilestones = ref<CheckinMilestoneRow[]>([]);
-
-interface LeaderboardRewardRuleRow {
-  rank: number;
-  mode: string;
-  amount: number;
-  balance_type: string;
-  expiry_days: number;
-}
-const leaderboardRewardRules = ref<LeaderboardRewardRuleRow[]>([]);
-
-interface OffPeakPricingRuleRow {
-  start_hour: number;
-  end_hour: number;
-  multiplier: number;
-  label: string;
-  group_ids: number[];
-}
-const offPeakPricingRules = ref<OffPeakPricingRuleRow[]>([]);
-const allGroups = ref<AdminGroup[]>([]);
-const allGroupOptions = computed(() =>
-  allGroups.value.map((g) => ({ value: g.id, label: g.name }))
-);
-
-async function loadAllGroups() {
-  try {
-    allGroups.value = await adminAPI.groups.getAll();
-  } catch {
-    allGroups.value = [];
-  }
-}
-
-function addCheckinMilestone() {
-  checkinMilestones.value.push({ days: 7, amount: 1, balance_type: 'permanent', expiry_days: 0 });
-}
-
-function removeCheckinMilestone(idx: number) {
-  checkinMilestones.value.splice(idx, 1);
-}
-
-// Sync milestones from form on settings load
+// bypass_registration 与身份同步三开关仅在 internal_only 模式下生效。切换 policy 到其它值时，
+// 立即把相关字段重置为 false，避免保存请求里残留旧值。后端 admin handler 与
+// 配置加载层都有 coerce 兜底，这里是 UX 层的同步而非安全防线。
 watch(
-  () => form.checkin_milestones,
-  (raw) => {
-    try {
-      const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
-      if (Array.isArray(parsed)) {
-        checkinMilestones.value = parsed.map((m: any) => ({
-          days: Number(m.days) || 7,
-          amount: Number(m.amount) || 0,
-          balance_type: m.balance_type || 'permanent',
-          expiry_days: Number(m.expiry_days) || 0,
-        }));
-      }
-    } catch {
-      checkinMilestones.value = [];
+  () => form.dingtalk_connect_corp_restriction_policy,
+  (policy) => {
+    if (policy !== "internal_only") {
+      if (form.dingtalk_connect_bypass_registration) form.dingtalk_connect_bypass_registration = false;
+      if (form.dingtalk_connect_sync_corp_email) form.dingtalk_connect_sync_corp_email = false;
+      if (form.dingtalk_connect_sync_display_name) form.dingtalk_connect_sync_display_name = false;
+      if (form.dingtalk_connect_sync_dept) form.dingtalk_connect_sync_dept = false;
     }
   },
-  { immediate: true },
-);
-
-// Sync leaderboard reward rules from form on settings load
-watch(
-  () => form.leaderboard_reward_rules,
-  (raw) => {
-    try {
-      const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
-      if (Array.isArray(parsed)) {
-        leaderboardRewardRules.value = parsed.map((r: any) => ({
-          rank: Number(r.rank) || 1,
-          mode: r.mode || 'fixed',
-          amount: Number(r.amount) || 0,
-          balance_type: r.balance_type || 'permanent',
-          expiry_days: Number(r.expiry_days) || 0,
-        }));
-      }
-    } catch {
-      leaderboardRewardRules.value = [];
-    }
-  },
-  { immediate: true },
-);
-
-// Sync off-peak pricing rules from form on settings load
-watch(
-  () => form.off_peak_pricing_rules,
-  (raw) => {
-    try {
-      const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
-      if (Array.isArray(parsed)) {
-        offPeakPricingRules.value = parsed.map((r: any) => ({
-          start_hour: Number(r.start_hour) || 0,
-          end_hour: Number(r.end_hour) || 0,
-          multiplier: Number(r.multiplier) || 1,
-          label: r.label || '',
-          group_ids: Array.isArray(r.group_ids) ? r.group_ids.map(Number) : [],
-        }));
-      }
-    } catch {
-      offPeakPricingRules.value = [];
-    }
-  },
-  { immediate: true },
 );
 </script>
 
@@ -9795,14 +9431,6 @@ watch(
   box-shadow:
     0 12px 28px rgb(15 23 42 / 0.07),
     0 1px 0 rgb(255 255 255 / 0.9) inset;
-}
-
-:global(.dark) .settings-tabs-shell {
-  border-color: rgb(51 65 85 / 0.65);
-  background: rgb(15 23 42 / 0.86);
-  box-shadow:
-    0 16px 36px rgb(0 0 0 / 0.28),
-    0 1px 0 rgb(255 255 255 / 0.06) inset;
 }
 
 .settings-tabs-scroll {
@@ -9848,10 +9476,6 @@ watch(
   opacity: 1;
 }
 
-:global(.dark) .settings-tab::before {
-  background: linear-gradient(135deg, rgb(30 41 59 / 0.9), rgb(51 65 85 / 0.62));
-}
-
 .settings-tab:focus-visible {
   @apply ring-2 ring-primary-500/40 ring-offset-2 ring-offset-white dark:ring-offset-dark-900;
 }
@@ -9861,12 +9485,6 @@ watch(
   box-shadow:
     0 8px 18px rgb(15 23 42 / 0.08),
     0 1px 0 rgb(255 255 255 / 0.92) inset;
-}
-
-:global(.dark) .settings-tab-active {
-  box-shadow:
-    0 12px 26px rgb(0 0 0 / 0.22),
-    0 1px 0 rgb(255 255 255 / 0.08) inset;
 }
 
 .settings-tab-active::before {
@@ -9899,5 +9517,28 @@ watch(
 
 .settings-tab-label {
   @apply min-w-0 overflow-hidden text-ellipsis whitespace-nowrap leading-none;
+}
+</style>
+
+<style>
+/* Dark-mode overrides for the settings tabs shell. Kept in an UNSCOPED block
+   because Vue's scoped-CSS compiler was dropping the `:global(.dark) ...`
+   rules in the production build, leaving inactive tabs unreadable on dark. */
+.dark .settings-tabs-shell {
+  border-color: rgb(51 65 85 / 0.65);
+  background: rgb(15 23 42 / 0.86);
+  box-shadow:
+    0 16px 36px rgb(0 0 0 / 0.28),
+    0 1px 0 rgb(255 255 255 / 0.06) inset;
+}
+
+.dark .settings-tab::before {
+  background: linear-gradient(135deg, rgb(30 41 59 / 0.9), rgb(51 65 85 / 0.62));
+}
+
+.dark .settings-tab-active {
+  box-shadow:
+    0 12px 26px rgb(0 0 0 / 0.22),
+    0 1px 0 rgb(255 255 255 / 0.08) inset;
 }
 </style>

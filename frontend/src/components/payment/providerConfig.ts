@@ -47,6 +47,28 @@ export const METHOD_ORDER = ['alipay', 'alipay_direct', 'wxpay', 'wxpay_direct',
 /** Payment mode constants */
 export const PAYMENT_MODE_QRCODE = 'qrcode'
 export const PAYMENT_MODE_POPUP = 'popup'
+/** Alipay-only: skip FACE_TO_FACE_PAYMENT precreate and open the Alipay
+ * checkout page in a new tab instead. Backend `alipay.go` matches on this
+ * literal (case-insensitive); other values fall back to the default
+ * precreate→pagepay flow. */
+export const PAYMENT_MODE_REDIRECT = 'redirect'
+
+export const PAYMENT_CURRENCY_OPTIONS: TypeOption[] = [
+  { value: 'CNY', label: 'CNY' },
+  { value: 'HKD', label: 'HKD' },
+  { value: 'USD', label: 'USD' },
+  { value: 'EUR', label: 'EUR' },
+  { value: 'GBP', label: 'GBP' },
+  { value: 'AUD', label: 'AUD' },
+  { value: 'CAD', label: 'CAD' },
+  { value: 'SGD', label: 'SGD' },
+  { value: 'JPY', label: 'JPY' },
+  { value: 'KRW', label: 'KRW' },
+  { value: 'NZD', label: 'NZD' },
+]
+
+// 与后端当前集成的 stripe-go v85.0.0 的 stripe.APIVersion 保持一致。
+export const STRIPE_SDK_API_VERSION = '2026-03-25.dahlia'
 
 export const PAYMENT_CURRENCY_OPTIONS: TypeOption[] = [
   { value: 'CNY', label: 'CNY' },

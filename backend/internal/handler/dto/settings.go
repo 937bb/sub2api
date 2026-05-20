@@ -56,6 +56,23 @@ type SystemSettings struct {
 	LinuxDoConnectClientSecretConfigured bool   `json:"linuxdo_connect_client_secret_configured"`
 	LinuxDoConnectRedirectURL            string `json:"linuxdo_connect_redirect_url"`
 
+	DingTalkConnectEnabled                 bool   `json:"dingtalk_connect_enabled"`
+	DingTalkConnectClientID                string `json:"dingtalk_connect_client_id"`
+	DingTalkConnectClientSecretConfigured  bool   `json:"dingtalk_connect_client_secret_configured"`
+	DingTalkConnectRedirectURL             string `json:"dingtalk_connect_redirect_url"`
+	DingTalkConnectCorpRestrictionPolicy   string `json:"dingtalk_connect_corp_restriction_policy"`
+	DingTalkConnectInternalCorpID          string `json:"dingtalk_connect_internal_corp_id"`
+	DingTalkConnectBypassRegistration      bool   `json:"dingtalk_connect_bypass_registration"`
+	DingTalkConnectSyncCorpEmail           bool   `json:"dingtalk_connect_sync_corp_email"`
+	DingTalkConnectSyncDisplayName         bool   `json:"dingtalk_connect_sync_display_name"`
+	DingTalkConnectSyncDept                bool   `json:"dingtalk_connect_sync_dept"`
+	DingTalkConnectSyncCorpEmailAttrKey    string `json:"dingtalk_connect_sync_corp_email_attr_key"`
+	DingTalkConnectSyncDisplayNameAttrKey  string `json:"dingtalk_connect_sync_display_name_attr_key"`
+	DingTalkConnectSyncDeptAttrKey         string `json:"dingtalk_connect_sync_dept_attr_key"`
+	DingTalkConnectSyncCorpEmailAttrName   string `json:"dingtalk_connect_sync_corp_email_attr_name"`
+	DingTalkConnectSyncDisplayNameAttrName string `json:"dingtalk_connect_sync_display_name_attr_name"`
+	DingTalkConnectSyncDeptAttrName        string `json:"dingtalk_connect_sync_dept_attr_name"`
+
 	WeChatConnectEnabled                   bool   `json:"wechat_connect_enabled"`
 	WeChatConnectAppID                     string `json:"wechat_connect_app_id"`
 	WeChatConnectAppSecretConfigured       bool   `json:"wechat_connect_app_secret_configured"`
@@ -128,65 +145,7 @@ type SystemSettings struct {
 	AffiliateRebateFreezeHours   int                          `json:"affiliate_rebate_freeze_hours"`
 	AffiliateRebateDurationDays  int                          `json:"affiliate_rebate_duration_days"`
 	AffiliateRebatePerInviteeCap float64                      `json:"affiliate_rebate_per_invitee_cap"`
-	RedeemRebateEnabled          bool                         `json:"redeem_rebate_enabled"`
-
-	// 余额模型设置
-	BalanceExpiryEnabled     bool   `json:"balance_expiry_enabled"`
-	BalanceExpiryWarningDays int    `json:"balance_expiry_warning_days"`
-	BalanceDeductionOrder    string `json:"balance_deduction_order"`
-
-	// 首次兑换加成 (F4)
-	FirstRedeemBonusEnabled     bool   `json:"first_redeem_bonus_enabled"`
-	FirstRedeemBonusMultiplier  string `json:"first_redeem_bonus_multiplier"`
-	FirstRedeemBonusCap         string `json:"first_redeem_bonus_cap"`
-	FirstRedeemBonusBalanceType string `json:"first_redeem_bonus_balance_type"`
-	FirstRedeemBonusExpiryDays  string `json:"first_redeem_bonus_expiry_days"`
-
-	// 常规兑换加成 (F5)
-	RedeemBonusEnabled     bool   `json:"redeem_bonus_enabled"`
-	RedeemBonusMode        string `json:"redeem_bonus_mode"`
-	RedeemBonusFixedAmount string `json:"redeem_bonus_fixed_amount"`
-	RedeemBonusPercent     string `json:"redeem_bonus_percent"`
-	RedeemBonusRandomMin   string `json:"redeem_bonus_random_min"`
-	RedeemBonusRandomMax   string `json:"redeem_bonus_random_max"`
-	RedeemBonusCap         string `json:"redeem_bonus_cap"`
-	RedeemBonusMinAmount   string `json:"redeem_bonus_min_amount"`
-	RedeemBonusBalanceType string `json:"redeem_bonus_balance_type"`
-	RedeemBonusExpiryDays  string `json:"redeem_bonus_expiry_days"`
-
-	// 每日签到 (F2)
-	CheckinEnabled     bool   `json:"checkin_enabled"`
-	CheckinMode        string `json:"checkin_mode"`
-	CheckinFixedAmount string `json:"checkin_fixed_amount"`
-	CheckinRandomMin   string `json:"checkin_random_min"`
-	CheckinRandomMax   string `json:"checkin_random_max"`
-	CheckinBalanceType string `json:"checkin_balance_type"`
-	CheckinExpiryDays  string `json:"checkin_expiry_days"`
-	CheckinMilestones  string `json:"checkin_milestones"`
-
-	// 排行榜 + 奖励 (F3)
-	LeaderboardEnabled     bool   `json:"leaderboard_enabled"`
-	LeaderboardMaskEmail   bool   `json:"leaderboard_mask_email"`
-	LeaderboardTopN        string `json:"leaderboard_top_n"`
-	LeaderboardRewardRules string `json:"leaderboard_reward_rules"`
-
-	// 消费返现 (F6)
-	CashbackEnabled     bool   `json:"cashback_enabled"`
-	CashbackThreshold   string `json:"cashback_threshold"`
-	CashbackMode        string `json:"cashback_mode"`
-	CashbackFixedAmount string `json:"cashback_fixed_amount"`
-	CashbackPercent     string `json:"cashback_percent"`
-	CashbackRandomMin   string `json:"cashback_random_min"`
-	CashbackRandomMax   string `json:"cashback_random_max"`
-	CashbackBalanceType string `json:"cashback_balance_type"`
-	CashbackExpiryDays  string `json:"cashback_expiry_days"`
-	CashbackCycle       string `json:"cashback_cycle"`
-
-	// 分时费率 (F7)
-	OffPeakPricingEnabled bool   `json:"off_peak_pricing_enabled"`
-	OffPeakPricingRules   string `json:"off_peak_pricing_rules"`
-
-	DefaultUserRPMLimit  int                          `json:"default_user_rpm_limit"`
+	DefaultUserRPMLimit          int                          `json:"default_user_rpm_limit"`
 	DefaultSubscriptions         []DefaultSubscriptionSetting `json:"default_subscriptions"`
 
 	// Model fallback configuration
@@ -222,6 +181,7 @@ type SystemSettings struct {
 	EnableAnthropicCacheTTL1hInjection bool   `json:"enable_anthropic_cache_ttl_1h_injection"`
 	RewriteMessageCacheControl         bool   `json:"rewrite_message_cache_control"`
 	AntigravityUserAgentVersion        string `json:"antigravity_user_agent_version"`
+	OpenAICodexUserAgent               string `json:"openai_codex_user_agent"`
 
 	// Web Search Emulation
 	WebSearchEmulationEnabled bool `json:"web_search_emulation_enabled"`
@@ -258,6 +218,9 @@ type SystemSettings struct {
 	PaymentCancelRateLimitWindow  int    `json:"payment_cancel_rate_limit_window"`
 	PaymentCancelRateLimitUnit    string `json:"payment_cancel_rate_limit_unit"`
 	PaymentCancelRateLimitMode    string `json:"payment_cancel_rate_limit_window_mode"`
+
+	// Force Alipay mobile clients to use QR code payment instead of mobile redirect
+	PaymentAlipayForceQRCode bool `json:"payment_alipay_force_qrcode"`
 
 	// Balance low notification
 	BalanceLowNotifyEnabled     bool               `json:"balance_low_notify_enabled"`
@@ -318,6 +281,7 @@ type PublicSettings struct {
 	TablePageSizeOptions             []int                    `json:"table_page_size_options"`
 	CustomMenuItems                  []CustomMenuItem         `json:"custom_menu_items"`
 	CustomEndpoints                  []CustomEndpoint         `json:"custom_endpoints"`
+	DingTalkOAuthEnabled             bool                     `json:"dingtalk_oauth_enabled"`
 	LinuxDoOAuthEnabled              bool                     `json:"linuxdo_oauth_enabled"`
 	WeChatOAuthEnabled               bool                     `json:"wechat_oauth_enabled"`
 	WeChatOAuthOpenEnabled           bool                     `json:"wechat_oauth_open_enabled"`
@@ -412,6 +376,62 @@ type OpenAIFastPolicyRule struct {
 // OpenAIFastPolicySettings OpenAI fast 策略配置 DTO
 type OpenAIFastPolicySettings struct {
 	Rules []OpenAIFastPolicyRule `json:"rules"`
+}
+
+// EmailTemplateEventOption describes an editable notification email event.
+type EmailTemplateEventOption struct {
+	Value       string `json:"value"`
+	Label       string `json:"label,omitempty"`
+	Description string `json:"description,omitempty"`
+}
+
+// EmailTemplateSummary is shown in the admin email template list.
+type EmailTemplateSummary struct {
+	Event     string `json:"event"`
+	Locale    string `json:"locale"`
+	Subject   string `json:"subject"`
+	IsCustom  bool   `json:"is_custom,omitempty"`
+	UpdatedAt string `json:"updated_at,omitempty"`
+}
+
+// EmailTemplateListResponse is returned by GET /admin/settings/email-templates.
+type EmailTemplateListResponse struct {
+	Events       []EmailTemplateEventOption `json:"events"`
+	Locales      []string                   `json:"locales"`
+	Templates    []EmailTemplateSummary     `json:"templates,omitempty"`
+	Placeholders []string                   `json:"placeholders,omitempty"`
+}
+
+// EmailTemplateDetail is returned for a specific event/locale template.
+type EmailTemplateDetail struct {
+	Event        string   `json:"event"`
+	Locale       string   `json:"locale"`
+	Subject      string   `json:"subject"`
+	HTML         string   `json:"html"`
+	IsCustom     bool     `json:"is_custom,omitempty"`
+	UpdatedAt    string   `json:"updated_at,omitempty"`
+	Placeholders []string `json:"placeholders,omitempty"`
+}
+
+// UpdateEmailTemplateRequest updates a template override.
+type UpdateEmailTemplateRequest struct {
+	Subject string `json:"subject"`
+	HTML    string `json:"html"`
+}
+
+// PreviewEmailTemplateRequest previews a template without saving it.
+type PreviewEmailTemplateRequest struct {
+	Event     string            `json:"event"`
+	Locale    string            `json:"locale"`
+	Subject   string            `json:"subject"`
+	HTML      string            `json:"html"`
+	Variables map[string]string `json:"variables,omitempty"`
+}
+
+// EmailTemplatePreviewResponse is the rendered preview payload.
+type EmailTemplatePreviewResponse struct {
+	Subject string `json:"subject"`
+	HTML    string `json:"html"`
 }
 
 // ParseCustomMenuItems parses a JSON string into a slice of CustomMenuItem.

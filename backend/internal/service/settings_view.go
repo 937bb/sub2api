@@ -46,6 +46,25 @@ type SystemSettings struct {
 	LinuxDoConnectClientSecretConfigured bool
 	LinuxDoConnectRedirectURL            string
 
+	// DingTalk Connect OAuth 登录
+	DingTalkConnectEnabled                 bool
+	DingTalkConnectClientID                string
+	DingTalkConnectClientSecret            string
+	DingTalkConnectClientSecretConfigured  bool
+	DingTalkConnectRedirectURL             string
+	DingTalkConnectCorpRestrictionPolicy   string
+	DingTalkConnectInternalCorpID          string
+	DingTalkConnectBypassRegistration      bool
+	DingTalkConnectSyncCorpEmail           bool
+	DingTalkConnectSyncDisplayName         bool
+	DingTalkConnectSyncDept                bool
+	DingTalkConnectSyncCorpEmailAttrKey    string
+	DingTalkConnectSyncDisplayNameAttrKey  string
+	DingTalkConnectSyncDeptAttrKey         string
+	DingTalkConnectSyncCorpEmailAttrName   string
+	DingTalkConnectSyncDisplayNameAttrName string
+	DingTalkConnectSyncDeptAttrName        string
+
 	// WeChat Connect OAuth 登录
 	WeChatConnectEnabled                   bool
 	WeChatConnectAppID                     string
@@ -130,65 +149,7 @@ type SystemSettings struct {
 	AffiliateRebateFreezeHours   int
 	AffiliateRebateDurationDays  int
 	AffiliateRebatePerInviteeCap float64
-	RedeemRebateEnabled          bool
-
-	// 余额模型设置（balance_entries）
-	BalanceExpiryEnabled     bool
-	BalanceExpiryWarningDays int
-	BalanceDeductionOrder    string // "expiring_first" | "permanent_first"
-
-	// 首次兑换加成 (F4)
-	FirstRedeemBonusEnabled     bool
-	FirstRedeemBonusMultiplier  string
-	FirstRedeemBonusCap         string
-	FirstRedeemBonusBalanceType string
-	FirstRedeemBonusExpiryDays  string
-
-	// 常规兑换加成 (F5)
-	RedeemBonusEnabled     bool
-	RedeemBonusMode        string
-	RedeemBonusFixedAmount string
-	RedeemBonusPercent     string
-	RedeemBonusRandomMin   string
-	RedeemBonusRandomMax   string
-	RedeemBonusCap         string
-	RedeemBonusMinAmount   string
-	RedeemBonusBalanceType string
-	RedeemBonusExpiryDays  string
-
-	// 每日签到 (F2)
-	CheckinEnabled     bool
-	CheckinMode        string
-	CheckinFixedAmount string
-	CheckinRandomMin   string
-	CheckinRandomMax   string
-	CheckinBalanceType string
-	CheckinExpiryDays  string
-	CheckinMilestones  string
-
-	// 排行榜 + 奖励 (F3)
-	LeaderboardEnabled    bool
-	LeaderboardMaskEmail  bool
-	LeaderboardTopN       string
-	LeaderboardRewardRules string
-
-	// 消费返现 (F6)
-	CashbackEnabled     bool
-	CashbackThreshold   string
-	CashbackMode        string
-	CashbackFixedAmount string
-	CashbackPercent     string
-	CashbackRandomMin   string
-	CashbackRandomMax   string
-	CashbackBalanceType string
-	CashbackExpiryDays  string
-	CashbackCycle       string
-
-	// 分时费率 (F7)
-	OffPeakPricingEnabled bool
-	OffPeakPricingRules   string
-
-	DefaultUserRPMLimit int
+	DefaultUserRPMLimit          int
 	DefaultSubscriptions         []DefaultSubscriptionSetting
 
 	// Model fallback configuration
@@ -232,6 +193,39 @@ type SystemSettings struct {
 	EnableAnthropicCacheTTL1hInjection bool   // 是否对 Anthropic OAuth/SetupToken 请求体注入 1h cache_control ttl（默认 false）
 	RewriteMessageCacheControl         bool   // 是否改写 messages[*].content[*].cache_control（默认 false）
 	AntigravityUserAgentVersion        string // Antigravity 上游 User-Agent 版本号；空值使用配置/默认值
+	OpenAICodexUserAgent               string // OpenAI Codex 上游完整 User-Agent；空值使用内置默认
+
+	// Reward system
+	RedeemRebateEnabled       bool
+	FirstRedeemBonusEnabled   bool
+	FirstRedeemBonusMultiplier string
+	FirstRedeemBonusCap       string
+	FirstRedeemBonusBalanceType string
+	FirstRedeemBonusExpiryDays string
+	CheckinEnabled     bool
+	CheckinMode        string
+	CheckinFixedAmount string
+	CheckinRandomMin   string
+	CheckinRandomMax   string
+	CheckinBalanceType string
+	CheckinExpiryDays  string
+	CheckinMilestones  string
+	LeaderboardEnabled     bool
+	LeaderboardMaskEmail   bool
+	LeaderboardTopN        string
+	LeaderboardRewardRules string
+	CashbackEnabled     bool
+	CashbackThreshold   string
+	CashbackMode        string
+	CashbackFixedAmount string
+	CashbackPercent     string
+	CashbackRandomMin   string
+	CashbackRandomMax   string
+	CashbackBalanceType string
+	CashbackExpiryDays  string
+	CashbackCycle       string
+	OffPeakPricingEnabled bool
+	OffPeakPricingRules   string
 
 	// Web Search Emulation
 	WebSearchEmulationEnabled bool // 是否启用 web search 模拟
@@ -293,6 +287,7 @@ type PublicSettings struct {
 	CustomEndpoints             string // JSON array of custom endpoints
 
 	LinuxDoOAuthEnabled      bool
+	DingTalkOAuthEnabled     bool
 	WeChatOAuthEnabled       bool
 	WeChatOAuthOpenEnabled   bool
 	WeChatOAuthMPEnabled     bool
@@ -549,25 +544,10 @@ type OpenAIFastPolicySettings struct {
 }
 
 // DefaultOpenAIFastPolicySettings 返回默认的 OpenAI fast 策略配置。
-// 默认对所有模型的 priority（fast）请求执行 filter，即剔除 service_tier 字段，
-// 让上游按 normal 优先级处理。
-//
-// 为什么 ModelWhitelist 为空（=对所有模型生效）：
-// codex 客户端的 service_tier=fast 是用户级开关，与 model 字段正交。即使
-// 用户使用 gpt-4 + fast，priority 配额仍会被消耗。如果默认规则只锁
-// gpt-5.5*，"用 gpt-4 + fast 透传 priority 上游" 这条路径就会绕过策略。
-// 与 codex 真实语义对齐，默认对所有模型生效；管理员若需要只针对特定
-// 模型，可在 admin UI 中显式配置 model_whitelist。
+// 默认不配置任何规则，保留 OpenAI 上游 service_tier 语义；管理员如需
+// 限制 priority/flex，可以在 admin UI 中显式配置 filter 或 block 规则。
 func DefaultOpenAIFastPolicySettings() *OpenAIFastPolicySettings {
 	return &OpenAIFastPolicySettings{
-		Rules: []OpenAIFastPolicyRule{
-			{
-				ServiceTier:    OpenAIFastTierPriority,
-				Action:         BetaPolicyActionFilter,
-				Scope:          BetaPolicyScopeAll,
-				ModelWhitelist: []string{},
-				FallbackAction: BetaPolicyActionPass,
-			},
-		},
+		Rules: []OpenAIFastPolicyRule{},
 	}
 }
