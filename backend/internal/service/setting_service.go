@@ -4569,3 +4569,67 @@ func (s *SettingService) SetStreamTimeoutSettings(ctx context.Context, settings 
 
 	return s.settingRepo.Set(ctx, SettingKeyStreamTimeoutSettings, string(data))
 }
+
+// ==================== Generic Setting Accessors ====================
+
+func (s *SettingService) GetBoolSetting(ctx context.Context, key string, defaultVal bool) bool {
+	value, err := s.settingRepo.GetValue(ctx, key)
+	if err != nil {
+		return defaultVal
+	}
+	return value == "true"
+}
+
+func (s *SettingService) GetStringSetting(ctx context.Context, key string, defaultVal string) string {
+	value, err := s.settingRepo.GetValue(ctx, key)
+	if err != nil || value == "" {
+		return defaultVal
+	}
+	return value
+}
+
+func (s *SettingService) GetIntSetting(ctx context.Context, key string, defaultVal int) int {
+	value, err := s.settingRepo.GetValue(ctx, key)
+	if err != nil || value == "" {
+		return defaultVal
+	}
+	n, err := strconv.Atoi(value)
+	if err != nil {
+		return defaultVal
+	}
+	return n
+}
+
+func (s *SettingService) GetFloatSetting(ctx context.Context, key string, defaultVal float64) float64 {
+	value, err := s.settingRepo.GetValue(ctx, key)
+	if err != nil || value == "" {
+		return defaultVal
+	}
+	f, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		return defaultVal
+	}
+	return f
+}
+
+// ==================== Balance Model Accessors ====================
+
+func (s *SettingService) GetBalanceExpiryWarningDays(ctx context.Context) int {
+	value, err := s.settingRepo.GetValue(ctx, SettingKeyBalanceExpiryWarningDays)
+	if err != nil {
+		return 3
+	}
+	v, err := strconv.Atoi(value)
+	if err != nil || v < 0 {
+		return 3
+	}
+	return v
+}
+
+func (s *SettingService) GetBalanceDeductionOrder(ctx context.Context) string {
+	value, err := s.settingRepo.GetValue(ctx, SettingKeyBalanceDeductionOrder)
+	if err != nil || value == "" {
+		return "expiring_first"
+	}
+	return value
+}

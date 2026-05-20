@@ -441,6 +441,21 @@ const (
 	SettingKeyFirstRedeemBonusBalanceType = "first_redeem_bonus_balance_type" // 加成余额类型
 	SettingKeyFirstRedeemBonusExpiryDays = "first_redeem_bonus_expiry_days"  // 有效期天数
 
+	// Reward System - Balance Deduction Order
+	SettingKeyBalanceDeductionOrder = "balance_deduction_order" // expiring_first / permanent_first
+
+	// Reward System - Redeem Bonus (Regular)
+	SettingKeyRedeemBonusEnabled     = "redeem_bonus_enabled"       // 开关
+	SettingKeyRedeemBonusMode        = "redeem_bonus_mode"          // fixed / percent / random
+	SettingKeyRedeemBonusFixedAmount = "redeem_bonus_fixed_amount"  // 固定金额
+	SettingKeyRedeemBonusPercent     = "redeem_bonus_percent"       // 百分比
+	SettingKeyRedeemBonusRandomMin   = "redeem_bonus_random_min"    // 随机最小
+	SettingKeyRedeemBonusRandomMax   = "redeem_bonus_random_max"    // 随机最大
+	SettingKeyRedeemBonusCap         = "redeem_bonus_cap"           // 加成上限（0=无上限）
+	SettingKeyRedeemBonusMinAmount   = "redeem_bonus_min_amount"    // 最低触发金额
+	SettingKeyRedeemBonusBalanceType = "redeem_bonus_balance_type"  // 余额类型
+	SettingKeyRedeemBonusExpiryDays  = "redeem_bonus_expiry_days"   // 有效期天数
+
 	// Reward System - Leaderboard
 	SettingKeyLeaderboardEnabled     = "leaderboard_enabled"      // 开关
 	SettingKeyLeaderboardMaskEmail   = "leaderboard_mask_email"   // 用户名脱敏
