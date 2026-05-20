@@ -573,6 +573,38 @@ type UpdateSettingsRequest struct {
 	AntigravityUserAgentVersion        *string `json:"antigravity_user_agent_version"`
 	OpenAICodexUserAgent               *string `json:"openai_codex_user_agent"`
 
+	// Reward System
+	RedeemRebateEnabled       *bool   `json:"redeem_rebate_enabled"`
+	FirstRedeemBonusEnabled   *bool   `json:"first_redeem_bonus_enabled"`
+	FirstRedeemBonusMultiplier *string `json:"first_redeem_bonus_multiplier"`
+	FirstRedeemBonusCap       *string `json:"first_redeem_bonus_cap"`
+	FirstRedeemBonusBalanceType *string `json:"first_redeem_bonus_balance_type"`
+	FirstRedeemBonusExpiryDays *string `json:"first_redeem_bonus_expiry_days"`
+	CheckinEnabled     *bool   `json:"checkin_enabled"`
+	CheckinMode        *string `json:"checkin_mode"`
+	CheckinFixedAmount *string `json:"checkin_fixed_amount"`
+	CheckinRandomMin   *string `json:"checkin_random_min"`
+	CheckinRandomMax   *string `json:"checkin_random_max"`
+	CheckinBalanceType *string `json:"checkin_balance_type"`
+	CheckinExpiryDays  *string `json:"checkin_expiry_days"`
+	CheckinMilestones  *string `json:"checkin_milestones"`
+	LeaderboardEnabled     *bool   `json:"leaderboard_enabled"`
+	LeaderboardMaskEmail   *bool   `json:"leaderboard_mask_email"`
+	LeaderboardTopN        *string `json:"leaderboard_top_n"`
+	LeaderboardRewardRules *string `json:"leaderboard_reward_rules"`
+	CashbackEnabled     *bool   `json:"cashback_enabled"`
+	CashbackThreshold   *string `json:"cashback_threshold"`
+	CashbackMode        *string `json:"cashback_mode"`
+	CashbackFixedAmount *string `json:"cashback_fixed_amount"`
+	CashbackPercent     *string `json:"cashback_percent"`
+	CashbackRandomMin   *string `json:"cashback_random_min"`
+	CashbackRandomMax   *string `json:"cashback_random_max"`
+	CashbackBalanceType *string `json:"cashback_balance_type"`
+	CashbackExpiryDays  *string `json:"cashback_expiry_days"`
+	CashbackCycle       *string `json:"cashback_cycle"`
+	OffPeakPricingEnabled *bool   `json:"off_peak_pricing_enabled"`
+	OffPeakPricingRules   *string `json:"off_peak_pricing_rules"`
+
 	// Payment visible method routing
 	PaymentVisibleMethodAlipaySource  *string `json:"payment_visible_method_alipay_source"`
 	PaymentVisibleMethodWxpaySource   *string `json:"payment_visible_method_wxpay_source"`

@@ -505,6 +505,37 @@ export interface SystemSettings {
   rewrite_message_cache_control: boolean;
   antigravity_user_agent_version: string;
   openai_codex_user_agent: string;
+  // Reward System
+  redeem_rebate_enabled: boolean;
+  first_redeem_bonus_enabled: boolean;
+  first_redeem_bonus_multiplier: string;
+  first_redeem_bonus_cap: string;
+  first_redeem_bonus_balance_type: string;
+  first_redeem_bonus_expiry_days: string;
+  checkin_enabled: boolean;
+  checkin_mode: string;
+  checkin_fixed_amount: string;
+  checkin_random_min: string;
+  checkin_random_max: string;
+  checkin_balance_type: string;
+  checkin_expiry_days: string;
+  checkin_milestones: string;
+  leaderboard_enabled: boolean;
+  leaderboard_mask_email: boolean;
+  leaderboard_top_n: string;
+  leaderboard_reward_rules: string;
+  cashback_enabled: boolean;
+  cashback_threshold: string;
+  cashback_mode: string;
+  cashback_fixed_amount: string;
+  cashback_percent: string;
+  cashback_random_min: string;
+  cashback_random_max: string;
+  cashback_balance_type: string;
+  cashback_expiry_days: string;
+  cashback_cycle: string;
+  off_peak_pricing_enabled: boolean;
+  off_peak_pricing_rules: string;
   web_search_emulation_enabled?: boolean;
 
   // Payment configuration
@@ -726,6 +757,37 @@ export interface UpdateSettingsRequest {
   rewrite_message_cache_control?: boolean;
   antigravity_user_agent_version?: string;
   openai_codex_user_agent?: string;
+  // Reward System
+  redeem_rebate_enabled?: boolean;
+  first_redeem_bonus_enabled?: boolean;
+  first_redeem_bonus_multiplier?: string;
+  first_redeem_bonus_cap?: string;
+  first_redeem_bonus_balance_type?: string;
+  first_redeem_bonus_expiry_days?: string;
+  checkin_enabled?: boolean;
+  checkin_mode?: string;
+  checkin_fixed_amount?: string;
+  checkin_random_min?: string;
+  checkin_random_max?: string;
+  checkin_balance_type?: string;
+  checkin_expiry_days?: string;
+  checkin_milestones?: string;
+  leaderboard_enabled?: boolean;
+  leaderboard_mask_email?: boolean;
+  leaderboard_top_n?: string;
+  leaderboard_reward_rules?: string;
+  cashback_enabled?: boolean;
+  cashback_threshold?: string;
+  cashback_mode?: string;
+  cashback_fixed_amount?: string;
+  cashback_percent?: string;
+  cashback_random_min?: string;
+  cashback_random_max?: string;
+  cashback_balance_type?: string;
+  cashback_expiry_days?: string;
+  cashback_cycle?: string;
+  off_peak_pricing_enabled?: boolean;
+  off_peak_pricing_rules?: string;
   // Payment configuration
   payment_enabled?: boolean;
   risk_control_enabled?: boolean;

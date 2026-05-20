@@ -416,6 +416,52 @@ const (
 
 	// Web Search Emulation
 	SettingKeyWebSearchEmulationConfig = "web_search_emulation_config" // JSON 配置
+
+	// Reward System - Redeem Rebate
+	SettingKeyRedeemRebateEnabled = "redeem_rebate_enabled" // 兑换码余额充值返利开关
+
+	// Reward System - Balance Expiry
+	SettingKeyBalanceExpiryEnabled     = "balance_expiry_enabled"      // 余额过期功能开关
+	SettingKeyBalanceExpiryWarningDays = "balance_expiry_warning_days" // 余额过期预警天数
+
+	// Reward System - Checkin
+	SettingKeyCheckinEnabled     = "checkin_enabled"       // 签到功能总开关
+	SettingKeyCheckinMode        = "checkin_mode"          // 基础奖励模式：fixed / random
+	SettingKeyCheckinFixedAmount = "checkin_fixed_amount"  // 固定模式奖励金额
+	SettingKeyCheckinRandomMin   = "checkin_random_min"    // 随机模式最小值
+	SettingKeyCheckinRandomMax   = "checkin_random_max"    // 随机模式最大值
+	SettingKeyCheckinBalanceType = "checkin_balance_type"  // 基础奖励余额类型：permanent / expirable
+	SettingKeyCheckinExpiryDays  = "checkin_expiry_days"   // 基础奖励有效期天数（仅 expirable 生效）
+	SettingKeyCheckinMilestones  = "checkin_milestones"    // 里程碑规则（JSON 数组）
+
+	// Reward System - First Redeem Bonus
+	SettingKeyFirstRedeemBonusEnabled     = "first_redeem_bonus_enabled"      // 开关
+	SettingKeyFirstRedeemBonusMultiplier  = "first_redeem_bonus_multiplier"   // 加成倍率（如2表示双倍，即额外给 1x）
+	SettingKeyFirstRedeemBonusCap        = "first_redeem_bonus_cap"          // 加成上限（0=无上限）
+	SettingKeyFirstRedeemBonusBalanceType = "first_redeem_bonus_balance_type" // 加成余额类型
+	SettingKeyFirstRedeemBonusExpiryDays = "first_redeem_bonus_expiry_days"  // 有效期天数
+
+	// Reward System - Leaderboard
+	SettingKeyLeaderboardEnabled     = "leaderboard_enabled"      // 开关
+	SettingKeyLeaderboardMaskEmail   = "leaderboard_mask_email"   // 用户名脱敏
+	SettingKeyLeaderboardTopN        = "leaderboard_top_n"        // 展示 TopN
+	SettingKeyLeaderboardRewardRules = "leaderboard_reward_rules" // 奖励规则 JSON
+
+	// Reward System - Cashback
+	SettingKeyCashbackEnabled     = "cashback_enabled"       // 开关
+	SettingKeyCashbackThreshold   = "cashback_threshold"     // 消费门槛
+	SettingKeyCashbackMode        = "cashback_mode"          // fixed / percent / random
+	SettingKeyCashbackFixedAmount = "cashback_fixed_amount"  // 固定金额
+	SettingKeyCashbackPercent     = "cashback_percent"       // 百分比
+	SettingKeyCashbackRandomMin   = "cashback_random_min"    // 随机最小
+	SettingKeyCashbackRandomMax   = "cashback_random_max"    // 随机最大
+	SettingKeyCashbackBalanceType = "cashback_balance_type"  // 余额类型
+	SettingKeyCashbackExpiryDays  = "cashback_expiry_days"   // 有效期天数
+	SettingKeyCashbackCycle       = "cashback_cycle"         // 结算周期：realtime / daily
+
+	// Reward System - Off-Peak Pricing
+	SettingKeyOffPeakPricingEnabled = "off_peak_pricing_enabled" // 开关
+	SettingKeyOffPeakPricingRules   = "off_peak_pricing_rules"   // 规则 JSON：[{start_hour,end_hour,multiplier,label}]
 )
 
 // AdminAPIKeyPrefix is the prefix for admin API keys (distinct from user "sk-" keys).
