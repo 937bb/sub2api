@@ -70,23 +70,6 @@ export const PAYMENT_CURRENCY_OPTIONS: TypeOption[] = [
 // 与后端当前集成的 stripe-go v85.0.0 的 stripe.APIVersion 保持一致。
 export const STRIPE_SDK_API_VERSION = '2026-03-25.dahlia'
 
-export const PAYMENT_CURRENCY_OPTIONS: TypeOption[] = [
-  { value: 'CNY', label: 'CNY' },
-  { value: 'HKD', label: 'HKD' },
-  { value: 'USD', label: 'USD' },
-  { value: 'EUR', label: 'EUR' },
-  { value: 'GBP', label: 'GBP' },
-  { value: 'AUD', label: 'AUD' },
-  { value: 'CAD', label: 'CAD' },
-  { value: 'SGD', label: 'SGD' },
-  { value: 'JPY', label: 'JPY' },
-  { value: 'KRW', label: 'KRW' },
-  { value: 'NZD', label: 'NZD' },
-]
-
-// 与后端当前集成的 stripe-go v85.0.0 的 stripe.APIVersion 保持一致。
-export const STRIPE_SDK_API_VERSION = '2026-03-25.dahlia'
-
 /** Preferred popup size for payment gateways. Alipay's standard checkout
  * (QR + account login panel) needs ~1200×900 to render without any scrolling. */
 const PAYMENT_POPUP_PREFERRED_WIDTH = 1250

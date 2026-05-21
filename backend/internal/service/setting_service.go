@@ -1795,6 +1795,19 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyFirstRedeemBonusCap] = settings.FirstRedeemBonusCap
 	updates[SettingKeyFirstRedeemBonusBalanceType] = settings.FirstRedeemBonusBalanceType
 	updates[SettingKeyFirstRedeemBonusExpiryDays] = settings.FirstRedeemBonusExpiryDays
+	updates[SettingKeyRedeemBonusEnabled] = strconv.FormatBool(settings.RedeemBonusEnabled)
+	updates[SettingKeyRedeemBonusMode] = settings.RedeemBonusMode
+	updates[SettingKeyRedeemBonusFixedAmount] = settings.RedeemBonusFixedAmount
+	updates[SettingKeyRedeemBonusPercent] = settings.RedeemBonusPercent
+	updates[SettingKeyRedeemBonusRandomMin] = settings.RedeemBonusRandomMin
+	updates[SettingKeyRedeemBonusRandomMax] = settings.RedeemBonusRandomMax
+	updates[SettingKeyRedeemBonusCap] = settings.RedeemBonusCap
+	updates[SettingKeyRedeemBonusMinAmount] = settings.RedeemBonusMinAmount
+	updates[SettingKeyRedeemBonusBalanceType] = settings.RedeemBonusBalanceType
+	updates[SettingKeyRedeemBonusExpiryDays] = settings.RedeemBonusExpiryDays
+	updates[SettingKeyBalanceExpiryEnabled] = strconv.FormatBool(settings.BalanceExpiryEnabled)
+	updates[SettingKeyBalanceExpiryWarningDays] = strconv.Itoa(settings.BalanceExpiryWarningDays)
+	updates[SettingKeyBalanceDeductionOrder] = settings.BalanceDeductionOrder
 	updates[SettingKeyCheckinEnabled] = strconv.FormatBool(settings.CheckinEnabled)
 	updates[SettingKeyCheckinMode] = settings.CheckinMode
 	updates[SettingKeyCheckinFixedAmount] = settings.CheckinFixedAmount
@@ -2658,6 +2671,19 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyFirstRedeemBonusCap:                "0",
 		SettingKeyFirstRedeemBonusBalanceType:        "permanent",
 		SettingKeyFirstRedeemBonusExpiryDays:         "0",
+		SettingKeyRedeemBonusEnabled:                 "false",
+		SettingKeyRedeemBonusMode:                    "percent",
+		SettingKeyRedeemBonusFixedAmount:             "1",
+		SettingKeyRedeemBonusPercent:                 "10",
+		SettingKeyRedeemBonusRandomMin:               "1",
+		SettingKeyRedeemBonusRandomMax:               "10",
+		SettingKeyRedeemBonusCap:                     "0",
+		SettingKeyRedeemBonusMinAmount:               "0",
+		SettingKeyRedeemBonusBalanceType:             "permanent",
+		SettingKeyRedeemBonusExpiryDays:              "0",
+		SettingKeyBalanceExpiryEnabled:               "false",
+		SettingKeyBalanceExpiryWarningDays:           "3",
+		SettingKeyBalanceDeductionOrder:              "expiring_first",
 		SettingKeyOffPeakPricingEnabled:              "false",
 		SettingKeyOffPeakPricingRules:                "[]",
 		SettingKeyLeaderboardEnabled:                 "false",
@@ -3201,6 +3227,23 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	result.FirstRedeemBonusCap = s.getStringOrDefault(settings, SettingKeyFirstRedeemBonusCap, "0")
 	result.FirstRedeemBonusBalanceType = s.getStringOrDefault(settings, SettingKeyFirstRedeemBonusBalanceType, "permanent")
 	result.FirstRedeemBonusExpiryDays = s.getStringOrDefault(settings, SettingKeyFirstRedeemBonusExpiryDays, "0")
+	result.RedeemBonusEnabled = settings[SettingKeyRedeemBonusEnabled] == "true"
+	result.RedeemBonusMode = s.getStringOrDefault(settings, SettingKeyRedeemBonusMode, "percent")
+	result.RedeemBonusFixedAmount = s.getStringOrDefault(settings, SettingKeyRedeemBonusFixedAmount, "1")
+	result.RedeemBonusPercent = s.getStringOrDefault(settings, SettingKeyRedeemBonusPercent, "10")
+	result.RedeemBonusRandomMin = s.getStringOrDefault(settings, SettingKeyRedeemBonusRandomMin, "1")
+	result.RedeemBonusRandomMax = s.getStringOrDefault(settings, SettingKeyRedeemBonusRandomMax, "10")
+	result.RedeemBonusCap = s.getStringOrDefault(settings, SettingKeyRedeemBonusCap, "0")
+	result.RedeemBonusMinAmount = s.getStringOrDefault(settings, SettingKeyRedeemBonusMinAmount, "0")
+	result.RedeemBonusBalanceType = s.getStringOrDefault(settings, SettingKeyRedeemBonusBalanceType, "permanent")
+	result.RedeemBonusExpiryDays = s.getStringOrDefault(settings, SettingKeyRedeemBonusExpiryDays, "0")
+	result.BalanceExpiryEnabled = settings[SettingKeyBalanceExpiryEnabled] == "true"
+	if v, err := strconv.Atoi(settings[SettingKeyBalanceExpiryWarningDays]); err == nil && v >= 0 {
+		result.BalanceExpiryWarningDays = v
+	} else {
+		result.BalanceExpiryWarningDays = 3
+	}
+	result.BalanceDeductionOrder = s.getStringOrDefault(settings, SettingKeyBalanceDeductionOrder, "expiring_first")
 	result.CheckinEnabled = settings[SettingKeyCheckinEnabled] == "true"
 	result.CheckinMode = s.getStringOrDefault(settings, SettingKeyCheckinMode, "fixed")
 	result.CheckinFixedAmount = s.getStringOrDefault(settings, SettingKeyCheckinFixedAmount, "0.01")

@@ -255,6 +255,49 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		RewriteMessageCacheControl:             settings.RewriteMessageCacheControl,
 		AntigravityUserAgentVersion:            settings.AntigravityUserAgentVersion,
 		OpenAICodexUserAgent:                   settings.OpenAICodexUserAgent,
+		RedeemRebateEnabled:                    settings.RedeemRebateEnabled,
+		FirstRedeemBonusEnabled:                settings.FirstRedeemBonusEnabled,
+		FirstRedeemBonusMultiplier:             settings.FirstRedeemBonusMultiplier,
+		FirstRedeemBonusCap:                    settings.FirstRedeemBonusCap,
+		FirstRedeemBonusBalanceType:            settings.FirstRedeemBonusBalanceType,
+		FirstRedeemBonusExpiryDays:             settings.FirstRedeemBonusExpiryDays,
+		RedeemBonusEnabled:                     settings.RedeemBonusEnabled,
+		RedeemBonusMode:                        settings.RedeemBonusMode,
+		RedeemBonusFixedAmount:                 settings.RedeemBonusFixedAmount,
+		RedeemBonusPercent:                     settings.RedeemBonusPercent,
+		RedeemBonusRandomMin:                   settings.RedeemBonusRandomMin,
+		RedeemBonusRandomMax:                   settings.RedeemBonusRandomMax,
+		RedeemBonusCap:                         settings.RedeemBonusCap,
+		RedeemBonusMinAmount:                   settings.RedeemBonusMinAmount,
+		RedeemBonusBalanceType:                 settings.RedeemBonusBalanceType,
+		RedeemBonusExpiryDays:                  settings.RedeemBonusExpiryDays,
+		BalanceExpiryEnabled:                   settings.BalanceExpiryEnabled,
+		BalanceExpiryWarningDays:               settings.BalanceExpiryWarningDays,
+		BalanceDeductionOrder:                  settings.BalanceDeductionOrder,
+		CheckinEnabled:                         settings.CheckinEnabled,
+		CheckinMode:                            settings.CheckinMode,
+		CheckinFixedAmount:                     settings.CheckinFixedAmount,
+		CheckinRandomMin:                       settings.CheckinRandomMin,
+		CheckinRandomMax:                       settings.CheckinRandomMax,
+		CheckinBalanceType:                     settings.CheckinBalanceType,
+		CheckinExpiryDays:                      settings.CheckinExpiryDays,
+		CheckinMilestones:                      settings.CheckinMilestones,
+		LeaderboardEnabled:                     settings.LeaderboardEnabled,
+		LeaderboardMaskEmail:                   settings.LeaderboardMaskEmail,
+		LeaderboardTopN:                        settings.LeaderboardTopN,
+		LeaderboardRewardRules:                 settings.LeaderboardRewardRules,
+		CashbackEnabled:                        settings.CashbackEnabled,
+		CashbackThreshold:                      settings.CashbackThreshold,
+		CashbackMode:                           settings.CashbackMode,
+		CashbackFixedAmount:                    settings.CashbackFixedAmount,
+		CashbackPercent:                        settings.CashbackPercent,
+		CashbackRandomMin:                      settings.CashbackRandomMin,
+		CashbackRandomMax:                      settings.CashbackRandomMax,
+		CashbackBalanceType:                    settings.CashbackBalanceType,
+		CashbackExpiryDays:                     settings.CashbackExpiryDays,
+		CashbackCycle:                          settings.CashbackCycle,
+		OffPeakPricingEnabled:                  settings.OffPeakPricingEnabled,
+		OffPeakPricingRules:                    settings.OffPeakPricingRules,
 		WebSearchEmulationEnabled:              settings.WebSearchEmulationEnabled,
 		PaymentVisibleMethodAlipaySource:       settings.PaymentVisibleMethodAlipaySource,
 		PaymentVisibleMethodWxpaySource:        settings.PaymentVisibleMethodWxpaySource,
@@ -574,36 +617,49 @@ type UpdateSettingsRequest struct {
 	OpenAICodexUserAgent               *string `json:"openai_codex_user_agent"`
 
 	// Reward System
-	RedeemRebateEnabled       *bool   `json:"redeem_rebate_enabled"`
-	FirstRedeemBonusEnabled   *bool   `json:"first_redeem_bonus_enabled"`
-	FirstRedeemBonusMultiplier *string `json:"first_redeem_bonus_multiplier"`
-	FirstRedeemBonusCap       *string `json:"first_redeem_bonus_cap"`
+	RedeemRebateEnabled         *bool   `json:"redeem_rebate_enabled"`
+	FirstRedeemBonusEnabled     *bool   `json:"first_redeem_bonus_enabled"`
+	FirstRedeemBonusMultiplier  *string `json:"first_redeem_bonus_multiplier"`
+	FirstRedeemBonusCap         *string `json:"first_redeem_bonus_cap"`
 	FirstRedeemBonusBalanceType *string `json:"first_redeem_bonus_balance_type"`
-	FirstRedeemBonusExpiryDays *string `json:"first_redeem_bonus_expiry_days"`
-	CheckinEnabled     *bool   `json:"checkin_enabled"`
-	CheckinMode        *string `json:"checkin_mode"`
-	CheckinFixedAmount *string `json:"checkin_fixed_amount"`
-	CheckinRandomMin   *string `json:"checkin_random_min"`
-	CheckinRandomMax   *string `json:"checkin_random_max"`
-	CheckinBalanceType *string `json:"checkin_balance_type"`
-	CheckinExpiryDays  *string `json:"checkin_expiry_days"`
-	CheckinMilestones  *string `json:"checkin_milestones"`
-	LeaderboardEnabled     *bool   `json:"leaderboard_enabled"`
-	LeaderboardMaskEmail   *bool   `json:"leaderboard_mask_email"`
-	LeaderboardTopN        *string `json:"leaderboard_top_n"`
-	LeaderboardRewardRules *string `json:"leaderboard_reward_rules"`
-	CashbackEnabled     *bool   `json:"cashback_enabled"`
-	CashbackThreshold   *string `json:"cashback_threshold"`
-	CashbackMode        *string `json:"cashback_mode"`
-	CashbackFixedAmount *string `json:"cashback_fixed_amount"`
-	CashbackPercent     *string `json:"cashback_percent"`
-	CashbackRandomMin   *string `json:"cashback_random_min"`
-	CashbackRandomMax   *string `json:"cashback_random_max"`
-	CashbackBalanceType *string `json:"cashback_balance_type"`
-	CashbackExpiryDays  *string `json:"cashback_expiry_days"`
-	CashbackCycle       *string `json:"cashback_cycle"`
-	OffPeakPricingEnabled *bool   `json:"off_peak_pricing_enabled"`
-	OffPeakPricingRules   *string `json:"off_peak_pricing_rules"`
+	FirstRedeemBonusExpiryDays  *string `json:"first_redeem_bonus_expiry_days"`
+	RedeemBonusEnabled          *bool   `json:"redeem_bonus_enabled"`
+	RedeemBonusMode             *string `json:"redeem_bonus_mode"`
+	RedeemBonusFixedAmount      *string `json:"redeem_bonus_fixed_amount"`
+	RedeemBonusPercent          *string `json:"redeem_bonus_percent"`
+	RedeemBonusRandomMin        *string `json:"redeem_bonus_random_min"`
+	RedeemBonusRandomMax        *string `json:"redeem_bonus_random_max"`
+	RedeemBonusCap              *string `json:"redeem_bonus_cap"`
+	RedeemBonusMinAmount        *string `json:"redeem_bonus_min_amount"`
+	RedeemBonusBalanceType      *string `json:"redeem_bonus_balance_type"`
+	RedeemBonusExpiryDays       *string `json:"redeem_bonus_expiry_days"`
+	BalanceExpiryEnabled        *bool   `json:"balance_expiry_enabled"`
+	BalanceExpiryWarningDays    *int    `json:"balance_expiry_warning_days"`
+	BalanceDeductionOrder       *string `json:"balance_deduction_order"`
+	CheckinEnabled              *bool   `json:"checkin_enabled"`
+	CheckinMode                 *string `json:"checkin_mode"`
+	CheckinFixedAmount          *string `json:"checkin_fixed_amount"`
+	CheckinRandomMin            *string `json:"checkin_random_min"`
+	CheckinRandomMax            *string `json:"checkin_random_max"`
+	CheckinBalanceType          *string `json:"checkin_balance_type"`
+	CheckinExpiryDays           *string `json:"checkin_expiry_days"`
+	CheckinMilestones           *string `json:"checkin_milestones"`
+	LeaderboardEnabled          *bool   `json:"leaderboard_enabled"`
+	LeaderboardMaskEmail        *bool   `json:"leaderboard_mask_email"`
+	LeaderboardTopN             *string `json:"leaderboard_top_n"`
+	LeaderboardRewardRules      *string `json:"leaderboard_reward_rules"`
+	CashbackEnabled             *bool   `json:"cashback_enabled"`
+	CashbackThreshold           *string `json:"cashback_threshold"`
+	CashbackMode                *string `json:"cashback_mode"`
+	CashbackFixedAmount         *string `json:"cashback_fixed_amount"`
+	CashbackPercent             *string `json:"cashback_percent"`
+	CashbackRandomMin           *string `json:"cashback_random_min"`
+	CashbackRandomMax           *string `json:"cashback_random_max"`
+	CashbackBalanceType         *string `json:"cashback_balance_type"`
+	CashbackExpiryDays          *string `json:"cashback_expiry_days"`
+	CashbackCycle               *string `json:"cashback_cycle"`
+	OffPeakPricingEnabled       *bool   `json:"off_peak_pricing_enabled"`
+	OffPeakPricingRules         *string `json:"off_peak_pricing_rules"`
 
 	// Payment visible method routing
 	PaymentVisibleMethodAlipaySource  *string `json:"payment_visible_method_alipay_source"`
@@ -1653,6 +1709,49 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.OpenAICodexUserAgent
 		}(),
+		RedeemRebateEnabled:         boolValueOrDefault(req.RedeemRebateEnabled, previousSettings.RedeemRebateEnabled),
+		FirstRedeemBonusEnabled:     boolValueOrDefault(req.FirstRedeemBonusEnabled, previousSettings.FirstRedeemBonusEnabled),
+		FirstRedeemBonusMultiplier:  stringValueOrDefault(req.FirstRedeemBonusMultiplier, previousSettings.FirstRedeemBonusMultiplier),
+		FirstRedeemBonusCap:         stringValueOrDefault(req.FirstRedeemBonusCap, previousSettings.FirstRedeemBonusCap),
+		FirstRedeemBonusBalanceType: stringValueOrDefault(req.FirstRedeemBonusBalanceType, previousSettings.FirstRedeemBonusBalanceType),
+		FirstRedeemBonusExpiryDays:  stringValueOrDefault(req.FirstRedeemBonusExpiryDays, previousSettings.FirstRedeemBonusExpiryDays),
+		RedeemBonusEnabled:          boolValueOrDefault(req.RedeemBonusEnabled, previousSettings.RedeemBonusEnabled),
+		RedeemBonusMode:             stringValueOrDefault(req.RedeemBonusMode, previousSettings.RedeemBonusMode),
+		RedeemBonusFixedAmount:      stringValueOrDefault(req.RedeemBonusFixedAmount, previousSettings.RedeemBonusFixedAmount),
+		RedeemBonusPercent:          stringValueOrDefault(req.RedeemBonusPercent, previousSettings.RedeemBonusPercent),
+		RedeemBonusRandomMin:        stringValueOrDefault(req.RedeemBonusRandomMin, previousSettings.RedeemBonusRandomMin),
+		RedeemBonusRandomMax:        stringValueOrDefault(req.RedeemBonusRandomMax, previousSettings.RedeemBonusRandomMax),
+		RedeemBonusCap:              stringValueOrDefault(req.RedeemBonusCap, previousSettings.RedeemBonusCap),
+		RedeemBonusMinAmount:        stringValueOrDefault(req.RedeemBonusMinAmount, previousSettings.RedeemBonusMinAmount),
+		RedeemBonusBalanceType:      stringValueOrDefault(req.RedeemBonusBalanceType, previousSettings.RedeemBonusBalanceType),
+		RedeemBonusExpiryDays:       stringValueOrDefault(req.RedeemBonusExpiryDays, previousSettings.RedeemBonusExpiryDays),
+		BalanceExpiryEnabled:        boolValueOrDefault(req.BalanceExpiryEnabled, previousSettings.BalanceExpiryEnabled),
+		BalanceExpiryWarningDays:    intValueOrDefault(req.BalanceExpiryWarningDays, previousSettings.BalanceExpiryWarningDays),
+		BalanceDeductionOrder:       stringValueOrDefault(req.BalanceDeductionOrder, previousSettings.BalanceDeductionOrder),
+		CheckinEnabled:              boolValueOrDefault(req.CheckinEnabled, previousSettings.CheckinEnabled),
+		CheckinMode:                 stringValueOrDefault(req.CheckinMode, previousSettings.CheckinMode),
+		CheckinFixedAmount:          stringValueOrDefault(req.CheckinFixedAmount, previousSettings.CheckinFixedAmount),
+		CheckinRandomMin:            stringValueOrDefault(req.CheckinRandomMin, previousSettings.CheckinRandomMin),
+		CheckinRandomMax:            stringValueOrDefault(req.CheckinRandomMax, previousSettings.CheckinRandomMax),
+		CheckinBalanceType:          stringValueOrDefault(req.CheckinBalanceType, previousSettings.CheckinBalanceType),
+		CheckinExpiryDays:           stringValueOrDefault(req.CheckinExpiryDays, previousSettings.CheckinExpiryDays),
+		CheckinMilestones:           stringValueOrDefault(req.CheckinMilestones, previousSettings.CheckinMilestones),
+		LeaderboardEnabled:          boolValueOrDefault(req.LeaderboardEnabled, previousSettings.LeaderboardEnabled),
+		LeaderboardMaskEmail:        boolValueOrDefault(req.LeaderboardMaskEmail, previousSettings.LeaderboardMaskEmail),
+		LeaderboardTopN:             stringValueOrDefault(req.LeaderboardTopN, previousSettings.LeaderboardTopN),
+		LeaderboardRewardRules:      stringValueOrDefault(req.LeaderboardRewardRules, previousSettings.LeaderboardRewardRules),
+		CashbackEnabled:             boolValueOrDefault(req.CashbackEnabled, previousSettings.CashbackEnabled),
+		CashbackThreshold:           stringValueOrDefault(req.CashbackThreshold, previousSettings.CashbackThreshold),
+		CashbackMode:                stringValueOrDefault(req.CashbackMode, previousSettings.CashbackMode),
+		CashbackFixedAmount:         stringValueOrDefault(req.CashbackFixedAmount, previousSettings.CashbackFixedAmount),
+		CashbackPercent:             stringValueOrDefault(req.CashbackPercent, previousSettings.CashbackPercent),
+		CashbackRandomMin:           stringValueOrDefault(req.CashbackRandomMin, previousSettings.CashbackRandomMin),
+		CashbackRandomMax:           stringValueOrDefault(req.CashbackRandomMax, previousSettings.CashbackRandomMax),
+		CashbackBalanceType:         stringValueOrDefault(req.CashbackBalanceType, previousSettings.CashbackBalanceType),
+		CashbackExpiryDays:          stringValueOrDefault(req.CashbackExpiryDays, previousSettings.CashbackExpiryDays),
+		CashbackCycle:               stringValueOrDefault(req.CashbackCycle, previousSettings.CashbackCycle),
+		OffPeakPricingEnabled:       boolValueOrDefault(req.OffPeakPricingEnabled, previousSettings.OffPeakPricingEnabled),
+		OffPeakPricingRules:         stringValueOrDefault(req.OffPeakPricingRules, previousSettings.OffPeakPricingRules),
 		PaymentVisibleMethodAlipaySource: func() string {
 			if req.PaymentVisibleMethodAlipaySource != nil {
 				return strings.TrimSpace(*req.PaymentVisibleMethodAlipaySource)
@@ -2013,6 +2112,49 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		RewriteMessageCacheControl:             updatedSettings.RewriteMessageCacheControl,
 		AntigravityUserAgentVersion:            updatedSettings.AntigravityUserAgentVersion,
 		OpenAICodexUserAgent:                   updatedSettings.OpenAICodexUserAgent,
+		RedeemRebateEnabled:                    updatedSettings.RedeemRebateEnabled,
+		FirstRedeemBonusEnabled:                updatedSettings.FirstRedeemBonusEnabled,
+		FirstRedeemBonusMultiplier:             updatedSettings.FirstRedeemBonusMultiplier,
+		FirstRedeemBonusCap:                    updatedSettings.FirstRedeemBonusCap,
+		FirstRedeemBonusBalanceType:            updatedSettings.FirstRedeemBonusBalanceType,
+		FirstRedeemBonusExpiryDays:             updatedSettings.FirstRedeemBonusExpiryDays,
+		RedeemBonusEnabled:                     updatedSettings.RedeemBonusEnabled,
+		RedeemBonusMode:                        updatedSettings.RedeemBonusMode,
+		RedeemBonusFixedAmount:                 updatedSettings.RedeemBonusFixedAmount,
+		RedeemBonusPercent:                     updatedSettings.RedeemBonusPercent,
+		RedeemBonusRandomMin:                   updatedSettings.RedeemBonusRandomMin,
+		RedeemBonusRandomMax:                   updatedSettings.RedeemBonusRandomMax,
+		RedeemBonusCap:                         updatedSettings.RedeemBonusCap,
+		RedeemBonusMinAmount:                   updatedSettings.RedeemBonusMinAmount,
+		RedeemBonusBalanceType:                 updatedSettings.RedeemBonusBalanceType,
+		RedeemBonusExpiryDays:                  updatedSettings.RedeemBonusExpiryDays,
+		BalanceExpiryEnabled:                   updatedSettings.BalanceExpiryEnabled,
+		BalanceExpiryWarningDays:               updatedSettings.BalanceExpiryWarningDays,
+		BalanceDeductionOrder:                  updatedSettings.BalanceDeductionOrder,
+		CheckinEnabled:                         updatedSettings.CheckinEnabled,
+		CheckinMode:                            updatedSettings.CheckinMode,
+		CheckinFixedAmount:                     updatedSettings.CheckinFixedAmount,
+		CheckinRandomMin:                       updatedSettings.CheckinRandomMin,
+		CheckinRandomMax:                       updatedSettings.CheckinRandomMax,
+		CheckinBalanceType:                     updatedSettings.CheckinBalanceType,
+		CheckinExpiryDays:                      updatedSettings.CheckinExpiryDays,
+		CheckinMilestones:                      updatedSettings.CheckinMilestones,
+		LeaderboardEnabled:                     updatedSettings.LeaderboardEnabled,
+		LeaderboardMaskEmail:                   updatedSettings.LeaderboardMaskEmail,
+		LeaderboardTopN:                        updatedSettings.LeaderboardTopN,
+		LeaderboardRewardRules:                 updatedSettings.LeaderboardRewardRules,
+		CashbackEnabled:                        updatedSettings.CashbackEnabled,
+		CashbackThreshold:                      updatedSettings.CashbackThreshold,
+		CashbackMode:                           updatedSettings.CashbackMode,
+		CashbackFixedAmount:                    updatedSettings.CashbackFixedAmount,
+		CashbackPercent:                        updatedSettings.CashbackPercent,
+		CashbackRandomMin:                      updatedSettings.CashbackRandomMin,
+		CashbackRandomMax:                      updatedSettings.CashbackRandomMax,
+		CashbackBalanceType:                    updatedSettings.CashbackBalanceType,
+		CashbackExpiryDays:                     updatedSettings.CashbackExpiryDays,
+		CashbackCycle:                          updatedSettings.CashbackCycle,
+		OffPeakPricingEnabled:                  updatedSettings.OffPeakPricingEnabled,
+		OffPeakPricingRules:                    updatedSettings.OffPeakPricingRules,
 		PaymentVisibleMethodAlipaySource:       updatedSettings.PaymentVisibleMethodAlipaySource,
 		PaymentVisibleMethodWxpaySource:        updatedSettings.PaymentVisibleMethodWxpaySource,
 		PaymentVisibleMethodAlipayEnabled:      updatedSettings.PaymentVisibleMethodAlipayEnabled,
@@ -2607,6 +2749,13 @@ func intValueOrDefault(value *int, fallback int) int {
 }
 
 func boolValueOrDefault(value *bool, fallback bool) bool {
+	if value == nil {
+		return fallback
+	}
+	return *value
+}
+
+func stringValueOrDefault(value *string, fallback string) string {
 	if value == nil {
 		return fallback
 	}
