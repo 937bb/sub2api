@@ -531,12 +531,18 @@ type adminServiceImpl struct {
 	defaultSubAssigner   DefaultSubscriptionAssigner
 	userSubRepo          UserSubscriptionRepository
 	privacyClientFactory PrivacyClientFactory
+	runtimeBlocker       AccountRuntimeBlocker
 	balanceEntryService  *BalanceEntryService
 }
 
 // SetBalanceEntryService 注入余额明细服务
 func (s *adminServiceImpl) SetBalanceEntryService(svc *BalanceEntryService) {
 	s.balanceEntryService = svc
+}
+
+// SetRuntimeBlocker 延迟注入 runtime blocker（解决循环依赖）
+func (s *adminServiceImpl) SetRuntimeBlocker(blocker AccountRuntimeBlocker) {
+	s.runtimeBlocker = blocker
 }
 
 type userGroupRateBatchReader interface {
@@ -2811,6 +2817,9 @@ func (s *adminServiceImpl) ClearAccountError(ctx context.Context, id int64) (*Ac
 	}
 	if err := s.accountRepo.ClearTempUnschedulable(ctx, id); err != nil {
 		return nil, err
+	}
+	if s.runtimeBlocker != nil {
+		s.runtimeBlocker.ClearAccountSchedulingBlock(id)
 	}
 	return s.accountRepo.GetByID(ctx, id)
 }

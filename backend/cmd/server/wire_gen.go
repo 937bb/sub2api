@@ -211,6 +211,9 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	openAIGatewayService.SetBalanceEntryService(balanceEntryService)
 	openAIGatewayService.SetCashbackService(cashbackService)
 	openAIGatewayService.SetOffPeakPricingService(offPeakPricingService)
+	if impl, ok := adminService.(interface{ SetRuntimeBlocker(service.AccountRuntimeBlocker) }); ok {
+		impl.SetRuntimeBlocker(openAIGatewayService)
+	}
 	geminiMessagesCompatService := service.NewGeminiMessagesCompatService(accountRepository, groupRepository, gatewayCache, schedulerSnapshotService, geminiTokenProvider, rateLimitService, httpUpstream, antigravityGatewayService, configConfig)
 	opsSystemLogSink := service.ProvideOpsSystemLogSink(opsRepository)
 	opsService := service.NewOpsService(opsRepository, settingRepository, configConfig, accountRepository, userRepository, concurrencyService, gatewayService, openAIGatewayService, geminiMessagesCompatService, antigravityGatewayService, opsSystemLogSink)
