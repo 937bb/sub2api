@@ -1,0 +1,553 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Facebook GPT API Relay Banner</title>
+  <style>
+    :root {
+      --scale: 1;
+      --w: 1640px;
+      --h: 624px;
+      --ink: #f8fafc;
+      --muted: #b6c7d6;
+      --teal: #20d3b5;
+      --cyan: #62d6ff;
+      --amber: #f9b24e;
+      --green: #59f09a;
+      --panel: rgba(12, 22, 34, 0.78);
+      --line: rgba(255, 255, 255, 0.12);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      width: calc(var(--w) * var(--scale));
+      height: calc(var(--h) * var(--scale));
+      overflow: hidden;
+      background: #0b1220;
+    }
+
+    body {
+      font-family: "Segoe UI", Inter, Arial, sans-serif;
+    }
+
+    .stage {
+      position: relative;
+      width: var(--w);
+      height: var(--h);
+      transform: scale(var(--scale));
+      transform-origin: 0 0;
+      overflow: hidden;
+      color: var(--ink);
+      background:
+        linear-gradient(105deg, rgba(5, 12, 26, 0.96) 0%, rgba(8, 26, 38, 0.98) 34%, rgba(14, 26, 44, 0.98) 67%, rgba(32, 26, 36, 0.96) 100%);
+      isolation: isolate;
+    }
+
+    .stage::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background:
+        repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.045) 0 1px, transparent 1px 44px),
+        repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.035) 0 1px, transparent 1px 44px);
+      mask-image: linear-gradient(90deg, rgba(0, 0, 0, 0.9), rgba(0, 0, 0, 0.35) 42%, rgba(0, 0, 0, 0.75));
+      z-index: 0;
+    }
+
+    .stage::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background:
+        linear-gradient(115deg, transparent 0 12%, rgba(32, 211, 181, 0.14) 12.2% 13.2%, transparent 13.4% 42%, rgba(249, 178, 78, 0.13) 42.2% 43.1%, transparent 43.3% 100%),
+        linear-gradient(18deg, rgba(98, 214, 255, 0.08), transparent 40%);
+      z-index: 0;
+    }
+
+    .left-shield {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 430px;
+      height: 624px;
+      background:
+        linear-gradient(120deg, rgba(32, 211, 181, 0.16), transparent 58%),
+        linear-gradient(90deg, rgba(1, 9, 20, 0.72), rgba(1, 9, 20, 0));
+      clip-path: polygon(0 0, 100% 0, 72% 100%, 0 100%);
+      z-index: 1;
+    }
+
+    .brand-chip {
+      position: absolute;
+      left: 76px;
+      top: 56px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      z-index: 3;
+    }
+
+    .brand-mark {
+      width: 68px;
+      height: 68px;
+      border: 1px solid rgba(255, 255, 255, 0.22);
+      border-radius: 18px;
+      background:
+        linear-gradient(135deg, rgba(32, 211, 181, 0.95), rgba(98, 214, 255, 0.74) 46%, rgba(249, 178, 78, 0.82));
+      box-shadow: 0 20px 46px rgba(0, 0, 0, 0.22);
+      display: grid;
+      place-items: center;
+      font-weight: 900;
+      font-size: 24px;
+      letter-spacing: 0;
+      color: #06111e;
+    }
+
+    .brand-copy {
+      display: grid;
+      gap: 3px;
+    }
+
+    .eyebrow {
+      font-size: 22px;
+      font-weight: 800;
+      letter-spacing: 0;
+      text-transform: uppercase;
+      color: #ffffff;
+    }
+
+    .submark {
+      font-size: 15px;
+      font-weight: 650;
+      color: var(--muted);
+    }
+
+    .terminal {
+      position: absolute;
+      left: 80px;
+      bottom: 74px;
+      width: 350px;
+      height: 182px;
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      border-radius: 22px;
+      background: rgba(5, 13, 24, 0.62);
+      box-shadow: 0 22px 58px rgba(0, 0, 0, 0.28);
+      backdrop-filter: blur(10px);
+      z-index: 2;
+      overflow: hidden;
+    }
+
+    .terminal-head {
+      height: 42px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      padding: 0 18px;
+    }
+
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 99px;
+      background: rgba(255, 255, 255, 0.32);
+    }
+
+    .dot:nth-child(1) {
+      background: #ff6f61;
+    }
+
+    .dot:nth-child(2) {
+      background: #f9b24e;
+    }
+
+    .dot:nth-child(3) {
+      background: #59f09a;
+    }
+
+    .terminal-body {
+      padding: 18px 20px;
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 17px;
+      line-height: 1.7;
+      color: #dceeff;
+      white-space: nowrap;
+    }
+
+    .terminal-body .ok {
+      color: var(--green);
+    }
+
+    .terminal-body .accent {
+      color: var(--cyan);
+    }
+
+    .diagram {
+      position: absolute;
+      left: 505px;
+      top: 84px;
+      width: 440px;
+      height: 456px;
+      z-index: 2;
+    }
+
+    .node {
+      position: absolute;
+      display: grid;
+      place-items: center;
+      width: 118px;
+      height: 74px;
+      border-radius: 22px;
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      background: rgba(12, 22, 34, 0.62);
+      box-shadow: 0 22px 48px rgba(0, 0, 0, 0.24);
+      color: #f8fafc;
+      font-weight: 800;
+      font-size: 20px;
+    }
+
+    .node.api {
+      left: 150px;
+      top: 182px;
+      width: 142px;
+      height: 92px;
+      border-color: rgba(32, 211, 181, 0.42);
+      background: linear-gradient(145deg, rgba(32, 211, 181, 0.26), rgba(12, 22, 34, 0.82));
+      color: #ffffff;
+    }
+
+    .node.us {
+      left: 8px;
+      top: 62px;
+    }
+
+    .node.eu {
+      right: 8px;
+      top: 48px;
+    }
+
+    .node.asia {
+      left: 18px;
+      bottom: 64px;
+    }
+
+    .node.saas {
+      right: 10px;
+      bottom: 58px;
+    }
+
+    .line {
+      position: absolute;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, rgba(98, 214, 255, 0.72), transparent);
+      transform-origin: left center;
+      z-index: -1;
+    }
+
+    .line.one {
+      width: 168px;
+      left: 118px;
+      top: 150px;
+      transform: rotate(25deg);
+    }
+
+    .line.two {
+      width: 160px;
+      left: 252px;
+      top: 148px;
+      transform: rotate(-29deg);
+    }
+
+    .line.three {
+      width: 154px;
+      left: 120px;
+      bottom: 151px;
+      transform: rotate(-24deg);
+    }
+
+    .line.four {
+      width: 154px;
+      left: 260px;
+      bottom: 148px;
+      transform: rotate(26deg);
+    }
+
+    .pulse {
+      position: absolute;
+      left: 205px;
+      top: 205px;
+      width: 34px;
+      height: 34px;
+      border: 2px solid rgba(89, 240, 154, 0.78);
+      border-radius: 50%;
+    }
+
+    .copy {
+      position: absolute;
+      left: 950px;
+      top: 84px;
+      width: 610px;
+      z-index: 4;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 18px;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      background: rgba(255, 255, 255, 0.08);
+      color: #dceeff;
+      font-size: 19px;
+      font-weight: 750;
+    }
+
+    .badge::before {
+      content: "";
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 16px rgba(89, 240, 154, 0.85);
+    }
+
+    h1 {
+      margin: 34px 0 0;
+      font-size: 72px;
+      line-height: 0.96;
+      letter-spacing: 0;
+      max-width: 600px;
+      font-weight: 900;
+    }
+
+    .gradient-text {
+      color: #ffffff;
+    }
+
+    .accent-text {
+      color: var(--teal);
+    }
+
+    .lead {
+      margin: 28px 0 0;
+      max-width: 580px;
+      color: #d6e4ef;
+      font-size: 28px;
+      line-height: 1.25;
+      font-weight: 600;
+    }
+
+    .features {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 14px;
+      margin-top: 34px;
+      max-width: 590px;
+    }
+
+    .pill {
+      padding: 13px 17px;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      background: rgba(255, 255, 255, 0.08);
+      color: #eef7ff;
+      font-size: 18px;
+      font-weight: 760;
+    }
+
+    .cta-row {
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      margin-top: 34px;
+    }
+
+    .cta {
+      padding: 18px 28px;
+      border-radius: 18px;
+      background: linear-gradient(135deg, var(--teal), var(--cyan));
+      color: #04101c;
+      font-weight: 900;
+      font-size: 22px;
+      letter-spacing: 0;
+      box-shadow: 0 24px 42px rgba(32, 211, 181, 0.22);
+    }
+
+    .note {
+      color: #b6c7d6;
+      font-size: 16px;
+      line-height: 1.35;
+      max-width: 250px;
+      font-weight: 650;
+    }
+
+    .status-panel {
+      position: absolute;
+      right: 78px;
+      bottom: 62px;
+      width: 392px;
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      border-radius: 24px;
+      background: var(--panel);
+      box-shadow: 0 30px 72px rgba(0, 0, 0, 0.28);
+      z-index: 3;
+      padding: 20px 22px;
+    }
+
+    .status-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      padding-bottom: 14px;
+      margin-bottom: 14px;
+    }
+
+    .status-title {
+      font-size: 20px;
+      font-weight: 850;
+      color: #ffffff;
+    }
+
+    .online {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: rgba(89, 240, 154, 0.14);
+      color: #a7ffc8;
+      font-size: 15px;
+      font-weight: 800;
+    }
+
+    .online::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--green);
+    }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 12px;
+    }
+
+    .metric {
+      padding: 12px;
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.07);
+    }
+
+    .metric strong {
+      display: block;
+      color: #ffffff;
+      font-size: 19px;
+      line-height: 1.1;
+    }
+
+    .metric span {
+      display: block;
+      color: #b6c7d6;
+      font-size: 13px;
+      margin-top: 5px;
+      font-weight: 650;
+    }
+  </style>
+</head>
+<body>
+  <main class="stage" aria-label="Facebook cover banner for GPT API relay service">
+    <div class="left-shield"></div>
+
+    <section class="brand-chip">
+      <div class="brand-mark">API</div>
+      <div class="brand-copy">
+        <div class="eyebrow">Relay Access</div>
+        <div class="submark">For global AI builders</div>
+      </div>
+    </section>
+
+    <section class="terminal" aria-hidden="true">
+      <div class="terminal-head">
+        <span class="dot"></span>
+        <span class="dot"></span>
+        <span class="dot"></span>
+      </div>
+      <div class="terminal-body">
+        <div><span class="accent">$</span> connect gpt-relay</div>
+        <div><span class="ok">200 OK</span> secure route ready</div>
+        <div>latency: optimized</div>
+      </div>
+    </section>
+
+    <section class="diagram" aria-hidden="true">
+      <div class="line one"></div>
+      <div class="line two"></div>
+      <div class="line three"></div>
+      <div class="line four"></div>
+      <div class="node us">US</div>
+      <div class="node eu">EU</div>
+      <div class="node asia">Asia</div>
+      <div class="node saas">SaaS</div>
+      <div class="node api">GPT<br>Relay</div>
+      <div class="pulse"></div>
+    </section>
+
+    <section class="copy">
+      <div class="badge">Independent GPT API relay service</div>
+      <h1><span class="gradient-text">Reliable GPT</span><br><span class="accent-text">API Relay</span></h1>
+      <p class="lead">Fast access, stable routing, and simple integration for developers and AI teams.</p>
+
+      <div class="features" aria-label="service features">
+        <span class="pill">Global Delivery</span>
+        <span class="pill">Low Latency</span>
+        <span class="pill">Easy Setup</span>
+        <span class="pill">24/7 Support</span>
+      </div>
+
+      <div class="cta-row">
+        <div class="cta">DM FOR ACCESS</div>
+        <div class="note">Setup, usage guidance, and flexible plans available.</div>
+      </div>
+    </section>
+
+    <section class="status-panel" aria-hidden="true">
+      <div class="status-row">
+        <div class="status-title">Gateway Status</div>
+        <div class="online">ONLINE</div>
+      </div>
+      <div class="metrics">
+        <div class="metric">
+          <strong>99.9%</strong>
+          <span>uptime target</span>
+        </div>
+        <div class="metric">
+          <strong>Multi</strong>
+          <span>model routing</span>
+        </div>
+        <div class="metric">
+          <strong>Fast</strong>
+          <span>API response</span>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const scale = Number(params.get("scale") || "1");
+    if (Number.isFinite(scale) && scale > 0) {
+      document.documentElement.style.setProperty("--scale", String(scale));
+    }
+  </script>
+</body>
+</html>

@@ -2072,10 +2072,14 @@ export default {
       sourceConsumption: 'API Consumption',
       sourceExpiryClear: 'Expiry Cleanup',
       sourceRefund: 'Refund',
+      sourceFilterRecharge: 'Recharge (Redeem/Admin)',
       sourceFilterBonus: 'Redeem Bonus',
       sourceOauthGrant: 'First Bind Grant',
       entryTypePermanent: 'Permanent',
       entryTypeExpirable: 'Expirable',
+      entryPermanent: 'Permanent',
+      entryExpirable: 'Expirable',
+      entryExpired: 'Expired',
       roles: {
         admin: 'Admin',
         user: 'User'
