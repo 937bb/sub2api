@@ -70,22 +70,32 @@ func (u *User) IsActive() bool {
 	return u.Status == StatusActive
 }
 
-// CanBindGroup checks whether a user can bind to a given group.
-// When AllowedGroups is set (non-empty): strict whitelist mode — only groups in the list are visible.
-// When AllowedGroups is empty: public (non-exclusive) groups are visible to all, exclusive groups are hidden.
+// CanBindGroup checks whether a user can bind a standard group to an API key.
+// Public groups are always bindable. Exclusive groups require explicit permission.
 func (u *User) CanBindGroup(groupID int64, isExclusive bool) bool {
-	// 如果管理员为用户设置了 AllowedGroups 白名单，则严格限制：
-	// 只能访问列表中明确允许的分组（无论是否专属）
-	if len(u.AllowedGroups) > 0 {
-		for _, id := range u.AllowedGroups {
-			if id == groupID {
-				return true
-			}
-		}
-		return false
+	if !isExclusive {
+		return true
 	}
-	// 未设置 AllowedGroups 的用户：公开分组可见，专属分组不可见
+	return u.hasAllowedGroup(groupID)
+}
+
+// CanViewGroup checks whether a user can see a standard group in strict user-facing views.
+// When AllowedGroups is set (non-empty), the list acts as a whitelist for all groups.
+// When AllowedGroups is empty, only public groups are visible.
+func (u *User) CanViewGroup(groupID int64, isExclusive bool) bool {
+	if len(u.AllowedGroups) > 0 {
+		return u.hasAllowedGroup(groupID)
+	}
 	return !isExclusive
+}
+
+func (u *User) hasAllowedGroup(groupID int64) bool {
+	for _, id := range u.AllowedGroups {
+		if id == groupID {
+			return true
+		}
+	}
+	return false
 }
 
 func (u *User) SetPassword(password string) error {
