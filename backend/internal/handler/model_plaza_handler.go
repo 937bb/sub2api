@@ -43,10 +43,10 @@ type modelPlazaGroup struct {
 }
 
 type modelPlazaPricing struct {
-	InputPrice      *float64 `json:"input_price"`
-	OutputPrice     *float64 `json:"output_price"`
-	CacheWritePrice *float64 `json:"cache_write_price"`
-	CacheReadPrice  *float64 `json:"cache_read_price"`
+	InputPrice       *float64 `json:"input_price"`
+	OutputPrice      *float64 `json:"output_price"`
+	CacheWritePrice  *float64 `json:"cache_write_price"`
+	CacheReadPrice   *float64 `json:"cache_read_price"`
 	ImageOutputPrice *float64 `json:"image_output_price"`
 }
 
@@ -84,7 +84,7 @@ func (h *ModelPlazaHandler) List(c *gin.Context) {
 	}
 
 	// 1. 获取用户可访问的分组
-	userGroups, err := h.apiKeyService.GetAvailableGroups(c.Request.Context(), subject.UserID)
+	userGroups, err := h.apiKeyService.GetVisibleGroups(c.Request.Context(), subject.UserID)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
