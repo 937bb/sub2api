@@ -133,6 +133,7 @@ func (User) Edges() []ent.Edge {
 		edge.To("pending_auth_sessions", PendingAuthSession.Type),
 		edge.To("balance_entries", BalanceEntry.Type),
 		edge.To("checkin_records", CheckinRecord.Type),
+		edge.To("platform_quotas", UserPlatformQuota.Type),
 	}
 }
 
