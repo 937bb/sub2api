@@ -34,7 +34,7 @@
 
         <div class="hidden items-center gap-8 text-sm text-zinc-500 dark:text-zinc-400 md:flex">
           <a href="#models" class="transition-colors hover:text-zinc-950 dark:hover:text-white">Models</a>
-          <a href="#capabilities" class="transition-colors hover:text-zinc-950 dark:hover:text-white">Capabilities</a>
+          <a href="#capabilities" class="transition-colors hover:text-zinc-950 dark:hover:text-white">Access</a>
           <a href="#metrics" class="transition-colors hover:text-zinc-950 dark:hover:text-white">Metrics</a>
         </div>
 
@@ -74,12 +74,12 @@
         <div>
           <div class="mb-8 flex items-center gap-3 text-sm text-zinc-500 dark:text-zinc-400">
             <span class="h-px w-8 bg-zinc-300 dark:bg-white/20"></span>
-            <span>AI gateway for modern builders</span>
+            <span>Global AI access for builders and teams</span>
           </div>
 
           <h1 class="max-w-5xl text-5xl font-semibold leading-none text-zinc-950 dark:text-white md:text-7xl">
-            One API.
-            <span class="block">Every top AI model.</span>
+            Low-rate GPT & Claude.
+            <span class="block">China models worldwide.</span>
           </h1>
 
           <p class="mt-7 max-w-2xl text-lg leading-8 text-zinc-600 dark:text-zinc-300 md:text-xl">
@@ -131,8 +131,8 @@
           </div>
 
           <div class="absolute left-1/2 top-24 w-44 -translate-x-1/2 rounded-md border border-zinc-950 bg-zinc-950 px-4 py-4 text-white shadow-sm dark:border-white dark:bg-white dark:text-zinc-950">
-            <div class="text-xs opacity-70">Policy layer</div>
-            <div class="mt-1 text-lg font-semibold">route + meter</div>
+            <div class="text-xs opacity-70">Global gateway</div>
+            <div class="mt-1 text-lg font-semibold">route + save</div>
           </div>
 
           <div class="absolute right-8 top-20 grid gap-3">
@@ -166,7 +166,7 @@
         <div class="mx-auto flex max-w-7xl flex-col gap-5 md:flex-row md:items-center md:justify-between">
           <div>
             <p class="text-sm font-semibold text-zinc-950 dark:text-white">Model ecosystem</p>
-            <p class="mt-1 text-sm text-zinc-500 dark:text-zinc-400">OpenAI-compatible access across leading providers.</p>
+            <p class="mt-1 text-sm text-zinc-500 dark:text-zinc-400">Low-multiplier GPT and Claude, plus Chinese models available to global users.</p>
           </div>
           <div class="flex flex-wrap gap-2">
             <span
@@ -184,7 +184,7 @@
         <div class="max-w-2xl">
           <p class="text-sm font-semibold text-zinc-500 dark:text-zinc-400">Core capabilities</p>
           <h2 class="mt-3 text-3xl font-semibold text-zinc-950 dark:text-white md:text-4xl">
-            A clear control layer for every model request.
+            Premium and Chinese models, ready for global traffic.
           </h2>
         </div>
 
@@ -209,7 +209,6 @@
         <span>&copy; {{ currentYear }} {{ siteName }}. All systems operational.</span>
         <div class="flex gap-5">
           <a v-if="docUrl" :href="docUrl" target="_blank" rel="noopener noreferrer" class="hover:text-zinc-950 dark:hover:text-white">Docs</a>
-          <a :href="githubUrl" target="_blank" rel="noopener noreferrer" class="hover:text-zinc-950 dark:hover:text-white">GitHub</a>
         </div>
       </div>
     </footer>
@@ -243,7 +242,6 @@ const isHomeContentUrl = computed(() => {
 })
 
 const isDark = ref(document.documentElement.classList.contains('dark'))
-const githubUrl = 'https://github.com/Wei-Shaw/sub2api'
 
 const isAuthenticated = computed(() => authStore.isAuthenticated)
 const isAdmin = computed(() => authStore.isAdmin)
@@ -251,37 +249,37 @@ const dashboardPath = computed(() => isAdmin.value ? '/admin/dashboard' : '/dash
 const currentYear = computed(() => new Date().getFullYear())
 const brandInitial = computed(() => siteName.value.trim().charAt(0).toUpperCase() || 'S')
 
-const featuredProviders = ['OpenAI', 'Claude', 'Gemini', 'DeepSeek']
-const modelProviders = ['OpenAI', 'Claude', 'Gemini', 'Codex', 'DeepSeek', 'Qwen', 'Mistral', 'Azure', 'Bedrock']
+const featuredProviders = ['GPT', 'Claude', 'DeepSeek', 'GLM']
+const modelProviders = ['GPT', 'Claude', 'DeepSeek', 'GLM', 'Qwen', 'Gemini', 'Codex', 'Mistral', 'Azure', 'Bedrock']
 const heroMetrics = [
-  { value: '30+', label: 'provider integrations' },
-  { value: '24/7', label: 'usage and key monitoring' },
-  { value: '1', label: 'control plane for teams' }
+  { value: 'Global', label: 'access for users in multiple regions' },
+  { value: 'Low', label: 'multiplier routes for GPT and Claude' },
+  { value: 'CN+', label: 'DeepSeek, GLM, Qwen, and more' }
 ]
 const routingStats = [
-  { value: 'Smart failover', label: 'Route around unhealthy upstreams automatically.' },
-  { value: 'Live metering', label: 'Track token spend close to the request path.' },
-  { value: 'Policy aware', label: 'Apply groups, quotas, and access rules in one place.' }
+  { value: 'Low-rate routes', label: 'Keep GPT and Claude costs predictable for high-volume usage.' },
+  { value: 'China model access', label: 'Offer DeepSeek, GLM, Qwen, and other Chinese models to overseas users.' },
+  { value: 'One API', label: 'Serve international teams through one OpenAI-compatible endpoint.' }
 ]
 const features: Array<{ title: string; description: string; icon: FeatureIcon }> = [
   {
-    title: 'Unified routing',
-    description: 'Use one OpenAI-compatible endpoint across frontier models and regional provider stacks.',
+    title: 'Global user access',
+    description: 'Serve users across regions with one consistent OpenAI-compatible API surface.',
     icon: 'server'
   },
   {
-    title: 'Operational guardrails',
-    description: 'Keep quotas, group policies, rate limits, and access controls close to production traffic.',
+    title: 'Low-multiplier GPT/Claude',
+    description: 'Expose premium GPT and Claude routes with clear metering and cost-friendly multipliers.',
     icon: 'shield'
   },
   {
-    title: 'Usage observability',
-    description: 'Monitor requests, latency, errors, consumption, and billing behaviour from one surface.',
+    title: 'Chinese models worldwide',
+    description: 'Make DeepSeek, GLM, Qwen, and other Chinese model families usable for overseas customers.',
     icon: 'chart'
   },
   {
-    title: 'Global-ready delivery',
-    description: 'Run a self-hosted control plane with flexible upstream connectivity across regions.',
+    title: 'Unified operations',
+    description: 'Manage routing, quotas, usage, and access rules for every provider from one control plane.',
     icon: 'globe'
   }
 ]
