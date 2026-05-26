@@ -1,8 +1,8 @@
 # =============================================================================
-# Sub2API Global Site - Docker Compose (Host Network + Custom Frontend)
+# Sub2API Global Site - Docker Compose (Custom Frontend)
 # =============================================================================
-# Uses the server's existing PostgreSQL and Redis via host network.
-# No PG/Redis containers needed.
+# Uses the compose project network so existing PostgreSQL and Redis services can
+# be resolved by their Docker service names: postgres and redis.
 # Builds the global branch locally so custom homepage changes are included.
 #
 # Quick Start:
@@ -28,7 +28,8 @@ services:
       nofile:
         soft: 100000
         hard: 100000
-    network_mode: host
+    ports:
+      - "${SERVER_PORT:-6066}:${SERVER_PORT:-6066}"
     volumes:
       # Local directory mapping for easy migration
       - ./data:/app/data
