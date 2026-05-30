@@ -560,6 +560,7 @@ export interface SystemSettings {
   rewrite_message_cache_control: boolean;
   antigravity_user_agent_version: string;
   openai_codex_user_agent: string;
+  openai_allow_claude_code_codex_plugin: boolean;
   // Reward System
   redeem_rebate_enabled: boolean;
   first_redeem_bonus_enabled: boolean;
@@ -836,6 +837,7 @@ export interface UpdateSettingsRequest {
   rewrite_message_cache_control?: boolean;
   antigravity_user_agent_version?: string;
   openai_codex_user_agent?: string;
+  openai_allow_claude_code_codex_plugin?: boolean;
   // Reward System
   redeem_rebate_enabled?: boolean;
   first_redeem_bonus_enabled?: boolean;

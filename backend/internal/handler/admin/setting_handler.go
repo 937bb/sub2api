@@ -256,6 +256,7 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		RewriteMessageCacheControl:             settings.RewriteMessageCacheControl,
 		AntigravityUserAgentVersion:            settings.AntigravityUserAgentVersion,
 		OpenAICodexUserAgent:                   settings.OpenAICodexUserAgent,
+		OpenAIAllowClaudeCodeCodexPlugin:       settings.OpenAIAllowClaudeCodeCodexPlugin,
 		RedeemRebateEnabled:                    settings.RedeemRebateEnabled,
 		FirstRedeemBonusEnabled:                settings.FirstRedeemBonusEnabled,
 		FirstRedeemBonusMultiplier:             settings.FirstRedeemBonusMultiplier,
@@ -627,6 +628,7 @@ type UpdateSettingsRequest struct {
 	RewriteMessageCacheControl         *bool   `json:"rewrite_message_cache_control"`
 	AntigravityUserAgentVersion        *string `json:"antigravity_user_agent_version"`
 	OpenAICodexUserAgent               *string `json:"openai_codex_user_agent"`
+	OpenAIAllowClaudeCodeCodexPlugin   *bool   `json:"openai_allow_claude_code_codex_plugin"`
 
 	// Reward System
 	RedeemRebateEnabled         *bool   `json:"redeem_rebate_enabled"`
@@ -1786,6 +1788,12 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		CashbackCycle:               stringValueOrDefault(req.CashbackCycle, previousSettings.CashbackCycle),
 		OffPeakPricingEnabled:       boolValueOrDefault(req.OffPeakPricingEnabled, previousSettings.OffPeakPricingEnabled),
 		OffPeakPricingRules:         stringValueOrDefault(req.OffPeakPricingRules, previousSettings.OffPeakPricingRules),
+		OpenAIAllowClaudeCodeCodexPlugin: func() bool {
+			if req.OpenAIAllowClaudeCodeCodexPlugin != nil {
+				return *req.OpenAIAllowClaudeCodeCodexPlugin
+			}
+			return previousSettings.OpenAIAllowClaudeCodeCodexPlugin
+		}(),
 		PaymentVisibleMethodAlipaySource: func() string {
 			if req.PaymentVisibleMethodAlipaySource != nil {
 				return strings.TrimSpace(*req.PaymentVisibleMethodAlipaySource)
@@ -2205,6 +2213,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		CashbackCycle:                          updatedSettings.CashbackCycle,
 		OffPeakPricingEnabled:                  updatedSettings.OffPeakPricingEnabled,
 		OffPeakPricingRules:                    updatedSettings.OffPeakPricingRules,
+		OpenAIAllowClaudeCodeCodexPlugin:       updatedSettings.OpenAIAllowClaudeCodeCodexPlugin,
 		PaymentVisibleMethodAlipaySource:       updatedSettings.PaymentVisibleMethodAlipaySource,
 		PaymentVisibleMethodWxpaySource:        updatedSettings.PaymentVisibleMethodWxpaySource,
 		PaymentVisibleMethodAlipayEnabled:      updatedSettings.PaymentVisibleMethodAlipayEnabled,
@@ -2673,6 +2682,9 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	}
 	if before.OpenAICodexUserAgent != after.OpenAICodexUserAgent {
 		changed = append(changed, "openai_codex_user_agent")
+	}
+	if before.OpenAIAllowClaudeCodeCodexPlugin != after.OpenAIAllowClaudeCodeCodexPlugin {
+		changed = append(changed, "openai_allow_claude_code_codex_plugin")
 	}
 	if before.PaymentVisibleMethodAlipaySource != after.PaymentVisibleMethodAlipaySource {
 		changed = append(changed, "payment_visible_method_alipay_source")
