@@ -447,6 +447,7 @@ type AccountBulkEditTarget =
         group?: string
         search?: string
         privacy_mode?: string
+        plan_type?: string
         sort_by?: string
         sort_order?: AccountSortOrder
       }
@@ -737,6 +738,7 @@ const {
     type: '',
     status: '',
     privacy_mode: '',
+    plan_type: '',
     group: '',
     search: '',
     sort_by: sortState.sort_by,
@@ -941,6 +943,7 @@ const refreshAccountsIncrementally = async () => {
         type?: string
         status?: string
         privacy_mode?: string
+        plan_type?: string
         group?: string
         search?: string
         sort_by?: string
@@ -1359,6 +1362,7 @@ const buildBulkEditFilterSnapshot = () => {
     group: typeof rawParams.group === 'string' ? rawParams.group : '',
     search: typeof rawParams.search === 'string' ? rawParams.search : '',
     privacy_mode: typeof rawParams.privacy_mode === 'string' ? rawParams.privacy_mode : '',
+    plan_type: typeof rawParams.plan_type === 'string' ? rawParams.plan_type : '',
     sort_by: typeof rawParams.sort_by === 'string' ? rawParams.sort_by : '',
     sort_order: sortOrder
   }
@@ -1409,6 +1413,7 @@ const buildAccountQueryFilters = () => ({
   status: params.status || '',
   group: params.group || '',
   privacy_mode: params.privacy_mode || '',
+  plan_type: params.plan_type || '',
   search: params.search || '',
   sort_by: sortState.sort_by,
   sort_order: sortState.sort_order
@@ -1452,6 +1457,8 @@ const accountMatchesCurrentFilters = (account: Account) => {
       return false
     }
   }
+  const planType = typeof account.credentials?.plan_type === 'string' ? account.credentials.plan_type : ''
+  if (filters.plan_type && planType !== filters.plan_type) return false
   const search = String(filters.search || '').trim().toLowerCase()
   if (search && !account.name.toLowerCase().includes(search)) return false
   return true
