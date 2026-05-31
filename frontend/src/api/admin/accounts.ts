@@ -688,6 +688,20 @@ export async function batchRefresh(accountIds: number[]): Promise<BatchOperation
 }
 
 /**
+ * Batch refresh OpenAI OAuth plan types
+ * @param accountIds - Array of account IDs
+ * @returns Batch operation result
+ */
+export async function batchRefreshPlanType(accountIds: number[]): Promise<BatchOperationResult> {
+  const { data } = await apiClient.post<BatchOperationResult>('/admin/accounts/batch-refresh-plan-type', {
+    account_ids: accountIds,
+  }, {
+    timeout: 120000
+  })
+  return data
+}
+
+/**
  * Set privacy for an Antigravity OAuth account
  * @param id - Account ID
  * @returns Updated account
@@ -737,6 +751,7 @@ export const accountsAPI = {
   getAntigravityDefaultModelMapping,
   batchClearError,
   batchRefresh,
+  batchRefreshPlanType,
   setPrivacy
 }
 
