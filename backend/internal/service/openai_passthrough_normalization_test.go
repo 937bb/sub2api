@@ -31,3 +31,12 @@ func TestNormalizeOpenAIPassthroughOAuthBody_CompactRemovesUnsupportedUser(t *te
 	require.False(t, gjson.GetBytes(normalized, "stream").Exists())
 	require.False(t, gjson.GetBytes(normalized, "store").Exists())
 }
+
+func TestNormalizeOpenAIPassthroughOAuthBody_CompactRejectsMalformedJSON(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.4","input":"hello"`)
+
+	normalized, changed, err := normalizeOpenAIPassthroughOAuthBody(body, true)
+	require.Error(t, err)
+	require.False(t, changed)
+	require.Equal(t, body, normalized)
+}

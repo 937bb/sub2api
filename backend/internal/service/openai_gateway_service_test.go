@@ -30,6 +30,47 @@ type stubOpenAIAccountRepo struct {
 	accounts []Account
 }
 
+type openAITestSettingRepo struct {
+	values map[string]string
+}
+
+func (s *openAITestSettingRepo) Get(ctx context.Context, key string) (*Setting, error) {
+	panic("unexpected Get call")
+}
+
+func (s *openAITestSettingRepo) GetValue(ctx context.Context, key string) (string, error) {
+	if v, ok := s.values[key]; ok {
+		return v, nil
+	}
+	return "", ErrSettingNotFound
+}
+
+func (s *openAITestSettingRepo) Set(ctx context.Context, key, value string) error {
+	panic("unexpected Set call")
+}
+
+func (s *openAITestSettingRepo) GetMultiple(ctx context.Context, keys []string) (map[string]string, error) {
+	result := make(map[string]string, len(keys))
+	for _, key := range keys {
+		if v, ok := s.values[key]; ok {
+			result[key] = v
+		}
+	}
+	return result, nil
+}
+
+func (s *openAITestSettingRepo) SetMultiple(ctx context.Context, settings map[string]string) error {
+	panic("unexpected SetMultiple call")
+}
+
+func (s *openAITestSettingRepo) GetAll(ctx context.Context) (map[string]string, error) {
+	panic("unexpected GetAll call")
+}
+
+func (s *openAITestSettingRepo) Delete(ctx context.Context, key string) error {
+	panic("unexpected Delete call")
+}
+
 type snapshotUpdateAccountRepo struct {
 	stubOpenAIAccountRepo
 	updateExtraCalls chan map[string]any
@@ -1809,7 +1850,7 @@ func TestOpenAIResponsesRequestPathSuffix(t *testing.T) {
 }
 
 func TestNormalizeOpenAICompactRequestBodyPreservesCurrentCodexPayloadFields(t *testing.T) {
-	body := []byte(`{"model":"gpt-5.5","input":[{"type":"message","role":"user","content":"compact me"}],"instructions":"compact-test","tools":[{"type":"function","name":"shell"}],"parallel_tool_calls":true,"reasoning":{"effort":"high"},"text":{"verbosity":"low"},"previous_response_id":"resp_123","store":true,"stream":true,"prompt_cache_key":"cache_123"}`)
+	body := []byte(`{"model":"gpt-5.5","input":[{"type":"message","role":"user","content":"compact me"}],"instructions":"compact-test","tools":[{"type":"function","name":"shell"}],"parallel_tool_calls":true,"reasoning":{"effort":"high"},"text":{"verbosity":"low"},"service_tier":"priority","prompt_cache_key":"cache_123","metadata":{"keep":"yes"},"max_output_tokens":1024,"temperature":0.2,"top_p":0.9,"truncation":"auto","background":false,"conversation":"none","safety_identifier":"safe-user","user":"end-user","previous_response_id":"resp_123","type":"response.create","generate":false,"store":true,"stream":true,"include":["reasoning.encrypted_content"],"tool_choice":"auto","client_metadata":{"x":"y"}}`)
 
 	normalized, changed, err := normalizeOpenAICompactRequestBody(body)
 
@@ -1820,10 +1861,62 @@ func TestNormalizeOpenAICompactRequestBodyPreservesCurrentCodexPayloadFields(t *
 	require.True(t, gjson.GetBytes(normalized, "parallel_tool_calls").Bool())
 	require.Equal(t, "high", gjson.GetBytes(normalized, "reasoning.effort").String())
 	require.Equal(t, "low", gjson.GetBytes(normalized, "text.verbosity").String())
-	require.Equal(t, "resp_123", gjson.GetBytes(normalized, "previous_response_id").String())
+	require.Equal(t, "priority", gjson.GetBytes(normalized, "service_tier").String())
+	require.Equal(t, "cache_123", gjson.GetBytes(normalized, "prompt_cache_key").String())
+	require.Equal(t, "yes", gjson.GetBytes(normalized, "metadata.keep").String())
+	require.Equal(t, int64(1024), gjson.GetBytes(normalized, "max_output_tokens").Int())
+	require.InEpsilon(t, 0.2, gjson.GetBytes(normalized, "temperature").Float(), 0.0001)
+	require.InEpsilon(t, 0.9, gjson.GetBytes(normalized, "top_p").Float(), 0.0001)
+	require.Equal(t, "auto", gjson.GetBytes(normalized, "truncation").String())
+	require.False(t, gjson.GetBytes(normalized, "background").Bool())
+	require.Equal(t, "none", gjson.GetBytes(normalized, "conversation").String())
+	require.Equal(t, "safe-user", gjson.GetBytes(normalized, "safety_identifier").String())
+	require.Equal(t, "end-user", gjson.GetBytes(normalized, "user").String())
+	require.False(t, gjson.GetBytes(normalized, "previous_response_id").Exists())
+	require.False(t, gjson.GetBytes(normalized, "type").Exists())
+	require.False(t, gjson.GetBytes(normalized, "generate").Exists())
 	require.False(t, gjson.GetBytes(normalized, "store").Exists())
 	require.False(t, gjson.GetBytes(normalized, "stream").Exists())
-	require.False(t, gjson.GetBytes(normalized, "prompt_cache_key").Exists())
+	require.False(t, gjson.GetBytes(normalized, "include").Exists())
+	require.False(t, gjson.GetBytes(normalized, "tool_choice").Exists())
+	require.False(t, gjson.GetBytes(normalized, "client_metadata").Exists())
+}
+
+func TestOpenAIForwardHTTPDoesNotSendWSCreateFrameFields(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	body := []byte(`{"type":"response.create","generate":false,"previous_response_id":"resp_warm","model":"gpt-5","stream":false,"input":"hello","client_metadata":{"keep":"yes"}}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+	SetOpenAIClientTransport(c, OpenAIClientTransportHTTP)
+
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"id":"resp_1","model":"gpt-5","output":[],"usage":{"input_tokens":1,"output_tokens":1}}`)),
+	}}
+	svc := &OpenAIGatewayService{
+		cfg:          &config.Config{},
+		httpUpstream: upstream,
+	}
+	account := &Account{
+		ID:          77,
+		Name:        "openai-apikey",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{"api_key": "test-key"},
+	}
+
+	result, err := svc.Forward(context.Background(), c, account, body)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, upstream.lastReq)
+	require.False(t, gjson.GetBytes(upstream.lastBody, "type").Exists())
+	require.False(t, gjson.GetBytes(upstream.lastBody, "generate").Exists())
+	require.False(t, gjson.GetBytes(upstream.lastBody, "previous_response_id").Exists())
+	require.Equal(t, "yes", gjson.GetBytes(upstream.lastBody, "client_metadata.keep").String())
 }
 
 func TestOpenAIBuildUpstreamRequestOpenAIPassthroughPreservesCompactPath(t *testing.T) {
@@ -1831,6 +1924,8 @@ func TestOpenAIBuildUpstreamRequestOpenAIPassthroughPreservesCompactPath(t *test
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/compact", bytes.NewReader([]byte(`{"model":"gpt-5"}`)))
+	c.Request.Header.Set(openAICodexSubagentHeader, "compact")
+	c.Request.Header.Set(openAITraceparentHeader, "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
 
 	svc := &OpenAIGatewayService{}
 	account := &Account{Type: AccountTypeOAuth}
@@ -1842,6 +1937,16 @@ func TestOpenAIBuildUpstreamRequestOpenAIPassthroughPreservesCompactPath(t *test
 	require.Equal(t, codexCLIVersion, req.Header.Get("Version"))
 	require.NotEmpty(t, req.Header.Get("Session_Id"))
 	require.Equal(t, HTTPUpstreamProfileOpenAI, HTTPUpstreamProfileFromContext(req.Context()))
+	require.Equal(t, req.Header.Get("Session_Id"), req.Header.Get(openAICodexSessionIDHeader))
+	require.Equal(t, req.Header.Get("Conversation_Id"), req.Header.Get(openAICodexThreadIDHeader))
+	require.NotEmpty(t, req.Header.Get(openAICodexClientRequestIDHeader))
+	require.NotEmpty(t, req.Header.Get(openAICodexInstallationIDHeader))
+	require.NotEmpty(t, req.Header.Get(openAICodexWindowIDHeader))
+	require.Equal(t, "compact", req.Header.Get(openAICodexSubagentHeader))
+	require.Equal(t, "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01", req.Header.Get(openAITraceparentHeader))
+	bodyBytes, err := io.ReadAll(req.Body)
+	require.NoError(t, err)
+	require.False(t, gjson.GetBytes(bodyBytes, "client_metadata").Exists())
 }
 
 func TestOpenAIBuildUpstreamRequestCompactForcesJSONAcceptForOAuth(t *testing.T) {
@@ -1865,6 +1970,125 @@ func TestOpenAIBuildUpstreamRequestCompactForcesJSONAcceptForOAuth(t *testing.T)
 	require.Equal(t, HTTPUpstreamProfileOpenAI, HTTPUpstreamProfileFromContext(req.Context()))
 }
 
+func TestCodexDefaultUserAgentUsesOfficialFingerprint(t *testing.T) {
+	require.Equal(t, "0.136.0", codexCLIVersion)
+	require.Equal(t, "Mac OS 26.5.0; arm64", codexOSFingerprint)
+	require.Equal(t, "Apple_Terminal/470.2", codexTerminalName)
+	require.Equal(t, "codex-tui", codexOfficialOriginator)
+	require.Equal(t, "codex-tui/0.136.0 (Mac OS 26.5.0; arm64) Apple_Terminal/470.2 (codex-tui; 0.136.0)", codexCLIUserAgent)
+}
+
+func TestOpenAIBuildUpstreamRequestOAuthAddsCodexIdentityFallbacks(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-5","input":"hello"}`)))
+	c.Request.Header.Set("User-Agent", "opencode/0.9")
+	c.Request.Header.Set("originator", "opencode")
+
+	svc := &OpenAIGatewayService{}
+	account := &Account{
+		ID:          42,
+		Type:        AccountTypeOAuth,
+		Credentials: map[string]any{"chatgpt_account_id": "chatgpt-acc"},
+	}
+
+	req, err := svc.buildUpstreamRequest(c.Request.Context(), c, account, []byte(`{"model":"gpt-5","input":"hello"}`), "token", true, "", false)
+	require.NoError(t, err)
+	require.Equal(t, codexOfficialOriginator, req.Header.Get("originator"))
+	require.Equal(t, codexCLIVersion, req.Header.Get("Version"))
+	require.Equal(t, codexCLIUserAgent, req.Header.Get("User-Agent"))
+	require.NotEmpty(t, req.Header.Get(openAICodexSessionIDHeader))
+	require.NotEmpty(t, req.Header.Get(openAICodexThreadIDHeader))
+	require.Equal(t, req.Header.Get(openAICodexThreadIDHeader), req.Header.Get(openAICodexClientRequestIDHeader))
+	require.NotEmpty(t, req.Header.Get(openAICodexInstallationIDHeader))
+	require.NotEmpty(t, req.Header.Get(openAICodexWindowIDHeader))
+
+	bodyBytes, err := io.ReadAll(req.Body)
+	require.NoError(t, err)
+	require.Equal(t, req.Header.Get(openAICodexThreadIDHeader), gjson.GetBytes(bodyBytes, "prompt_cache_key").String())
+	require.Equal(t, req.Header.Get(openAICodexInstallationIDHeader), gjson.GetBytes(bodyBytes, "client_metadata."+openAICodexInstallationIDHeader).String())
+	require.Equal(t, req.Header.Get(openAICodexWindowIDHeader), gjson.GetBytes(bodyBytes, "client_metadata."+openAICodexWindowIDHeader).String())
+}
+
+func TestOpenAIBuildUpstreamRequestOAuthPreservesIncomingDesktopUserAgent(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	body := []byte(`{"model":"gpt-5.4","input":"hello"}`)
+	incomingUA := "codex-tui/0.136.0 (Mac OS 26.5.0; arm64) Apple_Terminal/470.2 (codex-tui; 0.136.0)"
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+	c.Request.Header.Set("User-Agent", incomingUA)
+
+	svc := &OpenAIGatewayService{}
+	account := &Account{
+		ID:          42,
+		Type:        AccountTypeOAuth,
+		Credentials: map[string]any{"chatgpt_account_id": "chatgpt-acc"},
+	}
+
+	req, err := svc.buildUpstreamRequest(c.Request.Context(), c, account, body, "token", true, "", false)
+	require.NoError(t, err)
+	require.Equal(t, incomingUA, req.Header.Get("User-Agent"))
+}
+
+func TestOpenAIBuildUpstreamRequestOAuthNonOfficialUserAgentUsesConfiguredCodexUserAgent(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	body := []byte(`{"model":"gpt-5.4","input":"hello"}`)
+	configuredUA := "custom-codex/1.2.3"
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+	c.Request.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+
+	svc := &OpenAIGatewayService{
+		settingService: NewSettingService(&openAITestSettingRepo{values: map[string]string{
+			SettingKeyOpenAICodexUserAgent: configuredUA,
+		}}, &config.Config{}),
+	}
+	account := &Account{
+		ID:          42,
+		Type:        AccountTypeOAuth,
+		Credentials: map[string]any{"chatgpt_account_id": "chatgpt-acc"},
+	}
+
+	req, err := svc.buildUpstreamRequest(c.Request.Context(), c, account, body, "token", true, "", false)
+	require.NoError(t, err)
+	require.Equal(t, configuredUA, req.Header.Get("User-Agent"))
+}
+
+func TestOpenAIBuildUpstreamRequestOAuthPreservesCodexReleaseHTTPHeaders(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	body := []byte(`{"model":"gpt-5.4","input":"hello"}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+	c.Request.Header.Set(openAICodexSessionIDHeader, "release-session")
+	c.Request.Header.Set(openAICodexThreadIDHeader, "release-thread")
+	c.Request.Header.Set(openAICodexClientRequestIDHeader, "release-client-request")
+	c.Request.Header.Set(openAICodexWindowIDHeader, "release-window")
+	c.Request.Header.Set(openAICodexBetaFeaturesHeader, "feature-a,feature-b")
+	c.Request.Header.Set(openAICodexTurnStateHeader, "release-turn-state")
+	c.Request.Header.Set(openAICodexTurnMetadataHeader, "release-turn-metadata")
+
+	svc := &OpenAIGatewayService{}
+	account := &Account{
+		ID:          42,
+		Type:        AccountTypeOAuth,
+		Credentials: map[string]any{"chatgpt_account_id": "chatgpt-acc"},
+	}
+
+	req, err := svc.buildUpstreamRequest(c.Request.Context(), c, account, body, "token", true, "", false)
+	require.NoError(t, err)
+	require.NotEmpty(t, req.Header.Get(openAICodexSessionIDHeader))
+	require.NotEmpty(t, req.Header.Get(openAICodexThreadIDHeader))
+	require.Equal(t, "release-client-request", req.Header.Get(openAICodexClientRequestIDHeader))
+	require.Equal(t, "release-window", req.Header.Get(openAICodexWindowIDHeader))
+	require.Equal(t, "feature-a,feature-b", req.Header.Get(openAICodexBetaFeaturesHeader))
+	require.Equal(t, "release-turn-state", req.Header.Get(openAICodexTurnStateHeader))
+	require.Equal(t, "release-turn-metadata", req.Header.Get(openAICodexTurnMetadataHeader))
+}
+
 func TestOpenAIBuildUpstreamRequestOAuthMessagesBridgeUsesSessionOnly(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
@@ -1872,7 +2096,7 @@ func TestOpenAIBuildUpstreamRequestOAuthMessagesBridgeUsesSessionOnly(t *testing
 	body := []byte(`{"model":"gpt-5.5","prompt_cache_key":"anthropic-metadata-session-1","input":[{"type":"message","role":"developer","content":[{"type":"input_text","text":"<sub2api-claude-code-todo-guard>"}]},{"type":"message","role":"user","content":"hello"}]}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
 	c.Request.Header.Set("OpenAI-Beta", "responses=experimental")
-	c.Request.Header.Set("originator", "codex_cli_rs")
+	c.Request.Header.Set("originator", codexOfficialOriginator)
 
 	svc := &OpenAIGatewayService{}
 	account := &Account{
@@ -1886,6 +2110,7 @@ func TestOpenAIBuildUpstreamRequestOAuthMessagesBridgeUsesSessionOnly(t *testing
 	require.Empty(t, req.Header.Get("Conversation_Id"))
 	require.Empty(t, req.Header.Get("OpenAI-Beta"))
 	require.Empty(t, req.Header.Get("originator"))
+	require.Empty(t, req.Header.Get("Version"))
 }
 
 func TestOpenAIBuildUpstreamRequestPreservesCompactPathForAPIKeyBaseURL(t *testing.T) {
@@ -1919,9 +2144,10 @@ func TestOpenAIBuildUpstreamRequestOAuthOfficialClientOriginatorCompatibility(t 
 		originator     string
 		wantOriginator string
 	}{
-		{name: "desktop originator preserved", originator: "Codex Desktop", wantOriginator: "Codex Desktop"},
-		{name: "vscode originator preserved", originator: "codex_vscode", wantOriginator: "codex_vscode"},
-		{name: "official ua fallback to codex_cli_rs", userAgent: "Codex Desktop/1.2.3", wantOriginator: "codex_cli_rs"},
+		{name: "tui originator preserved", userAgent: "codex-tui/1.2.3", originator: codexOfficialOriginator, wantOriginator: codexOfficialOriginator},
+		{name: "vscode originator preserved", userAgent: "codex_vscode/1.2.3", originator: "codex_vscode", wantOriginator: "codex_vscode"},
+		{name: "official ua fallback to tui originator", userAgent: "codex-tui/1.2.3", wantOriginator: codexOfficialOriginator},
+		{name: "non official originator normalized", userAgent: "opencode/0.9", originator: "opencode", wantOriginator: codexOfficialOriginator},
 	}
 
 	for _, tt := range tests {

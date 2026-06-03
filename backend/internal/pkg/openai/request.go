@@ -13,6 +13,7 @@ var CodexCLIUserAgentPrefixes = []string{
 // 该列表仅用于 OpenAI OAuth `codex_cli_only` 访问限制判定。
 var CodexOfficialClientUserAgentPrefixes = []string{
 	"codex_cli_rs/",
+	"codex-tui/",
 	"codex_vscode/",
 	"codex_app/",
 	"codex_chatgpt_desktop/",
