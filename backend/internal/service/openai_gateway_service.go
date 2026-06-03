@@ -40,13 +40,13 @@ const (
 	// ChatGPT internal API for OAuth accounts
 	chatgptCodexURL = "https://chatgpt.com/backend-api/codex/responses"
 	// OpenAI Platform API for API Key accounts (fallback)
-	openaiPlatformAPIURL      = "https://api.openai.com/v1/responses"
-	openaiStickySessionTTL    = time.Hour // 粘性会话TTL
-	codexCLIVersion        = "0.136.0"
-	codexOSFingerprint     = "Mac OS 26.5.0; arm64"
-	codexTerminalName      = "Apple_Terminal/470.2"
+	openaiPlatformAPIURL    = "https://api.openai.com/v1/responses"
+	openaiStickySessionTTL  = time.Hour // 粘性会话TTL
+	codexCLIVersion         = "0.136.0"
+	codexOSFingerprint      = "Mac OS 26.5.0; arm64"
+	codexTerminalName       = "Apple_Terminal/470.2"
 	codexOfficialOriginator = "codex-tui"
-	codexCLIUserAgent      = codexOfficialOriginator + "/" + codexCLIVersion + " (" + codexOSFingerprint + ") " + codexTerminalName + " (" + codexOfficialOriginator + "; " + codexCLIVersion + ")"
+	codexCLIUserAgent       = codexOfficialOriginator + "/" + codexCLIVersion + " (" + codexOSFingerprint + ") " + codexTerminalName + " (" + codexOfficialOriginator + "; " + codexCLIVersion + ")"
 	// codex_cli_only 拒绝时单个请求头日志长度上限（字符）
 	codexCLIOnlyHeaderValueMaxBytes = 256
 
@@ -2934,7 +2934,13 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 	}
 
-	if rawTier := requestView.ServiceTier; rawTier != "" {
+	rawTier := requestView.ServiceTier
+	// Per-key override: force service_tier=priority before fast policy.
+	if shouldForceOpenAIPriorityTier(apiKey) && rawTier != "priority" {
+		rawTier = "priority"
+		markPatchSet("service_tier", rawTier)
+	}
+	if rawTier != "" {
 		if normTier := normalizedOpenAIServiceTierValue(rawTier); normTier != "" {
 			action, errMsg := s.evaluateOpenAIFastPolicy(ctx, account, upstreamModel, normTier)
 			switch action {
@@ -3444,6 +3450,12 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	if policyModel == "" {
 		policyModel = reqModel
 	}
+	apiKey := getAPIKeyFromContext(c)
+	forcedBody, forceErr := forceOpenAIPriorityTierInBody(apiKey, body)
+	if forceErr != nil {
+		return nil, forceErr
+	}
+	body = forcedBody
 	updatedBody, policyErr := s.applyOpenAIFastPolicyToBody(ctx, account, policyModel, body)
 	if policyErr != nil {
 		var blocked *OpenAIFastBlockedError
@@ -3454,7 +3466,6 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	}
 	body = updatedBody
 
-	apiKey := getAPIKeyFromContext(c)
 	if IsImageGenerationIntent(openAIResponsesEndpoint, reqModel, body) && !GroupAllowsImageGeneration(apiKeyGroup(apiKey)) {
 		MarkOpsClientBusinessLimited(c, OpsClientBusinessLimitedReasonLocalFeatureGate)
 		c.JSON(http.StatusForbidden, gin.H{
@@ -6867,6 +6878,28 @@ func openAIFastPolicySettingsFromContext(ctx context.Context) *OpenAIFastPolicyS
 		return v
 	}
 	return nil
+}
+
+// shouldForceOpenAIPriorityTier reports whether the per-key override forces
+// service_tier=priority for this API key.
+func shouldForceOpenAIPriorityTier(apiKey *APIKey) bool {
+	return apiKey != nil && apiKey.OpenAIForcePriorityTier
+}
+
+// forceOpenAIPriorityTierInBody returns body with service_tier="priority"
+// injected; no-op when the override is off or the field already matches.
+func forceOpenAIPriorityTierInBody(apiKey *APIKey, body []byte) ([]byte, error) {
+	if !shouldForceOpenAIPriorityTier(apiKey) || len(body) == 0 {
+		return body, nil
+	}
+	if gjson.GetBytes(body, "service_tier").String() == "priority" {
+		return body, nil
+	}
+	updated, err := sjson.SetBytes(body, "service_tier", "priority")
+	if err != nil {
+		return body, fmt.Errorf("force service_tier=priority: %w", err)
+	}
+	return updated, nil
 }
 
 // applyOpenAIFastPolicyToBody applies the OpenAI fast policy to a raw request

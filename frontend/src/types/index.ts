@@ -588,6 +588,7 @@ export interface ApiKey {
   reset_5h_at: string | null
   reset_1d_at: string | null
   reset_7d_at: string | null
+  openai_force_priority_tier: boolean
 }
 
 export interface CreateApiKeyRequest {
@@ -601,6 +602,7 @@ export interface CreateApiKeyRequest {
   rate_limit_5h?: number
   rate_limit_1d?: number
   rate_limit_7d?: number
+  openai_force_priority_tier?: boolean
 }
 
 export interface UpdateApiKeyRequest {
@@ -616,6 +618,7 @@ export interface UpdateApiKeyRequest {
   rate_limit_1d?: number
   rate_limit_7d?: number
   reset_rate_limit_usage?: boolean
+  openai_force_priority_tier?: boolean
 }
 
 export interface CreateGroupRequest {
