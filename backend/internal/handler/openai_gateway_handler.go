@@ -209,9 +209,9 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			return
 		}
 		reqLog.Warn("openai.request_validation_failed",
-			zap.String("reason", "previous_response_id_requires_wsv2"),
+			zap.String("reason", "previous_response_id_unsupported_for_http_responses"),
 		)
-		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "previous_response_id is only supported on Responses WebSocket v2")
+		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "previous_response_id is not supported for HTTP responses requests")
 		return
 	}
 
