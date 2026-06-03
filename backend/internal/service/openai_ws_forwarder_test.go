@@ -73,3 +73,40 @@ func TestIsOpenAIWSTokenEvent_DisjointWithTerminal(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildOpenAIWSCreatePayload(t *testing.T) {
+	svc := &OpenAIGatewayService{}
+	account := &Account{Type: AccountTypeOAuth}
+	req := map[string]any{
+		"model":      "gpt-5-codex",
+		"input":      []any{map[string]any{"role": "user", "content": "hi"}},
+		"stream":     true,
+		"background": false,
+		"store":      true,
+	}
+
+	payload := svc.buildOpenAIWSCreatePayload(req, account)
+
+	require.Equal(t, "response.create", payload["type"])
+	require.NotContains(t, payload, "background")
+	require.Equal(t, true, payload["stream"])
+	require.NotContains(t, payload, "previous_response_id")
+	require.NotContains(t, payload, "generate")
+	require.Equal(t, false, payload["store"])
+	require.Equal(t, true, req["store"])
+}
+
+func TestBuildOpenAIWSCreatePayloadPreservesExplicitWSFields(t *testing.T) {
+	svc := &OpenAIGatewayService{}
+	req := map[string]any{
+		"model":                "gpt-5-codex",
+		"previous_response_id": "resp_123",
+		"generate":             true,
+	}
+
+	payload := svc.buildOpenAIWSCreatePayload(req, nil)
+
+	require.Equal(t, "resp_123", payload["previous_response_id"])
+	require.Equal(t, true, payload["generate"])
+	require.Equal(t, true, payload["stream"])
+}

@@ -42,12 +42,11 @@ const (
 	// OpenAI Platform API for API Key accounts (fallback)
 	openaiPlatformAPIURL      = "https://api.openai.com/v1/responses"
 	openaiStickySessionTTL    = time.Hour // 粘性会话TTL
-	codexCLIVersion           = "0.135.0-alpha.1"
-	codexDesktopAppVersion    = "26.527.31326"
-	codexDesktopOSFingerprint = "Windows 10.0.19045; x86_64"
-	codexDesktopTerminalName  = "unknown"
-	codexDesktopOriginator    = "Codex Desktop"
-	codexCLIUserAgent         = codexDesktopOriginator + "/" + codexCLIVersion + " (" + codexDesktopOSFingerprint + ") " + codexDesktopTerminalName + " (" + codexDesktopOriginator + "; " + codexDesktopAppVersion + ")"
+	codexCLIVersion        = "0.136.0"
+	codexOSFingerprint     = "Mac OS 26.5.0; arm64"
+	codexTerminalName      = "Apple_Terminal/470.2"
+	codexOfficialOriginator = "codex-tui"
+	codexCLIUserAgent      = codexOfficialOriginator + "/" + codexCLIVersion + " (" + codexOSFingerprint + ") " + codexTerminalName + " (" + codexOfficialOriginator + "; " + codexCLIVersion + ")"
 	// codex_cli_only 拒绝时单个请求头日志长度上限（字符）
 	codexCLIOnlyHeaderValueMaxBytes = 256
 
@@ -1557,9 +1556,9 @@ func resolveOpenAIUpstreamOriginator(c *gin.Context, isOfficialClient bool) stri
 		}
 	}
 	if isOfficialClient {
-		return codexDesktopOriginator
+		return codexOfficialOriginator
 	}
-	return codexDesktopOriginator
+	return codexOfficialOriginator
 }
 
 // BindStickySession sets session -> account binding with standard TTL.
@@ -3728,7 +3727,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 			req.Header.Set("version", codexCLIVersion)
 		}
 		if req.Header.Get("originator") == "" {
-			req.Header.Set("originator", codexDesktopOriginator)
+			req.Header.Set("originator", codexOfficialOriginator)
 		}
 		body, _ = applyOpenAICodexHTTPRequestAlignmentWithBodyOptions(req, c, account, body, promptCacheKey, true, true, !isCompactRequest)
 	}
@@ -3739,16 +3738,12 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 		req.Header.Set("user-agent", customUA)
 	}
 	if s.cfg != nil && s.cfg.Gateway.ForceCodexCLI {
-		req.Header.Set("user-agent", codexCLIUserAgent)
+		req.Header.Set("user-agent", s.resolveOpenAICodexUserAgent(ctx))
 	}
 	// OAuth 安全透传：对非 Codex UA 统一兜底，降低被上游风控拦截概率。
 	if account.Type == AccountTypeOAuth && !openai.IsCodexOfficialClientRequest(req.Header.Get("user-agent")) {
-		req.Header.Set("user-agent", codexCLIUserAgent)
+		req.Header.Set("user-agent", s.resolveOpenAICodexUserAgent(ctx))
 	}
-
-	// 浏览器型 UA 兜底：仅 OAuth（ChatGPT 内部接口）账号生效，若最终 user-agent 仍为浏览器
-	// （Chrome/Firefox/Safari/Edge 等），替换为后台配置的 Codex UA，避免 Cloudflare 触发 JS 质询。
-	s.overrideBrowserUserAgent(ctx, account, req)
 
 	if req.Header.Get("content-type") == "" {
 		req.Header.Set("content-type", "application/json")
@@ -4235,6 +4230,9 @@ func (s *OpenAIGatewayService) handleNonStreamingResponsePassthrough(
 		// 兜底：尝试从 SSE 文本中解析 usage
 		usage = s.parseSSEUsageFromBody(string(body))
 	}
+	if resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices && len(bytes.TrimSpace(body)) > 0 && !json.Valid(body) {
+		return nil, s.writeOpenAINonStreamingProtocolError(resp, c, "Upstream returned an invalid non-streaming response")
+	}
 
 	writeOpenAIPassthroughResponseHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 
@@ -4460,15 +4458,11 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 	// 若开启 ForceCodexCLI，则强制将上游 User-Agent 伪装为 Codex CLI。
 	// 用于网关未透传/改写 User-Agent 时，仍能命中 Codex 侧识别逻辑。
 	if s.cfg != nil && s.cfg.Gateway.ForceCodexCLI {
-		req.Header.Set("user-agent", codexCLIUserAgent)
+		req.Header.Set("user-agent", s.resolveOpenAICodexUserAgent(ctx))
 	}
 	if account.Type == AccountTypeOAuth && !openai.IsCodexOfficialClientRequest(req.Header.Get("user-agent")) {
-		req.Header.Set("user-agent", codexCLIUserAgent)
+		req.Header.Set("user-agent", s.resolveOpenAICodexUserAgent(ctx))
 	}
-
-	// 浏览器型 UA 兜底：仅 OAuth（ChatGPT 内部接口）账号生效，若最终 user-agent 仍为浏览器
-	// （Chrome/Firefox/Safari/Edge 等），替换为后台配置的 Codex UA，避免 Cloudflare 触发 JS 质询。
-	s.overrideBrowserUserAgent(ctx, account, req)
 
 	// Ensure required headers exist
 	if req.Header.Get("content-type") == "" {
@@ -4478,28 +4472,14 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 	return req, nil
 }
 
-// overrideBrowserUserAgent 检查请求的最终 user-agent，若为浏览器 UA 则替换为后台配置的 Codex UA。
-// 用于规避 Cloudflare 对浏览器型 UA 在 ChatGPT 内部接口上的访问质询。
-// 影响范围严格限定：仅 OAuth（Codex/ChatGPT 内部接口）账号生效；API Key 等其他账号原样透传。
-// 仅在识别为浏览器（Mozilla/...）时改写，其他 CLI/工具 UA 不动。
-func (s *OpenAIGatewayService) overrideBrowserUserAgent(ctx context.Context, account *Account, req *http.Request) {
-	if req == nil || account == nil {
-		return
-	}
-	if account.Type != AccountTypeOAuth {
-		return
-	}
-	currentUA := req.Header.Get("user-agent")
-	if !openai.IsBrowserUserAgent(currentUA) {
-		return
-	}
+func (s *OpenAIGatewayService) resolveOpenAICodexUserAgent(ctx context.Context) string {
 	codexUA := DefaultOpenAICodexUserAgent
 	if s != nil && s.settingService != nil {
 		if v := strings.TrimSpace(s.settingService.GetOpenAICodexUserAgent(ctx)); v != "" {
 			codexUA = v
 		}
 	}
-	req.Header.Set("user-agent", codexUA)
+	return codexUA
 }
 
 func (s *OpenAIGatewayService) handleErrorResponse(
@@ -5777,6 +5757,9 @@ func normalizeOpenAICompactRequestBody(body []byte) ([]byte, bool, error) {
 	if len(body) == 0 {
 		return body, false, nil
 	}
+	if !json.Valid(body) {
+		return body, false, fmt.Errorf("normalize compact body: invalid JSON")
+	}
 
 	normalized := []byte(`{}`)
 	// 保留 Codex /compact 当前 schema，避免把 HTTP/WS 会话字段串到压缩请求里。
@@ -5789,6 +5772,15 @@ func normalizeOpenAICompactRequestBody(body []byte) ([]byte, bool, error) {
 		"reasoning",
 		"service_tier",
 		"prompt_cache_key",
+		"metadata",
+		"max_output_tokens",
+		"temperature",
+		"top_p",
+		"truncation",
+		"background",
+		"conversation",
+		"safety_identifier",
+		"user",
 		"text",
 	} {
 		value := gjson.GetBytes(body, field)

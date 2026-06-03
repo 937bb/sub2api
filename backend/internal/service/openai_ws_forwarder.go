@@ -1256,8 +1256,8 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 	if s != nil && s.cfg != nil && s.cfg.Gateway.ForceCodexCLI {
 		headers.Set("user-agent", codexCLIUserAgent)
 	}
-	if account != nil && account.Type == AccountTypeOAuth && !openai.IsCodexCLIRequest(headers.Get("user-agent")) {
-		headers.Set("user-agent", codexCLIUserAgent)
+	if account != nil && account.Type == AccountTypeOAuth && !openai.IsCodexOfficialClientRequest(headers.Get("user-agent")) {
+		headers.Set("user-agent", s.resolveOpenAICodexUserAgent(c.Request.Context()))
 	}
 
 	return headers, sessionResolution
@@ -1266,7 +1266,7 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 func (s *OpenAIGatewayService) buildOpenAIWSCreatePayload(reqBody map[string]any, account *Account) map[string]any {
 	// OpenAI WS Mode 协议：response.create 字段与 HTTP /responses 基本一致。
 	// 保留 stream 字段（与 Codex CLI 一致），仅移除 background。
-	payload := make(map[string]any, len(reqBody)+1)
+	payload := make(map[string]any, len(reqBody)+2)
 	for k, v := range reqBody {
 		payload[k] = v
 	}

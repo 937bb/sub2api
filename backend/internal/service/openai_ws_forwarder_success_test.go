@@ -686,15 +686,17 @@ func TestOpenAIGatewayService_Forward_WSv2_OAuthStoreFalseByDefault(t *testing.T
 func TestOpenAIGatewayService_Forward_WSv2_OAuthOriginatorCompatibility(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
+	configuredUA := "custom-codex/1.2.3"
 	tests := []struct {
 		name           string
 		userAgent      string
 		originator     string
 		wantOriginator string
+		wantUserAgent  string
 	}{
-		{name: "desktop originator preserved", originator: "Codex Desktop", wantOriginator: "Codex Desktop"},
-		{name: "vscode originator preserved", originator: "codex_vscode", wantOriginator: "codex_vscode"},
-		{name: "official ua fallback to desktop originator", userAgent: codexCLIUserAgent, wantOriginator: codexDesktopOriginator},
+		{name: "desktop originator preserved", originator: "Codex Desktop", wantOriginator: "Codex Desktop", wantUserAgent: configuredUA},
+		{name: "vscode originator preserved", originator: "codex_vscode", wantOriginator: "codex_vscode", wantUserAgent: configuredUA},
+		{name: "official ua fallback to desktop originator", userAgent: codexCLIUserAgent, wantOriginator: codexOfficialOriginator, wantUserAgent: codexCLIUserAgent},
 	}
 
 	for _, tt := range tests {
