@@ -68,7 +68,7 @@ release:
   # 跳过上传二进制包
   skip_upload: true
   header: |
-    > AI API Gateway Platform - 将 AI 订阅配额分发和管理
+    > Independently maintained AI API gateway release. The `sub2api` artifact name is preserved for deployment compatibility.
     > ⚡ Simple Release: 仅包含 x86_64 GHCR 镜像
 
     {{ .Env.TAG_MESSAGE }}

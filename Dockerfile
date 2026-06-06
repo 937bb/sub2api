@@ -84,9 +84,9 @@ FROM ${POSTGRES_IMAGE} AS pg-client
 FROM ${ALPINE_IMAGE}
 
 # Labels
-LABEL maintainer="Wei-Shaw <github.com/Wei-Shaw>"
-LABEL description="Sub2API - AI API Gateway Platform"
-LABEL org.opencontainers.image.source="https://github.com/Wei-Shaw/sub2api"
+LABEL maintainer="is7Qin <https://github.com/is7Qin>"
+LABEL description="Sub2API - independently maintained AI API gateway"
+LABEL org.opencontainers.image.source="https://github.com/is7Qin/sub2api"
 
 # Install runtime dependencies
 RUN apk add --no-cache \
