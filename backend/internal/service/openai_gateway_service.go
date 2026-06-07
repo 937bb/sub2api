@@ -5852,7 +5852,7 @@ func normalizeOpenAICompactRequestBody(body []byte) ([]byte, bool, error) {
 	}
 
 	normalized := []byte(`{}`)
-	// 保留 Codex /compact 当前 schema，避免把 HTTP/WS 会话字段串到压缩请求里。
+	// 对齐 Codex CompactionInput schema（9 字段），丢弃上游不接受的字段。
 	for _, field := range []string{
 		"model",
 		"input",
@@ -5862,15 +5862,6 @@ func normalizeOpenAICompactRequestBody(body []byte) ([]byte, bool, error) {
 		"reasoning",
 		"service_tier",
 		"prompt_cache_key",
-		"metadata",
-		"max_output_tokens",
-		"temperature",
-		"top_p",
-		"truncation",
-		"background",
-		"conversation",
-		"safety_identifier",
-		"user",
 		"text",
 	} {
 		value := gjson.GetBytes(body, field)
@@ -6719,10 +6710,9 @@ func extractOpenAIRequestMetaFromBody(body []byte) (model string, stream bool, p
 	return view.Model, view.Stream, view.PromptCacheKey
 }
 
-// normalizeOpenAIPassthroughOAuthBody 将透传 OAuth 请求体收敛到对应上游 schema：
-// 1) 删除 ChatGPT internal API 不支持的顶层 Responses 参数
-// 2) 普通 HTTP /responses 保留 client_metadata，但移除 WS frame 字段
-// 3) /responses/compact 使用 Codex compact allowlist，避免混入请求级字段
+// normalizeOpenAIPassthroughOAuthBody 将透传 OAuth 请求体收敛到 Codex CLI 实际发送的字段集合：
+// 1) /responses/compact → Codex CompactionInput allowlist（9 字段）
+// 2) 普通 HTTP /responses → Codex ResponsesApiRequest allowlist（14 字段）+ force store=false, stream=true
 func normalizeOpenAIPassthroughOAuthBody(body []byte, compact bool) ([]byte, bool, error) {
 	if len(body) == 0 {
 		return body, false, nil
@@ -6732,40 +6722,43 @@ func normalizeOpenAIPassthroughOAuthBody(body []byte, compact bool) ([]byte, boo
 		return normalizeOpenAICompactRequestBody(body)
 	}
 
-	normalized := body
-	changed := false
-
-	for _, field := range openAIChatGPTInternalUnsupportedFields {
-		if value := gjson.GetBytes(normalized, field); !value.Exists() {
+	// 非 compact：对齐 Codex CLI build_responses_request() 实际发送的字段。
+	// 用 allowlist 代替 denylist，避免客户端传什么就得追着删什么。
+	normalized := []byte(`{}`)
+	for _, field := range []string{
+		"model",
+		"input",
+		"instructions",
+		"tools",
+		"tool_choice",
+		"parallel_tool_calls",
+		"reasoning",
+		"store",
+		"stream",
+		"include",
+		"service_tier",
+		"prompt_cache_key",
+		"text",
+		"client_metadata",
+	} {
+		value := gjson.GetBytes(body, field)
+		if !value.Exists() {
 			continue
 		}
-		next, err := sjson.DeleteBytes(normalized, field)
+		next, err := sjson.SetRawBytes(normalized, field, []byte(value.Raw))
 		if err != nil {
-			return body, false, fmt.Errorf("normalize passthrough body delete %s: %w", field, err)
+			return body, false, fmt.Errorf("normalize passthrough body %s: %w", field, err)
 		}
 		normalized = next
-		changed = true
 	}
 
-	for _, field := range []string{"previous_response_id", "generate", "type"} {
-		if value := gjson.GetBytes(normalized, field); !value.Exists() {
-			continue
-		}
-		next, err := sjson.DeleteBytes(normalized, field)
-		if err != nil {
-			return body, false, fmt.Errorf("normalize passthrough body delete %s: %w", field, err)
-		}
-		normalized = next
-		changed = true
-	}
-
+	// Codex CLI 固定值：store=false, stream=true。
 	if store := gjson.GetBytes(normalized, "store"); !store.Exists() || store.Type != gjson.False {
 		next, err := sjson.SetBytes(normalized, "store", false)
 		if err != nil {
 			return body, false, fmt.Errorf("normalize passthrough body store=false: %w", err)
 		}
 		normalized = next
-		changed = true
 	}
 	if stream := gjson.GetBytes(normalized, "stream"); !stream.Exists() || stream.Type != gjson.True {
 		next, err := sjson.SetBytes(normalized, "stream", true)
@@ -6773,10 +6766,12 @@ func normalizeOpenAIPassthroughOAuthBody(body []byte, compact bool) ([]byte, boo
 			return body, false, fmt.Errorf("normalize passthrough body stream=true: %w", err)
 		}
 		normalized = next
-		changed = true
 	}
 
-	return normalized, changed, nil
+	if bytes.Equal(bytes.TrimSpace(body), bytes.TrimSpace(normalized)) {
+		return body, false, nil
+	}
+	return normalized, true, nil
 }
 
 func detectOpenAIPassthroughInstructionsRejectReason(reqModel string, body []byte) string {

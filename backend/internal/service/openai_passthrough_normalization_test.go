@@ -13,7 +13,8 @@ func TestNormalizeOpenAIPassthroughOAuthBody_RemovesUnsupportedUser(t *testing.T
 	normalized, changed, err := normalizeOpenAIPassthroughOAuthBody(body, false)
 	require.NoError(t, err)
 	require.True(t, changed)
-	for _, field := range openAIChatGPTInternalUnsupportedFields {
+	// allowlist 模式：仅 Codex ResponsesApiRequest 的 14 字段可通过；其余全部丢弃。
+	for _, field := range []string{"user", "metadata", "prompt_cache_retention", "safety_identifier", "stream_options"} {
 		require.False(t, gjson.GetBytes(normalized, field).Exists(), "%s should be stripped", field)
 	}
 	require.True(t, gjson.GetBytes(normalized, "stream").Bool())
