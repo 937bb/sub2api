@@ -316,13 +316,13 @@ func (s *stubAdminService) BatchSetGroupRPMOverrides(_ context.Context, _ int64,
 	return nil
 }
 
-func s *stubAdminService ListAccounts(ctx context.Context, page, pageSize int, filters service.AccountListFilters, sortBy, sortOrder string) ([]service.Account, int64, error) {
-	s.lastListAccounts.platform = platform
-	s.lastListAccounts.accountType = accountType
-	s.lastListAccounts.status = status
-	s.lastListAccounts.search = search
-	s.lastListAccounts.groupID = groupID
-	s.lastListAccounts.privacyMode = privacyMode
+func (s *stubAdminService) ListAccounts(_ context.Context, _ int, _ int, filters service.AccountListFilters, sortBy, sortOrder string) ([]service.Account, int64, error) {
+	s.lastListAccounts.platform = filters.Platform
+	s.lastListAccounts.accountType = filters.AccountType
+	s.lastListAccounts.status = filters.Status
+	s.lastListAccounts.search = filters.Search
+	s.lastListAccounts.groupID = filters.GroupID
+	s.lastListAccounts.privacyMode = filters.PrivacyMode
 	s.lastListAccounts.sortBy = sortBy
 	s.lastListAccounts.sortOrder = sortOrder
 	s.lastListAccounts.calls++

@@ -79,7 +79,7 @@ func TestAccountUsageService_GetOpenAIUsageRefreshesPlanType(t *testing.T) {
 		},
 	}
 
-	_, err := svc.getOpenAIUsage(context.Background(), account, false)
+	_, _, err := svc.getOpenAIUsage(context.Background(), account, false)
 	if err != nil {
 		t.Fatalf("getOpenAIUsage() error = %v", err)
 	}
@@ -185,7 +185,7 @@ func TestAccountUsageService_GetOpenAIUsageSkipsPlanTypeRefreshWhenCodexSnapshot
 		},
 	}
 
-	if _, err := svc.getOpenAIUsage(context.Background(), account, false); err != nil {
+	if _, _, err := svc.getOpenAIUsage(context.Background(), account, false); err != nil {
 		t.Fatalf("getOpenAIUsage() error = %v", err)
 	}
 
@@ -305,7 +305,7 @@ func TestAccountUsageService_GetOpenAIUsage_DoesNotPromoteCodexExtraToRateLimit(
 		},
 	}
 
-	usage, err := svc.getOpenAIUsage(context.Background(), account, false)
+	usage, _, err := svc.getOpenAIUsage(context.Background(), account, false)
 	if err != nil {
 		t.Fatalf("getOpenAIUsage() error = %v", err)
 	}
