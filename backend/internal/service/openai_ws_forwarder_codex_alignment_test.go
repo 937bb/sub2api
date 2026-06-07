@@ -54,11 +54,14 @@ func TestOpenAIWSHeadersOAuthAddsCodexIdentityFallbacks(t *testing.T) {
 }
 
 func TestOpenAIWSCodexClientMetadataIncludesRequestStart(t *testing.T) {
+	// 对齐 Codex build_ws_client_metadata + response_create_client_metadata 的 key 集合。
 	payload := map[string]any{"type": "response.create", "model": "gpt-5"}
 	headers := http.Header{}
 	headers.Set(openAICodexInstallationIDHeader, "installation-1")
 	headers.Set(openAICodexWindowIDHeader, "thread-1:0")
-	headers.Set(openAICodexThreadIDHeader, "thread-1")
+	headers.Set(openAICodexTurnMetadataHeader, "turn=v1")
+	headers.Set(openAITraceparentHeader, "00-trace-id")
+	headers.Set(openAITracestateHeader, "vendor=value")
 
 	setOpenAIWSCodexClientMetadata(payload, headers)
 
@@ -66,7 +69,12 @@ func TestOpenAIWSCodexClientMetadataIncludesRequestStart(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, "installation-1", metadata[openAICodexInstallationIDHeader])
 	require.Equal(t, "thread-1:0", metadata[openAICodexWindowIDHeader])
-	require.Equal(t, "thread-1", metadata[openAICodexThreadIDHeader])
+	require.Equal(t, "turn=v1", metadata[openAICodexTurnMetadataHeader])
+	// traceparent/tracestate 在 client_metadata 中映射为 ws_request_header_* key。
+	require.Equal(t, "00-trace-id", metadata[openAICodexWSTraceparentMetadataKey])
+	require.Equal(t, "vendor=value", metadata[openAICodexWSTracestateMetadataKey])
+	// thread-id 不放 client_metadata（Codex 仅放在 HTTP header 中）。
+	require.NotContains(t, metadata, openAICodexThreadIDHeader)
 	startMS, ok := metadata[openAICodexWSStreamRequestStartMSKey].(string)
 	require.True(t, ok)
 	parsedStartMS, err := strconv.ParseInt(startMS, 10, 64)

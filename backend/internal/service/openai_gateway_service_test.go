@@ -2139,7 +2139,8 @@ func TestOpenAIBuildUpstreamRequestOAuthAddsCodexIdentityFallbacks(t *testing.T)
 	require.NoError(t, err)
 	require.Equal(t, req.Header.Get(openAICodexThreadIDHeader), gjson.GetBytes(bodyBytes, "prompt_cache_key").String())
 	require.Equal(t, req.Header.Get(openAICodexInstallationIDHeader), gjson.GetBytes(bodyBytes, "client_metadata."+openAICodexInstallationIDHeader).String())
-	require.Equal(t, req.Header.Get(openAICodexWindowIDHeader), gjson.GetBytes(bodyBytes, "client_metadata."+openAICodexWindowIDHeader).String())
+	// Codex HTTP 不在 client_metadata 中放 x-codex-window-id，仅放在 HTTP header。
+	require.False(t, gjson.GetBytes(bodyBytes, "client_metadata."+openAICodexWindowIDHeader).Exists())
 }
 
 func TestOpenAIBuildUpstreamRequestOAuthPreservesIncomingDesktopUserAgent(t *testing.T) {

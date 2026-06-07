@@ -22,10 +22,9 @@ func TestApplyCodexOAuthTransform_ToolContinuationPreservesInput(t *testing.T) {
 
 	applyCodexOAuthTransform(reqBody, false, false)
 
-	// 未显式设置 store=true，默认为 false。
-	store, ok := reqBody["store"].(bool)
-	require.True(t, ok)
-	require.False(t, store)
+	// store 由 Forward markPatchDelete / AnthropicToResponses 统一处理；transform 不再注入。
+	_, hasStore := reqBody["store"]
+	require.False(t, hasStore, "store is not injected by transform")
 
 	input, ok := reqBody["input"].([]any)
 	require.True(t, ok)
@@ -414,7 +413,7 @@ func TestApplyCodexOAuthTransform_ExplicitStoreFalsePreserved(t *testing.T) {
 }
 
 func TestApplyCodexOAuthTransform_ExplicitStoreTrueForcedFalse(t *testing.T) {
-	// 显式 store=true 也会强制为 false。
+	// store 由 Forward markPatchDelete 统一处理；transform 不再覆盖。
 
 	reqBody := map[string]any{
 		"model": "gpt-5.1",
@@ -429,27 +428,29 @@ func TestApplyCodexOAuthTransform_ExplicitStoreTrueForcedFalse(t *testing.T) {
 
 	store, ok := reqBody["store"].(bool)
 	require.True(t, ok)
-	require.False(t, store)
+	require.True(t, store, "store preserved by transform; forcing handled by Forward markPatchDelete")
 }
 
 func TestApplyCodexOAuthTransform_CompactForcesNonStreaming(t *testing.T) {
+	// compact 的 store/stream 由 normalizeOpenAICompactRequestBody allowlist 统一丢弃；
+	// transform 不再负责删除。
 	reqBody := map[string]any{
 		"model":  "gpt-5.1-codex",
 		"store":  true,
 		"stream": true,
 	}
 
-	result := applyCodexOAuthTransform(reqBody, true, true)
+	applyCodexOAuthTransform(reqBody, true, true)
 
 	_, hasStore := reqBody["store"]
-	require.False(t, hasStore)
+	require.True(t, hasStore, "store preserved by transform; dropping handled by compact allowlist")
 	_, hasStream := reqBody["stream"]
-	require.False(t, hasStream)
-	require.True(t, result.Modified)
+	require.True(t, hasStream, "stream preserved by transform; dropping handled by compact allowlist")
 }
 
 func TestApplyCodexOAuthTransform_NonContinuationDefaultsStoreFalseAndStripsIDs(t *testing.T) {
-	// 非续链场景：未设置 store 时默认 false，并移除 input 中的 id。
+	// store 由 Forward markPatchDelete / AnthropicToResponses 统一处理；transform 不再注入。
+	// input 中的 id 仍由 transform 过滤。
 
 	reqBody := map[string]any{
 		"model": "gpt-5.1",
@@ -460,9 +461,8 @@ func TestApplyCodexOAuthTransform_NonContinuationDefaultsStoreFalseAndStripsIDs(
 
 	applyCodexOAuthTransform(reqBody, false, false)
 
-	store, ok := reqBody["store"].(bool)
-	require.True(t, ok)
-	require.False(t, store)
+	_, hasStore := reqBody["store"]
+	require.False(t, hasStore, "store not injected by transform; handled by Forward markPatchDelete")
 
 	input, ok := reqBody["input"].([]any)
 	require.True(t, ok)
@@ -898,9 +898,9 @@ func TestApplyCodexOAuthTransform_PreservesBareSparkModel(t *testing.T) {
 
 	require.Equal(t, "gpt-5.3-codex-spark", reqBody["model"])
 	require.Equal(t, "gpt-5.3-codex-spark", result.NormalizedModel)
-	store, ok := reqBody["store"].(bool)
-	require.True(t, ok)
-	require.False(t, store)
+	// store 由 Forward markPatchDelete 统一处理；transform 不再注入。
+	_, hasStore := reqBody["store"]
+	require.False(t, hasStore, "store not injected by transform")
 }
 
 func TestApplyCodexOAuthTransform_TrimmedModelWithoutPolicyRewrite(t *testing.T) {
@@ -1127,12 +1127,15 @@ func TestApplyCodexOAuthTransform_StripsPromptCacheRetention(t *testing.T) {
 
 	applyCodexOAuthTransform(reqBody, false, false)
 
+	// 字段过滤已移至 Forward 的 markPatchDelete 统一处理；transform 不再负责删除。
 	_, stillThere := reqBody["prompt_cache_retention"]
-	require.False(t, stillThere,
-		"prompt_cache_retention must be stripped before forwarding to Codex upstream")
+	require.True(t, stillThere,
+		"prompt_cache_retention preserved by transform; deletion handled by Forward markPatchDelete")
 }
 
 func TestApplyCodexOAuthTransform_StripsChatGPTInternalUnsupportedFields(t *testing.T) {
+	// 字段过滤已移至 Forward 的 markPatchDelete 统一处理；transform 不再负责删除。
+	// 此测试验证 transform 不会错误地删除这些字段。
 	reqBody := map[string]any{
 		"model":                  "gpt-5.4",
 		"user":                   "user_123",
@@ -1145,11 +1148,11 @@ func TestApplyCodexOAuthTransform_StripsChatGPTInternalUnsupportedFields(t *test
 		},
 	}
 
-	result := applyCodexOAuthTransform(reqBody, true, false)
+	applyCodexOAuthTransform(reqBody, true, false)
 
-	require.True(t, result.Modified)
-	for _, field := range openAIChatGPTInternalUnsupportedFields {
-		require.NotContains(t, reqBody, field)
+	// transform 保留这些字段；由 Forward markPatchDelete 在调用方删除。
+	for _, field := range []string{"user", "metadata", "prompt_cache_retention", "safety_identifier", "stream_options"} {
+		require.Contains(t, reqBody, field, "%s should be preserved by transform", field)
 	}
 }
 
