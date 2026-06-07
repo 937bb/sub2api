@@ -826,7 +826,6 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 }
 
 func (s *adminServiceImpl) DeleteUser(ctx context.Context, id int64) error {
-	// Protect admin users: cannot delete admin accounts
 	user, err := s.userRepo.GetByID(ctx, id)
 	if err != nil {
 		return err
@@ -834,14 +833,57 @@ func (s *adminServiceImpl) DeleteUser(ctx context.Context, id int64) error {
 	if user.Role == "admin" {
 		return errors.New("cannot delete admin user")
 	}
+
+	// Delete all API keys owned by the user first so no orphan keys remain.
+	// Page through the list to bound memory when a user has created many keys.
+	var deletedKeyValues []string
+	if s.apiKeyRepo != nil {
+		keys, err := listUserAPIKeys(ctx, s.apiKeyRepo, id)
+		if err != nil {
+			return fmt.Errorf("list api keys: %w", err)
+		}
+		for _, k := range keys {
+			if err := s.apiKeyRepo.DeleteWithAudit(ctx, k.ID); err != nil {
+				return fmt.Errorf("delete api key %d: %w", k.ID, err)
+			}
+			if v := strings.TrimSpace(k.Key); v != "" {
+				deletedKeyValues = append(deletedKeyValues, v)
+			}
+		}
+	}
+
 	if err := s.userRepo.Delete(ctx, id); err != nil {
 		logger.LegacyPrintf("service.admin", "delete user failed: user_id=%d err=%v", id, err)
 		return err
 	}
+
 	if s.authCacheInvalidator != nil {
+		for _, k := range deletedKeyValues {
+			s.authCacheInvalidator.InvalidateAuthCacheByKey(ctx, k)
+		}
 		s.authCacheInvalidator.InvalidateAuthCacheByUserID(ctx, id)
 	}
 	return nil
+}
+
+// listUserAPIKeys pages through every API key owned by userID.
+func listUserAPIKeys(ctx context.Context, repo APIKeyRepository, userID int64) ([]APIKey, error) {
+	const pageSize = 500
+	var all []APIKey
+	for page := 1; ; page++ {
+		keys, _, err := repo.ListByUserID(ctx, userID, pagination.PaginationParams{
+			Page:     page,
+			PageSize: pageSize,
+		}, APIKeyListFilters{})
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, keys...)
+		if len(keys) < pageSize {
+			break
+		}
+	}
+	return all, nil
 }
 
 func (s *adminServiceImpl) BatchUpdateConcurrency(ctx context.Context, userIDs []int64, value int, mode string) (int, error) {
