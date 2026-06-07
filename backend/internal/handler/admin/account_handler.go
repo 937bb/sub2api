@@ -44,10 +44,6 @@ func NewOAuthHandler(oauthService *service.OAuthService) *OAuthHandler {
 }
 
 // AccountHandler handles admin account management
-type openAIPlanTypeRefresher interface {
-	RefreshOpenAIPlanType(context.Context, *service.Account) error
-}
-
 type AccountHandler struct {
 	adminService            service.AdminService
 	oauthService            *service.OAuthService
@@ -56,7 +52,6 @@ type AccountHandler struct {
 	antigravityOAuthService *service.AntigravityOAuthService
 	rateLimitService        *service.RateLimitService
 	accountUsageService     *service.AccountUsageService
-	planTypeRefresher      openAIPlanTypeRefresher
 	accountTestService      *service.AccountTestService
 	concurrencyService      *service.ConcurrencyService
 	crsSyncService          *service.CRSSyncService
@@ -89,7 +84,6 @@ func NewAccountHandler(
 		antigravityOAuthService: antigravityOAuthService,
 		rateLimitService:        rateLimitService,
 		accountUsageService:     accountUsageService,
-		planTypeRefresher:      accountUsageService,
 		accountTestService:      accountTestService,
 		concurrencyService:      concurrencyService,
 		crsSyncService:          crsSyncService,
@@ -1324,7 +1318,7 @@ func (h *AccountHandler) BatchRefreshPlanType(c *gin.Context) {
 		response.BadRequest(c, "account_ids is required")
 		return
 	}
-	if h.planTypeRefresher == nil {
+	if h.accountUsageService == nil {
 		response.BadRequest(c, "plan_type refresh is not configured")
 		return
 	}
@@ -1364,7 +1358,7 @@ func (h *AccountHandler) BatchRefreshPlanType(c *gin.Context) {
 			continue
 		}
 		g.Go(func() error {
-			err := h.planTypeRefresher.RefreshOpenAIPlanType(gctx, acc)
+			err := h.accountUsageService.RefreshOpenAIPlanType(gctx, acc)
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
