@@ -445,7 +445,14 @@ func (s *AccountRepoSuite) TestListWithFilters() {
 
 			tt.setup(client)
 
-			accounts, _, err := repo.ListWithFilters(ctx, pagination.PaginationParams{Page: 1, PageSize: 10}, tt.platform, tt.accType, tt.status, tt.search, tt.groupID, tt.privacyMode, "")
+			accounts, _, err := repo.ListWithFilters(ctx, pagination.PaginationParams{Page: 1, PageSize: 10}, service.AccountListFilters{
+		Platform:    tt.platform,
+		AccountType: tt.accType,
+		Status:      tt.status,
+		Search:      tt.search,
+		GroupID:     tt.groupID,
+		PrivacyMode: tt.privacyMode,
+	})
 			s.Require().NoError(err)
 			s.Require().Len(accounts, tt.wantCount)
 			if tt.validate != nil {

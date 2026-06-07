@@ -266,7 +266,15 @@ func (h *AccountHandler) List(c *gin.Context) {
 		}
 	}
 
-	accounts, total, err := h.adminService.ListAccounts(c.Request.Context(), page, pageSize, platform, accountType, status, search, groupID, privacyMode, planType, sortBy, sortOrder)
+	accounts, total, err := h.adminService.ListAccounts(c.Request.Context(), page, pageSize, service.AccountListFilters{
+		Platform:    platform,
+		AccountType: accountType,
+		Status:      status,
+		Search:      search,
+		GroupID:     groupID,
+		PrivacyMode: privacyMode,
+		PlanType:    planType,
+	}, sortBy, sortOrder)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -2383,7 +2391,7 @@ func (h *AccountHandler) BatchRefreshTier(c *gin.Context) {
 	accounts := make([]*service.Account, 0)
 
 	if len(req.AccountIDs) == 0 {
-		allAccounts, _, err := h.adminService.ListAccounts(ctx, 1, 10000, "gemini", "oauth", "", "", 0, "", "", "name", "asc")
+		allAccounts, _, err := h.adminService.ListAccounts(ctx, 1, 10000, service.AccountListFilters{Platform: "gemini", AccountType: "oauth"}, "name", "asc")
 		if err != nil {
 			response.ErrorFrom(c, err)
 			return

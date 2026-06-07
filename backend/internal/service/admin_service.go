@@ -73,7 +73,7 @@ type AdminService interface {
 	ReplaceUserGroup(ctx context.Context, userID, oldGroupID, newGroupID int64) (*ReplaceUserGroupResult, error)
 
 	// Account management
-	ListAccounts(ctx context.Context, page, pageSize int, platform, accountType, status, search string, groupID int64, privacyMode, planType string, sortBy, sortOrder string) ([]Account, int64, error)
+	ListAccounts(ctx context.Context, page, pageSize int, filters AccountListFilters, sortBy, sortOrder string) ([]Account, int64, error)
 	GetAccount(ctx context.Context, id int64) (*Account, error)
 	GetAccountsByIDs(ctx context.Context, ids []int64) ([]*Account, error)
 	CreateAccount(ctx context.Context, input *CreateAccountInput) (*Account, error)
@@ -327,6 +327,18 @@ type BulkUpdateAccountsInput struct {
 	// SkipMixedChannelCheck skips the mixed channel risk check when binding groups.
 	// This should only be set when the caller has explicitly confirmed the risk.
 	SkipMixedChannelCheck bool
+}
+
+// AccountListFilters groups optional account listing filters into a single
+// struct to prevent signature bloat as filter dimensions grow.
+type AccountListFilters struct {
+	Platform    string
+	AccountType string
+	Status      string
+	Search      string
+	GroupID     int64
+	PrivacyMode string
+	PlanType    string
 }
 
 type BulkUpdateAccountFilters struct {
@@ -2472,9 +2484,17 @@ func (s *adminServiceImpl) ReplaceUserGroup(ctx context.Context, userID, oldGrou
 }
 
 // Account management implementations
-func (s *adminServiceImpl) ListAccounts(ctx context.Context, page, pageSize int, platform, accountType, status, search string, groupID int64, privacyMode, planType string, sortBy, sortOrder string) ([]Account, int64, error) {
+func (s *adminServiceImpl) ListAccounts(ctx context.Context, page, pageSize int, filters AccountListFilters, sortBy, sortOrder string) ([]Account, int64, error) {
 	params := pagination.PaginationParams{Page: page, PageSize: pageSize, SortBy: sortBy, SortOrder: sortOrder}
-	accounts, result, err := s.accountRepo.ListWithFilters(ctx, params, platform, accountType, status, search, groupID, privacyMode, planType)
+	accounts, result, err := s.accountRepo.ListWithFilters(ctx, params, AccountListFilters{
+		Platform:    filters.Platform,
+		AccountType: filters.AccountType,
+		Status:      filters.Status,
+		Search:      filters.Search,
+		GroupID:     filters.GroupID,
+		PrivacyMode: filters.PrivacyMode,
+		PlanType:    filters.PlanType,
+	})
 	if err != nil {
 		return nil, 0, err
 	}
@@ -2890,20 +2910,15 @@ func (s *adminServiceImpl) resolveBulkUpdateTargetIDs(ctx context.Context, filte
 	accountIDs := make([]int64, 0, pageSize)
 
 	for {
-		accounts, total, err := s.ListAccounts(
-			ctx,
-			page,
-			pageSize,
-			filters.Platform,
-			filters.Type,
-			filters.Status,
-			filters.Search,
-			groupID,
-			filters.PrivacyMode,
-			filters.PlanType,
-			"",
-			"",
-		)
+		accounts, total, err := s.ListAccounts(ctx, page, pageSize, AccountListFilters{
+			Platform:    filters.Platform,
+			AccountType: filters.Type,
+			Status:      filters.Status,
+			Search:      filters.Search,
+			GroupID:     groupID,
+			PrivacyMode: filters.PrivacyMode,
+			PlanType:    filters.PlanType,
+		}, "", "")
 		if err != nil {
 			return nil, err
 		}
