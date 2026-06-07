@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -16,6 +17,14 @@ type accountUsageCodexProbeRepo struct {
 	updateExtraCh chan map[string]any
 	rateLimitCh   chan time.Time
 	bulkUpdateCh  chan AccountBulkUpdate
+	getByID       func(context.Context, int64) (*Account, error)
+}
+
+func (r *accountUsageCodexProbeRepo) GetByID(ctx context.Context, id int64) (*Account, error) {
+	if r.getByID != nil {
+		return r.getByID(ctx, id)
+	}
+	return r.stubOpenAIAccountRepo.GetByID(ctx, id)
 }
 
 func (r *accountUsageCodexProbeRepo) UpdateExtra(_ context.Context, _ int64, updates map[string]any) error {
@@ -61,13 +70,6 @@ func TestAccountUsageService_GetOpenAIUsageRefreshesPlanType(t *testing.T) {
 	chatGPTAccountsCheckURL = server.URL + "/backend-api/accounts/check/v4-2023-04-27"
 	t.Cleanup(func() { chatGPTAccountsCheckURL = originalURL })
 
-	repo := &accountUsageCodexProbeRepo{bulkUpdateCh: make(chan AccountBulkUpdate, 1)}
-	svc := &AccountUsageService{
-		accountRepo: repo,
-		privacyClientFactory: func(_ string) (*req.Client, error) {
-			return req.C(), nil
-		},
-	}
 	account := &Account{
 		ID:       42,
 		Platform: PlatformOpenAI,
@@ -78,10 +80,25 @@ func TestAccountUsageService_GetOpenAIUsageRefreshesPlanType(t *testing.T) {
 			"plan_type":       "free",
 		},
 	}
+	repo := &accountUsageCodexProbeRepo{
+		bulkUpdateCh: make(chan AccountBulkUpdate, 1),
+		getByID: func(_ context.Context, id int64) (*Account, error) {
+			if id == account.ID {
+				return account, nil
+			}
+			return nil, errors.New("not found")
+		},
+	}
+	svc := &AccountUsageService{
+		accountRepo: repo,
+		privacyClientFactory: func(_ string) (*req.Client, error) {
+			return req.C(), nil
+		},
+	}
 
-	_, _, err := svc.getOpenAIUsage(context.Background(), account, false)
+	_, err := svc.GetUsage(context.Background(), account.ID)
 	if err != nil {
-		t.Fatalf("getOpenAIUsage() error = %v", err)
+		t.Fatalf("GetUsage() error = %v", err)
 	}
 
 	select {
