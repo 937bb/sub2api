@@ -250,6 +250,16 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		responsesReq.ServiceTier = strings.TrimSpace(gjson.GetBytes(responsesBody, "service_tier").String())
 	}
 
+	// 4d. OAuth non-passthrough: apply the same Codex allowlist used by the
+	// passthrough path, so the body never carries parameters the real CLI doesn't send.
+	if account.Type == AccountTypeOAuth {
+		normalized, _, err := normalizeOpenAIPassthroughOAuthBody(responsesBody, false)
+		if err != nil {
+			return nil, fmt.Errorf("normalize oauth body: %w", err)
+		}
+		responsesBody = normalized
+	}
+
 	// 5. Get access token
 	token, _, err := s.GetAccessToken(ctx, account)
 	if err != nil {
