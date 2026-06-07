@@ -306,9 +306,14 @@ func (s *AccountUsageService) GetUsage(ctx context.Context, accountID int64, for
 	}
 
 	if account.Platform == PlatformOpenAI && account.Type == AccountTypeOAuth {
-		usage, err := s.getOpenAIUsage(ctx, account, forceProbe)
+		usage, shouldRefreshPlanType, err := s.getOpenAIUsage(ctx, account, forceProbe)
 		if err == nil {
 			s.tryClearRecoverableAccountError(ctx, account)
+			if shouldRefreshPlanType {
+				if planErr := s.RefreshOpenAIPlanType(ctx, account); planErr != nil {
+					slog.Warn("openai_usage_plan_type_sync_failed", "account_id", account.ID, "error", planErr)
+				}
+			}
 		}
 		return usage, err
 	}
@@ -496,12 +501,13 @@ func (s *AccountUsageService) syncActiveToPassive(ctx context.Context, accountID
 	}
 }
 
-func (s *AccountUsageService) getOpenAIUsage(ctx context.Context, account *Account, force bool) (*UsageInfo, error) {
+func (s *AccountUsageService) getOpenAIUsage(ctx context.Context, account *Account, force bool) (*UsageInfo, bool, error) {
 	now := time.Now()
 	usage := &UsageInfo{UpdatedAt: &now}
+	shouldRefreshPlanType := false
 
 	if account == nil {
-		return usage, nil
+		return usage, shouldRefreshPlanType, nil
 	}
 
 	if progress := buildCodexUsageProgressFromExtra(account.Extra, "5h", now); progress != nil {
@@ -512,11 +518,7 @@ func (s *AccountUsageService) getOpenAIUsage(ctx context.Context, account *Accou
 	}
 
 	shouldRefreshRemote := force || shouldRefreshOpenAICodexSnapshot(account, usage, now)
-	if shouldRefreshRemote {
-		if err := s.RefreshOpenAIPlanType(ctx, account); err != nil {
-			slog.Warn("openai_usage_plan_type_sync_failed", "account_id", account.ID, "error", err)
-		}
-	}
+	shouldRefreshPlanType = shouldRefreshRemote
 	if shouldRefreshRemote && s.shouldProbeOpenAICodexSnapshot(account.ID, now, force) {
 		if updates, err := s.probeOpenAICodexSnapshot(ctx, account); err == nil && len(updates) > 0 {
 			mergeAccountExtra(account, updates)
@@ -533,7 +535,7 @@ func (s *AccountUsageService) getOpenAIUsage(ctx context.Context, account *Accou
 	}
 
 	if s.usageLogRepo == nil {
-		return usage, nil
+		return usage, shouldRefreshPlanType, nil
 	}
 
 	if stats, err := s.usageLogRepo.GetAccountWindowStats(ctx, account.ID, codexWindowStatsStart(usage.FiveHour, 5*time.Hour, now)); err == nil {
@@ -550,7 +552,7 @@ func (s *AccountUsageService) getOpenAIUsage(ctx context.Context, account *Accou
 		usage.SevenDay.WindowStats = windowStatsFromAccountStats(stats)
 	}
 
-	return usage, nil
+	return usage, shouldRefreshPlanType, nil
 }
 
 func (s *AccountUsageService) RefreshOpenAIPlanType(ctx context.Context, account *Account) error {
