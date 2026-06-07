@@ -84,23 +84,6 @@ const (
 	codexSparkImageUnsupportedText   = codexSparkImageUnsupportedMarker + "\nThe current model is gpt-5.3-codex-spark, which does not support image generation, image editing, image input, the `image_generation` tool, or Codex `image_gen`/`$imagegen` workflows. If the user asks for image generation or image editing, clearly explain this model limitation and ask them to switch to a non-Spark Codex model such as gpt-5.3-codex or gpt-5.4. Do not claim that the local environment merely lacks image_gen tooling, and do not suggest CLI fallback as the primary fix while the model remains Spark.\n</sub2api-codex-spark-image-unsupported>"
 )
 
-var openAIChatGPTInternalUnsupportedFields = []string{
-	"user",
-	"metadata",
-	"prompt_cache_retention",
-	"safety_identifier",
-	"stream_options",
-}
-
-var openAICodexOAuthUnsupportedFields = append([]string{
-	"max_output_tokens",
-	"max_completion_tokens",
-	"temperature",
-	"top_p",
-	"frequency_penalty",
-	"presence_penalty",
-}, openAIChatGPTInternalUnsupportedFields...)
-
 func applyCodexOAuthTransform(reqBody map[string]any, isCodexCLI bool, isCompact bool) codexTransformResult {
 	return applyCodexOAuthTransformWithOptions(reqBody, codexOAuthTransformOptions{
 		IsCodexCLI: isCodexCLI,
@@ -126,32 +109,14 @@ func applyCodexOAuthTransformWithOptions(reqBody map[string]any, opts codexOAuth
 		result.NormalizedModel = normalizedModel
 	}
 
-	if opts.IsCompact {
-		if _, ok := reqBody["store"]; ok {
-			delete(reqBody, "store")
-			result.Modified = true
-		}
-		if _, ok := reqBody["stream"]; ok {
-			delete(reqBody, "stream")
-			result.Modified = true
-		}
-	} else {
-		// OAuth 走 ChatGPT internal API 时，store 必须为 false；显式 true 也会强制覆盖。
-		// 避免上游返回 "Store must be set to false"。
-		if v, ok := reqBody["store"].(bool); !ok || v {
-			reqBody["store"] = false
-			result.Modified = true
-		}
-		if v, ok := reqBody["stream"].(bool); !ok || !v {
-			reqBody["stream"] = true
-			result.Modified = true
-		}
-	}
+	// store/stream 由 normalizeOpenAIPassthroughOAuthBody（passthrough）或
+	// Forward 的 markPatchDelete（非 passthrough）统一处理，此处不再重复。
 
-	// Strip parameters unsupported by ChatGPT internal Codex endpoint.
-	for _, key := range openAICodexOAuthUnsupportedFields {
-		if _, ok := reqBody[key]; ok {
-			delete(reqBody, key)
+	// Codex 行为：reasoning 非空时注入 include: ["reasoning.encrypted_content"]，
+	// 否则上游不返回加密推理内容。
+	if reqBody["reasoning"] != nil {
+		if _, hasInclude := reqBody["include"]; !hasInclude {
+			reqBody["include"] = []any{"reasoning.encrypted_content"}
 			result.Modified = true
 		}
 	}

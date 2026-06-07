@@ -680,7 +680,8 @@ func TestOpenAIGatewayService_Forward_WSv2_OAuthStoreFalseByDefault(t *testing.T
 	require.Equal(t, captureDialer.lastHeaders.Get(openAICodexWindowIDHeader), gjson.Get(requestJSON, "client_metadata."+openAICodexWindowIDHeader).String())
 	require.Equal(t, "collab_spawn", gjson.Get(requestJSON, "client_metadata."+openAICodexSubagentHeader).String())
 	require.Equal(t, "parent-thread-1", gjson.Get(requestJSON, "client_metadata."+openAICodexParentThreadIDHeader).String())
-	require.Equal(t, "vendor=value", gjson.Get(requestJSON, "client_metadata."+openAITracestateHeader).String())
+	// traceparent/tracestate 在 client_metadata 中映射为 ws_request_header_* key。
+	require.Equal(t, "vendor=value", gjson.Get(requestJSON, "client_metadata."+openAICodexWSTracestateMetadataKey).String())
 }
 
 func TestOpenAIGatewayService_Forward_WSv2_OAuthOriginatorCompatibility(t *testing.T) {

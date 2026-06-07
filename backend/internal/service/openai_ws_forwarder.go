@@ -60,6 +60,8 @@ const (
 	openAIWSIngressStagePreviousResponseNotFound = "previous_response_not_found"
 	openAIWSMaxPrevResponseIDDeletePasses        = 8
 	openAICodexWSStreamRequestStartMSKey         = "x-codex-ws-stream-request-start-ms"
+	openAICodexWSTraceparentMetadataKey          = "ws_request_header_traceparent"
+	openAICodexWSTracestateMetadataKey           = "ws_request_header_tracestate"
 )
 
 var openAIWSLogValueReplacer = strings.NewReplacer(
@@ -1299,18 +1301,24 @@ func setOpenAIWSCodexClientMetadata(payload map[string]any, headers http.Header)
 		return
 	}
 	metadata := ensureOpenAIWSClientMetadata(payload)
+	// 对齐 Codex build_ws_client_metadata + response_create_client_metadata 的 key 集合。
 	for _, key := range []string{
 		openAICodexInstallationIDHeader,
 		openAICodexWindowIDHeader,
 		openAICodexSubagentHeader,
 		openAICodexParentThreadIDHeader,
-		openAICodexThreadIDHeader,
-		openAITraceparentHeader,
-		openAITracestateHeader,
+		openAICodexTurnMetadataHeader,
 	} {
 		if value := strings.TrimSpace(headers.Get(key)); value != "" {
 			metadata[key] = value
 		}
+	}
+	// traceparent/tracestate 在 client_metadata 中的 key 名与 header 名不同。
+	if v := strings.TrimSpace(headers.Get(openAITraceparentHeader)); v != "" {
+		metadata[openAICodexWSTraceparentMetadataKey] = v
+	}
+	if v := strings.TrimSpace(headers.Get(openAITracestateHeader)); v != "" {
+		metadata[openAICodexWSTracestateMetadataKey] = v
 	}
 	metadata[openAICodexWSStreamRequestStartMSKey] = strconv.FormatInt(time.Now().UnixMilli(), 10)
 }

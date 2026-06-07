@@ -1121,21 +1121,16 @@ func setOpenAICodexHTTPPromptCacheKey(body []byte, identity openAICodexRequestId
 }
 
 func setOpenAICodexHTTPClientMetadata(body []byte, identity openAICodexRequestIdentity) []byte {
+	// 对齐 Codex build_responses_request：HTTP 仅注入 x-codex-installation-id。
 	if len(bytes.TrimSpace(body)) == 0 {
 		return body
 	}
-	updated := body
-	if identity.InstallationID != "" {
-		next, err := sjson.SetBytes(updated, "client_metadata."+openAICodexInstallationIDHeader, identity.InstallationID)
-		if err != nil {
-			return body
-		}
-		updated = next
+	if identity.InstallationID == "" {
+		return body
 	}
-	if identity.WindowID != "" {
-		if next, err := sjson.SetBytes(updated, "client_metadata."+openAICodexWindowIDHeader, identity.WindowID); err == nil {
-			updated = next
-		}
+	updated, err := sjson.SetBytes(body, "client_metadata."+openAICodexInstallationIDHeader, identity.InstallationID)
+	if err != nil {
+		return body
 	}
 	return updated
 }
@@ -2915,6 +2910,25 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			if gjson.GetBytes(body, unsupportedField).Exists() {
 				markPatchDelete(unsupportedField)
 			}
+		}
+		// ChatGPT internal API 不接受 Chat Completions 时代字段；OAuth 统一在此删除，
+		// 不再由 applyCodexOAuthTransformWithOptions 的 denylist 处理。
+		if account.Type == AccountTypeOAuth {
+			for _, field := range []string{"temperature", "top_p", "frequency_penalty", "presence_penalty", "user", "metadata", "stream_options"} {
+				if gjson.GetBytes(body, field).Exists() {
+					markPatchDelete(field)
+				}
+			}
+		}
+	}
+	// OAuth 走 ChatGPT internal API 时 store 必须为 false，stream 必须为 true；
+	// 非 compact 路径在此统一强制，不再由 applyCodexOAuthTransformWithOptions 处理。
+	if account.Type == AccountTypeOAuth && !isCompactRequest {
+		if store := gjson.GetBytes(body, "store"); !store.Exists() || store.Type != gjson.False {
+			markPatchSet("store", false)
+		}
+		if stream := gjson.GetBytes(body, "stream"); !stream.Exists() || stream.Type != gjson.True {
+			markPatchSet("stream", true)
 		}
 	}
 	if wsDecision.Transport != OpenAIUpstreamTransportResponsesWebsocketV2 {
