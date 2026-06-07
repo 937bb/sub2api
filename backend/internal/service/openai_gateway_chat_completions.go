@@ -205,14 +205,6 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	}
 	responsesBody = updatedBody
 
-	// OAuth: trim fields the real Codex CLI never sends.
-	if account.Type == AccountTypeOAuth {
-		responsesBody, _, err = normalizeOpenAIPassthroughOAuthBody(responsesBody, false)
-		if err != nil {
-			return nil, fmt.Errorf("normalize oauth body: %w", err)
-		}
-	}
-
 	// Refresh ServiceTier so billing reflects the final body sent upstream.
 	if responsesReq != nil {
 		responsesReq.ServiceTier = strings.TrimSpace(gjson.GetBytes(responsesBody, "service_tier").String())

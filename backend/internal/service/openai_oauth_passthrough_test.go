@@ -573,7 +573,7 @@ func TestOpenAIGatewayService_OAuthPassthrough_CodexMissingInstructionsRejectedB
 	require.True(t, logSink.ContainsFieldValue("reject_reason", "instructions_missing"))
 }
 
-func TestOpenAIGatewayService_OAuthPassthrough_DisabledUsesLegacyTransform(t *testing.T) {
+func TestOpenAIGatewayService_OAuthPassthrough_DisabledUsesAllowlistFiltering(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
@@ -581,8 +581,20 @@ func TestOpenAIGatewayService_OAuthPassthrough_DisabledUsesLegacyTransform(t *te
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
 	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.1.0")
 
-	// store=true + stream=false should be forced to store=false + stream=true by applyCodexOAuthTransform (OAuth legacy path)
-	inputBody := []byte(`{"model":"gpt-5.2","stream":false,"store":true,"input":[{"type":"text","text":"hi"}]}`)
+	inputBody := []byte(`{
+		"model":"gpt-5.2",
+		"stream":false,
+		"store":true,
+		"input":"hi",
+		"instructions":"be helpful",
+		"reasoning":{"effort":"medium"},
+		"max_output_tokens":1024,
+		"temperature":0.5,
+		"top_p":0.9,
+		"user":"should-drop",
+		"metadata":{"should":"drop"},
+		"previous_response_id":"resp_should_drop"
+	}`)
 
 	resp := &http.Response{
 		StatusCode: http.StatusOK,
@@ -612,10 +624,16 @@ func TestOpenAIGatewayService_OAuthPassthrough_DisabledUsesLegacyTransform(t *te
 	_, err := svc.Forward(context.Background(), c, account, inputBody)
 	require.NoError(t, err)
 
-	// legacy path rewrites request body (not byte-equal)
-	require.NotEqual(t, inputBody, upstream.lastBody)
-	require.Contains(t, string(upstream.lastBody), `"store":false`)
-	require.Contains(t, string(upstream.lastBody), `"stream":true`)
+	require.Equal(t, "gpt-5.2", gjson.GetBytes(upstream.lastBody, "model").String())
+	require.Equal(t, "hi", gjson.GetBytes(upstream.lastBody, "input.0.content").String())
+	require.Equal(t, "be helpful", gjson.GetBytes(upstream.lastBody, "instructions").String())
+	require.Equal(t, "medium", gjson.GetBytes(upstream.lastBody, "reasoning.effort").String())
+	require.False(t, gjson.GetBytes(upstream.lastBody, "store").Bool())
+	require.True(t, gjson.GetBytes(upstream.lastBody, "stream").Bool())
+
+	for _, field := range []string{"max_output_tokens", "temperature", "top_p", "user", "metadata", "previous_response_id"} {
+		require.False(t, gjson.GetBytes(upstream.lastBody, field).Exists(), "%s should be removed by OAuth allowlist", field)
+	}
 }
 
 func TestOpenAIGatewayService_OAuthLegacy_UpstreamRequestIgnoresClientCancel(t *testing.T) {

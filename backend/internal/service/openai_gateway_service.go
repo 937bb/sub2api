@@ -2924,32 +2924,15 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		if gjson.GetBytes(body, "max_completion_tokens").Exists() && (account.Type == AccountTypeAPIKey || account.Platform != PlatformOpenAI) {
 			markPatchDelete("max_completion_tokens")
 		}
-		for _, unsupportedField := range []string{"prompt_cache_retention", "safety_identifier"} {
-			if gjson.GetBytes(body, unsupportedField).Exists() {
-				markPatchDelete(unsupportedField)
-			}
-		}
-		// ChatGPT internal API 不接受 Chat Completions 时代字段；OAuth 统一在此删除，
-		// 不再由 applyCodexOAuthTransformWithOptions 的 denylist 处理。
-		if account.Type == AccountTypeOAuth {
-			for _, field := range []string{"temperature", "top_p", "frequency_penalty", "presence_penalty", "user", "metadata", "stream_options"} {
-				if gjson.GetBytes(body, field).Exists() {
-					markPatchDelete(field)
+		if account.Type != AccountTypeOAuth {
+			for _, unsupportedField := range []string{"prompt_cache_retention", "safety_identifier"} {
+				if gjson.GetBytes(body, unsupportedField).Exists() {
+					markPatchDelete(unsupportedField)
 				}
 			}
 		}
 	}
-	// OAuth 走 ChatGPT internal API 时 store 必须为 false，stream 必须为 true；
-	// 非 compact 路径在此统一强制，不再由 applyCodexOAuthTransformWithOptions 处理。
-	if account.Type == AccountTypeOAuth && !isCompactRequest {
-		if store := gjson.GetBytes(body, "store"); !store.Exists() || store.Type != gjson.False {
-			markPatchSet("store", false)
-		}
-		if stream := gjson.GetBytes(body, "stream"); !stream.Exists() || stream.Type != gjson.True {
-			markPatchSet("stream", true)
-		}
-	}
-	if wsDecision.Transport != OpenAIUpstreamTransportResponsesWebsocketV2 {
+	if account.Type != AccountTypeOAuth && wsDecision.Transport != OpenAIUpstreamTransportResponsesWebsocketV2 {
 		for _, field := range []string{"previous_response_id", "generate", "type"} {
 			if gjson.GetBytes(body, field).Exists() {
 				markPatchDelete(field)
@@ -3049,6 +3032,10 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		wsReqBody, err := ensureReqBody()
 		if err != nil {
 			return nil, err
+		}
+		if account.Type == AccountTypeOAuth {
+			wsReqBody["store"] = false
+			wsReqBody["stream"] = true
 		}
 		_, hasPreviousResponseID := wsReqBody["previous_response_id"]
 		logOpenAIWSModeDebug(
@@ -3454,7 +3441,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			return nil, fmt.Errorf("openai passthrough rejected before upstream: %s", rejectReason)
 		}
 
-		normalizedBody, normalized, err := normalizeOpenAIPassthroughOAuthBody(body, isOpenAIResponsesCompactPath(c))
+		normalizedBody, normalized, err := normalizeOpenAIOAuthHTTPBody(body, isOpenAIResponsesCompactPath(c))
 		if err != nil {
 			return nil, err
 		}
@@ -3773,6 +3760,9 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 			req.Header.Set("originator", codexOfficialOriginator)
 		}
 		body, _ = applyOpenAICodexHTTPRequestAlignmentWithBodyOptions(req, c, account, body, promptCacheKey, true, true, !isCompactRequest)
+		if _, err := normalizeOpenAIOAuthHTTPUpstreamRequestBody(req, c, account, body); err != nil {
+			return nil, err
+		}
 	}
 
 	// 透传模式也支持账户自定义 User-Agent 与 ForceCodexCLI 兜底。
@@ -4490,6 +4480,9 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 		}
 		mutateBody := !compatMessagesBridge
 		body, _ = applyOpenAICodexHTTPRequestAlignmentWithBodyOptions(req, c, account, body, promptCacheKey, !compatMessagesBridge || clientConversationID != "", mutateBody, mutateBody && !isCompactRequest)
+		if _, err := normalizeOpenAIOAuthHTTPUpstreamRequestBody(req, c, account, body); err != nil {
+			return nil, err
+		}
 	}
 
 	// Apply custom User-Agent if configured
@@ -6724,10 +6717,23 @@ func extractOpenAIRequestMetaFromBody(body []byte) (model string, stream bool, p
 	return view.Model, view.Stream, view.PromptCacheKey
 }
 
-// normalizeOpenAIPassthroughOAuthBody 将透传 OAuth 请求体收敛到 Codex CLI 实际发送的字段集合：
+func normalizeOpenAIOAuthHTTPUpstreamRequestBody(req *http.Request, c *gin.Context, account *Account, body []byte) ([]byte, error) {
+	if account == nil || !account.IsOpenAIOAuth() {
+		return body, nil
+	}
+
+	normalized, _, err := normalizeOpenAIOAuthHTTPBody(body, isOpenAIResponsesCompactPath(c))
+	if err != nil {
+		return body, fmt.Errorf("normalize oauth body: %w", err)
+	}
+	resetHTTPRequestBody(req, normalized)
+	return normalized, nil
+}
+
+// normalizeOpenAIOAuthHTTPBody 将 OpenAI OAuth HTTP 请求体收敛到 Codex CLI 实际发送的字段集合：
 // 1) /responses/compact → Codex CompactionInput allowlist（9 字段）
 // 2) 普通 HTTP /responses → Codex ResponsesApiRequest allowlist（14 字段）+ force store=false, stream=true
-func normalizeOpenAIPassthroughOAuthBody(body []byte, compact bool) ([]byte, bool, error) {
+func normalizeOpenAIOAuthHTTPBody(body []byte, compact bool) ([]byte, bool, error) {
 	if len(body) == 0 {
 		return body, false, nil
 	}
