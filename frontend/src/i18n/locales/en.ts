@@ -3145,6 +3145,8 @@ export default {
       usageWindowsHint: '"5h / 7d" are the upstream account\'s official rolling usage windows (e.g. OpenAI ChatGPT, Claude). They are imposed by the upstream provider on the account itself — not configured by sub2api, and unrelated to the models you map. Usage resets automatically once each window rolls over, and the limit cannot be lifted from within sub2api.',
       allPrivacyModes: 'All Privacy States',
       privacyUnset: 'Unset',
+      allPlanTypes: 'All Plan Types',
+      planTypeAbnormal: 'Abnormal',
       privacyTrainingOff: 'Training data sharing disabled',
       privacyCfBlocked: 'Blocked by Cloudflare, training may still be on',
       privacyFailed: 'Failed to disable training',
@@ -3284,8 +3286,10 @@ export default {
         disableScheduling: 'Disable Scheduling',
         resetStatus: 'Reset Status',
         refreshToken: 'Refresh Token',
+        refreshPlanType: 'Refresh Plan Type',
         resetStatusSuccess: 'Successfully reset {count} account(s) status',
         refreshTokenSuccess: 'Successfully refreshed {count} account(s) token',
+        refreshPlanTypeSuccess: 'Successfully refreshed {count} account(s) plan type',
         partialSuccess: 'Partially completed: {success} succeeded, {failed} failed'
       },
       bulkEdit: {

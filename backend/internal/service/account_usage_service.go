@@ -265,6 +265,7 @@ type AccountUsageService struct {
 	cache                   *UsageCache
 	identityCache           IdentityCache
 	tlsFPProfileService     *TLSFingerprintProfileService
+	privacyClientFactory    PrivacyClientFactory
 }
 
 // NewAccountUsageService 创建AccountUsageService实例
@@ -277,6 +278,7 @@ func NewAccountUsageService(
 	cache *UsageCache,
 	identityCache IdentityCache,
 	tlsFPProfileService *TLSFingerprintProfileService,
+	privacyClientFactory PrivacyClientFactory,
 ) *AccountUsageService {
 	return &AccountUsageService{
 		accountRepo:             accountRepo,
@@ -287,6 +289,7 @@ func NewAccountUsageService(
 		cache:                   cache,
 		identityCache:           identityCache,
 		tlsFPProfileService:     tlsFPProfileService,
+		privacyClientFactory:    privacyClientFactory,
 	}
 }
 
@@ -303,9 +306,14 @@ func (s *AccountUsageService) GetUsage(ctx context.Context, accountID int64, for
 	}
 
 	if account.Platform == PlatformOpenAI && account.Type == AccountTypeOAuth {
-		usage, err := s.getOpenAIUsage(ctx, account, forceProbe)
+		usage, shouldRefreshPlanType, err := s.getOpenAIUsage(ctx, account, forceProbe)
 		if err == nil {
 			s.tryClearRecoverableAccountError(ctx, account)
+			if shouldRefreshPlanType {
+				if planErr := s.RefreshOpenAIPlanType(ctx, account); planErr != nil {
+					slog.Warn("openai_usage_plan_type_sync_failed", "account_id", account.ID, "error", planErr)
+				}
+			}
 		}
 		return usage, err
 	}
@@ -493,12 +501,13 @@ func (s *AccountUsageService) syncActiveToPassive(ctx context.Context, accountID
 	}
 }
 
-func (s *AccountUsageService) getOpenAIUsage(ctx context.Context, account *Account, force bool) (*UsageInfo, error) {
+func (s *AccountUsageService) getOpenAIUsage(ctx context.Context, account *Account, force bool) (*UsageInfo, bool, error) {
 	now := time.Now()
 	usage := &UsageInfo{UpdatedAt: &now}
+	shouldRefreshPlanType := false
 
 	if account == nil {
-		return usage, nil
+		return usage, shouldRefreshPlanType, nil
 	}
 
 	if progress := buildCodexUsageProgressFromExtra(account.Extra, "5h", now); progress != nil {
@@ -508,7 +517,9 @@ func (s *AccountUsageService) getOpenAIUsage(ctx context.Context, account *Accou
 		usage.SevenDay = progress
 	}
 
-	if (force || shouldRefreshOpenAICodexSnapshot(account, usage, now)) && s.shouldProbeOpenAICodexSnapshot(account.ID, now, force) {
+	shouldRefreshRemote := force || shouldRefreshOpenAICodexSnapshot(account, usage, now)
+	shouldRefreshPlanType = shouldRefreshRemote
+	if shouldRefreshRemote && s.shouldProbeOpenAICodexSnapshot(account.ID, now, force) {
 		if updates, err := s.probeOpenAICodexSnapshot(ctx, account); err == nil && len(updates) > 0 {
 			mergeAccountExtra(account, updates)
 			if usage.UpdatedAt == nil {
@@ -524,7 +535,7 @@ func (s *AccountUsageService) getOpenAIUsage(ctx context.Context, account *Accou
 	}
 
 	if s.usageLogRepo == nil {
-		return usage, nil
+		return usage, shouldRefreshPlanType, nil
 	}
 
 	if stats, err := s.usageLogRepo.GetAccountWindowStats(ctx, account.ID, codexWindowStatsStart(usage.FiveHour, 5*time.Hour, now)); err == nil {
@@ -541,7 +552,47 @@ func (s *AccountUsageService) getOpenAIUsage(ctx context.Context, account *Accou
 		usage.SevenDay.WindowStats = windowStatsFromAccountStats(stats)
 	}
 
-	return usage, nil
+	return usage, shouldRefreshPlanType, nil
+}
+
+func (s *AccountUsageService) RefreshOpenAIPlanType(ctx context.Context, account *Account) error {
+	if s == nil || s.accountRepo == nil || s.privacyClientFactory == nil {
+		return fmt.Errorf("plan type refresh is not configured")
+	}
+	if account == nil {
+		return fmt.Errorf("account is required")
+	}
+	if !account.IsOpenAIOAuth() {
+		return fmt.Errorf("only OpenAI OAuth accounts support plan type refresh")
+	}
+	accessToken := account.GetOpenAIAccessToken()
+	if accessToken == "" {
+		return fmt.Errorf("OpenAI OAuth access token is required")
+	}
+
+	proxyURL := ""
+	if account.ProxyID != nil && account.Proxy != nil {
+		proxyURL = account.Proxy.URL()
+	}
+	info := fetchChatGPTAccountInfo(ctx, s.privacyClientFactory, accessToken, proxyURL, account.GetOpenAIOrganizationID())
+	if info == nil || info.PlanType == "" {
+		return fmt.Errorf("ChatGPT account info did not include plan_type")
+	}
+
+	updates := map[string]any{"plan_type": info.PlanType}
+	if info.SubscriptionExpiresAt != "" {
+		updates["subscription_expires_at"] = info.SubscriptionExpiresAt
+	}
+	if _, err := s.accountRepo.BulkUpdate(ctx, []int64{account.ID}, AccountBulkUpdate{Credentials: updates}); err != nil {
+		return err
+	}
+	if account.Credentials == nil {
+		account.Credentials = make(map[string]any, len(updates))
+	}
+	for k, v := range updates {
+		account.Credentials[k] = v
+	}
+	return nil
 }
 
 func shouldRefreshOpenAICodexSnapshot(account *Account, usage *UsageInfo, now time.Time) bool {

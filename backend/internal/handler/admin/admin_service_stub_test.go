@@ -34,6 +34,8 @@ type stubAdminService struct {
 		platform  string
 		groupIDs  []int64
 	}
+	lastBulkUpdateInput *service.BulkUpdateAccountsInput
+	getAccountsByIDs  func(context.Context, []int64) ([]*service.Account, error)
 	lastListAccounts struct {
 		platform    string
 		accountType string
@@ -314,13 +316,13 @@ func (s *stubAdminService) BatchSetGroupRPMOverrides(_ context.Context, _ int64,
 	return nil
 }
 
-func (s *stubAdminService) ListAccounts(ctx context.Context, page, pageSize int, platform, accountType, status, search string, groupID int64, privacyMode string, sortBy, sortOrder string) ([]service.Account, int64, error) {
-	s.lastListAccounts.platform = platform
-	s.lastListAccounts.accountType = accountType
-	s.lastListAccounts.status = status
-	s.lastListAccounts.search = search
-	s.lastListAccounts.groupID = groupID
-	s.lastListAccounts.privacyMode = privacyMode
+func (s *stubAdminService) ListAccounts(_ context.Context, _ int, _ int, filters service.AccountListFilters, sortBy, sortOrder string) ([]service.Account, int64, error) {
+	s.lastListAccounts.platform = filters.Platform
+	s.lastListAccounts.accountType = filters.AccountType
+	s.lastListAccounts.status = filters.Status
+	s.lastListAccounts.search = filters.Search
+	s.lastListAccounts.groupID = filters.GroupID
+	s.lastListAccounts.privacyMode = filters.PrivacyMode
 	s.lastListAccounts.sortBy = sortBy
 	s.lastListAccounts.sortOrder = sortOrder
 	s.lastListAccounts.calls++
@@ -333,6 +335,9 @@ func (s *stubAdminService) GetAccount(ctx context.Context, id int64) (*service.A
 }
 
 func (s *stubAdminService) GetAccountsByIDs(ctx context.Context, ids []int64) ([]*service.Account, error) {
+	if s.getAccountsByIDs != nil {
+		return s.getAccountsByIDs(ctx, ids)
+	}
 	out := make([]*service.Account, 0, len(ids))
 	for _, id := range ids {
 		account := service.Account{ID: id, Name: "account", Status: service.StatusActive}
@@ -388,6 +393,7 @@ func (s *stubAdminService) SetAccountSchedulable(ctx context.Context, id int64, 
 }
 
 func (s *stubAdminService) BulkUpdateAccounts(ctx context.Context, input *service.BulkUpdateAccountsInput) (*service.BulkUpdateAccountsResult, error) {
+	s.lastBulkUpdateInput = input
 	if s.bulkUpdateAccountErr != nil {
 		return nil, s.bulkUpdateAccountErr
 	}

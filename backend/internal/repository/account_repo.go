@@ -462,23 +462,23 @@ func (r *accountRepository) Delete(ctx context.Context, id int64) error {
 }
 
 func (r *accountRepository) List(ctx context.Context, params pagination.PaginationParams) ([]service.Account, *pagination.PaginationResult, error) {
-	return r.ListWithFilters(ctx, params, "", "", "", "", 0, "")
+	return r.ListWithFilters(ctx, params, service.AccountListFilters{})
 }
 
-func (r *accountRepository) ListWithFilters(ctx context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64, privacyMode string) ([]service.Account, *pagination.PaginationResult, error) {
+func (r *accountRepository) ListWithFilters(ctx context.Context, params pagination.PaginationParams, filters service.AccountListFilters) ([]service.Account, *pagination.PaginationResult, error) {
 	q := r.client.Account.Query()
 
-	if platform != "" {
-		q = q.Where(dbaccount.PlatformEQ(platform))
+	if filters.Platform != "" {
+		q = q.Where(dbaccount.PlatformEQ(filters.Platform))
 	}
-	if accountType != "" {
-		q = q.Where(dbaccount.TypeEQ(accountType))
+	if filters.AccountType != "" {
+		q = q.Where(dbaccount.TypeEQ(filters.AccountType))
 	}
-	if status != "" {
-		switch status {
+	if filters.Status != "" {
+		switch filters.Status {
 		case service.StatusActive:
 			q = q.Where(
-				dbaccount.StatusEQ(status),
+				dbaccount.StatusEQ(filters.Status),
 				dbaccount.SchedulableEQ(true),
 				dbaccount.Or(
 					dbaccount.RateLimitResetAtIsNil(),
@@ -532,29 +532,34 @@ func (r *accountRepository) ListWithFilters(ctx context.Context, params paginati
 				}),
 			)
 		default:
-			q = q.Where(dbaccount.StatusEQ(status))
+			q = q.Where(dbaccount.StatusEQ(filters.Status))
 		}
 	}
-	if search != "" {
-		q = q.Where(dbaccount.NameContainsFold(search))
+	if filters.Search != "" {
+		q = q.Where(dbaccount.NameContainsFold(filters.Search))
 	}
-	if groupID == service.AccountListGroupUngrouped {
+	if filters.GroupID == service.AccountListGroupUngrouped {
 		q = q.Where(dbaccount.Not(dbaccount.HasAccountGroups()))
-	} else if groupID > 0 {
-		q = q.Where(dbaccount.HasAccountGroupsWith(dbaccountgroup.GroupIDEQ(groupID)))
+	} else if filters.GroupID > 0 {
+		q = q.Where(dbaccount.HasAccountGroupsWith(dbaccountgroup.GroupIDEQ(filters.GroupID)))
 	}
-	if privacyMode != "" {
+	if filters.PrivacyMode != "" {
 		q = q.Where(dbpredicate.Account(func(s *entsql.Selector) {
 			path := sqljson.Path("privacy_mode")
-			switch privacyMode {
+			switch filters.PrivacyMode {
 			case service.AccountPrivacyModeUnsetFilter:
 				s.Where(entsql.Or(
 					entsql.Not(sqljson.HasKey(dbaccount.FieldExtra, path)),
 					sqljson.ValueEQ(dbaccount.FieldExtra, "", path),
 				))
 			default:
-				s.Where(sqljson.ValueEQ(dbaccount.FieldExtra, privacyMode, path))
+				s.Where(sqljson.ValueEQ(dbaccount.FieldExtra, filters.PrivacyMode, path))
 			}
+		}))
+	}
+	if filters.PlanType != "" {
+		q = q.Where(dbpredicate.Account(func(s *entsql.Selector) {
+			s.Where(sqljson.ValueEQ(dbaccount.FieldCredentials, filters.PlanType, sqljson.Path("plan_type")))
 		}))
 	}
 
