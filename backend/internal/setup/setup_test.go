@@ -4,6 +4,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/jackc/pgx/v5"
 )
 
 func TestDecideAdminBootstrap(t *testing.T) {
@@ -108,5 +110,31 @@ func TestBuildDatabaseConnectionDSNsUsesPostgresForBootstrap(t *testing.T) {
 	}
 	if !strings.Contains(targetDSN, "dbname=sub2api") {
 		t.Fatalf("target DSN = %q, want configured database", targetDSN)
+	}
+}
+
+func TestBuildDatabaseConnectionDSNsArePgxCompatible(t *testing.T) {
+	cfg := &DatabaseConfig{
+		Host:     "db",
+		Port:     5432,
+		User:     "sub2api",
+		Password: "secret",
+		DBName:   "sub2api",
+		SSLMode:  "disable",
+	}
+
+	for name, dsn := range map[string]string{
+		"bootstrap": buildPostgresDSN(cfg, "postgres"),
+		"target":    buildPostgresDSN(cfg, cfg.DBName),
+	} {
+		t.Run(name, func(t *testing.T) {
+			parsed, err := pgx.ParseConfig(dsn)
+			if err != nil {
+				t.Fatalf("pgx.ParseConfig(%q) error = %v", dsn, err)
+			}
+			if parsed.User != cfg.User {
+				t.Fatalf("parsed user = %q, want %q", parsed.User, cfg.User)
+			}
+		})
 	}
 }
