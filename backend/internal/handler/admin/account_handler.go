@@ -157,6 +157,7 @@ type BulkUpdateAccountFilters struct {
 	Group       string `json:"group"`
 	Search      string `json:"search"`
 	PrivacyMode string `json:"privacy_mode"`
+	PlanType    string `json:"plan_type"`
 }
 
 // CheckMixedChannelRequest represents check mixed channel risk request
@@ -231,6 +232,7 @@ func (h *AccountHandler) List(c *gin.Context) {
 	status := c.Query("status")
 	search := c.Query("search")
 	privacyMode := strings.TrimSpace(c.Query("privacy_mode"))
+	planType := strings.TrimSpace(c.Query("plan_type"))
 	sortBy := c.DefaultQuery("sort_by", "name")
 	sortOrder := c.DefaultQuery("sort_order", "asc")
 	// 标准化和验证 search 参数
@@ -258,7 +260,15 @@ func (h *AccountHandler) List(c *gin.Context) {
 		}
 	}
 
-	accounts, total, err := h.adminService.ListAccounts(c.Request.Context(), page, pageSize, platform, accountType, status, search, groupID, privacyMode, sortBy, sortOrder)
+	accounts, total, err := h.adminService.ListAccounts(c.Request.Context(), page, pageSize, service.AccountListFilters{
+		Platform:    platform,
+		AccountType: accountType,
+		Status:      status,
+		Search:      search,
+		GroupID:     groupID,
+		PrivacyMode: privacyMode,
+		PlanType:    planType,
+	}, sortBy, sortOrder)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -1294,6 +1304,86 @@ func (h *AccountHandler) BatchRefresh(c *gin.Context) {
 	})
 }
 
+// BatchRefreshPlanType handles batch refreshing OpenAI OAuth plan_type.
+// POST /api/v1/admin/accounts/batch-refresh-plan-type
+func (h *AccountHandler) BatchRefreshPlanType(c *gin.Context) {
+	var req struct {
+		AccountIDs []int64 `json:"account_ids"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	if len(req.AccountIDs) == 0 {
+		response.BadRequest(c, "account_ids is required")
+		return
+	}
+	if h.accountUsageService == nil {
+		response.BadRequest(c, "plan_type refresh is not configured")
+		return
+	}
+
+	ctx := c.Request.Context()
+	accounts, err := h.adminService.GetAccountsByIDs(ctx, req.AccountIDs)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	foundIDs := make(map[int64]bool, len(accounts))
+	for _, acc := range accounts {
+		if acc != nil {
+			foundIDs[acc.ID] = true
+		}
+	}
+
+	const maxConcurrency = 10
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(maxConcurrency)
+
+	var mu sync.Mutex
+	var successCount, failedCount int
+	var errors []gin.H
+
+	for _, id := range req.AccountIDs {
+		if !foundIDs[id] {
+			failedCount++
+			errors = append(errors, gin.H{"account_id": id, "error": "account not found"})
+		}
+	}
+
+	for _, account := range accounts {
+		acc := account
+		if acc == nil {
+			continue
+		}
+		g.Go(func() error {
+			err := h.accountUsageService.RefreshOpenAIPlanType(gctx, acc)
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				failedCount++
+				errors = append(errors, gin.H{"account_id": acc.ID, "error": err.Error()})
+			} else {
+				successCount++
+			}
+			return nil
+		})
+	}
+
+	if err := g.Wait(); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	response.Success(c, gin.H{
+		"total":   len(req.AccountIDs),
+		"success": successCount,
+		"failed":  failedCount,
+		"errors":  errors,
+	})
+}
+
 // BatchCreate handles batch creating accounts
 // POST /api/v1/admin/accounts/batch
 func (h *AccountHandler) BatchCreate(c *gin.Context) {
@@ -1589,6 +1679,7 @@ func toServiceBulkUpdateAccountFilters(filters *BulkUpdateAccountFilters) *servi
 		Group:       filters.Group,
 		Search:      filters.Search,
 		PrivacyMode: filters.PrivacyMode,
+		PlanType:    filters.PlanType,
 	}
 }
 
@@ -2294,7 +2385,7 @@ func (h *AccountHandler) BatchRefreshTier(c *gin.Context) {
 	accounts := make([]*service.Account, 0)
 
 	if len(req.AccountIDs) == 0 {
-		allAccounts, _, err := h.adminService.ListAccounts(ctx, 1, 10000, "gemini", "oauth", "", "", 0, "", "name", "asc")
+		allAccounts, _, err := h.adminService.ListAccounts(ctx, 1, 10000, service.AccountListFilters{Platform: "gemini", AccountType: "oauth"}, "name", "asc")
 		if err != nil {
 			response.ErrorFrom(c, err)
 			return
