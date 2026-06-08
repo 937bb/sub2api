@@ -1,6 +1,7 @@
 package service
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -76,13 +77,14 @@ func TestIsOpenAIWSTokenEvent_DisjointWithTerminal(t *testing.T) {
 
 func TestBuildOpenAIWSCreatePayload(t *testing.T) {
 	svc := &OpenAIGatewayService{}
-	account := &Account{Type: AccountTypeOAuth}
+	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth}
 	req := map[string]any{
-		"model":      "gpt-5-codex",
-		"input":      []any{map[string]any{"role": "user", "content": "hi"}},
-		"stream":     true,
-		"background": false,
-		"store":      true,
+		"model":             "gpt-5-codex",
+		"input":             []any{map[string]any{"role": "user", "content": "hi"}},
+		"stream":            true,
+		"background":        false,
+		"store":             true,
+		"max_output_tokens": 1024,
 	}
 
 	payload := svc.buildOpenAIWSCreatePayload(req, account)
@@ -92,8 +94,54 @@ func TestBuildOpenAIWSCreatePayload(t *testing.T) {
 	require.Equal(t, true, payload["stream"])
 	require.NotContains(t, payload, "previous_response_id")
 	require.NotContains(t, payload, "generate")
+	require.NotContains(t, payload, "max_output_tokens")
 	require.Equal(t, false, payload["store"])
 	require.Equal(t, true, req["store"])
+}
+
+func TestApplyOpenAIOAuthWSAllowlistRawPreservesAllowedRawJSON(t *testing.T) {
+	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	payload := []byte(`{"type":"response.create","model":"gpt-5-codex","tools":[{"type":"function","name":"big","parameters":{"const":9007199254740993}}],"unknown_field":"drop"}`)
+
+	filtered, err := applyOpenAIOAuthWSAllowlistRaw(payload, account)
+
+	require.NoError(t, err)
+	require.Contains(t, string(filtered), `9007199254740993`)
+	require.NotContains(t, string(filtered), "9007199254740992")
+	require.NotContains(t, string(filtered), "unknown_field")
+}
+
+func TestApplyOpenAIOAuthWSAllowlistRawUsesAllowlistOrder(t *testing.T) {
+	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	payload := []byte(`{"unknown_field":"drop","model":"gpt-5-codex","type":"response.create","input":"hi"}`)
+
+	filtered, err := applyOpenAIOAuthWSAllowlistRaw(payload, account)
+
+	require.NoError(t, err)
+	filteredString := string(filtered)
+	require.True(t, strings.Index(filteredString, `"type"`) < strings.Index(filteredString, `"model"`))
+	require.True(t, strings.Index(filteredString, `"model"`) < strings.Index(filteredString, `"input"`))
+	require.NotContains(t, filteredString, "unknown_field")
+}
+
+func TestBuildOpenAIWSCreatePayloadAPIKeyKeepsExistingBehavior(t *testing.T) {
+	svc := &OpenAIGatewayService{}
+	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+	req := map[string]any{
+		"model":             "gpt-5-codex",
+		"stream":            false,
+		"background":        false,
+		"store":             true,
+		"max_output_tokens": 1024,
+	}
+
+	payload := svc.buildOpenAIWSCreatePayload(req, account)
+
+	require.Equal(t, "response.create", payload["type"])
+	require.NotContains(t, payload, "background")
+	require.Equal(t, false, payload["stream"])
+	require.Equal(t, true, payload["store"])
+	require.Equal(t, 1024, payload["max_output_tokens"])
 }
 
 func TestBuildOpenAIWSCreatePayloadPreservesExplicitWSFields(t *testing.T) {

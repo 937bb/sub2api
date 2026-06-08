@@ -2722,7 +2722,14 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		if reqBody != nil {
 			return reqBody, nil
 		}
-		decoded, decodeErr := requestView.Decode(c)
+		var decoded map[string]any
+		var decodeErr error
+		// OAuth WS allowlist 会重新序列化允许字段；UseNumber 避免大整数先被 float64 舍入。
+		if account != nil && account.IsOpenAIOAuth() && wsDecision.Transport == OpenAIUpstreamTransportResponsesWebsocketV2 {
+			decoded, decodeErr = requestView.DecodeUseNumber(c)
+		} else {
+			decoded, decodeErr = requestView.Decode(c)
+		}
 		if decodeErr != nil {
 			return nil, decodeErr
 		}
@@ -6596,6 +6603,11 @@ func (v openAIRequestView) Decode(c *gin.Context) (map[string]any, error) {
 	return getOpenAIRequestBodyMap(c, v.body)
 }
 
+// DecodeUseNumber 保留 JSON 数字文本，供 OAuth allowlist 终端路径避免大整数被 float64 舍入。
+func (v openAIRequestView) DecodeUseNumber(_ *gin.Context) (map[string]any, error) {
+	return decodeOpenAIRequestBodyMapUseNumber(v.body)
+}
+
 func (v *openAIRequestView) MarkPatchSet(path string, value any) {
 	if v == nil || v.patchesDisabled {
 		return
@@ -7398,6 +7410,23 @@ func isEmptyBase64DataURI(raw string) bool {
 func getOpenAIRequestBodyMap(_ *gin.Context, body []byte) (map[string]any, error) {
 	var reqBody map[string]any
 	if err := json.Unmarshal(body, &reqBody); err != nil {
+		return nil, fmt.Errorf("parse request: %w", err)
+	}
+	return reqBody, nil
+}
+
+func decodeOpenAIRequestBodyMapUseNumber(body []byte) (map[string]any, error) {
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.UseNumber()
+	var reqBody map[string]any
+	if err := decoder.Decode(&reqBody); err != nil {
+		return nil, fmt.Errorf("parse request: %w", err)
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return nil, fmt.Errorf("parse request: unexpected trailing JSON")
+		}
 		return nil, fmt.Errorf("parse request: %w", err)
 	}
 	return reqBody, nil

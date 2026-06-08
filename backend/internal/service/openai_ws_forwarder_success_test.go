@@ -651,7 +651,29 @@ func TestOpenAIGatewayService_Forward_WSv2_OAuthStoreFalseByDefault(t *testing.T
 		},
 	}
 
-	body := []byte(`{"model":"gpt-5.1","stream":false,"store":true,"input":[{"type":"input_text","text":"hello"}]}`)
+	body := []byte(`{
+		"model":"gpt-5.1",
+		"stream":false,
+		"store":true,
+		"input":[{"type":"input_text","text":"hello"}],
+		"instructions":"be helpful",
+		"reasoning":{"effort":"medium"},
+		"tools":[{"type":"function","name":"shell","parameters":{"type":"object","properties":{"nonce":{"const":9007199254740993}}}}],
+		"tool_choice":"auto",
+		"parallel_tool_calls":true,
+		"include":["reasoning.encrypted_content"],
+		"service_tier":"default",
+		"prompt_cache_key":"cache-oauth-ws",
+		"text":{"verbosity":"low"},
+		"generate":false,
+		"max_output_tokens":1024,
+		"temperature":0.5,
+		"top_p":0.9,
+		"metadata":{"should":"drop"},
+		"user":"should-drop",
+		"background":true,
+		"unknown_field":"should-drop"
+	}`)
 	result, err := svc.Forward(context.Background(), c, account, body)
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -663,6 +685,22 @@ func TestOpenAIGatewayService_Forward_WSv2_OAuthStoreFalseByDefault(t *testing.T
 	require.False(t, gjson.Get(requestJSON, "store").Bool(), "默认策略应将 OAuth store 置为 false")
 	require.True(t, gjson.Get(requestJSON, "stream").Exists(), "WSv2 payload 应保留 stream 字段")
 	require.True(t, gjson.Get(requestJSON, "stream").Bool(), "OAuth Codex 规范化后应强制 stream=true")
+	require.Equal(t, "response.create", gjson.Get(requestJSON, "type").String())
+	require.Equal(t, "gpt-5.4", gjson.Get(requestJSON, "model").String())
+	require.Equal(t, "be helpful", gjson.Get(requestJSON, "instructions").String())
+	require.Equal(t, "medium", gjson.Get(requestJSON, "reasoning.effort").String())
+	require.Equal(t, "function", gjson.Get(requestJSON, "tools.0.type").String())
+	require.Contains(t, requestJSON, "9007199254740993")
+	require.NotContains(t, requestJSON, "9007199254740992")
+	require.Equal(t, "auto", gjson.Get(requestJSON, "tool_choice").String())
+	require.True(t, gjson.Get(requestJSON, "parallel_tool_calls").Bool())
+	require.Equal(t, "reasoning.encrypted_content", gjson.Get(requestJSON, "include.0").String())
+	require.Equal(t, "cache-oauth-ws", gjson.Get(requestJSON, "prompt_cache_key").String())
+	require.Equal(t, "low", gjson.Get(requestJSON, "text.verbosity").String())
+	require.False(t, gjson.Get(requestJSON, "generate").Bool())
+	for _, field := range []string{"max_output_tokens", "temperature", "top_p", "metadata", "user", "background", "unknown_field"} {
+		require.False(t, gjson.Get(requestJSON, field).Exists(), "%s should be removed by OAuth WS allowlist", field)
+	}
 	require.Equal(t, openAIWSBetaV2Value, captureDialer.lastHeaders.Get("OpenAI-Beta"))
 	// OAuth 账号的 session_id/conversation_id 应被 isolateOpenAISessionID 隔离，
 	// 测试中未设置 api_key 到 context，apiKeyID=0。
@@ -1592,12 +1630,14 @@ func (d *openAIWSCaptureDialer) DialCount() int {
 }
 
 type openAIWSCaptureConn struct {
-	mu         sync.Mutex
-	readDelays []time.Duration
-	events     [][]byte
-	lastWrite  map[string]any
-	writes     []map[string]any
-	closed     bool
+	mu           sync.Mutex
+	readDelays   []time.Duration
+	events       [][]byte
+	lastWrite    map[string]any
+	writes       []map[string]any
+	lastRawWrite []byte
+	rawWrites    [][]byte
+	closed       bool
 }
 
 func (c *openAIWSCaptureConn) WriteJSON(ctx context.Context, value any) error {
@@ -1609,15 +1649,22 @@ func (c *openAIWSCaptureConn) WriteJSON(ctx context.Context, value any) error {
 	}
 	switch payload := value.(type) {
 	case map[string]any:
+		raw, _ := json.Marshal(payload)
+		c.lastRawWrite = append([]byte(nil), raw...)
+		c.rawWrites = append(c.rawWrites, append([]byte(nil), raw...))
 		c.lastWrite = cloneMapStringAny(payload)
 		c.writes = append(c.writes, cloneMapStringAny(payload))
 	case json.RawMessage:
+		c.lastRawWrite = append([]byte(nil), payload...)
+		c.rawWrites = append(c.rawWrites, append([]byte(nil), payload...))
 		var parsed map[string]any
 		if err := json.Unmarshal(payload, &parsed); err == nil {
 			c.lastWrite = cloneMapStringAny(parsed)
 			c.writes = append(c.writes, cloneMapStringAny(parsed))
 		}
 	case []byte:
+		c.lastRawWrite = append([]byte(nil), payload...)
+		c.rawWrites = append(c.rawWrites, append([]byte(nil), payload...))
 		var parsed map[string]any
 		if err := json.Unmarshal(payload, &parsed); err == nil {
 			c.lastWrite = cloneMapStringAny(parsed)

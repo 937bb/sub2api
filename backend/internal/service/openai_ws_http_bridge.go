@@ -2,6 +2,7 @@ package service
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -14,6 +15,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 const (
@@ -52,18 +54,33 @@ func (s *OpenAIGatewayService) shouldBridgeOpenAIWSHTTP(payloadBytes int, previo
 }
 
 func prepareOpenAIWSHTTPBridgeBody(payload []byte) ([]byte, error) {
-	var body map[string]any
+	var body map[string]json.RawMessage
 	if err := json.Unmarshal(payload, &body); err != nil {
 		return nil, err
 	}
 	if body == nil {
 		return nil, errors.New("response.create payload must be a JSON object")
 	}
-	delete(body, "type")
-	delete(body, "generate")
-	delete(body, "previous_response_id")
-	body["stream"] = true
-	return json.Marshal(body)
+
+	// Bridge 只做协议字段转换；用 raw JSON patch 避免 OAuth 终端 allowlist 前已把大整数舍入。
+	out := bytes.TrimSpace(payload)
+	for _, field := range []string{"type", "generate", "previous_response_id"} {
+		for i := 0; i < openAIWSMaxPrevResponseIDDeletePasses && gjson.GetBytes(out, field).Exists(); i++ {
+			next, err := sjson.DeleteBytes(out, field)
+			if err != nil {
+				return nil, err
+			}
+			if bytes.Equal(next, out) {
+				break
+			}
+			out = next
+		}
+	}
+	out, err := sjson.SetBytes(out, "stream", true)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 type openAIWSToolCallReplayCollector struct {

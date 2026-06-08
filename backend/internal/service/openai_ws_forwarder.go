@@ -1265,15 +1265,112 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 	return headers, sessionResolution
 }
 
+var wsallowlistFields = []string{
+	"type",
+	"model",
+	"instructions",
+	"previous_response_id",
+	"input",
+	"tools",
+	"tool_choice",
+	"parallel_tool_calls",
+	"reasoning",
+	"store",
+	"stream",
+	"include",
+	"service_tier",
+	"prompt_cache_key",
+	"text",
+	"generate",
+	"client_metadata",
+}
+
+var wsallowlist = map[string]struct{}{
+	"type":                 {},
+	"model":                {},
+	"instructions":         {},
+	"previous_response_id": {},
+	"input":                {},
+	"tools":                {},
+	"tool_choice":          {},
+	"parallel_tool_calls":  {},
+	"reasoning":            {},
+	"store":                {},
+	"stream":               {},
+	"include":              {},
+	"service_tier":         {},
+	"prompt_cache_key":     {},
+	"text":                 {},
+	"generate":             {},
+	"client_metadata":      {},
+}
+
+func filterOpenAIWSAllowlist(payload map[string]any) map[string]any {
+	filtered := make(map[string]any, len(wsallowlist))
+	for k, v := range payload {
+		if _, ok := wsallowlist[k]; ok {
+			filtered[k] = v
+		}
+	}
+	return filtered
+}
+
+func applyOpenAIOAuthWSAllowlist(payload map[string]any, account *Account) map[string]any {
+	if account == nil || !account.IsOpenAIOAuth() {
+		return payload
+	}
+	return filterOpenAIWSAllowlist(payload)
+}
+
+func normalizeOpenAIWSResponseCreateTypeRaw(payload []byte) ([]byte, error) {
+	if len(payload) == 0 || !gjson.ValidBytes(payload) {
+		return payload, nil
+	}
+	if strings.TrimSpace(gjson.GetBytes(payload, "type").String()) != "" {
+		return payload, nil
+	}
+	if strings.TrimSpace(gjson.GetBytes(payload, "model").String()) == "" {
+		return payload, nil
+	}
+	updated, err := sjson.SetBytes(payload, "type", "response.create")
+	if err != nil {
+		return payload, fmt.Errorf("normalize ws response.create type: %w", err)
+	}
+	return updated, nil
+}
+
+func applyOpenAIOAuthWSAllowlistRaw(payload []byte, account *Account) ([]byte, error) {
+	if account == nil || !account.IsOpenAIOAuth() || len(payload) == 0 {
+		return payload, nil
+	}
+	if !gjson.ValidBytes(payload) || strings.TrimSpace(gjson.GetBytes(payload, "type").String()) != "response.create" {
+		return payload, nil
+	}
+	filtered := []byte(`{}`)
+	for _, field := range wsallowlistFields {
+		value := gjson.GetBytes(payload, field)
+		if !value.Exists() {
+			continue
+		}
+		next, err := sjson.SetRawBytes(filtered, field, []byte(value.Raw))
+		if err != nil {
+			return payload, fmt.Errorf("filter oauth ws payload %s: %w", field, err)
+		}
+		filtered = next
+	}
+	return filtered, nil
+}
+
 func (s *OpenAIGatewayService) buildOpenAIWSCreatePayload(reqBody map[string]any, account *Account) map[string]any {
-	// OpenAI WS Mode 协议：response.create 字段与 HTTP /responses 基本一致。
-	// 保留 stream 字段（与 Codex CLI 一致），仅移除 background。
+	// OpenAI WS Mode 协议：response.create 字段与 Codex CLI 的 WS schema 对齐。
 	payload := make(map[string]any, len(reqBody)+2)
 	for k, v := range reqBody {
 		payload[k] = v
 	}
 
-	delete(payload, "background")
+	if account == nil || !account.IsOpenAIOAuth() {
+		delete(payload, "background")
+	}
 	if _, exists := payload["stream"]; !exists {
 		payload["stream"] = true
 	}
@@ -1283,7 +1380,7 @@ func (s *OpenAIGatewayService) buildOpenAIWSCreatePayload(reqBody map[string]any
 	if account != nil && account.Type == AccountTypeOAuth && !s.isOpenAIWSStoreRecoveryAllowed(account) {
 		payload["store"] = false
 	}
-	return payload
+	return applyOpenAIOAuthWSAllowlist(payload, account)
 }
 
 func setOpenAIWSTurnMetadata(payload map[string]any, turnMetadata string) {
@@ -2733,9 +2830,16 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		imageGenerationAllowed := GroupAllowsImageGeneration(apiKeyGroup(apiKey))
 		codexBridgeEnabled := isCodexCLI && imageGenerationAllowed && s.isCodexImageGenerationBridgeEnabled(ctx, account, apiKey)
 		if codexBridgeEnabled {
-			payloadMap := make(map[string]any)
-			if err := json.Unmarshal(normalized, &payloadMap); err != nil {
-				return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", err)
+			var payloadMap map[string]any
+			var decodeErr error
+			if account != nil && account.IsOpenAIOAuth() {
+				payloadMap, decodeErr = decodeOpenAIRequestBodyMapUseNumber(normalized)
+			} else {
+				payloadMap = make(map[string]any)
+				decodeErr = json.Unmarshal(normalized, &payloadMap)
+			}
+			if decodeErr != nil {
+				return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", decodeErr)
 			}
 			bridgeModified := false
 			if ensureOpenAIResponsesImageGenerationTool(payloadMap) {
@@ -2843,6 +2947,16 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			imageInputSize:     imageInputSize,
 			payloadBytes:       len(normalized),
 		}, nil
+	}
+
+	applyOAuthWSAllowlistToIngressPayload := func(payload openAIWSClientPayload) (openAIWSClientPayload, error) {
+		filtered, filterErr := applyOpenAIOAuthWSAllowlistRaw(payload.payloadRaw, account)
+		if filterErr != nil {
+			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", filterErr)
+		}
+		payload.payloadRaw = filtered
+		payload.payloadBytes = len(filtered)
+		return payload, nil
 	}
 
 	writeClientMessage := func(message []byte) error {
@@ -3022,6 +3136,12 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			currentBridgePayload = nextPayload
 		}
 	}
+
+	firstPayload, err = applyOAuthWSAllowlistToIngressPayload(firstPayload)
+	if err != nil {
+		return err
+	}
+	refreshIngressRouteState(firstPayload)
 
 	fallbackSessionID := fallbackOpenAICodexSessionID(c, account, firstPayload.rawForHash)
 	wsHeaders, _ := s.buildOpenAIWSHeaders(c, account, token, wsDecision, isCodexCLI, turnState, strings.TrimSpace(c.GetHeader(openAIWSTurnMetadataHeader)), firstPayload.promptCacheKey, fallbackSessionID)
@@ -3994,6 +4114,10 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}
 
 		nextPayload, parseErr := parseClientPayload(nextClientMessage)
+		if parseErr != nil {
+			return parseErr
+		}
+		nextPayload, parseErr = applyOAuthWSAllowlistToIngressPayload(nextPayload)
 		if parseErr != nil {
 			return parseErr
 		}

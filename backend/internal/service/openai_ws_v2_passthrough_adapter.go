@@ -246,6 +246,13 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	if strings.TrimSpace(token) == "" {
 		return errors.New("token is empty")
 	}
+	if account.IsOpenAIOAuth() {
+		var normalizeErr error
+		firstClientMessage, normalizeErr = normalizeOpenAIWSResponseCreateTypeRaw(firstClientMessage)
+		if normalizeErr != nil {
+			return fmt.Errorf("normalize first ws response.create frame: %w", normalizeErr)
+		}
+	}
 	requestModel := strings.TrimSpace(gjson.GetBytes(firstClientMessage, "model").String())
 	requestPreviousResponseID := strings.TrimSpace(gjson.GetBytes(firstClientMessage, "previous_response_id").String())
 	logOpenAIWSV2Passthrough(
@@ -297,6 +304,10 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, blocked.Message, blocked)
 	}
 	firstClientMessage = updatedFirst
+	firstClientMessage, policyErr = applyOpenAIOAuthWSAllowlistRaw(firstClientMessage, account)
+	if policyErr != nil {
+		return fmt.Errorf("apply oauth ws allowlist on first ws frame: %w", policyErr)
+	}
 
 	// 在 policy filter 之后再提取 service_tier / reasoning_effort 用于
 	// usage 上报：filter
@@ -398,8 +409,15 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		// capturedSessionModel 的读写都发生在该 goroutine 内，因此无需
 		// 加锁/原子化。
 		filter: func(msgType coderws.MessageType, payload []byte) ([]byte, *OpenAIFastBlockedError, error) {
-			if msgType != coderws.MessageText {
+			if msgType != coderws.MessageText && (!account.IsOpenAIOAuth() || msgType != coderws.MessageBinary) {
 				return payload, nil, nil
+			}
+			if account.IsOpenAIOAuth() {
+				normalizedPayload, frameNormalizeErr := normalizeOpenAIWSResponseCreateTypeRaw(payload)
+				if frameNormalizeErr != nil {
+					return payload, nil, fmt.Errorf("normalize ws response.create frame: %w", frameNormalizeErr)
+				}
+				payload = normalizedPayload
 			}
 			if strings.TrimSpace(gjson.GetBytes(payload, "type").String()) == "response.create" && hooks != nil && hooks.BeforeRequest != nil {
 				turnNo := int(completedTurns.Load()) + 1
@@ -436,6 +454,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				model = capturedSessionModel
 			}
 			out, blocked, policyErr := s.applyOpenAIFastPolicyToWSResponseCreate(ctx, account, model, payload)
+			if policyErr == nil && blocked == nil {
+				out, policyErr = applyOpenAIOAuthWSAllowlistRaw(out, account)
+			}
 			// 多轮 passthrough usage：仅在成功（non-block / non-err）
 			// 的 response.create 帧上更新 usageMeta，使用
 			// filter 处理后的 payload，与首帧 policy-after-extract 语义
@@ -489,7 +510,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			if readErr != nil {
 				return msgType, payload, readErr
 			}
-			if msgType == coderws.MessageText && strings.TrimSpace(gjson.GetBytes(payload, "type").String()) == "response.create" {
+			if (msgType == coderws.MessageText || (account.IsOpenAIOAuth() && msgType == coderws.MessageBinary)) && strings.TrimSpace(gjson.GetBytes(payload, "type").String()) == "response.create" {
 				return msgType, payload, nil
 			}
 			if writeErr := upstreamFrameConn.WriteFrame(readCtx, msgType, payload); writeErr != nil {
