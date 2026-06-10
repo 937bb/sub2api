@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/require"
 )
 
@@ -25,4 +26,11 @@ func TestAffiliateRecordQueriesUseLedgerAuditFields(t *testing.T) {
 	require.Contains(t, content, "ual.balance_after::double precision")
 	require.NotContains(t, content, "parseAffiliateRebateAmount")
 	require.NotContains(t, content, `"current_balance": "u.balance"`)
+}
+
+func TestIsAffiliateUniqueViolationTypedNilPgError(t *testing.T) {
+	var pgErr *pgconn.PgError
+	var err error = pgErr
+
+	require.False(t, isAffiliateUniqueViolation(err))
 }

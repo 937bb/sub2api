@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
-	"github.com/lib/pq"
 )
 
 type opsRepository struct {
@@ -669,23 +668,25 @@ func (r *opsRepository) BatchInsertSystemLogs(ctx context.Context, inputs []*ser
 	if err != nil {
 		return 0, err
 	}
-	stmt, err := tx.PrepareContext(ctx, pq.CopyIn(
-		"ops_system_logs",
-		"created_at",
-		"level",
-		"component",
-		"message",
-		"request_id",
-		"client_request_id",
-		"user_id",
-		"account_id",
-		"platform",
-		"model",
-		"extra",
-	))
-	if err != nil {
-		_ = tx.Rollback()
-		return 0, err
+
+	const batchSize = 500
+	values := make([]string, 0, batchSize)
+	args := make([]any, 0, batchSize*11)
+	flush := func() (int64, error) {
+		if len(values) == 0 {
+			return 0, nil
+		}
+		query := `INSERT INTO ops_system_logs (
+			created_at, level, component, message, request_id, client_request_id,
+			user_id, account_id, platform, model, extra
+		) VALUES ` + strings.Join(values, ",")
+		count := int64(len(values))
+		if _, err := tx.ExecContext(ctx, query, args...); err != nil {
+			return 0, err
+		}
+		values = values[:0]
+		args = args[:0]
+		return count, nil
 	}
 
 	var inserted int64
@@ -710,8 +711,13 @@ func (r *opsRepository) BatchInsertSystemLogs(ctx context.Context, inputs []*ser
 		if extra == "" {
 			extra = "{}"
 		}
-		if _, err := stmt.ExecContext(
-			ctx,
+
+		base := len(args)
+		values = append(values, fmt.Sprintf(
+			"($%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d::jsonb)",
+			base+1, base+2, base+3, base+4, base+5, base+6, base+7, base+8, base+9, base+10, base+11,
+		))
+		args = append(args,
 			createdAt.UTC(),
 			level,
 			component,
@@ -723,23 +729,23 @@ func (r *opsRepository) BatchInsertSystemLogs(ctx context.Context, inputs []*ser
 			opsNullString(input.Platform),
 			opsNullString(input.Model),
 			extra,
-		); err != nil {
-			_ = stmt.Close()
-			_ = tx.Rollback()
-			return inserted, err
+		)
+		if len(values) >= batchSize {
+			count, err := flush()
+			if err != nil {
+				_ = tx.Rollback()
+				return inserted, err
+			}
+			inserted += count
 		}
-		inserted++
 	}
 
-	if _, err := stmt.ExecContext(ctx); err != nil {
-		_ = stmt.Close()
+	count, err := flush()
+	if err != nil {
 		_ = tx.Rollback()
 		return inserted, err
 	}
-	if err := stmt.Close(); err != nil {
-		_ = tx.Rollback()
-		return inserted, err
-	}
+	inserted += count
 	if err := tx.Commit(); err != nil {
 		return inserted, err
 	}
@@ -982,12 +988,12 @@ func buildOpsErrorLogsWhere(filter *service.OpsErrorLogFilter) (string, []any) {
 		clauses = append(clauses, "COALESCE(e.is_business_limited,false) = false")
 	}
 	if len(filter.StatusCodes) > 0 {
-		args = append(args, pq.Array(filter.StatusCodes))
+		args = append(args, filter.StatusCodes)
 		clauses = append(clauses, "COALESCE(e.upstream_status_code, e.status_code, 0) = ANY($"+itoa(len(args))+")")
 	} else if filter.StatusCodesOther {
 		// "Other" means: status codes not in the common list.
 		known := []int{400, 401, 403, 404, 409, 422, 429, 500, 502, 503, 504, 529}
-		args = append(args, pq.Array(known))
+		args = append(args, known)
 		clauses = append(clauses, "NOT (COALESCE(e.upstream_status_code, e.status_code, 0) = ANY($"+itoa(len(args))+"))")
 	}
 	// Exact correlation keys (preferred for request↔upstream linkage).
@@ -1041,11 +1047,11 @@ func buildOpsErrorLogsWhere(filter *service.OpsErrorLogFilter) (string, []any) {
 		clauses = append(clauses, "COALESCE(e.is_count_tokens, false) = false")
 	}
 	if len(filter.ErrorPhasesAny) > 0 {
-		args = append(args, pq.Array(filter.ErrorPhasesAny))
+		args = append(args, filter.ErrorPhasesAny)
 		clauses = append(clauses, "e.error_phase = ANY($"+itoa(len(args))+")")
 	}
 	if len(filter.ErrorTypesAny) > 0 {
-		args = append(args, pq.Array(filter.ErrorTypesAny))
+		args = append(args, filter.ErrorTypesAny)
 		clauses = append(clauses, "e.error_type = ANY($"+itoa(len(args))+")")
 	}
 

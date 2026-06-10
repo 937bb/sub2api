@@ -10,7 +10,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
 	"github.com/Wei-Shaw/sub2api/internal/service"
-	"github.com/lib/pq"
+	"github.com/jackc/pgx/v5/stdlib"
 )
 
 type dashboardAggregationRepository struct {
@@ -40,7 +40,7 @@ func isPostgresDriver(db *sql.DB) bool {
 	if db == nil {
 		return false
 	}
-	_, ok := db.Driver().(*pq.Driver)
+	_, ok := db.Driver().(*stdlib.Driver)
 	return ok
 }
 
@@ -509,7 +509,7 @@ func (r *dashboardAggregationRepository) dropUsageLogsPartitions(ctx context.Con
 		}
 		month = month.UTC()
 		if month.Before(cutoffMonth) {
-			if _, err := r.sql.ExecContext(ctx, fmt.Sprintf("DROP TABLE IF EXISTS %s", pq.QuoteIdentifier(name))); err != nil {
+			if _, err := r.sql.ExecContext(ctx, fmt.Sprintf("DROP TABLE IF EXISTS %s", quotePostgresIdentifier(name))); err != nil {
 				return err
 			}
 		}
@@ -523,12 +523,20 @@ func (r *dashboardAggregationRepository) createUsageLogsPartition(ctx context.Co
 	name := fmt.Sprintf("usage_logs_%s", monthStart.Format("200601"))
 	query := fmt.Sprintf(
 		"CREATE TABLE IF NOT EXISTS %s PARTITION OF usage_logs FOR VALUES FROM (%s) TO (%s)",
-		pq.QuoteIdentifier(name),
-		pq.QuoteLiteral(monthStart.Format("2006-01-02")),
-		pq.QuoteLiteral(nextMonth.Format("2006-01-02")),
+		quotePostgresIdentifier(name),
+		quotePostgresLiteral(monthStart.Format("2006-01-02")),
+		quotePostgresLiteral(nextMonth.Format("2006-01-02")),
 	)
 	_, err := r.sql.ExecContext(ctx, query)
 	return err
+}
+
+func quotePostgresIdentifier(name string) string {
+	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
+}
+
+func quotePostgresLiteral(value string) string {
+	return `'` + strings.ReplaceAll(value, `'`, `''`) + `'`
 }
 
 func truncateToDay(t time.Time) time.Time {
