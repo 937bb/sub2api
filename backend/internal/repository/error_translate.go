@@ -85,6 +85,9 @@ func isUniqueConstraintViolation(err error) bool {
 	// 参考：https://www.postgresql.org/docs/current/errcodes-appendix.html
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) {
+		if pgErr == nil {
+			return false
+		}
 		return pgErr.Code == "23505"
 	}
 

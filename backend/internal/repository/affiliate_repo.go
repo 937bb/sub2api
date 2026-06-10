@@ -971,8 +971,8 @@ func generateAffiliateCode() (string, error) {
 
 func isAffiliateUniqueViolation(err error) bool {
 	var pqErr *pgconn.PgError
-	if errors.As(err, &pqErr) {
-		return string(pqErr.Code) == "23505"
+	if errors.As(err, &pqErr) && pqErr != nil {
+		return pqErr.Code == "23505"
 	}
 	return false
 }

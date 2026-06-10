@@ -30,7 +30,7 @@ func (r *channelRepository) batchLoadAccountStatsPricingRules(ctx context.Contex
 		var rule service.AccountStatsPricingRule
 		if err := rows.Scan(
 			&rule.ID, &rule.ChannelID, &rule.Name,
-			&rule.GroupIDs, &rule.AccountIDs,
+			scanPostgresInt64Array(&rule.GroupIDs), scanPostgresInt64Array(&rule.AccountIDs),
 			&rule.SortOrder, &rule.CreatedAt, &rule.UpdatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan account stats pricing rule: %w", err)
@@ -151,7 +151,7 @@ func createAccountStatsPricingRuleTx(ctx context.Context, tx *sql.Tx, rule *serv
 	err := tx.QueryRowContext(ctx,
 		`INSERT INTO channel_account_stats_pricing_rules (channel_id, name, group_ids, account_ids, sort_order)
 		 VALUES ($1, $2, $3, $4, $5) RETURNING id, created_at, updated_at`,
-		rule.ChannelID, rule.Name, rule.GroupIDs, rule.AccountIDs, rule.SortOrder,
+		rule.ChannelID, rule.Name, postgresInt64Array(rule.GroupIDs), postgresInt64Array(rule.AccountIDs), rule.SortOrder,
 	).Scan(&rule.ID, &rule.CreatedAt, &rule.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("insert account stats pricing rule: %w", err)
