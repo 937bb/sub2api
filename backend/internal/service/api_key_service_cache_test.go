@@ -277,6 +277,41 @@ func TestAPIKeyService_SnapshotRoundTrip_PreservesMessagesDispatchModelConfig(t 
 	require.Equal(t, apiKey.Group.MessagesDispatchModelConfig, roundTrip.Group.MessagesDispatchModelConfig)
 }
 
+func TestAPIKeyService_SnapshotRoundTrip_PreservesRequirePrivacySet(t *testing.T) {
+	svc := NewAPIKeyService(nil, nil, nil, nil, nil, nil, &config.Config{})
+	groupID := int64(10)
+	apiKey := &APIKey{
+		ID:      1,
+		UserID:  2,
+		GroupID: &groupID,
+		Key:     "k-privacy",
+		Status:  StatusActive,
+		User: &User{
+			ID:          2,
+			Status:      StatusActive,
+			Role:        RoleUser,
+			Balance:     10,
+			Concurrency: 3,
+		},
+		Group: &Group{
+			ID:                groupID,
+			Name:              "openai-privacy",
+			Platform:          PlatformOpenAI,
+			Status:            StatusActive,
+			SubscriptionType:  SubscriptionTypeStandard,
+			RateMultiplier:    1,
+			RequirePrivacySet: true,
+		},
+	}
+
+	snapshot := svc.snapshotFromAPIKey(context.Background(), apiKey)
+	roundTrip := svc.snapshotToAPIKey(apiKey.Key, snapshot)
+
+	require.NotNil(t, roundTrip)
+	require.NotNil(t, roundTrip.Group)
+	require.True(t, roundTrip.Group.RequirePrivacySet)
+}
+
 func TestAPIKeyService_SnapshotRoundTrip_PreservesOpenAIForcePriorityTier(t *testing.T) {
 	svc := NewAPIKeyService(nil, nil, nil, nil, nil, nil, &config.Config{})
 	apiKey := &APIKey{

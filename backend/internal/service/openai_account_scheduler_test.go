@@ -1996,6 +1996,384 @@ func TestOpenAIGatewayService_SchedulerWrappersAndDefaults(t *testing.T) {
 	require.Equal(t, 0.6, customWeights.TTFT)
 }
 
+type openAIPrivacySchedulerAccountRepo struct {
+	schedulerTestOpenAIAccountRepo
+	getByIDErr  error
+	setErrorIDs []int64
+}
+
+func (r *openAIPrivacySchedulerAccountRepo) GetByID(ctx context.Context, id int64) (*Account, error) {
+	if r.getByIDErr != nil {
+		return nil, r.getByIDErr
+	}
+	return r.schedulerTestOpenAIAccountRepo.GetByID(ctx, id)
+}
+
+func (r *openAIPrivacySchedulerAccountRepo) SetError(ctx context.Context, id int64, errorMsg string) error {
+	r.setErrorIDs = append(r.setErrorIDs, id)
+	return nil
+}
+
+type openAIPrivacySchedulerGroupRepo struct {
+	GroupRepository
+	group *Group
+}
+
+func (r openAIPrivacySchedulerGroupRepo) GetByID(ctx context.Context, id int64) (*Group, error) {
+	if r.group == nil || r.group.ID != id {
+		return nil, ErrGroupNotFound
+	}
+	group := *r.group
+	return &group, nil
+}
+
+func TestOpenAIGatewayService_OpenAIAPIKeyAndSetupTokenBypassPrivacyDBRefresh(t *testing.T) {
+	ctx := context.Background()
+	group := &Group{ID: 10189, Name: "privacy-required", Platform: PlatformOpenAI, RequirePrivacySet: true}
+	repo := &openAIPrivacySchedulerAccountRepo{getByIDErr: errors.New("db unavailable")}
+	svc := &OpenAIGatewayService{
+		accountRepo:        repo,
+		schedulerSnapshot:  NewSchedulerSnapshotService(nil, nil, repo, nil, nil),
+		rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("true"),
+		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
+	}
+
+	for _, accountType := range []string{AccountTypeAPIKey, AccountTypeSetupToken} {
+		t.Run(accountType, func(t *testing.T) {
+			account := &Account{
+				ID:          9100,
+				Platform:    PlatformOpenAI,
+				Type:        accountType,
+				Status:      StatusActive,
+				Schedulable: true,
+			}
+
+			got, ok := svc.resolveOpenAIAccountForPrivacyRequirement(ctx, account, group)
+
+			require.True(t, ok)
+			require.Same(t, account, got)
+			require.Empty(t, repo.setErrorIDs)
+		})
+	}
+}
+
+func TestDefaultOpenAIAccountScheduler_SetupTokenBypassesRequirePrivacySetWithoutClaimingPrivacy(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(10190)
+	setupToken := Account{
+		ID:          9102,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeSetupToken,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    1,
+	}
+	require.False(t, setupToken.IsPrivacySet(), "setup-token must not claim full OAuth privacy state")
+
+	repo := &openAIPrivacySchedulerAccountRepo{
+		schedulerTestOpenAIAccountRepo: schedulerTestOpenAIAccountRepo{accounts: []Account{
+			{
+				ID:          9101,
+				Platform:    PlatformOpenAI,
+				Type:        AccountTypeOAuth,
+				Status:      StatusActive,
+				Schedulable: true,
+				Concurrency: 1,
+				Priority:    0,
+			},
+			setupToken,
+		}},
+	}
+	snapshot := NewSchedulerSnapshotService(nil, nil, repo, openAIPrivacySchedulerGroupRepo{group: &Group{
+		ID:                groupID,
+		Name:              "privacy-required",
+		Platform:          PlatformOpenAI,
+		RequirePrivacySet: true,
+	}}, nil)
+	scheduler := &defaultOpenAIAccountScheduler{service: &OpenAIGatewayService{
+		accountRepo:       repo,
+		schedulerSnapshot: snapshot,
+	}}
+
+	selection, decision, err := scheduler.Select(ctx, OpenAIAccountScheduleRequest{GroupID: &groupID, RequestedModel: "gpt-5.4"})
+
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.Account)
+	require.Equal(t, int64(9102), selection.Account.ID)
+	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
+	require.Equal(t, []int64{9101}, repo.setErrorIDs, "full OAuth without privacy remains blocked by require_privacy_set")
+}
+
+func TestDefaultOpenAIAccountScheduler_PreviousResponseHonorsRequirePrivacySet(t *testing.T) {
+	resetOpenAIAdvancedSchedulerSettingCacheForTest()
+
+	ctx := context.Background()
+	groupID := int64(10191)
+	fullOAuth := Account{
+		ID:          9111,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    0,
+		Extra: map[string]any{
+			"openai_oauth_ws_mode": OpenAIOAuthWSModeManagedSession,
+		},
+	}
+	setupToken := Account{
+		ID:          9112,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeSetupToken,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    1,
+	}
+
+	repo := &openAIPrivacySchedulerAccountRepo{
+		schedulerTestOpenAIAccountRepo: schedulerTestOpenAIAccountRepo{accounts: []Account{fullOAuth, setupToken}},
+	}
+	snapshot := NewSchedulerSnapshotService(nil, nil, repo, openAIPrivacySchedulerGroupRepo{group: &Group{
+		ID:                groupID,
+		Name:              "privacy-required-previous",
+		Platform:          PlatformOpenAI,
+		RequirePrivacySet: true,
+	}}, nil)
+	cfg := newSchedulerTestOpenAIWSV2Config()
+	svc := &OpenAIGatewayService{
+		accountRepo:        repo,
+		cache:              &schedulerTestGatewayCache{},
+		cfg:                cfg,
+		rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("true"),
+		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
+		schedulerSnapshot:  snapshot,
+	}
+	store := svc.getOpenAIWSStateStore()
+	require.NoError(t, store.BindResponseAccount(ctx, groupID, "resp_privacy_previous", fullOAuth.ID, time.Hour))
+
+	selection, decision, err := svc.SelectAccountWithScheduler(
+		ctx,
+		&groupID,
+		"resp_privacy_previous",
+		"",
+		"gpt-5.4",
+		nil,
+		OpenAIUpstreamTransportAny,
+		false,
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.Account)
+	require.Equal(t, setupToken.ID, selection.Account.ID)
+	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
+	require.False(t, decision.StickyPreviousHit)
+	boundAccountID, err := store.GetResponseAccount(ctx, groupID, "resp_privacy_previous")
+	require.NoError(t, err)
+	require.Zero(t, boundAccountID, "privacy rejection must clear stale previous_response_id binding")
+	require.Equal(t, []int64{fullOAuth.ID}, repo.setErrorIDs)
+}
+
+func TestDefaultOpenAIAccountScheduler_RequirePrivacySetUsesDBBeforeBlockingStaleSnapshot(t *testing.T) {
+	resetOpenAIAdvancedSchedulerSettingCacheForTest()
+
+	ctx := context.Background()
+	groupID := int64(10194)
+	staleFullOAuth := &Account{
+		ID:          9141,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    0,
+	}
+	freshFullOAuth := *staleFullOAuth
+	freshFullOAuth.Extra = map[string]any{"privacy_mode": PrivacyModeTrainingOff}
+	setupToken := Account{
+		ID:       9142,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeSetupToken,
+		Status:   StatusActive,
+		// Keep this present but unavailable so the stale-OAuth regression is not
+		// randomized by the valid setup-token privacy bypass path.
+		Schedulable: false,
+		Concurrency: 1,
+		Priority:    1,
+	}
+
+	repo := &openAIPrivacySchedulerAccountRepo{
+		schedulerTestOpenAIAccountRepo: schedulerTestOpenAIAccountRepo{accounts: []Account{freshFullOAuth, setupToken}},
+	}
+	snapshotCache := &openAISnapshotCacheStub{
+		snapshotAccounts: []*Account{staleFullOAuth, &setupToken},
+		accountsByID: map[int64]*Account{
+			staleFullOAuth.ID: staleFullOAuth,
+			setupToken.ID:     &setupToken,
+		},
+	}
+	snapshot := NewSchedulerSnapshotService(snapshotCache, nil, repo, openAIPrivacySchedulerGroupRepo{group: &Group{
+		ID:                groupID,
+		Name:              "privacy-required-stale-snapshot",
+		Platform:          PlatformOpenAI,
+		RequirePrivacySet: true,
+	}}, nil)
+	svc := &OpenAIGatewayService{
+		accountRepo:        repo,
+		cfg:                &config.Config{},
+		rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("true"),
+		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
+		schedulerSnapshot:  snapshot,
+	}
+
+	selection, decision, err := svc.SelectAccountWithScheduler(
+		ctx,
+		&groupID,
+		"",
+		"",
+		"gpt-5.4",
+		nil,
+		OpenAIUpstreamTransportAny,
+		false,
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.Account)
+	require.Equal(t, freshFullOAuth.ID, selection.Account.ID)
+	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
+	require.Empty(t, repo.setErrorIDs, "stale scheduler snapshots must not mark DB-fresh privacy-set accounts as errored")
+}
+
+func TestDefaultOpenAIAccountScheduler_SessionStickyHonorsRequirePrivacySet(t *testing.T) {
+	resetOpenAIAdvancedSchedulerSettingCacheForTest()
+
+	ctx := context.Background()
+	groupID := int64(10192)
+	fullOAuth := Account{
+		ID:          9121,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    0,
+	}
+	setupToken := Account{
+		ID:          9122,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeSetupToken,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    1,
+	}
+
+	repo := &openAIPrivacySchedulerAccountRepo{
+		schedulerTestOpenAIAccountRepo: schedulerTestOpenAIAccountRepo{accounts: []Account{fullOAuth, setupToken}},
+	}
+	snapshot := NewSchedulerSnapshotService(nil, nil, repo, openAIPrivacySchedulerGroupRepo{group: &Group{
+		ID:                groupID,
+		Name:              "privacy-required-session",
+		Platform:          PlatformOpenAI,
+		RequirePrivacySet: true,
+	}}, nil)
+	cache := &schedulerTestGatewayCache{sessionBindings: map[string]int64{"openai:session_privacy": fullOAuth.ID}}
+	svc := &OpenAIGatewayService{
+		accountRepo:        repo,
+		cache:              cache,
+		cfg:                &config.Config{},
+		rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("true"),
+		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
+		schedulerSnapshot:  snapshot,
+	}
+
+	selection, decision, err := svc.SelectAccountWithScheduler(
+		ctx,
+		&groupID,
+		"",
+		"session_privacy",
+		"gpt-5.4",
+		nil,
+		OpenAIUpstreamTransportAny,
+		false,
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.Account)
+	require.Equal(t, setupToken.ID, selection.Account.ID)
+	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
+	require.False(t, decision.StickySessionHit)
+	require.Equal(t, []int64{fullOAuth.ID}, repo.setErrorIDs)
+}
+
+func TestOpenAIGatewayService_LegacySchedulerHonorsRequirePrivacySet(t *testing.T) {
+	resetOpenAIAdvancedSchedulerSettingCacheForTest()
+
+	ctx := context.Background()
+	groupID := int64(10193)
+	fullOAuth := Account{
+		ID:          9131,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    0,
+	}
+	setupToken := Account{
+		ID:          9132,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeSetupToken,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    1,
+	}
+
+	repo := &openAIPrivacySchedulerAccountRepo{
+		schedulerTestOpenAIAccountRepo: schedulerTestOpenAIAccountRepo{accounts: []Account{fullOAuth, setupToken}},
+	}
+	snapshot := NewSchedulerSnapshotService(nil, nil, repo, openAIPrivacySchedulerGroupRepo{group: &Group{
+		ID:                groupID,
+		Name:              "privacy-required-legacy",
+		Platform:          PlatformOpenAI,
+		RequirePrivacySet: true,
+	}}, nil)
+	cfg := &config.Config{}
+	cfg.Gateway.Scheduling.LoadBatchEnabled = true
+	svc := &OpenAIGatewayService{
+		accountRepo:        repo,
+		cache:              &schedulerTestGatewayCache{},
+		cfg:                cfg,
+		rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("false"),
+		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
+		schedulerSnapshot:  snapshot,
+	}
+
+	selection, decision, err := svc.SelectAccountWithScheduler(
+		ctx,
+		&groupID,
+		"",
+		"",
+		"gpt-5.4",
+		nil,
+		OpenAIUpstreamTransportAny,
+		false,
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.Account)
+	require.Equal(t, setupToken.ID, selection.Account.ID)
+	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
+	require.Equal(t, []int64{fullOAuth.ID}, repo.setErrorIDs)
+}
+
 func TestDefaultOpenAIAccountScheduler_IsAccountTransportCompatible_Branches(t *testing.T) {
 	scheduler := &defaultOpenAIAccountScheduler{}
 	require.True(t, scheduler.isAccountTransportCompatible(nil, OpenAIUpstreamTransportAny))

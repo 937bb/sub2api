@@ -35,8 +35,8 @@ func TestSchedulerCacheSnapshotUsesSlimMetadataButKeepsFullAccount(t *testing.T)
 		Priority:    7,
 		LastUsedAt:  &now,
 		Credentials: map[string]any{
-			"api_key":       "gemini-api-key",
-			"access_token":  "secret-access-token",
+			"api_key":       "present-sensitive-value",
+			"access_token":  "present-sensitive-value",
 			"project_id":    "proj-1",
 			"oauth_type":    "ai_studio",
 			"model_mapping": map[string]any{"gemini-2.5-pro": "gemini-2.5-pro"},
@@ -76,7 +76,8 @@ func TestSchedulerCacheSnapshotUsesSlimMetadataButKeepsFullAccount(t *testing.T)
 
 	got := snapshot[0]
 	require.NotNil(t, got)
-	require.Equal(t, "gemini-api-key", got.GetCredential("api_key"))
+	require.True(t, got.HasCredential("api_key"))
+	require.Empty(t, got.GetCredential("api_key"))
 	require.Equal(t, "proj-1", got.GetCredential("project_id"))
 	require.Equal(t, "ai_studio", got.GetCredential("oauth_type"))
 	require.NotEmpty(t, got.GetModelMapping())
@@ -97,7 +98,7 @@ func TestSchedulerCacheSnapshotUsesSlimMetadataButKeepsFullAccount(t *testing.T)
 	full, err := cache.GetAccount(ctx, account.ID)
 	require.NoError(t, err)
 	require.NotNil(t, full)
-	require.Equal(t, "secret-access-token", full.GetCredential("access_token"))
+	require.Equal(t, "present-sensitive-value", full.GetCredential("access_token"))
 	require.Equal(t, strings.Repeat("x", 4096), full.GetCredential("huge_blob"))
 	require.Len(t, full.AccountGroups, 1)
 	require.NotNil(t, full.AccountGroups[0].Group)

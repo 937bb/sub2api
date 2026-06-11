@@ -14,7 +14,7 @@ import (
 	"github.com/dgraph-io/ristretto"
 )
 
-const apiKeyAuthSnapshotVersion = 12 // v12: custom models_list_config and openai_force_priority_tier override
+const apiKeyAuthSnapshotVersion = 13 // v13: custom models_list_config, priority override, and require_privacy_set
 
 type apiKeyAuthCacheConfig struct {
 	l1Size        int
@@ -272,6 +272,7 @@ func (s *APIKeyService) snapshotFromAPIKey(ctx context.Context, apiKey *APIKey) 
 			MCPXMLInject:                    apiKey.Group.MCPXMLInject,
 			SupportedModelScopes:            apiKey.Group.SupportedModelScopes,
 			AllowMessagesDispatch:           apiKey.Group.AllowMessagesDispatch,
+			RequirePrivacySet:               apiKey.Group.RequirePrivacySet,
 			DefaultMappedModel:              apiKey.Group.DefaultMappedModel,
 			MessagesDispatchModelConfig:     apiKey.Group.MessagesDispatchModelConfig,
 			ModelsListConfig:                apiKey.Group.ModelsListConfig,
@@ -345,6 +346,7 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 			MCPXMLInject:                    snapshot.Group.MCPXMLInject,
 			SupportedModelScopes:            snapshot.Group.SupportedModelScopes,
 			AllowMessagesDispatch:           snapshot.Group.AllowMessagesDispatch,
+			RequirePrivacySet:               snapshot.Group.RequirePrivacySet,
 			DefaultMappedModel:              snapshot.Group.DefaultMappedModel,
 			MessagesDispatchModelConfig:     snapshot.Group.MessagesDispatchModelConfig,
 			ModelsListConfig:                snapshot.Group.ModelsListConfig,

@@ -15,6 +15,7 @@ func TestBuildSchedulerMetadataAccount_KeepsOpenAIWSFlags(t *testing.T) {
 		Platform: service.PlatformOpenAI,
 		Type:     service.AccountTypeOAuth,
 		Extra: map[string]any{
+			"openai_oauth_ws_mode":                         service.OpenAIOAuthWSModeManagedSession,
 			"openai_oauth_responses_websockets_v2_enabled": true,
 			"openai_oauth_responses_websockets_v2_mode":    service.OpenAIWSIngressModePassthrough,
 			"openai_ws_force_http":                         true,
@@ -27,6 +28,7 @@ func TestBuildSchedulerMetadataAccount_KeepsOpenAIWSFlags(t *testing.T) {
 
 	got := buildSchedulerMetadataAccount(account)
 
+	require.Equal(t, service.OpenAIOAuthWSModeManagedSession, got.Extra["openai_oauth_ws_mode"])
 	require.Equal(t, true, got.Extra["openai_oauth_responses_websockets_v2_enabled"])
 	require.Equal(t, service.OpenAIWSIngressModePassthrough, got.Extra["openai_oauth_responses_websockets_v2_mode"])
 	require.Equal(t, true, got.Extra["openai_ws_force_http"])
@@ -80,6 +82,7 @@ func TestBuildSchedulerMetadataAccount_KeepsQuotaAutoPauseFields(t *testing.T) {
 	account := service.Account{
 		ID: 88,
 		Extra: map[string]any{
+			"privacy_mode":                 service.PrivacyModeTrainingOff,
 			"codex_5h_used_percent":        12.34,
 			"codex_7d_used_percent":        56.78,
 			"codex_5h_reset_at":            "2026-05-29T10:00:00Z",
@@ -96,6 +99,7 @@ func TestBuildSchedulerMetadataAccount_KeepsQuotaAutoPauseFields(t *testing.T) {
 
 	got := buildSchedulerMetadataAccount(account)
 
+	require.Equal(t, service.PrivacyModeTrainingOff, got.Extra["privacy_mode"])
 	require.Equal(t, 12.34, got.Extra["codex_5h_used_percent"])
 	require.Equal(t, 56.78, got.Extra["codex_7d_used_percent"])
 	require.Equal(t, "2026-05-29T10:00:00Z", got.Extra["codex_5h_reset_at"])
@@ -133,4 +137,61 @@ func TestBuildSchedulerMetadataAccount_KeepsModelRateLimits(t *testing.T) {
 	require.Contains(t, limits, "gemini-3-flash")
 	require.Contains(t, limits, "antigravity:gemini")
 	require.Nil(t, got.Extra["unused_large_field"])
+}
+
+func TestBuildSchedulerMetadataAccount_DropsSensitiveCredentials(t *testing.T) {
+	account := service.Account{
+		ID:       91,
+		Platform: service.PlatformOpenAI,
+		Type:     service.AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"model_mapping":       map[string]any{"gpt-5.4": "upstream-model"},
+			"project_id":          "project-visible-for-routing",
+			"oauth_type":          "chatgpt",
+			"openai_capabilities": []any{"chat_completions"},
+			"api_key":             "present-sensitive-value",
+			"access_token":        "present-sensitive-value",
+			"refresh_token":       "present-sensitive-value",
+		},
+	}
+
+	got := buildSchedulerMetadataAccount(account)
+
+	require.Equal(t, map[string]any{"gpt-5.4": "upstream-model"}, got.Credentials["model_mapping"])
+	require.Equal(t, "project-visible-for-routing", got.Credentials["project_id"])
+	require.Equal(t, "chatgpt", got.Credentials["oauth_type"])
+	require.Equal(t, []any{"chat_completions"}, got.Credentials["openai_capabilities"])
+	require.True(t, got.HasCredential("api_key"))
+	require.NotContains(t, got.Credentials, "api_key")
+	require.NotContains(t, got.Credentials, "access_token")
+	require.NotContains(t, got.Credentials, "refresh_token")
+}
+
+func TestBuildSchedulerMetadataAccount_HasAPIKeyRequiresNonEmptyString(t *testing.T) {
+	cases := []struct {
+		name  string
+		value any
+	}{
+		{name: "empty", value: ""},
+		{name: "whitespace", value: "   "},
+		{name: "non string", value: true},
+		{name: "object", value: map[string]any{"present": true}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := buildSchedulerMetadataAccount(service.Account{
+				ID:       92,
+				Platform: service.PlatformOpenAI,
+				Type:     service.AccountTypeAPIKey,
+				Credentials: map[string]any{
+					"api_key": tc.value,
+				},
+			})
+
+			require.False(t, got.HasCredential("api_key"))
+			require.NotContains(t, got.Credentials, "api_key")
+			require.NotContains(t, got.Credentials, "has_api_key")
+		})
+	}
 }

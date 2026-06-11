@@ -24,7 +24,7 @@ func openAIAccountStateContext(ctx context.Context) (context.Context, context.Ca
 }
 
 func isOpenAIOAuthAccount(account *Account) bool {
-	return account != nil && account.Platform == PlatformOpenAI && account.Type == AccountTypeOAuth
+	return account != nil && account.IsOpenAIOAuthLike()
 }
 
 func isOpenAIAccount(account *Account) bool {

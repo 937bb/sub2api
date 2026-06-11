@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestOpenAIGatewayService_SelectAccountWithScheduler_UsesWSPassthroughSnapshotFlags(t *testing.T) {
+func TestOpenAIGatewayService_SelectAccountWithScheduler_UsesOAuthManagedSessionSnapshotFlags(t *testing.T) {
 	ctx := context.Background()
 	groupID := int64(10105)
 	account := &Account{
@@ -21,7 +21,7 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_UsesWSPassthroughSnapsh
 		Schedulable: true,
 		Concurrency: 10,
 		Extra: map[string]any{
-			"openai_oauth_responses_websockets_v2_mode": OpenAIWSIngressModePassthrough,
+			"openai_oauth_ws_mode": OpenAIOAuthWSModeManagedSession,
 		},
 	}
 

@@ -358,6 +358,13 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 		_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, sessionHash)
 		return nil, nil
 	}
+	schedGroup := s.service.resolveOpenAISchedulingGroup(ctx, req.GroupID)
+	var ok bool
+	account, ok = s.service.resolveOpenAIAccountForPrivacyRequirement(ctx, account, schedGroup)
+	if !ok {
+		_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, sessionHash)
+		return nil, nil
+	}
 	if !s.isAccountRequestCompatible(ctx, account, req) {
 		return nil, nil
 	}
@@ -367,6 +374,11 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 	}
 	account = s.service.recheckSelectedOpenAIAccountFromDB(ctx, account, req.RequestedModel, req.RequireCompact, req.RequiredCapability)
 	if account == nil || !s.isAccountTransportCompatible(account, req.RequiredTransport) {
+		_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, sessionHash)
+		return nil, nil
+	}
+	account, ok = s.service.resolveOpenAIAccountForPrivacyRequirement(ctx, account, schedGroup)
+	if !ok {
 		_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, sessionHash)
 		return nil, nil
 	}
@@ -790,6 +802,7 @@ func (s *defaultOpenAIAccountScheduler) tryAcquireOpenAISelectionOrder(
 	selectionOrder []openAIAccountCandidateScore,
 ) (*AccountSelectionResult, bool, error) {
 	compactBlocked := false
+	schedGroup := s.service.resolveOpenAISchedulingGroup(ctx, req.GroupID)
 	for i := 0; i < len(selectionOrder); i++ {
 		candidate := selectionOrder[i]
 		fresh := s.service.resolveFreshSchedulableOpenAIAccount(ctx, candidate.account, req.RequestedModel, false, req.RequiredCapability)
@@ -798,6 +811,11 @@ func (s *defaultOpenAIAccountScheduler) tryAcquireOpenAISelectionOrder(
 		}
 		fresh = s.service.recheckSelectedOpenAIAccountFromDB(ctx, fresh, req.RequestedModel, false, req.RequiredCapability)
 		if fresh == nil || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) || !s.isAccountRequestCompatible(ctx, fresh, req) {
+			continue
+		}
+		var ok bool
+		fresh, ok = s.service.resolveOpenAIAccountForPrivacyRequirement(ctx, fresh, schedGroup)
+		if !ok {
 			continue
 		}
 		if req.RequireCompact && openAICompactSupportTier(fresh) == 0 {
@@ -834,11 +852,7 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 		return nil, 0, 0, 0, noAvailableOpenAISelectionError(req.RequestedModel, false)
 	}
 
-	// require_privacy_set: 获取分组信息
-	var schedGroup *Group
-	if req.GroupID != nil && s.service.schedulerSnapshot != nil {
-		schedGroup, _ = s.service.schedulerSnapshot.GetGroupByID(ctx, *req.GroupID)
-	}
+	schedGroup := s.service.resolveOpenAISchedulingGroup(ctx, req.GroupID)
 
 	filtered := make([]*Account, 0, len(accounts))
 	loadReq := make([]AccountWithConcurrency, 0, len(accounts))
@@ -852,14 +866,12 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 		if !account.IsSchedulable() || !account.IsOpenAI() {
 			continue
 		}
-		if s.service.isOpenAIAccountRuntimeBlocked(account) {
+		var ok bool
+		account, ok = s.service.resolveOpenAIAccountForPrivacyRequirement(ctx, account, schedGroup)
+		if !ok {
 			continue
 		}
-		// require_privacy_set: 跳过 privacy 未设置的账号并标记异常
-		if schedGroup != nil && schedGroup.RequirePrivacySet && !account.IsPrivacySet() {
-			s.service.BlockAccountScheduling(account, time.Time{}, "privacy_not_set")
-			_ = s.service.accountRepo.SetError(ctx, account.ID,
-				fmt.Sprintf("Privacy not set, required by group [%s]", schedGroup.Name))
+		if s.service.isOpenAIAccountRuntimeBlocked(account) {
 			continue
 		}
 		if !s.isAccountRequestCompatible(ctx, account, req) {
@@ -937,6 +949,11 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 		}
 		fresh = s.service.recheckSelectedOpenAIAccountFromDB(ctx, fresh, req.RequestedModel, false, req.RequiredCapability)
 		if fresh == nil || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) || !s.isAccountRequestCompatible(ctx, fresh, req) {
+			continue
+		}
+		var ok bool
+		fresh, ok = s.service.resolveOpenAIAccountForPrivacyRequirement(ctx, fresh, schedGroup)
+		if !ok {
 			continue
 		}
 		if req.RequireCompact && openAICompactSupportTier(fresh) == 0 {

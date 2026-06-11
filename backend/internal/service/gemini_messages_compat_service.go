@@ -514,7 +514,7 @@ func (s *GeminiMessagesCompatService) SelectAccountForAIStudioEndpoints(ctx cont
 		}
 		switch a.Type {
 		case AccountTypeAPIKey:
-			if strings.TrimSpace(a.GetCredential("api_key")) != "" {
+			if a.HasCredential("api_key") {
 				return 0
 			}
 			return 9
