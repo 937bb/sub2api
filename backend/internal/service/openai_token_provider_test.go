@@ -110,6 +110,16 @@ func (r *openAIAccountRepoStub) Update(ctx context.Context, account *Account) er
 	return nil
 }
 
+type openAISetupTokenBoundaryRepoStub struct {
+	AccountRepository
+	setErrorCalls int32
+}
+
+func (r *openAISetupTokenBoundaryRepoStub) SetError(ctx context.Context, id int64, errorMsg string) error {
+	atomic.AddInt32(&r.setErrorCalls, 1)
+	return nil
+}
+
 // openAIOAuthServiceStub implements OpenAIOAuthService methods for testing
 type openAIOAuthServiceStub struct {
 	tokenInfo     *OpenAITokenInfo
@@ -179,6 +189,47 @@ func TestOpenAITokenProvider_CacheMiss_FromCredentials(t *testing.T) {
 	// Should have stored in cache
 	cacheKey := OpenAITokenCacheKey(account)
 	require.Equal(t, "credential-token", cache.tokens[cacheKey])
+}
+
+func TestOpenAITokenProvider_SetupTokenUsesStoredAccessTokenWithoutMissingRefreshDisable(t *testing.T) {
+	repo := &openAISetupTokenBoundaryRepoStub{}
+	expiresAt := time.Now().Add(-1 * time.Hour).Format(time.RFC3339)
+	account := &Account{
+		ID:       112,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeSetupToken,
+		Credentials: map[string]any{
+			"access_token": "setup-access-token",
+			"expires_at":   expiresAt,
+		},
+	}
+
+	provider := NewOpenAITokenProvider(repo, nil, nil)
+	token, err := provider.GetAccessToken(context.Background(), account)
+
+	require.NoError(t, err)
+	require.Equal(t, "setup-access-token", token)
+	require.Zero(t, atomic.LoadInt32(&repo.setErrorCalls), "setup-token must not be disabled as a full OAuth missing-refresh failure")
+}
+
+func TestOpenAITokenProvider_SetupTokenIgnoresStaleCachedOAuthToken(t *testing.T) {
+	cache := newOpenAITokenCacheStub()
+	account := &Account{
+		ID:       113,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeSetupToken,
+		Credentials: map[string]any{
+			"access_token": "setup-access-token",
+		},
+	}
+	cache.tokens[OpenAITokenCacheKey(account)] = "stale-oauth-token"
+
+	provider := NewOpenAITokenProvider(nil, cache, nil)
+	token, err := provider.GetAccessToken(context.Background(), account)
+
+	require.NoError(t, err)
+	require.Equal(t, "setup-access-token", token)
+	require.Equal(t, int32(0), atomic.LoadInt32(&cache.getCalled), "setup-token should read credentials directly instead of any cached OAuth token")
 }
 
 func TestOpenAITokenProvider_TokenRefresh(t *testing.T) {

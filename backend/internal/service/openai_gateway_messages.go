@@ -81,10 +81,10 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	compatContinuationDisabled := compatContinuationEnabled &&
 		s.isOpenAICompatSessionContinuationDisabled(ctx, c, account, promptCacheKey)
 	compatTurnState := ""
-	// OAuth/Plus relies on session_id + x-codex-turn-state; trimming to a
+	// OAuth-like accounts rely on session_id + x-codex-turn-state; trimming to a
 	// sliding 12-message window makes the cached prefix stall at system/tools.
 	// Keep full replay there so upstream prompt caching can grow turn by turn.
-	if compatReplayGuardEnabled && account.Type != AccountTypeOAuth && previousResponseID == "" && !compatContinuationDisabled {
+	if compatReplayGuardEnabled && !account.IsOpenAIOAuthLike() && previousResponseID == "" && !compatContinuationDisabled {
 		compatReplayTrimmed = applyAnthropicCompatFullReplayGuard(&anthropicReq)
 	}
 
@@ -109,7 +109,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		responsesReq.PreviousResponseID = previousResponseID
 		trimAnthropicCompatResponsesInputToLatestTurn(responsesReq)
 	}
-	if compatReplayGuardEnabled && account.Type != AccountTypeOAuth {
+	if compatReplayGuardEnabled && !account.IsOpenAIOAuthLike() {
 		appendOpenAICompatClaudeCodeTodoGuard(responsesReq)
 	}
 
@@ -150,9 +150,9 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		return nil, fmt.Errorf("marshal responses request: %w", err)
 	}
 
-	if account.Type == AccountTypeOAuth {
-		var reqBody map[string]any
-		if err := json.Unmarshal(responsesBody, &reqBody); err != nil {
+	if account.IsOpenAIOAuthLike() {
+		reqBody, err := decodeOpenAIRequestBodyMapUseNumber(responsesBody)
+		if err != nil {
 			return nil, fmt.Errorf("unmarshal for codex transform: %w", err)
 		}
 		codexResult := applyCodexOAuthTransformWithOptions(reqBody, codexOAuthTransformOptions{
@@ -197,7 +197,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		// OAuth codex transform forces stream=true upstream, so always use
 		// the streaming response handler regardless of what the client asked.
 		isStream = true
-		responsesBody, err = json.Marshal(reqBody)
+		responsesBody, err = marshalOpenAIUpstreamJSON(reqBody)
 		if err != nil {
 			return nil, fmt.Errorf("remarshal after codex transform: %w", err)
 		}
@@ -257,7 +257,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	}
 
 	// 6. Build upstream request
-	setOpenAICompatMessagesBridgeContext(c, account.Type == AccountTypeOAuth)
+	setOpenAICompatMessagesBridgeContext(c, account.IsOpenAIOAuthLike())
 	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
 	upstreamReq, err := s.buildUpstreamRequest(upstreamCtx, c, account, responsesBody, token, isStream, promptCacheKey, false)
 	releaseUpstreamCtx()
@@ -274,7 +274,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 			upstreamReq.Header.Set("conversation_id", isolatedSessionID)
 		}
 	}
-	if account.Type == AccountTypeOAuth {
+	if account.IsOpenAIOAuthLike() {
 		// Anthropic Messages compatibility uses the ChatGPT Codex SSE endpoint.
 		// Match airgate-openai's request shape: the SSE endpoint does not need
 		// the Responses experimental beta header, and forcing originator can make
@@ -282,7 +282,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		upstreamReq.Header.Del("OpenAI-Beta")
 		upstreamReq.Header.Del("originator")
 	}
-	if account.Type == AccountTypeOAuth && promptCacheKey != "" && strings.TrimSpace(c.GetHeader("conversation_id")) == "" {
+	if account.IsOpenAIOAuthLike() && promptCacheKey != "" && strings.TrimSpace(c.GetHeader("conversation_id")) == "" {
 		upstreamReq.Header.Del("conversation_id")
 	}
 	if compatTurnState != "" && upstreamReq.Header.Get("x-codex-turn-state") == "" {
@@ -362,7 +362,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		return s.handleAnthropicErrorResponse(resp, c, account, billingModel)
 	}
 
-	if account.Type == AccountTypeOAuth && promptCacheKey != "" {
+	if account.IsOpenAIOAuthLike() && promptCacheKey != "" {
 		if turnState := strings.TrimSpace(resp.Header.Get("x-codex-turn-state")); turnState != "" {
 			s.bindOpenAICompatSessionTurnState(ctx, c, account, promptCacheKey, turnState)
 		}

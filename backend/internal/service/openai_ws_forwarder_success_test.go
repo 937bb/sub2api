@@ -647,7 +647,7 @@ func TestOpenAIGatewayService_Forward_WSv2_OAuthStoreFalseByDefault(t *testing.T
 			"access_token": "oauth-token-1",
 		},
 		Extra: map[string]any{
-			"responses_websockets_v2_enabled": true,
+			"openai_oauth_ws_mode": OpenAIOAuthWSModeManagedSession,
 		},
 	}
 
@@ -791,7 +791,7 @@ func TestOpenAIGatewayService_Forward_WSv2_OAuthOriginatorCompatibility(t *testi
 					"access_token": "oauth-token-1",
 				},
 				Extra: map[string]any{
-					"responses_websockets_v2_enabled": true,
+					"openai_oauth_ws_mode": OpenAIOAuthWSModeManagedSession,
 				},
 			}
 
@@ -852,7 +852,7 @@ func TestOpenAIGatewayService_Forward_WSv2_HeaderSessionFallbackFromPromptCacheK
 			"access_token": "oauth-token-1",
 		},
 		Extra: map[string]any{
-			"responses_websockets_v2_enabled": true,
+			"openai_oauth_ws_mode": OpenAIOAuthWSModeManagedSession,
 		},
 	}
 

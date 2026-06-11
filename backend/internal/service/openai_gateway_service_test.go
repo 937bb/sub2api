@@ -2050,18 +2050,49 @@ func TestOpenAIForwardHTTPDoesNotSendWSCreateFrameFields(t *testing.T) {
 	require.Equal(t, "yes", gjson.GetBytes(upstream.lastBody, "client_metadata.keep").String())
 }
 
-func TestOpenAIBuildUpstreamRequestOpenAIPassthroughPreservesCompactPath(t *testing.T) {
+func TestOpenAIBuildUpstreamRequestNativeOpenAIRelayRejectsOAuth(t *testing.T) {
+	svc := &OpenAIGatewayService{}
+	account := &Account{Type: AccountTypeOAuth}
+
+	req, err := svc.buildUpstreamRequestOpenAIPassthrough(context.Background(), nil, account, []byte(`{"model":"gpt-5"}`), "token")
+
+	require.Nil(t, req)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "requires APIKey account")
+}
+
+func TestOpenAIBuildUpstreamRequestOpenAIOAuthAdapterAcceptsSetupToken(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-5","input":"hello"}`)))
+
+	svc := &OpenAIGatewayService{}
+	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeSetupToken}
+
+	req, err := svc.buildUpstreamRequest(c.Request.Context(), c, account, []byte(`{"model":"gpt-5","input":"hello"}`), "token", false, "", true)
+
+	require.NoError(t, err)
+	require.Equal(t, chatgptCodexURL, req.URL.String())
+	require.Equal(t, codexCLIVersion, req.Header.Get("Version"))
+	require.NotEmpty(t, req.Header.Get("Session_Id"))
+	require.Equal(t, HTTPUpstreamProfileOpenAI, HTTPUpstreamProfileFromContext(req.Context()))
+}
+
+func TestOpenAIBuildUpstreamRequestOpenAIOAuthAdapterPreservesCompactPath(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/compact", bytes.NewReader([]byte(`{"model":"gpt-5"}`)))
 	c.Request.Header.Set(openAICodexSubagentHeader, "compact")
 	c.Request.Header.Set(openAITraceparentHeader, "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
+	c.Request.Header.Set("X-Stainless-Timeout", "1")
 
-	svc := &OpenAIGatewayService{}
-	account := &Account{Type: AccountTypeOAuth}
+	svc := &OpenAIGatewayService{cfg: &config.Config{}}
+	svc.cfg.Gateway.OpenAIPassthroughAllowTimeoutHeaders = true
+	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth}
 
-	req, err := svc.buildUpstreamRequestOpenAIPassthrough(c.Request.Context(), c, account, []byte(`{"model":"gpt-5"}`), "token")
+	req, err := svc.buildUpstreamRequestOpenAIOAuthAdapter(c.Request.Context(), c, account, []byte(`{"model":"gpt-5"}`), "token", "", true)
 	require.NoError(t, err)
 	require.Equal(t, chatgptCodexURL+"/compact", req.URL.String())
 	require.Equal(t, "application/json", req.Header.Get("Accept"))
@@ -2075,6 +2106,7 @@ func TestOpenAIBuildUpstreamRequestOpenAIPassthroughPreservesCompactPath(t *test
 	require.NotEmpty(t, req.Header.Get(openAICodexWindowIDHeader))
 	require.Equal(t, "compact", req.Header.Get(openAICodexSubagentHeader))
 	require.Equal(t, "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01", req.Header.Get(openAITraceparentHeader))
+	require.Empty(t, req.Header.Get("X-Stainless-Timeout"), "OAuth adapter must not use APIKey passthrough timeout-header config")
 	bodyBytes, err := io.ReadAll(req.Body)
 	require.NoError(t, err)
 	require.False(t, gjson.GetBytes(bodyBytes, "client_metadata").Exists())
@@ -2088,6 +2120,7 @@ func TestOpenAIBuildUpstreamRequestCompactForcesJSONAcceptForOAuth(t *testing.T)
 
 	svc := &OpenAIGatewayService{}
 	account := &Account{
+		Platform:    PlatformOpenAI,
 		Type:        AccountTypeOAuth,
 		Credentials: map[string]any{"chatgpt_account_id": "chatgpt-acc"},
 	}
@@ -2120,6 +2153,7 @@ func TestOpenAIBuildUpstreamRequestOAuthAddsCodexIdentityFallbacks(t *testing.T)
 	svc := &OpenAIGatewayService{}
 	account := &Account{
 		ID:          42,
+		Platform:    PlatformOpenAI,
 		Type:        AccountTypeOAuth,
 		Credentials: map[string]any{"chatgpt_account_id": "chatgpt-acc"},
 	}
@@ -2155,6 +2189,7 @@ func TestOpenAIBuildUpstreamRequestOAuthPreservesIncomingDesktopUserAgent(t *tes
 	svc := &OpenAIGatewayService{}
 	account := &Account{
 		ID:          42,
+		Platform:    PlatformOpenAI,
 		Type:        AccountTypeOAuth,
 		Credentials: map[string]any{"chatgpt_account_id": "chatgpt-acc"},
 	}
@@ -2180,6 +2215,7 @@ func TestOpenAIBuildUpstreamRequestOAuthNonOfficialUserAgentUsesConfiguredCodexU
 	}
 	account := &Account{
 		ID:          42,
+		Platform:    PlatformOpenAI,
 		Type:        AccountTypeOAuth,
 		Credentials: map[string]any{"chatgpt_account_id": "chatgpt-acc"},
 	}
@@ -2206,6 +2242,7 @@ func TestOpenAIBuildUpstreamRequestOAuthPreservesCodexReleaseHTTPHeaders(t *test
 	svc := &OpenAIGatewayService{}
 	account := &Account{
 		ID:          42,
+		Platform:    PlatformOpenAI,
 		Type:        AccountTypeOAuth,
 		Credentials: map[string]any{"chatgpt_account_id": "chatgpt-acc"},
 	}
@@ -2232,6 +2269,7 @@ func TestOpenAIBuildUpstreamRequestOAuthMessagesBridgeUsesSessionOnly(t *testing
 
 	svc := &OpenAIGatewayService{}
 	account := &Account{
+		Platform:    PlatformOpenAI,
 		Type:        AccountTypeOAuth,
 		Credentials: map[string]any{"chatgpt_account_id": "chatgpt-acc"},
 	}
@@ -2296,6 +2334,7 @@ func TestOpenAIBuildUpstreamRequestOAuthOfficialClientOriginatorCompatibility(t 
 
 			svc := &OpenAIGatewayService{}
 			account := &Account{
+				Platform:    PlatformOpenAI,
 				Type:        AccountTypeOAuth,
 				Credentials: map[string]any{"chatgpt_account_id": "chatgpt-acc"},
 			}

@@ -22,6 +22,7 @@ func TestOpenAIWSHeadersOAuthAddsCodexIdentityFallbacks(t *testing.T) {
 	svc := &OpenAIGatewayService{}
 	account := &Account{
 		ID:          43,
+		Platform:    PlatformOpenAI,
 		Type:        AccountTypeOAuth,
 		Credentials: map[string]any{"chatgpt_account_id": "chatgpt-acc"},
 	}
@@ -51,6 +52,30 @@ func TestOpenAIWSHeadersOAuthAddsCodexIdentityFallbacks(t *testing.T) {
 	require.Equal(t, headers.Get(openAICodexThreadIDHeader), headers.Get(openAICodexClientRequestIDHeader))
 	require.NotEmpty(t, headers.Get(openAICodexInstallationIDHeader))
 	require.NotEmpty(t, headers.Get(openAICodexWindowIDHeader))
+}
+
+func TestOpenAIWSHeadersOAuthNilContextUsesCodexUserAgent(t *testing.T) {
+	account := &Account{
+		ID:       44,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeSetupToken,
+	}
+	svc := &OpenAIGatewayService{}
+
+	require.NotPanics(t, func() {
+		headers, _ := svc.buildOpenAIWSHeaders(
+			nil,
+			account,
+			"token",
+			OpenAIWSProtocolDecision{Transport: OpenAIUpstreamTransportResponsesWebsocketV2},
+			false,
+			"",
+			"",
+			"",
+			"fallback-session",
+		)
+		require.Equal(t, codexCLIUserAgent, headers.Get("User-Agent"))
+	})
 }
 
 func TestOpenAIWSCodexClientMetadataIncludesRequestStart(t *testing.T) {

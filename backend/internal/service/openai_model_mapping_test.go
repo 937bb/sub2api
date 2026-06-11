@@ -262,6 +262,12 @@ func TestNormalizeOpenAIModelForUpstream(t *testing.T) {
 			want:    "gpt-5.4",
 		},
 		{
+			name:    "setup-token normalizes known codex alias",
+			account: &Account{Type: AccountTypeSetupToken},
+			model:   "gpt-5.4-high",
+			want:    "gpt-5.4",
+		},
+		{
 			name:    "oauth preserves codex auto review model",
 			account: &Account{Type: AccountTypeOAuth},
 			model:   "codex-auto-review",

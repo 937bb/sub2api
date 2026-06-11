@@ -173,6 +173,168 @@ func TestOpenAIWSHTTPBridgeRelaysSSEFramesAsWebSocketMessages(t *testing.T) {
 	require.True(t, gjson.GetBytes(upstream.lastBody, "stream").Bool())
 }
 
+func TestOpenAIWSHTTPBridgeOAuthUsesAdapterWithoutPassthroughFlag(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header: http.Header{
+			"Content-Type": []string{"text/event-stream"},
+			"x-request-id": []string{"rid_oauth_bridge"},
+		},
+		Body: io.NopCloser(strings.NewReader(strings.Join([]string{
+			`data: {"type":"response.completed","response":{"id":"resp_oauth_bridge","model":"gpt-5.4","usage":{"input_tokens":1,"output_tokens":1}}}`,
+			"",
+		}, "\n"))),
+	}}
+	svc := &OpenAIGatewayService{
+		cfg: &config.Config{
+			Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize},
+		},
+		httpUpstream:  upstream,
+		toolCorrector: NewCodexToolCorrector(),
+	}
+	account := &Account{
+		ID:          17,
+		Name:        "openai-oauth",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Credentials: map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-acc"},
+		Concurrency: 1,
+		Status:      StatusActive,
+	}
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.98.0")
+
+	written := make([][]byte, 0, 1)
+	payload := []byte(`{"type":"response.create","model":"gpt-5.1","stream":false,"input":"hi","unknown_field":"drop"}`)
+	result, err := svc.proxyOpenAIWSHTTPBridgeTurn(
+		context.Background(),
+		c,
+		account,
+		"oauth-token",
+		payload,
+		len(payload),
+		"gpt-5.1",
+		"",
+		"",
+		"",
+		1,
+		func(message []byte) error {
+			written = append(written, append([]byte(nil), message...))
+			return nil
+		},
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, "resp_oauth_bridge", result.RequestID)
+	require.Len(t, written, 1)
+	require.NotNil(t, upstream.lastReq)
+	require.Equal(t, chatgptCodexURL, upstream.lastReq.URL.String())
+	require.Equal(t, "chatgpt.com", upstream.lastReq.Host)
+	require.Equal(t, "chatgpt-acc", upstream.lastReq.Header.Get("chatgpt-account-id"))
+	require.False(t, gjson.GetBytes(upstream.lastBody, "type").Exists())
+	require.False(t, gjson.GetBytes(upstream.lastBody, "unknown_field").Exists())
+	require.Equal(t, "gpt-5.1", gjson.GetBytes(upstream.lastBody, "model").String())
+	wsBridgeFlag, _ := c.Get("openai_ws_http_bridge")
+	require.Equal(t, true, wsBridgeFlag)
+	passthroughFlag, _ := c.Get("openai_passthrough")
+	require.NotEqual(t, true, passthroughFlag, "OAuth WS HTTP bridge is an adapter path, not passthrough")
+}
+
+func TestOpenAIWSHTTPBridgeNilUpstreamResponseReturnsErrorEvent(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	upstream := &httpUpstreamRecorder{}
+	svc := &OpenAIGatewayService{
+		cfg:          &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}},
+		httpUpstream: upstream,
+	}
+	account := &Account{
+		ID:          18,
+		Name:        "api-key",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Status:      StatusActive,
+	}
+
+	written := make([][]byte, 0, 1)
+	payload := []byte(`{"type":"response.create","model":"gpt-5","input":"hi"}`)
+	require.NotPanics(t, func() {
+		result, err := svc.proxyOpenAIWSHTTPBridgeTurn(
+			context.Background(),
+			nil,
+			account,
+			"sk-test",
+			payload,
+			len(payload),
+			"gpt-5",
+			"",
+			"",
+			"",
+			1,
+			func(message []byte) error {
+				written = append(written, append([]byte(nil), message...))
+				return nil
+			},
+		)
+		require.Error(t, err)
+		require.Nil(t, result)
+	})
+	require.Len(t, written, 1)
+	require.Equal(t, "error", gjson.GetBytes(written[0], "type").String())
+	require.Equal(t, http.StatusBadGateway, int(gjson.GetBytes(written[0], "status").Int()))
+}
+
+func TestOpenAIWSHTTPBridgeNilUpstreamBodyReturnsErrorEvent(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: http.StatusOK, Header: http.Header{}}}
+	svc := &OpenAIGatewayService{
+		cfg:          &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}},
+		httpUpstream: upstream,
+	}
+	account := &Account{
+		ID:          19,
+		Name:        "api-key",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Status:      StatusActive,
+	}
+
+	written := make([][]byte, 0, 1)
+	payload := []byte(`{"type":"response.create","model":"gpt-5","input":"hi"}`)
+	require.NotPanics(t, func() {
+		result, err := svc.proxyOpenAIWSHTTPBridgeTurn(
+			context.Background(),
+			nil,
+			account,
+			"sk-test",
+			payload,
+			len(payload),
+			"gpt-5",
+			"",
+			"",
+			"",
+			1,
+			func(message []byte) error {
+				written = append(written, append([]byte(nil), message...))
+				return nil
+			},
+		)
+		require.Error(t, err)
+		require.Nil(t, result)
+	})
+	require.Len(t, written, 1)
+	require.Equal(t, "error", gjson.GetBytes(written[0], "type").String())
+	require.Equal(t, http.StatusBadGateway, int(gjson.GetBytes(written[0], "status").Int()))
+}
+
 func TestOpenAIWSHTTPBridgeAcceptsFirstFrameAboveLegacy16MiB(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

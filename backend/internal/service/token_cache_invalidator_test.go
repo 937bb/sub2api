@@ -127,6 +127,23 @@ func TestCompositeTokenCacheInvalidator_OpenAI(t *testing.T) {
 	require.Equal(t, []string{"openai:account:500"}, cache.deletedKeys)
 }
 
+func TestCompositeTokenCacheInvalidator_OpenAISetupToken(t *testing.T) {
+	cache := &geminiTokenCacheStub{}
+	invalidator := NewCompositeTokenCacheInvalidator(cache)
+	account := &Account{
+		ID:       501,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeSetupToken,
+		Credentials: map[string]any{
+			"access_token": "setup-token",
+		},
+	}
+
+	err := invalidator.InvalidateToken(context.Background(), account)
+	require.NoError(t, err)
+	require.Equal(t, []string{"openai:account:501"}, cache.deletedKeys)
+}
+
 func TestCompositeTokenCacheInvalidator_Claude(t *testing.T) {
 	cache := &geminiTokenCacheStub{}
 	invalidator := NewCompositeTokenCacheInvalidator(cache)

@@ -169,6 +169,17 @@ func (a *Account) IsPrivacySet() bool {
 	}
 }
 
+func shouldBlockAccountForPrivacyRequirement(account *Account, group *Group) bool {
+	if account == nil || group == nil || !group.RequirePrivacySet {
+		return false
+	}
+	// OpenAI privacy gate 只适用于完整 OAuth；APIKey 与 setup-token 不参与该语义。
+	if account.Platform == PlatformOpenAI {
+		return account.Type == AccountTypeOAuth && !account.IsPrivacySet()
+	}
+	return !account.IsPrivacySet()
+}
+
 func (a *Account) IsGemini() bool {
 	return a.Platform == PlatformGemini
 }
@@ -230,6 +241,17 @@ func (a *Account) GetCredential(key string) string {
 	default:
 		return ""
 	}
+}
+
+func (a *Account) HasCredential(key string) bool {
+	if a == nil || a.Credentials == nil || key == "" {
+		return false
+	}
+	if strings.TrimSpace(a.GetCredential(key)) != "" {
+		return true
+	}
+	hasValue, ok := a.Credentials["has_"+key].(bool)
+	return ok && hasValue
 }
 
 // GetCredentialAsTime 解析凭证中的时间戳字段，支持多种格式
@@ -1058,6 +1080,10 @@ func (a *Account) IsOpenAIOAuth() bool {
 	return a.IsOpenAI() && a.Type == AccountTypeOAuth
 }
 
+func (a *Account) IsOpenAIOAuthLike() bool {
+	return a.IsOpenAI() && (a.Type == AccountTypeOAuth || a.Type == AccountTypeSetupToken)
+}
+
 func (a *Account) IsOpenAIApiKey() bool {
 	return a.IsOpenAI() && a.Type == AccountTypeAPIKey
 }
@@ -1111,7 +1137,7 @@ func (a *Account) GetOpenAIUserAgent() string {
 }
 
 func (a *Account) GetChatGPTAccountID() string {
-	if !a.IsOpenAIOAuth() {
+	if !a.IsOpenAIOAuthLike() {
 		return ""
 	}
 	return a.GetCredential("chatgpt_account_id")
@@ -1279,45 +1305,39 @@ func (a *Account) IsOveragesEnabled() bool {
 	return false
 }
 
-// IsOpenAIPassthroughEnabled 返回 OpenAI 账号是否启用"自动透传（仅替换认证）"。
-//
-// 新字段：accounts.extra.openai_passthrough。
-// 兼容字段：accounts.extra.openai_oauth_passthrough（历史 OAuth 开关）。
-// 字段缺失或类型不正确时，按 false（关闭）处理。
-func (a *Account) IsOpenAIPassthroughEnabled() bool {
-	if a == nil || !a.IsOpenAI() || a.Extra == nil {
+// IsOpenAIAPIKeyPassthroughEnabled 返回 OpenAI APIKey 账号是否启用 native passthrough。
+// Passthrough 语义只属于 APIKey；OAuth 旧字段由迁移/校验处理，运行时一律 fail-closed。
+func (a *Account) IsOpenAIAPIKeyPassthroughEnabled() bool {
+	if a == nil || !a.IsOpenAI() || !a.IsOpenAIApiKey() || a.Extra == nil {
 		return false
 	}
-	if enabled, ok := a.Extra["openai_passthrough"].(bool); ok {
-		return enabled
-	}
-	if enabled, ok := a.Extra["openai_oauth_passthrough"].(bool); ok {
-		return enabled
-	}
-	return false
+	enabled, ok := a.Extra["openai_passthrough"].(bool)
+	return ok && enabled
+}
+
+// IsOpenAIPassthroughEnabled 返回 OpenAI APIKey 账号是否启用 native passthrough。
+// 保留旧函数名仅作为兼容壳；OAuth 不再通过该函数进入 passthrough。
+func (a *Account) IsOpenAIPassthroughEnabled() bool {
+	return a.IsOpenAIAPIKeyPassthroughEnabled()
 }
 
 // IsOpenAIResponsesWebSocketV2Enabled 返回 OpenAI 账号是否开启 Responses WebSocket v2。
-//
-// 分类型新字段：
-// - OAuth 账号：accounts.extra.openai_oauth_responses_websockets_v2_enabled
-// - API Key 账号：accounts.extra.openai_apikey_responses_websockets_v2_enabled
-//
-// 兼容字段：
-// - accounts.extra.responses_websockets_v2_enabled
-// - accounts.extra.openai_ws_enabled（历史开关）
-//
-// 优先级：
-// 1. 按账号类型读取分类型字段
-// 2. 分类型字段缺失时，回退兼容字段
+// OAuth 只读取迁移后的 openai_oauth_ws_mode，legacy OAuth 字段只允许迁移/校验代码识别。
+// APIKey 继续保持原有分类型字段与兼容字段回退行为。
 func (a *Account) IsOpenAIResponsesWebSocketV2Enabled() bool {
 	if a == nil || !a.IsOpenAI() || a.Extra == nil {
 		return false
 	}
-	if a.IsOpenAIOAuth() {
-		if enabled, ok := a.Extra["openai_oauth_responses_websockets_v2_enabled"].(bool); ok {
-			return enabled
+	if a.IsOpenAIOAuthLike() {
+		if mode, ok := a.Extra["openai_oauth_ws_mode"].(string); ok {
+			switch normalizeOpenAIOAuthWSMode(mode) {
+			case OpenAIOAuthWSModeManagedSession:
+				return true
+			case OpenAIOAuthWSModeOff:
+				return false
+			}
 		}
+		return false
 	}
 	if a.IsOpenAIApiKey() {
 		if enabled, ok := a.Extra["openai_apikey_responses_websockets_v2_enabled"].(bool); ok {
@@ -1339,7 +1359,21 @@ const (
 	OpenAIWSIngressModeDedicated   = "dedicated"
 	OpenAIWSIngressModeCtxPool     = "ctx_pool"
 	OpenAIWSIngressModePassthrough = "passthrough"
+
+	OpenAIOAuthWSModeManagedSession = "managed_session"
+	OpenAIOAuthWSModeOff            = "off"
 )
+
+func normalizeOpenAIOAuthWSMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case OpenAIOAuthWSModeManagedSession:
+		return OpenAIOAuthWSModeManagedSession
+	case OpenAIOAuthWSModeOff:
+		return OpenAIOAuthWSModeOff
+	default:
+		return ""
+	}
+}
 
 func normalizeOpenAIWSIngressMode(mode string) string {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
@@ -1369,18 +1403,17 @@ func normalizeOpenAIWSIngressDefaultMode(mode string) string {
 }
 
 // ResolveOpenAIResponsesWebSocketV2Mode 返回账号在 WSv2 ingress 下的有效模式（off/ctx_pool/passthrough）。
-//
-// 优先级：
-// 1. 分类型 mode 新字段（string）
-// 2. 分类型 enabled 旧字段（bool）
-// 3. 兼容 enabled 旧字段（bool）
-// 4. defaultMode（非法时回退 ctx_pool）
+// OAuth 只读取迁移后的 openai_oauth_ws_mode；legacy OAuth WS 字段不再参与运行时分流。
+// APIKey 继续保持原有 mode/enabled 与兼容 enabled 回退行为。
 func (a *Account) ResolveOpenAIResponsesWebSocketV2Mode(defaultMode string) string {
 	resolvedDefault := normalizeOpenAIWSIngressDefaultMode(defaultMode)
 	if a == nil || !a.IsOpenAI() {
 		return OpenAIWSIngressModeOff
 	}
 	if a.Extra == nil {
+		if a.IsOpenAIOAuthLike() {
+			return OpenAIWSIngressModeOff
+		}
 		return resolvedDefault
 	}
 
@@ -1414,13 +1447,18 @@ func (a *Account) ResolveOpenAIResponsesWebSocketV2Mode(defaultMode string) stri
 		return OpenAIWSIngressModeOff, true
 	}
 
-	if a.IsOpenAIOAuth() {
-		if mode, ok := resolveModeString("openai_oauth_responses_websockets_v2_mode"); ok {
-			return mode
+	if a.IsOpenAIOAuthLike() {
+		if raw, ok := a.Extra["openai_oauth_ws_mode"]; ok {
+			if mode, ok := raw.(string); ok {
+				switch normalizeOpenAIOAuthWSMode(mode) {
+				case OpenAIOAuthWSModeManagedSession:
+					return OpenAIWSIngressModeCtxPool
+				case OpenAIOAuthWSModeOff:
+					return OpenAIWSIngressModeOff
+				}
+			}
 		}
-		if mode, ok := resolveBoolMode("openai_oauth_responses_websockets_v2_enabled"); ok {
-			return mode
-		}
+		return OpenAIWSIngressModeOff
 	}
 	if a.IsOpenAIApiKey() {
 		if mode, ok := resolveModeString("openai_apikey_responses_websockets_v2_mode"); ok {
@@ -1461,11 +1499,6 @@ func (a *Account) IsOpenAIWSAllowStoreRecoveryEnabled() bool {
 	}
 	enabled, ok := a.Extra["openai_ws_allow_store_recovery"].(bool)
 	return ok && enabled
-}
-
-// IsOpenAIOAuthPassthroughEnabled 兼容旧接口，等价于 OAuth 账号的 IsOpenAIPassthroughEnabled。
-func (a *Account) IsOpenAIOAuthPassthroughEnabled() bool {
-	return a != nil && a.IsOpenAIOAuth() && a.IsOpenAIPassthroughEnabled()
 }
 
 // IsAnthropicAPIKeyPassthroughEnabled 返回 Anthropic API Key 账号是否启用"自动透传（仅替换认证）"。

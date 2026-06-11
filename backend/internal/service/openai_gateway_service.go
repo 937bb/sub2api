@@ -22,6 +22,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
@@ -1047,7 +1048,7 @@ func resolveOpenAICodexRequestIdentity(req *http.Request, c *gin.Context, accoun
 
 	sessionID := rawSessionID
 	threadID := rawThreadID
-	if account != nil && account.Type == AccountTypeOAuth {
+	if account != nil && account.IsOpenAIOAuthLike() {
 		sessionID = isolateOpenAISessionID(apiKeyID, sessionID)
 		threadID = isolateOpenAISessionID(apiKeyID, threadID)
 	}
@@ -1632,6 +1633,72 @@ func isOpenAIAccountEligibleForRequest(ctx context.Context, account *Account, re
 	return true
 }
 
+func (s *OpenAIGatewayService) resolveOpenAISchedulingGroup(ctx context.Context, groupID *int64) *Group {
+	if groupID == nil {
+		return nil
+	}
+	if group, ok := ctx.Value(ctxkey.Group).(*Group); ok && group != nil && group.ID == *groupID {
+		return group
+	}
+	if group, ok := ctx.Value(ctxkey.Group).(Group); ok && group.ID == *groupID {
+		groupCopy := group
+		return &groupCopy
+	}
+	if s != nil && s.schedulerSnapshot != nil {
+		group, err := s.schedulerSnapshot.GetGroupByID(ctx, *groupID)
+		if err == nil {
+			return group
+		}
+		// 若无法确认分组配置，privacy gate 必须 fail closed，避免缺失上下文时放行未设置 privacy 的 OAuth 账号。
+		slog.Warn("failed to resolve OpenAI scheduling group; enforcing privacy requirement", "group_id", *groupID, "error", err)
+		return &Group{ID: *groupID, Name: fmt.Sprintf("group:%d", *groupID), Platform: PlatformOpenAI, RequirePrivacySet: true}
+	}
+	return nil
+}
+
+func (s *OpenAIGatewayService) resolveOpenAIAccountForPrivacyRequirement(ctx context.Context, account *Account, group *Group) (*Account, bool) {
+	if account == nil {
+		return nil, false
+	}
+	if group == nil || !group.RequirePrivacySet {
+		return account, true
+	}
+	if account.Platform == PlatformOpenAI && account.Type != AccountTypeOAuth {
+		return account, true
+	}
+	if s != nil && s.schedulerSnapshot != nil && s.accountRepo != nil {
+		// Snapshot/cache data can lag behind privacy updates; verify against DB before
+		// mutating runtime/account error state so fresh privacy-set accounts are not poisoned.
+		latest, err := s.accountRepo.GetByID(ctx, account.ID)
+		if err != nil || latest == nil {
+			return nil, false
+		}
+		account = latest
+	}
+	if s.blockOpenAIAccountForPrivacyRequirement(ctx, account, group) {
+		return nil, false
+	}
+	return account, true
+}
+
+func (s *OpenAIGatewayService) blockOpenAIAccountForPrivacyRequirement(ctx context.Context, account *Account, group *Group) bool {
+	if !shouldBlockAccountForPrivacyRequirement(account, group) {
+		return false
+	}
+	if s != nil {
+		if s.isOpenAIAccountRuntimeBlocked(account) {
+			return true
+		}
+		// 将 privacy gate 同步到运行时隔离，防止 sticky/previous/fallback 路径重复命中。
+		s.BlockAccountScheduling(account, time.Time{}, "privacy_not_set")
+		if s.accountRepo != nil {
+			_ = s.accountRepo.SetError(ctx, account.ID,
+				fmt.Sprintf("Privacy not set, required by group [%s]", group.Name))
+		}
+	}
+	return true
+}
+
 type openAIQuotaAutoPauseDecision struct {
 	window      string
 	threshold   float64
@@ -1978,12 +2045,24 @@ func (s *OpenAIGatewayService) tryStickySessionHit(ctx context.Context, groupID 
 	if !isOpenAIAccountEligibleForRequest(ctx, account, requestedModel, false, requiredCapability) {
 		return nil
 	}
+	schedGroup := s.resolveOpenAISchedulingGroup(ctx, groupID)
+	var ok bool
+	account, ok = s.resolveOpenAIAccountForPrivacyRequirement(ctx, account, schedGroup)
+	if !ok {
+		_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
+		return nil
+	}
 	if s.isOpenAIAccountRuntimeBlocked(account) {
 		_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
 		return nil
 	}
 	account = s.recheckSelectedOpenAIAccountFromDB(ctx, account, requestedModel, requireCompact, requiredCapability)
 	if account == nil {
+		_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
+		return nil
+	}
+	account, ok = s.resolveOpenAIAccountForPrivacyRequirement(ctx, account, schedGroup)
+	if !ok {
 		_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
 		return nil
 	}
@@ -2011,6 +2090,7 @@ func (s *OpenAIGatewayService) selectBestAccount(ctx context.Context, groupID *i
 	selectedCompactTier := -1
 	compactBlocked := false
 	needsUpstreamCheck := s.needsUpstreamChannelRestrictionCheck(ctx, groupID)
+	schedGroup := s.resolveOpenAISchedulingGroup(ctx, groupID)
 
 	for i := range accounts {
 		acc := &accounts[i]
@@ -2027,6 +2107,11 @@ func (s *OpenAIGatewayService) selectBestAccount(ctx context.Context, groupID *i
 		}
 		fresh = s.recheckSelectedOpenAIAccountFromDB(ctx, fresh, requestedModel, false, requiredCapability)
 		if fresh == nil {
+			continue
+		}
+		var ok bool
+		fresh, ok = s.resolveOpenAIAccountForPrivacyRequirement(ctx, fresh, schedGroup)
+		if !ok {
 			continue
 		}
 		if needsUpstreamCheck && s.isUpstreamModelRestrictedByChannel(ctx, *groupID, fresh, requestedModel, requireCompact) {
@@ -2115,6 +2200,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 
 	cfg := s.schedulingConfig()
 	needsUpstreamCheck := s.needsUpstreamChannelRestrictionCheck(ctx, groupID)
+	schedGroup := s.resolveOpenAISchedulingGroup(ctx, groupID)
 	var stickyAccountID int64
 	if sessionHash != "" && s.cache != nil {
 		if accountID, err := s.getStickySessionAccountID(ctx, groupID, sessionHash); err == nil {
@@ -2179,7 +2265,9 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 					account = s.recheckSelectedOpenAIAccountFromDB(ctx, account, requestedModel, requireCompact, requiredCapability)
 					if account == nil {
 						_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
-					} else if s.isOpenAIAccountRuntimeBlocked(account) {
+					} else if resolved, ok := s.resolveOpenAIAccountForPrivacyRequirement(ctx, account, schedGroup); !ok {
+						_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
+					} else if account = resolved; s.isOpenAIAccountRuntimeBlocked(account) {
 						_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
 					} else if needsUpstreamCheck && s.isUpstreamModelRestrictedByChannel(ctx, *groupID, account, requestedModel, requireCompact) {
 						_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
@@ -2221,6 +2309,11 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		// re-check schedulability here so recently rate-limited/overloaded accounts
 		// are not selected again before the bucket is rebuilt.
 		if !isOpenAIAccountEligibleForRequest(ctx, acc, requestedModel, false, requiredCapability) {
+			continue
+		}
+		var ok bool
+		acc, ok = s.resolveOpenAIAccountForPrivacyRequirement(ctx, acc, schedGroup)
+		if !ok {
 			continue
 		}
 		if s.isOpenAIAccountRuntimeBlocked(acc) {
@@ -2313,6 +2406,11 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			if fresh == nil {
 				continue
 			}
+			var ok bool
+			fresh, ok = s.resolveOpenAIAccountForPrivacyRequirement(ctx, fresh, schedGroup)
+			if !ok {
+				continue
+			}
 			if needsUpstreamCheck && s.isUpstreamModelRestrictedByChannel(ctx, *groupID, fresh, requestedModel, requireCompact) {
 				continue
 			}
@@ -2345,6 +2443,11 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			}
 			fresh = s.recheckSelectedOpenAIAccountFromDB(ctx, fresh, requestedModel, requireCompact, requiredCapability)
 			if fresh == nil {
+				continue
+			}
+			var ok bool
+			fresh, ok = s.resolveOpenAIAccountForPrivacyRequirement(ctx, fresh, schedGroup)
+			if !ok {
 				continue
 			}
 			if needsUpstreamCheck && s.isUpstreamModelRestrictedByChannel(ctx, *groupID, fresh, requestedModel, requireCompact) {
@@ -2390,6 +2493,11 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		}
 		fresh = s.recheckSelectedOpenAIAccountFromDB(ctx, fresh, requestedModel, requireCompact, requiredCapability)
 		if fresh == nil {
+			continue
+		}
+		var ok bool
+		fresh, ok = s.resolveOpenAIAccountForPrivacyRequirement(ctx, fresh, schedGroup)
+		if !ok {
 			continue
 		}
 		if needsUpstreamCheck && s.isUpstreamModelRestrictedByChannel(ctx, *groupID, fresh, requestedModel, requireCompact) {
@@ -2551,8 +2659,8 @@ func (s *OpenAIGatewayService) schedulingConfig() config.GatewaySchedulingConfig
 // GetAccessToken gets the access token for an OpenAI account
 func (s *OpenAIGatewayService) GetAccessToken(ctx context.Context, account *Account) (string, string, error) {
 	switch account.Type {
-	case AccountTypeOAuth:
-		// 使用 TokenProvider 获取缓存的 token
+	case AccountTypeOAuth, AccountTypeSetupToken:
+		// 使用 TokenProvider 获取缓存的 token；setup-token 无 refresh_token 时会直接读取 access_token。
 		if s.openAITokenProvider != nil {
 			accessToken, err := s.openAITokenProvider.GetAccessToken(ctx, account)
 			if err != nil {
@@ -2658,6 +2766,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	requestView := newOpenAIRequestView(body)
 	reqModel, reqStream, promptCacheKey := requestView.Model, requestView.Stream, requestView.PromptCacheKey
 	originalModel := reqModel
+	isCompactRequest := isOpenAIResponsesCompactPath(c)
 
 	if account.Type == AccountTypeAPIKey && !openai_compat.ShouldUseResponsesAPI(account.Extra) {
 		return s.forwardResponsesViaRawChatCompletions(ctx, c, account, body)
@@ -2699,6 +2808,12 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 		return nil, errors.New("openai ws v1 is temporarily unsupported; use ws v2")
 	}
+	if account.IsOpenAIOAuthLike() {
+		// OAuth-like 请求必须先校验原始 body，避免 sjson patch 把 trailing tokens 清洗成合法 JSON。
+		if _, err := decodeOpenAIRequestBodyMapUseNumber(originalBody); err != nil {
+			return nil, err
+		}
+	}
 	passthroughEnabled := account.IsOpenAIPassthroughEnabled()
 	if passthroughEnabled {
 		// 透传分支只需要轻量提取字段，避免热路径全量 Unmarshal。
@@ -2724,8 +2839,8 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 		var decoded map[string]any
 		var decodeErr error
-		// OAuth WS allowlist 会重新序列化允许字段；UseNumber 避免大整数先被 float64 舍入。
-		if account != nil && account.IsOpenAIOAuth() && wsDecision.Transport == OpenAIUpstreamTransportResponsesWebsocketV2 {
+		// OAuth 末端 allowlist 会复制允许字段的 raw JSON；UseNumber 避免中途改写时大整数先被 float64 舍入。
+		if account != nil && account.IsOpenAIOAuthLike() {
 			decoded, decodeErr = requestView.DecodeUseNumber(c)
 		} else {
 			decoded, decodeErr = requestView.Decode(c)
@@ -2790,7 +2905,10 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		markPatchSet("model", billingModel)
 	}
 	upstreamModel := billingModel
-	isCompactRequest := isOpenAIResponsesCompactPath(c)
+	if account.IsOpenAIOAuthLike() && isCompactRequest {
+		// Compact terminal policy omits stream, so response handling must follow the normalized body.
+		reqStream = false
+	}
 	compactMapped := false
 	if isCompactRequest {
 		compactMappedModel := resolveOpenAICompactForwardModel(account, billingModel)
@@ -2876,7 +2994,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 	}
 
-	if account.Type == AccountTypeOAuth {
+	if account.IsOpenAIOAuthLike() {
 		decoded, decodeErr := ensureReqBody()
 		if decodeErr != nil {
 			return nil, decodeErr
@@ -2931,7 +3049,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		if gjson.GetBytes(body, "max_completion_tokens").Exists() && (account.Type == AccountTypeAPIKey || account.Platform != PlatformOpenAI) {
 			markPatchDelete("max_completion_tokens")
 		}
-		if account.Type != AccountTypeOAuth {
+		if !account.IsOpenAIOAuthLike() {
 			for _, unsupportedField := range []string{"prompt_cache_retention", "safety_identifier"} {
 				if gjson.GetBytes(body, unsupportedField).Exists() {
 					markPatchDelete(unsupportedField)
@@ -2939,7 +3057,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			}
 		}
 	}
-	if account.Type != AccountTypeOAuth && wsDecision.Transport != OpenAIUpstreamTransportResponsesWebsocketV2 {
+	if !account.IsOpenAIOAuthLike() && wsDecision.Transport != OpenAIUpstreamTransportResponsesWebsocketV2 {
 		for _, field := range []string{"previous_response_id", "generate", "type"} {
 			if gjson.GetBytes(body, field).Exists() {
 				markPatchDelete(field)
@@ -3040,7 +3158,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		if err != nil {
 			return nil, err
 		}
-		if account.Type == AccountTypeOAuth {
+		if account.IsOpenAIOAuthLike() {
 			wsReqBody["store"] = false
 			wsReqBody["stream"] = true
 		}
@@ -3377,8 +3495,8 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			imageOutputSizes = nonStreamResult.imageOutputSizes
 		}
 
-		// Extract and save Codex usage snapshot from response headers (for OAuth accounts)
-		if account.Type == AccountTypeOAuth {
+		// Extract and save Codex usage snapshot from response headers for full OAuth only.
+		if account.IsOpenAIOAuth() {
 			if snapshot := ParseCodexRateLimitHeaders(resp.Header); snapshot != nil {
 				s.updateCodexUsageSnapshot(ctx, account.ID, snapshot)
 			}
@@ -3421,6 +3539,13 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	reqStream bool,
 	startTime time.Time,
 ) (*OpenAIForwardResult, error) {
+	if account == nil {
+		return nil, errors.New("account is nil")
+	}
+	if !account.IsOpenAIApiKey() {
+		return nil, fmt.Errorf("openai native passthrough requires APIKey account, got=%s", account.Type)
+	}
+
 	upstreamPassthroughModel := ""
 	if isOpenAIResponsesCompactPath(c) {
 		compactMappedModel := resolveOpenAICompactForwardModel(account, reqModel)
@@ -3434,30 +3559,6 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		}
 	}
 
-	if account != nil && account.Type == AccountTypeOAuth {
-		if rejectReason := detectOpenAIPassthroughInstructionsRejectReason(reqModel, body); rejectReason != "" {
-			rejectMsg := "OpenAI codex passthrough requires a non-empty instructions field"
-			MarkOpsClientBusinessLimited(c, OpsClientBusinessLimitedReasonLocalPolicyDenied)
-			logOpenAIPassthroughInstructionsRejected(ctx, c, account, reqModel, rejectReason, body)
-			c.JSON(http.StatusForbidden, gin.H{
-				"error": gin.H{
-					"type":    "forbidden_error",
-					"message": rejectMsg,
-				},
-			})
-			return nil, fmt.Errorf("openai passthrough rejected before upstream: %s", rejectReason)
-		}
-
-		normalizedBody, normalized, err := normalizeOpenAIOAuthHTTPBody(body, isOpenAIResponsesCompactPath(c))
-		if err != nil {
-			return nil, err
-		}
-		if normalized {
-			body = normalizedBody
-		}
-		reqStream = gjson.GetBytes(body, "stream").Bool()
-	}
-
 	sanitizedBody, sanitized, err := sanitizeEmptyBase64InputImagesInOpenAIBody(body)
 	if err != nil {
 		return nil, err
@@ -3467,8 +3568,8 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	}
 
 	// Apply OpenAI fast policy to the passthrough body (filter/block by service_tier).
-	// 统一使用 upstream 视角的 model：透传路径下 body 已经过 compact 映射 +
-	// OAuth normalize，body 中的 model 字段即上游真正会看到的 slug。
+	// 统一使用 upstream 视角的 model：APIKey 透传路径下 body 已经过 compact 映射，
+	// body 中的 model 字段即上游真正会看到的 slug。
 	// 这样可以与 chat-completions / messages / native /responses 入口的
 	// upstreamModel 保持一致，避免 whitelist 命中差异。当 body 中没有
 	// model 字段时退回 reqModel。
@@ -3658,37 +3759,6 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	return forwardResult, nil
 }
 
-func logOpenAIPassthroughInstructionsRejected(
-	ctx context.Context,
-	c *gin.Context,
-	account *Account,
-	reqModel string,
-	rejectReason string,
-	body []byte,
-) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	accountID := int64(0)
-	accountName := ""
-	accountType := ""
-	if account != nil {
-		accountID = account.ID
-		accountName = strings.TrimSpace(account.Name)
-		accountType = strings.TrimSpace(string(account.Type))
-	}
-	fields := []zap.Field{
-		zap.String("component", "service.openai_gateway"),
-		zap.Int64("account_id", accountID),
-		zap.String("account_name", accountName),
-		zap.String("account_type", accountType),
-		zap.String("request_model", strings.TrimSpace(reqModel)),
-		zap.String("reject_reason", strings.TrimSpace(rejectReason)),
-	}
-	fields = appendCodexCLIOnlyRejectedRequestFields(fields, c, body)
-	logger.FromContext(ctx).With(fields...).Warn("OpenAI passthrough 本地拦截：Codex 请求缺少有效 instructions")
-}
-
 func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 	ctx context.Context,
 	c *gin.Context,
@@ -3696,19 +3766,21 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 	body []byte,
 	token string,
 ) (*http.Request, error) {
+	if account == nil {
+		return nil, errors.New("account is nil")
+	}
+	if !account.IsOpenAIApiKey() {
+		return nil, fmt.Errorf("openai native passthrough requires APIKey account, got=%s", account.Type)
+	}
+
 	targetURL := openaiPlatformAPIURL
-	switch account.Type {
-	case AccountTypeOAuth:
-		targetURL = chatgptCodexURL
-	case AccountTypeAPIKey:
-		baseURL := account.GetOpenAIBaseURL()
-		if baseURL != "" {
-			validatedURL, err := s.validateUpstreamBaseURL(baseURL)
-			if err != nil {
-				return nil, err
-			}
-			targetURL = buildOpenAIResponsesURL(validatedURL)
+	baseURL := account.GetOpenAIBaseURL()
+	if baseURL != "" {
+		validatedURL, err := s.validateUpstreamBaseURL(baseURL)
+		if err != nil {
+			return nil, err
 		}
+		targetURL = buildOpenAIResponsesURL(validatedURL)
 	}
 	targetURL = appendOpenAIResponsesRequestPathSuffix(targetURL, openAIResponsesRequestPathSuffix(c))
 
@@ -3718,7 +3790,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 	}
 	req = req.WithContext(WithHTTPUpstreamProfile(req.Context(), HTTPUpstreamProfileOpenAI))
 
-	// 透传客户端请求头（安全白名单）。
+	// APIKey 透传保留客户端请求头安全白名单。
 	allowTimeoutHeaders := s.isOpenAIPassthroughTimeoutHeadersAllowed()
 	if c != nil && c.Request != nil {
 		for key, values := range c.Request.Header {
@@ -3732,47 +3804,13 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 		}
 	}
 
-	// 覆盖入站鉴权残留，并注入上游认证
+	// 覆盖入站鉴权残留，并注入上游认证。
 	req.Header.Del("authorization")
 	req.Header.Del("x-api-key")
 	req.Header.Del("x-goog-api-key")
 	req.Header.Set("authorization", "Bearer "+token)
 
-	// OAuth 透传到 ChatGPT internal API 时补齐必要头。
-	if account.Type == AccountTypeOAuth {
-		promptCacheKey := strings.TrimSpace(gjson.GetBytes(body, "prompt_cache_key").String())
-		req.Host = "chatgpt.com"
-		if chatgptAccountID := account.GetChatGPTAccountID(); chatgptAccountID != "" {
-			req.Header.Set("chatgpt-account-id", chatgptAccountID)
-		}
-		isCompactRequest := isOpenAIResponsesCompactPath(c)
-		if isCompactRequest {
-			req.Header.Set("accept", "application/json")
-			if req.Header.Get("version") == "" {
-				req.Header.Set("version", codexCLIVersion)
-			}
-			if req.Header.Get("session_id") == "" && req.Header.Get(openAICodexSessionIDHeader) == "" {
-				req.Header.Set(openAICodexSessionIDHeader, resolveOpenAICompactSessionID(c))
-			}
-		} else if req.Header.Get("accept") == "" {
-			req.Header.Set("accept", "text/event-stream")
-		}
-		if req.Header.Get("OpenAI-Beta") == "" {
-			req.Header.Set("OpenAI-Beta", "responses=experimental")
-		}
-		if req.Header.Get("version") == "" {
-			req.Header.Set("version", codexCLIVersion)
-		}
-		if req.Header.Get("originator") == "" {
-			req.Header.Set("originator", codexOfficialOriginator)
-		}
-		body, _ = applyOpenAICodexHTTPRequestAlignmentWithBodyOptions(req, c, account, body, promptCacheKey, true, true, !isCompactRequest)
-		if _, err := normalizeOpenAIOAuthHTTPUpstreamRequestBody(req, c, account, body); err != nil {
-			return nil, err
-		}
-	}
-
-	// 透传模式也支持账户自定义 User-Agent 与 ForceCodexCLI 兜底。
+	// APIKey 透传模式支持账户自定义 User-Agent 与 ForceCodexCLI 兜底。
 	customUA := account.GetOpenAIUserAgent()
 	if customUA != "" {
 		req.Header.Set("user-agent", customUA)
@@ -3780,8 +3818,106 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 	if s.cfg != nil && s.cfg.Gateway.ForceCodexCLI {
 		req.Header.Set("user-agent", s.resolveOpenAICodexUserAgent(ctx))
 	}
-	// OAuth 安全透传：对非 Codex UA 统一兜底，降低被上游风控拦截概率。
-	if account.Type == AccountTypeOAuth && !openai.IsCodexOfficialClientRequest(req.Header.Get("user-agent")) {
+
+	if req.Header.Get("content-type") == "" {
+		req.Header.Set("content-type", "application/json")
+	}
+
+	return req, nil
+}
+
+func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIOAuthAdapter(
+	ctx context.Context,
+	c *gin.Context,
+	account *Account,
+	body []byte,
+	token string,
+	promptCacheKey string,
+	isCodexCLI bool,
+) (*http.Request, error) {
+	if account == nil {
+		return nil, errors.New("account is nil")
+	}
+	if !account.IsOpenAIOAuthLike() {
+		return nil, fmt.Errorf("openai OAuth adapter requires OAuth account, got=%s", account.Type)
+	}
+
+	targetURL := appendOpenAIResponsesRequestPathSuffix(chatgptCodexURL, openAIResponsesRequestPathSuffix(c))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(WithHTTPUpstreamProfile(req.Context(), HTTPUpstreamProfileOpenAI))
+
+	if c != nil && c.Request != nil {
+		for key, values := range c.Request.Header {
+			lower := strings.ToLower(strings.TrimSpace(key))
+			if !openaiAllowedHeaders[lower] {
+				continue
+			}
+			for _, v := range values {
+				req.Header.Add(key, v)
+			}
+		}
+	}
+
+	req.Header.Del("authorization")
+	req.Header.Del("x-api-key")
+	req.Header.Del("x-goog-api-key")
+	req.Header.Set("authorization", "Bearer "+token)
+
+	// OAuth adapter 目标是 ChatGPT internal API，需要补齐 Codex/ChatGPT 请求头。
+	if promptCacheKey == "" {
+		promptCacheKey = strings.TrimSpace(gjson.GetBytes(body, "prompt_cache_key").String())
+	}
+	req.Host = "chatgpt.com"
+	if chatgptAccountID := account.GetChatGPTAccountID(); chatgptAccountID != "" {
+		req.Header.Set("chatgpt-account-id", chatgptAccountID)
+	}
+	isCompactRequest := isOpenAIResponsesCompactPath(c)
+	if isCompactRequest {
+		req.Header.Set("accept", "application/json")
+		if req.Header.Get("version") == "" {
+			req.Header.Set("version", codexCLIVersion)
+		}
+		if req.Header.Get("session_id") == "" && req.Header.Get(openAICodexSessionIDHeader) == "" {
+			req.Header.Set(openAICodexSessionIDHeader, resolveOpenAICompactSessionID(c))
+		}
+	} else if req.Header.Get("accept") == "" {
+		req.Header.Set("accept", "text/event-stream")
+	}
+	compatMessagesBridge := isOpenAICompatMessagesBridgeContext(c) || isOpenAICompatMessagesBridgeBody(body)
+	clientConversationID := strings.TrimSpace(req.Header.Get("conversation_id"))
+	req.Header.Del("conversation_id")
+	req.Header.Del("session_id")
+
+	if compatMessagesBridge {
+		req.Header.Del("OpenAI-Beta")
+		req.Header.Del("originator")
+		req.Header.Del("version")
+	} else {
+		if req.Header.Get("OpenAI-Beta") == "" {
+			req.Header.Set("OpenAI-Beta", "responses=experimental")
+		}
+		if req.Header.Get("version") == "" {
+			req.Header.Set("version", codexCLIVersion)
+		}
+		req.Header.Set("originator", resolveOpenAIUpstreamOriginator(c, isCodexCLI))
+	}
+	mutateBody := !compatMessagesBridge
+	body, _ = applyOpenAICodexHTTPRequestAlignmentWithBodyOptions(req, c, account, body, promptCacheKey, !compatMessagesBridge || clientConversationID != "", mutateBody, mutateBody && !isCompactRequest)
+	if _, err := normalizeOpenAIOAuthHTTPUpstreamRequestBody(req, c, account, body); err != nil {
+		return nil, err
+	}
+
+	customUA := account.GetOpenAIUserAgent()
+	if customUA != "" {
+		req.Header.Set("user-agent", customUA)
+	}
+	if s.cfg != nil && s.cfg.Gateway.ForceCodexCLI {
+		req.Header.Set("user-agent", s.resolveOpenAICodexUserAgent(ctx))
+	}
+	if !openai.IsCodexOfficialClientRequest(req.Header.Get("user-agent")) {
 		req.Header.Set("user-agent", s.resolveOpenAICodexUserAgent(ctx))
 	}
 
@@ -4404,12 +4540,14 @@ func writeOpenAIPassthroughResponseHeaders(dst http.Header, src http.Header, fil
 }
 
 func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Context, account *Account, body []byte, token string, isStream bool, promptCacheKey string, isCodexCLI bool) (*http.Request, error) {
-	// Determine target URL based on account type
+	if account != nil && account.IsOpenAIOAuthLike() {
+		return s.buildUpstreamRequestOpenAIOAuthAdapter(ctx, c, account, body, token, promptCacheKey, isCodexCLI)
+	}
+
+	// Remaining runtime path is APIKey/native OpenAI; OAuth-like accounts already
+	// delegated to the adapter and must not fall back to legacy passthrough logic.
 	var targetURL string
 	switch account.Type {
-	case AccountTypeOAuth:
-		// OAuth accounts use ChatGPT internal API
-		targetURL = chatgptCodexURL
 	case AccountTypeAPIKey:
 		// API Key accounts use Platform API or custom base URL
 		baseURL := account.GetOpenAIBaseURL()
@@ -4436,59 +4574,13 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 	// Set authentication header
 	req.Header.Set("authorization", "Bearer "+token)
 
-	// Set headers specific to OAuth accounts (ChatGPT internal API)
-	if account.Type == AccountTypeOAuth {
-		// Required: set Host for ChatGPT API (must use req.Host, not Header.Set)
-		req.Host = "chatgpt.com"
-		// Required: set chatgpt-account-id header
-		chatgptAccountID := account.GetChatGPTAccountID()
-		if chatgptAccountID != "" {
-			req.Header.Set("chatgpt-account-id", chatgptAccountID)
-		}
-	}
-
-	// Whitelist passthrough headers
+	// Whitelist native OpenAI request headers for APIKey/custom-base-url calls.
 	for key, values := range c.Request.Header {
 		lowerKey := strings.ToLower(key)
 		if openaiAllowedHeaders[lowerKey] {
 			for _, v := range values {
 				req.Header.Add(key, v)
 			}
-		}
-	}
-	if account.Type == AccountTypeOAuth {
-		compatMessagesBridge := isOpenAICompatMessagesBridgeContext(c) || isOpenAICompatMessagesBridgeBody(body)
-		clientConversationID := strings.TrimSpace(req.Header.Get("conversation_id"))
-		req.Header.Del("conversation_id")
-		req.Header.Del("session_id")
-
-		if compatMessagesBridge {
-			req.Header.Del("OpenAI-Beta")
-			req.Header.Del("originator")
-			req.Header.Del("version")
-		} else {
-			req.Header.Set("OpenAI-Beta", "responses=experimental")
-			if req.Header.Get("version") == "" {
-				req.Header.Set("version", codexCLIVersion)
-			}
-			req.Header.Set("originator", resolveOpenAIUpstreamOriginator(c, isCodexCLI))
-		}
-		isCompactRequest := isOpenAIResponsesCompactPath(c)
-		if isCompactRequest {
-			req.Header.Set("accept", "application/json")
-			if req.Header.Get("version") == "" {
-				req.Header.Set("version", codexCLIVersion)
-			}
-			if req.Header.Get(openAICodexSessionIDHeader) == "" {
-				req.Header.Set(openAICodexSessionIDHeader, resolveOpenAICompactSessionID(c))
-			}
-		} else {
-			req.Header.Set("accept", "text/event-stream")
-		}
-		mutateBody := !compatMessagesBridge
-		body, _ = applyOpenAICodexHTTPRequestAlignmentWithBodyOptions(req, c, account, body, promptCacheKey, !compatMessagesBridge || clientConversationID != "", mutateBody, mutateBody && !isCompactRequest)
-		if _, err := normalizeOpenAIOAuthHTTPUpstreamRequestBody(req, c, account, body); err != nil {
-			return nil, err
 		}
 	}
 
@@ -4503,10 +4595,6 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 	if s.cfg != nil && s.cfg.Gateway.ForceCodexCLI {
 		req.Header.Set("user-agent", s.resolveOpenAICodexUserAgent(ctx))
 	}
-	if account.Type == AccountTypeOAuth && !openai.IsCodexOfficialClientRequest(req.Header.Get("user-agent")) {
-		req.Header.Set("user-agent", s.resolveOpenAICodexUserAgent(ctx))
-	}
-
 	// Ensure required headers exist
 	if req.Header.Get("content-type") == "" {
 		req.Header.Set("content-type", "application/json")
@@ -5409,7 +5497,7 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 	// This heuristic is NOT applied to API-key accounts to avoid false
 	// positives on JSON responses that coincidentally contain "data:" or
 	// "event:" in their text content.
-	if account.Type == AccountTypeOAuth && bodyLooksLikeSSE {
+	if account.IsOpenAIOAuthLike() && bodyLooksLikeSSE {
 		return s.handleSSEToJSON(resp, c, body, originalModel, mappedModel)
 	}
 
@@ -6730,7 +6818,7 @@ func extractOpenAIRequestMetaFromBody(body []byte) (model string, stream bool, p
 }
 
 func normalizeOpenAIOAuthHTTPUpstreamRequestBody(req *http.Request, c *gin.Context, account *Account, body []byte) ([]byte, error) {
-	if account == nil || !account.IsOpenAIOAuth() {
+	if account == nil || !account.IsOpenAIOAuthLike() {
 		return body, nil
 	}
 
@@ -6751,78 +6839,10 @@ func normalizeOpenAIOAuthHTTPBody(body []byte, compact bool) ([]byte, bool, erro
 	}
 
 	if compact {
-		return normalizeOpenAICompactRequestBody(body)
+		return applyOpenAIOAuthCompactAllowlist(body)
 	}
 
-	// 非 compact：对齐 Codex CLI build_responses_request() 实际发送的字段。
-	// 用 allowlist 代替 denylist，避免客户端传什么就得追着删什么。
-	normalized := []byte(`{}`)
-	for _, field := range []string{
-		"model",
-		"input",
-		"instructions",
-		"tools",
-		"tool_choice",
-		"parallel_tool_calls",
-		"reasoning",
-		"store",
-		"stream",
-		"include",
-		"service_tier",
-		"prompt_cache_key",
-		"text",
-		"client_metadata",
-	} {
-		value := gjson.GetBytes(body, field)
-		if !value.Exists() {
-			continue
-		}
-		next, err := sjson.SetRawBytes(normalized, field, []byte(value.Raw))
-		if err != nil {
-			return body, false, fmt.Errorf("normalize passthrough body %s: %w", field, err)
-		}
-		normalized = next
-	}
-
-	// Codex CLI 固定值：store=false, stream=true。
-	if store := gjson.GetBytes(normalized, "store"); !store.Exists() || store.Type != gjson.False {
-		next, err := sjson.SetBytes(normalized, "store", false)
-		if err != nil {
-			return body, false, fmt.Errorf("normalize passthrough body store=false: %w", err)
-		}
-		normalized = next
-	}
-	if stream := gjson.GetBytes(normalized, "stream"); !stream.Exists() || stream.Type != gjson.True {
-		next, err := sjson.SetBytes(normalized, "stream", true)
-		if err != nil {
-			return body, false, fmt.Errorf("normalize passthrough body stream=true: %w", err)
-		}
-		normalized = next
-	}
-
-	if bytes.Equal(bytes.TrimSpace(body), bytes.TrimSpace(normalized)) {
-		return body, false, nil
-	}
-	return normalized, true, nil
-}
-
-func detectOpenAIPassthroughInstructionsRejectReason(reqModel string, body []byte) string {
-	model := strings.ToLower(strings.TrimSpace(reqModel))
-	if !strings.Contains(model, "codex") {
-		return ""
-	}
-
-	instructions := gjson.GetBytes(body, "instructions")
-	if !instructions.Exists() {
-		return "instructions_missing"
-	}
-	if instructions.Type != gjson.String {
-		return "instructions_not_string"
-	}
-	if strings.TrimSpace(instructions.String()) == "" {
-		return "instructions_empty"
-	}
-	return ""
+	return applyOpenAIOAuthHTTPAllowlist(body)
 }
 
 func extractOpenAIReasoningEffortFromBody(body []byte, requestedModel string) *string {

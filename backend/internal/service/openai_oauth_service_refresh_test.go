@@ -60,6 +60,32 @@ func TestOpenAIOAuthService_RefreshAccountToken_NoRefreshTokenUsesExistingAccess
 	require.Positive(t, atomic.LoadInt32(&privacyClientCalls), "existing access token should still run enrichment")
 }
 
+func TestOpenAIOAuthService_RefreshAccountToken_RejectsSetupToken(t *testing.T) {
+	client := &openaiOAuthClientRefreshStub{}
+	svc := NewOpenAIOAuthService(nil, client)
+	var privacyClientCalls int32
+	svc.SetPrivacyClientFactory(func(proxyURL string) (*req.Client, error) {
+		atomic.AddInt32(&privacyClientCalls, 1)
+		return nil, errors.New("setup-token must not run OAuth enrichment")
+	})
+
+	account := &Account{
+		ID:       78,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeSetupToken,
+		Credentials: map[string]any{
+			"access_token": "setup-access-token",
+		},
+	}
+
+	info, err := svc.RefreshAccountToken(context.Background(), account)
+	require.Error(t, err)
+	require.Nil(t, info)
+	require.Contains(t, err.Error(), "account is not an OAuth account")
+	require.Zero(t, atomic.LoadInt32(&client.refreshCalls), "setup-token must not call full OAuth refresh")
+	require.Zero(t, atomic.LoadInt32(&privacyClientCalls), "setup-token must not call full OAuth enrichment")
+}
+
 func TestOpenAITokenRefresher_NeedsRefresh_SkipsAccountWithoutRefreshToken(t *testing.T) {
 	refresher := NewOpenAITokenRefresher(nil, nil)
 	expiresAt := time.Now().Add(time.Minute).UTC().Format(time.RFC3339)

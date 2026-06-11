@@ -211,7 +211,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_OAuthCtxPoolAppl
 			"access_token": "oauth-token",
 		},
 		Extra: map[string]any{
-			"openai_oauth_responses_websockets_v2_enabled": true,
+			"openai_oauth_ws_mode": OpenAIOAuthWSModeManagedSession,
 		},
 	}
 
@@ -349,7 +349,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_OAuthHTTPBridgeD
 		Concurrency: 1,
 		Credentials: map[string]any{"access_token": "oauth-token"},
 		Extra: map[string]any{
-			"openai_oauth_responses_websockets_v2_enabled": true,
+			"openai_oauth_ws_mode": OpenAIOAuthWSModeManagedSession,
 		},
 	}
 
@@ -619,8 +619,8 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_InjectsCodexImag
 			"access_token": "test-token",
 		},
 		Extra: map[string]any{
-			"openai_oauth_responses_websockets_v2_enabled": true,
-			"codex_image_generation_bridge":                true,
+			"openai_oauth_ws_mode":          OpenAIOAuthWSModeManagedSession,
+			"codex_image_generation_bridge": true,
 		},
 	}
 
@@ -955,7 +955,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_PassthroughModeR
 				"server error should only be a normal close frame, got: %v", serverErr)
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("等待 passthrough websocket 结束超时")
+		t.Fatal("等待 websocket 结束超时")
 	}
 
 	select {
@@ -976,7 +976,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_PassthroughModeR
 	require.Len(t, upstreamConn.writes, 1, "passthrough 模式应透传首条 response.create")
 }
 
-func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_OAuthPassthroughAppliesWSAllowlist(t *testing.T) {
+func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_OAuthManagedSessionAppliesWSAllowlist(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	cfg := &config.Config{}
@@ -993,21 +993,23 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_OAuthPassthrough
 
 	upstreamConn := &openAIWSCaptureConn{
 		events: [][]byte{
-			[]byte(`{"type":"response.completed","response":{"id":"resp_passthrough_allowlist","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`),
+			[]byte(`{"type":"response.completed","response":{"id":"resp_oauth_managed_allowlist","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`),
 		},
 	}
 	captureDialer := &openAIWSCaptureDialer{conn: upstreamConn}
+	pool := newOpenAIWSConnPool(cfg)
+	pool.setClientDialerForTest(captureDialer)
 	svc := &OpenAIGatewayService{
-		cfg:                       cfg,
-		httpUpstream:              &httpUpstreamRecorder{},
-		cache:                     &stubGatewayCache{},
-		openaiWSResolver:          NewOpenAIWSProtocolResolver(cfg),
-		toolCorrector:             NewCodexToolCorrector(),
-		openaiWSPassthroughDialer: captureDialer,
+		cfg:              cfg,
+		httpUpstream:     &httpUpstreamRecorder{},
+		cache:            &stubGatewayCache{},
+		openaiWSResolver: NewOpenAIWSProtocolResolver(cfg),
+		toolCorrector:    NewCodexToolCorrector(),
+		openaiWSPool:     pool,
 	}
 	account := &Account{
 		ID:          454,
-		Name:        "openai-ingress-passthrough-allowlist",
+		Name:        "openai-ingress-oauth-managed-allowlist",
 		Platform:    PlatformOpenAI,
 		Type:        AccountTypeOAuth,
 		Status:      StatusActive,
@@ -1017,7 +1019,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_OAuthPassthrough
 			"access_token": "oauth-token",
 		},
 		Extra: map[string]any{
-			"openai_oauth_responses_websockets_v2_mode": OpenAIWSIngressModePassthrough,
+			"openai_oauth_ws_mode": OpenAIOAuthWSModeManagedSession,
 		},
 	}
 
@@ -1066,7 +1068,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_OAuthPassthrough
 	}()
 
 	writeCtx, cancelWrite := context.WithTimeout(context.Background(), 3*time.Second)
-	err = clientConn.Write(writeCtx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.1","stream":false,"input":"hi","instructions":"be helpful","prompt_cache_key":"pcache_passthrough","max_output_tokens":1024,"temperature":0.5,"top_p":0.9,"metadata":{"drop":true},"user":"drop","background":true,"unknown_field":"drop"}`))
+	err = clientConn.Write(writeCtx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.1","stream":false,"input":"hi","instructions":"be helpful","prompt_cache_key":"pcache_oauth_managed","max_output_tokens":1024,"temperature":0.5,"top_p":0.9,"metadata":{"drop":true},"user":"drop","background":true,"unknown_field":"drop"}`))
 	cancelWrite()
 	require.NoError(t, err)
 
@@ -1074,7 +1076,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_OAuthPassthrough
 	_, event, readErr := clientConn.Read(readCtx)
 	cancelRead()
 	require.NoError(t, readErr)
-	require.Equal(t, "resp_passthrough_allowlist", gjson.GetBytes(event, "response.id").String())
+	require.Equal(t, "resp_oauth_managed_allowlist", gjson.GetBytes(event, "response.id").String())
 	_ = clientConn.Close(coderws.StatusNormalClosure, "done")
 
 	select {
@@ -1083,15 +1085,15 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_OAuthPassthrough
 			require.Contains(t, serverErr.Error(), "StatusNormalClosure")
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("等待 oauth passthrough websocket 结束超时")
+		t.Fatal("等待 oauth managed-session websocket 结束超时")
 	}
 
 	require.Len(t, upstreamConn.writes, 1)
 	upstreamPayload := requestToJSONString(upstreamConn.writes[0])
 	require.Equal(t, "response.create", gjson.Get(upstreamPayload, "type").String())
-	require.Equal(t, "gpt-5.1", gjson.Get(upstreamPayload, "model").String())
+	require.Equal(t, "gpt-5.4", gjson.Get(upstreamPayload, "model").String())
 	require.Equal(t, "be helpful", gjson.Get(upstreamPayload, "instructions").String())
-	require.Equal(t, "pcache_passthrough", gjson.Get(upstreamPayload, "prompt_cache_key").String())
+	require.Equal(t, "pcache_oauth_managed", gjson.Get(upstreamPayload, "prompt_cache_key").String())
 	for _, field := range []string{"max_output_tokens", "temperature", "top_p", "metadata", "user", "background", "unknown_field"} {
 		require.False(t, gjson.Get(upstreamPayload, field).Exists(), "%s should be removed by OAuth WS allowlist", field)
 	}
@@ -1329,7 +1331,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_APIKeyPassthroug
 	require.Equal(t, "keep", gjson.Get(upstreamPayload, "unknown_field").String())
 }
 
-func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_OAuthPassthroughMissingTypeAppliesWSAllowlist(t *testing.T) {
+func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_OAuthManagedSessionMissingTypeAppliesWSAllowlist(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	cfg := &config.Config{}
@@ -1346,21 +1348,23 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_OAuthPassthrough
 
 	upstreamConn := &openAIWSCaptureConn{
 		events: [][]byte{
-			[]byte(`{"type":"response.completed","response":{"id":"resp_passthrough_missing_type","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`),
+			[]byte(`{"type":"response.completed","response":{"id":"resp_oauth_managed_missing_type","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`),
 		},
 	}
 	captureDialer := &openAIWSCaptureDialer{conn: upstreamConn}
+	pool := newOpenAIWSConnPool(cfg)
+	pool.setClientDialerForTest(captureDialer)
 	svc := &OpenAIGatewayService{
-		cfg:                       cfg,
-		httpUpstream:              &httpUpstreamRecorder{},
-		cache:                     &stubGatewayCache{},
-		openaiWSResolver:          NewOpenAIWSProtocolResolver(cfg),
-		toolCorrector:             NewCodexToolCorrector(),
-		openaiWSPassthroughDialer: captureDialer,
+		cfg:              cfg,
+		httpUpstream:     &httpUpstreamRecorder{},
+		cache:            &stubGatewayCache{},
+		openaiWSResolver: NewOpenAIWSProtocolResolver(cfg),
+		toolCorrector:    NewCodexToolCorrector(),
+		openaiWSPool:     pool,
 	}
 	account := &Account{
 		ID:          455,
-		Name:        "openai-ingress-passthrough-missing-type-allowlist",
+		Name:        "openai-ingress-oauth-managed-missing-type-allowlist",
 		Platform:    PlatformOpenAI,
 		Type:        AccountTypeOAuth,
 		Status:      StatusActive,
@@ -1368,7 +1372,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_OAuthPassthrough
 		Concurrency: 1,
 		Credentials: map[string]any{"access_token": "oauth-token"},
 		Extra: map[string]any{
-			"openai_oauth_responses_websockets_v2_mode": OpenAIWSIngressModePassthrough,
+			"openai_oauth_ws_mode": OpenAIOAuthWSModeManagedSession,
 		},
 	}
 
@@ -1419,7 +1423,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_OAuthPassthrough
 	_, event, readErr := clientConn.Read(readCtx)
 	cancelRead()
 	require.NoError(t, readErr)
-	require.Equal(t, "resp_passthrough_missing_type", gjson.GetBytes(event, "response.id").String())
+	require.Equal(t, "resp_oauth_managed_missing_type", gjson.GetBytes(event, "response.id").String())
 	_ = clientConn.Close(coderws.StatusNormalClosure, "done")
 
 	select {
@@ -1428,20 +1432,20 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_OAuthPassthrough
 			require.Contains(t, serverErr.Error(), "StatusNormalClosure")
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("等待 oauth passthrough missing-type websocket 结束超时")
+		t.Fatal("等待 oauth managed-session missing-type websocket 结束超时")
 	}
 
 	require.Len(t, upstreamConn.writes, 1)
 	upstreamPayload := requestToJSONString(upstreamConn.writes[0])
 	require.Equal(t, "response.create", gjson.Get(upstreamPayload, "type").String())
-	require.Equal(t, "gpt-5.1", gjson.Get(upstreamPayload, "model").String())
+	require.Equal(t, "gpt-5.4", gjson.Get(upstreamPayload, "model").String())
 	require.Equal(t, "be helpful", gjson.Get(upstreamPayload, "instructions").String())
 	for _, field := range []string{"max_output_tokens", "temperature", "top_p", "metadata", "user", "background", "unknown_field"} {
 		require.False(t, gjson.Get(upstreamPayload, field).Exists(), "%s should be removed by OAuth WS allowlist", field)
 	}
 }
 
-func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_OAuthPassthroughBinaryFollowupAppliesWSAllowlist(t *testing.T) {
+func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_OAuthManagedSessionBinaryFollowupAppliesWSAllowlist(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	cfg := &config.Config{}
@@ -1464,17 +1468,19 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_OAuthPassthrough
 		},
 	}
 	captureDialer := &openAIWSCaptureDialer{conn: upstreamConn}
+	pool := newOpenAIWSConnPool(cfg)
+	pool.setClientDialerForTest(captureDialer)
 	svc := &OpenAIGatewayService{
-		cfg:                       cfg,
-		httpUpstream:              &httpUpstreamRecorder{},
-		cache:                     &stubGatewayCache{},
-		openaiWSResolver:          NewOpenAIWSProtocolResolver(cfg),
-		toolCorrector:             NewCodexToolCorrector(),
-		openaiWSPassthroughDialer: captureDialer,
+		cfg:              cfg,
+		httpUpstream:     &httpUpstreamRecorder{},
+		cache:            &stubGatewayCache{},
+		openaiWSResolver: NewOpenAIWSProtocolResolver(cfg),
+		toolCorrector:    NewCodexToolCorrector(),
+		openaiWSPool:     pool,
 	}
 	account := &Account{
 		ID:          456,
-		Name:        "openai-ingress-passthrough-binary-allowlist",
+		Name:        "openai-ingress-oauth-managed-binary-allowlist",
 		Platform:    PlatformOpenAI,
 		Type:        AccountTypeOAuth,
 		Status:      StatusActive,
@@ -1482,7 +1488,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_OAuthPassthrough
 		Concurrency: 1,
 		Credentials: map[string]any{"access_token": "oauth-token"},
 		Extra: map[string]any{
-			"openai_oauth_responses_websockets_v2_mode": OpenAIWSIngressModePassthrough,
+			"openai_oauth_ws_mode": OpenAIOAuthWSModeManagedSession,
 		},
 	}
 
@@ -1553,7 +1559,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_OAuthPassthrough
 			require.Contains(t, serverErr.Error(), "StatusNormalClosure")
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("等待 oauth passthrough binary websocket 结束超时")
+		t.Fatal("等待 oauth managed-session binary websocket 结束超时")
 	}
 
 	require.Len(t, upstreamConn.writes, 2)
@@ -1565,7 +1571,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_OAuthPassthrough
 	}
 }
 
-func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_PassthroughHeadersUsePromptCacheAndTurnState(t *testing.T) {
+func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_OAuthManagedSessionHeadersUsePromptCacheAndTurnState(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	cfg := &config.Config{}
@@ -1583,21 +1589,23 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_PassthroughHeade
 
 	upstreamConn := &openAIWSCaptureConn{
 		events: [][]byte{
-			[]byte(`{"type":"response.completed","response":{"id":"resp_passthrough_headers","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`),
+			[]byte(`{"type":"response.completed","response":{"id":"resp_oauth_managed_headers","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`),
 		},
 	}
 	captureDialer := &openAIWSCaptureDialer{conn: upstreamConn}
+	pool := newOpenAIWSConnPool(cfg)
+	pool.setClientDialerForTest(captureDialer)
 	svc := &OpenAIGatewayService{
-		cfg:                       cfg,
-		httpUpstream:              &httpUpstreamRecorder{},
-		cache:                     &stubGatewayCache{},
-		openaiWSResolver:          NewOpenAIWSProtocolResolver(cfg),
-		toolCorrector:             NewCodexToolCorrector(),
-		openaiWSPassthroughDialer: captureDialer,
+		cfg:              cfg,
+		httpUpstream:     &httpUpstreamRecorder{},
+		cache:            &stubGatewayCache{},
+		openaiWSResolver: NewOpenAIWSProtocolResolver(cfg),
+		toolCorrector:    NewCodexToolCorrector(),
+		openaiWSPool:     pool,
 	}
 	account := &Account{
 		ID:          453,
-		Name:        "openai-ingress-passthrough-headers",
+		Name:        "openai-ingress-oauth-managed-headers",
 		Platform:    PlatformOpenAI,
 		Type:        AccountTypeOAuth,
 		Status:      StatusActive,
@@ -1607,7 +1615,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_PassthroughHeade
 			"access_token": "oauth-token",
 		},
 		Extra: map[string]any{
-			"openai_oauth_responses_websockets_v2_mode": OpenAIWSIngressModePassthrough,
+			"openai_oauth_ws_mode": OpenAIOAuthWSModeManagedSession,
 		},
 	}
 
@@ -1658,7 +1666,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_PassthroughHeade
 	}()
 
 	writeCtx, cancelWrite := context.WithTimeout(context.Background(), 3*time.Second)
-	err = clientConn.Write(writeCtx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.1","stream":false,"prompt_cache_key":"pcache_passthrough"}`))
+	err = clientConn.Write(writeCtx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.1","stream":false,"prompt_cache_key":"pcache_oauth_managed"}`))
 	cancelWrite()
 	require.NoError(t, err)
 
@@ -1666,7 +1674,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_PassthroughHeade
 	_, event, readErr := clientConn.Read(readCtx)
 	cancelRead()
 	require.NoError(t, readErr)
-	require.Equal(t, "resp_passthrough_headers", gjson.GetBytes(event, "response.id").String())
+	require.Equal(t, "resp_oauth_managed_headers", gjson.GetBytes(event, "response.id").String())
 	_ = clientConn.Close(coderws.StatusNormalClosure, "done")
 
 	select {
@@ -1675,10 +1683,10 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_PassthroughHeade
 			require.Contains(t, serverErr.Error(), "StatusNormalClosure")
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("等待 passthrough websocket 结束超时")
+		t.Fatal("等待 websocket 结束超时")
 	}
 
-	require.Equal(t, isolateOpenAISessionID(0, "pcache_passthrough"), captureDialer.lastHeaders.Get("session_id"))
+	require.Equal(t, isolateOpenAISessionID(0, "pcache_oauth_managed"), captureDialer.lastHeaders.Get("session_id"))
 	require.Equal(t, "turn-state-1", captureDialer.lastHeaders.Get(openAIWSTurnStateHeader))
 	require.Equal(t, "turn-meta-1", captureDialer.lastHeaders.Get(openAIWSTurnMetadataHeader))
 }

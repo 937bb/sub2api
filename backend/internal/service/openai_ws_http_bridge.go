@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
@@ -191,7 +192,16 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	}
 
 	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
-	upstreamReq, err := s.buildUpstreamRequestOpenAIPassthrough(upstreamCtx, c, account, body, token)
+	var upstreamReq *http.Request
+	if account.IsOpenAIOAuthLike() {
+		isCodexCLI := false
+		if c != nil {
+			isCodexCLI = openai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator")) || (s.cfg != nil && s.cfg.Gateway.ForceCodexCLI)
+		}
+		upstreamReq, err = s.buildUpstreamRequestOpenAIOAuthAdapter(upstreamCtx, c, account, body, token, "", isCodexCLI)
+	} else {
+		upstreamReq, err = s.buildUpstreamRequestOpenAIPassthrough(upstreamCtx, c, account, body, token)
+	}
 	releaseUpstreamCtx()
 	if err != nil {
 		return nil, err
@@ -202,7 +212,11 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		proxyURL = account.Proxy.URL()
 	}
 	if c != nil {
-		c.Set("openai_passthrough", true)
+		// WS HTTP bridge is shared by APIKey native relay and OAuth adapter paths;
+		// only APIKey keeps passthrough semantics/ops tagging.
+		if !account.IsOpenAIOAuthLike() {
+			c.Set("openai_passthrough", true)
+		}
 		c.Set("openai_ws_http_bridge", true)
 	}
 
@@ -212,6 +226,14 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		safeErr := sanitizeUpstreamErrorMessage(err.Error())
 		_ = writeClientMessage(buildOpenAIWSHTTPBridgeErrorEvent(http.StatusBadGateway, "Upstream request failed"))
 		return nil, fmt.Errorf("upstream http bridge request failed: %s", safeErr)
+	}
+	if resp == nil {
+		_ = writeClientMessage(buildOpenAIWSHTTPBridgeErrorEvent(http.StatusBadGateway, "Upstream request failed"))
+		return nil, errors.New("upstream http bridge returned nil response")
+	}
+	if resp.Body == nil {
+		_ = writeClientMessage(buildOpenAIWSHTTPBridgeErrorEvent(http.StatusBadGateway, "Upstream request failed"))
+		return nil, errors.New("upstream http bridge returned nil response body")
 	}
 	defer func() { _ = resp.Body.Close() }()
 

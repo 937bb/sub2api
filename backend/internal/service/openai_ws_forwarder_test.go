@@ -1,10 +1,14 @@
 package service
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 // TestIsOpenAIWSTokenEvent_TerminalEventsExcluded 覆盖 isOpenAIWSTokenEvent 的回归用例。
@@ -111,6 +115,18 @@ func TestApplyOpenAIOAuthWSAllowlistRawPreservesAllowedRawJSON(t *testing.T) {
 	require.NotContains(t, string(filtered), "unknown_field")
 }
 
+func TestApplyOpenAIOAuthWSAllowlistRawAppliesToSetupToken(t *testing.T) {
+	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeSetupToken}
+	payload := []byte(`{"type":"response.create","model":"gpt-5-codex","tools":[{"type":"function","name":"big","parameters":{"const":9007199254740993}}],"unknown_field":"drop"}`)
+
+	filtered, err := applyOpenAIOAuthWSAllowlistRaw(payload, account)
+
+	require.NoError(t, err)
+	require.Contains(t, string(filtered), `9007199254740993`)
+	require.NotContains(t, string(filtered), "9007199254740992")
+	require.NotContains(t, string(filtered), "unknown_field")
+}
+
 func TestApplyOpenAIOAuthWSAllowlistRawUsesAllowlistOrder(t *testing.T) {
 	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth}
 	payload := []byte(`{"unknown_field":"drop","model":"gpt-5-codex","type":"response.create","input":"hi"}`)
@@ -122,6 +138,26 @@ func TestApplyOpenAIOAuthWSAllowlistRawUsesAllowlistOrder(t *testing.T) {
 	require.True(t, strings.Index(filteredString, `"type"`) < strings.Index(filteredString, `"model"`))
 	require.True(t, strings.Index(filteredString, `"model"`) < strings.Index(filteredString, `"input"`))
 	require.NotContains(t, filteredString, "unknown_field")
+}
+
+func TestBuildOpenAIWSCreatePayloadSetupTokenAppliesOAuthAllowlist(t *testing.T) {
+	svc := &OpenAIGatewayService{}
+	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeSetupToken}
+	req := map[string]any{
+		"model":             "gpt-5-codex",
+		"stream":            true,
+		"background":        false,
+		"store":             true,
+		"max_output_tokens": 1024,
+	}
+
+	payload := svc.buildOpenAIWSCreatePayload(req, account)
+
+	require.Equal(t, "response.create", payload["type"])
+	require.NotContains(t, payload, "background")
+	require.NotContains(t, payload, "max_output_tokens")
+	require.Equal(t, false, payload["store"])
+	require.Equal(t, true, req["store"])
 }
 
 func TestBuildOpenAIWSCreatePayloadAPIKeyKeepsExistingBehavior(t *testing.T) {
@@ -157,4 +193,57 @@ func TestBuildOpenAIWSCreatePayloadPreservesExplicitWSFields(t *testing.T) {
 	require.Equal(t, "resp_123", payload["previous_response_id"])
 	require.Equal(t, true, payload["generate"])
 	require.Equal(t, true, payload["stream"])
+}
+
+func TestOpenAIWSStoreDisabledTreatsSetupTokenAsOAuthLike(t *testing.T) {
+	svc := &OpenAIGatewayService{}
+	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeSetupToken}
+
+	require.True(t, svc.isOpenAIWSStoreDisabledInRequest(map[string]any{"store": true}, account))
+	require.True(t, svc.isOpenAIWSStoreDisabledInRequestRaw([]byte(`{"store":true}`), account))
+}
+
+func TestBuildOpenAIWSHeadersSetupTokenUsesOAuthIsolation(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+	c.Request.Header.Set("session_id", "shared-session")
+	c.Request.Header.Set("User-Agent", "generic-client")
+	c.Set("api_key", &APIKey{ID: 77})
+
+	svc := &OpenAIGatewayService{}
+	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeSetupToken}
+	headers, _ := svc.buildOpenAIWSHeaders(c, account, "token", OpenAIWSProtocolDecision{Transport: OpenAIUpstreamTransportResponsesWebsocketV2}, true, "", "", "", "")
+
+	require.Equal(t, isolateOpenAISessionID(77, "shared-session"), headers.Get("session_id"))
+	require.Equal(t, headers.Get("session_id"), headers.Get(openAICodexSessionIDHeader))
+	require.Equal(t, codexCLIVersion, headers.Get("version"))
+	require.Equal(t, svc.resolveOpenAICodexUserAgent(c.Request.Context()), headers.Get("user-agent"))
+}
+
+func TestBuildOpenAIResponsesWSURLSetupTokenUsesOAuthEndpoint(t *testing.T) {
+	svc := &OpenAIGatewayService{}
+	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeSetupToken}
+
+	wsURL, err := svc.buildOpenAIResponsesWSURL(account)
+
+	require.NoError(t, err)
+	require.Equal(t, "wss://chatgpt.com/backend-api/codex/responses", wsURL)
+}
+
+func TestDecodeOpenAIWSBridgePayloadMapSetupTokenPreservesRawNumbers(t *testing.T) {
+	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeSetupToken}
+	normalized := []byte(`{"type":"response.create","model":"gpt-5.4","tools":[{"type":"function","name":"big","parameters":{"const":9007199254740993}}]}`)
+
+	payloadMap, err := decodeOpenAIWSBridgePayloadMap(normalized, account)
+	require.NoError(t, err)
+	require.True(t, ensureOpenAIResponsesImageGenerationTool(payloadMap))
+
+	rebuilt, err := marshalOpenAIUpstreamJSON(payloadMap)
+
+	require.NoError(t, err)
+	require.Equal(t, "9007199254740993", gjson.GetBytes(rebuilt, "tools.0.parameters.const").Raw)
+	require.NotContains(t, string(rebuilt), "9007199254740992")
+	require.Equal(t, "image_generation", gjson.GetBytes(rebuilt, "tools.1.type").String())
 }

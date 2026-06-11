@@ -1120,10 +1120,9 @@ func (s *OpenAIGatewayService) buildOpenAIResponsesWSURL(account *Account) (stri
 		return "", errors.New("account is nil")
 	}
 	var targetURL string
-	switch account.Type {
-	case AccountTypeOAuth:
+	if account.IsOpenAIOAuthLike() {
 		targetURL = chatgptCodexURL
-	case AccountTypeAPIKey:
+	} else if account.IsOpenAIApiKey() {
 		baseURL := account.GetOpenAIBaseURL()
 		if baseURL == "" {
 			targetURL = openaiPlatformAPIURL
@@ -1134,7 +1133,7 @@ func (s *OpenAIGatewayService) buildOpenAIResponsesWSURL(account *Account) (stri
 			}
 			targetURL = buildOpenAIResponsesURL(validatedURL)
 		}
-	default:
+	} else {
 		targetURL = openaiPlatformAPIURL
 	}
 
@@ -1176,7 +1175,7 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 		}
 	}
 	// OAuth 账号：将 apiKeyID 混入 session 标识符，防止跨用户会话碰撞。
-	if account != nil && account.Type == AccountTypeOAuth {
+	if account != nil && account.IsOpenAIOAuthLike() {
 		apiKeyID := getAPIKeyIDFromContext(c)
 		if sessionResolution.SessionID != "" {
 			headers.Set("session_id", isolateOpenAISessionID(apiKeyID, sessionResolution.SessionID))
@@ -1218,7 +1217,7 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 		headers.Set(openAIWSTurnMetadataHeader, metadata)
 	}
 
-	if account != nil && account.Type == AccountTypeOAuth {
+	if account != nil && account.IsOpenAIOAuthLike() {
 		if chatgptAccountID := account.GetChatGPTAccountID(); chatgptAccountID != "" {
 			headers.Set("chatgpt-account-id", chatgptAccountID)
 		}
@@ -1258,8 +1257,12 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 	if s != nil && s.cfg != nil && s.cfg.Gateway.ForceCodexCLI {
 		headers.Set("user-agent", codexCLIUserAgent)
 	}
-	if account != nil && account.Type == AccountTypeOAuth && !openai.IsCodexOfficialClientRequest(headers.Get("user-agent")) {
-		headers.Set("user-agent", s.resolveOpenAICodexUserAgent(c.Request.Context()))
+	if account != nil && account.IsOpenAIOAuthLike() && !openai.IsCodexOfficialClientRequest(headers.Get("user-agent")) {
+		requestCtx := context.Background()
+		if c != nil && c.Request != nil {
+			requestCtx = c.Request.Context()
+		}
+		headers.Set("user-agent", s.resolveOpenAICodexUserAgent(requestCtx))
 	}
 
 	return headers, sessionResolution
@@ -1316,7 +1319,7 @@ func filterOpenAIWSAllowlist(payload map[string]any) map[string]any {
 }
 
 func applyOpenAIOAuthWSAllowlist(payload map[string]any, account *Account) map[string]any {
-	if account == nil || !account.IsOpenAIOAuth() {
+	if account == nil || !account.IsOpenAIOAuthLike() {
 		return payload
 	}
 	return filterOpenAIWSAllowlist(payload)
@@ -1339,8 +1342,19 @@ func normalizeOpenAIWSResponseCreateTypeRaw(payload []byte) ([]byte, error) {
 	return updated, nil
 }
 
+func decodeOpenAIWSBridgePayloadMap(payload []byte, account *Account) (map[string]any, error) {
+	if account != nil && account.IsOpenAIOAuthLike() {
+		return decodeOpenAIRequestBodyMapUseNumber(payload)
+	}
+	payloadMap := make(map[string]any)
+	if err := json.Unmarshal(payload, &payloadMap); err != nil {
+		return nil, err
+	}
+	return payloadMap, nil
+}
+
 func applyOpenAIOAuthWSAllowlistRaw(payload []byte, account *Account) ([]byte, error) {
-	if account == nil || !account.IsOpenAIOAuth() || len(payload) == 0 {
+	if account == nil || !account.IsOpenAIOAuthLike() || len(payload) == 0 {
 		return payload, nil
 	}
 	if !gjson.ValidBytes(payload) || strings.TrimSpace(gjson.GetBytes(payload, "type").String()) != "response.create" {
@@ -1368,7 +1382,7 @@ func (s *OpenAIGatewayService) buildOpenAIWSCreatePayload(reqBody map[string]any
 		payload[k] = v
 	}
 
-	if account == nil || !account.IsOpenAIOAuth() {
+	if account == nil || !account.IsOpenAIOAuthLike() {
 		delete(payload, "background")
 	}
 	if _, exists := payload["stream"]; !exists {
@@ -1376,8 +1390,8 @@ func (s *OpenAIGatewayService) buildOpenAIWSCreatePayload(reqBody map[string]any
 	}
 	payload["type"] = "response.create"
 
-	// OAuth 默认保持 store=false，避免误依赖服务端历史。
-	if account != nil && account.Type == AccountTypeOAuth && !s.isOpenAIWSStoreRecoveryAllowed(account) {
+	// OAuth-like 账号默认保持 store=false，避免误依赖服务端历史。
+	if account != nil && account.IsOpenAIOAuthLike() && !s.isOpenAIWSStoreRecoveryAllowed(account) {
 		payload["store"] = false
 	}
 	return applyOpenAIOAuthWSAllowlist(payload, account)
@@ -1449,7 +1463,7 @@ func (s *OpenAIGatewayService) isOpenAIWSStoreRecoveryAllowed(account *Account) 
 }
 
 func (s *OpenAIGatewayService) isOpenAIWSStoreDisabledInRequest(reqBody map[string]any, account *Account) bool {
-	if account != nil && account.Type == AccountTypeOAuth && !s.isOpenAIWSStoreRecoveryAllowed(account) {
+	if account != nil && account.IsOpenAIOAuthLike() && !s.isOpenAIWSStoreRecoveryAllowed(account) {
 		return true
 	}
 	if len(reqBody) == 0 {
@@ -1467,7 +1481,7 @@ func (s *OpenAIGatewayService) isOpenAIWSStoreDisabledInRequest(reqBody map[stri
 }
 
 func (s *OpenAIGatewayService) isOpenAIWSStoreDisabledInRequestRaw(reqBody []byte, account *Account) bool {
-	if account != nil && account.Type == AccountTypeOAuth && !s.isOpenAIWSStoreRecoveryAllowed(account) {
+	if account != nil && account.IsOpenAIOAuthLike() && !s.isOpenAIWSStoreRecoveryAllowed(account) {
 		return true
 	}
 	if len(reqBody) == 0 {
@@ -2830,14 +2844,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		imageGenerationAllowed := GroupAllowsImageGeneration(apiKeyGroup(apiKey))
 		codexBridgeEnabled := isCodexCLI && imageGenerationAllowed && s.isCodexImageGenerationBridgeEnabled(ctx, account, apiKey)
 		if codexBridgeEnabled {
-			var payloadMap map[string]any
-			var decodeErr error
-			if account != nil && account.IsOpenAIOAuth() {
-				payloadMap, decodeErr = decodeOpenAIRequestBodyMapUseNumber(normalized)
-			} else {
-				payloadMap = make(map[string]any)
-				decodeErr = json.Unmarshal(normalized, &payloadMap)
-			}
+			payloadMap, decodeErr := decodeOpenAIWSBridgePayloadMap(normalized, account)
 			if decodeErr != nil {
 				return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", decodeErr)
 			}
@@ -4507,6 +4514,13 @@ func (s *OpenAIGatewayService) selectAccountByPreviousResponseIDForCapability(
 		_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
 		return nil, nil
 	}
+	schedGroup := s.resolveOpenAISchedulingGroup(ctx, groupID)
+	var ok bool
+	account, ok = s.resolveOpenAIAccountForPrivacyRequirement(ctx, account, schedGroup)
+	if !ok {
+		_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
+		return nil, nil
+	}
 	if requestedModel != "" && !account.IsModelSupported(requestedModel) {
 		return nil, nil
 	}
@@ -4537,6 +4551,11 @@ func (s *OpenAIGatewayService) selectAccountByPreviousResponseIDForCapability(
 			return nil, nil
 		}
 		if paused, _ := shouldAutoPauseOpenAIAccountByQuota(ctx, latest); paused {
+			return nil, nil
+		}
+		latest, ok = s.resolveOpenAIAccountForPrivacyRequirement(ctx, latest, schedGroup)
+		if !ok {
+			_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
 			return nil, nil
 		}
 		if s.isOpenAIAccountRuntimeBlocked(latest) {
