@@ -609,6 +609,13 @@ func (s *CRSSyncService) SyncFromCRS(ctx context.Context, input SyncFromCRSInput
 				Status:      status,
 				Schedulable: src.Schedulable,
 			}
+			if err := validateOpenAIOAuthAccountWriteConfig(account); err != nil {
+				item.Action = "failed"
+				item.Error = err.Error()
+				result.Failed++
+				result.Items = append(result.Items, item)
+				continue
+			}
 			if err := s.accountRepo.Create(ctx, account); err != nil {
 				item.Action = "failed"
 				item.Error = "create failed: " + err.Error()
@@ -639,6 +646,13 @@ func (s *CRSSyncService) SyncFromCRS(ctx context.Context, input SyncFromCRSInput
 		existing.Status = status
 		existing.Schedulable = src.Schedulable
 
+		if err := validateOpenAIOAuthAccountWriteConfig(existing); err != nil {
+			item.Action = "failed"
+			item.Error = err.Error()
+			result.Failed++
+			result.Items = append(result.Items, item)
+			continue
+		}
 		if err := s.accountRepo.Update(ctx, existing); err != nil {
 			item.Action = "failed"
 			item.Error = "update failed: " + err.Error()
@@ -1165,7 +1179,7 @@ func crsLogin(ctx context.Context, client *http.Client, baseURL, username, passw
 
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("crs login failed: status=%d body=%s", resp.StatusCode, string(raw))
+		return "", fmt.Errorf("crs login failed: status=%d", resp.StatusCode)
 	}
 
 	var parsed crsLoginResponse
@@ -1200,7 +1214,7 @@ func crsExportAccounts(ctx context.Context, client *http.Client, baseURL, adminT
 
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 5<<20))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("crs export failed: status=%d body=%s", resp.StatusCode, string(raw))
+		return nil, fmt.Errorf("crs export failed: status=%d", resp.StatusCode)
 	}
 
 	var parsed crsExportResponse

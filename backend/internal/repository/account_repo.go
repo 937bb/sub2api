@@ -418,6 +418,39 @@ func (r *accountRepository) UpdateCredentials(ctx context.Context, id int64, cre
 	return nil
 }
 
+func (r *accountRepository) UpdateAuthAndMergeExtra(ctx context.Context, id int64, accountType string, credentials, extraUpdates map[string]any) error {
+	credentialsPayload, err := json.Marshal(normalizeJSONMap(credentials))
+	if err != nil {
+		return err
+	}
+	extraPayload, err := json.Marshal(normalizeJSONMap(extraUpdates))
+	if err != nil {
+		return err
+	}
+
+	client := clientFromContext(ctx, r.client)
+	result, err := client.ExecContext(
+		ctx,
+		"UPDATE accounts SET type = $1, credentials = $2::jsonb, extra = COALESCE(extra, '{}'::jsonb) || $3::jsonb, updated_at = NOW() WHERE id = $4 AND deleted_at IS NULL",
+		accountType, string(credentialsPayload), string(extraPayload), id,
+	)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return service.ErrAccountNotFound
+	}
+	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
+		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue auth/extra update failed: account=%d err=%v", id, err)
+	}
+	r.syncSchedulerAccountSnapshot(ctx, id)
+	return nil
+}
+
 func (r *accountRepository) Delete(ctx context.Context, id int64) error {
 	groupIDs, err := r.loadAccountGroupIDs(ctx, id)
 	if err != nil {
@@ -656,6 +689,20 @@ func (r *accountRepository) ListByPlatform(ctx context.Context, platform string)
 		Where(
 			dbaccount.PlatformEQ(platform),
 			dbaccount.StatusEQ(service.StatusActive),
+		).
+		Order(dbent.Asc(dbaccount.FieldPriority)).
+		All(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return r.accountsToService(ctx, accounts)
+}
+
+func (r *accountRepository) ListByPlatformForValidation(ctx context.Context, platform string) ([]service.Account, error) {
+	accounts, err := r.client.Account.Query().
+		Where(
+			dbaccount.PlatformEQ(platform),
+			dbaccount.DeletedAtIsNil(),
 		).
 		Order(dbent.Asc(dbaccount.FieldPriority)).
 		All(ctx)

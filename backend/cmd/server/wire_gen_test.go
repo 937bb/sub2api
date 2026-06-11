@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -68,6 +70,7 @@ func TestProvideCleanup_WithMinimalDependencies_NoPanic(t *testing.T) {
 		billingCacheSvc,
 		&service.UsageRecordWorkerPool{},
 		&service.SubscriptionService{},
+		&service.OpenAIOAuthStartupConfigValidation{},
 		oauthSvc,
 		openAIOAuthSvc,
 		geminiOAuthSvc,
@@ -83,4 +86,32 @@ func TestProvideCleanup_WithMinimalDependencies_NoPanic(t *testing.T) {
 	require.NotPanics(t, func() {
 		cleanup()
 	})
+}
+
+func TestWireGeneratedStartupValidationRunsBeforeSideEffectingProviders(t *testing.T) {
+	content, err := os.ReadFile("wire_gen.go")
+	require.NoError(t, err)
+	wireGen := string(content)
+
+	validationIndex := strings.Index(wireGen, "service.ProvideOpenAIOAuthStartupConfigValidation")
+	require.NotEqual(t, -1, validationIndex, "startup validation must be wired into initializeApplication")
+
+	for _, provider := range []string{
+		"service.ProvideEmailQueueService",
+		"service.ProvideBillingCacheService",
+		"service.ProvideAPIKeyAuthCacheInvalidator",
+		"service.ProvideConcurrencyService",
+		"service.ProvideTimingWheelService",
+		"service.ProvideDeferredService",
+		"service.ProvideSchedulerSnapshotService",
+		"service.ProvideDashboardAggregationService",
+		"service.ProvideUsageCleanupService",
+		"service.ProvideTokenRefreshService",
+		"service.ProvideAccountExpiryService",
+		"service.ProvideSubscriptionExpiryService",
+	} {
+		providerIndex := strings.Index(wireGen, provider)
+		require.NotEqual(t, -1, providerIndex, "%s must be present in generated wiring", provider)
+		require.Less(t, validationIndex, providerIndex, "startup validation must run before side-effecting provider %s", provider)
+	}
 }

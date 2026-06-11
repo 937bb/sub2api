@@ -498,6 +498,26 @@ func (s *AccountRepoSuite) TestListByPlatform() {
 	s.Require().Equal(service.PlatformAnthropic, accounts[0].Platform)
 }
 
+func (s *AccountRepoSuite) TestListByPlatformForValidationIncludesDisabledAndExcludesDeleted() {
+	disabled := mustCreateAccount(s.T(), s.client, &service.Account{Name: "openai-disabled", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Status: service.StatusDisabled})
+	mustCreateAccount(s.T(), s.client, &service.Account{Name: "openai-active", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Status: service.StatusActive})
+	deleted := mustCreateAccount(s.T(), s.client, &service.Account{Name: "openai-deleted", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Status: service.StatusError})
+	mustCreateAccount(s.T(), s.client, &service.Account{Name: "anthropic-disabled", Platform: service.PlatformAnthropic, Status: service.StatusDisabled})
+	s.Require().NoError(s.repo.Delete(s.ctx, deleted.ID), "delete account")
+
+	accounts, err := s.repo.ListByPlatformForValidation(s.ctx, service.PlatformOpenAI)
+
+	s.Require().NoError(err, "ListByPlatformForValidation")
+	s.Require().Len(accounts, 2)
+	ids := make([]int64, 0, len(accounts))
+	for _, account := range accounts {
+		s.Require().Equal(service.PlatformOpenAI, account.Platform)
+		ids = append(ids, account.ID)
+	}
+	s.Require().Contains(ids, disabled.ID)
+	s.Require().NotContains(ids, deleted.ID)
+}
+
 // --- Preload and VirtualFields ---
 
 func (s *AccountRepoSuite) TestPreload_And_VirtualFields() {
@@ -888,6 +908,30 @@ func (s *AccountRepoSuite) TestUpdateExtra_NilExtra() {
 	got, err := s.repo.GetByID(s.ctx, account.ID)
 	s.Require().NoError(err)
 	s.Require().Equal("val", got.Extra["key"])
+}
+
+func (s *AccountRepoSuite) TestUpdateAuthAndMergeExtraPreservesConcurrentExtra() {
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:        "acc-auth-extra",
+		Platform:    service.PlatformOpenAI,
+		Type:        service.AccountTypeOAuth,
+		Credentials: map[string]any{"refresh_token": "rt-old"},
+		Extra:       map[string]any{"existing": "keep"},
+	})
+
+	s.Require().NoError(s.repo.UpdateAuthAndMergeExtra(
+		s.ctx,
+		account.ID,
+		service.AccountTypeOAuth,
+		map[string]any{"access_token": "at-new"},
+		map[string]any{"org_uuid": "org"},
+	))
+
+	got, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().Equal("at-new", got.Credentials["access_token"])
+	s.Require().Equal("keep", got.Extra["existing"])
+	s.Require().Equal("org", got.Extra["org_uuid"])
 }
 
 func (s *AccountRepoSuite) TestUpdateExtra_SchedulerNeutralSkipsOutboxAndSyncsFreshSnapshot() {

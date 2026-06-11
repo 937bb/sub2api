@@ -36,7 +36,7 @@ func ProvideUpdateService(cache UpdateCache, githubClient GitHubReleaseClient, b
 }
 
 // ProvideEmailQueueService creates EmailQueueService with default worker count
-func ProvideEmailQueueService(emailService *EmailService) *EmailQueueService {
+func ProvideEmailQueueService(emailService *EmailService, _ *OpenAIOAuthStartupConfigValidation) *EmailQueueService {
 	return NewEmailQueueService(emailService, 3)
 }
 
@@ -192,7 +192,7 @@ func ProvideDeferredService(accountRepo AccountRepository, timingWheel *TimingWh
 }
 
 // ProvideConcurrencyService creates ConcurrencyService and starts slot cleanup worker.
-func ProvideConcurrencyService(cache ConcurrencyCache, accountRepo AccountRepository, cfg *config.Config) *ConcurrencyService {
+func ProvideConcurrencyService(cache ConcurrencyCache, accountRepo AccountRepository, cfg *config.Config, _ *OpenAIOAuthStartupConfigValidation) *ConcurrencyService {
 	svc := NewConcurrencyService(cache)
 	if err := svc.CleanupStaleProcessSlots(context.Background()); err != nil {
 		logger.LegacyPrintf("service.concurrency", "Warning: startup cleanup stale process slots failed: %v", err)
@@ -471,6 +471,7 @@ func ProvideBillingCacheService(
 	rateRepo UserGroupRateRepository,
 	cfg *config.Config,
 	userPlatformQuotaRepo UserPlatformQuotaRepository,
+	_ *OpenAIOAuthStartupConfigValidation,
 ) *BillingCacheService {
 	return NewBillingCacheService(cache, userRepo, subRepo, apiKeyRepo, rpmCache, rateRepo, cfg, userPlatformQuotaRepo)
 }
@@ -510,6 +511,7 @@ var ProviderSet = wire.NewSet(
 	ProvideBillingCacheService,
 	NewAnnouncementService,
 	NewAdminService,
+	ProvideOpenAIOAuthStartupConfigValidation,
 	NewGatewayService,
 	NewOpenAIGatewayService,
 	wire.Bind(new(AccountRuntimeBlocker), new(*OpenAIGatewayService)),

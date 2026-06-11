@@ -175,7 +175,8 @@ func TestAccountTestService_OpenAIOAuthProbeSendsCodexFingerprint(t *testing.T) 
 	require.NotEmpty(t, upstream.lastReq.Header.Get(openAICodexWindowIDHeader))
 	require.Equal(t, upstream.lastReq.Header.Get(openAICodexThreadIDHeader), gjson.GetBytes(upstream.lastBody, "prompt_cache_key").String())
 	require.Equal(t, upstream.lastReq.Header.Get(openAICodexInstallationIDHeader), gjson.GetBytes(upstream.lastBody, "client_metadata.x-codex-installation-id").String())
-	require.Equal(t, upstream.lastReq.Header.Get(openAICodexWindowIDHeader), gjson.GetBytes(upstream.lastBody, "client_metadata.x-codex-window-id").String())
+	// Codex HTTP 不在 client_metadata 中放 x-codex-window-id，仅放在 HTTP header。
+	require.False(t, gjson.GetBytes(upstream.lastBody, "client_metadata.x-codex-window-id").Exists())
 }
 
 func TestAccountTestService_OpenAIStreamEOFBeforeCompletedFails(t *testing.T) {

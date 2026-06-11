@@ -193,12 +193,12 @@ func TestAccountUsageService_GetOpenAIUsageSkipsPlanTypeRefreshWhenCodexSnapshot
 			"plan_type":    "plus",
 		},
 		Extra: map[string]any{
-			"openai_oauth_responses_websockets_v2_enabled": true,
-			"codex_usage_updated_at":                       time.Now().UTC().Format(time.RFC3339),
-			"codex_5h_used_percent":                        10.0,
-			"codex_5h_reset_at":                            time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
-			"codex_7d_used_percent":                        20.0,
-			"codex_7d_reset_at":                            time.Now().Add(24 * time.Hour).UTC().Format(time.RFC3339),
+			"openai_oauth_ws_mode":   OpenAIOAuthWSModeManagedSession,
+			"codex_usage_updated_at": time.Now().UTC().Format(time.RFC3339),
+			"codex_5h_used_percent":  10.0,
+			"codex_5h_reset_at":      time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
+			"codex_7d_used_percent":  20.0,
+			"codex_7d_reset_at":      time.Now().Add(24 * time.Hour).UTC().Format(time.RFC3339),
 		},
 	}
 
@@ -240,8 +240,8 @@ func TestShouldRefreshOpenAICodexSnapshot(t *testing.T) {
 		Platform: PlatformOpenAI,
 		Type:     AccountTypeOAuth,
 		Extra: map[string]any{
-			"openai_oauth_responses_websockets_v2_enabled": true,
-			"codex_usage_updated_at":                       staleAt,
+			"openai_oauth_ws_mode":   OpenAIOAuthWSModeManagedSession,
+			"codex_usage_updated_at": staleAt,
 		},
 	}, usage, now) {
 		t.Fatal("expected stale ws snapshot to trigger refresh")

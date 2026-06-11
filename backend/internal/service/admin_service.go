@@ -78,6 +78,7 @@ type AdminService interface {
 	GetAccountsByIDs(ctx context.Context, ids []int64) ([]*Account, error)
 	CreateAccount(ctx context.Context, input *CreateAccountInput) (*Account, error)
 	UpdateAccount(ctx context.Context, id int64, input *UpdateAccountInput) (*Account, error)
+	ApplyOAuthCredentials(ctx context.Context, id int64, input *ApplyOAuthCredentialsInput) (*Account, error)
 	// UpdateAccountExtra 仅对 Extra 做 JSONB 增量合并（key 级覆盖），不会影响其它字段或运行态键。
 	// 用于刷新流程持久化 account_uuid / org_uuid 等少量键，避免被全量快照覆盖。
 	UpdateAccountExtra(ctx context.Context, id int64, updates map[string]any) error
@@ -307,6 +308,12 @@ type UpdateAccountInput struct {
 	ExpiresAt             *int64
 	AutoPauseOnExpired    *bool
 	SkipMixedChannelCheck bool // 跳过混合渠道检查（用户已确认风险）
+}
+
+type ApplyOAuthCredentialsInput struct {
+	Type        string
+	Credentials map[string]any
+	Extra       map[string]any
 }
 
 // BulkUpdateAccountsInput describes the payload for bulk updating accounts.
@@ -2555,6 +2562,9 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 		Status:      StatusActive,
 		Schedulable: true,
 	}
+	if err := validateOpenAIOAuthAccountWriteConfig(account); err != nil {
+		return nil, err
+	}
 	// 预计算固定时间重置的下次重置时间
 	if account.Extra != nil {
 		if err := ValidateQuotaResetConfig(account.Extra); err != nil {
@@ -2623,6 +2633,44 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 	return account, nil
 }
 
+type accountAuthExtraUpdater interface {
+	UpdateAuthAndMergeExtra(ctx context.Context, id int64, accountType string, credentials, extraUpdates map[string]any) error
+}
+
+func (s *adminServiceImpl) ApplyOAuthCredentials(ctx context.Context, id int64, input *ApplyOAuthCredentialsInput) (*Account, error) {
+	account, err := s.accountRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if account == nil {
+		return nil, ErrAccountNotFound
+	}
+
+	candidate := *account
+	candidate.Type = input.Type
+	if len(input.Credentials) > 0 {
+		candidate.Credentials = MergePreservingSensitiveCreds(account.Credentials, input.Credentials)
+	}
+	candidate.Extra = mergeAccountExtraForValidation(account.Extra, input.Extra)
+	if err := validateOpenAIOAuthAccountWriteConfig(&candidate); err != nil {
+		return nil, err
+	}
+
+	// 重新授权只做凭据/type + Extra key 级合并，避免全量 Extra 快照覆盖运行态并发更新。
+	if updater, ok := any(s.accountRepo).(accountAuthExtraUpdater); ok {
+		if err := updater.UpdateAuthAndMergeExtra(ctx, id, candidate.Type, candidate.Credentials, input.Extra); err != nil {
+			return nil, err
+		}
+		return s.accountRepo.GetByID(ctx, id)
+	}
+
+	// 测试替身保留旧接口时的兜底；真实 repository 走上面的原子 key 合并路径。
+	if err := s.accountRepo.Update(ctx, &candidate); err != nil {
+		return nil, err
+	}
+	return s.accountRepo.GetByID(ctx, id)
+}
+
 func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *UpdateAccountInput) (*Account, error) {
 	account, err := s.accountRepo.GetByID(ctx, id)
 	if err != nil {
@@ -2671,6 +2719,9 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		}
 		ComputeQuotaResetAt(account.Extra)
 		NormalizeFixedQuotaWindows(account.Extra)
+	}
+	if err := validateOpenAIOAuthAccountWriteConfig(account); err != nil {
+		return nil, err
 	}
 	if input.ProxyID != nil {
 		// 0 表示清除代理（前端发送 0 而不是 null 来表达清除意图）
@@ -2758,6 +2809,15 @@ func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, upd
 	if len(updates) == 0 {
 		return nil
 	}
+	account, err := s.accountRepo.GetByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	candidate := *account
+	candidate.Extra = mergeAccountExtraForValidation(account.Extra, updates)
+	if err := validateOpenAIOAuthAccountWriteConfig(&candidate); err != nil {
+		return err
+	}
 	return s.accountRepo.UpdateExtra(ctx, id, updates)
 }
 
@@ -2789,17 +2849,23 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 
 	needMixedChannelCheck := input.GroupIDs != nil && !input.SkipMixedChannelCheck
 
-	// 预加载账号平台信息（混合渠道检查需要）。
+	// 预加载账号信息，用于所有批量更新的缺失 ID 结果、混合渠道检查与 OAuth Extra 写入守卫。
 	platformByID := map[int64]string{}
-	if needMixedChannelCheck {
-		accounts, err := s.accountRepo.GetByIDs(ctx, input.AccountIDs)
-		if err != nil {
-			return nil, err
+	foundAccountIDs := map[int64]bool{}
+	preloadedAccounts, err := s.accountRepo.GetByIDs(ctx, input.AccountIDs)
+	if err != nil {
+		return nil, err
+	}
+	for _, account := range preloadedAccounts {
+		if account != nil {
+			platformByID[account.ID] = account.Platform
+			foundAccountIDs[account.ID] = true
 		}
-		for _, account := range accounts {
-			if account != nil {
-				platformByID[account.ID] = account.Platform
-			}
+	}
+	validUpdateIDs := make([]int64, 0, len(input.AccountIDs))
+	for _, accountID := range input.AccountIDs {
+		if foundAccountIDs[accountID] {
+			validUpdateIDs = append(validUpdateIDs, accountID)
 		}
 	}
 
@@ -2819,6 +2885,18 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	if input.RateMultiplier != nil {
 		if *input.RateMultiplier < 0 {
 			return nil, errors.New("rate_multiplier must be >= 0")
+		}
+	}
+	if len(input.Extra) > 0 {
+		for _, account := range preloadedAccounts {
+			if account == nil {
+				continue
+			}
+			candidate := *account
+			candidate.Extra = mergeAccountExtraForValidation(account.Extra, input.Extra)
+			if err := validateOpenAIOAuthAccountWriteConfig(&candidate); err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -2859,13 +2937,24 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	}
 
 	// Run bulk update for column/jsonb fields first.
-	if _, err := s.accountRepo.BulkUpdate(ctx, input.AccountIDs, repoUpdates); err != nil {
-		return nil, err
+	if len(validUpdateIDs) > 0 {
+		if _, err := s.accountRepo.BulkUpdate(ctx, validUpdateIDs, repoUpdates); err != nil {
+			return nil, err
+		}
 	}
 
 	// Handle group bindings per account (requires individual operations).
 	for _, accountID := range input.AccountIDs {
 		entry := BulkUpdateAccountResult{AccountID: accountID}
+
+		if !foundAccountIDs[accountID] {
+			entry.Success = false
+			entry.Error = "account not found"
+			result.Failed++
+			result.FailedIDs = append(result.FailedIDs, accountID)
+			result.Results = append(result.Results, entry)
+			continue
+		}
 
 		if input.GroupIDs != nil {
 			if err := s.accountRepo.BindGroups(ctx, accountID, *input.GroupIDs); err != nil {
