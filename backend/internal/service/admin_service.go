@@ -311,9 +311,10 @@ type UpdateAccountInput struct {
 }
 
 type ApplyOAuthCredentialsInput struct {
-	Type        string
-	Credentials map[string]any
-	Extra       map[string]any
+	Type            string
+	Credentials     map[string]any
+	Extra           map[string]any
+	ExtraDeleteKeys []string
 }
 
 // BulkUpdateAccountsInput describes the payload for bulk updating accounts.
@@ -331,6 +332,9 @@ type BulkUpdateAccountsInput struct {
 	GroupIDs       *[]int64
 	Credentials    map[string]any
 	Extra          map[string]any
+	// ExtraDeleteKeys is a temporary migration hook for deleting legacy OAuth
+	// passthrough/WS extra keys before JSONB merge; remove after cleanup is complete.
+	ExtraDeleteKeys []string
 	// SkipMixedChannelCheck skips the mixed channel risk check when binding groups.
 	// This should only be set when the caller has explicitly confirmed the risk.
 	SkipMixedChannelCheck bool
@@ -2634,7 +2638,7 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 }
 
 type accountAuthExtraUpdater interface {
-	UpdateAuthAndMergeExtra(ctx context.Context, id int64, accountType string, credentials, extraUpdates map[string]any) error
+	UpdateAuthAndMergeExtra(ctx context.Context, id int64, accountType string, credentials, extraUpdates map[string]any, extraDeleteKeys []string) error
 }
 
 func (s *adminServiceImpl) ApplyOAuthCredentials(ctx context.Context, id int64, input *ApplyOAuthCredentialsInput) (*Account, error) {
@@ -2646,25 +2650,33 @@ func (s *adminServiceImpl) ApplyOAuthCredentials(ctx context.Context, id int64, 
 		return nil, ErrAccountNotFound
 	}
 
+	extraDeleteKeys, err := NormalizeOpenAIOAuthExtraDeleteKeys(input.ExtraDeleteKeys)
+	if err != nil {
+		return nil, err
+	}
+	if len(extraDeleteKeys) > 0 && !account.IsOpenAIOAuthLike() {
+		return nil, infraerrors.BadRequest("OPENAI_OAUTH_EXTRA_DELETE_KEYS_INVALID", "extra_delete_keys can only clean legacy keys on OpenAI OAuth/setup-token accounts")
+	}
+
 	candidate := *account
 	candidate.Type = input.Type
 	if len(input.Credentials) > 0 {
 		candidate.Credentials = MergePreservingSensitiveCreds(account.Credentials, input.Credentials)
 	}
-	candidate.Extra = mergeAccountExtraForValidation(account.Extra, input.Extra)
+	candidate.Extra = mergeAccountExtraWithDeletesForValidation(account.Extra, input.Extra, extraDeleteKeys)
 	if err := validateOpenAIOAuthAccountWriteConfig(&candidate); err != nil {
 		return nil, err
 	}
 
 	// 重新授权只做凭据/type + Extra key 级合并，避免全量 Extra 快照覆盖运行态并发更新。
 	if updater, ok := any(s.accountRepo).(accountAuthExtraUpdater); ok {
-		if err := updater.UpdateAuthAndMergeExtra(ctx, id, candidate.Type, candidate.Credentials, input.Extra); err != nil {
+		if err := updater.UpdateAuthAndMergeExtra(ctx, id, candidate.Type, candidate.Credentials, input.Extra, extraDeleteKeys); err != nil {
 			return nil, err
 		}
 		return s.accountRepo.GetByID(ctx, id)
 	}
 
-	// 测试替身保留旧接口时的兜底；真实 repository 走上面的原子 key 合并路径。
+	// 测试替身保留旧接口时的兜底；真实 repository 走上面的原子 key 合并/删除路径。
 	if err := s.accountRepo.Update(ctx, &candidate); err != nil {
 		return nil, err
 	}
@@ -2887,13 +2899,27 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 			return nil, errors.New("rate_multiplier must be >= 0")
 		}
 	}
-	if len(input.Extra) > 0 {
+	extraDeleteKeys, err := NormalizeOpenAIOAuthExtraDeleteKeys(input.ExtraDeleteKeys)
+	if err != nil {
+		return nil, err
+	}
+	if len(extraDeleteKeys) > 0 {
+		for _, account := range preloadedAccounts {
+			if account == nil {
+				continue
+			}
+			if !account.IsOpenAIOAuthLike() {
+				return nil, infraerrors.BadRequest("OPENAI_OAUTH_EXTRA_DELETE_KEYS_INVALID", "extra_delete_keys can only clean legacy keys on OpenAI OAuth/setup-token accounts")
+			}
+		}
+	}
+	if len(input.Extra) > 0 || len(extraDeleteKeys) > 0 {
 		for _, account := range preloadedAccounts {
 			if account == nil {
 				continue
 			}
 			candidate := *account
-			candidate.Extra = mergeAccountExtraForValidation(account.Extra, input.Extra)
+			candidate.Extra = mergeAccountExtraWithDeletesForValidation(account.Extra, input.Extra, extraDeleteKeys)
 			if err := validateOpenAIOAuthAccountWriteConfig(&candidate); err != nil {
 				return nil, err
 			}
@@ -2902,8 +2928,9 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 
 	// Prepare bulk updates for columns and JSONB fields.
 	repoUpdates := AccountBulkUpdate{
-		Credentials: input.Credentials,
-		Extra:       input.Extra,
+		Credentials:     input.Credentials,
+		Extra:           input.Extra,
+		ExtraDeleteKeys: extraDeleteKeys,
 	}
 	if input.Name != "" {
 		repoUpdates.Name = &input.Name

@@ -18,6 +18,7 @@ type openAIOAuthConfigValidationAccountRepoStub struct {
 	updated                           *Account
 	updateExtraCalled                 bool
 	bulkUpdateCalled                  bool
+	bulkUpdatePayload                 AccountBulkUpdate
 	getByIDAccount                    *Account
 	getByIDsAccounts                  []*Account
 	getByCRSAccountIDResult           *Account
@@ -64,8 +65,9 @@ func (s *openAIOAuthConfigValidationAccountRepoStub) UpdateExtra(_ context.Conte
 	return nil
 }
 
-func (s *openAIOAuthConfigValidationAccountRepoStub) BulkUpdate(_ context.Context, ids []int64, _ AccountBulkUpdate) (int64, error) {
+func (s *openAIOAuthConfigValidationAccountRepoStub) BulkUpdate(_ context.Context, ids []int64, updates AccountBulkUpdate) (int64, error) {
 	s.bulkUpdateCalled = true
+	s.bulkUpdatePayload = updates
 	return int64(len(ids)), nil
 }
 
@@ -407,6 +409,83 @@ func TestAdminServiceUpdateAccountExtraAllowsAPIKeyPassthroughExtra(t *testing.T
 	require.True(t, repo.updateExtraCalled)
 }
 
+func TestAdminServiceApplyOAuthCredentialsAllowsOAuthLegacyExtraDeleteKeys(t *testing.T) {
+	repo := &openAIOAuthConfigValidationAccountRepoStub{
+		getByIDAccount: &Account{
+			ID:       149,
+			Platform: PlatformOpenAI,
+			Type:     AccountTypeSetupToken,
+			Credentials: map[string]any{
+				"refresh_token": "redacted-old-refresh-token",
+			},
+			Extra: map[string]any{
+				"keep":                     "value",
+				"openai_oauth_passthrough": true,
+				"openai_oauth_responses_websockets_v2_mode":  "passthrough",
+				"openai_apikey_responses_websockets_v2_mode": OpenAIWSIngressModePassthrough,
+			},
+		},
+	}
+	svc := &adminServiceImpl{accountRepo: repo}
+
+	updated, err := svc.ApplyOAuthCredentials(context.Background(), 149, &ApplyOAuthCredentialsInput{
+		Type:        AccountTypeSetupToken,
+		Credentials: map[string]any{"access_token": "redacted-new-access-token"},
+		ExtraDeleteKeys: []string{
+			" openai_oauth_passthrough ",
+			"openai_oauth_responses_websockets_v2_mode",
+			"openai_apikey_responses_websockets_v2_mode",
+		},
+		Extra: map[string]any{"openai_oauth_ws_mode": OpenAIOAuthWSModeManagedSession},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, updated)
+	require.NotNil(t, repo.updated)
+	require.Equal(t, AccountTypeSetupToken, repo.updated.Type)
+	require.Equal(t, "value", repo.updated.Extra["keep"])
+	require.Equal(t, OpenAIOAuthWSModeManagedSession, repo.updated.Extra["openai_oauth_ws_mode"])
+	require.NotContains(t, repo.updated.Extra, "openai_oauth_passthrough")
+	require.NotContains(t, repo.updated.Extra, "openai_oauth_responses_websockets_v2_mode")
+	require.NotContains(t, repo.updated.Extra, "openai_apikey_responses_websockets_v2_mode")
+}
+
+func TestAdminServiceApplyOAuthCredentialsRejectsUnknownExtraDeleteKeys(t *testing.T) {
+	repo := &openAIOAuthConfigValidationAccountRepoStub{
+		getByIDAccount: &Account{ID: 150, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Extra: map[string]any{}},
+	}
+	svc := &adminServiceImpl{accountRepo: repo}
+
+	updated, err := svc.ApplyOAuthCredentials(context.Background(), 150, &ApplyOAuthCredentialsInput{
+		Type:            AccountTypeOAuth,
+		Credentials:     map[string]any{"access_token": "redacted-new-access-token"},
+		ExtraDeleteKeys: []string{"quota_limit"},
+	})
+
+	require.Nil(t, updated)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "legacy OpenAI OAuth passthrough/WS cleanup keys")
+	require.Nil(t, repo.updated)
+}
+
+func TestAdminServiceApplyOAuthCredentialsRejectsAPIKeyExtraDeleteKeys(t *testing.T) {
+	repo := &openAIOAuthConfigValidationAccountRepoStub{
+		getByIDAccount: &Account{ID: 151, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Extra: map[string]any{"openai_passthrough": true}},
+	}
+	svc := &adminServiceImpl{accountRepo: repo}
+
+	updated, err := svc.ApplyOAuthCredentials(context.Background(), 151, &ApplyOAuthCredentialsInput{
+		Type:            AccountTypeOAuth,
+		Credentials:     map[string]any{"access_token": "redacted-new-access-token"},
+		ExtraDeleteKeys: []string{"openai_passthrough"},
+	})
+
+	require.Nil(t, updated)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "extra_delete_keys")
+	require.Nil(t, repo.updated)
+}
+
 func TestAdminServiceBulkUpdateAccountsRejectsOAuthLegacyExtra(t *testing.T) {
 	repo := &openAIOAuthConfigValidationAccountRepoStub{
 		getByIDsAccounts: []*Account{
@@ -442,6 +521,93 @@ func TestAdminServiceBulkUpdateAccountsAllowsAPIKeyPassthroughExtra(t *testing.T
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.True(t, repo.bulkUpdateCalled)
+}
+
+func TestAdminServiceBulkUpdateAccountsRejectsAPIKeyExtraDeleteKeys(t *testing.T) {
+	repo := &openAIOAuthConfigValidationAccountRepoStub{
+		getByIDsAccounts: []*Account{
+			{
+				ID:       50,
+				Platform: PlatformOpenAI,
+				Type:     AccountTypeAPIKey,
+				Extra: map[string]any{
+					"openai_passthrough":                         true,
+					"openai_apikey_responses_websockets_v2_mode": OpenAIWSIngressModePassthrough,
+				},
+			},
+		},
+	}
+	svc := &adminServiceImpl{accountRepo: repo}
+
+	result, err := svc.BulkUpdateAccounts(context.Background(), &BulkUpdateAccountsInput{
+		AccountIDs:      []int64{50},
+		ExtraDeleteKeys: []string{"openai_passthrough"},
+		Extra:           map[string]any{"openai_oauth_ws_mode": OpenAIOAuthWSModeManagedSession},
+	})
+
+	require.Nil(t, result)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "extra_delete_keys")
+	require.False(t, repo.bulkUpdateCalled)
+}
+
+func TestAdminServiceBulkUpdateAccountsRejectsUnknownExtraDeleteKeys(t *testing.T) {
+	repo := &openAIOAuthConfigValidationAccountRepoStub{
+		getByIDsAccounts: []*Account{
+			{ID: 51, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Extra: map[string]any{}},
+		},
+	}
+	svc := &adminServiceImpl{accountRepo: repo}
+
+	result, err := svc.BulkUpdateAccounts(context.Background(), &BulkUpdateAccountsInput{
+		AccountIDs:      []int64{51},
+		ExtraDeleteKeys: []string{"quota_limit"},
+		Extra:           map[string]any{"openai_oauth_ws_mode": OpenAIOAuthWSModeManagedSession},
+	})
+
+	require.Nil(t, result)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "legacy OpenAI OAuth passthrough/WS cleanup keys")
+	require.False(t, repo.bulkUpdateCalled)
+}
+
+func TestAdminServiceBulkUpdateAccountsAllowsOAuthLegacyExtraDeleteKeys(t *testing.T) {
+	repo := &openAIOAuthConfigValidationAccountRepoStub{
+		getByIDsAccounts: []*Account{
+			{
+				ID:       49,
+				Platform: PlatformOpenAI,
+				Type:     AccountTypeSetupToken,
+				Extra: map[string]any{
+					"openai_oauth_passthrough":                     true,
+					"openai_oauth_responses_websockets_v2_mode":    "passthrough",
+					"openai_oauth_responses_websockets_v2_enabled": true,
+				},
+			},
+		},
+	}
+	svc := &adminServiceImpl{accountRepo: repo}
+
+	result, err := svc.BulkUpdateAccounts(context.Background(), &BulkUpdateAccountsInput{
+		AccountIDs: []int64{49},
+		ExtraDeleteKeys: []string{
+			" openai_oauth_passthrough ",
+			"openai_oauth_responses_websockets_v2_mode",
+			"openai_oauth_responses_websockets_v2_enabled",
+			"openai_oauth_passthrough",
+		},
+		Extra: map[string]any{"openai_oauth_ws_mode": OpenAIOAuthWSModeManagedSession},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.True(t, repo.bulkUpdateCalled)
+	require.Equal(t, map[string]any{"openai_oauth_ws_mode": OpenAIOAuthWSModeManagedSession}, repo.bulkUpdatePayload.Extra)
+	require.Equal(t, []string{
+		"openai_oauth_passthrough",
+		"openai_oauth_responses_websockets_v2_mode",
+		"openai_oauth_responses_websockets_v2_enabled",
+	}, repo.bulkUpdatePayload.ExtraDeleteKeys)
 }
 
 func TestCRSSyncFromCRSRejectsOpenAIOAuthLegacyExtraOnCreate(t *testing.T) {

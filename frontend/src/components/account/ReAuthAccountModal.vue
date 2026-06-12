@@ -192,7 +192,7 @@ import {
 import { useOpenAIOAuth } from '@/composables/useOpenAIOAuth'
 import { useGeminiOAuth } from '@/composables/useGeminiOAuth'
 import { useAntigravityOAuth } from '@/composables/useAntigravityOAuth'
-import type { Account } from '@/types'
+import type { Account, AccountType } from '@/types'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
 import OAuthAuthorizationFlow from './OAuthAuthorizationFlow.vue'
@@ -281,6 +281,34 @@ const canExchangeCode = computed(() => {
   return authCode.trim() && sessionId && !loading
 })
 
+const openAIOAuthExtraCleanupKeys = [
+  'openai_oauth_passthrough',
+  'openai_passthrough',
+  'openai_oauth_responses_websockets_v2_mode',
+  'openai_oauth_responses_websockets_v2_enabled',
+  'responses_websockets_v2_enabled',
+  'openai_ws_enabled',
+  'openai_apikey_responses_websockets_v2_mode',
+  'openai_apikey_responses_websockets_v2_enabled'
+]
+
+const buildOpenAIReAuthExtra = (tokenExtra?: Record<string, unknown>): Record<string, unknown> | undefined => {
+  const extra: Record<string, unknown> = { ...(props.account?.extra || {}) }
+  for (const key of openAIOAuthExtraCleanupKeys) {
+    delete extra[key]
+  }
+  Object.assign(extra, tokenExtra || {})
+  const wsMode = extra.openai_oauth_ws_mode
+  if (wsMode !== 'managed_session' && wsMode !== 'off') {
+    extra.openai_oauth_ws_mode = 'off'
+  }
+  return Object.keys(extra).length > 0 ? extra : undefined
+}
+
+const resolveOpenAIReAuthType = (): AccountType => {
+  return props.account?.type === 'setup-token' ? 'setup-token' : 'oauth'
+}
+
 // Watchers
 watch(
   () => props.show,
@@ -366,14 +394,14 @@ const handleExchangeCode = async () => {
     )
     if (!tokenInfo) return
 
-    // Build credentials and extra info
+    // Build credentials and merge adapter metadata without dropping OAuth WS config.
     const credentials = oauthClient.buildCredentials(tokenInfo)
-    const extra = oauthClient.buildExtraInfo(tokenInfo)
+    const extra = buildOpenAIReAuthExtra(oauthClient.buildExtraInfo(tokenInfo))
 
     try {
-      // Update account with new credentials
+      // Preserve setup-token type; re-auth updates credentials, not account semantics.
       await adminAPI.accounts.update(props.account.id, {
-        type: 'oauth', // OpenAI OAuth is always 'oauth' type
+        type: resolveOpenAIReAuthType(),
         credentials,
         extra
       })

@@ -3513,9 +3513,9 @@ export default {
       openai: {
         baseUrlHint: '留空使用官方 OpenAI API',
         apiKeyHint: '您的 OpenAI API Key',
-        oauthPassthrough: '自动透传（仅替换认证）',
-        oauthPassthroughDesc:
-          '开启后，该 OpenAI 账号将自动透传请求与响应，仅替换认证并保留计费/并发/审计及必要安全过滤；如遇兼容性问题可随时关闭回滚。',
+        apiKeyPassthrough: 'API Key 自动透传（仅替换认证）',
+        apiKeyPassthroughDesc:
+          '仅对 OpenAI API Key 生效。开启后请求与响应走 API Key 透传链路，仅替换认证并保留计费/并发/审计及必要安全过滤。OAuth 账号始终走 Codex/ChatGPT adapter 链路。',
         responsesWebsocketsV2: 'Responses WebSocket v2',
         responsesWebsocketsV2Desc:
           '默认关闭。开启后可启用 responses_websockets_v2 协议能力（受网关全局开关与账号类型开关约束）。',
@@ -3523,18 +3523,19 @@ export default {
         wsModeDesc: '仅对当前 OpenAI 账号类型生效。',
         wsModeOff: '关闭（off）',
         wsModeCtxPool: '上下文池（ctx_pool）',
-        wsModePassthrough: '透传（passthrough）',
+        wsModeManagedSession: '托管会话（managed_session）',
+        wsModePassthrough: '无连接池直连',
         wsModeShared: '共享（shared）',
         wsModeDedicated: '独享（dedicated）',
         wsModeConcurrencyHint: '启用 WS mode 后，该账号并发数将作为该账号 WS 连接池上限。',
-        wsModePassthroughHint: 'passthrough 模式不使用 WS 连接池。',
+        wsModePassthroughHint: '该 WS 直连模式不使用连接池；它只是 WebSocket 转发方式，不代表 OAuth HTTP 透传。',
         oauthResponsesWebsocketsV2: 'OAuth WebSocket Mode',
         oauthResponsesWebsocketsV2Desc:
           '仅对 OpenAI OAuth 生效。开启后该账号才允许使用 OpenAI WebSocket Mode 协议。',
         apiKeyResponsesWebsocketsV2: 'API Key WebSocket Mode',
         apiKeyResponsesWebsocketsV2Desc:
           '仅对 OpenAI API Key 生效。开启后该账号才允许使用 OpenAI WebSocket Mode 协议。',
-        responsesWebsocketsV2PassthroughHint: '当前已开启自动透传：仅影响 HTTP 透传链路，不影响 WS mode。',
+        responsesWebsocketsV2PassthroughHint: '当前已开启 API Key 自动透传：仅影响 API Key HTTP 透传链路，不影响 WS mode。',
         responsesMode: 'Responses API 支持',
         responsesModeDesc:
           '仅对 OpenAI API Key 的文本转发链路生效。自动跟随探测结果，强制模式会覆盖自动探测。',
@@ -5831,7 +5832,7 @@ export default {
         openaiCodexUserAgentHint: '用于 OpenAI OAuth 上游请求：当客户端 User-Agent 未识别为 Codex 官方客户端时使用该 UA。留空使用内置默认值。',
         openaiAllowClaudeCodeCodexPlugin: '允许在 Claude Code 中使用 Codex 插件',
         openaiAllowClaudeCodeCodexPluginDesc:
-          '全局开关，仅对已开启「仅允许 Codex 官方客户端」的 OpenAI OAuth 账号生效。开启后，所有此类账号都额外放行通过 Claude Code 的 Codex 插件发起的请求（精确匹配 originator=Claude Code），无需逐账号配置；上游请求仍保持透传。',
+          '全局开关，仅对已开启「仅允许 Codex 官方客户端」的 OpenAI OAuth 账号生效。开启后，所有此类账号都额外放行通过 Claude Code 的 Codex 插件发起的请求（精确匹配 originator=Claude Code），无需逐账号配置；上游请求仍走 Codex/ChatGPT adapter 链路。',
       },
       webSearchEmulation: {
         title: 'Web Search 模拟',

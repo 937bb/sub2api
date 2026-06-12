@@ -79,9 +79,37 @@ const AccountBulkActionsBarStub = {
   template: '<button data-test="edit-filtered" @click="$emit(\'edit-filtered\')">edit filtered</button>'
 }
 
+const AccountTableFiltersStub = {
+  emits: ['update:filters'],
+  template: `
+    <div>
+      <button
+        data-test="filter-openai-all"
+        @click="$emit('update:filters', { platform: 'openai', type: '' })"
+      >
+        filter openai
+      </button>
+      <button
+        data-test="filter-openai-oauth"
+        @click="$emit('update:filters', { platform: 'openai', type: 'oauth' })"
+      >
+        filter openai oauth
+      </button>
+    </div>
+  `
+}
+
 const BulkEditAccountModalStub = {
   props: ['show', 'target'],
-  template: '<div data-test="bulk-edit-modal" :data-show="String(show)" :data-target-mode="target?.mode ?? \'\'"></div>'
+  template: `
+    <div
+      data-test="bulk-edit-modal"
+      :data-show="String(show)"
+      :data-target-mode="target?.mode ?? ''"
+      :data-selected-platforms="(target?.selectedPlatforms ?? []).join(',')"
+      :data-selected-types="(target?.selectedTypes ?? []).join(',')"
+    ></div>
+  `
 }
 
 describe('admin AccountsView bulk edit scope', () => {
@@ -123,7 +151,7 @@ describe('admin AccountsView bulk edit scope', () => {
           Pagination: true,
           ConfirmDialog: true,
           AccountTableActions: { template: '<div><slot name="beforeCreate" /><slot name="after" /></div>' },
-          AccountTableFilters: { template: '<div></div>' },
+          AccountTableFilters: AccountTableFiltersStub,
           AccountBulkActionsBar: AccountBulkActionsBarStub,
           AccountActionMenu: true,
           ImportDataModal: true,
@@ -157,6 +185,152 @@ describe('admin AccountsView bulk edit scope', () => {
     expect(wrapper.get('[data-test="bulk-edit-modal"]').attributes('data-target-mode')).toBe('filtered')
   })
 
+  it('uses platform fallback types for filtered bulk edit when type is not pinned', async () => {
+    listAccounts
+      .mockResolvedValueOnce({
+        items: [],
+        total: 0,
+        page: 1,
+        page_size: 20,
+        pages: 0
+      })
+      .mockResolvedValueOnce({
+        items: [
+          {
+            id: 1,
+            name: 'preview-oauth-only',
+            platform: 'openai',
+            type: 'oauth',
+            status: 'active',
+            schedulable: true
+          }
+        ],
+        total: 120,
+        page: 1,
+        page_size: 100,
+        pages: 2
+      })
+
+    const wrapper = mount(AccountsView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: {
+            template: '<div><slot name="filters" /><slot name="table" /><slot name="pagination" /></div>'
+          },
+          DataTable: DataTableStub,
+          Pagination: true,
+          ConfirmDialog: true,
+          AccountTableActions: { template: '<div><slot name="beforeCreate" /><slot name="after" /></div>' },
+          AccountTableFilters: AccountTableFiltersStub,
+          AccountBulkActionsBar: AccountBulkActionsBarStub,
+          AccountActionMenu: true,
+          ImportDataModal: true,
+          ReAuthAccountModal: true,
+          AccountTestModal: true,
+          AccountStatsModal: true,
+          ScheduledTestsPanel: true,
+          SyncFromCrsModal: true,
+          TempUnschedStatusModal: true,
+          ErrorPassthroughRulesModal: true,
+          TLSFingerprintProfilesModal: true,
+          CreateAccountModal: true,
+          EditAccountModal: true,
+          BulkEditAccountModal: BulkEditAccountModalStub,
+          PlatformTypeBadge: true,
+          AccountCapacityCell: true,
+          AccountStatusIndicator: true,
+          AccountTodayStatsCell: true,
+          AccountGroupsCell: true,
+          AccountUsageCell: true,
+          Icon: true
+        }
+      }
+    })
+
+    await flushPromises()
+    await wrapper.get('[data-test="filter-openai-all"]').trigger('click')
+    await wrapper.get('[data-test="edit-filtered"]').trigger('click')
+    await flushPromises()
+
+    const modal = wrapper.get('[data-test="bulk-edit-modal"]')
+    expect(modal.attributes('data-selected-platforms')).toBe('openai')
+    expect(modal.attributes('data-selected-types')).toBe('oauth,setup-token,apikey')
+  })
+
+  it('uses explicit type filter for filtered bulk edit metadata', async () => {
+    listAccounts
+      .mockResolvedValueOnce({
+        items: [],
+        total: 0,
+        page: 1,
+        page_size: 20,
+        pages: 0
+      })
+      .mockResolvedValueOnce({
+        items: [
+          {
+            id: 2,
+            name: 'preview-apikey',
+            platform: 'openai',
+            type: 'apikey',
+            status: 'active',
+            schedulable: true
+          }
+        ],
+        total: 1,
+        page: 1,
+        page_size: 100,
+        pages: 1
+      })
+
+    const wrapper = mount(AccountsView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: {
+            template: '<div><slot name="filters" /><slot name="table" /><slot name="pagination" /></div>'
+          },
+          DataTable: DataTableStub,
+          Pagination: true,
+          ConfirmDialog: true,
+          AccountTableActions: { template: '<div><slot name="beforeCreate" /><slot name="after" /></div>' },
+          AccountTableFilters: AccountTableFiltersStub,
+          AccountBulkActionsBar: AccountBulkActionsBarStub,
+          AccountActionMenu: true,
+          ImportDataModal: true,
+          ReAuthAccountModal: true,
+          AccountTestModal: true,
+          AccountStatsModal: true,
+          ScheduledTestsPanel: true,
+          SyncFromCrsModal: true,
+          TempUnschedStatusModal: true,
+          ErrorPassthroughRulesModal: true,
+          TLSFingerprintProfilesModal: true,
+          CreateAccountModal: true,
+          EditAccountModal: true,
+          BulkEditAccountModal: BulkEditAccountModalStub,
+          PlatformTypeBadge: true,
+          AccountCapacityCell: true,
+          AccountStatusIndicator: true,
+          AccountTodayStatsCell: true,
+          AccountGroupsCell: true,
+          AccountUsageCell: true,
+          Icon: true
+        }
+      }
+    })
+
+    await flushPromises()
+    await wrapper.get('[data-test="filter-openai-oauth"]').trigger('click')
+    await wrapper.get('[data-test="edit-filtered"]').trigger('click')
+    await flushPromises()
+
+    const modal = wrapper.get('[data-test="bulk-edit-modal"]')
+    expect(modal.attributes('data-selected-platforms')).toBe('openai')
+    expect(modal.attributes('data-selected-types')).toBe('oauth')
+  })
+
   it('renders the created_at column by default', async () => {
     listAccounts.mockResolvedValue({
       items: [
@@ -188,7 +362,7 @@ describe('admin AccountsView bulk edit scope', () => {
           Pagination: true,
           ConfirmDialog: true,
           AccountTableActions: { template: '<div><slot name="beforeCreate" /><slot name="after" /></div>' },
-          AccountTableFilters: { template: '<div></div>' },
+          AccountTableFilters: AccountTableFiltersStub,
           AccountBulkActionsBar: AccountBulkActionsBarStub,
           AccountActionMenu: true,
           ImportDataModal: true,

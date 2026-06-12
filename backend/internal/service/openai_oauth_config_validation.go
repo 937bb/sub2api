@@ -104,6 +104,12 @@ func formatOpenAIOAuthConfigViolation(accountID int64, scope, key, recommendatio
 }
 
 func mergeAccountExtraForValidation(existing, updates map[string]any) map[string]any {
+	return mergeAccountExtraWithDeletesForValidation(existing, updates, nil)
+}
+
+// mergeAccountExtraWithDeletesForValidation mirrors the temporary bulk write order:
+// delete legacy extra keys first, then merge updates. Remove with ExtraDeleteKeys.
+func mergeAccountExtraWithDeletesForValidation(existing, updates map[string]any, deleteKeys []string) map[string]any {
 	if len(existing) == 0 && len(updates) == 0 {
 		return nil
 	}
@@ -111,8 +117,41 @@ func mergeAccountExtraForValidation(existing, updates map[string]any) map[string
 	for key, value := range existing {
 		merged[key] = value
 	}
+	for _, key := range NormalizeExtraDeleteKeys(deleteKeys) {
+		delete(merged, key)
+	}
 	for key, value := range updates {
 		merged[key] = value
 	}
 	return merged
+}
+
+func NormalizeExtraDeleteKeys(keys []string) []string {
+	if len(keys) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(keys))
+	normalized := make([]string, 0, len(keys))
+	for _, key := range keys {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		normalized = append(normalized, key)
+	}
+	return normalized
+}
+
+func NormalizeOpenAIOAuthExtraDeleteKeys(keys []string) ([]string, error) {
+	normalized := NormalizeExtraDeleteKeys(keys)
+	for _, key := range normalized {
+		if _, ok := openAIOAuthForbiddenExtraKeys[key]; !ok {
+			return nil, infraerrors.BadRequest("OPENAI_OAUTH_EXTRA_DELETE_KEYS_INVALID", "extra_delete_keys only supports legacy OpenAI OAuth passthrough/WS cleanup keys")
+		}
+	}
+	return normalized, nil
 }

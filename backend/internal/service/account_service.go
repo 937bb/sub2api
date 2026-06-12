@@ -91,6 +91,9 @@ type AccountBulkUpdate struct {
 	Schedulable    *bool
 	Credentials    map[string]any
 	Extra          map[string]any
+	// ExtraDeleteKeys is a temporary migration hook for bulk JSONB extra cleanup;
+	// remove it after legacy OpenAI OAuth passthrough/WS keys are no longer present.
+	ExtraDeleteKeys []string
 }
 
 // CreateAccountRequest 创建账号请求

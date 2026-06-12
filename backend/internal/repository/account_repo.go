@@ -418,7 +418,7 @@ func (r *accountRepository) UpdateCredentials(ctx context.Context, id int64, cre
 	return nil
 }
 
-func (r *accountRepository) UpdateAuthAndMergeExtra(ctx context.Context, id int64, accountType string, credentials, extraUpdates map[string]any) error {
+func (r *accountRepository) UpdateAuthAndMergeExtra(ctx context.Context, id int64, accountType string, credentials, extraUpdates map[string]any, extraDeleteKeys []string) error {
 	credentialsPayload, err := json.Marshal(normalizeJSONMap(credentials))
 	if err != nil {
 		return err
@@ -428,11 +428,28 @@ func (r *accountRepository) UpdateAuthAndMergeExtra(ctx context.Context, id int6
 		return err
 	}
 
+	extraExpr := "COALESCE(extra, '{}'::jsonb)"
+	args := []any{accountType, string(credentialsPayload)}
+	idx := 3
+	// Transitional cleanup: re-auth JSONB merge cannot remove old OAuth passthrough/WS keys.
+	// Delete requested keys first, then merge; remove this path after legacy extras age out.
+	deleteKeys, err := service.NormalizeOpenAIOAuthExtraDeleteKeys(extraDeleteKeys)
+	if err != nil {
+		return err
+	}
+	for _, key := range deleteKeys {
+		extraExpr = "(" + extraExpr + " - $" + itoa(idx) + ")"
+		args = append(args, key)
+		idx++
+	}
+	extraExpr += " || $" + itoa(idx) + "::jsonb"
+	args = append(args, string(extraPayload), id)
+
 	client := clientFromContext(ctx, r.client)
 	result, err := client.ExecContext(
 		ctx,
-		"UPDATE accounts SET type = $1, credentials = $2::jsonb, extra = COALESCE(extra, '{}'::jsonb) || $3::jsonb, updated_at = NOW() WHERE id = $4 AND deleted_at IS NULL",
-		accountType, string(credentialsPayload), string(extraPayload), id,
+		"UPDATE accounts SET type = $1, credentials = $2::jsonb, extra = "+extraExpr+", updated_at = NOW() WHERE id = $"+itoa(idx+1)+" AND deleted_at IS NULL",
+		args...,
 	)
 	if err != nil {
 		return err
@@ -1506,14 +1523,29 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 		args = append(args, payload)
 		idx++
 	}
-	if len(updates.Extra) > 0 {
-		payload, err := json.Marshal(updates.Extra)
+	if len(updates.Extra) > 0 || len(updates.ExtraDeleteKeys) > 0 {
+		extraExpr := "COALESCE(extra, '{}'::jsonb)"
+		// Transitional cleanup: bulk JSONB merge cannot remove old OAuth passthrough/WS keys.
+		// Delete requested keys first, then merge; remove this path after legacy extras age out.
+		deleteKeys, err := service.NormalizeOpenAIOAuthExtraDeleteKeys(updates.ExtraDeleteKeys)
 		if err != nil {
 			return 0, err
 		}
-		setClauses = append(setClauses, "extra = COALESCE(extra, '{}'::jsonb) || $"+itoa(idx)+"::jsonb")
-		args = append(args, payload)
-		idx++
+		for _, key := range deleteKeys {
+			extraExpr = "(" + extraExpr + " - $" + itoa(idx) + ")"
+			args = append(args, key)
+			idx++
+		}
+		if len(updates.Extra) > 0 {
+			payload, err := json.Marshal(updates.Extra)
+			if err != nil {
+				return 0, err
+			}
+			extraExpr += " || $" + itoa(idx) + "::jsonb"
+			args = append(args, payload)
+			idx++
+		}
+		setClauses = append(setClauses, "extra = "+extraExpr)
 	}
 
 	if len(setClauses) == 0 {

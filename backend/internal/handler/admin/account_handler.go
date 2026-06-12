@@ -134,20 +134,23 @@ type UpdateAccountRequest struct {
 
 // BulkUpdateAccountsRequest represents the payload for bulk editing accounts
 type BulkUpdateAccountsRequest struct {
-	AccountIDs              []int64                   `json:"account_ids"`
-	Filters                 *BulkUpdateAccountFilters `json:"filters"`
-	Name                    string                    `json:"name"`
-	ProxyID                 *int64                    `json:"proxy_id"`
-	Concurrency             *int                      `json:"concurrency"`
-	Priority                *int                      `json:"priority"`
-	RateMultiplier          *float64                  `json:"rate_multiplier"`
-	LoadFactor              *int                      `json:"load_factor"`
-	Status                  string                    `json:"status" binding:"omitempty,oneof=active inactive error"`
-	Schedulable             *bool                     `json:"schedulable"`
-	GroupIDs                *[]int64                  `json:"group_ids"`
-	Credentials             map[string]any            `json:"credentials"`
-	Extra                   map[string]any            `json:"extra"`
-	ConfirmMixedChannelRisk *bool                     `json:"confirm_mixed_channel_risk"` // 用户确认混合渠道风险
+	AccountIDs     []int64                   `json:"account_ids"`
+	Filters        *BulkUpdateAccountFilters `json:"filters"`
+	Name           string                    `json:"name"`
+	ProxyID        *int64                    `json:"proxy_id"`
+	Concurrency    *int                      `json:"concurrency"`
+	Priority       *int                      `json:"priority"`
+	RateMultiplier *float64                  `json:"rate_multiplier"`
+	LoadFactor     *int                      `json:"load_factor"`
+	Status         string                    `json:"status" binding:"omitempty,oneof=active inactive error"`
+	Schedulable    *bool                     `json:"schedulable"`
+	GroupIDs       *[]int64                  `json:"group_ids"`
+	Credentials    map[string]any            `json:"credentials"`
+	Extra          map[string]any            `json:"extra"`
+	// ExtraDeleteKeys is a temporary bulk cleanup hook for legacy OAuth extra keys;
+	// remove the API field after historical passthrough/WS config has been migrated.
+	ExtraDeleteKeys         []string `json:"extra_delete_keys"`
+	ConfirmMixedChannelRisk *bool    `json:"confirm_mixed_channel_risk"` // 用户确认混合渠道风险
 }
 
 type BulkUpdateAccountFilters struct {
@@ -1030,13 +1033,16 @@ type ApplyOAuthCredentialsRequest struct {
 	Type        string         `json:"type" binding:"required,oneof=oauth setup-token"`
 	Credentials map[string]any `json:"credentials" binding:"required"`
 	Extra       map[string]any `json:"extra"`
+	// ExtraDeleteKeys is a temporary cleanup hook for re-authing legacy OpenAI OAuth extra keys;
+	// remove it after historical passthrough/WS config has been migrated.
+	ExtraDeleteKeys []string `json:"extra_delete_keys"`
 }
 
 // ApplyOAuthCredentials 将"重新授权"得到的新凭据原子落库。
 // POST /api/v1/admin/accounts/:id/apply-oauth-credentials
 //
 // 与通用 PUT /:id (Update) 接口的关键区别：
-//   - 仅接收 type / credentials / extra 三个字段（不接受 concurrency / rpm / quota_* 等可能误传的字段）
+//   - 仅接收 type / credentials / extra / extra_delete_keys（不接受 concurrency / rpm / quota_* 等可能误传的字段）
 //   - Extra 由 service 在校验候选状态后做 JSONB key 级合并，避免 base_rpm / window_cost_limit /
 //     max_sessions / quota_* / privacy_mode 等持久化配置在重新授权后丢失，也避免全量快照覆盖运行态并发更新；
 //     同时确保 OAuth legacy 写入守卫能在任何落库前拒绝非法 Extra
@@ -1072,9 +1078,10 @@ func (h *AccountHandler) ApplyOAuthCredentials(c *gin.Context) {
 	}
 
 	updatedAccount, err := h.adminService.ApplyOAuthCredentials(ctx, accountID, &service.ApplyOAuthCredentialsInput{
-		Type:        req.Type,
-		Credentials: req.Credentials,
-		Extra:       req.Extra,
+		Type:            req.Type,
+		Credentials:     req.Credentials,
+		Extra:           req.Extra,
+		ExtraDeleteKeys: req.ExtraDeleteKeys,
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -1643,7 +1650,8 @@ func (h *AccountHandler) BulkUpdate(c *gin.Context) {
 		req.Schedulable != nil ||
 		req.GroupIDs != nil ||
 		len(req.Credentials) > 0 ||
-		len(req.Extra) > 0
+		len(req.Extra) > 0 ||
+		len(req.ExtraDeleteKeys) > 0
 
 	if !hasUpdates {
 		response.BadRequest(c, "No updates provided")
@@ -1665,6 +1673,7 @@ func (h *AccountHandler) BulkUpdate(c *gin.Context) {
 		GroupIDs:              req.GroupIDs,
 		Credentials:           req.Credentials,
 		Extra:                 req.Extra,
+		ExtraDeleteKeys:       req.ExtraDeleteKeys,
 		SkipMixedChannelCheck: skipCheck,
 	})
 	if err != nil {

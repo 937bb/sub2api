@@ -925,6 +925,7 @@ func (s *AccountRepoSuite) TestUpdateAuthAndMergeExtraPreservesConcurrentExtra()
 		service.AccountTypeOAuth,
 		map[string]any{"access_token": "at-new"},
 		map[string]any{"org_uuid": "org"},
+		nil,
 	))
 
 	got, err := s.repo.GetByID(s.ctx, account.ID)
@@ -1100,6 +1101,28 @@ func (s *AccountRepoSuite) TestBulkUpdate_MergeExtra() {
 	got, _ := s.repo.GetByID(s.ctx, a1.ID)
 	s.Require().Equal("val", got.Extra["existing"])
 	s.Require().Equal("new_val", got.Extra["new_key"])
+}
+
+func (s *AccountRepoSuite) TestBulkUpdate_DeleteExtraKeysBeforeMerge() {
+	a1 := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name: "bulk-extra-delete",
+		Extra: map[string]any{
+			"keep":                     "val",
+			"openai_oauth_passthrough": true,
+			"openai_oauth_ws_mode":     "off",
+		},
+	})
+
+	_, err := s.repo.BulkUpdate(s.ctx, []int64{a1.ID}, service.AccountBulkUpdate{
+		ExtraDeleteKeys: []string{"openai_oauth_passthrough"},
+		Extra:           map[string]any{"openai_oauth_ws_mode": service.OpenAIOAuthWSModeManagedSession},
+	})
+	s.Require().NoError(err)
+
+	got, _ := s.repo.GetByID(s.ctx, a1.ID)
+	s.Require().Equal("val", got.Extra["keep"])
+	s.Require().NotContains(got.Extra, "openai_oauth_passthrough")
+	s.Require().Equal(service.OpenAIOAuthWSModeManagedSession, got.Extra["openai_oauth_ws_mode"])
 }
 
 func (s *AccountRepoSuite) TestBulkUpdate_EmptyIDs() {

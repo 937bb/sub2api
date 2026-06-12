@@ -1385,10 +1385,31 @@ const buildBulkEditFilterSnapshot = () => {
   }
 }
 
-const collectSelectionMetadata = (rows: Account[]) => {
-  const selectedPlatforms = Array.from(new Set(rows.map(account => account.platform)))
-  const selectedTypes = Array.from(new Set(rows.map(account => account.type)))
-  return { selectedPlatforms, selectedTypes }
+const singleFilterValue = <T extends string>(value: unknown, allowed: readonly T[]): T | null => {
+  if (typeof value !== 'string') return null
+  return (allowed as readonly string[]).includes(value) ? (value as T) : null
+}
+
+const filteredBulkTypeFallbacks: Record<AccountPlatform, AccountType[]> = {
+  anthropic: ['oauth', 'setup-token', 'apikey', 'bedrock', 'service_account'],
+  openai: ['oauth', 'setup-token', 'apikey'],
+  gemini: ['oauth', 'setup-token', 'apikey', 'service_account'],
+  antigravity: ['oauth', 'setup-token', 'apikey', 'upstream']
+}
+
+const collectFilteredBulkMetadata = (filters: ReturnType<typeof buildBulkEditFilterSnapshot>) => {
+  const platformFilter = singleFilterValue<AccountPlatform>(filters.platform, ['anthropic', 'openai', 'gemini', 'antigravity'])
+  const typeFilter = singleFilterValue<AccountType>(filters.type, ['oauth', 'setup-token', 'apikey', 'upstream', 'bedrock', 'service_account'])
+
+  if (!platformFilter) {
+    return { selectedPlatforms: [], selectedTypes: typeFilter ? [typeFilter] : [] }
+  }
+  if (typeFilter) {
+    return { selectedPlatforms: [platformFilter], selectedTypes: [typeFilter] }
+  }
+  // Filtered bulk edits apply to all matching rows, not just the preview page;
+  // use the platform's full type set unless the filter pins type explicitly.
+  return { selectedPlatforms: [platformFilter], selectedTypes: filteredBulkTypeFallbacks[platformFilter] }
 }
 
 const openBulkEditSelected = () => {
@@ -1404,7 +1425,7 @@ const openBulkEditSelected = () => {
 const openBulkEditFiltered = async () => {
   const filters = buildBulkEditFilterSnapshot()
   const preview = await adminAPI.accounts.list(1, 100, filters)
-  const { selectedPlatforms, selectedTypes } = collectSelectionMetadata(preview.items)
+  const { selectedPlatforms, selectedTypes } = collectFilteredBulkMetadata(filters)
   bulkEditTarget.value = {
     mode: 'filtered',
     filters,

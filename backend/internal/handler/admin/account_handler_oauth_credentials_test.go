@@ -78,6 +78,29 @@ func TestAccountHandlerApplyOAuthCredentialsAllowsSuccessfulExtraUpdate(t *testi
 	require.Equal(t, "org", svc.lastApplyOAuthCredentialsInput.Extra["org_uuid"])
 }
 
+func TestAccountHandlerApplyOAuthCredentialsForwardsExtraDeleteKeys(t *testing.T) {
+	svc := newStubAdminService()
+	svc.getAccountResult = &service.Account{ID: 55, Name: "setup", Platform: service.PlatformOpenAI, Type: service.AccountTypeSetupToken}
+	router := setupApplyOAuthCredentialsRouter(svc)
+
+	body, err := json.Marshal(ApplyOAuthCredentialsRequest{
+		Type:            service.AccountTypeSetupToken,
+		Credentials:     map[string]any{"access_token": "token"},
+		Extra:           map[string]any{"openai_oauth_ws_mode": service.OpenAIOAuthWSModeManagedSession},
+		ExtraDeleteKeys: []string{"openai_oauth_passthrough"},
+	})
+	require.NoError(t, err)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/55/apply-oauth-credentials", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.True(t, svc.applyOAuthCredentialsCalled)
+	require.Equal(t, []string{"openai_oauth_passthrough"}, svc.lastApplyOAuthCredentialsInput.ExtraDeleteKeys)
+}
+
 func TestAccountHandlerApplyOAuthCredentialsRejectsNonOAuthAccount(t *testing.T) {
 	svc := newStubAdminService()
 	svc.getAccountResult = &service.Account{ID: 53, Name: "apikey", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey}

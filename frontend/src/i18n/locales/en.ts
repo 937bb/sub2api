@@ -3365,9 +3365,9 @@ export default {
       openai: {
         baseUrlHint: 'Leave default for official OpenAI API',
         apiKeyHint: 'Your OpenAI API Key',
-        oauthPassthrough: 'Auto passthrough (auth only)',
-        oauthPassthroughDesc:
-          'When enabled, this OpenAI account uses automatic passthrough: the gateway forwards request/response as-is and only swaps auth, while keeping billing/concurrency/audit and necessary safety filtering.',
+        apiKeyPassthrough: 'API Key auto passthrough (auth only)',
+        apiKeyPassthroughDesc:
+          'Only applies to OpenAI API Key accounts. When enabled, requests and responses use the API Key passthrough path with auth replacement only, while billing/concurrency/audit and safety filtering are preserved. OAuth accounts always use the Codex/ChatGPT adapter path.',
         responsesWebsocketsV2: 'Responses WebSocket v2',
         responsesWebsocketsV2Desc:
           'Disabled by default. Enable to allow responses_websockets_v2 capability (still gated by global and account-type switches).',
@@ -3375,12 +3375,13 @@ export default {
         wsModeDesc: 'Only applies to the current OpenAI account type.',
         wsModeOff: 'Off (off)',
         wsModeCtxPool: 'Context Pool (ctx_pool)',
-        wsModePassthrough: 'Passthrough (passthrough)',
+        wsModeManagedSession: 'Managed Session (managed_session)',
+        wsModePassthrough: 'Direct without pool',
         wsModeShared: 'Shared (shared)',
         wsModeDedicated: 'Dedicated (dedicated)',
         wsModeConcurrencyHint:
           'When WS mode is enabled, account concurrency becomes the WS connection pool limit for this account.',
-        wsModePassthroughHint: 'Passthrough mode does not use the WS connection pool.',
+        wsModePassthroughHint: 'This direct WS mode does not use the WS connection pool; it is only a WebSocket forwarding mode, not OAuth HTTP passthrough.',
         oauthResponsesWebsocketsV2: 'OAuth WebSocket Mode',
         oauthResponsesWebsocketsV2Desc:
           'Only applies to OpenAI OAuth. This account can use OpenAI WebSocket Mode only when enabled.',
@@ -3388,7 +3389,7 @@ export default {
         apiKeyResponsesWebsocketsV2Desc:
           'Only applies to OpenAI API Key. This account can use OpenAI WebSocket Mode only when enabled.',
         responsesWebsocketsV2PassthroughHint:
-          'Automatic passthrough is currently enabled: it only affects HTTP passthrough and does not disable WS mode.',
+          'API Key auto passthrough is currently enabled: it only affects the API Key HTTP passthrough path and does not disable WS mode.',
         responsesMode: 'Responses API support',
         responsesModeDesc:
           'Only applies to the OpenAI API Key text forwarding path. Auto follows probe results; force modes override probing.',
@@ -5677,7 +5678,7 @@ export default {
         openaiCodexUserAgentHint: 'Used for OpenAI OAuth upstream requests when the client User-Agent is not recognized as an official Codex client. Leave empty to use the built-in default.',
         openaiAllowClaudeCodeCodexPlugin: "Allow using the Codex plugin in Claude Code",
         openaiAllowClaudeCodeCodexPluginDesc:
-          "Global switch; only affects OpenAI OAuth accounts that have 'Codex official clients only' enabled. When on, all such accounts additionally allow requests from the Claude Code Codex plugin (exact match on originator=Claude Code) without per-account config; upstream requests remain pass-through.",
+          "Global switch; only affects OpenAI OAuth accounts that have 'Codex official clients only' enabled. When on, all such accounts additionally allow requests from the Claude Code Codex plugin (exact match on originator=Claude Code) without per-account config; upstream requests continue through the Codex/ChatGPT adapter path.",
       },
       webSearchEmulation: {
         title: 'Web Search Emulation',

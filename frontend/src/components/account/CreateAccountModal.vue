@@ -86,6 +86,7 @@
           </button>
           <button
             type="button"
+            data-testid="create-platform-openai"
             @click="form.platform = 'openai'"
             :class="[
               'flex flex-1 items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm font-medium transition-all',
@@ -286,6 +287,7 @@
         <div class="mt-2 grid grid-cols-2 gap-3" data-tour="account-form-type">
           <button
             type="button"
+            data-testid="create-openai-oauth-type"
             @click="accountCategory = 'oauth-based'"
             :class="[
               'flex items-center gap-3 rounded-lg border-2 p-3 text-left transition-all',
@@ -312,6 +314,7 @@
 
           <button
             type="button"
+            data-testid="create-openai-apikey-type"
             @click="accountCategory = 'apikey'"
             :class="[
               'flex items-center gap-3 rounded-lg border-2 p-3 text-left transition-all',
@@ -1030,6 +1033,7 @@
           <label class="input-label">{{ t('admin.accounts.apiKeyRequired') }}</label>
           <input
             v-model="apiKeyValue"
+            data-testid="create-api-key-input"
             type="password"
             required
             class="input font-mono"
@@ -2506,20 +2510,21 @@
         <p class="input-hint">{{ t('admin.accounts.expiresAtHint') }}</p>
       </div>
 
-      <!-- OpenAI 自动透传开关（OAuth/API Key） -->
+      <!-- OpenAI API Key 自动透传开关 -->
       <div
-        v-if="form.platform === 'openai'"
+        v-if="form.platform === 'openai' && accountCategory === 'apikey'"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <div class="flex items-center justify-between">
           <div>
-            <label class="input-label mb-0">{{ t('admin.accounts.openai.oauthPassthrough') }}</label>
+            <label class="input-label mb-0">{{ t('admin.accounts.openai.apiKeyPassthrough') }}</label>
             <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {{ t('admin.accounts.openai.oauthPassthroughDesc') }}
+              {{ t('admin.accounts.openai.apiKeyPassthroughDesc') }}
             </p>
           </div>
           <button
             type="button"
+            data-testid="create-openai-passthrough-toggle"
             @click="openaiPassthroughEnabled = !openaiPassthroughEnabled"
             :class="[
               'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
@@ -2536,7 +2541,7 @@
         </div>
       </div>
 
-      <!-- OpenAI WS Mode 三态（off/ctx_pool/passthrough） -->
+      <!-- OpenAI WS Mode（APIKey 三态；OAuth/setup-token 仅 managed_session/off） -->
       <div
         v-if="form.platform === 'openai' && (accountCategory === 'oauth-based' || accountCategory === 'apikey')"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
@@ -2552,7 +2557,11 @@
             </p>
           </div>
           <div class="w-52">
-            <Select v-model="openaiResponsesWebSocketV2Mode" :options="openAIWSModeOptions" />
+            <Select
+              v-model="openaiResponsesWebSocketV2Mode"
+              data-testid="create-openai-ws-mode-select"
+              :options="openAIWSModeOptions"
+            />
           </div>
         </div>
       </div>
@@ -3243,11 +3252,13 @@ import { formatDateTimeLocalInput, parseDateTimeLocalInput } from '@/utils/forma
 import { createStableObjectKeyResolver } from '@/utils/stableObjectKey'
 import { VERTEX_LOCATION_OPTIONS } from '@/constants/account'
 import {
+  OPENAI_OAUTH_WS_MODE_MANAGED_SESSION,
   OPENAI_WS_MODE_CTX_POOL,
   OPENAI_WS_MODE_OFF,
   OPENAI_WS_MODE_PASSTHROUGH,
   isOpenAIWSModeEnabled,
   resolveOpenAIWSModeConcurrencyHintKey,
+  type OpenAIOAuthWSMode,
   type OpenAIWSMode
 } from '@/utils/openaiWsMode'
 import OAuthAuthorizationFlow from './OAuthAuthorizationFlow.vue'
@@ -3417,7 +3428,7 @@ const openaiPassthroughEnabled = ref(false)
 const openAICompactMode = ref<OpenAICompactMode>('auto')
 const openAIResponsesMode = ref<OpenAIResponsesMode>('auto')
 const openAIEndpointCapabilities = ref<OpenAIEndpointCapability[]>(['chat_completions', 'embeddings'])
-const openaiOAuthResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
+const openaiOAuthResponsesWebSocketV2Mode = ref<OpenAIOAuthWSMode>(OPENAI_WS_MODE_OFF)
 const openaiAPIKeyResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
 const codexCLIOnlyEnabled = ref(false)
 const codexCLIOnlyAllowClaudeCodeEnabled = ref(false)
@@ -3597,11 +3608,20 @@ const geminiSelectedTier = computed(() => {
   }
 })
 
-const openAIWSModeOptions = computed(() => [
+const openAIAPIKeyWSModeOptions = computed(() => [
   { value: OPENAI_WS_MODE_OFF, label: t('admin.accounts.openai.wsModeOff') },
   { value: OPENAI_WS_MODE_CTX_POOL, label: t('admin.accounts.openai.wsModeCtxPool') },
   { value: OPENAI_WS_MODE_PASSTHROUGH, label: t('admin.accounts.openai.wsModePassthrough') }
 ])
+
+const openAIOAuthWSModeOptions = computed(() => [
+  { value: OPENAI_WS_MODE_OFF, label: t('admin.accounts.openai.wsModeOff') },
+  { value: OPENAI_OAUTH_WS_MODE_MANAGED_SESSION, label: t('admin.accounts.openai.wsModeManagedSession') }
+])
+
+const openAIWSModeOptions = computed(() =>
+  accountCategory.value === 'apikey' ? openAIAPIKeyWSModeOptions.value : openAIOAuthWSModeOptions.value
+)
 
 const openaiResponsesWebSocketV2Mode = computed({
   get: () => {
@@ -3610,12 +3630,12 @@ const openaiResponsesWebSocketV2Mode = computed({
     }
     return openaiOAuthResponsesWebSocketV2Mode.value
   },
-  set: (mode: OpenAIWSMode) => {
+  set: (mode: OpenAIWSMode | OpenAIOAuthWSMode) => {
     if (form.platform === 'openai' && accountCategory.value === 'apikey') {
-      openaiAPIKeyResponsesWebSocketV2Mode.value = mode
+      openaiAPIKeyResponsesWebSocketV2Mode.value = mode as OpenAIWSMode
       return
     }
-    openaiOAuthResponsesWebSocketV2Mode.value = mode
+    openaiOAuthResponsesWebSocketV2Mode.value = mode === OPENAI_WS_MODE_OFF ? OPENAI_WS_MODE_OFF : OPENAI_OAUTH_WS_MODE_MANAGED_SESSION
   }
 })
 
@@ -3624,7 +3644,7 @@ const openAIWSModeConcurrencyHintKey = computed(() =>
 )
 
 const isOpenAIModelRestrictionDisabled = computed(() =>
-  form.platform === 'openai' && openaiPassthroughEnabled.value
+  form.platform === 'openai' && accountCategory.value === 'apikey' && openaiPassthroughEnabled.value
 )
 
 const mixedChannelWarningMessageText = computed(() => {
@@ -3864,6 +3884,9 @@ watch(
 watch(
   [accountCategory, () => form.platform],
   ([category, platform]) => {
+    if (platform === 'openai' && category !== 'apikey') {
+      openaiPassthroughEnabled.value = false
+    }
     if (platform === 'openai' && category !== 'oauth-based') {
       codexCLIOnlyEnabled.value = false
       codexCLIOnlyAllowClaudeCodeEnabled.value = false
@@ -4305,20 +4328,24 @@ const buildOpenAIExtra = (base?: Record<string, unknown>): Record<string, unknow
 
   const extra: Record<string, unknown> = { ...(base || {}) }
   if (accountCategory.value === 'oauth-based') {
-    extra.openai_oauth_responses_websockets_v2_mode = openaiOAuthResponsesWebSocketV2Mode.value
-    extra.openai_oauth_responses_websockets_v2_enabled = isOpenAIWSModeEnabled(openaiOAuthResponsesWebSocketV2Mode.value)
+    extra.openai_oauth_ws_mode = openaiOAuthResponsesWebSocketV2Mode.value
+    delete extra.openai_apikey_responses_websockets_v2_mode
+    delete extra.openai_apikey_responses_websockets_v2_enabled
   } else if (accountCategory.value === 'apikey') {
     extra.openai_apikey_responses_websockets_v2_mode = openaiAPIKeyResponsesWebSocketV2Mode.value
     extra.openai_apikey_responses_websockets_v2_enabled = isOpenAIWSModeEnabled(openaiAPIKeyResponsesWebSocketV2Mode.value)
+    delete extra.openai_oauth_ws_mode
   }
-  // 清理兼容旧键，统一改用分类型开关。
+  // 清理兼容旧键，OAuth adapter 只写 openai_oauth_ws_mode；透传键只允许 APIKey 使用。
   delete extra.responses_websockets_v2_enabled
   delete extra.openai_ws_enabled
-  if (openaiPassthroughEnabled.value) {
+  delete extra.openai_oauth_responses_websockets_v2_mode
+  delete extra.openai_oauth_responses_websockets_v2_enabled
+  delete extra.openai_oauth_passthrough
+  if (accountCategory.value === 'apikey' && openaiPassthroughEnabled.value) {
     extra.openai_passthrough = true
   } else {
     delete extra.openai_passthrough
-    delete extra.openai_oauth_passthrough
   }
 
   if (accountCategory.value === 'oauth-based' && codexCLIOnlyEnabled.value) {
@@ -4628,7 +4655,7 @@ const handleSubmit = async () => {
     credentials.tier_id = geminiTierAIStudio.value
   }
 
-  // Add model mapping if configured（OpenAI 开启自动透传时不应用）
+  // OpenAI API Key 自动透传时不应用模型限制，OAuth adapter 路径仍可应用。
   if (!isOpenAIModelRestrictionDisabled.value) {
     const modelMapping = buildModelMappingObject(modelRestrictionMode.value, allowedModels.value, modelMappings.value)
     if (modelMapping) {
@@ -4816,7 +4843,7 @@ const handleOpenAIExchange = async (authCode: string) => {
     const extra = buildOpenAIExtra(oauthExtra)
     const shouldCreateOpenAI = form.platform === 'openai'
 
-    // Add model mapping for OpenAI OAuth accounts（透传模式下不应用）
+    // OpenAI OAuth 走 adapter 路径，模型映射仍可在网关侧生效。
     if (shouldCreateOpenAI && !isOpenAIModelRestrictionDisabled.value) {
       const modelMapping = buildModelMappingObject(modelRestrictionMode.value, allowedModels.value, modelMappings.value)
       if (modelMapping) {
@@ -5021,7 +5048,7 @@ const handleOpenAIBatchRT = async (refreshTokenInput: string, clientId?: string)
         const oauthExtra = oauthClient.buildExtraInfo(tokenInfo) as Record<string, unknown> | undefined
         const extra = buildOpenAIExtra(oauthExtra)
 
-        // Add model mapping for OpenAI OAuth accounts（透传模式下不应用）
+        // OpenAI OAuth 走 adapter 路径，模型映射仍可在网关侧生效。
         if (shouldCreateOpenAI && !isOpenAIModelRestrictionDisabled.value) {
           const modelMapping = buildModelMappingObject(modelRestrictionMode.value, allowedModels.value, modelMappings.value)
           if (modelMapping) {

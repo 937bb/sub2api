@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import {
+  OPENAI_OAUTH_WS_MODE_MANAGED_SESSION,
   OPENAI_WS_MODE_CTX_POOL,
   OPENAI_WS_MODE_OFF,
   OPENAI_WS_MODE_PASSTHROUGH,
   isOpenAIWSModeEnabled,
   normalizeOpenAIWSMode,
+  openAIOAuthWSModeToUIWSMode,
   openAIWSModeFromEnabled,
+  openAIWSModeToOAuthUIWSMode,
   resolveOpenAIWSModeConcurrencyHintKey,
   resolveOpenAIWSModeFromExtra
 } from '@/utils/openaiWsMode'
@@ -54,6 +57,15 @@ describe('openaiWsMode utils', () => {
     expect(isOpenAIWSModeEnabled(OPENAI_WS_MODE_OFF)).toBe(false)
     expect(isOpenAIWSModeEnabled(OPENAI_WS_MODE_CTX_POOL)).toBe(true)
     expect(isOpenAIWSModeEnabled(OPENAI_WS_MODE_PASSTHROUGH)).toBe(true)
+  })
+
+  it('maps UI WS modes to OAuth adapter-safe config values', () => {
+    expect(openAIWSModeToOAuthUIWSMode(OPENAI_WS_MODE_OFF)).toBe(OPENAI_WS_MODE_OFF)
+    expect(openAIWSModeToOAuthUIWSMode(OPENAI_WS_MODE_CTX_POOL)).toBe(OPENAI_OAUTH_WS_MODE_MANAGED_SESSION)
+    expect(openAIWSModeToOAuthUIWSMode(OPENAI_WS_MODE_PASSTHROUGH)).toBe(OPENAI_OAUTH_WS_MODE_MANAGED_SESSION)
+    expect(openAIOAuthWSModeToUIWSMode(OPENAI_OAUTH_WS_MODE_MANAGED_SESSION)).toBe(OPENAI_OAUTH_WS_MODE_MANAGED_SESSION)
+    expect(openAIOAuthWSModeToUIWSMode(OPENAI_WS_MODE_OFF)).toBe(OPENAI_WS_MODE_OFF)
+    expect(openAIOAuthWSModeToUIWSMode('passthrough')).toBeNull()
   })
 
   it('resolves concurrency hint key by mode', () => {
