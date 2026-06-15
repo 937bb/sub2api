@@ -37,19 +37,20 @@ func (s *openaiOAuthService) ExchangeCode(ctx context.Context, code, codeVerifie
 		clientID = openai.ClientID
 	}
 
-	formData := url.Values{}
-	formData.Set("grant_type", "authorization_code")
-	formData.Set("client_id", clientID)
-	formData.Set("code", code)
-	formData.Set("redirect_uri", redirectURI)
-	formData.Set("code_verifier", codeVerifier)
+	reqBody := openai.EncodeCodexForm([]openai.CodexFormValue{
+		{Key: "grant_type", Value: "authorization_code"},
+		{Key: "code", Value: code},
+		{Key: "redirect_uri", Value: redirectURI},
+		{Key: "client_id", Value: clientID},
+		{Key: "code_verifier", Value: codeVerifier},
+	})
 
 	var tokenResp openai.TokenResponse
 
 	resp, err := client.R().
 		SetContext(ctx).
-		SetHeader("User-Agent", "codex-cli/0.91.0").
-		SetFormDataFromValues(formData).
+		SetHeader("Content-Type", "application/x-www-form-urlencoded").
+		SetBodyString(reqBody).
 		SetSuccessResult(&tokenResp).
 		Post(s.tokenURL)
 
