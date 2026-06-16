@@ -105,7 +105,18 @@ func TestExportDataIncludesSecrets(t *testing.T) {
 			Platform:    service.PlatformOpenAI,
 			Type:        service.AccountTypeOAuth,
 			Credentials: map[string]any{"token": "secret"},
-			Extra:       map[string]any{"note": "x"},
+			Extra: map[string]any{
+				"note": "x",
+				service.OpenAICodexFingerprintExtraKey: map[string]any{
+					"schema_version":  1,
+					"installation_id": "11111111-1111-4111-8111-111111111111",
+					"created_at":      "2026-06-15T00:00:00Z",
+					"updated_at":      "2026-06-15T00:00:00Z",
+					"ua_profile": map[string]any{
+						"raw_user_agent": "codex-tui/0.136.0 raw",
+					},
+				},
+			},
 			ProxyID:     &proxyID,
 			Concurrency: 3,
 			Priority:    50,
@@ -127,6 +138,14 @@ func TestExportDataIncludesSecrets(t *testing.T) {
 	require.Equal(t, "pass", resp.Data.Proxies[0].Password)
 	require.Len(t, resp.Data.Accounts, 1)
 	require.Equal(t, "secret", resp.Data.Accounts[0].Credentials["token"])
+	require.Equal(t, "x", resp.Data.Accounts[0].Extra["note"])
+	fingerprint, ok := resp.Data.Accounts[0].Extra[service.OpenAICodexFingerprintExtraKey].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, true, fingerprint["present"])
+	require.Equal(t, float64(1), fingerprint["schema_version"])
+	require.Equal(t, "2026-06-15T00:00:00Z", fingerprint["created_at"])
+	require.NotContains(t, rec.Body.String(), "11111111-1111-4111-8111-111111111111")
+	require.NotContains(t, rec.Body.String(), "codex-tui/0.136.0 raw")
 }
 
 func TestExportDataWithoutProxies(t *testing.T) {

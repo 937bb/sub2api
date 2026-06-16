@@ -587,7 +587,7 @@ func openAIImagesUpstreamErrorFromGJSON(errorObj gjson.Result, upstreamRequestID
 		StatusCode:        statusCode,
 		ErrorType:         errType,
 		Code:              code,
-		Message:           sanitizeUpstreamErrorMessage(message),
+		Message:           sanitizeOpenAIUpstreamDiagnosticText(message),
 		Param:             param,
 		UpstreamRequestID: strings.TrimSpace(upstreamRequestID),
 	}
@@ -622,7 +622,7 @@ func openAIImagesUpstreamErrorFromHTTP(statusCode int, header http.Header, body 
 	errType := strings.TrimSpace(gjson.GetBytes(body, "error.type").String())
 	code := strings.TrimSpace(extractUpstreamErrorCode(body))
 	param := strings.TrimSpace(gjson.GetBytes(body, "error.param").String())
-	message := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(body)))
+	message := sanitizeOpenAIUpstreamDiagnosticText(strings.TrimSpace(extractUpstreamErrorMessage(body)))
 	if message == "" {
 		message = fmt.Sprintf("Upstream request failed (status %d)", statusCode)
 	}
@@ -663,14 +663,14 @@ func (s *OpenAIGatewayService) handleOpenAIImagesErrorResponse(
 ) (*OpenAIForwardResult, error) {
 	body := s.readUpstreamErrorBody(resp)
 
-	upstreamMsg := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(body)))
+	upstreamMsg := sanitizeOpenAIUpstreamDiagnosticText(strings.TrimSpace(extractUpstreamErrorMessage(body)))
 	upstreamDetail := ""
 	if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
 		maxBytes := s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes
 		if maxBytes <= 0 {
 			maxBytes = 2048
 		}
-		upstreamDetail = truncateString(string(body), maxBytes)
+		upstreamDetail = sanitizeOpenAIUpstreamDiagnosticBodyForLog(body, maxBytes)
 	}
 	setOpsUpstreamError(c, resp.StatusCode, upstreamMsg, upstreamDetail)
 
@@ -681,7 +681,7 @@ func (s *OpenAIGatewayService) handleOpenAIImagesErrorResponse(
 			account.ID,
 			account.Platform,
 			account.Type,
-			truncateForLog(body, s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes),
+			sanitizeOpenAIUpstreamDiagnosticBodyForLog(body, s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes),
 		)
 	}
 
@@ -698,7 +698,7 @@ func (s *OpenAIGatewayService) handleOpenAIImagesErrorResponse(
 		upErr := &OpenAIImagesUpstreamError{
 			StatusCode:        status,
 			ErrorType:         errType,
-			Message:           errMsg,
+			Message:           sanitizeOpenAIUpstreamDiagnosticText(errMsg),
 			UpstreamRequestID: strings.TrimSpace(resp.Header.Get("x-request-id")),
 		}
 		writeOpenAIImagesUpstreamErrorResponse(c, upErr)
@@ -1342,7 +1342,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 	SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 	if err != nil {
-		safeErr := sanitizeUpstreamErrorMessage(err.Error())
+		safeErr := sanitizeOpenAIUpstreamDiagnosticText(err.Error())
 		setOpsUpstreamError(c, 0, safeErr, "")
 		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 			Platform:           account.Platform,
@@ -1360,7 +1360,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 		_ = resp.Body.Close()
 		resp.Body = io.NopCloser(bytes.NewReader(respBody))
 		upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
-		upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
+		upstreamMsg = sanitizeOpenAIUpstreamDiagnosticText(upstreamMsg)
 		if s.shouldFailoverOpenAIUpstreamResponse(resp.StatusCode, upstreamMsg, respBody) {
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 				Platform:           account.Platform,

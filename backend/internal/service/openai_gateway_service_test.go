@@ -73,7 +73,11 @@ func (s *openAITestSettingRepo) Delete(ctx context.Context, key string) error {
 
 type snapshotUpdateAccountRepo struct {
 	stubOpenAIAccountRepo
-	updateExtraCalls chan map[string]any
+	updateExtraCalls  chan map[string]any
+	updateExtraErr    error
+	updateExtraErrFor func(map[string]any) error
+	setErrorID        int64
+	setErrorMsg       string
 }
 
 func (r *snapshotUpdateAccountRepo) UpdateExtra(ctx context.Context, id int64, updates map[string]any) error {
@@ -84,6 +88,20 @@ func (r *snapshotUpdateAccountRepo) UpdateExtra(ctx context.Context, id int64, u
 		}
 		r.updateExtraCalls <- copied
 	}
+	if r.updateExtraErrFor != nil {
+		if err := r.updateExtraErrFor(updates); err != nil {
+			return err
+		}
+	}
+	if r.updateExtraErr != nil {
+		return r.updateExtraErr
+	}
+	return nil
+}
+
+func (r *snapshotUpdateAccountRepo) SetError(_ context.Context, id int64, errorMsg string) error {
+	r.setErrorID = id
+	r.setErrorMsg = errorMsg
 	return nil
 }
 
@@ -2177,12 +2195,12 @@ func TestOpenAIBuildUpstreamRequestOAuthAddsCodexIdentityFallbacks(t *testing.T)
 	require.False(t, gjson.GetBytes(bodyBytes, "client_metadata."+openAICodexWindowIDHeader).Exists())
 }
 
-func TestOpenAIBuildUpstreamRequestOAuthPreservesIncomingDesktopUserAgent(t *testing.T) {
+func TestOpenAIBuildUpstreamRequestOAuthIgnoresIncomingDesktopUserAgent(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	body := []byte(`{"model":"gpt-5.4","input":"hello"}`)
-	incomingUA := "codex-tui/0.136.0 (Mac OS 26.5.0; arm64) Apple_Terminal/470.2 (codex-tui; 0.136.0)"
+	incomingUA := "codex-tui/9.9.9 (Injected OS; x64) Injected_Term/1.0 (codex-tui; 9.9.9)"
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
 	c.Request.Header.Set("User-Agent", incomingUA)
 
@@ -2196,10 +2214,10 @@ func TestOpenAIBuildUpstreamRequestOAuthPreservesIncomingDesktopUserAgent(t *tes
 
 	req, err := svc.buildUpstreamRequest(c.Request.Context(), c, account, body, "token", true, "", false)
 	require.NoError(t, err)
-	require.Equal(t, incomingUA, req.Header.Get("User-Agent"))
+	require.Equal(t, codexCLIUserAgent, req.Header.Get("User-Agent"))
 }
 
-func TestOpenAIBuildUpstreamRequestOAuthNonOfficialUserAgentUsesConfiguredCodexUserAgent(t *testing.T) {
+func TestOpenAIBuildUpstreamRequestOAuthSnapshotsConfiguredCodexUserAgentIntoFingerprint(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -2234,7 +2252,7 @@ func TestOpenAIBuildUpstreamRequestOAuthPreservesCodexReleaseHTTPHeaders(t *test
 	c.Request.Header.Set(openAICodexSessionIDHeader, "release-session")
 	c.Request.Header.Set(openAICodexThreadIDHeader, "release-thread")
 	c.Request.Header.Set(openAICodexClientRequestIDHeader, "release-client-request")
-	c.Request.Header.Set(openAICodexWindowIDHeader, "release-window")
+	c.Request.Header.Set(openAICodexWindowIDHeader, "attacker-release-thread:7")
 	c.Request.Header.Set(openAICodexBetaFeaturesHeader, "feature-a,feature-b")
 	c.Request.Header.Set(openAICodexTurnStateHeader, "release-turn-state")
 	c.Request.Header.Set(openAICodexTurnMetadataHeader, "release-turn-metadata")
@@ -2249,29 +2267,40 @@ func TestOpenAIBuildUpstreamRequestOAuthPreservesCodexReleaseHTTPHeaders(t *test
 
 	req, err := svc.buildUpstreamRequest(c.Request.Context(), c, account, body, "token", true, "", false)
 	require.NoError(t, err)
-	require.NotEmpty(t, req.Header.Get(openAICodexSessionIDHeader))
-	require.NotEmpty(t, req.Header.Get(openAICodexThreadIDHeader))
-	require.Equal(t, "release-client-request", req.Header.Get(openAICodexClientRequestIDHeader))
-	require.Equal(t, "release-window", req.Header.Get(openAICodexWindowIDHeader))
+	wantSessionID := isolateOpenAICodexOAuthSessionID(0, "release-session", "session")
+	wantThreadID := isolateOpenAICodexOAuthSessionID(0, "release-thread", "thread")
+	require.Equal(t, wantSessionID, req.Header.Get(openAICodexSessionIDHeader))
+	require.Equal(t, wantThreadID, req.Header.Get(openAICodexThreadIDHeader))
+	require.Equal(t, wantThreadID, req.Header.Get(openAICodexClientRequestIDHeader))
+	require.Equal(t, wantThreadID+":7", req.Header.Get(openAICodexWindowIDHeader))
 	require.Equal(t, "feature-a,feature-b", req.Header.Get(openAICodexBetaFeaturesHeader))
 	require.Equal(t, "release-turn-state", req.Header.Get(openAICodexTurnStateHeader))
 	require.Equal(t, "release-turn-metadata", req.Header.Get(openAICodexTurnMetadataHeader))
 }
 
-func TestOpenAIBuildUpstreamRequestOAuthMessagesBridgeUsesSessionOnly(t *testing.T) {
+func TestOpenAIBuildUpstreamRequestOAuthMessagesBridgeUsesFingerprintIdentity(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	body := []byte(`{"model":"gpt-5.5","prompt_cache_key":"anthropic-metadata-session-1","input":[{"type":"message","role":"developer","content":[{"type":"input_text","text":"<sub2api-claude-code-todo-guard>"}]},{"type":"message","role":"user","content":"hello"}]}`)
+	body := []byte(`{"model":"gpt-5.5","prompt_cache_key":"anthropic-metadata-session-1","client_metadata":{"keep":"yes","x-codex-installation-id":"attacker-installation","x-codex-window-id":"attacker-window","thread-id":"attacker-thread"},"input":[{"type":"message","role":"developer","content":[{"type":"input_text","text":"<sub2api-claude-code-todo-guard>"}]},{"type":"message","role":"user","content":"hello"}]}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
 	c.Request.Header.Set("OpenAI-Beta", "responses=experimental")
-	c.Request.Header.Set("originator", codexOfficialOriginator)
+	c.Request.Header.Set("originator", "attacker-originator")
+	c.Request.Header.Set(openAICodexInstallationIDHeader, "11111111-1111-4111-8111-111111111111")
 
+	persisted := OpenAICodexFingerprint{
+		SchemaVersion:  openAICodexFingerprintSchemaV1,
+		InstallationID: "550e8400-e29b-41d4-a716-446655440000",
+		UAProfile:      ParseOpenAICodexUAProfile("persisted-codex/9.9.9 (Persist OS; arch) Persist_Term/1.0 (persisted-codex; 9.9.9)"),
+		CreatedAt:      "2026-06-12T00:00:00Z",
+		UpdatedAt:      "2026-06-12T00:00:00Z",
+	}
 	svc := &OpenAIGatewayService{}
 	account := &Account{
 		Platform:    PlatformOpenAI,
 		Type:        AccountTypeOAuth,
 		Credentials: map[string]any{"chatgpt_account_id": "chatgpt-acc"},
+		Extra:       map[string]any{OpenAICodexFingerprintExtraKey: persisted},
 	}
 
 	req, err := svc.buildUpstreamRequest(c.Request.Context(), c, account, body, "token", true, "anthropic-metadata-session-1", false)
@@ -2279,8 +2308,48 @@ func TestOpenAIBuildUpstreamRequestOAuthMessagesBridgeUsesSessionOnly(t *testing
 	require.NotEmpty(t, req.Header.Get("Session_Id"))
 	require.Empty(t, req.Header.Get("Conversation_Id"))
 	require.Empty(t, req.Header.Get("OpenAI-Beta"))
-	require.Empty(t, req.Header.Get("originator"))
-	require.Empty(t, req.Header.Get("Version"))
+	require.Equal(t, "persisted-codex", req.Header.Get("originator"))
+	require.Equal(t, "9.9.9", req.Header.Get("Version"))
+	require.Equal(t, persisted.InstallationID, req.Header.Get(openAICodexInstallationIDHeader))
+	bodyBytes, err := io.ReadAll(req.Body)
+	require.NoError(t, err)
+	require.Equal(t, "yes", gjson.GetBytes(bodyBytes, "client_metadata.keep").String())
+	require.Equal(t, persisted.InstallationID, gjson.GetBytes(bodyBytes, "client_metadata."+openAICodexInstallationIDHeader).String())
+	require.False(t, gjson.GetBytes(bodyBytes, "client_metadata."+openAICodexWindowIDHeader).Exists())
+	require.False(t, gjson.GetBytes(bodyBytes, "client_metadata."+openAICodexThreadIDHeader).Exists())
+	require.NotContains(t, string(bodyBytes), "attacker-installation")
+	require.NotContains(t, string(bodyBytes), "attacker-window")
+	require.NotContains(t, string(bodyBytes), "attacker-thread")
+}
+
+func TestOpenAIBuildUpstreamRequestOAuthUsesRequestContextFingerprintWhenExtraRedacted(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	body := []byte(`{"model":"gpt-5.5","client_metadata":{"keep":"yes"},"input":"hello"}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+
+	svc := &OpenAIGatewayService{}
+	account := &Account{
+		ID:          43,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Credentials: map[string]any{"chatgpt_account_id": "chatgpt-acc"},
+		Extra:       map[string]any{OpenAICodexFingerprintExtraKey: map[string]any{"present": true}},
+	}
+
+	req, err := svc.buildUpstreamRequest(c.Request.Context(), c, account, body, "token", true, "", false)
+	require.NoError(t, err)
+	installationID := req.Header.Get(openAICodexInstallationIDHeader)
+	require.NotEmpty(t, installationID)
+	_, ok := canonicalOpenAICodexInstallationID(installationID)
+	require.True(t, ok)
+
+	bodyBytes, err := io.ReadAll(req.Body)
+	require.NoError(t, err)
+	require.Equal(t, "yes", gjson.GetBytes(bodyBytes, "client_metadata.keep").String())
+	require.Equal(t, installationID, gjson.GetBytes(bodyBytes, "client_metadata."+openAICodexInstallationIDHeader).String())
+	require.Equal(t, map[string]any{"present": true}, account.Extra[OpenAICodexFingerprintExtraKey])
 }
 
 func TestOpenAIBuildUpstreamRequestPreservesCompactPathForAPIKeyBaseURL(t *testing.T) {
@@ -2314,9 +2383,9 @@ func TestOpenAIBuildUpstreamRequestOAuthOfficialClientOriginatorCompatibility(t 
 		originator     string
 		wantOriginator string
 	}{
-		{name: "tui originator preserved", userAgent: "codex-tui/1.2.3", originator: codexOfficialOriginator, wantOriginator: codexOfficialOriginator},
-		{name: "vscode originator preserved", userAgent: "codex_vscode/1.2.3", originator: "codex_vscode", wantOriginator: "codex_vscode"},
-		{name: "official ua fallback to tui originator", userAgent: "codex-tui/1.2.3", wantOriginator: codexOfficialOriginator},
+		{name: "tui originator comes from fingerprint", userAgent: "codex-tui/1.2.3", originator: codexOfficialOriginator, wantOriginator: codexOfficialOriginator},
+		{name: "vscode originator ignored for OAuth fingerprint", userAgent: "codex_vscode/1.2.3", originator: "codex_vscode", wantOriginator: codexOfficialOriginator},
+		{name: "official ua fallback to fingerprint originator", userAgent: "codex-tui/1.2.3", wantOriginator: codexOfficialOriginator},
 		{name: "non official originator normalized", userAgent: "opencode/0.9", originator: "opencode", wantOriginator: codexOfficialOriginator},
 	}
 

@@ -10,37 +10,40 @@ import (
 )
 
 type stubAdminService struct {
-	users                          []service.User
-	apiKeys                        []service.APIKey
-	groups                         []service.Group
-	accounts                       []service.Account
-	proxies                        []service.Proxy
-	proxyCounts                    []service.ProxyWithAccountCount
-	redeems                        []service.RedeemCode
-	boundAuthIdentity              *service.AdminBindAuthIdentityInput
-	boundAuthIdentityFor           int64
-	createdAccounts                []*service.CreateAccountInput
-	createdProxies                 []*service.CreateProxyInput
-	updatedProxyIDs                []int64
-	updatedProxies                 []*service.UpdateProxyInput
-	testedProxyIDs                 []int64
-	getUserErr                     error
-	getAccountResult               *service.Account
-	getAccountErr                  error
-	createAccountErr               error
-	updateAccountErr               error
-	updateAccountFunc              func(context.Context, int64, *service.UpdateAccountInput) (*service.Account, error)
-	updateAccountCalled            bool
-	lastUpdateAccountInput         *service.UpdateAccountInput
-	applyOAuthCredentialsErr       error
-	applyOAuthCredentialsFunc      func(context.Context, int64, *service.ApplyOAuthCredentialsInput) (*service.Account, error)
-	applyOAuthCredentialsCalled    bool
-	lastApplyOAuthCredentialsInput *service.ApplyOAuthCredentialsInput
-	updateAccountExtraErr          error
-	updateAccountExtraCalled       bool
-	bulkUpdateAccountErr           error
-	checkMixedErr                  error
-	lastMixedCheck                 struct {
+	users                             []service.User
+	apiKeys                           []service.APIKey
+	groups                            []service.Group
+	accounts                          []service.Account
+	proxies                           []service.Proxy
+	proxyCounts                       []service.ProxyWithAccountCount
+	redeems                           []service.RedeemCode
+	boundAuthIdentity                 *service.AdminBindAuthIdentityInput
+	boundAuthIdentityFor              int64
+	createdAccounts                   []*service.CreateAccountInput
+	createdProxies                    []*service.CreateProxyInput
+	updatedProxyIDs                   []int64
+	updatedProxies                    []*service.UpdateProxyInput
+	testedProxyIDs                    []int64
+	getUserErr                        error
+	getAccountResult                  *service.Account
+	getAccountErr                     error
+	createAccountErr                  error
+	updateAccountErr                  error
+	updateAccountFunc                 func(context.Context, int64, *service.UpdateAccountInput) (*service.Account, error)
+	updateAccountCalled               bool
+	lastUpdateAccountInput            *service.UpdateAccountInput
+	applyOAuthCredentialsErr          error
+	applyOAuthCredentialsFunc         func(context.Context, int64, *service.ApplyOAuthCredentialsInput) (*service.Account, error)
+	applyOAuthCredentialsCalled       bool
+	lastApplyOAuthCredentialsInput    *service.ApplyOAuthCredentialsInput
+	resetOpenAICodexFingerprintErr    error
+	resetOpenAICodexFingerprintFunc   func(context.Context, int64) (*service.Account, error)
+	resetOpenAICodexFingerprintCalled bool
+	updateAccountExtraErr             error
+	updateAccountExtraCalled          bool
+	bulkUpdateAccountErr              error
+	checkMixedErr                     error
+	lastMixedCheck                    struct {
 		accountID int64
 		platform  string
 		groupIDs  []int64
@@ -397,6 +400,18 @@ func (s *stubAdminService) ApplyOAuthCredentials(ctx context.Context, id int64, 
 		return nil, s.applyOAuthCredentialsErr
 	}
 	account := service.Account{ID: id, Name: "account", Platform: service.PlatformOpenAI, Type: input.Type, Status: service.StatusActive}
+	return &account, nil
+}
+
+func (s *stubAdminService) ResetOpenAICodexFingerprint(ctx context.Context, id int64) (*service.Account, error) {
+	s.resetOpenAICodexFingerprintCalled = true
+	if s.resetOpenAICodexFingerprintFunc != nil {
+		return s.resetOpenAICodexFingerprintFunc(ctx, id)
+	}
+	if s.resetOpenAICodexFingerprintErr != nil {
+		return nil, s.resetOpenAICodexFingerprintErr
+	}
+	account := service.Account{ID: id, Name: "account", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Status: service.StatusActive}
 	return &account, nil
 }
 

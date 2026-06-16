@@ -70,6 +70,7 @@ type AccountTestService struct {
 	httpUpstream              HTTPUpstream
 	cfg                       *config.Config
 	tlsFPProfileService       *TLSFingerprintProfileService
+	codexFingerprintService   *OpenAICodexFingerprintService
 }
 
 // NewAccountTestService creates a new AccountTestService
@@ -80,6 +81,7 @@ func NewAccountTestService(
 	antigravityGatewayService *AntigravityGatewayService,
 	httpUpstream HTTPUpstream,
 	cfg *config.Config,
+	settingService *SettingService,
 	tlsFPProfileService *TLSFingerprintProfileService,
 ) *AccountTestService {
 	return &AccountTestService{
@@ -90,7 +92,37 @@ func NewAccountTestService(
 		httpUpstream:              httpUpstream,
 		cfg:                       cfg,
 		tlsFPProfileService:       tlsFPProfileService,
+		codexFingerprintService:   NewOpenAICodexFingerprintService(accountRepo, settingService),
 	}
+}
+
+func (s *AccountTestService) ensureOpenAICodexFingerprint(ctx context.Context, account *Account, req *http.Request) (OpenAICodexFingerprint, error) {
+	if account == nil || !account.IsOpenAIOAuthLike() {
+		return OpenAICodexFingerprint{}, nil
+	}
+	var fp OpenAICodexFingerprint
+	var err error
+	if s != nil && s.codexFingerprintService != nil {
+		fp, err = s.codexFingerprintService.Ensure(ctx, account)
+	} else {
+		var accountRepo OpenAICodexFingerprintAccountRepository
+		if s != nil {
+			accountRepo = s.accountRepo
+		}
+		fp, err = ensureOpenAICodexFingerprintForRequest(ctx, accountRepo, account, nil)
+	}
+	if err != nil {
+		return OpenAICodexFingerprint{}, err
+	}
+	applyOpenAICodexFingerprintHeaders(req, fp)
+	if req != nil {
+		*req = *req.WithContext(openAICodexFingerprintContext(req.Context(), fp))
+	}
+	return fp, nil
+}
+
+func openAICodexAccountTestProbePromptCacheKey(prefix string, account *Account, fingerprint OpenAICodexFingerprint) string {
+	return openAICodexProbePromptCacheKey(prefix, account, fingerprint)
 }
 
 func (s *AccountTestService) validateUpstreamBaseURL(raw string) (string, error) {
@@ -597,7 +629,12 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 		if chatgptAccountID != "" {
 			req.Header.Set("chatgpt-account-id", chatgptAccountID)
 		}
-		payloadBytes = applyOpenAICodexAccountTestAlignment(req, c, account, payloadBytes, "probe_openai")
+		fingerprint, err := s.ensureOpenAICodexFingerprint(ctx, account, req)
+		if err != nil {
+			return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to ensure Codex fingerprint: %s", err.Error()))
+		}
+		promptCacheKey := openAICodexAccountTestProbePromptCacheKey("probe_openai", account, fingerprint)
+		payloadBytes = applyOpenAICodexAccountTestAlignment(req, c, account, payloadBytes, promptCacheKey)
 	}
 
 	// Get proxy URL
@@ -614,22 +651,22 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 
 	if isOAuth && s.accountRepo != nil {
 		if updates, err := extractOpenAICodexProbeUpdates(resp); err == nil && len(updates) > 0 {
-			_ = s.accountRepo.UpdateExtra(ctx, account.ID, updates)
-			mergeAccountExtra(account, updates)
+			if err := s.persistOpenAIAccountTestExtraUpdates(ctx, account, updates); err != nil {
+				return s.sendErrorAndEnd(c, "Failed to persist Codex probe snapshot")
+			}
 		}
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 		if resp.StatusCode == http.StatusTooManyRequests {
 			s.reconcileOpenAI429State(ctx, account, resp.Header, body)
 		}
-		// 401 Unauthorized: 标记账号为永久错误
+		// 401 Unauthorized: 标记账号为永久错误，但不要存储上游原始响应体。
 		if resp.StatusCode == http.StatusUnauthorized && s.accountRepo != nil {
-			errMsg := fmt.Sprintf("Authentication failed (401): %s", string(body))
-			_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
+			_ = s.accountRepo.SetError(ctx, account.ID, openAIAccountTestAuthErrorMessage(resp.StatusCode, body))
 		}
-		return s.sendErrorAndEnd(c, fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body)))
+		return s.sendErrorAndEnd(c, openAIAccountTestAPIErrorMessage(resp.StatusCode, body))
 	}
 
 	// Process SSE stream
@@ -686,11 +723,12 @@ func (s *AccountTestService) testOpenAIChatCompletionsConnection(
 		if resp.StatusCode == http.StatusTooManyRequests {
 			s.reconcileOpenAI429State(ctx, account, resp.Header, body)
 		}
+		safeBody := sanitizeOpenAIUpstreamDiagnosticBodyForLog(body, 2048)
 		if resp.StatusCode == http.StatusUnauthorized && s.accountRepo != nil {
-			errMsg := fmt.Sprintf("Chat Completions authentication failed (401): %s", string(body))
+			errMsg := fmt.Sprintf("Chat Completions authentication failed (401): %s", safeBody)
 			_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
 		}
-		return s.sendErrorAndEnd(c, fmt.Sprintf("Chat Completions API (/v1/chat/completions) returned %d: %s", resp.StatusCode, string(body)))
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Chat Completions API (/v1/chat/completions) returned %d: %s", resp.StatusCode, safeBody))
 	}
 
 	return s.processOpenAIChatCompletionsStream(c, resp.Body)
@@ -755,16 +793,23 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 	req.Header.Set("Originator", codexOfficialOriginator)
 	req.Header.Set("User-Agent", codexCLIUserAgent)
 	req.Header.Set("Version", codexCLIVersion)
-	probeSessionID := compactProbeSessionID(account.ID)
-	req.Header.Set("Session_ID", probeSessionID)
-	req.Header.Set("Conversation_ID", probeSessionID)
+	if !isOAuth {
+		probeSessionID := compactProbeSessionID(account.ID)
+		req.Header.Set("Session_ID", probeSessionID)
+		req.Header.Set("Conversation_ID", probeSessionID)
+	}
 
 	if isOAuth {
 		req.Host = "chatgpt.com"
 		if chatgptAccountID != "" {
 			req.Header.Set("chatgpt-account-id", chatgptAccountID)
 		}
-		payloadBytes = applyOpenAICodexAccountTestAlignment(req, c, account, payloadBytes, probeSessionID)
+		fingerprint, err := s.ensureOpenAICodexFingerprint(ctx, account, req)
+		if err != nil {
+			return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to ensure Codex fingerprint: %s", err.Error()))
+		}
+		promptCacheKey := openAICodexAccountTestProbePromptCacheKey("probe_openai_compact", account, fingerprint)
+		payloadBytes = applyOpenAICodexAccountTestAlignment(req, c, account, payloadBytes, promptCacheKey)
 	}
 
 	proxyURL := ""
@@ -776,8 +821,9 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 	if err != nil {
 		if s.accountRepo != nil {
 			updates := buildOpenAICompactProbeExtraUpdates(nil, nil, err, time.Now())
-			_ = s.accountRepo.UpdateExtra(ctx, account.ID, updates)
-			mergeAccountExtra(account, updates)
+			if persistErr := s.persistOpenAIAccountTestExtraUpdates(ctx, account, updates); persistErr != nil {
+				return s.sendErrorAndEnd(c, "Failed to persist compact probe state")
+			}
 		}
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Request failed: %s", err.Error()))
 	}
@@ -791,8 +837,9 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 			updates = mergeExtraUpdates(updates, codexUpdates)
 		}
 		if len(updates) > 0 {
-			_ = s.accountRepo.UpdateExtra(ctx, account.ID, updates)
-			mergeAccountExtra(account, updates)
+			if err := s.persistOpenAIAccountTestExtraUpdates(ctx, account, updates); err != nil {
+				return s.sendErrorAndEnd(c, "Failed to persist compact probe state")
+			}
 		}
 		// 探测如返回 429,主动同步限流状态,避免后续短时间内继续选中。
 		if resp.StatusCode == http.StatusTooManyRequests {
@@ -802,14 +849,40 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 
 	if resp.StatusCode != http.StatusOK {
 		if resp.StatusCode == http.StatusUnauthorized && s.accountRepo != nil {
-			errMsg := fmt.Sprintf("Authentication failed (401): %s", string(body))
-			_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
+			_ = s.accountRepo.SetError(ctx, account.ID, openAIAccountTestAuthErrorMessage(resp.StatusCode, body))
 		}
-		return s.sendErrorAndEnd(c, fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body)))
+		return s.sendErrorAndEnd(c, openAIAccountTestAPIErrorMessage(resp.StatusCode, body))
 	}
 
 	s.sendEvent(c, TestEvent{Type: "content", Text: "Compact probe succeeded"})
 	s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
+	return nil
+}
+
+func openAIAccountTestSanitizedUpstreamError(statusCode int, body []byte) string {
+	message := strings.TrimSpace(extractUpstreamErrorMessage(body))
+	if message == "" {
+		message = fmt.Sprintf("Upstream returned %d", statusCode)
+	}
+	return sanitizeOpenAIUpstreamDiagnosticText(message)
+}
+
+func openAIAccountTestAPIErrorMessage(statusCode int, body []byte) string {
+	return fmt.Sprintf("API returned %d: %s", statusCode, openAIAccountTestSanitizedUpstreamError(statusCode, body))
+}
+
+func openAIAccountTestAuthErrorMessage(statusCode int, body []byte) string {
+	return fmt.Sprintf("Authentication failed (%d): %s", statusCode, openAIAccountTestSanitizedUpstreamError(statusCode, body))
+}
+
+func (s *AccountTestService) persistOpenAIAccountTestExtraUpdates(ctx context.Context, account *Account, updates map[string]any) error {
+	if s == nil || s.accountRepo == nil || account == nil || account.ID <= 0 || len(updates) == 0 {
+		return nil
+	}
+	if err := s.accountRepo.UpdateExtra(ctx, account.ID, updates); err != nil {
+		return err
+	}
+	mergeAccountExtra(account, updates)
 	return nil
 }
 
@@ -1391,7 +1464,7 @@ func (s *AccountTestService) processOpenAIChatCompletionsStream(c *gin.Context, 
 		if errData, ok := data["error"].(map[string]any); ok {
 			errorMsg := "Chat Completions API (/v1/chat/completions) returned an error"
 			if msg, ok := errData["message"].(string); ok && msg != "" {
-				errorMsg = msg
+				errorMsg = sanitizeOpenAIUpstreamDiagnosticText(msg)
 			}
 			return s.sendErrorAndEnd(c, fmt.Sprintf("Chat Completions API (/v1/chat/completions) error: %s", errorMsg))
 		}
@@ -1475,7 +1548,7 @@ func (s *AccountTestService) processOpenAIStream(c *gin.Context, body io.Reader)
 			if responseData, ok := data["response"].(map[string]any); ok {
 				if errData, ok := responseData["error"].(map[string]any); ok {
 					if msg, ok := errData["message"].(string); ok && msg != "" {
-						errorMsg = msg
+						errorMsg = sanitizeOpenAIUpstreamDiagnosticText(msg)
 					}
 				}
 			}
@@ -1484,7 +1557,7 @@ func (s *AccountTestService) processOpenAIStream(c *gin.Context, body io.Reader)
 			errorMsg := "Unknown error"
 			if errData, ok := data["error"].(map[string]any); ok {
 				if msg, ok := errData["message"].(string); ok {
-					errorMsg = msg
+					errorMsg = sanitizeOpenAIUpstreamDiagnosticText(msg)
 				}
 			}
 			return s.sendErrorAndEnd(c, errorMsg)
@@ -1551,7 +1624,7 @@ func (s *AccountTestService) testOpenAIImageAPIKey(c *gin.Context, ctx context.C
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return s.sendErrorAndEnd(c, fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body)))
+		return s.sendErrorAndEnd(c, fmt.Sprintf("API returned %d: %s", resp.StatusCode, sanitizeOpenAIUpstreamDiagnosticBodyForLog(body, 2048)))
 	}
 
 	// Parse {"data": [{"b64_json": "...", "revised_prompt": "..."}]}
@@ -1627,15 +1700,16 @@ func (s *AccountTestService) testOpenAIImageOAuth(c *gin.Context, ctx context.Co
 	req.Header.Set("OpenAI-Beta", "responses=experimental")
 	req.Header.Set("originator", codexOfficialOriginator)
 	req.Header.Set("Version", codexCLIVersion)
-	if customUA := strings.TrimSpace(account.GetOpenAIUserAgent()); customUA != "" {
-		req.Header.Set("User-Agent", customUA)
-	} else {
-		req.Header.Set("User-Agent", codexCLIUserAgent)
-	}
+	req.Header.Set("User-Agent", codexCLIUserAgent)
 	if chatgptAccountID := strings.TrimSpace(account.GetChatGPTAccountID()); chatgptAccountID != "" {
 		req.Header.Set("chatgpt-account-id", chatgptAccountID)
 	}
-	responsesBody = applyOpenAICodexAccountTestAlignment(req, c, account, responsesBody, "probe_openai_image")
+	fingerprint, err := s.ensureOpenAICodexFingerprint(ctx, account, req)
+	if err != nil {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to ensure Codex fingerprint: %s", err.Error()))
+	}
+	promptCacheKey := openAICodexAccountTestProbePromptCacheKey("probe_openai_image", account, fingerprint)
+	responsesBody = applyOpenAICodexAccountTestAlignment(req, c, account, responsesBody, promptCacheKey)
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
@@ -1650,13 +1724,16 @@ func (s *AccountTestService) testOpenAIImageOAuth(c *gin.Context, ctx context.Co
 			_ = resp.Body.Close()
 		}
 	}()
+	if s.accountRepo != nil {
+		if updates, err := extractOpenAICodexProbeUpdates(resp); err == nil && len(updates) > 0 {
+			if err := s.persistOpenAIAccountTestExtraUpdates(ctx, account, updates); err != nil {
+				return s.sendErrorAndEnd(c, "Failed to persist Codex image probe snapshot")
+			}
+		}
+	}
 	if resp.StatusCode >= 400 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
-		message := strings.TrimSpace(extractUpstreamErrorMessage(body))
-		if message == "" {
-			message = fmt.Sprintf("Responses API returned %d", resp.StatusCode)
-		}
-		return s.sendErrorAndEnd(c, message)
+		return s.sendErrorAndEnd(c, openAIAccountTestAPIErrorMessage(resp.StatusCode, body))
 	}
 
 	body, err := io.ReadAll(resp.Body)

@@ -190,7 +190,11 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 	}
 
 	upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(responseBody))
-	upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
+	if account.Platform == PlatformOpenAI {
+		upstreamMsg = sanitizeOpenAIUpstreamDiagnosticText(upstreamMsg)
+	} else {
+		upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
+	}
 	if upstreamMsg != "" {
 		upstreamMsg = truncateForLog([]byte(upstreamMsg), 512)
 	}
@@ -304,6 +308,10 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 		s.handleAuthError(ctx, account, msg)
 		shouldDisable = true
 	case 403:
+		rawBodyForLog := truncateForLog(responseBody, 1024)
+		if account.Platform == PlatformOpenAI {
+			rawBodyForLog = sanitizeOpenAIUpstreamDiagnosticBodyForLog(responseBody, 1024)
+		}
 		logger.LegacyPrintf(
 			"service.ratelimit",
 			"[HandleUpstreamErrorRaw] account_id=%d platform=%s type=%s status=403 request_id=%s cf_ray=%s upstream_msg=%s raw_body=%s",
@@ -313,7 +321,7 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 			strings.TrimSpace(headers.Get("x-request-id")),
 			strings.TrimSpace(headers.Get("cf-ray")),
 			upstreamMsg,
-			truncateForLog(responseBody, 1024),
+			rawBodyForLog,
 		)
 		shouldDisable = s.handle403(ctx, account, upstreamMsg, responseBody)
 	case 429:
@@ -745,6 +753,23 @@ func buildForbiddenErrorMessage(prefix string, upstreamMsg string, responseBody 
 	return prefix + fallback
 }
 
+func buildOpenAIForbiddenErrorMessage(prefix string, upstreamMsg string, responseBody []byte, fallback string) string {
+	prefix = strings.TrimSpace(prefix)
+	if prefix != "" && !strings.HasSuffix(prefix, " ") {
+		prefix += " "
+	}
+
+	if msg := strings.TrimSpace(upstreamMsg); msg != "" {
+		return prefix + msg
+	}
+
+	if body := sanitizeOpenAIUpstreamDiagnosticBodyForLog(responseBody, 512); strings.TrimSpace(body) != "" {
+		return prefix + body
+	}
+
+	return prefix + fallback
+}
+
 // handle403 处理 403 Forbidden 错误
 // Antigravity 平台区分 validation/violation/generic 三种类型，均 SetError 永久禁用；
 // 其他平台保持原有 SetError 行为。
@@ -767,7 +792,7 @@ func (s *RateLimitService) handle403(ctx context.Context, account *Account, upst
 }
 
 func (s *RateLimitService) handleOpenAI403(ctx context.Context, account *Account, upstreamMsg string, responseBody []byte) (shouldDisable bool) {
-	msg := buildForbiddenErrorMessage(
+	msg := buildOpenAIForbiddenErrorMessage(
 		"Access forbidden (403):",
 		upstreamMsg,
 		responseBody,
@@ -1878,7 +1903,7 @@ func (s *RateLimitService) triggerTempUnschedulable(ctx context.Context, account
 		StatusCode:      statusCode,
 		MatchedKeyword:  matchedKeyword,
 		RuleIndex:       ruleIndex,
-		ErrorMessage:    truncateTempUnschedMessage(responseBody, tempUnschedMessageMaxBytes),
+		ErrorMessage:    truncateTempUnschedMessageForAccount(account, responseBody, tempUnschedMessageMaxBytes),
 	}
 
 	reason := ""
@@ -1913,6 +1938,13 @@ func truncateTempUnschedMessage(body []byte, maxBytes int) string {
 		body = body[:maxBytes]
 	}
 	return strings.TrimSpace(string(body))
+}
+
+func truncateTempUnschedMessageForAccount(account *Account, body []byte, maxBytes int) string {
+	if account != nil && account.Platform == PlatformOpenAI {
+		return strings.TrimSpace(sanitizeOpenAIUpstreamDiagnosticBodyForLog(body, maxBytes))
+	}
+	return truncateTempUnschedMessage(body, maxBytes)
 }
 
 // HandleStreamTimeout 处理流数据超时

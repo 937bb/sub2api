@@ -209,17 +209,74 @@ func TestBuildOpenAIWSHeadersSetupTokenUsesOAuthIsolation(t *testing.T) {
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
 	c.Request.Header.Set("session_id", "shared-session")
+	c.Request.Header.Set(openAICodexWindowIDHeader, "attacker-thread:42")
+	c.Request.Header.Set(openAICodexClientRequestIDHeader, "attacker-request")
 	c.Request.Header.Set("User-Agent", "generic-client")
 	c.Set("api_key", &APIKey{ID: 77})
 
 	svc := &OpenAIGatewayService{}
 	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeSetupToken}
-	headers, _ := svc.buildOpenAIWSHeaders(c, account, "token", OpenAIWSProtocolDecision{Transport: OpenAIUpstreamTransportResponsesWebsocketV2}, true, "", "", "", "")
+	headers, _, err := svc.buildOpenAIWSHeaders(c, account, "token", OpenAIWSProtocolDecision{Transport: OpenAIUpstreamTransportResponsesWebsocketV2}, true, "", "", "", "")
+	require.NoError(t, err)
 
-	require.Equal(t, isolateOpenAISessionID(77, "shared-session"), headers.Get("session_id"))
-	require.Equal(t, headers.Get("session_id"), headers.Get(openAICodexSessionIDHeader))
+	wantSessionID := isolateOpenAICodexOAuthSessionID(77, "shared-session", "session")
+	wantThreadID := isolateOpenAICodexOAuthSessionID(77, "shared-session", "thread")
+	require.Equal(t, wantSessionID, headers.Get("session_id"))
+	require.Equal(t, wantSessionID, headers.Get(openAICodexSessionIDHeader))
+	require.Equal(t, wantThreadID, headers.Get(openAICodexThreadIDHeader))
+	require.Equal(t, wantThreadID, headers.Get(openAICodexClientRequestIDHeader))
+	require.Equal(t, wantThreadID+":42", headers.Get(openAICodexWindowIDHeader))
 	require.Equal(t, codexCLIVersion, headers.Get("version"))
-	require.Equal(t, svc.resolveOpenAICodexUserAgent(c.Request.Context()), headers.Get("user-agent"))
+	require.Equal(t, codexOfficialOriginator, headers.Get("originator"))
+	require.Equal(t, codexCLIUserAgent, headers.Get("user-agent"))
+	require.NotEmpty(t, headers.Get(openAICodexInstallationIDHeader))
+}
+
+func TestBuildOpenAIWSHeadersOAuthPayloadWindowGenerationBeatsUpgradeHeader(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+	c.Request.Header.Set("session_id", "shared-session")
+	c.Request.Header.Set(openAICodexWindowIDHeader, "upgrade-thread:0")
+	c.Set("api_key", &APIKey{ID: 77})
+
+	svc := &OpenAIGatewayService{}
+	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	headers, _, err := svc.buildOpenAIWSHeaders(c, account, "token", OpenAIWSProtocolDecision{Transport: OpenAIUpstreamTransportResponsesWebsocketV2}, true, "", "", "", "", "payload-thread:7")
+	require.NoError(t, err)
+
+	wantThreadID := isolateOpenAICodexOAuthSessionID(77, "shared-session", "thread")
+	require.Equal(t, wantThreadID+":7", headers.Get(openAICodexWindowIDHeader))
+}
+
+func TestOpenAIWSHeaderValueForLogHashesSensitiveIdentityHeaders(t *testing.T) {
+	headers := http.Header{}
+	headers.Set("User-Agent", "codex-tui/0.136.0 (Mac OS 26.5.0; arm64) Apple_Terminal/470.2")
+	headers.Set("session_id", "session-secret")
+	headers.Set("conversation_id", "conversation-secret")
+	headers.Set(openAICodexSessionIDHeader, "codex-session-secret")
+	headers.Set(openAICodexThreadIDHeader, "thread-secret")
+	headers.Set(openAICodexClientRequestIDHeader, "client-request-secret")
+	headers.Set(openAICodexInstallationIDHeader, "550e8400-e29b-41d4-a716-446655440000")
+	headers.Set(openAICodexWindowIDHeader, "thread-secret:7")
+	headers.Set("OpenAI-Beta", openAIWSBetaV2Value)
+
+	for _, key := range []string{
+		"User-Agent",
+		"session_id",
+		"conversation_id",
+		openAICodexSessionIDHeader,
+		openAICodexThreadIDHeader,
+		openAICodexClientRequestIDHeader,
+		openAICodexInstallationIDHeader,
+		openAICodexWindowIDHeader,
+	} {
+		raw := headers.Get(key)
+		require.Equal(t, hashSensitiveValueForLog(raw), openAIWSHeaderValueForLog(headers, key), key)
+		require.NotContains(t, openAIWSHeaderValueForLog(headers, key), raw, key)
+	}
+	require.Equal(t, openAIWSBetaV2Value, openAIWSHeaderValueForLog(headers, "OpenAI-Beta"))
 }
 
 func TestBuildOpenAIResponsesWSURLSetupTokenUsesOAuthEndpoint(t *testing.T) {

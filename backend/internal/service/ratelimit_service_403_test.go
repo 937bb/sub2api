@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"testing"
 	"time"
@@ -85,4 +86,88 @@ func TestRateLimitService_HandleUpstreamError_OpenAI403ThresholdDisables(t *test
 	require.Equal(t, 0, repo.tempCalls)
 	require.Contains(t, repo.lastErrorMsg, "workspace forbidden by policy")
 	require.Contains(t, repo.lastErrorMsg, "consecutive_403=3/3")
+}
+
+func TestRateLimitService_HandleUpstreamError_OpenAI403RawFallbackRedactsSensitiveMetadata(t *testing.T) {
+	installationID := "550e8400-e29b-41d4-a716-446655440000"
+	threadID := "018fed75-1b7e-7000-8000-000000000123"
+	accessToken := "setup-secret-access-token"
+	rawUA := "codex-tui/0.136.0 (Mac OS 26.5.0; arm64) Apple_Terminal/470.2 (codex-tui; 0.136.0)"
+	body := []byte(`{"diagnostic":{"x-codex-installation-id":"` + installationID + `","thread_id":"` + threadID + `","authorization":"Bearer ` + accessToken + `","raw_user_agent":"` + rawUA + `"},"diagnostic_text":"x-codex-installation-id=` + installationID + ` thread-id=` + threadID + ` Authorization=Bearer ` + accessToken + ` ua ` + rawUA + `"}`)
+
+	t.Run("temporary cooldown", func(t *testing.T) {
+		repo := &rateLimitAccountRepoStub{}
+		counter := &openAI403CounterCacheStub{counts: []int64{1}}
+		service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+		service.SetOpenAI403CounterCache(counter)
+		account := &Account{ID: 303, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+
+		shouldDisable := service.HandleUpstreamError(context.Background(), account, http.StatusForbidden, http.Header{}, body)
+
+		require.True(t, shouldDisable)
+		require.Equal(t, 0, repo.setErrorCalls)
+		require.Equal(t, 1, repo.tempCalls)
+		assertOpenAIDiagnosticRedacted(t, repo.lastTempReason, installationID, threadID, accessToken, rawUA)
+		require.Contains(t, repo.lastTempReason, "[redacted]")
+		require.Contains(t, repo.lastTempReason, "[codex-user-agent-redacted]")
+	})
+
+	t.Run("threshold disable", func(t *testing.T) {
+		repo := &rateLimitAccountRepoStub{}
+		counter := &openAI403CounterCacheStub{counts: []int64{3}}
+		service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+		service.SetOpenAI403CounterCache(counter)
+		account := &Account{ID: 304, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+
+		shouldDisable := service.HandleUpstreamError(context.Background(), account, http.StatusForbidden, http.Header{}, body)
+
+		require.True(t, shouldDisable)
+		require.Equal(t, 1, repo.setErrorCalls)
+		require.Equal(t, 0, repo.tempCalls)
+		assertOpenAIDiagnosticRedacted(t, repo.lastErrorMsg, installationID, threadID, accessToken, rawUA)
+		require.Contains(t, repo.lastErrorMsg, "consecutive_403=3/3")
+	})
+}
+
+func TestRateLimitService_OpenAITempUnschedulableReasonRedactsSensitiveMetadata(t *testing.T) {
+	installationID := "550e8400-e29b-41d4-a716-446655440000"
+	threadID := "018fed75-1b7e-7000-8000-000000000123"
+	accessToken := "setup-secret-access-token"
+	rawUA := "codex-tui/0.136.0 (Mac OS 26.5.0; arm64) Apple_Terminal/470.2 (codex-tui; 0.136.0)"
+	body := []byte(`{"error":{"message":"overloaded","x-codex-installation-id":"` + installationID + `","thread_id":"` + threadID + `","authorization":"Bearer ` + accessToken + `","raw_user_agent":"` + rawUA + `"}}`)
+	repo := &rateLimitAccountRepoStub{}
+	service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	account := &Account{
+		ID:       305,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"temp_unschedulable_enabled": true,
+			"temp_unschedulable_rules": []any{
+				map[string]any{
+					"error_code":       float64(http.StatusServiceUnavailable),
+					"keywords":         []any{"overloaded"},
+					"duration_minutes": float64(5),
+				},
+			},
+		},
+	}
+
+	shouldDisable := service.HandleUpstreamError(context.Background(), account, http.StatusServiceUnavailable, http.Header{}, body)
+
+	require.True(t, shouldDisable)
+	require.Equal(t, 0, repo.setErrorCalls)
+	require.Equal(t, 1, repo.tempCalls)
+	assertOpenAIDiagnosticRedacted(t, repo.lastTempReason, installationID, threadID, accessToken, rawUA)
+	var state TempUnschedState
+	require.NoError(t, json.Unmarshal([]byte(repo.lastTempReason), &state))
+	assertOpenAIDiagnosticRedacted(t, state.ErrorMessage, installationID, threadID, accessToken, rawUA)
+	require.Contains(t, state.ErrorMessage, "[redacted]")
+}
+
+func assertOpenAIDiagnosticRedacted(t *testing.T, text string, leaked ...string) {
+	t.Helper()
+	for _, fragment := range leaked {
+		require.NotContains(t, text, fragment)
+	}
 }

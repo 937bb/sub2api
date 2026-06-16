@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -64,6 +65,8 @@ func newTestContext() (*gin.Context, *httptest.ResponseRecorder) {
 type openAIAccountTestRepo struct {
 	mockAccountRepoForGemini
 	updatedExtra       map[string]any
+	updateExtraErr     error
+	updateExtraErrFor  func(map[string]any) error
 	bulkUpdatedIDs     []int64
 	bulkUpdatedPayload AccountBulkUpdate
 	rateLimitedID      int64
@@ -75,6 +78,14 @@ type openAIAccountTestRepo struct {
 
 func (r *openAIAccountTestRepo) UpdateExtra(_ context.Context, _ int64, updates map[string]any) error {
 	r.updatedExtra = updates
+	if r.updateExtraErrFor != nil {
+		if err := r.updateExtraErrFor(updates); err != nil {
+			return err
+		}
+	}
+	if r.updateExtraErr != nil {
+		return r.updateExtraErr
+	}
 	return nil
 }
 
@@ -137,6 +148,78 @@ func TestAccountTestService_OpenAISuccessPersistsSnapshotFromHeaders(t *testing.
 	require.Contains(t, recorder.Body.String(), "test_complete")
 }
 
+func TestAccountTestService_OpenAIPersistsSnapshotOnlyAfterRepositorySuccess(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, recorder := newTestContext()
+
+	resp := newJSONResponse(http.StatusOK, "")
+	resp.Body = io.NopCloser(strings.NewReader(`data: {"type":"response.completed"}
+
+`))
+	resp.Header.Set("x-codex-primary-used-percent", "88")
+	resp.Header.Set("x-codex-primary-reset-after-seconds", "604800")
+	resp.Header.Set("x-codex-primary-window-minutes", "10080")
+
+	repo := &openAIAccountTestRepo{
+		updateExtraErrFor: func(updates map[string]any) error {
+			if _, ok := updates["codex_usage_updated_at"]; ok {
+				return errors.New("snapshot persist failed")
+			}
+			return nil
+		},
+	}
+	upstream := &queuedHTTPUpstream{responses: []*http.Response{resp}}
+	svc := &AccountTestService{accountRepo: repo, httpUpstream: upstream}
+	account := &Account{
+		ID:          891,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Concurrency: 1,
+		Credentials: map[string]any{"access_token": "test-token"},
+	}
+
+	err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.4", "", "")
+	require.Error(t, err)
+	require.Contains(t, recorder.Body.String(), "Failed to persist Codex probe snapshot")
+	require.Contains(t, repo.updatedExtra, "codex_usage_updated_at")
+	require.NotContains(t, account.Extra, "codex_usage_updated_at")
+	require.NotContains(t, account.Extra, "codex_7d_used_percent")
+}
+
+func TestAccountTestService_OpenAIErrorSanitizesOAuthUpstreamBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, recorder := newTestContext()
+
+	installationID := "550e8400-e29b-41d4-a716-446655440000"
+	threadID := "018fed75-1b7e-7000-8000-000000000123"
+	accessToken := "setup-secret-access-token"
+	resp := newJSONResponse(http.StatusUnauthorized, fmt.Sprintf(`{"error":{"message":"bad auth x-codex-installation-id=%s thread-id=%s Authorization=Bearer %s"},"raw":{"x-codex-installation-id":"%s","thread-id":"%s","authorization":"Bearer %s"}}`, installationID, threadID, accessToken, installationID, threadID, accessToken))
+
+	repo := &openAIAccountTestRepo{}
+	upstream := &queuedHTTPUpstream{responses: []*http.Response{resp}}
+	svc := &AccountTestService{accountRepo: repo, httpUpstream: upstream}
+	account := &Account{
+		ID:          892,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Concurrency: 1,
+		Credentials: map[string]any{"access_token": accessToken},
+	}
+
+	err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.4", "", "")
+	require.Error(t, err)
+	output := recorder.Body.String()
+	require.Contains(t, output, "API returned 401")
+	require.Contains(t, repo.setErrorMsg, "Authentication failed (401)")
+	for _, leaked := range []string{installationID, threadID, accessToken, "setup-secret"} {
+		require.NotContains(t, output, leaked)
+		require.NotContains(t, repo.setErrorMsg, leaked)
+	}
+	require.Contains(t, output, "x-codex-installation-id=[redacted]")
+	require.Contains(t, output, "thread-id=[redacted]")
+	require.Contains(t, repo.setErrorMsg, "Authorization=[redacted]")
+}
+
 func TestAccountTestService_OpenAIOAuthProbeSendsCodexFingerprint(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, _ := newTestContext()
@@ -173,10 +256,54 @@ func TestAccountTestService_OpenAIOAuthProbeSendsCodexFingerprint(t *testing.T) 
 	require.NotEmpty(t, upstream.lastReq.Header.Get(openAICodexClientRequestIDHeader))
 	require.NotEmpty(t, upstream.lastReq.Header.Get(openAICodexInstallationIDHeader))
 	require.NotEmpty(t, upstream.lastReq.Header.Get(openAICodexWindowIDHeader))
-	require.Equal(t, upstream.lastReq.Header.Get(openAICodexThreadIDHeader), gjson.GetBytes(upstream.lastBody, "prompt_cache_key").String())
+	promptCacheKey := gjson.GetBytes(upstream.lastBody, "prompt_cache_key").String()
+	require.Equal(t, upstream.lastReq.Header.Get(openAICodexThreadIDHeader), promptCacheKey)
+	require.NotEqual(t, "probe_openai", promptCacheKey)
+	require.Contains(t, promptCacheKey, "-")
 	require.Equal(t, upstream.lastReq.Header.Get(openAICodexInstallationIDHeader), gjson.GetBytes(upstream.lastBody, "client_metadata.x-codex-installation-id").String())
 	// Codex HTTP 不在 client_metadata 中放 x-codex-window-id，仅放在 HTTP header。
 	require.False(t, gjson.GetBytes(upstream.lastBody, "client_metadata.x-codex-window-id").Exists())
+}
+
+func TestAccountTestService_OpenAIOAuthProbeIDsAreAccountScoped(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	probe := func(accountID int64) (threadID string, windowID string, promptCacheKey string) {
+		ctx, _ := newTestContext()
+		resp := newJSONResponse(http.StatusOK, "")
+		resp.Body = io.NopCloser(strings.NewReader("data: {\"type\":\"response.completed\"}\n\n"))
+		upstream := &httpUpstreamRecorder{resp: resp}
+		repo := &snapshotUpdateAccountRepo{stubOpenAIAccountRepo: stubOpenAIAccountRepo{accounts: []Account{{
+			ID:          accountID,
+			Platform:    PlatformOpenAI,
+			Type:        AccountTypeOAuth,
+			Status:      StatusActive,
+			Schedulable: true,
+			Concurrency: 1,
+			Credentials: map[string]any{"access_token": "test-token"},
+		}}}}
+		svc := &AccountTestService{
+			accountRepo:             repo,
+			httpUpstream:            upstream,
+			codexFingerprintService: NewOpenAICodexFingerprintService(repo, nil),
+		}
+		account, err := repo.GetByID(context.Background(), accountID)
+		require.NoError(t, err)
+		require.NoError(t, svc.testOpenAIAccountConnection(ctx, account, "gpt-5.4", "", ""))
+		return upstream.lastReq.Header.Get(openAICodexThreadIDHeader),
+			upstream.lastReq.Header.Get(openAICodexWindowIDHeader),
+			gjson.GetBytes(upstream.lastBody, "prompt_cache_key").String()
+	}
+
+	threadA, windowA, promptA := probe(931)
+	threadB, windowB, promptB := probe(932)
+	require.NotEmpty(t, promptA)
+	require.NotEmpty(t, promptB)
+	require.NotEqual(t, "probe_openai", promptA)
+	require.NotEqual(t, "probe_openai", promptB)
+	require.NotEqual(t, promptA, promptB)
+	require.NotEqual(t, threadA, threadB)
+	require.NotEqual(t, windowA, windowB)
 }
 
 func TestAccountTestService_OpenAIStreamEOFBeforeCompletedFails(t *testing.T) {
@@ -267,7 +394,9 @@ func TestAccountTestService_OpenAI429BodyOnlyPersistsRateLimitAndClearsStaleErro
 	require.Equal(t, StatusActive, account.Status)
 	require.Empty(t, account.ErrorMessage)
 	require.NotNil(t, account.RateLimitResetAt)
-	require.Empty(t, repo.updatedExtra)
+	require.Contains(t, repo.updatedExtra, OpenAICodexFingerprintExtraKey)
+	require.NotContains(t, repo.updatedExtra, "codex_5h_used_percent")
+	require.NotContains(t, repo.updatedExtra, "codex_7d_used_percent")
 }
 
 func TestAccountTestService_OpenAI429SyncsObservedPlanType(t *testing.T) {

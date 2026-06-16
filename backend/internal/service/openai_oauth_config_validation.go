@@ -66,6 +66,76 @@ func validateOpenAIOAuthAccountWriteConfig(account *Account) error {
 	return nil
 }
 
+func normalizeOpenAICodexFingerprintExtraForCreate(account *Account) {
+	if account == nil {
+		return
+	}
+	account.Extra = normalizeOpenAICodexFingerprintFullExtraWrite(account, account.Extra, nil, false)
+}
+
+func normalizeOpenAICodexFingerprintExtraForUpdate(account *Account, existingExtra map[string]any, existingWasOpenAIOAuthLike bool) {
+	if account == nil {
+		return
+	}
+	account.Extra = normalizeOpenAICodexFingerprintFullExtraWrite(account, account.Extra, existingExtra, existingWasOpenAIOAuthLike)
+}
+
+func normalizeOpenAICodexFingerprintFullExtraWrite(account *Account, incoming, existingExtra map[string]any, preserveExisting bool) map[string]any {
+	if incoming == nil {
+		if account != nil && account.IsOpenAIOAuthLike() && preserveExisting {
+			if fingerprint, ok := existingExtra[OpenAICodexFingerprintExtraKey]; ok {
+				return map[string]any{OpenAICodexFingerprintExtraKey: fingerprint}
+			}
+		}
+		return nil
+	}
+
+	out := make(map[string]any, len(incoming))
+	for key, value := range incoming {
+		if key == OpenAICodexFingerprintExtraKey {
+			continue
+		}
+		out[key] = value
+	}
+	// The Codex fingerprint is server-owned sensitive metadata. Full-account
+	// writes may carry a redacted DTO placeholder, so preserve only the durable
+	// value that already belongs to an OAuth-like account and ignore all input.
+	if account != nil && account.IsOpenAIOAuthLike() && preserveExisting {
+		if fingerprint, ok := existingExtra[OpenAICodexFingerprintExtraKey]; ok {
+			out[OpenAICodexFingerprintExtraKey] = fingerprint
+		}
+	}
+	return out
+}
+
+func sanitizeOpenAICodexFingerprintExtraUpdates(updates map[string]any) map[string]any {
+	if updates == nil {
+		return nil
+	}
+	if _, ok := updates[OpenAICodexFingerprintExtraKey]; !ok {
+		return updates
+	}
+	out := make(map[string]any, len(updates)-1)
+	for key, value := range updates {
+		if key == OpenAICodexFingerprintExtraKey {
+			continue
+		}
+		out[key] = value
+	}
+	return out
+}
+
+func cloneAccountExtraForServerOwnedWrite(extra map[string]any) map[string]any {
+	if extra == nil {
+		return nil
+	}
+	out := make(map[string]any, len(extra))
+	for key, value := range extra {
+		out[key] = value
+	}
+	return out
+}
+
 func validateOpenAIOAuthAccountConfig(account *Account, scope string) []string {
 	if account == nil || !account.IsOpenAIOAuthLike() || account.Extra == nil {
 		return nil

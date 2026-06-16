@@ -1686,7 +1686,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_OAuthManagedSess
 		t.Fatal("等待 websocket 结束超时")
 	}
 
-	require.Equal(t, isolateOpenAISessionID(0, "pcache_oauth_managed"), captureDialer.lastHeaders.Get("session_id"))
+	require.Equal(t, isolateOpenAICodexOAuthSessionID(0, "pcache_oauth_managed", "session"), captureDialer.lastHeaders.Get("session_id"))
 	require.Equal(t, "turn-state-1", captureDialer.lastHeaders.Get(openAIWSTurnStateHeader))
 	require.Equal(t, "turn-meta-1", captureDialer.lastHeaders.Get(openAIWSTurnMetadataHeader))
 }

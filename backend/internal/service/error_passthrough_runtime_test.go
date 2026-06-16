@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/model"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -167,6 +168,43 @@ func TestOpenAIHandleErrorResponse_AppliesRuleFor422(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "upstream_error", errField["type"])
 	assert.Equal(t, "OpenAI上游失败", errField["message"])
+}
+
+func TestOpenAIHandleErrorResponse_RedactsOpsDiagnostics(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+
+	installationID := "550e8400-e29b-41d4-a716-446655440000"
+	threadID := "018fed75-1b7e-7000-8000-000000000123"
+	accessToken := "setup-secret-access-token"
+	rawUA := "codex-tui/0.136.0 (Mac OS 26.5.0; arm64) Apple_Terminal/470.2 (codex-tui; 0.136.0)"
+	respBody := []byte(`{"error":{"message":"bad x-codex-installation-id=` + installationID + ` thread-id=` + threadID + ` Authorization=Bearer ` + accessToken + ` ua ` + rawUA + `"},"raw_user_agent":"` + rawUA + `","prompt_cache_key":"probe_openai_usage:` + threadID + `"}`)
+	resp := &http.Response{
+		StatusCode: http.StatusBadRequest,
+		Body:       io.NopCloser(bytes.NewReader(respBody)),
+		Header:     http.Header{},
+	}
+	svc := &OpenAIGatewayService{
+		cfg: &config.Config{Gateway: config.GatewayConfig{LogUpstreamErrorBody: true, LogUpstreamErrorBodyMaxBytes: 4096}},
+	}
+	account := &Account{ID: 312, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+
+	_, err := svc.handleErrorResponse(context.Background(), resp, c, account, nil)
+
+	require.Error(t, err)
+	messageRaw, ok := c.Get(OpsUpstreamErrorMessageKey)
+	require.True(t, ok)
+	detailRaw, ok := c.Get(OpsUpstreamErrorDetailKey)
+	require.True(t, ok)
+	combined := err.Error() + "\n" + messageRaw.(string) + "\n" + detailRaw.(string)
+	for _, leaked := range []string{installationID, threadID, accessToken, rawUA, "setup-secret"} {
+		require.NotContains(t, combined, leaked)
+	}
+	require.Contains(t, combined, "x-codex-installation-id=[redacted]")
+	require.Contains(t, combined, "thread-id=[redacted]")
+	require.Contains(t, combined, "[redacted]")
+	require.Contains(t, combined, "[codex-user-agent-redacted]")
 }
 
 func TestGeminiWriteGeminiMappedError_AppliesRuleFor422(t *testing.T) {

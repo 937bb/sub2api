@@ -1,9 +1,87 @@
 package service
 
 import (
+	"bytes"
+	"context"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/require"
 )
+
+func TestForwardAsAnthropic_SetupTokenPersistsCodexUsageSnapshot(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":false}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	upstreamBody := strings.Join([]string{
+		`data: {"type":"response.completed","response":{"id":"resp_1","object":"response","model":"gpt-5.4","status":"completed","output":[{"type":"message","id":"msg_1","role":"assistant","status":"completed","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":5,"output_tokens":2,"total_tokens":7}}}`,
+		"",
+		"data: [DONE]",
+		"",
+	}, "\n")
+	headers := http.Header{}
+	headers.Set("Content-Type", "text/event-stream")
+	headers.Set("x-request-id", "rid_setup_snapshot")
+	headers.Set(openAICodexPrimaryUsedPercentHeader, "66")
+	headers.Set(openAICodexPrimaryResetSecondsHeader, "604800")
+	headers.Set(openAICodexPrimaryWindowMinutesHeader, "10080")
+	headers.Set(openAICodexSecondUsedPercentHeader, "33")
+	headers.Set(openAICodexSecondResetSecondsHeader, "18000")
+	headers.Set(openAICodexSecondWindowMinutesHeader, "300")
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     headers,
+		Body:       io.NopCloser(strings.NewReader(upstreamBody)),
+	}}
+	updateCalls := make(chan map[string]any, 2)
+	repo := &snapshotUpdateAccountRepo{updateExtraCalls: updateCalls}
+	svc := &OpenAIGatewayService{
+		accountRepo:  repo,
+		httpUpstream: upstream,
+		cfg:          &config.Config{Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}}},
+	}
+	account := &Account{
+		ID:          613,
+		Name:        "openai-setup-token",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeSetupToken,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"access_token":       "setup-token",
+			"chatgpt_account_id": "chatgpt-acc",
+		},
+	}
+
+	result, err := svc.ForwardAsAnthropic(context.Background(), c, account, body, "", "gpt-5.4")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	var snapshotUpdates map[string]any
+	deadline := time.After(time.Second)
+	for snapshotUpdates == nil {
+		select {
+		case updates := <-updateCalls:
+			if _, ok := updates["codex_usage_updated_at"]; ok {
+				snapshotUpdates = updates
+			}
+		case <-deadline:
+			t.Fatal("expected setup-token messages compatibility to persist Codex usage snapshot")
+		}
+	}
+	require.Equal(t, 66.0, snapshotUpdates["codex_7d_used_percent"])
+	require.Equal(t, 33.0, snapshotUpdates["codex_5h_used_percent"])
+}
 
 func TestCodexSnapshotBaseTime(t *testing.T) {
 	fallback := time.Date(2026, 2, 20, 9, 0, 0, 0, time.UTC)

@@ -10,6 +10,7 @@ import (
 
 	"log/slog"
 
+	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
@@ -43,9 +44,9 @@ type DataProxy struct {
 	Status   string `json:"status"`
 }
 
-// DataAccount 是管理员显式备份导出使用的账号结构，故意不走 dto.Account 的脱敏路径，
-// Credentials 原文返回。这是"管理员备份"这一显式行为的一部分；如未来需要导出脱敏版本，
-// 应新增独立结构而非修改这里。
+// DataAccount 是管理员显式备份导出使用的账号结构，故意不走 dto.Account 的凭证脱敏路径，
+// Credentials 原文返回。这是"管理员备份"这一显式行为的一部分；Extra 仍需隐藏
+// OpenAI Codex 指纹这类支持排障不应完整暴露的敏感元数据。
 type DataAccount struct {
 	Name               string         `json:"name"`
 	Notes              *string        `json:"notes,omitempty"`
@@ -156,7 +157,7 @@ func (h *AccountHandler) ExportData(c *gin.Context) {
 			Platform:           acc.Platform,
 			Type:               acc.Type,
 			Credentials:        acc.Credentials,
-			Extra:              acc.Extra,
+			Extra:              dto.RedactAccountExtraForAccount(&acc),
 			ProxyKey:           proxyKey,
 			Concurrency:        acc.Concurrency,
 			Priority:           acc.Priority,
@@ -382,14 +383,14 @@ func (h *AccountHandler) listAccountsFiltered(ctx context.Context, platform, acc
 	var out []service.Account
 	for {
 		items, total, err := h.adminService.ListAccounts(ctx, page, pageSize, service.AccountListFilters{
-		Platform:    platform,
-		AccountType: accountType,
-		Status:      status,
-		Search:      search,
-		GroupID:     groupID,
-		PrivacyMode: privacyMode,
-		PlanType:    planType,
-	}, sortBy, sortOrder)
+			Platform:    platform,
+			AccountType: accountType,
+			Status:      status,
+			Search:      search,
+			GroupID:     groupID,
+			PrivacyMode: privacyMode,
+			PlanType:    planType,
+		}, sortBy, sortOrder)
 		if err != nil {
 			return nil, err
 		}

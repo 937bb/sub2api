@@ -609,6 +609,7 @@ func (s *CRSSyncService) SyncFromCRS(ctx context.Context, input SyncFromCRSInput
 				Status:      status,
 				Schedulable: src.Schedulable,
 			}
+			normalizeOpenAICodexFingerprintExtraForCreate(account)
 			if err := validateOpenAIOAuthAccountWriteConfig(account); err != nil {
 				item.Action = "failed"
 				item.Error = err.Error()
@@ -633,6 +634,8 @@ func (s *CRSSyncService) SyncFromCRS(ctx context.Context, input SyncFromCRSInput
 			continue
 		}
 
+		existingExtra := cloneAccountExtraForServerOwnedWrite(existing.Extra)
+		existingWasOpenAIOAuthLike := existing.IsOpenAIOAuthLike()
 		existing.Extra = mergeMap(existing.Extra, extra)
 		existing.Name = defaultName(src.Name, src.ID)
 		existing.Platform = PlatformOpenAI
@@ -645,6 +648,7 @@ func (s *CRSSyncService) SyncFromCRS(ctx context.Context, input SyncFromCRSInput
 		existing.Priority = priority
 		existing.Status = status
 		existing.Schedulable = src.Schedulable
+		normalizeOpenAICodexFingerprintExtraForUpdate(existing, existingExtra, existingWasOpenAIOAuthLike)
 
 		if err := validateOpenAIOAuthAccountWriteConfig(existing); err != nil {
 			item.Action = "failed"
@@ -749,6 +753,7 @@ func (s *CRSSyncService) SyncFromCRS(ctx context.Context, input SyncFromCRSInput
 				Status:      status,
 				Schedulable: src.Schedulable,
 			}
+			normalizeOpenAICodexFingerprintExtraForCreate(account)
 			if err := s.accountRepo.Create(ctx, account); err != nil {
 				item.Action = "failed"
 				item.Error = "create failed: " + err.Error()
@@ -762,6 +767,8 @@ func (s *CRSSyncService) SyncFromCRS(ctx context.Context, input SyncFromCRSInput
 			continue
 		}
 
+		existingExtra := cloneAccountExtraForServerOwnedWrite(existing.Extra)
+		existingWasOpenAIOAuthLike := existing.IsOpenAIOAuthLike()
 		existing.Extra = mergeMap(existing.Extra, extra)
 		existing.Name = defaultName(src.Name, src.ID)
 		existing.Platform = PlatformOpenAI
@@ -774,6 +781,7 @@ func (s *CRSSyncService) SyncFromCRS(ctx context.Context, input SyncFromCRSInput
 		existing.Priority = priority
 		existing.Status = status
 		existing.Schedulable = src.Schedulable
+		normalizeOpenAICodexFingerprintExtraForUpdate(existing, existingExtra, existingWasOpenAIOAuthLike)
 
 		if err := s.accountRepo.Update(ctx, existing); err != nil {
 			item.Action = "failed"

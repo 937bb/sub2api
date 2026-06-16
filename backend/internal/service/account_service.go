@@ -173,6 +173,7 @@ func (s *AccountService) Create(ctx context.Context, req CreateAccountRequest) (
 	} else {
 		account.AutoPauseOnExpired = true
 	}
+	normalizeOpenAICodexFingerprintExtraForCreate(account)
 	if err := validateOpenAIOAuthAccountWriteConfig(account); err != nil {
 		return nil, err
 	}
@@ -246,6 +247,8 @@ func (s *AccountService) Update(ctx context.Context, id int64, req UpdateAccount
 	if err != nil {
 		return nil, fmt.Errorf("get account: %w", err)
 	}
+	existingExtra := cloneAccountExtraForServerOwnedWrite(account.Extra)
+	existingWasOpenAIOAuthLike := account.IsOpenAIOAuthLike()
 
 	// 更新字段
 	if req.Name != nil {
@@ -284,6 +287,7 @@ func (s *AccountService) Update(ctx context.Context, id int64, req UpdateAccount
 	if req.AutoPauseOnExpired != nil {
 		account.AutoPauseOnExpired = *req.AutoPauseOnExpired
 	}
+	normalizeOpenAICodexFingerprintExtraForUpdate(account, existingExtra, existingWasOpenAIOAuthLike)
 	if err := validateOpenAIOAuthAccountWriteConfig(account); err != nil {
 		return nil, err
 	}

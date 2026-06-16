@@ -1109,6 +1109,24 @@ func (h *AccountHandler) ApplyOAuthCredentials(c *gin.Context) {
 	response.Success(c, h.buildAccountResponseWithRuntime(ctx, updatedAccount))
 }
 
+// ResetOpenAICodexFingerprint rotates the server-owned OpenAI Codex account fingerprint.
+// POST /api/v1/admin/accounts/:id/reset-openai-codex-fingerprint
+func (h *AccountHandler) ResetOpenAICodexFingerprint(c *gin.Context) {
+	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid account ID")
+		return
+	}
+
+	account, err := h.adminService.ResetOpenAICodexFingerprint(c.Request.Context(), accountID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), account))
+}
+
 // GetStats handles getting account statistics
 // GET /api/v1/admin/accounts/:id/stats
 func (h *AccountHandler) GetStats(c *gin.Context) {

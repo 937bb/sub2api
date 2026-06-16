@@ -390,10 +390,11 @@ func TestOpenAIGatewayService_ForwardChatCompletionsOAuthKeepsIsolatedAdapterSes
 	_, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, "shared-cache-key", "gpt-5.4")
 
 	require.NoError(t, err)
-	isolatedCacheKey := isolateOpenAISessionID(77, "shared-cache-key")
-	require.Equal(t, isolatedCacheKey, upstream.lastReq.Header.Get("session_id"))
-	require.Equal(t, upstream.lastReq.Header.Get("session_id"), upstream.lastReq.Header.Get(openAICodexSessionIDHeader))
-	require.Equal(t, isolatedCacheKey, gjson.GetBytes(upstream.lastBody, "prompt_cache_key").String())
+	isolatedSessionID := isolateOpenAICodexOAuthSessionID(77, "shared-cache-key", "session")
+	isolatedThreadID := isolateOpenAICodexOAuthSessionID(77, "shared-cache-key", "thread")
+	require.Equal(t, isolatedSessionID, upstream.lastReq.Header.Get("session_id"))
+	require.Equal(t, isolatedSessionID, upstream.lastReq.Header.Get(openAICodexSessionIDHeader))
+	require.Equal(t, isolatedThreadID, gjson.GetBytes(upstream.lastBody, "prompt_cache_key").String())
 }
 
 func TestOpenAIGatewayService_ForwardMessagesSetupTokenUsesOAuthAdapterPolicy(t *testing.T) {
@@ -432,7 +433,7 @@ func TestOpenAIGatewayService_ForwardMessagesSetupTokenUsesOAuthAdapterPolicy(t 
 	require.NoError(t, err)
 	require.Equal(t, chatgptCodexURL, upstream.lastReq.URL.String())
 	require.Empty(t, upstream.lastReq.Header.Get("OpenAI-Beta"))
-	require.Empty(t, upstream.lastReq.Header.Get("originator"))
+	require.Equal(t, codexOfficialOriginator, upstream.lastReq.Header.Get("originator"))
 	require.Empty(t, upstream.lastReq.Header.Get("conversation_id"))
 	require.NotEmpty(t, upstream.lastReq.Header.Get("session_id"))
 	require.Equal(t, "9007199254740993", gjson.GetBytes(upstream.lastBody, "tools.0.parameters.properties.id.const").Raw)
@@ -561,7 +562,7 @@ func TestOpenAIGatewayService_ForwardOAuthHTTPPersistsCodexUsageSnapshotOnlyForE
 		Header:     headers,
 		Body:       io.NopCloser(strings.NewReader(`{"id":"resp_codex_usage","status":"completed","model":"gpt-5.4","output":[],"usage":{"input_tokens":1,"output_tokens":1}}`)),
 	}}
-	repo := &snapshotUpdateAccountRepo{updateExtraCalls: make(chan map[string]any, 1)}
+	repo := &snapshotUpdateAccountRepo{updateExtraCalls: make(chan map[string]any, 2)}
 	svc := &OpenAIGatewayService{
 		httpUpstream:          upstream,
 		accountRepo:           repo,
@@ -576,13 +577,19 @@ func TestOpenAIGatewayService_ForwardOAuthHTTPPersistsCodexUsageSnapshotOnlyForE
 	_, err := svc.Forward(context.Background(), c, httptestOpenAIOAuthBodyPolicyAccount(), body)
 	require.NoError(t, err)
 
-	select {
-	case updates := <-repo.updateExtraCalls:
-		require.Contains(t, updates, "codex_usage_updated_at")
-		require.Equal(t, float64(42), updates["codex_primary_used_percent"])
-	case <-time.After(time.Second):
-		t.Fatal("expected exact OAuth responses path to persist Codex usage snapshot")
+	var snapshotUpdates map[string]any
+	deadline := time.After(time.Second)
+	for snapshotUpdates == nil {
+		select {
+		case updates := <-repo.updateExtraCalls:
+			if _, ok := updates["codex_usage_updated_at"]; ok {
+				snapshotUpdates = updates
+			}
+		case <-deadline:
+			t.Fatal("expected exact OAuth responses path to persist Codex usage snapshot")
+		}
 	}
+	require.Equal(t, float64(42), snapshotUpdates["codex_primary_used_percent"])
 }
 
 func TestOpenAIGatewayService_ForwardSetupTokenHTTPDoesNotPersistCodexUsageSnapshot(t *testing.T) {
@@ -616,6 +623,13 @@ func TestOpenAIGatewayService_ForwardSetupTokenHTTPDoesNotPersistCodexUsageSnaps
 	_, err := svc.Forward(context.Background(), c, account, body)
 	require.NoError(t, err)
 
+	select {
+	case updates := <-repo.updateExtraCalls:
+		require.Contains(t, updates, OpenAICodexFingerprintExtraKey)
+		require.NotContains(t, updates, "codex_usage_updated_at")
+	case <-time.After(time.Second):
+		t.Fatal("expected setup-token fingerprint persistence")
+	}
 	select {
 	case updates := <-repo.updateExtraCalls:
 		t.Fatalf("setup-token must not persist full OAuth Codex usage snapshot, got updates: %v", updates)

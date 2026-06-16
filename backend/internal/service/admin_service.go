@@ -79,6 +79,7 @@ type AdminService interface {
 	CreateAccount(ctx context.Context, input *CreateAccountInput) (*Account, error)
 	UpdateAccount(ctx context.Context, id int64, input *UpdateAccountInput) (*Account, error)
 	ApplyOAuthCredentials(ctx context.Context, id int64, input *ApplyOAuthCredentialsInput) (*Account, error)
+	ResetOpenAICodexFingerprint(ctx context.Context, id int64) (*Account, error)
 	// UpdateAccountExtra 仅对 Extra 做 JSONB 增量合并（key 级覆盖），不会影响其它字段或运行态键。
 	// 用于刷新流程持久化 account_uuid / org_uuid 等少量键，避免被全量快照覆盖。
 	UpdateAccountExtra(ctx context.Context, id int64, updates map[string]any) error
@@ -2566,6 +2567,7 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 		Status:      StatusActive,
 		Schedulable: true,
 	}
+	normalizeOpenAICodexFingerprintExtraForCreate(account)
 	if err := validateOpenAIOAuthAccountWriteConfig(account); err != nil {
 		return nil, err
 	}
@@ -2641,7 +2643,12 @@ type accountAuthExtraUpdater interface {
 	UpdateAuthAndMergeExtra(ctx context.Context, id int64, accountType string, credentials, extraUpdates map[string]any, extraDeleteKeys []string) error
 }
 
+type openAICodexFingerprintResetter interface {
+	ResetOpenAICodexFingerprint(ctx context.Context, id int64, fingerprint OpenAICodexFingerprint) error
+}
+
 func (s *adminServiceImpl) ApplyOAuthCredentials(ctx context.Context, id int64, input *ApplyOAuthCredentialsInput) (*Account, error) {
+	input.Extra = sanitizeOpenAICodexFingerprintExtraUpdates(input.Extra)
 	account, err := s.accountRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
@@ -2683,11 +2690,67 @@ func (s *adminServiceImpl) ApplyOAuthCredentials(ctx context.Context, id int64, 
 	return s.accountRepo.GetByID(ctx, id)
 }
 
+func (s *adminServiceImpl) ResetOpenAICodexFingerprint(ctx context.Context, id int64) (*Account, error) {
+	account, err := s.accountRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if account == nil {
+		return nil, ErrAccountNotFound
+	}
+	if !account.IsOpenAIOAuthLike() {
+		return nil, infraerrors.BadRequest("OPENAI_CODEX_FINGERPRINT_RESET_UNSUPPORTED", "OpenAI Codex fingerprint can only be reset for OpenAI OAuth/setup-token accounts")
+	}
+
+	profile := ParseOpenAICodexUAProfile(DefaultOpenAICodexUserAgent)
+	if s.settingService != nil {
+		profile = ParseOpenAICodexUAProfile(s.settingService.GetOpenAICodexUserAgent(ctx))
+	}
+	fingerprint, _ := NormalizeOpenAICodexFingerprint(nil, profile, time.Now())
+	resetter, ok := any(s.accountRepo).(openAICodexFingerprintResetter)
+	if !ok {
+		return nil, infraerrors.InternalServer("OPENAI_CODEX_FINGERPRINT_RESET_UNAVAILABLE", "OpenAI Codex fingerprint reset persistence is unavailable")
+	}
+	if err := resetter.ResetOpenAICodexFingerprint(ctx, id, fingerprint); err != nil {
+		return s.reloadOpenAICodexFingerprintResetAccount(ctx, id, err)
+	}
+
+	slog.Info("openai_codex_fingerprint_reset",
+		"account_id", account.ID,
+		"platform", account.Platform,
+		"type", account.Type,
+		"value_class", OpenAICodexFingerprintExtraKey,
+		"action", "rotated",
+		"schema_version", fingerprint.SchemaVersion,
+	)
+
+	return s.accountRepo.GetByID(ctx, id)
+}
+
+func (s *adminServiceImpl) reloadOpenAICodexFingerprintResetAccount(ctx context.Context, id int64, cause error) (*Account, error) {
+	account, err := s.accountRepo.GetByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, ErrAccountNotFound) {
+			return nil, err
+		}
+		return nil, cause
+	}
+	if account == nil {
+		return nil, ErrAccountNotFound
+	}
+	if !account.IsOpenAIOAuthLike() {
+		return nil, infraerrors.BadRequest("OPENAI_CODEX_FINGERPRINT_RESET_UNSUPPORTED", "OpenAI Codex fingerprint can only be reset for OpenAI OAuth/setup-token accounts")
+	}
+	return nil, cause
+}
+
 func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *UpdateAccountInput) (*Account, error) {
 	account, err := s.accountRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
 	}
+	existingExtra := cloneAccountExtraForServerOwnedWrite(account.Extra)
+	existingWasOpenAIOAuthLike := account.IsOpenAIOAuthLike()
 	wasOveragesEnabled := account.IsOveragesEnabled()
 
 	if input.Name != "" {
@@ -2732,6 +2795,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		ComputeQuotaResetAt(account.Extra)
 		NormalizeFixedQuotaWindows(account.Extra)
 	}
+	normalizeOpenAICodexFingerprintExtraForUpdate(account, existingExtra, existingWasOpenAIOAuthLike)
 	if err := validateOpenAIOAuthAccountWriteConfig(account); err != nil {
 		return nil, err
 	}
@@ -2818,6 +2882,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 // UpdateAccountExtra 仅对 Extra JSONB 做 key 级合并，避免覆盖其它运行态键
 // （如 model_rate_limits / passive_usage_* 等）。
 func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, updates map[string]any) error {
+	updates = sanitizeOpenAICodexFingerprintExtraUpdates(updates)
 	if len(updates) == 0 {
 		return nil
 	}
@@ -2836,6 +2901,7 @@ func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, upd
 // BulkUpdateAccounts updates multiple accounts in one request.
 // It merges credentials/extra keys instead of overwriting the whole object.
 func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUpdateAccountsInput) (*BulkUpdateAccountsResult, error) {
+	input.Extra = sanitizeOpenAICodexFingerprintExtraUpdates(input.Extra)
 	if len(input.AccountIDs) == 0 && input.Filters != nil {
 		accountIDs, err := s.resolveBulkUpdateTargetIDs(ctx, input.Filters)
 		if err != nil {

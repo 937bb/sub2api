@@ -59,8 +59,9 @@ var schedulerNeutralExtraKeyPrefixes = []string{
 }
 
 var schedulerNeutralExtraKeys = map[string]struct{}{
-	"codex_usage_updated_at":     {},
-	"session_window_utilization": {},
+	service.OpenAICodexFingerprintExtraKey: {},
+	"codex_usage_updated_at":               {},
+	"session_window_utilization":           {},
 }
 
 // NewAccountRepository 创建账户仓储实例。
@@ -316,12 +317,107 @@ func (r *accountRepository) Update(ctx context.Context, account *service.Account
 	if account == nil {
 		return nil
 	}
+
+	if account.IsOpenAIOAuthLike() {
+		if err := r.updateOpenAIOAuthLikeAccount(ctx, account); err != nil {
+			return err
+		}
+	} else {
+		if err := r.updateAccountRow(ctx, clientFromContext(ctx, r.client), account); err != nil {
+			return err
+		}
+	}
+
+	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &account.ID, nil, buildSchedulerGroupPayload(account.GroupIDs)); err != nil {
+		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue account update failed: account=%d err=%v", account.ID, err)
+	}
+	// 普通账号编辑（如 model_mapping / credentials）也需要立即刷新单账号快照，
+	// 否则网关在 outbox worker 延迟或异常时仍可能读到旧配置。
+	r.syncSchedulerAccountSnapshot(ctx, account.ID)
+	return nil
+}
+
+func (r *accountRepository) updateOpenAIOAuthLikeAccount(ctx context.Context, account *service.Account) error {
+	if tx := dbent.TxFromContext(ctx); tx != nil {
+		return r.updateOpenAIOAuthLikeAccountWithClient(ctx, tx.Client(), account)
+	}
+
+	tx, err := r.client.Tx(ctx)
+	if err != nil {
+		if errors.Is(err, dbent.ErrTxStarted) {
+			return r.updateOpenAIOAuthLikeAccountWithClient(ctx, r.client, account)
+		}
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	txCtx := dbent.NewTxContext(ctx, tx)
+	if err := r.updateOpenAIOAuthLikeAccountWithClient(txCtx, tx.Client(), account); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (r *accountRepository) updateOpenAIOAuthLikeAccountWithClient(ctx context.Context, client *dbent.Client, account *service.Account) error {
+	if err := r.mergeCurrentOpenAICodexFingerprintForFullUpdate(ctx, client, account); err != nil {
+		return err
+	}
+	return r.updateAccountRow(ctx, client, account)
+}
+
+func (r *accountRepository) mergeCurrentOpenAICodexFingerprintForFullUpdate(ctx context.Context, client *dbent.Client, account *service.Account) error {
+	rows, err := client.QueryContext(ctx, `
+SELECT (
+	CASE WHEN platform = $3 AND type IN ($4, $5)
+		THEN COALESCE(extra, '{}'::jsonb) -> $2
+		ELSE NULL
+	END
+)::text
+FROM accounts
+WHERE id = $1 AND deleted_at IS NULL
+FOR UPDATE`, account.ID, service.OpenAICodexFingerprintExtraKey, service.PlatformOpenAI, service.AccountTypeOAuth, service.AccountTypeSetupToken)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		return service.ErrAccountNotFound
+	}
+
+	var raw sql.NullString
+	if err := rows.Scan(&raw); err != nil {
+		return err
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	if !raw.Valid {
+		delete(account.Extra, service.OpenAICodexFingerprintExtraKey)
+		return nil
+	}
+
+	var fingerprint any
+	if err := json.Unmarshal([]byte(raw.String), &fingerprint); err != nil {
+		return err
+	}
+	if account.Extra == nil {
+		account.Extra = map[string]any{}
+	}
+	account.Extra[service.OpenAICodexFingerprintExtraKey] = fingerprint
+	return nil
+}
+
+func (r *accountRepository) updateAccountRow(ctx context.Context, client *dbent.Client, account *service.Account) error {
 	schedulable := account.Schedulable
 	if account.Status == service.StatusError {
 		schedulable = false
 	}
 
-	builder := r.client.Account.UpdateOneID(account.ID).
+	builder := client.Account.UpdateOneID(account.ID).
 		SetName(account.Name).
 		SetNillableNotes(account.Notes).
 		SetPlatform(account.Platform).
@@ -398,12 +494,6 @@ func (r *accountRepository) Update(ctx context.Context, account *service.Account
 		return translatePersistenceError(err, service.ErrAccountNotFound, nil)
 	}
 	account.UpdatedAt = updated.UpdatedAt
-	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &account.ID, nil, buildSchedulerGroupPayload(account.GroupIDs)); err != nil {
-		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue account update failed: account=%d err=%v", account.ID, err)
-	}
-	// 普通账号编辑（如 model_mapping / credentials）也需要立即刷新单账号快照，
-	// 否则网关在 outbox worker 延迟或异常时仍可能读到旧配置。
-	r.syncSchedulerAccountSnapshot(ctx, account.ID)
 	return nil
 }
 
@@ -1424,6 +1514,119 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 		r.syncSchedulerAccountSnapshot(ctx, id)
 	}
 	return nil
+}
+
+func (r *accountRepository) ResetOpenAICodexFingerprint(ctx context.Context, id int64, fingerprint service.OpenAICodexFingerprint) error {
+	payload, err := json.Marshal(fingerprint)
+	if err != nil {
+		return err
+	}
+
+	client := clientFromContext(ctx, r.client)
+	result, err := client.ExecContext(ctx, `
+UPDATE accounts
+SET extra = jsonb_set(COALESCE(extra, '{}'::jsonb), ARRAY[$2], $3::jsonb, true), updated_at = NOW()
+WHERE id = $1 AND deleted_at IS NULL AND platform = $4 AND type IN ($5, $6)`,
+		id,
+		service.OpenAICodexFingerprintExtraKey,
+		string(payload),
+		service.PlatformOpenAI,
+		service.AccountTypeOAuth,
+		service.AccountTypeSetupToken,
+	)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return service.ErrAccountNotFound
+	}
+	r.syncSchedulerAccountSnapshot(ctx, id)
+	return nil
+}
+
+func (r *accountRepository) EnsureOpenAICodexFingerprint(ctx context.Context, id int64, fingerprint service.OpenAICodexFingerprint, replaceExisting bool) (service.OpenAICodexFingerprint, error) {
+	_ = replaceExisting // The database re-checks validity to avoid stale repair hints overwriting a valid winner.
+	payload, err := json.Marshal(fingerprint)
+	if err != nil {
+		return service.OpenAICodexFingerprint{}, err
+	}
+
+	client := clientFromContext(ctx, r.client)
+	fpExpr := "COALESCE(extra, '{}'::jsonb) -> $2"
+	out, inserted, err := r.queryOpenAICodexFingerprint(ctx, client, `
+UPDATE accounts
+SET extra = jsonb_set(COALESCE(extra, '{}'::jsonb), ARRAY[$2], $3::jsonb, true), updated_at = NOW()
+WHERE id = $1 AND deleted_at IS NULL AND platform = $4 AND type IN ($5, $6) AND (
+	NOT (COALESCE(extra, '{}'::jsonb) ? $2)
+	OR NOT (`+openAICodexFingerprintSQLValid(fpExpr)+`)
+)
+RETURNING extra -> $2`, id, service.OpenAICodexFingerprintExtraKey, string(payload), service.PlatformOpenAI, service.AccountTypeOAuth, service.AccountTypeSetupToken)
+	if err != nil {
+		return service.OpenAICodexFingerprint{}, err
+	}
+	if inserted {
+		r.syncSchedulerAccountSnapshot(ctx, id)
+		return out, nil
+	}
+
+	out, found, err := r.queryOpenAICodexFingerprint(ctx, client, `
+SELECT extra -> $2
+FROM accounts
+WHERE id = $1 AND deleted_at IS NULL AND platform = $3 AND type IN ($4, $5) AND COALESCE(extra, '{}'::jsonb) ? $2 AND `+openAICodexFingerprintSQLValid(fpExpr), id, service.OpenAICodexFingerprintExtraKey, service.PlatformOpenAI, service.AccountTypeOAuth, service.AccountTypeSetupToken)
+	if err != nil {
+		return service.OpenAICodexFingerprint{}, err
+	}
+	if !found {
+		return service.OpenAICodexFingerprint{}, service.ErrAccountNotFound
+	}
+	return out, nil
+}
+
+func (r *accountRepository) queryOpenAICodexFingerprint(ctx context.Context, client *dbent.Client, query string, args ...any) (service.OpenAICodexFingerprint, bool, error) {
+	rows, err := client.QueryContext(ctx, query, args...)
+	if err != nil {
+		return service.OpenAICodexFingerprint{}, false, err
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return service.OpenAICodexFingerprint{}, false, err
+		}
+		return service.OpenAICodexFingerprint{}, false, nil
+	}
+	var raw []byte
+	if err := rows.Scan(&raw); err != nil {
+		return service.OpenAICodexFingerprint{}, false, err
+	}
+	out, err := decodeOpenAICodexFingerprintJSON(raw)
+	return out, true, err
+}
+
+func decodeOpenAICodexFingerprintJSON(raw []byte) (service.OpenAICodexFingerprint, error) {
+	var out service.OpenAICodexFingerprint
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return service.OpenAICodexFingerprint{}, err
+	}
+	return out, nil
+}
+
+func openAICodexFingerprintSQLValid(expr string) string {
+	e := "(" + strings.TrimSpace(expr) + ")"
+	conditions := "jsonb_typeof(" + e + ") = 'object'" +
+		" AND " + e + " ->> 'schema_version' = '1'" +
+		" AND (" + e + " ->> 'installation_id') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'" +
+		" AND jsonb_typeof(" + e + " -> 'ua_profile') = 'object'" +
+		" AND COALESCE(NULLIF(BTRIM(" + e + " #>> '{ua_profile,originator}'), ''), '') <> ''" +
+		" AND COALESCE(NULLIF(BTRIM(" + e + " #>> '{ua_profile,codex_version}'), ''), '') <> ''" +
+		" AND COALESCE(NULLIF(BTRIM(" + e + " #>> '{ua_profile,os_fingerprint}'), ''), '') <> ''" +
+		" AND COALESCE(NULLIF(BTRIM(" + e + " #>> '{ua_profile,terminal_token}'), ''), '') <> ''" +
+		" AND COALESCE(NULLIF(BTRIM(" + e + " ->> 'created_at'), ''), '') <> ''" +
+		" AND COALESCE(NULLIF(BTRIM(" + e + " ->> 'updated_at'), ''), '') <> ''"
+	return "COALESCE((" + conditions + "), false)"
 }
 
 func shouldEnqueueSchedulerOutboxForExtraUpdates(updates map[string]any) bool {

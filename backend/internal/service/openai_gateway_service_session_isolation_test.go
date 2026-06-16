@@ -3,6 +3,7 @@ package service
 import (
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -46,5 +47,27 @@ func TestIsolateOpenAISessionID(t *testing.T) {
 		// apiKeyID=0 与 apiKeyID=1 应产生不同结果
 		other := isolateOpenAISessionID(1, "session")
 		assert.NotEqual(t, result, other)
+	})
+}
+
+func TestIsolateOpenAICodexOAuthSessionID(t *testing.T) {
+	t.Run("empty_raw_returns_empty", func(t *testing.T) {
+		assert.Equal(t, "", isolateOpenAICodexOAuthSessionID(1, "", "session"))
+		assert.Equal(t, "", isolateOpenAICodexOAuthSessionID(1, "   ", "session"))
+	})
+
+	t.Run("deterministic_uuid_v7_shape", func(t *testing.T) {
+		result := isolateOpenAICodexOAuthSessionID(42, "sess_abc123", "session")
+		require.Equal(t, result, isolateOpenAICodexOAuthSessionID(42, "sess_abc123", "session"))
+		parsed, err := uuid.Parse(result)
+		require.NoError(t, err)
+		require.Equal(t, uuid.Version(7), parsed.Version())
+	})
+
+	t.Run("different_api_key_raw_and_purpose_change_result", func(t *testing.T) {
+		sessionID := isolateOpenAICodexOAuthSessionID(1, "same_session", "session")
+		require.NotEqual(t, sessionID, isolateOpenAICodexOAuthSessionID(2, "same_session", "session"))
+		require.NotEqual(t, sessionID, isolateOpenAICodexOAuthSessionID(1, "other_session", "session"))
+		require.NotEqual(t, sessionID, isolateOpenAICodexOAuthSessionID(1, "same_session", "thread"))
 	})
 }

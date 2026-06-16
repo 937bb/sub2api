@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"log/slog"
@@ -110,6 +111,11 @@ const (
 	apiQueryMaxJitter   = 800 * time.Millisecond // 用量查询最大随机延迟
 	windowStatsCacheTTL = 1 * time.Minute
 	openAIProbeCacheTTL = 10 * time.Minute
+)
+
+var (
+	errOpenAICodexFingerprintEnsure    = errors.New("openai codex fingerprint ensure failed")
+	errOpenAICodexProbeSnapshotPersist = errors.New("openai codex probe snapshot persist failed")
 )
 
 // UsageCache 封装账户使用量相关的缓存
@@ -266,6 +272,34 @@ type AccountUsageService struct {
 	identityCache           IdentityCache
 	tlsFPProfileService     *TLSFingerprintProfileService
 	privacyClientFactory    PrivacyClientFactory
+	codexFingerprintService *OpenAICodexFingerprintService
+}
+
+var openAICodexProbeHTTPClientFactory = httppool.GetClient
+
+func (s *AccountUsageService) ensureOpenAICodexFingerprint(ctx context.Context, account *Account, req *http.Request) (OpenAICodexFingerprint, error) {
+	if account == nil || !account.IsOpenAIOAuthLike() {
+		return OpenAICodexFingerprint{}, nil
+	}
+	var fp OpenAICodexFingerprint
+	var err error
+	if s != nil && s.codexFingerprintService != nil {
+		fp, err = s.codexFingerprintService.Ensure(ctx, account)
+	} else {
+		var accountRepo OpenAICodexFingerprintAccountRepository
+		if s != nil {
+			accountRepo = s.accountRepo
+		}
+		fp, err = ensureOpenAICodexFingerprintForRequest(ctx, accountRepo, account, nil)
+	}
+	if err != nil {
+		return OpenAICodexFingerprint{}, err
+	}
+	applyOpenAICodexFingerprintHeaders(req, fp)
+	if req != nil {
+		*req = *req.WithContext(openAICodexFingerprintContext(req.Context(), fp))
+	}
+	return fp, nil
 }
 
 // NewAccountUsageService 创建AccountUsageService实例
@@ -277,6 +311,7 @@ func NewAccountUsageService(
 	antigravityQuotaFetcher *AntigravityQuotaFetcher,
 	cache *UsageCache,
 	identityCache IdentityCache,
+	settingService *SettingService,
 	tlsFPProfileService *TLSFingerprintProfileService,
 	privacyClientFactory PrivacyClientFactory,
 ) *AccountUsageService {
@@ -290,12 +325,14 @@ func NewAccountUsageService(
 		identityCache:           identityCache,
 		tlsFPProfileService:     tlsFPProfileService,
 		privacyClientFactory:    privacyClientFactory,
+		codexFingerprintService: NewOpenAICodexFingerprintService(accountRepo, settingService),
 	}
 }
 
 // GetUsage 获取账号使用量
-// OAuth账号: 调用Anthropic API获取真实数据（需要profile scope），API响应缓存10分钟，窗口统计缓存1分钟
-// Setup Token账号: 根据session_window推算5h窗口，7d数据不可用（没有profile scope）
+// OpenAI OAuth/setup-token 账号: 使用 Codex 探测快照；完整 OAuth 额外同步 plan_type。
+// Anthropic OAuth账号: 调用Anthropic API获取真实数据（需要profile scope），API响应缓存10分钟，窗口统计缓存1分钟
+// Anthropic Setup Token账号: 根据session_window推算5h窗口，7d数据不可用（没有profile scope）
 // API Key账号: 不支持usage查询
 func (s *AccountUsageService) GetUsage(ctx context.Context, accountID int64, force ...bool) (*UsageInfo, error) {
 	forceProbe := len(force) > 0 && force[0]
@@ -305,11 +342,11 @@ func (s *AccountUsageService) GetUsage(ctx context.Context, accountID int64, for
 		return nil, fmt.Errorf("get account failed: %w", err)
 	}
 
-	if account.Platform == PlatformOpenAI && account.Type == AccountTypeOAuth {
+	if account.IsOpenAIOAuthLike() {
 		usage, shouldRefreshPlanType, err := s.getOpenAIUsage(ctx, account, forceProbe)
 		if err == nil {
 			s.tryClearRecoverableAccountError(ctx, account)
-			if shouldRefreshPlanType {
+			if account.IsOpenAIOAuth() && shouldRefreshPlanType {
 				if planErr := s.RefreshOpenAIPlanType(ctx, account); planErr != nil {
 					slog.Warn("openai_usage_plan_type_sync_failed", "account_id", account.ID, "error", planErr)
 				}
@@ -509,6 +546,11 @@ func (s *AccountUsageService) getOpenAIUsage(ctx context.Context, account *Accou
 	if account == nil {
 		return usage, shouldRefreshPlanType, nil
 	}
+	if account.IsOpenAIOAuthLike() && account.Type == AccountTypeSetupToken {
+		// setup-token 没有 profile scope，但仍先带账号级 Codex 指纹探测；
+		// 无远端快照时保留本地 session_window 估算作为 5h 回退。
+		usage = s.mergeOpenAISetupTokenUsageEstimate(account, usage, now)
+	}
 
 	if progress := buildCodexUsageProgressFromExtra(account.Extra, "5h", now); progress != nil {
 		usage.FiveHour = progress
@@ -520,7 +562,16 @@ func (s *AccountUsageService) getOpenAIUsage(ctx context.Context, account *Accou
 	shouldRefreshRemote := force || shouldRefreshOpenAICodexSnapshot(account, usage, now)
 	shouldRefreshPlanType = shouldRefreshRemote
 	if shouldRefreshRemote && s.shouldProbeOpenAICodexSnapshot(account.ID, now, force) {
-		if updates, err := s.probeOpenAICodexSnapshot(ctx, account); err == nil && len(updates) > 0 {
+		updates, err := s.probeOpenAICodexSnapshot(ctx, account)
+		if err != nil {
+			if errors.Is(err, errOpenAICodexFingerprintEnsure) || errors.Is(err, errOpenAICodexProbeSnapshotPersist) {
+				if s != nil && s.cache != nil && account.ID > 0 {
+					s.cache.openAIProbeCache.Delete(account.ID)
+				}
+				return nil, shouldRefreshPlanType, err
+			}
+			slog.Warn("openai_codex_usage_probe_failed", "account_id", account.ID, "error_type", fmt.Sprintf("%T", err))
+		} else if len(updates) > 0 {
 			mergeAccountExtra(account, updates)
 			if usage.UpdatedAt == nil {
 				usage.UpdatedAt = &now
@@ -612,7 +663,7 @@ func shouldRefreshOpenAICodexSnapshot(account *Account, usage *UsageInfo, now ti
 }
 
 func isOpenAICodexSnapshotStale(account *Account, now time.Time) bool {
-	if account == nil || !account.IsOpenAIOAuth() || !account.IsOpenAIResponsesWebSocketV2Enabled() {
+	if account == nil || !account.IsOpenAIOAuthLike() || !account.IsOpenAIResponsesWebSocketV2Enabled() {
 		return false
 	}
 	if account.Extra == nil {
@@ -627,6 +678,23 @@ func isOpenAICodexSnapshotStale(account *Account, now time.Time) bool {
 		return true
 	}
 	return now.Sub(ts) >= openAIProbeCacheTTL
+}
+
+func (s *AccountUsageService) mergeOpenAISetupTokenUsageEstimate(account *Account, usage *UsageInfo, now time.Time) *UsageInfo {
+	if usage == nil {
+		usage = &UsageInfo{UpdatedAt: &now}
+	}
+	estimate := s.estimateSetupTokenUsage(account)
+	if estimate == nil {
+		return usage
+	}
+	if usage.FiveHour == nil {
+		usage.FiveHour = estimate.FiveHour
+	}
+	if usage.SevenDay == nil {
+		usage.SevenDay = estimate.SevenDay
+	}
+	return usage
 }
 
 func (s *AccountUsageService) shouldProbeOpenAICodexSnapshot(accountID int64, now time.Time, force ...bool) bool {
@@ -645,8 +713,30 @@ func (s *AccountUsageService) shouldProbeOpenAICodexSnapshot(accountID int64, no
 	return true
 }
 
+func openAICodexProbePromptCacheKey(prefix string, account *Account, fingerprint OpenAICodexFingerprint) string {
+	prefix = strings.TrimSpace(prefix)
+	if prefix == "" {
+		prefix = "probe_openai"
+	}
+	seedParts := []string{"openai-codex-probe", prefix}
+	if account != nil && account.ID > 0 {
+		seedParts = append(seedParts, fmt.Sprintf("account:%d", account.ID))
+	}
+	if installationID := strings.TrimSpace(fingerprint.InstallationID); installationID != "" {
+		seedParts = append(seedParts, "installation:"+installationID)
+	}
+	if len(seedParts) == 2 {
+		return prefix
+	}
+	return prefix + ":" + generateOpenAICodexDeterministicUUIDV7(strings.Join(seedParts, ":"))
+}
+
+func openAICodexUsageProbePromptCacheKey(account *Account, fingerprint OpenAICodexFingerprint) string {
+	return openAICodexProbePromptCacheKey("probe_openai_usage", account, fingerprint)
+}
+
 func (s *AccountUsageService) probeOpenAICodexSnapshot(ctx context.Context, account *Account) (map[string]any, error) {
-	if account == nil || !account.IsOAuth() {
+	if account == nil || !account.IsOpenAIOAuthLike() {
 		return nil, nil
 	}
 	accessToken := account.GetOpenAIAccessToken()
@@ -674,20 +764,21 @@ func (s *AccountUsageService) probeOpenAICodexSnapshot(ctx context.Context, acco
 	req.Header.Set("Originator", codexOfficialOriginator)
 	req.Header.Set("Version", codexCLIVersion)
 	req.Header.Set("User-Agent", codexCLIUserAgent)
-	if s.identityCache != nil {
-		if fp, fpErr := s.identityCache.GetFingerprint(reqCtx, account.ID); fpErr == nil && fp != nil && strings.TrimSpace(fp.UserAgent) != "" {
-			req.Header.Set("User-Agent", strings.TrimSpace(fp.UserAgent))
-		}
-	}
 	if chatgptAccountID := account.GetChatGPTAccountID(); chatgptAccountID != "" {
 		req.Header.Set("chatgpt-account-id", chatgptAccountID)
 	}
+	fingerprint, err := s.ensureOpenAICodexFingerprint(reqCtx, account, req)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", errOpenAICodexFingerprintEnsure, err)
+	}
+	promptCacheKey := openAICodexUsageProbePromptCacheKey(account, fingerprint)
+	payloadBytes, _ = applyOpenAICodexHTTPRequestAlignmentWithBodyOptions(req, nil, account, payloadBytes, promptCacheKey, true, true, true)
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
 	}
-	client, err := httppool.GetClient(httppool.Options{
+	client, err := openAICodexProbeHTTPClientFactory(httppool.Options{
 		ProxyURL:              proxyURL,
 		Timeout:               15 * time.Second,
 		ResponseHeaderTimeout: 10 * time.Second,
@@ -706,25 +797,19 @@ func (s *AccountUsageService) probeOpenAICodexSnapshot(ctx context.Context, acco
 		return nil, err
 	}
 	if len(updates) > 0 {
-		s.persistOpenAICodexProbeSnapshot(account.ID, updates)
+		if err := s.persistOpenAICodexProbeSnapshot(reqCtx, account.ID, updates); err != nil {
+			return nil, fmt.Errorf("%w: %w", errOpenAICodexProbeSnapshotPersist, err)
+		}
 		return updates, nil
 	}
 	return nil, nil
 }
 
-func (s *AccountUsageService) persistOpenAICodexProbeSnapshot(accountID int64, updates map[string]any) {
-	if s == nil || s.accountRepo == nil || accountID <= 0 {
-		return
+func (s *AccountUsageService) persistOpenAICodexProbeSnapshot(ctx context.Context, accountID int64, updates map[string]any) error {
+	if s == nil || s.accountRepo == nil || accountID <= 0 || len(updates) == 0 {
+		return nil
 	}
-	if len(updates) == 0 {
-		return
-	}
-
-	go func() {
-		updateCtx, updateCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer updateCancel()
-		_ = s.accountRepo.UpdateExtra(updateCtx, accountID, updates)
-	}()
+	return s.accountRepo.UpdateExtra(ctx, accountID, updates)
 }
 
 func extractOpenAICodexProbeUpdates(resp *http.Response) (map[string]any, error) {

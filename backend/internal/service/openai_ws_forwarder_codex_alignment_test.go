@@ -28,7 +28,7 @@ func TestOpenAIWSHeadersOAuthAddsCodexIdentityFallbacks(t *testing.T) {
 	}
 	fallbackSessionID := fallbackOpenAICodexSessionID(c, account, []byte(`{"model":"gpt-5","input":"hello"}`))
 
-	headers, resolution := svc.buildOpenAIWSHeaders(
+	headers, resolution, err := svc.buildOpenAIWSHeaders(
 		c,
 		account,
 		"token",
@@ -39,6 +39,7 @@ func TestOpenAIWSHeadersOAuthAddsCodexIdentityFallbacks(t *testing.T) {
 		"",
 		fallbackSessionID,
 	)
+	require.NoError(t, err)
 
 	require.NotEmpty(t, resolution.SessionID)
 	require.Equal(t, "fallback_session_id", resolution.SessionSource)
@@ -63,7 +64,7 @@ func TestOpenAIWSHeadersOAuthNilContextUsesCodexUserAgent(t *testing.T) {
 	svc := &OpenAIGatewayService{}
 
 	require.NotPanics(t, func() {
-		headers, _ := svc.buildOpenAIWSHeaders(
+		headers, _, err := svc.buildOpenAIWSHeaders(
 			nil,
 			account,
 			"token",
@@ -74,8 +75,85 @@ func TestOpenAIWSHeadersOAuthNilContextUsesCodexUserAgent(t *testing.T) {
 			"",
 			"fallback-session",
 		)
+		require.NoError(t, err)
 		require.Equal(t, codexCLIUserAgent, headers.Get("User-Agent"))
 	})
+}
+
+func TestOpenAIWSHeadersOAuthUsesPersistedFingerprintIdentity(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+	c.Request.Header.Set("User-Agent", "inbound/9.9")
+	c.Request.Header.Set("originator", "inbound")
+	c.Request.Header.Set(openAICodexInstallationIDHeader, "11111111-1111-4111-8111-111111111111")
+
+	persisted := OpenAICodexFingerprint{
+		SchemaVersion:  openAICodexFingerprintSchemaV1,
+		InstallationID: "550e8400-e29b-41d4-a716-446655440000",
+		UAProfile:      ParseOpenAICodexUAProfile("persisted-codex/9.9.9 (Persist OS; arch) Persist_Term/1.0 (persisted-codex; 9.9.9)"),
+		CreatedAt:      "2026-06-12T00:00:00Z",
+		UpdatedAt:      "2026-06-12T00:00:00Z",
+	}
+	svc := &OpenAIGatewayService{}
+	account := &Account{
+		ID:       45,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Extra:    map[string]any{OpenAICodexFingerprintExtraKey: persisted},
+	}
+
+	headers, _, err := svc.buildOpenAIWSHeaders(
+		c,
+		account,
+		"token",
+		OpenAIWSProtocolDecision{Transport: OpenAIUpstreamTransportResponsesWebsocketV2},
+		false,
+		"",
+		"",
+		"",
+		"fallback-session",
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, persisted.InstallationID, headers.Get(openAICodexInstallationIDHeader))
+	require.Equal(t, persisted.UAProfile.UserAgent(), headers.Get("User-Agent"))
+	require.Equal(t, "persisted-codex", headers.Get("originator"))
+	require.Equal(t, "9.9.9", headers.Get("Version"))
+}
+
+func TestOpenAIWSHeadersAPIKeyKeepsLegacyUserAgentSemantics(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+	c.Request.Header.Set("User-Agent", "inbound-client/1.0")
+
+	svc := &OpenAIGatewayService{}
+	account := &Account{
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Credentials: map[string]any{"user_agent": "api-key-custom/2.0"},
+		Extra:       map[string]any{OpenAICodexFingerprintExtraKey: "must-not-be-read"},
+	}
+
+	headers, _, err := svc.buildOpenAIWSHeaders(
+		c,
+		account,
+		"token",
+		OpenAIWSProtocolDecision{Transport: OpenAIUpstreamTransportResponsesWebsocketV2},
+		false,
+		"",
+		"",
+		"",
+		"fallback-session",
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, "api-key-custom/2.0", headers.Get("User-Agent"))
+	require.NotEqual(t, "must-not-be-read", headers.Get(openAICodexInstallationIDHeader))
+	require.NotEqual(t, codexCLIUserAgent, headers.Get("User-Agent"))
 }
 
 func TestOpenAIWSCodexClientMetadataIncludesRequestStart(t *testing.T) {
@@ -105,4 +183,57 @@ func TestOpenAIWSCodexClientMetadataIncludesRequestStart(t *testing.T) {
 	parsedStartMS, err := strconv.ParseInt(startMS, 10, 64)
 	require.NoError(t, err)
 	require.Positive(t, parsedStartMS)
+}
+
+func TestOpenAIWSCodexClientMetadataStripsClientSuppliedIdentity(t *testing.T) {
+	payload := map[string]any{
+		"type":  "response.create",
+		"model": "gpt-5",
+		"client_metadata": map[string]any{
+			"keep":                               "yes",
+			openAICodexInstallationIDHeader:      "attacker-installation",
+			openAICodexWindowIDHeader:            "attacker-window",
+			openAICodexSessionIDHeader:           "attacker-session-header",
+			openAICodexThreadIDHeader:            "attacker-thread-header",
+			openAICodexClientRequestIDHeader:     "attacker-request-header",
+			openAICodexParentThreadIDHeader:      "attacker-parent-thread",
+			openAICodexTurnStateHeader:           "attacker-turn-state",
+			openAICodexTurnMetadataHeader:        "attacker-turn-metadata",
+			openAICodexSubagentHeader:            "attacker-subagent",
+			openAICodexWSTraceparentMetadataKey:  "attacker-traceparent",
+			openAICodexWSTracestateMetadataKey:   "attacker-tracestate",
+			openAICodexWSStreamRequestStartMSKey: "attacker-start-ms",
+			"ws_request_header_authorization":    "attacker-auth",
+			"ws_request_header_cookie":           "attacker-cookie",
+			"session_id":                         "attacker-session",
+			"conversation_id":                    "attacker-conversation",
+			"prompt_cache_key":                   "attacker-cache-key",
+		},
+	}
+	headers := http.Header{}
+	headers.Set(openAICodexInstallationIDHeader, "server-installation")
+	headers.Set(openAICodexWindowIDHeader, "server-thread:3")
+
+	setOpenAIWSCodexClientMetadata(payload, headers)
+
+	metadata, ok := payload["client_metadata"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "yes", metadata["keep"])
+	require.Equal(t, "server-installation", metadata[openAICodexInstallationIDHeader])
+	require.Equal(t, "server-thread:3", metadata[openAICodexWindowIDHeader])
+	require.NotContains(t, metadata, openAICodexSessionIDHeader)
+	require.NotContains(t, metadata, openAICodexThreadIDHeader)
+	require.NotContains(t, metadata, openAICodexClientRequestIDHeader)
+	require.NotContains(t, metadata, openAICodexParentThreadIDHeader)
+	require.NotContains(t, metadata, openAICodexTurnStateHeader)
+	require.NotContains(t, metadata, openAICodexTurnMetadataHeader)
+	require.NotContains(t, metadata, openAICodexSubagentHeader)
+	require.NotContains(t, metadata, openAICodexWSTraceparentMetadataKey)
+	require.NotContains(t, metadata, openAICodexWSTracestateMetadataKey)
+	require.NotContains(t, metadata, "ws_request_header_authorization")
+	require.NotContains(t, metadata, "ws_request_header_cookie")
+	require.NotEqual(t, "attacker-start-ms", metadata[openAICodexWSStreamRequestStartMSKey])
+	require.NotContains(t, metadata, "session_id")
+	require.NotContains(t, metadata, "conversation_id")
+	require.NotContains(t, metadata, "prompt_cache_key")
 }
