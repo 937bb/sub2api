@@ -32,6 +32,8 @@ const (
 
 	// Originator matches current Codex CLI browser-login authorize URLs.
 	DefaultOriginator = "codex_cli_rs"
+	// CodexUserAgent matches the requested Codex CLI OAuth token-exchange UA.
+	CodexUserAgent = "codex_cli_rs/0.140.0"
 
 	// Session TTL
 	SessionTTL = 30 * time.Minute

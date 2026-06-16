@@ -50,8 +50,13 @@ func (s *OpenAIOAuthServiceSuite) TestExchangeCode_DefaultRedirectURI() {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		if got := r.Header.Get("User-Agent"); got == "codex-cli/0.91.0" {
-			errCh <- "unexpected legacy user-agent"
+		if got := r.Header.Get("User-Agent"); got != openai.CodexUserAgent {
+			errCh <- "user-agent mismatch"
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if got := r.Header.Get("originator"); got != openai.DefaultOriginator {
+			errCh <- "originator mismatch"
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}

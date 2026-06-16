@@ -50,6 +50,8 @@ func (s *openaiOAuthService) ExchangeCode(ctx context.Context, code, codeVerifie
 	resp, err := client.R().
 		SetContext(ctx).
 		SetHeader("Content-Type", "application/x-www-form-urlencoded").
+		SetHeader("User-Agent", openai.CodexUserAgent).
+		SetHeader("originator", openai.DefaultOriginator).
 		SetBodyString(reqBody).
 		SetSuccessResult(&tokenResp).
 		Post(s.tokenURL)
@@ -97,7 +99,8 @@ func (s *openaiOAuthService) refreshTokenWithClientID(ctx context.Context, refre
 
 	resp, err := client.R().
 		SetContext(ctx).
-		SetHeader("User-Agent", "codex-cli/0.91.0").
+		SetHeader("User-Agent", openai.CodexUserAgent).
+		SetHeader("originator", openai.DefaultOriginator).
 		SetFormDataFromValues(formData).
 		SetSuccessResult(&tokenResp).
 		Post(s.tokenURL)
