@@ -31,27 +31,56 @@ func (s *RedeemCacheSuite) TestGetRedeemAttemptCount_Missing() {
 func (s *RedeemCacheSuite) TestIncrementAndGetRedeemAttemptCount() {
 	userID := int64(1)
 	key := fmt.Sprintf("%s%d", redeemRateLimitKeyPrefix, userID)
+	window := time.Hour
 
-	require.NoError(s.T(), s.cache.IncrementRedeemAttemptCount(s.ctx, userID), "IncrementRedeemAttemptCount")
+	require.NoError(s.T(), s.cache.IncrementRedeemAttemptCount(s.ctx, userID, window), "IncrementRedeemAttemptCount")
 	count, err := s.cache.GetRedeemAttemptCount(s.ctx, userID)
 	require.NoError(s.T(), err, "GetRedeemAttemptCount")
 	require.Equal(s.T(), 1, count, "count mismatch")
 
 	ttl, err := s.rdb.TTL(s.ctx, key).Result()
 	require.NoError(s.T(), err, "TTL")
-	s.AssertTTLWithin(ttl, 1*time.Second, redeemRateLimitDuration)
+	s.AssertTTLWithin(ttl, 1*time.Second, window)
 }
 
 func (s *RedeemCacheSuite) TestMultipleIncrements() {
 	userID := int64(2)
+	window := time.Hour
 
-	require.NoError(s.T(), s.cache.IncrementRedeemAttemptCount(s.ctx, userID))
-	require.NoError(s.T(), s.cache.IncrementRedeemAttemptCount(s.ctx, userID))
-	require.NoError(s.T(), s.cache.IncrementRedeemAttemptCount(s.ctx, userID))
+	require.NoError(s.T(), s.cache.IncrementRedeemAttemptCount(s.ctx, userID, window))
+	require.NoError(s.T(), s.cache.IncrementRedeemAttemptCount(s.ctx, userID, window))
+	require.NoError(s.T(), s.cache.IncrementRedeemAttemptCount(s.ctx, userID, window))
 
 	count, err := s.cache.GetRedeemAttemptCount(s.ctx, userID)
 	require.NoError(s.T(), err)
 	require.Equal(s.T(), 3, count, "count after 3 increments")
+}
+
+func (s *RedeemCacheSuite) TestIncrementDoesNotRefreshTTL() {
+	userID := int64(3)
+	key := fmt.Sprintf("%s%d", redeemRateLimitKeyPrefix, userID)
+	initialWindow := 5 * time.Second
+	refreshWindow := 30 * time.Second
+
+	require.NoError(s.T(), s.cache.IncrementRedeemAttemptCount(s.ctx, userID, initialWindow))
+	require.NoError(s.T(), s.cache.IncrementRedeemAttemptCount(s.ctx, userID, refreshWindow))
+
+	ttl, err := s.rdb.TTL(s.ctx, key).Result()
+	require.NoError(s.T(), err, "TTL")
+	s.AssertTTLWithin(ttl, 1*time.Second, initialWindow)
+	require.Less(s.T(), ttl, refreshWindow-1*time.Second, "second increment must not extend the fixed window")
+}
+
+func (s *RedeemCacheSuite) TestDeleteRedeemAttemptCount() {
+	userID := int64(4)
+	window := time.Hour
+
+	require.NoError(s.T(), s.cache.IncrementRedeemAttemptCount(s.ctx, userID, window))
+	require.NoError(s.T(), s.cache.DeleteRedeemAttemptCount(s.ctx, userID))
+
+	count, err := s.cache.GetRedeemAttemptCount(s.ctx, userID)
+	require.NoError(s.T(), err)
+	require.Equal(s.T(), 0, count, "count after delete")
 }
 
 func (s *RedeemCacheSuite) TestAcquireAndReleaseRedeemLock() {

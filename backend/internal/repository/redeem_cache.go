@@ -12,8 +12,15 @@ import (
 const (
 	redeemRateLimitKeyPrefix = "redeem:ratelimit:"
 	redeemLockKeyPrefix      = "redeem:lock:"
-	redeemRateLimitDuration  = 24 * time.Hour
 )
+
+var incrementRedeemAttemptScript = redis.NewScript(`
+local current = redis.call('INCR', KEYS[1])
+if current == 1 then
+	redis.call('PEXPIRE', KEYS[1], ARGV[1])
+end
+return current
+`)
 
 // redeemRateLimitKey generates the Redis key for redeem attempt rate limiting.
 func redeemRateLimitKey(userID int64) string {
@@ -42,13 +49,16 @@ func (c *redeemCache) GetRedeemAttemptCount(ctx context.Context, userID int64) (
 	return count, err
 }
 
-func (c *redeemCache) IncrementRedeemAttemptCount(ctx context.Context, userID int64) error {
+func (c *redeemCache) IncrementRedeemAttemptCount(ctx context.Context, userID int64, window time.Duration) error {
 	key := redeemRateLimitKey(userID)
-	pipe := c.rdb.Pipeline()
-	pipe.Incr(ctx, key)
-	pipe.Expire(ctx, key, redeemRateLimitDuration)
-	_, err := pipe.Exec(ctx)
-	return err
+	// Set the expiry only for the first failure; otherwise repeated typos would
+	// keep extending the user's lockout window.
+	return incrementRedeemAttemptScript.Run(ctx, c.rdb, []string{key}, int64(window/time.Millisecond)).Err()
+}
+
+func (c *redeemCache) DeleteRedeemAttemptCount(ctx context.Context, userID int64) error {
+	key := redeemRateLimitKey(userID)
+	return c.rdb.Del(ctx, key).Err()
 }
 
 func (c *redeemCache) AcquireRedeemLock(ctx context.Context, code string, ttl time.Duration) (bool, error) {
