@@ -39,7 +39,7 @@ func TestOpenAIOAuthService_ExchangeCode_StateRequired(t *testing.T) {
 	svc := NewOpenAIOAuthService(nil, client)
 	defer svc.Stop()
 
-	svc.sessionStore.Set("sid", &openai.OAuthSession{
+	svc.sessionStore.Set(context.Background(), "sid", &openai.OAuthSession{
 		State:        "expected-state",
 		CodeVerifier: "verifier",
 		RedirectURI:  openai.DefaultRedirectURI,
@@ -60,7 +60,7 @@ func TestOpenAIOAuthService_ExchangeCode_StateMismatch(t *testing.T) {
 	svc := NewOpenAIOAuthService(nil, client)
 	defer svc.Stop()
 
-	svc.sessionStore.Set("sid", &openai.OAuthSession{
+	svc.sessionStore.Set(context.Background(), "sid", &openai.OAuthSession{
 		State:        "expected-state",
 		CodeVerifier: "verifier",
 		RedirectURI:  openai.DefaultRedirectURI,
@@ -82,7 +82,7 @@ func TestOpenAIOAuthService_ExchangeCode_StateMatch(t *testing.T) {
 	svc := NewOpenAIOAuthService(nil, client)
 	defer svc.Stop()
 
-	svc.sessionStore.Set("sid", &openai.OAuthSession{
+	svc.sessionStore.Set(context.Background(), "sid", &openai.OAuthSession{
 		State:        "expected-state",
 		CodeVerifier: "verifier",
 		RedirectURI:  openai.DefaultRedirectURI,
@@ -101,6 +101,6 @@ func TestOpenAIOAuthService_ExchangeCode_StateMatch(t *testing.T) {
 	require.Equal(t, openai.ClientID, client.lastClientID)
 	require.Equal(t, int32(1), atomic.LoadInt32(&client.exchangeCalled))
 
-	_, ok := svc.sessionStore.Get("sid")
+	_, ok := svc.sessionStore.Get(context.Background(), "sid")
 	require.False(t, ok)
 }

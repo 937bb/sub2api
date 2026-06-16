@@ -3746,7 +3746,9 @@ export default {
           failedToValidateRT: 'Failed to validate refresh token',
           errors: {
             OPENAI_OAUTH_PROXY_REQUIRED:
-              'No proxy is configured and this server could not reach OpenAI directly, so the OpenAI OAuth request failed. Select a proxy that can access OpenAI and retry; if the authorization code has expired, regenerate the authorization URL.'
+              'No proxy is configured and this server could not reach OpenAI directly, so the OpenAI OAuth request failed. Select a proxy that can access OpenAI and retry; if the authorization code has expired, regenerate the authorization URL.',
+            OPENAI_OAUTH_SESSION_NOT_FOUND:
+              'The OpenAI OAuth session was not found or has expired. Generate a new auth URL and use the latest callback URL.'
           },
           // Refresh Token auth
           refreshTokenAuth: 'Manual RT Input',

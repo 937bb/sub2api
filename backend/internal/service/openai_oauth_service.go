@@ -14,16 +14,23 @@ import (
 
 // OpenAIOAuthService handles OpenAI OAuth authentication flows
 type OpenAIOAuthService struct {
-	sessionStore         *openai.SessionStore
+	sessionStore         openAIOAuthSessionStore
 	proxyRepo            ProxyRepository
 	oauthClient          OpenAIOAuthClient
 	privacyClientFactory PrivacyClientFactory // 用于调用 chatgpt.com/backend-api（ImpersonateChrome）
 }
 
-// NewOpenAIOAuthService creates a new OpenAI OAuth service
+// NewOpenAIOAuthService creates a new OpenAI OAuth service with in-memory pending session storage.
 func NewOpenAIOAuthService(proxyRepo ProxyRepository, oauthClient OpenAIOAuthClient) *OpenAIOAuthService {
+	return newOpenAIOAuthServiceWithSessionStore(proxyRepo, oauthClient, newOpenAIOAuthMemorySessionStore())
+}
+
+func newOpenAIOAuthServiceWithSessionStore(proxyRepo ProxyRepository, oauthClient OpenAIOAuthClient, sessionStore openAIOAuthSessionStore) *OpenAIOAuthService {
+	if sessionStore == nil {
+		sessionStore = newOpenAIOAuthMemorySessionStore()
+	}
 	return &OpenAIOAuthService{
-		sessionStore: openai.NewSessionStore(),
+		sessionStore: sessionStore,
 		proxyRepo:    proxyRepo,
 		oauthClient:  oauthClient,
 	}
@@ -90,7 +97,9 @@ func (s *OpenAIOAuthService) GenerateAuthURL(ctx context.Context, proxyID *int64
 		ProxyURL:     proxyURL,
 		CreatedAt:    time.Now(),
 	}
-	s.sessionStore.Set(sessionID, session)
+	if err := s.sessionStore.Set(ctx, sessionID, session); err != nil {
+		return nil, infraerrors.Newf(http.StatusInternalServerError, "OPENAI_OAUTH_SESSION_STORE_FAILED", "failed to store oauth session: %v", err)
+	}
 
 	// Build authorization URL
 	authURL := openai.BuildAuthorizationURLForPlatform(state, codeChallenge, redirectURI, normalizedPlatform)
@@ -130,7 +139,7 @@ type OpenAITokenInfo struct {
 // ExchangeCode exchanges authorization code for tokens
 func (s *OpenAIOAuthService) ExchangeCode(ctx context.Context, input *OpenAIExchangeCodeInput) (*OpenAITokenInfo, error) {
 	// Get session
-	session, ok := s.sessionStore.Get(input.SessionID)
+	session, ok := s.sessionStore.Get(ctx, input.SessionID)
 	if !ok {
 		return nil, infraerrors.New(http.StatusBadRequest, "OPENAI_OAUTH_SESSION_NOT_FOUND", "session not found or expired")
 	}
@@ -181,7 +190,7 @@ func (s *OpenAIOAuthService) ExchangeCode(ctx context.Context, input *OpenAIExch
 	}
 
 	// Delete session after successful exchange
-	s.sessionStore.Delete(input.SessionID)
+	s.sessionStore.Delete(ctx, input.SessionID)
 
 	tokenInfo := &OpenAITokenInfo{
 		AccessToken:  tokenResp.AccessToken,
