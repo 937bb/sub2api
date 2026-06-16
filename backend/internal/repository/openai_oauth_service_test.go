@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
@@ -42,6 +43,18 @@ func (s *OpenAIOAuthServiceSuite) setupServer(handler http.HandlerFunc) {
 func (s *OpenAIOAuthServiceSuite) TestExchangeCode_DefaultRedirectURI() {
 	errCh := make(chan string, 1)
 	s.setupServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		r.Body = io.NopCloser(strings.NewReader(string(body)))
+		if got, want := string(body), "grant_type=authorization_code&code=code&redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback&client_id=app_EMoamEEZ73f0CkXaXp7hrann&code_verifier=ver"; got != want {
+			errCh <- "body order mismatch"
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if got := r.Header.Get("User-Agent"); got == "codex-cli/0.91.0" {
+			errCh <- "unexpected legacy user-agent"
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
 		if r.Method != http.MethodPost {
 			errCh <- "method mismatch"
 			w.WriteHeader(http.StatusBadRequest)
