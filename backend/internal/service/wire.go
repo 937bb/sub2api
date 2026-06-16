@@ -51,9 +51,12 @@ func ProvideOpenAIOAuthService(
 	oauthClient OpenAIOAuthClient,
 	privacyClientFactory PrivacyClientFactory,
 	redisClient *redis.Client,
+	accountRepo AccountRepository,
+	settingService *SettingService,
 ) *OpenAIOAuthService {
 	svc := NewOpenAIOAuthServiceWithRedis(proxyRepo, oauthClient, redisClient)
 	svc.SetPrivacyClientFactory(privacyClientFactory)
+	svc.SetCodexFingerprintDependencies(accountRepo, settingService)
 	return svc
 }
 

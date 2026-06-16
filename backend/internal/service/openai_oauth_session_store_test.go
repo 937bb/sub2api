@@ -22,14 +22,14 @@ func TestOpenAIOAuthRedisSessionStore_SharesSessionsAcrossInstances(t *testing.T
 	t.Cleanup(storeA.Stop)
 	t.Cleanup(storeB.Stop)
 
-	session := &openai.OAuthSession{
+	session := &openAIOAuthPendingSession{OAuthSession: openai.OAuthSession{
 		State:        "state-1",
 		CodeVerifier: "verifier-1",
 		ClientID:     openai.ClientID,
 		RedirectURI:  openai.DefaultRedirectURI,
 		ProxyURL:     "http://proxy.example",
 		CreatedAt:    time.Now(),
-	}
+	}}
 	require.NoError(t, storeA.Set(ctx, "session-1", session))
 
 	loaded, ok := storeB.Get(ctx, "session-1")
@@ -54,13 +54,13 @@ func TestOpenAIOAuthRedisSessionStore_DoesNotFallbackToStaleMemoryAfterRedisDele
 	t.Cleanup(storeA.Stop)
 	t.Cleanup(storeB.Stop)
 
-	session := &openai.OAuthSession{
+	session := &openAIOAuthPendingSession{OAuthSession: openai.OAuthSession{
 		State:        "state-stale",
 		CodeVerifier: "verifier-stale",
 		ClientID:     openai.ClientID,
 		RedirectURI:  openai.DefaultRedirectURI,
 		CreatedAt:    time.Now(),
-	}
+	}}
 	require.NoError(t, storeA.Set(ctx, "session-stale", session))
 	loaded, ok := storeA.Get(ctx, "session-stale")
 	require.True(t, ok)
@@ -89,13 +89,13 @@ func TestOpenAIOAuthRedisSessionStore_FallsBackToMemoryWhenRedisWriteFails(t *te
 	store := newOpenAIOAuthSessionStore(rdb)
 	t.Cleanup(store.Stop)
 
-	session := &openai.OAuthSession{
+	session := &openAIOAuthPendingSession{OAuthSession: openai.OAuthSession{
 		State:        "state-2",
 		CodeVerifier: "verifier-2",
 		ClientID:     openai.ClientID,
 		RedirectURI:  openai.DefaultRedirectURI,
 		CreatedAt:    time.Now(),
-	}
+	}}
 	require.NoError(t, store.Set(ctx, "session-2", session))
 
 	loaded, ok := store.Get(ctx, "session-2")
@@ -113,12 +113,12 @@ func TestOpenAIOAuthRedisSessionStore_RejectsExpiredSession(t *testing.T) {
 	store := newOpenAIOAuthSessionStore(rdb)
 	t.Cleanup(store.Stop)
 
-	session := &openai.OAuthSession{
+	session := &openAIOAuthPendingSession{OAuthSession: openai.OAuthSession{
 		State:        "state-expired",
 		CodeVerifier: "verifier-expired",
 		RedirectURI:  openai.DefaultRedirectURI,
 		CreatedAt:    time.Now().Add(-openai.SessionTTL - time.Minute),
-	}
+	}}
 	require.NoError(t, store.Set(ctx, "session-expired", session))
 
 	_, ok := store.Get(ctx, "session-expired")

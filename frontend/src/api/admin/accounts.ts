@@ -335,7 +335,7 @@ export async function resetTempUnschedulable(id: number): Promise<{ message: str
  */
 export async function generateAuthUrl(
   endpoint: string,
-  config: { proxy_id?: number }
+  config: { proxy_id?: number; redirect_uri?: string; account_id?: number }
 ): Promise<{ auth_url: string; session_id: string }> {
   const { data } = await apiClient.post<{ auth_url: string; session_id: string }>(endpoint, config)
   return data
@@ -352,6 +352,32 @@ export async function exchangeCode(
   exchangeData: { session_id: string; code: string; state?: string; proxy_id?: number }
 ): Promise<Record<string, unknown>> {
   const { data } = await apiClient.post<Record<string, unknown>>(endpoint, exchangeData)
+  return data
+}
+
+export interface CreateOpenAIAccountFromOAuthRequest extends Omit<CreateAccountRequest, 'platform' | 'type'> {
+  session_id: string
+  code: string
+  state: string
+  redirect_uri?: string
+}
+
+export async function createOpenAIAccountFromOAuth(
+  payload: CreateOpenAIAccountFromOAuthRequest
+): Promise<Account> {
+  const { data } = await apiClient.post<Account>('/admin/openai/create-from-oauth', payload)
+  return data
+}
+
+export interface CreateOpenAIAccountFromRefreshTokenRequest extends Omit<CreateAccountRequest, 'platform' | 'type'> {
+  refresh_token: string
+  client_id?: string
+}
+
+export async function createOpenAIAccountFromRefreshToken(
+  payload: CreateOpenAIAccountFromRefreshTokenRequest
+): Promise<Account> {
+  const { data } = await apiClient.post<Account>('/admin/openai/create-from-refresh-token', payload)
   return data
 }
 
@@ -810,6 +836,8 @@ export const accountsAPI = {
   syncUpstreamModelsPreview,
   generateAuthUrl,
   exchangeCode,
+  createOpenAIAccountFromOAuth,
+  createOpenAIAccountFromRefreshToken,
   refreshOpenAIToken,
   batchCreate,
   batchUpdateCredentials,

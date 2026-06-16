@@ -192,7 +192,7 @@ import {
 import { useOpenAIOAuth } from '@/composables/useOpenAIOAuth'
 import { useGeminiOAuth } from '@/composables/useGeminiOAuth'
 import { useAntigravityOAuth } from '@/composables/useAntigravityOAuth'
-import type { Account, AccountType } from '@/types'
+import type { Account } from '@/types'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
 import OAuthAuthorizationFlow from './OAuthAuthorizationFlow.vue'
@@ -293,19 +293,14 @@ const openAIOAuthExtraCleanupKeys = [
 ]
 
 const buildOpenAIReAuthExtra = (tokenExtra?: Record<string, unknown>): Record<string, unknown> | undefined => {
-  const extra: Record<string, unknown> = { ...(props.account?.extra || {}) }
+  const extra: Record<string, unknown> = { ...(tokenExtra || {}) }
   for (const key of openAIOAuthExtraCleanupKeys) {
     delete extra[key]
-  }
-  Object.assign(extra, tokenExtra || {})
-  const wsMode = extra.openai_oauth_ws_mode
-  if (wsMode !== 'managed_session' && wsMode !== 'off') {
-    extra.openai_oauth_ws_mode = 'off'
   }
   return Object.keys(extra).length > 0 ? extra : undefined
 }
 
-const resolveOpenAIReAuthType = (): AccountType => {
+const resolveOpenAIReAuthType = (): 'oauth' | 'setup-token' => {
   return props.account?.type === 'setup-token' ? 'setup-token' : 'oauth'
 }
 
@@ -355,7 +350,10 @@ const handleGenerateUrl = async () => {
   if (!props.account) return
 
   if (isOpenAILike.value) {
-    await openaiOAuth.generateAuthUrl(props.account.proxy_id)
+    await openaiOAuth.generateAuthUrl({
+      proxyId: props.account.proxy_id,
+      accountId: props.account.id
+    })
   } else if (isGemini.value) {
     const creds = (props.account.credentials || {}) as Record<string, unknown>
     const tierId = typeof creds.tier_id === 'string' ? creds.tier_id : undefined
@@ -401,14 +399,12 @@ const handleExchangeCode = async () => {
 
     try {
       // Preserve setup-token type; re-auth updates credentials, not account semantics.
-      await adminAPI.accounts.update(props.account.id, {
+      await adminAPI.accounts.applyOAuthCredentials(props.account.id, {
         type: resolveOpenAIReAuthType(),
         credentials,
-        extra
+        extra,
+        extra_delete_keys: openAIOAuthExtraCleanupKeys
       })
-
-      // Clear error status after successful re-authorization
-      await adminAPI.accounts.clearError(props.account.id)
 
       appStore.showSuccess(t('admin.accounts.reAuthorizedSuccess'))
       emit('reauthorized')

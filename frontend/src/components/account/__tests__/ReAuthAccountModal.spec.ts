@@ -5,10 +5,12 @@ import { flushPromises, mount } from '@vue/test-utils'
 const {
   updateAccountMock,
   clearErrorMock,
+  applyOAuthCredentialsMock,
   exchangeCodeMock
 } = vi.hoisted(() => ({
   updateAccountMock: vi.fn(),
   clearErrorMock: vi.fn(),
+  applyOAuthCredentialsMock: vi.fn(),
   exchangeCodeMock: vi.fn()
 }))
 
@@ -26,6 +28,7 @@ vi.mock('@/api/admin', () => ({
     accounts: {
       update: updateAccountMock,
       clearError: clearErrorMock,
+      applyOAuthCredentials: applyOAuthCredentialsMock,
       generateAuthUrl: vi.fn(),
       exchangeCode: exchangeCodeMock
     }
@@ -126,10 +129,12 @@ describe('ReAuthAccountModal', () => {
   beforeEach(() => {
     updateAccountMock.mockReset()
     clearErrorMock.mockReset()
+    applyOAuthCredentialsMock.mockReset()
     exchangeCodeMock.mockReset()
 
     updateAccountMock.mockResolvedValue({})
     clearErrorMock.mockResolvedValue({})
+    applyOAuthCredentialsMock.mockResolvedValue({ ...buildOpenAIAccount(), type: 'setup-token' })
     exchangeCodeMock.mockResolvedValue({
       access_token: 'redacted-access-token',
       refresh_token: 'redacted-refresh-token',
@@ -158,17 +163,20 @@ describe('ReAuthAccountModal', () => {
     await wrapper.get('button.btn-primary').trigger('click')
     await flushPromises()
 
-    expect(updateAccountMock).toHaveBeenCalledTimes(1)
-    const payload = updateAccountMock.mock.calls[0]?.[1]
+    expect(updateAccountMock).not.toHaveBeenCalled()
+    expect(clearErrorMock).not.toHaveBeenCalled()
+    expect(applyOAuthCredentialsMock).toHaveBeenCalledTimes(1)
+    const payload = applyOAuthCredentialsMock.mock.calls[0]?.[1]
     expect(payload.type).toBe('setup-token')
     expect(payload.extra).toMatchObject({
-      openai_oauth_ws_mode: 'managed_session',
       email: 'new@example.com',
       name: 'New User',
       privacy_mode: 'training_disabled'
     })
+    expect(payload.extra).not.toHaveProperty('openai_oauth_ws_mode')
     expect(payload.extra).not.toHaveProperty('openai_oauth_passthrough')
     expect(payload.extra).not.toHaveProperty('openai_oauth_responses_websockets_v2_mode')
     expect(payload.extra).not.toHaveProperty('openai_passthrough')
+    expect(payload.extra_delete_keys).toContain('openai_oauth_passthrough')
   })
 })

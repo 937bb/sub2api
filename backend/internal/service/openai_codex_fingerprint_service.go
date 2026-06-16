@@ -115,14 +115,30 @@ func ensureOpenAICodexFingerprintForRequest(ctx context.Context, accountRepo Ope
 	return fp, nil
 }
 
+type OpenAICodexUAHeaders struct {
+	UserAgent  string
+	Originator string
+	Version    string
+}
+
+func OpenAICodexHeadersFromUAProfile(profile OpenAICodexUAProfile) OpenAICodexUAHeaders {
+	normalized := normalizeOpenAICodexUAProfile(profile)
+	return OpenAICodexUAHeaders{
+		UserAgent:  normalized.UserAgent(),
+		Originator: normalized.Originator,
+		Version:    normalized.CodexVersion,
+	}
+}
+
 func applyOpenAICodexFingerprintHeaders(req *http.Request, fp OpenAICodexFingerprint) {
 	if req == nil {
 		return
 	}
-	req.Header.Set("version", safeOpenAICodexUAComponent(fp.UAProfile.CodexVersion, codexCLIVersion))
-	req.Header.Set("originator", safeOpenAICodexUAComponent(fp.UAProfile.Originator, codexOfficialOriginator))
-	if ua := fp.UAProfile.UserAgent(); ua != "" {
-		req.Header.Set("user-agent", ua)
+	headers := OpenAICodexHeadersFromUAProfile(fp.UAProfile)
+	req.Header.Set("version", headers.Version)
+	req.Header.Set("originator", headers.Originator)
+	if headers.UserAgent != "" {
+		req.Header.Set("user-agent", headers.UserAgent)
 	}
 }
 

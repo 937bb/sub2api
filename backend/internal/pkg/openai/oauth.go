@@ -204,11 +204,22 @@ func BuildAuthorizationURL(state, codeChallenge, redirectURI string) string {
 
 // BuildAuthorizationURLForPlatform builds authorization URL by platform.
 func BuildAuthorizationURLForPlatform(state, codeChallenge, redirectURI, platform string) string {
+	return BuildAuthorizationURLForPlatformWithOriginator(state, codeChallenge, redirectURI, platform, DefaultOriginator)
+}
+
+// BuildAuthorizationURLForPlatformWithOriginator builds authorization URL by platform
+// and lets account-scoped callers keep the authorize originator aligned with the
+// token-exchange UA profile captured for the pending OAuth session.
+func BuildAuthorizationURLForPlatformWithOriginator(state, codeChallenge, redirectURI, platform, originator string) string {
 	if redirectURI == "" {
 		redirectURI = DefaultRedirectURI
 	}
 
 	clientID, codexFlow := OAuthClientConfigByPlatform(platform)
+	originator = strings.TrimSpace(originator)
+	if originator == "" {
+		originator = DefaultOriginator
+	}
 
 	query := []CodexFormValue{
 		{Key: "response_type", Value: "code"},
@@ -224,7 +235,7 @@ func BuildAuthorizationURLForPlatform(state, codeChallenge, redirectURI, platfor
 	}
 	query = append(query,
 		CodexFormValue{Key: "state", Value: state},
-		CodexFormValue{Key: "originator", Value: DefaultOriginator},
+		CodexFormValue{Key: "originator", Value: originator},
 	)
 
 	return fmt.Sprintf("%s?%s", AuthorizeURL, EncodeCodexForm(query))

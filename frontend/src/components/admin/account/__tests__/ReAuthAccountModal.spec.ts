@@ -178,11 +178,11 @@ describe('Admin ReAuthAccountModal', () => {
     expect(payload.extra_delete_keys).toContain('openai_oauth_passthrough')
     expect(payload.extra_delete_keys).toContain('openai_apikey_responses_websockets_v2_mode')
     expect(payload.extra).toMatchObject({
-      openai_oauth_ws_mode: 'managed_session',
       email: 'new@example.com',
       name: 'New User',
       privacy_mode: 'training_disabled'
     })
+    expect(payload.extra).not.toHaveProperty('openai_oauth_ws_mode')
     expect(payload.extra).not.toHaveProperty('openai_oauth_passthrough')
     expect(payload.extra).not.toHaveProperty('openai_oauth_responses_websockets_v2_mode')
     expect(payload.extra).not.toHaveProperty('openai_oauth_responses_websockets_v2_enabled')

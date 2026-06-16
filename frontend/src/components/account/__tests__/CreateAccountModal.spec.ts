@@ -4,6 +4,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 
 const {
   createAccountMock,
+  createOpenAIAccountFromRefreshTokenMock,
   checkMixedChannelRiskMock,
   refreshOpenAITokenMock,
   getWebSearchEmulationConfigMock,
@@ -11,6 +12,7 @@ const {
   listTLSFingerprintProfilesMock
 } = vi.hoisted(() => ({
   createAccountMock: vi.fn(),
+  createOpenAIAccountFromRefreshTokenMock: vi.fn(),
   checkMixedChannelRiskMock: vi.fn(),
   refreshOpenAITokenMock: vi.fn(),
   getWebSearchEmulationConfigMock: vi.fn(),
@@ -37,6 +39,7 @@ vi.mock('@/api/admin', () => ({
   adminAPI: {
     accounts: {
       create: createAccountMock,
+      createOpenAIAccountFromRefreshToken: createOpenAIAccountFromRefreshTokenMock,
       checkMixedChannelRisk: checkMixedChannelRiskMock,
       refreshOpenAIToken: refreshOpenAITokenMock,
       generateAuthUrl: vi.fn(),
@@ -149,6 +152,7 @@ function mountModal() {
 describe('CreateAccountModal', () => {
   beforeEach(() => {
     createAccountMock.mockReset()
+    createOpenAIAccountFromRefreshTokenMock.mockReset()
     checkMixedChannelRiskMock.mockReset()
     refreshOpenAITokenMock.mockReset()
     getWebSearchEmulationConfigMock.mockReset()
@@ -156,6 +160,7 @@ describe('CreateAccountModal', () => {
     listTLSFingerprintProfilesMock.mockReset()
 
     createAccountMock.mockResolvedValue({})
+    createOpenAIAccountFromRefreshTokenMock.mockResolvedValue({})
     checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
     refreshOpenAITokenMock.mockResolvedValue({
       access_token: 'redacted-access-token',
@@ -190,12 +195,13 @@ describe('CreateAccountModal', () => {
     await wrapper.get('[data-testid="emit-refresh-token"]').trigger('click')
     await flushPromises()
 
-    expect(createAccountMock).toHaveBeenCalledTimes(1)
-    const payload = createAccountMock.mock.calls[0]?.[0]
+    expect(createAccountMock).not.toHaveBeenCalled()
+    expect(refreshOpenAITokenMock).not.toHaveBeenCalled()
+    expect(createOpenAIAccountFromRefreshTokenMock).toHaveBeenCalledTimes(1)
+    const payload = createOpenAIAccountFromRefreshTokenMock.mock.calls[0]?.[0]
     expect(payload).toMatchObject({
+      refresh_token: 'rt-test',
       name: 'OpenAI OAuth',
-      platform: 'openai',
-      type: 'oauth',
       extra: expect.objectContaining({
         openai_oauth_ws_mode: 'managed_session'
       })

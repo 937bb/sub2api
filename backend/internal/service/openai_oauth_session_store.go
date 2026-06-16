@@ -16,47 +16,95 @@ import (
 const openAIOAuthSessionKeyPrefix = "openai:oauth:session:"
 
 type openAIOAuthSessionStore interface {
-	Set(ctx context.Context, sessionID string, session *openai.OAuthSession) error
-	Get(ctx context.Context, sessionID string) (*openai.OAuthSession, bool)
+	Set(ctx context.Context, sessionID string, session *openAIOAuthPendingSession) error
+	Get(ctx context.Context, sessionID string) (*openAIOAuthPendingSession, bool)
 	Delete(ctx context.Context, sessionID string)
 	Stop()
 }
 
+type openAIOAuthPendingSession struct {
+	openai.OAuthSession
+	CodexFingerprint OpenAICodexFingerprint `json:"codex_fingerprint,omitempty"`
+}
+
 type openAIOAuthMemorySessionStore struct {
-	store *openai.SessionStore
+	mu       sync.RWMutex
+	sessions map[string]*openAIOAuthPendingSession
+	stopOnce sync.Once
+	stopCh   chan struct{}
 }
 
 func newOpenAIOAuthMemorySessionStore() *openAIOAuthMemorySessionStore {
-	return &openAIOAuthMemorySessionStore{store: openai.NewSessionStore()}
+	store := &openAIOAuthMemorySessionStore{
+		sessions: make(map[string]*openAIOAuthPendingSession),
+		stopCh:   make(chan struct{}),
+	}
+	go store.cleanup()
+	return store
 }
 
-func (s *openAIOAuthMemorySessionStore) Set(_ context.Context, sessionID string, session *openai.OAuthSession) error {
-	if s == nil || s.store == nil || strings.TrimSpace(sessionID) == "" || session == nil {
+func (s *openAIOAuthMemorySessionStore) Set(_ context.Context, sessionID string, session *openAIOAuthPendingSession) error {
+	if s == nil || strings.TrimSpace(sessionID) == "" || session == nil {
 		return nil
 	}
-	s.store.Set(sessionID, session)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sessions[sessionID] = session
 	return nil
 }
 
-func (s *openAIOAuthMemorySessionStore) Get(_ context.Context, sessionID string) (*openai.OAuthSession, bool) {
-	if s == nil || s.store == nil || strings.TrimSpace(sessionID) == "" {
+func (s *openAIOAuthMemorySessionStore) Get(_ context.Context, sessionID string) (*openAIOAuthPendingSession, bool) {
+	if s == nil || strings.TrimSpace(sessionID) == "" {
 		return nil, false
 	}
-	return s.store.Get(sessionID)
+	s.mu.RLock()
+	session, ok := s.sessions[sessionID]
+	s.mu.RUnlock()
+	if !ok || openAIOAuthSessionExpired(session) {
+		return nil, false
+	}
+	return session, true
 }
 
 func (s *openAIOAuthMemorySessionStore) Delete(_ context.Context, sessionID string) {
-	if s == nil || s.store == nil || strings.TrimSpace(sessionID) == "" {
+	if s == nil || strings.TrimSpace(sessionID) == "" {
 		return
 	}
-	s.store.Delete(sessionID)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.sessions, sessionID)
 }
 
 func (s *openAIOAuthMemorySessionStore) Stop() {
-	if s == nil || s.store == nil {
+	if s == nil {
 		return
 	}
-	s.store.Stop()
+	s.stopOnce.Do(func() {
+		close(s.stopCh)
+	})
+}
+
+func (s *openAIOAuthMemorySessionStore) cleanup() {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-s.stopCh:
+			return
+		case <-ticker.C:
+			s.deleteExpired(time.Now())
+		}
+	}
+}
+
+func (s *openAIOAuthMemorySessionStore) deleteExpired(_ time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id, session := range s.sessions {
+		if openAIOAuthSessionExpired(session) {
+			delete(s.sessions, id)
+		}
+	}
 }
 
 // NewOpenAIOAuthServiceWithRedis creates the OAuth service with Redis-backed pending session storage.
@@ -92,7 +140,7 @@ type openAIOAuthRedisSetFailure struct {
 	expiresAt time.Time
 }
 
-func (s *openAIOAuthRedisSessionStore) Set(ctx context.Context, sessionID string, session *openai.OAuthSession) error {
+func (s *openAIOAuthRedisSessionStore) Set(ctx context.Context, sessionID string, session *openAIOAuthPendingSession) error {
 	if s == nil {
 		return nil
 	}
@@ -116,7 +164,7 @@ func (s *openAIOAuthRedisSessionStore) Set(ctx context.Context, sessionID string
 	return nil
 }
 
-func (s *openAIOAuthRedisSessionStore) Get(ctx context.Context, sessionID string) (*openai.OAuthSession, bool) {
+func (s *openAIOAuthRedisSessionStore) Get(ctx context.Context, sessionID string) (*openAIOAuthPendingSession, bool) {
 	if s == nil || strings.TrimSpace(sessionID) == "" {
 		return nil, false
 	}
@@ -217,7 +265,7 @@ const (
 	openAIOAuthSessionRedisError
 )
 
-func (s *openAIOAuthRedisSessionStore) getFromRedis(ctx context.Context, sessionID string) (*openai.OAuthSession, openAIOAuthSessionRedisStatus) {
+func (s *openAIOAuthRedisSessionStore) getFromRedis(ctx context.Context, sessionID string) (*openAIOAuthPendingSession, openAIOAuthSessionRedisStatus) {
 	payload, err := s.rdb.Get(openAIOAuthSessionContext(ctx), openAIOAuthSessionKey(sessionID)).Bytes()
 	if errors.Is(err, redis.Nil) {
 		return nil, openAIOAuthSessionRedisMiss
@@ -227,7 +275,7 @@ func (s *openAIOAuthRedisSessionStore) getFromRedis(ctx context.Context, session
 		return nil, openAIOAuthSessionRedisError
 	}
 
-	var session openai.OAuthSession
+	var session openAIOAuthPendingSession
 	if err := json.Unmarshal(payload, &session); err != nil {
 		slog.Warn("openai_oauth_session_redis_decode_failed", "error", err)
 		s.Delete(ctx, sessionID)
@@ -243,7 +291,7 @@ func openAIOAuthSessionKey(sessionID string) string {
 	return openAIOAuthSessionKeyPrefix + sessionID
 }
 
-func openAIOAuthSessionExpired(session *openai.OAuthSession) bool {
+func openAIOAuthSessionExpired(session *openAIOAuthPendingSession) bool {
 	return session == nil || time.Since(session.CreatedAt) > openai.SessionTTL
 }
 

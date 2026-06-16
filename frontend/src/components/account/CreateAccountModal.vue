@@ -4831,17 +4831,8 @@ const handleOpenAIExchange = async (authCode: string) => {
       return
     }
 
-    const tokenInfo = await oauthClient.exchangeAuthCode(
-      authCode.trim(),
-      oauthClient.sessionId.value,
-      stateToUse,
-      form.proxy_id
-    )
-    if (!tokenInfo) return
-
-    const credentials = oauthClient.buildCredentials(tokenInfo)
-    const oauthExtra = oauthClient.buildExtraInfo(tokenInfo) as Record<string, unknown> | undefined
-    const extra = buildOpenAIExtra(oauthExtra)
+    const credentials: Record<string, unknown> = {}
+    const extra = buildOpenAIExtra()
     const shouldCreateOpenAI = form.platform === 'openai'
 
     // OpenAI OAuth 走 adapter 路径，模型映射仍可在网关侧生效。
@@ -4864,11 +4855,12 @@ const handleOpenAIExchange = async (authCode: string) => {
     }
 
     if (shouldCreateOpenAI) {
-      await adminAPI.accounts.create({
+      await adminAPI.accounts.createOpenAIAccountFromOAuth({
+        session_id: oauthClient.sessionId.value,
+        code: authCode.trim(),
+        state: stateToUse,
         name: form.name,
         notes: form.notes,
-        platform: 'openai',
-        type: 'oauth',
         credentials,
         extra,
         proxy_id: form.proxy_id,
@@ -5030,24 +5022,8 @@ const handleOpenAIBatchRT = async (refreshTokenInput: string, clientId?: string)
   try {
     for (let i = 0; i < refreshTokens.length; i++) {
       try {
-        const tokenInfo = await oauthClient.validateRefreshToken(
-          refreshTokens[i],
-          form.proxy_id,
-          clientId
-        )
-        if (!tokenInfo) {
-          failedCount++
-          errors.push(`#${i + 1}: ${oauthClient.error.value || 'Validation failed'}`)
-          oauthClient.error.value = ''
-          continue
-        }
-
-        const credentials = oauthClient.buildCredentials(tokenInfo)
-        if (clientId) {
-          credentials.client_id = clientId
-        }
-        const oauthExtra = oauthClient.buildExtraInfo(tokenInfo) as Record<string, unknown> | undefined
-        const extra = buildOpenAIExtra(oauthExtra)
+        const credentials: Record<string, unknown> = {}
+        const extra = buildOpenAIExtra()
 
         // OpenAI OAuth 走 adapter 路径，模型映射仍可在网关侧生效。
         if (shouldCreateOpenAI && !isOpenAIModelRestrictionDisabled.value) {
@@ -5062,17 +5038,20 @@ const handleOpenAIBatchRT = async (refreshTokenInput: string, clientId?: string)
             credentials.compact_model_mapping = compactModelMapping
           }
         }
+        if (!applyTempUnschedConfig(credentials)) {
+          return
+        }
 
-        // Generate account name; fallback to email if name is empty (ent schema requires NotEmpty)
-        const baseName = form.name || tokenInfo.email || 'OpenAI OAuth Account'
+        // Generate account name; fallback to backend token metadata if name is empty.
+        const baseName = form.name || 'OpenAI OAuth Account'
         const accountName = refreshTokens.length > 1 ? `${baseName} #${i + 1}` : baseName
 
         if (shouldCreateOpenAI) {
-          await adminAPI.accounts.create({
+          await adminAPI.accounts.createOpenAIAccountFromRefreshToken({
+            refresh_token: refreshTokens[i],
+            client_id: clientId,
             name: accountName,
             notes: form.notes,
-            platform: 'openai',
-            type: 'oauth',
             credentials,
             extra,
             proxy_id: form.proxy_id,
@@ -5084,6 +5063,18 @@ const handleOpenAIBatchRT = async (refreshTokenInput: string, clientId?: string)
             expires_at: form.expires_at,
             auto_pause_on_expired: autoPauseOnExpired.value
           })
+        } else {
+          const tokenInfo = await oauthClient.validateRefreshToken(
+            refreshTokens[i],
+            form.proxy_id,
+            clientId
+          )
+          if (!tokenInfo) {
+            failedCount++
+            errors.push(`#${i + 1}: ${oauthClient.error.value || 'Validation failed'}`)
+            oauthClient.error.value = ''
+            continue
+          }
         }
 
         successCount++

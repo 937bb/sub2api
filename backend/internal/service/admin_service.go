@@ -291,6 +291,9 @@ type CreateAccountInput struct {
 	// SkipMixedChannelCheck skips the mixed channel risk check when binding groups.
 	// This should only be set when the caller has explicitly confirmed the risk.
 	SkipMixedChannelCheck bool
+	// OpenAICodexFingerprint is server-owned metadata from the OAuth exchange path.
+	// It is never populated from generic account create/update request bodies.
+	OpenAICodexFingerprint *OpenAICodexFingerprint
 }
 
 type UpdateAccountInput struct {
@@ -2568,6 +2571,12 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 		Schedulable: true,
 	}
 	normalizeOpenAICodexFingerprintExtraForCreate(account)
+	if input.OpenAICodexFingerprint != nil && account.IsOpenAIOAuthLike() {
+		if account.Extra == nil {
+			account.Extra = map[string]any{}
+		}
+		account.Extra[OpenAICodexFingerprintExtraKey] = *input.OpenAICodexFingerprint
+	}
 	if err := validateOpenAIOAuthAccountWriteConfig(account); err != nil {
 		return nil, err
 	}
