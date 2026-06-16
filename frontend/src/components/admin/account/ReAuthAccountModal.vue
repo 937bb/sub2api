@@ -192,7 +192,7 @@ import {
 import { useOpenAIOAuth } from '@/composables/useOpenAIOAuth'
 import { useGeminiOAuth } from '@/composables/useGeminiOAuth'
 import { useAntigravityOAuth } from '@/composables/useAntigravityOAuth'
-import type { Account, AccountType } from '@/types'
+import type { Account } from '@/types'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
 import OAuthAuthorizationFlow from '@/components/account/OAuthAuthorizationFlow.vue'
@@ -307,7 +307,7 @@ const buildOpenAIReAuthExtra = (tokenExtra?: Record<string, unknown>): Record<st
   return Object.keys(extra).length > 0 ? extra : undefined
 }
 
-const resolveOpenAIReAuthType = (): AccountType => {
+const resolveOpenAIReAuthType = (): 'oauth' | 'setup-token' => {
   return props.account?.type === 'setup-token' ? 'setup-token' : 'oauth'
 }
 
