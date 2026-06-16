@@ -304,6 +304,7 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 		}
 
 		enrichCredentialsFromIDToken(&item)
+		migrateImportedOpenAIOAuthLegacyExtra(&item)
 
 		accountInput := &service.CreateAccountInput{
 			Name:                 item.Name,
@@ -645,6 +646,69 @@ func enrichCredentialsFromIDToken(item *DataAccount) {
 	setIfMissing("chatgpt_account_id", userInfo.ChatGPTAccountID)
 	setIfMissing("chatgpt_user_id", userInfo.ChatGPTUserID)
 	setIfMissing("organization_id", userInfo.OrganizationID)
+}
+
+func migrateImportedOpenAIOAuthLegacyExtra(item *DataAccount) {
+	if item == nil || item.Extra == nil {
+		return
+	}
+	if strings.ToLower(strings.TrimSpace(item.Platform)) != service.PlatformOpenAI {
+		return
+	}
+	accountType := strings.ToLower(strings.TrimSpace(item.Type))
+	if accountType != service.AccountTypeOAuth && accountType != service.AccountTypeSetupToken {
+		return
+	}
+
+	if mode, ok := importedOpenAIOAuthWSMode(item.Extra); ok {
+		item.Extra["openai_oauth_ws_mode"] = mode
+	}
+	for _, key := range []string{
+		"openai_oauth_passthrough",
+		"openai_passthrough",
+		"openai_oauth_responses_websockets_v2_mode",
+		"openai_oauth_responses_websockets_v2_enabled",
+		"responses_websockets_v2_enabled",
+		"openai_ws_enabled",
+		"openai_apikey_responses_websockets_v2_enabled",
+		"openai_apikey_responses_websockets_v2_mode",
+	} {
+		delete(item.Extra, key)
+	}
+}
+
+func importedOpenAIOAuthWSMode(extra map[string]any) (string, bool) {
+	if mode, ok := extra["openai_oauth_responses_websockets_v2_mode"].(string); ok {
+		switch strings.ToLower(strings.TrimSpace(mode)) {
+		case service.OpenAIWSIngressModeOff:
+			return service.OpenAIOAuthWSModeOff, true
+		case service.OpenAIWSIngressModeCtxPool,
+			service.OpenAIWSIngressModeShared,
+			service.OpenAIWSIngressModeDedicated,
+			service.OpenAIWSIngressModePassthrough,
+			service.OpenAIOAuthWSModeManagedSession:
+			return service.OpenAIOAuthWSModeManagedSession, true
+		}
+	}
+	if enabled, ok := extra["openai_oauth_responses_websockets_v2_enabled"].(bool); ok {
+		if enabled {
+			return service.OpenAIOAuthWSModeManagedSession, true
+		}
+		return service.OpenAIOAuthWSModeOff, true
+	}
+	if enabled, ok := extra["responses_websockets_v2_enabled"].(bool); ok {
+		if enabled {
+			return service.OpenAIOAuthWSModeManagedSession, true
+		}
+		return service.OpenAIOAuthWSModeOff, true
+	}
+	if enabled, ok := extra["openai_ws_enabled"].(bool); ok {
+		if enabled {
+			return service.OpenAIOAuthWSModeManagedSession, true
+		}
+		return service.OpenAIOAuthWSModeOff, true
+	}
+	return "", false
 }
 
 func normalizeProxyStatus(status string) string {
