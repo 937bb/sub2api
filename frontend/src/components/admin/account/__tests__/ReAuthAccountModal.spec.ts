@@ -153,10 +153,10 @@ describe('Admin ReAuthAccountModal', () => {
 
     const vm = wrapper.vm as any
     vm.openaiOAuth.sessionId.value = 'session-id'
-    vm.openaiOAuth.oauthState.value = 'state-value'
+    vm.openaiOAuth.oauthState.value = 'generated-state'
     vm.oauthFlowRef.value = {
       authCode: 'auth-code',
-      oauthState: 'state-value',
+      oauthState: 'stale-callback-state',
       inputMethod: 'manual',
       reset: vi.fn(),
       projectId: '',
@@ -167,6 +167,11 @@ describe('Admin ReAuthAccountModal', () => {
     await flushPromises()
 
     expect(updateAccountMock).not.toHaveBeenCalled()
+    expect(exchangeCodeMock).toHaveBeenCalledWith('/admin/openai/exchange-code', {
+      session_id: 'session-id',
+      code: 'auth-code',
+      state: 'generated-state'
+    })
     expect(applyOAuthCredentialsMock).toHaveBeenCalledTimes(1)
     const payload = applyOAuthCredentialsMock.mock.calls[0]?.[1]
     expect(payload.type).toBe('setup-token')

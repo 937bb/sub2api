@@ -4823,7 +4823,8 @@ const handleOpenAIExchange = async (authCode: string) => {
   oauthClient.error.value = ''
 
   try {
-    const stateToUse = (oauthFlowRef.value?.oauthState || oauthClient.oauthState.value || '').trim()
+    // Prefer the generated session state; pasted callback state can be stale after regenerating the URL.
+    const stateToUse = (oauthClient.oauthState.value || oauthFlowRef.value?.oauthState || '').trim()
     if (!stateToUse) {
       oauthClient.error.value = t('admin.accounts.oauth.authFailed')
       appStore.showError(oauthClient.error.value)
