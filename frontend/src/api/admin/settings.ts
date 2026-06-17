@@ -95,6 +95,19 @@ export interface PaymentVisibleMethodSourceOption {
   labelEn: string;
 }
 
+export interface OpenAICodexUAProfile {
+  originator: string;
+  codex_version: string;
+  os_fingerprint: string;
+  terminal_token: string;
+  /** Effective raw UA returned by the backend for legacy/custom values. */
+  user_agent?: string;
+}
+
+export type UpdateOpenAICodexUAProfile = Omit<OpenAICodexUAProfile, "user_agent"> & {
+  user_agent?: never;
+};
+
 export interface WeChatConnectModeOption {
   value: WeChatConnectMode;
   labelZh: string;
@@ -560,6 +573,7 @@ export interface SystemSettings {
   rewrite_message_cache_control: boolean;
   antigravity_user_agent_version: string;
   openai_codex_user_agent: string;
+  openai_codex_ua_profile: OpenAICodexUAProfile;
   openai_allow_claude_code_codex_plugin: boolean;
   web_search_emulation_enabled?: boolean;
 
@@ -796,6 +810,7 @@ export interface UpdateSettingsRequest {
   rewrite_message_cache_control?: boolean;
   antigravity_user_agent_version?: string;
   openai_codex_user_agent?: string;
+  openai_codex_ua_profile?: UpdateOpenAICodexUAProfile;
   openai_allow_claude_code_codex_plugin?: boolean;
   // Payment configuration
   payment_enabled?: boolean;

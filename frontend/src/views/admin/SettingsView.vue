@@ -3919,34 +3919,78 @@
                 </p>
               </div>
 
-              <!-- OpenAI Codex UA -->
-              <div>
-                <label
-                  class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
-                >
-                  {{
-                    t(
-                      "admin.settings.gatewayForwarding.openaiCodexUserAgent",
-                    )
-                  }}
-                </label>
-                <input
-                  v-model="form.openai_codex_user_agent"
-                  type="text"
-                  class="input w-full font-mono text-sm"
-                  :placeholder="
-                    t(
-                      'admin.settings.gatewayForwarding.openaiCodexUserAgentPlaceholder',
-                    )
-                  "
-                />
-                <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
-                  {{
-                    t(
-                      "admin.settings.gatewayForwarding.openaiCodexUserAgentHint",
-                    )
-                  }}
-                </p>
+              <!-- OpenAI Codex UA Profile -->
+              <div class="space-y-3">
+                <div>
+                  <label
+                    class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
+                  >
+                    {{
+                      t(
+                        "admin.settings.gatewayForwarding.openaiCodexUserAgent",
+                      )
+                    }}
+                  </label>
+                  <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                    {{
+                      t(
+                        "admin.settings.gatewayForwarding.openaiCodexUserAgentHint",
+                      )
+                    }}
+                  </p>
+                </div>
+
+                <div class="grid gap-3 md:grid-cols-2">
+                  <div>
+                    <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
+                      {{ t("admin.settings.gatewayForwarding.openaiCodexOriginator") }}
+                    </label>
+                    <input
+                      v-model="form.openai_codex_ua_profile.originator"
+                      type="text"
+                      class="input w-full font-mono text-sm"
+                      :placeholder="t('admin.settings.gatewayForwarding.openaiCodexOriginatorPlaceholder')"                    />
+                  </div>
+                  <div>
+                    <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
+                      {{ t("admin.settings.gatewayForwarding.openaiCodexVersion") }}
+                    </label>
+                    <input
+                      v-model="form.openai_codex_ua_profile.codex_version"
+                      type="text"
+                      class="input w-full font-mono text-sm"
+                      :placeholder="t('admin.settings.gatewayForwarding.openaiCodexVersionPlaceholder')"                    />
+                  </div>
+                  <div>
+                    <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
+                      {{ t("admin.settings.gatewayForwarding.openaiCodexOS") }}
+                    </label>
+                    <input
+                      v-model="form.openai_codex_ua_profile.os_fingerprint"
+                      type="text"
+                      class="input w-full font-mono text-sm"
+                      :placeholder="t('admin.settings.gatewayForwarding.openaiCodexOSPlaceholder')"                    />
+                  </div>
+                  <div>
+                    <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
+                      {{ t("admin.settings.gatewayForwarding.openaiCodexTerminal") }}
+                    </label>
+                    <input
+                      v-model="form.openai_codex_ua_profile.terminal_token"
+                      type="text"
+                      class="input w-full font-mono text-sm"
+                      :placeholder="t('admin.settings.gatewayForwarding.openaiCodexTerminalPlaceholder')"                    />
+                  </div>
+                </div>
+
+                <div class="rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-dark-600 dark:bg-dark-800/60">
+                  <div class="mb-1 text-xs font-medium text-gray-500 dark:text-gray-400">
+                    {{ t("admin.settings.gatewayForwarding.openaiCodexUserAgentPreview") }}
+                  </div>
+                  <code class="break-all font-mono text-xs text-gray-700 dark:text-gray-300">
+                    {{ openAICodexUserAgentPreview }}
+                  </code>
+                </div>
               </div>
 
               <!-- 是否允许在 Claude Code 中使用 Codex 插件（全局开关） -->
@@ -6713,6 +6757,7 @@ import type {
   UpdateSettingsRequest,
   DefaultSubscriptionSetting,
   DefaultPlatformQuotasMap,
+  OpenAICodexUAProfile,
   OpenAIFastPolicyRule,
   WeChatConnectMode,
   WebSearchEmulationConfig,
@@ -6759,6 +6804,127 @@ const isZhLocale = computed(() => locale.value.startsWith("zh"));
 
 function localText(zh: string, en: string): string {
   return isZhLocale.value ? zh : en;
+}
+
+const defaultOpenAICodexUAProfile: OpenAICodexUAProfile = {
+  originator: "codex-tui",
+  codex_version: "0.136.0",
+  os_fingerprint: "Mac OS 26.5.0; arm64",
+  terminal_token: "Apple_Terminal/470.2",
+};
+
+function isOpenAICodexHeaderValueSafe(value: string): boolean {
+  return Array.from(value).every((char) => {
+    const code = char.charCodeAt(0);
+    return code >= 0x20 && code !== 0x7f;
+  });
+}
+
+function sanitizeOpenAICodexUAPathTokenComponent(
+  value: string | undefined,
+  fallback: string,
+): string {
+  const trimmed = value?.trim() || "";
+  if (
+    !trimmed ||
+    !isOpenAICodexHeaderValueSafe(trimmed) ||
+    /[\s/();]/u.test(trimmed)
+  ) {
+    return fallback;
+  }
+  return trimmed;
+}
+
+function sanitizeOpenAICodexUATokenComponent(
+  value: string | undefined,
+  fallback: string,
+): string {
+  const trimmed = value?.trim() || "";
+  if (
+    !trimmed ||
+    !isOpenAICodexHeaderValueSafe(trimmed) ||
+    /[\s();]/u.test(trimmed)
+  ) {
+    return fallback;
+  }
+  return trimmed;
+}
+
+function sanitizeOpenAICodexUACommentComponent(
+  value: string | undefined,
+  fallback: string,
+): string {
+  const trimmed = value?.trim() || "";
+  if (
+    !trimmed ||
+    !isOpenAICodexHeaderValueSafe(trimmed) ||
+    /[()]/u.test(trimmed)
+  ) {
+    return fallback;
+  }
+  return trimmed;
+}
+
+function normalizeOpenAICodexUAProfile(
+  profile?: Partial<OpenAICodexUAProfile> | null,
+): OpenAICodexUAProfile {
+  return {
+    originator: sanitizeOpenAICodexUAPathTokenComponent(
+      profile?.originator,
+      defaultOpenAICodexUAProfile.originator,
+    ),
+    codex_version: sanitizeOpenAICodexUAPathTokenComponent(
+      profile?.codex_version,
+      defaultOpenAICodexUAProfile.codex_version,
+    ),
+    os_fingerprint: sanitizeOpenAICodexUACommentComponent(
+      profile?.os_fingerprint,
+      defaultOpenAICodexUAProfile.os_fingerprint,
+    ),
+    terminal_token: sanitizeOpenAICodexUATokenComponent(
+      profile?.terminal_token,
+      defaultOpenAICodexUAProfile.terminal_token,
+    ),
+    user_agent: profile?.user_agent?.trim() || undefined,
+  };
+}
+
+function buildOpenAICodexUserAgent(profile: OpenAICodexUAProfile): string {
+  const normalized = normalizeOpenAICodexUAProfile(profile);
+  if (normalized.user_agent) {
+    return normalized.user_agent;
+  }
+  return buildOpenAICodexCanonicalUserAgent(normalized);
+}
+
+function buildOpenAICodexCanonicalUserAgent(profile: OpenAICodexUAProfile): string {
+  const normalized = normalizeOpenAICodexUAProfile({
+    originator: profile.originator,
+    codex_version: profile.codex_version,
+    os_fingerprint: profile.os_fingerprint,
+    terminal_token: profile.terminal_token,
+  });
+  return `${normalized.originator}/${normalized.codex_version} (${normalized.os_fingerprint}) ${normalized.terminal_token} (${normalized.originator}; ${normalized.codex_version})`;
+}
+
+function openAICodexUAProfileKey(profile: OpenAICodexUAProfile): string {
+  const normalized = normalizeOpenAICodexUAProfile(profile);
+  return JSON.stringify({
+    originator: normalized.originator,
+    codex_version: normalized.codex_version,
+    os_fingerprint: normalized.os_fingerprint,
+    terminal_token: normalized.terminal_token,
+  });
+}
+
+function openAICodexUAProfilePayload(profile: OpenAICodexUAProfile) {
+  const normalized = normalizeOpenAICodexUAProfile(profile);
+  return {
+    originator: normalized.originator,
+    codex_version: normalized.codex_version,
+    os_fingerprint: normalized.os_fingerprint,
+    terminal_token: normalized.terminal_token,
+  };
 }
 
 const paymentGuideHref = computed(() =>
@@ -6858,6 +7024,7 @@ const testEmailAddress = ref("");
 const registrationEmailSuffixWhitelistTags = ref<string[]>([]);
 const registrationEmailSuffixWhitelistDraft = ref("");
 const tablePageSizeOptionsInput = ref("10, 20, 50, 100");
+const initialOpenAICodexUAProfileKey = ref("");
 
 // Admin API Key 状态
 const adminApiKeyLoading = ref(true);
@@ -7204,6 +7371,7 @@ const form = reactive<SettingsForm>({
   rewrite_message_cache_control: false,
   antigravity_user_agent_version: "",
   openai_codex_user_agent: "",
+  openai_codex_ua_profile: normalizeOpenAICodexUAProfile(),
   openai_allow_claude_code_codex_plugin: false,
   // 余额、订阅到期与账号限额通知
   balance_low_notify_enabled: false,
@@ -7221,6 +7389,19 @@ const form = reactive<SettingsForm>({
   affiliate_enabled: false,
   // Allow user view error requests
   allow_user_view_error_requests: false,
+});
+
+const openAICodexUAProfileChanged = computed(
+  () =>
+    openAICodexUAProfileKey(form.openai_codex_ua_profile) !==
+    initialOpenAICodexUAProfileKey.value,
+);
+
+const openAICodexUserAgentPreview = computed(() => {
+  const profile = normalizeOpenAICodexUAProfile(form.openai_codex_ua_profile);
+  return openAICodexUAProfileChanged.value
+    ? buildOpenAICodexCanonicalUserAgent(profile)
+    : buildOpenAICodexUserAgent(profile);
 });
 
 const authSourceDefaults = reactive<AuthSourceDefaultsState>(
@@ -7838,6 +8019,13 @@ async function loadSettings() {
         : defaultLoginAgreementDocuments();
     Object.assign(authSourceDefaults, buildAuthSourceDefaultsState(settings));
     form.default_platform_quotas = normalizePlatformQuotasMap(settings.default_platform_quotas);
+    form.openai_codex_ua_profile = normalizeOpenAICodexUAProfile(
+      settings.openai_codex_ua_profile,
+    );
+    form.openai_codex_user_agent = settings.openai_codex_user_agent || "";
+    initialOpenAICodexUAProfileKey.value = openAICodexUAProfileKey(
+      form.openai_codex_ua_profile,
+    );
     form.backend_mode_enabled = settings.backend_mode_enabled;
     form.default_subscriptions = normalizeDefaultSubscriptionSettings(
       settings.default_subscriptions,
@@ -8152,6 +8340,12 @@ async function saveSettings() {
       form.wechat_connect_mobile_enabled,
       form.wechat_connect_mode,
     );
+    const openAICodexUAProfile = normalizeOpenAICodexUAProfile(
+      form.openai_codex_ua_profile,
+    );
+    const openAICodexUserAgent = buildOpenAICodexCanonicalUserAgent(
+      openAICodexUAProfile,
+    );
 
     const payload: UpdateSettingsRequest = {
       registration_enabled: form.registration_enabled,
@@ -8310,8 +8504,6 @@ async function saveSettings() {
       rewrite_message_cache_control: form.rewrite_message_cache_control,
       antigravity_user_agent_version:
         form.antigravity_user_agent_version?.trim() || "",
-      openai_codex_user_agent:
-        form.openai_codex_user_agent?.trim() || "",
       openai_allow_claude_code_codex_plugin: form.openai_allow_claude_code_codex_plugin,
       // Payment configuration
       payment_enabled: form.payment_enabled,
@@ -8365,6 +8557,11 @@ async function saveSettings() {
       allow_user_view_error_requests: form.allow_user_view_error_requests,
     };
 
+    if (openAICodexUAProfileChanged.value) {
+      payload.openai_codex_user_agent = openAICodexUserAgent;
+      payload.openai_codex_ua_profile = openAICodexUAProfilePayload(openAICodexUAProfile);
+    }
+
     // 仅当 openai_fast_policy_settings 已成功从后端加载时才回写，
     // 否则省略整个字段，让后端保留既有规则（含默认值）。
     if (openaiFastPolicyLoaded.value) {
@@ -8405,6 +8602,13 @@ async function saveSettings() {
     }
     Object.assign(authSourceDefaults, buildAuthSourceDefaultsState(updated));
     form.default_platform_quotas = normalizePlatformQuotasMap(updated.default_platform_quotas);
+    form.openai_codex_ua_profile = normalizeOpenAICodexUAProfile(
+      updated.openai_codex_ua_profile,
+    );
+    form.openai_codex_user_agent = updated.openai_codex_user_agent || "";
+    initialOpenAICodexUAProfileKey.value = openAICodexUAProfileKey(
+      form.openai_codex_ua_profile,
+    );
     registrationEmailSuffixWhitelistTags.value =
       normalizeRegistrationEmailSuffixDomains(
         updated.registration_email_suffix_whitelist,

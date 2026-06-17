@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/google/uuid"
 )
@@ -33,10 +34,10 @@ func (p OpenAICodexUAProfile) UserAgent() string {
 	if raw := strings.TrimSpace(p.RawUserAgent); raw != "" && isOpenAICodexHeaderValueSafe(raw) {
 		return raw
 	}
-	originator := safeOpenAICodexUAComponent(p.Originator, codexOfficialOriginator)
-	version := safeOpenAICodexUAComponent(p.CodexVersion, codexCLIVersion)
-	osFingerprint := safeOpenAICodexUAComponent(p.OSFingerprint, codexOSFingerprint)
-	terminalToken := safeOpenAICodexUAComponent(p.TerminalToken, codexTerminalName)
+	originator := safeOpenAICodexUAPathTokenComponent(p.Originator, codexOfficialOriginator)
+	version := safeOpenAICodexUAPathTokenComponent(p.CodexVersion, codexCLIVersion)
+	osFingerprint := safeOpenAICodexUACommentComponent(p.OSFingerprint, codexOSFingerprint)
+	terminalToken := safeOpenAICodexUATokenComponent(p.TerminalToken, codexTerminalName)
 	return fmt.Sprintf("%s/%s (%s) %s (%s; %s)", originator, version, osFingerprint, terminalToken, originator, version)
 }
 
@@ -191,11 +192,17 @@ func openAICodexUAProfileFromMap(m map[string]any) OpenAICodexUAProfile {
 	}
 }
 
+// NormalizeOpenAICodexUAProfile sanitizes a Codex UA profile using the same
+// defaults as account fingerprint creation.
+func NormalizeOpenAICodexUAProfile(profile OpenAICodexUAProfile) OpenAICodexUAProfile {
+	return normalizeOpenAICodexUAProfile(profile)
+}
+
 func normalizeOpenAICodexUAProfile(profile OpenAICodexUAProfile) OpenAICodexUAProfile {
-	profile.Originator = safeOpenAICodexUAComponent(profile.Originator, codexOfficialOriginator)
-	profile.CodexVersion = safeOpenAICodexUAComponent(profile.CodexVersion, codexCLIVersion)
-	profile.OSFingerprint = safeOpenAICodexUAComponent(profile.OSFingerprint, codexOSFingerprint)
-	profile.TerminalToken = safeOpenAICodexUAComponent(profile.TerminalToken, codexTerminalName)
+	profile.Originator = safeOpenAICodexUAPathTokenComponent(profile.Originator, codexOfficialOriginator)
+	profile.CodexVersion = safeOpenAICodexUAPathTokenComponent(profile.CodexVersion, codexCLIVersion)
+	profile.OSFingerprint = safeOpenAICodexUACommentComponent(profile.OSFingerprint, codexOSFingerprint)
+	profile.TerminalToken = safeOpenAICodexUATokenComponent(profile.TerminalToken, codexTerminalName)
 	profile.RawUserAgent = strings.TrimSpace(profile.RawUserAgent)
 	if !isOpenAICodexHeaderValueSafe(profile.RawUserAgent) {
 		profile.RawUserAgent = ""
@@ -213,6 +220,42 @@ func safeOpenAICodexUAComponent(value, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func safeOpenAICodexUAPathTokenComponent(value, fallback string) string {
+	value = safeOpenAICodexUAComponent(value, fallback)
+	if strings.Contains(value, "/") || !isOpenAICodexUATokenComponentSafe(value) {
+		return fallback
+	}
+	return value
+}
+
+func safeOpenAICodexUATokenComponent(value, fallback string) string {
+	value = safeOpenAICodexUAComponent(value, fallback)
+	if !isOpenAICodexUATokenComponentSafe(value) {
+		return fallback
+	}
+	return value
+}
+
+func safeOpenAICodexUACommentComponent(value, fallback string) string {
+	value = safeOpenAICodexUAComponent(value, fallback)
+	if strings.ContainsAny(value, "()") {
+		return fallback
+	}
+	return value
+}
+
+func isOpenAICodexUATokenComponentSafe(value string) bool {
+	if strings.ContainsAny(value, "();") {
+		return false
+	}
+	for _, r := range value {
+		if unicode.IsSpace(r) {
+			return false
+		}
+	}
+	return true
 }
 
 func isOpenAICodexHeaderValueSafe(value string) bool {

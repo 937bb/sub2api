@@ -3351,6 +3351,11 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	}
 	result.AntigravityUserAgentVersion = antigravity.NormalizeUserAgentVersion(settings[SettingKeyAntigravityUserAgentVersion])
 	result.OpenAICodexUserAgent = strings.TrimSpace(settings[SettingKeyOpenAICodexUserAgent])
+	openAICodexUA := result.OpenAICodexUserAgent
+	if openAICodexUA == "" {
+		openAICodexUA = DefaultOpenAICodexUserAgent
+	}
+	result.OpenAICodexUAProfile = NormalizeOpenAICodexUAProfile(ParseOpenAICodexUAProfile(openAICodexUA))
 	result.OpenAIAllowClaudeCodeCodexPlugin = settings[SettingKeyOpenAIAllowClaudeCodeCodexPlugin] == "true"
 
 	// Web search emulation: quick enabled check from the JSON config

@@ -25,6 +25,15 @@ type CustomEndpoint struct {
 	Description string `json:"description"`
 }
 
+// OpenAICodexUAProfile is the structured admin view of the global Codex UA setting.
+type OpenAICodexUAProfile struct {
+	Originator    string `json:"originator"`
+	CodexVersion  string `json:"codex_version"`
+	OSFingerprint string `json:"os_fingerprint"`
+	TerminalToken string `json:"terminal_token"`
+	UserAgent     string `json:"user_agent,omitempty"`
+}
+
 // SystemSettings represents the admin settings API response payload.
 type SystemSettings struct {
 	RegistrationEnabled              bool                     `json:"registration_enabled"`
@@ -178,14 +187,15 @@ type SystemSettings struct {
 	BackendModeEnabled bool `json:"backend_mode_enabled"`
 
 	// Gateway forwarding behavior
-	EnableFingerprintUnification       bool   `json:"enable_fingerprint_unification"`
-	EnableMetadataPassthrough          bool   `json:"enable_metadata_passthrough"`
-	EnableCCHSigning                   bool   `json:"enable_cch_signing"`
-	EnableAnthropicCacheTTL1hInjection bool   `json:"enable_anthropic_cache_ttl_1h_injection"`
-	RewriteMessageCacheControl         bool   `json:"rewrite_message_cache_control"`
-	AntigravityUserAgentVersion        string `json:"antigravity_user_agent_version"`
-	OpenAICodexUserAgent               string `json:"openai_codex_user_agent"`
-	OpenAIAllowClaudeCodeCodexPlugin   bool   `json:"openai_allow_claude_code_codex_plugin"`
+	EnableFingerprintUnification       bool                 `json:"enable_fingerprint_unification"`
+	EnableMetadataPassthrough          bool                 `json:"enable_metadata_passthrough"`
+	EnableCCHSigning                   bool                 `json:"enable_cch_signing"`
+	EnableAnthropicCacheTTL1hInjection bool                 `json:"enable_anthropic_cache_ttl_1h_injection"`
+	RewriteMessageCacheControl         bool                 `json:"rewrite_message_cache_control"`
+	AntigravityUserAgentVersion        string               `json:"antigravity_user_agent_version"`
+	OpenAICodexUserAgent               string               `json:"openai_codex_user_agent"`
+	OpenAICodexUAProfile               OpenAICodexUAProfile `json:"openai_codex_ua_profile"`
+	OpenAIAllowClaudeCodeCodexPlugin   bool                 `json:"openai_allow_claude_code_codex_plugin"`
 
 	// Web Search Emulation
 	WebSearchEmulationEnabled bool `json:"web_search_emulation_enabled"`

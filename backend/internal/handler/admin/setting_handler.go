@@ -54,6 +54,32 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
+func openAICodexUAProfileToDTO(profile service.OpenAICodexUAProfile) dto.OpenAICodexUAProfile {
+	normalized := service.NormalizeOpenAICodexUAProfile(profile)
+	return dto.OpenAICodexUAProfile{
+		Originator:    normalized.Originator,
+		CodexVersion:  normalized.CodexVersion,
+		OSFingerprint: normalized.OSFingerprint,
+		TerminalToken: normalized.TerminalToken,
+		UserAgent:     normalized.UserAgent(),
+	}
+}
+
+func openAICodexUAProfileFromDTO(profile dto.OpenAICodexUAProfile) service.OpenAICodexUAProfile {
+	return service.NormalizeOpenAICodexUAProfile(service.OpenAICodexUAProfile{
+		Originator:    profile.Originator,
+		CodexVersion:  profile.CodexVersion,
+		OSFingerprint: profile.OSFingerprint,
+		TerminalToken: profile.TerminalToken,
+	})
+}
+
+func openAICodexUAProfileComparable(profile service.OpenAICodexUAProfile) service.OpenAICodexUAProfile {
+	normalized := service.NormalizeOpenAICodexUAProfile(profile)
+	normalized.RawUserAgent = ""
+	return normalized
+}
+
 // SettingHandler 系统设置处理器
 type SettingHandler struct {
 	settingService           *service.SettingService
@@ -256,6 +282,7 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		RewriteMessageCacheControl:             settings.RewriteMessageCacheControl,
 		AntigravityUserAgentVersion:            settings.AntigravityUserAgentVersion,
 		OpenAICodexUserAgent:                   settings.OpenAICodexUserAgent,
+		OpenAICodexUAProfile:                   openAICodexUAProfileToDTO(settings.OpenAICodexUAProfile),
 		OpenAIAllowClaudeCodeCodexPlugin:       settings.OpenAIAllowClaudeCodeCodexPlugin,
 		WebSearchEmulationEnabled:              settings.WebSearchEmulationEnabled,
 		PaymentVisibleMethodAlipaySource:       settings.PaymentVisibleMethodAlipaySource,
@@ -580,14 +607,15 @@ type UpdateSettingsRequest struct {
 	BackendModeEnabled bool `json:"backend_mode_enabled"`
 
 	// Gateway forwarding behavior
-	EnableFingerprintUnification       *bool   `json:"enable_fingerprint_unification"`
-	EnableMetadataPassthrough          *bool   `json:"enable_metadata_passthrough"`
-	EnableCCHSigning                   *bool   `json:"enable_cch_signing"`
-	EnableAnthropicCacheTTL1hInjection *bool   `json:"enable_anthropic_cache_ttl_1h_injection"`
-	RewriteMessageCacheControl         *bool   `json:"rewrite_message_cache_control"`
-	AntigravityUserAgentVersion        *string `json:"antigravity_user_agent_version"`
-	OpenAICodexUserAgent               *string `json:"openai_codex_user_agent"`
-	OpenAIAllowClaudeCodeCodexPlugin   *bool   `json:"openai_allow_claude_code_codex_plugin"`
+	EnableFingerprintUnification       *bool                     `json:"enable_fingerprint_unification"`
+	EnableMetadataPassthrough          *bool                     `json:"enable_metadata_passthrough"`
+	EnableCCHSigning                   *bool                     `json:"enable_cch_signing"`
+	EnableAnthropicCacheTTL1hInjection *bool                     `json:"enable_anthropic_cache_ttl_1h_injection"`
+	RewriteMessageCacheControl         *bool                     `json:"rewrite_message_cache_control"`
+	AntigravityUserAgentVersion        *string                   `json:"antigravity_user_agent_version"`
+	OpenAICodexUserAgent               *string                   `json:"openai_codex_user_agent"`
+	OpenAICodexUAProfile               *dto.OpenAICodexUAProfile `json:"openai_codex_ua_profile"`
+	OpenAIAllowClaudeCodeCodexPlugin   *bool                     `json:"openai_allow_claude_code_codex_plugin"`
 
 	// Payment visible method routing
 	PaymentVisibleMethodAlipaySource  *string `json:"payment_visible_method_alipay_source"`
@@ -1444,7 +1472,37 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			return
 		}
 	}
-	if req.OpenAICodexUserAgent != nil {
+	if req.OpenAICodexUAProfile != nil {
+		// 结构化 profile 是后台配置层的便捷输入；持久化仍复用旧 raw UA setting 以保持兼容。
+		// 结构化字段变化时 profile 优先生效，避免旧 raw 快照阻断新 UI 保存。
+		profile := openAICodexUAProfileFromDTO(*req.OpenAICodexUAProfile)
+		ua := profile.UserAgent()
+		uaFromProfile := true
+		validateUA := true
+		profileUnchanged := openAICodexUAProfileComparable(profile) == openAICodexUAProfileComparable(previousSettings.OpenAICodexUAProfile)
+		if profileUnchanged {
+			if req.OpenAICodexUserAgent != nil {
+				// 兼容显式使用旧 raw key 的全量 PUT 客户端；仅在结构化字段未变时允许 raw 生效。
+				ua = strings.TrimSpace(*req.OpenAICodexUserAgent)
+				uaFromProfile = false
+				validateUA = ua != previousSettings.OpenAICodexUserAgent
+			} else if strings.TrimSpace(req.OpenAICodexUAProfile.UserAgent) != "" {
+				// 兼容把 GET 响应原样 PUT 回来的旧/通用客户端：结构化字段未变时不把 legacy raw UA 或空 setting 规范化。
+				ua = previousSettings.OpenAICodexUserAgent
+				uaFromProfile = false
+				validateUA = false
+			}
+		}
+		if len(ua) > 512 && validateUA {
+			if uaFromProfile {
+				response.Error(c, http.StatusBadRequest, "openai_codex_ua_profile generates a user agent longer than 512 characters")
+			} else {
+				response.Error(c, http.StatusBadRequest, "openai_codex_user_agent must be at most 512 characters")
+			}
+			return
+		}
+		req.OpenAICodexUserAgent = &ua
+	} else if req.OpenAICodexUserAgent != nil {
 		normalized := strings.TrimSpace(*req.OpenAICodexUserAgent)
 		req.OpenAICodexUserAgent = &normalized
 		// 仅做长度上限保护，不限制具体格式（运维需要可自由调整 codex 版本号）
@@ -1666,6 +1724,12 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 				return *req.OpenAICodexUserAgent
 			}
 			return previousSettings.OpenAICodexUserAgent
+		}(),
+		OpenAICodexUAProfile: func() service.OpenAICodexUAProfile {
+			if req.OpenAICodexUAProfile != nil {
+				return openAICodexUAProfileFromDTO(*req.OpenAICodexUAProfile)
+			}
+			return previousSettings.OpenAICodexUAProfile
 		}(),
 		OpenAIAllowClaudeCodeCodexPlugin: func() bool {
 			if req.OpenAIAllowClaudeCodeCodexPlugin != nil {
@@ -2049,6 +2113,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		RewriteMessageCacheControl:             updatedSettings.RewriteMessageCacheControl,
 		AntigravityUserAgentVersion:            updatedSettings.AntigravityUserAgentVersion,
 		OpenAICodexUserAgent:                   updatedSettings.OpenAICodexUserAgent,
+		OpenAICodexUAProfile:                   openAICodexUAProfileToDTO(updatedSettings.OpenAICodexUAProfile),
 		OpenAIAllowClaudeCodeCodexPlugin:       updatedSettings.OpenAIAllowClaudeCodeCodexPlugin,
 		PaymentVisibleMethodAlipaySource:       updatedSettings.PaymentVisibleMethodAlipaySource,
 		PaymentVisibleMethodWxpaySource:        updatedSettings.PaymentVisibleMethodWxpaySource,

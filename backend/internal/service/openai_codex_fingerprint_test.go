@@ -186,6 +186,18 @@ func TestOpenAICodexUAProfileUserAgentRepairsHeaderInvalidStructuredFields(t *te
 	}
 }
 
+func TestOpenAICodexUAProfileUserAgentRepairsGrammarInvalidStructuredFields(t *testing.T) {
+	profile := OpenAICodexUAProfile{
+		Originator:    "Claude Code",
+		CodexVersion:  "0.136.0 beta",
+		OSFingerprint: "Bad ) OS",
+		TerminalToken: "Term (bad)",
+	}
+	if got := profile.UserAgent(); got != DefaultOpenAICodexUserAgent {
+		t.Fatalf("UserAgent() = %q, want default %q", got, DefaultOpenAICodexUserAgent)
+	}
+}
+
 func TestNormalizeOpenAICodexFingerprintCreatesUUIDv4(t *testing.T) {
 	now := time.Date(2026, 6, 13, 1, 2, 3, 0, time.UTC)
 	fp, changed := NormalizeOpenAICodexFingerprint(nil, ParseOpenAICodexUAProfile(DefaultOpenAICodexUserAgent), now)
