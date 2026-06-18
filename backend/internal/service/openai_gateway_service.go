@@ -1937,6 +1937,20 @@ func (s *OpenAIGatewayService) resolveOpenAIAccountForPrivacyRequirement(ctx con
 		}
 		account = latest
 	}
+	return s.resolveFreshOpenAIAccountForPrivacyRequirement(ctx, account, group)
+}
+
+// resolveFreshOpenAIAccountForPrivacyRequirement applies privacy gating to an account the caller already refreshed from DB.
+func (s *OpenAIGatewayService) resolveFreshOpenAIAccountForPrivacyRequirement(ctx context.Context, account *Account, group *Group) (*Account, bool) {
+	if account == nil {
+		return nil, false
+	}
+	if group == nil || !group.RequirePrivacySet {
+		return account, true
+	}
+	if account.Platform == PlatformOpenAI && account.Type != AccountTypeOAuth {
+		return account, true
+	}
 	if s.blockOpenAIAccountForPrivacyRequirement(ctx, account, group) {
 		return nil, false
 	}
@@ -2294,6 +2308,11 @@ func (s *OpenAIGatewayService) tryStickySessionHit(ctx context.Context, groupID 
 	if err != nil {
 		return nil
 	}
+	account = s.refreshSelectedOpenAIAccountFromDB(ctx, account)
+	if account == nil || !s.openAIStickyAccountMatchesSchedulingGroup(account, groupID) {
+		_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
+		return nil
+	}
 
 	// 检查账号是否需要清理粘性会话
 	// Check if sticky session should be cleared
@@ -2309,21 +2328,16 @@ func (s *OpenAIGatewayService) tryStickySessionHit(ctx context.Context, groupID 
 	}
 	schedGroup := s.resolveOpenAISchedulingGroup(ctx, groupID)
 	var ok bool
-	account, ok = s.resolveOpenAIAccountForPrivacyRequirement(ctx, account, schedGroup)
+	account, ok = s.resolveFreshOpenAIAccountForPrivacyRequirement(ctx, account, schedGroup)
 	if !ok {
 		_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
 		return nil
 	}
-	if s.isOpenAIAccountRuntimeBlocked(account) {
+	if account = s.recheckOpenAIAccountEligibility(ctx, account, requestedModel, requireCompact, requiredCapability); account == nil {
 		_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
 		return nil
 	}
-	account = s.recheckSelectedOpenAIAccountFromDB(ctx, account, requestedModel, requireCompact, requiredCapability)
-	if account == nil {
-		_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
-		return nil
-	}
-	account, ok = s.resolveOpenAIAccountForPrivacyRequirement(ctx, account, schedGroup)
+	account, ok = s.resolveFreshOpenAIAccountForPrivacyRequirement(ctx, account, schedGroup)
 	if !ok {
 		_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
 		return nil
@@ -2519,39 +2533,46 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		if accountID > 0 && !isExcluded(accountID) {
 			account, err := s.getSchedulableAccount(ctx, accountID)
 			if err == nil {
-				clearSticky := shouldClearStickySession(account, requestedModel)
-				if clearSticky {
+				account = s.refreshSelectedOpenAIAccountFromDB(ctx, account)
+				if account == nil || !s.openAIStickyAccountMatchesSchedulingGroup(account, groupID) {
 					_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
-				}
-				if !clearSticky && isOpenAIAccountEligibleForRequest(ctx, account, requestedModel, false, requiredCapability) {
-					account = s.recheckSelectedOpenAIAccountFromDB(ctx, account, requestedModel, requireCompact, requiredCapability)
-					if account == nil {
+				} else {
+					clearSticky := shouldClearStickySession(account, requestedModel)
+					if clearSticky {
 						_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
-					} else if resolved, ok := s.resolveOpenAIAccountForPrivacyRequirement(ctx, account, schedGroup); !ok {
-						_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
-					} else if account = resolved; s.isOpenAIAccountRuntimeBlocked(account) {
-						_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
-					} else if needsUpstreamCheck && s.isUpstreamModelRestrictedByChannel(ctx, *groupID, account, requestedModel, requireCompact) {
-						_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
-					} else {
-						result, err := s.tryAcquireAccountSlot(ctx, accountID, account.Concurrency)
-						if err == nil && result != nil && result.Acquired {
-							selection, selectErr := s.newAcquiredSelectionResult(ctx, account, result.ReleaseFunc)
-							if selectErr != nil {
-								return nil, selectErr
+					}
+					if !clearSticky && isOpenAIAccountEligibleForRequest(ctx, account, requestedModel, false, requiredCapability) {
+						account = s.recheckOpenAIAccountEligibility(ctx, account, requestedModel, requireCompact, requiredCapability)
+						if account == nil {
+							_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
+						} else if resolved, ok := s.resolveFreshOpenAIAccountForPrivacyRequirement(ctx, account, schedGroup); !ok {
+							_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
+						} else if account = resolved; !s.openAIStickyAccountMatchesSchedulingGroup(account, groupID) {
+							_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
+						} else if s.isOpenAIAccountRuntimeBlocked(account) {
+							_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
+						} else if needsUpstreamCheck && s.isUpstreamModelRestrictedByChannel(ctx, *groupID, account, requestedModel, requireCompact) {
+							_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
+						} else {
+							result, err := s.tryAcquireAccountSlot(ctx, accountID, account.Concurrency)
+							if err == nil && result != nil && result.Acquired {
+								selection, selectErr := s.newAcquiredSelectionResult(ctx, account, result.ReleaseFunc)
+								if selectErr != nil {
+									return nil, selectErr
+								}
+								_ = s.refreshStickySessionTTL(ctx, groupID, sessionHash, openaiStickySessionTTL)
+								return selection, nil
 							}
-							_ = s.refreshStickySessionTTL(ctx, groupID, sessionHash, openaiStickySessionTTL)
-							return selection, nil
-						}
 
-						waitingCount, _ := s.concurrencyService.GetAccountWaitingCount(ctx, accountID)
-						if waitingCount < cfg.StickySessionMaxWaiting {
-							return s.newSelectionResult(ctx, account, false, nil, &AccountWaitPlan{
-								AccountID:      accountID,
-								MaxConcurrency: account.Concurrency,
-								Timeout:        cfg.StickySessionWaitTimeout,
-								MaxWaiting:     cfg.StickySessionMaxWaiting,
-							})
+							waitingCount, _ := s.concurrencyService.GetAccountWaitingCount(ctx, accountID)
+							if waitingCount < cfg.StickySessionMaxWaiting {
+								return s.newSelectionResult(ctx, account, false, nil, &AccountWaitPlan{
+									AccountID:      accountID,
+									MaxConcurrency: account.Concurrency,
+									Timeout:        cfg.StickySessionWaitTimeout,
+									MaxWaiting:     cfg.StickySessionMaxWaiting,
+								})
+							}
 						}
 					}
 				}
@@ -2829,28 +2850,45 @@ func (s *OpenAIGatewayService) resolveFreshSchedulableOpenAIAccount(ctx context.
 	return fresh
 }
 
-func (s *OpenAIGatewayService) recheckSelectedOpenAIAccountFromDB(ctx context.Context, account *Account, requestedModel string, requireCompact bool, requiredCapability OpenAIEndpointCapability) *Account {
+func (s *OpenAIGatewayService) refreshSelectedOpenAIAccountFromDB(ctx context.Context, account *Account) *Account {
 	if account == nil {
 		return nil
 	}
 	if s.schedulerSnapshot == nil || s.accountRepo == nil {
-		if !isOpenAIAccountEligibleForRequest(ctx, account, requestedModel, requireCompact, requiredCapability) {
-			return nil
-		}
 		return account
 	}
-
 	latest, err := s.accountRepo.GetByID(ctx, account.ID)
 	if err != nil || latest == nil {
 		return nil
 	}
-	if !isOpenAIAccountEligibleForRequest(ctx, latest, requestedModel, requireCompact, requiredCapability) {
-		return nil
-	}
-	if s.isOpenAIAccountRuntimeBlocked(latest) {
-		return nil
-	}
 	return latest
+}
+
+func (s *OpenAIGatewayService) recheckOpenAIAccountEligibility(ctx context.Context, account *Account, requestedModel string, requireCompact bool, requiredCapability OpenAIEndpointCapability) *Account {
+	if account == nil {
+		return nil
+	}
+	if !isOpenAIAccountEligibleForRequest(ctx, account, requestedModel, requireCompact, requiredCapability) {
+		return nil
+	}
+	if s.isOpenAIAccountRuntimeBlocked(account) {
+		return nil
+	}
+	return account
+}
+
+func (s *OpenAIGatewayService) recheckSelectedOpenAIAccountFromDB(ctx context.Context, account *Account, requestedModel string, requireCompact bool, requiredCapability OpenAIEndpointCapability) *Account {
+	return s.recheckOpenAIAccountEligibility(ctx, s.refreshSelectedOpenAIAccountFromDB(ctx, account), requestedModel, requireCompact, requiredCapability)
+}
+
+func (s *OpenAIGatewayService) openAIStickyAccountMatchesSchedulingGroup(account *Account, groupID *int64) bool {
+	if account == nil {
+		return false
+	}
+	if s != nil && s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
+		return true
+	}
+	return openAIStickyAccountMatchesGroup(account, groupID)
 }
 
 func (s *OpenAIGatewayService) getSchedulableAccount(ctx context.Context, accountID int64) (*Account, error) {

@@ -138,6 +138,30 @@ func (r stubOpenAIAccountRepo) ListSchedulableUngroupedByPlatform(ctx context.Co
 	return r.ListSchedulableByPlatform(ctx, platform)
 }
 
+type groupAwareStubOpenAIAccountRepo struct {
+	stubOpenAIAccountRepo
+}
+
+func (r groupAwareStubOpenAIAccountRepo) ListSchedulableByGroupIDAndPlatform(ctx context.Context, groupID int64, platform string) ([]Account, error) {
+	var result []Account
+	for _, acc := range r.accounts {
+		if acc.Platform == platform && openAIStickyAccountMatchesGroup(&acc, &groupID) {
+			result = append(result, acc)
+		}
+	}
+	return result, nil
+}
+
+func (r groupAwareStubOpenAIAccountRepo) ListSchedulableUngroupedByPlatform(ctx context.Context, platform string) ([]Account, error) {
+	var result []Account
+	for _, acc := range r.accounts {
+		if acc.Platform == platform && openAIStickyAccountMatchesGroup(&acc, nil) {
+			result = append(result, acc)
+		}
+	}
+	return result, nil
+}
+
 type stubConcurrencyCache struct {
 	ConcurrencyCache
 	loadBatchErr    error
@@ -618,6 +642,142 @@ func TestOpenAISelectAccountWithLoadAwareness_StickyUnschedulableClearsSession(t
 		accounts: []Account{
 			{ID: 1, Platform: PlatformOpenAI, Status: StatusDisabled, Schedulable: true, Concurrency: 1},
 			{ID: 2, Platform: PlatformOpenAI, Status: StatusActive, Schedulable: true, Concurrency: 1},
+		},
+	}
+	cache := &stubGatewayCache{
+		sessionBindings: map[string]int64{"openai:" + sessionHash: 1},
+	}
+
+	svc := &OpenAIGatewayService{
+		accountRepo:        repo,
+		cache:              cache,
+		concurrencyService: NewConcurrencyService(stubConcurrencyCache{}),
+	}
+
+	selection, err := svc.SelectAccountWithLoadAwareness(context.Background(), &groupID, sessionHash, "gpt-4", nil)
+	if err != nil {
+		t.Fatalf("SelectAccountWithLoadAwareness error: %v", err)
+	}
+	if selection == nil || selection.Account == nil || selection.Account.ID != 2 {
+		t.Fatalf("expected account 2, got %+v", selection)
+	}
+	if cache.deletedSessions["openai:"+sessionHash] != 1 {
+		t.Fatalf("expected sticky session to be deleted")
+	}
+	if cache.sessionBindings["openai:"+sessionHash] != 2 {
+		t.Fatalf("expected sticky session to bind to account 2")
+	}
+	if selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
+	}
+}
+
+func TestOpenAISelectAccountForModelWithExclusions_StickyOutsideGroupClearsSession(t *testing.T) {
+	sessionHash := "outside-group"
+	groupID := int64(12)
+	repo := groupAwareStubOpenAIAccountRepo{
+		stubOpenAIAccountRepo: stubOpenAIAccountRepo{
+			accounts: []Account{
+				{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0},
+				{ID: 2, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 5, GroupIDs: []int64{groupID}},
+			},
+		},
+	}
+	cache := &stubGatewayCache{
+		sessionBindings: map[string]int64{"openai:" + sessionHash: 1},
+	}
+
+	svc := &OpenAIGatewayService{
+		accountRepo: repo,
+		cache:       cache,
+	}
+
+	acc, err := svc.SelectAccountForModelWithExclusions(context.Background(), &groupID, sessionHash, "gpt-4", nil)
+	if err != nil {
+		t.Fatalf("SelectAccountForModelWithExclusions error: %v", err)
+	}
+	if acc == nil || acc.ID != 2 {
+		t.Fatalf("expected account 2, got %+v", acc)
+	}
+	if cache.deletedSessions["openai:"+sessionHash] != 1 {
+		t.Fatalf("expected sticky session to be deleted")
+	}
+	if cache.sessionBindings["openai:"+sessionHash] != 2 {
+		t.Fatalf("expected sticky session to bind to account 2")
+	}
+}
+
+func TestOpenAISelectAccountForModelWithExclusions_StickyOutsideGroupClearsBeforeEligibility(t *testing.T) {
+	sessionHash := "outside-group-unsupported"
+	groupID := int64(14)
+	repo := groupAwareStubOpenAIAccountRepo{
+		stubOpenAIAccountRepo: stubOpenAIAccountRepo{
+			accounts: []Account{
+				{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0, Credentials: map[string]any{"model_mapping": map[string]any{"gpt-3.5-turbo": "gpt-3.5-turbo"}}},
+				{ID: 2, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 5, GroupIDs: []int64{groupID}},
+			},
+		},
+	}
+	cache := &stubGatewayCache{
+		sessionBindings: map[string]int64{"openai:" + sessionHash: 1},
+	}
+
+	svc := &OpenAIGatewayService{
+		accountRepo: repo,
+		cache:       cache,
+	}
+
+	acc, err := svc.SelectAccountForModelWithExclusions(context.Background(), &groupID, sessionHash, "gpt-4", nil)
+	if err != nil {
+		t.Fatalf("SelectAccountForModelWithExclusions error: %v", err)
+	}
+	if acc == nil || acc.ID != 2 {
+		t.Fatalf("expected account 2, got %+v", acc)
+	}
+	if cache.deletedSessions["openai:"+sessionHash] != 1 {
+		t.Fatalf("expected sticky session to be deleted before eligibility checks")
+	}
+}
+
+func TestOpenAISelectAccountForModelWithExclusions_SimpleModeAllowsGroupedStickyWithoutGroup(t *testing.T) {
+	sessionHash := "simple-grouped"
+	repo := stubOpenAIAccountRepo{
+		accounts: []Account{
+			{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0, GroupIDs: []int64{99}},
+		},
+	}
+	cache := &stubGatewayCache{
+		sessionBindings: map[string]int64{"openai:" + sessionHash: 1},
+	}
+	cfg := &config.Config{RunMode: config.RunModeSimple}
+
+	svc := &OpenAIGatewayService{
+		accountRepo: repo,
+		cache:       cache,
+		cfg:         cfg,
+	}
+
+	acc, err := svc.SelectAccountForModelWithExclusions(context.Background(), nil, sessionHash, "gpt-4", nil)
+	if err != nil {
+		t.Fatalf("SelectAccountForModelWithExclusions error: %v", err)
+	}
+	if acc == nil || acc.ID != 1 {
+		t.Fatalf("expected sticky account 1, got %+v", acc)
+	}
+	if cache.deletedSessions["openai:"+sessionHash] != 0 {
+		t.Fatalf("simple mode should not delete grouped sticky binding")
+	}
+}
+
+func TestOpenAISelectAccountWithLoadAwareness_StickyOutsideGroupClearsSession(t *testing.T) {
+	sessionHash := "outside-group-load"
+	groupID := int64(13)
+	repo := groupAwareStubOpenAIAccountRepo{
+		stubOpenAIAccountRepo: stubOpenAIAccountRepo{
+			accounts: []Account{
+				{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0},
+				{ID: 2, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 5, AccountGroups: []AccountGroup{{AccountID: 2, GroupID: groupID}}},
+			},
 		},
 	}
 	cache := &stubGatewayCache{
