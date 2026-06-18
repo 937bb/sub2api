@@ -11,7 +11,7 @@
         </div>
         <div>
           <p class="text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('dashboard.balance') }}</p>
-          <p class="text-xl font-bold text-emerald-600 dark:text-emerald-400">${{ formatBalance(balance) }}</p>
+          <p class="text-xl font-bold text-emerald-600 dark:text-emerald-400">{{ balanceLabel }}</p>
           <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('common.available') }}</p>
         </div>
       </div>
@@ -241,7 +241,7 @@ interface FusedPlatformCard {
 
 const props = defineProps<{
   stats: UserStatsType
-  balance: number
+  balance?: number
   isSimple: boolean
   platformQuotas?: PlatformQuotaItem[] | null
 }>()
@@ -361,6 +361,13 @@ function formatUsd(n: number): string {
   return usdFormatter.format(n)
 }
 
+const balanceLabel = computed(() => {
+  if (typeof props.balance !== 'number' || Number.isNaN(props.balance)) {
+    return '...'
+  }
+  return `$${formatBalance(props.balance)}`
+})
+
 function formatResetTime(iso: string | null | undefined): string {
   if (!iso) return ''
   const d = new Date(iso)
@@ -374,11 +381,11 @@ function formatResetTime(iso: string | null | undefined): string {
   })
 }
 
-const formatBalance = (b: number) =>
+const formatBalance = (b?: number) =>
   new Intl.NumberFormat('en-US', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2
-  }).format(b)
+  }).format(b ?? 0)
 
 const formatNumber = (n: number) => n.toLocaleString()
 const formatCost = (c: number) => c.toFixed(4)

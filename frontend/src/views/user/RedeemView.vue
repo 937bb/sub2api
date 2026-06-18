@@ -11,7 +11,7 @@
           </div>
           <p class="text-sm font-medium text-primary-100">{{ t('redeem.currentBalance') }}</p>
           <p class="mt-2 text-4xl font-bold text-white">
-            ${{ user?.balance?.toFixed(2) || '0.00' }}
+            {{ currentBalanceLabel }}
           </p>
           <p class="mt-2 text-sm text-primary-100">
             {{ t('redeem.concurrency') }}: {{ user?.concurrency || 0 }} {{ t('redeem.requests') }}
@@ -358,6 +358,12 @@ const appStore = useAppStore()
 const subscriptionStore = useSubscriptionStore()
 
 const user = computed(() => authStore.user)
+const currentBalanceLabel = computed(() => {
+  if (typeof user.value?.balance !== 'number' || Number.isNaN(user.value.balance)) {
+    return '...'
+  }
+  return `$${user.value.balance.toFixed(2)}`
+})
 
 const redeemCode = ref('')
 const submitting = ref(false)
@@ -446,8 +452,12 @@ const handleRedeem = async () => {
 
     redeemResult.value = result
 
-    // Refresh user data to get updated balance/concurrency
-    await authStore.refreshUser()
+    // Force a live balance/concurrency refresh after balance-affecting redemption.
+    try {
+      await authStore.refreshUser({ force: true })
+    } catch (error) {
+      console.error('Failed to refresh user after redeem:', error)
+    }
 
     // If subscription type, immediately refresh subscription status
     if (result.type === 'subscription') {
