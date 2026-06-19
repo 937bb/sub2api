@@ -432,3 +432,22 @@
 - `.dockerignore`: unignored `docs/legal/*.md` so the frontend production build can resolve raw legal Markdown imports; rollback by restoring the previous `docs/` ignore-only rule.
 - `deploy/docker-compose.local.yml`: switched the local full-stack deployment image to `sub-claudeproxy:latest`; rollback by restoring `weishaw/sub2api:latest` if using the official upstream image intentionally.
 - `progress.md`: appended this deployment fix record; rollback by deleting this `2026-06-19 - Task: Fix Docker source deployment for Claude proxy fork` block.
+
+## 2026-06-19 - Task: Include legal docs in Docker image build
+### What was done
+- Fixed the frontend production Docker build path so the legal Markdown files imported by `LegalDocumentView` are copied into the build container at `/app/docs/legal`.
+- Adjusted the Docker ignore rule to ignore ordinary docs while still allowing `docs/legal/*.md` to remain available to Docker build contexts.
+- Applied the same legal-doc copy step to both the root Dockerfile and the deploy Dockerfile to keep source-build deployment paths consistent.
+
+### Testing
+- Ran `rg -n "COPY docs/legal|docs/\\*|!docs/legal" Dockerfile deploy/Dockerfile .dockerignore`; confirmed both Dockerfiles copy `docs/legal/` and `.dockerignore` allows the legal Markdown files.
+- Ran `Test-Path docs\\legal\\admin-compliance.zh.md; Test-Path docs\\legal\\admin-compliance.en.md`; confirmed both imported legal files exist locally.
+- Ran `git ls-files docs/legal/admin-compliance.zh.md docs/legal/admin-compliance.en.md`; confirmed both imported legal files are tracked by Git.
+- Ran `git diff --check`; passed with the existing `.dockerignore` LF/CRLF working-copy warning.
+- Could not run a local `docker build` because Docker is not installed in this Windows environment.
+
+### Notes
+- `.dockerignore`: changed the docs exclusion to `docs/*` and kept explicit `docs/legal` exceptions so Docker can still send the required Markdown files in the build context; rollback by restoring the previous `docs/` rule if the frontend import is removed.
+- `Dockerfile`: copies `docs/legal/` into `/app/docs/legal/` before the frontend build; rollback by removing that `COPY docs/legal/ /app/docs/legal/` line.
+- `deploy/Dockerfile`: applies the same copy step for the alternate deploy Dockerfile; rollback by removing that `COPY docs/legal/ /app/docs/legal/` line.
+- `progress.md`: appended this deployment build fix record; rollback by deleting this `2026-06-19 - Task: Include legal docs in Docker image build` block.
