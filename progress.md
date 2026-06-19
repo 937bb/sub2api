@@ -417,3 +417,18 @@
 - `backend/internal/service/gateway_prompt_test.go`, `backend/internal/service/gateway_anthropic_apikey_passthrough_test.go`, `backend/internal/service/gateway_billing_block_test.go`, `backend/internal/service/gateway_billing_header_test.go`, `backend/internal/service/gateway_context_management_test.go`: updated regression coverage for preserved inbound fingerprints, SDK-CLI billing, no default CCH, and current-date reminder placement; rollback by restoring prior expected system/message/billing assertions.
 - `docs/CLAUDE_CLI_ALIGNMENT_AUDIT.md`, `docs/SUB_CLAUDE_USAGE.md`: updated operational documentation for the latest CLI capture and current implementation behavior; rollback by restoring the previous capture/status paragraphs.
 - `progress.md`: appended this task record; rollback by deleting this `2026-06-18 - Task: Align generated Claude mimic fingerprint with local CLI capture` block.
+
+## 2026-06-19 - Task: Fix Docker source deployment for Claude proxy fork
+### What was done
+- Allowed the frontend legal Markdown documents required by `LegalDocumentView` to enter the Docker build context.
+- Changed the local Docker Compose deployment to use the locally built `sub-claudeproxy:latest` image instead of the official upstream image.
+
+### Testing
+- Ran `git check-ignore -v docs/legal/admin-compliance.zh.md`; confirmed the file is not ignored and will be available during Docker build.
+- Ran `rg -n "image: sub-claudeproxy|image: weishaw/sub2api" deploy/docker-compose.local.yml deploy/docker-compose.yml deploy/docker-compose.standalone.yml`; confirmed `docker-compose.local.yml` now uses `sub-claudeproxy:latest`.
+- Ran `git diff --check`; passed with the existing `.dockerignore` LF/CRLF working-copy warning.
+
+### Notes
+- `.dockerignore`: unignored `docs/legal/*.md` so the frontend production build can resolve raw legal Markdown imports; rollback by restoring the previous `docs/` ignore-only rule.
+- `deploy/docker-compose.local.yml`: switched the local full-stack deployment image to `sub-claudeproxy:latest`; rollback by restoring `weishaw/sub2api:latest` if using the official upstream image intentionally.
+- `progress.md`: appended this deployment fix record; rollback by deleting this `2026-06-19 - Task: Fix Docker source deployment for Claude proxy fork` block.
