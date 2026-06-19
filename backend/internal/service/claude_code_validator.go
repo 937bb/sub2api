@@ -10,6 +10,13 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 )
 
+const claudeCodeSDKCLIEntrypointMarker = "cc_entrypoint=sdk-cli"
+
+var claudeCodeBillingEntrypointMarkers = []string{
+	claudeCodeCLIEntrypointMarker,
+	claudeCodeSDKCLIEntrypointMarker,
+}
+
 // ClaudeCodeValidator 验证请求是否来自 Claude Code 客户端
 // 完全学习自 claude-relay-service 项目的验证逻辑
 type ClaudeCodeValidator struct{}
@@ -121,6 +128,10 @@ func (v *ClaudeCodeValidator) Validate(r *http.Request, body map[string]any) boo
 		return false
 	}
 
+	if v.hasClaudeCodeBillingBlock(body) {
+		return true
+	}
+
 	// 4.3 验证 metadata.user_id
 	if body == nil {
 		return false
@@ -145,6 +156,40 @@ func (v *ClaudeCodeValidator) Validate(r *http.Request, body map[string]any) boo
 
 func isMessagesCountTokensPath(path string) bool {
 	return strings.HasSuffix(path, "/messages/count_tokens")
+}
+
+func (v *ClaudeCodeValidator) hasClaudeCodeBillingBlock(body map[string]any) bool {
+	if body == nil {
+		return false
+	}
+
+	if _, ok := body["model"].(string); !ok {
+		return false
+	}
+
+	systemEntries, ok := body["system"].([]any)
+	if !ok {
+		return false
+	}
+
+	for _, entry := range systemEntries {
+		entryMap, ok := entry.(map[string]any)
+		if !ok {
+			continue
+		}
+
+		text, ok := entryMap["text"].(string)
+		if !ok || text == "" {
+			continue
+		}
+
+		if strings.HasPrefix(text, claudeCodeBillingHeaderPrefix) &&
+			hasClaudeCodeBillingEntrypoint(text) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // hasClaudeCodeSystemPrompt 检查请求是否包含 Claude Code 系统提示词
@@ -180,7 +225,7 @@ func (v *ClaudeCodeValidator) hasClaudeCodeSystemPrompt(body map[string]any) boo
 		// 计费归因块识别（WHY 见 claudeCodeBillingHeaderPrefix 注释）。先于 Dice 检查，
 		// 大小写敏感：该块由 gateway_billing_block.go 固定小写生成。
 		if strings.HasPrefix(text, claudeCodeBillingHeaderPrefix) &&
-			strings.Contains(text, claudeCodeCLIEntrypointMarker) {
+			hasClaudeCodeBillingEntrypoint(text) {
 			return true
 		}
 
@@ -195,6 +240,15 @@ func (v *ClaudeCodeValidator) hasClaudeCodeSystemPrompt(body map[string]any) boo
 }
 
 // bestSimilarityScore 计算文本与所有 Claude Code 模板的最佳相似度
+func hasClaudeCodeBillingEntrypoint(text string) bool {
+	for _, marker := range claudeCodeBillingEntrypointMarkers {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
+}
+
 func (v *ClaudeCodeValidator) bestSimilarityScore(text string) float64 {
 	normalizedText := normalizePrompt(text)
 	bestScore := 0.0

@@ -563,6 +563,8 @@ Simple Mode is designed for individual developers or internal teams who want qui
 
 Sub2API supports [Antigravity](https://antigravity.so/) accounts. After authorization, dedicated endpoints are available for Claude and Gemini models.
 
+For a complete Claude Code setup guide, including normal Anthropic groups, Antigravity-only routing, OpenAI `/v1/messages` dispatch, and common troubleshooting, see [Sub Claude Usage](docs/SUB_CLAUDE_USAGE.md).
+
 ### Dedicated Endpoints
 
 | Endpoint | Model |
@@ -571,6 +573,15 @@ Sub2API supports [Antigravity](https://antigravity.so/) accounts. After authoriz
 | `/antigravity/v1beta/` | Gemini models |
 
 ### Claude Code Configuration
+
+Normal Anthropic-compatible routing:
+
+```bash
+export ANTHROPIC_BASE_URL="http://localhost:8080"
+export ANTHROPIC_AUTH_TOKEN="sk-xxx"
+```
+
+Antigravity-only routing:
 
 ```bash
 export ANTHROPIC_BASE_URL="http://localhost:8080/antigravity"

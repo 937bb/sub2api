@@ -140,6 +140,13 @@ func validClaudeCodeBodyJSON() []byte {
 	}`)
 }
 
+func validClaudeCodeBillingBodyJSON() []byte {
+	return []byte(`{
+		"model":"claude-3-5-sonnet-20241022",
+		"system":[{"text":"x-anthropic-billing-header: cc_version=2.1.162.884; cc_entrypoint=cli; cch=d8726;"}]
+	}`)
+}
+
 func TestSetClaudeCodeClientContext_FastPathAndStrictPath(t *testing.T) {
 	t.Run("non_cli_user_agent_sets_false", func(t *testing.T) {
 		c, _ := newHelperTestContext(http.MethodPost, "/v1/messages")
@@ -168,6 +175,17 @@ func TestSetClaudeCodeClientContext_FastPathAndStrictPath(t *testing.T) {
 		require.True(t, service.IsClaudeCodeClient(c.Request.Context()))
 	})
 
+	t.Run("cli_messages_path_billing_body_without_metadata_sets_true", func(t *testing.T) {
+		c, _ := newHelperTestContext(http.MethodPost, "/v1/messages")
+		c.Request.Header.Set("User-Agent", "claude-cli/2.1.162")
+		c.Request.Header.Set("X-App", "cli")
+		c.Request.Header.Set("anthropic-beta", "claude-code-20250219")
+		c.Request.Header.Set("anthropic-version", "2023-06-01")
+
+		SetClaudeCodeClientContext(c, validClaudeCodeBillingBodyJSON(), nil)
+		require.True(t, service.IsClaudeCodeClient(c.Request.Context()))
+	})
+
 	t.Run("cli_messages_path_invalid_body_sets_false", func(t *testing.T) {
 		c, _ := newHelperTestContext(http.MethodPost, "/v1/messages")
 		c.Request.Header.Set("User-Agent", "claude-cli/1.0.1")
@@ -189,6 +207,20 @@ func TestSetClaudeCodeClientContext_ReuseParsedRequest(t *testing.T) {
 		require.NoError(t, err)
 
 		// body 非法 JSON，如果函数复用 parsedReq 成功则仍应判定为 Claude Code。
+		SetClaudeCodeClientContext(c, []byte(`{invalid`), parsedReq)
+		require.True(t, service.IsClaudeCodeClient(c.Request.Context()))
+	})
+
+	t.Run("reuse parsed billing request without metadata", func(t *testing.T) {
+		c, _ := newHelperTestContext(http.MethodPost, "/v1/messages")
+		c.Request.Header.Set("User-Agent", "claude-cli/2.1.162")
+		c.Request.Header.Set("X-App", "cli")
+		c.Request.Header.Set("anthropic-beta", "claude-code-20250219")
+		c.Request.Header.Set("anthropic-version", "2023-06-01")
+
+		parsedReq, err := service.ParseGatewayRequest(service.NewRequestBodyRef(validClaudeCodeBillingBodyJSON()), "")
+		require.NoError(t, err)
+
 		SetClaudeCodeClientContext(c, []byte(`{invalid`), parsedReq)
 		require.True(t, service.IsClaudeCodeClient(c.Request.Context()))
 	})

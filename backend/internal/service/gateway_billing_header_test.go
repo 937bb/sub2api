@@ -54,6 +54,18 @@ func TestSyncBillingHeaderVersion(t *testing.T) {
 			userAgent: "claude-cli/2.1.22",
 			unchanged: true,
 		},
+		{
+			name:      "syncs sdk cli entrypoint from user-agent",
+			body:      `{"system":[{"type":"text","text":"x-anthropic-billing-header: cc_version=2.1.81.df2; cc_entrypoint=cli; cch=00000;"}],"messages":[]}`,
+			userAgent: "claude-cli/2.1.112 (external, sdk-cli)",
+			wantSub:   "cc_entrypoint=sdk-cli",
+		},
+		{
+			name:      "syncs billing header without cch field",
+			body:      `{"system":[{"type":"text","text":"x-anthropic-billing-header: cc_version=2.1.81.df2; cc_entrypoint=cli;"}],"messages":[]}`,
+			userAgent: "claude-cli/2.1.181 (external, sdk-cli)",
+			wantSub:   "cc_version=2.1.181.df2; cc_entrypoint=sdk-cli;",
+		},
 	}
 
 	for _, tt := range tests {

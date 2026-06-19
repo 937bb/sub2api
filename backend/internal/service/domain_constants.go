@@ -425,6 +425,12 @@ const (
 	SettingKeyEnableAnthropicCacheTTL1hInjection = "enable_anthropic_cache_ttl_1h_injection"
 	// SettingKeyRewriteMessageCacheControl 是否改写 messages[*].content[*].cache_control（默认 false）
 	SettingKeyRewriteMessageCacheControl = "rewrite_message_cache_control"
+	// SettingKeyEnableClaudeOAuthSystemPromptInjection 是否对非 Claude Code 客户端的 Claude OAuth 请求注入 Claude Code system blocks（默认 true）
+	SettingKeyEnableClaudeOAuthSystemPromptInjection = "enable_claude_oauth_system_prompt_injection"
+	// SettingKeyClaudeOAuthSystemPrompt 自定义 Claude OAuth system prompt；空值使用内置 Claude Code prompt。
+	SettingKeyClaudeOAuthSystemPrompt = "claude_oauth_system_prompt"
+	// SettingKeyClaudeOAuthSystemPromptBlocks 自定义 Claude OAuth system blocks JSON；空值使用内置 3-block 模板。
+	SettingKeyClaudeOAuthSystemPromptBlocks = "claude_oauth_system_prompt_blocks"
 	// SettingKeyAntigravityUserAgentVersion Antigravity 上游 User-Agent 版本号（空值使用环境变量/默认值）
 	SettingKeyAntigravityUserAgentVersion = "antigravity_user_agent_version"
 	// SettingKeyOpenAICodexUserAgent OpenAI Codex 完整 User-Agent（空值使用内置默认）

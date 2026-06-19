@@ -17,6 +17,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
@@ -182,7 +183,9 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_ForwardStreamPreservesBodyAnd
 	require.Empty(t, getHeaderRaw(upstream.lastReq.Header, "cookie"))
 	require.Equal(t, "2023-06-01", getHeaderRaw(upstream.lastReq.Header, "anthropic-version"))
 	require.Equal(t, "interleaved-thinking-2025-05-14", getHeaderRaw(upstream.lastReq.Header, "anthropic-beta"))
-	require.Empty(t, getHeaderRaw(upstream.lastReq.Header, "x-stainless-lang"), "API Key 透传不应注入 OAuth 指纹头")
+	require.Equal(t, claude.DefaultHeaders["User-Agent"], getHeaderRaw(upstream.lastReq.Header, "user-agent"))
+	require.Equal(t, claude.DefaultHeaders["X-Stainless-Lang"], getHeaderRaw(upstream.lastReq.Header, "x-stainless-lang"))
+	require.Equal(t, claude.DefaultHeaders["X-App"], getHeaderRaw(upstream.lastReq.Header, "x-app"))
 
 	require.Contains(t, rec.Body.String(), `"cached_tokens":7`)
 	require.NotContains(t, rec.Body.String(), `"cache_read_input_tokens":7`, "透传输出不应被网关改写")
@@ -259,6 +262,118 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_ForwardCountTokensPreservesBo
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.JSONEq(t, upstreamRespBody, rec.Body.String())
 	require.Empty(t, rec.Header().Get("Set-Cookie"))
+}
+
+func TestGatewayAllowedHeadersExcludesClientFingerprintHeaders(t *testing.T) {
+	for _, key := range []string{
+		"user-agent",
+		"x-app",
+		"x-stainless-retry-count",
+		"x-stainless-timeout",
+		"x-stainless-lang",
+		"x-stainless-package-version",
+		"x-stainless-os",
+		"x-stainless-arch",
+		"x-stainless-runtime",
+		"x-stainless-runtime-version",
+		"x-stainless-helper-method",
+		"x-claude-code-session-id",
+		"x-client-request-id",
+		"accept-language",
+		"sec-fetch-mode",
+	} {
+		require.False(t, allowedHeaders[key], key)
+	}
+	require.True(t, allowedHeaders["anthropic-beta"])
+}
+
+func TestGatewayService_AnthropicAPIKeyPassthrough_BuildRequestAppliesGatewayFingerprint(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	c.Request.Header.Set("User-Agent", "claude-cli/9.9.9 (external, cli)")
+	c.Request.Header.Set("X-App", "other-client")
+	c.Request.Header.Set("X-Stainless-Lang", "python")
+	c.Request.Header.Set("X-Stainless-Timeout", "1")
+	c.Request.Header.Set("Accept-Language", "zh-CN,zh;q=0.9")
+	c.Request.Header.Set("Sec-Fetch-Mode", "cors")
+
+	svc := &GatewayService{cfg: &config.Config{}}
+	req, _, err := svc.buildUpstreamRequestAnthropicAPIKeyPassthrough(
+		context.Background(), c, newAnthropicAPIKeyAccountForTest(), []byte(`{"model":"claude-3-5-sonnet-latest"}`), "token",
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, claude.DefaultHeaders["User-Agent"], getHeaderRaw(req.Header, "user-agent"))
+	require.Equal(t, claude.DefaultHeaders["X-App"], getHeaderRaw(req.Header, "x-app"))
+	require.Equal(t, claude.DefaultHeaders["X-Stainless-Lang"], getHeaderRaw(req.Header, "x-stainless-lang"))
+	require.Equal(t, claude.DefaultHeaders["X-Stainless-Timeout"], getHeaderRaw(req.Header, "x-stainless-timeout"))
+	require.Empty(t, getHeaderRaw(req.Header, "accept-language"))
+	require.Empty(t, getHeaderRaw(req.Header, "sec-fetch-mode"))
+	generatedRequestID := getHeaderRaw(req.Header, "x-client-request-id")
+	require.NotEmpty(t, generatedRequestID)
+	_, parseErr := uuid.Parse(generatedRequestID)
+	require.NoError(t, parseErr)
+}
+
+func TestGatewayService_AnthropicAPIKeyPassthrough_ClaudeCodePreservesRequestIDAndSyncsSession(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	c.Request.Header.Set("User-Agent", "claude-cli/9.9.9 (external, cli)")
+	c.Request.Header.Set("X-Client-Request-Id", "00000000-0000-4000-8000-000000000001")
+	c.Request.Header.Set("X-Claude-Code-Session-Id", "00000000-0000-4000-8000-000000000002")
+	c.Request = c.Request.WithContext(SetClaudeCodeClient(c.Request.Context(), true))
+
+	inboundUserID := FormatMetadataUserID(
+		"a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+		"",
+		"123e4567-e89b-42d3-a456-426614174000",
+		"2.1.161",
+	)
+	body := []byte(`{"model":"claude-3-5-sonnet-latest","metadata":{"user_id":` + strconvQuote(inboundUserID) + `},"messages":[]}`)
+
+	svc := &GatewayService{cfg: &config.Config{}}
+	req, _, err := svc.buildUpstreamRequestAnthropicAPIKeyPassthrough(
+		c.Request.Context(), c, newAnthropicAPIKeyAccountForTest(), body, "token",
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, "00000000-0000-4000-8000-000000000001", getHeaderRaw(req.Header, "x-client-request-id"))
+	_, requestParseErr := uuid.Parse(getHeaderRaw(req.Header, "x-client-request-id"))
+	require.NoError(t, requestParseErr)
+
+	sessionID := getHeaderRaw(req.Header, "X-Claude-Code-Session-Id")
+	require.Equal(t, "123e4567-e89b-42d3-a456-426614174000", sessionID)
+}
+
+func TestGatewayService_AnthropicAPIKeyPassthrough_BuildCountTokensRequestAppliesGatewayFingerprint(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages/count_tokens", nil)
+	requestID := "00000000-0000-4000-8000-000000000001"
+	c.Request.Header.Set("User-Agent", "claude-cli/9.9.9 (external, cli)")
+	c.Request.Header.Set("X-App", "other-client")
+	c.Request.Header.Set("X-Stainless-OS", "Windows")
+	c.Request.Header.Set("X-Stainless-Runtime-Version", "v99.0.0")
+	c.Request.Header.Set("X-Client-Request-Id", requestID)
+
+	svc := &GatewayService{cfg: &config.Config{}}
+	req, err := svc.buildCountTokensRequestAnthropicAPIKeyPassthrough(
+		context.Background(), c, newAnthropicAPIKeyAccountForTest(), []byte(`{"model":"claude-3-5-sonnet-latest"}`), "token",
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, claude.DefaultHeaders["User-Agent"], getHeaderRaw(req.Header, "user-agent"))
+	require.Equal(t, claude.DefaultHeaders["X-App"], getHeaderRaw(req.Header, "x-app"))
+	require.Equal(t, claude.DefaultHeaders["X-Stainless-OS"], getHeaderRaw(req.Header, "x-stainless-os"))
+	require.Equal(t, claude.DefaultHeaders["X-Stainless-Runtime-Version"], getHeaderRaw(req.Header, "x-stainless-runtime-version"))
+	require.NotEqual(t, requestID, getHeaderRaw(req.Header, "x-client-request-id"))
+	_, parseErr := uuid.Parse(getHeaderRaw(req.Header, "x-client-request-id"))
+	require.NoError(t, parseErr)
 }
 
 // TestGatewayService_AnthropicAPIKeyPassthrough_ModelMappingEdgeCases 覆盖透传模式下模型映射的各种边界情况
@@ -742,6 +857,7 @@ func TestGatewayService_AnthropicOAuth_NotAffectedByAPIKeyPassthroughToggle(t *t
 	require.NoError(t, err)
 	require.Equal(t, "Bearer oauth-token", getHeaderRaw(req.Header, "authorization"))
 	require.Contains(t, getHeaderRaw(req.Header, "anthropic-beta"), claude.BetaOAuth, "OAuth 链路仍应按原逻辑补齐 oauth beta")
+	require.NotEmpty(t, getHeaderRaw(req.Header, "x-client-request-id"))
 }
 
 func TestGatewayService_AnthropicOAuth_ForwardPreservesBillingHeaderSystemBlock(t *testing.T) {
@@ -822,19 +938,27 @@ func TestGatewayService_AnthropicOAuth_ForwardPreservesBillingHeaderSystemBlock(
 
 			require.Contains(t, arr[0].Get("text").String(), "x-anthropic-billing-header:")
 			require.Contains(t, arr[0].Get("text").String(), "cc_version=")
+			require.Contains(t, arr[0].Get("text").String(), "cc_entrypoint=sdk-cli")
 
 			require.Equal(t, claudeCodeSystemPrompt, arr[1].Get("text").String())
-			require.False(t, arr[1].Get("cache_control").Exists(), "身份前缀 block 不应带 cache_control")
+			require.Equal(t, "ephemeral", arr[1].Get("cache_control.type").String())
+			require.False(t, arr[1].Get("cache_control.ttl").Exists())
 
-			require.Equal(t, claudeCodeSystemPromptExpansion, arr[2].Get("text").String())
+			expansionText := arr[2].Get("text").String()
+			require.Contains(t, expansionText, claudeCodeSystemPromptExpansion)
+			require.NotContains(t, expansionText, "Today's date is ")
 			require.Equal(t, "ephemeral", arr[2].Get("cache_control.type").String())
+			require.False(t, arr[2].Get("cache_control.ttl").Exists())
 
 			// 原始 system prompt 应迁移至 messages 中
 			messages := gjson.GetBytes(upstream.lastBody, "messages")
 			require.True(t, messages.IsArray())
 			firstMsg := messages.Array()[0]
 			require.Equal(t, "user", firstMsg.Get("role").String())
-			require.Contains(t, firstMsg.Get("content.0.text").String(), "x-anthropic-billing-header keep")
+			require.Contains(t, firstMsg.Get("content.0.text").String(), "Today's date is ")
+			secondMsg := messages.Array()[1]
+			require.Equal(t, "user", secondMsg.Get("role").String())
+			require.Contains(t, secondMsg.Get("content.0.text").String(), "x-anthropic-billing-header keep")
 		})
 	}
 }

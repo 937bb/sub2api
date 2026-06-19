@@ -65,7 +65,7 @@ const DefaultCacheControlTTL = "5m"
 // CLICurrentVersion 是 sub2api 当前对外伪装的 Claude Code CLI 版本号（三段 semver）。
 // 用于 billing attribution block 中的 cc_version=X.Y.Z.{fp} 前缀以及 fingerprint 计算。
 // 必须与 DefaultHeaders["User-Agent"] 中的版本号严格一致；不一致会被 Anthropic 判第三方。
-const CLICurrentVersion = "2.1.161"
+const CLICurrentVersion = "2.1.181"
 
 // FullClaudeCodeMimicryBetas 返回最"像"真实 Claude Code CLI 的完整 beta 列表，
 // 用于 OAuth 账号伪装成 Claude Code 时使用。
@@ -81,9 +81,9 @@ func FullClaudeCodeMimicryBetas() []string {
 		BetaClaudeCode,
 		BetaOAuth,
 		BetaInterleavedThinking,
+		BetaContextManagement,
 		BetaPromptCachingScope,
 		BetaEffort,
-		BetaContextManagement,
 		BetaExtendedCacheTTL,
 	}
 }
@@ -92,12 +92,14 @@ func FullClaudeCodeMimicryBetas() []string {
 var DefaultHeaders = map[string]string{
 	// Keep these in sync with recent Claude CLI traffic to reduce the chance
 	// that Claude Code-scoped OAuth credentials are rejected as "non-CLI" usage.
-	// 版本参考：对齐 Parrot (src/transform/cc_mimicry.py:49) 的 CLI_USER_AGENT。
-	"User-Agent":                                "claude-cli/" + CLICurrentVersion + " (external, cli)",
+	// 版本参考：本机 Claude Code --print 真实网络请求抓包。
+	// 注意：claude --version 可能显示包装层版本；上游请求以实际发出的
+	// claude-cli/<version> 与 x-stainless-* 指纹为准。
+	"User-Agent":                                "claude-cli/" + CLICurrentVersion + " (external, sdk-cli)",
 	"X-Stainless-Lang":                          "js",
 	"X-Stainless-Package-Version":               "0.94.0",
-	"X-Stainless-OS":                            "Linux",
-	"X-Stainless-Arch":                          "arm64",
+	"X-Stainless-OS":                            "Windows",
+	"X-Stainless-Arch":                          "x64",
 	"X-Stainless-Runtime":                       "node",
 	"X-Stainless-Runtime-Version":               "v24.3.0",
 	"X-Stainless-Retry-Count":                   "0",

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -318,21 +319,21 @@ func TestRewriteSystemForNonClaudeCode(t *testing.T) {
 			body:            `{"model":"claude-3","messages":[{"role":"user","content":"hello"}]}`,
 			system:          nil,
 			wantSystemText:  claudeCodeSystemPrompt,
-			wantMessagesLen: 1, // 原始 1 条消息，不注入
+			wantMessagesLen: 2, // current-date reminder + original
 		},
 		{
 			name:            "empty string system - no messages injected",
 			body:            `{"model":"claude-3","messages":[{"role":"user","content":"hello"}]}`,
 			system:          "",
 			wantSystemText:  claudeCodeSystemPrompt,
-			wantMessagesLen: 1,
+			wantMessagesLen: 2,
 		},
 		{
 			name:             "custom string system - migrated to messages",
 			body:             `{"model":"claude-3","messages":[{"role":"user","content":"hello"}]}`,
 			system:           "You are a personal assistant running inside OpenClaw.",
 			wantSystemText:   claudeCodeSystemPrompt,
-			wantMessagesLen:  3, // instruction + ack + original
+			wantMessagesLen:  4, // current-date reminder + instruction + ack + original
 			wantFirstMsgRole: "user",
 			wantFirstMsgText: "[System Instructions]\nYou are a personal assistant running inside OpenClaw.",
 			wantAckMsgText:   "Understood. I will follow these instructions.",
@@ -342,7 +343,7 @@ func TestRewriteSystemForNonClaudeCode(t *testing.T) {
 			body:            `{"model":"claude-3","messages":[{"role":"user","content":"hello"}]}`,
 			system:          claudeCodeSystemPrompt,
 			wantSystemText:  claudeCodeSystemPrompt,
-			wantMessagesLen: 1,
+			wantMessagesLen: 2,
 		},
 		{
 			name: "array system with custom blocks - text joined and migrated",
@@ -352,7 +353,7 @@ func TestRewriteSystemForNonClaudeCode(t *testing.T) {
 				map[string]any{"type": "text", "text": "Second instruction"},
 			},
 			wantSystemText:   claudeCodeSystemPrompt,
-			wantMessagesLen:  3,
+			wantMessagesLen:  4,
 			wantFirstMsgRole: "user",
 			wantFirstMsgText: "[System Instructions]\nFirst instruction\n\nSecond instruction",
 			wantAckMsgText:   "Understood. I will follow these instructions.",
@@ -362,14 +363,14 @@ func TestRewriteSystemForNonClaudeCode(t *testing.T) {
 			body:            `{"model":"claude-3","messages":[{"role":"user","content":"hello"}]}`,
 			system:          []any{},
 			wantSystemText:  claudeCodeSystemPrompt,
-			wantMessagesLen: 1,
+			wantMessagesLen: 2,
 		},
 		{
 			name:             "json.RawMessage string system",
 			body:             `{"model":"claude-3","system":"Custom prompt","messages":[{"role":"user","content":"hello"}]}`,
 			system:           json.RawMessage(`"Custom prompt"`),
 			wantSystemText:   claudeCodeSystemPrompt,
-			wantMessagesLen:  3,
+			wantMessagesLen:  4,
 			wantFirstMsgRole: "user",
 			wantFirstMsgText: "[System Instructions]\nCustom prompt",
 			wantAckMsgText:   "Understood. I will follow these instructions.",
@@ -379,14 +380,14 @@ func TestRewriteSystemForNonClaudeCode(t *testing.T) {
 			body:            `{"model":"claude-3","messages":[{"role":"user","content":"hello"}]}`,
 			system:          json.RawMessage(nil),
 			wantSystemText:  claudeCodeSystemPrompt,
-			wantMessagesLen: 1,
+			wantMessagesLen: 2,
 		},
 		{
 			name:             "multiple original messages preserved",
 			body:             `{"model":"claude-3","messages":[{"role":"user","content":"msg1"},{"role":"assistant","content":"resp1"},{"role":"user","content":"msg2"}]}`,
 			system:           "Be helpful",
 			wantSystemText:   claudeCodeSystemPrompt,
-			wantMessagesLen:  5, // 2 injected + 3 original
+			wantMessagesLen:  6, // current-date reminder + 2 injected + 3 original
 			wantFirstMsgRole: "user",
 			wantFirstMsgText: "[System Instructions]\nBe helpful",
 			wantAckMsgText:   "Understood. I will follow these instructions.",
@@ -414,32 +415,50 @@ func TestRewriteSystemForNonClaudeCode(t *testing.T) {
 			require.Equal(t, "text", billingBlock["type"])
 			require.Contains(t, billingBlock["text"], "x-anthropic-billing-header:")
 			require.Contains(t, billingBlock["text"], "cc_version=")
-			require.Contains(t, billingBlock["text"], "cc_entrypoint=cli")
-			require.Contains(t, billingBlock["text"], "cch=00000")
+			require.Contains(t, billingBlock["text"], "cc_entrypoint=sdk-cli")
+			require.NotContains(t, billingBlock["text"], "cch=")
 
 			systemBlock, ok := systemArr[1].(map[string]any)
 			require.True(t, ok)
 			require.Equal(t, "text", systemBlock["type"])
 			require.Equal(t, tt.wantSystemText, systemBlock["text"])
-			_, hasCC := systemBlock["cache_control"]
-			require.False(t, hasCC, "身份前缀 block 不应带 cache_control（断点落在扩充块）")
+			ccPrompt, ok := systemBlock["cache_control"].(map[string]any)
+			require.True(t, ok, "identity block should have cache_control")
+			require.Equal(t, "ephemeral", ccPrompt["type"])
+			_, hasPromptTTL := ccPrompt["ttl"]
+			require.False(t, hasPromptTTL)
 
 			expansionBlock, ok := systemArr[2].(map[string]any)
 			require.True(t, ok)
 			require.Equal(t, "text", expansionBlock["type"])
-			require.Equal(t, claudeCodeSystemPromptExpansion, expansionBlock["text"])
+			expansionText, ok := expansionBlock["text"].(string)
+			require.True(t, ok)
+			require.Contains(t, expansionText, claudeCodeSystemPromptExpansion)
+			require.NotContains(t, expansionText, "Today's date is ")
 			cc, ok := expansionBlock["cache_control"].(map[string]any)
 			require.True(t, ok, "expansion block should have cache_control")
 			require.Equal(t, "ephemeral", cc["type"])
+			_, hasExpansionTTL := cc["ttl"]
+			require.False(t, hasExpansionTTL)
 
 			// 检查 messages
 			messages, ok := parsed["messages"].([]any)
 			require.True(t, ok, "messages should be an array")
 			require.Len(t, messages, tt.wantMessagesLen)
 
-			if tt.wantFirstMsgRole != "" && len(messages) >= 2 {
+			reminderMsg, ok := messages[0].(map[string]any)
+			require.True(t, ok)
+			require.Equal(t, "user", reminderMsg["role"])
+			reminderContent, ok := reminderMsg["content"].([]any)
+			require.True(t, ok)
+			require.Len(t, reminderContent, 1)
+			reminderBlock, ok := reminderContent[0].(map[string]any)
+			require.True(t, ok)
+			require.Contains(t, reminderBlock["text"], "Today's date is ")
+
+			if tt.wantFirstMsgRole != "" && len(messages) >= 3 {
 				// 检查注入的 instruction 消息
-				firstMsg, ok := messages[0].(map[string]any)
+				firstMsg, ok := messages[1].(map[string]any)
 				require.True(t, ok)
 				require.Equal(t, tt.wantFirstMsgRole, firstMsg["role"])
 
@@ -451,7 +470,7 @@ func TestRewriteSystemForNonClaudeCode(t *testing.T) {
 				require.Equal(t, tt.wantFirstMsgText, firstBlock["text"])
 
 				// 检查注入的 ack 消息
-				ackMsg, ok := messages[1].(map[string]any)
+				ackMsg, ok := messages[2].(map[string]any)
 				require.True(t, ok)
 				require.Equal(t, "assistant", ackMsg["role"])
 
@@ -464,4 +483,99 @@ func TestRewriteSystemForNonClaudeCode(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestClaudeMimicCurrentDateTextUsesEasternDate(t *testing.T) {
+	utc := time.Date(2026, 6, 17, 3, 30, 0, 0, time.UTC)
+
+	require.Equal(t, "2026/06/16", claudeMimicEasternDate(utc))
+	require.Equal(t, "Today's date is 2026/06/16.", claudeMimicCurrentDateText(utc))
+	require.Contains(t, claudeMimicCurrentDateReminderText(utc), "# currentDate\nToday's date is 2026/06/16.")
+}
+
+func TestRewriteSystemForNonClaudeCodeWithPromptBlocks_CustomTemplates(t *testing.T) {
+	body := []byte(`{"model":"claude-3","system":"Original rules","messages":[{"role":"user","content":"hello"}]}`)
+	blocks := `[
+		{"text":"` + claudeOAuthSystemPromptBillingHeaderTemplate + `"},
+		{"text":"custom: ` + claudeOAuthSystemPromptTemplate + `","cache_control":{"type":"ephemeral","ttl":"5m"}},
+		{"text":"tail: ` + claudeOAuthSystemPromptExpansionTemplate + `"}
+	]`
+
+	result := rewriteSystemForNonClaudeCodeWithPromptBlocks(body, "Original rules", "Custom Claude Code prompt", blocks)
+
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal(result, &parsed))
+
+	systemArr, ok := parsed["system"].([]any)
+	require.True(t, ok)
+	require.Len(t, systemArr, 3)
+
+	require.Contains(t, systemArr[0].(map[string]any)["text"], "x-anthropic-billing-header:")
+	second := systemArr[1].(map[string]any)
+	require.Equal(t, "custom: Custom Claude Code prompt", second["text"])
+	cc, ok := second["cache_control"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "ephemeral", cc["type"])
+	require.Equal(t, "5m", cc["ttl"])
+	require.Contains(t, systemArr[2].(map[string]any)["text"], claudeCodeSystemPromptExpansion)
+	require.NotContains(t, systemArr[2].(map[string]any)["text"], "Today's date is ")
+
+	messages := parsed["messages"].([]any)
+	require.Len(t, messages, 4)
+	firstReminder := messages[0].(map[string]any)
+	require.Contains(t, firstReminder["content"].([]any)[0].(map[string]any)["text"], "Today's date is ")
+	firstMsg := messages[1].(map[string]any)
+	firstContent := firstMsg["content"].([]any)
+	require.Equal(t, "[System Instructions]\nOriginal rules", firstContent[0].(map[string]any)["text"])
+}
+
+func TestBuildClaudeOAuthSystemPromptBlocks_InvalidConfigFallsBackToDefaults(t *testing.T) {
+	body := []byte(`{"model":"claude-3","messages":[{"role":"user","content":"hello"}]}`)
+	blocks, err := buildClaudeOAuthSystemPromptBlocks(body, "", `{invalid`, time.Date(2026, 6, 17, 3, 30, 0, 0, time.UTC))
+	require.NoError(t, err)
+	require.Len(t, blocks, 3)
+
+	var first map[string]any
+	var second map[string]any
+	var third map[string]any
+	require.NoError(t, json.Unmarshal(blocks[0], &first))
+	require.NoError(t, json.Unmarshal(blocks[1], &second))
+	require.NoError(t, json.Unmarshal(blocks[2], &third))
+
+	require.Contains(t, first["text"], "x-anthropic-billing-header:")
+	require.Equal(t, claudeCodeSystemPrompt, second["text"])
+	secondCC, ok := second["cache_control"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "ephemeral", secondCC["type"])
+	_, hasSecondTTL := secondCC["ttl"]
+	require.False(t, hasSecondTTL)
+	require.Contains(t, third["text"], claudeCodeSystemPromptExpansion)
+	require.NotContains(t, third["text"], "Today's date is ")
+	thirdCC, ok := third["cache_control"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "ephemeral", thirdCC["type"])
+	_, hasThirdTTL := thirdCC["ttl"]
+	require.False(t, hasThirdTTL)
+}
+
+func TestRewriteSystemForNonClaudeCodeWithPromptBlocks_EmptyConfigFallsBackToDefaults(t *testing.T) {
+	body := []byte(`{"model":"claude-3","system":"Original rules","messages":[{"role":"user","content":"hello"}]}`)
+	blocks := `[{"text":"   "},{"cache_control":{"type":"ephemeral"}}]`
+
+	result := rewriteSystemForNonClaudeCodeWithPromptBlocks(body, "Original rules", "Custom Claude Code prompt", blocks)
+
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal(result, &parsed))
+
+	systemArr, ok := parsed["system"].([]any)
+	require.True(t, ok)
+	require.Len(t, systemArr, 3)
+	require.Contains(t, systemArr[0].(map[string]any)["text"], "x-anthropic-billing-header:")
+	require.Equal(t, "Custom Claude Code prompt", systemArr[1].(map[string]any)["text"])
+	require.NotContains(t, systemArr[2].(map[string]any)["text"], "Today's date is ")
+
+	messages := parsed["messages"].([]any)
+	require.Len(t, messages, 4)
+	firstReminder := messages[0].(map[string]any)
+	require.Contains(t, firstReminder["content"].([]any)[0].(map[string]any)["text"], "Today's date is ")
 }

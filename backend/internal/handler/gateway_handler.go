@@ -169,7 +169,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 
 	// 设置 max_tokens=1 + haiku 探测请求标识到 context 中
 	// 必须在 SetClaudeCodeClientContext 之前设置，因为 ClaudeCodeValidator 需要读取此标识进行绕过判断
-	if isMaxTokensOneHaikuRequest(reqModel, parsedReq.MaxTokens, reqStream) {
+	if isMaxTokensOneHaikuRequest(reqModel, parsedReq.MaxTokens) {
 		ctx := service.WithIsMaxTokensOneHaikuRequest(c.Request.Context(), true, h.metadataBridgeEnabled())
 		c.Request = c.Request.WithContext(ctx)
 	}
@@ -360,7 +360,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 
 			// 检查请求拦截（预热请求、SUGGESTION MODE等）
 			if account.IsInterceptWarmupEnabled() {
-				interceptType := detectInterceptType(body, reqModel, parsedReq.MaxTokens, reqStream, isClaudeCodeClient)
+				interceptType := detectInterceptType(body, reqModel, parsedReq.MaxTokens, isClaudeCodeClient)
 				if interceptType != InterceptTypeNone {
 					if selection.Acquired && selection.ReleaseFunc != nil {
 						selection.ReleaseFunc()
@@ -638,7 +638,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 
 			// 检查请求拦截（预热请求、SUGGESTION MODE等）
 			if account.IsInterceptWarmupEnabled() {
-				interceptType := detectInterceptType(body, reqModel, parsedReq.MaxTokens, reqStream, isClaudeCodeClient)
+				interceptType := detectInterceptType(body, reqModel, parsedReq.MaxTokens, isClaudeCodeClient)
 				if interceptType != InterceptTypeNone {
 					if selection.Acquired && selection.ReleaseFunc != nil {
 						selection.ReleaseFunc()
@@ -1159,7 +1159,136 @@ func defaultModelIDsForPlatform(platform string) []string {
 	}
 }
 
-// AntigravityModels 返回 Antigravity 支持的全部模型
+// Files handles Claude Code Files API proxying.
+func (h *GatewayHandler) Files(c *gin.Context) {
+	apiKey, ok := middleware2.GetAPIKeyFromContext(c)
+	if !ok {
+		h.errorResponse(c, http.StatusUnauthorized, "authentication_error", "Invalid API key")
+		return
+	}
+
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		h.errorResponse(c, http.StatusInternalServerError, "api_error", "User context not found")
+		return
+	}
+	reqLog := requestLogger(
+		c,
+		"handler.gateway.files",
+		zap.Int64("user_id", subject.UserID),
+		zap.Int64("api_key_id", apiKey.ID),
+		zap.Any("group_id", apiKey.GroupID),
+	)
+	setOpsRequestContext(c, "", false)
+
+	streamStarted := false
+	userReleaseFunc, err := h.concurrencyHelper.AcquireUserSlotWithWait(c, subject.UserID, subject.Concurrency, false, &streamStarted)
+	if err != nil {
+		reqLog.Warn("gateway.files_user_slot_acquire_failed", zap.Error(err))
+		h.handleConcurrencyError(c, err, "user", streamStarted)
+		return
+	}
+	userReleaseFunc = wrapReleaseOnDone(c.Request.Context(), userReleaseFunc)
+	if userReleaseFunc != nil {
+		defer userReleaseFunc()
+	}
+
+	subscription, _ := middleware2.GetSubscriptionFromContext(c)
+	if err := h.billingCacheService.CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription, service.QuotaPlatform(c.Request.Context(), apiKey)); err != nil {
+		reqLog.Info("gateway.files_billing_eligibility_check_failed", zap.Error(err))
+		status, code, message, retryAfter := billingErrorDetails(err)
+		if retryAfter > 0 {
+			c.Header("Retry-After", strconv.Itoa(retryAfter))
+		}
+		h.errorResponse(c, status, code, message)
+		return
+	}
+
+	account, releaseAccount, err := h.selectClaudeFilesAccount(c, apiKey, subject.UserID, &streamStarted)
+	if err != nil {
+		markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
+		reqLog.Warn("gateway.files_select_account_failed",
+			zap.Int64p("group_id", apiKey.GroupID),
+			zap.Error(err),
+		)
+		h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "No available Claude OAuth accounts")
+		return
+	}
+	if releaseAccount != nil {
+		defer releaseAccount()
+	}
+	setOpsSelectedAccount(c, account.ID, account.Platform)
+
+	if err := h.gatewayService.ForwardClaudeFiles(c.Request.Context(), c, account); err != nil {
+		reqLog.Error("gateway.files_forward_failed", zap.Int64("account_id", account.ID), zap.Error(err))
+		if !c.Writer.Written() {
+			h.errorResponse(c, http.StatusBadGateway, "upstream_error", "Upstream request failed")
+		}
+		return
+	}
+}
+
+func (h *GatewayHandler) selectClaudeFilesAccount(c *gin.Context, apiKey *service.APIKey, userID int64, streamStarted *bool) (*service.Account, func(), error) {
+	maxAttempts := h.maxAccountSwitches
+	if maxAttempts <= 0 {
+		maxAttempts = 10
+	}
+	excludedIDs := make(map[int64]struct{}, maxAttempts)
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		selection, err := h.gatewayService.SelectAccountWithLoadAwareness(c.Request.Context(), apiKey.GroupID, "", "", excludedIDs, "", userID)
+		if err != nil {
+			return nil, nil, err
+		}
+		if selection == nil || selection.Account == nil {
+			return nil, nil, errors.New("no available accounts")
+		}
+		account := selection.Account
+		if !account.IsAnthropicOAuthOrSetupToken() {
+			if selection.Acquired && selection.ReleaseFunc != nil {
+				selection.ReleaseFunc()
+			}
+			excludedIDs[account.ID] = struct{}{}
+			continue
+		}
+		if !selection.Acquired {
+			if selection.WaitPlan == nil {
+				return nil, nil, errors.New("no Claude OAuth account capacity")
+			}
+			accountWaitCounted := false
+			releaseWait := func() {
+				if accountWaitCounted {
+					h.concurrencyHelper.DecrementAccountWaitCount(c.Request.Context(), account.ID)
+					accountWaitCounted = false
+				}
+			}
+			defer releaseWait()
+			canWait, waitErr := h.concurrencyHelper.IncrementAccountWaitCount(c.Request.Context(), account.ID, selection.WaitPlan.MaxWaiting)
+			if waitErr == nil && !canWait {
+				return nil, nil, errors.New("too many requests waiting for Claude OAuth account capacity")
+			}
+			if waitErr == nil && canWait {
+				accountWaitCounted = true
+			}
+			releaseFunc, err := h.concurrencyHelper.AcquireAccountSlotWithWaitTimeout(
+				c,
+				account.ID,
+				selection.WaitPlan.MaxConcurrency,
+				selection.WaitPlan.Timeout,
+				false,
+				streamStarted,
+			)
+			if err != nil {
+				return nil, nil, err
+			}
+			releaseWait()
+			return account, wrapReleaseOnDone(c.Request.Context(), releaseFunc), nil
+		}
+		return account, wrapReleaseOnDone(c.Request.Context(), selection.ReleaseFunc), nil
+	}
+	return nil, nil, errors.New("no available Claude OAuth accounts")
+}
+
+// AntigravityModels returns Antigravity model list.
 // GET /antigravity/models
 func (h *GatewayHandler) AntigravityModels(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
@@ -1824,10 +1953,10 @@ func isHaikuModel(model string) bool {
 }
 
 // isMaxTokensOneHaikuRequest 检查是否为 max_tokens=1 + haiku 模型的探测请求
-// 这类请求用于 Claude Code 验证 API 连通性
-// 条件：max_tokens == 1 且 model 包含 "haiku" 且非流式请求
-func isMaxTokensOneHaikuRequest(model string, maxTokens int, isStream bool) bool {
-	return maxTokens == 1 && isHaikuModel(model) && !isStream
+// 这类请求用于 Claude Code 验证 API 连通性，流式和非流式都可能出现。
+// 条件：max_tokens == 1 且 model 包含 "haiku"
+func isMaxTokensOneHaikuRequest(model string, maxTokens int) bool {
+	return maxTokens == 1 && isHaikuModel(model)
 }
 
 // detectInterceptType 检测请求是否需要拦截，返回拦截类型
@@ -1835,11 +1964,10 @@ func isMaxTokensOneHaikuRequest(model string, maxTokens int, isStream bool) bool
 //   - body: 请求体字节
 //   - model: 请求的模型名称
 //   - maxTokens: max_tokens 值
-//   - isStream: 是否为流式请求
 //   - isClaudeCodeClient: 是否已通过 Claude Code 客户端校验
-func detectInterceptType(body []byte, model string, maxTokens int, isStream bool, isClaudeCodeClient bool) InterceptType {
-	// 优先检查 max_tokens=1 + haiku 探测请求（仅非流式）
-	if isClaudeCodeClient && isMaxTokensOneHaikuRequest(model, maxTokens, isStream) {
+func detectInterceptType(body []byte, model string, maxTokens int, isClaudeCodeClient bool) InterceptType {
+	// 优先检查 max_tokens=1 + haiku 探测请求
+	if isClaudeCodeClient && isMaxTokensOneHaikuRequest(model, maxTokens) {
 		return InterceptTypeMaxTokensOneHaiku
 	}
 

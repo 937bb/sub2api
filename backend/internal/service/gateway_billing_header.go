@@ -14,6 +14,8 @@ import (
 // the trailing message-derived suffix (e.g. ".c02") if present.
 var ccVersionInBillingRe = regexp.MustCompile(`cc_version=\d+\.\d+\.\d+`)
 
+var ccEntrypointInBillingRe = regexp.MustCompile(`cc_entrypoint=[^;\s]+`)
+
 // cchPlaceholderRe matches the cch=00000 placeholder in billing header text,
 // scoped to x-anthropic-billing-header to avoid touching user content.
 var cchPlaceholderRe = regexp.MustCompile(`(x-anthropic-billing-header:[^"]*?\bcch=)(00000)(;)`)
@@ -34,13 +36,15 @@ func syncBillingHeaderVersion(body []byte, userAgent string) []byte {
 		return body
 	}
 
-	replacement := "cc_version=" + version
+	versionReplacement := "cc_version=" + version
+	entrypointReplacement := "cc_entrypoint=" + claudeCodeEntrypointFromUserAgent(userAgent)
 	idx := 0
 	systemResult.ForEach(func(_, item gjson.Result) bool {
 		text := item.Get("text")
 		if text.Exists() && text.Type == gjson.String &&
 			strings.HasPrefix(text.String(), "x-anthropic-billing-header") {
-			newText := ccVersionInBillingRe.ReplaceAllString(text.String(), replacement)
+			newText := ccVersionInBillingRe.ReplaceAllString(text.String(), versionReplacement)
+			newText = ccEntrypointInBillingRe.ReplaceAllString(newText, entrypointReplacement)
 			if newText != text.String() {
 				if updated, err := sjson.SetBytes(body, fmt.Sprintf("system.%d.text", idx), newText); err == nil {
 					body = updated

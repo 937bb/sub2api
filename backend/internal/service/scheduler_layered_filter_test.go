@@ -3,6 +3,7 @@
 package service
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -209,6 +210,68 @@ func TestSelectByLRU(t *testing.T) {
 		// 有不同 LastUsedAt 时，按时间选择最早的，不受 preferOAuth 影响
 		require.Equal(t, int64(1), result.account.ID)
 	})
+}
+
+func TestSelectByLRUWithAffinity(t *testing.T) {
+	accounts := []accountWithLoad{
+		{account: &Account{ID: 1, LastUsedAt: nil}, loadInfo: &AccountLoadInfo{}},
+		{account: &Account{ID: 2, LastUsedAt: nil}, loadInfo: &AccountLoadInfo{}},
+		{account: &Account{ID: 3, LastUsedAt: nil}, loadInfo: &AccountLoadInfo{}},
+	}
+
+	first := selectByLRUWithAffinity(accounts, false, "sub:42|device:a|session:s1")
+	second := selectByLRUWithAffinity(accounts, false, "sub:42|device:a|session:s1")
+	require.NotNil(t, first)
+	require.NotNil(t, second)
+	require.Equal(t, first.account.ID, second.account.ID)
+
+	expectedIdx := stableAffinityIndex("sub:42|device:a|session:s1", len(accounts))
+	require.Equal(t, accounts[expectedIdx].account.ID, first.account.ID)
+}
+
+func TestSchedulerAffinitySeed(t *testing.T) {
+	metadata := FormatMetadataUserID(
+		"a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+		"",
+		"123e4567-e89b-42d3-a456-426614174000",
+		"2.1.161",
+	)
+
+	seed := schedulerAffinitySeed(metadata, 99, "fallback-session")
+	require.Contains(t, seed, "sub:99")
+	require.Contains(t, seed, "device:a1b2c3d4")
+	require.Contains(t, seed, "session:123e4567-e89b-42d3-a456-426614174000")
+
+	require.Equal(t, "sub:99|session:fallback-session", schedulerAffinitySeed("", 99, "fallback-session"))
+}
+
+type sessionLimitCacheForSchedulerFilterTest struct {
+	SessionLimitCache
+	counts map[int64]int
+}
+
+func (s sessionLimitCacheForSchedulerFilterTest) GetActiveSessionCountBatch(ctx context.Context, accountIDs []int64, idleTimeouts map[int64]time.Duration) (map[int64]int, error) {
+	out := make(map[int64]int, len(accountIDs))
+	for _, id := range accountIDs {
+		out[id] = s.counts[id]
+	}
+	return out, nil
+}
+
+func TestFilterByMinActiveSessions(t *testing.T) {
+	svc := &GatewayService{sessionLimitCache: sessionLimitCacheForSchedulerFilterTest{
+		counts: map[int64]int{1: 3, 2: 1, 3: 1},
+	}}
+	accounts := []accountWithLoad{
+		{account: &Account{ID: 1, Platform: PlatformAnthropic, Type: AccountTypeOAuth, Extra: map[string]any{"max_sessions": 5}}, loadInfo: &AccountLoadInfo{}},
+		{account: &Account{ID: 2, Platform: PlatformAnthropic, Type: AccountTypeOAuth, Extra: map[string]any{"max_sessions": 5}}, loadInfo: &AccountLoadInfo{}},
+		{account: &Account{ID: 3, Platform: PlatformAnthropic, Type: AccountTypeOAuth, Extra: map[string]any{"max_sessions": 5}}, loadInfo: &AccountLoadInfo{}},
+	}
+
+	result := svc.filterByMinActiveSessions(context.Background(), accounts)
+	require.Len(t, result, 2)
+	require.Equal(t, int64(2), result[0].account.ID)
+	require.Equal(t, int64(3), result[1].account.ID)
 }
 
 func TestLayeredFilterIntegration(t *testing.T) {

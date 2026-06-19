@@ -131,6 +131,8 @@ docs/*
 !docs/PAYMENT.md
 !docs/PAYMENT_CN.md
 !docs/ADMIN_PAYMENT_INTEGRATION_API.md
+!docs/SUB_CLAUDE_USAGE.md
+!docs/CLAUDE_CLI_ALIGNMENT_AUDIT.md
 !docs/legal/
 !docs/legal/*.md
 .serena/

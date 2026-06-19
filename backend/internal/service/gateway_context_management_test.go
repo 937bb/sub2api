@@ -14,6 +14,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
@@ -664,4 +665,107 @@ func TestBuildUpstreamRequest_APIKeyHaikuWithContextManagement_StripsField(t *te
 	outBody := readUpstreamBodyForTest(t, req)
 	require.False(t, gjson.GetBytes(outBody, "context_management").Exists(),
 		"API-key + haiku + 客户端未带 beta token → body 字段必须被 strip")
+}
+
+func TestBuildUpstreamRequest_APIKeyClaudeCodeAddsNativeHeadersAndSession(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	inboundUA := "claude-cli/2.1.161 (external, cli)"
+	c.Request.Header.Set("User-Agent", inboundUA)
+	c.Request.Header.Set("X-App", "cli")
+	c.Request.Header.Set("X-Stainless-Package-Version", "0.94.0")
+	c.Request.Header.Set("X-Stainless-OS", "Linux")
+	c.Request.Header.Set("X-Stainless-Arch", "arm64")
+	c.Request.Header.Set("Anthropic-Version", "2023-06-01")
+	c.Request.Header.Set("Anthropic-Beta", "claude-code-20250219,interleaved-thinking-2025-05-14")
+	c.Request.Header.Set("X-Client-Request-Id", "00000000-0000-4000-8000-000000000001")
+	c.Request.Header.Set("X-Claude-Code-Session-Id", "00000000-0000-4000-8000-000000000002")
+	c.Request = c.Request.WithContext(SetClaudeCodeClient(c.Request.Context(), true))
+
+	account := &Account{ID: 405, Platform: PlatformAnthropic, Type: AccountTypeAPIKey,
+		Credentials: map[string]any{"api_key": "sk-ant-xxx"},
+		Status:      StatusActive, Schedulable: true,
+	}
+	inboundSessionID := "123e4567-e89b-42d3-a456-426614174000"
+	inboundUserID := FormatMetadataUserID(
+		"a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+		"",
+		inboundSessionID,
+		"2.1.161",
+	)
+	body := []byte(`{"model":"claude-sonnet-4-5","metadata":{"user_id":` + strconvQuote(inboundUserID) + `},"messages":[]}`)
+	svc := &GatewayService{cfg: &config.Config{}}
+
+	req, wireBody, err := svc.buildUpstreamRequest(
+		c.Request.Context(), c, account, body,
+		"sk-ant-xxx", "apikey", "claude-sonnet-4-5", false, false,
+	)
+	require.NoError(t, err)
+
+	require.Equal(t, inboundUA, getHeaderRaw(req.Header, "user-agent"))
+	require.Equal(t, "cli", getHeaderRaw(req.Header, "x-app"))
+	require.Equal(t, "0.94.0", getHeaderRaw(req.Header, "x-stainless-package-version"))
+	require.Equal(t, "Linux", getHeaderRaw(req.Header, "x-stainless-os"))
+	require.Equal(t, "arm64", getHeaderRaw(req.Header, "x-stainless-arch"))
+	require.Equal(t, claude.DefaultHeaders["X-Stainless-Lang"], getHeaderRaw(req.Header, "x-stainless-lang"))
+	requestID := getHeaderRaw(req.Header, "x-client-request-id")
+	require.NotEmpty(t, requestID)
+	require.Equal(t, "00000000-0000-4000-8000-000000000001", requestID)
+	_, parseErr := uuid.Parse(requestID)
+	require.NoError(t, parseErr)
+
+	rewritten := ParseMetadataUserID(gjson.GetBytes(wireBody, "metadata.user_id").String())
+	require.NotNil(t, rewritten)
+	require.Equal(t, inboundSessionID, rewritten.SessionID)
+	require.Equal(t, rewritten.SessionID, getHeaderRaw(req.Header, "X-Claude-Code-Session-Id"))
+}
+
+func TestBuildCountTokensRequest_APIKeyClaudeCodeAddsNativeHeadersAndRequestID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages/count_tokens", nil)
+	inboundUA := "claude-cli/2.1.161 (external, cli)"
+	c.Request.Header.Set("User-Agent", inboundUA)
+	c.Request.Header.Set("X-App", "cli")
+	c.Request.Header.Set("X-Stainless-Package-Version", "0.94.0")
+	c.Request.Header.Set("X-Stainless-OS", "Linux")
+	c.Request.Header.Set("X-Stainless-Arch", "arm64")
+	c.Request.Header.Set("Anthropic-Version", "2023-06-01")
+	inboundSessionID := "123e4567-e89b-42d3-a456-426614174000"
+	c.Request.Header.Set("X-Claude-Code-Session-Id", inboundSessionID)
+	c.Request.Header.Set("X-Client-Request-Id", "00000000-0000-4000-8000-000000000001")
+	c.Request = c.Request.WithContext(SetClaudeCodeClient(c.Request.Context(), true))
+
+	account := &Account{ID: 413, Platform: PlatformAnthropic, Type: AccountTypeAPIKey,
+		Credentials: map[string]any{"api_key": "sk-ant-xxx"},
+		Status:      StatusActive, Schedulable: true,
+	}
+	body := []byte(`{"model":"claude-sonnet-4-5","messages":[]}`)
+	svc := &GatewayService{cfg: &config.Config{}}
+
+	req, _, err := svc.buildCountTokensRequest(
+		c.Request.Context(), c, account, body,
+		"sk-ant-xxx", "apikey", "claude-sonnet-4-5", false,
+	)
+	require.NoError(t, err)
+
+	require.Equal(t, inboundUA, getHeaderRaw(req.Header, "user-agent"))
+	require.Equal(t, "cli", getHeaderRaw(req.Header, "x-app"))
+	require.Equal(t, "0.94.0", getHeaderRaw(req.Header, "x-stainless-package-version"))
+	require.Equal(t, "Linux", getHeaderRaw(req.Header, "x-stainless-os"))
+	require.Equal(t, "arm64", getHeaderRaw(req.Header, "x-stainless-arch"))
+	require.Equal(t, claude.DefaultHeaders["X-Stainless-Lang"], getHeaderRaw(req.Header, "x-stainless-lang"))
+	requestID := getHeaderRaw(req.Header, "x-client-request-id")
+	require.NotEmpty(t, requestID)
+	require.Equal(t, "00000000-0000-4000-8000-000000000001", requestID)
+	_, parseErr := uuid.Parse(requestID)
+	require.NoError(t, parseErr)
+	sessionID := getHeaderRaw(req.Header, "X-Claude-Code-Session-Id")
+	require.NotEmpty(t, sessionID)
+	require.NotEqual(t, inboundSessionID, sessionID)
+	_, parseSessionErr := uuid.Parse(sessionID)
+	require.NoError(t, parseSessionErr)
 }

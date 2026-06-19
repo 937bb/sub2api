@@ -84,6 +84,42 @@ func (s *settingAntigravityUARepoStub) Delete(ctx context.Context, key string) e
 	panic("unexpected Delete call")
 }
 
+type gatewayForwardingSettingsRepoStub struct {
+	values map[string]string
+}
+
+func (s *gatewayForwardingSettingsRepoStub) Get(ctx context.Context, key string) (*Setting, error) {
+	panic("unexpected Get call")
+}
+
+func (s *gatewayForwardingSettingsRepoStub) GetValue(ctx context.Context, key string) (string, error) {
+	panic("unexpected GetValue call")
+}
+
+func (s *gatewayForwardingSettingsRepoStub) Set(ctx context.Context, key, value string) error {
+	panic("unexpected Set call")
+}
+
+func (s *gatewayForwardingSettingsRepoStub) GetMultiple(ctx context.Context, keys []string) (map[string]string, error) {
+	out := make(map[string]string, len(keys))
+	for _, key := range keys {
+		out[key] = s.values[key]
+	}
+	return out, nil
+}
+
+func (s *gatewayForwardingSettingsRepoStub) SetMultiple(ctx context.Context, settings map[string]string) error {
+	panic("unexpected SetMultiple call")
+}
+
+func (s *gatewayForwardingSettingsRepoStub) GetAll(ctx context.Context) (map[string]string, error) {
+	panic("unexpected GetAll call")
+}
+
+func (s *gatewayForwardingSettingsRepoStub) Delete(ctx context.Context, key string) error {
+	panic("unexpected Delete call")
+}
+
 type defaultSubGroupReaderStub struct {
 	byID  map[int64]*Group
 	errBy map[int64]error
@@ -288,6 +324,47 @@ func TestSettingService_UpdateSettings_AntigravityUserAgentVersion(t *testing.T)
 	})
 	require.NoError(t, err)
 	require.Equal(t, "1.23.2", repo.updates[SettingKeyAntigravityUserAgentVersion])
+}
+
+func TestSettingService_UpdateSettings_ClaudeOAuthSystemPromptSettings(t *testing.T) {
+	repo := &settingUpdateRepoStub{}
+	svc := NewSettingService(repo, &config.Config{})
+
+	err := svc.UpdateSettings(context.Background(), &SystemSettings{
+		EnableClaudeOAuthSystemPromptInjection: true,
+		ClaudeOAuthSystemPrompt:                "  custom prompt  ",
+		ClaudeOAuthSystemPromptBlocks:          "  []  ",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "true", repo.updates[SettingKeyEnableClaudeOAuthSystemPromptInjection])
+	require.Equal(t, "custom prompt", repo.updates[SettingKeyClaudeOAuthSystemPrompt])
+	require.Equal(t, "[]", repo.updates[SettingKeyClaudeOAuthSystemPromptBlocks])
+}
+
+func TestSettingService_ParseSettings_ClaudeOAuthSystemPromptDefaultsEnabled(t *testing.T) {
+	svc := NewSettingService(&settingUpdateRepoStub{}, &config.Config{})
+
+	got := svc.parseSettings(map[string]string{})
+
+	require.True(t, got.EnableClaudeOAuthSystemPromptInjection)
+	require.Empty(t, got.ClaudeOAuthSystemPrompt)
+	require.Empty(t, got.ClaudeOAuthSystemPromptBlocks)
+}
+
+func TestSettingService_GetClaudeOAuthSystemPromptInjectionSettings(t *testing.T) {
+	gatewayForwardingCache.Store(&cachedGatewayForwardingSettings{})
+	repo := &gatewayForwardingSettingsRepoStub{values: map[string]string{
+		SettingKeyEnableClaudeOAuthSystemPromptInjection: "false",
+		SettingKeyClaudeOAuthSystemPrompt:                "custom prompt",
+		SettingKeyClaudeOAuthSystemPromptBlocks:          `[{"text":"custom"}]`,
+	}}
+	svc := NewSettingService(repo, &config.Config{})
+
+	enabled, prompt, blocks := svc.GetClaudeOAuthSystemPromptInjectionSettings(context.Background())
+
+	require.False(t, enabled)
+	require.Equal(t, "custom prompt", prompt)
+	require.Equal(t, `[{"text":"custom"}]`, blocks)
 }
 
 func TestSettingService_UpdateSettings_APIKeyACLTrustForwardedIPRefreshesConfig(t *testing.T) {

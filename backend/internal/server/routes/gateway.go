@@ -63,6 +63,25 @@ func RegisterGatewayRoutes(
 			}
 			h.Gateway.CountTokens(c)
 		})
+		filesHandler := func(c *gin.Context) {
+			if getGroupPlatform(c) == service.PlatformOpenAI {
+				service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
+				c.JSON(http.StatusNotFound, gin.H{
+					"type": "error",
+					"error": gin.H{
+						"type":    "not_found_error",
+						"message": "Files API is not supported for this platform",
+					},
+				})
+				return
+			}
+			h.Gateway.Files(c)
+		}
+		gateway.GET("/files", filesHandler)
+		gateway.POST("/files", filesHandler)
+		gateway.GET("/files/:file_id/content", filesHandler)
+		gateway.GET("/files/:file_id", filesHandler)
+		gateway.DELETE("/files/:file_id", filesHandler)
 		gateway.GET("/models", h.Gateway.Models)
 		gateway.GET("/usage", h.Gateway.Usage)
 		// OpenAI Responses API: auto-route based on group platform

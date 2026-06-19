@@ -510,7 +510,10 @@ func StripEmptyTextBlocks(body []byte) []byte {
 //   - 当 thinking.type 不是 "enabled"/"adaptive"：移除所有 thinking 相关块
 //   - 当 thinking.type 是 "enabled"/"adaptive"：仅移除缺失/无效 signature 的 thinking 块（避免 400）
 //     (blocks with missing/empty/dummy signatures that would cause 400 errors)
-func FilterThinkingBlocks(body []byte) []byte {
+func FilterThinkingBlocks(body []byte, mappedModel ...string) []byte {
+	if len(mappedModel) > 0 && !ShouldPreFilterThinkingBlocks(mappedModel[0]) {
+		return body
+	}
 	return filterThinkingBlocksInternal(body, false)
 }
 
@@ -528,7 +531,10 @@ func FilterThinkingBlocks(body []byte) []byte {
 //   - Convert `thinking` blocks to `text` blocks (preserve the thinking content).
 //   - Remove `redacted_thinking` blocks (cannot be converted to text).
 //   - Ensure no message ends up with empty content.
-func FilterThinkingBlocksForRetry(body []byte) []byte {
+func FilterThinkingBlocksForRetry(body []byte, mappedModel ...string) []byte {
+	if len(mappedModel) > 0 && !ShouldApplyRetryFilters(mappedModel[0]) {
+		return body
+	}
 	hasThinkingContent := bytes.Contains(body, patternTypeThinking) ||
 		bytes.Contains(body, patternTypeThinkingSpaced) ||
 		bytes.Contains(body, patternTypeRedactedThinking) ||
@@ -871,7 +877,10 @@ func anthropicBetaTokensContains(header, token string) bool {
 //
 // Use this only when needed: converting tool blocks to text changes model behaviour and can increase the
 // risk of prompt injection (tool output becomes plain conversation text).
-func FilterSignatureSensitiveBlocksForRetry(body []byte) []byte {
+func FilterSignatureSensitiveBlocksForRetry(body []byte, mappedModel ...string) []byte {
+	if len(mappedModel) > 0 && !ShouldApplyRetryFilters(mappedModel[0]) {
+		return body
+	}
 	// Fast path: only run when we see likely relevant constructs.
 	if !bytes.Contains(body, []byte(`"type":"thinking"`)) &&
 		!bytes.Contains(body, []byte(`"type": "thinking"`)) &&
