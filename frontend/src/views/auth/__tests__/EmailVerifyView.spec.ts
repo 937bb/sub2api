@@ -300,6 +300,10 @@ describe('EmailVerifyView', () => {
       provider: 'wechat',
       redirect: '/profile',
     }
+    localStorage.setItem(
+      'affiliate_referral_code',
+      JSON.stringify({ code: 'AFF123', expiresAt: Date.now() + 60_000 })
+    )
     sessionStorage.setItem(
       'register_data',
       JSON.stringify({

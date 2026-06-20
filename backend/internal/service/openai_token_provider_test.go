@@ -232,6 +232,53 @@ func TestOpenAITokenProvider_SetupTokenIgnoresStaleCachedOAuthToken(t *testing.T
 	require.Equal(t, int32(0), atomic.LoadInt32(&cache.getCalled), "setup-token should read credentials directly instead of any cached OAuth token")
 }
 
+func TestOpenAITokenProvider_PersonalAccessTokenBypassesCacheAndMissingRefreshDisable(t *testing.T) {
+	cache := newOpenAITokenCacheStub()
+	repo := &openAISetupTokenBoundaryRepoStub{}
+	expiresAt := time.Now().Add(-time.Hour).Format(time.RFC3339)
+	account := &Account{
+		ID:       114,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"access_token":          "expired-access-token",
+			"personal_access_token": "pat-token",
+			"expires_at":            expiresAt,
+		},
+	}
+	cache.tokens[OpenAITokenCacheKey(account)] = "stale-oauth-token"
+
+	provider := NewOpenAITokenProvider(repo, cache, nil)
+	token, err := provider.GetAccessToken(context.Background(), account)
+
+	require.NoError(t, err)
+	require.Equal(t, "pat-token", token)
+	require.Equal(t, int32(0), atomic.LoadInt32(&cache.getCalled), "PAT should bypass stale OAuth cache")
+	require.Equal(t, int32(0), atomic.LoadInt32(&cache.setCalled), "PAT should not be written into OAuth access-token cache")
+	require.Zero(t, atomic.LoadInt32(&repo.setErrorCalls), "PAT accounts must not be disabled for missing refresh_token")
+}
+
+func TestOpenAITokenProvider_SetupTokenPersonalAccessTokenBypassesCache(t *testing.T) {
+	cache := newOpenAITokenCacheStub()
+	account := &Account{
+		ID:       115,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeSetupToken,
+		Credentials: map[string]any{
+			"access_token":          "setup-access-token",
+			"personal_access_token": "setup-pat-token",
+		},
+	}
+	cache.tokens[OpenAITokenCacheKey(account)] = "stale-oauth-token"
+
+	provider := NewOpenAITokenProvider(nil, cache, nil)
+	token, err := provider.GetAccessToken(context.Background(), account)
+
+	require.NoError(t, err)
+	require.Equal(t, "setup-pat-token", token)
+	require.Equal(t, int32(0), atomic.LoadInt32(&cache.getCalled), "setup-token PAT should read credentials directly instead of cache")
+}
+
 func TestOpenAITokenProvider_TokenRefresh(t *testing.T) {
 	cache := newOpenAITokenCacheStub()
 	accountRepo := &openAIAccountRepoStub{}
@@ -343,7 +390,7 @@ func (p *testOpenAITokenProvider) GetAccessToken(ctx context.Context, account *A
 		}
 	}
 
-	accessToken := account.GetOpenAIAccessToken()
+	accessToken := account.GetOpenAIOAuthBearerToken()
 	if accessToken == "" {
 		return "", errors.New("access_token not found in credentials")
 	}

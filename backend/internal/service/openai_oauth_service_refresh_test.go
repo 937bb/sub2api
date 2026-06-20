@@ -189,6 +189,18 @@ func TestOpenAITokenRefresher_NeedsRefresh_SkipsAccountWithoutRefreshToken(t *te
 		},
 	}
 	require.True(t, refresher.NeedsRefresh(withRT, 5*time.Minute))
+
+	withPAT := &Account{
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"access_token":          "access-token",
+			"personal_access_token": "pat-token",
+			"refresh_token":         "refresh-token",
+			"expires_at":            expiresAt,
+		},
+	}
+	require.False(t, refresher.NeedsRefresh(withPAT, 5*time.Minute))
 }
 
 func TestOpenAITokenProvider_NoRefreshTokenExpiredAccessTokenReturnsError(t *testing.T) {

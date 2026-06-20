@@ -233,6 +233,7 @@ func TestAPIContracts(t *testing.T) {
 					"ip_whitelist": null,
 					"ip_blacklist": null,
 					"last_used_at": null,
+					"openai_force_priority_tier": false,
 					"quota": 0,
 					"quota_used": 0,
 					"rate_limit_5h": 0,
@@ -282,6 +283,7 @@ func TestAPIContracts(t *testing.T) {
 							"ip_whitelist": null,
 							"ip_blacklist": null,
 							"last_used_at": null,
+							"openai_force_priority_tier": false,
 							"quota": 0,
 							"quota_used": 0,
 							"rate_limit_5h": 0,
@@ -847,6 +849,14 @@ func TestAPIContracts(t *testing.T) {
 					"payment_visible_method_wxpay_enabled": false,
 					"openai_advanced_scheduler_enabled": true,
 					"openai_allow_claude_code_codex_plugin": false,
+					"openai_codex_ua_profile": {
+						"codex_version": "0.136.0",
+						"originator": "codex-tui",
+						"os_fingerprint": "Mac OS 26.5.0; arm64",
+						"terminal_token": "Apple_Terminal/470.2",
+						"user_agent": "codex-tui/0.136.0 (Mac OS 26.5.0; arm64) Apple_Terminal/470.2 (codex-tui; 0.136.0)"
+					},
+					"openai_codex_user_agent": "",
 					"openai_fast_policy_settings": {
 						"rules": []
 					},
@@ -1084,6 +1094,14 @@ func TestAPIContracts(t *testing.T) {
 					"payment_visible_method_wxpay_enabled": false,
 					"openai_advanced_scheduler_enabled": false,
 					"openai_allow_claude_code_codex_plugin": false,
+					"openai_codex_ua_profile": {
+						"codex_version": "0.136.0",
+						"originator": "codex-tui",
+						"os_fingerprint": "Mac OS 26.5.0; arm64",
+						"terminal_token": "Apple_Terminal/470.2",
+						"user_agent": "codex-tui/0.136.0 (Mac OS 26.5.0; arm64) Apple_Terminal/470.2 (codex-tui; 0.136.0)"
+					},
+					"openai_codex_user_agent": "",
 					"openai_fast_policy_settings": {
 						"rules": []
 					},
@@ -1634,7 +1652,11 @@ func (s *stubAccountRepo) GetByID(ctx context.Context, id int64) (*service.Accou
 }
 
 func (s *stubAccountRepo) GetByIDs(ctx context.Context, ids []int64) ([]*service.Account, error) {
-	return nil, errors.New("not implemented")
+	accounts := make([]*service.Account, 0, len(ids))
+	for _, id := range ids {
+		accounts = append(accounts, &service.Account{ID: id, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth})
+	}
+	return accounts, nil
 }
 
 func (s *stubAccountRepo) ExistsByID(ctx context.Context, id int64) (bool, error) {
@@ -1661,7 +1683,7 @@ func (s *stubAccountRepo) List(ctx context.Context, params pagination.Pagination
 	return nil, nil, errors.New("not implemented")
 }
 
-func (s *stubAccountRepo) ListWithFilters(ctx context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64, privacyMode, planType string) ([]service.Account, *pagination.PaginationResult, error) {
+func (s *stubAccountRepo) ListWithFilters(ctx context.Context, params pagination.PaginationParams, filters service.AccountListFilters) ([]service.Account, *pagination.PaginationResult, error) {
 	return nil, nil, errors.New("not implemented")
 }
 
@@ -1674,6 +1696,10 @@ func (s *stubAccountRepo) ListActive(ctx context.Context) ([]service.Account, er
 }
 
 func (s *stubAccountRepo) ListByPlatform(ctx context.Context, platform string) ([]service.Account, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (s *stubAccountRepo) ListByPlatformForValidation(ctx context.Context, platform string) ([]service.Account, error) {
 	return nil, errors.New("not implemented")
 }
 

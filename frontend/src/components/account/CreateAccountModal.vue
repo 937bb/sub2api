@@ -2877,6 +2877,7 @@
         :show-mobile-refresh-token-option="form.platform === 'openai'"
         :show-session-token-option="false"
         :show-access-token-option="false"
+        :show-personal-access-token-option="form.platform === 'openai'"
         :show-codex-session-import-option="form.platform === 'openai'"
         :platform="form.platform"
         :show-project-id="geminiOAuthType === 'code_assist'"
@@ -2885,6 +2886,7 @@
         @validate-refresh-token="handleValidateRefreshToken"
         @validate-mobile-refresh-token="handleOpenAIValidateMobileRT"
         @validate-session-token="handleValidateSessionToken"
+        @import-personal-access-token="handleOpenAIImportPersonalAccessToken"
         @import-codex-session="handleOpenAIImportCodexSession"
       />
 
@@ -3272,6 +3274,7 @@ interface OAuthFlowExposed {
   sessionKey: string
   refreshToken: string
   sessionToken: string
+  personalAccessToken: string
   codexSession: string
   inputMethod: AuthInputMethod
   reset: () => void
@@ -4916,6 +4919,15 @@ const formatCodexImportMessages = (messages?: CodexSessionImportMessage[]) => {
       return `#${item.index}${name}: ${item.message}`
     })
     .join('\n')
+}
+
+const handleOpenAIImportPersonalAccessToken = async (token: string) => {
+  const trimmed = token.trim()
+  if (!trimmed) {
+    openaiOAuth.error.value = t('admin.accounts.oauth.openai.personalAccessTokenEmpty')
+    return
+  }
+  await handleOpenAIImportCodexSession(JSON.stringify({ personal_access_token: trimmed }))
 }
 
 const handleOpenAIImportCodexSession = async (content: string) => {

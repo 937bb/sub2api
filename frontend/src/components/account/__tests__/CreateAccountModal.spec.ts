@@ -7,6 +7,7 @@ const {
   createOpenAIAccountFromRefreshTokenMock,
   checkMixedChannelRiskMock,
   refreshOpenAITokenMock,
+  importCodexSessionMock,
   getWebSearchEmulationConfigMock,
   getSettingsMock,
   listTLSFingerprintProfilesMock
@@ -15,6 +16,7 @@ const {
   createOpenAIAccountFromRefreshTokenMock: vi.fn(),
   checkMixedChannelRiskMock: vi.fn(),
   refreshOpenAITokenMock: vi.fn(),
+  importCodexSessionMock: vi.fn(),
   getWebSearchEmulationConfigMock: vi.fn(),
   getSettingsMock: vi.fn(),
   listTLSFingerprintProfilesMock: vi.fn()
@@ -44,7 +46,7 @@ vi.mock('@/api/admin', () => ({
       refreshOpenAIToken: refreshOpenAITokenMock,
       generateAuthUrl: vi.fn(),
       exchangeCode: vi.fn(),
-      importCodexSession: vi.fn()
+      importCodexSession: importCodexSessionMock
     },
     settings: {
       getWebSearchEmulationConfig: getWebSearchEmulationConfigMock,
@@ -111,7 +113,11 @@ const SelectStub = defineComponent({
 
 const OAuthAuthorizationFlowStub = defineComponent({
   name: 'OAuthAuthorizationFlow',
-  emits: ['validate-refresh-token'],
+  emits: ['validate-refresh-token', 'import-personal-access-token', 'import-codex-session'],
+  setup(_, { emit }) {
+    const emitCodexSession = () => emit('import-codex-session', '{"personal_access_token":"pat-test"}')
+    return { emitCodexSession }
+  },
   template: `
     <div data-testid="oauth-flow">
       <button
@@ -120,6 +126,20 @@ const OAuthAuthorizationFlowStub = defineComponent({
         @click="$emit('validate-refresh-token', 'rt-test')"
       >
         validate refresh token
+      </button>
+      <button
+        type="button"
+        data-testid="emit-personal-access-token"
+        @click="$emit('import-personal-access-token', 'pat-direct')"
+      >
+        import personal access token
+      </button>
+      <button
+        type="button"
+        data-testid="emit-codex-session"
+        @click="emitCodexSession"
+      >
+        import codex session
       </button>
     </div>
   `
@@ -155,6 +175,7 @@ describe('CreateAccountModal', () => {
     createOpenAIAccountFromRefreshTokenMock.mockReset()
     checkMixedChannelRiskMock.mockReset()
     refreshOpenAITokenMock.mockReset()
+    importCodexSessionMock.mockReset()
     getWebSearchEmulationConfigMock.mockReset()
     getSettingsMock.mockReset()
     listTLSFingerprintProfilesMock.mockReset()
@@ -169,6 +190,13 @@ describe('CreateAccountModal', () => {
       email: 'openai@example.com',
       name: 'OpenAI User',
       privacy_mode: 'training_disabled'
+    })
+    importCodexSessionMock.mockResolvedValue({
+      total: 1,
+      created: 1,
+      updated: 0,
+      skipped: 0,
+      failed: 0
     })
     getWebSearchEmulationConfigMock.mockResolvedValue({ enabled: false, providers: [] })
     getSettingsMock.mockResolvedValue({})
@@ -212,6 +240,58 @@ describe('CreateAccountModal', () => {
     expect(payload.extra).not.toHaveProperty('openai_oauth_responses_websockets_v2_enabled')
     expect(payload.extra).not.toHaveProperty('openai_apikey_responses_websockets_v2_mode')
     expect(payload.extra).not.toHaveProperty('openai_apikey_responses_websockets_v2_enabled')
+  })
+
+  it('imports OpenAI Codex PAT JSON through the backend import endpoint', async () => {
+    const wrapper = mountModal()
+
+    await wrapper.get('input[data-tour="account-form-name"]').setValue('OpenAI PAT')
+    await wrapper.get('[data-testid="create-platform-openai"]').trigger('click')
+    await wrapper.get('[data-testid="create-openai-oauth-type"]').trigger('click')
+    await flushPromises()
+
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+    await wrapper.get('[data-testid="emit-codex-session"]').trigger('click')
+    await flushPromises()
+
+    expect(importCodexSessionMock).toHaveBeenCalledTimes(1)
+    const payload = importCodexSessionMock.mock.calls[0]?.[0]
+    expect(payload).toMatchObject({
+      content: '{"personal_access_token":"pat-test"}',
+      name: 'OpenAI PAT',
+      update_existing: true,
+      extra: expect.objectContaining({
+        openai_oauth_ws_mode: 'off'
+      })
+    })
+    expect(payload.credential_extras).not.toHaveProperty('personal_access_token')
+  })
+
+  it('imports OpenAI PAT direct input through the backend import endpoint', async () => {
+    const wrapper = mountModal()
+
+    await wrapper.get('input[data-tour="account-form-name"]').setValue('OpenAI PAT Direct')
+    await wrapper.get('[data-testid="create-platform-openai"]').trigger('click')
+    await wrapper.get('[data-testid="create-openai-oauth-type"]').trigger('click')
+    await flushPromises()
+
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+    await wrapper.get('[data-testid="emit-personal-access-token"]').trigger('click')
+    await flushPromises()
+
+    expect(importCodexSessionMock).toHaveBeenCalledTimes(1)
+    const payload = importCodexSessionMock.mock.calls[0]?.[0]
+    expect(payload).toMatchObject({
+      content: '{"personal_access_token":"pat-direct"}',
+      name: 'OpenAI PAT Direct',
+      update_existing: true,
+      extra: expect.objectContaining({
+        openai_oauth_ws_mode: 'off'
+      })
+    })
+    expect(payload.credential_extras).not.toHaveProperty('personal_access_token')
   })
 
   it('preserves OpenAI APIKey passthrough and APIKey WS payload fields', async () => {

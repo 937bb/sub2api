@@ -2968,8 +2968,8 @@ func (s *OpenAIGatewayService) GetAccessToken(ctx context.Context, account *Acco
 			}
 			return accessToken, "oauth", nil
 		}
-		// 降级：TokenProvider 未配置时直接从账号读取
-		accessToken := account.GetOpenAIAccessToken()
+		// 降级：TokenProvider 未配置时直接从账号读取，仍按 OAuth-like bearer 优先级处理 PAT。
+		accessToken := account.GetOpenAIOAuthBearerToken()
 		if accessToken == "" {
 			return "", "", errors.New("access_token not found in credentials")
 		}
@@ -4173,6 +4173,9 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIOAuthAdapter(
 	req.Host = "chatgpt.com"
 	if chatgptAccountID := account.GetChatGPTAccountID(); chatgptAccountID != "" {
 		req.Header.Set("chatgpt-account-id", chatgptAccountID)
+	}
+	if account.IsOpenAIChatGPTFedRAMPAccount() {
+		req.Header.Set("x-openai-fedramp", "true")
 	}
 	isCompactRequest := isOpenAIResponsesCompactPath(c)
 	if isCompactRequest {

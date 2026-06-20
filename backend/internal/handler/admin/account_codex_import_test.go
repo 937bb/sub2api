@@ -318,6 +318,253 @@ func TestCodexIdentityKeysPreferStrongIdentifiers(t *testing.T) {
 	}
 }
 
+func TestNormalizeCodexImportPersonalAccessTokenStoresPATMetadataAndFedRAMP(t *testing.T) {
+	raw := map[string]any{
+		"personalAccessToken": "pat-token",
+		"email":               "pat@example.com",
+		"chatgptAccountId":    "acct-pat",
+		"chatgptUserId":       "user-pat",
+		"chatgptPlanType":     "team",
+		"account": map[string]any{
+			"isFedramp": true,
+		},
+	}
+
+	item, err := normalizeCodexImportEntry(codexImportEntry{Index: 1, Value: raw})
+	if err != nil {
+		t.Fatalf("normalizeCodexImportEntry error = %v", err)
+	}
+	if item.Credentials["personal_access_token"] != "pat-token" {
+		t.Fatalf("personal_access_token = %v, want pat-token", item.Credentials["personal_access_token"])
+	}
+	if _, ok := item.Credentials["access_token"]; ok {
+		t.Fatalf("access_token should not be stored for PAT import")
+	}
+	if item.Credentials["email"] != "pat@example.com" {
+		t.Fatalf("email = %v, want pat@example.com", item.Credentials["email"])
+	}
+	if item.Credentials["chatgpt_account_id"] != "acct-pat" {
+		t.Fatalf("chatgpt_account_id = %v, want acct-pat", item.Credentials["chatgpt_account_id"])
+	}
+	if item.Credentials["chatgpt_user_id"] != "user-pat" {
+		t.Fatalf("chatgpt_user_id = %v, want user-pat", item.Credentials["chatgpt_user_id"])
+	}
+	if item.Credentials["plan_type"] != "team" {
+		t.Fatalf("plan_type = %v, want team", item.Credentials["plan_type"])
+	}
+	if item.Credentials["chatgpt_account_is_fedramp"] != true {
+		t.Fatalf("chatgpt_account_is_fedramp = %v, want true", item.Credentials["chatgpt_account_is_fedramp"])
+	}
+	if _, ok := item.Extra["personal_access_token_sha256"]; ok {
+		t.Fatalf("personal_access_token_sha256 should not be recorded for PAT import")
+	}
+	if _, ok := item.Extra["access_token_sha256"]; ok {
+		t.Fatalf("access_token_sha256 should not be recorded for PAT import")
+	}
+	if item.TokenExpiresAt != nil {
+		t.Fatalf("TokenExpiresAt = %v, want nil for PAT import", item.TokenExpiresAt)
+	}
+}
+
+func TestNormalizeCodexImportPersonalAccessTokenIgnoresExpiredAccessToken(t *testing.T) {
+	raw := map[string]any{
+		"personal_access_token": "pat-token",
+		"accessToken":           buildCodexImportTestJWT(t, time.Now().Add(-time.Hour), nil),
+		"expiresAt":             time.Now().Add(-time.Hour).UTC().Format(time.RFC3339),
+	}
+
+	item, err := normalizeCodexImportEntry(codexImportEntry{Index: 1, Value: raw})
+	if err != nil {
+		t.Fatalf("normalizeCodexImportEntry error = %v", err)
+	}
+	if item.Credentials["personal_access_token"] != "pat-token" {
+		t.Fatalf("personal_access_token = %v, want pat-token", item.Credentials["personal_access_token"])
+	}
+	if _, ok := item.Credentials["access_token"]; ok {
+		t.Fatalf("expired access_token should be ignored for PAT import")
+	}
+	if _, ok := item.Credentials["expires_at"]; ok {
+		t.Fatalf("expires_at should be ignored for PAT import")
+	}
+}
+
+func TestNormalizeCodexImportHCPAFormatExtractsAllFields(t *testing.T) {
+	accountExpiry := time.Now().Add(24 * time.Hour).UTC().Truncate(time.Second)
+	lastRefresh := time.Now().Add(-time.Hour).UTC().Truncate(time.Second)
+	raw := map[string]any{
+		"at":           "hcpa-access-token",
+		"rt":           "hcpa-refresh-token",
+		"id_token":     "hcpa-id-token",
+		"account_id":   "acct-hcpa",
+		"email":        "hcpa@example.com",
+		"expired":      accountExpiry.Format(time.RFC3339),
+		"disabled":     true,
+		"last_refresh": lastRefresh.Format(time.RFC3339),
+		"type":         "codex",
+		"headers": map[string]any{
+			"Authorization": "Bearer hcpa-pat-token",
+		},
+	}
+
+	item, err := normalizeCodexImportEntry(codexImportEntry{Index: 1, Value: raw})
+	if err != nil {
+		t.Fatalf("normalizeCodexImportEntry error = %v", err)
+	}
+	if item.ImportFormat != codexImportFormatHCPA {
+		t.Fatalf("ImportFormat = %q, want %q", item.ImportFormat, codexImportFormatHCPA)
+	}
+	if item.Credentials["personal_access_token"] != "hcpa-pat-token" {
+		t.Fatalf("personal_access_token = %v, want hcpa-pat-token", item.Credentials["personal_access_token"])
+	}
+	if item.Credentials["access_token"] != "hcpa-access-token" {
+		t.Fatalf("access_token = %v, want hcpa-access-token", item.Credentials["access_token"])
+	}
+	if item.Credentials["refresh_token"] != "hcpa-refresh-token" {
+		t.Fatalf("refresh_token = %v, want hcpa-refresh-token", item.Credentials["refresh_token"])
+	}
+	if item.Credentials["id_token"] != "hcpa-id-token" {
+		t.Fatalf("id_token = %v, want hcpa-id-token", item.Credentials["id_token"])
+	}
+	if item.Credentials["client_id"] == "" {
+		t.Fatalf("client_id should be stored when HCPA rt is present")
+	}
+	if item.Credentials["chatgpt_account_id"] != "acct-hcpa" {
+		t.Fatalf("chatgpt_account_id = %v, want acct-hcpa", item.Credentials["chatgpt_account_id"])
+	}
+	if item.Credentials["email"] != "hcpa@example.com" {
+		t.Fatalf("email = %v, want hcpa@example.com", item.Credentials["email"])
+	}
+	if item.Status != "disabled" {
+		t.Fatalf("Status = %q, want disabled", item.Status)
+	}
+	if item.AccountExpiresAt == nil || item.AccountExpiresAt.Unix() != accountExpiry.Unix() {
+		t.Fatalf("AccountExpiresAt = %v, want %s", item.AccountExpiresAt, accountExpiry)
+	}
+	if item.Extra["import_source"] != codexImportFormatHCPA || item.Extra["import_format"] != codexImportFormatHCPA {
+		t.Fatalf("HCPA import markers missing: %v", item.Extra)
+	}
+	if item.Extra["hcpa_disabled"] != true {
+		t.Fatalf("hcpa_disabled = %v, want true", item.Extra["hcpa_disabled"])
+	}
+	if item.Extra["hcpa_last_refresh_at"] != lastRefresh.Format(time.RFC3339) {
+		t.Fatalf("hcpa_last_refresh_at = %v, want %s", item.Extra["hcpa_last_refresh_at"], lastRefresh.Format(time.RFC3339))
+	}
+	if _, ok := item.Extra["personal_access_token_sha256"]; ok {
+		t.Fatalf("personal_access_token_sha256 should not be recorded for HCPA PAT import")
+	}
+	if _, ok := item.Extra["access_token_sha256"]; ok {
+		t.Fatalf("access_token_sha256 should not be recorded for HCPA PAT import")
+	}
+
+	accountExpiresAt, credentialExpiresAt, _, _, err := resolveCodexImportExpiry(CodexSessionImportRequest{}, item)
+	if err != nil {
+		t.Fatalf("resolveCodexImportExpiry error = %v", err)
+	}
+	if accountExpiresAt == nil || *accountExpiresAt != accountExpiry.Unix() {
+		t.Fatalf("account expires_at = %v, want %d", accountExpiresAt, accountExpiry.Unix())
+	}
+	if credentialExpiresAt != nil {
+		t.Fatalf("credential expires_at = %v, want nil for opaque HCPA at", credentialExpiresAt)
+	}
+}
+
+func TestResolveCodexImportExpiryForPersonalAccessTokenDoesNotRequireExpiry(t *testing.T) {
+	item := &codexImportAccount{
+		PersonalAccessToken: "pat-token",
+		Credentials:         map[string]any{"personal_access_token": "pat-token"},
+		WarningTexts:        []string{},
+	}
+
+	accountExpiresAt, credentialExpiresAt, autoPause, warnings, err := resolveCodexImportExpiry(CodexSessionImportRequest{}, item)
+	if err != nil {
+		t.Fatalf("resolveCodexImportExpiry error = %v", err)
+	}
+	if accountExpiresAt != nil || credentialExpiresAt != nil || autoPause != nil {
+		t.Fatalf("PAT without requested expiry should not force expiry: account=%v credential=%v auto=%v", accountExpiresAt, credentialExpiresAt, autoPause)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %v, want none", warnings)
+	}
+
+	requestExpiresAt := time.Now().Add(time.Hour).UTC().Unix()
+	autoPauseInput := false
+	accountExpiresAt, credentialExpiresAt, autoPause, _, err = resolveCodexImportExpiry(CodexSessionImportRequest{
+		ExpiresAt:          &requestExpiresAt,
+		AutoPauseOnExpired: &autoPauseInput,
+	}, item)
+	if err != nil {
+		t.Fatalf("resolveCodexImportExpiry with request expiry error = %v", err)
+	}
+	if accountExpiresAt == nil || *accountExpiresAt != requestExpiresAt {
+		t.Fatalf("account expires_at = %v, want %d", accountExpiresAt, requestExpiresAt)
+	}
+	if credentialExpiresAt != nil {
+		t.Fatalf("credential expires_at = %v, want nil for PAT", credentialExpiresAt)
+	}
+	if autoPause == nil || *autoPause != false {
+		t.Fatalf("autoPause = %v, want false", autoPause)
+	}
+}
+
+func TestMergeCodexImportCredentialsPersonalAccessTokenClearsStaleOAuthFields(t *testing.T) {
+	existing := map[string]any{
+		"access_token":       "old-access-token",
+		"refresh_token":      "old-refresh-token",
+		"client_id":          "old-client-id",
+		"id_token":           "old-id-token",
+		"expires_at":         "2026-08-05T13:40:42Z",
+		"unrelated_existing": "keep",
+	}
+	incoming := map[string]any{
+		"personal_access_token": "pat-new",
+		"chatgpt_account_id":    "acct-new",
+	}
+	item := &codexImportAccount{PersonalAccessToken: "pat-new"}
+
+	merged := mergeCodexImportCredentials(existing, incoming, item)
+
+	if merged["personal_access_token"] != "pat-new" {
+		t.Fatalf("personal_access_token = %v, want pat-new", merged["personal_access_token"])
+	}
+	for _, key := range []string{"access_token", "refresh_token", "client_id", "id_token", "expires_at"} {
+		if _, ok := merged[key]; ok {
+			t.Fatalf("%s should be cleared on PAT import", key)
+		}
+	}
+	if merged["unrelated_existing"] != "keep" {
+		t.Fatalf("unrelated_existing = %v, want keep", merged["unrelated_existing"])
+	}
+}
+
+func TestMergeCodexImportCredentialsMissingPersonalAccessTokenPreservesExistingPAT(t *testing.T) {
+	existing := map[string]any{
+		"personal_access_token": "pat-existing",
+		"access_token":          "old-access-token",
+		"refresh_token":         "old-refresh-token",
+		"client_id":             "old-client-id",
+	}
+	incoming := map[string]any{
+		"access_token": "new-access-token",
+		"expires_at":   "2026-08-05T13:40:42Z",
+	}
+	item := &codexImportAccount{AccessToken: "new-access-token"}
+
+	merged := mergeCodexImportCredentials(existing, incoming, item)
+
+	if merged["personal_access_token"] != "pat-existing" {
+		t.Fatalf("personal_access_token = %v, want preserved PAT", merged["personal_access_token"])
+	}
+	if merged["access_token"] != "new-access-token" {
+		t.Fatalf("access_token = %v, want new-access-token", merged["access_token"])
+	}
+	if _, ok := merged["refresh_token"]; ok {
+		t.Fatalf("refresh_token should be cleared when incoming has no refresh token")
+	}
+	if _, ok := merged["client_id"]; ok {
+		t.Fatalf("client_id should be cleared when incoming has no refresh token")
+	}
+}
+
 func buildCodexImportTestJWT(t *testing.T, exp time.Time, extraClaims map[string]any) string {
 	t.Helper()
 	header := map[string]any{

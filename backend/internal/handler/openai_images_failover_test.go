@@ -34,6 +34,10 @@ func (r openAIImagesFailoverAccountRepo) GetByID(_ context.Context, id int64) (*
 	return nil, service.ErrNoAvailableAccounts
 }
 
+func (r openAIImagesFailoverAccountRepo) UpdateExtra(_ context.Context, _ int64, _ map[string]any) error {
+	return nil
+}
+
 func (r openAIImagesFailoverAccountRepo) ListSchedulableByGroupIDAndPlatform(_ context.Context, _ int64, platform string) ([]service.Account, error) {
 	return r.accountsForPlatform(platform), nil
 }

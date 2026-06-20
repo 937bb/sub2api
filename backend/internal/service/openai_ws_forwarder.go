@@ -1271,6 +1271,9 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 		if chatgptAccountID := account.GetChatGPTAccountID(); chatgptAccountID != "" {
 			headers.Set("chatgpt-account-id", chatgptAccountID)
 		}
+		if account.IsOpenAIChatGPTFedRAMPAccount() {
+			headers.Set("x-openai-fedramp", "true")
+		}
 		headers.Set("version", safeOpenAICodexUAComponent(fingerprint.UAProfile.CodexVersion, codexCLIVersion))
 		headers.Set("originator", safeOpenAICodexUAComponent(fingerprint.UAProfile.Originator, codexOfficialOriginator))
 	}

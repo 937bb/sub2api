@@ -2,8 +2,10 @@ package admin
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strconv"
 	"strings"
 	"time"
@@ -177,8 +179,34 @@ func (h *AccountHandler) ExportData(c *gin.Context) {
 }
 
 func (h *AccountHandler) ImportData(c *gin.Context) {
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+
+	if codexReq, ok, err := parseHCPADataImportRequest(body); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	} else if ok {
+		entries, err := parseCodexSessionImportEntries(codexReq)
+		if err != nil {
+			response.BadRequest(c, err.Error())
+			return
+		}
+		if len(entries) == 0 {
+			response.BadRequest(c, "请输入 accessToken 或 Codex session JSON")
+			return
+		}
+		executeAdminIdempotentJSON(c, "admin.accounts.import_data_hcpa", codexReq, service.DefaultWriteIdempotencyTTL(), func(ctx context.Context) (any, error) {
+			result, importErr := h.importCodexSessions(ctx, codexReq, entries)
+			return codexImportResultAsDataImportResult(result), importErr
+		})
+		return
+	}
+
 	var req DataImportRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if err := json.Unmarshal(body, &req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
 	}
@@ -191,6 +219,52 @@ func (h *AccountHandler) ImportData(c *gin.Context) {
 	executeAdminIdempotentJSON(c, "admin.accounts.import_data", req, service.DefaultWriteIdempotencyTTL(), func(ctx context.Context) (any, error) {
 		return h.importData(ctx, req)
 	})
+}
+
+func parseHCPADataImportRequest(body []byte) (CodexSessionImportRequest, bool, error) {
+	var envelope struct {
+		Data                 json.RawMessage `json:"data"`
+		SkipDefaultGroupBind *bool           `json:"skip_default_group_bind"`
+	}
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return CodexSessionImportRequest{}, false, err
+	}
+	if len(envelope.Data) == 0 || string(envelope.Data) == "null" {
+		return CodexSessionImportRequest{}, false, nil
+	}
+
+	var raw map[string]any
+	if err := json.Unmarshal(envelope.Data, &raw); err != nil {
+		return CodexSessionImportRequest{}, false, nil
+	}
+	if _, ok := hcpaAuthorizationHeader(raw); !ok {
+		return CodexSessionImportRequest{}, false, nil
+	}
+	delete(raw, "type")
+
+	content, err := json.Marshal(raw)
+	if err != nil {
+		return CodexSessionImportRequest{}, false, err
+	}
+	return CodexSessionImportRequest{
+		Content:              string(content),
+		SkipDefaultGroupBind: envelope.SkipDefaultGroupBind,
+	}, true, nil
+}
+
+func codexImportResultAsDataImportResult(result CodexSessionImportResult) DataImportResult {
+	out := DataImportResult{
+		AccountCreated: result.Created + result.Updated,
+		AccountFailed:  result.Failed,
+	}
+	for _, item := range result.Errors {
+		out.Errors = append(out.Errors, DataImportError{
+			Kind:    "account",
+			Name:    item.Name,
+			Message: item.Message,
+		})
+	}
+	return out
 }
 
 func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) (DataImportResult, error) {

@@ -104,7 +104,7 @@ func TestExportDataIncludesSecrets(t *testing.T) {
 			Name:        "account",
 			Platform:    service.PlatformOpenAI,
 			Type:        service.AccountTypeOAuth,
-			Credentials: map[string]any{"token": "secret"},
+			Credentials: map[string]any{"token": "secret", "personal_access_token": "pat-secret"},
 			Extra: map[string]any{
 				"note": "x",
 				service.OpenAICodexFingerprintExtraKey: map[string]any{
@@ -138,6 +138,7 @@ func TestExportDataIncludesSecrets(t *testing.T) {
 	require.Equal(t, "pass", resp.Data.Proxies[0].Password)
 	require.Len(t, resp.Data.Accounts, 1)
 	require.Equal(t, "secret", resp.Data.Accounts[0].Credentials["token"])
+	require.Equal(t, "pat-secret", resp.Data.Accounts[0].Credentials["personal_access_token"])
 	require.Equal(t, "x", resp.Data.Accounts[0].Extra["note"])
 	fingerprint, ok := resp.Data.Accounts[0].Extra[service.OpenAICodexFingerprintExtraKey].(map[string]any)
 	require.True(t, ok)
@@ -234,6 +235,48 @@ func TestExportDataSelectedIDsOverrideFilters(t *testing.T) {
 	require.Equal(t, 0, resp.Code)
 	require.Len(t, resp.Data.Accounts, 2)
 	require.Equal(t, 0, adminSvc.lastListAccounts.calls)
+}
+
+func TestImportDataIncludesPersonalAccessTokenAndIgnoresMissingField(t *testing.T) {
+	router, adminSvc := setupAccountDataRouter()
+
+	dataPayload := map[string]any{
+		"data": map[string]any{
+			"type":    dataType,
+			"version": dataVersion,
+			"proxies": []map[string]any{},
+			"accounts": []map[string]any{
+				{
+					"name":        "pat-account",
+					"platform":    service.PlatformOpenAI,
+					"type":        service.AccountTypeOAuth,
+					"credentials": map[string]any{"personal_access_token": "pat-secret", "chatgpt_account_id": "acct"},
+					"concurrency": 3,
+					"priority":    50,
+				},
+				{
+					"name":        "legacy-account",
+					"platform":    service.PlatformOpenAI,
+					"type":        service.AccountTypeOAuth,
+					"credentials": map[string]any{"access_token": "access-secret"},
+					"concurrency": 3,
+					"priority":    50,
+				},
+			},
+		},
+		"skip_default_group_bind": true,
+	}
+
+	body, _ := json.Marshal(dataPayload)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/data", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	require.Len(t, adminSvc.createdAccounts, 2)
+	require.Equal(t, "pat-secret", adminSvc.createdAccounts[0].Credentials["personal_access_token"])
+	require.NotContains(t, adminSvc.createdAccounts[1].Credentials, "personal_access_token")
 }
 
 func TestImportDataMigratesLegacyOpenAIOAuthExtra(t *testing.T) {

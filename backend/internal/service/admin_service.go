@@ -284,6 +284,7 @@ type CreateAccountInput struct {
 	RateMultiplier     *float64 // 账号计费倍率（>=0，允许 0）
 	LoadFactor         *int
 	GroupIDs           []int64
+	Status             string
 	ExpiresAt          *int64
 	AutoPauseOnExpired *bool
 	// SkipDefaultGroupBind prevents auto-binding to platform default group when GroupIDs is empty.
@@ -2557,6 +2558,10 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 		}
 	}
 
+	status := input.Status
+	if status == "" {
+		status = StatusActive
+	}
 	account := &Account{
 		Name:        input.Name,
 		Notes:       normalizeAccountNotes(input.Notes),
@@ -2567,7 +2572,7 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 		ProxyID:     input.ProxyID,
 		Concurrency: input.Concurrency,
 		Priority:    input.Priority,
-		Status:      StatusActive,
+		Status:      status,
 		Schedulable: true,
 	}
 	normalizeOpenAICodexFingerprintExtraForCreate(account)

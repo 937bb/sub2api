@@ -24,6 +24,69 @@ func TestAccount_OpenAISetupTokenAdapterBoundaryHelpers(t *testing.T) {
 	require.False(t, apiKeyWithoutPrivacy.IsPrivacySet())
 }
 
+func TestAccount_OpenAIPersonalAccessTokenHelpersAreOAuthLikeOnly(t *testing.T) {
+	oauth := &Account{
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"access_token":          "access-token",
+			"personal_access_token": "pat-token",
+		},
+	}
+	require.Equal(t, "pat-token", oauth.GetOpenAIPersonalAccessToken())
+	require.Equal(t, "pat-token", oauth.GetOpenAIOAuthBearerToken())
+
+	setupToken := &Account{
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeSetupToken,
+		Credentials: map[string]any{
+			"access_token":          "setup-access-token",
+			"personal_access_token": "setup-pat-token",
+		},
+	}
+	require.Equal(t, "setup-pat-token", setupToken.GetOpenAIOAuthBearerToken())
+
+	oauthWithoutPAT := &Account{
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"access_token": "access-token",
+		},
+	}
+	require.Equal(t, "access-token", oauthWithoutPAT.GetOpenAIOAuthBearerToken())
+
+	apiKey := &Account{
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"personal_access_token": "must-not-be-read",
+			"access_token":          "must-not-be-read",
+		},
+	}
+	require.Empty(t, apiKey.GetOpenAIPersonalAccessToken())
+	require.Empty(t, apiKey.GetOpenAIOAuthBearerToken())
+}
+
+func TestAccount_IsOpenAIChatGPTFedRAMPAccount(t *testing.T) {
+	oauth := &Account{
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"chatgpt_account_is_fedramp": "true",
+		},
+	}
+	require.True(t, oauth.IsOpenAIChatGPTFedRAMPAccount())
+
+	apiKey := &Account{
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"chatgpt_account_is_fedramp": true,
+		},
+	}
+	require.False(t, apiKey.IsOpenAIChatGPTFedRAMPAccount())
+}
+
 func TestShouldBlockAccountForPrivacyRequirement_OpenAIOnlyBlocksFullOAuth(t *testing.T) {
 	group := &Group{Name: "privacy-required", Platform: PlatformOpenAI, RequirePrivacySet: true}
 

@@ -305,6 +305,36 @@ func (a *Account) GetCredentialAsInt64(key string) int64 {
 	return 0
 }
 
+func (a *Account) GetCredentialAsBool(key string) bool {
+	if a == nil || a.Credentials == nil {
+		return false
+	}
+	val, ok := a.Credentials[key]
+	if !ok || val == nil {
+		return false
+	}
+	switch v := val.(type) {
+	case bool:
+		return v
+	case string:
+		parsed, err := strconv.ParseBool(strings.TrimSpace(v))
+		return err == nil && parsed
+	case float64:
+		return v != 0
+	case float32:
+		return v != 0
+	case int:
+		return v != 0
+	case int64:
+		return v != 0
+	case json.Number:
+		if i, err := v.Int64(); err == nil {
+			return i != 0
+		}
+	}
+	return false
+}
+
 func (a *Account) IsTempUnschedulableEnabled() bool {
 	if a.Credentials == nil {
 		return false
@@ -1108,6 +1138,23 @@ func (a *Account) GetOpenAIAccessToken() string {
 	return a.GetCredential("access_token")
 }
 
+func (a *Account) GetOpenAIPersonalAccessToken() string {
+	if !a.IsOpenAIOAuthLike() {
+		return ""
+	}
+	return a.GetCredential("personal_access_token")
+}
+
+func (a *Account) GetOpenAIOAuthBearerToken() string {
+	if !a.IsOpenAIOAuthLike() {
+		return ""
+	}
+	if token := strings.TrimSpace(a.GetOpenAIPersonalAccessToken()); token != "" {
+		return token
+	}
+	return strings.TrimSpace(a.GetOpenAIAccessToken())
+}
+
 func (a *Account) GetOpenAIRefreshToken() string {
 	if !a.IsOpenAIOAuth() {
 		return ""
@@ -1141,6 +1188,13 @@ func (a *Account) GetChatGPTAccountID() string {
 		return ""
 	}
 	return a.GetCredential("chatgpt_account_id")
+}
+
+func (a *Account) IsOpenAIChatGPTFedRAMPAccount() bool {
+	if !a.IsOpenAIOAuthLike() {
+		return false
+	}
+	return a.GetCredentialAsBool("chatgpt_account_is_fedramp")
 }
 
 func (a *Account) GetOpenAIDeviceID() string {

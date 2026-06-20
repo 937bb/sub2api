@@ -562,8 +562,8 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 
 	if account.IsOAuth() {
 		isOAuth = true
-		// OAuth - use Bearer token with ChatGPT internal API
-		authToken = account.GetOpenAIAccessToken()
+		// OAuth-like accounts may use either OAuth access_token or Codex PAT bearer.
+		authToken = account.GetOpenAIOAuthBearerToken()
 		if authToken == "" {
 			return s.sendErrorAndEnd(c, "No access token available")
 		}
@@ -747,7 +747,7 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 	switch {
 	case account.IsOAuth():
 		isOAuth = true
-		authToken = account.GetOpenAIAccessToken()
+		authToken = account.GetOpenAIOAuthBearerToken()
 		if authToken == "" {
 			return s.sendErrorAndEnd(c, "No access token available")
 		}
@@ -1661,7 +1661,7 @@ func (s *AccountTestService) testOpenAIImageAPIKey(c *gin.Context, ctx context.C
 
 // testOpenAIImageOAuth tests OpenAI image generation using an OAuth account via Codex /responses API.
 func (s *AccountTestService) testOpenAIImageOAuth(c *gin.Context, ctx context.Context, account *Account, modelID, prompt string) error {
-	authToken := account.GetOpenAIAccessToken()
+	authToken := account.GetOpenAIOAuthBearerToken()
 	if authToken == "" {
 		return s.sendErrorAndEnd(c, "No access token available")
 	}

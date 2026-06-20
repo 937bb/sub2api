@@ -140,6 +140,10 @@ func (p *OpenAITokenProvider) GetAccessToken(ctx context.Context, account *Accou
 		return "", errors.New("not an openai oauth account")
 	}
 
+	if token := strings.TrimSpace(account.GetOpenAIPersonalAccessToken()); token != "" {
+		return token, nil
+	}
+
 	if account.Type == AccountTypeSetupToken {
 		// setup-token 只在 OpenAI adapter 边界复用 access_token；不读写 OAuth token cache，
 		// 避免账号类型/凭证切换后复用旧 OAuth access_token。
@@ -237,7 +241,7 @@ func (p *OpenAITokenProvider) GetAccessToken(ctx context.Context, account *Accou
 		}
 	}
 
-	accessToken := account.GetCredential("access_token")
+	accessToken := account.GetOpenAIOAuthBearerToken()
 	if strings.TrimSpace(accessToken) == "" {
 		return "", errors.New("access_token not found in credentials")
 	}
@@ -247,7 +251,7 @@ func (p *OpenAITokenProvider) GetAccessToken(ctx context.Context, account *Accou
 		latestAccount, isStale := CheckTokenVersion(ctx, account, p.accountRepo)
 		if isStale && latestAccount != nil {
 			slog.Debug("openai_token_version_stale_use_latest", "account_id", account.ID)
-			accessToken = latestAccount.GetOpenAIAccessToken()
+			accessToken = latestAccount.GetOpenAIOAuthBearerToken()
 			if strings.TrimSpace(accessToken) == "" {
 				return "", errors.New("access_token not found after version check")
 			}
