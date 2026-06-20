@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
 func TestParseCodexSessionImportEntriesSupportsRawTokenJSONAndArray(t *testing.T) {
@@ -301,21 +303,69 @@ func TestResolveCodexImportExpiryForNoRefreshTokenUsesEarlierRequestExpiry(t *te
 func TestCodexIdentityKeysPreferStrongIdentifiers(t *testing.T) {
 	keys := buildCodexIdentityKeys("acct-1", "user-1", "same@example.com", "token")
 	for _, key := range keys {
-		if strings.HasPrefix(key, "email:") {
-			t.Fatalf("strong identity should not include email fallback: %v", keys)
+		if key == "account:acct-1" || key == "email:same@example.com" || key == "user:user-1" {
+			t.Fatalf("strong identity should not include broad fallback key %q: %v", key, keys)
+		}
+	}
+	for _, want := range []string{
+		"account_user:acct-1:user-1",
+		"account_email:acct-1:same@example.com",
+	} {
+		if !codexTestHasIdentityKey(keys, want) {
+			t.Fatalf("identity keys missing %q: %v", want, keys)
 		}
 	}
 
 	keys = buildCodexIdentityKeys("", "", "same@example.com", "token")
-	hasEmail := false
-	for _, key := range keys {
-		if key == "email:same@example.com" {
-			hasEmail = true
-		}
-	}
-	if !hasEmail {
+	if !codexTestHasIdentityKey(keys, "email:same@example.com") {
 		t.Fatalf("weak identity should include email fallback: %v", keys)
 	}
+}
+
+func TestCodexAccountIndexDoesNotMatchSameWorkspaceDifferentUser(t *testing.T) {
+	index := buildCodexAccountIndex([]service.Account{{
+		ID:   1,
+		Name: "existing-user-1",
+		Credentials: map[string]any{
+			"chatgpt_account_id": "acct-1",
+			"chatgpt_user_id":    "user-1",
+			"email":              "user1@example.com",
+			"access_token":       "token-1",
+		},
+	}})
+
+	keys := buildCodexIdentityKeys("acct-1", "user-2", "user2@example.com", "token-2")
+	if existing := index.Find(keys); existing != nil {
+		t.Fatalf("same workspace with different user matched account %d", existing.ID)
+	}
+}
+
+func TestCodexAccountIndexMatchesSameWorkspaceAndUser(t *testing.T) {
+	index := buildCodexAccountIndex([]service.Account{{
+		ID:   1,
+		Name: "existing-user-1",
+		Credentials: map[string]any{
+			"chatgpt_account_id": "acct-1",
+			"chatgpt_user_id":    "user-1",
+			"email":              "user1@example.com",
+			"access_token":       "token-1",
+		},
+	}})
+
+	keys := buildCodexIdentityKeys("acct-1", "user-1", "other@example.com", "token-2")
+	existing := index.Find(keys)
+	if existing == nil || existing.ID != 1 {
+		t.Fatalf("same workspace and user should match account 1, got %#v", existing)
+	}
+}
+
+func codexTestHasIdentityKey(keys []string, want string) bool {
+	for _, key := range keys {
+		if key == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestNormalizeCodexImportPersonalAccessTokenStoresPATMetadataAndFedRAMP(t *testing.T) {
