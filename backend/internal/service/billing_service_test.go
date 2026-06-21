@@ -331,12 +331,15 @@ func TestCalculateCost_LongContextAppliesMultiplierToCacheCreation5mAnd1h(t *tes
 
 func TestGetFallbackPricing_FamilyMatching(t *testing.T) {
 	svc := newTestBillingService()
+	floatPtr := func(v float64) *float64 { return &v }
 
 	tests := []struct {
-		name             string
-		model            string
-		expectedInput    float64
-		expectNilPricing bool
+		name              string
+		model             string
+		expectedInput     float64
+		expectedOutput    *float64
+		expectedCacheRead *float64
+		expectNilPricing  bool
 	}{
 		{name: "empty model", model: "   ", expectNilPricing: true},
 		{name: "claude opus 4.6", model: "claude-opus-4.6-20260201", expectedInput: 5e-6},
@@ -352,7 +355,38 @@ func TestGetFallbackPricing_FamilyMatching(t *testing.T) {
 		{name: "openai legacy gpt5.1 codex falls back to gpt5.3 codex", model: "gpt-5.1-codex", expectedInput: 1.5e-6},
 		{name: "openai legacy codex mini latest falls back to gpt5.3 codex", model: "codex-mini-latest", expectedInput: 1.5e-6},
 		{name: "openai unknown no fallback", model: "gpt-unknown-model", expectNilPricing: true},
+		{name: "deepseek v4 pro", model: "deepseek-v4-pro", expectedInput: 4.35e-7, expectedOutput: floatPtr(8.7e-7), expectedCacheRead: floatPtr(3.625e-9)},
+		{name: "deepseek v4 flash", model: "deepseek-v4-flash", expectedInput: 1.4e-7, expectedOutput: floatPtr(2.8e-7), expectedCacheRead: floatPtr(2.8e-9)},
+		{name: "deepseek chat alias", model: "deepseek-chat", expectedInput: 1.4e-7, expectedOutput: floatPtr(2.8e-7), expectedCacheRead: floatPtr(2.8e-9)},
+		{name: "deepseek reasoner alias", model: "deepseek-reasoner", expectedInput: 1.4e-7, expectedOutput: floatPtr(2.8e-7), expectedCacheRead: floatPtr(2.8e-9)},
+		{name: "glm 5.1 before glm 5", model: "glm-5.1", expectedInput: 1.4e-6, expectedOutput: floatPtr(4.4e-6), expectedCacheRead: floatPtr(0.26e-6)},
+		{name: "glm 5 turbo", model: "glm-5-turbo", expectedInput: 1.2e-6, expectedOutput: floatPtr(4e-6), expectedCacheRead: floatPtr(0.24e-6)},
+		{name: "glm 5", model: "glm-5", expectedInput: 1e-6, expectedOutput: floatPtr(3.2e-6), expectedCacheRead: floatPtr(0.2e-6)},
+		{name: "glm 4.7 flashx before flash", model: "glm-4.7-flashx", expectedInput: 0.07e-6, expectedOutput: floatPtr(0.4e-6), expectedCacheRead: floatPtr(0.01e-6)},
+		{name: "glm 4.7 flash free", model: "glm-4.7-flash", expectedInput: 0, expectedOutput: floatPtr(0), expectedCacheRead: floatPtr(0)},
+		{name: "glm 4.7", model: "glm-4.7", expectedInput: 0.6e-6, expectedOutput: floatPtr(2.2e-6), expectedCacheRead: floatPtr(0.11e-6)},
+		{name: "glm 4.6", model: "glm-4.6", expectedInput: 0.6e-6, expectedOutput: floatPtr(2.2e-6), expectedCacheRead: floatPtr(0.11e-6)},
+		{name: "glm 4.5 flash free", model: "glm-4.5-flash", expectedInput: 0, expectedOutput: floatPtr(0), expectedCacheRead: floatPtr(0)},
+		{name: "glm 4.5 airx before air", model: "glm-4.5-airx", expectedInput: 1.1e-6, expectedOutput: floatPtr(4.5e-6), expectedCacheRead: floatPtr(0.22e-6)},
+		{name: "glm 4.5 air before base", model: "glm-4.5-air", expectedInput: 0.2e-6, expectedOutput: floatPtr(1.1e-6), expectedCacheRead: floatPtr(0.03e-6)},
+		{name: "glm 4.5 x before base", model: "glm-4.5-x", expectedInput: 2.2e-6, expectedOutput: floatPtr(8.9e-6), expectedCacheRead: floatPtr(0.45e-6)},
+		{name: "glm 4.5", model: "glm-4.5", expectedInput: 0.6e-6, expectedOutput: floatPtr(2.2e-6), expectedCacheRead: floatPtr(0.11e-6)},
+		{name: "glm legacy 32b", model: "glm-4-32b-0414-128k", expectedInput: 0.1e-6, expectedOutput: floatPtr(0.1e-6)},
+		{name: "kimi for coding", model: "kimi-for-coding", expectedInput: 0.95e-6, expectedOutput: floatPtr(4e-6), expectedCacheRead: floatPtr(0.15e-6)},
+		{name: "kimi k2.6 before k2", model: "kimi-k2.6", expectedInput: 0.95e-6, expectedOutput: floatPtr(4e-6), expectedCacheRead: floatPtr(0.15e-6)},
+		{name: "kimi k2.5 before k2", model: "kimi-k2.5", expectedInput: 0.60e-6, expectedOutput: floatPtr(3e-6), expectedCacheRead: floatPtr(0.098e-6)},
+		{name: "kimi k2 thinking before k2", model: "kimi-k2-thinking-preview", expectedInput: 0.56e-6, expectedOutput: floatPtr(2.24e-6), expectedCacheRead: floatPtr(0.14e-6)},
+		{name: "kimi k2", model: "kimi-k2", expectedInput: 0.56e-6, expectedOutput: floatPtr(2.24e-6), expectedCacheRead: floatPtr(0.14e-6)},
+		{name: "minimax m3", model: "minimax-m3-long", expectedInput: 0.60e-6, expectedOutput: floatPtr(2.40e-6), expectedCacheRead: floatPtr(0.12e-6)},
+		{name: "minimax m2.7 highspeed before m2.7", model: "minimax-m2.7-highspeed", expectedInput: 0.60e-6, expectedOutput: floatPtr(2.40e-6), expectedCacheRead: floatPtr(0.06e-6)},
+		{name: "minimax m2.7", model: "minimax-m2.7", expectedInput: 0.30e-6, expectedOutput: floatPtr(1.20e-6), expectedCacheRead: floatPtr(0.06e-6)},
+		{name: "minimax m2.5", model: "minimax-m2.5", expectedInput: 0.30e-6, expectedOutput: floatPtr(1.20e-6), expectedCacheRead: floatPtr(0.03e-6)},
+		{name: "minimax m2.1", model: "minimax-m2.1", expectedInput: 0.30e-6, expectedOutput: floatPtr(1.20e-6), expectedCacheRead: floatPtr(0.03e-6)},
+		{name: "minimax m2", model: "minimax-m2", expectedInput: 0.30e-6, expectedOutput: floatPtr(1.20e-6), expectedCacheRead: floatPtr(0.03e-6)},
+		{name: "doubao embedding vision", model: "doubao-embedding-vision-251215", expectedInput: 0.098e-6, expectedOutput: floatPtr(0)},
 		{name: "non supported family", model: "qwen-max", expectNilPricing: true},
+		{name: "doubao text embedding no fallback", model: "doubao-embedding-text-240515", expectNilPricing: true},
+		{name: "moonshot v1 not covered", model: "moonshot-v1-8k", expectNilPricing: true},
 	}
 
 	for _, tt := range tests {
@@ -364,9 +398,83 @@ func TestGetFallbackPricing_FamilyMatching(t *testing.T) {
 			}
 			require.NotNil(t, pricing)
 			require.InDelta(t, tt.expectedInput, pricing.InputPricePerToken, 1e-12)
+			if tt.expectedOutput != nil {
+				require.InDelta(t, *tt.expectedOutput, pricing.OutputPricePerToken, 1e-12)
+			}
+			if tt.expectedCacheRead != nil {
+				require.InDelta(t, *tt.expectedCacheRead, pricing.CacheReadPricePerToken, 1e-14)
+			}
 		})
 	}
 }
+
+func TestGetModelPricing_DoubaoEmbeddingVisionImageInputRate(t *testing.T) {
+	svc := newTestBillingService()
+
+	for _, model := range []string{
+		"doubao-embedding-vision",
+		"doubao-embedding-vision-251215",
+		"Doubao-Embedding-Vision",
+	} {
+		t.Run(model, func(t *testing.T) {
+			pricing, err := svc.GetModelPricing(model)
+			require.NoError(t, err)
+			require.InDelta(t, 0.098e-6, pricing.InputPricePerToken, 1e-12)
+			require.InDelta(t, 0.252e-6, pricing.ImageInputPricePerToken, 1e-12)
+			require.Zero(t, pricing.OutputPricePerToken)
+		})
+	}
+}
+
+func TestCalculateCost_LongContextScalesImageInputPrice(t *testing.T) {
+	svc := NewBillingService(&config.Config{}, &PricingService{
+		pricingData: map[string]*LiteLLMModelPricing{
+			"long-context-image-input": {
+				InputCostPerToken:              1e-6,
+				InputCostPerImageToken:         3e-6,
+				OutputCostPerToken:             2e-6,
+				LongContextInputTokenThreshold: 100,
+				LongContextInputCostMultiplier: 2,
+			},
+		},
+	})
+
+	cost, err := svc.CalculateCost("long-context-image-input", UsageTokens{InputTokens: 101, ImageInputTokens: 10}, 1.0)
+	require.NoError(t, err)
+	want := float64(91)*1e-6*2 + float64(10)*3e-6*2
+	require.InDelta(t, want, cost.InputCost, 1e-15)
+}
+
+func TestCalculateCost_DoubaoEmbeddingVisionDifferentialInput(t *testing.T) {
+	svc := newTestBillingService()
+
+	mixed := UsageTokens{InputTokens: 1340, ImageInputTokens: 28}
+	cost, err := svc.CalculateCost("doubao-embedding-vision", mixed, 1.0)
+	require.NoError(t, err)
+	wantMixed := float64(1312)*0.098e-6 + float64(28)*0.252e-6
+	require.InDelta(t, wantMixed, cost.InputCost, 1e-15)
+	require.InDelta(t, wantMixed, cost.TotalCost, 1e-15)
+	require.Zero(t, cost.OutputCost)
+
+	textOnly := UsageTokens{InputTokens: 1340}
+	costText, err := svc.CalculateCost("doubao-embedding-vision", textOnly, 1.0)
+	require.NoError(t, err)
+	require.InDelta(t, float64(1340)*0.098e-6, costText.InputCost, 1e-15)
+
+	weird := UsageTokens{InputTokens: 10, ImageInputTokens: 50}
+	costWeird, err := svc.CalculateCost("doubao-embedding-vision", weird, 1.0)
+	require.NoError(t, err)
+	require.InDelta(t, float64(10)*0.252e-6, costWeird.InputCost, 1e-15)
+}
+
+func TestCalculateCost_ImageInputFallsBackToTextPrice(t *testing.T) {
+	svc := newTestBillingService()
+
+	cost, err := svc.CalculateCost("claude-sonnet-4", UsageTokens{InputTokens: 100, ImageInputTokens: 25}, 1.0)
+	require.NoError(t, err)
+	require.InDelta(t, float64(100)*3e-6, cost.InputCost, 1e-15)
+}
+
 func TestCalculateCostWithLongContext_BelowThreshold(t *testing.T) {
 	svc := newTestBillingService()
 
@@ -802,6 +910,7 @@ func TestGetModelPricing_MapsDynamicPriorityFieldsIntoBillingPricing(t *testing.
 			"dynamic-tier-model": {
 				InputCostPerToken:                   1e-6,
 				InputCostPerTokenPriority:           2e-6,
+				InputCostPerImageToken:              9e-6,
 				OutputCostPerToken:                  3e-6,
 				OutputCostPerTokenPriority:          6e-6,
 				CacheCreationInputTokenCost:         4e-6,
@@ -819,6 +928,7 @@ func TestGetModelPricing_MapsDynamicPriorityFieldsIntoBillingPricing(t *testing.
 	require.NoError(t, err)
 	require.InDelta(t, 1e-6, pricing.InputPricePerToken, 1e-12)
 	require.InDelta(t, 2e-6, pricing.InputPricePerTokenPriority, 1e-12)
+	require.InDelta(t, 9e-6, pricing.ImageInputPricePerToken, 1e-12)
 	require.InDelta(t, 3e-6, pricing.OutputPricePerToken, 1e-12)
 	require.InDelta(t, 6e-6, pricing.OutputPricePerTokenPriority, 1e-12)
 	require.InDelta(t, 4e-6, pricing.CacheCreation5mPrice, 1e-12)

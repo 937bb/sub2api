@@ -65,7 +65,7 @@ func tryModelFilePricing(billingService *BillingService, model string, tokens Us
 	if err != nil || pricing == nil {
 		return nil
 	}
-	cost := float64(tokens.InputTokens)*pricing.InputPricePerToken +
+	cost := computeInputCostWithImageTokens(tokens, pricing.InputPricePerToken, pricing.ImageInputPricePerToken) +
 		float64(tokens.OutputTokens)*pricing.OutputPricePerToken +
 		float64(tokens.CacheCreationTokens)*pricing.CacheCreationPricePerToken +
 		float64(tokens.CacheReadTokens)*pricing.CacheReadPricePerToken +

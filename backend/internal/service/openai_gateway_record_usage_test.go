@@ -178,6 +178,7 @@ func expectedOpenAICost(t *testing.T, svc *OpenAIGatewayService, model string, u
 
 	cost, err := svc.billingService.CalculateCost(model, UsageTokens{
 		InputTokens:         max(usage.InputTokens-usage.CacheReadInputTokens, 0),
+		ImageInputTokens:    usage.ImageInputTokens,
 		OutputTokens:        usage.OutputTokens,
 		CacheCreationTokens: usage.CacheCreationInputTokens,
 		CacheReadTokens:     usage.CacheReadInputTokens,
@@ -258,7 +259,7 @@ func TestOpenAIGatewayServiceRecordUsage_MissingPricingRecordsZeroCostUsageLog(t
 				InputTokens:  1200,
 				OutputTokens: 300,
 			},
-			Model:    "deepseek-v4-flash",
+			Model:    "unpriced-openai-model",
 			Duration: time.Second,
 		},
 		APIKey:        &APIKey{ID: 1002, Quota: 100, Group: &Group{RateMultiplier: 1}},
@@ -277,8 +278,8 @@ func TestOpenAIGatewayServiceRecordUsage_MissingPricingRecordsZeroCostUsageLog(t
 
 	require.NotNil(t, usageRepo.lastLog)
 	require.Equal(t, "resp_missing_pricing", usageRepo.lastLog.RequestID)
-	require.Equal(t, "deepseek-v4-flash", usageRepo.lastLog.Model)
-	require.Equal(t, "deepseek-v4-flash", usageRepo.lastLog.RequestedModel)
+	require.Equal(t, "unpriced-openai-model", usageRepo.lastLog.Model)
+	require.Equal(t, "unpriced-openai-model", usageRepo.lastLog.RequestedModel)
 	require.Equal(t, 1200, usageRepo.lastLog.InputTokens)
 	require.Equal(t, 300, usageRepo.lastLog.OutputTokens)
 	require.Zero(t, usageRepo.lastLog.TotalCost)
@@ -292,6 +293,40 @@ func TestOpenAIGatewayServiceRecordUsage_MissingPricingRecordsZeroCostUsageLog(t
 	require.Zero(t, billingRepo.lastCmd.APIKeyQuotaCost)
 	require.Zero(t, billingRepo.lastCmd.APIKeyRateLimitCost)
 	require.Zero(t, billingRepo.lastCmd.AccountQuotaCost)
+}
+
+func TestOpenAIGatewayServiceRecordUsage_BillsImageInputTokens(t *testing.T) {
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+	userRepo := &openAIRecordUsageUserRepoStub{}
+	subRepo := &openAIRecordUsageSubRepoStub{}
+	svc := newOpenAIRecordUsageServiceForTest(usageRepo, userRepo, subRepo, nil)
+
+	err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
+		Result: &OpenAIForwardResult{
+			RequestID: "resp_image_input_tokens",
+			Usage: OpenAIUsage{
+				InputTokens:      1340,
+				ImageInputTokens: 28,
+			},
+			Model:    "doubao-embedding-vision",
+			Duration: time.Second,
+		},
+		APIKey: &APIKey{
+			ID:    1003,
+			Group: &Group{RateMultiplier: 1},
+		},
+		User:    &User{ID: 2003},
+		Account: &Account{ID: 3003, Type: AccountTypeAPIKey},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, usageRepo.lastLog)
+	require.Equal(t, 1340, usageRepo.lastLog.InputTokens)
+	wantTotal := (float64(1312)*0.098e-6 + float64(28)*0.252e-6)
+	require.InDelta(t, wantTotal, usageRepo.lastLog.InputCost, 1e-15)
+	require.InDelta(t, wantTotal, usageRepo.lastLog.TotalCost, 1e-15)
+	require.InDelta(t, wantTotal*1.1, usageRepo.lastLog.ActualCost, 1e-15)
+	require.InDelta(t, wantTotal*1.1, userRepo.lastAmount, 1e-15)
 }
 
 func TestOpenAIGatewayServiceRecordUsage_UsesUserSpecificGroupRate(t *testing.T) {
