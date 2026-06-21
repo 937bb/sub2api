@@ -1505,9 +1505,75 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 	if affected == 0 {
 		return service.ErrAccountNotFound
 	}
+	r.afterExtraUpdate(ctx, id, updates, "extra update")
+	return nil
+}
+
+func (r *accountRepository) UpdateExtraNestedBool(ctx context.Context, id int64, updates map[string]any, mapKey string, nestedKey string, value bool) error {
+	mapKey = strings.TrimSpace(mapKey)
+	nestedKey = strings.TrimSpace(nestedKey)
+	if mapKey == "" || nestedKey == "" {
+		return errors.New("extra nested bool path cannot be empty")
+	}
+
+	shallowUpdates := make(map[string]any, len(updates))
+	for key, update := range updates {
+		if key == mapKey {
+			continue
+		}
+		shallowUpdates[key] = update
+	}
+	payload, err := json.Marshal(shallowUpdates)
+	if err != nil {
+		return err
+	}
+
+	client := clientFromContext(ctx, r.client)
+	result, err := client.ExecContext(ctx, `
+UPDATE accounts
+SET extra = jsonb_set(
+	jsonb_set(
+		COALESCE(extra, '{}'::jsonb) || $1::jsonb,
+		ARRAY[$2]::text[],
+		CASE
+			WHEN jsonb_typeof((COALESCE(extra, '{}'::jsonb) || $1::jsonb) -> $2) = 'object'
+				THEN (COALESCE(extra, '{}'::jsonb) || $1::jsonb) -> $2
+			ELSE '{}'::jsonb
+		END,
+		true
+	),
+	ARRAY[$2, $3]::text[],
+	$4::jsonb,
+	true
+), updated_at = NOW()
+WHERE id = $5 AND deleted_at IS NULL`,
+		string(payload), mapKey, nestedKey, strconv.FormatBool(value), id,
+	)
+	if err != nil {
+		return err
+	}
+
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return service.ErrAccountNotFound
+	}
+
+	schedulerUpdates := make(map[string]any, len(updates)+1)
+	for key, update := range updates {
+		schedulerUpdates[key] = update
+	}
+	schedulerUpdates[mapKey] = value
+	r.afterExtraUpdate(ctx, id, schedulerUpdates, "nested extra update")
+	return nil
+}
+
+func (r *accountRepository) afterExtraUpdate(ctx context.Context, id int64, updates map[string]any, operation string) {
 	if shouldEnqueueSchedulerOutboxForExtraUpdates(updates) {
 		if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
-			logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue extra update failed: account=%d err=%v", id, err)
+			logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue %s failed: account=%d err=%v", operation, id, err)
 		}
 	} else {
 		// 观测型 extra 字段不需要触发 bucket 重建，但仍同步单账号快照，
@@ -1515,7 +1581,6 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 		// 同时避免缓存局部 patch 覆盖掉并发写入的其它账号字段。
 		r.syncSchedulerAccountSnapshot(ctx, id)
 	}
-	return nil
 }
 
 func (r *accountRepository) ResetOpenAICodexFingerprint(ctx context.Context, id int64, fingerprint service.OpenAICodexFingerprint) error {

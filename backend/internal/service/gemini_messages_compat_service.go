@@ -834,13 +834,13 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 				stageName := ""
 				switch signatureRetryStage {
 				case 0:
-					// Stage 1: disable thinking + thinking->text
-					strippedClaudeBody = FilterThinkingBlocksForRetry(originalClaudeBody)
+					// The retry body is Anthropic-shaped, so classify by the original Anthropic model.
+					strippedClaudeBody = FilterThinkingBlocksForRetry(originalClaudeBody, originalModel)
 					stageName = "thinking-only"
 					signatureRetryStage = 1
 				default:
-					// Stage 2: additionally downgrade tool_use/tool_result blocks to text
-					strippedClaudeBody = FilterSignatureSensitiveBlocksForRetry(originalClaudeBody)
+					// Stage 2: additionally downgrade tool_use/tool_result blocks to text.
+					strippedClaudeBody = FilterSignatureSensitiveBlocksForRetry(originalClaudeBody, originalModel)
 					stageName = "thinking+tools"
 					signatureRetryStage = 2
 				}

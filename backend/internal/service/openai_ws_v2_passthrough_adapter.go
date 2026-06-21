@@ -142,12 +142,16 @@ func newOpenAIWSPassthroughUsageMeta(initialRequestModel string, firstFrame []by
 	return meta
 }
 
-func (m *openAIWSPassthroughUsageMeta) initFromFirstFrame(policyOutput []byte) {
+func (m *openAIWSPassthroughUsageMeta) initFromFirstFrame(policyOutput []byte, protocolModel string) {
 	if m == nil {
 		return
 	}
 	m.serviceTier.Store(extractOpenAIServiceTierFromBody(policyOutput))
-	m.reasoningEffort.Store(extractOpenAIReasoningEffortFromBody(policyOutput, m.sessionRequestModel))
+	requestModel := m.sessionRequestModel
+	if strings.TrimSpace(protocolModel) == "" {
+		protocolModel = requestModel
+	}
+	m.reasoningEffort.Store(ApplyThinkingEnabledFallback(extractOpenAIReasoningEffortFromBody(policyOutput, requestModel), policyOutput, protocolModel))
 }
 
 func (m *openAIWSPassthroughUsageMeta) updateSessionRequestModel(payload []byte) {
@@ -169,12 +173,15 @@ func (m *openAIWSPassthroughUsageMeta) requestModelForFrame(payload []byte) stri
 	return m.sessionRequestModel
 }
 
-func (m *openAIWSPassthroughUsageMeta) updateFromResponseCreate(policyOutput []byte, requestModelForFrame string) {
+func (m *openAIWSPassthroughUsageMeta) updateFromResponseCreate(policyOutput []byte, requestModelForFrame string, protocolModel string) {
 	if m == nil {
 		return
 	}
 	m.serviceTier.Store(extractOpenAIServiceTierFromBody(policyOutput))
-	m.reasoningEffort.Store(extractOpenAIReasoningEffortFromBody(policyOutput, requestModelForFrame))
+	if strings.TrimSpace(protocolModel) == "" {
+		protocolModel = requestModelForFrame
+	}
+	m.reasoningEffort.Store(ApplyThinkingEnabledFallback(extractOpenAIReasoningEffortFromBody(policyOutput, requestModelForFrame), policyOutput, protocolModel))
 }
 
 func openAIWSPassthroughRequestModelForFrame(payload []byte) string {
@@ -314,7 +321,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	// 因此使用 atomic.Pointer[string] 在 filter（runClientToUpstream
 	// goroutine）和 OnTurnComplete / final result（runUpstreamToClient
 	// goroutine）之间同步当前 turn 的 usage metadata。
-	usageMeta.initFromFirstFrame(firstClientMessage)
+	usageMeta.initFromFirstFrame(firstClientMessage, capturedSessionModel)
 	promptCacheKey := strings.TrimSpace(gjson.GetBytes(firstClientMessage, "prompt_cache_key").String())
 
 	wsURL, err := s.buildOpenAIResponsesWSURL(account)
@@ -459,7 +466,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			//     service_tier 时按 default 处理，billing 应如实反映。
 			if policyErr == nil && blocked == nil &&
 				strings.TrimSpace(gjson.GetBytes(payload, "type").String()) == "response.create" {
-				usageMeta.updateFromResponseCreate(out, requestModelForThisFrame)
+				usageMeta.updateFromResponseCreate(out, requestModelForThisFrame, model)
 			}
 			return out, blocked, policyErr
 		},

@@ -35,6 +35,8 @@ func (r openAIImagesFailoverAccountRepo) GetByID(_ context.Context, id int64) (*
 }
 
 func (r openAIImagesFailoverAccountRepo) UpdateExtra(_ context.Context, _ int64, _ map[string]any) error {
+	// OAuth forwarding ensures a Codex fingerprint before contacting upstream;
+	// this test repository only needs to accept that persistence hook.
 	return nil
 }
 
@@ -101,7 +103,7 @@ func TestOpenAIGatewayHandlerImages_ServerErrorFailsOverAndReturnsClearErrorWhen
 			Schedulable: true,
 			Concurrency: 0,
 			Priority:    0,
-			Credentials: map[string]any{"access_token": "token-1"},
+			Credentials: map[string]any{"access_token": "token-1", "chatgpt_account_id": "chatgpt-1"},
 		},
 		{
 			ID:          2,
@@ -112,7 +114,7 @@ func TestOpenAIGatewayHandlerImages_ServerErrorFailsOverAndReturnsClearErrorWhen
 			Schedulable: true,
 			Concurrency: 0,
 			Priority:    1,
-			Credentials: map[string]any{"access_token": "token-2"},
+			Credentials: map[string]any{"access_token": "token-2", "chatgpt_account_id": "chatgpt-2"},
 		},
 	}
 	accountRepo := openAIImagesFailoverAccountRepo{accounts: accounts}

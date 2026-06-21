@@ -233,7 +233,6 @@ func TestAPIContracts(t *testing.T) {
 					"ip_whitelist": null,
 					"ip_blacklist": null,
 					"last_used_at": null,
-					"openai_force_priority_tier": false,
 					"quota": 0,
 					"quota_used": 0,
 					"rate_limit_5h": 0,
@@ -247,6 +246,7 @@ func TestAPIContracts(t *testing.T) {
 					"window_7d_start": null,
 					"expires_at": null,
 					"created_at": "2025-01-02T03:04:05Z",
+					"openai_force_priority_tier": false,
 					"updated_at": "2025-01-02T03:04:05Z"
 				}
 			}`,
@@ -283,7 +283,6 @@ func TestAPIContracts(t *testing.T) {
 							"ip_whitelist": null,
 							"ip_blacklist": null,
 							"last_used_at": null,
-							"openai_force_priority_tier": false,
 							"quota": 0,
 							"quota_used": 0,
 							"rate_limit_5h": 0,
@@ -297,6 +296,7 @@ func TestAPIContracts(t *testing.T) {
 							"window_7d_start": null,
 							"expires_at": null,
 							"created_at": "2025-01-02T03:04:05Z",
+							"openai_force_priority_tier": false,
 							"updated_at": "2025-01-02T03:04:05Z"
 						}
 					],
@@ -1654,7 +1654,7 @@ func (s *stubAccountRepo) GetByID(ctx context.Context, id int64) (*service.Accou
 func (s *stubAccountRepo) GetByIDs(ctx context.Context, ids []int64) ([]*service.Account, error) {
 	accounts := make([]*service.Account, 0, len(ids))
 	for _, id := range ids {
-		accounts = append(accounts, &service.Account{ID: id, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth})
+		accounts = append(accounts, &service.Account{ID: id, Platform: service.PlatformAnthropic})
 	}
 	return accounts, nil
 }

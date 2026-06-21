@@ -2758,7 +2758,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		ImageCount:       imageCounter.Count(),
 		ImageOutputSizes: imageCounter.Sizes(),
 		ServiceTier:      extractOpenAIServiceTier(reqBody),
-		ReasoningEffort:  extractOpenAIReasoningEffort(reqBody, originalModel),
+		ReasoningEffort:  ApplyThinkingEnabledFallback(extractOpenAIReasoningEffort(reqBody, originalModel), payloadAsJSONBytes(payload), mappedModel),
 		Stream:           reqStream,
 		OpenAIWSMode:     true,
 		ResponseHeaders:  lease.HandshakeHeaders(),
@@ -3668,7 +3668,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					Model:           originalModel,
 					UpstreamModel:   mappedModel,
 					ServiceTier:     extractOpenAIServiceTierFromBody(payload),
-					ReasoningEffort: extractOpenAIReasoningEffortFromBody(payload, originalModel),
+					ReasoningEffort: ApplyThinkingEnabledFallback(extractOpenAIReasoningEffortFromBody(payload, originalModel), payload, mappedModel),
 					Stream:          reqStream,
 					OpenAIWSMode:    true,
 					ResponseHeaders: lease.HandshakeHeaders(),
@@ -4671,6 +4671,11 @@ func (s *OpenAIGatewayService) selectAccountByPreviousResponseIDForCapability(
 		_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
 		return nil, nil
 	}
+	account = s.refreshSelectedOpenAIAccountFromDB(ctx, account)
+	if account == nil || !s.openAIStickyAccountMatchesSchedulingGroup(account, groupID) {
+		_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
+		return nil, nil
+	}
 	// 非 WSv2 场景（如 force_http/全局关闭）不应使用 previous_response_id 粘连，
 	// 以保持“回滚到 HTTP”后的历史行为一致性。
 	if s.getOpenAIWSProtocolResolver().Resolve(account).Transport != OpenAIUpstreamTransportResponsesWebsocketV2 {
@@ -4700,6 +4705,15 @@ func (s *OpenAIGatewayService) selectAccountByPreviousResponseIDForCapability(
 	if paused, _ := shouldAutoPauseOpenAIAccountByQuota(ctx, account); paused {
 		return nil, nil
 	}
+	if s.isOpenAIAccountRuntimeBlocked(account) {
+		_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
+		return nil, nil
+	}
+	if groupID != nil && s.needsUpstreamChannelRestrictionCheck(ctx, groupID) &&
+		s.isUpstreamModelRestrictedByChannel(ctx, *groupID, account, requestedModel, requireCompact) {
+		_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
+		return nil, nil
+	}
 	if s.schedulerSnapshot != nil && s.accountRepo != nil {
 		latest, latestErr := s.accountRepo.GetByID(ctx, account.ID)
 		if latestErr != nil || latest == nil {
@@ -4721,6 +4735,10 @@ func (s *OpenAIGatewayService) selectAccountByPreviousResponseIDForCapability(
 		}
 		latest, ok = s.resolveOpenAIAccountForPrivacyRequirement(ctx, latest, schedGroup)
 		if !ok {
+			_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
+			return nil, nil
+		}
+		if !s.openAIStickyAccountMatchesSchedulingGroup(latest, groupID) {
 			_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
 			return nil, nil
 		}

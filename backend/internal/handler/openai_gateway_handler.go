@@ -486,6 +486,9 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		requestPayloadHash := service.HashUsageRequestPayload(body)
 		inboundEndpoint := GetInboundEndpoint(c)
 		upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
+		if resultEndpoint := strings.TrimSpace(result.UpstreamEndpoint); resultEndpoint != "" {
+			upstreamEndpoint = resultEndpoint
+		}
 
 		// 使用量记录通过有界 worker 池提交，避免请求热路径创建无界 goroutine。
 		h.submitOpenAIUsageRecordTask(c.Request.Context(), result, func(ctx context.Context) {
@@ -750,10 +753,11 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 					return
 				}
 			} else {
+				anthropicStreamStarted := streamStarted || (c.Writer != nil && c.Writer.Written())
 				if lastFailoverErr != nil {
-					h.handleAnthropicFailoverExhausted(c, lastFailoverErr, streamStarted)
+					h.handleAnthropicFailoverExhausted(c, lastFailoverErr, anthropicStreamStarted)
 				} else {
-					h.anthropicStreamingAwareError(c, http.StatusBadGateway, "api_error", "Upstream request failed", streamStarted)
+					h.anthropicStreamingAwareError(c, http.StatusBadGateway, "api_error", "Upstream request failed", anthropicStreamStarted)
 				}
 				return
 			}
@@ -776,11 +780,14 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 
 		service.SetOpsLatencyMs(c, service.OpsRoutingLatencyMsKey, time.Since(routingStart).Milliseconds())
 		forwardStart := time.Now()
+		writerSizeBeforeForward := 0
+		if c.Writer != nil {
+			writerSizeBeforeForward = c.Writer.Size()
+		}
 
 		defaultMappedModel := strings.TrimSpace(effectiveMappedModel)
 		// 应用渠道模型映射到请求体
 		forwardBody := mappedBodyForMessages(channelMappingMsg.Mapped, channelMappingMsg.MappedModel)
-		writerSizeBeforeForward := c.Writer.Size()
 		result, err := func() (*service.OpenAIForwardResult, error) {
 			defer func() {
 				if accountReleaseFunc != nil {
@@ -797,9 +804,10 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 			responseLatencyMs = forwardDurationMs - upstreamLatencyMs
 		}
 		service.SetOpsLatencyMs(c, service.OpsResponseLatencyMsKey, responseLatencyMs)
-		if err == nil && result != nil && result.FirstTokenMs != nil {
+		if result != nil && result.FirstTokenMs != nil {
 			service.SetOpsLatencyMs(c, service.OpsTimeToFirstTokenMsKey, int64(*result.FirstTokenMs))
 		}
+		forwardFailedAfterOutput := false
 		if err != nil {
 			if result != nil && result.ImageCount > 0 {
 				reqLog.Warn("openai_messages.forward_partial_error_with_image_result",
@@ -810,69 +818,102 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 			} else {
 				var failoverErr *service.UpstreamFailoverError
 				if errors.As(err, &failoverErr) {
-					if c.Writer.Size() != writerSizeBeforeForward {
+					if service.OpenAICompatAnthropicClientOutputStarted(c) {
 						h.handleAnthropicFailoverExhausted(c, failoverErr, true)
-						return
-					}
-					h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, false, nil)
-					// 池模式：同账号重试
-					if failoverErr.RetryableOnSameAccount {
-						retryLimit := account.GetPoolModeRetryCount()
-						if sameAccountRetryCount[account.ID] < retryLimit {
-							sameAccountRetryCount[account.ID]++
-							reqLog.Warn("openai_messages.pool_mode_same_account_retry",
-								zap.Int64("account_id", account.ID),
-								zap.Int("upstream_status", failoverErr.StatusCode),
-								zap.Int("retry_limit", retryLimit),
-								zap.Int("retry_count", sameAccountRetryCount[account.ID]),
-							)
-							select {
-							case <-c.Request.Context().Done():
-								return
-							case <-time.After(sameAccountRetryDelay):
-							}
-							continue
+						if result == nil {
+							return
 						}
+						forwardFailedAfterOutput = true
+						reqLog.Warn("openai_messages.failover_exhausted_after_output",
+							zap.Int64("account_id", account.ID),
+							zap.Int("upstream_status", failoverErr.StatusCode),
+							zap.Error(err),
+						)
+					} else {
+						h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, false, nil)
+						// 池模式：同账号重试
+						if failoverErr.RetryableOnSameAccount {
+							retryLimit := account.GetPoolModeRetryCount()
+							if sameAccountRetryCount[account.ID] < retryLimit {
+								sameAccountRetryCount[account.ID]++
+								reqLog.Warn("openai_messages.pool_mode_same_account_retry",
+									zap.Int64("account_id", account.ID),
+									zap.Int("upstream_status", failoverErr.StatusCode),
+									zap.Int("retry_limit", retryLimit),
+									zap.Int("retry_count", sameAccountRetryCount[account.ID]),
+								)
+								select {
+								case <-c.Request.Context().Done():
+									return
+								case <-time.After(sameAccountRetryDelay):
+								}
+								continue
+							}
+						}
+						failedAccountIDs[account.ID] = struct{}{}
+						lastFailoverErr = failoverErr
+						anthropicStreamStarted := streamStarted || (c.Writer != nil && c.Writer.Written())
+						if switchCount >= maxAccountSwitches {
+							h.handleAnthropicFailoverExhausted(c, failoverErr, anthropicStreamStarted)
+							return
+						}
+						nextSwitchCount := switchCount + 1
+						if h.gatewayService.ShouldStopOpenAIOAuth429Failover(account, failoverErr.StatusCode, nextSwitchCount) {
+							h.handleAnthropicFailoverExhausted(c, failoverErr, anthropicStreamStarted)
+							return
+						}
+						h.gatewayService.RecordOpenAIAccountSwitch()
+						switchCount = nextSwitchCount
+						reqLog.Warn("openai_messages.upstream_failover_switching",
+							zap.Int64("account_id", account.ID),
+							zap.Int("upstream_status", failoverErr.StatusCode),
+							zap.Int("switch_count", switchCount),
+							zap.Int("max_switches", maxAccountSwitches),
+						)
+						continue
 					}
-					h.gatewayService.RecordOpenAIAccountSwitch()
-					failedAccountIDs[account.ID] = struct{}{}
-					lastFailoverErr = failoverErr
-					if switchCount >= maxAccountSwitches {
-						h.handleAnthropicFailoverExhausted(c, failoverErr, streamStarted)
-						return
+				} else {
+					upstreamErrorAlreadyCommunicated := openAIForwardErrorAlreadyCommunicated(c, writerSizeBeforeForward, err)
+					if result != nil && result.ClientDisconnect {
+						reqLog.Info("openai_messages.client_disconnected",
+							zap.Int64("account_id", account.ID),
+							zap.Error(err),
+						)
+						if !openAIForwardResultHasUsage(result) {
+							return
+						}
+						forwardFailedAfterOutput = true
+					} else if result == nil || !service.OpenAICompatAnthropicClientOutputStarted(c) {
+						anthropicStreamStarted := streamStarted || (c.Writer != nil && c.Writer.Written())
+						wroteFallback := false
+						if !upstreamErrorAlreadyCommunicated {
+							wroteFallback = h.ensureAnthropicErrorResponse(c, anthropicStreamStarted)
+						}
+						reqLog.Warn("openai_messages.forward_failed",
+							zap.Int64("account_id", account.ID),
+							zap.Bool("fallback_error_response_written", wroteFallback),
+							zap.Error(err),
+						)
+						if !openAIForwardResultHasUsage(result) {
+							h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, false, nil)
+							return
+						}
+						forwardFailedAfterOutput = true
+					} else if c.Writer != nil && c.Writer.Written() && !upstreamErrorAlreadyCommunicated {
+						// The stream already contains model output; close it with an Anthropic
+						// SSE error instead of silently ending after a partial response.
+						h.anthropicStreamingAwareError(c, http.StatusBadGateway, "api_error", "Upstream request failed", true)
 					}
-					switchCount++
-					if h.gatewayService.ShouldStopOpenAIOAuth429Failover(account, failoverErr.StatusCode, switchCount) {
-						h.handleAnthropicFailoverExhausted(c, failoverErr, streamStarted)
-						return
-					}
-					reqLog.Warn("openai_messages.upstream_failover_switching",
-						zap.Int64("account_id", account.ID),
-						zap.Int("upstream_status", failoverErr.StatusCode),
-						zap.Int("switch_count", switchCount),
-						zap.Int("max_switches", maxAccountSwitches),
-					)
-					continue
-				}
-				if result != nil && result.ClientDisconnect {
-					reqLog.Info("openai_messages.client_disconnected",
+					forwardFailedAfterOutput = true
+					reqLog.Warn("openai_messages.forward_failed_after_output",
 						zap.Int64("account_id", account.ID),
 						zap.Error(err),
 					)
-					return
 				}
-				h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, false, nil)
-				wroteFallback := h.ensureAnthropicErrorResponse(c, streamStarted)
-				reqLog.Warn("openai_messages.forward_failed",
-					zap.Int64("account_id", account.ID),
-					zap.Bool("fallback_error_response_written", wroteFallback),
-					zap.Error(err),
-				)
-				return
 			}
 		}
 		if result != nil {
-			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, true, result.FirstTokenMs)
+			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, !forwardFailedAfterOutput, result.FirstTokenMs)
 		} else {
 			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, true, nil)
 		}
@@ -968,10 +1009,19 @@ func (h *OpenAIGatewayHandler) handleAnthropicFailoverExhausted(c *gin.Context, 
 	h.anthropicStreamingAwareError(c, status, errType, errMsg, streamStarted)
 }
 
-// ensureAnthropicErrorResponse writes a fallback Anthropic error if no response was written.
+// ensureAnthropicErrorResponse writes a fallback Anthropic error when the
+// response is still writable; if SSE bytes are already committed, keep the
+// fallback in Anthropic stream format.
 func (h *OpenAIGatewayHandler) ensureAnthropicErrorResponse(c *gin.Context, streamStarted bool) bool {
-	if c == nil || c.Writer == nil || c.Writer.Written() {
+	if c == nil || c.Writer == nil {
 		return false
+	}
+	if c.Writer.Written() {
+		if !streamStarted {
+			return false
+		}
+		h.anthropicStreamingAwareError(c, http.StatusBadGateway, "api_error", "Upstream request failed", true)
+		return true
 	}
 	h.anthropicStreamingAwareError(c, http.StatusBadGateway, "api_error", "Upstream request failed", streamStarted)
 	return true
@@ -1669,6 +1719,19 @@ func getContextInt64(c *gin.Context, key string) (int64, bool) {
 	}
 }
 
+func openAIForwardResultHasUsage(result *service.OpenAIForwardResult) bool {
+	if result == nil {
+		return false
+	}
+	u := result.Usage
+	return u.InputTokens != 0 ||
+		u.OutputTokens != 0 ||
+		u.CacheCreationInputTokens != 0 ||
+		u.CacheReadInputTokens != 0 ||
+		u.ImageOutputTokens != 0 ||
+		result.ImageCount > 0
+}
+
 func (h *OpenAIGatewayHandler) submitUsageRecordTask(parent context.Context, task service.UsageRecordTask) {
 	if task == nil {
 		return
@@ -1897,6 +1960,8 @@ func openAIForwardErrorAlreadyCommunicated(c *gin.Context, writerSizeBeforeForwa
 	msg := strings.TrimSpace(err.Error())
 	for _, prefix := range []string{
 		"upstream response failed:",
+		"upstream request failed:",
+		"upstream error:",
 		"non-streaming openai protocol error:",
 	} {
 		if strings.HasPrefix(msg, prefix) {

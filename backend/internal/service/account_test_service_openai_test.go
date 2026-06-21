@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/gin-gonic/gin"
@@ -62,9 +63,17 @@ func newTestContext() (*gin.Context, *httptest.ResponseRecorder) {
 	return c, rec
 }
 
+type openAIAccountNestedBoolUpdate struct {
+	updates   map[string]any
+	mapKey    string
+	nestedKey string
+	value     bool
+}
+
 type openAIAccountTestRepo struct {
 	mockAccountRepoForGemini
 	updatedExtra       map[string]any
+	nestedBoolUpdates  []openAIAccountNestedBoolUpdate
 	updateExtraErr     error
 	updateExtraErrFor  func(map[string]any) error
 	bulkUpdatedIDs     []int64
@@ -78,6 +87,25 @@ type openAIAccountTestRepo struct {
 
 func (r *openAIAccountTestRepo) UpdateExtra(_ context.Context, _ int64, updates map[string]any) error {
 	r.updatedExtra = updates
+	if r.updateExtraErrFor != nil {
+		if err := r.updateExtraErrFor(updates); err != nil {
+			return err
+		}
+	}
+	if r.updateExtraErr != nil {
+		return r.updateExtraErr
+	}
+	return nil
+}
+
+func (r *openAIAccountTestRepo) UpdateExtraNestedBool(_ context.Context, _ int64, updates map[string]any, mapKey string, nestedKey string, value bool) error {
+	r.updatedExtra = updates
+	r.nestedBoolUpdates = append(r.nestedBoolUpdates, openAIAccountNestedBoolUpdate{
+		updates:   updates,
+		mapKey:    mapKey,
+		nestedKey: nestedKey,
+		value:     value,
+	})
 	if r.updateExtraErrFor != nil {
 		if err := r.updateExtraErrFor(updates); err != nil {
 			return err
@@ -110,6 +138,101 @@ func (r *openAIAccountTestRepo) SetError(_ context.Context, id int64, errorMsg s
 	r.setErrorID = id
 	r.setErrorMsg = errorMsg
 	return nil
+}
+
+func TestProbeOpenAIAPIKeyResponsesSupportDefaultProbeWritesAccountMarkerOnly(t *testing.T) {
+	repo := &openAIAccountTestRepo{mockAccountRepoForGemini: mockAccountRepoForGemini{accountsByID: map[int64]*Account{
+		7: {
+			ID:          7,
+			Platform:    PlatformOpenAI,
+			Type:        AccountTypeAPIKey,
+			Concurrency: 1,
+			Credentials: map[string]any{"api_key": "sk-test", "base_url": "https://upstream.example"},
+		},
+	}}}
+	upstream := &queuedHTTPUpstream{responses: []*http.Response{newJSONResponse(http.StatusNotFound, `{"error":"not found"}`)}}
+	svc := &AccountTestService{
+		accountRepo:  repo,
+		httpUpstream: upstream,
+		cfg:          &config.Config{},
+	}
+
+	svc.ProbeOpenAIAPIKeyResponsesSupport(context.Background(), 7)
+
+	require.Empty(t, repo.nestedBoolUpdates)
+	require.Equal(t, map[string]any{openai_compat.ExtraKeyResponsesSupported: false}, repo.updatedExtra)
+	require.Len(t, upstream.requests, 1)
+	require.Equal(t, "https://upstream.example/v1/responses", upstream.requests[0].URL.String())
+	require.Equal(t, openai.DefaultTestModel, gjson.GetBytes(readTestRequestBody(t, upstream.requests[0]), "model").String())
+}
+
+func TestProbeOpenAIAPIKeyResponsesSupportDefaultProbeClearsStaleModelMap(t *testing.T) {
+	repo := &openAIAccountTestRepo{mockAccountRepoForGemini: mockAccountRepoForGemini{accountsByID: map[int64]*Account{
+		8: {
+			ID:          8,
+			Platform:    PlatformOpenAI,
+			Type:        AccountTypeAPIKey,
+			Concurrency: 1,
+			Credentials: map[string]any{"api_key": "sk-test", "base_url": "https://upstream.example"},
+			Extra: map[string]any{
+				openai_compat.ExtraKeyResponsesSupportedByModel: map[string]any{"gpt-5.4": false},
+			},
+		},
+	}}}
+	upstream := &queuedHTTPUpstream{responses: []*http.Response{newJSONResponse(http.StatusNotFound, `{"error":"not found"}`)}}
+	svc := &AccountTestService{
+		accountRepo:  repo,
+		httpUpstream: upstream,
+		cfg:          &config.Config{},
+	}
+
+	svc.ProbeOpenAIAPIKeyResponsesSupport(context.Background(), 8)
+
+	require.Empty(t, repo.nestedBoolUpdates)
+	require.Equal(t, false, repo.updatedExtra[openai_compat.ExtraKeyResponsesSupported])
+	require.Contains(t, repo.updatedExtra, openai_compat.ExtraKeyResponsesSupportedByModel)
+	require.Nil(t, repo.updatedExtra[openai_compat.ExtraKeyResponsesSupportedByModel])
+}
+
+func TestProbeOpenAIAPIKeyResponsesSupportMappedProbeUsesNestedModelUpdate(t *testing.T) {
+	repo := &openAIAccountTestRepo{mockAccountRepoForGemini: mockAccountRepoForGemini{accountsByID: map[int64]*Account{
+		9: {
+			ID:          9,
+			Platform:    PlatformOpenAI,
+			Type:        AccountTypeAPIKey,
+			Concurrency: 1,
+			Credentials: map[string]any{
+				"api_key":  "sk-test",
+				"base_url": "https://upstream.example",
+				"model_mapping": map[string]any{
+					"client-b": "zeta-model",
+					"client-a": "alpha-model",
+				},
+			},
+		},
+	}}}
+	upstream := &queuedHTTPUpstream{responses: []*http.Response{newJSONResponse(http.StatusOK, `{"output":[{"type":"function_call","name":"probe_ping"}]}`)}}
+	svc := &AccountTestService{
+		accountRepo:  repo,
+		httpUpstream: upstream,
+		cfg:          &config.Config{},
+	}
+
+	svc.ProbeOpenAIAPIKeyResponsesSupport(context.Background(), 9)
+
+	require.Equal(t, map[string]any{openai_compat.ExtraKeyResponsesSupported: true}, repo.updatedExtra)
+	require.Len(t, repo.nestedBoolUpdates, 1)
+	require.Equal(t, openai_compat.ExtraKeyResponsesSupportedByModel, repo.nestedBoolUpdates[0].mapKey)
+	require.Equal(t, "alpha-model", repo.nestedBoolUpdates[0].nestedKey)
+	require.True(t, repo.nestedBoolUpdates[0].value)
+	require.Equal(t, "alpha-model", gjson.GetBytes(readTestRequestBody(t, upstream.requests[0]), "model").String())
+}
+
+func readTestRequestBody(t *testing.T, req *http.Request) []byte {
+	t.Helper()
+	body, err := io.ReadAll(req.Body)
+	require.NoError(t, err)
+	return body
 }
 
 func TestAccountTestService_OpenAISuccessPersistsSnapshotFromHeaders(t *testing.T) {

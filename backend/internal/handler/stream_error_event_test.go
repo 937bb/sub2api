@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -151,6 +152,31 @@ func TestOpenAIHandleStreamingAwareError_ChatCompletionsStreamingKeepsLegacy(t *
 
 	body := w.Body.String()
 	assert.True(t, strings.HasPrefix(body, "event: error\n"), "got: %q", body)
+}
+
+func TestOpenAIEnsureAnthropicErrorResponse_ExistingStreamWritesSSEError(t *testing.T) {
+	c, w := newGinContextForEndpoint(t, EndpointMessages)
+	_, err := c.Writer.WriteString("event: ping\ndata: {\"type\":\"ping\"}\n\n")
+	require.NoError(t, err)
+
+	h := &OpenAIGatewayHandler{}
+	require.True(t, h.ensureAnthropicErrorResponse(c, true))
+
+	body := w.Body.String()
+	assert.Contains(t, body, "event: ping")
+	assert.Contains(t, body, "event: error")
+	assert.Contains(t, body, "Upstream request failed")
+	assert.NotContains(t, body, "\n\n{\"error\"")
+}
+
+func TestOpenAIForwardErrorAlreadyCommunicated_IncludesRequestErrors(t *testing.T) {
+	c, _ := newGinContextForEndpoint(t, EndpointMessages)
+	before := c.Writer.Size()
+	_, err := c.Writer.WriteString("event: error\ndata: {}\n\n")
+	require.NoError(t, err)
+
+	require.True(t, openAIForwardErrorAlreadyCommunicated(c, before, errors.New("upstream request failed: dial tcp refused")))
+	require.True(t, openAIForwardErrorAlreadyCommunicated(c, before, errors.New("upstream error: 500 boom")))
 }
 
 // Gateway (Anthropic-backed) handler: /v1/responses path also must emit response.failed.

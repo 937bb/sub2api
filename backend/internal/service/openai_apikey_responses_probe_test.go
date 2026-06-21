@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
 	"github.com/stretchr/testify/require"
 )
 
@@ -49,6 +50,9 @@ func TestResponsesProbeBodyHasFunctionCall(t *testing.T) {
 
 func TestSelectResponsesProbeModel(t *testing.T) {
 	// No model_mapping -> fall back to DefaultTestModel (OpenAI official APIKey).
+	model, scoped := selectResponsesProbeModelWithScope(&Account{})
+	require.Equal(t, openai.DefaultTestModel, model)
+	require.False(t, scoped)
 	require.Equal(t, openai.DefaultTestModel, selectResponsesProbeModel(&Account{}))
 
 	// model_mapping values are upstream models; pick first by sort for reproducibility.
@@ -58,6 +62,9 @@ func TestSelectResponsesProbeModel(t *testing.T) {
 			"client-a": "alpha-model",
 		},
 	}}
+	model, scoped = selectResponsesProbeModelWithScope(acct)
+	require.Equal(t, "alpha-model", model)
+	require.True(t, scoped)
 	require.Equal(t, "alpha-model", selectResponsesProbeModel(acct))
 
 	// Wildcard / blank upstream values are skipped.
@@ -68,11 +75,69 @@ func TestSelectResponsesProbeModel(t *testing.T) {
 			"c": "real-model",
 		},
 	}}
-	require.Equal(t, "real-model", selectResponsesProbeModel(acctWild))
+	model, scoped = selectResponsesProbeModelWithScope(acctWild)
+	require.Equal(t, "real-model", model)
+	require.True(t, scoped)
 
 	// Only wildcard mappings -> DefaultTestModel.
 	acctAllWild := &Account{Credentials: map[string]any{
 		"model_mapping": map[string]any{"a": "gpt-*"},
 	}}
-	require.Equal(t, openai.DefaultTestModel, selectResponsesProbeModel(acctAllWild))
+	model, scoped = selectResponsesProbeModelWithScope(acctAllWild)
+	require.Equal(t, openai.DefaultTestModel, model)
+	require.False(t, scoped)
+}
+
+func TestBuildResponsesProbeExtraUpdatesDefaultProbeClearsStaleModelMap(t *testing.T) {
+	extra := map[string]any{
+		openai_compat.ExtraKeyResponsesSupportedByModel: map[string]any{"old-probe-model": false},
+	}
+
+	updates := buildResponsesProbeExtraUpdates(extra, openai.DefaultTestModel, false, false)
+
+	require.Equal(t, false, updates[openai_compat.ExtraKeyResponsesSupported])
+	require.Contains(t, updates, openai_compat.ExtraKeyResponsesSupportedByModel)
+	require.Nil(t, updates[openai_compat.ExtraKeyResponsesSupportedByModel])
+}
+
+func TestBuildResponsesProbeExtraUpdatesModelScopedIncludesMergedMap(t *testing.T) {
+	extra := map[string]any{
+		openai_compat.ExtraKeyResponsesSupportedByModel: map[string]any{"model-a": true},
+	}
+
+	updates := buildResponsesProbeExtraUpdatesWithNestedMap(extra, "model-b", true, false, false)
+	require.Equal(t, map[string]any{openai_compat.ExtraKeyResponsesSupported: false}, updates)
+
+	updates = buildResponsesProbeExtraUpdates(extra, "model-b", true, false)
+	require.Equal(t, false, updates[openai_compat.ExtraKeyResponsesSupported])
+	require.Equal(t, map[string]any{"model-a": true, "model-b": false}, updates[openai_compat.ExtraKeyResponsesSupportedByModel])
+}
+
+func TestMergeResponsesSupportByModelPreservesSiblings(t *testing.T) {
+	extra := map[string]any{
+		openai_compat.ExtraKeyResponsesSupportedByModel: map[string]any{
+			"model-a": true,
+			"model-b": false,
+		},
+	}
+
+	merged := mergeResponsesSupportByModel(extra, "model-c", true)
+
+	require.Equal(t, map[string]any{
+		"model-a": true,
+		"model-b": false,
+		"model-c": true,
+	}, merged)
+}
+
+func TestMergeResponsesSupportByModelOverwritesProbeModel(t *testing.T) {
+	extra := map[string]any{
+		openai_compat.ExtraKeyResponsesSupportedByModel: map[string]bool{
+			"model-a": true,
+		},
+	}
+
+	merged := mergeResponsesSupportByModel(extra, "model-a", false)
+
+	require.Equal(t, map[string]any{"model-a": false}, merged)
 }

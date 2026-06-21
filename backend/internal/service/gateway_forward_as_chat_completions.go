@@ -179,7 +179,7 @@ func (s *GatewayService) ForwardAsChatCompletions(
 	}
 
 	// 13. Extract reasoning effort from CC request body
-	reasoningEffort := extractCCReasoningEffortFromBody(body)
+	reasoningEffort := ApplyThinkingEnabledFallback(extractCCReasoningEffortFromBody(body), body, mappedModel)
 
 	// 14. Handle normal response
 	// Read Anthropic SSE → convert to Responses events → convert to CC format
