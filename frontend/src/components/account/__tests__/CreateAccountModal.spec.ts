@@ -130,7 +130,7 @@ const OAuthAuthorizationFlowStub = defineComponent({
       <button
         type="button"
         data-testid="emit-personal-access-token"
-        @click="$emit('import-personal-access-token', 'pat-direct')"
+        @click="$emit('import-personal-access-token', 'pat-direct', 'acct-direct')"
       >
         import personal access token
       </button>
@@ -284,7 +284,7 @@ describe('CreateAccountModal', () => {
     expect(importCodexSessionMock).toHaveBeenCalledTimes(1)
     const payload = importCodexSessionMock.mock.calls[0]?.[0]
     expect(payload).toMatchObject({
-      content: '{"personal_access_token":"pat-direct"}',
+      content: '{"personal_access_token":"pat-direct","chatgpt_account_id":"acct-direct"}',
       name: 'OpenAI PAT Direct',
       update_existing: true,
       extra: expect.objectContaining({

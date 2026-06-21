@@ -3275,6 +3275,7 @@ interface OAuthFlowExposed {
   refreshToken: string
   sessionToken: string
   personalAccessToken: string
+  personalAccessTokenAccountId: string
   codexSession: string
   inputMethod: AuthInputMethod
   reset: () => void
@@ -4921,13 +4922,20 @@ const formatCodexImportMessages = (messages?: CodexSessionImportMessage[]) => {
     .join('\n')
 }
 
-const handleOpenAIImportPersonalAccessToken = async (token: string) => {
+const handleOpenAIImportPersonalAccessToken = async (token: string, accountId = '') => {
   const trimmed = token.trim()
+  const trimmedAccountId = accountId.trim()
   if (!trimmed) {
     openaiOAuth.error.value = t('admin.accounts.oauth.openai.personalAccessTokenEmpty')
     return
   }
-  await handleOpenAIImportCodexSession(JSON.stringify({ personal_access_token: trimmed }))
+  if (!trimmedAccountId) {
+    openaiOAuth.error.value = t('admin.accounts.oauth.openai.personalAccessTokenAccountIdEmpty')
+    return
+  }
+  await handleOpenAIImportCodexSession(
+    JSON.stringify({ personal_access_token: trimmed, chatgpt_account_id: trimmedAccountId })
+  )
 }
 
 const handleOpenAIImportCodexSession = async (content: string) => {
