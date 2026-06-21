@@ -863,27 +863,30 @@ func (s *adminServiceImpl) DeleteUser(ctx context.Context, id int64) error {
 		return errors.New("cannot delete admin user")
 	}
 
-	// Delete all API keys owned by the user first so no orphan keys remain.
-	// Page through the list to bound memory when a user has created many keys.
 	var deletedKeyValues []string
-	if s.apiKeyRepo != nil {
-		keys, err := listUserAPIKeys(ctx, s.apiKeyRepo, id)
+	if s.entClient != nil {
+		tx, err := s.entClient.Tx(ctx)
 		if err != nil {
-			return fmt.Errorf("list api keys: %w", err)
+			return err
 		}
-		for _, k := range keys {
-			if err := s.apiKeyRepo.DeleteWithAudit(ctx, k.ID); err != nil {
-				return fmt.Errorf("delete api key %d: %w", k.ID, err)
-			}
-			if v := strings.TrimSpace(k.Key); v != "" {
-				deletedKeyValues = append(deletedKeyValues, v)
-			}
-		}
-	}
+		defer func() { _ = tx.Rollback() }()
 
-	if err := s.userRepo.Delete(ctx, id); err != nil {
-		logger.LegacyPrintf("service.admin", "delete user failed: user_id=%d err=%v", id, err)
-		return err
+		opCtx := dbent.NewTxContext(ctx, tx)
+		deletedKeyValues, err = s.deleteUserAndAPIKeysInTx(opCtx, id)
+		if err != nil {
+			return err
+		}
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+	} else {
+		if s.apiKeyRepo != nil {
+			return errors.New("delete user with API keys requires transaction client")
+		}
+		if err := s.userRepo.Delete(ctx, id); err != nil {
+			logger.LegacyPrintf("service.admin", "delete user failed: user_id=%d err=%v", id, err)
+			return err
+		}
 	}
 
 	if s.authCacheInvalidator != nil {
@@ -895,24 +898,30 @@ func (s *adminServiceImpl) DeleteUser(ctx context.Context, id int64) error {
 	return nil
 }
 
-// listUserAPIKeys pages through every API key owned by userID.
-func listUserAPIKeys(ctx context.Context, repo APIKeyRepository, userID int64) ([]APIKey, error) {
-	const pageSize = 500
-	var all []APIKey
-	for page := 1; ; page++ {
-		keys, _, err := repo.ListByUserID(ctx, userID, pagination.PaginationParams{
-			Page:     page,
-			PageSize: pageSize,
-		}, APIKeyListFilters{})
-		if err != nil {
-			return nil, err
-		}
-		all = append(all, keys...)
-		if len(keys) < pageSize {
-			break
-		}
+func (s *adminServiceImpl) deleteUserAndAPIKeysInTx(ctx context.Context, userID int64) ([]string, error) {
+	// Soft-delete the user first inside the outer transaction. This locks the user
+	// row, so concurrent API key creation either commits before we list keys or
+	// waits until commit and then observes the deleted user.
+	if err := s.userRepo.Delete(ctx, userID); err != nil {
+		logger.LegacyPrintf("service.admin", "delete user failed: user_id=%d err=%v", userID, err)
+		return nil, err
 	}
-	return all, nil
+
+	if s.apiKeyRepo == nil {
+		return nil, nil
+	}
+
+	bulkDeleter, ok := s.apiKeyRepo.(interface {
+		DeleteByUserIDWithAudit(context.Context, int64) ([]string, error)
+	})
+	if !ok {
+		return nil, errors.New("delete user api keys requires bulk audit delete support")
+	}
+	deletedKeyValues, err := bulkDeleter.DeleteByUserIDWithAudit(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("delete user api keys: %w", err)
+	}
+	return deletedKeyValues, nil
 }
 
 func (s *adminServiceImpl) BatchUpdateConcurrency(ctx context.Context, userIDs []int64, value int, mode string) (int, error) {

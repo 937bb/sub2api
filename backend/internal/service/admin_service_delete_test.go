@@ -550,43 +550,34 @@ func TestAdminService_DeleteUser_DeleteError(t *testing.T) {
 // deleteUserAPIKeyStub implements APIKeyRepository for DeleteUser tests.
 type deleteUserAPIKeyStub struct {
 	apiKeyRepoStubForGroupUpdate
-	listKeys  []APIKey
-	listErr   error
-	deletedIDs []int64
-	deleteErr error
+	deletedKeys []string
+	deleteErr   error
+	calls       []int64
 }
 
-func (s *deleteUserAPIKeyStub) ListByUserID(_ context.Context, _ int64, _ pagination.PaginationParams, _ APIKeyListFilters) ([]APIKey, *pagination.PaginationResult, error) {
-	if s.listErr != nil {
-		return nil, nil, s.listErr
+func (s *deleteUserAPIKeyStub) DeleteByUserIDWithAudit(_ context.Context, userID int64) ([]string, error) {
+	s.calls = append(s.calls, userID)
+	if s.deleteErr != nil {
+		return nil, s.deleteErr
 	}
-	return s.listKeys, &pagination.PaginationResult{Total: int64(len(s.listKeys)), Page: 1, PageSize: 500}, nil
-}
-
-func (s *deleteUserAPIKeyStub) DeleteWithAudit(_ context.Context, id int64) error {
-	s.deletedIDs = append(s.deletedIDs, id)
-	return s.deleteErr
+	return s.deletedKeys, nil
 }
 
 func TestAdminService_DeleteUser_DeletesOwnedAPIKeys(t *testing.T) {
 	repo := &userRepoStub{user: &User{ID: 7, Role: RoleUser}}
-	apiKeyRepo := &deleteUserAPIKeyStub{
-		listKeys: []APIKey{
-			{ID: 11, UserID: 7, Key: "sk-user-1"},
-			{ID: 12, UserID: 7, Key: "sk-user-2"},
-		},
-	}
+	apiKeyRepo := &deleteUserAPIKeyStub{deletedKeys: []string{"sk-user-1", "sk-user-2"}}
 	invalidator := &authCacheInvalidatorStub{}
 	svc := &adminServiceImpl{
 		userRepo:             repo,
 		apiKeyRepo:           apiKeyRepo,
 		authCacheInvalidator: invalidator,
+		entClient:            newAdminServiceAuthIdentityBindingTestClient(t),
 	}
 
 	err := svc.DeleteUser(context.Background(), 7)
 	require.NoError(t, err)
 	require.Equal(t, []int64{7}, repo.deletedIDs)
-	require.Equal(t, []int64{11, 12}, apiKeyRepo.deletedIDs)
+	require.Equal(t, []int64{7}, apiKeyRepo.calls)
 	require.ElementsMatch(t, []string{"sk-user-1", "sk-user-2"}, invalidator.keys)
 	require.Equal(t, []int64{7}, invalidator.userIDs)
 }
