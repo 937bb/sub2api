@@ -40,6 +40,7 @@ type AccountRepository interface {
 	ListWithFilters(ctx context.Context, params pagination.PaginationParams, filters AccountListFilters) ([]Account, *pagination.PaginationResult, error)
 	ListByGroup(ctx context.Context, groupID int64) ([]Account, error)
 	ListActive(ctx context.Context) ([]Account, error)
+	ListOAuthRefreshCandidates(ctx context.Context) ([]Account, error)
 	ListByPlatform(ctx context.Context, platform string) ([]Account, error)
 	// ListByPlatformForValidation returns non-deleted accounts regardless of status.
 	ListByPlatformForValidation(ctx context.Context, platform string) ([]Account, error)

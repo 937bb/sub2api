@@ -101,6 +101,9 @@ func (m *mockAccountRepoForPlatform) ListByGroup(ctx context.Context, groupID in
 func (m *mockAccountRepoForPlatform) ListActive(ctx context.Context) ([]Account, error) {
 	return nil, nil
 }
+func (m *mockAccountRepoForPlatform) ListOAuthRefreshCandidates(ctx context.Context) ([]Account, error) {
+	return nil, nil
+}
 func (m *mockAccountRepoForPlatform) ListByPlatform(ctx context.Context, platform string) ([]Account, error) {
 	return nil, nil
 }
