@@ -2207,7 +2207,9 @@ func mergeGroupIDs(a []int64, b []int64) []int64 {
 	return out
 }
 
-func buildSchedulerGroupPayload(groupIDs []int64) map[string]any {
+// buildSchedulerGroupPayload returns untyped nil for empty groups so payload-any
+// callers do not marshal a typed-nil map as JSON null and split dedup keys.
+func buildSchedulerGroupPayload(groupIDs []int64) any {
 	if len(groupIDs) == 0 {
 		return nil
 	}
