@@ -1181,6 +1181,7 @@ func writeAnthropicError(c *gin.Context, statusCode int, errType, message string
 	if c == nil || c.Writer == nil {
 		return
 	}
+	MarkResponseCommitted(c)
 	if c.Writer.Written() {
 		// Once an SSE ping/prelude has committed the response, keep later errors in
 		// Anthropic stream format instead of appending JSON to an SSE body.
@@ -1200,6 +1201,7 @@ func writeAnthropicStreamError(c *gin.Context, errType, message string) error {
 	if c == nil || c.Writer == nil {
 		return nil
 	}
+	MarkResponseCommitted(c)
 	payload, _ := json.Marshal(gin.H{
 		"type": "error",
 		"error": gin.H{

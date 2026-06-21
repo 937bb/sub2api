@@ -215,7 +215,13 @@ func PrepareBedrockRequestBodyWithTokens(body []byte, modelID string, betaTokens
 			return nil, fmt.Errorf("inject anthropic_beta: %w", err)
 		}
 		logger.LegacyPrintf("service.gateway", "[Bedrock] Injected beta tokens: %v (model=%s ccCompat=%v)", betaTokens, modelID, ccCompat)
+	} else {
+		body, _ = sjson.DeleteBytes(body, "anthropic_beta")
 	}
+
+	// 移除 Bedrock 不支持的 Anthropic 直连 API 专有顶层字段。
+	body, _ = sjson.DeleteBytes(body, "provider")
+	body, _ = sjson.DeleteBytes(body, "metadata")
 
 	// 移除 model 字段（Bedrock 通过 URL 指定模型）
 	body, err = sjson.DeleteBytes(body, "model")
@@ -259,6 +265,7 @@ func PrepareBedrockRequestBodyWithTokens(body []byte, modelID string, betaTokens
 // ResolveBedrockBetaTokens computes the final Bedrock beta token list before policy filtering.
 func ResolveBedrockBetaTokens(betaHeader string, body []byte, modelID string) []string {
 	betaTokens := parseAnthropicBetaHeader(betaHeader)
+	betaTokens = append(betaTokens, parseBedrockBodyBetaTokens(body)...)
 	betaTokens = autoInjectBedrockBetaTokens(betaTokens, body, modelID)
 	return filterBedrockBetaTokens(betaTokens)
 }
@@ -461,15 +468,33 @@ func parseAnthropicBetaHeader(header string) []string {
 	return tokens
 }
 
+func parseBedrockBodyBetaTokens(body []byte) []string {
+	betaField := gjson.GetBytes(body, "anthropic_beta")
+	if !betaField.Exists() || !betaField.IsArray() {
+		return nil
+	}
+	tokens := make([]string, 0, len(betaField.Array()))
+	for _, token := range betaField.Array() {
+		if token.Type != gjson.String {
+			continue
+		}
+		if value := strings.TrimSpace(token.String()); value != "" {
+			tokens = append(tokens, value)
+		}
+	}
+	return tokens
+}
+
 // bedrockSupportedBetaTokens 是 Bedrock Invoke 支持的 beta 头白名单
 // 参考: AWS Bedrock 官方文档 + litellm anthropic_beta_headers_config.json
 // 更新策略: 当 AWS Bedrock 新增支持的 beta token 时需同步更新此白名单
 var bedrockSupportedBetaTokens = map[string]bool{
-	"computer-use-2025-01-24": true,
-	"computer-use-2025-11-24": true,
-	"context-1m-2025-08-07":   true,
-	// "context-management-2025-06-27": false, // 无官方文档支持
-	"compact-2026-01-12": true, // 官方支持，仅 InvokeModel API（Opus 4.6+）
+	"computer-use-2025-01-24":                true,
+	"computer-use-2025-11-24":                true,
+	"context-1m-2025-08-07":                  true,
+	"context-management-2025-06-27":          true, // AWS Bedrock 文档已支持 context management。
+	"compact-2026-01-12":                     true, // 官方支持，仅 InvokeModel API（Opus 4.6+）
+	"fine-grained-tool-streaming-2025-05-14": true, // AWS Bedrock Tool Use 文档已支持。
 	// "interleaved-thinking-2025-05-14": false, // 无官方文档支持
 	"tool-search-tool-2025-10-19": true,
 	"tool-examples-2025-10-29":    true,
@@ -729,18 +754,17 @@ const defaultCCMaxTokens = 81920
 // sanitizeBedrockCCFields 处理 Claude Code 发送的 Bedrock 不兼容字段：
 //   - 移除 service_tier（Anthropic API 专有，Bedrock 不支持）
 //   - 移除 interface_geo（Anthropic API 专有，Bedrock 不支持）
-//   - 移除 context_management（Anthropic API 专有，Bedrock 不支持，CC v2.1.87+ 默认携带）
 //   - 注入 max_tokens 默认值 81920（CC 可能省略，Bedrock 要求必须提供）
 //   - 注入 anthropic_version（CC 通过 HTTP 头发送，Bedrock 需要放在请求体中）
+//
+// context_management 的去留取决于最终 Bedrock beta token，必须留给
+// sanitizeBedrockFieldsForBetaTokens 按最终 token 统一处理。
 func sanitizeBedrockCCFields(body []byte) []byte {
 	if gjson.GetBytes(body, "service_tier").Exists() {
 		body, _ = sjson.DeleteBytes(body, "service_tier")
 	}
 	if gjson.GetBytes(body, "interface_geo").Exists() {
 		body, _ = sjson.DeleteBytes(body, "interface_geo")
-	}
-	if gjson.GetBytes(body, "context_management").Exists() {
-		body, _ = sjson.DeleteBytes(body, "context_management")
 	}
 	if !gjson.GetBytes(body, "max_tokens").Exists() {
 		body, _ = sjson.SetBytes(body, "max_tokens", defaultCCMaxTokens)
@@ -753,21 +777,16 @@ func sanitizeBedrockCCFields(body []byte) []byte {
 
 // sanitizeBedrockCCBetaTokens 清理请求体中的 anthropic_beta 字段，只保留 Bedrock 支持的 beta token
 // CC 可能在请求体中注入了 Bedrock 不支持的 beta token（如 prompt-caching 等），导致 ValidationException
-func sanitizeBedrockCCBetaTokens(body []byte, modelID string) []byte {
+func sanitizeBedrockCCBetaTokens(body []byte, modelID string, betaHeader string) []byte {
+	finalTokens := ResolveBedrockBetaTokens(betaHeader, body, modelID)
+	body = sanitizeBedrockFieldsForBetaTokens(body, finalTokens)
+
 	betaField := gjson.GetBytes(body, "anthropic_beta")
 	if !betaField.Exists() {
 		return body
 	}
 
-	var tokens []string
-	if betaField.IsArray() {
-		for _, t := range betaField.Array() {
-			if t.Type == gjson.String {
-				tokens = append(tokens, t.String())
-			}
-		}
-	}
-
+	tokens := parseBedrockBodyBetaTokens(body)
 	originalTokens := append([]string(nil), tokens...) // 保存原始 tokens 用于日志
 
 	// 复用现有的 Bedrock beta token 过滤逻辑（自动注入 + 白名单过滤 + 转换）

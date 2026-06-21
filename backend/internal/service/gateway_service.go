@@ -6041,17 +6041,42 @@ func writeAnthropicPassthroughResponseHeaders(dst http.Header, src http.Header, 
 	}
 }
 
-// ApplyBedrockCCCompat 应用 Bedrock CC 兼容转换（渠道级模型映射后调用）
-// 清理 Anthropic API 专有字段、注入 Bedrock 必需字段、修复 thinking/tool_use ID
-func (s *GatewayService) ApplyBedrockCCCompat(ctx context.Context, body []byte, model string, account *Account, groupID *int64) []byte {
+// ApplyBedrockCCCompat 应用 Bedrock CC 兼容转换（渠道级模型映射后调用）。
+// 只改写本次账号尝试的 body；HTTP anthropic-beta 通过
+// ApplyBedrockCCCompatBetaHeaderOverride 在 Forward 期间做作用域覆盖，避免 failover 后污染原始请求头。
+func (s *GatewayService) ApplyBedrockCCCompat(c *gin.Context, body []byte, model string, account *Account, groupID *int64) []byte {
+	ctx := context.Background()
+	betaHeader := ""
+	if c != nil && c.Request != nil {
+		ctx = c.Request.Context()
+		betaHeader = getHeaderRaw(c.Request.Header, "anthropic-beta")
+	}
 	if !s.isBedrockCCCompatEnabled(ctx, account, groupID) {
 		return body
 	}
 	body = sanitizeBedrockCCFields(body)
 	body = sanitizeBedrockThinking(body, model)
 	body = sanitizeBedrockToolUseIDs(body)
-	body = sanitizeBedrockCCBetaTokens(body, model)
+	body = sanitizeBedrockCCBetaTokens(body, model, betaHeader)
 	return body
+}
+
+// ApplyBedrockCCCompatBetaHeaderOverride filters anthropic-beta only for the current
+// Forward call. The returned restore function must be called immediately after Forward.
+func (s *GatewayService) ApplyBedrockCCCompatBetaHeaderOverride(c *gin.Context, body []byte, model string, account *Account, groupID *int64) func() {
+	if c == nil || c.Request == nil || account == nil || account.IsBedrock() {
+		return func() {}
+	}
+	ctx := c.Request.Context()
+	if !s.isBedrockCCCompatEnabled(ctx, account, groupID) {
+		return func() {}
+	}
+	betaHeader := getHeaderRaw(c.Request.Header, "anthropic-beta")
+	if betaHeader == "" {
+		return func() {}
+	}
+	filtered := ResolveBedrockBetaTokens(betaHeader, body, model)
+	return scopedHeaderRawOverride(c.Request.Header, "anthropic-beta", strings.Join(filtered, ", "), len(filtered) > 0)
 }
 
 // isBedrockCCCompatEnabled 检查渠道是否启用了 Bedrock CC 兼容模式
@@ -7550,6 +7575,8 @@ func (s *GatewayService) handleErrorResponse(ctx context.Context, resp *http.Res
 		)
 	}
 
+	MarkResponseCommitted(c)
+
 	// 非 failover 错误也支持错误透传规则匹配。
 	if status, errType, errMsg, matched := applyErrorPassthroughRule(
 		c,
@@ -7712,6 +7739,8 @@ func (s *GatewayService) handleRetryExhaustedError(ctx context.Context, resp *ht
 			truncateForLog(respBody, s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes),
 		)
 	}
+
+	MarkResponseCommitted(c)
 
 	if status, errType, errMsg, matched := applyErrorPassthroughRule(
 		c,
