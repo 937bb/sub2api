@@ -487,10 +487,7 @@ func normalizeCodexImportEntry(entry codexImportEntry) (*codexImportAccount, err
 	now := time.Now().UTC()
 	item := &codexImportAccount{
 		Credentials: map[string]any{},
-		Extra: map[string]any{
-			"import_source": "codex_session",
-			"imported_at":   now.Format(time.RFC3339),
-		},
+		Extra:       map[string]any{},
 	}
 
 	switch raw := entry.Value.(type) {
@@ -697,8 +694,6 @@ func normalizeHCPAImportAccount(item *codexImportAccount, raw map[string]any, no
 	}
 
 	item.ImportFormat = codexImportFormatHCPA
-	item.Extra["import_source"] = codexImportFormatHCPA
-	item.Extra["import_format"] = codexImportFormatHCPA
 	item.PersonalAccessToken = personalAccessToken
 	item.AccessToken = firstCodexString(raw,
 		[]string{"access_token"},
@@ -749,7 +744,6 @@ func normalizeHCPAImportAccount(item *codexImportAccount, raw map[string]any, no
 		} else {
 			item.Status = service.StatusActive
 		}
-		item.Extra["hcpa_disabled"] = disabled
 	}
 	if accountExpiresAt, ok := firstCodexTime(raw,
 		[]string{"expired"},
@@ -758,13 +752,6 @@ func normalizeHCPAImportAccount(item *codexImportAccount, raw map[string]any, no
 		[]string{"expiresAt"},
 	); ok {
 		item.AccountExpiresAt = &accountExpiresAt
-		item.Extra["hcpa_expired_at"] = accountExpiresAt.Format(time.RFC3339)
-	}
-	if lastRefresh, ok := firstCodexTime(raw,
-		[]string{"last_refresh"},
-		[]string{"lastRefresh"},
-	); ok {
-		item.Extra["hcpa_last_refresh_at"] = lastRefresh.Format(time.RFC3339)
 	}
 
 	_ = enrichCodexImportAccountFromJWT(item, item.IDToken, false, now)

@@ -140,11 +140,8 @@ func TestExportDataIncludesSecrets(t *testing.T) {
 	require.Equal(t, "secret", resp.Data.Accounts[0].Credentials["token"])
 	require.Equal(t, "pat-secret", resp.Data.Accounts[0].Credentials["personal_access_token"])
 	require.Equal(t, "x", resp.Data.Accounts[0].Extra["note"])
-	fingerprint, ok := resp.Data.Accounts[0].Extra[service.OpenAICodexFingerprintExtraKey].(map[string]any)
-	require.True(t, ok)
-	require.Equal(t, true, fingerprint["present"])
-	require.Equal(t, float64(1), fingerprint["schema_version"])
-	require.Equal(t, "2026-06-15T00:00:00Z", fingerprint["created_at"])
+	require.NotContains(t, resp.Data.Accounts[0].Extra, service.OpenAICodexFingerprintExtraKey)
+	require.NotContains(t, rec.Body.String(), service.OpenAICodexFingerprintExtraKey)
 	require.NotContains(t, rec.Body.String(), "11111111-1111-4111-8111-111111111111")
 	require.NotContains(t, rec.Body.String(), "codex-tui/0.136.0 raw")
 }

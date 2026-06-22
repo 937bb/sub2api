@@ -159,7 +159,7 @@ func (h *AccountHandler) ExportData(c *gin.Context) {
 			Platform:           acc.Platform,
 			Type:               acc.Type,
 			Credentials:        acc.Credentials,
-			Extra:              dto.RedactAccountExtraForAccount(&acc),
+			Extra:              exportAccountExtra(&acc),
 			ProxyKey:           proxyKey,
 			Concurrency:        acc.Concurrency,
 			Priority:           acc.Priority,
@@ -176,6 +176,18 @@ func (h *AccountHandler) ExportData(c *gin.Context) {
 	}
 
 	response.Success(c, payload)
+}
+
+func exportAccountExtra(account *service.Account) map[string]any {
+	if account == nil || account.Extra == nil {
+		return nil
+	}
+	out := dto.RedactAccountExtraForAccount(account)
+	delete(out, service.OpenAICodexFingerprintExtraKey)
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func (h *AccountHandler) ImportData(c *gin.Context) {

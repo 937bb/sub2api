@@ -490,14 +490,10 @@ func TestNormalizeCodexImportHCPAFormatExtractsAllFields(t *testing.T) {
 	if item.AccountExpiresAt == nil || item.AccountExpiresAt.Unix() != accountExpiry.Unix() {
 		t.Fatalf("AccountExpiresAt = %v, want %s", item.AccountExpiresAt, accountExpiry)
 	}
-	if item.Extra["import_source"] != codexImportFormatHCPA || item.Extra["import_format"] != codexImportFormatHCPA {
-		t.Fatalf("HCPA import markers missing: %v", item.Extra)
-	}
-	if item.Extra["hcpa_disabled"] != true {
-		t.Fatalf("hcpa_disabled = %v, want true", item.Extra["hcpa_disabled"])
-	}
-	if item.Extra["hcpa_last_refresh_at"] != lastRefresh.Format(time.RFC3339) {
-		t.Fatalf("hcpa_last_refresh_at = %v, want %s", item.Extra["hcpa_last_refresh_at"], lastRefresh.Format(time.RFC3339))
+	for _, key := range []string{"import_source", "import_format", "imported_at", "hcpa_disabled", "hcpa_expired_at", "hcpa_last_refresh_at"} {
+		if _, ok := item.Extra[key]; ok {
+			t.Fatalf("internal HCPA import field %q should not be stored in Extra: %v", key, item.Extra)
+		}
 	}
 	if _, ok := item.Extra["personal_access_token_sha256"]; ok {
 		t.Fatalf("personal_access_token_sha256 should not be recorded for HCPA PAT import")
