@@ -9,6 +9,28 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestGatewayCompatibilityConcurrencyErrorResponses(t *testing.T) {
+	h := &GatewayHandler{}
+
+	t.Run("chat completions keeps OpenAI envelope", func(t *testing.T) {
+		c, rec := newHelperTestContext(http.MethodPost, "/v1/chat/completions")
+
+		h.chatCompletionsConcurrencyErrorResponse(c, &WaitQueueFullError{SlotType: "user"}, "user", false)
+
+		require.Equal(t, http.StatusTooManyRequests, rec.Code)
+		require.JSONEq(t, `{"error":{"type":"rate_limit_error","message":"Too many pending requests, please retry later"}}`, rec.Body.String())
+	})
+
+	t.Run("responses keeps Responses envelope", func(t *testing.T) {
+		c, rec := newHelperTestContext(http.MethodPost, "/v1/responses")
+
+		h.responsesConcurrencyErrorResponse(c, &WaitQueueFullError{SlotType: "user"}, "user", false)
+
+		require.Equal(t, http.StatusTooManyRequests, rec.Code)
+		require.JSONEq(t, `{"error":{"code":"rate_limit_error","message":"Too many pending requests, please retry later"}}`, rec.Body.String())
+	})
+}
+
 func TestConcurrencyErrorResponse(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -25,6 +47,14 @@ func TestConcurrencyErrorResponse(t *testing.T) {
 			wantStatus:  http.StatusTooManyRequests,
 			wantType:    "rate_limit_error",
 			wantMessage: "Concurrency limit exceeded for account, please retry later",
+		},
+		{
+			name:        "full wait queue is rate limited",
+			err:         &WaitQueueFullError{SlotType: "user"},
+			slotType:    "user",
+			wantStatus:  http.StatusTooManyRequests,
+			wantType:    "rate_limit_error",
+			wantMessage: "Too many pending requests, please retry later",
 		},
 		{
 			name:        "client cancellation is not classified as concurrency limit",
