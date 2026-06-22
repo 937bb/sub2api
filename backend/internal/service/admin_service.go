@@ -572,6 +572,7 @@ type adminServiceImpl struct {
 	userSubRepo          UserSubscriptionRepository
 	privacyClientFactory PrivacyClientFactory
 	runtimeBlocker       AccountRuntimeBlocker
+	rateLimitService     *RateLimitService
 }
 
 type userGroupRateBatchReader interface {
@@ -598,6 +599,7 @@ func NewAdminService(
 	userSubRepo UserSubscriptionRepository,
 	privacyClientFactory PrivacyClientFactory,
 	runtimeBlocker AccountRuntimeBlocker,
+	rateLimitService *RateLimitService,
 ) AdminService {
 	return &adminServiceImpl{
 		userRepo:             userRepo,
@@ -618,6 +620,7 @@ func NewAdminService(
 		userSubRepo:          userSubRepo,
 		privacyClientFactory: privacyClientFactory,
 		runtimeBlocker:       runtimeBlocker,
+		rateLimitService:     rateLimitService,
 	}
 }
 
@@ -3190,6 +3193,9 @@ func (s *adminServiceImpl) ClearAccountError(ctx context.Context, id int64) (*Ac
 	}
 	if s.runtimeBlocker != nil {
 		s.runtimeBlocker.ClearAccountSchedulingBlock(id)
+	}
+	if s.rateLimitService != nil {
+		s.rateLimitService.ResetOpenAIOAuth429DynamicStats(id)
 	}
 	return s.accountRepo.GetByID(ctx, id)
 }

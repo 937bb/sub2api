@@ -462,6 +462,22 @@ type RateLimit429CooldownSettings struct {
 	CooldownSeconds int `json:"cooldown_seconds"`
 }
 
+// OpenAIOAuth429DynamicSettings OpenAI OAuth 429动态调度配置
+type OpenAIOAuth429DynamicSettings struct {
+	// Enabled 是否启用基于429比例的动态调度暂停
+	Enabled bool `json:"enabled"`
+	// WindowSeconds 统计窗口时长（秒）
+	WindowSeconds int `json:"window_seconds"`
+	// MinSamples 触发判断所需的最少样本数
+	MinSamples int `json:"min_samples"`
+	// Min429 触发判断所需的最少429次数
+	Min429 int `json:"min_429"`
+	// RatioThreshold 429比例阈值，取值0-1
+	RatioThreshold float64 `json:"ratio_threshold"`
+	// BlockSeconds 达阈值后暂停调度时长（秒）
+	BlockSeconds int `json:"block_seconds"`
+}
+
 // DefaultOverloadCooldownSettings 返回默认的过载冷却配置（启用，10分钟）
 func DefaultOverloadCooldownSettings() *OverloadCooldownSettings {
 	return &OverloadCooldownSettings{
@@ -475,6 +491,18 @@ func DefaultRateLimit429CooldownSettings() *RateLimit429CooldownSettings {
 	return &RateLimit429CooldownSettings{
 		Enabled:         true,
 		CooldownSeconds: 5,
+	}
+}
+
+// DefaultOpenAIOAuth429DynamicSettings 返回默认的OpenAI OAuth 429动态调度配置。
+func DefaultOpenAIOAuth429DynamicSettings() *OpenAIOAuth429DynamicSettings {
+	return &OpenAIOAuth429DynamicSettings{
+		Enabled:        false,
+		WindowSeconds:  300,
+		MinSamples:     20,
+		Min429:         3,
+		RatioThreshold: 0.5,
+		BlockSeconds:   60,
 	}
 }
 

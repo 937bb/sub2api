@@ -411,6 +411,223 @@
             </div>
           </div>
 
+          <!-- OpenAI OAuth Dynamic 429 Settings -->
+          <div class="card" @keydown.enter.prevent="saveOpenAIOAuth429DynamicSettings">
+            <div
+              class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
+            >
+              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+                {{ t("admin.settings.openaiOAuth429Dynamic.title") }}
+              </h2>
+              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                {{ t("admin.settings.openaiOAuth429Dynamic.description") }}
+              </p>
+            </div>
+            <div class="space-y-5 p-6">
+              <div
+                v-if="openaiOAuth429DynamicLoading"
+                class="flex items-center gap-2 text-gray-500"
+              >
+                <div
+                  class="h-4 w-4 animate-spin rounded-full border-b-2 border-primary-600"
+                ></div>
+                {{ t("common.loading") }}
+              </div>
+
+              <template v-else>
+                <div class="flex items-center justify-between">
+                  <div>
+                    <label class="font-medium text-gray-900 dark:text-white">{{
+                      t("admin.settings.openaiOAuth429Dynamic.enabled")
+                    }}</label>
+                    <p class="text-sm text-gray-500 dark:text-gray-400">
+                      {{ t("admin.settings.openaiOAuth429Dynamic.enabledHint") }}
+                    </p>
+                  </div>
+                  <Toggle
+                    v-model="openaiOAuth429DynamicForm.enabled"
+                    data-testid="openai-oauth-429-dynamic-enabled"
+                  />
+                </div>
+
+                <div
+                  v-if="openaiOAuth429DynamicForm.enabled"
+                  class="space-y-4 border-t border-gray-100 pt-4 dark:border-dark-700"
+                >
+                  <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                    <div>
+                      <label
+                        class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
+                      >
+                        {{
+                          t(
+                            "admin.settings.openaiOAuth429Dynamic.windowSeconds",
+                          )
+                        }}
+                      </label>
+                      <input
+                        v-model.number="openaiOAuth429DynamicForm.window_seconds"
+                        data-testid="openai-oauth-429-dynamic-window-seconds"
+                        type="number"
+                        min="60"
+                        max="3600"
+                        class="input w-32"
+                      />
+                      <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                        {{
+                          t(
+                            "admin.settings.openaiOAuth429Dynamic.windowSecondsHint",
+                          )
+                        }}
+                      </p>
+                    </div>
+
+                    <div>
+                      <label
+                        class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
+                      >
+                        {{
+                          t("admin.settings.openaiOAuth429Dynamic.minSamples")
+                        }}
+                      </label>
+                      <input
+                        v-model.number="openaiOAuth429DynamicForm.min_samples"
+                        data-testid="openai-oauth-429-dynamic-min-samples"
+                        type="number"
+                        min="2"
+                        max="10000"
+                        class="input w-32"
+                      />
+                      <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                        {{
+                          t(
+                            "admin.settings.openaiOAuth429Dynamic.minSamplesHint",
+                          )
+                        }}
+                      </p>
+                    </div>
+
+                    <div>
+                      <label
+                        class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
+                      >
+                        {{ t("admin.settings.openaiOAuth429Dynamic.min429") }}
+                      </label>
+                      <input
+                        v-model.number="openaiOAuth429DynamicForm.min_429"
+                        data-testid="openai-oauth-429-dynamic-min-429"
+                        type="number"
+                        min="1"
+                        :max="openaiOAuth429DynamicForm.min_samples"
+                        class="input w-32"
+                      />
+                      <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                        {{
+                          t("admin.settings.openaiOAuth429Dynamic.min429Hint")
+                        }}
+                      </p>
+                    </div>
+
+                    <div>
+                      <label
+                        class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
+                      >
+                        {{
+                          t(
+                            "admin.settings.openaiOAuth429Dynamic.ratioThreshold",
+                          )
+                        }}
+                      </label>
+                      <input
+                        v-model.number="openaiOAuth429DynamicForm.ratio_threshold"
+                        data-testid="openai-oauth-429-dynamic-ratio-threshold"
+                        type="number"
+                        min="0.01"
+                        max="1"
+                        step="0.01"
+                        class="input w-32"
+                      />
+                      <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                        {{
+                          t(
+                            "admin.settings.openaiOAuth429Dynamic.ratioThresholdHint",
+                          )
+                        }}
+                      </p>
+                    </div>
+
+                    <div>
+                      <label
+                        class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
+                      >
+                        {{
+                          t(
+                            "admin.settings.openaiOAuth429Dynamic.blockSeconds",
+                          )
+                        }}
+                      </label>
+                      <input
+                        v-model.number="openaiOAuth429DynamicForm.block_seconds"
+                        data-testid="openai-oauth-429-dynamic-block-seconds"
+                        type="number"
+                        min="1"
+                        max="7200"
+                        class="input w-32"
+                      />
+                      <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                        {{
+                          t(
+                            "admin.settings.openaiOAuth429Dynamic.blockSecondsHint",
+                          )
+                        }}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div
+                  class="flex justify-end border-t border-gray-100 pt-4 dark:border-dark-700"
+                >
+                  <button
+                    type="button"
+                    data-testid="openai-oauth-429-dynamic-save"
+                    @click="saveOpenAIOAuth429DynamicSettings"
+                    :disabled="
+                      openaiOAuth429DynamicSaving || !openaiOAuth429DynamicLoaded
+                    "
+                    class="btn btn-primary btn-sm"
+                  >
+                    <svg
+                      v-if="openaiOAuth429DynamicSaving"
+                      class="mr-1 h-4 w-4 animate-spin"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                    >
+                      <circle
+                        class="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        stroke-width="4"
+                      ></circle>
+                      <path
+                        class="opacity-75"
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                      ></path>
+                    </svg>
+                    {{
+                      openaiOAuth429DynamicSaving
+                        ? t("common.saving")
+                        : t("common.save")
+                    }}
+                  </button>
+                </div>
+              </template>
+            </div>
+          </div>
+
           <!-- Stream Timeout Settings -->
           <div class="card">
             <div
@@ -6759,6 +6976,7 @@ import type {
   DefaultPlatformQuotasMap,
   OpenAICodexUAProfile,
   OpenAIFastPolicyRule,
+  OpenAIOAuth429DynamicSettings,
   WeChatConnectMode,
   WebSearchEmulationConfig,
   WebSearchProviderConfig,
@@ -7048,6 +7266,19 @@ const rateLimit429CooldownSaving = ref(false);
 const rateLimit429CooldownForm = reactive({
   enabled: true,
   cooldown_seconds: 5,
+});
+
+// OpenAI OAuth 429 动态调度状态
+const openaiOAuth429DynamicLoading = ref(true);
+const openaiOAuth429DynamicSaving = ref(false);
+const openaiOAuth429DynamicLoaded = ref(false);
+const openaiOAuth429DynamicForm = reactive<OpenAIOAuth429DynamicSettings>({
+  enabled: false,
+  window_seconds: 300,
+  min_samples: 20,
+  min_429: 3,
+  ratio_threshold: 0.5,
+  block_seconds: 60,
 });
 
 // Stream Timeout 状态
@@ -8869,6 +9100,85 @@ async function saveRateLimit429CooldownSettings() {
   }
 }
 
+async function loadOpenAIOAuth429DynamicSettings() {
+  openaiOAuth429DynamicLoading.value = true;
+  openaiOAuth429DynamicLoaded.value = false;
+  try {
+    const settings = await adminAPI.settings.getOpenAIOAuth429DynamicSettings();
+    Object.assign(openaiOAuth429DynamicForm, normalizeOpenAIOAuth429DynamicForm(settings));
+    openaiOAuth429DynamicLoaded.value = true;
+  } catch (error: unknown) {
+    appStore.showError(
+      extractApiErrorMessage(
+        error,
+        t("admin.settings.openaiOAuth429Dynamic.loadFailed"),
+      ),
+    );
+  } finally {
+    openaiOAuth429DynamicLoading.value = false;
+  }
+}
+
+function boundedInteger(value: unknown, min: number, max: number, fallback: number): number {
+  if (typeof value === "string" && value.trim() === "") {
+    return fallback;
+  }
+  const parsed = Math.floor(Number(value));
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+  return Math.min(max, Math.max(min, parsed));
+}
+
+function boundedNumber(value: unknown, min: number, max: number, fallback: number): number {
+  if (typeof value === "string" && value.trim() === "") {
+    return fallback;
+  }
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+  return Math.min(max, Math.max(min, parsed));
+}
+
+function normalizeOpenAIOAuth429DynamicForm(
+  raw: Partial<OpenAIOAuth429DynamicSettings>,
+): OpenAIOAuth429DynamicSettings {
+  const minSamples = boundedInteger(raw.min_samples, 2, 10000, 20);
+  return {
+    enabled: Boolean(raw.enabled),
+    window_seconds: boundedInteger(raw.window_seconds, 60, 3600, 300),
+    min_samples: minSamples,
+    min_429: boundedInteger(raw.min_429, 1, minSamples, Math.min(3, minSamples)),
+    ratio_threshold: boundedNumber(raw.ratio_threshold, 0.01, 1, 0.5),
+    block_seconds: boundedInteger(raw.block_seconds, 1, 7200, 60),
+  };
+}
+
+async function saveOpenAIOAuth429DynamicSettings() {
+  if (!openaiOAuth429DynamicLoaded.value) {
+    appStore.showError(t("admin.settings.openaiOAuth429Dynamic.loadFailed"));
+    return;
+  }
+  openaiOAuth429DynamicSaving.value = true;
+  try {
+    const payload = normalizeOpenAIOAuth429DynamicForm(openaiOAuth429DynamicForm);
+    Object.assign(openaiOAuth429DynamicForm, payload);
+    const updated = await adminAPI.settings.updateOpenAIOAuth429DynamicSettings(payload);
+    Object.assign(openaiOAuth429DynamicForm, normalizeOpenAIOAuth429DynamicForm(updated));
+    appStore.showSuccess(t("admin.settings.openaiOAuth429Dynamic.saved"));
+  } catch (error: unknown) {
+    appStore.showError(
+      extractApiErrorMessage(
+        error,
+        t("admin.settings.openaiOAuth429Dynamic.saveFailed"),
+      ),
+    );
+  } finally {
+    openaiOAuth429DynamicSaving.value = false;
+  }
+}
+
 // Stream Timeout 方法
 async function loadStreamTimeoutSettings() {
   streamTimeoutLoading.value = true;
@@ -9483,6 +9793,7 @@ onMounted(() => {
   loadAdminApiKey();
   loadOverloadCooldownSettings();
   loadRateLimit429CooldownSettings();
+  loadOpenAIOAuth429DynamicSettings();
   loadStreamTimeoutSettings();
   loadRectifierSettings();
   loadBetaPolicySettings();

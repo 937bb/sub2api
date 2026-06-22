@@ -13,6 +13,8 @@ const {
   getOverloadCooldownSettings,
   getRateLimit429CooldownSettings,
   updateRateLimit429CooldownSettings,
+  getOpenAIOAuth429DynamicSettings,
+  updateOpenAIOAuth429DynamicSettings,
   getStreamTimeoutSettings,
   getRectifierSettings,
   getBetaPolicySettings,
@@ -35,6 +37,8 @@ const {
   getOverloadCooldownSettings: vi.fn(),
   getRateLimit429CooldownSettings: vi.fn(),
   updateRateLimit429CooldownSettings: vi.fn(),
+  getOpenAIOAuth429DynamicSettings: vi.fn(),
+  updateOpenAIOAuth429DynamicSettings: vi.fn(),
   getStreamTimeoutSettings: vi.fn(),
   getRectifierSettings: vi.fn(),
   getBetaPolicySettings: vi.fn(),
@@ -63,6 +67,8 @@ vi.mock("@/api", () => ({
       getOverloadCooldownSettings,
       getRateLimit429CooldownSettings,
       updateRateLimit429CooldownSettings,
+      getOpenAIOAuth429DynamicSettings,
+      updateOpenAIOAuth429DynamicSettings,
       getStreamTimeoutSettings,
       getRectifierSettings,
       getBetaPolicySettings,
@@ -483,6 +489,8 @@ describe("admin SettingsView payment visible method controls", () => {
     getOverloadCooldownSettings.mockReset();
     getRateLimit429CooldownSettings.mockReset();
     updateRateLimit429CooldownSettings.mockReset();
+    getOpenAIOAuth429DynamicSettings.mockReset();
+    updateOpenAIOAuth429DynamicSettings.mockReset();
     getStreamTimeoutSettings.mockReset();
     getRectifierSettings.mockReset();
     getBetaPolicySettings.mockReset();
@@ -524,6 +532,15 @@ describe("admin SettingsView payment visible method controls", () => {
       cooldown_seconds: 5,
     });
     updateRateLimit429CooldownSettings.mockImplementation(async (payload) => payload);
+    getOpenAIOAuth429DynamicSettings.mockResolvedValue({
+      enabled: false,
+      window_seconds: 300,
+      min_samples: 20,
+      min_429: 3,
+      ratio_threshold: 0.5,
+      block_seconds: 60,
+    });
+    updateOpenAIOAuth429DynamicSettings.mockImplementation(async (payload) => payload);
     getStreamTimeoutSettings.mockResolvedValue({
       enabled: true,
       action: "temp_unsched",
@@ -737,6 +754,61 @@ describe("admin SettingsView payment visible method controls", () => {
     expect(wrapper.text()).not.toContain("OpenAI 高级调度器");
   });
 
+  it("normalizes OpenAI OAuth dynamic 429 settings before saving", async () => {
+    getOpenAIOAuth429DynamicSettings.mockResolvedValueOnce({
+      enabled: true,
+      window_seconds: 300,
+      min_samples: 20,
+      min_429: 3,
+      ratio_threshold: 0.5,
+      block_seconds: 60,
+    });
+    const wrapper = mountView();
+
+    await flushPromises();
+    await wrapper
+      .get('[data-testid="openai-oauth-429-dynamic-window-seconds"]')
+      .setValue("5");
+    await wrapper
+      .get('[data-testid="openai-oauth-429-dynamic-min-samples"]')
+      .setValue("2");
+    await wrapper
+      .get('[data-testid="openai-oauth-429-dynamic-min-429"]')
+      .setValue("999");
+    await wrapper
+      .get('[data-testid="openai-oauth-429-dynamic-ratio-threshold"]')
+      .setValue("0");
+    await wrapper
+      .get('[data-testid="openai-oauth-429-dynamic-block-seconds"]')
+      .setValue("");
+    await wrapper.get('[data-testid="openai-oauth-429-dynamic-save"]').trigger("click");
+    await flushPromises();
+
+    expect(updateOpenAIOAuth429DynamicSettings).toHaveBeenCalledWith({
+      enabled: true,
+      window_seconds: 60,
+      min_samples: 2,
+      min_429: 2,
+      ratio_threshold: 0.01,
+      block_seconds: 60,
+    });
+  });
+
+  it("does not overwrite OpenAI OAuth dynamic 429 settings when loading fails", async () => {
+    getOpenAIOAuth429DynamicSettings.mockRejectedValueOnce(new Error("boom"));
+    const wrapper = mountView();
+
+    await flushPromises();
+    const saveButton = wrapper.get('[data-testid="openai-oauth-429-dynamic-save"]');
+
+    expect(saveButton.attributes("disabled")).toBeDefined();
+    await saveButton.trigger("click");
+    await flushPromises();
+
+    expect(updateOpenAIOAuth429DynamicSettings).not.toHaveBeenCalled();
+    expect(showError).toHaveBeenCalled();
+  });
+
   it("passes translated upload and remove labels to the payment help image uploader", async () => {
     const wrapper = mountView();
 
@@ -766,6 +838,8 @@ describe("admin SettingsView wechat connect controls", () => {
     getOverloadCooldownSettings.mockReset();
     getRateLimit429CooldownSettings.mockReset();
     updateRateLimit429CooldownSettings.mockReset();
+    getOpenAIOAuth429DynamicSettings.mockReset();
+    updateOpenAIOAuth429DynamicSettings.mockReset();
     getStreamTimeoutSettings.mockReset();
     getRectifierSettings.mockReset();
     getBetaPolicySettings.mockReset();
@@ -810,6 +884,15 @@ describe("admin SettingsView wechat connect controls", () => {
       cooldown_seconds: 5,
     });
     updateRateLimit429CooldownSettings.mockImplementation(async (payload) => payload);
+    getOpenAIOAuth429DynamicSettings.mockResolvedValue({
+      enabled: false,
+      window_seconds: 300,
+      min_samples: 20,
+      min_429: 3,
+      ratio_threshold: 0.5,
+      block_seconds: 60,
+    });
+    updateOpenAIOAuth429DynamicSettings.mockImplementation(async (payload) => payload);
     getStreamTimeoutSettings.mockResolvedValue({
       enabled: true,
       action: "temp_unsched",
@@ -1012,6 +1095,8 @@ describe("admin SettingsView platform quota matrix", () => {
     getOverloadCooldownSettings.mockReset();
     getRateLimit429CooldownSettings.mockReset();
     updateRateLimit429CooldownSettings.mockReset();
+    getOpenAIOAuth429DynamicSettings.mockReset();
+    updateOpenAIOAuth429DynamicSettings.mockReset();
     getStreamTimeoutSettings.mockReset();
     getRectifierSettings.mockReset();
     getBetaPolicySettings.mockReset();
@@ -1038,6 +1123,8 @@ describe("admin SettingsView platform quota matrix", () => {
     getOverloadCooldownSettings.mockResolvedValue({});
     getRateLimit429CooldownSettings.mockResolvedValue({});
     updateRateLimit429CooldownSettings.mockResolvedValue({});
+    getOpenAIOAuth429DynamicSettings.mockResolvedValue({});
+    updateOpenAIOAuth429DynamicSettings.mockResolvedValue({});
     getStreamTimeoutSettings.mockResolvedValue({});
     getRectifierSettings.mockResolvedValue({});
     getBetaPolicySettings.mockResolvedValue({});

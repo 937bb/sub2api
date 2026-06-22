@@ -371,6 +371,9 @@ const (
 	// SettingKeyRateLimit429CooldownSettings stores JSON config for 429 fallback cooldown handling.
 	SettingKeyRateLimit429CooldownSettings = "rate_limit_429_cooldown_settings"
 
+	// SettingKeyOpenAIOAuth429DynamicSettings stores JSON config for OpenAI OAuth 429 dynamic scheduling.
+	SettingKeyOpenAIOAuth429DynamicSettings = "openai_oauth_429_dynamic_settings"
+
 	// =========================
 	// Stream Timeout Handling
 	// =========================

@@ -3172,6 +3172,16 @@ type UpdateRateLimit429CooldownSettingsRequest struct {
 	CooldownSeconds int  `json:"cooldown_seconds"`
 }
 
+// UpdateOpenAIOAuth429DynamicSettingsRequest 更新OpenAI OAuth 429动态调度配置请求
+type UpdateOpenAIOAuth429DynamicSettingsRequest struct {
+	Enabled        bool    `json:"enabled"`
+	WindowSeconds  int     `json:"window_seconds"`
+	MinSamples     int     `json:"min_samples"`
+	Min429         int     `json:"min_429"`
+	RatioThreshold float64 `json:"ratio_threshold"`
+	BlockSeconds   int     `json:"block_seconds"`
+}
+
 // UpdateRateLimit429CooldownSettings 更新429默认回避配置
 // PUT /api/v1/admin/settings/rate-limit-429-cooldown
 func (h *SettingHandler) UpdateRateLimit429CooldownSettings(c *gin.Context) {
@@ -3200,6 +3210,63 @@ func (h *SettingHandler) UpdateRateLimit429CooldownSettings(c *gin.Context) {
 	response.Success(c, dto.RateLimit429CooldownSettings{
 		Enabled:         updatedSettings.Enabled,
 		CooldownSeconds: updatedSettings.CooldownSeconds,
+	})
+}
+
+// GetOpenAIOAuth429DynamicSettings 获取OpenAI OAuth 429动态调度配置
+// GET /api/v1/admin/settings/openai-oauth-429-dynamic
+func (h *SettingHandler) GetOpenAIOAuth429DynamicSettings(c *gin.Context) {
+	settings, err := h.settingService.GetOpenAIOAuth429DynamicSettings(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	response.Success(c, dto.OpenAIOAuth429DynamicSettings{
+		Enabled:        settings.Enabled,
+		WindowSeconds:  settings.WindowSeconds,
+		MinSamples:     settings.MinSamples,
+		Min429:         settings.Min429,
+		RatioThreshold: settings.RatioThreshold,
+		BlockSeconds:   settings.BlockSeconds,
+	})
+}
+
+// UpdateOpenAIOAuth429DynamicSettings 更新OpenAI OAuth 429动态调度配置
+// PUT /api/v1/admin/settings/openai-oauth-429-dynamic
+func (h *SettingHandler) UpdateOpenAIOAuth429DynamicSettings(c *gin.Context) {
+	var req UpdateOpenAIOAuth429DynamicSettingsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+
+	settings := &service.OpenAIOAuth429DynamicSettings{
+		Enabled:        req.Enabled,
+		WindowSeconds:  req.WindowSeconds,
+		MinSamples:     req.MinSamples,
+		Min429:         req.Min429,
+		RatioThreshold: req.RatioThreshold,
+		BlockSeconds:   req.BlockSeconds,
+	}
+	if err := h.settingService.SetOpenAIOAuth429DynamicSettings(c.Request.Context(), settings); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+
+	updatedSettings, err := h.settingService.GetOpenAIOAuth429DynamicSettings(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	response.Success(c, dto.OpenAIOAuth429DynamicSettings{
+		Enabled:        updatedSettings.Enabled,
+		WindowSeconds:  updatedSettings.WindowSeconds,
+		MinSamples:     updatedSettings.MinSamples,
+		Min429:         updatedSettings.Min429,
+		RatioThreshold: updatedSettings.RatioThreshold,
+		BlockSeconds:   updatedSettings.BlockSeconds,
 	})
 }
 

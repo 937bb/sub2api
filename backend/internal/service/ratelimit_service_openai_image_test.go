@@ -25,10 +25,10 @@ func TestIsOpenAIImageRateLimitError(t *testing.T) {
 	require.False(t, isOpenAIImageRateLimitError(http.StatusBadRequest, imageBody))
 }
 
-func TestRateLimitService_HandleOpenAIImageRateLimit_ParsesTryAgainCooldown(t *testing.T) {
+func TestRateLimitService_HandleOpenAIImageRateLimit_APIKeyParsesTryAgainCooldown(t *testing.T) {
 	repo := &modelNotFoundAccountRepoStub{}
 	svc := &RateLimitService{accountRepo: repo}
-	account := &Account{ID: 201, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	account := &Account{ID: 201, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
 	body := []byte(`{"error":{"type":"rate_limit_exceeded","message":"Rate limit reached for gpt-image-2-codex (for limit gpt-image) on input-images per min. Please try again in 2s."}}`)
 
 	before := time.Now()
@@ -43,10 +43,34 @@ func TestRateLimitService_HandleOpenAIImageRateLimit_ParsesTryAgainCooldown(t *t
 	require.WithinDuration(t, before.Add(2*time.Second), call.resetAt, time.Second)
 }
 
-func TestRateLimitService_HandleOpenAIImageRateLimit_DefaultsToOneMinute(t *testing.T) {
+func TestRateLimitService_HandleOpenAIImageRateLimit_OAuthRecordsDynamicSignalAndKeepsScopeLimit(t *testing.T) {
+	repo := &rateLimit429AccountRepoStub{}
+	settingRepo := newMockSettingRepo()
+	storeOpenAIOAuth429DynamicSettings(t, settingRepo, OpenAIOAuth429DynamicSettings{
+		Enabled:        true,
+		WindowSeconds:  60,
+		MinSamples:     2,
+		Min429:         2,
+		RatioThreshold: 1,
+		BlockSeconds:   7,
+	})
+	svc := NewRateLimitService(repo, nil, nil, nil, nil)
+	svc.SetSettingService(NewSettingService(settingRepo, nil))
+	account := &Account{ID: 202, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	body := []byte(`{"error":{"type":"rate_limit_exceeded","message":"Rate limit reached for gpt-image-2-codex (for limit gpt-image) on input-images per min. Please try again in 2s."}}`)
+
+	handled := svc.HandleOpenAIImageRateLimit(context.Background(), account, http.StatusTooManyRequests, http.Header{}, body)
+
+	require.True(t, handled)
+	require.Len(t, repo.modelRateLimitCalls, 1)
+	require.Zero(t, repo.rateLimitCalls)
+	require.True(t, svc.hasOpenAIOAuth429DynamicStats(account.ID))
+}
+
+func TestRateLimitService_HandleOpenAIImageRateLimit_APIKeyDefaultsToOneMinute(t *testing.T) {
 	repo := &modelNotFoundAccountRepoStub{}
 	svc := &RateLimitService{accountRepo: repo}
-	account := &Account{ID: 202, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	account := &Account{ID: 203, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
 	body := []byte(`{"error":{"type":"rate_limit_exceeded","message":"Rate limit reached for gpt-image-2-codex (for limit gpt-image) on input-images per min."}}`)
 
 	before := time.Now()

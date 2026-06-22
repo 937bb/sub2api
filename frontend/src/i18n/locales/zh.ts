@@ -6388,6 +6388,25 @@ export default {
         saved: '429 默认回避设置保存成功',
         saveFailed: '保存 429 默认回避设置失败'
       },
+      openaiOAuth429Dynamic: {
+        title: 'OpenAI OAuth 429 动态调度',
+        description: '将 OpenAI OAuth-like 429 作为统计信号，按窗口内 429 比例决定是否暂停调度',
+        enabled: '启用动态调度',
+        enabledHint: '首个 429 后开始统计 429 与成功/其他错误；达阈值后调用统一限流状态暂停账号',
+        windowSeconds: '统计窗口（秒）',
+        windowSecondsHint: '从首个 429 开始计数的窗口时长（60-3600 秒）',
+        minSamples: '最少样本数',
+        minSamplesHint: '达到该样本数后才判断比例（2-10000）',
+        min429: '最少 429 次数',
+        min429Hint: '429 次数至少达到该值才可能暂停（1-最少样本数）',
+        ratioThreshold: '429 比例阈值',
+        ratioThresholdHint: '窗口内 429 / 总样本比例，范围 0.01-1',
+        blockSeconds: '暂停时长（秒）',
+        blockSecondsHint: '达阈值后暂停调度的时长（1-7200 秒）',
+        saved: 'OpenAI OAuth 429 动态调度设置保存成功',
+        loadFailed: '加载 OpenAI OAuth 429 动态调度设置失败',
+        saveFailed: '保存 OpenAI OAuth 429 动态调度设置失败'
+      },
       streamTimeout: {
         title: '流超时处理',
         description: '配置上游响应超时时的账户处理策略，避免问题账户持续被选中',

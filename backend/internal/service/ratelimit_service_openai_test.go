@@ -186,8 +186,8 @@ func TestHandle429_OpenAIPersistsCodexSnapshotImmediately(t *testing.T) {
 
 	svc.handle429(context.Background(), account, headers, nil)
 
-	if repo.rateLimitedID != account.ID {
-		t.Fatalf("rateLimitedID = %d, want %d", repo.rateLimitedID, account.ID)
+	if repo.rateLimitedID != 0 {
+		t.Fatalf("rateLimitedID = %d, want no direct OAuth rate limit", repo.rateLimitedID)
 	}
 	if len(repo.updatedExtra) == 0 {
 		t.Fatal("expected codex snapshot to be persisted on 429")
@@ -216,7 +216,7 @@ func TestHandle429_OpenAISyncsObservedPlanType(t *testing.T) {
 	require.Equal(t, []int64{account.ID}, repo.bulkUpdatedIDs)
 	require.Equal(t, "free", repo.bulkUpdatedPayload.Credentials["plan_type"])
 	require.Equal(t, "free", account.Credentials["plan_type"])
-	require.Equal(t, account.ID, repo.rateLimitedID)
+	require.Zero(t, repo.rateLimitedID)
 }
 
 func TestNormalizedCodexLimits(t *testing.T) {

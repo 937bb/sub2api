@@ -662,10 +662,7 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 		if resp.StatusCode == http.StatusTooManyRequests {
 			s.reconcileOpenAI429State(ctx, account, resp.Header, body)
 		}
-		// 401 Unauthorized: 标记账号为永久错误，但不要存储上游原始响应体。
-		if resp.StatusCode == http.StatusUnauthorized && s.accountRepo != nil {
-			_ = s.accountRepo.SetError(ctx, account.ID, openAIAccountTestAuthErrorMessage(resp.StatusCode, body))
-		}
+		s.markOpenAIAccountTestPermanentError(ctx, account, resp.StatusCode, body)
 		return s.sendErrorAndEnd(c, openAIAccountTestAPIErrorMessage(resp.StatusCode, body))
 	}
 
@@ -848,9 +845,7 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		if resp.StatusCode == http.StatusUnauthorized && s.accountRepo != nil {
-			_ = s.accountRepo.SetError(ctx, account.ID, openAIAccountTestAuthErrorMessage(resp.StatusCode, body))
-		}
+		s.markOpenAIAccountTestPermanentError(ctx, account, resp.StatusCode, body)
 		return s.sendErrorAndEnd(c, openAIAccountTestAPIErrorMessage(resp.StatusCode, body))
 	}
 
@@ -871,8 +866,26 @@ func openAIAccountTestAPIErrorMessage(statusCode int, body []byte) string {
 	return fmt.Sprintf("API returned %d: %s", statusCode, openAIAccountTestSanitizedUpstreamError(statusCode, body))
 }
 
+func (s *AccountTestService) markOpenAIAccountTestPermanentError(ctx context.Context, account *Account, statusCode int, body []byte) {
+	if s == nil || s.accountRepo == nil || account == nil {
+		return
+	}
+	switch statusCode {
+	case http.StatusUnauthorized:
+		_ = s.accountRepo.SetError(ctx, account.ID, openAIAccountTestAuthErrorMessage(statusCode, body))
+	case http.StatusForbidden:
+		if isOpenAIPersonalAccessTokenWorkspace403(account, extractUpstreamErrorMessage(body), body) {
+			_ = s.accountRepo.SetError(ctx, account.ID, openAIAccountTestForbiddenErrorMessage(statusCode, body))
+		}
+	}
+}
+
 func openAIAccountTestAuthErrorMessage(statusCode int, body []byte) string {
 	return fmt.Sprintf("Authentication failed (%d): %s", statusCode, openAIAccountTestSanitizedUpstreamError(statusCode, body))
+}
+
+func openAIAccountTestForbiddenErrorMessage(statusCode int, body []byte) string {
+	return fmt.Sprintf("Access forbidden (%d): %s", statusCode, openAIAccountTestSanitizedUpstreamError(statusCode, body))
 }
 
 func (s *AccountTestService) persistOpenAIAccountTestExtraUpdates(ctx context.Context, account *Account, updates map[string]any) error {
@@ -908,6 +921,10 @@ func (s *AccountTestService) reconcileOpenAI429State(ctx context.Context, accoun
 	}
 
 	persistOpenAI429PlanType(ctx, s.accountRepo, account, body)
+	if account.IsOpenAIOAuthLike() {
+		// OAuth-like 429 仍可继续成功请求；账号测试只同步旁路信息，不直接暂停调度。
+		return
+	}
 
 	var resetAt *time.Time
 	if calculated := calculateOpenAI429ResetTime(headers); calculated != nil {
@@ -1733,6 +1750,7 @@ func (s *AccountTestService) testOpenAIImageOAuth(c *gin.Context, ctx context.Co
 	}
 	if resp.StatusCode >= 400 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+		s.markOpenAIAccountTestPermanentError(ctx, account, resp.StatusCode, body)
 		return s.sendErrorAndEnd(c, openAIAccountTestAPIErrorMessage(resp.StatusCode, body))
 	}
 

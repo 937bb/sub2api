@@ -8,7 +8,6 @@ import (
 
 const (
 	openAIAccountStateUpdateTimeout       = 5 * time.Second
-	openAIOAuth429FallbackCooldown        = 5 * time.Second
 	openAIStopSchedulingBridgeCooldown    = 2 * time.Minute
 	openAIOAuth429StormWindow             = 10 * time.Second
 	openAIOAuth429StormThreshold          = 20
@@ -35,48 +34,38 @@ func (s *OpenAIGatewayService) handleOpenAIAccountUpstreamError(ctx context.Cont
 	stateCtx, cancel := openAIAccountStateContext(ctx)
 	defer cancel()
 
-	if isOpenAIImageRateLimitError(statusCode, responseBody) {
-		if s != nil && s.rateLimitService != nil {
-			_ = s.rateLimitService.HandleOpenAIImageRateLimit(stateCtx, account, statusCode, headers, responseBody)
-		}
-		return false
-	}
-
 	if statusCode == http.StatusTooManyRequests {
-		s.markOpenAIOAuth429RateLimited(stateCtx, account, headers, responseBody)
+		s.markOpenAIOAuth429RateLimited(stateCtx, account)
 	}
 	if s == nil || account == nil || s.rateLimitService == nil {
 		return false
 	}
+
+	if isOpenAIImageRateLimitError(statusCode, responseBody) {
+		_ = s.rateLimitService.HandleOpenAIImageRateLimit(stateCtx, account, statusCode, headers, responseBody)
+		return false
+	}
+
 	if len(requestedModel) > 0 && s.rateLimitService.HandleUpstreamModelNotFound(stateCtx, account, requestedModel[0], statusCode, responseBody) {
+		s.rateLimitService.RecordOpenAIOAuthUpstreamOutcome(stateCtx, account, statusCode)
 		return true
 	}
 	shouldDisable := s.rateLimitService.HandleUpstreamError(stateCtx, account, statusCode, headers, responseBody)
+	if statusCode != http.StatusTooManyRequests {
+		s.rateLimitService.RecordOpenAIOAuthUpstreamOutcome(stateCtx, account, statusCode)
+	}
 	if shouldDisable {
 		s.BlockAccountScheduling(account, time.Time{}, "upstream_disable")
 	}
 	return shouldDisable
 }
 
-func (s *OpenAIGatewayService) markOpenAIOAuth429RateLimited(ctx context.Context, account *Account, headers http.Header, responseBody []byte) {
+func (s *OpenAIGatewayService) markOpenAIOAuth429RateLimited(_ context.Context, account *Account) {
 	if s == nil || !isOpenAIOAuthAccount(account) {
 		return
 	}
+	// 单次 OAuth 429 仍可继续成功请求；这里仅保留全局风暴计数。
 	s.recordOpenAIOAuth429()
-
-	cooldownUntil := time.Now().Add(openAIOAuth429FallbackCooldown)
-	if s.rateLimitService != nil {
-		if resetAt := s.rateLimitService.calculateOpenAI429ResetTime(headers); resetAt != nil && resetAt.After(time.Now()) {
-			cooldownUntil = *resetAt
-		} else if resetUnix := parseOpenAIRateLimitResetTime(responseBody); resetUnix != nil {
-			if resetAt := time.Unix(*resetUnix, 0); resetAt.After(time.Now()) {
-				cooldownUntil = resetAt
-			}
-		} else if cooldown, ok := s.rateLimitService.get429FallbackCooldown(ctx, account); ok && cooldown > 0 {
-			cooldownUntil = time.Now().Add(cooldown)
-		}
-	}
-	s.BlockAccountScheduling(account, cooldownUntil, "429")
 }
 
 func (s *OpenAIGatewayService) BlockAccountScheduling(account *Account, until time.Time, reason string) {

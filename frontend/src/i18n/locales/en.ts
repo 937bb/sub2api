@@ -6233,6 +6233,25 @@ export default {
         saved: '429 default cooldown settings saved',
         saveFailed: 'Failed to save 429 default cooldown settings'
       },
+      openaiOAuth429Dynamic: {
+        title: 'OpenAI OAuth 429 Dynamic Scheduling',
+        description: 'Treat OpenAI OAuth-like 429s as statistical signals and pause scheduling only when the window ratio crosses the threshold',
+        enabled: 'Enable Dynamic Scheduling',
+        enabledHint: 'Start counting after the first 429; when 429 ratio and sample thresholds are met, pause the account through the unified rate-limit state',
+        windowSeconds: 'Stats Window (seconds)',
+        windowSecondsHint: 'Window duration counted from the first 429 (60-3600 seconds)',
+        minSamples: 'Minimum Samples',
+        minSamplesHint: 'Only evaluate the ratio after this many samples (2-10000)',
+        min429: 'Minimum 429 Count',
+        min429Hint: '429 count must reach this value before pausing (1-minimum samples)',
+        ratioThreshold: '429 Ratio Threshold',
+        ratioThresholdHint: '429 / total samples within the window, range 0.01-1',
+        blockSeconds: 'Pause Duration (seconds)',
+        blockSecondsHint: 'Scheduling pause duration after threshold hit (1-7200 seconds)',
+        saved: 'OpenAI OAuth 429 dynamic scheduling settings saved',
+        loadFailed: 'Failed to load OpenAI OAuth 429 dynamic scheduling settings',
+        saveFailed: 'Failed to save OpenAI OAuth 429 dynamic scheduling settings'
+      },
       streamTimeout: {
         title: 'Stream Timeout Handling',
         description: 'Configure account handling strategy when upstream response times out',

@@ -4114,6 +4114,102 @@ func (s *SettingService) SetRateLimit429CooldownSettings(ctx context.Context, se
 	return s.settingRepo.Set(ctx, SettingKeyRateLimit429CooldownSettings, string(data))
 }
 
+// GetOpenAIOAuth429DynamicSettings 获取OpenAI OAuth 429动态调度配置
+func (s *SettingService) GetOpenAIOAuth429DynamicSettings(ctx context.Context) (*OpenAIOAuth429DynamicSettings, error) {
+	value, err := s.settingRepo.GetValue(ctx, SettingKeyOpenAIOAuth429DynamicSettings)
+	if err != nil {
+		if errors.Is(err, ErrSettingNotFound) {
+			return DefaultOpenAIOAuth429DynamicSettings(), nil
+		}
+		return nil, fmt.Errorf("get openai oauth 429 dynamic settings: %w", err)
+	}
+	if value == "" {
+		return DefaultOpenAIOAuth429DynamicSettings(), nil
+	}
+
+	var settings OpenAIOAuth429DynamicSettings
+	if err := json.Unmarshal([]byte(value), &settings); err != nil {
+		return DefaultOpenAIOAuth429DynamicSettings(), nil
+	}
+	normalizeOpenAIOAuth429DynamicSettings(&settings)
+	return &settings, nil
+}
+
+// SetOpenAIOAuth429DynamicSettings 设置OpenAI OAuth 429动态调度配置
+func (s *SettingService) SetOpenAIOAuth429DynamicSettings(ctx context.Context, settings *OpenAIOAuth429DynamicSettings) error {
+	if settings == nil {
+		return fmt.Errorf("settings cannot be nil")
+	}
+	if err := validateOpenAIOAuth429DynamicSettings(settings); err != nil {
+		if settings.Enabled {
+			return err
+		}
+		settings = DefaultOpenAIOAuth429DynamicSettings()
+	}
+
+	data, err := json.Marshal(settings)
+	if err != nil {
+		return fmt.Errorf("marshal openai oauth 429 dynamic settings: %w", err)
+	}
+
+	return s.settingRepo.Set(ctx, SettingKeyOpenAIOAuth429DynamicSettings, string(data))
+}
+
+func normalizeOpenAIOAuth429DynamicSettings(settings *OpenAIOAuth429DynamicSettings) {
+	if settings == nil {
+		return
+	}
+	if settings.WindowSeconds < 60 {
+		settings.WindowSeconds = 60
+	}
+	if settings.WindowSeconds > 3600 {
+		settings.WindowSeconds = 3600
+	}
+	if settings.MinSamples < 2 {
+		settings.MinSamples = 2
+	}
+	if settings.MinSamples > 10000 {
+		settings.MinSamples = 10000
+	}
+	if settings.Min429 < 1 {
+		settings.Min429 = 1
+	}
+	if settings.Min429 > settings.MinSamples {
+		settings.Min429 = settings.MinSamples
+	}
+	if settings.RatioThreshold <= 0 {
+		settings.RatioThreshold = 0.01
+	}
+	if settings.RatioThreshold > 1 {
+		settings.RatioThreshold = 1
+	}
+	if settings.BlockSeconds < 1 {
+		settings.BlockSeconds = 1
+	}
+	if settings.BlockSeconds > 7200 {
+		settings.BlockSeconds = 7200
+	}
+}
+
+func validateOpenAIOAuth429DynamicSettings(settings *OpenAIOAuth429DynamicSettings) error {
+	if settings.WindowSeconds < 60 || settings.WindowSeconds > 3600 {
+		return fmt.Errorf("window_seconds must be between 60-3600")
+	}
+	if settings.MinSamples < 2 || settings.MinSamples > 10000 {
+		return fmt.Errorf("min_samples must be between 2-10000")
+	}
+	if settings.Min429 < 1 || settings.Min429 > settings.MinSamples {
+		return fmt.Errorf("min_429 must be between 1-min_samples")
+	}
+	if settings.RatioThreshold <= 0 || settings.RatioThreshold > 1 {
+		return fmt.Errorf("ratio_threshold must be between 0.01-1")
+	}
+	if settings.BlockSeconds < 1 || settings.BlockSeconds > 7200 {
+		return fmt.Errorf("block_seconds must be between 1-7200")
+	}
+	return nil
+}
+
 // GetOIDCConnectOAuthConfig 返回用于登录的“最终生效” OIDC 配置。
 //
 // 优先级：

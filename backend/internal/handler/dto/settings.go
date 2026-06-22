@@ -351,6 +351,16 @@ type RateLimit429CooldownSettings struct {
 	CooldownSeconds int  `json:"cooldown_seconds"`
 }
 
+// OpenAIOAuth429DynamicSettings OpenAI OAuth 429动态调度配置 DTO
+type OpenAIOAuth429DynamicSettings struct {
+	Enabled        bool    `json:"enabled"`
+	WindowSeconds  int     `json:"window_seconds"`
+	MinSamples     int     `json:"min_samples"`
+	Min429         int     `json:"min_429"`
+	RatioThreshold float64 `json:"ratio_threshold"`
+	BlockSeconds   int     `json:"block_seconds"`
+}
+
 // StreamTimeoutSettings 流超时处理配置 DTO
 type StreamTimeoutSettings struct {
 	Enabled                bool   `json:"enabled"`

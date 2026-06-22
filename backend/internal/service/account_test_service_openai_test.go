@@ -343,6 +343,34 @@ func TestAccountTestService_OpenAIErrorSanitizesOAuthUpstreamBody(t *testing.T) 
 	require.Contains(t, repo.setErrorMsg, "Authorization=[redacted]")
 }
 
+func TestAccountTestService_OpenAIPATWorkspace403MarksError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, recorder := newTestContext()
+
+	body := `{"error":{"message":"Personal access token owner is not an active member of the selected workspace."}}`
+	repo := &openAIAccountTestRepo{}
+	upstream := &queuedHTTPUpstream{responses: []*http.Response{newJSONResponse(http.StatusForbidden, body)}}
+	svc := &AccountTestService{accountRepo: repo, httpUpstream: upstream}
+	account := &Account{
+		ID:          893,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"personal_access_token": "pat-test",
+			"chatgpt_account_id":    "chatgpt-acc",
+		},
+	}
+
+	err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.4", "", "")
+
+	require.Error(t, err)
+	require.Contains(t, recorder.Body.String(), "API returned 403")
+	require.Equal(t, account.ID, repo.setErrorID)
+	require.Contains(t, repo.setErrorMsg, "Access forbidden (403)")
+	require.Contains(t, repo.setErrorMsg, "Personal access token owner is not an active member of the selected workspace")
+}
+
 func TestAccountTestService_OpenAIOAuthProbeSendsCodexFingerprint(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, _ := newTestContext()
@@ -454,7 +482,7 @@ func TestAccountTestService_OpenAIStreamEOFBeforeCompletedFails(t *testing.T) {
 	require.NotContains(t, recorder.Body.String(), `"success":true`)
 }
 
-func TestAccountTestService_OpenAI429PersistsSnapshotAndRateLimitState(t *testing.T) {
+func TestAccountTestService_OpenAI429OAuthPersistsSnapshotWithoutRateLimitState(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, _ := newTestContext()
 
@@ -482,15 +510,15 @@ func TestAccountTestService_OpenAI429PersistsSnapshotAndRateLimitState(t *testin
 	require.Error(t, err)
 	require.NotEmpty(t, repo.updatedExtra)
 	require.Equal(t, 100.0, repo.updatedExtra["codex_5h_used_percent"])
-	require.Equal(t, account.ID, repo.rateLimitedID)
-	require.NotNil(t, repo.rateLimitedAt)
-	require.Equal(t, account.ID, repo.clearedErrorID)
-	require.Equal(t, StatusActive, account.Status)
+	require.Zero(t, repo.rateLimitedID)
+	require.Nil(t, repo.rateLimitedAt)
+	require.Zero(t, repo.clearedErrorID)
+	require.Equal(t, StatusError, account.Status)
 	require.Empty(t, account.ErrorMessage)
-	require.NotNil(t, account.RateLimitResetAt)
+	require.Nil(t, account.RateLimitResetAt)
 }
 
-func TestAccountTestService_OpenAI429BodyOnlyPersistsRateLimitAndClearsStaleError(t *testing.T) {
+func TestAccountTestService_OpenAI429OAuthBodyOnlyDoesNotRateLimitOrClearStaleError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, _ := newTestContext()
 
@@ -511,12 +539,12 @@ func TestAccountTestService_OpenAI429BodyOnlyPersistsRateLimitAndClearsStaleErro
 
 	err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.4", "", "")
 	require.Error(t, err)
-	require.Equal(t, account.ID, repo.rateLimitedID)
-	require.NotNil(t, repo.rateLimitedAt)
-	require.Equal(t, account.ID, repo.clearedErrorID)
-	require.Equal(t, StatusActive, account.Status)
-	require.Empty(t, account.ErrorMessage)
-	require.NotNil(t, account.RateLimitResetAt)
+	require.Zero(t, repo.rateLimitedID)
+	require.Nil(t, repo.rateLimitedAt)
+	require.Zero(t, repo.clearedErrorID)
+	require.Equal(t, StatusError, account.Status)
+	require.Equal(t, "Access forbidden (403): account may be suspended or lack permissions", account.ErrorMessage)
+	require.Nil(t, account.RateLimitResetAt)
 	require.Contains(t, repo.updatedExtra, OpenAICodexFingerprintExtraKey)
 	require.NotContains(t, repo.updatedExtra, "codex_5h_used_percent")
 	require.NotContains(t, repo.updatedExtra, "codex_7d_used_percent")
@@ -545,11 +573,11 @@ func TestAccountTestService_OpenAI429SyncsObservedPlanType(t *testing.T) {
 	require.Equal(t, []int64{account.ID}, repo.bulkUpdatedIDs)
 	require.Equal(t, "free", repo.bulkUpdatedPayload.Credentials["plan_type"])
 	require.Equal(t, "free", account.Credentials["plan_type"])
-	require.Equal(t, account.ID, repo.rateLimitedID)
-	require.NotNil(t, account.RateLimitResetAt)
+	require.Zero(t, repo.rateLimitedID)
+	require.Nil(t, account.RateLimitResetAt)
 }
 
-func TestAccountTestService_OpenAI429ActiveAccountDoesNotClearError(t *testing.T) {
+func TestAccountTestService_OpenAI429OAuthActiveAccountDoesNotRateLimitOrClearError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, _ := newTestContext()
 
@@ -569,11 +597,11 @@ func TestAccountTestService_OpenAI429ActiveAccountDoesNotClearError(t *testing.T
 
 	err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.4", "", "")
 	require.Error(t, err)
-	require.Equal(t, account.ID, repo.rateLimitedID)
-	require.NotNil(t, repo.rateLimitedAt)
+	require.Zero(t, repo.rateLimitedID)
+	require.Nil(t, repo.rateLimitedAt)
 	require.Zero(t, repo.clearedErrorID)
 	require.Equal(t, StatusActive, account.Status)
-	require.NotNil(t, account.RateLimitResetAt)
+	require.Nil(t, account.RateLimitResetAt)
 }
 
 func TestAccountTestService_OpenAI429WithoutResetSignalDoesNotMutateRuntimeState(t *testing.T) {

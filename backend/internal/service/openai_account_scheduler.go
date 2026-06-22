@@ -7,6 +7,7 @@ import (
 	"hash/fnv"
 	"log/slog"
 	"math"
+	"net/http"
 	"sort"
 	"strconv"
 	"strings"
@@ -1317,7 +1318,16 @@ func (s *OpenAIGatewayService) isOpenAIAccountTransportCompatible(account *Accou
 	return s.getOpenAIWSProtocolResolver().Resolve(account).Transport == requiredTransport
 }
 
-func (s *OpenAIGatewayService) ReportOpenAIAccountScheduleResult(accountID int64, success bool, firstTokenMs *int) {
+func (s *OpenAIGatewayService) ReportOpenAIAccountScheduleResult(accountID int64, success bool, firstTokenMs *int, accounts ...*Account) {
+	if s == nil {
+		return
+	}
+	if success && s.rateLimitService != nil {
+		s.rateLimitService.ResetOpenAI403Counter(context.Background(), accountID)
+		if len(accounts) > 0 {
+			s.rateLimitService.RecordOpenAIOAuthUpstreamOutcome(context.Background(), accounts[0], http.StatusOK)
+		}
+	}
 	scheduler := s.getOpenAIAccountScheduler(context.Background())
 	if scheduler == nil {
 		return

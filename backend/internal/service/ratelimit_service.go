@@ -20,18 +20,20 @@ import (
 
 // RateLimitService 处理限流和过载状态管理
 type RateLimitService struct {
-	accountRepo           AccountRepository
-	usageRepo             UsageLogRepository
-	cfg                   *config.Config
-	geminiQuotaService    *GeminiQuotaService
-	tempUnschedCache      TempUnschedCache
-	timeoutCounterCache   TimeoutCounterCache
-	openAI403CounterCache OpenAI403CounterCache
-	settingService        *SettingService
-	tokenCacheInvalidator TokenCacheInvalidator
-	runtimeBlocker        AccountRuntimeBlocker
-	usageCacheMu          sync.RWMutex
-	usageCache            map[int64]*geminiUsageCacheEntry
+	accountRepo               AccountRepository
+	usageRepo                 UsageLogRepository
+	cfg                       *config.Config
+	geminiQuotaService        *GeminiQuotaService
+	tempUnschedCache          TempUnschedCache
+	timeoutCounterCache       TimeoutCounterCache
+	openAI403CounterCache     OpenAI403CounterCache
+	openAIOAuth429DynamicMu   sync.Mutex
+	openAIOAuth429DynamicStat map[int64]*openAIOAuth429DynamicWindow
+	settingService            *SettingService
+	tokenCacheInvalidator     TokenCacheInvalidator
+	runtimeBlocker            AccountRuntimeBlocker
+	usageCacheMu              sync.RWMutex
+	usageCache                map[int64]*geminiUsageCacheEntry
 }
 
 type AccountRuntimeBlocker interface {
@@ -83,12 +85,13 @@ const (
 // NewRateLimitService 创建RateLimitService实例
 func NewRateLimitService(accountRepo AccountRepository, usageRepo UsageLogRepository, cfg *config.Config, geminiQuotaService *GeminiQuotaService, tempUnschedCache TempUnschedCache) *RateLimitService {
 	return &RateLimitService{
-		accountRepo:        accountRepo,
-		usageRepo:          usageRepo,
-		cfg:                cfg,
-		geminiQuotaService: geminiQuotaService,
-		tempUnschedCache:   tempUnschedCache,
-		usageCache:         make(map[int64]*geminiUsageCacheEntry),
+		accountRepo:               accountRepo,
+		usageRepo:                 usageRepo,
+		cfg:                       cfg,
+		geminiQuotaService:        geminiQuotaService,
+		tempUnschedCache:          tempUnschedCache,
+		openAIOAuth429DynamicStat: make(map[int64]*openAIOAuth429DynamicWindow),
+		usageCache:                make(map[int64]*geminiUsageCacheEntry),
 	}
 }
 
@@ -807,6 +810,11 @@ func (s *RateLimitService) handleOpenAI403(ctx context.Context, account *Account
 		"account may be suspended or lack permissions",
 	)
 
+	if isOpenAIPersonalAccessTokenWorkspace403(account, upstreamMsg, responseBody) {
+		s.handleAuthError(ctx, account, msg)
+		return true
+	}
+
 	if s.openAI403CounterCache == nil {
 		s.handleAuthError(ctx, account, msg)
 		return true
@@ -842,6 +850,19 @@ func (s *RateLimitService) handleOpenAI403(ctx context.Context, account *Account
 		"threshold", openAI403DisableThreshold,
 	)
 	return true
+}
+
+func isOpenAIPersonalAccessTokenWorkspace403(account *Account, upstreamMsg string, responseBody []byte) bool {
+	if account == nil || strings.TrimSpace(account.GetOpenAIPersonalAccessToken()) == "" {
+		return false
+	}
+	msg := strings.ToLower(strings.TrimSpace(upstreamMsg))
+	if msg == "" {
+		msg = strings.ToLower(extractUpstreamErrorMessage(responseBody))
+	}
+	return strings.Contains(msg, "personal access token owner") &&
+		strings.Contains(msg, "not an active member") &&
+		strings.Contains(msg, "selected workspace")
 }
 
 // handleAntigravity403 处理 Antigravity 平台的 403 错误
@@ -904,10 +925,14 @@ func (s *RateLimitService) handleCustomErrorCode(ctx context.Context, account *A
 // handle429 处理429限流错误
 // 解析响应头获取重置时间，标记账号为限流状态
 func (s *RateLimitService) handle429(ctx context.Context, account *Account, headers http.Header, responseBody []byte) {
-	// 1. OpenAI 平台：优先尝试解析 x-codex-* 响应头（用于 rate_limit_exceeded）
+	// 1. OpenAI OAuth-like：429 只作为动态统计信号，达阈值后再统一 SetRateLimited。
 	if account.Platform == PlatformOpenAI {
 		persistOpenAI429PlanType(ctx, s.accountRepo, account, responseBody)
 		s.persistOpenAICodexSnapshot(ctx, account, headers)
+		if account.IsOpenAIOAuthLike() {
+			s.RecordOpenAIOAuthUpstreamOutcome(ctx, account, http.StatusTooManyRequests)
+			return
+		}
 		if resetAt := s.calculateOpenAI429ResetTime(headers); resetAt != nil {
 			s.notifyAccountSchedulingBlocked(account, *resetAt, "429")
 			if err := s.accountRepo.SetRateLimited(ctx, account.ID, *resetAt); err != nil {
@@ -948,6 +973,9 @@ func (s *RateLimitService) handle429(ctx context.Context, account *Account, head
 	if resetTimestamp == "" {
 		switch account.Platform {
 		case PlatformOpenAI:
+			if account.IsOpenAIOAuthLike() {
+				return
+			}
 			// 尝试解析 OpenAI 的 usage_limit_reached 错误
 			if resetAt := parseOpenAIRateLimitResetTime(responseBody); resetAt != nil {
 				resetTime := time.Unix(*resetAt, 0)
@@ -1620,6 +1648,7 @@ func (s *RateLimitService) ClearRateLimit(ctx context.Context, accountID int64) 
 		}
 	}
 	s.ResetOpenAI403Counter(ctx, accountID)
+	s.ResetOpenAIOAuth429DynamicStats(accountID)
 	s.notifyAccountSchedulingBlockCleared(accountID)
 	return nil
 }
@@ -1688,6 +1717,7 @@ func (s *RateLimitService) ClearTempUnschedulable(ctx context.Context, accountID
 	if err := s.accountRepo.ClearModelRateLimits(ctx, accountID); err != nil {
 		slog.Warn("clear_model_rate_limits_on_temp_unsched_reset_failed", "account_id", accountID, "error", err)
 	}
+	s.ResetOpenAIOAuth429DynamicStats(accountID)
 	s.notifyAccountSchedulingBlockCleared(accountID)
 	return nil
 }
@@ -1794,6 +1824,10 @@ func (s *RateLimitService) HandleOpenAIImageRateLimit(ctx context.Context, accou
 	}
 	if !isOpenAIImageRateLimitError(statusCode, responseBody) {
 		return false
+	}
+	if account.IsOpenAIOAuthLike() {
+		// Keep OAuth-like account scheduling on the dynamic 429 path; image cooldown remains scope-local.
+		s.handle429(ctx, account, headers, responseBody)
 	}
 
 	resetAt := openAIImageRateLimitResetAt(headers, responseBody)

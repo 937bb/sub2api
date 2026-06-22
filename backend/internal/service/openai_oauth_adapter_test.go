@@ -860,7 +860,7 @@ func TestOpenAIGatewayService_OpenAIUpstream_429And529TriggerFailover(t *testing
 		assertRepo  func(t *testing.T, repo *openAIUpstreamFailoverRepo, start time.Time)
 	}{
 		{
-			name:        "oauth_429_rate_limit",
+			name:        "oauth_429_dynamic_signal_only",
 			accountType: AccountTypeOAuth,
 			statusCode:  http.StatusTooManyRequests,
 			body: func() string {
@@ -868,9 +868,8 @@ func TestOpenAIGatewayService_OpenAIUpstream_429And529TriggerFailover(t *testing
 				return fmt.Sprintf(`{"error":{"message":"The usage limit has been reached","type":"usage_limit_reached","resets_at":%d}}`, resetAt)
 			}(),
 			assertRepo: func(t *testing.T, repo *openAIUpstreamFailoverRepo, _ time.Time) {
-				require.Len(t, repo.rateLimitCalls, 1)
+				require.Empty(t, repo.rateLimitCalls)
 				require.Empty(t, repo.overloadCalls)
-				require.True(t, time.Until(repo.rateLimitCalls[0]) > 24*time.Hour)
 			},
 		},
 		{
