@@ -420,6 +420,161 @@ func TestAPIKeyAuthRejectsUnavailableGroup(t *testing.T) {
 	}
 }
 
+func TestAPIKeyAuthRejectsExclusiveGroupNotAllowed(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	groupID := int64(101)
+	user := &service.User{
+		ID:          7,
+		Role:        service.RoleUser,
+		Status:      service.StatusActive,
+		Balance:     10,
+		Concurrency: 3,
+	}
+	apiKey := &service.APIKey{
+		ID:      100,
+		UserID:  user.ID,
+		GroupID: &groupID,
+		Key:     "exclusive-key",
+		Status:  service.StatusActive,
+		User:    user,
+		Group: &service.Group{
+			ID:               groupID,
+			Name:             "exclusive",
+			Status:           service.StatusActive,
+			Platform:         service.PlatformAnthropic,
+			SubscriptionType: service.SubscriptionTypeStandard,
+			IsExclusive:      true,
+			Hydrated:         true,
+		},
+	}
+	apiKeyRepo := &stubApiKeyRepo{
+		getByKey: func(ctx context.Context, key string) (*service.APIKey, error) {
+			if key != apiKey.Key {
+				return nil, service.ErrAPIKeyNotFound
+			}
+			clone := *apiKey
+			return &clone, nil
+		},
+	}
+	cfg := &config.Config{RunMode: config.RunModeStandard}
+	apiKeyService := service.NewAPIKeyService(apiKeyRepo, nil, nil, nil, nil, nil, cfg)
+	router := gin.New()
+	var markedBusinessLimited bool
+	var businessLimitedReason string
+	router.Use(func(c *gin.Context) {
+		c.Next()
+		markedBusinessLimited = service.HasOpsClientBusinessLimited(c)
+		if v, ok := c.Get(service.OpsClientBusinessLimitedReasonKey); ok {
+			businessLimitedReason, _ = v.(string)
+		}
+	})
+	router.Use(gin.HandlerFunc(NewAPIKeyAuthMiddleware(apiKeyService, nil, cfg)))
+	router.GET("/t", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/t", nil)
+	req.Header.Set("x-api-key", apiKey.Key)
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusForbidden, w.Code)
+	requireAPIKeyAuthError(t, w, "GROUP_NOT_ALLOWED", "API Key 所属专属分组不再允许当前用户使用")
+	require.True(t, markedBusinessLimited)
+	require.Equal(t, service.OpsClientBusinessLimitedReasonAPIKeyGroupUnavailable, businessLimitedReason)
+}
+
+func TestAPIKeyAuthAllowsAuthorizedOrNonExclusiveGroups(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	groupID := int64(101)
+	tests := []struct {
+		name          string
+		allowedGroups []int64
+		group         *service.Group
+	}{
+		{
+			name:          "exclusive group allowed for user",
+			allowedGroups: []int64{groupID},
+			group: &service.Group{
+				ID:               groupID,
+				Name:             "exclusive",
+				Status:           service.StatusActive,
+				Platform:         service.PlatformAnthropic,
+				SubscriptionType: service.SubscriptionTypeStandard,
+				IsExclusive:      true,
+				Hydrated:         true,
+			},
+		},
+		{
+			name: "public standard group allowed for all users",
+			group: &service.Group{
+				ID:               groupID,
+				Name:             "public",
+				Status:           service.StatusActive,
+				Platform:         service.PlatformAnthropic,
+				SubscriptionType: service.SubscriptionTypeStandard,
+				IsExclusive:      false,
+				Hydrated:         true,
+			},
+		},
+		{
+			name: "subscription groups bypass standard exclusive binding check",
+			group: &service.Group{
+				ID:               groupID,
+				Name:             "subscription",
+				Status:           service.StatusActive,
+				Platform:         service.PlatformAnthropic,
+				SubscriptionType: service.SubscriptionTypeSubscription,
+				IsExclusive:      true,
+				Hydrated:         true,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			user := &service.User{
+				ID:            7,
+				Role:          service.RoleUser,
+				Status:        service.StatusActive,
+				Balance:       10,
+				Concurrency:   3,
+				AllowedGroups: tt.allowedGroups,
+			}
+			apiKey := &service.APIKey{
+				ID:      100,
+				UserID:  user.ID,
+				GroupID: &groupID,
+				Key:     "allowed-key",
+				Status:  service.StatusActive,
+				User:    user,
+				Group:   tt.group,
+			}
+			apiKeyRepo := &stubApiKeyRepo{
+				getByKey: func(ctx context.Context, key string) (*service.APIKey, error) {
+					if key != apiKey.Key {
+						return nil, service.ErrAPIKeyNotFound
+					}
+					clone := *apiKey
+					return &clone, nil
+				},
+			}
+			cfg := &config.Config{RunMode: config.RunModeStandard}
+			apiKeyService := service.NewAPIKeyService(apiKeyRepo, nil, nil, nil, nil, nil, cfg)
+			router := newAuthTestRouter(apiKeyService, nil, cfg)
+
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/t", nil)
+			req.Header.Set("x-api-key", apiKey.Key)
+			router.ServeHTTP(w, req)
+
+			require.Equal(t, http.StatusOK, w.Code)
+		})
+	}
+}
+
 func TestAPIKeyAuthSetsOpsFallbackKeyOnEarlyAbort(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

@@ -778,6 +778,7 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 	oldStatus := user.Status
 	oldRole := user.Role
 	oldRPMLimit := user.RPMLimit
+	oldAllowedGroups := append([]int64(nil), user.AllowedGroups...)
 
 	if input.Email != "" {
 		user.Email = input.Email
@@ -823,9 +824,10 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 	}
 
 	if s.authCacheInvalidator != nil {
-		// RPMLimit 直接参与 billing_cache_service.checkRPM 的三级级联，
-		// 不失效缓存会让修改在一个 L2 TTL 内失去效果。
-		if user.Concurrency != oldConcurrency || user.Status != oldStatus || user.Role != oldRole || user.RPMLimit != oldRPMLimit {
+		// RPMLimit 与 AllowedGroups 都参与 API Key 鉴权快照；不失效会让修改在
+		// 一个 L2 TTL 内继续使用旧的限流或专属分组授权。
+		if user.Concurrency != oldConcurrency || user.Status != oldStatus || user.Role != oldRole ||
+			user.RPMLimit != oldRPMLimit || !sameInt64Set(user.AllowedGroups, oldAllowedGroups) {
 			s.authCacheInvalidator.InvalidateAuthCacheByUserID(ctx, user.ID)
 		}
 	}
@@ -852,6 +854,22 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 	}
 
 	return user, nil
+}
+
+func sameInt64Set(a, b []int64) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	left := append([]int64(nil), a...)
+	right := append([]int64(nil), b...)
+	sort.Slice(left, func(i, j int) bool { return left[i] < left[j] })
+	sort.Slice(right, func(i, j int) bool { return right[i] < right[j] })
+	for i := range left {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *adminServiceImpl) DeleteUser(ctx context.Context, id int64) error {
@@ -2395,9 +2413,10 @@ func (s *adminServiceImpl) AdminUpdateAPIKeyGroupID(ctx context.Context, keyID i
 			result.GrantedGroupID = &gid
 			result.GrantedGroupName = group.Name
 
-			// 失效认证缓存（在事务提交后执行）
+			// 自动授予 AllowedGroups 会改变该用户所有 API Key 的认证快照。
+			// 事务提交后按用户失效，避免其他已缓存 Key 在 L2 TTL 内误用旧授权。
 			if s.authCacheInvalidator != nil {
-				s.authCacheInvalidator.InvalidateAuthCacheByKey(ctx, apiKey.Key)
+				s.authCacheInvalidator.InvalidateAuthCacheByUserID(ctx, apiKey.UserID)
 			}
 
 			result.APIKey = apiKey

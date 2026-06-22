@@ -48,6 +48,46 @@ func TestAdminService_UpdateUser_InvalidatesAuthCacheOnRPMLimitChange(t *testing
 	require.Equal(t, []int64{42}, invalidator.userIDs, "仅修改 RPMLimit 也应失效 API Key 认证缓存")
 }
 
+func TestAdminService_UpdateUser_InvalidatesAuthCacheOnAllowedGroupsChange(t *testing.T) {
+	base := &userRepoStub{user: &User{ID: 42, Email: "u@example.com", AllowedGroups: []int64{1, 2}}}
+	repo := &rpmUserRepoStub{userRepoStub: base}
+	invalidator := &authCacheInvalidatorStub{}
+	svc := &adminServiceImpl{
+		userRepo:             repo,
+		redeemCodeRepo:       &redeemRepoStub{},
+		authCacheInvalidator: invalidator,
+	}
+
+	newAllowedGroups := []int64{2, 3}
+	updated, err := svc.UpdateUser(context.Background(), 42, &UpdateUserInput{
+		AllowedGroups: &newAllowedGroups,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, updated)
+	require.Equal(t, []int64{2, 3}, updated.AllowedGroups)
+	require.Equal(t, []int64{42}, invalidator.userIDs, "修改 AllowedGroups 应失效 API Key 认证缓存")
+}
+
+func TestAdminService_UpdateUser_NoInvalidateWhenAllowedGroupsOrderOnlyChanges(t *testing.T) {
+	base := &userRepoStub{user: &User{ID: 42, Email: "u@example.com", AllowedGroups: []int64{1, 2}}}
+	repo := &rpmUserRepoStub{userRepoStub: base}
+	invalidator := &authCacheInvalidatorStub{}
+	svc := &adminServiceImpl{
+		userRepo:             repo,
+		redeemCodeRepo:       &redeemRepoStub{},
+		authCacheInvalidator: invalidator,
+	}
+
+	reorderedAllowedGroups := []int64{2, 1}
+	updated, err := svc.UpdateUser(context.Background(), 42, &UpdateUserInput{
+		AllowedGroups: &reorderedAllowedGroups,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, updated)
+	require.Equal(t, []int64{2, 1}, updated.AllowedGroups)
+	require.Empty(t, invalidator.userIDs, "AllowedGroups 仅顺序变化不应触发认证缓存失效")
+}
+
 func TestAdminService_UpdateUser_NoInvalidateWhenRPMLimitUnchanged(t *testing.T) {
 	base := &userRepoStub{user: &User{ID: 42, Email: "u@example.com", RPMLimit: 10, Username: "old"}}
 	repo := &rpmUserRepoStub{userRepoStub: base}

@@ -449,6 +449,9 @@ func TestAdminService_AdminUpdateAPIKeyGroupID_ExclusiveGroup_AddsAllowedGroup(t
 	require.NotNil(t, got.GrantedGroupID)
 	require.Equal(t, int64(10), *got.GrantedGroupID)
 	require.Equal(t, "Exclusive", got.GrantedGroupName)
+	// 自动授权会影响该用户所有 Key 的认证快照，不能只失效当前 Key。
+	require.Equal(t, []int64{42}, cache.userIDs)
+	require.Empty(t, cache.keys)
 }
 
 func TestAdminService_AdminUpdateAPIKeyGroupID_NonExclusiveGroup_NoAllowedGroupUpdate(t *testing.T) {

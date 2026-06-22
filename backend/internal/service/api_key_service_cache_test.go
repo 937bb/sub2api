@@ -339,6 +339,48 @@ func TestAPIKeyService_SnapshotRoundTrip_PreservesOpenAIForcePriorityTier(t *tes
 	require.True(t, roundTrip.OpenAIForcePriorityTier)
 }
 
+func TestAPIKeyService_SnapshotRoundTrip_PreservesExclusiveGroupAuthorizationFields(t *testing.T) {
+	svc := NewAPIKeyService(nil, nil, nil, nil, nil, nil, &config.Config{})
+	groupID := int64(10)
+	apiKey := &APIKey{
+		ID:      1,
+		UserID:  2,
+		GroupID: &groupID,
+		Key:     "k-exclusive",
+		Status:  StatusActive,
+		User: &User{
+			ID:            2,
+			Status:        StatusActive,
+			Role:          RoleUser,
+			Balance:       10,
+			Concurrency:   3,
+			AllowedGroups: []int64{groupID, 99},
+		},
+		Group: &Group{
+			ID:               groupID,
+			Name:             "exclusive",
+			Platform:         PlatformAnthropic,
+			Status:           StatusActive,
+			SubscriptionType: SubscriptionTypeStandard,
+			IsExclusive:      true,
+			RateMultiplier:   1,
+		},
+	}
+
+	snapshot := svc.snapshotFromAPIKey(context.Background(), apiKey)
+	require.NotNil(t, snapshot)
+	require.Equal(t, []int64{groupID, 99}, snapshot.User.AllowedGroups)
+	require.NotNil(t, snapshot.Group)
+	require.True(t, snapshot.Group.IsExclusive)
+
+	roundTrip := svc.snapshotToAPIKey(apiKey.Key, snapshot)
+	require.NotNil(t, roundTrip)
+	require.Equal(t, []int64{groupID, 99}, roundTrip.User.AllowedGroups)
+	require.NotNil(t, roundTrip.Group)
+	require.True(t, roundTrip.Group.IsExclusive)
+	require.True(t, roundTrip.User.CanBindGroup(groupID, roundTrip.Group.IsExclusive))
+}
+
 func TestAPIKeyService_GetByKey_IgnoresLegacyAuthCacheSnapshotWithoutMessagesDispatchConfig(t *testing.T) {
 	cache := &authCacheStub{}
 	var repoCalls int32
