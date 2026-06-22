@@ -1149,6 +1149,15 @@ func (a *Account) GetOpenAIOAuthBearerToken() string {
 	if !a.IsOpenAIOAuthLike() {
 		return ""
 	}
+	// OAuth bearer means OAuth/setup access_token only. Do not return
+	// personal_access_token here; PAT has its own whoami metadata path.
+	return strings.TrimSpace(a.GetOpenAIAccessToken())
+}
+
+func (a *Account) GetOpenAICodexBearerToken() string {
+	if !a.IsOpenAIOAuthLike() {
+		return ""
+	}
 	if token := strings.TrimSpace(a.GetOpenAIPersonalAccessToken()); token != "" {
 		return token
 	}

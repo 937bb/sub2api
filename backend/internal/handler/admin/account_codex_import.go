@@ -222,6 +222,22 @@ func (h *AccountHandler) importCodexSessions(ctx context.Context, req CodexSessi
 		if credentialExpiresAt != nil {
 			item.Credentials["expires_at"] = credentialExpiresAt.Format(time.RFC3339)
 		}
+		if err := h.hydrateCodexImportPersonalAccessToken(ctx, req.ProxyID, item); err != nil {
+			result.Failed++
+			result.Items = append(result.Items, CodexSessionImportItem{
+				Index:   entry.Index,
+				Name:    accountName,
+				Action:  "failed",
+				Message: err.Error(),
+			})
+			result.Errors = append(result.Errors, CodexSessionImportMessage{
+				Index:   entry.Index,
+				Name:    accountName,
+				Message: err.Error(),
+			})
+			continue
+		}
+		accountName = buildCodexCreateAccountName(req.Name, item, entry.Index, len(entries))
 		credentials := mergeCodexImportMap(item.Credentials, credentialExtras)
 		extra := mergeCodexImportMap(req.Extra, item.Extra)
 		for _, warning := range item.WarningTexts {
@@ -479,7 +495,12 @@ func normalizeCodexImportEntry(entry codexImportEntry) (*codexImportAccount, err
 
 	switch raw := entry.Value.(type) {
 	case string:
-		item.AccessToken = strings.TrimSpace(raw)
+		trimmed := strings.TrimSpace(raw)
+		if service.ValidateOpenAIPersonalAccessToken(trimmed) == nil {
+			item.PersonalAccessToken = trimmed
+		} else {
+			item.AccessToken = trimmed
+		}
 	case map[string]any:
 		if handled, err := normalizeHCPAImportAccount(item, raw, now); handled {
 			if err != nil {
@@ -585,6 +606,9 @@ func normalizeCodexImportEntry(entry codexImportEntry) (*codexImportAccount, err
 
 	if item.PersonalAccessToken != "" {
 		item.Credentials["personal_access_token"] = item.PersonalAccessToken
+		// PAT is distinct from OAuth AT/RT. Only the HCPA format deliberately
+		// carries both credential families; generic PAT imports keep OAuth tokens out
+		// so stale access_token values cannot be mistaken for PAT metadata.
 		if item.ImportFormat == codexImportFormatHCPA {
 			setCodexCredentialIfNotEmpty(item.Credentials, "access_token", item.AccessToken)
 			if item.RefreshToken != "" {
@@ -637,6 +661,27 @@ func normalizeCodexImportEntry(entry codexImportEntry) (*codexImportAccount, err
 	item.Name = buildCodexImportAccountName(item, entry.Index)
 
 	return item, nil
+}
+
+func (h *AccountHandler) hydrateCodexImportPersonalAccessToken(ctx context.Context, proxyID *int64, item *codexImportAccount) error {
+	if item == nil || strings.TrimSpace(item.PersonalAccessToken) == "" {
+		return nil
+	}
+	if h.openaiOAuthService == nil {
+		return errors.New("OpenAI personal_access_token whoami hydration is not configured")
+	}
+	metadata, err := h.openaiOAuthService.HydratePersonalAccessToken(ctx, item.PersonalAccessToken, proxyID)
+	if err != nil {
+		return err
+	}
+	item.Credentials = service.ApplyOpenAIPersonalAccessTokenMetadata(item.Credentials, item.PersonalAccessToken, metadata)
+	item.Email = strings.TrimSpace(metadata.Email)
+	item.UserID = strings.TrimSpace(metadata.ChatGPTUserID)
+	item.AccountID = strings.TrimSpace(metadata.ChatGPTAccountID)
+	item.PlanType = strings.TrimSpace(metadata.ChatGPTPlanType)
+	item.IdentityKeys = buildCodexIdentityKeys(item.AccountID, item.UserID, item.Email, item.PersonalAccessToken)
+	item.Name = buildCodexImportAccountName(item, 0)
+	return nil
 }
 
 func normalizeHCPAImportAccount(item *codexImportAccount, raw map[string]any, now time.Time) (bool, error) {
@@ -1092,27 +1137,19 @@ func mergeCodexImportCredentials(existing, incoming map[string]any, item *codexI
 		return out
 	}
 	if strings.TrimSpace(item.PersonalAccessToken) != "" {
-		if item.ImportFormat == codexImportFormatHCPA {
-			if strings.TrimSpace(item.AccessToken) == "" {
-				delete(out, "access_token")
-			}
-			if item.TokenExpiresAt == nil {
-				delete(out, "expires_at")
-			}
-			if strings.TrimSpace(item.RefreshToken) == "" {
-				delete(out, "refresh_token")
-				delete(out, "client_id")
-			}
-			if strings.TrimSpace(item.IDToken) == "" {
-				delete(out, "id_token")
-			}
-			return out
+		if strings.TrimSpace(item.AccessToken) == "" {
+			delete(out, "access_token")
 		}
-		delete(out, "access_token")
-		delete(out, "refresh_token")
-		delete(out, "id_token")
-		delete(out, "client_id")
-		delete(out, "expires_at")
+		if item.TokenExpiresAt == nil {
+			delete(out, "expires_at")
+		}
+		if strings.TrimSpace(item.RefreshToken) == "" {
+			delete(out, "refresh_token")
+			delete(out, "client_id")
+		}
+		if strings.TrimSpace(item.IDToken) == "" {
+			delete(out, "id_token")
+		}
 		return out
 	}
 	// 缺少 personal_access_token 表示本次导入未提供该字段；保留旧值避免导入旧备份误清 PAT。

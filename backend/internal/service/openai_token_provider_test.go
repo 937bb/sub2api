@@ -112,12 +112,20 @@ func (r *openAIAccountRepoStub) Update(ctx context.Context, account *Account) er
 
 type openAISetupTokenBoundaryRepoStub struct {
 	AccountRepository
-	setErrorCalls int32
+	setErrorCalls   int32
+	bulkUpdateCalls int32
+	lastCredentials map[string]any
 }
 
 func (r *openAISetupTokenBoundaryRepoStub) SetError(ctx context.Context, id int64, errorMsg string) error {
 	atomic.AddInt32(&r.setErrorCalls, 1)
 	return nil
+}
+
+func (r *openAISetupTokenBoundaryRepoStub) BulkUpdate(ctx context.Context, ids []int64, updates AccountBulkUpdate) (int64, error) {
+	atomic.AddInt32(&r.bulkUpdateCalls, 1)
+	r.lastCredentials = cloneCredentials(updates.Credentials)
+	return int64(len(ids)), nil
 }
 
 // openAIOAuthServiceStub implements OpenAIOAuthService methods for testing
@@ -241,9 +249,15 @@ func TestOpenAITokenProvider_PersonalAccessTokenBypassesCacheAndMissingRefreshDi
 		Platform: PlatformOpenAI,
 		Type:     AccountTypeOAuth,
 		Credentials: map[string]any{
-			"access_token":          "expired-access-token",
-			"personal_access_token": "pat-token",
-			"expires_at":            expiresAt,
+			"access_token":                 "expired-access-token",
+			"personal_access_token":        "at-pat-token",
+			"personal_access_token_sha256": OpenAIPersonalAccessTokenFingerprint("at-pat-token"),
+			"email":                        "user@example.com",
+			"chatgpt_user_id":              "user-123",
+			"chatgpt_account_id":           "acc-123",
+			"chatgpt_plan_type":            "plus",
+			"chatgpt_account_is_fedramp":   false,
+			"expires_at":                   expiresAt,
 		},
 	}
 	cache.tokens[OpenAITokenCacheKey(account)] = "stale-oauth-token"
@@ -252,7 +266,7 @@ func TestOpenAITokenProvider_PersonalAccessTokenBypassesCacheAndMissingRefreshDi
 	token, err := provider.GetAccessToken(context.Background(), account)
 
 	require.NoError(t, err)
-	require.Equal(t, "pat-token", token)
+	require.Equal(t, "at-pat-token", token)
 	require.Equal(t, int32(0), atomic.LoadInt32(&cache.getCalled), "PAT should bypass stale OAuth cache")
 	require.Equal(t, int32(0), atomic.LoadInt32(&cache.setCalled), "PAT should not be written into OAuth access-token cache")
 	require.Zero(t, atomic.LoadInt32(&repo.setErrorCalls), "PAT accounts must not be disabled for missing refresh_token")
@@ -265,8 +279,14 @@ func TestOpenAITokenProvider_SetupTokenPersonalAccessTokenBypassesCache(t *testi
 		Platform: PlatformOpenAI,
 		Type:     AccountTypeSetupToken,
 		Credentials: map[string]any{
-			"access_token":          "setup-access-token",
-			"personal_access_token": "setup-pat-token",
+			"access_token":                 "setup-access-token",
+			"personal_access_token":        "at-setup-pat-token",
+			"personal_access_token_sha256": OpenAIPersonalAccessTokenFingerprint("at-setup-pat-token"),
+			"email":                        "setup@example.com",
+			"chatgpt_user_id":              "setup-user-123",
+			"chatgpt_account_id":           "setup-acc-123",
+			"chatgpt_plan_type":            "team",
+			"chatgpt_account_is_fedramp":   false,
 		},
 	}
 	cache.tokens[OpenAITokenCacheKey(account)] = "stale-oauth-token"
@@ -275,7 +295,7 @@ func TestOpenAITokenProvider_SetupTokenPersonalAccessTokenBypassesCache(t *testi
 	token, err := provider.GetAccessToken(context.Background(), account)
 
 	require.NoError(t, err)
-	require.Equal(t, "setup-pat-token", token)
+	require.Equal(t, "at-setup-pat-token", token)
 	require.Equal(t, int32(0), atomic.LoadInt32(&cache.getCalled), "setup-token PAT should read credentials directly instead of cache")
 }
 

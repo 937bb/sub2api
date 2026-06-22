@@ -141,6 +141,9 @@ func (p *OpenAITokenProvider) GetAccessToken(ctx context.Context, account *Accou
 	}
 
 	if token := strings.TrimSpace(account.GetOpenAIPersonalAccessToken()); token != "" {
+		if err := p.ensurePersonalAccessTokenMetadata(ctx, account, token); err != nil {
+			return "", err
+		}
 		return token, nil
 	}
 
@@ -282,6 +285,27 @@ func (p *OpenAITokenProvider) GetAccessToken(ctx context.Context, account *Accou
 	}
 
 	return accessToken, nil
+}
+
+func (p *OpenAITokenProvider) ensurePersonalAccessTokenMetadata(ctx context.Context, account *Account, personalAccessToken string) error {
+	if err := ValidateOpenAIPersonalAccessToken(personalAccessToken); err != nil {
+		return err
+	}
+	if !AccountNeedsOpenAIPersonalAccessTokenMetadataHydration(account, personalAccessToken) {
+		return nil
+	}
+	if p == nil || p.openAIOAuthService == nil {
+		return errors.New("OpenAI personal_access_token whoami hydration is not configured")
+	}
+	metadata, err := p.openAIOAuthService.HydratePersonalAccessToken(ctx, personalAccessToken, account.ProxyID)
+	if err != nil {
+		return err
+	}
+	if err := persistOpenAIPersonalAccessTokenMetadata(ctx, p.accountRepo, account, personalAccessToken, metadata); err != nil {
+		return err
+	}
+	slog.Info("openai_personal_access_token_metadata_hydrated", "account_id", account.ID, "chatgpt_account_id", metadata.ChatGPTAccountID, "plan_type", metadata.ChatGPTPlanType)
+	return nil
 }
 
 // disableAccountMissingRefreshToken 在请求路径上发现 OpenAI OAuth 账号

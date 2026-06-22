@@ -2972,8 +2972,8 @@ func (s *OpenAIGatewayService) GetAccessToken(ctx context.Context, account *Acco
 			}
 			return accessToken, "oauth", nil
 		}
-		// 降级：TokenProvider 未配置时直接从账号读取，仍按 OAuth-like bearer 优先级处理 PAT。
-		accessToken := account.GetOpenAIOAuthBearerToken()
+		// 降级：TokenProvider 未配置时只在最终 Codex 请求边界读取 bearer。
+		accessToken := account.GetOpenAICodexBearerToken()
 		if accessToken == "" {
 			return "", "", errors.New("access_token not found in credentials")
 		}

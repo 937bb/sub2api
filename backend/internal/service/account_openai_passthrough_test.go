@@ -34,7 +34,8 @@ func TestAccount_OpenAIPersonalAccessTokenHelpersAreOAuthLikeOnly(t *testing.T) 
 		},
 	}
 	require.Equal(t, "pat-token", oauth.GetOpenAIPersonalAccessToken())
-	require.Equal(t, "pat-token", oauth.GetOpenAIOAuthBearerToken())
+	require.Equal(t, "access-token", oauth.GetOpenAIOAuthBearerToken())
+	require.Equal(t, "pat-token", oauth.GetOpenAICodexBearerToken())
 
 	setupToken := &Account{
 		Platform: PlatformOpenAI,
@@ -44,7 +45,8 @@ func TestAccount_OpenAIPersonalAccessTokenHelpersAreOAuthLikeOnly(t *testing.T) 
 			"personal_access_token": "setup-pat-token",
 		},
 	}
-	require.Equal(t, "setup-pat-token", setupToken.GetOpenAIOAuthBearerToken())
+	require.Equal(t, "setup-access-token", setupToken.GetOpenAIOAuthBearerToken())
+	require.Equal(t, "setup-pat-token", setupToken.GetOpenAICodexBearerToken())
 
 	oauthWithoutPAT := &Account{
 		Platform: PlatformOpenAI,
@@ -54,6 +56,7 @@ func TestAccount_OpenAIPersonalAccessTokenHelpersAreOAuthLikeOnly(t *testing.T) 
 		},
 	}
 	require.Equal(t, "access-token", oauthWithoutPAT.GetOpenAIOAuthBearerToken())
+	require.Equal(t, "access-token", oauthWithoutPAT.GetOpenAICodexBearerToken())
 
 	apiKey := &Account{
 		Platform: PlatformOpenAI,
@@ -65,6 +68,7 @@ func TestAccount_OpenAIPersonalAccessTokenHelpersAreOAuthLikeOnly(t *testing.T) 
 	}
 	require.Empty(t, apiKey.GetOpenAIPersonalAccessToken())
 	require.Empty(t, apiKey.GetOpenAIOAuthBearerToken())
+	require.Empty(t, apiKey.GetOpenAICodexBearerToken())
 }
 
 func TestAccount_IsOpenAIChatGPTFedRAMPAccount(t *testing.T) {

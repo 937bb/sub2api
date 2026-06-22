@@ -616,7 +616,7 @@ func (s *AccountUsageService) RefreshOpenAIPlanType(ctx context.Context, account
 	if !account.IsOpenAIOAuth() {
 		return fmt.Errorf("only OpenAI OAuth accounts support plan type refresh")
 	}
-	accessToken := account.GetOpenAIOAuthBearerToken()
+	accessToken := strings.TrimSpace(account.GetOpenAIAccessToken())
 	if accessToken == "" {
 		return fmt.Errorf("OpenAI OAuth access token is required")
 	}
@@ -739,7 +739,7 @@ func (s *AccountUsageService) probeOpenAICodexSnapshot(ctx context.Context, acco
 	if account == nil || !account.IsOpenAIOAuthLike() {
 		return nil, nil
 	}
-	accessToken := account.GetOpenAIOAuthBearerToken()
+	accessToken := account.GetOpenAICodexBearerToken()
 	if accessToken == "" {
 		return nil, fmt.Errorf("no access token available")
 	}
