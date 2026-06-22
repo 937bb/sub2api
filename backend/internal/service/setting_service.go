@@ -142,6 +142,11 @@ type cachedOpenAIQuotaAutoPauseSettings struct {
 	expiresAt int64
 }
 
+type cachedOpenAIOAuth429DynamicSettings struct {
+	settings  OpenAIOAuth429DynamicSettings
+	expiresAt int64
+}
+
 const openAICodexUserAgentCacheTTL = 60 * time.Second
 const openAICodexUserAgentErrorTTL = 5 * time.Second
 const openAICodexUserAgentDBTimeout = 5 * time.Second
@@ -161,7 +166,11 @@ const openAIQuotaAutoPauseSettingsCacheTTL = 60 * time.Second
 const openAIQuotaAutoPauseSettingsErrorTTL = 5 * time.Second
 const openAIQuotaAutoPauseSettingsDBTimeout = 5 * time.Second
 
+const openAIOAuth429DynamicSettingsCacheTTL = 5 * time.Second
+const openAIOAuth429DynamicSettingsDBTimeout = 5 * time.Second
+
 const openAIQuotaAutoPauseSettingsRefreshKey = "openai_quota_auto_pause_settings"
+const openAIOAuth429DynamicSettingsCacheKey = "openai_oauth_429_dynamic_settings"
 
 // DefaultSubscriptionGroupReader validates group references used by default subscriptions.
 type DefaultSubscriptionGroupReader interface {
@@ -196,6 +205,11 @@ type SettingService struct {
 	// instance owns its own cache, no shared package-level state.
 	openAIQuotaAutoPauseSettingsCache atomic.Value // *cachedOpenAIQuotaAutoPauseSettings
 	openAIQuotaAutoPauseSettingsSF    singleflight.Group
+
+	// openAIOAuth429DynamicSettingsCache keeps the dynamic 429 scheduler settings
+	// out of the request hot path while preserving a short propagation delay.
+	openAIOAuth429DynamicSettingsCache atomic.Value // *cachedOpenAIOAuth429DynamicSettings
+	openAIOAuth429DynamicSettingsSF    singleflight.Group
 }
 
 // DefaultPlatformQuotaSetting 单 platform 三档限额（nil = 沿用上层；0 = 显式禁用；>0 = 上限）
@@ -4114,8 +4128,71 @@ func (s *SettingService) SetRateLimit429CooldownSettings(ctx context.Context, se
 	return s.settingRepo.Set(ctx, SettingKeyRateLimit429CooldownSettings, string(data))
 }
 
-// GetOpenAIOAuth429DynamicSettings 获取OpenAI OAuth 429动态调度配置
+// GetOpenAIOAuth429DynamicSettings 获取OpenAI OAuth 429动态调度配置。
+// 该配置会在请求成功热路径上读取，因此在 SettingService 层做短 TTL 缓存。
 func (s *SettingService) GetOpenAIOAuth429DynamicSettings(ctx context.Context) (*OpenAIOAuth429DynamicSettings, error) {
+	if s == nil || s.settingRepo == nil {
+		return DefaultOpenAIOAuth429DynamicSettings(), nil
+	}
+	if cached := s.getCachedOpenAIOAuth429DynamicSettings(); cached != nil {
+		return cached, nil
+	}
+
+	result, _, _ := s.openAIOAuth429DynamicSettingsSF.Do(openAIOAuth429DynamicSettingsCacheKey, func() (any, error) {
+		if cached := s.getCachedOpenAIOAuth429DynamicSettings(); cached != nil {
+			return cached, nil
+		}
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		dbCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), openAIOAuth429DynamicSettingsDBTimeout)
+		defer cancel()
+
+		settings, err := s.loadOpenAIOAuth429DynamicSettings(dbCtx)
+		if err != nil {
+			if cached := s.getLastOpenAIOAuth429DynamicSettings(); cached != nil {
+				slog.Warn("failed to get openai oauth 429 dynamic settings, using cached value", "error", err)
+				s.storeOpenAIOAuth429DynamicSettingsCache(cached)
+				return cached, nil
+			}
+			return nil, err
+		}
+		s.storeOpenAIOAuth429DynamicSettingsCache(settings)
+		return cloneOpenAIOAuth429DynamicSettings(settings), nil
+	})
+	if settings, ok := result.(*OpenAIOAuth429DynamicSettings); ok && settings != nil {
+		return cloneOpenAIOAuth429DynamicSettings(settings), nil
+	}
+	return nil, fmt.Errorf("get openai oauth 429 dynamic settings: invalid cached value")
+}
+
+// SetOpenAIOAuth429DynamicSettings 设置OpenAI OAuth 429动态调度配置
+func (s *SettingService) SetOpenAIOAuth429DynamicSettings(ctx context.Context, settings *OpenAIOAuth429DynamicSettings) error {
+	if settings == nil {
+		return fmt.Errorf("settings cannot be nil")
+	}
+	if err := validateOpenAIOAuth429DynamicSettings(settings); err != nil {
+		if settings.Enabled {
+			return err
+		}
+		settings = DefaultOpenAIOAuth429DynamicSettings()
+	}
+
+	normalizeOpenAIOAuth429DynamicSettings(settings)
+	data, err := json.Marshal(settings)
+	if err != nil {
+		return fmt.Errorf("marshal openai oauth 429 dynamic settings: %w", err)
+	}
+
+	if err := s.settingRepo.Set(ctx, SettingKeyOpenAIOAuth429DynamicSettings, string(data)); err != nil {
+		return err
+	}
+	s.storeOpenAIOAuth429DynamicSettingsCache(settings)
+	s.openAIOAuth429DynamicSettingsSF.Forget(openAIOAuth429DynamicSettingsCacheKey)
+	return nil
+}
+
+func (s *SettingService) loadOpenAIOAuth429DynamicSettings(ctx context.Context) (*OpenAIOAuth429DynamicSettings, error) {
 	value, err := s.settingRepo.GetValue(ctx, SettingKeyOpenAIOAuth429DynamicSettings)
 	if err != nil {
 		if errors.Is(err, ErrSettingNotFound) {
@@ -4135,24 +4212,40 @@ func (s *SettingService) GetOpenAIOAuth429DynamicSettings(ctx context.Context) (
 	return &settings, nil
 }
 
-// SetOpenAIOAuth429DynamicSettings 设置OpenAI OAuth 429动态调度配置
-func (s *SettingService) SetOpenAIOAuth429DynamicSettings(ctx context.Context, settings *OpenAIOAuth429DynamicSettings) error {
+func (s *SettingService) getCachedOpenAIOAuth429DynamicSettings() *OpenAIOAuth429DynamicSettings {
+	cached, _ := s.openAIOAuth429DynamicSettingsCache.Load().(*cachedOpenAIOAuth429DynamicSettings)
+	if cached == nil || time.Now().UnixNano() >= cached.expiresAt {
+		return nil
+	}
+	return cloneOpenAIOAuth429DynamicSettings(&cached.settings)
+}
+
+func (s *SettingService) getLastOpenAIOAuth429DynamicSettings() *OpenAIOAuth429DynamicSettings {
+	cached, _ := s.openAIOAuth429DynamicSettingsCache.Load().(*cachedOpenAIOAuth429DynamicSettings)
+	if cached == nil {
+		return nil
+	}
+	return cloneOpenAIOAuth429DynamicSettings(&cached.settings)
+}
+
+func (s *SettingService) storeOpenAIOAuth429DynamicSettingsCache(settings *OpenAIOAuth429DynamicSettings) {
+	if s == nil || settings == nil {
+		return
+	}
+	cloned := cloneOpenAIOAuth429DynamicSettings(settings)
+	normalizeOpenAIOAuth429DynamicSettings(cloned)
+	s.openAIOAuth429DynamicSettingsCache.Store(&cachedOpenAIOAuth429DynamicSettings{
+		settings:  *cloned,
+		expiresAt: time.Now().Add(openAIOAuth429DynamicSettingsCacheTTL).UnixNano(),
+	})
+}
+
+func cloneOpenAIOAuth429DynamicSettings(settings *OpenAIOAuth429DynamicSettings) *OpenAIOAuth429DynamicSettings {
 	if settings == nil {
-		return fmt.Errorf("settings cannot be nil")
+		return nil
 	}
-	if err := validateOpenAIOAuth429DynamicSettings(settings); err != nil {
-		if settings.Enabled {
-			return err
-		}
-		settings = DefaultOpenAIOAuth429DynamicSettings()
-	}
-
-	data, err := json.Marshal(settings)
-	if err != nil {
-		return fmt.Errorf("marshal openai oauth 429 dynamic settings: %w", err)
-	}
-
-	return s.settingRepo.Set(ctx, SettingKeyOpenAIOAuth429DynamicSettings, string(data))
+	cloned := *settings
+	return &cloned
 }
 
 func normalizeOpenAIOAuth429DynamicSettings(settings *OpenAIOAuth429DynamicSettings) {

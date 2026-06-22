@@ -227,6 +227,63 @@ func TestOpenAIOAuth429Dynamic_ResetStatsClearsWindow(t *testing.T) {
 	require.Zero(t, accountRepo.rateLimitCalls)
 }
 
+func TestOpenAIOAuth429Dynamic_SettingsCacheAvoidsRepeatedHotPathReads(t *testing.T) {
+	accountRepo := &rateLimit429AccountRepoStub{}
+	settingRepo := newCountingOpenAIOAuth429SettingRepo()
+	storeOpenAIOAuth429DynamicSettings(t, &settingRepo.mockSettingRepo, OpenAIOAuth429DynamicSettings{
+		Enabled:        true,
+		WindowSeconds:  60,
+		MinSamples:     100,
+		Min429:         100,
+		RatioThreshold: 1,
+		BlockSeconds:   12,
+	})
+	settingSvc := NewSettingService(settingRepo, &config.Config{})
+	svc := NewRateLimitService(accountRepo, nil, &config.Config{}, nil, nil)
+	svc.SetSettingService(settingSvc)
+	account := &Account{ID: 50, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+
+	svc.handle429(context.Background(), account, http.Header{}, []byte(`{"error":{"type":"rate_limit_error","message":"slow down"}}`))
+	svc.RecordOpenAIOAuthUpstreamOutcome(context.Background(), account, http.StatusOK)
+	svc.RecordOpenAIOAuthUpstreamOutcome(context.Background(), account, http.StatusOK)
+
+	require.Equal(t, 1, settingRepo.openAIOAuth429Reads)
+	require.Zero(t, accountRepo.rateLimitCalls)
+}
+
+func TestOpenAIOAuth429Dynamic_DisabledSettingsClearExistingStats(t *testing.T) {
+	accountRepo := &rateLimit429AccountRepoStub{}
+	settingRepo := newMockSettingRepo()
+	storeOpenAIOAuth429DynamicSettings(t, settingRepo, OpenAIOAuth429DynamicSettings{
+		Enabled:        true,
+		WindowSeconds:  60,
+		MinSamples:     100,
+		Min429:         100,
+		RatioThreshold: 1,
+		BlockSeconds:   12,
+	})
+	settingSvc := NewSettingService(settingRepo, &config.Config{})
+	svc := NewRateLimitService(accountRepo, nil, &config.Config{}, nil, nil)
+	svc.SetSettingService(settingSvc)
+	account := &Account{ID: 51, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+
+	svc.handle429(context.Background(), account, http.Header{}, []byte(`{"error":{"type":"rate_limit_error","message":"slow down"}}`))
+	require.True(t, svc.hasOpenAIOAuth429DynamicStats(account.ID))
+	require.NoError(t, settingSvc.SetOpenAIOAuth429DynamicSettings(context.Background(), &OpenAIOAuth429DynamicSettings{
+		Enabled:        false,
+		WindowSeconds:  60,
+		MinSamples:     100,
+		Min429:         100,
+		RatioThreshold: 1,
+		BlockSeconds:   12,
+	}))
+
+	svc.RecordOpenAIOAuthUpstreamOutcome(context.Background(), account, http.StatusOK)
+
+	require.False(t, svc.hasOpenAIOAuth429DynamicStats(account.ID))
+	require.Zero(t, accountRepo.rateLimitCalls)
+}
+
 func TestOpenAIOAuth429Dynamic_StatsRetainedWhenSetRateLimitedFails(t *testing.T) {
 	rateLimitErr := errors.New("db unavailable")
 	accountRepo := &rateLimit429FailingAccountRepoStub{err: rateLimitErr}
@@ -255,6 +312,22 @@ func TestOpenAIOAuth429Dynamic_StatsRetainedWhenSetRateLimitedFails(t *testing.T
 	require.False(t, stat.limiting)
 	require.Equal(t, 2, stat.total)
 	require.Equal(t, 2, stat.count429)
+}
+
+type countingOpenAIOAuth429SettingRepo struct {
+	mockSettingRepo
+	openAIOAuth429Reads int
+}
+
+func newCountingOpenAIOAuth429SettingRepo() *countingOpenAIOAuth429SettingRepo {
+	return &countingOpenAIOAuth429SettingRepo{mockSettingRepo: *newMockSettingRepo()}
+}
+
+func (r *countingOpenAIOAuth429SettingRepo) GetValue(ctx context.Context, key string) (string, error) {
+	if key == SettingKeyOpenAIOAuth429DynamicSettings {
+		r.openAIOAuth429Reads++
+	}
+	return r.mockSettingRepo.GetValue(ctx, key)
 }
 
 type rateLimit429FailingAccountRepoStub struct {

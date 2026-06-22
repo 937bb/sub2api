@@ -31,6 +31,19 @@ type OpenAIPersonalAccessTokenMetadata struct {
 	ChatGPTAccountIsFedRAMP bool   `json:"chatgpt_account_is_fedramp"`
 }
 
+type openAIPersonalAccessTokenWhoamiError struct {
+	statusCode int
+	body       string
+}
+
+func (e *openAIPersonalAccessTokenWhoamiError) Error() string {
+	if e == nil {
+		return "OpenAI PAT whoami failed"
+	}
+	body := sanitizeOpenAIUpstreamDiagnosticText(truncateOpenAIWhoamiBody(e.body))
+	return fmt.Sprintf("OpenAI PAT whoami failed: status %d, body: %s", e.statusCode, body)
+}
+
 // ValidateOpenAIPersonalAccessToken applies Codex's PAT classification rule.
 func ValidateOpenAIPersonalAccessToken(personalAccessToken string) error {
 	if strings.TrimSpace(personalAccessToken) == "" {
@@ -170,7 +183,7 @@ func (s *OpenAIOAuthService) HydratePersonalAccessToken(ctx context.Context, per
 		return nil, fmt.Errorf("OpenAI PAT whoami request returned no response")
 	}
 	if !resp.IsSuccessState() {
-		return nil, fmt.Errorf("OpenAI PAT whoami failed: status %d, body: %s", resp.StatusCode, truncateOpenAIWhoamiBody(resp.String()))
+		return nil, &openAIPersonalAccessTokenWhoamiError{statusCode: resp.StatusCode, body: resp.String()}
 	}
 	if err := metadata.validate(); err != nil {
 		return nil, err

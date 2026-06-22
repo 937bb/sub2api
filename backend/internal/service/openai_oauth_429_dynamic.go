@@ -24,6 +24,8 @@ func (s *RateLimitService) RecordOpenAIOAuthUpstreamOutcome(ctx context.Context,
 
 	settings, ok := s.getOpenAIOAuth429DynamicSettings(ctx, account.ID)
 	if !ok || !settings.Enabled {
+		// 禁用后清理已开启的窗口，避免成功请求继续命中动态统计热路径。
+		s.ResetOpenAIOAuth429DynamicStats(account.ID)
 		return
 	}
 
