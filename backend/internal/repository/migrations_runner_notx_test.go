@@ -49,6 +49,15 @@ DROP INDEX CONCURRENTLY IF EXISTS idx_b;
 		require.True(t, nonTx)
 		require.NoError(t, err)
 	})
+
+	t.Run("notx迁移忽略注释里的分号", func(t *testing.T) {
+		nonTx, err := validateMigrationExecutionMode("001_add_idx_notx.sql", `
+	-- build concurrently for live installs; this is only a comment.
+	CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_a ON t(a);
+	`)
+		require.True(t, nonTx)
+		require.NoError(t, err)
+	})
 }
 
 func TestApplyMigrationsFS_NonTransactionalMigration(t *testing.T) {
@@ -103,9 +112,9 @@ func TestApplyMigrationsFS_NonTransactionalMigration_MultiStatements(t *testing.
 	fsys := fstest.MapFS{
 		"001_add_multi_idx_notx.sql": &fstest.MapFile{
 			Data: []byte(`
--- first
+-- first; this comment must not become a SQL statement
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_t_a ON t(a);
--- second
+-- second; comments may mention CREATE INDEX CONCURRENTLY safely
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_t_b ON t(b);
 `),
 		},

@@ -211,11 +211,8 @@ func applyMigrationsFS(ctx context.Context, db *sql.DB, fsys fs.FS) error {
 			// 逐条语句执行，避免将多条 CONCURRENTLY 语句放入同一个隐式事务块。
 			statements := splitSQLStatements(content)
 			for i, stmt := range statements {
-				trimmed := strings.TrimSpace(stmt)
+				trimmed := stripSQLLineComment(stmt)
 				if trimmed == "" {
-					continue
-				}
-				if stripSQLLineComment(trimmed) == "" {
 					continue
 				}
 				if _, err := db.ExecContext(ctx, trimmed); err != nil {
@@ -451,7 +448,8 @@ func isMigrationChecksumCompatible(name, dbChecksum, fileChecksum string) bool {
 
 func validateMigrationExecutionMode(name, content string) (bool, error) {
 	normalizedName := strings.ToLower(strings.TrimSpace(name))
-	upperContent := strings.ToUpper(content)
+	commentlessContent := stripSQLLineComment(content)
+	upperContent := strings.ToUpper(commentlessContent)
 	nonTx := strings.HasSuffix(normalizedName, nonTransactionalMigrationSuffix)
 
 	if !nonTx {
@@ -494,13 +492,17 @@ func validateMigrationExecutionMode(name, content string) (bool, error) {
 }
 
 func splitSQLStatements(content string) []string {
+	// Strip line comments before splitting so semicolons in comments do not
+	// become executable statement fragments.
+	content = stripSQLLineComment(content)
 	parts := strings.Split(content, ";")
 	out := make([]string, 0, len(parts))
 	for _, part := range parts {
-		if strings.TrimSpace(part) == "" {
+		trimmed := strings.TrimSpace(part)
+		if trimmed == "" {
 			continue
 		}
-		out = append(out, part)
+		out = append(out, trimmed)
 	}
 	return out
 }
