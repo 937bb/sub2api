@@ -199,44 +199,23 @@
               {{ t('admin.accounts.oauth.openai.personalAccessTokenDesc') }}
             </p>
 
-            <div class="mb-4 space-y-4">
-              <div>
-                <label
-                  class="mb-2 flex items-center gap-2 text-sm font-semibold text-gray-700 dark:text-gray-300"
-                >
-                  <Icon name="key" size="sm" class="text-blue-500" />
-                  {{ t('admin.accounts.oauth.openai.personalAccessTokenInputLabel') }}
-                </label>
-                <textarea
-                  v-model="personalAccessTokenInput"
-                  rows="3"
-                  class="input w-full resize-y font-mono text-sm"
-                  :placeholder="t('admin.accounts.oauth.openai.personalAccessTokenPlaceholder')"
-                  spellcheck="false"
-                ></textarea>
-                <p class="mt-1 text-xs text-blue-600 dark:text-blue-400">
-                  {{ t('admin.accounts.oauth.openai.personalAccessTokenHint') }}
-                </p>
-              </div>
-
-              <div>
-                <label
-                  class="mb-2 flex items-center gap-2 text-sm font-semibold text-gray-700 dark:text-gray-300"
-                >
-                  <Icon name="userCircle" size="sm" class="text-blue-500" />
-                  {{ t('admin.accounts.oauth.openai.personalAccessTokenAccountIdLabel') }}
-                </label>
-                <input
-                  v-model="personalAccessTokenAccountIdInput"
-                  type="text"
-                  class="input w-full font-mono text-sm"
-                  :placeholder="t('admin.accounts.oauth.openai.personalAccessTokenAccountIdPlaceholder')"
-                  spellcheck="false"
-                />
-                <p class="mt-1 text-xs text-blue-600 dark:text-blue-400">
-                  {{ t('admin.accounts.oauth.openai.personalAccessTokenAccountIdHint') }}
-                </p>
-              </div>
+            <div class="mb-4">
+              <label
+                class="mb-2 flex items-center gap-2 text-sm font-semibold text-gray-700 dark:text-gray-300"
+              >
+                <Icon name="key" size="sm" class="text-blue-500" />
+                {{ t('admin.accounts.oauth.openai.personalAccessTokenInputLabel') }}
+              </label>
+              <textarea
+                v-model="personalAccessTokenInput"
+                rows="3"
+                class="input w-full resize-y font-mono text-sm"
+                :placeholder="t('admin.accounts.oauth.openai.personalAccessTokenPlaceholder')"
+                spellcheck="false"
+              ></textarea>
+              <p class="mt-1 text-xs text-blue-600 dark:text-blue-400">
+                {{ t('admin.accounts.oauth.openai.personalAccessTokenHint') }}
+              </p>
             </div>
 
             <div
@@ -251,7 +230,7 @@
             <button
               type="button"
               class="btn btn-primary w-full"
-              :disabled="loading || !personalAccessTokenInput.trim() || !personalAccessTokenAccountIdInput.trim()"
+              :disabled="loading || !personalAccessTokenInput.trim()"
               @click="handleImportPersonalAccessToken"
             >
               <svg
@@ -790,7 +769,7 @@ const emit = defineEmits<{
   'validate-mobile-refresh-token': [refreshToken: string]
   'validate-session-token': [sessionToken: string]
   'import-access-token': [accessToken: string]
-  'import-personal-access-token': [token: string, accountId: string]
+  'import-personal-access-token': [token: string]
   'import-codex-session': [content: string]
   'update:inputMethod': [method: AuthInputMethod]
 }>()
@@ -832,7 +811,6 @@ const sessionKeyInput = ref('')
 const refreshTokenInput = ref('')
 const sessionTokenInput = ref('')
 const personalAccessTokenInput = ref('')
-const personalAccessTokenAccountIdInput = ref('')
 const codexSessionInput = ref('')
 const showHelpDialog = ref(false)
 const oauthState = ref('')
@@ -942,10 +920,8 @@ const handleValidateRefreshToken = () => {
 }
 
 const handleImportPersonalAccessToken = () => {
-  const token = personalAccessTokenInput.value.trim()
-  const accountId = personalAccessTokenAccountIdInput.value.trim()
-  if (token && accountId) {
-    emit('import-personal-access-token', token, accountId)
+  if (personalAccessTokenInput.value.trim()) {
+    emit('import-personal-access-token', personalAccessTokenInput.value.trim())
   }
 }
 
@@ -964,7 +940,6 @@ defineExpose({
   refreshToken: refreshTokenInput,
   sessionToken: sessionTokenInput,
   personalAccessToken: personalAccessTokenInput,
-  personalAccessTokenAccountId: personalAccessTokenAccountIdInput,
   codexSession: codexSessionInput,
   inputMethod,
   reset: () => {
@@ -975,7 +950,6 @@ defineExpose({
     refreshTokenInput.value = ''
     sessionTokenInput.value = ''
     personalAccessTokenInput.value = ''
-    personalAccessTokenAccountIdInput.value = ''
     codexSessionInput.value = ''
     inputMethod.value = 'manual'
     showHelpDialog.value = false
