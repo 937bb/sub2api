@@ -36,7 +36,7 @@ func TestHydratePersonalAccessTokenCallsOfficialWhoami(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, openAIWhoamiPath, r.URL.Path)
 		require.Equal(t, "Bearer at-test-pat", r.Header.Get("Authorization"))
-		require.Equal(t, "application/json", r.Header.Get("Accept"))
+		require.Empty(t, r.Header.Values("Accept"))
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"email":                      "user@example.com",
 			"chatgpt_user_id":            "user-123",

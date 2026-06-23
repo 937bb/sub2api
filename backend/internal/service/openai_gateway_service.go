@@ -4186,10 +4186,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIOAuthAdapter(
 		}
 	}
 
-	req.Header.Del("authorization")
-	req.Header.Del("x-api-key")
-	req.Header.Del("x-goog-api-key")
-	req.Header.Set("authorization", "Bearer "+token)
+	setHeaderRaw(req.Header, "Authorization", "Bearer "+token)
 
 	// OAuth adapter 目标是 ChatGPT internal API，需要补齐 Codex/ChatGPT 请求头。
 	if promptCacheKey == "" {
@@ -4197,37 +4194,28 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIOAuthAdapter(
 	}
 	req.Host = "chatgpt.com"
 	if chatgptAccountID := account.GetChatGPTAccountID(); chatgptAccountID != "" {
-		req.Header.Set("chatgpt-account-id", chatgptAccountID)
+		setHeaderRaw(req.Header, "ChatGPT-Account-ID", chatgptAccountID)
 	}
 	if account.IsOpenAIChatGPTFedRAMPAccount() {
-		req.Header.Set("x-openai-fedramp", "true")
+		setHeaderRaw(req.Header, "X-OpenAI-Fedramp", "true")
 	}
 	isCompactRequest := isOpenAIResponsesCompactPath(c)
 	if isCompactRequest {
-		req.Header.Set("accept", "application/json")
+		setHeaderRaw(req.Header, "Accept", "application/json")
 		if req.Header.Get("version") == "" {
 			req.Header.Set("version", codexCLIVersion)
 		}
 		if req.Header.Get("session_id") == "" && req.Header.Get(openAICodexSessionIDHeader) == "" {
 			req.Header.Set(openAICodexSessionIDHeader, resolveOpenAICompactSessionID(c))
 		}
-	} else if req.Header.Get("accept") == "" {
-		req.Header.Set("accept", "text/event-stream")
+	} else if getHeaderRaw(req.Header, "Accept") == "" {
+		setHeaderRaw(req.Header, "Accept", "text/event-stream")
 	}
 	compatMessagesBridge := isOpenAICompatMessagesBridgeContext(c) || isOpenAICompatMessagesBridgeBody(body)
 	clientConversationID := strings.TrimSpace(req.Header.Get("conversation_id"))
 	req.Header.Del("conversation_id")
 	req.Header.Del("session_id")
 
-	if compatMessagesBridge {
-		req.Header.Del("OpenAI-Beta")
-		req.Header.Del("originator")
-		req.Header.Del("version")
-	} else {
-		if req.Header.Get("OpenAI-Beta") == "" {
-			req.Header.Set("OpenAI-Beta", "responses=experimental")
-		}
-	}
 	fingerprint, err := s.ensureOpenAICodexFingerprint(ctx, account)
 	if err != nil {
 		return nil, err
@@ -4246,10 +4234,10 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIOAuthAdapter(
 	if ua := fingerprint.UAProfile.UserAgent(); ua != "" {
 		codexUA = ua
 	}
-	req.Header.Set("user-agent", codexUA)
+	setHeaderRaw(req.Header, "User-Agent", codexUA)
 
-	if req.Header.Get("content-type") == "" {
-		req.Header.Set("content-type", "application/json")
+	if getHeaderRaw(req.Header, "Content-Type") == "" {
+		setHeaderRaw(req.Header, "Content-Type", "application/json")
 	}
 
 	return req, nil

@@ -173,7 +173,6 @@ func (s *OpenAIOAuthService) HydratePersonalAccessToken(ctx context.Context, per
 	resp, err := client.R().
 		SetContext(reqCtx).
 		SetHeader("Authorization", "Bearer "+personalAccessToken).
-		SetHeader("Accept", "application/json").
 		SetSuccessResult(&metadata).
 		Get(openAIWhoamiURL())
 	if err != nil {

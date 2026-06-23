@@ -400,7 +400,7 @@ func TestOpenAIGatewayService_OAuthAdapter_StreamKeepsToolNameAndBodyNormalized(
 
 	// 3) required OAuth headers are present
 	require.Equal(t, "chatgpt.com", upstream.lastReq.Host)
-	require.Equal(t, "chatgpt-acc", upstream.lastReq.Header.Get("chatgpt-account-id"))
+	require.Equal(t, "chatgpt-acc", getHeaderRaw(upstream.lastReq.Header, "ChatGPT-Account-ID"))
 
 	// 4) downstream SSE keeps tool name (no toolCorrector)
 	body := rec.Body.String()
@@ -470,7 +470,7 @@ func TestOpenAIGatewayService_OAuthAdapter_CompactUsesJSONAndKeepsNonStreaming(t
 	require.Equal(t, codexCLIVersion, upstream.lastReq.Header.Get("Version"))
 	require.NotEmpty(t, upstream.lastReq.Header.Get("Session_Id"))
 	require.Equal(t, "chatgpt.com", upstream.lastReq.Host)
-	require.Equal(t, "chatgpt-acc", upstream.lastReq.Header.Get("chatgpt-account-id"))
+	require.Equal(t, "chatgpt-acc", getHeaderRaw(upstream.lastReq.Header, "ChatGPT-Account-ID"))
 	require.Contains(t, rec.Body.String(), `"id":"cmp_123"`)
 }
 
