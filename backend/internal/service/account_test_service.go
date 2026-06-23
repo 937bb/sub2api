@@ -622,7 +622,6 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	if isOAuth {
 		req.Host = "chatgpt.com"
 		req.Header.Set("accept", "text/event-stream")
-		req.Header.Set("OpenAI-Beta", "responses=experimental")
 		req.Header.Set("originator", codexOfficialOriginator)
 		req.Header.Set("User-Agent", codexCLIUserAgent)
 		req.Header.Set("Version", codexCLIVersion)
@@ -786,7 +785,6 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Authorization", "Bearer "+authToken)
-	req.Header.Set("OpenAI-Beta", "responses=experimental")
 	req.Header.Set("Originator", codexOfficialOriginator)
 	req.Header.Set("User-Agent", codexCLIUserAgent)
 	req.Header.Set("Version", codexCLIVersion)
@@ -1714,7 +1712,6 @@ func (s *AccountTestService) testOpenAIImageOAuth(c *gin.Context, ctx context.Co
 	req.Header.Set("Authorization", "Bearer "+authToken)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "text/event-stream")
-	req.Header.Set("OpenAI-Beta", "responses=experimental")
 	req.Header.Set("originator", codexOfficialOriginator)
 	req.Header.Set("Version", codexCLIVersion)
 	req.Header.Set("User-Agent", codexCLIUserAgent)

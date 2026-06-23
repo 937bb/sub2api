@@ -760,7 +760,6 @@ func (s *AccountUsageService) probeOpenAICodexSnapshot(ctx context.Context, acco
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 	req.Header.Set("Accept", "text/event-stream")
-	req.Header.Set("OpenAI-Beta", "responses=experimental")
 	req.Header.Set("Originator", codexOfficialOriginator)
 	req.Header.Set("Version", codexCLIVersion)
 	req.Header.Set("User-Agent", codexCLIUserAgent)

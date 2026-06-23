@@ -59,7 +59,13 @@ func AccountNeedsOpenAIPersonalAccessTokenMetadataHydration(account *Account, pe
 	if account == nil || account.Credentials == nil {
 		return true
 	}
-	return strings.TrimSpace(account.GetCredential("chatgpt_account_id")) == ""
+	accountID := strings.TrimSpace(account.GetCredential("chatgpt_account_id"))
+	if accountID == "" {
+		return true
+	}
+	// Older records may have persisted the ChatGPT user id in the account-id
+	// slot. Hydrate once so PAT requests carry the workspace/account id instead.
+	return strings.HasPrefix(accountID, "user-")
 }
 
 // BuildOpenAIPersonalAccessTokenCredentialUpdates converts whoami metadata into

@@ -106,6 +106,12 @@ func TestAccountNeedsOpenAIPersonalAccessTokenMetadataHydration(t *testing.T) {
 	account.Credentials = map[string]any{"chatgpt_account_id": "acc-123"}
 	require.False(t, AccountNeedsOpenAIPersonalAccessTokenMetadataHydration(account, "at-token"))
 
+	account.Credentials = map[string]any{
+		"chatgpt_user_id":    "user-123",
+		"chatgpt_account_id": "user-123",
+	}
+	require.True(t, AccountNeedsOpenAIPersonalAccessTokenMetadataHydration(account, "at-token"))
+
 	delete(account.Credentials, "chatgpt_account_id")
 	require.True(t, AccountNeedsOpenAIPersonalAccessTokenMetadataHydration(account, "at-token"))
 }
