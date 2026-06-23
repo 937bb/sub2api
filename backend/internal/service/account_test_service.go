@@ -874,7 +874,7 @@ func (s *AccountTestService) markOpenAIAccountTestPermanentError(ctx context.Con
 	case http.StatusUnauthorized:
 		_ = s.accountRepo.SetError(ctx, account.ID, openAIAccountTestAuthErrorMessage(statusCode, body))
 	case http.StatusForbidden:
-		if isOpenAIPersonalAccessTokenWorkspace403(account, extractUpstreamErrorMessage(body), body) {
+		if isOpenAIPersonalAccessTokenOwner403(account, extractUpstreamErrorMessage(body), body) {
 			_ = s.accountRepo.SetError(ctx, account.ID, openAIAccountTestForbiddenErrorMessage(statusCode, body))
 		}
 	}

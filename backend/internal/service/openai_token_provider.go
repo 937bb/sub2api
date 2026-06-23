@@ -299,8 +299,8 @@ func (p *OpenAITokenProvider) ensurePersonalAccessTokenMetadata(ctx context.Cont
 	}
 	metadata, err := p.openAIOAuthService.HydratePersonalAccessToken(ctx, personalAccessToken, account.ProxyID)
 	if err != nil {
-		if isOpenAIPersonalAccessTokenHydrationWorkspace403(account, err) {
-			p.disableAccountPersonalAccessTokenWorkspace403(account, err)
+		if isOpenAIPersonalAccessTokenHydrationOwner403(account, err) {
+			p.disableAccountPersonalAccessTokenOwner403(account, err)
 		}
 		return err
 	}
@@ -321,17 +321,17 @@ func (p *OpenAITokenProvider) disableAccountMissingRefreshToken(account *Account
 	p.disableAccountFromTokenProvider(account, reason, "missing_refresh_token", "openai_token_provider.account_disabled_missing_refresh_token")
 }
 
-// disableAccountPersonalAccessTokenWorkspace403 处理 PAT whoami 阶段返回的 workspace
-// 成员资格 403。该错误发生在真正转发请求前，无法走上游响应的统一 403 分支，
+// disableAccountPersonalAccessTokenOwner403 处理 PAT whoami 阶段返回的 owner
+// 状态 403。该错误发生在真正转发请求前，无法走上游响应的统一 403 分支，
 // 因此需要在 token provider 边界同步剔除调度，避免持续被选中并在网关侧表现为 502。
-func (p *OpenAITokenProvider) disableAccountPersonalAccessTokenWorkspace403(account *Account, cause error) {
+func (p *OpenAITokenProvider) disableAccountPersonalAccessTokenOwner403(account *Account, cause error) {
 	msg := buildOpenAIForbiddenErrorMessage(
 		"Access forbidden (403):",
 		openAIPersonalAccessTokenHydrationErrorMessage(cause),
 		openAIPersonalAccessTokenHydrationErrorBody(cause),
 		"account may be suspended or lack permissions",
 	)
-	p.disableAccountFromTokenProvider(account, msg, "openai_pat_workspace_403", "openai_token_provider.account_disabled_pat_workspace_403")
+	p.disableAccountFromTokenProvider(account, msg, "openai_pat_owner_403", "openai_token_provider.account_disabled_pat_owner_403")
 }
 
 func (p *OpenAITokenProvider) disableAccountFromTokenProvider(account *Account, reason string, blockReason string, logEvent string) {
@@ -364,15 +364,15 @@ func (p *OpenAITokenProvider) disableAccountFromTokenProvider(account *Account, 
 	)
 }
 
-func isOpenAIPersonalAccessTokenHydrationWorkspace403(account *Account, err error) bool {
+func isOpenAIPersonalAccessTokenHydrationOwner403(account *Account, err error) bool {
 	if err == nil {
 		return false
 	}
 	var whoamiErr *openAIPersonalAccessTokenWhoamiError
 	if errors.As(err, &whoamiErr) {
-		return whoamiErr.statusCode == 403 && isOpenAIPersonalAccessTokenWorkspace403(account, "", []byte(whoamiErr.body))
+		return whoamiErr.statusCode == 403 && isOpenAIPersonalAccessTokenOwner403(account, "", []byte(whoamiErr.body))
 	}
-	return isOpenAIPersonalAccessTokenWorkspace403(account, err.Error(), nil)
+	return isOpenAIPersonalAccessTokenOwner403(account, err.Error(), nil)
 }
 
 func openAIPersonalAccessTokenHydrationErrorMessage(err error) string {

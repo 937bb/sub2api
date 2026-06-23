@@ -371,6 +371,34 @@ func TestAccountTestService_OpenAIPATWorkspace403MarksError(t *testing.T) {
 	require.Contains(t, repo.setErrorMsg, "Personal access token owner is not an active member of the selected workspace")
 }
 
+func TestAccountTestService_OpenAIPATOwnerInactive403MarksError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, recorder := newTestContext()
+
+	body := `{"error":{"message":"Personal access token owner is inactive."}}`
+	repo := &openAIAccountTestRepo{}
+	upstream := &queuedHTTPUpstream{responses: []*http.Response{newJSONResponse(http.StatusForbidden, body)}}
+	svc := &AccountTestService{accountRepo: repo, httpUpstream: upstream}
+	account := &Account{
+		ID:          894,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"personal_access_token": "pat-test",
+			"chatgpt_account_id":    "chatgpt-acc",
+		},
+	}
+
+	err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.4", "", "")
+
+	require.Error(t, err)
+	require.Contains(t, recorder.Body.String(), "API returned 403")
+	require.Equal(t, account.ID, repo.setErrorID)
+	require.Contains(t, repo.setErrorMsg, "Access forbidden (403)")
+	require.Contains(t, repo.setErrorMsg, "Personal access token owner is inactive")
+}
+
 func TestAccountTestService_OpenAIOAuthProbeSendsCodexFingerprint(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, _ := newTestContext()

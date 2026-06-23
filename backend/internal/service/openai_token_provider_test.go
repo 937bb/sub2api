@@ -361,7 +361,51 @@ func TestOpenAITokenProvider_PersonalAccessTokenWorkspace403DisablesAccountDurin
 	require.Contains(t, repo.lastErrorMsg, "Personal access token owner is not an active member of the selected workspace")
 	require.NotContains(t, repo.lastErrorMsg, "at-runtime-workspace-403")
 	require.Equal(t, []int64{account.ID}, blocker.accounts)
-	require.Equal(t, []string{"openai_pat_workspace_403"}, blocker.reasons)
+	require.Equal(t, []string{"openai_pat_owner_403"}, blocker.reasons)
+	_, cached := cache.tokens[OpenAITokenCacheKey(account)]
+	require.False(t, cached)
+}
+
+func TestOpenAITokenProvider_PersonalAccessTokenOwnerInactive403DisablesAccountDuringHydration(t *testing.T) {
+	oldBaseURL := openAIAuthAPIBaseURL
+	t.Cleanup(func() { openAIAuthAPIBaseURL = oldBaseURL })
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, openAIWhoamiPath, r.URL.Path)
+		require.Equal(t, "Bearer at-runtime-inactive-403", r.Header.Get("Authorization"))
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"error":{"message":"Personal access token owner is inactive.","access_token":"at-runtime-inactive-403"}}`))
+	}))
+	defer server.Close()
+	openAIAuthAPIBaseURL = server.URL
+
+	cache := newOpenAITokenCacheStub()
+	repo := &openAISetupTokenBoundaryRepoStub{}
+	blocker := &openAITokenProviderRuntimeBlockRecorder{}
+	account := &Account{
+		ID:       117,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"personal_access_token": "at-runtime-inactive-403",
+		},
+	}
+	cache.tokens[OpenAITokenCacheKey(account)] = "stale-token"
+	svc := NewOpenAIOAuthService(nil, openAIPATTestOAuthClient{})
+	provider := NewOpenAITokenProvider(repo, cache, svc)
+	provider.SetAccountRuntimeBlocker(blocker)
+
+	token, err := provider.GetAccessToken(context.Background(), account)
+
+	require.Error(t, err)
+	require.Empty(t, token)
+	require.Equal(t, int32(1), atomic.LoadInt32(&repo.setErrorCalls))
+	require.Equal(t, account.ID, repo.lastErrorID)
+	require.Contains(t, repo.lastErrorMsg, "Access forbidden (403)")
+	require.Contains(t, repo.lastErrorMsg, "Personal access token owner is inactive")
+	require.NotContains(t, repo.lastErrorMsg, "at-runtime-inactive-403")
+	require.Equal(t, []int64{account.ID}, blocker.accounts)
+	require.Equal(t, []string{"openai_pat_owner_403"}, blocker.reasons)
 	_, cached := cache.tokens[OpenAITokenCacheKey(account)]
 	require.False(t, cached)
 }

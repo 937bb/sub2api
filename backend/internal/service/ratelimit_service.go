@@ -810,7 +810,7 @@ func (s *RateLimitService) handleOpenAI403(ctx context.Context, account *Account
 		"account may be suspended or lack permissions",
 	)
 
-	if isOpenAIPersonalAccessTokenWorkspace403(account, upstreamMsg, responseBody) {
+	if isOpenAIPersonalAccessTokenOwner403(account, upstreamMsg, responseBody) {
 		s.handleAuthError(ctx, account, msg)
 		return true
 	}
@@ -852,7 +852,7 @@ func (s *RateLimitService) handleOpenAI403(ctx context.Context, account *Account
 	return true
 }
 
-func isOpenAIPersonalAccessTokenWorkspace403(account *Account, upstreamMsg string, responseBody []byte) bool {
+func isOpenAIPersonalAccessTokenOwner403(account *Account, upstreamMsg string, responseBody []byte) bool {
 	if account == nil || strings.TrimSpace(account.GetOpenAIPersonalAccessToken()) == "" {
 		return false
 	}
@@ -860,9 +860,11 @@ func isOpenAIPersonalAccessTokenWorkspace403(account *Account, upstreamMsg strin
 	if msg == "" {
 		msg = strings.ToLower(extractUpstreamErrorMessage(responseBody))
 	}
-	return strings.Contains(msg, "personal access token owner") &&
-		strings.Contains(msg, "not an active member") &&
-		strings.Contains(msg, "selected workspace")
+	if !strings.Contains(msg, "personal access token owner") {
+		return false
+	}
+	return strings.Contains(msg, "owner is inactive") ||
+		(strings.Contains(msg, "not an active member") && strings.Contains(msg, "selected workspace"))
 }
 
 // handleAntigravity403 处理 Antigravity 平台的 403 错误

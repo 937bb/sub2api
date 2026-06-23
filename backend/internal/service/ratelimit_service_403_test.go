@@ -118,6 +118,36 @@ func TestRateLimitService_HandleUpstreamError_OpenAIPATWorkspace403DisablesImmed
 	require.NotContains(t, repo.lastErrorMsg, "consecutive_403")
 }
 
+func TestRateLimitService_HandleUpstreamError_OpenAIPATOwnerInactive403DisablesImmediately(t *testing.T) {
+	repo := &rateLimitAccountRepoStub{}
+	counter := &openAI403CounterCacheStub{counts: []int64{1}}
+	service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	service.SetOpenAI403CounterCache(counter)
+	account := &Account{
+		ID:       305,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"personal_access_token": "pat-test",
+		},
+	}
+
+	shouldDisable := service.HandleUpstreamError(
+		context.Background(),
+		account,
+		http.StatusForbidden,
+		http.Header{},
+		[]byte(`{"error":{"message":"Personal access token owner is inactive."}}`),
+	)
+
+	require.True(t, shouldDisable)
+	require.Equal(t, 1, repo.setErrorCalls)
+	require.Equal(t, 0, repo.tempCalls)
+	require.Equal(t, []int64{1}, counter.counts)
+	require.Contains(t, repo.lastErrorMsg, "Personal access token owner is inactive")
+	require.NotContains(t, repo.lastErrorMsg, "consecutive_403")
+}
+
 func TestRateLimitService_HandleUpstreamError_OpenAIOAuthWorkspace403UsesTempCooldown(t *testing.T) {
 	repo := &rateLimitAccountRepoStub{}
 	counter := &openAI403CounterCacheStub{counts: []int64{1}}
