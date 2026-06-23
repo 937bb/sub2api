@@ -485,7 +485,7 @@ func (r *apiKeyRepository) deleteByUserIDWithAudit(ctx context.Context, exec *db
 			FOR UPDATE
 		), deleted AS (
 			UPDATE api_keys AS ak
-			SET key = CONCAT('__deleted__', ak.id, '__', $2), deleted_at = NOW(), updated_at = NOW()
+			SET key = CONCAT('__deleted__', ak.id, '__', $2::text), deleted_at = NOW(), updated_at = NOW()
 			FROM locked
 			WHERE ak.id = locked.id
 			RETURNING locked.key AS original_key, ak.id, ak.user_id, ak.name, ak.deleted_at
