@@ -2212,7 +2212,7 @@ func TestOpenAIForwardHTTPDoesNotSendWSCreateFrameFields(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	body := []byte(`{"type":"response.create","generate":false,"previous_response_id":"resp_warm","model":"gpt-5","stream":false,"input":"hello","client_metadata":{"keep":"yes"}}`)
+	body := []byte(`{"type":"response.create","generate":false,"previous_response_id":"resp_warm","model":"gpt-5","stream":false,"input":"hello","metadata":{"drop":"yes"},"client_metadata":{"keep":"yes"}}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
 	SetOpenAIClientTransport(c, OpenAIClientTransportHTTP)
 
@@ -2242,6 +2242,7 @@ func TestOpenAIForwardHTTPDoesNotSendWSCreateFrameFields(t *testing.T) {
 	require.False(t, gjson.GetBytes(upstream.lastBody, "type").Exists())
 	require.False(t, gjson.GetBytes(upstream.lastBody, "generate").Exists())
 	require.False(t, gjson.GetBytes(upstream.lastBody, "previous_response_id").Exists())
+	require.False(t, gjson.GetBytes(upstream.lastBody, "metadata").Exists())
 	require.Equal(t, "yes", gjson.GetBytes(upstream.lastBody, "client_metadata.keep").String())
 }
 

@@ -3362,6 +3362,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			}
 		}
 	}
+	if account.Platform == PlatformOpenAI && account.Type == AccountTypeAPIKey && gjson.GetBytes(body, "metadata").Exists() {
+		markPatchDelete("metadata")
+	}
 	if !account.IsOpenAIOAuthLike() && wsDecision.Transport != OpenAIUpstreamTransportResponsesWebsocketV2 {
 		for _, field := range []string{"previous_response_id", "generate", "type"} {
 			if gjson.GetBytes(body, field).Exists() {
