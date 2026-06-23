@@ -122,8 +122,9 @@ func persistOpenAIPersonalAccessTokenMetadata(ctx context.Context, repo AccountR
 	if repo == nil || account.ID <= 0 {
 		return nil
 	}
-	_, err := repo.BulkUpdate(ctx, []int64{account.ID}, AccountBulkUpdate{Credentials: updates})
-	return err
+	// Use the single-account credential path so scheduler snapshots refresh
+	// immediately after fixing stale PAT metadata.
+	return persistAccountCredentials(ctx, repo, account, account.Credentials)
 }
 
 // HydratePersonalAccessToken calls the official Codex whoami endpoint for PATs:

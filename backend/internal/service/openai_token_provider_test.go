@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/imroc/req/v3"
 	"github.com/stretchr/testify/require"
 )
 
@@ -114,11 +116,12 @@ func (r *openAIAccountRepoStub) Update(ctx context.Context, account *Account) er
 
 type openAISetupTokenBoundaryRepoStub struct {
 	AccountRepository
-	setErrorCalls   int32
-	bulkUpdateCalls int32
-	lastErrorID     int64
-	lastErrorMsg    string
-	lastCredentials map[string]any
+	setErrorCalls          int32
+	bulkUpdateCalls        int32
+	updateCredentialsCalls int32
+	lastErrorID            int64
+	lastErrorMsg           string
+	lastCredentials        map[string]any
 }
 
 func (r *openAISetupTokenBoundaryRepoStub) SetError(ctx context.Context, id int64, errorMsg string) error {
@@ -132,6 +135,12 @@ func (r *openAISetupTokenBoundaryRepoStub) BulkUpdate(ctx context.Context, ids [
 	atomic.AddInt32(&r.bulkUpdateCalls, 1)
 	r.lastCredentials = cloneCredentials(updates.Credentials)
 	return int64(len(ids)), nil
+}
+
+func (r *openAISetupTokenBoundaryRepoStub) UpdateCredentials(ctx context.Context, id int64, credentials map[string]any) error {
+	atomic.AddInt32(&r.updateCredentialsCalls, 1)
+	r.lastCredentials = cloneCredentials(credentials)
+	return nil
 }
 
 type openAITokenProviderRuntimeBlockRecorder struct {
@@ -272,14 +281,14 @@ func TestOpenAITokenProvider_PersonalAccessTokenBypassesCacheAndMissingRefreshDi
 		Platform: PlatformOpenAI,
 		Type:     AccountTypeOAuth,
 		Credentials: map[string]any{
-			"access_token":                 "expired-access-token",
-			"personal_access_token":        "at-pat-token",
-			"email":                        "user@example.com",
-			"chatgpt_user_id":              "user-123",
-			"chatgpt_account_id":           "acc-123",
-			"chatgpt_plan_type":            "plus",
-			"chatgpt_account_is_fedramp":   false,
-			"expires_at":                   expiresAt,
+			"access_token":               "expired-access-token",
+			"personal_access_token":      "at-pat-token",
+			"email":                      "user@example.com",
+			"chatgpt_user_id":            "user-123",
+			"chatgpt_account_id":         "acc-123",
+			"chatgpt_plan_type":          "plus",
+			"chatgpt_account_is_fedramp": false,
+			"expires_at":                 expiresAt,
 		},
 	}
 	cache.tokens[OpenAITokenCacheKey(account)] = "stale-oauth-token"
@@ -301,9 +310,9 @@ func TestOpenAITokenProvider_PersonalAccessTokenWithAccountIDSkipsHydration(t *t
 		Platform: PlatformOpenAI,
 		Type:     AccountTypeOAuth,
 		Credentials: map[string]any{
-			"access_token":                 "expired-access-token",
-			"personal_access_token":        "at-pat-token",
-			"chatgpt_account_id":           "acc-123",
+			"access_token":          "expired-access-token",
+			"personal_access_token": "at-pat-token",
+			"chatgpt_account_id":    "acc-123",
 		},
 	}
 
@@ -315,6 +324,50 @@ func TestOpenAITokenProvider_PersonalAccessTokenWithAccountIDSkipsHydration(t *t
 	require.Equal(t, int32(0), atomic.LoadInt32(&cache.getCalled), "PAT should bypass OAuth cache")
 }
 
+func TestOpenAITokenProvider_PersonalAccessTokenHydrationPersistsViaUpdateCredentials(t *testing.T) {
+	oldBaseURL := openAIAuthAPIBaseURL
+	t.Cleanup(func() { openAIAuthAPIBaseURL = oldBaseURL })
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, openAIWhoamiPath, r.URL.Path)
+		require.Equal(t, "Bearer at-pat-token", r.Header.Get("Authorization"))
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"email":                      "user@example.com",
+			"chatgpt_user_id":            "user-123",
+			"chatgpt_account_id":         "698727dc-d964-43d7-954f-932a4eb67eaf",
+			"chatgpt_plan_type":          "team",
+			"chatgpt_account_is_fedramp": false,
+		})
+	}))
+	defer server.Close()
+	openAIAuthAPIBaseURL = server.URL
+
+	cache := newOpenAITokenCacheStub()
+	repo := &openAISetupTokenBoundaryRepoStub{}
+	oauthSvc := NewOpenAIOAuthService(nil, openAIPATTestOAuthClient{})
+	oauthSvc.SetPrivacyClientFactory(func(proxyURL string) (*req.Client, error) { return req.C(), nil })
+	account := &Account{
+		ID:       117,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"access_token":          "expired-access-token",
+			"personal_access_token": "at-pat-token",
+			"chatgpt_account_id":    "user-stale",
+		},
+	}
+
+	provider := NewOpenAITokenProvider(repo, cache, oauthSvc)
+	token, err := provider.GetAccessToken(context.Background(), account)
+
+	require.NoError(t, err)
+	require.Equal(t, "at-pat-token", token)
+	require.Equal(t, int32(1), atomic.LoadInt32(&repo.updateCredentialsCalls), "PAT hydration must refresh the single-account scheduler snapshot via UpdateCredentials")
+	require.Equal(t, int32(0), atomic.LoadInt32(&repo.bulkUpdateCalls), "PAT hydration should not use bulk update")
+	require.Equal(t, "698727dc-d964-43d7-954f-932a4eb67eaf", repo.lastCredentials["chatgpt_account_id"])
+	require.Equal(t, "698727dc-d964-43d7-954f-932a4eb67eaf", account.GetChatGPTAccountID())
+}
+
 func TestOpenAITokenProvider_SetupTokenPersonalAccessTokenBypassesCache(t *testing.T) {
 	cache := newOpenAITokenCacheStub()
 	account := &Account{
@@ -322,13 +375,13 @@ func TestOpenAITokenProvider_SetupTokenPersonalAccessTokenBypassesCache(t *testi
 		Platform: PlatformOpenAI,
 		Type:     AccountTypeSetupToken,
 		Credentials: map[string]any{
-			"access_token":                 "setup-access-token",
-			"personal_access_token":        "at-setup-pat-token",
-			"email":                        "setup@example.com",
-			"chatgpt_user_id":              "setup-user-123",
-			"chatgpt_account_id":           "setup-acc-123",
-			"chatgpt_plan_type":            "team",
-			"chatgpt_account_is_fedramp":   false,
+			"access_token":               "setup-access-token",
+			"personal_access_token":      "at-setup-pat-token",
+			"email":                      "setup@example.com",
+			"chatgpt_user_id":            "setup-user-123",
+			"chatgpt_account_id":         "setup-acc-123",
+			"chatgpt_plan_type":          "team",
+			"chatgpt_account_is_fedramp": false,
 		},
 	}
 	cache.tokens[OpenAITokenCacheKey(account)] = "stale-oauth-token"
