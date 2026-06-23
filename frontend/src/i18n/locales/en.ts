@@ -391,7 +391,6 @@ export default {
     balanceEntries: 'Balance Details',
     checkin: 'Daily Check-in',
     leaderboard: 'Leaderboard',
-    modelPlaza: 'Model Plaza',
   },
 
   // Auth
@@ -1073,36 +1072,6 @@ export default {
       unitPerMillion: '/ 1M tokens',
       unitPerRequest: '/ request'
     }
-  },
-
-  // Model Plaza (user-facing)
-  modelPlaza: {
-    title: 'Model Plaza',
-    description: 'Browse all available models, pricing and accessible groups',
-    searchPlaceholder: 'Search models, platforms or groups...',
-    allPlatforms: 'All',
-    allGroups: 'All Groups',
-    filterByGroup: 'Filter by Group',
-    empty: 'No models available',
-    noPricing: 'No pricing configured',
-    modelCount: '{count} models',
-    availableGroups: 'Available Groups',
-    exclusiveGroup: 'Exclusive group assigned by admin',
-    publicGroup: 'Public group available to all users',
-    pricing: {
-      input: 'Input',
-      output: 'Output',
-      cacheWrite: 'Cache Write',
-      cacheRead: 'Cache Read',
-      imageOutput: 'Image Output',
-      perRequest: 'Per Request',
-      modeToken: 'Per Token',
-      modePerRequest: 'Per Request',
-      modeImage: 'Per Image',
-      unitPerMillion: '/ 1M tokens',
-      unitPerRequest: '/ request',
-      hasTieredPricing: '{count} tiered pricing rules',
-    },
   },
 
   affiliate: {

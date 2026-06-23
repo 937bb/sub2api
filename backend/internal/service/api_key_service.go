@@ -745,7 +745,7 @@ func (s *APIKeyService) GetAvailableGroups(ctx context.Context, userID int64) ([
 }
 
 // GetVisibleGroups returns groups visible in strict user-facing discovery views
-// such as Model Plaza and Available Channels.
+// such as Available Channels.
 func (s *APIKeyService) GetVisibleGroups(ctx context.Context, userID int64) ([]Group, error) {
 	return s.listUserGroups(ctx, userID, s.canUserViewGroupInternal)
 }

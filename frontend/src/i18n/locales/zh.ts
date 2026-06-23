@@ -391,7 +391,6 @@ export default {
     balanceEntries: '余额明细',
     checkin: '每日签到',
     leaderboard: '排行榜',
-    modelPlaza: '模型广场',
   },
 
   // Auth
@@ -1077,36 +1076,6 @@ export default {
       unitPerMillion: '/ 1M token',
       unitPerRequest: '/ 次'
     }
-  },
-
-  // 模型广场（用户端）
-  modelPlaza: {
-    title: '模型广场',
-    description: '浏览所有可用模型、定价与可访问的分组',
-    searchPlaceholder: '搜索模型、平台或分组...',
-    allPlatforms: '全部',
-    allGroups: '全部分组',
-    filterByGroup: '按分组筛选',
-    empty: '暂无可用模型',
-    noPricing: '未配置定价',
-    modelCount: '{count} 个模型',
-    availableGroups: '可用分组',
-    exclusiveGroup: '管理员授权的专属分组',
-    publicGroup: '对所有用户开放的公开分组',
-    pricing: {
-      input: '输入',
-      output: '输出',
-      cacheWrite: '缓存写入',
-      cacheRead: '缓存读取',
-      imageOutput: '图片输出',
-      perRequest: '每次请求',
-      modeToken: '按 Token',
-      modePerRequest: '按次',
-      modeImage: '按图片',
-      unitPerMillion: '/ 1M token',
-      unitPerRequest: '/ 次',
-      hasTieredPricing: '{count} 条阶梯定价规则',
-    },
   },
 
   affiliate: {
