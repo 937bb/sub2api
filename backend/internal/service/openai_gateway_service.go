@@ -3731,7 +3731,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
 			upstreamMsg = sanitizeOpenAIUpstreamDiagnosticText(upstreamMsg)
 			upstreamCode := extractUpstreamErrorCode(respBody)
-			if !httpInvalidEncryptedContentRetryTried && resp.StatusCode == http.StatusBadRequest && upstreamCode == "invalid_encrypted_content" {
+			if !httpInvalidEncryptedContentRetryTried && resp.StatusCode == http.StatusBadRequest && isOpenAIEncryptedContextErrorCode(upstreamCode) {
 				decoded, decodeErr := ensureReqBody()
 				if decodeErr != nil {
 					return nil, decodeErr
@@ -3739,13 +3739,13 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 				if trimOpenAIEncryptedReasoningItems(decoded) {
 					body, err = marshalOpenAIUpstreamJSON(decoded)
 					if err != nil {
-						return nil, fmt.Errorf("serialize invalid_encrypted_content retry body: %w", err)
+						return nil, fmt.Errorf("serialize encrypted context retry body: %w", err)
 					}
 					httpInvalidEncryptedContentRetryTried = true
-					logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Retrying non-WSv2 request once after invalid_encrypted_content (account: %s)", account.Name)
+					logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Retrying non-WSv2 request once after encrypted context error code=%s (account: %s)", upstreamCode, account.Name)
 					continue
 				}
-				logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Skip non-WSv2 invalid_encrypted_content retry because encrypted reasoning items are missing (account: %s)", account.Name)
+				logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Skip non-WSv2 encrypted context retry because stale reasoning/compaction items are missing (account: %s)", account.Name)
 			}
 			if s.shouldFailoverOpenAIUpstreamResponse(resp.StatusCode, upstreamMsg, respBody) {
 				upstreamDetail := ""
@@ -6309,6 +6309,15 @@ func trimOpenAIEncryptedReasoningItems(reqBody map[string]any) bool {
 	}
 }
 
+func isOpenAIEncryptedContextErrorCode(code string) bool {
+	switch strings.ToLower(strings.TrimSpace(code)) {
+	case "invalid_encrypted_content", "thinking_signature_invalid":
+		return true
+	default:
+		return false
+	}
+}
+
 func sanitizeEncryptedReasoningInputItem(item any) (next any, changed bool, keep bool) {
 	inputItem, ok := item.(map[string]any)
 	if !ok {
@@ -6316,20 +6325,12 @@ func sanitizeEncryptedReasoningInputItem(item any) (next any, changed bool, keep
 	}
 
 	itemType, _ := inputItem["type"].(string)
-	if strings.TrimSpace(itemType) != "reasoning" {
-		return item, false, true
-	}
-
-	_, hasEncryptedContent := inputItem["encrypted_content"]
-	if !hasEncryptedContent {
-		return item, false, true
-	}
-
-	delete(inputItem, "encrypted_content")
-	if len(inputItem) == 1 {
+	switch strings.TrimSpace(itemType) {
+	case "reasoning", "compaction":
 		return nil, true, false
+	default:
+		return item, false, true
 	}
-	return inputItem, true, true
 }
 
 func IsOpenAIResponsesCompactPathForTest(c *gin.Context) bool {
