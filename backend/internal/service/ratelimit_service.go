@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -31,9 +32,17 @@ type RateLimitService struct {
 	openAIOAuth429DynamicStat map[int64]*openAIOAuth429DynamicWindow
 	settingService            *SettingService
 	tokenCacheInvalidator     TokenCacheInvalidator
+	openAIPAT401Verifier      OpenAIPersonalAccessTokenVerifier
+	openAIPAT401TokenCache    GeminiTokenCache
+	openAIPAT401LocalLocks    sync.Map
+	openAIPAT401LocalResults  sync.Map
 	runtimeBlocker            AccountRuntimeBlocker
 	usageCacheMu              sync.RWMutex
 	usageCache                map[int64]*geminiUsageCacheEntry
+}
+
+type OpenAIPersonalAccessTokenVerifier interface {
+	HydratePersonalAccessToken(ctx context.Context, personalAccessToken string, proxyID *int64) (*OpenAIPersonalAccessTokenMetadata, error)
 }
 
 type AccountRuntimeBlocker interface {
@@ -113,6 +122,11 @@ func (s *RateLimitService) SetSettingService(settingService *SettingService) {
 // SetTokenCacheInvalidator 设置 token 缓存清理器（可选依赖）
 func (s *RateLimitService) SetTokenCacheInvalidator(invalidator TokenCacheInvalidator) {
 	s.tokenCacheInvalidator = invalidator
+}
+
+func (s *RateLimitService) SetOpenAIPersonalAccessToken401Verifier(verifier OpenAIPersonalAccessTokenVerifier, tokenCache GeminiTokenCache) {
+	s.openAIPAT401Verifier = verifier
+	s.openAIPAT401TokenCache = tokenCache
 }
 
 func (s *RateLimitService) SetAccountRuntimeBlocker(blocker AccountRuntimeBlocker) {
@@ -241,6 +255,11 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 			shouldDisable = true
 			break
 		}
+		// OpenAI PAT 的 401 先用 whoami 复核；只有 whoami 也 401/403 才永久禁用。
+		if account.Platform == PlatformOpenAI && strings.TrimSpace(account.GetOpenAIPersonalAccessToken()) != "" {
+			shouldDisable = s.handleOpenAIPersonalAccessToken401(ctx, account, upstreamMsg)
+			break
+		}
 		// OpenAI: {"detail":"Unauthorized"} 表示 token 完全无效（非标准 OpenAI 错误格式），直接标记 error
 		if account.Platform == PlatformOpenAI && gjson.GetBytes(responseBody, "detail").String() == "Unauthorized" {
 			msg := "Unauthorized (401): account authentication failed permanently"
@@ -255,12 +274,7 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 		// Antigravity 除外：其 401 由 applyErrorPolicy 的 temp_unschedulable_rules 自行控制。
 		if account.Type == AccountTypeOAuth && account.Platform != PlatformAntigravity {
 			if account.Platform == PlatformOpenAI && strings.TrimSpace(account.GetOpenAIPersonalAccessToken()) != "" {
-				msg := "Authentication failed (401): invalid or expired credentials"
-				if upstreamMsg != "" {
-					msg = "Authentication failed (401): " + upstreamMsg
-				}
-				s.handleAuthError(ctx, account, msg)
-				shouldDisable = true
+				shouldDisable = s.handleOpenAIPersonalAccessToken401(ctx, account, upstreamMsg)
 				break
 			}
 			// 1. 失效缓存
@@ -737,6 +751,73 @@ func (s *RateLimitService) GeminiCooldown(ctx context.Context, account *Account)
 		return 5 * time.Minute
 	}
 	return s.geminiQuotaService.CooldownForAccount(ctx, account)
+}
+
+func (s *RateLimitService) handleOpenAIPersonalAccessToken401(ctx context.Context, account *Account, upstreamMsg string) bool {
+	msg := "OpenAI Codex 401: invalid or expired credentials"
+	if strings.TrimSpace(upstreamMsg) != "" {
+		msg = "OpenAI Codex 401: " + upstreamMsg
+	}
+	if s.verifyOpenAIPersonalAccessToken401(ctx, account) {
+		s.handleAuthError(ctx, account, "OpenAI PAT whoami failed after Codex 401: "+sanitizeOpenAIUpstreamDiagnosticText(upstreamMsg))
+		return true
+	}
+	cooldownMinutes := 0
+	if s.cfg != nil {
+		cooldownMinutes = s.cfg.RateLimit.OAuth401CooldownMinutes
+	}
+	if cooldownMinutes <= 0 {
+		cooldownMinutes = 10
+	}
+	until := time.Now().Add(time.Duration(cooldownMinutes) * time.Minute)
+	s.notifyAccountSchedulingBlocked(account, until, "openai_pat_401")
+	if err := s.accountRepo.SetTempUnschedulable(ctx, account.ID, until, msg); err != nil {
+		slog.Warn("openai_pat_401_set_temp_unschedulable_failed", "account_id", account.ID, "error", err)
+	}
+	return true
+}
+
+func (s *RateLimitService) verifyOpenAIPersonalAccessToken401(ctx context.Context, account *Account) bool {
+	if s == nil || account == nil || s.openAIPAT401Verifier == nil {
+		return false
+	}
+	token := strings.TrimSpace(account.GetOpenAIPersonalAccessToken())
+	if token == "" {
+		return false
+	}
+	key := OpenAITokenCacheKey(account) + ":pat401-whoami"
+	mu := s.openAIPAT401LocalLock(key)
+	mu.Lock()
+	defer mu.Unlock()
+	if cached, ok := s.openAIPAT401LocalResults.Load(key); ok {
+		return cached == true
+	}
+	if s.openAIPAT401TokenCache != nil {
+		acquired, err := s.openAIPAT401TokenCache.AcquireRefreshLock(ctx, key, 30*time.Second)
+		if err != nil {
+			slog.Warn("openai_pat_401_whoami_lock_failed", "account_id", account.ID, "error", err)
+		} else if !acquired {
+			return false
+		} else {
+			defer func() { _ = s.openAIPAT401TokenCache.ReleaseRefreshLock(ctx, key) }()
+		}
+	}
+	_, err := s.openAIPAT401Verifier.HydratePersonalAccessToken(ctx, token, account.ProxyID)
+	var whoamiErr *openAIPersonalAccessTokenWhoamiError
+	failed := errors.As(err, &whoamiErr) && (whoamiErr.statusCode == http.StatusUnauthorized || whoamiErr.statusCode == http.StatusForbidden)
+	// Cache the first local verdict so concurrent 401s collapse to one whoami in this process.
+	s.openAIPAT401LocalResults.Store(key, failed)
+	return failed
+}
+
+func (s *RateLimitService) openAIPAT401LocalLock(key string) *sync.Mutex {
+	actual, _ := s.openAIPAT401LocalLocks.LoadOrStore(key, &sync.Mutex{})
+	if mu, ok := actual.(*sync.Mutex); ok {
+		return mu
+	}
+	mu := &sync.Mutex{}
+	s.openAIPAT401LocalLocks.Store(key, mu)
+	return mu
 }
 
 // handleAuthError 处理认证类错误(401/403)，停止账号调度
