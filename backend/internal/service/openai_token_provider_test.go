@@ -274,7 +274,6 @@ func TestOpenAITokenProvider_PersonalAccessTokenBypassesCacheAndMissingRefreshDi
 		Credentials: map[string]any{
 			"access_token":                 "expired-access-token",
 			"personal_access_token":        "at-pat-token",
-			"personal_access_token_sha256": OpenAIPersonalAccessTokenFingerprint("at-pat-token"),
 			"email":                        "user@example.com",
 			"chatgpt_user_id":              "user-123",
 			"chatgpt_account_id":           "acc-123",
@@ -295,6 +294,27 @@ func TestOpenAITokenProvider_PersonalAccessTokenBypassesCacheAndMissingRefreshDi
 	require.Zero(t, atomic.LoadInt32(&repo.setErrorCalls), "PAT accounts must not be disabled for missing refresh_token")
 }
 
+func TestOpenAITokenProvider_PersonalAccessTokenWithAccountIDSkipsHydration(t *testing.T) {
+	cache := newOpenAITokenCacheStub()
+	account := &Account{
+		ID:       116,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"access_token":                 "expired-access-token",
+			"personal_access_token":        "at-pat-token",
+			"chatgpt_account_id":           "acc-123",
+		},
+	}
+
+	provider := NewOpenAITokenProvider(nil, cache, nil)
+	token, err := provider.GetAccessToken(context.Background(), account)
+
+	require.NoError(t, err)
+	require.Equal(t, "at-pat-token", token)
+	require.Equal(t, int32(0), atomic.LoadInt32(&cache.getCalled), "PAT should bypass OAuth cache")
+}
+
 func TestOpenAITokenProvider_SetupTokenPersonalAccessTokenBypassesCache(t *testing.T) {
 	cache := newOpenAITokenCacheStub()
 	account := &Account{
@@ -304,7 +324,6 @@ func TestOpenAITokenProvider_SetupTokenPersonalAccessTokenBypassesCache(t *testi
 		Credentials: map[string]any{
 			"access_token":                 "setup-access-token",
 			"personal_access_token":        "at-setup-pat-token",
-			"personal_access_token_sha256": OpenAIPersonalAccessTokenFingerprint("at-setup-pat-token"),
 			"email":                        "setup@example.com",
 			"chatgpt_user_id":              "setup-user-123",
 			"chatgpt_account_id":           "setup-acc-123",

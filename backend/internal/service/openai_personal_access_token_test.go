@@ -90,7 +90,7 @@ func TestApplyOpenAIPersonalAccessTokenMetadataPreservesOAuthCredentials(t *test
 	require.Equal(t, "pro", out["chatgpt_plan_type"])
 	require.Equal(t, "pro", out["plan_type"])
 	require.Equal(t, true, out["chatgpt_account_is_fedramp"])
-	require.NotEmpty(t, out["personal_access_token_sha256"])
+	require.NotContains(t, out, "personal_access_token_sha256")
 }
 
 func TestAccountNeedsOpenAIPersonalAccessTokenMetadataHydration(t *testing.T) {
@@ -101,7 +101,11 @@ func TestAccountNeedsOpenAIPersonalAccessTokenMetadataHydration(t *testing.T) {
 		ChatGPTPlanType:  "plus",
 	})}
 	require.False(t, AccountNeedsOpenAIPersonalAccessTokenMetadataHydration(account, "at-token"))
-	require.True(t, AccountNeedsOpenAIPersonalAccessTokenMetadataHydration(account, "at-other"))
+	require.False(t, AccountNeedsOpenAIPersonalAccessTokenMetadataHydration(account, "at-other"))
+
+	account.Credentials = map[string]any{"chatgpt_account_id": "acc-123"}
+	require.False(t, AccountNeedsOpenAIPersonalAccessTokenMetadataHydration(account, "at-token"))
+
 	delete(account.Credentials, "chatgpt_account_id")
 	require.True(t, AccountNeedsOpenAIPersonalAccessTokenMetadataHydration(account, "at-token"))
 }

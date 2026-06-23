@@ -247,4 +247,33 @@ func TestRateLimitService_HandleUpstreamError_OAuth401NoRefreshTokenSetsError(t 
 		require.Equal(t, 1, repo.setErrorCalls)
 		require.Equal(t, 0, repo.tempCalls)
 	})
+
+	t.Run("openai_pat_without_refresh_token_is_not_reported_as_oauth_refresh_failure", func(t *testing.T) {
+		repo := &rateLimitAccountRepoStub{}
+		invalidator := &tokenCacheInvalidatorRecorder{}
+		service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+		service.SetTokenCacheInvalidator(invalidator)
+		account := &Account{
+			ID:       2883,
+			Platform: PlatformOpenAI,
+			Type:     AccountTypeOAuth,
+			Credentials: map[string]any{
+				"access_token":               "expired-at",
+				"personal_access_token":      "at-valid-pat",
+				"chatgpt_account_id":         "acc-123",
+				"chatgpt_account_is_fedramp": false,
+				// no refresh_token: PAT-backed requests are not OAuth-refreshable.
+			},
+		}
+
+		shouldDisable := service.HandleUpstreamError(context.Background(), account, 401, http.Header{}, []byte("Unauthorized"))
+
+		require.True(t, shouldDisable)
+		require.Equal(t, 1, repo.setErrorCalls)
+		require.Equal(t, 0, repo.tempCalls)
+		require.NotContains(t, repo.lastErrorMsg, "OAuth 401 (no refresh_token)")
+		require.NotContains(t, repo.lastErrorMsg, "refresh_token missing")
+		require.Contains(t, repo.lastErrorMsg, "Authentication failed (401)")
+		require.Empty(t, invalidator.accounts, "PAT-present 401 should not invalidate OAuth AT cache without knowing the bearer used")
+	})
 }

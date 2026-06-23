@@ -2,8 +2,6 @@ package service
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"os"
 	"strings"
@@ -55,45 +53,19 @@ func ValidateOpenAIPersonalAccessToken(personalAccessToken string) error {
 	return nil
 }
 
-// OpenAIPersonalAccessTokenFingerprint returns a non-secret stable fingerprint
-// used to detect when persisted whoami metadata belongs to a different PAT.
-func OpenAIPersonalAccessTokenFingerprint(personalAccessToken string) string {
-	sum := sha256.Sum256([]byte(strings.TrimSpace(personalAccessToken)))
-	return hex.EncodeToString(sum[:])
-}
-
 // AccountNeedsOpenAIPersonalAccessTokenMetadataHydration reports whether the
-// account is missing the official whoami metadata Codex sends alongside PATs.
+// account lacks the ChatGPT account id needed to route PAT-backed requests.
 func AccountNeedsOpenAIPersonalAccessTokenMetadataHydration(account *Account, personalAccessToken string) bool {
 	if account == nil || account.Credentials == nil {
 		return true
 	}
-	fingerprint := OpenAIPersonalAccessTokenFingerprint(personalAccessToken)
-	storedFingerprint := strings.TrimSpace(account.GetCredential("personal_access_token_sha256"))
-	if storedFingerprint == "" || !strings.EqualFold(storedFingerprint, fingerprint) {
-		return true
-	}
-	for _, key := range []string{
-		"email",
-		"chatgpt_user_id",
-		"chatgpt_account_id",
-		"chatgpt_plan_type",
-	} {
-		if strings.TrimSpace(account.GetCredential(key)) == "" {
-			return true
-		}
-	}
-	if _, ok := account.Credentials["chatgpt_account_is_fedramp"]; !ok {
-		return true
-	}
-	return false
+	return strings.TrimSpace(account.GetCredential("chatgpt_account_id")) == ""
 }
 
 // BuildOpenAIPersonalAccessTokenCredentialUpdates converts whoami metadata into
 // account credential fields used by the Codex request path.
 func BuildOpenAIPersonalAccessTokenCredentialUpdates(personalAccessToken string, metadata *OpenAIPersonalAccessTokenMetadata) map[string]any {
 	updates := map[string]any{
-		"personal_access_token_sha256":      OpenAIPersonalAccessTokenFingerprint(personalAccessToken),
 		"personal_access_token_hydrated_at": time.Now().UTC().Format(time.RFC3339),
 		"chatgpt_account_is_fedramp":        false,
 	}
