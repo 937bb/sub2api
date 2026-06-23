@@ -11,9 +11,24 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type createUserRedeemRepoStub struct {
+	redeemRepoStub
+	created []*RedeemCode
+	err     error
+}
+
+func (s *createUserRedeemRepoStub) Create(ctx context.Context, code *RedeemCode) error {
+	if s.err != nil {
+		return s.err
+	}
+	s.created = append(s.created, code)
+	return nil
+}
+
 func TestAdminService_CreateUser_Success(t *testing.T) {
 	repo := &userRepoStub{nextID: 10}
-	svc := &adminServiceImpl{userRepo: repo}
+	redeemRepo := &createUserRedeemRepoStub{}
+	svc := &adminServiceImpl{userRepo: repo, redeemCodeRepo: redeemRepo}
 	balance := 12.5
 
 	input := &CreateUserInput{
@@ -41,10 +56,20 @@ func TestAdminService_CreateUser_Success(t *testing.T) {
 	require.True(t, user.CheckPassword(input.Password))
 	require.Len(t, repo.created, 1)
 	require.Equal(t, user, repo.created[0])
+	require.Len(t, redeemRepo.created, 1)
+	adjustment := redeemRepo.created[0]
+	require.NotEmpty(t, adjustment.Code)
+	require.Equal(t, AdjustmentTypeAdminBalance, adjustment.Type)
+	require.Equal(t, balance, adjustment.Value)
+	require.Equal(t, StatusUsed, adjustment.Status)
+	require.NotNil(t, adjustment.UsedBy)
+	require.Equal(t, user.ID, *adjustment.UsedBy)
+	require.NotNil(t, adjustment.UsedAt)
 }
 
 func TestAdminService_CreateUser_UsesDefaultBalanceWhenBalanceOmitted(t *testing.T) {
 	repo := &userRepoStub{nextID: 11}
+	redeemRepo := &createUserRedeemRepoStub{}
 	cfg := &config.Config{
 		Default: config.DefaultConfig{
 			UserBalance: 0,
@@ -53,7 +78,7 @@ func TestAdminService_CreateUser_UsesDefaultBalanceWhenBalanceOmitted(t *testing
 	settingService := NewSettingService(&settingRepoStub{values: map[string]string{
 		SettingKeyDefaultBalance: "0.02",
 	}}, cfg)
-	svc := &adminServiceImpl{userRepo: repo, settingService: settingService}
+	svc := &adminServiceImpl{userRepo: repo, settingService: settingService, redeemCodeRepo: redeemRepo}
 
 	user, err := svc.CreateUser(context.Background(), &CreateUserInput{
 		Email:    "default-balance@test.com",
@@ -65,10 +90,12 @@ func TestAdminService_CreateUser_UsesDefaultBalanceWhenBalanceOmitted(t *testing
 	require.Equal(t, 0.02, user.Balance)
 	require.Len(t, repo.created, 1)
 	require.Equal(t, 0.02, repo.created[0].Balance)
+	require.Empty(t, redeemRepo.created)
 }
 
 func TestAdminService_CreateUser_ExplicitZeroBalanceOverridesDefault(t *testing.T) {
 	repo := &userRepoStub{nextID: 12}
+	redeemRepo := &createUserRedeemRepoStub{}
 	cfg := &config.Config{
 		Default: config.DefaultConfig{
 			UserBalance: 0,
@@ -77,7 +104,7 @@ func TestAdminService_CreateUser_ExplicitZeroBalanceOverridesDefault(t *testing.
 	settingService := NewSettingService(&settingRepoStub{values: map[string]string{
 		SettingKeyDefaultBalance: "0.02",
 	}}, cfg)
-	svc := &adminServiceImpl{userRepo: repo, settingService: settingService}
+	svc := &adminServiceImpl{userRepo: repo, settingService: settingService, redeemCodeRepo: redeemRepo}
 	balance := 0.0
 
 	user, err := svc.CreateUser(context.Background(), &CreateUserInput{
@@ -91,6 +118,7 @@ func TestAdminService_CreateUser_ExplicitZeroBalanceOverridesDefault(t *testing.
 	require.Equal(t, 0.0, user.Balance)
 	require.Len(t, repo.created, 1)
 	require.Equal(t, 0.0, repo.created[0].Balance)
+	require.Empty(t, redeemRepo.created)
 }
 
 func TestAdminService_CreateUser_EmailExists(t *testing.T) {

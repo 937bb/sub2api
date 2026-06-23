@@ -736,6 +736,11 @@ func (s *adminServiceImpl) CreateUser(ctx context.Context, input *CreateUserInpu
 	if err := s.userRepo.Create(ctx, user); err != nil {
 		return nil, err
 	}
+	if input.Balance != nil && balance != 0 {
+		if err := s.createAdminAdjustmentRecord(ctx, user.ID, AdjustmentTypeAdminBalance, balance, ""); err != nil {
+			logger.LegacyPrintf("service.admin", "failed to create initial balance adjustment redeem code: %v", err)
+		}
+	}
 	s.assignDefaultSubscriptions(ctx, user.ID)
 	return user, nil
 }
@@ -755,6 +760,27 @@ func (s *adminServiceImpl) assignDefaultSubscriptions(ctx context.Context, userI
 			logger.LegacyPrintf("service.admin", "failed to assign default subscription: user_id=%d group_id=%d err=%v", userID, item.GroupID, err)
 		}
 	}
+}
+
+func (s *adminServiceImpl) createAdminAdjustmentRecord(ctx context.Context, userID int64, adjustmentType string, value float64, notes string) error {
+	if s == nil || s.redeemCodeRepo == nil || userID <= 0 || value == 0 {
+		return nil
+	}
+	code, err := GenerateRedeemCode()
+	if err != nil {
+		return err
+	}
+	record := &RedeemCode{
+		Code:   code,
+		Type:   adjustmentType,
+		Value:  value,
+		Status: StatusUsed,
+		UsedBy: &userID,
+		Notes:  notes,
+	}
+	now := time.Now()
+	record.UsedAt = &now
+	return s.redeemCodeRepo.Create(ctx, record)
 }
 
 func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *UpdateUserInput) (*User, error) {
@@ -837,21 +863,7 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 
 	concurrencyDiff := user.Concurrency - oldConcurrency
 	if concurrencyDiff != 0 {
-		code, err := GenerateRedeemCode()
-		if err != nil {
-			logger.LegacyPrintf("service.admin", "failed to generate adjustment redeem code: %v", err)
-			return user, nil
-		}
-		adjustmentRecord := &RedeemCode{
-			Code:   code,
-			Type:   AdjustmentTypeAdminConcurrency,
-			Value:  float64(concurrencyDiff),
-			Status: StatusUsed,
-			UsedBy: &user.ID,
-		}
-		now := time.Now()
-		adjustmentRecord.UsedAt = &now
-		if err := s.redeemCodeRepo.Create(ctx, adjustmentRecord); err != nil {
+		if err := s.createAdminAdjustmentRecord(ctx, user.ID, AdjustmentTypeAdminConcurrency, float64(concurrencyDiff), ""); err != nil {
 			logger.LegacyPrintf("service.admin", "failed to create concurrency adjustment redeem code: %v", err)
 		}
 	}
@@ -1018,24 +1030,7 @@ func (s *adminServiceImpl) UpdateUserBalance(ctx context.Context, userID int64, 
 	}
 
 	if balanceDiff != 0 {
-		code, err := GenerateRedeemCode()
-		if err != nil {
-			logger.LegacyPrintf("service.admin", "failed to generate adjustment redeem code: %v", err)
-			return user, nil
-		}
-
-		adjustmentRecord := &RedeemCode{
-			Code:   code,
-			Type:   AdjustmentTypeAdminBalance,
-			Value:  balanceDiff,
-			Status: StatusUsed,
-			UsedBy: &user.ID,
-			Notes:  notes,
-		}
-		now := time.Now()
-		adjustmentRecord.UsedAt = &now
-
-		if err := s.redeemCodeRepo.Create(ctx, adjustmentRecord); err != nil {
+		if err := s.createAdminAdjustmentRecord(ctx, user.ID, AdjustmentTypeAdminBalance, balanceDiff, notes); err != nil {
 			logger.LegacyPrintf("service.admin", "failed to create balance adjustment redeem code: %v", err)
 		}
 	}
