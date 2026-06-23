@@ -106,7 +106,13 @@ func TestExportDataIncludesSecrets(t *testing.T) {
 			Type:        service.AccountTypeOAuth,
 			Credentials: map[string]any{"token": "secret", "personal_access_token": "pat-secret"},
 			Extra: map[string]any{
-				"note": "x",
+				"note":                 "x",
+				"import_source":        "hcpa",
+				"import_format":        "hcpa",
+				"imported_at":          "2026-06-23T14:06:08+08:00",
+				"hcpa_disabled":        false,
+				"hcpa_expired_at":      "2026-12-31T10:00:00+08:00",
+				"hcpa_last_refresh_at": "2026-06-23T14:06:08+08:00",
 				service.OpenAICodexFingerprintExtraKey: map[string]any{
 					"schema_version":  1,
 					"installation_id": "11111111-1111-4111-8111-111111111111",
@@ -140,6 +146,9 @@ func TestExportDataIncludesSecrets(t *testing.T) {
 	require.Equal(t, "secret", resp.Data.Accounts[0].Credentials["token"])
 	require.Equal(t, "pat-secret", resp.Data.Accounts[0].Credentials["personal_access_token"])
 	require.Equal(t, "x", resp.Data.Accounts[0].Extra["note"])
+	for _, key := range internalHCPAAccountExtraKeys() {
+		require.NotContains(t, resp.Data.Accounts[0].Extra, key)
+	}
 	require.NotContains(t, resp.Data.Accounts[0].Extra, service.OpenAICodexFingerprintExtraKey)
 	require.NotContains(t, rec.Body.String(), service.OpenAICodexFingerprintExtraKey)
 	require.NotContains(t, rec.Body.String(), "11111111-1111-4111-8111-111111111111")
@@ -274,6 +283,52 @@ func TestImportDataIncludesPersonalAccessTokenAndIgnoresMissingField(t *testing.
 	require.Len(t, adminSvc.createdAccounts, 2)
 	require.Equal(t, "pat-secret", adminSvc.createdAccounts[0].Credentials["personal_access_token"])
 	require.NotContains(t, adminSvc.createdAccounts[1].Credentials, "personal_access_token")
+}
+
+func TestImportDataStripsInternalHCPAExtra(t *testing.T) {
+	router, adminSvc := setupAccountDataRouter()
+
+	dataPayload := map[string]any{
+		"data": map[string]any{
+			"type":    dataType,
+			"version": dataVersion,
+			"proxies": []map[string]any{},
+			"accounts": []map[string]any{
+				{
+					"name":        "hcpa-backup",
+					"platform":    service.PlatformOpenAI,
+					"type":        service.AccountTypeOAuth,
+					"credentials": map[string]any{"personal_access_token": "pat-secret", "chatgpt_account_id": "acct"},
+					"extra": map[string]any{
+						"keep":                 "value",
+						"import_source":        "hcpa",
+						"import_format":        "hcpa",
+						"imported_at":          "2026-06-23T14:06:08+08:00",
+						"hcpa_disabled":        false,
+						"hcpa_expired_at":      "2026-12-31T10:00:00+08:00",
+						"hcpa_last_refresh_at": "2026-06-23T14:06:08+08:00",
+					},
+					"concurrency": 3,
+					"priority":    50,
+				},
+			},
+		},
+		"skip_default_group_bind": true,
+	}
+
+	body, _ := json.Marshal(dataPayload)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/data", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	require.Len(t, adminSvc.createdAccounts, 1)
+	extra := adminSvc.createdAccounts[0].Extra
+	require.Equal(t, "value", extra["keep"])
+	for _, key := range internalHCPAAccountExtraKeys() {
+		require.NotContains(t, extra, key)
+	}
 }
 
 func TestImportDataMigratesLegacyOpenAIOAuthExtra(t *testing.T) {

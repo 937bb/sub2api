@@ -184,10 +184,31 @@ func exportAccountExtra(account *service.Account) map[string]any {
 	}
 	out := dto.RedactAccountExtraForAccount(account)
 	delete(out, service.OpenAICodexFingerprintExtraKey)
+	stripInternalHCPAAccountExtra(out)
 	if len(out) == 0 {
 		return nil
 	}
 	return out
+}
+
+func internalHCPAAccountExtraKeys() []string {
+	return []string{
+		"import_source",
+		"import_format",
+		"imported_at",
+		"hcpa_disabled",
+		"hcpa_expired_at",
+		"hcpa_last_refresh_at",
+	}
+}
+
+func stripInternalHCPAAccountExtra(extra map[string]any) {
+	if extra == nil {
+		return
+	}
+	for _, key := range internalHCPAAccountExtraKeys() {
+		delete(extra, key)
+	}
 }
 
 func (h *AccountHandler) ImportData(c *gin.Context) {
@@ -391,6 +412,7 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 
 		enrichCredentialsFromIDToken(&item)
 		migrateImportedOpenAIOAuthLegacyExtra(&item)
+		stripInternalHCPAAccountExtra(item.Extra)
 
 		accountInput := &service.CreateAccountInput{
 			Name:                 item.Name,

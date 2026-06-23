@@ -239,7 +239,7 @@ func (h *AccountHandler) importCodexSessions(ctx context.Context, req CodexSessi
 		}
 		accountName = buildCodexCreateAccountName(req.Name, item, entry.Index, len(entries))
 		credentials := mergeCodexImportMap(item.Credentials, credentialExtras)
-		extra := mergeCodexImportMap(req.Extra, item.Extra)
+		extra := mergeCodexImportExtra(req.Extra, item.Extra)
 		for _, warning := range item.WarningTexts {
 			result.Warnings = append(result.Warnings, CodexSessionImportMessage{
 				Index:   entry.Index,
@@ -268,7 +268,7 @@ func (h *AccountHandler) importCodexSessions(ctx context.Context, req CodexSessi
 
 		if existing := index.Find(item.IdentityKeys); existing != nil && updateExisting {
 			mergedCredentials := mergeCodexImportCredentials(existing.Credentials, credentials, item)
-			mergedExtra := mergeCodexImportMap(existing.Extra, extra)
+			mergedExtra := mergeCodexImportExtra(existing.Extra, extra)
 			updateInput := &service.UpdateAccountInput{
 				Credentials:        mergedCredentials,
 				Extra:              mergedExtra,
@@ -991,6 +991,15 @@ func earlierCodexTime(current, candidate *time.Time) *time.Time {
 	}
 	t := current.UTC()
 	return &t
+}
+
+func mergeCodexImportExtra(existing, incoming map[string]any) map[string]any {
+	out := mergeCodexImportMap(existing, incoming)
+	stripInternalHCPAAccountExtra(out)
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func sanitizeCodexImportCredentialExtras(input map[string]any) map[string]any {

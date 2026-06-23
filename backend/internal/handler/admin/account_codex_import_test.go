@@ -438,6 +438,38 @@ func TestNormalizeCodexImportPersonalAccessTokenIgnoresExpiredAccessToken(t *tes
 	}
 }
 
+func TestMergeCodexImportExtraStripsInternalHCPAFields(t *testing.T) {
+	extra := mergeCodexImportExtra(
+		map[string]any{
+			"existing":             "value",
+			"hcpa_disabled":        true,
+			"hcpa_expired_at":      "2026-01-01T00:00:00Z",
+			"hcpa_last_refresh_at": "2026-01-01T00:00:00Z",
+		},
+		map[string]any{
+			"keep":                 "value",
+			"import_source":        "hcpa",
+			"import_format":        "hcpa",
+			"imported_at":          "2026-06-23T14:06:08+08:00",
+			"hcpa_disabled":        false,
+			"hcpa_expired_at":      "2026-12-31T10:00:00+08:00",
+			"hcpa_last_refresh_at": "2026-06-23T14:06:08+08:00",
+		},
+	)
+
+	if extra["existing"] != "value" {
+		t.Fatalf("existing = %v, want value", extra["existing"])
+	}
+	if extra["keep"] != "value" {
+		t.Fatalf("keep = %v, want value", extra["keep"])
+	}
+	for _, key := range internalHCPAAccountExtraKeys() {
+		if _, ok := extra[key]; ok {
+			t.Fatalf("internal HCPA import field %q should not be retained in Extra: %v", key, extra)
+		}
+	}
+}
+
 func TestNormalizeCodexImportHCPAFormatExtractsAllFields(t *testing.T) {
 	accountExpiry := time.Now().Add(24 * time.Hour).UTC().Truncate(time.Second)
 	lastRefresh := time.Now().Add(-time.Hour).UTC().Truncate(time.Second)
