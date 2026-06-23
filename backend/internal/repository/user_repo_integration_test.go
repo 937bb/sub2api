@@ -4,6 +4,7 @@ package repository
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -32,6 +33,7 @@ func (s *UserRepoSuite) SetupTest() {
 	_, _ = integrationDB.ExecContext(s.ctx, "DELETE FROM auth_identities")
 	_, _ = integrationDB.ExecContext(s.ctx, "DELETE FROM user_subscriptions")
 	_, _ = integrationDB.ExecContext(s.ctx, "DELETE FROM user_allowed_groups")
+	_, _ = integrationDB.ExecContext(s.ctx, "DELETE FROM api_keys")
 	_, _ = integrationDB.ExecContext(s.ctx, "DELETE FROM users")
 }
 
@@ -327,6 +329,102 @@ func (s *UserRepoSuite) TestListWithFilters_CombinedFilters() {
 	s.Require().Equal(int64(1), page.Total, "ListWithFilters total mismatch")
 	s.Require().Len(users, 1, "ListWithFilters len mismatch")
 	s.Require().Equal(target.ID, users[0].ID, "ListWithFilters result mismatch")
+}
+
+func (s *UserRepoSuite) TestListWithFilters_APIKeyGroupID() {
+	group := s.mustCreateGroup(s.uniqueGroupName("api-key-target"))
+	otherGroup := s.mustCreateGroup(s.uniqueGroupName("api-key-other"))
+	target := s.mustCreateUser(&service.User{Email: s.uniqueEmail("api-key-target")})
+	miss := s.mustCreateUser(&service.User{Email: s.uniqueEmail("api-key-miss")})
+
+	mustCreateApiKey(s.T(), s.client, &service.APIKey{UserID: target.ID, Key: s.uniqueAPIKey("target"), Name: "target", GroupID: &group.ID})
+	mustCreateApiKey(s.T(), s.client, &service.APIKey{UserID: miss.ID, Key: s.uniqueAPIKey("miss"), Name: "miss", GroupID: &otherGroup.ID})
+
+	users, page, err := s.repo.ListWithFilters(s.ctx, pagination.PaginationParams{Page: 1, PageSize: 10}, service.UserListFilters{APIKeyGroupID: group.ID})
+	s.Require().NoError(err)
+	s.Require().Equal(int64(1), page.Total)
+	s.Require().Len(users, 1)
+	s.Require().Equal(target.ID, users[0].ID)
+}
+
+func (s *UserRepoSuite) TestListWithFilters_APIKeyGroupIDExcludesSoftDeletedKeys() {
+	group := s.mustCreateGroup(s.uniqueGroupName("api-key-soft"))
+	user := s.mustCreateUser(&service.User{Email: s.uniqueEmail("api-key-soft")})
+	key := mustCreateApiKey(s.T(), s.client, &service.APIKey{UserID: user.ID, Key: s.uniqueAPIKey("soft"), Name: "soft", GroupID: &group.ID})
+
+	s.Require().NoError(s.client.APIKey.DeleteOneID(key.ID).Exec(s.ctx), "soft-delete api key")
+
+	users, page, err := s.repo.ListWithFilters(s.ctx, pagination.PaginationParams{Page: 1, PageSize: 10}, service.UserListFilters{APIKeyGroupID: group.ID})
+	s.Require().NoError(err)
+	s.Require().Zero(page.Total)
+	s.Require().Empty(users)
+}
+
+func (s *UserRepoSuite) TestListWithFilters_APIKeyGroupIDDeduplicatesUsersWithMultipleKeys() {
+	group := s.mustCreateGroup(s.uniqueGroupName("api-key-dedup"))
+	user := s.mustCreateUser(&service.User{Email: s.uniqueEmail("api-key-dedup")})
+
+	mustCreateApiKey(s.T(), s.client, &service.APIKey{UserID: user.ID, Key: s.uniqueAPIKey("dedup-a"), Name: "dedup-a", GroupID: &group.ID})
+	mustCreateApiKey(s.T(), s.client, &service.APIKey{UserID: user.ID, Key: s.uniqueAPIKey("dedup-b"), Name: "dedup-b", GroupID: &group.ID})
+
+	users, page, err := s.repo.ListWithFilters(s.ctx, pagination.PaginationParams{Page: 1, PageSize: 10}, service.UserListFilters{APIKeyGroupID: group.ID})
+	s.Require().NoError(err)
+	s.Require().Equal(int64(1), page.Total)
+	s.Require().Len(users, 1)
+	s.Require().Equal(user.ID, users[0].ID)
+}
+
+func (s *UserRepoSuite) TestListWithFilters_APIKeyGroupIDCombinesWithStatus() {
+	group := s.mustCreateGroup(s.uniqueGroupName("api-key-status"))
+	active := s.mustCreateUser(&service.User{Email: s.uniqueEmail("api-key-active"), Status: service.StatusActive})
+	disabled := s.mustCreateUser(&service.User{Email: s.uniqueEmail("api-key-disabled"), Status: service.StatusDisabled})
+
+	mustCreateApiKey(s.T(), s.client, &service.APIKey{UserID: active.ID, Key: s.uniqueAPIKey("active"), Name: "active", GroupID: &group.ID})
+	mustCreateApiKey(s.T(), s.client, &service.APIKey{UserID: disabled.ID, Key: s.uniqueAPIKey("disabled"), Name: "disabled", GroupID: &group.ID})
+
+	users, page, err := s.repo.ListWithFilters(s.ctx, pagination.PaginationParams{Page: 1, PageSize: 10}, service.UserListFilters{APIKeyGroupID: group.ID, Status: service.StatusActive})
+	s.Require().NoError(err)
+	s.Require().Equal(int64(1), page.Total)
+	s.Require().Len(users, 1)
+	s.Require().Equal(active.ID, users[0].ID)
+}
+
+func (s *UserRepoSuite) TestListWithFilters_APIKeyGroupIDZeroDoesNotFilter() {
+	group := s.mustCreateGroup(s.uniqueGroupName("api-key-zero"))
+	withKey := s.mustCreateUser(&service.User{Email: s.uniqueEmail("api-key-zero-with")})
+	withoutKey := s.mustCreateUser(&service.User{Email: s.uniqueEmail("api-key-zero-without")})
+	mustCreateApiKey(s.T(), s.client, &service.APIKey{UserID: withKey.ID, Key: s.uniqueAPIKey("zero"), Name: "zero", GroupID: &group.ID})
+
+	users, page, err := s.repo.ListWithFilters(s.ctx, pagination.PaginationParams{Page: 1, PageSize: 10}, service.UserListFilters{APIKeyGroupID: 0})
+	s.Require().NoError(err)
+	s.Require().GreaterOrEqual(page.Total, int64(2))
+	s.Require().ElementsMatch([]int64{withKey.ID, withoutKey.ID}, filterUserIDs(users, withKey.ID, withoutKey.ID))
+}
+
+func (s *UserRepoSuite) uniqueEmail(prefix string) string {
+	return fmt.Sprintf("%s-%d@example.com", prefix, time.Now().UnixNano())
+}
+
+func (s *UserRepoSuite) uniqueGroupName(prefix string) string {
+	return fmt.Sprintf("%s-%d", prefix, time.Now().UnixNano())
+}
+
+func (s *UserRepoSuite) uniqueAPIKey(prefix string) string {
+	return fmt.Sprintf("sk-%s-%d", prefix, time.Now().UnixNano())
+}
+
+func filterUserIDs(users []service.User, ids ...int64) []int64 {
+	wanted := make(map[int64]struct{}, len(ids))
+	for _, id := range ids {
+		wanted[id] = struct{}{}
+	}
+	out := make([]int64, 0, len(ids))
+	for _, user := range users {
+		if _, ok := wanted[user.ID]; ok {
+			out = append(out, user.ID)
+		}
+	}
+	return out
 }
 
 // --- Balance operations ---

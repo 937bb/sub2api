@@ -1615,6 +1615,10 @@ func (r *stubGroupRepo) ListActiveByPlatform(ctx context.Context, platform strin
 	return out, nil
 }
 
+func (r *stubGroupRepo) ListAllIncludingInactive(ctx context.Context, platform string) ([]service.Group, error) {
+	return r.ListActiveByPlatform(ctx, platform)
+}
+
 func (stubGroupRepo) ExistsByName(ctx context.Context, name string) (bool, error) {
 	return false, errors.New("not implemented")
 }

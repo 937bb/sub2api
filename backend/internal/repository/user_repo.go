@@ -460,6 +460,14 @@ func (r *userRepository) ListWithFilters(ctx context.Context, params pagination.
 			dbgroup.NameContainsFold(filters.GroupName),
 		))
 	}
+	if filters.APIKeyGroupID > 0 {
+		// SoftDeleteMixin interceptors do not apply inside this edge subquery,
+		// so keep deleted keys from matching the group filter explicitly.
+		q = q.Where(dbuser.HasAPIKeysWith(
+			apikey.GroupIDEQ(filters.APIKeyGroupID),
+			apikey.DeletedAtIsNil(),
+		))
+	}
 
 	// If attribute filters are specified, we need to filter by user IDs first
 	var allowedUserIDs []int64

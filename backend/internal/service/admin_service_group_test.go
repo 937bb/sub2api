@@ -101,6 +101,10 @@ func (s *groupRepoStubForAdmin) ListActiveByPlatform(_ context.Context, _ string
 	panic("unexpected ListActiveByPlatform call")
 }
 
+func (s *groupRepoStubForAdmin) ListAllIncludingInactive(_ context.Context, _ string) ([]Group, error) {
+	panic("unexpected ListAllIncludingInactive call")
+}
+
 func (s *groupRepoStubForAdmin) ExistsByName(_ context.Context, _ string) (bool, error) {
 	panic("unexpected ExistsByName call")
 }
@@ -619,6 +623,10 @@ func (s *groupRepoStubForFallbackCycle) ListActiveByPlatform(_ context.Context, 
 	panic("unexpected ListActiveByPlatform call")
 }
 
+func (s *groupRepoStubForFallbackCycle) ListAllIncludingInactive(_ context.Context, _ string) ([]Group, error) {
+	panic("unexpected ListAllIncludingInactive call")
+}
+
 func (s *groupRepoStubForFallbackCycle) ExistsByName(_ context.Context, _ string) (bool, error) {
 	panic("unexpected ExistsByName call")
 }
@@ -692,6 +700,10 @@ func (s *groupRepoStubForInvalidRequestFallback) ListActive(_ context.Context) (
 
 func (s *groupRepoStubForInvalidRequestFallback) ListActiveByPlatform(_ context.Context, _ string) ([]Group, error) {
 	panic("unexpected ListActiveByPlatform call")
+}
+
+func (s *groupRepoStubForInvalidRequestFallback) ListAllIncludingInactive(_ context.Context, _ string) ([]Group, error) {
+	panic("unexpected ListAllIncludingInactive call")
 }
 
 func (s *groupRepoStubForInvalidRequestFallback) ExistsByName(_ context.Context, _ string) (bool, error) {

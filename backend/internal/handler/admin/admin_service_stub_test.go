@@ -69,6 +69,21 @@ type stubAdminService struct {
 		sortOrder string
 		calls     int
 	}
+	lastListGroups struct {
+		page        int
+		pageSize    int
+		platform    string
+		status      string
+		search      string
+		isExclusive *bool
+		sortBy      string
+		sortOrder   string
+		calls       int
+	}
+	lastGetAllGroupsIncludingInactive struct {
+		platform string
+		calls    int
+	}
 	lastListProxies struct {
 		protocol  string
 		status    string
@@ -269,6 +284,15 @@ func (s *stubAdminService) BindUserAuthIdentity(ctx context.Context, userID int6
 }
 
 func (s *stubAdminService) ListGroups(ctx context.Context, page, pageSize int, platform, status, search string, isExclusive *bool, sortBy, sortOrder string) ([]service.Group, int64, error) {
+	s.lastListGroups.page = page
+	s.lastListGroups.pageSize = pageSize
+	s.lastListGroups.platform = platform
+	s.lastListGroups.status = status
+	s.lastListGroups.search = search
+	s.lastListGroups.isExclusive = isExclusive
+	s.lastListGroups.sortBy = sortBy
+	s.lastListGroups.sortOrder = sortOrder
+	s.lastListGroups.calls++
 	return s.groups, int64(len(s.groups)), nil
 }
 
@@ -277,6 +301,12 @@ func (s *stubAdminService) GetAllGroups(ctx context.Context) ([]service.Group, e
 }
 
 func (s *stubAdminService) GetAllGroupsByPlatform(ctx context.Context, platform string) ([]service.Group, error) {
+	return s.groups, nil
+}
+
+func (s *stubAdminService) GetAllGroupsIncludingInactive(ctx context.Context, platform string) ([]service.Group, error) {
+	s.lastGetAllGroupsIncludingInactive.platform = platform
+	s.lastGetAllGroupsIncludingInactive.calls++
 	return s.groups, nil
 }
 

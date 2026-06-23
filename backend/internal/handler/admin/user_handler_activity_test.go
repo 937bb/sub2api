@@ -68,6 +68,48 @@ func TestUserHandlerListIncludesActivityFieldsAndSortParams(t *testing.T) {
 	require.WithinDuration(t, lastUsedAt, *resp.Data.Items[0].LastUsedAt, time.Second)
 }
 
+func TestUserHandlerListParsesAPIKeyGroupIDFilter(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	adminSvc := newStubAdminService()
+	handler := NewUserHandler(adminSvc, nil, nil, nil)
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/admin/users?api_key_group_id=42",
+		nil,
+	)
+
+	handler.List(c)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Equal(t, int64(42), adminSvc.lastListUsers.filters.APIKeyGroupID)
+}
+
+func TestUserHandlerListIgnoresInvalidAPIKeyGroupIDFilter(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	adminSvc := newStubAdminService()
+	handler := NewUserHandler(adminSvc, nil, nil, nil)
+
+	for _, query := range []string{"api_key_group_id=0", "api_key_group_id=-7", "api_key_group_id=abc"} {
+		recorder := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(recorder)
+		c.Request = httptest.NewRequest(
+			http.MethodGet,
+			"/api/v1/admin/users?"+query,
+			nil,
+		)
+
+		handler.List(c)
+
+		require.Equal(t, http.StatusOK, recorder.Code)
+		require.Zero(t, adminSvc.lastListUsers.filters.APIKeyGroupID)
+	}
+}
+
 func TestUserHandlerGetByIDIncludesActivityFields(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

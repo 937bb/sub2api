@@ -233,6 +233,9 @@ func (m *mockGroupRepoForGemini) ListActive(ctx context.Context) ([]Group, error
 func (m *mockGroupRepoForGemini) ListActiveByPlatform(ctx context.Context, platform string) ([]Group, error) {
 	return nil, nil
 }
+func (m *mockGroupRepoForGemini) ListAllIncludingInactive(ctx context.Context, platform string) ([]Group, error) {
+	return nil, nil
+}
 func (m *mockGroupRepoForGemini) ExistsByName(ctx context.Context, name string) (bool, error) {
 	return false, nil
 }
