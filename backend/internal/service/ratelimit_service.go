@@ -45,6 +45,11 @@ type OpenAIPersonalAccessTokenVerifier interface {
 	HydratePersonalAccessToken(ctx context.Context, personalAccessToken string, proxyID *int64) (*OpenAIPersonalAccessTokenMetadata, error)
 }
 
+type openAIPAT401WhoamiResult struct {
+	failed    bool
+	expiresAt time.Time
+}
+
 type AccountRuntimeBlocker interface {
 	BlockAccountScheduling(account *Account, until time.Time, reason string)
 	ClearAccountSchedulingBlock(accountID int64)
@@ -89,6 +94,7 @@ const (
 	openAI403CooldownMinutesDefault = 10
 	openAI403DisableThreshold       = 3
 	openAI403CounterWindowMinutes   = 180
+	openAIPAT401WhoamiCacheTTL      = 15 * time.Minute
 )
 
 // NewRateLimitService 创建RateLimitService实例
@@ -754,27 +760,13 @@ func (s *RateLimitService) GeminiCooldown(ctx context.Context, account *Account)
 }
 
 func (s *RateLimitService) handleOpenAIPersonalAccessToken401(ctx context.Context, account *Account, upstreamMsg string) bool {
-	msg := "OpenAI Codex 401: invalid or expired credentials"
-	if strings.TrimSpace(upstreamMsg) != "" {
-		msg = "OpenAI Codex 401: " + upstreamMsg
-	}
 	if s.verifyOpenAIPersonalAccessToken401(ctx, account) {
 		s.handleAuthError(ctx, account, "OpenAI PAT whoami failed after Codex 401: "+sanitizeOpenAIUpstreamDiagnosticText(upstreamMsg))
 		return true
 	}
-	cooldownMinutes := 0
-	if s.cfg != nil {
-		cooldownMinutes = s.cfg.RateLimit.OAuth401CooldownMinutes
-	}
-	if cooldownMinutes <= 0 {
-		cooldownMinutes = 10
-	}
-	until := time.Now().Add(time.Duration(cooldownMinutes) * time.Minute)
-	s.notifyAccountSchedulingBlocked(account, until, "openai_pat_401")
-	if err := s.accountRepo.SetTempUnschedulable(ctx, account.ID, until, msg); err != nil {
-		slog.Warn("openai_pat_401_set_temp_unschedulable_failed", "account_id", account.ID, "error", err)
-	}
-	return true
+	// PAT-backed Codex 401s can be model/session-specific while the PAT remains
+	// healthy. Keep the account schedulable unless whoami proves the PAT is bad.
+	return false
 }
 
 func (s *RateLimitService) verifyOpenAIPersonalAccessToken401(ctx context.Context, account *Account) bool {
@@ -790,7 +782,10 @@ func (s *RateLimitService) verifyOpenAIPersonalAccessToken401(ctx context.Contex
 	mu.Lock()
 	defer mu.Unlock()
 	if cached, ok := s.openAIPAT401LocalResults.Load(key); ok {
-		return cached == true
+		if result, ok := cached.(openAIPAT401WhoamiResult); ok && time.Now().Before(result.expiresAt) {
+			return result.failed
+		}
+		s.openAIPAT401LocalResults.Delete(key)
 	}
 	if s.openAIPAT401TokenCache != nil {
 		acquired, err := s.openAIPAT401TokenCache.AcquireRefreshLock(ctx, key, 30*time.Second)
@@ -805,8 +800,10 @@ func (s *RateLimitService) verifyOpenAIPersonalAccessToken401(ctx context.Contex
 	_, err := s.openAIPAT401Verifier.HydratePersonalAccessToken(ctx, token, account.ProxyID)
 	var whoamiErr *openAIPersonalAccessTokenWhoamiError
 	failed := errors.As(err, &whoamiErr) && (whoamiErr.statusCode == http.StatusUnauthorized || whoamiErr.statusCode == http.StatusForbidden)
-	// Cache the first local verdict so concurrent 401s collapse to one whoami in this process.
-	s.openAIPAT401LocalResults.Store(key, failed)
+	if !failed {
+		// Cache only healthy verdicts so 401 bursts do not repeatedly hit whoami.
+		s.openAIPAT401LocalResults.Store(key, openAIPAT401WhoamiResult{failed: false, expiresAt: time.Now().Add(openAIPAT401WhoamiCacheTTL)})
+	}
 	return failed
 }
 
