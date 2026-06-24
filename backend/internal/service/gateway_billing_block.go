@@ -76,7 +76,7 @@ func extractFirstUserText(body []byte) string {
 //
 // 形态严格对齐真实 Claude Code CLI：
 //
-//	{"type":"text","text":"x-anthropic-billing-header: cc_version=2.1.181.{fp}; cc_entrypoint=sdk-cli;"}
+//	{"type":"text","text":"x-anthropic-billing-header: cc_version=2.1.181.{fp}; cc_entrypoint=sdk-cli; cch=00000;"}
 //
 // 此 block 不带 cache_control（与真实 CLI 一致；cache breakpoint 由后续的
 // Claude Code prompt block 承担）。
@@ -105,7 +105,7 @@ func buildBillingAttributionBlockTextWithEntrypoint(body []byte, cliVersion stri
 	}
 	fp := computeClaudeCodeFingerprint(body, cliVersion)
 	return fmt.Sprintf(
-		"x-anthropic-billing-header: cc_version=%s.%s; cc_entrypoint=%s;",
+		"x-anthropic-billing-header: cc_version=%s.%s; cc_entrypoint=%s; cch=00000;",
 		cliVersion, fp, entrypoint,
 	), nil
 }

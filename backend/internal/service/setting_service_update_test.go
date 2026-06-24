@@ -347,6 +347,7 @@ func TestSettingService_ParseSettings_ClaudeOAuthSystemPromptDefaultsEnabled(t *
 	got := svc.parseSettings(map[string]string{})
 
 	require.True(t, got.EnableClaudeOAuthSystemPromptInjection)
+	require.True(t, got.EnableCCHSigning)
 	require.Empty(t, got.ClaudeOAuthSystemPrompt)
 	require.Empty(t, got.ClaudeOAuthSystemPromptBlocks)
 }

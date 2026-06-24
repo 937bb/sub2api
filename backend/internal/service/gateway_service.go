@@ -84,6 +84,7 @@ IMPORTANT: You must NEVER generate or guess URLs for the user unless you are con
 
 const (
 	claudeMimicDebugInfoKey = "claude_mimic_debug_info"
+	claudeCodeDeviceIDKey   = "cc_device_id"
 )
 
 const (
@@ -1419,7 +1420,7 @@ func normalizeClaudeOAuthRequestBody(body []byte, modelID string, opts claudeOAu
 	return out, modelID
 }
 
-func (s *GatewayService) buildOAuthMetadataUserID(parsed *ParsedRequest, account *Account, fp *Fingerprint) string {
+func (s *GatewayService) buildOAuthMetadataUserID(ctx context.Context, parsed *ParsedRequest, account *Account, fp *Fingerprint) string {
 	if parsed == nil || account == nil {
 		return ""
 	}
@@ -1427,15 +1428,7 @@ func (s *GatewayService) buildOAuthMetadataUserID(parsed *ParsedRequest, account
 		return ""
 	}
 
-	userID := strings.TrimSpace(account.GetClaudeUserID())
-	if userID == "" && fp != nil {
-		userID = fp.ClientID
-	}
-	if userID == "" {
-		// Fall back to a random, well-formed client id so we can still satisfy
-		// Claude Code OAuth requirements when account metadata is incomplete.
-		userID = generateClientID()
-	}
+	userID := s.resolveClaudeCodeDeviceID(ctx, account, fp)
 
 	// session_id 用"会话级稳定种子"派生（账号 + 客户端区分因子 + 首条 user 文本）：
 	// 随对话在尾部追加 messages 时保持不变，贴近真实 CC 进程级稳定的 session_id。
@@ -1454,6 +1447,51 @@ func (s *GatewayService) buildOAuthMetadataUserID(parsed *ParsedRequest, account
 	}
 	accountUUID := strings.TrimSpace(account.GetExtraString("account_uuid"))
 	return FormatMetadataUserID(userID, accountUUID, sessionID, uaVersion)
+}
+
+func (s *GatewayService) resolveClaudeCodeDeviceID(ctx context.Context, account *Account, fp *Fingerprint) string {
+	if account == nil {
+		return ""
+	}
+	if deviceID := strings.TrimSpace(account.GetExtraString(claudeCodeDeviceIDKey)); deviceID != "" {
+		return deviceID
+	}
+
+	deviceID := strings.TrimSpace(account.GetClaudeUserID())
+	if deviceID == "" && fp != nil {
+		deviceID = strings.TrimSpace(fp.ClientID)
+	}
+	if deviceID == "" {
+		deviceID = generateClientID()
+	}
+
+	s.persistClaudeCodeDeviceID(ctx, account, deviceID)
+	return deviceID
+}
+
+func (s *GatewayService) persistClaudeCodeDeviceID(ctx context.Context, account *Account, deviceID string) {
+	if account == nil || strings.TrimSpace(deviceID) == "" {
+		return
+	}
+	if strings.TrimSpace(account.GetExtraString(claudeCodeDeviceIDKey)) != "" {
+		return
+	}
+	if account.Extra == nil {
+		account.Extra = map[string]any{}
+	}
+	account.Extra[claudeCodeDeviceIDKey] = deviceID
+
+	if s == nil || s.accountRepo == nil || account.ID <= 0 {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := s.accountRepo.UpdateExtra(ctx, account.ID, map[string]any{claudeCodeDeviceIDKey: deviceID}); err != nil {
+		slog.Warn("persist claude code device id failed",
+			"account_id", account.ID,
+			"error", err)
+	}
 }
 
 // applyClaudeCodeOAuthMimicryToBody 将"非 Claude Code 客户端 + Claude OAuth 账号"
@@ -1560,13 +1598,7 @@ func (s *GatewayService) buildOAuthMetadataUserIDFromBody(
 		return ""
 	}
 
-	userID := strings.TrimSpace(account.GetClaudeUserID())
-	if userID == "" && fp != nil {
-		userID = fp.ClientID
-	}
-	if userID == "" {
-		userID = generateClientID()
-	}
+	userID := s.resolveClaudeCodeDeviceID(ctx, account, fp)
 
 	// 与 buildOAuthMetadataUserID 一致：用会话级稳定种子，避免整 body 哈希导致
 	// 每轮（甚至每个 token 变化）都重算出不同的 session_id。
@@ -4840,7 +4872,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 				// metadata 透传开启时跳过 metadata 注入
 				_, mimicMPT, _ := s.settingService.GetGatewayForwardingSettings(ctx)
 				if !mimicMPT {
-					if metadataUserID := s.buildOAuthMetadataUserID(parsed, account, fp); metadataUserID != "" {
+					if metadataUserID := s.buildOAuthMetadataUserID(ctx, parsed, account, fp); metadataUserID != "" {
 						normalizeOpts.injectMetadata = true
 						normalizeOpts.metadataUserID = metadataUserID
 					}

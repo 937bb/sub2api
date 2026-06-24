@@ -86,7 +86,7 @@ version pin:
 | User agent | The bundled UA helper formats `claude-cli/<version> (external, <entrypoint>...)` and can append SDK/client-app/workload suffixes | Keep family-based UA recognition; do not chase an exact local version |
 | Entrypoint | The bundled entrypoint helper rewrites an existing `CLAUDE_CODE_ENTRYPOINT=cli` to `sdk-cli` for non-interactive runs | Treat `sdk-cli` as official local CLI behavior; add validator support only after approval |
 | App marker | The API client sends `x-app: cli` for normal traffic and can send `x-app: cli-bg` for background session context | Current validator requires a non-empty `X-App`, so this is already tolerated; do not generate `cli-bg` for normal mimic traffic |
-| Billing attribution | The billing block uses the runtime entrypoint and optional `cc_workload`; the current 2.1.181 network capture omits `cch` | Keep generated mimic internally consistent; tolerate workload markers but do not blanket-allow unrelated entrypoints |
+| Billing attribution | The billing block uses the runtime entrypoint and optional `cc_workload`; source and reverse-engineered evidence keeps the normal OAuth `cch=00000` placeholder before signing/replacement | Keep generated mimic internally consistent; include `cch=00000` by default and sign it after final body rewriting |
 | Auth headers | Local and public paths support bearer auth from `ANTHROPIC_AUTH_TOKEN` and API-key auth from `ANTHROPIC_API_KEY` | Sub2API already accepts both inbound user-key shapes; upstream OAuth/setup-token forwarding remains bearer-based |
 | Files API | The bundled file helper contains the same OAuth files beta literal as the public source | Files support should be a separate OAuth/setup-token route, not message-beta injection |
 
@@ -104,7 +104,7 @@ version pin:
 | Global timezone | CLI body carries its own date; Sub2API should not globally move runtime TZ | Sub2API process timezone is not globally changed |
 | Billing fingerprint salt | Public source uses `59cf53e54c78` | Sub2API uses the same salt |
 | Billing fingerprint indexing | Public source uses JavaScript string indexes `[4, 7, 20]` | Sub2API now mimics JS UTF-16 string indexing |
-| Billing CCH placeholder | Older package-path capture kept `cch=00000`; current 2.1.181 network capture omits the `cch` field | Sub2API default generated billing now omits `cch`; optional signing remains for inbound/legacy bodies that already contain `cch=00000` |
+| Billing CCH placeholder | Normal Claude Code OAuth billing includes `cch=00000` before runtime signing/replacement; a no-`cch` capture is treated as incomplete evidence | Sub2API generated billing includes `cch=00000` by default and signs the placeholder after final body rewriting |
 | Request id forwarding | Public source injects `x-client-request-id` only for first-party Anthropic base URLs | Sub2API preserves valid Claude Code request ids and generates only when needed |
 | Ambient browser headers | CLI API traffic does not require browser locale/fetch headers | Sub2API strips ambient browser/locale headers from Anthropic passthrough |
 | Session identity | CLI carries a process-level Claude Code session id | Sub2API syncs upstream session identity from rewritten metadata where available |
@@ -129,6 +129,7 @@ emulating the matching execution context.
 | Additional protection header | `x-anthropic-additional-protection: true` is gated by env | Not part of Sub2API default mimic headers | Do not generate globally |
 | Custom request headers | `ANTHROPIC_CUSTOM_HEADERS` can add arbitrary headers before requests | Sub2API intentionally uses a narrow forwarding whitelist | Keep narrow; arbitrary custom headers can create mixed fingerprints |
 | Extra metadata fields | `CLAUDE_CODE_EXTRA_METADATA` can add fields inside JSON `metadata.user_id` | Parsing tolerates unknown fields, but rewriting emits only `device_id`, `account_uuid`, and `session_id` | Fine for normal CLI; preserve-extra-fields can be evaluated if SDK/remote users rely on it |
+| Telemetry / OpenTelemetry | Claude Code can collect local environment and behavior telemetry outside the normal message body | Sub2API does not synthesize telemetry because it cannot truthfully observe the caller's local shell, package manager, process, or behavioral state | Do not generate fake telemetry; add only narrow passthrough if a real Claude Code telemetry route is observed through the configured base URL |
 
 ## Official Sub2API Upstream Update Review
 
@@ -217,19 +218,21 @@ validation has identified the caller as Claude Code.
 | Area | Status | Evidence / next action |
 | --- | --- | --- |
 | Local/public CLI source comparison | Covered | Public mirror at `290fdc9`; local 2.1.112 wrapper package and 2.1.181 native package inspected |
-| Local live request traits | Covered | Local mock captures confirm `2.1.181 sdk-cli`, auth variants, metadata/session, beta list, current-date reminder placement, billing without `cch`, and `HEAD /` tolerance |
+| Local live request traits | Covered | Local mock captures confirm `2.1.181 sdk-cli`, auth variants, metadata/session, beta list, current-date reminder placement, and `HEAD /` tolerance; later source/reverse-engineered evidence restored `cch=00000` as the generated default |
 | Version pinning | Covered as non-requirement | CLI can switch versions; Sub2API preserves validated inbound Claude Code fingerprints and keeps generated defaults internally consistent |
 | OS/arch | Covered as non-issue | Runtime OS/arch are fingerprint traits; current issue is mixed fingerprints, not forcing a global OS/arch |
 | `x-app` marker | Covered as non-issue | Normal local capture sent `cli`; bundled source can send `cli-bg` in background context; current validation already tolerates non-empty official app markers |
 | Date behavior | Covered in code | Generated mimic requests insert a current-date user reminder with `YYYY/MM/DD`; real client bodies are not rewritten |
 | Billing fingerprint | Covered in code | Salt and JS string-index behavior are implemented and tested |
-| CCH | Covered for current default | Generated billing omits `cch` like current local network capture; optional signing still handles legacy/inbound placeholders |
+| CCH | Covered for current default | Generated billing includes `cch=00000` and CCH signing is enabled by default; signing still runs after body normalization/sanitization |
 | Request/session identity | Covered in code | Request id preservation/generation and session header/metadata synchronization are implemented |
+| Account device identity | Covered in code | Anthropic OAuth/setup-token accounts persist `extra.cc_device_id`; generated metadata uses that value instead of caller-provided metadata so one upstream account keeps a stable device id |
+| Telemetry | Intentionally not synthesized | The gateway aligns forwarded API requests and documents the boundary; fake environment/process telemetry is not generated |
 | Account scheduling | Covered in code | Stable affinity, active-session preference, `max_sessions`, and Anthropic reset-window handling are implemented |
 | Official Sub2API updates already useful here | Covered | Anthropic reset-window cooldowns, streaming Haiku probe interception, mapped-model thinking filters, non-JSON 2xx failover, and SSE `event:error` body preservation are present |
 | Official Sub2API updates still missing here | None in the reviewed anti-false-ban set | The useful reviewed items are now either covered or intentionally left as design-only |
 | `sdk-cli` billing fallback | Covered in code | Billing-block fallback now accepts `cli` and the locally captured `sdk-cli`, while unrelated entrypoints still fall through |
-| Generated SDK-mode mimic | Covered for default path | Default generated UA, billing entrypoint, system identity/cache controls, current-date reminder, and CCH shape align with current local `--print` network capture |
+| Generated SDK-mode mimic | Covered for default path | Default generated UA, billing entrypoint, signed CCH placeholder, system identity/cache controls, and current-date reminder are internally aligned |
 | `/v1/files` | Covered in code | Route-level OAuth/setup-token transparent proxy is implemented with official files beta and raw body/response passthrough |
 | Root `HEAD /` probe | No change needed | CLI tolerates 404 and continues to `/v1/messages` |
 

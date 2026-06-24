@@ -48,7 +48,7 @@ func TestComputeClaudeCodeFingerprintMatchesJSStringIndexing(t *testing.T) {
 	}
 }
 
-func TestBuildBillingAttributionBlockText_DefaultShapeMatchesCurrentCLI(t *testing.T) {
+func TestBuildBillingAttributionBlockText_DefaultShapeIncludesCCHPlaceholder(t *testing.T) {
 	body := []byte(`{"messages":[{"role":"user","content":[{"type":"text","text":"billing shape"}]}]}`)
 
 	text, err := buildBillingAttributionBlockText(body, "2.1.181")
@@ -62,7 +62,7 @@ func TestBuildBillingAttributionBlockText_DefaultShapeMatchesCurrentCLI(t *testi
 	if !strings.Contains(text, "cc_entrypoint=sdk-cli;") {
 		t.Fatalf("billing text = %q, want sdk-cli entrypoint", text)
 	}
-	if strings.Contains(text, "cch=") {
-		t.Fatalf("billing text = %q, current CLI shape should not include cch", text)
+	if !strings.Contains(text, "cch=00000;") {
+		t.Fatalf("billing text = %q, want cch placeholder", text)
 	}
 }

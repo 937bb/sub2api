@@ -1,11 +1,69 @@
 package service
 
 import (
+	"context"
 	"regexp"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
+
+type claudeCodeDeviceIDRepoStub struct {
+	AccountRepository
+	ids     []int64
+	updates []map[string]any
+}
+
+func (r *claudeCodeDeviceIDRepoStub) UpdateExtra(_ context.Context, id int64, updates map[string]any) error {
+	r.ids = append(r.ids, id)
+	r.updates = append(r.updates, updates)
+	return nil
+}
+
+func TestBuildOAuthMetadataUserID_UsesPersistedClaudeCodeDeviceID(t *testing.T) {
+	svc := &GatewayService{}
+	parsed := &ParsedRequest{Model: "claude-sonnet-4-5"}
+	account := &Account{
+		ID:   124,
+		Type: AccountTypeOAuth,
+		Extra: map[string]any{
+			"account_uuid":   "acc-uuid",
+			"cc_device_id":   "device-from-extra",
+			"claude_user_id": "legacy-device",
+		},
+	}
+	fp := &Fingerprint{ClientID: "device-from-fingerprint", UserAgent: "claude-cli/2.1.161 (external, cli)"}
+
+	got := svc.buildOAuthMetadataUserID(context.Background(), parsed, account, fp)
+	parsedUserID := ParseMetadataUserID(got)
+	require.NotNil(t, parsedUserID)
+	require.True(t, parsedUserID.IsNewFormat)
+	require.Equal(t, "device-from-extra", parsedUserID.DeviceID)
+	require.Equal(t, "acc-uuid", parsedUserID.AccountUUID)
+}
+
+func TestBuildOAuthMetadataUserID_PersistsMissingClaudeCodeDeviceID(t *testing.T) {
+	repo := &claudeCodeDeviceIDRepoStub{}
+	svc := &GatewayService{accountRepo: repo}
+	parsed := &ParsedRequest{Model: "claude-sonnet-4-5"}
+	account := &Account{
+		ID:   125,
+		Type: AccountTypeOAuth,
+		Extra: map[string]any{
+			"account_uuid": "acc-uuid",
+		},
+	}
+	fp := &Fingerprint{ClientID: "device-from-fingerprint", UserAgent: "claude-cli/2.1.161 (external, cli)"}
+
+	got := svc.buildOAuthMetadataUserID(context.Background(), parsed, account, fp)
+	parsedUserID := ParseMetadataUserID(got)
+	require.NotNil(t, parsedUserID)
+	require.Equal(t, "device-from-fingerprint", parsedUserID.DeviceID)
+	require.Equal(t, "device-from-fingerprint", account.GetExtraString(claudeCodeDeviceIDKey))
+	require.Equal(t, []int64{125}, repo.ids)
+	require.Len(t, repo.updates, 1)
+	require.Equal(t, "device-from-fingerprint", repo.updates[0][claudeCodeDeviceIDKey])
+}
 
 func TestBuildOAuthMetadataUserID_FallbackWithoutAccountUUID(t *testing.T) {
 	svc := &GatewayService{}
@@ -24,7 +82,7 @@ func TestBuildOAuthMetadataUserID_FallbackWithoutAccountUUID(t *testing.T) {
 
 	fp := &Fingerprint{ClientID: "deadbeef"} // should be used as user id in legacy format
 
-	got := svc.buildOAuthMetadataUserID(parsed, account, fp)
+	got := svc.buildOAuthMetadataUserID(context.Background(), parsed, account, fp)
 	require.NotEmpty(t, got)
 
 	// Legacy format: user_{client}_account__session_{uuid}
@@ -51,7 +109,7 @@ func TestBuildOAuthMetadataUserID_UsesAccountUUIDWhenPresent(t *testing.T) {
 		},
 	}
 
-	got := svc.buildOAuthMetadataUserID(parsed, account, nil)
+	got := svc.buildOAuthMetadataUserID(context.Background(), parsed, account, nil)
 	require.NotEmpty(t, got)
 
 	// New format: user_{client}_account_{account_uuid}_session_{uuid}
@@ -87,9 +145,9 @@ func TestBuildOAuthMetadataUserID_SessionIDStableAcrossTurns(t *testing.T) {
 		`{"role":"assistant","content":"answer 2"},` +
 		`{"role":"user","content":"third question"}]}`)
 
-	id1 := svc.buildOAuthMetadataUserID(round1, account, fp)
-	id2 := svc.buildOAuthMetadataUserID(round2, account, fp)
-	id3 := svc.buildOAuthMetadataUserID(round3, account, fp)
+	id1 := svc.buildOAuthMetadataUserID(context.Background(), round1, account, fp)
+	id2 := svc.buildOAuthMetadataUserID(context.Background(), round2, account, fp)
+	id3 := svc.buildOAuthMetadataUserID(context.Background(), round3, account, fp)
 
 	require.NotEmpty(t, id1)
 	require.Equal(t, id1, id2, "session_id 应随对话增长保持不变")
@@ -98,6 +156,6 @@ func TestBuildOAuthMetadataUserID_SessionIDStableAcrossTurns(t *testing.T) {
 	// 不同的首条 user 消息应派生出不同的 session_id（不同会话）。
 	other := mustParse(`{"model":"claude-sonnet-4-5","system":"sys","messages":[` +
 		`{"role":"user","content":"a completely different opener"}]}`)
-	idOther := svc.buildOAuthMetadataUserID(other, account, fp)
+	idOther := svc.buildOAuthMetadataUserID(context.Background(), other, account, fp)
 	require.NotEqual(t, id1, idOther, "不同首条消息应派生不同 session_id")
 }

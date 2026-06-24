@@ -451,3 +451,22 @@
 - `Dockerfile`: copies `docs/legal/` into `/app/docs/legal/` before the frontend build; rollback by removing that `COPY docs/legal/ /app/docs/legal/` line.
 - `deploy/Dockerfile`: applies the same copy step for the alternate deploy Dockerfile; rollback by removing that `COPY docs/legal/ /app/docs/legal/` line.
 - `progress.md`: appended this deployment build fix record; rollback by deleting this `2026-06-19 - Task: Include legal docs in Docker image build` block.
+
+## 2026-06-24 - Task: Restore Claude CCH signing and persist OAuth device identity
+### What was done
+- Restored generated Claude OAuth billing attribution to include `cch=00000` and made CCH signing enabled by default across backend settings and the admin settings form.
+- Added per-account Claude Code device identity persistence through `extra.cc_device_id`, so generated OAuth metadata uses a stable upstream-account device id instead of drifting with callers.
+- Documented the telemetry boundary: Sub2API aligns real forwarded API request traits but does not synthesize fake Claude Code telemetry/OpenTelemetry events.
+### Testing
+- Ran `C:\Go\bin\gofmt.exe -w backend/internal/service/gateway_service.go backend/internal/service/gateway_oauth_metadata_test.go backend/internal/service/gateway_billing_block.go backend/internal/service/domain_constants.go backend/internal/service/settings_view.go backend/internal/service/setting_service.go backend/internal/service/gateway_billing_block_test.go backend/internal/service/gateway_prompt_test.go backend/internal/service/setting_service_update_test.go`.
+- Ran `C:\Go\bin\go.exe test -tags unit ./internal/service -run "Test(BuildBillingAttributionBlockText|RewriteSystemForNonClaudeCode|SettingService_ParseSettings_ClaudeOAuthSystemPromptDefaultsEnabled|SignBillingHeaderCCH|SanitizeMustBeBeforeCCHSigning|BuildOAuthMetadataUserID)"`; passed.
+- Ran `C:\Go\bin\go.exe test -tags unit ./internal/service ./internal/handler ./internal/server/routes`; passed.
+- Ran `git diff --check`; passed with LF-to-CRLF working-copy warnings for `docs/CLAUDE_CLI_ALIGNMENT_AUDIT.md` and `docs/SUB_CLAUDE_USAGE.md`.
+### Notes
+- `backend/internal/service/gateway_billing_block.go`: generated billing attribution now includes the `cch=00000` placeholder; rollback by restoring the previous no-`cch` format string.
+- `backend/internal/service/gateway_service.go`: added `extra.cc_device_id` resolution/persistence and routed generated OAuth metadata through it; rollback by removing `resolveClaudeCodeDeviceID`/`persistClaudeCodeDeviceID` and restoring direct `GetClaudeUserID`/fingerprint fallback.
+- `backend/internal/service/domain_constants.go`, `backend/internal/service/settings_view.go`, `backend/internal/service/setting_service.go`: changed CCH signing defaults to enabled; rollback by restoring the default comments, initialization, parsing, and cached fallback to false.
+- `backend/internal/service/gateway_billing_block_test.go`, `backend/internal/service/gateway_prompt_test.go`, `backend/internal/service/setting_service_update_test.go`, `backend/internal/service/gateway_oauth_metadata_test.go`: updated and added regression coverage for CCH placeholder/defaults and stable account device id; rollback by restoring the prior assertions and deleting the new device-id tests.
+- `frontend/src/views/admin/SettingsView.vue`, `frontend/src/i18n/locales/en.ts`, `frontend/src/i18n/locales/zh.ts`: made the admin CCH default/hints match backend behavior; rollback by restoring the prior default and hint text.
+- `docs/CLAUDE_CLI_ALIGNMENT_AUDIT.md`, `docs/SUB_CLAUDE_USAGE.md`: documented restored CCH behavior, account-level `cc_device_id`, and the no-fake-telemetry boundary; rollback by removing the new audit/status rows and usage paragraphs.
+- `progress.md`: appended this task record; rollback by deleting this `2026-06-24 - Task: Restore Claude CCH signing and persist OAuth device identity` block.
