@@ -15,6 +15,14 @@ import (
 	"github.com/tidwall/gjson"
 )
 
+type panicOnReadCloser struct{}
+
+func (panicOnReadCloser) Read(_ []byte) (int, error) {
+	panic("response body should not be reread")
+}
+
+func (panicOnReadCloser) Close() error { return nil }
+
 func TestOpenAIGatewayService_Forward_FailoverReparsesCachedBodyForNextAccount(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -100,6 +108,30 @@ func TestOpenAIGatewayService_Forward_FailoverReparsesCachedBodyForNextAccount(t
 			require.Equal(t, tt.wantSecond, gjson.GetBytes(upstream.bodies[1], "model").String())
 		})
 	}
+}
+
+func TestOpenAIGatewayService_HandleFailoverSideEffects_DoesNotRereadResponseBody(t *testing.T) {
+	repo := &modelNotFoundAccountRepoStub{}
+	svc := &OpenAIGatewayService{rateLimitService: &RateLimitService{accountRepo: repo}}
+	account := &Account{
+		ID:       88,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+	}
+	resp := &http.Response{
+		StatusCode: http.StatusTooManyRequests,
+		Header:     http.Header{},
+		Body:       panicOnReadCloser{},
+	}
+	body := []byte(`{"error":{"type":"rate_limit_exceeded","message":"Rate limit reached for gpt-image-2-codex (for limit gpt-image) on input-images per min. Please try again in 2s."}}`)
+
+	require.NotPanics(t, func() {
+		svc.handleFailoverSideEffects(context.Background(), resp, account, body)
+	})
+
+	require.Len(t, repo.modelRateLimitCalls, 1)
+	require.Equal(t, account.ID, repo.modelRateLimitCalls[0].accountID)
+	require.Equal(t, openAIImageGenerationRateLimitKey, repo.modelRateLimitCalls[0].scope)
 }
 
 func TestGetOpenAIRequestBodyMap_IgnoresLegacyContextCache(t *testing.T) {
