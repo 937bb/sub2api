@@ -65,6 +65,80 @@ func TestNormalizeChineseLLMThinking(t *testing.T) {
 	require.Equal(t, adaptiveBody, out)
 }
 
+func TestNormalizeGLMOpenAIReasoningEffort(t *testing.T) {
+	tests := []struct {
+		name        string
+		body        []byte
+		model       string
+		path        string
+		want        string
+		wantChanged bool
+	}{
+		{
+			name:        "flat xhigh to max",
+			body:        []byte(`{"reasoning_effort":"xhigh","messages":[]}`),
+			model:       "glm-5.2",
+			path:        "reasoning_effort",
+			want:        "max",
+			wantChanged: true,
+		},
+		{
+			name:        "flat x-high to max",
+			body:        []byte(`{"reasoning_effort":"x-high","messages":[]}`),
+			model:       "glm-5.2",
+			path:        "reasoning_effort",
+			want:        "max",
+			wantChanged: true,
+		},
+		{
+			name:        "flat medium to high",
+			body:        []byte(`{"reasoning_effort":"medium","messages":[]}`),
+			model:       "glm-5.2",
+			path:        "reasoning_effort",
+			want:        "high",
+			wantChanged: true,
+		},
+		{
+			name:        "nested uppercase high to high",
+			body:        []byte(`{"reasoning":{"effort":"HIGH"},"messages":[]}`),
+			model:       "glm-5.2",
+			path:        "reasoning.effort",
+			want:        "high",
+			wantChanged: true,
+		},
+		{
+			name:        "non GLM unchanged",
+			body:        []byte(`{"reasoning_effort":"xhigh","messages":[]}`),
+			model:       "deepseek-reasoner",
+			wantChanged: false,
+		},
+		{
+			name:        "missing effort unchanged",
+			body:        []byte(`{"messages":[]}`),
+			model:       "glm-5.2",
+			wantChanged: false,
+		},
+		{
+			name:        "unknown effort unchanged",
+			body:        []byte(`{"reasoning_effort":"extreme","messages":[]}`),
+			model:       "glm-5.2",
+			wantChanged: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			out, changed := NormalizeGLMOpenAIReasoningEffort(tt.body, tt.model)
+			require.Equal(t, tt.wantChanged, changed)
+			if !tt.wantChanged {
+				require.Equal(t, tt.body, out)
+				return
+			}
+			require.Equal(t, tt.want, gjson.GetBytes(out, tt.path).String())
+		})
+	}
+}
+
 func TestDefaultEffortForThinkingEnabled(t *testing.T) {
 	tests := []struct {
 		name    string
