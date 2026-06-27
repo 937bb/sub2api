@@ -36,7 +36,7 @@ func ProvideUpdateService(cache UpdateCache, githubClient GitHubReleaseClient, b
 }
 
 // ProvideEmailQueueService creates EmailQueueService with default worker count
-func ProvideEmailQueueService(emailService *EmailService) *EmailQueueService {
+func ProvideEmailQueueService(emailService *EmailService, _ *OpenAIOAuthStartupConfigValidation) *EmailQueueService {
 	return NewEmailQueueService(emailService, 3)
 }
 
@@ -50,9 +50,13 @@ func ProvideOpenAIOAuthService(
 	proxyRepo ProxyRepository,
 	oauthClient OpenAIOAuthClient,
 	privacyClientFactory PrivacyClientFactory,
+	redisClient *redis.Client,
+	accountRepo AccountRepository,
+	settingService *SettingService,
 ) *OpenAIOAuthService {
-	svc := NewOpenAIOAuthService(proxyRepo, oauthClient)
+	svc := NewOpenAIOAuthServiceWithRedis(proxyRepo, oauthClient, redisClient)
 	svc.SetPrivacyClientFactory(privacyClientFactory)
+	svc.SetCodexFingerprintDependencies(accountRepo, settingService)
 	return svc
 }
 
@@ -110,6 +114,18 @@ func ProvideOpenAITokenProvider(
 	p.SetRefreshAPI(refreshAPI, executor)
 	p.SetRefreshPolicy(OpenAIProviderRefreshPolicy())
 	return p
+}
+
+// ProvideOpenAIQuotaService wires the OpenAI quota query/reset service.
+// It depends on the OpenAI token provider for refreshed access tokens and the
+// privacy client factory for the impersonated upstream HTTP client.
+func ProvideOpenAIQuotaService(
+	accountRepo AccountRepository,
+	proxyRepo ProxyRepository,
+	tokenProvider *OpenAITokenProvider,
+	privacyClientFactory PrivacyClientFactory,
+) *OpenAIQuotaService {
+	return NewOpenAIQuotaService(accountRepo, proxyRepo, tokenProvider, privacyClientFactory)
 }
 
 // ProvideGeminiTokenProvider creates GeminiTokenProvider with OAuthRefreshAPI injection
@@ -192,7 +208,7 @@ func ProvideDeferredService(accountRepo AccountRepository, timingWheel *TimingWh
 }
 
 // ProvideConcurrencyService creates ConcurrencyService and starts slot cleanup worker.
-func ProvideConcurrencyService(cache ConcurrencyCache, accountRepo AccountRepository, cfg *config.Config) *ConcurrencyService {
+func ProvideConcurrencyService(cache ConcurrencyCache, accountRepo AccountRepository, cfg *config.Config, _ *OpenAIOAuthStartupConfigValidation) *ConcurrencyService {
 	svc := NewConcurrencyService(cache)
 	if err := svc.CleanupStaleProcessSlots(context.Background()); err != nil {
 		logger.LegacyPrintf("service.concurrency", "Warning: startup cleanup stale process slots failed: %v", err)
@@ -237,12 +253,15 @@ func ProvideRateLimitService(
 	openAI403CounterCache OpenAI403CounterCache,
 	settingService *SettingService,
 	tokenCacheInvalidator TokenCacheInvalidator,
+	openaiOAuthService *OpenAIOAuthService,
+	tokenCache GeminiTokenCache,
 ) *RateLimitService {
 	svc := NewRateLimitService(accountRepo, usageRepo, cfg, geminiQuotaService, tempUnschedCache)
 	svc.SetTimeoutCounterCache(timeoutCounterCache)
 	svc.SetOpenAI403CounterCache(openAI403CounterCache)
 	svc.SetSettingService(settingService)
 	svc.SetTokenCacheInvalidator(tokenCacheInvalidator)
+	svc.SetOpenAIPersonalAccessToken401Verifier(openaiOAuthService, tokenCache)
 	return svc
 }
 
@@ -471,6 +490,7 @@ func ProvideBillingCacheService(
 	rateRepo UserGroupRateRepository,
 	cfg *config.Config,
 	userPlatformQuotaRepo UserPlatformQuotaRepository,
+	_ *OpenAIOAuthStartupConfigValidation,
 ) *BillingCacheService {
 	return NewBillingCacheService(cache, userRepo, subRepo, apiKeyRepo, rpmCache, rateRepo, cfg, userPlatformQuotaRepo)
 }
@@ -510,6 +530,7 @@ var ProviderSet = wire.NewSet(
 	ProvideBillingCacheService,
 	NewAnnouncementService,
 	NewAdminService,
+	ProvideOpenAIOAuthStartupConfigValidation,
 	NewGatewayService,
 	NewOpenAIGatewayService,
 	wire.Bind(new(AccountRuntimeBlocker), new(*OpenAIGatewayService)),
@@ -525,6 +546,7 @@ var ProviderSet = wire.NewSet(
 	NewGeminiMessagesCompatService,
 	ProvideAntigravityTokenProvider,
 	ProvideOpenAITokenProvider,
+	ProvideOpenAIQuotaService,
 	ProvideClaudeTokenProvider,
 	NewAntigravityGatewayService,
 	ProvideRateLimitService,

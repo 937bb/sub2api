@@ -46,6 +46,20 @@ type tokenCacheInvalidatorRecorder struct {
 	err      error
 }
 
+type openAIPATWhoamiVerifierStub struct {
+	calls    int
+	metadata *OpenAIPersonalAccessTokenMetadata
+	err      error
+}
+
+func (s *openAIPATWhoamiVerifierStub) HydratePersonalAccessToken(ctx context.Context, personalAccessToken string, proxyID *int64) (*OpenAIPersonalAccessTokenMetadata, error) {
+	s.calls++
+	if s.err != nil {
+		return nil, s.err
+	}
+	return s.metadata, nil
+}
+
 type openAI403CounterCacheStub struct {
 	counts     []int64
 	resetCalls []int64
@@ -246,5 +260,124 @@ func TestRateLimitService_HandleUpstreamError_OAuth401NoRefreshTokenSetsError(t 
 		require.True(t, shouldDisable)
 		require.Equal(t, 1, repo.setErrorCalls)
 		require.Equal(t, 0, repo.tempCalls)
+	})
+
+	t.Run("openai_pat_401_with_valid_whoami_is_temporary_not_set_error", func(t *testing.T) {
+		repo := &rateLimitAccountRepoStub{}
+		invalidator := &tokenCacheInvalidatorRecorder{}
+		verifier := &openAIPATWhoamiVerifierStub{metadata: &OpenAIPersonalAccessTokenMetadata{
+			Email:            "user@example.com",
+			ChatGPTUserID:    "user-123",
+			ChatGPTAccountID: "acc-123",
+			ChatGPTPlanType:  "team",
+		}}
+		service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+		service.SetTokenCacheInvalidator(invalidator)
+		service.SetOpenAIPersonalAccessToken401Verifier(verifier, nil)
+		account := &Account{
+			ID:       2883,
+			Platform: PlatformOpenAI,
+			Type:     AccountTypeOAuth,
+			Credentials: map[string]any{
+				"access_token":               "expired-at",
+				"personal_access_token":      "at-valid-pat",
+				"chatgpt_account_id":         "acc-123",
+				"chatgpt_account_is_fedramp": false,
+				// no refresh_token: PAT-backed requests are not OAuth-refreshable.
+			},
+		}
+
+		shouldDisable := service.HandleUpstreamError(context.Background(), account, 401, http.Header{}, []byte("Unauthorized"))
+
+		require.False(t, shouldDisable)
+		require.Equal(t, 1, verifier.calls)
+		require.Equal(t, 0, repo.setErrorCalls)
+		require.Equal(t, 0, repo.tempCalls)
+		require.Empty(t, repo.lastTempReason)
+		require.Empty(t, invalidator.accounts, "PAT-present 401 should not invalidate OAuth AT cache without knowing the bearer used")
+	})
+
+	t.Run("openai_pat_401_whoami_runs_once_per_account", func(t *testing.T) {
+		repo := &rateLimitAccountRepoStub{}
+		verifier := &openAIPATWhoamiVerifierStub{metadata: &OpenAIPersonalAccessTokenMetadata{
+			Email:            "user@example.com",
+			ChatGPTUserID:    "user-123",
+			ChatGPTAccountID: "acc-123",
+			ChatGPTPlanType:  "team",
+		}}
+		service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+		service.SetOpenAIPersonalAccessToken401Verifier(verifier, nil)
+		account := &Account{
+			ID:       2884,
+			Platform: PlatformOpenAI,
+			Type:     AccountTypeOAuth,
+			Credentials: map[string]any{
+				"personal_access_token": "at-valid-pat",
+				"chatgpt_account_id":    "acc-123",
+			},
+		}
+
+		first := service.HandleUpstreamError(context.Background(), account, 401, http.Header{}, []byte("Unauthorized"))
+		second := service.HandleUpstreamError(context.Background(), account, 401, http.Header{}, []byte("Unauthorized"))
+
+		require.False(t, first)
+		require.False(t, second)
+		require.Equal(t, 1, verifier.calls)
+		require.Equal(t, 0, repo.setErrorCalls)
+		require.Equal(t, 0, repo.tempCalls)
+	})
+
+	t.Run("openai_pat_401_whoami_cache_expires_after_ttl", func(t *testing.T) {
+		repo := &rateLimitAccountRepoStub{}
+		verifier := &openAIPATWhoamiVerifierStub{metadata: &OpenAIPersonalAccessTokenMetadata{
+			Email:            "user@example.com",
+			ChatGPTUserID:    "user-123",
+			ChatGPTAccountID: "acc-123",
+			ChatGPTPlanType:  "team",
+		}}
+		service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+		service.SetOpenAIPersonalAccessToken401Verifier(verifier, nil)
+		account := &Account{
+			ID:       2885,
+			Platform: PlatformOpenAI,
+			Type:     AccountTypeOAuth,
+			Credentials: map[string]any{
+				"personal_access_token": "at-valid-pat",
+				"chatgpt_account_id":    "acc-123",
+			},
+		}
+		key := OpenAITokenCacheKey(account) + ":pat401-whoami"
+		service.openAIPAT401LocalResults.Store(key, openAIPAT401WhoamiResult{failed: false, expiresAt: time.Now().Add(-time.Second)})
+
+		shouldDisable := service.HandleUpstreamError(context.Background(), account, 401, http.Header{}, []byte("Unauthorized"))
+
+		require.False(t, shouldDisable)
+		require.Equal(t, 1, verifier.calls)
+	})
+
+	t.Run("openai_pat_401_sets_error_only_when_whoami_401_or_403", func(t *testing.T) {
+		for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden} {
+			repo := &rateLimitAccountRepoStub{}
+			verifier := &openAIPATWhoamiVerifierStub{err: &openAIPersonalAccessTokenWhoamiError{statusCode: status, body: `{"error":{"message":"bad pat"}}`}}
+			service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+			service.SetOpenAIPersonalAccessToken401Verifier(verifier, nil)
+			account := &Account{
+				ID:       int64(3000 + status),
+				Platform: PlatformOpenAI,
+				Type:     AccountTypeOAuth,
+				Credentials: map[string]any{
+					"personal_access_token": "at-invalid-pat",
+					"chatgpt_account_id":    "acc-123",
+				},
+			}
+
+			shouldDisable := service.HandleUpstreamError(context.Background(), account, 401, http.Header{}, []byte("Unauthorized"))
+
+			require.True(t, shouldDisable)
+			require.Equal(t, 1, verifier.calls)
+			require.Equal(t, 1, repo.setErrorCalls)
+			require.Equal(t, 0, repo.tempCalls)
+			require.Contains(t, repo.lastErrorMsg, "OpenAI PAT whoami failed")
+		}
 	})
 }

@@ -17,6 +17,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 
+	"entgo.io/ent/dialect"
 	entsql "entgo.io/ent/dialect/sql"
 )
 
@@ -39,7 +40,47 @@ func (r *apiKeyRepository) activeQuery() *dbent.APIKeyQuery {
 }
 
 func (r *apiKeyRepository) Create(ctx context.Context, key *service.APIKey) error {
-	builder := r.client.APIKey.Create().
+	if existingTx := dbent.TxFromContext(ctx); existingTx != nil {
+		return r.create(ctx, existingTx.Client(), key)
+	}
+
+	tx, err := r.client.Tx(ctx)
+	if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
+		return translatePersistenceError(err, nil, service.ErrAPIKeyExists)
+	}
+	exec := r.client
+	if err == nil {
+		defer func() { _ = tx.Rollback() }()
+		exec = tx.Client()
+	}
+	// err == dbent.ErrTxStarted 时复用当前事务(exec = r.client)。
+
+	if err := r.create(ctx, exec, key); err != nil {
+		return err
+	}
+	if tx != nil {
+		return translatePersistenceError(tx.Commit(), nil, service.ErrAPIKeyExists)
+	}
+	return nil
+}
+
+func (r *apiKeyRepository) create(ctx context.Context, exec *dbent.Client, key *service.APIKey) error {
+	// 与删除用户流程串行化：PostgreSQL 下创建 Key 前锁定 active user row，避免在
+	// 用户软删除并清理 Key 的事务窗口内插入新的 active Key。SQLite 测试库不支持
+	// SELECT ... FOR UPDATE，保留 active-user 校验但不加锁。
+	userQuery := exec.User.Query().
+		Where(user.IDEQ(key.UserID), user.DeletedAtIsNil())
+	if exec.Driver().Dialect() == dialect.Postgres {
+		userQuery.ForUpdate()
+	}
+	if _, err := userQuery.Only(ctx); err != nil {
+		if dbent.IsNotFound(err) {
+			return service.ErrUserNotFound
+		}
+		return err
+	}
+
+	builder := exec.APIKey.Create().
 		SetUserID(key.UserID).
 		SetKey(key.Key).
 		SetName(key.Name).
@@ -108,7 +149,11 @@ func (r *apiKeyRepository) GetKeyAndOwnerID(ctx context.Context, id int64) (stri
 func (r *apiKeyRepository) GetByKey(ctx context.Context, key string) (*service.APIKey, error) {
 	m, err := r.activeQuery().
 		Where(apikey.KeyEQ(key)).
-		WithUser().
+		WithUser(func(q *dbent.UserQuery) {
+			q.WithAllowedGroups(func(gq *dbent.GroupQuery) {
+				gq.Select(group.FieldID)
+			})
+		}).
 		WithGroup().
 		Only(ctx)
 	if err != nil {
@@ -158,12 +203,16 @@ func (r *apiKeyRepository) GetByKeyForAuth(ctx context.Context, key string) (*se
 				user.FieldLastActiveAt,
 				user.FieldRpmLimit,
 			)
+			q.WithAllowedGroups(func(gq *dbent.GroupQuery) {
+				gq.Select(group.FieldID)
+			})
 		}).
 		WithGroup(func(q *dbent.GroupQuery) {
 			q.Select(
 				group.FieldID,
 				group.FieldName,
 				group.FieldPlatform,
+				group.FieldIsExclusive,
 				group.FieldStatus,
 				group.FieldSubscriptionType,
 				group.FieldRateMultiplier,
@@ -184,6 +233,7 @@ func (r *apiKeyRepository) GetByKeyForAuth(ctx context.Context, key string) (*se
 				group.FieldMcpXMLInject,
 				group.FieldSupportedModelScopes,
 				group.FieldAllowMessagesDispatch,
+				group.FieldRequirePrivacySet,
 				group.FieldDefaultMappedModel,
 				group.FieldMessagesDispatchModelConfig,
 				group.FieldModelsListConfig,
@@ -316,6 +366,10 @@ func (r *apiKeyRepository) Delete(ctx context.Context, id int64) error {
 func (r *apiKeyRepository) DeleteWithAudit(ctx context.Context, id int64) error {
 	tombstoneKey := fmt.Sprintf("__deleted__%d__%d", id, time.Now().UnixNano())
 
+	if existingTx := dbent.TxFromContext(ctx); existingTx != nil {
+		return r.deleteWithAudit(ctx, existingTx.Client(), id, tombstoneKey)
+	}
+
 	tx, err := r.client.Tx(ctx)
 	if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
 		return err
@@ -327,39 +381,8 @@ func (r *apiKeyRepository) DeleteWithAudit(ctx context.Context, id int64) error 
 	}
 	// err == dbent.ErrTxStarted 时复用当前事务(exec = r.client)。
 
-	// 1. 审计:数据源即 api_keys 当前行;WHERE deleted_at IS NULL 保证只对未删除行写一次。
-	if _, err := exec.ExecContext(ctx, `
-		INSERT INTO deleted_api_key_audits (key, api_key_id, user_id, key_name, deleted_at)
-		SELECT key, id, user_id, name, NOW()
-		FROM api_keys
-		WHERE id = $1 AND deleted_at IS NULL`, id); err != nil {
+	if err := r.deleteWithAudit(ctx, exec, id, tombstoneKey); err != nil {
 		return err
-	}
-
-	// 2. 软删除(tombstone 覆盖 key)。
-	res, err := exec.ExecContext(ctx, `
-		UPDATE api_keys
-		SET key = $1, deleted_at = NOW(), updated_at = NOW()
-		WHERE id = $2 AND deleted_at IS NULL`, tombstoneKey, id)
-	if err != nil {
-		return err
-	}
-	affected, err := res.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if affected == 0 {
-		// 并发/重复删除:记录已存在(已软删)则幂等返回 nil(defer 回滚空事务),否则 NotFound。
-		exists, existErr := r.client.APIKey.Query().
-			Where(apikey.IDEQ(id)).
-			Exist(mixins.SkipSoftDelete(ctx))
-		if existErr != nil {
-			return existErr
-		}
-		if exists {
-			return nil
-		}
-		return service.ErrAPIKeyNotFound
 	}
 
 	if tx != nil {
@@ -368,8 +391,137 @@ func (r *apiKeyRepository) DeleteWithAudit(ctx context.Context, id int64) error 
 	return nil
 }
 
+func (r *apiKeyRepository) deleteWithAudit(ctx context.Context, exec *dbent.Client, id int64, tombstoneKey string) error {
+	// 先锁定并 tombstone 覆盖 active key，再用 RETURNING 的原始值写审计，避免并发删除
+	// 在审计 INSERT 与软删除 UPDATE 之间交错导致重复审计行。
+	rows, err := exec.QueryContext(ctx, `
+		WITH locked AS (
+			SELECT id, key, user_id, name
+			FROM api_keys
+			WHERE id = $2 AND deleted_at IS NULL
+			FOR UPDATE
+		), deleted AS (
+			UPDATE api_keys AS ak
+			SET key = $1, deleted_at = NOW(), updated_at = NOW()
+			FROM locked
+			WHERE ak.id = locked.id
+			RETURNING locked.key AS original_key, ak.id, ak.user_id, ak.name, ak.deleted_at
+		), audited AS (
+			INSERT INTO deleted_api_key_audits (key, api_key_id, user_id, key_name, deleted_at)
+			SELECT original_key, id, user_id, name, deleted_at
+			FROM deleted
+			RETURNING api_key_id
+		)
+		SELECT deleted.id
+		FROM deleted
+		JOIN audited ON audited.api_key_id = deleted.id`, tombstoneKey, id)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }()
+
+	if rows.Next() {
+		return rows.Err()
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	// 并发/重复删除:记录已存在(已软删)则幂等返回 nil，否则 NotFound。
+	exists, existErr := exec.APIKey.Query().
+		Where(apikey.IDEQ(id)).
+		Exist(mixins.SkipSoftDelete(ctx))
+	if existErr != nil {
+		return existErr
+	}
+	if exists {
+		return nil
+	}
+	return service.ErrAPIKeyNotFound
+}
+
+// DeleteByUserIDWithAudit soft-deletes every active API key owned by userID and
+// returns the original key values for post-commit auth-cache invalidation.
+func (r *apiKeyRepository) DeleteByUserIDWithAudit(ctx context.Context, userID int64) ([]string, error) {
+	if existingTx := dbent.TxFromContext(ctx); existingTx != nil {
+		return r.deleteByUserIDWithAudit(ctx, existingTx.Client(), userID)
+	}
+
+	tx, err := r.client.Tx(ctx)
+	if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
+		return nil, err
+	}
+	exec := r.client
+	if err == nil {
+		defer func() { _ = tx.Rollback() }()
+		exec = tx.Client()
+	}
+	// err == dbent.ErrTxStarted 时复用当前事务(exec = r.client)。
+
+	keys, err := r.deleteByUserIDWithAudit(ctx, exec, userID)
+	if err != nil {
+		return nil, err
+	}
+	if tx != nil {
+		if err := tx.Commit(); err != nil {
+			return nil, err
+		}
+	}
+	return keys, nil
+}
+
+func (r *apiKeyRepository) deleteByUserIDWithAudit(ctx context.Context, exec *dbent.Client, userID int64) ([]string, error) {
+	tombstoneSuffix := fmt.Sprintf("%d", time.Now().UnixNano())
+
+	// Lock and tombstone the complete active-key set in one statement. This avoids
+	// offset pagination gaps if another transaction deletes a key while admin user
+	// deletion is collecting the target list.
+	rows, err := exec.QueryContext(ctx, `
+		WITH locked AS (
+			SELECT id, key, user_id, name
+			FROM api_keys
+			WHERE user_id = $1 AND deleted_at IS NULL
+			ORDER BY id
+			FOR UPDATE
+		), deleted AS (
+			UPDATE api_keys AS ak
+			SET key = CONCAT('__deleted__', ak.id, '__', $2::text), deleted_at = NOW(), updated_at = NOW()
+			FROM locked
+			WHERE ak.id = locked.id
+			RETURNING locked.key AS original_key, ak.id, ak.user_id, ak.name, ak.deleted_at
+		), audited AS (
+			INSERT INTO deleted_api_key_audits (key, api_key_id, user_id, key_name, deleted_at)
+			SELECT original_key, id, user_id, name, deleted_at
+			FROM deleted
+			RETURNING api_key_id
+		)
+		SELECT deleted.original_key
+		FROM deleted
+		JOIN audited ON audited.api_key_id = deleted.id`, userID, tombstoneSuffix)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	keys := make([]string, 0)
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			return nil, err
+		}
+		if key = strings.TrimSpace(key); key != "" {
+			keys = append(keys, key)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return keys, nil
+}
+
 func (r *apiKeyRepository) ListByUserID(ctx context.Context, userID int64, params pagination.PaginationParams, filters service.APIKeyListFilters) ([]service.APIKey, *pagination.PaginationResult, error) {
-	q := r.activeQuery().Where(apikey.UserIDEQ(userID))
+	client := clientFromContext(ctx, r.client)
+	q := client.APIKey.Query().Where(apikey.DeletedAtIsNil(), apikey.UserIDEQ(userID))
 
 	// Apply filters
 	if filters.Search != "" {
@@ -420,7 +572,8 @@ func (r *apiKeyRepository) VerifyOwnership(ctx context.Context, userID int64, ap
 		return []int64{}, nil
 	}
 
-	ids, err := r.client.APIKey.Query().
+	client := clientFromContext(ctx, r.client)
+	ids, err := client.APIKey.Query().
 		Where(apikey.UserIDEQ(userID), apikey.IDIn(apiKeyIDs...), apikey.DeletedAtIsNil()).
 		IDs(ctx)
 	if err != nil {
@@ -430,7 +583,8 @@ func (r *apiKeyRepository) VerifyOwnership(ctx context.Context, userID int64, ap
 }
 
 func (r *apiKeyRepository) CountByUserID(ctx context.Context, userID int64) (int64, error) {
-	count, err := r.activeQuery().Where(apikey.UserIDEQ(userID)).Count(ctx)
+	client := clientFromContext(ctx, r.client)
+	count, err := client.APIKey.Query().Where(apikey.DeletedAtIsNil(), apikey.UserIDEQ(userID)).Count(ctx)
 	return int64(count), err
 }
 
@@ -750,6 +904,14 @@ func userEntityToService(u *dbent.User) *service.User {
 	// Parse extra emails JSON (supports both old []string and new []NotifyEmailEntry format)
 	if u.BalanceNotifyExtraEmails != "" && u.BalanceNotifyExtraEmails != "[]" {
 		out.BalanceNotifyExtraEmails = service.ParseNotifyEmails(u.BalanceNotifyExtraEmails)
+	}
+	if len(u.Edges.AllowedGroups) > 0 {
+		out.AllowedGroups = make([]int64, 0, len(u.Edges.AllowedGroups))
+		for _, g := range u.Edges.AllowedGroups {
+			if g != nil {
+				out.AllowedGroups = append(out.AllowedGroups, g.ID)
+			}
+		}
 	}
 	return out
 }

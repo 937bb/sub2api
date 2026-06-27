@@ -16,6 +16,7 @@ func TestRedactCredentials_StripsSensitiveKeysAndReportsStatus(t *testing.T) {
 	in := map[string]any{
 		"refresh_token":         "rt-secret",
 		"access_token":          "at-secret",
+		"personal_access_token": "pat-secret",
 		"api_key":               "sk-secret",
 		"aws_secret_access_key": "aws-secret",
 		"service_account_json":  map[string]any{"private_key": "..."},
@@ -31,6 +32,7 @@ func TestRedactCredentials_StripsSensitiveKeysAndReportsStatus(t *testing.T) {
 
 	require.NotContains(t, out, "refresh_token")
 	require.NotContains(t, out, "access_token")
+	require.NotContains(t, out, "personal_access_token")
 	require.NotContains(t, out, "api_key")
 	require.NotContains(t, out, "aws_secret_access_key")
 	require.NotContains(t, out, "service_account_json")
@@ -43,6 +45,7 @@ func TestRedactCredentials_StripsSensitiveKeysAndReportsStatus(t *testing.T) {
 
 	require.True(t, status["has_refresh_token"])
 	require.True(t, status["has_access_token"])
+	require.True(t, status["has_personal_access_token"])
 	require.True(t, status["has_api_key"])
 	require.True(t, status["has_aws_secret_access_key"])
 	require.True(t, status["has_service_account_json"])
@@ -80,7 +83,7 @@ func TestRedactCredentials_DoesNotMutateInput(t *testing.T) {
 
 func TestRedactCredentials_AllKnownSensitiveKeys(t *testing.T) {
 	keys := []string{
-		"access_token", "refresh_token", "id_token",
+		"access_token", "refresh_token", "id_token", "personal_access_token",
 		"api_key", "session_key", "cookie",
 		"aws_secret_access_key", "aws_session_token",
 		"service_account_json", "service_account", "private_key",

@@ -26,6 +26,12 @@ export interface OpenAITokenInfo {
 
 export type OpenAIOAuthPlatform = 'openai'
 
+interface OpenAIGenerateAuthURLOptions {
+  proxyId?: number | null
+  redirectUri?: string
+  accountId?: number | null
+}
+
 export function useOpenAIOAuth() {
   const appStore = useAppStore()
   const { t } = useI18n()
@@ -49,7 +55,7 @@ export function useOpenAIOAuth() {
 
   // Generate auth URL for OpenAI OAuth
   const generateAuthUrl = async (
-    proxyId?: number | null,
+    proxyOrOptions?: number | null | OpenAIGenerateAuthURLOptions,
     redirectUri?: string
   ): Promise<boolean> => {
     loading.value = true
@@ -59,12 +65,18 @@ export function useOpenAIOAuth() {
     error.value = ''
 
     try {
+      const options = typeof proxyOrOptions === 'object' && proxyOrOptions !== null
+        ? proxyOrOptions
+        : { proxyId: proxyOrOptions, redirectUri }
       const payload: Record<string, unknown> = {}
-      if (proxyId) {
-        payload.proxy_id = proxyId
+      if (options.proxyId) {
+        payload.proxy_id = options.proxyId
       }
-      if (redirectUri) {
-        payload.redirect_uri = redirectUri
+      if (options.redirectUri) {
+        payload.redirect_uri = options.redirectUri
+      }
+      if (options.accountId) {
+        payload.account_id = options.accountId
       }
 
       const response = await adminAPI.accounts.generateAuthUrl(

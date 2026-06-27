@@ -34,6 +34,67 @@ func TestResolveResponsesSupport(t *testing.T) {
 	}
 }
 
+func TestResolveResponsesSupportForModel(t *testing.T) {
+	tests := []struct {
+		name          string
+		extra         map[string]any
+		upstreamModel string
+		want          AccountResponsesSupport
+	}{
+		{
+			name:          "model true wins over account false",
+			extra:         map[string]any{ExtraKeyResponsesSupported: false, ExtraKeyResponsesSupportedByModel: map[string]any{"model-a": true}},
+			upstreamModel: "model-a",
+			want:          ResponsesSupportYes,
+		},
+		{
+			name:          "model false wins over account true",
+			extra:         map[string]any{ExtraKeyResponsesSupported: true, ExtraKeyResponsesSupportedByModel: map[string]any{"model-a": false}},
+			upstreamModel: "model-a",
+			want:          ResponsesSupportNo,
+		},
+		{
+			name:          "missing model in model map stays unknown",
+			extra:         map[string]any{ExtraKeyResponsesSupported: false, ExtraKeyResponsesSupportedByModel: map[string]any{"model-a": false}},
+			upstreamModel: "model-b",
+			want:          ResponsesSupportUnknown,
+		},
+		{
+			name:          "legacy account marker still applies without model map",
+			extra:         map[string]any{ExtraKeyResponsesSupported: false},
+			upstreamModel: "model-b",
+			want:          ResponsesSupportNo,
+		},
+		{
+			name:          "manual force responses overrides model false",
+			extra:         map[string]any{ExtraKeyResponsesMode: string(ResponsesSupportModeForceResponses), ExtraKeyResponsesSupportedByModel: map[string]any{"model-a": false}},
+			upstreamModel: "model-a",
+			want:          ResponsesSupportYes,
+		},
+		{
+			name:          "manual force chat completions overrides model true",
+			extra:         map[string]any{ExtraKeyResponsesMode: string(ResponsesSupportModeForceChatCompletions), ExtraKeyResponsesSupportedByModel: map[string]any{"model-a": true}},
+			upstreamModel: "model-a",
+			want:          ResponsesSupportNo,
+		},
+		{
+			name:          "map string bool is accepted",
+			extra:         map[string]any{ExtraKeyResponsesSupportedByModel: map[string]bool{"model-a": false}},
+			upstreamModel: "model-a",
+			want:          ResponsesSupportNo,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ResolveResponsesSupportForModel(tc.extra, tc.upstreamModel)
+			if got != tc.want {
+				t.Errorf("ResolveResponsesSupportForModel(%v, %q) = %v, want %v", tc.extra, tc.upstreamModel, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestShouldUseResponsesAPI(t *testing.T) {
 	tests := []struct {
 		name  string

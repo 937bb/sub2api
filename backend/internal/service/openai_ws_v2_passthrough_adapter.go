@@ -142,12 +142,16 @@ func newOpenAIWSPassthroughUsageMeta(initialRequestModel string, firstFrame []by
 	return meta
 }
 
-func (m *openAIWSPassthroughUsageMeta) initFromFirstFrame(policyOutput []byte) {
+func (m *openAIWSPassthroughUsageMeta) initFromFirstFrame(policyOutput []byte, protocolModel string) {
 	if m == nil {
 		return
 	}
 	m.serviceTier.Store(extractOpenAIServiceTierFromBody(policyOutput))
-	m.reasoningEffort.Store(extractOpenAIReasoningEffortFromBody(policyOutput, m.sessionRequestModel))
+	requestModel := m.sessionRequestModel
+	if strings.TrimSpace(protocolModel) == "" {
+		protocolModel = requestModel
+	}
+	m.reasoningEffort.Store(ApplyThinkingEnabledFallback(extractOpenAIReasoningEffortFromBody(policyOutput, requestModel), policyOutput, protocolModel))
 }
 
 func (m *openAIWSPassthroughUsageMeta) updateSessionRequestModel(payload []byte) {
@@ -169,12 +173,15 @@ func (m *openAIWSPassthroughUsageMeta) requestModelForFrame(payload []byte) stri
 	return m.sessionRequestModel
 }
 
-func (m *openAIWSPassthroughUsageMeta) updateFromResponseCreate(policyOutput []byte, requestModelForFrame string) {
+func (m *openAIWSPassthroughUsageMeta) updateFromResponseCreate(policyOutput []byte, requestModelForFrame string, protocolModel string) {
 	if m == nil {
 		return
 	}
 	m.serviceTier.Store(extractOpenAIServiceTierFromBody(policyOutput))
-	m.reasoningEffort.Store(extractOpenAIReasoningEffortFromBody(policyOutput, requestModelForFrame))
+	if strings.TrimSpace(protocolModel) == "" {
+		protocolModel = requestModelForFrame
+	}
+	m.reasoningEffort.Store(ApplyThinkingEnabledFallback(extractOpenAIReasoningEffortFromBody(policyOutput, requestModelForFrame), policyOutput, protocolModel))
 }
 
 func openAIWSPassthroughRequestModelForFrame(payload []byte) string {
@@ -237,11 +244,14 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	if s == nil {
 		return errors.New("service is nil")
 	}
-	if clientConn == nil {
-		return errors.New("client websocket is nil")
-	}
 	if account == nil {
 		return errors.New("account is nil")
+	}
+	if !account.IsOpenAIApiKey() {
+		return fmt.Errorf("openai ws native passthrough requires APIKey account, got=%s", account.Type)
+	}
+	if clientConn == nil {
+		return errors.New("client websocket is nil")
 	}
 	if strings.TrimSpace(token) == "" {
 		return errors.New("token is empty")
@@ -311,7 +321,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	// 因此使用 atomic.Pointer[string] 在 filter（runClientToUpstream
 	// goroutine）和 OnTurnComplete / final result（runUpstreamToClient
 	// goroutine）之间同步当前 turn 的 usage metadata。
-	usageMeta.initFromFirstFrame(firstClientMessage)
+	usageMeta.initFromFirstFrame(firstClientMessage, capturedSessionModel)
 	promptCacheKey := strings.TrimSpace(gjson.GetBytes(firstClientMessage, "prompt_cache_key").String())
 
 	wsURL, err := s.buildOpenAIResponsesWSURL(account)
@@ -345,7 +355,10 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		turnState = strings.TrimSpace(c.GetHeader(openAIWSTurnStateHeader))
 		turnMetadata = strings.TrimSpace(c.GetHeader(openAIWSTurnMetadataHeader))
 	}
-	headers, _ := s.buildOpenAIWSHeaders(c, account, token, wsDecision, isCodexCLI, turnState, turnMetadata, promptCacheKey, fallbackOpenAICodexSessionID(c, account, firstClientMessage))
+	headers, _, err := s.buildOpenAIWSHeaders(c, account, token, wsDecision, isCodexCLI, turnState, turnMetadata, promptCacheKey, fallbackOpenAICodexSessionID(c, account, firstClientMessage), openAIWSPayloadStringFromRaw(firstClientMessage, "client_metadata."+openAICodexWindowIDHeader))
+	if err != nil {
+		return fmt.Errorf("ensure codex fingerprint: %w", err)
+	}
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
@@ -360,14 +373,15 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	defer cancelDial()
 	upstreamConn, statusCode, handshakeHeaders, err := dialer.Dial(dialCtx, wsURL, headers, proxyURL)
 	if err != nil {
+		safeErr := sanitizeOpenAIUpstreamDiagnosticText(err.Error())
 		logOpenAIWSV2Passthrough(
 			"relay_dial_failed account_id=%d status_code=%d err=%s",
 			account.ID,
 			statusCode,
-			truncateOpenAIWSLogValue(err.Error(), openAIWSLogValueMaxLen),
+			truncateOpenAIWSLogValue(safeErr, openAIWSLogValueMaxLen),
 		)
 		if statusCode == http.StatusTooManyRequests {
-			s.persistOpenAIWSRateLimitSignal(ctx, account, handshakeHeaders, nil, "rate_limit_exceeded", "rate_limit_error", strings.TrimSpace(err.Error()))
+			s.persistOpenAIWSRateLimitSignal(ctx, account, handshakeHeaders, nil, "rate_limit_exceeded", "rate_limit_error", strings.TrimSpace(safeErr))
 			return &UpstreamFailoverError{
 				StatusCode:      http.StatusTooManyRequests,
 				ResponseHeaders: cloneHeader(handshakeHeaders),
@@ -452,7 +466,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			//     service_tier 时按 default 处理，billing 应如实反映。
 			if policyErr == nil && blocked == nil &&
 				strings.TrimSpace(gjson.GetBytes(payload, "type").String()) == "response.create" {
-				usageMeta.updateFromResponseCreate(out, requestModelForThisFrame)
+				usageMeta.updateFromResponseCreate(out, requestModelForThisFrame, model)
 			}
 			return out, blocked, policyErr
 		},
@@ -565,12 +579,13 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					return nil
 				}
 				s.persistOpenAIWSRateLimitSignal(ctx, account, handshakeHeaders, payload, errCodeRaw, errTypeRaw, errMsgRaw)
+				errCode, errType, errMessage := summarizeOpenAIWSErrorEventFieldsFromRaw(errCodeRaw, errTypeRaw, errMsgRaw)
 				logOpenAIWSV2Passthrough(
 					"relay_rate_limit_failover account_id=%d err_code=%s err_type=%s err_message=%s",
 					account.ID,
-					truncateOpenAIWSLogValue(errCodeRaw, openAIWSLogValueMaxLen),
-					truncateOpenAIWSLogValue(errTypeRaw, openAIWSLogValueMaxLen),
-					truncateOpenAIWSLogValue(errMsgRaw, openAIWSLogValueMaxLen),
+					errCode,
+					errType,
+					errMessage,
 				)
 				return &UpstreamFailoverError{
 					StatusCode:      http.StatusTooManyRequests,
@@ -588,7 +603,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					event.PayloadBytes,
 					event.Graceful,
 					event.WroteDownstream,
-					truncateOpenAIWSLogValue(event.Error, openAIWSLogValueMaxLen),
+					truncateOpenAIWSLogValue(sanitizeOpenAIUpstreamDiagnosticText(event.Error), openAIWSLogValueMaxLen),
 				)
 			},
 		},
@@ -637,7 +652,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		account.ID,
 		truncateOpenAIWSLogValue(relayExit.Stage, openAIWSLogValueMaxLen),
 		relayExit.WroteDownstream,
-		truncateOpenAIWSLogValue(relayErrorText(relayExit.Err), openAIWSLogValueMaxLen),
+		truncateOpenAIWSLogValue(sanitizeOpenAIUpstreamDiagnosticText(relayErrorText(relayExit.Err)), openAIWSLogValueMaxLen),
 		result.Duration.Milliseconds(),
 		relayResult.ClientToUpstreamFrames,
 		relayResult.UpstreamToClientFrames,

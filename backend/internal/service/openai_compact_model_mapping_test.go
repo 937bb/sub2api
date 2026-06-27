@@ -92,7 +92,7 @@ func TestOpenAIGatewayService_Forward_NonCompactRequestIgnoresCompactOnlyModelMa
 	require.Equal(t, "gpt-5.4", gjson.GetBytes(upstream.lastBody, "model").String())
 }
 
-func TestOpenAIGatewayService_OAuthPassthrough_CompactOnlyModelMappingOverridesUpstreamModel(t *testing.T) {
+func TestOpenAIGatewayService_OAuthAdapter_CompactOnlyModelMappingOverridesUpstreamModel(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
@@ -111,7 +111,7 @@ func TestOpenAIGatewayService_OAuthPassthrough_CompactOnlyModelMappingOverridesU
 	svc := &OpenAIGatewayService{httpUpstream: upstream}
 	account := &Account{
 		ID:          3,
-		Name:        "openai-oauth-pass",
+		Name:        "openai-oauth-adapter",
 		Platform:    PlatformOpenAI,
 		Type:        AccountTypeOAuth,
 		Concurrency: 1,
@@ -120,7 +120,6 @@ func TestOpenAIGatewayService_OAuthPassthrough_CompactOnlyModelMappingOverridesU
 			"chatgpt_account_id":    "chatgpt-acc",
 			"compact_model_mapping": map[string]any{"gpt-5.4": "gpt-5.4-openai-compact"},
 		},
-		Extra:       map[string]any{"openai_passthrough": true},
 		Status:      StatusActive,
 		Schedulable: true,
 	}

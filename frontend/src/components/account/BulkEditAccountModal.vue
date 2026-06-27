@@ -31,9 +31,9 @@
         </p>
       </div>
 
-      <!-- OpenAI passthrough -->
+      <!-- OpenAI API Key passthrough -->
       <div
-        v-if="allOpenAIPassthroughCapable"
+        v-if="allOpenAIAPIKey"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <div class="mb-3 flex items-center justify-between">
@@ -43,10 +43,10 @@
               class="input-label mb-0"
               for="bulk-edit-openai-passthrough-enabled"
             >
-              {{ t('admin.accounts.openai.oauthPassthrough') }}
+              {{ t('admin.accounts.openai.apiKeyPassthrough') }}
             </label>
             <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {{ t('admin.accounts.openai.oauthPassthroughDesc') }}
+              {{ t('admin.accounts.openai.apiKeyPassthroughDesc') }}
             </p>
           </div>
           <input
@@ -661,8 +661,8 @@
         </div>
       </div>
 
-      <!-- OpenAI OAuth WS mode -->
-      <div v-if="allOpenAIOAuth" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+      <!-- OpenAI OAuth/setup-token WS mode -->
+      <div v-if="allOpenAIOAuthLike" class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="mb-3 flex items-center justify-between">
           <label
             id="bulk-edit-openai-ws-mode-label"
@@ -692,7 +692,7 @@
           <Select
             v-model="openaiOAuthResponsesWebSocketV2Mode"
             data-testid="bulk-edit-openai-ws-mode-select"
-            :options="openAIWSModeOptions"
+            :options="openAIOAuthWSModeOptions"
             aria-labelledby="bulk-edit-openai-ws-mode-label"
           />
         </div>
@@ -817,14 +817,14 @@
           <Select
             v-model="openaiAPIKeyResponsesWebSocketV2Mode"
             data-testid="bulk-edit-openai-apikey-ws-mode-select"
-            :options="openAIWSModeOptions"
+            :options="openAIAPIKeyWSModeOptions"
             aria-labelledby="bulk-edit-openai-apikey-ws-mode-label"
           />
         </div>
       </div>
 
       <!-- OpenAI Compact mode -->
-      <div v-if="allOpenAIPassthroughCapable" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+      <div v-if="allOpenAIConfigCapable" class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="mb-3 flex items-center justify-between">
           <div class="flex-1 pr-4">
             <label
@@ -860,7 +860,7 @@
       </div>
 
       <!-- OpenAI Compact model mapping -->
-      <div v-if="allOpenAIPassthroughCapable" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+      <div v-if="allOpenAIConfigCapable" class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="mb-3 flex items-center justify-between">
           <div class="flex-1 pr-4">
             <label
@@ -1150,13 +1150,14 @@ import {
   getPresetMappingsByPlatform
 } from '@/composables/useModelWhitelist'
 import {
+  OPENAI_OAUTH_WS_MODE_MANAGED_SESSION,
   OPENAI_WS_MODE_CTX_POOL,
   OPENAI_WS_MODE_OFF,
   OPENAI_WS_MODE_PASSTHROUGH,
   isOpenAIWSModeEnabled,
   resolveOpenAIWSModeConcurrencyHintKey
 } from '@/utils/openaiWsMode'
-import type { OpenAIWSMode } from '@/utils/openaiWsMode'
+import type { OpenAIOAuthWSMode, OpenAIWSMode } from '@/utils/openaiWsMode'
 interface Props {
   show: boolean
   accountIds: number[]
@@ -1189,12 +1190,21 @@ const targetSelectedPlatforms = computed(() => props.target?.selectedPlatforms ?
 const targetSelectedTypes = computed(() => props.target?.selectedTypes ?? props.selectedTypes)
 const isMixedPlatform = computed(() => targetSelectedPlatforms.value.length > 1)
 
-const allOpenAIPassthroughCapable = computed(() => {
+const allOpenAIConfigCapable = computed(() => {
   return (
     targetSelectedPlatforms.value.length === 1 &&
     targetSelectedPlatforms.value[0] === 'openai' &&
     targetSelectedTypes.value.length > 0 &&
-    targetSelectedTypes.value.every(t => t === 'oauth' || t === 'apikey')
+    targetSelectedTypes.value.every(t => t === 'oauth' || t === 'setup-token' || t === 'apikey')
+  )
+})
+
+const allOpenAIOAuthLike = computed(() => {
+  return (
+    targetSelectedPlatforms.value.length === 1 &&
+    targetSelectedPlatforms.value[0] === 'openai' &&
+    targetSelectedTypes.value.length > 0 &&
+    targetSelectedTypes.value.every(t => t === 'oauth' || t === 'setup-token')
   )
 })
 
@@ -1224,6 +1234,19 @@ const allAnthropicOAuthOrSetupToken = computed(() => {
     targetSelectedTypes.value.every(t => t === 'oauth' || t === 'setup-token')
   )
 })
+
+// Temporary migration cleanup for bulk OAuth/setup-token edits. Remove after legacy
+// passthrough/WS extra keys are no longer present in existing OpenAI accounts.
+const OPENAI_OAUTH_LEGACY_EXTRA_DELETE_KEYS = [
+  'openai_oauth_passthrough',
+  'openai_passthrough',
+  'openai_oauth_responses_websockets_v2_mode',
+  'openai_oauth_responses_websockets_v2_enabled',
+  'responses_websockets_v2_enabled',
+  'openai_ws_enabled',
+  'openai_apikey_responses_websockets_v2_mode',
+  'openai_apikey_responses_websockets_v2_enabled'
+]
 
 const filteredPresets = computed(() => {
   if (targetSelectedPlatforms.value.length === 0) return []
@@ -1288,7 +1311,7 @@ const rateMultiplier = ref(1)
 const status = ref<'active' | 'inactive'>('active')
 const groupIds = ref<number[]>([])
 const openaiPassthroughEnabled = ref(false)
-const openaiOAuthResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
+const openaiOAuthResponsesWebSocketV2Mode = ref<OpenAIOAuthWSMode>(OPENAI_WS_MODE_OFF)
 const openaiAPIKeyResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
 const codexCLIOnlyEnabled = ref(false)
 const codexCLIOnlyAllowClaudeCodeEnabled = ref(false)
@@ -1322,15 +1345,19 @@ const statusOptions = computed(() => [
 ])
 const isOpenAIModelRestrictionDisabled = computed(
   () =>
-    allOpenAIPassthroughCapable.value &&
+    allOpenAIAPIKey.value &&
     enableOpenAIPassthrough.value &&
     openaiPassthroughEnabled.value
 )
 
-const openAIWSModeOptions = computed(() => [
+const openAIAPIKeyWSModeOptions = computed(() => [
   { value: OPENAI_WS_MODE_OFF, label: t('admin.accounts.openai.wsModeOff') },
   { value: OPENAI_WS_MODE_CTX_POOL, label: t('admin.accounts.openai.wsModeCtxPool') },
   { value: OPENAI_WS_MODE_PASSTHROUGH, label: t('admin.accounts.openai.wsModePassthrough') }
+])
+const openAIOAuthWSModeOptions = computed(() => [
+  { value: OPENAI_WS_MODE_OFF, label: t('admin.accounts.openai.wsModeOff') },
+  { value: OPENAI_OAUTH_WS_MODE_MANAGED_SESSION, label: t('admin.accounts.openai.wsModeManagedSession') }
 ])
 const openAICompactModeOptions = computed(() => [
   { value: 'auto', label: t('admin.accounts.openai.compactModeAuto') },
@@ -1483,12 +1510,9 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
     }
   }
 
-  if (enableOpenAIPassthrough.value) {
+  if (enableOpenAIPassthrough.value && allOpenAIAPIKey.value) {
     const extra = ensureExtra()
     extra.openai_passthrough = openaiPassthroughEnabled.value
-    if (!openaiPassthroughEnabled.value) {
-      extra.openai_oauth_passthrough = false
-    }
   }
 
   if (enableModelRestriction.value && !isOpenAIModelRestrictionDisabled.value) {
@@ -1521,15 +1545,17 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
     credentialsChanged = true
   }
 
-  if (enableOpenAIWSMode.value) {
-    const extra = ensureExtra()
-    extra.openai_oauth_responses_websockets_v2_mode = openaiOAuthResponsesWebSocketV2Mode.value
-    extra.openai_oauth_responses_websockets_v2_enabled = isOpenAIWSModeEnabled(
-      openaiOAuthResponsesWebSocketV2Mode.value
-    )
+  if (allOpenAIOAuthLike.value) {
+    if (enableOpenAIWSMode.value) {
+      const extra = ensureExtra()
+      updates.extra_delete_keys = OPENAI_OAUTH_LEGACY_EXTRA_DELETE_KEYS
+      extra.openai_oauth_ws_mode = openaiOAuthResponsesWebSocketV2Mode.value
+    }
+  } else {
+    delete updates.extra_delete_keys
   }
 
-  if (enableOpenAIAPIKeyWSMode.value) {
+  if (enableOpenAIAPIKeyWSMode.value && allOpenAIAPIKey.value) {
     const extra = ensureExtra()
     extra.openai_apikey_responses_websockets_v2_mode = openaiAPIKeyResponsesWebSocketV2Mode.value
     extra.openai_apikey_responses_websockets_v2_enabled = isOpenAIWSModeEnabled(
@@ -1537,12 +1563,12 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
     )
   }
 
-  if (enableCodexCLIOnly.value) {
+  if (enableCodexCLIOnly.value && allOpenAIOAuth.value) {
     const extra = ensureExtra()
     extra.codex_cli_only = codexCLIOnlyEnabled.value
   }
 
-  if (enableCodexCLIOnlyAllowClaudeCode.value) {
+  if (enableCodexCLIOnlyAllowClaudeCode.value && allOpenAIOAuth.value) {
     const extra = ensureExtra()
     extra.codex_cli_only_allowed_clients = codexCLIOnlyAllowClaudeCodeEnabled.value ? ['claude_code'] : []
   }

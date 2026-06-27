@@ -608,7 +608,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 	SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 	if err != nil {
-		safeErr := sanitizeUpstreamErrorMessage(err.Error())
+		safeErr := sanitizeOpenAIUpstreamDiagnosticText(err.Error())
 		setOpsUpstreamError(c, 0, safeErr, "")
 		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 			Platform:           account.Platform,
@@ -626,7 +626,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 		_ = resp.Body.Close()
 		resp.Body = io.NopCloser(bytes.NewReader(respBody))
 		upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
-		upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
+		upstreamMsg = sanitizeOpenAIUpstreamDiagnosticText(upstreamMsg)
 		if s.shouldFailoverOpenAIUpstreamResponse(resp.StatusCode, upstreamMsg, respBody) {
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 				Platform:           account.Platform,
@@ -638,7 +638,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 				Kind:               "failover",
 				Message:            upstreamMsg,
 			})
-			s.handleFailoverSideEffects(upstreamCtx, resp, account, upstreamModel)
+			s.handleFailoverSideEffects(upstreamCtx, resp, account, respBody, upstreamModel)
 			return nil, &UpstreamFailoverError{
 				StatusCode:             resp.StatusCode,
 				ResponseBody:           respBody,
@@ -1536,7 +1536,7 @@ func newOpenAIImageStatusError(resp *req.Response, fallback string, errorBodyRea
 		}
 	}
 
-	message := sanitizeUpstreamErrorMessage(extractUpstreamErrorMessage(body))
+	message := sanitizeOpenAIUpstreamDiagnosticText(extractUpstreamErrorMessage(body))
 	if message == "" {
 		prefix := strings.TrimSpace(fallback)
 		if prefix == "" {

@@ -35,6 +35,12 @@ const fakeUser = {
   updated_at: '2024-01-01',
 }
 
+function withoutBalance<T extends { balance?: unknown }>(value: T): Omit<T, 'balance'> {
+  const copy = { ...value }
+  delete copy.balance
+  return copy
+}
+
 const fakeAdminUser = {
   ...fakeUser,
   id: 2,
@@ -76,7 +82,7 @@ describe('useAuthStore', () => {
       expect(store.user).toEqual(fakeUser)
       expect(store.isAuthenticated).toBe(true)
       expect(localStorage.getItem('auth_token')).toBe('test-token-123')
-      expect(localStorage.getItem('auth_user')).toBe(JSON.stringify(fakeUser))
+      expect(JSON.parse(localStorage.getItem('auth_user')!)).toEqual(withoutBalance(fakeUser))
     })
 
     it('登录失败时清除状态并抛出错误', async () => {
@@ -172,7 +178,7 @@ describe('useAuthStore', () => {
       store.checkAuth()
 
       expect(store.token).toBe('saved-token')
-      expect(store.user).toEqual(fakeUser)
+      expect(store.user).toEqual(withoutBalance(fakeUser))
       expect(store.isAuthenticated).toBe(true)
     })
 
@@ -209,6 +215,18 @@ describe('useAuthStore', () => {
       const store = useAuthStore()
       store.checkAuth()
 
+      expect(store.isAuthenticated).toBe(true)
+    })
+
+    it('恢复本地状态时不使用持久化余额', () => {
+      localStorage.setItem('auth_token', 'saved-token')
+      localStorage.setItem('auth_user', JSON.stringify({ ...fakeUser, balance: 999 }))
+      mockGetCurrentUser.mockResolvedValue({ data: fakeUser })
+
+      const store = useAuthStore()
+      store.checkAuth()
+
+      expect(store.user?.balance).toBeUndefined()
       expect(store.isAuthenticated).toBe(true)
     })
 
@@ -357,7 +375,34 @@ describe('useAuthStore', () => {
 
       expect(result).toEqual(updatedUser)
       expect(store.user).toEqual(updatedUser)
-      expect(JSON.parse(localStorage.getItem('auth_user')!)).toEqual(updatedUser)
+      expect(JSON.parse(localStorage.getItem('auth_user')!)).toEqual(withoutBalance(updatedUser))
+    })
+
+    it('强制刷新绕过进行中的旧请求，避免旧余额覆盖新余额', async () => {
+      mockLogin.mockResolvedValue(fakeAuthResponse)
+      const store = useAuthStore()
+      await store.login({ email: 'test@example.com', password: '123456' })
+
+      let resolveStaleRefresh!: (value: { data: typeof fakeUser }) => void
+      const staleRefreshResponse = new Promise<{ data: typeof fakeUser }>((resolve) => {
+        resolveStaleRefresh = resolve
+      })
+      const staleUser = { ...fakeUser, balance: 101 }
+      const liveUser = { ...fakeUser, balance: 202 }
+      mockGetCurrentUser
+        .mockReturnValueOnce(staleRefreshResponse)
+        .mockResolvedValueOnce({ data: liveUser })
+
+      const staleRefresh = store.refreshUser()
+      const liveRefresh = store.refreshUser({ force: true })
+
+      await expect(liveRefresh).resolves.toEqual(liveUser)
+      expect(store.user).toEqual(liveUser)
+
+      resolveStaleRefresh({ data: staleUser })
+      await expect(staleRefresh).resolves.toEqual(staleUser)
+      expect(store.user).toEqual(liveUser)
+      expect(mockGetCurrentUser).toHaveBeenCalledTimes(2)
     })
 
     it('未认证时抛出错误', async () => {

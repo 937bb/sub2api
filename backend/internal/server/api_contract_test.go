@@ -246,6 +246,7 @@ func TestAPIContracts(t *testing.T) {
 					"window_7d_start": null,
 					"expires_at": null,
 					"created_at": "2025-01-02T03:04:05Z",
+					"openai_force_priority_tier": false,
 					"updated_at": "2025-01-02T03:04:05Z"
 				}
 			}`,
@@ -295,6 +296,7 @@ func TestAPIContracts(t *testing.T) {
 							"window_7d_start": null,
 							"expires_at": null,
 							"created_at": "2025-01-02T03:04:05Z",
+							"openai_force_priority_tier": false,
 							"updated_at": "2025-01-02T03:04:05Z"
 						}
 					],
@@ -847,6 +849,14 @@ func TestAPIContracts(t *testing.T) {
 					"payment_visible_method_wxpay_enabled": false,
 					"openai_advanced_scheduler_enabled": true,
 					"openai_allow_claude_code_codex_plugin": false,
+					"openai_codex_ua_profile": {
+						"codex_version": "0.136.0",
+						"originator": "codex-tui",
+						"os_fingerprint": "Mac OS 26.5.0; arm64",
+						"terminal_token": "Apple_Terminal/470.2",
+						"user_agent": "codex-tui/0.136.0 (Mac OS 26.5.0; arm64) Apple_Terminal/470.2 (codex-tui; 0.136.0)"
+					},
+					"openai_codex_user_agent": "",
 					"openai_fast_policy_settings": {
 						"rules": []
 					},
@@ -1084,6 +1094,14 @@ func TestAPIContracts(t *testing.T) {
 					"payment_visible_method_wxpay_enabled": false,
 					"openai_advanced_scheduler_enabled": false,
 					"openai_allow_claude_code_codex_plugin": false,
+					"openai_codex_ua_profile": {
+						"codex_version": "0.136.0",
+						"originator": "codex-tui",
+						"os_fingerprint": "Mac OS 26.5.0; arm64",
+						"terminal_token": "Apple_Terminal/470.2",
+						"user_agent": "codex-tui/0.136.0 (Mac OS 26.5.0; arm64) Apple_Terminal/470.2 (codex-tui; 0.136.0)"
+					},
+					"openai_codex_user_agent": "",
 					"openai_fast_policy_settings": {
 						"rules": []
 					},
@@ -1280,7 +1298,7 @@ func newContractDeps(t *testing.T) *contractDeps {
 	settingRepo := newStubSettingRepo()
 	settingService := service.NewSettingService(settingRepo, cfg)
 
-	adminService := service.NewAdminService(userRepo, groupRepo, &accountRepo, proxyRepo, apiKeyRepo, redeemRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	adminService := service.NewAdminService(userRepo, groupRepo, &accountRepo, proxyRepo, apiKeyRepo, redeemRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	authHandler := handler.NewAuthHandler(cfg, nil, userService, settingService, nil, redeemService, nil, nil)
 	apiKeyHandler := handler.NewAPIKeyHandler(apiKeyService)
 	usageHandler := handler.NewUsageHandler(usageService, apiKeyService, nil, nil)
@@ -1597,6 +1615,10 @@ func (r *stubGroupRepo) ListActiveByPlatform(ctx context.Context, platform strin
 	return out, nil
 }
 
+func (r *stubGroupRepo) ListAllIncludingInactive(ctx context.Context, platform string) ([]service.Group, error) {
+	return r.ListActiveByPlatform(ctx, platform)
+}
+
 func (stubGroupRepo) ExistsByName(ctx context.Context, name string) (bool, error) {
 	return false, errors.New("not implemented")
 }
@@ -1634,7 +1656,11 @@ func (s *stubAccountRepo) GetByID(ctx context.Context, id int64) (*service.Accou
 }
 
 func (s *stubAccountRepo) GetByIDs(ctx context.Context, ids []int64) ([]*service.Account, error) {
-	return nil, errors.New("not implemented")
+	accounts := make([]*service.Account, 0, len(ids))
+	for _, id := range ids {
+		accounts = append(accounts, &service.Account{ID: id, Platform: service.PlatformAnthropic})
+	}
+	return accounts, nil
 }
 
 func (s *stubAccountRepo) ExistsByID(ctx context.Context, id int64) (bool, error) {
@@ -1661,7 +1687,7 @@ func (s *stubAccountRepo) List(ctx context.Context, params pagination.Pagination
 	return nil, nil, errors.New("not implemented")
 }
 
-func (s *stubAccountRepo) ListWithFilters(ctx context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64, privacyMode, planType string) ([]service.Account, *pagination.PaginationResult, error) {
+func (s *stubAccountRepo) ListWithFilters(ctx context.Context, params pagination.PaginationParams, filters service.AccountListFilters) ([]service.Account, *pagination.PaginationResult, error) {
 	return nil, nil, errors.New("not implemented")
 }
 
@@ -1673,7 +1699,15 @@ func (s *stubAccountRepo) ListActive(ctx context.Context) ([]service.Account, er
 	return nil, errors.New("not implemented")
 }
 
+func (s *stubAccountRepo) ListOAuthRefreshCandidates(ctx context.Context) ([]service.Account, error) {
+	return nil, errors.New("not implemented")
+}
+
 func (s *stubAccountRepo) ListByPlatform(ctx context.Context, platform string) ([]service.Account, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (s *stubAccountRepo) ListByPlatformForValidation(ctx context.Context, platform string) ([]service.Account, error) {
 	return nil, errors.New("not implemented")
 }
 

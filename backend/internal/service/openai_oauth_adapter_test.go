@@ -194,21 +194,23 @@ func TestOpenAIGatewayService_OAuthMessagesBridgeDoesNotInjectDefaultInstruction
 	require.NotEmpty(t, upstream.lastReq.Header.Get("Session_Id"))
 	require.Empty(t, upstream.lastReq.Header.Get("Conversation_Id"))
 	require.Empty(t, upstream.lastReq.Header.Get("OpenAI-Beta"))
-	require.Empty(t, upstream.lastReq.Header.Get("originator"))
+	require.Equal(t, codexOfficialOriginator, upstream.lastReq.Header.Get("originator"))
+	require.Equal(t, codexCLIVersion, upstream.lastReq.Header.Get("Version"))
+	require.Equal(t, upstream.lastReq.Header.Get(openAICodexInstallationIDHeader), gjson.GetBytes(upstream.lastBody, "client_metadata."+openAICodexInstallationIDHeader).String())
 }
 
-type openAIPassthroughFailoverRepo struct {
+type openAIUpstreamFailoverRepo struct {
 	stubOpenAIAccountRepo
 	rateLimitCalls []time.Time
 	overloadCalls  []time.Time
 }
 
-func (r *openAIPassthroughFailoverRepo) SetRateLimited(_ context.Context, _ int64, resetAt time.Time) error {
+func (r *openAIUpstreamFailoverRepo) SetRateLimited(_ context.Context, _ int64, resetAt time.Time) error {
 	r.rateLimitCalls = append(r.rateLimitCalls, resetAt)
 	return nil
 }
 
-func (r *openAIPassthroughFailoverRepo) SetOverloaded(_ context.Context, _ int64, until time.Time) error {
+func (r *openAIUpstreamFailoverRepo) SetOverloaded(_ context.Context, _ int64, until time.Time) error {
 	r.overloadCalls = append(r.overloadCalls, until)
 	return nil
 }
@@ -315,7 +317,7 @@ func captureStructuredLog(t *testing.T) (*inMemoryLogSink, func()) {
 	}
 }
 
-func TestOpenAIGatewayService_OAuthPassthrough_StreamKeepsToolNameAndBodyNormalized(t *testing.T) {
+func TestOpenAIGatewayService_OAuthAdapter_StreamKeepsToolNameAndBodyNormalized(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
@@ -360,7 +362,6 @@ func TestOpenAIGatewayService_OAuthPassthrough_StreamKeepsToolNameAndBodyNormali
 		Type:           AccountTypeOAuth,
 		Concurrency:    1,
 		Credentials:    map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-acc"},
-		Extra:          map[string]any{"openai_passthrough": true},
 		Status:         StatusActive,
 		Schedulable:    true,
 		RateMultiplier: f64p(1),
@@ -374,12 +375,12 @@ func TestOpenAIGatewayService_OAuthPassthrough_StreamKeepsToolNameAndBodyNormali
 	require.NotNil(t, result)
 	require.True(t, result.Stream)
 
-	// 1) 透传 OAuth 请求体与旧链路关键行为保持一致：store=false + stream=true。
+	// 1) OAuth adapter 终端策略保持 Codex 内部 API 需要的关键归一化：store=false + stream=true。
 	require.Equal(t, false, gjson.GetBytes(upstream.lastBody, "store").Bool())
 	require.Equal(t, true, gjson.GetBytes(upstream.lastBody, "stream").Bool())
 	require.False(t, gjson.GetBytes(upstream.lastBody, "type").Exists())
 	require.False(t, gjson.GetBytes(upstream.lastBody, "generate").Exists())
-	// previous_response_id 删除：sub2api 是中转站，透传会导致切号时上游 404 + 指纹泄露。
+	// previous_response_id 删除：sub2api 是中转站，转发会导致切号时上游 404 + 指纹泄露。
 	require.False(t, gjson.GetBytes(upstream.lastBody, "previous_response_id").Exists())
 	require.Equal(t, "yes", gjson.GetBytes(upstream.lastBody, "client_metadata.keep").String())
 	require.Equal(t, "local-test-instructions", strings.TrimSpace(gjson.GetBytes(upstream.lastBody, "instructions").String()))
@@ -389,7 +390,7 @@ func TestOpenAIGatewayService_OAuthPassthrough_StreamKeepsToolNameAndBodyNormali
 
 	// 2) only auth is replaced; inbound auth/cookie are not forwarded
 	require.Equal(t, "Bearer oauth-token", upstream.lastReq.Header.Get("Authorization"))
-	require.Equal(t, "codex_cli_rs/0.1.0", upstream.lastReq.Header.Get("User-Agent"))
+	require.Equal(t, codexCLIUserAgent, upstream.lastReq.Header.Get("User-Agent"))
 	require.Empty(t, upstream.lastReq.Header.Get("Cookie"))
 	require.Empty(t, upstream.lastReq.Header.Get("X-Api-Key"))
 	require.Empty(t, upstream.lastReq.Header.Get("X-Goog-Api-Key"))
@@ -399,7 +400,7 @@ func TestOpenAIGatewayService_OAuthPassthrough_StreamKeepsToolNameAndBodyNormali
 
 	// 3) required OAuth headers are present
 	require.Equal(t, "chatgpt.com", upstream.lastReq.Host)
-	require.Equal(t, "chatgpt-acc", upstream.lastReq.Header.Get("chatgpt-account-id"))
+	require.Equal(t, "chatgpt-acc", getHeaderRaw(upstream.lastReq.Header, "ChatGPT-Account-ID"))
 
 	// 4) downstream SSE keeps tool name (no toolCorrector)
 	body := rec.Body.String()
@@ -407,7 +408,7 @@ func TestOpenAIGatewayService_OAuthPassthrough_StreamKeepsToolNameAndBodyNormali
 	require.NotContains(t, body, "\"name\":\"edit\"")
 }
 
-func TestOpenAIGatewayService_OAuthPassthrough_CompactUsesJSONAndKeepsNonStreaming(t *testing.T) {
+func TestOpenAIGatewayService_OAuthAdapter_CompactUsesJSONAndKeepsNonStreaming(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
@@ -437,7 +438,6 @@ func TestOpenAIGatewayService_OAuthPassthrough_CompactUsesJSONAndKeepsNonStreami
 		Type:           AccountTypeOAuth,
 		Concurrency:    1,
 		Credentials:    map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-acc"},
-		Extra:          map[string]any{"openai_passthrough": true},
 		Status:         StatusActive,
 		Schedulable:    true,
 		RateMultiplier: f64p(1),
@@ -456,7 +456,7 @@ func TestOpenAIGatewayService_OAuthPassthrough_CompactUsesJSONAndKeepsNonStreami
 	require.False(t, gjson.GetBytes(upstream.lastBody, "include").Exists())
 	require.False(t, gjson.GetBytes(upstream.lastBody, "tool_choice").Exists())
 	require.False(t, gjson.GetBytes(upstream.lastBody, "client_metadata").Exists())
-	require.Equal(t, "gpt-5.1-codex", gjson.GetBytes(upstream.lastBody, "model").String())
+	require.Equal(t, "gpt-5.3-codex", gjson.GetBytes(upstream.lastBody, "model").String())
 	require.Equal(t, "compact me", gjson.GetBytes(upstream.lastBody, "input.0.text").String())
 	require.Equal(t, "local-test-instructions", strings.TrimSpace(gjson.GetBytes(upstream.lastBody, "instructions").String()))
 	require.Equal(t, "function", gjson.GetBytes(upstream.lastBody, "tools.0.type").String())
@@ -470,11 +470,11 @@ func TestOpenAIGatewayService_OAuthPassthrough_CompactUsesJSONAndKeepsNonStreami
 	require.Equal(t, codexCLIVersion, upstream.lastReq.Header.Get("Version"))
 	require.NotEmpty(t, upstream.lastReq.Header.Get("Session_Id"))
 	require.Equal(t, "chatgpt.com", upstream.lastReq.Host)
-	require.Equal(t, "chatgpt-acc", upstream.lastReq.Header.Get("chatgpt-account-id"))
+	require.Equal(t, "chatgpt-acc", getHeaderRaw(upstream.lastReq.Header, "ChatGPT-Account-ID"))
 	require.Contains(t, rec.Body.String(), `"id":"cmp_123"`)
 }
 
-func TestOpenAIGatewayService_OAuthPassthrough_UpstreamRequestIgnoresClientCancel(t *testing.T) {
+func TestOpenAIGatewayService_OAuthAdapter_UpstreamRequestIgnoresClientCancel(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
@@ -487,7 +487,7 @@ func TestOpenAIGatewayService_OAuthPassthrough_UpstreamRequestIgnoresClientCance
 	originalBody := []byte(`{"model":"gpt-5.2","stream":true,"store":true,"instructions":"local-test-instructions","input":[{"type":"text","text":"hi"}]}`)
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusOK,
-		Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "x-request-id": []string{"rid_passthrough_ctx"}},
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "x-request-id": []string{"rid_adapter_ctx"}},
 		Body: io.NopCloser(strings.NewReader(strings.Join([]string{
 			`data: {"type":"response.completed","response":{"usage":{"input_tokens":2,"output_tokens":1}}}`,
 			"",
@@ -507,7 +507,6 @@ func TestOpenAIGatewayService_OAuthPassthrough_UpstreamRequestIgnoresClientCance
 		Type:           AccountTypeOAuth,
 		Concurrency:    1,
 		Credentials:    map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-acc"},
-		Extra:          map[string]any{"openai_passthrough": true, "openai_oauth_responses_websockets_v2_mode": OpenAIWSIngressModeOff},
 		Status:         StatusActive,
 		Schedulable:    true,
 		RateMultiplier: f64p(1),
@@ -520,7 +519,7 @@ func TestOpenAIGatewayService_OAuthPassthrough_UpstreamRequestIgnoresClientCance
 	require.NoError(t, upstream.lastReq.Context().Err())
 }
 
-func TestOpenAIGatewayService_OAuthPassthrough_CodexMissingInstructionsRejectedBeforeUpstream(t *testing.T) {
+func TestOpenAIGatewayService_OAuthAdapter_CodexMissingInstructionsUsesAdapterDefaults(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	logSink, restore := captureStructuredLog(t)
 	defer restore()
@@ -532,7 +531,7 @@ func TestOpenAIGatewayService_OAuthPassthrough_CodexMissingInstructionsRejectedB
 	c.Request.Header.Set("Content-Type", "application/json")
 	c.Request.Header.Set("OpenAI-Beta", "responses=experimental")
 
-	// Codex 模型且缺少 instructions，应在本地直接 403 拒绝，不触达上游。
+	// OAuth adapter 不做本地 instructions 拦截；终端策略只做 allowlist/归一化。
 	originalBody := []byte(`{"model":"gpt-5.1-codex-max","stream":false,"store":true,"input":[{"type":"text","text":"hi"}]}`)
 
 	upstream := &httpUpstreamRecorder{
@@ -555,25 +554,24 @@ func TestOpenAIGatewayService_OAuthPassthrough_CodexMissingInstructionsRejectedB
 		Type:           AccountTypeOAuth,
 		Concurrency:    1,
 		Credentials:    map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-acc"},
-		Extra:          map[string]any{"openai_passthrough": true},
 		Status:         StatusActive,
 		Schedulable:    true,
 		RateMultiplier: f64p(1),
 	}
 
 	result, err := svc.Forward(context.Background(), c, account, originalBody)
-	require.Error(t, err)
-	require.Nil(t, result)
-	require.Equal(t, http.StatusForbidden, rec.Code)
-	require.Contains(t, rec.Body.String(), "requires a non-empty instructions field")
-	require.Nil(t, upstream.lastReq)
-
-	require.True(t, logSink.ContainsMessage("OpenAI passthrough 本地拦截：Codex 请求缺少有效 instructions"))
-	require.True(t, logSink.ContainsFieldValue("request_user_agent", "codex_cli_rs/0.98.0 (Windows 10.0.19045; x86_64) unknown"))
-	require.True(t, logSink.ContainsFieldValue("reject_reason", "instructions_missing"))
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NotNil(t, upstream.lastReq)
+	require.Equal(t, chatgptCodexURL, upstream.lastReq.URL.String())
+	require.Equal(t, "gpt-5.3-codex", gjson.GetBytes(upstream.lastBody, "model").String())
+	require.NotEmpty(t, strings.TrimSpace(gjson.GetBytes(upstream.lastBody, "instructions").String()))
+	require.False(t, logSink.ContainsFieldValue("request_user_agent", "codex_cli_rs/0.98.0 (Windows 10.0.19045; x86_64) unknown"))
+	require.False(t, logSink.ContainsFieldValue("reject_reason", "instructions_missing"))
 }
 
-func TestOpenAIGatewayService_OAuthPassthrough_DisabledUsesLegacyTransform(t *testing.T) {
+func TestOpenAIGatewayService_OAuthAdapter_UsesAllowlistFiltering(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
@@ -581,8 +579,20 @@ func TestOpenAIGatewayService_OAuthPassthrough_DisabledUsesLegacyTransform(t *te
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
 	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.1.0")
 
-	// store=true + stream=false should be forced to store=false + stream=true by applyCodexOAuthTransform (OAuth legacy path)
-	inputBody := []byte(`{"model":"gpt-5.2","stream":false,"store":true,"input":[{"type":"text","text":"hi"}]}`)
+	inputBody := []byte(`{
+		"model":"gpt-5.2",
+		"stream":false,
+		"store":true,
+		"input":"hi",
+		"instructions":"be helpful",
+		"reasoning":{"effort":"medium"},
+		"max_output_tokens":1024,
+		"temperature":0.5,
+		"top_p":0.9,
+		"user":"should-drop",
+		"metadata":{"should":"drop"},
+		"previous_response_id":"resp_should_drop"
+	}`)
 
 	resp := &http.Response{
 		StatusCode: http.StatusOK,
@@ -603,7 +613,6 @@ func TestOpenAIGatewayService_OAuthPassthrough_DisabledUsesLegacyTransform(t *te
 		Type:           AccountTypeOAuth,
 		Concurrency:    1,
 		Credentials:    map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-acc"},
-		Extra:          map[string]any{"openai_passthrough": false},
 		Status:         StatusActive,
 		Schedulable:    true,
 		RateMultiplier: f64p(1),
@@ -612,13 +621,19 @@ func TestOpenAIGatewayService_OAuthPassthrough_DisabledUsesLegacyTransform(t *te
 	_, err := svc.Forward(context.Background(), c, account, inputBody)
 	require.NoError(t, err)
 
-	// legacy path rewrites request body (not byte-equal)
-	require.NotEqual(t, inputBody, upstream.lastBody)
-	require.Contains(t, string(upstream.lastBody), `"store":false`)
-	require.Contains(t, string(upstream.lastBody), `"stream":true`)
+	require.Equal(t, "gpt-5.2", gjson.GetBytes(upstream.lastBody, "model").String())
+	require.Equal(t, "hi", gjson.GetBytes(upstream.lastBody, "input.0.content").String())
+	require.Equal(t, "be helpful", gjson.GetBytes(upstream.lastBody, "instructions").String())
+	require.Equal(t, "medium", gjson.GetBytes(upstream.lastBody, "reasoning.effort").String())
+	require.False(t, gjson.GetBytes(upstream.lastBody, "store").Bool())
+	require.True(t, gjson.GetBytes(upstream.lastBody, "stream").Bool())
+
+	for _, field := range []string{"max_output_tokens", "temperature", "top_p", "user", "metadata", "previous_response_id"} {
+		require.False(t, gjson.GetBytes(upstream.lastBody, field).Exists(), "%s should be removed by OAuth allowlist", field)
+	}
 }
 
-func TestOpenAIGatewayService_OAuthLegacy_UpstreamRequestIgnoresClientCancel(t *testing.T) {
+func TestOpenAIGatewayService_OAuthAdapter_NonStreamingUpstreamRequestIgnoresClientCancel(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
@@ -651,7 +666,6 @@ func TestOpenAIGatewayService_OAuthLegacy_UpstreamRequestIgnoresClientCancel(t *
 		Type:           AccountTypeOAuth,
 		Concurrency:    1,
 		Credentials:    map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-acc"},
-		Extra:          map[string]any{"openai_passthrough": false, "openai_oauth_responses_websockets_v2_mode": OpenAIWSIngressModeOff},
 		Status:         StatusActive,
 		Schedulable:    true,
 		RateMultiplier: f64p(1),
@@ -664,7 +678,7 @@ func TestOpenAIGatewayService_OAuthLegacy_UpstreamRequestIgnoresClientCancel(t *
 	require.NoError(t, upstream.lastReq.Context().Err())
 }
 
-func TestOpenAIGatewayService_OAuthLegacy_CompositeCodexUAUsesCodexOriginator(t *testing.T) {
+func TestOpenAIGatewayService_OAuthAdapter_CompositeCodexUAUsesCodexOriginator(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
@@ -694,7 +708,6 @@ func TestOpenAIGatewayService_OAuthLegacy_CompositeCodexUAUsesCodexOriginator(t 
 		Type:           AccountTypeOAuth,
 		Concurrency:    1,
 		Credentials:    map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-acc"},
-		Extra:          map[string]any{"openai_passthrough": false},
 		Status:         StatusActive,
 		Schedulable:    true,
 		RateMultiplier: f64p(1),
@@ -707,7 +720,7 @@ func TestOpenAIGatewayService_OAuthLegacy_CompositeCodexUAUsesCodexOriginator(t 
 	require.NotEqual(t, "opencode", upstream.lastReq.Header.Get("originator"))
 }
 
-func TestOpenAIGatewayService_OAuthPassthrough_ResponseHeadersAllowXCodex(t *testing.T) {
+func TestOpenAIGatewayService_OAuthAdapter_ResponseHeadersUseGenericFilterForXCodex(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
@@ -752,7 +765,6 @@ func TestOpenAIGatewayService_OAuthPassthrough_ResponseHeadersAllowXCodex(t *tes
 		Type:           AccountTypeOAuth,
 		Concurrency:    1,
 		Credentials:    map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-acc"},
-		Extra:          map[string]any{"openai_passthrough": true},
 		Status:         StatusActive,
 		Schedulable:    true,
 		RateMultiplier: f64p(1),
@@ -761,11 +773,12 @@ func TestOpenAIGatewayService_OAuthPassthrough_ResponseHeadersAllowXCodex(t *tes
 	_, err := svc.Forward(context.Background(), c, account, originalBody)
 	require.NoError(t, err)
 
-	require.Equal(t, "12", rec.Header().Get("x-codex-primary-used-percent"))
-	require.Equal(t, "34", rec.Header().Get("x-codex-secondary-used-percent"))
+	// OAuth adapter 不继承 APIKey native relay 的 x-codex-* 强制响应头放行；默认只走通用 header filter。
+	require.Empty(t, rec.Header().Get("x-codex-primary-used-percent"))
+	require.Empty(t, rec.Header().Get("x-codex-secondary-used-percent"))
 }
 
-func TestOpenAIGatewayService_OAuthPassthrough_UpstreamErrorIncludesPassthroughFlag(t *testing.T) {
+func TestOpenAIGatewayService_OAuthAdapter_UpstreamErrorUsesGenericErrorResponse(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
@@ -794,7 +807,6 @@ func TestOpenAIGatewayService_OAuthPassthrough_UpstreamErrorIncludesPassthroughF
 		Type:           AccountTypeOAuth,
 		Concurrency:    1,
 		Credentials:    map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-acc"},
-		Extra:          map[string]any{"openai_passthrough": true},
 		Status:         StatusActive,
 		Schedulable:    true,
 		RateMultiplier: f64p(1),
@@ -802,20 +814,20 @@ func TestOpenAIGatewayService_OAuthPassthrough_UpstreamErrorIncludesPassthroughF
 
 	_, err := svc.Forward(context.Background(), c, account, originalBody)
 	require.Error(t, err)
-	require.True(t, c.Writer.Written(), "非 429/529 的 passthrough 错误应继续原样写回客户端")
-	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.True(t, c.Writer.Written(), "OAuth adapter errors should use the generic gateway error response, not native relay replay")
+	require.Equal(t, http.StatusBadGateway, rec.Code)
 
-	// should append an upstream error event with passthrough=true
 	v, ok := c.Get(OpsUpstreamErrorsKey)
 	require.True(t, ok)
 	arr, ok := v.([]*OpsUpstreamErrorEvent)
 	require.True(t, ok)
 	require.NotEmpty(t, arr)
-	require.True(t, arr[len(arr)-1].Passthrough)
+	require.False(t, arr[len(arr)-1].Passthrough)
 	require.Equal(t, "http_error", arr[len(arr)-1].Kind)
+	require.Equal(t, http.StatusBadRequest, arr[len(arr)-1].UpstreamStatusCode)
 }
 
-func TestOpenAIGatewayService_OpenAIPassthrough_429And529TriggerFailover(t *testing.T) {
+func TestOpenAIGatewayService_OpenAIUpstream_429And529TriggerFailover(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	originalBody := []byte(`{"model":"gpt-5.2","stream":false,"instructions":"local-test-instructions","input":[{"type":"text","text":"hi"}]}`)
 
@@ -826,7 +838,6 @@ func TestOpenAIGatewayService_OpenAIPassthrough_429And529TriggerFailover(t *test
 			Platform:       PlatformOpenAI,
 			Type:           accountType,
 			Concurrency:    1,
-			Extra:          map[string]any{"openai_passthrough": true},
 			Status:         StatusActive,
 			Schedulable:    true,
 			RateMultiplier: f64p(1),
@@ -836,6 +847,7 @@ func TestOpenAIGatewayService_OpenAIPassthrough_429And529TriggerFailover(t *test
 			account.Credentials = map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-acc"}
 		case AccountTypeAPIKey:
 			account.Credentials = map[string]any{"api_key": "sk-test"}
+			account.Extra = map[string]any{"openai_passthrough": true}
 		}
 		return account
 	}
@@ -845,20 +857,19 @@ func TestOpenAIGatewayService_OpenAIPassthrough_429And529TriggerFailover(t *test
 		accountType string
 		statusCode  int
 		body        string
-		assertRepo  func(t *testing.T, repo *openAIPassthroughFailoverRepo, start time.Time)
+		assertRepo  func(t *testing.T, repo *openAIUpstreamFailoverRepo, start time.Time)
 	}{
 		{
-			name:        "oauth_429_rate_limit",
+			name:        "oauth_429_dynamic_signal_only",
 			accountType: AccountTypeOAuth,
 			statusCode:  http.StatusTooManyRequests,
 			body: func() string {
 				resetAt := time.Now().Add(7 * 24 * time.Hour).Unix()
 				return fmt.Sprintf(`{"error":{"message":"The usage limit has been reached","type":"usage_limit_reached","resets_at":%d}}`, resetAt)
 			}(),
-			assertRepo: func(t *testing.T, repo *openAIPassthroughFailoverRepo, _ time.Time) {
-				require.Len(t, repo.rateLimitCalls, 1)
+			assertRepo: func(t *testing.T, repo *openAIUpstreamFailoverRepo, _ time.Time) {
+				require.Empty(t, repo.rateLimitCalls)
 				require.Empty(t, repo.overloadCalls)
-				require.True(t, time.Until(repo.rateLimitCalls[0]) > 24*time.Hour)
 			},
 		},
 		{
@@ -866,7 +877,7 @@ func TestOpenAIGatewayService_OpenAIPassthrough_429And529TriggerFailover(t *test
 			accountType: AccountTypeOAuth,
 			statusCode:  529,
 			body:        `{"error":{"message":"server overloaded","type":"server_error"}}`,
-			assertRepo: func(t *testing.T, repo *openAIPassthroughFailoverRepo, start time.Time) {
+			assertRepo: func(t *testing.T, repo *openAIUpstreamFailoverRepo, start time.Time) {
 				require.Empty(t, repo.rateLimitCalls)
 				require.Len(t, repo.overloadCalls, 1)
 				require.WithinDuration(t, start.Add(10*time.Minute), repo.overloadCalls[0], 5*time.Second)
@@ -880,7 +891,7 @@ func TestOpenAIGatewayService_OpenAIPassthrough_429And529TriggerFailover(t *test
 				resetAt := time.Now().Add(7 * 24 * time.Hour).Unix()
 				return fmt.Sprintf(`{"error":{"message":"The usage limit has been reached","type":"usage_limit_reached","resets_at":%d}}`, resetAt)
 			}(),
-			assertRepo: func(t *testing.T, repo *openAIPassthroughFailoverRepo, _ time.Time) {
+			assertRepo: func(t *testing.T, repo *openAIUpstreamFailoverRepo, _ time.Time) {
 				require.Len(t, repo.rateLimitCalls, 1)
 				require.Empty(t, repo.overloadCalls)
 				require.True(t, time.Until(repo.rateLimitCalls[0]) > 24*time.Hour)
@@ -891,7 +902,7 @@ func TestOpenAIGatewayService_OpenAIPassthrough_429And529TriggerFailover(t *test
 			accountType: AccountTypeAPIKey,
 			statusCode:  529,
 			body:        `{"error":{"message":"server overloaded","type":"server_error"}}`,
-			assertRepo: func(t *testing.T, repo *openAIPassthroughFailoverRepo, start time.Time) {
+			assertRepo: func(t *testing.T, repo *openAIUpstreamFailoverRepo, start time.Time) {
 				require.Empty(t, repo.rateLimitCalls)
 				require.Len(t, repo.overloadCalls, 1)
 				require.WithinDuration(t, start.Add(10*time.Minute), repo.overloadCalls[0], 5*time.Second)
@@ -915,7 +926,7 @@ func TestOpenAIGatewayService_OpenAIPassthrough_429And529TriggerFailover(t *test
 				Body: io.NopCloser(strings.NewReader(tc.body)),
 			}
 			upstream := &httpUpstreamRecorder{resp: resp}
-			repo := &openAIPassthroughFailoverRepo{}
+			repo := &openAIUpstreamFailoverRepo{}
 			rateSvc := &RateLimitService{
 				accountRepo: repo,
 				cfg: &config.Config{
@@ -937,14 +948,14 @@ func TestOpenAIGatewayService_OpenAIPassthrough_429And529TriggerFailover(t *test
 			var failoverErr *UpstreamFailoverError
 			require.ErrorAs(t, err, &failoverErr)
 			require.Equal(t, tc.statusCode, failoverErr.StatusCode)
-			require.False(t, c.Writer.Written(), "429/529 passthrough 应返回 failover 错误给上层换号，而不是直接向客户端写响应")
+			require.False(t, c.Writer.Written(), "429/529 upstream capacity errors should return failover for account rotation instead of writing directly to the client")
 
 			v, ok := c.Get(OpsUpstreamErrorsKey)
 			require.True(t, ok)
 			arr, ok := v.([]*OpsUpstreamErrorEvent)
 			require.True(t, ok)
 			require.NotEmpty(t, arr)
-			require.True(t, arr[len(arr)-1].Passthrough)
+			require.Equal(t, tc.accountType == AccountTypeAPIKey, arr[len(arr)-1].Passthrough)
 			require.Equal(t, "failover", arr[len(arr)-1].Kind)
 			require.Equal(t, tc.statusCode, arr[len(arr)-1].UpstreamStatusCode)
 
@@ -953,7 +964,7 @@ func TestOpenAIGatewayService_OpenAIPassthrough_429And529TriggerFailover(t *test
 	}
 }
 
-func TestOpenAIGatewayService_OAuthPassthrough_NonCodexUAFallbackToCodexUA(t *testing.T) {
+func TestOpenAIGatewayService_OAuthAdapter_NonCodexUAFallbackToCodexUA(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
@@ -983,7 +994,6 @@ func TestOpenAIGatewayService_OAuthPassthrough_NonCodexUAFallbackToCodexUA(t *te
 		Type:           AccountTypeOAuth,
 		Concurrency:    1,
 		Credentials:    map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-acc"},
-		Extra:          map[string]any{"openai_passthrough": true},
 		Status:         StatusActive,
 		Schedulable:    true,
 		RateMultiplier: f64p(1),
@@ -996,7 +1006,7 @@ func TestOpenAIGatewayService_OAuthPassthrough_NonCodexUAFallbackToCodexUA(t *te
 	require.Equal(t, codexCLIUserAgent, upstream.lastReq.Header.Get("User-Agent"))
 }
 
-func TestOpenAIGatewayService_CodexCLIOnly_RejectsNonCodexClient(t *testing.T) {
+func TestOpenAIGatewayService_OAuthAdapter_CodexCLIOnlyRejectsNonCodexClient(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
@@ -1017,7 +1027,7 @@ func TestOpenAIGatewayService_CodexCLIOnly_RejectsNonCodexClient(t *testing.T) {
 		Type:           AccountTypeOAuth,
 		Concurrency:    1,
 		Credentials:    map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-acc"},
-		Extra:          map[string]any{"openai_passthrough": true, "codex_cli_only": true},
+		Extra:          map[string]any{"codex_cli_only": true},
 		Status:         StatusActive,
 		Schedulable:    true,
 		RateMultiplier: f64p(1),
@@ -1029,7 +1039,7 @@ func TestOpenAIGatewayService_CodexCLIOnly_RejectsNonCodexClient(t *testing.T) {
 	require.Contains(t, rec.Body.String(), "Codex official clients")
 }
 
-func TestOpenAIGatewayService_CodexCLIOnly_AllowOfficialClientFamilies(t *testing.T) {
+func TestOpenAIGatewayService_OAuthAdapter_CodexCLIOnlyAllowsOfficialClientFamilies(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	tests := []struct {
@@ -1074,7 +1084,7 @@ func TestOpenAIGatewayService_CodexCLIOnly_AllowOfficialClientFamilies(t *testin
 				Type:           AccountTypeOAuth,
 				Concurrency:    1,
 				Credentials:    map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-acc"},
-				Extra:          map[string]any{"openai_passthrough": true, "codex_cli_only": true},
+				Extra:          map[string]any{"codex_cli_only": true},
 				Status:         StatusActive,
 				Schedulable:    true,
 				RateMultiplier: f64p(1),
@@ -1087,7 +1097,7 @@ func TestOpenAIGatewayService_CodexCLIOnly_AllowOfficialClientFamilies(t *testin
 	}
 }
 
-func TestOpenAIGatewayService_OAuthPassthrough_StreamingSetsFirstTokenMs(t *testing.T) {
+func TestOpenAIGatewayService_OAuthAdapter_StreamingSetsFirstTokenMs(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
@@ -1122,7 +1132,6 @@ func TestOpenAIGatewayService_OAuthPassthrough_StreamingSetsFirstTokenMs(t *test
 		Type:           AccountTypeOAuth,
 		Concurrency:    1,
 		Credentials:    map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-acc"},
-		Extra:          map[string]any{"openai_passthrough": true},
 		Status:         StatusActive,
 		Schedulable:    true,
 		RateMultiplier: f64p(1),
@@ -1139,7 +1148,7 @@ func TestOpenAIGatewayService_OAuthPassthrough_StreamingSetsFirstTokenMs(t *test
 	require.Equal(t, "priority", *result.ServiceTier)
 }
 
-func TestOpenAIGatewayService_OAuthPassthrough_StreamClientDisconnectStillCollectsUsage(t *testing.T) {
+func TestOpenAIGatewayService_OAuthAdapter_StreamClientDisconnectStillCollectsUsage(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
@@ -1178,7 +1187,6 @@ func TestOpenAIGatewayService_OAuthPassthrough_StreamClientDisconnectStillCollec
 		Type:           AccountTypeOAuth,
 		Concurrency:    1,
 		Credentials:    map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-acc"},
-		Extra:          map[string]any{"openai_passthrough": true},
 		Status:         StatusActive,
 		Schedulable:    true,
 		RateMultiplier: f64p(1),
@@ -1242,7 +1250,7 @@ func TestOpenAIGatewayService_APIKeyPassthrough_PreservesBodyAndUsesResponsesEnd
 	require.Empty(t, upstream.lastReq.Header.Get("X-Test"))
 }
 
-func TestOpenAIGatewayService_OAuthPassthrough_WarnOnTimeoutHeadersForStream(t *testing.T) {
+func TestOpenAIGatewayService_OAuthAdapter_FiltersTimeoutHeadersForStreamWithoutWarning(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	logSink, restore := captureStructuredLog(t)
 	defer restore()
@@ -1271,7 +1279,6 @@ func TestOpenAIGatewayService_OAuthPassthrough_WarnOnTimeoutHeadersForStream(t *
 		Type:           AccountTypeOAuth,
 		Concurrency:    1,
 		Credentials:    map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-acc"},
-		Extra:          map[string]any{"openai_passthrough": true},
 		Status:         StatusActive,
 		Schedulable:    true,
 		RateMultiplier: f64p(1),
@@ -1279,11 +1286,13 @@ func TestOpenAIGatewayService_OAuthPassthrough_WarnOnTimeoutHeadersForStream(t *
 
 	_, err := svc.Forward(context.Background(), c, account, originalBody)
 	require.NoError(t, err)
-	require.True(t, logSink.ContainsMessage("检测到超时相关请求头，将按配置过滤以降低断流风险"))
-	require.True(t, logSink.ContainsFieldValue("timeout_headers", "x-stainless-timeout=10000"))
+	require.NotNil(t, upstream.lastReq)
+	require.Empty(t, upstream.lastReq.Header.Get("x-stainless-timeout"))
+	require.False(t, logSink.ContainsMessage("检测到超时相关请求头，将按配置过滤以降低断流风险"))
+	require.False(t, logSink.ContainsFieldValue("timeout_headers", "x-stainless-timeout=10000"))
 }
 
-func TestOpenAIGatewayService_OAuthPassthrough_InfoWhenStreamEndsWithoutDone(t *testing.T) {
+func TestOpenAIGatewayService_OAuthAdapter_StreamEndsWithoutDoneDoesNotEmitNativeRelayLog(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	logSink, restore := captureStructuredLog(t)
 	defer restore()
@@ -1312,7 +1321,6 @@ func TestOpenAIGatewayService_OAuthPassthrough_InfoWhenStreamEndsWithoutDone(t *
 		Type:           AccountTypeOAuth,
 		Concurrency:    1,
 		Credentials:    map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-acc"},
-		Extra:          map[string]any{"openai_passthrough": true},
 		Status:         StatusActive,
 		Schedulable:    true,
 		RateMultiplier: f64p(1),
@@ -1320,12 +1328,12 @@ func TestOpenAIGatewayService_OAuthPassthrough_InfoWhenStreamEndsWithoutDone(t *
 
 	_, err := svc.Forward(context.Background(), c, account, originalBody)
 	require.EqualError(t, err, "stream usage incomplete: missing terminal event")
-	require.True(t, logSink.ContainsMessage("上游流在未收到 [DONE] 时结束，疑似断流"))
-	require.True(t, logSink.ContainsMessageAtLevel("上游流在未收到 [DONE] 时结束，疑似断流", "info"))
-	require.True(t, logSink.ContainsFieldValue("upstream_request_id", "rid-truncate"))
+	require.False(t, logSink.ContainsMessage("上游流在未收到 [DONE] 时结束，疑似断流"))
+	require.False(t, logSink.ContainsMessageAtLevel("上游流在未收到 [DONE] 时结束，疑似断流", "info"))
+	require.False(t, logSink.ContainsFieldValue("upstream_request_id", "rid-truncate"))
 }
 
-func TestOpenAIGatewayService_OAuthPassthrough_DefaultFiltersTimeoutHeaders(t *testing.T) {
+func TestOpenAIGatewayService_OAuthAdapter_DefaultFiltersTimeoutHeaders(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
@@ -1358,7 +1366,6 @@ func TestOpenAIGatewayService_OAuthPassthrough_DefaultFiltersTimeoutHeaders(t *t
 		Type:           AccountTypeOAuth,
 		Concurrency:    1,
 		Credentials:    map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-acc"},
-		Extra:          map[string]any{"openai_passthrough": true},
 		Status:         StatusActive,
 		Schedulable:    true,
 		RateMultiplier: f64p(1),
@@ -1371,7 +1378,7 @@ func TestOpenAIGatewayService_OAuthPassthrough_DefaultFiltersTimeoutHeaders(t *t
 	require.Empty(t, upstream.lastReq.Header.Get("X-Test"))
 }
 
-func TestOpenAIGatewayService_OAuthPassthrough_AllowTimeoutHeadersWhenConfigured(t *testing.T) {
+func TestOpenAIGatewayService_OAuthAdapter_IgnoresAPIKeyTimeoutHeaderNativeRelayConfig(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
@@ -1407,7 +1414,6 @@ func TestOpenAIGatewayService_OAuthPassthrough_AllowTimeoutHeadersWhenConfigured
 		Type:           AccountTypeOAuth,
 		Concurrency:    1,
 		Credentials:    map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-acc"},
-		Extra:          map[string]any{"openai_passthrough": true},
 		Status:         StatusActive,
 		Schedulable:    true,
 		RateMultiplier: f64p(1),
@@ -1416,6 +1422,7 @@ func TestOpenAIGatewayService_OAuthPassthrough_AllowTimeoutHeadersWhenConfigured
 	_, err := svc.Forward(context.Background(), c, account, originalBody)
 	require.NoError(t, err)
 	require.NotNil(t, upstream.lastReq)
-	require.Equal(t, "120000", upstream.lastReq.Header.Get("x-stainless-timeout"))
+	// OAuth adapter ignores APIKey native-relay timeout-header config.
+	require.Empty(t, upstream.lastReq.Header.Get("x-stainless-timeout"))
 	require.Empty(t, upstream.lastReq.Header.Get("X-Test"))
 }

@@ -134,20 +134,23 @@ type UpdateAccountRequest struct {
 
 // BulkUpdateAccountsRequest represents the payload for bulk editing accounts
 type BulkUpdateAccountsRequest struct {
-	AccountIDs              []int64                   `json:"account_ids"`
-	Filters                 *BulkUpdateAccountFilters `json:"filters"`
-	Name                    string                    `json:"name"`
-	ProxyID                 *int64                    `json:"proxy_id"`
-	Concurrency             *int                      `json:"concurrency"`
-	Priority                *int                      `json:"priority"`
-	RateMultiplier          *float64                  `json:"rate_multiplier"`
-	LoadFactor              *int                      `json:"load_factor"`
-	Status                  string                    `json:"status" binding:"omitempty,oneof=active inactive error"`
-	Schedulable             *bool                     `json:"schedulable"`
-	GroupIDs                *[]int64                  `json:"group_ids"`
-	Credentials             map[string]any            `json:"credentials"`
-	Extra                   map[string]any            `json:"extra"`
-	ConfirmMixedChannelRisk *bool                     `json:"confirm_mixed_channel_risk"` // 用户确认混合渠道风险
+	AccountIDs     []int64                   `json:"account_ids"`
+	Filters        *BulkUpdateAccountFilters `json:"filters"`
+	Name           string                    `json:"name"`
+	ProxyID        *int64                    `json:"proxy_id"`
+	Concurrency    *int                      `json:"concurrency"`
+	Priority       *int                      `json:"priority"`
+	RateMultiplier *float64                  `json:"rate_multiplier"`
+	LoadFactor     *int                      `json:"load_factor"`
+	Status         string                    `json:"status" binding:"omitempty,oneof=active inactive error"`
+	Schedulable    *bool                     `json:"schedulable"`
+	GroupIDs       *[]int64                  `json:"group_ids"`
+	Credentials    map[string]any            `json:"credentials"`
+	Extra          map[string]any            `json:"extra"`
+	// ExtraDeleteKeys is a temporary bulk cleanup hook for legacy OAuth extra keys;
+	// remove the API field after historical passthrough/WS config has been migrated.
+	ExtraDeleteKeys         []string `json:"extra_delete_keys"`
+	ConfirmMixedChannelRisk *bool    `json:"confirm_mixed_channel_risk"` // 用户确认混合渠道风险
 }
 
 type BulkUpdateAccountFilters struct {
@@ -622,7 +625,18 @@ func (h *AccountHandler) Update(c *gin.Context) {
 	// 确定是否跳过混合渠道检查
 	skipCheck := req.ConfirmMixedChannelRisk != nil && *req.ConfirmMixedChannelRisk
 
-	account, err := h.adminService.UpdateAccount(c.Request.Context(), accountID, &service.UpdateAccountInput{
+	ctx := c.Request.Context()
+	needsTokenInvalidation := h.tokenCacheInvalidator != nil && (req.Type != "" || len(req.Credentials) > 0)
+	var previousAccount *service.Account
+	if needsTokenInvalidation {
+		previousAccount, err = h.adminService.GetAccount(ctx, accountID)
+		if err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+	}
+
+	account, err := h.adminService.UpdateAccount(ctx, accountID, &service.UpdateAccountInput{
 		Name:                  req.Name,
 		Notes:                 req.Notes,
 		Type:                  req.Type,
@@ -655,13 +669,36 @@ func (h *AccountHandler) Update(c *gin.Context) {
 		return
 	}
 
+	if needsTokenInvalidation {
+		h.invalidateOpenAIOAuthLikeTokenCache(ctx, previousAccount, account)
+	}
+
 	// OpenAI APIKey: credentials 修改后重新探测上游能力（base_url/api_key 可能变更）。
 	// 异步执行，探测失败不影响账号更新响应。
 	if len(req.Credentials) > 0 {
 		h.scheduleOpenAIResponsesProbe(account)
 	}
 
-	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), account))
+	response.Success(c, h.buildAccountResponseWithRuntime(ctx, account))
+}
+
+func (h *AccountHandler) invalidateOpenAIOAuthLikeTokenCache(ctx context.Context, previousAccount, updatedAccount *service.Account) {
+	if h == nil || h.tokenCacheInvalidator == nil {
+		return
+	}
+	account := updatedAccount
+	if account == nil || !account.IsOpenAIOAuthLike() {
+		account = previousAccount
+	}
+	if account == nil || !account.IsOpenAIOAuthLike() {
+		return
+	}
+	if err := h.tokenCacheInvalidator.InvalidateToken(ctx, account); err != nil {
+		slog.Warn("account_update.invalidate_openai_oauth_token_failed",
+			"account_id", account.ID,
+			"err", err,
+		)
+	}
 }
 
 // scheduleOpenAIResponsesProbe 异步触发 OpenAI APIKey 账号的 Responses API 能力探测。
@@ -996,16 +1033,19 @@ type ApplyOAuthCredentialsRequest struct {
 	Type        string         `json:"type" binding:"required,oneof=oauth setup-token"`
 	Credentials map[string]any `json:"credentials" binding:"required"`
 	Extra       map[string]any `json:"extra"`
+	// ExtraDeleteKeys is a temporary cleanup hook for re-authing legacy OpenAI OAuth extra keys;
+	// remove it after historical passthrough/WS config has been migrated.
+	ExtraDeleteKeys []string `json:"extra_delete_keys"`
 }
 
 // ApplyOAuthCredentials 将"重新授权"得到的新凭据原子落库。
 // POST /api/v1/admin/accounts/:id/apply-oauth-credentials
 //
 // 与通用 PUT /:id (Update) 接口的关键区别：
-//   - 仅接收 type / credentials / extra 三个字段（不接受 concurrency / rpm / quota_* 等可能误传的字段）
-//   - Extra 走 UpdateAccountExtra(JSONB key 级合并)，**绝不**全量覆盖；
-//     避免 base_rpm / window_cost_limit / max_sessions / quota_* / privacy_mode
-//     等持久化配置在重新授权后丢失
+//   - 仅接收 type / credentials / extra / extra_delete_keys（不接受 concurrency / rpm / quota_* 等可能误传的字段）
+//   - Extra 由 service 在校验候选状态后做 JSONB key 级合并，避免 base_rpm / window_cost_limit /
+//     max_sessions / quota_* / privacy_mode 等持久化配置在重新授权后丢失，也避免全量快照覆盖运行态并发更新；
+//     同时确保 OAuth legacy 写入守卫能在任何落库前拒绝非法 Extra
 //   - 内置 ClearError + InvalidateToken，避免前端额外两次调用，
 //     并修复旧路径未失效 token 缓存导致重新授权后立即 401 的隐性 bug
 //
@@ -1037,31 +1077,15 @@ func (h *AccountHandler) ApplyOAuthCredentials(c *gin.Context) {
 		return
 	}
 
-	updatedAccount, err := h.adminService.UpdateAccount(ctx, accountID, &service.UpdateAccountInput{
-		Type:        req.Type,
-		Credentials: req.Credentials,
+	updatedAccount, err := h.adminService.ApplyOAuthCredentials(ctx, accountID, &service.ApplyOAuthCredentialsInput{
+		Type:            req.Type,
+		Credentials:     req.Credentials,
+		Extra:           req.Extra,
+		ExtraDeleteKeys: req.ExtraDeleteKeys,
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
-	}
-
-	// 增量合并 Extra（JSONB key 级 merge，绝不覆盖 base_rpm / window_cost_limit /
-	// max_sessions / quota_* / privacy_mode 等持久化键）。
-	// best-effort：失败仅记日志；下方 ClearAccountError 会从 DB 重新读取最新 account，
-	// 因此响应里的 extra 始终以 DB 为准——这里不需要手动维护内存快照。
-	if len(req.Extra) > 0 {
-		if extraErr := h.adminService.UpdateAccountExtra(ctx, accountID, req.Extra); extraErr != nil {
-			extraKeys := make([]string, 0, len(req.Extra))
-			for k := range req.Extra {
-				extraKeys = append(extraKeys, k)
-			}
-			slog.Error("apply_oauth_credentials.update_extra_failed",
-				"account_id", accountID,
-				"extra_keys", extraKeys,
-				"err", extraErr,
-			)
-		}
 	}
 
 	if cleared, clearErr := h.adminService.ClearAccountError(ctx, accountID); clearErr != nil {
@@ -1083,6 +1107,24 @@ func (h *AccountHandler) ApplyOAuthCredentials(c *gin.Context) {
 	}
 
 	response.Success(c, h.buildAccountResponseWithRuntime(ctx, updatedAccount))
+}
+
+// ResetOpenAICodexFingerprint rotates the server-owned OpenAI Codex account fingerprint.
+// POST /api/v1/admin/accounts/:id/reset-openai-codex-fingerprint
+func (h *AccountHandler) ResetOpenAICodexFingerprint(c *gin.Context) {
+	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid account ID")
+		return
+	}
+
+	account, err := h.adminService.ResetOpenAICodexFingerprint(c.Request.Context(), accountID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), account))
 }
 
 // GetStats handles getting account statistics
@@ -1540,6 +1582,7 @@ func (h *AccountHandler) BatchUpdateCredentials(c *gin.Context) {
 	// 阶段一：预验证所有账号存在，收集 credentials
 	type accountUpdate struct {
 		ID          int64
+		Account     *service.Account
 		Credentials map[string]any
 	}
 	updates := make([]accountUpdate, 0, len(req.AccountIDs))
@@ -1553,7 +1596,7 @@ func (h *AccountHandler) BatchUpdateCredentials(c *gin.Context) {
 			account.Credentials = make(map[string]any)
 		}
 		account.Credentials[req.Field] = req.Value
-		updates = append(updates, accountUpdate{ID: accountID, Credentials: account.Credentials})
+		updates = append(updates, accountUpdate{ID: accountID, Account: account, Credentials: account.Credentials})
 	}
 
 	// 阶段二：依次更新，返回每个账号的成功/失败明细，便于调用方重试
@@ -1564,7 +1607,8 @@ func (h *AccountHandler) BatchUpdateCredentials(c *gin.Context) {
 	results := make([]gin.H, 0, len(updates))
 	for _, u := range updates {
 		updateInput := &service.UpdateAccountInput{Credentials: u.Credentials}
-		if _, err := h.adminService.UpdateAccount(ctx, u.ID, updateInput); err != nil {
+		updatedAccount, err := h.adminService.UpdateAccount(ctx, u.ID, updateInput)
+		if err != nil {
 			failed++
 			failedIDs = append(failedIDs, u.ID)
 			results = append(results, gin.H{
@@ -1574,6 +1618,7 @@ func (h *AccountHandler) BatchUpdateCredentials(c *gin.Context) {
 			})
 			continue
 		}
+		h.invalidateOpenAIOAuthLikeTokenCache(ctx, u.Account, updatedAccount)
 		success++
 		successIDs = append(successIDs, u.ID)
 		results = append(results, gin.H{
@@ -1623,14 +1668,16 @@ func (h *AccountHandler) BulkUpdate(c *gin.Context) {
 		req.Schedulable != nil ||
 		req.GroupIDs != nil ||
 		len(req.Credentials) > 0 ||
-		len(req.Extra) > 0
+		len(req.Extra) > 0 ||
+		len(req.ExtraDeleteKeys) > 0
 
 	if !hasUpdates {
 		response.BadRequest(c, "No updates provided")
 		return
 	}
 
-	result, err := h.adminService.BulkUpdateAccounts(c.Request.Context(), &service.BulkUpdateAccountsInput{
+	ctx := c.Request.Context()
+	result, err := h.adminService.BulkUpdateAccounts(ctx, &service.BulkUpdateAccountsInput{
 		AccountIDs:            req.AccountIDs,
 		Filters:               toServiceBulkUpdateAccountFilters(req.Filters),
 		Name:                  req.Name,
@@ -1644,6 +1691,7 @@ func (h *AccountHandler) BulkUpdate(c *gin.Context) {
 		GroupIDs:              req.GroupIDs,
 		Credentials:           req.Credentials,
 		Extra:                 req.Extra,
+		ExtraDeleteKeys:       req.ExtraDeleteKeys,
 		SkipMixedChannelCheck: skipCheck,
 	})
 	if err != nil {
@@ -1663,6 +1711,17 @@ func (h *AccountHandler) BulkUpdate(c *gin.Context) {
 		}
 		response.ErrorFrom(c, err)
 		return
+	}
+
+	if len(req.Credentials) > 0 && h.tokenCacheInvalidator != nil && len(result.SuccessIDs) > 0 {
+		updatedAccounts, getErr := h.adminService.GetAccountsByIDs(ctx, result.SuccessIDs)
+		if getErr != nil {
+			slog.Warn("bulk_update.invalidate_openai_oauth_token_get_accounts_failed", "err", getErr)
+		} else {
+			for _, account := range updatedAccounts {
+				h.invalidateOpenAIOAuthLikeTokenCache(ctx, nil, account)
+			}
+		}
 	}
 
 	response.Success(c, result)

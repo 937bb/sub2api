@@ -77,4 +77,21 @@ describe('useOpenAIOAuth.exchangeAuthCode', () => {
       '未设置代理，当前服务器无法直连 OpenAI，导致 OpenAI OAuth 请求失败。请先选择可访问 OpenAI 的代理后重试；如果授权码已失效，请重新生成授权链接。'
     )
   })
+
+  it('sends the generated session state with the code exchange request', async () => {
+    vi.mocked(adminAPI.accounts.exchangeCode).mockResolvedValueOnce({
+      access_token: 'at',
+      refresh_token: 'rt'
+    })
+    const oauth = useOpenAIOAuth()
+
+    const tokenInfo = await oauth.exchangeAuthCode(' code ', 'session-id', 'generated-state')
+
+    expect(tokenInfo).toEqual({ access_token: 'at', refresh_token: 'rt' })
+    expect(adminAPI.accounts.exchangeCode).toHaveBeenCalledWith('/admin/openai/exchange-code', {
+      session_id: 'session-id',
+      code: 'code',
+      state: 'generated-state'
+    })
+  })
 })

@@ -5,7 +5,6 @@ package service
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -751,21 +750,4 @@ func TestResolveAccountStatsCost_CustomRulePriorityOverApplyPricing(t *testing.T
 	require.NotNil(t, result)
 	// Custom rule: 100*0.05 = 5.0 (NOT 99.0 from totalCost)
 	require.InDelta(t, 5.0, *result, 1e-12)
-}
-
-// ---------------------------------------------------------------------------
-// helpers for resolveAccountStatsCost tests
-// ---------------------------------------------------------------------------
-
-// newTestChannelServiceForStats creates a ChannelService with a single channel
-// mapped to the given groupID, suitable for resolveAccountStatsCost tests.
-func newTestChannelServiceForStats(t *testing.T, channel *Channel, groupID int64, platform string) *ChannelService {
-	t.Helper()
-	cache := newEmptyChannelCache()
-	cache.channelByGroupID[groupID] = channel
-	cache.groupPlatform[groupID] = platform
-	cs := &ChannelService{}
-	cache.loadedAt = time.Now()
-	cs.cache.Store(cache)
-	return cs
 }

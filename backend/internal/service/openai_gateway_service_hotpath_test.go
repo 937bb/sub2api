@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -192,6 +193,53 @@ func TestOpenAIGatewayService_Forward_MappedImageModelUsesImageGate(t *testing.T
 	require.Equal(t, http.StatusForbidden, rec.Code)
 }
 
+func TestOpenAIGatewayService_Forward_ImageCapabilityGateUsesFinalNormalizedModel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	upstream := &httpUpstreamRecorder{
+		resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"usage":{"input_tokens":1,"output_tokens":2}}`)),
+		},
+	}
+	cfg := &config.Config{}
+	cfg.Security.URLAllowlist.Enabled = false
+	svc := &OpenAIGatewayService{cfg: cfg, httpUpstream: upstream}
+	account := &Account{
+		ID:          31,
+		Name:        "openai-apikey",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key":       "sk-test",
+			"base_url":      "https://example.com",
+			"model_mapping": map[string]any{"draw-alias": "gpt-image-2"},
+		},
+		Extra: map[string]any{
+			openai_compat.ExtraKeyResponsesSupportedByModel: map[string]any{
+				"gpt-image-2":                  false,
+				openAIImagesResponsesMainModel: true,
+			},
+		},
+	}
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", nil)
+	c.Set("api_key", &APIKey{Group: &Group{AllowImageGeneration: true}})
+	SetOpenAIClientTransport(c, OpenAIClientTransportHTTP)
+
+	body := []byte(`{"model":"draw-alias","stream":false,"input":"draw"}`)
+	result, err := svc.Forward(context.Background(), c, account, body)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, upstream.lastReq)
+	require.Equal(t, "https://example.com/v1/responses", upstream.lastReq.URL.String())
+	require.Equal(t, openAIImagesResponsesMainModel, gjson.GetBytes(upstream.lastBody, "model").String())
+	require.True(t, gjson.GetBytes(upstream.lastBody, "tools").Exists())
+}
+
 func TestOpenAIGatewayService_Forward_TextDataImageDoesNotForceMapMarshal(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	upstream := &httpUpstreamRecorder{
@@ -348,8 +396,103 @@ func TestOpenAIGatewayService_Forward_HTTPRetryRecoveryDoesNotDecodeBeforeError(
 	require.Len(t, upstream.bodies, 2)
 	require.Equal(t, "gAAA", gjson.GetBytes(upstream.bodies[0], "input.0.encrypted_content").String())
 	require.Equal(t, "9007199254740993", gjson.GetBytes(upstream.bodies[0], "input.1.content.0.nonce").Raw)
-	require.False(t, gjson.GetBytes(upstream.bodies[1], "input.0.encrypted_content").Exists())
-	require.Equal(t, "summary_text", gjson.GetBytes(upstream.bodies[1], "input.0.summary.0.type").String())
+	require.Equal(t, "message", gjson.GetBytes(upstream.bodies[1], "input.0.type").String())
+}
+
+func TestOpenAIGatewayService_Forward_HTTPRetryRecoveryDropsReasoningWithoutEncryptedContent(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	upstream := &httpUpstreamRecorder{
+		responses: []*http.Response{
+			{
+				StatusCode: http.StatusBadRequest,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(`{"error":{"code":"invalid_encrypted_content","type":"invalid_request_error","message":"bad encrypted content"}}`)),
+			},
+			{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(`{"usage":{"input_tokens":1,"output_tokens":2}}`)),
+			},
+		},
+	}
+	cfg := &config.Config{}
+	cfg.Security.URLAllowlist.Enabled = false
+	svc := &OpenAIGatewayService{cfg: cfg, httpUpstream: upstream}
+	account := &Account{
+		ID:          10,
+		Name:        "openai-apikey",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key":  "sk-test",
+			"base_url": "https://example.com",
+		},
+		Extra: map[string]any{"use_responses_api": true},
+	}
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", nil)
+	SetOpenAIClientTransport(c, OpenAIClientTransportHTTP)
+
+	body := []byte(`{"model":"gpt-5","stream":false,"input":[{"type":"reasoning","summary":[{"type":"summary_text","text":"stale reasoning"}]},{"type":"message","content":[{"type":"input_text","text":"hi"}]}]}`)
+	result, err := svc.Forward(context.Background(), c, account, body)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Len(t, upstream.bodies, 2)
+	require.Equal(t, "reasoning", gjson.GetBytes(upstream.bodies[0], "input.0.type").String())
+	require.Equal(t, "message", gjson.GetBytes(upstream.bodies[1], "input.0.type").String())
+	require.False(t, gjson.GetBytes(upstream.bodies[1], "input.1").Exists())
+}
+
+func TestOpenAIGatewayService_Forward_HTTPRetryRecoveryDropsEncryptedContextItemsOnThinkingSignatureInvalid(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	upstream := &httpUpstreamRecorder{
+		responses: []*http.Response{
+			{
+				StatusCode: http.StatusBadRequest,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(`{"error":{"code":"thinking_signature_invalid","type":"invalid_request_error","message":"The encrypted content could not be verified."}}`)),
+			},
+			{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(`{"usage":{"input_tokens":1,"output_tokens":2}}`)),
+			},
+		},
+	}
+	cfg := &config.Config{}
+	cfg.Security.URLAllowlist.Enabled = false
+	svc := &OpenAIGatewayService{cfg: cfg, httpUpstream: upstream}
+	account := &Account{
+		ID:          10,
+		Name:        "openai-apikey",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key":  "sk-test",
+			"base_url": "https://example.com",
+		},
+		Extra: map[string]any{"use_responses_api": true},
+	}
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", nil)
+	SetOpenAIClientTransport(c, OpenAIClientTransportHTTP)
+
+	body := []byte(`{"model":"gpt-5.5","stream":false,"input":[{"type":"compaction","encrypted_content":"gAAA","summary":[{"type":"summary_text","text":"old compacted context"}]},{"type":"reasoning","encrypted_content":"rAAA","summary":[{"type":"summary_text","text":"stale reasoning"}]},{"type":"message","content":[{"type":"input_text","text":"hello"}]}]}`)
+	result, err := svc.Forward(context.Background(), c, account, body)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Len(t, upstream.bodies, 2)
+	require.Equal(t, "compaction", gjson.GetBytes(upstream.bodies[0], "input.0.type").String())
+	require.Equal(t, "gAAA", gjson.GetBytes(upstream.bodies[0], "input.0.encrypted_content").String())
+	require.Equal(t, "reasoning", gjson.GetBytes(upstream.bodies[0], "input.1.type").String())
+	require.Equal(t, "rAAA", gjson.GetBytes(upstream.bodies[0], "input.1.encrypted_content").String())
+	require.Equal(t, "message", gjson.GetBytes(upstream.bodies[0], "input.2.type").String())
+	require.Equal(t, "message", gjson.GetBytes(upstream.bodies[1], "input.0.type").String())
+	require.False(t, gjson.GetBytes(upstream.bodies[1], "input.1").Exists())
 }
 
 func TestOpenAIGatewayService_Forward_CodexSparkRejectsEscapedInputImage(t *testing.T) {
@@ -430,6 +573,47 @@ func TestOpenAIGatewayService_Forward_CodexBridgeInjectionSetsImageBilling(t *te
 	require.Equal(t, 1, result.ImageCount)
 	require.Equal(t, "2K", result.ImageSize)
 	require.Equal(t, "gpt-image-2", result.BillingModel)
+}
+
+func TestOpenAIGatewayService_Forward_BindsHTTPResponseID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cfg := &config.Config{}
+	cfg.Security.URLAllowlist.Enabled = false
+	upstream := &httpUpstreamRecorder{
+		resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"id":"resp_http_bind","usage":{"input_tokens":1,"output_tokens":2}}`)),
+		},
+	}
+	svc := &OpenAIGatewayService{cfg: cfg, httpUpstream: upstream}
+	account := &Account{
+		ID:          18,
+		Name:        "openai-apikey",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key":  "sk-test",
+			"base_url": "https://example.com",
+		},
+		Extra: map[string]any{"use_responses_api": true},
+	}
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", nil)
+	groupID := int64(1801)
+	c.Set("api_key", &APIKey{GroupID: &groupID})
+	SetOpenAIClientTransport(c, OpenAIClientTransportHTTP)
+
+	result, err := svc.Forward(context.Background(), c, account, []byte(`{"model":"gpt-5","stream":false,"input":"hi"}`))
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, "resp_http_bind", result.ResponseID)
+
+	got, err := svc.getOpenAIWSStateStore().GetResponseAccount(context.Background(), groupID, "resp_http_bind")
+	require.NoError(t, err)
+	require.Equal(t, account.ID, got)
 }
 
 func TestOpenAIGatewayService_Forward_HTTPDeletesPreviousResponseIDWhenPresent(t *testing.T) {
@@ -588,6 +772,13 @@ func TestExtractOpenAIReasoningEffortFromBody(t *testing.T) {
 			name:      "兼容 reasoning_effort",
 			body:      []byte(`{"reasoning_effort":"x-high"}`),
 			model:     "",
+			wantNil:   false,
+			wantValue: "xhigh",
+		},
+		{
+			name:      "max 归一化为 xhigh",
+			body:      []byte(`{"reasoning_effort":"max"}`),
+			model:     "deepseek-reasoner",
 			wantNil:   false,
 			wantValue: "xhigh",
 		},

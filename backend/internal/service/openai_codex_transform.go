@@ -109,8 +109,7 @@ func applyCodexOAuthTransformWithOptions(reqBody map[string]any, opts codexOAuth
 		result.NormalizedModel = normalizedModel
 	}
 
-	// store/stream 由 normalizeOpenAIPassthroughOAuthBody（passthrough）或
-	// Forward 的 markPatchDelete（非 passthrough）统一处理，此处不再重复。
+	// store/stream 由最终 HTTP allowlist 或 WS payload 分支统一处理，此处不再重复。
 
 	// Codex 行为：reasoning 非空时注入 include: ["reasoning.encrypted_content"]，
 	// 否则上游不返回加密推理内容。
@@ -799,7 +798,7 @@ func normalizeOpenAIResponsesImageOnlyModel(reqBody map[string]any) bool {
 }
 
 func normalizeOpenAIModelForUpstream(account *Account, model string) string {
-	if account == nil || account.Type == AccountTypeOAuth {
+	if account == nil || account.Type == AccountTypeOAuth || account.Type == AccountTypeSetupToken {
 		return normalizeCodexModel(model)
 	}
 	return strings.TrimSpace(model)

@@ -14,19 +14,36 @@ import (
 
 // OpenAIOAuthService handles OpenAI OAuth authentication flows
 type OpenAIOAuthService struct {
-	sessionStore         *openai.SessionStore
+	sessionStore         openAIOAuthSessionStore
 	proxyRepo            ProxyRepository
+	accountRepo          OpenAICodexFingerprintAccountRepository
 	oauthClient          OpenAIOAuthClient
+	userAgentProvider    OpenAICodexUserAgentProvider
 	privacyClientFactory PrivacyClientFactory // 用于调用 chatgpt.com/backend-api（ImpersonateChrome）
 }
 
-// NewOpenAIOAuthService creates a new OpenAI OAuth service
+// NewOpenAIOAuthService creates a new OpenAI OAuth service with in-memory pending session storage.
 func NewOpenAIOAuthService(proxyRepo ProxyRepository, oauthClient OpenAIOAuthClient) *OpenAIOAuthService {
+	return newOpenAIOAuthServiceWithSessionStore(proxyRepo, oauthClient, newOpenAIOAuthMemorySessionStore())
+}
+
+func newOpenAIOAuthServiceWithSessionStore(proxyRepo ProxyRepository, oauthClient OpenAIOAuthClient, sessionStore openAIOAuthSessionStore) *OpenAIOAuthService {
+	if sessionStore == nil {
+		sessionStore = newOpenAIOAuthMemorySessionStore()
+	}
 	return &OpenAIOAuthService{
-		sessionStore: openai.NewSessionStore(),
+		sessionStore: sessionStore,
 		proxyRepo:    proxyRepo,
 		oauthClient:  oauthClient,
 	}
+}
+
+func (s *OpenAIOAuthService) SetCodexFingerprintDependencies(accountRepo OpenAICodexFingerprintAccountRepository, userAgentProvider OpenAICodexUserAgentProvider) {
+	if s == nil {
+		return
+	}
+	s.accountRepo = accountRepo
+	s.userAgentProvider = userAgentProvider
 }
 
 // SetPrivacyClientFactory 注入 ImpersonateChrome 客户端工厂，
@@ -35,14 +52,44 @@ func (s *OpenAIOAuthService) SetPrivacyClientFactory(factory PrivacyClientFactor
 	s.privacyClientFactory = factory
 }
 
+func (s *OpenAIOAuthService) openAIOAuthPendingFingerprint(ctx context.Context, account *Account, now time.Time) (OpenAICodexFingerprint, error) {
+	defaultProfile := s.defaultOpenAICodexUAProfile(ctx)
+	if account != nil {
+		return ensureOpenAICodexFingerprintWithProfile(ctx, account, s.accountRepo, defaultProfile, now)
+	}
+	fingerprint, _ := NormalizeOpenAICodexFingerprint(nil, defaultProfile, now)
+	return fingerprint, nil
+}
+
+func (s *OpenAIOAuthService) defaultOpenAICodexUAProfile(ctx context.Context) OpenAICodexUAProfile {
+	ua := DefaultOpenAICodexUserAgent
+	if s != nil && s.userAgentProvider != nil {
+		if configured := strings.TrimSpace(s.userAgentProvider.GetOpenAICodexUserAgent(ctx)); configured != "" {
+			ua = configured
+		}
+	}
+	return ParseOpenAICodexUAProfile(ua)
+}
+
 // OpenAIAuthURLResult contains the authorization URL and session info
 type OpenAIAuthURLResult struct {
 	AuthURL   string `json:"auth_url"`
 	SessionID string `json:"session_id"`
 }
 
+type OpenAIAuthURLInput struct {
+	ProxyID     *int64
+	RedirectURI string
+	Platform    string
+	Account     *Account
+}
+
 // GenerateAuthURL generates an OpenAI OAuth authorization URL
 func (s *OpenAIOAuthService) GenerateAuthURL(ctx context.Context, proxyID *int64, redirectURI, platform string) (*OpenAIAuthURLResult, error) {
+	return s.GenerateAuthURLWithInput(ctx, OpenAIAuthURLInput{ProxyID: proxyID, RedirectURI: redirectURI, Platform: platform})
+}
+
+func (s *OpenAIOAuthService) GenerateAuthURLWithInput(ctx context.Context, input OpenAIAuthURLInput) (*OpenAIAuthURLResult, error) {
 	// Generate PKCE values
 	state, err := openai.GenerateState()
 	if err != nil {
@@ -64,8 +111,8 @@ func (s *OpenAIOAuthService) GenerateAuthURL(ctx context.Context, proxyID *int64
 
 	// Get proxy URL if specified
 	var proxyURL string
-	if proxyID != nil {
-		proxy, err := s.proxyRepo.GetByID(ctx, *proxyID)
+	if input.ProxyID != nil {
+		proxy, err := s.proxyRepo.GetByID(ctx, *input.ProxyID)
 		if err != nil {
 			return nil, infraerrors.Newf(http.StatusBadRequest, "OPENAI_OAUTH_PROXY_NOT_FOUND", "proxy not found: %v", err)
 		}
@@ -75,25 +122,36 @@ func (s *OpenAIOAuthService) GenerateAuthURL(ctx context.Context, proxyID *int64
 	}
 
 	// Use default redirect URI if not specified
+	redirectURI := input.RedirectURI
 	if redirectURI == "" {
 		redirectURI = openai.DefaultRedirectURI
 	}
-	normalizedPlatform := normalizeOpenAIOAuthPlatform(platform)
+	normalizedPlatform := normalizeOpenAIOAuthPlatform(input.Platform)
 	clientID, _ := openai.OAuthClientConfigByPlatform(normalizedPlatform)
+	createdAt := time.Now()
+	fingerprint, err := s.openAIOAuthPendingFingerprint(ctx, input.Account, createdAt)
+	if err != nil {
+		return nil, err
+	}
 
 	// Store session
-	session := &openai.OAuthSession{
-		State:        state,
-		CodeVerifier: codeVerifier,
-		ClientID:     clientID,
-		RedirectURI:  redirectURI,
-		ProxyURL:     proxyURL,
-		CreatedAt:    time.Now(),
+	session := &openAIOAuthPendingSession{
+		OAuthSession: openai.OAuthSession{
+			State:        state,
+			CodeVerifier: codeVerifier,
+			ClientID:     clientID,
+			RedirectURI:  redirectURI,
+			ProxyURL:     proxyURL,
+			CreatedAt:    createdAt,
+		},
+		CodexFingerprint: fingerprint,
 	}
-	s.sessionStore.Set(sessionID, session)
+	if err := s.sessionStore.Set(ctx, sessionID, session); err != nil {
+		return nil, infraerrors.Newf(http.StatusInternalServerError, "OPENAI_OAUTH_SESSION_STORE_FAILED", "failed to store oauth session: %v", err)
+	}
 
-	// Build authorization URL
-	authURL := openai.BuildAuthorizationURLForPlatform(state, codeChallenge, redirectURI, normalizedPlatform)
+	// Build authorization URL with the same profile originator used for token exchange.
+	authURL := openai.BuildAuthorizationURLForPlatformWithOriginator(state, codeChallenge, redirectURI, normalizedPlatform, fingerprint.UAProfile.Originator)
 
 	return &OpenAIAuthURLResult{
 		AuthURL:   authURL,
@@ -112,25 +170,26 @@ type OpenAIExchangeCodeInput struct {
 
 // OpenAITokenInfo represents the token information for OpenAI
 type OpenAITokenInfo struct {
-	AccessToken           string `json:"access_token"`
-	RefreshToken          string `json:"refresh_token"`
-	IDToken               string `json:"id_token,omitempty"`
-	ExpiresIn             int64  `json:"expires_in"`
-	ExpiresAt             int64  `json:"expires_at"`
-	ClientID              string `json:"client_id,omitempty"`
-	Email                 string `json:"email,omitempty"`
-	ChatGPTAccountID      string `json:"chatgpt_account_id,omitempty"`
-	ChatGPTUserID         string `json:"chatgpt_user_id,omitempty"`
-	OrganizationID        string `json:"organization_id,omitempty"`
-	PlanType              string `json:"plan_type,omitempty"`
-	SubscriptionExpiresAt string `json:"subscription_expires_at,omitempty"`
-	PrivacyMode           string `json:"privacy_mode,omitempty"`
+	AccessToken           string                  `json:"access_token"`
+	RefreshToken          string                  `json:"refresh_token"`
+	IDToken               string                  `json:"id_token,omitempty"`
+	ExpiresIn             int64                   `json:"expires_in"`
+	ExpiresAt             int64                   `json:"expires_at"`
+	ClientID              string                  `json:"client_id,omitempty"`
+	Email                 string                  `json:"email,omitempty"`
+	ChatGPTAccountID      string                  `json:"chatgpt_account_id,omitempty"`
+	ChatGPTUserID         string                  `json:"chatgpt_user_id,omitempty"`
+	OrganizationID        string                  `json:"organization_id,omitempty"`
+	PlanType              string                  `json:"plan_type,omitempty"`
+	SubscriptionExpiresAt string                  `json:"subscription_expires_at,omitempty"`
+	PrivacyMode           string                  `json:"privacy_mode,omitempty"`
+	CodexFingerprint      *OpenAICodexFingerprint `json:"-"`
 }
 
 // ExchangeCode exchanges authorization code for tokens
 func (s *OpenAIOAuthService) ExchangeCode(ctx context.Context, input *OpenAIExchangeCodeInput) (*OpenAITokenInfo, error) {
 	// Get session
-	session, ok := s.sessionStore.Get(input.SessionID)
+	session, ok := s.sessionStore.Get(ctx, input.SessionID)
 	if !ok {
 		return nil, infraerrors.New(http.StatusBadRequest, "OPENAI_OAUTH_SESSION_NOT_FOUND", "session not found or expired")
 	}
@@ -162,9 +221,13 @@ func (s *OpenAIOAuthService) ExchangeCode(ctx context.Context, input *OpenAIExch
 	if clientID == "" {
 		clientID = openai.ClientID
 	}
+	fingerprint, _ := NormalizeOpenAICodexFingerprint(session.CodexFingerprint, s.defaultOpenAICodexUAProfile(ctx), time.Now())
 
-	// Exchange code for token
-	tokenResp, err := s.oauthClient.ExchangeCode(ctx, input.Code, session.CodeVerifier, redirectURI, proxyURL, clientID)
+	// Exchange code with the pending account fingerprint captured when the auth URL was generated.
+	tokenResp, err := s.oauthClient.ExchangeCode(ctx, input.Code, session.CodeVerifier, redirectURI, proxyURL, OpenAIOAuthTokenOptions{
+		ClientID:  clientID,
+		UAProfile: fingerprint.UAProfile,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -181,15 +244,16 @@ func (s *OpenAIOAuthService) ExchangeCode(ctx context.Context, input *OpenAIExch
 	}
 
 	// Delete session after successful exchange
-	s.sessionStore.Delete(input.SessionID)
+	s.sessionStore.Delete(ctx, input.SessionID)
 
 	tokenInfo := &OpenAITokenInfo{
-		AccessToken:  tokenResp.AccessToken,
-		RefreshToken: tokenResp.RefreshToken,
-		IDToken:      tokenResp.IDToken,
-		ExpiresIn:    int64(tokenResp.ExpiresIn),
-		ExpiresAt:    time.Now().Unix() + int64(tokenResp.ExpiresIn),
-		ClientID:     clientID,
+		AccessToken:      tokenResp.AccessToken,
+		RefreshToken:     tokenResp.RefreshToken,
+		IDToken:          tokenResp.IDToken,
+		ExpiresIn:        int64(tokenResp.ExpiresIn),
+		ExpiresAt:        time.Now().Unix() + int64(tokenResp.ExpiresIn),
+		ClientID:         clientID,
+		CodexFingerprint: &fingerprint,
 	}
 
 	if userInfo != nil {
@@ -205,14 +269,18 @@ func (s *OpenAIOAuthService) ExchangeCode(ctx context.Context, input *OpenAIExch
 	return tokenInfo, nil
 }
 
-// RefreshToken refreshes an OpenAI OAuth token
+// RefreshToken refreshes an OpenAI OAuth token.
 func (s *OpenAIOAuthService) RefreshToken(ctx context.Context, refreshToken string, proxyURL string) (*OpenAITokenInfo, error) {
-	return s.RefreshTokenWithClientID(ctx, refreshToken, proxyURL, "")
+	return s.RefreshTokenWithOptions(ctx, refreshToken, proxyURL, OpenAIOAuthTokenOptions{})
 }
 
 // RefreshTokenWithClientID refreshes an OpenAI OAuth token with optional client_id.
 func (s *OpenAIOAuthService) RefreshTokenWithClientID(ctx context.Context, refreshToken string, proxyURL string, clientID string) (*OpenAITokenInfo, error) {
-	tokenResp, err := s.oauthClient.RefreshTokenWithClientID(ctx, refreshToken, proxyURL, clientID)
+	return s.RefreshTokenWithOptions(ctx, refreshToken, proxyURL, OpenAIOAuthTokenOptions{ClientID: clientID})
+}
+
+func (s *OpenAIOAuthService) RefreshTokenWithOptions(ctx context.Context, refreshToken string, proxyURL string, opts OpenAIOAuthTokenOptions) (*OpenAITokenInfo, error) {
+	tokenResp, err := s.oauthClient.RefreshTokenWithOptions(ctx, refreshToken, proxyURL, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -235,7 +303,7 @@ func (s *OpenAIOAuthService) RefreshTokenWithClientID(ctx context.Context, refre
 		ExpiresIn:    int64(tokenResp.ExpiresIn),
 		ExpiresAt:    time.Now().Unix() + int64(tokenResp.ExpiresIn),
 	}
-	if trimmed := strings.TrimSpace(clientID); trimmed != "" {
+	if trimmed := strings.TrimSpace(opts.ClientID); trimmed != "" {
 		tokenInfo.ClientID = trimmed
 	}
 
@@ -249,6 +317,21 @@ func (s *OpenAIOAuthService) RefreshTokenWithClientID(ctx context.Context, refre
 
 	s.enrichTokenInfo(ctx, tokenInfo, proxyURL)
 
+	return tokenInfo, nil
+}
+
+// RefreshTokenForNewAccount validates a manually supplied RT with a fresh server-owned
+// Codex fingerprint, then returns the same fingerprint for account creation.
+func (s *OpenAIOAuthService) RefreshTokenForNewAccount(ctx context.Context, refreshToken string, proxyURL string, clientID string) (*OpenAITokenInfo, error) {
+	fingerprint, _ := NormalizeOpenAICodexFingerprint(nil, s.defaultOpenAICodexUAProfile(ctx), time.Now())
+	tokenInfo, err := s.RefreshTokenWithOptions(ctx, refreshToken, proxyURL, OpenAIOAuthTokenOptions{
+		ClientID:  clientID,
+		UAProfile: fingerprint.UAProfile,
+	})
+	if err != nil {
+		return nil, err
+	}
+	tokenInfo.CodexFingerprint = &fingerprint
 	return tokenInfo, nil
 }
 
@@ -301,13 +384,18 @@ func resolveChatGPTSubscriptionAccountID(tokenInfo *OpenAITokenInfo, orgID strin
 	return ""
 }
 
-// RefreshAccountToken refreshes token for an OpenAI OAuth account
+// RefreshAccountToken refreshes token for an OpenAI OAuth account.
 func (s *OpenAIOAuthService) RefreshAccountToken(ctx context.Context, account *Account) (*OpenAITokenInfo, error) {
-	if account.Platform != PlatformOpenAI {
+	if account == nil || account.Platform != PlatformOpenAI {
 		return nil, infraerrors.New(http.StatusBadRequest, "OPENAI_OAUTH_INVALID_ACCOUNT", "account is not an OpenAI account")
 	}
-	if account.Type != AccountTypeOAuth {
-		return nil, infraerrors.New(http.StatusBadRequest, "OPENAI_OAUTH_INVALID_ACCOUNT_TYPE", "account is not an OAuth account")
+	if !account.IsOpenAIOAuthLike() {
+		return nil, infraerrors.New(http.StatusBadRequest, "OPENAI_OAUTH_INVALID_ACCOUNT_TYPE", "account is not an OpenAI OAuth/setup-token account")
+	}
+
+	fingerprint, err := ensureOpenAICodexFingerprintWithProfile(ctx, account, s.accountRepo, s.defaultOpenAICodexUAProfile(ctx), time.Now())
+	if err != nil {
+		return nil, err
 	}
 
 	var proxyURL string
@@ -338,6 +426,7 @@ func (s *OpenAIOAuthService) RefreshAccountToken(ctx context.Context, account *A
 				tokenInfo.ExpiresAt = expiresAt.Unix()
 				tokenInfo.ExpiresIn = int64(time.Until(*expiresAt).Seconds())
 			}
+			tokenInfo.CodexFingerprint = &fingerprint
 			s.enrichTokenInfo(ctx, tokenInfo, proxyURL)
 			return tokenInfo, nil
 		}
@@ -345,7 +434,15 @@ func (s *OpenAIOAuthService) RefreshAccountToken(ctx context.Context, account *A
 	}
 
 	clientID := account.GetCredential("client_id")
-	return s.RefreshTokenWithClientID(ctx, refreshToken, proxyURL, clientID)
+	tokenInfo, err := s.RefreshTokenWithOptions(ctx, refreshToken, proxyURL, OpenAIOAuthTokenOptions{
+		ClientID:  clientID,
+		UAProfile: fingerprint.UAProfile,
+	})
+	if err != nil {
+		return nil, err
+	}
+	tokenInfo.CodexFingerprint = &fingerprint
+	return tokenInfo, nil
 }
 
 // BuildAccountCredentials builds credentials map from token info

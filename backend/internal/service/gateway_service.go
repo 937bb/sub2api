@@ -585,6 +585,17 @@ func (e *UpstreamFailoverError) Error() string {
 	return fmt.Sprintf("upstream error: %d (failover)", e.StatusCode)
 }
 
+// sseStreamErrorEventError 表示上游 SSE 流体内出现 event:error 帧。
+// RawData 是该事件 data: 行的原始 JSON 字符串
+// （Anthropic 标准结构 {"type":"error","error":{"type":"...","message":"..."}}）。
+// Error() 保持原字符串以兼容现有日志/检索；调用方应通过 errors.As
+// 提取 RawData 并构造 UpstreamFailoverError.ResponseBody。
+type sseStreamErrorEventError struct {
+	RawData string
+}
+
+func (e *sseStreamErrorEventError) Error() string { return "have error in stream" }
+
 // TempUnscheduleRetryableError 对 RetryableOnSameAccount 类型的 failover 错误触发临时封禁。
 // 由 handler 层在同账号重试全部用尽、切换账号时调用。
 func (s *GatewayService) TempUnscheduleRetryableError(ctx context.Context, accountID int64, failoverErr *UpstreamFailoverError) {
@@ -770,7 +781,11 @@ func (s *GatewayService) GenerateSessionHash(parsed *ParsedRequest) string {
 	if systemText := extractTextFromSystemRaw(parsed.SystemRaw()); systemText != "" {
 		_, _ = combined.WriteString(systemText)
 	}
+	contentStart := combined.Len()
 	appendMessageTextsFromRaw(&combined, parsed.MessagesRaw())
+	if combined.Len() == contentStart {
+		appendResponsesSessionAnchorFromRaw(&combined, parsed.InputRaw())
+	}
 	if combined.Len() > 0 {
 		hash := s.hashContent(combined.String())
 		slog.Info("sticky.hash_source",
@@ -924,6 +939,65 @@ func appendMessageTextsFromRaw(builder *strings.Builder, raw []byte) {
 				}
 				return true
 			})
+		}
+		return true
+	})
+}
+
+func appendResponsesSessionAnchorFromRaw(builder *strings.Builder, raw []byte) {
+	if builder == nil || len(raw) == 0 {
+		return
+	}
+	input := parseRawJSONView(raw)
+	if input.Type == gjson.String {
+		_, _ = builder.WriteString(input.String())
+		return
+	}
+	if !input.IsArray() {
+		return
+	}
+
+	input.ForEach(func(_, item gjson.Result) bool {
+		if item.Type == gjson.String {
+			_, _ = builder.WriteString(item.String())
+			return false
+		}
+
+		switch item.Get("role").String() {
+		case "system", "developer":
+			appendResponsesContentText(builder, item.Get("content"))
+		case "user":
+			appendResponsesContentText(builder, item.Get("content"))
+			return false
+		default:
+			if item.Get("type").String() == "input_text" {
+				if text := item.Get("text").String(); text != "" {
+					_, _ = builder.WriteString(text)
+				}
+				return false
+			}
+		}
+		return true
+	})
+}
+
+func appendResponsesContentText(builder *strings.Builder, content gjson.Result) {
+	if builder == nil || !content.Exists() {
+		return
+	}
+	if content.Type == gjson.String {
+		_, _ = builder.WriteString(content.String())
+		return
+	}
+	if !content.IsArray() {
+		return
+	}
+	content.ForEach(func(_, part gjson.Result) bool {
+		switch part.Get("type").String() {
+		case "input_text", "text":
+			if text := part.Get("text").String(); text != "" {
+				_, _ = builder.WriteString(text)
+			}
 		}
 		return true
 	})
@@ -2361,14 +2435,16 @@ func (s *GatewayService) listSchedulableAccounts(ctx context.Context, groupID *i
 				"platform", platform,
 				"use_mixed", useMixed,
 				"count", len(accounts))
-			for _, acc := range accounts {
-				slog.Debug("account_scheduling_account_detail",
-					"account_id", acc.ID,
-					"name", acc.Name,
-					"platform", acc.Platform,
-					"type", acc.Type,
-					"status", acc.Status,
-					"tls_fingerprint", acc.IsTLSFingerprintEnabled())
+			if slog.Default().Enabled(ctx, slog.LevelDebug) {
+				for _, acc := range accounts {
+					slog.Debug("account_scheduling_account_detail",
+						"account_id", acc.ID,
+						"name", acc.Name,
+						"platform", acc.Platform,
+						"type", acc.Type,
+						"status", acc.Status,
+						"tls_fingerprint", acc.IsTLSFingerprintEnabled())
+				}
 			}
 		}
 		return accounts, useMixed, err
@@ -2404,14 +2480,16 @@ func (s *GatewayService) listSchedulableAccounts(ctx context.Context, groupID *i
 			"platform", platform,
 			"raw_count", len(accounts),
 			"filtered_count", len(filtered))
-		for _, acc := range filtered {
-			slog.Debug("account_scheduling_account_detail",
-				"account_id", acc.ID,
-				"name", acc.Name,
-				"platform", acc.Platform,
-				"type", acc.Type,
-				"status", acc.Status,
-				"tls_fingerprint", acc.IsTLSFingerprintEnabled())
+		if slog.Default().Enabled(ctx, slog.LevelDebug) {
+			for _, acc := range filtered {
+				slog.Debug("account_scheduling_account_detail",
+					"account_id", acc.ID,
+					"name", acc.Name,
+					"platform", acc.Platform,
+					"type", acc.Type,
+					"status", acc.Status,
+					"tls_fingerprint", acc.IsTLSFingerprintEnabled())
+			}
 		}
 		return filtered, useMixed, nil
 	}
@@ -2437,14 +2515,16 @@ func (s *GatewayService) listSchedulableAccounts(ctx context.Context, groupID *i
 		"group_id", derefGroupID(groupID),
 		"platform", platform,
 		"count", len(accounts))
-	for _, acc := range accounts {
-		slog.Debug("account_scheduling_account_detail",
-			"account_id", acc.ID,
-			"name", acc.Name,
-			"platform", acc.Platform,
-			"type", acc.Type,
-			"status", acc.Status,
-			"tls_fingerprint", acc.IsTLSFingerprintEnabled())
+	if slog.Default().Enabled(ctx, slog.LevelDebug) {
+		for _, acc := range accounts {
+			slog.Debug("account_scheduling_account_detail",
+				"account_id", acc.ID,
+				"name", acc.Name,
+				"platform", acc.Platform,
+				"type", acc.Type,
+				"status", acc.Status,
+				"tls_fingerprint", acc.IsTLSFingerprintEnabled())
+		}
 	}
 	return accounts, useMixed, nil
 }
@@ -3203,7 +3283,7 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 				continue
 			}
 			// require_privacy_set: 跳过 privacy 未设置的账号并标记异常
-			if schedGroup != nil && schedGroup.RequirePrivacySet && !acc.IsPrivacySet() {
+			if shouldBlockAccountForPrivacyRequirement(acc, schedGroup) {
 				_ = s.accountRepo.SetError(ctx, acc.ID,
 					fmt.Sprintf("Privacy not set, required by group [%s]", schedGroup.Name))
 				continue
@@ -3314,7 +3394,7 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 			continue
 		}
 		// require_privacy_set: 跳过 privacy 未设置的账号并标记异常
-		if schedGroup != nil && schedGroup.RequirePrivacySet && !acc.IsPrivacySet() {
+		if shouldBlockAccountForPrivacyRequirement(acc, schedGroup) {
 			_ = s.accountRepo.SetError(ctx, acc.ID,
 				fmt.Sprintf("Privacy not set, required by group [%s]", schedGroup.Name))
 			continue
@@ -3459,7 +3539,7 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 				continue
 			}
 			// require_privacy_set: 跳过 privacy 未设置的账号并标记异常
-			if schedGroup != nil && schedGroup.RequirePrivacySet && !acc.IsPrivacySet() {
+			if shouldBlockAccountForPrivacyRequirement(acc, schedGroup) {
 				_ = s.accountRepo.SetError(ctx, acc.ID,
 					fmt.Sprintf("Privacy not set, required by group [%s]", schedGroup.Name))
 				continue
@@ -3571,7 +3651,7 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 			continue
 		}
 		// require_privacy_set: 跳过 privacy 未设置的账号并标记异常
-		if schedGroup != nil && schedGroup.RequirePrivacySet && !acc.IsPrivacySet() {
+		if shouldBlockAccountForPrivacyRequirement(acc, schedGroup) {
 			_ = s.accountRepo.SetError(ctx, acc.ID,
 				fmt.Sprintf("Privacy not set, required by group [%s]", schedGroup.Name))
 			continue
@@ -4689,6 +4769,19 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	if err := replaceBody(StripEmptyTextBlocks(body)); err != nil {
 		return nil, err
 	}
+	// Only Anthropic-strict upstreams can safely drop unsigned thinking blocks;
+	// passback-required providers need historical thinking to round-trip unchanged.
+	if err := replaceBody(FilterThinkingBlocks(body, reqModel)); err != nil {
+		return nil, err
+	}
+	if ResolveThinkingProtocol(reqModel) == ThinkingProtocolPassbackRequired {
+		if rewritten, applied := NormalizeChineseLLMThinking(body, reqModel); applied {
+			if err := replaceBody(rewritten); err != nil {
+				return nil, err
+			}
+			logger.LegacyPrintf("service.gateway", "Account %d: rewrote thinking.type for %s", account.ID, reqModel)
+		}
+	}
 
 	// 重试循环
 	var resp *http.Response
@@ -4739,7 +4832,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 			if readErr == nil {
 				_ = resp.Body.Close()
 
-				if s.shouldRectifySignatureError(ctx, account, respBody) {
+				if s.shouldRectifySignatureError(ctx, account, respBody, reqModel) {
 					appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 						Platform:           account.Platform,
 						AccountID:          account.ID,
@@ -4779,7 +4872,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 					// 2) Only if upstream still errors AND error message points to tool/function signature issues:
 					//    also downgrade tool_use/tool_result blocks to text.
 
-					filteredBody := FilterThinkingBlocksForRetry(body)
+					filteredBody := FilterThinkingBlocksForRetry(body, reqModel)
 					retryCtx, releaseRetryCtx := detachStreamUpstreamContext(ctx, reqStream)
 					retryReq, retryWireBody, buildErr := s.buildUpstreamRequest(retryCtx, c, account, filteredBody, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
 					releaseRetryCtx()
@@ -4820,7 +4913,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 								msg2 := extractUpstreamErrorMessage(retryRespBody)
 								if looksLikeToolSignatureError(msg2) && time.Since(retryStart) < maxRetryElapsed {
 									logger.LegacyPrintf("service.gateway", "Account %d: signature retry still failing and looks tool-related, retrying with tool blocks downgraded", account.ID)
-									filteredBody2 := FilterSignatureSensitiveBlocksForRetry(body)
+									filteredBody2 := FilterSignatureSensitiveBlocksForRetry(body, reqModel)
 									retryCtx2, releaseRetryCtx2 := detachStreamUpstreamContext(ctx, reqStream)
 									retryReq2, retryWireBody2, buildErr2 := s.buildUpstreamRequest(retryCtx2, c, account, filteredBody2, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
 									releaseRetryCtx2()
@@ -5128,9 +5221,46 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	if reqStream {
 		streamResult, err := s.handleStreamingResponse(ctx, resp, c, account, startTime, originalModel, reqModel, shouldMimicClaudeCode)
 		if err != nil {
-			if err.Error() == "have error in stream" {
+			var sseErr *sseStreamErrorEventError
+			if errors.As(err, &sseErr) {
+				// 上游 HTTP 200 + SSE 流体内出现 event:error 帧。
+				// 保留 StatusCode=403 以兼容既有 failover/客户端响应语义，
+				// 但补全 ResponseBody 与 ops 上下文，让运维日志能反映上游真实错误。
+				body := []byte(sseErr.RawData)
+
+				upstreamMsg := sanitizeUpstreamErrorMessage(
+					strings.TrimSpace(extractUpstreamErrorMessage(body)),
+				)
+
+				upstreamDetail := ""
+				if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
+					maxBytes := s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes
+					if maxBytes <= 0 {
+						maxBytes = 2048
+					}
+					upstreamDetail = truncateString(sseErr.RawData, maxBytes)
+				}
+
+				appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+					Platform:           account.Platform,
+					AccountID:          account.ID,
+					AccountName:        account.Name,
+					UpstreamStatusCode: 403,
+					UpstreamRequestID:  resp.Header.Get("x-request-id"),
+					Kind:               "stream_error",
+					Message:            upstreamMsg,
+					Detail:             upstreamDetail,
+				})
+
+				logger.LegacyPrintf("service.gateway",
+					"[Forward] SSE error event in stream: Account=%d(%s) RequestID=%s Body=%s",
+					account.ID, account.Name, resp.Header.Get("x-request-id"),
+					truncateString(sseErr.RawData, 1000),
+				)
+
 				return nil, &UpstreamFailoverError{
-					StatusCode: 403,
+					StatusCode:   403,
+					ResponseBody: body,
 				}
 			}
 			return nil, err
@@ -5816,6 +5946,51 @@ func parseClaudeUsageFromResponseBody(body []byte) *ClaudeUsage {
 	return usage
 }
 
+func (s *GatewayService) invalidNonStreamingJSONFailoverError(
+	ctx context.Context,
+	resp *http.Response,
+	account *Account,
+	body []byte,
+	parseErr error,
+	requestedModel ...string,
+) error {
+	const statusCode = http.StatusBadGateway
+
+	accountID := int64(0)
+	accountName := ""
+	retryableOnSameAccount := false
+	if account != nil {
+		accountID = account.ID
+		accountName = account.Name
+		retryableOnSameAccount = account.IsPoolMode() && account.IsPoolModeRetryableStatus(statusCode)
+	}
+
+	logger.LegacyPrintf(
+		"service.gateway",
+		"Account %d(%s): upstream returned non-JSON 2xx response, attempting failover: status=%d request_id=%s error=%v",
+		accountID,
+		accountName,
+		resp.StatusCode,
+		resp.Header.Get("x-request-id"),
+		parseErr,
+	)
+
+	if s.rateLimitService != nil && account != nil {
+		if len(requestedModel) > 0 {
+			s.rateLimitService.HandleUpstreamError(ctx, account, statusCode, resp.Header, body, requestedModel[0])
+		} else {
+			s.rateLimitService.HandleUpstreamError(ctx, account, statusCode, resp.Header, body)
+		}
+	}
+
+	return &UpstreamFailoverError{
+		StatusCode:             statusCode,
+		ResponseBody:           body,
+		ResponseHeaders:        resp.Header,
+		RetryableOnSameAccount: retryableOnSameAccount,
+	}
+}
+
 func (s *GatewayService) handleNonStreamingResponseAnthropicAPIKeyPassthrough(
 	ctx context.Context,
 	resp *http.Response,
@@ -5829,6 +6004,13 @@ func (s *GatewayService) handleNonStreamingResponseAnthropicAPIKeyPassthrough(
 	body, err := ReadUpstreamResponseBody(resp.Body, s.cfg, c, anthropicTooLargeError)
 	if err != nil {
 		return nil, err
+	}
+
+	if resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices {
+		var raw json.RawMessage
+		if err := json.Unmarshal(body, &raw); err != nil {
+			return nil, s.invalidNonStreamingJSONFailoverError(ctx, resp, account, body, err)
+		}
 	}
 
 	usage := parseClaudeUsageFromResponseBody(body)
@@ -5859,17 +6041,42 @@ func writeAnthropicPassthroughResponseHeaders(dst http.Header, src http.Header, 
 	}
 }
 
-// ApplyBedrockCCCompat 应用 Bedrock CC 兼容转换（渠道级模型映射后调用）
-// 清理 Anthropic API 专有字段、注入 Bedrock 必需字段、修复 thinking/tool_use ID
-func (s *GatewayService) ApplyBedrockCCCompat(ctx context.Context, body []byte, model string, account *Account, groupID *int64) []byte {
+// ApplyBedrockCCCompat 应用 Bedrock CC 兼容转换（渠道级模型映射后调用）。
+// 只改写本次账号尝试的 body；HTTP anthropic-beta 通过
+// ApplyBedrockCCCompatBetaHeaderOverride 在 Forward 期间做作用域覆盖，避免 failover 后污染原始请求头。
+func (s *GatewayService) ApplyBedrockCCCompat(c *gin.Context, body []byte, model string, account *Account, groupID *int64) []byte {
+	ctx := context.Background()
+	betaHeader := ""
+	if c != nil && c.Request != nil {
+		ctx = c.Request.Context()
+		betaHeader = getHeaderRaw(c.Request.Header, "anthropic-beta")
+	}
 	if !s.isBedrockCCCompatEnabled(ctx, account, groupID) {
 		return body
 	}
 	body = sanitizeBedrockCCFields(body)
 	body = sanitizeBedrockThinking(body, model)
 	body = sanitizeBedrockToolUseIDs(body)
-	body = sanitizeBedrockCCBetaTokens(body, model)
+	body = sanitizeBedrockCCBetaTokens(body, model, betaHeader)
 	return body
+}
+
+// ApplyBedrockCCCompatBetaHeaderOverride filters anthropic-beta only for the current
+// Forward call. The returned restore function must be called immediately after Forward.
+func (s *GatewayService) ApplyBedrockCCCompatBetaHeaderOverride(c *gin.Context, body []byte, model string, account *Account, groupID *int64) func() {
+	if c == nil || c.Request == nil || account == nil || account.IsBedrock() {
+		return func() {}
+	}
+	ctx := c.Request.Context()
+	if !s.isBedrockCCCompatEnabled(ctx, account, groupID) {
+		return func() {}
+	}
+	betaHeader := getHeaderRaw(c.Request.Header, "anthropic-beta")
+	if betaHeader == "" {
+		return func() {}
+	}
+	filtered := ResolveBedrockBetaTokens(betaHeader, body, model)
+	return scopedHeaderRawOverride(c.Request.Header, "anthropic-beta", strings.Join(filtered, ", "), len(filtered) > 0)
 }
 
 // isBedrockCCCompatEnabled 检查渠道是否启用了 Bedrock CC 兼容模式
@@ -7050,7 +7257,10 @@ func truncateForLog(b []byte, maxBytes int) string {
 
 // shouldRectifySignatureError 统一判断是否应触发签名整流（strip thinking blocks 并重试）。
 // 根据账号类型检查对应的开关和匹配模式。
-func (s *GatewayService) shouldRectifySignatureError(ctx context.Context, account *Account, respBody []byte) bool {
+func (s *GatewayService) shouldRectifySignatureError(ctx context.Context, account *Account, respBody []byte, mappedModel string) bool {
+	if !ShouldRectifyThinkingSignatureError(mappedModel) {
+		return false
+	}
 	if account.Type == AccountTypeAPIKey {
 		// API Key 账号：独立开关，一次读取配置
 		settings, err := s.settingService.GetRectifierSettings(ctx)
@@ -7365,6 +7575,8 @@ func (s *GatewayService) handleErrorResponse(ctx context.Context, resp *http.Res
 		)
 	}
 
+	MarkResponseCommitted(c)
+
 	// 非 failover 错误也支持错误透传规则匹配。
 	if status, errType, errMsg, matched := applyErrorPassthroughRule(
 		c,
@@ -7527,6 +7739,8 @@ func (s *GatewayService) handleRetryExhaustedError(ctx context.Context, resp *ht
 			truncateForLog(respBody, s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes),
 		)
 	}
+
+	MarkResponseCommitted(c)
 
 	if status, errType, errMsg, matched := applyErrorPassthroughRule(
 		c,
@@ -7729,7 +7943,7 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 		}
 
 		if eventName == "error" {
-			return nil, dataLine, nil, errors.New("have error in stream")
+			return nil, dataLine, nil, &sseStreamErrorEventError{RawData: dataLine}
 		}
 
 		if dataLine == "" {
@@ -8213,6 +8427,9 @@ func (s *GatewayService) handleNonStreamingResponse(ctx context.Context, resp *h
 		Usage ClaudeUsage `json:"usage"`
 	}
 	if err := json.Unmarshal(body, &response); err != nil {
+		if resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices {
+			return nil, s.invalidNonStreamingJSONFailoverError(ctx, resp, account, body, err, mappedModel)
+		}
 		return nil, fmt.Errorf("parse response: %w", err)
 	}
 
@@ -9479,10 +9696,10 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 	}
 
 	// 检测 thinking block 签名错误（400）并重试一次（过滤 thinking blocks）
-	if resp.StatusCode == 400 && s.shouldRectifySignatureError(ctx, account, respBody) {
+	if resp.StatusCode == 400 && s.shouldRectifySignatureError(ctx, account, respBody, reqModel) {
 		logger.LegacyPrintf("service.gateway", "Account %d: detected thinking block signature error on count_tokens, retrying with filtered thinking blocks", account.ID)
 
-		filteredBody := FilterThinkingBlocksForRetry(body)
+		filteredBody := FilterThinkingBlocksForRetry(body, reqModel)
 		retryReq, retryWireBody, buildErr := s.buildCountTokensRequest(ctx, c, account, filteredBody, token, tokenType, reqModel, shouldMimicClaudeCode)
 		if buildErr == nil {
 			retryResp, retryErr := s.httpUpstream.DoWithTLS(retryReq, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))

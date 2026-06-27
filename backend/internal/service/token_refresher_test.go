@@ -243,6 +243,12 @@ func TestOpenAITokenRefresher_CanRefresh(t *testing.T) {
 			want:     true,
 		},
 		{
+			name:     "openai setup-token - cannot refresh",
+			platform: PlatformOpenAI,
+			accType:  AccountTypeSetupToken,
+			want:     false,
+		},
+		{
 			name:     "openai apikey - cannot refresh",
 			platform: PlatformOpenAI,
 			accType:  AccountTypeAPIKey,

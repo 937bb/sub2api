@@ -13,7 +13,6 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/service"
-	"github.com/lib/pq"
 
 	entsql "entgo.io/ent/dialect/sql"
 )
@@ -429,38 +428,27 @@ func groupListOrder(params pagination.PaginationParams) []func(*entsql.Selector)
 }
 
 func (r *groupRepository) ListActive(ctx context.Context) ([]service.Group, error) {
-	groups, err := r.client.Group.Query().
-		Where(group.StatusEQ(service.StatusActive)).
-		Order(dbent.Asc(group.FieldSortOrder), dbent.Asc(group.FieldID)).
-		All(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	groupIDs := make([]int64, 0, len(groups))
-	outGroups := make([]service.Group, 0, len(groups))
-	for i := range groups {
-		g := groupEntityToService(groups[i])
-		outGroups = append(outGroups, *g)
-		groupIDs = append(groupIDs, g.ID)
-	}
-
-	counts, err := r.loadAccountCounts(ctx, groupIDs)
-	if err == nil {
-		for i := range outGroups {
-			c := counts[outGroups[i].ID]
-			outGroups[i].AccountCount = c.Total
-			outGroups[i].ActiveAccountCount = c.Active
-			outGroups[i].RateLimitedAccountCount = c.RateLimited
-		}
-	}
-
-	return outGroups, nil
+	return r.listAll(ctx, service.StatusActive, "")
 }
 
 func (r *groupRepository) ListActiveByPlatform(ctx context.Context, platform string) ([]service.Group, error) {
-	groups, err := r.client.Group.Query().
-		Where(group.StatusEQ(service.StatusActive), group.PlatformEQ(platform)).
+	return r.listAll(ctx, service.StatusActive, platform)
+}
+
+func (r *groupRepository) ListAllIncludingInactive(ctx context.Context, platform string) ([]service.Group, error) {
+	return r.listAll(ctx, "", platform)
+}
+
+func (r *groupRepository) listAll(ctx context.Context, status, platform string) ([]service.Group, error) {
+	q := r.client.Group.Query()
+	if status != "" {
+		q = q.Where(group.StatusEQ(status))
+	}
+	if platform != "" {
+		q = q.Where(group.PlatformEQ(platform))
+	}
+
+	groups, err := q.
 		Order(dbent.Asc(group.FieldSortOrder), dbent.Asc(group.FieldID)).
 		All(ctx)
 	if err != nil {
@@ -521,7 +509,7 @@ func (r *groupRepository) ExistsByIDs(ctx context.Context, ids []int64) (map[int
 		SELECT id
 		FROM groups
 		WHERE id = ANY($1) AND deleted_at IS NULL
-	`, pq.Array(uniqueIDs))
+	`, uniqueIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -710,7 +698,7 @@ func (r *groupRepository) loadAccountCounts(ctx context.Context, groupIDs []int6
 		JOIN accounts a ON a.id = ag.account_id
 		WHERE ag.group_id = ANY($1)
 		GROUP BY ag.group_id`, groupAccountAvailableSQL, groupAccountTemporarilyLimitedSQL),
-		pq.Array(groupIDs),
+		groupIDs,
 	)
 	if err != nil {
 		return nil, err
@@ -746,7 +734,7 @@ func (r *groupRepository) GetAccountIDsByGroupIDs(ctx context.Context, groupIDs 
 	rows, err := r.sql.QueryContext(
 		ctx,
 		"SELECT DISTINCT account_id FROM account_groups WHERE group_id = ANY($1) ORDER BY account_id",
-		pq.Array(groupIDs),
+		groupIDs,
 	)
 	if err != nil {
 		return nil, err
@@ -780,7 +768,7 @@ func (r *groupRepository) BindAccountsToGroup(ctx context.Context, groupID int64
 		`INSERT INTO account_groups (account_id, group_id, priority, created_at)
 		 SELECT unnest($1::bigint[]), $2, 50, NOW()
 		 ON CONFLICT (account_id, group_id) DO NOTHING`,
-		pq.Array(accountIDs),
+		accountIDs,
 		groupID,
 	)
 	if err != nil {
@@ -823,7 +811,7 @@ func (r *groupRepository) UpdateSortOrders(ctx context.Context, updates []servic
 		ctx,
 		r.sql,
 		`SELECT COUNT(*) FROM groups WHERE deleted_at IS NULL AND id = ANY($1)`,
-		[]any{pq.Array(groupIDs)},
+		[]any{groupIDs},
 		&existingCount,
 	); err != nil {
 		return err
@@ -840,7 +828,7 @@ func (r *groupRepository) UpdateSortOrders(ctx context.Context, updates []servic
 		args = append(args, id, sortOrderByID[id])
 		placeholder += 2
 	}
-	args = append(args, pq.Array(groupIDs))
+	args = append(args, groupIDs)
 
 	query := fmt.Sprintf(`
 		UPDATE groups

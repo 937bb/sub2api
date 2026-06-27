@@ -27,6 +27,18 @@ func TestRedactText_QueryLike(t *testing.T) {
 	}
 }
 
+func TestRedactText_PersonalAccessToken(t *testing.T) {
+	jsonOut := RedactText(`{"personal_access_token":"pat-secret","other":"ok"}`)
+	if strings.Contains(jsonOut, "pat-secret") || !strings.Contains(jsonOut, `"personal_access_token":"***"`) {
+		t.Fatalf("expected personal_access_token JSON redacted, got %q", jsonOut)
+	}
+
+	queryOut := RedactText("personal_access_token=pat-secret access_token=at-secret")
+	if strings.Contains(queryOut, "pat-secret") || !strings.Contains(queryOut, "personal_access_token=***") {
+		t.Fatalf("expected personal_access_token query redacted, got %q", queryOut)
+	}
+}
+
 func TestRedactText_GOCSPX(t *testing.T) {
 	in := "client_secret=GOCSPX-your-client-secret"
 	out := RedactText(in)

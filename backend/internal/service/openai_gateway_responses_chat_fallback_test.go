@@ -42,8 +42,10 @@ func TestForwardResponses_ForceChatCompletionsRoutesNonStreamingToChatCompletion
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.Equal(t, "http://upstream.example/v1/chat/completions", upstream.lastReq.URL.String())
+	require.Equal(t, "/v1/chat/completions", result.UpstreamEndpoint)
 	require.Equal(t, HTTPUpstreamProfileOpenAI, HTTPUpstreamProfileFromContext(upstream.lastReq.Context()))
-	require.Equal(t, "hello", gjson.GetBytes(upstream.lastBody, "messages.0.content").String())
+	require.Equal(t, "You are a helpful coding assistant.", gjson.GetBytes(upstream.lastBody, "messages.0.content").String())
+	require.Equal(t, "hello", gjson.GetBytes(upstream.lastBody, "messages.1.content").String())
 	require.False(t, gjson.GetBytes(upstream.lastBody, "input").Exists())
 	require.Equal(t, "response", gjson.Get(rec.Body.String(), "object").String())
 	require.Equal(t, "ok", gjson.Get(rec.Body.String(), "output.0.content.0.text").String())
@@ -51,6 +53,46 @@ func TestForwardResponses_ForceChatCompletionsRoutesNonStreamingToChatCompletion
 	require.Equal(t, 2, result.Usage.OutputTokens)
 	require.Equal(t, 1, result.Usage.CacheReadInputTokens)
 	require.False(t, result.Stream)
+}
+
+func TestForwardResponses_RawChatFallbackPreservesClientModelAndMaxOutputTokens(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	body := []byte(`{"model":"client-alias","input":"hello","stream":false,"max_output_tokens":123}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}, "x-request-id": []string{"rid_resp_chat_mapped"}},
+		Body: io.NopCloser(strings.NewReader(
+			`{"id":"chatcmpl_mapped","object":"chat.completion","model":"mapped-raw-model","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}`,
+		)),
+	}}
+	svc := &OpenAIGatewayService{
+		cfg:          rawChatCompletionsTestConfig(),
+		httpUpstream: upstream,
+	}
+	account := rawChatCompletionsTestAccount()
+	account.Credentials["model_mapping"] = map[string]any{"client-alias": "mapped-raw-model"}
+	account.Extra = map[string]any{
+		openai_compat.ExtraKeyResponsesSupportedByModel: map[string]any{"mapped-raw-model": false},
+	}
+
+	result, err := svc.Forward(context.Background(), c, account, body)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, "http://upstream.example/v1/chat/completions", upstream.lastReq.URL.String())
+	require.Equal(t, "mapped-raw-model", gjson.GetBytes(upstream.lastBody, "model").String())
+	require.Equal(t, int64(123), gjson.GetBytes(upstream.lastBody, "max_completion_tokens").Int())
+	require.False(t, gjson.GetBytes(upstream.lastBody, "max_output_tokens").Exists())
+	require.Equal(t, "client-alias", gjson.Get(rec.Body.String(), "model").String())
+	require.Equal(t, "client-alias", result.Model)
+	require.Equal(t, "mapped-raw-model", result.BillingModel)
+	require.Equal(t, "mapped-raw-model", result.UpstreamModel)
+	require.Equal(t, "/v1/chat/completions", result.UpstreamEndpoint)
 }
 
 func TestForwardResponses_ForceChatCompletionsRoutesStreamingToChatCompletions(t *testing.T) {
@@ -90,6 +132,7 @@ func TestForwardResponses_ForceChatCompletionsRoutesStreamingToChatCompletions(t
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.Equal(t, "http://upstream.example/v1/chat/completions", upstream.lastReq.URL.String())
+	require.Equal(t, "/v1/chat/completions", result.UpstreamEndpoint)
 	require.True(t, gjson.GetBytes(upstream.lastBody, "stream_options.include_usage").Bool())
 	require.Contains(t, rec.Body.String(), "event: response.output_text.delta")
 	require.Contains(t, rec.Body.String(), `"delta":"he"`)

@@ -2,14 +2,17 @@ package admin
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strconv"
 	"strings"
 	"time"
 
 	"log/slog"
 
+	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
@@ -43,9 +46,9 @@ type DataProxy struct {
 	Status   string `json:"status"`
 }
 
-// DataAccount 是管理员显式备份导出使用的账号结构，故意不走 dto.Account 的脱敏路径，
-// Credentials 原文返回。这是"管理员备份"这一显式行为的一部分；如未来需要导出脱敏版本，
-// 应新增独立结构而非修改这里。
+// DataAccount 是管理员显式备份导出使用的账号结构，故意不走 dto.Account 的凭证脱敏路径，
+// Credentials 原文返回。这是"管理员备份"这一显式行为的一部分；Extra 仍需隐藏
+// OpenAI Codex 指纹这类支持排障不应完整暴露的敏感元数据。
 type DataAccount struct {
 	Name               string         `json:"name"`
 	Notes              *string        `json:"notes,omitempty"`
@@ -156,7 +159,7 @@ func (h *AccountHandler) ExportData(c *gin.Context) {
 			Platform:           acc.Platform,
 			Type:               acc.Type,
 			Credentials:        acc.Credentials,
-			Extra:              acc.Extra,
+			Extra:              exportAccountExtra(&acc),
 			ProxyKey:           proxyKey,
 			Concurrency:        acc.Concurrency,
 			Priority:           acc.Priority,
@@ -175,9 +178,68 @@ func (h *AccountHandler) ExportData(c *gin.Context) {
 	response.Success(c, payload)
 }
 
+func exportAccountExtra(account *service.Account) map[string]any {
+	if account == nil || account.Extra == nil {
+		return nil
+	}
+	out := dto.RedactAccountExtraForAccount(account)
+	delete(out, service.OpenAICodexFingerprintExtraKey)
+	stripInternalHCPAAccountExtra(out)
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func internalHCPAAccountExtraKeys() []string {
+	return []string{
+		"import_source",
+		"import_format",
+		"imported_at",
+		"hcpa_disabled",
+		"hcpa_expired_at",
+		"hcpa_last_refresh_at",
+	}
+}
+
+func stripInternalHCPAAccountExtra(extra map[string]any) {
+	if extra == nil {
+		return
+	}
+	for _, key := range internalHCPAAccountExtraKeys() {
+		delete(extra, key)
+	}
+}
+
 func (h *AccountHandler) ImportData(c *gin.Context) {
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+
+	if codexReq, ok, err := parseHCPADataImportRequest(body); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	} else if ok {
+		entries, err := parseCodexSessionImportEntries(codexReq)
+		if err != nil {
+			response.BadRequest(c, err.Error())
+			return
+		}
+		if len(entries) == 0 {
+			response.BadRequest(c, "请输入 accessToken 或 Codex session JSON")
+			return
+		}
+		executeAdminIdempotentJSON(c, "admin.accounts.import_data_hcpa", codexReq, service.DefaultWriteIdempotencyTTL(), func(ctx context.Context) (any, error) {
+			result, importErr := h.importCodexSessions(ctx, codexReq, entries)
+			return codexImportResultAsDataImportResult(result), importErr
+		})
+		return
+	}
+
 	var req DataImportRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if err := json.Unmarshal(body, &req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
 	}
@@ -190,6 +252,52 @@ func (h *AccountHandler) ImportData(c *gin.Context) {
 	executeAdminIdempotentJSON(c, "admin.accounts.import_data", req, service.DefaultWriteIdempotencyTTL(), func(ctx context.Context) (any, error) {
 		return h.importData(ctx, req)
 	})
+}
+
+func parseHCPADataImportRequest(body []byte) (CodexSessionImportRequest, bool, error) {
+	var envelope struct {
+		Data                 json.RawMessage `json:"data"`
+		SkipDefaultGroupBind *bool           `json:"skip_default_group_bind"`
+	}
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return CodexSessionImportRequest{}, false, err
+	}
+	if len(envelope.Data) == 0 || string(envelope.Data) == "null" {
+		return CodexSessionImportRequest{}, false, nil
+	}
+
+	var raw map[string]any
+	if err := json.Unmarshal(envelope.Data, &raw); err != nil {
+		return CodexSessionImportRequest{}, false, nil
+	}
+	if _, ok := hcpaAuthorizationHeader(raw); !ok {
+		return CodexSessionImportRequest{}, false, nil
+	}
+	delete(raw, "type")
+
+	content, err := json.Marshal(raw)
+	if err != nil {
+		return CodexSessionImportRequest{}, false, err
+	}
+	return CodexSessionImportRequest{
+		Content:              string(content),
+		SkipDefaultGroupBind: envelope.SkipDefaultGroupBind,
+	}, true, nil
+}
+
+func codexImportResultAsDataImportResult(result CodexSessionImportResult) DataImportResult {
+	out := DataImportResult{
+		AccountCreated: result.Created + result.Updated,
+		AccountFailed:  result.Failed,
+	}
+	for _, item := range result.Errors {
+		out.Errors = append(out.Errors, DataImportError{
+			Kind:    "account",
+			Name:    item.Name,
+			Message: item.Message,
+		})
+	}
+	return out
 }
 
 func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) (DataImportResult, error) {
@@ -303,6 +411,8 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 		}
 
 		enrichCredentialsFromIDToken(&item)
+		migrateImportedOpenAIOAuthLegacyExtra(&item)
+		stripInternalHCPAAccountExtra(item.Extra)
 
 		accountInput := &service.CreateAccountInput{
 			Name:                 item.Name,
@@ -382,14 +492,14 @@ func (h *AccountHandler) listAccountsFiltered(ctx context.Context, platform, acc
 	var out []service.Account
 	for {
 		items, total, err := h.adminService.ListAccounts(ctx, page, pageSize, service.AccountListFilters{
-		Platform:    platform,
-		AccountType: accountType,
-		Status:      status,
-		Search:      search,
-		GroupID:     groupID,
-		PrivacyMode: privacyMode,
-		PlanType:    planType,
-	}, sortBy, sortOrder)
+			Platform:    platform,
+			AccountType: accountType,
+			Status:      status,
+			Search:      search,
+			GroupID:     groupID,
+			PrivacyMode: privacyMode,
+			PlanType:    planType,
+		}, sortBy, sortOrder)
 		if err != nil {
 			return nil, err
 		}
@@ -644,6 +754,69 @@ func enrichCredentialsFromIDToken(item *DataAccount) {
 	setIfMissing("chatgpt_account_id", userInfo.ChatGPTAccountID)
 	setIfMissing("chatgpt_user_id", userInfo.ChatGPTUserID)
 	setIfMissing("organization_id", userInfo.OrganizationID)
+}
+
+func migrateImportedOpenAIOAuthLegacyExtra(item *DataAccount) {
+	if item == nil || item.Extra == nil {
+		return
+	}
+	if strings.ToLower(strings.TrimSpace(item.Platform)) != service.PlatformOpenAI {
+		return
+	}
+	accountType := strings.ToLower(strings.TrimSpace(item.Type))
+	if accountType != service.AccountTypeOAuth && accountType != service.AccountTypeSetupToken {
+		return
+	}
+
+	if mode, ok := importedOpenAIOAuthWSMode(item.Extra); ok {
+		item.Extra["openai_oauth_ws_mode"] = mode
+	}
+	for _, key := range []string{
+		"openai_oauth_passthrough",
+		"openai_passthrough",
+		"openai_oauth_responses_websockets_v2_mode",
+		"openai_oauth_responses_websockets_v2_enabled",
+		"responses_websockets_v2_enabled",
+		"openai_ws_enabled",
+		"openai_apikey_responses_websockets_v2_enabled",
+		"openai_apikey_responses_websockets_v2_mode",
+	} {
+		delete(item.Extra, key)
+	}
+}
+
+func importedOpenAIOAuthWSMode(extra map[string]any) (string, bool) {
+	if mode, ok := extra["openai_oauth_responses_websockets_v2_mode"].(string); ok {
+		switch strings.ToLower(strings.TrimSpace(mode)) {
+		case service.OpenAIWSIngressModeOff:
+			return service.OpenAIOAuthWSModeOff, true
+		case service.OpenAIWSIngressModeCtxPool,
+			service.OpenAIWSIngressModeShared,
+			service.OpenAIWSIngressModeDedicated,
+			service.OpenAIWSIngressModePassthrough,
+			service.OpenAIOAuthWSModeManagedSession:
+			return service.OpenAIOAuthWSModeManagedSession, true
+		}
+	}
+	if enabled, ok := extra["openai_oauth_responses_websockets_v2_enabled"].(bool); ok {
+		if enabled {
+			return service.OpenAIOAuthWSModeManagedSession, true
+		}
+		return service.OpenAIOAuthWSModeOff, true
+	}
+	if enabled, ok := extra["responses_websockets_v2_enabled"].(bool); ok {
+		if enabled {
+			return service.OpenAIOAuthWSModeManagedSession, true
+		}
+		return service.OpenAIOAuthWSModeOff, true
+	}
+	if enabled, ok := extra["openai_ws_enabled"].(bool); ok {
+		if enabled {
+			return service.OpenAIOAuthWSModeManagedSession, true
+		}
+		return service.OpenAIOAuthWSModeOff, true
+	}
+	return "", false
 }
 
 func normalizeProxyStatus(status string) string {

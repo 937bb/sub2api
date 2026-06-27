@@ -11,7 +11,6 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/channelmonitor"
 	"github.com/Wei-Shaw/sub2api/ent/channelmonitorhistory"
 	"github.com/Wei-Shaw/sub2api/internal/service"
-	"github.com/lib/pq"
 )
 
 // channelMonitorRepository 实现 service.ChannelMonitorRepository。
@@ -45,6 +44,7 @@ func (r *channelMonitorRepository) Create(ctx context.Context, m *service.Channe
 		SetGroupName(m.GroupName).
 		SetEnabled(m.Enabled).
 		SetIntervalSeconds(m.IntervalSeconds).
+		SetJitterSeconds(m.JitterSeconds).
 		SetCreatedBy(m.CreatedBy).
 		SetExtraHeaders(emptyHeadersIfNilRepo(m.ExtraHeaders)).
 		SetBodyOverrideMode(defaultBodyModeRepo(m.BodyOverrideMode))
@@ -88,6 +88,7 @@ func (r *channelMonitorRepository) Update(ctx context.Context, m *service.Channe
 		SetGroupName(m.GroupName).
 		SetEnabled(m.Enabled).
 		SetIntervalSeconds(m.IntervalSeconds).
+		SetJitterSeconds(m.JitterSeconds).
 		SetExtraHeaders(emptyHeadersIfNilRepo(m.ExtraHeaders)).
 		SetBodyOverrideMode(defaultBodyModeRepo(m.BodyOverrideMode))
 	if m.TemplateID != nil {
@@ -372,7 +373,7 @@ func (r *channelMonitorRepository) ListLatestForMonitorIDs(ctx context.Context, 
 		WHERE monitor_id = ANY($1)
 		ORDER BY monitor_id, model, checked_at DESC
 	`
-	rows, err := r.db.QueryContext(ctx, q, pq.Array(ids))
+	rows, err := r.db.QueryContext(ctx, q, ids)
 	if err != nil {
 		return nil, fmt.Errorf("query latest batch: %w", err)
 	}
@@ -436,7 +437,7 @@ func (r *channelMonitorRepository) ListRecentHistoryForMonitors(
 		WHERE rn <= $3
 		ORDER BY monitor_id, checked_at DESC
 	`
-	rows, err := r.db.QueryContext(ctx, q, pq.Array(pairIDs), pq.Array(pairModels), perMonitorLimit)
+	rows, err := r.db.QueryContext(ctx, q, pairIDs, pairModels, perMonitorLimit)
 	if err != nil {
 		return nil, fmt.Errorf("query recent history batch: %w", err)
 	}
@@ -519,7 +520,7 @@ func (r *channelMonitorRepository) ComputeAvailabilityForMonitors(ctx context.Co
 		  AND checked_at >= NOW() - ($2::int || ' days')::interval
 		GROUP BY monitor_id, model
 	`
-	rows, err := r.db.QueryContext(ctx, q, pq.Array(ids), windowDays)
+	rows, err := r.db.QueryContext(ctx, q, ids, windowDays)
 	if err != nil {
 		return nil, fmt.Errorf("query availability batch: %w", err)
 	}
@@ -718,6 +719,7 @@ func entToServiceMonitor(row *dbent.ChannelMonitor) *service.ChannelMonitor {
 		GroupName:        row.GroupName,
 		Enabled:          row.Enabled,
 		IntervalSeconds:  row.IntervalSeconds,
+		JitterSeconds:    row.JitterSeconds,
 		LastCheckedAt:    row.LastCheckedAt,
 		CreatedBy:        row.CreatedBy,
 		CreatedAt:        row.CreatedAt,

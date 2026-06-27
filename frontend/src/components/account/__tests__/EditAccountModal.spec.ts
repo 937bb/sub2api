@@ -189,6 +189,86 @@ function mountModal(account = buildAccount()) {
 }
 
 describe('EditAccountModal', () => {
+  it('hides OpenAI passthrough for OAuth and removes legacy flags on save', async () => {
+    const account = buildAccount()
+    account.type = 'oauth'
+    account.credentials = {
+      access_token: 'redacted',
+      refresh_token: 'redacted',
+      model_mapping: {
+        'gpt-5.2': 'gpt-5.2'
+      }
+    }
+    account.extra = {
+      openai_passthrough: true,
+      openai_oauth_passthrough: true
+    }
+    updateAccountMock.mockReset()
+    checkMixedChannelRiskMock.mockReset()
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    updateAccountMock.mockResolvedValue(account)
+
+    const wrapper = mountModal(account)
+
+    expect(wrapper.text()).not.toContain('admin.accounts.openai.apiKeyPassthrough')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).not.toHaveProperty('openai_passthrough')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).not.toHaveProperty('openai_oauth_passthrough')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials?.model_mapping).toEqual({
+      'gpt-5.2': 'gpt-5.2'
+    })
+  })
+
+  it('removes legacy passthrough and WS flags when saving OpenAI setup-token accounts', async () => {
+    const account = buildAccount()
+    account.type = 'setup-token'
+    account.credentials = {
+      access_token: 'redacted'
+    }
+    account.extra = {
+      openai_passthrough: true,
+      openai_oauth_passthrough: true,
+      openai_oauth_responses_websockets_v2_mode: 'passthrough',
+      openai_oauth_responses_websockets_v2_enabled: true,
+      openai_apikey_responses_websockets_v2_mode: 'ctx_pool',
+      openai_apikey_responses_websockets_v2_enabled: true,
+      codex_cli_only: true,
+      codex_cli_only_allowed_clients: ['claude_code'],
+      codex_image_generation_bridge: true,
+      codex_image_generation_bridge_enabled: true
+    }
+    updateAccountMock.mockReset()
+    checkMixedChannelRiskMock.mockReset()
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    updateAccountMock.mockResolvedValue(account)
+
+    const wrapper = mountModal(account)
+
+    expect(wrapper.text()).not.toContain('admin.accounts.openai.apiKeyPassthrough')
+    const wsModeSelect = wrapper.get('[data-testid="edit-openai-ws-mode-select"]')
+    expect(wsModeSelect.find('option[value="passthrough"]').exists()).toBe(false)
+    expect(wsModeSelect.find('option[value="ctx_pool"]').exists()).toBe(false)
+    await wsModeSelect.setValue('managed_session')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    const extra = updateAccountMock.mock.calls[0]?.[1]?.extra
+    expect(extra).toMatchObject({
+      openai_oauth_ws_mode: 'managed_session'
+    })
+    expect(extra).not.toHaveProperty('openai_passthrough')
+    expect(extra).not.toHaveProperty('openai_oauth_passthrough')
+    expect(extra).not.toHaveProperty('openai_oauth_responses_websockets_v2_mode')
+    expect(extra).not.toHaveProperty('openai_oauth_responses_websockets_v2_enabled')
+    expect(extra).not.toHaveProperty('openai_apikey_responses_websockets_v2_mode')
+    expect(extra).not.toHaveProperty('openai_apikey_responses_websockets_v2_enabled')
+    expect(extra).not.toHaveProperty('codex_cli_only')
+    expect(extra).not.toHaveProperty('codex_cli_only_allowed_clients')
+    expect(extra).not.toHaveProperty('codex_image_generation_bridge')
+    expect(extra).not.toHaveProperty('codex_image_generation_bridge_enabled')
+  })
+
   it('reopening the same account rehydrates the OpenAI whitelist from props', async () => {
     const account = buildAccount()
     updateAccountMock.mockReset()

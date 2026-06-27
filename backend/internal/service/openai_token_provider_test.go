@@ -4,12 +4,16 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/imroc/req/v3"
 	"github.com/stretchr/testify/require"
 )
 
@@ -110,6 +114,52 @@ func (r *openAIAccountRepoStub) Update(ctx context.Context, account *Account) er
 	return nil
 }
 
+type openAISetupTokenBoundaryRepoStub struct {
+	AccountRepository
+	setErrorCalls          int32
+	bulkUpdateCalls        int32
+	updateCredentialsCalls int32
+	lastErrorID            int64
+	lastErrorMsg           string
+	lastCredentials        map[string]any
+}
+
+func (r *openAISetupTokenBoundaryRepoStub) SetError(ctx context.Context, id int64, errorMsg string) error {
+	atomic.AddInt32(&r.setErrorCalls, 1)
+	r.lastErrorID = id
+	r.lastErrorMsg = errorMsg
+	return nil
+}
+
+func (r *openAISetupTokenBoundaryRepoStub) BulkUpdate(ctx context.Context, ids []int64, updates AccountBulkUpdate) (int64, error) {
+	atomic.AddInt32(&r.bulkUpdateCalls, 1)
+	r.lastCredentials = cloneCredentials(updates.Credentials)
+	return int64(len(ids)), nil
+}
+
+func (r *openAISetupTokenBoundaryRepoStub) UpdateCredentials(ctx context.Context, id int64, credentials map[string]any) error {
+	atomic.AddInt32(&r.updateCredentialsCalls, 1)
+	r.lastCredentials = cloneCredentials(credentials)
+	return nil
+}
+
+type openAITokenProviderRuntimeBlockRecorder struct {
+	accounts []int64
+	reasons  []string
+	cleared  []int64
+}
+
+func (r *openAITokenProviderRuntimeBlockRecorder) BlockAccountScheduling(account *Account, until time.Time, reason string) {
+	if account != nil {
+		r.accounts = append(r.accounts, account.ID)
+	}
+	r.reasons = append(r.reasons, reason)
+}
+
+func (r *openAITokenProviderRuntimeBlockRecorder) ClearAccountSchedulingBlock(accountID int64) {
+	r.cleared = append(r.cleared, accountID)
+}
+
 // openAIOAuthServiceStub implements OpenAIOAuthService methods for testing
 type openAIOAuthServiceStub struct {
 	tokenInfo     *OpenAITokenInfo
@@ -179,6 +229,257 @@ func TestOpenAITokenProvider_CacheMiss_FromCredentials(t *testing.T) {
 	// Should have stored in cache
 	cacheKey := OpenAITokenCacheKey(account)
 	require.Equal(t, "credential-token", cache.tokens[cacheKey])
+}
+
+func TestOpenAITokenProvider_SetupTokenUsesStoredAccessTokenWithoutMissingRefreshDisable(t *testing.T) {
+	repo := &openAISetupTokenBoundaryRepoStub{}
+	expiresAt := time.Now().Add(-1 * time.Hour).Format(time.RFC3339)
+	account := &Account{
+		ID:       112,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeSetupToken,
+		Credentials: map[string]any{
+			"access_token": "setup-access-token",
+			"expires_at":   expiresAt,
+		},
+	}
+
+	provider := NewOpenAITokenProvider(repo, nil, nil)
+	token, err := provider.GetAccessToken(context.Background(), account)
+
+	require.NoError(t, err)
+	require.Equal(t, "setup-access-token", token)
+	require.Zero(t, atomic.LoadInt32(&repo.setErrorCalls), "setup-token must not be disabled as a full OAuth missing-refresh failure")
+}
+
+func TestOpenAITokenProvider_SetupTokenIgnoresStaleCachedOAuthToken(t *testing.T) {
+	cache := newOpenAITokenCacheStub()
+	account := &Account{
+		ID:       113,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeSetupToken,
+		Credentials: map[string]any{
+			"access_token": "setup-access-token",
+		},
+	}
+	cache.tokens[OpenAITokenCacheKey(account)] = "stale-oauth-token"
+
+	provider := NewOpenAITokenProvider(nil, cache, nil)
+	token, err := provider.GetAccessToken(context.Background(), account)
+
+	require.NoError(t, err)
+	require.Equal(t, "setup-access-token", token)
+	require.Equal(t, int32(0), atomic.LoadInt32(&cache.getCalled), "setup-token should read credentials directly instead of any cached OAuth token")
+}
+
+func TestOpenAITokenProvider_PersonalAccessTokenBypassesCacheAndMissingRefreshDisable(t *testing.T) {
+	cache := newOpenAITokenCacheStub()
+	repo := &openAISetupTokenBoundaryRepoStub{}
+	expiresAt := time.Now().Add(-time.Hour).Format(time.RFC3339)
+	account := &Account{
+		ID:       114,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"access_token":               "expired-access-token",
+			"personal_access_token":      "at-pat-token",
+			"email":                      "user@example.com",
+			"chatgpt_user_id":            "user-123",
+			"chatgpt_account_id":         "acc-123",
+			"chatgpt_plan_type":          "plus",
+			"chatgpt_account_is_fedramp": false,
+			"expires_at":                 expiresAt,
+		},
+	}
+	cache.tokens[OpenAITokenCacheKey(account)] = "stale-oauth-token"
+
+	provider := NewOpenAITokenProvider(repo, cache, nil)
+	token, err := provider.GetAccessToken(context.Background(), account)
+
+	require.NoError(t, err)
+	require.Equal(t, "at-pat-token", token)
+	require.Equal(t, int32(0), atomic.LoadInt32(&cache.getCalled), "PAT should bypass stale OAuth cache")
+	require.Equal(t, int32(0), atomic.LoadInt32(&cache.setCalled), "PAT should not be written into OAuth access-token cache")
+	require.Zero(t, atomic.LoadInt32(&repo.setErrorCalls), "PAT accounts must not be disabled for missing refresh_token")
+}
+
+func TestOpenAITokenProvider_PersonalAccessTokenWithAccountIDSkipsHydration(t *testing.T) {
+	cache := newOpenAITokenCacheStub()
+	account := &Account{
+		ID:       116,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"access_token":          "expired-access-token",
+			"personal_access_token": "at-pat-token",
+			"chatgpt_account_id":    "acc-123",
+		},
+	}
+
+	provider := NewOpenAITokenProvider(nil, cache, nil)
+	token, err := provider.GetAccessToken(context.Background(), account)
+
+	require.NoError(t, err)
+	require.Equal(t, "at-pat-token", token)
+	require.Equal(t, int32(0), atomic.LoadInt32(&cache.getCalled), "PAT should bypass OAuth cache")
+}
+
+func TestOpenAITokenProvider_PersonalAccessTokenHydrationPersistsViaUpdateCredentials(t *testing.T) {
+	oldBaseURL := openAIAuthAPIBaseURL
+	t.Cleanup(func() { openAIAuthAPIBaseURL = oldBaseURL })
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, openAIWhoamiPath, r.URL.Path)
+		require.Equal(t, "Bearer at-pat-token", r.Header.Get("Authorization"))
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"email":                      "user@example.com",
+			"chatgpt_user_id":            "user-123",
+			"chatgpt_account_id":         "698727dc-d964-43d7-954f-932a4eb67eaf",
+			"chatgpt_plan_type":          "team",
+			"chatgpt_account_is_fedramp": false,
+		})
+	}))
+	defer server.Close()
+	openAIAuthAPIBaseURL = server.URL
+
+	cache := newOpenAITokenCacheStub()
+	repo := &openAISetupTokenBoundaryRepoStub{}
+	oauthSvc := NewOpenAIOAuthService(nil, openAIPATTestOAuthClient{})
+	oauthSvc.SetPrivacyClientFactory(func(proxyURL string) (*req.Client, error) { return req.C(), nil })
+	account := &Account{
+		ID:       117,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"access_token":          "expired-access-token",
+			"personal_access_token": "at-pat-token",
+			"chatgpt_account_id":    "user-stale",
+		},
+	}
+
+	provider := NewOpenAITokenProvider(repo, cache, oauthSvc)
+	token, err := provider.GetAccessToken(context.Background(), account)
+
+	require.NoError(t, err)
+	require.Equal(t, "at-pat-token", token)
+	require.Equal(t, int32(1), atomic.LoadInt32(&repo.updateCredentialsCalls), "PAT hydration must refresh the single-account scheduler snapshot via UpdateCredentials")
+	require.Equal(t, int32(0), atomic.LoadInt32(&repo.bulkUpdateCalls), "PAT hydration should not use bulk update")
+	require.Equal(t, "698727dc-d964-43d7-954f-932a4eb67eaf", repo.lastCredentials["chatgpt_account_id"])
+	require.Equal(t, "698727dc-d964-43d7-954f-932a4eb67eaf", account.GetChatGPTAccountID())
+}
+
+func TestOpenAITokenProvider_SetupTokenPersonalAccessTokenBypassesCache(t *testing.T) {
+	cache := newOpenAITokenCacheStub()
+	account := &Account{
+		ID:       115,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeSetupToken,
+		Credentials: map[string]any{
+			"access_token":               "setup-access-token",
+			"personal_access_token":      "at-setup-pat-token",
+			"email":                      "setup@example.com",
+			"chatgpt_user_id":            "setup-user-123",
+			"chatgpt_account_id":         "setup-acc-123",
+			"chatgpt_plan_type":          "team",
+			"chatgpt_account_is_fedramp": false,
+		},
+	}
+	cache.tokens[OpenAITokenCacheKey(account)] = "stale-oauth-token"
+
+	provider := NewOpenAITokenProvider(nil, cache, nil)
+	token, err := provider.GetAccessToken(context.Background(), account)
+
+	require.NoError(t, err)
+	require.Equal(t, "at-setup-pat-token", token)
+	require.Equal(t, int32(0), atomic.LoadInt32(&cache.getCalled), "setup-token PAT should read credentials directly instead of cache")
+}
+
+func TestOpenAITokenProvider_PersonalAccessTokenWorkspace403DisablesAccountDuringHydration(t *testing.T) {
+	oldBaseURL := openAIAuthAPIBaseURL
+	t.Cleanup(func() { openAIAuthAPIBaseURL = oldBaseURL })
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, openAIWhoamiPath, r.URL.Path)
+		require.Equal(t, "Bearer at-runtime-workspace-403", r.Header.Get("Authorization"))
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"error":{"message":"Personal access token owner is not an active member of the selected workspace.","access_token":"at-runtime-workspace-403"}}`))
+	}))
+	defer server.Close()
+	openAIAuthAPIBaseURL = server.URL
+
+	cache := newOpenAITokenCacheStub()
+	repo := &openAISetupTokenBoundaryRepoStub{}
+	blocker := &openAITokenProviderRuntimeBlockRecorder{}
+	account := &Account{
+		ID:       116,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"personal_access_token": "at-runtime-workspace-403",
+		},
+	}
+	cache.tokens[OpenAITokenCacheKey(account)] = "stale-token"
+	svc := NewOpenAIOAuthService(nil, openAIPATTestOAuthClient{})
+	provider := NewOpenAITokenProvider(repo, cache, svc)
+	provider.SetAccountRuntimeBlocker(blocker)
+
+	token, err := provider.GetAccessToken(context.Background(), account)
+
+	require.Error(t, err)
+	require.Empty(t, token)
+	require.Equal(t, int32(1), atomic.LoadInt32(&repo.setErrorCalls))
+	require.Equal(t, account.ID, repo.lastErrorID)
+	require.Contains(t, repo.lastErrorMsg, "Access forbidden (403)")
+	require.Contains(t, repo.lastErrorMsg, "Personal access token owner is not an active member of the selected workspace")
+	require.NotContains(t, repo.lastErrorMsg, "at-runtime-workspace-403")
+	require.Equal(t, []int64{account.ID}, blocker.accounts)
+	require.Equal(t, []string{"openai_pat_owner_403"}, blocker.reasons)
+	_, cached := cache.tokens[OpenAITokenCacheKey(account)]
+	require.False(t, cached)
+}
+
+func TestOpenAITokenProvider_PersonalAccessTokenOwnerInactive403DisablesAccountDuringHydration(t *testing.T) {
+	oldBaseURL := openAIAuthAPIBaseURL
+	t.Cleanup(func() { openAIAuthAPIBaseURL = oldBaseURL })
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, openAIWhoamiPath, r.URL.Path)
+		require.Equal(t, "Bearer at-runtime-inactive-403", r.Header.Get("Authorization"))
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"error":{"message":"Personal access token owner is inactive.","access_token":"at-runtime-inactive-403"}}`))
+	}))
+	defer server.Close()
+	openAIAuthAPIBaseURL = server.URL
+
+	cache := newOpenAITokenCacheStub()
+	repo := &openAISetupTokenBoundaryRepoStub{}
+	blocker := &openAITokenProviderRuntimeBlockRecorder{}
+	account := &Account{
+		ID:       117,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"personal_access_token": "at-runtime-inactive-403",
+		},
+	}
+	cache.tokens[OpenAITokenCacheKey(account)] = "stale-token"
+	svc := NewOpenAIOAuthService(nil, openAIPATTestOAuthClient{})
+	provider := NewOpenAITokenProvider(repo, cache, svc)
+	provider.SetAccountRuntimeBlocker(blocker)
+
+	token, err := provider.GetAccessToken(context.Background(), account)
+
+	require.Error(t, err)
+	require.Empty(t, token)
+	require.Equal(t, int32(1), atomic.LoadInt32(&repo.setErrorCalls))
+	require.Equal(t, account.ID, repo.lastErrorID)
+	require.Contains(t, repo.lastErrorMsg, "Access forbidden (403)")
+	require.Contains(t, repo.lastErrorMsg, "Personal access token owner is inactive")
+	require.NotContains(t, repo.lastErrorMsg, "at-runtime-inactive-403")
+	require.Equal(t, []int64{account.ID}, blocker.accounts)
+	require.Equal(t, []string{"openai_pat_owner_403"}, blocker.reasons)
+	_, cached := cache.tokens[OpenAITokenCacheKey(account)]
+	require.False(t, cached)
 }
 
 func TestOpenAITokenProvider_TokenRefresh(t *testing.T) {
@@ -292,7 +593,7 @@ func (p *testOpenAITokenProvider) GetAccessToken(ctx context.Context, account *A
 		}
 	}
 
-	accessToken := account.GetOpenAIAccessToken()
+	accessToken := account.GetOpenAIOAuthBearerToken()
 	if accessToken == "" {
 		return "", errors.New("access_token not found in credentials")
 	}

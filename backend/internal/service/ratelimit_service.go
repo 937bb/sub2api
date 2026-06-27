@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -20,18 +21,33 @@ import (
 
 // RateLimitService 处理限流和过载状态管理
 type RateLimitService struct {
-	accountRepo           AccountRepository
-	usageRepo             UsageLogRepository
-	cfg                   *config.Config
-	geminiQuotaService    *GeminiQuotaService
-	tempUnschedCache      TempUnschedCache
-	timeoutCounterCache   TimeoutCounterCache
-	openAI403CounterCache OpenAI403CounterCache
-	settingService        *SettingService
-	tokenCacheInvalidator TokenCacheInvalidator
-	runtimeBlocker        AccountRuntimeBlocker
-	usageCacheMu          sync.RWMutex
-	usageCache            map[int64]*geminiUsageCacheEntry
+	accountRepo               AccountRepository
+	usageRepo                 UsageLogRepository
+	cfg                       *config.Config
+	geminiQuotaService        *GeminiQuotaService
+	tempUnschedCache          TempUnschedCache
+	timeoutCounterCache       TimeoutCounterCache
+	openAI403CounterCache     OpenAI403CounterCache
+	openAIOAuth429DynamicMu   sync.Mutex
+	openAIOAuth429DynamicStat map[int64]*openAIOAuth429DynamicWindow
+	settingService            *SettingService
+	tokenCacheInvalidator     TokenCacheInvalidator
+	openAIPAT401Verifier      OpenAIPersonalAccessTokenVerifier
+	openAIPAT401TokenCache    GeminiTokenCache
+	openAIPAT401LocalLocks    sync.Map
+	openAIPAT401LocalResults  sync.Map
+	runtimeBlocker            AccountRuntimeBlocker
+	usageCacheMu              sync.RWMutex
+	usageCache                map[int64]*geminiUsageCacheEntry
+}
+
+type OpenAIPersonalAccessTokenVerifier interface {
+	HydratePersonalAccessToken(ctx context.Context, personalAccessToken string, proxyID *int64) (*OpenAIPersonalAccessTokenMetadata, error)
+}
+
+type openAIPAT401WhoamiResult struct {
+	failed    bool
+	expiresAt time.Time
 }
 
 type AccountRuntimeBlocker interface {
@@ -78,17 +94,19 @@ const (
 	openAI403CooldownMinutesDefault = 10
 	openAI403DisableThreshold       = 3
 	openAI403CounterWindowMinutes   = 180
+	openAIPAT401WhoamiCacheTTL      = 15 * time.Minute
 )
 
 // NewRateLimitService 创建RateLimitService实例
 func NewRateLimitService(accountRepo AccountRepository, usageRepo UsageLogRepository, cfg *config.Config, geminiQuotaService *GeminiQuotaService, tempUnschedCache TempUnschedCache) *RateLimitService {
 	return &RateLimitService{
-		accountRepo:        accountRepo,
-		usageRepo:          usageRepo,
-		cfg:                cfg,
-		geminiQuotaService: geminiQuotaService,
-		tempUnschedCache:   tempUnschedCache,
-		usageCache:         make(map[int64]*geminiUsageCacheEntry),
+		accountRepo:               accountRepo,
+		usageRepo:                 usageRepo,
+		cfg:                       cfg,
+		geminiQuotaService:        geminiQuotaService,
+		tempUnschedCache:          tempUnschedCache,
+		openAIOAuth429DynamicStat: make(map[int64]*openAIOAuth429DynamicWindow),
+		usageCache:                make(map[int64]*geminiUsageCacheEntry),
 	}
 }
 
@@ -110,6 +128,11 @@ func (s *RateLimitService) SetSettingService(settingService *SettingService) {
 // SetTokenCacheInvalidator 设置 token 缓存清理器（可选依赖）
 func (s *RateLimitService) SetTokenCacheInvalidator(invalidator TokenCacheInvalidator) {
 	s.tokenCacheInvalidator = invalidator
+}
+
+func (s *RateLimitService) SetOpenAIPersonalAccessToken401Verifier(verifier OpenAIPersonalAccessTokenVerifier, tokenCache GeminiTokenCache) {
+	s.openAIPAT401Verifier = verifier
+	s.openAIPAT401TokenCache = tokenCache
 }
 
 func (s *RateLimitService) SetAccountRuntimeBlocker(blocker AccountRuntimeBlocker) {
@@ -181,6 +204,14 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 		return true
 	}
 
+	// Anthropic official 5h/7d window exhaustion is a hard account limit;
+	// handle it before broad user temp-unsched rules can shorten the cooldown.
+	if statusCode == http.StatusTooManyRequests && account.Platform == PlatformAnthropic {
+		if s.persistAnthropicExhaustedWindowLimit(ctx, account, headers) {
+			return false
+		}
+	}
+
 	// 先尝试临时不可调度规则（401除外）
 	// 如果匹配成功，直接返回，不执行后续禁用逻辑
 	if statusCode != 401 {
@@ -190,7 +221,11 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 	}
 
 	upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(responseBody))
-	upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
+	if account.Platform == PlatformOpenAI {
+		upstreamMsg = sanitizeOpenAIUpstreamDiagnosticText(upstreamMsg)
+	} else {
+		upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
+	}
 	if upstreamMsg != "" {
 		upstreamMsg = truncateForLog([]byte(upstreamMsg), 512)
 	}
@@ -226,6 +261,11 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 			shouldDisable = true
 			break
 		}
+		// OpenAI PAT 的 401 先用 whoami 复核；只有 whoami 也 401/403 才永久禁用。
+		if account.Platform == PlatformOpenAI && strings.TrimSpace(account.GetOpenAIPersonalAccessToken()) != "" {
+			shouldDisable = s.handleOpenAIPersonalAccessToken401(ctx, account, upstreamMsg)
+			break
+		}
 		// OpenAI: {"detail":"Unauthorized"} 表示 token 完全无效（非标准 OpenAI 错误格式），直接标记 error
 		if account.Platform == PlatformOpenAI && gjson.GetBytes(responseBody, "detail").String() == "Unauthorized" {
 			msg := "Unauthorized (401): account authentication failed permanently"
@@ -239,6 +279,10 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 		// OAuth 账号在 401 错误时临时不可调度（给 token 刷新窗口）；非 OAuth 账号保持原有 SetError 行为。
 		// Antigravity 除外：其 401 由 applyErrorPolicy 的 temp_unschedulable_rules 自行控制。
 		if account.Type == AccountTypeOAuth && account.Platform != PlatformAntigravity {
+			if account.Platform == PlatformOpenAI && strings.TrimSpace(account.GetOpenAIPersonalAccessToken()) != "" {
+				shouldDisable = s.handleOpenAIPersonalAccessToken401(ctx, account, upstreamMsg)
+				break
+			}
 			// 1. 失效缓存
 			if s.tokenCacheInvalidator != nil {
 				if err := s.tokenCacheInvalidator.InvalidateToken(ctx, account); err != nil {
@@ -304,6 +348,10 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 		s.handleAuthError(ctx, account, msg)
 		shouldDisable = true
 	case 403:
+		rawBodyForLog := truncateForLog(responseBody, 1024)
+		if account.Platform == PlatformOpenAI {
+			rawBodyForLog = sanitizeOpenAIUpstreamDiagnosticBodyForLog(responseBody, 1024)
+		}
 		logger.LegacyPrintf(
 			"service.ratelimit",
 			"[HandleUpstreamErrorRaw] account_id=%d platform=%s type=%s status=403 request_id=%s cf_ray=%s upstream_msg=%s raw_body=%s",
@@ -313,7 +361,7 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 			strings.TrimSpace(headers.Get("x-request-id")),
 			strings.TrimSpace(headers.Get("cf-ray")),
 			upstreamMsg,
-			truncateForLog(responseBody, 1024),
+			rawBodyForLog,
 		)
 		shouldDisable = s.handle403(ctx, account, upstreamMsg, responseBody)
 	case 429:
@@ -711,6 +759,64 @@ func (s *RateLimitService) GeminiCooldown(ctx context.Context, account *Account)
 	return s.geminiQuotaService.CooldownForAccount(ctx, account)
 }
 
+func (s *RateLimitService) handleOpenAIPersonalAccessToken401(ctx context.Context, account *Account, upstreamMsg string) bool {
+	if s.verifyOpenAIPersonalAccessToken401(ctx, account) {
+		s.handleAuthError(ctx, account, "OpenAI PAT whoami failed after Codex 401: "+sanitizeOpenAIUpstreamDiagnosticText(upstreamMsg))
+		return true
+	}
+	// PAT-backed Codex 401s can be model/session-specific while the PAT remains
+	// healthy. Keep the account schedulable unless whoami proves the PAT is bad.
+	return false
+}
+
+func (s *RateLimitService) verifyOpenAIPersonalAccessToken401(ctx context.Context, account *Account) bool {
+	if s == nil || account == nil || s.openAIPAT401Verifier == nil {
+		return false
+	}
+	token := strings.TrimSpace(account.GetOpenAIPersonalAccessToken())
+	if token == "" {
+		return false
+	}
+	key := OpenAITokenCacheKey(account) + ":pat401-whoami"
+	mu := s.openAIPAT401LocalLock(key)
+	mu.Lock()
+	defer mu.Unlock()
+	if cached, ok := s.openAIPAT401LocalResults.Load(key); ok {
+		if result, ok := cached.(openAIPAT401WhoamiResult); ok && time.Now().Before(result.expiresAt) {
+			return result.failed
+		}
+		s.openAIPAT401LocalResults.Delete(key)
+	}
+	if s.openAIPAT401TokenCache != nil {
+		acquired, err := s.openAIPAT401TokenCache.AcquireRefreshLock(ctx, key, 30*time.Second)
+		if err != nil {
+			slog.Warn("openai_pat_401_whoami_lock_failed", "account_id", account.ID, "error", err)
+		} else if !acquired {
+			return false
+		} else {
+			defer func() { _ = s.openAIPAT401TokenCache.ReleaseRefreshLock(ctx, key) }()
+		}
+	}
+	_, err := s.openAIPAT401Verifier.HydratePersonalAccessToken(ctx, token, account.ProxyID)
+	var whoamiErr *openAIPersonalAccessTokenWhoamiError
+	failed := errors.As(err, &whoamiErr) && (whoamiErr.statusCode == http.StatusUnauthorized || whoamiErr.statusCode == http.StatusForbidden)
+	if !failed {
+		// Cache only healthy verdicts so 401 bursts do not repeatedly hit whoami.
+		s.openAIPAT401LocalResults.Store(key, openAIPAT401WhoamiResult{failed: false, expiresAt: time.Now().Add(openAIPAT401WhoamiCacheTTL)})
+	}
+	return failed
+}
+
+func (s *RateLimitService) openAIPAT401LocalLock(key string) *sync.Mutex {
+	actual, _ := s.openAIPAT401LocalLocks.LoadOrStore(key, &sync.Mutex{})
+	if mu, ok := actual.(*sync.Mutex); ok {
+		return mu
+	}
+	mu := &sync.Mutex{}
+	s.openAIPAT401LocalLocks.Store(key, mu)
+	return mu
+}
+
 // handleAuthError 处理认证类错误(401/403)，停止账号调度
 func (s *RateLimitService) handleAuthError(ctx context.Context, account *Account, errorMsg string) {
 	s.notifyAccountSchedulingBlocked(account, time.Time{}, "auth_error")
@@ -745,6 +851,23 @@ func buildForbiddenErrorMessage(prefix string, upstreamMsg string, responseBody 
 	return prefix + fallback
 }
 
+func buildOpenAIForbiddenErrorMessage(prefix string, upstreamMsg string, responseBody []byte, fallback string) string {
+	prefix = strings.TrimSpace(prefix)
+	if prefix != "" && !strings.HasSuffix(prefix, " ") {
+		prefix += " "
+	}
+
+	if msg := strings.TrimSpace(upstreamMsg); msg != "" {
+		return prefix + msg
+	}
+
+	if body := sanitizeOpenAIUpstreamDiagnosticBodyForLog(responseBody, 512); strings.TrimSpace(body) != "" {
+		return prefix + body
+	}
+
+	return prefix + fallback
+}
+
 // handle403 处理 403 Forbidden 错误
 // Antigravity 平台区分 validation/violation/generic 三种类型，均 SetError 永久禁用；
 // 其他平台保持原有 SetError 行为。
@@ -767,12 +890,17 @@ func (s *RateLimitService) handle403(ctx context.Context, account *Account, upst
 }
 
 func (s *RateLimitService) handleOpenAI403(ctx context.Context, account *Account, upstreamMsg string, responseBody []byte) (shouldDisable bool) {
-	msg := buildForbiddenErrorMessage(
+	msg := buildOpenAIForbiddenErrorMessage(
 		"Access forbidden (403):",
 		upstreamMsg,
 		responseBody,
 		"account may be suspended or lack permissions",
 	)
+
+	if isOpenAIPersonalAccessTokenOwner403(account, upstreamMsg, responseBody) {
+		s.handleAuthError(ctx, account, msg)
+		return true
+	}
 
 	if s.openAI403CounterCache == nil {
 		s.handleAuthError(ctx, account, msg)
@@ -809,6 +937,21 @@ func (s *RateLimitService) handleOpenAI403(ctx context.Context, account *Account
 		"threshold", openAI403DisableThreshold,
 	)
 	return true
+}
+
+func isOpenAIPersonalAccessTokenOwner403(account *Account, upstreamMsg string, responseBody []byte) bool {
+	if account == nil || strings.TrimSpace(account.GetOpenAIPersonalAccessToken()) == "" {
+		return false
+	}
+	msg := strings.ToLower(strings.TrimSpace(upstreamMsg))
+	if msg == "" {
+		msg = strings.ToLower(extractUpstreamErrorMessage(responseBody))
+	}
+	if !strings.Contains(msg, "personal access token owner") {
+		return false
+	}
+	return strings.Contains(msg, "owner is inactive") ||
+		(strings.Contains(msg, "not an active member") && strings.Contains(msg, "selected workspace"))
 }
 
 // handleAntigravity403 处理 Antigravity 平台的 403 错误
@@ -871,10 +1014,14 @@ func (s *RateLimitService) handleCustomErrorCode(ctx context.Context, account *A
 // handle429 处理429限流错误
 // 解析响应头获取重置时间，标记账号为限流状态
 func (s *RateLimitService) handle429(ctx context.Context, account *Account, headers http.Header, responseBody []byte) {
-	// 1. OpenAI 平台：优先尝试解析 x-codex-* 响应头（用于 rate_limit_exceeded）
+	// 1. OpenAI OAuth-like：429 只作为动态统计信号，达阈值后再统一 SetRateLimited。
 	if account.Platform == PlatformOpenAI {
 		persistOpenAI429PlanType(ctx, s.accountRepo, account, responseBody)
 		s.persistOpenAICodexSnapshot(ctx, account, headers)
+		if account.IsOpenAIOAuthLike() {
+			s.RecordOpenAIOAuthUpstreamOutcome(ctx, account, http.StatusTooManyRequests)
+			return
+		}
 		if resetAt := s.calculateOpenAI429ResetTime(headers); resetAt != nil {
 			s.notifyAccountSchedulingBlocked(account, *resetAt, "429")
 			if err := s.accountRepo.SetRateLimited(ctx, account.ID, *resetAt); err != nil {
@@ -915,6 +1062,9 @@ func (s *RateLimitService) handle429(ctx context.Context, account *Account, head
 	if resetTimestamp == "" {
 		switch account.Platform {
 		case PlatformOpenAI:
+			if account.IsOpenAIOAuthLike() {
+				return
+			}
 			// 尝试解析 OpenAI 的 usage_limit_reached 错误
 			if resetAt := parseOpenAIRateLimitResetTime(responseBody); resetAt != nil {
 				resetTime := time.Unix(*resetAt, 0)
@@ -1081,6 +1231,128 @@ func (s *RateLimitService) calculateOpenAI429ResetTime(headers http.Header) *tim
 type anthropic429Result struct {
 	resetAt       time.Time  // The correct reset time to use for SetRateLimited
 	fiveHourReset *time.Time // 5h window reset timestamp (for session window calculation), nil if not available
+}
+
+type anthropicWindowLimit struct {
+	window        string
+	resetAt       time.Time
+	fiveHourReset *time.Time
+	reason        string
+}
+
+func selectAnthropicExhaustedWindow(headers http.Header, now time.Time) *anthropicWindowLimit {
+	reset5h, ok5hReset := parseAnthropicWindowReset(headers, "5h", now)
+	reset7d, ok7dReset := parseAnthropicWindowReset(headers, "7d", now)
+
+	exceeded5h := isAnthropic5hRejected(headers) || isAnthropicWindowExceeded(headers, "5h")
+	exceeded7d := isAnthropicWindowExceeded(headers, "7d")
+
+	if exceeded7d && ok7dReset {
+		limit := &anthropicWindowLimit{
+			window:  "7d",
+			resetAt: reset7d,
+			reason:  "anthropic_7d_window_exhausted",
+		}
+		if ok5hReset {
+			limit.fiveHourReset = &reset5h
+		}
+		return limit
+	}
+	if exceeded5h && ok5hReset {
+		return &anthropicWindowLimit{
+			window:        "5h",
+			resetAt:       reset5h,
+			fiveHourReset: &reset5h,
+			reason:        "anthropic_5h_window_exhausted",
+		}
+	}
+	return nil
+}
+
+func isAnthropic5hRejected(headers http.Header) bool {
+	return strings.EqualFold(strings.TrimSpace(headers.Get("anthropic-ratelimit-unified-5h-status")), "rejected")
+}
+
+func parseAnthropicWindowReset(headers http.Header, window string, now time.Time) (time.Time, bool) {
+	raw := strings.TrimSpace(headers.Get("anthropic-ratelimit-unified-" + window + "-reset"))
+	if raw == "" {
+		return time.Time{}, false
+	}
+	ts, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return time.Time{}, false
+	}
+	if ts > 1e11 {
+		ts = ts / 1000
+	}
+	resetAt := time.Unix(ts, 0)
+	if !resetAt.After(now) {
+		return time.Time{}, false
+	}
+
+	maxAge := 8 * 24 * time.Hour
+	if window == "5h" {
+		maxAge = 6 * time.Hour
+	}
+	if resetAt.After(now.Add(maxAge)) {
+		return time.Time{}, false
+	}
+	return resetAt, true
+}
+
+func shouldPersistAnthropicWindowLimit(account *Account, limit *anthropicWindowLimit, now time.Time) bool {
+	if account == nil || limit == nil || !limit.resetAt.After(now) {
+		return false
+	}
+	if account.RateLimitResetAt == nil {
+		return true
+	}
+	if !account.RateLimitResetAt.After(now) {
+		return true
+	}
+	return limit.resetAt.After(*account.RateLimitResetAt)
+}
+
+func (s *RateLimitService) persistAnthropicExhaustedWindowLimit(ctx context.Context, account *Account, headers http.Header) bool {
+	if s == nil || s.accountRepo == nil || account == nil {
+		return false
+	}
+	now := time.Now()
+	limit := selectAnthropicExhaustedWindow(headers, now)
+	if limit == nil {
+		return false
+	}
+	if !shouldPersistAnthropicWindowLimit(account, limit, now) {
+		slog.Info("anthropic_window_rate_limit_kept",
+			"account_id", account.ID,
+			"window", limit.window,
+			"reset_at", limit.resetAt,
+			"existing_reset_at", account.RateLimitResetAt)
+		return true
+	}
+
+	s.notifyAccountSchedulingBlocked(account, limit.resetAt, limit.reason)
+	if err := s.accountRepo.SetRateLimited(ctx, account.ID, limit.resetAt); err != nil {
+		slog.Warn("anthropic_window_rate_limit_set_failed",
+			"account_id", account.ID,
+			"window", limit.window,
+			"reset_at", limit.resetAt,
+			"error", err)
+		return true
+	}
+	if limit.fiveHourReset != nil {
+		windowEnd := *limit.fiveHourReset
+		windowStart := windowEnd.Add(-5 * time.Hour)
+		if err := s.accountRepo.UpdateSessionWindow(ctx, account.ID, &windowStart, &windowEnd, "rejected"); err != nil {
+			slog.Warn("anthropic_window_rate_limit_update_session_window_failed", "account_id", account.ID, "error", err)
+		}
+	}
+	slog.Info("anthropic_window_rate_limited",
+		"account_id", account.ID,
+		"window", limit.window,
+		"reset_at", limit.resetAt,
+		"reset_in", time.Until(limit.resetAt).Truncate(time.Second))
+	return true
 }
 
 // calculateAnthropic429ResetTime parses Anthropic's per-window rate-limit headers
@@ -1465,6 +1737,7 @@ func (s *RateLimitService) ClearRateLimit(ctx context.Context, accountID int64) 
 		}
 	}
 	s.ResetOpenAI403Counter(ctx, accountID)
+	s.ResetOpenAIOAuth429DynamicStats(accountID)
 	s.notifyAccountSchedulingBlockCleared(accountID)
 	return nil
 }
@@ -1533,6 +1806,7 @@ func (s *RateLimitService) ClearTempUnschedulable(ctx context.Context, accountID
 	if err := s.accountRepo.ClearModelRateLimits(ctx, accountID); err != nil {
 		slog.Warn("clear_model_rate_limits_on_temp_unsched_reset_failed", "account_id", accountID, "error", err)
 	}
+	s.ResetOpenAIOAuth429DynamicStats(accountID)
 	s.notifyAccountSchedulingBlockCleared(accountID)
 	return nil
 }
@@ -1639,6 +1913,10 @@ func (s *RateLimitService) HandleOpenAIImageRateLimit(ctx context.Context, accou
 	}
 	if !isOpenAIImageRateLimitError(statusCode, responseBody) {
 		return false
+	}
+	if account.IsOpenAIOAuthLike() {
+		// Keep OAuth-like account scheduling on the dynamic 429 path; image cooldown remains scope-local.
+		s.handle429(ctx, account, headers, responseBody)
 	}
 
 	resetAt := openAIImageRateLimitResetAt(headers, responseBody)
@@ -1878,7 +2156,7 @@ func (s *RateLimitService) triggerTempUnschedulable(ctx context.Context, account
 		StatusCode:      statusCode,
 		MatchedKeyword:  matchedKeyword,
 		RuleIndex:       ruleIndex,
-		ErrorMessage:    truncateTempUnschedMessage(responseBody, tempUnschedMessageMaxBytes),
+		ErrorMessage:    truncateTempUnschedMessageForAccount(account, responseBody, tempUnschedMessageMaxBytes),
 	}
 
 	reason := ""
@@ -1913,6 +2191,13 @@ func truncateTempUnschedMessage(body []byte, maxBytes int) string {
 		body = body[:maxBytes]
 	}
 	return strings.TrimSpace(string(body))
+}
+
+func truncateTempUnschedMessageForAccount(account *Account, body []byte, maxBytes int) string {
+	if account != nil && account.Platform == PlatformOpenAI {
+		return strings.TrimSpace(sanitizeOpenAIUpstreamDiagnosticBodyForLog(body, maxBytes))
+	}
+	return truncateTempUnschedMessage(body, maxBytes)
 }
 
 // HandleStreamTimeout 处理流数据超时

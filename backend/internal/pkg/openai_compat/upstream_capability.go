@@ -17,6 +17,8 @@
 //     pensieve/short-term/maxims/preserve-existing-runtime-behavior-when-replacing-logic-in-stateful-systems）
 package openai_compat
 
+import "strings"
+
 // AccountResponsesSupport 描述账号上游对 OpenAI Responses API 的有效支持状态。
 //
 // 仅用于 platform=openai + type=apikey 的账号；其他账号类型不应调用本包判定。
@@ -54,9 +56,14 @@ const (
 // force_chat_completions=强制 Chat Completions。
 const ExtraKeyResponsesMode = "openai_responses_mode"
 
-// ExtraKeyResponsesSupported 是 accounts.extra JSON 中存储自动探测结果的键名。
+// ExtraKeyResponsesSupported 是 accounts.extra JSON 中存储自动探测结果的账号级键名。
 // 值类型为 bool：true=支持、false=不支持、键缺失=未探测。
 const ExtraKeyResponsesSupported = "openai_responses_supported"
+
+// ExtraKeyResponsesSupportedByModel 是 accounts.extra JSON 中存储按上游模型探测结果的键名。
+// 值类型为 object：{"upstream-model": true|false}。若该 map 存在，未命中的模型保持 unknown，
+// 避免单模型探测结果污染其他模型；仅无模型级 map 的旧账号回退账号级标记。
+const ExtraKeyResponsesSupportedByModel = "openai_responses_supported_by_model"
 
 // NormalizeResponsesSupportMode 归一化账号级 Responses API 路由覆盖模式。
 // 缺失或非法值按 auto 处理，以保持存量行为。
@@ -76,6 +83,16 @@ func NormalizeResponsesSupportMode(mode string) ResponsesSupportMode {
 // 标记缺失或类型不匹配时返回 ResponsesSupportUnknown——调用方应按
 // "未探测=保留旧行为=走 Responses" 处理（参见 ShouldUseResponsesAPI）。
 func ResolveResponsesSupport(extra map[string]any) AccountResponsesSupport {
+	return resolveResponsesSupport(extra, "")
+}
+
+// ResolveResponsesSupportForModel 先按上游模型读取自动探测结果；没有模型级 map 的旧账号
+// 才回退账号级标记。手动覆盖模式仍优先于所有自动探测结果。
+func ResolveResponsesSupportForModel(extra map[string]any, upstreamModel string) AccountResponsesSupport {
+	return resolveResponsesSupport(extra, upstreamModel)
+}
+
+func resolveResponsesSupport(extra map[string]any, upstreamModel string) AccountResponsesSupport {
 	if extra == nil {
 		return ResponsesSupportUnknown
 	}
@@ -85,6 +102,13 @@ func ResolveResponsesSupport(extra map[string]any) AccountResponsesSupport {
 			return ResponsesSupportYes
 		case ResponsesSupportModeForceChatCompletions:
 			return ResponsesSupportNo
+		}
+	}
+	if upstreamModel = strings.TrimSpace(upstreamModel); upstreamModel != "" {
+		if modelSupport, found, usableMap := resolveModelResponsesSupport(extra, upstreamModel); found {
+			return modelSupport
+		} else if usableMap {
+			return ResponsesSupportUnknown
 		}
 	}
 	v, ok := extra[ExtraKeyResponsesSupported]
@@ -101,6 +125,39 @@ func ResolveResponsesSupport(extra map[string]any) AccountResponsesSupport {
 	return ResponsesSupportNo
 }
 
+func resolveModelResponsesSupport(extra map[string]any, upstreamModel string) (AccountResponsesSupport, bool, bool) {
+	raw, ok := extra[ExtraKeyResponsesSupportedByModel]
+	if !ok {
+		return ResponsesSupportUnknown, false, false
+	}
+
+	var supported bool
+	switch modelMap := raw.(type) {
+	case map[string]any:
+		v, found := modelMap[upstreamModel]
+		if !found {
+			return ResponsesSupportUnknown, false, true
+		}
+		var ok bool
+		supported, ok = v.(bool)
+		if !ok {
+			return ResponsesSupportUnknown, false, true
+		}
+	case map[string]bool:
+		v, found := modelMap[upstreamModel]
+		if !found {
+			return ResponsesSupportUnknown, false, true
+		}
+		supported = v
+	default:
+		return ResponsesSupportUnknown, false, false
+	}
+	if supported {
+		return ResponsesSupportYes, true, true
+	}
+	return ResponsesSupportNo, true, true
+}
+
 // ShouldUseResponsesAPI 判断 OpenAI APIKey 账号的入站 /v1/chat/completions 请求
 // 是否应走"CC→Responses 转换 + 上游 /v1/responses"路径。
 //
@@ -112,4 +169,9 @@ func ResolveResponsesSupport(extra map[string]any) AccountResponsesSupport {
 // （详见 internal/service/openai_gateway_chat_completions_raw.go）。
 func ShouldUseResponsesAPI(extra map[string]any) bool {
 	return ResolveResponsesSupport(extra) != ResponsesSupportNo
+}
+
+// ShouldUseResponsesAPIForModel 与 ShouldUseResponsesAPI 相同，但优先使用上游模型级探测结果。
+func ShouldUseResponsesAPIForModel(extra map[string]any, upstreamModel string) bool {
+	return ResolveResponsesSupportForModel(extra, upstreamModel) != ResponsesSupportNo
 }

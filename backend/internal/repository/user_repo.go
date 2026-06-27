@@ -22,7 +22,6 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/usersubscription"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/service"
-	"github.com/lib/pq"
 
 	entsql "entgo.io/ent/dialect/sql"
 )
@@ -360,60 +359,68 @@ func normalizeEmailAuthIdentitySubject(email string) string {
 }
 
 func (r *userRepository) Delete(ctx context.Context, id int64) error {
+	// AdminService.DeleteUser wraps API key deletion and user deletion in one outer
+	// transaction; reuse it before opening our own tx so the soft-delete is atomic.
+	if existingTx := dbent.TxFromContext(ctx); existingTx != nil {
+		return r.deleteUser(ctx, existingTx.Client(), id)
+	}
+
 	tx, err := r.client.Tx(ctx)
 	if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
 		return translatePersistenceError(err, service.ErrUserNotFound, nil)
 	}
 
-	var txClient *dbent.Client
+	exec := r.client
 	if err == nil {
 		defer func() { _ = tx.Rollback() }()
-		txClient = tx.Client()
-	} else {
-		if existingTx := dbent.TxFromContext(ctx); existingTx != nil {
-			txClient = existingTx.Client()
-		} else {
-			txClient = r.client
-		}
+		exec = tx.Client()
 	}
+	// err == dbent.ErrTxStarted 时复用当前事务（exec = r.client）。
 
-	identityIDs, err := txClient.AuthIdentity.Query().
-		Where(authidentity.UserIDEQ(id)).
-		IDs(ctx)
-	if err != nil {
-		return translatePersistenceError(err, service.ErrUserNotFound, nil)
-	}
-	if len(identityIDs) > 0 {
-		if _, err := txClient.IdentityAdoptionDecision.Update().
-			Where(identityadoptiondecision.IdentityIDIn(identityIDs...)).
-			ClearIdentityID().
-			Save(ctx); err != nil {
-			return translatePersistenceError(err, service.ErrUserNotFound, nil)
-		}
-		if _, err := txClient.AuthIdentityChannel.Delete().
-			Where(authidentitychannel.IdentityIDIn(identityIDs...)).
-			Exec(ctx); err != nil {
-			return translatePersistenceError(err, service.ErrUserNotFound, nil)
-		}
-		if _, err := txClient.AuthIdentity.Delete().
-			Where(authidentity.UserIDEQ(id)).
-			Exec(ctx); err != nil {
-			return translatePersistenceError(err, service.ErrUserNotFound, nil)
-		}
-	}
-
-	affected, err := txClient.User.Delete().Where(dbuser.IDEQ(id)).Exec(ctx)
-	if err != nil {
-		return translatePersistenceError(err, service.ErrUserNotFound, nil)
-	}
-	if affected == 0 {
-		return service.ErrUserNotFound
+	if err := r.deleteUser(ctx, exec, id); err != nil {
+		return err
 	}
 
 	if tx != nil {
 		if err := tx.Commit(); err != nil {
 			return translatePersistenceError(err, service.ErrUserNotFound, nil)
 		}
+	}
+	return nil
+}
+
+func (r *userRepository) deleteUser(ctx context.Context, exec *dbent.Client, id int64) error {
+	identityIDs, err := exec.AuthIdentity.Query().
+		Where(authidentity.UserIDEQ(id)).
+		IDs(ctx)
+	if err != nil {
+		return translatePersistenceError(err, service.ErrUserNotFound, nil)
+	}
+	if len(identityIDs) > 0 {
+		if _, err := exec.IdentityAdoptionDecision.Update().
+			Where(identityadoptiondecision.IdentityIDIn(identityIDs...)).
+			ClearIdentityID().
+			Save(ctx); err != nil {
+			return translatePersistenceError(err, service.ErrUserNotFound, nil)
+		}
+		if _, err := exec.AuthIdentityChannel.Delete().
+			Where(authidentitychannel.IdentityIDIn(identityIDs...)).
+			Exec(ctx); err != nil {
+			return translatePersistenceError(err, service.ErrUserNotFound, nil)
+		}
+		if _, err := exec.AuthIdentity.Delete().
+			Where(authidentity.UserIDEQ(id)).
+			Exec(ctx); err != nil {
+			return translatePersistenceError(err, service.ErrUserNotFound, nil)
+		}
+	}
+
+	affected, err := exec.User.Delete().Where(dbuser.IDEQ(id)).Exec(ctx)
+	if err != nil {
+		return translatePersistenceError(err, service.ErrUserNotFound, nil)
+	}
+	if affected == 0 {
+		return service.ErrUserNotFound
 	}
 	return nil
 }
@@ -451,6 +458,14 @@ func (r *userRepository) ListWithFilters(ctx context.Context, params pagination.
 	if filters.GroupName != "" {
 		q = q.Where(dbuser.HasAllowedGroupsWith(
 			dbgroup.NameContainsFold(filters.GroupName),
+		))
+	}
+	if filters.APIKeyGroupID > 0 {
+		// SoftDeleteMixin interceptors do not apply inside this edge subquery,
+		// so keep deleted keys from matching the group filter explicitly.
+		q = q.Where(dbuser.HasAPIKeysWith(
+			apikey.GroupIDEQ(filters.APIKeyGroupID),
+			apikey.DeletedAtIsNil(),
 		))
 	}
 
@@ -615,7 +630,7 @@ func (r *userRepository) GetLatestUsedAtByUserIDs(ctx context.Context, userIDs [
 		GROUP BY user_id
 	`
 
-	rows, err := r.sql.QueryContext(ctx, query, pq.Array(userIDs))
+	rows, err := r.sql.QueryContext(ctx, query, userIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -771,7 +786,7 @@ func (r *userRepository) BatchSetConcurrency(ctx context.Context, userIDs []int6
 	}
 	res, err := r.sql.ExecContext(ctx,
 		"UPDATE users SET concurrency = $1, updated_at = NOW() WHERE id = ANY($2) AND deleted_at IS NULL",
-		value, pq.Array(userIDs))
+		value, userIDs)
 	if err != nil {
 		return 0, fmt.Errorf("batch set concurrency: %w", err)
 	}
@@ -785,7 +800,7 @@ func (r *userRepository) BatchAddConcurrency(ctx context.Context, userIDs []int6
 	}
 	res, err := r.sql.ExecContext(ctx,
 		"UPDATE users SET concurrency = GREATEST(concurrency + $1, 0), updated_at = NOW() WHERE id = ANY($2) AND deleted_at IS NULL",
-		delta, pq.Array(userIDs))
+		delta, userIDs)
 	if err != nil {
 		return 0, fmt.Errorf("batch add concurrency: %w", err)
 	}

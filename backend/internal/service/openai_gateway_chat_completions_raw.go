@@ -81,6 +81,7 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 	// 2. Resolve model mapping (same as ForwardAsChatCompletions)
 	billingModel := resolveOpenAIForwardModel(account, originalModel, defaultMappedModel)
 	upstreamModel := normalizeOpenAIModelForUpstream(account, billingModel)
+	reasoningEffort = ApplyThinkingEnabledFallback(reasoningEffort, body, billingModel)
 
 	// 3. Rewrite model in body (no protocol conversion)
 	upstreamBody := body
@@ -173,7 +174,7 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 	}
 	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 	if err != nil {
-		safeErr := sanitizeUpstreamErrorMessage(err.Error())
+		safeErr := sanitizeOpenAIUpstreamDiagnosticText(err.Error())
 		setOpsUpstreamError(c, 0, safeErr, "")
 		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 			Platform:           account.Platform,
@@ -195,7 +196,7 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 		resp.Body = io.NopCloser(bytes.NewReader(respBody))
 
 		upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
-		upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
+		upstreamMsg = sanitizeOpenAIUpstreamDiagnosticText(upstreamMsg)
 		if s.shouldFailoverOpenAIUpstreamResponse(resp.StatusCode, upstreamMsg, respBody) {
 			upstreamDetail := ""
 			if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
@@ -203,7 +204,7 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 				if maxBytes <= 0 {
 					maxBytes = 2048
 				}
-				upstreamDetail = truncateString(string(respBody), maxBytes)
+				upstreamDetail = sanitizeOpenAIUpstreamDiagnosticBodyForLog(respBody, maxBytes)
 			}
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 				Platform:           account.Platform,
@@ -374,16 +375,17 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 	}
 
 	return &OpenAIForwardResult{
-		RequestID:       requestID,
-		Usage:           usage,
-		Model:           originalModel,
-		BillingModel:    billingModel,
-		UpstreamModel:   upstreamModel,
-		ReasoningEffort: reasoningEffort,
-		ServiceTier:     serviceTier,
-		Stream:          true,
-		Duration:        time.Since(startTime),
-		FirstTokenMs:    firstTokenMs,
+		RequestID:        requestID,
+		Usage:            usage,
+		Model:            originalModel,
+		BillingModel:     billingModel,
+		UpstreamModel:    upstreamModel,
+		UpstreamEndpoint: "/v1/chat/completions",
+		ReasoningEffort:  reasoningEffort,
+		ServiceTier:      serviceTier,
+		Stream:           true,
+		Duration:         time.Since(startTime),
+		FirstTokenMs:     firstTokenMs,
 	}, nil
 }
 
@@ -471,15 +473,16 @@ func (s *OpenAIGatewayService) bufferRawChatCompletions(
 	_, _ = c.Writer.Write(respBody)
 
 	return &OpenAIForwardResult{
-		RequestID:       requestID,
-		Usage:           usage,
-		Model:           originalModel,
-		BillingModel:    billingModel,
-		UpstreamModel:   upstreamModel,
-		ReasoningEffort: reasoningEffort,
-		ServiceTier:     serviceTier,
-		Stream:          false,
-		Duration:        time.Since(startTime),
+		RequestID:        requestID,
+		Usage:            usage,
+		Model:            originalModel,
+		BillingModel:     billingModel,
+		UpstreamModel:    upstreamModel,
+		UpstreamEndpoint: "/v1/chat/completions",
+		ReasoningEffort:  reasoningEffort,
+		ServiceTier:      serviceTier,
+		Stream:           false,
+		Duration:         time.Since(startTime),
 	}, nil
 }
 

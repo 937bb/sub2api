@@ -7,7 +7,7 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-func TestNormalizeOpenAIPassthroughOAuthBody_AllowlistPreservesAllCodexFields(t *testing.T) {
+func TestNormalizeOpenAIOAuthHTTPBody_AllowlistPreservesAllCodexFields(t *testing.T) {
 	// 发送 Codex ResponsesApiRequest 全部 14 字段 + 若干不允许字段；
 	// 验证 allowlist 保留 14 字段 + 强制 store/stream + 丢弃其余。
 	body := []byte(`{
@@ -37,7 +37,7 @@ func TestNormalizeOpenAIPassthroughOAuthBody_AllowlistPreservesAllCodexFields(t 
 		"truncation": "auto"
 	}`)
 
-	normalized, changed, err := normalizeOpenAIPassthroughOAuthBody(body, false)
+	normalized, changed, err := normalizeOpenAIOAuthHTTPBody(body, false)
 	require.NoError(t, err)
 	require.True(t, changed)
 
@@ -66,10 +66,10 @@ func TestNormalizeOpenAIPassthroughOAuthBody_AllowlistPreservesAllCodexFields(t 
 	}
 }
 
-func TestNormalizeOpenAIPassthroughOAuthBody_ClientMetadataPreserved(t *testing.T) {
+func TestNormalizeOpenAIOAuthHTTPBody_ClientMetadataPreserved(t *testing.T) {
 	body := []byte(`{"model":"gpt-5.4","input":"hi","client_metadata":{"x-codex-installation-id":"inst-abc","x-codex-window-id":"win-1"}}`)
 
-	normalized, changed, err := normalizeOpenAIPassthroughOAuthBody(body, false)
+	normalized, changed, err := normalizeOpenAIOAuthHTTPBody(body, false)
 	require.NoError(t, err)
 	require.True(t, changed)
 	require.Equal(t, "inst-abc", gjson.GetBytes(normalized, "client_metadata.x-codex-installation-id").String())
@@ -78,10 +78,10 @@ func TestNormalizeOpenAIPassthroughOAuthBody_ClientMetadataPreserved(t *testing.
 	require.False(t, gjson.GetBytes(normalized, "store").Bool())
 }
 
-func TestNormalizeOpenAIPassthroughOAuthBody_RemovesUnsupportedUser(t *testing.T) {
+func TestNormalizeOpenAIOAuthHTTPBody_RemovesUnsupportedUser(t *testing.T) {
 	body := []byte(`{"model":"gpt-5.4","input":"hello","user":"user_123","metadata":{"user_id":"user_123"},"prompt_cache_retention":"24h","safety_identifier":"sid","stream_options":{"include_usage":true}}`)
 
-	normalized, changed, err := normalizeOpenAIPassthroughOAuthBody(body, false)
+	normalized, changed, err := normalizeOpenAIOAuthHTTPBody(body, false)
 	require.NoError(t, err)
 	require.True(t, changed)
 	for _, field := range []string{"user", "metadata", "prompt_cache_retention", "safety_identifier", "stream_options"} {
@@ -91,10 +91,10 @@ func TestNormalizeOpenAIPassthroughOAuthBody_RemovesUnsupportedUser(t *testing.T
 	require.False(t, gjson.GetBytes(normalized, "store").Bool())
 }
 
-func TestNormalizeOpenAIPassthroughOAuthBody_CompactRemovesUnsupportedUser(t *testing.T) {
+func TestNormalizeOpenAIOAuthHTTPBody_CompactRemovesUnsupportedUser(t *testing.T) {
 	body := []byte(`{"model":"gpt-5.4","input":"hello","user":"user_123","metadata":{"user_id":"user_123"},"stream":true,"store":true}`)
 
-	normalized, changed, err := normalizeOpenAIPassthroughOAuthBody(body, true)
+	normalized, changed, err := normalizeOpenAIOAuthHTTPBody(body, true)
 	require.NoError(t, err)
 	require.True(t, changed)
 	require.False(t, gjson.GetBytes(normalized, "user").Exists())
@@ -103,10 +103,10 @@ func TestNormalizeOpenAIPassthroughOAuthBody_CompactRemovesUnsupportedUser(t *te
 	require.False(t, gjson.GetBytes(normalized, "store").Exists())
 }
 
-func TestNormalizeOpenAIPassthroughOAuthBody_CompactRejectsMalformedJSON(t *testing.T) {
+func TestNormalizeOpenAIOAuthHTTPBody_CompactRejectsMalformedJSON(t *testing.T) {
 	body := []byte(`{"model":"gpt-5.4","input":"hello"`)
 
-	normalized, changed, err := normalizeOpenAIPassthroughOAuthBody(body, true)
+	normalized, changed, err := normalizeOpenAIOAuthHTTPBody(body, true)
 	require.Error(t, err)
 	require.False(t, changed)
 	require.Equal(t, body, normalized)

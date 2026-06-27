@@ -290,6 +290,7 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		accounts.POST("/:id/recover-state", h.Admin.Account.RecoverState)
 		accounts.POST("/:id/refresh", h.Admin.Account.Refresh)
 		accounts.POST("/:id/apply-oauth-credentials", h.Admin.Account.ApplyOAuthCredentials)
+		accounts.POST("/:id/reset-openai-codex-fingerprint", h.Admin.Account.ResetOpenAICodexFingerprint)
 		accounts.POST("/:id/set-privacy", h.Admin.Account.SetPrivacy)
 		accounts.POST("/:id/refresh-tier", h.Admin.Account.RefreshTier)
 		accounts.GET("/:id/stats", h.Admin.Account.GetStats)
@@ -348,6 +349,9 @@ func registerOpenAIOAuthRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		openai.POST("/refresh-token", h.Admin.OpenAIOAuth.RefreshToken)
 		openai.POST("/accounts/:id/refresh", h.Admin.OpenAIOAuth.RefreshAccountToken)
 		openai.POST("/create-from-oauth", h.Admin.OpenAIOAuth.CreateAccountFromOAuth)
+		openai.POST("/create-from-refresh-token", h.Admin.OpenAIOAuth.CreateAccountFromRefreshToken)
+		openai.GET("/accounts/:id/quota", h.Admin.OpenAIOAuth.QueryQuota)
+		openai.POST("/accounts/:id/reset-quota", h.Admin.OpenAIOAuth.ResetQuota)
 	}
 }
 
@@ -439,6 +443,9 @@ func registerSettingsRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		// 429默认回避配置
 		adminSettings.GET("/rate-limit-429-cooldown", h.Admin.Setting.GetRateLimit429CooldownSettings)
 		adminSettings.PUT("/rate-limit-429-cooldown", h.Admin.Setting.UpdateRateLimit429CooldownSettings)
+		// OpenAI OAuth 429动态调度配置
+		adminSettings.GET("/openai-oauth-429-dynamic", h.Admin.Setting.GetOpenAIOAuth429DynamicSettings)
+		adminSettings.PUT("/openai-oauth-429-dynamic", h.Admin.Setting.UpdateOpenAIOAuth429DynamicSettings)
 		// 流超时处理配置
 		adminSettings.GET("/stream-timeout", h.Admin.Setting.GetStreamTimeoutSettings)
 		adminSettings.PUT("/stream-timeout", h.Admin.Setting.UpdateStreamTimeoutSettings)

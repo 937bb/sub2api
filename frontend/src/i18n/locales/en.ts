@@ -1795,6 +1795,16 @@ export default {
       allStatus: 'All Status',
       allGroups: 'All Groups',
       searchGroups: 'Search groups...',
+      apiKeyGroupFilter: 'API Key Group',
+      apiKeyGroupExclusive: 'Exclusive Groups',
+      apiKeyGroupPublic: 'Public Groups',
+      apiKeyGroupSubscription: 'Subscription Groups',
+      apiKeyGroupDisabled: 'Disabled Groups',
+      authorizedGroupFilter: 'Authorized Group',
+      allAuthorizedGroups: 'All Authorized Groups',
+      searchAuthorizedGroups: 'Search authorized groups...',
+      allApiKeyGroups: 'All API Key Groups',
+      searchApiKeyGroups: 'Search API key groups...',
       fuzzySearch: 'Fuzzy search',
       admin: 'Admin',
       user: 'User',
@@ -2797,6 +2807,8 @@ export default {
         groupNamePlaceholder: 'Optional, used to group rows in user view',
         intervalSeconds: 'Interval (seconds)',
         intervalSecondsHint: 'Range: 15 - 3600 seconds',
+        jitterSeconds: 'Jitter (seconds)',
+        jitterSecondsHint: 'Randomize each scheduled run by ± jitter seconds. Range: 0 - {max} seconds.',
         enabled: 'Enable monitor',
         kindRequired: 'Please select a provider'
       },
@@ -3123,6 +3135,7 @@ export default {
       },
       columns: {
         name: 'Name',
+        id: 'Account ID',
         platformType: 'Platform/Type',
         platform: 'Platform',
         type: 'Type',
@@ -3365,9 +3378,9 @@ export default {
       openai: {
         baseUrlHint: 'Leave default for official OpenAI API',
         apiKeyHint: 'Your OpenAI API Key',
-        oauthPassthrough: 'Auto passthrough (auth only)',
-        oauthPassthroughDesc:
-          'When enabled, this OpenAI account uses automatic passthrough: the gateway forwards request/response as-is and only swaps auth, while keeping billing/concurrency/audit and necessary safety filtering.',
+        apiKeyPassthrough: 'API Key auto passthrough (auth only)',
+        apiKeyPassthroughDesc:
+          'Only applies to OpenAI API Key accounts. When enabled, requests and responses use the API Key passthrough path with auth replacement only, while billing/concurrency/audit and safety filtering are preserved. OAuth accounts always use the Codex/ChatGPT adapter path.',
         responsesWebsocketsV2: 'Responses WebSocket v2',
         responsesWebsocketsV2Desc:
           'Disabled by default. Enable to allow responses_websockets_v2 capability (still gated by global and account-type switches).',
@@ -3375,12 +3388,13 @@ export default {
         wsModeDesc: 'Only applies to the current OpenAI account type.',
         wsModeOff: 'Off (off)',
         wsModeCtxPool: 'Context Pool (ctx_pool)',
-        wsModePassthrough: 'Passthrough (passthrough)',
+        wsModeManagedSession: 'Managed Session (managed_session)',
+        wsModePassthrough: 'Direct without pool',
         wsModeShared: 'Shared (shared)',
         wsModeDedicated: 'Dedicated (dedicated)',
         wsModeConcurrencyHint:
           'When WS mode is enabled, account concurrency becomes the WS connection pool limit for this account.',
-        wsModePassthroughHint: 'Passthrough mode does not use the WS connection pool.',
+        wsModePassthroughHint: 'This direct WS mode does not use the WS connection pool; it is only a WebSocket forwarding mode, not OAuth HTTP passthrough.',
         oauthResponsesWebsocketsV2: 'OAuth WebSocket Mode',
         oauthResponsesWebsocketsV2Desc:
           'Only applies to OpenAI OAuth. This account can use OpenAI WebSocket Mode only when enabled.',
@@ -3388,7 +3402,7 @@ export default {
         apiKeyResponsesWebsocketsV2Desc:
           'Only applies to OpenAI API Key. This account can use OpenAI WebSocket Mode only when enabled.',
         responsesWebsocketsV2PassthroughHint:
-          'Automatic passthrough is currently enabled: it only affects HTTP passthrough and does not disable WS mode.',
+          'API Key auto passthrough is currently enabled: it only affects the API Key HTTP passthrough path and does not disable WS mode.',
         responsesMode: 'Responses API support',
         responsesModeDesc:
           'Only applies to the OpenAI API Key text forwarding path. Auto follows probe results; force modes override probing.',
@@ -3745,19 +3759,28 @@ export default {
           failedToValidateRT: 'Failed to validate refresh token',
           errors: {
             OPENAI_OAUTH_PROXY_REQUIRED:
-              'No proxy is configured and this server could not reach OpenAI directly, so the OpenAI OAuth request failed. Select a proxy that can access OpenAI and retry; if the authorization code has expired, regenerate the authorization URL.'
+              'No proxy is configured and this server could not reach OpenAI directly, so the OpenAI OAuth request failed. Select a proxy that can access OpenAI and retry; if the authorization code has expired, regenerate the authorization URL.',
+            OPENAI_OAUTH_SESSION_NOT_FOUND:
+              'The OpenAI OAuth session was not found or has expired. Generate a new auth URL and use the latest callback URL.'
           },
           // Refresh Token auth
           refreshTokenAuth: 'Manual RT Input',
           refreshTokenDesc: 'Enter your existing OpenAI Refresh Token(s). Supports batch input (one per line). The system will automatically validate and create accounts.',
           refreshTokenPlaceholder: 'Paste your OpenAI Refresh Token...\nSupports multiple, one per line',
-          codexSessionAuth: 'Codex JSON / AT Batch Input',
-          codexSessionDesc: 'Paste Codex JSON or an accessToken. Accounts use the step 1 settings.',
-          codexSessionInputLabel: 'Codex JSON or accessToken',
-          codexSessionPlaceholder: 'Multiple lines supported, one token or JSON per line',
-          codexSessionHint: 'sessionToken will not be saved as refresh_token. Without refresh_token, the account expires with the accessToken expiry; import is rejected if the expiry cannot be parsed and step 1 has no expiration.',
+          personalAccessTokenAuth: 'Manual PAT Input',
+          personalAccessTokenDesc: 'Enter a Codex Personal Access Token. The account will be created as an OpenAI OAuth-like account using the step 1 settings.',
+          personalAccessTokenInputLabel: 'Personal Access Token',
+          personalAccessTokenPlaceholder: 'Paste personal_access_token / PAT...',
+          personalAccessTokenHint: 'PAT is saved as personal_access_token. It does not require an accessToken expiry and will not trigger OAuth refresh.',
+          personalAccessTokenImportAndCreate: 'Create Account with PAT',
+          personalAccessTokenEmpty: 'Please enter a Personal Access Token',
+          codexSessionAuth: 'Codex JSON / AT / PAT Batch Input',
+          codexSessionDesc: 'Paste Codex JSON, an accessToken, or JSON with personal_access_token. Accounts use the step 1 settings.',
+          codexSessionInputLabel: 'Codex JSON, accessToken, or personal_access_token JSON',
+          codexSessionPlaceholder: 'Multiple lines supported, one token or JSON per line; use personal_access_token for PAT',
+          codexSessionHint: 'sessionToken will not be saved as refresh_token. personal_access_token does not require an accessToken expiry; missing personal_access_token is ignored. accessToken-only imports without refresh_token still require a parsed expiry or a step 1 expiration.',
           codexSessionImportAndCreate: 'Import & Create Account',
-          codexSessionEmpty: 'Please enter Codex JSON or accessToken',
+          codexSessionEmpty: 'Please enter Codex JSON, accessToken, or personal_access_token JSON',
           codexSessionImportFailed: 'Failed to import Codex account',
           codexSessionImportSuccess: 'Import completed: created {created}, updated {updated}, skipped {skipped}',
           codexSessionImportPartial: 'Partial success: created {created}, updated {updated}, skipped {skipped}, failed {failed}',
@@ -4075,6 +4098,17 @@ export default {
         claude: 'Claude',
         passiveSampled: 'Passive',
         activeQuery: 'Query'
+      },
+      openaiQuotaReset: {
+        count: 'Credits',
+        reset: 'Reset',
+        countTooltipLoad: 'Click to load the available reset-credit count',
+        countTooltipRefresh: 'Click to refresh the available reset-credit count',
+        resetTooltipReady: 'Consume 1 reset credit to immediately restore the window',
+        resetTooltipNeedQuery: 'Click Credits first to load the available count',
+        resetTooltipNoCredits: 'No reset credits available',
+        noCreditsAvailable: 'No reset credits available',
+        resetSuccess: 'Reset {windows} window(s)'
       },
       tier: {
         free: 'Free',
@@ -5672,12 +5706,20 @@ export default {
         antigravityUserAgentVersion: 'Antigravity UA Version',
         antigravityUserAgentVersionPlaceholder: '1.23.2',
         antigravityUserAgentVersionHint: 'Leave empty to use ANTIGRAVITY_USER_AGENT_VERSION or the built-in default 1.23.2; when set, the admin setting takes precedence.',
-        openaiCodexUserAgent: 'OpenAI Codex UA',
-        openaiCodexUserAgentPlaceholder: 'codex-tui/0.136.0 (Mac OS 26.5.0; arm64) Apple_Terminal/470.2 (codex-tui; 0.136.0)',
-        openaiCodexUserAgentHint: 'Used for OpenAI OAuth upstream requests when the client User-Agent is not recognized as an official Codex client. Leave empty to use the built-in default.',
+        openaiCodexUserAgent: 'OpenAI Codex UA Profile',
+        openaiCodexUserAgentHint: 'Structured profile used when creating new OpenAI OAuth/Codex account fingerprints. Existing account fingerprints keep their persisted profile until normal re-auth/fingerprint creation updates them.',
+        openaiCodexOriginator: 'Originator',
+        openaiCodexOriginatorPlaceholder: 'codex-tui',
+        openaiCodexVersion: 'Codex version',
+        openaiCodexVersionPlaceholder: '0.136.0',
+        openaiCodexOS: 'OS fingerprint',
+        openaiCodexOSPlaceholder: 'Mac OS 26.5.0; arm64',
+        openaiCodexTerminal: 'Terminal token',
+        openaiCodexTerminalPlaceholder: 'Apple_Terminal/470.2',
+        openaiCodexUserAgentPreview: 'Effective / generated User-Agent',
         openaiAllowClaudeCodeCodexPlugin: "Allow using the Codex plugin in Claude Code",
         openaiAllowClaudeCodeCodexPluginDesc:
-          "Global switch; only affects OpenAI OAuth accounts that have 'Codex official clients only' enabled. When on, all such accounts additionally allow requests from the Claude Code Codex plugin (exact match on originator=Claude Code) without per-account config; upstream requests remain pass-through.",
+          "Global switch; only affects OpenAI OAuth accounts that have 'Codex official clients only' enabled. When on, all such accounts additionally allow requests from the Claude Code Codex plugin (exact match on originator=Claude Code) without per-account config; upstream requests continue through the Codex/ChatGPT adapter path.",
       },
       webSearchEmulation: {
         title: 'Web Search Emulation',
@@ -6203,6 +6245,25 @@ export default {
         cooldownSecondsHint: 'Default cooldown duration (1-7200 seconds); explicit upstream reset times still take precedence',
         saved: '429 default cooldown settings saved',
         saveFailed: 'Failed to save 429 default cooldown settings'
+      },
+      openaiOAuth429Dynamic: {
+        title: 'OpenAI OAuth 429 Dynamic Scheduling',
+        description: 'Treat OpenAI OAuth-like 429s as statistical signals and pause scheduling only when the window ratio crosses the threshold',
+        enabled: 'Enable Dynamic Scheduling',
+        enabledHint: 'Start counting after the first 429; when 429 ratio and sample thresholds are met, pause the account through the unified rate-limit state',
+        windowSeconds: 'Stats Window (seconds)',
+        windowSecondsHint: 'Window duration counted from the first 429 (60-3600 seconds)',
+        minSamples: 'Minimum Samples',
+        minSamplesHint: 'Only evaluate the ratio after this many samples (2-10000)',
+        min429: 'Minimum 429 Count',
+        min429Hint: '429 count must reach this value before pausing (1-minimum samples)',
+        ratioThreshold: '429 Ratio Threshold',
+        ratioThresholdHint: '429 / total samples within the window, range 0.01-1',
+        blockSeconds: 'Pause Duration (seconds)',
+        blockSecondsHint: 'Scheduling pause duration after threshold hit (1-7200 seconds)',
+        saved: 'OpenAI OAuth 429 dynamic scheduling settings saved',
+        loadFailed: 'Failed to load OpenAI OAuth 429 dynamic scheduling settings',
+        saveFailed: 'Failed to save OpenAI OAuth 429 dynamic scheduling settings'
       },
       streamTimeout: {
         title: 'Stream Timeout Handling',

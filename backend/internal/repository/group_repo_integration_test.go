@@ -6,7 +6,10 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
+	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
@@ -44,6 +47,24 @@ func (s *GroupRepoSuite) SetupTest() {
 
 func TestGroupRepoSuite(t *testing.T) {
 	suite.Run(t, new(GroupRepoSuite))
+}
+
+func (s *GroupRepoSuite) uniqueGroupName(prefix string) string {
+	name := strings.ReplaceAll(s.T().Name(), "/", "-")
+	suffix := fmt.Sprintf("-%d", time.Now().UnixNano())
+	maxNameLen := 100 - len(prefix) - len(suffix) - 1
+	if len(name) > maxNameLen {
+		name = name[:maxNameLen]
+	}
+	return fmt.Sprintf("%s-%s%s", prefix, name, suffix)
+}
+
+func groupIDs(groups []service.Group) []int64 {
+	ids := make([]int64, 0, len(groups))
+	for _, group := range groups {
+		ids = append(ids, group.ID)
+	}
+	return ids
 }
 
 // --- Create / GetByID / Update / Delete ---
@@ -247,6 +268,48 @@ func (s *GroupRepoSuite) TestListWithFilters_Status() {
 	s.Require().NoError(err)
 	s.Require().Len(groups, 1)
 	s.Require().Equal(service.StatusDisabled, groups[0].Status)
+}
+
+func (s *GroupRepoSuite) TestListAllIncludingInactive_PlatformScoped() {
+	activeOpenAI := &service.Group{
+		Name:             s.uniqueGroupName("all-active-openai"),
+		Platform:         service.PlatformOpenAI,
+		RateMultiplier:   1.0,
+		Status:           service.StatusActive,
+		SubscriptionType: service.SubscriptionTypeStandard,
+	}
+	inactiveOpenAI := &service.Group{
+		Name:             s.uniqueGroupName("all-inactive-openai"),
+		Platform:         service.PlatformOpenAI,
+		RateMultiplier:   1.0,
+		Status:           service.StatusDisabled,
+		SubscriptionType: service.SubscriptionTypeStandard,
+	}
+	inactiveAnthropic := &service.Group{
+		Name:             s.uniqueGroupName("all-inactive-anthropic"),
+		Platform:         service.PlatformAnthropic,
+		RateMultiplier:   1.0,
+		Status:           service.StatusDisabled,
+		SubscriptionType: service.SubscriptionTypeStandard,
+	}
+	s.Require().NoError(s.repo.Create(s.ctx, activeOpenAI))
+	s.Require().NoError(s.repo.Create(s.ctx, inactiveOpenAI))
+	s.Require().NoError(s.repo.Create(s.ctx, inactiveAnthropic))
+
+	groups, err := s.repo.ListAllIncludingInactive(s.ctx, service.PlatformOpenAI)
+	s.Require().NoError(err)
+	ids := groupIDs(groups)
+	s.Require().Contains(ids, activeOpenAI.ID)
+	s.Require().Contains(ids, inactiveOpenAI.ID)
+	s.Require().NotContains(ids, inactiveAnthropic.ID)
+	for _, group := range groups {
+		s.Require().Equal(service.PlatformOpenAI, group.Platform)
+	}
+
+	groups, err = s.repo.ListAllIncludingInactive(s.ctx, "")
+	s.Require().NoError(err)
+	ids = groupIDs(groups)
+	s.Require().Contains(ids, inactiveAnthropic.ID)
 }
 
 func (s *GroupRepoSuite) TestListWithFilters_IsExclusive() {

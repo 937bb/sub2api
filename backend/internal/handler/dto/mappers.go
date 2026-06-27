@@ -212,7 +212,7 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 		Type:                    a.Type,
 		Credentials:             redactedCreds,
 		CredentialsStatus:       credsStatus,
-		Extra:                   a.Extra,
+		Extra:                   RedactAccountExtraForAccount(a),
 		ProxyID:                 a.ProxyID,
 		Concurrency:             a.Concurrency,
 		LoadFactor:              a.LoadFactor,

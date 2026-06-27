@@ -7,6 +7,7 @@ import (
 	"hash/fnv"
 	"log/slog"
 	"math"
+	"net/http"
 	"sort"
 	"strconv"
 	"strings"
@@ -354,7 +355,19 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 		_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, sessionHash)
 		return nil, nil
 	}
+	account = s.service.refreshSelectedOpenAIAccountFromDB(ctx, account)
+	if account == nil || !s.service.openAIStickyAccountMatchesSchedulingGroup(account, req.GroupID) {
+		_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, sessionHash)
+		return nil, nil
+	}
 	if shouldClearStickySession(account, req.RequestedModel) || !account.IsOpenAI() || !account.IsSchedulable() {
+		_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, sessionHash)
+		return nil, nil
+	}
+	schedGroup := s.service.resolveOpenAISchedulingGroup(ctx, req.GroupID)
+	var ok bool
+	account, ok = s.service.resolveFreshOpenAIAccountForPrivacyRequirement(ctx, account, schedGroup)
+	if !ok {
 		_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, sessionHash)
 		return nil, nil
 	}
@@ -365,8 +378,13 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 		_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, sessionHash)
 		return nil, nil
 	}
-	account = s.service.recheckSelectedOpenAIAccountFromDB(ctx, account, req.RequestedModel, req.RequireCompact, req.RequiredCapability)
-	if account == nil || !s.isAccountTransportCompatible(account, req.RequiredTransport) {
+	account = s.service.recheckOpenAIAccountEligibility(ctx, account, req.RequestedModel, req.RequireCompact, req.RequiredCapability)
+	if account == nil || !s.service.openAIStickyAccountMatchesSchedulingGroup(account, req.GroupID) || !s.isAccountTransportCompatible(account, req.RequiredTransport) {
+		_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, sessionHash)
+		return nil, nil
+	}
+	account, ok = s.service.resolveFreshOpenAIAccountForPrivacyRequirement(ctx, account, schedGroup)
+	if !ok {
 		_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, sessionHash)
 		return nil, nil
 	}
@@ -394,6 +412,27 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 		}, nil
 	}
 	return nil, nil
+}
+
+// openAIStickyAccountMatchesGroup guards cached sticky bindings after account/group membership changes.
+func openAIStickyAccountMatchesGroup(account *Account, groupID *int64) bool {
+	if account == nil {
+		return false
+	}
+	if groupID == nil {
+		return len(account.AccountGroups) == 0 && len(account.GroupIDs) == 0
+	}
+	for _, accountGroupID := range account.GroupIDs {
+		if accountGroupID == *groupID {
+			return true
+		}
+	}
+	for _, accountGroup := range account.AccountGroups {
+		if accountGroup.GroupID == *groupID {
+			return true
+		}
+	}
+	return false
 }
 
 type openAIAccountCandidateScore struct {
@@ -790,6 +829,7 @@ func (s *defaultOpenAIAccountScheduler) tryAcquireOpenAISelectionOrder(
 	selectionOrder []openAIAccountCandidateScore,
 ) (*AccountSelectionResult, bool, error) {
 	compactBlocked := false
+	schedGroup := s.service.resolveOpenAISchedulingGroup(ctx, req.GroupID)
 	for i := 0; i < len(selectionOrder); i++ {
 		candidate := selectionOrder[i]
 		fresh := s.service.resolveFreshSchedulableOpenAIAccount(ctx, candidate.account, req.RequestedModel, false, req.RequiredCapability)
@@ -798,6 +838,11 @@ func (s *defaultOpenAIAccountScheduler) tryAcquireOpenAISelectionOrder(
 		}
 		fresh = s.service.recheckSelectedOpenAIAccountFromDB(ctx, fresh, req.RequestedModel, false, req.RequiredCapability)
 		if fresh == nil || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) || !s.isAccountRequestCompatible(ctx, fresh, req) {
+			continue
+		}
+		var ok bool
+		fresh, ok = s.service.resolveOpenAIAccountForPrivacyRequirement(ctx, fresh, schedGroup)
+		if !ok {
 			continue
 		}
 		if req.RequireCompact && openAICompactSupportTier(fresh) == 0 {
@@ -834,11 +879,7 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 		return nil, 0, 0, 0, noAvailableOpenAISelectionError(req.RequestedModel, false)
 	}
 
-	// require_privacy_set: 获取分组信息
-	var schedGroup *Group
-	if req.GroupID != nil && s.service.schedulerSnapshot != nil {
-		schedGroup, _ = s.service.schedulerSnapshot.GetGroupByID(ctx, *req.GroupID)
-	}
+	schedGroup := s.service.resolveOpenAISchedulingGroup(ctx, req.GroupID)
 
 	filtered := make([]*Account, 0, len(accounts))
 	loadReq := make([]AccountWithConcurrency, 0, len(accounts))
@@ -852,14 +893,12 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 		if !account.IsSchedulable() || !account.IsOpenAI() {
 			continue
 		}
-		if s.service.isOpenAIAccountRuntimeBlocked(account) {
+		var ok bool
+		account, ok = s.service.resolveOpenAIAccountForPrivacyRequirement(ctx, account, schedGroup)
+		if !ok {
 			continue
 		}
-		// require_privacy_set: 跳过 privacy 未设置的账号并标记异常
-		if schedGroup != nil && schedGroup.RequirePrivacySet && !account.IsPrivacySet() {
-			s.service.BlockAccountScheduling(account, time.Time{}, "privacy_not_set")
-			_ = s.service.accountRepo.SetError(ctx, account.ID,
-				fmt.Sprintf("Privacy not set, required by group [%s]", schedGroup.Name))
+		if s.service.isOpenAIAccountRuntimeBlocked(account) {
 			continue
 		}
 		if !s.isAccountRequestCompatible(ctx, account, req) {
@@ -937,6 +976,11 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 		}
 		fresh = s.service.recheckSelectedOpenAIAccountFromDB(ctx, fresh, req.RequestedModel, false, req.RequiredCapability)
 		if fresh == nil || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) || !s.isAccountRequestCompatible(ctx, fresh, req) {
+			continue
+		}
+		var ok bool
+		fresh, ok = s.service.resolveOpenAIAccountForPrivacyRequirement(ctx, fresh, schedGroup)
+		if !ok {
 			continue
 		}
 		if req.RequireCompact && openAICompactSupportTier(fresh) == 0 {
@@ -1274,7 +1318,16 @@ func (s *OpenAIGatewayService) isOpenAIAccountTransportCompatible(account *Accou
 	return s.getOpenAIWSProtocolResolver().Resolve(account).Transport == requiredTransport
 }
 
-func (s *OpenAIGatewayService) ReportOpenAIAccountScheduleResult(accountID int64, success bool, firstTokenMs *int) {
+func (s *OpenAIGatewayService) ReportOpenAIAccountScheduleResult(accountID int64, success bool, firstTokenMs *int, accounts ...*Account) {
+	if s == nil {
+		return
+	}
+	if success && s.rateLimitService != nil {
+		s.rateLimitService.ResetOpenAI403Counter(context.Background(), accountID)
+		if len(accounts) > 0 {
+			s.rateLimitService.RecordOpenAIOAuthUpstreamOutcome(context.Background(), accounts[0], http.StatusOK)
+		}
+	}
 	scheduler := s.getOpenAIAccountScheduler(context.Background())
 	if scheduler == nil {
 		return

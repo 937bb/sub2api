@@ -88,7 +88,13 @@ func (m *mockAccountRepoForGemini) ListByGroup(ctx context.Context, groupID int6
 func (m *mockAccountRepoForGemini) ListActive(ctx context.Context) ([]Account, error) {
 	return nil, nil
 }
+func (m *mockAccountRepoForGemini) ListOAuthRefreshCandidates(ctx context.Context) ([]Account, error) {
+	return m.ListActive(ctx)
+}
 func (m *mockAccountRepoForGemini) ListByPlatform(ctx context.Context, platform string) ([]Account, error) {
+	return nil, nil
+}
+func (m *mockAccountRepoForGemini) ListByPlatformForValidation(ctx context.Context, platform string) ([]Account, error) {
 	return nil, nil
 }
 func (m *mockAccountRepoForGemini) UpdateLastUsed(ctx context.Context, id int64) error { return nil }
@@ -227,6 +233,9 @@ func (m *mockGroupRepoForGemini) ListActive(ctx context.Context) ([]Group, error
 func (m *mockGroupRepoForGemini) ListActiveByPlatform(ctx context.Context, platform string) ([]Group, error) {
 	return nil, nil
 }
+func (m *mockGroupRepoForGemini) ListAllIncludingInactive(ctx context.Context, platform string) ([]Group, error) {
+	return nil, nil
+}
 func (m *mockGroupRepoForGemini) ExistsByName(ctx context.Context, name string) (bool, error) {
 	return false, nil
 }
@@ -319,6 +328,68 @@ func TestGeminiMessagesCompatService_SelectAccountForModelWithExclusions_GeminiP
 	require.NotNil(t, acc)
 	require.Equal(t, int64(1), acc.ID, "应选择优先级最高的 gemini 账户")
 	require.Equal(t, PlatformGemini, acc.Platform, "无分组时应只返回 gemini 平台账户")
+}
+
+func TestGeminiMessagesCompatService_SelectAccountForAIStudioEndpoints_PrefersAPIKeyFromSchedulerMetadata(t *testing.T) {
+	ctx := context.Background()
+	cache := &snapshotHydrationCache{
+		snapshot: []*Account{
+			{
+				ID:          1,
+				Platform:    PlatformGemini,
+				Type:        AccountTypeOAuth,
+				Status:      StatusActive,
+				Schedulable: true,
+				Concurrency: 1,
+				Priority:    1,
+			},
+			{
+				ID:          2,
+				Platform:    PlatformGemini,
+				Type:        AccountTypeAPIKey,
+				Status:      StatusActive,
+				Schedulable: true,
+				Concurrency: 1,
+				Priority:    10,
+				Credentials: map[string]any{
+					"has_api_key": true,
+				},
+			},
+		},
+		accounts: map[int64]*Account{
+			1: {
+				ID:          1,
+				Platform:    PlatformGemini,
+				Type:        AccountTypeOAuth,
+				Status:      StatusActive,
+				Schedulable: true,
+				Concurrency: 1,
+				Priority:    1,
+			},
+			2: {
+				ID:          2,
+				Platform:    PlatformGemini,
+				Type:        AccountTypeAPIKey,
+				Status:      StatusActive,
+				Schedulable: true,
+				Concurrency: 1,
+				Priority:    10,
+				Credentials: map[string]any{
+					"api_key": "live-api-key",
+				},
+			},
+		},
+	}
+	svc := &GeminiMessagesCompatService{
+		schedulerSnapshot: NewSchedulerSnapshotService(cache, nil, nil, nil, nil),
+	}
+
+	account, err := svc.SelectAccountForAIStudioEndpoints(ctx, nil)
+
+	require.NoError(t, err)
+	require.NotNil(t, account)
+	require.Equal(t, int64(2), account.ID)
+	require.Equal(t, "live-api-key", account.GetCredential("api_key"))
 }
 
 func TestGeminiMessagesCompatService_GroupResolution_ReusesContextGroup(t *testing.T) {

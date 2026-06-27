@@ -242,7 +242,7 @@ func (s *SchedulerSnapshotService) pollOutbox() {
 		return
 	}
 
-	events, err := s.outboxRepo.ListAfter(ctx, watermark, 200)
+	events, err := s.outboxRepo.ListAfterAndReleaseDedup(ctx, watermark, 200)
 	if err != nil {
 		logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] outbox poll failed: %v", err)
 		return
@@ -263,7 +263,12 @@ func (s *SchedulerSnapshotService) pollOutbox() {
 		}
 	}
 
-	lastID := events[len(events)-1].ID
+	lastID := watermark
+	for _, event := range events {
+		if event.ID > lastID {
+			lastID = event.ID
+		}
+	}
 	var wmErr error
 	for i := range 3 {
 		wmCtx, wmCancel := context.WithTimeout(context.Background(), 5*time.Second)

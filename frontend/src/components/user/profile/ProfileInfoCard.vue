@@ -67,7 +67,7 @@
                   {{ t('profile.accountBalance') }}
                 </p>
                 <p class="mt-1 text-lg font-semibold text-gray-900 dark:text-white">
-                  {{ formatCurrency(user?.balance || 0) }}
+                  {{ accountBalanceLabel }}
                 </p>
               </div>
               <div
@@ -245,6 +245,13 @@ const primaryEmailDisplay = computed(() => {
   return email
 })
 const avatarInitial = computed(() => displayName.value.charAt(0).toUpperCase() || 'U')
+const accountBalanceLabel = computed(() => {
+  if (typeof props.user?.balance !== 'number' || Number.isNaN(props.user.balance)) {
+    return '...'
+  }
+  return formatCurrency(props.user.balance)
+})
+
 const memberSinceLabel = computed(() => {
   const raw = props.user?.created_at?.trim()
   if (!raw) {

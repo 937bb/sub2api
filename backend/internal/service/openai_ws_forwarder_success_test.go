@@ -30,6 +30,8 @@ func TestOpenAIGatewayService_Forward_WSv2_SuccessAndBindSticky(t *testing.T) {
 		PreviousResponseID string
 		StreamExists       bool
 		Stream             bool
+		ClientRequestID    string
+		MetadataSessionID  string
 	}
 	receivedCh := make(chan receivedPayload, 1)
 
@@ -55,6 +57,8 @@ func TestOpenAIGatewayService_Forward_WSv2_SuccessAndBindSticky(t *testing.T) {
 			PreviousResponseID: strings.TrimSpace(gjson.Get(requestJSON, "previous_response_id").String()),
 			StreamExists:       gjson.Get(requestJSON, "stream").Exists(),
 			Stream:             gjson.Get(requestJSON, "stream").Bool(),
+			ClientRequestID:    strings.TrimSpace(gjson.Get(requestJSON, "client_metadata."+openAICodexClientRequestIDHeader).String()),
+			MetadataSessionID:  strings.TrimSpace(gjson.Get(requestJSON, "client_metadata.session_id").String()),
 		}
 
 		if err := conn.WriteJSON(map[string]any{
@@ -142,7 +146,7 @@ func TestOpenAIGatewayService_Forward_WSv2_SuccessAndBindSticky(t *testing.T) {
 		},
 	}
 
-	body := []byte(`{"model":"gpt-5.1","stream":false,"previous_response_id":"resp_prev_1","input":[{"type":"input_text","text":"hello"}]}`)
+	body := []byte(`{"model":"gpt-5.1","stream":false,"previous_response_id":"resp_prev_1","input":[{"type":"input_text","text":"hello"}],"client_metadata":{"x-client-request-id":"api-key-client-request","session_id":"api-key-session"}}`)
 	result, err := svc.Forward(context.Background(), c, account, body)
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -158,6 +162,8 @@ func TestOpenAIGatewayService_Forward_WSv2_SuccessAndBindSticky(t *testing.T) {
 	require.Equal(t, "resp_prev_1", received.PreviousResponseID)
 	require.True(t, received.StreamExists, "WS 请求应携带 stream 字段")
 	require.False(t, received.Stream, "应保持客户端 stream=false 的原始语义")
+	require.Equal(t, "api-key-client-request", received.ClientRequestID)
+	require.Equal(t, "api-key-session", received.MetadataSessionID)
 
 	store := svc.getOpenAIWSStateStore()
 	mappedAccountID, getErr := store.GetResponseAccount(context.Background(), groupID, "resp_new_1")
@@ -647,11 +653,33 @@ func TestOpenAIGatewayService_Forward_WSv2_OAuthStoreFalseByDefault(t *testing.T
 			"access_token": "oauth-token-1",
 		},
 		Extra: map[string]any{
-			"responses_websockets_v2_enabled": true,
+			"openai_oauth_ws_mode": OpenAIOAuthWSModeManagedSession,
 		},
 	}
 
-	body := []byte(`{"model":"gpt-5.1","stream":false,"store":true,"input":[{"type":"input_text","text":"hello"}]}`)
+	body := []byte(`{
+		"model":"gpt-5.1",
+		"stream":false,
+		"store":true,
+		"input":[{"type":"input_text","text":"hello"}],
+		"instructions":"be helpful",
+		"reasoning":{"effort":"medium"},
+		"tools":[{"type":"function","name":"shell","parameters":{"type":"object","properties":{"nonce":{"const":9007199254740993}}}}],
+		"tool_choice":"auto",
+		"parallel_tool_calls":true,
+		"include":["reasoning.encrypted_content"],
+		"service_tier":"default",
+		"prompt_cache_key":"cache-oauth-ws",
+		"text":{"verbosity":"low"},
+		"generate":false,
+		"max_output_tokens":1024,
+		"temperature":0.5,
+		"top_p":0.9,
+		"metadata":{"should":"drop"},
+		"user":"should-drop",
+		"background":true,
+		"unknown_field":"should-drop"
+	}`)
 	result, err := svc.Forward(context.Background(), c, account, body)
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -663,16 +691,34 @@ func TestOpenAIGatewayService_Forward_WSv2_OAuthStoreFalseByDefault(t *testing.T
 	require.False(t, gjson.Get(requestJSON, "store").Bool(), "默认策略应将 OAuth store 置为 false")
 	require.True(t, gjson.Get(requestJSON, "stream").Exists(), "WSv2 payload 应保留 stream 字段")
 	require.True(t, gjson.Get(requestJSON, "stream").Bool(), "OAuth Codex 规范化后应强制 stream=true")
+	require.Equal(t, "response.create", gjson.Get(requestJSON, "type").String())
+	require.Equal(t, "gpt-5.4", gjson.Get(requestJSON, "model").String())
+	require.Equal(t, "be helpful", gjson.Get(requestJSON, "instructions").String())
+	require.Equal(t, "medium", gjson.Get(requestJSON, "reasoning.effort").String())
+	require.Equal(t, "function", gjson.Get(requestJSON, "tools.0.type").String())
+	require.Contains(t, requestJSON, "9007199254740993")
+	require.NotContains(t, requestJSON, "9007199254740992")
+	require.Equal(t, "auto", gjson.Get(requestJSON, "tool_choice").String())
+	require.True(t, gjson.Get(requestJSON, "parallel_tool_calls").Bool())
+	require.Equal(t, "reasoning.encrypted_content", gjson.Get(requestJSON, "include.0").String())
+	require.Equal(t, "cache-oauth-ws", gjson.Get(requestJSON, "prompt_cache_key").String())
+	require.Equal(t, "low", gjson.Get(requestJSON, "text.verbosity").String())
+	require.False(t, gjson.Get(requestJSON, "generate").Bool())
+	for _, field := range []string{"max_output_tokens", "temperature", "top_p", "metadata", "user", "background", "unknown_field"} {
+		require.False(t, gjson.Get(requestJSON, field).Exists(), "%s should be removed by OAuth WS allowlist", field)
+	}
 	require.Equal(t, openAIWSBetaV2Value, captureDialer.lastHeaders.Get("OpenAI-Beta"))
-	// OAuth 账号的 session_id/conversation_id 应被 isolateOpenAISessionID 隔离，
+	// OAuth 账号的 session_id/conversation_id 应隔离成 UUID 形态，
 	// 测试中未设置 api_key 到 context，apiKeyID=0。
-	require.Equal(t, isolateOpenAISessionID(0, "sess-oauth-1"), captureDialer.lastHeaders.Get("session_id"))
-	require.Equal(t, isolateOpenAISessionID(0, "sess-oauth-1"), captureDialer.lastHeaders.Get(openAICodexSessionIDHeader))
-	require.Equal(t, isolateOpenAISessionID(0, "conv-oauth-1"), captureDialer.lastHeaders.Get("conversation_id"))
-	require.Equal(t, isolateOpenAISessionID(0, "conv-oauth-1"), captureDialer.lastHeaders.Get(openAICodexThreadIDHeader))
-	require.NotEmpty(t, captureDialer.lastHeaders.Get(openAICodexClientRequestIDHeader))
+	wantSessionID := isolateOpenAICodexOAuthSessionID(0, "sess-oauth-1", "session")
+	wantThreadID := isolateOpenAICodexOAuthSessionID(0, "conv-oauth-1", "thread")
+	require.Equal(t, wantSessionID, captureDialer.lastHeaders.Get("session_id"))
+	require.Equal(t, wantSessionID, captureDialer.lastHeaders.Get(openAICodexSessionIDHeader))
+	require.Equal(t, wantThreadID, captureDialer.lastHeaders.Get("conversation_id"))
+	require.Equal(t, wantThreadID, captureDialer.lastHeaders.Get(openAICodexThreadIDHeader))
+	require.Equal(t, wantThreadID, captureDialer.lastHeaders.Get(openAICodexClientRequestIDHeader))
 	require.NotEmpty(t, captureDialer.lastHeaders.Get(openAICodexInstallationIDHeader))
-	require.NotEmpty(t, captureDialer.lastHeaders.Get(openAICodexWindowIDHeader))
+	require.Equal(t, wantThreadID+":0", captureDialer.lastHeaders.Get(openAICodexWindowIDHeader))
 	require.Equal(t, "collab_spawn", captureDialer.lastHeaders.Get(openAICodexSubagentHeader))
 	require.Equal(t, "parent-thread-1", captureDialer.lastHeaders.Get(openAICodexParentThreadIDHeader))
 	require.Equal(t, "vendor=value", captureDialer.lastHeaders.Get(openAITracestateHeader))
@@ -684,20 +730,188 @@ func TestOpenAIGatewayService_Forward_WSv2_OAuthStoreFalseByDefault(t *testing.T
 	require.Equal(t, "vendor=value", gjson.Get(requestJSON, "client_metadata."+openAICodexWSTracestateMetadataKey).String())
 }
 
+func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_OAuthStripsClientMetadataIdentity(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	cfg := &config.Config{}
+	cfg.Security.URLAllowlist.Enabled = false
+	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
+	cfg.Gateway.OpenAIWS.Enabled = true
+	cfg.Gateway.OpenAIWS.OAuthEnabled = true
+	cfg.Gateway.OpenAIWS.APIKeyEnabled = true
+	cfg.Gateway.OpenAIWS.ResponsesWebsocketsV2 = true
+	cfg.Gateway.OpenAIWS.MaxConnsPerAccount = 1
+	cfg.Gateway.OpenAIWS.MinIdlePerAccount = 0
+	cfg.Gateway.OpenAIWS.MaxIdlePerAccount = 1
+	cfg.Gateway.OpenAIWS.QueueLimitPerConn = 8
+	cfg.Gateway.OpenAIWS.DialTimeoutSeconds = 3
+	cfg.Gateway.OpenAIWS.ReadTimeoutSeconds = 3
+	cfg.Gateway.OpenAIWS.WriteTimeoutSeconds = 3
+
+	captureConn := &openAIWSCaptureConn{
+		events: [][]byte{
+			[]byte(`{"type":"response.completed","response":{"id":"resp_ingress_meta_1","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`),
+			[]byte(`{"type":"response.completed","response":{"id":"resp_ingress_meta_2","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`),
+		},
+	}
+	captureDialer := &openAIWSCaptureDialer{conn: captureConn}
+	pool := newOpenAIWSConnPool(cfg)
+	pool.setClientDialerForTest(captureDialer)
+
+	svc := &OpenAIGatewayService{
+		cfg:              cfg,
+		httpUpstream:     &httpUpstreamRecorder{},
+		cache:            &stubGatewayCache{},
+		openaiWSResolver: NewOpenAIWSProtocolResolver(cfg),
+		toolCorrector:    NewCodexToolCorrector(),
+		openaiWSPool:     pool,
+	}
+	persisted := OpenAICodexFingerprint{
+		SchemaVersion:  openAICodexFingerprintSchemaV1,
+		InstallationID: "550e8400-e29b-41d4-a716-446655440000",
+		UAProfile:      ParseOpenAICodexUAProfile(codexCLIUserAgent),
+		CreatedAt:      "2026-06-12T00:00:00Z",
+		UpdatedAt:      "2026-06-12T00:00:00Z",
+	}
+	account := &Account{
+		ID:          229,
+		Name:        "openai-oauth-ingress-metadata",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Credentials: map[string]any{"access_token": "oauth-token-1"},
+		Extra: map[string]any{
+			"openai_oauth_ws_mode":         OpenAIOAuthWSModeManagedSession,
+			OpenAICodexFingerprintExtraKey: persisted,
+		},
+	}
+
+	serverErrCh := make(chan error, 1)
+	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := coderws.Accept(w, r, &coderws.AcceptOptions{CompressionMode: coderws.CompressionContextTakeover})
+		if err != nil {
+			serverErrCh <- err
+			return
+		}
+		defer func() { _ = conn.CloseNow() }()
+
+		rec := httptest.NewRecorder()
+		ginCtx, _ := gin.CreateTestContext(rec)
+		req := r.Clone(r.Context())
+		req.Header = req.Header.Clone()
+		req.Header.Set("User-Agent", codexCLIUserAgent)
+		ginCtx.Request = req
+
+		readCtx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+		_, firstMessage, readErr := conn.Read(readCtx)
+		cancel()
+		if readErr != nil {
+			serverErrCh <- readErr
+			return
+		}
+		serverErrCh <- svc.ProxyResponsesWebSocketFromClient(r.Context(), ginCtx, conn, account, "oauth-token-1", firstMessage, nil)
+	}))
+	defer wsServer.Close()
+
+	dialCtx, cancelDial := context.WithTimeout(context.Background(), 3*time.Second)
+	clientConn, _, err := coderws.Dial(dialCtx, "ws"+strings.TrimPrefix(wsServer.URL, "http"), nil)
+	cancelDial()
+	require.NoError(t, err)
+	defer func() { _ = clientConn.CloseNow() }()
+
+	firstPayload := []byte(`{"type":"response.create","model":"gpt-5.1","stream":false,"input":"first","client_metadata":{"keep":"first","x-codex-installation-id":"attacker-installation-1","x-codex-window-id":"attacker-window-1","session-id":"attacker-session-header-1","thread-id":"attacker-thread-header-1","x-client-request-id":"attacker-request-header-1","x-codex-parent-thread-id":"attacker-parent-1","x-codex-turn-metadata":"attacker-turn-metadata-1","x-codex-turn-state":"attacker-turn-state-1","x-openai-subagent":"attacker-subagent-1","ws_request_header_traceparent":"attacker-traceparent-1","ws_request_header_tracestate":"attacker-tracestate-1","ws_request_header_authorization":"attacker-auth-1","ws_request_header_cookie":"attacker-cookie-1","x-codex-ws-stream-request-start-ms":"attacker-start-1","session_id":"attacker-session-1","conversation_id":"attacker-conversation-1","prompt_cache_key":"attacker-cache-1"}}`)
+	writeCtx, cancelWrite := context.WithTimeout(context.Background(), 3*time.Second)
+	require.NoError(t, clientConn.Write(writeCtx, coderws.MessageText, firstPayload))
+	cancelWrite()
+
+	readCtx, cancelRead := context.WithTimeout(context.Background(), 3*time.Second)
+	_, event, readErr := clientConn.Read(readCtx)
+	cancelRead()
+	require.NoError(t, readErr)
+	require.Equal(t, "response.completed", gjson.GetBytes(event, "type").String())
+
+	secondPayload := []byte(`{"type":"response.create","model":"gpt-5.1","stream":false,"input":"second","client_metadata":{"keep":"second","x-codex-installation-id":"attacker-installation-2","x-codex-window-id":"attacker-thread-2:7","session-id":"attacker-session-header-2","thread-id":"attacker-thread-header-2","x-client-request-id":"attacker-request-header-2","x-codex-parent-thread-id":"attacker-parent-2","x-codex-turn-metadata":"attacker-turn-metadata-2","x-codex-turn-state":"attacker-turn-state-2","x-openai-subagent":"attacker-subagent-2","ws_request_header_traceparent":"attacker-traceparent-2","ws_request_header_tracestate":"attacker-tracestate-2","ws_request_header_authorization":"attacker-auth-2","ws_request_header_cookie":"attacker-cookie-2","x-codex-ws-stream-request-start-ms":"attacker-start-2","session_id":"attacker-session-2","conversation_id":"attacker-conversation-2","prompt_cache_key":"attacker-cache-2"}}`)
+	writeCtx, cancelWrite = context.WithTimeout(context.Background(), 3*time.Second)
+	require.NoError(t, clientConn.Write(writeCtx, coderws.MessageText, secondPayload))
+	cancelWrite()
+
+	readCtx, cancelRead = context.WithTimeout(context.Background(), 3*time.Second)
+	_, event, readErr = clientConn.Read(readCtx)
+	cancelRead()
+	require.NoError(t, readErr)
+	require.Equal(t, "response.completed", gjson.GetBytes(event, "type").String())
+
+	require.NoError(t, clientConn.Close(coderws.StatusNormalClosure, "done"))
+	select {
+	case serverErr := <-serverErrCh:
+		require.NoError(t, serverErr)
+	case <-time.After(5 * time.Second):
+		t.Fatal("等待 ingress websocket 结束超时")
+	}
+
+	require.Len(t, captureConn.writes, 2)
+	assertSanitized := func(index int, keep string, attackerSuffix string) {
+		require.Less(t, index, len(captureConn.rawWrites))
+		requestJSON := requestToJSONString(captureConn.writes[index])
+		rawWrite := string(captureConn.rawWrites[index])
+		require.Equal(t, keep, gjson.Get(requestJSON, "client_metadata.keep").String())
+		require.Equal(t, persisted.InstallationID, gjson.Get(requestJSON, "client_metadata."+openAICodexInstallationIDHeader).String())
+		require.NotEmpty(t, gjson.Get(requestJSON, "client_metadata."+openAICodexWindowIDHeader).String())
+		require.True(t, gjson.Get(requestJSON, "client_metadata."+openAICodexWSStreamRequestStartMSKey).Exists())
+		require.False(t, gjson.Get(requestJSON, "client_metadata."+openAICodexSessionIDHeader).Exists())
+		require.False(t, gjson.Get(requestJSON, "client_metadata."+openAICodexThreadIDHeader).Exists())
+		require.False(t, gjson.Get(requestJSON, "client_metadata."+openAICodexClientRequestIDHeader).Exists())
+		require.False(t, gjson.Get(requestJSON, "client_metadata."+openAICodexParentThreadIDHeader).Exists())
+		require.False(t, gjson.Get(requestJSON, "client_metadata."+openAICodexTurnStateHeader).Exists())
+		require.False(t, gjson.Get(requestJSON, "client_metadata."+openAICodexTurnMetadataHeader).Exists())
+		require.False(t, gjson.Get(requestJSON, "client_metadata."+openAICodexSubagentHeader).Exists())
+		require.False(t, gjson.Get(requestJSON, "client_metadata."+openAICodexWSTraceparentMetadataKey).Exists())
+		require.False(t, gjson.Get(requestJSON, "client_metadata."+openAICodexWSTracestateMetadataKey).Exists())
+		require.False(t, gjson.Get(requestJSON, "client_metadata.ws_request_header_authorization").Exists())
+		require.False(t, gjson.Get(requestJSON, "client_metadata.ws_request_header_cookie").Exists())
+		require.NotEqual(t, "attacker-start-"+attackerSuffix, gjson.Get(requestJSON, "client_metadata."+openAICodexWSStreamRequestStartMSKey).String())
+		require.False(t, gjson.Get(requestJSON, "client_metadata.session_id").Exists())
+		require.False(t, gjson.Get(requestJSON, "client_metadata.conversation_id").Exists())
+		require.False(t, gjson.Get(requestJSON, "client_metadata.prompt_cache_key").Exists())
+		require.NotContains(t, rawWrite, "attacker-installation-"+attackerSuffix)
+		require.NotContains(t, rawWrite, "attacker-window-"+attackerSuffix)
+		require.NotContains(t, rawWrite, "attacker-session-"+attackerSuffix)
+		require.NotContains(t, rawWrite, "attacker-thread-header-"+attackerSuffix)
+		require.NotContains(t, rawWrite, "attacker-request-header-"+attackerSuffix)
+		require.NotContains(t, rawWrite, "attacker-parent-"+attackerSuffix)
+		require.NotContains(t, rawWrite, "attacker-turn-metadata-"+attackerSuffix)
+		require.NotContains(t, rawWrite, "attacker-turn-state-"+attackerSuffix)
+		require.NotContains(t, rawWrite, "attacker-subagent-"+attackerSuffix)
+		require.NotContains(t, rawWrite, "attacker-traceparent-"+attackerSuffix)
+		require.NotContains(t, rawWrite, "attacker-tracestate-"+attackerSuffix)
+		require.NotContains(t, rawWrite, "attacker-auth-"+attackerSuffix)
+		require.NotContains(t, rawWrite, "attacker-cookie-"+attackerSuffix)
+		require.NotContains(t, rawWrite, "attacker-conversation-"+attackerSuffix)
+		require.NotContains(t, rawWrite, "attacker-cache-"+attackerSuffix)
+	}
+	assertSanitized(0, "first", "1")
+	assertSanitized(1, "second", "2")
+	firstWindowID := gjson.Get(requestToJSONString(captureConn.writes[0]), "client_metadata."+openAICodexWindowIDHeader).String()
+	secondWindowID := gjson.Get(requestToJSONString(captureConn.writes[1]), "client_metadata."+openAICodexWindowIDHeader).String()
+	require.True(t, strings.HasSuffix(firstWindowID, ":0"))
+	require.True(t, strings.HasSuffix(secondWindowID, ":7"))
+	require.Equal(t, strings.TrimSuffix(firstWindowID, ":0"), strings.TrimSuffix(secondWindowID, ":7"))
+}
+
 func TestOpenAIGatewayService_Forward_WSv2_OAuthOriginatorCompatibility(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	configuredUA := "custom-codex/1.2.3"
 	tests := []struct {
 		name           string
 		userAgent      string
 		originator     string
 		wantOriginator string
-		wantUserAgent  string
 	}{
-		{name: "desktop originator preserved", originator: "Codex Desktop", wantOriginator: "Codex Desktop", wantUserAgent: configuredUA},
-		{name: "vscode originator preserved", originator: "codex_vscode", wantOriginator: "codex_vscode", wantUserAgent: configuredUA},
-		{name: "official ua fallback to desktop originator", userAgent: codexCLIUserAgent, wantOriginator: codexOfficialOriginator, wantUserAgent: codexCLIUserAgent},
+		{name: "desktop originator ignored for OAuth fingerprint", originator: "Codex Desktop", wantOriginator: codexOfficialOriginator},
+		{name: "vscode originator ignored for OAuth fingerprint", originator: "codex_vscode", wantOriginator: codexOfficialOriginator},
+		{name: "official ua fallback to fingerprint originator", userAgent: codexCLIUserAgent, wantOriginator: codexOfficialOriginator},
 	}
 
 	for _, tt := range tests {
@@ -753,7 +967,7 @@ func TestOpenAIGatewayService_Forward_WSv2_OAuthOriginatorCompatibility(t *testi
 					"access_token": "oauth-token-1",
 				},
 				Extra: map[string]any{
-					"responses_websockets_v2_enabled": true,
+					"openai_oauth_ws_mode": OpenAIOAuthWSModeManagedSession,
 				},
 			}
 
@@ -814,7 +1028,7 @@ func TestOpenAIGatewayService_Forward_WSv2_HeaderSessionFallbackFromPromptCacheK
 			"access_token": "oauth-token-1",
 		},
 		Extra: map[string]any{
-			"responses_websockets_v2_enabled": true,
+			"openai_oauth_ws_mode": OpenAIOAuthWSModeManagedSession,
 		},
 	}
 
@@ -824,8 +1038,8 @@ func TestOpenAIGatewayService_Forward_WSv2_HeaderSessionFallbackFromPromptCacheK
 	require.NotNil(t, result)
 	require.Equal(t, "resp_prompt_cache_key", result.RequestID)
 
-	// OAuth 账号的 session_id 应被 isolateOpenAISessionID 隔离（apiKeyID=0，未在 context 设置）。
-	require.Equal(t, isolateOpenAISessionID(0, "pcache_123"), captureDialer.lastHeaders.Get("session_id"))
+	// OAuth 账号的 session_id 应隔离成 UUID 形态（apiKeyID=0，未在 context 设置）。
+	require.Equal(t, isolateOpenAICodexOAuthSessionID(0, "pcache_123", "session"), captureDialer.lastHeaders.Get("session_id"))
 	require.Empty(t, captureDialer.lastHeaders.Get("conversation_id"))
 	require.NotNil(t, captureConn.lastWrite)
 	require.True(t, gjson.Get(requestToJSONString(captureConn.lastWrite), "stream").Exists())
@@ -1592,12 +1806,14 @@ func (d *openAIWSCaptureDialer) DialCount() int {
 }
 
 type openAIWSCaptureConn struct {
-	mu         sync.Mutex
-	readDelays []time.Duration
-	events     [][]byte
-	lastWrite  map[string]any
-	writes     []map[string]any
-	closed     bool
+	mu           sync.Mutex
+	readDelays   []time.Duration
+	events       [][]byte
+	lastWrite    map[string]any
+	writes       []map[string]any
+	lastRawWrite []byte
+	rawWrites    [][]byte
+	closed       bool
 }
 
 func (c *openAIWSCaptureConn) WriteJSON(ctx context.Context, value any) error {
@@ -1609,15 +1825,22 @@ func (c *openAIWSCaptureConn) WriteJSON(ctx context.Context, value any) error {
 	}
 	switch payload := value.(type) {
 	case map[string]any:
+		raw, _ := json.Marshal(payload)
+		c.lastRawWrite = append([]byte(nil), raw...)
+		c.rawWrites = append(c.rawWrites, append([]byte(nil), raw...))
 		c.lastWrite = cloneMapStringAny(payload)
 		c.writes = append(c.writes, cloneMapStringAny(payload))
 	case json.RawMessage:
+		c.lastRawWrite = append([]byte(nil), payload...)
+		c.rawWrites = append(c.rawWrites, append([]byte(nil), payload...))
 		var parsed map[string]any
 		if err := json.Unmarshal(payload, &parsed); err == nil {
 			c.lastWrite = cloneMapStringAny(parsed)
 			c.writes = append(c.writes, cloneMapStringAny(parsed))
 		}
 	case []byte:
+		c.lastRawWrite = append([]byte(nil), payload...)
+		c.rawWrites = append(c.rawWrites, append([]byte(nil), payload...))
 		var parsed map[string]any
 		if err := json.Unmarshal(payload, &parsed); err == nil {
 			c.lastWrite = cloneMapStringAny(parsed)

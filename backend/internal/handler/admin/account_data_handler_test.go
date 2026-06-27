@@ -104,8 +104,25 @@ func TestExportDataIncludesSecrets(t *testing.T) {
 			Name:        "account",
 			Platform:    service.PlatformOpenAI,
 			Type:        service.AccountTypeOAuth,
-			Credentials: map[string]any{"token": "secret"},
-			Extra:       map[string]any{"note": "x"},
+			Credentials: map[string]any{"token": "secret", "personal_access_token": "pat-secret"},
+			Extra: map[string]any{
+				"note":                 "x",
+				"import_source":        "hcpa",
+				"import_format":        "hcpa",
+				"imported_at":          "2026-06-23T14:06:08+08:00",
+				"hcpa_disabled":        false,
+				"hcpa_expired_at":      "2026-12-31T10:00:00+08:00",
+				"hcpa_last_refresh_at": "2026-06-23T14:06:08+08:00",
+				service.OpenAICodexFingerprintExtraKey: map[string]any{
+					"schema_version":  1,
+					"installation_id": "11111111-1111-4111-8111-111111111111",
+					"created_at":      "2026-06-15T00:00:00Z",
+					"updated_at":      "2026-06-15T00:00:00Z",
+					"ua_profile": map[string]any{
+						"raw_user_agent": "codex-tui/0.136.0 raw",
+					},
+				},
+			},
 			ProxyID:     &proxyID,
 			Concurrency: 3,
 			Priority:    50,
@@ -127,6 +144,15 @@ func TestExportDataIncludesSecrets(t *testing.T) {
 	require.Equal(t, "pass", resp.Data.Proxies[0].Password)
 	require.Len(t, resp.Data.Accounts, 1)
 	require.Equal(t, "secret", resp.Data.Accounts[0].Credentials["token"])
+	require.Equal(t, "pat-secret", resp.Data.Accounts[0].Credentials["personal_access_token"])
+	require.Equal(t, "x", resp.Data.Accounts[0].Extra["note"])
+	for _, key := range internalHCPAAccountExtraKeys() {
+		require.NotContains(t, resp.Data.Accounts[0].Extra, key)
+	}
+	require.NotContains(t, resp.Data.Accounts[0].Extra, service.OpenAICodexFingerprintExtraKey)
+	require.NotContains(t, rec.Body.String(), service.OpenAICodexFingerprintExtraKey)
+	require.NotContains(t, rec.Body.String(), "11111111-1111-4111-8111-111111111111")
+	require.NotContains(t, rec.Body.String(), "codex-tui/0.136.0 raw")
 }
 
 func TestExportDataWithoutProxies(t *testing.T) {
@@ -215,6 +241,176 @@ func TestExportDataSelectedIDsOverrideFilters(t *testing.T) {
 	require.Equal(t, 0, resp.Code)
 	require.Len(t, resp.Data.Accounts, 2)
 	require.Equal(t, 0, adminSvc.lastListAccounts.calls)
+}
+
+func TestImportDataIncludesPersonalAccessTokenAndIgnoresMissingField(t *testing.T) {
+	router, adminSvc := setupAccountDataRouter()
+
+	dataPayload := map[string]any{
+		"data": map[string]any{
+			"type":    dataType,
+			"version": dataVersion,
+			"proxies": []map[string]any{},
+			"accounts": []map[string]any{
+				{
+					"name":        "pat-account",
+					"platform":    service.PlatformOpenAI,
+					"type":        service.AccountTypeOAuth,
+					"credentials": map[string]any{"personal_access_token": "pat-secret", "chatgpt_account_id": "acct"},
+					"concurrency": 3,
+					"priority":    50,
+				},
+				{
+					"name":        "legacy-account",
+					"platform":    service.PlatformOpenAI,
+					"type":        service.AccountTypeOAuth,
+					"credentials": map[string]any{"access_token": "access-secret"},
+					"concurrency": 3,
+					"priority":    50,
+				},
+			},
+		},
+		"skip_default_group_bind": true,
+	}
+
+	body, _ := json.Marshal(dataPayload)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/data", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	require.Len(t, adminSvc.createdAccounts, 2)
+	require.Equal(t, "pat-secret", adminSvc.createdAccounts[0].Credentials["personal_access_token"])
+	require.NotContains(t, adminSvc.createdAccounts[1].Credentials, "personal_access_token")
+}
+
+func TestImportDataStripsInternalHCPAExtra(t *testing.T) {
+	router, adminSvc := setupAccountDataRouter()
+
+	dataPayload := map[string]any{
+		"data": map[string]any{
+			"type":    dataType,
+			"version": dataVersion,
+			"proxies": []map[string]any{},
+			"accounts": []map[string]any{
+				{
+					"name":        "hcpa-backup",
+					"platform":    service.PlatformOpenAI,
+					"type":        service.AccountTypeOAuth,
+					"credentials": map[string]any{"personal_access_token": "pat-secret", "chatgpt_account_id": "acct"},
+					"extra": map[string]any{
+						"keep":                 "value",
+						"import_source":        "hcpa",
+						"import_format":        "hcpa",
+						"imported_at":          "2026-06-23T14:06:08+08:00",
+						"hcpa_disabled":        false,
+						"hcpa_expired_at":      "2026-12-31T10:00:00+08:00",
+						"hcpa_last_refresh_at": "2026-06-23T14:06:08+08:00",
+					},
+					"concurrency": 3,
+					"priority":    50,
+				},
+			},
+		},
+		"skip_default_group_bind": true,
+	}
+
+	body, _ := json.Marshal(dataPayload)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/data", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	require.Len(t, adminSvc.createdAccounts, 1)
+	extra := adminSvc.createdAccounts[0].Extra
+	require.Equal(t, "value", extra["keep"])
+	for _, key := range internalHCPAAccountExtraKeys() {
+		require.NotContains(t, extra, key)
+	}
+}
+
+func TestImportDataMigratesLegacyOpenAIOAuthExtra(t *testing.T) {
+	router, adminSvc := setupAccountDataRouter()
+
+	dataPayload := map[string]any{
+		"data": map[string]any{
+			"type":    dataType,
+			"version": dataVersion,
+			"proxies": []map[string]any{},
+			"accounts": []map[string]any{
+				{
+					"name":        "oauth-mode",
+					"platform":    service.PlatformOpenAI,
+					"type":        service.AccountTypeOAuth,
+					"credentials": map[string]any{"token": "x"},
+					"extra": map[string]any{
+						"keep": "value",
+						"openai_oauth_responses_websockets_v2_mode":    "passthrough",
+						"openai_oauth_responses_websockets_v2_enabled": false,
+						"openai_oauth_passthrough":                     true,
+						"openai_passthrough":                           true,
+						"responses_websockets_v2_enabled":              false,
+						"openai_ws_enabled":                            true,
+						"openai_apikey_responses_websockets_v2_mode":   "passthrough",
+					},
+					"concurrency": 3,
+					"priority":    50,
+				},
+				{
+					"name":        "setup-token-enabled",
+					"platform":    service.PlatformOpenAI,
+					"type":        service.AccountTypeSetupToken,
+					"credentials": map[string]any{"token": "y"},
+					"extra": map[string]any{
+						"openai_oauth_responses_websockets_v2_enabled": true,
+					},
+					"concurrency": 3,
+					"priority":    50,
+				},
+				{
+					"name":        "apikey-untouched",
+					"platform":    service.PlatformOpenAI,
+					"type":        service.AccountTypeAPIKey,
+					"credentials": map[string]any{"api_key": "sk-test"},
+					"extra": map[string]any{
+						"openai_oauth_responses_websockets_v2_mode": "passthrough",
+					},
+					"concurrency": 3,
+					"priority":    50,
+				},
+			},
+		},
+		"skip_default_group_bind": true,
+	}
+
+	body, _ := json.Marshal(dataPayload)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/data", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	require.Len(t, adminSvc.createdAccounts, 3)
+	modeExtra := adminSvc.createdAccounts[0].Extra
+	require.Equal(t, service.OpenAIOAuthWSModeManagedSession, modeExtra["openai_oauth_ws_mode"])
+	require.Equal(t, "value", modeExtra["keep"])
+	require.NotContains(t, modeExtra, "openai_oauth_responses_websockets_v2_mode")
+	require.NotContains(t, modeExtra, "openai_oauth_responses_websockets_v2_enabled")
+	require.NotContains(t, modeExtra, "openai_oauth_passthrough")
+	require.NotContains(t, modeExtra, "openai_passthrough")
+	require.NotContains(t, modeExtra, "responses_websockets_v2_enabled")
+	require.NotContains(t, modeExtra, "openai_ws_enabled")
+	require.NotContains(t, modeExtra, "openai_apikey_responses_websockets_v2_mode")
+
+	setupTokenExtra := adminSvc.createdAccounts[1].Extra
+	require.Equal(t, service.OpenAIOAuthWSModeManagedSession, setupTokenExtra["openai_oauth_ws_mode"])
+	require.NotContains(t, setupTokenExtra, "openai_oauth_responses_websockets_v2_enabled")
+
+	apiKeyExtra := adminSvc.createdAccounts[2].Extra
+	require.Equal(t, "passthrough", apiKeyExtra["openai_oauth_responses_websockets_v2_mode"])
+	require.NotContains(t, apiKeyExtra, "openai_oauth_ws_mode")
 }
 
 func TestImportDataReusesProxyAndSkipsDefaultGroup(t *testing.T) {

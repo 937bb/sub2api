@@ -19,6 +19,7 @@ func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_Hit(t *testing.T
 		Status:      StatusActive,
 		Schedulable: true,
 		Concurrency: 2,
+		GroupIDs:    []int64{groupID},
 		Extra: map[string]any{
 			"openai_apikey_responses_websockets_v2_enabled": true,
 		},
@@ -58,6 +59,7 @@ func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_QuotaAutoPausedM
 		Status:      StatusActive,
 		Schedulable: true,
 		Concurrency: 2,
+		GroupIDs:    []int64{groupID},
 		Extra: map[string]any{
 			"openai_apikey_responses_websockets_v2_enabled": true,
 			"codex_5h_used_percent":                         96.0,
@@ -99,6 +101,7 @@ func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_RateLimitedMiss(
 		Status:           StatusActive,
 		Schedulable:      true,
 		Concurrency:      1,
+		GroupIDs:         []int64{groupID},
 		RateLimitResetAt: &rateLimitedUntil,
 		Extra: map[string]any{
 			"openai_apikey_responses_websockets_v2_enabled": true,
@@ -125,6 +128,99 @@ func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_RateLimitedMiss(
 	require.Zero(t, boundAccountID)
 }
 
+func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_RuntimeBlockedMiss(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(23)
+	account := Account{
+		ID:          78,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 2,
+		GroupIDs:    []int64{groupID},
+		Extra: map[string]any{
+			"openai_apikey_responses_websockets_v2_enabled": true,
+		},
+	}
+	cache := &stubGatewayCache{}
+	store := NewOpenAIWSStateStore(cache)
+	cfg := newOpenAIWSV2TestConfig()
+	svc := &OpenAIGatewayService{
+		accountRepo:        stubOpenAIAccountRepo{accounts: []Account{account}},
+		cache:              cache,
+		cfg:                cfg,
+		concurrencyService: NewConcurrencyService(stubConcurrencyCache{}),
+		openaiWSStateStore: store,
+	}
+	responseID := "resp_prev_runtime_blocked"
+
+	require.NoError(t, store.BindResponseAccount(ctx, groupID, responseID, account.ID, time.Hour))
+	svc.BlockAccountScheduling(&account, time.Now().Add(time.Minute), "429")
+
+	selection, err := svc.SelectAccountByPreviousResponseID(ctx, &groupID, responseID, "gpt-5.1", nil, false)
+	require.NoError(t, err)
+	require.Nil(t, selection, "运行时屏蔽中的账号不应继续命中 previous_response_id 粘连")
+	boundAccountID, getErr := store.GetResponseAccount(ctx, groupID, responseID)
+	require.NoError(t, getErr)
+	require.Zero(t, boundAccountID)
+}
+
+func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_UpstreamChannelRestrictionMiss(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(23)
+	account := Account{
+		ID:          79,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 2,
+		GroupIDs:    []int64{groupID},
+		Credentials: map[string]any{
+			"model_mapping": map[string]any{"gpt-5.1": "gpt-5.1-restricted-upstream"},
+		},
+		Extra: map[string]any{
+			"openai_apikey_responses_websockets_v2_enabled": true,
+		},
+	}
+	allowedPrice := 0.001
+	channel := &Channel{
+		ID:                 6101,
+		Status:             StatusActive,
+		BillingModelSource: BillingModelSourceUpstream,
+		RestrictModels:     true,
+		ModelPricing: []ChannelModelPricing{{
+			Platform:    PlatformOpenAI,
+			Models:      []string{"gpt-5.1-allowed-upstream"},
+			BillingMode: BillingModeToken,
+			InputPrice:  &allowedPrice,
+		}},
+	}
+	channelService := newTestChannelServiceForStats(t, channel, groupID, PlatformOpenAI)
+	cache := &stubGatewayCache{}
+	store := NewOpenAIWSStateStore(cache)
+	cfg := newOpenAIWSV2TestConfig()
+	svc := &OpenAIGatewayService{
+		accountRepo:        stubOpenAIAccountRepo{accounts: []Account{account}},
+		cache:              cache,
+		cfg:                cfg,
+		channelService:     channelService,
+		concurrencyService: NewConcurrencyService(stubConcurrencyCache{}),
+		openaiWSStateStore: store,
+	}
+	responseID := "resp_prev_upstream_restricted"
+
+	require.NoError(t, store.BindResponseAccount(ctx, groupID, responseID, account.ID, time.Hour))
+
+	selection, err := svc.SelectAccountByPreviousResponseID(ctx, &groupID, responseID, "gpt-5.1", nil, false)
+	require.NoError(t, err)
+	require.Nil(t, selection, "upstream 计费限制下，粘连账号的上游模型不在渠道允许列表时不应命中")
+	boundAccountID, getErr := store.GetResponseAccount(ctx, groupID, responseID)
+	require.NoError(t, getErr)
+	require.Zero(t, boundAccountID)
+}
+
 func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_DBRuntimeRecheckRateLimitedMiss(t *testing.T) {
 	ctx := context.Background()
 	groupID := int64(24)
@@ -136,6 +232,7 @@ func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_DBRuntimeRecheck
 		Status:      StatusActive,
 		Schedulable: true,
 		Concurrency: 1,
+		GroupIDs:    []int64{groupID},
 		Extra: map[string]any{
 			"openai_apikey_responses_websockets_v2_enabled": true,
 		},
@@ -147,6 +244,7 @@ func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_DBRuntimeRecheck
 		Status:           StatusActive,
 		Schedulable:      true,
 		Concurrency:      1,
+		GroupIDs:         []int64{groupID},
 		RateLimitResetAt: &rateLimitedUntil,
 		Extra: map[string]any{
 			"openai_apikey_responses_websockets_v2_enabled": true,
@@ -187,6 +285,7 @@ func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_Excluded(t *test
 		Status:      StatusActive,
 		Schedulable: true,
 		Concurrency: 1,
+		GroupIDs:    []int64{groupID},
 		Extra: map[string]any{
 			"openai_apikey_responses_websockets_v2_enabled": true,
 		},
@@ -219,6 +318,7 @@ func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_ForceHTTPIgnored
 		Status:      StatusActive,
 		Schedulable: true,
 		Concurrency: 1,
+		GroupIDs:    []int64{groupID},
 		Extra: map[string]any{
 			"openai_ws_force_http":            true,
 			"responses_websockets_v2_enabled": true,
@@ -254,6 +354,7 @@ func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_BusyKeepsSticky(
 			Schedulable: true,
 			Concurrency: 1,
 			Priority:    0,
+			GroupIDs:    []int64{groupID},
 			Extra: map[string]any{
 				"openai_apikey_responses_websockets_v2_enabled": true,
 			},
@@ -266,6 +367,7 @@ func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_BusyKeepsSticky(
 			Schedulable: true,
 			Concurrency: 1,
 			Priority:    9,
+			GroupIDs:    []int64{groupID},
 			Extra: map[string]any{
 				"openai_apikey_responses_websockets_v2_enabled": true,
 			},
@@ -318,6 +420,7 @@ func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_CapabilityMismat
 		Status:      StatusActive,
 		Schedulable: true,
 		Concurrency: 1,
+		GroupIDs:    []int64{groupID},
 		Credentials: map[string]any{
 			"openai_capabilities": []any{"chat_completions"},
 		},

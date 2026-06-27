@@ -1325,16 +1325,16 @@
         <p class="input-hint">{{ t('admin.accounts.expiresAtHint') }}</p>
       </div>
 
-      <!-- OpenAI 自动透传开关（OAuth/API Key） -->
+      <!-- OpenAI API Key 自动透传开关 -->
       <div
-        v-if="account?.platform === 'openai' && (account?.type === 'oauth' || account?.type === 'apikey')"
+        v-if="account?.platform === 'openai' && account?.type === 'apikey'"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <div class="flex items-center justify-between">
           <div>
-            <label class="input-label mb-0">{{ t('admin.accounts.openai.oauthPassthrough') }}</label>
+            <label class="input-label mb-0">{{ t('admin.accounts.openai.apiKeyPassthrough') }}</label>
             <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {{ t('admin.accounts.openai.oauthPassthroughDesc') }}
+              {{ t('admin.accounts.openai.apiKeyPassthroughDesc') }}
             </p>
           </div>
           <button
@@ -1415,9 +1415,9 @@
         </div>
       </div>
 
-      <!-- OpenAI WS Mode 三态（off/ctx_pool/passthrough） -->
+      <!-- OpenAI WS Mode（APIKey 三态；OAuth/setup-token 仅 managed_session/off） -->
       <div
-        v-if="account?.platform === 'openai' && (account?.type === 'oauth' || account?.type === 'apikey')"
+        v-if="account?.platform === 'openai' && (account?.type === 'oauth' || account?.type === 'setup-token' || account?.type === 'apikey')"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <div class="flex items-center justify-between">
@@ -1431,7 +1431,11 @@
             </p>
           </div>
           <div class="w-52">
-            <Select v-model="openaiResponsesWebSocketV2Mode" :options="openAIWSModeOptions" />
+            <Select
+              v-model="openaiResponsesWebSocketV2Mode"
+              data-testid="edit-openai-ws-mode-select"
+              :options="openAIWSModeOptions"
+            />
           </div>
         </div>
       </div>
@@ -1702,7 +1706,7 @@
       </div>
 
       <div
-        v-if="account?.platform === 'openai' && (account?.type === 'oauth' || account?.type === 'apikey')"
+        v-if="account?.platform === 'openai' && (account?.type === 'oauth' || account?.type === 'setup-token' || account?.type === 'apikey')"
         class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4"
       >
         <div class="flex items-center justify-between">
@@ -2403,11 +2407,15 @@ import { formatDateTime, formatDateTimeLocalInput, parseDateTimeLocalInput } fro
 import { createStableObjectKeyResolver } from '@/utils/stableObjectKey'
 import { VERTEX_LOCATION_OPTIONS } from '@/constants/account'
 import {
+  OPENAI_OAUTH_WS_MODE_MANAGED_SESSION,
   OPENAI_WS_MODE_CTX_POOL,
   OPENAI_WS_MODE_OFF,
   OPENAI_WS_MODE_PASSTHROUGH,
   isOpenAIWSModeEnabled,
+  openAIOAuthWSModeToUIWSMode,
+  openAIWSModeToOAuthUIWSMode,
   resolveOpenAIWSModeConcurrencyHintKey,
+  type OpenAIOAuthWSMode,
   type OpenAIWSMode,
   resolveOpenAIWSModeFromExtra
 } from '@/utils/openaiWsMode'
@@ -2576,12 +2584,12 @@ const cacheTTLOverrideTarget = ref<string>('5m')
 const customBaseUrlEnabled = ref(false)
 const customBaseUrl = ref('')
 
-// OpenAI 自动透传开关（OAuth/API Key）
+// OpenAI API Key 自动透传开关
 const openaiPassthroughEnabled = ref(false)
 const openAICompactMode = ref<OpenAICompactMode>('auto')
 const openAIResponsesMode = ref<OpenAIResponsesMode>('auto')
 const openAIEndpointCapabilities = ref<OpenAIEndpointCapability[]>(['chat_completions', 'embeddings'])
-const openaiOAuthResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
+const openaiOAuthResponsesWebSocketV2Mode = ref<OpenAIOAuthWSMode>(OPENAI_WS_MODE_OFF)
 const openaiAPIKeyResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
 const codexCLIOnlyEnabled = ref(false)
 const codexCLIOnlyAllowClaudeCodeEnabled = ref(false)
@@ -2614,11 +2622,18 @@ const editWeeklyResetMode = ref<'rolling' | 'fixed' | null>(null)
 const editWeeklyResetDay = ref<number | null>(null)
 const editWeeklyResetHour = ref<number | null>(null)
 const editResetTimezone = ref<string | null>(null)
-const openAIWSModeOptions = computed(() => [
+const openAIAPIKeyWSModeOptions = computed(() => [
   { value: OPENAI_WS_MODE_OFF, label: t('admin.accounts.openai.wsModeOff') },
   { value: OPENAI_WS_MODE_CTX_POOL, label: t('admin.accounts.openai.wsModeCtxPool') },
   { value: OPENAI_WS_MODE_PASSTHROUGH, label: t('admin.accounts.openai.wsModePassthrough') }
 ])
+const openAIOAuthWSModeOptions = computed(() => [
+  { value: OPENAI_WS_MODE_OFF, label: t('admin.accounts.openai.wsModeOff') },
+  { value: OPENAI_OAUTH_WS_MODE_MANAGED_SESSION, label: t('admin.accounts.openai.wsModeManagedSession') }
+])
+const openAIWSModeOptions = computed(() =>
+  props.account?.type === 'apikey' ? openAIAPIKeyWSModeOptions.value : openAIOAuthWSModeOptions.value
+)
 const openaiResponsesWebSocketV2Mode = computed({
   get: () => {
     if (props.account?.type === 'apikey') {
@@ -2626,12 +2641,12 @@ const openaiResponsesWebSocketV2Mode = computed({
     }
     return openaiOAuthResponsesWebSocketV2Mode.value
   },
-  set: (mode: OpenAIWSMode) => {
+  set: (mode: OpenAIWSMode | OpenAIOAuthWSMode) => {
     if (props.account?.type === 'apikey') {
-      openaiAPIKeyResponsesWebSocketV2Mode.value = mode
+      openaiAPIKeyResponsesWebSocketV2Mode.value = mode as OpenAIWSMode
       return
     }
-    openaiOAuthResponsesWebSocketV2Mode.value = mode
+    openaiOAuthResponsesWebSocketV2Mode.value = mode === OPENAI_WS_MODE_OFF ? OPENAI_WS_MODE_OFF : OPENAI_OAUTH_WS_MODE_MANAGED_SESSION
   }
 })
 const openAIWSModeConcurrencyHintKey = computed(() =>
@@ -2774,7 +2789,7 @@ const normalizeOpenAIResponsesMode = (mode: unknown): OpenAIResponsesMode => {
   return 'auto'
 }
 const isOpenAIModelRestrictionDisabled = computed(() =>
-  props.account?.platform === 'openai' && openaiPassthroughEnabled.value
+  props.account?.platform === 'openai' && props.account?.type === 'apikey' && openaiPassthroughEnabled.value
 )
 const openAIResponsesStatusKey = computed(() => {
   if (openAIResponsesMode.value === 'force_responses') {
@@ -2952,7 +2967,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
 	autoPause5hDisabled.value = extra?.auto_pause_5h_disabled === true
 	autoPause7dDisabled.value = extra?.auto_pause_7d_disabled === true
 
-  // Load OpenAI passthrough toggle (OpenAI OAuth/API Key)
+  // Load OpenAI API Key passthrough toggle
   openaiPassthroughEnabled.value = false
   openAICompactMode.value = 'auto'
   openAIResponsesMode.value = 'auto'
@@ -2965,8 +2980,11 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   codexImageGenerationBridgeMode.value = 'inherit'
   anthropicPassthroughEnabled.value = false
   webSearchEmulationMode.value = 'default'
-  if (newAccount.platform === 'openai' && (newAccount.type === 'oauth' || newAccount.type === 'apikey')) {
-    openaiPassthroughEnabled.value = extra?.openai_passthrough === true || extra?.openai_oauth_passthrough === true
+  if (
+    newAccount.platform === 'openai' &&
+    (newAccount.type === 'oauth' || newAccount.type === 'setup-token' || newAccount.type === 'apikey')
+  ) {
+    openaiPassthroughEnabled.value = newAccount.type === 'apikey' && extra?.openai_passthrough === true
     openAICompactMode.value = (extra?.openai_compact_mode as OpenAICompactMode) || 'auto'
     if (newAccount.type === 'apikey') {
       openAIResponsesMode.value = normalizeOpenAIResponsesMode(extra?.openai_responses_mode)
@@ -2977,20 +2995,26 @@ const syncFormFromAccount = (newAccount: Account | null) => {
         openAIResponsesMode.value = 'auto'
       }
     }
-    const codexImageGenerationBridgeValue = typeof extra?.codex_image_generation_bridge === 'boolean'
-      ? extra.codex_image_generation_bridge
-      : extra?.codex_image_generation_bridge_enabled
-    if (codexImageGenerationBridgeValue === true) {
-      codexImageGenerationBridgeMode.value = 'enabled'
-    } else if (codexImageGenerationBridgeValue === false) {
-      codexImageGenerationBridgeMode.value = 'disabled'
+    if (newAccount.type === 'oauth' || newAccount.type === 'apikey') {
+      const codexImageGenerationBridgeValue = typeof extra?.codex_image_generation_bridge === 'boolean'
+        ? extra.codex_image_generation_bridge
+        : extra?.codex_image_generation_bridge_enabled
+      if (codexImageGenerationBridgeValue === true) {
+        codexImageGenerationBridgeMode.value = 'enabled'
+      } else if (codexImageGenerationBridgeValue === false) {
+        codexImageGenerationBridgeMode.value = 'disabled'
+      }
     }
-    openaiOAuthResponsesWebSocketV2Mode.value = resolveOpenAIWSModeFromExtra(extra, {
-      modeKey: 'openai_oauth_responses_websockets_v2_mode',
-      enabledKey: 'openai_oauth_responses_websockets_v2_enabled',
-      fallbackEnabledKeys: ['responses_websockets_v2_enabled', 'openai_ws_enabled'],
-      defaultMode: OPENAI_WS_MODE_OFF
-    })
+    openaiOAuthResponsesWebSocketV2Mode.value =
+      openAIOAuthWSModeToUIWSMode(extra?.openai_oauth_ws_mode) ??
+      openAIWSModeToOAuthUIWSMode(
+        resolveOpenAIWSModeFromExtra(extra, {
+          modeKey: 'openai_oauth_responses_websockets_v2_mode',
+          enabledKey: 'openai_oauth_responses_websockets_v2_enabled',
+          fallbackEnabledKeys: ['responses_websockets_v2_enabled', 'openai_ws_enabled'],
+          defaultMode: OPENAI_WS_MODE_OFF
+        })
+      )
     openaiAPIKeyResponsesWebSocketV2Mode.value = resolveOpenAIWSModeFromExtra(extra, {
       modeKey: 'openai_apikey_responses_websockets_v2_mode',
       enabledKey: 'openai_apikey_responses_websockets_v2_enabled',
@@ -3707,7 +3731,7 @@ const handleSubmit = async () => {
         return
       }
 
-      // Add model mapping if configured（OpenAI 开启自动透传时保留现有映射，不再编辑）
+      // OpenAI API Key 自动透传时保留现有映射，不再编辑。
       if (shouldApplyModelMapping) {
         const modelMapping = buildModelRestrictionMapping()
         if (modelMapping) {
@@ -3901,18 +3925,11 @@ const handleSubmit = async () => {
       const currentCredentials = (updatePayload.credentials as Record<string, unknown>) ||
         ((props.account.credentials as Record<string, unknown>) || {})
       const newCredentials: Record<string, unknown> = { ...currentCredentials }
-      const shouldApplyModelMapping = !openaiPassthroughEnabled.value
-
-      if (shouldApplyModelMapping) {
-        const modelMapping = buildModelRestrictionMapping()
-        if (modelMapping) {
-          newCredentials.model_mapping = modelMapping
-        } else {
-          delete newCredentials.model_mapping
-        }
-      } else if (currentCredentials.model_mapping) {
-        // 透传模式保留现有映射
-        newCredentials.model_mapping = currentCredentials.model_mapping
+      const modelMapping = buildModelRestrictionMapping()
+      if (modelMapping) {
+        newCredentials.model_mapping = modelMapping
+      } else {
+        delete newCredentials.model_mapping
       }
       const compactModelMapping = buildModelMappingObject('mapping', [], openAICompactModelMappings.value)
       if (compactModelMapping) {
@@ -4072,64 +4089,76 @@ const handleSubmit = async () => {
       updatePayload.extra = newExtra
     }
 
-    // For OpenAI OAuth/API Key accounts, handle passthrough mode in extra
-	if (props.account.platform === 'openai' && (props.account.type === 'oauth' || props.account.type === 'apikey')) {
-		const currentExtra = (props.account.extra as Record<string, unknown>) || {}
-		const newExtra: Record<string, unknown> = { ...currentExtra }
+    // For OpenAI OAuth-like/API Key accounts, handle account-type extra flags
+    if (
+      props.account.platform === 'openai' &&
+      (props.account.type === 'oauth' || props.account.type === 'setup-token' || props.account.type === 'apikey')
+    ) {
+      const currentExtra = (props.account.extra as Record<string, unknown>) || {}
+      const newExtra: Record<string, unknown> = { ...currentExtra }
+      const isOpenAIOAuthLike = props.account.type === 'oauth' || props.account.type === 'setup-token'
       const hadCodexCLIOnlyEnabled = currentExtra.codex_cli_only === true
-      if (props.account.type === 'oauth') {
-        newExtra.openai_oauth_responses_websockets_v2_mode = openaiOAuthResponsesWebSocketV2Mode.value
-        newExtra.openai_oauth_responses_websockets_v2_enabled = isOpenAIWSModeEnabled(openaiOAuthResponsesWebSocketV2Mode.value)
+      if (isOpenAIOAuthLike) {
+        newExtra.openai_oauth_ws_mode = openaiOAuthResponsesWebSocketV2Mode.value
+        delete newExtra.openai_apikey_responses_websockets_v2_mode
+        delete newExtra.openai_apikey_responses_websockets_v2_enabled
       } else if (props.account.type === 'apikey') {
         newExtra.openai_apikey_responses_websockets_v2_mode = openaiAPIKeyResponsesWebSocketV2Mode.value
         newExtra.openai_apikey_responses_websockets_v2_enabled = isOpenAIWSModeEnabled(openaiAPIKeyResponsesWebSocketV2Mode.value)
+        delete newExtra.openai_oauth_ws_mode
       }
       delete newExtra.responses_websockets_v2_enabled
       delete newExtra.openai_ws_enabled
-      if (openaiPassthroughEnabled.value) {
+      delete newExtra.openai_oauth_responses_websockets_v2_mode
+      delete newExtra.openai_oauth_responses_websockets_v2_enabled
+      delete newExtra.openai_oauth_passthrough
+      if (props.account.type === 'apikey' && openaiPassthroughEnabled.value) {
         newExtra.openai_passthrough = true
       } else {
         delete newExtra.openai_passthrough
-        delete newExtra.openai_oauth_passthrough
       }
       if (openAICompactMode.value === 'auto') {
         delete newExtra.openai_compact_mode
       } else {
         newExtra.openai_compact_mode = openAICompactMode.value
       }
-		if (props.account.type === 'apikey') {
+      if (props.account.type === 'apikey') {
         if (!openAITextGenerationCapabilityEnabled.value || openAIResponsesMode.value === 'auto') {
           delete newExtra.openai_responses_mode
         } else {
           newExtra.openai_responses_mode = openAIResponsesMode.value
         }
-		}
-		if (autoPause5hThreshold.value != null && autoPause5hThreshold.value > 0) {
-			newExtra.auto_pause_5h_threshold = autoPause5hThreshold.value / 100
-		} else {
-			delete newExtra.auto_pause_5h_threshold
-		}
-		if (autoPause7dThreshold.value != null && autoPause7dThreshold.value > 0) {
-			newExtra.auto_pause_7d_threshold = autoPause7dThreshold.value / 100
-		} else {
-			delete newExtra.auto_pause_7d_threshold
-		}
-		if (autoPause5hDisabled.value) {
-			newExtra.auto_pause_5h_disabled = true
-		} else {
-			delete newExtra.auto_pause_5h_disabled
-		}
-		if (autoPause7dDisabled.value) {
-			newExtra.auto_pause_7d_disabled = true
-		} else {
-			delete newExtra.auto_pause_7d_disabled
-		}
-
-		delete newExtra.codex_image_generation_bridge_enabled
-      if (codexImageGenerationBridgeMode.value === 'inherit') {
-        delete newExtra.codex_image_generation_bridge
+      }
+      if (autoPause5hThreshold.value != null && autoPause5hThreshold.value > 0) {
+        newExtra.auto_pause_5h_threshold = autoPause5hThreshold.value / 100
       } else {
-        newExtra.codex_image_generation_bridge = codexImageGenerationBridgeMode.value === 'enabled'
+        delete newExtra.auto_pause_5h_threshold
+      }
+      if (autoPause7dThreshold.value != null && autoPause7dThreshold.value > 0) {
+        newExtra.auto_pause_7d_threshold = autoPause7dThreshold.value / 100
+      } else {
+        delete newExtra.auto_pause_7d_threshold
+      }
+      if (autoPause5hDisabled.value) {
+        newExtra.auto_pause_5h_disabled = true
+      } else {
+        delete newExtra.auto_pause_5h_disabled
+      }
+      if (autoPause7dDisabled.value) {
+        newExtra.auto_pause_7d_disabled = true
+      } else {
+        delete newExtra.auto_pause_7d_disabled
+      }
+
+      delete newExtra.codex_image_generation_bridge_enabled
+      if (props.account.type === 'oauth' || props.account.type === 'apikey') {
+        if (codexImageGenerationBridgeMode.value === 'inherit') {
+          delete newExtra.codex_image_generation_bridge
+        } else {
+          newExtra.codex_image_generation_bridge = codexImageGenerationBridgeMode.value === 'enabled'
+        }
+      } else {
+        delete newExtra.codex_image_generation_bridge
       }
 
       if (props.account.type === 'oauth') {
@@ -4147,6 +4176,9 @@ const handleSubmit = async () => {
         } else {
           delete newExtra.codex_cli_only_allowed_clients
         }
+      } else {
+        delete newExtra.codex_cli_only
+        delete newExtra.codex_cli_only_allowed_clients
       }
 
       updatePayload.extra = newExtra

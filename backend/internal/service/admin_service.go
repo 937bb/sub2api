@@ -52,6 +52,7 @@ type AdminService interface {
 	ListGroups(ctx context.Context, page, pageSize int, platform, status, search string, isExclusive *bool, sortBy, sortOrder string) ([]Group, int64, error)
 	GetAllGroups(ctx context.Context) ([]Group, error)
 	GetAllGroupsByPlatform(ctx context.Context, platform string) ([]Group, error)
+	GetAllGroupsIncludingInactive(ctx context.Context, platform string) ([]Group, error)
 	GetGroup(ctx context.Context, id int64) (*Group, error)
 	GetGroupModelsListCandidates(ctx context.Context, id int64, platform string) ([]string, error)
 	CreateGroup(ctx context.Context, input *CreateGroupInput) (*Group, error)
@@ -78,6 +79,8 @@ type AdminService interface {
 	GetAccountsByIDs(ctx context.Context, ids []int64) ([]*Account, error)
 	CreateAccount(ctx context.Context, input *CreateAccountInput) (*Account, error)
 	UpdateAccount(ctx context.Context, id int64, input *UpdateAccountInput) (*Account, error)
+	ApplyOAuthCredentials(ctx context.Context, id int64, input *ApplyOAuthCredentialsInput) (*Account, error)
+	ResetOpenAICodexFingerprint(ctx context.Context, id int64) (*Account, error)
 	// UpdateAccountExtra 仅对 Extra 做 JSONB 增量合并（key 级覆盖），不会影响其它字段或运行态键。
 	// 用于刷新流程持久化 account_uuid / org_uuid 等少量键，避免被全量快照覆盖。
 	UpdateAccountExtra(ctx context.Context, id int64, updates map[string]any) error
@@ -282,6 +285,7 @@ type CreateAccountInput struct {
 	RateMultiplier     *float64 // 账号计费倍率（>=0，允许 0）
 	LoadFactor         *int
 	GroupIDs           []int64
+	Status             string
 	ExpiresAt          *int64
 	AutoPauseOnExpired *bool
 	// SkipDefaultGroupBind prevents auto-binding to platform default group when GroupIDs is empty.
@@ -289,6 +293,9 @@ type CreateAccountInput struct {
 	// SkipMixedChannelCheck skips the mixed channel risk check when binding groups.
 	// This should only be set when the caller has explicitly confirmed the risk.
 	SkipMixedChannelCheck bool
+	// OpenAICodexFingerprint is server-owned metadata from the OAuth exchange path.
+	// It is never populated from generic account create/update request bodies.
+	OpenAICodexFingerprint *OpenAICodexFingerprint
 }
 
 type UpdateAccountInput struct {
@@ -309,6 +316,13 @@ type UpdateAccountInput struct {
 	SkipMixedChannelCheck bool // 跳过混合渠道检查（用户已确认风险）
 }
 
+type ApplyOAuthCredentialsInput struct {
+	Type            string
+	Credentials     map[string]any
+	Extra           map[string]any
+	ExtraDeleteKeys []string
+}
+
 // BulkUpdateAccountsInput describes the payload for bulk updating accounts.
 type BulkUpdateAccountsInput struct {
 	AccountIDs     []int64
@@ -324,6 +338,9 @@ type BulkUpdateAccountsInput struct {
 	GroupIDs       *[]int64
 	Credentials    map[string]any
 	Extra          map[string]any
+	// ExtraDeleteKeys is a temporary migration hook for deleting legacy OAuth
+	// passthrough/WS extra keys before JSONB merge; remove after cleanup is complete.
+	ExtraDeleteKeys []string
 	// SkipMixedChannelCheck skips the mixed channel risk check when binding groups.
 	// This should only be set when the caller has explicitly confirmed the risk.
 	SkipMixedChannelCheck bool
@@ -556,6 +573,7 @@ type adminServiceImpl struct {
 	userSubRepo          UserSubscriptionRepository
 	privacyClientFactory PrivacyClientFactory
 	runtimeBlocker       AccountRuntimeBlocker
+	rateLimitService     *RateLimitService
 }
 
 type userGroupRateBatchReader interface {
@@ -582,6 +600,7 @@ func NewAdminService(
 	userSubRepo UserSubscriptionRepository,
 	privacyClientFactory PrivacyClientFactory,
 	runtimeBlocker AccountRuntimeBlocker,
+	rateLimitService *RateLimitService,
 ) AdminService {
 	return &adminServiceImpl{
 		userRepo:             userRepo,
@@ -602,6 +621,7 @@ func NewAdminService(
 		userSubRepo:          userSubRepo,
 		privacyClientFactory: privacyClientFactory,
 		runtimeBlocker:       runtimeBlocker,
+		rateLimitService:     rateLimitService,
 	}
 }
 
@@ -717,6 +737,11 @@ func (s *adminServiceImpl) CreateUser(ctx context.Context, input *CreateUserInpu
 	if err := s.userRepo.Create(ctx, user); err != nil {
 		return nil, err
 	}
+	if input.Balance != nil && balance != 0 {
+		if err := s.createAdminAdjustmentRecord(ctx, user.ID, AdjustmentTypeAdminBalance, balance, ""); err != nil {
+			logger.LegacyPrintf("service.admin", "failed to create initial balance adjustment redeem code: %v", err)
+		}
+	}
 	s.assignDefaultSubscriptions(ctx, user.ID)
 	return user, nil
 }
@@ -736,6 +761,27 @@ func (s *adminServiceImpl) assignDefaultSubscriptions(ctx context.Context, userI
 			logger.LegacyPrintf("service.admin", "failed to assign default subscription: user_id=%d group_id=%d err=%v", userID, item.GroupID, err)
 		}
 	}
+}
+
+func (s *adminServiceImpl) createAdminAdjustmentRecord(ctx context.Context, userID int64, adjustmentType string, value float64, notes string) error {
+	if s == nil || s.redeemCodeRepo == nil || userID <= 0 || value == 0 {
+		return nil
+	}
+	code, err := GenerateRedeemCode()
+	if err != nil {
+		return err
+	}
+	record := &RedeemCode{
+		Code:   code,
+		Type:   adjustmentType,
+		Value:  value,
+		Status: StatusUsed,
+		UsedBy: &userID,
+		Notes:  notes,
+	}
+	now := time.Now()
+	record.UsedAt = &now
+	return s.redeemCodeRepo.Create(ctx, record)
 }
 
 func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *UpdateUserInput) (*User, error) {
@@ -762,6 +808,7 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 	oldStatus := user.Status
 	oldRole := user.Role
 	oldRPMLimit := user.RPMLimit
+	oldAllowedGroups := append([]int64(nil), user.AllowedGroups...)
 
 	if input.Email != "" {
 		user.Email = input.Email
@@ -807,35 +854,38 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 	}
 
 	if s.authCacheInvalidator != nil {
-		// RPMLimit 直接参与 billing_cache_service.checkRPM 的三级级联，
-		// 不失效缓存会让修改在一个 L2 TTL 内失去效果。
-		if user.Concurrency != oldConcurrency || user.Status != oldStatus || user.Role != oldRole || user.RPMLimit != oldRPMLimit {
+		// RPMLimit 与 AllowedGroups 都参与 API Key 鉴权快照；不失效会让修改在
+		// 一个 L2 TTL 内继续使用旧的限流或专属分组授权。
+		if user.Concurrency != oldConcurrency || user.Status != oldStatus || user.Role != oldRole ||
+			user.RPMLimit != oldRPMLimit || !sameInt64Set(user.AllowedGroups, oldAllowedGroups) {
 			s.authCacheInvalidator.InvalidateAuthCacheByUserID(ctx, user.ID)
 		}
 	}
 
 	concurrencyDiff := user.Concurrency - oldConcurrency
 	if concurrencyDiff != 0 {
-		code, err := GenerateRedeemCode()
-		if err != nil {
-			logger.LegacyPrintf("service.admin", "failed to generate adjustment redeem code: %v", err)
-			return user, nil
-		}
-		adjustmentRecord := &RedeemCode{
-			Code:   code,
-			Type:   AdjustmentTypeAdminConcurrency,
-			Value:  float64(concurrencyDiff),
-			Status: StatusUsed,
-			UsedBy: &user.ID,
-		}
-		now := time.Now()
-		adjustmentRecord.UsedAt = &now
-		if err := s.redeemCodeRepo.Create(ctx, adjustmentRecord); err != nil {
+		if err := s.createAdminAdjustmentRecord(ctx, user.ID, AdjustmentTypeAdminConcurrency, float64(concurrencyDiff), ""); err != nil {
 			logger.LegacyPrintf("service.admin", "failed to create concurrency adjustment redeem code: %v", err)
 		}
 	}
 
 	return user, nil
+}
+
+func sameInt64Set(a, b []int64) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	left := append([]int64(nil), a...)
+	right := append([]int64(nil), b...)
+	sort.Slice(left, func(i, j int) bool { return left[i] < left[j] })
+	sort.Slice(right, func(i, j int) bool { return right[i] < right[j] })
+	for i := range left {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *adminServiceImpl) DeleteUser(ctx context.Context, id int64) error {
@@ -847,27 +897,30 @@ func (s *adminServiceImpl) DeleteUser(ctx context.Context, id int64) error {
 		return errors.New("cannot delete admin user")
 	}
 
-	// Delete all API keys owned by the user first so no orphan keys remain.
-	// Page through the list to bound memory when a user has created many keys.
 	var deletedKeyValues []string
-	if s.apiKeyRepo != nil {
-		keys, err := listUserAPIKeys(ctx, s.apiKeyRepo, id)
+	if s.entClient != nil {
+		tx, err := s.entClient.Tx(ctx)
 		if err != nil {
-			return fmt.Errorf("list api keys: %w", err)
+			return err
 		}
-		for _, k := range keys {
-			if err := s.apiKeyRepo.DeleteWithAudit(ctx, k.ID); err != nil {
-				return fmt.Errorf("delete api key %d: %w", k.ID, err)
-			}
-			if v := strings.TrimSpace(k.Key); v != "" {
-				deletedKeyValues = append(deletedKeyValues, v)
-			}
-		}
-	}
+		defer func() { _ = tx.Rollback() }()
 
-	if err := s.userRepo.Delete(ctx, id); err != nil {
-		logger.LegacyPrintf("service.admin", "delete user failed: user_id=%d err=%v", id, err)
-		return err
+		opCtx := dbent.NewTxContext(ctx, tx)
+		deletedKeyValues, err = s.deleteUserAndAPIKeysInTx(opCtx, id)
+		if err != nil {
+			return err
+		}
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+	} else {
+		if s.apiKeyRepo != nil {
+			return errors.New("delete user with API keys requires transaction client")
+		}
+		if err := s.userRepo.Delete(ctx, id); err != nil {
+			logger.LegacyPrintf("service.admin", "delete user failed: user_id=%d err=%v", id, err)
+			return err
+		}
 	}
 
 	if s.authCacheInvalidator != nil {
@@ -879,24 +932,30 @@ func (s *adminServiceImpl) DeleteUser(ctx context.Context, id int64) error {
 	return nil
 }
 
-// listUserAPIKeys pages through every API key owned by userID.
-func listUserAPIKeys(ctx context.Context, repo APIKeyRepository, userID int64) ([]APIKey, error) {
-	const pageSize = 500
-	var all []APIKey
-	for page := 1; ; page++ {
-		keys, _, err := repo.ListByUserID(ctx, userID, pagination.PaginationParams{
-			Page:     page,
-			PageSize: pageSize,
-		}, APIKeyListFilters{})
-		if err != nil {
-			return nil, err
-		}
-		all = append(all, keys...)
-		if len(keys) < pageSize {
-			break
-		}
+func (s *adminServiceImpl) deleteUserAndAPIKeysInTx(ctx context.Context, userID int64) ([]string, error) {
+	// Soft-delete the user first inside the outer transaction. This locks the user
+	// row, so concurrent API key creation either commits before we list keys or
+	// waits until commit and then observes the deleted user.
+	if err := s.userRepo.Delete(ctx, userID); err != nil {
+		logger.LegacyPrintf("service.admin", "delete user failed: user_id=%d err=%v", userID, err)
+		return nil, err
 	}
-	return all, nil
+
+	if s.apiKeyRepo == nil {
+		return nil, nil
+	}
+
+	bulkDeleter, ok := s.apiKeyRepo.(interface {
+		DeleteByUserIDWithAudit(context.Context, int64) ([]string, error)
+	})
+	if !ok {
+		return nil, errors.New("delete user api keys requires bulk audit delete support")
+	}
+	deletedKeyValues, err := bulkDeleter.DeleteByUserIDWithAudit(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("delete user api keys: %w", err)
+	}
+	return deletedKeyValues, nil
 }
 
 func (s *adminServiceImpl) BatchUpdateConcurrency(ctx context.Context, userIDs []int64, value int, mode string) (int, error) {
@@ -972,24 +1031,7 @@ func (s *adminServiceImpl) UpdateUserBalance(ctx context.Context, userID int64, 
 	}
 
 	if balanceDiff != 0 {
-		code, err := GenerateRedeemCode()
-		if err != nil {
-			logger.LegacyPrintf("service.admin", "failed to generate adjustment redeem code: %v", err)
-			return user, nil
-		}
-
-		adjustmentRecord := &RedeemCode{
-			Code:   code,
-			Type:   AdjustmentTypeAdminBalance,
-			Value:  balanceDiff,
-			Status: StatusUsed,
-			UsedBy: &user.ID,
-			Notes:  notes,
-		}
-		now := time.Now()
-		adjustmentRecord.UsedAt = &now
-
-		if err := s.redeemCodeRepo.Create(ctx, adjustmentRecord); err != nil {
+		if err := s.createAdminAdjustmentRecord(ctx, user.ID, AdjustmentTypeAdminBalance, balanceDiff, notes); err != nil {
 			logger.LegacyPrintf("service.admin", "failed to create balance adjustment redeem code: %v", err)
 		}
 	}
@@ -1650,6 +1692,10 @@ func (s *adminServiceImpl) GetAllGroups(ctx context.Context) ([]Group, error) {
 
 func (s *adminServiceImpl) GetAllGroupsByPlatform(ctx context.Context, platform string) ([]Group, error) {
 	return s.groupRepo.ListActiveByPlatform(ctx, platform)
+}
+
+func (s *adminServiceImpl) GetAllGroupsIncludingInactive(ctx context.Context, platform string) ([]Group, error) {
+	return s.groupRepo.ListAllIncludingInactive(ctx, platform)
 }
 
 func (s *adminServiceImpl) GetGroup(ctx context.Context, id int64) (*Group, error) {
@@ -2370,9 +2416,10 @@ func (s *adminServiceImpl) AdminUpdateAPIKeyGroupID(ctx context.Context, keyID i
 			result.GrantedGroupID = &gid
 			result.GrantedGroupName = group.Name
 
-			// 失效认证缓存（在事务提交后执行）
+			// 自动授予 AllowedGroups 会改变该用户所有 API Key 的认证快照。
+			// 事务提交后按用户失效，避免其他已缓存 Key 在 L2 TTL 内误用旧授权。
 			if s.authCacheInvalidator != nil {
-				s.authCacheInvalidator.InvalidateAuthCacheByKey(ctx, apiKey.Key)
+				s.authCacheInvalidator.InvalidateAuthCacheByUserID(ctx, apiKey.UserID)
 			}
 
 			result.APIKey = apiKey
@@ -2542,6 +2589,10 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 		}
 	}
 
+	status := input.Status
+	if status == "" {
+		status = StatusActive
+	}
 	account := &Account{
 		Name:        input.Name,
 		Notes:       normalizeAccountNotes(input.Notes),
@@ -2552,8 +2603,18 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 		ProxyID:     input.ProxyID,
 		Concurrency: input.Concurrency,
 		Priority:    input.Priority,
-		Status:      StatusActive,
+		Status:      status,
 		Schedulable: true,
+	}
+	normalizeOpenAICodexFingerprintExtraForCreate(account)
+	if input.OpenAICodexFingerprint != nil && account.IsOpenAIOAuthLike() {
+		if account.Extra == nil {
+			account.Extra = map[string]any{}
+		}
+		account.Extra[OpenAICodexFingerprintExtraKey] = *input.OpenAICodexFingerprint
+	}
+	if err := validateOpenAIOAuthAccountWriteConfig(account); err != nil {
+		return nil, err
 	}
 	// 预计算固定时间重置的下次重置时间
 	if account.Extra != nil {
@@ -2623,11 +2684,118 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 	return account, nil
 }
 
+type accountAuthExtraUpdater interface {
+	UpdateAuthAndMergeExtra(ctx context.Context, id int64, accountType string, credentials, extraUpdates map[string]any, extraDeleteKeys []string) error
+}
+
+type openAICodexFingerprintResetter interface {
+	ResetOpenAICodexFingerprint(ctx context.Context, id int64, fingerprint OpenAICodexFingerprint) error
+}
+
+func (s *adminServiceImpl) ApplyOAuthCredentials(ctx context.Context, id int64, input *ApplyOAuthCredentialsInput) (*Account, error) {
+	input.Extra = sanitizeOpenAICodexFingerprintExtraUpdates(input.Extra)
+	account, err := s.accountRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if account == nil {
+		return nil, ErrAccountNotFound
+	}
+
+	extraDeleteKeys, err := NormalizeOpenAIOAuthExtraDeleteKeys(input.ExtraDeleteKeys)
+	if err != nil {
+		return nil, err
+	}
+	if len(extraDeleteKeys) > 0 && !account.IsOpenAIOAuthLike() {
+		return nil, infraerrors.BadRequest("OPENAI_OAUTH_EXTRA_DELETE_KEYS_INVALID", "extra_delete_keys can only clean legacy keys on OpenAI OAuth/setup-token accounts")
+	}
+
+	candidate := *account
+	candidate.Type = input.Type
+	if len(input.Credentials) > 0 {
+		candidate.Credentials = MergePreservingSensitiveCreds(account.Credentials, input.Credentials)
+	}
+	candidate.Extra = mergeAccountExtraWithDeletesForValidation(account.Extra, input.Extra, extraDeleteKeys)
+	if err := validateOpenAIOAuthAccountWriteConfig(&candidate); err != nil {
+		return nil, err
+	}
+
+	// 重新授权只做凭据/type + Extra key 级合并，避免全量 Extra 快照覆盖运行态并发更新。
+	if updater, ok := any(s.accountRepo).(accountAuthExtraUpdater); ok {
+		if err := updater.UpdateAuthAndMergeExtra(ctx, id, candidate.Type, candidate.Credentials, input.Extra, extraDeleteKeys); err != nil {
+			return nil, err
+		}
+		return s.accountRepo.GetByID(ctx, id)
+	}
+
+	// 测试替身保留旧接口时的兜底；真实 repository 走上面的原子 key 合并/删除路径。
+	if err := s.accountRepo.Update(ctx, &candidate); err != nil {
+		return nil, err
+	}
+	return s.accountRepo.GetByID(ctx, id)
+}
+
+func (s *adminServiceImpl) ResetOpenAICodexFingerprint(ctx context.Context, id int64) (*Account, error) {
+	account, err := s.accountRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if account == nil {
+		return nil, ErrAccountNotFound
+	}
+	if !account.IsOpenAIOAuthLike() {
+		return nil, infraerrors.BadRequest("OPENAI_CODEX_FINGERPRINT_RESET_UNSUPPORTED", "OpenAI Codex fingerprint can only be reset for OpenAI OAuth/setup-token accounts")
+	}
+
+	profile := ParseOpenAICodexUAProfile(DefaultOpenAICodexUserAgent)
+	if s.settingService != nil {
+		profile = ParseOpenAICodexUAProfile(s.settingService.GetOpenAICodexUserAgent(ctx))
+	}
+	fingerprint, _ := NormalizeOpenAICodexFingerprint(nil, profile, time.Now())
+	resetter, ok := any(s.accountRepo).(openAICodexFingerprintResetter)
+	if !ok {
+		return nil, infraerrors.InternalServer("OPENAI_CODEX_FINGERPRINT_RESET_UNAVAILABLE", "OpenAI Codex fingerprint reset persistence is unavailable")
+	}
+	if err := resetter.ResetOpenAICodexFingerprint(ctx, id, fingerprint); err != nil {
+		return s.reloadOpenAICodexFingerprintResetAccount(ctx, id, err)
+	}
+
+	slog.Info("openai_codex_fingerprint_reset",
+		"account_id", account.ID,
+		"platform", account.Platform,
+		"type", account.Type,
+		"value_class", OpenAICodexFingerprintExtraKey,
+		"action", "rotated",
+		"schema_version", fingerprint.SchemaVersion,
+	)
+
+	return s.accountRepo.GetByID(ctx, id)
+}
+
+func (s *adminServiceImpl) reloadOpenAICodexFingerprintResetAccount(ctx context.Context, id int64, cause error) (*Account, error) {
+	account, err := s.accountRepo.GetByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, ErrAccountNotFound) {
+			return nil, err
+		}
+		return nil, cause
+	}
+	if account == nil {
+		return nil, ErrAccountNotFound
+	}
+	if !account.IsOpenAIOAuthLike() {
+		return nil, infraerrors.BadRequest("OPENAI_CODEX_FINGERPRINT_RESET_UNSUPPORTED", "OpenAI Codex fingerprint can only be reset for OpenAI OAuth/setup-token accounts")
+	}
+	return nil, cause
+}
+
 func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *UpdateAccountInput) (*Account, error) {
 	account, err := s.accountRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
 	}
+	existingExtra := cloneAccountExtraForServerOwnedWrite(account.Extra)
+	existingWasOpenAIOAuthLike := account.IsOpenAIOAuthLike()
 	wasOveragesEnabled := account.IsOveragesEnabled()
 
 	if input.Name != "" {
@@ -2671,6 +2839,10 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		}
 		ComputeQuotaResetAt(account.Extra)
 		NormalizeFixedQuotaWindows(account.Extra)
+	}
+	normalizeOpenAICodexFingerprintExtraForUpdate(account, existingExtra, existingWasOpenAIOAuthLike)
+	if err := validateOpenAIOAuthAccountWriteConfig(account); err != nil {
+		return nil, err
 	}
 	if input.ProxyID != nil {
 		// 0 表示清除代理（前端发送 0 而不是 null 来表达清除意图）
@@ -2755,8 +2927,18 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 // UpdateAccountExtra 仅对 Extra JSONB 做 key 级合并，避免覆盖其它运行态键
 // （如 model_rate_limits / passive_usage_* 等）。
 func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, updates map[string]any) error {
+	updates = sanitizeOpenAICodexFingerprintExtraUpdates(updates)
 	if len(updates) == 0 {
 		return nil
+	}
+	account, err := s.accountRepo.GetByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	candidate := *account
+	candidate.Extra = mergeAccountExtraForValidation(account.Extra, updates)
+	if err := validateOpenAIOAuthAccountWriteConfig(&candidate); err != nil {
+		return err
 	}
 	return s.accountRepo.UpdateExtra(ctx, id, updates)
 }
@@ -2764,6 +2946,7 @@ func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, upd
 // BulkUpdateAccounts updates multiple accounts in one request.
 // It merges credentials/extra keys instead of overwriting the whole object.
 func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUpdateAccountsInput) (*BulkUpdateAccountsResult, error) {
+	input.Extra = sanitizeOpenAICodexFingerprintExtraUpdates(input.Extra)
 	if len(input.AccountIDs) == 0 && input.Filters != nil {
 		accountIDs, err := s.resolveBulkUpdateTargetIDs(ctx, input.Filters)
 		if err != nil {
@@ -2789,17 +2972,23 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 
 	needMixedChannelCheck := input.GroupIDs != nil && !input.SkipMixedChannelCheck
 
-	// 预加载账号平台信息（混合渠道检查需要）。
+	// 预加载账号信息，用于所有批量更新的缺失 ID 结果、混合渠道检查与 OAuth Extra 写入守卫。
 	platformByID := map[int64]string{}
-	if needMixedChannelCheck {
-		accounts, err := s.accountRepo.GetByIDs(ctx, input.AccountIDs)
-		if err != nil {
-			return nil, err
+	foundAccountIDs := map[int64]bool{}
+	preloadedAccounts, err := s.accountRepo.GetByIDs(ctx, input.AccountIDs)
+	if err != nil {
+		return nil, err
+	}
+	for _, account := range preloadedAccounts {
+		if account != nil {
+			platformByID[account.ID] = account.Platform
+			foundAccountIDs[account.ID] = true
 		}
-		for _, account := range accounts {
-			if account != nil {
-				platformByID[account.ID] = account.Platform
-			}
+	}
+	validUpdateIDs := make([]int64, 0, len(input.AccountIDs))
+	for _, accountID := range input.AccountIDs {
+		if foundAccountIDs[accountID] {
+			validUpdateIDs = append(validUpdateIDs, accountID)
 		}
 	}
 
@@ -2821,11 +3010,38 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 			return nil, errors.New("rate_multiplier must be >= 0")
 		}
 	}
+	extraDeleteKeys, err := NormalizeOpenAIOAuthExtraDeleteKeys(input.ExtraDeleteKeys)
+	if err != nil {
+		return nil, err
+	}
+	if len(extraDeleteKeys) > 0 {
+		for _, account := range preloadedAccounts {
+			if account == nil {
+				continue
+			}
+			if !account.IsOpenAIOAuthLike() {
+				return nil, infraerrors.BadRequest("OPENAI_OAUTH_EXTRA_DELETE_KEYS_INVALID", "extra_delete_keys can only clean legacy keys on OpenAI OAuth/setup-token accounts")
+			}
+		}
+	}
+	if len(input.Extra) > 0 || len(extraDeleteKeys) > 0 {
+		for _, account := range preloadedAccounts {
+			if account == nil {
+				continue
+			}
+			candidate := *account
+			candidate.Extra = mergeAccountExtraWithDeletesForValidation(account.Extra, input.Extra, extraDeleteKeys)
+			if err := validateOpenAIOAuthAccountWriteConfig(&candidate); err != nil {
+				return nil, err
+			}
+		}
+	}
 
 	// Prepare bulk updates for columns and JSONB fields.
 	repoUpdates := AccountBulkUpdate{
-		Credentials: input.Credentials,
-		Extra:       input.Extra,
+		Credentials:     input.Credentials,
+		Extra:           input.Extra,
+		ExtraDeleteKeys: extraDeleteKeys,
 	}
 	if input.Name != "" {
 		repoUpdates.Name = &input.Name
@@ -2859,13 +3075,24 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	}
 
 	// Run bulk update for column/jsonb fields first.
-	if _, err := s.accountRepo.BulkUpdate(ctx, input.AccountIDs, repoUpdates); err != nil {
-		return nil, err
+	if len(validUpdateIDs) > 0 {
+		if _, err := s.accountRepo.BulkUpdate(ctx, validUpdateIDs, repoUpdates); err != nil {
+			return nil, err
+		}
 	}
 
 	// Handle group bindings per account (requires individual operations).
 	for _, accountID := range input.AccountIDs {
 		entry := BulkUpdateAccountResult{AccountID: accountID}
+
+		if !foundAccountIDs[accountID] {
+			entry.Success = false
+			entry.Error = "account not found"
+			result.Failed++
+			result.FailedIDs = append(result.FailedIDs, accountID)
+			result.Results = append(result.Results, entry)
+			continue
+		}
 
 		if input.GroupIDs != nil {
 			if err := s.accountRepo.BindGroups(ctx, accountID, *input.GroupIDs); err != nil {
@@ -2966,6 +3193,9 @@ func (s *adminServiceImpl) ClearAccountError(ctx context.Context, id int64) (*Ac
 	}
 	if s.runtimeBlocker != nil {
 		s.runtimeBlocker.ClearAccountSchedulingBlock(id)
+	}
+	if s.rateLimitService != nil {
+		s.rateLimitService.ResetOpenAIOAuth429DynamicStats(id)
 	}
 	return s.accountRepo.GetByID(ctx, id)
 }

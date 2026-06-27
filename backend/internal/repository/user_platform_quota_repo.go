@@ -10,7 +10,7 @@ import (
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/ent/userplatformquota"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
-	"github.com/lib/pq"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // UserPlatformQuotaRecord 是 repository 层的传输结构体，
@@ -34,6 +34,11 @@ var ErrUserPlatformQuotaNotFound = fmt.Errorf("user platform quota record not fo
 
 // ErrUserPlatformQuotaFKViolation 当批量 UPSERT 中存在 user_id 不在 users 表的记录时返回。
 var ErrUserPlatformQuotaFKViolation = errors.New("user platform quota snapshot FK violation")
+
+func isUserPlatformQuotaFKViolation(err error) bool {
+	var pqErr *pgconn.PgError
+	return errors.As(err, &pqErr) && pqErr != nil && pqErr.Code == "23503"
+}
 
 // UserPlatformQuotaSnapshot 是 BatchSnapshotUsage 的输入结构体，
 // 表示 Redis 当前窗口快照（用于绝对值覆盖写入 DB）。
@@ -497,8 +502,7 @@ func (r *userPlatformQuotaRepository) BatchSnapshotUsage(ctx context.Context, sn
 				"  updated_at           = EXCLUDED.updated_at")
 
 		if _, err := client.ExecContext(ctx, sb.String(), args...); err != nil {
-			var pqErr *pq.Error
-			if errors.As(err, &pqErr) && pqErr.Code == "23503" {
+			if isUserPlatformQuotaFKViolation(err) {
 				return ErrUserPlatformQuotaFKViolation
 			}
 			return err

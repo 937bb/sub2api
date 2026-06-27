@@ -14,7 +14,7 @@ import (
 	"github.com/dgraph-io/ristretto"
 )
 
-const apiKeyAuthSnapshotVersion = 12 // v12: custom models_list_config and openai_force_priority_tier override
+const apiKeyAuthSnapshotVersion = 14 // v14: exclusive group authorization fields
 
 type apiKeyAuthCacheConfig struct {
 	l1Size        int
@@ -228,6 +228,7 @@ func (s *APIKeyService) snapshotFromAPIKey(ctx context.Context, apiKey *APIKey) 
 			Role:                       apiKey.User.Role,
 			Balance:                    apiKey.User.Balance,
 			Concurrency:                apiKey.User.Concurrency,
+			AllowedGroups:              apiKey.User.AllowedGroups,
 			Email:                      apiKey.User.Email,
 			Username:                   apiKey.User.Username,
 			BalanceNotifyEnabled:       apiKey.User.BalanceNotifyEnabled,
@@ -252,6 +253,7 @@ func (s *APIKeyService) snapshotFromAPIKey(ctx context.Context, apiKey *APIKey) 
 			ID:                              apiKey.Group.ID,
 			Name:                            apiKey.Group.Name,
 			Platform:                        apiKey.Group.Platform,
+			IsExclusive:                     apiKey.Group.IsExclusive,
 			Status:                          apiKey.Group.Status,
 			SubscriptionType:                apiKey.Group.SubscriptionType,
 			RateMultiplier:                  apiKey.Group.RateMultiplier,
@@ -272,6 +274,7 @@ func (s *APIKeyService) snapshotFromAPIKey(ctx context.Context, apiKey *APIKey) 
 			MCPXMLInject:                    apiKey.Group.MCPXMLInject,
 			SupportedModelScopes:            apiKey.Group.SupportedModelScopes,
 			AllowMessagesDispatch:           apiKey.Group.AllowMessagesDispatch,
+			RequirePrivacySet:               apiKey.Group.RequirePrivacySet,
 			DefaultMappedModel:              apiKey.Group.DefaultMappedModel,
 			MessagesDispatchModelConfig:     apiKey.Group.MessagesDispatchModelConfig,
 			ModelsListConfig:                apiKey.Group.ModelsListConfig,
@@ -308,6 +311,7 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 			Role:                       snapshot.User.Role,
 			Balance:                    snapshot.User.Balance,
 			Concurrency:                snapshot.User.Concurrency,
+			AllowedGroups:              snapshot.User.AllowedGroups,
 			Email:                      snapshot.User.Email,
 			Username:                   snapshot.User.Username,
 			BalanceNotifyEnabled:       snapshot.User.BalanceNotifyEnabled,
@@ -324,6 +328,7 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 			ID:                              snapshot.Group.ID,
 			Name:                            snapshot.Group.Name,
 			Platform:                        snapshot.Group.Platform,
+			IsExclusive:                     snapshot.Group.IsExclusive,
 			Status:                          snapshot.Group.Status,
 			Hydrated:                        true,
 			SubscriptionType:                snapshot.Group.SubscriptionType,
@@ -345,6 +350,7 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 			MCPXMLInject:                    snapshot.Group.MCPXMLInject,
 			SupportedModelScopes:            snapshot.Group.SupportedModelScopes,
 			AllowMessagesDispatch:           snapshot.Group.AllowMessagesDispatch,
+			RequirePrivacySet:               snapshot.Group.RequirePrivacySet,
 			DefaultMappedModel:              snapshot.Group.DefaultMappedModel,
 			MessagesDispatchModelConfig:     snapshot.Group.MessagesDispatchModelConfig,
 			ModelsListConfig:                snapshot.Group.ModelsListConfig,

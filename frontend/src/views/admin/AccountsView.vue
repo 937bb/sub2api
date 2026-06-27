@@ -211,6 +211,9 @@
           <template #cell-select="{ row }">
             <input type="checkbox" :checked="isSelected(row.id)" @change="toggleSel(row.id)" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
           </template>
+          <template #cell-id="{ value }">
+            <span class="font-mono text-xs text-gray-500 dark:text-gray-400">#{{ value }}</span>
+          </template>
           <template #cell-name="{ row, value }">
             <div class="flex flex-col">
               <span class="font-medium text-gray-900 dark:text-white">{{ value }}</span>
@@ -515,6 +518,7 @@ type AccountSortState = {
   sort_order: AccountSortOrder
 }
 const ACCOUNT_SORTABLE_KEYS = new Set([
+  'id',
   'name',
   'status',
   'schedulable',
@@ -1127,6 +1131,7 @@ const allColumns = computed(() => {
   const c = [
     { key: 'select', label: '', sortable: false },
     { key: 'name', label: t('admin.accounts.columns.name'), sortable: true },
+    { key: 'id', label: t('admin.accounts.columns.id'), sortable: true },
     { key: 'platform_type', label: t('admin.accounts.columns.platformType'), sortable: false },
     { key: 'capacity', label: t('admin.accounts.columns.capacity'), sortable: false },
     { key: 'status', label: t('admin.accounts.columns.status'), sortable: true },
@@ -1385,10 +1390,31 @@ const buildBulkEditFilterSnapshot = () => {
   }
 }
 
-const collectSelectionMetadata = (rows: Account[]) => {
-  const selectedPlatforms = Array.from(new Set(rows.map(account => account.platform)))
-  const selectedTypes = Array.from(new Set(rows.map(account => account.type)))
-  return { selectedPlatforms, selectedTypes }
+const singleFilterValue = <T extends string>(value: unknown, allowed: readonly T[]): T | null => {
+  if (typeof value !== 'string') return null
+  return (allowed as readonly string[]).includes(value) ? (value as T) : null
+}
+
+const filteredBulkTypeFallbacks: Record<AccountPlatform, AccountType[]> = {
+  anthropic: ['oauth', 'setup-token', 'apikey', 'bedrock', 'service_account'],
+  openai: ['oauth', 'setup-token', 'apikey'],
+  gemini: ['oauth', 'setup-token', 'apikey', 'service_account'],
+  antigravity: ['oauth', 'setup-token', 'apikey', 'upstream']
+}
+
+const collectFilteredBulkMetadata = (filters: ReturnType<typeof buildBulkEditFilterSnapshot>) => {
+  const platformFilter = singleFilterValue<AccountPlatform>(filters.platform, ['anthropic', 'openai', 'gemini', 'antigravity'])
+  const typeFilter = singleFilterValue<AccountType>(filters.type, ['oauth', 'setup-token', 'apikey', 'upstream', 'bedrock', 'service_account'])
+
+  if (!platformFilter) {
+    return { selectedPlatforms: [], selectedTypes: typeFilter ? [typeFilter] : [] }
+  }
+  if (typeFilter) {
+    return { selectedPlatforms: [platformFilter], selectedTypes: [typeFilter] }
+  }
+  // Filtered bulk edits apply to all matching rows, not just the preview page;
+  // use the platform's full type set unless the filter pins type explicitly.
+  return { selectedPlatforms: [platformFilter], selectedTypes: filteredBulkTypeFallbacks[platformFilter] }
 }
 
 const openBulkEditSelected = () => {
@@ -1404,7 +1430,7 @@ const openBulkEditSelected = () => {
 const openBulkEditFiltered = async () => {
   const filters = buildBulkEditFilterSnapshot()
   const preview = await adminAPI.accounts.list(1, 100, filters)
-  const { selectedPlatforms, selectedTypes } = collectSelectionMetadata(preview.items)
+  const { selectedPlatforms, selectedTypes } = collectFilteredBulkMetadata(filters)
   bulkEditTarget.value = {
     mode: 'filtered',
     filters,

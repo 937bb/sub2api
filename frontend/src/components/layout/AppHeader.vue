@@ -63,7 +63,7 @@
             />
           </svg>
           <span class="text-sm font-semibold text-primary-700 dark:text-primary-300">
-            ${{ user.balance?.toFixed(2) || '0.00' }}
+            {{ balanceLabel }}
           </span>
         </div>
 
@@ -111,7 +111,7 @@
                   {{ t('common.balance') }}
                 </div>
                 <div class="text-sm font-semibold text-primary-600 dark:text-primary-400">
-                  ${{ user.balance?.toFixed(2) || '0.00' }}
+                  {{ balanceLabel }}
                 </div>
               </div>
 
@@ -237,6 +237,12 @@ const dropdownRef = ref<HTMLElement | null>(null)
 const contactInfo = computed(() => appStore.contactInfo)
 const docUrl = computed(() => appStore.docUrl)
 const avatarUrl = computed(() => user.value?.avatar_url?.trim() || '')
+const balanceLabel = computed(() => {
+  if (typeof user.value?.balance !== 'number' || Number.isNaN(user.value.balance)) {
+    return '...'
+  }
+  return `$${user.value.balance.toFixed(2)}`
+})
 
 // 只在标准模式的管理员下显示新手引导按钮
 const showOnboardingButton = computed(() => {

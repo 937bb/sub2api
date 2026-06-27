@@ -64,7 +64,14 @@ func (s *accountRepoStubForBulkUpdate) GetByIDs(_ context.Context, ids []int64) 
 	if s.getByIDsErr != nil {
 		return nil, s.getByIDsErr
 	}
-	return s.getByIDsAccounts, nil
+	if s.getByIDsAccounts != nil {
+		return s.getByIDsAccounts, nil
+	}
+	accounts := make([]*Account, 0, len(ids))
+	for _, id := range ids {
+		accounts = append(accounts, &Account{ID: id, Platform: PlatformOpenAI})
+	}
+	return accounts, nil
 }
 
 func (s *accountRepoStubForBulkUpdate) GetByID(_ context.Context, id int64) (*Account, error) {
@@ -202,6 +209,49 @@ func TestAdminService_BulkUpdateAccounts_MixedChannelPreCheckBlocksOnExistingCon
 	require.Contains(t, err.Error(), "mixed channel")
 	// No BindGroups should have been called since the check runs before any write.
 	require.Empty(t, repo.bindGroupsCalls)
+}
+
+func TestAdminService_BulkUpdateAccounts_ExtraPayloadMarksMissingIDsFailed(t *testing.T) {
+	repo := &accountRepoStubForBulkUpdate{getByIDsAccounts: []*Account{}}
+	svc := &adminServiceImpl{accountRepo: repo}
+
+	result, err := svc.BulkUpdateAccounts(context.Background(), &BulkUpdateAccountsInput{
+		AccountIDs: []int64{999999},
+		Extra:      map[string]any{"org_uuid": "org"},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, 0, result.Success)
+	require.Equal(t, 1, result.Failed)
+	require.Empty(t, result.SuccessIDs)
+	require.Equal(t, []int64{999999}, result.FailedIDs)
+	require.Len(t, result.Results, 1)
+	require.False(t, result.Results[0].Success)
+	require.Contains(t, result.Results[0].Error, "account not found")
+}
+
+func TestAdminService_BulkUpdateAccounts_StatusOnlyMarksMissingIDsFailed(t *testing.T) {
+	repo := &accountRepoStubForBulkUpdate{
+		getByIDsAccounts: []*Account{{ID: 1}},
+	}
+	svc := &adminServiceImpl{accountRepo: repo}
+
+	result, err := svc.BulkUpdateAccounts(context.Background(), &BulkUpdateAccountsInput{
+		AccountIDs: []int64{1, 999999},
+		Status:     StatusDisabled,
+	})
+
+	require.NoError(t, err)
+	require.True(t, repo.getByIDsCalled, "bulk update must preload accounts for every update type to report missing IDs")
+	require.Equal(t, []int64{1}, repo.bulkUpdateIDs)
+	require.Equal(t, 1, result.Success)
+	require.Equal(t, 1, result.Failed)
+	require.Equal(t, []int64{1}, result.SuccessIDs)
+	require.Equal(t, []int64{999999}, result.FailedIDs)
+	require.Len(t, result.Results, 2)
+	require.True(t, result.Results[0].Success)
+	require.False(t, result.Results[1].Success)
+	require.Contains(t, result.Results[1].Error, "account not found")
 }
 
 func TestAdminServiceBulkUpdateAccounts_ResolvesIDsFromFilters(t *testing.T) {

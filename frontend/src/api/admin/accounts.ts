@@ -221,6 +221,7 @@ export async function applyOAuthCredentials(
     type: 'oauth' | 'setup-token'
     credentials: Record<string, unknown>
     extra?: Record<string, unknown>
+    extra_delete_keys?: string[]
   }
 ): Promise<Account> {
   const { data } = await apiClient.post<Account>(
@@ -334,7 +335,7 @@ export async function resetTempUnschedulable(id: number): Promise<{ message: str
  */
 export async function generateAuthUrl(
   endpoint: string,
-  config: { proxy_id?: number }
+  config: { proxy_id?: number; redirect_uri?: string; account_id?: number }
 ): Promise<{ auth_url: string; session_id: string }> {
   const { data } = await apiClient.post<{ auth_url: string; session_id: string }>(endpoint, config)
   return data
@@ -351,6 +352,32 @@ export async function exchangeCode(
   exchangeData: { session_id: string; code: string; state?: string; proxy_id?: number }
 ): Promise<Record<string, unknown>> {
   const { data } = await apiClient.post<Record<string, unknown>>(endpoint, exchangeData)
+  return data
+}
+
+export interface CreateOpenAIAccountFromOAuthRequest extends Omit<CreateAccountRequest, 'platform' | 'type'> {
+  session_id: string
+  code: string
+  state: string
+  redirect_uri?: string
+}
+
+export async function createOpenAIAccountFromOAuth(
+  payload: CreateOpenAIAccountFromOAuthRequest
+): Promise<Account> {
+  const { data } = await apiClient.post<Account>('/admin/openai/create-from-oauth', payload)
+  return data
+}
+
+export interface CreateOpenAIAccountFromRefreshTokenRequest extends Omit<CreateAccountRequest, 'platform' | 'type'> {
+  refresh_token: string
+  client_id?: string
+}
+
+export async function createOpenAIAccountFromRefreshToken(
+  payload: CreateOpenAIAccountFromRefreshTokenRequest
+): Promise<Account> {
+  const { data } = await apiClient.post<Account>('/admin/openai/create-from-refresh-token', payload)
   return data
 }
 
@@ -711,6 +738,76 @@ export async function setPrivacy(id: number): Promise<Account> {
   return data
 }
 
+/**
+ * OpenAI / Codex rate-limit reset feature: query and reset upstream usage.
+ */
+export interface OpenAIRateLimitWindow {
+  used_percent: number
+  limit_window_seconds: number
+  reset_after_seconds: number
+  reset_at: number
+}
+
+export interface OpenAIRateLimit {
+  allowed: boolean
+  limit_reached: boolean
+  primary_window?: OpenAIRateLimitWindow | null
+  secondary_window?: OpenAIRateLimitWindow | null
+}
+
+export interface OpenAIAdditionalRateLimit {
+  limit_name: string
+  metered_feature: string
+  rate_limit?: OpenAIRateLimit | null
+}
+
+export interface OpenAIRateLimitResetCredits {
+  available_count: number
+}
+
+export interface OpenAIQuotaUsage {
+  user_id?: string
+  account_id?: string
+  email?: string
+  plan_type?: string
+  rate_limit?: OpenAIRateLimit | null
+  additional_rate_limits?: OpenAIAdditionalRateLimit[]
+  rate_limit_reset_credits?: OpenAIRateLimitResetCredits | null
+  fetched_at: number
+}
+
+export interface OpenAIQuotaResetCredit {
+  id?: string
+  reset_type?: string
+  status?: string
+  granted_at?: string
+  expires_at?: string
+  redeem_started_at?: string
+  redeemed_at?: string
+}
+
+export interface OpenAIQuotaResetResult {
+  code: string
+  credit?: OpenAIQuotaResetCredit | null
+  windows_reset: number
+}
+
+/**
+ * Query OpenAI/Codex rate-limit usage for an OAuth account.
+ */
+export async function queryOpenAIQuota(id: number): Promise<OpenAIQuotaUsage> {
+  const { data } = await apiClient.get<OpenAIQuotaUsage>(`/admin/openai/accounts/${id}/quota`)
+  return data
+}
+
+/**
+ * Consume one rate-limit-reset credit for an OpenAI/Codex OAuth account.
+ */
+export async function resetOpenAIQuota(id: number): Promise<OpenAIQuotaResetResult> {
+  const { data } = await apiClient.post<OpenAIQuotaResetResult>(`/admin/openai/accounts/${id}/reset-quota`)
+  return data
+}
+
 export const accountsAPI = {
   list,
   listWithEtag,
@@ -739,6 +836,8 @@ export const accountsAPI = {
   syncUpstreamModelsPreview,
   generateAuthUrl,
   exchangeCode,
+  createOpenAIAccountFromOAuth,
+  createOpenAIAccountFromRefreshToken,
   refreshOpenAIToken,
   batchCreate,
   batchUpdateCredentials,
@@ -752,7 +851,9 @@ export const accountsAPI = {
   batchClearError,
   batchRefresh,
   batchRefreshPlanType,
-  setPrivacy
+  setPrivacy,
+  queryOpenAIQuota,
+  resetOpenAIQuota
 }
 
 export default accountsAPI

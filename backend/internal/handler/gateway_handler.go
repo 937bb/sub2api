@@ -169,7 +169,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 
 	// 设置 max_tokens=1 + haiku 探测请求标识到 context 中
 	// 必须在 SetClaudeCodeClientContext 之前设置，因为 ClaudeCodeValidator 需要读取此标识进行绕过判断
-	if isMaxTokensOneHaikuRequest(reqModel, parsedReq.MaxTokens, reqStream) {
+	if isMaxTokensOneHaikuRequest(reqModel, parsedReq.MaxTokens) {
 		ctx := service.WithIsMaxTokensOneHaikuRequest(c.Request.Context(), true, h.metadataBridgeEnabled())
 		c.Request = c.Request.WithContext(ctx)
 	}
@@ -211,39 +211,12 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	// 获取订阅信息（可能为nil）- 提前获取用于后续检查
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
 
-	// 0. 检查wait队列是否已满
-	maxWait := service.CalculateMaxWait(subject.Concurrency)
-	canWait, err := h.concurrencyHelper.IncrementWaitCount(c.Request.Context(), subject.UserID, maxWait)
-	waitCounted := false
-	if err != nil {
-		reqLog.Warn("gateway.user_wait_counter_increment_failed", zap.Error(err))
-		// On error, allow request to proceed
-	} else if !canWait {
-		reqLog.Info("gateway.user_wait_queue_full", zap.Int("max_wait", maxWait))
-		h.errorResponse(c, http.StatusTooManyRequests, "rate_limit_error", "Too many pending requests, please retry later")
-		return
-	}
-	if err == nil && canWait {
-		waitCounted = true
-	}
-	// Ensure we decrement if we exit before acquiring the user slot.
-	defer func() {
-		if waitCounted {
-			h.concurrencyHelper.DecrementWaitCount(c.Request.Context(), subject.UserID)
-		}
-	}()
-
 	// 1. 首先获取用户并发槽位
 	userReleaseFunc, err := h.concurrencyHelper.AcquireUserSlotWithWait(c, subject.UserID, subject.Concurrency, reqStream, &streamStarted)
 	if err != nil {
 		reqLog.Warn("gateway.user_slot_acquire_failed", zap.Error(err))
 		h.handleConcurrencyError(c, err, "user", streamStarted)
 		return
-	}
-	// User slot acquired: no longer waiting in the queue.
-	if waitCounted {
-		h.concurrencyHelper.DecrementWaitCount(c.Request.Context(), subject.UserID)
-		waitCounted = false
 	}
 	// 在请求结束或 Context 取消时确保释放槽位，避免客户端断开造成泄漏
 	userReleaseFunc = wrapReleaseOnDone(c.Request.Context(), userReleaseFunc)
@@ -360,7 +333,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 
 			// 检查请求拦截（预热请求、SUGGESTION MODE等）
 			if account.IsInterceptWarmupEnabled() {
-				interceptType := detectInterceptType(body, reqModel, parsedReq.MaxTokens, reqStream, isClaudeCodeClient)
+				interceptType := detectInterceptType(body, reqModel, parsedReq.MaxTokens, isClaudeCodeClient)
 				if interceptType != InterceptTypeNone {
 					if selection.Acquired && selection.ReleaseFunc != nil {
 						selection.ReleaseFunc()
@@ -477,12 +450,17 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						return
 					}
 				}
-				wroteFallback := h.ensureForwardErrorResponse(c, streamStarted)
+				upstreamErrorAlreadyCommunicated := gatewayForwardErrorAlreadyCommunicated(c, writerSizeBeforeForward, err)
+				wroteFallback := false
+				if !upstreamErrorAlreadyCommunicated {
+					wroteFallback = h.ensureForwardErrorResponse(c, streamStarted)
+				}
 				forwardFailedFields := []zap.Field{
 					zap.Int64("account_id", account.ID),
 					zap.String("account_name", account.Name),
 					zap.String("account_platform", account.Platform),
 					zap.Bool("fallback_error_response_written", wroteFallback),
+					zap.Bool("upstream_error_response_already_written", upstreamErrorAlreadyCommunicated),
 					zap.Error(err),
 				}
 				if account.Proxy != nil {
@@ -517,6 +495,13 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 
 			if result.ReasoningEffort == nil {
 				result.ReasoningEffort = service.NormalizeClaudeOutputEffort(parsedReq.OutputEffort)
+			}
+			if result.ReasoningEffort == nil && parsedReq.ThinkingEnabled {
+				protocolModel := result.UpstreamModel
+				if protocolModel == "" {
+					protocolModel = result.Model
+				}
+				result.ReasoningEffort = service.DefaultEffortForThinkingEnabled(protocolModel)
 			}
 
 			// 使用量记录通过有界 worker 池提交，避免请求热路径创建无界 goroutine。
@@ -633,7 +618,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 
 			// 检查请求拦截（预热请求、SUGGESTION MODE等）
 			if account.IsInterceptWarmupEnabled() {
-				interceptType := detectInterceptType(body, reqModel, parsedReq.MaxTokens, reqStream, isClaudeCodeClient)
+				interceptType := detectInterceptType(body, reqModel, parsedReq.MaxTokens, isClaudeCodeClient)
 				if interceptType != InterceptTypeNone {
 					if selection.Acquired && selection.ReleaseFunc != nil {
 						selection.ReleaseFunc()
@@ -769,8 +754,8 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					return
 				}
 			}
-			// Bedrock CC 兼容：渠道模型映射后，清理 Anthropic API 专有字段、注入 Bedrock 必需字段
-			if err := attemptParsedReq.ReplaceBody(h.gatewayService.ApplyBedrockCCCompat(c.Request.Context(), attemptParsedReq.Body.Bytes(), attemptParsedReq.Model, account, apiKey.GroupID)); err != nil {
+			// Bedrock CC 兼容：清理 body 专有字段，并在需要透传 HTTP header 时过滤 beta token。
+			if err := attemptParsedReq.ReplaceBody(h.gatewayService.ApplyBedrockCCCompat(c, attemptParsedReq.Body.Bytes(), attemptParsedReq.Model, account, apiKey.GroupID)); err != nil {
 				h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
 				return
 			}
@@ -785,11 +770,13 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			}
 			// 记录 Forward 前已写入字节数，Forward 后若增加则说明 SSE 内容已发，禁止 failover
 			writerSizeBeforeForward := c.Writer.Size()
+			restoreBedrockBetaHeader := h.gatewayService.ApplyBedrockCCCompatBetaHeaderOverride(c, attemptParsedReq.Body.Bytes(), attemptParsedReq.Model, account, apiKey.GroupID)
 			if account.Platform == service.PlatformAntigravity && account.Type != service.AccountTypeAPIKey {
 				result, err = h.antigravityGatewayService.Forward(requestCtx, c, account, attemptBody, hasBoundSession)
 			} else {
 				result, err = h.gatewayService.Forward(requestCtx, c, account, attemptParsedReq)
 			}
+			restoreBedrockBetaHeader()
 
 			// 兜底释放串行锁（正常情况已通过回调提前释放）
 			if queueRelease != nil {
@@ -874,12 +861,17 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						return
 					}
 				}
-				wroteFallback := h.ensureForwardErrorResponse(c, streamStarted)
+				upstreamErrorAlreadyCommunicated := gatewayForwardErrorAlreadyCommunicated(c, writerSizeBeforeForward, err)
+				wroteFallback := false
+				if !upstreamErrorAlreadyCommunicated {
+					wroteFallback = h.ensureForwardErrorResponse(c, streamStarted)
+				}
 				forwardFailedFields := []zap.Field{
 					zap.Int64("account_id", account.ID),
 					zap.String("account_name", account.Name),
 					zap.String("account_platform", account.Platform),
 					zap.Bool("fallback_error_response_written", wroteFallback),
+					zap.Bool("upstream_error_response_already_written", upstreamErrorAlreadyCommunicated),
 					zap.Error(err),
 				}
 				if account.Proxy != nil {
@@ -926,6 +918,13 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 
 			if result.ReasoningEffort == nil {
 				result.ReasoningEffort = service.NormalizeClaudeOutputEffort(attemptParsedReq.OutputEffort)
+			}
+			if result.ReasoningEffort == nil && attemptParsedReq.ThinkingEnabled {
+				protocolModel := result.UpstreamModel
+				if protocolModel == "" {
+					protocolModel = result.Model
+				}
+				result.ReasoningEffort = service.DefaultEffortForThinkingEnabled(protocolModel)
 			}
 
 			// 使用量记录通过有界 worker 池提交，避免请求热路径创建无界 goroutine。
@@ -1503,6 +1502,26 @@ func (h *GatewayHandler) handleConcurrencyError(c *gin.Context, err error, slotT
 	h.handleStreamingAwareError(c, status, errType, message, streamStarted)
 }
 
+func (h *GatewayHandler) chatCompletionsConcurrencyErrorResponse(c *gin.Context, err error, slotType string, streamStarted bool) {
+	status, errType, message := concurrencyErrorResponse(err, slotType)
+	if streamStarted {
+		// After streaming pings have flushed headers, keep the existing SSE error path.
+		h.handleStreamingAwareError(c, status, errType, message, streamStarted)
+		return
+	}
+	h.chatCompletionsErrorResponse(c, status, errType, message)
+}
+
+func (h *GatewayHandler) responsesConcurrencyErrorResponse(c *gin.Context, err error, slotType string, streamStarted bool) {
+	status, errType, message := concurrencyErrorResponse(err, slotType)
+	if streamStarted {
+		// After streaming pings have flushed headers, keep the Responses terminal-event path.
+		h.handleStreamingAwareError(c, status, errType, message, streamStarted)
+		return
+	}
+	h.responsesErrorResponse(c, status, errType, message)
+}
+
 func (h *GatewayHandler) handleFailoverExhausted(c *gin.Context, failoverErr *service.UpstreamFailoverError, platform string, streamStarted bool) {
 	statusCode := failoverErr.StatusCode
 	responseBody := failoverErr.ResponseBody
@@ -1605,11 +1624,30 @@ func (h *GatewayHandler) ensureForwardErrorResponse(c *gin.Context, streamStarte
 	if c == nil || c.Writer == nil {
 		return false
 	}
+	if service.IsResponseCommitted(c) {
+		return false
+	}
 	if c.Writer.Written() {
 		streamStarted = true
 	}
 	h.handleStreamingAwareError(c, http.StatusBadGateway, "upstream_error", "Upstream request failed", streamStarted)
 	return true
+}
+
+// gatewayForwardErrorAlreadyCommunicated reports whether Forward already wrote a
+// complete non-SSE error response before returning an error for logging/state.
+func gatewayForwardErrorAlreadyCommunicated(c *gin.Context, writerSizeBeforeForward int, err error) bool {
+	if err == nil || c == nil || c.Writer == nil {
+		return false
+	}
+	if service.IsResponseCommitted(c) {
+		return true
+	}
+	if c.Writer.Size() == writerSizeBeforeForward {
+		return false
+	}
+	contentType := strings.ToLower(strings.TrimSpace(c.Writer.Header().Get("Content-Type")))
+	return contentType != "" && !strings.Contains(contentType, "text/event-stream")
 }
 
 // checkClaudeCodeVersion 检查 Claude Code 客户端版本是否满足版本要求
@@ -1786,10 +1824,10 @@ func isHaikuModel(model string) bool {
 }
 
 // isMaxTokensOneHaikuRequest 检查是否为 max_tokens=1 + haiku 模型的探测请求
-// 这类请求用于 Claude Code 验证 API 连通性
-// 条件：max_tokens == 1 且 model 包含 "haiku" 且非流式请求
-func isMaxTokensOneHaikuRequest(model string, maxTokens int, isStream bool) bool {
-	return maxTokens == 1 && isHaikuModel(model) && !isStream
+// 这类请求用于 Claude Code 验证 API 连通性（流式/非流式均会出现，如 cc-switch v3.9.0 起的健康检查探测为流式）
+// 条件：max_tokens == 1 且 model 包含 "haiku"
+func isMaxTokensOneHaikuRequest(model string, maxTokens int) bool {
+	return maxTokens == 1 && isHaikuModel(model)
 }
 
 // detectInterceptType 检测请求是否需要拦截，返回拦截类型
@@ -1797,11 +1835,10 @@ func isMaxTokensOneHaikuRequest(model string, maxTokens int, isStream bool) bool
 //   - body: 请求体字节
 //   - model: 请求的模型名称
 //   - maxTokens: max_tokens 值
-//   - isStream: 是否为流式请求
 //   - isClaudeCodeClient: 是否已通过 Claude Code 客户端校验
-func detectInterceptType(body []byte, model string, maxTokens int, isStream bool, isClaudeCodeClient bool) InterceptType {
-	// 优先检查 max_tokens=1 + haiku 探测请求（仅非流式）
-	if isClaudeCodeClient && isMaxTokensOneHaikuRequest(model, maxTokens, isStream) {
+func detectInterceptType(body []byte, model string, maxTokens int, isClaudeCodeClient bool) InterceptType {
+	// 优先检查 max_tokens=1 + haiku 探测请求（流式/非流式均适用）
+	if isClaudeCodeClient && isMaxTokensOneHaikuRequest(model, maxTokens) {
 		return InterceptTypeMaxTokensOneHaiku
 	}
 

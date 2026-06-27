@@ -73,7 +73,15 @@ func (s *openAITestSettingRepo) Delete(ctx context.Context, key string) error {
 
 type snapshotUpdateAccountRepo struct {
 	stubOpenAIAccountRepo
-	updateExtraCalls chan map[string]any
+	updateExtraCalls      chan map[string]any
+	updateExtraErr        error
+	updateExtraErrFor     func(map[string]any) error
+	sessionWindowEndCalls chan struct {
+		id  int64
+		end time.Time
+	}
+	setErrorID  int64
+	setErrorMsg string
 }
 
 func (r *snapshotUpdateAccountRepo) UpdateExtra(ctx context.Context, id int64, updates map[string]any) error {
@@ -83,6 +91,30 @@ func (r *snapshotUpdateAccountRepo) UpdateExtra(ctx context.Context, id int64, u
 			copied[k] = v
 		}
 		r.updateExtraCalls <- copied
+	}
+	if r.updateExtraErrFor != nil {
+		if err := r.updateExtraErrFor(updates); err != nil {
+			return err
+		}
+	}
+	if r.updateExtraErr != nil {
+		return r.updateExtraErr
+	}
+	return nil
+}
+
+func (r *snapshotUpdateAccountRepo) SetError(_ context.Context, id int64, errorMsg string) error {
+	r.setErrorID = id
+	r.setErrorMsg = errorMsg
+	return nil
+}
+
+func (r *snapshotUpdateAccountRepo) UpdateSessionWindowEnd(_ context.Context, id int64, end time.Time) error {
+	if r.sessionWindowEndCalls != nil {
+		r.sessionWindowEndCalls <- struct {
+			id  int64
+			end time.Time
+		}{id: id, end: end}
 	}
 	return nil
 }
@@ -118,6 +150,30 @@ func (r stubOpenAIAccountRepo) ListSchedulableByPlatform(ctx context.Context, pl
 
 func (r stubOpenAIAccountRepo) ListSchedulableUngroupedByPlatform(ctx context.Context, platform string) ([]Account, error) {
 	return r.ListSchedulableByPlatform(ctx, platform)
+}
+
+type groupAwareStubOpenAIAccountRepo struct {
+	stubOpenAIAccountRepo
+}
+
+func (r groupAwareStubOpenAIAccountRepo) ListSchedulableByGroupIDAndPlatform(ctx context.Context, groupID int64, platform string) ([]Account, error) {
+	var result []Account
+	for _, acc := range r.accounts {
+		if acc.Platform == platform && openAIStickyAccountMatchesGroup(&acc, &groupID) {
+			result = append(result, acc)
+		}
+	}
+	return result, nil
+}
+
+func (r groupAwareStubOpenAIAccountRepo) ListSchedulableUngroupedByPlatform(ctx context.Context, platform string) ([]Account, error) {
+	var result []Account
+	for _, acc := range r.accounts {
+		if acc.Platform == platform && openAIStickyAccountMatchesGroup(&acc, nil) {
+			result = append(result, acc)
+		}
+	}
+	return result, nil
 }
 
 type stubConcurrencyCache struct {
@@ -375,6 +431,23 @@ func TestOpenAIGatewayService_GenerateSessionHash_EmptyBodyStillEmpty(t *testing
 	require.Empty(t, svc.GenerateSessionHash(c, nil))
 }
 
+func TestOpenAIGatewayService_BindHTTPResponseAccount(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", nil)
+	groupID := int64(4201)
+	c.Set("api_key", &APIKey{ID: 501, GroupID: &groupID})
+
+	svc := &OpenAIGatewayService{}
+	account := &Account{ID: 37001, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+	svc.bindHTTPResponseAccount(context.Background(), c, account, "resp_http_001")
+
+	got, err := svc.getOpenAIWSStateStore().GetResponseAccount(context.Background(), groupID, "resp_http_001")
+	require.NoError(t, err)
+	require.Equal(t, account.ID, got)
+}
+
 func (c stubConcurrencyCache) GetAccountWaitingCount(ctx context.Context, accountID int64) (int, error) {
 	if c.waitCounts != nil {
 		if count, ok := c.waitCounts[accountID]; ok {
@@ -600,6 +673,142 @@ func TestOpenAISelectAccountWithLoadAwareness_StickyUnschedulableClearsSession(t
 		accounts: []Account{
 			{ID: 1, Platform: PlatformOpenAI, Status: StatusDisabled, Schedulable: true, Concurrency: 1},
 			{ID: 2, Platform: PlatformOpenAI, Status: StatusActive, Schedulable: true, Concurrency: 1},
+		},
+	}
+	cache := &stubGatewayCache{
+		sessionBindings: map[string]int64{"openai:" + sessionHash: 1},
+	}
+
+	svc := &OpenAIGatewayService{
+		accountRepo:        repo,
+		cache:              cache,
+		concurrencyService: NewConcurrencyService(stubConcurrencyCache{}),
+	}
+
+	selection, err := svc.SelectAccountWithLoadAwareness(context.Background(), &groupID, sessionHash, "gpt-4", nil)
+	if err != nil {
+		t.Fatalf("SelectAccountWithLoadAwareness error: %v", err)
+	}
+	if selection == nil || selection.Account == nil || selection.Account.ID != 2 {
+		t.Fatalf("expected account 2, got %+v", selection)
+	}
+	if cache.deletedSessions["openai:"+sessionHash] != 1 {
+		t.Fatalf("expected sticky session to be deleted")
+	}
+	if cache.sessionBindings["openai:"+sessionHash] != 2 {
+		t.Fatalf("expected sticky session to bind to account 2")
+	}
+	if selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
+	}
+}
+
+func TestOpenAISelectAccountForModelWithExclusions_StickyOutsideGroupClearsSession(t *testing.T) {
+	sessionHash := "outside-group"
+	groupID := int64(12)
+	repo := groupAwareStubOpenAIAccountRepo{
+		stubOpenAIAccountRepo: stubOpenAIAccountRepo{
+			accounts: []Account{
+				{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0},
+				{ID: 2, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 5, GroupIDs: []int64{groupID}},
+			},
+		},
+	}
+	cache := &stubGatewayCache{
+		sessionBindings: map[string]int64{"openai:" + sessionHash: 1},
+	}
+
+	svc := &OpenAIGatewayService{
+		accountRepo: repo,
+		cache:       cache,
+	}
+
+	acc, err := svc.SelectAccountForModelWithExclusions(context.Background(), &groupID, sessionHash, "gpt-4", nil)
+	if err != nil {
+		t.Fatalf("SelectAccountForModelWithExclusions error: %v", err)
+	}
+	if acc == nil || acc.ID != 2 {
+		t.Fatalf("expected account 2, got %+v", acc)
+	}
+	if cache.deletedSessions["openai:"+sessionHash] != 1 {
+		t.Fatalf("expected sticky session to be deleted")
+	}
+	if cache.sessionBindings["openai:"+sessionHash] != 2 {
+		t.Fatalf("expected sticky session to bind to account 2")
+	}
+}
+
+func TestOpenAISelectAccountForModelWithExclusions_StickyOutsideGroupClearsBeforeEligibility(t *testing.T) {
+	sessionHash := "outside-group-unsupported"
+	groupID := int64(14)
+	repo := groupAwareStubOpenAIAccountRepo{
+		stubOpenAIAccountRepo: stubOpenAIAccountRepo{
+			accounts: []Account{
+				{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0, Credentials: map[string]any{"model_mapping": map[string]any{"gpt-3.5-turbo": "gpt-3.5-turbo"}}},
+				{ID: 2, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 5, GroupIDs: []int64{groupID}},
+			},
+		},
+	}
+	cache := &stubGatewayCache{
+		sessionBindings: map[string]int64{"openai:" + sessionHash: 1},
+	}
+
+	svc := &OpenAIGatewayService{
+		accountRepo: repo,
+		cache:       cache,
+	}
+
+	acc, err := svc.SelectAccountForModelWithExclusions(context.Background(), &groupID, sessionHash, "gpt-4", nil)
+	if err != nil {
+		t.Fatalf("SelectAccountForModelWithExclusions error: %v", err)
+	}
+	if acc == nil || acc.ID != 2 {
+		t.Fatalf("expected account 2, got %+v", acc)
+	}
+	if cache.deletedSessions["openai:"+sessionHash] != 1 {
+		t.Fatalf("expected sticky session to be deleted before eligibility checks")
+	}
+}
+
+func TestOpenAISelectAccountForModelWithExclusions_SimpleModeAllowsGroupedStickyWithoutGroup(t *testing.T) {
+	sessionHash := "simple-grouped"
+	repo := stubOpenAIAccountRepo{
+		accounts: []Account{
+			{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0, GroupIDs: []int64{99}},
+		},
+	}
+	cache := &stubGatewayCache{
+		sessionBindings: map[string]int64{"openai:" + sessionHash: 1},
+	}
+	cfg := &config.Config{RunMode: config.RunModeSimple}
+
+	svc := &OpenAIGatewayService{
+		accountRepo: repo,
+		cache:       cache,
+		cfg:         cfg,
+	}
+
+	acc, err := svc.SelectAccountForModelWithExclusions(context.Background(), nil, sessionHash, "gpt-4", nil)
+	if err != nil {
+		t.Fatalf("SelectAccountForModelWithExclusions error: %v", err)
+	}
+	if acc == nil || acc.ID != 1 {
+		t.Fatalf("expected sticky account 1, got %+v", acc)
+	}
+	if cache.deletedSessions["openai:"+sessionHash] != 0 {
+		t.Fatalf("simple mode should not delete grouped sticky binding")
+	}
+}
+
+func TestOpenAISelectAccountWithLoadAwareness_StickyOutsideGroupClearsSession(t *testing.T) {
+	sessionHash := "outside-group-load"
+	groupID := int64(13)
+	repo := groupAwareStubOpenAIAccountRepo{
+		stubOpenAIAccountRepo: stubOpenAIAccountRepo{
+			accounts: []Account{
+				{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0},
+				{ID: 2, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 5, AccountGroups: []AccountGroup{{AccountID: 2, GroupID: groupID}}},
+			},
 		},
 	}
 	cache := &stubGatewayCache{
@@ -1931,7 +2140,13 @@ func TestOpenAIValidateUpstreamBaseURLEnabledEnforcesAllowlist(t *testing.T) {
 }
 
 func TestOpenAIUpdateCodexUsageSnapshotFromHeaders(t *testing.T) {
-	repo := &snapshotUpdateAccountRepo{updateExtraCalls: make(chan map[string]any, 1)}
+	repo := &snapshotUpdateAccountRepo{
+		updateExtraCalls: make(chan map[string]any, 1),
+		sessionWindowEndCalls: make(chan struct {
+			id  int64
+			end time.Time
+		}, 1),
+	}
 	svc := &OpenAIGatewayService{accountRepo: repo}
 	headers := http.Header{}
 	headers.Set("x-codex-primary-used-percent", "12")
@@ -1943,14 +2158,27 @@ func TestOpenAIUpdateCodexUsageSnapshotFromHeaders(t *testing.T) {
 
 	svc.UpdateCodexUsageSnapshotFromHeaders(context.Background(), 123, headers)
 
+	var resetAt string
 	select {
 	case updates := <-repo.updateExtraCalls:
 		require.Equal(t, 12.0, updates["codex_5h_used_percent"])
 		require.Equal(t, 34.0, updates["codex_7d_used_percent"])
 		require.Equal(t, 600, updates["codex_5h_reset_after_seconds"])
 		require.Equal(t, 86400, updates["codex_7d_reset_after_seconds"])
+		resetAt, _ = updates["codex_5h_reset_at"].(string)
+		require.NotEmpty(t, resetAt)
 	case <-time.After(2 * time.Second):
 		t.Fatal("expected UpdateExtra to be called")
+	}
+
+	select {
+	case call := <-repo.sessionWindowEndCalls:
+		require.Equal(t, int64(123), call.id)
+		want, err := parseTime(resetAt)
+		require.NoError(t, err)
+		require.True(t, call.end.Equal(want), "session window end = %v, want %v", call.end, want)
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected UpdateSessionWindowEnd to be called")
 	}
 }
 
@@ -2017,7 +2245,7 @@ func TestOpenAIForwardHTTPDoesNotSendWSCreateFrameFields(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	body := []byte(`{"type":"response.create","generate":false,"previous_response_id":"resp_warm","model":"gpt-5","stream":false,"input":"hello","client_metadata":{"keep":"yes"}}`)
+	body := []byte(`{"type":"response.create","generate":false,"previous_response_id":"resp_warm","model":"gpt-5","stream":false,"input":"hello","metadata":{"drop":"yes"},"client_metadata":{"keep":"yes"}}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
 	SetOpenAIClientTransport(c, OpenAIClientTransportHTTP)
 
@@ -2047,21 +2275,53 @@ func TestOpenAIForwardHTTPDoesNotSendWSCreateFrameFields(t *testing.T) {
 	require.False(t, gjson.GetBytes(upstream.lastBody, "type").Exists())
 	require.False(t, gjson.GetBytes(upstream.lastBody, "generate").Exists())
 	require.False(t, gjson.GetBytes(upstream.lastBody, "previous_response_id").Exists())
+	require.False(t, gjson.GetBytes(upstream.lastBody, "metadata").Exists())
 	require.Equal(t, "yes", gjson.GetBytes(upstream.lastBody, "client_metadata.keep").String())
 }
 
-func TestOpenAIBuildUpstreamRequestOpenAIPassthroughPreservesCompactPath(t *testing.T) {
+func TestOpenAIBuildUpstreamRequestNativeOpenAIRelayRejectsOAuth(t *testing.T) {
+	svc := &OpenAIGatewayService{}
+	account := &Account{Type: AccountTypeOAuth}
+
+	req, err := svc.buildUpstreamRequestOpenAIPassthrough(context.Background(), nil, account, []byte(`{"model":"gpt-5"}`), "token")
+
+	require.Nil(t, req)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "requires APIKey account")
+}
+
+func TestOpenAIBuildUpstreamRequestOpenAIOAuthAdapterAcceptsSetupToken(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-5","input":"hello"}`)))
+
+	svc := &OpenAIGatewayService{}
+	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeSetupToken}
+
+	req, err := svc.buildUpstreamRequest(c.Request.Context(), c, account, []byte(`{"model":"gpt-5","input":"hello"}`), "token", false, "", true)
+
+	require.NoError(t, err)
+	require.Equal(t, chatgptCodexURL, req.URL.String())
+	require.Equal(t, codexCLIVersion, req.Header.Get("Version"))
+	require.NotEmpty(t, req.Header.Get("Session_Id"))
+	require.Equal(t, HTTPUpstreamProfileOpenAI, HTTPUpstreamProfileFromContext(req.Context()))
+}
+
+func TestOpenAIBuildUpstreamRequestOpenAIOAuthAdapterPreservesCompactPath(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/compact", bytes.NewReader([]byte(`{"model":"gpt-5"}`)))
 	c.Request.Header.Set(openAICodexSubagentHeader, "compact")
 	c.Request.Header.Set(openAITraceparentHeader, "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
+	c.Request.Header.Set("X-Stainless-Timeout", "1")
 
-	svc := &OpenAIGatewayService{}
-	account := &Account{Type: AccountTypeOAuth}
+	svc := &OpenAIGatewayService{cfg: &config.Config{}}
+	svc.cfg.Gateway.OpenAIPassthroughAllowTimeoutHeaders = true
+	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth}
 
-	req, err := svc.buildUpstreamRequestOpenAIPassthrough(c.Request.Context(), c, account, []byte(`{"model":"gpt-5"}`), "token")
+	req, err := svc.buildUpstreamRequestOpenAIOAuthAdapter(c.Request.Context(), c, account, []byte(`{"model":"gpt-5"}`), "token", "", true)
 	require.NoError(t, err)
 	require.Equal(t, chatgptCodexURL+"/compact", req.URL.String())
 	require.Equal(t, "application/json", req.Header.Get("Accept"))
@@ -2075,6 +2335,7 @@ func TestOpenAIBuildUpstreamRequestOpenAIPassthroughPreservesCompactPath(t *test
 	require.NotEmpty(t, req.Header.Get(openAICodexWindowIDHeader))
 	require.Equal(t, "compact", req.Header.Get(openAICodexSubagentHeader))
 	require.Equal(t, "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01", req.Header.Get(openAITraceparentHeader))
+	require.Empty(t, req.Header.Get("X-Stainless-Timeout"), "OAuth adapter must not use APIKey passthrough timeout-header config")
 	bodyBytes, err := io.ReadAll(req.Body)
 	require.NoError(t, err)
 	require.False(t, gjson.GetBytes(bodyBytes, "client_metadata").Exists())
@@ -2088,6 +2349,7 @@ func TestOpenAIBuildUpstreamRequestCompactForcesJSONAcceptForOAuth(t *testing.T)
 
 	svc := &OpenAIGatewayService{}
 	account := &Account{
+		Platform:    PlatformOpenAI,
 		Type:        AccountTypeOAuth,
 		Credentials: map[string]any{"chatgpt_account_id": "chatgpt-acc"},
 	}
@@ -2116,19 +2378,30 @@ func TestOpenAIBuildUpstreamRequestOAuthAddsCodexIdentityFallbacks(t *testing.T)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-5","input":"hello"}`)))
 	c.Request.Header.Set("User-Agent", "opencode/0.9")
 	c.Request.Header.Set("originator", "opencode")
+	c.Request.Header.Set("OpenAI-Beta", "responses=experimental")
 
 	svc := &OpenAIGatewayService{}
 	account := &Account{
 		ID:          42,
+		Platform:    PlatformOpenAI,
 		Type:        AccountTypeOAuth,
 		Credentials: map[string]any{"chatgpt_account_id": "chatgpt-acc"},
 	}
 
 	req, err := svc.buildUpstreamRequest(c.Request.Context(), c, account, []byte(`{"model":"gpt-5","input":"hello"}`), "token", true, "", false)
 	require.NoError(t, err)
-	require.Equal(t, codexOfficialOriginator, req.Header.Get("originator"))
-	require.Equal(t, codexCLIVersion, req.Header.Get("Version"))
-	require.Equal(t, codexCLIUserAgent, req.Header.Get("User-Agent"))
+	require.Equal(t, "Bearer token", getHeaderRaw(req.Header, "Authorization"))
+	require.Contains(t, req.Header, "Authorization")
+	require.Equal(t, "chatgpt-acc", getHeaderRaw(req.Header, "ChatGPT-Account-ID"))
+	require.Contains(t, req.Header, "ChatGPT-Account-ID")
+	require.Equal(t, "text/event-stream", getHeaderRaw(req.Header, "Accept"))
+	require.Contains(t, req.Header, "Accept")
+	require.Equal(t, "application/json", getHeaderRaw(req.Header, "Content-Type"))
+	require.Contains(t, req.Header, "Content-Type")
+	require.Empty(t, getHeaderRaw(req.Header, "OpenAI-Beta"))
+	require.Equal(t, codexOfficialOriginator, getHeaderRaw(req.Header, "originator"))
+	require.Equal(t, codexCLIVersion, getHeaderRaw(req.Header, "Version"))
+	require.Equal(t, codexCLIUserAgent, getHeaderRaw(req.Header, "User-Agent"))
 	require.NotEmpty(t, req.Header.Get(openAICodexSessionIDHeader))
 	require.NotEmpty(t, req.Header.Get(openAICodexThreadIDHeader))
 	require.Equal(t, req.Header.Get(openAICodexThreadIDHeader), req.Header.Get(openAICodexClientRequestIDHeader))
@@ -2143,28 +2416,29 @@ func TestOpenAIBuildUpstreamRequestOAuthAddsCodexIdentityFallbacks(t *testing.T)
 	require.False(t, gjson.GetBytes(bodyBytes, "client_metadata."+openAICodexWindowIDHeader).Exists())
 }
 
-func TestOpenAIBuildUpstreamRequestOAuthPreservesIncomingDesktopUserAgent(t *testing.T) {
+func TestOpenAIBuildUpstreamRequestOAuthIgnoresIncomingDesktopUserAgent(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	body := []byte(`{"model":"gpt-5.4","input":"hello"}`)
-	incomingUA := "codex-tui/0.136.0 (Mac OS 26.5.0; arm64) Apple_Terminal/470.2 (codex-tui; 0.136.0)"
+	incomingUA := "codex-tui/9.9.9 (Injected OS; x64) Injected_Term/1.0 (codex-tui; 9.9.9)"
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
 	c.Request.Header.Set("User-Agent", incomingUA)
 
 	svc := &OpenAIGatewayService{}
 	account := &Account{
 		ID:          42,
+		Platform:    PlatformOpenAI,
 		Type:        AccountTypeOAuth,
 		Credentials: map[string]any{"chatgpt_account_id": "chatgpt-acc"},
 	}
 
 	req, err := svc.buildUpstreamRequest(c.Request.Context(), c, account, body, "token", true, "", false)
 	require.NoError(t, err)
-	require.Equal(t, incomingUA, req.Header.Get("User-Agent"))
+	require.Equal(t, codexCLIUserAgent, req.Header.Get("User-Agent"))
 }
 
-func TestOpenAIBuildUpstreamRequestOAuthNonOfficialUserAgentUsesConfiguredCodexUserAgent(t *testing.T) {
+func TestOpenAIBuildUpstreamRequestOAuthSnapshotsConfiguredCodexUserAgentIntoFingerprint(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -2180,6 +2454,7 @@ func TestOpenAIBuildUpstreamRequestOAuthNonOfficialUserAgentUsesConfiguredCodexU
 	}
 	account := &Account{
 		ID:          42,
+		Platform:    PlatformOpenAI,
 		Type:        AccountTypeOAuth,
 		Credentials: map[string]any{"chatgpt_account_id": "chatgpt-acc"},
 	}
@@ -2198,7 +2473,7 @@ func TestOpenAIBuildUpstreamRequestOAuthPreservesCodexReleaseHTTPHeaders(t *test
 	c.Request.Header.Set(openAICodexSessionIDHeader, "release-session")
 	c.Request.Header.Set(openAICodexThreadIDHeader, "release-thread")
 	c.Request.Header.Set(openAICodexClientRequestIDHeader, "release-client-request")
-	c.Request.Header.Set(openAICodexWindowIDHeader, "release-window")
+	c.Request.Header.Set(openAICodexWindowIDHeader, "attacker-release-thread:7")
 	c.Request.Header.Set(openAICodexBetaFeaturesHeader, "feature-a,feature-b")
 	c.Request.Header.Set(openAICodexTurnStateHeader, "release-turn-state")
 	c.Request.Header.Set(openAICodexTurnMetadataHeader, "release-turn-metadata")
@@ -2206,34 +2481,47 @@ func TestOpenAIBuildUpstreamRequestOAuthPreservesCodexReleaseHTTPHeaders(t *test
 	svc := &OpenAIGatewayService{}
 	account := &Account{
 		ID:          42,
+		Platform:    PlatformOpenAI,
 		Type:        AccountTypeOAuth,
 		Credentials: map[string]any{"chatgpt_account_id": "chatgpt-acc"},
 	}
 
 	req, err := svc.buildUpstreamRequest(c.Request.Context(), c, account, body, "token", true, "", false)
 	require.NoError(t, err)
-	require.NotEmpty(t, req.Header.Get(openAICodexSessionIDHeader))
-	require.NotEmpty(t, req.Header.Get(openAICodexThreadIDHeader))
-	require.Equal(t, "release-client-request", req.Header.Get(openAICodexClientRequestIDHeader))
-	require.Equal(t, "release-window", req.Header.Get(openAICodexWindowIDHeader))
+	wantSessionID := isolateOpenAICodexOAuthSessionID(0, "release-session", "session")
+	wantThreadID := isolateOpenAICodexOAuthSessionID(0, "release-thread", "thread")
+	require.Equal(t, wantSessionID, req.Header.Get(openAICodexSessionIDHeader))
+	require.Equal(t, wantThreadID, req.Header.Get(openAICodexThreadIDHeader))
+	require.Equal(t, wantThreadID, req.Header.Get(openAICodexClientRequestIDHeader))
+	require.Equal(t, wantThreadID+":7", req.Header.Get(openAICodexWindowIDHeader))
 	require.Equal(t, "feature-a,feature-b", req.Header.Get(openAICodexBetaFeaturesHeader))
 	require.Equal(t, "release-turn-state", req.Header.Get(openAICodexTurnStateHeader))
 	require.Equal(t, "release-turn-metadata", req.Header.Get(openAICodexTurnMetadataHeader))
 }
 
-func TestOpenAIBuildUpstreamRequestOAuthMessagesBridgeUsesSessionOnly(t *testing.T) {
+func TestOpenAIBuildUpstreamRequestOAuthMessagesBridgeUsesFingerprintIdentity(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	body := []byte(`{"model":"gpt-5.5","prompt_cache_key":"anthropic-metadata-session-1","input":[{"type":"message","role":"developer","content":[{"type":"input_text","text":"<sub2api-claude-code-todo-guard>"}]},{"type":"message","role":"user","content":"hello"}]}`)
+	body := []byte(`{"model":"gpt-5.5","prompt_cache_key":"anthropic-metadata-session-1","client_metadata":{"keep":"yes","x-codex-installation-id":"attacker-installation","x-codex-window-id":"attacker-window","thread-id":"attacker-thread"},"input":[{"type":"message","role":"developer","content":[{"type":"input_text","text":"<sub2api-claude-code-todo-guard>"}]},{"type":"message","role":"user","content":"hello"}]}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
 	c.Request.Header.Set("OpenAI-Beta", "responses=experimental")
-	c.Request.Header.Set("originator", codexOfficialOriginator)
+	c.Request.Header.Set("originator", "attacker-originator")
+	c.Request.Header.Set(openAICodexInstallationIDHeader, "11111111-1111-4111-8111-111111111111")
 
+	persisted := OpenAICodexFingerprint{
+		SchemaVersion:  openAICodexFingerprintSchemaV1,
+		InstallationID: "550e8400-e29b-41d4-a716-446655440000",
+		UAProfile:      ParseOpenAICodexUAProfile("persisted-codex/9.9.9 (Persist OS; arch) Persist_Term/1.0 (persisted-codex; 9.9.9)"),
+		CreatedAt:      "2026-06-12T00:00:00Z",
+		UpdatedAt:      "2026-06-12T00:00:00Z",
+	}
 	svc := &OpenAIGatewayService{}
 	account := &Account{
+		Platform:    PlatformOpenAI,
 		Type:        AccountTypeOAuth,
 		Credentials: map[string]any{"chatgpt_account_id": "chatgpt-acc"},
+		Extra:       map[string]any{OpenAICodexFingerprintExtraKey: persisted},
 	}
 
 	req, err := svc.buildUpstreamRequest(c.Request.Context(), c, account, body, "token", true, "anthropic-metadata-session-1", false)
@@ -2241,8 +2529,48 @@ func TestOpenAIBuildUpstreamRequestOAuthMessagesBridgeUsesSessionOnly(t *testing
 	require.NotEmpty(t, req.Header.Get("Session_Id"))
 	require.Empty(t, req.Header.Get("Conversation_Id"))
 	require.Empty(t, req.Header.Get("OpenAI-Beta"))
-	require.Empty(t, req.Header.Get("originator"))
-	require.Empty(t, req.Header.Get("Version"))
+	require.Equal(t, "persisted-codex", req.Header.Get("originator"))
+	require.Equal(t, "9.9.9", req.Header.Get("Version"))
+	require.Equal(t, persisted.InstallationID, req.Header.Get(openAICodexInstallationIDHeader))
+	bodyBytes, err := io.ReadAll(req.Body)
+	require.NoError(t, err)
+	require.Equal(t, "yes", gjson.GetBytes(bodyBytes, "client_metadata.keep").String())
+	require.Equal(t, persisted.InstallationID, gjson.GetBytes(bodyBytes, "client_metadata."+openAICodexInstallationIDHeader).String())
+	require.False(t, gjson.GetBytes(bodyBytes, "client_metadata."+openAICodexWindowIDHeader).Exists())
+	require.False(t, gjson.GetBytes(bodyBytes, "client_metadata."+openAICodexThreadIDHeader).Exists())
+	require.NotContains(t, string(bodyBytes), "attacker-installation")
+	require.NotContains(t, string(bodyBytes), "attacker-window")
+	require.NotContains(t, string(bodyBytes), "attacker-thread")
+}
+
+func TestOpenAIBuildUpstreamRequestOAuthUsesRequestContextFingerprintWhenExtraRedacted(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	body := []byte(`{"model":"gpt-5.5","client_metadata":{"keep":"yes"},"input":"hello"}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+
+	svc := &OpenAIGatewayService{}
+	account := &Account{
+		ID:          43,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Credentials: map[string]any{"chatgpt_account_id": "chatgpt-acc"},
+		Extra:       map[string]any{OpenAICodexFingerprintExtraKey: map[string]any{"present": true}},
+	}
+
+	req, err := svc.buildUpstreamRequest(c.Request.Context(), c, account, body, "token", true, "", false)
+	require.NoError(t, err)
+	installationID := req.Header.Get(openAICodexInstallationIDHeader)
+	require.NotEmpty(t, installationID)
+	_, ok := canonicalOpenAICodexInstallationID(installationID)
+	require.True(t, ok)
+
+	bodyBytes, err := io.ReadAll(req.Body)
+	require.NoError(t, err)
+	require.Equal(t, "yes", gjson.GetBytes(bodyBytes, "client_metadata.keep").String())
+	require.Equal(t, installationID, gjson.GetBytes(bodyBytes, "client_metadata."+openAICodexInstallationIDHeader).String())
+	require.Equal(t, map[string]any{"present": true}, account.Extra[OpenAICodexFingerprintExtraKey])
 }
 
 func TestOpenAIBuildUpstreamRequestPreservesCompactPathForAPIKeyBaseURL(t *testing.T) {
@@ -2276,9 +2604,9 @@ func TestOpenAIBuildUpstreamRequestOAuthOfficialClientOriginatorCompatibility(t 
 		originator     string
 		wantOriginator string
 	}{
-		{name: "tui originator preserved", userAgent: "codex-tui/1.2.3", originator: codexOfficialOriginator, wantOriginator: codexOfficialOriginator},
-		{name: "vscode originator preserved", userAgent: "codex_vscode/1.2.3", originator: "codex_vscode", wantOriginator: "codex_vscode"},
-		{name: "official ua fallback to tui originator", userAgent: "codex-tui/1.2.3", wantOriginator: codexOfficialOriginator},
+		{name: "tui originator comes from fingerprint", userAgent: "codex-tui/1.2.3", originator: codexOfficialOriginator, wantOriginator: codexOfficialOriginator},
+		{name: "vscode originator ignored for OAuth fingerprint", userAgent: "codex_vscode/1.2.3", originator: "codex_vscode", wantOriginator: codexOfficialOriginator},
+		{name: "official ua fallback to fingerprint originator", userAgent: "codex-tui/1.2.3", wantOriginator: codexOfficialOriginator},
 		{name: "non official originator normalized", userAgent: "opencode/0.9", originator: "opencode", wantOriginator: codexOfficialOriginator},
 	}
 
@@ -2296,6 +2624,7 @@ func TestOpenAIBuildUpstreamRequestOAuthOfficialClientOriginatorCompatibility(t 
 
 			svc := &OpenAIGatewayService{}
 			account := &Account{
+				Platform:    PlatformOpenAI,
 				Type:        AccountTypeOAuth,
 				Credentials: map[string]any{"chatgpt_account_id": "chatgpt-acc"},
 			}
@@ -2589,17 +2918,26 @@ func TestParseSSEUsage_SelectiveParsing(t *testing.T) {
 }
 
 func TestExtractOpenAIUsageFromJSONBytes_AcceptsResponseAndChatUsageShapes(t *testing.T) {
-	usage, ok := extractOpenAIUsageFromJSONBytes([]byte(`{"id":"resp_1","usage":{"input_tokens":3,"output_tokens":5,"input_tokens_details":{"cached_tokens":2}}}`))
+	usage, ok := extractOpenAIUsageFromJSONBytes([]byte(`{"id":"resp_1","usage":{"input_tokens":3,"output_tokens":5,"input_tokens_details":{"cached_tokens":2,"image_tokens":1}}}`))
 	require.True(t, ok)
 	require.Equal(t, 3, usage.InputTokens)
+	require.Equal(t, 1, usage.ImageInputTokens)
 	require.Equal(t, 5, usage.OutputTokens)
 	require.Equal(t, 2, usage.CacheReadInputTokens)
 
-	usage, ok = extractOpenAIUsageFromJSONBytes([]byte(`{"type":"response.completed","response":{"usage":{"prompt_tokens":13,"completion_tokens":7,"prompt_tokens_details":{"cached_tokens":4}}}}`))
+	usage, ok = extractOpenAIUsageFromJSONBytes([]byte(`{"type":"response.completed","response":{"usage":{"prompt_tokens":13,"completion_tokens":7,"prompt_tokens_details":{"cached_tokens":4,"image_tokens":3}}}}`))
 	require.True(t, ok)
 	require.Equal(t, 13, usage.InputTokens)
+	require.Equal(t, 3, usage.ImageInputTokens)
 	require.Equal(t, 7, usage.OutputTokens)
 	require.Equal(t, 4, usage.CacheReadInputTokens)
+}
+
+func TestExtractOpenAIResponseIDFromJSONBytes(t *testing.T) {
+	require.Equal(t, "resp_json", extractOpenAIResponseIDFromJSONBytes([]byte(`{"id":"resp_json"}`)))
+	require.Equal(t, "resp_sse", extractOpenAIResponseIDFromJSONBytes([]byte(`{"type":"response.completed","response":{"id":"resp_sse"}}`)))
+	require.Empty(t, extractOpenAIResponseIDFromJSONBytes([]byte(`{"response":{}}`)))
+	require.Empty(t, extractOpenAIResponseIDFromJSONBytes([]byte(`not-json`)))
 }
 
 func TestExtractCodexFinalResponse_SampleReplay(t *testing.T) {
@@ -2639,6 +2977,7 @@ func TestHandleSSEToJSON_CompletedEventReturnsJSON(t *testing.T) {
 	require.Equal(t, 7, usage.InputTokens)
 	require.Equal(t, 9, usage.OutputTokens)
 	require.Equal(t, 1, usage.CacheReadInputTokens)
+	require.Equal(t, "resp_2", usage.responseID)
 	// Header 可能由上游 Content-Type 透传；关键是 body 已转换为最终 JSON 响应。
 	require.NotContains(t, rec.Body.String(), "event:")
 	require.Contains(t, rec.Body.String(), `"id":"resp_2"`)
@@ -2669,6 +3008,7 @@ func TestHandleNonStreamingResponse_APIKeyFallsBackToSSEBodyWhenContentTypeIsWro
 	require.NotNil(t, result)
 	require.Equal(t, 3, result.InputTokens)
 	require.Equal(t, 2, result.OutputTokens)
+	require.Equal(t, "resp_api_key_sse", result.responseID)
 	require.NotContains(t, rec.Body.String(), "data:")
 	require.Equal(t, "resp_api_key_sse", gjson.Get(rec.Body.String(), "id").String())
 	require.Equal(t, "hello", gjson.Get(rec.Body.String(), "output.0.content.0.text").String())

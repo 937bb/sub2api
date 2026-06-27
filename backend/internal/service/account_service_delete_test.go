@@ -91,8 +91,16 @@ func (s *accountRepoStub) ListActive(ctx context.Context) ([]Account, error) {
 	panic("unexpected ListActive call")
 }
 
+func (s *accountRepoStub) ListOAuthRefreshCandidates(ctx context.Context) ([]Account, error) {
+	panic("unexpected ListOAuthRefreshCandidates call")
+}
+
 func (s *accountRepoStub) ListByPlatform(ctx context.Context, platform string) ([]Account, error) {
 	panic("unexpected ListByPlatform call")
+}
+
+func (s *accountRepoStub) ListByPlatformForValidation(ctx context.Context, platform string) ([]Account, error) {
+	panic("unexpected ListByPlatformForValidation call")
 }
 
 func (s *accountRepoStub) UpdateLastUsed(ctx context.Context, id int64) error {

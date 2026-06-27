@@ -2,9 +2,12 @@ package repository
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
-	"time"
+	"fmt"
+	"strconv"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
@@ -13,23 +16,45 @@ type schedulerOutboxRepository struct {
 	db *sql.DB
 }
 
-const schedulerOutboxDedupWindow = time.Second
-
 func NewSchedulerOutboxRepository(db *sql.DB) service.SchedulerOutboxRepository {
 	return &schedulerOutboxRepository{db: db}
 }
 
-func (r *schedulerOutboxRepository) ListAfter(ctx context.Context, afterID int64, limit int) ([]service.SchedulerOutboxEvent, error) {
+func (r *schedulerOutboxRepository) ListAfterAndReleaseDedup(ctx context.Context, afterID int64, limit int) ([]service.SchedulerOutboxEvent, error) {
 	if limit <= 0 {
 		limit = 100
 	}
+	// Sequence IDs are not commit ordered. Rows that commit below the watermark
+	// cannot be replayed safely with an ID-only watermark, but their pending keys
+	// must be released so future same-key scheduler events are not suppressed.
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, event_type, account_id, group_id, payload, created_at
-		FROM scheduler_outbox
-		WHERE id > $1
-		ORDER BY id ASC
-		LIMIT $2
-	`, afterID, limit)
+			WITH stranded AS (
+				UPDATE scheduler_outbox
+				SET dedup_key = NULL
+				WHERE id <= $1
+					AND dedup_key IS NOT NULL
+				RETURNING id
+			), selected AS MATERIALIZED (
+				SELECT id, event_type, account_id, group_id, payload, created_at
+				FROM scheduler_outbox
+				WHERE id > $1
+				ORDER BY id ASC
+				LIMIT $2
+				FOR UPDATE
+			), released AS (
+				UPDATE scheduler_outbox AS o
+				SET dedup_key = NULL
+				FROM selected AS s
+				WHERE o.id = s.id
+					AND o.dedup_key IS NOT NULL
+				RETURNING o.id
+			)
+			SELECT s.id, s.event_type, s.account_id, s.group_id, s.payload, s.created_at
+			FROM selected AS s
+			CROSS JOIN (SELECT COUNT(*) FROM stranded) AS stranded_barrier
+			CROSS JOIN (SELECT COUNT(*) FROM released) AS release_barrier
+			ORDER BY s.id ASC
+		`, afterID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -84,35 +109,56 @@ func enqueueSchedulerOutbox(ctx context.Context, exec sqlExecutor, eventType str
 		return nil
 	}
 	var payloadArg any
+	var payloadJSON []byte
 	if payload != nil {
 		encoded, err := json.Marshal(payload)
 		if err != nil {
 			return err
 		}
 		payloadArg = encoded
+		payloadJSON = encoded
 	}
 	query := `
-		INSERT INTO scheduler_outbox (event_type, account_id, group_id, payload)
-		VALUES ($1, $2, $3, $4)
-	`
+			INSERT INTO scheduler_outbox (event_type, account_id, group_id, payload)
+			VALUES ($1, $2, $3, $4)
+		`
 	args := []any{eventType, accountID, groupID, payloadArg}
 	if schedulerOutboxEventSupportsDedup(eventType) {
+		dedupKey := schedulerOutboxDedupKey(eventType, accountID, groupID, payloadJSON)
+		// Refresh a lagging conflicting row to the proposed id so a same-key event
+		// can requeue a late-commit row that is already below the Redis watermark.
 		query = `
-			INSERT INTO scheduler_outbox (event_type, account_id, group_id, payload)
-			SELECT $1, $2, $3, $4
-			WHERE NOT EXISTS (
-				SELECT 1
-				FROM scheduler_outbox
-				WHERE event_type = $1
-					AND account_id IS NOT DISTINCT FROM $2
-					AND group_id IS NOT DISTINCT FROM $3
-					AND created_at >= NOW() - make_interval(secs => $5)
-			)
-		`
-		args = append(args, schedulerOutboxDedupWindow.Seconds())
+				INSERT INTO scheduler_outbox (event_type, account_id, group_id, payload, dedup_key)
+				VALUES ($1, $2, $3, $4, $5)
+				ON CONFLICT (dedup_key) WHERE dedup_key IS NOT NULL DO UPDATE
+				SET id = EXCLUDED.id,
+					event_type = EXCLUDED.event_type,
+					account_id = EXCLUDED.account_id,
+					group_id = EXCLUDED.group_id,
+					payload = EXCLUDED.payload,
+					created_at = EXCLUDED.created_at
+				WHERE scheduler_outbox.id < (SELECT COALESCE(MAX(id), 0) FROM scheduler_outbox)
+			`
+		args = append(args, dedupKey)
 	}
 	_, err := exec.ExecContext(ctx, query, args...)
 	return err
+}
+
+func schedulerOutboxDedupKey(eventType string, accountID *int64, groupID *int64, payloadJSON []byte) string {
+	h := sha256.New()
+	_, _ = h.Write([]byte(eventType))
+	_, _ = h.Write([]byte{0})
+	if accountID != nil {
+		_, _ = h.Write([]byte(strconv.FormatInt(*accountID, 10)))
+	}
+	_, _ = h.Write([]byte{0})
+	if groupID != nil {
+		_, _ = h.Write([]byte(strconv.FormatInt(*groupID, 10)))
+	}
+	_, _ = h.Write([]byte{0})
+	_, _ = h.Write(payloadJSON)
+	return fmt.Sprintf("scheduler_outbox:%s", hex.EncodeToString(h.Sum(nil)))
 }
 
 func schedulerOutboxEventSupportsDedup(eventType string) bool {

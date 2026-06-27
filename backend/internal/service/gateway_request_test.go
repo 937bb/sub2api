@@ -77,6 +77,15 @@ func TestParseGatewayRequest_InvalidStreamType(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestParseGatewayRequest_ResponsesInput(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.1","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}]}`)
+	parsed, err := ParseGatewayRequest(NewRequestBodyRef(body), "responses")
+	require.NoError(t, err)
+	require.NotEmpty(t, parsed.InputRaw())
+	require.Nil(t, parsed.MessagesRaw())
+	require.Equal(t, "hello", gjson.ParseBytes(parsed.InputRaw()).Get("0.content.0.text").String())
+}
+
 // ============ Gemini 原生格式解析测试 ============
 
 func TestParseGatewayRequest_GeminiContents(t *testing.T) {
@@ -268,7 +277,7 @@ func TestFilterThinkingBlocks(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := FilterThinkingBlocks([]byte(tt.input))
+			result := FilterThinkingBlocks([]byte(tt.input), "claude-3-5-sonnet-20241022")
 
 			if tt.expectError {
 				// For invalid JSON, should return original
@@ -304,7 +313,7 @@ func TestFilterThinkingBlocksForRetry_DisablesThinkingAndPreservesAsText(t *test
 		]
 	}`)
 
-	out := FilterThinkingBlocksForRetry(input)
+	out := FilterThinkingBlocksForRetry(input, "claude-3-5-sonnet-20241022")
 
 	var req map[string]any
 	require.NoError(t, json.Unmarshal(out, &req))
@@ -337,7 +346,7 @@ func TestFilterThinkingBlocksForRetry_DisablesThinkingEvenWithoutThinkingBlocks(
 		]
 	}`)
 
-	out := FilterThinkingBlocksForRetry(input)
+	out := FilterThinkingBlocksForRetry(input, "claude-3-5-sonnet-20241022")
 
 	var req map[string]any
 	require.NoError(t, json.Unmarshal(out, &req))
@@ -356,7 +365,7 @@ func TestFilterThinkingBlocksForRetry_RemovesRedactedThinkingAndKeepsValidConten
 		]
 	}`)
 
-	out := FilterThinkingBlocksForRetry(input)
+	out := FilterThinkingBlocksForRetry(input, "claude-3-5-sonnet-20241022")
 
 	var req map[string]any
 	require.NoError(t, json.Unmarshal(out, &req))
@@ -392,7 +401,7 @@ func TestFilterThinkingBlocksForRetry_DropsThinkingBlockWithEmptyContent(t *test
 		]
 	}`)
 
-	out := FilterThinkingBlocksForRetry(input)
+	out := FilterThinkingBlocksForRetry(input, "claude-3-5-sonnet-20241022")
 
 	var req map[string]any
 	require.NoError(t, json.Unmarshal(out, &req))
@@ -415,7 +424,7 @@ func TestFilterThinkingBlocksForRetry_EmptyContentGetsPlaceholder(t *testing.T) 
 		]
 	}`)
 
-	out := FilterThinkingBlocksForRetry(input)
+	out := FilterThinkingBlocksForRetry(input, "claude-3-5-sonnet-20241022")
 
 	var req map[string]any
 	require.NoError(t, json.Unmarshal(out, &req))
@@ -441,7 +450,7 @@ func TestFilterThinkingBlocksForRetry_StripsEmptyTextBlocks(t *testing.T) {
 		]
 	}`)
 
-	out := FilterThinkingBlocksForRetry(input)
+	out := FilterThinkingBlocksForRetry(input, "claude-3-5-sonnet-20241022")
 
 	var req map[string]any
 	require.NoError(t, json.Unmarshal(out, &req))
@@ -476,7 +485,7 @@ func TestFilterThinkingBlocksForRetry_StripsNestedEmptyTextInToolResult(t *testi
 		]
 	}`)
 
-	out := FilterThinkingBlocksForRetry(input)
+	out := FilterThinkingBlocksForRetry(input, "claude-3-5-sonnet-20241022")
 
 	var req map[string]any
 	require.NoError(t, json.Unmarshal(out, &req))
@@ -504,7 +513,7 @@ func TestFilterThinkingBlocksForRetry_NestedAllEmptyGetsEmptySlice(t *testing.T)
 		]
 	}`)
 
-	out := FilterThinkingBlocksForRetry(input)
+	out := FilterThinkingBlocksForRetry(input, "claude-3-5-sonnet-20241022")
 
 	var req map[string]any
 	require.NoError(t, json.Unmarshal(out, &req))
@@ -587,7 +596,7 @@ func TestFilterThinkingBlocksForRetry_PreservesNonEmptyTextBlocks(t *testing.T) 
 		]
 	}`)
 
-	out := FilterThinkingBlocksForRetry(input)
+	out := FilterThinkingBlocksForRetry(input, "claude-3-5-sonnet-20241022")
 
 	// Fast path: no thinking content, no empty content, no empty text blocks → unchanged
 	require.Equal(t, input, out)
@@ -604,7 +613,7 @@ func TestFilterSignatureSensitiveBlocksForRetry_DowngradesTools(t *testing.T) {
 		]
 	}`)
 
-	out := FilterSignatureSensitiveBlocksForRetry(input)
+	out := FilterSignatureSensitiveBlocksForRetry(input, "claude-3-5-sonnet-20241022")
 
 	var req map[string]any
 	require.NoError(t, json.Unmarshal(out, &req))
@@ -691,7 +700,7 @@ func TestFilterThinkingBlocksForRetry_RemovesClearThinkingStrategy_FastPath(t *t
 		]
 	}`)
 
-	out := FilterThinkingBlocksForRetry(input)
+	out := FilterThinkingBlocksForRetry(input, "claude-3-5-sonnet-20241022")
 
 	var req map[string]any
 	require.NoError(t, json.Unmarshal(out, &req))
@@ -717,7 +726,7 @@ func TestFilterThinkingBlocksForRetry_RemovesClearThinkingStrategy_WithThinkingB
 		]
 	}`)
 
-	out := FilterThinkingBlocksForRetry(input)
+	out := FilterThinkingBlocksForRetry(input, "claude-3-5-sonnet-20241022")
 
 	var req map[string]any
 	require.NoError(t, json.Unmarshal(out, &req))
@@ -741,7 +750,7 @@ func TestFilterThinkingBlocksForRetry_NoContextManagement_Unaffected(t *testing.
 		"messages":[{"role":"user","content":[{"type":"text","text":"Hi"}]}]
 	}`)
 
-	out := FilterThinkingBlocksForRetry(input)
+	out := FilterThinkingBlocksForRetry(input, "claude-3-5-sonnet-20241022")
 
 	var req map[string]any
 	require.NoError(t, json.Unmarshal(out, &req))
@@ -764,7 +773,7 @@ func TestFilterSignatureSensitiveBlocksForRetry_RemovesClearThinkingStrategy(t *
 		]
 	}`)
 
-	out := FilterSignatureSensitiveBlocksForRetry(input)
+	out := FilterSignatureSensitiveBlocksForRetry(input, "claude-3-5-sonnet-20241022")
 
 	var req map[string]any
 	require.NoError(t, json.Unmarshal(out, &req))
@@ -795,7 +804,7 @@ func TestFilterSignatureSensitiveBlocksForRetry_PreservesNonThinkingStrategies(t
 		]
 	}`)
 
-	out := FilterSignatureSensitiveBlocksForRetry(input)
+	out := FilterSignatureSensitiveBlocksForRetry(input, "claude-3-5-sonnet-20241022")
 
 	var req map[string]any
 	require.NoError(t, json.Unmarshal(out, &req))
@@ -821,7 +830,7 @@ func TestFilterSignatureSensitiveBlocksForRetry_NoThinkingField_ContextManagemen
 		]
 	}`)
 
-	out := FilterSignatureSensitiveBlocksForRetry(input)
+	out := FilterSignatureSensitiveBlocksForRetry(input, "claude-3-5-sonnet-20241022")
 
 	var req map[string]any
 	require.NoError(t, json.Unmarshal(out, &req))

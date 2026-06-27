@@ -42,7 +42,8 @@ func ContextSkipRedeemAffiliate(ctx context.Context) context.Context {
 // RedeemCache defines cache operations for redeem service
 type RedeemCache interface {
 	GetRedeemAttemptCount(ctx context.Context, userID int64) (int, error)
-	IncrementRedeemAttemptCount(ctx context.Context, userID int64) error
+	IncrementRedeemAttemptCount(ctx context.Context, userID int64, window time.Duration) error
+	DeleteRedeemAttemptCount(ctx context.Context, userID int64) error
 
 	AcquireRedeemLock(ctx context.Context, code string, ttl time.Duration) (bool, error)
 	ReleaseRedeemLock(ctx context.Context, code string) error
@@ -347,7 +348,17 @@ func (s *RedeemService) incrementRedeemErrorCount(ctx context.Context, userID in
 		return
 	}
 
-	_ = s.cache.IncrementRedeemAttemptCount(ctx, userID)
+	_ = s.cache.IncrementRedeemAttemptCount(ctx, userID, redeemRateLimitDuration)
+}
+
+// resetRedeemErrorCount clears prior failures after a successful redeem so a
+// legitimate code is not blocked by stale typo attempts.
+func (s *RedeemService) resetRedeemErrorCount(ctx context.Context, userID int64) {
+	if s.cache == nil {
+		return
+	}
+
+	_ = s.cache.DeleteRedeemAttemptCount(ctx, userID)
 }
 
 // acquireRedeemLock 尝试获取兑换码的分布式锁
@@ -493,6 +504,7 @@ func (s *RedeemService) Redeem(ctx context.Context, userID int64, code string) (
 
 	// 事务提交成功后失效缓存
 	s.invalidateRedeemCaches(ctx, userID, redeemCode)
+	s.resetRedeemErrorCount(ctx, userID)
 
 	// 余额类正数兑换码触发邀请返利（best-effort，失败不影响兑换结果）
 	if redeemCode.Type == RedeemTypeBalance && redeemCode.Value > 0 {

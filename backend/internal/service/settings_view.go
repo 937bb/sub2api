@@ -188,14 +188,15 @@ type SystemSettings struct {
 	BackendModeEnabled bool
 
 	// Gateway forwarding behavior
-	EnableFingerprintUnification       bool   // 是否统一 OAuth 账号的指纹头（默认 true）
-	EnableMetadataPassthrough          bool   // 是否透传客户端原始 metadata（默认 false）
-	EnableCCHSigning                   bool   // 是否对 billing header cch 进行签名（默认 false）
-	EnableAnthropicCacheTTL1hInjection bool   // 是否对 Anthropic OAuth/SetupToken 请求体注入 1h cache_control ttl（默认 false）
-	RewriteMessageCacheControl         bool   // 是否改写 messages[*].content[*].cache_control（默认 false）
-	AntigravityUserAgentVersion        string // Antigravity 上游 User-Agent 版本号；空值使用配置/默认值
-	OpenAICodexUserAgent               string // OpenAI Codex 上游完整 User-Agent；空值使用内置默认
-	OpenAIAllowClaudeCodeCodexPlugin   bool   // 全局开关：是否额外放行 Claude Code 的 Codex 插件（默认 false）
+	EnableFingerprintUnification       bool                 // 是否统一 OAuth 账号的指纹头（默认 true）
+	EnableMetadataPassthrough          bool                 // 是否透传客户端原始 metadata（默认 false）
+	EnableCCHSigning                   bool                 // 是否对 billing header cch 进行签名（默认 false）
+	EnableAnthropicCacheTTL1hInjection bool                 // 是否对 Anthropic OAuth/SetupToken 请求体注入 1h cache_control ttl（默认 false）
+	RewriteMessageCacheControl         bool                 // 是否改写 messages[*].content[*].cache_control（默认 false）
+	AntigravityUserAgentVersion        string               // Antigravity 上游 User-Agent 版本号；空值使用配置/默认值
+	OpenAICodexUserAgent               string               // OpenAI Codex 上游完整 User-Agent；空值使用内置默认
+	OpenAICodexUAProfile               OpenAICodexUAProfile // OpenAI Codex UA 结构化配置回显；从完整 UA 解析/归一化
+	OpenAIAllowClaudeCodeCodexPlugin   bool                 // 全局开关：是否额外放行 Claude Code 的 Codex 插件（默认 false）
 
 	// Web Search Emulation
 	WebSearchEmulationEnabled bool // 是否启用 web search 模拟
@@ -461,6 +462,22 @@ type RateLimit429CooldownSettings struct {
 	CooldownSeconds int `json:"cooldown_seconds"`
 }
 
+// OpenAIOAuth429DynamicSettings OpenAI OAuth 429动态调度配置
+type OpenAIOAuth429DynamicSettings struct {
+	// Enabled 是否启用基于429比例的动态调度暂停
+	Enabled bool `json:"enabled"`
+	// WindowSeconds 统计窗口时长（秒）
+	WindowSeconds int `json:"window_seconds"`
+	// MinSamples 触发判断所需的最少样本数
+	MinSamples int `json:"min_samples"`
+	// Min429 触发判断所需的最少429次数
+	Min429 int `json:"min_429"`
+	// RatioThreshold 429比例阈值，取值0-1
+	RatioThreshold float64 `json:"ratio_threshold"`
+	// BlockSeconds 达阈值后暂停调度时长（秒）
+	BlockSeconds int `json:"block_seconds"`
+}
+
 // DefaultOverloadCooldownSettings 返回默认的过载冷却配置（启用，10分钟）
 func DefaultOverloadCooldownSettings() *OverloadCooldownSettings {
 	return &OverloadCooldownSettings{
@@ -474,6 +491,18 @@ func DefaultRateLimit429CooldownSettings() *RateLimit429CooldownSettings {
 	return &RateLimit429CooldownSettings{
 		Enabled:         true,
 		CooldownSeconds: 5,
+	}
+}
+
+// DefaultOpenAIOAuth429DynamicSettings 返回默认的OpenAI OAuth 429动态调度配置。
+func DefaultOpenAIOAuth429DynamicSettings() *OpenAIOAuth429DynamicSettings {
+	return &OpenAIOAuth429DynamicSettings{
+		Enabled:        false,
+		WindowSeconds:  300,
+		MinSamples:     20,
+		Min429:         3,
+		RatioThreshold: 0.5,
+		BlockSeconds:   60,
 	}
 }
 

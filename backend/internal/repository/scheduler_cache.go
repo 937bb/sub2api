@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -516,12 +517,16 @@ func filterSchedulerCredentials(credentials map[string]any) map[string]any {
 	if len(credentials) == 0 {
 		return nil
 	}
-	keys := []string{"model_mapping", "api_key", "project_id", "oauth_type"}
+	keys := []string{"model_mapping", "project_id", "oauth_type", "openai_capabilities"}
 	filtered := make(map[string]any)
 	for _, key := range keys {
 		if value, ok := credentials[key]; ok && value != nil {
 			filtered[key] = value
 		}
+	}
+	if value, ok := credentials["api_key"].(string); ok && strings.TrimSpace(value) != "" {
+		// Snapshot metadata must support API-key routing decisions without storing the secret.
+		filtered["has_api_key"] = true
 	}
 	if len(filtered) == 0 {
 		return nil
@@ -539,6 +544,7 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 		"window_cost_sticky_reserve",
 		"max_sessions",
 		"session_idle_timeout_minutes",
+		"openai_oauth_ws_mode",
 		"openai_oauth_responses_websockets_v2_enabled",
 		"openai_oauth_responses_websockets_v2_mode",
 		"openai_apikey_responses_websockets_v2_enabled",
@@ -548,6 +554,7 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 		"openai_ws_force_http",
 		"openai_responses_mode",
 		"openai_responses_supported",
+		"privacy_mode",
 		"codex_5h_used_percent",
 		"codex_7d_used_percent",
 		"codex_5h_reset_at",

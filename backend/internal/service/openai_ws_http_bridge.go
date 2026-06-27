@@ -2,6 +2,7 @@ package service
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -12,8 +13,10 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 const (
@@ -52,18 +55,33 @@ func (s *OpenAIGatewayService) shouldBridgeOpenAIWSHTTP(payloadBytes int, previo
 }
 
 func prepareOpenAIWSHTTPBridgeBody(payload []byte) ([]byte, error) {
-	var body map[string]any
+	var body map[string]json.RawMessage
 	if err := json.Unmarshal(payload, &body); err != nil {
 		return nil, err
 	}
 	if body == nil {
 		return nil, errors.New("response.create payload must be a JSON object")
 	}
-	delete(body, "type")
-	delete(body, "generate")
-	delete(body, "previous_response_id")
-	body["stream"] = true
-	return json.Marshal(body)
+
+	// Bridge 只做协议字段转换；用 raw JSON patch 避免 OAuth 终端 allowlist 前已把大整数舍入。
+	out := bytes.TrimSpace(payload)
+	for _, field := range []string{"type", "generate", "previous_response_id"} {
+		for i := 0; i < openAIWSMaxPrevResponseIDDeletePasses && gjson.GetBytes(out, field).Exists(); i++ {
+			next, err := sjson.DeleteBytes(out, field)
+			if err != nil {
+				return nil, err
+			}
+			if bytes.Equal(next, out) {
+				break
+			}
+			out = next
+		}
+	}
+	out, err := sjson.SetBytes(out, "stream", true)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 type openAIWSToolCallReplayCollector struct {
@@ -172,9 +190,22 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	if err != nil {
 		return nil, fmt.Errorf("prepare http bridge body: %w", err)
 	}
+	if c != nil {
+		// 标记在构造上游请求前设置：OAuth adapter 需要据此忽略旧 WS upgrade 的窗口代数。
+		c.Set("openai_ws_http_bridge", true)
+	}
 
 	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
-	upstreamReq, err := s.buildUpstreamRequestOpenAIPassthrough(upstreamCtx, c, account, body, token)
+	var upstreamReq *http.Request
+	if account.IsOpenAIOAuthLike() {
+		isCodexCLI := false
+		if c != nil {
+			isCodexCLI = openai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator")) || (s.cfg != nil && s.cfg.Gateway.ForceCodexCLI)
+		}
+		upstreamReq, err = s.buildUpstreamRequestOpenAIOAuthAdapter(upstreamCtx, c, account, body, token, "", isCodexCLI)
+	} else {
+		upstreamReq, err = s.buildUpstreamRequestOpenAIPassthrough(upstreamCtx, c, account, body, token)
+	}
 	releaseUpstreamCtx()
 	if err != nil {
 		return nil, err
@@ -185,22 +216,33 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		proxyURL = account.Proxy.URL()
 	}
 	if c != nil {
-		c.Set("openai_passthrough", true)
-		c.Set("openai_ws_http_bridge", true)
+		// WS HTTP bridge is shared by APIKey native relay and OAuth adapter paths;
+		// only APIKey keeps passthrough semantics/ops tagging.
+		if !account.IsOpenAIOAuthLike() {
+			c.Set("openai_passthrough", true)
+		}
 	}
 
 	turnStart := time.Now()
 	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 	if err != nil {
-		safeErr := sanitizeUpstreamErrorMessage(err.Error())
+		safeErr := sanitizeOpenAIUpstreamDiagnosticText(err.Error())
 		_ = writeClientMessage(buildOpenAIWSHTTPBridgeErrorEvent(http.StatusBadGateway, "Upstream request failed"))
 		return nil, fmt.Errorf("upstream http bridge request failed: %s", safeErr)
+	}
+	if resp == nil {
+		_ = writeClientMessage(buildOpenAIWSHTTPBridgeErrorEvent(http.StatusBadGateway, "Upstream request failed"))
+		return nil, errors.New("upstream http bridge returned nil response")
+	}
+	if resp.Body == nil {
+		_ = writeClientMessage(buildOpenAIWSHTTPBridgeErrorEvent(http.StatusBadGateway, "Upstream request failed"))
+		return nil, errors.New("upstream http bridge returned nil response body")
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 400 {
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, openAIWSHTTPBridgeErrorBodyLimitBytes))
-		upstreamMsg := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(respBody)))
+		upstreamMsg := sanitizeOpenAIUpstreamDiagnosticText(strings.TrimSpace(extractUpstreamErrorMessage(respBody)))
 		if upstreamMsg == "" {
 			upstreamMsg = http.StatusText(resp.StatusCode)
 		}
@@ -241,7 +283,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			Model:           originalModel,
 			UpstreamModel:   mappedModel,
 			ServiceTier:     extractOpenAIServiceTierFromBody(body),
-			ReasoningEffort: extractOpenAIReasoningEffortFromBody(body, originalModel),
+			ReasoningEffort: ApplyThinkingEnabledFallback(extractOpenAIReasoningEffortFromBody(body, originalModel), body, mappedModel),
 			Stream:          reqStream,
 			OpenAIWSMode:    true,
 			ResponseHeaders: cloneHeader(resp.Header),
@@ -347,10 +389,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		if eventType == "error" {
 			errCodeRaw, errTypeRaw, errMsgRaw := parseOpenAIWSErrorEventFields(upstreamMessage)
 			s.persistOpenAIWSRateLimitSignal(ctx, account, resp.Header, upstreamMessage, errCodeRaw, errTypeRaw, errMsgRaw)
-			errMessage := strings.TrimSpace(errMsgRaw)
-			if errMessage == "" {
-				errMessage = "upstream error event"
-			}
+			errMessage := sanitizeOpenAIWSErrorMessageForDiagnostic(errMsgRaw, "upstream error event")
 			return resultWithUsage(), errors.New(errMessage)
 		}
 		if isOpenAIWSTerminalEvent(eventType) {

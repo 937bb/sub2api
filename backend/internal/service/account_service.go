@@ -40,7 +40,10 @@ type AccountRepository interface {
 	ListWithFilters(ctx context.Context, params pagination.PaginationParams, filters AccountListFilters) ([]Account, *pagination.PaginationResult, error)
 	ListByGroup(ctx context.Context, groupID int64) ([]Account, error)
 	ListActive(ctx context.Context) ([]Account, error)
+	ListOAuthRefreshCandidates(ctx context.Context) ([]Account, error)
 	ListByPlatform(ctx context.Context, platform string) ([]Account, error)
+	// ListByPlatformForValidation returns non-deleted accounts regardless of status.
+	ListByPlatformForValidation(ctx context.Context, platform string) ([]Account, error)
 
 	UpdateLastUsed(ctx context.Context, id int64) error
 	BatchUpdateLastUsed(ctx context.Context, updates map[int64]time.Time) error
@@ -89,6 +92,9 @@ type AccountBulkUpdate struct {
 	Schedulable    *bool
 	Credentials    map[string]any
 	Extra          map[string]any
+	// ExtraDeleteKeys is a temporary migration hook for bulk JSONB extra cleanup;
+	// remove it after legacy OpenAI OAuth passthrough/WS keys are no longer present.
+	ExtraDeleteKeys []string
 }
 
 // CreateAccountRequest 创建账号请求
@@ -168,6 +174,10 @@ func (s *AccountService) Create(ctx context.Context, req CreateAccountRequest) (
 	} else {
 		account.AutoPauseOnExpired = true
 	}
+	normalizeOpenAICodexFingerprintExtraForCreate(account)
+	if err := validateOpenAIOAuthAccountWriteConfig(account); err != nil {
+		return nil, err
+	}
 
 	if err := s.accountRepo.Create(ctx, account); err != nil {
 		return nil, fmt.Errorf("create account: %w", err)
@@ -238,6 +248,8 @@ func (s *AccountService) Update(ctx context.Context, id int64, req UpdateAccount
 	if err != nil {
 		return nil, fmt.Errorf("get account: %w", err)
 	}
+	existingExtra := cloneAccountExtraForServerOwnedWrite(account.Extra)
+	existingWasOpenAIOAuthLike := account.IsOpenAIOAuthLike()
 
 	// 更新字段
 	if req.Name != nil {
@@ -275,6 +287,10 @@ func (s *AccountService) Update(ctx context.Context, id int64, req UpdateAccount
 	}
 	if req.AutoPauseOnExpired != nil {
 		account.AutoPauseOnExpired = *req.AutoPauseOnExpired
+	}
+	normalizeOpenAICodexFingerprintExtraForUpdate(account, existingExtra, existingWasOpenAIOAuthLike)
+	if err := validateOpenAIOAuthAccountWriteConfig(account); err != nil {
+		return nil, err
 	}
 
 	// 先验证分组是否存在（在任何写操作之前）

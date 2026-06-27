@@ -37,6 +37,29 @@ func TestBuildOpenAIEmbeddingsURL(t *testing.T) {
 	}
 }
 
+func TestExtractOpenAIEmbeddingsUsage_ParsesImageInputTokens(t *testing.T) {
+	usage := extractOpenAIEmbeddingsUsage([]byte(`{
+		"usage": {
+			"prompt_tokens": 1340,
+			"prompt_tokens_details": {"image_tokens": 28, "cached_tokens": 7}
+		}
+	}`))
+
+	require.Equal(t, 1340, usage.InputTokens)
+	require.Equal(t, 28, usage.ImageInputTokens)
+	require.Equal(t, 7, usage.CacheReadInputTokens)
+
+	usage = extractOpenAIEmbeddingsUsage([]byte(`{
+		"usage": {
+			"input_tokens": 500,
+			"input_tokens_details": {"image_tokens": 30}
+		}
+	}`))
+
+	require.Equal(t, 500, usage.InputTokens)
+	require.Equal(t, 30, usage.ImageInputTokens)
+}
+
 func TestForwardEmbeddings_APIKeyPassthroughRecordsUsageAndBatchInput(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -94,6 +117,7 @@ func TestForwardEmbeddings_APIKeyPassthroughRecordsUsageAndBatchInput(t *testing
 	require.Equal(t, "jina-embeddings-v5-text-small", result.BillingModel)
 	require.Equal(t, "jina-embeddings-v5-text-small", result.UpstreamModel)
 	require.Equal(t, 13, result.Usage.InputTokens)
+	require.Equal(t, 0, result.Usage.ImageInputTokens)
 	require.Equal(t, 0, result.Usage.OutputTokens)
 	require.Equal(t, "https://api.jina.ai/v1/embeddings", upstream.lastReq.URL.String())
 	require.Equal(t, "Bearer sk-test", upstream.lastReq.Header.Get("Authorization"))

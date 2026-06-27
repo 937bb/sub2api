@@ -130,10 +130,20 @@ describe('BulkEditAccountModal', () => {
     })
   })
 
-  it('OpenAI 账号批量编辑可开启自动透传', async () => {
+  it('OpenAI OAuth 批量编辑不显示自动透传入口', () => {
     const wrapper = mountModal({
       selectedPlatforms: ['openai'],
       selectedTypes: ['oauth']
+    })
+
+    expect(wrapper.find('#bulk-edit-openai-passthrough-enabled').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('admin.accounts.openai.apiKeyPassthrough')
+  })
+
+  it('OpenAI API Key 批量编辑可开启自动透传', async () => {
+    const wrapper = mountModal({
+      selectedPlatforms: ['openai'],
+      selectedTypes: ['apikey']
     })
 
     await wrapper.get('#bulk-edit-openai-passthrough-enabled').setValue(true)
@@ -156,26 +166,69 @@ describe('BulkEditAccountModal', () => {
     })
 
     await wrapper.get('#bulk-edit-openai-ws-mode-enabled').setValue(true)
-    await wrapper.get('[data-testid="bulk-edit-openai-ws-mode-select"]').setValue('passthrough')
+    const wsModeSelect = wrapper.get('[data-testid="bulk-edit-openai-ws-mode-select"]')
+    expect(wsModeSelect.find('option[value="passthrough"]').exists()).toBe(false)
+    expect(wsModeSelect.find('option[value="ctx_pool"]').exists()).toBe(false)
+    await wsModeSelect.setValue('managed_session')
     await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
     await flushPromises()
 
     expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledTimes(1)
     expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], {
+      extra_delete_keys: [
+        'openai_oauth_passthrough',
+        'openai_passthrough',
+        'openai_oauth_responses_websockets_v2_mode',
+        'openai_oauth_responses_websockets_v2_enabled',
+        'responses_websockets_v2_enabled',
+        'openai_ws_enabled',
+        'openai_apikey_responses_websockets_v2_mode',
+        'openai_apikey_responses_websockets_v2_enabled'
+      ],
       extra: {
-        openai_oauth_responses_websockets_v2_mode: 'passthrough',
-        openai_oauth_responses_websockets_v2_enabled: true
+        openai_oauth_ws_mode: 'managed_session'
       }
     })
+    expect(vi.mocked(adminAPI.accounts.bulkUpdate).mock.calls[0]?.[1]?.extra).not.toHaveProperty(
+      'openai_oauth_responses_websockets_v2_mode'
+    )
+    expect(vi.mocked(adminAPI.accounts.bulkUpdate).mock.calls[0]?.[1]?.extra).not.toHaveProperty(
+      'openai_oauth_responses_websockets_v2_enabled'
+    )
   })
 
-  it('OpenAI API Key 批量编辑不显示 WS mode 入口', () => {
+  it('OpenAI API Key 批量编辑不显示 OAuth WS mode 入口', () => {
     const wrapper = mountModal({
       selectedPlatforms: ['openai'],
       selectedTypes: ['apikey']
     })
 
     expect(wrapper.find('#bulk-edit-openai-ws-mode-enabled').exists()).toBe(false)
+  })
+
+  it('OpenAI setup-token 批量编辑显示 OAuth-safe WS/compact 控制且隐藏透传/APIKey WS', async () => {
+    const wrapper = mountModal({
+      selectedPlatforms: ['openai'],
+      selectedTypes: ['setup-token']
+    })
+
+    expect(wrapper.find('#bulk-edit-openai-ws-mode-enabled').exists()).toBe(true)
+    expect(wrapper.find('#bulk-edit-openai-compact-mode-enabled').exists()).toBe(true)
+    expect(wrapper.find('#bulk-edit-openai-passthrough-enabled').exists()).toBe(false)
+    expect(wrapper.find('#bulk-edit-openai-apikey-ws-mode-enabled').exists()).toBe(false)
+
+    await wrapper.get('#bulk-edit-openai-ws-mode-enabled').setValue(true)
+    await wrapper.get('[data-testid="bulk-edit-openai-ws-mode-select"]').setValue('managed_session')
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledTimes(1)
+    const payload = vi.mocked(adminAPI.accounts.bulkUpdate).mock.calls[0]?.[1] as any
+    expect(payload.extra).toEqual({ openai_oauth_ws_mode: 'managed_session' })
+    expect(payload.extra_delete_keys).toContain('openai_oauth_passthrough')
+    expect(payload.extra_delete_keys).toContain('openai_apikey_responses_websockets_v2_mode')
+    expect(payload.extra).not.toHaveProperty('openai_passthrough')
+    expect(payload.extra).not.toHaveProperty('openai_apikey_responses_websockets_v2_mode')
   })
 
   it('OpenAI OAuth 批量编辑应提交 codex_cli_only 字段', async () => {
@@ -274,7 +327,7 @@ describe('BulkEditAccountModal', () => {
     })
   })
 
-  it('OpenAI 账号批量编辑可关闭自动透传', async () => {
+  it('OpenAI API Key 批量编辑可关闭自动透传', async () => {
     const wrapper = mountModal({
       selectedPlatforms: ['openai'],
       selectedTypes: ['apikey']
@@ -287,16 +340,15 @@ describe('BulkEditAccountModal', () => {
     expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledTimes(1)
     expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], {
       extra: {
-        openai_passthrough: false,
-        openai_oauth_passthrough: false
+        openai_passthrough: false
       }
     })
   })
 
-  it('开启 OpenAI 自动透传时不再同时提交模型限制', async () => {
+  it('开启 OpenAI API Key 自动透传时不再同时提交模型限制', async () => {
     const wrapper = mountModal({
       selectedPlatforms: ['openai'],
-      selectedTypes: ['oauth']
+      selectedTypes: ['apikey']
     })
 
     await wrapper.get('#bulk-edit-openai-passthrough-enabled').setValue(true)
@@ -312,6 +364,73 @@ describe('BulkEditAccountModal', () => {
       }
     })
     expect(wrapper.text()).toContain('admin.accounts.openai.modelRestrictionDisabledByPassthrough')
+  })
+
+  it('切换到 APIKey 后不提交隐藏的 OAuth WS 清理字段', async () => {
+    const wrapper = mountModal({
+      selectedPlatforms: ['openai'],
+      selectedTypes: ['oauth']
+    })
+
+    await wrapper.get('#bulk-edit-openai-ws-mode-enabled').setValue(true)
+    await wrapper.get('[data-testid="bulk-edit-openai-ws-mode-select"]').setValue('managed_session')
+    await wrapper.setProps({ selectedTypes: ['apikey'] })
+    await wrapper.get('#bulk-edit-openai-passthrough-enabled').setValue(true)
+    await wrapper.get('#bulk-edit-openai-passthrough-toggle').trigger('click')
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledTimes(1)
+    const payload = vi.mocked(adminAPI.accounts.bulkUpdate).mock.calls[0]?.[1] as any
+    expect(payload).toEqual({
+      extra: {
+        openai_passthrough: true
+      }
+    })
+    expect(payload).not.toHaveProperty('extra_delete_keys')
+    expect(payload.extra).not.toHaveProperty('openai_oauth_ws_mode')
+  })
+
+  it('切换目标类型后不提交隐藏的 OpenAI APIKey WS 字段', async () => {
+    const wrapper = mountModal({
+      selectedPlatforms: ['openai'],
+      selectedTypes: ['apikey']
+    })
+
+    await wrapper.get('#bulk-edit-openai-apikey-ws-mode-enabled').setValue(true)
+    await wrapper.get('[data-testid="bulk-edit-openai-apikey-ws-mode-select"]').setValue('ctx_pool')
+    await wrapper.setProps({ selectedTypes: ['oauth'] })
+    await wrapper.get('#bulk-edit-openai-ws-mode-enabled').setValue(true)
+    await wrapper.get('[data-testid="bulk-edit-openai-ws-mode-select"]').setValue('managed_session')
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledTimes(1)
+    const payload = vi.mocked(adminAPI.accounts.bulkUpdate).mock.calls[0]?.[1] as any
+    expect(payload.extra).toEqual({ openai_oauth_ws_mode: 'managed_session' })
+    expect(payload.extra).not.toHaveProperty('openai_apikey_responses_websockets_v2_mode')
+    expect(payload.extra).not.toHaveProperty('openai_apikey_responses_websockets_v2_enabled')
+  })
+
+  it('切换到 setup-token 后不提交隐藏的 OpenAI OAuth-only Codex 字段', async () => {
+    const wrapper = mountModal({
+      selectedPlatforms: ['openai'],
+      selectedTypes: ['oauth']
+    })
+
+    await wrapper.get('#bulk-edit-openai-codex-cli-only-enabled').setValue(true)
+    await wrapper.get('#bulk-edit-openai-codex-cli-only-toggle').trigger('click')
+    await wrapper.setProps({ selectedTypes: ['setup-token'] })
+    await wrapper.get('#bulk-edit-openai-ws-mode-enabled').setValue(true)
+    await wrapper.get('[data-testid="bulk-edit-openai-ws-mode-select"]').setValue('managed_session')
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledTimes(1)
+    const payload = vi.mocked(adminAPI.accounts.bulkUpdate).mock.calls[0]?.[1] as any
+    expect(payload.extra).toEqual({ openai_oauth_ws_mode: 'managed_session' })
+    expect(payload.extra).not.toHaveProperty('codex_cli_only')
+    expect(payload.extra).not.toHaveProperty('codex_cli_only_allowed_clients')
   })
 
   it('filtered-results 模式下应提交 filters 而不是 account_ids', async () => {

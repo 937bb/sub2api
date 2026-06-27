@@ -137,6 +137,31 @@ func (s *AccountRepoSuite) TestUpdate() {
 	s.Require().Equal("updated", got.Name)
 }
 
+func (s *AccountRepoSuite) TestUpdate_OpenAIOAuthLikePreservesConcurrentFingerprint() {
+	profile := service.ParseOpenAICodexUAProfile(service.DefaultOpenAICodexUserAgent)
+	fingerprint, _ := service.NormalizeOpenAICodexFingerprint(nil, profile, time.Now())
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:     "acc-update-fingerprint-race",
+		Platform: service.PlatformOpenAI,
+		Type:     service.AccountTypeOAuth,
+		Extra:    map[string]any{"editable": "stale"},
+	})
+
+	stale := *account
+	stale.Extra = map[string]any{"editable": "fresh"}
+	_, err := s.repo.EnsureOpenAICodexFingerprint(s.ctx, account.ID, fingerprint, false)
+	s.Require().NoError(err)
+
+	s.Require().NoError(s.repo.Update(s.ctx, &stale))
+
+	got, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().Equal("fresh", got.Extra["editable"])
+	persisted, changed := service.NormalizeOpenAICodexFingerprint(got.Extra[service.OpenAICodexFingerprintExtraKey], profile, time.Now())
+	s.Require().False(changed)
+	s.Require().Equal(fingerprint.InstallationID, persisted.InstallationID)
+}
+
 func (s *AccountRepoSuite) TestUpdate_SyncSchedulerSnapshotOnDisabled() {
 	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "sync-update", Status: service.StatusActive, Schedulable: true})
 	cacheRecorder := &schedulerCacheRecorder{}
@@ -446,13 +471,13 @@ func (s *AccountRepoSuite) TestListWithFilters() {
 			tt.setup(client)
 
 			accounts, _, err := repo.ListWithFilters(ctx, pagination.PaginationParams{Page: 1, PageSize: 10}, service.AccountListFilters{
-		Platform:    tt.platform,
-		AccountType: tt.accType,
-		Status:      tt.status,
-		Search:      tt.search,
-		GroupID:     tt.groupID,
-		PrivacyMode: tt.privacyMode,
-	})
+				Platform:    tt.platform,
+				AccountType: tt.accType,
+				Status:      tt.status,
+				Search:      tt.search,
+				GroupID:     tt.groupID,
+				PrivacyMode: tt.privacyMode,
+			})
 			s.Require().NoError(err)
 			s.Require().Len(accounts, tt.wantCount)
 			if tt.validate != nil {
@@ -498,6 +523,26 @@ func (s *AccountRepoSuite) TestListByPlatform() {
 	s.Require().Equal(service.PlatformAnthropic, accounts[0].Platform)
 }
 
+func (s *AccountRepoSuite) TestListByPlatformForValidationIncludesDisabledAndExcludesDeleted() {
+	disabled := mustCreateAccount(s.T(), s.client, &service.Account{Name: "openai-disabled", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Status: service.StatusDisabled})
+	mustCreateAccount(s.T(), s.client, &service.Account{Name: "openai-active", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Status: service.StatusActive})
+	deleted := mustCreateAccount(s.T(), s.client, &service.Account{Name: "openai-deleted", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Status: service.StatusError})
+	mustCreateAccount(s.T(), s.client, &service.Account{Name: "anthropic-disabled", Platform: service.PlatformAnthropic, Status: service.StatusDisabled})
+	s.Require().NoError(s.repo.Delete(s.ctx, deleted.ID), "delete account")
+
+	accounts, err := s.repo.ListByPlatformForValidation(s.ctx, service.PlatformOpenAI)
+
+	s.Require().NoError(err, "ListByPlatformForValidation")
+	s.Require().Len(accounts, 2)
+	ids := make([]int64, 0, len(accounts))
+	for _, account := range accounts {
+		s.Require().Equal(service.PlatformOpenAI, account.Platform)
+		ids = append(ids, account.ID)
+	}
+	s.Require().Contains(ids, disabled.ID)
+	s.Require().NotContains(ids, deleted.ID)
+}
+
 // --- Preload and VirtualFields ---
 
 func (s *AccountRepoSuite) TestPreload_And_VirtualFields() {
@@ -519,7 +564,7 @@ func (s *AccountRepoSuite) TestPreload_And_VirtualFields() {
 	s.Require().Len(got.Groups, 1, "expected Groups to be populated")
 	s.Require().Equal(group.ID, got.Groups[0].ID)
 
-	accounts, page, err := s.repo.ListWithFilters(s.ctx, pagination.PaginationParams{Page: 1, PageSize: 10}, "", "", "", "acc", 0, "", "")
+	accounts, page, err := s.repo.ListWithFilters(s.ctx, pagination.PaginationParams{Page: 1, PageSize: 10}, service.AccountListFilters{Search: "acc"})
 	s.Require().NoError(err, "ListWithFilters")
 	s.Require().Equal(int64(1), page.Total)
 	s.Require().Len(accounts, 1)
@@ -890,6 +935,106 @@ func (s *AccountRepoSuite) TestUpdateExtra_NilExtra() {
 	s.Require().Equal("val", got.Extra["key"])
 }
 
+func (s *AccountRepoSuite) TestResetOpenAICodexFingerprint_UpdatesOnlyOAuthLikeAccounts() {
+	profile := service.ParseOpenAICodexUAProfile(service.DefaultOpenAICodexUserAgent)
+	for _, accountType := range []string{service.AccountTypeOAuth, service.AccountTypeSetupToken} {
+		s.Run(accountType, func() {
+			fingerprint, _ := service.NormalizeOpenAICodexFingerprint(nil, profile, time.Now())
+			account := mustCreateAccount(s.T(), s.client, &service.Account{
+				Name:     "acc-reset-fingerprint-" + accountType,
+				Platform: service.PlatformOpenAI,
+				Type:     accountType,
+				Extra:    map[string]any{"keep": "value"},
+			})
+
+			s.Require().NoError(s.repo.ResetOpenAICodexFingerprint(s.ctx, account.ID, fingerprint))
+
+			got, err := s.repo.GetByID(s.ctx, account.ID)
+			s.Require().NoError(err)
+			s.Require().Equal("value", got.Extra["keep"])
+			persisted, changed := service.NormalizeOpenAICodexFingerprint(got.Extra[service.OpenAICodexFingerprintExtraKey], profile, time.Now())
+			s.Require().False(changed)
+			s.Require().Equal(fingerprint.InstallationID, persisted.InstallationID)
+			s.Require().Equal(fingerprint.UAProfile, persisted.UAProfile)
+		})
+	}
+}
+
+func (s *AccountRepoSuite) TestResetOpenAICodexFingerprint_RejectsAPIKeyAccount() {
+	fingerprint, _ := service.NormalizeOpenAICodexFingerprint(nil, service.ParseOpenAICodexUAProfile(service.DefaultOpenAICodexUserAgent), time.Now())
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:     "acc-reset-fingerprint-apikey",
+		Platform: service.PlatformOpenAI,
+		Type:     service.AccountTypeAPIKey,
+		Extra:    map[string]any{"keep": "value"},
+	})
+
+	err := s.repo.ResetOpenAICodexFingerprint(s.ctx, account.ID, fingerprint)
+
+	s.Require().ErrorIs(err, service.ErrAccountNotFound)
+	got, getErr := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(getErr)
+	s.Require().Equal("value", got.Extra["keep"])
+	_, ok := got.Extra[service.OpenAICodexFingerprintExtraKey]
+	s.Require().False(ok)
+}
+
+func (s *AccountRepoSuite) TestEnsureOpenAICodexFingerprint_RejectsNonOAuthLikeAccounts() {
+	profile := service.ParseOpenAICodexUAProfile(service.DefaultOpenAICodexUserAgent)
+	for _, tc := range []struct {
+		name     string
+		platform string
+		typ      string
+	}{
+		{name: "apikey", platform: service.PlatformOpenAI, typ: service.AccountTypeAPIKey},
+		{name: "non-openai-oauth", platform: service.PlatformAnthropic, typ: service.AccountTypeOAuth},
+	} {
+		s.Run(tc.name, func() {
+			fingerprint, _ := service.NormalizeOpenAICodexFingerprint(nil, profile, time.Now())
+			account := mustCreateAccount(s.T(), s.client, &service.Account{
+				Name:     "acc-ensure-fingerprint-" + tc.name,
+				Platform: tc.platform,
+				Type:     tc.typ,
+				Extra:    map[string]any{"keep": "value"},
+			})
+
+			_, err := s.repo.EnsureOpenAICodexFingerprint(s.ctx, account.ID, fingerprint, false)
+
+			s.Require().ErrorIs(err, service.ErrAccountNotFound)
+			got, getErr := s.repo.GetByID(s.ctx, account.ID)
+			s.Require().NoError(getErr)
+			s.Require().Equal("value", got.Extra["keep"])
+			_, ok := got.Extra[service.OpenAICodexFingerprintExtraKey]
+			s.Require().False(ok)
+		})
+	}
+}
+
+func (s *AccountRepoSuite) TestUpdateAuthAndMergeExtraPreservesConcurrentExtra() {
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:        "acc-auth-extra",
+		Platform:    service.PlatformOpenAI,
+		Type:        service.AccountTypeOAuth,
+		Credentials: map[string]any{"refresh_token": "rt-old"},
+		Extra:       map[string]any{"existing": "keep"},
+	})
+
+	s.Require().NoError(s.repo.UpdateAuthAndMergeExtra(
+		s.ctx,
+		account.ID,
+		service.AccountTypeOAuth,
+		map[string]any{"access_token": "at-new"},
+		map[string]any{"org_uuid": "org"},
+		nil,
+	))
+
+	got, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().Equal("at-new", got.Credentials["access_token"])
+	s.Require().Equal("keep", got.Extra["existing"])
+	s.Require().Equal("org", got.Extra["org_uuid"])
+}
+
 func (s *AccountRepoSuite) TestUpdateExtra_SchedulerNeutralSkipsOutboxAndSyncsFreshSnapshot() {
 	account := mustCreateAccount(s.T(), s.client, &service.Account{
 		Name:     "acc-extra-neutral",
@@ -1056,6 +1201,28 @@ func (s *AccountRepoSuite) TestBulkUpdate_MergeExtra() {
 	got, _ := s.repo.GetByID(s.ctx, a1.ID)
 	s.Require().Equal("val", got.Extra["existing"])
 	s.Require().Equal("new_val", got.Extra["new_key"])
+}
+
+func (s *AccountRepoSuite) TestBulkUpdate_DeleteExtraKeysBeforeMerge() {
+	a1 := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name: "bulk-extra-delete",
+		Extra: map[string]any{
+			"keep":                     "val",
+			"openai_oauth_passthrough": true,
+			"openai_oauth_ws_mode":     "off",
+		},
+	})
+
+	_, err := s.repo.BulkUpdate(s.ctx, []int64{a1.ID}, service.AccountBulkUpdate{
+		ExtraDeleteKeys: []string{"openai_oauth_passthrough"},
+		Extra:           map[string]any{"openai_oauth_ws_mode": service.OpenAIOAuthWSModeManagedSession},
+	})
+	s.Require().NoError(err)
+
+	got, _ := s.repo.GetByID(s.ctx, a1.ID)
+	s.Require().Equal("val", got.Extra["keep"])
+	s.Require().NotContains(got.Extra, "openai_oauth_passthrough")
+	s.Require().Equal(service.OpenAIOAuthWSModeManagedSession, got.Extra["openai_oauth_ws_mode"])
 }
 
 func (s *AccountRepoSuite) TestBulkUpdate_EmptyIDs() {

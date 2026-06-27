@@ -196,7 +196,9 @@ func (h *GroupHandler) List(c *gin.Context) {
 	response.Paginated(c, outGroups, total, page, pageSize)
 }
 
-// GetAll handles getting all active groups without pagination
+// GetAll handles getting all active groups without pagination.
+// Pass ?include_inactive=true to list inactive groups too for admin filters that
+// must match existing bindings, such as API keys bound to disabled groups.
 // GET /api/v1/admin/groups/all
 func (h *GroupHandler) GetAll(c *gin.Context) {
 	platform := c.Query("platform")
@@ -204,7 +206,9 @@ func (h *GroupHandler) GetAll(c *gin.Context) {
 	var groups []service.Group
 	var err error
 
-	if platform != "" {
+	if parseBoolQueryWithDefault(c.Query("include_inactive"), false) {
+		groups, err = h.adminService.GetAllGroupsIncludingInactive(c.Request.Context(), platform)
+	} else if platform != "" {
 		groups, err = h.adminService.GetAllGroupsByPlatform(c.Request.Context(), platform)
 	} else {
 		groups, err = h.adminService.GetAllGroups(c.Request.Context())

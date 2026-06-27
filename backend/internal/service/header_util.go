@@ -123,6 +123,40 @@ func deleteHeaderAllForms(h http.Header, key string) {
 	}
 }
 
+func scopedHeaderRawOverride(h http.Header, key, value string, shouldSet bool) func() {
+	if h == nil || key == "" {
+		return func() {}
+	}
+
+	saved := make(http.Header)
+	for existingKey, values := range h {
+		if strings.EqualFold(existingKey, key) {
+			saved[existingKey] = append([]string(nil), values...)
+		}
+	}
+	deleteEqualFoldHeader := func() {
+		for existingKey := range h {
+			if strings.EqualFold(existingKey, key) {
+				delete(h, existingKey)
+			}
+		}
+	}
+
+	deleteHeaderAllForms(h, key)
+	deleteEqualFoldHeader()
+	if shouldSet {
+		h.Set(key, value)
+	}
+
+	return func() {
+		deleteHeaderAllForms(h, key)
+		deleteEqualFoldHeader()
+		for existingKey, values := range saved {
+			h[existingKey] = append([]string(nil), values...)
+		}
+	}
+}
+
 // getHeaderRaw reads a header value, trying multiple key forms to handle the mismatch
 // between Go canonical keys, wire casing keys, and raw keys:
 //  1. exact key as provided

@@ -204,7 +204,7 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 		c.Header("x-request-id", requestID)
 	}
 
-	reasoningEffort := extractCCReasoningEffortFromBody(originalChatBody)
+	reasoningEffort := ApplyThinkingEnabledFallback(extractCCReasoningEffortFromBody(originalChatBody), originalChatBody, mappedModel)
 
 	if resp.StatusCode >= 400 {
 		respBody := s.readUpstreamErrorBody(resp)
@@ -876,6 +876,7 @@ func (s *GeminiMessagesCompatService) writeGeminiChatCompletionsMappedError(
 }
 
 func (s *GeminiMessagesCompatService) writeChatCompletionsError(c *gin.Context, status int, errType, message string) error {
+	MarkResponseCommitted(c)
 	c.JSON(status, gin.H{
 		"error": gin.H{
 			"type":    errType,

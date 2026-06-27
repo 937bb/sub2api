@@ -51,6 +51,12 @@ export function setTokenExpiresAt(expiresIn: number): void {
   localStorage.setItem('token_expires_at', String(expiresAt))
 }
 
+function persistAuthUser(user: AuthResponse['user']): void {
+  const userWithoutBalance = { ...user } as Record<string, unknown>
+  delete userWithoutBalance.balance
+  localStorage.setItem('auth_user', JSON.stringify(userWithoutBalance))
+}
+
 /**
  * Get authentication token from localStorage
  */
@@ -100,7 +106,7 @@ export async function login(credentials: LoginRequest): Promise<LoginResponse> {
     if (data.expires_in) {
       setTokenExpiresAt(data.expires_in)
     }
-    localStorage.setItem('auth_user', JSON.stringify(data.user))
+    persistAuthUser(data.user)
   }
 
   return data
@@ -122,7 +128,7 @@ export async function login2FA(request: TotpLogin2FARequest): Promise<AuthRespon
   if (data.expires_in) {
     setTokenExpiresAt(data.expires_in)
   }
-  localStorage.setItem('auth_user', JSON.stringify(data.user))
+  persistAuthUser(data.user)
 
   return data
 }
@@ -143,7 +149,7 @@ export async function register(userData: RegisterRequest): Promise<AuthResponse>
   if (data.expires_in) {
     setTokenExpiresAt(data.expires_in)
   }
-  localStorage.setItem('auth_user', JSON.stringify(data.user))
+  persistAuthUser(data.user)
 
   return data
 }

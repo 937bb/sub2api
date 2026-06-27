@@ -24,14 +24,9 @@ import (
 )
 
 // cursorResponsesUnsupportedFields are top-level Responses API parameters that
-// Codex upstreams reject with "Unsupported parameter: ...". They must be
-// stripped when forwarding a raw client body through the Responses-shape
-// short-circuit in ForwardAsChatCompletions (see isResponsesShape branch).
-// The normal Chat Completions → Responses conversion path is unaffected
-// because ChatCompletionsRequest has no fields for these parameters — unknown
-// fields are dropped naturally by json.Unmarshal. Kept semantically in sync
-// with the list in openai_gateway_service.go:2034 used by the /v1/responses
-// passthrough path.
+// existing APIKey Responses-shape chat-completions compatibility strips before
+// upstream forwarding. OAuth must leave them to the terminal allowlist instead
+// so bridge code does not own OAuth field policy.
 var cursorResponsesUnsupportedFields = []string{
 	"prompt_cache_retention",
 	"safety_identifier",
@@ -61,12 +56,6 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	promptCacheKey string,
 	defaultMappedModel string,
 ) (*OpenAIForwardResult, error) {
-	// 入口分流：APIKey 账号 + 强制或已探测确认上游不支持 Responses，走 CC 直转。
-	// 自动模式下标记缺失（未探测）按"现状即证据"原则继续走下方原 Responses 转换路径。
-	if account.Type == AccountTypeAPIKey && !openai_compat.ShouldUseResponsesAPI(account.Extra) {
-		return s.forwardAsRawChatCompletions(ctx, c, account, body, defaultMappedModel)
-	}
-
 	startTime := time.Now()
 
 	// 1. Parse Chat Completions request
@@ -82,9 +71,15 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	billingModel := resolveOpenAIForwardModel(account, originalModel, defaultMappedModel)
 	upstreamModel := normalizeOpenAIModelForUpstream(account, billingModel)
 
+	// 入口分流：APIKey 账号 + 强制或已探测确认上游模型不支持 Responses，走 CC 直转。
+	// 自动模式下标记缺失（未探测）按"现状即证据"原则继续走下方原 Responses 转换路径。
+	if account.Type == AccountTypeAPIKey && !openai_compat.ShouldUseResponsesAPIForModel(account.Extra, upstreamModel) {
+		return s.forwardAsRawChatCompletions(ctx, c, account, body, defaultMappedModel)
+	}
+
 	promptCacheKey = strings.TrimSpace(promptCacheKey)
 	compatPromptCacheInjected := false
-	if promptCacheKey == "" && account.Type == AccountTypeOAuth && shouldAutoInjectPromptCacheKeyForCompat(upstreamModel) {
+	if promptCacheKey == "" && account.IsOpenAIOAuthLike() && shouldAutoInjectPromptCacheKeyForCompat(upstreamModel) {
 		promptCacheKey = deriveCompatPromptCacheKey(&chatReq, upstreamModel)
 		compatPromptCacheInjected = promptCacheKey != ""
 	}
@@ -109,23 +104,10 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 		err           error
 	)
 	if isResponsesShape {
-		responsesBody, err = sjson.SetBytes(body, "model", upstreamModel)
+		var normalizedServiceTier string
+		responsesBody, normalizedServiceTier, err = buildOpenAIChatCompletionsResponsesShapeBridgeBody(body, upstreamModel, account)
 		if err != nil {
-			return nil, fmt.Errorf("rewrite model in responses-shape body: %w", err)
-		}
-		// Strip Responses API parameters that no Codex upstream accepts.
-		// Because this branch forwards the raw body (the normal path rebuilds
-		// it from ChatCompletionsRequest and drops unknown fields naturally),
-		// we must filter these fields explicitly here — otherwise the upstream
-		// rejects the request with "Unsupported parameter: ...".
-		for _, field := range cursorResponsesUnsupportedFields {
-			if stripped, derr := sjson.DeleteBytes(responsesBody, field); derr == nil {
-				responsesBody = stripped
-			}
-		}
-		responsesBody, normalizedServiceTier, err := normalizeResponsesBodyServiceTier(responsesBody)
-		if err != nil {
-			return nil, fmt.Errorf("normalize service_tier in responses-shape body: %w", err)
+			return nil, err
 		}
 		// Minimal stub populated from the raw body so downstream billing
 		// propagation (ServiceTier, ReasoningEffort) keeps working.
@@ -167,9 +149,9 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	}
 	logger.L().Debug("openai chat_completions: model mapping applied", logFields...)
 
-	if account.Type == AccountTypeOAuth {
-		var reqBody map[string]any
-		if err := json.Unmarshal(responsesBody, &reqBody); err != nil {
+	if account.IsOpenAIOAuthLike() {
+		reqBody, err := decodeOpenAIRequestBodyMapUseNumber(responsesBody)
+		if err != nil {
 			return nil, fmt.Errorf("unmarshal for codex transform: %w", err)
 		}
 		codexResult := applyCodexOAuthTransform(reqBody, false, false)
@@ -181,9 +163,21 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 		} else if promptCacheKey != "" {
 			reqBody["prompt_cache_key"] = promptCacheKey
 		}
-		responsesBody, err = json.Marshal(reqBody)
+		responsesBody, err = marshalOpenAIUpstreamJSON(reqBody)
 		if err != nil {
 			return nil, fmt.Errorf("remarshal after codex transform: %w", err)
+		}
+	} else if account.Type == AccountTypeAPIKey && promptCacheKey != "" {
+		reqBody, err := decodeOpenAIRequestBodyMapUseNumber(responsesBody)
+		if err != nil {
+			return nil, fmt.Errorf("unmarshal for prompt cache key injection: %w", err)
+		}
+		if existing, ok := reqBody["prompt_cache_key"].(string); !ok || strings.TrimSpace(existing) == "" {
+			reqBody["prompt_cache_key"] = promptCacheKey
+			responsesBody, err = marshalOpenAIUpstreamJSON(reqBody)
+			if err != nil {
+				return nil, fmt.Errorf("remarshal after prompt cache key injection: %w", err)
+			}
 		}
 	}
 
@@ -205,14 +199,6 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	}
 	responsesBody = updatedBody
 
-	// OAuth: trim fields the real Codex CLI never sends.
-	if account.Type == AccountTypeOAuth {
-		responsesBody, _, err = normalizeOpenAIPassthroughOAuthBody(responsesBody, false)
-		if err != nil {
-			return nil, fmt.Errorf("normalize oauth body: %w", err)
-		}
-	}
-
 	// Refresh ServiceTier so billing reflects the final body sent upstream.
 	if responsesReq != nil {
 		responsesReq.ServiceTier = strings.TrimSpace(gjson.GetBytes(responsesBody, "service_tier").String())
@@ -232,8 +218,9 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 		return nil, fmt.Errorf("build upstream request: %w", err)
 	}
 
-	if promptCacheKey != "" {
-		upstreamReq.Header.Set("session_id", generateSessionUUID(promptCacheKey))
+	if promptCacheKey != "" && !account.IsOpenAIOAuthLike() {
+		apiKeyID := getAPIKeyIDFromContext(c)
+		upstreamReq.Header.Set("session_id", generateSessionUUID(isolateOpenAISessionID(apiKeyID, promptCacheKey)))
 	}
 
 	// 7. Send request
@@ -243,7 +230,7 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	}
 	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 	if err != nil {
-		safeErr := sanitizeUpstreamErrorMessage(err.Error())
+		safeErr := sanitizeOpenAIUpstreamDiagnosticText(err.Error())
 		setOpsUpstreamError(c, 0, safeErr, "")
 		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 			Platform:           account.Platform,
@@ -265,9 +252,9 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 		resp.Body = io.NopCloser(bytes.NewReader(respBody))
 
 		upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
-		upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
+		upstreamMsg = sanitizeOpenAIUpstreamDiagnosticText(upstreamMsg)
 		if account.Type == AccountTypeAPIKey &&
-			openai_compat.ResolveResponsesSupport(account.Extra) == openai_compat.ResponsesSupportUnknown &&
+			openai_compat.ResolveResponsesSupportForModel(account.Extra, upstreamModel) == openai_compat.ResponsesSupportUnknown &&
 			!isResponsesEndpointSupportedByStatus(resp.StatusCode) {
 			logger.L().Info("openai chat_completions: /responses unsupported, falling back to raw chat completions",
 				zap.Int64("account_id", account.ID),
@@ -283,7 +270,7 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 				if maxBytes <= 0 {
 					maxBytes = 2048
 				}
-				upstreamDetail = truncateString(string(respBody), maxBytes)
+				upstreamDetail = sanitizeOpenAIUpstreamDiagnosticBodyForLog(respBody, maxBytes)
 			}
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 				Platform:           account.Platform,
@@ -334,6 +321,29 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	}
 
 	return result, handleErr
+}
+
+func buildOpenAIChatCompletionsResponsesShapeBridgeBody(body []byte, upstreamModel string, account *Account) ([]byte, string, error) {
+	responsesBody, err := sjson.SetBytes(body, "model", upstreamModel)
+	if err != nil {
+		return nil, "", fmt.Errorf("rewrite model in responses-shape body: %w", err)
+	}
+
+	if account == nil || !account.IsOpenAIOAuthLike() {
+		// Preserve the existing APIKey Cursor compatibility behavior. OAuth-like field
+		// filtering is terminal-policy-only and intentionally skips this bridge strip.
+		for _, field := range cursorResponsesUnsupportedFields {
+			if stripped, derr := sjson.DeleteBytes(responsesBody, field); derr == nil {
+				responsesBody = stripped
+			}
+		}
+	}
+
+	responsesBody, normalizedServiceTier, err := normalizeResponsesBodyServiceTier(responsesBody)
+	if err != nil {
+		return nil, "", fmt.Errorf("normalize service_tier in responses-shape body: %w", err)
+	}
+	return responsesBody, normalizedServiceTier, nil
 }
 
 func normalizeResponsesRequestServiceTier(req *apicompat.ResponsesRequest) {
@@ -403,7 +413,7 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 ) (*OpenAIForwardResult, error) {
 	requestID := resp.Header.Get("x-request-id")
 
-	finalResponse, usage, acc, err := s.readOpenAICompatBufferedTerminal(resp, "openai chat_completions buffered", requestID)
+	finalResponse, usage, acc, terminalPayload, err := s.readOpenAICompatBufferedTerminal(resp, "openai chat_completions buffered", requestID)
 	if err != nil {
 		return nil, err
 	}
@@ -413,7 +423,10 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 		return nil, fmt.Errorf("upstream stream ended without terminal event")
 	}
 	if strings.TrimSpace(finalResponse.Status) == "failed" {
-		payload, _ := json.Marshal(gin.H{"type": "response.failed", "response": finalResponse})
+		payload := terminalPayload
+		if len(payload) == 0 {
+			payload, _ = json.Marshal(gin.H{"type": "response.failed", "response": finalResponse})
+		}
 		return nil, s.newOpenAIStreamFailoverError(c, account, false, requestID, payload, openAICompatFailedResponseMessage(finalResponse))
 	}
 
@@ -426,6 +439,11 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 	if s.responseHeaderFilter != nil {
 		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 	}
+	// 非流式响应必须为标准 JSON。上游被强制流式，其响应头 Content-Type 为
+	// text/event-stream，会经 WriteFilteredHeaders 透传进来；而 c.JSON 走 Gin 的
+	// writeContentType 仅在头不存在时才设置，无法覆盖。这里显式 Set 强制改回 JSON，
+	// 否则下游"看头判流式"的中间层（如 new-api）会把本应聚合的 JSON 当成 SSE 处理。
+	c.Writer.Header().Set("Content-Type", "application/json; charset=utf-8")
 	c.JSON(http.StatusOK, chatResp)
 
 	return &OpenAIForwardResult{
@@ -850,6 +868,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 
 // writeChatCompletionsError writes an error response in OpenAI Chat Completions format.
 func writeChatCompletionsError(c *gin.Context, statusCode int, errType, message string) {
+	MarkResponseCommitted(c)
 	c.JSON(statusCode, gin.H{
 		"error": gin.H{
 			"type":    errType,

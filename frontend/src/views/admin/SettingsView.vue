@@ -411,6 +411,223 @@
             </div>
           </div>
 
+          <!-- OpenAI OAuth Dynamic 429 Settings -->
+          <div class="card" @keydown.enter.prevent="saveOpenAIOAuth429DynamicSettings">
+            <div
+              class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
+            >
+              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+                {{ t("admin.settings.openaiOAuth429Dynamic.title") }}
+              </h2>
+              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                {{ t("admin.settings.openaiOAuth429Dynamic.description") }}
+              </p>
+            </div>
+            <div class="space-y-5 p-6">
+              <div
+                v-if="openaiOAuth429DynamicLoading"
+                class="flex items-center gap-2 text-gray-500"
+              >
+                <div
+                  class="h-4 w-4 animate-spin rounded-full border-b-2 border-primary-600"
+                ></div>
+                {{ t("common.loading") }}
+              </div>
+
+              <template v-else>
+                <div class="flex items-center justify-between">
+                  <div>
+                    <label class="font-medium text-gray-900 dark:text-white">{{
+                      t("admin.settings.openaiOAuth429Dynamic.enabled")
+                    }}</label>
+                    <p class="text-sm text-gray-500 dark:text-gray-400">
+                      {{ t("admin.settings.openaiOAuth429Dynamic.enabledHint") }}
+                    </p>
+                  </div>
+                  <Toggle
+                    v-model="openaiOAuth429DynamicForm.enabled"
+                    data-testid="openai-oauth-429-dynamic-enabled"
+                  />
+                </div>
+
+                <div
+                  v-if="openaiOAuth429DynamicForm.enabled"
+                  class="space-y-4 border-t border-gray-100 pt-4 dark:border-dark-700"
+                >
+                  <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                    <div>
+                      <label
+                        class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
+                      >
+                        {{
+                          t(
+                            "admin.settings.openaiOAuth429Dynamic.windowSeconds",
+                          )
+                        }}
+                      </label>
+                      <input
+                        v-model.number="openaiOAuth429DynamicForm.window_seconds"
+                        data-testid="openai-oauth-429-dynamic-window-seconds"
+                        type="number"
+                        min="60"
+                        max="3600"
+                        class="input w-32"
+                      />
+                      <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                        {{
+                          t(
+                            "admin.settings.openaiOAuth429Dynamic.windowSecondsHint",
+                          )
+                        }}
+                      </p>
+                    </div>
+
+                    <div>
+                      <label
+                        class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
+                      >
+                        {{
+                          t("admin.settings.openaiOAuth429Dynamic.minSamples")
+                        }}
+                      </label>
+                      <input
+                        v-model.number="openaiOAuth429DynamicForm.min_samples"
+                        data-testid="openai-oauth-429-dynamic-min-samples"
+                        type="number"
+                        min="2"
+                        max="10000"
+                        class="input w-32"
+                      />
+                      <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                        {{
+                          t(
+                            "admin.settings.openaiOAuth429Dynamic.minSamplesHint",
+                          )
+                        }}
+                      </p>
+                    </div>
+
+                    <div>
+                      <label
+                        class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
+                      >
+                        {{ t("admin.settings.openaiOAuth429Dynamic.min429") }}
+                      </label>
+                      <input
+                        v-model.number="openaiOAuth429DynamicForm.min_429"
+                        data-testid="openai-oauth-429-dynamic-min-429"
+                        type="number"
+                        min="1"
+                        :max="openaiOAuth429DynamicForm.min_samples"
+                        class="input w-32"
+                      />
+                      <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                        {{
+                          t("admin.settings.openaiOAuth429Dynamic.min429Hint")
+                        }}
+                      </p>
+                    </div>
+
+                    <div>
+                      <label
+                        class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
+                      >
+                        {{
+                          t(
+                            "admin.settings.openaiOAuth429Dynamic.ratioThreshold",
+                          )
+                        }}
+                      </label>
+                      <input
+                        v-model.number="openaiOAuth429DynamicForm.ratio_threshold"
+                        data-testid="openai-oauth-429-dynamic-ratio-threshold"
+                        type="number"
+                        min="0.01"
+                        max="1"
+                        step="0.01"
+                        class="input w-32"
+                      />
+                      <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                        {{
+                          t(
+                            "admin.settings.openaiOAuth429Dynamic.ratioThresholdHint",
+                          )
+                        }}
+                      </p>
+                    </div>
+
+                    <div>
+                      <label
+                        class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
+                      >
+                        {{
+                          t(
+                            "admin.settings.openaiOAuth429Dynamic.blockSeconds",
+                          )
+                        }}
+                      </label>
+                      <input
+                        v-model.number="openaiOAuth429DynamicForm.block_seconds"
+                        data-testid="openai-oauth-429-dynamic-block-seconds"
+                        type="number"
+                        min="1"
+                        max="7200"
+                        class="input w-32"
+                      />
+                      <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                        {{
+                          t(
+                            "admin.settings.openaiOAuth429Dynamic.blockSecondsHint",
+                          )
+                        }}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div
+                  class="flex justify-end border-t border-gray-100 pt-4 dark:border-dark-700"
+                >
+                  <button
+                    type="button"
+                    data-testid="openai-oauth-429-dynamic-save"
+                    @click="saveOpenAIOAuth429DynamicSettings"
+                    :disabled="
+                      openaiOAuth429DynamicSaving || !openaiOAuth429DynamicLoaded
+                    "
+                    class="btn btn-primary btn-sm"
+                  >
+                    <svg
+                      v-if="openaiOAuth429DynamicSaving"
+                      class="mr-1 h-4 w-4 animate-spin"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                    >
+                      <circle
+                        class="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        stroke-width="4"
+                      ></circle>
+                      <path
+                        class="opacity-75"
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                      ></path>
+                    </svg>
+                    {{
+                      openaiOAuth429DynamicSaving
+                        ? t("common.saving")
+                        : t("common.save")
+                    }}
+                  </button>
+                </div>
+              </template>
+            </div>
+          </div>
+
           <!-- Stream Timeout Settings -->
           <div class="card">
             <div
@@ -3919,34 +4136,78 @@
                 </p>
               </div>
 
-              <!-- OpenAI Codex UA -->
-              <div>
-                <label
-                  class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
-                >
-                  {{
-                    t(
-                      "admin.settings.gatewayForwarding.openaiCodexUserAgent",
-                    )
-                  }}
-                </label>
-                <input
-                  v-model="form.openai_codex_user_agent"
-                  type="text"
-                  class="input w-full font-mono text-sm"
-                  :placeholder="
-                    t(
-                      'admin.settings.gatewayForwarding.openaiCodexUserAgentPlaceholder',
-                    )
-                  "
-                />
-                <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
-                  {{
-                    t(
-                      "admin.settings.gatewayForwarding.openaiCodexUserAgentHint",
-                    )
-                  }}
-                </p>
+              <!-- OpenAI Codex UA Profile -->
+              <div class="space-y-3">
+                <div>
+                  <label
+                    class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
+                  >
+                    {{
+                      t(
+                        "admin.settings.gatewayForwarding.openaiCodexUserAgent",
+                      )
+                    }}
+                  </label>
+                  <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                    {{
+                      t(
+                        "admin.settings.gatewayForwarding.openaiCodexUserAgentHint",
+                      )
+                    }}
+                  </p>
+                </div>
+
+                <div class="grid gap-3 md:grid-cols-2">
+                  <div>
+                    <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
+                      {{ t("admin.settings.gatewayForwarding.openaiCodexOriginator") }}
+                    </label>
+                    <input
+                      v-model="form.openai_codex_ua_profile.originator"
+                      type="text"
+                      class="input w-full font-mono text-sm"
+                      :placeholder="t('admin.settings.gatewayForwarding.openaiCodexOriginatorPlaceholder')"                    />
+                  </div>
+                  <div>
+                    <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
+                      {{ t("admin.settings.gatewayForwarding.openaiCodexVersion") }}
+                    </label>
+                    <input
+                      v-model="form.openai_codex_ua_profile.codex_version"
+                      type="text"
+                      class="input w-full font-mono text-sm"
+                      :placeholder="t('admin.settings.gatewayForwarding.openaiCodexVersionPlaceholder')"                    />
+                  </div>
+                  <div>
+                    <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
+                      {{ t("admin.settings.gatewayForwarding.openaiCodexOS") }}
+                    </label>
+                    <input
+                      v-model="form.openai_codex_ua_profile.os_fingerprint"
+                      type="text"
+                      class="input w-full font-mono text-sm"
+                      :placeholder="t('admin.settings.gatewayForwarding.openaiCodexOSPlaceholder')"                    />
+                  </div>
+                  <div>
+                    <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
+                      {{ t("admin.settings.gatewayForwarding.openaiCodexTerminal") }}
+                    </label>
+                    <input
+                      v-model="form.openai_codex_ua_profile.terminal_token"
+                      type="text"
+                      class="input w-full font-mono text-sm"
+                      :placeholder="t('admin.settings.gatewayForwarding.openaiCodexTerminalPlaceholder')"                    />
+                  </div>
+                </div>
+
+                <div class="rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-dark-600 dark:bg-dark-800/60">
+                  <div class="mb-1 text-xs font-medium text-gray-500 dark:text-gray-400">
+                    {{ t("admin.settings.gatewayForwarding.openaiCodexUserAgentPreview") }}
+                  </div>
+                  <code class="break-all font-mono text-xs text-gray-700 dark:text-gray-300">
+                    {{ openAICodexUserAgentPreview }}
+                  </code>
+                </div>
               </div>
 
               <!-- 是否允许在 Claude Code 中使用 Codex 插件（全局开关） -->
@@ -6713,7 +6974,9 @@ import type {
   UpdateSettingsRequest,
   DefaultSubscriptionSetting,
   DefaultPlatformQuotasMap,
+  OpenAICodexUAProfile,
   OpenAIFastPolicyRule,
+  OpenAIOAuth429DynamicSettings,
   WeChatConnectMode,
   WebSearchEmulationConfig,
   WebSearchProviderConfig,
@@ -6759,6 +7022,127 @@ const isZhLocale = computed(() => locale.value.startsWith("zh"));
 
 function localText(zh: string, en: string): string {
   return isZhLocale.value ? zh : en;
+}
+
+const defaultOpenAICodexUAProfile: OpenAICodexUAProfile = {
+  originator: "codex-tui",
+  codex_version: "0.136.0",
+  os_fingerprint: "Mac OS 26.5.0; arm64",
+  terminal_token: "Apple_Terminal/470.2",
+};
+
+function isOpenAICodexHeaderValueSafe(value: string): boolean {
+  return Array.from(value).every((char) => {
+    const code = char.charCodeAt(0);
+    return code >= 0x20 && code !== 0x7f;
+  });
+}
+
+function sanitizeOpenAICodexUAPathTokenComponent(
+  value: string | undefined,
+  fallback: string,
+): string {
+  const trimmed = value?.trim() || "";
+  if (
+    !trimmed ||
+    !isOpenAICodexHeaderValueSafe(trimmed) ||
+    /[\s/();]/u.test(trimmed)
+  ) {
+    return fallback;
+  }
+  return trimmed;
+}
+
+function sanitizeOpenAICodexUATokenComponent(
+  value: string | undefined,
+  fallback: string,
+): string {
+  const trimmed = value?.trim() || "";
+  if (
+    !trimmed ||
+    !isOpenAICodexHeaderValueSafe(trimmed) ||
+    /[\s();]/u.test(trimmed)
+  ) {
+    return fallback;
+  }
+  return trimmed;
+}
+
+function sanitizeOpenAICodexUACommentComponent(
+  value: string | undefined,
+  fallback: string,
+): string {
+  const trimmed = value?.trim() || "";
+  if (
+    !trimmed ||
+    !isOpenAICodexHeaderValueSafe(trimmed) ||
+    /[()]/u.test(trimmed)
+  ) {
+    return fallback;
+  }
+  return trimmed;
+}
+
+function normalizeOpenAICodexUAProfile(
+  profile?: Partial<OpenAICodexUAProfile> | null,
+): OpenAICodexUAProfile {
+  return {
+    originator: sanitizeOpenAICodexUAPathTokenComponent(
+      profile?.originator,
+      defaultOpenAICodexUAProfile.originator,
+    ),
+    codex_version: sanitizeOpenAICodexUAPathTokenComponent(
+      profile?.codex_version,
+      defaultOpenAICodexUAProfile.codex_version,
+    ),
+    os_fingerprint: sanitizeOpenAICodexUACommentComponent(
+      profile?.os_fingerprint,
+      defaultOpenAICodexUAProfile.os_fingerprint,
+    ),
+    terminal_token: sanitizeOpenAICodexUATokenComponent(
+      profile?.terminal_token,
+      defaultOpenAICodexUAProfile.terminal_token,
+    ),
+    user_agent: profile?.user_agent?.trim() || undefined,
+  };
+}
+
+function buildOpenAICodexUserAgent(profile: OpenAICodexUAProfile): string {
+  const normalized = normalizeOpenAICodexUAProfile(profile);
+  if (normalized.user_agent) {
+    return normalized.user_agent;
+  }
+  return buildOpenAICodexCanonicalUserAgent(normalized);
+}
+
+function buildOpenAICodexCanonicalUserAgent(profile: OpenAICodexUAProfile): string {
+  const normalized = normalizeOpenAICodexUAProfile({
+    originator: profile.originator,
+    codex_version: profile.codex_version,
+    os_fingerprint: profile.os_fingerprint,
+    terminal_token: profile.terminal_token,
+  });
+  return `${normalized.originator}/${normalized.codex_version} (${normalized.os_fingerprint}) ${normalized.terminal_token} (${normalized.originator}; ${normalized.codex_version})`;
+}
+
+function openAICodexUAProfileKey(profile: OpenAICodexUAProfile): string {
+  const normalized = normalizeOpenAICodexUAProfile(profile);
+  return JSON.stringify({
+    originator: normalized.originator,
+    codex_version: normalized.codex_version,
+    os_fingerprint: normalized.os_fingerprint,
+    terminal_token: normalized.terminal_token,
+  });
+}
+
+function openAICodexUAProfilePayload(profile: OpenAICodexUAProfile) {
+  const normalized = normalizeOpenAICodexUAProfile(profile);
+  return {
+    originator: normalized.originator,
+    codex_version: normalized.codex_version,
+    os_fingerprint: normalized.os_fingerprint,
+    terminal_token: normalized.terminal_token,
+  };
 }
 
 const paymentGuideHref = computed(() =>
@@ -6858,6 +7242,7 @@ const testEmailAddress = ref("");
 const registrationEmailSuffixWhitelistTags = ref<string[]>([]);
 const registrationEmailSuffixWhitelistDraft = ref("");
 const tablePageSizeOptionsInput = ref("10, 20, 50, 100");
+const initialOpenAICodexUAProfileKey = ref("");
 
 // Admin API Key 状态
 const adminApiKeyLoading = ref(true);
@@ -6881,6 +7266,19 @@ const rateLimit429CooldownSaving = ref(false);
 const rateLimit429CooldownForm = reactive({
   enabled: true,
   cooldown_seconds: 5,
+});
+
+// OpenAI OAuth 429 动态调度状态
+const openaiOAuth429DynamicLoading = ref(true);
+const openaiOAuth429DynamicSaving = ref(false);
+const openaiOAuth429DynamicLoaded = ref(false);
+const openaiOAuth429DynamicForm = reactive<OpenAIOAuth429DynamicSettings>({
+  enabled: false,
+  window_seconds: 300,
+  min_samples: 20,
+  min_429: 3,
+  ratio_threshold: 0.5,
+  block_seconds: 60,
 });
 
 // Stream Timeout 状态
@@ -7204,6 +7602,7 @@ const form = reactive<SettingsForm>({
   rewrite_message_cache_control: false,
   antigravity_user_agent_version: "",
   openai_codex_user_agent: "",
+  openai_codex_ua_profile: normalizeOpenAICodexUAProfile(),
   openai_allow_claude_code_codex_plugin: false,
   // 余额、订阅到期与账号限额通知
   balance_low_notify_enabled: false,
@@ -7221,6 +7620,19 @@ const form = reactive<SettingsForm>({
   affiliate_enabled: false,
   // Allow user view error requests
   allow_user_view_error_requests: false,
+});
+
+const openAICodexUAProfileChanged = computed(
+  () =>
+    openAICodexUAProfileKey(form.openai_codex_ua_profile) !==
+    initialOpenAICodexUAProfileKey.value,
+);
+
+const openAICodexUserAgentPreview = computed(() => {
+  const profile = normalizeOpenAICodexUAProfile(form.openai_codex_ua_profile);
+  return openAICodexUAProfileChanged.value
+    ? buildOpenAICodexCanonicalUserAgent(profile)
+    : buildOpenAICodexUserAgent(profile);
 });
 
 const authSourceDefaults = reactive<AuthSourceDefaultsState>(
@@ -7838,6 +8250,13 @@ async function loadSettings() {
         : defaultLoginAgreementDocuments();
     Object.assign(authSourceDefaults, buildAuthSourceDefaultsState(settings));
     form.default_platform_quotas = normalizePlatformQuotasMap(settings.default_platform_quotas);
+    form.openai_codex_ua_profile = normalizeOpenAICodexUAProfile(
+      settings.openai_codex_ua_profile,
+    );
+    form.openai_codex_user_agent = settings.openai_codex_user_agent || "";
+    initialOpenAICodexUAProfileKey.value = openAICodexUAProfileKey(
+      form.openai_codex_ua_profile,
+    );
     form.backend_mode_enabled = settings.backend_mode_enabled;
     form.default_subscriptions = normalizeDefaultSubscriptionSettings(
       settings.default_subscriptions,
@@ -8152,6 +8571,12 @@ async function saveSettings() {
       form.wechat_connect_mobile_enabled,
       form.wechat_connect_mode,
     );
+    const openAICodexUAProfile = normalizeOpenAICodexUAProfile(
+      form.openai_codex_ua_profile,
+    );
+    const openAICodexUserAgent = buildOpenAICodexCanonicalUserAgent(
+      openAICodexUAProfile,
+    );
 
     const payload: UpdateSettingsRequest = {
       registration_enabled: form.registration_enabled,
@@ -8310,8 +8735,6 @@ async function saveSettings() {
       rewrite_message_cache_control: form.rewrite_message_cache_control,
       antigravity_user_agent_version:
         form.antigravity_user_agent_version?.trim() || "",
-      openai_codex_user_agent:
-        form.openai_codex_user_agent?.trim() || "",
       openai_allow_claude_code_codex_plugin: form.openai_allow_claude_code_codex_plugin,
       // Payment configuration
       payment_enabled: form.payment_enabled,
@@ -8365,6 +8788,11 @@ async function saveSettings() {
       allow_user_view_error_requests: form.allow_user_view_error_requests,
     };
 
+    if (openAICodexUAProfileChanged.value) {
+      payload.openai_codex_user_agent = openAICodexUserAgent;
+      payload.openai_codex_ua_profile = openAICodexUAProfilePayload(openAICodexUAProfile);
+    }
+
     // 仅当 openai_fast_policy_settings 已成功从后端加载时才回写，
     // 否则省略整个字段，让后端保留既有规则（含默认值）。
     if (openaiFastPolicyLoaded.value) {
@@ -8405,6 +8833,13 @@ async function saveSettings() {
     }
     Object.assign(authSourceDefaults, buildAuthSourceDefaultsState(updated));
     form.default_platform_quotas = normalizePlatformQuotasMap(updated.default_platform_quotas);
+    form.openai_codex_ua_profile = normalizeOpenAICodexUAProfile(
+      updated.openai_codex_ua_profile,
+    );
+    form.openai_codex_user_agent = updated.openai_codex_user_agent || "";
+    initialOpenAICodexUAProfileKey.value = openAICodexUAProfileKey(
+      form.openai_codex_ua_profile,
+    );
     registrationEmailSuffixWhitelistTags.value =
       normalizeRegistrationEmailSuffixDomains(
         updated.registration_email_suffix_whitelist,
@@ -8662,6 +9097,85 @@ async function saveRateLimit429CooldownSettings() {
     );
   } finally {
     rateLimit429CooldownSaving.value = false;
+  }
+}
+
+async function loadOpenAIOAuth429DynamicSettings() {
+  openaiOAuth429DynamicLoading.value = true;
+  openaiOAuth429DynamicLoaded.value = false;
+  try {
+    const settings = await adminAPI.settings.getOpenAIOAuth429DynamicSettings();
+    Object.assign(openaiOAuth429DynamicForm, normalizeOpenAIOAuth429DynamicForm(settings));
+    openaiOAuth429DynamicLoaded.value = true;
+  } catch (error: unknown) {
+    appStore.showError(
+      extractApiErrorMessage(
+        error,
+        t("admin.settings.openaiOAuth429Dynamic.loadFailed"),
+      ),
+    );
+  } finally {
+    openaiOAuth429DynamicLoading.value = false;
+  }
+}
+
+function boundedInteger(value: unknown, min: number, max: number, fallback: number): number {
+  if (typeof value === "string" && value.trim() === "") {
+    return fallback;
+  }
+  const parsed = Math.floor(Number(value));
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+  return Math.min(max, Math.max(min, parsed));
+}
+
+function boundedNumber(value: unknown, min: number, max: number, fallback: number): number {
+  if (typeof value === "string" && value.trim() === "") {
+    return fallback;
+  }
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+  return Math.min(max, Math.max(min, parsed));
+}
+
+function normalizeOpenAIOAuth429DynamicForm(
+  raw: Partial<OpenAIOAuth429DynamicSettings>,
+): OpenAIOAuth429DynamicSettings {
+  const minSamples = boundedInteger(raw.min_samples, 2, 10000, 20);
+  return {
+    enabled: Boolean(raw.enabled),
+    window_seconds: boundedInteger(raw.window_seconds, 60, 3600, 300),
+    min_samples: minSamples,
+    min_429: boundedInteger(raw.min_429, 1, minSamples, Math.min(3, minSamples)),
+    ratio_threshold: boundedNumber(raw.ratio_threshold, 0.01, 1, 0.5),
+    block_seconds: boundedInteger(raw.block_seconds, 1, 7200, 60),
+  };
+}
+
+async function saveOpenAIOAuth429DynamicSettings() {
+  if (!openaiOAuth429DynamicLoaded.value) {
+    appStore.showError(t("admin.settings.openaiOAuth429Dynamic.loadFailed"));
+    return;
+  }
+  openaiOAuth429DynamicSaving.value = true;
+  try {
+    const payload = normalizeOpenAIOAuth429DynamicForm(openaiOAuth429DynamicForm);
+    Object.assign(openaiOAuth429DynamicForm, payload);
+    const updated = await adminAPI.settings.updateOpenAIOAuth429DynamicSettings(payload);
+    Object.assign(openaiOAuth429DynamicForm, normalizeOpenAIOAuth429DynamicForm(updated));
+    appStore.showSuccess(t("admin.settings.openaiOAuth429Dynamic.saved"));
+  } catch (error: unknown) {
+    appStore.showError(
+      extractApiErrorMessage(
+        error,
+        t("admin.settings.openaiOAuth429Dynamic.saveFailed"),
+      ),
+    );
+  } finally {
+    openaiOAuth429DynamicSaving.value = false;
   }
 }
 
@@ -9279,6 +9793,7 @@ onMounted(() => {
   loadAdminApiKey();
   loadOverloadCooldownSettings();
   loadRateLimit429CooldownSettings();
+  loadOpenAIOAuth429DynamicSettings();
   loadStreamTimeoutSettings();
   loadRectifierSettings();
   loadBetaPolicySettings();

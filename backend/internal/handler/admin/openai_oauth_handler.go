@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"strconv"
 	"strings"
 
@@ -16,17 +17,182 @@ import (
 type OpenAIOAuthHandler struct {
 	openaiOAuthService *service.OpenAIOAuthService
 	adminService       service.AdminService
+	quotaService       *service.OpenAIQuotaService
 }
 
 func oauthPlatformFromPath(c *gin.Context) string {
 	return service.PlatformOpenAI
 }
 
+var openAIOAuthServerOwnedCredentialKeys = map[string]struct{}{
+	"client_id":               {},
+	"email":                   {},
+	"chatgpt_account_id":      {},
+	"chatgpt_user_id":         {},
+	"organization_id":         {},
+	"plan_type":               {},
+	"subscription_expires_at": {},
+}
+
+var openAIOAuthCreateCredentialOptionKeys = map[string]struct{}{
+	"compact_model_mapping":        {},
+	"custom_error_codes":           {},
+	"custom_error_codes_enabled":   {},
+	"intercept_warmup_requests":    {},
+	"model_mapping":                {},
+	"pool_mode":                    {},
+	"pool_mode_retry_count":        {},
+	"pool_mode_retry_status_codes": {},
+	"temp_unschedulable_enabled":   {},
+	"temp_unschedulable_rules":     {},
+}
+
+func mergeOpenAIOAuthCreateCredentialOptions(base, incoming map[string]any) map[string]any {
+	if base == nil {
+		base = map[string]any{}
+	}
+	for key, value := range incoming {
+		if key == "" || service.IsSensitiveCredentialKey(key) {
+			continue
+		}
+		if _, serverOwned := openAIOAuthServerOwnedCredentialKeys[key]; serverOwned {
+			continue
+		}
+		if _, allowed := openAIOAuthCreateCredentialOptionKeys[key]; !allowed {
+			continue
+		}
+		base[key] = value
+	}
+	return base
+}
+
+type openAIOAuthTokenInfoResponse struct {
+	AccessToken           string `json:"access_token"`
+	RefreshToken          string `json:"refresh_token"`
+	IDToken               string `json:"id_token,omitempty"`
+	ExpiresIn             int64  `json:"expires_in"`
+	ExpiresAt             int64  `json:"expires_at"`
+	ClientID              string `json:"client_id,omitempty"`
+	Email                 string `json:"email,omitempty"`
+	ChatGPTAccountID      string `json:"chatgpt_account_id,omitempty"`
+	ChatGPTUserID         string `json:"chatgpt_user_id,omitempty"`
+	OrganizationID        string `json:"organization_id,omitempty"`
+	PlanType              string `json:"plan_type,omitempty"`
+	SubscriptionExpiresAt string `json:"subscription_expires_at,omitempty"`
+	PrivacyMode           string `json:"privacy_mode,omitempty"`
+}
+
+func openAIOAuthTokenResponse(tokenInfo *service.OpenAITokenInfo) *openAIOAuthTokenInfoResponse {
+	if tokenInfo == nil {
+		return nil
+	}
+	return &openAIOAuthTokenInfoResponse{
+		AccessToken:           tokenInfo.AccessToken,
+		RefreshToken:          tokenInfo.RefreshToken,
+		IDToken:               tokenInfo.IDToken,
+		ExpiresIn:             tokenInfo.ExpiresIn,
+		ExpiresAt:             tokenInfo.ExpiresAt,
+		ClientID:              tokenInfo.ClientID,
+		Email:                 tokenInfo.Email,
+		ChatGPTAccountID:      tokenInfo.ChatGPTAccountID,
+		ChatGPTUserID:         tokenInfo.ChatGPTUserID,
+		OrganizationID:        tokenInfo.OrganizationID,
+		PlanType:              tokenInfo.PlanType,
+		SubscriptionExpiresAt: tokenInfo.SubscriptionExpiresAt,
+		PrivacyMode:           tokenInfo.PrivacyMode,
+	}
+}
+
+func openAIOAuthProxyURL(ctx context.Context, adminService service.AdminService, proxyID *int64) string {
+	if proxyID == nil {
+		return ""
+	}
+	proxy, err := adminService.GetProxy(ctx, *proxyID)
+	if err != nil || proxy == nil {
+		return ""
+	}
+	return proxy.URL()
+}
+
+type openAIOAuthCreateAccountParams struct {
+	Name                    string
+	Notes                   *string
+	Credentials             map[string]any
+	Extra                   map[string]any
+	ProxyID                 *int64
+	Concurrency             int
+	LoadFactor              *int
+	Priority                int
+	RateMultiplier          *float64
+	GroupIDs                []int64
+	ExpiresAt               *int64
+	AutoPauseOnExpired      *bool
+	ConfirmMixedChannelRisk *bool
+}
+
+func (h *OpenAIOAuthHandler) createOpenAIOAuthAccount(c *gin.Context, tokenInfo *service.OpenAITokenInfo, params openAIOAuthCreateAccountParams) {
+	// Build credentials from token info and merge only non-sensitive create options from the request.
+	credentials := mergeOpenAIOAuthCreateCredentialOptions(h.openaiOAuthService.BuildAccountCredentials(tokenInfo), params.Credentials)
+
+	name := params.Name
+	if name == "" && tokenInfo.Email != "" {
+		name = tokenInfo.Email
+	}
+	if name == "" {
+		name = "OpenAI OAuth Account"
+	}
+
+	if params.RateMultiplier != nil && *params.RateMultiplier < 0 {
+		response.BadRequest(c, "rate_multiplier must be >= 0")
+		return
+	}
+	if params.LoadFactor != nil && *params.LoadFactor > 10000 {
+		response.BadRequest(c, "load_factor must be <= 10000")
+		return
+	}
+	if tokenInfo.CodexFingerprint == nil {
+		response.BadRequest(c, "OpenAI OAuth session fingerprint is missing")
+		return
+	}
+
+	// Create account. The Codex fingerprint is passed separately so generic Extra
+	// normalization still strips client-supplied fingerprint placeholders.
+	account, err := h.adminService.CreateAccount(c.Request.Context(), &service.CreateAccountInput{
+		Name:                   name,
+		Notes:                  params.Notes,
+		Platform:               oauthPlatformFromPath(c),
+		Type:                   "oauth",
+		Credentials:            credentials,
+		Extra:                  params.Extra,
+		ProxyID:                params.ProxyID,
+		Concurrency:            params.Concurrency,
+		Priority:               params.Priority,
+		RateMultiplier:         params.RateMultiplier,
+		LoadFactor:             params.LoadFactor,
+		GroupIDs:               params.GroupIDs,
+		ExpiresAt:              params.ExpiresAt,
+		AutoPauseOnExpired:     params.AutoPauseOnExpired,
+		SkipMixedChannelCheck:  params.ConfirmMixedChannelRisk != nil && *params.ConfirmMixedChannelRisk,
+		OpenAICodexFingerprint: tokenInfo.CodexFingerprint,
+	})
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	response.Success(c, dto.AccountFromService(account))
+}
+
 // NewOpenAIOAuthHandler creates a new OpenAI OAuth handler
-func NewOpenAIOAuthHandler(openaiOAuthService *service.OpenAIOAuthService, adminService service.AdminService) *OpenAIOAuthHandler {
+func NewOpenAIOAuthHandler(
+	openaiOAuthService *service.OpenAIOAuthService,
+	adminService service.AdminService,
+	quotaService *service.OpenAIQuotaService,
+) *OpenAIOAuthHandler {
 	return &OpenAIOAuthHandler{
 		openaiOAuthService: openaiOAuthService,
 		adminService:       adminService,
+		quotaService:       quotaService,
 	}
 }
 
@@ -34,6 +200,7 @@ func NewOpenAIOAuthHandler(openaiOAuthService *service.OpenAIOAuthService, admin
 type OpenAIGenerateAuthURLRequest struct {
 	ProxyID     *int64 `json:"proxy_id"`
 	RedirectURI string `json:"redirect_uri"`
+	AccountID   *int64 `json:"account_id"`
 }
 
 // GenerateAuthURL generates OpenAI OAuth authorization URL
@@ -45,12 +212,30 @@ func (h *OpenAIOAuthHandler) GenerateAuthURL(c *gin.Context) {
 		req = OpenAIGenerateAuthURLRequest{}
 	}
 
-	result, err := h.openaiOAuthService.GenerateAuthURL(
-		c.Request.Context(),
-		req.ProxyID,
-		req.RedirectURI,
-		oauthPlatformFromPath(c),
-	)
+	var account *service.Account
+	if req.AccountID != nil {
+		loaded, err := h.adminService.GetAccount(c.Request.Context(), *req.AccountID)
+		if err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+		platform := oauthPlatformFromPath(c)
+		if loaded.Platform != platform || !loaded.IsOpenAIOAuthLike() {
+			response.BadRequest(c, "Account platform or type does not match OpenAI OAuth endpoint")
+			return
+		}
+		account = loaded
+		if req.ProxyID == nil {
+			req.ProxyID = loaded.ProxyID
+		}
+	}
+
+	result, err := h.openaiOAuthService.GenerateAuthURLWithInput(c.Request.Context(), service.OpenAIAuthURLInput{
+		ProxyID:     req.ProxyID,
+		RedirectURI: req.RedirectURI,
+		Platform:    oauthPlatformFromPath(c),
+		Account:     account,
+	})
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -89,7 +274,7 @@ func (h *OpenAIOAuthHandler) ExchangeCode(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, tokenInfo)
+	response.Success(c, openAIOAuthTokenResponse(tokenInfo))
 }
 
 // OpenAIRefreshTokenRequest represents the request for refreshing OpenAI token
@@ -117,13 +302,7 @@ func (h *OpenAIOAuthHandler) RefreshToken(c *gin.Context) {
 		return
 	}
 
-	var proxyURL string
-	if req.ProxyID != nil {
-		proxy, err := h.adminService.GetProxy(c.Request.Context(), *req.ProxyID)
-		if err == nil && proxy != nil {
-			proxyURL = proxy.URL()
-		}
-	}
+	proxyURL := openAIOAuthProxyURL(c.Request.Context(), h.adminService, req.ProxyID)
 
 	// 未指定 client_id 时，根据请求路径平台自动设置默认值，避免 repository 层盲猜
 	clientID := strings.TrimSpace(req.ClientID)
@@ -132,13 +311,77 @@ func (h *OpenAIOAuthHandler) RefreshToken(c *gin.Context) {
 		clientID, _ = openai.OAuthClientConfigByPlatform(platform)
 	}
 
-	tokenInfo, err := h.openaiOAuthService.RefreshTokenWithClientID(c.Request.Context(), refreshToken, proxyURL, clientID)
+	tokenInfo, err := h.openaiOAuthService.RefreshTokenForNewAccount(c.Request.Context(), refreshToken, proxyURL, clientID)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
 
-	response.Success(c, tokenInfo)
+	response.Success(c, openAIOAuthTokenResponse(tokenInfo))
+}
+
+// OpenAICreateAccountFromRefreshTokenRequest creates an OpenAI OAuth account from a manually supplied refresh token.
+type OpenAICreateAccountFromRefreshTokenRequest struct {
+	RefreshToken            string         `json:"refresh_token"`
+	RT                      string         `json:"rt"`
+	ClientID                string         `json:"client_id"`
+	ProxyID                 *int64         `json:"proxy_id"`
+	Name                    string         `json:"name"`
+	Notes                   *string        `json:"notes"`
+	Credentials             map[string]any `json:"credentials"`
+	Extra                   map[string]any `json:"extra"`
+	Concurrency             int            `json:"concurrency"`
+	LoadFactor              *int           `json:"load_factor"`
+	Priority                int            `json:"priority"`
+	RateMultiplier          *float64       `json:"rate_multiplier"`
+	GroupIDs                []int64        `json:"group_ids"`
+	ExpiresAt               *int64         `json:"expires_at"`
+	AutoPauseOnExpired      *bool          `json:"auto_pause_on_expired"`
+	ConfirmMixedChannelRisk *bool          `json:"confirm_mixed_channel_risk"`
+}
+
+// CreateAccountFromRefreshToken creates a new OpenAI OAuth account from a refresh token.
+// POST /api/v1/admin/openai/create-from-refresh-token
+func (h *OpenAIOAuthHandler) CreateAccountFromRefreshToken(c *gin.Context) {
+	var req OpenAICreateAccountFromRefreshTokenRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	refreshToken := strings.TrimSpace(req.RefreshToken)
+	if refreshToken == "" {
+		refreshToken = strings.TrimSpace(req.RT)
+	}
+	if refreshToken == "" {
+		response.BadRequest(c, "refresh_token is required")
+		return
+	}
+
+	clientID := strings.TrimSpace(req.ClientID)
+	if clientID == "" {
+		clientID, _ = openai.OAuthClientConfigByPlatform(oauthPlatformFromPath(c))
+	}
+	tokenInfo, err := h.openaiOAuthService.RefreshTokenForNewAccount(c.Request.Context(), refreshToken, openAIOAuthProxyURL(c.Request.Context(), h.adminService, req.ProxyID), clientID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	h.createOpenAIOAuthAccount(c, tokenInfo, openAIOAuthCreateAccountParams{
+		Name:                    req.Name,
+		Notes:                   req.Notes,
+		Credentials:             req.Credentials,
+		Extra:                   req.Extra,
+		ProxyID:                 req.ProxyID,
+		Concurrency:             req.Concurrency,
+		LoadFactor:              req.LoadFactor,
+		Priority:                req.Priority,
+		RateMultiplier:          req.RateMultiplier,
+		GroupIDs:                req.GroupIDs,
+		ExpiresAt:               req.ExpiresAt,
+		AutoPauseOnExpired:      req.AutoPauseOnExpired,
+		ConfirmMixedChannelRisk: req.ConfirmMixedChannelRisk,
+	})
 }
 
 // RefreshAccountToken refreshes token for a specific OpenAI account
@@ -163,7 +406,7 @@ func (h *OpenAIOAuthHandler) RefreshAccountToken(c *gin.Context) {
 		return
 	}
 
-	// Only refresh OAuth-based accounts
+	// Only refresh OAuth-like accounts; setup-token reuses access-token metadata when no RT exists.
 	if !account.IsOAuth() {
 		response.BadRequest(c, "Cannot refresh non-OAuth account credentials")
 		return
@@ -201,15 +444,23 @@ func (h *OpenAIOAuthHandler) RefreshAccountToken(c *gin.Context) {
 // POST /api/v1/admin/openai/create-from-oauth
 func (h *OpenAIOAuthHandler) CreateAccountFromOAuth(c *gin.Context) {
 	var req struct {
-		SessionID   string  `json:"session_id" binding:"required"`
-		Code        string  `json:"code" binding:"required"`
-		State       string  `json:"state" binding:"required"`
-		RedirectURI string  `json:"redirect_uri"`
-		ProxyID     *int64  `json:"proxy_id"`
-		Name        string  `json:"name"`
-		Concurrency int     `json:"concurrency"`
-		Priority    int     `json:"priority"`
-		GroupIDs    []int64 `json:"group_ids"`
+		SessionID               string         `json:"session_id" binding:"required"`
+		Code                    string         `json:"code" binding:"required"`
+		State                   string         `json:"state" binding:"required"`
+		RedirectURI             string         `json:"redirect_uri"`
+		ProxyID                 *int64         `json:"proxy_id"`
+		Name                    string         `json:"name"`
+		Notes                   *string        `json:"notes"`
+		Credentials             map[string]any `json:"credentials"`
+		Extra                   map[string]any `json:"extra"`
+		Concurrency             int            `json:"concurrency"`
+		LoadFactor              *int           `json:"load_factor"`
+		Priority                int            `json:"priority"`
+		RateMultiplier          *float64       `json:"rate_multiplier"`
+		GroupIDs                []int64        `json:"group_ids"`
+		ExpiresAt               *int64         `json:"expires_at"`
+		AutoPauseOnExpired      *bool          `json:"auto_pause_on_expired"`
+		ConfirmMixedChannelRisk *bool          `json:"confirm_mixed_channel_risk"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
@@ -229,36 +480,59 @@ func (h *OpenAIOAuthHandler) CreateAccountFromOAuth(c *gin.Context) {
 		return
 	}
 
-	// Build credentials from token info
-	credentials := h.openaiOAuthService.BuildAccountCredentials(tokenInfo)
-
-	platform := oauthPlatformFromPath(c)
-
-	// Use email as default name if not provided
-	name := req.Name
-	if name == "" && tokenInfo.Email != "" {
-		name = tokenInfo.Email
-	}
-	if name == "" {
-		name = "OpenAI OAuth Account"
-	}
-
-	// Create account
-	account, err := h.adminService.CreateAccount(c.Request.Context(), &service.CreateAccountInput{
-		Name:        name,
-		Platform:    platform,
-		Type:        "oauth",
-		Credentials: credentials,
-		Extra:       nil,
-		ProxyID:     req.ProxyID,
-		Concurrency: req.Concurrency,
-		Priority:    req.Priority,
-		GroupIDs:    req.GroupIDs,
+	h.createOpenAIOAuthAccount(c, tokenInfo, openAIOAuthCreateAccountParams{
+		Name:                    req.Name,
+		Notes:                   req.Notes,
+		Credentials:             req.Credentials,
+		Extra:                   req.Extra,
+		ProxyID:                 req.ProxyID,
+		Concurrency:             req.Concurrency,
+		LoadFactor:              req.LoadFactor,
+		Priority:                req.Priority,
+		RateMultiplier:          req.RateMultiplier,
+		GroupIDs:                req.GroupIDs,
+		ExpiresAt:               req.ExpiresAt,
+		AutoPauseOnExpired:      req.AutoPauseOnExpired,
+		ConfirmMixedChannelRisk: req.ConfirmMixedChannelRisk,
 	})
+}
+
+// QueryQuota queries the rate-limit / quota usage for an OpenAI account.
+// GET /api/v1/admin/openai/accounts/:id/quota
+func (h *OpenAIOAuthHandler) QueryQuota(c *gin.Context) {
+	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid account ID")
+		return
+	}
+	if h.quotaService == nil {
+		response.BadRequest(c, "openai quota service is not enabled")
+		return
+	}
+	usage, err := h.quotaService.QueryUsage(c.Request.Context(), accountID)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
+	response.Success(c, usage)
+}
 
-	response.Success(c, dto.AccountFromService(account))
+// ResetQuota consumes one rate-limit reset credit for an OpenAI account.
+// POST /api/v1/admin/openai/accounts/:id/reset-quota
+func (h *OpenAIOAuthHandler) ResetQuota(c *gin.Context) {
+	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid account ID")
+		return
+	}
+	if h.quotaService == nil {
+		response.BadRequest(c, "openai quota service is not enabled")
+		return
+	}
+	result, err := h.quotaService.ResetCredit(c.Request.Context(), accountID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
 }

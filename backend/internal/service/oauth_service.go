@@ -12,9 +12,15 @@ import (
 
 // OpenAIOAuthClient interface for OpenAI OAuth operations
 type OpenAIOAuthClient interface {
-	ExchangeCode(ctx context.Context, code, codeVerifier, redirectURI, proxyURL, clientID string) (*openai.TokenResponse, error)
+	ExchangeCode(ctx context.Context, code, codeVerifier, redirectURI, proxyURL string, opts OpenAIOAuthTokenOptions) (*openai.TokenResponse, error)
 	RefreshToken(ctx context.Context, refreshToken, proxyURL string) (*openai.TokenResponse, error)
 	RefreshTokenWithClientID(ctx context.Context, refreshToken, proxyURL string, clientID string) (*openai.TokenResponse, error)
+	RefreshTokenWithOptions(ctx context.Context, refreshToken, proxyURL string, opts OpenAIOAuthTokenOptions) (*openai.TokenResponse, error)
+}
+
+type OpenAIOAuthTokenOptions struct {
+	ClientID  string
+	UAProfile OpenAICodexUAProfile
 }
 
 // ClaudeOAuthClient handles HTTP requests for Claude OAuth flows

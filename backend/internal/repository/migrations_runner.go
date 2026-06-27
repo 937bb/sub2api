@@ -53,6 +53,8 @@ const migrationsLockRetryInterval = 500 * time.Millisecond
 const nonTransactionalMigrationSuffix = "_notx.sql"
 const paymentOrdersOutTradeNoUniqueMigration = "120_enforce_payment_orders_out_trade_no_unique_notx.sql"
 const paymentOrdersOutTradeNoUniqueIndex = "paymentorder_out_trade_no_unique"
+const schedulerOutboxPendingDedupKeyMigration = "154_scheduler_outbox_pending_dedup_key_index_notx.sql"
+const schedulerOutboxPendingDedupKeyIndex = "idx_scheduler_outbox_pending_dedup_key"
 
 type migrationChecksumCompatibilityRule struct {
 	fileChecksum       string
@@ -209,11 +211,8 @@ func applyMigrationsFS(ctx context.Context, db *sql.DB, fsys fs.FS) error {
 			// 逐条语句执行，避免将多条 CONCURRENTLY 语句放入同一个隐式事务块。
 			statements := splitSQLStatements(content)
 			for i, stmt := range statements {
-				trimmed := strings.TrimSpace(stmt)
+				trimmed := stripSQLLineComment(stmt)
 				if trimmed == "" {
-					continue
-				}
-				if stripSQLLineComment(trimmed) == "" {
 					continue
 				}
 				if _, err := db.ExecContext(ctx, trimmed); err != nil {
@@ -258,6 +257,8 @@ func prepareNonTransactionalMigration(ctx context.Context, db *sql.DB, name stri
 	switch name {
 	case paymentOrdersOutTradeNoUniqueMigration:
 		return preparePaymentOrdersOutTradeNoUniqueMigration(ctx, db)
+	case schedulerOutboxPendingDedupKeyMigration:
+		return dropInvalidIndexIfPresent(ctx, db, schedulerOutboxPendingDedupKeyIndex)
 	default:
 		return nil
 	}
@@ -276,16 +277,20 @@ func preparePaymentOrdersOutTradeNoUniqueMigration(ctx context.Context, db *sql.
 		)
 	}
 
-	invalid, err := indexIsInvalid(ctx, db, paymentOrdersOutTradeNoUniqueIndex)
+	return dropInvalidIndexIfPresent(ctx, db, paymentOrdersOutTradeNoUniqueIndex)
+}
+
+func dropInvalidIndexIfPresent(ctx context.Context, db *sql.DB, indexName string) error {
+	invalid, err := indexIsInvalid(ctx, db, indexName)
 	if err != nil {
-		return fmt.Errorf("check invalid index %s: %w", paymentOrdersOutTradeNoUniqueIndex, err)
+		return fmt.Errorf("check invalid index %s: %w", indexName, err)
 	}
 	if !invalid {
 		return nil
 	}
 
-	if _, err := db.ExecContext(ctx, fmt.Sprintf("DROP INDEX CONCURRENTLY IF EXISTS %s", paymentOrdersOutTradeNoUniqueIndex)); err != nil {
-		return fmt.Errorf("drop invalid index %s: %w", paymentOrdersOutTradeNoUniqueIndex, err)
+	if _, err := db.ExecContext(ctx, fmt.Sprintf("DROP INDEX CONCURRENTLY IF EXISTS %s", indexName)); err != nil {
+		return fmt.Errorf("drop invalid index %s: %w", indexName, err)
 	}
 	return nil
 }
@@ -443,7 +448,8 @@ func isMigrationChecksumCompatible(name, dbChecksum, fileChecksum string) bool {
 
 func validateMigrationExecutionMode(name, content string) (bool, error) {
 	normalizedName := strings.ToLower(strings.TrimSpace(name))
-	upperContent := strings.ToUpper(content)
+	commentlessContent := stripSQLLineComment(content)
+	upperContent := strings.ToUpper(commentlessContent)
 	nonTx := strings.HasSuffix(normalizedName, nonTransactionalMigrationSuffix)
 
 	if !nonTx {
@@ -486,13 +492,17 @@ func validateMigrationExecutionMode(name, content string) (bool, error) {
 }
 
 func splitSQLStatements(content string) []string {
+	// Strip line comments before splitting so semicolons in comments do not
+	// become executable statement fragments.
+	content = stripSQLLineComment(content)
 	parts := strings.Split(content, ";")
 	out := make([]string, 0, len(parts))
 	for _, part := range parts {
-		if strings.TrimSpace(part) == "" {
+		trimmed := strings.TrimSpace(part)
+		if trimmed == "" {
 			continue
 		}
-		out = append(out, part)
+		out = append(out, trimmed)
 	}
 	return out
 }

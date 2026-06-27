@@ -88,7 +88,7 @@ func (s *OpenAIGatewayService) ForwardEmbeddings(
 	}
 	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 	if err != nil {
-		safeErr := sanitizeUpstreamErrorMessage(err.Error())
+		safeErr := sanitizeOpenAIUpstreamDiagnosticText(err.Error())
 		setOpsUpstreamError(c, 0, safeErr, "")
 		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 			Platform:           account.Platform,
@@ -109,7 +109,7 @@ func (s *OpenAIGatewayService) ForwardEmbeddings(
 		resp.Body = io.NopCloser(bytes.NewReader(respBody))
 
 		upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
-		upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
+		upstreamMsg = sanitizeOpenAIUpstreamDiagnosticText(upstreamMsg)
 		if s.shouldFailoverOpenAIUpstreamResponse(resp.StatusCode, upstreamMsg, respBody) {
 			upstreamDetail := ""
 			if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
@@ -117,7 +117,7 @@ func (s *OpenAIGatewayService) ForwardEmbeddings(
 				if maxBytes <= 0 {
 					maxBytes = 2048
 				}
-				upstreamDetail = truncateString(string(respBody), maxBytes)
+				upstreamDetail = sanitizeOpenAIUpstreamDiagnosticBodyForLog(respBody, maxBytes)
 			}
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 				Platform:           account.Platform,
@@ -181,6 +181,7 @@ func writeOpenAIEmbeddingsUpstreamResponse(c *gin.Context, resp *http.Response, 
 }
 
 func writeOpenAIEmbeddingsError(c *gin.Context, statusCode int, errType, message string) {
+	MarkResponseCommitted(c)
 	c.JSON(statusCode, gin.H{
 		"error": gin.H{
 			"type":    errType,
@@ -214,8 +215,14 @@ func extractOpenAIEmbeddingsUsage(body []byte) OpenAIUsage {
 		usage.Get("cache_creation_input_tokens"),
 		usage.Get("input_tokens_details.cache_creation_tokens"),
 	)
+	// 多模态 embedding 可回传图文 token 拆分，供图文不同价计费。
+	imageInputTokens := firstPositiveGJSONInt(
+		usage.Get("prompt_tokens_details.image_tokens"),
+		usage.Get("input_tokens_details.image_tokens"),
+	)
 	return OpenAIUsage{
 		InputTokens:              inputTokens,
+		ImageInputTokens:         imageInputTokens,
 		OutputTokens:             outputTokens,
 		CacheReadInputTokens:     cacheReadTokens,
 		CacheCreationInputTokens: cacheCreationTokens,

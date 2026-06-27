@@ -65,3 +65,65 @@ func TestAccountFromServiceShallow_NilCredentialsOmitsStatus(t *testing.T) {
 	require.Nil(t, got.Credentials)
 	require.Nil(t, got.CredentialsStatus)
 }
+
+func TestAccountFromServiceShallow_RedactsOpenAICodexFingerprintExtra(t *testing.T) {
+	src := &service.Account{
+		ID:       42,
+		Name:     "demo",
+		Platform: service.PlatformOpenAI,
+		Type:     service.AccountTypeOAuth,
+		Extra: map[string]any{
+			service.OpenAICodexFingerprintExtraKey: map[string]any{
+				"schema_version":  1,
+				"installation_id": "550e8400-e29b-41d4-a716-446655440000",
+				"ua_profile": map[string]any{
+					"originator":     "codex-tui",
+					"codex_version":  "0.136.0",
+					"os_fingerprint": "Mac OS 26.5.0; arm64",
+					"terminal_token": "Apple_Terminal/470.2",
+					"raw_user_agent": "codex-tui/0.136.0 (Mac OS 26.5.0; arm64) Apple_Terminal/470.2 (codex-tui; 0.136.0)",
+				},
+				"created_at": "2026-06-12T00:00:00Z",
+				"updated_at": "2026-06-13T00:00:00Z",
+			},
+			"safe": "value",
+		},
+	}
+
+	got := AccountFromServiceShallow(src)
+	require.NotNil(t, got)
+	require.Equal(t, "value", got.Extra["safe"])
+	fingerprint, ok := got.Extra[service.OpenAICodexFingerprintExtraKey].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, true, fingerprint["present"])
+	require.Equal(t, 1, fingerprint["schema_version"])
+	require.Equal(t, "2026-06-12T00:00:00Z", fingerprint["created_at"])
+	require.NotContains(t, fingerprint, "installation_id")
+	require.NotContains(t, fingerprint, "ua_profile")
+
+	raw, err := json.Marshal(got)
+	require.NoError(t, err)
+	require.NotContains(t, string(raw), "550e8400-e29b-41d4-a716-446655440000")
+	require.NotContains(t, string(raw), "Apple_Terminal/470.2")
+}
+
+func TestAccountFromServiceShallow_DropsOpenAICodexFingerprintForAPIKey(t *testing.T) {
+	src := &service.Account{
+		ID:       43,
+		Name:     "apikey",
+		Platform: service.PlatformOpenAI,
+		Type:     service.AccountTypeAPIKey,
+		Extra: map[string]any{
+			service.OpenAICodexFingerprintExtraKey: map[string]any{
+				"schema_version":  1,
+				"installation_id": "550e8400-e29b-41d4-a716-446655440000",
+			},
+			"safe": "value",
+		},
+	}
+
+	got := AccountFromServiceShallow(src)
+	require.NotNil(t, got)
+	require.Equal(t, "value", got.Extra["safe"])
+	require.NotContains(t, got.Extra, service.OpenAICodexFingerprintExtraKey)
+}

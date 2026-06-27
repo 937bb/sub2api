@@ -136,8 +136,25 @@ func (p *OpenAITokenProvider) GetAccessToken(ctx context.Context, account *Accou
 	if account == nil {
 		return "", errors.New("account is nil")
 	}
-	if account.Platform != PlatformOpenAI || account.Type != AccountTypeOAuth {
+	if account.Platform != PlatformOpenAI || (account.Type != AccountTypeOAuth && account.Type != AccountTypeSetupToken) {
 		return "", errors.New("not an openai oauth account")
+	}
+
+	if token := strings.TrimSpace(account.GetOpenAIPersonalAccessToken()); token != "" {
+		if err := p.ensurePersonalAccessTokenMetadata(ctx, account, token); err != nil {
+			return "", err
+		}
+		return token, nil
+	}
+
+	if account.Type == AccountTypeSetupToken {
+		// setup-token 只在 OpenAI adapter 边界复用 access_token；不读写 OAuth token cache，
+		// 避免账号类型/凭证切换后复用旧 OAuth access_token。
+		accessToken := account.GetOpenAIAccessToken()
+		if strings.TrimSpace(accessToken) == "" {
+			return "", errors.New("access_token not found in credentials")
+		}
+		return accessToken, nil
 	}
 
 	cacheKey := OpenAITokenCacheKey(account)
@@ -227,7 +244,7 @@ func (p *OpenAITokenProvider) GetAccessToken(ctx context.Context, account *Accou
 		}
 	}
 
-	accessToken := account.GetCredential("access_token")
+	accessToken := account.GetOpenAIOAuthBearerToken()
 	if strings.TrimSpace(accessToken) == "" {
 		return "", errors.New("access_token not found in credentials")
 	}
@@ -237,7 +254,7 @@ func (p *OpenAITokenProvider) GetAccessToken(ctx context.Context, account *Accou
 		latestAccount, isStale := CheckTokenVersion(ctx, account, p.accountRepo)
 		if isStale && latestAccount != nil {
 			slog.Debug("openai_token_version_stale_use_latest", "account_id", account.ID)
-			accessToken = latestAccount.GetOpenAIAccessToken()
+			accessToken = latestAccount.GetOpenAIOAuthBearerToken()
 			if strings.TrimSpace(accessToken) == "" {
 				return "", errors.New("access_token not found after version check")
 			}
@@ -270,6 +287,30 @@ func (p *OpenAITokenProvider) GetAccessToken(ctx context.Context, account *Accou
 	return accessToken, nil
 }
 
+func (p *OpenAITokenProvider) ensurePersonalAccessTokenMetadata(ctx context.Context, account *Account, personalAccessToken string) error {
+	if err := ValidateOpenAIPersonalAccessToken(personalAccessToken); err != nil {
+		return err
+	}
+	if !AccountNeedsOpenAIPersonalAccessTokenMetadataHydration(account, personalAccessToken) {
+		return nil
+	}
+	if p == nil || p.openAIOAuthService == nil {
+		return errors.New("OpenAI personal_access_token whoami hydration is not configured")
+	}
+	metadata, err := p.openAIOAuthService.HydratePersonalAccessToken(ctx, personalAccessToken, account.ProxyID)
+	if err != nil {
+		if isOpenAIPersonalAccessTokenHydrationOwner403(account, err) {
+			p.disableAccountPersonalAccessTokenOwner403(account, err)
+		}
+		return err
+	}
+	if err := persistOpenAIPersonalAccessTokenMetadata(ctx, p.accountRepo, account, personalAccessToken, metadata); err != nil {
+		return err
+	}
+	slog.Info("openai_personal_access_token_metadata_hydrated", "account_id", account.ID, "chatgpt_account_id", metadata.ChatGPTAccountID, "plan_type", metadata.ChatGPTPlanType)
+	return nil
+}
+
 // disableAccountMissingRefreshToken 在请求路径上发现 OpenAI OAuth 账号
 // 凭证已过期且 refresh_token 缺失时，将账号标记为 error 状态。
 // 这是一种永久性故障：仅靠后续请求或 TokenRefreshService 不会自愈
@@ -277,11 +318,28 @@ func (p *OpenAITokenProvider) GetAccessToken(ctx context.Context, account *Accou
 // 必须主动剔除以避免账号被持续选中导致用户端反复 502。
 // 使用 background context 是因为请求 context 可能很快结束。
 func (p *OpenAITokenProvider) disableAccountMissingRefreshToken(account *Account, reason string) {
+	p.disableAccountFromTokenProvider(account, reason, "missing_refresh_token", "openai_token_provider.account_disabled_missing_refresh_token")
+}
+
+// disableAccountPersonalAccessTokenOwner403 处理 PAT whoami 阶段返回的 owner
+// 状态 403。该错误发生在真正转发请求前，无法走上游响应的统一 403 分支，
+// 因此需要在 token provider 边界同步剔除调度，避免持续被选中并在网关侧表现为 502。
+func (p *OpenAITokenProvider) disableAccountPersonalAccessTokenOwner403(account *Account, cause error) {
+	msg := buildOpenAIForbiddenErrorMessage(
+		"Access forbidden (403):",
+		openAIPersonalAccessTokenHydrationErrorMessage(cause),
+		openAIPersonalAccessTokenHydrationErrorBody(cause),
+		"account may be suspended or lack permissions",
+	)
+	p.disableAccountFromTokenProvider(account, msg, "openai_pat_owner_403", "openai_token_provider.account_disabled_pat_owner_403")
+}
+
+func (p *OpenAITokenProvider) disableAccountFromTokenProvider(account *Account, reason string, blockReason string, logEvent string) {
 	if p == nil || p.accountRepo == nil || account == nil {
 		return
 	}
 	if p.runtimeBlocker != nil {
-		p.runtimeBlocker.BlockAccountScheduling(account, time.Time{}, "missing_refresh_token")
+		p.runtimeBlocker.BlockAccountScheduling(account, time.Time{}, blockReason)
 	}
 	bgCtx := context.Background()
 	if err := p.accountRepo.SetError(bgCtx, account.ID, reason); err != nil {
@@ -300,10 +358,37 @@ func (p *OpenAITokenProvider) disableAccountMissingRefreshToken(account *Account
 			)
 		}
 	}
-	slog.Warn("openai_token_provider.account_disabled_missing_refresh_token",
+	slog.Warn(logEvent,
 		"account_id", account.ID,
 		"reason", reason,
 	)
+}
+
+func isOpenAIPersonalAccessTokenHydrationOwner403(account *Account, err error) bool {
+	if err == nil {
+		return false
+	}
+	var whoamiErr *openAIPersonalAccessTokenWhoamiError
+	if errors.As(err, &whoamiErr) {
+		return whoamiErr.statusCode == 403 && isOpenAIPersonalAccessTokenOwner403(account, "", []byte(whoamiErr.body))
+	}
+	return isOpenAIPersonalAccessTokenOwner403(account, err.Error(), nil)
+}
+
+func openAIPersonalAccessTokenHydrationErrorMessage(err error) string {
+	var whoamiErr *openAIPersonalAccessTokenWhoamiError
+	if errors.As(err, &whoamiErr) {
+		return sanitizeOpenAIUpstreamDiagnosticText(extractUpstreamErrorMessage([]byte(whoamiErr.body)))
+	}
+	return sanitizeOpenAIUpstreamDiagnosticText(err.Error())
+}
+
+func openAIPersonalAccessTokenHydrationErrorBody(err error) []byte {
+	var whoamiErr *openAIPersonalAccessTokenWhoamiError
+	if errors.As(err, &whoamiErr) {
+		return []byte(whoamiErr.body)
+	}
+	return nil
 }
 
 func (p *OpenAITokenProvider) waitForTokenAfterLockRace(ctx context.Context, cacheKey string) (string, error) {

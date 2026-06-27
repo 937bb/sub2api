@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -443,6 +444,41 @@ func TestResolveOpenAIMessagesDispatchMappedModel(t *testing.T) {
 		require.Empty(t, resolveOpenAIMessagesDispatchMappedModel(apiKey, "gpt-5.4"))
 		require.Equal(t, "gpt-5.3-codex", resolveOpenAIMessagesDispatchMappedModel(apiKey, "claude-sonnet-4-5-20250929"))
 	})
+}
+
+func TestOpenAIModelMappedBody(t *testing.T) {
+	body := []byte(`{"model":"alias","input":"hello"}`)
+	calls := 0
+
+	forwardBody := openAIModelMappedBody(body, true, "gpt-5.4", func(body []byte, newModel string) []byte {
+		calls++
+		return service.ReplaceModelInBody(body, newModel)
+	})
+
+	require.Equal(t, 1, calls)
+	require.Equal(t, "gpt-5.4", gjson.GetBytes(forwardBody, "model").String())
+	require.Equal(t, "alias", gjson.GetBytes(body, "model").String())
+}
+
+func TestOpenAIModelMappedBodyCache(t *testing.T) {
+	body := []byte(`{"model":"alias","input":"hello"}`)
+	calls := 0
+	mappedBody := newOpenAIModelMappedBodyCache(body, func(body []byte, newModel string) []byte {
+		calls++
+		return service.ReplaceModelInBody(body, newModel)
+	})
+
+	first := mappedBody(true, "gpt-5.4")
+	second := mappedBody(true, "gpt-5.4")
+	third := mappedBody(true, "gpt-5.3-codex")
+	unmapped := mappedBody(false, "ignored")
+
+	require.Equal(t, 2, calls)
+	require.Equal(t, "gpt-5.4", gjson.GetBytes(first, "model").String())
+	require.Equal(t, "gpt-5.4", gjson.GetBytes(second, "model").String())
+	require.Equal(t, "gpt-5.3-codex", gjson.GetBytes(third, "model").String())
+	require.Equal(t, body, unmapped)
+	require.Same(t, &first[0], &second[0])
 }
 
 func TestOpenAIResponses_MissingDependencies_ReturnsServiceUnavailable(t *testing.T) {
@@ -1173,6 +1209,106 @@ func (s *openAIWSUsageHandlerChannelRepoStub) GetGroupPlatforms(ctx context.Cont
 		}
 	}
 	return out, nil
+}
+
+type openAIMessagesUsageHTTPUpstream struct {
+	service.HTTPUpstream
+	body string
+}
+
+func (u openAIMessagesUsageHTTPUpstream) Do(_ *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header: http.Header{
+			"Content-Type": []string{"text/event-stream"},
+			"X-Request-Id": []string{"req_messages_policy_usage"},
+		},
+		Body: io.NopCloser(strings.NewReader(u.body)),
+	}, nil
+}
+
+func TestOpenAIMessages_PreOutputPolicyFailureRecordsUsage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	groupID := int64(4242)
+	accountRepo := &openAIWSFailoverHandlerAccountRepoStub{accounts: []service.Account{
+		{
+			ID:          9904,
+			Name:        "openai-messages-policy",
+			Platform:    service.PlatformOpenAI,
+			Type:        service.AccountTypeAPIKey,
+			Status:      service.StatusActive,
+			Schedulable: true,
+			Concurrency: 0,
+			Credentials: map[string]any{"api_key": "sk-test"},
+		},
+	}}
+	usageRepo := &openAIWSUsageHandlerUsageLogRepoStub{created: make(chan *service.UsageLog, 1)}
+	cfg := &config.Config{RunMode: config.RunModeSimple}
+	billingCacheSvc := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
+	t.Cleanup(billingCacheSvc.Stop)
+	concurrencySvc := service.NewConcurrencyService(nil)
+	upstreamBody := strings.Join([]string{
+		`data: {"type":"response.failed","response":{"id":"resp_policy_usage","object":"response","model":"gpt-5.4","status":"failed","error":{"type":"invalid_request_error","code":"content_policy_violation","message":"request violates safety policy"},"output":[],"usage":{"input_tokens":5,"output_tokens":0,"total_tokens":5}}}`,
+		"",
+	}, "\n")
+	gatewaySvc := service.NewOpenAIGatewayService(
+		accountRepo,
+		usageRepo,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		cfg,
+		nil,
+		concurrencySvc,
+		service.NewBillingService(cfg, nil),
+		nil,
+		billingCacheSvc,
+		openAIMessagesUsageHTTPUpstream{body: upstreamBody},
+		&service.DeferredService{},
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+	)
+	h := NewOpenAIGatewayHandler(gatewaySvc, concurrencySvc, billingCacheSvc, &service.APIKeyService{}, nil, nil, nil, cfg)
+
+	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":true}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(string(body)))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set(string(middleware.ContextKeyAPIKey), &service.APIKey{
+		ID:      1803,
+		GroupID: &groupID,
+		User:    &service.User{ID: 1703, Status: service.StatusActive},
+		Group: &service.Group{
+			ID:                    groupID,
+			Platform:              service.PlatformOpenAI,
+			Status:                service.StatusActive,
+			AllowMessagesDispatch: true,
+		},
+	})
+	c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 1703, Concurrency: 0})
+
+	h.Messages(c)
+
+	require.Equal(t, http.StatusBadGateway, rec.Code)
+	require.Contains(t, rec.Body.String(), "request violates safety policy")
+	select {
+	case log := <-usageRepo.created:
+		require.Equal(t, int64(1703), log.UserID)
+		require.Equal(t, int64(9904), log.AccountID)
+		require.Equal(t, 5, log.InputTokens)
+		require.Equal(t, 0, log.OutputTokens)
+		require.True(t, log.Stream)
+	case <-time.After(time.Second):
+		t.Fatal("expected usage log for pre-output policy failure")
+	}
 }
 
 func TestOpenAIResponsesWebSocket_FailoverOnUpstreamUsageLimitEvent(t *testing.T) {
