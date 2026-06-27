@@ -15,9 +15,34 @@
       <div>
         <p class="text-xs font-medium text-gray-500">{{ t('usage.totalTokens') }}</p>
         <p class="text-xl font-bold">{{ formatTokens(stats?.total_tokens || 0) }}</p>
-        <p class="text-xs text-gray-500">
-          {{ t('usage.in') }}: {{ formatTokens(stats?.total_input_tokens || 0) }} /
-          {{ t('usage.out') }}: {{ formatTokens(stats?.total_output_tokens || 0) }}
+        <p class="flex flex-wrap items-center gap-x-1 text-xs text-gray-500">
+          <span>{{ t('usage.in') }}: {{ formatTokens(stats?.total_input_tokens || 0) }}</span>
+          <span>/</span>
+          <span>{{ t('usage.out') }}: {{ formatTokens(stats?.total_output_tokens || 0) }}</span>
+          <span>/</span>
+          <span class="group relative inline-flex cursor-help items-center gap-0.5" tabindex="0">
+            <span>{{ t('usage.cacheTotal') }}: {{ formatTokens(stats?.total_cache_tokens || 0) }}</span>
+            <Icon name="infoCircle" size="xs" class="text-gray-400" />
+            <span
+              class="pointer-events-none absolute left-1/2 top-full z-30 mt-2 w-56 -translate-x-1/2 rounded-lg border border-gray-200 bg-white p-3 text-left text-xs text-gray-700 opacity-0 shadow-lg transition-opacity duration-150 group-hover:opacity-100 group-focus:opacity-100 dark:border-dark-600 dark:bg-dark-800 dark:text-dark-200"
+            >
+              <span class="mb-2 block font-medium text-gray-900 dark:text-white">
+                {{ t('usage.cacheBreakdown') }}
+              </span>
+              <span class="flex items-center justify-between gap-3">
+                <span>{{ t('usage.cacheCreationTokensLabel') }}</span>
+                <span class="tabular-nums">
+                  {{ formatTokens(stats?.total_cache_creation_tokens || 0) }}
+                </span>
+              </span>
+              <span class="mt-1 flex items-center justify-between gap-3">
+                <span>{{ t('usage.cacheReadTokensLabel') }}</span>
+                <span class="tabular-nums">
+                  {{ formatTokens(stats?.total_cache_read_tokens || 0) }}
+                </span>
+              </span>
+            </span>
+          </span>
         </p>
       </div>
     </div>
