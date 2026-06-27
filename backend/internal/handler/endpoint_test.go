@@ -163,11 +163,33 @@ func TestGetUpstreamEndpoint_FullFlow(t *testing.T) {
 	require.Equal(t, "/v1/responses/compact", got)
 }
 
-func TestResolveRawCCUpstreamEndpointUsesResultUpstreamModel(t *testing.T) {
+func TestResolveOpenAIUpstreamEndpointUsesChatOnlyAPIKeyAcrossIngresses(t *testing.T) {
+	for _, inbound := range []string{EndpointChatCompletions, EndpointMessages, EndpointResponses} {
+		t.Run(inbound, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, inbound, nil)
+			c.Set(ctxKeyInboundEndpoint, inbound)
+
+			account := &service.Account{
+				Platform: service.PlatformOpenAI,
+				Type:     service.AccountTypeAPIKey,
+				Extra: map[string]any{
+					openai_compat.ExtraKeyResponsesSupported: false,
+				},
+			}
+
+			got := resolveOpenAIUpstreamEndpoint(c, account, &service.OpenAIForwardResult{})
+			require.Equal(t, EndpointChatCompletions, got)
+		})
+	}
+}
+
+func TestResolveOpenAIUpstreamEndpointUsesResultUpstreamModel(t *testing.T) {
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-	c.Set(ctxKeyInboundEndpoint, EndpointChatCompletions)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	c.Set(ctxKeyInboundEndpoint, EndpointMessages)
 
 	account := &service.Account{
 		Platform: service.PlatformOpenAI,
@@ -180,11 +202,11 @@ func TestResolveRawCCUpstreamEndpointUsesResultUpstreamModel(t *testing.T) {
 		},
 	}
 
-	got := resolveRawCCUpstreamEndpoint(c, account, &service.OpenAIForwardResult{UpstreamModel: "mapped-raw-model"})
+	got := resolveOpenAIUpstreamEndpoint(c, account, &service.OpenAIForwardResult{UpstreamModel: "mapped-raw-model"})
 	require.Equal(t, EndpointChatCompletions, got)
 }
 
-func TestResolveRawCCUpstreamEndpointPrefersResultOverride(t *testing.T) {
+func TestResolveOpenAIUpstreamEndpointPrefersResultOverride(t *testing.T) {
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
@@ -198,6 +220,6 @@ func TestResolveRawCCUpstreamEndpointPrefersResultOverride(t *testing.T) {
 		},
 	}
 
-	got := resolveRawCCUpstreamEndpoint(c, account, &service.OpenAIForwardResult{UpstreamEndpoint: EndpointChatCompletions})
+	got := resolveOpenAIUpstreamEndpoint(c, account, &service.OpenAIForwardResult{UpstreamEndpoint: EndpointChatCompletions})
 	require.Equal(t, EndpointChatCompletions, got)
 }

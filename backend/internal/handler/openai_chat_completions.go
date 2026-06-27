@@ -281,7 +281,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		userAgent := c.GetHeader("User-Agent")
 		clientIP := ip.GetClientIP(c)
 		inboundEndpoint := GetInboundEndpoint(c)
-		upstreamEndpoint := resolveRawCCUpstreamEndpoint(c, account, result)
+		upstreamEndpoint := resolveOpenAIUpstreamEndpoint(c, account, result)
 
 		h.submitOpenAIUsageRecordTask(c.Request.Context(), result, func(ctx context.Context) {
 			if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
@@ -315,10 +315,10 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 	}
 }
 
-// resolveRawCCUpstreamEndpoint returns the actual upstream endpoint for
-// OpenAI Chat Completions requests. Dynamic fallback can only be observed from
-// the service result, because account.extra may still be unknown at request time.
-func resolveRawCCUpstreamEndpoint(c *gin.Context, account *service.Account, result *service.OpenAIForwardResult) string {
+// resolveOpenAIUpstreamEndpoint returns the actual OpenAI upstream endpoint for
+// usage/ops records. Dynamic fallback can only be observed from the service
+// result, because account.extra may still be unknown at request time.
+func resolveOpenAIUpstreamEndpoint(c *gin.Context, account *service.Account, result *service.OpenAIForwardResult) string {
 	if result != nil && result.UpstreamEndpoint != "" {
 		return result.UpstreamEndpoint
 	}
@@ -328,7 +328,7 @@ func resolveRawCCUpstreamEndpoint(c *gin.Context, account *service.Account, resu
 	}
 	if account != nil && account.Type == service.AccountTypeAPIKey &&
 		!openai_compat.ShouldUseResponsesAPIForModel(account.Extra, upstreamModel) {
-		return "/v1/chat/completions"
+		return EndpointChatCompletions
 	}
 	platform := ""
 	if account != nil {
