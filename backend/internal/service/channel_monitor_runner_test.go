@@ -172,6 +172,27 @@ func TestSchedule_InvalidIntervalSkipped(t *testing.T) {
 	r.Stop()
 }
 
+func TestScheduledMonitorNextDelay_ClampsJitterFloor(t *testing.T) {
+	task := &scheduledMonitor{
+		interval: 20 * time.Second,
+		jitter:   30 * time.Second,
+	}
+	for i := 0; i < 100; i++ {
+		if delay := task.nextDelay(); delay < monitorMinIntervalSeconds*time.Second {
+			t.Fatalf("nextDelay() = %s, want >= %ds", delay, monitorMinIntervalSeconds)
+		}
+	}
+}
+
+func TestScheduledMonitorNextDelay_ZeroJitterUsesInterval(t *testing.T) {
+	task := &scheduledMonitor{
+		interval: 60 * time.Second,
+	}
+	if got := task.nextDelay(); got != 60*time.Second {
+		t.Fatalf("nextDelay() = %s, want 60s", got)
+	}
+}
+
 // TestSchedule_BeforeStartIsNoOp 验证 Start 之前调用 Schedule 不会注册任务。
 func TestSchedule_BeforeStartIsNoOp(t *testing.T) {
 	svc := &stubMonitorSvc{}

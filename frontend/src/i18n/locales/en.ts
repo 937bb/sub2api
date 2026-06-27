@@ -2807,6 +2807,8 @@ export default {
         groupNamePlaceholder: 'Optional, used to group rows in user view',
         intervalSeconds: 'Interval (seconds)',
         intervalSecondsHint: 'Range: 15 - 3600 seconds',
+        jitterSeconds: 'Jitter (seconds)',
+        jitterSecondsHint: 'Randomize each scheduled run by ± jitter seconds. Range: 0 - {max} seconds.',
         enabled: 'Enable monitor',
         kindRequired: 'Please select a provider'
       },
