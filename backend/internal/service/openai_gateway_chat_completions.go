@@ -167,6 +167,18 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 		if err != nil {
 			return nil, fmt.Errorf("remarshal after codex transform: %w", err)
 		}
+	} else if account.Type == AccountTypeAPIKey && promptCacheKey != "" {
+		reqBody, err := decodeOpenAIRequestBodyMapUseNumber(responsesBody)
+		if err != nil {
+			return nil, fmt.Errorf("unmarshal for prompt cache key injection: %w", err)
+		}
+		if existing, ok := reqBody["prompt_cache_key"].(string); !ok || strings.TrimSpace(existing) == "" {
+			reqBody["prompt_cache_key"] = promptCacheKey
+			responsesBody, err = marshalOpenAIUpstreamJSON(reqBody)
+			if err != nil {
+				return nil, fmt.Errorf("remarshal after prompt cache key injection: %w", err)
+			}
+		}
 	}
 
 	forcedBody, forceErr := forceOpenAIPriorityTierInBody(getAPIKeyFromContext(c), responsesBody)
@@ -207,7 +219,8 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	}
 
 	if promptCacheKey != "" && !account.IsOpenAIOAuthLike() {
-		upstreamReq.Header.Set("session_id", generateSessionUUID(promptCacheKey))
+		apiKeyID := getAPIKeyIDFromContext(c)
+		upstreamReq.Header.Set("session_id", generateSessionUUID(isolateOpenAISessionID(apiKeyID, promptCacheKey)))
 	}
 
 	// 7. Send request
