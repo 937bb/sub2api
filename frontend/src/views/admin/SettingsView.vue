@@ -9630,11 +9630,22 @@ function showProviderEnablementConflict(
   );
 }
 
+function normalizeProviderInstance(provider: ProviderInstance): ProviderInstance {
+  return {
+    ...provider,
+    // Backend serializes empty Go slices as null; payment UI code treats the
+    // supported types list as an array, so normalize once at the API boundary.
+    supported_types: Array.isArray(provider.supported_types)
+      ? provider.supported_types
+      : [],
+  };
+}
+
 async function loadProviders() {
   providersLoading.value = true;
   try {
     const res = await adminAPI.payment.getProviders();
-    providers.value = res.data || [];
+    providers.value = (res.data || []).map(normalizeProviderInstance);
   } catch (err: unknown) {
     appStore.showError(extractI18nErrorMessage(err, t, "payment.errors", t("common.error")));
   } finally {
@@ -9728,9 +9739,12 @@ async function handleToggleField(
 }
 
 async function handleToggleType(provider: ProviderInstance, type: string) {
-  const updated = provider.supported_types.includes(type)
-    ? provider.supported_types.filter((t) => t !== type)
-    : [...provider.supported_types, type];
+  const currentTypes = Array.isArray(provider.supported_types)
+    ? provider.supported_types
+    : [];
+  const updated = currentTypes.includes(type)
+    ? currentTypes.filter((t) => t !== type)
+    : [...currentTypes, type];
   const conflict = findProviderEnablementConflict({
     id: provider.id,
     provider_key: provider.provider_key,
