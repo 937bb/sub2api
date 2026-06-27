@@ -164,4 +164,40 @@ describe('UseKeyModal', () => {
     expect(fable.options.thinking).toEqual({ type: 'adaptive' })
     expect(fable.options.thinking).not.toHaveProperty('budgetTokens')
   })
+
+  it('disables Claude Code attribution header in terminal templates', async () => {
+    const wrapper = mount(UseKeyModal, {
+      props: {
+        show: true,
+        apiKey: 'sk-test',
+        baseUrl: 'https://example.com/v1',
+        platform: 'anthropic'
+      },
+      global: {
+        stubs: {
+          BaseDialog: {
+            template: '<div><slot /><slot name="footer" /></div>'
+          },
+          Icon: {
+            template: '<span />'
+          }
+        }
+      }
+    })
+
+    const currentTerminalContent = () => wrapper.find('pre code').text()
+    expect(currentTerminalContent()).toContain('export CLAUDE_CODE_ATTRIBUTION_HEADER=0')
+
+    const cmdTab = wrapper.findAll('button').find((button) => button.text().includes('Windows CMD'))
+    expect(cmdTab).toBeDefined()
+    await cmdTab!.trigger('click')
+    await nextTick()
+    expect(currentTerminalContent()).toContain('set CLAUDE_CODE_ATTRIBUTION_HEADER=0')
+
+    const powershellTab = wrapper.findAll('button').find((button) => button.text().includes('PowerShell'))
+    expect(powershellTab).toBeDefined()
+    await powershellTab!.trigger('click')
+    await nextTick()
+    expect(currentTerminalContent()).toContain('$env:CLAUDE_CODE_ATTRIBUTION_HEADER=0')
+  })
 })
