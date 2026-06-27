@@ -5868,7 +5868,6 @@ export default {
             clearHint: '留空提交将清除所选用户的专属比例。',
           },
         },
-      },
       firstRedeemBonus: {
         title: '首次兑换加成',
         description: '用户首次使用余额兑换码时额外发放加成奖励。',
@@ -6022,6 +6021,7 @@ export default {
         allGroups: '全部分组',
         hourSuffix: ':00',
         example: '例：22:00~07:00 设为 0.8 = 八折',
+      },
       },
       emailTabDisabledTitle: '邮箱验证未启用',
       emailTabDisabledHint: '请在「安全与认证」选项卡中启用邮箱验证后，再配置 SMTP 设置。',

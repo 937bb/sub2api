@@ -5708,7 +5708,6 @@ export default {
             clearHint: 'Submitting empty will clear the exclusive rate for selected users.',
           },
         },
-      },
       firstRedeemBonus: {
         title: 'First Redeem Bonus',
         description: 'Grant extra bonus when user redeems a balance code for the first time.',
@@ -5862,6 +5861,7 @@ export default {
         allGroups: 'All Groups',
         hourSuffix: ':00',
         example: 'e.g. 22:00~07:00 set to 0.8 = 20% off',
+      },
       },
       emailTabDisabledTitle: 'Email Verification Not Enabled',
       emailTabDisabledHint: 'Enable email verification in the Security tab to configure SMTP settings.',
