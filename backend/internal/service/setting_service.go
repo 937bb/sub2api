@@ -1257,6 +1257,54 @@ func (s *SettingService) MigrateCodexBodyFingerprintToSignals(ctx context.Contex
 	s.codexRestrictionPolicyCache.Store(&cachedCodexRestrictionPolicy{expiresAt: 0})
 	return nil
 }
+
+
+func codexClientEntriesContain(entries []openai.AllowedClientEntry, want openai.AllowedClientEntry) bool {
+	wantOriginator := strings.TrimSpace(want.Originator)
+	if wantOriginator == "" {
+		return false
+	}
+	wantMarkers := normalizedCodexClientMarkers(want.UAContains)
+	if len(wantMarkers) == 0 {
+		return false
+	}
+	for _, entry := range entries {
+		if !strings.EqualFold(strings.TrimSpace(entry.Originator), wantOriginator) {
+			continue
+		}
+		gotMarkers := normalizedCodexClientMarkers(entry.UAContains)
+		if len(gotMarkers) != len(wantMarkers) {
+			continue
+		}
+		matched := true
+		for marker := range wantMarkers {
+			if _, ok := gotMarkers[marker]; !ok {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizedCodexClientMarkers(markers []string) map[string]struct{} {
+	normalized := make(map[string]struct{}, len(markers))
+	for _, marker := range markers {
+		marker = strings.TrimSpace(marker)
+		if marker == "" {
+			continue
+		}
+		normalized[strings.ToLower(marker)] = struct{}{}
+	}
+	return normalized
+}
+
+// GetCodexRestrictionPolicy reads the codex_cli_only global hardening policy.
+func (s *SettingService) GetCodexRestrictionPolicy(ctx context.Context) CodexRestrictionPolicy {
+	if cached, ok := s.codexRestrictionPolicyCache.Load().(*cachedCodexRestrictionPolicy); ok && cached != nil {
 		if time.Now().UnixNano() < cached.expiresAt {
 			return cached.value
 		}
@@ -1270,16 +1318,15 @@ func (s *SettingService) MigrateCodexBodyFingerprintToSignals(ctx context.Contex
 		dbCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), codexRestrictionPolicyDBTimeout)
 		defer cancel()
 
-		pol := CodexRestrictionPolicy{EngineFingerprintSignals: openai.DefaultEngineFingerprintSignals} // ?????????????
+		pol := CodexRestrictionPolicy{EngineFingerprintSignals: openai.DefaultEngineFingerprintSignals}
 		if v, err := s.settingRepo.GetValue(dbCtx, SettingKeyMinCodexVersion); err == nil {
 			pol.MinCodexVersion = strings.TrimSpace(v)
-		}
 		}
 		if v, err := s.settingRepo.GetValue(dbCtx, SettingKeyMaxCodexVersion); err == nil {
 			pol.MaxCodexVersion = strings.TrimSpace(v)
 		}
 		if v, err := s.settingRepo.GetValue(dbCtx, SettingKeyCodexCLIOnlyAllowAppServerClients); err == nil {
-			pol.AllowAppServerClients = strings.TrimSpace(v) == "true" // 仅显式 "true" 开启
+			pol.AllowAppServerClients = strings.TrimSpace(v) == "true"
 		}
 		pol.EngineFingerprintSignals = s.loadEngineFingerprintSignals(dbCtx)
 		pol.Whitelist = s.loadCodexClientEntries(dbCtx, SettingKeyCodexCLIOnlyWhitelist)
@@ -1297,7 +1344,7 @@ func (s *SettingService) MigrateCodexBodyFingerprintToSignals(ctx context.Contex
 	return CodexRestrictionPolicy{EngineFingerprintSignals: openai.DefaultEngineFingerprintSignals}
 }
 
-// loadCodexClientEntries 读取并解析 []openai.AllowedClientEntry JSON 设置；缺失/空/非法 → nil（安全忽略）。
+// loadCodexClientEntries reads and parses []openai.AllowedClientEntry JSON settings.
 func (s *SettingService) loadCodexClientEntries(ctx context.Context, key string) []openai.AllowedClientEntry {
 	v, err := s.settingRepo.GetValue(ctx, key)
 	if err != nil || strings.TrimSpace(v) == "" {
@@ -1310,7 +1357,7 @@ func (s *SettingService) loadCodexClientEntries(ctx context.Context, key string)
 	return entries
 }
 
-// loadEngineFingerprintSignals 读取引擎指纹信号列表;缺失/空/非法 → 默认种子。
+// loadEngineFingerprintSignals reads engine fingerprint signals, falling back to defaults.
 func (s *SettingService) loadEngineFingerprintSignals(ctx context.Context) []openai.EngineFingerprintSignal {
 	v, err := s.settingRepo.GetValue(ctx, SettingKeyCodexCLIOnlyEngineFingerprintSignals)
 	if err != nil || strings.TrimSpace(v) == "" {
@@ -1323,9 +1370,7 @@ func (s *SettingService) loadEngineFingerprintSignals(ctx context.Context) []ope
 	return sigs
 }
 
-// ValidateCodexClientEntriesJSON 校验 codex_cli_only 名单 JSON 配置（黑名单语义）：
-// 空=合法（禁用）；非空须为 []AllowedClientEntry 的 JSON 数组。黑名单是 OR 宽 deny，
-// 允许 originator-only 条目，故不校验 ua_contains。白名单请用 ValidateCodexWhitelistEntriesJSON。
+// ValidateCodexClientEntriesJSON validates codex_cli_only blacklist JSON settings.
 func ValidateCodexClientEntriesJSON(raw string) error {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
@@ -1338,10 +1383,7 @@ func ValidateCodexClientEntriesJSON(raw string) error {
 	return nil
 }
 
-// ValidateCodexWhitelistEntriesJSON 在 ValidateCodexClientEntriesJSON 的数组结构校验之上，额外要求
-// 每条白名单条目「有可能命中」（openai.AllowedClientEntry.IsWhitelistable）。白名单是双因子 AND：
-// originator-only、空或含空白 ua_contains 的条目会在运行时静默失效——这里让管理员在写入时即收到反馈，
-// 而非存入永不命中的死规则。黑名单（OR 宽 deny）仍用 ValidateCodexClientEntriesJSON。
+// ValidateCodexWhitelistEntriesJSON validates codex_cli_only whitelist JSON settings.
 func ValidateCodexWhitelistEntriesJSON(raw string) error {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
@@ -1359,11 +1401,10 @@ func ValidateCodexWhitelistEntriesJSON(raw string) error {
 	return nil
 }
 
-// ValidateEngineFingerprintSignalsJSON 服务层包装,复用 openai 校验逻辑。
+// ValidateEngineFingerprintSignalsJSON wraps the openai validation logic.
 func ValidateEngineFingerprintSignalsJSON(raw string) error {
 	return openai.ValidateEngineFingerprintSignalsJSON(raw)
 }
-
 // SetOnUpdateCallback sets a callback function to be called when settings are updated
 // This is used for cache invalidation (e.g., HTML cache in frontend server)
 func (s *SettingService) SetOnUpdateCallback(callback func()) {
