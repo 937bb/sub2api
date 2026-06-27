@@ -1494,6 +1494,32 @@ func (r *accountRepository) UpdateSessionWindow(ctx context.Context, id int64, s
 	return nil
 }
 
+// UpdateSessionWindowEnd 仅更新 5h 窗口结束时间，不覆盖请求路径记录的 start/status。
+func (r *accountRepository) UpdateSessionWindowEnd(ctx context.Context, id int64, end time.Time) error {
+	client := clientFromContext(ctx, r.client)
+	result, err := client.ExecContext(ctx, `
+UPDATE accounts
+SET session_window_end = $1,
+	updated_at = NOW()
+WHERE id = $2
+	AND deleted_at IS NULL`, end, id)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return service.ErrAccountNotFound
+	}
+	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
+		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue session window end update failed: account=%d err=%v", id, err)
+	}
+	r.syncSchedulerAccountSnapshot(ctx, id)
+	return nil
+}
+
 func (r *accountRepository) SetSchedulable(ctx context.Context, id int64, schedulable bool) error {
 	_, err := r.client.Account.Update().
 		Where(dbaccount.IDEQ(id)).

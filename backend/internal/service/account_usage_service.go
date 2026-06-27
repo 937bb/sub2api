@@ -522,6 +522,9 @@ func (s *AccountUsageService) syncActiveToPassive(ctx context.Context, accountID
 
 	if usage.FiveHour != nil {
 		extraUpdates["session_window_utilization"] = usage.FiveHour.Utilization / 100
+		if usage.FiveHour.ResetsAt != nil {
+			syncFiveHourSessionWindowEnd(ctx, s.accountRepo, accountID, *usage.FiveHour.ResetsAt, "active_usage")
+		}
 	}
 	if usage.SevenDay != nil {
 		extraUpdates["passive_usage_7d_utilization"] = usage.SevenDay.Utilization / 100
@@ -808,7 +811,45 @@ func (s *AccountUsageService) persistOpenAICodexProbeSnapshot(ctx context.Contex
 	if s == nil || s.accountRepo == nil || accountID <= 0 || len(updates) == 0 {
 		return nil
 	}
-	return s.accountRepo.UpdateExtra(ctx, accountID, updates)
+	if err := s.accountRepo.UpdateExtra(ctx, accountID, updates); err != nil {
+		return err
+	}
+	syncCodexFiveHourSessionWindowEnd(ctx, s.accountRepo, accountID, updates, "active_probe")
+	return nil
+}
+
+// accountSessionWindowEndUpdater is implemented by persisted account stores that
+// can align the shared session-window column from active 5h reset snapshots.
+type accountSessionWindowEndUpdater interface {
+	UpdateSessionWindowEnd(ctx context.Context, id int64, end time.Time) error
+}
+
+func syncCodexFiveHourSessionWindowEnd(ctx context.Context, repo AccountRepository, accountID int64, updates map[string]any, source string) {
+	if repo == nil || accountID <= 0 || len(updates) == 0 {
+		return
+	}
+	raw, ok := updates["codex_5h_reset_at"]
+	if !ok {
+		return
+	}
+	resetAt, err := parseTime(fmt.Sprint(raw))
+	if err != nil {
+		return
+	}
+	syncFiveHourSessionWindowEnd(ctx, repo, accountID, resetAt, source)
+}
+
+func syncFiveHourSessionWindowEnd(ctx context.Context, repo AccountRepository, accountID int64, resetAt time.Time, source string) {
+	if repo == nil || accountID <= 0 {
+		return
+	}
+	updater, ok := any(repo).(accountSessionWindowEndUpdater)
+	if !ok {
+		return
+	}
+	if err := updater.UpdateSessionWindowEnd(ctx, accountID, resetAt); err != nil {
+		slog.Warn("sync_5h_session_window_end_failed", "account_id", accountID, "source", source, "error", err)
+	}
 }
 
 func extractOpenAICodexProbeUpdates(resp *http.Response) (map[string]any, error) {
@@ -1246,9 +1287,12 @@ func buildCodexUsageProgressFromExtra(extra map[string]any, window string, now t
 		}
 	}
 
-	// 窗口已过期（resetAt 在 now 之前）→ 额度已重置，归零
+	// 窗口已过期（resetAt 在 now 之前）→ 额度已重置，归零；
+	// 清掉过期 resetAt，避免 UI 继续展示上一窗口的重置时间。
 	if progress.ResetsAt != nil && !now.Before(*progress.ResetsAt) {
 		progress.Utilization = 0
+		progress.ResetsAt = nil
+		progress.RemainingSeconds = 0
 	}
 
 	return progress
@@ -1445,6 +1489,14 @@ func (s *AccountUsageService) estimateSetupTokenUsage(account *Account) *UsageIn
 			Utilization:      0,
 			RemainingSeconds: 0,
 		}
+	}
+
+	// 窗口已过期（resetAt 在 now 之前）→ 额度已重置，归零；
+	// 避免 active poll 尚未回写新窗口时继续展示过期 reset 时间。
+	if info.FiveHour != nil && info.FiveHour.ResetsAt != nil && !time.Now().Before(*info.FiveHour.ResetsAt) {
+		info.FiveHour.Utilization = 0
+		info.FiveHour.ResetsAt = nil
+		info.FiveHour.RemainingSeconds = 0
 	}
 
 	// Setup Token无法获取7d数据

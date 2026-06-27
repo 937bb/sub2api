@@ -38,12 +38,16 @@ func (rt rewriteChatGPTTestRoundTripper) RoundTrip(req *http.Request) (*http.Res
 
 type accountUsageCodexProbeRepo struct {
 	stubOpenAIAccountRepo
-	updateExtraCh     chan map[string]any
-	updateExtraErr    error
-	updateExtraErrFor func(map[string]any) error
-	rateLimitCh       chan time.Time
-	bulkUpdateCh      chan AccountBulkUpdate
-	getByID           func(context.Context, int64) (*Account, error)
+	updateExtraCh      chan map[string]any
+	updateExtraErr     error
+	updateExtraErrFor  func(map[string]any) error
+	rateLimitCh        chan time.Time
+	bulkUpdateCh       chan AccountBulkUpdate
+	sessionWindowEndCh chan struct {
+		id  int64
+		end time.Time
+	}
+	getByID func(context.Context, int64) (*Account, error)
 }
 
 func (r *accountUsageCodexProbeRepo) GetByID(ctx context.Context, id int64) (*Account, error) {
@@ -84,6 +88,16 @@ func (r *accountUsageCodexProbeRepo) BulkUpdate(_ context.Context, _ []int64, up
 		r.bulkUpdateCh <- updates
 	}
 	return 1, nil
+}
+
+func (r *accountUsageCodexProbeRepo) UpdateSessionWindowEnd(_ context.Context, id int64, end time.Time) error {
+	if r.sessionWindowEndCh != nil {
+		r.sessionWindowEndCh <- struct {
+			id  int64
+			end time.Time
+		}{id: id, end: end}
+	}
+	return nil
 }
 
 func TestAccountUsageService_GetOpenAIUsageRefreshesPlanType(t *testing.T) {
@@ -627,12 +641,16 @@ func TestAccountUsageService_GetUsageOpenAIAPIKeyDoesNotUseCodexFingerprintProbe
 	}
 }
 
-func TestAccountUsageService_PersistOpenAICodexProbeSnapshotOnlyUpdatesExtra(t *testing.T) {
+func TestAccountUsageService_PersistOpenAICodexProbeSnapshotOnlyUpdatesExtraWithoutFiveHourReset(t *testing.T) {
 	t.Parallel()
 
 	repo := &accountUsageCodexProbeRepo{
 		updateExtraCh: make(chan map[string]any, 1),
 		rateLimitCh:   make(chan time.Time, 1),
+		sessionWindowEndCh: make(chan struct {
+			id  int64
+			end time.Time
+		}, 1),
 	}
 	svc := &AccountUsageService{accountRepo: repo}
 	err := svc.persistOpenAICodexProbeSnapshot(context.Background(), 321, map[string]any{
@@ -655,6 +673,115 @@ func TestAccountUsageService_PersistOpenAICodexProbeSnapshotOnlyUpdatesExtra(t *
 	select {
 	case got := <-repo.rateLimitCh:
 		t.Fatalf("不应将探测快照写入运行时限流状态: %v", got)
+	case <-time.After(200 * time.Millisecond):
+	}
+	select {
+	case got := <-repo.sessionWindowEndCh:
+		t.Fatalf("不应在缺少 5h reset 时回写 SessionWindowEnd: %#v", got)
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+func TestAccountUsageService_PersistOpenAICodexProbeSnapshotWritesFiveHourSessionWindowEnd(t *testing.T) {
+	t.Parallel()
+
+	repo := &accountUsageCodexProbeRepo{
+		updateExtraCh: make(chan map[string]any, 1),
+		sessionWindowEndCh: make(chan struct {
+			id  int64
+			end time.Time
+		}, 1),
+	}
+	svc := &AccountUsageService{accountRepo: repo}
+	resetAt := time.Now().Add(90 * time.Minute).UTC().Truncate(time.Second)
+	err := svc.persistOpenAICodexProbeSnapshot(context.Background(), 321, map[string]any{
+		"codex_5h_used_percent": 42.0,
+		"codex_5h_reset_at":     resetAt.Format(time.RFC3339),
+	})
+	if err != nil {
+		t.Fatalf("persistOpenAICodexProbeSnapshot() error = %v", err)
+	}
+
+	select {
+	case <-repo.updateExtraCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("等待 codex 探测快照写入 extra 超时")
+	}
+	select {
+	case got := <-repo.sessionWindowEndCh:
+		if got.id != 321 {
+			t.Fatalf("SessionWindowEnd account id = %d, want 321", got.id)
+		}
+		if !got.end.Equal(resetAt) {
+			t.Fatalf("SessionWindowEnd = %v, want %v", got.end, resetAt)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("等待 5h reset 回写 SessionWindowEnd 超时")
+	}
+}
+
+func TestSyncActiveToPassive_WritesFiveHourSessionWindowEnd(t *testing.T) {
+	t.Parallel()
+
+	repo := &accountUsageCodexProbeRepo{
+		updateExtraCh: make(chan map[string]any, 1),
+		sessionWindowEndCh: make(chan struct {
+			id  int64
+			end time.Time
+		}, 1),
+	}
+	svc := &AccountUsageService{accountRepo: repo}
+	resetAt := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
+
+	svc.syncActiveToPassive(context.Background(), 456, &UsageInfo{
+		FiveHour: &UsageProgress{Utilization: 42, ResetsAt: &resetAt},
+	})
+
+	select {
+	case got := <-repo.sessionWindowEndCh:
+		if got.id != 456 {
+			t.Fatalf("SessionWindowEnd account id = %d, want 456", got.id)
+		}
+		if !got.end.Equal(resetAt) {
+			t.Fatalf("SessionWindowEnd = %v, want %v", got.end, resetAt)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("等待 active usage 5h reset 回写 SessionWindowEnd 超时")
+	}
+	select {
+	case updates := <-repo.updateExtraCh:
+		if got := updates["session_window_utilization"]; got != 0.42 {
+			t.Fatalf("session_window_utilization = %v, want 0.42", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("等待 active usage 写入 extra 超时")
+	}
+}
+
+func TestSyncActiveToPassive_SkipsSessionWindowEndWhenResetMissing(t *testing.T) {
+	t.Parallel()
+
+	repo := &accountUsageCodexProbeRepo{
+		updateExtraCh: make(chan map[string]any, 1),
+		sessionWindowEndCh: make(chan struct {
+			id  int64
+			end time.Time
+		}, 1),
+	}
+	svc := &AccountUsageService{accountRepo: repo}
+
+	svc.syncActiveToPassive(context.Background(), 456, &UsageInfo{
+		FiveHour: &UsageProgress{Utilization: 42},
+	})
+
+	select {
+	case <-repo.updateExtraCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("等待 active usage 写入 extra 超时")
+	}
+	select {
+	case got := <-repo.sessionWindowEndCh:
+		t.Fatalf("不应在缺少 5h reset 时回写 SessionWindowEnd: %#v", got)
 	case <-time.After(200 * time.Millisecond):
 	}
 }
@@ -695,6 +822,59 @@ func TestAccountUsageService_GetOpenAIUsage_DoesNotPromoteCodexExtraToRateLimit(
 	}
 }
 
+func TestEstimateSetupTokenUsage_ExpiredWindowZeroesAndClearsReset(t *testing.T) {
+	t.Parallel()
+
+	windowEnd := time.Now().Add(-time.Minute).UTC().Truncate(time.Second)
+	account := &Account{
+		SessionWindowEnd:    &windowEnd,
+		SessionWindowStatus: "rejected",
+		Extra: map[string]any{
+			"session_window_utilization": 0.99,
+		},
+	}
+
+	usage := (&AccountUsageService{}).estimateSetupTokenUsage(account)
+	if usage.FiveHour == nil {
+		t.Fatal("expected FiveHour usage")
+	}
+	if usage.FiveHour.Utilization != 0 {
+		t.Fatalf("expired setup-token utilization = %v, want 0", usage.FiveHour.Utilization)
+	}
+	if usage.FiveHour.ResetsAt != nil {
+		t.Fatalf("expired setup-token ResetsAt = %v, want nil", usage.FiveHour.ResetsAt)
+	}
+	if usage.FiveHour.RemainingSeconds != 0 {
+		t.Fatalf("expired setup-token RemainingSeconds = %v, want 0", usage.FiveHour.RemainingSeconds)
+	}
+}
+
+func TestEstimateSetupTokenUsage_ActiveWindowPreservesUtilization(t *testing.T) {
+	t.Parallel()
+
+	windowEnd := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
+	account := &Account{
+		SessionWindowEnd: &windowEnd,
+		Extra: map[string]any{
+			"session_window_utilization": 0.42,
+		},
+	}
+
+	usage := (&AccountUsageService{}).estimateSetupTokenUsage(account)
+	if usage.FiveHour == nil {
+		t.Fatal("expected FiveHour usage")
+	}
+	if usage.FiveHour.Utilization != 42.0 {
+		t.Fatalf("active setup-token utilization = %v, want 42", usage.FiveHour.Utilization)
+	}
+	if usage.FiveHour.ResetsAt == nil || !usage.FiveHour.ResetsAt.Equal(windowEnd) {
+		t.Fatalf("active setup-token ResetsAt = %v, want %v", usage.FiveHour.ResetsAt, windowEnd)
+	}
+	if usage.FiveHour.RemainingSeconds <= 0 {
+		t.Fatalf("active setup-token RemainingSeconds = %v, want > 0", usage.FiveHour.RemainingSeconds)
+	}
+}
+
 func TestBuildCodexUsageProgressFromExtra_ZerosExpiredWindow(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 3, 16, 12, 0, 0, 0, time.UTC)
@@ -710,6 +890,9 @@ func TestBuildCodexUsageProgressFromExtra_ZerosExpiredWindow(t *testing.T) {
 		}
 		if progress.Utilization != 0 {
 			t.Fatalf("expected Utilization=0 for expired window, got %v", progress.Utilization)
+		}
+		if progress.ResetsAt != nil {
+			t.Fatalf("expected ResetsAt=nil for expired window, got %v", progress.ResetsAt)
 		}
 		if progress.RemainingSeconds != 0 {
 			t.Fatalf("expected RemainingSeconds=0, got %v", progress.RemainingSeconds)
@@ -742,6 +925,9 @@ func TestBuildCodexUsageProgressFromExtra_ZerosExpiredWindow(t *testing.T) {
 		}
 		if progress.Utilization != 0 {
 			t.Fatalf("expected Utilization=0 for expired 7d window, got %v", progress.Utilization)
+		}
+		if progress.ResetsAt != nil {
+			t.Fatalf("expected ResetsAt=nil for expired 7d window, got %v", progress.ResetsAt)
 		}
 	})
 }

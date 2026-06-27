@@ -73,11 +73,15 @@ func (s *openAITestSettingRepo) Delete(ctx context.Context, key string) error {
 
 type snapshotUpdateAccountRepo struct {
 	stubOpenAIAccountRepo
-	updateExtraCalls  chan map[string]any
-	updateExtraErr    error
-	updateExtraErrFor func(map[string]any) error
-	setErrorID        int64
-	setErrorMsg       string
+	updateExtraCalls      chan map[string]any
+	updateExtraErr        error
+	updateExtraErrFor     func(map[string]any) error
+	sessionWindowEndCalls chan struct {
+		id  int64
+		end time.Time
+	}
+	setErrorID  int64
+	setErrorMsg string
 }
 
 func (r *snapshotUpdateAccountRepo) UpdateExtra(ctx context.Context, id int64, updates map[string]any) error {
@@ -102,6 +106,16 @@ func (r *snapshotUpdateAccountRepo) UpdateExtra(ctx context.Context, id int64, u
 func (r *snapshotUpdateAccountRepo) SetError(_ context.Context, id int64, errorMsg string) error {
 	r.setErrorID = id
 	r.setErrorMsg = errorMsg
+	return nil
+}
+
+func (r *snapshotUpdateAccountRepo) UpdateSessionWindowEnd(_ context.Context, id int64, end time.Time) error {
+	if r.sessionWindowEndCalls != nil {
+		r.sessionWindowEndCalls <- struct {
+			id  int64
+			end time.Time
+		}{id: id, end: end}
+	}
 	return nil
 }
 
@@ -2126,7 +2140,13 @@ func TestOpenAIValidateUpstreamBaseURLEnabledEnforcesAllowlist(t *testing.T) {
 }
 
 func TestOpenAIUpdateCodexUsageSnapshotFromHeaders(t *testing.T) {
-	repo := &snapshotUpdateAccountRepo{updateExtraCalls: make(chan map[string]any, 1)}
+	repo := &snapshotUpdateAccountRepo{
+		updateExtraCalls: make(chan map[string]any, 1),
+		sessionWindowEndCalls: make(chan struct {
+			id  int64
+			end time.Time
+		}, 1),
+	}
 	svc := &OpenAIGatewayService{accountRepo: repo}
 	headers := http.Header{}
 	headers.Set("x-codex-primary-used-percent", "12")
@@ -2138,14 +2158,27 @@ func TestOpenAIUpdateCodexUsageSnapshotFromHeaders(t *testing.T) {
 
 	svc.UpdateCodexUsageSnapshotFromHeaders(context.Background(), 123, headers)
 
+	var resetAt string
 	select {
 	case updates := <-repo.updateExtraCalls:
 		require.Equal(t, 12.0, updates["codex_5h_used_percent"])
 		require.Equal(t, 34.0, updates["codex_7d_used_percent"])
 		require.Equal(t, 600, updates["codex_5h_reset_after_seconds"])
 		require.Equal(t, 86400, updates["codex_7d_reset_after_seconds"])
+		resetAt, _ = updates["codex_5h_reset_at"].(string)
+		require.NotEmpty(t, resetAt)
 	case <-time.After(2 * time.Second):
 		t.Fatal("expected UpdateExtra to be called")
+	}
+
+	select {
+	case call := <-repo.sessionWindowEndCalls:
+		require.Equal(t, int64(123), call.id)
+		want, err := parseTime(resetAt)
+		require.NoError(t, err)
+		require.True(t, call.end.Equal(want), "session window end = %v, want %v", call.end, want)
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected UpdateSessionWindowEnd to be called")
 	}
 }
 
