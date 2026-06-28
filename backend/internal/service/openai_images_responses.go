@@ -616,6 +616,61 @@ func openAIImagesUpstreamErrorFromSSEPayload(payload []byte) *OpenAIImagesUpstre
 	}
 }
 
+// extractOpenAIImagesModelRefusal returns text the model emitted instead of an
+// image. A non-empty value means the no-image response is a content refusal, not
+// a probabilistic upstream empty response worth retrying.
+func extractOpenAIImagesModelRefusal(body []byte) string {
+	var b strings.Builder
+	collect := func(text string) {
+		text = strings.TrimSpace(text)
+		if text == "" {
+			return
+		}
+		if b.Len() > 0 {
+			_ = b.WriteByte(' ')
+		}
+		_, _ = b.WriteString(text)
+	}
+
+	forEachOpenAISSEDataPayload(string(body), func(payload []byte) {
+		if !gjson.ValidBytes(payload) {
+			return
+		}
+		switch gjson.GetBytes(payload, "type").String() {
+		case "response.output_text.delta":
+			collect(gjson.GetBytes(payload, "delta").String())
+		case "response.completed", "response.output_item.done":
+			gjson.GetBytes(payload, "response.output").ForEach(func(_, item gjson.Result) bool {
+				if item.Get("type").String() == "message" {
+					item.Get("content").ForEach(func(_, part gjson.Result) bool {
+						if part.Get("type").String() == "output_text" {
+							collect(part.Get("text").String())
+						}
+						return true
+					})
+				}
+				return true
+			})
+			item := gjson.GetBytes(payload, "item")
+			if item.Get("type").String() == "message" {
+				item.Get("content").ForEach(func(_, part gjson.Result) bool {
+					if part.Get("type").String() == "output_text" {
+						collect(part.Get("text").String())
+					}
+					return true
+				})
+			}
+		}
+	})
+
+	refusal := strings.TrimSpace(b.String())
+	const maxRefusalRunes = 600
+	if len([]rune(refusal)) > maxRefusalRunes {
+		refusal = string([]rune(refusal)[:maxRefusalRunes])
+	}
+	return refusal
+}
+
 func openAIImagesUpstreamErrorFromGJSON(errorObj gjson.Result, upstreamRequestID string) *OpenAIImagesUpstreamError {
 	if !errorObj.Exists() {
 		return nil
@@ -971,6 +1026,17 @@ func (s *OpenAIGatewayService) handleOpenAIImagesOAuthNonStreamingResponse(
 			if !IsOpenAIImagesRetryableUpstreamError(upstreamErr) {
 				writeOpenAIImagesUpstreamErrorResponse(c, upstreamErr)
 			}
+			return OpenAIUsage{}, 0, nil, upstreamErr
+		}
+		if refusal := extractOpenAIImagesModelRefusal(body); refusal != "" {
+			upstreamErr := &OpenAIImagesUpstreamError{
+				StatusCode: http.StatusBadRequest,
+				ErrorType:  "image_generation_user_error",
+				Code:       "content_policy_violation",
+				Message:    sanitizeOpenAIUpstreamDiagnosticText(refusal),
+			}
+			setOpsUpstreamError(c, upstreamErr.clientStatusCode(), upstreamErr.clientMessage(), "")
+			writeOpenAIImagesUpstreamErrorResponse(c, upstreamErr)
 			return OpenAIUsage{}, 0, nil, upstreamErr
 		}
 		return OpenAIUsage{}, 0, nil, fmt.Errorf("upstream did not return image output")
