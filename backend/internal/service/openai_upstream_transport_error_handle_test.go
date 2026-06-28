@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -123,4 +124,42 @@ func TestHandleOpenAIUpstreamTransportError_DeadlineExceeded_StillFailsOver(t *t
 
 	var fo *UpstreamFailoverError
 	require.True(t, errors.As(err, &fo), "context.DeadlineExceeded must still return *UpstreamFailoverError")
+}
+
+func TestForwardAsRawChatCompletions_TransportErrorFailsOver(t *testing.T) {
+	repo := &openaiTransportAccountRepoStub{}
+	upstream := &httpUpstreamRecorder{
+		err: errors.New(`Post "https://opencode.ai/zen/v1/chat/completions": EOF`),
+	}
+	svc := &OpenAIGatewayService{
+		accountRepo:  repo,
+		httpUpstream: upstream,
+		cfg: &config.Config{
+			Security: config.SecurityConfig{
+				URLAllowlist: config.URLAllowlistConfig{Enabled: false},
+			},
+		},
+	}
+	account := &Account{
+		ID:       81,
+		Name:     "oc-20053",
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"api_key":  "sk-test",
+			"base_url": "https://opencode.ai/zen/v1",
+		},
+	}
+	body := []byte(`{"model":"deepseek-v4-flash-free","messages":[{"role":"user","content":"hello"}]}`)
+	c, rec := newOpenAITransportErrTestContext()
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+
+	_, err := svc.forwardAsRawChatCompletions(context.Background(), c, account, body, "")
+
+	require.Len(t, upstream.requests, 1)
+	var fo *UpstreamFailoverError
+	require.True(t, errors.As(err, &fo), "transport error must trigger account failover")
+	require.Equal(t, http.StatusBadGateway, fo.StatusCode)
+	require.Empty(t, repo.tempUnschedCalls, "plain EOF is transient: fail over but do not evict")
+	require.Equal(t, 0, rec.Body.Len(), "service must not write a hard 502 before handler can fail over")
 }
