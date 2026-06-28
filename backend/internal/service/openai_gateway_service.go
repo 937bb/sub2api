@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"math/rand"
 	"net/http"
 	"net/url"
@@ -68,6 +69,11 @@ const (
 	// 被暂停的账号收不到流量，其快照永远不会从上游响应头刷新；该兜底让账号在快照
 	// 陈旧时放行一次请求，从而通过正常响应头自愈，而无需等待整个窗口（5h/7d）重置。
 	openAICodexAutoPauseStaleAfter = 2 * time.Hour
+
+	// 计费前硬拦截不可信 usage：阈值高于正常单次响应，避免异常 64 位 token
+	// 直接造成巨额扣费，或后续写入 usage_logs int 列时溢出。
+	openAIUsageBillingMaxTokenCount = 10_000_000
+	openAIUsageBillingMaxActualCost = 100.0
 )
 
 const (
@@ -6436,6 +6442,83 @@ type OpenAIRecordUsageInput struct {
 	ChannelUsageFields
 }
 
+func validateOpenAIUsageForBilling(usage OpenAIUsage) error {
+	checks := [...]struct {
+		name  string
+		value int
+	}{
+		{name: "input_tokens", value: usage.InputTokens},
+		{name: "image_input_tokens", value: usage.ImageInputTokens},
+		{name: "output_tokens", value: usage.OutputTokens},
+		{name: "cache_creation_input_tokens", value: usage.CacheCreationInputTokens},
+		{name: "cache_read_input_tokens", value: usage.CacheReadInputTokens},
+		{name: "image_output_tokens", value: usage.ImageOutputTokens},
+	}
+	for _, check := range checks {
+		if check.value < 0 {
+			return fmt.Errorf("%s is negative: %d", check.name, check.value)
+		}
+		if check.value > openAIUsageBillingMaxTokenCount {
+			return fmt.Errorf("%s exceeds billing guard: %d > %d", check.name, check.value, openAIUsageBillingMaxTokenCount)
+		}
+	}
+	return nil
+}
+
+func validateOpenAIUsageCostForBilling(cost *CostBreakdown) error {
+	if cost == nil {
+		return nil
+	}
+	if math.IsNaN(cost.ActualCost) || math.IsInf(cost.ActualCost, 0) {
+		return fmt.Errorf("actual_cost is not finite: %v", cost.ActualCost)
+	}
+	if cost.ActualCost < 0 {
+		return fmt.Errorf("actual_cost is negative: %f", cost.ActualCost)
+	}
+	if cost.ActualCost > openAIUsageBillingMaxActualCost {
+		return fmt.Errorf("actual_cost exceeds billing guard: %f > %f", cost.ActualCost, openAIUsageBillingMaxActualCost)
+	}
+	return nil
+}
+
+func logOpenAIUsageBillingGuard(reason string, result *OpenAIForwardResult, input *OpenAIRecordUsageInput, extra map[string]any, err error) {
+	fields := []zap.Field{
+		zap.String("component", "service.openai_gateway"),
+		zap.String("reason", reason),
+		zap.Error(err),
+	}
+	if result != nil {
+		fields = append(fields,
+			zap.String("request_id", result.RequestID),
+			zap.String("model", result.Model),
+			zap.String("upstream_model", result.UpstreamModel),
+			zap.Int("input_tokens", result.Usage.InputTokens),
+			zap.Int("output_tokens", result.Usage.OutputTokens),
+			zap.Int("cache_creation_input_tokens", result.Usage.CacheCreationInputTokens),
+			zap.Int("cache_read_input_tokens", result.Usage.CacheReadInputTokens),
+			zap.Int("image_input_tokens", result.Usage.ImageInputTokens),
+			zap.Int("image_output_tokens", result.Usage.ImageOutputTokens),
+		)
+	}
+	if input != nil {
+		if input.APIKey != nil {
+			fields = append(fields, zap.Int64("api_key_id", input.APIKey.ID))
+		}
+		if input.User != nil {
+			fields = append(fields, zap.Int64("user_id", input.User.ID))
+		}
+		if input.Account != nil {
+			fields = append(fields, zap.Int64("account_id", input.Account.ID))
+		}
+	}
+	if len(extra) > 0 {
+		for key, value := range extra {
+			fields = append(fields, zap.Any(key, value))
+		}
+	}
+	logger.L().Warn("openai_usage.billing_guard_skip", fields...)
+}
+
 // RecordUsage records usage and deducts balance
 func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRecordUsageInput) error {
 	if input == nil {
@@ -6454,6 +6537,10 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	account := input.Account
 	subscription := input.Subscription
 	ApplyOpenAIImageBillingResolution(result)
+	if err := validateOpenAIUsageForBilling(result.Usage); err != nil {
+		logOpenAIUsageBillingGuard("usage", result, input, nil, err)
+		return nil
+	}
 
 	// 计算实际的新输入token（减去缓存读取的token）
 	// 因为 input_tokens 包含了 cache_read_tokens，而缓存读取的token不应按输入价格计费
@@ -6525,6 +6612,14 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 			zap.Int64("account_id", account.ID),
 		).Warn("openai_usage.pricing_missing_record_zero_cost", zap.Error(err))
 		cost = &CostBreakdown{BillingMode: string(BillingModeToken)}
+	}
+	if err := validateOpenAIUsageCostForBilling(cost); err != nil {
+		actualCost := 0.0
+		if cost != nil {
+			actualCost = cost.ActualCost
+		}
+		logOpenAIUsageBillingGuard("cost", result, input, map[string]any{"actual_cost": actualCost}, err)
+		return nil
 	}
 
 	// Determine billing type
