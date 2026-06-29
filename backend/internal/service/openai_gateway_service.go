@@ -3861,10 +3861,56 @@ func openAIStreamDataStartsClientOutput(data, eventType string) bool {
 	if trimmed == "" {
 		return false
 	}
-	if strings.TrimSpace(eventType) == "response.failed" {
+	if trimmed == "[DONE]" {
 		return false
 	}
-	return !openAIStreamEventIsPreamble(eventType)
+	eventType = strings.TrimSpace(eventType)
+	if eventType != "" {
+		return openAIResponsesStreamEventStartsOutput(eventType)
+	}
+	if gjson.Get(trimmed, "choices.0.delta").Exists() {
+		return true
+	}
+	if gjson.Get(trimmed, "delta").Exists() {
+		return true
+	}
+	return false
+}
+
+func openAIResponsesStreamEventStartsOutput(eventType string) bool {
+	eventType = strings.TrimSpace(eventType)
+	if eventType == "" {
+		return false
+	}
+	if openAIStreamEventIsPreamble(eventType) || isOpenAIWSTerminalEvent(eventType) || eventType == "response.failed" {
+		return false
+	}
+	switch eventType {
+	case "response.output_item.added",
+		"response.output_item.done",
+		"response.content_part.added",
+		"response.content_part.done",
+		"response.output_text.done",
+		"response.refusal.done",
+		"response.reasoning_summary_text.done",
+		"response.function_call_arguments.done":
+		return false
+	}
+	if strings.Contains(eventType, ".delta") {
+		return true
+	}
+	return eventType == "response.output"
+}
+
+func openAIStreamDataShouldStartClientStream(data, eventType string) bool {
+	trimmed := strings.TrimSpace(data)
+	if trimmed == "" {
+		return false
+	}
+	if openAIStreamDataStartsClientOutput(trimmed, eventType) {
+		return true
+	}
+	return openAIStreamEventIsTerminal(trimmed)
 }
 
 func openAIStreamFailedEventShouldFailover(payload []byte, message string) bool {
@@ -4022,7 +4068,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 
 	for scanner.Scan() {
 		line := scanner.Text()
-		lineStartsClientOutput := false
+		lineStartsClientStream := false
 		forceFlushFailedEvent := false
 		if data, ok := extractOpenAISSEDataLine(line); ok {
 			dataBytes := []byte(data)
@@ -4077,8 +4123,9 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 				trimmedData = strings.TrimSpace(string(sanitizedData))
 				line = "data: " + string(sanitizedData)
 			}
-			lineStartsClientOutput = forceFlushFailedEvent || openAIStreamDataStartsClientOutput(trimmedData, eventType)
-			if firstTokenMs == nil && lineStartsClientOutput && trimmedData != "[DONE]" {
+			lineStartsTokenOutput := openAIStreamDataStartsClientOutput(trimmedData, eventType)
+			lineStartsClientStream = forceFlushFailedEvent || lineStartsTokenOutput || openAIStreamDataShouldStartClientStream(trimmedData, eventType)
+			if firstTokenMs == nil && lineStartsTokenOutput {
 				ms := int(time.Since(startTime).Milliseconds())
 				firstTokenMs = &ms
 			}
@@ -4086,7 +4133,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 		}
 
 		if !clientDisconnected {
-			if !clientOutputStarted && !lineStartsClientOutput {
+			if !clientOutputStarted && !lineStartsClientStream {
 				pendingLines = append(pendingLines, line)
 				continue
 			}
@@ -5049,12 +5096,13 @@ func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp
 			if needModelReplace && mappedModel != "" && strings.Contains(line, mappedModel) {
 				line = s.replaceModelInSSELine(line, mappedModel, originalModel)
 			}
-			startsClientOutput := forceFlushFailedEvent || openAIStreamDataStartsClientOutput(data, eventType)
+			startsTokenOutput := openAIStreamDataStartsClientOutput(data, eventType)
+			startsClientStream := forceFlushFailedEvent || startsTokenOutput || openAIStreamDataShouldStartClientStream(data, eventType)
 
 			// 写入客户端（客户端断开后继续 drain 上游）
 			if !clientDisconnected {
-				shouldFlush := queueDrained && (clientOutputStarted || startsClientOutput)
-				if firstTokenMs == nil && startsClientOutput {
+				shouldFlush := queueDrained && (clientOutputStarted || startsClientStream)
+				if firstTokenMs == nil && startsTokenOutput {
 					// 保证首个 token 事件尽快出站，避免影响 TTFT。
 					shouldFlush = true
 				}
@@ -5076,7 +5124,7 @@ func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp
 			}
 
 			// Record first token time
-			if firstTokenMs == nil && startsClientOutput {
+			if firstTokenMs == nil && startsTokenOutput {
 				ms := int(time.Since(startTime).Milliseconds())
 				firstTokenMs = &ms
 			}

@@ -869,20 +869,26 @@ func isTokenEvent(eventType string) bool {
 	if eventType == "" {
 		return false
 	}
+	if isTerminalEvent(eventType) {
+		return false
+	}
 	switch eventType {
-	case "response.created", "response.in_progress", "response.output_item.added", "response.output_item.done":
+	case "response.created",
+		"response.in_progress",
+		"response.output_item.added",
+		"response.output_item.done",
+		"response.content_part.added",
+		"response.content_part.done",
+		"response.output_text.done",
+		"response.refusal.done",
+		"response.reasoning_summary_text.done",
+		"response.function_call_arguments.done":
 		return false
 	}
 	if strings.Contains(eventType, ".delta") {
 		return true
 	}
-	if strings.HasPrefix(eventType, "response.output_text") {
-		return true
-	}
-	if strings.HasPrefix(eventType, "response.output") {
-		return true
-	}
-	return eventType == "response.completed" || eventType == "response.done"
+	return eventType == "response.output"
 }
 
 func minDuration(a, b time.Duration) time.Duration {

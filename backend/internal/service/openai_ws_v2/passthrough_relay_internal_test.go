@@ -240,7 +240,8 @@ func TestHelperFunctionsCoverage(t *testing.T) {
 
 	require.True(t, isTokenEvent("response.output_text.delta"))
 	require.True(t, isTokenEvent("response.output_audio.delta"))
-	require.True(t, isTokenEvent("response.completed"))
+	require.False(t, isTokenEvent("response.completed"))
+	require.False(t, isTokenEvent("response.output_text.done"))
 	require.False(t, isTokenEvent(""))
 	require.False(t, isTokenEvent("response.created"))
 
@@ -393,9 +394,12 @@ func TestIsTokenEventCoverageBranches(t *testing.T) {
 
 	require.False(t, isTokenEvent("response.in_progress"))
 	require.False(t, isTokenEvent("response.output_item.added"))
+	require.False(t, isTokenEvent("response.content_part.added"))
+	require.False(t, isTokenEvent("response.content_part.done"))
 	require.True(t, isTokenEvent("response.output_audio.delta"))
 	require.True(t, isTokenEvent("response.output"))
-	require.True(t, isTokenEvent("response.done"))
+	require.False(t, isTokenEvent("response.done"))
+	require.False(t, isTokenEvent("response.failed"))
 }
 
 func TestShouldParseUsageTerminalEvents(t *testing.T) {

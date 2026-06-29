@@ -4178,23 +4178,10 @@ func isOpenAIWSTokenEvent(eventType string) bool {
 	if eventType == "" {
 		return false
 	}
-	switch eventType {
-	case "response.created", "response.in_progress", "response.output_item.added", "response.output_item.done":
-		return false
-	}
-	if strings.Contains(eventType, ".delta") {
-		return true
-	}
-	if strings.HasPrefix(eventType, "response.output_text") {
-		return true
-	}
-	if strings.HasPrefix(eventType, "response.output") {
-		return true
-	}
 	// 终止事件（response.completed/done/failed/...）由 isOpenAIWSTerminalEvent 单独处理。
 	// 不能把它们当作 token event，否则当上游没有可识别的 delta 时，
 	// firstTokenMs 会被填到终止时刻，等于把"总耗时"误报为"首 token 延迟"。
-	return false
+	return openAIResponsesStreamEventStartsOutput(eventType)
 }
 
 func replaceOpenAIWSMessageModel(message []byte, fromModel, toModel string) []byte {
