@@ -46,4 +46,46 @@ describe('resolveRouteDocumentTitle', () => {
       }
     ])).toBe('账号调度器 - EzouAPI')
   })
+
+  it('仅在自定义页面路由上使用菜单名称', () => {
+    const route = {
+      name: 'Dashboard',
+      params: { id: 'scheduler' },
+      meta: {
+        title: 'Dashboard'
+      }
+    }
+
+    expect(resolveRouteDocumentTitle(route, 'EzouAPI', [
+      {
+        id: 'scheduler',
+        label: '账号调度器',
+        icon_svg: '',
+        url: 'https://example.com',
+        visibility: 'admin',
+        sort_order: 0
+      }
+    ])).toBe('Dashboard - EzouAPI')
+  })
+
+  it('菜单名称为空时回退到路由标题', () => {
+    const route = {
+      name: 'CustomPage',
+      params: { id: 'scheduler' },
+      meta: {
+        title: 'Custom Page'
+      }
+    }
+
+    expect(resolveRouteDocumentTitle(route, 'EzouAPI', [
+      {
+        id: 'scheduler',
+        label: '   ',
+        icon_svg: '',
+        url: 'https://example.com',
+        visibility: 'admin',
+        sort_order: 0
+      }
+    ])).toBe('Custom Page - EzouAPI')
+  })
 })
