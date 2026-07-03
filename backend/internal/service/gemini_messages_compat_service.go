@@ -3406,37 +3406,147 @@ func isClaudeWebSearchToolMap(tool map[string]any) bool {
 
 // cleanToolSchema 清理工具的 JSON Schema，移除 Gemini 不支持的字段
 func cleanToolSchema(schema any) any {
+	return cleanToolSchemaObjectValue(schema)
+}
+
+func cleanToolSchemaObjectValue(schema any) any {
 	if schema == nil {
 		return nil
 	}
 
 	switch v := schema.(type) {
 	case map[string]any:
-		cleaned := make(map[string]any)
+		cleaned := make(map[string]any, len(v))
 		for key, value := range v {
-			// 跳过不支持的字段
-			if key == "$schema" || key == "$id" || key == "$ref" ||
-				key == "additionalProperties" || key == "patternProperties" || key == "minLength" ||
-				key == "maxLength" || key == "minItems" || key == "maxItems" {
+			if isUnsupportedGeminiSchemaKeyword(key) {
 				continue
 			}
-			// 递归清理嵌套对象
-			cleaned[key] = cleanToolSchema(value)
+			switch key {
+			case "properties":
+				cleaned[key] = cleanToolSchemaPropertyMap(value)
+			case "items", "additionalItems", "contains", "not", "if", "then", "else", "propertyNames":
+				cleaned[key] = cleanToolSchemaObjectOrArray(value)
+			case "oneOf", "anyOf", "allOf", "prefixItems":
+				cleaned[key] = cleanToolSchemaObjectArray(value)
+			default:
+				cleaned[key] = cloneToolSchemaValue(value)
+			}
 		}
-		// 规范化 type 字段为大写
-		if typeVal, ok := cleaned["type"].(string); ok {
-			cleaned["type"] = strings.ToUpper(typeVal)
+		if typeVal, exists := cleaned["type"]; exists {
+			switch typed := typeVal.(type) {
+			case string:
+				cleaned["type"] = strings.ToUpper(typed)
+			case []any:
+				normalizedType, keepType := normalizeGeminiNullableSchemaTypeArray(typed)
+				if keepType {
+					cleaned["type"] = normalizedType
+				} else {
+					delete(cleaned, "type")
+				}
+			}
 		}
 		return cleaned
 	case []any:
-		cleaned := make([]any, len(v))
-		for i, item := range v {
-			cleaned[i] = cleanToolSchema(item)
-		}
-		return cleaned
+		return cleanToolSchemaObjectArray(v)
 	default:
 		return v
 	}
+}
+
+func cleanToolSchemaObjectOrArray(value any) any {
+	if schemas, ok := value.([]any); ok {
+		return cleanToolSchemaObjectArray(schemas)
+	}
+	return cleanToolSchemaObjectValue(value)
+}
+
+func cleanToolSchemaObjectArray(schemas any) any {
+	values, ok := schemas.([]any)
+	if !ok {
+		return cleanToolSchemaObjectValue(schemas)
+	}
+
+	cleaned := make([]any, len(values))
+	for i, item := range values {
+		cleaned[i] = cleanToolSchemaObjectValue(item)
+	}
+	return cleaned
+}
+
+func cleanToolSchemaPropertyMap(properties any) any {
+	propertyMap, ok := properties.(map[string]any)
+	if !ok {
+		return cloneToolSchemaValue(properties)
+	}
+
+	cleaned := make(map[string]any, len(propertyMap))
+	for name, propertySchema := range propertyMap {
+		cleaned[name] = cleanToolSchemaObjectValue(propertySchema)
+	}
+	return cleaned
+}
+
+func cloneToolSchemaValue(value any) any {
+	switch v := value.(type) {
+	case map[string]any:
+		cloned := make(map[string]any, len(v))
+		for key, nested := range v {
+			cloned[key] = cloneToolSchemaValue(nested)
+		}
+		return cloned
+	case []any:
+		cloned := make([]any, len(v))
+		for i, nested := range v {
+			cloned[i] = cloneToolSchemaValue(nested)
+		}
+		return cloned
+	default:
+		return v
+	}
+}
+
+func isUnsupportedGeminiSchemaKeyword(key string) bool {
+	switch key {
+	case "$schema", "$id", "$ref", "$defs", "definitions",
+		"additionalProperties", "patternProperties", "minLength",
+		"maxLength", "minItems", "maxItems":
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeGeminiNullableSchemaTypeArray(typeValues []any) (string, bool) {
+	nonNullTypes := make(map[string]struct{}, 1)
+	var nonNullType string
+	hasNull := false
+
+	for _, typeValue := range typeValues {
+		typeName, ok := typeValue.(string)
+		if !ok {
+			return "", false
+		}
+		if strings.EqualFold(typeName, "null") {
+			hasNull = true
+			continue
+		}
+
+		normalizedType := strings.ToUpper(typeName)
+		if _, exists := nonNullTypes[normalizedType]; exists {
+			continue
+		}
+		nonNullTypes[normalizedType] = struct{}{}
+		if len(nonNullTypes) > 1 {
+			return "", false
+		}
+		nonNullType = normalizedType
+	}
+
+	if hasNull && len(nonNullTypes) == 1 {
+		return nonNullType, true
+	}
+
+	return "", false
 }
 
 func convertClaudeGenerationConfig(req map[string]any) map[string]any {
