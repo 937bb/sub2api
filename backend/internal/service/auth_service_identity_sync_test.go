@@ -259,6 +259,52 @@ func TestAuthServiceRecordSuccessfulLoginBackfillsEmailIdentity(t *testing.T) {
 	require.Equal(t, user.ID, identity.UserID)
 }
 
+func TestAuthServiceRecordSuccessfulLoginSkipsDefaultsWhenEmailIdentityCreateFails(t *testing.T) {
+	_, _, client := newAuthServiceWithEnt(t, map[string]string{
+		service.SettingKeyRegistrationEnabled: "true",
+	}, nil)
+	ctx := context.Background()
+	assigner := &authIdentityDefaultSubAssignerStub{}
+	user := &service.User{
+		ID:          404040,
+		Email:       "missing-ent-user@example.com",
+		Role:        service.RoleUser,
+		Status:      service.StatusActive,
+		Balance:     1,
+		Concurrency: 1,
+	}
+	svc := service.NewAuthService(
+		client,
+		&recordLoginMissingEntUserRepo{user: user},
+		nil,
+		nil,
+		&config.Config{},
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		assigner,
+		nil,
+		nil,
+	)
+
+	require.NotPanics(t, func() {
+		svc.RecordSuccessfulLogin(ctx, user.ID)
+	})
+	require.Empty(t, assigner.calls)
+
+	identityCount, err := client.AuthIdentity.Query().
+		Where(
+			authidentity.ProviderTypeEQ("email"),
+			authidentity.ProviderKeyEQ("email"),
+			authidentity.ProviderSubjectEQ("missing-ent-user@example.com"),
+		).
+		Count(ctx)
+	require.NoError(t, err)
+	require.Zero(t, identityCount)
+}
+
 func TestAuthServiceLogin_DoesNotApplyEmailFirstBindDefaultsWhenBackfillingLegacyEmailIdentity(t *testing.T) {
 	assigner := &authIdentityDefaultSubAssignerStub{}
 	svc, _, client := newAuthServiceWithEnt(t, map[string]string{
@@ -479,4 +525,13 @@ func countProviderGrantRecords(
 	require.NoError(t, rows.Scan(&count))
 	require.NoError(t, rows.Err())
 	return count
+}
+
+type recordLoginMissingEntUserRepo struct {
+	service.UserRepository
+	user *service.User
+}
+
+func (r *recordLoginMissingEntUserRepo) GetByID(context.Context, int64) (*service.User, error) {
+	return r.user, nil
 }
