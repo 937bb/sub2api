@@ -106,6 +106,18 @@ func TestOpenAIStreamDataShouldStartClientStreamIncludesTerminal(t *testing.T) {
 			"response.output_text.delta",
 		),
 	)
+	require.True(t,
+		openAIStreamDataShouldStartClientStream(
+			`{"type":"response.output_item.added","item":{"type":"message"}}`,
+			"response.output_item.added",
+		),
+	)
+	require.True(t,
+		openAIStreamDataShouldStartClientStream(
+			`{"type":"response.content_part.added","part":{"type":"output_text"}}`,
+			"response.content_part.added",
+		),
+	)
 	require.False(t,
 		openAIStreamDataShouldStartClientStream(
 			`{"type":"response.created","response":{"id":"resp"}}`,

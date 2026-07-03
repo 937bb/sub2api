@@ -4027,7 +4027,11 @@ func openAIStreamDataShouldStartClientStream(data, eventType string) bool {
 	if openAIStreamDataStartsClientOutput(trimmed, eventType) {
 		return true
 	}
-	return openAIStreamEventIsTerminal(trimmed)
+	eventType = strings.TrimSpace(eventType)
+	if eventType != "" {
+		return !openAIStreamEventIsPreamble(eventType)
+	}
+	return openAIStreamEventIsTerminal(trimmed) || trimmed == "[DONE]"
 }
 
 func openAIStreamFailedEventShouldFailover(payload []byte, message string) bool {
