@@ -416,6 +416,53 @@ func TestNormalizeCodexImportPersonalAccessTokenStoresPATMetadataAndFedRAMP(t *t
 	}
 }
 
+func TestSanitizeCodexImportCredentialExtrasProtectsHydratedAuthMetadata(t *testing.T) {
+	credentials := service.ApplyOpenAIPersonalAccessTokenMetadata(map[string]any{
+		"auth_mode":        "personal_access_token",
+		"openai_auth_mode": "codex_pat",
+		"token_type":       "Bearer",
+	}, "at-server", &service.OpenAIPersonalAccessTokenMetadata{
+		Email:                   "server@example.com",
+		ChatGPTUserID:           "user-server",
+		ChatGPTAccountID:        "acct-server",
+		ChatGPTPlanType:         "team",
+		ChatGPTAccountIsFedRAMP: true,
+	})
+	extras := sanitizeCodexImportCredentialExtras(map[string]any{
+		"auth_mode":                   "oauth",
+		"openai_auth_mode":            "oauth",
+		"token_type":                  "service_account",
+		"chatgpt_account_is_fedramp":  false,
+		"chatgpt_plan_type":           "free",
+		"plan_type":                   "free",
+		"custom_passthrough_metadata": "kept",
+	})
+
+	merged := mergeCodexImportMap(credentials, extras)
+
+	if merged["auth_mode"] != "personal_access_token" {
+		t.Fatalf("auth_mode = %v, want personal_access_token", merged["auth_mode"])
+	}
+	if merged["openai_auth_mode"] != "codex_pat" {
+		t.Fatalf("openai_auth_mode = %v, want codex_pat", merged["openai_auth_mode"])
+	}
+	if merged["token_type"] != "Bearer" {
+		t.Fatalf("token_type = %v, want Bearer", merged["token_type"])
+	}
+	if merged["chatgpt_account_is_fedramp"] != true {
+		t.Fatalf("chatgpt_account_is_fedramp = %v, want true", merged["chatgpt_account_is_fedramp"])
+	}
+	if merged["chatgpt_plan_type"] != "team" {
+		t.Fatalf("chatgpt_plan_type = %v, want team", merged["chatgpt_plan_type"])
+	}
+	if merged["plan_type"] != "team" {
+		t.Fatalf("plan_type = %v, want team", merged["plan_type"])
+	}
+	if merged["custom_passthrough_metadata"] != "kept" {
+		t.Fatalf("custom_passthrough_metadata = %v, want kept", merged["custom_passthrough_metadata"])
+	}
+}
+
 func TestNormalizeCodexImportPersonalAccessTokenIgnoresExpiredAccessToken(t *testing.T) {
 	raw := map[string]any{
 		"personal_access_token": "pat-token",

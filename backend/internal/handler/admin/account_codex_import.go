@@ -1007,17 +1007,22 @@ func sanitizeCodexImportCredentialExtras(input map[string]any) map[string]any {
 		return nil
 	}
 	protected := map[string]struct{}{
-		"access_token":          {},
-		"personal_access_token": {},
-		"refresh_token":         {},
-		"id_token":              {},
-		"expires_at":            {},
-		"email":                 {},
-		"chatgpt_account_id":    {},
-		"chatgpt_user_id":       {},
-		"organization_id":       {},
-		"plan_type":             {},
-		"client_id":             {},
+		"access_token":               {},
+		"personal_access_token":      {},
+		"refresh_token":              {},
+		"id_token":                   {},
+		"expires_at":                 {},
+		"email":                      {},
+		"auth_mode":                  {},
+		"openai_auth_mode":           {},
+		"token_type":                 {},
+		"chatgpt_account_id":         {},
+		"chatgpt_user_id":            {},
+		"chatgpt_account_is_fedramp": {},
+		"chatgpt_plan_type":          {},
+		"organization_id":            {},
+		"plan_type":                  {},
+		"client_id":                  {},
 	}
 	out := make(map[string]any, len(input))
 	for key, value := range input {
