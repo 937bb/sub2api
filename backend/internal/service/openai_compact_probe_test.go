@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 )
@@ -118,5 +119,61 @@ func TestBuildOpenAICompactProbeExtraUpdates_EmptyFailureBodyFallsBackToHTTPStat
 	}
 	if got := updates["openai_compact_last_error"]; got != "HTTP 503" {
 		t.Fatalf("openai_compact_last_error = %v, want HTTP 503", got)
+	}
+}
+
+func TestOpenAIAccountTestAPIErrorMessage_RedactsPATMetadataDiagnostics(t *testing.T) {
+	body := []byte(`{"error":{"message":"owner email=pat-user@example.com ` +
+		`chatgpt_user_id=user-sensitive chatgpt_account_id=acc-sensitive ` +
+		`chatgpt_plan_type=enterprise chatgpt_account_is_fedramp=true ` +
+		`personal_access_token=at-secret"}}`)
+
+	got := openAIAccountTestAPIErrorMessage(http.StatusUnauthorized, body)
+
+	assertDiagnosticOmits(t, got,
+		"pat-user@example.com",
+		"user-sensitive",
+		"acc-sensitive",
+		"enterprise",
+		"chatgpt_account_is_fedramp=true",
+		"at-secret",
+	)
+	if !strings.Contains(got, "email=[redacted]") {
+		t.Fatalf("diagnostic = %s, want redacted email field", got)
+	}
+	if !strings.Contains(got, "chatgpt_account_is_fedramp=[redacted]") {
+		t.Fatalf("diagnostic = %s, want redacted non-string metadata field", got)
+	}
+}
+
+func TestBuildOpenAICompactProbeExtraUpdates_RedactsPATMetadataDiagnostics(t *testing.T) {
+	now := time.Date(2026, 4, 10, 10, 0, 0, 0, time.UTC)
+	body := []byte(`{"diagnostic":{"email":"pat-user@example.com",` +
+		`"chatgpt_user_id":"user-sensitive","chatgpt_account_id":"acc-sensitive",` +
+		`"chatgpt_plan_type":"enterprise","chatgpt_account_is_fedramp":true,` +
+		`"personal_access_token":"at-json-secret"}}`)
+
+	updates := buildOpenAICompactProbeExtraUpdates(&http.Response{StatusCode: http.StatusBadGateway}, body, nil, now)
+	got, _ := updates["openai_compact_last_error"].(string)
+
+	assertDiagnosticOmits(t, got,
+		"pat-user@example.com",
+		"user-sensitive",
+		"acc-sensitive",
+		"enterprise",
+		`"chatgpt_account_is_fedramp":true`,
+		"at-json-secret",
+	)
+	if !strings.Contains(got, `"chatgpt_account_is_fedramp":"[redacted]"`) {
+		t.Fatalf("compact diagnostic = %s, want redacted non-string metadata field", got)
+	}
+}
+
+func assertDiagnosticOmits(t *testing.T, text string, fragments ...string) {
+	t.Helper()
+	for _, fragment := range fragments {
+		if strings.Contains(text, fragment) {
+			t.Fatalf("diagnostic leaked %q in %s", fragment, text)
+		}
 	}
 }
