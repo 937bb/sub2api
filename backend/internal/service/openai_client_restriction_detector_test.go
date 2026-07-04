@@ -105,12 +105,15 @@ func TestOpenAICodexClientRestrictionDetector_Detect(t *testing.T) {
 			"codex_cli_rs/0.99.0",
 			"codex-tui/0.136.0",
 			"codex_vscode/1.0.0",
+			"codex_vscode_copilot/1.0.0",
 			"codex_app/2.1.0",
 			"codex_chatgpt_desktop/1.0.0",
 			"codex_atlas/0.1.0",
 			"codex_exec/0.1.0",
 			"codex_sdk_ts/0.1.0",
 			"Codex Desktop/1.2.3",
+			"Codex Some Future Client/9.9",
+			"cccc/0.141.0 (Mac OS 26.5.0; arm64) Apple_Terminal/470.2 (codex-tui; 0.141.0)",
 		}
 
 		for _, ua := range tests {
@@ -162,6 +165,16 @@ func TestOpenAICodexClientRestrictionDetector_Detect(t *testing.T) {
 		account := newCodexCLIOnlyDetectorTestAccount(nil)
 
 		result := detector.Detect(newCodexDetectorTestContext("Mozilla/5.0 codex_app/0.141.0", ""), account, nil)
+		require.True(t, result.Enabled)
+		require.False(t, result.Matched)
+		require.Equal(t, CodexClientRestrictionReasonNotMatchedUA, result.Reason)
+	})
+
+	t.Run("开启后浏览器 UA trailer 拒绝", func(t *testing.T) {
+		detector := NewOpenAICodexClientRestrictionDetector(nil)
+		account := newCodexCLIOnlyDetectorTestAccount(nil)
+
+		result := detector.Detect(newCodexDetectorTestContext("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) (codex-tui; 0.141.0)", ""), account, nil)
 		require.True(t, result.Enabled)
 		require.False(t, result.Matched)
 		require.Equal(t, CodexClientRestrictionReasonNotMatchedUA, result.Reason)
