@@ -1602,6 +1602,66 @@ func (s *GatewayService) SelectAccountForModelWithExclusions(ctx context.Context
 	return s.hydrateSelectedAccount(ctx, account)
 }
 
+func (s *GatewayService) isPureModelSupportMiss(
+	ctx context.Context,
+	accounts []Account,
+	requestedModel string,
+	platform string,
+	excludedIDs map[int64]struct{},
+	allowMixedScheduling bool,
+	schedGroup *Group,
+	groupID *int64,
+) bool {
+	requestedModel = strings.TrimSpace(requestedModel)
+	if requestedModel == "" || len(accounts) == 0 {
+		return false
+	}
+	if !publicModelSupportMiss404Enabled(ctx) {
+		return false
+	}
+	if len(excludedIDs) > 0 {
+		return false
+	}
+	needsUpstreamCheck := s.needsUpstreamChannelRestrictionCheck(ctx, groupID)
+
+	otherwiseEligible := 0
+	for i := range accounts {
+		acc := &accounts[i]
+		if acc == nil {
+			continue
+		}
+		if !s.isAccountAllowedForPlatform(acc, platform, allowMixedScheduling) {
+			continue
+		}
+		if s.isModelSupportedByAccountWithContext(ctx, acc, requestedModel) {
+			return false
+		}
+		if !s.isAccountSchedulableForSelection(acc) {
+			continue
+		}
+		if shouldBlockAccountForPrivacyRequirement(acc, schedGroup) {
+			continue
+		}
+		if needsUpstreamCheck && s.isUpstreamModelRestrictedByChannel(ctx, *groupID, acc, requestedModel) {
+			continue
+		}
+		if !s.isAccountSchedulableForModelSelection(ctx, acc, requestedModel) {
+			continue
+		}
+		if !s.isAccountSchedulableForQuota(acc) {
+			continue
+		}
+		if !s.isAccountSchedulableForWindowCost(ctx, acc, false) {
+			continue
+		}
+		if !s.isAccountSchedulableForRPM(ctx, acc, false) {
+			continue
+		}
+		otherwiseEligible++
+	}
+	return otherwiseEligible > 0
+}
+
 // SelectAccountWithLoadAwareness selects account with load-awareness and wait plan.
 // metadataUserID: 用于客户端亲和调度，从中提取客户端 ID
 // sub2apiUserID: 系统用户 ID，用于二维亲和调度
@@ -2172,6 +2232,9 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 	}
 
 	if len(candidates) == 0 {
+		if s.isPureModelSupportMiss(ctx, accounts, requestedModel, platform, excludedIDs, useMixed, group, groupID) {
+			return nil, newModelNotSupportedByAccountsError(requestedModel)
+		}
 		return nil, ErrNoAvailableAccounts
 	}
 
@@ -3443,6 +3506,9 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 
 	if selected == nil {
 		stats := s.logDetailedSelectionFailure(ctx, groupID, sessionHash, requestedModel, platform, accounts, excludedIDs, false)
+		if s.isPureModelSupportMiss(ctx, accounts, requestedModel, platform, excludedIDs, false, schedGroup, groupID) {
+			return nil, newModelNotSupportedByAccountsError(requestedModel)
+		}
 		if requestedModel != "" {
 			return nil, fmt.Errorf("%w supporting model: %s (%s)", ErrNoAvailableAccounts, requestedModel, summarizeSelectionFailureStats(stats))
 		}
@@ -3704,6 +3770,9 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 
 	if selected == nil {
 		stats := s.logDetailedSelectionFailure(ctx, groupID, sessionHash, requestedModel, nativePlatform, accounts, excludedIDs, true)
+		if s.isPureModelSupportMiss(ctx, accounts, requestedModel, nativePlatform, excludedIDs, true, schedGroup, groupID) {
+			return nil, newModelNotSupportedByAccountsError(requestedModel)
+		}
 		if requestedModel != "" {
 			return nil, fmt.Errorf("%w supporting model: %s (%s)", ErrNoAvailableAccounts, requestedModel, summarizeSelectionFailureStats(stats))
 		}

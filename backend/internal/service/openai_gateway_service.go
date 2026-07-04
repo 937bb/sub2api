@@ -1878,10 +1878,94 @@ func noAvailableOpenAISelectionError(requestedModel string, compactBlocked bool)
 	if compactBlocked {
 		return ErrNoAvailableCompactAccounts
 	}
-	if requestedModel != "" {
-		return fmt.Errorf("no available OpenAI accounts supporting model: %s", requestedModel)
+	if strings.TrimSpace(requestedModel) != "" {
+		return noAvailableOpenAIAccountsError(fmt.Sprintf("no available OpenAI accounts supporting model: %s", requestedModel))
 	}
-	return errors.New("no available OpenAI accounts")
+	return noAvailableOpenAIAccountsError("no available OpenAI accounts")
+}
+
+func noAvailableOpenAISelectionCapacityError(requestedModel string) error {
+	if strings.TrimSpace(requestedModel) != "" {
+		return noAvailableOpenAIAccountsError(fmt.Sprintf("no available OpenAI accounts supporting model: %s", requestedModel))
+	}
+	return ErrNoAvailableAccounts
+}
+
+type noAvailableOpenAIAccountsError string
+
+func (e noAvailableOpenAIAccountsError) Error() string {
+	return string(e)
+}
+
+func (e noAvailableOpenAIAccountsError) Is(target error) bool {
+	return target == ErrNoAvailableAccounts
+}
+
+func noAvailableOpenAISelectionErrorForAccounts(ctx context.Context, service *OpenAIGatewayService, groupID *int64, accounts []Account, requestedModel string, excludedIDs map[int64]struct{}, requireCompact bool, requiredCapability OpenAIEndpointCapability, requiredImageCapability OpenAIImagesCapability, requiredTransport OpenAIUpstreamTransport, schedGroup *Group, compactBlocked bool) error {
+	if compactBlocked {
+		return ErrNoAvailableCompactAccounts
+	}
+	if isPureOpenAIModelSupportMiss(ctx, service, groupID, accounts, requestedModel, excludedIDs, requireCompact, requiredCapability, requiredImageCapability, requiredTransport, schedGroup) {
+		return newModelNotSupportedByAccountsError(requestedModel)
+	}
+	return noAvailableOpenAISelectionError(requestedModel, false)
+}
+
+func isPureOpenAIModelSupportMiss(ctx context.Context, service *OpenAIGatewayService, groupID *int64, accounts []Account, requestedModel string, excludedIDs map[int64]struct{}, requireCompact bool, requiredCapability OpenAIEndpointCapability, requiredImageCapability OpenAIImagesCapability, requiredTransport OpenAIUpstreamTransport, schedGroup *Group) bool {
+	requestedModel = strings.TrimSpace(requestedModel)
+	if requestedModel == "" || len(accounts) == 0 {
+		return false
+	}
+	if !publicModelSupportMiss404Enabled(ctx) {
+		return false
+	}
+	if len(excludedIDs) > 0 {
+		return false
+	}
+	needsUpstreamCheck := service != nil && service.needsUpstreamChannelRestrictionCheck(ctx, groupID)
+
+	otherwiseEligible := 0
+	for i := range accounts {
+		account := &accounts[i]
+		if account == nil || !account.IsOpenAI() {
+			continue
+		}
+		if account.IsModelSupported(requestedModel) {
+			return false
+		}
+		if !account.IsSchedulable() {
+			continue
+		}
+		if paused, _ := shouldAutoPauseOpenAIAccountByQuota(ctx, account); paused {
+			continue
+		}
+		if shouldBlockAccountForPrivacyRequirement(account, schedGroup) {
+			continue
+		}
+		if service != nil && service.isOpenAIAccountRuntimeBlocked(account) {
+			continue
+		}
+		if needsUpstreamCheck && service.isUpstreamModelRestrictedByChannel(ctx, *groupID, account, requestedModel, requireCompact) {
+			continue
+		}
+		if !account.IsSchedulableForModelWithContext(ctx, requestedModel) {
+			continue
+		}
+		if !account.SupportsOpenAIEndpointCapability(requiredCapability) {
+			continue
+		}
+		if !account.SupportsOpenAIImageCapability(requiredImageCapability) {
+			continue
+		}
+		if requireCompact && openAICompactSupportTier(account) == 0 {
+			continue
+		}
+		if service != nil && !service.isOpenAIAccountTransportCompatible(account, requiredTransport) {
+			continue
+		}
+		otherwiseEligible++
+	}
+	return otherwiseEligible > 0
 }
 
 // openAICompactSupportTier classifies an OpenAI account by compact capability.
@@ -2298,7 +2382,8 @@ func (s *OpenAIGatewayService) selectAccountForModelWithExclusions(ctx context.C
 	selected, compactBlocked := s.selectBestAccount(ctx, groupID, accounts, requestedModel, excludedIDs, requireCompact, requiredCapability)
 
 	if selected == nil {
-		return nil, noAvailableOpenAISelectionError(requestedModel, compactBlocked)
+		schedGroup := s.resolveOpenAISchedulingGroup(ctx, groupID)
+		return nil, noAvailableOpenAISelectionErrorForAccounts(ctx, s, groupID, accounts, requestedModel, excludedIDs, requireCompact, requiredCapability, "", OpenAIUpstreamTransportAny, schedGroup, compactBlocked)
 	}
 
 	hydrated, err := s.hydrateSelectedAccount(ctx, selected)
@@ -2550,7 +2635,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		return nil, err
 	}
 	if len(accounts) == 0 {
-		return nil, ErrNoAvailableAccounts
+		return nil, noAvailableOpenAISelectionError(requestedModel, false)
 	}
 
 	isExcluded := func(accountID int64) bool {
@@ -2644,7 +2729,10 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 	}
 
 	if len(candidates) == 0 {
-		return nil, ErrNoAvailableAccounts
+		if isPureOpenAIModelSupportMiss(ctx, s, groupID, accounts, requestedModel, excludedIDs, requireCompact, requiredCapability, "", OpenAIUpstreamTransportAny, schedGroup) {
+			return nil, newModelNotSupportedByAccountsError(requestedModel)
+		}
+		return nil, noAvailableOpenAISelectionCapacityError(requestedModel)
 	}
 
 	accountLoads := make([]AccountWithConcurrency, 0, len(candidates))

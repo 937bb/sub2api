@@ -450,6 +450,44 @@ func TestGatewayService_SelectAccountForModelWithPlatform_NoAvailableAccounts(t 
 	require.Error(t, err)
 	require.Nil(t, acc)
 	require.ErrorIs(t, err, ErrNoAvailableAccounts)
+	require.NotErrorIs(t, err, ErrModelNotSupportedByAccounts)
+}
+
+func TestGatewayService_SelectAccountForModelWithPlatform_ModelRateLimitedNotUnsupportedModel(t *testing.T) {
+	ctx := context.Background()
+	resetAt := time.Now().Add(time.Hour)
+
+	repo := &mockAccountRepoForPlatform{
+		accounts: []Account{
+			{
+				ID:                     1,
+				Platform:               PlatformAnthropic,
+				Priority:               1,
+				Status:                 StatusActive,
+				Schedulable:            true,
+				Concurrency:            1,
+				RateLimitedAt:          &resetAt,
+				RateLimitResetAt:       &resetAt,
+				TempUnschedulableUntil: nil,
+			},
+		},
+		accountsByID: map[int64]*Account{},
+	}
+	for i := range repo.accounts {
+		repo.accountsByID[repo.accounts[i].ID] = &repo.accounts[i]
+	}
+
+	svc := &GatewayService{
+		accountRepo: repo,
+		cache:       &mockGatewayCacheForPlatform{},
+		cfg:         testConfig(),
+	}
+
+	acc, err := svc.selectAccountForModelWithPlatform(ctx, nil, "", "claude-3-5-sonnet-20241022", nil, PlatformAnthropic)
+	require.Error(t, err)
+	require.Nil(t, acc)
+	require.ErrorIs(t, err, ErrNoAvailableAccounts)
+	require.NotErrorIs(t, err, ErrModelNotSupportedByAccounts)
 }
 
 // TestGatewayService_SelectAccountForModelWithPlatform_AllExcluded 测试所有账户被排除
@@ -887,7 +925,90 @@ func TestGatewayService_SelectAccountForModelWithPlatform_NoModelSupport(t *test
 	acc, err := svc.selectAccountForModelWithPlatform(ctx, nil, "", "claude-3-5-sonnet-20241022", nil, PlatformAnthropic)
 	require.Error(t, err)
 	require.Nil(t, acc)
+	require.ErrorIs(t, err, ErrNoAvailableAccounts)
+	require.NotErrorIs(t, err, ErrModelNotSupportedByAccounts)
 	require.Contains(t, err.Error(), "supporting model")
+}
+
+func TestGatewayService_SelectAccountForModelWithPlatform_BedrockSupportMissRequiresPublicOptIn(t *testing.T) {
+	repo := &mockAccountRepoForPlatform{
+		accounts: []Account{
+			{
+				ID:          1,
+				Platform:    PlatformAnthropic,
+				Type:        AccountTypeBedrock,
+				Priority:    1,
+				Status:      StatusActive,
+				Schedulable: true,
+				Credentials: map[string]any{"aws_region": "us-east-1"},
+			},
+		},
+		accountsByID: map[int64]*Account{},
+	}
+	for i := range repo.accounts {
+		repo.accountsByID[repo.accounts[i].ID] = &repo.accounts[i]
+	}
+	svc := &GatewayService{
+		accountRepo: repo,
+		cache:       &mockGatewayCacheForPlatform{},
+		cfg:         testConfig(),
+	}
+
+	acc, err := svc.selectAccountForModelWithPlatform(context.Background(), nil, "", "claude-3-5-sonnet-20241022", nil, PlatformAnthropic)
+	require.Error(t, err)
+	require.Nil(t, acc)
+	require.ErrorIs(t, err, ErrNoAvailableAccounts)
+	require.NotErrorIs(t, err, ErrModelNotSupportedByAccounts)
+	require.Contains(t, err.Error(), "supporting model")
+
+	acc, err = svc.selectAccountForModelWithPlatform(WithPublicModelSupportMiss404(context.Background()), nil, "", "claude-3-5-sonnet-20241022", nil, PlatformAnthropic)
+	require.Error(t, err)
+	require.Nil(t, acc)
+	require.ErrorIs(t, err, ErrNoAvailableAccounts)
+	require.ErrorIs(t, err, ErrModelNotSupportedByAccounts)
+	model, ok := ModelNotSupportedRequestedModel(err)
+	require.True(t, ok)
+	require.Equal(t, "claude-3-5-sonnet-20241022", model)
+}
+
+func TestGatewayService_SelectAccountForModelWithPlatform_AntigravitySupportMissRequiresPublicOptIn(t *testing.T) {
+	repo := &mockAccountRepoForPlatform{
+		accounts: []Account{
+			{
+				ID:          1,
+				Platform:    PlatformAntigravity,
+				Type:        AccountTypeAPIKey,
+				Priority:    1,
+				Status:      StatusActive,
+				Schedulable: true,
+			},
+		},
+		accountsByID: map[int64]*Account{},
+	}
+	for i := range repo.accounts {
+		repo.accountsByID[repo.accounts[i].ID] = &repo.accounts[i]
+	}
+	svc := &GatewayService{
+		accountRepo: repo,
+		cache:       &mockGatewayCacheForPlatform{},
+		cfg:         testConfig(),
+	}
+
+	acc, err := svc.selectAccountForModelWithPlatform(context.Background(), nil, "", "gpt-4", nil, PlatformAntigravity)
+	require.Error(t, err)
+	require.Nil(t, acc)
+	require.ErrorIs(t, err, ErrNoAvailableAccounts)
+	require.NotErrorIs(t, err, ErrModelNotSupportedByAccounts)
+	require.Contains(t, err.Error(), "supporting model")
+
+	acc, err = svc.selectAccountForModelWithPlatform(WithPublicModelSupportMiss404(context.Background()), nil, "", "gpt-4", nil, PlatformAntigravity)
+	require.Error(t, err)
+	require.Nil(t, acc)
+	require.ErrorIs(t, err, ErrNoAvailableAccounts)
+	require.ErrorIs(t, err, ErrModelNotSupportedByAccounts)
+	model, ok := ModelNotSupportedRequestedModel(err)
+	require.True(t, ok)
+	require.Equal(t, "gpt-4", model)
 }
 
 func TestGatewayService_SelectAccountForModelWithPlatform_GeminiPreferOAuth(t *testing.T) {

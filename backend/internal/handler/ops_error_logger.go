@@ -492,6 +492,9 @@ func isOpsNoAvailableAccountError(err error) bool {
 	if err == nil {
 		return false
 	}
+	if _, ok := service.ModelNotSupportedRequestedModel(err); ok {
+		return false
+	}
 	if errors.Is(err, service.ErrNoAvailableAccounts) || errors.Is(err, service.ErrNoAvailableCompactAccounts) {
 		return true
 	}
@@ -1190,6 +1193,7 @@ func isKnownOpsErrorType(t string) bool {
 		"upstream_error",
 		"overloaded_error",
 		"api_error",
+		"model_not_found",
 		"not_found_error",
 		"forbidden_error":
 		return true
@@ -1232,7 +1236,7 @@ func classifyOpsPhase(errType, message, code string) string {
 			return "request"
 		}
 		return "upstream"
-	case "invalid_request_error":
+	case "invalid_request_error", "model_not_found":
 		return "request"
 	case "upstream_error", "overloaded_error":
 		return "upstream"

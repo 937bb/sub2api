@@ -150,6 +150,7 @@ func TestIsKnownOpsErrorType(t *testing.T) {
 		"upstream_error",
 		"overloaded_error",
 		"api_error",
+		"model_not_found",
 		"not_found_error",
 		"forbidden_error",
 	}
@@ -174,6 +175,7 @@ func TestNormalizeOpsErrorType(t *testing.T) {
 		{"known invalid_request_error", "invalid_request_error", "", "invalid_request_error"},
 		{"known rate_limit_error", "rate_limit_error", "", "rate_limit_error"},
 		{"known upstream_error", "upstream_error", "", "upstream_error"},
+		{"known model_not_found", "model_not_found", "", "model_not_found"},
 
 		// Unknown/garbage types are rejected and fall through to code-based or default.
 		{"nil literal from upstream", "<nil>", "", "api_error"},
@@ -699,6 +701,31 @@ func TestClassifyOpsUnsupportedModelExcludedFromSLA(t *testing.T) {
 			require.Equal(t, "gateway", errorSource)
 		})
 	}
+}
+
+func TestOpsRoutingCapacityMarkerSkipsPureModelSupportMiss(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+
+	err := &service.ModelNotSupportedByAccountsError{RequestedModel: "made-up-model"}
+	require.ErrorIs(t, err, service.ErrNoAvailableAccounts)
+
+	markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
+	require.False(t, isOpsRoutingCapacityLimited(c))
+
+	phase, isBusinessLimited, errorOwner, errorSource := classifyOpsErrorLog(
+		c,
+		"model_not_found",
+		`The model "made-up-model" was not found.`,
+		"",
+		http.StatusNotFound,
+	)
+
+	require.Equal(t, "request", phase)
+	require.False(t, isBusinessLimited)
+	require.Equal(t, "client", errorOwner)
+	require.Equal(t, "client_request", errorSource)
 }
 
 func TestClassifyOpsUnmarkedNoAvailableTextStillCountsForSLA(t *testing.T) {

@@ -865,9 +865,53 @@ func TestOpenAISelectAccountForModelWithExclusions_NoModelSupport(t *testing.T) 
 	if acc != nil {
 		t.Fatalf("expected nil account for unsupported model")
 	}
-	if !strings.Contains(err.Error(), "supporting model") {
-		t.Fatalf("unexpected error: %v", err)
+	require.ErrorIs(t, err, ErrNoAvailableAccounts)
+	require.NotErrorIs(t, err, ErrModelNotSupportedByAccounts)
+	require.Contains(t, err.Error(), "no available OpenAI accounts supporting model")
+}
+
+func TestOpenAISelectAccountForModelWithExclusions_WildcardMappingDoesNotReturnUnsupportedModel(t *testing.T) {
+	repo := stubOpenAIAccountRepo{
+		accounts: []Account{
+			{
+				ID:          1,
+				Platform:    PlatformOpenAI,
+				Status:      StatusActive,
+				Schedulable: true,
+				Credentials: map[string]any{"model_mapping": map[string]any{"gpt-*": "gpt-4o"}},
+			},
+		},
 	}
+	svc := &OpenAIGatewayService{
+		accountRepo: repo,
+		cache:       &stubGatewayCache{},
+	}
+
+	acc, err := svc.SelectAccountForModelWithExclusions(context.Background(), nil, "", "gpt-4.1", nil)
+	require.NoError(t, err)
+	require.NotNil(t, acc)
+}
+
+func TestOpenAISelectAccountForModelWithExclusions_EmptyMappingAllowsModel(t *testing.T) {
+	repo := stubOpenAIAccountRepo{
+		accounts: []Account{
+			{
+				ID:          1,
+				Platform:    PlatformOpenAI,
+				Status:      StatusActive,
+				Schedulable: true,
+				Credentials: map[string]any{"model_mapping": map[string]any{}},
+			},
+		},
+	}
+	svc := &OpenAIGatewayService{
+		accountRepo: repo,
+		cache:       &stubGatewayCache{},
+	}
+
+	acc, err := svc.SelectAccountForModelWithExclusions(context.Background(), nil, "", "gpt-any-public", nil)
+	require.NoError(t, err)
+	require.NotNil(t, acc)
 }
 
 func TestOpenAISelectAccountWithLoadAwareness_LoadBatchErrorFallback(t *testing.T) {
@@ -1103,9 +1147,8 @@ func TestOpenAISelectAccountForModelWithExclusions_NoAccounts(t *testing.T) {
 	if acc != nil {
 		t.Fatalf("expected nil account")
 	}
-	if !strings.Contains(err.Error(), "no available OpenAI accounts") {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.ErrorIs(t, err, ErrNoAvailableAccounts)
+	require.NotErrorIs(t, err, ErrModelNotSupportedByAccounts)
 }
 
 func TestOpenAISelectAccountWithLoadAwareness_NoCandidates(t *testing.T) {
@@ -1132,6 +1175,49 @@ func TestOpenAISelectAccountWithLoadAwareness_NoCandidates(t *testing.T) {
 	if selection != nil {
 		t.Fatalf("expected nil selection")
 	}
+	require.ErrorIs(t, err, ErrNoAvailableAccounts)
+	require.NotErrorIs(t, err, ErrModelNotSupportedByAccounts)
+}
+
+func TestOpenAISelectAccountWithLoadAwareness_EndpointCapabilityMismatchNotUnsupportedModel(t *testing.T) {
+	groupID := int64(1)
+	repo := stubOpenAIAccountRepo{
+		accounts: []Account{
+			{
+				ID:          1,
+				Platform:    PlatformOpenAI,
+				Type:        AccountTypeAPIKey,
+				Status:      StatusActive,
+				Schedulable: true,
+				Concurrency: 1,
+				Priority:    1,
+				Credentials: map[string]any{
+					"openai_capabilities": []any{"chat_completions"},
+				},
+			},
+		},
+	}
+	svc := &OpenAIGatewayService{
+		accountRepo:        repo,
+		cache:              &stubGatewayCache{},
+		concurrencyService: NewConcurrencyService(stubConcurrencyCache{}),
+	}
+
+	selection, _, err := svc.SelectAccountWithSchedulerForCapability(
+		context.Background(),
+		&groupID,
+		"",
+		"",
+		"text-embedding-3-small",
+		nil,
+		OpenAIUpstreamTransportHTTPSSE,
+		OpenAIEndpointCapabilityEmbeddings,
+		false,
+	)
+	require.Error(t, err)
+	require.Nil(t, selection)
+	require.ErrorIs(t, err, ErrNoAvailableAccounts)
+	require.NotErrorIs(t, err, ErrModelNotSupportedByAccounts)
 }
 
 func TestOpenAISelectAccountWithLoadAwareness_AllFullWaitPlan(t *testing.T) {
