@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -257,6 +258,59 @@ func TestAuthServiceRecordSuccessfulLoginBackfillsEmailIdentity(t *testing.T) {
 		Only(ctx)
 	require.NoError(t, err)
 	require.Equal(t, user.ID, identity.UserID)
+}
+
+func TestAuthServiceRecordSuccessfulLoginConcurrentDuplicateBackfillCreatesOneEmailIdentity(t *testing.T) {
+	svc, _, client := newAuthServiceWithEnt(t, map[string]string{
+		service.SettingKeyRegistrationEnabled: "true",
+	}, nil)
+	ctx := context.Background()
+
+	user, err := client.User.Create().
+		SetEmail("Concurrent.Backfill@Example.com").
+		SetUsername("concurrent-backfill-user").
+		SetPasswordHash("hash").
+		SetRole(service.RoleUser).
+		SetStatus(service.StatusActive).
+		SetBalance(1).
+		SetConcurrency(1).
+		Save(ctx)
+	require.NoError(t, err)
+
+	beforeCount, err := client.AuthIdentity.Query().
+		Where(
+			authidentity.ProviderTypeEQ("email"),
+			authidentity.ProviderKeyEQ("email"),
+			authidentity.ProviderSubjectEQ("concurrent.backfill@example.com"),
+		).
+		Count(ctx)
+	require.NoError(t, err)
+	require.Zero(t, beforeCount)
+
+	const goroutines = 4
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+	for i := 0; i < goroutines; i++ {
+		go func() {
+			defer wg.Done()
+			<-start
+			svc.RecordSuccessfulLogin(ctx, user.ID)
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	identities, err := client.AuthIdentity.Query().
+		Where(
+			authidentity.ProviderTypeEQ("email"),
+			authidentity.ProviderKeyEQ("email"),
+			authidentity.ProviderSubjectEQ("concurrent.backfill@example.com"),
+		).
+		All(ctx)
+	require.NoError(t, err)
+	require.Len(t, identities, 1)
+	require.Equal(t, user.ID, identities[0].UserID)
 }
 
 func TestAuthServiceRecordSuccessfulLoginSkipsDefaultsWhenEmailIdentityCreateFails(t *testing.T) {

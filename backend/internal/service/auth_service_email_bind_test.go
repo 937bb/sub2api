@@ -214,6 +214,84 @@ func TestAuthServiceBindEmailIdentity_RejectsExistingEmailOnAnotherUser(t *testi
 	require.Equal(t, 0, countProviderGrantRecords(t, client, sourceUser.ID, "email", "first_bind"))
 }
 
+func TestAuthServiceBindEmailIdentity_RejectsAuthIdentityOwnedByAnotherUserAfterDoNothing(t *testing.T) {
+	assigner := &emailBindDefaultSubAssignerStub{}
+	cache := &emailBindCacheStub{
+		data: &service.VerificationCodeData{
+			Code:      "123456",
+			CreatedAt: time.Now().UTC(),
+			ExpiresAt: time.Now().UTC().Add(10 * time.Minute),
+		},
+	}
+	svc, _, client := newAuthServiceForEmailBind(t, map[string]string{
+		service.SettingKeyAuthSourceDefaultEmailBalance:          "8.5",
+		service.SettingKeyAuthSourceDefaultEmailConcurrency:      "4",
+		service.SettingKeyAuthSourceDefaultEmailSubscriptions:    `[{"group_id":11,"validity_days":30}]`,
+		service.SettingKeyAuthSourceDefaultEmailGrantOnFirstBind: "true",
+	}, cache, assigner)
+
+	ctx := context.Background()
+	sourceEmail := "source-race" + service.LinuxDoConnectSyntheticEmailDomain
+	sourceUser, err := client.User.Create().
+		SetEmail(sourceEmail).
+		SetUsername("source-race").
+		SetPasswordHash("old-hash").
+		SetBalance(2.5).
+		SetConcurrency(1).
+		SetRole(service.RoleUser).
+		SetStatus(service.StatusActive).
+		Save(ctx)
+	require.NoError(t, err)
+	otherUser, err := client.User.Create().
+		SetEmail("other-owner@example.com").
+		SetUsername("other-owner").
+		SetPasswordHash("other-hash").
+		SetBalance(1).
+		SetConcurrency(1).
+		SetRole(service.RoleUser).
+		SetStatus(service.StatusActive).
+		Save(ctx)
+	require.NoError(t, err)
+	existingIdentity, err := client.AuthIdentity.Create().
+		SetUserID(otherUser.ID).
+		SetProviderType("email").
+		SetProviderKey("email").
+		SetProviderSubject("race@example.com").
+		SetVerifiedAt(time.Now().UTC()).
+		SetMetadata(map[string]any{"source": "race-test"}).
+		Save(ctx)
+	require.NoError(t, err)
+
+	updatedUser, err := svc.BindEmailIdentity(ctx, sourceUser.ID, "race@example.com", "123456", "new-password")
+	require.ErrorIs(t, err, service.ErrEmailExists)
+	require.Nil(t, updatedUser)
+
+	storedSource, err := client.User.Get(ctx, sourceUser.ID)
+	require.NoError(t, err)
+	require.Equal(t, sourceEmail, storedSource.Email)
+	require.Equal(t, "old-hash", storedSource.PasswordHash)
+	require.Equal(t, 2.5, storedSource.Balance)
+	require.Equal(t, 1, storedSource.Concurrency)
+
+	sourceIdentityCount, err := client.AuthIdentity.Query().
+		Where(
+			authidentity.UserIDEQ(sourceUser.ID),
+			authidentity.ProviderTypeEQ("email"),
+			authidentity.ProviderKeyEQ("email"),
+			authidentity.ProviderSubjectEQ("race@example.com"),
+		).
+		Count(ctx)
+	require.NoError(t, err)
+	require.Zero(t, sourceIdentityCount)
+
+	storedIdentity, err := client.AuthIdentity.Get(ctx, existingIdentity.ID)
+	require.NoError(t, err)
+	require.Equal(t, otherUser.ID, storedIdentity.UserID)
+	require.Equal(t, "race@example.com", storedIdentity.ProviderSubject)
+	require.Empty(t, assigner.calls)
+	require.Equal(t, 0, countProviderGrantRecords(t, client, sourceUser.ID, "email", "first_bind"))
+}
+
 func TestAuthServiceBindEmailIdentity_RollsBackWhenFirstBindDefaultsFail(t *testing.T) {
 	assigner := &flakyEmailBindDefaultSubAssignerStub{err: errors.New("temporary assign failure")}
 	cache := &emailBindCacheStub{
