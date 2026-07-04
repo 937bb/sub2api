@@ -28,8 +28,9 @@ const (
 	opsAccountIDKey              = "ops_account_id"
 	opsRoutingCapacityLimitedKey = "ops_routing_capacity_limited"
 
-	opsUpstreamModelKey = "ops_upstream_model"
-	opsRequestTypeKey   = "ops_request_type"
+	opsUpstreamModelKey    = "ops_upstream_model"
+	opsUpstreamEndpointKey = "ops_upstream_endpoint"
+	opsRequestTypeKey      = "ops_request_type"
 
 	// 错误过滤匹配常量 — shouldSkipOpsErrorLog 和错误分类共用
 	opsErrContextCanceled            = "context canceled"
@@ -410,6 +411,40 @@ func setOpsEndpointContext(c *gin.Context, upstreamModel string, requestType int
 	c.Set(opsRequestTypeKey, requestType)
 }
 
+func setOpsUpstreamEndpoint(c *gin.Context, endpoint string) {
+	if c == nil {
+		return
+	}
+	c.Set(opsUpstreamEndpointKey, strings.TrimSpace(endpoint))
+}
+
+func getOpsUpstreamEndpoint(c *gin.Context, platform string) string {
+	if c != nil {
+		if v, ok := c.Get(opsUpstreamEndpointKey); ok {
+			if endpoint, ok := v.(string); ok {
+				if endpoint = strings.TrimSpace(endpoint); endpoint != "" {
+					return endpoint
+				}
+			}
+		}
+	}
+	return GetUpstreamEndpoint(c, platform)
+}
+
+func opsEventUpstreamEndpoint(ev *service.OpsUpstreamErrorEvent) string {
+	if ev == nil {
+		return ""
+	}
+	return ev.ResolvedUpstreamEndpoint()
+}
+
+func resolveOpsLogUpstreamEndpoint(c *gin.Context, platform string, ev *service.OpsUpstreamErrorEvent) string {
+	if endpoint := opsEventUpstreamEndpoint(ev); endpoint != "" {
+		return endpoint
+	}
+	return getOpsUpstreamEndpoint(c, platform)
+}
+
 func setOpsSelectedAccount(c *gin.Context, accountID int64, platform ...string) {
 	if c == nil || accountID <= 0 {
 		return
@@ -605,14 +640,17 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 				stream = b
 			}
 
+			var lastUpstreamEvent *service.OpsUpstreamErrorEvent
+			if len(events) > 0 {
+				lastUpstreamEvent = events[len(events)-1]
+			}
+
 			// Prefer showing the account that experienced the upstream error (if we have events),
 			// otherwise fall back to the final selected account (best-effort).
 			var accountID *int64
-			if len(events) > 0 {
-				if last := events[len(events)-1]; last != nil && last.AccountID > 0 {
-					v := last.AccountID
-					accountID = &v
-				}
+			if lastUpstreamEvent != nil && lastUpstreamEvent.AccountID > 0 {
+				v := lastUpstreamEvent.AccountID
+				accountID = &v
 			}
 			if accountID == nil {
 				if v, ok := accountIDV.(int64); ok && v > 0 {
@@ -632,19 +670,16 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 			var upstreamStatusCode *int
 			var upstreamErrorMessage *string
 			var upstreamErrorDetail *string
-			if len(events) > 0 {
-				last := events[len(events)-1]
-				if last != nil {
-					if last.UpstreamStatusCode > 0 {
-						code := last.UpstreamStatusCode
-						upstreamStatusCode = &code
-					}
-					if msg := strings.TrimSpace(last.Message); msg != "" {
-						upstreamErrorMessage = &msg
-					}
-					if detail := strings.TrimSpace(last.Detail); detail != "" {
-						upstreamErrorDetail = &detail
-					}
+			if lastUpstreamEvent != nil {
+				if lastUpstreamEvent.UpstreamStatusCode > 0 {
+					code := lastUpstreamEvent.UpstreamStatusCode
+					upstreamStatusCode = &code
+				}
+				if msg := strings.TrimSpace(lastUpstreamEvent.Message); msg != "" {
+					upstreamErrorMessage = &msg
+				}
+				if detail := strings.TrimSpace(lastUpstreamEvent.Detail); detail != "" {
+					upstreamErrorDetail = &detail
 				}
 			}
 
@@ -715,7 +750,7 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 				}(),
 				Stream:           stream,
 				InboundEndpoint:  GetInboundEndpoint(c),
-				UpstreamEndpoint: GetUpstreamEndpoint(c, platform),
+				UpstreamEndpoint: resolveOpsLogUpstreamEndpoint(c, platform, lastUpstreamEvent),
 				RequestedModel:   modelName,
 				UpstreamModel: func() string {
 					if v, ok := c.Get(opsUpstreamModelKey); ok {
@@ -825,8 +860,17 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 		if b, ok := streamV.(bool); ok {
 			stream = b
 		}
+		var lastUpstreamEvent *service.OpsUpstreamErrorEvent
+		if v, ok := c.Get(service.OpsUpstreamErrorsKey); ok {
+			if events, ok := v.([]*service.OpsUpstreamErrorEvent); ok && len(events) > 0 {
+				lastUpstreamEvent = events[len(events)-1]
+			}
+		}
 		var accountID *int64
-		if v, ok := accountIDV.(int64); ok && v > 0 {
+		if lastUpstreamEvent != nil && lastUpstreamEvent.AccountID > 0 {
+			v := lastUpstreamEvent.AccountID
+			accountID = &v
+		} else if v, ok := accountIDV.(int64); ok && v > 0 {
 			accountID = &v
 		}
 
@@ -857,7 +901,7 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 			}(),
 			Stream:           stream,
 			InboundEndpoint:  GetInboundEndpoint(c),
-			UpstreamEndpoint: GetUpstreamEndpoint(c, platform),
+			UpstreamEndpoint: resolveOpsLogUpstreamEndpoint(c, platform, lastUpstreamEvent),
 			RequestedModel:   modelName,
 			UpstreamModel: func() string {
 				if v, ok := c.Get(opsUpstreamModelKey); ok {

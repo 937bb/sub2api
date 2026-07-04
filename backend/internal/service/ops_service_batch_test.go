@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"net/http"
 	"testing"
 	"time"
 
@@ -33,6 +34,7 @@ func TestOpsServiceRecordErrorBatch_SanitizesAndBatches(t *testing.T) {
 				{
 					AccountID:          -2,
 					UpstreamStatusCode: 429,
+					UpstreamURL:        "https://api.example.com/v1/chat/completions?api_key=secret#frag",
 					Message:            " token leaked ",
 					Detail:             `{"refresh_token":"secret"}`,
 				},
@@ -61,12 +63,57 @@ func TestOpsServiceRecordErrorBatch_SanitizesAndBatches(t *testing.T) {
 	require.Nil(t, first.UpstreamErrors)
 	require.NotNil(t, first.UpstreamErrorsJSON)
 	require.NotContains(t, *first.UpstreamErrorsJSON, "secret")
+	require.NotContains(t, *first.UpstreamErrorsJSON, "api_key")
+	require.Contains(t, *first.UpstreamErrorsJSON, `"upstream_endpoint":"/v1/chat/completions"`)
 	require.Contains(t, *first.UpstreamErrorsJSON, "[REDACTED]")
 
 	second := captured[1]
 	require.Equal(t, "upstream", second.ErrorPhase)
 	require.Equal(t, "upstream_error", second.ErrorType)
 	require.False(t, second.CreatedAt.IsZero())
+}
+
+func TestOpsUpstreamErrorEventEndpointFromSafeURL(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, "/v1/responses/compact", endpointFromSafeUpstreamURL("https://api.openai.com/v1/responses/compact"))
+	require.Equal(t, "/v1/responses", endpointFromSafeUpstreamURL("wss://chatgpt.com/backend-api/codex/responses"))
+	require.Equal(t, "/v1/responses/compact", endpointFromSafeUpstreamURL("https://chatgpt.com/backend-api/codex/responses/compact"))
+	require.Equal(t, "/v1/chat/completions", endpointFromSafeUpstreamURL("https://compat.example.com/base/v1/chat/completions"))
+	require.Equal(t, "", endpointFromSafeUpstreamURL("https://example.com/not-openai"))
+}
+
+func TestOpsServiceRecordErrorBatch_PreservesExplicitEventEndpoint(t *testing.T) {
+	t.Parallel()
+
+	var captured []*OpsInsertErrorLogInput
+	repo := &opsRepoMock{
+		InsertErrorLogFn: func(ctx context.Context, input *OpsInsertErrorLogInput) (int64, error) {
+			captured = append(captured, input)
+			return 1, nil
+		},
+	}
+	svc := NewOpsService(repo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+
+	require.NoError(t, svc.RecordError(context.Background(), &OpsInsertErrorLogInput{
+		ErrorPhase: "upstream",
+		ErrorType:  "upstream_error",
+		UpstreamErrors: []*OpsUpstreamErrorEvent{
+			{
+				AccountID:          101,
+				UpstreamStatusCode: http.StatusTooManyRequests,
+				UpstreamURL:        "https://api.openai.com/v1/responses?key=secret",
+				UpstreamEndpoint:   "/v1/chat/completions",
+				Message:            "rate limited",
+			},
+		},
+	}))
+
+	require.Len(t, captured, 1)
+	require.NotNil(t, captured[0].UpstreamErrorsJSON)
+	require.Contains(t, *captured[0].UpstreamErrorsJSON, `"upstream_endpoint":"/v1/chat/completions"`)
+	require.Contains(t, *captured[0].UpstreamErrorsJSON, `"upstream_url":"https://api.openai.com/v1/responses"`)
+	require.NotContains(t, *captured[0].UpstreamErrorsJSON, "secret")
 }
 
 func TestOpsServiceRecordErrorBatch_FallsBackToSingleInsert(t *testing.T) {

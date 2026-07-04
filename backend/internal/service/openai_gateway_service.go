@@ -821,6 +821,14 @@ func (s *OpenAIGatewayService) writeOpenAIWSFallbackErrorResponse(c *gin.Context
 		upstreamMessage = clientMessage
 	}
 
+	upstreamURL := ""
+	upstreamEndpoint := ""
+	var fallbackErr *openAIWSFallbackError
+	if errors.As(wsErr, &fallbackErr) && fallbackErr != nil {
+		upstreamURL = safeUpstreamURL(fallbackErr.UpstreamURL)
+		upstreamEndpoint = strings.TrimSpace(fallbackErr.UpstreamEndpoint)
+	}
+
 	setOpsUpstreamError(c, statusCode, upstreamMessage, "")
 	if account != nil {
 		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
@@ -828,6 +836,8 @@ func (s *OpenAIGatewayService) writeOpenAIWSFallbackErrorResponse(c *gin.Context
 			AccountID:          account.ID,
 			AccountName:        account.Name,
 			UpstreamStatusCode: statusCode,
+			UpstreamURL:        upstreamURL,
+			UpstreamEndpoint:   upstreamEndpoint,
 			Kind:               "ws_error",
 			Message:            upstreamMessage,
 		})

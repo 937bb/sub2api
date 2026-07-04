@@ -2,6 +2,8 @@ package service
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -139,6 +141,9 @@ type OpsUpstreamErrorEvent struct {
 	// Helps debug 404/routing errors by showing which endpoint was targeted.
 	UpstreamURL string `json:"upstream_url,omitempty"`
 
+	// UpstreamEndpoint is the normalized upstream API endpoint path used for this attempt.
+	UpstreamEndpoint string `json:"upstream_endpoint,omitempty"`
+
 	// Best-effort upstream response capture (sanitized+trimmed).
 	UpstreamResponseBody string `json:"upstream_response_body,omitempty"`
 
@@ -147,6 +152,16 @@ type OpsUpstreamErrorEvent struct {
 
 	Message string `json:"message,omitempty"`
 	Detail  string `json:"detail,omitempty"`
+}
+
+func (ev *OpsUpstreamErrorEvent) ResolvedUpstreamEndpoint() string {
+	if ev == nil {
+		return ""
+	}
+	if endpoint := strings.TrimSpace(ev.UpstreamEndpoint); endpoint != "" {
+		return endpoint
+	}
+	return endpointFromSafeUpstreamURL(ev.UpstreamURL)
 }
 
 func appendOpsUpstreamError(c *gin.Context, ev OpsUpstreamErrorEvent) {
@@ -161,6 +176,7 @@ func appendOpsUpstreamError(c *gin.Context, ev OpsUpstreamErrorEvent) {
 	ev.UpstreamResponseBody = strings.TrimSpace(ev.UpstreamResponseBody)
 	ev.Kind = strings.TrimSpace(ev.Kind)
 	ev.UpstreamURL = strings.TrimSpace(ev.UpstreamURL)
+	ev.UpstreamEndpoint = ev.ResolvedUpstreamEndpoint()
 	ev.Message = strings.TrimSpace(ev.Message)
 	ev.Detail = strings.TrimSpace(ev.Detail)
 	if ev.Message != "" {
@@ -242,6 +258,12 @@ func safeUpstreamURL(rawURL string) string {
 	if rawURL == "" {
 		return ""
 	}
+	if parsed, err := url.Parse(rawURL); err == nil && parsed.Scheme != "" && parsed.Host != "" {
+		parsed.User = nil
+		parsed.RawQuery = ""
+		parsed.Fragment = ""
+		return parsed.String()
+	}
 	if idx := strings.IndexByte(rawURL, '?'); idx >= 0 {
 		rawURL = rawURL[:idx]
 	}
@@ -249,4 +271,43 @@ func safeUpstreamURL(rawURL string) string {
 		rawURL = rawURL[:idx]
 	}
 	return rawURL
+}
+
+func endpointFromSafeUpstreamURL(rawURL string) string {
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		return ""
+	}
+	for _, match := range []struct {
+		path           string
+		endpoint       string
+		preserveSuffix bool
+	}{
+		{"/v1/chat/completions", "/v1/chat/completions", false},
+		{"/v1/responses", "/v1/responses", true},
+		{"/backend-api/codex/responses", "/v1/responses", true},
+		{"/v1/messages", "/v1/messages", false},
+		{"/v1/embeddings", "/v1/embeddings", false},
+		{"/v1/images/generations", "/v1/images/generations", false},
+		{"/v1/images/edits", "/v1/images/edits", false},
+		{"/v1beta/models", "/v1beta/models", false},
+	} {
+		if idx := strings.Index(rawURL, match.path); idx >= 0 {
+			if match.preserveSuffix {
+				suffix := strings.TrimRight(rawURL[idx+len(match.path):], "/")
+				if strings.HasPrefix(suffix, "/") {
+					return match.endpoint + suffix
+				}
+			}
+			return match.endpoint
+		}
+	}
+	return ""
+}
+
+func upstreamURLFromResponse(resp *http.Response) string {
+	if resp == nil || resp.Request == nil || resp.Request.URL == nil {
+		return ""
+	}
+	return safeUpstreamURL(resp.Request.URL.String())
 }

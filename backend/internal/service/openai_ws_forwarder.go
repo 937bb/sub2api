@@ -74,8 +74,10 @@ var openAIWSIngressPreflightPingIdle = 20 * time.Second
 
 // openAIWSFallbackError 表示可安全回退到 HTTP 的 WS 错误（尚未写下游）。
 type openAIWSFallbackError struct {
-	Reason string
-	Err    error
+	Reason           string
+	Err              error
+	UpstreamURL      string
+	UpstreamEndpoint string
 }
 
 func (e *openAIWSFallbackError) Error() string {
@@ -97,6 +99,16 @@ func (e *openAIWSFallbackError) Unwrap() error {
 
 func wrapOpenAIWSFallback(reason string, err error) error {
 	return &openAIWSFallbackError{Reason: strings.TrimSpace(reason), Err: err}
+}
+
+func wrapOpenAIWSFallbackWithUpstream(reason string, err error, upstreamURL string) error {
+	safeURL := safeUpstreamURL(upstreamURL)
+	return &openAIWSFallbackError{
+		Reason:           strings.TrimSpace(reason),
+		Err:              err,
+		UpstreamURL:      safeURL,
+		UpstreamEndpoint: endpointFromSafeUpstreamURL(safeURL),
+	}
 }
 
 // OpenAIWSClientCloseError 表示应以指定 WebSocket close code 主动关闭客户端连接的错误。
@@ -2116,6 +2128,9 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	if err != nil {
 		return nil, wrapOpenAIWSFallback("build_ws_url", err)
 	}
+	wrapFallback := func(reason string, err error) error {
+		return wrapOpenAIWSFallbackWithUpstream(reason, err, wsURL)
+	}
 	wsHost := "-"
 	wsPath := "-"
 	if parsed, parseErr := url.Parse(wsURL); parseErr == nil && parsed != nil {
@@ -2214,7 +2229,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	fallbackSessionID := fallbackOpenAICodexSessionID(c, account, payloadAsJSONBytes(payload))
 	wsHeaders, sessionResolution, err := s.buildOpenAIWSHeaders(c, account, token, decision, isCodexCLI, turnState, turnMetadata, promptCacheKey, fallbackSessionID, openAIWSPayloadClientMetadataString(payload, openAICodexWindowIDHeader))
 	if err != nil {
-		return nil, wrapOpenAIWSFallback("ensure_codex_fingerprint", err)
+		return nil, wrapFallback("ensure_codex_fingerprint", err)
 	}
 	if account != nil && account.IsOpenAIOAuthLike() {
 		setOpenAIWSCodexClientMetadata(payload, wsHeaders)
@@ -2294,7 +2309,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		if errors.As(err, &dialErr) && dialErr != nil && dialErr.StatusCode == http.StatusTooManyRequests {
 			s.persistOpenAIWSRateLimitSignal(ctx, account, dialErr.ResponseHeaders, nil, "rate_limit_exceeded", "rate_limit_error", strings.TrimSpace(sanitizeOpenAIUpstreamDiagnosticText(err.Error())))
 		}
-		return nil, wrapOpenAIWSFallback(classifyOpenAIWSAcquireError(err), err)
+		return nil, wrapFallback(classifyOpenAIWSAcquireError(err), err)
 	}
 	// cleanExit 标记正常终端事件退出，此时上游不会再发送帧，连接可安全归还复用。
 	// 所有异常路径（读写错误、error 事件等）已在各自分支中提前调用 MarkBroken，
@@ -2375,6 +2390,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		account,
 		stateStore,
 		groupID,
+		wsURL,
 	); err != nil {
 		return nil, err
 	}
@@ -2388,7 +2404,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 			truncateOpenAIWSLogValue(sanitizeOpenAIUpstreamDiagnosticText(err.Error()), openAIWSLogValueMaxLen),
 			resolvePayloadBytes(),
 		)
-		return nil, wrapOpenAIWSFallback("write_request", err)
+		return nil, wrapFallback("write_request", err)
 	}
 	if debugEnabled {
 		logOpenAIWSModeDebug(
@@ -2433,7 +2449,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		f, ok := c.Writer.(http.Flusher)
 		if !ok {
 			lease.MarkBroken()
-			return nil, wrapOpenAIWSFallback("streaming_not_supported", errors.New("streaming not supported"))
+			return nil, wrapFallback("streaming_not_supported", errors.New("streaming not supported"))
 		}
 		flusher = f
 	}
@@ -2522,7 +2538,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 				truncateOpenAIWSLogValue(lastEventType, openAIWSLogValueMaxLen),
 			)
 			if !wroteDownstream {
-				return nil, wrapOpenAIWSFallback(classifyOpenAIWSReadFallbackReason(readErr), readErr)
+				return nil, wrapFallback(classifyOpenAIWSReadFallbackReason(readErr), readErr)
 			}
 			if clientDisconnected {
 				break
@@ -2633,7 +2649,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 			// error 事件后连接不再可复用，避免回池后污染下一请求。
 			lease.MarkBroken()
 			if !wroteDownstream && canFallback {
-				return nil, wrapOpenAIWSFallback(fallbackReason, errors.New(errMsg))
+				return nil, wrapFallback(fallbackReason, errors.New(errMsg))
 			}
 			statusCode := openAIWSErrorHTTPStatusFromRaw(errCodeRaw, errTypeRaw)
 			setOpsUpstreamError(c, statusCode, errMsg, "")
@@ -2700,7 +2716,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 				wroteDownstream,
 			)
 			if !wroteDownstream {
-				return nil, wrapOpenAIWSFallback("missing_final_response", errors.New("no terminal response payload"))
+				return nil, wrapFallback("missing_final_response", errors.New("no terminal response payload"))
 			}
 			return nil, errors.New("ws finished without final response")
 		}
@@ -4391,6 +4407,7 @@ func (s *OpenAIGatewayService) performOpenAIWSGeneratePrewarm(
 	account *Account,
 	stateStore OpenAIWSStateStore,
 	groupID int64,
+	upstreamURL string,
 ) error {
 	if s == nil {
 		return nil
@@ -4447,7 +4464,7 @@ func (s *OpenAIGatewayService) performOpenAIWSGeneratePrewarm(
 			connID,
 			truncateOpenAIWSLogValue(sanitizeOpenAIUpstreamDiagnosticText(err.Error()), openAIWSLogValueMaxLen),
 		)
-		return wrapOpenAIWSFallback("prewarm_write", err)
+		return wrapOpenAIWSFallbackWithUpstream("prewarm_write", err, upstreamURL)
 	}
 	logOpenAIWSModeInfo("prewarm_write_sent account_id=%d conn_id=%s payload_bytes=%d", account.ID, connID, len(prewarmPayloadJSON))
 
@@ -4468,7 +4485,7 @@ func (s *OpenAIGatewayService) performOpenAIWSGeneratePrewarm(
 				truncateOpenAIWSLogValue(sanitizeOpenAIUpstreamDiagnosticText(readErr.Error()), openAIWSLogValueMaxLen),
 				prewarmEventCount,
 			)
-			return wrapOpenAIWSFallback("prewarm_"+classifyOpenAIWSReadFallbackReason(readErr), readErr)
+			return wrapOpenAIWSFallbackWithUpstream("prewarm_"+classifyOpenAIWSReadFallbackReason(readErr), readErr, upstreamURL)
 		}
 
 		eventType, eventResponseID, _ := parseOpenAIWSEventEnvelope(message)
@@ -4509,9 +4526,9 @@ func (s *OpenAIGatewayService) performOpenAIWSGeneratePrewarm(
 			)
 			lease.MarkBroken()
 			if canFallback {
-				return wrapOpenAIWSFallback("prewarm_"+fallbackReason, errors.New(errMsg))
+				return wrapOpenAIWSFallbackWithUpstream("prewarm_"+fallbackReason, errors.New(errMsg), upstreamURL)
 			}
-			return wrapOpenAIWSFallback("prewarm_error_event", errors.New(errMsg))
+			return wrapOpenAIWSFallbackWithUpstream("prewarm_error_event", errors.New(errMsg), upstreamURL)
 		}
 
 		if isOpenAIWSTerminalEvent(eventType) {

@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"sync"
 	"testing"
+	"time"
 
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -930,6 +931,100 @@ func TestSetOpsEndpointContext_NilContext(t *testing.T) {
 	require.NotPanics(t, func() {
 		setOpsEndpointContext(nil, "model", int16(1))
 	})
+}
+
+func TestGetOpsUpstreamEndpointUsesOverride(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+	c.Set(ctxKeyInboundEndpoint, EndpointResponses)
+
+	setOpsUpstreamEndpoint(c, " /v1/chat/completions ")
+
+	require.Equal(t, EndpointChatCompletions, getOpsUpstreamEndpoint(c, service.PlatformOpenAI))
+}
+
+func TestResolveOpsLogUpstreamEndpointPrefersEventURL(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, EndpointResponses, nil)
+	c.Set(ctxKeyInboundEndpoint, EndpointResponses)
+	setOpsUpstreamEndpoint(c, EndpointChatCompletions)
+
+	ev := &service.OpsUpstreamErrorEvent{UpstreamURL: "wss://chatgpt.com/backend-api/codex/responses"}
+
+	require.Equal(t, EndpointResponses, resolveOpsLogUpstreamEndpoint(c, service.PlatformOpenAI, ev))
+}
+
+func TestOpsErrorLoggerRecoveredUpstreamUsesEventEndpoint(t *testing.T) {
+	entry := runOpsErrorLoggerEndpointAttributionTest(t, &service.OpsUpstreamErrorEvent{
+		Platform:           service.PlatformOpenAI,
+		AccountID:          101,
+		AccountName:        "event-account",
+		UpstreamStatusCode: http.StatusUpgradeRequired,
+		UpstreamURL:        "wss://chatgpt.com/backend-api/codex/responses",
+		Kind:               "ws_error",
+		Message:            "upgrade required",
+	})
+
+	require.NotNil(t, entry.AccountID)
+	require.Equal(t, int64(101), *entry.AccountID)
+	require.Equal(t, EndpointResponses, entry.UpstreamEndpoint)
+}
+
+func TestOpsErrorLoggerRecoveredUpstreamFallsBackToRequestEndpoint(t *testing.T) {
+	entry := runOpsErrorLoggerEndpointAttributionTest(t, &service.OpsUpstreamErrorEvent{
+		Platform:           service.PlatformOpenAI,
+		AccountID:          101,
+		AccountName:        "event-account",
+		UpstreamStatusCode: http.StatusBadGateway,
+		Kind:               "failover",
+		Message:            "missing endpoint",
+	})
+
+	require.NotNil(t, entry.AccountID)
+	require.Equal(t, int64(101), *entry.AccountID)
+	require.Equal(t, EndpointChatCompletions, entry.UpstreamEndpoint)
+}
+
+func runOpsErrorLoggerEndpointAttributionTest(t *testing.T, ev *service.OpsUpstreamErrorEvent) *service.OpsInsertErrorLogInput {
+	t.Helper()
+	resetOpsErrorLoggerStateForTest(t)
+	defer resetOpsErrorLoggerStateForTest(t)
+
+	opsErrorLogOnce.Do(func() {})
+	opsErrorLogMu.Lock()
+	opsErrorLogQueue = make(chan opsErrorLogJob, 1)
+	opsErrorLogMu.Unlock()
+
+	gin.SetMode(gin.TestMode)
+	ops := service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	router := gin.New()
+	router.Use(InboundEndpointMiddleware())
+	router.Use(OpsErrorLoggerMiddleware(ops))
+	router.POST(EndpointResponses, func(c *gin.Context) {
+		setOpsRequestContext(c, "gpt-5.1", false)
+		setOpsSelectedAccount(c, 202, service.PlatformOpenAI)
+		setOpsUpstreamEndpoint(c, EndpointChatCompletions)
+		c.Set(service.OpsUpstreamErrorsKey, []*service.OpsUpstreamErrorEvent{ev})
+		c.Status(http.StatusOK)
+	})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, EndpointResponses, nil)
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	select {
+	case job := <-opsErrorLogQueue:
+		require.NotNil(t, job.entry)
+		return job.entry
+	case <-time.After(time.Second):
+		require.FailNow(t, "ops error log entry was not enqueued")
+	}
+	return nil
 }
 
 func TestGetOpsAPIKeyFallsBackToOpsFallbackKey(t *testing.T) {

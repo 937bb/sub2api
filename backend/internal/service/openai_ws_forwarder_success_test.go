@@ -1400,10 +1400,15 @@ func TestOpenAIGatewayService_PrewarmReadHonorsParentContext(t *testing.T) {
 		account,
 		nil,
 		0,
+		"wss://api.openai.com/v1/responses",
 	)
 	elapsed := time.Since(start)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "prewarm_read_event")
+	var fallbackErr *openAIWSFallbackError
+	require.ErrorAs(t, err, &fallbackErr)
+	require.Equal(t, "wss://api.openai.com/v1/responses", fallbackErr.UpstreamURL)
+	require.Equal(t, "/v1/responses", fallbackErr.UpstreamEndpoint)
 	require.Less(t, elapsed, 180*time.Millisecond, "预热读取应受父 context 取消控制，不应阻塞到 read_timeout")
 }
 
