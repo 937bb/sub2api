@@ -15,12 +15,14 @@ import (
 )
 
 const (
-	billingBalanceKeyPrefix   = "billing:balance:"
-	billingSubKeyPrefix       = "billing:sub:"
-	billingRateLimitKeyPrefix = "apikey:rate:"
-	billingCacheTTL           = 5 * time.Minute
-	billingCacheJitter        = 30 * time.Second
-	rateLimitCacheTTL         = 7 * 24 * time.Hour // 7 days matches the longest window
+	billingBalanceKeyPrefix    = "billing:balance:"
+	billingBalanceGenKeyPrefix = "billing:balance:gen:"
+	billingSubKeyPrefix        = "billing:sub:"
+	billingRateLimitKeyPrefix  = "apikey:rate:"
+	billingCacheTTL            = 5 * time.Minute
+	billingCacheJitter         = 30 * time.Second
+	billingBalanceGenTTL       = 10 * time.Minute
+	rateLimitCacheTTL          = 7 * 24 * time.Hour // 7 days matches the longest window
 
 	// Rate limit window durations — must match service.RateLimitWindow* constants.
 	rateLimitWindow5h = 5 * time.Hour
@@ -41,6 +43,11 @@ func jitteredTTL() time.Duration {
 // billingBalanceKey generates the Redis key for user balance cache.
 func billingBalanceKey(userID int64) string {
 	return fmt.Sprintf("%s%d", billingBalanceKeyPrefix, userID)
+}
+
+// billingBalanceGenerationKey generates the Redis key for user balance cache generation.
+func billingBalanceGenerationKey(userID int64) string {
+	return fmt.Sprintf("%s%d", billingBalanceGenKeyPrefix, userID)
 }
 
 // billingSubKey generates the Redis key for subscription cache.
@@ -73,6 +80,8 @@ const (
 
 var (
 	deductBalanceScript = redis.NewScript(`
+		redis.call('INCR', KEYS[2])
+		redis.call('EXPIRE', KEYS[2], ARGV[3])
 		local current = redis.call('GET', KEYS[1])
 		if current == false then
 			return 0
@@ -80,6 +89,24 @@ var (
 		local newVal = tonumber(current) - tonumber(ARGV[1])
 		redis.call('SET', KEYS[1], newVal)
 		redis.call('EXPIRE', KEYS[1], ARGV[2])
+		return 1
+	`)
+
+	invalidateBalanceScript = redis.NewScript(`
+		redis.call('INCR', KEYS[2])
+		redis.call('EXPIRE', KEYS[2], ARGV[1])
+		return redis.call('DEL', KEYS[1])
+	`)
+
+	setBalanceIfGenerationScript = redis.NewScript(`
+		local current_generation = redis.call('GET', KEYS[2])
+		if current_generation == false then
+			current_generation = '0'
+		end
+		if tostring(current_generation) ~= tostring(ARGV[2]) then
+			return 0
+		end
+		redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[3])
 		return 1
 	`)
 
@@ -157,9 +184,36 @@ func (c *billingCache) SetUserBalance(ctx context.Context, userID int64, balance
 	return c.rdb.Set(ctx, key, balance, jitteredTTL()).Err()
 }
 
+func (c *billingCache) GetUserBalanceGeneration(ctx context.Context, userID int64) (int64, error) {
+	key := billingBalanceGenerationKey(userID)
+	val, err := c.rdb.Get(ctx, key).Result()
+	if errors.Is(err, redis.Nil) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	return strconv.ParseInt(val, 10, 64)
+}
+
+func (c *billingCache) SetUserBalanceIfGeneration(ctx context.Context, userID int64, balance float64, generation int64) (bool, error) {
+	balanceKey := billingBalanceKey(userID)
+	generationKey := billingBalanceGenerationKey(userID)
+	result, err := setBalanceIfGenerationScript.Run(ctx, c.rdb, []string{balanceKey, generationKey},
+		strconv.FormatFloat(balance, 'f', -1, 64),
+		strconv.FormatInt(generation, 10),
+		int(jitteredTTL().Seconds()),
+	).Int64()
+	if err != nil {
+		return false, err
+	}
+	return result == 1, nil
+}
+
 func (c *billingCache) DeductUserBalance(ctx context.Context, userID int64, amount float64) error {
-	key := billingBalanceKey(userID)
-	_, err := deductBalanceScript.Run(ctx, c.rdb, []string{key}, amount, int(jitteredTTL().Seconds())).Result()
+	balanceKey := billingBalanceKey(userID)
+	generationKey := billingBalanceGenerationKey(userID)
+	_, err := deductBalanceScript.Run(ctx, c.rdb, []string{balanceKey, generationKey}, amount, int(jitteredTTL().Seconds()), int(billingBalanceGenTTL.Seconds())).Result()
 	if err != nil && !errors.Is(err, redis.Nil) {
 		log.Printf("Warning: deduct balance cache failed for user %d: %v", userID, err)
 		return err
@@ -168,8 +222,9 @@ func (c *billingCache) DeductUserBalance(ctx context.Context, userID int64, amou
 }
 
 func (c *billingCache) InvalidateUserBalance(ctx context.Context, userID int64) error {
-	key := billingBalanceKey(userID)
-	return c.rdb.Del(ctx, key).Err()
+	balanceKey := billingBalanceKey(userID)
+	generationKey := billingBalanceGenerationKey(userID)
+	return invalidateBalanceScript.Run(ctx, c.rdb, []string{balanceKey, generationKey}, int(billingBalanceGenTTL.Seconds())).Err()
 }
 
 func (c *billingCache) GetSubscriptionCache(ctx context.Context, userID, groupID int64) (*service.SubscriptionCacheData, error) {
