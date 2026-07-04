@@ -2,18 +2,23 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 )
 
 // tokenRefreshTempUnschedDuration token 刷新重试耗尽后临时不可调度的持续时间
 const tokenRefreshTempUnschedDuration = 10 * time.Minute
+
+const openAIOAuthTokenRefreshFailedReason = "OPENAI_OAUTH_TOKEN_REFRESH_FAILED"
 
 // TokenRefreshService OAuth token自动刷新服务
 // 定期检查并刷新即将过期的token
@@ -437,6 +442,9 @@ func isNonRetryableRefreshError(err error) bool {
 	if err == nil {
 		return false
 	}
+	if isOpenAIOAuthTokenExpiredRefreshError(err) {
+		return true
+	}
 	msg := strings.ToLower(err.Error())
 	nonRetryable := []string{
 		"invalid_grant",             // refresh_token 已失效
@@ -456,6 +464,65 @@ func isNonRetryableRefreshError(err error) bool {
 		}
 	}
 	return false
+}
+
+func isOpenAIOAuthTokenExpiredRefreshError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	var appErr *infraerrors.ApplicationError
+	if errors.As(err, &appErr) && strings.EqualFold(appErr.Reason, openAIOAuthTokenRefreshFailedReason) {
+		return openAIRefreshMessageHasTokenExpiredCode(appErr.Message)
+	}
+
+	return false
+}
+
+func openAIRefreshMessageHasTokenExpiredCode(msg string) bool {
+	return openAIRefreshJSONBodyHasTokenExpiredCode(msg)
+}
+
+func openAIRefreshJSONBodyHasTokenExpiredCode(msg string) bool {
+	body, ok := extractOpenAIRefreshResponseBody(msg)
+	if !ok {
+		return false
+	}
+
+	var parsed struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	dec := json.NewDecoder(strings.NewReader(body))
+	if err := dec.Decode(&parsed); err != nil {
+		return false
+	}
+	var extra any
+	if err := dec.Decode(&extra); err != io.EOF {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(parsed.Error.Code), "token_expired")
+}
+
+func extractOpenAIRefreshResponseBody(msg string) (string, bool) {
+	lowerMsg := strings.ToLower(msg)
+	refreshIdx := strings.Index(lowerMsg, "token refresh failed")
+	if refreshIdx < 0 {
+		return "", false
+	}
+
+	bodyIdx := strings.Index(lowerMsg[refreshIdx:], "body:")
+	if bodyIdx < 0 {
+		return "", false
+	}
+	bodyIdx += refreshIdx
+
+	body := strings.TrimSpace(msg[bodyIdx+len("body:"):])
+	if body == "" {
+		return "", false
+	}
+	return body, true
 }
 
 // ensureOpenAIPrivacy 检查 OpenAI OAuth 账号是否已设置 privacy_mode，
