@@ -90,6 +90,51 @@ func (u *openAIImagesFailoverHTTPUpstream) calls() []int64 {
 	return append([]int64(nil), u.accountIDs...)
 }
 
+type openAIImagesSequenceHTTPUpstream struct {
+	service.HTTPUpstream
+	mu         sync.Mutex
+	accountIDs []int64
+	responses  []*http.Response
+}
+
+func (u *openAIImagesSequenceHTTPUpstream) Do(_ *http.Request, _ string, accountID int64, _ int) (*http.Response, error) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.accountIDs = append(u.accountIDs, accountID)
+	idx := len(u.accountIDs) - 1
+	if idx >= len(u.responses) {
+		idx = len(u.responses) - 1
+	}
+	return u.responses[idx], nil
+}
+
+func (u *openAIImagesSequenceHTTPUpstream) calls() []int64 {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return append([]int64(nil), u.accountIDs...)
+}
+
+type openAIImagesFailoverUsageRepo struct {
+	service.UsageLogRepository
+	mu      sync.Mutex
+	calls   int
+	lastLog *service.UsageLog
+}
+
+func (r *openAIImagesFailoverUsageRepo) Create(_ context.Context, log *service.UsageLog) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.calls++
+	r.lastLog = log
+	return true, nil
+}
+
+func (r *openAIImagesFailoverUsageRepo) snapshot() (int, *service.UsageLog) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.calls, r.lastLog
+}
+
 func TestOpenAIGatewayHandlerImages_ServerErrorFailsOverAndReturnsClearErrorWhenExhausted(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	groupID := int64(3130)
@@ -189,4 +234,128 @@ func TestOpenAIGatewayHandlerImages_ServerErrorFailsOverAndReturnsClearErrorWhen
 	require.Len(t, events, 2)
 	require.Equal(t, "failover", events[0].Kind)
 	require.Equal(t, "failover", events[1].Kind)
+}
+
+func TestOpenAIGatewayHandlerImages_IncompleteFailoverBillsOnlyFinalSuccess(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	groupID := int64(3131)
+	accounts := []service.Account{
+		{
+			ID:          11,
+			Name:        "image-account-incomplete",
+			Platform:    service.PlatformOpenAI,
+			Type:        service.AccountTypeOAuth,
+			Status:      service.StatusActive,
+			Schedulable: true,
+			Concurrency: 0,
+			Priority:    0,
+			Credentials: map[string]any{"access_token": "token-1", "chatgpt_account_id": "chatgpt-1"},
+		},
+		{
+			ID:          12,
+			Name:        "image-account-success",
+			Platform:    service.PlatformOpenAI,
+			Type:        service.AccountTypeOAuth,
+			Status:      service.StatusActive,
+			Schedulable: true,
+			Concurrency: 0,
+			Priority:    1,
+			Credentials: map[string]any{"access_token": "token-2", "chatgpt_account_id": "chatgpt-2"},
+		},
+	}
+	accountRepo := openAIImagesFailoverAccountRepo{accounts: accounts}
+	usageRepo := &openAIImagesFailoverUsageRepo{}
+	upstream := &openAIImagesSequenceHTTPUpstream{
+		responses: []*http.Response{
+			{
+				StatusCode: http.StatusOK,
+				Header: http.Header{
+					"Content-Type": []string{"text/event-stream"},
+					"X-Request-Id": []string{"req_img_no_completion"},
+				},
+				Body: io.NopCloser(bytes.NewBufferString(
+					"data: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"ig_no_completion\",\"type\":\"image_generation_call\",\"result\":\"aW5jb21wbGV0ZS1mYWxsYmFjaw==\",\"revised_prompt\":\"draw a cat\",\"output_format\":\"png\"}}\n\n",
+				)),
+			},
+			{
+				StatusCode: http.StatusOK,
+				Header: http.Header{
+					"Content-Type": []string{"text/event-stream"},
+					"X-Request-Id": []string{"req_img_success"},
+				},
+				Body: io.NopCloser(bytes.NewBufferString(
+					"data: {\"type\":\"response.completed\",\"response\":{\"created_at\":1710000030,\"tool_usage\":{\"image_gen\":{\"images\":1}},\"output\":[{\"type\":\"image_generation_call\",\"result\":\"Zmlyc3Qtc3VjY2Vzcw==\",\"output_format\":\"png\"}]}}\n\n",
+				)),
+			},
+		},
+	}
+	cfg := &config.Config{RunMode: config.RunModeSimple}
+	coreBillingService := service.NewBillingService(cfg, nil)
+	gatewayService := service.NewOpenAIGatewayService(
+		accountRepo,
+		usageRepo,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		cfg,
+		nil,
+		nil,
+		coreBillingService,
+		nil,
+		nil,
+		upstream,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+	)
+	billingService := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
+	t.Cleanup(billingService.Stop)
+	concurrencyService := service.NewConcurrencyService(nil)
+	handler := NewOpenAIGatewayHandler(
+		gatewayService,
+		concurrencyService,
+		billingService,
+		service.NewAPIKeyService(nil, nil, nil, nil, nil, nil, cfg),
+		nil,
+		nil,
+		nil,
+		cfg,
+	)
+	handler.maxAccountSwitches = 10
+
+	body := []byte(`{"model":"gpt-image-2","prompt":"draw a cat"}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = req
+	c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{
+		ID:      199,
+		GroupID: &groupID,
+		Group: &service.Group{
+			ID:                   groupID,
+			AllowImageGeneration: true,
+		},
+		User: &service.User{ID: 200},
+	})
+	c.Set(string(middleware2.ContextKeyUser), middleware2.AuthSubject{UserID: 200, Concurrency: 0})
+
+	handler.Images(c)
+
+	require.Equal(t, []int64{11, 12}, upstream.calls())
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "Zmlyc3Qtc3VjY2Vzcw==", gjson.GetBytes(rec.Body.Bytes(), "data.0.b64_json").String())
+
+	calls, lastLog := usageRepo.snapshot()
+	require.Equal(t, 1, calls)
+	require.NotNil(t, lastLog)
+	require.Equal(t, int64(12), lastLog.AccountID)
+	require.Equal(t, 1, lastLog.ImageCount)
+	require.Equal(t, "req_img_success", lastLog.RequestID)
 }
