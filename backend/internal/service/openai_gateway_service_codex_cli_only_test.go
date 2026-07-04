@@ -124,6 +124,37 @@ func TestOpenAIGatewayServiceForwardAsChatCompletionsRejectsCodexCLIOnlyMismatch
 	require.Equal(t, OpsClientBusinessLimitedReasonLocalPolicyDenied, reason)
 }
 
+func TestOpenAIGatewayServiceForwardAsChatCompletionsRejectsSpoofedOriginatorWithoutUpstreamCall(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(nil))
+	c.Request.Header.Set("User-Agent", "curl/8.0")
+	c.Request.Header.Set("originator", "codex_chatgpt_desktop")
+	c.Set("api_key", &APIKey{ID: 2002})
+
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"id":"chatcmpl-1","choices":[]}`)),
+	}}
+	svc := &OpenAIGatewayService{
+		cfg:          &config.Config{Gateway: config.GatewayConfig{ForceCodexCLI: false}},
+		httpUpstream: upstream,
+	}
+	account := &Account{ID: 1001, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Extra: map[string]any{"codex_cli_only": true}}
+
+	result, err := svc.ForwardAsChatCompletions(context.Background(), c, account, []byte(`{"model":"gpt-5.2","messages":[]}`), "", "")
+
+	require.Nil(t, result)
+	require.ErrorContains(t, err, "codex_cli_only restriction")
+	require.Equal(t, http.StatusForbidden, recorder.Code)
+	require.Contains(t, recorder.Body.String(), "This account only allows Codex official clients")
+	require.Nil(t, upstream.lastReq)
+	require.Empty(t, upstream.requests)
+}
+
 func TestLogCodexCLIOnlyDetection_NilSafety(t *testing.T) {
 	// 不校验日志内容，仅保证在 nil 入参下不会 panic。
 	require.NotPanics(t, func() {

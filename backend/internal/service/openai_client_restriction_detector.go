@@ -11,8 +11,6 @@ const (
 	CodexClientRestrictionReasonDisabled = "codex_cli_only_disabled"
 	// CodexClientRestrictionReasonMatchedUA 表示请求命中官方客户端 UA 白名单。
 	CodexClientRestrictionReasonMatchedUA = "official_client_user_agent_matched"
-	// CodexClientRestrictionReasonMatchedOriginator 表示请求命中官方客户端 originator 白名单。
-	CodexClientRestrictionReasonMatchedOriginator = "official_client_originator_matched"
 	// CodexClientRestrictionReasonMatchedAllowedClient 表示请求命中账号级额外放行的命名客户端预设。
 	CodexClientRestrictionReasonMatchedAllowedClient = "allowed_client_matched"
 	// CodexClientRestrictionReasonMatchedGlobalAllowedClient 表示请求命中全局额外放行的命名客户端预设。
@@ -72,13 +70,6 @@ func (d *OpenAICodexClientRestrictionDetector) Detect(c *gin.Context, account *A
 			Enabled: true,
 			Matched: true,
 			Reason:  CodexClientRestrictionReasonMatchedUA,
-		}
-	}
-	if openai.IsCodexOfficialClientOriginatorStrict(originator) {
-		return CodexClientRestrictionDetectionResult{
-			Enabled: true,
-			Matched: true,
-			Reason:  CodexClientRestrictionReasonMatchedOriginator,
 		}
 	}
 

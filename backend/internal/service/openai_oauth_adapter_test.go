@@ -1009,34 +1009,55 @@ func TestOpenAIGatewayService_OAuthAdapter_NonCodexUAFallbackToCodexUA(t *testin
 func TestOpenAIGatewayService_OAuthAdapter_CodexCLIOnlyRejectsNonCodexClient(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	rec := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(rec)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
-	c.Request.Header.Set("User-Agent", "curl/8.0")
-
-	inputBody := []byte(`{"model":"gpt-5.2","stream":false,"store":true,"input":[{"type":"text","text":"hi"}]}`)
-
-	svc := &OpenAIGatewayService{
-		cfg: &config.Config{Gateway: config.GatewayConfig{ForceCodexCLI: false}},
+	tests := []struct {
+		name string
+		path string
+	}{
+		{name: "responses", path: "/v1/responses"},
+		{name: "compact_alias", path: "/responses/compact"},
 	}
 
-	account := &Account{
-		ID:             123,
-		Name:           "acc",
-		Platform:       PlatformOpenAI,
-		Type:           AccountTypeOAuth,
-		Concurrency:    1,
-		Credentials:    map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-acc"},
-		Extra:          map[string]any{"codex_cli_only": true},
-		Status:         StatusActive,
-		Schedulable:    true,
-		RateMultiplier: f64p(1),
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, tt.path, bytes.NewReader(nil))
+			c.Request.Header.Set("User-Agent", "curl/8.0")
+			c.Request.Header.Set("originator", "codex_chatgpt_desktop")
 
-	_, err := svc.Forward(context.Background(), c, account, inputBody)
-	require.Error(t, err)
-	require.Equal(t, http.StatusForbidden, rec.Code)
-	require.Contains(t, rec.Body.String(), "Codex official clients")
+			inputBody := []byte(`{"model":"gpt-5.2","stream":false,"store":true,"input":[{"type":"text","text":"hi"}]}`)
+			upstream := &httpUpstreamRecorder{resp: &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(`{"output":[]}`)),
+			}}
+
+			svc := &OpenAIGatewayService{
+				cfg:          &config.Config{Gateway: config.GatewayConfig{ForceCodexCLI: false}},
+				httpUpstream: upstream,
+			}
+
+			account := &Account{
+				ID:             123,
+				Name:           "acc",
+				Platform:       PlatformOpenAI,
+				Type:           AccountTypeOAuth,
+				Concurrency:    1,
+				Credentials:    map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-acc"},
+				Extra:          map[string]any{"codex_cli_only": true},
+				Status:         StatusActive,
+				Schedulable:    true,
+				RateMultiplier: f64p(1),
+			}
+
+			_, err := svc.Forward(context.Background(), c, account, inputBody)
+			require.Error(t, err)
+			require.Equal(t, http.StatusForbidden, rec.Code)
+			require.Contains(t, rec.Body.String(), "Codex official clients")
+			require.Nil(t, upstream.lastReq)
+			require.Empty(t, upstream.requests)
+		})
+	}
 }
 
 func TestOpenAIGatewayService_OAuthAdapter_CodexCLIOnlyAllowsOfficialClientFamilies(t *testing.T) {
@@ -1048,9 +1069,11 @@ func TestOpenAIGatewayService_OAuthAdapter_CodexCLIOnlyAllowsOfficialClientFamil
 		originator string
 	}{
 		{name: "codex_cli_rs", ua: "codex_cli_rs/0.99.0", originator: ""},
+		{name: "codex_tui", ua: "codex-tui/0.136.0", originator: ""},
 		{name: "codex_vscode", ua: "codex_vscode/1.0.0", originator: ""},
 		{name: "codex_app", ua: "codex_app/2.1.0", originator: ""},
-		{name: "originator_codex_chatgpt_desktop", ua: "curl/8.0", originator: "codex_chatgpt_desktop"},
+		{name: "codex_chatgpt_desktop_ua", ua: "codex_chatgpt_desktop/1.0.0", originator: ""},
+		{name: "codex_desktop_ua", ua: "Codex Desktop/1.2.3", originator: ""},
 	}
 
 	for _, tt := range tests {
