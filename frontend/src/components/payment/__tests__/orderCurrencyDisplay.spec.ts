@@ -2,7 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import type { PaymentOrder } from '@/types/payment'
 import OrderTable from '../OrderTable.vue'
+import AdminRefundDialog from '@/components/admin/payment/AdminRefundDialog.vue'
 import PaymentQRDialog from '../PaymentQRDialog.vue'
+import AdminOrdersView from '@/views/admin/orders/AdminOrdersView.vue'
 import StripePaymentView from '@/views/user/StripePaymentView.vue'
 
 const pollOrderStatus = vi.hoisted(() => vi.fn())
@@ -10,8 +12,14 @@ const cancelOrder = vi.hoisted(() => vi.fn())
 const verifyOrder = vi.hoisted(() => vi.fn())
 const getOrder = vi.hoisted(() => vi.fn())
 const showError = vi.hoisted(() => vi.fn())
+const showSuccess = vi.hoisted(() => vi.fn())
 const toCanvas = vi.hoisted(() => vi.fn())
 const confirmPayment = vi.hoisted(() => vi.fn())
+const adminGetOrders = vi.hoisted(() => vi.fn())
+const adminGetOrder = vi.hoisted(() => vi.fn())
+const adminCancelOrder = vi.hoisted(() => vi.fn())
+const adminRetryRecharge = vi.hoisted(() => vi.fn())
+const adminRefundOrder = vi.hoisted(() => vi.fn())
 const routeState = vi.hoisted(() => ({
   query: {} as Record<string, unknown>,
 }))
@@ -42,11 +50,35 @@ vi.mock('@/stores', () => ({
   }),
 }))
 
+vi.mock('@/stores/app', () => ({
+  useAppStore: () => ({
+    showError,
+    showSuccess,
+  }),
+}))
+
 vi.mock('@/api/payment', () => ({
   paymentAPI: {
     cancelOrder,
     verifyOrder,
     getOrder,
+  },
+}))
+
+vi.mock('@/api/admin/payment', () => ({
+  adminPaymentAPI: {
+    getOrders: adminGetOrders,
+    getOrder: adminGetOrder,
+    cancelOrder: adminCancelOrder,
+    retryRecharge: adminRetryRecharge,
+    refundOrder: adminRefundOrder,
+  },
+  default: {
+    getOrders: adminGetOrders,
+    getOrder: adminGetOrder,
+    cancelOrder: adminCancelOrder,
+    retryRecharge: adminRetryRecharge,
+    refundOrder: adminRefundOrder,
   },
 }))
 
@@ -93,6 +125,17 @@ const DataTableStub = {
   `,
 }
 
+const AdminOrderTableStub = {
+  props: ['orders', 'loading', 'showUser'],
+  template: `
+    <div>
+      <div v-for="row in orders" :key="row.id">
+        <slot name="actions" :row="row" />
+      </div>
+    </div>
+  `,
+}
+
 function orderFactory(overrides: Partial<PaymentOrder> = {}): PaymentOrder {
   return {
     id: 42,
@@ -120,6 +163,12 @@ describe('order currency display', () => {
     verifyOrder.mockReset()
     getOrder.mockReset()
     showError.mockReset()
+    showSuccess.mockReset()
+    adminGetOrders.mockReset().mockResolvedValue({ data: { items: [], total: 0 } })
+    adminGetOrder.mockReset()
+    adminCancelOrder.mockReset()
+    adminRetryRecharge.mockReset()
+    adminRefundOrder.mockReset()
     toCanvas.mockReset().mockResolvedValue(undefined)
     confirmPayment.mockReset().mockResolvedValue({})
     paymentStore.config = { stripe_publishable_key: 'pk_test' }
@@ -150,6 +199,40 @@ describe('order currency display', () => {
     expect(wrapper.text()).toContain('payment.orders.creditedAmount: $10.00')
     expect(wrapper.text()).not.toContain('¥10')
     expect(wrapper.text()).not.toContain('¥1,200.00')
+  })
+
+  it('displays admin order table pay_amount with order currency and keeps balance credited amount in USD', () => {
+    const wrapper = mount(OrderTable, {
+      props: {
+        showUser: true,
+        orders: [
+          orderFactory({ id: 1, order_type: 'balance', amount: 10, pay_amount: 1200, currency: 'JPY' }),
+          orderFactory({ id: 2, order_type: 'subscription', amount: 100, pay_amount: 101, currency: 'HKD' }),
+          orderFactory({ id: 3, order_type: 'subscription', amount: 200, pay_amount: 202, currency: 'USD' }),
+          orderFactory({ id: 4, order_type: 'subscription', amount: 300, pay_amount: 303, currency: 'CNY' }),
+          orderFactory({ id: 5, order_type: 'subscription', amount: 12.3, pay_amount: 12.3, currency: 'bad-currency' }),
+        ],
+        loading: false,
+      },
+      global: {
+        stubs: {
+          DataTable: DataTableStub,
+          OrderStatusBadge: true,
+        },
+      },
+    })
+
+    expect(wrapper.text()).toContain('¥1,200')
+    expect(wrapper.text()).not.toContain('¥1,200.00')
+    expect(wrapper.text()).toContain('payment.orders.creditedAmount: $10.00')
+    expect(wrapper.text()).not.toContain('payment.orders.creditedAmount: ¥10')
+    expect(wrapper.text()).toContain('$101.00')
+    expect(wrapper.text()).toContain('$100.00')
+    expect(wrapper.text()).toContain('$202.00')
+    expect(wrapper.text()).toContain('$200.00')
+    expect(wrapper.text()).toContain('¥303.00')
+    expect(wrapper.text()).toContain('¥300.00')
+    expect(wrapper.text()).toContain('¥12.30')
   })
 
   it('keeps subscription order amounts in the payment currency for HKD, USD, and JPY', () => {
@@ -245,5 +328,119 @@ describe('order currency display', () => {
     expect(getOrder).toHaveBeenCalledWith(42)
     expect(wrapper.text()).toContain('$5,000.00')
     expect(wrapper.text()).not.toContain('¥5,000')
+  })
+
+  it('renders admin detail modal pay_amount with provider currency and balance amount separately', async () => {
+    const rowOrder = orderFactory({
+      amount: 10,
+      pay_amount: 1200,
+      currency: 'JPY',
+      order_type: 'balance',
+    })
+    adminGetOrders.mockResolvedValue({
+      data: {
+        items: [rowOrder],
+        total: 1,
+      },
+    })
+    adminGetOrder.mockResolvedValue({
+      data: {
+        order: rowOrder,
+        auditLogs: [],
+      },
+    })
+
+    const wrapper = mount(AdminOrdersView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          OrderTable: AdminOrderTableStub,
+          Pagination: true,
+          BaseDialog: {
+            props: ['show'],
+            template: '<div v-if="show"><slot /><slot name="footer" /></div>',
+          },
+          Select: true,
+          Icon: true,
+          OrderStatusBadge: true,
+          AdminRefundDialog: true,
+        },
+      },
+    })
+
+    await flushPromises()
+    const detailButton = wrapper.findAll('button').find(button => button.text().includes('common.view'))
+    expect(detailButton).toBeTruthy()
+    await detailButton!.trigger('click')
+    await flushPromises()
+
+    expect(adminGetOrder).toHaveBeenCalledWith(42)
+    expect(wrapper.text()).toContain('$10.00')
+    expect(wrapper.text()).toContain('¥1,200')
+    expect(wrapper.text()).not.toContain('¥1,200.00')
+    expect(wrapper.text()).not.toContain('¥10.00')
+  })
+
+  it('distinguishes balance product amounts from gateway pay amount in admin refund dialog', () => {
+    const wrapper = mount(AdminRefundDialog, {
+      props: {
+        show: true,
+        order: orderFactory({
+          amount: 10,
+          pay_amount: 1200,
+          currency: 'JPY',
+          order_type: 'balance',
+          status: 'PARTIALLY_REFUNDED',
+          refund_amount: 2,
+        }),
+        userBalance: 8,
+      },
+      global: {
+        stubs: {
+          BaseDialog: {
+            props: ['show'],
+            template: '<div v-if="show"><slot /><slot name="footer" /></div>',
+          },
+        },
+      },
+    })
+
+    expect(wrapper.text()).toContain('payment.orders.creditedAmount')
+    expect(wrapper.text()).toContain('$10.00')
+    expect(wrapper.text()).toContain('¥1,200')
+    expect(wrapper.text()).toContain('payment.admin.alreadyRefunded')
+    expect(wrapper.text()).toContain('$2.00')
+    expect(wrapper.text()).toContain('payment.admin.userBalance')
+    expect(wrapper.text()).toContain('$8.00')
+    expect(wrapper.text()).toContain('payment.admin.maxRefundable: $8.00')
+    expect(wrapper.text()).not.toContain('¥10.00')
+    expect(wrapper.text()).not.toContain('¥2.00')
+  })
+
+  it('does not hard-code yen for admin refund dialog gateway payment currency', () => {
+    const wrapper = mount(AdminRefundDialog, {
+      props: {
+        show: true,
+        order: orderFactory({
+          amount: 50,
+          pay_amount: 50,
+          currency: 'USD',
+          order_type: 'subscription',
+          status: 'COMPLETED',
+          refund_amount: 0,
+        }),
+      },
+      global: {
+        stubs: {
+          BaseDialog: {
+            props: ['show'],
+            template: '<div v-if="show"><slot /><slot name="footer" /></div>',
+          },
+        },
+      },
+    })
+
+    expect(wrapper.text()).toContain('$50.00')
+    expect(wrapper.text()).not.toContain('¥50.00')
   })
 })

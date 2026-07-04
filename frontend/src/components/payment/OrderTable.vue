@@ -72,12 +72,10 @@ function formatGatewayAmount(amount: number, currency?: string | null): string {
 }
 
 function formatPayAmount(order: PaymentOrder, amount: number): string {
-  if (props.showUser) return `¥${amount.toFixed(2)}`
   return formatGatewayAmount(amount, order.currency)
 }
 
 function formatOrderAmount(order: PaymentOrder): string {
-  if (props.showUser) return `${order.order_type === 'balance' ? '$' : '¥'}${order.amount.toFixed(2)}`
   const currency = order.order_type === 'balance' ? 'USD' : order.currency
   return formatPaymentAmount(order.amount, currency, localeCode.value)
 }
