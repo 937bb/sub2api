@@ -769,6 +769,7 @@ func (s *AccountUsageService) probeOpenAICodexSnapshot(ctx context.Context, acco
 	if chatgptAccountID := account.GetChatGPTAccountID(); chatgptAccountID != "" {
 		req.Header.Set("chatgpt-account-id", chatgptAccountID)
 	}
+	applyOpenAIChatGPTFedRAMPHeader(req, account)
 	fingerprint, err := s.ensureOpenAICodexFingerprint(reqCtx, account, req)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", errOpenAICodexFingerprintEnsure, err)

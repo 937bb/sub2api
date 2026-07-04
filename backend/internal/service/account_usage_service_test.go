@@ -371,9 +371,10 @@ func TestAccountUsageService_GetUsageOpenAISetupTokenUsesCodexFingerprintProbe(t
 		Platform: PlatformOpenAI,
 		Type:     AccountTypeSetupToken,
 		Credentials: map[string]any{
-			"access_token":       "setup-access-token",
-			"chatgpt_account_id": "chatgpt-acc",
-			"user_agent":         "malicious-inbound/1.0",
+			"access_token":               "setup-access-token",
+			"chatgpt_account_id":         "chatgpt-acc",
+			"chatgpt_account_is_fedramp": true,
+			"user_agent":                 "malicious-inbound/1.0",
 		},
 		Extra: map[string]any{"openai_oauth_ws_mode": OpenAIOAuthWSModeManagedSession},
 	}
@@ -404,6 +405,12 @@ func TestAccountUsageService_GetUsageOpenAISetupTokenUsesCodexFingerprintProbe(t
 	}
 	if got := capturedReq.Header.Get("Authorization"); got != "Bearer setup-access-token" {
 		t.Fatalf("Authorization = %q", got)
+	}
+	if got := capturedReq.Header.Get("chatgpt-account-id"); got != "chatgpt-acc" {
+		t.Fatalf("chatgpt-account-id = %q, want chatgpt-acc", got)
+	}
+	if got := capturedReq.Header.Get("x-openai-fedramp"); got != "true" {
+		t.Fatalf("x-openai-fedramp = %q, want true", got)
 	}
 	if got := capturedReq.Header.Get("User-Agent"); got != DefaultOpenAICodexUserAgent {
 		t.Fatalf("User-Agent = %q, want fingerprint default", got)

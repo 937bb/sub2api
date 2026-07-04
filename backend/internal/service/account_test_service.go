@@ -125,6 +125,13 @@ func openAICodexAccountTestProbePromptCacheKey(prefix string, account *Account, 
 	return openAICodexProbePromptCacheKey(prefix, account, fingerprint)
 }
 
+func applyOpenAIChatGPTFedRAMPHeader(req *http.Request, account *Account) {
+	if req == nil || account == nil || !account.IsOpenAIChatGPTFedRAMPAccount() {
+		return
+	}
+	req.Header.Set("x-openai-fedramp", "true")
+}
+
 func (s *AccountTestService) validateUpstreamBaseURL(raw string) (string, error) {
 	if s.cfg == nil {
 		return "", errors.New("config is not available")
@@ -628,6 +635,7 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 		if chatgptAccountID != "" {
 			req.Header.Set("chatgpt-account-id", chatgptAccountID)
 		}
+		applyOpenAIChatGPTFedRAMPHeader(req, account)
 		fingerprint, err := s.ensureOpenAICodexFingerprint(ctx, account, req)
 		if err != nil {
 			return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to ensure Codex fingerprint: %s", err.Error()))
@@ -799,6 +807,7 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 		if chatgptAccountID != "" {
 			req.Header.Set("chatgpt-account-id", chatgptAccountID)
 		}
+		applyOpenAIChatGPTFedRAMPHeader(req, account)
 		fingerprint, err := s.ensureOpenAICodexFingerprint(ctx, account, req)
 		if err != nil {
 			return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to ensure Codex fingerprint: %s", err.Error()))
@@ -1718,6 +1727,7 @@ func (s *AccountTestService) testOpenAIImageOAuth(c *gin.Context, ctx context.Co
 	if chatgptAccountID := strings.TrimSpace(account.GetChatGPTAccountID()); chatgptAccountID != "" {
 		req.Header.Set("chatgpt-account-id", chatgptAccountID)
 	}
+	applyOpenAIChatGPTFedRAMPHeader(req, account)
 	fingerprint, err := s.ensureOpenAICodexFingerprint(ctx, account, req)
 	if err != nil {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to ensure Codex fingerprint: %s", err.Error()))

@@ -163,6 +163,7 @@ func TestProbeOpenAIAPIKeyResponsesSupportDefaultProbeWritesAccountMarkerOnly(t 
 	require.Equal(t, map[string]any{openai_compat.ExtraKeyResponsesSupported: false}, repo.updatedExtra)
 	require.Len(t, upstream.requests, 1)
 	require.Equal(t, "https://upstream.example/v1/responses", upstream.requests[0].URL.String())
+	require.Empty(t, upstream.requests[0].Header.Get("x-openai-fedramp"))
 	require.Equal(t, openai.DefaultTestModel, gjson.GetBytes(readTestRequestBody(t, upstream.requests[0]), "model").String())
 }
 
@@ -416,8 +417,9 @@ func TestAccountTestService_OpenAIOAuthProbeSendsCodexFingerprint(t *testing.T) 
 		Type:        AccountTypeOAuth,
 		Concurrency: 1,
 		Credentials: map[string]any{
-			"access_token":       "test-token",
-			"chatgpt_account_id": "chatgpt-acc",
+			"access_token":               "test-token",
+			"chatgpt_account_id":         "chatgpt-acc",
+			"chatgpt_account_is_fedramp": true,
 		},
 	}
 
@@ -430,6 +432,7 @@ func TestAccountTestService_OpenAIOAuthProbeSendsCodexFingerprint(t *testing.T) 
 	require.Equal(t, codexCLIUserAgent, upstream.lastReq.Header.Get("User-Agent"))
 	require.Equal(t, codexCLIVersion, upstream.lastReq.Header.Get("Version"))
 	require.Equal(t, "chatgpt-acc", upstream.lastReq.Header.Get("chatgpt-account-id"))
+	require.Equal(t, "true", upstream.lastReq.Header.Get("x-openai-fedramp"))
 	require.NotEmpty(t, upstream.lastReq.Header.Get(openAICodexSessionIDHeader))
 	require.NotEmpty(t, upstream.lastReq.Header.Get(openAICodexThreadIDHeader))
 	require.NotEmpty(t, upstream.lastReq.Header.Get(openAICodexClientRequestIDHeader))
@@ -442,6 +445,36 @@ func TestAccountTestService_OpenAIOAuthProbeSendsCodexFingerprint(t *testing.T) 
 	require.Equal(t, upstream.lastReq.Header.Get(openAICodexInstallationIDHeader), gjson.GetBytes(upstream.lastBody, "client_metadata.x-codex-installation-id").String())
 	// Codex HTTP 不在 client_metadata 中放 x-codex-window-id，仅放在 HTTP header。
 	require.False(t, gjson.GetBytes(upstream.lastBody, "client_metadata.x-codex-window-id").Exists())
+}
+
+func TestAccountTestService_OpenAIOAuthProbeOmitsFedRAMPHeaderWhenAccountMetadataFalse(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := newTestContext()
+
+	resp := newJSONResponse(http.StatusOK, "")
+	resp.Body = io.NopCloser(strings.NewReader(`data: {"type":"response.completed"}
+
+`))
+
+	upstream := &httpUpstreamRecorder{resp: resp}
+	svc := &AccountTestService{httpUpstream: upstream}
+	account := &Account{
+		ID:          925,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"access_token":               "test-token",
+			"chatgpt_account_id":         "chatgpt-acc",
+			"chatgpt_account_is_fedramp": false,
+		},
+	}
+
+	err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.4", "", "")
+	require.NoError(t, err)
+	require.NotNil(t, upstream.lastReq)
+	require.Equal(t, "chatgpt-acc", upstream.lastReq.Header.Get("chatgpt-account-id"))
+	require.Empty(t, upstream.lastReq.Header.Get("x-openai-fedramp"))
 }
 
 func TestAccountTestService_OpenAIOAuthProbeIDsAreAccountScoped(t *testing.T) {
@@ -728,6 +761,7 @@ func TestAccountTestService_OpenAIAPIKeyResponsesUnsupportedUsesChatCompletionsP
 	require.Equal(t, "https://compat-upstream.example/v1/chat/completions", upstream.lastReq.URL.String())
 	require.Equal(t, "Bearer sk-test", upstream.lastReq.Header.Get("Authorization"))
 	require.Equal(t, "text/event-stream", upstream.lastReq.Header.Get("Accept"))
+	require.Empty(t, upstream.lastReq.Header.Get("x-openai-fedramp"))
 	require.Equal(t, "gpt-5.4", gjson.GetBytes(upstream.lastBody, "model").String())
 	require.True(t, gjson.GetBytes(upstream.lastBody, "stream").Bool())
 	require.Equal(t, "hello", gjson.GetBytes(upstream.lastBody, "messages.0.content").String())
