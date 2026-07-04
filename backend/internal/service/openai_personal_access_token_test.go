@@ -167,6 +167,37 @@ func TestHydratePersonalAccessTokenWhoamiErrorRedactsPAT(t *testing.T) {
 	require.Contains(t, err, "Authorization=[redacted]")
 }
 
+func TestHydratePersonalAccessTokenWhoamiErrorRedactsSensitiveMetadata(t *testing.T) {
+	err := (&openAIPersonalAccessTokenWhoamiError{
+		statusCode: http.StatusForbidden,
+		body: `{"error":{"message":"Personal access token owner is inactive. email=pat-user@example.com ` +
+			`chatgpt_user_id=user-sensitive chatgpt_account_id=acc-sensitive chatgpt_plan_type=enterprise ` +
+			`chatgpt_account_is_fedramp=true token=hcpa-message-token","details":{"email":"pat-user@example.com",` +
+			`"chatgpt_user_id":"user-sensitive","chatgpt_account_id":"acc-sensitive","chatgpt_plan_type":"enterprise",` +
+			`"chatgpt_account_is_fedramp":true,"personal_access_token":"at-json-token","access_token":"hcpa-access-token",` +
+			`"refresh_token":"hcpa-refresh-token","id_token":"hcpa-id-token","authorization":"Bearer hcpa-header-token"}}}`,
+	}).Error()
+
+	require.Contains(t, err, "OpenAI PAT whoami failed")
+	require.Contains(t, err, "Personal access token owner is inactive")
+	require.Contains(t, err, `"email":"[redacted]"`)
+	require.Contains(t, err, `"chatgpt_user_id":"[redacted]"`)
+	require.Contains(t, err, `"chatgpt_account_id":"[redacted]"`)
+	require.Contains(t, err, `"chatgpt_plan_type":"[redacted]"`)
+	require.Contains(t, err, `"chatgpt_account_is_fedramp":"[redacted]"`)
+	require.NotContains(t, err, "chatgpt_account_is_fedramp=true")
+	require.NotContains(t, err, "pat-user@example.com")
+	require.NotContains(t, err, "user-sensitive")
+	require.NotContains(t, err, "acc-sensitive")
+	require.NotContains(t, err, "enterprise")
+	require.NotContains(t, err, "at-json-token")
+	require.NotContains(t, err, "hcpa-message-token")
+	require.NotContains(t, err, "hcpa-access-token")
+	require.NotContains(t, err, "hcpa-refresh-token")
+	require.NotContains(t, err, "hcpa-id-token")
+	require.NotContains(t, err, "hcpa-header-token")
+}
+
 func TestApplyOpenAIPersonalAccessTokenMetadataPreservesOAuthCredentials(t *testing.T) {
 	credentials := map[string]any{
 		"personal_access_token": "at-old",

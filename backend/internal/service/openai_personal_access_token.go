@@ -22,9 +22,11 @@ const (
 var openAIAuthAPIBaseURL = defaultOpenAIAuthAPIBaseURL
 
 var (
-	openAIPersonalAccessTokenDiagnosticJSONFieldRe = regexp.MustCompile(`(?i)("(?:personal_access_token|token)"\s*:\s*)"[^"]*"`)
-	openAIPersonalAccessTokenDiagnosticKVFieldRe   = regexp.MustCompile(`(?i)\b((?:personal_access_token|token)\s*(?:=|:)\s*)(?:Bearer\s+)?[^\s,;"}]+`)
-	openAIPersonalAccessTokenDiagnosticValueRe     = regexp.MustCompile(`\bat-[A-Za-z0-9._~+/=-]+`)
+	openAIPersonalAccessTokenDiagnosticFieldPattern = `personal_access_token|access_token|refresh_token|id_token|session_token|authorization|api_key|apikey|token|email|chatgpt_user_id|chatgpt_account_id|chatgpt_plan_type|chatgpt_account_is_fedramp`
+	openAIPersonalAccessTokenDiagnosticJSONFieldRe  = regexp.MustCompile(`(?i)("(?:` + openAIPersonalAccessTokenDiagnosticFieldPattern + `)"\s*:\s*)(?:"(?:\\.|[^"\\])*"|true|false|null|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)`)
+	openAIPersonalAccessTokenDiagnosticKVFieldRe    = regexp.MustCompile(`(?i)\b((?:` + openAIPersonalAccessTokenDiagnosticFieldPattern + `)\s*(?:=|:)\s*)(?:Bearer\s+)?(?:"(?:\\.|[^"\\])*"|[^\s,;"}]+)`)
+	openAIPersonalAccessTokenDiagnosticEmailRe      = regexp.MustCompile(`(?i)\b[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}\b`)
+	openAIPersonalAccessTokenDiagnosticValueRe      = regexp.MustCompile(`\bat-[A-Za-z0-9._~+/=-]+`)
 )
 
 // OpenAIPersonalAccessTokenMetadata is the official Codex whoami response for
@@ -54,7 +56,7 @@ func (e *openAIPersonalAccessTokenWhoamiError) Error() string {
 	if e == nil {
 		return "OpenAI PAT whoami failed"
 	}
-	body := sanitizeOpenAIPersonalAccessTokenDiagnosticText(truncateOpenAIWhoamiBody(e.body))
+	body := truncateOpenAIWhoamiBody(sanitizeOpenAIPersonalAccessTokenDiagnosticText(e.body))
 	return fmt.Sprintf("OpenAI PAT whoami failed: status %d, body: %s", e.statusCode, body)
 }
 
@@ -175,7 +177,7 @@ func (s *OpenAIOAuthService) HydratePersonalAccessToken(ctx context.Context, per
 		return nil, fmt.Errorf("OpenAI PAT whoami request returned no response")
 	}
 	if !resp.IsSuccessState() {
-		return nil, &openAIPersonalAccessTokenWhoamiError{statusCode: resp.StatusCode, body: resp.String()}
+		return nil, &openAIPersonalAccessTokenWhoamiError{statusCode: resp.StatusCode, body: sanitizeOpenAIPersonalAccessTokenDiagnosticText(resp.String())}
 	}
 	var metadata openAIPersonalAccessTokenWhoamiMetadata
 	if err := json.Unmarshal(resp.Bytes(), &metadata); err != nil {
@@ -274,9 +276,75 @@ func truncateOpenAIWhoamiBody(body string) string {
 }
 
 func sanitizeOpenAIPersonalAccessTokenDiagnosticText(text string) string {
+	if text == "" {
+		return text
+	}
+	text = sanitizeOpenAIPersonalAccessTokenDiagnosticJSON(text)
 	text = sanitizeOpenAIUpstreamDiagnosticText(text)
 	text = openAIPersonalAccessTokenDiagnosticJSONFieldRe.ReplaceAllString(text, `$1"[redacted]"`)
 	text = openAIPersonalAccessTokenDiagnosticKVFieldRe.ReplaceAllString(text, `$1[redacted]`)
+	text = openAIPersonalAccessTokenDiagnosticEmailRe.ReplaceAllString(text, "[redacted]")
 	text = openAIPersonalAccessTokenDiagnosticValueRe.ReplaceAllString(text, "[redacted]")
 	return text
+}
+
+func sanitizeOpenAIPersonalAccessTokenDiagnosticJSON(text string) string {
+	raw := []byte(strings.TrimSpace(text))
+	if len(raw) == 0 || !json.Valid(raw) {
+		return text
+	}
+	var decoded any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return text
+	}
+	encoded, err := json.Marshal(redactOpenAIPersonalAccessTokenDiagnosticJSON(decoded))
+	if err != nil {
+		return text
+	}
+	return string(encoded)
+}
+
+func redactOpenAIPersonalAccessTokenDiagnosticJSON(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(typed))
+		for key, value := range typed {
+			if isOpenAIPersonalAccessTokenDiagnosticSensitiveKey(key) {
+				out[key] = "[redacted]"
+				continue
+			}
+			out[key] = redactOpenAIPersonalAccessTokenDiagnosticJSON(value)
+		}
+		return out
+	case []any:
+		out := make([]any, 0, len(typed))
+		for _, value := range typed {
+			out = append(out, redactOpenAIPersonalAccessTokenDiagnosticJSON(value))
+		}
+		return out
+	default:
+		return value
+	}
+}
+
+func isOpenAIPersonalAccessTokenDiagnosticSensitiveKey(key string) bool {
+	key = strings.ToLower(strings.TrimSpace(key))
+	switch key {
+	case "email",
+		"chatgpt_user_id",
+		"chatgpt_account_id",
+		"chatgpt_plan_type",
+		"chatgpt_account_is_fedramp",
+		"personal_access_token",
+		"access_token",
+		"refresh_token",
+		"id_token",
+		"session_token",
+		"authorization",
+		"api_key",
+		"apikey",
+		"token":
+		return true
+	}
+	return strings.HasSuffix(key, "_token") || strings.HasSuffix(key, "-token")
 }
