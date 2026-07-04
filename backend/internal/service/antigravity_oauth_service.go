@@ -274,6 +274,18 @@ func isNonRetryableAntigravityOAuthError(err error) bool {
 	return false
 }
 
+func hasAntigravityOAuthProjectFallback(account *Account) bool {
+	return account != nil &&
+		account.Platform == PlatformAntigravity &&
+		account.Type == AccountTypeOAuth &&
+		strings.TrimSpace(account.GetCredential(antigravityProjectFallbackCredentialKey)) != ""
+}
+
+func isAntigravityOAuthProjectFallbackOnly(account *Account) bool {
+	return hasAntigravityOAuthProjectFallback(account) &&
+		strings.TrimSpace(account.GetCredential("project_id")) == ""
+}
+
 // RefreshAccountToken 刷新账户的 token
 func (s *AntigravityOAuthService) RefreshAccountToken(ctx context.Context, account *Account) (*AntigravityTokenInfo, error) {
 	if account.Platform != PlatformAntigravity || account.Type != AccountTypeOAuth {
@@ -298,13 +310,29 @@ func (s *AntigravityOAuthService) RefreshAccountToken(ctx context.Context, accou
 		return nil, err
 	}
 
+	s.enrichRefreshAccountTokenInfo(ctx, account, tokenInfo, proxyURL)
+
+	return tokenInfo, nil
+}
+
+func (s *AntigravityOAuthService) enrichRefreshAccountTokenInfo(ctx context.Context, account *Account, tokenInfo *AntigravityTokenInfo, proxyURL string) {
+	if account == nil || tokenInfo == nil {
+		return
+	}
+
 	// 保留原有的 email
 	existingEmail := strings.TrimSpace(account.GetCredential("email"))
 	if existingEmail != "" {
 		tokenInfo.Email = existingEmail
 	}
 
-	// 每次刷新都调用 LoadCodeAssist 获取 project_id + plan_type，失败时重试
+	// fallback-only OAuth accounts use antigravity_project_id only for request
+	// construction. Refresh must not probe/backfill project_id or change cache keys.
+	if isAntigravityOAuthProjectFallbackOnly(account) {
+		return
+	}
+
+	// 非 fallback-only 账号刷新时沿用原逻辑：调用 LoadCodeAssist 获取 project_id + plan_type，失败时重试。
 	existingProjectID := strings.TrimSpace(account.GetCredential("project_id"))
 	loadResult, loadErr := s.loadProjectIDWithRetry(ctx, tokenInfo.AccessToken, proxyURL, 3)
 
@@ -322,8 +350,6 @@ func (s *AntigravityOAuthService) RefreshAccountToken(ctx context.Context, accou
 			tokenInfo.PlanType = loadResult.Subscription.PlanType
 		}
 	}
-
-	return tokenInfo, nil
 }
 
 // loadCodeAssistResult 封装 loadProjectIDWithRetry 的返回结果，
@@ -477,6 +503,30 @@ func (s *AntigravityOAuthService) BuildAccountCredentials(tokenInfo *Antigravity
 		creds["plan_type"] = tokenInfo.PlanType
 	}
 	return creds
+}
+
+// BuildRefreshAccountCredentials merges refreshed token fields with existing
+// account credentials while keeping fallback-only OAuth accounts project_id-free.
+func (s *AntigravityOAuthService) BuildRefreshAccountCredentials(account *Account, tokenInfo *AntigravityTokenInfo) map[string]any {
+	newCredentials := s.BuildAccountCredentials(tokenInfo)
+	if account == nil {
+		return newCredentials
+	}
+	newCredentials = MergeCredentials(account.Credentials, newCredentials)
+
+	if isAntigravityOAuthProjectFallbackOnly(account) {
+		delete(newCredentials, "project_id")
+		return newCredentials
+	}
+
+	// 特殊处理 project_id：如果新值为空但旧值非空，保留旧值
+	// 这确保了即使 LoadCodeAssist 失败，project_id 也不会丢失
+	if newProjectID, _ := newCredentials["project_id"].(string); newProjectID == "" {
+		if oldProjectID := strings.TrimSpace(account.GetCredential("project_id")); oldProjectID != "" {
+			newCredentials["project_id"] = oldProjectID
+		}
+	}
+	return newCredentials
 }
 
 // Stop 停止服务

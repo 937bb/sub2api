@@ -81,7 +81,7 @@ func (s *AccountTestService) FetchUpstreamSupportedModels(ctx context.Context, a
 		return nil, newUpstreamModelSyncConfigError("Account is required", nil)
 	}
 
-	if account.Platform == PlatformAntigravity && account.Type != AccountTypeAPIKey {
+	if account.Platform == PlatformAntigravity && account.Type == AccountTypeOAuth {
 		return s.fetchAntigravityOAuthUpstreamModels(ctx, account)
 	}
 
@@ -337,12 +337,16 @@ func (s *AccountTestService) fetchAntigravityOAuthUpstreamModels(ctx context.Con
 	if accessToken == "" {
 		return nil, newUpstreamModelSyncConfigError("No Antigravity access token is available", nil)
 	}
+	projectID, err := resolveAntigravityProjectIDAfterToken(ctx, account, s.antigravityGatewayService.GetTokenProvider(), accessToken)
+	if err != nil {
+		return nil, newUpstreamModelSyncConfigError("Antigravity OAuth account requires project_id or antigravity_project_id", err)
+	}
 
 	client, err := antigravity.NewClient(upstreamModelsProxyURL(account))
 	if err != nil {
 		return nil, newUpstreamModelSyncConfigError("Failed to configure Antigravity client", err)
 	}
-	modelsResp, _, err := client.FetchAvailableModels(ctx, accessToken, strings.TrimSpace(account.GetCredential("project_id")))
+	modelsResp, _, err := client.FetchAvailableModels(ctx, accessToken, projectID)
 	if err != nil {
 		return nil, newUpstreamModelSyncUpstreamError("Failed to fetch Antigravity available models", err)
 	}

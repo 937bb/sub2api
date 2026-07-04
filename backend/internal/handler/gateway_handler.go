@@ -416,7 +416,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			}
 			// 记录 Forward 前已写入字节数，Forward 后若增加则说明 SSE 内容已发，禁止 failover
 			writerSizeBeforeForward := c.Writer.Size()
-			if account.Platform == service.PlatformAntigravity {
+			if account.Platform == service.PlatformAntigravity && account.Type == service.AccountTypeOAuth {
 				result, err = h.antigravityGatewayService.ForwardGemini(
 					requestCtx,
 					c,
@@ -777,7 +777,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// 记录 Forward 前已写入字节数，Forward 后若增加则说明 SSE 内容已发，禁止 failover
 			writerSizeBeforeForward := c.Writer.Size()
 			restoreBedrockBetaHeader := h.gatewayService.ApplyBedrockCCCompatBetaHeaderOverride(c, attemptParsedReq.Body.Bytes(), attemptParsedReq.Model, account, apiKey.GroupID)
-			if account.Platform == service.PlatformAntigravity && account.Type != service.AccountTypeAPIKey {
+			if account.Platform == service.PlatformAntigravity && (account.Type == service.AccountTypeOAuth || account.Type == service.AccountTypeUpstream) {
 				result, err = h.antigravityGatewayService.Forward(requestCtx, c, account, attemptBody, hasBoundSession)
 			} else {
 				result, err = h.gatewayService.Forward(requestCtx, c, account, attemptParsedReq)

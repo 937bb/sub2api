@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"strings"
 	"time"
 )
 
@@ -61,17 +60,7 @@ func (r *AntigravityTokenRefresher) Refresh(ctx context.Context, account *Accoun
 		return nil, err
 	}
 
-	newCredentials := r.antigravityOAuthService.BuildAccountCredentials(tokenInfo)
-	// 合并旧的 credentials，保留新 credentials 中不存在的字段
-	newCredentials = MergeCredentials(account.Credentials, newCredentials)
-
-	// 特殊处理 project_id：如果新值为空但旧值非空，保留旧值
-	// 这确保了即使 LoadCodeAssist 失败，project_id 也不会丢失
-	if newProjectID, _ := newCredentials["project_id"].(string); newProjectID == "" {
-		if oldProjectID := strings.TrimSpace(account.GetCredential("project_id")); oldProjectID != "" {
-			newCredentials["project_id"] = oldProjectID
-		}
-	}
+	newCredentials := r.antigravityOAuthService.BuildRefreshAccountCredentials(account, tokenInfo)
 
 	// 如果 project_id 获取失败，只记录警告，不返回错误
 	// LoadCodeAssist 失败可能是临时网络问题，应该允许重试而不是立即标记为不可重试错误

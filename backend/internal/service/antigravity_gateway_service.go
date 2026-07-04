@@ -90,6 +90,10 @@ const (
 	antigravityFallbackSecondsEnv = "GATEWAY_ANTIGRAVITY_FALLBACK_COOLDOWN_SECONDS"
 )
 
+const antigravityProjectFallbackCredentialKey = "antigravity_project_id"
+
+var errAntigravityProjectIDRequired = errors.New("antigravity oauth account requires project_id or antigravity_project_id")
+
 // AntigravityAccountSwitchError 账号切换信号
 // 当账号限流时间超过阈值时，通知上层切换账号
 type AntigravityAccountSwitchError struct {
@@ -1029,6 +1033,39 @@ func (s *AntigravityGatewayService) getMappedModel(account *Account, requestedMo
 	return mapAntigravityModel(account, requestedModel)
 }
 
+func resolveAntigravityProjectID(account *Account) (string, error) {
+	if account == nil {
+		return "", errAntigravityProjectIDRequired
+	}
+	if account.Platform != PlatformAntigravity || account.Type != AccountTypeOAuth {
+		return "", errAntigravityProjectIDRequired
+	}
+	if projectID := strings.TrimSpace(account.GetCredential("project_id")); projectID != "" {
+		return projectID, nil
+	}
+	if projectID := strings.TrimSpace(account.GetCredential(antigravityProjectFallbackCredentialKey)); projectID != "" {
+		return projectID, nil
+	}
+	return "", errAntigravityProjectIDRequired
+}
+
+func resolveAntigravityProjectIDAfterToken(ctx context.Context, account *Account, tokenProvider *AntigravityTokenProvider, accessToken string) (string, error) {
+	projectID, err := resolveAntigravityProjectID(account)
+	if err == nil {
+		return projectID, nil
+	}
+	if account == nil || account.Platform != PlatformAntigravity || account.Type != AccountTypeOAuth {
+		return "", err
+	}
+	if tokenProvider == nil {
+		return "", err
+	}
+	if backfillErr := tokenProvider.BackfillProjectIDIfMissing(ctx, account, accessToken); backfillErr != nil {
+		return "", fmt.Errorf("%w: %v", err, backfillErr)
+	}
+	return resolveAntigravityProjectID(account)
+}
+
 // applyThinkingModelSuffix 根据 thinking 配置调整模型名
 // 当映射结果是 claude-sonnet-4-5 且请求开启了 thinking 时，改为 claude-sonnet-4-5-thinking
 func applyThinkingModelSuffix(mappedModel string, thinkingEnabled bool) string {
@@ -1058,7 +1095,6 @@ type TestConnectionResult struct {
 // 复用 antigravityRetryLoop 的完整重试 / credits overages / 智能重试逻辑，
 // 与真实调度行为一致。差异：不做账号切换（测试指定账号）、不记录 ops 错误。
 func (s *AntigravityGatewayService) TestConnection(ctx context.Context, account *Account, modelID string) (*TestConnectionResult, error) {
-
 	// 获取 token
 	if s.tokenProvider == nil {
 		return nil, errors.New("antigravity token provider not configured")
@@ -1067,9 +1103,10 @@ func (s *AntigravityGatewayService) TestConnection(ctx context.Context, account 
 	if err != nil {
 		return nil, fmt.Errorf("获取 access_token 失败: %w", err)
 	}
-
-	// 获取 project_id（部分账户类型可能没有）
-	projectID := strings.TrimSpace(account.GetCredential("project_id"))
+	projectID, err := resolveAntigravityProjectIDAfterToken(ctx, account, s.tokenProvider, accessToken)
+	if err != nil {
+		return nil, err
+	}
 
 	// 模型映射
 	mappedModel := s.getMappedModel(account, modelID)
@@ -1322,6 +1359,10 @@ func injectIdentityPatchToGeminiRequest(body []byte) ([]byte, error) {
 
 // wrapV1InternalRequest 包装请求为 v1internal 格式
 func (s *AntigravityGatewayService) wrapV1InternalRequest(projectID, model string, originalBody []byte) ([]byte, error) {
+	projectID = strings.TrimSpace(projectID)
+	if projectID == "" {
+		return nil, errAntigravityProjectIDRequired
+	}
 	var request any
 	if err := json.Unmarshal(originalBody, &request); err != nil {
 		return nil, fmt.Errorf("解析请求体失败: %w", err)
@@ -1402,9 +1443,11 @@ func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context,
 			ResponseBody: []byte(`{"error":{"type":"authentication_error","message":"Failed to get upstream access token"},"type":"error"}`),
 		}
 	}
-
-	// 获取 project_id（部分账户类型可能没有）
-	projectID := strings.TrimSpace(account.GetCredential("project_id"))
+	projectID, err := resolveAntigravityProjectIDAfterToken(ctx, account, s.tokenProvider, accessToken)
+	if err != nil {
+		_ = s.writeClaudeError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+		return nil, err
+	}
 
 	// 代理 URL
 	proxyURL := ""
@@ -2170,9 +2213,11 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 			ResponseBody: []byte(`{"error":{"message":"Failed to get upstream access token","status":"UNAVAILABLE"}}`),
 		}
 	}
-
-	// 获取 project_id（部分账户类型可能没有）
-	projectID := strings.TrimSpace(account.GetCredential("project_id"))
+	projectID, err := resolveAntigravityProjectIDAfterToken(ctx, account, s.tokenProvider, accessToken)
+	if err != nil {
+		_ = s.writeGoogleError(c, http.StatusBadRequest, err.Error())
+		return nil, err
+	}
 
 	// 代理 URL
 	proxyURL := ""
@@ -2197,6 +2242,10 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 	// 包装请求
 	wrappedBody, err := s.wrapV1InternalRequest(projectID, mappedModel, injectedBody)
 	if err != nil {
+		if errors.Is(err, errAntigravityProjectIDRequired) {
+			_ = s.writeGoogleError(c, http.StatusBadRequest, err.Error())
+			return nil, err
+		}
 		return nil, s.writeGoogleError(c, http.StatusInternalServerError, "Failed to build upstream request")
 	}
 
