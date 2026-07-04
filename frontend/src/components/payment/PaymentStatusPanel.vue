@@ -22,11 +22,11 @@
               </div>
               <div class="flex justify-between">
                 <span class="text-gray-500 dark:text-gray-400">{{ t('payment.orders.amount') }}</span>
-                <span class="font-medium text-gray-900 dark:text-white">{{ paidOrder.order_type === 'balance' ? '$' + paidOrder.amount.toFixed(2) : formatGatewayAmount(paidOrder.amount) }}</span>
+                <span class="font-medium text-gray-900 dark:text-white">{{ formatPaidOrderAmount(paidOrder) }}</span>
               </div>
               <div class="flex justify-between">
                 <span class="text-gray-500 dark:text-gray-400">{{ t('payment.orders.payAmount') }}</span>
-                <span class="font-medium text-gray-900 dark:text-white">{{ formatGatewayAmount(paidOrder.pay_amount) }}</span>
+                <span class="font-medium text-gray-900 dark:text-white">{{ formatPaidOrderPaymentAmount(paidOrder) }}</span>
               </div>
             </div>
           </div>
@@ -214,8 +214,17 @@ const countdownDisplay = computed(() => {
   return m.toString().padStart(2, '0') + ':' + s.toString().padStart(2, '0')
 })
 
-function formatGatewayAmount(value: number): string {
-  return formatPaymentAmount(value, paymentCurrency.value, localeCode.value)
+function formatGatewayAmount(value: number, currency?: string | null): string {
+  return formatPaymentAmount(value, currency || paymentCurrency.value, localeCode.value)
+}
+
+function formatPaidOrderAmount(order: PaymentOrder): string {
+  const currency = order.order_type === 'balance' ? 'USD' : order.currency
+  return formatGatewayAmount(order.amount, currency)
+}
+
+function formatPaidOrderPaymentAmount(order: PaymentOrder): string {
+  return formatGatewayAmount(order.pay_amount, order.currency)
 }
 
 function isSuccessStatus(status: string | null | undefined): boolean {

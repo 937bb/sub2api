@@ -13,6 +13,7 @@ vi.mock('vue-i18n', async () => {
     ...actual,
     useI18n: () => ({
       t: (key: string) => key,
+      locale: 'en-US',
     }),
   }
 })
@@ -161,5 +162,38 @@ describe('PaymentStatusPanel', () => {
     expect(verifyOrder).toHaveBeenCalledWith('sub2_20260420abcd1234')
     expect(wrapper.text()).toContain('payment.result.success')
     expect(wrapper.emitted('success')).toHaveLength(1)
+  })
+
+  it('uses the paid order currency in success state', async () => {
+    pollOrderStatus.mockResolvedValue({
+      ...orderFactory('COMPLETED'),
+      amount: 1250,
+      pay_amount: 1250,
+      currency: 'JPY',
+      order_type: 'subscription',
+    })
+
+    const wrapper = mount(PaymentStatusPanel, {
+      props: {
+        orderId: 42,
+        qrCode: 'https://pay.example.com/qr/42',
+        expiresAt: '2099-01-01T12:30:00Z',
+        paymentType: 'alipay',
+        orderType: 'subscription',
+        currency: 'USD',
+      },
+      global: {
+        stubs: {
+          Icon: true,
+        },
+      },
+    })
+
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(3000)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('¥1,250')
+    expect(wrapper.text()).not.toContain('$1,250.00')
   })
 })
