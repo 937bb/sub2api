@@ -307,7 +307,7 @@ func (p *OpenAITokenProvider) ensurePersonalAccessTokenMetadata(ctx context.Cont
 	if err := persistOpenAIPersonalAccessTokenMetadata(ctx, p.accountRepo, account, personalAccessToken, metadata); err != nil {
 		return err
 	}
-	slog.Info("openai_personal_access_token_metadata_hydrated", "account_id", account.ID, "chatgpt_account_id", metadata.ChatGPTAccountID, "plan_type", metadata.ChatGPTPlanType)
+	slog.Info("openai_personal_access_token_metadata_hydrated", "account_id", account.ID)
 	return nil
 }
 

@@ -3,9 +3,11 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -341,6 +343,12 @@ func TestOpenAITokenProvider_PersonalAccessTokenHydrationPersistsViaUpdateCreden
 	}))
 	defer server.Close()
 	openAIAuthAPIBaseURL = server.URL
+	var slogOutput bytes.Buffer
+	previousLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&slogOutput, nil)))
+	t.Cleanup(func() {
+		slog.SetDefault(previousLogger)
+	})
 
 	cache := newOpenAITokenCacheStub()
 	repo := &openAISetupTokenBoundaryRepoStub{}
@@ -366,6 +374,19 @@ func TestOpenAITokenProvider_PersonalAccessTokenHydrationPersistsViaUpdateCreden
 	require.Equal(t, int32(0), atomic.LoadInt32(&repo.bulkUpdateCalls), "PAT hydration should not use bulk update")
 	require.Equal(t, "698727dc-d964-43d7-954f-932a4eb67eaf", repo.lastCredentials["chatgpt_account_id"])
 	require.Equal(t, "698727dc-d964-43d7-954f-932a4eb67eaf", account.GetChatGPTAccountID())
+	logs := slogOutput.String()
+	require.Contains(t, logs, `"msg":"openai_personal_access_token_metadata_hydrated"`)
+	require.Contains(t, logs, `"account_id":117`)
+	require.NotContains(t, logs, "user@example.com")
+	require.NotContains(t, logs, "user-123")
+	require.NotContains(t, logs, "698727dc-d964-43d7-954f-932a4eb67eaf")
+	require.NotContains(t, logs, `"email"`)
+	require.NotContains(t, logs, "chatgpt_user_id")
+	require.NotContains(t, logs, "chatgpt_account_id")
+	require.NotContains(t, logs, "chatgpt_plan_type")
+	require.NotContains(t, logs, "plan_type")
+	require.NotContains(t, logs, "chatgpt_account_is_fedramp")
+	require.NotContains(t, logs, "at-pat-token")
 }
 
 func TestOpenAITokenProvider_SetupTokenPersonalAccessTokenBypassesCache(t *testing.T) {
