@@ -2,8 +2,10 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -19,6 +21,12 @@ const (
 
 var openAIAuthAPIBaseURL = defaultOpenAIAuthAPIBaseURL
 
+var (
+	openAIPersonalAccessTokenDiagnosticJSONFieldRe = regexp.MustCompile(`(?i)("(?:personal_access_token|token)"\s*:\s*)"[^"]*"`)
+	openAIPersonalAccessTokenDiagnosticKVFieldRe   = regexp.MustCompile(`(?i)\b((?:personal_access_token|token)\s*(?:=|:)\s*)(?:Bearer\s+)?[^\s,;"}]+`)
+	openAIPersonalAccessTokenDiagnosticValueRe     = regexp.MustCompile(`\bat-[A-Za-z0-9._~+/=-]+`)
+)
+
 // OpenAIPersonalAccessTokenMetadata is the official Codex whoami response for
 // personal access tokens.
 type OpenAIPersonalAccessTokenMetadata struct {
@@ -27,6 +35,14 @@ type OpenAIPersonalAccessTokenMetadata struct {
 	ChatGPTAccountID        string `json:"chatgpt_account_id"`
 	ChatGPTPlanType         string `json:"chatgpt_plan_type"`
 	ChatGPTAccountIsFedRAMP bool   `json:"chatgpt_account_is_fedramp"`
+}
+
+type openAIPersonalAccessTokenWhoamiMetadata struct {
+	Email                   string `json:"email"`
+	ChatGPTUserID           string `json:"chatgpt_user_id"`
+	ChatGPTAccountID        string `json:"chatgpt_account_id"`
+	ChatGPTPlanType         string `json:"chatgpt_plan_type"`
+	ChatGPTAccountIsFedRAMP *bool  `json:"chatgpt_account_is_fedramp"`
 }
 
 type openAIPersonalAccessTokenWhoamiError struct {
@@ -38,7 +54,7 @@ func (e *openAIPersonalAccessTokenWhoamiError) Error() string {
 	if e == nil {
 		return "OpenAI PAT whoami failed"
 	}
-	body := sanitizeOpenAIUpstreamDiagnosticText(truncateOpenAIWhoamiBody(e.body))
+	body := sanitizeOpenAIPersonalAccessTokenDiagnosticText(truncateOpenAIWhoamiBody(e.body))
 	return fmt.Sprintf("OpenAI PAT whoami failed: status %d, body: %s", e.statusCode, body)
 }
 
@@ -148,11 +164,9 @@ func (s *OpenAIOAuthService) HydratePersonalAccessToken(ctx context.Context, per
 	reqCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
-	var metadata OpenAIPersonalAccessTokenMetadata
 	resp, err := client.R().
 		SetContext(reqCtx).
 		SetHeader("Authorization", "Bearer "+personalAccessToken).
-		SetSuccessResult(&metadata).
 		Get(openAIWhoamiURL())
 	if err != nil {
 		return nil, fmt.Errorf("OpenAI PAT whoami request failed: %w", err)
@@ -163,17 +177,21 @@ func (s *OpenAIOAuthService) HydratePersonalAccessToken(ctx context.Context, per
 	if !resp.IsSuccessState() {
 		return nil, &openAIPersonalAccessTokenWhoamiError{statusCode: resp.StatusCode, body: resp.String()}
 	}
+	var metadata openAIPersonalAccessTokenWhoamiMetadata
+	if err := json.Unmarshal(resp.Bytes(), &metadata); err != nil {
+		return nil, fmt.Errorf("OpenAI PAT whoami returned malformed metadata: %w", err)
+	}
 	if err := metadata.validate(); err != nil {
 		return nil, err
 	}
-	return &metadata, nil
+	return metadata.toPublic(), nil
 }
 
-func (m *OpenAIPersonalAccessTokenMetadata) validate() error {
+func (m *openAIPersonalAccessTokenWhoamiMetadata) validate() error {
 	if m == nil {
 		return fmt.Errorf("OpenAI PAT whoami returned empty metadata")
 	}
-	missing := make([]string, 0, 4)
+	missing := make([]string, 0, 5)
 	if strings.TrimSpace(m.Email) == "" {
 		missing = append(missing, "email")
 	}
@@ -186,10 +204,26 @@ func (m *OpenAIPersonalAccessTokenMetadata) validate() error {
 	if strings.TrimSpace(m.ChatGPTPlanType) == "" {
 		missing = append(missing, "chatgpt_plan_type")
 	}
+	if m.ChatGPTAccountIsFedRAMP == nil {
+		missing = append(missing, "chatgpt_account_is_fedramp")
+	}
 	if len(missing) > 0 {
 		return fmt.Errorf("OpenAI PAT whoami metadata missing required fields: %s", strings.Join(missing, ", "))
 	}
 	return nil
+}
+
+func (m *openAIPersonalAccessTokenWhoamiMetadata) toPublic() *OpenAIPersonalAccessTokenMetadata {
+	if m == nil {
+		return nil
+	}
+	return &OpenAIPersonalAccessTokenMetadata{
+		Email:                   m.Email,
+		ChatGPTUserID:           m.ChatGPTUserID,
+		ChatGPTAccountID:        m.ChatGPTAccountID,
+		ChatGPTPlanType:         m.ChatGPTPlanType,
+		ChatGPTAccountIsFedRAMP: *m.ChatGPTAccountIsFedRAMP,
+	}
 }
 
 func (s *OpenAIOAuthService) openAIPersonalAccessTokenProxyURL(ctx context.Context, proxyID *int64) (string, error) {
@@ -237,4 +271,12 @@ func truncateOpenAIWhoamiBody(body string) string {
 		return body
 	}
 	return body[:limit] + "..."
+}
+
+func sanitizeOpenAIPersonalAccessTokenDiagnosticText(text string) string {
+	text = sanitizeOpenAIUpstreamDiagnosticText(text)
+	text = openAIPersonalAccessTokenDiagnosticJSONFieldRe.ReplaceAllString(text, `$1"[redacted]"`)
+	text = openAIPersonalAccessTokenDiagnosticKVFieldRe.ReplaceAllString(text, `$1[redacted]`)
+	text = openAIPersonalAccessTokenDiagnosticValueRe.ReplaceAllString(text, "[redacted]")
+	return text
 }

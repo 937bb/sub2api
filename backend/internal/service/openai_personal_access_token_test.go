@@ -62,6 +62,111 @@ func TestHydratePersonalAccessTokenCallsOfficialWhoami(t *testing.T) {
 	require.True(t, metadata.ChatGPTAccountIsFedRAMP)
 }
 
+func TestHydratePersonalAccessTokenAcceptsExplicitFedRAMPFalse(t *testing.T) {
+	oldBaseURL := openAIAuthAPIBaseURL
+	t.Cleanup(func() { openAIAuthAPIBaseURL = oldBaseURL })
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, openAIWhoamiPath, r.URL.Path)
+		require.Equal(t, "Bearer at-test-pat", r.Header.Get("Authorization"))
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"email":                      "user@example.com",
+			"chatgpt_user_id":            "user-123",
+			"chatgpt_account_id":         "acc-123",
+			"chatgpt_plan_type":          "plus",
+			"chatgpt_account_is_fedramp": false,
+		})
+	}))
+	defer server.Close()
+	openAIAuthAPIBaseURL = server.URL
+
+	svc := NewOpenAIOAuthService(nil, openAIPATTestOAuthClient{})
+	svc.SetPrivacyClientFactory(func(proxyURL string) (*req.Client, error) {
+		return req.C(), nil
+	})
+
+	metadata, err := svc.HydratePersonalAccessToken(context.Background(), "at-test-pat", nil)
+	require.NoError(t, err)
+	require.False(t, metadata.ChatGPTAccountIsFedRAMP)
+}
+
+func TestHydratePersonalAccessTokenRequiresExplicitFedRAMPMetadata(t *testing.T) {
+	tests := []struct {
+		name        string
+		fedRAMP     any
+		wantMessage string
+	}{
+		{
+			name:        "missing",
+			wantMessage: "missing required fields: chatgpt_account_is_fedramp",
+		},
+		{
+			name:        "null",
+			fedRAMP:     nil,
+			wantMessage: "missing required fields: chatgpt_account_is_fedramp",
+		},
+		{
+			name:        "string",
+			fedRAMP:     "false",
+			wantMessage: "malformed metadata",
+		},
+		{
+			name:        "number",
+			fedRAMP:     0,
+			wantMessage: "malformed metadata",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			oldBaseURL := openAIAuthAPIBaseURL
+			t.Cleanup(func() { openAIAuthAPIBaseURL = oldBaseURL })
+
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				require.Equal(t, openAIWhoamiPath, r.URL.Path)
+				payload := map[string]any{
+					"email":              "user@example.com",
+					"chatgpt_user_id":    "user-123",
+					"chatgpt_account_id": "acc-123",
+					"chatgpt_plan_type":  "plus",
+				}
+				if tt.name != "missing" {
+					payload["chatgpt_account_is_fedramp"] = tt.fedRAMP
+				}
+				_ = json.NewEncoder(w).Encode(payload)
+			}))
+			defer server.Close()
+			openAIAuthAPIBaseURL = server.URL
+
+			svc := NewOpenAIOAuthService(nil, openAIPATTestOAuthClient{})
+			svc.SetPrivacyClientFactory(func(proxyURL string) (*req.Client, error) {
+				return req.C(), nil
+			})
+
+			metadata, err := svc.HydratePersonalAccessToken(context.Background(), "at-test-pat", nil)
+			require.Error(t, err)
+			require.Nil(t, metadata)
+			require.Contains(t, err.Error(), tt.wantMessage)
+		})
+	}
+}
+
+func TestHydratePersonalAccessTokenWhoamiErrorRedactsPAT(t *testing.T) {
+	err := (&openAIPersonalAccessTokenWhoamiError{
+		statusCode: http.StatusForbidden,
+		body: `{"error":{"message":"denied token=at-message-token ` +
+			`personal_access_token=at-kv-token Authorization=Bearer at-bearer-token","token":"at-json-token"}}`,
+	}).Error()
+
+	require.Contains(t, err, "OpenAI PAT whoami failed")
+	require.NotContains(t, err, "at-message-token")
+	require.NotContains(t, err, "at-kv-token")
+	require.NotContains(t, err, "at-bearer-token")
+	require.NotContains(t, err, "at-json-token")
+	require.Contains(t, err, "personal_access_token=[redacted]")
+	require.Contains(t, err, "Authorization=[redacted]")
+}
+
 func TestApplyOpenAIPersonalAccessTokenMetadataPreservesOAuthCredentials(t *testing.T) {
 	credentials := map[string]any{
 		"personal_access_token": "at-old",

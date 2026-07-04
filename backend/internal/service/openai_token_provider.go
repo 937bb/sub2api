@@ -378,15 +378,15 @@ func isOpenAIPersonalAccessTokenHydrationOwner403(account *Account, err error) b
 func openAIPersonalAccessTokenHydrationErrorMessage(err error) string {
 	var whoamiErr *openAIPersonalAccessTokenWhoamiError
 	if errors.As(err, &whoamiErr) {
-		return sanitizeOpenAIUpstreamDiagnosticText(extractUpstreamErrorMessage([]byte(whoamiErr.body)))
+		return sanitizeOpenAIPersonalAccessTokenDiagnosticText(extractUpstreamErrorMessage([]byte(whoamiErr.body)))
 	}
-	return sanitizeOpenAIUpstreamDiagnosticText(err.Error())
+	return sanitizeOpenAIPersonalAccessTokenDiagnosticText(err.Error())
 }
 
 func openAIPersonalAccessTokenHydrationErrorBody(err error) []byte {
 	var whoamiErr *openAIPersonalAccessTokenWhoamiError
 	if errors.As(err, &whoamiErr) {
-		return []byte(whoamiErr.body)
+		return []byte(sanitizeOpenAIPersonalAccessTokenDiagnosticText(whoamiErr.body))
 	}
 	return nil
 }
