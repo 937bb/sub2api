@@ -672,3 +672,45 @@ func TestGatewayBalanceFinalizationUsesAuthoritativeNewBalanceForCacheSync(t *te
 	require.ErrorIs(t, err, ErrInsufficientBalance)
 	require.Equal(t, int64(1), userRepo.calls.Load())
 }
+
+func TestPostUsageBillingLegacyDeductionInvalidatesBalanceCache(t *testing.T) {
+	cache := &balanceTestCache{balance: 10}
+	svc := newBalanceTestService(t, cache, nil, &config.Config{})
+	userRepo := &openAIRecordUsageUserRepoStub{}
+
+	postUsageBilling(context.Background(), &postUsageBillingParams{
+		Cost:    &CostBreakdown{ActualCost: 0.75},
+		User:    &User{ID: 1},
+		APIKey:  &APIKey{ID: 2},
+		Account: &Account{ID: 3},
+	}, &billingDeps{
+		userRepo:            userRepo,
+		billingCacheService: svc,
+		cfg:                 &config.Config{},
+	})
+
+	require.Equal(t, 1, userRepo.deductCalls)
+	require.Equal(t, int64(1), cache.invalidateBalanceCalls.Load())
+	require.Zero(t, cache.deductBalanceCalls.Load())
+}
+
+func TestPostUsageBillingLegacyDeductionFailureDoesNotInvalidateBalanceCache(t *testing.T) {
+	cache := &balanceTestCache{balance: 10}
+	svc := newBalanceTestService(t, cache, nil, &config.Config{})
+	userRepo := &openAIRecordUsageUserRepoStub{deductErr: errors.New("deduct failed")}
+
+	postUsageBilling(context.Background(), &postUsageBillingParams{
+		Cost:    &CostBreakdown{ActualCost: 0.75},
+		User:    &User{ID: 1},
+		APIKey:  &APIKey{ID: 2},
+		Account: &Account{ID: 3},
+	}, &billingDeps{
+		userRepo:            userRepo,
+		billingCacheService: svc,
+		cfg:                 &config.Config{},
+	})
+
+	require.Equal(t, 1, userRepo.deductCalls)
+	require.Zero(t, cache.invalidateBalanceCalls.Load())
+	require.Zero(t, cache.deductBalanceCalls.Load())
+}
