@@ -7,8 +7,11 @@ import (
 	"testing"
 	"time"
 
+	baseent "entgo.io/ent"
+	entsql "entgo.io/ent/dialect/sql"
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/ent/accountgroup"
+	"github.com/Wei-Shaw/sub2api/ent/intercept"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/suite"
@@ -259,6 +262,47 @@ func (s *AccountRepoSuite) TestList() {
 	s.Require().NoError(err, "List")
 	s.Require().Len(accounts, 2)
 	s.Require().Equal(int64(2), page.Total)
+}
+
+func (s *AccountRepoSuite) TestListWithFilters_PaginationCountCloneDoesNotMutateListQuery() {
+	for _, account := range []service.Account{
+		{Name: "clone-page-1", Platform: service.PlatformOpenAI, Priority: 10},
+		{Name: "clone-page-2", Platform: service.PlatformOpenAI, Priority: 20},
+		{Name: "clone-page-3", Platform: service.PlatformOpenAI, Priority: 30},
+		{Name: "clone-page-4", Platform: service.PlatformOpenAI, Priority: 40},
+		{Name: "clone-page-other", Platform: service.PlatformAnthropic, Priority: 100},
+	} {
+		account := account
+		mustCreateAccount(s.T(), s.client, &account)
+	}
+
+	s.client.Account.Intercept(intercept.TraverseFunc(func(ctx context.Context, q intercept.Query) error {
+		qc := baseent.QueryFromContext(ctx)
+		if qc != nil && qc.Op == baseent.OpQueryCount && q.Type() == dbent.TypeAccount {
+			q.WhereP(func(s *entsql.Selector) {
+				s.Select(s.C("id"))
+			})
+		}
+		return nil
+	}))
+
+	accounts, page, err := s.repo.ListWithFilters(s.ctx, pagination.PaginationParams{
+		Page:      2,
+		PageSize:  2,
+		SortBy:    "priority",
+		SortOrder: "asc",
+	}, service.AccountListFilters{
+		Platform: service.PlatformOpenAI,
+	})
+
+	s.Require().NoError(err, "ListWithFilters")
+	s.Require().Equal(int64(4), page.Total)
+	s.Require().Equal(2, page.Page)
+	s.Require().Equal(2, page.PageSize)
+	s.Require().Equal(2, page.Pages)
+	s.Require().Len(accounts, 2)
+	s.Require().Equal("clone-page-3", accounts[0].Name)
+	s.Require().Equal("clone-page-4", accounts[1].Name)
 }
 
 func (s *AccountRepoSuite) TestListWithFilters() {
