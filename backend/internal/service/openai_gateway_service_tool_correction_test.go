@@ -1,8 +1,12 @@
 package service
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 // TestOpenAIGatewayService_ToolCorrection 测试 OpenAIGatewayService 中的工具修正集成
@@ -75,6 +79,107 @@ func TestOpenAIGatewayService_ToolCorrection(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestNormalizeOpenAIResponsesFunctionCallArguments_DedupesOnlySupportedShapes(t *testing.T) {
+	doubled := `{\"cmd\":\"pwd\"}{\"cmd\":\"pwd\"}`
+
+	tests := []struct {
+		name string
+		body string
+		path string
+	}{
+		{
+			name: "function_call_arguments_done",
+			body: `{"type":"response.function_call_arguments.done","response":{"function_call_arguments":{"done":{"arguments":"` + doubled + `"}}}}`,
+			path: "response.function_call_arguments.done.arguments",
+		},
+		{
+			name: "function_call_item",
+			body: `{"type":"response.output_item.done","item":{"type":"function_call","arguments":"` + doubled + `"}}`,
+			path: "item.arguments",
+		},
+		{
+			name: "custom_tool_call_item",
+			body: `{"type":"response.output_item.done","item":{"type":"custom_tool_call","arguments":"` + doubled + `"}}`,
+			path: "item.arguments",
+		},
+		{
+			name: "response_output",
+			body: `{"response":{"output":[{"type":"function_call","arguments":"` + doubled + `"}]}}`,
+			path: "response.output.0.arguments",
+		},
+		{
+			name: "top_level_output",
+			body: `{"output":[{"type":"custom_tool_call","arguments":"` + doubled + `"}]}`,
+			path: "output.0.arguments",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			normalized, changed := normalizeOpenAIResponsesFunctionCallArguments([]byte(tt.body))
+			require.True(t, changed)
+			require.JSONEq(t, `{"cmd":"pwd"}`, gjson.GetBytes(normalized, tt.path).String())
+		})
+	}
+}
+
+func TestNormalizeOpenAIResponsesFunctionCallArguments_DoesNotRewriteUnsupportedJSON(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "single_arguments_json",
+			body: `{"item":{"type":"function_call","arguments":"{\"cmd\":\"pwd\"}"}}`,
+		},
+		{
+			name: "different_repeated_json",
+			body: `{"item":{"type":"function_call","arguments":"{\"cmd\":\"pwd\"}{\"cmd\":\"ls\"}"}}`,
+		},
+		{
+			name: "unsupported_item_type",
+			body: `{"item":{"type":"message","arguments":"{\"cmd\":\"pwd\"}{\"cmd\":\"pwd\"}"}}`,
+		},
+		{
+			name: "arbitrary_top_level_arguments",
+			body: `{"type":"response.completed","arguments":"{\"cmd\":\"pwd\"}{\"cmd\":\"pwd\"}"}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			normalized, changed := normalizeOpenAIResponsesFunctionCallArguments([]byte(tt.body))
+			require.False(t, changed)
+			require.JSONEq(t, tt.body, string(normalized))
+		})
+	}
+}
+
+func TestCorrectToolCallsInResponseBodyDeduplicatesResponsesArguments(t *testing.T) {
+	service := &OpenAIGatewayService{toolCorrector: NewCodexToolCorrector()}
+	input := []byte(`{"output":[{"type":"function_call","arguments":"{\"cmd\":\"pwd\"}{\"cmd\":\"pwd\"}"}]}`)
+
+	result := service.correctToolCallsInResponseBody(input)
+
+	require.JSONEq(t, `{"cmd":"pwd"}`, gjson.GetBytes(result, "output.0.arguments").String())
+}
+
+func TestDedupeRepeatedJSONArgumentString(t *testing.T) {
+	deduped, changed := dedupeRepeatedJSONArgumentString(`{"cmd":"pwd"}{"cmd":"pwd"}`)
+	require.True(t, changed)
+	require.JSONEq(t, `{"cmd":"pwd"}`, deduped)
+
+	deduped, changed = dedupeRepeatedJSONArgumentString(`[{"cmd":"pwd"}][{"cmd":"pwd"}]`)
+	require.True(t, changed)
+	var parsed []map[string]string
+	require.NoError(t, json.Unmarshal([]byte(deduped), &parsed))
+	require.Equal(t, []map[string]string{{"cmd": "pwd"}}, parsed)
+
+	unchanged, changed := dedupeRepeatedJSONArgumentString(`"abc""abc"`)
+	require.False(t, changed)
+	require.Equal(t, `"abc""abc"`, unchanged)
 }
 
 // TestOpenAIGatewayService_ToolCorrectorInitialization 测试工具修正器是否正确初始化

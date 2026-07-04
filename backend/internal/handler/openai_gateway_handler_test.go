@@ -14,6 +14,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	pkghttputil "github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -1308,6 +1309,244 @@ func TestOpenAIMessages_PreOutputPolicyFailureRecordsUsage(t *testing.T) {
 		require.True(t, log.Stream)
 	case <-time.After(time.Second):
 		t.Fatal("expected usage log for pre-output policy failure")
+	}
+}
+
+func TestOpenAIResponses_PostOutputResponseFailedRecordsUsage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	groupID := int64(4243)
+	account := service.Account{
+		ID:          9905,
+		Name:        "openai-responses-failed-usage",
+		Platform:    service.PlatformOpenAI,
+		Type:        service.AccountTypeAPIKey,
+		Status:      service.StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key":  "sk-test",
+			"base_url": "http://upstream.example",
+		},
+		Extra: map[string]any{
+			openai_compat.ExtraKeyResponsesMode:      string(openai_compat.ResponsesSupportModeAuto),
+			openai_compat.ExtraKeyResponsesSupported: true,
+		},
+	}
+	accountRepo := &openAIWSUsageHandlerAccountRepoStub{account: account}
+	usageRepo := &openAIWSUsageHandlerUsageLogRepoStub{created: make(chan *service.UsageLog, 1)}
+	cfg := &config.Config{RunMode: config.RunModeSimple}
+	cfg.Default.RateMultiplier = 1
+	cfg.Security.URLAllowlist.Enabled = false
+	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
+	cfg.Gateway.MaxLineSize = 1024 * 1024
+	cfg.Gateway.StreamKeepaliveInterval = 3600
+	billingCacheSvc := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
+	t.Cleanup(billingCacheSvc.Stop)
+	concurrencySvc := service.NewConcurrencyService(&concurrencyCacheMock{
+		acquireUserSlotFn: func(ctx context.Context, userID int64, maxConcurrency int, requestID string) (bool, error) {
+			return true, nil
+		},
+		acquireAccountSlotFn: func(ctx context.Context, accountID int64, maxConcurrency int, requestID string) (bool, error) {
+			return true, nil
+		},
+	})
+	upstreamBody := strings.Join([]string{
+		"event: response.created",
+		`data: {"type":"response.created","response":{"id":"resp_failed_usage"}}`,
+		"",
+		"event: response.output_text.delta",
+		`data: {"type":"response.output_text.delta","delta":"partial"}`,
+		"",
+		"event: response.failed",
+		`data: {"type":"response.failed","response":{"id":"resp_failed_usage","status":"failed","instructions":"sensitive instructions","output":[{"type":"message","content":[{"type":"output_text","text":"large"}]}],"usage":{"input_tokens":7,"output_tokens":0,"total_tokens":7,"input_tokens_details":{"cached_tokens":3}},"tools":[{"type":"function","name":"secret_tool"}],"metadata":{"tenant":"secret"},"error":{"code":"content_policy_violation","message":"request violates safety policy"}}}`,
+		"",
+		": queued after failed",
+		": queued after failed",
+		": queued after failed",
+		": queued after failed",
+		": queued after failed",
+		": queued after failed",
+		": queued after failed",
+		": queued after failed",
+		": queued after failed",
+		": queued after failed",
+		": queued after failed",
+		": queued after failed",
+		": queued after failed",
+		": queued after failed",
+		": queued after failed",
+		": queued after failed",
+	}, "\n")
+	gatewaySvc := service.NewOpenAIGatewayService(
+		accountRepo,
+		usageRepo,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		cfg,
+		nil,
+		concurrencySvc,
+		service.NewBillingService(cfg, nil),
+		nil,
+		billingCacheSvc,
+		openAIMessagesUsageHTTPUpstream{body: upstreamBody},
+		&service.DeferredService{},
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+	)
+	h := NewOpenAIGatewayHandler(gatewaySvc, concurrencySvc, billingCacheSvc, &service.APIKeyService{}, nil, nil, nil, cfg)
+
+	body := []byte(`{"model":"gpt-5.4","input":"hello","stream":true}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(string(body)))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set(string(middleware.ContextKeyAPIKey), &service.APIKey{
+		ID:      1804,
+		GroupID: &groupID,
+		User:    &service.User{ID: 1704, Status: service.StatusActive},
+		Group: &service.Group{
+			ID:       groupID,
+			Platform: service.PlatformOpenAI,
+			Status:   service.StatusActive,
+		},
+	})
+	c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 1704, Concurrency: 1})
+
+	h.Responses(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), "event: response.failed")
+	require.Contains(t, rec.Body.String(), "\n\n: queued after failed")
+	require.Contains(t, rec.Body.String(), "request violates safety policy")
+	require.NotContains(t, rec.Body.String(), "sensitive instructions")
+	require.NotContains(t, rec.Body.String(), "secret_tool")
+	require.NotContains(t, rec.Body.String(), `"usage"`)
+	select {
+	case log := <-usageRepo.created:
+		require.Equal(t, int64(1704), log.UserID)
+		require.Equal(t, int64(9905), log.AccountID)
+		require.Equal(t, 4, log.InputTokens)
+		require.Equal(t, 0, log.OutputTokens)
+		require.Equal(t, 3, log.CacheReadTokens)
+		require.True(t, log.Stream)
+	case <-time.After(time.Second):
+		t.Fatal("expected usage log for post-output response.failed")
+	}
+	select {
+	case log := <-usageRepo.created:
+		t.Fatalf("unexpected duplicate usage log for post-output response.failed: %+v", log)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestOpenAIResponses_PreOutputResponseFailedDoesNotRecordUsage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	groupID := int64(4244)
+	account := service.Account{
+		ID:          9906,
+		Name:        "openai-responses-pre-output-failed-usage",
+		Platform:    service.PlatformOpenAI,
+		Type:        service.AccountTypeAPIKey,
+		Status:      service.StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key":  "sk-test",
+			"base_url": "http://upstream.example",
+		},
+		Extra: map[string]any{
+			openai_compat.ExtraKeyResponsesMode:      string(openai_compat.ResponsesSupportModeAuto),
+			openai_compat.ExtraKeyResponsesSupported: true,
+		},
+	}
+	accountRepo := &openAIWSUsageHandlerAccountRepoStub{account: account}
+	usageRepo := &openAIWSUsageHandlerUsageLogRepoStub{created: make(chan *service.UsageLog, 1)}
+	cfg := &config.Config{RunMode: config.RunModeSimple}
+	cfg.Default.RateMultiplier = 1
+	cfg.Security.URLAllowlist.Enabled = false
+	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
+	cfg.Gateway.MaxLineSize = 1024 * 1024
+	billingCacheSvc := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
+	t.Cleanup(billingCacheSvc.Stop)
+	concurrencySvc := service.NewConcurrencyService(&concurrencyCacheMock{
+		acquireUserSlotFn: func(ctx context.Context, userID int64, maxConcurrency int, requestID string) (bool, error) {
+			return true, nil
+		},
+		acquireAccountSlotFn: func(ctx context.Context, accountID int64, maxConcurrency int, requestID string) (bool, error) {
+			return true, nil
+		},
+	})
+	upstreamBody := strings.Join([]string{
+		`data: {"type":"response.created","response":{"id":"resp_failed_pre_usage"}}`,
+		"",
+		"event: response.output_text.delta",
+		"event: response.failed",
+		`data: {"type":"response.failed","response":{"id":"resp_failed_pre_usage","status":"failed","instructions":"sensitive instructions","output":[{"type":"message","content":[{"type":"output_text","text":"large"}]}],"usage":{"input_tokens":7,"output_tokens":0,"total_tokens":7,"input_tokens_details":{"cached_tokens":3}},"tools":[{"type":"function","name":"secret_tool"}],"metadata":{"tenant":"secret"},"error":{"type":"invalid_request_error","code":"content_policy_violation","message":"request violates safety policy"}}}`,
+		"",
+	}, "\n")
+	gatewaySvc := service.NewOpenAIGatewayService(
+		accountRepo,
+		usageRepo,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		cfg,
+		nil,
+		concurrencySvc,
+		service.NewBillingService(cfg, nil),
+		nil,
+		billingCacheSvc,
+		openAIMessagesUsageHTTPUpstream{body: upstreamBody},
+		&service.DeferredService{},
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+	)
+	h := NewOpenAIGatewayHandler(gatewaySvc, concurrencySvc, billingCacheSvc, &service.APIKeyService{}, nil, nil, nil, cfg)
+
+	body := []byte(`{"model":"gpt-5.4","input":"hello","stream":true}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(string(body)))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set(string(middleware.ContextKeyAPIKey), &service.APIKey{
+		ID:      1805,
+		GroupID: &groupID,
+		User:    &service.User{ID: 1705, Status: service.StatusActive},
+		Group: &service.Group{
+			ID:       groupID,
+			Platform: service.PlatformOpenAI,
+			Status:   service.StatusActive,
+		},
+	})
+	c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 1705, Concurrency: 1})
+
+	h.Responses(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), "event: response.failed")
+	require.Contains(t, rec.Body.String(), "request violates safety policy")
+	require.NotContains(t, rec.Body.String(), "sensitive instructions")
+	require.NotContains(t, rec.Body.String(), "secret_tool")
+	require.NotContains(t, rec.Body.String(), `"usage"`)
+	select {
+	case log := <-usageRepo.created:
+		t.Fatalf("unexpected usage log for pre-output response.failed: %+v", log)
+	case <-time.After(100 * time.Millisecond):
 	}
 }
 

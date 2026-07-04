@@ -397,6 +397,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		if err == nil && result != nil && result.FirstTokenMs != nil {
 			service.SetOpsLatencyMs(c, service.OpsTimeToFirstTokenMsKey, int64(*result.FirstTokenMs))
 		}
+		forwardFailedAfterOutput := false
 		if err != nil {
 			if result != nil && result.ImageCount > 0 {
 				reqLog.Warn("openai.forward_partial_error_with_image_result",
@@ -451,31 +452,40 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 					)
 					continue
 				}
-				h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, false, nil)
 				upstreamErrorAlreadyCommunicated := openAIForwardErrorAlreadyCommunicated(c, writerSizeBeforeForward, err)
-				wroteFallback := false
-				if !upstreamErrorAlreadyCommunicated {
-					wroteFallback = h.ensureForwardErrorResponse(c, streamStarted)
-				}
-				fields := []zap.Field{
-					zap.Int64("account_id", account.ID),
-					zap.Bool("fallback_error_response_written", wroteFallback),
-					zap.Bool("upstream_error_response_already_written", upstreamErrorAlreadyCommunicated),
-					zap.Error(err),
-				}
-				if shouldLogOpenAIForwardFailureAsWarn(c, wroteFallback) {
-					reqLog.Warn("openai.forward_failed", fields...)
+				if upstreamErrorAlreadyCommunicated && openAIForwardResultHasUsage(result) {
+					forwardFailedAfterOutput = true
+					reqLog.Warn("openai.forward_failed_after_output_with_usage",
+						zap.Int64("account_id", account.ID),
+						zap.Bool("upstream_error_response_already_written", true),
+						zap.Error(err),
+					)
+				} else {
+					h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, false, nil)
+					wroteFallback := false
+					if !upstreamErrorAlreadyCommunicated {
+						wroteFallback = h.ensureForwardErrorResponse(c, streamStarted)
+					}
+					fields := []zap.Field{
+						zap.Int64("account_id", account.ID),
+						zap.Bool("fallback_error_response_written", wroteFallback),
+						zap.Bool("upstream_error_response_already_written", upstreamErrorAlreadyCommunicated),
+						zap.Error(err),
+					}
+					if shouldLogOpenAIForwardFailureAsWarn(c, wroteFallback) {
+						reqLog.Warn("openai.forward_failed", fields...)
+						return
+					}
+					reqLog.Error("openai.forward_failed", fields...)
 					return
 				}
-				reqLog.Error("openai.forward_failed", fields...)
-				return
 			}
 		}
 		if result != nil {
 			if account.Type == service.AccountTypeOAuth {
 				h.gatewayService.UpdateCodexUsageSnapshotFromHeaders(c.Request.Context(), account.ID, result.ResponseHeaders)
 			}
-			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, true, result.FirstTokenMs, account)
+			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, !forwardFailedAfterOutput, result.FirstTokenMs, account)
 		} else {
 			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, true, nil, account)
 		}
