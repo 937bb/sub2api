@@ -4324,7 +4324,7 @@ func rewriteSystemForNonClaudeCode(body []byte, system any) []byte {
 	}
 
 	// 2. 构造 system 数组，对齐真实 Claude Code CLI 的 3-block 形态：
-	//    [0] billing attribution block（cc_version={cliVer}.{fp}; cc_entrypoint=cli; cch=00000;）
+	//    [0] billing attribution block（cc_version={cliVer}.{fp}; cc_entrypoint=cli;）
 	//    [1] "You are Claude Code..." 身份前缀 block（带 cache_control）
 	//    [2] 工具无关的通用提示词扩充 block（带 cache_control 作为稳定缓存断点）
 	//
@@ -4332,9 +4332,8 @@ func rewriteSystemForNonClaudeCode(body []byte, system any) []byte {
 	//    区别于真实 CLI。这里注入 claudeCodeSystemPromptExpansion（中性段落）把形态做到
 	//    接近真实，同时不注入会污染被代理用户行为的工具专属指令。
 	//
-	//    billing block 的 cch=00000 是占位符，会被 buildUpstreamRequest 里的
-	//    signBillingHeaderCCH 替换成 xxhash64 签名。缺失 billing block 的系统 payload
-	//    是 Anthropic 判定第三方的关键信号之一（真实 CLI 每个请求都带）。
+	//    缺失 billing block 的系统 payload 是 Anthropic 判定第三方的关键信号之一
+	//    （真实 CLI 每个请求都带）。
 	billingBlock, billingErr := buildBillingAttributionBlockJSON(body, claude.CLICurrentVersion)
 	// 身份块不带 cache_control；缓存断点统一落在最后一个静态块（扩充块）上，
 	// 使 billing+身份+扩充 整段静态前缀都被同一断点覆盖，且只消耗 1 个断点配额。
@@ -4864,7 +4863,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		if err != nil {
 			return nil, err
 		}
-		// 记录本次实际发送的 wire body；只有请求成功后才写回 ParsedRequest，避免 400 retry 基于已签名 CCH 再改写。
+		// 记录本次实际发送的 wire body；只有请求成功后才写回 ParsedRequest，避免 400 retry 基于失败请求的 wire body 再改写。
 		lastWireBody = wireBody
 
 		// 发送请求
@@ -5273,7 +5272,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	// 处理正常响应
 
 	if !bytes.Equal(lastWireBody, body) {
-		// 成功后再同步最终 wire body，避免失败重试从已签名 CCH 的 body 继续派生。
+		// 成功后再同步最终 wire body，避免失败重试从已改写的 wire body 继续派生。
 		if err := replaceBody(lastWireBody); err != nil {
 			return nil, err
 		}
@@ -6555,9 +6554,9 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 
 	// OAuth账号：应用统一指纹和metadata重写（受设置开关控制）
 	var fingerprint *Fingerprint
-	enableFP, enableMPT, enableCCH := true, false, false
+	enableFP, enableMPT := true, false
 	if s.settingService != nil {
-		enableFP, enableMPT, enableCCH = s.settingService.GetGatewayForwardingSettings(ctx)
+		enableFP, enableMPT, _ = s.settingService.GetGatewayForwardingSettings(ctx)
 	}
 	if account.IsOAuth() && s.identityService != nil {
 		// 1. 获取或创建指纹（包含随机生成的ClientID）
@@ -6589,17 +6588,15 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 		body = syncBillingHeaderVersion(body, fingerprint.UserAgent)
 	}
 
-	// === 计算最终 anthropic-beta header（先于 body sanitize 与 CCH 签名）===
+	// === 计算最终 anthropic-beta header（先于 body sanitize）===
 	//
 	// 顺序约束：
 	//   1) 算 finalBeta（纯函数，不依赖 req.Header；mimicry 路径会忽略客户端 beta，
 	//      与原“OAuth + mimicClaudeCode 跳过白名单透传”行为对齐）
 	//   2) 按 finalBeta 做能力维度 body sanitize（如 context-management beta 缺失 →
 	//      strip body.context_management，与 Bedrock 路径对称）
-	//   3) CCH 签名（必须使用 strip 后的 body，否则 hash 与最终 body 不一致 →
-	//      被 Anthropic 判 third-party）
-	//   4) NewRequest（body 至此最终敲定）
-	//   5) 透传白名单 / fingerprint / mimic header / 写入 finalBeta
+	//   3) NewRequest（body 至此最终敲定）
+	//   4) 透传白名单 / fingerprint / mimic header / 写入 finalBeta
 	policyFilterSet := s.getBetaPolicyFilterSet(ctx, c, account, modelID)
 	effectiveDropSet := mergeDropSets(policyFilterSet)
 	finalBetaHeader, finalBetaShouldSet := s.computeFinalAnthropicBeta(
@@ -6609,11 +6606,6 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 	// 能力维度 body sanitize：与最终 anthropic-beta header 对称
 	if sanitized, changed := sanitizeAnthropicBodyForBetaTokens(body, finalBetaHeader); changed {
 		body = sanitized
-	}
-
-	// CCH 签名：将 cch=00000 占位符替换为 xxHash64 签名（需在所有 body 修改之后）
-	if enableCCH {
-		body = signBillingHeaderCCH(body)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", targetURL, bytes.NewReader(body))
@@ -6958,9 +6950,8 @@ func mergeAnthropicBetaDropping(required []string, incoming string, drop map[str
 //
 // 设计动机：将原本在 buildUpstreamRequest 内联在一起、依赖 req.Header 的
 // anthropic-beta 计算逻辑抽成纯函数。这样调用方可以在 NewRequest 之前
-// 就提前拿到最终 beta header，进而能按它对 body 做能力维度 sanitize 后再做
-// CCH 签名——一举修复了以下之前由顺序依赖导致的能力维度 sanitize
-// 无法部署的问题（签名与最终 body 不一致可以被判 third-party）。
+// 就提前拿到最终 beta header，进而能按它对 body 做能力维度 sanitize 后再构造
+// 上游请求，避免 header/body 能力维度不一致。
 //
 // 返回 (value, shouldSet)：
 //   - shouldSet=false 意为“不主动设置 anthropic-beta header”，与原代码“
@@ -10120,9 +10111,9 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 
 	// OAuth 账号：应用统一指纹和重写 userID（受设置开关控制）
 	// 如果启用了会话ID伪装，会在重写后替换 session 部分为固定值
-	ctEnableFP, ctEnableMPT, ctEnableCCH := true, false, false
+	ctEnableFP, ctEnableMPT := true, false
 	if s.settingService != nil {
-		ctEnableFP, ctEnableMPT, ctEnableCCH = s.settingService.GetGatewayForwardingSettings(ctx)
+		ctEnableFP, ctEnableMPT, _ = s.settingService.GetGatewayForwardingSettings(ctx)
 	}
 	var ctFingerprint *Fingerprint
 	if account.IsOAuth() && s.identityService != nil {
@@ -10145,7 +10136,7 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 		body = syncBillingHeaderVersion(body, ctFingerprint.UserAgent)
 	}
 
-	// === 计算最终 anthropic-beta header（先于 body sanitize 与 CCH 签名）===
+	// === 计算最终 anthropic-beta header（先于 body sanitize）===
 	// 顺序约束同 buildUpstreamRequest。
 	ctEffectiveDropSet := mergeDropSets(s.getBetaPolicyFilterSet(ctx, c, account, modelID))
 	finalBetaHeader, finalBetaShouldSet := s.computeFinalCountTokensAnthropicBeta(
@@ -10157,9 +10148,6 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 		body = sanitized
 	}
 
-	if ctEnableCCH {
-		body = signBillingHeaderCCH(body)
-	}
 	body = sanitizeCountTokensRequestBody(body)
 
 	req, err := http.NewRequestWithContext(ctx, "POST", targetURL, bytes.NewReader(body))

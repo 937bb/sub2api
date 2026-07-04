@@ -401,10 +401,10 @@ func TestRewriteSystemForNonClaudeCode(t *testing.T) {
 			err := json.Unmarshal(result, &parsed)
 			require.NoError(t, err)
 
-			// system 应为 array 格式，对齐真实 Claude Code CLI 的 2-block 形态：
+			// system 应为 array 格式，对齐真实 Claude Code CLI 的 3-block 形态：
 			//   [0] billing attribution block (x-anthropic-billing-header: cc_version=...;)
 			//   [1] Claude Code 身份前缀 block (不带 cache_control)
-		//   [2] 工具无关的通用提示词扩充 block (带 cache_control，作为缓存断点)
+			//   [2] 工具无关的通用提示词扩充 block (带 cache_control，作为缓存断点)
 			systemArr, ok := parsed["system"].([]any)
 			require.True(t, ok, "system should be an array, got %T", parsed["system"])
 			require.Len(t, systemArr, 3, "system array should have exactly 3 blocks (billing + cc prompt + expansion)")
@@ -415,7 +415,7 @@ func TestRewriteSystemForNonClaudeCode(t *testing.T) {
 			require.Contains(t, billingBlock["text"], "x-anthropic-billing-header:")
 			require.Contains(t, billingBlock["text"], "cc_version=")
 			require.Contains(t, billingBlock["text"], "cc_entrypoint=cli")
-			require.Contains(t, billingBlock["text"], "cch=00000")
+			require.NotContains(t, billingBlock["text"], "cch=")
 
 			systemBlock, ok := systemArr[1].(map[string]any)
 			require.True(t, ok)

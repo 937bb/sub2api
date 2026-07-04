@@ -121,7 +121,7 @@ func TestClaudeCodeValidator_BillingBlockRecognizedWithoutIdentityPrompt(t *test
 		"system": []any{
 			map[string]any{
 				"type": "text",
-				"text": "x-anthropic-billing-header: cc_version=2.1.162.884; cc_entrypoint=cli; cch=d8726;",
+				"text": "x-anthropic-billing-header: cc_version=2.1.162.884; cc_entrypoint=cli;",
 			},
 			map[string]any{
 				"type": "text",
@@ -187,7 +187,7 @@ func TestClaudeCodeValidator_BillingBlockWithoutEntrypointFallsThrough(t *testin
 		"system": []any{
 			map[string]any{
 				"type": "text",
-				"text": "x-anthropic-billing-header: cc_version=2.1.162.884; cch=d8726;",
+				"text": "x-anthropic-billing-header: cc_version=2.1.162.884;",
 			},
 			map[string]any{
 				"type": "text",
@@ -215,11 +215,41 @@ func TestClaudeCodeValidator_BillingBlockStillRequiresClaudeCodeUA(t *testing.T)
 		"system": []any{
 			map[string]any{
 				"type": "text",
-				"text": "x-anthropic-billing-header: cc_version=2.1.162.884; cc_entrypoint=cli; cch=d8726;",
+				"text": "x-anthropic-billing-header: cc_version=2.1.162.884; cc_entrypoint=cli;",
 			},
 		},
 	})
 	require.False(t, ok)
+}
+
+func TestClaudeCodeValidator_BillingBlockWithoutCCHStillRequiresHeadersAndMetadata(t *testing.T) {
+	validator := NewClaudeCodeValidator()
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/messages", nil)
+	req.Header.Set("User-Agent", "claude-cli/2.1.162 (external, cli)")
+	req.Header.Set("X-App", "cli")
+	req.Header.Set("anthropic-beta", "claude-code-20250219")
+
+	body := map[string]any{
+		"model": "claude-3-5-haiku-20241022",
+		"system": []any{
+			map[string]any{
+				"type": "text",
+				"text": "x-anthropic-billing-header: cc_version=2.1.162.884; cc_entrypoint=cli;",
+			},
+		},
+		"metadata": map[string]any{
+			"user_id": claudeCodeMetadataUserIDJSON,
+		},
+	}
+
+	require.False(t, validator.Validate(req, body), "billing block cannot bypass anthropic-version")
+
+	req.Header.Set("anthropic-version", "2023-06-01")
+	bodyWithoutMetadata := map[string]any{
+		"model":  body["model"],
+		"system": body["system"],
+	}
+	require.False(t, validator.Validate(req, bodyWithoutMetadata), "billing block cannot bypass metadata")
 }
 
 func TestClaudeCodeValidator_MessagesPathRejectsNonClaudeCodeUA(t *testing.T) {

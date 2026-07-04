@@ -189,7 +189,7 @@ type SystemSettings struct {
 	// Gateway forwarding behavior
 	EnableFingerprintUnification       bool                 `json:"enable_fingerprint_unification"`
 	EnableMetadataPassthrough          bool                 `json:"enable_metadata_passthrough"`
-	EnableCCHSigning                   bool                 `json:"enable_cch_signing"`
+	EnableCCHSigning                   bool                 `json:"enable_cch_signing"` // Deprecated no-op; kept for API compatibility.
 	EnableAnthropicCacheTTL1hInjection bool                 `json:"enable_anthropic_cache_ttl_1h_injection"`
 	RewriteMessageCacheControl         bool                 `json:"rewrite_message_cache_control"`
 	AntigravityUserAgentVersion        string               `json:"antigravity_user_agent_version"`

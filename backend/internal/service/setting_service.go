@@ -2342,6 +2342,8 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 // GetGatewayForwardingSettings returns cached gateway forwarding settings.
 // Uses in-process atomic.Value cache with 60s TTL, zero-lock hot path.
 // Returns (fingerprintUnification, metadataPassthrough, cchSigning).
+// cchSigning is deprecated and kept only for API/storage compatibility; gateway
+// request builders no longer generate or sign cch billing attribution fields.
 func (s *SettingService) GetGatewayForwardingSettings(ctx context.Context) (fingerprintUnification, metadataPassthrough, cchSigning bool) {
 	result := s.getGatewayForwardingSettingsCached(ctx)
 	return result.fp, result.mp, result.cch
@@ -3349,7 +3351,7 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	// 分组隔离
 	result.AllowUngroupedKeyScheduling = settings[SettingKeyAllowUngroupedKeyScheduling] == "true"
 
-	// Gateway forwarding behavior (defaults: fingerprint=true, metadata_passthrough=false, cch_signing=false)
+	// Gateway forwarding behavior (defaults: fingerprint=true, metadata_passthrough=false, cch_signing=false/no-op)
 	if v, ok := settings[SettingKeyEnableFingerprintUnification]; ok && v != "" {
 		result.EnableFingerprintUnification = v == "true"
 	} else {
