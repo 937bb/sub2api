@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	openaipkg "github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -164,6 +165,48 @@ func TestOpenAIGatewayService_ForwardOAuthHTTPAllowlistPreservesRawNumbersAfterC
 	require.Equal(t, "9007199254740993", gjson.GetBytes(upstream.lastBody, "tools.0.parameters.properties.id.const").Raw)
 	require.Equal(t, "9007199254740995", gjson.GetBytes(upstream.lastBody, "client_metadata.trace_id").Raw)
 	require.False(t, gjson.GetBytes(upstream.lastBody, "unknown_field").Exists())
+}
+
+func TestOpenAIGatewayService_OAuthHTTPResponsesInstructions(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	tests := []struct {
+		name             string
+		body             []byte
+		wantInstructions string
+	}{
+		{
+			name:             "empty native responses uses model aware synthetic default",
+			body:             []byte(`{"model":"gpt-5.5","stream":false,"store":true,"input":[{"type":"text","text":"hi"}]}`),
+			wantInstructions: openaipkg.CodexSyntheticDefaultInstructionsForModel("gpt-5.5"),
+		},
+		{
+			name:             "explicit native responses instructions preserved",
+			body:             []byte(`{"model":"gpt-5.5","stream":false,"store":true,"instructions":"  keep these exact instructions  ","input":[{"type":"text","text":"hi"}]}`),
+			wantInstructions: "  keep these exact instructions  ",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(tt.body))
+			c.Request.Header.Set("Content-Type", "application/json")
+			c.Request.Header.Set("User-Agent", "codex_cli_rs/0.98.0")
+
+			upstream := &httpUpstreamRecorder{resp: &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}, "x-request-id": []string{"rid-instructions"}},
+				Body:       io.NopCloser(strings.NewReader(`{"id":"resp_instructions","status":"completed","model":"gpt-5.5","output":[],"usage":{"input_tokens":1,"output_tokens":1}}`)),
+			}}
+			svc := &OpenAIGatewayService{httpUpstream: upstream}
+
+			_, err := svc.Forward(context.Background(), c, httptestOpenAIOAuthBodyPolicyAccount(), tt.body)
+			require.NoError(t, err)
+			require.Equal(t, tt.wantInstructions, gjson.GetBytes(upstream.lastBody, "instructions").String())
+		})
+	}
 }
 
 func TestOpenAIGatewayService_ForwardOAuthHTTPRejectsMalformedJSONBeforeUpstream(t *testing.T) {

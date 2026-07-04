@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	openaipkg "github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 )
 
 var codexModelMap = map[string]string{
@@ -174,7 +176,7 @@ func applyCodexOAuthTransformWithOptions(reqBody map[string]any, opts codexOAuth
 	}
 
 	// instructions 处理逻辑：根据是否是 Codex CLI 分别调用不同方法
-	if !opts.SkipDefaultInstructions && applyInstructions(reqBody, opts.IsCodexCLI) {
+	if !opts.SkipDefaultInstructions && applyInstructions(reqBody, opts.IsCodexCLI, normalizedModel) {
 		result.Modified = true
 	}
 	if isCodexSparkModel(normalizedModel) && applyCodexSparkImageUnsupportedInstructions(reqBody) {
@@ -966,11 +968,11 @@ func extractPromptLikeInstructionsFromInput(reqBody map[string]any) string {
 }
 
 // applyInstructions 处理 instructions 字段：仅在 instructions 为空时填充默认值。
-func applyInstructions(reqBody map[string]any, isCodexCLI bool) bool {
+func applyInstructions(reqBody map[string]any, isCodexCLI bool, model string) bool {
 	if !isInstructionsEmpty(reqBody) {
 		return false
 	}
-	reqBody["instructions"] = "You are a helpful coding assistant."
+	reqBody["instructions"] = openaipkg.CodexSyntheticDefaultInstructionsForModel(model)
 	return true
 }
 

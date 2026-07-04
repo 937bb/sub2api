@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	openaipkg "github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/stretchr/testify/require"
 )
 
@@ -971,7 +972,7 @@ func TestApplyCodexOAuthTransform_CodexCLI_PreservesExistingInstructions(t *test
 	// Codex CLI 场景：已有 instructions 时不修改
 
 	reqBody := map[string]any{
-		"model":        "gpt-5.1",
+		"model":        "gpt-5.5",
 		"instructions": "existing instructions",
 	}
 
@@ -988,7 +989,7 @@ func TestApplyCodexOAuthTransform_CodexCLI_SuppliesDefaultWhenEmpty(t *testing.T
 	// Codex CLI 场景：无 instructions 时补充默认值
 
 	reqBody := map[string]any{
-		"model": "gpt-5.1",
+		"model": "gpt-5.5",
 		// 没有 instructions 字段
 	}
 
@@ -996,15 +997,43 @@ func TestApplyCodexOAuthTransform_CodexCLI_SuppliesDefaultWhenEmpty(t *testing.T
 
 	instructions, ok := reqBody["instructions"].(string)
 	require.True(t, ok)
-	require.NotEmpty(t, instructions)
+	require.Equal(t, openaipkg.CodexSyntheticDefaultInstructionsForModel("gpt-5.5"), instructions)
 	require.True(t, result.Modified)
+}
+
+func TestApplyCodexOAuthTransform_SuppliesLatestDefaultForFallbackModelWhenEmpty(t *testing.T) {
+	reqBody := map[string]any{
+		"model": "gpt-5.4",
+	}
+
+	result := applyCodexOAuthTransform(reqBody, true, false)
+
+	instructions, ok := reqBody["instructions"].(string)
+	require.True(t, ok)
+	require.Equal(t, openaipkg.CodexSyntheticDefaultInstructionsForModel("gpt-5.4"), instructions)
+	require.True(t, result.Modified)
+}
+
+func TestApplyCodexOAuthTransform_SkipDefaultInstructionsDoesNotInject(t *testing.T) {
+	reqBody := map[string]any{
+		"model": "gpt-5.5",
+		"input": "hello",
+	}
+
+	result := applyCodexOAuthTransformWithOptions(reqBody, codexOAuthTransformOptions{
+		IsCodexCLI:              true,
+		SkipDefaultInstructions: true,
+	})
+
+	require.True(t, result.Modified)
+	require.NotContains(t, reqBody, "instructions")
 }
 
 func TestApplyCodexOAuthTransform_NonCodexCLI_PreservesExistingInstructions(t *testing.T) {
 	// 非 Codex CLI 场景：已有 instructions 时保留客户端的值，不再覆盖
 
 	reqBody := map[string]any{
-		"model":        "gpt-5.1",
+		"model":        "gpt-5.5",
 		"instructions": "old instructions",
 	}
 
