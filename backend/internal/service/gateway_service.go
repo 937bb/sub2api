@@ -8929,7 +8929,9 @@ func finalizePostUsageBilling(ctx context.Context, p *postUsageBillingParams, de
 			deps.billingCacheService.QueueUpdateSubscriptionUsage(p.User.ID, *p.APIKey.GroupID, p.Cost.ActualCost)
 		}
 	} else if p.Cost.ActualCost > 0 && p.User != nil {
-		deps.billingCacheService.QueueDeductBalance(p.User.ID, p.Cost.ActualCost)
+		if err := deps.billingCacheService.SyncBalanceCacheAfterDeduction(ctx, p.User.ID, p.Cost.ActualCost, resultNewBalance(result)); err != nil {
+			logger.LegacyPrintf("service.gateway", "Warning: sync balance cache after deduction failed user=%d cost=%f: %v", p.User.ID, p.Cost.ActualCost, err)
+		}
 	}
 
 	if p.Cost.ActualCost > 0 && p.APIKey != nil && p.APIKey.HasRateLimits() {
@@ -8976,6 +8978,13 @@ func finalizePostUsageBilling(ctx context.Context, p *postUsageBillingParams, de
 	// no dependency on the request context or upstream connection.
 	go notifyBalanceLow(p, deps, result)
 	go notifyAccountQuota(p, deps, result)
+}
+
+func resultNewBalance(result *UsageBillingApplyResult) *float64 {
+	if result == nil {
+		return nil
+	}
+	return result.NewBalance
 }
 
 // notifyBalanceLow sends balance low notification after deduction.

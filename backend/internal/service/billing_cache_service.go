@@ -436,8 +436,19 @@ func (s *BillingCacheService) clearBalanceCacheStaleLocked(state *balanceCacheSt
 	}
 }
 
+func (s *BillingCacheService) minimumBalanceReserve() float64 {
+	if s == nil || s.cfg == nil || s.cfg.Billing.MinimumBalanceReserve <= 0 {
+		return 0
+	}
+	return s.cfg.Billing.MinimumBalanceReserve
+}
+
 func (s *BillingCacheService) balanceBelowEligibilityThreshold(balance float64) bool {
-	return balance <= 0
+	minimumReserve := s.minimumBalanceReserve()
+	if minimumReserve <= 0 {
+		return balance <= 0
+	}
+	return balance <= minimumReserve
 }
 
 // getUserBalanceFromDB 从数据库获取用户余额

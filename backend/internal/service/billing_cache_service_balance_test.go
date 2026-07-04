@@ -226,6 +226,23 @@ func TestBalancePreflightDefaultRejectsZeroAndNegativeAllowsPositive(t *testing.
 	require.NoError(t, err)
 }
 
+func TestBalancePreflightConfiguredReserveRejectsAtOrBelowThreshold(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Billing.MinimumBalanceReserve = 0.25
+
+	below := newBalanceTestService(t, &balanceTestCache{balance: 0.24}, nil, cfg)
+	err := below.CheckBillingEligibility(context.Background(), &User{ID: 1}, nil, nil, nil, "")
+	require.ErrorIs(t, err, ErrInsufficientBalance)
+
+	atReserve := newBalanceTestService(t, &balanceTestCache{balance: 0.25}, nil, cfg)
+	err = atReserve.CheckBillingEligibility(context.Background(), &User{ID: 1}, nil, nil, nil, "")
+	require.ErrorIs(t, err, ErrInsufficientBalance)
+
+	above := newBalanceTestService(t, &balanceTestCache{balance: 0.250001}, nil, cfg)
+	err = above.CheckBillingEligibility(context.Background(), &User{ID: 1}, nil, nil, nil, "")
+	require.NoError(t, err)
+}
+
 func TestBalancePreflightBypassesSimpleMode(t *testing.T) {
 	cfg := &config.Config{RunMode: config.RunModeSimple}
 	cache := &balanceTestCache{balance: -1}
@@ -625,4 +642,33 @@ func TestBillingCacheAsyncDeductionBelowZeroIsIneligible(t *testing.T) {
 	}, time.Second, 10*time.Millisecond)
 	err := svc.CheckBillingEligibility(context.Background(), &User{ID: 1}, nil, nil, nil, "")
 	require.ErrorIs(t, err, ErrInsufficientBalance)
+}
+
+func TestGatewayBalanceFinalizationUsesAuthoritativeNewBalanceForCacheSync(t *testing.T) {
+	cache := &balanceTestCache{balance: 10}
+	userRepo := &balanceLoadUserRepoStub{balance: -0.25}
+	svc := newBalanceTestService(t, cache, userRepo, &config.Config{})
+	accountRepo := &mockAccountRepoForPlatform{}
+
+	newBalance := -0.25
+	finalizePostUsageBilling(context.Background(), &postUsageBillingParams{
+		Cost:    &CostBreakdown{ActualCost: 0.75},
+		User:    &User{ID: 1},
+		APIKey:  &APIKey{ID: 2},
+		Account: &Account{ID: 3},
+	}, &billingDeps{
+		billingCacheService: svc,
+		deferredService:     NewDeferredService(accountRepo, nil, time.Hour),
+		cfg:                 &config.Config{},
+	}, &UsageBillingApplyResult{
+		Applied:    true,
+		NewBalance: &newBalance,
+	})
+
+	require.Equal(t, int64(1), cache.invalidateBalanceCalls.Load())
+	require.Zero(t, cache.deductBalanceCalls.Load())
+
+	err := svc.CheckBillingEligibility(context.Background(), &User{ID: 1}, nil, nil, nil, "")
+	require.ErrorIs(t, err, ErrInsufficientBalance)
+	require.Equal(t, int64(1), userRepo.calls.Load())
 }
