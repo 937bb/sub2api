@@ -3308,6 +3308,10 @@ export default {
         api_key: 'API Key',
         cookie: 'Cookie'
       },
+      antigravityProjectIdLabel: 'GCP Project ID（可选）',
+      antigravityProjectIdPlaceholder: 'your-gcp-project-id',
+      antigravityProjectIdHint:
+        '用于未自动返回 project_id 的 Antigravity standard-tier OAuth 账号。',
       status: {
         active: '正常',
         inactive: '停用',

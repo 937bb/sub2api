@@ -3116,6 +3116,10 @@ export default {
         upstream: 'Upstream',
         upstreamDesc: 'Connect via Base URL + API Key'
       },
+      antigravityProjectIdLabel: 'GCP Project ID (optional)',
+      antigravityProjectIdPlaceholder: 'your-gcp-project-id',
+      antigravityProjectIdHint:
+        'Use this for Antigravity standard-tier OAuth accounts that did not receive an automatic project_id.',
       status: {
         active: 'Active',
         inactive: 'Inactive',
