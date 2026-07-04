@@ -1,6 +1,7 @@
 package service
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -9,6 +10,16 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
+
+type panicReadCloser struct{}
+
+func (panicReadCloser) Read(_ []byte) (int, error) {
+	panic("request body must not be read")
+}
+
+func (panicReadCloser) Close() error {
+	return nil
+}
 
 func newCodexDetectorTestContext(ua string, originator string) *gin.Context {
 	rec := httptest.NewRecorder()
@@ -21,6 +32,17 @@ func newCodexDetectorTestContext(ua string, originator string) *gin.Context {
 		c.Request.Header.Set("originator", originator)
 	}
 	return c
+}
+
+func newCodexCLIOnlyDetectorTestAccount(extra map[string]any) *Account {
+	if extra == nil {
+		extra = map[string]any{"codex_cli_only": true}
+	}
+	return &Account{
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Extra:    extra,
+	}
 }
 
 func TestOpenAICodexClientRestrictionDetector_Detect(t *testing.T) {
@@ -38,11 +60,7 @@ func TestOpenAICodexClientRestrictionDetector_Detect(t *testing.T) {
 
 	t.Run("开启后 codex_cli_rs 命中", func(t *testing.T) {
 		detector := NewOpenAICodexClientRestrictionDetector(nil)
-		account := &Account{
-			Platform: PlatformOpenAI,
-			Type:     AccountTypeOAuth,
-			Extra:    map[string]any{"codex_cli_only": true},
-		}
+		account := newCodexCLIOnlyDetectorTestAccount(nil)
 
 		result := detector.Detect(newCodexDetectorTestContext("codex_cli_rs/0.99.0", ""), account, nil)
 		require.True(t, result.Enabled)
@@ -52,11 +70,7 @@ func TestOpenAICodexClientRestrictionDetector_Detect(t *testing.T) {
 
 	t.Run("开启后 codex_vscode 命中", func(t *testing.T) {
 		detector := NewOpenAICodexClientRestrictionDetector(nil)
-		account := &Account{
-			Platform: PlatformOpenAI,
-			Type:     AccountTypeOAuth,
-			Extra:    map[string]any{"codex_cli_only": true},
-		}
+		account := newCodexCLIOnlyDetectorTestAccount(nil)
 
 		result := detector.Detect(newCodexDetectorTestContext("codex_vscode/1.0.0", ""), account, nil)
 		require.True(t, result.Enabled)
@@ -66,11 +80,7 @@ func TestOpenAICodexClientRestrictionDetector_Detect(t *testing.T) {
 
 	t.Run("开启后 codex_app 命中", func(t *testing.T) {
 		detector := NewOpenAICodexClientRestrictionDetector(nil)
-		account := &Account{
-			Platform: PlatformOpenAI,
-			Type:     AccountTypeOAuth,
-			Extra:    map[string]any{"codex_cli_only": true},
-		}
+		account := newCodexCLIOnlyDetectorTestAccount(nil)
 
 		result := detector.Detect(newCodexDetectorTestContext("codex_app/2.1.0", ""), account, nil)
 		require.True(t, result.Enabled)
@@ -78,13 +88,29 @@ func TestOpenAICodexClientRestrictionDetector_Detect(t *testing.T) {
 		require.Equal(t, CodexClientRestrictionReasonMatchedUA, result.Reason)
 	})
 
+	t.Run("开启后官方 UA 严格前缀命中", func(t *testing.T) {
+		detector := NewOpenAICodexClientRestrictionDetector(nil)
+		account := newCodexCLIOnlyDetectorTestAccount(nil)
+		tests := []string{
+			"codex_cli_rs/0.99.0",
+			"codex-tui/0.136.0",
+			"codex_vscode/1.0.0",
+			"Codex Desktop/1.2.3",
+		}
+
+		for _, ua := range tests {
+			t.Run(ua, func(t *testing.T) {
+				result := detector.Detect(newCodexDetectorTestContext(ua, ""), account, nil)
+				require.True(t, result.Enabled)
+				require.True(t, result.Matched)
+				require.Equal(t, CodexClientRestrictionReasonMatchedUA, result.Reason)
+			})
+		}
+	})
+
 	t.Run("开启后 originator 命中", func(t *testing.T) {
 		detector := NewOpenAICodexClientRestrictionDetector(nil)
-		account := &Account{
-			Platform: PlatformOpenAI,
-			Type:     AccountTypeOAuth,
-			Extra:    map[string]any{"codex_cli_only": true},
-		}
+		account := newCodexCLIOnlyDetectorTestAccount(nil)
 
 		result := detector.Detect(newCodexDetectorTestContext("curl/8.0", "codex_chatgpt_desktop"), account, nil)
 		require.True(t, result.Enabled)
@@ -94,11 +120,7 @@ func TestOpenAICodexClientRestrictionDetector_Detect(t *testing.T) {
 
 	t.Run("开启后非官方客户端拒绝", func(t *testing.T) {
 		detector := NewOpenAICodexClientRestrictionDetector(nil)
-		account := &Account{
-			Platform: PlatformOpenAI,
-			Type:     AccountTypeOAuth,
-			Extra:    map[string]any{"codex_cli_only": true},
-		}
+		account := newCodexCLIOnlyDetectorTestAccount(nil)
 
 		result := detector.Detect(newCodexDetectorTestContext("curl/8.0", "my_client"), account, nil)
 		require.True(t, result.Enabled)
@@ -106,21 +128,58 @@ func TestOpenAICodexClientRestrictionDetector_Detect(t *testing.T) {
 		require.Equal(t, CodexClientRestrictionReasonNotMatchedUA, result.Reason)
 	})
 
+	t.Run("开启后复合 UA 嵌入 codex_app 拒绝", func(t *testing.T) {
+		detector := NewOpenAICodexClientRestrictionDetector(nil)
+		account := newCodexCLIOnlyDetectorTestAccount(nil)
+
+		result := detector.Detect(newCodexDetectorTestContext("Mozilla/5.0 codex_app/0.141.0", ""), account, nil)
+		require.True(t, result.Enabled)
+		require.False(t, result.Matched)
+		require.Equal(t, CodexClientRestrictionReasonNotMatchedUA, result.Reason)
+	})
+
+	t.Run("开启后伪造 originator 拒绝", func(t *testing.T) {
+		detector := NewOpenAICodexClientRestrictionDetector(nil)
+		account := newCodexCLIOnlyDetectorTestAccount(nil)
+		tests := []string{"evil-codex_cli", "my_codex_thing", "codex_unknown", "Codex"}
+
+		for _, originator := range tests {
+			t.Run(originator, func(t *testing.T) {
+				result := detector.Detect(newCodexDetectorTestContext("curl/8.0", originator), account, nil)
+				require.True(t, result.Enabled)
+				require.False(t, result.Matched)
+				require.Equal(t, CodexClientRestrictionReasonNotMatchedUA, result.Reason)
+			})
+		}
+	})
+
 	t.Run("开启 ForceCodexCLI 时允许通过", func(t *testing.T) {
 		detector := NewOpenAICodexClientRestrictionDetector(&config.Config{
 			Gateway: config.GatewayConfig{ForceCodexCLI: true},
 		})
-		account := &Account{
-			Platform: PlatformOpenAI,
-			Type:     AccountTypeOAuth,
-			Extra:    map[string]any{"codex_cli_only": true},
-		}
+		account := newCodexCLIOnlyDetectorTestAccount(nil)
 
 		result := detector.Detect(newCodexDetectorTestContext("curl/8.0", "my_client"), account, nil)
 		require.True(t, result.Enabled)
 		require.True(t, result.Matched)
 		require.Equal(t, CodexClientRestrictionReasonForceCodexCLI, result.Reason)
 	})
+}
+
+func TestOpenAICodexClientRestrictionDetector_Detect_DoesNotReadRequestBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	detector := NewOpenAICodexClientRestrictionDetector(nil)
+	c := newCodexDetectorTestContext("curl/8.0", "my_client")
+	c.Request.Body = panicReadCloser{}
+	c.Request.GetBody = func() (io.ReadCloser, error) {
+		panic("request body must not be opened")
+	}
+
+	result := detector.Detect(c, newCodexCLIOnlyDetectorTestAccount(map[string]any{}), nil)
+	require.False(t, result.Enabled)
+	require.False(t, result.Matched)
+	require.Equal(t, CodexClientRestrictionReasonDisabled, result.Reason)
 }
 
 func TestOpenAICodexClientRestrictionDetector_Detect_AllowedClients(t *testing.T) {

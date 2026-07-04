@@ -67,14 +67,14 @@ func (d *OpenAICodexClientRestrictionDetector) Detect(c *gin.Context, account *A
 		userAgent = c.GetHeader("User-Agent")
 		originator = c.GetHeader("originator")
 	}
-	if openai.IsCodexOfficialClientRequest(userAgent) {
+	if openai.IsCodexOfficialClientRequestStrict(userAgent) {
 		return CodexClientRestrictionDetectionResult{
 			Enabled: true,
 			Matched: true,
 			Reason:  CodexClientRestrictionReasonMatchedUA,
 		}
 	}
-	if openai.IsCodexOfficialClientOriginator(originator) {
+	if openai.IsCodexOfficialClientOriginatorStrict(originator) {
 		return CodexClientRestrictionDetectionResult{
 			Enabled: true,
 			Matched: true,
