@@ -265,6 +265,7 @@ func (s *TokenRefreshService) refreshWithRetry(ctx context.Context, account *Acc
 	var lastErr error
 
 	for attempt := 1; attempt <= s.cfg.MaxRetries; attempt++ {
+		previousAccount := cloneAccountForTokenInvalidation(account)
 		var newCredentials map[string]any
 		var err error
 
@@ -295,7 +296,7 @@ func (s *TokenRefreshService) refreshWithRetry(ctx context.Context, account *Acc
 		}
 
 		if err == nil {
-			s.postRefreshActions(ctx, account)
+			s.postRefreshActions(ctx, previousAccount, account)
 			return nil
 		}
 
@@ -356,7 +357,7 @@ func (s *TokenRefreshService) refreshWithRetry(ctx context.Context, account *Acc
 }
 
 // postRefreshActions 刷新成功后的后续动作（清除错误状态、缓存失效、调度器同步等）
-func (s *TokenRefreshService) postRefreshActions(ctx context.Context, account *Account) {
+func (s *TokenRefreshService) postRefreshActions(ctx context.Context, previousAccount, account *Account) {
 	// Antigravity 账户：如果之前是因为缺少 project_id 而标记为 error，现在成功获取到了，清除错误状态
 	if account.Platform == PlatformAntigravity &&
 		account.Status == StatusError &&
@@ -394,7 +395,13 @@ func (s *TokenRefreshService) postRefreshActions(ctx context.Context, account *A
 	}
 	// 对所有 OAuth 账号调用缓存失效（InvalidateToken 内部根据平台判断是否需要处理）
 	if s.cacheInvalidator != nil && account.Type == AccountTypeOAuth {
-		if err := s.cacheInvalidator.InvalidateToken(ctx, account); err != nil {
+		var err error
+		if changeInvalidator, ok := s.cacheInvalidator.(TokenCacheAccountChangeInvalidator); ok {
+			err = changeInvalidator.InvalidateTokenForAccountChange(ctx, previousAccount, account)
+		} else {
+			err = s.cacheInvalidator.InvalidateToken(ctx, account)
+		}
+		if err != nil {
 			slog.Warn("token_refresh.invalidate_token_cache_failed",
 				"account_id", account.ID,
 				"error", err,

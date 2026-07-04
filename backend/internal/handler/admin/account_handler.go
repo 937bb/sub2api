@@ -670,7 +670,7 @@ func (h *AccountHandler) Update(c *gin.Context) {
 	}
 
 	if needsTokenInvalidation {
-		h.invalidateOpenAIOAuthLikeTokenCache(ctx, previousAccount, account)
+		h.invalidateOpenAIOrAntigravityTokenCacheForAccountChange(ctx, previousAccount, account)
 	}
 
 	// OpenAI APIKey: credentials 修改后重新探测上游能力（base_url/api_key 可能变更）。
@@ -682,23 +682,95 @@ func (h *AccountHandler) Update(c *gin.Context) {
 	response.Success(c, h.buildAccountResponseWithRuntime(ctx, account))
 }
 
-func (h *AccountHandler) invalidateOpenAIOAuthLikeTokenCache(ctx context.Context, previousAccount, updatedAccount *service.Account) {
+func (h *AccountHandler) invalidateOpenAIOrAntigravityTokenCacheForAccountChange(ctx context.Context, previousAccount, updatedAccount *service.Account) {
 	if h == nil || h.tokenCacheInvalidator == nil {
 		return
 	}
 	account := updatedAccount
-	if account == nil || !account.IsOpenAIOAuthLike() {
+	if account == nil || !shouldInvalidateAccountTokenCacheOnChange(account) {
 		account = previousAccount
 	}
-	if account == nil || !account.IsOpenAIOAuthLike() {
+	if account == nil || !shouldInvalidateAccountTokenCacheOnChange(account) {
+		return
+	}
+
+	if changeInvalidator, ok := h.tokenCacheInvalidator.(service.TokenCacheAccountChangeInvalidator); ok {
+		if err := changeInvalidator.InvalidateTokenForAccountChange(ctx, previousAccount, updatedAccount); err != nil {
+			slog.Warn("account_update.invalidate_oauth_token_failed",
+				"account_id", account.ID,
+				"err", err,
+			)
+		}
 		return
 	}
 	if err := h.tokenCacheInvalidator.InvalidateToken(ctx, account); err != nil {
-		slog.Warn("account_update.invalidate_openai_oauth_token_failed",
+		slog.Warn("account_update.invalidate_oauth_token_failed",
 			"account_id", account.ID,
 			"err", err,
 		)
 	}
+}
+
+func (h *AccountHandler) invalidateOAuthTokenCacheForAccountChange(ctx context.Context, previousAccount, updatedAccount *service.Account) {
+	if h == nil || h.tokenCacheInvalidator == nil {
+		return
+	}
+	account := updatedAccount
+	if account == nil || !account.IsOAuth() {
+		account = previousAccount
+	}
+	if account == nil || !account.IsOAuth() {
+		return
+	}
+
+	if changeInvalidator, ok := h.tokenCacheInvalidator.(service.TokenCacheAccountChangeInvalidator); ok {
+		if err := changeInvalidator.InvalidateTokenForAccountChange(ctx, previousAccount, updatedAccount); err != nil {
+			slog.Warn("account_update.invalidate_oauth_token_failed",
+				"account_id", account.ID,
+				"err", err,
+			)
+		}
+		return
+	}
+	if err := h.tokenCacheInvalidator.InvalidateToken(ctx, account); err != nil {
+		slog.Warn("account_update.invalidate_oauth_token_failed",
+			"account_id", account.ID,
+			"err", err,
+		)
+	}
+}
+
+func shouldInvalidateAccountTokenCacheOnChange(account *service.Account) bool {
+	if account == nil {
+		return false
+	}
+	if account.IsOpenAIOAuthLike() {
+		return true
+	}
+	return account.Platform == service.PlatformAntigravity && account.Type == service.AccountTypeOAuth
+}
+
+func cloneAccountForTokenCacheInvalidationSnapshot(account *service.Account) *service.Account {
+	if account == nil {
+		return nil
+	}
+	return &service.Account{
+		ID:          account.ID,
+		Platform:    account.Platform,
+		Type:        account.Type,
+		Credentials: cloneAccountCredentialsForTokenCacheInvalidation(account.Credentials),
+	}
+}
+
+func cloneAccountCredentialsForTokenCacheInvalidation(credentials map[string]any) map[string]any {
+	if credentials == nil {
+		return nil
+	}
+	cloned := make(map[string]any, len(credentials))
+	for key, value := range credentials {
+		cloned[key] = value
+	}
+	return cloned
 }
 
 // scheduleOpenAIResponsesProbe 异步触发 OpenAI APIKey 账号的 Responses API 能力探测。
@@ -914,20 +986,7 @@ func (h *AccountHandler) refreshSingleAccount(ctx context.Context, account *serv
 			return nil, "", err
 		}
 
-		newCredentials = h.antigravityOAuthService.BuildAccountCredentials(tokenInfo)
-		for k, v := range account.Credentials {
-			if _, exists := newCredentials[k]; !exists {
-				newCredentials[k] = v
-			}
-		}
-
-		// 特殊处理 project_id：如果新值为空但旧值非空，保留旧值
-		// 这确保了即使 LoadCodeAssist 失败，project_id 也不会丢失
-		if newProjectID, _ := newCredentials["project_id"].(string); newProjectID == "" {
-			if oldProjectID := strings.TrimSpace(account.GetCredential("project_id")); oldProjectID != "" {
-				newCredentials["project_id"] = oldProjectID
-			}
-		}
+		newCredentials = h.antigravityOAuthService.BuildRefreshAccountCredentials(account, tokenInfo)
 
 		// 如果 project_id 获取失败，更新凭证但不标记为 error
 		if tokenInfo.ProjectIDMissing {
@@ -937,6 +996,7 @@ func (h *AccountHandler) refreshSingleAccount(ctx context.Context, account *serv
 			if updateErr != nil {
 				return nil, "", fmt.Errorf("failed to update credentials: %w", updateErr)
 			}
+			h.invalidateOAuthTokenCacheForAccountChange(ctx, account, updatedAccount)
 			h.adminService.EnsureAntigravityPrivacy(ctx, updatedAccount)
 			return updatedAccount, "missing_project_id_temporary", nil
 		}
@@ -981,11 +1041,7 @@ func (h *AccountHandler) refreshSingleAccount(ctx context.Context, account *serv
 	}
 
 	// 刷新成功后，清除 token 缓存，确保下次请求使用新 token
-	if h.tokenCacheInvalidator != nil {
-		if invalidateErr := h.tokenCacheInvalidator.InvalidateToken(ctx, updatedAccount); invalidateErr != nil {
-			log.Printf("[WARN] Failed to invalidate token cache for account %d: %v", updatedAccount.ID, invalidateErr)
-		}
-	}
+	h.invalidateOAuthTokenCacheForAccountChange(ctx, account, updatedAccount)
 
 	// OpenAI OAuth: 刷新成功后检查并设置 privacy_mode
 	h.adminService.EnsureOpenAIPrivacy(ctx, updatedAccount)
@@ -1097,14 +1153,7 @@ func (h *AccountHandler) ApplyOAuthCredentials(c *gin.Context) {
 		updatedAccount = cleared
 	}
 
-	if h.tokenCacheInvalidator != nil && updatedAccount.IsOAuth() {
-		if invalidateErr := h.tokenCacheInvalidator.InvalidateToken(ctx, updatedAccount); invalidateErr != nil {
-			slog.Warn("apply_oauth_credentials.invalidate_token_failed",
-				"account_id", accountID,
-				"err", invalidateErr,
-			)
-		}
-	}
+	h.invalidateOAuthTokenCacheForAccountChange(ctx, existing, updatedAccount)
 
 	response.Success(c, h.buildAccountResponseWithRuntime(ctx, updatedAccount))
 }
@@ -1547,7 +1596,7 @@ func (h *AccountHandler) BatchCreate(c *gin.Context) {
 // BatchUpdateCredentialsRequest represents batch credentials update request
 type BatchUpdateCredentialsRequest struct {
 	AccountIDs []int64 `json:"account_ids" binding:"required,min=1"`
-	Field      string  `json:"field" binding:"required,oneof=account_uuid org_uuid intercept_warmup_requests"`
+	Field      string  `json:"field" binding:"required,oneof=account_uuid org_uuid intercept_warmup_requests project_id"`
 	Value      any     `json:"value"`
 }
 
@@ -1568,7 +1617,7 @@ func (h *AccountHandler) BatchUpdateCredentials(c *gin.Context) {
 			return
 		}
 	} else {
-		// account_uuid and org_uuid can be string or null
+		// account_uuid, org_uuid and project_id can be string or null
 		if req.Value != nil {
 			if _, ok := req.Value.(string); !ok {
 				response.BadRequest(c, req.Field+" must be string or null")
@@ -1581,9 +1630,9 @@ func (h *AccountHandler) BatchUpdateCredentials(c *gin.Context) {
 
 	// 阶段一：预验证所有账号存在，收集 credentials
 	type accountUpdate struct {
-		ID          int64
-		Account     *service.Account
-		Credentials map[string]any
+		ID              int64
+		PreviousAccount *service.Account
+		Credentials     map[string]any
 	}
 	updates := make([]accountUpdate, 0, len(req.AccountIDs))
 	for _, accountID := range req.AccountIDs {
@@ -1592,11 +1641,13 @@ func (h *AccountHandler) BatchUpdateCredentials(c *gin.Context) {
 			response.Error(c, 404, fmt.Sprintf("Account %d not found", accountID))
 			return
 		}
-		if account.Credentials == nil {
-			account.Credentials = make(map[string]any)
+		previousAccount := cloneAccountForTokenCacheInvalidationSnapshot(account)
+		credentials := cloneAccountCredentialsForTokenCacheInvalidation(account.Credentials)
+		if credentials == nil {
+			credentials = make(map[string]any)
 		}
-		account.Credentials[req.Field] = req.Value
-		updates = append(updates, accountUpdate{ID: accountID, Account: account, Credentials: account.Credentials})
+		credentials[req.Field] = req.Value
+		updates = append(updates, accountUpdate{ID: accountID, PreviousAccount: previousAccount, Credentials: credentials})
 	}
 
 	// 阶段二：依次更新，返回每个账号的成功/失败明细，便于调用方重试
@@ -1618,7 +1669,7 @@ func (h *AccountHandler) BatchUpdateCredentials(c *gin.Context) {
 			})
 			continue
 		}
-		h.invalidateOpenAIOAuthLikeTokenCache(ctx, u.Account, updatedAccount)
+		h.invalidateOpenAIOrAntigravityTokenCacheForAccountChange(ctx, u.PreviousAccount, updatedAccount)
 		success++
 		successIDs = append(successIDs, u.ID)
 		results = append(results, gin.H{
@@ -1713,13 +1764,30 @@ func (h *AccountHandler) BulkUpdate(c *gin.Context) {
 		return
 	}
 
-	if len(req.Credentials) > 0 && h.tokenCacheInvalidator != nil && len(result.SuccessIDs) > 0 {
-		updatedAccounts, getErr := h.adminService.GetAccountsByIDs(ctx, result.SuccessIDs)
+	if len(req.Credentials) > 0 && h.tokenCacheInvalidator != nil {
+		previousAccountsByID := make(map[int64]*service.Account, len(result.PreviousAccounts))
+		invalidationIDs := make([]int64, 0, len(result.PreviousAccounts))
+		for _, previousAccount := range result.PreviousAccounts {
+			if previousAccount == nil {
+				continue
+			}
+			previousAccountsByID[previousAccount.ID] = previousAccount
+			invalidationIDs = append(invalidationIDs, previousAccount.ID)
+		}
+		if len(invalidationIDs) == 0 {
+			invalidationIDs = result.SuccessIDs
+		}
+		if len(invalidationIDs) == 0 {
+			response.Success(c, result)
+			return
+		}
+
+		updatedAccounts, getErr := h.adminService.GetAccountsByIDs(ctx, invalidationIDs)
 		if getErr != nil {
 			slog.Warn("bulk_update.invalidate_openai_oauth_token_get_accounts_failed", "err", getErr)
 		} else {
 			for _, account := range updatedAccounts {
-				h.invalidateOpenAIOAuthLikeTokenCache(ctx, nil, account)
+				h.invalidateOpenAIOrAntigravityTokenCacheForAccountChange(ctx, previousAccountsByID[account.ID], account)
 			}
 		}
 	}
