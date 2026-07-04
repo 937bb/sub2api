@@ -155,6 +155,12 @@ function orderFactory(overrides: Partial<PaymentOrder> = {}): PaymentOrder {
   }
 }
 
+function orderFactoryOmittingCurrency(overrides: Partial<PaymentOrder> = {}): PaymentOrder {
+  const order = orderFactory(overrides)
+  delete order.currency
+  return order
+}
+
 describe('order currency display', () => {
   beforeEach(() => {
     vi.useFakeTimers()
@@ -233,6 +239,33 @@ describe('order currency display', () => {
     expect(wrapper.text()).toContain('¥303.00')
     expect(wrapper.text()).toContain('¥300.00')
     expect(wrapper.text()).toContain('¥12.30')
+  })
+
+  it('falls back to CNY in admin order table when order currency is omitted, undefined, or null', () => {
+    const wrapper = mount(OrderTable, {
+      props: {
+        showUser: true,
+        orders: [
+          orderFactoryOmittingCurrency({ id: 1, order_type: 'subscription', amount: 12.3, pay_amount: 45.6 }),
+          orderFactory({ id: 2, order_type: 'subscription', amount: 20, pay_amount: 21, currency: undefined }),
+          orderFactory({ id: 3, order_type: 'subscription', amount: 30, pay_amount: 31, currency: null as unknown as string }),
+        ],
+        loading: false,
+      },
+      global: {
+        stubs: {
+          DataTable: DataTableStub,
+          OrderStatusBadge: true,
+        },
+      },
+    })
+
+    expect(wrapper.text()).toContain('¥45.60')
+    expect(wrapper.text()).toContain('¥12.30')
+    expect(wrapper.text()).toContain('¥21.00')
+    expect(wrapper.text()).toContain('¥20.00')
+    expect(wrapper.text()).toContain('¥31.00')
+    expect(wrapper.text()).toContain('¥30.00')
   })
 
   it('keeps subscription order amounts in the payment currency for HKD, USD, and JPY', () => {
@@ -381,6 +414,54 @@ describe('order currency display', () => {
     expect(wrapper.text()).not.toContain('¥10.00')
   })
 
+  it('falls back to CNY in admin detail modal when order currency is omitted', async () => {
+    const rowOrder = orderFactoryOmittingCurrency({
+      amount: 100,
+      pay_amount: 101,
+      order_type: 'subscription',
+    })
+    adminGetOrders.mockResolvedValue({
+      data: {
+        items: [rowOrder],
+        total: 1,
+      },
+    })
+    adminGetOrder.mockResolvedValue({
+      data: {
+        order: rowOrder,
+        auditLogs: [],
+      },
+    })
+
+    const wrapper = mount(AdminOrdersView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          OrderTable: AdminOrderTableStub,
+          Pagination: true,
+          BaseDialog: {
+            props: ['show'],
+            template: '<div v-if="show"><slot /><slot name="footer" /></div>',
+          },
+          Select: true,
+          Icon: true,
+          OrderStatusBadge: true,
+          AdminRefundDialog: true,
+        },
+      },
+    })
+
+    await flushPromises()
+    const detailButton = wrapper.findAll('button').find(button => button.text().includes('common.view'))
+    expect(detailButton).toBeTruthy()
+    await detailButton!.trigger('click')
+    await flushPromises()
+
+    expect(adminGetOrder).toHaveBeenCalledWith(42)
+    expect(wrapper.text()).toContain('¥100.00')
+    expect(wrapper.text()).toContain('¥101.00')
+  })
+
   it('distinguishes balance product amounts from gateway pay amount in admin refund dialog', () => {
     const wrapper = mount(AdminRefundDialog, {
       props: {
@@ -442,5 +523,32 @@ describe('order currency display', () => {
 
     expect(wrapper.text()).toContain('$50.00')
     expect(wrapper.text()).not.toContain('¥50.00')
+  })
+
+  it('falls back to CNY in admin refund dialog gateway amount when order currency is null', () => {
+    const wrapper = mount(AdminRefundDialog, {
+      props: {
+        show: true,
+        order: orderFactory({
+          amount: 50,
+          pay_amount: 51,
+          currency: null as unknown as string,
+          order_type: 'subscription',
+          status: 'COMPLETED',
+          refund_amount: 0,
+        }),
+      },
+      global: {
+        stubs: {
+          BaseDialog: {
+            props: ['show'],
+            template: '<div v-if="show"><slot /><slot name="footer" /></div>',
+          },
+        },
+      },
+    })
+
+    expect(wrapper.text()).toContain('¥50.00')
+    expect(wrapper.text()).toContain('¥51.00')
   })
 })
