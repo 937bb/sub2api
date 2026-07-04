@@ -3,7 +3,10 @@
 package service
 
 import (
+	"bytes"
 	"context"
+	"fmt"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -231,6 +234,36 @@ func TestAntigravityTokenProvider_GetAccessToken_MissingFallbackBackfillsProject
 	require.Equal(t, "backfilled-project", repo.updateCredentialsPayload[0]["project_id"])
 	require.Equal(t, []string{"ag:account:502"}, cache.getCalls)
 	require.Equal(t, []string{"ag:backfilled-project"}, cache.setCalls)
+}
+
+func TestAntigravityTokenProvider_GetAccessToken_BackfillFailureLogsSanitizedError(t *testing.T) {
+	var logOutput bytes.Buffer
+	previousLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logOutput, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() {
+		slog.SetDefault(previousLogger)
+	})
+
+	rawErr := fmt.Errorf("获取 project_id 失败 (重试 3 次后): loadCodeAssist 失败 (HTTP 400): %s", antigravityBackfillSensitiveBody)
+	account := &Account{
+		ID:       506,
+		Platform: PlatformAntigravity,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"access_token": "oauth-token",
+			"expires_at":   time.Now().Add(30 * time.Minute).Format(time.RFC3339),
+		},
+	}
+	provider := newFailingAntigravityTokenProvider(rawErr)
+
+	token, err := provider.GetAccessToken(context.Background(), account)
+
+	require.NoError(t, err)
+	require.Equal(t, "oauth-token", token)
+	logText := logOutput.String()
+	require.Contains(t, logText, "antigravity_project_id_backfill_skipped")
+	require.Contains(t, logText, errAntigravityProjectBackfillUnavailable.Error())
+	requireNoAntigravityBackfillSensitiveLeak(t, logText)
 }
 
 func TestAntigravityTokenProvider_GetAccessToken_RefreshThenBackfillKeepsFreshTokenFields(t *testing.T) {

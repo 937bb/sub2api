@@ -93,6 +93,7 @@ const (
 const antigravityProjectFallbackCredentialKey = "antigravity_project_id"
 
 var errAntigravityProjectIDRequired = errors.New("antigravity oauth account requires project_id or antigravity_project_id")
+var errAntigravityProjectBackfillUnavailable = errors.New("antigravity project_id backfill unavailable")
 
 // AntigravityAccountSwitchError 账号切换信号
 // 当账号限流时间超过阈值时，通知上层切换账号
@@ -1061,7 +1062,7 @@ func resolveAntigravityProjectIDAfterToken(ctx context.Context, account *Account
 		return "", err
 	}
 	if backfillErr := tokenProvider.BackfillProjectIDIfMissing(ctx, account, accessToken); backfillErr != nil {
-		return "", fmt.Errorf("%w: %v", err, backfillErr)
+		return "", fmt.Errorf("%w: %w", err, errAntigravityProjectBackfillUnavailable)
 	}
 	return resolveAntigravityProjectID(account)
 }

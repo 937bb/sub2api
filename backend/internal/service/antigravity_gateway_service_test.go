@@ -315,6 +315,38 @@ func (s *antigravitySettingRepoStub) Delete(ctx context.Context, key string) err
 	panic("unexpected Delete call")
 }
 
+const antigravityBackfillSensitiveBody = `{"error":"SECRET_TOKEN_SHOULD_NOT_LEAK","authorization":"Bearer hidden-token","email":"alice@example.com","url":"https://antigravity.example.test/private?access_token=hidden","account":"sensitive-account-metadata"}`
+
+func requireNoAntigravityBackfillSensitiveLeak(t *testing.T, text string) {
+	t.Helper()
+	for _, forbidden := range []string{
+		"SECRET_TOKEN_SHOULD_NOT_LEAK",
+		"Bearer hidden-token",
+		"alice@example.com",
+		"antigravity.example.test/private",
+		"access_token=hidden",
+		"sensitive-account-metadata",
+		"loadCodeAssist",
+		"HTTP 400",
+	} {
+		require.NotContains(t, text, forbidden)
+	}
+}
+
+type failingAntigravityProjectIDBackfiller struct {
+	err error
+}
+
+func (f failingAntigravityProjectIDBackfiller) FillProjectID(context.Context, *Account, string) (string, error) {
+	return "", f.err
+}
+
+func newFailingAntigravityTokenProvider(rawErr error) *AntigravityTokenProvider {
+	return &AntigravityTokenProvider{
+		antigravityOAuthService: failingAntigravityProjectIDBackfiller{err: rawErr},
+	}
+}
+
 func TestResolveAntigravityProjectID(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -387,6 +419,27 @@ func TestResolveAntigravityProjectID(t *testing.T) {
 			require.Equal(t, tc.want, got)
 		})
 	}
+}
+
+func TestResolveAntigravityProjectIDAfterToken_BackfillFailureSanitizesCause(t *testing.T) {
+	rawErr := fmt.Errorf("获取 project_id 失败 (重试 3 次后): loadCodeAssist 失败 (HTTP 400): %s", antigravityBackfillSensitiveBody)
+	account := &Account{
+		ID:       120,
+		Platform: PlatformAntigravity,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"access_token": "token",
+		},
+	}
+	provider := newFailingAntigravityTokenProvider(rawErr)
+
+	projectID, err := resolveAntigravityProjectIDAfterToken(context.Background(), account, provider, "token")
+
+	require.Empty(t, projectID)
+	require.ErrorIs(t, err, errAntigravityProjectIDRequired)
+	require.ErrorIs(t, err, errAntigravityProjectBackfillUnavailable)
+	require.Contains(t, err.Error(), errAntigravityProjectBackfillUnavailable.Error())
+	requireNoAntigravityBackfillSensitiveLeak(t, err.Error())
 }
 
 func TestAntigravityGatewayService_WrapV1InternalRequestRequiresProject(t *testing.T) {
@@ -765,6 +818,96 @@ func TestAntigravityGatewayService_Forward_MissingProjectBackfillsBeforeResolve(
 	require.NoError(t, json.Unmarshal(upstream.requestBodies[0], &wrapped))
 	require.Equal(t, "backfilled-project", wrapped["project"])
 	require.Contains(t, writer.Body.String(), `"text":"ok"`)
+}
+
+func TestAntigravityGatewayService_Forward_BackfillFailureSanitizesClientError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	writer := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(writer)
+
+	body, err := json.Marshal(map[string]any{
+		"model": "claude-sonnet-4-5",
+		"messages": []map[string]any{
+			{"role": "user", "content": "hello"},
+		},
+		"max_tokens": 1,
+	})
+	require.NoError(t, err)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
+
+	rawErr := fmt.Errorf("获取 project_id 失败 (重试 3 次后): loadCodeAssist 失败 (HTTP 400): %s", antigravityBackfillSensitiveBody)
+	svc := &AntigravityGatewayService{
+		settingService: NewSettingService(&antigravitySettingRepoStub{}, &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}),
+		tokenProvider:  newFailingAntigravityTokenProvider(rawErr),
+	}
+	account := &Account{
+		ID:          121,
+		Name:        "acc-forward-backfill-failure",
+		Platform:    PlatformAntigravity,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"access_token": "token",
+			"model_mapping": map[string]any{
+				"claude-sonnet-4-5": "gemini-2.5-flash",
+			},
+		},
+	}
+
+	result, err := svc.Forward(context.Background(), c, account, body, false)
+
+	require.Nil(t, result)
+	require.ErrorIs(t, err, errAntigravityProjectIDRequired)
+	require.ErrorIs(t, err, errAntigravityProjectBackfillUnavailable)
+	require.Equal(t, http.StatusBadRequest, writer.Code)
+	require.Contains(t, writer.Body.String(), errAntigravityProjectBackfillUnavailable.Error())
+	requireNoAntigravityBackfillSensitiveLeak(t, writer.Body.String())
+	requireNoAntigravityBackfillSensitiveLeak(t, err.Error())
+}
+
+func TestAntigravityGatewayService_ForwardGemini_BackfillFailureSanitizesClientError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	writer := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(writer)
+
+	body, err := json.Marshal(map[string]any{
+		"contents": []map[string]any{
+			{"role": "user", "parts": []map[string]any{{"text": "hello"}}},
+		},
+	})
+	require.NoError(t, err)
+	c.Request = httptest.NewRequest(http.MethodPost, "/antigravity/v1beta/models/gemini-2.5-flash:generateContent", bytes.NewReader(body))
+
+	rawErr := fmt.Errorf("获取 project_id 失败 (重试 3 次后): loadCodeAssist 失败 (HTTP 400): %s", antigravityBackfillSensitiveBody)
+	svc := &AntigravityGatewayService{
+		settingService: NewSettingService(&antigravitySettingRepoStub{}, &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}),
+		tokenProvider:  newFailingAntigravityTokenProvider(rawErr),
+	}
+	account := &Account{
+		ID:          122,
+		Name:        "acc-gemini-backfill-failure",
+		Platform:    PlatformAntigravity,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"access_token": "token",
+			"model_mapping": map[string]any{
+				"gemini-2.5-flash": "gemini-2.5-flash",
+			},
+		},
+	}
+
+	result, err := svc.ForwardGemini(context.Background(), c, account, "gemini-2.5-flash", "generateContent", false, body, false)
+
+	require.Nil(t, result)
+	require.ErrorIs(t, err, errAntigravityProjectIDRequired)
+	require.ErrorIs(t, err, errAntigravityProjectBackfillUnavailable)
+	require.Equal(t, http.StatusBadRequest, writer.Code)
+	require.Contains(t, writer.Body.String(), errAntigravityProjectBackfillUnavailable.Error())
+	requireNoAntigravityBackfillSensitiveLeak(t, writer.Body.String())
+	requireNoAntigravityBackfillSensitiveLeak(t, err.Error())
 }
 
 func TestAntigravityGatewayService_Forward_RefreshUsesLatestFallbackWithoutStaleProject(t *testing.T) {

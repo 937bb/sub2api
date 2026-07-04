@@ -23,11 +23,15 @@ const (
 // AntigravityTokenCache token cache interface.
 type AntigravityTokenCache = GeminiTokenCache
 
+type antigravityProjectIDBackfiller interface {
+	FillProjectID(ctx context.Context, account *Account, accessToken string) (string, error)
+}
+
 // AntigravityTokenProvider manages access_token for antigravity accounts.
 type AntigravityTokenProvider struct {
 	accountRepo             AccountRepository
 	tokenCache              AntigravityTokenCache
-	antigravityOAuthService *AntigravityOAuthService
+	antigravityOAuthService antigravityProjectIDBackfiller
 	backfillCooldown        sync.Map // key: accountID -> last attempt time
 	refreshAPI              *OAuthRefreshAPI
 	executor                OAuthRefreshExecutor
@@ -40,10 +44,14 @@ func NewAntigravityTokenProvider(
 	tokenCache AntigravityTokenCache,
 	antigravityOAuthService *AntigravityOAuthService,
 ) *AntigravityTokenProvider {
+	var projectIDBackfiller antigravityProjectIDBackfiller
+	if antigravityOAuthService != nil {
+		projectIDBackfiller = antigravityOAuthService
+	}
 	return &AntigravityTokenProvider{
 		accountRepo:             accountRepo,
 		tokenCache:              tokenCache,
-		antigravityOAuthService: antigravityOAuthService,
+		antigravityOAuthService: projectIDBackfiller,
 		refreshPolicy:           AntigravityProviderRefreshPolicy(),
 	}
 }
@@ -142,7 +150,7 @@ func (p *AntigravityTokenProvider) GetAccessToken(ctx context.Context, account *
 	if err := p.BackfillProjectIDIfMissing(ctx, account, accessToken); err != nil {
 		slog.Debug("antigravity_project_id_backfill_skipped",
 			"account_id", account.ID,
-			"error", err,
+			"error", errAntigravityProjectBackfillUnavailable,
 		)
 	}
 	syncAccountCredentials(requestAccount, account)
@@ -216,7 +224,7 @@ func (p *AntigravityTokenProvider) BackfillProjectIDIfMissing(ctx context.Contex
 	p.markBackfillAttempted(account.ID)
 	projectID, err := p.antigravityOAuthService.FillProjectID(ctx, account, accessToken)
 	if err != nil {
-		return err
+		return errAntigravityProjectBackfillUnavailable
 	}
 	projectID = strings.TrimSpace(projectID)
 	if projectID == "" {
