@@ -14,6 +14,8 @@ const (
 	AntigravityPrivacyFailed = "privacy_set_failed"
 )
 
+var setAntigravityPrivacyForAccount = setAntigravityPrivacy
+
 // setAntigravityPrivacy 调用 Antigravity API 设置隐私并验证结果。
 // 流程：
 //  1. setUserSettings 清空设置 → 检查返回值 {"userSettings":{}}

@@ -4061,7 +4061,7 @@ func (s *adminServiceImpl) EnsureAntigravityPrivacy(ctx context.Context, account
 		return ""
 	}
 
-	projectID, _ := account.Credentials["project_id"].(string)
+	projectID, _ := resolveAntigravityProjectID(account)
 
 	var proxyURL string
 	if account.ProxyID != nil {
@@ -4070,7 +4070,7 @@ func (s *adminServiceImpl) EnsureAntigravityPrivacy(ctx context.Context, account
 		}
 	}
 
-	mode := setAntigravityPrivacy(ctx, token, projectID, proxyURL)
+	mode := setAntigravityPrivacyForAccount(ctx, token, projectID, proxyURL)
 	if mode == "" {
 		return ""
 	}
@@ -4094,7 +4094,7 @@ func (s *adminServiceImpl) ForceAntigravityPrivacy(ctx context.Context, account 
 		return ""
 	}
 
-	projectID, _ := account.Credentials["project_id"].(string)
+	projectID, _ := resolveAntigravityProjectID(account)
 
 	var proxyURL string
 	if account.ProxyID != nil {
@@ -4103,7 +4103,7 @@ func (s *adminServiceImpl) ForceAntigravityPrivacy(ctx context.Context, account 
 		}
 	}
 
-	mode := setAntigravityPrivacy(ctx, token, projectID, proxyURL)
+	mode := setAntigravityPrivacyForAccount(ctx, token, projectID, proxyURL)
 	if mode == "" {
 		return ""
 	}
