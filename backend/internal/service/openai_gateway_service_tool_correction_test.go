@@ -90,7 +90,12 @@ func TestNormalizeOpenAIResponsesFunctionCallArguments_DedupesOnlySupportedShape
 		path string
 	}{
 		{
-			name: "function_call_arguments_done",
+			name: "function_call_arguments_done_top_level",
+			body: `{"type":"response.function_call_arguments.done","output_index":0,"item_id":"fc_1","arguments":"` + doubled + `"}`,
+			path: "arguments",
+		},
+		{
+			name: "function_call_arguments_done_nested_legacy",
 			body: `{"type":"response.function_call_arguments.done","response":{"function_call_arguments":{"done":{"arguments":"` + doubled + `"}}}}`,
 			path: "response.function_call_arguments.done.arguments",
 		},
@@ -146,6 +151,10 @@ func TestNormalizeOpenAIResponsesFunctionCallArguments_DoesNotRewriteUnsupported
 			name: "arbitrary_top_level_arguments",
 			body: `{"type":"response.completed","arguments":"{\"cmd\":\"pwd\"}{\"cmd\":\"pwd\"}"}`,
 		},
+		{
+			name: "nested_done_arguments_without_done_event_type",
+			body: `{"type":"response.completed","response":{"function_call_arguments":{"done":{"arguments":"{\"cmd\":\"pwd\"}{\"cmd\":\"pwd\"}"}}}}`,
+		},
 	}
 
 	for _, tt := range tests {
@@ -164,6 +173,27 @@ func TestCorrectToolCallsInResponseBodyDeduplicatesResponsesArguments(t *testing
 	result := service.correctToolCallsInResponseBody(input)
 
 	require.JSONEq(t, `{"cmd":"pwd"}`, gjson.GetBytes(result, "output.0.arguments").String())
+}
+
+func TestNormalizeOpenAIResponsesFunctionCallOutputArguments_DedupesOnlyFunctionCallOutputs(t *testing.T) {
+	input := []byte(`{"output":[{"type":"function_call","arguments":"{\"cmd\":\"pwd\"}{\"cmd\":\"pwd\"}"},{"type":"message","arguments":"{\"cmd\":\"pwd\"}{\"cmd\":\"pwd\"}"},{"type":"custom_tool_call","arguments":"[1][1]"}],"arguments":"{\"cmd\":\"pwd\"}{\"cmd\":\"pwd\"}"}`)
+
+	normalized, changed := normalizeOpenAIResponsesFunctionCallOutputArguments(input)
+
+	require.True(t, changed)
+	require.JSONEq(t, `{"cmd":"pwd"}`, gjson.GetBytes(normalized, "output.0.arguments").String())
+	require.Equal(t, `{"cmd":"pwd"}{"cmd":"pwd"}`, gjson.GetBytes(normalized, "output.1.arguments").String())
+	require.JSONEq(t, `[1]`, gjson.GetBytes(normalized, "output.2.arguments").String())
+	require.Equal(t, `{"cmd":"pwd"}{"cmd":"pwd"}`, gjson.GetBytes(normalized, "arguments").String())
+}
+
+func TestNormalizeOpenAIResponsesFunctionCallOutputArguments_DoesNotRewriteTextOrDifferentJSON(t *testing.T) {
+	input := []byte(`{"output":[{"type":"function_call","arguments":"plain text plain text"},{"type":"custom_tool_call","arguments":"{\"cmd\":\"pwd\"}{\"cmd\":\"ls\"}"}]}`)
+
+	normalized, changed := normalizeOpenAIResponsesFunctionCallOutputArguments(input)
+
+	require.False(t, changed)
+	require.JSONEq(t, string(input), string(normalized))
 }
 
 func TestDedupeRepeatedJSONArgumentString(t *testing.T) {

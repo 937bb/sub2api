@@ -5003,6 +5003,9 @@ func (s *OpenAIGatewayService) handleNonStreamingResponsePassthrough(
 	if originalModel != "" && mappedModel != "" && originalModel != mappedModel {
 		body = s.replaceModelInResponseBody(body, mappedModel, originalModel)
 	}
+	if normalized, normalizedChanged := normalizeOpenAIResponsesFunctionCallOutputArguments(body); normalizedChanged {
+		body = normalized
+	}
 	c.Data(resp.StatusCode, contentType, body)
 	return &openaiNonStreamingResultPassthrough{
 		OpenAIUsage:      usage,
@@ -6158,7 +6161,7 @@ func normalizeOpenAIResponsesFunctionCallArguments(payload []byte) ([]byte, bool
 	if len(bytes.TrimSpace(payload)) == 0 ||
 		!bytes.Contains(payload, []byte(`"arguments"`)) ||
 		(!bytes.Contains(payload, []byte(`"function_call"`)) &&
-			!bytes.Contains(payload, []byte(`"function_call_arguments"`)) &&
+			!bytes.Contains(payload, []byte(`function_call_arguments`)) &&
 			!bytes.Contains(payload, []byte(`"custom_tool_call"`))) {
 		return payload, false
 	}
@@ -6185,7 +6188,10 @@ func normalizeOpenAIResponsesFunctionCallArguments(payload []byte) ([]byte, bool
 		changed = true
 	}
 
-	normalizeAtPath("response.function_call_arguments.done.arguments")
+	if strings.TrimSpace(gjson.GetBytes(updated, "type").String()) == "response.function_call_arguments.done" {
+		normalizeAtPath("arguments")
+		normalizeAtPath("response.function_call_arguments.done.arguments")
+	}
 
 	if item := gjson.GetBytes(updated, "item"); item.Exists() && item.IsObject() {
 		if openAIResponsesFunctionCallItemTypeAllowsArgumentsDedupe(item.Get("type").String()) {
@@ -6193,6 +6199,28 @@ func normalizeOpenAIResponsesFunctionCallArguments(payload []byte) ([]byte, bool
 		}
 	}
 
+	if outputNormalized, outputChanged := normalizeOpenAIResponsesFunctionCallOutputArguments(updated); outputChanged {
+		updated = outputNormalized
+		changed = true
+	}
+
+	return updated, changed
+}
+
+func normalizeOpenAIResponsesFunctionCallOutputArguments(payload []byte) ([]byte, bool) {
+	if len(bytes.TrimSpace(payload)) == 0 ||
+		!bytes.Contains(payload, []byte(`"arguments"`)) ||
+		!bytes.Contains(payload, []byte(`"output"`)) ||
+		(!bytes.Contains(payload, []byte(`"function_call"`)) &&
+			!bytes.Contains(payload, []byte(`"custom_tool_call"`))) {
+		return payload, false
+	}
+	if !gjson.ValidBytes(payload) {
+		return payload, false
+	}
+
+	updated := payload
+	changed := false
 	for _, root := range []string{"response.output", "output"} {
 		count := int(gjson.GetBytes(updated, root+".#").Int())
 		for i := 0; i < count; i++ {
@@ -6200,10 +6228,23 @@ func normalizeOpenAIResponsesFunctionCallArguments(payload []byte) ([]byte, bool
 			if !openAIResponsesFunctionCallItemTypeAllowsArgumentsDedupe(gjson.GetBytes(updated, itemPath+".type").String()) {
 				continue
 			}
-			normalizeAtPath(itemPath + ".arguments")
+			path := itemPath + ".arguments"
+			value := gjson.GetBytes(updated, path)
+			if !value.Exists() || value.Type != gjson.String {
+				continue
+			}
+			deduped, dedupedChanged := dedupeRepeatedJSONArgumentString(value.Str)
+			if !dedupedChanged {
+				continue
+			}
+			next, err := sjson.SetBytes(updated, path, deduped)
+			if err != nil {
+				continue
+			}
+			updated = next
+			changed = true
 		}
 	}
-
 	return updated, changed
 }
 

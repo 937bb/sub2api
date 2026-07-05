@@ -143,6 +143,39 @@ func TestOpenAIStreamingPassthroughDeduplicatesFunctionCallArguments(t *testing.
 	require.NotContains(t, body, `"name":"edit"`)
 }
 
+func TestOpenAINonStreamingPassthroughDeduplicatesFunctionCallOutputArguments(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+
+	body := `{"id":"resp_dedupe_passthrough","model":"upstream-model","output":[{"type":"function_call","name":"apply_patch","arguments":"{\"cmd\":\"pwd\"}{\"cmd\":\"pwd\"}"},{"type":"message","arguments":"{\"cmd\":\"pwd\"}{\"cmd\":\"pwd\"}"},{"type":"function_call","name":"exec","arguments":"{\"cmd\":\"pwd\"}{\"cmd\":\"ls\"}"}],"usage":{"input_tokens":7,"output_tokens":3,"total_tokens":10}}`
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Header: http.Header{
+			"Content-Type": []string{"application/json"},
+			"X-Request-Id": []string{"rid-nonstream-dedupe-passthrough"},
+		},
+	}
+
+	svc := &OpenAIGatewayService{cfg: passthroughPrivacyTestConfig(), toolCorrector: NewCodexToolCorrector()}
+	result, err := svc.handleNonStreamingResponsePassthrough(c.Request.Context(), resp, c, "client-model", "upstream-model")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, 7, result.usage.InputTokens)
+	require.Equal(t, "resp_dedupe_passthrough", result.responseID)
+
+	clientBody := rec.Body.String()
+	require.Equal(t, "client-model", gjson.Get(clientBody, "model").String())
+	require.Equal(t, "apply_patch", gjson.Get(clientBody, "output.0.name").String())
+	require.JSONEq(t, `{"cmd":"pwd"}`, gjson.Get(clientBody, "output.0.arguments").String())
+	require.Equal(t, `{"cmd":"pwd"}{"cmd":"pwd"}`, gjson.Get(clientBody, "output.1.arguments").String())
+	require.Equal(t, `{"cmd":"pwd"}{"cmd":"ls"}`, gjson.Get(clientBody, "output.2.arguments").String())
+	require.NotContains(t, clientBody, `"name":"edit"`)
+}
+
 func TestOpenAIStreamingNativeDeduplicatesFunctionCallArguments(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
