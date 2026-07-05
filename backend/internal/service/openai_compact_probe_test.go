@@ -151,6 +151,7 @@ func TestBuildOpenAICompactProbeExtraUpdates_RedactsPATMetadataDiagnostics(t *te
 	body := []byte(`{"diagnostic":{"email":"pat-user@example.com",` +
 		`"chatgpt_user_id":"user-sensitive","chatgpt_account_id":"acc-sensitive",` +
 		`"chatgpt_plan_type":"enterprise","chatgpt_account_is_fedramp":true,` +
+		`"x-openai-fedramp":["true"],"headers":{"x-openai-fedramp":{"values":["true"]}},` +
 		`"personal_access_token":"at-json-secret"}}`)
 
 	updates := buildOpenAICompactProbeExtraUpdates(&http.Response{StatusCode: http.StatusBadGateway}, body, nil, now)
@@ -162,10 +163,54 @@ func TestBuildOpenAICompactProbeExtraUpdates_RedactsPATMetadataDiagnostics(t *te
 		"acc-sensitive",
 		"enterprise",
 		`"chatgpt_account_is_fedramp":true`,
+		`"x-openai-fedramp":["true"]`,
+		`"x-openai-fedramp":{"values":["true"]}`,
 		"at-json-secret",
 	)
 	if !strings.Contains(got, `"chatgpt_account_is_fedramp":"[redacted]"`) {
 		t.Fatalf("compact diagnostic = %s, want redacted non-string metadata field", got)
+	}
+	if !strings.Contains(got, `"x-openai-fedramp":"[redacted]"`) {
+		t.Fatalf("compact diagnostic = %s, want redacted JSON array/object header field", got)
+	}
+	assertDiagnosticOmits(t, got, `["true"]`, `"values"`)
+}
+
+func TestSanitizeOpenAIUpstreamDiagnosticText_RedactsLongSensitiveJSONString(t *testing.T) {
+	secret := strings.Repeat("a", 9000)
+	got := sanitizeOpenAIUpstreamDiagnosticText(`{"access_token":"` + secret + `","other":"ok"}`)
+
+	assertDiagnosticOmits(t, got, secret)
+	if !strings.Contains(got, `"access_token":"[redacted]"`) {
+		t.Fatalf("diagnostic = %s, want long access_token redacted", got)
+	}
+	if !strings.Contains(got, `"other":"ok"`) {
+		t.Fatalf("diagnostic = %s, want non-sensitive field preserved", got)
+	}
+}
+
+func TestSanitizeOpenAIUpstreamDiagnosticText_FailsClosedForOverlongSensitiveJSONArray(t *testing.T) {
+	secret := "secret-array-token"
+	diagnosticTail := `"safe_tail":"should-be-dropped"}`
+	input := `{"access_token":["` + secret + `","` + strings.Repeat("x", openAISensitiveDiagnosticJSONCompositeMaxScan+1) + `"],` + diagnosticTail
+
+	got := sanitizeOpenAIUpstreamDiagnosticText(input)
+
+	assertDiagnosticOmits(t, got, secret, diagnosticTail, "should-be-dropped", strings.Repeat("x", 64))
+	if !strings.Contains(got, `"access_token":"[redacted]"`) {
+		t.Fatalf("diagnostic = %s, want overlong access_token array redacted", got)
+	}
+}
+
+func TestSanitizeOpenAIUpstreamDiagnosticText_FailsClosedForTooDeepSensitiveJSONObject(t *testing.T) {
+	secret := "secret-object-token"
+	input := `{"access_token":` + strings.Repeat(`{"nested":`, openAISensitiveDiagnosticJSONMaxDepth+1) + `"` + secret + `"` + strings.Repeat(`}`, openAISensitiveDiagnosticJSONMaxDepth+1) + `,"other":"should-be-dropped"}`
+
+	got := sanitizeOpenAIUpstreamDiagnosticText(input)
+
+	assertDiagnosticOmits(t, got, secret, `"other":"should-be-dropped"`)
+	if !strings.Contains(got, `"access_token":"[redacted]"`) {
+		t.Fatalf("diagnostic = %s, want over-depth access_token object redacted", got)
 	}
 }
 
