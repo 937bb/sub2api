@@ -5,7 +5,7 @@
     >
       <!-- Amount + Order ID -->
       <div v-if="amount" class="text-center">
-        <p class="text-3xl font-bold" :style="{ color: methodColor }">¥{{ amount }}</p>
+        <p class="text-3xl font-bold" :style="{ color: methodColor }">{{ formattedAmount }}</p>
         <p v-if="orderId" class="mt-1 text-sm text-gray-500 dark:text-slate-400">
           {{ t('payment.orders.orderId') }}: {{ orderId }}
         </p>
@@ -58,6 +58,7 @@ import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { extractI18nErrorMessage } from '@/utils/apiError'
 import { isMobileDevice } from '@/utils/device'
+import { formatPaymentAmount } from '@/components/payment/currency'
 
 interface StripeWithWechatPay {
   confirmWechatPayPayment(clientSecret: string, options: Record<string, unknown>): Promise<{ error?: { message?: string }; paymentIntent?: { status: string } }>
@@ -69,14 +70,25 @@ const METHOD_COLORS: Record<string, string> = {
 }
 const DEFAULT_METHOD_COLOR = '#635bff'
 
-const { t } = useI18n()
+const i18n = useI18n()
+const { t } = i18n
 const route = useRoute()
 
 const orderId = String(route.query.order_id || '')
 const method = String(route.query.method || 'alipay')
 const amount = String(route.query.amount || '')
+const currency = String(route.query.currency || '')
 
 const methodColor = computed(() => METHOD_COLORS[method] || DEFAULT_METHOD_COLOR)
+const localeCode = computed(() => {
+  const raw = i18n.locale as unknown
+  if (typeof raw === 'string') return raw
+  if (raw && typeof raw === 'object' && 'value' in raw) {
+    return String((raw as { value?: string }).value || '')
+  }
+  return undefined
+})
+const formattedAmount = computed(() => formatPaymentAmount(Number(amount), currency, localeCode.value))
 
 const error = ref('')
 const success = ref(false)

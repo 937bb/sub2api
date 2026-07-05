@@ -2,10 +2,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import type { PaymentOrder } from '@/types/payment'
 import OrderTable from '../OrderTable.vue'
+import AdminOrderTable from '@/components/admin/payment/AdminOrderTable.vue'
+import AdminOrderDetail from '@/components/admin/payment/AdminOrderDetail.vue'
 import AdminRefundDialog from '@/components/admin/payment/AdminRefundDialog.vue'
 import PaymentQRDialog from '../PaymentQRDialog.vue'
+import StripePaymentInline from '../StripePaymentInline.vue'
 import AdminOrdersView from '@/views/admin/orders/AdminOrdersView.vue'
 import StripePaymentView from '@/views/user/StripePaymentView.vue'
+import StripePopupView from '@/views/user/StripePopupView.vue'
 
 const pollOrderStatus = vi.hoisted(() => vi.fn())
 const cancelOrder = vi.hoisted(() => vi.fn())
@@ -105,7 +109,13 @@ vi.mock('@stripe/stripe-js', () => ({
     elements: () => ({
       create: () => ({
         mount: vi.fn(),
-        on: (_event: string, callback: () => void) => callback(),
+        on: (event: string, callback: (payload?: { value: { type: string } }) => void) => {
+          if (event === 'change') {
+            callback({ value: { type: 'card' } })
+            return
+          }
+          callback()
+        },
       }),
     }),
     confirmAlipayPayment: vi.fn(),
@@ -462,6 +472,60 @@ describe('order currency display', () => {
     expect(wrapper.text()).toContain('¥101.00')
   })
 
+  it('uses order currency in legacy admin order table amount cells', () => {
+    const wrapper = mount(AdminOrderTable, {
+      props: {
+        orders: [orderFactory({ amount: 10, pay_amount: 1200, currency: 'JPY', order_type: 'balance' })],
+        loading: false,
+        page: 1,
+        pageSize: 20,
+        total: 1,
+      },
+      global: {
+        stubs: {
+          DataTable: DataTableStub,
+          Pagination: true,
+          Select: true,
+          Icon: true,
+        },
+      },
+    })
+
+    expect(wrapper.text()).toContain('¥1,200')
+    expect(wrapper.text()).toContain('payment.orders.creditedAmount: $10.00')
+    expect(wrapper.text()).not.toContain('¥10.00')
+    expect(wrapper.text()).not.toContain('¥1,200.00')
+  })
+
+  it('uses order currency in legacy admin order detail gateway amounts', () => {
+    const wrapper = mount(AdminOrderDetail, {
+      props: {
+        show: true,
+        order: orderFactory({
+          amount: 10,
+          pay_amount: 1200,
+          currency: 'JPY',
+          order_type: 'balance',
+          refund_amount: 2,
+        }),
+      },
+      global: {
+        stubs: {
+          BaseDialog: {
+            props: ['show'],
+            template: '<div v-if="show"><slot /><slot name="footer" /></div>',
+          },
+        },
+      },
+    })
+
+    expect(wrapper.text()).toContain('¥1,200')
+    expect(wrapper.text()).toContain('$10.00')
+    expect(wrapper.text()).toContain('$2.00')
+    expect(wrapper.text()).not.toContain('¥10.00')
+    expect(wrapper.text()).not.toContain('¥2.00')
+  })
+
   it('distinguishes balance product amounts from gateway pay amount in admin refund dialog', () => {
     const wrapper = mount(AdminRefundDialog, {
       props: {
@@ -550,5 +614,44 @@ describe('order currency display', () => {
 
     expect(wrapper.text()).toContain('¥50.00')
     expect(wrapper.text()).toContain('¥51.00')
+  })
+
+  it('uses currency prop in legacy Stripe inline amount display', async () => {
+    const wrapper = mount(StripePaymentInline, {
+      props: {
+        orderId: 42,
+        amount: 50,
+        clientSecret: 'pi_secret',
+        orderType: 'subscription',
+        publishableKey: 'pk_test',
+        payAmount: 51,
+        currency: 'USD',
+      },
+      global: {
+        stubs: {
+          Icon: true,
+        },
+      },
+    })
+
+    await flushPromises()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('$51.00')
+    expect(wrapper.text()).not.toContain('¥51.00')
+  })
+
+  it('uses currency query in legacy Stripe popup amount display', () => {
+    routeState.query = {
+      order_id: '42',
+      method: 'alipay',
+      amount: '51',
+      currency: 'USD',
+    }
+
+    const wrapper = mount(StripePopupView)
+
+    expect(wrapper.text()).toContain('$51.00')
+    expect(wrapper.text()).not.toContain('¥51')
   })
 })
