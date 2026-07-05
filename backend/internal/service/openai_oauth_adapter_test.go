@@ -1088,6 +1088,7 @@ func TestOpenAIGatewayService_OAuthAdapter_CodexCLIOnlyAllowsOfficialClientFamil
 			c, _ := gin.CreateTestContext(rec)
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
 			c.Request.Header.Set("User-Agent", tt.ua)
+			c.Request.Header.Set("x-codex-installation-id", "test-installation")
 			if tt.originator != "" {
 				c.Request.Header.Set("originator", tt.originator)
 			}

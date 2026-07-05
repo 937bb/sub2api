@@ -34,6 +34,12 @@ func newCodexDetectorTestContext(ua string, originator string) *gin.Context {
 	return c
 }
 
+func newCodexDetectorTestContextWithCodexHeader(ua string, originator string) *gin.Context {
+	c := newCodexDetectorTestContext(ua, originator)
+	c.Request.Header.Set("x-codex-installation-id", "test-installation")
+	return c
+}
+
 func newCodexCLIOnlyDetectorTestAccount(extra map[string]any) *Account {
 	if extra == nil {
 		extra = map[string]any{"codex_cli_only": true}
@@ -72,7 +78,7 @@ func TestOpenAICodexClientRestrictionDetector_Detect(t *testing.T) {
 		detector := NewOpenAICodexClientRestrictionDetector(nil)
 		account := newCodexCLIOnlyDetectorTestAccount(nil)
 
-		result := detector.Detect(newCodexDetectorTestContext("codex_cli_rs/0.99.0", ""), account, nil)
+		result := detector.Detect(newCodexDetectorTestContextWithCodexHeader("codex_cli_rs/0.99.0", ""), account, nil)
 		require.True(t, result.Enabled)
 		require.True(t, result.Matched)
 		require.Equal(t, CodexClientRestrictionReasonMatchedUA, result.Reason)
@@ -82,7 +88,7 @@ func TestOpenAICodexClientRestrictionDetector_Detect(t *testing.T) {
 		detector := NewOpenAICodexClientRestrictionDetector(nil)
 		account := newCodexCLIOnlyDetectorTestAccount(nil)
 
-		result := detector.Detect(newCodexDetectorTestContext("codex_vscode/1.0.0", ""), account, nil)
+		result := detector.Detect(newCodexDetectorTestContextWithCodexHeader("codex_vscode/1.0.0", ""), account, nil)
 		require.True(t, result.Enabled)
 		require.True(t, result.Matched)
 		require.Equal(t, CodexClientRestrictionReasonMatchedUA, result.Reason)
@@ -92,7 +98,7 @@ func TestOpenAICodexClientRestrictionDetector_Detect(t *testing.T) {
 		detector := NewOpenAICodexClientRestrictionDetector(nil)
 		account := newCodexCLIOnlyDetectorTestAccount(nil)
 
-		result := detector.Detect(newCodexDetectorTestContext("codex_app/2.1.0", ""), account, nil)
+		result := detector.Detect(newCodexDetectorTestContextWithCodexHeader("codex_app/2.1.0", ""), account, nil)
 		require.True(t, result.Enabled)
 		require.True(t, result.Matched)
 		require.Equal(t, CodexClientRestrictionReasonMatchedUA, result.Reason)
@@ -118,12 +124,35 @@ func TestOpenAICodexClientRestrictionDetector_Detect(t *testing.T) {
 
 		for _, ua := range tests {
 			t.Run(ua, func(t *testing.T) {
-				result := detector.Detect(newCodexDetectorTestContext(ua, ""), account, nil)
+				result := detector.Detect(newCodexDetectorTestContextWithCodexHeader(ua, ""), account, nil)
 				require.True(t, result.Enabled)
 				require.True(t, result.Matched)
 				require.Equal(t, CodexClientRestrictionReasonMatchedUA, result.Reason)
 			})
 		}
+	})
+
+	t.Run("开启后官方 UA 缺少 x-codex 头拒绝", func(t *testing.T) {
+		detector := NewOpenAICodexClientRestrictionDetector(nil)
+		account := newCodexCLIOnlyDetectorTestAccount(nil)
+
+		result := detector.Detect(newCodexDetectorTestContext("codex_cli_rs/0.99.0", ""), account, nil)
+		require.True(t, result.Enabled)
+		require.False(t, result.Matched)
+		require.Equal(t, CodexClientRestrictionReasonNotMatchedUA, result.Reason)
+	})
+
+	t.Run("开启后官方 UA 只有空 x-codex 头拒绝", func(t *testing.T) {
+		detector := NewOpenAICodexClientRestrictionDetector(nil)
+		account := newCodexCLIOnlyDetectorTestAccount(nil)
+		c := newCodexDetectorTestContext("codex_cli_rs/0.99.0", "")
+		c.Request.Header.Set("x-codex-installation-id", "  ")
+		c.Request.Header.Add("x-codex-window-id", "")
+
+		result := detector.Detect(c, account, nil)
+		require.True(t, result.Enabled)
+		require.False(t, result.Matched)
+		require.Equal(t, CodexClientRestrictionReasonNotMatchedUA, result.Reason)
 	})
 
 	t.Run("开启后官方 originator 不能单独命中", func(t *testing.T) {
@@ -222,6 +251,59 @@ func TestOpenAICodexClientRestrictionDetector_Detect_DoesNotReadRequestBody(t *t
 	require.True(t, result.Enabled)
 	require.False(t, result.Matched)
 	require.Equal(t, CodexClientRestrictionReasonNotMatchedUA, result.Reason)
+}
+
+func TestOpenAICodexClientRestrictionDetector_Detect_NilRequestFailsClosed(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	detector := NewOpenAICodexClientRestrictionDetector(nil)
+
+	result := detector.Detect(c, newCodexCLIOnlyDetectorTestAccount(nil), nil)
+	require.True(t, result.Enabled)
+	require.False(t, result.Matched)
+	require.Equal(t, CodexClientRestrictionReasonNotMatchedUA, result.Reason)
+}
+
+func TestHasNonEmptyCodexHTTPHeader(t *testing.T) {
+	tests := []struct {
+		name    string
+		headers http.Header
+		want    bool
+	}{
+		{
+			name:    "missing",
+			headers: http.Header{"User-Agent": []string{"codex_cli_rs/0.99.0"}},
+			want:    false,
+		},
+		{
+			name:    "empty codex header",
+			headers: http.Header{"x-codex-installation-id": []string{"", "  "}},
+			want:    false,
+		},
+		{
+			name:    "non empty lowercase codex header",
+			headers: http.Header{"x-codex-installation-id": []string{"test-installation"}},
+			want:    true,
+		},
+		{
+			name:    "non empty canonical codex header",
+			headers: http.Header{"X-Codex-Window-Id": []string{"window-1"}},
+			want:    true,
+		},
+		{
+			name:    "bounded prefix only",
+			headers: http.Header{"x-codextra-installation-id": []string{"test-installation"}},
+			want:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, hasNonEmptyCodexHTTPHeader(tt.headers))
+		})
+	}
 }
 
 func TestOpenAICodexClientRestrictionDetector_Detect_AllowedClients(t *testing.T) {
