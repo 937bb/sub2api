@@ -754,8 +754,9 @@ func TestApplyCodexOAuthTransform_DoesNotAddSparkImageUnsupportedForNonSpark(t *
 
 func TestApplyCodexOAuthTransform_StripsImageGenerationToolForSpark(t *testing.T) {
 	reqBody := map[string]any{
-		"model": "gpt-5.3-codex-spark",
-		"input": "hello",
+		"model":       "gpt-5.3-codex-spark",
+		"input":       "hello",
+		"tool_choice": map[string]any{"type": "image_generation"},
 		"tools": []any{
 			map[string]any{"type": "function", "name": "shell"},
 			map[string]any{"type": "image_generation", "output_format": "png"},
@@ -765,6 +766,7 @@ func TestApplyCodexOAuthTransform_StripsImageGenerationToolForSpark(t *testing.T
 	result := applyCodexOAuthTransform(reqBody, true, false)
 	require.True(t, result.Modified)
 	require.False(t, hasOpenAIImageGenerationTool(reqBody))
+	require.NotContains(t, reqBody, "tool_choice")
 
 	tools, ok := reqBody["tools"].([]any)
 	require.True(t, ok)
@@ -803,6 +805,78 @@ func TestApplyCodexOAuthTransform_KeepsImageGenerationToolForNonSpark(t *testing
 	require.True(t, hasOpenAIImageGenerationTool(reqBody))
 }
 
+func TestStripCodexSparkImageGenerationTooling_RemovesToolChoice(t *testing.T) {
+	reqBody := map[string]any{
+		"model":       "gpt-5.3-codex-spark",
+		"tool_choice": map[string]any{"type": "image_generation"},
+		"tools": []any{
+			map[string]any{"type": "function", "name": "shell"},
+			map[string]any{"type": "image_generation", "output_format": "png"},
+		},
+	}
+
+	modified := stripCodexSparkImageGenerationTooling(reqBody, "gpt-5.3-codex-spark")
+	require.True(t, modified)
+	require.False(t, hasOpenAIImageGenerationTool(reqBody))
+	require.NotContains(t, reqBody, "tool_choice")
+
+	tools, ok := reqBody["tools"].([]any)
+	require.True(t, ok)
+	require.Len(t, tools, 1)
+	first, ok := tools[0].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "function", first["type"])
+	require.Equal(t, "shell", first["name"])
+}
+
+func TestStripCodexSparkImageGenerationTooling_RemovesOnlyToolChoice(t *testing.T) {
+	reqBody := map[string]any{
+		"model":       "gpt-5.3-codex-spark-high",
+		"tool_choice": map[string]any{"type": "image_generation"},
+		"tools": []any{
+			map[string]any{"type": "function", "name": "shell"},
+		},
+	}
+
+	modified := stripCodexSparkImageGenerationTooling(reqBody, "gpt-5.3-codex-spark")
+	require.True(t, modified)
+	require.NotContains(t, reqBody, "tool_choice")
+	require.True(t, codexToolsContainFunctionName(reqBody["tools"], "shell"))
+}
+
+func TestStripCodexSparkImageGenerationTooling_PreservesNonImageToolChoice(t *testing.T) {
+	reqBody := map[string]any{
+		"model":       "gpt-5.3-codex-spark",
+		"tool_choice": map[string]any{"type": "function", "name": "shell"},
+		"tools": []any{
+			map[string]any{"type": "function", "name": "shell"},
+			map[string]any{"type": "image_generation", "output_format": "png"},
+		},
+	}
+
+	modified := stripCodexSparkImageGenerationTooling(reqBody, "gpt-5.3-codex-spark")
+	require.True(t, modified)
+	require.False(t, hasOpenAIImageGenerationTool(reqBody))
+	choice, ok := reqBody["tool_choice"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "function", choice["type"])
+	require.Equal(t, "shell", choice["name"])
+}
+
+func TestStripCodexSparkImageGenerationTooling_PreservesNonSpark(t *testing.T) {
+	reqBody := map[string]any{
+		"model":       "gpt-5.3-codex",
+		"tool_choice": map[string]any{"type": "image_generation"},
+		"tools": []any{
+			map[string]any{"type": "image_generation", "output_format": "png"},
+		},
+	}
+
+	modified := stripCodexSparkImageGenerationTooling(reqBody, "gpt-5.3-codex")
+	require.False(t, modified)
+	require.True(t, hasOpenAIImageGenerationTool(reqBody))
+	require.Contains(t, reqBody, "tool_choice")
+}
 func TestNormalizeOpenAIResponsesImageOnlyModel_BuildsImageToolRequest(t *testing.T) {
 	reqBody := map[string]any{
 		"model":         "gpt-image-2",

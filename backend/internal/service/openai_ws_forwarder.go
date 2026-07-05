@@ -2784,21 +2784,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 }
 
 func stripCodexSparkImageGenerationToolFromRawPayload(payload []byte, model string, account *Account) ([]byte, bool, error) {
-	if !isCodexSparkModel(model) || !openAIRequestBodyHasImageGenerationTool(payload) {
-		return payload, false, nil
-	}
-	payloadMap, err := decodeOpenAIWSBridgePayloadMap(payload, account)
-	if err != nil {
-		return payload, false, err
-	}
-	if !stripCodexSparkImageGenerationTools(payloadMap) {
-		return payload, false, nil
-	}
-	rebuilt, err := json.Marshal(payloadMap)
-	if err != nil {
-		return payload, false, err
-	}
-	return rebuilt, true, nil
+	return stripCodexSparkImageGenerationToolingFromBody(payload, model)
 }
 
 // ProxyResponsesWebSocketFromClient 处理客户端入站 WebSocket（OpenAI Responses WS Mode）并转发到上游。

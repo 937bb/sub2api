@@ -15,6 +15,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 func TestOpenAIStreamingResponseFailedSanitizesVerboseResponseForClientAndKeepsUsage(t *testing.T) {
@@ -533,6 +534,29 @@ func TestOpenAIForwardNonStreamingSSEResponseFailedEventLineSanitizesAPIKeyPasst
 
 	detail := passthroughPrivacyOpsDetailValue(t, c)
 	passthroughPrivacyRequireSanitizedFailedText(t, detail)
+}
+
+func TestOpenAIPassthroughDoesNotStripSparkImageGenerationTooling(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	body := []byte(`{"model":"gpt-5.3-codex-spark","stream":false,"input":"hi","tools":[{"type":"image_generation"}],"tool_choice":{"type":"image_generation"}}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(string(body)))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	upstream := &httpUpstreamRecorder{resp: passthroughPrivacyNonStreamingResponseFailedNoTypeStatusHTTPResponse("resp_passthrough_spark_tooling", "rid-passthrough-spark-tooling")}
+	svc := &OpenAIGatewayService{
+		cfg:          passthroughPrivacyTestConfig(),
+		httpUpstream: upstream,
+	}
+
+	result, err := svc.Forward(context.Background(), c, passthroughPrivacyAPIKeyPassthroughAccount(), body)
+	_ = result
+	require.Error(t, err)
+	require.Equal(t, body, upstream.lastBody)
+	require.True(t, gjson.GetBytes(upstream.lastBody, `tools.#(type=="image_generation")`).Exists())
+	require.Equal(t, "image_generation", gjson.GetBytes(upstream.lastBody, "tool_choice.type").String())
 }
 
 func passthroughPrivacyTestConfig() *config.Config {

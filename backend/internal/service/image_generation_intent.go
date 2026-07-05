@@ -106,6 +106,14 @@ func openAIRequestBodyHasImageGenerationTool(body []byte) bool {
 	return openAIJSONToolsContainImageGeneration(gjson.GetBytes(body, "tools"))
 }
 
+func openAIRequestBodyHasImageGenerationTooling(body []byte) bool {
+	if len(body) == 0 || !gjson.ValidBytes(body) {
+		return false
+	}
+	return openAIJSONToolsContainImageGeneration(gjson.GetBytes(body, "tools")) ||
+		openAIJSONToolChoiceSelectsImageGeneration(gjson.GetBytes(body, "tool_choice"))
+}
+
 func openAIRequestBodyImageGenerationToolNeedsNormalization(body []byte) bool {
 	if len(body) == 0 || !gjson.ValidBytes(body) {
 		return false

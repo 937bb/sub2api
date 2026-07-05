@@ -350,6 +350,16 @@ func buildOpenAIChatCompletionsResponsesShapeBridgeBody(body []byte, upstreamMod
 	if err != nil {
 		return nil, "", fmt.Errorf("normalize service_tier in responses-shape body: %w", err)
 	}
+	if account != nil && account.Type == AccountTypeAPIKey {
+		var stripped bool
+		responsesBody, stripped, err = stripCodexSparkImageGenerationToolingFromBody(responsesBody, upstreamModel)
+		if err != nil {
+			return nil, "", fmt.Errorf("strip spark image_generation tooling in responses-shape body: %w", err)
+		}
+		if stripped {
+			normalizedServiceTier = strings.TrimSpace(gjson.GetBytes(responsesBody, "service_tier").String())
+		}
+	}
 	return responsesBody, normalizedServiceTier, nil
 }
 

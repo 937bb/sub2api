@@ -183,7 +183,7 @@ func applyCodexOAuthTransformWithOptions(reqBody map[string]any, opts codexOAuth
 		result.Modified = true
 	}
 	// Codex CLI advertises image_generation by default, but Spark rejects it.
-	if isCodexSparkModel(normalizedModel) && stripCodexSparkImageGenerationTools(reqBody) {
+	if stripCodexSparkImageGenerationTooling(reqBody, normalizedModel) {
 		result.Modified = true
 	}
 
@@ -564,9 +564,49 @@ func hasOpenAIImageGenerationTool(reqBody map[string]any) bool {
 	return false
 }
 
-// stripCodexSparkImageGenerationTools removes image_generation tool entries from
-// Spark requests. If the list becomes empty, tools is removed instead of sending
-// an empty tool list upstream.
+// stripCodexSparkImageGenerationTooling removes Spark-unsupported
+// image_generation tooling while preserving unrelated tools and choices.
+func stripCodexSparkImageGenerationTooling(reqBody map[string]any, model string) bool {
+	if len(reqBody) == 0 {
+		return false
+	}
+	model = strings.TrimSpace(model)
+	if model == "" {
+		model = strings.TrimSpace(firstNonEmptyString(reqBody["model"]))
+	}
+	if !isCodexSparkModel(model) {
+		return false
+	}
+
+	modified := stripCodexSparkImageGenerationTools(reqBody)
+	if openAIAnyToolChoiceSelectsImageGeneration(reqBody["tool_choice"]) {
+		delete(reqBody, "tool_choice")
+		modified = true
+	}
+	return modified
+}
+
+func stripCodexSparkImageGenerationToolingFromBody(body []byte, model string) ([]byte, bool, error) {
+	if !isCodexSparkModel(model) || !openAIRequestBodyHasImageGenerationTooling(body) {
+		return body, false, nil
+	}
+	reqBody, err := decodeOpenAIRequestBodyMapUseNumber(body)
+	if err != nil {
+		return body, false, err
+	}
+	if !stripCodexSparkImageGenerationTooling(reqBody, model) {
+		return body, false, nil
+	}
+	rebuilt, err := marshalOpenAIUpstreamJSON(reqBody)
+	if err != nil {
+		return body, false, err
+	}
+	return rebuilt, true, nil
+}
+
+// stripCodexSparkImageGenerationTools removes image_generation tool entries.
+// If the list becomes empty, tools is removed instead of sending an empty tool
+// list upstream.
 func stripCodexSparkImageGenerationTools(reqBody map[string]any) bool {
 	rawTools, ok := reqBody["tools"]
 	if !ok || rawTools == nil {
