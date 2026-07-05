@@ -1301,6 +1301,11 @@ func TestOpenAIImagesSSEClientErrorsAreNotRetryable(t *testing.T) {
 			payload:    `{"type":"response.incomplete","response":{"id":"resp_filter","status":"incomplete","incomplete_details":{"reason":"content_filter"}}}`,
 			wantStatus: http.StatusBadRequest,
 		},
+		{
+			name:       "incomplete content filter with whitespace",
+			payload:    `{"type":"response.incomplete","response":{"id":"resp_filter","status":"incomplete","incomplete_details":{"reason":" content_filter "}}}`,
+			wantStatus: http.StatusBadRequest,
+		},
 	}
 
 	for _, tt := range tests {
@@ -1314,16 +1319,19 @@ func TestOpenAIImagesSSEClientErrorsAreNotRetryable(t *testing.T) {
 }
 
 func TestOpenAIImagesSSEIncompleteMaxOutputTokensIsRetryable(t *testing.T) {
-	upstreamErr := openAIImagesUpstreamErrorFromSSEPayload([]byte(
-		`{"type":"response.incomplete","response":{"id":"resp_incomplete","status":"incomplete","incomplete_details":{"reason":"max_output_tokens"}}}`,
-	))
+	for _, reason := range []string{"max_output_tokens", " max_output_tokens "} {
+		upstreamErr := openAIImagesUpstreamErrorFromSSEPayload([]byte(fmt.Sprintf(
+			`{"type":"response.incomplete","response":{"id":"resp_incomplete","status":"incomplete","incomplete_details":{"reason":%q}}}`,
+			reason,
+		)))
 
-	require.NotNil(t, upstreamErr)
-	require.Equal(t, http.StatusBadGateway, upstreamErr.StatusCode)
-	require.Equal(t, "upstream_error", upstreamErr.ErrorType)
-	require.Equal(t, "response_incomplete", upstreamErr.Code)
-	require.Contains(t, upstreamErr.Message, "max_output_tokens")
-	require.True(t, IsOpenAIImagesRetryableUpstreamError(upstreamErr))
+		require.NotNil(t, upstreamErr)
+		require.Equal(t, http.StatusBadGateway, upstreamErr.StatusCode)
+		require.Equal(t, "upstream_error", upstreamErr.ErrorType)
+		require.Equal(t, "response_incomplete", upstreamErr.Code)
+		require.Contains(t, upstreamErr.Message, "max_output_tokens")
+		require.True(t, IsOpenAIImagesRetryableUpstreamError(upstreamErr))
+	}
 }
 
 func TestOpenAIImagesSSEIncompleteMaxOutputTokensIsRetryable_FreeFormKnownSubstringsAreUnknown(t *testing.T) {

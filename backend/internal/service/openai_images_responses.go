@@ -664,6 +664,7 @@ func openAIImagesIncompleteReasonDiagnostic(reason string) string {
 }
 
 func openAIImagesKnownIncompleteReason(reason string) string {
+	reason = strings.TrimSpace(reason)
 	if canonical, ok := openAIImagesKnownIncompleteReasons[reason]; ok {
 		return canonical
 	}
