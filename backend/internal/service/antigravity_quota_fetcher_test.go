@@ -3,7 +3,11 @@
 package service
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -388,6 +392,86 @@ func TestBuildUsageInfo_AICredits(t *testing.T) {
 	require.Equal(t, "GOOGLE_ONE_AI", info.AICredits[0].CreditType)
 	require.Equal(t, 25.0, info.AICredits[0].Amount)
 	require.Equal(t, 5.0, info.AICredits[0].MinimumBalance)
+}
+
+func TestFetchQuota_UsesConfiguredProjectFallback(t *testing.T) {
+	originalBaseURLs := antigravity.BaseURLs
+	sawFetch := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		w.Header().Set("Content-Type", "application/json")
+
+		switch r.URL.Path {
+		case "/v1internal:fetchAvailableModels":
+			sawFetch = true
+			var req antigravity.FetchAvailableModelsRequest
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+			require.Equal(t, "fallback-project", req.Project)
+			_, _ = w.Write([]byte(`{"models":{}}`))
+		case "/v1internal:loadCodeAssist":
+			_, _ = w.Write([]byte(`{"currentTier":{"id":"free-tier"}}`))
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	antigravity.BaseURLs = []string{server.URL}
+	t.Cleanup(func() { antigravity.BaseURLs = originalBaseURLs })
+
+	fetcher := &AntigravityQuotaFetcher{}
+	account := &Account{
+		Platform: PlatformAntigravity,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"access_token":                          "token",
+			"project_id":                            " ",
+			antigravityProjectFallbackCredentialKey: " fallback-project ",
+		},
+	}
+
+	_, err := fetcher.FetchQuota(context.Background(), account, "")
+	require.NoError(t, err)
+	require.True(t, sawFetch)
+}
+
+func TestFetchQuota_APIKeyIgnoresConfiguredProjectFallback(t *testing.T) {
+	originalBaseURLs := antigravity.BaseURLs
+	sawFetch := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		w.Header().Set("Content-Type", "application/json")
+
+		switch r.URL.Path {
+		case "/v1internal:fetchAvailableModels":
+			sawFetch = true
+			var req antigravity.FetchAvailableModelsRequest
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+			require.Equal(t, "api-project", req.Project)
+			_, _ = w.Write([]byte(`{"models":{}}`))
+		case "/v1internal:loadCodeAssist":
+			_, _ = w.Write([]byte(`{"currentTier":{"id":"free-tier"}}`))
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	antigravity.BaseURLs = []string{server.URL}
+	t.Cleanup(func() { antigravity.BaseURLs = originalBaseURLs })
+
+	fetcher := &AntigravityQuotaFetcher{}
+	account := &Account{
+		Platform: PlatformAntigravity,
+		Type:     AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"access_token":                          "token",
+			"project_id":                            " api-project ",
+			antigravityProjectFallbackCredentialKey: "fallback-project",
+		},
+	}
+
+	_, err := fetcher.FetchQuota(context.Background(), account, "")
+	require.NoError(t, err)
+	require.True(t, sawFetch)
 }
 
 func TestFetchQuota_ForbiddenReturnsIsForbidden(t *testing.T) {
