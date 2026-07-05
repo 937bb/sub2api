@@ -16,6 +16,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 func TestWriteModelNotFoundIfPureSupportMissSanitizesBody(t *testing.T) {
@@ -339,6 +340,105 @@ func TestOpenAICompatibleChatCompletionsStreamingModelNotFoundAfterPingUsesSSE(t
 	require.NotContains(t, strings.ToLower(body), "group")
 }
 
+func TestCountTokensUnsupportedModelReturnsModelNotFound(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(
+		http.MethodPost,
+		"/v1/messages/count_tokens",
+		strings.NewReader(`{"model":"claude-sonnet-4-5-20250929","messages":[{"role":"user","content":"hello"}]}`),
+	)
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	groupID := int64(7045)
+	h, cleanup := newCountTokensModelNotFoundGatewayHandler(t, groupID, []service.Account{{
+		ID:          704501,
+		Name:        "count-tokens-supported-account",
+		Platform:    service.PlatformAnthropic,
+		Type:        service.AccountTypeAPIKey,
+		Status:      service.StatusActive,
+		Schedulable: true,
+		Concurrency: 0,
+		Credentials: map[string]any{
+			"api_key":       "sk-ant-test",
+			"model_mapping": map[string]any{"claude-haiku-3-5-20241022": "claude-3-5-haiku-20241022"},
+		},
+	}})
+	defer cleanup()
+	c.Set(string(middleware.ContextKeyAPIKey), &service.APIKey{
+		ID:      704500,
+		GroupID: &groupID,
+		User:    &service.User{ID: 7045000, Status: service.StatusActive},
+		Group:   &service.Group{ID: groupID, Platform: service.PlatformAnthropic, Status: service.StatusActive},
+	})
+	c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 7045000, Concurrency: 0})
+
+	h.CountTokens(c)
+
+	require.Equal(t, http.StatusNotFound, rec.Code)
+	body := rec.Body.String()
+	var payload struct {
+		Type  string `json:"type"`
+		Error struct {
+			Type    string `json:"type"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &payload))
+	require.Equal(t, "error", payload.Type)
+	require.Equal(t, "model_not_found", payload.Error.Type)
+	require.Equal(t, `The model "claude-sonnet-4-5-20250929" was not found.`, payload.Error.Message)
+	require.NotContains(t, body, "claude-3-5-haiku-20241022")
+	require.NotContains(t, strings.ToLower(body), "account")
+	require.NotContains(t, strings.ToLower(body), "group")
+}
+
+func TestCountTokensTemporaryUnavailableRemains503(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(
+		http.MethodPost,
+		"/v1/messages/count_tokens",
+		strings.NewReader(`{"model":"claude-haiku-3-5-20241022","messages":[{"role":"user","content":"hello"}]}`),
+	)
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	groupID := int64(7046)
+	pausedUntil := time.Now().Add(time.Hour)
+	h, cleanup := newCountTokensModelNotFoundGatewayHandler(t, groupID, []service.Account{{
+		ID:                      704601,
+		Name:                    "count-tokens-temporarily-unavailable-account",
+		Platform:                service.PlatformAnthropic,
+		Type:                    service.AccountTypeAPIKey,
+		Status:                  service.StatusActive,
+		Schedulable:             true,
+		TempUnschedulableUntil:  &pausedUntil,
+		TempUnschedulableReason: "transient upstream health",
+		Concurrency:             0,
+		Credentials: map[string]any{
+			"api_key":       "sk-ant-test",
+			"model_mapping": map[string]any{"claude-haiku-3-5-20241022": "claude-3-5-haiku-20241022"},
+		},
+	}})
+	defer cleanup()
+	c.Set(string(middleware.ContextKeyAPIKey), &service.APIKey{
+		ID:      704600,
+		GroupID: &groupID,
+		User:    &service.User{ID: 7046000, Status: service.StatusActive},
+		Group:   &service.Group{ID: groupID, Platform: service.PlatformAnthropic, Status: service.StatusActive},
+	})
+	c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 7046000, Concurrency: 0})
+
+	h.CountTokens(c)
+
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
+	require.Equal(t, "api_error", gjson.GetBytes(rec.Body.Bytes(), "error.type").String())
+	require.Equal(t, "Service temporarily unavailable", gjson.GetBytes(rec.Body.Bytes(), "error.message").String())
+	require.NotContains(t, rec.Body.String(), "model_not_found")
+}
+
 func TestGeminiV1BetaModelNotFoundUsesRoutePublicModel(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
@@ -487,6 +587,44 @@ func decodeGenericModelNotFoundSSEPayload(t *testing.T, body string) struct {
 	}
 	require.NoError(t, json.Unmarshal([]byte(strings.TrimPrefix(event, "data: ")), &payload))
 	return payload
+}
+
+func newCountTokensModelNotFoundGatewayHandler(t *testing.T, groupID int64, accounts []service.Account) (*GatewayHandler, func()) {
+	t.Helper()
+	cfg := &config.Config{RunMode: config.RunModeSimple}
+	billingCacheSvc := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
+	concurrencySvc := service.NewConcurrencyService(nil)
+	group := &service.Group{ID: groupID, Platform: service.PlatformAnthropic, Status: service.StatusActive}
+	gatewaySvc := service.NewGatewayService(
+		&modelNotFoundAccountRepoStub{accounts: accounts},
+		&fakeGroupRepo{group: group},
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		&modelNotFoundGatewayCacheStub{},
+		cfg,
+		nil,
+		concurrencySvc,
+		service.NewBillingService(cfg, nil),
+		nil,
+		billingCacheSvc,
+		nil,
+		nil,
+		&service.DeferredService{},
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+	)
+	return &GatewayHandler{gatewayService: gatewaySvc, billingCacheService: billingCacheSvc}, billingCacheSvc.Stop
 }
 
 type modelNotFoundGatewayCacheStub struct{}

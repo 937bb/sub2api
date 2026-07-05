@@ -1816,10 +1816,14 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 	sessionHash := h.gatewayService.GenerateSessionHash(parsedReq)
 
 	// 选择支持该模型的账号
-	account, err := h.gatewayService.SelectAccountForModel(c.Request.Context(), apiKey.GroupID, sessionHash, parsedReq.Model)
+	selectionCtx := service.WithPublicModelSupportMiss404(c.Request.Context())
+	account, err := h.gatewayService.SelectAccountForModel(selectionCtx, apiKey.GroupID, sessionHash, parsedReq.Model)
 	if err != nil {
 		reqLog.Warn("gateway.count_tokens_select_account_failed", zap.Error(err))
 		markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
+		if writeAnthropicModelNotFoundIfPureSupportMissForModel(c, err, parsedReq.Model) {
+			return
+		}
 		h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Service temporarily unavailable")
 		return
 	}
