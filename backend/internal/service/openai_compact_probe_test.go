@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -211,6 +212,160 @@ func TestSanitizeOpenAIUpstreamDiagnosticText_FailsClosedForTooDeepSensitiveJSON
 	assertDiagnosticOmits(t, got, secret, `"other":"should-be-dropped"`)
 	if !strings.Contains(got, `"access_token":"[redacted]"`) {
 		t.Fatalf("diagnostic = %s, want over-depth access_token object redacted", got)
+	}
+}
+
+func TestSanitizeOpenAIUpstreamDiagnosticText_FailsClosedForMalformedSensitiveJSONScalar(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		leaks []string
+	}{
+		{
+			name:  "truncated quoted scalar",
+			input: `{"access_token":"secret-token`,
+			leaks: []string{"secret-token"},
+		},
+		{
+			name:  "unknown unquoted scalar",
+			input: `{"access_token":secret-token,"other":"ok"}`,
+			leaks: []string{"secret-token"},
+		},
+		{
+			name:  "number prefix scalar",
+			input: `{"access_token":123secret}`,
+			leaks: []string{"123secret", "secret"},
+		},
+		{
+			name:  "true prefix scalar",
+			input: `{"access_token":true-secret}`,
+			leaks: []string{"true-secret", "secret"},
+		},
+		{
+			name:  "false prefix scalar",
+			input: `{"access_token":false-secret}`,
+			leaks: []string{"false-secret", "secret"},
+		},
+		{
+			name:  "null prefix scalar",
+			input: `{"access_token":null-secret}`,
+			leaks: []string{"null-secret", "secret"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := sanitizeOpenAIUpstreamDiagnosticText(tt.input)
+
+			assertDiagnosticOmits(t, got, tt.leaks...)
+			if !strings.Contains(got, `"access_token":"[redacted]"`) {
+				t.Fatalf("diagnostic = %s, want malformed access_token redacted", got)
+			}
+		})
+	}
+}
+
+func TestSanitizeOpenAIUpstreamDiagnosticBodyForLog_RedactsEscapedEmbeddedJSONMessage(t *testing.T) {
+	embedded := `{"access_token":"secret-access","personal_access_token":"secret-pat",` +
+		`"x-openai-fedramp":"fedramp-scalar","array":{"x-openai-fedramp":["fedramp-array"]},` +
+		`"object":{"x-openai-fedramp":{"value":"fedramp-object"}},"safe":"ok"}`
+	body, err := json.Marshal(map[string]any{
+		"error": map[string]any{
+			"message": embedded,
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal diagnostic body: %v", err)
+	}
+
+	got := sanitizeOpenAIUpstreamDiagnosticBodyForLog(body, 4096)
+
+	assertDiagnosticOmits(t, got, "secret-access", "secret-pat", "fedramp-scalar", "fedramp-array", "fedramp-object")
+	var outer map[string]any
+	if err := json.Unmarshal([]byte(got), &outer); err != nil {
+		t.Fatalf("sanitized body is not valid JSON: %v; body=%s", err, got)
+	}
+	errorObject, ok := outer["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("sanitized body error field = %#v, want object", outer["error"])
+	}
+	message, ok := errorObject["message"].(string)
+	if !ok {
+		t.Fatalf("sanitized body error.message = %#v, want string", errorObject["message"])
+	}
+	assertDiagnosticOmits(t, message,
+		"secret-access",
+		"secret-pat",
+		"fedramp-scalar",
+		"fedramp-array",
+		"fedramp-object",
+	)
+
+	var inner map[string]any
+	if err := json.Unmarshal([]byte(message), &inner); err != nil {
+		t.Fatalf("sanitized embedded message is not valid JSON: %v; message=%s", err, message)
+	}
+	if got := inner["access_token"]; got != "[redacted]" {
+		t.Fatalf("embedded access_token = %#v, want redacted", got)
+	}
+	if got := inner["personal_access_token"]; got != "[redacted]" {
+		t.Fatalf("embedded personal_access_token = %#v, want redacted", got)
+	}
+	if got := inner["x-openai-fedramp"]; got != "[redacted]" {
+		t.Fatalf("embedded x-openai-fedramp scalar = %#v, want redacted", got)
+	}
+	if got := inner["array"].(map[string]any)["x-openai-fedramp"]; got != "[redacted]" {
+		t.Fatalf("embedded x-openai-fedramp array = %#v, want redacted", got)
+	}
+	if got := inner["object"].(map[string]any)["x-openai-fedramp"]; got != "[redacted]" {
+		t.Fatalf("embedded x-openai-fedramp object = %#v, want redacted", got)
+	}
+	if got := inner["safe"]; got != "ok" {
+		t.Fatalf("embedded safe field = %#v, want preserved", got)
+	}
+}
+
+func TestSanitizeOpenAIUpstreamDiagnosticBodyForLog_FailsClosedForMalformedEscapedEmbeddedJSON(t *testing.T) {
+	tests := []struct {
+		name         string
+		body         []byte
+		wantContains []string
+	}{
+		{
+			name: "truncated escaped scalar",
+			body: []byte(`{"error":{"message":"bad {\"access_token\":\"secret-access`),
+			wantContains: []string{
+				`\"access_token\":\"[redacted]\"`,
+			},
+		},
+		{
+			name: "malformed escaped fields",
+			body: []byte(`{"error":{"message":"bad {\"access_token\":\"secret-access\",\"personal_access_token\":\"secret-pat\",\"x-openai-fedramp\":\"fedramp-scalar\",\"array\":{\"x-openai-fedramp\":[\"fedramp-array\"]},\"object\":{\"x-openai-fedramp\":{\"value\":\"fedramp-object\"}},\"safe\":\"ok"`),
+			wantContains: []string{
+				`\"access_token\":\"[redacted]\"`,
+				`\"personal_access_token\":\"[redacted]\"`,
+				`\"x-openai-fedramp\":\"[redacted]\"`,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := sanitizeOpenAIUpstreamDiagnosticBodyForLog(tt.body, 4096)
+
+			assertDiagnosticOmits(t, got,
+				"secret-access",
+				"secret-pat",
+				"fedramp-scalar",
+				"fedramp-array",
+				"fedramp-object",
+			)
+			for _, want := range tt.wantContains {
+				if !strings.Contains(got, want) {
+					t.Fatalf("diagnostic = %s, want %s", got, want)
+				}
+			}
+		})
 	}
 }
 
