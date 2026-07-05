@@ -317,7 +317,7 @@ func TestAccountTestService_OpenAIErrorSanitizesOAuthUpstreamBody(t *testing.T) 
 	installationID := "550e8400-e29b-41d4-a716-446655440000"
 	threadID := "018fed75-1b7e-7000-8000-000000000123"
 	accessToken := "setup-secret-access-token"
-	resp := newJSONResponse(http.StatusUnauthorized, fmt.Sprintf(`{"error":{"message":"bad auth x-codex-installation-id=%s thread-id=%s Authorization=Bearer %s"},"raw":{"x-codex-installation-id":"%s","thread-id":"%s","authorization":"Bearer %s"}}`, installationID, threadID, accessToken, installationID, threadID, accessToken))
+	resp := newJSONResponse(http.StatusUnauthorized, fmt.Sprintf(`{"error":{"message":"bad auth x-codex-installation-id=%s thread-id=%s Authorization=Bearer %s x-openai-fedramp=true {\"x-openai-fedramp\":true}"},"raw":{"x-codex-installation-id":"%s","thread-id":"%s","authorization":"Bearer %s"}}`, installationID, threadID, accessToken, installationID, threadID, accessToken))
 
 	repo := &openAIAccountTestRepo{}
 	upstream := &queuedHTTPUpstream{responses: []*http.Response{resp}}
@@ -335,13 +335,17 @@ func TestAccountTestService_OpenAIErrorSanitizesOAuthUpstreamBody(t *testing.T) 
 	output := recorder.Body.String()
 	require.Contains(t, output, "API returned 401")
 	require.Contains(t, repo.setErrorMsg, "Authentication failed (401)")
-	for _, leaked := range []string{installationID, threadID, accessToken, "setup-secret"} {
+	for _, leaked := range []string{installationID, threadID, accessToken, "setup-secret", "x-openai-fedramp=true", `"x-openai-fedramp":true`, `\"x-openai-fedramp\":true`} {
 		require.NotContains(t, output, leaked)
 		require.NotContains(t, repo.setErrorMsg, leaked)
 	}
 	require.Contains(t, output, "x-codex-installation-id=[redacted]")
 	require.Contains(t, output, "thread-id=[redacted]")
+	require.Contains(t, output, "x-openai-fedramp=[redacted]")
+	require.Contains(t, output, `\"x-openai-fedramp\":\"[redacted]\"`)
 	require.Contains(t, repo.setErrorMsg, "Authorization=[redacted]")
+	require.Contains(t, repo.setErrorMsg, "x-openai-fedramp=[redacted]")
+	require.Contains(t, repo.setErrorMsg, `"x-openai-fedramp":"[redacted]"`)
 }
 
 func TestAccountTestService_OpenAIPATWorkspace403MarksError(t *testing.T) {

@@ -6,7 +6,7 @@ import (
 )
 
 var (
-	openAISensitiveDiagnosticFieldPattern = `x-codex-installation-id|x-codex-window-id|session-id|thread-id|x-client-request-id|installation_id|thread_id|window_id|prompt_cache_key|session_id|conversation_id|raw_user_agent|user_agent|user-agent|authorization|access_token|refresh_token|id_token|session_token|api_key|apikey|token|personal_access_token|email|chatgpt_user_id|chatgpt_account_id|chatgpt-account-id|chatgpt_plan_type|chatgpt_account_is_fedramp`
+	openAISensitiveDiagnosticFieldPattern = `x-codex-installation-id|x-codex-window-id|session-id|thread-id|x-client-request-id|installation_id|thread_id|window_id|prompt_cache_key|session_id|conversation_id|raw_user_agent|user_agent|user-agent|authorization|access_token|refresh_token|id_token|session_token|api_key|apikey|token|personal_access_token|email|chatgpt_user_id|chatgpt_account_id|chatgpt-account-id|chatgpt_plan_type|chatgpt_account_is_fedramp|x-openai-fedramp`
 	openAISensitiveDiagnosticJSONFieldRe  = regexp.MustCompile(`(?i)("(?:` + openAISensitiveDiagnosticFieldPattern + `)"\s*:\s*)(?:"(?:\\.|[^"\\])*"|true|false|null|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)`)
 	openAISensitiveDiagnosticKVFieldRe    = regexp.MustCompile(`(?i)\b((?:` + openAISensitiveDiagnosticFieldPattern + `)\s*(?:=|:)\s*)(?:Bearer\s+)?(?:"(?:\\.|[^"\\])*"|[^\s,;"}]+)`)
 	openAISensitiveDiagnosticBearerRe     = regexp.MustCompile(`(?i)\bBearer\s+[^\s,;"}]+`)

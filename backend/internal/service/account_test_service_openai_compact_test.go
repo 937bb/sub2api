@@ -173,7 +173,7 @@ func TestAccountTestService_TestAccountConnection_OpenAICompactOAuthErrorSanitiz
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusUnauthorized,
 		Header:     http.Header{"Content-Type": []string{"application/json"}},
-		Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"compact denied x-codex-installation-id=` + installationID + ` thread-id=` + threadID + ` Authorization=Bearer ` + accessToken + `"}}`)),
+		Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"compact denied x-codex-installation-id=` + installationID + ` thread-id=` + threadID + ` Authorization=Bearer ` + accessToken + ` x-openai-fedramp=true {\"x-openai-fedramp\":true}"}}`)),
 	}}
 	svc := &AccountTestService{
 		accountRepo:  repo,
@@ -189,13 +189,17 @@ func TestAccountTestService_TestAccountConnection_OpenAICompactOAuthErrorSanitiz
 	output := rec.Body.String()
 	require.Contains(t, output, "API returned 401")
 	require.Contains(t, repo.setErrorMsg, "Authentication failed (401)")
-	for _, leaked := range []string{installationID, threadID, accessToken, "compact-secret"} {
+	for _, leaked := range []string{installationID, threadID, accessToken, "compact-secret", "x-openai-fedramp=true", `"x-openai-fedramp":true`, `\"x-openai-fedramp\":true`} {
 		require.NotContains(t, output, leaked)
 		require.NotContains(t, repo.setErrorMsg, leaked)
 	}
 	require.Contains(t, output, "x-codex-installation-id=[redacted]")
 	require.Contains(t, output, "thread-id=[redacted]")
+	require.Contains(t, output, "x-openai-fedramp=[redacted]")
+	require.Contains(t, output, `\"x-openai-fedramp\":\"[redacted]\"`)
 	require.Contains(t, repo.setErrorMsg, "Authorization=[redacted]")
+	require.Contains(t, repo.setErrorMsg, "x-openai-fedramp=[redacted]")
+	require.Contains(t, repo.setErrorMsg, `"x-openai-fedramp":"[redacted]"`)
 }
 
 func TestAccountTestService_TestAccountConnection_OpenAICompactOAuth404MarksUnsupported(t *testing.T) {
