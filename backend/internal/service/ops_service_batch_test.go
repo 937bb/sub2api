@@ -81,6 +81,15 @@ func TestOpsUpstreamErrorEventEndpointFromSafeURL(t *testing.T) {
 	require.Equal(t, "/v1/responses/compact", endpointFromSafeUpstreamURL("https://chatgpt.com/backend-api/codex/responses/compact"))
 	require.Equal(t, "/v1/chat/completions", endpointFromSafeUpstreamURL("https://compat.example.com/base/v1/chat/completions"))
 	require.Equal(t, "", endpointFromSafeUpstreamURL("https://example.com/not-openai"))
+	require.Equal(t, "", endpointFromSafeUpstreamURL("https://example.com/proxy/v1/responses-archive"))
+	require.Equal(t, "", endpointFromSafeUpstreamURL("https://compat.example.com/base/v1/chat/completions-archive"))
+	require.Equal(t, "", endpointFromSafeUpstreamURL("https://compat.example.com/base/v1/chat/completions/archive"))
+	require.Equal(t, "", endpointFromSafeUpstreamURL("https://api.openai.com/v1/images/generations/archive"))
+	require.Equal(t, "/v1beta/models", endpointFromSafeUpstreamURL("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"))
+	require.Equal(t, "/v1beta/models", endpointFromSafeUpstreamURL("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent"))
+	require.Equal(t, "", endpointFromSafeUpstreamURL("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:countTokens"))
+	require.Equal(t, "", endpointFromSafeUpstreamURL("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent/debug"))
+	require.Equal(t, "/v1/responses", endpointFromSafeUpstreamURL("/proxy/v1/responses"))
 }
 
 func TestOpsServiceRecordErrorBatch_PreservesExplicitEventEndpoint(t *testing.T) {

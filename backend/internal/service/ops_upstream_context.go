@@ -278,31 +278,48 @@ func endpointFromSafeUpstreamURL(rawURL string) string {
 	if rawURL == "" {
 		return ""
 	}
+	path := rawURL
+	if parsed, err := url.Parse(rawURL); err == nil && parsed.Path != "" {
+		path = parsed.Path
+	}
 	for _, match := range []struct {
-		path           string
-		endpoint       string
-		preserveSuffix bool
+		path                     string
+		endpoint                 string
+		preserveSuffix           bool
+		allowGeminiActionSuffix bool
 	}{
-		{"/v1/chat/completions", "/v1/chat/completions", false},
-		{"/v1/responses", "/v1/responses", true},
-		{"/backend-api/codex/responses", "/v1/responses", true},
-		{"/v1/messages", "/v1/messages", false},
-		{"/v1/embeddings", "/v1/embeddings", false},
-		{"/v1/images/generations", "/v1/images/generations", false},
-		{"/v1/images/edits", "/v1/images/edits", false},
-		{"/v1beta/models", "/v1beta/models", false},
+		{"/v1/chat/completions", "/v1/chat/completions", false, false},
+		{"/v1/responses", "/v1/responses", true, false},
+		{"/backend-api/codex/responses", "/v1/responses", true, false},
+		{"/v1/messages", "/v1/messages", false, false},
+		{"/v1/embeddings", "/v1/embeddings", false, false},
+		{"/v1/images/generations", "/v1/images/generations", false, false},
+		{"/v1/images/edits", "/v1/images/edits", false, false},
+		{"/v1beta/models", "/v1beta/models", false, true},
 	} {
-		if idx := strings.Index(rawURL, match.path); idx >= 0 {
-			if match.preserveSuffix {
-				suffix := strings.TrimRight(rawURL[idx+len(match.path):], "/")
-				if strings.HasPrefix(suffix, "/") {
-					return match.endpoint + suffix
-				}
+		if idx := strings.Index(path, match.path); idx >= 0 {
+			suffix := strings.TrimRight(path[idx+len(match.path):], "/")
+			if suffix != "" && !strings.HasPrefix(suffix, "/") {
+				continue
+			}
+			if match.preserveSuffix && suffix != "" {
+				return match.endpoint + suffix
+			}
+			if suffix != "" && !(match.allowGeminiActionSuffix && isGeminiGenerateContentSuffix(suffix)) {
+				continue
 			}
 			return match.endpoint
 		}
 	}
 	return ""
+}
+
+func isGeminiGenerateContentSuffix(suffix string) bool {
+	suffix = strings.TrimPrefix(strings.TrimSpace(suffix), "/")
+	if suffix == "" || strings.Contains(suffix, "/") {
+		return false
+	}
+	return strings.HasSuffix(suffix, ":generateContent") || strings.HasSuffix(suffix, ":streamGenerateContent")
 }
 
 func upstreamURLFromResponse(resp *http.Response) string {
