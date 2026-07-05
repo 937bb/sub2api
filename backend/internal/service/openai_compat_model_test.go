@@ -466,6 +466,11 @@ func TestForwardAsAnthropic_StreamingResponseFailedAfterOutputReturnsUsage(t *te
 	require.True(t, OpenAICompatAnthropicClientOutputStarted(c))
 	require.Contains(t, rec.Body.String(), `event: content_block_delta`)
 	require.Contains(t, rec.Body.String(), `late upstream failure`)
+
+	events := openAICompatOpsEvents(t, c)
+	require.Len(t, events, 1)
+	require.Equal(t, "stream_failed", events[0].Kind)
+	require.Equal(t, "/v1/responses", events[0].UpstreamEndpoint)
 }
 
 func TestForwardAsAnthropic_BufferedMissingTerminalTriggersFailover(t *testing.T) {
@@ -2219,6 +2224,8 @@ func TestForwardAsAnthropic_MissingTerminalAfterOutputRecordsOpsWithoutFailover(
 	require.Equal(t, int64(1), events[0].AccountID)
 	require.Equal(t, "rid_partial_missing_terminal", events[0].UpstreamRequestID)
 	require.Contains(t, events[0].Message, "terminal event")
+	require.Equal(t, "https://chatgpt.com/backend-api/codex/responses", events[0].UpstreamURL)
+	require.Equal(t, "/v1/responses", events[0].UpstreamEndpoint)
 }
 
 func TestForwardAsAnthropic_MissingTerminalAfterClientDisconnectSkipsOpsAndFailover(t *testing.T) {

@@ -1001,7 +1001,7 @@ func TestOpsErrorLoggerRecoveredUpstreamUsesEventEndpoint(t *testing.T) {
 	require.Equal(t, EndpointResponses, entry.UpstreamEndpoint)
 }
 
-func TestOpsErrorLoggerRecoveredUpstreamFallsBackToRequestEndpoint(t *testing.T) {
+func TestOpsErrorLoggerRecoveredUpstreamKeepsBlankEventEndpoint(t *testing.T) {
 	entry := runOpsErrorLoggerEndpointAttributionTest(t, &service.OpsUpstreamErrorEvent{
 		Platform:           service.PlatformOpenAI,
 		AccountID:          101,
@@ -1013,7 +1013,7 @@ func TestOpsErrorLoggerRecoveredUpstreamFallsBackToRequestEndpoint(t *testing.T)
 
 	require.NotNil(t, entry.AccountID)
 	require.Equal(t, int64(101), *entry.AccountID)
-	require.Equal(t, EndpointChatCompletions, entry.UpstreamEndpoint)
+	require.Empty(t, entry.UpstreamEndpoint)
 }
 
 func runOpsErrorLoggerEndpointAttributionTest(t *testing.T, ev *service.OpsUpstreamErrorEvent) *service.OpsInsertErrorLogInput {

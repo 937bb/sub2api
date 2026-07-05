@@ -50,7 +50,13 @@ func (u *httpUpstreamRecorder) Do(req *http.Request, proxyURL string, accountID 
 	if len(u.responses) > 0 {
 		resp := u.responses[0]
 		u.responses = u.responses[1:]
+		if resp != nil && resp.Request == nil {
+			resp.Request = req
+		}
 		return resp, nil
+	}
+	if u.resp != nil && u.resp.Request == nil {
+		u.resp.Request = req
 	}
 	return u.resp, nil
 }

@@ -541,7 +541,7 @@ func openAICompatTopLevelFailedResponse(event *apicompat.ResponsesStreamEvent, p
 	return &resp
 }
 
-func (s *OpenAIGatewayService) recordOpenAIMessagesStreamUpstreamError(c *gin.Context, account *Account, upstreamRequestID, kind, message string) {
+func (s *OpenAIGatewayService) recordOpenAIMessagesStreamUpstreamError(c *gin.Context, account *Account, upstreamRequestID, upstreamURL, kind, message string) {
 	if c == nil {
 		return
 	}
@@ -551,6 +551,7 @@ func (s *OpenAIGatewayService) recordOpenAIMessagesStreamUpstreamError(c *gin.Co
 		Platform:           PlatformOpenAI,
 		UpstreamStatusCode: http.StatusBadGateway,
 		UpstreamRequestID:  strings.TrimSpace(upstreamRequestID),
+		UpstreamURL:        safeUpstreamURL(upstreamURL),
 		Kind:               kind,
 		Message:            message,
 	}
@@ -750,6 +751,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 	startTime time.Time,
 ) (*OpenAIForwardResult, error) {
 	requestID := resp.Header.Get("x-request-id")
+	upstreamURL := upstreamURLFromResponse(resp)
 
 	headersWritten := false
 	writeStreamHeaders := func() {
@@ -866,6 +868,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 				streamFailoverErr = s.newOpenAIStreamFailoverError(c, account, false, requestID, payloadBytes, message)
 				return true
 			}
+			s.recordOpenAIMessagesStreamUpstreamError(c, account, requestID, upstreamURL, "stream_failed", message)
 			streamErr = fmt.Errorf("upstream response failed: %s", message)
 			if !clientDisconnected {
 				if c != nil && c.Writer != nil && c.Writer.Written() {
@@ -1002,7 +1005,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 		if !OpenAICompatAnthropicClientOutputStarted(c) {
 			return result, s.newOpenAIStreamFailoverError(c, account, false, requestID, nil, message)
 		}
-		s.recordOpenAIMessagesStreamUpstreamError(c, account, requestID, "stream_missing_terminal", message)
+		s.recordOpenAIMessagesStreamUpstreamError(c, account, requestID, upstreamURL, "stream_missing_terminal", message)
 		return result, fmt.Errorf("stream usage incomplete: missing terminal event")
 	}
 	processFrame := func(frame openAICompatSSEFrame) bool {

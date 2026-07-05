@@ -439,8 +439,11 @@ func opsEventUpstreamEndpoint(ev *service.OpsUpstreamErrorEvent) string {
 }
 
 func resolveOpsLogUpstreamEndpoint(c *gin.Context, platform string, ev *service.OpsUpstreamErrorEvent) string {
-	if endpoint := opsEventUpstreamEndpoint(ev); endpoint != "" {
-		return endpoint
+	if ev != nil {
+		if endpoint := opsEventUpstreamEndpoint(ev); endpoint != "" {
+			return endpoint
+		}
+		return ""
 	}
 	return getOpsUpstreamEndpoint(c, platform)
 }
