@@ -13,6 +13,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+	"github.com/Wei-Shaw/sub2api/internal/util/logredact"
 )
 
 // tokenRefreshTempUnschedDuration token 刷新重试耗尽后临时不可调度的持续时间
@@ -307,7 +308,7 @@ func (s *TokenRefreshService) refreshWithRetry(ctx context.Context, account *Acc
 
 		// 不可重试错误（invalid_grant/invalid_client 等）直接标记 error 状态并返回
 		if isNonRetryableRefreshError(err) {
-			errorMsg := fmt.Sprintf("Token refresh failed (non-retryable): %v", err)
+			errorMsg := fmt.Sprintf("Token refresh failed (non-retryable): %s", redactRefreshErrorText(err))
 			s.notifyAccountSchedulingBlocked(account, time.Time{}, "token_refresh_non_retryable")
 			if setErr := s.accountRepo.SetError(ctx, account.ID, errorMsg); setErr != nil {
 				slog.Error("token_refresh.set_error_status_failed",
@@ -344,7 +345,7 @@ func (s *TokenRefreshService) refreshWithRetry(ctx context.Context, account *Acc
 
 	// 设置临时不可调度 10 分钟（不标记 error，保持 status=active 让下个刷新周期能继续尝试）
 	until := time.Now().Add(tokenRefreshTempUnschedDuration)
-	reason := fmt.Sprintf("token refresh retry exhausted: %v", lastErr)
+	reason := fmt.Sprintf("token refresh retry exhausted: %s", redactRefreshErrorText(lastErr))
 	s.notifyAccountSchedulingBlocked(account, until, "token_refresh_retry_exhausted")
 	if setErr := s.accountRepo.SetTempUnschedulable(ctx, account.ID, until, reason); setErr != nil {
 		slog.Warn("token_refresh.set_temp_unschedulable_failed",
@@ -359,6 +360,13 @@ func (s *TokenRefreshService) refreshWithRetry(ctx context.Context, account *Acc
 	}
 
 	return lastErr
+}
+
+func redactRefreshErrorText(err error) string {
+	if err == nil {
+		return "<nil>"
+	}
+	return logredact.RedactText(err.Error())
 }
 
 // postRefreshActions 刷新成功后的后续动作（清除错误状态、缓存失效、调度器同步等）
