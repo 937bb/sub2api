@@ -45,7 +45,6 @@ var (
 	openAISensitiveDiagnosticJSONFieldRe      = regexp.MustCompile(`(?i)("(?:` + openAISensitiveDiagnosticFieldPattern + `)"\s*:\s*)(?:"(?:\\.|[^"\\])*"|true|false|null|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)(\s*(?:[,}\]]|$))`)
 	openAISensitiveDiagnosticJSONKeyRe        = regexp.MustCompile(`(?i)"(?:` + openAISensitiveDiagnosticFieldPattern + `)"\s*:\s*`)
 	openAISensitiveDiagnosticEscapedJSONKeyRe = regexp.MustCompile(`(?i)\\"(?:` + openAISensitiveDiagnosticFieldPattern + `)\\"\s*:\s*`)
-	openAISensitiveDiagnosticKVFieldRe        = regexp.MustCompile(`(?i)\b((?:` + openAISensitiveDiagnosticFieldPattern + `)\s*(?:=|:)\s*)(?:Bearer\s+)?(?:"(?:\\.|[^"\\])*"|[^\s,;"}]+)`)
 	openAISensitiveDiagnosticBearerRe         = regexp.MustCompile(`(?i)\bBearer\s+[^\s,;"}]+`)
 	openAISensitiveDiagnosticUUIDRe           = regexp.MustCompile(`(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b`)
 	openAISensitiveDiagnosticCodexUARe        = regexp.MustCompile(`(?i)codex-tui/[^\s";]+\s+\([^"\)]*\)\s+[^\s"]+\s+\(codex-tui;\s*[^\)]*\)`)
@@ -53,6 +52,8 @@ var (
 
 const (
 	openAISensitiveDiagnosticJSONCompositeMaxScan = 8192
+	openAISensitiveDiagnosticJSONKeyMaxScan       = 512
+	openAISensitiveDiagnosticKVValueMaxScan       = 8192
 	openAISensitiveDiagnosticJSONMaxDepth         = 16
 	openAISensitiveDiagnosticJSONBodyMaxParse     = 512 << 10
 	openAISensitiveDiagnosticEmbeddedJSONMaxParse = 64 << 10
@@ -62,17 +63,493 @@ func sanitizeOpenAIUpstreamDiagnosticText(text string) string {
 	if text == "" {
 		return text
 	}
+	text = redactOpenAISensitiveDiagnosticEscapedJSONFields(text)
+	text = redactOpenAISensitiveDiagnosticKVFields(text)
 	text = sanitizeUpstreamErrorMessage(text)
 	text = redactOpenAISensitiveDiagnosticEscapedJSONFields(text)
+	text = redactOpenAISensitiveDiagnosticNormalizedJSONFields(text)
 	text = openAISensitiveDiagnosticJSONFieldRe.ReplaceAllString(text, `$1"[redacted]"$2`)
 	text = redactOpenAISensitiveDiagnosticJSONCompositeFields(text)
 	text = redactOpenAISensitiveDiagnosticJSONRemainderFields(text)
 	text = redactOpenAISensitiveDiagnosticEscapedJSONFields(text)
+	text = redactOpenAISensitiveDiagnosticNormalizedJSONFields(text)
 	text = openAISensitiveDiagnosticBearerRe.ReplaceAllString(text, "Bearer [redacted]")
 	text = openAISensitiveDiagnosticCodexUARe.ReplaceAllString(text, "[codex-user-agent-redacted]")
-	text = openAISensitiveDiagnosticKVFieldRe.ReplaceAllString(text, `$1[redacted]`)
+	text = redactOpenAISensitiveDiagnosticKVFields(text)
 	text = openAISensitiveDiagnosticUUIDRe.ReplaceAllString(text, "[uuid-redacted]")
 	return text
+}
+
+func redactOpenAISensitiveDiagnosticKVFields(text string) string {
+	var b strings.Builder
+	last := 0
+	changed := false
+
+	for i := 0; i < len(text); i++ {
+		if !openAISensitiveDiagnosticCanStartKVKey(text, i) {
+			continue
+		}
+		keyEnd, ok := openAISensitiveDiagnosticMatchKVKey(text, i)
+		if !ok {
+			continue
+		}
+		if openAISensitiveDiagnosticShouldSkipKVQuotedJSONKey(text, i, keyEnd) {
+			continue
+		}
+		valueStart, safePrefixEnd, failClosed, ok := openAISensitiveDiagnosticKVValueStart(text, keyEnd)
+		if failClosed {
+			b.WriteString(text[last:safePrefixEnd])
+			b.WriteString("[redacted]")
+			return b.String()
+		}
+		if !ok {
+			continue
+		}
+
+		b.WriteString(text[last:valueStart])
+		b.WriteString("[redacted]")
+		changed = true
+
+		valueEnd, ok := openAISensitiveDiagnosticKVValueEnd(text, valueStart)
+		if !ok {
+			return b.String()
+		}
+		last = valueEnd
+		i = valueEnd - 1
+	}
+
+	if !changed {
+		return text
+	}
+	b.WriteString(text[last:])
+	return b.String()
+}
+
+func openAISensitiveDiagnosticCanStartKVKey(text string, index int) bool {
+	if index >= len(text) {
+		return false
+	}
+	ch := text[index]
+	if !openAISensitiveDiagnosticIsASCIIAlpha(ch) {
+		return false
+	}
+	return index == 0 || !openAISensitiveDiagnosticIsRegexWordChar(text[index-1])
+}
+
+func openAISensitiveDiagnosticMatchKVKey(text string, start int) (int, bool) {
+	for _, key := range openAISensitiveDiagnosticFieldNames {
+		end := start + len(key)
+		if end > len(text) {
+			continue
+		}
+		if strings.EqualFold(text[start:end], key) && (end == len(text) || !openAISensitiveDiagnosticIsRegexWordChar(text[end])) {
+			return end, true
+		}
+	}
+	return 0, false
+}
+
+func openAISensitiveDiagnosticShouldSkipKVQuotedJSONKey(text string, start, keyEnd int) bool {
+	if start > 0 && text[start-1] == '"' && keyEnd < len(text) && text[keyEnd] == '"' {
+		i, ok := openAISensitiveDiagnosticKVSkipWhitespaceBounded(text, keyEnd+1)
+		if !ok {
+			return false
+		}
+		return i < len(text) && text[i] == ':'
+	}
+
+	if start > 1 && text[start-1] == '"' && openAISensitiveDiagnosticIsEscapedJSONQuote(text, start-1) &&
+		keyEnd+1 < len(text) && text[keyEnd] == '\\' && text[keyEnd+1] == '"' &&
+		openAISensitiveDiagnosticIsEscapedJSONQuote(text, keyEnd+1) {
+		i, ok := openAISensitiveDiagnosticKVSkipWhitespaceBounded(text, keyEnd+2)
+		if !ok {
+			return false
+		}
+		return i < len(text) && text[i] == ':'
+	}
+
+	return false
+}
+
+func openAISensitiveDiagnosticKVValueStart(text string, keyEnd int) (valueStart, safePrefixEnd int, failClosed, ok bool) {
+	i := keyEnd
+	safePrefixEnd = keyEnd
+	if i < len(text) && (text[i] == '"' || text[i] == '\'') {
+		i++
+		safePrefixEnd = i
+	} else {
+		quoteEnd, _, quoteOK, quoteUnsafe := openAISensitiveDiagnosticKVEscapedQuoteEnd(text, i)
+		if quoteUnsafe {
+			return 0, safePrefixEnd, true, false
+		}
+		if quoteOK {
+			i = quoteEnd
+			safePrefixEnd = i
+		}
+	}
+	separatorStart, ok := openAISensitiveDiagnosticKVSkipWhitespaceBounded(text, i)
+	if !ok {
+		return 0, safePrefixEnd, true, false
+	}
+	if separatorStart >= len(text) || (text[separatorStart] != '=' && text[separatorStart] != ':') {
+		return 0, 0, false, false
+	}
+	return separatorStart + 1, 0, false, true
+}
+
+func openAISensitiveDiagnosticKVValueEnd(text string, start int) (int, bool) {
+	valueStart, ok := openAISensitiveDiagnosticKVSkipValueWhitespace(text, start)
+	if !ok {
+		return 0, false
+	}
+	if valueStart >= len(text) {
+		return valueStart, true
+	}
+	if bearerStart, matched, ok := openAISensitiveDiagnosticKVBearerValueStart(text, valueStart); matched {
+		if !ok {
+			return 0, false
+		}
+		valueStart = bearerStart
+	}
+	if valueStart >= len(text) {
+		return valueStart, true
+	}
+
+	switch {
+	case text[valueStart] == '"' || text[valueStart] == '\'':
+		return openAISensitiveDiagnosticKVQuotedStringEnd(text, valueStart, text[valueStart])
+	case openAISensitiveDiagnosticStartsKVEscapedQuote(text, valueStart):
+		return openAISensitiveDiagnosticKVEscapedQuotedStringEnd(text, valueStart)
+	default:
+		return openAISensitiveDiagnosticKVUnquotedValueEnd(text, valueStart)
+	}
+}
+
+func openAISensitiveDiagnosticKVSkipValueWhitespace(text string, start int) (int, bool) {
+	return openAISensitiveDiagnosticKVSkipWhitespaceBounded(text, start)
+}
+
+func openAISensitiveDiagnosticKVSkipWhitespaceBounded(text string, start int) (int, bool) {
+	i := start
+	for i < len(text) && openAISensitiveDiagnosticIsWhitespace(text[i]) {
+		if i-start >= openAISensitiveDiagnosticKVValueMaxScan {
+			return 0, false
+		}
+		i++
+	}
+	return i, true
+}
+
+func openAISensitiveDiagnosticKVBearerValueStart(text string, start int) (int, bool, bool) {
+	const bearer = "Bearer"
+	end := start + len(bearer)
+	if end > len(text) || !strings.EqualFold(text[start:end], bearer) {
+		return 0, false, true
+	}
+	if end >= len(text) || !openAISensitiveDiagnosticIsWhitespace(text[end]) {
+		return 0, false, true
+	}
+	valueStart, ok := openAISensitiveDiagnosticKVSkipValueWhitespace(text, end)
+	if !ok {
+		return 0, true, false
+	}
+	return valueStart, true, true
+}
+
+func openAISensitiveDiagnosticKVQuotedStringEnd(text string, start int, quote byte) (int, bool) {
+	escaped := false
+	for i := start + 1; i < len(text) && i-start <= openAISensitiveDiagnosticKVValueMaxScan; i++ {
+		switch {
+		case escaped:
+			escaped = false
+		case text[i] == '\\':
+			escaped = true
+		case text[i] == quote:
+			if openAISensitiveDiagnosticKVHasQuotedValueBoundary(text, i+1) {
+				return i + 1, true
+			}
+		}
+	}
+	return 0, false
+}
+
+func openAISensitiveDiagnosticKVEscapedQuotedStringEnd(text string, start int) (int, bool) {
+	openQuoteEnd, quote, ok, _ := openAISensitiveDiagnosticKVEscapedQuoteEnd(text, start)
+	if !ok {
+		return 0, false
+	}
+	openBackslashes := openAISensitiveDiagnosticKVBackslashRunBefore(text, openQuoteEnd-1)
+	for i := openQuoteEnd; i < len(text) && i-start <= openAISensitiveDiagnosticKVValueMaxScan; i++ {
+		if text[i] != quote || !openAISensitiveDiagnosticKVHasQuotedValueBoundary(text, i+1) {
+			continue
+		}
+		// Match the quote layer that opened the value; longer runs are escaped content.
+		if openAISensitiveDiagnosticKVBackslashRunBefore(text, i) == openBackslashes {
+			return i + 1, true
+		}
+	}
+	return 0, false
+}
+
+func openAISensitiveDiagnosticKVUnquotedValueEnd(text string, start int) (int, bool) {
+	for i := start; i < len(text) && i-start <= openAISensitiveDiagnosticKVValueMaxScan; i++ {
+		switch text[i] {
+		case ' ', '\t', '\r', '\n', '\f', '\v', ',', ';', '&', '"', '}':
+			return i, true
+		}
+	}
+	if len(text)-start > openAISensitiveDiagnosticKVValueMaxScan {
+		return 0, false
+	}
+	return len(text), true
+}
+
+func openAISensitiveDiagnosticKVHasQuotedValueBoundary(text string, index int) bool {
+	if index >= len(text) {
+		return true
+	}
+	return !openAISensitiveDiagnosticIsRegexWordChar(text[index])
+}
+
+func openAISensitiveDiagnosticStartsKVEscapedQuote(text string, start int) bool {
+	_, _, ok, _ := openAISensitiveDiagnosticKVEscapedQuoteEnd(text, start)
+	return ok
+}
+
+func openAISensitiveDiagnosticKVEscapedQuoteEnd(text string, start int) (end int, quote byte, ok bool, unsafe bool) {
+	if start >= len(text) || text[start] != '\\' {
+		return 0, 0, false, false
+	}
+	i := start
+	for i < len(text) && text[i] == '\\' {
+		if i-start >= openAISensitiveDiagnosticKVValueMaxScan {
+			return 0, 0, false, true
+		}
+		i++
+	}
+	if i >= len(text) || (text[i] != '"' && text[i] != '\'') {
+		return 0, 0, false, false
+	}
+	return i + 1, text[i], true, false
+}
+
+func openAISensitiveDiagnosticIsKVEscapedQuote(text string, quoteIndex int) bool {
+	return openAISensitiveDiagnosticKVBackslashRunBefore(text, quoteIndex) > 0
+}
+
+func openAISensitiveDiagnosticKVBackslashRunBefore(text string, index int) int {
+	backslashes := 0
+	for i := index - 1; i >= 0 && text[i] == '\\'; i-- {
+		backslashes++
+	}
+	return backslashes
+}
+
+func openAISensitiveDiagnosticIsASCIIAlpha(ch byte) bool {
+	return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z')
+}
+
+func openAISensitiveDiagnosticIsRegexWordChar(ch byte) bool {
+	return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '_'
+}
+
+func openAISensitiveDiagnosticIsWhitespace(ch byte) bool {
+	switch ch {
+	case ' ', '\t', '\r', '\n', '\f', '\v':
+		return true
+	default:
+		return false
+	}
+}
+
+func redactOpenAISensitiveDiagnosticNormalizedJSONFields(text string) string {
+	var b strings.Builder
+	last := 0
+	changed := false
+
+	for i := 0; i < len(text); i++ {
+		switch text[i] {
+		case '"':
+		case '\\':
+			runEnd := openAISensitiveDiagnosticBackslashRunEnd(text, i, openAISensitiveDiagnosticJSONKeyMaxScan)
+			if runEnd >= len(text) || text[runEnd] != '"' {
+				i = runEnd - 1
+				continue
+			}
+		default:
+			continue
+		}
+		key, keyEnd, escapedKey, ok := openAISensitiveDiagnosticNormalizedJSONKey(text, i)
+		if !ok || !isOpenAISensitiveDiagnosticField(key) {
+			continue
+		}
+		valueStart, ok := openAISensitiveDiagnosticJSONFieldValueStart(text, keyEnd)
+		if !ok {
+			continue
+		}
+		if valueStart < last {
+			continue
+		}
+
+		b.WriteString(text[last:valueStart])
+		changed = true
+
+		valueEnd, ok := 0, false
+		if escapedKey || openAISensitiveDiagnosticStartsEscapedJSONValue(text, valueStart) {
+			b.WriteString(`\"[redacted]\"`)
+			valueEnd, ok = openAISensitiveDiagnosticEscapedJSONValueEnd(text, valueStart)
+		} else {
+			b.WriteString(`"[redacted]"`)
+			valueEnd, ok = openAISensitiveDiagnosticJSONValueEnd(text, valueStart)
+		}
+		if !ok {
+			return b.String()
+		}
+		last = valueEnd
+		i = valueEnd - 1
+	}
+
+	if !changed {
+		return text
+	}
+	b.WriteString(text[last:])
+	return b.String()
+}
+
+func openAISensitiveDiagnosticBackslashRunEnd(text string, start, max int) int {
+	i := start
+	for i < len(text) && text[i] == '\\' && i-start <= max {
+		i++
+	}
+	return i
+}
+
+func openAISensitiveDiagnosticNormalizedJSONKey(text string, start int) (key string, end int, escaped bool, ok bool) {
+	if start >= len(text) {
+		return "", 0, false, false
+	}
+	if text[start] == '"' && !openAISensitiveDiagnosticIsKVEscapedQuote(text, start) {
+		key, end, ok = openAISensitiveDiagnosticNormalizedJSONStringKeyEnd(text, start+1, false)
+		return key, end, false, ok
+	}
+	if text[start] != '\\' {
+		return "", 0, false, false
+	}
+	openEnd, quote, quoteOK, quoteUnsafe := openAISensitiveDiagnosticKVEscapedQuoteEnd(text, start)
+	if quoteUnsafe || !quoteOK || quote != '"' {
+		return "", 0, false, false
+	}
+	key, end, ok = openAISensitiveDiagnosticNormalizedJSONStringKeyEnd(text, openEnd, true)
+	return key, end, true, ok
+}
+
+func openAISensitiveDiagnosticNormalizedJSONStringKeyEnd(text string, start int, escapedDelimiter bool) (string, int, bool) {
+	var key strings.Builder
+	for i := start; i < len(text) && i-start <= openAISensitiveDiagnosticJSONKeyMaxScan; {
+		if escapedDelimiter {
+			if closeEnd, quote, ok, unsafe := openAISensitiveDiagnosticKVEscapedQuoteEnd(text, i); unsafe {
+				return "", 0, false
+			} else if ok && quote == '"' {
+				return key.String(), closeEnd, true
+			}
+		} else if text[i] == '"' {
+			return key.String(), i + 1, true
+		}
+
+		if text[i] == '\\' {
+			next, ok := openAISensitiveDiagnosticAppendNormalizedJSONKeyEscape(&key, text, i)
+			if !ok {
+				return "", 0, false
+			}
+			i = next
+			continue
+		}
+		if text[i] >= 0x80 {
+			return "", 0, false
+		}
+		key.WriteByte(text[i])
+		i++
+	}
+	return "", 0, false
+}
+
+func openAISensitiveDiagnosticAppendNormalizedJSONKeyEscape(b *strings.Builder, text string, slash int) (int, bool) {
+	if slash+1 >= len(text) {
+		return 0, false
+	}
+	switch text[slash+1] {
+	case '"', '\\', '/':
+		b.WriteByte(text[slash+1])
+		return slash + 2, true
+	case 'b':
+		b.WriteByte('\b')
+		return slash + 2, true
+	case 'f':
+		b.WriteByte('\f')
+		return slash + 2, true
+	case 'n':
+		b.WriteByte('\n')
+		return slash + 2, true
+	case 'r':
+		b.WriteByte('\r')
+		return slash + 2, true
+	case 't':
+		b.WriteByte('\t')
+		return slash + 2, true
+	case 'u':
+		if slash+6 > len(text) {
+			return 0, false
+		}
+		r, ok := openAISensitiveDiagnosticHex4(text[slash+2 : slash+6])
+		if !ok || r > 0x7f {
+			return 0, false
+		}
+		b.WriteByte(byte(r))
+		return slash + 6, true
+	default:
+		return 0, false
+	}
+}
+
+func openAISensitiveDiagnosticHex4(text string) (rune, bool) {
+	if len(text) != 4 {
+		return 0, false
+	}
+	var value rune
+	for i := 0; i < len(text); i++ {
+		ch := text[i]
+		value <<= 4
+		switch {
+		case ch >= '0' && ch <= '9':
+			value += rune(ch - '0')
+		case ch >= 'a' && ch <= 'f':
+			value += rune(ch-'a') + 10
+		case ch >= 'A' && ch <= 'F':
+			value += rune(ch-'A') + 10
+		default:
+			return 0, false
+		}
+	}
+	return value, true
+}
+
+func openAISensitiveDiagnosticJSONFieldValueStart(text string, keyEnd int) (int, bool) {
+	colon, ok := openAISensitiveDiagnosticKVSkipWhitespaceBounded(text, keyEnd)
+	if !ok {
+		return 0, false
+	}
+	if colon >= len(text) || text[colon] != ':' {
+		return 0, false
+	}
+	valueStart, ok := openAISensitiveDiagnosticKVSkipWhitespaceBounded(text, colon+1)
+	if !ok {
+		return 0, false
+	}
+	return valueStart, true
+}
+
+func openAISensitiveDiagnosticStartsEscapedJSONValue(text string, start int) bool {
+	return start+1 < len(text) && text[start] == '\\' && text[start+1] == '"'
 }
 
 func redactOpenAISensitiveDiagnosticJSONCompositeFields(text string) string {
