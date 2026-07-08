@@ -32,6 +32,61 @@ func TestBuildV1ModelsURL(t *testing.T) {
 	require.Equal(t, "https://gateway.example.com/antigravity/v1/models", buildV1ModelsURL("https://gateway.example.com/antigravity/"))
 }
 
+func TestBuildOpenAIModelsURL(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		base string
+		want string
+	}{
+		{
+			name: "host fallback uses v1",
+			base: "https://api.openai.com",
+			want: "https://api.openai.com/v1/models",
+		},
+		{
+			name: "openai v1 base url",
+			base: "https://api.openai.com/v1",
+			want: "https://api.openai.com/v1/models",
+		},
+		{
+			name: "models url unchanged",
+			base: "https://api.openai.com/v1/models",
+			want: "https://api.openai.com/v1/models",
+		},
+		{
+			name: "third party v4 base url",
+			base: "https://open.bigmodel.cn/api/coding/paas/v4",
+			want: "https://open.bigmodel.cn/api/coding/paas/v4/models",
+		},
+		{
+			name: "third party v4 models url unchanged",
+			base: "https://open.bigmodel.cn/api/coding/paas/v4/models",
+			want: "https://open.bigmodel.cn/api/coding/paas/v4/models",
+		},
+		{
+			name: "trailing slash on versioned base",
+			base: "https://open.bigmodel.cn/api/coding/paas/v4/",
+			want: "https://open.bigmodel.cn/api/coding/paas/v4/models",
+		},
+		{
+			name: "non versioned path appends v1",
+			base: "https://gateway.example.com/openai",
+			want: "https://gateway.example.com/openai/v1/models",
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			require.Equal(t, tt.want, buildOpenAIModelsURL(tt.base))
+		})
+	}
+}
+
 func TestBuildGeminiModelsURL(t *testing.T) {
 	t.Parallel()
 
