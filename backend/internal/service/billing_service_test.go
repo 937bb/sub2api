@@ -3,7 +3,10 @@
 package service
 
 import (
+	"bytes"
+	"log"
 	"math"
+	"strings"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -103,6 +106,34 @@ func TestGetModelPricing_CaseInsensitive(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, p1.InputPricePerToken, p2.InputPricePerToken)
+}
+
+func TestGetModelPricing_FallbackWarningDedupesByFallbackFamily(t *testing.T) {
+	svc := newTestBillingService()
+
+	var buf bytes.Buffer
+	originalOutput := log.Writer()
+	log.SetOutput(&buf)
+	defer log.SetOutput(originalOutput)
+
+	for _, model := range []string{
+		"claude-x-alpha",
+		"claude-x-bravo",
+		"claude-x-charlie",
+	} {
+		_, err := svc.GetModelPricing(model)
+		require.NoError(t, err)
+	}
+
+	require.Equal(t, 1, strings.Count(buf.String(), "Using fallback pricing for model:"))
+	require.Contains(t, buf.String(), "fallback: claude-sonnet-4")
+
+	seenCount := 0
+	svc.fallbackWarnSeen.Range(func(_, _ any) bool {
+		seenCount++
+		return true
+	})
+	require.Equal(t, 1, seenCount)
 }
 
 func TestGetModelPricing_UnknownClaudeModelFallsBackToSonnet(t *testing.T) {
