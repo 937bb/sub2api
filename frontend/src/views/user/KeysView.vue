@@ -1070,33 +1070,34 @@
 </template>
 
 <script setup lang="ts">
-	import { ref, computed, onMounted, onUnmounted, type ComponentPublicInstance } from 'vue'
-	import { useI18n } from 'vue-i18n'
-	import { useAppStore } from '@/stores/app'
-	import { useOnboardingStore } from '@/stores/onboarding'
-	import { useClipboard } from '@/composables/useClipboard'
+import { ref, computed, onMounted, onUnmounted, type ComponentPublicInstance } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { useAppStore } from '@/stores/app'
+import { useOnboardingStore } from '@/stores/onboarding'
+import { useClipboard } from '@/composables/useClipboard'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 
 const { t } = useI18n()
 import { keysAPI, authAPI, usageAPI, userGroupsAPI } from '@/api'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
-	import DataTable from '@/components/common/DataTable.vue'
-	import Pagination from '@/components/common/Pagination.vue'
-	import BaseDialog from '@/components/common/BaseDialog.vue'
-	import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
-	import EmptyState from '@/components/common/EmptyState.vue'
-	import Select from '@/components/common/Select.vue'
-	import SearchInput from '@/components/common/SearchInput.vue'
-	import Icon from '@/components/icons/Icon.vue'
-	import UseKeyModal from '@/components/keys/UseKeyModal.vue'
-	import EndpointPopover from '@/components/keys/EndpointPopover.vue'
-	import GroupBadge from '@/components/common/GroupBadge.vue'
-	import GroupOptionItem from '@/components/common/GroupOptionItem.vue'
-	import type { ApiKey, Group, PublicSettings, SubscriptionType, GroupPlatform } from '@/types'
+import DataTable from '@/components/common/DataTable.vue'
+import Pagination from '@/components/common/Pagination.vue'
+import BaseDialog from '@/components/common/BaseDialog.vue'
+import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
+import EmptyState from '@/components/common/EmptyState.vue'
+import Select from '@/components/common/Select.vue'
+import SearchInput from '@/components/common/SearchInput.vue'
+import Icon from '@/components/icons/Icon.vue'
+import UseKeyModal from '@/components/keys/UseKeyModal.vue'
+import EndpointPopover from '@/components/keys/EndpointPopover.vue'
+import GroupBadge from '@/components/common/GroupBadge.vue'
+import GroupOptionItem from '@/components/common/GroupOptionItem.vue'
+import type { ApiKey, Group, PublicSettings, SubscriptionType, GroupPlatform, UpdateApiKeyRequest } from '@/types'
 import type { Column } from '@/components/common/types'
 import type { BatchApiKeyUsageStats } from '@/api/usage'
 import { formatDateTime } from '@/utils/format'
+import { assignApiKeyEditStatus } from '@/utils/apiKeyUpdatePayload'
 import { maskApiKey } from '@/utils/maskApiKey'
 import {
   buildCcSwitchImportDeeplink,
@@ -1569,10 +1570,9 @@ const handleSubmit = async () => {
   submitting.value = true
   try {
     if (showEditModal.value && selectedKey.value) {
-      await keysAPI.update(selectedKey.value.id, {
+      const updatePayload: UpdateApiKeyRequest = {
         name: formData.value.name,
         group_id: formData.value.group_id,
-        status: formData.value.status,
         ip_whitelist: ipWhitelist,
         ip_blacklist: ipBlacklist,
         quota: quota,
@@ -1581,7 +1581,9 @@ const handleSubmit = async () => {
         rate_limit_1d: rateLimitData.rate_limit_1d,
         rate_limit_7d: rateLimitData.rate_limit_7d,
         openai_force_priority_tier: formData.value.openai_force_priority_tier,
-      })
+      }
+      assignApiKeyEditStatus(updatePayload, selectedKey.value, formData.value.status)
+      await keysAPI.update(selectedKey.value.id, updatePayload)
       appStore.showSuccess(t('keys.keyUpdatedSuccess'))
     } else {
       const customKey = formData.value.use_custom_key ? formData.value.custom_key : undefined

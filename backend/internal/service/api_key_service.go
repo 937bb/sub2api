@@ -571,41 +571,19 @@ func (s *APIKeyService) Update(ctx context.Context, id int64, userID int64, req 
 		apiKey.GroupID = req.GroupID
 	}
 
-	if req.Status != nil {
-		apiKey.Status = *req.Status
-		// 如果状态改变，清除Redis缓存
-		if s.cache != nil {
-			_ = s.cache.DeleteCreateAttemptCount(ctx, apiKey.UserID)
-		}
-	}
+	originalStatus := apiKey.Status
 
 	// Update quota fields
 	if req.Quota != nil {
 		apiKey.Quota = *req.Quota
-		// If quota is increased and status was quota_exhausted, reactivate
-		if apiKey.Status == StatusAPIKeyQuotaExhausted && *req.Quota > apiKey.QuotaUsed {
-			apiKey.Status = StatusActive
-		}
 	}
 	if req.ResetQuota != nil && *req.ResetQuota {
 		apiKey.QuotaUsed = 0
-		// If resetting quota and status was quota_exhausted, reactivate
-		if apiKey.Status == StatusAPIKeyQuotaExhausted {
-			apiKey.Status = StatusActive
-		}
 	}
 	if req.ClearExpiration {
 		apiKey.ExpiresAt = nil
-		// If clearing expiry and status was expired, reactivate
-		if apiKey.Status == StatusAPIKeyExpired {
-			apiKey.Status = StatusActive
-		}
 	} else if req.ExpiresAt != nil {
 		apiKey.ExpiresAt = req.ExpiresAt
-		// If extending expiry and status was expired, reactivate
-		if apiKey.Status == StatusAPIKeyExpired && time.Now().Before(*req.ExpiresAt) {
-			apiKey.Status = StatusActive
-		}
 	}
 
 	// 更新 IP 限制（空数组会清空设置）
@@ -636,6 +614,17 @@ func (s *APIKeyService) Update(ctx context.Context, id int64, userID int64, req 
 		apiKey.OpenAIForcePriorityTier = *req.OpenAIForcePriorityTier
 	}
 
+	if req.Status != nil {
+		apiKey.Status = *req.Status
+	}
+	apiKey.Status = reconcileAPIKeyTerminalStatus(apiKey)
+	if apiKey.Status != originalStatus {
+		// 如果状态改变，清除Redis缓存
+		if s.cache != nil {
+			_ = s.cache.DeleteCreateAttemptCount(ctx, apiKey.UserID)
+		}
+	}
+
 	if err := s.apiKeyRepo.Update(ctx, apiKey); err != nil {
 		return nil, fmt.Errorf("update api key: %w", err)
 	}
@@ -649,6 +638,25 @@ func (s *APIKeyService) Update(ctx context.Context, id int64, userID int64, req 
 	}
 
 	return apiKey, nil
+}
+
+func reconcileAPIKeyTerminalStatus(apiKey *APIKey) string {
+	switch apiKey.Status {
+	case StatusActive, "inactive", StatusAPIKeyExpired, StatusAPIKeyQuotaExhausted:
+	default:
+		return apiKey.Status
+	}
+	status := apiKey.Status
+	if apiKey.IsExpired() {
+		return StatusAPIKeyExpired
+	}
+	if apiKey.IsQuotaExhausted() {
+		return StatusAPIKeyQuotaExhausted
+	}
+	if status == "inactive" {
+		return status
+	}
+	return StatusActive
 }
 
 // Delete 删除API Key
