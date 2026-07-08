@@ -1409,3 +1409,74 @@ func TestFilterCodexInput_DropsReasoningItemsRegardlessOfPreserveReferences(t *t
 		})
 	}
 }
+
+func TestFilterCodexInput_StripsNonFcIDFromToolCallInputsWhenPreservingReferences(t *testing.T) {
+	for _, typ := range []string{
+		"function_call",
+		"tool_call",
+		"local_shell_call",
+		"tool_search_call",
+		"custom_tool_call",
+		"mcp_tool_call",
+	} {
+		t.Run(typ, func(t *testing.T) {
+			filtered := filterCodexInputWithOptions([]any{
+				map[string]any{
+					"type":    typ,
+					"id":      "item_123",
+					"call_id": "fc_123",
+					"name":    "tool",
+				},
+			}, codexInputFilterOptions{PreserveReferences: true})
+
+			require.Len(t, filtered, 1)
+			item, ok := filtered[0].(map[string]any)
+			require.True(t, ok)
+			require.Equal(t, typ, item["type"])
+			require.Equal(t, "fc_123", item["call_id"])
+			require.NotContains(t, item, "id")
+		})
+	}
+}
+
+func TestFilterCodexInput_KeepsValidToolCallInputIDWhenPreservingReferences(t *testing.T) {
+	filtered := filterCodexInputWithOptions([]any{
+		map[string]any{
+			"type":    "function_call",
+			"id":      "fc_123",
+			"call_id": "fc_123",
+			"name":    "tool",
+		},
+	}, codexInputFilterOptions{PreserveReferences: true})
+
+	require.Len(t, filtered, 1)
+	item, ok := filtered[0].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "fc_123", item["id"])
+}
+
+func TestFilterCodexInput_PreserveReferencesKeepsOutputAndMessageIDs(t *testing.T) {
+	filtered := filterCodexInputWithOptions([]any{
+		map[string]any{
+			"type":    "function_call_output",
+			"id":      "item_output_123",
+			"call_id": "fc_123",
+			"output":  "ok",
+		},
+		map[string]any{
+			"type": "message",
+			"id":   "item_message_123",
+			"role": "user",
+		},
+	}, codexInputFilterOptions{PreserveReferences: true})
+
+	require.Len(t, filtered, 2)
+
+	output, ok := filtered[0].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "item_output_123", output["id"])
+
+	message, ok := filtered[1].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "item_message_123", message["id"])
+}
