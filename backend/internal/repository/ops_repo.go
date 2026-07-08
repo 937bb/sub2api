@@ -671,14 +671,14 @@ func (r *opsRepository) BatchInsertSystemLogs(ctx context.Context, inputs []*ser
 
 	const batchSize = 500
 	values := make([]string, 0, batchSize)
-	args := make([]any, 0, batchSize*11)
+	args := make([]any, 0, batchSize*12)
 	flush := func() (int64, error) {
 		if len(values) == 0 {
 			return 0, nil
 		}
 		query := `INSERT INTO ops_system_logs (
 			created_at, level, component, message, request_id, client_request_id,
-			user_id, account_id, platform, model, extra
+			user_id, api_key_id, account_id, platform, model, extra
 		) VALUES ` + strings.Join(values, ",")
 		count := int64(len(values))
 		if _, err := tx.ExecContext(ctx, query, args...); err != nil {
@@ -714,8 +714,8 @@ func (r *opsRepository) BatchInsertSystemLogs(ctx context.Context, inputs []*ser
 
 		base := len(args)
 		values = append(values, fmt.Sprintf(
-			"($%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d::jsonb)",
-			base+1, base+2, base+3, base+4, base+5, base+6, base+7, base+8, base+9, base+10, base+11,
+			"($%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d::jsonb)",
+			base+1, base+2, base+3, base+4, base+5, base+6, base+7, base+8, base+9, base+10, base+11, base+12,
 		))
 		args = append(args,
 			createdAt.UTC(),
@@ -725,6 +725,7 @@ func (r *opsRepository) BatchInsertSystemLogs(ctx context.Context, inputs []*ser
 			opsNullString(input.RequestID),
 			opsNullString(input.ClientRequestID),
 			opsNullInt64(input.UserID),
+			opsNullInt64(input.APIKeyID),
 			opsNullInt64(input.AccountID),
 			opsNullString(input.Platform),
 			opsNullString(input.Model),
@@ -791,6 +792,7 @@ SELECT
   COALESCE(l.request_id, ''),
   COALESCE(l.client_request_id, ''),
   l.user_id,
+  l.api_key_id,
   l.account_id,
   COALESCE(l.platform, ''),
   COALESCE(l.model, ''),
@@ -810,6 +812,7 @@ LIMIT $` + itoa(len(args)+1) + ` OFFSET $` + itoa(len(args)+2)
 	for rows.Next() {
 		item := &service.OpsSystemLog{}
 		var userID sql.NullInt64
+		var apiKeyID sql.NullInt64
 		var accountID sql.NullInt64
 		var extraRaw string
 		if err := rows.Scan(
@@ -821,6 +824,7 @@ LIMIT $` + itoa(len(args)+1) + ` OFFSET $` + itoa(len(args)+2)
 			&item.RequestID,
 			&item.ClientRequestID,
 			&userID,
+			&apiKeyID,
 			&accountID,
 			&item.Platform,
 			&item.Model,
@@ -831,6 +835,10 @@ LIMIT $` + itoa(len(args)+1) + ` OFFSET $` + itoa(len(args)+2)
 		if userID.Valid {
 			v := userID.Int64
 			item.UserID = &v
+		}
+		if apiKeyID.Valid {
+			v := apiKeyID.Int64
+			item.APIKeyID = &v
 		}
 		if accountID.Valid {
 			v := accountID.Int64
@@ -1100,6 +1108,11 @@ func buildOpsSystemLogsWhere(filter *service.OpsSystemLogFilter) (string, []any,
 			clauses = append(clauses, "l.user_id = $"+itoa(len(args)))
 			hasConstraint = true
 		}
+		if filter.APIKeyID != nil && *filter.APIKeyID > 0 {
+			args = append(args, *filter.APIKeyID)
+			clauses = append(clauses, "l.api_key_id = $"+itoa(len(args)))
+			hasConstraint = true
+		}
 		if filter.AccountID != nil && *filter.AccountID > 0 {
 			args = append(args, *filter.AccountID)
 			clauses = append(clauses, "l.account_id = $"+itoa(len(args)))
@@ -1139,6 +1152,7 @@ func buildOpsSystemLogsCleanupWhere(filter *service.OpsSystemLogCleanupFilter) (
 		RequestID:       filter.RequestID,
 		ClientRequestID: filter.ClientRequestID,
 		UserID:          filter.UserID,
+		APIKeyID:        filter.APIKeyID,
 		AccountID:       filter.AccountID,
 		Platform:        filter.Platform,
 		Model:           filter.Model,
