@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"regexp"
@@ -15,6 +16,13 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
+)
+
+const (
+	InvalidJSONCategorySyntax   = "syntax"
+	InvalidJSONCategoryType     = "type"
+	InvalidJSONCategoryUnknown  = "unknown"
+	InvalidJSONCategoryDiverged = "validator_divergence"
 )
 
 var (
@@ -168,7 +176,7 @@ func parseGatewayRequestCurrentBody(parsed *ParsedRequest, protocol string) erro
 
 	bodyBytes := parsed.Body.Bytes()
 	if !gjson.ValidBytes(bodyBytes) {
-		return fmt.Errorf("invalid json")
+		return DescribeInvalidJSON(bodyBytes)
 	}
 
 	// 只在当前函数内零拷贝读取 JSON 字段；ReplaceBody 后必须重新进入本函数刷新派生状态。
@@ -214,6 +222,48 @@ func parseGatewayRequestCurrentBody(parsed *ParsedRequest, protocol string) erro
 
 func refreshGatewayRequestRanges(parsed *ParsedRequest, protocol string) error {
 	return parseGatewayRequestCurrentBody(parsed, protocol)
+}
+
+type InvalidJSONDiagnostic struct {
+	Length   int
+	Offset   int64
+	Category string
+}
+
+func (d InvalidJSONDiagnostic) Error() string {
+	if d.Offset > 0 {
+		return fmt.Sprintf("invalid json (len=%d, offset=%d, category=%s)", d.Length, d.Offset, d.Category)
+	}
+	return fmt.Sprintf("invalid json (len=%d, category=%s)", d.Length, d.Category)
+}
+
+// DescribeInvalidJSON returns a sanitized diagnostic for a request body that
+// failed JSON validation. It intentionally excludes parser strings, field names,
+// and body bytes because encoding/json errors can echo offending input.
+func DescribeInvalidJSON(body []byte) error {
+	return NewInvalidJSONDiagnostic(body)
+}
+
+func NewInvalidJSONDiagnostic(body []byte) InvalidJSONDiagnostic {
+	diag := InvalidJSONDiagnostic{
+		Length:   len(body),
+		Category: InvalidJSONCategoryUnknown,
+	}
+	var raw json.RawMessage
+	if err := json.Unmarshal(body, &raw); err != nil {
+		var syntaxErr *json.SyntaxError
+		if errors.As(err, &syntaxErr) {
+			diag.Offset = syntaxErr.Offset
+			diag.Category = InvalidJSONCategorySyntax
+			return diag
+		}
+		diag.Category = InvalidJSONCategoryType
+		return diag
+	}
+	// gjson rejected the body but encoding/json accepted it (divergent edge
+	// cases, e.g. certain malformed UTF-8 sequences); report the basics.
+	diag.Category = InvalidJSONCategoryDiverged
+	return diag
 }
 
 // ParsedRequest 保存网关请求的预解析结果
