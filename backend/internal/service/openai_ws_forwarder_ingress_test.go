@@ -154,6 +154,33 @@ func TestStripCodexSparkImageGenerationToolFromRawPayload(t *testing.T) {
 		require.True(t, gjson.GetBytes(updated, `tools.#(type=="function")`).Exists())
 	})
 
+	t.Run("spark_removes_image_gen_namespace_top_level", func(t *testing.T) {
+		payload := []byte(`{"type":"response.create","model":"gpt-5.3-codex-spark","tools":[{"type":"function","name":"shell"},{"type":"namespace","name":"image_gen","tools":[{"type":"function","name":"imagegen"}]}]}`)
+		updated, changed, err := stripCodexSparkImageGenerationToolFromRawPayload(payload, "gpt-5.3-codex-spark", nil)
+		require.NoError(t, err)
+		require.True(t, changed)
+		require.False(t, gjson.GetBytes(updated, `tools.#(type=="namespace").name`).Exists())
+		require.True(t, gjson.GetBytes(updated, `tools.#(type=="function")`).Exists())
+	})
+
+	t.Run("spark_removes_image_gen_namespace_additional_tools", func(t *testing.T) {
+		payload := []byte(`{"type":"response.create","model":"gpt-5.3-codex-spark","input":[{"type":"message","content":"hi"},{"type":"additional_tools","tools":[{"type":"namespace","name":"image_gen","tools":[{"type":"function","name":"imagegen"}]},{"type":"function","name":"shell"}]}]}`)
+		updated, changed, err := stripCodexSparkImageGenerationToolFromRawPayload(payload, "gpt-5.3-codex-spark", nil)
+		require.NoError(t, err)
+		require.True(t, changed)
+		require.False(t, gjson.GetBytes(updated, `input.#(type=="additional_tools").tools.#(type=="namespace").name`).Exists())
+		require.True(t, gjson.GetBytes(updated, `input.#(type=="additional_tools").tools.#(type=="function")`).Exists())
+	})
+
+	t.Run("spark_removes_native_image_generation_additional_tools", func(t *testing.T) {
+		payload := []byte(`{"type":"response.create","model":"gpt-5.3-codex-spark","input":[{"type":"message","content":"hi"},{"type":"additional_tools","tools":[{"type":"image_generation","output_format":"png"},{"type":"function","name":"shell"}]}]}`)
+		updated, changed, err := stripCodexSparkImageGenerationToolFromRawPayload(payload, "gpt-5.3-codex-spark", nil)
+		require.NoError(t, err)
+		require.True(t, changed)
+		require.False(t, gjson.GetBytes(updated, `input.#(type=="additional_tools").tools.#(type=="image_generation")`).Exists())
+		require.True(t, gjson.GetBytes(updated, `input.#(type=="additional_tools").tools.#(type=="function")`).Exists())
+	})
+
 	t.Run("spark_removes_empty_tools", func(t *testing.T) {
 		payload := []byte(`{"type":"response.create","model":"gpt-5.3-codex-spark","tools":[{"type":"image_generation","output_format":"png"}]}`)
 		updated, changed, err := stripCodexSparkImageGenerationToolFromRawPayload(payload, "gpt-5.3-codex-spark", nil)
@@ -182,6 +209,14 @@ func TestStripCodexSparkImageGenerationToolFromRawPayload(t *testing.T) {
 
 	t.Run("non_spark_unchanged", func(t *testing.T) {
 		payload := []byte(`{"type":"response.create","model":"gpt-5.3-codex","tools":[{"type":"image_generation","output_format":"png"}]}`)
+		updated, changed, err := stripCodexSparkImageGenerationToolFromRawPayload(payload, "gpt-5.3-codex", nil)
+		require.NoError(t, err)
+		require.False(t, changed)
+		require.Equal(t, string(payload), string(updated))
+	})
+
+	t.Run("non_spark_preserves_image_gen_namespace", func(t *testing.T) {
+		payload := []byte(`{"type":"response.create","model":"gpt-5.3-codex","tools":[{"type":"namespace","name":"image_gen","tools":[{"type":"function","name":"imagegen"}]}],"input":[{"type":"additional_tools","tools":[{"type":"namespace","name":"image_gen"}]}]}`)
 		updated, changed, err := stripCodexSparkImageGenerationToolFromRawPayload(payload, "gpt-5.3-codex", nil)
 		require.NoError(t, err)
 		require.False(t, changed)
