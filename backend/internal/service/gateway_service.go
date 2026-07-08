@@ -69,10 +69,11 @@ IMPORTANT: You must NEVER generate or guess URLs for the user unless you are con
  - Do not use a colon before tool calls. Your tool calls may not be shown directly in the output, so text like "Let me read the file:" followed by a read tool call should just be "Let me read the file." with a period.`
 	maxCacheControlBlocks = 4 // Anthropic API 允许的最大 cache_control 块数量
 
-	defaultUserGroupRateCacheTTL = 30 * time.Second
-	defaultModelsListCacheTTL    = 15 * time.Second
-	postUsageBillingTimeout      = 15 * time.Second
-	debugGatewayBodyEnv          = "SUB2API_DEBUG_GATEWAY_BODY"
+	defaultUserGroupRateCacheTTL           = 30 * time.Second
+	defaultModelsListCacheTTL              = 15 * time.Second
+	postUsageBillingTimeout                = 15 * time.Second
+	claudeCodeNoopDeltaKeepaliveMinVersion = "2.1.193"
+	debugGatewayBodyEnv                    = "SUB2API_DEBUG_GATEWAY_BODY"
 	// 上游错误体只需要提取错误 JSON/日志摘要，默认 512KiB 避免错误风暴叠加大请求体。
 	gatewayUpstreamErrorBodyReadLimit int64 = 512 << 10
 )
@@ -818,6 +819,76 @@ func (s *GatewayService) GetCachedSessionAccountID(ctx context.Context, groupID 
 		return 0, err
 	}
 	return accountID, nil
+}
+
+func shouldUseClaudeCodeNoopDeltaKeepalive(ctx context.Context, c *gin.Context, mimicClaudeCode bool) bool {
+	if mimicClaudeCode || c == nil || c.Request == nil {
+		return false
+	}
+	version := ExtractCLIVersion(c.GetHeader("User-Agent"))
+	if version == "" || CompareVersions(version, claudeCodeNoopDeltaKeepaliveMinVersion) < 0 {
+		return false
+	}
+	if IsClaudeCodeClient(ctx) {
+		return true
+	}
+	if c.GetHeader("X-App") == "" || c.GetHeader("anthropic-beta") == "" || c.GetHeader("anthropic-version") == "" {
+		return false
+	}
+	return c.GetHeader("X-Claude-Code-Session-Id") != ""
+}
+
+func claudeCodeKeepaliveDeltaTypeForContentBlock(blockType string) string {
+	switch blockType {
+	case "text":
+		return "text_delta"
+	case "tool_use":
+		return "input_json_delta"
+	case "thinking":
+		return "thinking_delta"
+	default:
+		return ""
+	}
+}
+
+func claudeCodeKeepaliveFieldForDeltaType(deltaType string) string {
+	switch deltaType {
+	case "text_delta":
+		return "text"
+	case "input_json_delta":
+		return "partial_json"
+	case "thinking_delta":
+		return "thinking"
+	default:
+		return ""
+	}
+}
+
+func buildClaudeCodeNoopDeltaKeepalive(index int, deltaType string) (string, bool) {
+	fieldName := claudeCodeKeepaliveFieldForDeltaType(deltaType)
+	if fieldName == "" {
+		return "", false
+	}
+	return fmt.Sprintf("event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":%d,\"delta\":{\"type\":\"%s\",\"%s\":\"\"}}\n\n", index, deltaType, fieldName), true
+}
+
+func sseEventIndex(event map[string]any) (int, bool) {
+	switch v := event["index"].(type) {
+	case float64:
+		return int(v), true
+	case int:
+		return v, true
+	case int64:
+		return int(v), true
+	case json.Number:
+		i, err := v.Int64()
+		if err != nil {
+			return 0, false
+		}
+		return int(i), true
+	default:
+		return 0, false
+	}
 }
 
 // FindGeminiSession 查找 Gemini 会话（基于内容摘要链的 Fallback 匹配）
@@ -8038,6 +8109,9 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 	needModelReplace := originalModel != mappedModel
 	clientDisconnected := false // 客户端断开标志，断开后继续读取上游以获取完整usage
 	sawTerminalEvent := false
+	useNoopDeltaKeepalive := shouldUseClaudeCodeNoopDeltaKeepalive(ctx, c, mimicClaudeCode)
+	noopDeltaKeepaliveBlockIndex := -1
+	noopDeltaKeepaliveDeltaType := ""
 
 	pendingEventLines := make([]string, 0, 4)
 
@@ -8093,6 +8167,40 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 			eventName = eventType
 		}
 		eventChanged := false
+
+		if useNoopDeltaKeepalive {
+			switch eventType {
+			case "content_block_start":
+				noopDeltaKeepaliveBlockIndex = -1
+				noopDeltaKeepaliveDeltaType = ""
+				if idx, ok := sseEventIndex(event); ok {
+					if contentBlock, ok := event["content_block"].(map[string]any); ok {
+						blockType, _ := contentBlock["type"].(string)
+						if deltaType := claudeCodeKeepaliveDeltaTypeForContentBlock(blockType); deltaType != "" {
+							noopDeltaKeepaliveBlockIndex = idx
+							noopDeltaKeepaliveDeltaType = deltaType
+						}
+					}
+				}
+			case "content_block_delta":
+				if idx, ok := sseEventIndex(event); ok && idx == noopDeltaKeepaliveBlockIndex {
+					if delta, ok := event["delta"].(map[string]any); ok {
+						deltaType, _ := delta["type"].(string)
+						if deltaType == noopDeltaKeepaliveDeltaType && claudeCodeKeepaliveFieldForDeltaType(deltaType) != "" {
+							noopDeltaKeepaliveDeltaType = deltaType
+						}
+					}
+				}
+			case "content_block_stop":
+				if idx, ok := sseEventIndex(event); ok && idx == noopDeltaKeepaliveBlockIndex {
+					noopDeltaKeepaliveBlockIndex = -1
+					noopDeltaKeepaliveDeltaType = ""
+				}
+			case "message_stop":
+				noopDeltaKeepaliveBlockIndex = -1
+				noopDeltaKeepaliveDeltaType = ""
+			}
+		}
 
 		// 兼容 Kimi cached_tokens → cache_read_input_tokens
 		if eventType == "message_start" {
@@ -8285,14 +8393,19 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 			if time.Since(lastDataAt) < keepaliveInterval {
 				continue
 			}
-			// SSE ping 事件：Anthropic 原生格式，客户端会正确处理，
-			// 同时保持连接活跃防止 Cloudflare Tunnel 等代理断开
-			if _, werr := fmt.Fprint(w, "event: ping\ndata: {\"type\": \"ping\"}\n\n"); werr != nil {
+			keepaliveBlock := "event: ping\ndata: {\"type\": \"ping\"}\n\n"
+			if useNoopDeltaKeepalive && noopDeltaKeepaliveBlockIndex >= 0 {
+				if block, ok := buildClaudeCodeNoopDeltaKeepalive(noopDeltaKeepaliveBlockIndex, noopDeltaKeepaliveDeltaType); ok {
+					keepaliveBlock = block
+				}
+			}
+			if _, werr := fmt.Fprint(w, keepaliveBlock); werr != nil {
 				clientDisconnected = true
 				logger.LegacyPrintf("service.gateway", "Client disconnected during keepalive ping, continuing to drain upstream for billing")
 				continue
 			}
 			flusher.Flush()
+			lastDataAt = time.Now()
 		}
 	}
 
