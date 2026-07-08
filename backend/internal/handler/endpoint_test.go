@@ -42,6 +42,7 @@ func TestNormalizeInboundEndpoint(t *testing.T) {
 		// Gin route patterns with wildcards.
 		{"/v1beta/models/*modelAction", EndpointGeminiModels},
 		{"/v1/responses/*subpath", EndpointResponses},
+		{"/v1/responses/compact/v1/messages", EndpointResponses},
 
 		// Unknown path is returned as-is.
 		{"/v1/embeddings", "/v1/embeddings"},
@@ -149,6 +150,49 @@ func TestGetInboundEndpoint_FallbackWithoutMiddleware(t *testing.T) {
 	// Middleware did not run — fallback to normalizing c.Request.URL.Path.
 	got := GetInboundEndpoint(c)
 	require.Equal(t, EndpointMessages, got)
+}
+
+func TestInboundEndpointMiddleware_WildcardRouteUsesRawRequestPath(t *testing.T) {
+	router := gin.New()
+	router.Use(InboundEndpointMiddleware())
+
+	var inbound string
+	var upstream string
+	router.POST("/v1/responses/*subpath", func(c *gin.Context) {
+		require.Equal(t, "/v1/responses/*subpath", c.FullPath())
+		inbound = GetInboundEndpoint(c)
+		upstream = GetUpstreamEndpoint(c, service.PlatformOpenAI)
+		c.Status(http.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses/compact", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, EndpointResponses, inbound)
+	require.Equal(t, "/v1/responses/compact", upstream)
+}
+
+func TestGetInboundEndpoint_FallbackWildcardRouteUsesRawRequestPath(t *testing.T) {
+	router := gin.New()
+
+	var inbound string
+	var upstream string
+	router.POST("/v1/responses/*subpath", func(c *gin.Context) {
+		require.Equal(t, "/v1/responses/*subpath", c.FullPath())
+		inbound = GetInboundEndpoint(c)
+		upstream = GetUpstreamEndpoint(c, service.PlatformOpenAI)
+		c.Status(http.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses/compact", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, EndpointResponses, inbound)
+	require.Equal(t, "/v1/responses/compact", upstream)
 }
 
 func TestGetUpstreamEndpoint_FullFlow(t *testing.T) {

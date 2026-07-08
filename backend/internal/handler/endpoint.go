@@ -42,24 +42,34 @@ const (
 //	"/v1beta/models/gemini:gen"  → "/v1beta/models"
 func NormalizeInboundEndpoint(path string) string {
 	path = strings.TrimSpace(path)
-	switch {
-	case strings.Contains(path, EndpointEmbeddings):
-		return EndpointEmbeddings
-	case strings.Contains(path, EndpointChatCompletions):
-		return EndpointChatCompletions
-	case strings.Contains(path, EndpointMessages):
-		return EndpointMessages
-	case strings.Contains(path, EndpointImagesGenerations) || strings.Contains(path, "/images/generations"):
-		return EndpointImagesGenerations
-	case strings.Contains(path, EndpointImagesEdits) || strings.Contains(path, "/images/edits"):
-		return EndpointImagesEdits
-	case strings.Contains(path, EndpointResponses):
-		return EndpointResponses
-	case strings.Contains(path, EndpointGeminiModels):
-		return EndpointGeminiModels
-	default:
+	if path == "" {
 		return path
 	}
+
+	bestEndpoint := ""
+	bestIndex := len(path) + 1
+	consider := func(endpoint, pattern string) {
+		idx := strings.Index(path, pattern)
+		if idx >= 0 && idx < bestIndex {
+			bestEndpoint = endpoint
+			bestIndex = idx
+		}
+	}
+
+	consider(EndpointEmbeddings, EndpointEmbeddings)
+	consider(EndpointChatCompletions, EndpointChatCompletions)
+	consider(EndpointMessages, EndpointMessages)
+	consider(EndpointImagesGenerations, EndpointImagesGenerations)
+	consider(EndpointImagesGenerations, "/images/generations")
+	consider(EndpointImagesEdits, EndpointImagesEdits)
+	consider(EndpointImagesEdits, "/images/edits")
+	consider(EndpointResponses, EndpointResponses)
+	consider(EndpointGeminiModels, EndpointGeminiModels)
+
+	if bestEndpoint != "" {
+		return bestEndpoint
+	}
+	return path
 }
 
 // DeriveUpstreamEndpoint determines the upstream endpoint from the
@@ -136,9 +146,12 @@ func responsesSubpathSuffix(rawPath string) string {
 // Apply this middleware to all gateway route groups.
 func InboundEndpointMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		path := c.FullPath()
-		if path == "" && c.Request != nil && c.Request.URL != nil {
+		path := ""
+		if c.Request != nil && c.Request.URL != nil {
 			path = c.Request.URL.Path
+		}
+		if path == "" {
+			path = c.FullPath()
 		}
 		c.Set(ctxKeyInboundEndpoint, NormalizeInboundEndpoint(path))
 		c.Next()
@@ -152,7 +165,7 @@ func InboundEndpointMiddleware() gin.HandlerFunc {
 
 // GetInboundEndpoint returns the canonical inbound endpoint stored by
 // InboundEndpointMiddleware. If the middleware did not run (e.g. in
-// tests), it falls back to normalizing c.FullPath() on the fly.
+// tests), it falls back to normalizing c.Request.URL.Path on the fly.
 func GetInboundEndpoint(c *gin.Context) string {
 	if v, ok := c.Get(ctxKeyInboundEndpoint); ok {
 		if s, ok := v.(string); ok && s != "" {
@@ -162,9 +175,11 @@ func GetInboundEndpoint(c *gin.Context) string {
 	// Fallback: normalize on the fly.
 	path := ""
 	if c != nil {
-		path = c.FullPath()
-		if path == "" && c.Request != nil && c.Request.URL != nil {
+		if c.Request != nil && c.Request.URL != nil {
 			path = c.Request.URL.Path
+		}
+		if path == "" {
+			path = c.FullPath()
 		}
 	}
 	return NormalizeInboundEndpoint(path)
