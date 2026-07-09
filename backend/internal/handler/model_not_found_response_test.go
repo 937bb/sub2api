@@ -789,6 +789,10 @@ func (c *modelNotFoundPingConcurrencyCache) CleanupExpiredAccountSlots(context.C
 	return nil
 }
 
+func (c *modelNotFoundPingConcurrencyCache) CleanupExpiredAccountSlotKeys(context.Context) error {
+	return nil
+}
+
 func (c *modelNotFoundPingConcurrencyCache) CleanupStaleProcessSlots(context.Context, string) error {
 	return nil
 }
