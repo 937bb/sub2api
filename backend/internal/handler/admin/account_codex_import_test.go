@@ -147,8 +147,6 @@ func TestNormalizeCodexSessionJSONExtractsCredentialsAndIgnoresSessionToken(t *t
 func TestMergeCodexImportCredentialsClearsStaleRefreshFieldsWhenIncomingHasNoRefreshToken(t *testing.T) {
 	existing := map[string]any{
 		"access_token":       "old-access-token",
-		"refresh_token":      "old-refresh-token",
-		"client_id":          "old-client-id",
 		"id_token":           "old-id-token",
 		"model_mapping":      map[string]any{"from": "existing"},
 		"chatgpt_account_id": "acct-old",
@@ -185,6 +183,37 @@ func TestMergeCodexImportCredentialsClearsStaleRefreshFieldsWhenIncomingHasNoRef
 	}
 	if _, ok := merged["model_mapping"]; !ok {
 		t.Fatalf("model_mapping should be preserved")
+	}
+}
+
+func TestMergeCodexImportCredentialsPreservesExistingRefreshFieldsWhenAccessOnlyImportMatches(t *testing.T) {
+	existing := map[string]any{
+		"access_token":  "old-access-token",
+		"refresh_token": "old-refresh-token",
+		"client_id":     "old-client-id",
+		"id_token":      "old-id-token",
+	}
+	incoming := map[string]any{
+		"access_token": "new-access-token",
+		"expires_at":   "2026-08-05T13:40:42Z",
+	}
+	item := &codexImportAccount{
+		AccessToken: "new-access-token",
+	}
+
+	merged := mergeCodexImportCredentials(existing, incoming, item)
+
+	if merged["access_token"] != "new-access-token" {
+		t.Fatalf("access_token = %v, want new-access-token", merged["access_token"])
+	}
+	if merged["refresh_token"] != "old-refresh-token" {
+		t.Fatalf("refresh_token = %v, want old-refresh-token", merged["refresh_token"])
+	}
+	if merged["client_id"] != "old-client-id" {
+		t.Fatalf("client_id = %v, want old-client-id", merged["client_id"])
+	}
+	if _, ok := merged["id_token"]; ok {
+		t.Fatalf("id_token should be cleared when incoming has no id_token")
 	}
 }
 
@@ -319,6 +348,26 @@ func TestCodexIdentityKeysPreferStrongIdentifiers(t *testing.T) {
 	keys = buildCodexIdentityKeys("", "", "same@example.com", "token")
 	if !codexTestHasIdentityKey(keys, "email:same@example.com") {
 		t.Fatalf("weak identity should include email fallback: %v", keys)
+	}
+}
+
+func TestCodexImportIdentityKeysUseAccessOnlyIdentityWhenRefreshTokenMissing(t *testing.T) {
+	keys := buildCodexImportIdentityKeys("acct-1", "user-1", "same@example.com", "access-token", "")
+	if len(keys) != 1 {
+		t.Fatalf("access-only import keys = %v, want exactly one access fingerprint key", keys)
+	}
+	if want := "access:" + codexTokenFingerprint("access-token"); keys[0] != want {
+		t.Fatalf("access-only import key = %q, want %q", keys[0], want)
+	}
+}
+
+func TestCodexImportIdentityKeysUseStrongIdentityWhenRefreshTokenPresent(t *testing.T) {
+	keys := buildCodexImportIdentityKeys("acct-1", "user-1", "same@example.com", "access-token", "refresh-token")
+	if !codexTestHasIdentityKey(keys, "account_user:acct-1:user-1") {
+		t.Fatalf("refreshable import should include account_user key: %v", keys)
+	}
+	if !codexTestHasIdentityKey(keys, "account_email:acct-1:same@example.com") {
+		t.Fatalf("refreshable import should include account_email key: %v", keys)
 	}
 }
 
