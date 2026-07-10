@@ -63,6 +63,7 @@ const (
 	openAIWSRetryBackoffMaxDefault     = 2 * time.Second
 	openAIWSRetryJitterRatioDefault    = 0.2
 	openAICompactSessionSeedKey        = "openai_compact_session_seed"
+	openAICompactClientStreamKey       = "openai_compact_client_stream"
 	// Codex 限额快照仅用于后台展示/诊断，不需要每个成功请求都立即落库。
 	openAICodexSnapshotPersistMinInterval = 30 * time.Second
 	// 配额自动暂停时，超过该时长仍未刷新的 used% 快照视为陈旧，不再据此暂停账号。
@@ -3196,6 +3197,11 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	if !isCompactRequest && account.IsOpenAIOAuthLike() && isCodexCLI && isBareOpenAIResponsesPath(c) && hasOpenAICompactionTriggerInInput(body) {
 		c.Request.URL.Path = strings.TrimRight(c.Request.URL.Path, "/") + "/compact"
 		isCompactRequest = true
+		// Body-signal promotion belongs to the OAuth adapter. API-key passthrough
+		// remains protocol preserving and never receives this response-bridge mark.
+		if reqStream {
+			c.Set(openAICompactClientStreamKey, true)
+		}
 	}
 	wsDecision := s.getOpenAIWSProtocolResolver().Resolve(account)
 	clientTransport := GetOpenAIClientTransport(c)
@@ -5010,7 +5016,9 @@ func (s *OpenAIGatewayService) handleNonStreamingResponsePassthrough(
 	if normalized, normalizedChanged := normalizeOpenAIResponsesFunctionCallOutputArguments(body); normalizedChanged {
 		body = normalized
 	}
-	c.Data(resp.StatusCode, contentType, body)
+	if !writeOpenAICompactSSEBridge(c, resp.StatusCode, body) {
+		c.Data(resp.StatusCode, contentType, body)
+	}
 	return &openaiNonStreamingResultPassthrough{
 		OpenAIUsage:      usage,
 		usage:            usage,
@@ -5076,7 +5084,9 @@ func (s *OpenAIGatewayService) handlePassthroughSSEToJSON(resp *http.Response, c
 			contentType = "text/event-stream"
 		}
 	}
-	c.Data(resp.StatusCode, contentType, body)
+	if !writeOpenAICompactSSEBridge(c, resp.StatusCode, body) {
+		c.Data(resp.StatusCode, contentType, body)
+	}
 
 	return &openaiNonStreamingResultPassthrough{
 		OpenAIUsage:      usage,
@@ -6503,7 +6513,9 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 		}
 	}
 
-	c.Data(resp.StatusCode, contentType, body)
+	if !writeOpenAICompactSSEBridge(c, resp.StatusCode, body) {
+		c.Data(resp.StatusCode, contentType, body)
+	}
 
 	return &openaiNonStreamingResult{
 		OpenAIUsage:      usage,
@@ -6591,7 +6603,9 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 			contentType = "text/event-stream"
 		}
 	}
-	c.Data(resp.StatusCode, contentType, body)
+	if !writeOpenAICompactSSEBridge(c, resp.StatusCode, body) {
+		c.Data(resp.StatusCode, contentType, body)
+	}
 
 	return &openaiNonStreamingResult{
 		OpenAIUsage:      usage,
@@ -8667,4 +8681,97 @@ func normalizeOpenAIReasoningEffort(raw string) string {
 		// Only store known effort levels for now to keep UI consistent.
 		return ""
 	}
+}
+
+func openAICompactClientWantsStream(c *gin.Context) bool {
+	if c == nil {
+		return false
+	}
+	value, ok := c.Get(openAICompactClientStreamKey)
+	wants, _ := value.(bool)
+	return ok && wants
+}
+
+func writeOpenAICompactSSEBridge(c *gin.Context, statusCode int, finalResponse []byte) bool {
+	if c == nil || !openAICompactClientWantsStream(c) || statusCode < 200 || statusCode >= 300 {
+		return false
+	}
+	payload, ok := buildOpenAICompactSSEPayload(finalResponse)
+	if !ok {
+		return false
+	}
+	h := c.Writer.Header()
+	h.Set("Content-Type", "text/event-stream")
+	h.Set("Cache-Control", "no-cache")
+	h.Set("Connection", "keep-alive")
+	h.Set("X-Accel-Buffering", "no")
+	c.Writer.WriteHeader(statusCode)
+	_, _ = c.Writer.Write(payload)
+	c.Writer.Flush()
+	return true
+}
+
+func buildOpenAICompactSSEPayload(finalResponse []byte) ([]byte, bool) {
+	if len(finalResponse) == 0 || !gjson.ValidBytes(finalResponse) || !gjson.ParseBytes(finalResponse).IsObject() {
+		return nil, false
+	}
+	var compacted bytes.Buffer
+	if err := json.Compact(&compacted, finalResponse); err != nil {
+		return nil, false
+	}
+	response := compacted.Bytes()
+	if strings.TrimSpace(gjson.GetBytes(response, "id").String()) == "" {
+		var err error
+		response, err = sjson.SetBytes(response, "id", "resp_"+strings.ReplaceAll(uuid.NewString(), "-", ""))
+		if err != nil {
+			return nil, false
+		}
+	}
+	if usage := gjson.GetBytes(response, "usage"); usage.Exists() && !openAICompactUsageParsableByCodex(usage) {
+		var err error
+		response, err = sjson.DeleteBytes(response, "usage")
+		if err != nil {
+			return nil, false
+		}
+	}
+	var buf bytes.Buffer
+	appendEvent := func(eventType string, data []byte) {
+		_, _ = buf.WriteString("event: " + eventType + "\ndata: ")
+		_, _ = buf.Write(data)
+		_, _ = buf.WriteString("\n\n")
+	}
+	outputIndex := 0
+	for _, item := range gjson.GetBytes(response, "output").Array() {
+		if !item.IsObject() {
+			continue
+		}
+		event, err := sjson.SetBytes([]byte(`{"type":"response.output_item.done"}`), "output_index", outputIndex)
+		if err != nil {
+			return nil, false
+		}
+		event, err = sjson.SetRawBytes(event, "item", []byte(item.Raw))
+		if err != nil {
+			return nil, false
+		}
+		appendEvent("response.output_item.done", event)
+		outputIndex++
+	}
+	completed, err := sjson.SetRawBytes([]byte(`{"type":"response.completed"}`), "response", response)
+	if err != nil {
+		return nil, false
+	}
+	appendEvent("response.completed", completed)
+	return buf.Bytes(), true
+}
+
+func openAICompactUsageParsableByCodex(usage gjson.Result) bool {
+	if !usage.IsObject() {
+		return false
+	}
+	for _, field := range []string{"input_tokens", "output_tokens", "total_tokens"} {
+		if usage.Get(field).Type != gjson.Number {
+			return false
+		}
+	}
+	return true
 }
