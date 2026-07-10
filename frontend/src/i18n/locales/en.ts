@@ -344,6 +344,26 @@ export default {
     }
   },
 
+  legal: {
+    loginAgreementPrompt: {
+      checkboxPrefix: 'I have read and agree to ',
+      documentSeparator: ', ',
+      noticeTitle: 'Accept the latest terms before continuing.',
+      noticeDescription: 'Account/password login and quick sign-in stay disabled until you accept.',
+      viewTerms: 'View terms',
+      dialogTitle: 'Terms Update Notice',
+      dialogDescription: 'Our service terms were updated on {date}. Please read and accept the following terms before continuing.',
+      recently: 'recently',
+      relatedDocuments: 'Related documents',
+      reject: 'Reject',
+      accept: 'Accept and continue',
+      loginRejectedWarning: 'Account/password login and quick sign-in are disabled until you accept the latest terms.',
+      loginRequiredWarning: 'Please read and accept the latest terms before logging in.',
+      registerRejectedWarning: 'Registration and quick sign-in are disabled until you accept the latest terms.',
+      registerRequiredWarning: 'Please read and accept the latest terms before registering.'
+    }
+  },
+
   // Navigation
   nav: {
     dashboard: 'Dashboard',
@@ -2471,6 +2491,21 @@ export default {
       duplicateModels: 'Model "{0}" appears in multiple pricing entries',
       modelConflict: "Model patterns '{model1}' and '{model2}' conflict: overlapping match range. Model names are matched case-insensitively, so an existing entry already covers all case variants - no need to add the variant separately.",
       mappingConflict: "Mapping source patterns '{model1}' and '{model2}' conflict: overlapping match range. Source patterns are matched case-insensitively, so an existing entry already covers all case variants.",
+      intervalValidation: {
+        negativeMin: 'Interval #{index}: minimum token count ({value}) cannot be negative',
+        maxPositive: 'Interval #{index}: maximum token count ({value}) must be greater than 0',
+        maxGreaterThanMin: 'Interval #{index}: maximum token count ({max}) must be greater than minimum token count ({min})',
+        negativePrice: 'Interval #{index}: {field} cannot be negative',
+        unboundedLast: 'Interval #{index}: an unbounded interval (empty maximum token count) must be last',
+        overlap: 'Intervals #{previousIndex} and #{currentIndex} overlap: previous upper bound ({previousMax}) is greater than current lower bound ({currentMin})',
+        price: {
+          inputPrice: 'input price',
+          outputPrice: 'output price',
+          cacheWritePrice: 'cache write price',
+          cacheReadPrice: 'cache read price',
+          perRequestPrice: 'per-request price'
+        }
+      },
       deleteConfirm: 'Are you sure you want to delete channel "{name}"? This cannot be undone.',
       columns: {
         name: 'Name',
