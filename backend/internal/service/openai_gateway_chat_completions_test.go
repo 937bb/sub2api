@@ -258,30 +258,60 @@ func TestForwardAsChatCompletions_OAuthResponsesShapeDoesNotInjectDefaultInstruc
 }
 
 func TestForwardAsChatCompletions_OAuthResponsesShapeRetriesInvalidEncryptedContentOnce(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		accountType string
+		errorCode   string
+	}{
+		{name: "oauth invalid encrypted content", accountType: AccountTypeOAuth, errorCode: "invalid_encrypted_content"},
+		{name: "setup token invalid thinking signature", accountType: AccountTypeSetupToken, errorCode: "thinking_signature_invalid"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			body := []byte(`{"model":"gpt-5.4","stream":false,"input":[{"type":"reasoning","id":"rs_stale","encrypted_content":"gAAA","summary":[]},{"type":"compaction","encrypted_content":"stale-compact"},{"type":"message","role":"user","content":"continue"}]}`)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+			upstream := &httpUpstreamRecorder{responses: []*http.Response{
+				{StatusCode: http.StatusBadRequest, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"error":{"code":"` + tc.errorCode + `","message":"stale"}}`))},
+				{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader("data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_retry_ok\",\"model\":\"gpt-5.4\",\"output\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\ndata: [DONE]\n\n"))},
+			}}
+			svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+			account := &Account{ID: 4, Name: "oauth-retry", Platform: PlatformOpenAI, Type: tc.accountType, Concurrency: 1, Credentials: map[string]any{"access_token": "token", "chatgpt_account_id": "acc"}}
+
+			result, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, "", "")
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.Len(t, upstream.bodies, 2)
+			require.Equal(t, "reasoning", gjson.GetBytes(upstream.bodies[0], "input.0.type").String())
+			require.Equal(t, "gAAA", gjson.GetBytes(upstream.bodies[0], "input.0.encrypted_content").String())
+			require.False(t, gjson.GetBytes(upstream.bodies[0], "input.0.id").Exists())
+			require.Equal(t, "compaction", gjson.GetBytes(upstream.bodies[0], "input.1.type").String())
+			require.Equal(t, "message", gjson.GetBytes(upstream.bodies[1], "input.0.type").String())
+			require.False(t, gjson.GetBytes(upstream.bodies[1], `input.#(type=="reasoning")`).Exists())
+			require.False(t, gjson.GetBytes(upstream.bodies[1], `input.#(type=="compaction")`).Exists())
+		})
+	}
+}
+
+func TestForwardAsChatCompletions_EncryptedContextRetryFailureIsNotRetriedAgain(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	body := []byte(`{"model":"gpt-5.4","stream":false,"input":[{"type":"reasoning","id":"rs_stale","encrypted_content":"gAAA","summary":[]},{"type":"compaction","encrypted_content":"stale-compact"},{"type":"message","role":"user","content":"continue"}]}`)
+	body := []byte(`{"model":"gpt-5.4","stream":false,"input":[{"type":"reasoning","encrypted_content":"gAAA","summary":[]},{"type":"message","role":"user","content":"continue"}]}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
-
 	upstream := &httpUpstreamRecorder{responses: []*http.Response{
 		{StatusCode: http.StatusBadRequest, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"error":{"code":"invalid_encrypted_content","message":"stale"}}`))},
-		{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader("data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_retry_ok\",\"model\":\"gpt-5.4\",\"output\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\ndata: [DONE]\n\n"))},
+		{StatusCode: http.StatusBadRequest, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"error":{"code":"thinking_signature_invalid","message":"still invalid"}}`))},
 	}}
 	svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
-	account := &Account{ID: 4, Name: "oauth-retry", Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1, Credentials: map[string]any{"access_token": "token", "chatgpt_account_id": "acc"}}
+	account := &Account{ID: 5, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1, Credentials: map[string]any{"access_token": "token", "chatgpt_account_id": "acc"}}
 
 	result, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, "", "")
-	require.NoError(t, err)
-	require.NotNil(t, result)
+	require.Error(t, err)
+	require.Nil(t, result)
 	require.Len(t, upstream.bodies, 2)
-	require.Equal(t, "reasoning", gjson.GetBytes(upstream.bodies[0], "input.0.type").String())
-	require.Equal(t, "gAAA", gjson.GetBytes(upstream.bodies[0], "input.0.encrypted_content").String())
-	require.False(t, gjson.GetBytes(upstream.bodies[0], "input.0.id").Exists())
-	require.Equal(t, "compaction", gjson.GetBytes(upstream.bodies[0], "input.1.type").String())
-	require.Equal(t, "message", gjson.GetBytes(upstream.bodies[1], "input.0.type").String())
-	require.False(t, gjson.GetBytes(upstream.bodies[1], `input.#(type=="reasoning")`).Exists())
-	require.False(t, gjson.GetBytes(upstream.bodies[1], `input.#(type=="compaction")`).Exists())
+	require.Contains(t, err.Error(), "still invalid")
 }
 
 func TestForwardAsChatCompletions_ClientDisconnectDrainsUpstreamUsage(t *testing.T) {

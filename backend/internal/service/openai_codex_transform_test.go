@@ -1446,6 +1446,26 @@ func TestFilterCodexInput_DropsBareReasoningReferences(t *testing.T) {
 	require.Empty(t, filtered)
 }
 
+func TestFilterCodexInput_DropsMalformedEncryptedReasoning(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		ciphertext any
+	}{
+		{name: "empty", ciphertext: ""},
+		{name: "whitespace", ciphertext: " \t\r\n "},
+		{name: "non-string", ciphertext: []any{"gAAA"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			filtered := filterCodexInput([]any{map[string]any{
+				"type":              "reasoning",
+				"id":                "rs_stale",
+				"encrypted_content": tc.ciphertext,
+			}}, false)
+			require.Empty(t, filtered)
+		})
+	}
+}
+
 func TestFilterCodexInput_StripsNonFcIDFromToolCallInputsWhenPreservingReferences(t *testing.T) {
 	for _, typ := range []string{
 		"function_call",
