@@ -53,14 +53,21 @@ func TestUsageConversionsPreserveCacheWriteTokens(t *testing.T) {
 	require.Equal(t, 200, roundTrip.InputTokensDetails.CacheWriteTokens)
 }
 
-func TestResponsesUsageNestedCacheWritePresenceOverridesTopLevelAlias(t *testing.T) {
+func TestResponsesUsageFallsBackFromNegativeCanonicalToPositiveAlias(t *testing.T) {
+	var usage ResponsesUsage
+	require.NoError(t, json.Unmarshal([]byte(`{"cache_creation_input_tokens":-1,"cache_write_input_tokens":8}`), &usage))
+	require.Equal(t, 8, usage.CacheCreationInputTokens)
+}
+
+func TestResponsesUsageNestedCacheWritePreservesPositiveAggregate(t *testing.T) {
 	tests := []struct {
 		name       string
 		nestedJSON string
 		want       int
 	}{
-		{name: "explicit zero", nestedJSON: `{"cache_write_tokens":0}`, want: 0},
-		{name: "nonzero", nestedJSON: `{"cache_write_tokens":7}`, want: 7},
+		{name: "nested zero preserves aggregate", nestedJSON: `{"cache_write_tokens":0}`, want: 19},
+		{name: "nested nonzero overrides aggregate", nestedJSON: `{"cache_write_tokens":7}`, want: 7},
+		{name: "later positive detail overrides nested zero", nestedJSON: `{"cache_write_tokens":0,"cache_creation_tokens":7}`, want: 7},
 	}
 
 	for _, tt := range tests {

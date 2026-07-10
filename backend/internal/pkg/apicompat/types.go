@@ -362,7 +362,7 @@ func (u *ResponsesUsage) UnmarshalJSON(data []byte) error {
 	if u.OutputTokens == 0 && aux.CompletionTokens != 0 {
 		u.OutputTokens = aux.CompletionTokens
 	}
-	if u.CacheCreationInputTokens == 0 {
+	if u.CacheCreationInputTokens <= 0 {
 		switch {
 		case aux.CacheWriteInputTokens > 0:
 			u.CacheCreationInputTokens = aux.CacheWriteInputTokens
@@ -378,20 +378,28 @@ func (u *ResponsesUsage) UnmarshalJSON(data []byte) error {
 	if u.OutputTokensDetails == nil && aux.CompletionTokensDetails != nil {
 		u.OutputTokensDetails = aux.CompletionTokensDetails
 	}
-	var canonicalCacheCreationTokens *int
-	switch {
-	case nestedPresence.InputTokensDetails != nil && nestedPresence.InputTokensDetails.CacheWriteTokens != nil:
-		canonicalCacheCreationTokens = nestedPresence.InputTokensDetails.CacheWriteTokens
-	case nestedPresence.PromptTokensDetails != nil && nestedPresence.PromptTokensDetails.CacheWriteTokens != nil:
-		canonicalCacheCreationTokens = nestedPresence.PromptTokensDetails.CacheWriteTokens
-	case nestedPresence.InputTokensDetails != nil && nestedPresence.InputTokensDetails.CacheCreationTokens != nil:
-		canonicalCacheCreationTokens = nestedPresence.InputTokensDetails.CacheCreationTokens
-	case nestedPresence.PromptTokensDetails != nil && nestedPresence.PromptTokensDetails.CacheCreationTokens != nil:
-		canonicalCacheCreationTokens = nestedPresence.PromptTokensDetails.CacheCreationTokens
+	nestedCacheCreationTokens := []*int{}
+	if nestedPresence.InputTokensDetails != nil {
+		nestedCacheCreationTokens = append(nestedCacheCreationTokens,
+			nestedPresence.InputTokensDetails.CacheWriteTokens,
+			nestedPresence.InputTokensDetails.CacheCreationTokens,
+		)
 	}
-	if canonicalCacheCreationTokens != nil {
-		u.CacheCreationInputTokens = max(*canonicalCacheCreationTokens, 0)
+	if nestedPresence.PromptTokensDetails != nil {
+		nestedCacheCreationTokens = append(nestedCacheCreationTokens,
+			nestedPresence.PromptTokensDetails.CacheWriteTokens,
+			nestedPresence.PromptTokensDetails.CacheCreationTokens,
+		)
 	}
+	// Zero-valued details can accompany a positive aggregate. Only a reported
+	// positive detail is authoritative; otherwise preserve the aggregate.
+	for _, candidate := range nestedCacheCreationTokens {
+		if candidate != nil && *candidate > 0 {
+			u.CacheCreationInputTokens = *candidate
+			break
+		}
+	}
+	u.CacheCreationInputTokens = max(u.CacheCreationInputTokens, 0)
 	if u.TotalTokens == 0 && (u.InputTokens != 0 || u.OutputTokens != 0) {
 		u.TotalTokens = u.InputTokens + u.OutputTokens
 	}
