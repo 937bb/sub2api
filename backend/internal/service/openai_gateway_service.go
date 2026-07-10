@@ -6458,6 +6458,27 @@ func openAIUsageFromGJSON(value gjson.Result) (OpenAIUsage, bool) {
 	if cacheReadTokens == 0 {
 		cacheReadTokens = value.Get("prompt_tokens_details.cached_tokens").Int()
 	}
+	cacheCreationTokens := value.Get("cache_creation_input_tokens")
+	if !cacheCreationTokens.Exists() {
+		for _, path := range []string{"cache_write_input_tokens", "cache_creation_tokens", "cache_write_tokens"} {
+			if candidate := value.Get(path); candidate.Exists() {
+				cacheCreationTokens = candidate
+				break
+			}
+		}
+	}
+	// Detailed usage is canonical when present, including an explicit zero.
+	for _, path := range []string{
+		"input_tokens_details.cache_write_tokens",
+		"prompt_tokens_details.cache_write_tokens",
+		"input_tokens_details.cache_creation_tokens",
+		"prompt_tokens_details.cache_creation_tokens",
+	} {
+		if candidate := value.Get(path); candidate.Exists() {
+			cacheCreationTokens = candidate
+			break
+		}
+	}
 	imageInputTokens := value.Get("input_tokens_details.image_tokens").Int()
 	if imageInputTokens == 0 {
 		imageInputTokens = value.Get("prompt_tokens_details.image_tokens").Int()
@@ -6470,7 +6491,7 @@ func openAIUsageFromGJSON(value gjson.Result) (OpenAIUsage, bool) {
 		InputTokens:              int(inputTokens),
 		ImageInputTokens:         int(imageInputTokens),
 		OutputTokens:             int(outputTokens),
-		CacheCreationInputTokens: int(value.Get("cache_creation_input_tokens").Int()),
+		CacheCreationInputTokens: max(int(cacheCreationTokens.Int()), 0),
 		CacheReadInputTokens:     int(cacheReadTokens),
 		ImageOutputTokens:        int(imageOutputTokens),
 	}, true

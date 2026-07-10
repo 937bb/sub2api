@@ -58,6 +58,50 @@ func TestCalculateCost_WithCacheTokens(t *testing.T) {
 	require.InDelta(t, expectedTotal, cost.TotalCost, 1e-10)
 }
 
+func TestCalculateCost_GPT56CacheCreationPricing(t *testing.T) {
+	svc := newTestBillingService()
+	tokens := UsageTokens{
+		InputTokens:         1000,
+		OutputTokens:        100,
+		CacheCreationTokens: 2000,
+		CacheReadTokens:     3000,
+	}
+
+	tests := []struct {
+		name               string
+		model              string
+		serviceTier        string
+		cacheCreationPrice float64
+		cacheReadPrice     float64
+	}{
+		{name: "bare alias uses sol", model: "gpt-5.6", cacheCreationPrice: 6.25e-6, cacheReadPrice: 0.5e-6},
+		{name: "sol", model: "gpt-5.6-sol", cacheCreationPrice: 6.25e-6, cacheReadPrice: 0.5e-6},
+		{name: "sol priority", model: "gpt-5.6-sol", serviceTier: "priority", cacheCreationPrice: 12.5e-6, cacheReadPrice: 1e-6},
+		{name: "terra", model: "gpt-5.6-terra", cacheCreationPrice: 3.125e-6, cacheReadPrice: 0.25e-6},
+		{name: "terra priority", model: "gpt-5.6-terra", serviceTier: "priority", cacheCreationPrice: 6.25e-6, cacheReadPrice: 0.5e-6},
+		{name: "luna", model: "gpt-5.6-luna", cacheCreationPrice: 1.25e-6, cacheReadPrice: 0.1e-6},
+		{name: "luna priority", model: "gpt-5.6-luna", serviceTier: "priority", cacheCreationPrice: 2.5e-6, cacheReadPrice: 0.2e-6},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cost, err := svc.CalculateCostWithServiceTier(tt.model, tokens, 1, tt.serviceTier)
+			require.NoError(t, err)
+			require.InDelta(t, float64(tokens.CacheCreationTokens)*tt.cacheCreationPrice, cost.CacheCreationCost, 1e-12)
+			require.InDelta(t, float64(tokens.CacheReadTokens)*tt.cacheReadPrice, cost.CacheReadCost, 1e-12)
+			require.InDelta(t, cost.InputCost+cost.OutputCost+cost.CacheCreationCost+cost.CacheReadCost, cost.TotalCost, 1e-12)
+		})
+	}
+}
+
+func TestCalculateCost_GPT56CacheCreationRequiresReportedTokens(t *testing.T) {
+	svc := newTestBillingService()
+	cost, err := svc.CalculateCost("gpt-5.6-sol", UsageTokens{CacheReadTokens: 3000}, 1)
+	require.NoError(t, err)
+	require.Zero(t, cost.CacheCreationCost)
+	require.InDelta(t, 3000*0.5e-6, cost.CacheReadCost, 1e-12)
+}
+
 func TestCalculateCost_RateMultiplier(t *testing.T) {
 	svc := newTestBillingService()
 
