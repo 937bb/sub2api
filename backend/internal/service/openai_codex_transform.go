@@ -164,6 +164,11 @@ func applyCodexOAuthTransformWithOptions(reqBody map[string]any, opts codexOAuth
 	if normalizeCodexTools(reqBody) {
 		result.Modified = true
 	}
+	// The ChatGPT Codex adapter rejects the client-only image_gen namespace.
+	// Keep native image_generation and unrelated namespaces available upstream.
+	if stripCodexImageGenNamespaceDeclarations(reqBody) {
+		result.Modified = true
+	}
 	if normalizeCodexToolChoice(reqBody) {
 		result.Modified = true
 	}
@@ -594,6 +599,60 @@ func openAIAnyInputContainsImageGenNamespace(rawInput any) bool {
 		}
 	}
 	return false
+}
+
+func stripCodexImageGenNamespaceDeclarations(reqBody map[string]any) bool {
+	modified := stripCodexImageGenNamespaceList(reqBody)
+	if choice, ok := reqBody["tool_choice"].(map[string]any); ok && openAIAnyToolIsImageGenNamespace(choice) {
+		delete(reqBody, "tool_choice")
+		modified = true
+	}
+	input, ok := reqBody["input"].([]any)
+	if !ok {
+		return modified
+	}
+
+	filteredInput := make([]any, 0, len(input))
+	for _, rawItem := range input {
+		item, ok := rawItem.(map[string]any)
+		if !ok || strings.TrimSpace(firstNonEmptyString(item["type"])) != "additional_tools" || !stripCodexImageGenNamespaceList(item) {
+			filteredInput = append(filteredInput, rawItem)
+			continue
+		}
+		modified = true
+		if _, hasTools := item["tools"]; hasTools {
+			filteredInput = append(filteredInput, rawItem)
+		}
+	}
+	if modified {
+		reqBody["input"] = filteredInput
+	}
+	return modified
+}
+
+func stripCodexImageGenNamespaceList(container map[string]any) bool {
+	tools, ok := container["tools"].([]any)
+	if !ok {
+		return false
+	}
+	filtered := make([]any, 0, len(tools))
+	removed := false
+	for _, rawTool := range tools {
+		if tool, ok := rawTool.(map[string]any); ok && openAIAnyToolIsImageGenNamespace(tool) {
+			removed = true
+			continue
+		}
+		filtered = append(filtered, rawTool)
+	}
+	if !removed {
+		return false
+	}
+	if len(filtered) == 0 {
+		delete(container, "tools")
+	} else {
+		container["tools"] = filtered
+	}
+	return true
 }
 
 // stripCodexSparkImageGenerationTooling removes Spark-unsupported

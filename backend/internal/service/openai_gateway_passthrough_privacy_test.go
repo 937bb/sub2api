@@ -302,6 +302,23 @@ func TestOpenAIForwardStreamingResponseFailedOutputEventOnlyReturnsFailoverWitho
 	passthroughPrivacyRequireSanitizedFailedText(t, detail)
 }
 
+func TestOpenAIAPIKeyPassthroughPreservesImageGenNamespaceBytes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	body := []byte("{\n  \"model\": \"gpt-5.5\",\n  \"stream\": true,\n  \"tools\": [{\"type\":\"namespace\",\"name\":\"image_gen\"}],\n  \"input\": \"draw\"\n}")
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(string(body)))
+	c.Request.Header.Set("Content-Type", "application/json")
+	upstream := &httpUpstreamRecorder{resp: passthroughPrivacyOutputEventOnlyThenResponseFailedHTTPResponse("resp_image_gen_passthrough", "rid-image-gen-passthrough")}
+	svc := &OpenAIGatewayService{cfg: passthroughPrivacyTestConfig(), httpUpstream: upstream}
+
+	_, err := svc.Forward(context.Background(), c, passthroughPrivacyAPIKeyPassthroughAccount(), body)
+
+	require.Error(t, err)
+	require.Equal(t, body, upstream.lastBody)
+}
+
 func TestOpenAIForwardStreamingResponseFailedOutputEventOnlyPassthroughReturnsFailoverWithoutUsageResult(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

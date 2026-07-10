@@ -520,6 +520,76 @@ func TestApplyCodexOAuthTransform_NormalizeCodexTools_PreservesResponsesFunction
 	require.Equal(t, "bash", first["name"])
 }
 
+func TestApplyCodexOAuthTransform_StripsExactImageGenNamespaceDeclarations(t *testing.T) {
+	reqBody := map[string]any{
+		"model": "gpt-5.5",
+		"tools": []any{
+			map[string]any{"type": "namespace", "name": "image_gen"},
+			map[string]any{"type": "namespace", "name": "media_tools", "tools": []any{
+				map[string]any{"type": "function", "name": "imagegen"},
+			}},
+			map[string]any{"type": "image_generation", "output_format": "png"},
+		},
+		"tool_choice": map[string]any{"type": "namespace", "name": "image_gen"},
+		"input": []any{
+			map[string]any{"type": "message", "role": "user", "content": "draw"},
+			map[string]any{"type": "additional_tools", "tools": []any{
+				map[string]any{"type": "namespace", "name": "image_gen"},
+				map[string]any{"type": "namespace", "name": "other"},
+			}},
+		},
+	}
+
+	result := applyCodexOAuthTransform(reqBody, true, false)
+
+	require.True(t, result.Modified)
+	tools, ok := reqBody["tools"].([]any)
+	require.True(t, ok)
+	require.Len(t, tools, 2)
+	require.Equal(t, "media_tools", tools[0].(map[string]any)["name"])
+	require.Equal(t, "image_generation", tools[1].(map[string]any)["type"])
+	require.NotContains(t, reqBody, "tool_choice")
+
+	input, ok := reqBody["input"].([]any)
+	require.True(t, ok)
+	require.Len(t, input, 2)
+	additionalTools, ok := input[1].(map[string]any)["tools"].([]any)
+	require.True(t, ok)
+	require.Len(t, additionalTools, 1)
+	require.Equal(t, "other", additionalTools[0].(map[string]any)["name"])
+}
+
+func TestApplyCodexOAuthTransform_StripsImageGenNamespaceToolChoiceWithoutDeclaration(t *testing.T) {
+	reqBody := map[string]any{
+		"model":       "gpt-5.5",
+		"tool_choice": map[string]any{"type": "namespace", "name": "image_gen"},
+		"input":       "draw",
+	}
+
+	applyCodexOAuthTransform(reqBody, true, false)
+
+	require.NotContains(t, reqBody, "tool_choice")
+}
+
+func TestApplyCodexOAuthTransform_DropsEmptyAdditionalToolsAfterImageGenNamespaceStrip(t *testing.T) {
+	reqBody := map[string]any{
+		"model": "gpt-5.5",
+		"input": []any{
+			map[string]any{"type": "additional_tools", "tools": []any{
+				map[string]any{"type": "namespace", "name": "image_gen"},
+			}},
+			map[string]any{"type": "message", "role": "user", "content": "draw"},
+		},
+	}
+
+	applyCodexOAuthTransform(reqBody, true, false)
+
+	input, ok := reqBody["input"].([]any)
+	require.True(t, ok)
+	require.Len(t, input, 1)
+	require.Equal(t, "message", input[0].(map[string]any)["type"])
+}
+
 func TestNormalizeOpenAIResponsesImageGenerationTools_RewritesLegacyFields(t *testing.T) {
 	reqBody := map[string]any{
 		"tools": []any{
