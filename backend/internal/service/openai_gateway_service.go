@@ -6476,8 +6476,12 @@ func openAIUsageFromGJSON(value gjson.Result) (OpenAIUsage, bool) {
 		"input_tokens_details.cache_creation_tokens",
 		"prompt_tokens_details.cache_creation_tokens",
 	} {
-		if candidate := value.Get(path); candidate.Int() > 0 {
+		if candidate := value.Get(path); candidate.Exists() {
+			// Official nested details are authoritative by field presence.
 			cacheCreationTokens = candidate.Int()
+			if cacheCreationTokens < 0 {
+				cacheCreationTokens = 0
+			}
 			break
 		}
 	}

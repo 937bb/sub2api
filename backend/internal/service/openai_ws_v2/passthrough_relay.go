@@ -834,8 +834,8 @@ func openAICacheCreationTokensFromUsage(value gjson.Result) int {
 		"input_tokens_details.cache_creation_tokens",
 		"prompt_tokens_details.cache_creation_tokens",
 	} {
-		if tokens := int(value.Get(field).Int()); tokens > 0 {
-			return tokens
+		if result := value.Get(field); result.Exists() {
+			return max(int(result.Int()), 0)
 		}
 	}
 	return cacheCreationTokens

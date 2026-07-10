@@ -1006,7 +1006,7 @@ func TestOpenAIGatewayServiceRecordUsage_PersistsGPT56CacheCreationCost(t *testi
 	subRepo := &openAIRecordUsageSubRepoStub{}
 	svc := newOpenAIRecordUsageServiceForTest(usageRepo, userRepo, subRepo, nil)
 
-	usage, ok := extractOpenAIUsageFromJSONBytes([]byte(`{"usage":{"input_tokens":100,"output_tokens":20,"cache_creation_input_tokens":40,"input_tokens_details":{"cache_creation_tokens":0}}}`))
+	usage, ok := extractOpenAIUsageFromJSONBytes([]byte(`{"usage":{"input_tokens":100,"output_tokens":20,"input_tokens_details":{"cached_tokens":10,"cache_write_tokens":40}}}`))
 	require.True(t, ok)
 	err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
 		Result: &OpenAIForwardResult{
@@ -1023,6 +1023,7 @@ func TestOpenAIGatewayServiceRecordUsage_PersistsGPT56CacheCreationCost(t *testi
 	require.NoError(t, err)
 	require.NotNil(t, usageRepo.lastLog)
 	require.Equal(t, 40, usageRepo.lastLog.CacheCreationTokens)
+	require.Equal(t, 10, usageRepo.lastLog.CacheReadTokens)
 	expectedCreationCost := 40 * 6.25e-6
 	require.InDelta(t, expectedCreationCost, usageRepo.lastLog.CacheCreationCost, 1e-12)
 	require.InDelta(t, usageRepo.lastLog.InputCost+usageRepo.lastLog.OutputCost+expectedCreationCost+usageRepo.lastLog.CacheReadCost, usageRepo.lastLog.TotalCost, 1e-12)

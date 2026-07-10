@@ -378,26 +378,21 @@ func (u *ResponsesUsage) UnmarshalJSON(data []byte) error {
 	if u.OutputTokensDetails == nil && aux.CompletionTokensDetails != nil {
 		u.OutputTokensDetails = aux.CompletionTokensDetails
 	}
-	nestedCacheCreationTokens := []*int{}
-	if nestedPresence.InputTokensDetails != nil {
-		nestedCacheCreationTokens = append(nestedCacheCreationTokens,
-			nestedPresence.InputTokensDetails.CacheWriteTokens,
-			nestedPresence.InputTokensDetails.CacheCreationTokens,
-		)
+	var canonicalCacheCreationTokens *int
+	switch {
+	case nestedPresence.InputTokensDetails != nil && nestedPresence.InputTokensDetails.CacheWriteTokens != nil:
+		canonicalCacheCreationTokens = nestedPresence.InputTokensDetails.CacheWriteTokens
+	case nestedPresence.PromptTokensDetails != nil && nestedPresence.PromptTokensDetails.CacheWriteTokens != nil:
+		canonicalCacheCreationTokens = nestedPresence.PromptTokensDetails.CacheWriteTokens
+	case nestedPresence.InputTokensDetails != nil && nestedPresence.InputTokensDetails.CacheCreationTokens != nil:
+		canonicalCacheCreationTokens = nestedPresence.InputTokensDetails.CacheCreationTokens
+	case nestedPresence.PromptTokensDetails != nil && nestedPresence.PromptTokensDetails.CacheCreationTokens != nil:
+		canonicalCacheCreationTokens = nestedPresence.PromptTokensDetails.CacheCreationTokens
 	}
-	if nestedPresence.PromptTokensDetails != nil {
-		nestedCacheCreationTokens = append(nestedCacheCreationTokens,
-			nestedPresence.PromptTokensDetails.CacheWriteTokens,
-			nestedPresence.PromptTokensDetails.CacheCreationTokens,
-		)
-	}
-	// Zero-valued details can accompany a positive aggregate. Only a reported
-	// positive detail is authoritative; otherwise preserve the aggregate.
-	for _, candidate := range nestedCacheCreationTokens {
-		if candidate != nil && *candidate > 0 {
-			u.CacheCreationInputTokens = *candidate
-			break
-		}
+	// Official nested details are authoritative by field presence, including
+	// zero. Top-level values are compatibility fallbacks only.
+	if canonicalCacheCreationTokens != nil {
+		u.CacheCreationInputTokens = max(*canonicalCacheCreationTokens, 0)
 	}
 	u.CacheCreationInputTokens = max(u.CacheCreationInputTokens, 0)
 	if u.TotalTokens == 0 && (u.InputTokens != 0 || u.OutputTokens != 0) {

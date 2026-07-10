@@ -3055,12 +3055,17 @@ func TestExtractOpenAIUsageFromJSONBytes_AcceptsResponseAndChatUsageShapes(t *te
 	require.Equal(t, 13, usage.InputTokens)
 	require.Equal(t, 3, usage.ImageInputTokens)
 	require.Equal(t, 7, usage.OutputTokens)
-	require.Equal(t, 9, usage.CacheCreationInputTokens)
+	require.Zero(t, usage.CacheCreationInputTokens)
 	require.Equal(t, 4, usage.CacheReadInputTokens)
 
 	usage, ok = extractOpenAIUsageFromJSONBytes([]byte(`{"usage":{"input_tokens":11,"output_tokens":2,"cache_creation_input_tokens":0,"cache_write_input_tokens":8,"input_tokens_details":{"cache_write_tokens":0,"cache_creation_tokens":6}}}`))
 	require.True(t, ok)
+	require.Zero(t, usage.CacheCreationInputTokens)
+
+	usage, ok = extractOpenAIUsageFromJSONBytes([]byte(`{"usage":{"prompt_tokens":11,"completion_tokens":2,"prompt_tokens_details":{"cached_tokens":3,"cache_write_tokens":6}}}`))
+	require.True(t, ok)
 	require.Equal(t, 6, usage.CacheCreationInputTokens)
+	require.Equal(t, 3, usage.CacheReadInputTokens)
 }
 
 func TestExtractOpenAIResponseIDFromJSONBytes(t *testing.T) {
