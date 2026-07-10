@@ -57,14 +57,18 @@ func TestOpenAICompactKeepalive_AdjustedSizeIgnoresHeartbeatAndSerializesWrites(
 	c.Set(openAICompactClientStreamKey, true)
 	stop := startOpenAICompactSSEKeepalive(c, time.Millisecond)
 	t.Cleanup(stop)
-	require.Eventually(t, func() bool { return strings.Contains(rec.Body.String(), ": keepalive") }, time.Second, time.Millisecond)
+	// Size is synchronized by the keepalive mutex; the recorder body is not safe
+	// to inspect until the heartbeat goroutine has been stopped.
+	require.Eventually(t, func() bool { return c.Writer.Written() }, time.Second, time.Millisecond)
 	require.Equal(t, -1, openAICompactKeepaliveAdjustedWrittenSize(c))
 	_, err := c.Writer.Write([]byte("semantic"))
 	require.NoError(t, err)
 	require.Greater(t, openAICompactKeepaliveAdjustedWrittenSize(c), 0)
+	stop()
 	before := rec.Body.String()
 	time.Sleep(5 * time.Millisecond)
 	require.Equal(t, before, rec.Body.String())
+	require.Contains(t, before, ": keepalive")
 }
 
 func TestMergeOpenAICompactTerminalOutput_RecoversRawCompactionItem(t *testing.T) {
