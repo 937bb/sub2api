@@ -226,27 +226,54 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 		return nil, fmt.Errorf("get access token: %w", err)
 	}
 
-	// 6. Build upstream request
-	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
-	upstreamReq, err := s.buildUpstreamRequest(upstreamCtx, c, account, responsesBody, token, true, promptCacheKey, false)
-	releaseUpstreamCtx()
-	if err != nil {
-		return nil, fmt.Errorf("build upstream request: %w", err)
-	}
-
-	if promptCacheKey != "" && !account.IsOpenAIOAuthLike() {
-		apiKeyID := getAPIKeyIDFromContext(c)
-		upstreamReq.Header.Set("session_id", generateSessionUUID(isolateOpenAISessionID(apiKeyID, promptCacheKey)))
-	}
-
-	// 7. Send request
 	proxyURL := ""
 	if account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
 	}
-	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
-	if err != nil {
-		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
+
+	var resp *http.Response
+	encryptedContextRetryTried := false
+	for {
+		// 6. Build and send the upstream request. Responses-shaped OAuth bridge
+		// requests share native Responses recovery for stale encrypted context.
+		upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
+		upstreamReq, buildErr := s.buildUpstreamRequest(upstreamCtx, c, account, responsesBody, token, true, promptCacheKey, false)
+		releaseUpstreamCtx()
+		if buildErr != nil {
+			return nil, fmt.Errorf("build upstream request: %w", buildErr)
+		}
+		if promptCacheKey != "" && !account.IsOpenAIOAuthLike() {
+			apiKeyID := getAPIKeyIDFromContext(c)
+			upstreamReq.Header.Set("session_id", generateSessionUUID(isolateOpenAISessionID(apiKeyID, promptCacheKey)))
+		}
+
+		resp, err = s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
+		if err != nil {
+			return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
+		}
+		if !isResponsesShape || !account.IsOpenAIOAuthLike() || encryptedContextRetryTried || resp.StatusCode != http.StatusBadRequest {
+			break
+		}
+
+		respBody := s.readUpstreamErrorBody(resp)
+		_ = resp.Body.Close()
+		if !isOpenAIEncryptedContextErrorCode(extractUpstreamErrorCode(respBody)) {
+			resp.Body = io.NopCloser(bytes.NewReader(respBody))
+			break
+		}
+		decoded, decodeErr := decodeOpenAIRequestBodyMapUseNumber(responsesBody)
+		if decodeErr != nil {
+			return nil, fmt.Errorf("decode encrypted context retry body: %w", decodeErr)
+		}
+		if !trimOpenAIEncryptedReasoningItems(decoded) {
+			resp.Body = io.NopCloser(bytes.NewReader(respBody))
+			break
+		}
+		responsesBody, err = marshalOpenAIUpstreamJSON(decoded)
+		if err != nil {
+			return nil, fmt.Errorf("serialize encrypted context retry body: %w", err)
+		}
+		encryptedContextRetryTried = true
 	}
 	defer func() { _ = resp.Body.Close() }()
 

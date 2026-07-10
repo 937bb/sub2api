@@ -1169,11 +1169,26 @@ func filterCodexInputWithOptions(input []any, opts codexInputFilterOptions) []an
 		}
 		typ, _ := m["type"].(string)
 
-		// chatgpt.com codex backend (OAuth path) does not persist reasoning
-		// items because applyCodexOAuthTransform forces store=false. Any rs_*
-		// reference replayed in input is guaranteed to 404 upstream
-		// ("Item with id 'rs_...' not found"). Drop reasoning items entirely.
+		// OAuth Codex runs with store=false, so replaying a reasoning item's
+		// persisted rs_* id can fail upstream. Keep only the self-contained
+		// encrypted context, strip the id, and retain the previous behavior of
+		// dropping bare reasoning references.
 		if typ == "reasoning" {
+			encryptedContent, ok := m["encrypted_content"].(string)
+			if !ok || strings.TrimSpace(encryptedContent) == "" {
+				continue
+			}
+			newItem := make(map[string]any, len(m))
+			for key, value := range m {
+				if key == "id" {
+					continue
+				}
+				newItem[key] = value
+			}
+			if summary, ok := newItem["summary"]; !ok || summary == nil {
+				newItem["summary"] = []any{}
+			}
+			filtered = append(filtered, newItem)
 			continue
 		}
 
