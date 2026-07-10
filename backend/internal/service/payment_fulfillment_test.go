@@ -972,6 +972,16 @@ func TestExecuteSubscriptionFulfillmentDoesNotDuplicateWorkAfterLegacySuccessAud
 		SettingKeyAffiliateRebateRate: "20",
 	}}, nil)
 	subRepo := newSubscriptionUserSubRepoStub()
+	expiresAt := time.Now().Add(30 * 24 * time.Hour).Truncate(time.Second)
+	subRepo.seed(&UserSubscription{
+		ID:        99,
+		UserID:    order.UserID,
+		GroupID:   *order.SubscriptionGroupID,
+		StartsAt:  time.Now().Add(-time.Hour),
+		ExpiresAt: expiresAt,
+		Status:    SubscriptionStatusActive,
+		Notes:     "legacy assignment\n" + subscriptionPaymentOrderNote(order.ID),
+	})
 	subscriptionSvc := NewSubscriptionService(&subscriptionGroupRepoStub{
 		group: &Group{ID: 7, Status: payment.EntityStatusActive, SubscriptionType: SubscriptionTypeSubscription},
 	}, subRepo, nil, nil, nil)
@@ -990,6 +1000,16 @@ func TestExecuteSubscriptionFulfillmentDoesNotDuplicateWorkAfterLegacySuccessAud
 	require.Equal(t, OrderStatusCompleted, reloaded.Status)
 	require.Empty(t, affiliateRepo.accrueCalls)
 	require.Zero(t, subRepo.createCalls)
+	assertPaymentSubscriptionExpiry(t, subRepo, order, expiresAt)
+
+	assignmentAudit, err := client.PaymentAuditLog.Query().
+		Where(
+			paymentauditlog.OrderIDEQ(strconv.FormatInt(order.ID, 10)),
+			paymentauditlog.ActionEQ("SUBSCRIPTION_ASSIGNED"),
+		).
+		Only(ctx)
+	require.NoError(t, err)
+	require.Contains(t, assignmentAudit.Detail, `"recoveredFromNote":true`)
 }
 
 var _ AffiliateRepository = (*paymentFulfillmentAffiliateRepoStub)(nil)
