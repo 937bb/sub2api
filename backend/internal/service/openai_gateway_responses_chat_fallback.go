@@ -75,7 +75,7 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 	}
 
 	clientStream := responsesReq.Stream
-	reasoningEffort := ApplyThinkingEnabledFallback(extractOpenAIReasoningEffortFromBody(body, originalModel), body, billingModel)
+	reasoningEffort := ApplyThinkingEnabledFallback(extractOpenAIReasoningEffortFromBody(body, originalModel, billingModel, upstreamModel), body, billingModel)
 	serviceTier := extractOpenAIServiceTierFromBody(body)
 
 	chatReq, err := apicompat.ResponsesToChatCompletionsRequest(&responsesReq)

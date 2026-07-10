@@ -551,7 +551,7 @@ func (s *PaymentService) ensurePaymentSubscriptionAssigned(ctx context.Context, 
 		case lookupErr == nil && existing != nil && hasPaymentSubscriptionOrderNote(existing.Notes, orderNote):
 			recoveredFromNote = true
 		case lookupErr != nil && !errors.Is(lookupErr, ErrSubscriptionNotFound):
-			return fmt.Errorf("check existing subscription assignment: %w", lookupErr)
+			return fmt.Errorf("check subscription assignment witness: %w", lookupErr)
 		default:
 			if _, _, err := s.subscriptionSvc.assignOrExtendSubscription(txCtx, &AssignSubscriptionInput{
 				UserID:       o.UserID,
@@ -603,7 +603,7 @@ func hasPaymentSubscriptionAssignmentAudit(ctx context.Context, client *dbent.Cl
 	count, err := client.PaymentAuditLog.Query().
 		Where(
 			paymentauditlog.OrderIDEQ(strconv.FormatInt(orderID, 10)),
-			paymentauditlog.ActionIn("SUBSCRIPTION_ASSIGNED", "SUBSCRIPTION_SUCCESS"),
+			paymentauditlog.ActionEQ("SUBSCRIPTION_ASSIGNED"),
 		).
 		Limit(1).
 		Count(ctx)
@@ -670,21 +670,13 @@ func (s *PaymentService) hasAuditLog(ctx context.Context, orderID int64, action 
 }
 
 func (s *PaymentService) applyAffiliateRebateForOrder(ctx context.Context, o *dbent.PaymentOrder) error {
-<<<<<<< HEAD
-	if o == nil {
-		return nil
-	}
-	if o.OrderType != payment.OrderTypeBalance && o.OrderType != payment.OrderTypeSubscription {
-=======
 	baseAmount := affiliateRebateBaseAmount(o)
 	if o == nil || baseAmount <= 0 {
->>>>>>> 60a9bd36e (fix(payment): recover stalled fulfillment safely)
 		return nil
 	}
 	if s.affiliateService == nil {
 		return nil
 	}
-	baseAmount := affiliateRebateBaseAmount(o)
 	if !isValidAffiliateRebateBase(baseAmount) {
 		return nil
 	}
@@ -754,33 +746,26 @@ func (s *PaymentService) applyAffiliateRebateForOrder(ctx context.Context, o *db
 	return nil
 }
 
-<<<<<<< HEAD
 func (s *PaymentService) writeAffiliateRebateFailedAudit(ctx context.Context, orderID int64, message string) {
 	s.writeAuditLog(ctx, orderID, "AFFILIATE_REBATE_FAILED", "system", map[string]any{
 		"error": message,
 	})
 }
 
-=======
->>>>>>> 60a9bd36e (fix(payment): recover stalled fulfillment safely)
 func affiliateRebateBaseAmount(o *dbent.PaymentOrder) float64 {
 	if o == nil {
 		return 0
 	}
-<<<<<<< HEAD
-	return o.Amount
-}
-
-func isValidAffiliateRebateBase(amount float64) bool {
-	return amount > 0 && !math.IsNaN(amount) && !math.IsInf(amount, 0)
-=======
 	switch o.OrderType {
 	case payment.OrderTypeBalance, payment.OrderTypeSubscription:
 		return o.Amount
 	default:
 		return 0
 	}
->>>>>>> 60a9bd36e (fix(payment): recover stalled fulfillment safely)
+}
+
+func isValidAffiliateRebateBase(amount float64) bool {
+	return amount > 0 && !math.IsNaN(amount) && !math.IsInf(amount, 0)
 }
 
 func (s *PaymentService) tryClaimAffiliateRebateAudit(ctx context.Context, client *dbent.Client, orderID int64, baseAmount float64) (bool, error) {
@@ -795,25 +780,11 @@ func (s *PaymentService) tryClaimAffiliateRebateAudit(ctx context.Context, clien
 		"baseAmount": baseAmount,
 		"status":     "reserved",
 	})
-<<<<<<< HEAD
 	if err != nil {
 		return false, fmt.Errorf("marshal affiliate rebate claim audit: %w", err)
 	}
-	rows, err := client.QueryContext(ctx, `
-INSERT INTO payment_audit_logs (order_id, action, detail, operator, created_at)
-SELECT $1, 'AFFILIATE_REBATE_APPLIED', $2, 'system', CURRENT_TIMESTAMP
-WHERE NOT EXISTS (
-	SELECT 1
-	FROM payment_audit_logs
-	WHERE order_id = $1
-	  AND action IN ('AFFILIATE_REBATE_APPLIED', 'AFFILIATE_REBATE_SKIPPED')
-)
-ON CONFLICT (order_id, action) DO NOTHING
-RETURNING id`, oid, string(detail))
-=======
 	query, args := buildAffiliateRebateAuditClaimQuery(client, oid, string(detail))
 	rows, err := client.QueryContext(ctx, query, args...)
->>>>>>> 60a9bd36e (fix(payment): recover stalled fulfillment safely)
 	if err != nil {
 		return false, err
 	}
