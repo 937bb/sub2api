@@ -631,6 +631,48 @@ func TestLinuxDoOAuthCallbackCreatesChoicePendingSessionWhenSignupRequiresInvite
 	require.Equal(t, "third_party_signup", completion["choice_reason"])
 }
 
+func TestCreateLinuxDoOAuthChoicePendingSessionRequiresVerifiedEmail(t *testing.T) {
+	handler, client := newOAuthPendingFlowTestHandler(t, false)
+	t.Cleanup(func() { _ = client.Close() })
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/auth/oauth/linuxdo/callback", nil)
+
+	err := handler.createLinuxDoOAuthChoicePendingSession(
+		c,
+		service.PendingAuthIdentityKey{ProviderType: "linuxdo", ProviderKey: "linuxdo", ProviderSubject: "verify-123"},
+		"linuxdo-verify-123@linuxdo-connect.invalid",
+		"linuxdo-verify-123@linuxdo-connect.invalid",
+		"/dashboard",
+		"browser-verify",
+		map[string]any{"email": "linuxdo-verify-123@linuxdo-connect.invalid"},
+		"",
+		nil,
+		true,
+		false,
+	)
+	require.NoError(t, err)
+
+	sessionCookie := findCookie(recorder.Result().Cookies(), oauthPendingSessionCookieName)
+	require.NotNil(t, sessionCookie)
+	session, err := client.PendingAuthSession.Query().
+		Where(pendingauthsession.SessionTokenEQ(decodeCookieValueForTest(t, sessionCookie.Value))).
+		Only(context.Background())
+	require.NoError(t, err)
+	require.Empty(t, session.ResolvedEmail)
+	require.Equal(t, "linuxdo-verify-123@linuxdo-connect.invalid", session.UpstreamIdentityClaims["email"])
+
+	completion, ok := session.LocalFlowState[oauthCompletionResponseKey].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "create_account_required", completion["step"])
+	require.Equal(t, true, completion["email_binding_required"])
+	require.Equal(t, true, completion["force_email_on_signup"])
+	require.Equal(t, "email_verification_required", completion["choice_reason"])
+	require.NotContains(t, completion, "email")
+	require.NotContains(t, completion, "resolved_email")
+}
+
 func TestLinuxDoOAuthCallbackDirectlyLogsInNewUserWhenEmailVerificationDisabled(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
