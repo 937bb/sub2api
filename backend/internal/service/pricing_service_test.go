@@ -177,6 +177,15 @@ func TestGetModelPricing_ImageModelDoesNotFallbackToTextModel(t *testing.T) {
 	require.Same(t, imagePricing, got)
 }
 
+func TestGetModelPricing_ImageModelWithoutImagePricingDoesNotFallbackToTextModel(t *testing.T) {
+	textPricing := &LiteLLMModelPricing{InputCostPerToken: 9}
+	svc := &PricingService{pricingData: map[string]*LiteLLMModelPricing{
+		"gpt-5.1-codex": textPricing,
+	}}
+
+	require.Nil(t, svc.GetModelPricing("gpt-image-99"))
+}
+
 func TestParsePricingData_PreservesPriorityAndServiceTierFields(t *testing.T) {
 	raw := map[string]any{
 		"gpt-5.4": map[string]any{
@@ -523,6 +532,16 @@ func TestBillingService_GetModelPricing_FailsClosedForImageOnlyEntries(t *testin
 			"output_cost_per_image": 0.034,
 			"litellm_provider": "vertex_ai-language-models",
 			"mode": "image_generation"
+		},
+		"image-token-dimensions-only": {
+			"input_cost_per_image_token": 0.000001,
+			"output_cost_per_image_token": 0.000002,
+			"mode": "image_generation"
+		},
+		"image-with-cache-only": {
+			"output_cost_per_image": 0.02,
+			"cache_read_input_token_cost": 0.0000001,
+			"mode": "image_generation"
 		}
 	}`))
 	require.NoError(t, err)
@@ -538,6 +557,19 @@ func TestBillingService_GetModelPricing_FailsClosedForImageOnlyEntries(t *testin
 	pricing, err := billingSvc.GetModelPricing("gemini-image-with-token-price")
 	require.NoError(t, err)
 	require.Zero(t, pricing.InputPricePerToken)
+	require.InDelta(t, 0.034, data["gemini-image-with-token-price"].OutputCostPerImage, 1e-12)
+
+	// Image-token dimensions remain available to image accounting but do not
+	// imply that generic input/output token prices exist.
+	_, err = billingSvc.GetModelPricing("image-token-dimensions-only")
+	require.ErrorIs(t, err, ErrModelPricingUnavailable)
+	require.InDelta(t, 1e-6, data["image-token-dimensions-only"].InputCostPerImageToken, 1e-12)
+	require.InDelta(t, 2e-6, data["image-token-dimensions-only"].OutputCostPerImageToken, 1e-12)
+
+	// Cache/priority modifiers without ordinary token pricing must not make an
+	// image-only entry appear safe for generic token billing.
+	_, err = billingSvc.GetModelPricing("image-with-cache-only")
+	require.ErrorIs(t, err, ErrModelPricingUnavailable)
 
 	// 图片计费路径不受影响：仍能读到 image-only 条目的图片单价。
 	raw := pricingSvc.GetModelPricing("imagen-9.0-generate")

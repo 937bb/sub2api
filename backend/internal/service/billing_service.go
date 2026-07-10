@@ -545,7 +545,7 @@ func (s *BillingService) GetModelPricing(model string) (*ModelPricing, error) {
 	// 1. 优先从动态价格服务获取
 	if s.pricingService != nil {
 		litellmPricing := s.pricingService.GetModelPricing(model)
-		if litellmPricing != nil {
+		if litellmPricing != nil && !litellmPricing.tokenBillingUnsupported {
 			// 启用 5m/1h 分类计费的条件：
 			// 1. 存在 1h 价格
 			// 2. 1h 价格 > 5m 价格（防止 LiteLLM 数据错误导致少收费）

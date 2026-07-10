@@ -117,6 +117,10 @@ type LiteLLMModelPricing struct {
 	SupportsPromptCaching               bool    `json:"supports_prompt_caching"`
 	OutputCostPerImage                  float64 `json:"output_cost_per_image"`       // 图片生成模型每张图片价格
 	OutputCostPerImageToken             float64 `json:"output_cost_per_image_token"` // 图片输出 token 价格
+	// tokenBillingUnsupported is set only when the source entry has image
+	// dimensions but no generic token-price dimension. It retains the
+	// absent-versus-explicit-zero distinction lost by the float fields above.
+	tokenBillingUnsupported bool
 }
 
 // PricingRemoteClient 远程价格数据获取接口
@@ -425,10 +429,11 @@ func (s *PricingService) parsePricingData(body []byte) (map[string]*LiteLLMModel
 		}
 
 		pricing := &LiteLLMModelPricing{
-			LiteLLMProvider:       entry.LiteLLMProvider,
-			Mode:                  entry.Mode,
-			SupportsPromptCaching: entry.SupportsPromptCaching,
-			SupportsServiceTier:   entry.SupportsServiceTier,
+			LiteLLMProvider:         entry.LiteLLMProvider,
+			Mode:                    entry.Mode,
+			SupportsPromptCaching:   entry.SupportsPromptCaching,
+			SupportsServiceTier:     entry.SupportsServiceTier,
+			tokenBillingUnsupported: !entry.hasGenericTokenPricing() && entry.hasImagePricing(),
 		}
 
 		if entry.InputCostPerToken != nil {
@@ -480,6 +485,17 @@ func (s *PricingService) parsePricingData(body []byte) (map[string]*LiteLLMModel
 	}
 
 	return result, nil
+}
+
+func (e LiteLLMRawEntry) hasGenericTokenPricing() bool {
+	// Priority and cache rates modify ordinary token pricing; they do not make
+	// an image-only entry safe for generic input/output token billing.
+	return e.InputCostPerToken != nil || e.OutputCostPerToken != nil
+}
+
+func (e LiteLLMRawEntry) hasImagePricing() bool {
+	return e.InputCostPerImageToken != nil || e.OutputCostPerImage != nil ||
+		e.OutputCostPerImageToken != nil
 }
 
 // loadPricingData 从本地文件加载价格数据
@@ -623,6 +639,9 @@ func (s *PricingService) GetModelPricing(modelName string) *LiteLLMModelPricing 
 	}
 
 	// 5. OpenAI 模型回退策略。先归一化已知别名，确保裸 gpt-5.6 稳定路由到 Sol。
+	if isOpenAIImageGenerationModel(lookupCandidates[0]) {
+		return s.matchOpenAIModel(lookupCandidates[0])
+	}
 	openAIModel := normalizeKnownOpenAICodexModel(lookupCandidates[0])
 	if openAIModel != "" {
 		return s.matchOpenAIModel(openAIModel)
@@ -824,6 +843,18 @@ func (s *PricingService) matchByModelFamily(model string) *LiteLLMModelPricing {
 // 5. gpt-5.4* -> 业务静态兜底价
 // 6. 最终回退到 DefaultTestModel (gpt-5.1-codex)
 func (s *PricingService) matchOpenAIModel(model string) *LiteLLMModelPricing {
+	// Image model families must never enter text-model variant or default
+	// fallback. Keep this guard before every text fallback rule.
+	if isOpenAIImageGenerationModel(model) {
+		for _, candidate := range []string{"gpt-image-2", "gpt-image-1.5", "gpt-image-1"} {
+			if pricing, ok := s.pricingData[candidate]; ok {
+				logger.LegacyPrintf("service.pricing", "[Pricing] OpenAI image fallback matched %s -> %s", model, candidate)
+				return pricing
+			}
+		}
+		return nil
+	}
+
 	if strings.HasPrefix(model, "gpt-5.3-codex-spark") {
 		if pricing, ok := s.pricingData["gpt-5.1-codex"]; ok {
 			logger.LegacyPrintf("service.pricing", "[Pricing][SparkBilling] %s -> %s billing", model, "gpt-5.1-codex")
@@ -891,16 +922,6 @@ func (s *PricingService) matchOpenAIModel(model string) *LiteLLMModelPricing {
 		logger.With(zap.String("component", "service.pricing")).
 			Info(fmt.Sprintf("[Pricing] OpenAI fallback matched %s -> %s", model, "gpt-5.4(static)"))
 		return openAIGPT54FallbackPricing
-	}
-
-	if isOpenAIImageGenerationModel(model) {
-		for _, candidate := range []string{"gpt-image-2", "gpt-image-1.5", "gpt-image-1"} {
-			if pricing, ok := s.pricingData[candidate]; ok {
-				logger.LegacyPrintf("service.pricing", "[Pricing] OpenAI image fallback matched %s -> %s", model, candidate)
-				return pricing
-			}
-		}
-		return nil
 	}
 
 	// 最终回退到 DefaultTestModel
