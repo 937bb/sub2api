@@ -8912,3 +8912,41 @@ func (w *openAICompactKeepaliveWriter) Written() bool {
 	defer w.k.mu.Unlock()
 	return w.ResponseWriter.Written()
 }
+
+func mergeOpenAICompactTerminalOutput(finalResponse []byte, bodyText string) []byte {
+	if len(finalResponse) == 0 || !gjson.ValidBytes(finalResponse) {
+		return finalResponse
+	}
+	output := gjson.GetBytes(finalResponse, "output").Array()
+	for _, existing := range output {
+		if existing.Get("type").String() == "compaction" {
+			return finalResponse
+		}
+	}
+	var raw []byte
+	forEachOpenAISSEFrame(bodyText, func(frame openAICompatSSEFrame) {
+		if raw != nil {
+			return
+		}
+		data := []byte(strings.TrimSpace(frame.Data))
+		if classifyOpenAIResponseSSEEvent(data, frame.EventType) != "response.output_item.done" {
+			return
+		}
+		item := gjson.GetBytes(data, "item")
+		if item.IsObject() && item.Get("type").String() == "compaction" {
+			raw = append([]byte(nil), item.Raw...)
+		}
+	})
+	if raw == nil {
+		return finalResponse
+	}
+	path := "output.-1"
+	if len(output) == 0 {
+		path = "output.0"
+	}
+	updated, err := sjson.SetRawBytes(finalResponse, path, raw)
+	if err != nil {
+		return finalResponse
+	}
+	return updated
+}

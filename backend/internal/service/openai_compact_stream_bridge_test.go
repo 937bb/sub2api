@@ -13,6 +13,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 func TestBuildOpenAICompactSSEPayload_PreservesItemsAndSanitizesCodexFields(t *testing.T) {
@@ -64,6 +65,16 @@ func TestOpenAICompactKeepalive_AdjustedSizeIgnoresHeartbeatAndSerializesWrites(
 	before := rec.Body.String()
 	time.Sleep(5 * time.Millisecond)
 	require.Equal(t, before, rec.Body.String())
+}
+
+func TestMergeOpenAICompactTerminalOutput_RecoversRawCompactionItem(t *testing.T) {
+	body := "event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"compaction\",\"encrypted_content\":\"opaque\"}}\n\n" +
+		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"output\":[{\"type\":\"message\"}],\"usage\":{\"input_tokens\":1,\"output_tokens\":2,\"total_tokens\":3}}}\n\n"
+	final, ok := extractCodexFinalResponse(body)
+	require.True(t, ok)
+	merged := mergeOpenAICompactTerminalOutput(final, body)
+	require.Len(t, gjson.GetBytes(merged, "output").Array(), 2)
+	require.Equal(t, "opaque", gjson.GetBytes(merged, "output.1.encrypted_content").String())
 }
 
 func TestOpenAIGatewayService_APIKeyBodySignalDoesNotBridge(t *testing.T) {
