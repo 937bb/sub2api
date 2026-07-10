@@ -4,6 +4,8 @@ package service
 
 import (
 	"testing"
+
+	"github.com/Wei-Shaw/sub2api/internal/domain"
 )
 
 func TestMatchWildcard(t *testing.T) {
@@ -424,11 +426,46 @@ func TestAccountGetModelMapping_AntigravityEnsuresGeminiDefaultPassthroughs(t *t
 	if mapping["gemini-3-flash"] != "gemini-3-flash" {
 		t.Fatalf("expected gemini-3-flash passthrough to be auto-filled, got: %q", mapping["gemini-3-flash"])
 	}
-	if mapping["gemini-3.1-pro-high"] != "gemini-3.1-pro-high" {
-		t.Fatalf("expected gemini-3.1-pro-high passthrough to be auto-filled, got: %q", mapping["gemini-3.1-pro-high"])
+	if mapping["gemini-3.1-pro-high"] != domain.AntigravityGemini31ProAgentModel {
+		t.Fatalf("expected gemini-3.1-pro-high agent route to be auto-filled, got: %q", mapping["gemini-3.1-pro-high"])
 	}
 	if mapping["gemini-3.1-pro-low"] != "gemini-3.1-pro-low" {
 		t.Fatalf("expected gemini-3.1-pro-low passthrough to be auto-filled, got: %q", mapping["gemini-3.1-pro-low"])
+	}
+}
+
+func TestAccountGetModelMapping_AntigravityNormalizesGemini31ProRouting(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		mapping map[string]any
+		model   string
+		want    string
+	}{
+		{name: "adds generic alias", mapping: map[string]any{"gemini-3-flash": "gemini-3-flash"}, model: "gemini-3.1-pro", want: domain.AntigravityGemini31ProAgentModel},
+		{name: "upgrades legacy high passthrough", mapping: map[string]any{"gemini-3.1-pro-high": "gemini-3.1-pro-high"}, model: "gemini-3.1-pro-high", want: domain.AntigravityGemini31ProAgentModel},
+		{name: "upgrades legacy preview target", mapping: map[string]any{"gemini-3.1-pro-preview": "gemini-3.1-pro-high"}, model: "gemini-3.1-pro-preview", want: domain.AntigravityGemini31ProAgentModel},
+		{name: "preserves explicit override", mapping: map[string]any{"gemini-3.1-pro-high": "private-high-route"}, model: "gemini-3.1-pro-high", want: "private-high-route"},
+		{name: "preserves wildcard authority", mapping: map[string]any{"gemini-3.1-*": "private-wildcard-route"}, model: "gemini-3.1-pro", want: "private-wildcard-route"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			account := &Account{Platform: PlatformAntigravity, Credentials: map[string]any{"model_mapping": tt.mapping}}
+			if got := account.GetMappedModel(tt.model); got != tt.want {
+				t.Fatalf("GetMappedModel(%q) = %q, want %q", tt.model, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAccountGetModelMapping_GeminiDoesNotNormalizeAntigravityAgentRoute(t *testing.T) {
+	t.Parallel()
+	account := &Account{Platform: PlatformGemini, Credentials: map[string]any{"model_mapping": map[string]any{"gemini-3.1-pro-high": "gemini-3.1-pro-high"}}}
+	if got := account.GetMappedModel("gemini-3.1-pro-high"); got != "gemini-3.1-pro-high" {
+		t.Fatalf("Gemini mapping leaked Antigravity route: got %q", got)
 	}
 }
 

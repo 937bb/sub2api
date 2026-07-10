@@ -43,6 +43,19 @@ func TestDefaultAntigravityModelMapping_ContainsNewClaudeModels(t *testing.T) {
 	}
 }
 
+func TestDefaultAntigravityModelMapping_Gemini31ProPublicAliases(t *testing.T) {
+	t.Parallel()
+
+	for _, model := range []string{"gemini-3.1-pro", "gemini-3.1-pro-high", "gemini-3.1-pro-preview"} {
+		if got := DefaultAntigravityModelMapping[model]; got != AntigravityGemini31ProAgentModel {
+			t.Fatalf("mapping for %q = %q, want %q", model, got, AntigravityGemini31ProAgentModel)
+		}
+	}
+	if _, advertised := DefaultAntigravityModelMapping[AntigravityGemini31ProAgentModel]; advertised {
+		t.Fatalf("internal route %q must not be a client-facing mapping key", AntigravityGemini31ProAgentModel)
+	}
+}
+
 func TestDefaultBedrockModelMapping_ContainsNewClaudeModels(t *testing.T) {
 	t.Parallel()
 

@@ -564,9 +564,9 @@ func (a *Account) resolveModelMapping(rawMapping map[string]any) map[string]stri
 		if a.Platform == domain.PlatformAntigravity {
 			ensureAntigravityDefaultPassthroughs(result, []string{
 				"gemini-3-flash",
-				"gemini-3.1-pro-high",
 				"gemini-3.1-pro-low",
 			})
+			normalizeAntigravityGemini31ProMappings(result)
 		}
 		return result
 	}
@@ -627,6 +627,25 @@ func ensureAntigravityDefaultPassthrough(mapping map[string]string, model string
 func ensureAntigravityDefaultPassthroughs(mapping map[string]string, models []string) {
 	for _, model := range models {
 		ensureAntigravityDefaultPassthrough(mapping, model)
+	}
+}
+
+func normalizeAntigravityGemini31ProMappings(mapping map[string]string) {
+	legacyTargets := map[string]map[string]struct{}{
+		"gemini-3.1-pro":         {"gemini-3.1-pro": {}},
+		"gemini-3.1-pro-high":    {"gemini-3.1-pro-high": {}},
+		"gemini-3.1-pro-preview": {"gemini-3.1-pro-preview": {}, "gemini-3.1-pro-high": {}},
+	}
+	for model, legacy := range legacyTargets {
+		if target, exists := mapping[model]; exists {
+			if _, upgrade := legacy[strings.TrimSpace(target)]; upgrade {
+				mapping[model] = domain.AntigravityGemini31ProAgentModel
+			}
+			continue
+		}
+		if !mappingSupportsRequestedModel(mapping, model) {
+			mapping[model] = domain.AntigravityGemini31ProAgentModel
+		}
 	}
 }
 
