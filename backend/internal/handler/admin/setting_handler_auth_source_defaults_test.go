@@ -253,7 +253,7 @@ func TestSettingHandler_UpdateSettings_OpenAICodexUAProfileRoundTripPreservesRaw
 	body := map[string]any{
 		"openai_codex_ua_profile": map[string]any{
 			"originator":     "codex-tui",
-			"codex_version":  "0.136.0",
+			"codex_version":  "0.144.1",
 			"os_fingerprint": "Mac OS 26.5.0; arm64",
 			"terminal_token": "Apple_Terminal/470.2",
 			"user_agent":     rawUA,
@@ -298,7 +298,7 @@ func TestSettingHandler_UpdateSettings_OpenAICodexUAProfileFullPUTAllowsExplicit
 		"openai_codex_user_agent": newRawUA,
 		"openai_codex_ua_profile": map[string]any{
 			"originator":     "codex-tui",
-			"codex_version":  "0.136.0",
+			"codex_version":  "0.144.1",
 			"os_fingerprint": "Mac OS 26.5.0; arm64",
 			"terminal_token": "Apple_Terminal/470.2",
 			"user_agent":     oldRawUA,
