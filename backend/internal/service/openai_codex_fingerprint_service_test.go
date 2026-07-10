@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"net/http"
 	"testing"
 	"time"
 
@@ -9,9 +10,9 @@ import (
 )
 
 type openAICodexFingerprintRepoStub struct {
-	updates              []map[string]any
-	replaceExistingCalls []bool
-	ensureReturn         *OpenAICodexFingerprint
+	updates          []map[string]any
+	expectedOldCalls []*OpenAICodexFingerprint
+	ensureReturn     *OpenAICodexFingerprint
 }
 
 func (r *openAICodexFingerprintRepoStub) UpdateExtra(_ context.Context, _ int64, updates map[string]any) error {
@@ -23,8 +24,8 @@ func (r *openAICodexFingerprintRepoStub) UpdateExtra(_ context.Context, _ int64,
 	return nil
 }
 
-func (r *openAICodexFingerprintRepoStub) EnsureOpenAICodexFingerprint(_ context.Context, _ int64, fingerprint OpenAICodexFingerprint, replaceExisting bool) (OpenAICodexFingerprint, error) {
-	r.replaceExistingCalls = append(r.replaceExistingCalls, replaceExisting)
+func (r *openAICodexFingerprintRepoStub) EnsureOpenAICodexFingerprint(_ context.Context, _ int64, fingerprint OpenAICodexFingerprint, expectedOld *OpenAICodexFingerprint) (OpenAICodexFingerprint, error) {
+	r.expectedOldCalls = append(r.expectedOldCalls, expectedOld)
 	if r.ensureReturn != nil {
 		fingerprint = *r.ensureReturn
 	}
@@ -63,8 +64,8 @@ func TestOpenAICodexFingerprintServiceEnsureCreatesAndPersistsOAuthLike(t *testi
 	if len(repo.updates) != 1 {
 		t.Fatalf("UpdateExtra calls = %d, want 1", len(repo.updates))
 	}
-	if len(repo.replaceExistingCalls) != 1 || repo.replaceExistingCalls[0] {
-		t.Fatalf("replaceExisting calls = %#v, want [false]", repo.replaceExistingCalls)
+	if len(repo.expectedOldCalls) != 1 || repo.expectedOldCalls[0] != nil {
+		t.Fatalf("expected-old calls = %#v, want [nil]", repo.expectedOldCalls)
 	}
 	if _, ok := account.Extra[OpenAICodexFingerprintExtraKey].(OpenAICodexFingerprint); !ok {
 		t.Fatalf("account extra fingerprint not updated: %#v", account.Extra[OpenAICodexFingerprintExtraKey])
@@ -115,6 +116,24 @@ func TestOpenAICodexFingerprintServiceEnsureSkipsPersistWhenValid(t *testing.T) 
 	}
 }
 
+func TestOpenAICodexFingerprintServiceEnsureMigratesLegacyOnlyOnceForHTTP(t *testing.T) {
+	repo := &openAICodexFingerprintRepoStub{}
+	legacy := OpenAICodexFingerprint{SchemaVersion: 1, InstallationID: "550e8400-e29b-41d4-a716-446655440000", UAProfile: legacyBuiltInOpenAICodexUAProfile, CreatedAt: "2026-06-12T00:00:00Z", UpdatedAt: "2026-06-13T00:00:00Z"}
+	account := &Account{ID: 7, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Extra: map[string]any{OpenAICodexFingerprintExtraKey: legacy}}
+	req, _ := http.NewRequest(http.MethodPost, "https://example.test/responses", nil)
+	fp, err := ensureOpenAICodexFingerprintForRequest(context.Background(), repo, account, req)
+	if err != nil || req.Header.Get("User-Agent") != DefaultOpenAICodexUserAgent || fp.InstallationID != legacy.InstallationID {
+		t.Fatalf("migration failed: fp=%#v headers=%#v err=%v", fp, req.Header, err)
+	}
+	if len(repo.updates) != 1 || len(repo.expectedOldCalls) != 1 || repo.expectedOldCalls[0] == nil || *repo.expectedOldCalls[0] != legacy {
+		t.Fatalf("CAS calls = %#v updates=%d", repo.expectedOldCalls, len(repo.updates))
+	}
+	_, err = ensureOpenAICodexFingerprintForRequest(context.Background(), repo, account, req)
+	if err != nil || len(repo.updates) != 1 {
+		t.Fatalf("second request wrote again: err=%v writes=%d", err, len(repo.updates))
+	}
+}
+
 func TestOpenAICodexFingerprintServiceEnsureRepairsCorruptExisting(t *testing.T) {
 	now := time.Date(2026, 6, 14, 1, 2, 3, 0, time.UTC)
 	repo := &openAICodexFingerprintRepoStub{}
@@ -129,8 +148,8 @@ func TestOpenAICodexFingerprintServiceEnsureRepairsCorruptExisting(t *testing.T)
 	if fp == (OpenAICodexFingerprint{}) {
 		t.Fatal("fingerprint was not repaired")
 	}
-	if len(repo.replaceExistingCalls) != 1 || !repo.replaceExistingCalls[0] {
-		t.Fatalf("replaceExisting calls = %#v, want [true]", repo.replaceExistingCalls)
+	if len(repo.expectedOldCalls) != 1 || repo.expectedOldCalls[0] != nil {
+		t.Fatalf("expected-old calls = %#v, want [nil] for non-decodable value", repo.expectedOldCalls)
 	}
 	if got := account.Extra[OpenAICodexFingerprintExtraKey]; got != fp {
 		t.Fatalf("account extra fingerprint = %#v, want %#v", got, fp)

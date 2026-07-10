@@ -7024,12 +7024,13 @@ function localText(zh: string, en: string): string {
   return isZhLocale.value ? zh : en;
 }
 
-const defaultOpenAICodexUAProfile: OpenAICodexUAProfile = {
+const canonicalOpenAICodexUAProfile: OpenAICodexUAProfile = {
   originator: "codex-tui",
-  codex_version: "0.136.0",
+  codex_version: "0.144.1",
   os_fingerprint: "Mac OS 26.5.0; arm64",
   terminal_token: "Apple_Terminal/470.2",
 };
+let backendOpenAICodexUAProfile = canonicalOpenAICodexUAProfile;
 
 function isOpenAICodexHeaderValueSafe(value: string): boolean {
   return Array.from(value).every((char) => {
@@ -7085,23 +7086,24 @@ function sanitizeOpenAICodexUACommentComponent(
 
 function normalizeOpenAICodexUAProfile(
   profile?: Partial<OpenAICodexUAProfile> | null,
+  fallback = backendOpenAICodexUAProfile,
 ): OpenAICodexUAProfile {
   return {
     originator: sanitizeOpenAICodexUAPathTokenComponent(
       profile?.originator,
-      defaultOpenAICodexUAProfile.originator,
+      fallback.originator,
     ),
     codex_version: sanitizeOpenAICodexUAPathTokenComponent(
       profile?.codex_version,
-      defaultOpenAICodexUAProfile.codex_version,
+      fallback.codex_version,
     ),
     os_fingerprint: sanitizeOpenAICodexUACommentComponent(
       profile?.os_fingerprint,
-      defaultOpenAICodexUAProfile.os_fingerprint,
+      fallback.os_fingerprint,
     ),
     terminal_token: sanitizeOpenAICodexUATokenComponent(
       profile?.terminal_token,
-      defaultOpenAICodexUAProfile.terminal_token,
+      fallback.terminal_token,
     ),
     user_agent: profile?.user_agent?.trim() || undefined,
   };
@@ -8250,9 +8252,11 @@ async function loadSettings() {
         : defaultLoginAgreementDocuments();
     Object.assign(authSourceDefaults, buildAuthSourceDefaultsState(settings));
     form.default_platform_quotas = normalizePlatformQuotasMap(settings.default_platform_quotas);
-    form.openai_codex_ua_profile = normalizeOpenAICodexUAProfile(
+    backendOpenAICodexUAProfile = normalizeOpenAICodexUAProfile(
       settings.openai_codex_ua_profile,
+      canonicalOpenAICodexUAProfile,
     );
+    form.openai_codex_ua_profile = { ...backendOpenAICodexUAProfile };
     form.openai_codex_user_agent = settings.openai_codex_user_agent || "";
     initialOpenAICodexUAProfileKey.value = openAICodexUAProfileKey(
       form.openai_codex_ua_profile,
@@ -8833,9 +8837,11 @@ async function saveSettings() {
     }
     Object.assign(authSourceDefaults, buildAuthSourceDefaultsState(updated));
     form.default_platform_quotas = normalizePlatformQuotasMap(updated.default_platform_quotas);
-    form.openai_codex_ua_profile = normalizeOpenAICodexUAProfile(
+    backendOpenAICodexUAProfile = normalizeOpenAICodexUAProfile(
       updated.openai_codex_ua_profile,
+      canonicalOpenAICodexUAProfile,
     );
+    form.openai_codex_ua_profile = { ...backendOpenAICodexUAProfile };
     form.openai_codex_user_agent = updated.openai_codex_user_agent || "";
     initialOpenAICodexUAProfileKey.value = openAICodexUAProfileKey(
       form.openai_codex_ua_profile,

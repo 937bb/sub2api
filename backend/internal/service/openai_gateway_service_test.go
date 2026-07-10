@@ -2488,11 +2488,11 @@ func TestOpenAIBuildUpstreamRequestCompactForcesJSONAcceptForOAuth(t *testing.T)
 }
 
 func TestCodexDefaultUserAgentUsesOfficialFingerprint(t *testing.T) {
-	require.Equal(t, "0.136.0", codexCLIVersion)
+	require.Equal(t, "0.144.1", codexCLIVersion)
 	require.Equal(t, "Mac OS 26.5.0; arm64", codexOSFingerprint)
 	require.Equal(t, "Apple_Terminal/470.2", codexTerminalName)
 	require.Equal(t, "codex-tui", codexOfficialOriginator)
-	require.Equal(t, "codex-tui/0.136.0 (Mac OS 26.5.0; arm64) Apple_Terminal/470.2 (codex-tui; 0.136.0)", codexCLIUserAgent)
+	require.Equal(t, "codex-tui/0.144.1 (Mac OS 26.5.0; arm64) Apple_Terminal/470.2 (codex-tui; 0.144.1)", codexCLIUserAgent)
 }
 
 func TestOpenAIBuildUpstreamRequestOAuthAddsCodexIdentityFallbacks(t *testing.T) {

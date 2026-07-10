@@ -679,6 +679,32 @@ describe("admin SettingsView payment visible method controls", () => {
     );
   });
 
+  it("resets an empty Codex version from the backend profile before saving", async () => {
+    getSettings.mockResolvedValueOnce({
+      ...baseSettingsResponse,
+      openai_codex_ua_profile: {
+        originator: "codex-tui",
+        codex_version: "0.144.1",
+        os_fingerprint: "Mac OS 26.5.0; arm64",
+        terminal_token: "Apple_Terminal/470.2",
+      },
+    });
+    const wrapper = mountView();
+    await flushPromises();
+    const versionInput = wrapper.findAll("input").find((input) => input.element.value === "0.144.1");
+    expect(versionInput).toBeDefined();
+    await versionInput!.setValue("");
+    const originatorInput = wrapper.findAll("input").find((input) => input.element.value === "codex-tui");
+    expect(originatorInput).toBeDefined();
+    await originatorInput!.setValue("codex-vscode");
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({
+      openai_codex_user_agent: "codex-vscode/0.144.1 (Mac OS 26.5.0; arm64) Apple_Terminal/470.2 (codex-vscode; 0.144.1)",
+      openai_codex_ua_profile: expect.objectContaining({ originator: "codex-vscode", codex_version: "0.144.1" }),
+    }));
+  });
+
   it("updates provider enablement immediately and reloads providers", async () => {
     const provider = {
       id: 7,

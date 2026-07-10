@@ -152,7 +152,7 @@ func (s *AccountRepoSuite) TestUpdate_OpenAIOAuthLikePreservesConcurrentFingerpr
 
 	stale := *account
 	stale.Extra = map[string]any{"editable": "fresh"}
-	_, err := s.repo.EnsureOpenAICodexFingerprint(s.ctx, account.ID, fingerprint, false)
+	_, err := s.repo.EnsureOpenAICodexFingerprint(s.ctx, account.ID, fingerprint, nil)
 	s.Require().NoError(err)
 
 	s.Require().NoError(s.repo.Update(s.ctx, &stale))
@@ -1042,7 +1042,7 @@ func (s *AccountRepoSuite) TestEnsureOpenAICodexFingerprint_RejectsNonOAuthLikeA
 				Extra:    map[string]any{"keep": "value"},
 			})
 
-			_, err := s.repo.EnsureOpenAICodexFingerprint(s.ctx, account.ID, fingerprint, false)
+			_, err := s.repo.EnsureOpenAICodexFingerprint(s.ctx, account.ID, fingerprint, nil)
 
 			s.Require().ErrorIs(err, service.ErrAccountNotFound)
 			got, getErr := s.repo.GetByID(s.ctx, account.ID)
@@ -1052,6 +1052,33 @@ func (s *AccountRepoSuite) TestEnsureOpenAICodexFingerprint_RejectsNonOAuthLikeA
 			s.Require().False(ok)
 		})
 	}
+}
+
+func (s *AccountRepoSuite) TestEnsureOpenAICodexFingerprint_ExpectedOldCASPreservesConcurrentCustomWinner() {
+	legacyProfile := service.ParseOpenAICodexUAProfile("codex-tui/0.136.0 (Mac OS 26.5.0; arm64) Apple_Terminal/470.2 (codex-tui; 0.136.0)")
+	legacy, _ := service.NormalizeOpenAICodexFingerprint(nil, legacyProfile, time.Now())
+	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-fingerprint-cas", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Extra: map[string]any{service.OpenAICodexFingerprintExtraKey: legacy}})
+	custom := legacy
+	custom.UAProfile = service.ParseOpenAICodexUAProfile("custom/9 (Custom OS) term (custom; 9)")
+	s.Require().NoError(s.repo.UpdateExtra(s.ctx, account.ID, map[string]any{service.OpenAICodexFingerprintExtraKey: custom}))
+	migrated := legacy
+	migrated.UAProfile = service.ParseOpenAICodexUAProfile(service.DefaultOpenAICodexUserAgent)
+	winner, err := s.repo.EnsureOpenAICodexFingerprint(s.ctx, account.ID, migrated, &legacy)
+	s.Require().NoError(err)
+	s.Require().Equal(custom, winner)
+}
+
+func (s *AccountRepoSuite) TestEnsureOpenAICodexFingerprint_ExpectedOldCASMigratesOnce() {
+	legacy, _ := service.NormalizeOpenAICodexFingerprint(nil, service.ParseOpenAICodexUAProfile("codex-tui/0.136.0 (Mac OS 26.5.0; arm64) Apple_Terminal/470.2 (codex-tui; 0.136.0)"), time.Now())
+	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-fingerprint-migrate", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Extra: map[string]any{service.OpenAICodexFingerprintExtraKey: legacy}})
+	migrated := legacy
+	migrated.UAProfile = service.ParseOpenAICodexUAProfile(service.DefaultOpenAICodexUserAgent)
+	winner, err := s.repo.EnsureOpenAICodexFingerprint(s.ctx, account.ID, migrated, &legacy)
+	s.Require().NoError(err)
+	s.Require().Equal(migrated, winner)
+	winner, err = s.repo.EnsureOpenAICodexFingerprint(s.ctx, account.ID, migrated, &legacy)
+	s.Require().NoError(err)
+	s.Require().Equal(migrated, winner)
 }
 
 func (s *AccountRepoSuite) TestUpdateAuthAndMergeExtraPreservesConcurrentExtra() {

@@ -80,6 +80,22 @@ func TestOpenAIWSHeadersOAuthNilContextUsesCodexUserAgent(t *testing.T) {
 	})
 }
 
+func TestOpenAIWSHeadersOAuthMigratesLegacyBuiltInFingerprint(t *testing.T) {
+	repo := &openAICodexFingerprintRepoStub{}
+	legacy := OpenAICodexFingerprint{SchemaVersion: 1, InstallationID: "550e8400-e29b-41d4-a716-446655440000", UAProfile: legacyBuiltInOpenAICodexUAProfile, CreatedAt: "2026-06-12T00:00:00Z", UpdatedAt: "2026-06-13T00:00:00Z"}
+	account := &Account{ID: 45, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Extra: map[string]any{OpenAICodexFingerprintExtraKey: legacy}}
+	svc := &OpenAIGatewayService{codexFingerprintService: NewOpenAICodexFingerprintService(repo, nil)}
+	headers, _, err := svc.buildOpenAIWSHeaders(nil, account, "token", OpenAIWSProtocolDecision{Transport: OpenAIUpstreamTransportResponsesWebsocketV2}, false, "", "", "", "fallback-session")
+	require.NoError(t, err)
+	require.Equal(t, codexCLIUserAgent, headers.Get("User-Agent"))
+	require.Equal(t, codexCLIVersion, headers.Get("Version"))
+	require.Equal(t, legacy.InstallationID, headers.Get(openAICodexInstallationIDHeader))
+	require.Len(t, repo.updates, 1)
+	_, _, err = svc.buildOpenAIWSHeaders(nil, account, "token", OpenAIWSProtocolDecision{Transport: OpenAIUpstreamTransportResponsesWebsocketV2}, false, "", "", "", "fallback-session")
+	require.NoError(t, err)
+	require.Len(t, repo.updates, 1)
+}
+
 func TestOpenAIWSHeadersOAuthUsesPersistedFingerprintIdentity(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()

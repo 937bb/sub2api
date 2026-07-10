@@ -1702,8 +1702,7 @@ WHERE id = $1 AND deleted_at IS NULL AND platform = $4 AND type IN ($5, $6)`,
 	return nil
 }
 
-func (r *accountRepository) EnsureOpenAICodexFingerprint(ctx context.Context, id int64, fingerprint service.OpenAICodexFingerprint, replaceExisting bool) (service.OpenAICodexFingerprint, error) {
-	_ = replaceExisting // The database re-checks validity to avoid stale repair hints overwriting a valid winner.
+func (r *accountRepository) EnsureOpenAICodexFingerprint(ctx context.Context, id int64, fingerprint service.OpenAICodexFingerprint, expectedOld *service.OpenAICodexFingerprint) (service.OpenAICodexFingerprint, error) {
 	payload, err := json.Marshal(fingerprint)
 	if err != nil {
 		return service.OpenAICodexFingerprint{}, err
@@ -1711,14 +1710,23 @@ func (r *accountRepository) EnsureOpenAICodexFingerprint(ctx context.Context, id
 
 	client := clientFromContext(ctx, r.client)
 	fpExpr := "COALESCE(extra, '{}'::jsonb) -> $2"
+	var expectedOldPayload any
+	if expectedOld != nil {
+		raw, marshalErr := json.Marshal(expectedOld)
+		if marshalErr != nil {
+			return service.OpenAICodexFingerprint{}, marshalErr
+		}
+		expectedOldPayload = string(raw)
+	}
 	out, inserted, err := r.queryOpenAICodexFingerprint(ctx, client, `
 UPDATE accounts
 SET extra = jsonb_set(COALESCE(extra, '{}'::jsonb), ARRAY[$2], $3::jsonb, true), updated_at = NOW()
 WHERE id = $1 AND deleted_at IS NULL AND platform = $4 AND type IN ($5, $6) AND (
 	NOT (COALESCE(extra, '{}'::jsonb) ? $2)
 	OR NOT (`+openAICodexFingerprintSQLValid(fpExpr)+`)
+	OR ($7::jsonb IS NOT NULL AND `+fpExpr+` = $7::jsonb)
 )
-RETURNING extra -> $2`, id, service.OpenAICodexFingerprintExtraKey, string(payload), service.PlatformOpenAI, service.AccountTypeOAuth, service.AccountTypeSetupToken)
+RETURNING extra -> $2`, id, service.OpenAICodexFingerprintExtraKey, string(payload), service.PlatformOpenAI, service.AccountTypeOAuth, service.AccountTypeSetupToken, expectedOldPayload)
 	if err != nil {
 		return service.OpenAICodexFingerprint{}, err
 	}
