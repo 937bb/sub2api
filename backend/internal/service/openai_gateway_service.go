@@ -64,6 +64,7 @@ const (
 	openAIWSRetryJitterRatioDefault    = 0.2
 	openAICompactSessionSeedKey        = "openai_compact_session_seed"
 	openAICompactClientStreamKey       = "openai_compact_client_stream"
+	openAICompactSSEKeepaliveKey       = "openai_compact_sse_keepalive"
 	// Codex 限额快照仅用于后台展示/诊断，不需要每个成功请求都立即落库。
 	openAICodexSnapshotPersistMinInterval = 30 * time.Second
 	// 配额自动暂停时，超过该时长仍未刷新的 used% 快照视为陈旧，不再据此暂停账号。
@@ -8774,4 +8775,140 @@ func openAICompactUsageParsableByCodex(usage gjson.Result) bool {
 		}
 	}
 	return true
+}
+
+type openAICompactSSEKeepalive struct {
+	mu               sync.Mutex
+	writer           gin.ResponseWriter
+	started, stopped bool
+	bytes            int
+	stop             chan struct{}
+}
+
+func startOpenAICompactSSEKeepalive(c *gin.Context, interval time.Duration) func() {
+	if c == nil || c.Writer == nil || interval <= 0 || !openAICompactClientWantsStream(c) {
+		return func() {}
+	}
+	k := &openAICompactSSEKeepalive{writer: c.Writer, stop: make(chan struct{})}
+	c.Set(openAICompactSSEKeepaliveKey, k)
+	c.Writer = &openAICompactKeepaliveWriter{ResponseWriter: c.Writer, k: k}
+	var done <-chan struct{}
+	if c.Request != nil {
+		done = c.Request.Context().Done()
+	}
+	go func() {
+		timer := time.NewTimer(interval)
+		defer timer.Stop()
+		for {
+			select {
+			case <-k.stop:
+				return
+			case <-done:
+				return
+			case <-timer.C:
+			}
+			if !k.beat() {
+				return
+			}
+			timer.Reset(interval)
+		}
+	}()
+	return k.Stop
+}
+func (k *openAICompactSSEKeepalive) beat() bool {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	if k.stopped {
+		return false
+	}
+	if !k.started {
+		h := k.writer.Header()
+		h.Set("Content-Type", "text/event-stream")
+		h.Set("Cache-Control", "no-cache")
+		h.Set("Connection", "keep-alive")
+		h.Set("X-Accel-Buffering", "no")
+		k.writer.WriteHeader(http.StatusOK)
+		k.started = true
+	}
+	n, err := k.writer.Write([]byte(": keepalive\n\n"))
+	k.bytes += n
+	if err != nil {
+		k.markStoppedLocked()
+		return false
+	}
+	k.writer.Flush()
+	return true
+}
+func (k *openAICompactSSEKeepalive) markStoppedLocked() {
+	if !k.stopped {
+		k.stopped = true
+		close(k.stop)
+	}
+}
+func (k *openAICompactSSEKeepalive) Stop() { k.mu.Lock(); k.markStoppedLocked(); k.mu.Unlock() }
+func openAICompactKeepaliveAdjustedWrittenSize(c *gin.Context) int {
+	if c == nil || c.Writer == nil {
+		return -1
+	}
+	v, ok := c.Get(openAICompactSSEKeepaliveKey)
+	if !ok {
+		return c.Writer.Size()
+	}
+	k, ok := v.(*openAICompactSSEKeepalive)
+	if !ok || k == nil {
+		return c.Writer.Size()
+	}
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	size := k.writer.Size()
+	if size < 0 {
+		return size
+	}
+	if real := size - k.bytes; real > 0 {
+		return real
+	}
+	return -1
+}
+
+type openAICompactKeepaliveWriter struct {
+	gin.ResponseWriter
+	k *openAICompactSSEKeepalive
+}
+
+func (w *openAICompactKeepaliveWriter) suspend() { w.k.Stop() }
+func (w *openAICompactKeepaliveWriter) Header() http.Header {
+	w.suspend()
+	return w.ResponseWriter.Header()
+}
+func (w *openAICompactKeepaliveWriter) Write(b []byte) (int, error) {
+	w.suspend()
+	return w.ResponseWriter.Write(b)
+}
+func (w *openAICompactKeepaliveWriter) WriteString(v string) (int, error) {
+	w.suspend()
+	return w.ResponseWriter.WriteString(v)
+}
+func (w *openAICompactKeepaliveWriter) WriteHeader(v int) {
+	w.suspend()
+	w.ResponseWriter.WriteHeader(v)
+}
+func (w *openAICompactKeepaliveWriter) WriteHeaderNow() {
+	w.suspend()
+	w.ResponseWriter.WriteHeaderNow()
+}
+func (w *openAICompactKeepaliveWriter) Flush() { w.suspend(); w.ResponseWriter.Flush() }
+func (w *openAICompactKeepaliveWriter) Status() int {
+	w.k.mu.Lock()
+	defer w.k.mu.Unlock()
+	return w.ResponseWriter.Status()
+}
+func (w *openAICompactKeepaliveWriter) Size() int {
+	w.k.mu.Lock()
+	defer w.k.mu.Unlock()
+	return w.ResponseWriter.Size()
+}
+func (w *openAICompactKeepaliveWriter) Written() bool {
+	w.k.mu.Lock()
+	defer w.k.mu.Unlock()
+	return w.ResponseWriter.Written()
 }

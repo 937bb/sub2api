@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/gin-gonic/gin"
@@ -45,6 +46,24 @@ func TestOpenAIGatewayService_OAuthBodySignalStreamBridgesUnaryJSONToSSE(t *test
 	require.Contains(t, rec.Body.String(), "event: response.output_item.done")
 	require.Contains(t, rec.Body.String(), `"encrypted_content":"opaque"`)
 	require.Contains(t, rec.Body.String(), "event: response.completed")
+}
+
+func TestOpenAICompactKeepalive_AdjustedSizeIgnoresHeartbeatAndSerializesWrites(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	c.Set(openAICompactClientStreamKey, true)
+	stop := startOpenAICompactSSEKeepalive(c, time.Millisecond)
+	t.Cleanup(stop)
+	require.Eventually(t, func() bool { return strings.Contains(rec.Body.String(), ": keepalive") }, time.Second, time.Millisecond)
+	require.Equal(t, -1, openAICompactKeepaliveAdjustedWrittenSize(c))
+	_, err := c.Writer.Write([]byte("semantic"))
+	require.NoError(t, err)
+	require.Greater(t, openAICompactKeepaliveAdjustedWrittenSize(c), 0)
+	before := rec.Body.String()
+	time.Sleep(5 * time.Millisecond)
+	require.Equal(t, before, rec.Body.String())
 }
 
 func TestOpenAIGatewayService_APIKeyBodySignalDoesNotBridge(t *testing.T) {
