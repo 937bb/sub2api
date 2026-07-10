@@ -45,7 +45,7 @@ const (
 	// OpenAI Platform API for API Key accounts (fallback)
 	openaiPlatformAPIURL    = "https://api.openai.com/v1/responses"
 	openaiStickySessionTTL  = time.Hour // 粘性会话TTL
-	codexCLIVersion         = "0.136.0"
+	codexCLIVersion         = "0.144.1"
 	codexOSFingerprint      = "Mac OS 26.5.0; arm64"
 	codexTerminalName       = "Apple_Terminal/470.2"
 	codexOfficialOriginator = "codex-tui"
