@@ -151,7 +151,7 @@ func (m *openAIWSPassthroughUsageMeta) initFromFirstFrame(policyOutput []byte, p
 	if strings.TrimSpace(protocolModel) == "" {
 		protocolModel = requestModel
 	}
-	m.reasoningEffort.Store(ApplyThinkingEnabledFallback(extractOpenAIReasoningEffortFromBody(policyOutput, requestModel, protocolModel), policyOutput, protocolModel))
+	m.reasoningEffort.Store(ApplyThinkingEnabledFallback(extractOpenAIReasoningEffortFromBody(policyOutput, protocolModel, requestModel), policyOutput, protocolModel))
 }
 
 func (m *openAIWSPassthroughUsageMeta) updateSessionRequestModel(payload []byte) {
