@@ -181,8 +181,9 @@ func applyCodexOAuthTransformWithOptions(reqBody map[string]any, opts codexOAuth
 		}
 	}
 
-	// 提取 input 中 role:"system" 消息至 instructions（OAuth 上游不支持 system role）。
-	if extractSystemMessagesFromInput(reqBody) {
+	// Codex OAuth does not accept role:"system". JSON object mode requires its
+	// guidance in input; other requests retain the established instructions form.
+	if extractSystemMessagesFromInput(reqBody, isJSONObjMode(reqBody)) {
 		result.Modified = true
 	}
 
@@ -1056,11 +1057,10 @@ func extractTextFromContent(content any) string {
 	}
 }
 
-// extractSystemMessagesFromInput scans the input array for items with role=="system",
-// removes them, and merges their content into reqBody["instructions"].
-// If instructions is already non-empty, extracted content is prepended with "\n\n".
-// Returns true if any system messages were extracted.
-func extractSystemMessagesFromInput(reqBody map[string]any) bool {
+// extractSystemMessagesFromInput removes OAuth-unsupported system roles. JSON
+// object mode keeps them in place as developer messages because upstream
+// validates JSON guidance in input. Other modes move their text to instructions.
+func extractSystemMessagesFromInput(reqBody map[string]any, preserveInInput bool) bool {
 	input, ok := reqBody["input"].([]any)
 	if !ok || len(input) == 0 {
 		return false
@@ -1068,7 +1068,7 @@ func extractSystemMessagesFromInput(reqBody map[string]any) bool {
 
 	var systemTexts []string
 	remaining := make([]any, 0, len(input))
-
+	modified := false
 	for _, item := range input {
 		m, ok := item.(map[string]any)
 		if !ok {
@@ -1079,23 +1079,44 @@ func extractSystemMessagesFromInput(reqBody map[string]any) bool {
 			remaining = append(remaining, item)
 			continue
 		}
+		modified = true
+		if preserveInInput {
+			m["role"] = "developer"
+			remaining = append(remaining, item)
+			continue
+		}
 		if text := extractTextFromContent(m["content"]); text != "" {
 			systemTexts = append(systemTexts, text)
 		}
 	}
 
-	if len(systemTexts) == 0 {
+	if !modified {
 		return false
 	}
-
-	extracted := strings.Join(systemTexts, "\n\n")
-	if existing, ok := reqBody["instructions"].(string); ok && strings.TrimSpace(existing) != "" {
-		reqBody["instructions"] = extracted + "\n\n" + existing
-	} else {
-		reqBody["instructions"] = extracted
-	}
 	reqBody["input"] = remaining
+
+	if len(systemTexts) > 0 {
+		extracted := strings.Join(systemTexts, "\n\n")
+		if existing, ok := reqBody["instructions"].(string); ok && strings.TrimSpace(existing) != "" {
+			reqBody["instructions"] = extracted + "\n\n" + existing
+		} else {
+			reqBody["instructions"] = extracted
+		}
+	}
 	return true
+}
+
+func isJSONObjMode(reqBody map[string]any) bool {
+	text, ok := reqBody["text"].(map[string]any)
+	if !ok {
+		return false
+	}
+	format, ok := text["format"].(map[string]any)
+	if !ok {
+		return false
+	}
+	typeName, _ := format["type"].(string)
+	return typeName == "json_object"
 }
 
 func extractPromptLikeInstructionsFromInput(reqBody map[string]any) string {
