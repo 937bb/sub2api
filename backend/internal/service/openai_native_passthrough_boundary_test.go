@@ -94,7 +94,7 @@ func TestOpenAIGatewayService_OAuthHTTPResidualLegacyConfigUsesAdapter(t *testin
 	require.Equal(t, chatgptCodexURL, upstream.lastReq.URL.String())
 	require.Equal(t, "chatgpt.com", upstream.lastReq.Host)
 	require.Equal(t, "Bearer oauth-token", upstream.lastReq.Header.Get("Authorization"))
-	require.Equal(t, "chatgpt-acc", upstream.lastReq.Header.Get("chatgpt-account-id"))
+	require.Equal(t, "chatgpt-acc", getHeaderRaw(upstream.lastReq.Header, "ChatGPT-Account-ID"))
 	require.Empty(t, upstream.lastReq.Header.Get("X-Api-Key"))
 	require.False(t, gjson.GetBytes(upstream.lastBody, "unknown_field").Exists())
 	require.False(t, gjson.GetBytes(upstream.lastBody, "previous_response_id").Exists())

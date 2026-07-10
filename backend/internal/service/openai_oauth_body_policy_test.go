@@ -363,7 +363,7 @@ func TestOpenAIGatewayService_ForwardChatCompletionsSetupTokenResponsesShapeUses
 	_, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, "", "gpt-5.4")
 	require.NoError(t, err)
 	require.Equal(t, chatgptCodexURL, upstream.lastReq.URL.String())
-	require.Equal(t, "chatgpt-acc", upstream.lastReq.Header.Get("chatgpt-account-id"))
+	require.Equal(t, "chatgpt-acc", getHeaderRaw(upstream.lastReq.Header, "ChatGPT-Account-ID"))
 	require.Equal(t, "9007199254740993", gjson.GetBytes(upstream.lastBody, "tools.0.parameters.properties.id.const").Raw)
 	require.Equal(t, "9007199254740995", gjson.GetBytes(upstream.lastBody, "client_metadata.trace_id").Raw)
 	for _, field := range []string{"metadata", "stream_options"} {
