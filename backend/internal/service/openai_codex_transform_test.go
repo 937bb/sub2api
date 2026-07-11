@@ -342,6 +342,55 @@ func TestApplyCodexOAuthTransform_AddsFallbackNameForFunctionCallInput(t *testin
 	require.Equal(t, "fc_1", item["call_id"])
 }
 
+func TestApplyCodexOAuthTransform_StripsClientNamespaceFromReplayedInput(t *testing.T) {
+	reqBody := map[string]any{
+		"model": "gpt-5.4",
+		"input": []any{
+			map[string]any{
+				"type":      "function_call",
+				"call_id":   "call_1",
+				"name":      "read",
+				"namespace": "mcp",
+				"arguments": "{}",
+			},
+			map[string]any{
+				"type":      "custom_tool_call",
+				"call_id":   "call_2",
+				"name":      "shell",
+				"namespace": "tools",
+				"input":     "pwd",
+			},
+			map[string]any{
+				"type":      "message",
+				"role":      "user",
+				"content":   "keep metadata",
+				"namespace": "application-data",
+			},
+		},
+	}
+
+	applyCodexOAuthTransform(reqBody, true, false)
+
+	input, ok := reqBody["input"].([]any)
+	require.True(t, ok)
+	require.Len(t, input, 3)
+	call, ok := input[0].(map[string]any)
+	require.True(t, ok)
+	require.NotContains(t, call, "namespace")
+	require.Equal(t, "read", call["name"])
+	require.Equal(t, "fc_1", call["call_id"])
+
+	customCall, ok := input[1].(map[string]any)
+	require.True(t, ok)
+	require.NotContains(t, customCall, "namespace")
+	require.Equal(t, "shell", customCall["name"])
+	require.Equal(t, "fc_2", customCall["call_id"])
+
+	message, ok := input[2].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "application-data", message["namespace"])
+}
+
 func TestApplyCodexOAuthTransform_PreservesFunctionCallInputName(t *testing.T) {
 	reqBody := map[string]any{
 		"model": "gpt-5.4",
