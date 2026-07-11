@@ -74,6 +74,43 @@ describe('PaymentStatusPanel', () => {
     vi.useRealTimers()
   })
 
+  it.each(['card_alipay', 'card_wxpay'])('does not show a branded QR overlay for custom method %s', async (paymentType) => {
+    const wrapper = mount(PaymentStatusPanel, {
+      props: {
+        orderId: 42,
+        qrCode: 'https://pay.example.com/qr/42',
+        expiresAt: '2099-01-01T12:30:00Z',
+        paymentType,
+      },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="payment-brand-overlay"]').exists()).toBe(false)
+    expect(wrapper.find('img').exists()).toBe(false)
+  })
+
+  it.each([
+    ['alipay', 'alipay'],
+    ['alipay', 'alipay_direct'],
+    ['wxpay', 'wxpay'],
+    ['wxpay', 'wxpay_direct'],
+  ])('shows the %s branded QR overlay for built-in method %s', async (iconName, paymentType) => {
+    const wrapper = mount(PaymentStatusPanel, {
+      props: {
+        orderId: 42,
+        qrCode: 'https://pay.example.com/qr/42',
+        expiresAt: '2099-01-01T12:30:00Z',
+        paymentType,
+      },
+    })
+
+    await flushPromises()
+
+    const overlay = wrapper.get('[data-testid="payment-brand-overlay"]')
+    expect(overlay.get('img').attributes('src')).toContain(iconName)
+  })
+
   it('treats RECHARGING as a successful terminal state', async () => {
     pollOrderStatus.mockResolvedValue(orderFactory('RECHARGING'))
 

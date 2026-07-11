@@ -9,31 +9,38 @@ vi.mock('vue-i18n', () => ({
 }))
 
 describe('PaymentMethodSelector', () => {
-  it('uses built-in style for direct alipay and wxpay methods', () => {
+  it('uses branded presentation only for built-in alipay and wxpay aliases', () => {
     const wrapper = mount(PaymentMethodSelector, {
       props: {
-        selected: 'alipay_direct',
+        selected: 'wxpay_direct',
         methods: [
+          { type: 'alipay', fee_rate: 0, available: true },
           { type: 'alipay_direct', fee_rate: 0, available: true },
+          { type: 'wxpay', fee_rate: 0, available: true },
           { type: 'wxpay_direct', fee_rate: 0, available: true },
         ],
       },
     })
 
-    const button = wrapper.get('button')
-    expect(button.classes()).toContain('border-[#02A9F1]')
+    const buttons = wrapper.findAll('button')
+    expect(buttons.slice(0, 2).every(button => button.get('img').attributes('src').includes('alipay'))).toBe(true)
+    expect(buttons.slice(2).every(button => button.get('img').attributes('src').includes('wxpay'))).toBe(true)
+    expect(buttons[3].classes()).toContain('border-[#09BB07]')
   })
 
-  it('uses the generic selected style for custom methods that contain built-in names', () => {
+  it.each(['card_alipay', 'card_wxpay'])('uses neutral presentation for custom method %s', (type) => {
     const wrapper = mount(PaymentMethodSelector, {
       props: {
-        selected: 'card_alipay',
-        methods: [{ type: 'card_alipay', fee_rate: 0, available: true }],
+        selected: type,
+        methods: [{ type, fee_rate: 0, available: true }],
       },
     })
 
     const button = wrapper.get('button')
     expect(button.classes()).toContain('border-primary-500')
     expect(button.classes()).not.toContain('border-[#02A9F1]')
+    expect(button.classes()).not.toContain('border-[#09BB07]')
+    expect(button.get('img').attributes('src')).toContain('easypay')
+    expect(button.get('img').attributes('alt')).toBe(`payment.methods.${type}`)
   })
 })
