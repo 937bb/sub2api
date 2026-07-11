@@ -514,7 +514,7 @@ func TestRelay_ResponseFailedTextSanitizesClientPayloadAndKeepsUsage(t *testing.
 	}
 }
 
-func TestRelay_BinaryResponseFailedFramePreservedAndNotObserved(t *testing.T) {
+func TestRelay_BinaryResponseFailedFrameSanitizedAndNotObserved(t *testing.T) {
 	t.Parallel()
 
 	binaryPayload := []byte(`{"type":"response.failed","response":{"id":"resp_binary_failed","usage":{"input_tokens":7,"output_tokens":3},"metadata":{"tenant":"secret"},"error":{"code":"bad"}}}`)
@@ -542,7 +542,9 @@ func TestRelay_BinaryResponseFailedFramePreservedAndNotObserved(t *testing.T) {
 	clientWrites := clientConn.Writes()
 	require.Len(t, clientWrites, 1)
 	require.Equal(t, coderws.MessageBinary, clientWrites[0].msgType)
-	require.Equal(t, binaryPayload, clientWrites[0].payload)
+	require.JSONEq(t, `{"type":"response.failed","response":{"id":"resp_binary_failed","error":{"code":"bad"}}}`, string(clientWrites[0].payload))
+	require.NotContains(t, string(clientWrites[0].payload), "tenant")
+	require.NotContains(t, string(clientWrites[0].payload), "usage")
 }
 
 func TestRelay_NonJSONTextFramePreserved(t *testing.T) {
