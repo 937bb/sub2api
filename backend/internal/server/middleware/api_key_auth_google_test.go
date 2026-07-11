@@ -874,6 +874,11 @@ func TestAPIKeyAuthWithSubscriptionGoogle_SecurityMatrix(t *testing.T) {
 			k.IPBlacklist = []string{"198.51.100.1"}
 			k.CompiledIPBlacklist = ip.CompileIPRules(k.IPBlacklist)
 		}, false, false, nil, "198.51.100.1:1", "", 403, service.OpsClientBusinessLimitedReasonIPRestriction, true},
+		{"acl denial conceals persisted status", func(k *service.APIKey) {
+			k.Status = service.StatusAPIKeyQuotaExhausted
+			k.IPWhitelist = []string{"203.0.113.1"}
+			k.CompiledIPWhitelist = ip.CompileIPRules(k.IPWhitelist)
+		}, false, false, nil, "198.51.100.1:1", "", 403, service.OpsClientBusinessLimitedReasonIPRestriction, true},
 		{"spoofed forwarded ignored", func(k *service.APIKey) {
 			k.IPWhitelist = []string{"198.51.100.1"}
 			k.CompiledIPWhitelist = ip.CompileIPRules(k.IPWhitelist)
