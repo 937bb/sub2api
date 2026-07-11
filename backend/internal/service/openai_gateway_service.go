@@ -7222,7 +7222,7 @@ type OpenAIRecordUsageInput struct {
 	ChannelUsageFields
 }
 
-func validateOpenAIUsageForBilling(usage OpenAIUsage) error {
+func validateOpenAIUsageForBilling(usage OpenAIUsage, imageCount int) error {
 	checks := [...]struct {
 		name  string
 		value int
@@ -7242,7 +7242,7 @@ func validateOpenAIUsageForBilling(usage OpenAIUsage) error {
 			return fmt.Errorf("%s exceeds billing guard: %d > %d", check.name, check.value, openAIUsageBillingMaxTokenCount)
 		}
 	}
-	return nil
+	return validateImageCountForBilling(imageCount)
 }
 
 func validateOpenAIUsageCostForBilling(cost *CostBreakdown) error {
@@ -7304,22 +7304,23 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	if input == nil {
 		return errors.New("openai usage input is nil")
 	}
-	result := input.Result
-	if result == nil {
+	if input.Result == nil {
 		return errors.New("openai usage result is nil")
 	}
-	if s.rateLimitService != nil && input.Account != nil && input.Account.Platform == PlatformOpenAI {
-		s.rateLimitService.ResetOpenAI403Counter(ctx, input.Account.ID)
-	}
-
+	resultCopy := *input.Result
+	result := &resultCopy
 	apiKey := input.APIKey
 	user := input.User
 	account := input.Account
 	subscription := input.Subscription
-	ApplyOpenAIImageBillingResolution(result)
-	if err := validateOpenAIUsageForBilling(result.Usage); err != nil {
+	if err := validateOpenAIUsageForBilling(result.Usage, result.ImageCount); err != nil {
 		logOpenAIUsageBillingGuard("usage", result, input, nil, err)
-		return nil
+		return err
+	}
+	ApplyOpenAIImageBillingResolution(result)
+	if err := validateImageCountForBilling(result.ImageCount); err != nil {
+		logOpenAIUsageBillingGuard("usage", result, input, nil, err)
+		return err
 	}
 
 	// 计算实际的新输入token（减去缓存读取的token）
@@ -7399,7 +7400,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 			actualCost = cost.ActualCost
 		}
 		logOpenAIUsageBillingGuard("cost", result, input, map[string]any{"actual_cost": actualCost}, err)
-		return nil
+		return err
 	}
 
 	// Determine billing type
@@ -7511,6 +7512,9 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 
 	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
 		writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLog, "service.openai_gateway")
+		if s.rateLimitService != nil && account != nil && account.Platform == PlatformOpenAI {
+			s.rateLimitService.ResetOpenAI403Counter(ctx, account.ID)
+		}
 		logger.LegacyPrintf("service.openai_gateway", "[SIMPLE MODE] Usage recorded (not billed): user=%d, tokens=%d", usageLog.UserID, usageLog.TotalTokens())
 		s.deferredService.ScheduleLastUsedUpdate(account.ID)
 		return nil
@@ -7541,6 +7545,9 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		return billingErr
 	}
 	writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLog, "service.openai_gateway")
+	if s.rateLimitService != nil && account != nil && account.Platform == PlatformOpenAI {
+		s.rateLimitService.ResetOpenAI403Counter(ctx, account.ID)
+	}
 
 	return nil
 }
@@ -7559,7 +7566,7 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageCost(
 	if result != nil && result.ImageCount > 0 {
 		// 渠道定价为 token 计费时走 token 路径，否则走图片计费
 		if resolved := s.resolveOpenAIChannelPricing(ctx, billingModel, apiKey); resolved == nil || resolved.Mode != BillingModeToken {
-			return s.calculateOpenAIImageCost(ctx, billingModel, apiKey, result, imageMultiplier), nil
+			return s.calculateOpenAIImageCost(ctx, billingModel, apiKey, result, imageMultiplier)
 		}
 	}
 	if len(billingModels) == 0 || billingModel == "" {
@@ -7575,6 +7582,9 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageCost(
 		if err == nil {
 			return cost, nil
 		}
+		if !isUsagePricingUnavailableError(err) {
+			return nil, fmt.Errorf("calculate OpenAI usage cost failed for billing model %s: %w", candidate, err)
+		}
 		lastErr = err
 	}
 	if lastErr == nil {
@@ -7584,14 +7594,7 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageCost(
 }
 
 func isUsagePricingUnavailableError(err error) bool {
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, ErrModelPricingUnavailable) {
-		return true
-	}
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "no pricing available") || strings.Contains(msg, "pricing not found")
+	return errors.Is(err, ErrModelPricingUnavailable)
 }
 
 func (s *OpenAIGatewayService) calculateOpenAIRecordUsageTokenCost(
@@ -7624,7 +7627,7 @@ func (s *OpenAIGatewayService) calculateOpenAIImageCost(
 	apiKey *APIKey,
 	result *OpenAIForwardResult,
 	multiplier float64,
-) *CostBreakdown {
+) (*CostBreakdown, error) {
 	sizeTier := NormalizeImageBillingTierOrDefault(result.ImageSize)
 	if resolved := s.resolveOpenAIChannelPricing(ctx, billingModel, apiKey); resolved != nil &&
 		(resolved.Mode == BillingModePerRequest || resolved.Mode == BillingModeImage) {
@@ -7640,9 +7643,10 @@ func (s *OpenAIGatewayService) calculateOpenAIImageCost(
 			Resolved:       resolved,
 		})
 		if err == nil {
-			return cost
+			return cost, nil
 		}
 		logger.LegacyPrintf("service.openai_gateway", "Calculate image channel cost failed: %v", err)
+		return nil, err
 	}
 
 	var groupConfig *ImagePriceConfig
@@ -7653,7 +7657,11 @@ func (s *OpenAIGatewayService) calculateOpenAIImageCost(
 			Price4K: apiKey.Group.ImagePrice4K,
 		}
 	}
-	return s.billingService.CalculateImageCost(billingModel, sizeTier, result.ImageCount, groupConfig, multiplier)
+	cost := s.billingService.CalculateImageCost(billingModel, sizeTier, result.ImageCount, groupConfig, multiplier)
+	if err := validateCostBreakdownForBilling(cost); err != nil {
+		return nil, err
+	}
+	return cost, nil
 }
 
 func (s *OpenAIGatewayService) resolveOpenAIChannelPricing(ctx context.Context, billingModel string, apiKey *APIKey) *ResolvedPricing {

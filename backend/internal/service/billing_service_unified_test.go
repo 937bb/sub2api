@@ -147,6 +147,51 @@ func TestCalculateCostUnified_ImageMode(t *testing.T) {
 	require.Equal(t, string(BillingModeImage), cost.BillingMode)
 }
 
+func TestCalculateCostUnified_RequestModesRejectNegativeRequestCount(t *testing.T) {
+	bs := newTestBillingService()
+	resolver := NewModelPricingResolver(nil, bs)
+
+	for _, mode := range []BillingMode{BillingModePerRequest, BillingModeImage} {
+		t.Run(string(mode), func(t *testing.T) {
+			cost, err := bs.CalculateCostUnified(CostInput{
+				Ctx:            context.Background(),
+				Model:          "request-priced-model",
+				RequestCount:   -1,
+				RateMultiplier: 1,
+				Resolver:       resolver,
+				Resolved: &ResolvedPricing{
+					Mode:                   mode,
+					DefaultPerRequestPrice: 0.25,
+				},
+			})
+
+			require.Nil(t, cost)
+			require.ErrorContains(t, err, "request_count is negative: -1")
+		})
+	}
+}
+
+func TestCalculateCostUnified_RequestModeZeroRequestCountDefaultsToOne(t *testing.T) {
+	bs := newTestBillingService()
+	resolver := NewModelPricingResolver(nil, bs)
+
+	cost, err := bs.CalculateCostUnified(CostInput{
+		Ctx:            context.Background(),
+		Model:          "request-priced-model",
+		RequestCount:   0,
+		RateMultiplier: 1,
+		Resolver:       resolver,
+		Resolved: &ResolvedPricing{
+			Mode:                   BillingModePerRequest,
+			DefaultPerRequestPrice: 0.25,
+		},
+	})
+
+	require.NoError(t, err)
+	require.InDelta(t, 0.25, cost.TotalCost, 1e-12)
+	require.InDelta(t, 0.25, cost.ActualCost, 1e-12)
+}
+
 // TestCalculateCostUnified_RateMultiplierZeroProducesZero 锁定新行为：
 // 保存时强制 > 0；若 0 仍泄漏到计费层，按 0 计费（而非历史上的 1.0）。
 func TestCalculateCostUnified_RateMultiplierZeroProducesZero(t *testing.T) {

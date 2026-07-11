@@ -441,6 +441,74 @@ func TestGatewayServiceRecordUsage_BillingErrorSkipsUsageLogWrite(t *testing.T) 
 	require.Equal(t, 0, usageRepo.calls)
 }
 
+func TestGatewayServiceRecordUsage_InvalidUsageSkipsBillingAndUsageLog(t *testing.T) {
+	usageRepo := &openAIRecordUsageLogRepoStub{}
+	billingRepo := &openAIRecordUsageBillingRepoStub{result: &UsageBillingApplyResult{Applied: true}}
+	userRepo := &openAIRecordUsageUserRepoStub{}
+	subRepo := &openAIRecordUsageSubRepoStub{}
+	svc := newGatewayRecordUsageServiceWithBillingRepoForTest(usageRepo, billingRepo, userRepo, subRepo)
+
+	err := svc.RecordUsage(context.Background(), &RecordUsageInput{
+		Result: &ForwardResult{
+			RequestID: "gateway_invalid_usage",
+			Usage: ClaudeUsage{
+				InputTokens:       10,
+				OutputTokens:      6,
+				ImageOutputTokens: -1,
+			},
+			Model:    "claude-sonnet-4",
+			Duration: time.Second,
+		},
+		APIKey:  &APIKey{ID: 506},
+		User:    &User{ID: 606},
+		Account: &Account{ID: 706},
+	})
+
+	require.ErrorContains(t, err, "image_output_tokens is negative")
+	require.Equal(t, 0, billingRepo.calls)
+	require.Equal(t, 0, usageRepo.calls)
+}
+
+func TestGatewayServiceRecordUsage_NegativeImageCountSkipsBillingAndUsageLog(t *testing.T) {
+	usageRepo := &openAIRecordUsageLogRepoStub{}
+	billingRepo := &openAIRecordUsageBillingRepoStub{result: &UsageBillingApplyResult{Applied: true}}
+	userRepo := &openAIRecordUsageUserRepoStub{}
+	subRepo := &openAIRecordUsageSubRepoStub{}
+	svc := newGatewayRecordUsageServiceWithBillingRepoForTest(usageRepo, billingRepo, userRepo, subRepo)
+
+	err := svc.RecordUsage(context.Background(), &RecordUsageInput{
+		Result: &ForwardResult{
+			RequestID: "gateway_negative_image_count",
+			Usage:     ClaudeUsage{InputTokens: 10, OutputTokens: 6},
+			Model:     "claude-sonnet-4", ImageCount: -1, Duration: time.Second,
+		},
+		APIKey: &APIKey{ID: 507}, User: &User{ID: 607}, Account: &Account{ID: 707},
+	})
+
+	require.ErrorContains(t, err, "image_count is negative")
+	require.Equal(t, 0, billingRepo.calls)
+	require.Equal(t, 0, usageRepo.calls)
+}
+
+func TestGatewayServiceRecordUsage_DoesNotMutateInputDuringNormalization(t *testing.T) {
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+	billingRepo := &openAIRecordUsageBillingRepoStub{result: &UsageBillingApplyResult{Applied: true}}
+	svc := newGatewayRecordUsageServiceWithBillingRepoForTest(usageRepo, billingRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{})
+	result := &ForwardResult{
+		RequestID: "gateway_unchanged_input", Model: "claude-sonnet-4", ImageCount: 1,
+		Usage: ClaudeUsage{InputTokens: 10, CacheReadInputTokens: 2},
+	}
+	original := *result
+
+	err := svc.RecordUsage(context.Background(), &RecordUsageInput{
+		Result: result, APIKey: &APIKey{ID: 508}, User: &User{ID: 608}, Account: &Account{ID: 708},
+		ForceCacheBilling: true,
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, original, *result)
+}
+
 func TestGatewayServiceRecordUsage_ReasoningEffortPersisted(t *testing.T) {
 	usageRepo := &openAIRecordUsageBestEffortLogRepoStub{}
 	svc := newGatewayRecordUsageServiceForTest(usageRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{})

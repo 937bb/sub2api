@@ -1189,7 +1189,8 @@ func TestComputeTokenBreakdown_ExplicitZeroImagePrice_NoFallback(t *testing.T) {
 		OutputTokens:      200,
 		ImageOutputTokens: 50,
 	}
-	bd := svc.computeTokenBreakdown(pricing, tokens, 1.0, "", false)
+	bd, err := svc.computeTokenBreakdown(pricing, tokens, 1.0, "", false)
+	require.NoError(t, err)
 
 	// ImageOutputTokens should NOT fall back to outputPrice
 	require.Equal(t, 0.0, bd.ImageOutputCost)
@@ -1211,10 +1212,35 @@ func TestComputeTokenBreakdown_NonExplicitZeroImagePrice_FallsBackToOutput(t *te
 		OutputTokens:      200,
 		ImageOutputTokens: 50,
 	}
-	bd := svc.computeTokenBreakdown(pricing, tokens, 1.0, "", false)
+	bd, err := svc.computeTokenBreakdown(pricing, tokens, 1.0, "", false)
+	require.NoError(t, err)
 
 	// Should fall back to outputPrice since not explicit
 	require.InDelta(t, 50*15e-6, bd.ImageOutputCost, 1e-12)
 	// textOutputTokens = 200 - 50 = 150
 	require.InDelta(t, 150*15e-6, bd.OutputCost, 1e-12)
+}
+
+func TestComputeTokenBreakdown_LongContextTokenSumOverflow(t *testing.T) {
+	svc := newTestBillingService()
+	pricing := &ModelPricing{
+		LongContextInputThreshold:  1,
+		LongContextInputMultiplier: 2,
+	}
+	tokens := UsageTokens{InputTokens: int(^uint(0) >> 1), CacheReadTokens: 1}
+
+	bd, err := svc.computeTokenBreakdown(pricing, tokens, 1.0, "", true)
+
+	require.Nil(t, bd)
+	require.ErrorContains(t, err, "token total overflows int")
+}
+
+func TestCalculateCost_LegacyLongContextTokenSumOverflow(t *testing.T) {
+	svc := newTestBillingService()
+	tokens := UsageTokens{InputTokens: int(^uint(0) >> 1), CacheCreationTokens: 1}
+
+	bd, err := svc.CalculateCost("gpt-5.4", tokens, 1.0)
+
+	require.Nil(t, bd)
+	require.ErrorContains(t, err, "token total overflows int")
 }

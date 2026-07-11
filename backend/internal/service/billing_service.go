@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"strings"
 	"sync"
 	"time"
@@ -643,6 +644,9 @@ type CostInput struct {
 // CalculateCostUnified 统一计费入口，支持三种计费模式。
 // 使用 ModelPricingResolver 解析定价，然后根据 BillingMode 分发计算。
 func (s *BillingService) CalculateCostUnified(input CostInput) (*CostBreakdown, error) {
+	if err := validateUsageTokensForBilling(input.Tokens); err != nil {
+		return nil, err
+	}
 	if input.Resolver == nil {
 		// 无 Resolver，回退到旧路径
 		return s.calculateCostInternal(input.Model, input.Tokens, input.RateMultiplier, input.ServiceTier, nil)
@@ -666,6 +670,9 @@ func (s *BillingService) CalculateCostUnified(input CostInput) (*CostBreakdown, 
 	var err error
 	switch resolved.Mode {
 	case BillingModePerRequest, BillingModeImage:
+		if err := validateRequestCountForBilling(input.RequestCount); err != nil {
+			return nil, err
+		}
 		breakdown, err = s.calculatePerRequestCost(resolved, input)
 	default: // BillingModeToken
 		breakdown, err = s.calculateTokenCost(resolved, input)
@@ -675,13 +682,80 @@ func (s *BillingService) CalculateCostUnified(input CostInput) (*CostBreakdown, 
 		if breakdown.BillingMode == "" {
 			breakdown.BillingMode = string(BillingModeToken)
 		}
+		err = validateCostBreakdownForBilling(breakdown)
 	}
 	return breakdown, err
 }
 
+func validateRequestCountForBilling(requestCount int) error {
+	if requestCount < 0 {
+		return fmt.Errorf("invalid usage for billing: request_count is negative: %d", requestCount)
+	}
+	return nil
+}
+
+func validateUsageTokensForBilling(tokens UsageTokens) error {
+	checks := [...]struct {
+		name  string
+		value int
+	}{
+		{"input_tokens", tokens.InputTokens}, {"image_input_tokens", tokens.ImageInputTokens},
+		{"output_tokens", tokens.OutputTokens}, {"image_output_tokens", tokens.ImageOutputTokens},
+		{"cache_read_tokens", tokens.CacheReadTokens}, {"cache_creation_tokens", tokens.CacheCreationTokens},
+		{"cache_creation_5m_tokens", tokens.CacheCreation5mTokens}, {"cache_creation_1h_tokens", tokens.CacheCreation1hTokens},
+	}
+	for _, check := range checks {
+		if check.value < 0 {
+			return fmt.Errorf("invalid usage for billing: %s is negative: %d", check.name, check.value)
+		}
+	}
+	return nil
+}
+
+func validateImageCountForBilling(imageCount int) error {
+	if imageCount < 0 {
+		return fmt.Errorf("invalid usage for billing: image_count is negative: %d", imageCount)
+	}
+	return nil
+}
+
+func checkedBillingTokenSum(values ...int) (int, error) {
+	total := 0
+	for _, value := range values {
+		if value < 0 || total > int(^uint(0)>>1)-value {
+			return 0, fmt.Errorf("invalid usage for billing: token total overflows int")
+		}
+		total += value
+	}
+	return total, nil
+}
+
+func validateCostBreakdownForBilling(cost *CostBreakdown) error {
+	if cost == nil {
+		return nil
+	}
+	values := [...]struct {
+		name  string
+		value float64
+	}{
+		{"input_cost", cost.InputCost}, {"output_cost", cost.OutputCost}, {"image_output_cost", cost.ImageOutputCost},
+		{"cache_creation_cost", cost.CacheCreationCost}, {"cache_read_cost", cost.CacheReadCost},
+		{"total_cost", cost.TotalCost}, {"actual_cost", cost.ActualCost},
+	}
+	for _, item := range values {
+		if math.IsNaN(item.value) || math.IsInf(item.value, 0) || item.value < 0 {
+			return fmt.Errorf("invalid billing cost: %s must be finite and nonnegative: %v", item.name, item.value)
+		}
+	}
+	return nil
+}
+
 // calculateTokenCost 按 token 区间计费
 func (s *BillingService) calculateTokenCost(resolved *ResolvedPricing, input CostInput) (*CostBreakdown, error) {
-	totalContext := input.Tokens.InputTokens + input.Tokens.CacheCreationTokens + input.Tokens.CacheReadTokens
+	totalContext, err := checkedBillingTokenSum(input.Tokens.InputTokens, input.Tokens.CacheCreationTokens, input.Tokens.CacheReadTokens)
+	if err != nil {
+		return nil, err
+	}
 
 	pricing := input.Resolver.GetIntervalPricing(resolved, totalContext)
 	if pricing == nil {
@@ -693,7 +767,7 @@ func (s *BillingService) calculateTokenCost(resolved *ResolvedPricing, input Cos
 	// 长上下文定价仅在无区间定价时应用（区间定价已包含上下文分层）
 	applyLongCtx := len(resolved.Intervals) == 0
 
-	return s.computeTokenBreakdown(pricing, input.Tokens, input.RateMultiplier, input.ServiceTier, applyLongCtx), nil
+	return s.computeTokenBreakdown(pricing, input.Tokens, input.RateMultiplier, input.ServiceTier, applyLongCtx)
 }
 
 // computeTokenBreakdown 是 token 计费的核心逻辑，由 calculateTokenCost 和 calculateCostInternal 共用。
@@ -702,7 +776,7 @@ func (s *BillingService) computeTokenBreakdown(
 	pricing *ModelPricing, tokens UsageTokens,
 	rateMultiplier float64, serviceTier string,
 	applyLongCtx bool,
-) *CostBreakdown {
+) (*CostBreakdown, error) {
 	// 保存时强制 > 0；若仍有负数泄漏，按 0 处理避免按 1x 误扣。
 	if rateMultiplier < 0 {
 		rateMultiplier = 0
@@ -733,7 +807,15 @@ func (s *BillingService) computeTokenBreakdown(
 	}
 
 	imageInputPrice := pricing.ImageInputPricePerToken
-	if applyLongCtx && s.shouldApplySessionLongContextPricing(tokens, pricing) {
+	applySessionLongContext := false
+	if applyLongCtx {
+		var err error
+		applySessionLongContext, err = s.shouldApplySessionLongContextPricing(tokens, pricing)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if applySessionLongContext {
 		inputPrice *= pricing.LongContextInputMultiplier
 		if imageInputPrice > 0 {
 			imageInputPrice *= pricing.LongContextInputMultiplier
@@ -784,7 +866,7 @@ func (s *BillingService) computeTokenBreakdown(
 		bd.CacheCreationCost + bd.CacheReadCost
 	bd.ActualCost = bd.TotalCost * rateMultiplier
 
-	return bd
+	return bd, nil
 }
 
 func computeInputCostWithImageTokens(tokens UsageTokens, inputPrice, imageInputPrice float64) float64 {
@@ -831,7 +913,10 @@ func (s *BillingService) calculatePerRequestCost(resolved *ResolvedPricing, inpu
 	}
 
 	if unitPrice == 0 {
-		totalContext := input.Tokens.InputTokens + input.Tokens.CacheCreationTokens + input.Tokens.CacheReadTokens
+		totalContext, err := checkedBillingTokenSum(input.Tokens.InputTokens, input.Tokens.CacheCreationTokens, input.Tokens.CacheReadTokens)
+		if err != nil {
+			return nil, err
+		}
 		unitPrice = input.Resolver.GetRequestTierPriceByContext(resolved, totalContext)
 	}
 
@@ -859,6 +944,9 @@ func (s *BillingService) CalculateCostWithServiceTier(model string, tokens Usage
 }
 
 func (s *BillingService) calculateCostInternal(model string, tokens UsageTokens, rateMultiplier float64, serviceTier string, channelPricing *ChannelModelPricing) (*CostBreakdown, error) {
+	if err := validateUsageTokensForBilling(tokens); err != nil {
+		return nil, err
+	}
 	var pricing *ModelPricing
 	var err error
 	if channelPricing != nil {
@@ -871,7 +959,14 @@ func (s *BillingService) calculateCostInternal(model string, tokens UsageTokens,
 	}
 
 	// 旧路径始终检查长上下文定价（无区间定价概念）
-	return s.computeTokenBreakdown(pricing, tokens, rateMultiplier, serviceTier, true), nil
+	breakdown, err := s.computeTokenBreakdown(pricing, tokens, rateMultiplier, serviceTier, true)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateCostBreakdownForBilling(breakdown); err != nil {
+		return nil, err
+	}
+	return breakdown, nil
 }
 
 func (s *BillingService) applyModelSpecificPricingPolicy(model string, pricing *ModelPricing) *ModelPricing {
@@ -910,14 +1005,18 @@ func (s *BillingService) applyModelSpecificPricingPolicy(model string, pricing *
 	return &cloned
 }
 
-func (s *BillingService) shouldApplySessionLongContextPricing(tokens UsageTokens, pricing *ModelPricing) bool {
+func (s *BillingService) shouldApplySessionLongContextPricing(tokens UsageTokens, pricing *ModelPricing) (bool, error) {
 	if pricing == nil || pricing.LongContextInputThreshold <= 0 {
-		return false
+		return false, nil
 	}
 	if pricing.LongContextInputMultiplier <= 1 && pricing.LongContextOutputMultiplier <= 1 {
-		return false
+		return false, nil
 	}
-	return tokens.InputTokens+tokens.CacheCreationTokens+tokens.CacheReadTokens > pricing.LongContextInputThreshold
+	total, err := checkedBillingTokenSum(tokens.InputTokens, tokens.CacheCreationTokens, tokens.CacheReadTokens)
+	if err != nil {
+		return false, err
+	}
+	return total > pricing.LongContextInputThreshold, nil
 }
 
 // CalculateCostWithConfig 使用配置中的默认倍率计算费用
@@ -937,13 +1036,19 @@ func (s *BillingService) CalculateCostWithConfig(model string, tokens UsageToken
 // 拆分为：范围内 (200k, 0) + 范围外 (10k, 10k)
 // 范围内正常计费，范围外 × 2 计费
 func (s *BillingService) CalculateCostWithLongContext(model string, tokens UsageTokens, rateMultiplier float64, threshold int, extraMultiplier float64) (*CostBreakdown, error) {
+	if err := validateUsageTokensForBilling(tokens); err != nil {
+		return nil, err
+	}
 	// 未启用长上下文计费，直接走正常计费
 	if threshold <= 0 || extraMultiplier <= 1 {
 		return s.CalculateCost(model, tokens, rateMultiplier)
 	}
 
 	// 计算总输入 token（缓存读取 + 新输入）
-	total := tokens.CacheReadTokens + tokens.InputTokens
+	total, err := checkedBillingTokenSum(tokens.CacheReadTokens, tokens.InputTokens)
+	if err != nil {
+		return nil, err
+	}
 	if total <= threshold {
 		return s.CalculateCost(model, tokens, rateMultiplier)
 	}
@@ -992,7 +1097,7 @@ func (s *BillingService) CalculateCostWithLongContext(model string, tokens Usage
 	}
 
 	// 合并成本
-	return &CostBreakdown{
+	combined := &CostBreakdown{
 		InputCost:         inRangeCost.InputCost + outRangeCost.InputCost,
 		OutputCost:        inRangeCost.OutputCost,
 		ImageOutputCost:   inRangeCost.ImageOutputCost,
@@ -1000,7 +1105,11 @@ func (s *BillingService) CalculateCostWithLongContext(model string, tokens Usage
 		CacheReadCost:     inRangeCost.CacheReadCost + outRangeCost.CacheReadCost,
 		TotalCost:         inRangeCost.TotalCost + outRangeCost.TotalCost,
 		ActualCost:        inRangeCost.ActualCost + outRangeCost.ActualCost,
-	}, nil
+	}
+	if err := validateCostBreakdownForBilling(combined); err != nil {
+		return nil, err
+	}
+	return combined, nil
 }
 
 // ListSupportedModels 列出所有支持的模型（现在总是返回true，因为有模糊匹配）
