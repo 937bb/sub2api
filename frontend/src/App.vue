@@ -7,6 +7,9 @@ import { resolveRouteDocumentTitle } from '@/router/title'
 import AnnouncementPopup from '@/components/common/AnnouncementPopup.vue'
 import { useAppStore, useAuthStore, useSubscriptionStore, useAnnouncementStore, useAdminSettingsStore } from '@/stores'
 import { getSetupStatus } from '@/api/setup'
+import { sanitizeUrl } from '@/utils/url'
+
+const defaultFavicon = '/logo.png'
 
 const router = useRouter()
 const route = useRoute()
@@ -28,7 +31,7 @@ function updateFavicon(logoUrl: string) {
     link.rel = 'icon'
     document.head.appendChild(link)
   }
-  link.type = logoUrl.endsWith('.svg') ? 'image/svg+xml' : 'image/x-icon'
+  link.type = logoUrl.endsWith('.svg') ? 'image/svg+xml' : 'image/png'
   link.href = logoUrl
 }
 
@@ -45,9 +48,8 @@ function updateDocumentTitle() {
 watch(
   () => appStore.siteLogo,
   (newLogo) => {
-    if (newLogo) {
-      updateFavicon(newLogo)
-    }
+    const safeLogo = sanitizeUrl(newLogo || '', { allowRelative: true, allowDataUrl: true })
+    updateFavicon(safeLogo || defaultFavicon)
   },
   { immediate: true }
 )

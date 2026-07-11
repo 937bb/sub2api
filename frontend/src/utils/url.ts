@@ -15,12 +15,22 @@ export function sanitizeUrl(value: string, options: SanitizeOptions = {}): strin
     return ''
   }
 
-  if (options.allowRelative && trimmed.startsWith('/') && !trimmed.startsWith('//')) {
+  // Browsers treat backslashes as path separators for special schemes, so `/\\host`
+  // can become a protocol-relative URL. Keep relative URLs strictly root-relative.
+  if (
+    options.allowRelative &&
+    trimmed.startsWith('/') &&
+    !trimmed.startsWith('//') &&
+    !trimmed.includes('\\')
+  ) {
     return trimmed
   }
 
-  // 允许 data:image/ 开头的 data URL（仅限图片类型）
-  if (options.allowDataUrl && trimmed.startsWith('data:image/')) {
+  // Only permit base64 raster images. SVG and arbitrary image subtypes can carry active content.
+  if (
+    options.allowDataUrl &&
+    /^data:image\/(?:png|jpe?g|gif|webp|avif);base64,[a-z0-9+/]*={0,2}$/i.test(trimmed)
+  ) {
     return trimmed
   }
 
