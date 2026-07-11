@@ -8871,7 +8871,8 @@ func startOpenAICompactSSEKeepalive(c *gin.Context, interval time.Duration) func
 	}
 	k := &openAICompactSSEKeepalive{writer: c.Writer, stop: make(chan struct{})}
 	c.Set(openAICompactSSEKeepaliveKey, k)
-	c.Writer = &openAICompactKeepaliveWriter{ResponseWriter: c.Writer, k: k}
+	w := &openAICompactKeepaliveWriter{ResponseWriter: c.Writer, k: k}
+	c.Writer = w
 	var done <-chan struct{}
 	if c.Request != nil {
 		done = c.Request.Context().Done()
@@ -8893,7 +8894,17 @@ func startOpenAICompactSSEKeepalive(c *gin.Context, interval time.Duration) func
 			timer.Reset(interval)
 		}
 	}()
-	return k.Stop
+	return func() {
+		k.Stop()
+		// The keepalive wrapper is request-scoped. Do not leave it retaining an
+		// inner writer (which may itself be pooled) after this owner is done.
+		if c.Writer == w {
+			c.Writer = w.ResponseWriter
+		}
+		if current, ok := c.Get(openAICompactSSEKeepaliveKey); ok && current == k {
+			delete(c.Keys, openAICompactSSEKeepaliveKey)
+		}
+	}
 }
 func (k *openAICompactSSEKeepalive) beat() bool {
 	k.mu.Lock()
