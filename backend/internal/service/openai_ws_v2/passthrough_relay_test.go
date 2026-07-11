@@ -517,7 +517,7 @@ func TestRelay_ResponseFailedTextSanitizesClientPayloadAndKeepsUsage(t *testing.
 func TestRelay_BinaryResponseFailedFrameSanitizedAndNotObserved(t *testing.T) {
 	t.Parallel()
 
-	binaryPayload := []byte(`{"type":"response.failed","response":{"id":"resp_binary_failed","usage":{"input_tokens":7,"output_tokens":3},"metadata":{"tenant":"secret"},"error":{"code":"bad"}}}`)
+	binaryPayload := []byte(`{"type":"response.failed","instructions":"top-secret instructions","input":[{"role":"user","content":"top secret prompt"}],"output":[{"type":"message","content":"top secret output"}],"usage":{"input_tokens":99,"output_tokens":88},"metadata":{"top":"top-secret"},"reasoning":{"effort":"high"},"tools":[{"type":"function","name":"top_secret_tool"}],"tool_choice":"auto","parallel_tool_calls":true,"prompt_cache_key":"top-secret-cache","previous_response_id":"resp_prev_top","text":{"verbosity":"high"},"truncation":"auto","max_output_tokens":8192,"incomplete_details":{"reason":"max"},"response":{"id":"resp_binary_failed","status":"failed","instructions":"secret instructions","input":[{"role":"user","content":"sensitive prompt"}],"output":[{"type":"message","content":"secret output"}],"usage":{"input_tokens":7,"output_tokens":3},"metadata":{"tenant":"secret"},"reasoning":{"effort":"high"},"tools":[{"type":"function","name":"secret_tool"}],"tool_choice":"auto","parallel_tool_calls":true,"prompt_cache_key":"secret-cache","previous_response_id":"resp_prev_inner","text":{"verbosity":"high"},"truncation":"auto","max_output_tokens":4096,"incomplete_details":{"reason":"max_output_tokens"},"error":{"code":"bad"}}}`)
 	clientConn := newPassthroughTestFrameConn(nil, false)
 	upstreamConn := newPassthroughTestFrameConn([]passthroughTestFrame{
 		{msgType: coderws.MessageBinary, payload: binaryPayload},
@@ -542,7 +542,7 @@ func TestRelay_BinaryResponseFailedFrameSanitizedAndNotObserved(t *testing.T) {
 	clientWrites := clientConn.Writes()
 	require.Len(t, clientWrites, 1)
 	require.Equal(t, coderws.MessageBinary, clientWrites[0].msgType)
-	require.JSONEq(t, `{"type":"response.failed","response":{"id":"resp_binary_failed","error":{"code":"bad"}}}`, string(clientWrites[0].payload))
+	require.JSONEq(t, `{"type":"response.failed","response":{"id":"resp_binary_failed","status":"failed","error":{"code":"bad"}}}`, string(clientWrites[0].payload))
 	require.NotContains(t, string(clientWrites[0].payload), "tenant")
 	require.NotContains(t, string(clientWrites[0].payload), "usage")
 }
