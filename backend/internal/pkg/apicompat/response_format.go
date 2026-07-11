@@ -108,15 +108,12 @@ func insertObjectMember(obj []byte, member string) json.RawMessage {
 }
 
 func scanRawJSONObject(raw []byte) ([]rawJSONMember, bool) {
-	if !json.Valid(raw) {
-		return nil, false
-	}
 	i := skipJSONSpace(raw, 0)
 	if i >= len(raw) || raw[i] != '{' {
 		return nil, false
 	}
 	i++
-	var out []rawJSONMember
+	out := make([]rawJSONMember, 0, 4)
 	for {
 		i = skipJSONSpace(raw, i)
 		if i < len(raw) && raw[i] == '}' {
@@ -139,7 +136,7 @@ func scanRawJSONObject(raw []byte) ([]rawJSONMember, bool) {
 		i++
 		i = skipJSONSpace(raw, i)
 		valueStart := i
-		valueEnd, ok := scanJSONValue(raw, i)
+		valueEnd, ok := scanJSONValue(raw, i, 1)
 		if !ok {
 			return nil, false
 		}
@@ -150,6 +147,9 @@ func scanRawJSONObject(raw []byte) ([]rawJSONMember, bool) {
 		}
 		if raw[i] == ',' {
 			i++
+			if next := skipJSONSpace(raw, i); next >= len(raw) || raw[next] == '}' {
+				return nil, false
+			}
 			continue
 		}
 		if raw[i] != '}' {
@@ -158,50 +158,158 @@ func scanRawJSONObject(raw []byte) ([]rawJSONMember, bool) {
 	}
 }
 
-func scanJSONValue(raw []byte, i int) (int, bool) {
-	if i >= len(raw) {
-		return 0, false
-	}
-	if raw[i] == '"' {
-		return scanJSONString(raw, i)
-	}
-	if raw[i] == '{' || raw[i] == '[' {
-		stack := []byte{raw[i]}
-		i++
-		for i < len(raw) {
-			if raw[i] == '"' {
-				var ok bool
+const maxJSONNestingDepth = 10000
+
+type jsonScanFrame struct {
+	close  byte
+	object bool
+}
+
+func scanJSONValue(raw []byte, i, depth int) (int, bool) {
+	stack := make([]jsonScanFrame, 0, 8)
+	wantValue := true
+	for {
+		i = skipJSONSpace(raw, i)
+		if i >= len(raw) {
+			return 0, false
+		}
+
+		if wantValue {
+			var ok bool
+			switch raw[i] {
+			case '"':
 				i, ok = scanJSONString(raw, i)
-				if !ok {
+			case '{', '[':
+				if depth+len(stack) == maxJSONNestingDepth {
 					return 0, false
+				}
+				open := raw[i]
+				close := byte(']')
+				if open == '{' {
+					close = '}'
+				}
+				stack = append(stack, jsonScanFrame{close: close, object: open == '{'})
+				i = skipJSONSpace(raw, i+1)
+				if i < len(raw) && raw[i] == stack[len(stack)-1].close {
+					i++
+					stack = stack[:len(stack)-1]
+					if len(stack) == 0 {
+						return i, true
+					}
+					wantValue = false
+					continue
+				}
+				if open == '{' {
+					i, ok = scanJSONString(raw, i)
+					if !ok {
+						return 0, false
+					}
+					i = skipJSONSpace(raw, i)
+					if i >= len(raw) || raw[i] != ':' {
+						return 0, false
+					}
+					i++
 				}
 				continue
+			case 't':
+				i, ok = scanJSONLiteral(raw, i, "true")
+			case 'f':
+				i, ok = scanJSONLiteral(raw, i, "false")
+			case 'n':
+				i, ok = scanJSONLiteral(raw, i, "null")
+			default:
+				i, ok = scanJSONNumber(raw, i)
 			}
-			switch raw[i] {
-			case '{', '[':
-				stack = append(stack, raw[i])
-			case '}', ']':
-				open := stack[len(stack)-1]
-				if (open == '{') != (raw[i] == '}') {
-					return 0, false
-				}
-				stack = stack[:len(stack)-1]
-				if len(stack) == 0 {
-					return i + 1, true
-				}
+			if !ok {
+				return 0, false
+			}
+			wantValue = false
+		}
+
+		if len(stack) == 0 {
+			return i, true
+		}
+		i = skipJSONSpace(raw, i)
+		frame := &stack[len(stack)-1]
+		if i >= len(raw) {
+			return 0, false
+		}
+		if raw[i] == frame.close {
+			i++
+			stack = stack[:len(stack)-1]
+			if len(stack) == 0 {
+				return i, true
+			}
+			continue
+		}
+		if raw[i] != ',' {
+			return 0, false
+		}
+		i = skipJSONSpace(raw, i+1)
+		if i >= len(raw) || raw[i] == frame.close {
+			return 0, false
+		}
+		if frame.object {
+			var ok bool
+			i, ok = scanJSONString(raw, i)
+			if !ok {
+				return 0, false
+			}
+			i = skipJSONSpace(raw, i)
+			if i >= len(raw) || raw[i] != ':' {
+				return 0, false
 			}
 			i++
 		}
+		wantValue = true
+	}
+}
+
+func scanJSONLiteral(raw []byte, i int, literal string) (int, bool) {
+	end := i + len(literal)
+	return end, end <= len(raw) && string(raw[i:end]) == literal
+}
+
+func scanJSONNumber(raw []byte, i int) (int, bool) {
+	start := i
+	if i < len(raw) && raw[i] == '-' {
+		i++
+	}
+	if i >= len(raw) {
 		return 0, false
 	}
-	end := i
-	for end < len(raw) && !bytes.ContainsRune([]byte(",}] \t\r\n"), rune(raw[end])) {
-		end++
+	if raw[i] == '0' {
+		i++
+	} else {
+		if raw[i] < '1' || raw[i] > '9' {
+			return 0, false
+		}
+		for i < len(raw) && raw[i] >= '0' && raw[i] <= '9' {
+			i++
+		}
 	}
-	if end == i || !json.Valid(raw[i:end]) {
-		return 0, false
+	if i < len(raw) && raw[i] == '.' {
+		i++
+		if i >= len(raw) || raw[i] < '0' || raw[i] > '9' {
+			return 0, false
+		}
+		for i < len(raw) && raw[i] >= '0' && raw[i] <= '9' {
+			i++
+		}
 	}
-	return end, true
+	if i < len(raw) && (raw[i] == 'e' || raw[i] == 'E') {
+		i++
+		if i < len(raw) && (raw[i] == '+' || raw[i] == '-') {
+			i++
+		}
+		if i >= len(raw) || raw[i] < '0' || raw[i] > '9' {
+			return 0, false
+		}
+		for i < len(raw) && raw[i] >= '0' && raw[i] <= '9' {
+			i++
+		}
+	}
+	return i, i > start
 }
 
 func scanJSONString(raw []byte, i int) (int, bool) {
@@ -211,7 +319,19 @@ func scanJSONString(raw []byte, i int) (int, bool) {
 	i++
 	for i < len(raw) {
 		if raw[i] == '\\' {
-			i += 2
+			i++
+			if i >= len(raw) || !bytes.ContainsRune([]byte(`"\\/bfnrtu`), rune(raw[i])) {
+				return 0, false
+			}
+			if raw[i] == 'u' {
+				for n := 0; n < 4; n++ {
+					i++
+					if i >= len(raw) || !isJSONHex(raw[i]) {
+						return 0, false
+					}
+				}
+			}
+			i++
 			continue
 		}
 		if raw[i] == '"' {
@@ -223,6 +343,10 @@ func scanJSONString(raw []byte, i int) (int, bool) {
 		i++
 	}
 	return 0, false
+}
+
+func isJSONHex(c byte) bool {
+	return c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F'
 }
 
 func skipJSONSpace(raw []byte, i int) int {
