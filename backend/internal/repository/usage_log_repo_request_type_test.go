@@ -379,6 +379,38 @@ func TestUsageLogRepositoryGetModelStatsWithFiltersRequestTypePriority(t *testin
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestUsageLogRepositoryGetUserBreakdownRequestTypeIncludesLegacyRows(t *testing.T) {
+	start := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	end := start.Add(24 * time.Hour)
+	streamFilter := true
+	tests := []struct {
+		name        string
+		requestType service.RequestType
+		condition   string
+	}{
+		{"sync", service.RequestTypeSync, `AND \(ul\.request_type = \$3 OR \(ul\.request_type = 0 AND ul\.stream = FALSE AND ul\.openai_ws_mode = FALSE\)\)`},
+		{"stream", service.RequestTypeStream, `AND \(ul\.request_type = \$3 OR \(ul\.request_type = 0 AND ul\.stream = TRUE AND ul\.openai_ws_mode = FALSE\)\)`},
+		{"ws_v2", service.RequestTypeWSV2, `AND \(ul\.request_type = \$3 OR \(ul\.request_type = 0 AND ul\.openai_ws_mode = TRUE\)\)`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db, mock := newSQLMock(t)
+			repo := &usageLogRepository{sql: db}
+			requestType := int16(tt.requestType)
+			mock.ExpectQuery(tt.condition).WithArgs(start, end, requestType).WillReturnRows(sqlmock.NewRows([]string{
+				"user_id", "email", "requests", "total_tokens", "cost", "actual_cost", "account_cost",
+			}))
+			stats, err := repo.GetUserBreakdownStats(context.Background(), start, end, usagestats.UserBreakdownDimension{
+				RequestType: &requestType,
+				Stream:      &streamFilter,
+			}, 50)
+			require.NoError(t, err)
+			require.Empty(t, stats)
+			require.NoError(t, mock.ExpectationsWereMet())
+		})
+	}
+}
+
 func TestUsageLogRepositoryGetStatsWithFiltersRequestTypePriority(t *testing.T) {
 	db, mock := newSQLMock(t)
 	repo := &usageLogRepository{sql: db}
@@ -600,7 +632,7 @@ func TestBuildRequestTypeFilterConditionLegacyFallback(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			where, args := buildRequestTypeFilterCondition(3, tt.request)
+			where, args := buildRequestTypeFilterCondition(3, tt.request, requestTypeColumnsUnqualified)
 			require.Equal(t, tt.wantWhere, where)
 			require.Equal(t, []any{tt.wantArg}, args)
 		})

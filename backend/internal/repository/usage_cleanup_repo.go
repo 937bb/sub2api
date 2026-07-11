@@ -363,7 +363,7 @@ func buildUsageCleanupWhere(filters service.UsageCleanupFilters) (string, []any)
 		}
 	}
 	if filters.RequestType != nil {
-		condition, conditionArgs := buildRequestTypeFilterCondition(idx, *filters.RequestType)
+		condition, conditionArgs := buildRequestTypeFilterCondition(idx, *filters.RequestType, requestTypeColumnsUnqualified)
 		conditions = append(conditions, condition)
 		args = append(args, conditionArgs...)
 		idx += len(conditionArgs)

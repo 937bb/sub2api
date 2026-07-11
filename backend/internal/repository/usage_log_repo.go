@@ -3321,10 +3321,10 @@ func (r *usageLogRepository) GetUserBreakdownStats(ctx context.Context, startTim
 		args = append(args, dim.AccountID)
 	}
 	if dim.RequestType != nil {
-		query += fmt.Sprintf(" AND ul.request_type = $%d", len(args)+1)
-		args = append(args, *dim.RequestType)
-	}
-	if dim.Stream != nil {
+		condition, conditionArgs := buildRequestTypeFilterCondition(len(args)+1, *dim.RequestType, requestTypeColumnsUsageLog)
+		query += " AND " + condition
+		args = append(args, conditionArgs...)
+	} else if dim.Stream != nil {
 		query += fmt.Sprintf(" AND ul.stream = $%d", len(args)+1)
 		args = append(args, *dim.Stream)
 	}
@@ -4494,7 +4494,7 @@ func buildWhere(conditions []string) string {
 
 func appendRequestTypeOrStreamWhereCondition(conditions []string, args []any, requestType *int16, stream *bool) ([]string, []any) {
 	if requestType != nil {
-		condition, conditionArgs := buildRequestTypeFilterCondition(len(args)+1, *requestType)
+		condition, conditionArgs := buildRequestTypeFilterCondition(len(args)+1, *requestType, requestTypeColumnsUnqualified)
 		conditions = append(conditions, condition)
 		args = append(args, conditionArgs...)
 		return conditions, args
@@ -4508,7 +4508,7 @@ func appendRequestTypeOrStreamWhereCondition(conditions []string, args []any, re
 
 func appendRequestTypeOrStreamQueryFilter(query string, args []any, requestType *int16, stream *bool) (string, []any) {
 	if requestType != nil {
-		condition, conditionArgs := buildRequestTypeFilterCondition(len(args)+1, *requestType)
+		condition, conditionArgs := buildRequestTypeFilterCondition(len(args)+1, *requestType, requestTypeColumnsUnqualified)
 		query += " AND " + condition
 		args = append(args, conditionArgs...)
 		return query, args
@@ -4520,19 +4520,29 @@ func appendRequestTypeOrStreamQueryFilter(query string, args []any, requestType 
 	return query, args
 }
 
+type requestTypeColumnPrefix string
+
+const (
+	requestTypeColumnsUnqualified requestTypeColumnPrefix = ""
+	requestTypeColumnsUsageLog    requestTypeColumnPrefix = "ul."
+)
+
 // buildRequestTypeFilterCondition 在 request_type 过滤时兼容 legacy 字段，避免历史数据漏查。
-func buildRequestTypeFilterCondition(startArgIndex int, requestType int16) (string, []any) {
+func buildRequestTypeFilterCondition(startArgIndex int, requestType int16, prefix requestTypeColumnPrefix) (string, []any) {
 	normalized := service.RequestTypeFromInt16(requestType)
 	requestTypeArg := int16(normalized)
+	requestTypeColumn := string(prefix) + "request_type"
+	streamColumn := string(prefix) + "stream"
+	wsModeColumn := string(prefix) + "openai_ws_mode"
 	switch normalized {
 	case service.RequestTypeSync:
-		return fmt.Sprintf("(request_type = $%d OR (request_type = %d AND stream = FALSE AND openai_ws_mode = FALSE))", startArgIndex, int16(service.RequestTypeUnknown)), []any{requestTypeArg}
+		return fmt.Sprintf("(%s = $%d OR (%s = %d AND %s = FALSE AND %s = FALSE))", requestTypeColumn, startArgIndex, requestTypeColumn, int16(service.RequestTypeUnknown), streamColumn, wsModeColumn), []any{requestTypeArg}
 	case service.RequestTypeStream:
-		return fmt.Sprintf("(request_type = $%d OR (request_type = %d AND stream = TRUE AND openai_ws_mode = FALSE))", startArgIndex, int16(service.RequestTypeUnknown)), []any{requestTypeArg}
+		return fmt.Sprintf("(%s = $%d OR (%s = %d AND %s = TRUE AND %s = FALSE))", requestTypeColumn, startArgIndex, requestTypeColumn, int16(service.RequestTypeUnknown), streamColumn, wsModeColumn), []any{requestTypeArg}
 	case service.RequestTypeWSV2:
-		return fmt.Sprintf("(request_type = $%d OR (request_type = %d AND openai_ws_mode = TRUE))", startArgIndex, int16(service.RequestTypeUnknown)), []any{requestTypeArg}
+		return fmt.Sprintf("(%s = $%d OR (%s = %d AND %s = TRUE))", requestTypeColumn, startArgIndex, requestTypeColumn, int16(service.RequestTypeUnknown), wsModeColumn), []any{requestTypeArg}
 	default:
-		return fmt.Sprintf("request_type = $%d", startArgIndex), []any{requestTypeArg}
+		return fmt.Sprintf("%s = $%d", requestTypeColumn, startArgIndex), []any{requestTypeArg}
 	}
 }
 
