@@ -21,6 +21,16 @@ func init() {
 }
 
 func TestInjectSiteTitle(t *testing.T) {
+	t.Run("escapes_title_end_markup_quotes_and_ampersand", func(t *testing.T) {
+		html := []byte(`<html><head><title>Sub2API</title></head><body></body></html>`)
+		settingsJSON := []byte(`{"site_name":"A&B </title><script>alert(1)</script> \"quoted\""}`)
+
+		result := string(injectSiteTitle(html, settingsJSON))
+
+		assert.Contains(t, result, `<title>A&amp;B &lt;/title&gt;&lt;script&gt;alert(1)&lt;/script&gt; &#34;quoted&#34; - AI API Gateway</title>`)
+		assert.NotContains(t, result, `<script>alert(1)</script>`)
+	})
+
 	t.Run("replaces_title_with_site_name", func(t *testing.T) {
 		html := []byte(`<html><head><title>Sub2API - AI API Gateway</title></head><body></body></html>`)
 		settingsJSON := []byte(`{"site_name":"MyCustomSite"}`)

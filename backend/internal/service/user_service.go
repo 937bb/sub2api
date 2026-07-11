@@ -10,6 +10,7 @@ import (
 	"fmt"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
+	"html"
 	"image"
 	"image/color"
 	stddraw "image/draw"
@@ -1379,5 +1380,5 @@ const notifyVerifyEmailTemplate = `<!DOCTYPE html>
 
 // buildNotifyVerifyEmailBody builds the HTML email body for notify email verification.
 func buildNotifyVerifyEmailBody(code, siteName string) string {
-	return fmt.Sprintf(notifyVerifyEmailTemplate, siteName, code)
+	return fmt.Sprintf(notifyVerifyEmailTemplate, html.EscapeString(siteName), code)
 }
