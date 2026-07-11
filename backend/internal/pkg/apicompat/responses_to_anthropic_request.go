@@ -116,7 +116,7 @@ func convertResponsesInputToAnthropic(inputRaw json.RawMessage) (json.RawMessage
 	var system json.RawMessage
 	var messages []AnthropicMessage
 
-	for _, item := range items {
+	for itemIndex, item := range items {
 		switch {
 		case item.Role == "system":
 			// System prompt → Anthropic system field
@@ -127,9 +127,9 @@ func convertResponsesInputToAnthropic(inputRaw json.RawMessage) (json.RawMessage
 
 		case item.Type == "function_call":
 			// function_call → assistant message with tool_use block
-			input := json.RawMessage("{}")
-			if item.Arguments != "" {
-				input = json.RawMessage(item.Arguments)
+			input, err := functionCallArgumentsObject(item.Arguments)
+			if err != nil {
+				return nil, nil, fmt.Errorf("responses input item %d function_call %q arguments: %w", itemIndex, item.CallID, err)
 			}
 			block := AnthropicContentBlock{
 				Type:  "tool_use",
@@ -202,6 +202,24 @@ func convertResponsesInputToAnthropic(inputRaw json.RawMessage) (json.RawMessage
 	messages = mergeConsecutiveMessages(messages)
 
 	return system, messages, nil
+}
+
+// functionCallArgumentsObject validates the Responses string field before it
+// becomes Anthropic's object-valued tool_use.input. Keep the original bytes so
+// arbitrary nested values pass through without lossy type conversion.
+func functionCallArgumentsObject(arguments string) (json.RawMessage, error) {
+	if arguments == "" {
+		return json.RawMessage("{}"), nil
+	}
+
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(arguments), &object); err != nil {
+		return nil, fmt.Errorf("must be a valid JSON object: %w", err)
+	}
+	if object == nil {
+		return nil, fmt.Errorf("must be a JSON object, got null")
+	}
+	return json.RawMessage(arguments), nil
 }
 
 // normalizeAnthropicToolPairing rebuilds the message sequence so it satisfies
