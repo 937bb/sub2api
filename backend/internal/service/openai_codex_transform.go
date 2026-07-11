@@ -1257,6 +1257,13 @@ func filterCodexInputWithOptions(input []any, opts codexInputFilterOptions) []an
 			copied = true
 		}
 
+		// `namespace` is client-facing Responses metadata. ChatGPT's Codex
+		// request schema rejects it when a prior tool call is replayed.
+		if (typ == "function_call" || typ == "custom_tool_call") && m["namespace"] != nil {
+			ensureCopy()
+			delete(newItem, "namespace")
+		}
+
 		if isCodexToolCallItemType(typ) {
 			callID, ok := m["call_id"].(string)
 			if !ok || strings.TrimSpace(callID) == "" {
