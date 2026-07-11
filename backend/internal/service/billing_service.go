@@ -579,7 +579,10 @@ func (s *BillingService) GetModelPricing(model string) (*ModelPricing, error) {
 		if _, seen := s.fallbackWarnSeen.LoadOrStore(fallbackKey, struct{}{}); !seen {
 			log.Printf("[Billing] Using fallback pricing for model: %s (fallback: %s)", model, fallbackKey)
 		}
-		return s.applyModelSpecificPricingPolicy(model, fallback), nil
+		// fallbackPrices is shared across requests; callers may apply channel
+		// overrides to the returned value.
+		pricing := *fallback
+		return s.applyModelSpecificPricingPolicy(model, &pricing), nil
 	}
 
 	return nil, fmt.Errorf("%w for model: %s", ErrModelPricingUnavailable, model)

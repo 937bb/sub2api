@@ -1053,6 +1053,30 @@ func TestGetModelPricingWithChannel_OverrideInputPriceOnly(t *testing.T) {
 	require.InDelta(t, 15e-6, pricing.OutputPricePerToken, 1e-12)
 }
 
+func TestGetModelPricing_FallbackReturnsOwnedValue(t *testing.T) {
+	svc := newTestBillingService()
+
+	pricing, err := svc.GetModelPricing("claude-sonnet-4")
+	require.NoError(t, err)
+	pricing.InputPricePerToken = 99
+
+	again, err := svc.GetModelPricing("CLAUDE-SONNET-4")
+	require.NoError(t, err)
+	require.InDelta(t, 3e-6, again.InputPricePerToken, 1e-12)
+}
+
+func TestGetModelPricingWithChannel_DoesNotMutateFallback(t *testing.T) {
+	svc := newTestBillingService()
+	override := 99.0
+
+	_, err := svc.GetModelPricingWithChannel("claude-sonnet-4", &ChannelModelPricing{InputPrice: &override})
+	require.NoError(t, err)
+
+	again, err := svc.GetModelPricing("claude-sonnet-4")
+	require.NoError(t, err)
+	require.InDelta(t, 3e-6, again.InputPricePerToken, 1e-12)
+}
+
 func TestGetModelPricingWithChannel_OverrideOutputPriceOnly(t *testing.T) {
 	svc := newTestBillingService()
 
