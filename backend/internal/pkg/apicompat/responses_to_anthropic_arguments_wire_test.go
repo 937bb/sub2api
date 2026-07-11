@@ -68,3 +68,18 @@ func TestResponsesToAnthropicRequest_PreservesNestedFunctionArgumentsOnWire(t *t
 	require.JSONEq(t, arguments, string(decoded.Messages[0].Content[0].Input))
 	require.Contains(t, string(wire), `9007199254740993`)
 }
+
+func TestResponsesToAnthropicRequest_RejectsDuplicateFunctionArgumentKeys(t *testing.T) {
+	for _, arguments := range []string{
+		`{"cmd":"first","cmd":"second"}`,
+		`{"outer":{"value":1,"value":2}}`,
+		`{"name":1,"n\u0061me":2}`,
+		`{"items":[{"id":1,"id":2}]}`,
+	} {
+		t.Run(arguments, func(t *testing.T) {
+			_, err := ResponsesToAnthropicRequest(functionCallRequest(t, arguments))
+			require.ErrorContains(t, err, `responses input item 0 function_call "call_wire" arguments:`)
+			require.ErrorContains(t, err, "duplicate object key")
+		})
+	}
+}

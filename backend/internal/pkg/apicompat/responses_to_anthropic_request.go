@@ -219,7 +219,49 @@ func functionCallArgumentsObject(arguments string) (json.RawMessage, error) {
 	if object == nil {
 		return nil, fmt.Errorf("must be a JSON object, got null")
 	}
+	if err := rejectDuplicateJSONNames(json.NewDecoder(strings.NewReader(arguments))); err != nil {
+		return nil, fmt.Errorf("must be a valid JSON object: %w", err)
+	}
 	return json.RawMessage(arguments), nil
+}
+
+func rejectDuplicateJSONNames(decoder *json.Decoder) error {
+	token, err := decoder.Token()
+	if err != nil {
+		return err
+	}
+
+	delim, isContainer := token.(json.Delim)
+	if !isContainer {
+		return nil
+	}
+	if delim == '[' {
+		for decoder.More() {
+			if err := rejectDuplicateJSONNames(decoder); err != nil {
+				return err
+			}
+		}
+		_, err = decoder.Token()
+		return err
+	}
+
+	seen := make(map[string]struct{})
+	for decoder.More() {
+		nameToken, err := decoder.Token()
+		if err != nil {
+			return err
+		}
+		name := nameToken.(string)
+		if _, exists := seen[name]; exists {
+			return fmt.Errorf("duplicate object key %q", name)
+		}
+		seen[name] = struct{}{}
+		if err := rejectDuplicateJSONNames(decoder); err != nil {
+			return err
+		}
+	}
+	_, err = decoder.Token()
+	return err
 }
 
 // normalizeAnthropicToolPairing rebuilds the message sequence so it satisfies
