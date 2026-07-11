@@ -9010,7 +9010,7 @@ func mergeOpenAICompactTerminalOutput(finalResponse []byte, bodyText string) []b
 	}
 	output := gjson.GetBytes(finalResponse, "output").Array()
 	for _, existing := range output {
-		if existing.Get("type").String() == "compaction" {
+		if isOpenAICompactionOutputType(existing.Get("type").String()) {
 			return finalResponse
 		}
 	}
@@ -9024,7 +9024,7 @@ func mergeOpenAICompactTerminalOutput(finalResponse []byte, bodyText string) []b
 			return
 		}
 		item := gjson.GetBytes(data, "item")
-		if item.IsObject() && item.Get("type").String() == "compaction" {
+		if item.IsObject() && isOpenAICompactionOutputType(item.Get("type").String()) {
 			raw = append([]byte(nil), item.Raw...)
 		}
 	})
@@ -9040,4 +9040,13 @@ func mergeOpenAICompactTerminalOutput(finalResponse []byte, bodyText string) []b
 		return finalResponse
 	}
 	return updated
+}
+
+func isOpenAICompactionOutputType(itemType string) bool {
+	switch strings.TrimSpace(itemType) {
+	case "compaction", "compaction_summary":
+		return true
+	default:
+		return false
+	}
 }

@@ -81,6 +81,16 @@ func TestMergeOpenAICompactTerminalOutput_RecoversRawCompactionItem(t *testing.T
 	require.Equal(t, "opaque", gjson.GetBytes(merged, "output.1.encrypted_content").String())
 }
 
+func TestMergeOpenAICompactTerminalOutput_RecoversCompactionSummaryAlias(t *testing.T) {
+	body := "event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"compaction_summary\",\"encrypted_content\":\"opaque-alias\"}}\n\n" +
+		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"output\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":2,\"total_tokens\":3}}}\n\n"
+	final, ok := extractCodexFinalResponse(body)
+	require.True(t, ok)
+	merged := mergeOpenAICompactTerminalOutput(final, body)
+	require.Equal(t, "compaction_summary", gjson.GetBytes(merged, "output.0.type").String())
+	require.Equal(t, "opaque-alias", gjson.GetBytes(merged, "output.0.encrypted_content").String())
+}
+
 func TestOpenAIGatewayService_APIKeyBodySignalDoesNotBridge(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
