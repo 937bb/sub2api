@@ -693,13 +693,31 @@ func resolveRequestedModelInMapping(mapping map[string]string, requestedModel st
 func (a *Account) IsModelSupported(requestedModel string) bool {
 	mapping := a.GetModelMapping()
 	if len(mapping) == 0 {
+		// Managed OpenAI OAuth forwards to the Codex upstream, whose accepted model
+		// aliases are the same set handled by the canonical Codex normalizer. Keep
+		// APIKey and passthrough accounts fail-open for compatible/custom upstreams.
+		if a.IsOpenAIOAuth() {
+			_, known := normalizeKnownCodexModel(requestedModel)
+			return known
+		}
 		return true // 无映射 = 允许所有
 	}
-	if mappingSupportsRequestedModel(mapping, requestedModel) {
-		return true
+	lookupModel := requestedModel
+	mappedModel, matched := resolveRequestedModelInMapping(mapping, lookupModel)
+	if !matched {
+		lookupModel = normalizeRequestedModelForLookup(a.Platform, requestedModel)
+		if lookupModel != requestedModel {
+			mappedModel, matched = resolveRequestedModelInMapping(mapping, lookupModel)
+		}
 	}
-	normalized := normalizeRequestedModelForLookup(a.Platform, requestedModel)
-	return normalized != requestedModel && mappingSupportsRequestedModel(mapping, normalized)
+	if !matched {
+		return false
+	}
+	if a.IsOpenAIOAuth() {
+		_, known := normalizeKnownCodexModel(mappedModel)
+		return known
+	}
+	return true
 }
 
 // GetMappedModel 获取映射后的模型名（支持通配符，最长优先匹配）
