@@ -12,6 +12,7 @@ import (
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/ent/paymentauditlog"
+	"github.com/Wei-Shaw/sub2api/ent/paymentorder"
 	"github.com/Wei-Shaw/sub2api/internal/payment"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/stretchr/testify/assert"
@@ -686,6 +687,36 @@ func TestFulfillmentLeaseIdenticalStaleSnapshotOnlyOneClaimSucceeds(t *testing.T
 	require.Error(t, err)
 	require.Nil(t, second)
 	require.Equal(t, "CONFLICT", infraerrors.Reason(err))
+}
+
+func TestFulfillmentLeaseLegacyWorkerReclaimRejectsNewWorkerFinalize(t *testing.T) {
+	ctx := context.Background()
+	client := newPaymentConfigServiceTestClient(t)
+	order := createPaymentFulfillmentSubscriptionOrder(t, ctx, client, OrderStatusPaid, time.Now())
+	svc := &PaymentService{entClient: client}
+
+	lease, err := svc.acquirePaymentFulfillmentLease(ctx, order)
+	require.NoError(t, err)
+
+	// A pre-token worker reclaims by updating only the status timestamp. It leaves
+	// the token untouched, so the timestamp must remain part of the final CAS.
+	legacyVersion := lease.version.Add(time.Second)
+	updated, err := client.PaymentOrder.Update().
+		Where(paymentorder.IDEQ(order.ID), paymentorder.StatusEQ(OrderStatusRecharging)).
+		SetUpdatedAt(legacyVersion).
+		Save(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 1, updated)
+
+	err = svc.markCompleted(ctx, order, lease, "SUBSCRIPTION_SUCCESS")
+	require.Error(t, err)
+	require.Equal(t, "CONFLICT", infraerrors.Reason(err))
+	svc.markFailed(ctx, order.ID, lease, errors.New("stale worker"))
+
+	reloaded, err := client.PaymentOrder.Get(ctx, order.ID)
+	require.NoError(t, err)
+	require.Equal(t, OrderStatusRecharging, reloaded.Status)
+	require.Equal(t, legacyVersion, reloaded.UpdatedAt)
 }
 
 func TestFulfillmentLeaseReclaimsLegacyNullTokenAndClearsOnFailure(t *testing.T) {

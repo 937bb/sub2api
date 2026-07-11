@@ -34,7 +34,8 @@ var ErrOrderNotFound = errors.New("payment order not found")
 const paymentFulfillmentLeaseDuration = 5 * time.Minute
 
 type paymentFulfillmentLease struct {
-	token string
+	token   string
+	version time.Time
 }
 
 func newPaymentFulfillmentLeaseToken() (string, error) {
@@ -338,7 +339,7 @@ func (s *PaymentService) acquirePaymentFulfillmentLease(ctx context.Context, o *
 	if claimed.Status != OrderStatusRecharging || claimed.FulfillmentLeaseToken == nil || *claimed.FulfillmentLeaseToken != leaseToken {
 		return nil, infraerrors.Conflict("CONFLICT", "fulfillment lease was lost")
 	}
-	return &paymentFulfillmentLease{token: leaseToken}, nil
+	return &paymentFulfillmentLease{token: leaseToken, version: claimed.UpdatedAt}, nil
 }
 
 // redeemAction represents the idempotency decision for balance fulfillment.
@@ -403,6 +404,7 @@ func (s *PaymentService) markCompleted(ctx context.Context, o *dbent.PaymentOrde
 		paymentorder.IDEQ(o.ID),
 		paymentorder.StatusEQ(OrderStatusRecharging),
 		paymentorder.FulfillmentLeaseTokenEQ(lease.token),
+		paymentorder.UpdatedAtEQ(lease.version),
 	).SetStatus(OrderStatusCompleted).SetCompletedAt(now).ClearFulfillmentLeaseToken().Save(ctx)
 	if err != nil {
 		return fmt.Errorf("mark completed: %w", err)
@@ -908,6 +910,7 @@ func (s *PaymentService) markFailed(ctx context.Context, oid int64, lease *payme
 			paymentorder.IDEQ(oid),
 			paymentorder.StatusEQ(OrderStatusRecharging),
 			paymentorder.FulfillmentLeaseTokenEQ(lease.token),
+			paymentorder.UpdatedAtEQ(lease.version),
 		).
 		SetStatus(OrderStatusFailed).SetFailedAt(now).SetFailedReason(r).ClearFulfillmentLeaseToken().Save(ctx)
 	if e != nil {

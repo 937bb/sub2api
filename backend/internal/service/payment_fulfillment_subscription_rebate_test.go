@@ -427,7 +427,7 @@ func TestSubscriptionPaymentFulfillment_WitnessRepoErrorFailsSafely(t *testing.T
 	order := fixture.createSubscriptionOrder(t, 100, 80)
 	fixture.subRepo.getWitnessError = errors.New("subscription witness lookup failed")
 
-	err := fixture.paymentSvc.doSub(ctx, order, &paymentFulfillmentLease{token: "test-lease-token"})
+	err := fixture.paymentSvc.doSub(ctx, order, &paymentFulfillmentLease{token: "test-lease-token", version: order.UpdatedAt})
 	require.ErrorContains(t, err, "check subscription assignment witness")
 	require.Equal(t, 0, fixture.subRepo.createCalls)
 	require.Equal(t, 0, fixture.affiliateRepo.calls)
