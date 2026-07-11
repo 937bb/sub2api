@@ -500,7 +500,7 @@ func runUpstreamToClient(
 			markActivity()
 			continue
 		}
-		if msgType == coderws.MessageText || msgType == coderws.MessageBinary {
+		if (msgType == coderws.MessageText && observedEvent.eventType == "response.failed") || msgType == coderws.MessageBinary {
 			payload, _ = sanitizeResponseFailedMessageForClient(payload)
 		}
 		if err := writeClient(msgType, payload); err != nil {
