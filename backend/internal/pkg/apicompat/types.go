@@ -254,6 +254,8 @@ type ResponsesTool struct {
 	Description string          `json:"description,omitempty"`
 	Parameters  json.RawMessage `json:"parameters,omitempty"`
 	Strict      *bool           `json:"strict,omitempty"`
+	Tools       []ResponsesTool `json:"tools,omitempty"`
+	Children    []ResponsesTool `json:"children,omitempty"`
 }
 
 // ResponsesResponse is the non-streaming response from POST /v1/responses.
@@ -301,6 +303,7 @@ type ResponsesOutput struct {
 	CallID    string `json:"call_id,omitempty"`
 	Name      string `json:"name,omitempty"`
 	Arguments string `json:"arguments,omitempty"`
+	Namespace string `json:"namespace,omitempty"`
 
 	// type=web_search_call
 	Action *WebSearchAction `json:"action,omitempty"`

@@ -42,7 +42,7 @@ func TestResponseFormatCompatibilityWiredBothDirections(t *testing.T) {
 	require.NotNil(t, chat.Text)
 	assert.Equal(t, `{"type":"json_schema","name":"n","schema":{"n":1e+09}}`, string(chat.Text.Format))
 
-	back, err := ResponsesToChatCompletionsRequest(&ResponsesRequest{Model: "gpt-4o", Input: json.RawMessage(`"json"`), Text: &ResponsesText{Format: chat.Text.Format}})
+	conversion, err := ResponsesToChatCompletionsRequest(&ResponsesRequest{Model: "gpt-4o", Input: json.RawMessage(`"json"`), Text: &ResponsesText{Format: chat.Text.Format}})
 	require.NoError(t, err)
-	assert.Equal(t, `{"type":"json_schema","json_schema":{"name":"n","schema":{"n":1e+09}}}`, string(back.ResponseFormat))
+	assert.Equal(t, `{"type":"json_schema","json_schema":{"name":"n","schema":{"n":1e+09}}}`, string(conversion.Request.ResponseFormat))
 }

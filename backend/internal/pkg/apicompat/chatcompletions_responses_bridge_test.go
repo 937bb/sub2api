@@ -63,8 +63,9 @@ func TestResponsesToChatCompletionsRequest_InstructionsAndInputDeveloperRole(t *
 		]`),
 	}
 
-	out, err := ResponsesToChatCompletionsRequest(req)
+	conversion, err := ResponsesToChatCompletionsRequest(req)
 	require.NoError(t, err)
+	out := conversion.Request
 	require.Len(t, out.Messages, 3)
 
 	assert.Equal(t, []string{"system", "system", "user"}, chatMessageRoles(out.Messages))
@@ -83,8 +84,9 @@ func TestResponsesToChatCompletionsRequest_ParallelToolCalls(t *testing.T) {
 		ParallelToolCalls: &parallel,
 	}
 
-	out, err := ResponsesToChatCompletionsRequest(req)
+	conversion, err := ResponsesToChatCompletionsRequest(req)
 	require.NoError(t, err)
+	out := conversion.Request
 	require.NotNil(t, out.ParallelToolCalls)
 	assert.False(t, *out.ParallelToolCalls)
 

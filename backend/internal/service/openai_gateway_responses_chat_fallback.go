@@ -78,7 +78,7 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 	reasoningEffort := ApplyThinkingEnabledFallback(extractOpenAIReasoningEffortFromBody(body, originalModel, billingModel, upstreamModel), body, billingModel)
 	serviceTier := extractOpenAIServiceTierFromBody(body)
 
-	chatReq, err := apicompat.ResponsesToChatCompletionsRequest(&responsesReq)
+	conversion, err := apicompat.ResponsesToChatCompletionsRequest(&responsesReq)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": gin.H{
@@ -88,6 +88,8 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 		})
 		return nil, fmt.Errorf("convert responses to chat completions: %w", err)
 	}
+	chatReq := conversion.Request
+	namespaceTools := conversion.NamespaceTools
 
 	chatReq.Model = upstreamModel
 	if clientStream {
@@ -205,9 +207,9 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 	}
 
 	if clientStream {
-		return s.streamChatCompletionsAsResponses(c, resp, originalModel, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime)
+		return s.streamChatCompletionsAsResponses(c, resp, originalModel, billingModel, upstreamModel, reasoningEffort, serviceTier, namespaceTools, startTime)
 	}
-	return s.bufferChatCompletionsAsResponses(c, resp, originalModel, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime)
+	return s.bufferChatCompletionsAsResponses(c, resp, originalModel, billingModel, upstreamModel, reasoningEffort, serviceTier, namespaceTools, startTime)
 }
 
 func (s *OpenAIGatewayService) bufferChatCompletionsAsResponses(
@@ -218,6 +220,7 @@ func (s *OpenAIGatewayService) bufferChatCompletionsAsResponses(
 	upstreamModel string,
 	reasoningEffort *string,
 	serviceTier *string,
+	namespaceTools map[string]apicompat.NamespacedToolName,
 	startTime time.Time,
 ) (*OpenAIForwardResult, error) {
 	requestID := resp.Header.Get("x-request-id")
@@ -244,7 +247,7 @@ func (s *OpenAIGatewayService) bufferChatCompletionsAsResponses(
 		})
 		return nil, fmt.Errorf("parse chat completions response: %w", err)
 	}
-	responsesResp := apicompat.ChatCompletionsResponseToResponses(&ccResp, originalModel)
+	responsesResp := apicompat.ChatCompletionsResponseToResponsesWithNamespace(&ccResp, originalModel, namespaceTools)
 
 	usage := OpenAIUsage{}
 	if parsed, ok := extractOpenAIUsageFromJSONBytes(respBody); ok {
@@ -278,6 +281,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 	upstreamModel string,
 	reasoningEffort *string,
 	serviceTier *string,
+	namespaceTools map[string]apicompat.NamespacedToolName,
 	startTime time.Time,
 ) (*OpenAIForwardResult, error) {
 	requestID := resp.Header.Get("x-request-id")
@@ -298,6 +302,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 	}
 
 	state := apicompat.NewChatCompletionsToResponsesStreamState(originalModel)
+	state.NamespaceTools = namespaceTools
 	var usage OpenAIUsage
 	var firstTokenMs *int
 	clientDisconnected := false
