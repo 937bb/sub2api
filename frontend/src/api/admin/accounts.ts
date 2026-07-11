@@ -586,7 +586,9 @@ export async function syncFromCrs(params: {
       action: string
       error?: string
     }>
-  }>('/admin/accounts/sync/crs', params)
+  }>('/admin/accounts/sync/crs', params, {
+    timeout: 180000
+  })
   return data
 }
 
