@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"compress/zlib"
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
@@ -139,5 +140,68 @@ func TestReadRequestBodyWithPrealloc_RespectsIdentityEncoding(t *testing.T) {
 	}
 	if string(got) != samplePayload {
 		t.Fatalf("body mismatch: got %q", got)
+	}
+}
+
+func TestDecompressRequestBody_RejectsDecodedBodyOverLimit(t *testing.T) {
+	payload := bytes.Repeat([]byte{'a'}, maxDecompressedBodySize+1)
+
+	tests := []struct {
+		name     string
+		encoding string
+		compress func(*testing.T, []byte) []byte
+	}{
+		{
+			name: "gzip", encoding: "gzip",
+			compress: func(t *testing.T, src []byte) []byte {
+				var buf bytes.Buffer
+				w := gzip.NewWriter(&buf)
+				if _, err := w.Write(src); err != nil {
+					t.Fatal(err)
+				}
+				if err := w.Close(); err != nil {
+					t.Fatal(err)
+				}
+				return buf.Bytes()
+			},
+		},
+		{
+			name: "deflate", encoding: "deflate",
+			compress: func(t *testing.T, src []byte) []byte {
+				var buf bytes.Buffer
+				w := zlib.NewWriter(&buf)
+				if _, err := w.Write(src); err != nil {
+					t.Fatal(err)
+				}
+				if err := w.Close(); err != nil {
+					t.Fatal(err)
+				}
+				return buf.Bytes()
+			},
+		},
+		{
+			name: "zstd", encoding: "zstd",
+			compress: func(t *testing.T, src []byte) []byte {
+				w, err := zstd.NewWriter(nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer w.Close()
+				return w.EncodeAll(src, nil)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := decompressRequestBody(tt.encoding, tt.compress(t, payload))
+			var maxErr *http.MaxBytesError
+			if !errors.As(err, &maxErr) {
+				t.Fatalf("expected MaxBytesError, got %T %v", err, err)
+			}
+			if maxErr.Limit != maxDecompressedBodySize {
+				t.Fatalf("limit = %d, want %d", maxErr.Limit, maxDecompressedBodySize)
+			}
+		})
 	}
 }
