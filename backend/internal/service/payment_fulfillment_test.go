@@ -636,7 +636,7 @@ func TestAlreadyProcessedRecoversStaleRechargingLease(t *testing.T) {
 	require.Equal(t, OrderStatusCompleted, reloaded.Status)
 }
 
-func TestFulfillmentLeaseVersionRejectsStaleWorker(t *testing.T) {
+func TestFulfillmentLeaseTokenRotationRejectsStaleFinalizeAndFail(t *testing.T) {
 	ctx := context.Background()
 	client := newPaymentConfigServiceTestClient(t)
 	staleAt := time.Now().Add(-paymentFulfillmentLeaseDuration - time.Minute)
@@ -655,7 +655,7 @@ func TestFulfillmentLeaseVersionRejectsStaleWorker(t *testing.T) {
 	secondLease, err := svc.acquirePaymentFulfillmentLease(ctx, staleOrder)
 	require.NoError(t, err)
 	require.NotNil(t, secondLease)
-	require.False(t, firstLease.version.Equal(secondLease.version))
+	require.NotEqual(t, firstLease.token, secondLease.token)
 
 	err = svc.markCompleted(ctx, order, firstLease, "SUBSCRIPTION_SUCCESS")
 	require.Error(t, err)
@@ -666,6 +666,48 @@ func TestFulfillmentLeaseVersionRejectsStaleWorker(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, OrderStatusRecharging, reloaded.Status)
 	require.NoError(t, svc.markCompleted(ctx, order, secondLease, "SUBSCRIPTION_SUCCESS"))
+	reloaded, err = client.PaymentOrder.Get(ctx, order.ID)
+	require.NoError(t, err)
+	require.Nil(t, reloaded.FulfillmentLeaseToken)
+}
+
+func TestFulfillmentLeaseIdenticalStaleSnapshotOnlyOneClaimSucceeds(t *testing.T) {
+	ctx := context.Background()
+	client := newPaymentConfigServiceTestClient(t)
+	staleAt := time.Now().Add(-paymentFulfillmentLeaseDuration - time.Minute)
+	order := createPaymentFulfillmentSubscriptionOrder(t, ctx, client, OrderStatusRecharging, staleAt)
+	svc := &PaymentService{entClient: client}
+
+	first, err := svc.acquirePaymentFulfillmentLease(ctx, order)
+	require.NoError(t, err)
+	require.NotEmpty(t, first.token)
+
+	second, err := svc.acquirePaymentFulfillmentLease(ctx, order)
+	require.Error(t, err)
+	require.Nil(t, second)
+	require.Equal(t, "CONFLICT", infraerrors.Reason(err))
+}
+
+func TestFulfillmentLeaseReclaimsLegacyNullTokenAndClearsOnFailure(t *testing.T) {
+	ctx := context.Background()
+	client := newPaymentConfigServiceTestClient(t)
+	staleAt := time.Now().Add(-paymentFulfillmentLeaseDuration - time.Minute)
+	order := createPaymentFulfillmentSubscriptionOrder(t, ctx, client, OrderStatusRecharging, staleAt)
+	require.Nil(t, order.FulfillmentLeaseToken)
+	svc := &PaymentService{entClient: client}
+
+	lease, err := svc.acquirePaymentFulfillmentLease(ctx, order)
+	require.NoError(t, err)
+	require.Len(t, lease.token, 64)
+	claimed, err := client.PaymentOrder.Get(ctx, order.ID)
+	require.NoError(t, err)
+	require.Equal(t, lease.token, *claimed.FulfillmentLeaseToken)
+
+	svc.markFailed(ctx, order.ID, lease, errors.New("fulfillment failed"))
+	failed, err := client.PaymentOrder.Get(ctx, order.ID)
+	require.NoError(t, err)
+	require.Equal(t, OrderStatusFailed, failed.Status)
+	require.Nil(t, failed.FulfillmentLeaseToken)
 }
 
 func TestExecuteBalanceFulfillmentRecoversAfterRedeemWithoutCreditingAgain(t *testing.T) {

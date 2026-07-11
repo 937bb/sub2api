@@ -431,6 +431,26 @@ func (_u *PaymentOrderUpdate) SetNillableStatus(v *string) *PaymentOrderUpdate {
 	return _u
 }
 
+// SetFulfillmentLeaseToken sets the "fulfillment_lease_token" field.
+func (_u *PaymentOrderUpdate) SetFulfillmentLeaseToken(v string) *PaymentOrderUpdate {
+	_u.mutation.SetFulfillmentLeaseToken(v)
+	return _u
+}
+
+// SetNillableFulfillmentLeaseToken sets the "fulfillment_lease_token" field if the given value is not nil.
+func (_u *PaymentOrderUpdate) SetNillableFulfillmentLeaseToken(v *string) *PaymentOrderUpdate {
+	if v != nil {
+		_u.SetFulfillmentLeaseToken(*v)
+	}
+	return _u
+}
+
+// ClearFulfillmentLeaseToken clears the value of the "fulfillment_lease_token" field.
+func (_u *PaymentOrderUpdate) ClearFulfillmentLeaseToken() *PaymentOrderUpdate {
+	_u.mutation.ClearFulfillmentLeaseToken()
+	return _u
+}
+
 // SetRefundAmount sets the "refund_amount" field.
 func (_u *PaymentOrderUpdate) SetRefundAmount(v float64) *PaymentOrderUpdate {
 	_u.mutation.ResetRefundAmount()
@@ -818,6 +838,11 @@ func (_u *PaymentOrderUpdate) check() error {
 			return &ValidationError{Name: "status", err: fmt.Errorf(`ent: validator failed for field "PaymentOrder.status": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.FulfillmentLeaseToken(); ok {
+		if err := paymentorder.FulfillmentLeaseTokenValidator(v); err != nil {
+			return &ValidationError{Name: "fulfillment_lease_token", err: fmt.Errorf(`ent: validator failed for field "PaymentOrder.fulfillment_lease_token": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.RefundRequestedBy(); ok {
 		if err := paymentorder.RefundRequestedByValidator(v); err != nil {
 			return &ValidationError{Name: "refund_requested_by", err: fmt.Errorf(`ent: validator failed for field "PaymentOrder.refund_requested_by": %w`, err)}
@@ -961,6 +986,12 @@ func (_u *PaymentOrderUpdate) sqlSave(ctx context.Context) (_node int, err error
 	}
 	if value, ok := _u.mutation.Status(); ok {
 		_spec.SetField(paymentorder.FieldStatus, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.FulfillmentLeaseToken(); ok {
+		_spec.SetField(paymentorder.FieldFulfillmentLeaseToken, field.TypeString, value)
+	}
+	if _u.mutation.FulfillmentLeaseTokenCleared() {
+		_spec.ClearField(paymentorder.FieldFulfillmentLeaseToken, field.TypeString)
 	}
 	if value, ok := _u.mutation.RefundAmount(); ok {
 		_spec.SetField(paymentorder.FieldRefundAmount, field.TypeFloat64, value)
@@ -1494,6 +1525,26 @@ func (_u *PaymentOrderUpdateOne) SetNillableStatus(v *string) *PaymentOrderUpdat
 	return _u
 }
 
+// SetFulfillmentLeaseToken sets the "fulfillment_lease_token" field.
+func (_u *PaymentOrderUpdateOne) SetFulfillmentLeaseToken(v string) *PaymentOrderUpdateOne {
+	_u.mutation.SetFulfillmentLeaseToken(v)
+	return _u
+}
+
+// SetNillableFulfillmentLeaseToken sets the "fulfillment_lease_token" field if the given value is not nil.
+func (_u *PaymentOrderUpdateOne) SetNillableFulfillmentLeaseToken(v *string) *PaymentOrderUpdateOne {
+	if v != nil {
+		_u.SetFulfillmentLeaseToken(*v)
+	}
+	return _u
+}
+
+// ClearFulfillmentLeaseToken clears the value of the "fulfillment_lease_token" field.
+func (_u *PaymentOrderUpdateOne) ClearFulfillmentLeaseToken() *PaymentOrderUpdateOne {
+	_u.mutation.ClearFulfillmentLeaseToken()
+	return _u
+}
+
 // SetRefundAmount sets the "refund_amount" field.
 func (_u *PaymentOrderUpdateOne) SetRefundAmount(v float64) *PaymentOrderUpdateOne {
 	_u.mutation.ResetRefundAmount()
@@ -1894,6 +1945,11 @@ func (_u *PaymentOrderUpdateOne) check() error {
 			return &ValidationError{Name: "status", err: fmt.Errorf(`ent: validator failed for field "PaymentOrder.status": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.FulfillmentLeaseToken(); ok {
+		if err := paymentorder.FulfillmentLeaseTokenValidator(v); err != nil {
+			return &ValidationError{Name: "fulfillment_lease_token", err: fmt.Errorf(`ent: validator failed for field "PaymentOrder.fulfillment_lease_token": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.RefundRequestedBy(); ok {
 		if err := paymentorder.RefundRequestedByValidator(v); err != nil {
 			return &ValidationError{Name: "refund_requested_by", err: fmt.Errorf(`ent: validator failed for field "PaymentOrder.refund_requested_by": %w`, err)}
@@ -2054,6 +2110,12 @@ func (_u *PaymentOrderUpdateOne) sqlSave(ctx context.Context) (_node *PaymentOrd
 	}
 	if value, ok := _u.mutation.Status(); ok {
 		_spec.SetField(paymentorder.FieldStatus, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.FulfillmentLeaseToken(); ok {
+		_spec.SetField(paymentorder.FieldFulfillmentLeaseToken, field.TypeString, value)
+	}
+	if _u.mutation.FulfillmentLeaseTokenCleared() {
+		_spec.ClearField(paymentorder.FieldFulfillmentLeaseToken, field.TypeString)
 	}
 	if value, ok := _u.mutation.RefundAmount(); ok {
 		_spec.SetField(paymentorder.FieldRefundAmount, field.TypeFloat64, value)

@@ -58,6 +58,8 @@ const (
 	FieldProviderSnapshot = "provider_snapshot"
 	// FieldStatus holds the string denoting the status field in the database.
 	FieldStatus = "status"
+	// FieldFulfillmentLeaseToken holds the string denoting the fulfillment_lease_token field in the database.
+	FieldFulfillmentLeaseToken = "fulfillment_lease_token"
 	// FieldRefundAmount holds the string denoting the refund_amount field in the database.
 	FieldRefundAmount = "refund_amount"
 	// FieldRefundReason holds the string denoting the refund_reason field in the database.
@@ -130,6 +132,7 @@ var Columns = []string{
 	FieldProviderKey,
 	FieldProviderSnapshot,
 	FieldStatus,
+	FieldFulfillmentLeaseToken,
 	FieldRefundAmount,
 	FieldRefundReason,
 	FieldRefundAt,
@@ -188,6 +191,8 @@ var (
 	DefaultStatus string
 	// StatusValidator is a validator for the "status" field. It is called by the builders before save.
 	StatusValidator func(string) error
+	// FulfillmentLeaseTokenValidator is a validator for the "fulfillment_lease_token" field. It is called by the builders before save.
+	FulfillmentLeaseTokenValidator func(string) error
 	// DefaultRefundAmount holds the default value on creation for the "refund_amount" field.
 	DefaultRefundAmount float64
 	// DefaultForceRefund holds the default value on creation for the "force_refund" field.
@@ -317,6 +322,11 @@ func ByProviderKey(opts ...sql.OrderTermOption) OrderOption {
 // ByStatus orders the results by the status field.
 func ByStatus(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldStatus, opts...).ToFunc()
+}
+
+// ByFulfillmentLeaseToken orders the results by the fulfillment_lease_token field.
+func ByFulfillmentLeaseToken(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldFulfillmentLeaseToken, opts...).ToFunc()
 }
 
 // ByRefundAmount orders the results by the refund_amount field.

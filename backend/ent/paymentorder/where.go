@@ -160,6 +160,11 @@ func Status(v string) predicate.PaymentOrder {
 	return predicate.PaymentOrder(sql.FieldEQ(FieldStatus, v))
 }
 
+// FulfillmentLeaseToken applies equality check predicate on the "fulfillment_lease_token" field. It's identical to FulfillmentLeaseTokenEQ.
+func FulfillmentLeaseToken(v string) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldEQ(FieldFulfillmentLeaseToken, v))
+}
+
 // RefundAmount applies equality check predicate on the "refund_amount" field. It's identical to RefundAmountEQ.
 func RefundAmount(v float64) predicate.PaymentOrder {
 	return predicate.PaymentOrder(sql.FieldEQ(FieldRefundAmount, v))
@@ -1513,6 +1518,81 @@ func StatusEqualFold(v string) predicate.PaymentOrder {
 // StatusContainsFold applies the ContainsFold predicate on the "status" field.
 func StatusContainsFold(v string) predicate.PaymentOrder {
 	return predicate.PaymentOrder(sql.FieldContainsFold(FieldStatus, v))
+}
+
+// FulfillmentLeaseTokenEQ applies the EQ predicate on the "fulfillment_lease_token" field.
+func FulfillmentLeaseTokenEQ(v string) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldEQ(FieldFulfillmentLeaseToken, v))
+}
+
+// FulfillmentLeaseTokenNEQ applies the NEQ predicate on the "fulfillment_lease_token" field.
+func FulfillmentLeaseTokenNEQ(v string) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldNEQ(FieldFulfillmentLeaseToken, v))
+}
+
+// FulfillmentLeaseTokenIn applies the In predicate on the "fulfillment_lease_token" field.
+func FulfillmentLeaseTokenIn(vs ...string) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldIn(FieldFulfillmentLeaseToken, vs...))
+}
+
+// FulfillmentLeaseTokenNotIn applies the NotIn predicate on the "fulfillment_lease_token" field.
+func FulfillmentLeaseTokenNotIn(vs ...string) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldNotIn(FieldFulfillmentLeaseToken, vs...))
+}
+
+// FulfillmentLeaseTokenGT applies the GT predicate on the "fulfillment_lease_token" field.
+func FulfillmentLeaseTokenGT(v string) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldGT(FieldFulfillmentLeaseToken, v))
+}
+
+// FulfillmentLeaseTokenGTE applies the GTE predicate on the "fulfillment_lease_token" field.
+func FulfillmentLeaseTokenGTE(v string) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldGTE(FieldFulfillmentLeaseToken, v))
+}
+
+// FulfillmentLeaseTokenLT applies the LT predicate on the "fulfillment_lease_token" field.
+func FulfillmentLeaseTokenLT(v string) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldLT(FieldFulfillmentLeaseToken, v))
+}
+
+// FulfillmentLeaseTokenLTE applies the LTE predicate on the "fulfillment_lease_token" field.
+func FulfillmentLeaseTokenLTE(v string) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldLTE(FieldFulfillmentLeaseToken, v))
+}
+
+// FulfillmentLeaseTokenContains applies the Contains predicate on the "fulfillment_lease_token" field.
+func FulfillmentLeaseTokenContains(v string) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldContains(FieldFulfillmentLeaseToken, v))
+}
+
+// FulfillmentLeaseTokenHasPrefix applies the HasPrefix predicate on the "fulfillment_lease_token" field.
+func FulfillmentLeaseTokenHasPrefix(v string) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldHasPrefix(FieldFulfillmentLeaseToken, v))
+}
+
+// FulfillmentLeaseTokenHasSuffix applies the HasSuffix predicate on the "fulfillment_lease_token" field.
+func FulfillmentLeaseTokenHasSuffix(v string) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldHasSuffix(FieldFulfillmentLeaseToken, v))
+}
+
+// FulfillmentLeaseTokenIsNil applies the IsNil predicate on the "fulfillment_lease_token" field.
+func FulfillmentLeaseTokenIsNil() predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldIsNull(FieldFulfillmentLeaseToken))
+}
+
+// FulfillmentLeaseTokenNotNil applies the NotNil predicate on the "fulfillment_lease_token" field.
+func FulfillmentLeaseTokenNotNil() predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldNotNull(FieldFulfillmentLeaseToken))
+}
+
+// FulfillmentLeaseTokenEqualFold applies the EqualFold predicate on the "fulfillment_lease_token" field.
+func FulfillmentLeaseTokenEqualFold(v string) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldEqualFold(FieldFulfillmentLeaseToken, v))
+}
+
+// FulfillmentLeaseTokenContainsFold applies the ContainsFold predicate on the "fulfillment_lease_token" field.
+func FulfillmentLeaseTokenContainsFold(v string) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldContainsFold(FieldFulfillmentLeaseToken, v))
 }
 
 // RefundAmountEQ applies the EQ predicate on the "refund_amount" field.
