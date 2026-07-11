@@ -19,7 +19,7 @@ func TestDescribeInvalidJSON_TruncatedBody(t *testing.T) {
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), fmt.Sprintf("len=%d", len(body)))
-	require.Contains(t, err.Error(), "category=syntax")
+	require.Contains(t, err.Error(), "category=validation")
 	require.NotContains(t, err.Error(), "unexpected end of JSON input")
 }
 
@@ -29,8 +29,8 @@ func TestDescribeInvalidJSON_InvalidCharacterWithOffset(t *testing.T) {
 	err := DescribeInvalidJSON(body)
 
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "offset=11")
-	require.Contains(t, err.Error(), "category=syntax")
+	require.NotContains(t, err.Error(), "offset=")
+	require.Contains(t, err.Error(), "category=validation")
 	require.NotContains(t, err.Error(), "invalid character")
 }
 

@@ -43,8 +43,8 @@ func TestLogRequestBodyParseFailure_DerivesErrorWhenNil(t *testing.T) {
 
 	fields := loggedFields(t, logs)
 	require.Equal(t, len(body), fields["body_len"])
-	require.Equal(t, service.InvalidJSONCategorySyntax, fields["json_error_category"])
-	require.Equal(t, int64(11), fields["json_error_offset"])
+	require.Equal(t, service.InvalidJSONCategoryValidation, fields["json_error_category"])
+	require.NotContains(t, fields, "json_error_offset")
 }
 
 func TestLogRequestBodyParseFailure_NoBodyBytesOrParserText(t *testing.T) {

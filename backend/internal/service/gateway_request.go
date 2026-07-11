@@ -3,7 +3,6 @@ package service
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"math"
 	"regexp"
@@ -19,10 +18,7 @@ import (
 )
 
 const (
-	InvalidJSONCategorySyntax   = "syntax"
-	InvalidJSONCategoryType     = "type"
-	InvalidJSONCategoryUnknown  = "unknown"
-	InvalidJSONCategoryDiverged = "validator_divergence"
+	InvalidJSONCategoryValidation = "validation"
 )
 
 var (
@@ -245,25 +241,10 @@ func DescribeInvalidJSON(body []byte) error {
 }
 
 func NewInvalidJSONDiagnostic(body []byte) InvalidJSONDiagnostic {
-	diag := InvalidJSONDiagnostic{
+	return InvalidJSONDiagnostic{
 		Length:   len(body),
-		Category: InvalidJSONCategoryUnknown,
+		Category: InvalidJSONCategoryValidation,
 	}
-	var raw json.RawMessage
-	if err := json.Unmarshal(body, &raw); err != nil {
-		var syntaxErr *json.SyntaxError
-		if errors.As(err, &syntaxErr) {
-			diag.Offset = syntaxErr.Offset
-			diag.Category = InvalidJSONCategorySyntax
-			return diag
-		}
-		diag.Category = InvalidJSONCategoryType
-		return diag
-	}
-	// gjson rejected the body but encoding/json accepted it (divergent edge
-	// cases, e.g. certain malformed UTF-8 sequences); report the basics.
-	diag.Category = InvalidJSONCategoryDiverged
-	return diag
 }
 
 // ParsedRequest 保存网关请求的预解析结果
