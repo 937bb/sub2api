@@ -34,7 +34,15 @@ func TestNormalizeInboundEndpoint(t *testing.T) {
 		// Prefixed paths (antigravity, openai).
 		{"/antigravity/v1/messages", EndpointMessages},
 		{"/openai/v1/responses", EndpointResponses},
-		{"/openai/v1/responses/compact", EndpointResponses},
+		{"/openai/v1/responses/compact", EndpointResponsesCompact},
+		{"/responses", EndpointResponses},
+		{"/responses/compact", EndpointResponsesCompact},
+		{"/responses/compact/", EndpointResponsesCompact},
+		{"/responses/compact?stream=false", EndpointResponsesCompact},
+		{"/backend-api/codex/responses/compact/detail", EndpointResponsesCompact},
+		{"/backend-api/codex/responses", EndpointResponses},
+		{"/prefix/v1/messages/later/v1/responses/compact", EndpointMessages},
+		{"/responses/compact/later/responses/foo", EndpointResponsesCompact},
 		{"/openai/v1/images/generations", EndpointImagesGenerations},
 		{"/openai/v1/images/edits", EndpointImagesEdits},
 		{"/antigravity/v1beta/models/gemini:generateContent", EndpointGeminiModels},
@@ -42,7 +50,15 @@ func TestNormalizeInboundEndpoint(t *testing.T) {
 		// Gin route patterns with wildcards.
 		{"/v1beta/models/*modelAction", EndpointGeminiModels},
 		{"/v1/responses/*subpath", EndpointResponses},
-		{"/v1/responses/compact/v1/messages", EndpointResponses},
+		{"/v1/responses/compact/v1/messages", EndpointResponsesCompact},
+
+		// Endpoint-like substrings are not endpoint segments.
+		{"/v1/responses/compactness", EndpointResponses},
+		{"/v1/responses/compact-old", EndpointResponses},
+		{"/v1/responses-old", "/v1/responses-old"},
+		{"/v1/responsesX", "/v1/responsesX"},
+		{"/prefix/v1/responses-old/v1/messages", EndpointMessages},
+		{"/prefix/responsesX/v1/responses/compact", EndpointResponsesCompact},
 
 		// Unknown path is returned as-is.
 		{"/v1/embeddings", "/v1/embeddings"},
@@ -76,9 +92,14 @@ func TestDeriveUpstreamEndpoint(t *testing.T) {
 
 		// OpenAI — always /v1/responses.
 		{"openai responses root", EndpointResponses, "/v1/responses", service.PlatformOpenAI, EndpointResponses},
+		{"openai responses alias root", EndpointResponses, "/responses/", service.PlatformOpenAI, EndpointResponses},
 		{"openai responses compact", EndpointResponses, "/openai/v1/responses/compact", service.PlatformOpenAI, "/v1/responses/compact"},
+		{"openai compact canonical inbound", EndpointResponsesCompact, "/responses/compact/", service.PlatformOpenAI, EndpointResponsesCompact},
 		{"openai responses nested", EndpointResponses, "/openai/v1/responses/compact/detail", service.PlatformOpenAI, "/v1/responses/compact/detail"},
+		{"openai repeated responses uses normalized occurrence", EndpointResponsesCompact, "/responses/compact/later/responses/foo", service.PlatformOpenAI, "/v1/responses/compact/later/responses/foo"},
+		{"openai skips invalid response occurrence", EndpointResponsesCompact, "/responses-old/later/responses/compact", service.PlatformOpenAI, EndpointResponsesCompact},
 		{"openai from messages", EndpointMessages, "/v1/messages", service.PlatformOpenAI, EndpointResponses},
+		{"openai from messages ignores later responses", EndpointMessages, "/v1/messages/later/responses/compact", service.PlatformOpenAI, EndpointResponses},
 		{"openai from completions", EndpointChatCompletions, "/v1/chat/completions", service.PlatformOpenAI, EndpointResponses},
 		{"openai embeddings", EndpointEmbeddings, "/v1/embeddings", service.PlatformOpenAI, EndpointEmbeddings},
 		{"openai image generations", EndpointImagesGenerations, "/v1/images/generations", service.PlatformOpenAI, EndpointImagesGenerations},
@@ -111,6 +132,11 @@ func TestResponsesSubpathSuffix(t *testing.T) {
 		{"/v1/responses/", ""},
 		{"/v1/responses/compact", "/compact"},
 		{"/openai/v1/responses/compact/detail", "/compact/detail"},
+		{"/responses/compact/later/responses/foo", "/compact/later/responses/foo"},
+		{"/responses-old/later/responses/compact", "/compact"},
+		{"/responsesX/later/responses/foo", "/foo"},
+		{"/responses-old", ""},
+		{"/responsesX", ""},
 		{"/v1/messages", ""},
 		{"", ""},
 	}
@@ -170,7 +196,7 @@ func TestInboundEndpointMiddleware_WildcardRouteUsesRawRequestPath(t *testing.T)
 	router.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusOK, rec.Code)
-	require.Equal(t, EndpointResponses, inbound)
+	require.Equal(t, EndpointResponsesCompact, inbound)
 	require.Equal(t, "/v1/responses/compact", upstream)
 }
 
@@ -191,7 +217,7 @@ func TestGetInboundEndpoint_FallbackWildcardRouteUsesRawRequestPath(t *testing.T
 	router.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusOK, rec.Code)
-	require.Equal(t, EndpointResponses, inbound)
+	require.Equal(t, EndpointResponsesCompact, inbound)
 	require.Equal(t, "/v1/responses/compact", upstream)
 }
 

@@ -19,6 +19,7 @@ const (
 	EndpointChatCompletions   = "/v1/chat/completions"
 	EndpointEmbeddings        = "/v1/embeddings"
 	EndpointResponses         = "/v1/responses"
+	EndpointResponsesCompact  = "/v1/responses/compact"
 	EndpointImagesGenerations = "/v1/images/generations"
 	EndpointImagesEdits       = "/v1/images/edits"
 	EndpointGeminiModels      = "/v1beta/models"
@@ -56,6 +57,14 @@ func NormalizeInboundEndpoint(path string) string {
 		}
 	}
 
+	considerBoundary := func(endpoint, pattern string) {
+		idx := endpointIndex(path, pattern)
+		if idx >= 0 && idx < bestIndex {
+			bestEndpoint = endpoint
+			bestIndex = idx
+		}
+	}
+
 	consider(EndpointEmbeddings, EndpointEmbeddings)
 	consider(EndpointChatCompletions, EndpointChatCompletions)
 	consider(EndpointMessages, EndpointMessages)
@@ -63,13 +72,35 @@ func NormalizeInboundEndpoint(path string) string {
 	consider(EndpointImagesGenerations, "/images/generations")
 	consider(EndpointImagesEdits, EndpointImagesEdits)
 	consider(EndpointImagesEdits, "/images/edits")
-	consider(EndpointResponses, EndpointResponses)
+	considerBoundary(EndpointResponsesCompact, EndpointResponsesCompact)
+	considerBoundary(EndpointResponsesCompact, "/responses/compact")
+	considerBoundary(EndpointResponsesCompact, "/backend-api/codex/responses/compact")
+	considerBoundary(EndpointResponses, EndpointResponses)
+	considerBoundary(EndpointResponses, "/responses")
+	considerBoundary(EndpointResponses, "/backend-api/codex/responses")
 	consider(EndpointGeminiModels, EndpointGeminiModels)
 
 	if bestEndpoint != "" {
 		return bestEndpoint
 	}
 	return path
+}
+
+func endpointIndex(path, endpoint string) int {
+	searchFrom := 0
+	for searchFrom < len(path) {
+		idx := strings.Index(path[searchFrom:], endpoint)
+		if idx < 0 {
+			return -1
+		}
+		idx += searchFrom
+		next := idx + len(endpoint)
+		if next == len(path) || strings.ContainsRune("/?#", rune(path[next])) {
+			return idx
+		}
+		searchFrom = idx + 1
+	}
+	return -1
 }
 
 // DeriveUpstreamEndpoint determines the upstream endpoint from the
@@ -93,8 +124,13 @@ func DeriveUpstreamEndpoint(inbound, rawRequestPath, platform string) string {
 		}
 		// OpenAI forwards everything to the Responses API.
 		// Preserve subresource suffix (e.g. /v1/responses/compact).
-		if suffix := responsesSubpathSuffix(rawRequestPath); suffix != "" {
-			return EndpointResponses + suffix
+		if inbound == EndpointResponses || inbound == EndpointResponsesCompact {
+			if suffix := responsesSubpathSuffix(rawRequestPath); suffix != "" {
+				return EndpointResponses + suffix
+			}
+			if inbound == EndpointResponsesCompact {
+				return EndpointResponsesCompact
+			}
 		}
 		return EndpointResponses
 
@@ -121,7 +157,7 @@ func DeriveUpstreamEndpoint(inbound, rawRequestPath, platform string) string {
 // Returns "" when there is no meaningful suffix.
 func responsesSubpathSuffix(rawPath string) string {
 	trimmed := strings.TrimRight(strings.TrimSpace(rawPath), "/")
-	idx := strings.LastIndex(trimmed, "/responses")
+	idx := endpointIndex(trimmed, "/responses")
 	if idx < 0 {
 		return ""
 	}
