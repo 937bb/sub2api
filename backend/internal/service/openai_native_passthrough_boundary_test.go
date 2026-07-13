@@ -46,6 +46,34 @@ func TestOpenAIGatewayService_NativeOpenAIHTTPRelayRejectsOAuth(t *testing.T) {
 	require.Contains(t, err.Error(), "requires APIKey account")
 }
 
+func TestOpenAIGatewayService_NativeCompactPassthroughUsesMappedBillingModel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/compact", nil)
+
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"id":"resp_compact","usage":{"input_tokens":3,"output_tokens":2}}`)),
+	}}
+	svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+	account := &Account{
+		ID: 8, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key": "sk-test", "base_url": "https://example.com",
+			"compact_model_mapping": map[string]any{"billing-alias": "gpt-5.4-high"},
+		},
+	}
+
+	result, err := svc.forwardOpenAIPassthrough(context.Background(), c, account, []byte(`{"model":"billing-alias","input":"hi"}`), "billing-alias", nil, false, time.Now())
+	require.NoError(t, err)
+	require.Equal(t, "billing-alias", result.Model)
+	require.Equal(t, "gpt-5.4-high", result.BillingModel)
+	require.Equal(t, "gpt-5.4-high", result.UpstreamModel)
+	require.Equal(t, "gpt-5.4-high", gjson.GetBytes(upstream.lastBody, "model").String())
+}
+
 func TestOpenAIGatewayService_OAuthHTTPResidualLegacyConfigUsesAdapter(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()

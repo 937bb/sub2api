@@ -3475,6 +3475,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	}
 
 	sendAndRelay := func(turn int, lease *openAIWSConnLease, payload []byte, payloadBytes int, originalModel string, imageBillingModel string, imageSizeTier string, imageInputSize string) (*OpenAIForwardResult, error) {
+		billingModel := strings.TrimSpace(account.GetMappedModel(originalModel))
 		if lease == nil {
 			return nil, errors.New("upstream websocket lease is nil")
 		}
@@ -3693,6 +3694,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					RequestID:       responseID,
 					Usage:           usage,
 					Model:           originalModel,
+					BillingModel:    billingModel,
 					UpstreamModel:   mappedModel,
 					ServiceTier:     extractOpenAIServiceTierFromBody(payload),
 					ReasoningEffort: ApplyThinkingEnabledFallback(extractOpenAIReasoningEffortFromBody(payload, originalModel, mappedModel), payload, mappedModel),

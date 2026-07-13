@@ -265,10 +265,12 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	wroteDownstream := false
 	clientDisconnected := false
 	mappedModel := ""
+	billingModel := ""
 	needModelReplace := false
 	var mappedModelBytes []byte
 	if originalModel != "" {
-		mappedModel = normalizeOpenAIModelForUpstream(account, account.GetMappedModel(originalModel))
+		billingModel = strings.TrimSpace(account.GetMappedModel(originalModel))
+		mappedModel = normalizeOpenAIModelForUpstream(account, billingModel)
 		needModelReplace = mappedModel != "" && mappedModel != originalModel
 		if needModelReplace {
 			mappedModelBytes = []byte(mappedModel)
@@ -281,6 +283,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			RequestID:       responseID,
 			Usage:           usage,
 			Model:           originalModel,
+			BillingModel:    billingModel,
 			UpstreamModel:   mappedModel,
 			ServiceTier:     extractOpenAIServiceTierFromBody(body),
 			ReasoningEffort: ApplyThinkingEnabledFallback(extractOpenAIReasoningEffortFromBody(body, originalModel, mappedModel), body, mappedModel),

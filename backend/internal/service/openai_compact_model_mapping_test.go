@@ -19,7 +19,7 @@ func TestOpenAIGatewayService_Forward_CompactOnlyModelMappingOverridesOAuthUpstr
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	body := []byte(`{"model":"gpt-5.4","stream":false,"instructions":"compact-test","input":"hello"}`)
+	body := []byte(`{"model":"billing-alias","stream":false,"instructions":"compact-test","input":"hello"}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/compact", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
 
@@ -39,6 +39,7 @@ func TestOpenAIGatewayService_Forward_CompactOnlyModelMappingOverridesOAuthUpstr
 		Credentials: map[string]any{
 			"access_token":          "oauth-token",
 			"chatgpt_account_id":    "chatgpt-acc",
+			"model_mapping":         map[string]any{"billing-alias": "gpt-5.4"},
 			"compact_model_mapping": map[string]any{"gpt-5.4": "gpt-5.4-openai-compact"},
 		},
 		Status:      StatusActive,
@@ -48,7 +49,8 @@ func TestOpenAIGatewayService_Forward_CompactOnlyModelMappingOverridesOAuthUpstr
 	result, err := svc.Forward(context.Background(), c, account, body)
 	require.NoError(t, err)
 	require.NotNil(t, result)
-	require.Equal(t, "gpt-5.4", result.Model)
+	require.Equal(t, "billing-alias", result.Model)
+	require.Equal(t, "gpt-5.4-openai-compact", result.BillingModel)
 	require.Equal(t, "gpt-5.4-openai-compact", result.UpstreamModel)
 	require.Equal(t, "gpt-5.4-openai-compact", gjson.GetBytes(upstream.lastBody, "model").String())
 }
@@ -101,7 +103,7 @@ func TestOpenAIGatewayService_OAuthAdapter_CompactOnlyModelMappingOverridesUpstr
 	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.1.0")
 	c.Request.Header.Set("Content-Type", "application/json")
 
-	originalBody := []byte(`{"model":"gpt-5.4","stream":true,"store":true,"instructions":"compact-pass","input":[{"type":"text","text":"compact me"}]}`)
+	originalBody := []byte(`{"model":"billing-alias","stream":true,"store":true,"instructions":"compact-pass","input":[{"type":"text","text":"compact me"}]}`)
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusOK,
 		Header:     http.Header{"Content-Type": []string{"application/json"}, "x-request-id": []string{"rid-compact-pass-map"}},
@@ -118,6 +120,7 @@ func TestOpenAIGatewayService_OAuthAdapter_CompactOnlyModelMappingOverridesUpstr
 		Credentials: map[string]any{
 			"access_token":          "oauth-token",
 			"chatgpt_account_id":    "chatgpt-acc",
+			"model_mapping":         map[string]any{"billing-alias": "gpt-5.4"},
 			"compact_model_mapping": map[string]any{"gpt-5.4": "gpt-5.4-openai-compact"},
 		},
 		Status:      StatusActive,
@@ -127,8 +130,9 @@ func TestOpenAIGatewayService_OAuthAdapter_CompactOnlyModelMappingOverridesUpstr
 	result, err := svc.Forward(context.Background(), c, account, originalBody)
 	require.NoError(t, err)
 	require.NotNil(t, result)
-	require.Equal(t, "gpt-5.4", result.Model)
+	require.Equal(t, "billing-alias", result.Model)
+	require.Equal(t, "gpt-5.4-openai-compact", result.BillingModel)
 	require.Equal(t, "gpt-5.4-openai-compact", result.UpstreamModel)
 	require.Equal(t, "gpt-5.4-openai-compact", gjson.GetBytes(upstream.lastBody, "model").String())
-	require.Equal(t, "gpt-5.4", gjson.GetBytes(rec.Body.Bytes(), "model").String())
+	require.Equal(t, "billing-alias", gjson.GetBytes(rec.Body.Bytes(), "model").String())
 }

@@ -86,8 +86,9 @@ func TestOpenAIWSHTTPBridgeRelaysSSEFramesAsWebSocketMessages(t *testing.T) {
 		Type:        AccountTypeAPIKey,
 		Concurrency: 1,
 		Status:      StatusActive,
+		Credentials: map[string]any{"model_mapping": map[string]any{"billing-alias": "gpt-5.4-high"}},
 	}
-	payload := []byte(`{"type":"response.create","generate":true,"model":"gpt-5","stream":true,"input":"hi"}`)
+	payload := []byte(`{"type":"response.create","generate":true,"model":"billing-alias","stream":true,"input":"hi"}`)
 
 	type bridgeResult struct {
 		result *OpenAIForwardResult
@@ -120,7 +121,7 @@ func TestOpenAIWSHTTPBridgeRelaysSSEFramesAsWebSocketMessages(t *testing.T) {
 			"sk-test",
 			payload,
 			len(payload),
-			"gpt-5",
+			"billing-alias",
 			"",
 			"",
 			"",
@@ -161,6 +162,9 @@ func TestOpenAIWSHTTPBridgeRelaysSSEFramesAsWebSocketMessages(t *testing.T) {
 		require.Equal(t, "resp_bridge", bridge.result.RequestID)
 		require.Equal(t, 3, bridge.result.Usage.InputTokens)
 		require.Equal(t, 2, bridge.result.Usage.OutputTokens)
+		require.Equal(t, "billing-alias", bridge.result.Model)
+		require.Equal(t, "gpt-5.4-high", bridge.result.BillingModel)
+		require.Equal(t, "gpt-5.4-high", bridge.result.UpstreamModel)
 		require.True(t, bridge.result.OpenAIWSMode)
 	case <-time.After(3 * time.Second):
 		t.Fatal("timed out waiting for bridge result")
@@ -171,6 +175,47 @@ func TestOpenAIWSHTTPBridgeRelaysSSEFramesAsWebSocketMessages(t *testing.T) {
 	require.False(t, gjson.GetBytes(upstream.lastBody, "type").Exists())
 	require.False(t, gjson.GetBytes(upstream.lastBody, "generate").Exists())
 	require.True(t, gjson.GetBytes(upstream.lastBody, "stream").Bool())
+}
+
+func TestOpenAIWSHTTPBridgeMappedTextBillingOnErrorAndPartialResults(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "error event", body: "data: {\"type\":\"error\",\"error\":{\"message\":\"upstream failed\"}}\n\n"},
+		{name: "partial stream", body: "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_partial\"}}\n\n"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			cfg := &config.Config{}
+			cfg.Security.URLAllowlist.Enabled = false
+			svc := &OpenAIGatewayService{cfg: cfg, httpUpstream: &httpUpstreamRecorder{resp: &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+				Body:       io.NopCloser(strings.NewReader(tt.body)),
+			}}}
+			account := &Account{
+				ID: 9, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Concurrency: 1,
+				Credentials: map[string]any{
+					"api_key": "sk-test", "base_url": "https://example.com",
+					"model_mapping": map[string]any{"billing-alias": "gpt-5.4-high"},
+				},
+			}
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+			payload := []byte(`{"type":"response.create","model":"billing-alias","input":"hi"}`)
+
+			result, err := svc.proxyOpenAIWSHTTPBridgeTurn(context.Background(), c, account, "sk-test", payload, len(payload), "billing-alias", "", "", "", 1, func([]byte) error { return nil })
+			require.Error(t, err)
+			require.NotNil(t, result)
+			require.Equal(t, "billing-alias", result.Model)
+			require.Equal(t, "gpt-5.4-high", result.BillingModel)
+			require.Equal(t, "gpt-5.4-high", result.UpstreamModel)
+		})
+	}
 }
 
 func TestOpenAIWSHTTPBridgeOAuthUsesAdapterWithoutPassthroughFlag(t *testing.T) {

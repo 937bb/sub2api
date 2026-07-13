@@ -22,7 +22,7 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-func TestOpenAIGatewayService_Forward_WSv2_SuccessAndBindSticky(t *testing.T) {
+func TestOpenAIGatewayService_Forward_WSv2_CompactUsesCompactMappedBillingModel(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	type receivedPayload struct {
@@ -93,7 +93,7 @@ func TestOpenAIGatewayService_Forward_WSv2_SuccessAndBindSticky(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", nil)
+	c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses/compact", nil)
 	c.Request.Header.Set("User-Agent", "unit-test-agent/1.0")
 	groupID := int64(1001)
 	c.Set("api_key", &APIKey{GroupID: &groupID})
@@ -138,15 +138,17 @@ func TestOpenAIGatewayService_Forward_WSv2_SuccessAndBindSticky(t *testing.T) {
 		Schedulable: true,
 		Concurrency: 2,
 		Credentials: map[string]any{
-			"api_key":  "sk-test",
-			"base_url": wsServer.URL,
+			"api_key":               "sk-test",
+			"base_url":              wsServer.URL,
+			"model_mapping":         map[string]any{"billing-alias": "gpt-5.4"},
+			"compact_model_mapping": map[string]any{"gpt-5.4": "gpt-5.4-openai-compact"},
 		},
 		Extra: map[string]any{
 			"responses_websockets_v2_enabled": true,
 		},
 	}
 
-	body := []byte(`{"model":"gpt-5.1","stream":false,"previous_response_id":"resp_prev_1","input":[{"type":"input_text","text":"hello"}],"client_metadata":{"x-client-request-id":"api-key-client-request","session_id":"api-key-session"}}`)
+	body := []byte(`{"model":"billing-alias","stream":false,"previous_response_id":"resp_prev_1","input":[{"type":"input_text","text":"hello"}],"client_metadata":{"x-client-request-id":"api-key-client-request","session_id":"api-key-session"}}`)
 	result, err := svc.Forward(context.Background(), c, account, body)
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -154,6 +156,9 @@ func TestOpenAIGatewayService_Forward_WSv2_SuccessAndBindSticky(t *testing.T) {
 	require.Equal(t, 7, result.Usage.OutputTokens)
 	require.Equal(t, 3, result.Usage.CacheReadInputTokens)
 	require.Equal(t, "resp_new_1", result.RequestID)
+	require.Equal(t, "billing-alias", result.Model)
+	require.Equal(t, "gpt-5.4-openai-compact", result.BillingModel)
+	require.Equal(t, "gpt-5.4-openai-compact", result.UpstreamModel)
 	require.True(t, result.OpenAIWSMode)
 	require.False(t, gjson.GetBytes(upstream.lastBody, "model").Exists(), "WSv2 成功时不应回落 HTTP 上游")
 

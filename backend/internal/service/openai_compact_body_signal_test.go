@@ -70,14 +70,22 @@ func TestOpenAIGatewayService_OAuthCodexBodySignalPromotesCompact(t *testing.T) 
 		Platform:    PlatformOpenAI,
 		Type:        AccountTypeOAuth,
 		Concurrency: 1,
-		Credentials: map[string]any{"access_token": "oauth-token"},
+		Credentials: map[string]any{
+			"access_token":          "oauth-token",
+			"model_mapping":         map[string]any{"billing-alias": "gpt-5.4"},
+			"compact_model_mapping": map[string]any{"gpt-5.4": "gpt-5.4-openai-compact"},
+		},
 	}
-	body := []byte(`{"model":"gpt-5.5","stream":true,"store":true,"client_metadata":{"drop":true},"input":[{"type":"message","role":"user","content":"hello"},{"type":"compaction_trigger"}]}`)
+	body := []byte(`{"model":"billing-alias","stream":true,"store":true,"client_metadata":{"drop":true},"input":[{"type":"message","role":"user","content":"hello"},{"type":"compaction_trigger"}]}`)
 
 	result, err := svc.Forward(context.Background(), c, account, body)
 
 	require.NoError(t, err)
 	require.NotNil(t, result)
+	require.Equal(t, "billing-alias", result.Model)
+	require.Equal(t, "gpt-5.4-openai-compact", result.BillingModel)
+	require.Equal(t, "gpt-5.4-openai-compact", result.UpstreamModel)
+	require.Equal(t, "gpt-5.4-openai-compact", gjson.GetBytes(upstream.lastBody, "model").String())
 	require.NotNil(t, upstream.lastReq)
 	require.Equal(t, "/v1/responses/compact", c.Request.URL.Path)
 	require.Equal(t, chatgptCodexURL+"/compact", upstream.lastReq.URL.String())

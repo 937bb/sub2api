@@ -3347,6 +3347,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		compactMappedModel := resolveOpenAICompactForwardModel(account, billingModel)
 		if compactMappedModel != "" && compactMappedModel != billingModel {
 			compactMapped = true
+			billingModel = compactMappedModel
 			upstreamModel = compactMappedModel
 			reqModel = compactMappedModel
 			markPatchSet("model", compactMappedModel)
@@ -3820,6 +3821,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 				wsAttempts,
 			)
 			wsResult.UpstreamModel = upstreamModel
+			wsResult.BillingModel = billingModel
 			if wsResult.ImageCount > 0 {
 				wsResult.ImageSize = imageSizeTier
 				wsResult.ImageInputSize = imageInputSize
@@ -3932,7 +3934,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 				if !openAIStreamingResultShouldExposeOnError(streamResult) {
 					return nil, err
 				}
-				return openAIForwardResultFromStreamingResult(streamResult, resp, startTime, originalModel, upstreamModel, serviceTier, reasoningEffort, reqStream, imageBillingModel, imageSizeTier, imageInputSize), err
+				return openAIForwardResultFromStreamingResult(streamResult, resp, startTime, originalModel, billingModel, upstreamModel, serviceTier, reasoningEffort, reqStream, imageBillingModel, imageSizeTier, imageInputSize), err
 			}
 			usage = streamResult.usage
 			firstTokenMs = streamResult.firstTokenMs
@@ -3967,6 +3969,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			ResponseID:      responseID,
 			Usage:           *usage,
 			Model:           originalModel,
+			BillingModel:    billingModel,
 			UpstreamModel:   upstreamModel,
 			ServiceTier:     serviceTier,
 			ReasoningEffort: reasoningEffort,
@@ -3991,6 +3994,7 @@ func openAIForwardResultFromStreamingResult(
 	resp *http.Response,
 	startTime time.Time,
 	originalModel string,
+	billingModel string,
 	upstreamModel string,
 	serviceTier *string,
 	reasoningEffort *string,
@@ -4017,6 +4021,7 @@ func openAIForwardResultFromStreamingResult(
 		ResponseID:       strings.TrimSpace(streamResult.responseID),
 		Usage:            *usage,
 		Model:            originalModel,
+		BillingModel:     billingModel,
 		UpstreamModel:    upstreamModel,
 		ServiceTier:      serviceTier,
 		ReasoningEffort:  reasoningEffort,
@@ -4054,8 +4059,10 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	}
 
 	upstreamPassthroughModel := ""
+	billingModel := ""
 	if isOpenAIResponsesCompactPath(c) {
 		compactMappedModel := resolveOpenAICompactForwardModel(account, reqModel)
+		billingModel = strings.TrimSpace(compactMappedModel)
 		if compactMappedModel != "" && compactMappedModel != reqModel {
 			nextBody, setErr := sjson.SetBytes(body, "model", compactMappedModel)
 			if setErr != nil {
@@ -4211,7 +4218,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			if !openAIStreamingPassthroughResultShouldExposeOnError(result) {
 				return nil, err
 			}
-			return openAIForwardResultFromPassthroughStreamingResult(result, resp, startTime, reqModel, upstreamPassthroughModel, serviceTier, reasoningEffort, imageBillingModel, imageSizeTier, imageInputSize), err
+			return openAIForwardResultFromPassthroughStreamingResult(result, resp, startTime, reqModel, billingModel, upstreamPassthroughModel, serviceTier, reasoningEffort, imageBillingModel, imageSizeTier, imageInputSize), err
 		}
 		usage = result.usage
 		firstTokenMs = result.firstTokenMs
@@ -4243,6 +4250,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		ResponseID:      responseID,
 		Usage:           *usage,
 		Model:           reqModel,
+		BillingModel:    billingModel,
 		UpstreamModel:   upstreamPassthroughModel,
 		ServiceTier:     serviceTier,
 		ReasoningEffort: reasoningEffort,
@@ -4266,6 +4274,7 @@ func openAIForwardResultFromPassthroughStreamingResult(
 	resp *http.Response,
 	startTime time.Time,
 	originalModel string,
+	billingModel string,
 	upstreamModel string,
 	serviceTier *string,
 	reasoningEffort *string,
@@ -4291,6 +4300,7 @@ func openAIForwardResultFromPassthroughStreamingResult(
 		ResponseID:       strings.TrimSpace(streamResult.responseID),
 		Usage:            *usage,
 		Model:            originalModel,
+		BillingModel:     billingModel,
 		UpstreamModel:    upstreamModel,
 		ServiceTier:      serviceTier,
 		ReasoningEffort:  reasoningEffort,

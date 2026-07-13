@@ -193,6 +193,91 @@ func TestOpenAIGatewayService_Forward_MappedImageModelUsesImageGate(t *testing.T
 	require.Equal(t, http.StatusForbidden, rec.Code)
 }
 
+func TestOpenAIGatewayService_Forward_TextResponsesUsesMappedBillingModel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"id":"resp_mapped","model":"gpt-5.5","usage":{"input_tokens":20,"output_tokens":10}}`)),
+	}}
+	cfg := &config.Config{}
+	cfg.Security.URLAllowlist.Enabled = false
+	svc := &OpenAIGatewayService{cfg: cfg, httpUpstream: upstream}
+	account := &Account{
+		ID: 4, Name: "openai-apikey", Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key": "sk-test", "base_url": "https://example.com",
+			"model_mapping": map[string]any{"gpt-5.4": "gpt-5.5"},
+		},
+		Extra: map[string]any{"use_responses_api": true},
+	}
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", nil)
+	SetOpenAIClientTransport(c, OpenAIClientTransportHTTP)
+
+	result, err := svc.Forward(context.Background(), c, account, []byte(`{"model":"gpt-5.4","stream":false,"input":"hello"}`))
+	require.NoError(t, err)
+	require.Equal(t, "gpt-5.4", result.Model)
+	require.Equal(t, "gpt-5.5", result.BillingModel)
+	require.Equal(t, "gpt-5.5", result.UpstreamModel)
+}
+
+func TestOpenAIGatewayService_Forward_StreamingTextUsesMappedBillingModel(t *testing.T) {
+	tests := []struct {
+		name      string
+		body      string
+		wantError string
+	}{
+		{
+			name: "success",
+			body: "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_stream\",\"model\":\"gpt-5.4\",\"usage\":{\"input_tokens\":20,\"output_tokens\":10}}}\n\n",
+		},
+		{
+			name: "partial error",
+			body: "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_partial\",\"model\":\"gpt-5.4\",\"status\":\"in_progress\",\"output\":[]}}\n\n" +
+				"data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n",
+			wantError: "missing terminal event",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			upstream := &httpUpstreamRecorder{resp: &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+				Body:       io.NopCloser(strings.NewReader(tt.body)),
+			}}
+			cfg := &config.Config{}
+			cfg.Security.URLAllowlist.Enabled = false
+			svc := &OpenAIGatewayService{cfg: cfg, httpUpstream: upstream}
+			account := &Account{
+				ID: 41, Name: "openai-oauth", Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1,
+				Credentials: map[string]any{
+					"access_token":  "oauth-token",
+					"model_mapping": map[string]any{"billing-alias": "gpt-5.4-high"},
+				},
+				Extra: map[string]any{"use_responses_api": true},
+			}
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", nil)
+			SetOpenAIClientTransport(c, OpenAIClientTransportHTTP)
+
+			result, err := svc.Forward(context.Background(), c, account, []byte(`{"model":"billing-alias","stream":true,"input":"hello"}`))
+			if tt.wantError == "" {
+				require.NoError(t, err)
+			} else {
+				require.ErrorContains(t, err, tt.wantError)
+			}
+			require.NotNil(t, result)
+			require.Equal(t, "billing-alias", result.Model)
+			require.Equal(t, "gpt-5.4-high", result.BillingModel)
+			require.Equal(t, "gpt-5.4", result.UpstreamModel)
+		})
+	}
+}
 func TestOpenAIGatewayService_Forward_ImageCapabilityGateUsesFinalNormalizedModel(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	upstream := &httpUpstreamRecorder{
