@@ -1621,28 +1621,36 @@ func TestFilterCodexInput_KeepsValidToolCallInputIDWhenPreservingReferences(t *t
 	require.Equal(t, "fc_123", item["id"])
 }
 
-func TestFilterCodexInput_PreserveReferencesKeepsOutputAndMessageIDs(t *testing.T) {
-	filtered := filterCodexInputWithOptions([]any{
-		map[string]any{
-			"type":    "function_call_output",
-			"id":      "item_output_123",
-			"call_id": "fc_123",
-			"output":  "ok",
-		},
-		map[string]any{
-			"type": "message",
-			"id":   "item_message_123",
-			"role": "user",
-		},
-	}, codexInputFilterOptions{PreserveReferences: true})
+func TestFilterCodexInput_MessageIDsWithPreservedReferences(t *testing.T) {
+	invalidMessage := map[string]any{"type": "message", "id": "item_message_123", "role": "user"}
+	input := []any{
+		map[string]any{"type": "item_reference", "id": "call_123"},
+		map[string]any{"type": "function_call_output", "id": "item_output_123", "call_id": "call_123", "output": "ok"},
+		invalidMessage,
+		map[string]any{"type": "message", "id": "msg_message_123", "role": "assistant"},
+	}
 
-	require.Len(t, filtered, 2)
+	filtered := filterCodexInputWithOptions(input, codexInputFilterOptions{
+		PreserveReferences: true,
+		PreserveCallIDs:    true,
+	})
 
-	output, ok := filtered[0].(map[string]any)
-	require.True(t, ok)
-	require.Equal(t, "item_output_123", output["id"])
+	require.Len(t, filtered, 4)
+	require.Equal(t, "call_123", filtered[0].(map[string]any)["id"])
+	require.Equal(t, "call_123", filtered[1].(map[string]any)["call_id"])
+	require.Equal(t, "item_output_123", filtered[1].(map[string]any)["id"])
+	require.NotContains(t, filtered[2].(map[string]any), "id")
+	require.Equal(t, "msg_message_123", filtered[3].(map[string]any)["id"])
+	require.Equal(t, "item_message_123", invalidMessage["id"], "caller input must not be mutated")
+}
 
-	message, ok := filtered[1].(map[string]any)
-	require.True(t, ok)
-	require.Equal(t, "item_message_123", message["id"])
+func TestFilterCodexInput_MessageIDsWithoutPreservedReferencesUnchanged(t *testing.T) {
+	for _, id := range []string{"item_message_123", "msg_message_123"} {
+		filtered := filterCodexInputWithOptions([]any{
+			map[string]any{"type": "message", "id": id, "role": "user"},
+		}, codexInputFilterOptions{PreserveReferences: false})
+
+		require.Len(t, filtered, 1)
+		require.NotContains(t, filtered[0].(map[string]any), "id")
+	}
 }

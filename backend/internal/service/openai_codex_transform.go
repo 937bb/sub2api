@@ -1312,6 +1312,13 @@ func filterCodexInputWithOptions(input []any, opts codexInputFilterOptions) []an
 				ensureCopy()
 				delete(newItem, "id")
 			}
+		} else if typ == "message" {
+			// Upstream only accepts persisted message IDs beginning with "msg".
+			// Do not rewrite invalid IDs because that could create a false reference.
+			if id, ok := m["id"].(string); ok && id != "" && !strings.HasPrefix(id, "msg") {
+				ensureCopy()
+				delete(newItem, "id")
+			}
 		}
 
 		filtered = append(filtered, newItem)
