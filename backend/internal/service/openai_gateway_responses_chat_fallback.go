@@ -63,7 +63,7 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 	}
 	billingModel = strings.TrimSpace(billingModel)
 	if billingModel == "" {
-		billingModel = resolveOpenAIForwardModel(account, originalModel, "")
+		billingModel = resolveOpenAIForwardModel(account, originalModel)
 	}
 	upstreamModel = strings.TrimSpace(upstreamModel)
 	if upstreamModel == "" {

@@ -154,7 +154,7 @@ func TestForwardAsRawChatCompletions_TransportErrorFailsOver(t *testing.T) {
 	c, rec := newOpenAITransportErrTestContext()
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 
-	_, err := svc.forwardAsRawChatCompletions(context.Background(), c, account, body, "")
+	_, err := svc.forwardAsRawChatCompletions(context.Background(), c, account, body)
 
 	require.Len(t, upstream.requests, 1)
 	var fo *UpstreamFailoverError

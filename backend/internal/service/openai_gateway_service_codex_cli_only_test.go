@@ -112,7 +112,7 @@ func TestOpenAIGatewayServiceForwardAsChatCompletionsRejectsCodexCLIOnlyMismatch
 	}}
 	account := &Account{ID: 1001, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Extra: map[string]any{"codex_cli_only": true}}
 
-	result, err := svc.ForwardAsChatCompletions(context.Background(), c, account, []byte(`{"model":"gpt-5.2","messages":[]}`), "", "")
+	result, err := svc.ForwardAsChatCompletions(context.Background(), c, account, []byte(`{"model":"gpt-5.2","messages":[]}`), "")
 
 	require.Nil(t, result)
 	require.ErrorContains(t, err, "codex_cli_only restriction")
@@ -145,7 +145,7 @@ func TestOpenAIGatewayServiceForwardAsChatCompletionsRejectsSpoofedOriginatorWit
 	}
 	account := &Account{ID: 1001, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Extra: map[string]any{"codex_cli_only": true}}
 
-	result, err := svc.ForwardAsChatCompletions(context.Background(), c, account, []byte(`{"model":"gpt-5.2","messages":[]}`), "", "")
+	result, err := svc.ForwardAsChatCompletions(context.Background(), c, account, []byte(`{"model":"gpt-5.2","messages":[]}`), "")
 
 	require.Nil(t, result)
 	require.ErrorContains(t, err, "codex_cli_only restriction")

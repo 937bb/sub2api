@@ -320,7 +320,7 @@ func TestOpenAIGatewayService_ForwardChatCompletionsOAuthResponsesShapePreserves
 	}}
 	svc := &OpenAIGatewayService{httpUpstream: upstream}
 
-	_, err := svc.ForwardAsChatCompletions(context.Background(), c, httptestOpenAIOAuthBodyPolicyAccount(), body, "", "gpt-5.4")
+	_, err := svc.ForwardAsChatCompletions(context.Background(), c, httptestOpenAIOAuthBodyPolicyAccount(), body, "")
 	require.NoError(t, err)
 	require.Equal(t, "9007199254740993", gjson.GetBytes(upstream.lastBody, "tools.0.parameters.properties.id.const").Raw)
 	require.Equal(t, "9007199254740995", gjson.GetBytes(upstream.lastBody, "client_metadata.trace_id").Raw)
@@ -360,7 +360,7 @@ func TestOpenAIGatewayService_ForwardChatCompletionsSetupTokenResponsesShapeUses
 	account := httptestOpenAIOAuthBodyPolicyAccount()
 	account.Type = AccountTypeSetupToken
 
-	_, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, "", "gpt-5.4")
+	_, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, "")
 	require.NoError(t, err)
 	require.Equal(t, chatgptCodexURL, upstream.lastReq.URL.String())
 	require.Equal(t, "chatgpt-acc", getHeaderRaw(upstream.lastReq.Header, "ChatGPT-Account-ID"))
@@ -398,7 +398,7 @@ func TestOpenAIGatewayService_ForwardChatCompletionsSetupTokenNormalPathUsesOAut
 	account := httptestOpenAIOAuthBodyPolicyAccount()
 	account.Type = AccountTypeSetupToken
 
-	_, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, "", "gpt-5.4")
+	_, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, "")
 	require.NoError(t, err)
 	require.Equal(t, chatgptCodexURL, upstream.lastReq.URL.String())
 	require.Equal(t, "gpt-5.4", gjson.GetBytes(upstream.lastBody, "model").String())
@@ -431,7 +431,7 @@ func TestOpenAIGatewayService_ForwardChatCompletionsOAuthKeepsIsolatedAdapterSes
 	svc := &OpenAIGatewayService{httpUpstream: upstream}
 	account := httptestOpenAIOAuthBodyPolicyAccount()
 
-	_, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, "shared-cache-key", "gpt-5.4")
+	_, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, "shared-cache-key")
 
 	require.NoError(t, err)
 	isolatedSessionID := isolateOpenAICodexOAuthSessionID(77, "shared-cache-key", "session")
