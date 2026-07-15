@@ -54,7 +54,9 @@ type APIKeyRepository interface {
 	GetByKey(ctx context.Context, key string) (*APIKey, error)
 	// GetByKeyForAuth 认证专用查询，返回最小字段集
 	GetByKeyForAuth(ctx context.Context, key string) (*APIKey, error)
-	Update(ctx context.Context, key *APIKey) error
+	UpdateConfig(ctx context.Context, id, expectedUserID int64, patch APIKeyConfigPatch) (*APIKey, error)
+	UpdateGroupID(ctx context.Context, id int64, groupID *int64) (*APIKey, error)
+	ResetRateLimitUsage(ctx context.Context, id int64) (*APIKey, error)
 	Delete(ctx context.Context, id int64) error
 	// DeleteWithAudit 在同一事务内先写 deleted_api_key_audits 审计、再软删除该 key。
 	DeleteWithAudit(ctx context.Context, id int64) error
@@ -74,12 +76,30 @@ type APIKeyRepository interface {
 
 	// Quota methods
 	IncrementQuotaUsed(ctx context.Context, id int64, amount float64) (float64, error)
+	IncrementQuotaUsedAndGetState(ctx context.Context, id int64, amount float64) (*APIKeyQuotaUsageState, error)
 	UpdateLastUsed(ctx context.Context, id int64, usedAt time.Time) error
 
 	// Rate limit methods
 	IncrementRateLimitUsage(ctx context.Context, id int64, cost float64) error
 	ResetRateLimitWindows(ctx context.Context, id int64) error
 	GetRateLimitData(ctx context.Context, id int64) (*APIKeyRateLimitData, error)
+}
+
+// APIKeyConfigPatch contains only control-plane fields; nil means unchanged.
+type APIKeyConfigPatch struct {
+	Name                    *string
+	GroupID                 **int64
+	Quota                   *float64
+	ExpiresAt               **time.Time
+	IPWhitelist             *[]string
+	IPBlacklist             *[]string
+	RateLimit5h             *float64
+	RateLimit1d             *float64
+	RateLimit7d             *float64
+	OpenAIForcePriorityTier *bool
+	Status                  *string
+	ResetQuota              bool
+	ResetRateLimitUsage     bool
 }
 
 // APIKeyRateLimitData holds rate limit usage and window state for an API key.
@@ -614,19 +634,35 @@ func (s *APIKeyService) Update(ctx context.Context, id int64, userID int64, req 
 		apiKey.OpenAIForcePriorityTier = *req.OpenAIForcePriorityTier
 	}
 
-	if req.Status != nil {
-		apiKey.Status = *req.Status
+	var exp **time.Time
+	if req.ClearExpiration {
+		v := (*time.Time)(nil)
+		exp = &v
+	} else if req.ExpiresAt != nil {
+		exp = &req.ExpiresAt
 	}
-	apiKey.Status = reconcileAPIKeyTerminalStatus(apiKey)
-	if apiKey.Status != originalStatus {
-		// 如果状态改变，清除Redis缓存
-		if s.cache != nil {
-			_ = s.cache.DeleteCreateAttemptCount(ctx, apiKey.UserID)
-		}
+	var gid **int64
+	if req.GroupID != nil {
+		gid = &req.GroupID
 	}
-
-	if err := s.apiKeyRepo.Update(ctx, apiKey); err != nil {
+	var escapedName *string
+	if req.Name != nil {
+		name := html.EscapeString(*req.Name)
+		escapedName = &name
+	}
+	patch := APIKeyConfigPatch{Name: escapedName, GroupID: gid, Quota: req.Quota, ExpiresAt: exp,
+		IPWhitelist: &req.IPWhitelist, IPBlacklist: &req.IPBlacklist,
+		RateLimit5h: req.RateLimit5h, RateLimit1d: req.RateLimit1d, RateLimit7d: req.RateLimit7d,
+		OpenAIForcePriorityTier: req.OpenAIForcePriorityTier,
+		ResetQuota:              req.ResetQuota != nil && *req.ResetQuota, ResetRateLimitUsage: resetRateLimit}
+	patch.Status = req.Status
+	updated, err := s.apiKeyRepo.UpdateConfig(ctx, id, userID, patch)
+	if err != nil {
 		return nil, fmt.Errorf("update api key: %w", err)
+	}
+	apiKey = updated
+	if apiKey.Status != originalStatus && s.cache != nil {
+		_ = s.cache.DeleteCreateAttemptCount(ctx, apiKey.UserID)
 	}
 
 	s.InvalidateAuthCacheByKey(ctx, apiKey.Key)
@@ -853,43 +889,13 @@ func (s *APIKeyService) UpdateQuotaUsed(ctx context.Context, apiKeyID int64, cos
 		return nil
 	}
 
-	type quotaStateReader interface {
-		IncrementQuotaUsedAndGetState(ctx context.Context, id int64, amount float64) (*APIKeyQuotaUsageState, error)
-	}
-
-	if repo, ok := s.apiKeyRepo.(quotaStateReader); ok {
-		state, err := repo.IncrementQuotaUsedAndGetState(ctx, apiKeyID, cost)
-		if err != nil {
-			return fmt.Errorf("increment quota used: %w", err)
-		}
-		if state != nil && state.Status == StatusAPIKeyQuotaExhausted && strings.TrimSpace(state.Key) != "" {
-			s.InvalidateAuthCacheByKey(ctx, state.Key)
-		}
-		return nil
-	}
-
-	// Use repository to atomically increment quota_used
-	newQuotaUsed, err := s.apiKeyRepo.IncrementQuotaUsed(ctx, apiKeyID, cost)
+	state, err := s.apiKeyRepo.IncrementQuotaUsedAndGetState(ctx, apiKeyID, cost)
 	if err != nil {
 		return fmt.Errorf("increment quota used: %w", err)
 	}
-
-	// Check if quota is now exhausted and update status if needed
-	apiKey, err := s.apiKeyRepo.GetByID(ctx, apiKeyID)
-	if err != nil {
-		return nil // Don't fail the request, just log
+	if state != nil && state.Status == StatusAPIKeyQuotaExhausted && strings.TrimSpace(state.Key) != "" {
+		s.InvalidateAuthCacheByKey(ctx, state.Key)
 	}
-
-	// If quota is set and now exhausted, update status
-	if apiKey.Quota > 0 && newQuotaUsed >= apiKey.Quota {
-		apiKey.Status = StatusAPIKeyQuotaExhausted
-		if err := s.apiKeyRepo.Update(ctx, apiKey); err != nil {
-			return nil // Don't fail the request
-		}
-		// Invalidate cache so next request sees the new status
-		s.InvalidateAuthCacheByKey(ctx, apiKey.Key)
-	}
-
 	return nil
 }
 

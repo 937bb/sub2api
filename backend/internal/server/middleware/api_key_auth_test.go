@@ -1211,8 +1211,14 @@ func (r *stubApiKeyRepo) GetByKeyForAuth(ctx context.Context, key string) (*serv
 	return r.GetByKey(ctx, key)
 }
 
-func (r *stubApiKeyRepo) Update(ctx context.Context, key *service.APIKey) error {
-	return errors.New("not implemented")
+func (r *stubApiKeyRepo) UpdateConfig(context.Context, int64, int64, service.APIKeyConfigPatch) (*service.APIKey, error) {
+	return nil, errors.New("not implemented")
+}
+func (r *stubApiKeyRepo) UpdateGroupID(context.Context, int64, *int64) (*service.APIKey, error) {
+	return nil, errors.New("not implemented")
+}
+func (r *stubApiKeyRepo) ResetRateLimitUsage(context.Context, int64) (*service.APIKey, error) {
+	return nil, errors.New("not implemented")
 }
 
 func (r *stubApiKeyRepo) Delete(ctx context.Context, id int64) error {
@@ -1269,6 +1275,9 @@ func (r *stubApiKeyRepo) ListKeysByGroupID(ctx context.Context, groupID int64) (
 
 func (r *stubApiKeyRepo) IncrementQuotaUsed(ctx context.Context, id int64, amount float64) (float64, error) {
 	return 0, errors.New("not implemented")
+}
+func (r *stubApiKeyRepo) IncrementQuotaUsedAndGetState(context.Context, int64, float64) (*service.APIKeyQuotaUsageState, error) {
+	return nil, errors.New("not implemented")
 }
 
 func (r *stubApiKeyRepo) UpdateLastUsed(ctx context.Context, id int64, usedAt time.Time) error {

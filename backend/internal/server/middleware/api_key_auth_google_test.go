@@ -52,8 +52,14 @@ func (f fakeAPIKeyRepo) GetByKey(ctx context.Context, key string) (*service.APIK
 func (f fakeAPIKeyRepo) GetByKeyForAuth(ctx context.Context, key string) (*service.APIKey, error) {
 	return f.GetByKey(ctx, key)
 }
-func (f fakeAPIKeyRepo) Update(ctx context.Context, key *service.APIKey) error {
-	return errors.New("not implemented")
+func (f fakeAPIKeyRepo) UpdateConfig(context.Context, int64, int64, service.APIKeyConfigPatch) (*service.APIKey, error) {
+	return nil, errors.New("not implemented")
+}
+func (f fakeAPIKeyRepo) UpdateGroupID(context.Context, int64, *int64) (*service.APIKey, error) {
+	return nil, errors.New("not implemented")
+}
+func (f fakeAPIKeyRepo) ResetRateLimitUsage(context.Context, int64) (*service.APIKey, error) {
+	return nil, errors.New("not implemented")
 }
 func (f fakeAPIKeyRepo) Delete(ctx context.Context, id int64) error {
 	return errors.New("not implemented")
@@ -93,6 +99,9 @@ func (f fakeAPIKeyRepo) ListKeysByGroupID(ctx context.Context, groupID int64) ([
 }
 func (f fakeAPIKeyRepo) IncrementQuotaUsed(ctx context.Context, id int64, amount float64) (float64, error) {
 	return 0, errors.New("not implemented")
+}
+func (f fakeAPIKeyRepo) IncrementQuotaUsedAndGetState(context.Context, int64, float64) (*service.APIKeyQuotaUsageState, error) {
+	return nil, errors.New("not implemented")
 }
 func (f fakeAPIKeyRepo) UpdateLastUsed(ctx context.Context, id int64, usedAt time.Time) error {
 	if f.updateLastUsed != nil {

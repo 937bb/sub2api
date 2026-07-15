@@ -2405,9 +2405,11 @@ func (s *adminServiceImpl) AdminUpdateAPIKeyGroupID(ctx context.Context, keyID i
 			if addErr := s.userRepo.AddGroupToAllowedGroups(opCtx, apiKey.UserID, gid); addErr != nil {
 				return nil, fmt.Errorf("add group to user allowed groups: %w", addErr)
 			}
-			if err := s.apiKeyRepo.Update(opCtx, apiKey); err != nil {
+			updated, err := s.apiKeyRepo.UpdateGroupID(opCtx, keyID, &gid)
+			if err != nil {
 				return nil, fmt.Errorf("update api key: %w", err)
 			}
+			apiKey = updated
 			if tx != nil {
 				if err := tx.Commit(); err != nil {
 					return nil, fmt.Errorf("commit transaction: %w", err)
@@ -2430,9 +2432,16 @@ func (s *adminServiceImpl) AdminUpdateAPIKeyGroupID(ctx context.Context, keyID i
 	}
 
 	// 非专属分组 / 解绑：无需事务，单步更新即可
-	if err := s.apiKeyRepo.Update(ctx, apiKey); err != nil {
+	updated, err := s.apiKeyRepo.UpdateGroupID(ctx, keyID, func() *int64 {
+		if *groupID == 0 {
+			return nil
+		}
+		return groupID
+	}())
+	if err != nil {
 		return nil, fmt.Errorf("update api key: %w", err)
 	}
+	apiKey = updated
 
 	// 失效认证缓存
 	if s.authCacheInvalidator != nil {
@@ -2449,13 +2458,8 @@ func (s *adminServiceImpl) AdminResetAPIKeyRateLimitUsage(ctx context.Context, k
 	if err != nil {
 		return nil, err
 	}
-	apiKey.Usage5h = 0
-	apiKey.Usage1d = 0
-	apiKey.Usage7d = 0
-	apiKey.Window5hStart = nil
-	apiKey.Window1dStart = nil
-	apiKey.Window7dStart = nil
-	if err := s.apiKeyRepo.Update(ctx, apiKey); err != nil {
+	apiKey, err = s.apiKeyRepo.ResetRateLimitUsage(ctx, keyID)
+	if err != nil {
 		return nil, fmt.Errorf("reset api key rate limit usage: %w", err)
 	}
 	if s.authCacheInvalidator != nil {

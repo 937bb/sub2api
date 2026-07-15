@@ -98,6 +98,15 @@ func (s *quotaBaseAPIKeyRepoStub) GetByKeyForAuth(context.Context, string) (*API
 func (s *quotaBaseAPIKeyRepoStub) Update(context.Context, *APIKey) error {
 	panic("unexpected Update call")
 }
+func (s *quotaBaseAPIKeyRepoStub) UpdateConfig(context.Context, int64, int64, APIKeyConfigPatch) (*APIKey, error) {
+	panic("unexpected UpdateConfig call")
+}
+func (s *quotaBaseAPIKeyRepoStub) UpdateGroupID(context.Context, int64, *int64) (*APIKey, error) {
+	panic("unexpected UpdateGroupID call")
+}
+func (s *quotaBaseAPIKeyRepoStub) ResetRateLimitUsage(context.Context, int64) (*APIKey, error) {
+	panic("unexpected ResetRateLimitUsage call")
+}
 func (s *quotaBaseAPIKeyRepoStub) Delete(context.Context, int64) error {
 	panic("unexpected Delete call")
 }
@@ -140,6 +149,9 @@ func (s *quotaBaseAPIKeyRepoStub) ListKeysByGroupID(context.Context, int64) ([]s
 func (s *quotaBaseAPIKeyRepoStub) IncrementQuotaUsed(context.Context, int64, float64) (float64, error) {
 	panic("unexpected IncrementQuotaUsed call")
 }
+func (s *quotaBaseAPIKeyRepoStub) IncrementQuotaUsedAndGetState(context.Context, int64, float64) (*APIKeyQuotaUsageState, error) {
+	panic("unexpected IncrementQuotaUsedAndGetState call")
+}
 func (s *quotaBaseAPIKeyRepoStub) UpdateLastUsed(context.Context, int64, time.Time) error {
 	panic("unexpected UpdateLastUsed call")
 }
@@ -157,6 +169,7 @@ type quotaUpdateAPIKeyRepoStub struct {
 	quotaBaseAPIKeyRepoStub
 	apiKey     *APIKey
 	updatedKey *APIKey
+	patch      APIKeyConfigPatch
 }
 
 func (s *quotaUpdateAPIKeyRepoStub) GetByID(context.Context, int64) (*APIKey, error) {
@@ -171,6 +184,42 @@ func (s *quotaUpdateAPIKeyRepoStub) Update(_ context.Context, key *APIKey) error
 	out := *key
 	s.updatedKey = &out
 	return nil
+}
+func (s *quotaUpdateAPIKeyRepoStub) UpdateConfig(_ context.Context, _ int64, _ int64, p APIKeyConfigPatch) (*APIKey, error) {
+	s.patch = p
+	out := *s.apiKey
+	if p.Name != nil {
+		out.Name = *p.Name
+	}
+	if p.Quota != nil {
+		out.Quota = *p.Quota
+	}
+	if p.ExpiresAt != nil {
+		out.ExpiresAt = *p.ExpiresAt
+	}
+	if p.Status != nil {
+		out.Status = *p.Status
+	}
+	if p.ResetQuota {
+		out.QuotaUsed = 0
+	}
+	out.Status = reconcileAPIKeyTerminalStatus(&out)
+	s.updatedKey = &out
+	return &out, nil
+}
+
+func TestAPIKeyService_UpdateEscapesNameInConfigPatch(t *testing.T) {
+	repo := &quotaUpdateAPIKeyRepoStub{apiKey: &APIKey{
+		ID: 1, UserID: 2, Key: "sk-test", Name: "before", Status: StatusAPIKeyActive,
+	}}
+	svc := &APIKeyService{apiKeyRepo: repo}
+	name := `<script>alert("xss")</script>`
+
+	updated, err := svc.Update(context.Background(), 1, 2, UpdateAPIKeyRequest{Name: &name})
+	require.NoError(t, err)
+	require.NotNil(t, repo.patch.Name)
+	require.Equal(t, `&lt;script&gt;alert(&#34;xss&#34;)&lt;/script&gt;`, *repo.patch.Name)
+	require.Equal(t, *repo.patch.Name, updated.Name)
 }
 
 func TestAPIKeyService_UpdateQuotaUsed_UsesAtomicStatePath(t *testing.T) {
