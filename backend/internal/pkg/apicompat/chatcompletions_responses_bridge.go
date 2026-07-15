@@ -20,18 +20,32 @@ type ResponsesToChatConversion struct {
 // Chat Completions request for upstreams that only implement
 // /v1/chat/completions.
 func ResponsesToChatCompletionsRequest(req *ResponsesRequest) (*ResponsesToChatConversion, error) {
+	return responsesToChatCompletionsRequest(req, decodeResponsesInputItems)
+}
+
+type responsesInputItemsDecoder func(json.RawMessage) ([]json.RawMessage, error)
+
+func decodeResponsesInputItems(inputRaw json.RawMessage) ([]json.RawMessage, error) {
+	var rawItems []json.RawMessage
+	if err := json.Unmarshal(inputRaw, &rawItems); err != nil {
+		return nil, err
+	}
+	return rawItems, nil
+}
+
+func responsesToChatCompletionsRequest(req *ResponsesRequest, decodeInput responsesInputItemsDecoder) (*ResponsesToChatConversion, error) {
 	if req == nil {
 		return nil, fmt.Errorf("responses request is nil")
 	}
 
-	messages, err := responsesInputToChatMessages(req.Instructions, req.Input)
+	input, err := convertResponsesInput(req.Instructions, req.Input, decodeInput)
 	if err != nil {
 		return nil, err
 	}
 
 	out := &ChatCompletionsRequest{
 		Model:               req.Model,
-		Messages:            messages,
+		Messages:            input.messages,
 		MaxCompletionTokens: req.MaxOutputTokens,
 		Temperature:         req.Temperature,
 		TopP:                req.TopP,
@@ -42,17 +56,28 @@ func ResponsesToChatCompletionsRequest(req *ResponsesRequest) (*ResponsesToChatC
 	if req.Reasoning != nil {
 		out.ReasoningEffort = req.Reasoning.Effort
 	}
+	effectiveTools := req.Tools
+	if len(input.additionalTools) > 0 {
+		// Additional declarations use the same conversion rules as top-level
+		// tools. Tool kinds unsupported by this local bridge remain ignored.
+		effectiveTools = make([]ResponsesTool, 0, len(req.Tools)+len(input.additionalTools))
+		effectiveTools = append(effectiveTools, req.Tools...)
+		effectiveTools = append(effectiveTools, input.additionalTools...)
+	}
 	namespaceTools := make(map[string]NamespacedToolName)
-	if len(req.Tools) > 0 {
-		out.Tools, namespaceTools, err = responsesToolsToChatTools(req.Tools)
+	if len(effectiveTools) > 0 {
+		out.Tools, namespaceTools, err = responsesToolsToChatTools(effectiveTools)
 		if err != nil {
 			return nil, err
 		}
 	}
-	if len(req.ToolChoice) > 0 {
+	if len(req.ToolChoice) > 0 && (len(out.Tools) > 0 || !input.hasAdditionalTools) {
 		out.ToolChoice, err = responsesToolChoiceToChatToolChoice(req.ToolChoice, namespaceTools)
 		if err != nil {
 			return nil, err
+		}
+		if input.hasAdditionalTools && !chatToolChoiceIsDeclared(out.ToolChoice, out.Tools) {
+			out.ToolChoice = nil
 		}
 	}
 	if req.Text != nil {
@@ -60,6 +85,12 @@ func ResponsesToChatCompletionsRequest(req *ResponsesRequest) (*ResponsesToChatC
 	}
 
 	return &ResponsesToChatConversion{Request: out, NamespaceTools: namespaceTools}, nil
+}
+
+type responsesInputConversion struct {
+	messages           []ChatMessage
+	additionalTools    []ResponsesTool
+	hasAdditionalTools bool
 }
 
 // responsesInputToChatMessages converts a Responses request's instructions +
@@ -76,6 +107,14 @@ func ResponsesToChatCompletionsRequest(req *ResponsesRequest) (*ResponsesToChatC
 // scattered across per-item cases, and makes unknown future codex item types
 // fail safe instead of leaking into the upstream request.
 func responsesInputToChatMessages(instructions string, inputRaw json.RawMessage) ([]ChatMessage, error) {
+	input, err := convertResponsesInput(instructions, inputRaw, decodeResponsesInputItems)
+	if err != nil {
+		return nil, err
+	}
+	return input.messages, nil
+}
+
+func convertResponsesInput(instructions string, inputRaw json.RawMessage, decodeInput responsesInputItemsDecoder) (responsesInputConversion, error) {
 	var messages []ChatMessage
 	if strings.TrimSpace(instructions) != "" {
 		content, _ := json.Marshal(instructions)
@@ -84,32 +123,39 @@ func responsesInputToChatMessages(instructions string, inputRaw json.RawMessage)
 
 	inputRaw = bytesTrimSpace(inputRaw)
 	if len(inputRaw) == 0 || string(inputRaw) == "null" {
-		return messages, nil
+		return responsesInputConversion{messages: messages}, nil
 	}
 
 	// Bare string input is a single user turn.
-	var inputText string
-	if err := json.Unmarshal(inputRaw, &inputText); err == nil {
+	if inputRaw[0] == '"' {
+		var inputText string
+		if err := json.Unmarshal(inputRaw, &inputText); err != nil {
+			return responsesInputConversion{}, fmt.Errorf("parse responses input: %w", err)
+		}
 		content, _ := json.Marshal(inputText)
 		messages = append(messages, ChatMessage{Role: "user", Content: content})
-		return messages, nil
+		return responsesInputConversion{messages: messages}, nil
 	}
 
-	var rawItems []json.RawMessage
-	if err := json.Unmarshal(inputRaw, &rawItems); err != nil {
-		return nil, fmt.Errorf("parse responses input: %w", err)
-	}
-
-	built, err := buildChatMessagesFromItems(messages, rawItems)
+	rawItems, err := decodeInput(inputRaw)
 	if err != nil {
-		return nil, err
+		return responsesInputConversion{}, fmt.Errorf("parse responses input: %w", err)
 	}
-	return normalizeChatMessages(built), nil
+
+	built, additionalTools, hasAdditionalTools, err := buildChatMessagesFromItems(messages, rawItems)
+	if err != nil {
+		return responsesInputConversion{}, err
+	}
+	return responsesInputConversion{
+		messages:           normalizeChatMessages(built),
+		additionalTools:    additionalTools,
+		hasAdditionalTools: hasAdditionalTools,
+	}, nil
 }
 
 // buildChatMessagesFromItems walks the Responses input items and appends the
 // corresponding Chat messages.
-func buildChatMessagesFromItems(messages []ChatMessage, rawItems []json.RawMessage) ([]ChatMessage, error) {
+func buildChatMessagesFromItems(messages []ChatMessage, rawItems []json.RawMessage) ([]ChatMessage, []ResponsesTool, bool, error) {
 	// pendingReasoning holds the reasoning text from a reasoning item until the
 	// assistant message it belongs to is emitted. DeepSeek's thinking mode
 	// requires the reasoning_content that produced a tool call to be passed back
@@ -117,6 +163,8 @@ func buildChatMessagesFromItems(messages []ChatMessage, rawItems []json.RawMessa
 	// across an assistant message (so a following tool call in the same turn
 	// still receives it); any other role ends the thinking span.
 	var pendingReasoning string
+	var additionalTools []ResponsesTool
+	var hasAdditionalTools bool
 
 	for _, raw := range rawItems {
 		raw = bytesTrimSpace(raw)
@@ -133,12 +181,24 @@ func buildChatMessagesFromItems(messages []ChatMessage, rawItems []json.RawMessa
 				pendingReasoning = ""
 				continue
 			}
-			return nil, fmt.Errorf("parse responses input item: %w", err)
+			return nil, nil, false, fmt.Errorf("parse responses input item: %w", err)
 		}
 
 		role := chatCompletionsBridgeRole(rawString(item["role"]))
 		itemType := rawString(item["type"])
 		switch itemType {
+		case "additional_tools":
+			hasAdditionalTools = true
+			toolsRaw := bytesTrimSpace(item["tools"])
+			if len(toolsRaw) > 0 && string(toolsRaw) != "null" {
+				var tools []ResponsesTool
+				if err := json.Unmarshal(toolsRaw, &tools); err != nil {
+					return nil, nil, false, fmt.Errorf("parse responses additional tools: %w", err)
+				}
+				additionalTools = append(additionalTools, tools...)
+			}
+			pendingReasoning = ""
+			continue
 		case "reasoning":
 			if txt := extractResponsesReasoningText(item); txt != "" {
 				pendingReasoning = txt
@@ -195,7 +255,7 @@ func buildChatMessagesFromItems(messages []ChatMessage, rawItems []json.RawMessa
 		case "input_image":
 			content, err := chatContentFromSingleResponsesPart(itemType, item)
 			if err != nil {
-				return nil, err
+				return nil, nil, false, err
 			}
 			messages = append(messages, ChatMessage{Role: "user", Content: content})
 			pendingReasoning = ""
@@ -221,7 +281,7 @@ func buildChatMessagesFromItems(messages []ChatMessage, rawItems []json.RawMessa
 		}
 		chatContent, err := responsesContentToChatContent(content, role)
 		if err != nil {
-			return nil, err
+			return nil, nil, false, err
 		}
 		messages = append(messages, ChatMessage{Role: role, Content: chatContent})
 		// Reasoning only survives across an assistant text message.
@@ -230,7 +290,7 @@ func buildChatMessagesFromItems(messages []ChatMessage, rawItems []json.RawMessa
 		}
 	}
 
-	return messages, nil
+	return messages, additionalTools, hasAdditionalTools, nil
 }
 
 // normalizeChatMessages is the single place that enforces the tool-call
@@ -572,6 +632,33 @@ func responsesToolChoiceToChatToolChoice(raw json.RawMessage, namespaceTools map
 		return raw, nil
 	}
 	return out, nil
+}
+
+// chatToolChoiceIsDeclared validates the lossy additional_tools conversion.
+// Ordinary Responses fallback traffic retains its pre-existing pass-through
+// behavior; requests using additional_tools may only select Chat-supported
+// modes or a function that survived conversion.
+func chatToolChoiceIsDeclared(raw json.RawMessage, tools []ChatTool) bool {
+	var mode string
+	if err := json.Unmarshal(raw, &mode); err == nil {
+		return mode == "none" || mode == "auto" || mode == "required"
+	}
+
+	var choice struct {
+		Type     string `json:"type"`
+		Function struct {
+			Name string `json:"name"`
+		} `json:"function"`
+	}
+	if err := json.Unmarshal(raw, &choice); err != nil || choice.Type != "function" || choice.Function.Name == "" {
+		return false
+	}
+	for _, tool := range tools {
+		if tool.Type == "function" && tool.Function != nil && tool.Function.Name == choice.Function.Name {
+			return true
+		}
+	}
+	return false
 }
 
 // ChatCompletionsResponseToResponses converts a non-streaming Chat Completions

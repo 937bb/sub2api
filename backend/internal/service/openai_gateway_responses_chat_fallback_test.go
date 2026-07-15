@@ -55,6 +55,79 @@ func TestForwardResponses_ForceChatCompletionsRoutesNonStreamingToChatCompletion
 	require.False(t, result.Stream)
 }
 
+func TestForwardResponses_ChatFallbackUsesAdditionalTools(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	body := []byte(`{
+		"model":"gpt-5.4",
+		"input":[
+			{"type":"additional_tools","tools":[{"type":"namespace","name":"mcp","tools":[{"type":"function","name":"read","parameters":{"type":"object"}}]}]},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"read it"}]}
+		],
+		"tool_choice":{"type":"function","namespace":"mcp","name":"read"},
+		"stream":false
+	}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body: io.NopCloser(strings.NewReader(
+			`{"id":"chatcmpl_tool","object":"chat.completion","model":"gpt-5.4","choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"mcp__read","arguments":"{}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}`,
+		)),
+	}}
+	svc := &OpenAIGatewayService{
+		cfg:          rawChatCompletionsTestConfig(),
+		httpUpstream: upstream,
+	}
+
+	result, err := svc.Forward(context.Background(), c, forceChatResponsesFallbackAccount(), body)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, "mcp__read", gjson.GetBytes(upstream.lastBody, "tools.0.function.name").String())
+	require.Equal(t, "mcp__read", gjson.GetBytes(upstream.lastBody, "tool_choice.function.name").String())
+	require.Equal(t, "read it", gjson.GetBytes(upstream.lastBody, "messages.1.content").String())
+	require.Equal(t, "read", gjson.Get(rec.Body.String(), "output.0.name").String())
+	require.Equal(t, "mcp", gjson.Get(rec.Body.String(), "output.0.namespace").String())
+}
+
+func TestForwardResponses_ChatFallbackDropsExcludedAdditionalToolChoice(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	body := []byte(`{
+		"model":"gpt-5.4",
+		"tools":[{"type":"function","name":"lookup","parameters":{"type":"object"}}],
+		"input":[
+			{"type":"additional_tools","tools":[{"type":"custom","name":"exec"}]},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"run it"}]}
+		],
+		"tool_choice":{"type":"custom","name":"exec"},
+		"stream":false
+	}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body: io.NopCloser(strings.NewReader(
+			`{"id":"chatcmpl_drop_choice","object":"chat.completion","model":"gpt-5.4","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}`,
+		)),
+	}}
+	svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}
+
+	result, err := svc.Forward(context.Background(), c, forceChatResponsesFallbackAccount(), body)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, "lookup", gjson.GetBytes(upstream.lastBody, "tools.0.function.name").String())
+	require.False(t, gjson.GetBytes(upstream.lastBody, "tool_choice").Exists())
+}
+
 func TestForwardResponses_RawChatFallbackPreservesClientModelAndMaxOutputTokens(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
