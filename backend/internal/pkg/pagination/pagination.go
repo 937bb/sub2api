@@ -38,7 +38,14 @@ func (p PaginationParams) Offset() int {
 	if p.Page < 1 {
 		p.Page = 1
 	}
-	return (p.Page - 1) * p.PageSize
+
+	pageIndex := p.Page - 1
+	limit := p.Limit()
+	maxInt := int(^uint(0) >> 1)
+	if pageIndex > maxInt/limit {
+		return maxInt
+	}
+	return pageIndex * limit
 }
 
 // Limit 获取限制数
