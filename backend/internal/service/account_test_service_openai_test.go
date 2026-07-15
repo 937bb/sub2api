@@ -63,6 +63,93 @@ func newTestContext() (*gin.Context, *httptest.ResponseRecorder) {
 	return c, rec
 }
 
+func TestAccountTestService_OpenAIProbeModelNormalizationBoundaries(t *testing.T) {
+	tests := []struct {
+		name           string
+		accountType    string
+		model          string
+		modelMapping   map[string]any
+		wantUpstream   string
+		wantEventModel string
+	}{
+		{
+			name:           "oauth alias",
+			accountType:    AccountTypeOAuth,
+			model:          "gpt-5.6",
+			wantUpstream:   "gpt-5.6-sol",
+			wantEventModel: "gpt-5.6",
+		},
+		{
+			name:           "setup token alias",
+			accountType:    AccountTypeSetupToken,
+			model:          "gpt-5.6",
+			wantUpstream:   "gpt-5.6-sol",
+			wantEventModel: "gpt-5.6",
+		},
+		{
+			name:           "oauth account mapping before normalization",
+			accountType:    AccountTypeOAuth,
+			model:          "client-gpt",
+			modelMapping:   map[string]any{"client-gpt": "gpt-5.6"},
+			wantUpstream:   "gpt-5.6-sol",
+			wantEventModel: "gpt-5.6",
+		},
+		{
+			name:           "oauth already upstream",
+			accountType:    AccountTypeOAuth,
+			model:          "gpt-5.6-sol",
+			wantUpstream:   "gpt-5.6-sol",
+			wantEventModel: "gpt-5.6-sol",
+		},
+		{
+			name:           "api key alias remains unchanged",
+			accountType:    AccountTypeAPIKey,
+			model:          "gpt-5.6",
+			wantUpstream:   "gpt-5.6",
+			wantEventModel: "gpt-5.6",
+		},
+		{
+			name:           "oauth unknown model remains unchanged",
+			accountType:    AccountTypeOAuth,
+			model:          "future-model",
+			wantUpstream:   "future-model",
+			wantEventModel: "future-model",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, recorder := newTestContext()
+			resp := newJSONResponse(http.StatusOK, "")
+			resp.Body = io.NopCloser(strings.NewReader("data: {\"type\":\"response.completed\"}\n\n"))
+			upstream := &queuedHTTPUpstream{responses: []*http.Response{resp}}
+			svc := &AccountTestService{
+				httpUpstream: upstream,
+				cfg:          &config.Config{Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}}},
+			}
+			account := &Account{
+				ID:          90,
+				Platform:    PlatformOpenAI,
+				Type:        tt.accountType,
+				Concurrency: 1,
+				Credentials: map[string]any{
+					"access_token":  "test-token",
+					"api_key":       "sk-test",
+					"base_url":      "https://upstream.example",
+					"model_mapping": tt.modelMapping,
+				},
+			}
+
+			require.NoError(t, svc.testOpenAIAccountConnection(ctx, account, tt.model, "", ""))
+			require.Len(t, upstream.requests, 1)
+			body := readTestRequestBody(t, upstream.requests[0])
+			require.Equal(t, tt.wantUpstream, gjson.GetBytes(body, "model").String())
+			require.Contains(t, recorder.Body.String(), `"type":"test_start"`)
+			require.Contains(t, recorder.Body.String(), `"model":"`+tt.wantEventModel+`"`)
+		})
+	}
+}
+
 type openAIAccountNestedBoolUpdate struct {
 	updates   map[string]any
 	mapKey    string
