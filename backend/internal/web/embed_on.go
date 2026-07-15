@@ -99,7 +99,17 @@ func (s *FrontendServer) Middleware() gin.HandlerFunc {
 		}
 
 		// For index.html or SPA routes, serve with injected settings
-		if cleanPath == "index.html" || !s.fileExists(cleanPath) {
+		if cleanPath == "index.html" {
+			s.serveIndexHTML(c)
+			return
+		}
+		exists := s.fileExists(cleanPath)
+		if !exists {
+			if isEmbeddedAssetPath(cleanPath) {
+				c.Status(http.StatusNotFound)
+				c.Abort()
+				return
+			}
 			s.serveIndexHTML(c)
 			return
 		}
@@ -277,6 +287,11 @@ func ServeEmbeddedFrontend() gin.HandlerFunc {
 			c.Abort()
 			return
 		}
+		if isEmbeddedAssetPath(cleanPath) {
+			c.Status(http.StatusNotFound)
+			c.Abort()
+			return
+		}
 
 		serveIndexHTML(c, distFS)
 	}
@@ -309,6 +324,10 @@ func shouldBypassEmbeddedFrontend(path string) bool {
 		trimmed == "/responses" ||
 		strings.HasPrefix(trimmed, "/responses/") ||
 		strings.HasPrefix(trimmed, "/images/")
+}
+
+func isEmbeddedAssetPath(cleanPath string) bool {
+	return strings.HasPrefix(cleanPath, "assets/")
 }
 
 func serveIndexHTML(c *gin.Context, fsys fs.FS) {

@@ -5,6 +5,7 @@ package web
 import (
 	"bytes"
 	"context"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -162,6 +163,16 @@ type mockSettingsProvider struct {
 	settings any
 	err      error
 	called   int
+}
+
+type countingFS struct {
+	fs.FS
+	opens int
+}
+
+func (f *countingFS) Open(name string) (fs.File, error) {
+	f.opens++
+	return f.FS.Open(name)
 }
 
 func (m *mockSettingsProvider) GetPublicSettingsForInjection(ctx context.Context) (any, error) {
@@ -551,6 +562,55 @@ func TestFrontendServer_Middleware(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 		assert.Contains(t, w.Header().Get("Content-Type"), "image/png")
 	})
+
+	t.Run("routes_missing_assets_and_dotted_spa_paths", func(t *testing.T) {
+		for _, tc := range []struct {
+			method       string
+			path         string
+			wantStatus   int
+			wantHTML     bool
+			wantProvider int
+		}{
+			{method: http.MethodGet, path: "/dashboard.v2", wantStatus: http.StatusOK, wantHTML: true, wantProvider: 1},
+			{method: http.MethodGet, path: "/dashboard%2Ev2", wantStatus: http.StatusOK, wantHTML: true, wantProvider: 1},
+			{method: http.MethodGet, path: "/assets-v2/route.js", wantStatus: http.StatusOK, wantHTML: true, wantProvider: 1},
+			{method: http.MethodGet, path: "/assets%5Croute.js", wantStatus: http.StatusOK, wantHTML: true, wantProvider: 1},
+			{method: http.MethodGet, path: "/assets/missing.js", wantStatus: http.StatusNotFound},
+			{method: http.MethodGet, path: "/assets/missing", wantStatus: http.StatusNotFound},
+			{method: http.MethodGet, path: "/assets/missing.js/", wantStatus: http.StatusNotFound},
+			{method: http.MethodGet, path: "/assets/missing.js/?v=1", wantStatus: http.StatusNotFound},
+			{method: http.MethodGet, path: "/assets/missing%2Ejs%2F", wantStatus: http.StatusNotFound},
+			{method: http.MethodGet, path: "/assets/../dashboard.v2", wantStatus: http.StatusNotFound},
+			{method: http.MethodHead, path: "/assets/missing.js", wantStatus: http.StatusNotFound},
+		} {
+			provider := &mockSettingsProvider{}
+			server, err := NewFrontendServer(provider)
+			require.NoError(t, err)
+			router := gin.New()
+			router.Use(server.Middleware())
+
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, httptest.NewRequest(tc.method, tc.path, nil))
+			assert.Equal(t, tc.wantStatus, w.Code, "%s %s", tc.method, tc.path)
+			assert.Equal(t, tc.wantHTML, strings.Contains(w.Header().Get("Content-Type"), "text/html"), "%s %s", tc.method, tc.path)
+			assert.Equal(t, tc.wantProvider, provider.called, "%s %s", tc.method, tc.path)
+		}
+	})
+
+	t.Run("looks_up_a_missing_file_once", func(t *testing.T) {
+		server, err := NewFrontendServer(&mockSettingsProvider{})
+		require.NoError(t, err)
+		counted := &countingFS{FS: server.distFS}
+		server.distFS = counted
+		router := gin.New()
+		router.Use(server.Middleware())
+
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/assets/missing.js", nil))
+
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Equal(t, 1, counted.opens)
+	})
 }
 
 func TestNewFrontendServer(t *testing.T) {
@@ -638,6 +698,36 @@ func TestServeEmbeddedFrontend(t *testing.T) {
 				assert.Equal(t, http.StatusOK, w.Code)
 				assert.Contains(t, w.Header().Get("Content-Type"), "text/html")
 			})
+		}
+	})
+
+	t.Run("routes_missing_assets_and_dotted_spa_paths", func(t *testing.T) {
+		middleware := ServeEmbeddedFrontend()
+		router := gin.New()
+		router.Use(middleware)
+
+		for _, tc := range []struct {
+			method     string
+			path       string
+			wantStatus int
+			wantHTML   bool
+		}{
+			{method: http.MethodGet, path: "/dashboard.v2", wantStatus: http.StatusOK, wantHTML: true},
+			{method: http.MethodGet, path: "/dashboard%2Ev2", wantStatus: http.StatusOK, wantHTML: true},
+			{method: http.MethodGet, path: "/assets-v2/route.js", wantStatus: http.StatusOK, wantHTML: true},
+			{method: http.MethodGet, path: "/assets%5Croute.js", wantStatus: http.StatusOK, wantHTML: true},
+			{method: http.MethodGet, path: "/assets/missing.js", wantStatus: http.StatusNotFound},
+			{method: http.MethodGet, path: "/assets/missing", wantStatus: http.StatusNotFound},
+			{method: http.MethodGet, path: "/assets/missing.js/", wantStatus: http.StatusNotFound},
+			{method: http.MethodGet, path: "/assets/missing.js/?v=1", wantStatus: http.StatusNotFound},
+			{method: http.MethodGet, path: "/assets/missing%2Ejs%2F", wantStatus: http.StatusNotFound},
+			{method: http.MethodGet, path: "/assets/../dashboard.v2", wantStatus: http.StatusNotFound},
+			{method: http.MethodHead, path: "/assets/missing.js", wantStatus: http.StatusNotFound},
+		} {
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, httptest.NewRequest(tc.method, tc.path, nil))
+			assert.Equal(t, tc.wantStatus, w.Code, "%s %s", tc.method, tc.path)
+			assert.Equal(t, tc.wantHTML, strings.Contains(w.Header().Get("Content-Type"), "text/html"), "%s %s", tc.method, tc.path)
 		}
 	})
 
