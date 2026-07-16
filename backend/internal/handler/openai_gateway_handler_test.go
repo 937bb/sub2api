@@ -13,9 +13,11 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/model"
 	pkghttputil "github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	coderws "github.com/coder/websocket"
@@ -25,6 +27,106 @@ import (
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
+
+type fixedErrorPassthroughRepo struct {
+	rules []*model.ErrorPassthroughRule
+}
+
+type fixedOpenAIHTTPUpstream struct {
+	response *http.Response
+}
+
+func (u *fixedOpenAIHTTPUpstream) Do(*http.Request, string, int64, int) (*http.Response, error) {
+	return u.response, nil
+}
+func (u *fixedOpenAIHTTPUpstream) DoWithTLS(*http.Request, string, int64, int, *tlsfingerprint.Profile) (*http.Response, error) {
+	return u.response, nil
+}
+
+func (r *fixedErrorPassthroughRepo) List(context.Context) ([]*model.ErrorPassthroughRule, error) {
+	return r.rules, nil
+}
+func (r *fixedErrorPassthroughRepo) GetByID(context.Context, int64) (*model.ErrorPassthroughRule, error) {
+	return nil, errors.New("not implemented")
+}
+func (r *fixedErrorPassthroughRepo) Create(context.Context, *model.ErrorPassthroughRule) (*model.ErrorPassthroughRule, error) {
+	return nil, errors.New("not implemented")
+}
+func (r *fixedErrorPassthroughRepo) Update(context.Context, *model.ErrorPassthroughRule) (*model.ErrorPassthroughRule, error) {
+	return nil, errors.New("not implemented")
+}
+func (r *fixedErrorPassthroughRepo) Delete(context.Context, int64) error {
+	return errors.New("not implemented")
+}
+
+func TestOpenAIHandleFailoverExhaustedSanitizedResponseBypassesMatchingRule(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	upstreamBody := `{"error":{"message":"private upstream temporarily unavailable"},"debug":"sk-upstream-secret"}`
+	upstream := &fixedOpenAIHTTPUpstream{response: &http.Response{
+		StatusCode: http.StatusServiceUnavailable,
+		Header: http.Header{
+			"Content-Type": {"text/html"},
+			"Retry-After":  {"17"},
+			"Set-Cookie":   {"private=1"},
+			"X-Request-Id": {"private-id"},
+		},
+		Body: io.NopCloser(strings.NewReader(upstreamBody)),
+	}}
+	forwardContext, _ := gin.CreateTestContext(httptest.NewRecorder())
+	forwardContext.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	cfg := &config.Config{Gateway: config.GatewayConfig{ForceCodexCLI: false}}
+	forwarder := service.NewOpenAIGatewayService(nil, nil, nil, nil, nil, nil, nil, cfg, nil, nil, nil, nil, nil, upstream, nil, nil, nil, nil, nil, nil, nil)
+	account := &service.Account{
+		ID: 91, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Concurrency: 1,
+		Credentials: map[string]any{"api_key": "sk-test", "base_url": "https://api.example.test"},
+		Extra:       map[string]any{"openai_passthrough": true}, Status: service.StatusActive, Schedulable: true,
+	}
+	_, err := forwarder.Forward(context.Background(), forwardContext, account, []byte(`{"model":"gpt-5.2","input":"hello"}`))
+	var failoverErr *service.UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+
+	customStatus := http.StatusTeapot
+	customMessage := "rule leaked private upstream body"
+	ruleService := service.NewErrorPassthroughService(&fixedErrorPassthroughRepo{rules: []*model.ErrorPassthroughRule{{
+		Name: "adversarial", Enabled: true, Priority: 1, ErrorCodes: []int{http.StatusServiceUnavailable},
+		MatchMode: model.MatchModeAny, Platforms: []string{model.PlatformOpenAI}, ResponseCode: &customStatus,
+		CustomMessage: &customMessage,
+	}}}, nil)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	c.Header("Set-Cookie", "handler-secret=1")
+	c.Header("X-Request-Id", "handler-private-id")
+
+	(&OpenAIGatewayHandler{errorPassthroughService: ruleService}).handleFailoverExhausted(c, failoverErr, false)
+
+	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+	require.Equal(t, "Upstream service temporarily unavailable", gjson.Get(recorder.Body.String(), "error.message").String())
+	require.NotContains(t, recorder.Body.String(), "private upstream")
+	require.NotContains(t, recorder.Body.String(), "sk-upstream-secret")
+	require.NotContains(t, recorder.Body.String(), customMessage)
+	require.Equal(t, "application/json; charset=utf-8", recorder.Header().Get("Content-Type"))
+	require.Equal(t, "no-store", recorder.Header().Get("Cache-Control"))
+	require.Equal(t, "17", recorder.Header().Get("Retry-After"))
+	require.Empty(t, recorder.Header().Get("Set-Cookie"))
+	require.Empty(t, recorder.Header().Get("X-Request-Id"))
+
+	streamRecorder := httptest.NewRecorder()
+	streamContext, _ := gin.CreateTestContext(streamRecorder)
+	streamContext.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	streamContext.Header("Set-Cookie", "committed-header=preserved")
+	_, _ = streamContext.Writer.WriteString(":\n\n")
+
+	(&OpenAIGatewayHandler{errorPassthroughService: ruleService}).handleFailoverExhausted(streamContext, failoverErr, true)
+
+	require.Equal(t, http.StatusOK, streamRecorder.Code, "committed status cannot be replaced")
+	require.Equal(t, "committed-header=preserved", streamRecorder.Header().Get("Set-Cookie"), "committed headers cannot be cleared")
+	require.Contains(t, streamRecorder.Body.String(), "event: response.failed\n")
+	require.Contains(t, streamRecorder.Body.String(), "Upstream service temporarily unavailable")
+	require.NotContains(t, streamRecorder.Body.String(), "private upstream")
+	require.NotContains(t, streamRecorder.Body.String(), "sk-upstream-secret")
+	require.NotContains(t, streamRecorder.Body.String(), customMessage)
+}
 
 func TestOpenAIHandleStreamingAwareError_JSONEscaping(t *testing.T) {
 	tests := []struct {

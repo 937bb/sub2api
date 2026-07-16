@@ -1809,6 +1809,28 @@ func (h *OpenAIGatewayHandler) handleConcurrencyError(c *gin.Context, err error,
 func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverErr *service.UpstreamFailoverError, streamStarted bool) {
 	statusCode := failoverErr.StatusCode
 	responseBody := failoverErr.ResponseBody
+	sanitizedStatus, sanitizedBody, sanitizedHeaders, hasSanitizedResponse := failoverErr.SanitizedClientResponse()
+	if hasSanitizedResponse {
+		statusCode = sanitizedStatus
+		responseBody = sanitizedBody
+		if streamStarted {
+			service.SetOpsUpstreamError(c, statusCode, service.ExtractUpstreamErrorMessage(responseBody), "")
+			h.handleStreamingAwareError(c, statusCode, "upstream_error", service.ExtractUpstreamErrorMessage(responseBody), true)
+			return
+		} else {
+			for key := range c.Writer.Header() {
+				c.Writer.Header().Del(key)
+			}
+			for _, key := range []string{"Content-Type", "Cache-Control", "Retry-After"} {
+				if value := sanitizedHeaders.Get(key); value != "" {
+					c.Header(key, value)
+				}
+			}
+			service.MarkResponseCommitted(c)
+			c.Data(statusCode, sanitizedHeaders.Get("Content-Type"), responseBody)
+			return
+		}
+	}
 	if service.IsOpenAISilentRefusalErrorBody(responseBody) {
 		service.SetOpsUpstreamError(c, statusCode, service.OpenAISilentRefusalClientMessage(), "")
 		h.handleStreamingAwareError(c, http.StatusBadGateway, "upstream_error", service.OpenAISilentRefusalClientMessage(), streamStarted)
@@ -1838,7 +1860,6 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 			return
 		}
 	}
-
 	// 记录原始上游状态码，以便 ops 错误日志捕获真实的上游错误
 	upstreamMsg := service.ExtractUpstreamErrorMessage(responseBody)
 	service.SetOpsUpstreamError(c, statusCode, upstreamMsg, "")

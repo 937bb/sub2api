@@ -575,15 +575,46 @@ type ForwardResult struct {
 
 // UpstreamFailoverError indicates an upstream error that should trigger account failover.
 type UpstreamFailoverError struct {
-	StatusCode             int
-	ResponseBody           []byte      // 上游响应体，用于错误透传规则匹配
-	ResponseHeaders        http.Header // 上游响应头，用于透传 cf-ray/cf-mitigated/content-type 等诊断信息
-	ForceCacheBilling      bool        // Antigravity 粘性会话切换时设为 true
-	RetryableOnSameAccount bool        // 临时性错误（如 Google 间歇性 400、空响应），应在同一账号上重试 N 次再切换
+	StatusCode              int
+	ResponseBody            []byte      // 上游响应体，用于错误透传规则匹配
+	ResponseHeaders         http.Header // 上游响应头，用于透传 cf-ray/cf-mitigated/content-type 等诊断信息
+	ForceCacheBilling       bool        // Antigravity 粘性会话切换时设为 true
+	RetryableOnSameAccount  bool        // 临时性错误（如 Google 间歇性 400、空响应），应在同一账号上重试 N 次再切换
+	sanitizedClientResponse *sanitizedUpstreamClientResponse
+}
+
+type sanitizedUpstreamClientResponse struct {
+	statusCode int
+	body       []byte
+	headers    http.Header
 }
 
 func (e *UpstreamFailoverError) Error() string {
 	return fmt.Sprintf("upstream error: %d (failover)", e.StatusCode)
+}
+
+// SanitizedClientResponse returns a copy of the fixed client-safe response when
+// this error was created through the private sanitized-response boundary.
+func (e *UpstreamFailoverError) SanitizedClientResponse() (int, []byte, http.Header, bool) {
+	if e == nil || e.sanitizedClientResponse == nil {
+		return 0, nil, nil, false
+	}
+	r := e.sanitizedClientResponse
+	return r.statusCode, append([]byte(nil), r.body...), r.headers.Clone(), true
+}
+
+func newSanitizedUpstreamFailoverError(statusCode int, body []byte, headers http.Header, retryableOnSameAccount bool) *UpstreamFailoverError {
+	return &UpstreamFailoverError{
+		StatusCode:             statusCode,
+		ResponseBody:           body,
+		ResponseHeaders:        headers,
+		RetryableOnSameAccount: retryableOnSameAccount,
+		sanitizedClientResponse: &sanitizedUpstreamClientResponse{
+			statusCode: statusCode,
+			body:       append([]byte(nil), body...),
+			headers:    headers.Clone(),
+		},
+	}
 }
 
 // sseStreamErrorEventError 表示上游 SSE 流体内出现 event:error 帧。

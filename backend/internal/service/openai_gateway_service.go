@@ -21,6 +21,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
@@ -58,6 +59,10 @@ const (
 	openAIWSReconnectRetryLimit = 5
 	// 上游错误体只需要提取错误 JSON/日志摘要，默认 512KiB 避免错误风暴叠加大请求体。
 	openAIUpstreamErrorBodyReadLimit int64 = 512 << 10
+	// APIKey retry classification has its own fixed, configuration-independent work bounds.
+	openAIErrorClassificationMaxBytes  = 64 << 10
+	openAIErrorClassificationMaxDepth  = 32
+	openAIErrorClassificationMaxTokens = 4096
 	// OpenAI WS Mode 重连退避默认值（可由配置覆盖）。
 	openAIWSRetryBackoffInitialDefault = 120 * time.Millisecond
 	openAIWSRetryBackoffMaxDefault     = 2 * time.Second
@@ -441,6 +446,7 @@ type OpenAIGatewayService struct {
 	codexSnapshotThrottle               *accountWriteThrottle
 	openaiCompatSessionResponses        sync.Map
 	openaiCompatAnthropicDigestSessions sync.Map
+	classifyContextWindowError          func([]byte) openAIContextWindowMatch
 }
 
 // NewOpenAIGatewayService creates a new OpenAIGatewayService
@@ -1720,7 +1726,6 @@ func isOpenAITransientProcessingError(upstreamStatusCode int, upstreamMsg string
 			strings.Contains(lower, "help.openai.com") &&
 			strings.Contains(lower, "request id")
 	}
-
 	if match(upstreamMsg) {
 		return true
 	}
@@ -3140,11 +3145,7 @@ func marshalOpenAIUpstreamJSON(v any) ([]byte, error) {
 }
 
 func openAIUpstreamErrorBodyReadLimitForConfig(cfg *config.Config) int64 {
-	limit := openAIUpstreamErrorBodyReadLimit
-	if cfg != nil && cfg.Gateway.LogUpstreamErrorBody && cfg.Gateway.LogUpstreamErrorBodyMaxBytes > int(limit) {
-		limit = int64(cfg.Gateway.LogUpstreamErrorBodyMaxBytes)
-	}
-	return limit
+	return openAIUpstreamErrorBodyReadLimit
 }
 
 func (s *OpenAIGatewayService) readUpstreamErrorBody(resp *http.Response) []byte {
@@ -4193,12 +4194,14 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 400 {
+		responseBody := s.readUpstreamErrorBody(resp)
+		contextMatch := s.classifyOpenAIContextWindowErrorForAccount(account, responseBody)
 		// 透传模式默认保持原样代理；但 429/529 属于网关必须兜底的
 		// 上游容量类错误，应先触发多账号 failover 以维持基础 SLA。
-		if shouldFailoverOpenAIPassthroughResponse(resp.StatusCode) {
-			return nil, s.handleFailoverErrorResponsePassthrough(ctx, resp, c, account, body)
+		if shouldFailoverOpenAIPassthroughResponse(resp.StatusCode, contextMatch, account != nil && account.Type == AccountTypeAPIKey) {
+			return nil, s.handleFailoverErrorResponsePassthrough(ctx, resp, c, account, body, responseBody)
 		}
-		return nil, s.handleErrorResponsePassthrough(ctx, resp, c, account, body)
+		return nil, s.handleErrorResponsePassthrough(ctx, resp, c, account, body, responseBody, contextMatch)
 	}
 
 	serviceTier := extractOpenAIServiceTierFromBody(body)
@@ -4479,12 +4482,302 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIOAuthAdapter(
 	return req, nil
 }
 
-func shouldFailoverOpenAIPassthroughResponse(statusCode int) bool {
+func shouldFailoverOpenAIPassthroughResponse(statusCode int, contextMatch openAIContextWindowMatch, apiKey bool) bool {
+	if !apiKey || !contextMatch.valid || contextMatch.overflow {
+		return false
+	}
+	if contextMatch.matched() || contextMatch.rejectedRequest {
+		return false
+	}
 	switch statusCode {
 	case http.StatusTooManyRequests, 529:
 		return true
+	case 500, 502, 503, 504, 520, 521, 522, 523, 524:
+		return true
 	default:
 		return false
+	}
+}
+
+type openAIContextWindowMatch struct {
+	field           string
+	rejectedRequest bool
+	valid           bool
+	overflow        bool
+}
+
+func (m openAIContextWindowMatch) matched() bool { return m.field != "" }
+
+func (s *OpenAIGatewayService) classifyOpenAIContextWindowError(body []byte) openAIContextWindowMatch {
+	if s != nil && s.classifyContextWindowError != nil {
+		return s.classifyContextWindowError(body)
+	}
+	return classifyOpenAIContextWindowError(body)
+}
+
+func (s *OpenAIGatewayService) classifyOpenAIContextWindowErrorForAccount(account *Account, body []byte) openAIContextWindowMatch {
+	if account == nil || account.Type != AccountTypeAPIKey {
+		return openAIContextWindowMatch{}
+	}
+	return s.classifyOpenAIContextWindowError(body)
+}
+
+// classifyOpenAIContextWindowError only trusts exact string values at the
+// documented paths. Ambiguous trusted-path members and invalid JSON fail closed.
+func classifyOpenAIContextWindowError(body []byte) openAIContextWindowMatch {
+	if len(body) > openAIErrorClassificationMaxBytes {
+		return openAIContextWindowMatch{overflow: true}
+	}
+	if len(body) == 0 || !utf8.Valid(body) {
+		return openAIContextWindowMatch{}
+	}
+	p := openAIErrorClassifier{decoder: json.NewDecoder(bytes.NewReader(body)), values: make(map[string]string, 6)}
+	first, err := p.next()
+	if err != nil || first != json.Delim('{') {
+		return openAIContextWindowMatch{}
+	}
+	if err := p.consume(first, openAIErrorPathRoot, 1); err != nil {
+		return openAIContextWindowMatch{overflow: errors.Is(err, errOpenAIErrorClassificationOverflow)}
+	}
+	if p.ambiguous {
+		return openAIContextWindowMatch{}
+	}
+	if token, err := p.next(); err != io.EOF || token != nil {
+		return openAIContextWindowMatch{}
+	}
+	for _, field := range []string{"error.code", "response.error.code", "code", "error.message", "response.error.message", "message"} {
+		if matchesOpenAIContextWindow(p.values[field]) {
+			return openAIContextWindowMatch{field: field, rejectedRequest: anyRejectedOpenAITrustedValue(p.values, matchesOpenAIRejectedRequest), valid: true}
+		}
+	}
+	return openAIContextWindowMatch{rejectedRequest: anyRejectedOpenAITrustedValue(p.values, matchesOpenAIRejectedRequest), valid: true}
+}
+
+var errOpenAIErrorClassificationOverflow = errors.New("OpenAI error classification bound exceeded")
+
+type openAIErrorPath uint8
+
+const (
+	openAIErrorPathOther openAIErrorPath = iota
+	openAIErrorPathRoot
+	openAIErrorPathError
+	openAIErrorPathResponse
+	openAIErrorPathResponseError
+)
+
+type openAIErrorClassifier struct {
+	decoder   *json.Decoder
+	values    map[string]string
+	tokens    int
+	ambiguous bool
+}
+
+func (p *openAIErrorClassifier) next() (json.Token, error) {
+	if p.tokens >= openAIErrorClassificationMaxTokens {
+		return nil, errOpenAIErrorClassificationOverflow
+	}
+	p.tokens++
+	return p.decoder.Token()
+}
+
+func (p *openAIErrorClassifier) consume(token json.Token, path openAIErrorPath, depth int) error {
+	if depth > openAIErrorClassificationMaxDepth {
+		return errOpenAIErrorClassificationOverflow
+	}
+	delim, ok := token.(json.Delim)
+	if !ok {
+		return nil
+	}
+	switch delim {
+	case '{':
+		seen := make(map[string]struct{}, 6)
+		for p.decoder.More() {
+			keyToken, err := p.next()
+			if err != nil {
+				return err
+			}
+			key, ok := keyToken.(string)
+			if !ok {
+				return errors.New("OpenAI error classification object key is not a string")
+			}
+			lowerKey := strings.ToLower(key)
+			field, childPath, object, leaf := openAITrustedErrorField(path, lowerKey)
+			if field != "" {
+				if key != lowerKey {
+					p.ambiguous = true
+				}
+				if _, exists := seen[lowerKey]; exists {
+					p.ambiguous = true
+				}
+			}
+			seen[lowerKey] = struct{}{}
+			value, err := p.next()
+			if err != nil {
+				return err
+			}
+			if leaf {
+				if text, ok := value.(string); ok {
+					p.values[field] = text
+				} else {
+					p.ambiguous = true
+					if err := p.consume(value, openAIErrorPathOther, depth+1); err != nil {
+						return err
+					}
+				}
+				continue
+			}
+			if object && value != json.Delim('{') {
+				p.ambiguous = true
+			}
+			if err := p.consume(value, childPath, depth+1); err != nil {
+				return err
+			}
+		}
+		end, err := p.next()
+		if err != nil || end != json.Delim('}') {
+			return errors.New("OpenAI error classification object is incomplete")
+		}
+		return nil
+	case '[':
+		if path != openAIErrorPathOther {
+			p.ambiguous = true
+		}
+		for p.decoder.More() {
+			value, err := p.next()
+			if err != nil {
+				return err
+			}
+			if err := p.consume(value, openAIErrorPathOther, depth+1); err != nil {
+				return err
+			}
+		}
+		end, err := p.next()
+		if err != nil || end != json.Delim(']') {
+			return errors.New("OpenAI error classification array is incomplete")
+		}
+		return nil
+	default:
+		return errors.New("unexpected OpenAI error JSON delimiter")
+	}
+}
+
+func openAITrustedErrorField(path openAIErrorPath, key string) (string, openAIErrorPath, bool, bool) {
+	switch path {
+	case openAIErrorPathRoot:
+		switch key {
+		case "error":
+			return "error", openAIErrorPathError, true, false
+		case "response":
+			return "response", openAIErrorPathResponse, true, false
+		case "code", "message", "type", "param":
+			return key, openAIErrorPathOther, false, true
+		}
+	case openAIErrorPathError:
+		if key == "code" || key == "message" || key == "type" || key == "param" {
+			return "error." + key, openAIErrorPathOther, false, true
+		}
+	case openAIErrorPathResponse:
+		if key == "error" {
+			return "response.error", openAIErrorPathResponseError, true, false
+		}
+	case openAIErrorPathResponseError:
+		if key == "code" || key == "message" || key == "type" || key == "param" {
+			return "response.error." + key, openAIErrorPathOther, false, true
+		}
+	}
+	return "", openAIErrorPathOther, false, false
+}
+
+func matchesOpenAIContextWindow(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	if lower == "" {
+		return false
+	}
+	if strings.Contains(lower, "context_too_large") || strings.Contains(lower, "context_length_exceeded") ||
+		strings.Contains(lower, "maximum context length") || strings.Contains(lower, "max context length") {
+		return true
+	}
+	exceeded := strings.Contains(lower, "exceed") || strings.Contains(lower, "too large") || strings.Contains(lower, "too long")
+	return exceeded && (strings.Contains(lower, "context window") || strings.Contains(lower, "context length") ||
+		(strings.Contains(lower, "token limit") && strings.Contains(lower, "context")))
+}
+
+func matchesOpenAIRejectedRequest(field, text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	if lower == "" {
+		return false
+	}
+	if strings.HasSuffix(field, "type") || strings.HasSuffix(field, "code") {
+		if strings.HasPrefix(lower, "invalid_request") || lower == "invalid_parameter" || lower == "invalid_field" ||
+			lower == "unknown_field" || lower == "unknown_parameter" || lower == "unsupported_parameter" ||
+			lower == "unrecognized_parameter" || lower == "rejected_parameter" || lower == "rejected_field" {
+			return true
+		}
+	}
+	return lower == "invalid parameter" || strings.HasPrefix(lower, "invalid parameter:") ||
+		lower == "invalid field" || strings.HasPrefix(lower, "invalid field:") || strings.Contains(lower, "unknown field") ||
+		strings.Contains(lower, "unknown parameter") || strings.Contains(lower, "unsupported parameter") ||
+		strings.Contains(lower, "unrecognized parameter") || strings.Contains(lower, "rejected parameter") || strings.Contains(lower, "rejected field")
+}
+
+func anyRejectedOpenAITrustedValue(values map[string]string, match func(string, string) bool) bool {
+	for field, value := range values {
+		if match(field, value) {
+			return true
+		}
+	}
+	return false
+}
+
+func openAIContextWindowClientMessage() string {
+	return "The request exceeds the model context window"
+}
+
+func sanitizedOpenAIPassthroughError(statusCode int, upstreamHeaders http.Header, message string) ([]byte, http.Header) {
+	body, _ := json.Marshal(gin.H{"error": gin.H{"type": "upstream_error", "message": message}})
+	headers := make(http.Header, 3)
+	headers.Set("Content-Type", "application/json; charset=utf-8")
+	headers.Set("Cache-Control", "no-store")
+	if retryAfter := strings.TrimSpace(upstreamHeaders.Get("Retry-After")); validOpenAIPassthroughRetryAfter(retryAfter, time.Now()) {
+		headers.Set("Retry-After", retryAfter)
+	}
+	return body, headers
+}
+
+func validOpenAIPassthroughRetryAfter(raw string, now time.Time) bool {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return false
+	}
+	allDigits := true
+	for i := 0; i < len(raw); i++ {
+		if raw[i] < '0' || raw[i] > '9' {
+			allDigits = false
+			break
+		}
+	}
+	if allDigits {
+		seconds, err := strconv.ParseUint(raw, 10, 64)
+		return err == nil && seconds > 0
+	}
+	parsed, err := http.ParseTime(raw)
+	return err == nil && parsed.After(now)
+}
+
+func openAIPassthroughSafeMessage(statusCode int, contextMessage string) (int, string) {
+	if contextMessage != "" {
+		return statusCode, contextMessage
+	}
+	switch statusCode {
+	case http.StatusUnauthorized:
+		return http.StatusBadGateway, "Upstream authentication failed"
+	case http.StatusForbidden:
+		return http.StatusBadGateway, "Upstream access denied"
+	default:
+		if statusCode >= http.StatusInternalServerError {
+			return statusCode, "Upstream service temporarily unavailable"
+		}
+		return statusCode, "Upstream request failed"
 	}
 }
 
@@ -4494,8 +4787,9 @@ func (s *OpenAIGatewayService) handleFailoverErrorResponsePassthrough(
 	c *gin.Context,
 	account *Account,
 	requestBody []byte,
+	responseBody []byte,
 ) error {
-	body := s.readUpstreamErrorBody(resp)
+	body := responseBody
 
 	upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(body))
 	upstreamMsg = sanitizeOpenAIUpstreamDiagnosticText(upstreamMsg)
@@ -4523,11 +4817,21 @@ func (s *OpenAIGatewayService) handleFailoverErrorResponsePassthrough(
 		Detail:               upstreamDetail,
 		UpstreamResponseBody: upstreamDetail,
 	})
-	return &UpstreamFailoverError{
-		StatusCode:      resp.StatusCode,
-		ResponseBody:    body,
-		ResponseHeaders: resp.Header.Clone(),
+	if account == nil || account.Type != AccountTypeAPIKey {
+		return &UpstreamFailoverError{
+			StatusCode:      resp.StatusCode,
+			ResponseBody:    body,
+			ResponseHeaders: resp.Header.Clone(),
+		}
 	}
+	statusCode, safeMessage := openAIPassthroughSafeMessage(resp.StatusCode, "")
+	safeBody, safeHeaders := sanitizedOpenAIPassthroughError(statusCode, resp.Header, safeMessage)
+	return newSanitizedUpstreamFailoverError(
+		statusCode,
+		safeBody,
+		safeHeaders,
+		account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode),
+	)
 }
 
 func (s *OpenAIGatewayService) handleErrorResponsePassthrough(
@@ -4536,8 +4840,10 @@ func (s *OpenAIGatewayService) handleErrorResponsePassthrough(
 	c *gin.Context,
 	account *Account,
 	requestBody []byte,
+	responseBody []byte,
+	contextMatch openAIContextWindowMatch,
 ) error {
-	body := s.readUpstreamErrorBody(resp)
+	body := responseBody
 
 	upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(body))
 	upstreamMsg = sanitizeOpenAIUpstreamDiagnosticText(upstreamMsg)
@@ -4567,6 +4873,24 @@ func (s *OpenAIGatewayService) handleErrorResponsePassthrough(
 		Detail:               upstreamDetail,
 		UpstreamResponseBody: upstreamDetail,
 	})
+
+	if account != nil && account.Type == AccountTypeAPIKey {
+		contextMessage := ""
+		if contextMatch.matched() {
+			contextMessage = openAIContextWindowClientMessage()
+		}
+		statusCode, safeMessage := openAIPassthroughSafeMessage(resp.StatusCode, contextMessage)
+		safeBody, safeHeaders := sanitizedOpenAIPassthroughError(statusCode, resp.Header, safeMessage)
+		for key := range c.Writer.Header() {
+			c.Writer.Header().Del(key)
+		}
+		for key, values := range safeHeaders {
+			c.Writer.Header()[key] = append([]string(nil), values...)
+		}
+		MarkResponseCommitted(c)
+		c.Data(statusCode, safeHeaders.Get("Content-Type"), safeBody)
+		return fmt.Errorf("upstream error: %d (client response sanitized)", resp.StatusCode)
+	}
 
 	writeOpenAIPassthroughResponseHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 	contentType := resp.Header.Get("Content-Type")

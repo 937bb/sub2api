@@ -423,13 +423,13 @@ func TestNewOpenAIImageStatusError_UsesProvidedReadLimit(t *testing.T) {
 	require.Len(t, statusErr.ResponseBody, len(body))
 }
 
-func TestOpenAIUpstreamErrorBodyReadLimitForConfig_RespectsDiagnosticLimit(t *testing.T) {
+func TestOpenAIUpstreamErrorBodyReadLimitForConfig_IgnoresDiagnosticLimit(t *testing.T) {
 	cfg := &config.Config{Gateway: config.GatewayConfig{
 		LogUpstreamErrorBody:         true,
 		LogUpstreamErrorBodyMaxBytes: int(openAIUpstreamErrorBodyReadLimit) + 1024,
 	}}
 
-	require.Equal(t, int64(cfg.Gateway.LogUpstreamErrorBodyMaxBytes), openAIUpstreamErrorBodyReadLimitForConfig(cfg))
+	require.Equal(t, openAIUpstreamErrorBodyReadLimit, openAIUpstreamErrorBodyReadLimitForConfig(cfg))
 }
 
 func TestAccountSupportsOpenAIImageCapability_OAuthSupportsNative(t *testing.T) {
