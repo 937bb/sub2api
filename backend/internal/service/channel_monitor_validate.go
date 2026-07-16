@@ -74,10 +74,19 @@ func validateEndpoint(ep string) error {
 	if u.Host == "" {
 		return ErrChannelMonitorInvalidEndpoint
 	}
+	if u.Hostname() == "" {
+		return ErrChannelMonitorInvalidEndpoint
+	}
+	if strings.Contains(u.Host, "%") || !validMonitorURLAuthority(u) {
+		return ErrChannelMonitorInvalidEndpoint
+	}
+	if u.User != nil {
+		return ErrChannelMonitorEndpointPath
+	}
 	if u.Path != "" && u.Path != "/" {
 		return ErrChannelMonitorEndpointPath
 	}
-	if u.RawQuery != "" || u.Fragment != "" {
+	if u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || strings.Contains(ep, "#") {
 		return ErrChannelMonitorEndpointPath
 	}
 
@@ -92,6 +101,20 @@ func validateEndpoint(ep string) error {
 		return ErrChannelMonitorEndpointPrivate
 	}
 	return nil
+}
+
+func validMonitorURLAuthority(u *url.URL) bool {
+	host := u.Host
+	if strings.HasPrefix(host, "[") {
+		closeBracket := strings.LastIndexByte(host, ']')
+		if closeBracket < 0 {
+			return false
+		}
+		suffix := host[closeBracket+1:]
+		return suffix == "" || (strings.HasPrefix(suffix, ":") && validMonitorPort(suffix[1:]))
+	}
+	colon := strings.LastIndexByte(host, ':')
+	return colon < 0 || validMonitorPort(host[colon+1:])
 }
 
 // normalizeEndpoint 去除前后空白与末尾 `/`，保证存储统一为 origin。
