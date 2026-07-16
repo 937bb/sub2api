@@ -8,6 +8,8 @@ import (
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -442,6 +444,33 @@ func TestFrontendServer_InvalidateCache(t *testing.T) {
 	})
 }
 
+func TestOverrideFilesAlwaysRevalidate(t *testing.T) {
+	overrideDir := t.TempDir()
+	cleanPath := "assets/index-AbCd1234.js"
+	filePath := filepath.Join(overrideDir, cleanPath)
+	require.NoError(t, os.MkdirAll(filepath.Dir(filePath), 0o755))
+	require.NoError(t, os.WriteFile(filePath, []byte("override"), 0o644))
+
+	t.Run("frontend server", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest(http.MethodGet, "/"+cleanPath, nil)
+		server := &FrontendServer{overrideDir: overrideDir}
+
+		assert.True(t, server.tryServeOverride(c, cleanPath))
+		assert.Equal(t, mutableAssetCacheControl, w.Header().Get("Cache-Control"))
+	})
+
+	t.Run("legacy server", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest(http.MethodGet, "/"+cleanPath, nil)
+
+		assert.True(t, tryServeOverrideFile(c, overrideDir, cleanPath))
+		assert.Equal(t, mutableAssetCacheControl, w.Header().Get("Cache-Control"))
+	})
+}
+
 func TestFrontendServer_Middleware(t *testing.T) {
 	t.Run("skips_api_routes", func(t *testing.T) {
 		provider := &mockSettingsProvider{
@@ -561,6 +590,24 @@ func TestFrontendServer_Middleware(t *testing.T) {
 
 		assert.Equal(t, http.StatusOK, w.Code)
 		assert.Contains(t, w.Header().Get("Content-Type"), "image/png")
+		assert.Equal(t, mutableAssetCacheControl, w.Header().Get("Cache-Control"))
+
+		entries, err := fs.ReadDir(server.distFS, "assets")
+		require.NoError(t, err)
+		fingerprintedPath := ""
+		for _, entry := range entries {
+			candidate := "assets/" + entry.Name()
+			if !entry.IsDir() && isFingerprintedEmbeddedAssetPath(candidate) {
+				fingerprintedPath = candidate
+				break
+			}
+		}
+		require.NotEmpty(t, fingerprintedPath, "generated Vite output must contain a fingerprinted asset")
+
+		assetWriter := httptest.NewRecorder()
+		router.ServeHTTP(assetWriter, httptest.NewRequest(http.MethodGet, "/"+fingerprintedPath, nil))
+		assert.Equal(t, http.StatusOK, assetWriter.Code)
+		assert.Equal(t, immutableAssetCacheControl, assetWriter.Header().Get("Cache-Control"))
 	})
 
 	t.Run("routes_missing_assets_and_dotted_spa_paths", func(t *testing.T) {
