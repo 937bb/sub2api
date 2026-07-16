@@ -3209,7 +3209,7 @@ func TestHandleSSEToJSON_ReconstructsImageGenerationOutputItemDone(t *testing.T)
 		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
 	}
 	body := []byte(strings.Join([]string{
-		`data: {"type":"response.output_item.done","item":{"id":"ig_123","type":"image_generation_call","result":"aGVsbG8=","revised_prompt":"draw a cat","output_format":"png"}}`,
+		`data: {"type":"response.output_item.done","item":{"id":"ig_123","type":"image_generation_call","status":"generating","result":"aGVsbG8=","revised_prompt":"draw a cat","output_format":"png","opaque":{"keep":true}}}`,
 		`data: {"type":"response.completed","response":{"id":"resp_img","model":"gpt-5.4","output":[],"usage":{"input_tokens":7,"output_tokens":9,"output_tokens_details":{"image_tokens":4}}}}`,
 		`data: [DONE]`,
 	}, "\n"))
@@ -3222,6 +3222,101 @@ func TestHandleSSEToJSON_ReconstructsImageGenerationOutputItemDone(t *testing.T)
 	require.Equal(t, "image_generation_call", gjson.Get(rec.Body.String(), "output.0.type").String())
 	require.Equal(t, "aGVsbG8=", gjson.Get(rec.Body.String(), "output.0.result").String())
 	require.Equal(t, "draw a cat", gjson.Get(rec.Body.String(), "output.0.revised_prompt").String())
+	require.Equal(t, "completed", gjson.Get(rec.Body.String(), "output.0.status").String())
+	require.True(t, gjson.Get(rec.Body.String(), "output.0.opaque.keep").Bool())
+}
+
+func TestHandleSSEToJSON_NormalizesCompletedImageStatuses(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/", nil)
+	svc := &OpenAIGatewayService{cfg: &config.Config{}}
+	resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}}
+	body := []byte(`data: {"type":"response.completed","response":{"id":"resp_img","output":[{"type":"image_generation_call","status":"generating","result":"one","opaque":1},{"type":"image_generation_call","status":"in_progress","result":"two","opaque":2}],"usage":{"input_tokens":5,"output_tokens":6}}}`)
+
+	result, err := svc.handleSSEToJSON(resp, c, body, "gpt-5.4", "gpt-5.4")
+	require.NoError(t, err)
+	require.Equal(t, 5, result.usage.InputTokens)
+	require.Equal(t, 6, result.usage.OutputTokens)
+	require.Equal(t, "completed", gjson.Get(rec.Body.String(), "output.0.status").String())
+	require.Equal(t, "completed", gjson.Get(rec.Body.String(), "output.1.status").String())
+	require.Equal(t, int64(2), gjson.Get(rec.Body.String(), "output.1.opaque").Int())
+}
+
+func TestHandlePassthroughSSEToJSON_NormalizesCompletedImageStatuses(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/", nil)
+	svc := &OpenAIGatewayService{cfg: &config.Config{}}
+	resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}}
+	body := []byte(`data: {"type":"response.done","response":{"id":"resp_img","output":[{"type":"image_generation_call","status":"in_progress","result":"one","opaque":"kept"}],"usage":{"input_tokens":7,"output_tokens":8}}}`)
+
+	result, err := svc.handlePassthroughSSEToJSON(resp, c, body, "", "")
+	require.NoError(t, err)
+	require.Equal(t, 7, result.usage.InputTokens)
+	require.Equal(t, 8, result.usage.OutputTokens)
+	require.Equal(t, "completed", gjson.Get(rec.Body.String(), "output.0.status").String())
+	require.Equal(t, "kept", gjson.Get(rec.Body.String(), "output.0.opaque").String())
+}
+
+func TestNormalizeCompletedImageGenerationStatusPreservesOpaqueRawBytes(t *testing.T) {
+	input := []byte("{\n  \"type\" : \"response.completed\", \"response\" : { \"status\":\"completed\", \"output\" : [" +
+		`{ "type":"image_generation_call", "status" : "generating", "result":"one", "slash":"a\\/b", "unicode":"\\u0061", "number":1.2300e+04, "dup":1, "dup":2, "nested" : { "raw" : [ 1,  2 ] } },` +
+		` {"type":"message","status":"in_progress","opaque" : { "x" : "\\u263a" }},` +
+		` {"type":"image_generation_call","status":"in_progress","result":"two","raw":[ true ,null, {"k" : "v"} ]}` +
+		"] , \"tail\" : { \"keep\" : -0.00E-2 } } }")
+	want := bytes.Replace(input, []byte(`"status" : "generating"`), []byte(`"status" : "completed"`), 1)
+	want = bytes.Replace(want, []byte(`"status":"in_progress","result":"two"`), []byte(`"status":"completed","result":"two"`), 1)
+
+	got, changed := normalizeCompletedImageGenerationStatus(input)
+	require.True(t, changed)
+	require.Equal(t, string(want), string(got))
+}
+
+func TestNormalizeCompletedImageGenerationStatusLargeOutput(t *testing.T) {
+	const itemCount = 5000
+	var input strings.Builder
+	input.WriteString(`{"type":"response.done","response":{"output":[`)
+	for i := 0; i < itemCount; i++ {
+		if i > 0 {
+			input.WriteByte(',')
+		}
+		fmt.Fprintf(&input, ` {"type":"image_generation_call","status":"in_progress","result":"%d","opaque":1.00e+02}`, i)
+	}
+	input.WriteString(`]}}`)
+
+	got, changed := normalizeCompletedImageGenerationStatus([]byte(input.String()))
+	require.True(t, changed)
+	require.Equal(t, itemCount, bytes.Count(got, []byte(`"status":"completed"`)))
+	require.Equal(t, itemCount, bytes.Count(got, []byte(`"opaque":1.00e+02`)))
+}
+
+func BenchmarkNormalizeCompletedImageGenerationStatusLargeOutput(b *testing.B) {
+	for _, itemCount := range []int{100, 1000, 5000} {
+		b.Run(fmt.Sprintf("items_%d", itemCount), func(b *testing.B) {
+			var input strings.Builder
+			input.WriteString(`{"type":"response.completed","response":{"output":[`)
+			for i := 0; i < itemCount; i++ {
+				if i > 0 {
+					input.WriteByte(',')
+				}
+				fmt.Fprintf(&input, `{"type":"image_generation_call","status":"generating","result":"%d","opaque":{"n":1.00e+02}}`, i)
+			}
+			input.WriteString(`]}}`)
+			payload := []byte(input.String())
+			b.SetBytes(int64(len(payload)))
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				_, changed := normalizeCompletedImageGenerationStatus(payload)
+				if !changed {
+					b.Fatal("expected normalization")
+				}
+			}
+		})
+	}
 }
 
 func TestHandleSSEToJSON_NoFinalResponseKeepsSSEBody(t *testing.T) {

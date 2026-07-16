@@ -4877,6 +4877,11 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 				line = "data: " + string(normalizedData)
 			}
 			eventType := classifyOpenAIResponseSSEEvent(dataBytes, currentEventType)
+			if normalizedData, normalized := normalizeCompletedImageGenerationStatusForEvent(dataBytes, eventType); normalized {
+				dataBytes = normalizedData
+				trimmedData = strings.TrimSpace(string(normalizedData))
+				line = "data: " + string(normalizedData)
+			}
 			if eventType == "response.failed" {
 				failedMessage = extractOpenAISSEErrorMessage(dataBytes)
 				s.parseSSEUsageBytesForEvent(dataBytes, usage, eventType)
@@ -5810,6 +5815,13 @@ func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp
 				line = "data: " + data
 				eventType = classifyOpenAIResponseSSEEvent(dataBytes, currentEventType)
 			}
+			if eventType == "response.output_item.done" {
+				if normalizedData, normalized := normalizeCompletedImageGenerationStatusForEvent(dataBytes, eventType); normalized {
+					dataBytes = normalizedData
+					data = string(normalizedData)
+					line = "data: " + data
+				}
+			}
 			if imageOutput, ok := extractImageGenerationOutputFromSSEData(dataBytes, streamSeenImages); ok {
 				streamImageOutputs = append(streamImageOutputs, imageOutput)
 			}
@@ -5824,6 +5836,13 @@ func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp
 				data = string(normalizedData)
 				line = "data: " + data
 				eventType = classifyOpenAIResponseSSEEvent(dataBytes, currentEventType)
+			}
+			if eventType == "response.completed" || eventType == "response.done" {
+				if normalizedData, normalized := normalizeCompletedImageGenerationStatusForEvent(dataBytes, eventType); normalized {
+					dataBytes = normalizedData
+					data = string(normalizedData)
+					line = "data: " + data
+				}
 			}
 			if eventType == "response.failed" {
 				if sanitizedData, sanitized := sanitizeOpenAIResponseFailedEventForClient(dataBytes, eventType); sanitized {
@@ -6793,6 +6812,9 @@ func extractCodexFinalResponse(body string) ([]byte, bool) {
 		}
 		eventType := classifyOpenAIResponseSSEEvent(data, frame.EventType)
 		if eventType == "response.done" || eventType == "response.completed" {
+			if normalized, changed := normalizeCompletedImageGenerationStatusForEvent(data, eventType); changed {
+				data = normalized
+			}
 			if response := gjson.GetBytes(data, "response"); response.Exists() && response.Type == gjson.JSON && response.Raw != "" {
 				finalResponse = []byte(response.Raw)
 			}
@@ -6802,6 +6824,98 @@ func extractCodexFinalResponse(body string) ([]byte, bool) {
 		return finalResponse, true
 	}
 	return nil, false
+}
+
+func normalizeCompletedImageGenerationStatus(data []byte) ([]byte, bool) {
+	eventType := strings.TrimSpace(gjson.GetBytes(data, "type").String())
+	return normalizeCompletedImageGenerationStatusForEvent(data, eventType)
+}
+
+func normalizeCompletedImageGenerationStatusForEvent(data []byte, eventType string) ([]byte, bool) {
+	switch eventType {
+	case "response.output_item.done", "response.completed", "response.done":
+	default:
+		return data, false
+	}
+	if len(data) == 0 || !gjson.ValidBytes(data) {
+		return data, false
+	}
+
+	shouldNormalize := func(item gjson.Result) bool {
+		if !item.Exists() || !item.IsObject() || strings.TrimSpace(item.Get("type").String()) != "image_generation_call" {
+			return false
+		}
+		result := item.Get("result")
+		if result.Type != gjson.String || strings.TrimSpace(result.String()) == "" {
+			return false
+		}
+		switch strings.TrimSpace(item.Get("status").String()) {
+		case "generating", "in_progress":
+			return true
+		default:
+			return false
+		}
+	}
+
+	switch eventType {
+	case "response.output_item.done":
+		if !shouldNormalize(gjson.GetBytes(data, "item")) {
+			return data, false
+		}
+		updated, err := sjson.SetBytes(data, "item.status", "completed")
+		if err != nil {
+			return data, false
+		}
+		return updated, true
+	case "response.completed", "response.done":
+		response := gjson.GetBytes(data, "response")
+		status := strings.ToLower(strings.TrimSpace(response.Get("status").String()))
+		switch status {
+		case "failed", "incomplete", "cancelled", "canceled":
+			return data, false
+		}
+		if responseError := response.Get("error"); responseError.Exists() && responseError.Type != gjson.Null {
+			return data, false
+		}
+		output := gjson.GetBytes(data, "response.output")
+		if !output.Exists() || !output.IsArray() {
+			return data, false
+		}
+		type replacement struct {
+			start int
+			end   int
+		}
+		replacements := make([]replacement, 0, 1)
+		newLen := len(data)
+		for _, item := range output.Array() {
+			if !shouldNormalize(item) {
+				continue
+			}
+			status := item.Get("status")
+			if status.Index < 0 || status.Index+len(status.Raw) > len(data) {
+				return data, false
+			}
+			replacements = append(replacements, replacement{
+				start: status.Index,
+				end:   status.Index + len(status.Raw),
+			})
+			newLen += len(`"completed"`) - len(status.Raw)
+		}
+		if len(replacements) == 0 {
+			return data, false
+		}
+		updated := make([]byte, 0, newLen)
+		previous := 0
+		for _, replacement := range replacements {
+			updated = append(updated, data[previous:replacement.start]...)
+			updated = append(updated, `"completed"`...)
+			previous = replacement.end
+		}
+		updated = append(updated, data[previous:]...)
+		return updated, true
+	default:
+		return data, false
+	}
 }
 
 func normalizeResponsesStreamingTerminalOutput(data []byte, acc *apicompat.BufferedResponseAccumulator, imageOutputs []json.RawMessage) ([]byte, bool) {
@@ -6851,10 +6965,15 @@ func reconstructResponseOutputFromSSE(bodyText string) ([]byte, bool) {
 	imageOutputs := make([]json.RawMessage, 0, 1)
 	seenImages := make(map[string]struct{})
 	forEachOpenAISSEDataPayload(bodyText, func(data []byte) {
+		eventType := strings.TrimSpace(gjson.GetBytes(data, "type").String())
+		if eventType == "response.output_item.done" {
+			if normalized, changed := normalizeCompletedImageGenerationStatusForEvent(data, eventType); changed {
+				data = normalized
+			}
+		}
 		if imageOutput, ok := extractImageGenerationOutputFromSSEData(data, seenImages); ok {
 			imageOutputs = append(imageOutputs, imageOutput)
 		}
-		eventType := strings.TrimSpace(gjson.GetBytes(data, "type").String())
 		if responsesStreamEventMayContributeToOutput(eventType) {
 			var event apicompat.ResponsesStreamEvent
 			if err := json.Unmarshal(data, &event); err == nil {
