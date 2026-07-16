@@ -23,6 +23,7 @@ func (s *OpenAIGatewayService) ForwardEmbeddings(
 	account *Account,
 	body []byte,
 ) (*OpenAIForwardResult, error) {
+	ctx = withHTTPAttemptAuthority(ctx)
 	startTime := time.Now()
 
 	originalModel := strings.TrimSpace(gjson.GetBytes(body, "model").String())
@@ -85,8 +86,11 @@ func (s *OpenAIGatewayService) ForwardEmbeddings(
 	if account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
 	}
-	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
+	resp, err := doHTTPUpstream(ctx, s.httpUpstream, upstreamReq, proxyURL, account.ID, account.Concurrency)
 	if err != nil {
+		if IsHTTPUpstreamAttemptNotAdmitted(err) || errors.Is(err, context.Canceled) {
+			return nil, err
+		}
 		safeErr := sanitizeOpenAIUpstreamDiagnosticText(err.Error())
 		setOpsUpstreamError(c, 0, safeErr, "")
 		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{

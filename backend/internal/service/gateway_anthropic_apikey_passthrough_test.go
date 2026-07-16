@@ -65,6 +65,83 @@ func (u *anthropicHTTPUpstreamRecorder) DoWithTLS(req *http.Request, proxyURL st
 	return u.Do(req, proxyURL, accountID, accountConcurrency)
 }
 
+type anthropicQueuedHTTPUpstream struct {
+	responses []*http.Response
+	onDo      func(int)
+	calls     int
+}
+
+func (u *anthropicQueuedHTTPUpstream) Do(
+	_ *http.Request,
+	_ string,
+	_ int64,
+	_ int,
+) (*http.Response, error) {
+	u.calls++
+	if u.onDo != nil {
+		u.onDo(u.calls)
+	}
+	if u.calls > len(u.responses) {
+		return nil, errors.New("unexpected upstream call")
+	}
+	return u.responses[u.calls-1], nil
+}
+
+func (u *anthropicQueuedHTTPUpstream) DoWithTLS(
+	req *http.Request,
+	proxyURL string,
+	accountID int64,
+	accountConcurrency int,
+	_ *tlsfingerprint.Profile,
+) (*http.Response, error) {
+	return u.Do(req, proxyURL, accountID, accountConcurrency)
+}
+
+func TestGatewayService_AnthropicAPIKeyPassthrough_RetryCancellationPreservesCompletedError(
+	t *testing.T,
+) {
+	gin.SetMode(gin.TestMode)
+	ctx, cancel := context.WithCancel(context.Background())
+	ctx = withHTTPAttemptAuthority(ctx)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	upstream := &anthropicQueuedHTTPUpstream{
+		responses: []*http.Response{{
+			StatusCode: http.StatusServiceUnavailable,
+			Header:     http.Header{"X-Request-Id": []string{"completed"}},
+			Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"completed error"}}`)),
+		}},
+		onDo: func(call int) {
+			if call == 1 {
+				cancel()
+			}
+		},
+	}
+	svc := &GatewayService{
+		httpUpstream: upstream,
+		cfg:          &config.Config{},
+	}
+	account := newAnthropicAPIKeyAccountForTest()
+
+	_, err := svc.forwardAnthropicAPIKeyPassthrough(
+		ctx,
+		c,
+		account,
+		[]byte(`{"model":"claude-3-5-sonnet-latest","messages":[]}`),
+		"claude-3-5-sonnet-latest",
+		"claude-3-5-sonnet-latest",
+		false,
+		time.Now(),
+	)
+
+	require.Error(t, err)
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.Contains(t, string(failoverErr.ResponseBody), "completed error")
+	require.Equal(t, 1, upstream.calls)
+}
+
 type streamReadCloser struct {
 	payload []byte
 	sent    bool
@@ -188,6 +265,33 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_ForwardStreamPreservesBodyAnd
 	require.NotContains(t, rec.Body.String(), `"cache_read_input_tokens":7`, "透传输出不应被网关改写")
 	require.Equal(t, 7, result.Usage.CacheReadInputTokens, "计费 usage 解析应保留 cached_tokens 兼容")
 	require.Empty(t, rec.Header().Get("Set-Cookie"), "响应头应经过安全过滤")
+}
+
+func TestGatewayService_AnthropicAPIKeyPassthrough_CountTokensCancellationBeforeAdmissionHasNoSideEffects(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, cancel := context.WithCancel(context.Background())
+	ctx = WithHTTPAttemptAdmissionHook(ctx, cancel)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages/count_tokens", nil)
+	upstream := &anthropicHTTPUpstreamRecorder{}
+	svc := &GatewayService{
+		httpUpstream: upstream,
+		cfg:          &config.Config{},
+	}
+	account := newAnthropicAPIKeyAccountForTest()
+	parsed := &ParsedRequest{
+		Model: "claude-3-5-sonnet-latest",
+		Body:  NewRequestBodyRef([]byte(`{"model":"claude-3-5-sonnet-latest","messages":[]}`)),
+	}
+
+	err := svc.ForwardCountTokens(ctx, c, account, parsed)
+
+	require.True(t, IsHTTPUpstreamAttemptNotAdmitted(err))
+	require.ErrorIs(t, err, context.Canceled)
+	require.Nil(t, upstream.lastReq)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Empty(t, rec.Body.String())
 }
 
 func TestGatewayService_AnthropicAPIKeyPassthrough_ForwardCountTokensPreservesBody(t *testing.T) {

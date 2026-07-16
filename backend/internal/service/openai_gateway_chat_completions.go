@@ -55,6 +55,7 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	body []byte,
 	promptCacheKey string,
 ) (*OpenAIForwardResult, error) {
+	ctx = withHTTPAttemptAuthority(ctx)
 	startTime := time.Now()
 
 	restrictionResult := s.detectCodexClientRestriction(c, account)
@@ -231,6 +232,7 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	}
 
 	var resp *http.Response
+	var completedError completedResponseSnapshot
 	encryptedContextRetryTried := false
 	for {
 		// 6. Build and send the upstream request. Responses-shaped OAuth bridge
@@ -246,8 +248,12 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 			upstreamReq.Header.Set("session_id", generateSessionUUID(isolateOpenAISessionID(apiKeyID, promptCacheKey)))
 		}
 
-		resp, err = s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
+		resp, err = doHTTPUpstream(ctx, s.httpUpstream, upstreamReq, proxyURL, account.ID, account.Concurrency)
 		if err != nil {
+			if restored, canceled := completedError.ifRetryCanceled(ctx); canceled {
+				resp = restored
+				break
+			}
 			return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
 		}
 		if !isResponsesShape || !account.IsOpenAIOAuthLike() || encryptedContextRetryTried || resp.StatusCode != http.StatusBadRequest {
@@ -256,6 +262,7 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 
 		respBody := s.readUpstreamErrorBody(resp)
 		_ = resp.Body.Close()
+		completedError = snapshotCompletedResponse(resp, respBody)
 		if !isOpenAIEncryptedContextErrorCode(extractUpstreamErrorCode(respBody)) {
 			resp.Body = io.NopCloser(bytes.NewReader(respBody))
 			break
@@ -273,6 +280,10 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 			return nil, fmt.Errorf("serialize encrypted context retry body: %w", err)
 		}
 		encryptedContextRetryTried = true
+		if restored, canceled := completedError.ifRetryCanceled(ctx); canceled {
+			resp = restored
+			break
+		}
 	}
 	defer func() { _ = resp.Body.Close() }()
 

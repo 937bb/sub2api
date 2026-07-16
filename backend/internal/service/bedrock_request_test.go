@@ -1,7 +1,11 @@
 package service
 
 import (
+	"context"
+	"io"
+	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,6 +14,71 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
+
+func TestExecuteBedrockUpstreamCancellationBeforeAdmissionHasNoSideEffects(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, cancel := context.WithCancel(context.Background())
+	ctx = withHTTPAttemptAuthority(WithHTTPAttemptAdmissionHook(ctx, cancel))
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	upstream := &attemptRecordingUpstream{}
+	svc := &GatewayService{httpUpstream: upstream}
+	account := &Account{
+		ID:          1,
+		Name:        "bedrock-test",
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeBedrock,
+		Concurrency: 1,
+		Credentials: map[string]any{"api_key": "test", "auth_mode": "apikey"},
+	}
+
+	resp, err := svc.executeBedrockUpstream(ctx, c, account, []byte(`{}`), "model", "us-east-1", false, nil, "test", "")
+
+	require.Nil(t, resp)
+	require.True(t, IsHTTPUpstreamAttemptNotAdmitted(err))
+	require.ErrorIs(t, err, context.Canceled)
+	require.Zero(t, upstream.calls)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Empty(t, rec.Body.String())
+}
+
+func TestExecuteBedrockUpstreamLaterCancellationPreservesCompletedResponse(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, cancel := context.WithCancel(context.Background())
+	upstream := &attemptRecordingUpstream{
+		response: &http.Response{
+			StatusCode: http.StatusServiceUnavailable,
+			Header:     http.Header{"X-Amzn-Requestid": []string{"completed"}},
+			Body:       io.NopCloser(strings.NewReader(`{"error":"completed"}`)),
+		},
+		onDo: func(call int) {
+			if call == 1 {
+				cancel()
+			}
+		},
+	}
+	svc := &GatewayService{httpUpstream: upstream}
+	account := &Account{
+		ID:          1,
+		Name:        "bedrock-test",
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeBedrock,
+		Concurrency: 1,
+		Credentials: map[string]any{"api_key": "test", "auth_mode": "apikey"},
+	}
+
+	resp, err := svc.executeBedrockUpstream(withHTTPAttemptAuthority(ctx), nil, account, []byte(`{}`), "model", "us-east-1", false, nil, "test", "")
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Equal(t, http.StatusServiceUnavailable, resp.StatusCode)
+	require.Equal(t, "completed", resp.Header.Get("X-Amzn-Requestid"))
+	body, readErr := io.ReadAll(resp.Body)
+	require.NoError(t, readErr)
+	require.NoError(t, resp.Body.Close())
+	require.Equal(t, `{"error":"completed"}`, string(body))
+	require.Equal(t, 1, upstream.calls)
+}
 
 func TestPrepareBedrockRequestBody_BasicFields(t *testing.T) {
 	input := `{"model":"claude-opus-4-6","stream":true,"max_tokens":1024,"messages":[{"role":"user","content":"hi"}]}`

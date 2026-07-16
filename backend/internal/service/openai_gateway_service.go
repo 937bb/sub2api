@@ -3170,6 +3170,9 @@ func (s *OpenAIGatewayService) handleFailoverSideEffects(ctx context.Context, re
 
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
+	if GetOpenAIClientTransport(c) != OpenAIClientTransportWS {
+		ctx = withHTTPAttemptAuthority(ctx)
+	}
 	startTime := time.Now()
 
 	restrictionResult := s.detectCodexClientRestriction(c, account)
@@ -3835,6 +3838,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	}
 
 	httpInvalidEncryptedContentRetryTried := false
+	var completedError completedResponseSnapshot
 	for {
 		// Build upstream request
 		upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
@@ -3852,10 +3856,14 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 
 		// Send request
 		upstreamStart := time.Now()
-		resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
+		resp, err := doHTTPUpstream(ctx, s.httpUpstream, upstreamReq, proxyURL, account.ID, account.Concurrency)
 		SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 		if err != nil {
-			return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
+			if restored, canceled := completedError.ifRetryCanceled(ctx); canceled {
+				resp = restored
+			} else {
+				return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
+			}
 		}
 
 		// Handle error response
@@ -3863,6 +3871,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			respBody := s.readUpstreamErrorBody(resp)
 			_ = resp.Body.Close()
 			resp.Body = io.NopCloser(bytes.NewReader(respBody))
+			completedError = snapshotCompletedResponse(resp, respBody)
 
 			upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
 			upstreamMsg = sanitizeOpenAIUpstreamDiagnosticText(upstreamMsg)
@@ -3879,7 +3888,12 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 					}
 					httpInvalidEncryptedContentRetryTried = true
 					logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Retrying non-WSv2 request once after encrypted context error code=%s (account: %s)", upstreamCode, account.Name)
-					continue
+					if restored, canceled := completedError.ifRetryCanceled(ctx); canceled {
+						resp = restored
+						respBody = completedError.body
+					} else {
+						continue
+					}
 				}
 				logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Skip non-WSv2 encrypted context retry because stale reasoning/compaction items are missing (account: %s)", account.Name)
 			}
@@ -4186,7 +4200,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	}
 
 	upstreamStart := time.Now()
-	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
+	resp, err := doHTTPUpstream(ctx, s.httpUpstream, upstreamReq, proxyURL, account.ID, account.Concurrency)
 	SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 	if err != nil {
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, true)
@@ -9421,6 +9435,29 @@ func (k *openAICompactSSEKeepalive) markStoppedLocked() {
 	}
 }
 func (k *openAICompactSSEKeepalive) Stop() { k.mu.Lock(); k.markStoppedLocked(); k.mu.Unlock() }
+
+// StopOpenAICompactSSEKeepaliveCommitted stops request keepalives and reports
+// whether they already committed a 200 response. On return no later heartbeat
+// can write, so the handler can safely inspect or take over the writer.
+func StopOpenAICompactSSEKeepaliveCommitted(c *gin.Context) bool {
+	if c == nil {
+		return false
+	}
+	v, ok := c.Get(openAICompactSSEKeepaliveKey)
+	if !ok {
+		return false
+	}
+	k, ok := v.(*openAICompactSSEKeepalive)
+	if !ok || k == nil {
+		return false
+	}
+	k.mu.Lock()
+	k.markStoppedLocked()
+	committed := k.started
+	k.mu.Unlock()
+	return committed
+}
+
 func openAICompactKeepaliveAdjustedWrittenSize(c *gin.Context) int {
 	if c == nil || c.Writer == nil {
 		return -1

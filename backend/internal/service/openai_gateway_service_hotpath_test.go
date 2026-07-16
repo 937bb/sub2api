@@ -574,6 +574,56 @@ func TestOpenAIGatewayService_Forward_HTTPRetryRecoveryDoesNotDecodeBeforeError(
 	require.Equal(t, "message", gjson.GetBytes(upstream.bodies[1], "input.0.type").String())
 }
 
+func TestOpenAIGatewayService_Forward_HTTPRetryCancellationPreservesCompletedError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, cancel := context.WithCancel(context.Background())
+	upstream := &httpUpstreamRecorder{
+		responses: []*http.Response{
+			{
+				StatusCode: http.StatusBadRequest,
+				Header: http.Header{
+					"Content-Type": []string{"application/json"},
+					"X-Request-Id": []string{"completed-request"},
+				},
+				Body: io.NopCloser(strings.NewReader(`{"error":{"code":"invalid_encrypted_content","type":"invalid_request_error","message":"completed error"}}`)),
+			},
+		},
+		onDo: func(call int) {
+			if call == 1 {
+				cancel()
+			}
+		},
+	}
+	cfg := &config.Config{}
+	cfg.Security.URLAllowlist.Enabled = false
+	svc := &OpenAIGatewayService{cfg: cfg, httpUpstream: upstream}
+	account := &Account{
+		ID:          10,
+		Name:        "openai-apikey",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key":  "sk-test",
+			"base_url": "https://example.com",
+		},
+		Extra: map[string]any{"use_responses_api": true},
+	}
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", nil)
+	SetOpenAIClientTransport(c, OpenAIClientTransportHTTP)
+
+	body := []byte(`{"model":"gpt-5","stream":false,"input":[{"type":"reasoning","encrypted_content":"gAAA","summary":[]},{"type":"message","content":[{"type":"input_text","text":"hi"}]}]}`)
+	result, err := svc.Forward(ctx, c, account, body)
+
+	require.Nil(t, result)
+	require.Error(t, err)
+	require.Len(t, upstream.requests, 1)
+	require.Equal(t, http.StatusBadGateway, rec.Code)
+	require.Contains(t, err.Error(), "completed error")
+}
+
 func TestOpenAIGatewayService_Forward_HTTPRetryRecoveryDropsReasoningWithoutEncryptedContent(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	upstream := &httpUpstreamRecorder{

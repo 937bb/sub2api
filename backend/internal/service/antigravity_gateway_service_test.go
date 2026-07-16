@@ -186,6 +186,34 @@ func (s *queuedHTTPUpstreamStub) DoWithTLS(req *http.Request, proxyURL string, a
 	return s.Do(req, proxyURL, accountID, concurrency)
 }
 
+func TestAttemptCreditsOveragesRetryUsesHTTPAttemptAuthority(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	ctx = withHTTPAttemptAuthority(WithHTTPAttemptAdmissionHook(ctx, cancel))
+	upstream := &queuedHTTPUpstreamStub{}
+	account := &Account{ID: 1, Concurrency: 1}
+	svc := &AntigravityGatewayService{}
+
+	result := svc.attemptCreditsOveragesRetry(
+		antigravityRetryLoopParams{
+			ctx:          ctx,
+			prefix:       "test",
+			account:      account,
+			action:       "generateContent",
+			body:         []byte(`{"model":"test"}`),
+			httpUpstream: upstream,
+		},
+		"https://example.com",
+		"test",
+		0,
+		http.StatusTooManyRequests,
+		nil,
+	)
+
+	require.True(t, result.handled)
+	require.Nil(t, result.resp)
+	require.Zero(t, upstream.callCount)
+}
+
 type recordingInternal500CounterCache struct {
 	incrementCalls []int64
 	resetCalls     []int64

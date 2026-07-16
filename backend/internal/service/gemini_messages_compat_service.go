@@ -580,6 +580,7 @@ func (s *GeminiMessagesCompatService) SelectAccountForAIStudioEndpoints(ctx cont
 }
 
 func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (*ForwardResult, error) {
+	ctx = withHTTPAttemptAuthority(ctx)
 	startTime := time.Now()
 
 	var req struct {
@@ -763,6 +764,7 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 	}
 
 	var resp *http.Response
+	var completedError completedResponseSnapshot
 	signatureRetryStage := 0
 	for attempt := 1; attempt <= geminiMaxRetries; attempt++ {
 		upstreamReq, idHeader, err := buildReq(ctx)
@@ -778,8 +780,15 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 		}
 		requestIDHeader = idHeader
 
-		resp, err = s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
+		resp, err = doHTTPUpstream(ctx, s.httpUpstream, upstreamReq, proxyURL, account.ID, account.Concurrency)
 		if err != nil {
+			if restored, canceled := completedError.ifRetryCanceled(ctx); canceled {
+				resp = restored
+				break
+			}
+			if IsHTTPUpstreamAttemptNotAdmitted(err) || errors.Is(err, context.Canceled) {
+				return nil, err
+			}
 			safeErr := sanitizeUpstreamErrorMessage(err.Error())
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 				Platform:           account.Platform,
@@ -803,6 +812,7 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 		if resp.StatusCode == http.StatusBadRequest && signatureRetryStage < 2 {
 			respBody := s.readUpstreamErrorBody(resp)
 			_ = resp.Body.Close()
+			completedError = snapshotCompletedResponse(resp, respBody)
 
 			if isGeminiSignatureRelatedError(respBody) {
 				upstreamReqID := resp.Header.Get(requestIDHeader)
@@ -850,6 +860,10 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 					geminiReq = retryGeminiReq
 					// Consume one retry budget attempt and continue with the updated request payload.
 					sleepGeminiBackoff(1)
+					if restored, canceled := completedError.ifRetryCanceled(ctx); canceled {
+						resp = restored
+						break
+					}
 					continue
 				}
 			}
@@ -874,6 +888,7 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 		if resp.StatusCode >= 400 && s.shouldRetryGeminiUpstreamError(account, resp.StatusCode) {
 			respBody := s.readUpstreamErrorBody(resp)
 			_ = resp.Body.Close()
+			completedError = snapshotCompletedResponse(resp, respBody)
 			// Don't treat insufficient-scope as transient.
 			if resp.StatusCode == 403 && isGeminiInsufficientScope(resp.Header, respBody) {
 				resp = &http.Response{
@@ -915,6 +930,10 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 
 				logger.LegacyPrintf("service.gemini_messages_compat", "Gemini account %d: upstream status %d, retry %d/%d", account.ID, resp.StatusCode, attempt, geminiMaxRetries)
 				sleepGeminiBackoff(attempt)
+				if restored, canceled := completedError.ifRetryCanceled(ctx); canceled {
+					resp = restored
+					break
+				}
 				continue
 			}
 			// Final attempt: surface the upstream error body (mapped below) instead of a generic retry error.
@@ -1107,6 +1126,7 @@ func isGeminiSignatureRelatedError(respBody []byte) bool {
 }
 
 func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.Context, account *Account, originalModel string, action string, stream bool, body []byte) (*ForwardResult, error) {
+	ctx = withHTTPAttemptAuthority(ctx)
 	startTime := time.Now()
 
 	if strings.TrimSpace(originalModel) == "" {
@@ -1285,6 +1305,7 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 	}
 
 	var resp *http.Response
+	var completedError completedResponseSnapshot
 	for attempt := 1; attempt <= geminiMaxRetries; attempt++ {
 		upstreamReq, idHeader, err := buildReq(ctx)
 		if err != nil {
@@ -1299,8 +1320,15 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 		}
 		requestIDHeader = idHeader
 
-		resp, err = s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
+		resp, err = doHTTPUpstream(ctx, s.httpUpstream, upstreamReq, proxyURL, account.ID, account.Concurrency)
 		if err != nil {
+			if restored, canceled := completedError.ifRetryCanceled(ctx); canceled {
+				resp = restored
+				break
+			}
+			if IsHTTPUpstreamAttemptNotAdmitted(err) || errors.Is(err, context.Canceled) {
+				return nil, err
+			}
 			safeErr := sanitizeUpstreamErrorMessage(err.Error())
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 				Platform:           account.Platform,
@@ -1343,6 +1371,7 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 		if resp.StatusCode >= 400 && s.shouldRetryGeminiUpstreamError(account, resp.StatusCode) {
 			respBody := s.readUpstreamErrorBody(resp)
 			_ = resp.Body.Close()
+			completedError = snapshotCompletedResponse(resp, respBody)
 			// Don't treat insufficient-scope as transient.
 			if resp.StatusCode == 403 && isGeminiInsufficientScope(resp.Header, respBody) {
 				resp = &http.Response{
@@ -1383,6 +1412,10 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 
 				logger.LegacyPrintf("service.gemini_messages_compat", "Gemini account %d: upstream status %d, retry %d/%d", account.ID, resp.StatusCode, attempt, geminiMaxRetries)
 				sleepGeminiBackoff(attempt)
+				if restored, canceled := completedError.ifRetryCanceled(ctx); canceled {
+					resp = restored
+					break
+				}
 				continue
 			}
 			if action == "countTokens" {
@@ -2634,6 +2667,7 @@ func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Conte
 //
 // This is used to support Gemini SDKs that call models listing endpoints before generation.
 func (s *GeminiMessagesCompatService) ForwardAIStudioGET(ctx context.Context, account *Account, path string) (*UpstreamHTTPResult, error) {
+	ctx = withHTTPAttemptAuthority(ctx)
 	if account == nil {
 		return nil, errors.New("account is nil")
 	}
@@ -2679,7 +2713,7 @@ func (s *GeminiMessagesCompatService) ForwardAIStudioGET(ctx context.Context, ac
 		return nil, fmt.Errorf("unsupported account type: %s", account.Type)
 	}
 
-	resp, err := s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
+	resp, err := doHTTPUpstream(ctx, s.httpUpstream, req, proxyURL, account.ID, account.Concurrency)
 	if err != nil {
 		return nil, err
 	}

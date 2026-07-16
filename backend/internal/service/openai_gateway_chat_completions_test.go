@@ -911,7 +911,7 @@ func TestForwardAsChatCompletions_DoneSentinelWithoutTerminalReturnsError(t *tes
 	require.Zero(t, result.Usage.OutputTokens)
 }
 
-func TestForwardAsChatCompletions_UpstreamRequestIgnoresClientCancel(t *testing.T) {
+func TestForwardAsChatCompletions_RejectsClientCancelBeforeAdmission(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
@@ -948,10 +948,9 @@ func TestForwardAsChatCompletions_UpstreamRequestIgnoresClientCancel(t *testing.
 	}
 
 	result, err := svc.ForwardAsChatCompletions(reqCtx, c, account, body, "")
-	require.NoError(t, err)
-	require.NotNil(t, result)
-	require.NotNil(t, upstream.lastReq)
-	require.NoError(t, upstream.lastReq.Context().Err())
+	require.ErrorIs(t, err, context.Canceled)
+	require.Nil(t, result)
+	require.Nil(t, upstream.lastReq)
 }
 
 func TestForwardAsChatCompletions_APIKeyResponsesShapeStripsSparkImageGenerationTooling(t *testing.T) {

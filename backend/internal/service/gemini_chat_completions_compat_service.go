@@ -28,6 +28,7 @@ func (s *GeminiMessagesCompatService) ForwardAsChatCompletions(
 	account *Account,
 	body []byte,
 ) (*ForwardResult, error) {
+	ctx = withHTTPAttemptAuthority(ctx)
 	startTime := time.Now()
 
 	var ccReq apicompat.ChatCompletionsRequest
@@ -113,6 +114,7 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 	)
 
 	var resp *http.Response
+	var completedError completedResponseSnapshot
 	for attempt := 1; attempt <= geminiMaxRetries; attempt++ {
 		upstreamReq, idHeader, err := buildReq(ctx)
 		if err != nil {
@@ -123,8 +125,16 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 		}
 		requestIDHeader = idHeader
 
-		resp, err = s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
+		resp, err = doHTTPUpstream(ctx, s.httpUpstream, upstreamReq, proxyURL, account.ID, account.Concurrency)
 		if err != nil {
+			if restored, canceled := completedError.ifRetryCanceled(ctx); canceled {
+				resp = restored
+				break
+			}
+			if IsHTTPUpstreamAttemptNotAdmitted(err) ||
+				errors.Is(err, context.Canceled) {
+				return nil, err
+			}
 			safeErr := sanitizeUpstreamErrorMessage(err.Error())
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 				Platform:           account.Platform,
@@ -153,6 +163,7 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 		if resp.StatusCode >= 400 && s.shouldRetryGeminiUpstreamError(account, resp.StatusCode) {
 			respBody := s.readUpstreamErrorBody(resp)
 			_ = resp.Body.Close()
+			completedError = snapshotCompletedResponse(resp, respBody)
 			if resp.StatusCode == http.StatusForbidden && isGeminiInsufficientScope(resp.Header, respBody) {
 				resp = &http.Response{
 					StatusCode: resp.StatusCode,
@@ -182,6 +193,10 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 				})
 				logger.LegacyPrintf("service.gemini_chat_completions", "Gemini account %d: upstream status %d, retry %d/%d", account.ID, resp.StatusCode, attempt, geminiMaxRetries)
 				sleepGeminiBackoff(attempt)
+				if restored, canceled := completedError.ifRetryCanceled(ctx); canceled {
+					resp = restored
+					break
+				}
 				continue
 			}
 			resp = &http.Response{

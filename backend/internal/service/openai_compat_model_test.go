@@ -2664,7 +2664,7 @@ func openAICompatOpsEvents(t *testing.T, c *gin.Context) []*OpsUpstreamErrorEven
 	return events
 }
 
-func TestForwardAsAnthropic_UpstreamRequestIgnoresClientCancel(t *testing.T) {
+func TestForwardAsAnthropic_RejectsClientCancelBeforeAdmission(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -2700,8 +2700,7 @@ func TestForwardAsAnthropic_UpstreamRequestIgnoresClientCancel(t *testing.T) {
 	}
 
 	result, err := svc.ForwardAsAnthropic(reqCtx, c, account, body, "", "gpt-5.1")
-	require.NoError(t, err)
-	require.NotNil(t, result)
-	require.NotNil(t, upstream.lastReq)
-	require.NoError(t, upstream.lastReq.Context().Err())
+	require.ErrorIs(t, err, context.Canceled)
+	require.Nil(t, result)
+	require.Nil(t, upstream.lastReq)
 }

@@ -32,6 +32,7 @@ type httpUpstreamRecorder struct {
 	resp      *http.Response
 	responses []*http.Response
 	err       error
+	onDo      func(int)
 }
 
 func (u *httpUpstreamRecorder) Do(req *http.Request, proxyURL string, accountID int64, accountConcurrency int) (*http.Response, error) {
@@ -44,6 +45,9 @@ func (u *httpUpstreamRecorder) Do(req *http.Request, proxyURL string, accountID 
 		req.Body = io.NopCloser(bytes.NewReader(b))
 	}
 	u.requests = append(u.requests, req)
+	if u.onDo != nil {
+		u.onDo(len(u.requests))
+	}
 	if u.err != nil {
 		return nil, u.err
 	}
@@ -480,7 +484,7 @@ func TestOpenAIGatewayService_OAuthAdapter_CompactUsesJSONAndKeepsNonStreaming(t
 	require.Contains(t, rec.Body.String(), `"id":"cmp_123"`)
 }
 
-func TestOpenAIGatewayService_OAuthAdapter_UpstreamRequestIgnoresClientCancel(t *testing.T) {
+func TestOpenAIGatewayService_OAuthAdapter_RejectsClientCancelBeforeAdmission(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
@@ -519,10 +523,9 @@ func TestOpenAIGatewayService_OAuthAdapter_UpstreamRequestIgnoresClientCancel(t 
 	}
 
 	result, err := svc.Forward(reqCtx, c, account, originalBody)
-	require.NoError(t, err)
-	require.NotNil(t, result)
-	require.NotNil(t, upstream.lastReq)
-	require.NoError(t, upstream.lastReq.Context().Err())
+	require.ErrorIs(t, err, context.Canceled)
+	require.Nil(t, result)
+	require.Nil(t, upstream.lastReq)
 }
 
 func TestOpenAIGatewayService_OAuthAdapter_CodexMissingInstructionsUsesAdapterDefaults(t *testing.T) {
@@ -639,7 +642,7 @@ func TestOpenAIGatewayService_OAuthAdapter_UsesAllowlistFiltering(t *testing.T) 
 	}
 }
 
-func TestOpenAIGatewayService_OAuthAdapter_NonStreamingUpstreamRequestIgnoresClientCancel(t *testing.T) {
+func TestOpenAIGatewayService_OAuthAdapter_NonStreamingRejectsClientCancelBeforeAdmission(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
@@ -678,10 +681,9 @@ func TestOpenAIGatewayService_OAuthAdapter_NonStreamingUpstreamRequestIgnoresCli
 	}
 
 	result, err := svc.Forward(reqCtx, c, account, originalBody)
-	require.NoError(t, err)
-	require.NotNil(t, result)
-	require.NotNil(t, upstream.lastReq)
-	require.NoError(t, upstream.lastReq.Context().Err())
+	require.ErrorIs(t, err, context.Canceled)
+	require.Nil(t, result)
+	require.Nil(t, upstream.lastReq)
 }
 
 func TestOpenAIGatewayService_OAuthAdapter_CompositeCodexUAUsesCodexOriginator(t *testing.T) {
