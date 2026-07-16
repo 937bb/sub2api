@@ -2516,9 +2516,28 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	}
 
 	readTimeout := s.openAIWSReadTimeout()
+	var pendingJSONDocuments [][]byte
 
 	for {
-		message, readErr := lease.ReadMessageWithContextTimeout(ctx, readTimeout)
+		var message []byte
+		var readErr error
+		if len(pendingJSONDocuments) > 0 {
+			message = pendingJSONDocuments[0]
+			pendingJSONDocuments = pendingJSONDocuments[1:]
+		} else {
+			message, readErr = lease.ReadMessageWithContextTimeout(ctx, readTimeout)
+			if readErr == nil {
+				documents, outcome := splitOpenAIConcatenatedJSONDocuments(message)
+				switch outcome {
+				case openAIJSONDocumentsRepaired:
+					message = documents[0]
+					pendingJSONDocuments = append(pendingJSONDocuments, documents[1:]...)
+				case openAIJSONDocumentsRejected:
+					lease.MarkBroken()
+					readErr = errOpenAIConcatenatedJSONRejected
+				}
+			}
+		}
 		if readErr != nil {
 			lease.MarkBroken()
 			closeStatus, closeReason := summarizeOpenAIWSReadCloseError(readErr)
@@ -2700,7 +2719,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		}
 
 		if isTerminalEvent {
-			cleanExit = true
+			cleanExit = len(pendingJSONDocuments) == 0
 			break
 		}
 	}
