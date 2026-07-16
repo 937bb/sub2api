@@ -42,6 +42,30 @@ func TestExecuteBedrockUpstreamCancellationBeforeAdmissionHasNoSideEffects(t *te
 	require.Empty(t, rec.Body.String())
 }
 
+func TestExecuteBedrockUpstreamAdmittedContextCanceledWithLiveDownstreamWritesError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	upstream := &attemptRecordingUpstream{err: context.Canceled}
+	svc := &GatewayService{httpUpstream: upstream}
+	account := &Account{
+		ID:          1,
+		Name:        "bedrock-test",
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeBedrock,
+		Concurrency: 1,
+		Credentials: map[string]any{"api_key": "test", "auth_mode": "apikey"},
+	}
+
+	resp, err := svc.executeBedrockUpstream(withHTTPAttemptAuthority(context.Background()), c, account, []byte(`{}`), "model", "us-east-1", false, nil, "test", "")
+
+	require.Nil(t, resp)
+	require.EqualError(t, err, "upstream request failed: context canceled")
+	require.Equal(t, 1, upstream.calls)
+	require.Contains(t, rec.Body.String(), "Upstream request failed")
+}
+
 func TestExecuteBedrockUpstreamLaterCancellationPreservesCompletedResponse(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, cancel := context.WithCancel(context.Background())

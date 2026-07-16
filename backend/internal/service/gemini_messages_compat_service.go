@@ -782,12 +782,15 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 
 		resp, err = doHTTPUpstream(ctx, s.httpUpstream, upstreamReq, proxyURL, account.ID, account.Concurrency)
 		if err != nil {
-			if restored, canceled := completedError.ifRetryCanceled(ctx); canceled {
+			if restored, notAdmitted := completedError.ifRetryNotAdmitted(err); notAdmitted {
 				resp = restored
 				break
 			}
-			if IsHTTPUpstreamAttemptNotAdmitted(err) || errors.Is(err, context.Canceled) {
+			if IsHTTPUpstreamAttemptNotAdmitted(err) {
 				return nil, err
+			}
+			if downstreamErr := downstreamRequestContextErr(c); downstreamErr != nil {
+				return nil, downstreamErr
 			}
 			safeErr := sanitizeUpstreamErrorMessage(err.Error())
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
@@ -1322,12 +1325,15 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 
 		resp, err = doHTTPUpstream(ctx, s.httpUpstream, upstreamReq, proxyURL, account.ID, account.Concurrency)
 		if err != nil {
-			if restored, canceled := completedError.ifRetryCanceled(ctx); canceled {
+			if restored, notAdmitted := completedError.ifRetryNotAdmitted(err); notAdmitted {
 				resp = restored
 				break
 			}
-			if IsHTTPUpstreamAttemptNotAdmitted(err) || errors.Is(err, context.Canceled) {
+			if IsHTTPUpstreamAttemptNotAdmitted(err) {
 				return nil, err
+			}
+			if downstreamErr := downstreamRequestContextErr(c); downstreamErr != nil {
+				return nil, downstreamErr
 			}
 			safeErr := sanitizeUpstreamErrorMessage(err.Error())
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{

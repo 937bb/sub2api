@@ -5,6 +5,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/stretchr/testify/require"
 	"io"
@@ -405,6 +406,51 @@ func TestHandleSmartRetry_503_ModelCapacityExhausted_RetrySuccess(t *testing.T) 
 }
 
 // TestHandleSmartRetry_503_ModelCapacityExhausted_ContextCancel 测试 MODEL_CAPACITY_EXHAUSTED 上下文取消
+func TestHandleSmartRetry_503_ModelCapacityExhausted_TransportErrorThenSuccess(t *testing.T) {
+	repo := &stubAntigravityAccountRepo{}
+	account := &Account{ID: 31, Type: AccountTypeOAuth, Platform: PlatformAntigravity}
+	respBody := []byte(`{
+		"error": {
+			"code": 503,
+			"status": "UNAVAILABLE",
+			"details": [
+				{"@type": "type.googleapis.com/google.rpc.ErrorInfo", "metadata": {"model": "gemini-3-pro-high"}, "reason": "MODEL_CAPACITY_EXHAUSTED"},
+				{"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": "39s"}
+			]
+		}
+	}`)
+	resp := &http.Response{StatusCode: http.StatusServiceUnavailable, Header: http.Header{}}
+	upstream := &mockSmartRetryUpstream{
+		responses: []*http.Response{nil, {
+			StatusCode: http.StatusOK,
+			Header:     http.Header{},
+			Body:       io.NopCloser(strings.NewReader(`{"ok":true}`)),
+		}},
+		errors: []error{errors.New("temporary transport failure"), nil},
+	}
+	params := antigravityRetryLoopParams{
+		ctx:          context.Background(),
+		prefix:       "[test]",
+		account:      account,
+		accessToken:  "token",
+		action:       "generateContent",
+		body:         []byte(`{"input":"test"}`),
+		httpUpstream: upstream,
+		accountRepo:  repo,
+		handleError: func(context.Context, string, *Account, int, http.Header, []byte, string, int64, string, bool) *handleModelRateLimitResult {
+			return nil
+		},
+	}
+
+	result := (&AntigravityGatewayService{}).handleSmartRetry(params, resp, respBody, "https://ag-1.test", 0, []string{"https://ag-1.test"})
+
+	require.NotNil(t, result)
+	require.NoError(t, result.err)
+	require.NotNil(t, result.resp)
+	require.Equal(t, http.StatusOK, result.resp.StatusCode)
+	require.Len(t, upstream.calls, 2)
+}
+
 func TestHandleSmartRetry_503_ModelCapacityExhausted_ContextCancel(t *testing.T) {
 	repo := &stubAntigravityAccountRepo{}
 	account := &Account{

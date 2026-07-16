@@ -316,13 +316,17 @@ func TestHTTPAttemptAuthorityClosesErrorResponseBeforeCancel(t *testing.T) {
 			)
 			require.NoError(t, err)
 
+			var resp *http.Response
 			if withTLS {
-				_, err = doHTTPUpstreamWithTLS(ctx, upstream, req, "", 1, 1, nil)
+				resp, err = doHTTPUpstreamWithTLS(ctx, upstream, req, "", 1, 1, nil)
 			} else {
-				_, err = doHTTPUpstream(ctx, upstream, req, "", 1, 1)
+				resp, err = doHTTPUpstream(ctx, upstream, req, "", 1, 1)
 			}
 
 			require.EqualError(t, err, "transport failed with response")
+			require.NotNil(t, resp)
+			require.Equal(t, http.NoBody, resp.Body)
+			require.NoError(t, resp.Body.Close())
 			require.NotNil(t, upstream.body)
 			require.True(t, upstream.body.closedBeforeDone)
 			require.Eventually(t, func() bool {
@@ -421,5 +425,6 @@ func TestHTTPAttemptAuthoritySuppressesRetryAfterCancellation(t *testing.T) {
 
 	require.ErrorIs(t, err, context.Canceled)
 	require.False(t, IsHTTPUpstreamAttemptNotAdmitted(err))
+	require.True(t, isHTTPUpstreamRetryNotAdmitted(err))
 	require.Equal(t, 1, upstream.calls)
 }

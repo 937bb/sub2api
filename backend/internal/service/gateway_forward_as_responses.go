@@ -127,9 +127,11 @@ func (s *GatewayService) ForwardAsResponses(
 	// 11. Send request
 	resp, err := doHTTPUpstreamWithTLS(ctx, s.httpUpstream, upstreamReq, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
 	if err != nil {
-		if IsHTTPUpstreamAttemptNotAdmitted(err) ||
-			errors.Is(err, context.Canceled) {
+		if IsHTTPUpstreamAttemptNotAdmitted(err) {
 			return nil, err
+		}
+		if downstreamErr := downstreamRequestContextErr(c); downstreamErr != nil {
+			return nil, downstreamErr
 		}
 		if resp != nil && resp.Body != nil {
 			_ = resp.Body.Close()

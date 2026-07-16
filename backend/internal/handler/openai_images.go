@@ -94,6 +94,9 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 	if !acquired {
 		return
 	}
+	logicalReleases := newHTTPAttemptReleaseSet(c.Request.Context())
+	logicalReleases.Add(imageReleaseFunc)
+	defer logicalReleases.finish()
 
 	if parsed.Multipart {
 		setOpsRequestContext(c, requestModel, parsed.Stream)
@@ -117,10 +120,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 	if !acquired {
 		return
 	}
-	logicalReleases := newHTTPAttemptReleaseSet(c.Request.Context())
-	logicalReleases.Add(imageReleaseFunc)
 	logicalReleases.Add(userReleaseFunc)
-	defer logicalReleases.finish()
 
 	if err := h.billingCacheService.CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription, service.QuotaPlatform(c.Request.Context(), apiKey)); err != nil {
 		reqLog.Info("openai.images.billing_eligibility_check_failed", zap.Error(err))

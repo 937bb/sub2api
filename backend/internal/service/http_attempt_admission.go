@@ -101,7 +101,7 @@ func (a *httpAttemptAuthority) admit() error {
 		if a.admitted == 0 {
 			return &HTTPUpstreamAttemptNotAdmittedError{cause: a.canceled}
 		}
-		return a.canceled
+		return &httpUpstreamRetryNotAdmittedError{cause: a.canceled}
 	}
 	first := a.admitted == 0
 	if first && a.onFirstTransfer != nil {
@@ -201,6 +201,7 @@ func ownHTTPAttemptResponse(
 	if err != nil {
 		if resp != nil && resp.Body != nil {
 			_ = resp.Body.Close()
+			resp.Body = http.NoBody
 		}
 		releaseAttempt()
 		return resp, err

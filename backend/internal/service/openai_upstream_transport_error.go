@@ -59,8 +59,11 @@ func classifyOpenAITransportError(err error) openAITransportErrorClass {
 // (proxy/DNS/TCP/TLS). It records ops diagnostics, fails over instead of writing
 // a hard 502, and temporarily unschedules only durable proxy/network faults.
 func (s *OpenAIGatewayService) handleOpenAIUpstreamTransportError(ctx context.Context, c *gin.Context, account *Account, err error, passthrough bool) error {
-	if IsHTTPUpstreamAttemptNotAdmitted(err) || errors.Is(err, context.Canceled) {
+	if IsHTTPUpstreamAttemptNotAdmitted(err) {
 		return err
+	}
+	if downstreamErr := downstreamRequestContextErr(c); downstreamErr != nil {
+		return downstreamErr
 	}
 	safeErr := sanitizeOpenAIUpstreamDiagnosticText(err.Error())
 	setOpsUpstreamError(c, 0, safeErr, "")
@@ -76,11 +79,6 @@ func (s *OpenAIGatewayService) handleOpenAIUpstreamTransportError(ctx context.Co
 		})
 	}
 
-	// Client disconnected: do not fail over or evict; the upstream account did not
-	// demonstrate a fault.
-	if errors.Is(err, context.Canceled) {
-		return err
-	}
 	if classifyOpenAITransportError(err).Persistent {
 		s.tempUnscheduleOpenAITransportError(ctx, account, safeErr)
 	}

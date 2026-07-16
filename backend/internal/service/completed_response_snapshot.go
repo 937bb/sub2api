@@ -35,6 +35,15 @@ func (s completedResponseSnapshot) ifRetryCanceled(ctx context.Context) (*http.R
 	return s.response(), true
 }
 
+// ifRetryNotAdmitted restores completed work only when the current physical
+// retry was rejected before admission, never for an admitted transport error.
+func (s completedResponseSnapshot) ifRetryNotAdmitted(err error) (*http.Response, bool) {
+	if !s.valid || (!IsHTTPUpstreamAttemptNotAdmitted(err) && !isHTTPUpstreamRetryNotAdmitted(err)) {
+		return nil, false
+	}
+	return s.response(), true
+}
+
 func (s completedResponseSnapshot) response() *http.Response {
 	return &http.Response{
 		StatusCode: s.statusCode,

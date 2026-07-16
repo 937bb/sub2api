@@ -1551,8 +1551,11 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 	resp, err := doHTTPUpstream(ctx, s.httpUpstream, upstreamReq, proxyURL, account.ID, account.Concurrency)
 	SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 	if err != nil {
-		if IsHTTPUpstreamAttemptNotAdmitted(err) || errors.Is(err, context.Canceled) {
+		if IsHTTPUpstreamAttemptNotAdmitted(err) {
 			return nil, err
+		}
+		if downstreamErr := downstreamRequestContextErr(c); downstreamErr != nil {
+			return nil, downstreamErr
 		}
 		safeErr := sanitizeOpenAIUpstreamDiagnosticText(err.Error())
 		setOpsUpstreamError(c, 0, safeErr, "")

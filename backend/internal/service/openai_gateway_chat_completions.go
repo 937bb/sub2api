@@ -250,7 +250,7 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 
 		resp, err = doHTTPUpstream(ctx, s.httpUpstream, upstreamReq, proxyURL, account.ID, account.Concurrency)
 		if err != nil {
-			if restored, canceled := completedError.ifRetryCanceled(ctx); canceled {
+			if restored, notAdmitted := completedError.ifRetryNotAdmitted(err); notAdmitted {
 				resp = restored
 				break
 			}

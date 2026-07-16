@@ -3859,7 +3859,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		resp, err := doHTTPUpstream(ctx, s.httpUpstream, upstreamReq, proxyURL, account.ID, account.Concurrency)
 		SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 		if err != nil {
-			if restored, canceled := completedError.ifRetryCanceled(ctx); canceled {
+			if restored, notAdmitted := completedError.ifRetryNotAdmitted(err); notAdmitted {
 				resp = restored
 			} else {
 				return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)

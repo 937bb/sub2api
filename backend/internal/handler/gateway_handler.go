@@ -471,6 +471,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				return
 			}
 			setOpsSelectedAccount(c, account.ID, account.Platform)
+			if err != nil && failoverClientGone(c) {
+				return
+			}
 			if err != nil {
 				var failoverErr *service.UpstreamFailoverError
 				if errors.As(err, &failoverErr) {
@@ -867,6 +870,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				return
 			}
 			setOpsSelectedAccount(c, account.ID, account.Platform)
+			if err != nil && failoverClientGone(c) {
+				return
+			}
 			if err != nil {
 				// Beta policy block: return 400 immediately, no failover
 				var betaBlockedErr *service.BetaBlockedError

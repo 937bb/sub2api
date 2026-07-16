@@ -251,13 +251,14 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		h.errorResponse(c, http.StatusForbidden, "permission_error", service.ImageGenerationPermissionMessage())
 		return
 	}
-	var imageReleaseFunc func()
+	logicalReleases := newHTTPAttemptReleaseSet(c.Request.Context())
+	defer logicalReleases.finish()
 	if imageIntent {
-		var imageAcquired bool
-		imageReleaseFunc, imageAcquired = h.acquireImageGenerationSlot(c, streamStarted)
+		imageReleaseFunc, imageAcquired := h.acquireImageGenerationSlot(c, streamStarted)
 		if !imageAcquired {
 			return
 		}
+		logicalReleases.Add(imageReleaseFunc)
 	}
 
 	// 解析渠道级模型映射
@@ -285,10 +286,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		return
 	}
 	// 确保请求取消时也会释放槽位，避免长连接被动中断造成泄漏
-	logicalReleases := newHTTPAttemptReleaseSet(c.Request.Context())
-	logicalReleases.Add(imageReleaseFunc)
 	logicalReleases.Add(userReleaseFunc)
-	defer logicalReleases.finish()
 
 	// 2. Re-check billing eligibility after wait
 	if err := h.billingCacheService.CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription, service.QuotaPlatform(c.Request.Context(), apiKey)); err != nil {

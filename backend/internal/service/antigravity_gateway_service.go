@@ -277,6 +277,7 @@ func (s *AntigravityGatewayService) handleSmartRetry(p antigravityRetryLoopParam
 		}
 
 		completed := snapshotCompletedResponse(resp, respBody)
+		var lastRetryErr error
 		for attempt := 1; attempt <= maxAttempts; attempt++ {
 			log.Printf("%s status=%d oauth_smart_retry attempt=%d/%d delay=%v model=%s account=%d",
 				p.prefix, resp.StatusCode, attempt, maxAttempts, waitDuration, modelName, p.account.ID)
@@ -286,7 +287,10 @@ func (s *AntigravityGatewayService) handleSmartRetry(p antigravityRetryLoopParam
 			case <-p.ctx.Done():
 				timer.Stop()
 				log.Printf("%s status=context_canceled_during_smart_retry", p.prefix)
-				return &smartRetryResult{action: smartRetryActionBreakWithResp, resp: completed.response()}
+				if lastRetryErr != nil {
+					return &smartRetryResult{action: smartRetryActionBreakWithResp, err: lastRetryErr}
+				}
+				return &smartRetryResult{action: smartRetryActionBreakWithResp, err: p.ctx.Err()}
 			case <-timer.C:
 			}
 
@@ -317,12 +321,21 @@ func (s *AntigravityGatewayService) handleSmartRetry(p antigravityRetryLoopParam
 				return &smartRetryResult{action: smartRetryActionBreakWithResp, resp: retryResp}
 			}
 
-			// 网络错误时，继续重试
+			// 网络错误时，继续重试；一旦请求已 admitted，旧 HTTP 响应便不再代表最新结果。
 			if retryErr != nil || retryResp == nil {
-				if restored, canceled := completed.ifRetryCanceled(p.ctx); canceled {
-					return &smartRetryResult{action: smartRetryActionBreakWithResp, resp: restored}
+				if IsHTTPUpstreamAttemptNotAdmitted(retryErr) || isHTTPUpstreamRetryNotAdmitted(retryErr) {
+					if lastRetryErr != nil {
+						return &smartRetryResult{action: smartRetryActionBreakWithResp, err: lastRetryErr}
+					}
+					return &smartRetryResult{action: smartRetryActionBreakWithResp, resp: completed.response()}
 				}
-				log.Printf("%s status=smart_retry_network_error attempt=%d/%d error=%v", p.prefix, attempt, maxAttempts, retryErr)
+				networkErr := retryErr
+				if networkErr == nil {
+					networkErr = errors.New("upstream returned nil response")
+				} else {
+					lastRetryErr = retryErr
+				}
+				log.Printf("%s status=smart_retry_network_error attempt=%d/%d error=%v", p.prefix, attempt, maxAttempts, networkErr)
 				continue
 			}
 
@@ -331,6 +344,7 @@ func (s *AntigravityGatewayService) handleSmartRetry(p antigravityRetryLoopParam
 				_ = lastRetryResp.Body.Close()
 			}
 			lastRetryResp = retryResp
+			lastRetryErr = nil
 			if retryResp != nil {
 				lastRetryBody, _ = io.ReadAll(io.LimitReader(retryResp.Body, 8<<10))
 				_ = retryResp.Body.Close()
@@ -344,6 +358,11 @@ func (s *AntigravityGatewayService) handleSmartRetry(p antigravityRetryLoopParam
 					waitDuration = newWaitDuration
 				}
 			}
+		}
+
+		// 真实传输错误是最新 admitted 结果，不能用更早的 HTTP 响应覆盖。
+		if lastRetryErr != nil {
+			return &smartRetryResult{action: smartRetryActionBreakWithResp, err: lastRetryErr}
 		}
 
 		// 所有重试都失败
@@ -451,6 +470,7 @@ func (s *AntigravityGatewayService) handleSingleAccountRetryInPlace(
 	var lastRetryResp *http.Response
 	var lastRetryBody []byte
 	completed := snapshotCompletedResponse(resp, respBody)
+	var lastRetryErr error
 	totalWaited := time.Duration(0)
 
 	for attempt := 1; attempt <= antigravitySingleAccountSmartRetryMaxAttempts; attempt++ {
@@ -473,7 +493,10 @@ func (s *AntigravityGatewayService) handleSingleAccountRetryInPlace(
 		case <-p.ctx.Done():
 			timer.Stop()
 			logger.LegacyPrintf("service.antigravity_gateway", "%s status=context_canceled_during_single_account_retry", p.prefix)
-			return &smartRetryResult{action: smartRetryActionBreakWithResp, resp: completed.response()}
+			if lastRetryErr != nil {
+				return &smartRetryResult{action: smartRetryActionBreakWithResp, err: lastRetryErr}
+			}
+			return &smartRetryResult{action: smartRetryActionBreakWithResp, err: p.ctx.Err()}
 		case <-timer.C:
 		}
 		totalWaited += waitDuration
@@ -496,13 +519,22 @@ func (s *AntigravityGatewayService) handleSingleAccountRetryInPlace(
 			return &smartRetryResult{action: smartRetryActionBreakWithResp, resp: retryResp}
 		}
 
-		// 网络错误时继续重试
+		// 网络错误时继续重试；一旦请求已 admitted，旧 503 便不再代表最新结果。
 		if retryErr != nil || retryResp == nil {
-			if restored, canceled := completed.ifRetryCanceled(p.ctx); canceled {
-				return &smartRetryResult{action: smartRetryActionBreakWithResp, resp: restored}
+			if IsHTTPUpstreamAttemptNotAdmitted(retryErr) || isHTTPUpstreamRetryNotAdmitted(retryErr) {
+				if lastRetryErr != nil {
+					return &smartRetryResult{action: smartRetryActionBreakWithResp, err: lastRetryErr}
+				}
+				return &smartRetryResult{action: smartRetryActionBreakWithResp, resp: completed.response()}
+			}
+			networkErr := retryErr
+			if networkErr == nil {
+				networkErr = errors.New("upstream returned nil response")
+			} else {
+				lastRetryErr = retryErr
 			}
 			logger.LegacyPrintf("service.antigravity_gateway", "%s single_account_503_retry: network_error attempt=%d/%d error=%v",
-				p.prefix, attempt, antigravitySingleAccountSmartRetryMaxAttempts, retryErr)
+				p.prefix, attempt, antigravitySingleAccountSmartRetryMaxAttempts, networkErr)
 			continue
 		}
 
@@ -511,6 +543,7 @@ func (s *AntigravityGatewayService) handleSingleAccountRetryInPlace(
 			_ = lastRetryResp.Body.Close()
 		}
 		lastRetryResp = retryResp
+		lastRetryErr = nil
 		lastRetryBody, _ = io.ReadAll(io.LimitReader(retryResp.Body, 8<<10))
 		_ = retryResp.Body.Close()
 		completed = snapshotCompletedResponse(retryResp, lastRetryBody)
@@ -528,6 +561,11 @@ func (s *AntigravityGatewayService) handleSingleAccountRetryInPlace(
 				}
 			}
 		}
+	}
+
+	// 真实传输错误是最新 admitted 结果，不能用更早的 503 覆盖。
+	if lastRetryErr != nil {
+		return &smartRetryResult{action: smartRetryActionBreakWithResp, err: lastRetryErr}
 	}
 
 	// 所有重试都失败，不设限流，直接返回 503
@@ -598,6 +636,7 @@ func (s *AntigravityGatewayService) antigravityRetryLoop(p antigravityRetryLoopP
 
 	var resp *http.Response
 	var completedError completedResponseSnapshot
+	var lastTransportErr error
 	var usedBaseURL string
 	logBody := p.settingService != nil && p.settingService.cfg != nil && p.settingService.cfg.Gateway.LogUpstreamErrorBody
 	maxBytes := 2048
@@ -619,6 +658,9 @@ urlFallbackLoop:
 			select {
 			case <-p.ctx.Done():
 				logger.LegacyPrintf("service.antigravity_gateway", "%s status=context_canceled error=%v", p.prefix, p.ctx.Err())
+				if lastTransportErr != nil {
+					return nil, lastTransportErr
+				}
 				if restored, canceled := completedError.ifRetryCanceled(p.ctx); canceled {
 					resp = restored
 					break urlFallbackLoop
@@ -633,15 +675,22 @@ urlFallbackLoop:
 			}
 
 			resp, err = doHTTPUpstream(p.ctx, p.httpUpstream, upstreamReq, p.proxyURL, p.account.ID, p.account.Concurrency)
-			if err != nil && (IsHTTPUpstreamAttemptNotAdmitted(err) || errors.Is(err, context.Canceled)) {
-				if restored, canceled := completedError.ifRetryCanceled(p.ctx); canceled {
-					resp = restored
+			if err != nil {
+				if _, notAdmitted := completedError.ifRetryNotAdmitted(err); notAdmitted {
+					if lastTransportErr != nil {
+						return nil, lastTransportErr
+					}
+					resp = completedError.response()
 					break urlFallbackLoop
 				}
-				return nil, err
+				if IsHTTPUpstreamAttemptNotAdmitted(err) {
+					return nil, err
+				}
+				lastTransportErr = err
 			}
 			if err == nil && resp == nil {
 				err = errors.New("upstream returned nil response")
+				lastTransportErr = err
 			}
 			if err != nil {
 				safeErr := sanitizeUpstreamErrorMessage(err.Error())
@@ -662,11 +711,7 @@ urlFallbackLoop:
 					logger.LegacyPrintf("service.antigravity_gateway", "%s status=request_failed retry=%d/%d error=%v", p.prefix, attempt, antigravityMaxRetries, err)
 					if !sleepAntigravityBackoffWithContext(p.ctx, attempt) {
 						logger.LegacyPrintf("service.antigravity_gateway", "%s status=context_canceled_during_backoff", p.prefix)
-						if restored, canceled := completedError.ifRetryCanceled(p.ctx); canceled {
-							resp = restored
-							break urlFallbackLoop
-						}
-						return nil, p.ctx.Err()
+						return nil, err
 					}
 					continue
 				}
@@ -674,6 +719,8 @@ urlFallbackLoop:
 				setOpsUpstreamError(p.c, 0, safeErr, "")
 				return nil, fmt.Errorf("upstream request failed after retries: %w", err)
 			}
+
+			lastTransportErr = nil
 
 			// 统一处理错误响应
 			if resp.StatusCode >= 400 {
@@ -4376,8 +4423,11 @@ func (s *AntigravityGatewayService) forwardUpstreamAdmitted(ctx context.Context,
 	// 发送请求
 	resp, err := doHTTPUpstream(ctx, s.httpUpstream, req, proxyURL, account.ID, account.Concurrency)
 	if err != nil {
-		if IsHTTPUpstreamAttemptNotAdmitted(err) || errors.Is(err, context.Canceled) {
+		if IsHTTPUpstreamAttemptNotAdmitted(err) {
 			return nil, err
+		}
+		if downstreamErr := downstreamRequestContextErr(c); downstreamErr != nil {
+			return nil, downstreamErr
 		}
 		logger.LegacyPrintf("service.antigravity_gateway", "%s upstream request failed: %v", prefix, err)
 		return nil, fmt.Errorf("upstream request failed: %w", err)
