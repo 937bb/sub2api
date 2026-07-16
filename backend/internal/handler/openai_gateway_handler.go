@@ -46,6 +46,15 @@ func resolveOpenAIMessagesDispatchMappedModel(apiKey *service.APIKey, requestedM
 	return strings.TrimSpace(apiKey.Group.ResolveMessagesDispatchModel(requestedModel))
 }
 
+// openAIProxyLogFields identifies the proxy actually available to the transport.
+// ProxyID alone can be stale while the relation is unloaded and the request goes direct.
+func openAIProxyLogFields(account *service.Account) []zap.Field {
+	if account == nil || account.ProxyID == nil || account.Proxy == nil {
+		return nil
+	}
+	return []zap.Field{zap.Int64("proxy_id", account.Proxy.ID)}
+}
+
 type openAIModelBodyReplaceFunc func([]byte, string) []byte
 
 func openAIModelMappedBody(body []byte, mapped bool, mappedModel string, replace openAIModelBodyReplaceFunc) []byte {
@@ -480,12 +489,14 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 						h.handleFailoverExhausted(c, failoverErr, streamStarted)
 						return
 					}
-					reqLog.Warn("openai.upstream_failover_switching",
+					fields := []zap.Field{
 						zap.Int64("account_id", account.ID),
 						zap.Int("upstream_status", failoverErr.StatusCode),
 						zap.Int("switch_count", switchCount),
 						zap.Int("max_switches", maxAccountSwitches),
-					)
+					}
+					fields = append(fields, openAIProxyLogFields(account)...)
+					reqLog.Warn("openai.upstream_failover_switching", fields...)
 					continue
 				}
 				upstreamErrorAlreadyCommunicated := openAIForwardErrorAlreadyCommunicated(c, writerSizeBeforeForward, err)
@@ -1638,12 +1649,14 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 					return
 				}
 				h.gatewayService.RecordOpenAIAccountSwitch()
-				reqLog.Warn("openai.websocket_upstream_failover_switching",
+				fields := []zap.Field{
 					zap.Int64("account_id", account.ID),
 					zap.Int("upstream_status", failoverErr.StatusCode),
 					zap.Int("switch_count", switchCount),
 					zap.Int("max_switches", maxAccountSwitches),
-				)
+				}
+				fields = append(fields, openAIProxyLogFields(account)...)
+				reqLog.Warn("openai.websocket_upstream_failover_switching", fields...)
 				if !ensureUserSlotHeld() {
 					return
 				}
