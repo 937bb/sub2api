@@ -577,6 +577,7 @@ func openAICompatBufferedTerminalResponse(event *apicompat.ResponsesStreamEvent,
 	var bareError struct {
 		Response *struct {
 			Error *apicompat.ResponsesError `json:"error"`
+			Usage *apicompat.ResponsesUsage `json:"usage"`
 		} `json:"response"`
 		Error   *apicompat.ResponsesError `json:"error"`
 		Message string                    `json:"message"`
@@ -594,7 +595,11 @@ func openAICompatBufferedTerminalResponse(event *apicompat.ResponsesStreamEvent,
 	if responseError == nil {
 		return nil
 	}
-	return &apicompat.ResponsesResponse{Status: "failed", Error: responseError, Usage: event.Usage}
+	usage := event.Usage
+	if usage == nil && bareError.Response != nil {
+		usage = bareError.Response.Usage
+	}
+	return &apicompat.ResponsesResponse{Status: "failed", Error: responseError, Usage: usage}
 }
 
 func (s *OpenAIGatewayService) recordOpenAIMessagesStreamUpstreamError(c *gin.Context, account *Account, upstreamRequestID, upstreamURL, kind, message string) {

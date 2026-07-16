@@ -710,6 +710,53 @@ func TestForwardAsAnthropic_BufferedBareResponseErrorTriggersFailover(t *testing
 	require.Empty(t, rec.Body.String())
 }
 
+func TestForwardAsAnthropic_BufferedBareResponseErrorPreservesNestedUsage(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":false}`)
+	c, rec := newOpenAICompatMessagesTestContext(body)
+	upstreamBody := `data: {"type":"error","response":{"error":{"code":"content_policy_violation","message":"request violates safety policy"},"usage":{"input_tokens":8,"output_tokens":2,"total_tokens":10}}}` + "\n\n"
+	svc := newOpenAICompatMessagesSSEService(io.NopCloser(strings.NewReader(upstreamBody)), "rid_buffered_nested_usage", nil)
+
+	result, err := svc.ForwardAsAnthropic(context.Background(), c, newOpenAICompatMessagesTestAccount(), body, "", "gpt-5.4")
+	require.Error(t, err)
+	var failoverErr *UpstreamFailoverError
+	require.False(t, errors.As(err, &failoverErr))
+	require.NotNil(t, result)
+	require.Equal(t, 8, result.Usage.InputTokens)
+	require.Equal(t, 2, result.Usage.OutputTokens)
+	require.Equal(t, "request violates safety policy", gjson.GetBytes(rec.Body.Bytes(), "error.message").String())
+}
+
+func TestForwardAsAnthropic_BufferedBareResponseErrorTopLevelUsageTakesPrecedence(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":false}`)
+	c, _ := newOpenAICompatMessagesTestContext(body)
+	upstreamBody := `data: {"type":"error","response":{"error":{"code":"content_policy_violation","message":"request violates safety policy"},"usage":{"input_tokens":80,"output_tokens":20,"total_tokens":100}},"usage":{"input_tokens":8,"output_tokens":2,"total_tokens":10}}` + "\n\n"
+	svc := newOpenAICompatMessagesSSEService(io.NopCloser(strings.NewReader(upstreamBody)), "rid_buffered_usage_precedence", nil)
+
+	result, err := svc.ForwardAsAnthropic(context.Background(), c, newOpenAICompatMessagesTestAccount(), body, "", "gpt-5.4")
+	require.Error(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, 8, result.Usage.InputTokens)
+	require.Equal(t, 2, result.Usage.OutputTokens)
+}
+
+func TestForwardAsAnthropic_BufferedBareResponseErrorAccountsFirstTerminalOnce(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":false}`)
+	c, rec := newOpenAICompatMessagesTestContext(body)
+	upstreamBody := strings.Join([]string{
+		`data: {"type":"error","response":{"error":{"code":"content_policy_violation","message":"first terminal"},"usage":{"input_tokens":8,"output_tokens":2,"total_tokens":10}}}`, "",
+		`data: {"type":"error","response":{"error":{"code":"content_policy_violation","message":"second terminal"},"usage":{"input_tokens":80,"output_tokens":20,"total_tokens":100}}}`, "",
+	}, "\n")
+	svc := newOpenAICompatMessagesSSEService(io.NopCloser(strings.NewReader(upstreamBody)), "rid_buffered_first_terminal_usage", nil)
+
+	result, err := svc.ForwardAsAnthropic(context.Background(), c, newOpenAICompatMessagesTestAccount(), body, "", "gpt-5.4")
+	require.Error(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, 8, result.Usage.InputTokens)
+	require.Equal(t, 2, result.Usage.OutputTokens)
+	require.Contains(t, rec.Body.String(), "first terminal")
+	require.NotContains(t, rec.Body.String(), "second terminal")
+}
+
 func TestForwardAsAnthropic_BufferedBareTopLevelPolicyMessagePreservesUsage(t *testing.T) {
 	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":false}`)
 	c, rec := newOpenAICompatMessagesTestContext(body)
