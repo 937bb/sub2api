@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
@@ -21,6 +22,33 @@ import (
 	"github.com/tidwall/gjson"
 	"go.uber.org/zap"
 )
+
+const openAIMessagesErrorMessageMaxBytes = 4 * 1024
+
+func boundOpenAIMessagesErrorMessage(message string) string {
+	message = sanitizeOpenAIUpstreamDiagnosticText(message)
+	if len(message) <= openAIMessagesErrorMessageMaxBytes {
+		return message
+	}
+
+	message = message[:openAIMessagesErrorMessageMaxBytes]
+	for !utf8.ValidString(message) {
+		message = message[:len(message)-1]
+	}
+	return message
+}
+
+func extractOpenAIMessagesRawSSEErrorMessage(payload []byte) string {
+	if len(payload) == 0 {
+		return ""
+	}
+	for _, path := range []string{"response.error.message", "error.message", "message"} {
+		if message := strings.TrimSpace(gjson.GetBytes(payload, path).String()); message != "" {
+			return message
+		}
+	}
+	return strings.TrimSpace(extractUpstreamErrorMessage(payload))
+}
 
 // ForwardAsAnthropic accepts an Anthropic Messages request body, converts it
 // to OpenAI Responses API format, forwards to the OpenAI upstream, and converts
@@ -461,13 +489,15 @@ func (s *OpenAIGatewayService) handleAnthropicBufferedStreamingResponse(
 		if len(payload) == 0 {
 			payload, _ = json.Marshal(gin.H{"type": "response.failed", "response": finalResponse})
 		}
-		message := openAICompatFailedResponseMessage(finalResponse)
-		if message == "" {
-			message = "OpenAI messages response failed"
+		rawMessage := openAICompatFailedResponseMessage(finalResponse)
+		if strings.TrimSpace(rawMessage) == "" {
+			rawMessage = "OpenAI messages response failed"
 		}
-		if openAIStreamFailedEventShouldFailover(payload, message) {
+		if openAIStreamFailedEventShouldFailover(payload, rawMessage) {
+			message := boundOpenAIMessagesErrorMessage(rawMessage)
 			return nil, s.newOpenAIStreamFailoverError(c, account, false, requestID, payload, message)
 		}
+		message := boundOpenAIMessagesErrorMessage(rawMessage)
 		writeAnthropicError(c, http.StatusBadGateway, "api_error", message)
 		return &OpenAIForwardResult{
 			RequestID:     requestID,
@@ -530,11 +560,48 @@ func openAICompatTopLevelFailedResponse(event *apicompat.ResponsesStreamEvent, p
 	return &resp
 }
 
+func openAICompatBufferedTerminalResponse(event *apicompat.ResponsesStreamEvent, payload []byte) *apicompat.ResponsesResponse {
+	if event == nil {
+		return nil
+	}
+	if failedResponse := openAICompatTopLevelFailedResponse(event, payload); failedResponse != nil {
+		event.Response = failedResponse
+	}
+	if isOpenAICompatResponsesTerminalEvent(event.Type) {
+		return event.Response
+	}
+	if strings.TrimSpace(event.Type) != "error" || len(payload) == 0 {
+		return nil
+	}
+
+	var bareError struct {
+		Response *struct {
+			Error *apicompat.ResponsesError `json:"error"`
+		} `json:"response"`
+		Error   *apicompat.ResponsesError `json:"error"`
+		Message string                    `json:"message"`
+	}
+	if err := json.Unmarshal(payload, &bareError); err != nil {
+		return nil
+	}
+
+	responseError := bareError.Error
+	if bareError.Response != nil && bareError.Response.Error != nil {
+		responseError = bareError.Response.Error
+	} else if responseError == nil && strings.TrimSpace(bareError.Message) != "" {
+		responseError = &apicompat.ResponsesError{Message: bareError.Message}
+	}
+	if responseError == nil {
+		return nil
+	}
+	return &apicompat.ResponsesResponse{Status: "failed", Error: responseError, Usage: event.Usage}
+}
+
 func (s *OpenAIGatewayService) recordOpenAIMessagesStreamUpstreamError(c *gin.Context, account *Account, upstreamRequestID, upstreamURL, kind, message string) {
 	if c == nil {
 		return
 	}
-	message = sanitizeUpstreamErrorMessage(message)
+	message = boundOpenAIMessagesErrorMessage(message)
 	setOpsUpstreamError(c, http.StatusBadGateway, message, "")
 	event := OpsUpstreamErrorEvent{
 		Platform:           PlatformOpenAI,
@@ -646,21 +713,19 @@ func (s *OpenAIGatewayService) readOpenAICompatBufferedTerminal(
 					payloadBytes := []byte(payload)
 					var event apicompat.ResponsesStreamEvent
 					if err := json.Unmarshal(payloadBytes, &event); err == nil {
-						if failedResponse := openAICompatTopLevelFailedResponse(&event, payloadBytes); failedResponse != nil {
-							event.Response = failedResponse
-						}
+						terminalResponse := openAICompatBufferedTerminalResponse(&event, payloadBytes)
 						acc.ProcessEvent(&event)
-						if isOpenAICompatResponsesTerminalEvent(event.Type) && event.Response != nil {
+						if terminalResponse != nil {
 							if event.Usage != nil {
 								usage = copyOpenAIUsageFromResponsesUsage(event.Usage)
-								if event.Response.Usage == nil {
-									event.Response.Usage = event.Usage
+								if terminalResponse.Usage == nil {
+									terminalResponse.Usage = event.Usage
 								}
 							}
-							if event.Response.Usage != nil {
-								usage = copyOpenAIUsageFromResponsesUsage(event.Response.Usage)
+							if terminalResponse.Usage != nil {
+								usage = copyOpenAIUsageFromResponsesUsage(terminalResponse.Usage)
 							}
-							return event.Response, usage, acc, payloadBytes, nil
+							return terminalResponse, usage, acc, payloadBytes, nil
 						}
 					}
 				}
@@ -695,23 +760,21 @@ func (s *OpenAIGatewayService) readOpenAICompatBufferedTerminal(
 				)
 				continue
 			}
-			if failedResponse := openAICompatTopLevelFailedResponse(&event, payloadBytes); failedResponse != nil {
-				event.Response = failedResponse
-			}
+			terminalResponse := openAICompatBufferedTerminalResponse(&event, payloadBytes)
 
 			acc.ProcessEvent(&event)
 
-			if isOpenAICompatResponsesTerminalEvent(event.Type) && event.Response != nil {
+			if terminalResponse != nil {
 				if event.Usage != nil {
 					usage = copyOpenAIUsageFromResponsesUsage(event.Usage)
-					if event.Response.Usage == nil {
-						event.Response.Usage = event.Usage
+					if terminalResponse.Usage == nil {
+						terminalResponse.Usage = event.Usage
 					}
 				}
-				if event.Response.Usage != nil {
-					usage = copyOpenAIUsageFromResponsesUsage(event.Response.Usage)
+				if terminalResponse.Usage != nil {
+					usage = copyOpenAIUsageFromResponsesUsage(terminalResponse.Usage)
 				}
-				return event.Response, usage, acc, payloadBytes, nil
+				return terminalResponse, usage, acc, payloadBytes, nil
 			}
 
 		case <-timeoutCh:
@@ -830,7 +893,8 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 		}
 
 		eventType := strings.TrimSpace(event.Type)
-		isTerminalEvent := isOpenAICompatResponsesTerminalEvent(eventType)
+		isBareErrorEvent := eventType == "error"
+		isTerminalEvent := isOpenAICompatResponsesTerminalEvent(eventType) || isBareErrorEvent
 		if isTerminalEvent {
 			if event.Response != nil {
 				if id := strings.TrimSpace(event.Response.ID); id != "" {
@@ -848,15 +912,17 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 			event.Response = failedResponse
 			usage = copyOpenAIUsageFromResponsesUsage(failedResponse.Usage)
 		}
-		if eventType == "response.failed" {
-			message := extractOpenAISSEErrorMessage(payloadBytes)
-			if message == "" {
-				message = "OpenAI messages stream response failed"
+		if eventType == "response.failed" || isBareErrorEvent {
+			rawMessage := extractOpenAIMessagesRawSSEErrorMessage(payloadBytes)
+			if strings.TrimSpace(rawMessage) == "" {
+				rawMessage = "OpenAI messages stream response failed"
 			}
-			if !clientOutputStarted && openAIStreamFailedEventShouldFailover(payloadBytes, message) {
+			if !clientDisconnected && !clientOutputStarted && openAIStreamFailedEventShouldFailover(payloadBytes, rawMessage) {
+				message := boundOpenAIMessagesErrorMessage(rawMessage)
 				streamFailoverErr = s.newOpenAIStreamFailoverError(c, account, false, requestID, payloadBytes, message)
 				return true
 			}
+			message := boundOpenAIMessagesErrorMessage(rawMessage)
 			s.recordOpenAIMessagesStreamUpstreamError(c, account, requestID, upstreamURL, "stream_failed", message)
 			streamErr = fmt.Errorf("upstream response failed: %s", message)
 			if !clientDisconnected {

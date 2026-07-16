@@ -14,6 +14,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
@@ -23,13 +24,19 @@ import (
 	"github.com/tidwall/gjson"
 )
 
+func init() {
+	gin.SetMode(gin.TestMode)
+}
+
 type openAICompatFailingWriter struct {
 	gin.ResponseWriter
 	failAfter int
 	writes    int
+	attempts  int
 }
 
 func (w *openAICompatFailingWriter) Write(p []byte) (int, error) {
+	w.attempts++
 	if w.writes >= w.failAfter {
 		return 0, errors.New("write failed: client disconnected")
 	}
@@ -202,7 +209,6 @@ func TestApplyOpenAICompatModelNormalization(t *testing.T) {
 
 func TestForwardAsAnthropic_NormalizesRoutingAndEffortForGpt54XHigh(t *testing.T) {
 	t.Parallel()
-	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -261,7 +267,6 @@ func TestForwardAsAnthropic_NormalizesRoutingAndEffortForGpt54XHigh(t *testing.T
 
 func TestForwardAsAnthropic_ExactMessagesDispatchPreservesPublicModel(t *testing.T) {
 	t.Parallel()
-	gin.SetMode(gin.TestMode)
 
 	body := []byte(`{"model":"claude-fable-5","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":false}`)
 	c, rec := newOpenAICompatMessagesTestContext(body)
@@ -281,7 +286,6 @@ func TestForwardAsAnthropic_ExactMessagesDispatchPreservesPublicModel(t *testing
 
 func TestForwardAsAnthropic_BufferedResponseFailedTriggersFailover(t *testing.T) {
 	t.Parallel()
-	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -327,7 +331,6 @@ func TestForwardAsAnthropic_BufferedResponseFailedTriggersFailover(t *testing.T)
 
 func TestForwardAsAnthropic_StreamingResponseFailedBeforeOutputTriggersFailover(t *testing.T) {
 	t.Parallel()
-	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -374,7 +377,6 @@ func TestForwardAsAnthropic_StreamingResponseFailedBeforeOutputTriggersFailover(
 
 func TestForwardAsAnthropic_StreamingPreludeThenResponseFailedBeforeOutputTriggersFailover(t *testing.T) {
 	t.Parallel()
-	gin.SetMode(gin.TestMode)
 
 	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":true}`)
 	c, rec := newOpenAICompatMessagesTestContext(body)
@@ -401,7 +403,6 @@ func TestForwardAsAnthropic_StreamingPreludeThenResponseFailedBeforeOutputTrigge
 
 func TestForwardAsAnthropic_StreamingKeepaliveBeforeResponseFailedDoesNotBlockFailover(t *testing.T) {
 	t.Parallel()
-	gin.SetMode(gin.TestMode)
 
 	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":true}`)
 	c, rec := newOpenAICompatMessagesTestContext(body)
@@ -429,7 +430,6 @@ func TestForwardAsAnthropic_StreamingKeepaliveBeforeResponseFailedDoesNotBlockFa
 
 func TestForwardAsAnthropic_StreamingKeepaliveBeforePolicyFailureWritesSSEError(t *testing.T) {
 	t.Parallel()
-	gin.SetMode(gin.TestMode)
 
 	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":true}`)
 	c, rec := newOpenAICompatMessagesTestContext(body)
@@ -461,7 +461,6 @@ func TestForwardAsAnthropic_StreamingKeepaliveBeforePolicyFailureWritesSSEError(
 
 func TestForwardAsAnthropic_StreamingResponseFailedAfterOutputReturnsUsage(t *testing.T) {
 	t.Parallel()
-	gin.SetMode(gin.TestMode)
 
 	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":true}`)
 	c, rec := newOpenAICompatMessagesTestContext(body)
@@ -493,9 +492,169 @@ func TestForwardAsAnthropic_StreamingResponseFailedAfterOutputReturnsUsage(t *te
 	require.Equal(t, "/v1/responses", events[0].UpstreamEndpoint)
 }
 
+func TestForwardAsAnthropic_StreamingBareErrorBeforeOutputTriggersFailover(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":true}`)
+	c, rec := newOpenAICompatMessagesTestContext(body)
+	upstreamBody := strings.Join([]string{
+		`data: {"type":"error","error":{"code":"server_error","message":"bare upstream failure"}}`,
+		"",
+		`data: {"type":"response.output_text.delta","delta":"must not leak"}`,
+		"",
+	}, "\n")
+	svc := newOpenAICompatMessagesSSEService(io.NopCloser(strings.NewReader(upstreamBody)), "rid_bare_error", nil)
+
+	result, err := svc.ForwardAsAnthropic(context.Background(), c, newOpenAICompatMessagesTestAccount(), body, "", "gpt-5.4")
+	require.Nil(t, result)
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.Equal(t, "bare upstream failure", gjson.GetBytes(failoverErr.ResponseBody, "error.message").String())
+	require.False(t, OpenAICompatAnthropicClientOutputStarted(c))
+	require.Empty(t, rec.Body.String())
+}
+
+func TestForwardAsAnthropic_StreamingEventNamedBareErrorSuppliesType(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":true}`)
+	c, rec := newOpenAICompatMessagesTestContext(body)
+	upstreamBody := "event: error\ndata: {\"error\":{\"code\":\"server_error\",\"message\":\"event named failure\"}}\n\n"
+	svc := newOpenAICompatMessagesSSEService(io.NopCloser(strings.NewReader(upstreamBody)), "rid_named_bare_error", nil)
+
+	result, err := svc.ForwardAsAnthropic(context.Background(), c, newOpenAICompatMessagesTestAccount(), body, "", "gpt-5.4")
+	require.Nil(t, result)
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.Equal(t, "event named failure", gjson.GetBytes(failoverErr.ResponseBody, "error.message").String())
+	require.Empty(t, rec.Body.String())
+}
+
+func TestForwardAsAnthropic_StreamingBareErrorAfterOutputReturnsUsageOnce(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":true}`)
+	c, rec := newOpenAICompatMessagesTestContext(body)
+	upstreamBody := strings.Join([]string{
+		`data: {"type":"response.created","response":{"id":"resp_bare","model":"gpt-5.4","status":"in_progress","output":[]}}`, "",
+		`data: {"type":"response.output_text.delta","delta":"hello"}`, "",
+		`data: {"type":"error","error":{"code":"server_error","message":"first terminal"},"usage":{"input_tokens":7,"output_tokens":3,"total_tokens":10}}`, "",
+		`data: {"type":"error","error":{"code":"server_error","message":"second terminal"}}`, "",
+	}, "\n")
+	svc := newOpenAICompatMessagesSSEService(io.NopCloser(strings.NewReader(upstreamBody)), "rid_late_bare_error", nil)
+
+	result, err := svc.ForwardAsAnthropic(context.Background(), c, newOpenAICompatMessagesTestAccount(), body, "", "gpt-5.4")
+	require.Error(t, err)
+	var failoverErr *UpstreamFailoverError
+	require.False(t, errors.As(err, &failoverErr))
+	require.NotNil(t, result)
+	require.Equal(t, 7, result.Usage.InputTokens)
+	require.Equal(t, 3, result.Usage.OutputTokens)
+	require.Equal(t, 1, strings.Count(rec.Body.String(), "event: error"))
+	require.Contains(t, rec.Body.String(), "first terminal")
+	require.NotContains(t, rec.Body.String(), "second terminal")
+	require.NotContains(t, rec.Body.String(), "event: message_stop")
+	require.Len(t, openAICompatOpsEvents(t, c), 1)
+}
+
+func TestForwardAsAnthropic_StreamingBarePolicyErrorDoesNotFailover(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":true}`)
+	c, rec := newOpenAICompatMessagesTestContext(body)
+	upstreamBody := `data: {"type":"error","error":{"code":"content_policy_violation","message":"request violates safety policy"},"usage":{"input_tokens":5,"output_tokens":0,"total_tokens":5}}` + "\n\n"
+	svc := newOpenAICompatMessagesSSEService(io.NopCloser(strings.NewReader(upstreamBody)), "rid_bare_policy", nil)
+
+	result, err := svc.ForwardAsAnthropic(context.Background(), c, newOpenAICompatMessagesTestAccount(), body, "", "gpt-5.4")
+	require.Error(t, err)
+	var failoverErr *UpstreamFailoverError
+	require.False(t, errors.As(err, &failoverErr))
+	require.NotNil(t, result)
+	require.Equal(t, 5, result.Usage.InputTokens)
+	require.Contains(t, rec.Body.String(), "request violates safety policy")
+}
+
+func TestForwardAsAnthropic_StreamingBareErrorLatePolicyMarkerDoesNotFailover(t *testing.T) {
+	message := "authorization=" + strings.Repeat("x", openAISensitiveDiagnosticKVValueMaxScan+1) + " request violates safety policy"
+	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":true}`)
+	c, rec := newOpenAICompatMessagesTestContext(body)
+	upstreamBody := fmt.Sprintf("event: error\ndata: {\"error\":{\"code\":\"server_error\",\"type\":\"upstream_error\",\"message\":%q}}\n\n", message)
+	svc := newOpenAICompatMessagesSSEService(io.NopCloser(strings.NewReader(upstreamBody)), "rid_late_policy", nil)
+
+	result, err := svc.ForwardAsAnthropic(context.Background(), c, newOpenAICompatMessagesTestAccount(), body, "", "gpt-5.4")
+	require.Error(t, err)
+	var failoverErr *UpstreamFailoverError
+	require.False(t, errors.As(err, &failoverErr))
+	require.NotNil(t, result)
+	outwardMessage := gjson.GetBytes(rec.Body.Bytes(), "error.message").String()
+	require.Contains(t, outwardMessage, "authorization=[redacted]")
+	require.NotContains(t, outwardMessage, strings.Repeat("x", 64))
+	require.NotContains(t, outwardMessage, "request violates safety policy")
+	require.LessOrEqual(t, len(outwardMessage), openAIMessagesErrorMessageMaxBytes)
+}
+
+func TestForwardAsAnthropic_StreamingMalformedBareErrorRemainsMissingTerminal(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":true}`)
+	c, rec := newOpenAICompatMessagesTestContext(body)
+	upstreamBody := "event: error\ndata: {not-json}\n\ndata: [DONE]\n\n"
+	svc := newOpenAICompatMessagesSSEService(io.NopCloser(strings.NewReader(upstreamBody)), "rid_malformed_bare", nil)
+
+	result, err := svc.ForwardAsAnthropic(context.Background(), c, newOpenAICompatMessagesTestAccount(), body, "", "gpt-5.4")
+	require.NotNil(t, result)
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.Contains(t, string(failoverErr.ResponseBody), "terminal event")
+	require.Empty(t, rec.Body.String())
+}
+
+func TestForwardAsAnthropic_StreamingBareErrorMessageIsRedactedAndCapped(t *testing.T) {
+	secrets := []string{"bearer-secret", "auth-secret", "api-secret", "refresh-secret", "person@example.com", "acct-secret", "123e4567-e89b-12d3-a456-426614174000", "query-secret"}
+	longMessage := `failure Bearer bearer-secret authorization=auth-secret api_key=api-secret refresh_token=refresh-secret ` +
+		`{"email":"person@example.com","chatgpt_account_id":"acct-secret"} uuid=123e4567-e89b-12d3-a456-426614174000 ` +
+		`https://host.invalid/path?access_token=query-secret ` + strings.Repeat("x", openAIMessagesErrorMessageMaxBytes*2)
+	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":true}`)
+	c, rec := newOpenAICompatMessagesTestContext(body)
+	upstreamBody := strings.Join([]string{
+		`data: {"type":"response.output_text.delta","delta":"hello"}`, "",
+		fmt.Sprintf(`data: {"type":"error","error":{"code":"server_error","message":%q}}`, longMessage), "",
+	}, "\n")
+	svc := newOpenAICompatMessagesSSEService(io.NopCloser(strings.NewReader(upstreamBody)), "rid_large_bare", nil)
+
+	result, err := svc.ForwardAsAnthropic(context.Background(), c, newOpenAICompatMessagesTestAccount(), body, "", "gpt-5.4")
+	require.NotNil(t, result)
+	require.Error(t, err)
+	for _, secret := range secrets {
+		require.NotContains(t, err.Error(), secret)
+		require.NotContains(t, rec.Body.String(), secret)
+	}
+	require.Contains(t, rec.Body.String(), "[redacted]")
+	require.LessOrEqual(t, len(rec.Body.String()), openAIMessagesErrorMessageMaxBytes+2048)
+	events := openAICompatOpsEvents(t, c)
+	require.Len(t, events, 1)
+	for _, secret := range secrets {
+		require.NotContains(t, events[0].Message, secret)
+	}
+	require.LessOrEqual(t, len(events[0].Message), openAIMessagesErrorMessageMaxBytes)
+}
+
+func TestForwardAsAnthropic_StreamingBareErrorAfterClientWriteFailureDoesNotFailoverOrWrite(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":true}`)
+	c, rec := newOpenAICompatMessagesTestContext(body)
+	failingWriter := &openAICompatFailingWriter{ResponseWriter: c.Writer, failAfter: 0}
+	c.Writer = failingWriter
+	upstreamBody := strings.Join([]string{
+		`data: {"type":"response.created","response":{"id":"resp_disconnect","model":"gpt-5.4","status":"in_progress","output":[]}}`, "",
+		`data: {"type":"response.output_text.delta","delta":"hello"}`, "",
+		`data: {"type":"error","error":{"code":"server_error","message":"terminal after disconnect"},"usage":{"input_tokens":11,"output_tokens":2,"total_tokens":13}}`, "",
+	}, "\n")
+	svc := newOpenAICompatMessagesSSEService(io.NopCloser(strings.NewReader(upstreamBody)), "rid_disconnected_bare", nil)
+
+	result, err := svc.ForwardAsAnthropic(context.Background(), c, newOpenAICompatMessagesTestAccount(), body, "", "gpt-5.4")
+	require.Error(t, err)
+	var failoverErr *UpstreamFailoverError
+	require.False(t, errors.As(err, &failoverErr))
+	require.NotNil(t, result)
+	require.True(t, result.ClientDisconnect)
+	require.Equal(t, 11, result.Usage.InputTokens)
+	require.Equal(t, 2, result.Usage.OutputTokens)
+	require.Equal(t, 1, failingWriter.attempts)
+	require.Empty(t, rec.Body.String())
+}
+
 func TestForwardAsAnthropic_BufferedMissingTerminalTriggersFailover(t *testing.T) {
 	t.Parallel()
-	gin.SetMode(gin.TestMode)
 
 	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":false}`)
 	c, rec := newOpenAICompatMessagesTestContext(body)
@@ -517,9 +676,108 @@ func TestForwardAsAnthropic_BufferedMissingTerminalTriggersFailover(t *testing.T
 	require.Empty(t, rec.Body.String())
 }
 
+func TestForwardAsAnthropic_BufferedBareErrorTriggersFailover(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":false}`)
+	c, rec := newOpenAICompatMessagesTestContext(body)
+	upstreamBody := strings.Join([]string{
+		`data: {"type":"error","error":{"code":"server_error","message":"bare buffered failure"},"usage":{"input_tokens":7,"output_tokens":2,"total_tokens":9}}`, "",
+		`data: {"type":"response.completed","response":{"id":"must_not_win","status":"completed","output":[]}}`, "",
+	}, "\n")
+	svc := newOpenAICompatMessagesSSEService(io.NopCloser(strings.NewReader(upstreamBody)), "rid_buffered_bare", nil)
+
+	result, err := svc.ForwardAsAnthropic(context.Background(), c, newOpenAICompatMessagesTestAccount(), body, "", "gpt-5.4")
+	require.Nil(t, result)
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.Equal(t, "bare buffered failure", gjson.GetBytes(failoverErr.ResponseBody, "error.message").String())
+	require.Empty(t, rec.Body.String())
+}
+
+func TestForwardAsAnthropic_BufferedBareResponseErrorTriggersFailover(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":false}`)
+	c, rec := newOpenAICompatMessagesTestContext(body)
+	upstreamBody := strings.Join([]string{
+		`data: {"type":"error","response":{"error":{"code":"server_error","message":"nested buffered failure"}},"usage":{"input_tokens":8,"output_tokens":3,"total_tokens":11}}`, "",
+		`data: {"type":"response.completed","response":{"id":"must_not_win","status":"completed","output":[]}}`, "",
+	}, "\n")
+	svc := newOpenAICompatMessagesSSEService(io.NopCloser(strings.NewReader(upstreamBody)), "rid_buffered_nested_bare", nil)
+
+	result, err := svc.ForwardAsAnthropic(context.Background(), c, newOpenAICompatMessagesTestAccount(), body, "", "gpt-5.4")
+	require.Nil(t, result)
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.Equal(t, "nested buffered failure", gjson.GetBytes(failoverErr.ResponseBody, "error.message").String())
+	require.Empty(t, rec.Body.String())
+}
+
+func TestForwardAsAnthropic_BufferedBareTopLevelPolicyMessagePreservesUsage(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":false}`)
+	c, rec := newOpenAICompatMessagesTestContext(body)
+	upstreamBody := `data: {"type":"error","message":"request violates safety policy","usage":{"input_tokens":6,"output_tokens":1,"total_tokens":7}}` + "\n\n"
+	svc := newOpenAICompatMessagesSSEService(io.NopCloser(strings.NewReader(upstreamBody)), "rid_buffered_top_message", nil)
+
+	result, err := svc.ForwardAsAnthropic(context.Background(), c, newOpenAICompatMessagesTestAccount(), body, "", "gpt-5.4")
+	require.Error(t, err)
+	var failoverErr *UpstreamFailoverError
+	require.False(t, errors.As(err, &failoverErr))
+	require.NotNil(t, result)
+	require.Equal(t, 6, result.Usage.InputTokens)
+	require.Equal(t, 1, result.Usage.OutputTokens)
+	require.Equal(t, http.StatusBadGateway, rec.Code)
+	require.Equal(t, "request violates safety policy", gjson.GetBytes(rec.Body.Bytes(), "error.message").String())
+}
+
+func TestForwardAsAnthropic_BufferedEventNamedBarePolicyErrorPreservesUsage(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":false}`)
+	c, rec := newOpenAICompatMessagesTestContext(body)
+	upstreamBody := "event: error\ndata: {\"error\":{\"code\":\"content_policy_violation\",\"message\":\"request violates safety policy\"},\"usage\":{\"input_tokens\":5,\"output_tokens\":0,\"total_tokens\":5}}\n\n"
+	svc := newOpenAICompatMessagesSSEService(io.NopCloser(strings.NewReader(upstreamBody)), "rid_buffered_bare_policy", nil)
+
+	result, err := svc.ForwardAsAnthropic(context.Background(), c, newOpenAICompatMessagesTestAccount(), body, "", "gpt-5.4")
+	require.Error(t, err)
+	var failoverErr *UpstreamFailoverError
+	require.False(t, errors.As(err, &failoverErr))
+	require.NotNil(t, result)
+	require.Equal(t, 5, result.Usage.InputTokens)
+	require.Equal(t, http.StatusBadGateway, rec.Code)
+	require.Equal(t, "request violates safety policy", gjson.GetBytes(rec.Body.Bytes(), "error.message").String())
+}
+
+func TestForwardAsAnthropic_BufferedBareErrorLatePolicyMarkerDoesNotFailover(t *testing.T) {
+	message := strings.Repeat("x", openAIMessagesErrorMessageMaxBytes+512) + " content policy violation"
+	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":false}`)
+	c, rec := newOpenAICompatMessagesTestContext(body)
+	upstreamBody := fmt.Sprintf("event: error\ndata: {\"error\":{\"code\":\"server_error\",\"type\":\"upstream_error\",\"message\":%q}}\n\n", message)
+	svc := newOpenAICompatMessagesSSEService(io.NopCloser(strings.NewReader(upstreamBody)), "rid_buffered_late_policy", nil)
+
+	result, err := svc.ForwardAsAnthropic(context.Background(), c, newOpenAICompatMessagesTestAccount(), body, "", "gpt-5.4")
+	require.Error(t, err)
+	var failoverErr *UpstreamFailoverError
+	require.False(t, errors.As(err, &failoverErr))
+	require.NotNil(t, result)
+	require.Equal(t, http.StatusBadGateway, rec.Code)
+	require.LessOrEqual(t, len(gjson.GetBytes(rec.Body.Bytes(), "error.message").String()), openAIMessagesErrorMessageMaxBytes)
+}
+
+func TestForwardAsAnthropic_BufferedBareErrorMessageIsRedactedAndCapped(t *testing.T) {
+	const secret = "buffered-secret-token"
+	message := "failure ?access_token=" + secret + " " + strings.Repeat("界", openAIMessagesErrorMessageMaxBytes)
+	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":false}`)
+	c, rec := newOpenAICompatMessagesTestContext(body)
+	upstreamBody := fmt.Sprintf("event: error\ndata: {\"error\":{\"code\":\"content_policy_violation\",\"message\":%q}}\n\n", message)
+	svc := newOpenAICompatMessagesSSEService(io.NopCloser(strings.NewReader(upstreamBody)), "rid_buffered_bare_large", nil)
+
+	result, err := svc.ForwardAsAnthropic(context.Background(), c, newOpenAICompatMessagesTestAccount(), body, "", "gpt-5.4")
+	require.NotNil(t, result)
+	require.Error(t, err)
+	require.NotContains(t, err.Error(), secret)
+	require.NotContains(t, rec.Body.String(), secret)
+	require.True(t, utf8.Valid(rec.Body.Bytes()))
+	require.LessOrEqual(t, len(gjson.GetBytes(rec.Body.Bytes(), "error.message").String()), openAIMessagesErrorMessageMaxBytes)
+}
+
 func TestForwardAsAnthropic_BufferedTopLevelResponseFailedTriggersFailover(t *testing.T) {
 	t.Parallel()
-	gin.SetMode(gin.TestMode)
 
 	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":false}`)
 	c, _ := newOpenAICompatMessagesTestContext(body)
@@ -542,7 +800,6 @@ func TestForwardAsAnthropic_BufferedTopLevelResponseFailedTriggersFailover(t *te
 
 func TestForwardAsAnthropic_BufferedPolicyResponseFailedDoesNotFailover(t *testing.T) {
 	t.Parallel()
-	gin.SetMode(gin.TestMode)
 
 	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":false}`)
 	c, rec := newOpenAICompatMessagesTestContext(body)
@@ -569,7 +826,6 @@ func TestForwardAsAnthropic_BufferedPolicyResponseFailedDoesNotFailover(t *testi
 
 func TestForwardAsAnthropic_BufferedInvalidRequestTypeDoesNotFailover(t *testing.T) {
 	t.Parallel()
-	gin.SetMode(gin.TestMode)
 
 	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":false}`)
 	c, rec := newOpenAICompatMessagesTestContext(body)
@@ -617,7 +873,6 @@ func TestOpenAIStreamFailoverErrorHonorsPoolModeRetryStatusPolicy(t *testing.T) 
 
 func TestForwardAsAnthropic_BufferedResponseForcesJSONContentType(t *testing.T) {
 	t.Parallel()
-	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -664,7 +919,6 @@ func TestForwardAsAnthropic_BufferedResponseForcesJSONContentType(t *testing.T) 
 
 func TestForwardAsAnthropic_MappedClaudeModelAcceptsChatUsageShape(t *testing.T) {
 	t.Parallel()
-	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -721,7 +975,6 @@ func TestForwardAsAnthropic_MappedClaudeModelAcceptsChatUsageShape(t *testing.T)
 
 func TestForwardAsAnthropic_InjectsPromptCacheKeyForAPIKeyMessagesDispatch(t *testing.T) {
 	t.Parallel()
-	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -767,7 +1020,6 @@ func TestForwardAsAnthropic_InjectsPromptCacheKeyForAPIKeyMessagesDispatch(t *te
 
 func TestForwardAsAnthropic_AutoDerivesPromptCacheKeyWhenMessagesDispatchHasNoSessionID(t *testing.T) {
 	t.Parallel()
-	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -814,7 +1066,6 @@ func TestForwardAsAnthropic_AutoDerivesPromptCacheKeyWhenMessagesDispatchHasNoSe
 
 func TestForwardAsAnthropic_DoesNotAutoDerivePromptCacheKeyForNonCodexModel(t *testing.T) {
 	t.Parallel()
-	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -859,7 +1110,6 @@ func TestForwardAsAnthropic_DoesNotAutoDerivePromptCacheKeyForNonCodexModel(t *t
 
 func TestForwardAsAnthropic_TrimsFullReplayOnlyForCodexCompatModels(t *testing.T) {
 	t.Parallel()
-	gin.SetMode(gin.TestMode)
 
 	messages := make([]string, 0, openAICompatAnthropicReplayMaxTailMessages+3)
 	for i := 0; i < openAICompatAnthropicReplayMaxTailMessages+3; i++ {
@@ -923,7 +1173,6 @@ func TestForwardAsAnthropic_TrimsFullReplayOnlyForCodexCompatModels(t *testing.T
 
 func TestForwardAsAnthropic_OAuthCompatKeepsFullReplayForCacheGrowth(t *testing.T) {
 	t.Parallel()
-	gin.SetMode(gin.TestMode)
 
 	messages := make([]string, 0, openAICompatAnthropicReplayMaxTailMessages+3)
 	for i := 0; i < openAICompatAnthropicReplayMaxTailMessages+3; i++ {
@@ -966,7 +1215,6 @@ func TestForwardAsAnthropic_OAuthCompatKeepsFullReplayForCacheGrowth(t *testing.
 
 func TestForwardAsAnthropic_AttachesPreviousResponseIDForCompatContinuation(t *testing.T) {
 	t.Parallel()
-	gin.SetMode(gin.TestMode)
 
 	upstream := &httpUpstreamRecorder{}
 	svc := &OpenAIGatewayService{
@@ -1018,7 +1266,6 @@ func TestForwardAsAnthropic_AttachesPreviousResponseIDForCompatContinuation(t *t
 
 func TestForwardAsAnthropic_PreviousResponseIDKeepsMultiToolCallContext(t *testing.T) {
 	t.Parallel()
-	gin.SetMode(gin.TestMode)
 
 	upstream := &httpUpstreamRecorder{}
 	svc := &OpenAIGatewayService{
@@ -1073,7 +1320,6 @@ func TestForwardAsAnthropic_PreviousResponseIDKeepsMultiToolCallContext(t *testi
 
 func TestForwardAsAnthropic_ReplaysWithoutContinuationWhenPreviousResponseMissing(t *testing.T) {
 	t.Parallel()
-	gin.SetMode(gin.TestMode)
 
 	upstream := &httpUpstreamRecorder{}
 	svc := &OpenAIGatewayService{
@@ -1124,7 +1370,6 @@ func TestForwardAsAnthropic_ReplaysWithoutContinuationWhenPreviousResponseMissin
 
 func TestForwardAsAnthropic_DisablesAPIKeyContinuationWhenUpstreamRequiresWebSocketV2(t *testing.T) {
 	t.Parallel()
-	gin.SetMode(gin.TestMode)
 
 	upstream := &httpUpstreamRecorder{}
 	svc := &OpenAIGatewayService{
@@ -1183,7 +1428,6 @@ func TestForwardAsAnthropic_DisablesAPIKeyContinuationWhenUpstreamRequiresWebSoc
 
 func TestForwardAsAnthropic_APIKeyMetadataSessionSurvivesChangingCacheControlAnchorAfterContinuationDisabled(t *testing.T) {
 	t.Parallel()
-	gin.SetMode(gin.TestMode)
 
 	metadata := `{"user_id":"{\"device_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"account_uuid\":\"\",\"session_id\":\"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\"}"}`
 	firstBody := []byte(`{"model":"claude-haiku-4-5-20251001","max_tokens":16,"metadata":` + metadata + `,"system":[{"type":"text","text":"project docs","cache_control":{"type":"ephemeral"}}],"messages":[{"role":"user","content":"first"}],"stream":false}`)
@@ -1248,7 +1492,6 @@ func TestForwardAsAnthropic_APIKeyMetadataSessionSurvivesChangingCacheControlAnc
 
 func TestForwardAsAnthropic_DoesNotAttachPreviousResponseIDForOAuthCompat(t *testing.T) {
 	t.Parallel()
-	gin.SetMode(gin.TestMode)
 
 	upstream := &httpUpstreamRecorder{resp: openAICompatSSECompletedResponse("resp_oauth_next", "gpt-5.4")}
 	svc := &OpenAIGatewayService{
@@ -1282,7 +1525,6 @@ func TestForwardAsAnthropic_DoesNotAttachPreviousResponseIDForOAuthCompat(t *tes
 
 func TestForwardAsAnthropic_ReusesOAuthCodexTurnState(t *testing.T) {
 	t.Parallel()
-	gin.SetMode(gin.TestMode)
 
 	firstResp := openAICompatSSECompletedResponse("resp_oauth_first", "gpt-5.4")
 	firstResp.Header.Set("x-codex-turn-state", "turn_state_first")
@@ -1339,7 +1581,6 @@ func TestForwardAsAnthropic_ReusesOAuthCodexTurnState(t *testing.T) {
 
 func TestForwardAsAnthropic_OAuthDigestFallbackReusesTurnStateWithoutExplicitKey(t *testing.T) {
 	t.Parallel()
-	gin.SetMode(gin.TestMode)
 
 	firstResp := openAICompatSSECompletedResponse("resp_oauth_digest_first", "gpt-5.4")
 	firstResp.Header.Set("x-codex-turn-state", "turn_state_digest_first")
@@ -1395,7 +1636,6 @@ func TestForwardAsAnthropic_OAuthDigestFallbackReusesTurnStateWithoutExplicitKey
 
 func TestForwardAsAnthropic_OAuthMetadataSessionSurvivesDigestPrefixRewrite(t *testing.T) {
 	t.Parallel()
-	gin.SetMode(gin.TestMode)
 
 	firstResp := openAICompatSSECompletedResponse("resp_oauth_metadata_first", "gpt-5.5")
 	firstResp.Header.Set("x-codex-turn-state", "turn_state_metadata_first")
@@ -1452,7 +1692,6 @@ func TestForwardAsAnthropic_OAuthMetadataSessionSurvivesDigestPrefixRewrite(t *t
 
 func TestForwardAsAnthropic_OAuthMetadataSessionSurvivesChangingCacheControlAnchor(t *testing.T) {
 	t.Parallel()
-	gin.SetMode(gin.TestMode)
 
 	firstResp := openAICompatSSECompletedResponse("resp_oauth_cache_anchor_first", "gpt-5.5")
 	firstResp.Header.Set("x-codex-turn-state", "turn_state_cache_anchor_first")
@@ -1509,7 +1748,6 @@ func TestForwardAsAnthropic_OAuthMetadataSessionSurvivesChangingCacheControlAnch
 
 func TestForwardAsAnthropic_OAuthKeepsSystemAsDeveloperInput(t *testing.T) {
 	t.Parallel()
-	gin.SetMode(gin.TestMode)
 
 	upstream := &httpUpstreamRecorder{resp: openAICompatSSECompletedResponse("resp_oauth_system", "gpt-5.4")}
 	svc := &OpenAIGatewayService{
@@ -1549,7 +1787,6 @@ func TestForwardAsAnthropic_OAuthKeepsSystemAsDeveloperInput(t *testing.T) {
 
 func TestForwardAsAnthropic_OAuthAddsClaudeCodeTodoGuardForCompatModel(t *testing.T) {
 	t.Parallel()
-	gin.SetMode(gin.TestMode)
 
 	upstream := &httpUpstreamRecorder{resp: openAICompatSSECompletedResponse("resp_oauth_todo_guard", "gpt-5.5")}
 	svc := &OpenAIGatewayService{
@@ -1586,7 +1823,6 @@ func TestForwardAsAnthropic_OAuthAddsClaudeCodeTodoGuardForCompatModel(t *testin
 
 func TestForwardAsAnthropic_OAuthPreservesClaudeCodeToolCallID(t *testing.T) {
 	t.Parallel()
-	gin.SetMode(gin.TestMode)
 
 	upstream := &httpUpstreamRecorder{resp: openAICompatSSECompletedResponse("resp_oauth_tool", "gpt-5.4")}
 	svc := &OpenAIGatewayService{
@@ -1623,7 +1859,6 @@ func TestForwardAsAnthropic_OAuthPreservesClaudeCodeToolCallID(t *testing.T) {
 
 func TestForwardAsAnthropic_StoresStreamingResponseIDWithoutUsage(t *testing.T) {
 	t.Parallel()
-	gin.SetMode(gin.TestMode)
 
 	upstream := &httpUpstreamRecorder{}
 	svc := &OpenAIGatewayService{
@@ -1697,7 +1932,6 @@ func openAICompatSSEResponseWithoutUsage(responseID, model string) *http.Respons
 
 func TestForwardAsAnthropic_ForcedCodexInstructionsTemplatePrependsRenderedInstructions(t *testing.T) {
 	t.Parallel()
-	gin.SetMode(gin.TestMode)
 
 	templateDir := t.TempDir()
 	templatePath := filepath.Join(templateDir, "codex-instructions.md.tmpl")
@@ -1748,7 +1982,6 @@ func TestForwardAsAnthropic_ForcedCodexInstructionsTemplatePrependsRenderedInstr
 
 func TestForwardAsAnthropic_ForcedCodexInstructionsTemplateUsesCachedTemplateContent(t *testing.T) {
 	t.Parallel()
-	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -1794,7 +2027,6 @@ func TestForwardAsAnthropic_ForcedCodexInstructionsTemplateUsesCachedTemplateCon
 }
 
 func TestForwardAsAnthropic_ClientDisconnectDrainsUpstreamUsage(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -1841,7 +2073,6 @@ func TestForwardAsAnthropic_ClientDisconnectDrainsUpstreamUsage(t *testing.T) {
 }
 
 func TestForwardAsAnthropic_TerminalUsageWithoutUpstreamCloseReturns(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -1897,7 +2128,6 @@ func TestForwardAsAnthropic_TerminalUsageWithoutUpstreamCloseReturns(t *testing.
 }
 
 func TestForwardAsAnthropic_EventNamedTerminalWithoutUpstreamCloseReturns(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -1958,7 +2188,6 @@ func TestForwardAsAnthropic_EventNamedTerminalWithoutUpstreamCloseReturns(t *tes
 }
 
 func TestForwardAsAnthropic_EventNamedTerminalWithKeepaliveReturns(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -2026,7 +2255,6 @@ func TestForwardAsAnthropic_EventNamedTerminalWithKeepaliveReturns(t *testing.T)
 }
 
 func TestForwardAsAnthropic_BufferedTerminalWithoutUpstreamCloseReturns(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -2082,7 +2310,6 @@ func TestForwardAsAnthropic_BufferedTerminalWithoutUpstreamCloseReturns(t *testi
 }
 
 func TestForwardAsAnthropic_BufferedEventNamedTerminalWithoutUpstreamCloseReturns(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -2143,7 +2370,6 @@ func TestForwardAsAnthropic_BufferedEventNamedTerminalWithoutUpstreamCloseReturn
 }
 
 func TestForwardAsAnthropic_MissingTerminalBeforeOutputReturnsFailoverAndOps(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -2193,7 +2419,6 @@ func TestForwardAsAnthropic_MissingTerminalBeforeOutputReturnsFailoverAndOps(t *
 }
 
 func TestForwardAsAnthropic_MissingTerminalAfterOutputRecordsOpsWithoutFailover(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -2249,7 +2474,6 @@ func TestForwardAsAnthropic_MissingTerminalAfterOutputRecordsOpsWithoutFailover(
 }
 
 func TestForwardAsAnthropic_MissingTerminalAfterClientDisconnectSkipsOpsAndFailover(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -2296,7 +2520,6 @@ func TestForwardAsAnthropic_MissingTerminalAfterClientDisconnectSkipsOpsAndFailo
 }
 
 func TestForwardAsAnthropic_CompleteStreamDoesNotRecordMissingTerminalOps(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -2353,7 +2576,6 @@ func openAICompatOpsEvents(t *testing.T, c *gin.Context) []*OpsUpstreamErrorEven
 }
 
 func TestForwardAsAnthropic_UpstreamRequestIgnoresClientCancel(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
