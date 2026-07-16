@@ -723,7 +723,7 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_Enabled_EmbeddingsSkips
 	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
 	require.False(t, decision.StickyPreviousHit)
 	require.False(t, decision.StickySessionHit)
-	require.Equal(t, int64(37022), cache.sessionBindings["openai:session_hash_embeddings"])
+	require.Equal(t, int64(37021), cache.sessionBindings["openai:session_hash_embeddings"])
 }
 
 func TestOpenAIGatewayService_OpenAIAccountSchedulerMetrics_DisabledNoOp(t *testing.T) {
@@ -1222,7 +1222,7 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_PreviousResponseSticky(
 	require.Equal(t, account.ID, selection.Account.ID)
 	require.Equal(t, openAIAccountScheduleLayerPreviousResponse, decision.Layer)
 	require.True(t, decision.StickyPreviousHit)
-	require.Equal(t, account.ID, cache.sessionBindings["openai:session_hash_001"])
+	require.Zero(t, cache.sessionBindings["openai:session_hash_001"])
 	if selection.ReleaseFunc != nil {
 		selection.ReleaseFunc()
 	}
@@ -1641,7 +1641,7 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_ClearsStickyAccountOuts
 	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
 	require.False(t, decision.StickySessionHit)
 	require.Equal(t, 1, cache.deletedSessions["openai:session_hash_removed_group"])
-	require.Equal(t, int64(2402), cache.sessionBindings["openai:session_hash_removed_group"])
+	require.Zero(t, cache.sessionBindings["openai:session_hash_removed_group"])
 	if selection.ReleaseFunc != nil {
 		selection.ReleaseFunc()
 	}
