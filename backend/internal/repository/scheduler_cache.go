@@ -248,34 +248,41 @@ func (c *schedulerCache) UpdateLastUsed(ctx context.Context, updates map[int64]t
 		ids = append(ids, id)
 	}
 
-	values, err := c.mgetChunked(ctx, keys)
-	if err != nil {
-		return err
-	}
+	return c.rdb.Watch(ctx, func(tx *redis.Tx) error {
+		values, err := tx.MGet(ctx, keys...).Result()
+		if err != nil {
+			return err
+		}
 
-	pipe := c.rdb.Pipeline()
-	for i, val := range values {
-		if val == nil {
-			continue
-		}
-		account, err := decodeCachedAccount(val)
-		if err != nil {
-			return err
-		}
-		account.LastUsedAt = ptrTime(updates[ids[i]])
-		updated, err := json.Marshal(account)
-		if err != nil {
-			return err
-		}
-		metaPayload, err := json.Marshal(buildSchedulerMetadataAccount(*account))
-		if err != nil {
-			return err
-		}
-		pipe.Set(ctx, keys[i], updated, 0)
-		pipe.Set(ctx, schedulerAccountMetaKey(strconv.FormatInt(ids[i], 10)), metaPayload, 0)
-	}
-	_, err = pipe.Exec(ctx)
-	return err
+		_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+			for i, val := range values {
+				if val == nil {
+					continue
+				}
+				account, err := decodeCachedAccount(val)
+				if err != nil {
+					return err
+				}
+				requested := updates[ids[i]]
+				if account.LastUsedAt != nil && !requested.After(*account.LastUsedAt) {
+					continue
+				}
+				account.LastUsedAt = ptrTime(requested)
+				updated, err := json.Marshal(account)
+				if err != nil {
+					return err
+				}
+				metaPayload, err := json.Marshal(buildSchedulerMetadataAccount(*account))
+				if err != nil {
+					return err
+				}
+				pipe.Set(ctx, keys[i], updated, 0)
+				pipe.Set(ctx, schedulerAccountMetaKey(strconv.FormatInt(ids[i], 10)), metaPayload, 0)
+			}
+			return nil
+		})
+		return err
+	}, keys...)
 }
 
 func (c *schedulerCache) TryLockBucket(ctx context.Context, bucket service.SchedulerBucket, ttl time.Duration) (bool, error) {

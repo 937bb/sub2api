@@ -103,3 +103,27 @@ func TestSchedulerCacheSnapshotUsesSlimMetadataButKeepsFullAccount(t *testing.T)
 	require.Len(t, full.AccountGroups, 1)
 	require.NotNil(t, full.AccountGroups[0].Group)
 }
+
+func TestSchedulerCacheUpdateLastUsedDoesNotRegress(t *testing.T) {
+	ctx := context.Background()
+	rdb := testRedis(t)
+	cache := NewSchedulerCache(rdb)
+
+	newer := time.Now().UTC().Truncate(time.Second)
+	older := newer.Add(-time.Hour)
+	account := service.Account{ID: 202, LastUsedAt: &newer}
+	require.NoError(t, cache.SetAccount(ctx, &account))
+
+	require.NoError(t, cache.UpdateLastUsed(ctx, map[int64]time.Time{account.ID: older}))
+	got, err := cache.GetAccount(ctx, account.ID)
+	require.NoError(t, err)
+	require.NotNil(t, got.LastUsedAt)
+	require.Equal(t, newer, *got.LastUsedAt)
+
+	metaRaw, err := rdb.Get(ctx, schedulerAccountMetaKey("202")).Result()
+	require.NoError(t, err)
+	meta, err := decodeCachedAccount(metaRaw)
+	require.NoError(t, err)
+	require.NotNil(t, meta.LastUsedAt)
+	require.Equal(t, newer, *meta.LastUsedAt)
+}

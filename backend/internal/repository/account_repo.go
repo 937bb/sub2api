@@ -15,6 +15,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -915,16 +916,34 @@ func (r *accountRepository) ListByPlatformForValidation(ctx context.Context, pla
 
 func (r *accountRepository) UpdateLastUsed(ctx context.Context, id int64) error {
 	now := time.Now()
-	_, err := r.client.Account.Update().
-		Where(dbaccount.IDEQ(id)).
-		SetLastUsedAt(now).
-		Save(ctx)
+	rows, err := r.sql.QueryContext(ctx, `
+		UPDATE accounts
+		SET last_used_at = GREATEST(last_used_at, $1),
+			updated_at = NOW()
+		WHERE id = $2 AND deleted_at IS NULL
+		RETURNING last_used_at
+	`, now, id)
 	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		return service.ErrAccountNotFound
+	}
+	var stored time.Time
+	if err := rows.Scan(&stored); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
 		return err
 	}
 	payload := map[string]any{
 		"last_used": map[string]int64{
-			strconv.FormatInt(id, 10): now.Unix(),
+			strconv.FormatInt(id, 10): stored.Unix(),
 		},
 	}
 	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountLastUsed, &id, nil, payload); err != nil {
@@ -933,33 +952,66 @@ func (r *accountRepository) UpdateLastUsed(ctx context.Context, id int64) error 
 	return nil
 }
 
+const accountLastUsedBatchSize = 1000
+
 func (r *accountRepository) BatchUpdateLastUsed(ctx context.Context, updates map[int64]time.Time) error {
 	if len(updates) == 0 {
 		return nil
 	}
 
 	ids := make([]int64, 0, len(updates))
-	args := make([]any, 0, len(updates)*2+1)
-	caseSQL := "UPDATE accounts SET last_used_at = CASE id"
-
-	idx := 1
-	for id, ts := range updates {
-		caseSQL += " WHEN $" + itoa(idx) + " THEN $" + itoa(idx+1) + "::timestamptz"
-		args = append(args, id, ts)
+	for id := range updates {
 		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+
+	for start := 0; start < len(ids); start += accountLastUsedBatchSize {
+		end := start + accountLastUsedBatchSize
+		if end > len(ids) {
+			end = len(ids)
+		}
+		if err := r.batchUpdateLastUsedChunk(ctx, ids[start:end], updates); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *accountRepository) batchUpdateLastUsedChunk(ctx context.Context, ids []int64, updates map[int64]time.Time) error {
+	args := make([]any, 0, len(ids)*2+1)
+	caseSQL := "UPDATE accounts SET last_used_at = GREATEST(last_used_at, CASE id"
+	idx := 1
+	for _, id := range ids {
+		caseSQL += " WHEN $" + itoa(idx) + " THEN $" + itoa(idx+1) + "::timestamptz"
+		args = append(args, id, updates[id])
 		idx += 2
 	}
-
-	caseSQL += " END, updated_at = NOW() WHERE id = ANY($" + itoa(idx) + ") AND deleted_at IS NULL"
+	caseSQL += " END), updated_at = NOW() WHERE id = ANY($" + itoa(idx) + ") AND deleted_at IS NULL RETURNING id, last_used_at"
 	args = append(args, ids)
 
-	_, err := r.sql.ExecContext(ctx, caseSQL, args...)
+	rows, err := r.sql.QueryContext(ctx, caseSQL, args...)
 	if err != nil {
 		return err
 	}
-	lastUsedPayload := make(map[string]int64, len(updates))
-	for id, ts := range updates {
-		lastUsedPayload[strconv.FormatInt(id, 10)] = ts.Unix()
+	lastUsedPayload := make(map[string]int64, len(ids))
+	for rows.Next() {
+		var id int64
+		var stored time.Time
+		if err := rows.Scan(&id, &stored); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		lastUsedPayload[strconv.FormatInt(id, 10)] = stored.Unix()
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if len(lastUsedPayload) == 0 {
+		return nil
 	}
 	payload := map[string]any{"last_used": lastUsedPayload}
 	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountLastUsed, nil, nil, payload); err != nil {

@@ -4,6 +4,8 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
+	"strconv"
 	"testing"
 	"time"
 
@@ -883,6 +885,69 @@ func (s *AccountRepoSuite) TestUpdateLastUsed() {
 	got, err := s.repo.GetByID(s.ctx, account.ID)
 	s.Require().NoError(err)
 	s.Require().NotNil(got.LastUsedAt)
+}
+
+func (s *AccountRepoSuite) TestLastUsedOutboxPublishesStoredTimestampsAndExistingIDsOnly() {
+	account1 := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-used-monotonic-1"})
+	account2 := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-used-monotonic-2"})
+	stored1 := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+	stored2 := stored1.Add(time.Hour)
+	_, err := s.repo.sql.ExecContext(s.ctx, "UPDATE accounts SET last_used_at = $1 WHERE id = $2", stored1, account1.ID)
+	s.Require().NoError(err)
+	_, err = s.repo.sql.ExecContext(s.ctx, "UPDATE accounts SET last_used_at = $1 WHERE id = $2", stored2, account2.ID)
+	s.Require().NoError(err)
+	_, err = s.repo.sql.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
+
+	s.Require().NoError(s.repo.UpdateLastUsed(s.ctx, account1.ID))
+	s.Require().Equal(map[string]int64{strconv.FormatInt(account1.ID, 10): stored1.Unix()}, s.lastUsedOutboxPayload())
+
+	_, err = s.repo.sql.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
+	missingID := account2.ID + 1000000
+	s.Require().NoError(s.repo.BatchUpdateLastUsed(s.ctx, map[int64]time.Time{
+		account1.ID: stored1.Add(-time.Hour),
+		account2.ID: stored2.Add(-time.Hour),
+		missingID:   stored2,
+	}))
+	s.Require().Equal(map[string]int64{
+		strconv.FormatInt(account1.ID, 10): stored1.Unix(),
+		strconv.FormatInt(account2.ID, 10): stored2.Unix(),
+	}, s.lastUsedOutboxPayload())
+}
+
+func (s *AccountRepoSuite) TestBatchUpdateLastUsedChunksLargeInput() {
+	const total = accountLastUsedBatchSize + 1
+	updates := make(map[int64]time.Time, total)
+	ids := make([]int64, 0, total)
+	usedAt := time.Now().UTC().Truncate(time.Second)
+	for i := 0; i < total; i++ {
+		account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-used-large-" + strconv.Itoa(i)})
+		ids = append(ids, account.ID)
+		updates[account.ID] = usedAt.Add(time.Duration(i) * time.Second)
+	}
+	_, err := s.repo.sql.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
+
+	s.Require().NoError(s.repo.BatchUpdateLastUsed(s.ctx, updates))
+
+	var outboxRows int
+	s.Require().NoError(scanSingleRow(s.ctx, s.repo.sql, `SELECT count(*) FROM scheduler_outbox WHERE event_type=$1`, []any{service.SchedulerOutboxEventAccountLastUsed}, &outboxRows))
+	s.Require().Equal(2, outboxRows)
+	var stored time.Time
+	s.Require().NoError(scanSingleRow(s.ctx, s.repo.sql, `SELECT last_used_at FROM accounts WHERE id=$1`, []any{ids[len(ids)-1]}, &stored))
+	s.Require().True(updates[ids[len(ids)-1]].Equal(stored))
+}
+
+func (s *AccountRepoSuite) lastUsedOutboxPayload() map[string]int64 {
+	var raw []byte
+	err := scanSingleRow(s.ctx, s.repo.sql, `SELECT payload FROM scheduler_outbox WHERE event_type = $1 ORDER BY id DESC LIMIT 1`, []any{service.SchedulerOutboxEventAccountLastUsed}, &raw)
+	s.Require().NoError(err)
+	var payload struct {
+		LastUsed map[string]int64 `json:"last_used"`
+	}
+	s.Require().NoError(json.Unmarshal(raw, &payload))
+	return payload.LastUsed
 }
 
 // --- SetError ---
