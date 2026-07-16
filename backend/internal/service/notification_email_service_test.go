@@ -10,8 +10,41 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/stretchr/testify/require"
 )
+
+func TestFrontendURLFallbackAndLinkPathPrefixes(t *testing.T) {
+	ctx := context.Background()
+	repo := newNotificationEmailMemorySettingRepo()
+	require.NoError(t, repo.Set(ctx, SettingKeyFrontendURL, "https://user:secret@example.com/%"))
+	settingSvc := NewSettingService(repo, &config.Config{Server: config.ServerConfig{FrontendURL: "https://example.com/startup/app/"}})
+
+	require.Equal(t, "https://example.com/startup/app/", settingSvc.GetFrontendURL(ctx))
+
+	require.NoError(t, repo.Set(ctx, SettingKeyFrontendURL, "https://example.com/runtime/app/"))
+	require.Equal(t, "https://example.com/runtime/app/", settingSvc.GetFrontendURL(ctx))
+
+	notificationSvc := NewNotificationEmailService(repo, nil)
+	unsubscribeURL, err := notificationSvc.buildUnsubscribeURL(ctx, "user@example.com", NotificationEmailEventBalanceLow)
+	require.NoError(t, err)
+	require.Contains(t, unsubscribeURL, "https://example.com/runtime/app/api/v1/settings/email-unsubscribe?token=")
+
+	resetURL := strings.TrimSuffix(settingSvc.GetFrontendURL(ctx), "/") + "/reset-password"
+	require.Equal(t, "https://example.com/runtime/app/reset-password", resetURL)
+}
+
+func TestNotificationEmailMalformedLegacyFrontendURLUsesRelativeUnsubscribeURL(t *testing.T) {
+	ctx := context.Background()
+	repo := newNotificationEmailMemorySettingRepo()
+	require.NoError(t, repo.Set(ctx, SettingKeyFrontendURL, "https://user:secret@example.com/%"))
+	svc := NewNotificationEmailService(repo, nil)
+
+	unsubscribeURL, err := svc.buildUnsubscribeURL(ctx, "user@example.com", NotificationEmailEventBalanceLow)
+	require.NoError(t, err)
+	require.True(t, strings.HasPrefix(unsubscribeURL, "/api/v1/settings/email-unsubscribe?token="))
+	require.NotContains(t, unsubscribeURL, "user:secret")
+}
 
 func TestNotificationEmailPreviewEscapesHTMLAndSanitizesSubject(t *testing.T) {
 	ctx := context.Background()

@@ -1288,7 +1288,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	// Frontend URL 验证
 	req.FrontendURL = strings.TrimSpace(req.FrontendURL)
 	if req.FrontendURL != "" {
-		if err := config.ValidateAbsoluteHTTPURL(req.FrontendURL); err != nil {
+		if err := config.ValidateFrontendBaseURL(req.FrontendURL); err != nil {
 			response.BadRequest(c, "Frontend URL must be an absolute http(s) URL")
 			return
 		}

@@ -701,9 +701,14 @@ func (s *SettingService) GetAllSettings(ctx context.Context) (*SystemSettings, e
 func (s *SettingService) GetFrontendURL(ctx context.Context) string {
 	val, err := s.settingRepo.GetValue(ctx, SettingKeyFrontendURL)
 	if err == nil && strings.TrimSpace(val) != "" {
-		return strings.TrimSpace(val)
+		val = strings.TrimSpace(val)
+		if validateErr := config.ValidateFrontendBaseURL(val); validateErr == nil {
+			return val
+		} else {
+			slog.Warn("invalid frontend_url setting; falling back to startup config")
+		}
 	}
-	return s.cfg.Server.FrontendURL
+	return strings.TrimSpace(s.cfg.Server.FrontendURL)
 }
 
 // GetPublicSettings 获取公开设置（无需登录）

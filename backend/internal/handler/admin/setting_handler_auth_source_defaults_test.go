@@ -207,6 +207,48 @@ func TestSettingHandler_UpdateSettings_PreservesOmittedAuthSourceDefaults(t *tes
 	require.Equal(t, true, data["force_email_on_third_party_signup"])
 }
 
+func TestSettingHandler_UpdateSettings_RejectsInvalidFrontendURLWithoutPersistence(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &settingHandlerRepoStub{values: map[string]string{}}
+	svc := service.NewSettingService(repo, &config.Config{})
+	handler := NewSettingHandler(svc, nil, nil, nil, nil, nil, nil)
+
+	body, err := json.Marshal(map[string]any{"frontend_url": "https://user:pass@example.com?token=secret"})
+	require.NoError(t, err)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.UpdateSettings(c)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Nil(t, repo.lastUpdates)
+}
+
+func TestSettingHandler_UpdateSettings_MalformedFrontendURLDoesNotLeakCredentials(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &settingHandlerRepoStub{values: map[string]string{}}
+	svc := service.NewSettingService(repo, &config.Config{})
+	handler := NewSettingHandler(svc, nil, nil, nil, nil, nil, nil)
+
+	const malformedWithCredentials = "https://user:secret@example.com/%"
+	body, err := json.Marshal(map[string]any{"frontend_url": malformedWithCredentials})
+	require.NoError(t, err)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.UpdateSettings(c)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.NotContains(t, rec.Body.String(), malformedWithCredentials)
+	require.NotContains(t, rec.Body.String(), "user:secret")
+	require.NotContains(t, rec.Body.String(), "invalid URL escape")
+	require.Nil(t, repo.lastUpdates)
+}
+
 func TestSettingHandler_GetSettings_ReturnsOpenAICodexUAProfile(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	const rawUA = "codex-custom/1.2.3 (Linux 6.0; x64) XTerm/380 (codex-custom; 1.2.3)"

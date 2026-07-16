@@ -831,6 +831,51 @@ func TestValidateAbsoluteHTTPURL(t *testing.T) {
 	}
 }
 
+func TestValidateFrontendBaseURL(t *testing.T) {
+	accepted := []string{
+		"https://example.com",
+		"https://example.com/app",
+		"https://example.com/app/",
+		" https://example.com/app/%23section ",
+	}
+	for _, raw := range accepted {
+		t.Run("accept_"+raw, func(t *testing.T) {
+			if err := ValidateFrontendBaseURL(raw); err != nil {
+				t.Fatalf("ValidateFrontendBaseURL(%q) error: %v", raw, err)
+			}
+		})
+	}
+
+	rejected := []string{
+		"https://:443",
+		"https://example.com?",
+		"https://example.com?token=secret",
+		"https://example.com#",
+		"https://example.com#section",
+		"https://user@example.com",
+		"https://user:pass@example.com",
+	}
+	for _, raw := range rejected {
+		t.Run("reject_"+raw, func(t *testing.T) {
+			if err := ValidateFrontendBaseURL(raw); err == nil {
+				t.Fatalf("ValidateFrontendBaseURL(%q) should reject input", raw)
+			}
+		})
+	}
+
+	const malformedWithCredentials = "https://user:secret@example.com/%"
+	err := ValidateFrontendBaseURL(malformedWithCredentials)
+	if err == nil {
+		t.Fatal("ValidateFrontendBaseURL should reject a malformed percent escape")
+	}
+	if got := err.Error(); got != "invalid frontend base URL" {
+		t.Fatalf("malformed URL error = %q, want fixed local error", got)
+	}
+	if strings.Contains(err.Error(), malformedWithCredentials) || strings.Contains(err.Error(), "user:secret") {
+		t.Fatalf("malformed URL error leaked input or credentials: %q", err)
+	}
+}
+
 func TestValidateServerFrontendURL(t *testing.T) {
 	resetViperWithJWTSecret(t)
 
@@ -849,6 +894,16 @@ func TestValidateServerFrontendURL(t *testing.T) {
 		t.Fatalf("Validate() frontend_url with path valid error: %v", err)
 	}
 
+	cfg.Server.FrontendURL = "https://example.com#"
+	if err := cfg.Validate(); err == nil {
+		t.Fatalf("Validate() should reject server.frontend_url with bare fragment")
+	}
+
+	cfg.Server.FrontendURL = "https://example.com?"
+	if err := cfg.Validate(); err == nil {
+		t.Fatalf("Validate() should reject server.frontend_url with bare query")
+	}
+
 	cfg.Server.FrontendURL = "https://example.com?utm=1"
 	if err := cfg.Validate(); err == nil {
 		t.Fatalf("Validate() should reject server.frontend_url with query")
@@ -862,6 +917,16 @@ func TestValidateServerFrontendURL(t *testing.T) {
 	cfg.Server.FrontendURL = "/relative"
 	if err := cfg.Validate(); err == nil {
 		t.Fatalf("Validate() should reject relative server.frontend_url")
+	}
+
+	const malformedWithCredentials = "https://user:secret@example.com/%"
+	cfg.Server.FrontendURL = malformedWithCredentials
+	err = cfg.Validate()
+	if err == nil {
+		t.Fatal("Validate() should reject malformed server.frontend_url")
+	}
+	if strings.Contains(err.Error(), malformedWithCredentials) || strings.Contains(err.Error(), "user:secret") || strings.Contains(err.Error(), "invalid URL escape") {
+		t.Fatalf("Validate() error leaked input or parser details: %q", err)
 	}
 }
 

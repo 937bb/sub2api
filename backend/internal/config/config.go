@@ -2028,18 +2028,8 @@ func (c *Config) Validate() error {
 	}
 
 	if strings.TrimSpace(c.Server.FrontendURL) != "" {
-		if err := ValidateAbsoluteHTTPURL(c.Server.FrontendURL); err != nil {
+		if err := ValidateFrontendBaseURL(c.Server.FrontendURL); err != nil {
 			return fmt.Errorf("server.frontend_url invalid: %w", err)
-		}
-		u, err := url.Parse(strings.TrimSpace(c.Server.FrontendURL))
-		if err != nil {
-			return fmt.Errorf("server.frontend_url invalid: %w", err)
-		}
-		if u.RawQuery != "" || u.ForceQuery {
-			return fmt.Errorf("server.frontend_url invalid: must not include query")
-		}
-		if u.User != nil {
-			return fmt.Errorf("server.frontend_url invalid: must not include userinfo")
 		}
 		warnIfInsecureURL("server.frontend_url", c.Server.FrontendURL)
 	}
@@ -2882,6 +2872,38 @@ func ValidateAbsoluteHTTPURL(raw string) error {
 	}
 	if u.Fragment != "" {
 		return fmt.Errorf("must not include fragment")
+	}
+	return nil
+}
+
+// ValidateFrontendBaseURL validates the external frontend base used to build links.
+func ValidateFrontendBaseURL(raw string) error {
+	raw = strings.TrimSpace(raw)
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("invalid frontend base URL")
+	}
+	if raw == "" {
+		return fmt.Errorf("frontend base URL is empty")
+	}
+	if !u.IsAbs() {
+		return fmt.Errorf("frontend base URL must be absolute")
+	}
+	if !isHTTPScheme(u.Scheme) {
+		return fmt.Errorf("frontend base URL must use http or https")
+	}
+	if strings.TrimSpace(u.Hostname()) == "" {
+		return fmt.Errorf("frontend base URL must include a hostname")
+	}
+	if u.RawQuery != "" || u.ForceQuery {
+		return fmt.Errorf("frontend base URL must not include a query")
+	}
+	if u.User != nil {
+		return fmt.Errorf("frontend base URL must not include userinfo")
+	}
+	// net/url does not retain an empty fragment delimiter (the equivalent of ForceQuery).
+	if strings.Contains(raw, "#") {
+		return fmt.Errorf("frontend base URL must not include a fragment")
 	}
 	return nil
 }
