@@ -223,6 +223,96 @@ func TestOpenAIGatewayService_Forward_TextResponsesUsesMappedBillingModel(t *tes
 	require.Equal(t, "gpt-5.5", result.UpstreamModel)
 }
 
+func TestOpenAIGatewayService_Forward_PlanGateUsesFinalUpstreamModel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusBadRequest,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"detail":"The 'gpt-5.4' model is not supported when using Codex with a ChatGPT account."}`)),
+	}}
+	repo := &modelNotFoundAccountRepoStub{}
+	cfg := &config.Config{}
+	cfg.Security.URLAllowlist.Enabled = false
+	svc := &OpenAIGatewayService{
+		cfg:          cfg,
+		httpUpstream: upstream,
+		rateLimitService: &RateLimitService{
+			accountRepo: repo,
+		},
+	}
+	account := &Account{
+		ID:          42,
+		Name:        "openai-oauth",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"access_token": "oauth-token",
+			"model_mapping": map[string]any{
+				"billing-alias": "gpt-5.4-high",
+			},
+		},
+		Extra: map[string]any{"use_responses_api": true},
+	}
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", nil)
+	SetOpenAIClientTransport(c, OpenAIClientTransportHTTP)
+
+	result, err := svc.Forward(context.Background(), c, account, []byte(`{"model":"billing-alias","stream":false,"input":"hello"}`))
+	require.Nil(t, result)
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	wireModel := gjson.GetBytes(upstream.lastBody, "model").String()
+	require.Equal(t, "gpt-5.4", wireModel)
+	require.Len(t, repo.modelRateLimitCalls, 1)
+	require.Equal(t, wireModel, repo.modelRateLimitCalls[0].scope)
+	require.Equal(t, openAIPlanGatedModelReason, repo.modelRateLimitCalls[0].reason)
+}
+
+func TestOpenAIGatewayService_Forward_PlanGateRejectsNonWireModel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusBadRequest,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"detail":"The 'gpt-5.4-high' model is not supported when using Codex with a ChatGPT account."}`)),
+	}}
+	repo := &modelNotFoundAccountRepoStub{}
+	cfg := &config.Config{}
+	cfg.Security.URLAllowlist.Enabled = false
+	svc := &OpenAIGatewayService{
+		cfg:          cfg,
+		httpUpstream: upstream,
+		rateLimitService: &RateLimitService{
+			accountRepo: repo,
+		},
+	}
+	account := &Account{
+		ID:          43,
+		Name:        "openai-oauth",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"access_token": "oauth-token",
+			"model_mapping": map[string]any{
+				"billing-alias": "gpt-5.4-high",
+			},
+		},
+		Extra: map[string]any{"use_responses_api": true},
+	}
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", nil)
+	SetOpenAIClientTransport(c, OpenAIClientTransportHTTP)
+
+	result, err := svc.Forward(context.Background(), c, account, []byte(`{"model":"billing-alias","stream":false,"input":"hello"}`))
+	require.Nil(t, result)
+	require.Error(t, err)
+	require.Equal(t, "gpt-5.4", gjson.GetBytes(upstream.lastBody, "model").String())
+	require.Empty(t, repo.modelRateLimitCalls)
+}
+
 func TestOpenAIGatewayService_Forward_StreamingTextUsesMappedBillingModel(t *testing.T) {
 	tests := []struct {
 		name      string

@@ -226,6 +226,48 @@ func TestIsModelRateLimited(t *testing.T) {
 			requestedModel: "gpt-5.4",
 			expected:       false,
 		},
+		{
+			name: "openai oauth mapped reasoning model hits final wire-model cooldown",
+			account: &Account{
+				Platform: PlatformOpenAI,
+				Type:     AccountTypeOAuth,
+				Credentials: map[string]any{
+					"model_mapping": map[string]any{
+						"billing-alias": "gpt-5.4-high",
+					},
+				},
+				Extra: map[string]any{
+					modelRateLimitsKey: map[string]any{
+						"gpt-5.4": map[string]any{
+							"rate_limit_reset_at": future,
+						},
+					},
+				},
+			},
+			requestedModel: "billing-alias",
+			expected:       true,
+		},
+		{
+			name: "openai api key does not broaden mapped model to OAuth wire scope",
+			account: &Account{
+				Platform: PlatformOpenAI,
+				Type:     AccountTypeAPIKey,
+				Credentials: map[string]any{
+					"model_mapping": map[string]any{
+						"billing-alias": "gpt-5.4-high",
+					},
+				},
+				Extra: map[string]any{
+					modelRateLimitsKey: map[string]any{
+						"gpt-5.4": map[string]any{
+							"rate_limit_reset_at": future,
+						},
+					},
+				},
+			},
+			requestedModel: "billing-alias",
+			expected:       false,
+		},
 	}
 
 	for _, tt := range tests {

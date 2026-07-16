@@ -2009,6 +2009,7 @@ func parseOpenAIImageTryAgainCooldown(body []byte) time.Duration {
 
 const upstreamModelNotFoundCooldown = 30 * time.Minute
 const upstreamModelNotFoundReason = "upstream_404_model_not_found"
+const openAIPlanGatedModelReason = "openai_oauth_plan_model_unsupported"
 const tempUnschedBodyMaxBytes = 64 << 10
 const tempUnschedMessageMaxBytes = 2048
 
@@ -2019,15 +2020,31 @@ func (s *RateLimitService) HandleUpstreamModelNotFound(ctx context.Context, acco
 	if !account.ShouldHandleErrorCode(statusCode) {
 		return false
 	}
-	if !isUpstreamModelNotFoundError(statusCode, responseBody) {
-		return false
+	reason := upstreamModelNotFoundReason
+	modelKey := ""
+	if statusCode == http.StatusBadRequest && account.Platform == PlatformOpenAI && account.Type == AccountTypeOAuth {
+		messageModel, ok := openAIPlanGatedModel(responseBody)
+		if !ok {
+			return false
+		}
+		// OpenAI forwarders pass the final upstream model. Persist exactly the
+		// model named by the authenticated upstream response without remapping it.
+		modelKey = strings.TrimSpace(requestedModel)
+		if messageModel != modelKey {
+			return false
+		}
+		reason = openAIPlanGatedModelReason
+	} else {
+		if !isUpstreamModelNotFoundError(statusCode, responseBody) {
+			return false
+		}
+		modelKey = modelRateLimitKeyForUpstreamModelNotFound(ctx, account, requestedModel)
 	}
-	modelKey := modelRateLimitKeyForUpstreamModelNotFound(ctx, account, requestedModel)
 	if modelKey == "" {
 		return false
 	}
 	resetAt := time.Now().Add(upstreamModelNotFoundCooldown)
-	if err := s.accountRepo.SetModelRateLimit(ctx, account.ID, modelKey, resetAt, upstreamModelNotFoundReason); err != nil {
+	if err := s.accountRepo.SetModelRateLimit(ctx, account.ID, modelKey, resetAt, reason); err != nil {
 		slog.Warn("upstream_model_not_found_set_model_rate_limit_failed", "account_id", account.ID, "model", modelKey, "error", err)
 		return true
 	}

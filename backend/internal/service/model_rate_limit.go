@@ -73,6 +73,13 @@ func (a *Account) modelRateLimitKeysForRequest(ctx context.Context, requestedMod
 	}
 
 	keys := []string{modelKey}
+	if a.Platform == PlatformOpenAI && a.Type == AccountTypeOAuth {
+		// OAuth plan gates name the exact Codex wire model, which may differ
+		// from the mapped billing model after reasoning-suffix normalization.
+		if wireModel := normalizeCodexModel(modelKey); wireModel != modelKey {
+			keys = append(keys, wireModel)
+		}
+	}
 	switch a.Platform {
 	case PlatformAntigravity:
 		if isAntigravityGeminiModel(modelKey) && modelKey != antigravityGeminiModelRateLimitKey {
