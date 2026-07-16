@@ -31,13 +31,15 @@ func TestSchedulerDirtyWorkListIsBoundedAndOrdered(t *testing.T) {
 
 	now := time.Now().UTC()
 	mock.ExpectQuery(regexp.QuoteMeta(`
-		SELECT kind, entity_id, generation, rebuild_buckets, updated_at
+		SELECT kind, entity_id, generation, rebuild_buckets, updated_at,
+		       failure_count, last_failure_at, last_error, retry_at
 		FROM scheduler_dirty_work
-		ORDER BY updated_at ASC, kind ASC, entity_id ASC
+		WHERE retry_at <= clock_timestamp()
+		ORDER BY retry_at ASC, updated_at ASC, kind ASC, entity_id ASC
 		LIMIT $1
 	`)).WithArgs(maxDirtyWorkBatchSize).WillReturnRows(
-		sqlmock.NewRows([]string{"kind", "entity_id", "generation", "rebuild_buckets", "updated_at"}).
-			AddRow(int16(2), int64(9), int64(4), true, now),
+		sqlmock.NewRows([]string{"kind", "entity_id", "generation", "rebuild_buckets", "updated_at", "failure_count", "last_failure_at", "last_error", "retry_at"}).
+			AddRow(int16(2), int64(9), int64(4), true, now, 0, nil, "", time.Time{}),
 	)
 
 	items, err := NewSchedulerDirtyWorkRepository(db).List(context.Background(), maxDirtyWorkBatchSize+1)
@@ -55,21 +57,65 @@ func TestSchedulerDirtyWorkAcknowledgeIsGenerationConditional(t *testing.T) {
 	query := regexp.QuoteMeta(`
 		DELETE FROM scheduler_dirty_work
 		WHERE kind = $1 AND entity_id = $2 AND generation = $3
+		  AND EXISTS (SELECT 1 FROM scheduler_ownership_epoch WHERE singleton AND epoch = $4)
 	`)
 
 	// Zero rows is the expected acknowledgement when a producer concurrently
 	// advanced generation; the newer dirty state remains in PostgreSQL.
-	mock.ExpectExec(query).WithArgs(item.Kind, item.EntityID, item.Generation).
+	mock.ExpectExec(query).WithArgs(item.Kind, item.EntityID, item.Generation, int64(11)).
 		WillReturnResult(sqlmock.NewResult(0, 0))
-	acknowledged, err := repo.Acknowledge(context.Background(), item)
+	conn, err := db.Conn(context.Background())
+	require.NoError(t, err)
+	defer conn.Close()
+	owner := &postgresSchedulerOwnership{conn: conn, epoch: 11, ctx: context.Background()}
+	acknowledged, err := repo.Acknowledge(context.Background(), owner, item)
 	require.NoError(t, err)
 	require.False(t, acknowledged)
 
-	mock.ExpectExec(query).WithArgs(item.Kind, item.EntityID, item.Generation).
+	mock.ExpectExec(query).WithArgs(item.Kind, item.EntityID, item.Generation, int64(11)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
-	acknowledged, err = repo.Acknowledge(context.Background(), item)
+	acknowledged, err = repo.Acknowledge(context.Background(), owner, item)
 	require.NoError(t, err)
 	require.True(t, acknowledged)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSchedulerDirtyWorkAcknowledgeRejectsMissingOwnership(t *testing.T) {
+	db, _, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+
+	acknowledged, err := NewSchedulerDirtyWorkRepository(db).Acknowledge(context.Background(), nil, service.SchedulerDirtyWork{Kind: 1, EntityID: 42, Generation: 1})
+	require.False(t, acknowledged)
+	require.ErrorContains(t, err, "active ownership")
+}
+
+func TestSchedulerDirtyWorkRecordFailureIsGenerationConditional(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+	repo := NewSchedulerDirtyWorkRepository(db)
+	item := service.SchedulerDirtyWork{Kind: 1, EntityID: 42, Generation: 7}
+	query := regexp.QuoteMeta(`
+		UPDATE scheduler_dirty_work
+		SET failure_count = LEAST(failure_count + 1, 31),
+		    last_failure_at = clock_timestamp(),
+		    last_error = $4,
+		    retry_at = clock_timestamp()
+		        + make_interval(secs => LEAST(300, 1 << LEAST(failure_count, 8)))
+		WHERE kind = $1 AND entity_id = $2 AND generation = $3
+		  AND EXISTS (SELECT 1 FROM scheduler_ownership_epoch WHERE singleton AND epoch = $5)
+	`)
+	mock.ExpectExec(query).WithArgs(item.Kind, item.EntityID, item.Generation, "errors_errorstring", int64(12)).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	conn, err := db.Conn(context.Background())
+	require.NoError(t, err)
+	defer conn.Close()
+	owner := &postgresSchedulerOwnership{conn: conn, epoch: 12, ctx: context.Background()}
+
+	recorded, err := repo.RecordFailure(context.Background(), owner, item, errors.New("failed"))
+	require.NoError(t, err)
+	require.False(t, recorded)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
@@ -80,13 +126,16 @@ func TestSchedulerDirtyWorkPendingStatsUsesWholePopulation(t *testing.T) {
 	now := time.Now().UTC()
 
 	mock.ExpectQuery(regexp.QuoteMeta(`
-		SELECT COUNT(*), MIN(updated_at)
+		SELECT COUNT(*), MIN(updated_at),
+		       COUNT(*) FILTER (WHERE failure_count > 0), MIN(last_failure_at)
 		FROM scheduler_dirty_work
-	`)).WillReturnRows(sqlmock.NewRows([]string{"count", "min"}).AddRow(int64(3), now))
+	`)).WillReturnRows(sqlmock.NewRows([]string{"count", "min", "failed", "oldest_failure"}).AddRow(int64(3), now, int64(1), now))
 	stats, err := NewSchedulerDirtyWorkRepository(db).PendingStats(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, int64(3), stats.Count)
 	require.Equal(t, now, *stats.OldestUpdatedAt)
+	require.Equal(t, int64(1), stats.FailedCount)
+	require.Equal(t, now, *stats.OldestFailureAt)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
@@ -97,6 +146,8 @@ func TestSchedulerOwnershipUsesDedicatedSession(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT pg_try_advisory_lock($1, $2)`)).
 		WithArgs(lockArg(schedulerAdvisoryLockNamespace), lockArg(schedulerAdvisoryLockID)).
 		WillReturnRows(sqlmock.NewRows([]string{"pg_try_advisory_lock"}).AddRow(true))
+	mock.ExpectQuery("INSERT INTO scheduler_ownership_epoch").
+		WillReturnRows(sqlmock.NewRows([]string{"epoch"}).AddRow(int64(41)))
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT pg_advisory_unlock($1, $2)`)).
 		WithArgs(lockArg(schedulerAdvisoryLockNamespace), lockArg(schedulerAdvisoryLockID)).
 		WillReturnRows(sqlmock.NewRows([]string{"pg_advisory_unlock"}).AddRow(true))
@@ -106,6 +157,7 @@ func TestSchedulerOwnershipUsesDedicatedSession(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, acquired)
 	require.NotNil(t, owner)
+	require.Equal(t, int64(41), owner.Epoch())
 	require.NoError(t, owner.Close())
 	select {
 	case <-owner.Lost():
@@ -122,6 +174,8 @@ func TestSchedulerOwnershipConcurrentCloseStoresOneResult(t *testing.T) {
 	defer db.Close()
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT pg_try_advisory_lock($1, $2)`)).
 		WillReturnRows(sqlmock.NewRows([]string{"locked"}).AddRow(true))
+	mock.ExpectQuery("INSERT INTO scheduler_ownership_epoch").
+		WillReturnRows(sqlmock.NewRows([]string{"epoch"}).AddRow(int64(42)))
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT pg_advisory_unlock($1, $2)`)).
 		WillReturnRows(sqlmock.NewRows([]string{"unlocked"}).AddRow(true))
 
@@ -152,6 +206,8 @@ func TestSchedulerOwnershipUnlockFailureDiscardsSession(t *testing.T) {
 	defer db.Close()
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT pg_try_advisory_lock($1, $2)`)).
 		WillReturnRows(sqlmock.NewRows([]string{"locked"}).AddRow(true))
+	mock.ExpectQuery("INSERT INTO scheduler_ownership_epoch").
+		WillReturnRows(sqlmock.NewRows([]string{"epoch"}).AddRow(int64(43)))
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT pg_advisory_unlock($1, $2)`)).
 		WillReturnError(errors.New("unlock failed"))
 	mock.ExpectClose()
@@ -172,6 +228,8 @@ func TestSchedulerOwnershipConnectionLossIsSurfacedAndDiscarded(t *testing.T) {
 	defer db.Close()
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT pg_try_advisory_lock($1, $2)`)).
 		WillReturnRows(sqlmock.NewRows([]string{"locked"}).AddRow(true))
+	mock.ExpectQuery("INSERT INTO scheduler_ownership_epoch").
+		WillReturnRows(sqlmock.NewRows([]string{"epoch"}).AddRow(int64(44)))
 	mock.ExpectPing().WillReturnError(lostErr)
 	mock.ExpectClose()
 

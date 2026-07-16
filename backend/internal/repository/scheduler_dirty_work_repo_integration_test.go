@@ -4,10 +4,13 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
 
@@ -194,7 +197,11 @@ func TestSchedulerDirtyWorkConcurrentGenerationPreservesDirtyKey(t *testing.T) {
 	`)
 	require.NoError(t, err)
 
-	acknowledged, err := repo.Acknowledge(ctx, batch[0])
+	owner, acquired, err := NewSchedulerOwnershipRepository(integrationDB).TryAcquire(ctx)
+	require.NoError(t, err)
+	require.True(t, acquired)
+	defer owner.Close()
+	acknowledged, err := repo.Acknowledge(ctx, owner, batch[0])
 	require.NoError(t, err)
 	require.False(t, acknowledged)
 
@@ -206,6 +213,53 @@ func TestSchedulerDirtyWorkConcurrentGenerationPreservesDirtyKey(t *testing.T) {
 		SELECT generation FROM scheduler_dirty_work WHERE kind = 1 AND entity_id = 42
 	`).Scan(&generation))
 	require.Equal(t, int64(2), generation)
+}
+
+func TestSchedulerFullRebuildFailureRemainsObservableAndRetryable(t *testing.T) {
+	ctx := context.Background()
+	truncateSchedulerDirtyTables(t, integrationDB)
+	repo := NewSchedulerDirtyWorkRepository(integrationDB)
+	require.NoError(t, repo.RequestFullRebuild(ctx))
+
+	batch, err := repo.List(ctx, 10)
+	require.NoError(t, err)
+	require.Len(t, batch, 1)
+	require.Equal(t, int16(3), batch[0].Kind)
+
+	owner, acquired, err := NewSchedulerOwnershipRepository(integrationDB).TryAcquire(ctx)
+	require.NoError(t, err)
+	require.True(t, acquired)
+	defer owner.Close()
+	recorded, err := repo.RecordFailure(ctx, owner, batch[0], errors.New(strings.Repeat("x", 700)))
+	require.NoError(t, err)
+	require.True(t, recorded)
+
+	// A newer global request is immediately eligible, but stale failure and
+	// acknowledgement outcomes cannot mutate or remove the new generation.
+	require.NoError(t, repo.RequestFullRebuild(ctx))
+	recorded, err = repo.RecordFailure(ctx, owner, batch[0], errors.New("stale"))
+	require.NoError(t, err)
+	require.False(t, recorded)
+	acknowledged, err := repo.Acknowledge(ctx, owner, batch[0])
+	require.NoError(t, err)
+	require.False(t, acknowledged)
+
+	stats, err := repo.PendingStats(ctx)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), stats.Count)
+	require.Zero(t, stats.FailedCount)
+	require.Nil(t, stats.OldestFailureAt)
+
+	batch, err = repo.List(ctx, 10)
+	require.NoError(t, err)
+	require.Len(t, batch, 1)
+	require.Equal(t, int64(2), batch[0].Generation)
+	require.Zero(t, batch[0].FailureCount)
+	require.Nil(t, batch[0].LastFailureAt)
+	require.Empty(t, batch[0].LastError)
+	acknowledged, err = repo.Acknowledge(ctx, owner, batch[0])
+	require.NoError(t, err)
+	require.True(t, acknowledged)
 }
 
 func TestSchedulerOwnershipReleasedWithDedicatedConnection(t *testing.T) {
@@ -223,6 +277,7 @@ func TestSchedulerOwnershipReleasedWithDedicatedConnection(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, acquired)
 	firstOwner := first.(*postgresSchedulerOwnership)
+	firstEpoch := first.Epoch()
 	var firstPID int
 	require.NoError(t, firstOwner.conn.QueryRowContext(ctx, "SELECT pg_backend_pid()").Scan(&firstPID))
 
@@ -232,11 +287,45 @@ func TestSchedulerOwnershipReleasedWithDedicatedConnection(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, acquired)
 	secondOwner := second.(*postgresSchedulerOwnership)
+	require.Greater(t, second.Epoch(), firstEpoch)
 	var secondPID int
 	require.NoError(t, secondOwner.conn.QueryRowContext(ctx, "SELECT pg_backend_pid()").Scan(&secondPID))
 	require.Equal(t, firstPID, secondPID, "test must exercise same-session reuse")
 	require.NoError(t, second.Close())
 	requireSchedulerAdvisoryLockCount(t, 0)
+}
+
+func TestSchedulerOwnershipTakeoverFencesTerminatedSession(t *testing.T) {
+	ctx := context.Background()
+	repo := &schedulerOwnershipRepository{db: integrationDB, checkInterval: 10 * time.Millisecond}
+	stale, acquired, err := repo.TryAcquire(ctx)
+	require.NoError(t, err)
+	require.True(t, acquired)
+	staleOwner := stale.(*postgresSchedulerOwnership)
+	staleEpoch := stale.Epoch()
+	var pid int
+	require.NoError(t, staleOwner.conn.QueryRowContext(ctx, "SELECT pg_backend_pid()").Scan(&pid))
+
+	var terminated bool
+	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT pg_terminate_backend($1)", pid).Scan(&terminated))
+	require.True(t, terminated)
+	select {
+	case <-stale.Lost():
+	case <-time.After(schedulerOwnershipProbeTimeout + time.Second):
+		t.Fatal("terminated ownership was not detected")
+	}
+
+	fresh, acquired, err := repo.TryAcquire(ctx)
+	require.NoError(t, err)
+	require.True(t, acquired)
+	require.Greater(t, fresh.Epoch(), staleEpoch)
+	defer fresh.Close()
+
+	work := service.SchedulerDirtyWork{Kind: service.SchedulerDirtyWorkGlobal, EntityID: 0, Generation: 1}
+	acknowledged, err := NewSchedulerDirtyWorkRepository(integrationDB).Acknowledge(ctx, stale, work)
+	require.False(t, acknowledged)
+	require.ErrorContains(t, err, "active ownership")
+	require.Error(t, stale.Close())
 }
 
 func TestSchedulerOwnershipCloseActuallyUnlocksSession(t *testing.T) {

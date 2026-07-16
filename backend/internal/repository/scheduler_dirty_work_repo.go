@@ -6,6 +6,7 @@ import (
 	"database/sql/driver"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 const (
 	defaultDirtyWorkBatchSize      = 100
 	maxDirtyWorkBatchSize          = 1000
+	maxDirtyWorkFailureText        = 512
 	schedulerOwnershipProbeTimeout = 5 * time.Second
 
 	// Two-key form avoids coupling the lock identity to PostgreSQL hash funcs.
@@ -83,6 +85,15 @@ func (r *schedulerDirtyWorkRepository) promoteSourceKind(ctx context.Context, ow
 		return 0, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	var epochCurrent bool
+	if err := tx.QueryRowContext(promoteCtx, `SELECT EXISTS (
+		SELECT 1 FROM scheduler_ownership_epoch WHERE singleton AND epoch = $1
+	)`, owner.epoch).Scan(&epochCurrent); err != nil {
+		return 0, err
+	}
+	if !epochCurrent {
+		return 0, errors.New("scheduler ownership epoch is stale during source promotion")
+	}
 
 	var promoted int
 	switch kind {
@@ -134,6 +145,10 @@ WITH picked AS MATERIALIZED (
     ON CONFLICT (kind, entity_id) DO UPDATE
     SET generation = scheduler_dirty_work.generation + 1,
         rebuild_buckets = scheduler_dirty_work.rebuild_buckets OR EXCLUDED.rebuild_buckets,
+        failure_count = 0,
+        last_failure_at = NULL,
+        last_error = '',
+        retry_at = clock_timestamp(),
         updated_at = clock_timestamp()
 ), advanced AS (
     UPDATE scheduler_dirty_account_sources AS source
@@ -191,6 +206,10 @@ WITH picked AS MATERIALIZED (
     ON CONFLICT (kind, entity_id) DO UPDATE
     SET generation = scheduler_dirty_work.generation + 1,
         rebuild_buckets = scheduler_dirty_work.rebuild_buckets OR EXCLUDED.rebuild_buckets,
+        failure_count = 0,
+        last_failure_at = NULL,
+        last_error = '',
+        retry_at = clock_timestamp(),
         updated_at = clock_timestamp()
 ), advanced AS (
     UPDATE scheduler_dirty_membership_sources AS source
@@ -233,6 +252,10 @@ WITH picked AS MATERIALIZED (
     ON CONFLICT (kind, entity_id) DO UPDATE
     SET generation = scheduler_dirty_work.generation + 1,
         rebuild_buckets = true,
+        failure_count = 0,
+        last_failure_at = NULL,
+        last_error = '',
+        retry_at = clock_timestamp(),
         updated_at = clock_timestamp()
 ), removed AS (
     DELETE FROM scheduler_dirty_group_sources AS source
@@ -251,9 +274,11 @@ func (r *schedulerDirtyWorkRepository) List(ctx context.Context, limit int) ([]s
 		limit = maxDirtyWorkBatchSize
 	}
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT kind, entity_id, generation, rebuild_buckets, updated_at
+		SELECT kind, entity_id, generation, rebuild_buckets, updated_at,
+		       failure_count, last_failure_at, last_error, retry_at
 		FROM scheduler_dirty_work
-		ORDER BY updated_at ASC, kind ASC, entity_id ASC
+		WHERE retry_at <= clock_timestamp()
+		ORDER BY retry_at ASC, updated_at ASC, kind ASC, entity_id ASC
 		LIMIT $1
 	`, limit)
 	if err != nil {
@@ -264,19 +289,139 @@ func (r *schedulerDirtyWorkRepository) List(ctx context.Context, limit int) ([]s
 	work := make([]service.SchedulerDirtyWork, 0, limit)
 	for rows.Next() {
 		var item service.SchedulerDirtyWork
-		if err := rows.Scan(&item.Kind, &item.EntityID, &item.Generation, &item.RebuildBuckets, &item.UpdatedAt); err != nil {
+		var lastFailure sql.NullTime
+		if err := rows.Scan(
+			&item.Kind,
+			&item.EntityID,
+			&item.Generation,
+			&item.RebuildBuckets,
+			&item.UpdatedAt,
+			&item.FailureCount,
+			&lastFailure,
+			&item.LastError,
+			&item.RetryAt,
+		); err != nil {
 			return nil, err
+		}
+		if lastFailure.Valid {
+			item.LastFailureAt = &lastFailure.Time
 		}
 		work = append(work, item)
 	}
 	return work, rows.Err()
 }
 
-func (r *schedulerDirtyWorkRepository) Acknowledge(ctx context.Context, work service.SchedulerDirtyWork) (bool, error) {
-	result, err := r.db.ExecContext(ctx, `
+func (r *schedulerDirtyWorkRepository) RequestFullRebuild(ctx context.Context) error {
+	_, err := r.db.ExecContext(ctx, `
+		INSERT INTO scheduler_dirty_work (kind, entity_id, rebuild_buckets)
+		VALUES (3, 0, true)
+		ON CONFLICT (kind, entity_id) DO UPDATE
+		SET generation = scheduler_dirty_work.generation + 1,
+		    rebuild_buckets = true,
+		    failure_count = 0,
+		    last_failure_at = NULL,
+		    last_error = '',
+		    retry_at = clock_timestamp(),
+		    updated_at = clock_timestamp()
+	`)
+	return err
+}
+
+func (r *schedulerDirtyWorkRepository) RecordFailure(ctx context.Context, ownership service.SchedulerOwnership, work service.SchedulerDirtyWork, failure error) (bool, error) {
+	owner, ok := ownership.(*postgresSchedulerOwnership)
+	if !ok || owner == nil || owner.Context().Err() != nil {
+		return false, errors.New("scheduler dirty failure recording requires active ownership")
+	}
+	owner.opMu.Lock()
+	defer owner.opMu.Unlock()
+	if owner.Context().Err() != nil {
+		return false, errors.New("scheduler dirty failure recording requires active ownership")
+	}
+	failureCtx, cancel := context.WithCancel(ctx)
+	stopOwnershipCancel := context.AfterFunc(owner.Context(), cancel)
+	defer func() { stopOwnershipCancel(); cancel() }()
+
+	message := schedulerDirtyFailureClass(failure)
+	result, err := owner.conn.ExecContext(failureCtx, `
+		UPDATE scheduler_dirty_work
+		SET failure_count = LEAST(failure_count + 1, 31),
+		    last_failure_at = clock_timestamp(),
+		    last_error = $4,
+		    retry_at = clock_timestamp()
+		        + make_interval(secs => LEAST(300, 1 << LEAST(failure_count, 8)))
+		WHERE kind = $1 AND entity_id = $2 AND generation = $3
+		  AND EXISTS (SELECT 1 FROM scheduler_ownership_epoch WHERE singleton AND epoch = $5)
+	`, work.Kind, work.EntityID, work.Generation, message, owner.epoch)
+	if err != nil {
+		return false, err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if n > 1 {
+		return false, fmt.Errorf("scheduler dirty failure recording affected %d rows", n)
+	}
+	return n == 1, nil
+}
+
+func schedulerDirtyFailureClass(failure error) string {
+	switch {
+	case failure == nil:
+		return "scheduler_rebuild_failed"
+	case errors.Is(failure, context.Canceled):
+		return "context_canceled"
+	case errors.Is(failure, context.DeadlineExceeded):
+		return "deadline_exceeded"
+	case errors.Is(failure, sql.ErrConnDone), errors.Is(failure, driver.ErrBadConn):
+		return "database_unavailable"
+	}
+
+	// Error text can contain credentials, URLs, or account metadata. Persist only
+	// a bounded class derived from the concrete error type, never failure.Error().
+	failureType := strings.ToLower(fmt.Sprintf("%T", failure))
+	var class strings.Builder
+	class.Grow(len(failureType))
+	lastUnderscore := false
+	for _, r := range failureType {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			class.WriteRune(r)
+			lastUnderscore = false
+		case class.Len() > 0 && !lastUnderscore:
+			class.WriteByte('_')
+			lastUnderscore = true
+		}
+		if class.Len() >= maxDirtyWorkFailureText {
+			break
+		}
+	}
+	value := strings.Trim(class.String(), "_")
+	if value == "" {
+		return "scheduler_rebuild_failed"
+	}
+	return value
+}
+
+func (r *schedulerDirtyWorkRepository) Acknowledge(ctx context.Context, ownership service.SchedulerOwnership, work service.SchedulerDirtyWork) (bool, error) {
+	owner, ok := ownership.(*postgresSchedulerOwnership)
+	if !ok || owner == nil || owner.Context().Err() != nil {
+		return false, errors.New("scheduler dirty acknowledgement requires active ownership")
+	}
+	owner.opMu.Lock()
+	defer owner.opMu.Unlock()
+	if owner.Context().Err() != nil {
+		return false, errors.New("scheduler dirty acknowledgement requires active ownership")
+	}
+	ackCtx, cancel := context.WithCancel(ctx)
+	stopOwnershipCancel := context.AfterFunc(owner.Context(), cancel)
+	defer func() { stopOwnershipCancel(); cancel() }()
+
+	result, err := owner.conn.ExecContext(ackCtx, `
 		DELETE FROM scheduler_dirty_work
 		WHERE kind = $1 AND entity_id = $2 AND generation = $3
-	`, work.Kind, work.EntityID, work.Generation)
+		  AND EXISTS (SELECT 1 FROM scheduler_ownership_epoch WHERE singleton AND epoch = $4)
+	`, work.Kind, work.EntityID, work.Generation, owner.epoch)
 	if err != nil {
 		return false, err
 	}
@@ -292,13 +437,17 @@ func (r *schedulerDirtyWorkRepository) Acknowledge(ctx context.Context, work ser
 
 func (r *schedulerDirtyWorkRepository) PendingStats(ctx context.Context) (service.SchedulerDirtyWorkStats, error) {
 	var stats service.SchedulerDirtyWorkStats
-	var oldest sql.NullTime
+	var oldest, oldestFailure sql.NullTime
 	err := r.db.QueryRowContext(ctx, `
-		SELECT COUNT(*), MIN(updated_at)
+		SELECT COUNT(*), MIN(updated_at),
+		       COUNT(*) FILTER (WHERE failure_count > 0), MIN(last_failure_at)
 		FROM scheduler_dirty_work
-	`).Scan(&stats.Count, &oldest)
+	`).Scan(&stats.Count, &oldest, &stats.FailedCount, &oldestFailure)
 	if oldest.Valid {
 		stats.OldestUpdatedAt = &oldest.Time
+	}
+	if oldestFailure.Valid {
+		stats.OldestFailureAt = &oldestFailure.Time
 	}
 	return stats, err
 }
@@ -328,15 +477,27 @@ func (r *schedulerOwnershipRepository) TryAcquire(ctx context.Context) (service.
 		_ = conn.Close()
 		return nil, false, nil
 	}
+	var epoch int64
+	if err := conn.QueryRowContext(ctx, `
+		INSERT INTO scheduler_ownership_epoch (singleton, epoch)
+		VALUES (true, 1)
+		ON CONFLICT (singleton) DO UPDATE
+		SET epoch = scheduler_ownership_epoch.epoch + 1
+		RETURNING epoch
+	`).Scan(&epoch); err != nil {
+		_ = discardSQLConn(conn)
+		return nil, false, err
+	}
 
 	ownerCtx, cancel := context.WithCancel(context.Background())
-	owner := &postgresSchedulerOwnership{conn: conn, ctx: ownerCtx, cancel: cancel, lost: make(chan struct{}), done: make(chan struct{})}
+	owner := &postgresSchedulerOwnership{conn: conn, epoch: epoch, ctx: ownerCtx, cancel: cancel, lost: make(chan struct{}), done: make(chan struct{})}
 	go owner.monitor(r.checkInterval)
 	return owner, true, nil
 }
 
 type postgresSchedulerOwnership struct {
 	conn       *sql.Conn
+	epoch      int64
 	opMu       sync.Mutex
 	ctx        context.Context
 	cancel     context.CancelFunc
@@ -349,6 +510,7 @@ type postgresSchedulerOwnership struct {
 	closeErr   error
 }
 
+func (o *postgresSchedulerOwnership) Epoch() int64             { return o.epoch }
 func (o *postgresSchedulerOwnership) Context() context.Context { return o.ctx }
 func (o *postgresSchedulerOwnership) Lost() <-chan struct{}    { return o.lost }
 func (o *postgresSchedulerOwnership) Err() error {
