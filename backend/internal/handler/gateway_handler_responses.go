@@ -125,7 +125,8 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		h.responsesConcurrencyErrorResponse(c, err, "user", streamStarted)
 		return
 	}
-	userReleaseFunc = wrapReleaseOnDone(c.Request.Context(), userReleaseFunc)
+	logicalReleases := newHTTPAttemptReleaseSet(c.Request.Context())
+	userReleaseFunc = logicalReleases.Add(userReleaseFunc)
 	if userReleaseFunc != nil {
 		defer userReleaseFunc()
 	}
@@ -159,7 +160,12 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 
 	selectionCtx := service.WithPublicModelSupportMiss404(requestCtx)
 	for {
-		selection, err := h.gatewayService.SelectAccountWithLoadAwareness(selectionCtx, apiKey.GroupID, sessionHash, reqModel, fs.FailedAccountIDs, "", int64(0))
+		selection, err, clientGone := selectFailoverAccount(c, func() (*service.AccountSelectionResult, error) {
+			return h.gatewayService.SelectAccountWithLoadAwareness(selectionCtx, apiKey.GroupID, sessionHash, reqModel, fs.FailedAccountIDs, "", int64(0))
+		})
+		if clientGone {
+			return
+		}
 		if err != nil {
 			if len(fs.FailedAccountIDs) == 0 {
 				markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
@@ -178,6 +184,7 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 			case FailoverContinue:
 				continue
 			case FailoverCanceled:
+				failoverClientGone(c)
 				return
 			default:
 				if fs.LastFailoverErr != nil {
@@ -189,7 +196,12 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 			}
 		}
 		account := selection.Account
-		setOpsSelectedAccount(c, account.ID, account.Platform)
+		if failoverClientGone(c) {
+			if selection.Acquired && selection.ReleaseFunc != nil {
+				selection.ReleaseFunc()
+			}
+			return
+		}
 
 		// 4. Acquire account concurrency slot
 		accountReleaseFunc := selection.ReleaseFunc
@@ -209,22 +221,53 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 			)
 			if err != nil {
 				reqLog.Warn("gateway.responses.account_slot_acquire_failed", zap.Int64("account_id", account.ID), zap.Error(err))
+				if failoverClientGone(c) {
+					return
+				}
 				h.responsesConcurrencyErrorResponse(c, err, "account", streamStarted)
 				return
 			}
 		}
-		accountReleaseFunc = wrapReleaseOnDone(c.Request.Context(), accountReleaseFunc)
-
+		attemptReleases := newHTTPAttemptReleaseSet(c.Request.Context())
+		accountReleaseFunc = attemptReleases.Add(accountReleaseFunc)
+		if failoverClientGone(c) {
+			if accountReleaseFunc != nil {
+				accountReleaseFunc()
+			}
+			return
+		}
 		// 5. Forward request
 		writerSizeBeforeForward := c.Writer.Size()
 		forwardBody := body
 		if channelMapping.Mapped {
 			forwardBody = h.gatewayService.ReplaceModelInBody(body, channelMapping.MappedModel)
 		}
-		result, err := h.gatewayService.ForwardAsResponses(requestCtx, c, account, forwardBody, parsedReq)
+		attemptCtx := withHTTPAttemptReleaseAuthority(
+			requestCtx,
+			logicalReleases,
+			attemptReleases,
+			func() {
+				if err := h.gatewayService.BindStickySession(
+					context.WithoutCancel(requestCtx),
+					apiKey.GroupID,
+					sessionHash,
+					account.ID,
+				); err != nil {
+					reqLog.Warn("gateway.responses.bind_sticky_session_failed", zap.Int64("account_id", account.ID), zap.Error(err))
+				}
+			},
+		)
+		result, err := h.gatewayService.ForwardAsResponses(attemptCtx, c, account, forwardBody, parsedReq)
 
 		if accountReleaseFunc != nil {
 			accountReleaseFunc()
+		}
+		if handleHTTPAttemptNotAdmitted(c, err) {
+			return
+		}
+		setOpsSelectedAccount(c, account.ID, account.Platform)
+		if err != nil && failoverClientGone(c) {
+			return
 		}
 
 		if err != nil {
@@ -243,6 +286,7 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 					h.handleResponsesFailoverExhausted(c, fs.LastFailoverErr, streamStarted)
 					return
 				case FailoverCanceled:
+					failoverClientGone(c)
 					return
 				}
 			}

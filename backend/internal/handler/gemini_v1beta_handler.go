@@ -52,7 +52,16 @@ func (h *GatewayHandler) GeminiV1BetaListModels(c *gin.Context) {
 		return
 	}
 
-	account, err := h.geminiCompatService.SelectAccountForAIStudioEndpoints(c.Request.Context(), apiKey.GroupID)
+	selection, err, clientGone := selectFailoverAccount(c, func() (*service.AccountSelectionResult, error) {
+		account, selectErr := h.geminiCompatService.SelectAccountForAIStudioEndpoints(c.Request.Context(), apiKey.GroupID)
+		if selectErr != nil {
+			return nil, selectErr
+		}
+		return &service.AccountSelectionResult{Account: account}, nil
+	})
+	if clientGone {
+		return
+	}
 	if err != nil {
 		// 没有 gemini 账户，检查是否有 antigravity 账户可用
 		hasAntigravity, _ := h.geminiCompatService.HasAntigravityAccounts(c.Request.Context(), apiKey.GroupID)
@@ -66,7 +75,17 @@ func (h *GatewayHandler) GeminiV1BetaListModels(c *gin.Context) {
 		return
 	}
 
+	if selection == nil || selection.Account == nil {
+		markOpsRoutingCapacityLimited(c)
+		googleError(c, http.StatusServiceUnavailable, "No available Gemini accounts")
+		return
+	}
+	account := selection.Account
 	res, err := h.geminiCompatService.ForwardAIStudioGET(c.Request.Context(), account, "/v1beta/models")
+	if handleHTTPAttemptNotAdmitted(c, err) {
+		return
+	}
+	setOpsSelectedAccount(c, account.ID, account.Platform)
 	if err != nil {
 		googleError(c, http.StatusBadGateway, err.Error())
 		return
@@ -105,7 +124,16 @@ func (h *GatewayHandler) GeminiV1BetaGetModel(c *gin.Context) {
 		return
 	}
 
-	account, err := h.geminiCompatService.SelectAccountForAIStudioEndpoints(c.Request.Context(), apiKey.GroupID)
+	selection, err, clientGone := selectFailoverAccount(c, func() (*service.AccountSelectionResult, error) {
+		account, selectErr := h.geminiCompatService.SelectAccountForAIStudioEndpoints(c.Request.Context(), apiKey.GroupID)
+		if selectErr != nil {
+			return nil, selectErr
+		}
+		return &service.AccountSelectionResult{Account: account}, nil
+	})
+	if clientGone {
+		return
+	}
 	if err != nil {
 		// 没有 gemini 账户，检查是否有 antigravity 账户可用
 		hasAntigravity, _ := h.geminiCompatService.HasAntigravityAccounts(c.Request.Context(), apiKey.GroupID)
@@ -119,7 +147,17 @@ func (h *GatewayHandler) GeminiV1BetaGetModel(c *gin.Context) {
 		return
 	}
 
+	if selection == nil || selection.Account == nil {
+		markOpsRoutingCapacityLimited(c)
+		googleError(c, http.StatusServiceUnavailable, "No available Gemini accounts")
+		return
+	}
+	account := selection.Account
 	res, err := h.geminiCompatService.ForwardAIStudioGET(c.Request.Context(), account, "/v1beta/models/"+modelName)
+	if handleHTTPAttemptNotAdmitted(c, err) {
+		return
+	}
+	setOpsSelectedAccount(c, account.ID, account.Platform)
 	if err != nil {
 		googleError(c, http.StatusBadGateway, err.Error())
 		return
@@ -216,11 +254,9 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		googleError(c, http.StatusTooManyRequests, err.Error())
 		return
 	}
-	// 确保请求取消时也会释放槽位，避免长连接被动中断造成泄漏
-	userReleaseFunc = wrapReleaseOnDone(c.Request.Context(), userReleaseFunc)
-	if userReleaseFunc != nil {
-		defer userReleaseFunc()
-	}
+	logicalReleases := newHTTPAttemptReleaseSet(c.Request.Context())
+	logicalReleases.Add(userReleaseFunc)
+	defer logicalReleases.finish()
 
 	// 2) billing eligibility check (after wait)
 	if err := h.billingCacheService.CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription, service.QuotaPlatform(c.Request.Context(), apiKey)); err != nil {
@@ -320,7 +356,6 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 					if sessionKey == "" {
 						sessionKey = service.GenerateGeminiDigestSessionKey(geminiPrefixHash, foundUUID)
 					}
-					_ = h.gatewayService.BindStickySession(c.Request.Context(), apiKey.GroupID, sessionKey, foundAccountID)
 				} else {
 					// 生成新的会话 UUID
 					geminiSessionUUID = uuid.New().String()
@@ -347,7 +382,12 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 	}
 
 	for {
-		selection, err := h.gatewayService.SelectAccountWithLoadAwareness(service.WithPublicModelSupportMiss404(c.Request.Context()), apiKey.GroupID, sessionKey, modelName, fs.FailedAccountIDs, "", int64(0)) // Gemini 不使用会话限制
+		selection, err, clientGone := selectFailoverAccount(c, func() (*service.AccountSelectionResult, error) {
+			return h.gatewayService.SelectAccountWithLoadAwareness(service.WithPublicModelSupportMiss404(c.Request.Context()), apiKey.GroupID, sessionKey, modelName, fs.FailedAccountIDs, "", int64(0)) // Gemini 不使用会话限制
+		})
+		if clientGone {
+			return
+		}
 		if err != nil {
 			if len(fs.FailedAccountIDs) == 0 {
 				markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
@@ -364,6 +404,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 				c.Request = c.Request.WithContext(ctx)
 				continue
 			case FailoverCanceled:
+				failoverClientGone(c)
 				return
 			default: // FailoverExhausted
 				h.handleGeminiFailoverExhausted(c, fs.LastFailoverErr)
@@ -371,7 +412,13 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 			}
 		}
 		account := selection.Account
-		setOpsSelectedAccount(c, account.ID, account.Platform)
+		if failoverClientGone(c) {
+			if selection.Acquired && selection.ReleaseFunc != nil {
+				selection.ReleaseFunc()
+			}
+			return
+		}
+		attemptReleases := newHTTPAttemptReleaseSet(c.Request.Context())
 
 		// 检测账号切换：如果粘性会话绑定的账号与当前选择的账号不同，清除 thoughtSignature
 		// 注意：Gemini 原生 API 的 thoughtSignature 与具体上游账号强相关；跨账号透传会导致 400。
@@ -436,6 +483,9 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 			)
 			if err != nil {
 				reqLog.Warn("gemini.account_slot_acquire_failed", zap.Int64("account_id", account.ID), zap.Error(err))
+				if failoverClientGone(c) {
+					return
+				}
 				googleError(c, http.StatusTooManyRequests, err.Error())
 				return
 			}
@@ -443,19 +493,38 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 				geminiConcurrency.DecrementAccountWaitCount(c.Request.Context(), account.ID)
 				accountWaitCounted = false
 			}
-			if err := h.gatewayService.BindStickySession(c.Request.Context(), apiKey.GroupID, sessionKey, account.ID); err != nil {
-				reqLog.Warn("gemini.bind_sticky_session_failed", zap.Int64("account_id", account.ID), zap.Error(err))
-			}
 		}
-		// 账号槽位/等待计数需要在超时或断开时安全回收
-		accountReleaseFunc = wrapReleaseOnDone(c.Request.Context(), accountReleaseFunc)
-
+		accountReleaseFunc = attemptReleases.Add(accountReleaseFunc)
+		if failoverClientGone(c) {
+			if accountReleaseFunc != nil {
+				accountReleaseFunc()
+			}
+			return
+		}
 		// 5) forward (根据平台分流)
 		var result *service.ForwardResult
 		requestCtx := c.Request.Context()
 		if fs.SwitchCount > 0 {
 			requestCtx = service.WithAccountSwitchCount(requestCtx, fs.SwitchCount, h.metadataBridgeEnabled())
 		}
+		requestCtx = withHTTPAttemptReleaseAuthority(
+			requestCtx,
+			logicalReleases,
+			attemptReleases,
+			func() {
+				if sessionKey == "" {
+					return
+				}
+				if err := h.gatewayService.BindStickySession(
+					context.WithoutCancel(c.Request.Context()),
+					apiKey.GroupID,
+					sessionKey,
+					account.ID,
+				); err != nil {
+					reqLog.Warn("gemini.bind_sticky_session_failed", zap.Int64("account_id", account.ID), zap.Error(err))
+				}
+			},
+		)
 		sessionGroupID := derefGroupID(apiKey.GroupID)
 		if account.Platform == service.PlatformAntigravity && account.Type == service.AccountTypeOAuth {
 			result, err = h.antigravityGatewayService.ForwardGemini(
@@ -475,6 +544,10 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		if accountReleaseFunc != nil {
 			accountReleaseFunc()
 		}
+		if handleHTTPAttemptNotAdmitted(c, err) {
+			return
+		}
+		setOpsSelectedAccount(c, account.ID, account.Platform)
 		if err != nil {
 			var failoverErr *service.UpstreamFailoverError
 			if errors.As(err, &failoverErr) {
@@ -486,6 +559,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 					h.handleGeminiFailoverExhausted(c, fs.LastFailoverErr)
 					return
 				case FailoverCanceled:
+					failoverClientGone(c)
 					return
 				}
 			}
@@ -499,7 +573,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		clientIP := ip.GetClientIP(c)
 
 		// 保存 Gemini 内容摘要会话（用于 Fallback 匹配）
-		if useDigestFallback && geminiDigestChain != "" && geminiPrefixHash != "" {
+		if c.Request.Context().Err() == nil && useDigestFallback && geminiDigestChain != "" && geminiPrefixHash != "" {
 			if err := h.gatewayService.SaveGeminiSession(
 				c.Request.Context(),
 				derefGroupID(apiKey.GroupID),

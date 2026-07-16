@@ -218,11 +218,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		h.handleConcurrencyError(c, err, "user", streamStarted)
 		return
 	}
-	// 在请求结束或 Context 取消时确保释放槽位，避免客户端断开造成泄漏
-	userReleaseFunc = wrapReleaseOnDone(c.Request.Context(), userReleaseFunc)
-	if userReleaseFunc != nil {
-		defer userReleaseFunc()
-	}
+	logicalReleases := newHTTPAttemptReleaseSet(c.Request.Context())
+	logicalReleases.Add(userReleaseFunc)
+	defer logicalReleases.finish()
 
 	// 2. 【新增】Wait后二次检查余额/订阅
 	if err := h.billingCacheService.CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription, service.QuotaPlatform(c.Request.Context(), apiKey)); err != nil {
@@ -298,7 +296,12 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		}
 
 		for {
-			selection, err := h.gatewayService.SelectAccountWithLoadAwareness(service.WithPublicModelSupportMiss404(c.Request.Context()), apiKey.GroupID, sessionKey, reqModel, fs.FailedAccountIDs, "", int64(0)) // Gemini 不使用会话限制
+			selection, err, clientGone := selectFailoverAccount(c, func() (*service.AccountSelectionResult, error) {
+				return h.gatewayService.SelectAccountWithLoadAwareness(service.WithPublicModelSupportMiss404(c.Request.Context()), apiKey.GroupID, sessionKey, reqModel, fs.FailedAccountIDs, "", int64(0)) // Gemini 不使用会话限制
+			})
+			if clientGone {
+				return
+			}
 			if err != nil {
 				if len(fs.FailedAccountIDs) == 0 {
 					markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
@@ -321,6 +324,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					c.Request = c.Request.WithContext(ctx)
 					continue
 				case FailoverCanceled:
+					failoverClientGone(c)
 					return
 				default: // FailoverExhausted
 					if fs.LastFailoverErr != nil {
@@ -332,7 +336,13 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				}
 			}
 			account := selection.Account
-			setOpsSelectedAccount(c, account.ID, account.Platform)
+			if failoverClientGone(c) {
+				if selection.Acquired && selection.ReleaseFunc != nil {
+					selection.ReleaseFunc()
+				}
+				return
+			}
+			attemptReleases := newHTTPAttemptReleaseSet(c.Request.Context())
 
 			// 检查请求拦截（预热请求、SUGGESTION MODE等）
 			if account.IsInterceptWarmupEnabled() {
@@ -341,6 +351,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					if selection.Acquired && selection.ReleaseFunc != nil {
 						selection.ReleaseFunc()
 					}
+					setOpsSelectedAccount(c, account.ID, account.Platform)
 					if reqStream {
 						sendMockInterceptStream(c, reqModel, interceptType)
 					} else {
@@ -396,24 +407,46 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				if err != nil {
 					reqLog.Warn("gateway.account_slot_acquire_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 					releaseWait()
+					if failoverClientGone(c) {
+						return
+					}
 					h.handleConcurrencyError(c, err, "account", streamStarted)
 					return
 				}
 				// Slot acquired: no longer waiting in queue.
 				releaseWait()
-				if err := h.gatewayService.BindStickySession(c.Request.Context(), apiKey.GroupID, sessionKey, account.ID); err != nil {
-					reqLog.Warn("gateway.bind_sticky_session_failed", zap.Int64("account_id", account.ID), zap.Error(err))
-				}
 			}
-			// 账号槽位/等待计数需要在超时或断开时安全回收
-			accountReleaseFunc = wrapReleaseOnDone(c.Request.Context(), accountReleaseFunc)
-
+			accountReleaseFunc = attemptReleases.Add(accountReleaseFunc)
+			if failoverClientGone(c) {
+				if accountReleaseFunc != nil {
+					accountReleaseFunc()
+				}
+				return
+			}
 			// 转发请求 - 根据账号平台分流
 			var result *service.ForwardResult
 			requestCtx := c.Request.Context()
 			if fs.SwitchCount > 0 {
 				requestCtx = service.WithAccountSwitchCount(requestCtx, fs.SwitchCount, h.metadataBridgeEnabled())
 			}
+			requestCtx = withHTTPAttemptReleaseAuthority(
+				requestCtx,
+				logicalReleases,
+				attemptReleases,
+				func() {
+					if sessionKey == "" {
+						return
+					}
+					if err := h.gatewayService.BindStickySession(
+						context.WithoutCancel(c.Request.Context()),
+						apiKey.GroupID,
+						sessionKey,
+						account.ID,
+					); err != nil {
+						reqLog.Warn("gateway.bind_sticky_session_failed", zap.Int64("account_id", account.ID), zap.Error(err))
+					}
+				},
+			)
 			// 记录 Forward 前已写入字节数，Forward 后若增加则说明 SSE 内容已发，禁止 failover
 			writerSizeBeforeForward := c.Writer.Size()
 			if account.Platform == service.PlatformAntigravity && account.Type == service.AccountTypeOAuth {
@@ -434,6 +467,10 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			if accountReleaseFunc != nil {
 				accountReleaseFunc()
 			}
+			if handleHTTPAttemptNotAdmitted(c, err) {
+				return
+			}
+			setOpsSelectedAccount(c, account.ID, account.Platform)
 			if err != nil {
 				var failoverErr *service.UpstreamFailoverError
 				if errors.As(err, &failoverErr) {
@@ -450,6 +487,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						h.handleFailoverExhausted(c, fs.LastFailoverErr, service.PlatformGemini, streamStarted)
 						return
 					case FailoverCanceled:
+						failoverClientGone(c)
 						return
 					}
 				}
@@ -484,7 +522,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// 注意：TOCTOU 竞态是已知且可接受的设计权衡，与 WindowCost 一致的 soft-limit 模式。
 			// 在高并发下可能短暂超出 RPM 限制，但不会导致请求失败。
 			if account.IsAnthropicOAuthOrSetupToken() && account.GetBaseRPM() > 0 {
-				if err := h.gatewayService.IncrementAccountRPM(c.Request.Context(), account.ID); err != nil {
+				if err := h.gatewayService.IncrementAccountRPM(context.WithoutCancel(c.Request.Context()), account.ID); err != nil {
 					reqLog.Warn("gateway.rpm_increment_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 				}
 			}
@@ -575,7 +613,12 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				zap.Bool("has_bound_session", hasBoundSession),
 				zap.Int("failed_account_count", len(fs.FailedAccountIDs)),
 			)
-			selection, err := h.gatewayService.SelectAccountWithLoadAwareness(service.WithPublicModelSupportMiss404(c.Request.Context()), currentAPIKey.GroupID, sessionKey, reqModel, fs.FailedAccountIDs, parsedReq.MetadataUserID, subject.UserID)
+			selection, err, clientGone := selectFailoverAccount(c, func() (*service.AccountSelectionResult, error) {
+				return h.gatewayService.SelectAccountWithLoadAwareness(service.WithPublicModelSupportMiss404(c.Request.Context()), currentAPIKey.GroupID, sessionKey, reqModel, fs.FailedAccountIDs, parsedReq.MetadataUserID, subject.UserID)
+			})
+			if clientGone {
+				return
+			}
 			if err != nil {
 				if len(fs.FailedAccountIDs) == 0 {
 					markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
@@ -599,6 +642,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					c.Request = c.Request.WithContext(ctx)
 					continue
 				case FailoverCanceled:
+					failoverClientGone(c)
 					return
 				default: // FailoverExhausted
 					if fs.LastFailoverErr != nil {
@@ -610,7 +654,13 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				}
 			}
 			account := selection.Account
-			setOpsSelectedAccount(c, account.ID, account.Platform)
+			if failoverClientGone(c) {
+				if selection.Acquired && selection.ReleaseFunc != nil {
+					selection.ReleaseFunc()
+				}
+				return
+			}
+			attemptReleases := newHTTPAttemptReleaseSet(c.Request.Context())
 
 			// [DEBUG-STICKY] 打印账号选择结果
 			reqLog.Info("sticky.account_selected",
@@ -629,6 +679,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					if selection.Acquired && selection.ReleaseFunc != nil {
 						selection.ReleaseFunc()
 					}
+					setOpsSelectedAccount(c, account.ID, account.Platform)
 					if reqStream {
 						sendMockInterceptStream(c, reqModel, interceptType)
 					} else {
@@ -684,22 +735,22 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				if err != nil {
 					reqLog.Warn("gateway.account_slot_acquire_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 					releaseWait()
+					if failoverClientGone(c) {
+						return
+					}
 					h.handleConcurrencyError(c, err, "account", streamStarted)
 					return
 				}
 				// Slot acquired: no longer waiting in queue.
 				releaseWait()
-				reqLog.Info("sticky.bind_after_wait",
-					zap.String("session_key", sessionKey),
-					zap.Int64("account_id", account.ID),
-				)
-				if err := h.gatewayService.BindStickySession(c.Request.Context(), currentAPIKey.GroupID, sessionKey, account.ID); err != nil {
-					reqLog.Warn("gateway.bind_sticky_session_failed", zap.Int64("account_id", account.ID), zap.Error(err))
-				}
 			}
-			// 账号槽位/等待计数需要在超时或断开时安全回收
-			accountReleaseFunc = wrapReleaseOnDone(c.Request.Context(), accountReleaseFunc)
-
+			accountReleaseFunc = attemptReleases.Add(accountReleaseFunc)
+			if failoverClientGone(c) {
+				if accountReleaseFunc != nil {
+					accountReleaseFunc()
+				}
+				return
+			}
 			// ===== 用户消息串行队列 START =====
 			var queueRelease func()
 			umqMode := h.getUserMsgQueueMode(account, attemptParsedReq)
@@ -746,9 +797,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				}
 			}
 
-			// 用 wrapReleaseOnDone 确保 context 取消时自动释放（仅 serialize 模式有 queueRelease）
-			queueRelease = wrapReleaseOnDone(c.Request.Context(), queueRelease)
-			// 注入回调到 ParsedRequest：使用外层 wrapper 以便提前清理 AfterFunc
+			queueRelease = attemptReleases.Add(queueRelease)
+			// The queue lease can release once upstream accepts while the account
+			// lease remains owned through response draining and accounting.
 			attemptParsedReq.OnUpstreamAccepted = queueRelease
 			// ===== 用户消息串行队列 END =====
 
@@ -774,6 +825,24 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			if fs.SwitchCount > 0 {
 				requestCtx = service.WithAccountSwitchCount(requestCtx, fs.SwitchCount, h.metadataBridgeEnabled())
 			}
+			requestCtx = withHTTPAttemptReleaseAuthority(
+				requestCtx,
+				logicalReleases,
+				attemptReleases,
+				func() {
+					if sessionKey == "" || (sessionBoundAccountID != 0 && sessionBoundAccountID != account.ID) {
+						return
+					}
+					if err := h.gatewayService.BindStickySession(
+						context.WithoutCancel(c.Request.Context()),
+						currentAPIKey.GroupID,
+						sessionKey,
+						account.ID,
+					); err != nil {
+						reqLog.Warn("gateway.bind_sticky_session_failed", zap.Int64("account_id", account.ID), zap.Error(err))
+					}
+				},
+			)
 			// 记录 Forward 前已写入字节数，Forward 后若增加则说明 SSE 内容已发，禁止 failover
 			writerSizeBeforeForward := c.Writer.Size()
 			restoreBedrockBetaHeader := h.gatewayService.ApplyBedrockCCCompatBetaHeaderOverride(c, attemptParsedReq.Body.Bytes(), attemptParsedReq.Model, account, apiKey.GroupID)
@@ -794,6 +863,10 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			if accountReleaseFunc != nil {
 				accountReleaseFunc()
 			}
+			if handleHTTPAttemptNotAdmitted(c, err) {
+				return
+			}
+			setOpsSelectedAccount(c, account.ID, account.Platform)
 			if err != nil {
 				// Beta policy block: return 400 immediately, no failover
 				var betaBlockedErr *service.BetaBlockedError
@@ -864,6 +937,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						h.handleFailoverExhausted(c, fs.LastFailoverErr, account.Platform, streamStarted)
 						return
 					case FailoverCanceled:
+						failoverClientGone(c)
 						return
 					}
 				}
@@ -898,19 +972,8 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// 注意：TOCTOU 竞态是已知且可接受的设计权衡，与 WindowCost 一致的 soft-limit 模式。
 			// 在高并发下可能短暂超出 RPM 限制，但不会导致请求失败。
 			if account.IsAnthropicOAuthOrSetupToken() && account.GetBaseRPM() > 0 {
-				if err := h.gatewayService.IncrementAccountRPM(c.Request.Context(), account.ID); err != nil {
+				if err := h.gatewayService.IncrementAccountRPM(context.WithoutCancel(c.Request.Context()), account.ID); err != nil {
 					reqLog.Warn("gateway.rpm_increment_failed", zap.Int64("account_id", account.ID), zap.Error(err))
-				}
-			}
-
-			// 绑定粘性会话（成功转发后绑定/刷新）
-			// - 无现有绑定（首次请求）：创建绑定
-			// - 选中账号与粘性账号一致：刷新 TTL
-			// - 粘性账号因负载/RPM 被跳过、选中了其他账号：不覆盖原绑定，
-			//   下次请求粘性账号恢复后仍可命中
-			if sessionKey != "" && (sessionBoundAccountID == 0 || sessionBoundAccountID == account.ID) {
-				if err := h.gatewayService.BindStickySession(c.Request.Context(), currentAPIKey.GroupID, sessionKey, account.ID); err != nil {
-					reqLog.Warn("gateway.bind_sticky_session_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 				}
 			}
 
@@ -1818,7 +1881,16 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 
 	// 选择支持该模型的账号
 	selectionCtx := service.WithPublicModelSupportMiss404(c.Request.Context())
-	account, err := h.gatewayService.SelectAccountForModel(selectionCtx, apiKey.GroupID, sessionHash, parsedReq.Model)
+	selection, err, clientGone := selectFailoverAccount(c, func() (*service.AccountSelectionResult, error) {
+		account, selectErr := h.gatewayService.SelectAccountForModel(selectionCtx, apiKey.GroupID, sessionHash, parsedReq.Model)
+		if selectErr != nil {
+			return nil, selectErr
+		}
+		return &service.AccountSelectionResult{Account: account}, nil
+	})
+	if clientGone {
+		return
+	}
 	if err != nil {
 		reqLog.Warn("gateway.count_tokens_select_account_failed", zap.Error(err))
 		markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
@@ -1828,10 +1900,19 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 		h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Service temporarily unavailable")
 		return
 	}
-	setOpsSelectedAccount(c, account.ID, account.Platform)
-
+	if selection == nil || selection.Account == nil {
+		markOpsRoutingCapacityLimited(c)
+		h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Service temporarily unavailable")
+		return
+	}
+	account := selection.Account
 	// 转发请求（不记录使用量）
-	if err := h.gatewayService.ForwardCountTokens(c.Request.Context(), c, account, parsedReq); err != nil {
+	err = h.gatewayService.ForwardCountTokens(c.Request.Context(), c, account, parsedReq)
+	if handleHTTPAttemptNotAdmitted(c, err) {
+		return
+	}
+	setOpsSelectedAccount(c, account.ID, account.Platform)
+	if err != nil {
 		reqLog.Error("gateway.count_tokens_forward_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 		// 错误响应已在 ForwardCountTokens 中处理
 		return

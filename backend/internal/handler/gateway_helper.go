@@ -154,9 +154,9 @@ func NewConcurrencyHelper(concurrencyService *service.ConcurrencyService, pingFo
 	}
 }
 
-// wrapReleaseOnDone ensures release runs at most once and still triggers on context cancellation.
-// 用于避免客户端断开或上游超时导致的并发槽位泄漏。
-// 优化：基于 context.AfterFunc 注册回调，避免每请求额外守护 goroutine。
+// wrapReleaseOnDone ensures release runs at most once and still triggers on
+// context cancellation. HTTP requests that detach admitted upstream work must
+// transfer their slots to a separate attempt-owned lease before detaching.
 func wrapReleaseOnDone(ctx context.Context, releaseFunc func()) func() {
 	if releaseFunc == nil {
 		return nil
@@ -176,6 +176,132 @@ func wrapReleaseOnDone(ctx context.Context, releaseFunc func()) func() {
 	stop = context.AfterFunc(ctx, release)
 
 	return release
+}
+
+type httpAttemptReleaseSet struct {
+	mu          sync.Mutex
+	transferred bool
+	released    bool
+	releases    []func()
+}
+
+func newHTTPAttemptReleaseSet(
+	ctx context.Context,
+) *httpAttemptReleaseSet {
+	set := &httpAttemptReleaseSet{}
+	context.AfterFunc(ctx, set.releasePending)
+	return set
+}
+
+func (s *httpAttemptReleaseSet) Add(release func()) func() {
+	if s == nil || release == nil {
+		return nil
+	}
+	var once sync.Once
+	ownedRelease := func() {
+		once.Do(release)
+	}
+	s.mu.Lock()
+	if s.transferred || s.released {
+		s.mu.Unlock()
+		ownedRelease()
+		return ownedRelease
+	}
+	s.releases = append(s.releases, ownedRelease)
+	s.mu.Unlock()
+	return ownedRelease
+}
+
+func (s *httpAttemptReleaseSet) Transfer() bool {
+	if s == nil {
+		return true
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.released || s.transferred {
+		return false
+	}
+	s.transferred = true
+	return true
+}
+
+// transferLogical keeps one logical lease across multiple admitted account
+// attempts. Unlike an attempt lease, an earlier transfer remains valid.
+func (s *httpAttemptReleaseSet) transferLogical() bool {
+	if s == nil {
+		return true
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.released {
+		return false
+	}
+	s.transferred = true
+	return true
+}
+
+func (s *httpAttemptReleaseSet) releasePending() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	if s.transferred || s.released {
+		s.mu.Unlock()
+		return
+	}
+	s.released = true
+	releases := s.releases
+	s.releases = nil
+	s.mu.Unlock()
+	for _, release := range releases {
+		release()
+	}
+}
+
+func (s *httpAttemptReleaseSet) releaseTransferred() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	if s.released {
+		s.mu.Unlock()
+		return
+	}
+	s.released = true
+	releases := s.releases
+	s.releases = nil
+	s.mu.Unlock()
+	for _, release := range releases {
+		release()
+	}
+}
+
+// finish releases pending or transferred ownership when the logical handler
+// has completed all accounting derived from admitted work.
+func (s *httpAttemptReleaseSet) finish() {
+	s.releaseTransferred()
+}
+
+func withHTTPAttemptReleaseAuthority(
+	ctx context.Context,
+	logical *httpAttemptReleaseSet,
+	attempt *httpAttemptReleaseSet,
+	onFirst func(),
+) context.Context {
+	return service.WithHTTPAttemptAuthority(
+		ctx,
+		func() bool {
+			if !attempt.Transfer() {
+				return false
+			}
+			if !logical.transferLogical() {
+				attempt.releaseTransferred()
+				return false
+			}
+			return true
+		},
+		onFirst,
+	)
 }
 
 // IncrementWaitCount increments the wait count for a user

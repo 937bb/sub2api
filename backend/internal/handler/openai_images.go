@@ -94,9 +94,6 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 	if !acquired {
 		return
 	}
-	if imageReleaseFunc != nil {
-		defer imageReleaseFunc()
-	}
 
 	if parsed.Multipart {
 		setOpsRequestContext(c, requestModel, parsed.Stream)
@@ -120,9 +117,10 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 	if !acquired {
 		return
 	}
-	if userReleaseFunc != nil {
-		defer userReleaseFunc()
-	}
+	logicalReleases := newHTTPAttemptReleaseSet(c.Request.Context())
+	logicalReleases.Add(imageReleaseFunc)
+	logicalReleases.Add(userReleaseFunc)
+	defer logicalReleases.finish()
 
 	if err := h.billingCacheService.CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription, service.QuotaPlatform(c.Request.Context(), apiKey)); err != nil {
 		reqLog.Info("openai.images.billing_eligibility_check_failed", zap.Error(err))
@@ -144,6 +142,9 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 	var lastFailoverErr *service.UpstreamFailoverError
 
 	for {
+		if failoverClientGone(c) {
+			return
+		}
 		reqLog.Debug("openai.images.account_selecting", zap.Int("excluded_account_count", len(failedAccountIDs)))
 		selection, scheduleDecision, err := h.gatewayService.SelectAccountWithSchedulerForImages(
 			requestCtx,
@@ -154,6 +155,9 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 			parsed.RequiredCapability,
 		)
 		if err != nil {
+			if failoverClientGone(c) {
+				return
+			}
 			reqLog.Warn("openai.images.account_select_failed",
 				zap.Error(err),
 				zap.Int("excluded_account_count", len(failedAccountIDs)),
@@ -189,26 +193,53 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		)
 
 		account := selection.Account
+		if failoverClientGone(c) {
+			if selection.Acquired && selection.ReleaseFunc != nil {
+				selection.ReleaseFunc()
+			}
+			return
+		}
 		sessionHash = ensureOpenAIPoolModeSessionHash(sessionHash, account)
 		reqLog.Debug("openai.images.account_selected", zap.Int64("account_id", account.ID), zap.String("account_name", account.Name))
-		setOpsSelectedAccount(c, account.ID, account.Platform)
 
-		accountReleaseFunc, acquired := h.acquireResponsesAccountSlot(c, apiKey.GroupID, sessionHash, selection, parsed.Stream, &streamStarted, reqLog)
+		accountReleaseFunc, acquired := h.acquireResponsesAccountSlot(c, selection, parsed.Stream, &streamStarted, reqLog)
 		if !acquired {
 			return
 		}
-
+		if failoverClientGone(c) {
+			if accountReleaseFunc != nil {
+				accountReleaseFunc()
+			}
+			return
+		}
 		service.SetOpsLatencyMs(c, service.OpsRoutingLatencyMsKey, time.Since(routingStart).Milliseconds())
 		forwardStart := time.Now()
 		writerSizeBeforeForward := c.Writer.Size()
-		result, err := func() (*service.OpenAIForwardResult, error) {
-			defer func() {
-				if accountReleaseFunc != nil {
-					accountReleaseFunc()
+		attemptReleases := newHTTPAttemptReleaseSet(c.Request.Context())
+		attemptReleases.Add(accountReleaseFunc)
+		attemptCtx := withHTTPAttemptReleaseAuthority(
+			requestCtx,
+			logicalReleases,
+			attemptReleases,
+			func() {
+				if err := h.gatewayService.BindStickySession(
+					context.WithoutCancel(c.Request.Context()),
+					apiKey.GroupID,
+					sessionHash,
+					account.ID,
+				); err != nil {
+					reqLog.Warn("openai.bind_sticky_session_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 				}
-			}()
-			return h.gatewayService.ForwardImages(requestCtx, c, account, body, parsed, channelMapping.MappedModel)
+			},
+		)
+		result, err := func() (*service.OpenAIForwardResult, error) {
+			defer attemptReleases.releaseTransferred()
+			return h.gatewayService.ForwardImages(attemptCtx, c, account, body, parsed, channelMapping.MappedModel)
 		}()
+		if handleHTTPAttemptNotAdmitted(c, err) {
+			return
+		}
+		setOpsSelectedAccount(c, account.ID, account.Platform)
 		forwardDurationMs := time.Since(forwardStart).Milliseconds()
 		upstreamLatencyMs, _ := getContextInt64(c, service.OpsUpstreamLatencyMsKey)
 		responseLatencyMs := forwardDurationMs
@@ -253,6 +284,9 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 							zap.Int("upstream_status", failoverErr.StatusCode),
 						)
 						h.handleFailoverExhausted(c, failoverErr, true)
+						return
+					}
+					if failoverClientGone(c) {
 						return
 					}
 					if failoverErr.RetryableOnSameAccount {

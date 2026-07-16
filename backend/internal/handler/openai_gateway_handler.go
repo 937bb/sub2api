@@ -258,9 +258,6 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		if !imageAcquired {
 			return
 		}
-		if imageReleaseFunc != nil {
-			defer imageReleaseFunc()
-		}
 	}
 
 	// 解析渠道级模型映射
@@ -288,9 +285,10 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		return
 	}
 	// 确保请求取消时也会释放槽位，避免长连接被动中断造成泄漏
-	if userReleaseFunc != nil {
-		defer userReleaseFunc()
-	}
+	logicalReleases := newHTTPAttemptReleaseSet(c.Request.Context())
+	logicalReleases.Add(imageReleaseFunc)
+	logicalReleases.Add(userReleaseFunc)
+	defer logicalReleases.finish()
 
 	// 2. Re-check billing eligibility after wait
 	if err := h.billingCacheService.CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription, service.QuotaPlatform(c.Request.Context(), apiKey)); err != nil {
@@ -315,6 +313,9 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 
 	selectionCtx := service.WithPublicModelSupportMiss404(c.Request.Context())
 	for {
+		if failoverClientGone(c) {
+			return
+		}
 		// Select account supporting the requested model
 		reqLog.Debug("openai.account_selecting", zap.Int("excluded_account_count", len(failedAccountIDs)))
 		selection, scheduleDecision, err := h.gatewayService.SelectAccountWithSchedulerForCapability(
@@ -329,6 +330,9 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			requireCompact,
 		)
 		if err != nil {
+			if failoverClientGone(c) {
+				return
+			}
 			reqLog.Warn("openai.account_select_failed",
 				zap.Error(err),
 				zap.Int("excluded_account_count", len(failedAccountIDs)),
@@ -370,27 +374,54 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			zap.Float64("load_skew", scheduleDecision.LoadSkew),
 		)
 		account := selection.Account
+		if failoverClientGone(c) {
+			if selection.Acquired && selection.ReleaseFunc != nil {
+				selection.ReleaseFunc()
+			}
+			return
+		}
 		sessionHash = ensureOpenAIPoolModeSessionHash(sessionHash, account)
 		reqLog.Debug("openai.account_selected", zap.Int64("account_id", account.ID), zap.String("account_name", account.Name))
-		setOpsSelectedAccount(c, account.ID, account.Platform)
 
-		accountReleaseFunc, acquired := h.acquireResponsesAccountSlot(c, apiKey.GroupID, sessionHash, selection, reqStream, &streamStarted, reqLog)
+		accountReleaseFunc, acquired := h.acquireResponsesAccountSlot(c, selection, reqStream, &streamStarted, reqLog)
 		if !acquired {
 			return
 		}
-
+		if failoverClientGone(c) {
+			if accountReleaseFunc != nil {
+				accountReleaseFunc()
+			}
+			return
+		}
 		// Forward request
 		service.SetOpsLatencyMs(c, service.OpsRoutingLatencyMsKey, time.Since(routingStart).Milliseconds())
 		forwardStart := time.Now()
 		writerSizeBeforeForward := c.Writer.Size()
-		result, err := func() (*service.OpenAIForwardResult, error) {
-			defer func() {
-				if accountReleaseFunc != nil {
-					accountReleaseFunc()
+		attemptReleases := newHTTPAttemptReleaseSet(c.Request.Context())
+		attemptReleases.Add(accountReleaseFunc)
+		attemptCtx := withHTTPAttemptReleaseAuthority(
+			c.Request.Context(),
+			logicalReleases,
+			attemptReleases,
+			func() {
+				if err := h.gatewayService.BindStickySession(
+					context.WithoutCancel(c.Request.Context()),
+					apiKey.GroupID,
+					sessionHash,
+					account.ID,
+				); err != nil {
+					reqLog.Warn("openai.bind_sticky_session_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 				}
-			}()
-			return h.gatewayService.Forward(c.Request.Context(), c, account, forwardBody)
+			},
+		)
+		result, err := func() (*service.OpenAIForwardResult, error) {
+			defer attemptReleases.releaseTransferred()
+			return h.gatewayService.Forward(attemptCtx, c, account, forwardBody)
 		}()
+		if handleHTTPAttemptNotAdmitted(c, err) {
+			return
+		}
+		setOpsSelectedAccount(c, account.ID, account.Platform)
 		forwardDurationMs := time.Since(forwardStart).Milliseconds()
 		upstreamLatencyMs, _ := getContextInt64(c, service.OpsUpstreamLatencyMsKey)
 		responseLatencyMs := forwardDurationMs
@@ -417,6 +448,9 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 						return
 					}
 					h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, false, nil)
+					if failoverClientGone(c) {
+						return
+					}
 					// 池模式：同账号重试
 					if failoverErr.RetryableOnSameAccount {
 						retryLimit := account.GetPoolModeRetryCount()
@@ -714,9 +748,9 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 	if !acquired {
 		return
 	}
-	if userReleaseFunc != nil {
-		defer userReleaseFunc()
-	}
+	logicalReleases := newHTTPAttemptReleaseSet(c.Request.Context())
+	logicalReleases.Add(userReleaseFunc)
+	defer logicalReleases.finish()
 
 	if err := h.billingCacheService.CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription, service.QuotaPlatform(c.Request.Context(), apiKey)); err != nil {
 		reqLog.Info("openai_messages.billing_eligibility_check_failed", zap.Error(err))
@@ -741,6 +775,9 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 
 	selectionCtx := service.WithPublicModelSupportMiss404(c.Request.Context())
 	for {
+		if failoverClientGone(c) {
+			return
+		}
 		currentRoutingModel := routingModel
 		if effectiveMappedModel != "" {
 			currentRoutingModel = effectiveMappedModel
@@ -758,6 +795,9 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 			false,
 		)
 		if err != nil {
+			if failoverClientGone(c) {
+				return
+			}
 			reqLog.Warn("openai_messages.account_select_failed",
 				zap.Error(err),
 				zap.Int("excluded_account_count", len(failedAccountIDs)),
@@ -787,16 +827,26 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 			return
 		}
 		account := selection.Account
+		if failoverClientGone(c) {
+			if selection.Acquired && selection.ReleaseFunc != nil {
+				selection.ReleaseFunc()
+			}
+			return
+		}
 		sessionHash = ensureOpenAIPoolModeSessionHash(sessionHash, account)
 		reqLog.Debug("openai_messages.account_selected", zap.Int64("account_id", account.ID), zap.String("account_name", account.Name))
 		_ = scheduleDecision
-		setOpsSelectedAccount(c, account.ID, account.Platform)
 
-		accountReleaseFunc, acquired := h.acquireResponsesAccountSlot(c, apiKey.GroupID, sessionHash, selection, reqStream, &streamStarted, reqLog)
+		accountReleaseFunc, acquired := h.acquireResponsesAccountSlot(c, selection, reqStream, &streamStarted, reqLog)
 		if !acquired {
 			return
 		}
-
+		if failoverClientGone(c) {
+			if accountReleaseFunc != nil {
+				accountReleaseFunc()
+			}
+			return
+		}
 		service.SetOpsLatencyMs(c, service.OpsRoutingLatencyMsKey, time.Since(routingStart).Milliseconds())
 		forwardStart := time.Now()
 		writerSizeBeforeForward := 0
@@ -807,14 +857,31 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		defaultMappedModel := strings.TrimSpace(effectiveMappedModel)
 		// 应用渠道模型映射到请求体
 		forwardBody := mappedBodyForMessages(channelMappingMsg.Mapped, channelMappingMsg.MappedModel)
-		result, err := func() (*service.OpenAIForwardResult, error) {
-			defer func() {
-				if accountReleaseFunc != nil {
-					accountReleaseFunc()
+		attemptReleases := newHTTPAttemptReleaseSet(c.Request.Context())
+		attemptReleases.Add(accountReleaseFunc)
+		attemptCtx := withHTTPAttemptReleaseAuthority(
+			c.Request.Context(),
+			logicalReleases,
+			attemptReleases,
+			func() {
+				if err := h.gatewayService.BindStickySession(
+					context.WithoutCancel(c.Request.Context()),
+					apiKey.GroupID,
+					sessionHash,
+					account.ID,
+				); err != nil {
+					reqLog.Warn("openai.bind_sticky_session_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 				}
-			}()
-			return h.gatewayService.ForwardAsAnthropic(c.Request.Context(), c, account, forwardBody, promptCacheKey, defaultMappedModel)
+			},
+		)
+		result, err := func() (*service.OpenAIForwardResult, error) {
+			defer attemptReleases.releaseTransferred()
+			return h.gatewayService.ForwardAsAnthropic(attemptCtx, c, account, forwardBody, promptCacheKey, defaultMappedModel)
 		}()
+		if handleHTTPAttemptNotAdmitted(c, err) {
+			return
+		}
+		setOpsSelectedAccount(c, account.ID, account.Platform)
 
 		forwardDurationMs := time.Since(forwardStart).Milliseconds()
 		upstreamLatencyMs, _ := getContextInt64(c, service.OpsUpstreamLatencyMsKey)
@@ -850,6 +917,9 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 						)
 					} else {
 						h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, false, nil)
+						if failoverClientGone(c) {
+							return
+						}
 						// 池模式：同账号重试
 						if failoverErr.RetryableOnSameAccount {
 							retryLimit := account.GetPoolModeRetryCount()
@@ -1096,13 +1166,11 @@ func (h *OpenAIGatewayHandler) acquireResponsesUserSlot(
 		h.handleConcurrencyError(c, err, "user", *streamStarted)
 		return nil, false
 	}
-	return wrapReleaseOnDone(c.Request.Context(), userReleaseFunc), true
+	return userReleaseFunc, true
 }
 
 func (h *OpenAIGatewayHandler) acquireResponsesAccountSlot(
 	c *gin.Context,
-	groupID *int64,
-	sessionHash string,
 	selection *service.AccountSelectionResult,
 	reqStream bool,
 	streamStarted *bool,
@@ -1117,7 +1185,7 @@ func (h *OpenAIGatewayHandler) acquireResponsesAccountSlot(
 	ctx := c.Request.Context()
 	account := selection.Account
 	if selection.Acquired {
-		return wrapReleaseOnDone(ctx, selection.ReleaseFunc), true
+		return selection.ReleaseFunc, true
 	}
 	if selection.WaitPlan == nil {
 		markOpsRoutingCapacityLimited(c)
@@ -1132,14 +1200,14 @@ func (h *OpenAIGatewayHandler) acquireResponsesAccountSlot(
 	)
 	if err != nil {
 		reqLog.Warn("openai.account_slot_quick_acquire_failed", zap.Int64("account_id", account.ID), zap.Error(err))
+		if failoverClientGone(c) {
+			return nil, false
+		}
 		h.handleConcurrencyError(c, err, "account", *streamStarted)
 		return nil, false
 	}
 	if fastAcquired {
-		if err := h.gatewayService.BindStickySession(ctx, groupID, sessionHash, account.ID); err != nil {
-			reqLog.Warn("openai.bind_sticky_session_failed", zap.Int64("account_id", account.ID), zap.Error(err))
-		}
-		return wrapReleaseOnDone(ctx, fastReleaseFunc), true
+		return fastReleaseFunc, true
 	}
 
 	canWait, waitErr := h.concurrencyHelper.IncrementAccountWaitCount(ctx, account.ID, selection.WaitPlan.MaxWaiting)
@@ -1173,16 +1241,16 @@ func (h *OpenAIGatewayHandler) acquireResponsesAccountSlot(
 	)
 	if err != nil {
 		reqLog.Warn("openai.account_slot_acquire_failed", zap.Int64("account_id", account.ID), zap.Error(err))
+		if failoverClientGone(c) {
+			return nil, false
+		}
 		h.handleConcurrencyError(c, err, "account", *streamStarted)
 		return nil, false
 	}
 
 	// Slot acquired: no longer waiting in queue.
 	releaseWait()
-	if err := h.gatewayService.BindStickySession(ctx, groupID, sessionHash, account.ID); err != nil {
-		reqLog.Warn("openai.bind_sticky_session_failed", zap.Int64("account_id", account.ID), zap.Error(err))
-	}
-	return wrapReleaseOnDone(ctx, accountReleaseFunc), true
+	return accountReleaseFunc, true
 }
 
 // ResponsesWebSocket handles OpenAI Responses API WebSocket ingress endpoint

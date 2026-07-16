@@ -106,9 +106,9 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 	if !acquired {
 		return
 	}
-	if userReleaseFunc != nil {
-		defer userReleaseFunc()
-	}
+	logicalReleases := newHTTPAttemptReleaseSet(c.Request.Context())
+	logicalReleases.Add(userReleaseFunc)
+	defer logicalReleases.finish()
 
 	if err := h.billingCacheService.CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription, service.QuotaPlatform(c.Request.Context(), apiKey)); err != nil {
 		reqLog.Info("openai_chat_completions.billing_eligibility_check_failed", zap.Error(err))
@@ -131,6 +131,9 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 
 	selectionCtx := service.WithPublicModelSupportMiss404(c.Request.Context())
 	for {
+		if failoverClientGone(c) {
+			return
+		}
 		reqLog.Debug("openai_chat_completions.account_selecting", zap.Int("excluded_account_count", len(failedAccountIDs)))
 		selection, scheduleDecision, err := h.gatewayService.SelectAccountWithSchedulerForCapability(
 			selectionCtx,
@@ -144,6 +147,9 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 			false,
 		)
 		if err != nil {
+			if failoverClientGone(c) {
+				return
+			}
 			reqLog.Warn("openai_chat_completions.account_select_failed",
 				zap.Error(err),
 				zap.Int("excluded_account_count", len(failedAccountIDs)),
@@ -170,16 +176,26 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 			return
 		}
 		account := selection.Account
+		if failoverClientGone(c) {
+			if selection.Acquired && selection.ReleaseFunc != nil {
+				selection.ReleaseFunc()
+			}
+			return
+		}
 		sessionHash = ensureOpenAIPoolModeSessionHash(sessionHash, account)
 		reqLog.Debug("openai_chat_completions.account_selected", zap.Int64("account_id", account.ID), zap.String("account_name", account.Name))
 		_ = scheduleDecision
-		setOpsSelectedAccount(c, account.ID, account.Platform)
 
-		accountReleaseFunc, acquired := h.acquireResponsesAccountSlot(c, apiKey.GroupID, sessionHash, selection, reqStream, &streamStarted, reqLog)
+		accountReleaseFunc, acquired := h.acquireResponsesAccountSlot(c, selection, reqStream, &streamStarted, reqLog)
 		if !acquired {
 			return
 		}
-
+		if failoverClientGone(c) {
+			if accountReleaseFunc != nil {
+				accountReleaseFunc()
+			}
+			return
+		}
 		service.SetOpsLatencyMs(c, service.OpsRoutingLatencyMsKey, time.Since(routingStart).Milliseconds())
 		forwardStart := time.Now()
 
@@ -188,14 +204,31 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 			forwardBody = h.gatewayService.ReplaceModelInBody(body, channelMapping.MappedModel)
 		}
 		writerSizeBeforeForward := c.Writer.Size()
-		result, err := func() (*service.OpenAIForwardResult, error) {
-			defer func() {
-				if accountReleaseFunc != nil {
-					accountReleaseFunc()
+		attemptReleases := newHTTPAttemptReleaseSet(c.Request.Context())
+		attemptReleases.Add(accountReleaseFunc)
+		attemptCtx := withHTTPAttemptReleaseAuthority(
+			c.Request.Context(),
+			logicalReleases,
+			attemptReleases,
+			func() {
+				if err := h.gatewayService.BindStickySession(
+					context.WithoutCancel(c.Request.Context()),
+					apiKey.GroupID,
+					sessionHash,
+					account.ID,
+				); err != nil {
+					reqLog.Warn("openai.bind_sticky_session_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 				}
-			}()
-			return h.gatewayService.ForwardAsChatCompletions(c.Request.Context(), c, account, forwardBody, promptCacheKey)
+			},
+		)
+		result, err := func() (*service.OpenAIForwardResult, error) {
+			defer attemptReleases.releaseTransferred()
+			return h.gatewayService.ForwardAsChatCompletions(attemptCtx, c, account, forwardBody, promptCacheKey)
 		}()
+		if handleHTTPAttemptNotAdmitted(c, err) {
+			return
+		}
+		setOpsSelectedAccount(c, account.ID, account.Platform)
 
 		forwardDurationMs := time.Since(forwardStart).Milliseconds()
 		upstreamLatencyMs, _ := getContextInt64(c, service.OpsUpstreamLatencyMsKey)
@@ -222,6 +255,9 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 						return
 					}
 					h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, false, nil)
+					if failoverClientGone(c) {
+						return
+					}
 					// Pool mode: retry on the same account
 					if failoverErr.RetryableOnSameAccount {
 						retryLimit := account.GetPoolModeRetryCount()
