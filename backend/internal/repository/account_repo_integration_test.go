@@ -828,6 +828,20 @@ func (s *AccountRepoSuite) TestUpdateSessionWindowEnd_SyncsWithoutLifecycleOutbo
 	s.Require().Zero(outboxCount)
 }
 
+func (s *AccountRepoSuite) TestUpdateSessionWindowEnd_AvoidsRedundantSnapshotWrite() {
+	end := time.Now().UTC().Add(5 * time.Hour).Truncate(time.Second)
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:             "session-window-end-unchanged",
+		SessionWindowEnd: &end,
+	})
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
+
+	s.Require().NoError(s.repo.UpdateSessionWindowEnd(s.ctx, account.ID, end))
+
+	s.Require().Empty(cacheRecorder.setAccounts)
+}
+
 func (s *AccountRepoSuite) TestSetOverloaded() {
 	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-over"})
 	until := time.Date(2025, 6, 15, 12, 0, 0, 0, time.UTC)

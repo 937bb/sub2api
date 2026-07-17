@@ -1612,21 +1612,44 @@ WHERE id = $1
 // UpdateSessionWindowEnd 仅更新 5h 窗口结束时间，不覆盖请求路径记录的 start/status。
 func (r *accountRepository) UpdateSessionWindowEnd(ctx context.Context, id int64, end time.Time) error {
 	client := clientFromContext(ctx, r.client)
-	result, err := client.ExecContext(ctx, `
-UPDATE accounts
-SET session_window_end = $1,
-	updated_at = NOW()
-WHERE id = $2
-	AND deleted_at IS NULL`, end, id)
+	rows, err := client.QueryContext(ctx, `
+WITH target AS MATERIALIZED (
+	SELECT id
+	FROM accounts
+	WHERE id = $2 AND deleted_at IS NULL
+), updated AS (
+	UPDATE accounts
+	SET session_window_end = $1,
+		updated_at = NOW()
+	WHERE id IN (SELECT id FROM target)
+		AND session_window_end IS DISTINCT FROM $1
+	RETURNING 1
+)
+SELECT EXISTS (SELECT 1 FROM target), EXISTS (SELECT 1 FROM updated)`, end, id)
 	if err != nil {
 		return err
 	}
-	affected, err := result.RowsAffected()
-	if err != nil {
+	if !rows.Next() {
+		rowsErr := rows.Err()
+		_ = rows.Close()
+		if rowsErr != nil {
+			return rowsErr
+		}
+		return errors.New("session window update returned no result")
+	}
+	var exists, updated bool
+	if err := rows.Scan(&exists, &updated); err != nil {
+		_ = rows.Close()
 		return err
 	}
-	if affected == 0 {
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if !exists {
 		return service.ErrAccountNotFound
+	}
+	if !updated {
+		return nil
 	}
 	r.syncSchedulerAccountSnapshot(ctx, id)
 	return nil
