@@ -439,9 +439,23 @@ func (r *schedulerDirtyWorkRepository) PendingStats(ctx context.Context) (servic
 	var stats service.SchedulerDirtyWorkStats
 	var oldest, oldestFailure sql.NullTime
 	err := r.db.QueryRowContext(ctx, `
-		SELECT COUNT(*), MIN(updated_at),
-		       COUNT(*) FILTER (WHERE failure_count > 0), MIN(last_failure_at)
-		FROM scheduler_dirty_work
+		SELECT COALESCE(SUM(pending_count), 0), MIN(oldest_updated_at),
+		       COALESCE(SUM(failed_count), 0), MIN(oldest_failure_at)
+		FROM (
+			SELECT COUNT(*) AS pending_count, MIN(updated_at) AS oldest_updated_at,
+			       COUNT(*) FILTER (WHERE failure_count > 0) AS failed_count,
+			       MIN(last_failure_at) AS oldest_failure_at
+			FROM scheduler_dirty_work
+			UNION ALL
+			SELECT COUNT(*), MIN(updated_at), 0, NULL::timestamptz
+			FROM scheduler_dirty_account_sources
+			UNION ALL
+			SELECT COUNT(*), MIN(updated_at), 0, NULL::timestamptz
+			FROM scheduler_dirty_membership_sources
+			UNION ALL
+			SELECT COUNT(*), MIN(updated_at), 0, NULL::timestamptz
+			FROM scheduler_dirty_group_sources
+		) AS pending
 	`).Scan(&stats.Count, &oldest, &stats.FailedCount, &oldestFailure)
 	if oldest.Valid {
 		stats.OldestUpdatedAt = &oldest.Time

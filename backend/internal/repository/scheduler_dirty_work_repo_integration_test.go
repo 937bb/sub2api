@@ -14,6 +14,38 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestSchedulerPendingStatsIncludesUnpromotedSources(t *testing.T) {
+	ctx := context.Background()
+	truncateSchedulerDirtyTables(t, integrationDB)
+	oldest := time.Now().UTC().Add(-time.Minute)
+	_, err := integrationDB.ExecContext(ctx, `
+		INSERT INTO scheduler_dirty_account_sources(account_id, updated_at) VALUES(910001, $1)
+	`, oldest)
+	require.NoError(t, err)
+	_, err = integrationDB.ExecContext(ctx, `
+		INSERT INTO scheduler_dirty_membership_sources(account_id, group_id, updated_at) VALUES(910002, 920002, $1)
+	`, oldest.Add(time.Second))
+	require.NoError(t, err)
+	_, err = integrationDB.ExecContext(ctx, `
+		INSERT INTO scheduler_dirty_group_sources(group_id, updated_at) VALUES(920003, $1)
+	`, oldest.Add(2*time.Second))
+	require.NoError(t, err)
+	_, err = integrationDB.ExecContext(ctx, `
+		INSERT INTO scheduler_dirty_work(kind, entity_id, failure_count, last_failure_at, updated_at)
+		VALUES(1, 910004, 1, $1, $2)
+	`, oldest.Add(3*time.Second), oldest.Add(4*time.Second))
+	require.NoError(t, err)
+
+	stats, err := NewSchedulerDirtyWorkRepository(integrationDB).PendingStats(ctx)
+	require.NoError(t, err)
+	require.Equal(t, int64(4), stats.Count)
+	require.NotNil(t, stats.OldestUpdatedAt)
+	require.WithinDuration(t, oldest, *stats.OldestUpdatedAt, time.Millisecond)
+	require.Equal(t, int64(1), stats.FailedCount)
+	require.NotNil(t, stats.OldestFailureAt)
+	require.WithinDuration(t, oldest.Add(3*time.Second), *stats.OldestFailureAt, time.Millisecond)
+}
+
 func TestSchedulerSourcePromotionDerivesTargetsAndDrainsEvidence(t *testing.T) {
 	ctx := context.Background()
 	_, err := integrationDB.ExecContext(ctx, `TRUNCATE scheduler_dirty_account_sources, scheduler_dirty_group_sources, scheduler_dirty_membership_sources, scheduler_dirty_work`)

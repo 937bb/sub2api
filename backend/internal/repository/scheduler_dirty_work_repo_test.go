@@ -126,13 +126,27 @@ func TestSchedulerDirtyWorkPendingStatsUsesWholePopulation(t *testing.T) {
 	now := time.Now().UTC()
 
 	mock.ExpectQuery(regexp.QuoteMeta(`
-		SELECT COUNT(*), MIN(updated_at),
-		       COUNT(*) FILTER (WHERE failure_count > 0), MIN(last_failure_at)
-		FROM scheduler_dirty_work
-	`)).WillReturnRows(sqlmock.NewRows([]string{"count", "min", "failed", "oldest_failure"}).AddRow(int64(3), now, int64(1), now))
+		SELECT COALESCE(SUM(pending_count), 0), MIN(oldest_updated_at),
+		       COALESCE(SUM(failed_count), 0), MIN(oldest_failure_at)
+		FROM (
+			SELECT COUNT(*) AS pending_count, MIN(updated_at) AS oldest_updated_at,
+			       COUNT(*) FILTER (WHERE failure_count > 0) AS failed_count,
+			       MIN(last_failure_at) AS oldest_failure_at
+			FROM scheduler_dirty_work
+			UNION ALL
+			SELECT COUNT(*), MIN(updated_at), 0, NULL::timestamptz
+			FROM scheduler_dirty_account_sources
+			UNION ALL
+			SELECT COUNT(*), MIN(updated_at), 0, NULL::timestamptz
+			FROM scheduler_dirty_membership_sources
+			UNION ALL
+			SELECT COUNT(*), MIN(updated_at), 0, NULL::timestamptz
+			FROM scheduler_dirty_group_sources
+		) AS pending
+	`)).WillReturnRows(sqlmock.NewRows([]string{"count", "min", "failed", "oldest_failure"}).AddRow(int64(6), now, int64(1), now))
 	stats, err := NewSchedulerDirtyWorkRepository(db).PendingStats(context.Background())
 	require.NoError(t, err)
-	require.Equal(t, int64(3), stats.Count)
+	require.Equal(t, int64(6), stats.Count)
 	require.Equal(t, now, *stats.OldestUpdatedAt)
 	require.Equal(t, int64(1), stats.FailedCount)
 	require.Equal(t, now, *stats.OldestFailureAt)
