@@ -1968,6 +1968,34 @@ func (s *AccountRepoSuite) TestUpdateRuntimeExtra_StaleSnapshotIsNoOp() {
 	s.requireNoSchedulerOutbox()
 }
 
+func (s *AccountRepoSuite) TestUpdateRuntimeExtra_PersistsComparedObservationTime() {
+	observedAt := time.Now().UTC().Truncate(time.Microsecond)
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name: "runtime-extra-observation-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		Extra: map[string]any{
+			"passive_usage_sampled_at":     observedAt.Add(-time.Hour).Format(time.RFC3339Nano),
+			"passive_usage_7d_utilization": 0.1,
+		},
+	})
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
+
+	updated, err := s.repo.UpdateRuntimeExtra(s.ctx, account.ID, map[string]any{
+		// A producer cannot weaken the repository watermark by supplying a stale
+		// payload value that differs from the timestamp used for ordering.
+		"passive_usage_sampled_at":     observedAt.Add(-time.Minute).Format(time.RFC3339Nano),
+		"passive_usage_7d_utilization": 0.7,
+	}, "passive_usage_sampled_at", observedAt)
+	s.Require().NoError(err)
+	s.Require().True(updated)
+
+	got, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().Equal(observedAt.Format(time.RFC3339Nano), got.Extra["passive_usage_sampled_at"])
+	s.Require().Equal(0.7, got.Extra["passive_usage_7d_utilization"])
+	s.Require().Len(cacheRecorder.setAccounts, 1)
+}
+
 func (s *AccountRepoSuite) TestUpdateRuntimeExtra_NewerSnapshotPublishesAfterCommit() {
 	older := time.Now().UTC().Add(-time.Minute).Truncate(time.Second)
 	newer := older.Add(time.Minute)

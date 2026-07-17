@@ -1953,7 +1953,15 @@ func (r *accountRepository) UpdateRuntimeExtra(ctx context.Context, id int64, up
 	if observedAtKey == "" || observedAt.IsZero() {
 		return false, errors.New("runtime extra observation is required")
 	}
-	payload, err := json.Marshal(updates)
+	// Keep the persisted watermark and the comparison value identical. Trusting a
+	// caller-supplied timestamp here could accept a snapshot at T2 while storing
+	// T1, allowing observations between T1 and T2 to overwrite newer state.
+	snapshot := make(map[string]any, len(updates)+1)
+	for key, value := range updates {
+		snapshot[key] = value
+	}
+	snapshot[observedAtKey] = observedAt.UTC().Format(time.RFC3339Nano)
+	payload, err := json.Marshal(snapshot)
 	if err != nil {
 		return false, err
 	}
