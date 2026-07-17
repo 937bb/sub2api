@@ -79,15 +79,28 @@ UPDATE account_groups SET group_id = $1 WHERE account_id = $2 AND group_id = $3
 	}
 
 	for key, value := range map[string]string{
-		"codex_usage_updated_at":     `"2026-07-17T00:00:00Z"`,
-		"model_rate_limits":          `{"gpt-5":{"rate_limit_reset_at":"2026-07-17T01:00:00Z"}}`,
-		"openai_codex_fingerprint":   `{"schema_version":1}`,
-		"session_window_utilization": `0.5`,
-		"codex_primary_used_percent": `11.5`,
-		"codex_secondary_reset_at":   `"2026-07-18T00:00:00Z"`,
-		"codex_5h_used_percent":      `22.5`,
-		"codex_7d_used_percent":      `33.5`,
-		"passive_usage_tokens":       `42`,
+		"codex_usage_updated_at":               `"2026-07-17T00:00:00Z"`,
+		"model_rate_limits":                    `{"gpt-5":{"rate_limit_reset_at":"2026-07-17T01:00:00Z"}}`,
+		"openai_codex_fingerprint":             `{"schema_version":1}`,
+		"session_window_utilization":           `0.5`,
+		"codex_primary_used_percent":           `11.5`,
+		"codex_primary_reset_after_seconds":    `120`,
+		"codex_primary_window_minutes":         `300`,
+		"codex_primary_over_secondary_percent": `9.5`,
+		"codex_secondary_used_percent":         `12.5`,
+		"codex_secondary_reset_after_seconds":  `240`,
+		"codex_secondary_window_minutes":       `10080`,
+		"codex_5h_used_percent":                `22.5`,
+		"codex_5h_reset_after_seconds":         `3600`,
+		"codex_5h_window_minutes":              `300`,
+		"codex_5h_reset_at":                    `"2026-07-17T05:00:00Z"`,
+		"codex_7d_used_percent":                `33.5`,
+		"codex_7d_reset_after_seconds":         `7200`,
+		"codex_7d_window_minutes":              `10080`,
+		"codex_7d_reset_at":                    `"2026-07-18T00:00:00Z"`,
+		"passive_usage_7d_utilization":         `0.42`,
+		"passive_usage_7d_reset":               `1784332800`,
+		"passive_usage_sampled_at":             `"2026-07-17T00:00:00Z"`,
 	} {
 		truncateSchedulerDirtyTables(t, tx)
 		_, err = tx.ExecContext(ctx, `
@@ -97,6 +110,23 @@ UPDATE account_groups SET group_id = $1 WHERE account_id = $2 AND group_id = $3
 		`, key, value, accountID)
 		require.NoError(t, err)
 		requireNoAccountSource(t, tx, accountID)
+	}
+
+	// Unknown keys remain conservatively dirty even when their names resemble
+	// observational usage fields; only explicitly known producers are exempt.
+	for _, key := range []string{
+		"codex_primary_future_policy",
+		"codex_5h_future_policy",
+		"passive_usage_future_policy",
+	} {
+		truncateSchedulerDirtyTables(t, tx)
+		_, err = tx.ExecContext(ctx, `
+			UPDATE accounts
+			SET extra = jsonb_set(COALESCE(extra, '{}'::jsonb), ARRAY[$1], 'true'::jsonb, true)
+			WHERE id = $2
+		`, key, accountID)
+		require.NoError(t, err)
+		requireAccountSource(t, tx, accountID, 1, false)
 	}
 
 	// Static policy and unknown Extra keys remain conservatively dirty. Only

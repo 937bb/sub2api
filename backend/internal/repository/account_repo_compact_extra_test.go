@@ -47,3 +47,28 @@ func TestShouldEnqueueSchedulerOutboxForExtraUpdates_ModelRateLimitsAreNeutral(t
 		t.Fatalf("expected model rate limit update to avoid scheduler outbox")
 	}
 }
+
+func TestShouldEnqueueSchedulerOutboxForExtraUpdates_KnownUsageKeysAreNeutral(t *testing.T) {
+	updates := map[string]any{
+		"codex_primary_used_percent":   12.5,
+		"codex_7d_reset_at":            "2026-07-18T01:00:00Z",
+		"passive_usage_sampled_at":     "2026-07-17T01:00:00Z",
+		"passive_usage_7d_utilization": 0.42,
+	}
+
+	if shouldEnqueueSchedulerOutboxForExtraUpdates(updates) {
+		t.Fatalf("expected known usage updates to avoid scheduler outbox")
+	}
+}
+
+func TestShouldEnqueueSchedulerOutboxForExtraUpdates_UnknownUsagePrefixedKeysAreRelevant(t *testing.T) {
+	for _, key := range []string{
+		"codex_primary_future_policy",
+		"codex_5h_future_policy",
+		"passive_usage_future_policy",
+	} {
+		if !shouldEnqueueSchedulerOutboxForExtraUpdates(map[string]any{key: true}) {
+			t.Fatalf("expected unknown prefixed key %q to enqueue scheduler outbox", key)
+		}
+	}
+}

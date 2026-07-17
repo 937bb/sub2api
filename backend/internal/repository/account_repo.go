@@ -51,19 +51,31 @@ type accountRepository struct {
 	schedulerCache service.SchedulerCache
 }
 
-var schedulerNeutralExtraKeyPrefixes = []string{
-	"codex_primary_",
-	"codex_secondary_",
-	"codex_5h_",
-	"codex_7d_",
-	"passive_usage_",
-}
-
+// Keep this allowlist exact: unknown Extra keys must remain lifecycle-relevant,
+// even when they share a prefix with an observational usage producer.
 var schedulerNeutralExtraKeys = map[string]struct{}{
 	service.OpenAICodexFingerprintExtraKey: {},
 	"codex_usage_updated_at":               {},
 	"model_rate_limits":                    {},
 	"session_window_utilization":           {},
+	"codex_primary_used_percent":           {},
+	"codex_primary_reset_after_seconds":    {},
+	"codex_primary_window_minutes":         {},
+	"codex_primary_over_secondary_percent": {},
+	"codex_secondary_used_percent":         {},
+	"codex_secondary_reset_after_seconds":  {},
+	"codex_secondary_window_minutes":       {},
+	"codex_5h_used_percent":                {},
+	"codex_5h_reset_after_seconds":         {},
+	"codex_5h_window_minutes":              {},
+	"codex_5h_reset_at":                    {},
+	"codex_7d_used_percent":                {},
+	"codex_7d_reset_after_seconds":         {},
+	"codex_7d_window_minutes":              {},
+	"codex_7d_reset_at":                    {},
+	"passive_usage_7d_utilization":         {},
+	"passive_usage_7d_reset":               {},
+	"passive_usage_sampled_at":             {},
 }
 
 const postgresParameterBatchSize = 50000
@@ -1893,15 +1905,8 @@ func isSchedulerNeutralExtraKey(key string) bool {
 	if key == "" {
 		return false
 	}
-	if _, ok := schedulerNeutralExtraKeys[key]; ok {
-		return true
-	}
-	for _, prefix := range schedulerNeutralExtraKeyPrefixes {
-		if strings.HasPrefix(key, prefix) {
-			return true
-		}
-	}
-	return false
+	_, ok := schedulerNeutralExtraKeys[key]
+	return ok
 }
 
 func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates service.AccountBulkUpdate) (int64, error) {
