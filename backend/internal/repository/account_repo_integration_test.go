@@ -1468,6 +1468,37 @@ func (s *AccountRepoSuite) TestSetModelRateLimit_SyncsWithoutLifecycleOutbox() {
 	s.requireNoSchedulerOutbox()
 }
 
+func (s *AccountRepoSuite) TestSetModelRateLimit_DoesNotShortenExistingCooldown() {
+	later := time.Now().UTC().Add(2 * time.Hour).Truncate(time.Second)
+	earlier := later.Add(-time.Hour)
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name: "model-rate-monotonic-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		Extra: map[string]any{
+			"model_rate_limits": map[string]any{
+				"gpt-5": map[string]any{
+					"rate_limited_at":     "2026-07-18T00:00:00Z",
+					"rate_limit_reset_at": later.Format(time.RFC3339),
+					"reason":              "longer cooldown",
+				},
+			},
+		},
+	})
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
+
+	s.Require().NoError(s.repo.SetModelRateLimit(s.ctx, account.ID, "gpt-5", earlier, "stale cooldown"))
+
+	got, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	limits, ok := got.Extra["model_rate_limits"].(map[string]any)
+	s.Require().True(ok)
+	limit, ok := limits["gpt-5"].(map[string]any)
+	s.Require().True(ok)
+	s.Require().Equal(later.Format(time.RFC3339), limit["rate_limit_reset_at"])
+	s.Require().Equal("longer cooldown", limit["reason"])
+	s.Require().Empty(cacheRecorder.setAccounts)
+}
+
 func (s *AccountRepoSuite) TestSetModelRateLimit_PublishesOnlyAfterCommit() {
 	client := testEntClient(s.T())
 	account := mustCreateAccount(s.T(), client, &service.Account{

@@ -1543,31 +1543,62 @@ func (r *accountRepository) SetModelRateLimit(ctx context.Context, id int64, sco
 	}
 
 	client := clientFromContext(ctx, r.client)
-	result, err := client.ExecContext(
-		ctx,
-		`UPDATE accounts SET 
-			extra = jsonb_set(
-				jsonb_set(COALESCE(extra, '{}'::jsonb), '{model_rate_limits}'::text[], COALESCE(extra->'model_rate_limits', '{}'::jsonb), true),
-				ARRAY['model_rate_limits', $1]::text[],
-				$2::jsonb,
-				true
-			),
-			updated_at = NOW()
-		WHERE id = $3 AND deleted_at IS NULL`,
+	rows, err := client.QueryContext(ctx, `
+WITH target AS MATERIALIZED (
+	SELECT id,
+		COALESCE(extra, '{}'::jsonb) AS extra,
+		COALESCE(extra, '{}'::jsonb) #>> ARRAY['model_rate_limits', $1, 'rate_limit_reset_at'] AS current_reset
+	FROM accounts
+	WHERE id = $3 AND deleted_at IS NULL
+	FOR UPDATE
+), updated AS (
+	UPDATE accounts
+	SET extra = jsonb_set(
+		jsonb_set(target.extra, '{model_rate_limits}'::text[], COALESCE(target.extra->'model_rate_limits', '{}'::jsonb), true),
+		ARRAY['model_rate_limits', $1]::text[],
+		$2::jsonb,
+		true
+	),
+		updated_at = NOW()
+	FROM target
+	WHERE accounts.id = target.id
+		AND CASE
+			WHEN target.current_reset ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z$'
+				THEN target.current_reset::timestamptz < $4
+			ELSE true
+		END
+	RETURNING 1
+)
+SELECT EXISTS (SELECT 1 FROM target), EXISTS (SELECT 1 FROM updated)`,
 		scope,
 		raw,
 		id,
+		resetAt,
 	)
 	if err != nil {
 		return err
 	}
-
-	affected, err := result.RowsAffected()
-	if err != nil {
+	if !rows.Next() {
+		rowsErr := rows.Err()
+		_ = rows.Close()
+		if rowsErr != nil {
+			return rowsErr
+		}
+		return errors.New("model rate limit update returned no result")
+	}
+	var exists, updated bool
+	if err := rows.Scan(&exists, &updated); err != nil {
+		_ = rows.Close()
 		return err
 	}
-	if affected == 0 {
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if !exists {
 		return service.ErrAccountNotFound
+	}
+	if !updated {
+		return nil
 	}
 	r.syncSchedulerAccountSnapshotAfterCommit(ctx, id)
 	return nil
