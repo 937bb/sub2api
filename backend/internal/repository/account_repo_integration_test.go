@@ -1945,6 +1945,66 @@ func (s *AccountRepoSuite) TestBulkUpdate() {
 	s.Require().Equal(99, got2.Priority)
 }
 
+func (s *AccountRepoSuite) TestIncrementQuotaUsed_RollbackKeepsUsageAndOutboxAtomic() {
+	client := testEntClient(s.T())
+	account := mustCreateAccount(s.T(), client, &service.Account{
+		Name: "increment-quota-rollback-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		Extra: map[string]any{
+			"quota_limit": 10.0,
+			"quota_used":  9.0,
+		},
+	})
+	s.T().Cleanup(func() {
+		_, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background())
+	})
+	repo := newAccountRepositoryWithSQL(client, integrationDB, nil)
+	_, err := integrationDB.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+
+	s.Require().NoError(repo.IncrementQuotaUsed(txCtx, account.ID, 1))
+	s.Require().NoError(tx.Rollback())
+
+	got, err := repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().Equal(9.0, got.Extra["quota_used"])
+	var outboxCount int
+	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, "SELECT count(*) FROM scheduler_outbox").Scan(&outboxCount))
+	s.Require().Zero(outboxCount)
+}
+
+func (s *AccountRepoSuite) TestResetQuotaUsed_RollbackKeepsUsageAndOutboxAtomic() {
+	client := testEntClient(s.T())
+	account := mustCreateAccount(s.T(), client, &service.Account{
+		Name: "reset-quota-rollback-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		Extra: map[string]any{
+			"quota_limit": 10.0,
+			"quota_used":  10.0,
+		},
+	})
+	s.T().Cleanup(func() {
+		_, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background())
+	})
+	repo := newAccountRepositoryWithSQL(client, integrationDB, nil)
+	_, err := integrationDB.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+
+	s.Require().NoError(repo.ResetQuotaUsed(txCtx, account.ID))
+	s.Require().NoError(tx.Rollback())
+
+	got, err := repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().Equal(10.0, got.Extra["quota_used"])
+	var outboxCount int
+	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, "SELECT count(*) FROM scheduler_outbox").Scan(&outboxCount))
+	s.Require().Zero(outboxCount)
+}
+
 func (s *AccountRepoSuite) TestBulkUpdate_MergeCredentials() {
 	a1 := mustCreateAccount(s.T(), s.client, &service.Account{
 		Name:        "bulk-cred",
