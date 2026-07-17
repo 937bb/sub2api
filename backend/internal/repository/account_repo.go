@@ -1995,10 +1995,26 @@ func (r *accountRepository) ResetOpenAICodexFingerprint(ctx context.Context, id 
 	}
 
 	client := clientFromContext(ctx, r.client)
-	result, err := client.ExecContext(ctx, `
-UPDATE accounts
-SET extra = jsonb_set(COALESCE(extra, '{}'::jsonb), ARRAY[$2], $3::jsonb, true), updated_at = NOW()
-WHERE id = $1 AND deleted_at IS NULL AND platform = $4 AND type IN ($5, $6)`,
+	rows, err := client.QueryContext(ctx, `
+WITH updated AS (
+	UPDATE accounts
+	SET extra = jsonb_set(COALESCE(extra, '{}'::jsonb), ARRAY[$2], $3::jsonb, true),
+		updated_at = NOW()
+	WHERE id = $1
+		AND deleted_at IS NULL
+		AND platform = $4
+		AND type IN ($5, $6)
+		AND COALESCE(extra, '{}'::jsonb) -> $2 IS DISTINCT FROM $3::jsonb
+	RETURNING 1
+)
+SELECT EXISTS (
+	SELECT 1
+	FROM accounts
+	WHERE id = $1
+		AND deleted_at IS NULL
+		AND platform = $4
+		AND type IN ($5, $6)
+), EXISTS (SELECT 1 FROM updated)`,
 		id,
 		service.OpenAICodexFingerprintExtraKey,
 		string(payload),
@@ -2009,12 +2025,27 @@ WHERE id = $1 AND deleted_at IS NULL AND platform = $4 AND type IN ($5, $6)`,
 	if err != nil {
 		return err
 	}
-	affected, err := result.RowsAffected()
-	if err != nil {
+	if !rows.Next() {
+		rowsErr := rows.Err()
+		_ = rows.Close()
+		if rowsErr != nil {
+			return rowsErr
+		}
+		return errors.New("codex fingerprint reset returned no result")
+	}
+	var exists, updated bool
+	if err := rows.Scan(&exists, &updated); err != nil {
+		_ = rows.Close()
 		return err
 	}
-	if affected == 0 {
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if !exists {
 		return service.ErrAccountNotFound
+	}
+	if !updated {
+		return nil
 	}
 	r.syncSchedulerAccountSnapshotAfterCommit(ctx, id)
 	return nil

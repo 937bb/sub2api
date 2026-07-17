@@ -1896,6 +1896,56 @@ func (s *AccountRepoSuite) TestResetOpenAICodexFingerprint_PublishesOnlyAfterCom
 	s.Require().Contains(cacheRecorder.setAccounts[0].Extra, service.OpenAICodexFingerprintExtraKey)
 }
 
+func (s *AccountRepoSuite) TestResetOpenAICodexFingerprint_UnchangedAvoidsRedundantSnapshotWrite() {
+	fingerprint, _ := service.NormalizeOpenAICodexFingerprint(
+		nil,
+		service.ParseOpenAICodexUAProfile(service.DefaultOpenAICodexUserAgent),
+		time.Now(),
+	)
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:     "fingerprint-unchanged-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		Platform: service.PlatformOpenAI,
+		Type:     service.AccountTypeOAuth,
+		Extra: map[string]any{
+			service.OpenAICodexFingerprintExtraKey: fingerprint,
+		},
+	})
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
+
+	s.Require().NoError(s.repo.ResetOpenAICodexFingerprint(s.ctx, account.ID, fingerprint))
+
+	s.Require().Empty(cacheRecorder.setAccounts)
+}
+
+func (s *AccountRepoSuite) TestResetOpenAICodexFingerprint_UnchangedHonorsCallerTransaction() {
+	client := testEntClient(s.T())
+	fingerprint, _ := service.NormalizeOpenAICodexFingerprint(
+		nil,
+		service.ParseOpenAICodexUAProfile(service.DefaultOpenAICodexUserAgent),
+		time.Now(),
+	)
+	account := mustCreateAccount(s.T(), client, &service.Account{
+		Name:     "fingerprint-unchanged-tx-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		Platform: service.PlatformOpenAI,
+		Type:     service.AccountTypeOAuth,
+		Extra: map[string]any{
+			service.OpenAICodexFingerprintExtraKey: fingerprint,
+		},
+	})
+	s.T().Cleanup(func() { _, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background()) })
+	cacheRecorder := &schedulerCacheRecorder{}
+	repo := newAccountRepositoryWithSQL(client, integrationDB, cacheRecorder)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+
+	s.Require().NoError(repo.ResetOpenAICodexFingerprint(txCtx, account.ID, fingerprint))
+	s.Require().NoError(tx.Rollback())
+
+	s.Require().Empty(cacheRecorder.setAccounts)
+}
+
 func (s *AccountRepoSuite) TestResetOpenAICodexFingerprint_RejectsAPIKeyAccount() {
 	fingerprint, _ := service.NormalizeOpenAICodexFingerprint(nil, service.ParseOpenAICodexUAProfile(service.DefaultOpenAICodexUserAgent), time.Now())
 	account := mustCreateAccount(s.T(), s.client, &service.Account{
