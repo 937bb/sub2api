@@ -1579,21 +1579,32 @@ func (r *accountRepository) ClearModelRateLimits(ctx context.Context, id int64) 
 }
 
 func (r *accountRepository) UpdateSessionWindow(ctx context.Context, id int64, start, end *time.Time, status string) error {
-	builder := r.client.Account.Update().
-		Where(dbaccount.IDEQ(id)).
-		SetSessionWindowStatus(status)
-	if start != nil {
-		builder.SetSessionWindowStart(*start)
-	}
-	if end != nil {
-		builder.SetSessionWindowEnd(*end)
-	}
-	_, err := builder.Save(ctx)
+	client := clientFromContext(ctx, r.client)
+	result, err := client.ExecContext(ctx, `
+UPDATE accounts
+SET session_window_start = CASE WHEN $2 THEN $3::timestamptz ELSE session_window_start END,
+	session_window_end = CASE WHEN $4 THEN $5::timestamptz ELSE session_window_end END,
+	session_window_status = $6,
+	updated_at = NOW()
+WHERE id = $1
+	AND deleted_at IS NULL
+	AND (
+		session_window_status IS DISTINCT FROM $6 OR
+		($2 AND session_window_start IS DISTINCT FROM $3::timestamptz) OR
+		($4 AND session_window_end IS DISTINCT FROM $5::timestamptz)
+	)`, id, start != nil, start, end != nil, end, status)
 	if err != nil {
 		return err
 	}
-	// Session-window state is a runtime overlay: keep the account snapshot fresh
-	// without generating canonical dirty work or rebuilding scheduler buckets.
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if updated == 0 {
+		return nil
+	}
+	// Session-window state is a runtime overlay: publish only real changes so
+	// stable response headers do not cause a DB write plus Redis rewrite per call.
 	r.syncSchedulerAccountSnapshot(ctx, id)
 	return nil
 }

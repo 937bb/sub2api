@@ -792,6 +792,23 @@ func (s *AccountRepoSuite) TestUpdateSessionWindow_SyncsSchedulerSnapshot() {
 	s.Require().Zero(outboxCount)
 }
 
+func (s *AccountRepoSuite) TestUpdateSessionWindow_AvoidsRedundantSnapshotWrite() {
+	start := time.Now().UTC().Truncate(time.Second)
+	end := start.Add(5 * time.Hour)
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:                "session-window-unchanged",
+		SessionWindowStart:  &start,
+		SessionWindowEnd:    &end,
+		SessionWindowStatus: "active",
+	})
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
+
+	s.Require().NoError(s.repo.UpdateSessionWindow(s.ctx, account.ID, &start, &end, "active"))
+
+	s.Require().Empty(cacheRecorder.setAccounts)
+}
+
 func (s *AccountRepoSuite) TestUpdateSessionWindowEnd_SyncsWithoutLifecycleOutbox() {
 	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "session-window-end-sync"})
 	cacheRecorder := &schedulerCacheRecorder{}
