@@ -1457,6 +1457,41 @@ func (s *AccountRepoSuite) TestClearAntigravityQuotaScopes_RollbackKeepsExtraAnd
 	s.Require().Zero(outboxCount)
 }
 
+func (s *AccountRepoSuite) TestClearAntigravityQuotaScopes_UnchangedAvoidsRedundantOutbox() {
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name: "clear-quota-scopes-unchanged-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+	})
+	_, err := s.repo.sql.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
+
+	s.Require().NoError(s.repo.ClearAntigravityQuotaScopes(s.ctx, account.ID))
+
+	s.requireNoSchedulerOutbox()
+}
+
+func (s *AccountRepoSuite) TestClearAntigravityQuotaScopes_UnchangedHonorsCallerTransaction() {
+	client := testEntClient(s.T())
+	account := mustCreateAccount(s.T(), client, &service.Account{
+		Name: "clear-quota-scopes-unchanged-tx-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+	})
+	s.T().Cleanup(func() {
+		_, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background())
+	})
+	repo := newAccountRepositoryWithSQL(client, integrationDB, nil)
+	_, err := integrationDB.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+
+	s.Require().NoError(repo.ClearAntigravityQuotaScopes(txCtx, account.ID))
+	s.Require().NoError(tx.Rollback())
+
+	var outboxCount int
+	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, "SELECT count(*) FROM scheduler_outbox").Scan(&outboxCount))
+	s.Require().Zero(outboxCount)
+}
+
 func (s *AccountRepoSuite) TestClearModelRateLimits_SyncsSchedulerSnapshot() {
 	account := mustCreateAccount(s.T(), s.client, &service.Account{
 		Name: "acc-clear-model-rate",
