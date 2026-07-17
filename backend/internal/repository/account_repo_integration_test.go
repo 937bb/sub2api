@@ -12,6 +12,7 @@ import (
 	baseent "entgo.io/ent"
 	entsql "entgo.io/ent/dialect/sql"
 	dbent "github.com/Wei-Shaw/sub2api/ent"
+	dbaccount "github.com/Wei-Shaw/sub2api/ent/account"
 	"github.com/Wei-Shaw/sub2api/ent/accountgroup"
 	"github.com/Wei-Shaw/sub2api/ent/intercept"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
@@ -826,6 +827,49 @@ func (s *AccountRepoSuite) TestUpdateSessionWindowEnd_SyncsWithoutLifecycleOutbo
 	var outboxCount int
 	s.Require().NoError(scanSingleRow(s.ctx, s.repo.sql, "SELECT COUNT(*) FROM scheduler_outbox", nil, &outboxCount))
 	s.Require().Zero(outboxCount)
+}
+
+func (s *AccountRepoSuite) TestUpdateSessionWindow_PublishesOnlyAfterCommit() {
+	client := testEntClient(s.T())
+	account := mustCreateAccount(s.T(), client, &service.Account{
+		Name:                "session-window-transaction-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		SessionWindowStatus: "idle",
+	})
+	s.T().Cleanup(func() { _, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background()) })
+	cacheRecorder := &schedulerCacheRecorder{}
+	repo := newAccountRepositoryWithSQL(client, integrationDB, cacheRecorder)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+
+	s.Require().NoError(repo.UpdateSessionWindow(txCtx, account.ID, nil, nil, "active"))
+	s.Require().Empty(cacheRecorder.setAccounts)
+	s.Require().NoError(tx.Commit())
+
+	s.Require().Len(cacheRecorder.setAccounts, 1)
+	s.Require().Equal("active", cacheRecorder.setAccounts[0].SessionWindowStatus)
+}
+
+func (s *AccountRepoSuite) TestUpdateSessionWindow_RollbackDoesNotPublishSnapshot() {
+	client := testEntClient(s.T())
+	account := mustCreateAccount(s.T(), client, &service.Account{
+		Name:                "session-window-rollback-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		SessionWindowStatus: "idle",
+	})
+	s.T().Cleanup(func() { _, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background()) })
+	cacheRecorder := &schedulerCacheRecorder{}
+	repo := newAccountRepositoryWithSQL(client, integrationDB, cacheRecorder)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+
+	s.Require().NoError(repo.UpdateSessionWindow(txCtx, account.ID, nil, nil, "active"))
+	s.Require().NoError(tx.Rollback())
+
+	s.Require().Empty(cacheRecorder.setAccounts)
+	got, err := repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().Equal("idle", got.SessionWindowStatus)
 }
 
 func (s *AccountRepoSuite) TestUpdateSessionWindowEnd_AvoidsRedundantSnapshotWrite() {

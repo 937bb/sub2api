@@ -1058,6 +1058,24 @@ func (r *accountRepository) SetError(ctx context.Context, id int64, errorMsg str
 // when account status changes. Called when account is set to error, disabled,
 // unschedulable, or temporarily unschedulable, ensuring scheduler and sticky session
 // logic can promptly detect the latest account state and avoid using unavailable accounts.
+func (r *accountRepository) syncSchedulerAccountSnapshotAfterCommit(ctx context.Context, accountID int64) {
+	if tx := dbent.TxFromContext(ctx); tx != nil {
+		tx.OnCommit(func(next dbent.Committer) dbent.Committer {
+			return dbent.CommitFunc(func(commitCtx context.Context, committedTx *dbent.Tx) error {
+				if err := next.Commit(commitCtx, committedTx); err != nil {
+					return err
+				}
+				// The base repository client can observe the update only after commit;
+				// publishing earlier would cache the previous row or a rolled-back value.
+				r.syncSchedulerAccountSnapshot(context.WithoutCancel(commitCtx), accountID)
+				return nil
+			})
+		})
+		return
+	}
+	r.syncSchedulerAccountSnapshot(ctx, accountID)
+}
+
 func (r *accountRepository) syncSchedulerAccountSnapshot(ctx context.Context, accountID int64) {
 	if r == nil || r.schedulerCache == nil || accountID <= 0 {
 		return
@@ -1605,7 +1623,7 @@ WHERE id = $1
 	}
 	// Session-window state is a runtime overlay: publish only real changes so
 	// stable response headers do not cause a DB write plus Redis rewrite per call.
-	r.syncSchedulerAccountSnapshot(ctx, id)
+	r.syncSchedulerAccountSnapshotAfterCommit(ctx, id)
 	return nil
 }
 
@@ -1651,7 +1669,7 @@ SELECT EXISTS (SELECT 1 FROM target), EXISTS (SELECT 1 FROM updated)`, end, id)
 	if !updated {
 		return nil
 	}
-	r.syncSchedulerAccountSnapshot(ctx, id)
+	r.syncSchedulerAccountSnapshotAfterCommit(ctx, id)
 	return nil
 }
 
