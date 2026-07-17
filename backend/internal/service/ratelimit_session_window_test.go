@@ -314,21 +314,21 @@ func TestUpdateSessionWindow_ClearsUtilizationOnWindowReset(t *testing.T) {
 
 	svc.UpdateSessionWindow(context.Background(), account, headers)
 
-	// Should have 2 UpdateExtra calls: one to clear utilization, one to store new utilization
-	if len(repo.updateExtraCalls) != 2 {
-		t.Fatalf("expected 2 UpdateExtra calls, got %d", len(repo.updateExtraCalls))
+	// Reset cleanup and the replacement sample must be one write so a cleanup
+	// cannot erase a newer concurrent observation.
+	if len(repo.updateExtraCalls) != 1 {
+		t.Fatalf("expected 1 merged UpdateExtra call, got %d", len(repo.updateExtraCalls))
 	}
 
-	// First call: clear utilization (nil value)
-	clearCall := repo.updateExtraCalls[0]
-	if clearCall.Updates["session_window_utilization"] != nil {
-		t.Errorf("expected utilization cleared to nil, got %v", clearCall.Updates["session_window_utilization"])
-	}
-
-	// Second call: store new utilization
-	storeCall := repo.updateExtraCalls[1]
+	storeCall := repo.updateExtraCalls[0]
 	if val, ok := storeCall.Updates["session_window_utilization"].(float64); !ok || val != 0.15 {
 		t.Errorf("expected utilization stored as 0.15, got %v", storeCall.Updates["session_window_utilization"])
+	}
+	if storeCall.Updates["passive_usage_7d_utilization"] != nil {
+		t.Errorf("expected stale 7d utilization cleared, got %v", storeCall.Updates["passive_usage_7d_utilization"])
+	}
+	if storeCall.Updates["passive_usage_7d_reset"] != nil {
+		t.Errorf("expected stale 7d reset cleared, got %v", storeCall.Updates["passive_usage_7d_reset"])
 	}
 }
 
