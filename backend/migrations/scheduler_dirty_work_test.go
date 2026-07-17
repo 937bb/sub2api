@@ -71,7 +71,7 @@ func TestSchedulerAccountDirtyProjectionExcludesOnlyRuntimeOverlays(t *testing.T
 		require.NotContains(t, sql, "n."+column)
 	}
 
-	for _, exactKey := range []string{
+	exactKeys := []string{
 		"codex_usage_updated_at",
 		"model_rate_limits",
 		"openai_codex_fingerprint",
@@ -94,8 +94,10 @@ func TestSchedulerAccountDirtyProjectionExcludesOnlyRuntimeOverlays(t *testing.T
 		"passive_usage_7d_utilization",
 		"passive_usage_7d_reset",
 		"passive_usage_sampled_at",
-	} {
-		require.Contains(t, sql, "'"+exactKey+"'")
+	}
+	require.Len(t, exactKeys, 22)
+	for _, exactKey := range exactKeys {
+		require.Equal(t, 1, strings.Count(sql, "'"+exactKey+"'"), "runtime Extra key must appear exactly once in the projection allowlist")
 	}
 	require.NotContains(t, sql, "starts_with(entry.key")
 

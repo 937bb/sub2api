@@ -48,6 +48,23 @@ func TestShouldEnqueueSchedulerOutboxForExtraUpdates_ModelRateLimitsAreNeutral(t
 	}
 }
 
+func TestSchedulerNeutralExtraKeysMatchMigrationProjection(t *testing.T) {
+	if got := len(schedulerNeutralExtraKeys); got != 22 {
+		t.Fatalf("schedulerNeutralExtraKeys length = %d, want 22", got)
+	}
+	for key := range schedulerNeutralExtraKeys {
+		if !isSchedulerNeutralExtraKey(key) {
+			t.Fatalf("expected allowlisted key %q to be scheduler-neutral", key)
+		}
+		if shouldEnqueueSchedulerOutboxForExtraUpdates(map[string]any{key: true}) {
+			t.Fatalf("expected allowlisted key %q to avoid lifecycle outbox", key)
+		}
+		if !shouldSyncSchedulerSnapshotForExtraUpdates(map[string]any{key: true}) {
+			t.Fatalf("expected allowlisted key %q to publish runtime snapshot", key)
+		}
+	}
+}
+
 func TestShouldEnqueueSchedulerOutboxForExtraUpdates_KnownUsageKeysAreNeutral(t *testing.T) {
 	updates := map[string]any{
 		"codex_primary_used_percent":   12.5,
