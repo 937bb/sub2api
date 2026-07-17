@@ -1089,6 +1089,25 @@ func (s *AccountRepoSuite) TestUpdateSessionWindow_PublishesOnlyAfterCommit() {
 	s.Require().Equal("active", cacheRecorder.setAccounts[0].SessionWindowStatus)
 }
 
+func (s *AccountRepoSuite) TestUpdateSessionWindowEnd_DoesNotShortenExistingWindow() {
+	laterEnd := time.Now().UTC().Add(5 * time.Hour).Truncate(time.Second)
+	earlierEnd := laterEnd.Add(-time.Hour)
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:             "session-window-end-monotonic-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		SessionWindowEnd: &laterEnd,
+	})
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
+
+	s.Require().NoError(s.repo.UpdateSessionWindowEnd(s.ctx, account.ID, earlierEnd))
+
+	got, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().NotNil(got.SessionWindowEnd)
+	s.Require().WithinDuration(laterEnd, *got.SessionWindowEnd, time.Microsecond)
+	s.Require().Empty(cacheRecorder.setAccounts)
+}
+
 func (s *AccountRepoSuite) TestUpdateSessionWindowEnd_PublishesOnlyAfterCommit() {
 	client := testEntClient(s.T())
 	originalEnd := time.Now().UTC().Add(time.Hour).Truncate(time.Second)

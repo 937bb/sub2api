@@ -1838,7 +1838,7 @@ WITH target AS MATERIALIZED (
 	SET session_window_end = $1,
 		updated_at = NOW()
 	WHERE id IN (SELECT id FROM target)
-		AND session_window_end IS DISTINCT FROM $1
+		AND (session_window_end IS NULL OR session_window_end < $1)
 	RETURNING 1
 )
 SELECT EXISTS (SELECT 1 FROM target), EXISTS (SELECT 1 FROM updated)`, end, id)
