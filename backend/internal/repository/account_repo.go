@@ -1208,14 +1208,24 @@ func (r *accountRepository) syncSchedulerAccountSnapshots(ctx context.Context, a
 }
 
 func (r *accountRepository) ClearError(ctx context.Context, id int64) error {
-	client := clientFromContext(ctx, r.client)
-	_, err := client.Account.Update().
-		Where(dbaccount.IDEQ(id)).
-		SetStatus(service.StatusActive).
-		SetErrorMessage("").
-		Save(ctx)
+	result, err := r.sqlFromContext(ctx).ExecContext(ctx, `
+		UPDATE accounts
+		SET status = $2,
+			error_message = '',
+			updated_at = NOW()
+		WHERE id = $1
+			AND deleted_at IS NULL
+			AND (status IS DISTINCT FROM $2 OR error_message IS DISTINCT FROM '')
+	`, id, service.StatusActive)
 	if err != nil {
 		return err
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if updated == 0 {
+		return nil
 	}
 	if err := enqueueSchedulerOutbox(ctx, r.sqlFromContext(ctx), service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
 		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue clear error failed: account=%d err=%v", id, err)

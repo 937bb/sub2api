@@ -1736,6 +1736,43 @@ func (s *AccountRepoSuite) TestClearError_SyncSchedulerSnapshotOnRecovery() {
 	s.Require().Equal(service.StatusActive, cacheRecorder.setAccounts[0].Status)
 }
 
+func (s *AccountRepoSuite) TestClearError_UnchangedAvoidsRedundantEffects() {
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:   "clear-error-unchanged-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		Status: service.StatusActive,
+	})
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
+	_, err := s.repo.sql.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
+
+	s.Require().NoError(s.repo.ClearError(s.ctx, account.ID))
+
+	s.Require().Empty(cacheRecorder.setAccounts)
+	s.requireNoSchedulerOutbox()
+}
+
+func (s *AccountRepoSuite) TestClearError_UnchangedHonorsCallerTransaction() {
+	client := testEntClient(s.T())
+	account := mustCreateAccount(s.T(), client, &service.Account{
+		Name:   "clear-error-unchanged-tx-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		Status: service.StatusActive,
+	})
+	s.T().Cleanup(func() {
+		_, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background())
+	})
+	cacheRecorder := &schedulerCacheRecorder{}
+	repo := newAccountRepositoryWithSQL(client, integrationDB, cacheRecorder)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+
+	s.Require().NoError(repo.ClearError(txCtx, account.ID))
+	s.Require().NoError(tx.Rollback())
+
+	s.Require().Empty(cacheRecorder.setAccounts)
+}
+
 // --- UpdateSessionWindow ---
 
 func (s *AccountRepoSuite) TestUpdateSessionWindow() {
