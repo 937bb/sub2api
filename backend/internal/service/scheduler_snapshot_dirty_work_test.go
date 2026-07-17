@@ -46,6 +46,7 @@ type dirtyWorkTestRepo struct {
 	promoteResults      []int
 	promoteCalls        int
 	work                []SchedulerDirtyWork
+	listErr             error
 	acknowledged        []SchedulerDirtyWork
 	failures            []SchedulerDirtyWork
 	stats               SchedulerDirtyWorkStats
@@ -68,7 +69,7 @@ func (r *dirtyWorkTestRepo) RequestFullRebuild(context.Context) error {
 	return r.fullRebuildErr
 }
 func (r *dirtyWorkTestRepo) List(context.Context, int) ([]SchedulerDirtyWork, error) {
-	return r.work, nil
+	return r.work, r.listErr
 }
 func (r *dirtyWorkTestRepo) RecordFailure(_ context.Context, _ SchedulerOwnership, work SchedulerDirtyWork, _ error) (bool, error) {
 	r.failures = append(r.failures, work)
@@ -202,6 +203,62 @@ func TestSchedulerSnapshotDirtyWorkRejectsUnknownKind(t *testing.T) {
 	err := svc.handleDirtyWork(context.Background(), SchedulerDirtyWork{Kind: 99})
 	require.Error(t, err)
 	require.False(t, errors.Is(err, context.Canceled))
+}
+
+func TestSchedulerSnapshotDirtyWorkListFailuresRequestLatchedRebuild(t *testing.T) {
+	repo := &dirtyWorkTestRepo{listErr: errors.New("database unavailable")}
+	workerCtx, workerCancel := context.WithCancel(context.Background())
+	svc := &SchedulerSnapshotService{
+		dirtyWorkRepo: repo,
+		workerCtx:     workerCtx,
+		workerCancel:  workerCancel,
+		cfg: &config.Config{Gateway: config.GatewayConfig{Scheduling: config.GatewaySchedulingConfig{
+			OutboxLagRebuildFailures: 2,
+		}}},
+	}
+	owner := newDirtyWorkTestOwnership()
+
+	workerCancel()
+	svc.consumeDirtyWork(owner, time.Hour)
+	require.Zero(t, repo.fullRebuildRequests)
+
+	workerCtx, workerCancel = context.WithCancel(context.Background())
+	svc.workerCtx = workerCtx
+	svc.workerCancel = workerCancel
+	workerCancel()
+	svc.consumeDirtyWork(owner, time.Hour)
+	require.Equal(t, 1, repo.fullRebuildRequests)
+
+	workerCtx, workerCancel = context.WithCancel(context.Background())
+	svc.workerCtx = workerCtx
+	svc.workerCancel = workerCancel
+	workerCancel()
+	svc.consumeDirtyWork(owner, time.Hour)
+	require.Equal(t, 1, repo.fullRebuildRequests)
+
+	// A successful list proves recovery and rearms the next outage.
+	repo.listErr = nil
+	svc.clearDirtyListFailure()
+	repo.listErr = errors.New("database unavailable")
+	svc.recordDirtyListFailure(context.Background())
+	svc.recordDirtyListFailure(context.Background())
+	require.Equal(t, 2, repo.fullRebuildRequests)
+}
+
+func TestSchedulerSnapshotDirtyWorkListFailureRebuildRequestRetries(t *testing.T) {
+	repo := &dirtyWorkTestRepo{fullRebuildErr: errors.New("database unavailable")}
+	svc := &SchedulerSnapshotService{
+		dirtyWorkRepo: repo,
+		cfg: &config.Config{Gateway: config.GatewayConfig{Scheduling: config.GatewaySchedulingConfig{
+			OutboxLagRebuildFailures: 1,
+		}}},
+	}
+
+	svc.recordDirtyListFailure(context.Background())
+	repo.fullRebuildErr = nil
+	svc.recordDirtyListFailure(context.Background())
+
+	require.Equal(t, 2, repo.fullRebuildRequests)
 }
 
 func TestSchedulerSnapshotDirtyWorkDegradationUsesPersistentStatsAndLatches(t *testing.T) {

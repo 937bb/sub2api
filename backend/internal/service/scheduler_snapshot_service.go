@@ -33,23 +33,25 @@ type batchSeenKey struct {
 }
 
 type SchedulerSnapshotService struct {
-	cache               SchedulerCache
-	outboxRepo          SchedulerOutboxRepository
-	dirtyWorkRepo       SchedulerDirtyWorkRepository
-	ownershipRepo       SchedulerOwnershipRepository
-	accountRepo         AccountRepository
-	groupRepo           GroupRepository
-	cfg                 *config.Config
-	stopCh              chan struct{}
-	stopOnce            sync.Once
-	workerCtx           context.Context
-	workerCancel        context.CancelFunc
-	wg                  sync.WaitGroup
-	fallbackLimit       *fallbackLimiter
-	lagMu               sync.Mutex
-	lagFailures         int
-	dirtyLagFailures    int
-	dirtyRebuildLatched bool
+	cache                   SchedulerCache
+	outboxRepo              SchedulerOutboxRepository
+	dirtyWorkRepo           SchedulerDirtyWorkRepository
+	ownershipRepo           SchedulerOwnershipRepository
+	accountRepo             AccountRepository
+	groupRepo               GroupRepository
+	cfg                     *config.Config
+	stopCh                  chan struct{}
+	stopOnce                sync.Once
+	workerCtx               context.Context
+	workerCancel            context.CancelFunc
+	wg                      sync.WaitGroup
+	fallbackLimit           *fallbackLimiter
+	lagMu                   sync.Mutex
+	lagFailures             int
+	dirtyLagFailures        int
+	dirtyRebuildLatched     bool
+	dirtyListFailures       int
+	dirtyListRebuildLatched bool
 }
 
 func NewSchedulerSnapshotService(
@@ -303,9 +305,11 @@ func (s *SchedulerSnapshotService) consumeDirtyWork(ownership SchedulerOwnership
 		if err != nil {
 			if consumeCtx.Err() == nil {
 				logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] dirty work list failed: %v", err)
+				s.recordDirtyListFailure(consumeCtx)
 			}
 			return
 		}
+		s.clearDirtyListFailure()
 		for _, item := range work {
 			if consumeCtx.Err() != nil {
 				return
@@ -789,6 +793,51 @@ func (s *SchedulerSnapshotService) triggerFullRebuildContext(ctx context.Context
 		}
 	}
 	return s.rebuildBuckets(ctx, buckets, reason)
+}
+
+func (s *SchedulerSnapshotService) recordDirtyListFailure(ctx context.Context) {
+	if s.dirtyWorkRepo == nil || s.cfg == nil {
+		return
+	}
+	threshold := s.cfg.Gateway.Scheduling.OutboxLagRebuildFailures
+	if threshold <= 0 {
+		return
+	}
+
+	s.lagMu.Lock()
+	if s.dirtyListRebuildLatched {
+		s.lagMu.Unlock()
+		return
+	}
+	s.dirtyListFailures++
+	failures := s.dirtyListFailures
+	if failures < threshold {
+		s.lagMu.Unlock()
+		return
+	}
+	// The request is durable canonical work. Latch the incident so a persistent
+	// listing outage does not advance the global generation on every poll.
+	s.dirtyListRebuildLatched = true
+	s.dirtyListFailures = 0
+	s.lagMu.Unlock()
+
+	if err := s.dirtyWorkRepo.RequestFullRebuild(ctx); err != nil {
+		s.lagMu.Lock()
+		s.dirtyListRebuildLatched = false
+		s.lagMu.Unlock()
+		if ctx.Err() == nil {
+			logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] dirty work list failure rebuild request failed: %v", err)
+		}
+		return
+	}
+	logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] dirty work list failure rebuild requested: failures=%d", failures)
+}
+
+func (s *SchedulerSnapshotService) clearDirtyListFailure() {
+	s.lagMu.Lock()
+	s.dirtyListFailures = 0
+	s.dirtyListRebuildLatched = false
+	s.lagMu.Unlock()
 }
 
 func (s *SchedulerSnapshotService) checkDirtyWorkLag(ctx context.Context) {
