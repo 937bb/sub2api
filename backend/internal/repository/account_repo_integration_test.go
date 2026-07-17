@@ -1789,6 +1789,65 @@ func (s *AccountRepoSuite) TestUpdateExtra_UnchangedHonorsCallerTransaction() {
 	s.Require().Empty(cacheRecorder.setAccounts)
 }
 
+func (s *AccountRepoSuite) TestUpdateExtraNestedBool_UnchangedAvoidsRedundantEffects() {
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name: "nested-extra-unchanged-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		Extra: map[string]any{
+			"openai_responses_supported": true,
+			"openai_responses_supported_by_model": map[string]any{
+				"gpt-5": true,
+			},
+		},
+	})
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
+	_, err := s.repo.sql.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
+
+	s.Require().NoError(s.repo.UpdateExtraNestedBool(
+		s.ctx,
+		account.ID,
+		map[string]any{"openai_responses_supported": true},
+		"openai_responses_supported_by_model",
+		"gpt-5",
+		true,
+	))
+
+	s.Require().Empty(cacheRecorder.setAccounts)
+	s.requireNoSchedulerOutbox()
+}
+
+func (s *AccountRepoSuite) TestUpdateExtraNestedBool_UnchangedHonorsCallerTransaction() {
+	client := testEntClient(s.T())
+	account := mustCreateAccount(s.T(), client, &service.Account{
+		Name: "nested-extra-unchanged-tx-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		Extra: map[string]any{
+			"openai_responses_supported": true,
+			"openai_responses_supported_by_model": map[string]any{
+				"gpt-5": true,
+			},
+		},
+	})
+	s.T().Cleanup(func() { _, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background()) })
+	cacheRecorder := &schedulerCacheRecorder{}
+	repo := newAccountRepositoryWithSQL(client, integrationDB, cacheRecorder)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+
+	s.Require().NoError(repo.UpdateExtraNestedBool(
+		txCtx,
+		account.ID,
+		map[string]any{"openai_responses_supported": true},
+		"openai_responses_supported_by_model",
+		"gpt-5",
+		true,
+	))
+	s.Require().NoError(tx.Rollback())
+
+	s.Require().Empty(cacheRecorder.setAccounts)
+}
+
 func (s *AccountRepoSuite) TestResetOpenAICodexFingerprint_UpdatesOnlyOAuthLikeAccounts() {
 	profile := service.ParseOpenAICodexUAProfile(service.DefaultOpenAICodexUserAgent)
 	for _, accountType := range []string{service.AccountTypeOAuth, service.AccountTypeSetupToken} {

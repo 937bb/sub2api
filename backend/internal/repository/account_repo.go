@@ -1904,36 +1904,64 @@ func (r *accountRepository) UpdateExtraNestedBool(ctx context.Context, id int64,
 	}
 
 	client := clientFromContext(ctx, r.client)
-	result, err := client.ExecContext(ctx, `
-UPDATE accounts
-SET extra = jsonb_set(
-	jsonb_set(
-		COALESCE(extra, '{}'::jsonb) || $1::jsonb,
-		ARRAY[$2]::text[],
-		CASE
-			WHEN jsonb_typeof((COALESCE(extra, '{}'::jsonb) || $1::jsonb) -> $2) = 'object'
-				THEN (COALESCE(extra, '{}'::jsonb) || $1::jsonb) -> $2
-			ELSE '{}'::jsonb
-		END,
-		true
-	),
-	ARRAY[$2, $3]::text[],
-	$4::jsonb,
-	true
-), updated_at = NOW()
-WHERE id = $5 AND deleted_at IS NULL`,
+	rows, err := client.QueryContext(ctx, `
+WITH target AS MATERIALIZED (
+	SELECT id,
+		extra,
+		jsonb_set(
+			jsonb_set(
+				COALESCE(extra, '{}'::jsonb) || $1::jsonb,
+				ARRAY[$2]::text[],
+				CASE
+					WHEN jsonb_typeof((COALESCE(extra, '{}'::jsonb) || $1::jsonb) -> $2) = 'object'
+						THEN (COALESCE(extra, '{}'::jsonb) || $1::jsonb) -> $2
+					ELSE '{}'::jsonb
+				END,
+				true
+			),
+			ARRAY[$2, $3]::text[],
+			$4::jsonb,
+			true
+		) AS next_extra
+	FROM accounts
+	WHERE id = $5 AND deleted_at IS NULL
+	FOR UPDATE
+), updated AS (
+	UPDATE accounts
+	SET extra = target.next_extra,
+		updated_at = NOW()
+	FROM target
+	WHERE accounts.id = target.id
+		AND target.extra IS DISTINCT FROM target.next_extra
+	RETURNING 1
+)
+SELECT EXISTS (SELECT 1 FROM target), EXISTS (SELECT 1 FROM updated)`,
 		string(payload), mapKey, nestedKey, strconv.FormatBool(value), id,
 	)
 	if err != nil {
 		return err
 	}
-
-	affected, err := result.RowsAffected()
-	if err != nil {
+	if !rows.Next() {
+		rowsErr := rows.Err()
+		_ = rows.Close()
+		if rowsErr != nil {
+			return rowsErr
+		}
+		return errors.New("nested extra update returned no result")
+	}
+	var exists, updated bool
+	if err := rows.Scan(&exists, &updated); err != nil {
+		_ = rows.Close()
 		return err
 	}
-	if affected == 0 {
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if !exists {
 		return service.ErrAccountNotFound
+	}
+	if !updated {
+		return nil
 	}
 
 	schedulerUpdates := make(map[string]any, len(updates)+1)
