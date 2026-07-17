@@ -919,6 +919,68 @@ func (s *AccountRepoSuite) TestSetSchedulable_RollbackKeepsStateAndOutboxAtomic(
 	s.Require().Zero(outboxCount)
 }
 
+func (s *AccountRepoSuite) TestBulkUpdate_RollbackKeepsStateOutboxAndCacheAtomic() {
+	client := testEntClient(s.T())
+	account := mustCreateAccount(s.T(), client, &service.Account{
+		Name:        "bulk-rollback-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		Status:      service.StatusActive,
+		Schedulable: true,
+	})
+	s.T().Cleanup(func() {
+		_, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background())
+	})
+	cacheRecorder := &schedulerCacheRecorder{}
+	repo := newAccountRepositoryWithSQL(client, integrationDB, cacheRecorder)
+	_, err := integrationDB.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+	disabled := service.StatusDisabled
+
+	rows, err := repo.BulkUpdate(txCtx, []int64{account.ID}, service.AccountBulkUpdate{Status: &disabled})
+	s.Require().NoError(err)
+	s.Require().Equal(int64(1), rows)
+	s.Require().Empty(cacheRecorder.setAccounts)
+	s.Require().NoError(tx.Rollback())
+
+	got, err := repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().Equal(service.StatusActive, got.Status)
+	s.Require().Empty(cacheRecorder.setAccounts)
+	var outboxCount int
+	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, "SELECT count(*) FROM scheduler_outbox").Scan(&outboxCount))
+	s.Require().Zero(outboxCount)
+}
+
+func (s *AccountRepoSuite) TestBulkUpdate_PublishesSnapshotOnlyAfterCommit() {
+	client := testEntClient(s.T())
+	account := mustCreateAccount(s.T(), client, &service.Account{
+		Name:        "bulk-commit-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		Status:      service.StatusActive,
+		Schedulable: true,
+	})
+	s.T().Cleanup(func() {
+		_, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background())
+	})
+	cacheRecorder := &schedulerCacheRecorder{}
+	repo := newAccountRepositoryWithSQL(client, integrationDB, cacheRecorder)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+	disabled := service.StatusDisabled
+
+	rows, err := repo.BulkUpdate(txCtx, []int64{account.ID}, service.AccountBulkUpdate{Status: &disabled})
+	s.Require().NoError(err)
+	s.Require().Equal(int64(1), rows)
+	s.Require().Empty(cacheRecorder.setAccounts)
+	s.Require().NoError(tx.Commit())
+
+	s.Require().Len(cacheRecorder.setAccounts, 1)
+	s.Require().Equal(account.ID, cacheRecorder.setAccounts[0].ID)
+	s.Require().Equal(service.StatusDisabled, cacheRecorder.setAccounts[0].Status)
+}
+
 func (s *AccountRepoSuite) TestBulkUpdate_SyncSchedulerSnapshotOnDisabled() {
 	account1 := mustCreateAccount(s.T(), s.client, &service.Account{Name: "bulk-1", Status: service.StatusActive, Schedulable: true})
 	account2 := mustCreateAccount(s.T(), s.client, &service.Account{Name: "bulk-2", Status: service.StatusActive, Schedulable: true})

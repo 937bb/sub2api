@@ -1144,6 +1144,30 @@ func (r *accountRepository) deleteSchedulerAccountSnapshot(ctx context.Context, 
 	}
 }
 
+func (r *accountRepository) syncSchedulerAccountSnapshotsAfterCommit(ctx context.Context, accountIDs []int64) {
+	if r == nil || r.schedulerCache == nil || len(accountIDs) == 0 {
+		return
+	}
+	if tx := dbent.TxFromContext(ctx); tx != nil {
+		ids := append([]int64(nil), accountIDs...)
+		tx.OnCommit(func(next dbent.Committer) dbent.Committer {
+			return dbent.CommitFunc(func(commitCtx context.Context, committedTx *dbent.Tx) error {
+				if err := next.Commit(commitCtx, committedTx); err != nil {
+					return err
+				}
+				publishCtx, cancel := context.WithTimeout(
+					context.WithoutCancel(commitCtx), schedulerSnapshotPostCommitTimeout,
+				)
+				defer cancel()
+				r.syncSchedulerAccountSnapshots(publishCtx, ids)
+				return nil
+			})
+		})
+		return
+	}
+	r.syncSchedulerAccountSnapshots(ctx, accountIDs)
+}
+
 func (r *accountRepository) syncSchedulerAccountSnapshots(ctx context.Context, accountIDs []int64) {
 	if r == nil || r.schedulerCache == nil || len(accountIDs) == 0 {
 		return
@@ -2120,7 +2144,8 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 	query := "UPDATE accounts SET " + joinClauses(setClauses, ", ") + " WHERE id = ANY($" + itoa(idx) + ") AND deleted_at IS NULL"
 	args = append(args, ids)
 
-	result, err := r.sql.ExecContext(ctx, query, args...)
+	exec := r.sqlFromContext(ctx)
+	result, err := exec.ExecContext(ctx, query, args...)
 	if err != nil {
 		return 0, err
 	}
@@ -2130,7 +2155,7 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 	}
 	if rows > 0 {
 		payload := map[string]any{"account_ids": ids}
-		if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountBulkChanged, nil, nil, payload); err != nil {
+		if err := enqueueSchedulerOutbox(ctx, exec, service.SchedulerOutboxEventAccountBulkChanged, nil, nil, payload); err != nil {
 			logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue bulk update failed: err=%v", err)
 		}
 		shouldSync := false
@@ -2141,7 +2166,7 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 			shouldSync = true
 		}
 		if shouldSync {
-			r.syncSchedulerAccountSnapshots(ctx, ids)
+			r.syncSchedulerAccountSnapshotsAfterCommit(ctx, ids)
 		}
 	}
 	return rows, nil
