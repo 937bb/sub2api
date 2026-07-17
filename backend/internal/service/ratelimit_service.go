@@ -1467,7 +1467,12 @@ func (s *RateLimitService) persistOpenAICodexSnapshot(ctx context.Context, accou
 	if len(updates) == 0 {
 		return
 	}
-	if err := s.accountRepo.UpdateExtra(ctx, account.ID, updates); err != nil {
+	observedAt, err := runtimeExtraObservedAt(updates, "codex_usage_updated_at")
+	if err != nil {
+		slog.Warn("openai_codex_snapshot_observation_invalid", "account_id", account.ID, "error", err)
+		return
+	}
+	if _, err := updateRuntimeExtra(ctx, s.accountRepo, account.ID, updates, "codex_usage_updated_at", observedAt); err != nil {
 		slog.Warn("openai_codex_snapshot_persist_failed", "account_id", account.ID, "error", err)
 	}
 }
