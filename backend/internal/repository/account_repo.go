@@ -1804,22 +1804,45 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 	}
 
 	client := clientFromContext(ctx, r.client)
-	result, err := client.ExecContext(
-		ctx,
-		"UPDATE accounts SET extra = COALESCE(extra, '{}'::jsonb) || $1::jsonb, updated_at = NOW() WHERE id = $2 AND deleted_at IS NULL",
-		string(payload), id,
-	)
-
+	rows, err := client.QueryContext(ctx, `
+WITH target AS MATERIALIZED (
+	SELECT id, COALESCE(extra, '{}'::jsonb) AS extra
+	FROM accounts
+	WHERE id = $2 AND deleted_at IS NULL
+), updated AS (
+	UPDATE accounts
+	SET extra = target.extra || $1::jsonb,
+		updated_at = NOW()
+	FROM target
+	WHERE accounts.id = target.id
+		AND target.extra IS DISTINCT FROM target.extra || $1::jsonb
+	RETURNING 1
+)
+SELECT EXISTS (SELECT 1 FROM target), EXISTS (SELECT 1 FROM updated)`, string(payload), id)
 	if err != nil {
 		return err
 	}
-
-	affected, err := result.RowsAffected()
-	if err != nil {
+	if !rows.Next() {
+		rowsErr := rows.Err()
+		_ = rows.Close()
+		if rowsErr != nil {
+			return rowsErr
+		}
+		return errors.New("extra update returned no result")
+	}
+	var exists, updated bool
+	if err := rows.Scan(&exists, &updated); err != nil {
+		_ = rows.Close()
 		return err
 	}
-	if affected == 0 {
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if !exists {
 		return service.ErrAccountNotFound
+	}
+	if !updated {
+		return nil
 	}
 	r.afterExtraUpdate(ctx, id, updates, "extra update")
 	return nil

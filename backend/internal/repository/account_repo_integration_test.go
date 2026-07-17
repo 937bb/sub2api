@@ -1693,6 +1693,26 @@ func (s *AccountRepoSuite) TestUpdateExtra_EmptyUpdates() {
 	s.Require().NoError(s.repo.UpdateExtra(s.ctx, account.ID, map[string]any{}))
 }
 
+func (s *AccountRepoSuite) TestUpdateExtra_UnchangedRuntimeAvoidsRedundantEffects() {
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name: "acc-extra-unchanged-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		Extra: map[string]any{
+			"session_window_utilization": 0.5,
+		},
+	})
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
+	_, err := s.repo.sql.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
+
+	s.Require().NoError(s.repo.UpdateExtra(s.ctx, account.ID, map[string]any{
+		"session_window_utilization": 0.5,
+	}))
+
+	s.Require().Empty(cacheRecorder.setAccounts)
+	s.requireNoSchedulerOutbox()
+}
+
 func (s *AccountRepoSuite) TestUpdateExtra_NilExtra() {
 	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-nil-extra", Extra: nil})
 	s.Require().NoError(s.repo.UpdateExtra(s.ctx, account.ID, map[string]any{"key": "val"}))
@@ -1700,6 +1720,29 @@ func (s *AccountRepoSuite) TestUpdateExtra_NilExtra() {
 	got, err := s.repo.GetByID(s.ctx, account.ID)
 	s.Require().NoError(err)
 	s.Require().Equal("val", got.Extra["key"])
+}
+
+func (s *AccountRepoSuite) TestUpdateExtra_UnchangedHonorsCallerTransaction() {
+	client := testEntClient(s.T())
+	account := mustCreateAccount(s.T(), client, &service.Account{
+		Name: "extra-unchanged-transaction-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		Extra: map[string]any{
+			"session_window_utilization": 0.5,
+		},
+	})
+	s.T().Cleanup(func() { _, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background()) })
+	cacheRecorder := &schedulerCacheRecorder{}
+	repo := newAccountRepositoryWithSQL(client, integrationDB, cacheRecorder)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+
+	s.Require().NoError(repo.UpdateExtra(txCtx, account.ID, map[string]any{
+		"session_window_utilization": 0.5,
+	}))
+	s.Require().NoError(tx.Rollback())
+
+	s.Require().Empty(cacheRecorder.setAccounts)
 }
 
 func (s *AccountRepoSuite) TestResetOpenAICodexFingerprint_UpdatesOnlyOAuthLikeAccounts() {
