@@ -162,6 +162,7 @@ type openAIAccountTestRepo struct {
 	updatedExtra       map[string]any
 	observedAtKey      string
 	observedAt         time.Time
+	sessionWindowEnd   *time.Time
 	nestedBoolUpdates  []openAIAccountNestedBoolUpdate
 	updateExtraErr     error
 	updateExtraErrFor  func(map[string]any) error
@@ -200,6 +201,11 @@ func (r *openAIAccountTestRepo) UpdateRuntimeExtra(_ context.Context, _ int64, u
 		return false, r.updateExtraErr
 	}
 	return true, nil
+}
+
+func (r *openAIAccountTestRepo) UpdateSessionWindowEnd(_ context.Context, _ int64, end time.Time) error {
+	r.sessionWindowEnd = &end
+	return nil
 }
 
 func (r *openAIAccountTestRepo) UpdateExtraNestedBool(_ context.Context, _ int64, updates map[string]any, mapKey string, nestedKey string, value bool) error {
@@ -377,6 +383,10 @@ func TestAccountTestService_OpenAISuccessPersistsSnapshotFromHeaders(t *testing.
 	parsed, err := runtimeExtraObservedAt(repo.updatedExtra, repo.observedAtKey)
 	require.NoError(t, err)
 	require.Equal(t, parsed, repo.observedAt)
+	require.NotNil(t, repo.sessionWindowEnd)
+	resetAt, err := parseTime(repo.updatedExtra["codex_5h_reset_at"].(string))
+	require.NoError(t, err)
+	require.Equal(t, resetAt, *repo.sessionWindowEnd)
 	require.Contains(t, recorder.Body.String(), "test_complete")
 }
 

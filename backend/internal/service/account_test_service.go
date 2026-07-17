@@ -910,6 +910,7 @@ func (s *AccountTestService) persistOpenAIAccountTestExtraUpdates(ctx context.Co
 		if err != nil || !updated {
 			return err
 		}
+		syncCodexFiveHourSessionWindowEnd(ctx, s.accountRepo, account.ID, updates, "account_test")
 	} else if err := s.accountRepo.UpdateExtra(ctx, account.ID, updates); err != nil {
 		return err
 	}
