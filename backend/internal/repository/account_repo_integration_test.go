@@ -992,6 +992,49 @@ func (s *AccountRepoSuite) TestSetRateLimited() {
 	s.requireNoSchedulerOutbox()
 }
 
+func (s *AccountRepoSuite) TestSetTempUnschedulable_RollbackDoesNotPublishSnapshot() {
+	client := testEntClient(s.T())
+	account := mustCreateAccount(s.T(), client, &service.Account{
+		Name: "temp-unsched-rollback-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+	})
+	s.T().Cleanup(func() { _, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background()) })
+	cacheRecorder := &schedulerCacheRecorder{}
+	repo := newAccountRepositoryWithSQL(client, integrationDB, cacheRecorder)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+
+	s.Require().NoError(repo.SetTempUnschedulable(txCtx, account.ID, time.Now().UTC().Add(time.Hour), "retry"))
+	s.Require().NoError(tx.Rollback())
+
+	s.Require().Empty(cacheRecorder.setAccounts)
+	got, err := repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().Nil(got.TempUnschedulableUntil)
+}
+
+func (s *AccountRepoSuite) TestSetRateLimited_PublishesOnlyAfterCommit() {
+	client := testEntClient(s.T())
+	account := mustCreateAccount(s.T(), client, &service.Account{
+		Name: "rate-limit-transaction-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+	})
+	s.T().Cleanup(func() { _, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background()) })
+	cacheRecorder := &schedulerCacheRecorder{}
+	repo := newAccountRepositoryWithSQL(client, integrationDB, cacheRecorder)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+	resetAt := time.Now().UTC().Add(time.Hour)
+
+	s.Require().NoError(repo.SetRateLimited(txCtx, account.ID, resetAt))
+	s.Require().Empty(cacheRecorder.setAccounts)
+	s.Require().NoError(tx.Commit())
+
+	s.Require().Len(cacheRecorder.setAccounts, 1)
+	s.Require().NotNil(cacheRecorder.setAccounts[0].RateLimitResetAt)
+	s.Require().WithinDuration(resetAt, *cacheRecorder.setAccounts[0].RateLimitResetAt, time.Second)
+}
+
 func (s *AccountRepoSuite) TestClearRateLimit() {
 	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-clear"})
 	until := time.Now().Add(1 * time.Hour)

@@ -95,6 +95,13 @@ func newAccountRepositoryWithSQL(client *dbent.Client, sqlq sqlExecutor, schedul
 	return &accountRepository{client: client, sql: sqlq, schedulerCache: schedulerCache}
 }
 
+func (r *accountRepository) sqlFromContext(ctx context.Context) sqlExecutor {
+	if tx := dbent.TxFromContext(ctx); tx != nil {
+		return tx.Client()
+	}
+	return r.sql
+}
+
 func (r *accountRepository) Create(ctx context.Context, account *service.Account) error {
 	if account == nil {
 		return service.ErrAccountNilInput
@@ -1434,7 +1441,8 @@ func (r *accountRepository) ListSchedulableByGroupIDAndPlatforms(ctx context.Con
 
 func (r *accountRepository) SetRateLimited(ctx context.Context, id int64, resetAt time.Time) error {
 	now := time.Now()
-	_, err := r.client.Account.Update().
+	client := clientFromContext(ctx, r.client)
+	_, err := client.Account.Update().
 		Where(dbaccount.IDEQ(id)).
 		SetRateLimitedAt(now).
 		SetRateLimitResetAt(resetAt).
@@ -1442,7 +1450,7 @@ func (r *accountRepository) SetRateLimited(ctx context.Context, id int64, resetA
 	if err != nil {
 		return err
 	}
-	r.syncSchedulerAccountSnapshot(ctx, id)
+	r.syncSchedulerAccountSnapshotAfterCommit(ctx, id)
 	return nil
 }
 
@@ -1497,19 +1505,20 @@ func (r *accountRepository) SetModelRateLimit(ctx context.Context, id int64, sco
 }
 
 func (r *accountRepository) SetOverloaded(ctx context.Context, id int64, until time.Time) error {
-	_, err := r.client.Account.Update().
+	client := clientFromContext(ctx, r.client)
+	_, err := client.Account.Update().
 		Where(dbaccount.IDEQ(id)).
 		SetOverloadUntil(until).
 		Save(ctx)
 	if err != nil {
 		return err
 	}
-	r.syncSchedulerAccountSnapshot(ctx, id)
+	r.syncSchedulerAccountSnapshotAfterCommit(ctx, id)
 	return nil
 }
 
 func (r *accountRepository) SetTempUnschedulable(ctx context.Context, id int64, until time.Time, reason string) error {
-	result, err := r.sql.ExecContext(ctx, `
+	result, err := r.sqlFromContext(ctx).ExecContext(ctx, `
 		UPDATE accounts
 		SET temp_unschedulable_until = $1,
 			temp_unschedulable_reason = $2,
@@ -1528,12 +1537,12 @@ func (r *accountRepository) SetTempUnschedulable(ctx context.Context, id int64, 
 	if affected <= 0 {
 		return nil
 	}
-	r.syncSchedulerAccountSnapshot(ctx, id)
+	r.syncSchedulerAccountSnapshotAfterCommit(ctx, id)
 	return nil
 }
 
 func (r *accountRepository) ClearTempUnschedulable(ctx context.Context, id int64) error {
-	_, err := r.sql.ExecContext(ctx, `
+	_, err := r.sqlFromContext(ctx).ExecContext(ctx, `
 		UPDATE accounts
 		SET temp_unschedulable_until = NULL,
 			temp_unschedulable_reason = NULL,
@@ -1544,12 +1553,13 @@ func (r *accountRepository) ClearTempUnschedulable(ctx context.Context, id int64
 	if err != nil {
 		return err
 	}
-	r.syncSchedulerAccountSnapshot(ctx, id)
+	r.syncSchedulerAccountSnapshotAfterCommit(ctx, id)
 	return nil
 }
 
 func (r *accountRepository) ClearRateLimit(ctx context.Context, id int64) error {
-	_, err := r.client.Account.Update().
+	client := clientFromContext(ctx, r.client)
+	_, err := client.Account.Update().
 		Where(dbaccount.IDEQ(id)).
 		ClearRateLimitedAt().
 		ClearRateLimitResetAt().
@@ -1558,7 +1568,7 @@ func (r *accountRepository) ClearRateLimit(ctx context.Context, id int64) error 
 	if err != nil {
 		return err
 	}
-	r.syncSchedulerAccountSnapshot(ctx, id)
+	r.syncSchedulerAccountSnapshotAfterCommit(ctx, id)
 	return nil
 }
 
