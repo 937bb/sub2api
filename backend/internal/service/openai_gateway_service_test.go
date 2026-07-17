@@ -3226,6 +3226,32 @@ func TestHandleSSEToJSON_ReconstructsImageGenerationOutputItemDone(t *testing.T)
 	require.True(t, gjson.Get(rec.Body.String(), "output.0.opaque.keep").Bool())
 }
 
+func TestHandleSSEToJSON_ReconstructsEventLineOnlyImageGenerationOutput(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/", nil)
+
+	svc := &OpenAIGatewayService{cfg: &config.Config{}}
+	resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}}
+	body := []byte(strings.Join([]string{
+		`event: response.output_item.done`,
+		`data: {"item":{"id":"ig_event_only","type":"image_generation_call","status":"generating","result":"aGVsbG8="}}`,
+		``,
+		`event: response.completed`,
+		`data: {"response":{"id":"resp_event_only","output":[],"usage":{"input_tokens":3,"output_tokens":4}}}`,
+		``,
+	}, "\n"))
+
+	result, err := svc.handleSSEToJSON(resp, c, body, "gpt-5.4", "gpt-5.4")
+	require.NoError(t, err)
+	require.Equal(t, 3, result.usage.InputTokens)
+	require.Equal(t, 4, result.usage.OutputTokens)
+	require.Equal(t, "image_generation_call", gjson.Get(rec.Body.String(), "output.0.type").String())
+	require.Equal(t, "completed", gjson.Get(rec.Body.String(), "output.0.status").String())
+	require.Equal(t, "aGVsbG8=", gjson.Get(rec.Body.String(), "output.0.result").String())
+}
+
 func TestHandleSSEToJSON_NormalizesCompletedImageStatuses(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()

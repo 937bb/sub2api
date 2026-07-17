@@ -699,16 +699,21 @@ func stripCodexSparkImageGenerationToolingFromBody(body []byte, model string) ([
 	return rebuilt, true, nil
 }
 
-// stripCodexSparkImageGenerationTools removes image_generation tool entries.
-// If the list becomes empty, tools is removed instead of sending an empty tool
-// list upstream.
-func stripCodexSparkImageGenerationTools(reqBody map[string]any) bool {
+func stripOpenAIImageGenerationTools(reqBody map[string]any) bool {
 	rawTools, ok := reqBody["tools"]
 	if !ok || rawTools == nil {
+		if openAIAnyToolChoiceSelectsImageGeneration(reqBody["tool_choice"]) {
+			delete(reqBody, "tool_choice")
+			return true
+		}
 		return false
 	}
 	tools, ok := rawTools.([]any)
 	if !ok {
+		if openAIAnyToolChoiceSelectsImageGeneration(reqBody["tool_choice"]) {
+			delete(reqBody, "tool_choice")
+			return true
+		}
 		return false
 	}
 	filtered := make([]any, 0, len(tools))
@@ -722,15 +727,25 @@ func stripCodexSparkImageGenerationTools(reqBody map[string]any) bool {
 		}
 		filtered = append(filtered, rawTool)
 	}
-	if !removed {
+	if !removed && !openAIAnyToolChoiceSelectsImageGeneration(reqBody["tool_choice"]) {
 		return false
 	}
-	if len(filtered) == 0 {
-		delete(reqBody, "tools")
-	} else {
-		reqBody["tools"] = filtered
+	if removed {
+		if len(filtered) == 0 {
+			delete(reqBody, "tools")
+		} else {
+			reqBody["tools"] = filtered
+		}
+	}
+	if openAIAnyToolChoiceSelectsImageGeneration(reqBody["tool_choice"]) {
+		delete(reqBody, "tool_choice")
 	}
 	return true
+}
+
+// stripCodexSparkImageGenerationTools removes image-generation tool entries.
+func stripCodexSparkImageGenerationTools(reqBody map[string]any) bool {
+	return stripOpenAIImageGenerationTools(reqBody)
 }
 
 func stripCodexSparkAdditionalImageGenerationTools(reqBody map[string]any) bool {

@@ -149,6 +149,24 @@ func TestOpenAIGatewayServiceForward_ExplicitImageToolWorksWithBridgeDisabled(t 
 	require.NotContains(t, instructions, "image_generation")
 }
 
+func TestOpenAIGatewayServiceForward_AccountPolicyStripsExplicitImageTool(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"id":"resp_stripped_image","usage":{"input_tokens":2,"output_tokens":1}}`))}}
+	svc := newOpenAIImageGenerationControlTestService(upstream)
+	c, _ := newOpenAIImageGenerationControlTestContext(true, "codex_cli_rs/0.98.0")
+	account := newOpenAIImageGenerationControlTestAccount()
+	account.Extra = map[string]any{featureKeyCodexImageGenerationExplicitToolPolicy: codexImageGenerationExplicitToolPolicyStrip}
+	body := []byte(`{"model":"gpt-5.4","input":"draw","stream":false,"tools":[{"type":"function","name":"shell"},{"type":"image_generation"}],"tool_choice":{"type":"image_generation"}}`)
+
+	result, err := svc.Forward(context.Background(), c, account, body)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.False(t, gjson.GetBytes(upstream.lastBody, `tools.#(type=="image_generation")`).Exists())
+	require.True(t, gjson.GetBytes(upstream.lastBody, `tools.#(type=="function")`).Exists())
+	require.False(t, gjson.GetBytes(upstream.lastBody, "tool_choice").Exists())
+}
+
 func TestOpenAIGatewayServiceForward_CodexCompactSkipsImplicitImageBridge(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -380,7 +398,8 @@ func TestOpenAIGatewayServiceHandleResponsesImageOutputs_Streaming(t *testing.T)
 	require.Equal(t, 11, result.usage.InputTokens)
 	require.Equal(t, 5, result.usage.OutputTokens)
 	require.Equal(t, 4, result.usage.ImageOutputTokens)
-	require.Equal(t, 2, strings.Count(recorder.Body.String(), `"status":"completed"`))
+	require.Equal(t, 1, strings.Count(recorder.Body.String(), `"status":"completed"`))
+	require.Contains(t, recorder.Body.String(), `"status":"generating"`)
 	require.Equal(t, 1, strings.Count(recorder.Body.String(), `"type":"response.completed"`))
 	require.Equal(t, 1, strings.Count(recorder.Body.String(), `"usage"`))
 	require.Contains(t, recorder.Body.String(), `"opaque":{"n":1}`)
@@ -455,6 +474,15 @@ func TestNormalizeCompletedImageGenerationStatusRejectsFailedTerminalEnvelope(t 
 		{"completed string error", "response.completed", `"error":"render failed"`},
 		{"done object error", "response.done", `"error":{"message":"render failed"}`},
 		{"completed false error", "response.completed", `"error":false`},
+		{"completed unknown status", "response.completed", `"status":"aborted"`},
+	}
+	for _, rootKV := range []string{`"status":"failed"`, `"status":"incomplete"`, `"status":"cancelled"`, `"error":"render failed"`, `"error":{"message":"render failed"}`} {
+		t.Run("root "+rootKV, func(t *testing.T) {
+			input := []byte(`{"type":"response.completed",` + rootKV + `,"response":{"output":[{"type":"image_generation_call","status":"generating","result":"image"}]}}`)
+			got, changed := normalizeCompletedImageGenerationStatus(input)
+			require.False(t, changed)
+			require.Equal(t, input, got)
+		})
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -502,11 +530,11 @@ func TestExtractImageGenerationOutputReusesCallerNormalizedPayload(t *testing.T)
 	normalized, changed := normalizeCompletedImageGenerationStatusForEvent(input, "response.output_item.done")
 	require.True(t, changed)
 
-	item, ok := extractImageGenerationOutputFromSSEData(normalized, make(map[string]struct{}))
+	item, ok := extractImageGenerationOutputFromSSEData(normalized, "response.output_item.done", make(map[string]struct{}))
 	require.True(t, ok)
 	require.Equal(t, "completed", gjson.GetBytes(item, "status").String())
 
-	staleItem, ok := extractImageGenerationOutputFromSSEData(input, make(map[string]struct{}))
+	staleItem, ok := extractImageGenerationOutputFromSSEData(input, "response.output_item.done", make(map[string]struct{}))
 	require.True(t, ok)
 	require.Equal(t, "generating", gjson.GetBytes(staleItem, "status").String())
 }
@@ -533,11 +561,110 @@ func TestOpenAIImageStatusStreamingPassthrough(t *testing.T) {
 			"data: {\"type\":\"response.done\",\"response\":{\"output\":[{\"type\":\"image_generation_call\",\"status\":\"generating\",\"result\":\"image\"}],\"usage\":{\"input_tokens\":2,\"output_tokens\":3}}}\n\n"))}
 	result, err := svc.handleStreamingResponsePassthrough(context.Background(), resp, c, &Account{ID: 1}, time.Now(), "", "")
 	require.NoError(t, err)
-	require.Equal(t, 2, strings.Count(recorder.Body.String(), `"status":"completed"`))
+	require.Equal(t, 1, strings.Count(recorder.Body.String(), `"status":"completed"`))
+	require.Contains(t, recorder.Body.String(), `"status":"in_progress"`)
 	require.Equal(t, 1, strings.Count(recorder.Body.String(), `"type":"response.done"`))
 	require.Equal(t, 1, strings.Count(recorder.Body.String(), `"usage"`))
 	require.Equal(t, 2, result.usage.InputTokens)
 	require.Equal(t, 3, result.usage.OutputTokens)
+}
+
+func TestOpenAIImageStatusStreamingDoesNotCompleteBeforeSuccess(t *testing.T) {
+	terminalCases := []struct {
+		name     string
+		terminal string
+	}{
+		{name: "failed", terminal: `{"type":"response.failed","response":{"status":"failed","error":{"message":"render failed"},"usage":{"input_tokens":2,"output_tokens":3}}}`},
+		{name: "incomplete", terminal: `{"type":"response.incomplete","response":{"status":"incomplete","usage":{"input_tokens":2,"output_tokens":3}}}`},
+		{name: "cancelled", terminal: `{"type":"response.cancelled","response":{"status":"cancelled","usage":{"input_tokens":2,"output_tokens":3}}}`},
+		{name: "done with error", terminal: `{"type":"response.done","error":{"message":"render failed"},"response":{"output":[{"type":"image_generation_call","status":"generating","result":"partial"}],"usage":{"input_tokens":2,"output_tokens":3}}}`},
+	}
+
+	for _, tt := range terminalCases {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, passthrough := range []bool{false, true} {
+				pathName := "oauth"
+				if passthrough {
+					pathName = "passthrough"
+				}
+				t.Run(pathName, func(t *testing.T) {
+					gin.SetMode(gin.TestMode)
+					svc := newOpenAIImageGenerationControlTestService(&httpUpstreamRecorder{})
+					c, recorder := newOpenAIImageGenerationControlTestContext(true, "unit-test-agent/1.0")
+					resp := &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(
+						"data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"image_generation_call\",\"status\":\"generating\",\"result\":\"partial\"}}\n\n" +
+							"data: " + tt.terminal + "\n\n"))}
+
+					if passthrough {
+						_, _ = svc.handleStreamingResponsePassthrough(context.Background(), resp, c, &Account{ID: 1}, time.Now(), "", "")
+					} else {
+						_, _ = svc.handleStreamingResponse(context.Background(), resp, c, &Account{ID: 1}, time.Now(), "gpt-5.5", "gpt-5.5")
+					}
+
+					require.NotContains(t, recorder.Body.String(), `"status":"completed"`)
+					require.Contains(t, recorder.Body.String(), `"status":"generating"`)
+				})
+			}
+		})
+	}
+}
+
+func TestExtractCodexFinalResponseRejectsConflictingTerminalState(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+	}{
+		{name: "failed then completed", body: "data: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\"}}\n\n" + "data: {\"type\":\"response.completed\",\"response\":{\"output\":[{\"type\":\"image_generation_call\",\"status\":\"generating\",\"result\":\"image\"}]}}"},
+		{name: "completed then failed", body: "data: {\"type\":\"response.completed\",\"response\":{\"output\":[{\"type\":\"image_generation_call\",\"status\":\"generating\",\"result\":\"image\"}]}}\n\n" + "data: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\"}}"},
+		{name: "completed then done", body: "data: {\"type\":\"response.completed\",\"response\":{\"output\":[]}}\n\n" + "data: {\"type\":\"response.done\",\"response\":{\"output\":[]}}"},
+		{name: "unknown success status", body: "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"aborted\",\"output\":[]}}"},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			_, ok := extractCodexFinalResponse(tt.body)
+			require.False(t, ok)
+		})
+	}
+}
+
+func TestOpenAIImageStatusStreamingSuppressesDuplicateTerminal(t *testing.T) {
+	for _, passthrough := range []bool{false, true} {
+		name := "oauth"
+		if passthrough {
+			name = "passthrough"
+		}
+		t.Run(name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			svc := newOpenAIImageGenerationControlTestService(&httpUpstreamRecorder{})
+			c, recorder := newOpenAIImageGenerationControlTestContext(true, "unit-test-agent/1.0")
+			resp := &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(strings.Join([]string{
+				`event: response.completed`,
+				`data: {"response":{"output":[{"type":"image_generation_call","status":"generating","result":"image"}],"usage":{"input_tokens":2,"output_tokens":3}}}`,
+				``,
+				`event: response.done`,
+				`data: {"response":{"output":[{"type":"image_generation_call","status":"in_progress","result":"image"}],"usage":{"input_tokens":20,"output_tokens":30}}}`,
+				``,
+			}, "\n")))}
+
+			var inputTokens, outputTokens int
+			if passthrough {
+				result, err := svc.handleStreamingResponsePassthrough(context.Background(), resp, c, &Account{ID: 1}, time.Now(), "", "")
+				require.NoError(t, err)
+				inputTokens, outputTokens = result.usage.InputTokens, result.usage.OutputTokens
+			} else {
+				result, err := svc.handleStreamingResponse(context.Background(), resp, c, &Account{ID: 1}, time.Now(), "gpt-5.5", "gpt-5.5")
+				require.NoError(t, err)
+				inputTokens, outputTokens = result.usage.InputTokens, result.usage.OutputTokens
+			}
+
+			require.Equal(t, 1, strings.Count(recorder.Body.String(), `event: response.completed`))
+			require.NotContains(t, recorder.Body.String(), `event: response.done`)
+			require.Contains(t, recorder.Body.String(), "}\n\n")
+			require.Equal(t, 1, strings.Count(recorder.Body.String(), `"status":"completed"`))
+			require.Equal(t, 2, inputTokens)
+			require.Equal(t, 3, outputTokens)
+		})
+	}
 }
 
 func newOpenAIImageGenerationControlTestService(upstream *httpUpstreamRecorder) *OpenAIGatewayService {

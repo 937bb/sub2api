@@ -3326,8 +3326,22 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	if apiKey != nil {
 		imageGenerationAllowed = GroupAllowsImageGeneration(apiKey.Group)
 	}
-	codexImageGenerationBridgeEnabled := isCodexCLI && !isCompactRequest && imageGenerationAllowed && s.isCodexImageGenerationBridgeEnabled(ctx, account, apiKey)
+	codexImageGenerationExplicitToolPolicy := codexImageGenerationExplicitToolPolicyAllow
+	if isCodexCLI {
+		codexImageGenerationExplicitToolPolicy = account.CodexImageGenerationExplicitToolPolicy()
+	}
+	codexImageGenerationBridgeEnabled := isCodexCLI && !isCompactRequest && imageGenerationAllowed && codexImageGenerationExplicitToolPolicy != codexImageGenerationExplicitToolPolicyStrip && s.isCodexImageGenerationBridgeEnabled(ctx, account, apiKey)
 	imageIntent := false
+	if isCodexCLI && codexImageGenerationExplicitToolPolicy == codexImageGenerationExplicitToolPolicyStrip {
+		decoded, decodeErr := ensureReqBody()
+		if decodeErr != nil {
+			return nil, decodeErr
+		}
+		if stripOpenAIImageGenerationTools(decoded) {
+			markDecodedModified()
+			logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Stripped /responses image_generation tool for Codex client by account policy")
+		}
+	}
 
 	instructions := gjson.GetBytes(body, "instructions")
 	instructionsEmpty := !instructions.Exists() || instructions.Type != gjson.String || strings.TrimSpace(instructions.String()) == ""
@@ -5194,15 +5208,22 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 	}
 
 	currentEventType := ""
+	suppressTerminalFrame := false
 	for documentScanner.Scan() {
 		line := documentScanner.Text()
+		suppressLine := suppressTerminalFrame
 		lineStartsClientOutput := false
 		lineStartsRealOutput := false
 		forceFlushFailedEvent := false
 		if parsedEventType, ok := extractOpenAISSEEventLine(line); ok {
 			currentEventType = parsedEventType
+			if sawTerminalEvent && openAIResponseStreamEventTypeIsTerminal(parsedEventType) {
+				suppressLine = true
+				suppressTerminalFrame = true
+			}
 		} else if strings.TrimSpace(line) == "" {
 			currentEventType = ""
+			suppressTerminalFrame = false
 		}
 		if data, ok := extractOpenAISSEDataLine(line); ok {
 			acceptTerminalState := !sawTerminalEvent
@@ -5224,10 +5245,19 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 				line = "data: " + string(normalizedData)
 			}
 			eventType := classifyOpenAIResponseSSEEvent(dataBytes, currentEventType)
-			if normalizedData, normalized := normalizeCompletedImageGenerationStatusForEvent(dataBytes, eventType); normalized {
-				dataBytes = normalizedData
-				trimmedData = strings.TrimSpace(string(normalizedData))
-				line = "data: " + string(normalizedData)
+			if !acceptTerminalState && openAIResponseStreamEventTypeIsTerminal(eventType) {
+				suppressLine = true
+				suppressTerminalFrame = true
+			}
+			if suppressLine {
+				continue
+			}
+			if eventType == "response.completed" || eventType == "response.done" {
+				if normalizedData, normalized := normalizeCompletedImageGenerationStatusForEvent(dataBytes, eventType); normalized {
+					dataBytes = normalizedData
+					trimmedData = strings.TrimSpace(string(normalizedData))
+					line = "data: " + string(normalizedData)
+				}
 			}
 			if acceptTerminalState && eventType == "response.failed" {
 				failedMessage = extractOpenAISSEErrorMessage(dataBytes)
@@ -5267,6 +5297,9 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 			}
 		}
 
+		if suppressLine {
+			continue
+		}
 		if !clientDisconnected {
 			if !clientOutputStarted && !lineStartsClientOutput {
 				pendingLines = append(pendingLines, line)
@@ -5436,15 +5469,18 @@ func (s *OpenAIGatewayService) handlePassthroughSSEToJSON(resp *http.Response, c
 		body = s.correctToolCallsInResponseBody(body)
 	} else {
 		terminalType, terminalPayload, terminalOK := extractOpenAISSETerminalEvent(bodyText)
-		if terminalOK && terminalType == "response.failed" {
-			s.parseSSEUsageBytesForEvent(terminalPayload, usage, terminalType)
-			diagnosticPayload := openAIResponseFailedPayloadForDiagnostic(terminalPayload, terminalType)
-			sanitizedPayload := sanitizeOpenAIStreamFailoverDiagnosticPayload(diagnosticPayload)
-			msg := extractOpenAISSEErrorMessage(terminalPayload)
-			if msg == "" {
-				msg = "Upstream compact response failed"
+		if terminalOK {
+			if terminalType == "response.failed" {
+				s.parseSSEUsageBytesForEvent(terminalPayload, usage, terminalType)
+				diagnosticPayload := openAIResponseFailedPayloadForDiagnostic(terminalPayload, terminalType)
+				sanitizedPayload := sanitizeOpenAIStreamFailoverDiagnosticPayload(diagnosticPayload)
+				msg := extractOpenAISSEErrorMessage(terminalPayload)
+				if msg == "" {
+					msg = "Upstream compact response failed"
+				}
+				return nil, s.writeOpenAINonStreamingProtocolError(resp, c, msg, sanitizedPayload)
 			}
-			return nil, s.writeOpenAINonStreamingProtocolError(resp, c, msg, sanitizedPayload)
+			return nil, s.writeOpenAINonStreamingProtocolError(resp, c, "Upstream compact response returned conflicting terminal events", terminalPayload)
 		}
 		usage = s.parseSSEUsageFromBody(bodyText)
 		if originalModel != "" && mappedModel != "" && originalModel != mappedModel {
@@ -6034,6 +6070,7 @@ func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp
 	streamImageOutputs := make([]json.RawMessage, 0, 1)
 	streamSeenImages := make(map[string]struct{})
 	currentEventType := ""
+	suppressTerminalFrame := false
 	resultWithUsage := func() *openaiStreamingResult {
 		return &openaiStreamingResult{
 			usage:             usage,
@@ -6128,10 +6165,16 @@ func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp
 		if streamFailoverErr != nil {
 			return
 		}
+		suppressLine := suppressTerminalFrame
 		if parsedEventType, ok := extractOpenAISSEEventLine(line); ok {
 			currentEventType = parsedEventType
+			if sawTerminalEvent && openAIResponseStreamEventTypeIsTerminal(parsedEventType) {
+				suppressLine = true
+				suppressTerminalFrame = true
+			}
 		} else if strings.TrimSpace(line) == "" {
 			currentEventType = ""
+			suppressTerminalFrame = false
 		}
 		// Extract data from SSE line (supports both "data: " and "data:" formats)
 		if data, ok := extractOpenAISSEDataLine(line); ok {
@@ -6141,6 +6184,10 @@ func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp
 				responseID = extractOpenAIResponseIDFromJSONBytes(dataBytes)
 			}
 			eventType := classifyOpenAIResponseSSEEvent(dataBytes, currentEventType)
+			if !acceptTerminalState && openAIResponseStreamEventTypeIsTerminal(eventType) {
+				suppressTerminalFrame = true
+				return
+			}
 			if acceptTerminalState && (openAIStreamEventIsTerminal(data) || openAIResponseStreamEventTypeIsTerminal(eventType)) {
 				sawTerminalEvent = true
 			}
@@ -6173,14 +6220,7 @@ func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp
 				line = "data: " + data
 				eventType = classifyOpenAIResponseSSEEvent(dataBytes, currentEventType)
 			}
-			if eventType == "response.output_item.done" {
-				if normalizedData, normalized := normalizeCompletedImageGenerationStatusForEvent(dataBytes, eventType); normalized {
-					dataBytes = normalizedData
-					data = string(normalizedData)
-					line = "data: " + data
-				}
-			}
-			if imageOutput, ok := extractImageGenerationOutputFromSSEData(dataBytes, streamSeenImages); ok {
+			if imageOutput, ok := extractImageGenerationOutputFromSSEData(dataBytes, eventType, streamSeenImages); ok {
 				streamImageOutputs = append(streamImageOutputs, imageOutput)
 			}
 			if responsesStreamEventMayContributeToOutput(eventType) {
@@ -6253,6 +6293,9 @@ func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp
 			return
 		}
 
+		if suppressLine {
+			return
+		}
 		shouldFlush := line == "" && (eventShouldFlush || (queueDrained && clientOutputStarted))
 		if line == "" {
 			eventShouldFlush = false
@@ -7004,15 +7047,18 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 		body = s.correctToolCallsInResponseBody(body)
 	} else {
 		terminalType, terminalPayload, terminalOK := extractOpenAISSETerminalEvent(bodyText)
-		if terminalOK && terminalType == "response.failed" {
-			s.parseSSEUsageBytesForEvent(terminalPayload, usage, terminalType)
-			diagnosticPayload := openAIResponseFailedPayloadForDiagnostic(terminalPayload, terminalType)
-			sanitizedPayload := sanitizeOpenAIStreamFailoverDiagnosticPayload(diagnosticPayload)
-			msg := extractOpenAISSEErrorMessage(terminalPayload)
-			if msg == "" {
-				msg = "Upstream compact response failed"
+		if terminalOK {
+			if terminalType == "response.failed" {
+				s.parseSSEUsageBytesForEvent(terminalPayload, usage, terminalType)
+				diagnosticPayload := openAIResponseFailedPayloadForDiagnostic(terminalPayload, terminalType)
+				sanitizedPayload := sanitizeOpenAIStreamFailoverDiagnosticPayload(diagnosticPayload)
+				msg := extractOpenAISSEErrorMessage(terminalPayload)
+				if msg == "" {
+					msg = "Upstream compact response failed"
+				}
+				return nil, s.writeOpenAINonStreamingProtocolError(resp, c, msg, sanitizedPayload)
 			}
-			return nil, s.writeOpenAINonStreamingProtocolError(resp, c, msg, sanitizedPayload)
+			return nil, s.writeOpenAINonStreamingProtocolError(resp, c, "Upstream compact response returned conflicting terminal events", terminalPayload)
 		}
 		usage = s.parseSSEUsageFromBody(bodyText)
 		if originalModel != mappedModel {
@@ -7163,28 +7209,62 @@ func (s *OpenAIGatewayService) writeOpenAINonStreamingProtocolError(resp *http.R
 
 func extractCodexFinalResponse(body string) ([]byte, bool) {
 	var finalResponse []byte
+	terminalFailure := false
 	forEachOpenAISSEFrame(body, func(frame openAICompatSSEFrame) {
-		if finalResponse != nil {
-			return
-		}
 		data := []byte(strings.TrimSpace(frame.Data))
 		if len(data) == 0 || bytes.Equal(data, []byte("[DONE]")) {
 			return
 		}
 		eventType := classifyOpenAIResponseSSEEvent(data, frame.EventType)
-		if eventType == "response.done" || eventType == "response.completed" {
-			if normalized, changed := normalizeCompletedImageGenerationStatusForEvent(data, eventType); changed {
-				data = normalized
-			}
-			if response := gjson.GetBytes(data, "response"); response.Exists() && response.Type == gjson.JSON && response.Raw != "" {
-				finalResponse = []byte(response.Raw)
-			}
+		if !openAIResponseStreamEventTypeIsTerminal(eventType) {
+			return
+		}
+		if eventType != "response.done" && eventType != "response.completed" {
+			terminalFailure = true
+			return
+		}
+		if responseTerminalPayloadIsFailure(data) {
+			terminalFailure = true
+			return
+		}
+		if finalResponse != nil {
+			terminalFailure = true
+			return
+		}
+		if normalized, changed := normalizeCompletedImageGenerationStatusForEvent(data, eventType); changed {
+			data = normalized
+		}
+		if response := gjson.GetBytes(data, "response"); response.Exists() && response.Type == gjson.JSON && response.Raw != "" {
+			finalResponse = []byte(response.Raw)
 		}
 	})
-	if finalResponse != nil {
+	if finalResponse != nil && !terminalFailure {
 		return finalResponse, true
 	}
 	return nil, false
+}
+
+func responseTerminalPayloadIsFailure(data []byte) bool {
+	if len(data) == 0 || !gjson.ValidBytes(data) {
+		return true
+	}
+	for _, path := range []string{"response.status", "status"} {
+		status := strings.ToLower(strings.TrimSpace(gjson.GetBytes(data, path).String()))
+		switch status {
+		case "", "completed":
+		case "failed", "incomplete", "cancelled", "canceled":
+			return true
+		default:
+			return true
+		}
+	}
+	for _, path := range []string{"response.error", "error"} {
+		errorValue := gjson.GetBytes(data, path)
+		if errorValue.Exists() && errorValue.Type != gjson.Null {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizeCompletedImageGenerationStatus(data []byte) ([]byte, bool) {
@@ -7234,8 +7314,25 @@ func normalizeCompletedImageGenerationStatusForEvent(data []byte, eventType stri
 		switch status {
 		case "failed", "incomplete", "cancelled", "canceled":
 			return data, false
+		case "":
+			// Some Codex-compatible terminals omit response.status; retain that
+			// compatibility while rejecting explicit non-success states below.
+		case "completed":
+		default:
+			return data, false
+		}
+		rootStatus := strings.ToLower(strings.TrimSpace(gjson.GetBytes(data, "status").String()))
+		switch rootStatus {
+		case "failed", "incomplete", "cancelled", "canceled":
+			return data, false
+		case "", "completed":
+		default:
+			return data, false
 		}
 		if responseError := response.Get("error"); responseError.Exists() && responseError.Type != gjson.Null {
+			return data, false
+		}
+		if rootError := gjson.GetBytes(data, "error"); rootError.Exists() && rootError.Type != gjson.Null {
 			return data, false
 		}
 		output := gjson.GetBytes(data, "response.output")
@@ -7325,19 +7422,23 @@ func reconstructResponseOutputFromSSE(bodyText string) ([]byte, bool) {
 	acc := apicompat.NewBufferedResponseAccumulator()
 	imageOutputs := make([]json.RawMessage, 0, 1)
 	seenImages := make(map[string]struct{})
-	forEachOpenAISSEDataPayload(bodyText, func(data []byte) {
-		eventType := strings.TrimSpace(gjson.GetBytes(data, "type").String())
+	forEachOpenAISSEFrame(bodyText, func(frame openAICompatSSEFrame) {
+		data := []byte(strings.TrimSpace(frame.Data))
+		if len(data) == 0 || bytes.Equal(data, []byte("[DONE]")) {
+			return
+		}
+		eventType := classifyOpenAIResponseSSEEvent(data, frame.EventType)
 		if eventType == "response.output_item.done" {
 			if normalized, changed := normalizeCompletedImageGenerationStatusForEvent(data, eventType); changed {
 				data = normalized
 			}
 		}
-		if imageOutput, ok := extractImageGenerationOutputFromSSEData(data, seenImages); ok {
+		if imageOutput, ok := extractImageGenerationOutputFromSSEData(data, eventType, seenImages); ok {
 			imageOutputs = append(imageOutputs, imageOutput)
 		}
 		if responsesStreamEventMayContributeToOutput(eventType) {
 			var event apicompat.ResponsesStreamEvent
-			if err := json.Unmarshal(data, &event); err == nil {
+			if err := json.Unmarshal([]byte(openAICompatPayloadWithEventType(string(data), eventType)), &event); err == nil {
 				acc.ProcessEvent(&event)
 			}
 		}
@@ -7368,11 +7469,11 @@ func buildResponsesOutputJSON(acc *apicompat.BufferedResponseAccumulator, imageO
 	return outputJSON, true
 }
 
-func extractImageGenerationOutputFromSSEData(data []byte, seen map[string]struct{}) (json.RawMessage, bool) {
+func extractImageGenerationOutputFromSSEData(data []byte, eventType string, seen map[string]struct{}) (json.RawMessage, bool) {
 	if len(data) == 0 || !gjson.ValidBytes(data) {
 		return nil, false
 	}
-	if gjson.GetBytes(data, "type").String() != "response.output_item.done" {
+	if strings.TrimSpace(eventType) != "response.output_item.done" {
 		return nil, false
 	}
 	item := gjson.GetBytes(data, "item")

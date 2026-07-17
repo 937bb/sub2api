@@ -1396,7 +1396,7 @@
             </div>
           </div>
           <div class="border-t border-sky-100 bg-white/70 p-2 dark:border-sky-900/50 dark:bg-dark-800/70">
-            <div class="grid grid-cols-1 gap-2 sm:grid-cols-3">
+            <div class="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
               <button
                 v-for="option in codexImageGenerationBridgeOptions"
                 :key="option.value"
@@ -2612,7 +2612,7 @@ const openaiOAuthResponsesWebSocketV2Mode = ref<OpenAIOAuthWSMode>(OPENAI_WS_MOD
 const openaiAPIKeyResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
 const codexCLIOnlyEnabled = ref(false)
 const codexCLIOnlyAllowClaudeCodeEnabled = ref(false)
-type CodexImageGenerationBridgeMode = 'inherit' | 'enabled' | 'disabled'
+type CodexImageGenerationBridgeMode = 'inherit' | 'enabled' | 'disabled' | 'block'
 const codexImageGenerationBridgeMode = ref<CodexImageGenerationBridgeMode>('inherit')
 const anthropicPassthroughEnabled = ref(false)
 const webSearchEmulationMode = ref('default')
@@ -2690,6 +2690,11 @@ const codexImageGenerationBridgeOptions = computed<Array<{
     value: 'disabled',
     label: t('admin.accounts.openai.codexImageGenerationBridgeDisabled'),
     description: t('admin.accounts.openai.codexImageGenerationBridgeDisabledDesc')
+  },
+  {
+    value: 'block',
+    label: t('admin.accounts.openai.codexImageGenerationBridgeBlock'),
+    description: t('admin.accounts.openai.codexImageGenerationBridgeBlockDesc')
   }
 ])
 const codexImageGenerationBridgeBadgeLabel = computed(() => {
@@ -2698,6 +2703,8 @@ const codexImageGenerationBridgeBadgeLabel = computed(() => {
       return t('admin.accounts.openai.codexImageGenerationBridgeBadgeEnabled')
     case 'disabled':
       return t('admin.accounts.openai.codexImageGenerationBridgeBadgeDisabled')
+    case 'block':
+      return t('admin.accounts.openai.codexImageGenerationBridgeBadgeBlock')
     default:
       return t('admin.accounts.openai.codexImageGenerationBridgeBadgeInherit')
   }
@@ -2707,6 +2714,8 @@ const codexImageGenerationBridgeBadgeClass = computed(() => {
     case 'enabled':
       return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
     case 'disabled':
+      return 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300'
+    case 'block':
       return 'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300'
     default:
       return 'bg-slate-100 text-slate-600 dark:bg-dark-600 dark:text-slate-300'
@@ -3024,7 +3033,9 @@ const syncFormFromAccount = (newAccount: Account | null) => {
       const codexImageGenerationBridgeValue = typeof extra?.codex_image_generation_bridge === 'boolean'
         ? extra.codex_image_generation_bridge
         : extra?.codex_image_generation_bridge_enabled
-      if (codexImageGenerationBridgeValue === true) {
+      if (extra?.codex_image_generation_explicit_tool_policy === 'strip') {
+        codexImageGenerationBridgeMode.value = 'block'
+      } else if (codexImageGenerationBridgeValue === true) {
         codexImageGenerationBridgeMode.value = 'enabled'
       } else if (codexImageGenerationBridgeValue === false) {
         codexImageGenerationBridgeMode.value = 'disabled'
@@ -4180,13 +4191,20 @@ const handleSubmit = async () => {
 
       delete newExtra.codex_image_generation_bridge_enabled
       if (props.account.type === 'oauth' || props.account.type === 'apikey') {
-        if (codexImageGenerationBridgeMode.value === 'inherit') {
+        if (codexImageGenerationBridgeMode.value === 'block') {
+          newExtra.codex_image_generation_explicit_tool_policy = 'strip'
           delete newExtra.codex_image_generation_bridge
         } else {
-          newExtra.codex_image_generation_bridge = codexImageGenerationBridgeMode.value === 'enabled'
+          delete newExtra.codex_image_generation_explicit_tool_policy
+          if (codexImageGenerationBridgeMode.value === 'inherit') {
+            delete newExtra.codex_image_generation_bridge
+          } else {
+            newExtra.codex_image_generation_bridge = codexImageGenerationBridgeMode.value === 'enabled'
+          }
         }
       } else {
         delete newExtra.codex_image_generation_bridge
+        delete newExtra.codex_image_generation_explicit_tool_policy
       }
 
       if (props.account.type === 'oauth') {

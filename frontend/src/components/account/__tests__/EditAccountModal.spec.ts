@@ -568,6 +568,24 @@ describe('EditAccountModal', () => {
     expect(updateAccountMock.mock.calls[0]?.[1]?.extra).not.toHaveProperty('codex_image_generation_bridge_enabled')
   })
 
+  it('submits complete Codex image-tool blocking policy', async () => {
+    const account = buildAccount()
+    account.extra = { codex_image_generation_bridge: true }
+    updateAccountMock.mockReset()
+    checkMixedChannelRiskMock.mockReset()
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    updateAccountMock.mockResolvedValue(account)
+
+    const wrapper = mountModal(account)
+
+    await wrapper.get('button[data-testid="codex-image-bridge-block"]').trigger('click')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    const extra = updateAccountMock.mock.calls[0]?.[1]?.extra
+    expect(extra?.codex_image_generation_explicit_tool_policy).toBe('strip')
+    expect(extra).not.toHaveProperty('codex_image_generation_bridge')
+  })
+
   it('allows saving apikey account when backend redacted api_key but credentials_status reports it exists', async () => {
     // 新前端 + 新后端：响应已脱敏，credentials 里没有 api_key，credentials_status.has_api_key=true
     const account = buildAccount()
