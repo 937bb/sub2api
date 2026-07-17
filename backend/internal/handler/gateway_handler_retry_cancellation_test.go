@@ -46,10 +46,10 @@ func (f *retryCancellationSchedulerCache) DeleteAccount(context.Context, int64) 
 func (f *retryCancellationSchedulerCache) UpdateLastUsed(context.Context, map[int64]time.Time) error {
 	return nil
 }
-func (f *retryCancellationSchedulerCache) TryLockBucket(context.Context, service.SchedulerBucket, time.Duration) (bool, error) {
-	return true, nil
+func (f *retryCancellationSchedulerCache) TryLockBucket(context.Context, service.SchedulerBucket, time.Duration) (string, bool, error) {
+	return "test-lock", true, nil
 }
-func (f *retryCancellationSchedulerCache) UnlockBucket(context.Context, service.SchedulerBucket) error {
+func (f *retryCancellationSchedulerCache) UnlockBucket(context.Context, service.SchedulerBucket, string) error {
 	return nil
 }
 func (f *retryCancellationSchedulerCache) ListBuckets(context.Context) ([]service.SchedulerBucket, error) {

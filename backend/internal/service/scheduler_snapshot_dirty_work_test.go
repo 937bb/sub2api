@@ -28,8 +28,11 @@ func (c *dirtyWorkTestCache) DeleteAccount(_ context.Context, accountID int64) e
 	return nil
 }
 
-func (c *dirtyWorkTestCache) TryLockBucket(context.Context, SchedulerBucket, time.Duration) (bool, error) {
-	return c.lockAcquired, nil
+func (c *dirtyWorkTestCache) TryLockBucket(context.Context, SchedulerBucket, time.Duration) (string, bool, error) {
+	if !c.lockAcquired {
+		return "", false, nil
+	}
+	return "test-lock", true, nil
 }
 
 type dirtyWorkTestAccountRepo struct {

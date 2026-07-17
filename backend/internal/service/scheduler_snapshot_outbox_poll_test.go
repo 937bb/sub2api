@@ -40,11 +40,11 @@ func (c *outboxPollCache) UpdateLastUsed(context.Context, map[int64]time.Time) e
 	return c.updateErr
 }
 
-func (c *outboxPollCache) TryLockBucket(context.Context, SchedulerBucket, time.Duration) (bool, error) {
-	return true, nil
+func (c *outboxPollCache) TryLockBucket(context.Context, SchedulerBucket, time.Duration) (string, bool, error) {
+	return "test-lock", true, nil
 }
 
-func (c *outboxPollCache) UnlockBucket(context.Context, SchedulerBucket) error {
+func (c *outboxPollCache) UnlockBucket(context.Context, SchedulerBucket, string) error {
 	return nil
 }
 

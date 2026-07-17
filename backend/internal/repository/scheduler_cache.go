@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -67,6 +68,13 @@ if currentActive ~= false and currentActive ~= ARGV[1] then
 end
 
 return 1
+`)
+
+	unlockBucketScript = redis.NewScript(`
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+	return redis.call('DEL', KEYS[1])
+end
+return 0
 `)
 )
 
@@ -285,14 +293,22 @@ func (c *schedulerCache) UpdateLastUsed(ctx context.Context, updates map[int64]t
 	}, keys...)
 }
 
-func (c *schedulerCache) TryLockBucket(ctx context.Context, bucket service.SchedulerBucket, ttl time.Duration) (bool, error) {
+func (c *schedulerCache) TryLockBucket(ctx context.Context, bucket service.SchedulerBucket, ttl time.Duration) (string, bool, error) {
 	key := schedulerBucketKey(schedulerLockPrefix, bucket)
-	return c.rdb.SetNX(ctx, key, time.Now().UnixNano(), ttl).Result()
+	token := uuid.NewString()
+	acquired, err := c.rdb.SetNX(ctx, key, token, ttl).Result()
+	if err != nil || !acquired {
+		return "", acquired, err
+	}
+	return token, true, nil
 }
 
-func (c *schedulerCache) UnlockBucket(ctx context.Context, bucket service.SchedulerBucket) error {
+func (c *schedulerCache) UnlockBucket(ctx context.Context, bucket service.SchedulerBucket, token string) error {
+	if token == "" {
+		return nil
+	}
 	key := schedulerBucketKey(schedulerLockPrefix, bucket)
-	return c.rdb.Del(ctx, key).Err()
+	return unlockBucketScript.Run(ctx, c.rdb, []string{key}, token).Err()
 }
 
 func (c *schedulerCache) ListBuckets(ctx context.Context) ([]service.SchedulerBucket, error) {

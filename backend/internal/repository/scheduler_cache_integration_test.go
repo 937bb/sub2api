@@ -12,6 +12,26 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestSchedulerCacheBucketUnlockRequiresOwnerToken(t *testing.T) {
+	ctx := context.Background()
+	rdb := testRedis(t)
+	cache := NewSchedulerCache(rdb)
+	bucket := service.SchedulerBucket{GroupID: 91, Platform: service.PlatformOpenAI, Mode: service.SchedulerModeSingle}
+
+	firstToken, acquired, err := cache.TryLockBucket(ctx, bucket, time.Minute)
+	require.NoError(t, err)
+	require.True(t, acquired)
+	require.NotEmpty(t, firstToken)
+
+	// A timed-out former owner must not delete a lock acquired by its successor.
+	require.NoError(t, rdb.Set(ctx, schedulerBucketKey(schedulerLockPrefix, bucket), "successor", time.Minute).Err())
+	require.NoError(t, cache.UnlockBucket(ctx, bucket, firstToken))
+	require.Equal(t, "successor", rdb.Get(ctx, schedulerBucketKey(schedulerLockPrefix, bucket)).Val())
+
+	require.NoError(t, cache.UnlockBucket(ctx, bucket, "successor"))
+	require.Equal(t, int64(0), rdb.Exists(ctx, schedulerBucketKey(schedulerLockPrefix, bucket)).Val())
+}
+
 func TestSchedulerCacheSnapshotUsesSlimMetadataButKeepsFullAccount(t *testing.T) {
 	ctx := context.Background()
 	rdb := testRedis(t)
