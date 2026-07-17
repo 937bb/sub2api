@@ -1702,8 +1702,9 @@ func (s *RateLimitService) UpdateSessionWindow(ctx context.Context, account *Acc
 		}
 	}
 	if len(extraUpdates) > 0 {
-		extraUpdates["passive_usage_sampled_at"] = time.Now().UTC().Format(time.RFC3339)
-		if err := s.accountRepo.UpdateExtra(ctx, account.ID, extraUpdates); err != nil {
+		observedAt := time.Now().UTC()
+		extraUpdates["passive_usage_sampled_at"] = observedAt.Format(time.RFC3339Nano)
+		if _, err := updateRuntimeExtra(ctx, s.accountRepo, account.ID, extraUpdates, "passive_usage_sampled_at", observedAt); err != nil {
 			slog.Warn("passive_usage_update_failed", "account_id", account.ID, "error", err)
 		}
 	}

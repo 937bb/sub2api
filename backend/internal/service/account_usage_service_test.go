@@ -777,8 +777,9 @@ func TestAccountUsageService_PersistOpenAICodexProbeSnapshotOnlyUpdatesExtraWith
 	}
 	svc := &AccountUsageService{accountRepo: repo}
 	err := svc.persistOpenAICodexProbeSnapshot(context.Background(), 321, map[string]any{
-		"codex_7d_used_percent": 100.0,
-		"codex_7d_reset_at":     time.Now().Add(2 * time.Hour).UTC().Truncate(time.Second).Format(time.RFC3339),
+		"codex_usage_updated_at": time.Now().UTC().Format(time.RFC3339),
+		"codex_7d_used_percent":  100.0,
+		"codex_7d_reset_at":      time.Now().Add(2 * time.Hour).UTC().Truncate(time.Second).Format(time.RFC3339),
 	})
 	if err != nil {
 		t.Fatalf("persistOpenAICodexProbeSnapshot() error = %v", err)
@@ -818,8 +819,9 @@ func TestAccountUsageService_PersistOpenAICodexProbeSnapshotWritesFiveHourSessio
 	svc := &AccountUsageService{accountRepo: repo}
 	resetAt := time.Now().Add(90 * time.Minute).UTC().Truncate(time.Second)
 	err := svc.persistOpenAICodexProbeSnapshot(context.Background(), 321, map[string]any{
-		"codex_5h_used_percent": 42.0,
-		"codex_5h_reset_at":     resetAt.Format(time.RFC3339),
+		"codex_usage_updated_at": time.Now().UTC().Format(time.RFC3339),
+		"codex_5h_used_percent":  42.0,
+		"codex_5h_reset_at":      resetAt.Format(time.RFC3339),
 	})
 	if err != nil {
 		t.Fatalf("persistOpenAICodexProbeSnapshot() error = %v", err)

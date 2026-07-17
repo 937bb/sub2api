@@ -1911,14 +1911,29 @@ func (r *accountRepository) AutoPauseExpiredAccounts(ctx context.Context, now ti
 }
 
 func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates map[string]any) error {
+	_, err := r.updateExtra(ctx, id, updates, "", time.Time{})
+	return err
+}
+
+// UpdateRuntimeExtra applies one runtime snapshot only when its observation time
+// is newer than the snapshot already stored on the account.
+func (r *accountRepository) UpdateRuntimeExtra(ctx context.Context, id int64, updates map[string]any, observedAtKey string, observedAt time.Time) (bool, error) {
+	observedAtKey = strings.TrimSpace(observedAtKey)
+	if observedAtKey == "" || observedAt.IsZero() {
+		return false, errors.New("runtime extra observation is required")
+	}
+	return r.updateExtra(ctx, id, updates, observedAtKey, observedAt)
+}
+
+func (r *accountRepository) updateExtra(ctx context.Context, id int64, updates map[string]any, observedAtKey string, observedAt time.Time) (bool, error) {
 	if len(updates) == 0 {
-		return nil
+		return false, nil
 	}
 
 	// 使用 JSONB 合并操作实现原子更新，避免读-改-写的并发丢失更新问题
 	payload, err := json.Marshal(updates)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	client := clientFromContext(ctx, r.client)
@@ -1927,6 +1942,7 @@ WITH target AS MATERIALIZED (
 	SELECT id, COALESCE(extra, '{}'::jsonb) AS extra
 	FROM accounts
 	WHERE id = $2 AND deleted_at IS NULL
+	FOR UPDATE
 ), updated AS (
 	UPDATE accounts
 	SET extra = target.extra || $1::jsonb,
@@ -1934,36 +1950,45 @@ WITH target AS MATERIALIZED (
 	FROM target
 	WHERE accounts.id = target.id
 		AND target.extra IS DISTINCT FROM target.extra || $1::jsonb
+		AND (
+			$3 = '' OR
+			CASE
+				WHEN target.extra #>> ARRAY[$3] ~
+					'^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z$'
+					THEN (target.extra #>> ARRAY[$3])::timestamptz < $4
+				ELSE true
+			END
+		)
 	RETURNING 1
 )
-SELECT EXISTS (SELECT 1 FROM target), EXISTS (SELECT 1 FROM updated)`, string(payload), id)
+SELECT EXISTS (SELECT 1 FROM target), EXISTS (SELECT 1 FROM updated)`, string(payload), id, observedAtKey, observedAt)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if !rows.Next() {
 		rowsErr := rows.Err()
 		_ = rows.Close()
 		if rowsErr != nil {
-			return rowsErr
+			return false, rowsErr
 		}
-		return errors.New("extra update returned no result")
+		return false, errors.New("extra update returned no result")
 	}
 	var exists, updated bool
 	if err := rows.Scan(&exists, &updated); err != nil {
 		_ = rows.Close()
-		return err
+		return false, err
 	}
 	if err := rows.Close(); err != nil {
-		return err
+		return false, err
 	}
 	if !exists {
-		return service.ErrAccountNotFound
+		return false, service.ErrAccountNotFound
 	}
 	if !updated {
-		return nil
+		return false, nil
 	}
 	r.afterExtraUpdate(ctx, id, updates, "extra update")
-	return nil
+	return true, nil
 }
 
 func (r *accountRepository) UpdateExtraNestedBool(ctx context.Context, id int64, updates map[string]any, mapKey string, nestedKey string, value bool) error {

@@ -534,8 +534,12 @@ func (s *AccountUsageService) syncActiveToPassive(ctx context.Context, accountID
 	}
 
 	if len(extraUpdates) > 0 {
-		extraUpdates["passive_usage_sampled_at"] = time.Now().UTC().Format(time.RFC3339)
-		if err := s.accountRepo.UpdateExtra(ctx, accountID, extraUpdates); err != nil {
+		observedAt := time.Now().UTC()
+		if usage.UpdatedAt != nil {
+			observedAt = usage.UpdatedAt.UTC()
+		}
+		extraUpdates["passive_usage_sampled_at"] = observedAt.Format(time.RFC3339Nano)
+		if _, err := updateRuntimeExtra(ctx, s.accountRepo, accountID, extraUpdates, "passive_usage_sampled_at", observedAt); err != nil {
 			slog.Warn("sync_active_to_passive_failed", "account_id", accountID, "error", err)
 		}
 	}
@@ -812,11 +816,44 @@ func (s *AccountUsageService) persistOpenAICodexProbeSnapshot(ctx context.Contex
 	if s == nil || s.accountRepo == nil || accountID <= 0 || len(updates) == 0 {
 		return nil
 	}
-	if err := s.accountRepo.UpdateExtra(ctx, accountID, updates); err != nil {
+	observedAt, err := runtimeExtraObservedAt(updates, "codex_usage_updated_at")
+	if err != nil {
 		return err
 	}
-	syncCodexFiveHourSessionWindowEnd(ctx, s.accountRepo, accountID, updates, "active_probe")
+	updated, err := updateRuntimeExtra(ctx, s.accountRepo, accountID, updates, "codex_usage_updated_at", observedAt)
+	if err != nil {
+		return err
+	}
+	if updated {
+		syncCodexFiveHourSessionWindowEnd(ctx, s.accountRepo, accountID, updates, "active_probe")
+	}
 	return nil
+}
+
+type runtimeExtraUpdater interface {
+	UpdateRuntimeExtra(ctx context.Context, id int64, updates map[string]any, observedAtKey string, observedAt time.Time) (bool, error)
+}
+
+func updateRuntimeExtra(ctx context.Context, repo AccountRepository, accountID int64, updates map[string]any, observedAtKey string, observedAt time.Time) (bool, error) {
+	if updater, ok := any(repo).(runtimeExtraUpdater); ok {
+		return updater.UpdateRuntimeExtra(ctx, accountID, updates, observedAtKey, observedAt)
+	}
+	if err := repo.UpdateExtra(ctx, accountID, updates); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func runtimeExtraObservedAt(updates map[string]any, key string) (time.Time, error) {
+	raw, ok := updates[key]
+	if !ok {
+		return time.Time{}, fmt.Errorf("runtime extra snapshot missing %s", key)
+	}
+	observedAt, err := parseTime(fmt.Sprint(raw))
+	if err != nil {
+		return time.Time{}, fmt.Errorf("invalid runtime extra observation %s: %w", key, err)
+	}
+	return observedAt, nil
 }
 
 // accountSessionWindowEndUpdater is implemented by persisted account stores that

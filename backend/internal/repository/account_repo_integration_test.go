@@ -1939,6 +1939,98 @@ func (s *AccountRepoSuite) TestUpdateExtra_UnchangedRuntimeAvoidsRedundantEffect
 	s.requireNoSchedulerOutbox()
 }
 
+func (s *AccountRepoSuite) TestUpdateRuntimeExtra_StaleSnapshotIsNoOp() {
+	newer := time.Now().UTC().Truncate(time.Second)
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name: "runtime-extra-stale-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		Extra: map[string]any{
+			"codex_usage_updated_at": newer.Format(time.RFC3339),
+			"codex_5h_used_percent":  20.0,
+		},
+	})
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
+	_, err := s.repo.sql.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
+
+	updated, err := s.repo.UpdateRuntimeExtra(s.ctx, account.ID, map[string]any{
+		"codex_usage_updated_at": newer.Add(-time.Minute).Format(time.RFC3339),
+		"codex_5h_used_percent":  10.0,
+	}, "codex_usage_updated_at", newer.Add(-time.Minute))
+	s.Require().NoError(err)
+	s.Require().False(updated)
+
+	got, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().Equal(20.0, got.Extra["codex_5h_used_percent"])
+	s.Require().Equal(newer.Format(time.RFC3339), got.Extra["codex_usage_updated_at"])
+	s.Require().Empty(cacheRecorder.setAccounts)
+	s.requireNoSchedulerOutbox()
+}
+
+func (s *AccountRepoSuite) TestUpdateRuntimeExtra_NewerSnapshotPublishesAfterCommit() {
+	older := time.Now().UTC().Add(-time.Minute).Truncate(time.Second)
+	newer := older.Add(time.Minute)
+	client := testEntClient(s.T())
+	account := mustCreateAccount(s.T(), client, &service.Account{
+		Name: "runtime-extra-newer-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		Extra: map[string]any{
+			"passive_usage_sampled_at":     older.Format(time.RFC3339),
+			"passive_usage_7d_utilization": 0.1,
+		},
+	})
+	s.T().Cleanup(func() { _, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background()) })
+	cacheRecorder := &schedulerCacheRecorder{}
+	repo := newAccountRepositoryWithSQL(client, integrationDB, cacheRecorder)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+
+	updated, err := repo.UpdateRuntimeExtra(txCtx, account.ID, map[string]any{
+		"passive_usage_sampled_at":     newer.Format(time.RFC3339),
+		"passive_usage_7d_utilization": 0.7,
+	}, "passive_usage_sampled_at", newer)
+	s.Require().NoError(err)
+	s.Require().True(updated)
+	s.Require().Empty(cacheRecorder.setAccounts)
+	s.Require().NoError(tx.Commit())
+
+	s.Require().Len(cacheRecorder.setAccounts, 1)
+	s.Require().Equal(0.7, cacheRecorder.setAccounts[0].Extra["passive_usage_7d_utilization"])
+}
+
+func (s *AccountRepoSuite) TestUpdateRuntimeExtra_RollbackDoesNotPublishSnapshot() {
+	older := time.Now().UTC().Add(-time.Minute).Truncate(time.Second)
+	newer := older.Add(time.Minute)
+	client := testEntClient(s.T())
+	account := mustCreateAccount(s.T(), client, &service.Account{
+		Name: "runtime-extra-rollback-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		Extra: map[string]any{
+			"passive_usage_sampled_at":     older.Format(time.RFC3339),
+			"passive_usage_7d_utilization": 0.1,
+		},
+	})
+	s.T().Cleanup(func() { _, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background()) })
+	cacheRecorder := &schedulerCacheRecorder{}
+	repo := newAccountRepositoryWithSQL(client, integrationDB, cacheRecorder)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+
+	updated, err := repo.UpdateRuntimeExtra(txCtx, account.ID, map[string]any{
+		"passive_usage_sampled_at":     newer.Format(time.RFC3339),
+		"passive_usage_7d_utilization": 0.7,
+	}, "passive_usage_sampled_at", newer)
+	s.Require().NoError(err)
+	s.Require().True(updated)
+	s.Require().NoError(tx.Rollback())
+
+	s.Require().Empty(cacheRecorder.setAccounts)
+	got, err := repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().Equal(0.1, got.Extra["passive_usage_7d_utilization"])
+}
+
 func (s *AccountRepoSuite) TestUpdateExtra_NilExtra() {
 	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-nil-extra", Extra: nil})
 	s.Require().NoError(s.repo.UpdateExtra(s.ctx, account.ID, map[string]any{"key": "val"}))

@@ -8331,7 +8331,7 @@ func ParseCodexRateLimitHeaders(headers http.Header) *OpenAICodexUsageSnapshot {
 		return nil
 	}
 
-	snapshot.UpdatedAt = time.Now().Format(time.RFC3339)
+	snapshot.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	return snapshot
 }
 
@@ -8391,7 +8391,7 @@ func buildCodexUsageExtraUpdates(snapshot *OpenAICodexUsageSnapshot, fallbackNow
 	if snapshot.PrimaryOverSecondaryPercent != nil {
 		updates["codex_primary_over_secondary_percent"] = *snapshot.PrimaryOverSecondaryPercent
 	}
-	updates["codex_usage_updated_at"] = baseTime.Format(time.RFC3339)
+	updates["codex_usage_updated_at"] = baseTime.UTC().Format(time.RFC3339Nano)
 
 	// 归一化到 5h/7d 规范字段
 	if normalized := snapshot.Normalize(); normalized != nil {
@@ -8445,7 +8445,12 @@ func (s *OpenAIGatewayService) updateCodexUsageSnapshot(ctx context.Context, acc
 	go func() {
 		updateCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if err := s.accountRepo.UpdateExtra(updateCtx, accountID, updates); err != nil {
+		observedAt, err := runtimeExtraObservedAt(updates, "codex_usage_updated_at")
+		if err != nil {
+			return
+		}
+		updated, err := updateRuntimeExtra(updateCtx, s.accountRepo, accountID, updates, "codex_usage_updated_at", observedAt)
+		if err != nil || !updated {
 			return
 		}
 		syncCodexFiveHourSessionWindowEnd(updateCtx, s.accountRepo, accountID, updates, "response_headers")
