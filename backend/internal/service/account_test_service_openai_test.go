@@ -160,6 +160,8 @@ type openAIAccountNestedBoolUpdate struct {
 type openAIAccountTestRepo struct {
 	mockAccountRepoForGemini
 	updatedExtra       map[string]any
+	observedAtKey      string
+	observedAt         time.Time
 	nestedBoolUpdates  []openAIAccountNestedBoolUpdate
 	updateExtraErr     error
 	updateExtraErrFor  func(map[string]any) error
@@ -183,6 +185,21 @@ func (r *openAIAccountTestRepo) UpdateExtra(_ context.Context, _ int64, updates 
 		return r.updateExtraErr
 	}
 	return nil
+}
+
+func (r *openAIAccountTestRepo) UpdateRuntimeExtra(_ context.Context, _ int64, updates map[string]any, observedAtKey string, observedAt time.Time) (bool, error) {
+	r.updatedExtra = updates
+	r.observedAtKey = observedAtKey
+	r.observedAt = observedAt
+	if r.updateExtraErrFor != nil {
+		if err := r.updateExtraErrFor(updates); err != nil {
+			return false, err
+		}
+	}
+	if r.updateExtraErr != nil {
+		return false, r.updateExtraErr
+	}
+	return true, nil
 }
 
 func (r *openAIAccountTestRepo) UpdateExtraNestedBool(_ context.Context, _ int64, updates map[string]any, mapKey string, nestedKey string, value bool) error {
@@ -356,6 +373,10 @@ func TestAccountTestService_OpenAISuccessPersistsSnapshotFromHeaders(t *testing.
 	require.NotEmpty(t, repo.updatedExtra)
 	require.Equal(t, 42.0, repo.updatedExtra["codex_5h_used_percent"])
 	require.Equal(t, 88.0, repo.updatedExtra["codex_7d_used_percent"])
+	require.Equal(t, "codex_usage_updated_at", repo.observedAtKey)
+	parsed, err := runtimeExtraObservedAt(repo.updatedExtra, repo.observedAtKey)
+	require.NoError(t, err)
+	require.Equal(t, parsed, repo.observedAt)
 	require.Contains(t, recorder.Body.String(), "test_complete")
 }
 

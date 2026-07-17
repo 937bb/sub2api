@@ -901,7 +901,16 @@ func (s *AccountTestService) persistOpenAIAccountTestExtraUpdates(ctx context.Co
 	if s == nil || s.accountRepo == nil || account == nil || account.ID <= 0 || len(updates) == 0 {
 		return nil
 	}
-	if err := s.accountRepo.UpdateExtra(ctx, account.ID, updates); err != nil {
+	if _, ok := updates["codex_usage_updated_at"]; ok {
+		observedAt, err := runtimeExtraObservedAt(updates, "codex_usage_updated_at")
+		if err != nil {
+			return err
+		}
+		updated, err := updateRuntimeExtra(ctx, s.accountRepo, account.ID, updates, "codex_usage_updated_at", observedAt)
+		if err != nil || !updated {
+			return err
+		}
+	} else if err := s.accountRepo.UpdateExtra(ctx, account.ID, updates); err != nil {
 		return err
 	}
 	mergeAccountExtra(account, updates)
