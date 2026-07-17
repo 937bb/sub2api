@@ -16,6 +16,7 @@ type dirtyWorkTestCache struct {
 	deletedAccount []int64
 	setAccountErr  error
 	lockAcquired   bool
+	lockTTL        time.Duration
 }
 
 func (c *dirtyWorkTestCache) SetAccount(_ context.Context, account *Account) error {
@@ -28,7 +29,8 @@ func (c *dirtyWorkTestCache) DeleteAccount(_ context.Context, accountID int64) e
 	return nil
 }
 
-func (c *dirtyWorkTestCache) TryLockBucket(context.Context, SchedulerBucket, time.Duration) (string, bool, error) {
+func (c *dirtyWorkTestCache) TryLockBucket(_ context.Context, _ SchedulerBucket, ttl time.Duration) (string, bool, error) {
+	c.lockTTL = ttl
 	if !c.lockAcquired {
 		return "", false, nil
 	}
@@ -199,6 +201,7 @@ func TestSchedulerSnapshotDirtyWorkRetriesContendedBucket(t *testing.T) {
 	err := svc.handleDirtyWork(context.Background(), SchedulerDirtyWork{Kind: SchedulerDirtyWorkGroup, EntityID: 91})
 
 	require.ErrorIs(t, err, errSchedulerBucketLockBusy)
+	require.Greater(t, cache.lockTTL, schedulerBucketRebuildLimit)
 }
 
 func TestSchedulerSnapshotDirtyWorkRejectsUnknownKind(t *testing.T) {

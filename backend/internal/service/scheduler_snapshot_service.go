@@ -20,8 +20,10 @@ var (
 )
 
 const (
-	outboxEventTimeout = 2 * time.Minute
-	dirtyWorkBatchSize = 100
+	outboxEventTimeout          = 2 * time.Minute
+	dirtyWorkBatchSize          = 100
+	schedulerBucketRebuildLimit = 30 * time.Second
+	schedulerBucketLockTTL      = schedulerBucketRebuildLimit + 5*time.Second
 )
 
 // batchSeenKey tracks which (groupID, platform) bucket sets have already been
@@ -739,7 +741,9 @@ func (s *SchedulerSnapshotService) rebuildBucket(ctx context.Context, bucket Sch
 	if s.cache == nil {
 		return ErrSchedulerCacheNotReady
 	}
-	lockToken, ok, err := s.cache.TryLockBucket(ctx, bucket, 30*time.Second)
+	// Keep the lease strictly longer than the bounded rebuild. Equal deadlines can
+	// let a successor acquire while the first writer is still finishing Redis I/O.
+	lockToken, ok, err := s.cache.TryLockBucket(ctx, bucket, schedulerBucketLockTTL)
 	if err != nil {
 		return err
 	}
@@ -752,7 +756,7 @@ func (s *SchedulerSnapshotService) rebuildBucket(ctx context.Context, bucket Sch
 		_ = s.cache.UnlockBucket(unlockCtx, bucket, lockToken)
 	}()
 
-	rebuildCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	rebuildCtx, cancel := context.WithTimeout(ctx, schedulerBucketRebuildLimit)
 	defer cancel()
 
 	accounts, err := s.loadAccountsFromDB(rebuildCtx, bucket, bucket.Mode == SchedulerModeMixed)
