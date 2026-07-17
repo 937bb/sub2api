@@ -1298,6 +1298,29 @@ func (s *AccountRepoSuite) TestResetOpenAICodexFingerprint_UpdatesOnlyOAuthLikeA
 	}
 }
 
+func (s *AccountRepoSuite) TestResetOpenAICodexFingerprint_PublishesOnlyAfterCommit() {
+	client := testEntClient(s.T())
+	account := mustCreateAccount(s.T(), client, &service.Account{
+		Name:     "fingerprint-transaction-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		Platform: service.PlatformOpenAI,
+		Type:     service.AccountTypeOAuth,
+	})
+	s.T().Cleanup(func() { _, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background()) })
+	cacheRecorder := &schedulerCacheRecorder{}
+	repo := newAccountRepositoryWithSQL(client, integrationDB, cacheRecorder)
+	fingerprint, _ := service.NormalizeOpenAICodexFingerprint(nil, service.ParseOpenAICodexUAProfile(service.DefaultOpenAICodexUserAgent), time.Now())
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+
+	s.Require().NoError(repo.ResetOpenAICodexFingerprint(txCtx, account.ID, fingerprint))
+	s.Require().Empty(cacheRecorder.setAccounts)
+	s.Require().NoError(tx.Commit())
+
+	s.Require().Len(cacheRecorder.setAccounts, 1)
+	s.Require().Contains(cacheRecorder.setAccounts[0].Extra, service.OpenAICodexFingerprintExtraKey)
+}
+
 func (s *AccountRepoSuite) TestResetOpenAICodexFingerprint_RejectsAPIKeyAccount() {
 	fingerprint, _ := service.NormalizeOpenAICodexFingerprint(nil, service.ParseOpenAICodexUAProfile(service.DefaultOpenAICodexUserAgent), time.Now())
 	account := mustCreateAccount(s.T(), s.client, &service.Account{

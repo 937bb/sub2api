@@ -1858,7 +1858,7 @@ WHERE id = $1 AND deleted_at IS NULL AND platform = $4 AND type IN ($5, $6)`,
 	if affected == 0 {
 		return service.ErrAccountNotFound
 	}
-	r.syncSchedulerAccountSnapshot(ctx, id)
+	r.syncSchedulerAccountSnapshotAfterCommit(ctx, id)
 	return nil
 }
 
@@ -1891,7 +1891,7 @@ RETURNING extra -> $2`, id, service.OpenAICodexFingerprintExtraKey, string(paylo
 		return service.OpenAICodexFingerprint{}, err
 	}
 	if inserted {
-		r.syncSchedulerAccountSnapshot(ctx, id)
+		r.syncSchedulerAccountSnapshotAfterCommit(ctx, id)
 		return out, nil
 	}
 
