@@ -28,6 +28,8 @@ func TestSchedulerCacheSetSnapshotSkipsOnlyUnencodableAccounts(t *testing.T) {
 	cache := newSchedulerCacheUnit(t)
 	bucket := service.SchedulerBucket{GroupID: 7, Platform: service.PlatformOpenAI, Mode: service.SchedulerModeSingle}
 	invalidTime := time.Date(10000, time.January, 1, 0, 0, 0, 0, time.UTC)
+	stale := service.Account{ID: 112, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey}
+	require.NoError(t, cache.SetAccount(ctx, &stale))
 
 	err := cache.SetSnapshot(ctx, bucket, []service.Account{
 		{ID: 111, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey},
@@ -40,6 +42,9 @@ func TestSchedulerCacheSetSnapshotSkipsOnlyUnencodableAccounts(t *testing.T) {
 	require.True(t, hit)
 	require.Len(t, snapshot, 1)
 	require.Equal(t, int64(111), snapshot[0].ID)
+	cachedInvalid, err := cache.GetAccount(ctx, stale.ID)
+	require.NoError(t, err)
+	require.Nil(t, cachedInvalid)
 }
 
 func TestSchedulerCacheSetAccountClearsUnencodablePayload(t *testing.T) {

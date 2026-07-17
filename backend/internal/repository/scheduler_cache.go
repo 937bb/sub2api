@@ -235,16 +235,8 @@ func (c *schedulerCache) SetAccount(ctx context.Context, account *service.Accoun
 	if account == nil || account.ID <= 0 {
 		return nil
 	}
-	cacheableAccounts, err := c.writeAccounts(ctx, []service.Account{*account})
-	if err != nil {
-		return err
-	}
-	if len(cacheableAccounts) == 0 {
-		// Do not leave a previously valid snapshot behind after the row becomes
-		// unencodable (for example, an out-of-range timestamp).
-		return c.DeleteAccount(ctx, account.ID)
-	}
-	return nil
+	_, err := c.writeAccounts(ctx, []service.Account{*account})
+	return err
 }
 
 func (c *schedulerCache) DeleteAccount(ctx context.Context, accountID int64) error {
@@ -424,6 +416,16 @@ func (c *schedulerCache) writeAccounts(ctx context.Context, accounts []service.A
 				"account_id", account.ID,
 				"error", err,
 			)
+			// A successful dirty-work acknowledgement must not leave an older
+			// account payload behind when the current row cannot be encoded.
+			id := strconv.FormatInt(account.ID, 10)
+			pipe.Del(ctx, schedulerAccountKey(id), schedulerAccountMetaKey(id))
+			pending++
+			if pending >= c.writeChunkSize {
+				if err := flush(); err != nil {
+					return nil, err
+				}
+			}
 			continue
 		}
 
