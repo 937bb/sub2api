@@ -354,7 +354,7 @@ func (r *accountRepository) Update(ctx context.Context, account *service.Account
 		}
 	}
 
-	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &account.ID, nil, buildSchedulerGroupPayload(account.GroupIDs)); err != nil {
+	if err := enqueueSchedulerOutbox(ctx, r.sqlFromContext(ctx), service.SchedulerOutboxEventAccountChanged, &account.ID, nil, buildSchedulerGroupPayload(account.GroupIDs)); err != nil {
 		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue account update failed: account=%d err=%v", account.ID, err)
 	}
 	// 普通账号编辑（如 model_mapping / credentials）也需要及时刷新单账号快照，
@@ -579,7 +579,7 @@ func (r *accountRepository) UpdateAuthAndMergeExtra(ctx context.Context, id int6
 	if affected == 0 {
 		return service.ErrAccountNotFound
 	}
-	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
+	if err := enqueueSchedulerOutbox(ctx, r.sqlFromContext(ctx), service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
 		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue auth/extra update failed: account=%d err=%v", id, err)
 	}
 	r.syncSchedulerAccountSnapshotAfterCommit(ctx, id)
@@ -1832,7 +1832,7 @@ WHERE id = $5 AND deleted_at IS NULL`,
 
 func (r *accountRepository) afterExtraUpdate(ctx context.Context, id int64, updates map[string]any, operation string) {
 	if shouldEnqueueSchedulerOutboxForExtraUpdates(updates) {
-		if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
+		if err := enqueueSchedulerOutbox(ctx, r.sqlFromContext(ctx), service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
 			logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue %s failed: account=%d err=%v", operation, id, err)
 		}
 	}

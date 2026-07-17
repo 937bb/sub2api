@@ -204,6 +204,29 @@ func (s *AccountRepoSuite) TestUpdate_PublishesOnlyAfterCommit() {
 	s.Require().Equal(service.StatusDisabled, cacheRecorder.setAccounts[0].Status)
 }
 
+func (s *AccountRepoSuite) TestUpdate_RollbackKeepsOutboxAtomic() {
+	client := testEntClient(s.T())
+	account := mustCreateAccount(s.T(), client, &service.Account{
+		Name:   "update-outbox-rollback-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		Status: service.StatusActive,
+	})
+	s.T().Cleanup(func() { _, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background()) })
+	repo := newAccountRepositoryWithSQL(client, integrationDB, &schedulerCacheRecorder{})
+	_, err := integrationDB.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+	account.Status = service.StatusDisabled
+
+	s.Require().NoError(repo.Update(txCtx, account))
+	s.Require().NoError(tx.Rollback())
+
+	var outboxCount int
+	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, "SELECT count(*) FROM scheduler_outbox").Scan(&outboxCount))
+	s.Require().Zero(outboxCount)
+}
+
 func (s *AccountRepoSuite) TestUpdate_SyncSchedulerSnapshotOnCredentialsChange() {
 	account := mustCreateAccount(s.T(), s.client, &service.Account{
 		Name:        "sync-credentials-update",
