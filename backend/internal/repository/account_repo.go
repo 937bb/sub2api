@@ -943,7 +943,8 @@ func (r *accountRepository) ListByPlatformForValidation(ctx context.Context, pla
 
 func (r *accountRepository) UpdateLastUsed(ctx context.Context, id int64) error {
 	now := time.Now()
-	rows, err := r.sql.QueryContext(ctx, `
+	exec := r.sqlFromContext(ctx)
+	rows, err := exec.QueryContext(ctx, `
 		UPDATE accounts
 		SET last_used_at = GREATEST(last_used_at, $1),
 			updated_at = NOW()
@@ -973,7 +974,7 @@ func (r *accountRepository) UpdateLastUsed(ctx context.Context, id int64) error 
 			strconv.FormatInt(id, 10): stored.Unix(),
 		},
 	}
-	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountLastUsed, &id, nil, payload); err != nil {
+	if err := enqueueSchedulerOutbox(ctx, exec, service.SchedulerOutboxEventAccountLastUsed, &id, nil, payload); err != nil {
 		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue last used failed: account=%d err=%v", id, err)
 	}
 	return nil
@@ -1005,6 +1006,7 @@ func (r *accountRepository) BatchUpdateLastUsed(ctx context.Context, updates map
 }
 
 func (r *accountRepository) batchUpdateLastUsedChunk(ctx context.Context, ids []int64, updates map[int64]time.Time) error {
+	exec := r.sqlFromContext(ctx)
 	args := make([]any, 0, len(ids)*2+1)
 	caseSQL := "UPDATE accounts SET last_used_at = GREATEST(last_used_at, CASE id"
 	idx := 1
@@ -1016,7 +1018,7 @@ func (r *accountRepository) batchUpdateLastUsedChunk(ctx context.Context, ids []
 	caseSQL += " END), updated_at = NOW() WHERE id = ANY($" + itoa(idx) + ") AND deleted_at IS NULL RETURNING id, last_used_at"
 	args = append(args, ids)
 
-	rows, err := r.sql.QueryContext(ctx, caseSQL, args...)
+	rows, err := exec.QueryContext(ctx, caseSQL, args...)
 	if err != nil {
 		return err
 	}
@@ -1041,7 +1043,7 @@ func (r *accountRepository) batchUpdateLastUsedChunk(ctx context.Context, ids []
 		return nil
 	}
 	payload := map[string]any{"last_used": lastUsedPayload}
-	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountLastUsed, nil, nil, payload); err != nil {
+	if err := enqueueSchedulerOutbox(ctx, exec, service.SchedulerOutboxEventAccountLastUsed, nil, nil, payload); err != nil {
 		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue batch last used failed: err=%v", err)
 	}
 	return nil

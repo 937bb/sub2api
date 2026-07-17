@@ -1427,6 +1427,64 @@ func (s *AccountRepoSuite) TestUpdateLastUsed() {
 	s.Require().NotNil(got.LastUsedAt)
 }
 
+func (s *AccountRepoSuite) TestUpdateLastUsed_RollbackKeepsTimestampAndOutboxAtomic() {
+	client := testEntClient(s.T())
+	original := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+	account := mustCreateAccount(s.T(), client, &service.Account{
+		Name:       "last-used-rollback-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		LastUsedAt: &original,
+	})
+	s.T().Cleanup(func() {
+		_, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background())
+	})
+	repo := newAccountRepositoryWithSQL(client, integrationDB, nil)
+	_, err := integrationDB.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+
+	s.Require().NoError(repo.UpdateLastUsed(txCtx, account.ID))
+	s.Require().NoError(tx.Rollback())
+
+	got, err := repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().NotNil(got.LastUsedAt)
+	s.Require().WithinDuration(original, *got.LastUsedAt, time.Millisecond)
+	var outboxCount int
+	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, "SELECT count(*) FROM scheduler_outbox").Scan(&outboxCount))
+	s.Require().Zero(outboxCount)
+}
+
+func (s *AccountRepoSuite) TestBatchUpdateLastUsed_RollbackKeepsTimestampAndOutboxAtomic() {
+	client := testEntClient(s.T())
+	original := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+	account := mustCreateAccount(s.T(), client, &service.Account{
+		Name:       "batch-last-used-rollback-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		LastUsedAt: &original,
+	})
+	s.T().Cleanup(func() {
+		_, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background())
+	})
+	repo := newAccountRepositoryWithSQL(client, integrationDB, nil)
+	_, err := integrationDB.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+
+	s.Require().NoError(repo.BatchUpdateLastUsed(txCtx, map[int64]time.Time{account.ID: original.Add(30 * time.Minute)}))
+	s.Require().NoError(tx.Rollback())
+
+	got, err := repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().NotNil(got.LastUsedAt)
+	s.Require().WithinDuration(original, *got.LastUsedAt, time.Millisecond)
+	var outboxCount int
+	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, "SELECT count(*) FROM scheduler_outbox").Scan(&outboxCount))
+	s.Require().Zero(outboxCount)
+}
+
 func (s *AccountRepoSuite) TestLastUsedOutboxPublishesStoredTimestampsAndExistingIDsOnly() {
 	account1 := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-used-monotonic-1"})
 	account2 := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-used-monotonic-2"})
