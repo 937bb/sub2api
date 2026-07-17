@@ -1322,6 +1322,18 @@ func (s *AccountRepoSuite) TestClearRateLimit() {
 	s.requireNoSchedulerOutbox()
 }
 
+func (s *AccountRepoSuite) TestClearTempUnschedulable_AvoidsRedundantSnapshotWrite() {
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name: "temp-unsched-unchanged-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+	})
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
+
+	s.Require().NoError(s.repo.ClearTempUnschedulable(s.ctx, account.ID))
+
+	s.Require().Empty(cacheRecorder.setAccounts)
+}
+
 func (s *AccountRepoSuite) TestTempUnschedulableFieldsLoadedByGetByIDAndGetByIDs() {
 	acc1 := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-temp-1"})
 	acc2 := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-temp-2"})

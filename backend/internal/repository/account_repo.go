@@ -1592,16 +1592,24 @@ func (r *accountRepository) SetTempUnschedulable(ctx context.Context, id int64, 
 }
 
 func (r *accountRepository) ClearTempUnschedulable(ctx context.Context, id int64) error {
-	_, err := r.sqlFromContext(ctx).ExecContext(ctx, `
+	result, err := r.sqlFromContext(ctx).ExecContext(ctx, `
 		UPDATE accounts
 		SET temp_unschedulable_until = NULL,
 			temp_unschedulable_reason = NULL,
 			updated_at = NOW()
 		WHERE id = $1
 			AND deleted_at IS NULL
+			AND (temp_unschedulable_until IS NOT NULL OR temp_unschedulable_reason IS NOT NULL)
 	`, id)
 	if err != nil {
 		return err
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if updated == 0 {
+		return nil
 	}
 	r.syncSchedulerAccountSnapshotAfterCommit(ctx, id)
 	return nil
