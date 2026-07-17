@@ -1294,6 +1294,35 @@ func (s *AccountRepoSuite) TestSetModelRateLimit_PublishesOnlyAfterCommit() {
 	s.Require().Contains(cacheRecorder.setAccounts[0].Extra, "model_rate_limits")
 }
 
+func (s *AccountRepoSuite) TestClearAntigravityQuotaScopes_RollbackKeepsExtraAndOutboxAtomic() {
+	client := testEntClient(s.T())
+	account := mustCreateAccount(s.T(), client, &service.Account{
+		Name: "clear-quota-scopes-rollback-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		Extra: map[string]any{
+			"antigravity_quota_scopes": map[string]any{"scope": "value"},
+		},
+	})
+	s.T().Cleanup(func() {
+		_, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background())
+	})
+	repo := newAccountRepositoryWithSQL(client, integrationDB, nil)
+	_, err := integrationDB.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+
+	s.Require().NoError(repo.ClearAntigravityQuotaScopes(txCtx, account.ID))
+	s.Require().NoError(tx.Rollback())
+
+	got, err := repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().Contains(got.Extra, "antigravity_quota_scopes")
+	var outboxCount int
+	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, "SELECT count(*) FROM scheduler_outbox").Scan(&outboxCount))
+	s.Require().Zero(outboxCount)
+}
+
 func (s *AccountRepoSuite) TestClearModelRateLimits_SyncsSchedulerSnapshot() {
 	account := mustCreateAccount(s.T(), s.client, &service.Account{
 		Name: "acc-clear-model-rate",

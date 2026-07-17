@@ -1614,7 +1614,7 @@ func (r *accountRepository) ClearAntigravityQuotaScopes(ctx context.Context, id 
 	if affected == 0 {
 		return service.ErrAccountNotFound
 	}
-	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
+	if err := enqueueSchedulerOutbox(ctx, r.sqlFromContext(ctx), service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
 		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue clear quota scopes failed: account=%d err=%v", id, err)
 	}
 	return nil
