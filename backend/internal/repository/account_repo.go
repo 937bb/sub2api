@@ -78,7 +78,10 @@ var schedulerNeutralExtraKeys = map[string]struct{}{
 	"passive_usage_sampled_at":             {},
 }
 
-const postgresParameterBatchSize = 50000
+const (
+	postgresParameterBatchSize         = 50000
+	schedulerSnapshotPostCommitTimeout = 5 * time.Second
+)
 
 // NewAccountRepository 创建账户仓储实例。
 // 这是对外暴露的构造函数，返回接口类型以便于依赖注入。
@@ -1059,6 +1062,9 @@ func (r *accountRepository) SetError(ctx context.Context, id int64, errorMsg str
 // unschedulable, or temporarily unschedulable, ensuring scheduler and sticky session
 // logic can promptly detect the latest account state and avoid using unavailable accounts.
 func (r *accountRepository) syncSchedulerAccountSnapshotAfterCommit(ctx context.Context, accountID int64) {
+	if r == nil || r.schedulerCache == nil || accountID <= 0 {
+		return
+	}
 	if tx := dbent.TxFromContext(ctx); tx != nil {
 		tx.OnCommit(func(next dbent.Committer) dbent.Committer {
 			return dbent.CommitFunc(func(commitCtx context.Context, committedTx *dbent.Tx) error {
@@ -1067,7 +1073,11 @@ func (r *accountRepository) syncSchedulerAccountSnapshotAfterCommit(ctx context.
 				}
 				// The base repository client can observe the update only after commit;
 				// publishing earlier would cache the previous row or a rolled-back value.
-				r.syncSchedulerAccountSnapshot(context.WithoutCancel(commitCtx), accountID)
+				publishCtx, cancel := context.WithTimeout(
+					context.WithoutCancel(commitCtx), schedulerSnapshotPostCommitTimeout,
+				)
+				defer cancel()
+				r.syncSchedulerAccountSnapshot(publishCtx, accountID)
 				return nil
 			})
 		})
