@@ -1420,6 +1420,52 @@ func (s *AccountRepoSuite) TestEnsureOpenAICodexFingerprint_ExpectedOldCASMigrat
 	s.Require().Equal(migrated, winner)
 }
 
+func (s *AccountRepoSuite) TestUpdateCredentials_PublishesOnlyAfterCommit() {
+	client := testEntClient(s.T())
+	account := mustCreateAccount(s.T(), client, &service.Account{
+		Name:        "credentials-transaction-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		Credentials: map[string]any{"access_token": "old"},
+	})
+	s.T().Cleanup(func() { _, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background()) })
+	cacheRecorder := &schedulerCacheRecorder{}
+	repo := newAccountRepositoryWithSQL(client, integrationDB, cacheRecorder)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+
+	s.Require().NoError(repo.UpdateCredentials(txCtx, account.ID, map[string]any{"access_token": "new"}))
+	s.Require().Empty(cacheRecorder.setAccounts)
+	s.Require().NoError(tx.Commit())
+
+	s.Require().Len(cacheRecorder.setAccounts, 1)
+	s.Require().Equal("new", cacheRecorder.setAccounts[0].Credentials["access_token"])
+}
+
+func (s *AccountRepoSuite) TestUpdateAuthAndMergeExtra_PublishesOnlyAfterCommit() {
+	client := testEntClient(s.T())
+	account := mustCreateAccount(s.T(), client, &service.Account{
+		Name:        "auth-extra-transaction-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		Platform:    service.PlatformOpenAI,
+		Type:        service.AccountTypeOAuth,
+		Credentials: map[string]any{"access_token": "old"},
+	})
+	s.T().Cleanup(func() { _, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background()) })
+	cacheRecorder := &schedulerCacheRecorder{}
+	repo := newAccountRepositoryWithSQL(client, integrationDB, cacheRecorder)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+
+	s.Require().NoError(repo.UpdateAuthAndMergeExtra(txCtx, account.ID, service.AccountTypeOAuth,
+		map[string]any{"access_token": "new"}, map[string]any{"org_uuid": "org"}, nil))
+	s.Require().Empty(cacheRecorder.setAccounts)
+	s.Require().NoError(tx.Commit())
+
+	s.Require().Len(cacheRecorder.setAccounts, 1)
+	s.Require().Equal("new", cacheRecorder.setAccounts[0].Credentials["access_token"])
+	s.Require().Equal("org", cacheRecorder.setAccounts[0].Extra["org_uuid"])
+}
+
 func (s *AccountRepoSuite) TestUpdateAuthAndMergeExtraPreservesConcurrentExtra() {
 	account := mustCreateAccount(s.T(), s.client, &service.Account{
 		Name:        "acc-auth-extra",

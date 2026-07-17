@@ -518,13 +518,14 @@ func (r *accountRepository) updateAccountRow(ctx context.Context, client *dbent.
 }
 
 func (r *accountRepository) UpdateCredentials(ctx context.Context, id int64, credentials map[string]any) error {
-	_, err := r.client.Account.UpdateOneID(id).
+	client := clientFromContext(ctx, r.client)
+	_, err := client.Account.UpdateOneID(id).
 		SetCredentials(normalizeJSONMap(credentials)).
 		Save(ctx)
 	if err != nil {
 		return translatePersistenceError(err, service.ErrAccountNotFound, nil)
 	}
-	r.syncSchedulerAccountSnapshot(ctx, id)
+	r.syncSchedulerAccountSnapshotAfterCommit(ctx, id)
 	return nil
 }
 
@@ -574,7 +575,7 @@ func (r *accountRepository) UpdateAuthAndMergeExtra(ctx context.Context, id int6
 	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
 		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue auth/extra update failed: account=%d err=%v", id, err)
 	}
-	r.syncSchedulerAccountSnapshot(ctx, id)
+	r.syncSchedulerAccountSnapshotAfterCommit(ctx, id)
 	return nil
 }
 
