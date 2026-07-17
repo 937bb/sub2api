@@ -151,6 +151,33 @@ func (s *GroupRepoSuite) TestDelete_RollbackKeepsGroupAndOutboxAtomic() {
 	s.Require().Zero(outboxCount)
 }
 
+func (s *GroupRepoSuite) TestDeleteCascade_RollbackKeepsGroupAndOutboxAtomic() {
+	client := testEntClient(s.T())
+	name := s.uniqueGroupName("cascade-rollback")
+	var groupID int64
+	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, `INSERT INTO groups(name, platform, status) VALUES($1, 'openai', 'active') RETURNING id`, name).Scan(&groupID))
+	s.T().Cleanup(func() {
+		_, _ = integrationDB.ExecContext(context.Background(), "DELETE FROM groups WHERE id = $1", groupID)
+	})
+	repo := newGroupRepositoryWithSQL(client, integrationDB)
+	_, err := integrationDB.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+
+	_, err = repo.DeleteCascade(txCtx, groupID)
+	s.Require().NoError(err)
+	s.Require().NoError(tx.Rollback())
+
+	var deletedAt sql.NullTime
+	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, "SELECT deleted_at FROM groups WHERE id = $1", groupID).Scan(&deletedAt))
+	s.Require().False(deletedAt.Valid)
+	var outboxCount int
+	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, "SELECT count(*) FROM scheduler_outbox").Scan(&outboxCount))
+	s.Require().Zero(outboxCount)
+}
+
 func (s *GroupRepoSuite) TestCreate() {
 	group := &service.Group{
 		Name:             "test-create",

@@ -562,26 +562,28 @@ func (r *groupRepository) DeleteAccountGroupsByGroupID(ctx context.Context, grou
 }
 
 func (r *groupRepository) DeleteCascade(ctx context.Context, id int64) ([]int64, error) {
-	g, err := r.client.Group.Query().Where(group.IDEQ(id)).Only(ctx)
+	// Reuse an explicit caller transaction; otherwise own the full cascade and
+	// its scheduler evidence under one internal commit boundary.
+	var tx *dbent.Tx
+	var err error
+	exec := clientFromContext(ctx, r.client)
+	if dbent.TxFromContext(ctx) == nil {
+		tx, err = r.client.Tx(ctx)
+		if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
+			return nil, err
+		}
+		if err == nil {
+			defer func() { _ = tx.Rollback() }()
+			exec = tx.Client()
+		}
+		// ErrTxStarted means the repository client is already transaction-bound.
+	}
+	txClient := exec
+	g, err := txClient.Group.Query().Where(group.IDEQ(id)).Only(ctx)
 	if err != nil {
 		return nil, translatePersistenceError(err, service.ErrGroupNotFound, nil)
 	}
 	groupSvc := groupEntityToService(g)
-
-	// 使用 ent 事务统一包裹：避免手工基于 *sql.Tx 构造 ent client 带来的驱动断言问题，
-	// 同时保证级联删除的原子性。
-	tx, err := r.client.Tx(ctx)
-	if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
-		return nil, err
-	}
-	exec := r.client
-	txClient := r.client
-	if err == nil {
-		defer func() { _ = tx.Rollback() }()
-		exec = tx.Client()
-		txClient = exec
-	}
-	// err 为 dbent.ErrTxStarted 时，复用当前 client 参与同一事务。
 
 	// Lock the group row to avoid concurrent writes while we cascade.
 	// 这里使用 exec.QueryContext 手动扫描，确保同一事务内加锁并能区分"未找到"与其他错误。
@@ -650,13 +652,17 @@ func (r *groupRepository) DeleteCascade(ctx context.Context, id int64) ([]int64,
 		return nil, err
 	}
 
+	outboxExec := sqlExecutor(exec)
+	if dbent.TxFromContext(ctx) == nil && tx == nil {
+		outboxExec = r.sql
+	}
+	if err := enqueueSchedulerOutbox(ctx, outboxExec, service.SchedulerOutboxEventGroupChanged, nil, &id, nil); err != nil {
+		logger.LegacyPrintf("repository.group", "[SchedulerOutbox] enqueue group cascade delete failed: group=%d err=%v", id, err)
+	}
 	if tx != nil {
 		if err := tx.Commit(); err != nil {
 			return nil, err
 		}
-	}
-	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventGroupChanged, nil, &id, nil); err != nil {
-		logger.LegacyPrintf("repository.group", "[SchedulerOutbox] enqueue group cascade delete failed: group=%d err=%v", id, err)
 	}
 
 	return affectedUserIDs, nil
