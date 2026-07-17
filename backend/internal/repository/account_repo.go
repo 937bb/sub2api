@@ -1775,6 +1775,32 @@ SELECT EXISTS (
 	return nil
 }
 
+func (r *accountRepository) ClearModelRateLimit(ctx context.Context, id int64, scope string) error {
+	if strings.TrimSpace(scope) == "" {
+		return nil
+	}
+	client := clientFromContext(ctx, r.client)
+	result, err := client.ExecContext(ctx, `
+UPDATE accounts
+SET extra = COALESCE(extra, '{}'::jsonb) #- ARRAY['model_rate_limits', $2]::text[],
+	updated_at = NOW()
+WHERE id = $1
+	AND deleted_at IS NULL
+	AND COALESCE(extra, '{}'::jsonb) #> ARRAY['model_rate_limits', $2]::text[] IS NOT NULL`, id, scope)
+	if err != nil {
+		return err
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if updated == 0 {
+		return nil
+	}
+	r.syncSchedulerAccountSnapshotAfterCommit(ctx, id)
+	return nil
+}
+
 func (r *accountRepository) ClearModelRateLimits(ctx context.Context, id int64) error {
 	client := clientFromContext(ctx, r.client)
 	rows, err := client.QueryContext(ctx, `

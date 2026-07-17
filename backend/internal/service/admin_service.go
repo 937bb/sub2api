@@ -2698,6 +2698,10 @@ type openAICodexFingerprintResetter interface {
 	ResetOpenAICodexFingerprint(ctx context.Context, id int64, fingerprint OpenAICodexFingerprint) error
 }
 
+type modelRateLimitScopeClearer interface {
+	ClearModelRateLimit(ctx context.Context, id int64, scope string) error
+}
+
 func (s *adminServiceImpl) ApplyOAuthCredentials(ctx context.Context, id int64, input *ApplyOAuthCredentialsInput) (*Account, error) {
 	input.Extra = sanitizeOpenAICodexFingerprintExtraUpdates(input.Extra)
 	account, err := s.accountRepo.GetByID(ctx, id)
@@ -2803,6 +2807,8 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	existingExtra := cloneAccountExtraForServerOwnedWrite(account.Extra)
 	existingWasOpenAIOAuthLike := account.IsOpenAIOAuthLike()
 	wasOveragesEnabled := account.IsOveragesEnabled()
+	clearCreditsExhausted := false
+	clearModelRateLimits := false
 
 	if input.Name != "" {
 		account.Name = input.Name
@@ -2835,14 +2841,12 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		account.Extra = input.Extra
 		if account.Platform == PlatformAntigravity && wasOveragesEnabled && !account.IsOveragesEnabled() {
 			delete(account.Extra, "antigravity_credits_overages") // 清理旧版 overages 运行态
-			// 清除 AICredits 限流 key
-			if rawLimits, ok := account.Extra[modelRateLimitsKey].(map[string]any); ok {
-				delete(rawLimits, creditsExhaustedKey)
-			}
+			clearCreditsExhausted = true
 		}
 		if account.Platform == PlatformAntigravity && !wasOveragesEnabled && account.IsOveragesEnabled() {
 			delete(account.Extra, modelRateLimitsKey)
 			delete(account.Extra, "antigravity_credits_overages") // 清理旧版 overages 运行态
+			clearModelRateLimits = true
 		}
 		// 校验并预计算固定时间重置的下次重置时间
 		if err := ValidateQuotaResetConfig(account.Extra); err != nil {
@@ -2916,8 +2920,37 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		}
 	}
 
-	if err := s.accountRepo.Update(ctx, account); err != nil {
+	opCtx := ctx
+	var tx *dbent.Tx
+	if (clearModelRateLimits || clearCreditsExhausted) && s.entClient != nil {
+		tx, err = s.entClient.Tx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = tx.Rollback() }()
+		opCtx = dbent.NewTxContext(ctx, tx)
+	}
+
+	if err := s.accountRepo.Update(opCtx, account); err != nil {
 		return nil, err
+	}
+	if clearModelRateLimits {
+		if err := s.accountRepo.ClearModelRateLimits(opCtx, account.ID); err != nil {
+			return nil, err
+		}
+	} else if clearCreditsExhausted {
+		clearer, ok := s.accountRepo.(modelRateLimitScopeClearer)
+		if !ok {
+			return nil, errors.New("account repository does not support model rate limit scope cleanup")
+		}
+		if err := clearer.ClearModelRateLimit(opCtx, account.ID, creditsExhaustedKey); err != nil {
+			return nil, err
+		}
+	}
+	if tx != nil {
+		if err := tx.Commit(); err != nil {
+			return nil, err
+		}
 	}
 
 	// 绑定分组

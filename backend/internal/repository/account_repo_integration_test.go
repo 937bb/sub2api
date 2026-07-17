@@ -1933,6 +1933,27 @@ func (s *AccountRepoSuite) TestClearError_UnchangedHonorsCallerTransaction() {
 
 // --- UpdateSessionWindow ---
 
+func (s *AccountRepoSuite) TestClearModelRateLimit_PreservesConcurrentScopes() {
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name: "clear-model-rate-limit-scope",
+		Extra: map[string]any{
+			"model_rate_limits": map[string]any{
+				"AICredits": map[string]any{"rate_limit_reset_at": "2099-01-01T00:00:00Z"},
+				"model-a":   map[string]any{"rate_limit_reset_at": "2099-01-02T00:00:00Z"},
+			},
+		},
+	})
+
+	s.Require().NoError(s.repo.ClearModelRateLimit(s.ctx, account.ID, "AICredits"))
+
+	got, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	limits, ok := got.Extra["model_rate_limits"].(map[string]any)
+	s.Require().True(ok)
+	s.Require().NotContains(limits, "AICredits")
+	s.Require().Contains(limits, "model-a")
+}
+
 func (s *AccountRepoSuite) TestUpdateSessionWindow() {
 	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-win"})
 	start := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
