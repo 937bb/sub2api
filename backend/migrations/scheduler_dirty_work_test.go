@@ -1,6 +1,7 @@
 package migrations
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
@@ -99,6 +100,15 @@ func TestSchedulerAccountDirtyProjectionExcludesOnlyRuntimeOverlays(t *testing.T
 	for _, exactKey := range exactKeys {
 		require.Equal(t, 1, strings.Count(sql, "'"+exactKey+"'"), "runtime Extra key must appear exactly once in the projection allowlist")
 	}
+	allowlistPattern := regexp.MustCompile(`(?s)where entry\.key not in \((.*?)\)`).FindStringSubmatch(sql)
+	require.Len(t, allowlistPattern, 2)
+	quotedKeyPattern := regexp.MustCompile(`'([^']+)'`)
+	matches := quotedKeyPattern.FindAllStringSubmatch(allowlistPattern[1], -1)
+	migrationKeys := make([]string, 0, len(matches))
+	for _, match := range matches {
+		migrationKeys = append(migrationKeys, match[1])
+	}
+	require.ElementsMatch(t, exactKeys, migrationKeys)
 	require.NotContains(t, sql, "starts_with(entry.key")
 
 	require.Contains(t, sql, "scheduler_account_lifecycle_extra(o.extra) is distinct from")
