@@ -588,44 +588,45 @@ func (r *accountRepository) UpdateAuthAndMergeExtra(ctx context.Context, id int6
 }
 
 func (r *accountRepository) Delete(ctx context.Context, id int64) error {
-	groupIDs, err := r.loadAccountGroupIDs(ctx, id)
+	if tx := dbent.TxFromContext(ctx); tx != nil {
+		return r.deleteWithClient(ctx, tx.Client(), id)
+	}
+
+	// Keep account deletion, membership evidence, and cache eviction ordered by
+	// the same commit boundary.
+	tx, err := r.client.Tx(ctx)
+	if errors.Is(err, dbent.ErrTxStarted) {
+		return r.deleteWithClient(ctx, r.client, id)
+	}
 	if err != nil {
 		return err
 	}
-	// 使用事务保证账号与关联分组的删除原子性
-	tx, err := r.client.Tx(ctx)
-	if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
+	defer func() { _ = tx.Rollback() }()
+	txCtx := dbent.NewTxContext(ctx, tx)
+	if err := r.deleteWithClient(txCtx, tx.Client(), id); err != nil {
 		return err
 	}
+	return tx.Commit()
+}
 
-	var txClient *dbent.Client
-	if err == nil {
-		defer func() { _ = tx.Rollback() }()
-		txClient = tx.Client()
-	} else {
-		// 已处于外部事务中（ErrTxStarted），复用当前 client
-		txClient = r.client
-	}
-
-	if _, err := txClient.AccountGroup.Delete().Where(dbaccountgroup.AccountIDEQ(id)).Exec(ctx); err != nil {
+func (r *accountRepository) deleteWithClient(ctx context.Context, client *dbent.Client, id int64) error {
+	groupIDs, err := r.loadAccountGroupIDsWithClient(ctx, client, id)
+	if err != nil {
 		return err
 	}
-	if _, err := txClient.ExecContext(ctx, "DELETE FROM scheduled_test_plans WHERE account_id = $1", id); err != nil {
+	if _, err := client.AccountGroup.Delete().Where(dbaccountgroup.AccountIDEQ(id)).Exec(ctx); err != nil {
 		return err
 	}
-	if _, err := txClient.Account.Delete().Where(dbaccount.IDEQ(id)).Exec(ctx); err != nil {
+	if _, err := client.ExecContext(ctx, "DELETE FROM scheduled_test_plans WHERE account_id = $1", id); err != nil {
 		return err
 	}
-
-	if tx != nil {
-		if err := tx.Commit(); err != nil {
-			return err
-		}
+	if _, err := client.Account.Delete().Where(dbaccount.IDEQ(id)).Exec(ctx); err != nil {
+		return err
 	}
-	r.deleteSchedulerAccountSnapshot(ctx, id)
-	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, buildSchedulerGroupPayload(groupIDs)); err != nil {
+	if err := enqueueSchedulerOutbox(ctx, r.sqlFromContext(ctx), service.SchedulerOutboxEventAccountChanged, &id, nil, buildSchedulerGroupPayload(groupIDs)); err != nil {
 		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue account delete failed: account=%d err=%v", id, err)
 	}
+	r.deleteSchedulerAccountSnapshotAfterCommit(ctx, id)
 	return nil
 }
 
@@ -1109,6 +1110,29 @@ func (r *accountRepository) syncSchedulerAccountSnapshot(ctx context.Context, ac
 	if err := r.schedulerCache.SetAccount(ctx, account); err != nil {
 		logger.LegacyPrintf("repository.account", "[Scheduler] sync account snapshot write failed: id=%d err=%v", accountID, err)
 	}
+}
+
+func (r *accountRepository) deleteSchedulerAccountSnapshotAfterCommit(ctx context.Context, accountID int64) {
+	if r == nil || r.schedulerCache == nil || accountID <= 0 {
+		return
+	}
+	if tx := dbent.TxFromContext(ctx); tx != nil {
+		tx.OnCommit(func(next dbent.Committer) dbent.Committer {
+			return dbent.CommitFunc(func(commitCtx context.Context, committedTx *dbent.Tx) error {
+				if err := next.Commit(commitCtx, committedTx); err != nil {
+					return err
+				}
+				deleteCtx, cancel := context.WithTimeout(
+					context.WithoutCancel(commitCtx), schedulerSnapshotPostCommitTimeout,
+				)
+				defer cancel()
+				r.deleteSchedulerAccountSnapshot(deleteCtx, accountID)
+				return nil
+			})
+		})
+		return
+	}
+	r.deleteSchedulerAccountSnapshot(ctx, accountID)
 }
 
 func (r *accountRepository) deleteSchedulerAccountSnapshot(ctx context.Context, accountID int64) {
