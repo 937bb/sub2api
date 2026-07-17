@@ -765,6 +765,13 @@ func (s *AccountRepoSuite) TestBulkUpdate_SyncSchedulerSnapshotOnDisabled() {
 
 // --- SetOverloaded / SetRateLimited / ClearRateLimit ---
 
+func (s *AccountRepoSuite) requireNoSchedulerOutbox() {
+	s.T().Helper()
+	var count int
+	s.Require().NoError(scanSingleRow(s.ctx, s.repo.sql, "SELECT COUNT(*) FROM scheduler_outbox", nil, &count))
+	s.Require().Zero(count)
+}
+
 func (s *AccountRepoSuite) TestUpdateSessionWindow_SyncsSchedulerSnapshot() {
 	account := mustCreateAccount(s.T(), s.client, &service.Account{
 		Name:                "session-window-sync",
@@ -809,6 +816,8 @@ func (s *AccountRepoSuite) TestSetOverloaded() {
 	until := time.Date(2025, 6, 15, 12, 0, 0, 0, time.UTC)
 	cacheRecorder := &schedulerCacheRecorder{}
 	s.repo.schedulerCache = cacheRecorder
+	_, err := s.repo.sql.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
 
 	s.Require().NoError(s.repo.SetOverloaded(s.ctx, account.ID, until))
 
@@ -820,11 +829,16 @@ func (s *AccountRepoSuite) TestSetOverloaded() {
 	s.Require().Equal(account.ID, cacheRecorder.setAccounts[0].ID)
 	s.Require().NotNil(cacheRecorder.setAccounts[0].OverloadUntil)
 	s.Require().WithinDuration(until, *cacheRecorder.setAccounts[0].OverloadUntil, time.Second)
+	s.requireNoSchedulerOutbox()
 }
 
 func (s *AccountRepoSuite) TestSetRateLimited() {
 	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-rl"})
 	resetAt := time.Date(2025, 6, 15, 14, 0, 0, 0, time.UTC)
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
+	_, err := s.repo.sql.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
 
 	s.Require().NoError(s.repo.SetRateLimited(s.ctx, account.ID, resetAt))
 
@@ -833,6 +847,9 @@ func (s *AccountRepoSuite) TestSetRateLimited() {
 	s.Require().NotNil(got.RateLimitedAt)
 	s.Require().NotNil(got.RateLimitResetAt)
 	s.Require().WithinDuration(resetAt, *got.RateLimitResetAt, time.Second)
+	s.Require().Len(cacheRecorder.setAccounts, 1)
+	s.Require().Equal(account.ID, cacheRecorder.setAccounts[0].ID)
+	s.requireNoSchedulerOutbox()
 }
 
 func (s *AccountRepoSuite) TestClearRateLimit() {
@@ -840,6 +857,10 @@ func (s *AccountRepoSuite) TestClearRateLimit() {
 	until := time.Now().Add(1 * time.Hour)
 	s.Require().NoError(s.repo.SetOverloaded(s.ctx, account.ID, until))
 	s.Require().NoError(s.repo.SetRateLimited(s.ctx, account.ID, until))
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
+	_, err := s.repo.sql.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
 
 	s.Require().NoError(s.repo.ClearRateLimit(s.ctx, account.ID))
 
@@ -848,15 +869,25 @@ func (s *AccountRepoSuite) TestClearRateLimit() {
 	s.Require().Nil(got.RateLimitedAt)
 	s.Require().Nil(got.RateLimitResetAt)
 	s.Require().Nil(got.OverloadUntil)
+	s.Require().Len(cacheRecorder.setAccounts, 1)
+	s.Require().Equal(account.ID, cacheRecorder.setAccounts[0].ID)
+	s.requireNoSchedulerOutbox()
 }
 
 func (s *AccountRepoSuite) TestTempUnschedulableFieldsLoadedByGetByIDAndGetByIDs() {
 	acc1 := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-temp-1"})
 	acc2 := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-temp-2"})
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
+	_, err := s.repo.sql.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
 
 	until := time.Now().Add(15 * time.Minute).UTC().Truncate(time.Second)
 	reason := `{"rule":"429","matched_keyword":"too many requests"}`
 	s.Require().NoError(s.repo.SetTempUnschedulable(s.ctx, acc1.ID, until, reason))
+	s.Require().Len(cacheRecorder.setAccounts, 1)
+	s.Require().Equal(acc1.ID, cacheRecorder.setAccounts[0].ID)
+	s.requireNoSchedulerOutbox()
 
 	gotByID, err := s.repo.GetByID(s.ctx, acc1.ID)
 	s.Require().NoError(err)
@@ -875,8 +906,7 @@ func (s *AccountRepoSuite) TestTempUnschedulableFieldsLoadedByGetByIDAndGetByIDs
 	s.Require().WithinDuration(until, *gotByIDs[1].TempUnschedulableUntil, time.Second)
 	s.Require().Equal(reason, gotByIDs[1].TempUnschedulableReason)
 
-	cacheRecorder := &schedulerCacheRecorder{}
-	s.repo.schedulerCache = cacheRecorder
+	cacheRecorder.setAccounts = nil
 
 	s.Require().NoError(s.repo.ClearTempUnschedulable(s.ctx, acc1.ID))
 	cleared, err := s.repo.GetByID(s.ctx, acc1.ID)
@@ -887,6 +917,23 @@ func (s *AccountRepoSuite) TestTempUnschedulableFieldsLoadedByGetByIDAndGetByIDs
 	s.Require().Equal(acc1.ID, cacheRecorder.setAccounts[0].ID)
 	s.Require().Nil(cacheRecorder.setAccounts[0].TempUnschedulableUntil)
 	s.Require().Equal("", cacheRecorder.setAccounts[0].TempUnschedulableReason)
+	s.requireNoSchedulerOutbox()
+}
+
+func (s *AccountRepoSuite) TestSetModelRateLimit_SyncsWithoutLifecycleOutbox() {
+	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-set-model-rate"})
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
+	_, err := s.repo.sql.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
+	resetAt := time.Now().UTC().Add(time.Hour)
+
+	s.Require().NoError(s.repo.SetModelRateLimit(s.ctx, account.ID, "gpt-5", resetAt, "runtime cooldown"))
+
+	s.Require().Len(cacheRecorder.setAccounts, 1)
+	s.Require().Equal(account.ID, cacheRecorder.setAccounts[0].ID)
+	s.Require().Contains(cacheRecorder.setAccounts[0].Extra, "model_rate_limits")
+	s.requireNoSchedulerOutbox()
 }
 
 func (s *AccountRepoSuite) TestClearModelRateLimits_SyncsSchedulerSnapshot() {

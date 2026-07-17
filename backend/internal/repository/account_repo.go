@@ -62,6 +62,7 @@ var schedulerNeutralExtraKeyPrefixes = []string{
 var schedulerNeutralExtraKeys = map[string]struct{}{
 	service.OpenAICodexFingerprintExtraKey: {},
 	"codex_usage_updated_at":               {},
+	"model_rate_limits":                    {},
 	"session_window_utilization":           {},
 }
 
@@ -1399,9 +1400,6 @@ func (r *accountRepository) SetRateLimited(ctx context.Context, id int64, resetA
 	if err != nil {
 		return err
 	}
-	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
-		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue rate limit failed: account=%d err=%v", id, err)
-	}
 	r.syncSchedulerAccountSnapshot(ctx, id)
 	return nil
 }
@@ -1452,9 +1450,6 @@ func (r *accountRepository) SetModelRateLimit(ctx context.Context, id int64, sco
 	if affected == 0 {
 		return service.ErrAccountNotFound
 	}
-	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
-		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue model rate limit failed: account=%d err=%v", id, err)
-	}
 	r.syncSchedulerAccountSnapshot(ctx, id)
 	return nil
 }
@@ -1466,9 +1461,6 @@ func (r *accountRepository) SetOverloaded(ctx context.Context, id int64, until t
 		Save(ctx)
 	if err != nil {
 		return err
-	}
-	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
-		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue overload failed: account=%d err=%v", id, err)
 	}
 	r.syncSchedulerAccountSnapshot(ctx, id)
 	return nil
@@ -1494,9 +1486,6 @@ func (r *accountRepository) SetTempUnschedulable(ctx context.Context, id int64, 
 	if affected <= 0 {
 		return nil
 	}
-	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
-		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue temp unschedulable failed: account=%d err=%v", id, err)
-	}
 	r.syncSchedulerAccountSnapshot(ctx, id)
 	return nil
 }
@@ -1513,9 +1502,6 @@ func (r *accountRepository) ClearTempUnschedulable(ctx context.Context, id int64
 	if err != nil {
 		return err
 	}
-	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
-		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue clear temp unschedulable failed: account=%d err=%v", id, err)
-	}
 	r.syncSchedulerAccountSnapshot(ctx, id)
 	return nil
 }
@@ -1529,9 +1515,6 @@ func (r *accountRepository) ClearRateLimit(ctx context.Context, id int64) error 
 		Save(ctx)
 	if err != nil {
 		return err
-	}
-	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
-		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue clear rate limit failed: account=%d err=%v", id, err)
 	}
 	r.syncSchedulerAccountSnapshot(ctx, id)
 	return nil

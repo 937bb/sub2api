@@ -37,3 +37,13 @@ func TestShouldEnqueueSchedulerOutboxForExtraUpdates_OpenAICodexFingerprintIsNeu
 		t.Fatalf("expected codex fingerprint update to avoid scheduler outbox")
 	}
 }
+
+func TestShouldEnqueueSchedulerOutboxForExtraUpdates_ModelRateLimitsAreNeutral(t *testing.T) {
+	updates := map[string]any{
+		"model_rate_limits": map[string]any{"gpt-5": map[string]any{"rate_limit_reset_at": "2026-07-17T01:00:00Z"}},
+	}
+
+	if shouldEnqueueSchedulerOutboxForExtraUpdates(updates) {
+		t.Fatalf("expected model rate limit update to avoid scheduler outbox")
+	}
+}
