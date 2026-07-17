@@ -1933,6 +1933,33 @@ func (s *AccountRepoSuite) TestClearError_UnchangedHonorsCallerTransaction() {
 
 // --- UpdateSessionWindow ---
 
+func (s *AccountRepoSuite) TestClearModelRateLimit_PublishesOnlyAfterCommit() {
+	client := testEntClient(s.T())
+	account := mustCreateAccount(s.T(), client, &service.Account{
+		Name: "clear-model-rate-limit-transaction-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		Extra: map[string]any{
+			"model_rate_limits": map[string]any{
+				"AICredits": map[string]any{"rate_limit_reset_at": "2099-01-01T00:00:00Z"},
+			},
+		},
+	})
+	s.T().Cleanup(func() { _, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background()) })
+	cacheRecorder := &schedulerCacheRecorder{}
+	repo := newAccountRepositoryWithSQL(client, integrationDB, cacheRecorder)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+
+	s.Require().NoError(repo.ClearModelRateLimit(txCtx, account.ID, "AICredits"))
+	s.Require().Empty(cacheRecorder.setAccounts)
+	s.Require().NoError(tx.Commit())
+
+	s.Require().Len(cacheRecorder.setAccounts, 1)
+	limits, ok := cacheRecorder.setAccounts[0].Extra["model_rate_limits"].(map[string]any)
+	s.Require().True(ok)
+	s.Require().NotContains(limits, "AICredits")
+}
+
 func (s *AccountRepoSuite) TestClearModelRateLimit_PreservesConcurrentScopes() {
 	account := mustCreateAccount(s.T(), s.client, &service.Account{
 		Name: "clear-model-rate-limit-scope",
