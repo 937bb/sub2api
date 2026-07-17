@@ -1,7 +1,6 @@
 <template>
-  <div class="min-h-screen bg-gray-50 dark:bg-dark-950">
-    <!-- Background Decoration -->
-    <div class="pointer-events-none fixed inset-0 bg-mesh-gradient"></div>
+  <div class="min-h-screen">
+    <!-- 背景由全局 body::before 的 mesh 壁纸提供,外壳保持透明以透出玻璃折射 -->
 
     <!-- Sidebar -->
     <AppSidebar />
@@ -9,13 +8,13 @@
     <!-- Main Content Area -->
     <div
       class="relative min-h-screen transition-all duration-300"
-      :class="[sidebarCollapsed ? 'lg:ml-[72px]' : 'lg:ml-64']"
+      :class="[sidebarCollapsed ? 'lg:ml-[6rem]' : 'lg:ml-[17.5rem]']"
     >
       <!-- Header -->
       <AppHeader />
 
       <!-- Main Content -->
-      <main class="p-4 md:p-6 lg:p-8">
+      <main class="px-4 pb-8 pt-4 md:px-6 lg:px-8 lg:pr-6">
         <slot />
       </main>
     </div>

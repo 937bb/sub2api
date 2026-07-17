@@ -39,7 +39,7 @@
         <div
           v-for="attr in attributes"
           :key="attr.id"
-          class="flex items-center gap-3 rounded-lg border border-gray-200 bg-white p-3 dark:border-dark-600 dark:bg-dark-800"
+          class="flex items-center gap-3 rounded-lg border border-gray-200 bg-[var(--glass-bg-content)] p-3 dark:border-dark-600 "
         >
           <!-- Drag Handle -->
           <div class="cursor-move text-gray-400 hover:text-gray-600 dark:hover:text-gray-300" :title="t('admin.users.attributes.dragToReorder')">

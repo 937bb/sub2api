@@ -1,5 +1,7 @@
 <template>
-  <header class="glass sticky top-0 z-30 border-b border-gray-200/50 dark:border-dark-700/50">
+  <header
+    class="glass sticky top-3 z-30 mx-3 mt-3 rounded-2xl border border-[var(--glass-border)] shadow-[inset_0_0.5px_0_0_rgba(255,255,255,0.6),0_16px_40px_-24px_rgba(0,0,0,0.35)] lg:mx-0 lg:mr-3"
+  >
     <div class="flex h-16 items-center justify-between px-4 md:px-6">
       <!-- Left: Mobile Menu Toggle + Page Title -->
       <div class="flex items-center gap-4">

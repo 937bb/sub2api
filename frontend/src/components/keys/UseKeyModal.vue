@@ -369,9 +369,9 @@ const wrapToken = (className: string, value: string) =>
 
 const keyword = (value: string) => wrapToken('text-emerald-300', value)
 const variable = (value: string) => wrapToken('text-sky-200', value)
-const operator = (value: string) => wrapToken('text-slate-400', value)
+const operator = (value: string) => wrapToken('text-zinc-400', value)
 const string = (value: string) => wrapToken('text-amber-200', value)
-const comment = (value: string) => wrapToken('text-slate-500', value)
+const comment = (value: string) => wrapToken('text-zinc-500', value)
 
 // Syntax highlighting helpers
 // Generate file configs based on platform and active tab

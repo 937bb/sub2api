@@ -1,7 +1,7 @@
 <template>
   <div v-if="!isDesktopViewport" class="space-y-3">
     <template v-if="loading">
-      <div v-for="i in 5" :key="i" class="rounded-lg border border-gray-200 bg-white p-4 dark:border-dark-700 dark:bg-dark-900">
+      <div v-for="i in 5" :key="i" class="rounded-lg border border-gray-200 bg-[var(--glass-bg-content)] p-4 dark:border-dark-700">
         <div class="space-y-3">
           <div v-for="column in dataColumns" :key="column.key" class="flex justify-between">
             <div class="h-4 w-20 animate-pulse rounded bg-gray-200 dark:bg-dark-700"></div>
@@ -15,7 +15,7 @@
     </template>
 
     <template v-else-if="!data || data.length === 0">
-      <div class="rounded-lg border border-gray-200 bg-white p-12 text-center dark:border-dark-700 dark:bg-dark-900">
+      <div class="rounded-lg border border-gray-200 bg-[var(--glass-bg-content)] p-12 text-center dark:border-dark-700">
         <slot name="empty">
           <div class="flex flex-col items-center">
             <Icon
@@ -35,7 +35,7 @@
       <div
         v-for="(row, index) in sortedData"
         :key="resolveRowKey(row, index)"
-        class="rounded-lg border border-gray-200 bg-white p-4 dark:border-dark-700 dark:bg-dark-900"
+        class="rounded-lg border border-gray-200 bg-[var(--glass-bg-content)] p-4 dark:border-dark-700"
       >
         <div class="space-y-3">
           <div
@@ -78,9 +78,9 @@
             scope="col"
             :class="[
               'sticky-header-cell py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-dark-400',
-              getAdaptivePaddingClass(),
+              adaptivePaddingClass,
               { 'cursor-pointer hover:bg-gray-100 dark:hover:bg-dark-700': column.sortable },
-              getStickyColumnClass(column, index),
+              stickyClassByIndex[index],
               column.class
             ]"
             @click="column.sortable && handleSort(column.key)"
@@ -118,10 +118,10 @@
           </th>
         </tr>
       </thead>
-      <tbody class="table-body divide-y divide-gray-200 bg-white dark:divide-dark-700 dark:bg-dark-900">
+      <tbody class="table-body divide-y divide-gray-200 bg-transparent dark:divide-dark-700">
         <!-- Loading skeleton -->
         <tr v-if="loading" v-for="i in 5" :key="i">
-          <td v-for="column in columns" :key="column.key" :class="['whitespace-nowrap py-4', getAdaptivePaddingClass()]">
+          <td v-for="column in columns" :key="column.key" :class="['whitespace-nowrap py-4', adaptivePaddingClass]">
             <div class="animate-pulse">
               <div class="h-4 w-3/4 rounded bg-gray-200 dark:bg-dark-700"></div>
             </div>
@@ -132,7 +132,7 @@
         <tr v-else-if="!data || data.length === 0">
           <td
             :colspan="columns.length"
-            :class="['py-12 text-center text-gray-500 dark:text-dark-400', getAdaptivePaddingClass()]"
+            :class="['py-12 text-center text-gray-500 dark:text-dark-400', adaptivePaddingClass]"
           >
             <slot name="empty">
               <div class="flex flex-col items-center">
@@ -169,8 +169,8 @@
               :key="column.key"
               :class="[
                 'whitespace-nowrap py-4 text-sm text-gray-900 dark:text-gray-100',
-                getAdaptivePaddingClass(),
-                getStickyColumnClass(column, colIndex),
+                adaptivePaddingClass,
+                stickyClassByIndex[colIndex],
                 column.class
               ]"
             >
@@ -678,6 +678,15 @@ const getAdaptivePaddingClass = () => {
   }
 }
 
+// 性能:内边距只随列数变化,缓存为 computed,避免每个单元格每次渲染都重算
+const adaptivePaddingClass = computed(() => getAdaptivePaddingClass())
+
+// 性能:sticky 列 class 只随列/固定配置变化,预计算为按列索引的数组,
+// 避免虚拟滚动时每个可见单元格每帧都调用 getStickyColumnClass()
+const stickyClassByIndex = computed(() =>
+  props.columns.map((column, index) => getStickyColumnClass(column, index))
+)
+
 // Init + keep persisted sort state consistent with current columns
 const didInitSort = ref(false)
 
@@ -752,7 +761,7 @@ defineExpose({
 }
 
 .dark .table-wrapper .table-header {
-  background-color: rgb(31 41 55);
+  background-color: rgb(38 40 46);
 }
 
 /* 表体保持在表头下方 */
@@ -770,7 +779,7 @@ defineExpose({
 }
 
 .dark .sticky-header-cell {
-  background-color: rgb(31 41 55);
+  background-color: rgb(38 40 46);
 }
 
 /* Sticky 列基础样式 */
@@ -810,7 +819,7 @@ tbody .sticky-col {
 }
 
 .dark tbody .sticky-col {
-  background-color: rgb(17 24 39);
+  background-color: rgb(22 23 27);
 }
 
 /* hover 状态保持 */
@@ -819,7 +828,7 @@ tbody tr:hover .sticky-col {
 }
 
 .dark tbody tr:hover .sticky-col {
-  background-color: rgb(31 41 55);
+  background-color: rgb(38 40 46);
 }
 
 /* 阴影只在可滚动时显示 */

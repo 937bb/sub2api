@@ -1,5 +1,5 @@
 <template>
-  <div class="flex h-full min-h-0 flex-col bg-white dark:bg-dark-900">
+  <div class="flex h-full min-h-0 flex-col bg-[var(--glass-bg-content)] ">
     <!-- Loading State -->
     <div v-if="loading" class="flex flex-1 items-center justify-center py-10">
       <div class="h-8 w-8 animate-spin rounded-full border-b-2 border-primary-600"></div>
@@ -9,7 +9,7 @@
     <div v-else class="flex min-h-0 flex-1 flex-col">
       <div class="min-h-0 flex-1 overflow-auto border-b border-gray-200 dark:border-dark-700">
         <table class="w-full border-separate border-spacing-0">
-          <thead class="sticky top-0 z-10 bg-gray-50 dark:bg-dark-800">
+          <thead class="sticky top-0 z-10 border border-gray-200 bg-white/40 dark:border-white/10 dark:bg-white/[0.03]">
             <tr>
               <th class="border-b border-gray-200 px-4 py-2.5 text-left text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:border-dark-700 dark:text-dark-400">
                 {{ t('admin.ops.errorLog.time') }}

@@ -187,7 +187,7 @@ const isWxpay = computed(() => isBuiltInWxpayMethod(props.paymentType))
 const qrBorderClass = computed(() => {
   if (isAlipay.value) return 'border-[#00AEEF] bg-blue-50 dark:border-[#00AEEF]/70 dark:bg-blue-950/20'
   if (isWxpay.value) return 'border-[#2BB741] bg-green-50 dark:border-[#2BB741]/70 dark:bg-green-950/20'
-  return 'border-gray-200 bg-white dark:border-dark-600 dark:bg-dark-800'
+  return 'border-gray-200 bg-[var(--glass-bg-content)] dark:border-dark-600 '
 })
 
 const qrLogoBgClass = computed(() => {
