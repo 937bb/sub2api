@@ -107,7 +107,8 @@ func (r *accountRepository) Create(ctx context.Context, account *service.Account
 		return service.ErrAccountNilInput
 	}
 
-	builder := r.client.Account.Create().
+	client := clientFromContext(ctx, r.client)
+	builder := client.Account.Create().
 		SetName(account.Name).
 		SetNillableNotes(account.Notes).
 		SetPlatform(account.Platform).
@@ -164,7 +165,7 @@ func (r *accountRepository) Create(ctx context.Context, account *service.Account
 	account.ID = created.ID
 	account.CreatedAt = created.CreatedAt
 	account.UpdatedAt = created.UpdatedAt
-	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &account.ID, nil, buildSchedulerGroupPayload(account.GroupIDs)); err != nil {
+	if err := enqueueSchedulerOutbox(ctx, r.sqlFromContext(ctx), service.SchedulerOutboxEventAccountChanged, &account.ID, nil, buildSchedulerGroupPayload(account.GroupIDs)); err != nil {
 		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue account create failed: account=%d err=%v", account.ID, err)
 	}
 	return nil

@@ -104,6 +104,31 @@ func TestAccountRepoSuite(t *testing.T) {
 
 // --- Create / GetByID / Update / Delete ---
 
+func (s *AccountRepoSuite) TestCreate_RollbackKeepsAccountAndOutboxAtomic() {
+	client := testEntClient(s.T())
+	repo := newAccountRepositoryWithSQL(client, integrationDB, nil)
+	_, err := integrationDB.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+	account := &service.Account{
+		Name:     "create-rollback-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		Platform: service.PlatformOpenAI,
+		Type:     service.AccountTypeOAuth,
+	}
+
+	s.Require().NoError(repo.Create(txCtx, account))
+	s.Require().Positive(account.ID)
+	s.Require().NoError(tx.Rollback())
+
+	var accountCount, outboxCount int
+	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, "SELECT count(*) FROM accounts WHERE id = $1", account.ID).Scan(&accountCount))
+	s.Require().Zero(accountCount)
+	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, "SELECT count(*) FROM scheduler_outbox").Scan(&outboxCount))
+	s.Require().Zero(outboxCount)
+}
+
 func (s *AccountRepoSuite) TestCreate() {
 	account := &service.Account{
 		Name:        "test-create",
