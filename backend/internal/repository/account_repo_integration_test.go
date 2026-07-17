@@ -1295,6 +1295,28 @@ func (s *AccountRepoSuite) TestSetRateLimited() {
 	s.requireNoSchedulerOutbox()
 }
 
+func (s *AccountRepoSuite) TestSetRateLimited_DoesNotShortenExistingCooldown() {
+	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-rate-limit-monotonic"})
+	later := time.Now().UTC().Add(2 * time.Hour)
+	earlier := later.Add(-time.Hour)
+	s.Require().NoError(s.repo.SetRateLimited(s.ctx, account.ID, later))
+	first, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().NotNil(first.RateLimitedAt)
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
+
+	s.Require().NoError(s.repo.SetRateLimited(s.ctx, account.ID, earlier))
+
+	got, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().NotNil(got.RateLimitedAt)
+	s.Require().NotNil(got.RateLimitResetAt)
+	s.Require().WithinDuration(*first.RateLimitedAt, *got.RateLimitedAt, time.Microsecond)
+	s.Require().WithinDuration(later, *got.RateLimitResetAt, time.Microsecond)
+	s.Require().Empty(cacheRecorder.setAccounts)
+}
+
 func (s *AccountRepoSuite) TestSetTempUnschedulable_RollbackDoesNotPublishSnapshot() {
 	client := testEntClient(s.T())
 	account := mustCreateAccount(s.T(), client, &service.Account{

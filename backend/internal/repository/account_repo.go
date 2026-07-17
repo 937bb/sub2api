@@ -1500,15 +1500,24 @@ func (r *accountRepository) ListSchedulableByGroupIDAndPlatforms(ctx context.Con
 }
 
 func (r *accountRepository) SetRateLimited(ctx context.Context, id int64, resetAt time.Time) error {
-	now := time.Now()
-	client := clientFromContext(ctx, r.client)
-	_, err := client.Account.Update().
-		Where(dbaccount.IDEQ(id)).
-		SetRateLimitedAt(now).
-		SetRateLimitResetAt(resetAt).
-		Save(ctx)
+	result, err := r.sqlFromContext(ctx).ExecContext(ctx, `
+		UPDATE accounts
+		SET rate_limited_at = NOW(),
+			rate_limit_reset_at = $1,
+			updated_at = NOW()
+		WHERE id = $2
+			AND deleted_at IS NULL
+			AND (rate_limit_reset_at IS NULL OR rate_limit_reset_at < $1)
+	`, resetAt, id)
 	if err != nil {
 		return err
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if updated == 0 {
+		return nil
 	}
 	r.syncSchedulerAccountSnapshotAfterCommit(ctx, id)
 	return nil
