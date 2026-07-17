@@ -193,6 +193,54 @@ func (s *AccountRepoSuite) TestUpdate_OpenAIOAuthLikePreservesConcurrentFingerpr
 	s.Require().Equal(fingerprint.InstallationID, persisted.InstallationID)
 }
 
+func (s *AccountRepoSuite) TestUpdate_PreservesConcurrentRuntimeState() {
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:  "acc-update-runtime-race",
+		Extra: map[string]any{"editable": "stale"},
+	})
+	stale := *account
+	stale.Name = "updated"
+	stale.Extra = map[string]any{
+		"editable":                    "fresh",
+		"codex_usage_updated_at":      "2025-01-01T00:00:00Z",
+		"codex_5h_used_percent":       10.0,
+		"unknown_lifecycle_attribute": "preserved",
+	}
+
+	observedAt := time.Now().UTC()
+	resetAt := observedAt.Add(5 * time.Hour)
+	s.Require().NoError(s.repo.SetRateLimited(s.ctx, account.ID, resetAt))
+	s.Require().NoError(s.repo.SetOverloaded(s.ctx, account.ID, observedAt.Add(time.Minute)))
+	s.Require().NoError(s.repo.UpdateSessionWindow(
+		s.ctx,
+		account.ID,
+		&observedAt,
+		&resetAt,
+		"allowed_warning",
+	))
+	updated, err := s.repo.UpdateRuntimeExtra(s.ctx, account.ID, map[string]any{
+		"codex_5h_used_percent": 75.0,
+	}, "codex_usage_updated_at", observedAt)
+	s.Require().NoError(err)
+	s.Require().True(updated)
+
+	s.Require().NoError(s.repo.Update(s.ctx, &stale))
+
+	got, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().Equal("updated", got.Name)
+	s.Require().Equal("fresh", got.Extra["editable"])
+	s.Require().Equal("preserved", got.Extra["unknown_lifecycle_attribute"])
+	s.Require().Equal(75.0, got.Extra["codex_5h_used_percent"])
+	s.Require().Equal(observedAt.Format(time.RFC3339Nano), got.Extra["codex_usage_updated_at"])
+	s.Require().NotNil(got.RateLimitedAt)
+	s.Require().WithinDuration(resetAt, *got.RateLimitResetAt, time.Microsecond)
+	s.Require().WithinDuration(observedAt.Add(time.Minute), *got.OverloadUntil, time.Microsecond)
+	s.Require().WithinDuration(observedAt, *got.SessionWindowStart, time.Microsecond)
+	s.Require().WithinDuration(resetAt, *got.SessionWindowEnd, time.Microsecond)
+	s.Require().Equal("allowed_warning", got.SessionWindowStatus)
+}
+
 func (s *AccountRepoSuite) TestUpdate_SyncSchedulerSnapshotOnDisabled() {
 	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "sync-update", Status: service.StatusActive, Schedulable: true})
 	cacheRecorder := &schedulerCacheRecorder{}

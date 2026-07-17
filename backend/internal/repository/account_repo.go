@@ -345,14 +345,8 @@ func (r *accountRepository) Update(ctx context.Context, account *service.Account
 		return nil
 	}
 
-	if account.IsOpenAIOAuthLike() {
-		if err := r.updateOpenAIOAuthLikeAccount(ctx, account); err != nil {
-			return err
-		}
-	} else {
-		if err := r.updateAccountRow(ctx, clientFromContext(ctx, r.client), account); err != nil {
-			return err
-		}
+	if err := r.updateAccountPreservingRuntime(ctx, account); err != nil {
+		return err
 	}
 
 	if err := enqueueSchedulerOutbox(ctx, r.sqlFromContext(ctx), service.SchedulerOutboxEventAccountChanged, &account.ID, nil, buildSchedulerGroupPayload(account.GroupIDs)); err != nil {
@@ -365,45 +359,46 @@ func (r *accountRepository) Update(ctx context.Context, account *service.Account
 	return nil
 }
 
-func (r *accountRepository) updateOpenAIOAuthLikeAccount(ctx context.Context, account *service.Account) error {
+func (r *accountRepository) updateAccountPreservingRuntime(ctx context.Context, account *service.Account) error {
 	if tx := dbent.TxFromContext(ctx); tx != nil {
-		return r.updateOpenAIOAuthLikeAccountWithClient(ctx, tx.Client(), account)
+		return r.updateAccountPreservingRuntimeWithClient(ctx, tx.Client(), account)
 	}
 
 	tx, err := r.client.Tx(ctx)
 	if err != nil {
 		if errors.Is(err, dbent.ErrTxStarted) {
-			return r.updateOpenAIOAuthLikeAccountWithClient(ctx, r.client, account)
+			return r.updateAccountPreservingRuntimeWithClient(ctx, r.client, account)
 		}
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
 
 	txCtx := dbent.NewTxContext(ctx, tx)
-	if err := r.updateOpenAIOAuthLikeAccountWithClient(txCtx, tx.Client(), account); err != nil {
+	if err := r.updateAccountPreservingRuntimeWithClient(txCtx, tx.Client(), account); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
-func (r *accountRepository) updateOpenAIOAuthLikeAccountWithClient(ctx context.Context, client *dbent.Client, account *service.Account) error {
-	if err := r.mergeCurrentOpenAICodexFingerprintForFullUpdate(ctx, client, account); err != nil {
+func (r *accountRepository) updateAccountPreservingRuntimeWithClient(ctx context.Context, client *dbent.Client, account *service.Account) error {
+	if err := r.mergeCurrentRuntimeForFullUpdate(ctx, client, account); err != nil {
 		return err
 	}
 	return r.updateAccountRow(ctx, client, account)
 }
 
-func (r *accountRepository) mergeCurrentOpenAICodexFingerprintForFullUpdate(ctx context.Context, client *dbent.Client, account *service.Account) error {
+func (r *accountRepository) mergeCurrentRuntimeForFullUpdate(ctx context.Context, client *dbent.Client, account *service.Account) error {
 	rows, err := client.QueryContext(ctx, `
-SELECT (
-	CASE WHEN platform = $3 AND type IN ($4, $5)
-		THEN COALESCE(extra, '{}'::jsonb) -> $2
-		ELSE NULL
-	END
-)::text
+SELECT COALESCE(extra, '{}'::jsonb)::text,
+	rate_limited_at,
+	rate_limit_reset_at,
+	overload_until,
+	session_window_start,
+	session_window_end,
+	session_window_status
 FROM accounts
 WHERE id = $1 AND deleted_at IS NULL
-FOR UPDATE`, account.ID, service.OpenAICodexFingerprintExtraKey, service.PlatformOpenAI, service.AccountTypeOAuth, service.AccountTypeSetupToken)
+FOR UPDATE`, account.ID)
 	if err != nil {
 		return err
 	}
@@ -415,28 +410,58 @@ FOR UPDATE`, account.ID, service.OpenAICodexFingerprintExtraKey, service.Platfor
 		return service.ErrAccountNotFound
 	}
 
-	var raw sql.NullString
-	if err := rows.Scan(&raw); err != nil {
+	var rawExtra string
+	var rateLimitedAt, rateLimitResetAt, overloadUntil sql.NullTime
+	var sessionWindowStart, sessionWindowEnd sql.NullTime
+	var sessionWindowStatus sql.NullString
+	if err := rows.Scan(
+		&rawExtra,
+		&rateLimitedAt,
+		&rateLimitResetAt,
+		&overloadUntil,
+		&sessionWindowStart,
+		&sessionWindowEnd,
+		&sessionWindowStatus,
+	); err != nil {
 		return err
 	}
 	if err := rows.Err(); err != nil {
 		return err
 	}
 
-	if !raw.Valid {
-		delete(account.Extra, service.OpenAICodexFingerprintExtraKey)
-		return nil
-	}
-
-	var fingerprint any
-	if err := json.Unmarshal([]byte(raw.String), &fingerprint); err != nil {
+	var currentExtra map[string]any
+	if err := json.Unmarshal([]byte(rawExtra), &currentExtra); err != nil {
 		return err
 	}
 	if account.Extra == nil {
 		account.Extra = map[string]any{}
 	}
-	account.Extra[service.OpenAICodexFingerprintExtraKey] = fingerprint
+	for key := range schedulerNeutralExtraKeys {
+		if value, ok := currentExtra[key]; ok {
+			account.Extra[key] = value
+		} else {
+			delete(account.Extra, key)
+		}
+	}
+
+	account.RateLimitedAt = nullTimePointer(rateLimitedAt)
+	account.RateLimitResetAt = nullTimePointer(rateLimitResetAt)
+	account.OverloadUntil = nullTimePointer(overloadUntil)
+	account.SessionWindowStart = nullTimePointer(sessionWindowStart)
+	account.SessionWindowEnd = nullTimePointer(sessionWindowEnd)
+	if sessionWindowStatus.Valid {
+		account.SessionWindowStatus = sessionWindowStatus.String
+	} else {
+		account.SessionWindowStatus = ""
+	}
 	return nil
+}
+
+func nullTimePointer(value sql.NullTime) *time.Time {
+	if !value.Valid {
+		return nil
+	}
+	return &value.Time
 }
 
 func (r *accountRepository) updateAccountRow(ctx context.Context, client *dbent.Client, account *service.Account) error {
