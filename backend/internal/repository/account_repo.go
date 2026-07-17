@@ -1911,7 +1911,6 @@ func shouldSyncSchedulerSnapshotForExtraUpdates(updates map[string]any) bool {
 }
 
 func isSchedulerNeutralExtraKey(key string) bool {
-	key = strings.TrimSpace(key)
 	if key == "" {
 		return false
 	}

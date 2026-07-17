@@ -66,9 +66,11 @@ func TestShouldEnqueueSchedulerOutboxForExtraUpdates_UnknownUsagePrefixedKeysAre
 		"codex_primary_future_policy",
 		"codex_5h_future_policy",
 		"passive_usage_future_policy",
+		" codex_5h_used_percent",
+		"codex_5h_used_percent ",
 	} {
 		if !shouldEnqueueSchedulerOutboxForExtraUpdates(map[string]any{key: true}) {
-			t.Fatalf("expected unknown prefixed key %q to enqueue scheduler outbox", key)
+			t.Fatalf("expected unknown key %q to enqueue scheduler outbox", key)
 		}
 	}
 }
