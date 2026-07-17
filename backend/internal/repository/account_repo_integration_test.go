@@ -1237,6 +1237,44 @@ func (s *AccountRepoSuite) TestSetOverloaded() {
 	s.requireNoSchedulerOutbox()
 }
 
+func (s *AccountRepoSuite) TestSetOverloaded_DoesNotShortenExistingCooldown() {
+	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-over-monotonic"})
+	later := time.Now().UTC().Add(2 * time.Hour)
+	earlier := later.Add(-time.Hour)
+	s.Require().NoError(s.repo.SetOverloaded(s.ctx, account.ID, later))
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
+
+	s.Require().NoError(s.repo.SetOverloaded(s.ctx, account.ID, earlier))
+
+	got, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().NotNil(got.OverloadUntil)
+	s.Require().WithinDuration(later, *got.OverloadUntil, time.Microsecond)
+	s.Require().Empty(cacheRecorder.setAccounts)
+}
+
+func (s *AccountRepoSuite) TestSetOverloaded_RollbackDoesNotPublishSnapshot() {
+	client := testEntClient(s.T())
+	account := mustCreateAccount(s.T(), client, &service.Account{
+		Name: "overload-rollback-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+	})
+	s.T().Cleanup(func() { _, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background()) })
+	cacheRecorder := &schedulerCacheRecorder{}
+	repo := newAccountRepositoryWithSQL(client, integrationDB, cacheRecorder)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+
+	s.Require().NoError(repo.SetOverloaded(txCtx, account.ID, time.Now().UTC().Add(time.Hour)))
+	s.Require().NoError(tx.Rollback())
+
+	s.Require().Empty(cacheRecorder.setAccounts)
+	got, err := repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().Nil(got.OverloadUntil)
+}
+
 func (s *AccountRepoSuite) TestSetRateLimited() {
 	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-rl"})
 	resetAt := time.Date(2025, 6, 15, 14, 0, 0, 0, time.UTC)
