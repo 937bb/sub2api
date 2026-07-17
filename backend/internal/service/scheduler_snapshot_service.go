@@ -33,21 +33,23 @@ type batchSeenKey struct {
 }
 
 type SchedulerSnapshotService struct {
-	cache         SchedulerCache
-	outboxRepo    SchedulerOutboxRepository
-	dirtyWorkRepo SchedulerDirtyWorkRepository
-	ownershipRepo SchedulerOwnershipRepository
-	accountRepo   AccountRepository
-	groupRepo     GroupRepository
-	cfg           *config.Config
-	stopCh        chan struct{}
-	stopOnce      sync.Once
-	workerCtx     context.Context
-	workerCancel  context.CancelFunc
-	wg            sync.WaitGroup
-	fallbackLimit *fallbackLimiter
-	lagMu         sync.Mutex
-	lagFailures   int
+	cache               SchedulerCache
+	outboxRepo          SchedulerOutboxRepository
+	dirtyWorkRepo       SchedulerDirtyWorkRepository
+	ownershipRepo       SchedulerOwnershipRepository
+	accountRepo         AccountRepository
+	groupRepo           GroupRepository
+	cfg                 *config.Config
+	stopCh              chan struct{}
+	stopOnce            sync.Once
+	workerCtx           context.Context
+	workerCancel        context.CancelFunc
+	wg                  sync.WaitGroup
+	fallbackLimit       *fallbackLimiter
+	lagMu               sync.Mutex
+	lagFailures         int
+	dirtyLagFailures    int
+	dirtyRebuildLatched bool
 }
 
 func NewSchedulerSnapshotService(
@@ -322,6 +324,7 @@ func (s *SchedulerSnapshotService) consumeDirtyWork(ownership SchedulerOwnership
 				logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] dirty work acknowledgement failed: kind=%d entity=%d err=%v", item.Kind, item.EntityID, err)
 			}
 		}
+		s.checkDirtyWorkLag(consumeCtx)
 	}
 
 	poll()
@@ -464,7 +467,11 @@ func (s *SchedulerSnapshotService) pollOutbox() {
 		watermarkForCheck = lastID
 	}
 
-	s.checkOutboxLag(ctx, events[0], watermarkForCheck)
+	// Lifecycle degradation is measured from persistent dirty state once the
+	// fenced consumer is active. Legacy ID arithmetic is not commit-order safe.
+	if s.dirtyWorkRepo == nil || s.ownershipRepo == nil {
+		s.checkOutboxLag(ctx, events[0], watermarkForCheck)
+	}
 }
 
 func (s *SchedulerSnapshotService) handleOutboxEvent(ctx context.Context, event SchedulerOutboxEvent, seen map[batchSeenKey]struct{}) error {
@@ -782,6 +789,70 @@ func (s *SchedulerSnapshotService) triggerFullRebuildContext(ctx context.Context
 		}
 	}
 	return s.rebuildBuckets(ctx, buckets, reason)
+}
+
+func (s *SchedulerSnapshotService) checkDirtyWorkLag(ctx context.Context) {
+	if s.dirtyWorkRepo == nil || s.cfg == nil {
+		return
+	}
+	stats, err := s.dirtyWorkRepo.PendingStats(ctx)
+	if err != nil {
+		if ctx.Err() == nil {
+			logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] dirty work stats failed: %v", err)
+		}
+		return
+	}
+
+	lagSeconds := 0
+	if stats.OldestUpdatedAt != nil {
+		lagSeconds = max(0, int(time.Since(*stats.OldestUpdatedAt).Seconds()))
+	}
+	warnSeconds := s.cfg.Gateway.Scheduling.OutboxLagWarnSeconds
+	if warnSeconds > 0 && lagSeconds >= warnSeconds {
+		logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] dirty work lag warning: lag=%ds pending=%d failed=%d", lagSeconds, stats.Count, stats.FailedCount)
+	}
+
+	rebuildSeconds := s.cfg.Gateway.Scheduling.OutboxLagRebuildSeconds
+	backlogRows := s.cfg.Gateway.Scheduling.OutboxBacklogRebuildRows
+	degraded := rebuildSeconds > 0 && lagSeconds >= rebuildSeconds
+	if backlogRows > 0 && stats.Count >= int64(backlogRows) {
+		degraded = true
+	}
+
+	s.lagMu.Lock()
+	if !degraded {
+		s.dirtyLagFailures = 0
+		s.dirtyRebuildLatched = false
+		s.lagMu.Unlock()
+		return
+	}
+	if s.dirtyRebuildLatched {
+		s.lagMu.Unlock()
+		return
+	}
+	s.dirtyLagFailures++
+	failures := s.dirtyLagFailures
+	threshold := s.cfg.Gateway.Scheduling.OutboxLagRebuildFailures
+	if failures < threshold {
+		s.lagMu.Unlock()
+		return
+	}
+	// Latch before enqueueing: one persistent degraded interval should create one
+	// coalesced generation, not a new global generation on every poll.
+	s.dirtyRebuildLatched = true
+	s.dirtyLagFailures = 0
+	s.lagMu.Unlock()
+
+	if err := s.dirtyWorkRepo.RequestFullRebuild(ctx); err != nil {
+		s.lagMu.Lock()
+		s.dirtyRebuildLatched = false
+		s.lagMu.Unlock()
+		if ctx.Err() == nil {
+			logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] dirty work degraded rebuild request failed: %v", err)
+		}
+		return
+	}
+	logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] dirty work degraded rebuild requested: lag=%ds pending=%d failed=%d", lagSeconds, stats.Count, stats.FailedCount)
 }
 
 func (s *SchedulerSnapshotService) checkOutboxLag(ctx context.Context, oldest SchedulerOutboxEvent, watermark int64) {

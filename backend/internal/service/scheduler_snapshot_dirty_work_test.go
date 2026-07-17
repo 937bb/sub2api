@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/stretchr/testify/require"
 )
 
@@ -42,11 +43,15 @@ func (r *dirtyWorkTestAccountRepo) GetByID(context.Context, int64) (*Account, er
 }
 
 type dirtyWorkTestRepo struct {
-	promoteResults []int
-	promoteCalls   int
-	work           []SchedulerDirtyWork
-	acknowledged   []SchedulerDirtyWork
-	failures       []SchedulerDirtyWork
+	promoteResults      []int
+	promoteCalls        int
+	work                []SchedulerDirtyWork
+	acknowledged        []SchedulerDirtyWork
+	failures            []SchedulerDirtyWork
+	stats               SchedulerDirtyWorkStats
+	statsErr            error
+	fullRebuildRequests int
+	fullRebuildErr      error
 }
 
 func (r *dirtyWorkTestRepo) Promote(context.Context, SchedulerOwnership, int) (int, error) {
@@ -58,7 +63,10 @@ func (r *dirtyWorkTestRepo) Promote(context.Context, SchedulerOwnership, int) (i
 	return result, nil
 }
 
-func (r *dirtyWorkTestRepo) RequestFullRebuild(context.Context) error { return nil }
+func (r *dirtyWorkTestRepo) RequestFullRebuild(context.Context) error {
+	r.fullRebuildRequests++
+	return r.fullRebuildErr
+}
 func (r *dirtyWorkTestRepo) List(context.Context, int) ([]SchedulerDirtyWork, error) {
 	return r.work, nil
 }
@@ -71,7 +79,7 @@ func (r *dirtyWorkTestRepo) Acknowledge(_ context.Context, _ SchedulerOwnership,
 	return true, nil
 }
 func (r *dirtyWorkTestRepo) PendingStats(context.Context) (SchedulerDirtyWorkStats, error) {
-	return SchedulerDirtyWorkStats{}, nil
+	return r.stats, r.statsErr
 }
 
 type dirtyWorkTestOwnership struct {
@@ -194,4 +202,72 @@ func TestSchedulerSnapshotDirtyWorkRejectsUnknownKind(t *testing.T) {
 	err := svc.handleDirtyWork(context.Background(), SchedulerDirtyWork{Kind: 99})
 	require.Error(t, err)
 	require.False(t, errors.Is(err, context.Canceled))
+}
+
+func TestSchedulerSnapshotDirtyWorkDegradationUsesPersistentStatsAndLatches(t *testing.T) {
+	oldest := time.Now().Add(-time.Minute)
+	repo := &dirtyWorkTestRepo{stats: SchedulerDirtyWorkStats{
+		Count:           12,
+		OldestUpdatedAt: &oldest,
+		FailedCount:     2,
+	}}
+	svc := &SchedulerSnapshotService{
+		dirtyWorkRepo: repo,
+		cfg: &config.Config{Gateway: config.GatewayConfig{Scheduling: config.GatewaySchedulingConfig{
+			OutboxLagRebuildSeconds:  10,
+			OutboxLagRebuildFailures: 2,
+		}}},
+	}
+
+	svc.checkDirtyWorkLag(context.Background())
+	require.Zero(t, repo.fullRebuildRequests)
+	svc.checkDirtyWorkLag(context.Background())
+	require.Equal(t, 1, repo.fullRebuildRequests)
+
+	// Persistent degradation must not advance the coalesced global generation on
+	// every poll. Clearing the condition rearms a later incident.
+	svc.checkDirtyWorkLag(context.Background())
+	require.Equal(t, 1, repo.fullRebuildRequests)
+	repo.stats = SchedulerDirtyWorkStats{}
+	svc.checkDirtyWorkLag(context.Background())
+	repo.stats = SchedulerDirtyWorkStats{Count: 12, OldestUpdatedAt: &oldest}
+	svc.checkDirtyWorkLag(context.Background())
+	svc.checkDirtyWorkLag(context.Background())
+	require.Equal(t, 2, repo.fullRebuildRequests)
+}
+
+func TestSchedulerSnapshotDirtyWorkDegradationCountsCanonicalRows(t *testing.T) {
+	repo := &dirtyWorkTestRepo{stats: SchedulerDirtyWorkStats{Count: 4}}
+	svc := &SchedulerSnapshotService{
+		dirtyWorkRepo: repo,
+		cfg: &config.Config{Gateway: config.GatewayConfig{Scheduling: config.GatewaySchedulingConfig{
+			OutboxLagRebuildFailures: 1,
+			OutboxBacklogRebuildRows: 4,
+		}}},
+	}
+
+	svc.checkDirtyWorkLag(context.Background())
+
+	require.Equal(t, 1, repo.fullRebuildRequests)
+}
+
+func TestSchedulerSnapshotDirtyWorkDegradationRetriesFailedRequest(t *testing.T) {
+	oldest := time.Now().Add(-time.Minute)
+	repo := &dirtyWorkTestRepo{
+		stats:          SchedulerDirtyWorkStats{Count: 1, OldestUpdatedAt: &oldest},
+		fullRebuildErr: errors.New("database unavailable"),
+	}
+	svc := &SchedulerSnapshotService{
+		dirtyWorkRepo: repo,
+		cfg: &config.Config{Gateway: config.GatewayConfig{Scheduling: config.GatewaySchedulingConfig{
+			OutboxLagRebuildSeconds:  10,
+			OutboxLagRebuildFailures: 1,
+		}}},
+	}
+
+	svc.checkDirtyWorkLag(context.Background())
+	repo.fullRebuildErr = nil
+	svc.checkDirtyWorkLag(context.Background())
+
+	require.Equal(t, 2, repo.fullRebuildRequests)
 }
