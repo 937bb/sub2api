@@ -716,6 +716,35 @@ func (s *AccountRepoSuite) TestAddToGroup_RollbackKeepsMembershipAndOutboxAtomic
 	s.Require().Zero(outboxCount)
 }
 
+func (s *AccountRepoSuite) TestBindGroups_RollbackKeepsReplacementAndOutboxAtomic() {
+	client := testEntClient(s.T())
+	oldGroup := mustCreateGroup(s.T(), client, &service.Group{Name: "bind-old-" + strconv.FormatInt(time.Now().UnixNano(), 10)})
+	newGroup := mustCreateGroup(s.T(), client, &service.Group{Name: "bind-new-" + strconv.FormatInt(time.Now().UnixNano(), 10)})
+	account := mustCreateAccount(s.T(), client, &service.Account{Name: "bind-rollback-" + strconv.FormatInt(time.Now().UnixNano(), 10)})
+	mustBindAccountToGroup(s.T(), client, account.ID, oldGroup.ID, 1)
+	s.T().Cleanup(func() {
+		_, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background())
+		_, _ = integrationDB.ExecContext(context.Background(), "DELETE FROM groups WHERE id = ANY($1)", []int64{oldGroup.ID, newGroup.ID})
+	})
+	repo := newAccountRepositoryWithSQL(client, integrationDB, nil)
+	_, err := integrationDB.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+
+	s.Require().NoError(repo.BindGroups(txCtx, account.ID, []int64{newGroup.ID}))
+	s.Require().NoError(tx.Rollback())
+
+	groups, err := repo.GetGroups(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().Len(groups, 1)
+	s.Require().Equal(oldGroup.ID, groups[0].ID)
+	var outboxCount int
+	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, "SELECT count(*) FROM scheduler_outbox").Scan(&outboxCount))
+	s.Require().Zero(outboxCount)
+}
+
 func (s *AccountRepoSuite) TestBindGroups_EmptyList() {
 	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-empty"})
 	group := mustCreateGroup(s.T(), s.client, &service.Group{Name: "g-empty"})
