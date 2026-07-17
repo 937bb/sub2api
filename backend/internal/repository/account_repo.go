@@ -1606,6 +1606,9 @@ func (r *accountRepository) UpdateSessionWindow(ctx context.Context, id int64, s
 			logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue session window update failed: account=%d err=%v", id, err)
 		}
 	}
+	// Session-window state is a runtime overlay: keep the account snapshot fresh
+	// without generating canonical dirty work or rebuilding scheduler buckets.
+	r.syncSchedulerAccountSnapshot(ctx, id)
 	return nil
 }
 

@@ -765,6 +765,21 @@ func (s *AccountRepoSuite) TestBulkUpdate_SyncSchedulerSnapshotOnDisabled() {
 
 // --- SetOverloaded / SetRateLimited / ClearRateLimit ---
 
+func (s *AccountRepoSuite) TestUpdateSessionWindow_SyncsSchedulerSnapshot() {
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:                "session-window-sync",
+		SessionWindowStatus: "idle",
+	})
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
+
+	s.Require().NoError(s.repo.UpdateSessionWindow(s.ctx, account.ID, nil, nil, "active"))
+
+	s.Require().Len(cacheRecorder.setAccounts, 1)
+	s.Require().Equal(account.ID, cacheRecorder.setAccounts[0].ID)
+	s.Require().Equal("active", cacheRecorder.setAccounts[0].SessionWindowStatus)
+}
+
 func (s *AccountRepoSuite) TestSetOverloaded() {
 	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-over"})
 	until := time.Date(2025, 6, 15, 12, 0, 0, 0, time.UTC)

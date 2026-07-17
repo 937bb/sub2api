@@ -51,3 +51,47 @@ func TestSchedulerDirtyWorkMigrationKeepsSourcePromotionContracts(t *testing.T) 
 	require.NotContains(t, sql, "xid")
 	require.NotContains(t, sql, "event_id")
 }
+
+func TestSchedulerAccountDirtyProjectionExcludesOnlyRuntimeOverlays(t *testing.T) {
+	raw, err := FS.ReadFile("164_scheduler_account_dirty_projection.sql")
+	require.NoError(t, err)
+	sql := strings.ToLower(string(raw))
+
+	for _, column := range []string{
+		"rate_limited_at",
+		"rate_limit_reset_at",
+		"overload_until",
+		"temp_unschedulable_until",
+		"temp_unschedulable_reason",
+		"session_window_start",
+		"session_window_end",
+		"session_window_status",
+	} {
+		require.NotContains(t, sql, "o."+column)
+		require.NotContains(t, sql, "n."+column)
+	}
+
+	for _, exactKey := range []string{
+		"codex_usage_updated_at",
+		"model_rate_limits",
+		"openai_codex_fingerprint",
+		"session_window_utilization",
+	} {
+		require.Contains(t, sql, "'"+exactKey+"'")
+	}
+	for _, prefix := range []string{
+		"codex_primary_",
+		"codex_secondary_",
+		"codex_5h_",
+		"codex_7d_",
+		"passive_usage_",
+	} {
+		require.Contains(t, sql, "starts_with(entry.key, '"+prefix+"')")
+	}
+
+	require.Contains(t, sql, "scheduler_account_lifecycle_extra(o.extra) is distinct from")
+	require.Contains(t, sql, "o.extra -> 'mixed_scheduling'")
+	require.Contains(t, sql, "o.extra is distinct from n.extra")
+	require.Contains(t, sql, "jsonb_object_agg(entry.key, entry.value)")
+	require.NotContains(t, sql, "where o.extra is distinct from n.extra")
+}

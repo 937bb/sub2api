@@ -60,8 +60,65 @@ UPDATE account_groups SET group_id = $1 WHERE account_id = $2 AND group_id = $3
 	require.NoError(t, tx.QueryRowContext(ctx, "SELECT count(*) FROM scheduler_dirty_account_sources WHERE account_id=$1", accountID).Scan(&sourceCount))
 	require.Zero(t, sourceCount)
 
+	// High-frequency runtime overlays are published separately and must not
+	// advance lifecycle generations or force bucket rebuilds.
+	for _, update := range []string{
+		"rate_limited_at = NOW()",
+		"rate_limit_reset_at = NOW() + INTERVAL '1 minute'",
+		"overload_until = NOW() + INTERVAL '2 minutes'",
+		"temp_unschedulable_until = NOW() + INTERVAL '3 minutes'",
+		"temp_unschedulable_reason = 'runtime penalty'",
+		"session_window_start = NOW()",
+		"session_window_end = NOW() + INTERVAL '5 hours'",
+		"session_window_status = 'active'",
+	} {
+		truncateSchedulerDirtyTables(t, tx)
+		_, err = tx.ExecContext(ctx, "UPDATE accounts SET "+update+" WHERE id = $1", accountID)
+		require.NoError(t, err)
+		requireNoAccountSource(t, tx, accountID)
+	}
+
+	for key, value := range map[string]string{
+		"codex_usage_updated_at":     `"2026-07-17T00:00:00Z"`,
+		"model_rate_limits":          `{"gpt-5":{"rate_limit_reset_at":"2026-07-17T01:00:00Z"}}`,
+		"openai_codex_fingerprint":   `{"schema_version":1}`,
+		"session_window_utilization": `0.5`,
+		"codex_primary_used_percent": `11.5`,
+		"codex_secondary_reset_at":   `"2026-07-18T00:00:00Z"`,
+		"codex_5h_used_percent":      `22.5`,
+		"codex_7d_used_percent":      `33.5`,
+		"passive_usage_tokens":       `42`,
+	} {
+		truncateSchedulerDirtyTables(t, tx)
+		_, err = tx.ExecContext(ctx, `
+			UPDATE accounts
+			SET extra = jsonb_set(COALESCE(extra, '{}'::jsonb), ARRAY[$1], $2::jsonb, true)
+			WHERE id = $3
+		`, key, value, accountID)
+		require.NoError(t, err)
+		requireNoAccountSource(t, tx, accountID)
+	}
+
+	// Static policy and unknown Extra keys remain conservatively dirty. Only
+	// mixed_scheduling affects bucket membership.
+	truncateSchedulerDirtyTables(t, tx)
+	_, err = tx.ExecContext(ctx, `UPDATE accounts SET extra = jsonb_set(COALESCE(extra, '{}'::jsonb), '{privacy_mode}', '"training_off"'::jsonb, true) WHERE id = $1`, accountID)
+	require.NoError(t, err)
+	requireAccountSource(t, tx, accountID, 1, false)
+
+	truncateSchedulerDirtyTables(t, tx)
+	_, err = tx.ExecContext(ctx, `UPDATE accounts SET extra = jsonb_set(COALESCE(extra, '{}'::jsonb), '{future_scheduler_key}', 'true'::jsonb, true) WHERE id = $1`, accountID)
+	require.NoError(t, err)
+	requireAccountSource(t, tx, accountID, 1, false)
+
+	truncateSchedulerDirtyTables(t, tx)
+	_, err = tx.ExecContext(ctx, `UPDATE accounts SET extra = jsonb_set(COALESCE(extra, '{}'::jsonb), '{mixed_scheduling}', 'true'::jsonb, true) WHERE id = $1`, accountID)
+	require.NoError(t, err)
+	requireAccountSource(t, tx, accountID, 1, true)
+
 	// Scheduler metadata changes still request account refresh without forcing a
 	// bucket rebuild. Explicit administrative last-used clear remains valid.
+	truncateSchedulerDirtyTables(t, tx)
 	_, err = tx.ExecContext(ctx, "UPDATE accounts SET concurrency = concurrency + 1 WHERE id = $1", accountID)
 	require.NoError(t, err)
 	requireAccountSource(t, tx, accountID, 1, false)
@@ -135,6 +192,15 @@ SELECT generation,bucket_dirty FROM scheduler_dirty_account_sources WHERE accoun
 `, accountID).Scan(&gotGeneration, &gotBucketDirty))
 	require.Equal(t, generation, gotGeneration)
 	require.Equal(t, bucketDirty, gotBucketDirty)
+}
+
+func requireNoAccountSource(t *testing.T, tx queryRower, accountID int64) {
+	t.Helper()
+	var count int
+	require.NoError(t, tx.QueryRowContext(context.Background(), `
+SELECT count(*) FROM scheduler_dirty_account_sources WHERE account_id=$1
+`, accountID).Scan(&count))
+	require.Zero(t, count)
 }
 
 func requireMembershipSource(t *testing.T, tx queryRower, accountID, groupID, generation int64) {
