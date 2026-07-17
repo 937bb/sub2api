@@ -1758,10 +1758,11 @@ func (r *accountRepository) afterExtraUpdate(ctx context.Context, id int64, upda
 		if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
 			logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue %s failed: account=%d err=%v", operation, id, err)
 		}
-	} else {
-		// 观测型 extra 字段不需要触发 bucket 重建，但仍同步单账号快照，
-		// 让 sticky session / GetAccount 命中缓存时也能读到最新数据，
-		// 同时避免缓存局部 patch 覆盖掉并发写入的其它账号字段。
+	}
+	if shouldSyncSchedulerSnapshotForExtraUpdates(updates) {
+		// Runtime overlays need prompt publication even when the same batch also
+		// carries lifecycle state whose normal refresh is handled asynchronously.
+		// Read the full account to avoid a partial patch losing concurrent fields.
 		r.syncSchedulerAccountSnapshot(ctx, id)
 	}
 }
@@ -1896,6 +1897,15 @@ func shouldEnqueueSchedulerOutboxForExtraUpdates(updates map[string]any) bool {
 			continue
 		}
 		return true
+	}
+	return false
+}
+
+func shouldSyncSchedulerSnapshotForExtraUpdates(updates map[string]any) bool {
+	for key := range updates {
+		if isSchedulerNeutralExtraKey(key) {
+			return true
+		}
 	}
 	return false
 }

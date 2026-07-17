@@ -72,3 +72,45 @@ func TestShouldEnqueueSchedulerOutboxForExtraUpdates_UnknownUsagePrefixedKeysAre
 		}
 	}
 }
+
+func TestExtraUpdateSchedulerEffectsAreIndependent(t *testing.T) {
+	tests := []struct {
+		name         string
+		updates      map[string]any
+		wantOutbox   bool
+		wantSnapshot bool
+	}{
+		{
+			name:         "lifecycle only",
+			updates:      map[string]any{"openai_compact_supported": true},
+			wantOutbox:   true,
+			wantSnapshot: false,
+		},
+		{
+			name:         "runtime only",
+			updates:      map[string]any{"codex_5h_used_percent": 42.5},
+			wantOutbox:   false,
+			wantSnapshot: true,
+		},
+		{
+			name: "mixed compact probe",
+			updates: map[string]any{
+				"openai_compact_supported": true,
+				"codex_5h_used_percent":    42.5,
+			},
+			wantOutbox:   true,
+			wantSnapshot: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := shouldEnqueueSchedulerOutboxForExtraUpdates(tt.updates); got != tt.wantOutbox {
+				t.Fatalf("shouldEnqueueSchedulerOutboxForExtraUpdates() = %v, want %v", got, tt.wantOutbox)
+			}
+			if got := shouldSyncSchedulerSnapshotForExtraUpdates(tt.updates); got != tt.wantSnapshot {
+				t.Fatalf("shouldSyncSchedulerSnapshotForExtraUpdates() = %v, want %v", got, tt.wantSnapshot)
+			}
+		})
+	}
+}
