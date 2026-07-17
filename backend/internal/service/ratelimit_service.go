@@ -1472,8 +1472,13 @@ func (s *RateLimitService) persistOpenAICodexSnapshot(ctx context.Context, accou
 		slog.Warn("openai_codex_snapshot_observation_invalid", "account_id", account.ID, "error", err)
 		return
 	}
-	if _, err := updateRuntimeExtra(ctx, s.accountRepo, account.ID, updates, "codex_usage_updated_at", observedAt); err != nil {
+	updated, err := updateRuntimeExtra(ctx, s.accountRepo, account.ID, updates, "codex_usage_updated_at", observedAt)
+	if err != nil {
 		slog.Warn("openai_codex_snapshot_persist_failed", "account_id", account.ID, "error", err)
+		return
+	}
+	if updated {
+		syncCodexFiveHourSessionWindowEnd(ctx, s.accountRepo, account.ID, updates, "rate_limit_headers")
 	}
 }
 

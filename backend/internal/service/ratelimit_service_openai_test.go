@@ -153,6 +153,7 @@ type openAI429SnapshotRepo struct {
 	updatedExtra       map[string]any
 	observedAtKey      string
 	observedAt         time.Time
+	sessionWindowEnd   *time.Time
 	bulkUpdatedIDs     []int64
 	bulkUpdatedPayload AccountBulkUpdate
 }
@@ -172,6 +173,11 @@ func (r *openAI429SnapshotRepo) UpdateRuntimeExtra(_ context.Context, _ int64, u
 	r.observedAtKey = observedAtKey
 	r.observedAt = observedAt
 	return true, nil
+}
+
+func (r *openAI429SnapshotRepo) UpdateSessionWindowEnd(_ context.Context, _ int64, end time.Time) error {
+	r.sessionWindowEnd = &end
+	return nil
 }
 
 func (r *openAI429SnapshotRepo) BulkUpdate(_ context.Context, ids []int64, updates AccountBulkUpdate) (int64, error) {
@@ -213,6 +219,10 @@ func TestHandle429_OpenAIPersistsCodexSnapshotImmediately(t *testing.T) {
 	parsed, err := runtimeExtraObservedAt(repo.updatedExtra, repo.observedAtKey)
 	require.NoError(t, err)
 	require.Equal(t, parsed, repo.observedAt)
+	require.NotNil(t, repo.sessionWindowEnd)
+	resetAt, err := parseTime(repo.updatedExtra["codex_5h_reset_at"].(string))
+	require.NoError(t, err)
+	require.Equal(t, resetAt, *repo.sessionWindowEnd)
 }
 
 func TestHandle429_OpenAISyncsObservedPlanType(t *testing.T) {
