@@ -9,6 +9,9 @@ import (
 	"testing"
 	"time"
 
+	dbent "github.com/Wei-Shaw/sub2api/ent"
+	dbaccount "github.com/Wei-Shaw/sub2api/ent/account"
+	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
 
@@ -229,6 +232,36 @@ INSERT INTO account_groups(account_id, group_id) VALUES($1, $2)
 	var schedulable bool
 	require.NoError(t, tx.QueryRowContext(ctx, `SELECT schedulable FROM accounts WHERE id=$1`, accountIDs[0]).Scan(&schedulable))
 	require.True(t, schedulable)
+}
+
+func TestAutoPauseExpiredAccountsHonorsCallerTransaction(t *testing.T) {
+	ctx := context.Background()
+	client := testEntClient(t)
+	now := time.Now().UTC()
+	account := mustCreateAccount(t, client, &service.Account{
+		Name:        fmt.Sprintf("auto-pause-caller-tx-%d", time.Now().UnixNano()),
+		Schedulable: true,
+	})
+	t.Cleanup(func() { _, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background()) })
+	_, err := client.Account.UpdateOneID(account.ID).
+		SetAutoPauseOnExpired(true).
+		SetExpiresAt(now.Add(-time.Hour)).
+		Save(ctx)
+	require.NoError(t, err)
+
+	repo := newAccountRepositoryWithSQL(client, integrationDB, nil)
+	tx, err := client.Tx(ctx)
+	require.NoError(t, err)
+	txCtx := dbent.NewTxContext(ctx, tx)
+
+	paused, err := repo.AutoPauseExpiredAccounts(txCtx, now)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), paused)
+	require.NoError(t, tx.Rollback())
+
+	got, err := repo.GetByID(ctx, account.ID)
+	require.NoError(t, err)
+	require.True(t, got.Schedulable)
 }
 
 func TestSchedulerGroupPrimaryKeyUpdatePreservesOldAndNewSources(t *testing.T) {
