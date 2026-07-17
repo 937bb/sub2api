@@ -1673,11 +1673,6 @@ func (r *accountRepository) AutoPauseExpiredAccounts(ctx context.Context, now ti
 	if err != nil {
 		return 0, err
 	}
-	if rows > 0 {
-		if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventFullRebuild, nil, nil, nil); err != nil {
-			logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue auto pause rebuild failed: err=%v", err)
-		}
-	}
 	return rows, nil
 }
 

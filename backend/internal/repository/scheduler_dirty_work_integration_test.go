@@ -142,6 +142,65 @@ UPDATE account_groups SET group_id = $1 WHERE account_id = $2 AND group_id = $3
 	require.Zero(t, sourceCount)
 }
 
+func TestAutoPauseExpiredAccountsUsesTransactionalDirtySources(t *testing.T) {
+	ctx := context.Background()
+	tx := testTx(t)
+	suffix := time.Now().UnixNano()
+	now := time.Now().UTC()
+
+	var groupID int64
+	require.NoError(t, tx.QueryRowContext(ctx, `
+INSERT INTO groups(name) VALUES($1) RETURNING id
+`, fmt.Sprintf("auto-pause-group-%d", suffix)).Scan(&groupID))
+
+	accountIDs := make([]int64, 3)
+	for i := range accountIDs {
+		require.NoError(t, tx.QueryRowContext(ctx, `
+INSERT INTO accounts(
+    name, platform, type, schedulable, auto_pause_on_expired, expires_at
+) VALUES ($1, 'openai', 'oauth', true, $2, $3) RETURNING id
+`, fmt.Sprintf("auto-pause-%d-%d", suffix, i), i < 2, now.Add(time.Duration(i-1)*time.Hour)).Scan(&accountIDs[i]))
+	}
+	_, err := tx.ExecContext(ctx, `
+INSERT INTO account_groups(account_id, group_id) VALUES($1, $2)
+`, accountIDs[0], groupID)
+	require.NoError(t, err)
+	truncateSchedulerDirtyTables(t, tx)
+	_, err = tx.ExecContext(ctx, `TRUNCATE scheduler_outbox RESTART IDENTITY`)
+	require.NoError(t, err)
+
+	repo := &accountRepository{sql: tx}
+	paused, err := repo.AutoPauseExpiredAccounts(ctx, now)
+	require.NoError(t, err)
+	require.Equal(t, int64(2), paused)
+	requireAccountSource(t, tx, accountIDs[0], 1, true)
+	requireAccountSource(t, tx, accountIDs[1], 1, true)
+	requireNoAccountSource(t, tx, accountIDs[2])
+
+	var outboxCount int
+	require.NoError(t, tx.QueryRowContext(ctx, `SELECT count(*) FROM scheduler_outbox`).Scan(&outboxCount))
+	require.Zero(t, outboxCount)
+
+	// The same business transaction owns both the pause and its invalidation
+	// evidence, so rolling it back cannot leave either side committed alone.
+	truncateSchedulerDirtyTables(t, tx)
+	_, err = tx.ExecContext(ctx, `UPDATE accounts SET schedulable=true WHERE id=$1`, accountIDs[0])
+	require.NoError(t, err)
+	truncateSchedulerDirtyTables(t, tx)
+	_, err = tx.ExecContext(ctx, `SAVEPOINT auto_pause_rollback`)
+	require.NoError(t, err)
+	paused, err = repo.AutoPauseExpiredAccounts(ctx, now)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), paused)
+	requireAccountSource(t, tx, accountIDs[0], 1, true)
+	_, err = tx.ExecContext(ctx, `ROLLBACK TO SAVEPOINT auto_pause_rollback`)
+	require.NoError(t, err)
+	requireNoAccountSource(t, tx, accountIDs[0])
+	var schedulable bool
+	require.NoError(t, tx.QueryRowContext(ctx, `SELECT schedulable FROM accounts WHERE id=$1`, accountIDs[0]).Scan(&schedulable))
+	require.True(t, schedulable)
+}
+
 func TestSchedulerGroupPrimaryKeyUpdatePreservesOldAndNewSources(t *testing.T) {
 	ctx := context.Background()
 	tx := testTx(t)
