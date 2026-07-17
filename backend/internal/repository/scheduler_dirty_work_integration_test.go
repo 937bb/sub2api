@@ -281,6 +281,31 @@ func TestSchedulerGroupPrimaryKeyUpdatePreservesOldAndNewSources(t *testing.T) {
 	}
 }
 
+func TestSchedulerAccountPrimaryKeyUpdatePreservesOldAndNewSources(t *testing.T) {
+	ctx := context.Background()
+	tx := testTx(t)
+	suffix := time.Now().UnixNano()
+	var oldID int64
+	require.NoError(t, tx.QueryRowContext(ctx, `
+INSERT INTO accounts(name, platform, type) VALUES($1, 'openai', 'oauth') RETURNING id
+`, fmt.Sprintf("account-pk-%d", suffix)).Scan(&oldID))
+	truncateSchedulerDirtyTables(t, tx)
+	newID := oldID + 1000000
+	_, err := tx.ExecContext(ctx, `UPDATE accounts SET id=$1 WHERE id=$2`, newID, oldID)
+	require.NoError(t, err)
+	for _, id := range []int64{oldID, newID} {
+		var generation int64
+		var bucketDirty bool
+		require.NoError(t, tx.QueryRowContext(ctx, `
+SELECT generation, bucket_dirty
+FROM scheduler_dirty_account_sources
+WHERE account_id=$1
+`, id).Scan(&generation, &bucketDirty))
+		require.Equal(t, int64(1), generation)
+		require.True(t, bucketDirty)
+	}
+}
+
 func TestSchedulerDirtySourceStatementUpdatesAreSortedAndCoalesced(t *testing.T) {
 	ctx := context.Background()
 	tx := testTx(t)
