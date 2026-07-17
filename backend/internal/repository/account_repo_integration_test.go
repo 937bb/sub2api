@@ -1089,6 +1089,54 @@ func (s *AccountRepoSuite) TestUpdateSessionWindow_PublishesOnlyAfterCommit() {
 	s.Require().Equal("active", cacheRecorder.setAccounts[0].SessionWindowStatus)
 }
 
+func (s *AccountRepoSuite) TestUpdateSessionWindowEnd_PublishesOnlyAfterCommit() {
+	client := testEntClient(s.T())
+	originalEnd := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+	account := mustCreateAccount(s.T(), client, &service.Account{
+		Name:             "session-window-end-transaction-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		SessionWindowEnd: &originalEnd,
+	})
+	s.T().Cleanup(func() { _, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background()) })
+	cacheRecorder := &schedulerCacheRecorder{}
+	repo := newAccountRepositoryWithSQL(client, integrationDB, cacheRecorder)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+	updatedEnd := originalEnd.Add(4 * time.Hour)
+
+	s.Require().NoError(repo.UpdateSessionWindowEnd(txCtx, account.ID, updatedEnd))
+	s.Require().Empty(cacheRecorder.setAccounts)
+	s.Require().NoError(tx.Commit())
+
+	s.Require().Len(cacheRecorder.setAccounts, 1)
+	s.Require().NotNil(cacheRecorder.setAccounts[0].SessionWindowEnd)
+	s.Require().WithinDuration(updatedEnd, *cacheRecorder.setAccounts[0].SessionWindowEnd, time.Microsecond)
+}
+
+func (s *AccountRepoSuite) TestUpdateSessionWindowEnd_RollbackDoesNotPublishSnapshot() {
+	client := testEntClient(s.T())
+	originalEnd := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+	account := mustCreateAccount(s.T(), client, &service.Account{
+		Name:             "session-window-end-rollback-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		SessionWindowEnd: &originalEnd,
+	})
+	s.T().Cleanup(func() { _, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background()) })
+	cacheRecorder := &schedulerCacheRecorder{}
+	repo := newAccountRepositoryWithSQL(client, integrationDB, cacheRecorder)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+
+	s.Require().NoError(repo.UpdateSessionWindowEnd(txCtx, account.ID, originalEnd.Add(4*time.Hour)))
+	s.Require().NoError(tx.Rollback())
+
+	s.Require().Empty(cacheRecorder.setAccounts)
+	got, err := repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().NotNil(got.SessionWindowEnd)
+	s.Require().WithinDuration(originalEnd, *got.SessionWindowEnd, time.Microsecond)
+}
+
 func (s *AccountRepoSuite) TestUpdateSessionWindow_RollbackDoesNotPublishSnapshot() {
 	client := testEntClient(s.T())
 	account := mustCreateAccount(s.T(), client, &service.Account{
