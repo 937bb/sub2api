@@ -1824,8 +1824,9 @@ func (r *accountRepository) afterExtraUpdate(ctx context.Context, id int64, upda
 	if shouldSyncSchedulerSnapshotForExtraUpdates(updates) {
 		// Runtime overlays need prompt publication even when the same batch also
 		// carries lifecycle state whose normal refresh is handled asynchronously.
-		// Read the full account to avoid a partial patch losing concurrent fields.
-		r.syncSchedulerAccountSnapshot(ctx, id)
+		// Read the full account after commit to avoid publishing stale or rolled-back
+		// state, and to avoid a partial patch losing concurrent fields.
+		r.syncSchedulerAccountSnapshotAfterCommit(ctx, id)
 	}
 }
 

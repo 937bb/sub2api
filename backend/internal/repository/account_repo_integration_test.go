@@ -886,6 +886,49 @@ func (s *AccountRepoSuite) TestUpdateSessionWindowEnd_AvoidsRedundantSnapshotWri
 	s.Require().Empty(cacheRecorder.setAccounts)
 }
 
+func (s *AccountRepoSuite) TestUpdateExtraRuntimeOverlay_PublishesOnlyAfterCommit() {
+	client := testEntClient(s.T())
+	account := mustCreateAccount(s.T(), client, &service.Account{
+		Name:  "extra-runtime-transaction-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		Extra: map[string]any{"session_window_utilization": 0.1},
+	})
+	s.T().Cleanup(func() { _, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background()) })
+	cacheRecorder := &schedulerCacheRecorder{}
+	repo := newAccountRepositoryWithSQL(client, integrationDB, cacheRecorder)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+
+	s.Require().NoError(repo.UpdateExtra(txCtx, account.ID, map[string]any{"session_window_utilization": 0.5}))
+	s.Require().Empty(cacheRecorder.setAccounts)
+	s.Require().NoError(tx.Commit())
+
+	s.Require().Len(cacheRecorder.setAccounts, 1)
+	s.Require().Equal(0.5, cacheRecorder.setAccounts[0].Extra["session_window_utilization"])
+}
+
+func (s *AccountRepoSuite) TestUpdateExtraRuntimeOverlay_RollbackDoesNotPublishSnapshot() {
+	client := testEntClient(s.T())
+	account := mustCreateAccount(s.T(), client, &service.Account{
+		Name:  "extra-runtime-rollback-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		Extra: map[string]any{"session_window_utilization": 0.1},
+	})
+	s.T().Cleanup(func() { _, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background()) })
+	cacheRecorder := &schedulerCacheRecorder{}
+	repo := newAccountRepositoryWithSQL(client, integrationDB, cacheRecorder)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+
+	s.Require().NoError(repo.UpdateExtra(txCtx, account.ID, map[string]any{"session_window_utilization": 0.5}))
+	s.Require().NoError(tx.Rollback())
+
+	s.Require().Empty(cacheRecorder.setAccounts)
+	got, err := repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().Equal(0.1, got.Extra["session_window_utilization"])
+}
+
 func (s *AccountRepoSuite) TestSetOverloaded() {
 	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-over"})
 	until := time.Date(2025, 6, 15, 12, 0, 0, 0, time.UTC)
