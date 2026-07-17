@@ -549,12 +549,13 @@ func (r *groupRepository) GetAccountCount(ctx context.Context, groupID int64) (t
 }
 
 func (r *groupRepository) DeleteAccountGroupsByGroupID(ctx context.Context, groupID int64) (int64, error) {
-	res, err := r.sql.ExecContext(ctx, "DELETE FROM account_groups WHERE group_id = $1", groupID)
+	exec := r.sqlFromContext(ctx)
+	res, err := exec.ExecContext(ctx, "DELETE FROM account_groups WHERE group_id = $1", groupID)
 	if err != nil {
 		return 0, err
 	}
 	affected, _ := res.RowsAffected()
-	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventGroupChanged, nil, &groupID, nil); err != nil {
+	if err := enqueueSchedulerOutbox(ctx, exec, service.SchedulerOutboxEventGroupChanged, nil, &groupID, nil); err != nil {
 		logger.LegacyPrintf("repository.group", "[SchedulerOutbox] enqueue group account clear failed: group=%d err=%v", groupID, err)
 	}
 	return affected, nil
@@ -769,8 +770,9 @@ func (r *groupRepository) BindAccountsToGroup(ctx context.Context, groupID int64
 		return nil
 	}
 
+	exec := r.sqlFromContext(ctx)
 	// 使用 INSERT ... ON CONFLICT DO NOTHING 忽略已存在的绑定
-	_, err := r.sql.ExecContext(
+	_, err := exec.ExecContext(
 		ctx,
 		`INSERT INTO account_groups (account_id, group_id, priority, created_at)
 		 SELECT unnest($1::bigint[]), $2, 50, NOW()
@@ -783,7 +785,7 @@ func (r *groupRepository) BindAccountsToGroup(ctx context.Context, groupID int64
 	}
 
 	// 发送调度器事件
-	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventGroupChanged, nil, &groupID, nil); err != nil {
+	if err := enqueueSchedulerOutbox(ctx, exec, service.SchedulerOutboxEventGroupChanged, nil, &groupID, nil); err != nil {
 		logger.LegacyPrintf("repository.group", "[SchedulerOutbox] enqueue bind accounts to group failed: group=%d err=%v", groupID, err)
 	}
 
@@ -812,11 +814,12 @@ func (r *groupRepository) UpdateSortOrders(ctx context.Context, updates []servic
 		return nil
 	}
 
+	exec := r.sqlFromContext(ctx)
 	// 与旧实现保持一致：任何不存在/已删除的分组都返回 not found，且不执行更新。
 	var existingCount int
 	if err := scanSingleRow(
 		ctx,
-		r.sql,
+		exec,
 		`SELECT COUNT(*) FROM groups WHERE deleted_at IS NULL AND id = ANY($1)`,
 		[]any{groupIDs},
 		&existingCount,
@@ -846,7 +849,7 @@ func (r *groupRepository) UpdateSortOrders(ctx context.Context, updates []servic
 		WHERE deleted_at IS NULL AND id = ANY($%d)
 	`, strings.Join(caseClauses, "\n\t\t\t"), placeholder)
 
-	result, err := r.sql.ExecContext(ctx, query, args...)
+	result, err := exec.ExecContext(ctx, query, args...)
 	if err != nil {
 		return err
 	}
@@ -859,7 +862,7 @@ func (r *groupRepository) UpdateSortOrders(ctx context.Context, updates []servic
 	}
 
 	for _, id := range groupIDs {
-		if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventGroupChanged, nil, &id, nil); err != nil {
+		if err := enqueueSchedulerOutbox(ctx, exec, service.SchedulerOutboxEventGroupChanged, nil, &id, nil); err != nil {
 			logger.LegacyPrintf("repository.group", "[SchedulerOutbox] enqueue group sort update failed: group=%d err=%v", id, err)
 		}
 	}
