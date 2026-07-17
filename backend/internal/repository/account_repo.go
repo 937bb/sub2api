@@ -1616,15 +1616,29 @@ func (r *accountRepository) ClearTempUnschedulable(ctx context.Context, id int64
 }
 
 func (r *accountRepository) ClearRateLimit(ctx context.Context, id int64) error {
-	client := clientFromContext(ctx, r.client)
-	_, err := client.Account.Update().
-		Where(dbaccount.IDEQ(id)).
-		ClearRateLimitedAt().
-		ClearRateLimitResetAt().
-		ClearOverloadUntil().
-		Save(ctx)
+	result, err := r.sqlFromContext(ctx).ExecContext(ctx, `
+		UPDATE accounts
+		SET rate_limited_at = NULL,
+			rate_limit_reset_at = NULL,
+			overload_until = NULL,
+			updated_at = NOW()
+		WHERE id = $1
+			AND deleted_at IS NULL
+			AND (
+				rate_limited_at IS NOT NULL OR
+				rate_limit_reset_at IS NOT NULL OR
+				overload_until IS NOT NULL
+			)
+	`, id)
 	if err != nil {
 		return err
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if updated == 0 {
+		return nil
 	}
 	r.syncSchedulerAccountSnapshotAfterCommit(ctx, id)
 	return nil
@@ -1656,21 +1670,43 @@ func (r *accountRepository) ClearAntigravityQuotaScopes(ctx context.Context, id 
 
 func (r *accountRepository) ClearModelRateLimits(ctx context.Context, id int64) error {
 	client := clientFromContext(ctx, r.client)
-	result, err := client.ExecContext(
-		ctx,
-		"UPDATE accounts SET extra = COALESCE(extra, '{}'::jsonb) - 'model_rate_limits', updated_at = NOW() WHERE id = $1 AND deleted_at IS NULL",
-		id,
-	)
+	rows, err := client.QueryContext(ctx, `
+WITH updated AS (
+	UPDATE accounts
+	SET extra = COALESCE(extra, '{}'::jsonb) - 'model_rate_limits',
+		updated_at = NOW()
+	WHERE id = $1
+		AND deleted_at IS NULL
+		AND COALESCE(extra, '{}'::jsonb) ? 'model_rate_limits'
+	RETURNING 1
+)
+SELECT EXISTS (
+	SELECT 1 FROM accounts WHERE id = $1 AND deleted_at IS NULL
+), EXISTS (SELECT 1 FROM updated)`, id)
 	if err != nil {
 		return err
 	}
-
-	affected, err := result.RowsAffected()
-	if err != nil {
+	if !rows.Next() {
+		rowsErr := rows.Err()
+		_ = rows.Close()
+		if rowsErr != nil {
+			return rowsErr
+		}
+		return errors.New("model rate limit clear returned no result")
+	}
+	var exists, updated bool
+	if err := rows.Scan(&exists, &updated); err != nil {
+		_ = rows.Close()
 		return err
 	}
-	if affected == 0 {
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if !exists {
 		return service.ErrAccountNotFound
+	}
+	if !updated {
+		return nil
 	}
 	r.syncSchedulerAccountSnapshotAfterCommit(ctx, id)
 	return nil

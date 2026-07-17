@@ -1322,6 +1322,18 @@ func (s *AccountRepoSuite) TestClearRateLimit() {
 	s.requireNoSchedulerOutbox()
 }
 
+func (s *AccountRepoSuite) TestClearRateLimit_AvoidsRedundantSnapshotWrite() {
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name: "rate-limit-clear-unchanged-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+	})
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
+
+	s.Require().NoError(s.repo.ClearRateLimit(s.ctx, account.ID))
+
+	s.Require().Empty(cacheRecorder.setAccounts)
+}
+
 func (s *AccountRepoSuite) TestClearTempUnschedulable_AvoidsRedundantSnapshotWrite() {
 	account := mustCreateAccount(s.T(), s.client, &service.Account{
 		Name: "temp-unsched-unchanged-" + strconv.FormatInt(time.Now().UnixNano(), 10),
@@ -1472,6 +1484,38 @@ func (s *AccountRepoSuite) TestClearModelRateLimits_SyncsSchedulerSnapshot() {
 	var outboxCount int
 	s.Require().NoError(scanSingleRow(s.ctx, s.repo.sql, "SELECT COUNT(*) FROM scheduler_outbox", nil, &outboxCount))
 	s.Require().Zero(outboxCount)
+}
+
+func (s *AccountRepoSuite) TestClearModelRateLimits_AvoidsRedundantSnapshotWrite() {
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name: "model-rate-clear-unchanged-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+	})
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
+
+	s.Require().NoError(s.repo.ClearModelRateLimits(s.ctx, account.ID))
+
+	s.Require().Empty(cacheRecorder.setAccounts)
+}
+
+func (s *AccountRepoSuite) TestClearModelRateLimits_UnchangedHonorsCallerTransaction() {
+	client := testEntClient(s.T())
+	account := mustCreateAccount(s.T(), client, &service.Account{
+		Name: "model-rate-clear-unchanged-tx-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+	})
+	s.T().Cleanup(func() {
+		_, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background())
+	})
+	cacheRecorder := &schedulerCacheRecorder{}
+	repo := newAccountRepositoryWithSQL(client, integrationDB, cacheRecorder)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+
+	s.Require().NoError(repo.ClearModelRateLimits(txCtx, account.ID))
+	s.Require().NoError(tx.Rollback())
+
+	s.Require().Empty(cacheRecorder.setAccounts)
 }
 
 // --- UpdateLastUsed ---
