@@ -1579,9 +1579,6 @@ func (r *accountRepository) ClearModelRateLimits(ctx context.Context, id int64) 
 	if affected == 0 {
 		return service.ErrAccountNotFound
 	}
-	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
-		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue clear model rate limit failed: account=%d err=%v", id, err)
-	}
 	r.syncSchedulerAccountSnapshot(ctx, id)
 	return nil
 }
@@ -1599,12 +1596,6 @@ func (r *accountRepository) UpdateSessionWindow(ctx context.Context, id int64, s
 	_, err := builder.Save(ctx)
 	if err != nil {
 		return err
-	}
-	// 触发调度器缓存更新（仅当窗口时间有变化时）
-	if start != nil || end != nil {
-		if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
-			logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue session window update failed: account=%d err=%v", id, err)
-		}
 	}
 	// Session-window state is a runtime overlay: keep the account snapshot fresh
 	// without generating canonical dirty work or rebuilding scheduler buckets.
@@ -1630,9 +1621,6 @@ WHERE id = $2
 	}
 	if affected == 0 {
 		return service.ErrAccountNotFound
-	}
-	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
-		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue session window end update failed: account=%d err=%v", id, err)
 	}
 	r.syncSchedulerAccountSnapshot(ctx, id)
 	return nil

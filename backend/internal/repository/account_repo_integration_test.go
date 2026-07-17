@@ -772,12 +772,36 @@ func (s *AccountRepoSuite) TestUpdateSessionWindow_SyncsSchedulerSnapshot() {
 	})
 	cacheRecorder := &schedulerCacheRecorder{}
 	s.repo.schedulerCache = cacheRecorder
+	_, err := s.repo.sql.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
 
 	s.Require().NoError(s.repo.UpdateSessionWindow(s.ctx, account.ID, nil, nil, "active"))
 
 	s.Require().Len(cacheRecorder.setAccounts, 1)
 	s.Require().Equal(account.ID, cacheRecorder.setAccounts[0].ID)
 	s.Require().Equal("active", cacheRecorder.setAccounts[0].SessionWindowStatus)
+	var outboxCount int
+	s.Require().NoError(scanSingleRow(s.ctx, s.repo.sql, "SELECT COUNT(*) FROM scheduler_outbox", nil, &outboxCount))
+	s.Require().Zero(outboxCount)
+}
+
+func (s *AccountRepoSuite) TestUpdateSessionWindowEnd_SyncsWithoutLifecycleOutbox() {
+	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "session-window-end-sync"})
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
+	_, err := s.repo.sql.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
+	end := time.Now().UTC().Add(5 * time.Hour)
+
+	s.Require().NoError(s.repo.UpdateSessionWindowEnd(s.ctx, account.ID, end))
+
+	s.Require().Len(cacheRecorder.setAccounts, 1)
+	s.Require().Equal(account.ID, cacheRecorder.setAccounts[0].ID)
+	s.Require().NotNil(cacheRecorder.setAccounts[0].SessionWindowEnd)
+	s.Require().WithinDuration(end, *cacheRecorder.setAccounts[0].SessionWindowEnd, time.Second)
+	var outboxCount int
+	s.Require().NoError(scanSingleRow(s.ctx, s.repo.sql, "SELECT COUNT(*) FROM scheduler_outbox", nil, &outboxCount))
+	s.Require().Zero(outboxCount)
 }
 
 func (s *AccountRepoSuite) TestSetOverloaded() {
@@ -878,6 +902,8 @@ func (s *AccountRepoSuite) TestClearModelRateLimits_SyncsSchedulerSnapshot() {
 	})
 	cacheRecorder := &schedulerCacheRecorder{}
 	s.repo.schedulerCache = cacheRecorder
+	_, err := s.repo.sql.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
 
 	s.Require().NoError(s.repo.ClearModelRateLimits(s.ctx, account.ID))
 
@@ -887,6 +913,9 @@ func (s *AccountRepoSuite) TestClearModelRateLimits_SyncsSchedulerSnapshot() {
 	s.Require().Len(cacheRecorder.setAccounts, 1)
 	s.Require().Equal(account.ID, cacheRecorder.setAccounts[0].ID)
 	s.Require().NotContains(cacheRecorder.setAccounts[0].Extra, "model_rate_limits")
+	var outboxCount int
+	s.Require().NoError(scanSingleRow(s.ctx, s.repo.sql, "SELECT COUNT(*) FROM scheduler_outbox", nil, &outboxCount))
+	s.Require().Zero(outboxCount)
 }
 
 // --- UpdateLastUsed ---
