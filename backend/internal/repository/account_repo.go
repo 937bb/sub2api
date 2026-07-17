@@ -350,9 +350,10 @@ func (r *accountRepository) Update(ctx context.Context, account *service.Account
 	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &account.ID, nil, buildSchedulerGroupPayload(account.GroupIDs)); err != nil {
 		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue account update failed: account=%d err=%v", account.ID, err)
 	}
-	// 普通账号编辑（如 model_mapping / credentials）也需要立即刷新单账号快照，
+	// 普通账号编辑（如 model_mapping / credentials）也需要及时刷新单账号快照，
 	// 否则网关在 outbox worker 延迟或异常时仍可能读到旧配置。
-	r.syncSchedulerAccountSnapshot(ctx, account.ID)
+	// Transactional callers must publish only after their update becomes visible.
+	r.syncSchedulerAccountSnapshotAfterCommit(ctx, account.ID)
 	return nil
 }
 
