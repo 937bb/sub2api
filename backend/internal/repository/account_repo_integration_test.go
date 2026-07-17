@@ -1054,6 +1054,26 @@ func (s *AccountRepoSuite) TestSetModelRateLimit_SyncsWithoutLifecycleOutbox() {
 	s.requireNoSchedulerOutbox()
 }
 
+func (s *AccountRepoSuite) TestSetModelRateLimit_PublishesOnlyAfterCommit() {
+	client := testEntClient(s.T())
+	account := mustCreateAccount(s.T(), client, &service.Account{
+		Name: "model-rate-transaction-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+	})
+	s.T().Cleanup(func() { _, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background()) })
+	cacheRecorder := &schedulerCacheRecorder{}
+	repo := newAccountRepositoryWithSQL(client, integrationDB, cacheRecorder)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+
+	s.Require().NoError(repo.SetModelRateLimit(txCtx, account.ID, "gpt-5", time.Now().UTC().Add(time.Hour)))
+	s.Require().Empty(cacheRecorder.setAccounts)
+	s.Require().NoError(tx.Commit())
+
+	s.Require().Len(cacheRecorder.setAccounts, 1)
+	s.Require().Contains(cacheRecorder.setAccounts[0].Extra, "model_rate_limits")
+}
+
 func (s *AccountRepoSuite) TestClearModelRateLimits_SyncsSchedulerSnapshot() {
 	account := mustCreateAccount(s.T(), s.client, &service.Account{
 		Name: "acc-clear-model-rate",
