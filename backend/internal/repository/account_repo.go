@@ -393,6 +393,7 @@ SELECT COALESCE(extra, '{}'::jsonb)::text,
 	rate_limited_at,
 	rate_limit_reset_at,
 	overload_until,
+	last_used_at,
 	session_window_start,
 	session_window_end,
 	session_window_status
@@ -412,13 +413,14 @@ FOR UPDATE`, account.ID)
 
 	var rawExtra string
 	var rateLimitedAt, rateLimitResetAt, overloadUntil sql.NullTime
-	var sessionWindowStart, sessionWindowEnd sql.NullTime
+	var lastUsedAt, sessionWindowStart, sessionWindowEnd sql.NullTime
 	var sessionWindowStatus sql.NullString
 	if err := rows.Scan(
 		&rawExtra,
 		&rateLimitedAt,
 		&rateLimitResetAt,
 		&overloadUntil,
+		&lastUsedAt,
 		&sessionWindowStart,
 		&sessionWindowEnd,
 		&sessionWindowStatus,
@@ -447,6 +449,7 @@ FOR UPDATE`, account.ID)
 	account.RateLimitedAt = nullTimePointer(rateLimitedAt)
 	account.RateLimitResetAt = nullTimePointer(rateLimitResetAt)
 	account.OverloadUntil = nullTimePointer(overloadUntil)
+	account.LastUsedAt = nullTimePointer(lastUsedAt)
 	account.SessionWindowStart = nullTimePointer(sessionWindowStart)
 	account.SessionWindowEnd = nullTimePointer(sessionWindowEnd)
 	if sessionWindowStatus.Valid {

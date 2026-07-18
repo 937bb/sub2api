@@ -241,6 +241,27 @@ func (s *AccountRepoSuite) TestUpdate_PreservesConcurrentRuntimeState() {
 	s.Require().Equal("allowed_warning", got.SessionWindowStatus)
 }
 
+func (s *AccountRepoSuite) TestUpdate_PreservesConcurrentLastUsed() {
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name: "acc-update-last-used-race",
+	})
+	stale := *account
+	stale.Name = "updated"
+
+	s.Require().NoError(s.repo.UpdateLastUsed(s.ctx, account.ID))
+	stored, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().NotNil(stored.LastUsedAt)
+
+	s.Require().NoError(s.repo.Update(s.ctx, &stale))
+
+	got, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().Equal("updated", got.Name)
+	s.Require().NotNil(got.LastUsedAt)
+	s.Require().WithinDuration(*stored.LastUsedAt, *got.LastUsedAt, time.Microsecond)
+}
+
 func (s *AccountRepoSuite) TestUpdate_SyncSchedulerSnapshotOnDisabled() {
 	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "sync-update", Status: service.StatusActive, Schedulable: true})
 	cacheRecorder := &schedulerCacheRecorder{}
