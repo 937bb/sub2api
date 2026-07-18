@@ -350,6 +350,9 @@ func TestSchedulerRuntimeProjectionDoesNotDisturbPendingLifecycleSource(t *testi
 	_, err = tx.ExecContext(ctx, `UPDATE accounts SET extra=jsonb_set(COALESCE(extra, '{}'::jsonb), '{codex_5h_used_percent}', '50'::jsonb, true) WHERE id=$1`, accountID)
 	require.NoError(t, err)
 	requireAccountSourceState(t, tx, accountID, 1, true, 42)
+	_, err = tx.ExecContext(ctx, `UPDATE accounts SET extra=COALESCE(extra, '{}'::jsonb)-'codex_5h_used_percent' WHERE id=$1`, accountID)
+	require.NoError(t, err)
+	requireAccountSourceState(t, tx, accountID, 1, true, 42)
 
 	_, err = tx.ExecContext(ctx, `UPDATE accounts SET extra=jsonb_set(COALESCE(extra, '{}'::jsonb), '{future_scheduler_key}', 'true'::jsonb, true) WHERE id=$1`, accountID)
 	require.NoError(t, err)
