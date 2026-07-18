@@ -190,6 +190,9 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 
 	setOpsRequestContext(c, "", false)
 	sessionHashBody := body
+	if service.PromoteOpenAICompactBodySignal(c, body, h != nil && h.cfg != nil && h.cfg.Gateway.ForceCodexCLI) {
+		reqLog.Info("codex.remote_compact.detected_body_signal")
+	}
 	if service.IsOpenAIResponsesCompactPathForTest(c) {
 		if compactSeed := strings.TrimSpace(gjson.GetBytes(body, "prompt_cache_key").String()); compactSeed != "" {
 			c.Set(service.OpenAICompactSessionSeedKeyForTest(), compactSeed)
@@ -311,6 +314,10 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	// Generate session hash (header first; fallback to prompt_cache_key)
 	sessionHash := h.gatewayService.GenerateSessionHash(c, sessionHashBody)
 	requireCompact := isOpenAIRemoteCompactPath(c)
+	requiredCapability := service.OpenAIEndpointCapabilityChatCompletions
+	if service.IsOpenAICompactBodySignalRequest(c) {
+		requiredCapability = service.OpenAIEndpointCapabilityOAuthCompactBodySignal
+	}
 
 	maxAccountSwitches := h.maxAccountSwitches
 	switchCount := 0
@@ -333,7 +340,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			reqModel,
 			failedAccountIDs,
 			service.OpenAIUpstreamTransportAny,
-			service.OpenAIEndpointCapabilityChatCompletions,
+			requiredCapability,
 			requireCompact,
 		)
 		if err != nil {

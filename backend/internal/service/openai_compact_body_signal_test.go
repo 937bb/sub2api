@@ -46,7 +46,7 @@ func TestHasOpenAICompactionTriggerInInput(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			require.Equal(t, tt.want, hasOpenAICompactionTriggerInInput(tt.body))
+			require.Equal(t, tt.want, HasOpenAICompactionTriggerInInput(tt.body))
 		})
 	}
 }
@@ -77,6 +77,7 @@ func TestOpenAIGatewayService_OAuthCodexBodySignalPromotesCompact(t *testing.T) 
 		},
 	}
 	body := []byte(`{"model":"billing-alias","stream":true,"store":true,"client_metadata":{"drop":true},"input":[{"type":"message","role":"user","content":"hello"},{"type":"compaction_trigger"}]}`)
+	require.True(t, PromoteOpenAICompactBodySignal(c, body, false))
 
 	result, err := svc.Forward(context.Background(), c, account, body)
 
@@ -117,6 +118,8 @@ func TestOpenAIGatewayService_APIKeyBodySignalStaysNativeResponses(t *testing.T)
 		Credentials: map[string]any{"api_key": "sk-test"},
 	}
 	body := []byte(`{"model":"gpt-5.5","stream":false,"store":true,"input":[{"type":"compaction_trigger"}]}`)
+	// API-key passthrough never receives the handler's promoted marker because
+	// body-signal scheduling is scoped to OAuth-like accounts.
 
 	result, err := svc.Forward(context.Background(), c, account, body)
 

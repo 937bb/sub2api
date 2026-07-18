@@ -41,6 +41,7 @@ func TestOpenAIGatewayService_OAuthBodySignalStreamBridgesUnaryJSONToSSE(t *test
 	svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
 	account := &Account{ID: 79, Name: "oauth-codex", Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1, Credentials: map[string]any{"access_token": "oauth-token"}}
 	body := []byte(`{"model":"gpt-5.5","stream":true,"input":[{"type":"compaction_trigger"}]}`)
+	require.True(t, PromoteOpenAICompactBodySignal(c, body, false))
 	_, err := svc.Forward(context.Background(), c, account, body)
 	require.NoError(t, err)
 	require.Equal(t, "text/event-stream", rec.Header().Get("Content-Type"))

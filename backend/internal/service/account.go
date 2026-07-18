@@ -69,8 +69,9 @@ type Account struct {
 type OpenAIEndpointCapability string
 
 const (
-	OpenAIEndpointCapabilityChatCompletions OpenAIEndpointCapability = "chat_completions"
-	OpenAIEndpointCapabilityEmbeddings      OpenAIEndpointCapability = "embeddings"
+	OpenAIEndpointCapabilityChatCompletions        OpenAIEndpointCapability = "chat_completions"
+	OpenAIEndpointCapabilityEmbeddings             OpenAIEndpointCapability = "embeddings"
+	OpenAIEndpointCapabilityOAuthCompactBodySignal OpenAIEndpointCapability = "oauth_compact_body_signal"
 )
 
 const openAIEndpointCapabilitiesCredentialKey = "openai_capabilities"
@@ -1273,6 +1274,8 @@ func (a *Account) SupportsOpenAIEndpointCapability(capability OpenAIEndpointCapa
 		if a.Type != AccountTypeAPIKey {
 			return false
 		}
+	case OpenAIEndpointCapabilityOAuthCompactBodySignal:
+		return a.IsOpenAIOAuthLike()
 	default:
 		return false
 	}

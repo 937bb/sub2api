@@ -3207,11 +3207,11 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	setOpenAICompatMessagesBridgeContext(c, compatMessagesBridge)
 
 	isCodexCLI := openai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator")) || (s.cfg != nil && s.cfg.Gateway.ForceCodexCLI)
-	if !isCompactRequest && account.IsOpenAIOAuthLike() && isCodexCLI && isBareOpenAIResponsesPath(c) && hasOpenAICompactionTriggerInInput(body) {
-		c.Request.URL.Path = strings.TrimRight(c.Request.URL.Path, "/") + "/compact"
+	if isOpenAICompactBodySignalRequest(c) {
+		if !account.IsOpenAIOAuthLike() {
+			return nil, errors.New("compact body signal requires an OpenAI OAuth-like account")
+		}
 		isCompactRequest = true
-		// Body-signal promotion belongs to the OAuth adapter. API-key passthrough
-		// remains protocol preserving and never receives this response-bridge mark.
 		if reqStream {
 			c.Set(openAICompactClientStreamKey, true)
 		}
