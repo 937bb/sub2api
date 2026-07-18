@@ -246,49 +246,6 @@
             </p>
           </article>
         </section>
-
-        <!-- Providers strip -->
-        <section class="reveal py-14" style="--d: 280ms">
-          <div class="rounded-3xl border border-[var(--glass-border)] bg-[var(--glass-bg-content)] p-8 shadow-sm backdrop-blur-md sm:p-10">
-            <div class="flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <h2 class="font-display text-2xl font-bold tracking-tight text-gray-900 dark:text-white">
-                  {{ t('home.providers.title') }}
-                </h2>
-                <p class="mt-1.5 text-sm text-gray-500 dark:text-dark-300">
-                  {{ t('home.providers.description') }}
-                </p>
-              </div>
-              <div class="flex flex-wrap items-center gap-2.5">
-                <div
-                  v-for="prov in providerList"
-                  :key="prov.key"
-                  :class="[
-                    'flex items-center gap-2 rounded-xl border px-4 py-2.5 backdrop-blur-sm',
-                    prov.soon
-                      ? 'border-gray-200/60 bg-[var(--glass-bg-float)] opacity-60 dark:border-dark-700/60'
-                      : 'border-primary-500/20 bg-[var(--glass-bg-float)] ring-1 ring-primary-500/10'
-                  ]"
-                >
-                  <span :class="['flex h-7 w-7 items-center justify-center rounded-lg text-white', prov.color]">
-                    <img v-if="prov.img" :src="prov.img" :alt="prov.name" class="h-5 w-5" />
-                    <svg v-else-if="prov.path" viewBox="0 0 24 24" fill="currentColor" class="h-4 w-4"><path :d="prov.path" /></svg>
-                    <span v-else class="text-[11px] font-bold">{{ prov.letter }}</span>
-                  </span>
-                  <span class="text-sm font-medium text-gray-700 dark:text-dark-200">{{ prov.name }}</span>
-                  <span
-                    :class="[
-                      'rounded px-1.5 py-0.5 text-[10px] font-medium',
-                      prov.soon
-                        ? 'bg-gray-100 text-gray-500 dark:bg-dark-700 dark:text-dark-300'
-                        : 'bg-primary-100 text-primary-600 dark:bg-primary-900/30 dark:text-primary-400'
-                    ]"
-                  >{{ prov.soon ? t('home.providers.soon') : t('home.providers.supported') }}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
       </div>
     </main>
 
