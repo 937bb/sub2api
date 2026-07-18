@@ -306,6 +306,30 @@ WHERE account_id=$1
 	}
 }
 
+func TestSchedulerAccountDirtyProjectionClassifiesEachUpdatedRow(t *testing.T) {
+	ctx := context.Background()
+	tx := testTx(t)
+	suffix := time.Now().UnixNano()
+
+	var runtimeID, lifecycleID int64
+	require.NoError(t, tx.QueryRowContext(ctx, `INSERT INTO accounts(name,platform,type) VALUES($1,'openai','oauth') RETURNING id`, fmt.Sprintf("projection-runtime-%d", suffix)).Scan(&runtimeID))
+	require.NoError(t, tx.QueryRowContext(ctx, `INSERT INTO accounts(name,platform,type) VALUES($1,'openai','oauth') RETURNING id`, fmt.Sprintf("projection-lifecycle-%d", suffix)).Scan(&lifecycleID))
+	truncateSchedulerDirtyTables(t, tx)
+
+	_, err := tx.ExecContext(ctx, `
+UPDATE accounts
+SET extra = CASE id
+	WHEN $1 THEN jsonb_set(COALESCE(extra, '{}'::jsonb), '{codex_5h_used_percent}', '50'::jsonb, true)
+	WHEN $2 THEN jsonb_set(COALESCE(extra, '{}'::jsonb), '{future_scheduler_key}', 'true'::jsonb, true)
+	ELSE extra
+END
+WHERE id IN ($1, $2)`, runtimeID, lifecycleID)
+	require.NoError(t, err)
+
+	requireNoAccountSource(t, tx, runtimeID)
+	requireAccountSource(t, tx, lifecycleID, 1, false)
+}
+
 func TestSchedulerDirtySourceStatementUpdatesAreSortedAndCoalesced(t *testing.T) {
 	ctx := context.Background()
 	tx := testTx(t)
