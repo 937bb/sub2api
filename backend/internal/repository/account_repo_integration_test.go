@@ -1118,6 +1118,32 @@ func (s *AccountRepoSuite) TestUpdateSessionWindow_AvoidsRedundantSnapshotWrite(
 	s.Require().Empty(cacheRecorder.setAccounts)
 }
 
+func (s *AccountRepoSuite) TestUpdateSessionWindow_DoesNotReplaceNewerWindow() {
+	laterStart := time.Now().UTC().Truncate(time.Second)
+	laterEnd := laterStart.Add(5 * time.Hour)
+	earlierStart := laterStart.Add(-time.Hour)
+	earlierEnd := laterEnd.Add(-time.Hour)
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:                "session-window-monotonic-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		SessionWindowStart:  &laterStart,
+		SessionWindowEnd:    &laterEnd,
+		SessionWindowStatus: "active",
+	})
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
+
+	s.Require().NoError(s.repo.UpdateSessionWindow(s.ctx, account.ID, &earlierStart, &earlierEnd, "rejected"))
+
+	got, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().NotNil(got.SessionWindowStart)
+	s.Require().NotNil(got.SessionWindowEnd)
+	s.Require().WithinDuration(laterStart, *got.SessionWindowStart, time.Microsecond)
+	s.Require().WithinDuration(laterEnd, *got.SessionWindowEnd, time.Microsecond)
+	s.Require().Equal("active", got.SessionWindowStatus)
+	s.Require().Empty(cacheRecorder.setAccounts)
+}
+
 func (s *AccountRepoSuite) TestUpdateSessionWindowEnd_SyncsWithoutLifecycleOutbox() {
 	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "session-window-end-sync"})
 	cacheRecorder := &schedulerCacheRecorder{}

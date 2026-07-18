@@ -1859,6 +1859,11 @@ SET session_window_start = CASE WHEN $2 THEN $3::timestamptz ELSE session_window
 WHERE id = $1
 	AND deleted_at IS NULL
 	AND (
+		NOT $4 OR
+		session_window_end IS NULL OR
+		session_window_end <= $5::timestamptz
+	)
+	AND (
 		session_window_status IS DISTINCT FROM $6 OR
 		($2 AND session_window_start IS DISTINCT FROM $3::timestamptz) OR
 		($4 AND session_window_end IS DISTINCT FROM $5::timestamptz)
