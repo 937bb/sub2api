@@ -1028,6 +1028,7 @@ export default {
   // Channel Status (user-facing read-only view)
   channelStatus: {
     title: '渠道状态',
+    heroHeading: '服务可用性总览',
     description: '查看渠道可用性、延迟和近期状态',
     searchPlaceholder: '搜索渠道...',
     allProviders: '全部供应商',
