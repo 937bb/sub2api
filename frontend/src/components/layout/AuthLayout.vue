@@ -8,22 +8,22 @@
 
       <!-- 顶部 wordmark -->
       <div class="relative z-10 flex items-center gap-3">
-        <div class="h-10 w-10 overflow-hidden rounded-xl ring-1 ring-white/15">
+        <div class="h-10 w-10 overflow-hidden rounded-xl ring-1 ring-black/10 dark:ring-white/15">
           <img :src="siteLogo || '/logo.png'" alt="Logo" class="h-full w-full object-contain" />
         </div>
-        <span class="text-sm font-medium tracking-wide text-white/70">{{ siteName }}</span>
+        <span class="text-sm font-medium tracking-wide text-gray-500 dark:text-white/70">{{ siteName }}</span>
       </div>
 
       <!-- 中部:大标题 + 副标题 + 能力标签 -->
       <div class="relative z-10 max-w-md">
-        <h1 class="font-display text-5xl font-extrabold leading-[1.05] tracking-tight text-white xl:text-6xl">
+        <h1 class="font-display text-5xl font-extrabold leading-[1.05] tracking-tight text-gray-900 dark:text-white xl:text-6xl">
           {{ siteName }}
         </h1>
-        <p class="mt-5 text-lg leading-relaxed text-white/60">
+        <p class="mt-5 text-lg leading-relaxed text-gray-500 dark:text-white/60">
           {{ siteSubtitle }}
         </p>
         <ul class="mt-9 space-y-3.5">
-          <li v-for="cap in capabilities" :key="cap" class="flex items-center gap-3 text-[15px] text-white/75">
+          <li v-for="cap in capabilities" :key="cap" class="flex items-center gap-3 text-[15px] text-gray-600 dark:text-white/75">
             <span class="cap-dot"></span>
             {{ cap }}
           </li>
@@ -32,11 +32,11 @@
 
       <!-- 底部:mono 装饰行 + 版权 -->
       <div class="relative z-10 space-y-4">
-        <div class="brand-code inline-flex items-center gap-2 rounded-lg px-3 py-1.5 font-mono text-xs text-white/55">
-          <span class="text-emerald-400">$</span>
+        <div class="brand-code inline-flex items-center gap-2 rounded-lg px-3 py-1.5 font-mono text-xs text-gray-600 dark:text-white/55">
+          <span class="text-emerald-500 dark:text-emerald-400">$</span>
           <span>curl -X POST /v1/messages</span>
         </div>
-        <p class="text-xs text-white/35">&copy; {{ currentYear }} {{ siteName }}. All rights reserved.</p>
+        <p class="text-xs text-gray-400 dark:text-white/35">&copy; {{ currentYear }} {{ siteName }}. All rights reserved.</p>
       </div>
     </aside>
 
@@ -101,24 +101,42 @@ onMounted(() => {
 <style scoped>
 /* 右侧表单区背景由全局 body mesh 提供,保持透明 */
 
-/* 左侧品牌深色面板 —— 中性炭黑 + 单点电光蓝柔光,不铺彩色 */
+/* 左侧品牌面板 —— 浅色玻璃基底 + 单点电光蓝柔光,与右侧表单区以细分隔线区分 */
 .brand-panel {
+  background:
+    radial-gradient(120% 80% at 15% 0%, #ffffff 0%, #e9edf4 60%),
+    #e6eaf1;
+  border-right: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.dark .brand-panel {
   background:
     radial-gradient(120% 80% at 15% 0%, #1a1c22 0%, #0b0c10 55%),
     #0b0c10;
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .brand-grid {
   background-image:
-    linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+    linear-gradient(rgba(0, 0, 0, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 0, 0, 0.045) 1px, transparent 1px);
   background-size: 56px 56px;
   mask-image: radial-gradient(120% 100% at 30% 20%, #000 0%, transparent 75%);
   -webkit-mask-image: radial-gradient(120% 100% at 30% 20%, #000 0%, transparent 75%);
 }
 
+.dark .brand-grid {
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+}
+
 /* 单一柔和电光蓝辉光(克制,只此一处) */
 .brand-glow {
+  background: radial-gradient(50% 45% at 78% 78%, rgba(10, 132, 255, 0.14) 0%, transparent 70%);
+}
+
+.dark .brand-glow {
   background: radial-gradient(50% 45% at 78% 78%, rgba(10, 132, 255, 0.22) 0%, transparent 70%);
 }
 
@@ -127,11 +145,17 @@ onMounted(() => {
   width: 6px;
   border-radius: 9999px;
   background: #0a84ff;
-  box-shadow: 0 0 10px rgba(10, 132, 255, 0.8);
+  box-shadow: 0 0 10px rgba(10, 132, 255, 0.6);
   flex: none;
 }
 
 .brand-code {
+  background: rgba(255, 255, 255, 0.6);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: inset 0 0.5px 0 rgba(255, 255, 255, 0.9);
+}
+
+.dark .brand-code {
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.08);
   box-shadow: inset 0 0.5px 0 rgba(255, 255, 255, 0.12);

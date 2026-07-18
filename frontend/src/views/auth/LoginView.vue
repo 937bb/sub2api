@@ -19,7 +19,7 @@
           </label>
           <div class="relative">
             <div class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5">
-              <Icon name="mail" size="md" class="text-gray-500 dark:text-dark-400" />
+              <Icon name="mail" size="md" class="text-gray-500 dark:text-dark-300" :stroke-width="2" />
             </div>
             <input
               id="email"
@@ -28,7 +28,7 @@
               required
               autofocus
               autocomplete="email"
-              :disabled="authActionDisabled"
+              :disabled="fieldsDisabled"
               class="input pl-11"
               :class="{ 'input-error': errors.email }"
               :placeholder="t('auth.emailPlaceholder')"
@@ -43,7 +43,7 @@
           </label>
           <div class="relative">
             <div class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5">
-              <Icon name="lock" size="md" class="text-gray-500 dark:text-dark-400" />
+              <Icon name="lock" size="md" class="text-gray-500 dark:text-dark-300" :stroke-width="2" />
             </div>
             <input
               id="password"
@@ -51,7 +51,7 @@
               :type="showPassword ? 'text' : 'password'"
               required
               autocomplete="current-password"
-              :disabled="authActionDisabled"
+              :disabled="fieldsDisabled"
               class="input pl-11 pr-11"
               :class="{ 'input-error': errors.password }"
               :placeholder="t('auth.passwordPlaceholder')"
@@ -59,8 +59,8 @@
             <button
               type="button"
               @click="showPassword = !showPassword"
-              :disabled="authActionDisabled"
-              class="absolute inset-y-0 right-0 flex items-center pr-3.5 text-gray-400 transition-colors hover:text-gray-600 dark:hover:text-dark-300"
+              :disabled="fieldsDisabled"
+              class="absolute inset-y-0 right-0 flex items-center pr-3.5 text-gray-500 transition-colors hover:text-gray-700 dark:text-dark-300 dark:hover:text-white"
             >
               <Icon v-if="showPassword" name="eyeOff" size="md" />
               <Icon v-else name="eye" size="md" />
@@ -285,6 +285,11 @@ const agreementGateActive = computed(
 const authActionDisabled = computed(
   () => isLoading.value || !publicSettingsLoaded.value || agreementGateActive.value
 )
+
+// Text inputs should stay usable while the page loads or the agreement gate is
+// pending — the gate is enforced on submit (validateForm), not on typing. Only
+// lock the fields during an in-flight submission to avoid mid-request edits.
+const fieldsDisabled = computed(() => isLoading.value)
 
 const showOAuthLogin = computed(
   () =>
