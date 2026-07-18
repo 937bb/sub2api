@@ -1197,11 +1197,12 @@ func TestForwardAsAnthropic_DoesNotAutoDerivePromptCacheKeyForNonCodexModel(t *t
 	require.Empty(t, upstream.lastReq.Header.Get("session_id"))
 }
 
-func TestForwardAsAnthropic_TrimsFullReplayOnlyForCodexCompatModels(t *testing.T) {
+func TestForwardAsAnthropic_KeepsFullReplayWithoutContinuation(t *testing.T) {
 	t.Parallel()
 
-	messages := make([]string, 0, openAICompatAnthropicReplayMaxTailMessages+3)
-	for i := 0; i < openAICompatAnthropicReplayMaxTailMessages+3; i++ {
+	const messageCount = 15
+	messages := make([]string, 0, messageCount)
+	for i := 0; i < messageCount; i++ {
 		messages = append(messages, `{"role":"user","content":"message-`+fmt.Sprintf("%02d", i)+`"}`)
 	}
 	body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[` + strings.Join(messages, ",") + `],"stream":false}`)
@@ -1249,22 +1250,23 @@ func TestForwardAsAnthropic_TrimsFullReplayOnlyForCodexCompatModels(t *testing.T
 	}
 
 	codexBody := run(t, "gpt-5.3-codex")
-	require.Equal(t, int64(openAICompatAnthropicReplayMaxTailMessages+1), gjson.GetBytes(codexBody, "input.#").Int())
+	require.Equal(t, int64(messageCount+1), gjson.GetBytes(codexBody, "input.#").Int())
 	require.Equal(t, "developer", gjson.GetBytes(codexBody, "input.0.role").String())
 	require.Contains(t, gjson.GetBytes(codexBody, "input.0.content.0.text").String(), "<sub2api-claude-code-todo-guard>")
-	require.Equal(t, "message-03", gjson.GetBytes(codexBody, "input.1.content.0.text").String())
-	require.Equal(t, "message-14", gjson.GetBytes(codexBody, "input.12.content.0.text").String())
+	require.Equal(t, "message-00", gjson.GetBytes(codexBody, "input.1.content.0.text").String())
+	require.Equal(t, "message-14", gjson.GetBytes(codexBody, "input.15.content.0.text").String())
 
 	nonCompatBody := run(t, "gpt-4o")
-	require.Equal(t, int64(openAICompatAnthropicReplayMaxTailMessages+3), gjson.GetBytes(nonCompatBody, "input.#").Int())
+	require.Equal(t, int64(messageCount), gjson.GetBytes(nonCompatBody, "input.#").Int())
 	require.Equal(t, "message-00", gjson.GetBytes(nonCompatBody, "input.0.content.0.text").String())
 }
 
 func TestForwardAsAnthropic_OAuthCompatKeepsFullReplayForCacheGrowth(t *testing.T) {
 	t.Parallel()
 
-	messages := make([]string, 0, openAICompatAnthropicReplayMaxTailMessages+3)
-	for i := 0; i < openAICompatAnthropicReplayMaxTailMessages+3; i++ {
+	const messageCount = 15
+	messages := make([]string, 0, messageCount)
+	for i := 0; i < messageCount; i++ {
 		messages = append(messages, `{"role":"user","content":"message-`+fmt.Sprintf("%02d", i)+`"}`)
 	}
 	body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[` + strings.Join(messages, ",") + `],"stream":false}`)
@@ -1294,7 +1296,7 @@ func TestForwardAsAnthropic_OAuthCompatKeepsFullReplayForCacheGrowth(t *testing.
 	result, err := svc.ForwardAsAnthropic(context.Background(), c, account, body, "", "gpt-5.4")
 	require.NoError(t, err)
 	require.NotNil(t, result)
-	require.Equal(t, int64(openAICompatAnthropicReplayMaxTailMessages+4), gjson.GetBytes(upstream.lastBody, "input.#").Int())
+	require.Equal(t, int64(messageCount+1), gjson.GetBytes(upstream.lastBody, "input.#").Int())
 	require.Equal(t, "developer", gjson.GetBytes(upstream.lastBody, "input.0.role").String())
 	require.Contains(t, gjson.GetBytes(upstream.lastBody, "input.0.content.0.text").String(), "<sub2api-claude-code-todo-guard>")
 	require.Equal(t, "message-00", gjson.GetBytes(upstream.lastBody, "input.1.content.0.text").String())
@@ -1428,7 +1430,12 @@ func TestForwardAsAnthropic_ReplaysWithoutContinuationWhenPreviousResponseMissin
 	}
 
 	svc.bindOpenAICompatSessionResponseID(context.Background(), nil, account, "stable-cache-key", "resp_missing")
-	secondBody := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"first"},{"role":"assistant","content":"ok"},{"role":"user","content":"second"}],"stream":false}`)
+	const messageCount = 15
+	messages := make([]string, 0, messageCount)
+	for i := 0; i < messageCount; i++ {
+		messages = append(messages, `{"role":"user","content":"message-`+fmt.Sprintf("%02d", i)+`"}`)
+	}
+	secondBody := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[` + strings.Join(messages, ",") + `],"stream":false}`)
 	upstream.responses = []*http.Response{
 		{
 			StatusCode: http.StatusBadRequest,
@@ -1450,11 +1457,11 @@ func TestForwardAsAnthropic_ReplaysWithoutContinuationWhenPreviousResponseMissin
 	require.Len(t, upstream.requests, 2)
 	require.Equal(t, "resp_missing", gjson.GetBytes(upstream.bodies[0], "previous_response_id").String())
 	require.False(t, gjson.GetBytes(upstream.bodies[1], "previous_response_id").Exists())
-	require.Equal(t, int64(4), gjson.GetBytes(upstream.bodies[1], "input.#").Int())
+	require.Equal(t, int64(messageCount+1), gjson.GetBytes(upstream.bodies[1], "input.#").Int())
 	require.Equal(t, "developer", gjson.GetBytes(upstream.bodies[1], "input.0.role").String())
 	require.Contains(t, gjson.GetBytes(upstream.bodies[1], "input.0.content.0.text").String(), "<sub2api-claude-code-todo-guard>")
-	require.Equal(t, "first", gjson.GetBytes(upstream.bodies[1], "input.1.content.0.text").String())
-	require.Equal(t, "second", gjson.GetBytes(upstream.bodies[1], "input.3.content.0.text").String())
+	require.Equal(t, "message-00", gjson.GetBytes(upstream.bodies[1], "input.1.content.0.text").String())
+	require.Equal(t, "message-14", gjson.GetBytes(upstream.bodies[1], "input.15.content.0.text").String())
 }
 
 func TestForwardAsAnthropic_DisablesAPIKeyContinuationWhenUpstreamRequiresWebSocketV2(t *testing.T) {
@@ -1520,9 +1527,10 @@ func TestForwardAsAnthropic_APIKeyMetadataSessionSurvivesChangingCacheControlAnc
 
 	metadata := `{"user_id":"{\"device_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"account_uuid\":\"\",\"session_id\":\"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\"}"}`
 	firstBody := []byte(`{"model":"claude-haiku-4-5-20251001","max_tokens":16,"metadata":` + metadata + `,"system":[{"type":"text","text":"project docs","cache_control":{"type":"ephemeral"}}],"messages":[{"role":"user","content":"first"}],"stream":false}`)
-	messages := make([]string, 0, openAICompatAnthropicReplayMaxTailMessages+4)
+	const messageCount = 16
+	messages := make([]string, 0, messageCount)
 	messages = append(messages, `{"role":"user","content":[{"type":"text","text":"rewritten context","cache_control":{"type":"ephemeral"}}]}`)
-	for i := 1; i < openAICompatAnthropicReplayMaxTailMessages+4; i++ {
+	for i := 1; i < messageCount; i++ {
 		messages = append(messages, `{"role":"user","content":"message-`+fmt.Sprintf("%02d", i)+`"}`)
 	}
 	secondBody := []byte(`{"model":"claude-haiku-4-5-20251001","max_tokens":16,"metadata":` + metadata + `,"messages":[` + strings.Join(messages, ",") + `],"stream":false}`)
@@ -1572,7 +1580,7 @@ func TestForwardAsAnthropic_APIKeyMetadataSessionSurvivesChangingCacheControlAnc
 	require.Len(t, upstream.requests, 2)
 	require.Equal(t, firstKey, gjson.GetBytes(upstream.bodies[1], "prompt_cache_key").String())
 	require.False(t, gjson.GetBytes(upstream.bodies[1], "previous_response_id").Exists())
-	require.Equal(t, int64(openAICompatAnthropicReplayMaxTailMessages+5), gjson.GetBytes(upstream.bodies[1], "input.#").Int())
+	require.Equal(t, int64(messageCount+1), gjson.GetBytes(upstream.bodies[1], "input.#").Int())
 	require.Equal(t, "developer", gjson.GetBytes(upstream.bodies[1], "input.0.role").String())
 	require.Contains(t, gjson.GetBytes(upstream.bodies[1], "input.0.content.0.text").String(), "<sub2api-claude-code-todo-guard>")
 	require.Equal(t, "rewritten context", gjson.GetBytes(upstream.bodies[1], "input.1.content.0.text").String())

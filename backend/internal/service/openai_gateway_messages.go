@@ -100,24 +100,16 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		}
 		compatPromptCacheInjected = promptCacheKey != ""
 	}
-	compatReplayTrimmed := false
 	compatReplayGuardEnabled := shouldAutoInjectPromptCacheKeyForCompat(upstreamModel)
 	compatContinuationEnabled := openAICompatContinuationEnabled(account, upstreamModel)
 	previousResponseID := ""
 	if compatContinuationEnabled {
 		previousResponseID = s.getOpenAICompatSessionResponseID(ctx, c, account, promptCacheKey)
 	}
-	compatContinuationDisabled := compatContinuationEnabled &&
-		s.isOpenAICompatSessionContinuationDisabled(ctx, c, account, promptCacheKey)
 	compatTurnState := ""
-	// OAuth-like accounts rely on session_id + x-codex-turn-state; trimming to a
-	// sliding 12-message window makes the cached prefix stall at system/tools.
-	// Keep full replay there so upstream prompt caching can grow turn by turn.
-	if compatReplayGuardEnabled && !account.IsOpenAIOAuthLike() && previousResponseID == "" && !compatContinuationDisabled {
-		compatReplayTrimmed = applyAnthropicCompatFullReplayGuard(&anthropicReq)
-	}
 
-	// 3. Convert Anthropic → Responses after compatibility-only replay guard.
+	// 3. Convert the complete client-maintained Anthropic history. Only a valid
+	// previous_response_id permits reducing the replay to the latest turn below.
 	responsesReq, err := apicompat.AnthropicToResponses(&anthropicReq)
 	if err != nil {
 		return nil, fmt.Errorf("convert anthropic to responses: %w", err)
@@ -154,12 +146,6 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		logFields = append(logFields,
 			zap.Bool("compat_prompt_cache_key_injected", true),
 			zap.String("compat_prompt_cache_key_sha256", hashSensitiveValueForLog(promptCacheKey)),
-		)
-	}
-	if compatReplayTrimmed {
-		logFields = append(logFields,
-			zap.Bool("compat_full_replay_trimmed", true),
-			zap.Int("compat_messages_after_trim", len(anthropicReq.Messages)),
 		)
 	}
 	if previousResponseID != "" {
