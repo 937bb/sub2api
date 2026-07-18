@@ -1431,6 +1431,27 @@ func (s *AccountRepoSuite) TestSetRateLimited_DoesNotShortenExistingCooldown() {
 	s.Require().Empty(cacheRecorder.setAccounts)
 }
 
+func (s *AccountRepoSuite) TestSetTempUnschedulable_DoesNotShortenExistingPenalty() {
+	later := time.Now().UTC().Add(2 * time.Hour).Truncate(time.Second)
+	earlier := later.Add(-time.Hour)
+	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "temp-unsched-monotonic-" + strconv.FormatInt(time.Now().UnixNano(), 10)})
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
+
+	s.Require().NoError(s.repo.SetTempUnschedulable(s.ctx, account.ID, later, "longer penalty"))
+	s.Require().Len(cacheRecorder.setAccounts, 1)
+	cacheRecorder.setAccounts = nil
+
+	s.Require().NoError(s.repo.SetTempUnschedulable(s.ctx, account.ID, earlier, "stale penalty"))
+
+	got, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().NotNil(got.TempUnschedulableUntil)
+	s.Require().WithinDuration(later, *got.TempUnschedulableUntil, time.Microsecond)
+	s.Require().Equal("longer penalty", got.TempUnschedulableReason)
+	s.Require().Empty(cacheRecorder.setAccounts)
+}
+
 func (s *AccountRepoSuite) TestSetTempUnschedulable_RollbackDoesNotPublishSnapshot() {
 	client := testEntClient(s.T())
 	account := mustCreateAccount(s.T(), client, &service.Account{
