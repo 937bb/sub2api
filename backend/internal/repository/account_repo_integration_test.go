@@ -209,8 +209,10 @@ func (s *AccountRepoSuite) TestUpdate_PreservesConcurrentRuntimeState() {
 
 	observedAt := time.Now().UTC()
 	resetAt := observedAt.Add(5 * time.Hour)
+	tempUntil := observedAt.Add(10 * time.Minute)
 	s.Require().NoError(s.repo.SetRateLimited(s.ctx, account.ID, resetAt))
 	s.Require().NoError(s.repo.SetOverloaded(s.ctx, account.ID, observedAt.Add(time.Minute)))
+	s.Require().NoError(s.repo.SetTempUnschedulable(s.ctx, account.ID, tempUntil, "runtime penalty"))
 	s.Require().NoError(s.repo.UpdateSessionWindow(
 		s.ctx,
 		account.ID,
@@ -236,6 +238,9 @@ func (s *AccountRepoSuite) TestUpdate_PreservesConcurrentRuntimeState() {
 	s.Require().NotNil(got.RateLimitedAt)
 	s.Require().WithinDuration(resetAt, *got.RateLimitResetAt, time.Microsecond)
 	s.Require().WithinDuration(observedAt.Add(time.Minute), *got.OverloadUntil, time.Microsecond)
+	s.Require().NotNil(got.TempUnschedulableUntil)
+	s.Require().WithinDuration(tempUntil, *got.TempUnschedulableUntil, time.Microsecond)
+	s.Require().Equal("runtime penalty", got.TempUnschedulableReason)
 	s.Require().WithinDuration(observedAt, *got.SessionWindowStart, time.Microsecond)
 	s.Require().WithinDuration(resetAt, *got.SessionWindowEnd, time.Microsecond)
 	s.Require().Equal("allowed_warning", got.SessionWindowStatus)
