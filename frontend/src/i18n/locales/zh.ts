@@ -4336,6 +4336,9 @@ export default {
     proxies: {
       title: 'IP管理',
       description: '管理代理服务器配置',
+      summaryTotal: '代理总数',
+      summaryActive: '启用中',
+      summaryInactive: '已停用',
       createProxy: '添加代理',
       editProxy: '编辑代理',
       deleteProxy: '删除代理',
@@ -4516,6 +4519,9 @@ export default {
     redeem: {
       title: '兑换码管理',
       description: '生成和管理兑换码',
+      summaryTotal: '兑换码总数',
+      summaryUnused: '未使用',
+      summaryUsed: '已使用',
       generateCodes: '生成兑换码',
       columns: {
         code: '兑换码',
@@ -4725,6 +4731,9 @@ export default {
     promo: {
       title: '优惠码管理',
       description: '创建和管理注册优惠码',
+      summaryTotal: '优惠码总数',
+      summaryActive: '启用中',
+      summaryDisabled: '已停用',
       createCode: '创建优惠码',
       editCode: '编辑优惠码',
       deleteCode: '删除优惠码',

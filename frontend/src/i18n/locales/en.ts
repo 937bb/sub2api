@@ -4336,6 +4336,9 @@ export default {
     proxies: {
       title: 'Proxy Management',
       description: 'Manage proxy servers for accounts',
+      summaryTotal: 'Total proxies',
+      summaryActive: 'Active',
+      summaryInactive: 'Inactive',
       createProxy: 'Create Proxy',
       editProxy: 'Edit Proxy',
       deleteProxy: 'Delete Proxy',
@@ -4520,6 +4523,9 @@ export default {
     redeem: {
       title: 'Redeem Code Management',
       description: 'Generate and manage redeem codes',
+      summaryTotal: 'Total codes',
+      summaryUnused: 'Unused',
+      summaryUsed: 'Used',
       generateCodes: 'Generate Codes',
       searchCodes: 'Search codes or email...',
       allTypes: 'All Types',
@@ -4730,6 +4736,9 @@ export default {
     promo: {
       title: 'Promo Code Management',
       description: 'Create and manage registration promo codes',
+      summaryTotal: 'Total codes',
+      summaryActive: 'Active',
+      summaryDisabled: 'Disabled',
       createCode: 'Create Promo Code',
       editCode: 'Edit Promo Code',
       deleteCode: 'Delete Promo Code',

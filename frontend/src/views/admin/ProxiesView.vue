@@ -2,13 +2,31 @@
   <AppLayout>
     <TablePageLayout>
       <template #filters>
-        <div class="flex flex-wrap items-center gap-3">
+        <div class="space-y-4">
+          <!-- Summary strip -->
+          <div class="card grid grid-cols-3 divide-x divide-gray-200/70 dark:divide-dark-700">
+            <div class="px-5 py-3">
+              <p class="font-display text-2xl font-bold tracking-tight text-gray-900 dark:text-white">{{ pagination.total }}</p>
+              <p class="mt-0.5 text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.proxies.summaryTotal') }}</p>
+            </div>
+            <div class="px-5 py-3">
+              <p class="font-display text-2xl font-bold tracking-tight text-emerald-600 dark:text-emerald-400">{{ activeProxyCount }}</p>
+              <p class="mt-0.5 text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.proxies.summaryActive') }}</p>
+            </div>
+            <div class="px-5 py-3">
+              <p class="font-display text-2xl font-bold tracking-tight text-gray-500 dark:text-gray-400">{{ inactiveProxyCount }}</p>
+              <p class="mt-0.5 text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.proxies.summaryInactive') }}</p>
+            </div>
+          </div>
+
+          <div class="flex flex-wrap items-center gap-3">
           <!-- Left: Search + Filters -->
           <div class="relative w-full sm:w-64">
             <Icon
               name="search"
               size="md"
-              class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500"
+              class="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-gray-500 dark:text-dark-300"
+              :stroke-width="2"
             />
             <input
               v-model="searchQuery"
@@ -83,6 +101,7 @@
               <Icon name="plus" size="md" class="mr-2" />
               {{ t('admin.proxies.createProxy') }}
             </button>
+          </div>
           </div>
         </div>
       </template>
@@ -946,6 +965,10 @@ const editStatusOptions = computed(() => [
 ])
 
 const proxies = ref<Proxy[]>([])
+
+// Page-scoped status breakdown (server total lives in pagination.total).
+const activeProxyCount = computed(() => proxies.value.filter((p) => p.status === 'active').length)
+const inactiveProxyCount = computed(() => proxies.value.filter((p) => p.status !== 'active').length)
 const visiblePasswordIds = reactive(new Set<number>())
 const copyMenuProxyId = ref<number | null>(null)
 const loading = ref(false)
