@@ -4648,6 +4648,9 @@ export default {
     announcements: {
       title: '公告管理',
       description: '创建公告并按条件投放',
+      summaryTotal: '公告总数',
+      summaryActive: '展示中',
+      summaryOnPage: '本页数量',
       createAnnouncement: '创建公告',
       editAnnouncement: '编辑公告',
       deleteAnnouncement: '删除公告',

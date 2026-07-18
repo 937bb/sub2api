@@ -4653,6 +4653,9 @@ export default {
     announcements: {
       title: 'Announcements',
       description: 'Create announcements and target by conditions',
+      summaryTotal: 'Total',
+      summaryActive: 'Active',
+      summaryOnPage: 'On this page',
       createAnnouncement: 'Create Announcement',
       editAnnouncement: 'Edit Announcement',
       deleteAnnouncement: 'Delete Announcement',
