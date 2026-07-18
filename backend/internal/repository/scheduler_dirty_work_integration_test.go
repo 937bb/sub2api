@@ -359,6 +359,46 @@ func TestSchedulerRuntimeProjectionDoesNotDisturbPendingLifecycleSource(t *testi
 	requireAccountSourceState(t, tx, accountID, 2, true, 0)
 }
 
+func TestSchedulerMixedSchedulingChangePromotesPendingSourceToBucketDirty(t *testing.T) {
+	ctx := context.Background()
+	tx := testTx(t)
+	suffix := time.Now().UnixNano()
+
+	var accountID int64
+	require.NoError(t, tx.QueryRowContext(ctx, `INSERT INTO accounts(name,platform,type) VALUES($1,'openai','oauth') RETURNING id`, fmt.Sprintf("projection-mixed-%d", suffix)).Scan(&accountID))
+	truncateSchedulerDirtyTables(t, tx)
+
+	_, err := tx.ExecContext(ctx, `UPDATE accounts SET concurrency=concurrency+1 WHERE id=$1`, accountID)
+	require.NoError(t, err)
+	_, err = tx.ExecContext(ctx, `UPDATE scheduler_dirty_account_sources SET group_cursor=42 WHERE account_id=$1`, accountID)
+	require.NoError(t, err)
+	requireAccountSourceState(t, tx, accountID, 1, false, 42)
+
+	// A mixed runtime/lifecycle statement remains lifecycle-relevant because
+	// mixed_scheduling changes bucket membership. It must restart pending fanout
+	// and promote the previously clean source to sticky bucket rebuild work.
+	_, err = tx.ExecContext(ctx, `
+UPDATE accounts
+SET extra=jsonb_set(
+	jsonb_set(
+		COALESCE(extra, '{}'::jsonb),
+		'{codex_5h_used_percent}',
+		'50'::jsonb,
+		true
+	),
+	'{mixed_scheduling}',
+	'true'::jsonb,
+	true
+)
+WHERE id=$1`, accountID)
+	require.NoError(t, err)
+	requireAccountSourceState(t, tx, accountID, 2, true, 0)
+
+	_, err = tx.ExecContext(ctx, `UPDATE accounts SET extra=COALESCE(extra, '{}'::jsonb)-'mixed_scheduling' WHERE id=$1`, accountID)
+	require.NoError(t, err)
+	requireAccountSourceState(t, tx, accountID, 3, true, 0)
+}
+
 func TestSchedulerDirtySourceStatementUpdatesAreSortedAndCoalesced(t *testing.T) {
 	ctx := context.Background()
 	tx := testTx(t)
