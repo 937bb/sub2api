@@ -330,6 +330,32 @@ WHERE id IN ($1, $2)`, runtimeID, lifecycleID)
 	requireAccountSource(t, tx, lifecycleID, 1, false)
 }
 
+func TestSchedulerRuntimeProjectionDoesNotDisturbPendingLifecycleSource(t *testing.T) {
+	ctx := context.Background()
+	tx := testTx(t)
+	suffix := time.Now().UnixNano()
+
+	var accountID int64
+	require.NoError(t, tx.QueryRowContext(ctx, `INSERT INTO accounts(name,platform,type) VALUES($1,'openai','oauth') RETURNING id`, fmt.Sprintf("projection-pending-%d", suffix)).Scan(&accountID))
+	truncateSchedulerDirtyTables(t, tx)
+
+	_, err := tx.ExecContext(ctx, `UPDATE accounts SET priority=priority+1 WHERE id=$1`, accountID)
+	require.NoError(t, err)
+	_, err = tx.ExecContext(ctx, `UPDATE scheduler_dirty_account_sources SET group_cursor=42 WHERE account_id=$1`, accountID)
+	require.NoError(t, err)
+
+	// Runtime-only observations must not restart pending lifecycle fanout or
+	// advance its generation. A later lifecycle change must do both while keeping
+	// the earlier bucket-rebuild intent sticky.
+	_, err = tx.ExecContext(ctx, `UPDATE accounts SET extra=jsonb_set(COALESCE(extra, '{}'::jsonb), '{codex_5h_used_percent}', '50'::jsonb, true) WHERE id=$1`, accountID)
+	require.NoError(t, err)
+	requireAccountSourceState(t, tx, accountID, 1, true, 42)
+
+	_, err = tx.ExecContext(ctx, `UPDATE accounts SET extra=jsonb_set(COALESCE(extra, '{}'::jsonb), '{future_scheduler_key}', 'true'::jsonb, true) WHERE id=$1`, accountID)
+	require.NoError(t, err)
+	requireAccountSourceState(t, tx, accountID, 2, true, 0)
+}
+
 func TestSchedulerDirtySourceStatementUpdatesAreSortedAndCoalesced(t *testing.T) {
 	ctx := context.Background()
 	tx := testTx(t)
@@ -363,6 +389,18 @@ SELECT generation,bucket_dirty FROM scheduler_dirty_account_sources WHERE accoun
 `, accountID).Scan(&gotGeneration, &gotBucketDirty))
 	require.Equal(t, generation, gotGeneration)
 	require.Equal(t, bucketDirty, gotBucketDirty)
+}
+
+func requireAccountSourceState(t *testing.T, tx queryRower, accountID, generation int64, bucketDirty bool, groupCursor int64) {
+	t.Helper()
+	var gotGeneration, gotGroupCursor int64
+	var gotBucketDirty bool
+	require.NoError(t, tx.QueryRowContext(context.Background(), `
+SELECT generation,bucket_dirty,group_cursor FROM scheduler_dirty_account_sources WHERE account_id=$1
+`, accountID).Scan(&gotGeneration, &gotBucketDirty, &gotGroupCursor))
+	require.Equal(t, generation, gotGeneration)
+	require.Equal(t, bucketDirty, gotBucketDirty)
+	require.Equal(t, groupCursor, gotGroupCursor)
 }
 
 func requireNoAccountSource(t *testing.T, tx queryRower, accountID int64) {
