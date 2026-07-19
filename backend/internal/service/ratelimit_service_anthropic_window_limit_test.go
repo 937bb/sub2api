@@ -14,18 +14,38 @@ import (
 
 type anthropicWindowLimitRepo struct {
 	mockAccountRepoForGemini
-	rateLimitCalls          int
-	tempUnschedCalls        int
-	sessionWindowCalls      int
-	lastRateLimitReset      time.Time
-	lastSessionWindowStart  *time.Time
-	lastSessionWindowEnd    *time.Time
-	lastSessionWindowStatus string
+	rateLimitCalls           int
+	modelRateLimitCalls      int
+	tempUnschedCalls         int
+	sessionWindowCalls       int
+	lastRateLimitReset       time.Time
+	lastModelRateLimitScope  string
+	lastModelRateLimitReset  time.Time
+	lastModelRateLimitReason string
+	lastExtraUpdates         map[string]any
+	lastSessionWindowStart   *time.Time
+	lastSessionWindowEnd     *time.Time
+	lastSessionWindowStatus  string
 }
 
 func (r *anthropicWindowLimitRepo) SetRateLimited(_ context.Context, _ int64, resetAt time.Time) error {
 	r.rateLimitCalls++
 	r.lastRateLimitReset = resetAt
+	return nil
+}
+
+func (r *anthropicWindowLimitRepo) SetModelRateLimit(_ context.Context, _ int64, scope string, resetAt time.Time, reason ...string) error {
+	r.modelRateLimitCalls++
+	r.lastModelRateLimitScope = scope
+	r.lastModelRateLimitReset = resetAt
+	if len(reason) > 0 {
+		r.lastModelRateLimitReason = reason[0]
+	}
+	return nil
+}
+
+func (r *anthropicWindowLimitRepo) UpdateExtra(_ context.Context, _ int64, updates map[string]any) error {
+	r.lastExtraUpdates = updates
 	return nil
 }
 
@@ -83,6 +103,64 @@ func TestHandleUpstreamError_AnthropicWindowLimitPreemptsTempUnschedRule(t *test
 	require.NotNil(t, repo.lastSessionWindowEnd)
 	require.Equal(t, resetAt, *repo.lastSessionWindowEnd)
 	require.Equal(t, "rejected", repo.lastSessionWindowStatus)
+}
+
+func TestHandleUpstreamError_AnthropicFableWindowOnlyMarksModelRateLimit(t *testing.T) {
+	now := time.Now().Truncate(time.Second)
+	resetAt := now.Add(6 * 24 * time.Hour)
+	headers := http.Header{}
+	headers.Set("anthropic-ratelimit-unified-5h-status", "allowed")
+	headers.Set("anthropic-ratelimit-unified-5h-utilization", "0.41")
+	headers.Set("anthropic-ratelimit-unified-7d-status", "allowed")
+	headers.Set("anthropic-ratelimit-unified-7d-utilization", "0.56")
+	headers.Set("anthropic-ratelimit-unified-7d_oi-status", "rejected")
+	headers.Set("anthropic-ratelimit-unified-7d_oi-utilization", "1.0")
+	headers.Set("anthropic-ratelimit-unified-7d_oi-reset", strconv.FormatInt(resetAt.Unix(), 10))
+
+	repo := &anthropicWindowLimitRepo{}
+	svc := NewRateLimitService(repo, nil, nil, nil, nil)
+	account := &Account{ID: 43, Type: AccountTypeOAuth, Platform: PlatformAnthropic}
+
+	shouldDisable := svc.HandleUpstreamError(
+		context.Background(),
+		account,
+		http.StatusTooManyRequests,
+		headers,
+		[]byte(`{"type":"error","error":{"type":"rate_limit_error","message":"rate limit"}}`),
+		"claude-fable-5",
+	)
+
+	require.False(t, shouldDisable)
+	require.Zero(t, repo.rateLimitCalls)
+	require.Zero(t, repo.tempUnschedCalls)
+	require.Equal(t, 1, repo.modelRateLimitCalls)
+	require.Equal(t, anthropicFableRateLimitKey, repo.lastModelRateLimitScope)
+	require.Equal(t, resetAt, repo.lastModelRateLimitReset)
+	require.Equal(t, anthropicFableWindowReason, repo.lastModelRateLimitReason)
+	require.Equal(t, 1.0, repo.lastExtraUpdates["passive_usage_7d_oi_utilization"])
+	require.Equal(t, resetAt.Unix(), repo.lastExtraUpdates["passive_usage_7d_oi_reset"])
+}
+
+func TestHandleUpstreamError_AnthropicFableWindowDoesNotAffectNonFableRequest(t *testing.T) {
+	resetAt := time.Now().Add(6 * 24 * time.Hour).Truncate(time.Second)
+	headers := http.Header{}
+	headers.Set("anthropic-ratelimit-unified-7d_oi-status", "rejected")
+	headers.Set("anthropic-ratelimit-unified-7d_oi-reset", strconv.FormatInt(resetAt.Unix(), 10))
+
+	repo := &anthropicWindowLimitRepo{}
+	svc := NewRateLimitService(repo, nil, nil, nil, nil)
+	account := &Account{ID: 44, Type: AccountTypeOAuth, Platform: PlatformAnthropic}
+
+	svc.HandleUpstreamError(
+		context.Background(),
+		account,
+		http.StatusTooManyRequests,
+		headers,
+		[]byte(`{"type":"error","error":{"type":"rate_limit_error","message":"rate limit"}}`),
+		"claude-sonnet-4-6",
+	)
+
+	require.Zero(t, repo.modelRateLimitCalls)
 }
 
 func TestSelectAnthropicExhaustedWindowPrefersSevenDayWindow(t *testing.T) {

@@ -845,6 +845,67 @@ func TestAccountUsageService_PersistOpenAICodexProbeSnapshotWritesFiveHourSessio
 	}
 }
 
+func TestBuildUsageInfo_FableWindow(t *testing.T) {
+	resetAt := time.Now().Add(6 * 24 * time.Hour).UTC().Truncate(time.Second)
+	resp := &ClaudeUsageResponse{
+		SevenDayOverageIncluded: ClaudeUsageWindow{
+			Utilization: 87,
+			ResetsAt:    resetAt.Format(time.RFC3339),
+		},
+	}
+
+	info := (&AccountUsageService{}).buildUsageInfo(resp, nil)
+	if info.SevenDayFable == nil {
+		t.Fatal("expected Fable usage window")
+	}
+	if info.SevenDayFable.Utilization != 87 {
+		t.Fatalf("utilization = %v, want 87", info.SevenDayFable.Utilization)
+	}
+	if info.SevenDayFable.ResetsAt == nil || !info.SevenDayFable.ResetsAt.Equal(resetAt) {
+		t.Fatalf("reset = %v, want %v", info.SevenDayFable.ResetsAt, resetAt)
+	}
+}
+
+func TestBuildPassiveUsageWindow_Fable(t *testing.T) {
+	resetAt := time.Now().Add(6 * 24 * time.Hour).Unix()
+	window := buildPassiveUsageWindow(map[string]any{
+		"passive_usage_7d_oi_utilization": 0.87,
+		"passive_usage_7d_oi_reset":       resetAt,
+	}, "passive_usage_7d_oi_utilization", "passive_usage_7d_oi_reset")
+
+	if window == nil {
+		t.Fatal("expected Fable passive usage window")
+	}
+	if window.Utilization != 87 {
+		t.Fatalf("utilization = %v, want 87", window.Utilization)
+	}
+	if window.ResetsAt == nil || window.ResetsAt.Unix() != resetAt {
+		t.Fatalf("reset = %v, want %d", window.ResetsAt, resetAt)
+	}
+}
+
+func TestSyncActiveToPassive_WritesFableWindow(t *testing.T) {
+	repo := &accountUsageCodexProbeRepo{updateExtraCh: make(chan map[string]any, 1)}
+	svc := &AccountUsageService{accountRepo: repo}
+	resetAt := time.Now().Add(6 * 24 * time.Hour).UTC().Truncate(time.Second)
+
+	svc.syncActiveToPassive(context.Background(), 456, &UsageInfo{
+		SevenDayFable: &UsageProgress{Utilization: 87, ResetsAt: &resetAt},
+	})
+
+	select {
+	case updates := <-repo.updateExtraCh:
+		if got := updates["passive_usage_7d_oi_utilization"]; got != 0.87 {
+			t.Fatalf("passive_usage_7d_oi_utilization = %v, want 0.87", got)
+		}
+		if got := updates["passive_usage_7d_oi_reset"]; got != resetAt.Unix() {
+			t.Fatalf("passive_usage_7d_oi_reset = %v, want %d", got, resetAt.Unix())
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("等待 Fable usage 写入 extra 超时")
+	}
+}
+
 func TestSyncActiveToPassive_WritesFiveHourSessionWindowEnd(t *testing.T) {
 	t.Parallel()
 

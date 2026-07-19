@@ -49,8 +49,8 @@ func TestShouldEnqueueSchedulerOutboxForExtraUpdates_ModelRateLimitsAreNeutral(t
 }
 
 func TestSchedulerNeutralExtraKeysMatchMigrationProjection(t *testing.T) {
-	if got := len(schedulerNeutralExtraKeys); got != 22 {
-		t.Fatalf("schedulerNeutralExtraKeys length = %d, want 22", got)
+	if got := len(schedulerNeutralExtraKeys); got != 24 {
+		t.Fatalf("schedulerNeutralExtraKeys length = %d, want 24", got)
 	}
 	for key := range schedulerNeutralExtraKeys {
 		if !isSchedulerNeutralExtraKey(key) {

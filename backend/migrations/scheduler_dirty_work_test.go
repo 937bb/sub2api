@@ -94,9 +94,11 @@ func TestSchedulerAccountDirtyProjectionExcludesOnlyRuntimeOverlays(t *testing.T
 		"codex_7d_reset_at",
 		"passive_usage_7d_utilization",
 		"passive_usage_7d_reset",
+		"passive_usage_7d_oi_utilization",
+		"passive_usage_7d_oi_reset",
 		"passive_usage_sampled_at",
 	}
-	require.Len(t, exactKeys, 22)
+	require.Len(t, exactKeys, 24)
 	for _, exactKey := range exactKeys {
 		require.Equal(t, 1, strings.Count(sql, "'"+exactKey+"'"), "runtime Extra key must appear exactly once in the projection allowlist")
 	}

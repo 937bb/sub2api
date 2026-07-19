@@ -9,6 +9,29 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestIsModelRateLimited_AnthropicFableFamilyScope(t *testing.T) {
+	future := time.Now().Add(10 * time.Minute).Format(time.RFC3339)
+	account := &Account{
+		Platform: PlatformAnthropic,
+		Extra: map[string]any{
+			modelRateLimitsKey: map[string]any{
+				anthropicFableRateLimitKey: map[string]any{
+					"rate_limit_reset_at": future,
+				},
+			},
+		},
+	}
+
+	for _, model := range []string{
+		"claude-fable-5",
+		"claude-fable-5[1m]",
+		"Claude-Fable-5-20260601",
+	} {
+		require.True(t, account.isModelRateLimitedWithContext(context.Background(), model), model)
+	}
+	require.False(t, account.isModelRateLimitedWithContext(context.Background(), "claude-sonnet-4-6"))
+}
+
 func TestIsModelRateLimited(t *testing.T) {
 	now := time.Now()
 	future := now.Add(10 * time.Minute).Format(time.RFC3339)

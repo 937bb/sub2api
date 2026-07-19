@@ -103,6 +103,8 @@ UPDATE account_groups SET group_id = $1 WHERE account_id = $2 AND group_id = $3
 		"codex_7d_reset_at":                    `"2026-07-18T00:00:00Z"`,
 		"passive_usage_7d_utilization":         `0.42`,
 		"passive_usage_7d_reset":               `1784332800`,
+		"passive_usage_7d_oi_utilization":      `0.87`,
+		"passive_usage_7d_oi_reset":            `1784332800`,
 		"passive_usage_sampled_at":             `"2026-07-17T00:00:00Z"`,
 	} {
 		truncateSchedulerDirtyTables(t, tx)

@@ -72,6 +72,37 @@ describe('AccountUsageCell', () => {
     })
   })
 
+  it('Anthropic 会显示 Fable 7d 窗口', async () => {
+    getUsage.mockResolvedValue({
+      five_hour: null,
+      seven_day: null,
+      seven_day_sonnet: null,
+      seven_day_fable: {
+        utilization: 87,
+        resets_at: '2026-07-25T00:00:00Z',
+        remaining_seconds: 3600
+      }
+    })
+
+    const wrapper = mount(AccountUsageCell, {
+      props: {
+        account: makeAccount({ platform: 'anthropic', type: 'oauth' })
+      },
+      global: {
+        stubs: {
+          UsageProgressBar: {
+            props: ['label', 'utilization', 'resetsAt', 'color'],
+            template: '<div class="usage-bar">{{ label }}|{{ utilization }}|{{ resetsAt }}</div>'
+          }
+        }
+      }
+    })
+
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('7d F|87|2026-07-25T00:00:00Z')
+  })
+
   it('Antigravity 图片用量会聚合新旧 image 模型', async () => {
     getUsage.mockResolvedValue({
       antigravity_quota: {

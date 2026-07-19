@@ -188,6 +188,7 @@ type UsageInfo struct {
 	FiveHour           *UsageProgress `json:"five_hour"`                      // 5小时窗口
 	SevenDay           *UsageProgress `json:"seven_day,omitempty"`            // 7天窗口
 	SevenDaySonnet     *UsageProgress `json:"seven_day_sonnet,omitempty"`     // 7天Sonnet窗口
+	SevenDayFable      *UsageProgress `json:"seven_day_fable,omitempty"`      // 7天Fable窗口（7d_oi）
 	GeminiSharedDaily  *UsageProgress `json:"gemini_shared_daily,omitempty"`  // Gemini shared pool RPD (Google One / Code Assist)
 	GeminiProDaily     *UsageProgress `json:"gemini_pro_daily,omitempty"`     // Gemini Pro 日配额
 	GeminiFlashDaily   *UsageProgress `json:"gemini_flash_daily,omitempty"`   // Gemini Flash 日配额
@@ -229,20 +230,17 @@ type UsageInfo struct {
 	Error string `json:"error,omitempty"`
 }
 
+type ClaudeUsageWindow struct {
+	Utilization float64 `json:"utilization"`
+	ResetsAt    string  `json:"resets_at"`
+}
+
 // ClaudeUsageResponse Anthropic API返回的usage结构
 type ClaudeUsageResponse struct {
-	FiveHour struct {
-		Utilization float64 `json:"utilization"`
-		ResetsAt    string  `json:"resets_at"`
-	} `json:"five_hour"`
-	SevenDay struct {
-		Utilization float64 `json:"utilization"`
-		ResetsAt    string  `json:"resets_at"`
-	} `json:"seven_day"`
-	SevenDaySonnet struct {
-		Utilization float64 `json:"utilization"`
-		ResetsAt    string  `json:"resets_at"`
-	} `json:"seven_day_sonnet"`
+	FiveHour                ClaudeUsageWindow `json:"five_hour"`
+	SevenDay                ClaudeUsageWindow `json:"seven_day"`
+	SevenDaySonnet          ClaudeUsageWindow `json:"seven_day_sonnet"`
+	SevenDayOverageIncluded ClaudeUsageWindow `json:"seven_day_overage_included"`
 }
 
 // ClaudeUsageFetchOptions 包含获取 Claude 用量数据所需的所有选项
@@ -441,6 +439,14 @@ func (s *AccountUsageService) GetUsage(ctx context.Context, accountID int64, for
 		now := time.Now()
 		usage := s.buildUsageInfo(apiResp, &now)
 
+		if usage.SevenDayFable == nil {
+			usage.SevenDayFable = buildPassiveUsageWindow(
+				account.Extra,
+				"passive_usage_7d_oi_utilization",
+				"passive_usage_7d_oi_reset",
+			)
+		}
+
 		// 4. 添加窗口统计（有独立缓存，1 分钟）
 		s.addWindowStats(ctx, account, usage)
 
@@ -488,31 +494,41 @@ func (s *AccountUsageService) GetPassiveUsage(ctx context.Context, accountID int
 		}
 	}
 
-	// 构建 7d 窗口（从被动采样数据）
-	util7d := parseExtraFloat64(account.Extra["passive_usage_7d_utilization"])
-	reset7dRaw := parseExtraFloat64(account.Extra["passive_usage_7d_reset"])
-	if util7d > 0 || reset7dRaw > 0 {
-		var resetAt *time.Time
-		var remaining int
-		if reset7dRaw > 0 {
-			t := time.Unix(int64(reset7dRaw), 0)
-			resetAt = &t
-			remaining = int(time.Until(t).Seconds())
-			if remaining < 0 {
-				remaining = 0
-			}
-		}
-		info.SevenDay = &UsageProgress{
-			Utilization:      util7d * 100,
-			ResetsAt:         resetAt,
-			RemainingSeconds: remaining,
-		}
-	}
+	info.SevenDay = buildPassiveUsageWindow(
+		account.Extra,
+		"passive_usage_7d_utilization",
+		"passive_usage_7d_reset",
+	)
+	info.SevenDayFable = buildPassiveUsageWindow(
+		account.Extra,
+		"passive_usage_7d_oi_utilization",
+		"passive_usage_7d_oi_reset",
+	)
 
 	// 添加窗口统计
 	s.addWindowStats(ctx, account, info)
 
 	return info, nil
+}
+
+func buildPassiveUsageWindow(extra map[string]any, utilizationKey, resetKey string) *UsageProgress {
+	utilization := parseExtraFloat64(extra[utilizationKey])
+	resetRaw := parseExtraFloat64(extra[resetKey])
+	if utilization <= 0 && resetRaw <= 0 {
+		return nil
+	}
+	var resetAt *time.Time
+	remaining := 0
+	if resetRaw > 0 {
+		reset := time.Unix(int64(resetRaw), 0)
+		resetAt = &reset
+		remaining = max(0, int(time.Until(reset).Seconds()))
+	}
+	return &UsageProgress{
+		Utilization:      utilization * 100,
+		ResetsAt:         resetAt,
+		RemainingSeconds: remaining,
+	}
 }
 
 // syncActiveToPassive 将主动查询的最新数据回写到 Extra 被动缓存，
@@ -530,6 +546,12 @@ func (s *AccountUsageService) syncActiveToPassive(ctx context.Context, accountID
 		extraUpdates["passive_usage_7d_utilization"] = usage.SevenDay.Utilization / 100
 		if usage.SevenDay.ResetsAt != nil {
 			extraUpdates["passive_usage_7d_reset"] = usage.SevenDay.ResetsAt.Unix()
+		}
+	}
+	if usage.SevenDayFable != nil {
+		extraUpdates["passive_usage_7d_oi_utilization"] = usage.SevenDayFable.Utilization / 100
+		if usage.SevenDayFable.ResetsAt != nil {
+			extraUpdates["passive_usage_7d_oi_reset"] = usage.SevenDayFable.ResetsAt.Unix()
 		}
 	}
 
@@ -1137,7 +1159,7 @@ func enrichUsageWithAccountError(info *UsageInfo, account *Account) {
 func (s *AccountUsageService) addWindowStats(ctx context.Context, account *Account, usage *UsageInfo) {
 	// 修复：即使 FiveHour 为 nil，也要尝试获取统计数据
 	// 因为 SevenDay/SevenDaySonnet 可能需要
-	if usage.FiveHour == nil && usage.SevenDay == nil && usage.SevenDaySonnet == nil {
+	if usage.FiveHour == nil && usage.SevenDay == nil && usage.SevenDaySonnet == nil && usage.SevenDayFable == nil {
 		return
 	}
 
@@ -1457,6 +1479,20 @@ func (s *AccountUsageService) buildUsageInfo(resp *ClaudeUsageResponse, updatedA
 			info.SevenDay = &UsageProgress{
 				Utilization: resp.SevenDay.Utilization,
 			}
+		}
+	}
+
+	// 7天Fable窗口（7d_oi）
+	if resp.SevenDayOverageIncluded.ResetsAt != "" {
+		if reset, err := parseTime(resp.SevenDayOverageIncluded.ResetsAt); err == nil {
+			info.SevenDayFable = &UsageProgress{
+				Utilization:      resp.SevenDayOverageIncluded.Utilization,
+				ResetsAt:         &reset,
+				RemainingSeconds: max(0, int(time.Until(reset).Seconds())),
+			}
+		} else {
+			log.Printf("Failed to parse SevenDayFable.ResetsAt: %s, error: %v", resp.SevenDayOverageIncluded.ResetsAt, err)
+			info.SevenDayFable = &UsageProgress{Utilization: resp.SevenDayOverageIncluded.Utilization}
 		}
 	}
 

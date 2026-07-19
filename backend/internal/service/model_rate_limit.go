@@ -10,6 +10,7 @@ import (
 
 const (
 	modelRateLimitsKey                 = "model_rate_limits"
+	anthropicFableRateLimitKey         = "claude-fable-5"
 	antigravityGeminiModelRateLimitKey = "antigravity:gemini"
 	openAIImageGenerationRateLimitKey  = "openai:image_generation"
 )
@@ -81,6 +82,10 @@ func (a *Account) modelRateLimitKeysForRequest(ctx context.Context, requestedMod
 		}
 	}
 	switch a.Platform {
+	case PlatformAnthropic:
+		if isAnthropicFableModel(modelKey) && modelKey != anthropicFableRateLimitKey {
+			keys = append(keys, anthropicFableRateLimitKey)
+		}
 	case PlatformAntigravity:
 		if isAntigravityGeminiModel(modelKey) && modelKey != antigravityGeminiModelRateLimitKey {
 			keys = append(keys, antigravityGeminiModelRateLimitKey)
@@ -125,6 +130,10 @@ func resolveFinalAntigravityModelKey(ctx context.Context, account *Account, requ
 		modelKey = applyThinkingModelSuffix(modelKey, enabled)
 	}
 	return modelKey
+}
+
+func isAnthropicFableModel(model string) bool {
+	return strings.Contains(strings.ToLower(model), "fable")
 }
 
 func isAntigravityGeminiModel(model string) bool {

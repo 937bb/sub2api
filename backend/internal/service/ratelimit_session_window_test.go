@@ -361,6 +361,30 @@ func TestUpdateSessionWindow_NoClearUtilizationOnCorrection(t *testing.T) {
 	}
 }
 
+func TestUpdateSessionWindow_SamplesFableWindow(t *testing.T) {
+	resetUnix := time.Now().Add(6 * 24 * time.Hour).Unix()
+	repo := &sessionWindowMockRepo{}
+	svc := newRateLimitServiceForTest(repo)
+	account := &Account{ID: 81}
+	headers := http.Header{}
+	headers.Set("anthropic-ratelimit-unified-5h-status", "allowed")
+	headers.Set("anthropic-ratelimit-unified-7d_oi-utilization", "0.87")
+	headers.Set("anthropic-ratelimit-unified-7d_oi-reset", fmt.Sprintf("%d", resetUnix))
+
+	svc.UpdateSessionWindow(context.Background(), account, headers)
+
+	if len(repo.updateExtraCalls) != 1 {
+		t.Fatalf("expected 1 UpdateExtra call, got %d", len(repo.updateExtraCalls))
+	}
+	updates := repo.updateExtraCalls[0].Updates
+	if got := updates["passive_usage_7d_oi_utilization"]; got != 0.87 {
+		t.Fatalf("passive_usage_7d_oi_utilization = %v, want 0.87", got)
+	}
+	if got := updates["passive_usage_7d_oi_reset"]; got != resetUnix {
+		t.Fatalf("passive_usage_7d_oi_reset = %v, want %d", got, resetUnix)
+	}
+}
+
 func TestUpdateSessionWindow_NoStatusHeader(t *testing.T) {
 	// Should return immediately if no status header.
 	repo := &sessionWindowMockRepo{}
