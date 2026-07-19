@@ -27,7 +27,7 @@
     <transition name="dropdown">
       <div
         v-if="tooltipOpen"
-        class="absolute right-0 z-50 mt-2 w-[340px] overflow-hidden rounded-xl border border-[var(--glass-border)] bg-[var(--glass-bg-dropdown)] backdrop-blur-xl shadow-xl"
+        class="absolute right-0 z-50 mt-2 w-[340px] overflow-hidden rounded-xl border border-[var(--glass-border)] bg-[var(--glass-bg-overlay)] backdrop-blur-xl shadow-xl"
       >
         <div class="border-b border-gray-100 p-3 dark:border-dark-700">
           <h3 class="text-sm font-semibold text-gray-900 dark:text-white">
