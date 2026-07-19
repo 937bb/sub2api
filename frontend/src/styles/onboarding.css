@@ -209,10 +209,10 @@
   box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05) !important;
 }
 .theme-tour-popover .driver-popover-prev-btn:hover { background-color: #f9fafb !important; color: #3f3f46 !important; }
-.dark .theme-tour-popover .driver-popover-prev-btn { 
-  background-color: #27272a !important; 
-  border-color: #52525b !important; 
-  color: #9ca3af !important; 
+.dark .theme-tour-popover .driver-popover-prev-btn {
+  background-color: #27272a !important;
+  border-color: #52525b !important;
+  color: #9ca3af !important;
 }
 
 /* Arrows */
