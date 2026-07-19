@@ -275,22 +275,19 @@
                   </div>
                 </div>
               </div>
-              <!-- Token Detail Tooltip -->
-              <div
-                class="group relative"
+              <!-- Token Detail Tooltip (simplified DOM for perf) -->
+              <svg
+                class="h-4 w-4 cursor-help text-gray-400 transition-colors hover:text-blue-500 dark:text-gray-500 dark:hover:text-blue-400"
                 @mouseenter="showTokenTooltip($event, row)"
                 @mouseleave="hideTokenTooltip"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                stroke-width="2"
               >
-                <div
-                  class="flex h-4 w-4 cursor-help items-center justify-center rounded-full bg-gray-100 transition-colors group-hover:bg-blue-100 dark:bg-gray-700 dark:group-hover:bg-blue-900/50"
-                >
-                  <Icon
-                    name="infoCircle"
-                    size="xs"
-                    class="text-gray-400 group-hover:text-blue-500 dark:text-gray-500 dark:group-hover:text-blue-400"
-                  />
-                </div>
-              </div>
+                <circle cx="12" cy="12" r="10" />
+                <path d="M12 16v-4m0-4h.01" />
+              </svg>
             </div>
           </template>
 
@@ -299,22 +296,19 @@
               <span class="font-medium text-green-600 dark:text-green-400">
                 ${{ (row.actual_cost ?? 0).toFixed(6) }}
               </span>
-              <!-- Cost Detail Tooltip -->
-              <div
-                class="group relative"
+              <!-- Cost Detail Tooltip (simplified DOM for perf) -->
+              <svg
+                class="h-4 w-4 cursor-help text-gray-400 transition-colors hover:text-blue-500 dark:text-gray-500 dark:hover:text-blue-400"
                 @mouseenter="showTooltip($event, row)"
                 @mouseleave="hideTooltip"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                stroke-width="2"
               >
-                <div
-                  class="flex h-4 w-4 cursor-help items-center justify-center rounded-full bg-gray-100 transition-colors group-hover:bg-blue-100 dark:bg-gray-700 dark:group-hover:bg-blue-900/50"
-                >
-                  <Icon
-                    name="infoCircle"
-                    size="xs"
-                    class="text-gray-400 group-hover:text-blue-500 dark:text-gray-500 dark:group-hover:text-blue-400"
-                  />
-                </div>
-              </div>
+                <circle cx="12" cy="12" r="10" />
+                <path d="M12 16v-4m0-4h.01" />
+              </svg>
             </div>
           </template>
 

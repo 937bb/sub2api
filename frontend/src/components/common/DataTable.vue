@@ -575,6 +575,10 @@ const handleSort = (key: string) => {
   }
 }
 
+// Memoized sort cache to avoid re-sorting when data array reference changes
+// but content is identical (common on pagination/page-size updates).
+let sortCache: { data: any[] | undefined; key: string | null; order: string; result: any[] } | null = null
+
 const sortedData = computed(() => {
   // Server-side sort mode: return data as-is (server handles sorting)
   if (props.serverSideSort || !sortKey.value || !props.data) return props.data
@@ -582,8 +586,13 @@ const sortedData = computed(() => {
   const key = sortKey.value
   const order = sortOrder.value
 
+  // Cache hit: same data array reference + same sort params → return cached result
+  if (sortCache && sortCache.data === props.data && sortCache.key === key && sortCache.order === order) {
+    return sortCache.result
+  }
+
   // Stable sort (tie-break with original index) to avoid jitter when values are equal.
-  return props.data
+  const sorted = props.data
     .map((row, index) => ({ row, index }))
     .sort((a, b) => {
       const cmp = compareSortValues(a.row?.[key], b.row?.[key])
@@ -591,6 +600,9 @@ const sortedData = computed(() => {
       return a.index - b.index
     })
     .map(item => item.row)
+
+  sortCache = { data: props.data, key, order, result: sorted }
+  return sorted
 })
 
 // --- Virtual scrolling ---
