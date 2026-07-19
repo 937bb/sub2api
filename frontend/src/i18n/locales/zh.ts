@@ -697,6 +697,9 @@ export default {
   keys: {
     title: 'API 密钥',
     description: '管理您的 API 密钥和访问令牌',
+    summaryTotal: '密钥总数',
+    summaryActive: '活跃',
+    summaryInactive: '非活跃',
     searchPlaceholder: '搜索名称或Key...',
     endpoints: {
       title: 'API 端点',
@@ -2168,6 +2171,9 @@ export default {
     groups: {
       title: '分组管理',
       description: '管理 API 密钥分组和费率配置',
+      summaryTotal: '分组总数',
+      summaryActive: '启用中',
+      summaryInactive: '已停用',
       searchGroups: '搜索分组...',
       createGroup: '创建分组',
       editGroup: '编辑分组',
@@ -2472,6 +2478,9 @@ export default {
     channels: {
       title: '渠道管理',
       description: '管理渠道和自定义模型定价',
+      summaryTotal: '渠道总数',
+      summaryActive: '启用中',
+      summaryDisabled: '已停用',
       searchChannels: '搜索渠道...',
       createChannel: '创建渠道',
       editChannel: '编辑渠道',

@@ -3,6 +3,22 @@
     <TablePageLayout>
       <template #filters>
         <div class="flex flex-col gap-3">
+          <!-- Summary strip -->
+          <div class="card grid grid-cols-3 divide-x divide-gray-200/70 dark:divide-dark-700">
+            <div class="px-5 py-3">
+              <p class="font-display text-2xl font-bold tracking-tight text-gray-900 dark:text-white">{{ pagination.total }}</p>
+              <p class="mt-0.5 text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('keys.summaryTotal') }}</p>
+            </div>
+            <div class="px-5 py-3">
+              <p class="font-display text-2xl font-bold tracking-tight text-emerald-600 dark:text-emerald-400">{{ activeKeyCount }}</p>
+              <p class="mt-0.5 text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('keys.summaryActive') }}</p>
+            </div>
+            <div class="px-5 py-3">
+              <p class="font-display text-2xl font-bold tracking-tight text-gray-500 dark:text-gray-400">{{ inactiveKeyCount }}</p>
+              <p class="mt-0.5 text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('keys.summaryInactive') }}</p>
+            </div>
+          </div>
+
           <div class="flex flex-wrap items-center gap-3">
             <SearchInput
               v-model="filterSearch"
@@ -1139,6 +1155,11 @@ const columns = computed<Column[]>(() => [
 ])
 
 const apiKeys = ref<ApiKey[]>([])
+
+// Page-scoped status breakdown (server total lives in pagination.total).
+const activeKeyCount = computed(() => apiKeys.value.filter((k) => k.status === 'active').length)
+const inactiveKeyCount = computed(() => apiKeys.value.filter((k) => k.status !== 'active').length)
+
 const groups = ref<Group[]>([])
 const loading = ref(false)
 const submitting = ref(false)

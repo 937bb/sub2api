@@ -2,6 +2,23 @@
   <AppLayout>
     <TablePageLayout>
       <template #filters>
+        <div class="space-y-4">
+          <!-- Summary strip -->
+          <div class="card grid grid-cols-3 divide-x divide-gray-200/70 dark:divide-dark-700">
+            <div class="px-5 py-3">
+              <p class="font-display text-2xl font-bold tracking-tight text-gray-900 dark:text-white">{{ pagination.total }}</p>
+              <p class="mt-0.5 text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.groups.summaryTotal') }}</p>
+            </div>
+            <div class="px-5 py-3">
+              <p class="font-display text-2xl font-bold tracking-tight text-emerald-600 dark:text-emerald-400">{{ activeGroupCount }}</p>
+              <p class="mt-0.5 text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.groups.summaryActive') }}</p>
+            </div>
+            <div class="px-5 py-3">
+              <p class="font-display text-2xl font-bold tracking-tight text-gray-500 dark:text-gray-400">{{ inactiveGroupCount }}</p>
+              <p class="mt-0.5 text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.groups.summaryInactive') }}</p>
+            </div>
+          </div>
+
         <div
           class="flex flex-col justify-between gap-4 lg:flex-row lg:items-start"
         >
@@ -11,7 +28,8 @@
               <Icon
                 name="search"
                 size="md"
-                class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500"
+                class="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-gray-500 dark:text-dark-300"
+                :stroke-width="2"
               />
               <input
                 v-model="searchQuery"
@@ -77,6 +95,7 @@
               {{ t("admin.groups.createGroup") }}
             </button>
           </div>
+        </div>
         </div>
       </template>
 
@@ -3259,6 +3278,11 @@ const copyAccountsGroupOptionsForEdit = computed(() => {
 });
 
 const groups = ref<AdminGroup[]>([]);
+
+// Page-scoped status breakdown (server total lives in pagination.total).
+const activeGroupCount = computed(() => groups.value.filter((g) => g.status === 'active').length);
+const inactiveGroupCount = computed(() => groups.value.filter((g) => g.status !== 'active').length);
+
 const loading = ref(false);
 const usageMap = ref<Map<number, { today_cost: number; total_cost: number }>>(
   new Map(),

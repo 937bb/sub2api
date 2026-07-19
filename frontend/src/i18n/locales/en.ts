@@ -698,6 +698,9 @@ export default {
   keys: {
     title: 'API Keys',
     description: 'Manage your API keys and access tokens',
+    summaryTotal: 'Total keys',
+    summaryActive: 'Active',
+    summaryInactive: 'Inactive',
     searchPlaceholder: 'Search name or key...',
     endpoints: {
       title: 'API Endpoints',
@@ -2177,6 +2180,9 @@ export default {
     groups: {
       title: 'Group Management',
       description: 'Manage API key groups and rate multipliers',
+      summaryTotal: 'Total groups',
+      summaryActive: 'Active',
+      summaryInactive: 'Inactive',
       searchGroups: 'Search groups...',
       createGroup: 'Create Group',
       editGroup: 'Edit Group',
@@ -2487,6 +2493,9 @@ export default {
     channels: {
       title: 'Channel Management',
       description: 'Manage channels and custom model pricing',
+      summaryTotal: 'Total channels',
+      summaryActive: 'Active',
+      summaryDisabled: 'Disabled',
       searchChannels: 'Search channels...',
       createChannel: 'Create Channel',
       editChannel: 'Edit Channel',
