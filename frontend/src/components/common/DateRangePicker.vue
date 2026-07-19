@@ -351,9 +351,12 @@ onUnmounted(() => {
 
 .date-picker-dropdown {
   @apply absolute left-0 z-[100] mt-2;
-  @apply bg-[var(--glass-bg-content)];
+  background-color: var(--glass-bg-dropdown);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
   @apply rounded-xl;
-  @apply border border-gray-200 dark:border-dark-700;
+  @apply border;
+  border-color: var(--glass-border);
   @apply shadow-lg shadow-black/10 dark:shadow-black/30;
   @apply overflow-hidden;
   @apply min-w-[320px];

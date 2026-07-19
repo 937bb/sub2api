@@ -3,6 +3,7 @@
     <!-- Admin: Full version badge with dropdown -->
     <template v-if="isAdmin">
       <button
+        ref="triggerRef"
         @click="toggleDropdown"
         class="flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs transition-colors"
         :class="[
@@ -26,14 +27,16 @@
         </span>
       </button>
 
-      <!-- Dropdown -->
-      <transition name="dropdown">
-        <div
-          v-if="dropdownOpen"
-          ref="dropdownRef"
-          class="absolute left-0 z-50 mt-2 overflow-hidden whitespace-normal rounded-xl border border-[var(--glass-border)] bg-[var(--glass-bg-dropdown)] backdrop-blur-xl shadow-lg transition-all duration-200"
-          :class="rollbackPanelOpen && isReleaseBuild ? 'w-80' : 'w-64'"
-        >
+      <!-- Dropdown (teleported to body so it escapes the sidebar's overflow:hidden) -->
+      <Teleport to="body">
+        <transition name="dropdown">
+          <div
+            v-if="dropdownOpen"
+            ref="dropdownRef"
+            class="fixed z-[9999] overflow-hidden whitespace-normal rounded-xl border border-[var(--glass-border)] bg-[var(--glass-bg-dropdown)] backdrop-blur-xl shadow-xl transition-all duration-200"
+            :class="rollbackPanelOpen && isReleaseBuild ? 'w-80' : 'w-64'"
+            :style="dropdownStyle"
+          >
           <!-- Header with refresh button -->
           <div
             class="flex items-center justify-between border-b border-gray-100 px-4 py-3 dark:border-dark-700"
@@ -628,6 +631,7 @@
           </div>
         </div>
       </transition>
+      </Teleport>
     </template>
 
     <!-- Non-admin: Simple static version text -->
@@ -638,7 +642,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore, useAppStore } from '@/stores'
 import {
@@ -668,6 +672,28 @@ const isAdmin = computed(() => authStore.isAdmin)
 
 const dropdownOpen = ref(false)
 const dropdownRef = ref<HTMLElement | null>(null)
+const triggerRef = ref<HTMLElement | null>(null)
+
+// The dropdown is teleported to <body> and positioned fixed under the trigger,
+// so it escapes the sidebar's overflow:hidden clipping. Re-measured on open,
+// scroll and resize; flips/clamps to stay in the viewport.
+const dropdownStyle = ref<Record<string, string>>({ top: '0px', left: '0px' })
+
+function updateDropdownPosition() {
+  const trigger = triggerRef.value
+  if (!trigger) return
+  const rect = trigger.getBoundingClientRect()
+  const margin = 8
+  const width = rollbackPanelOpen.value && isReleaseBuild.value ? 320 : 256
+  const vw = window.innerWidth
+  let left = rect.left
+  if (left + width > vw - margin) left = Math.max(margin, vw - margin - width)
+  if (left < margin) left = margin
+  dropdownStyle.value = {
+    top: `${Math.round(rect.bottom + margin)}px`,
+    left: `${Math.round(left)}px`,
+  }
+}
 
 // Use store's cached version state
 const loading = computed(() => appStore.versionLoading)
@@ -733,10 +759,22 @@ const isReleaseBuild = computed(() => buildType.value === 'release')
 
 function toggleDropdown() {
   dropdownOpen.value = !dropdownOpen.value
+  if (dropdownOpen.value) {
+    nextTick(() => {
+      updateDropdownPosition()
+      window.addEventListener('scroll', updateDropdownPosition, true)
+      window.addEventListener('resize', updateDropdownPosition)
+    })
+  } else {
+    window.removeEventListener('scroll', updateDropdownPosition, true)
+    window.removeEventListener('resize', updateDropdownPosition)
+  }
 }
 
 function closeDropdown() {
   dropdownOpen.value = false
+  window.removeEventListener('scroll', updateDropdownPosition, true)
+  window.removeEventListener('resize', updateDropdownPosition)
 }
 
 async function refreshVersion(force = true) {
@@ -919,6 +957,8 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   document.removeEventListener('click', handleClickOutside)
+  window.removeEventListener('scroll', updateDropdownPosition, true)
+  window.removeEventListener('resize', updateDropdownPosition)
 })
 </script>
 
