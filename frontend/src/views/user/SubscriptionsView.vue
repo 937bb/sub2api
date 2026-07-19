@@ -61,8 +61,8 @@
           :key="subscription.id"
           class="card flex flex-col overflow-hidden p-0"
         >
-          <!-- Platform accent bar -->
-          <div :class="['h-1 w-full', platformAccentDotClass(subscription.group?.platform || '')]" />
+          <!-- Top accent line (neutral primary, subtle) -->
+          <div class="h-0.5 w-full bg-primary-500/60" />
 
           <!-- Header -->
           <div class="flex items-start justify-between gap-3 p-5">
@@ -256,7 +256,7 @@
           <!-- Footer action -->
           <div v-if="subscription.status === 'active'" class="border-t border-gray-100 p-4 dark:border-dark-700">
             <button
-              :class="['w-full rounded-lg px-3 py-2 text-sm font-semibold text-white transition-colors', platformButtonClass(subscription.group?.platform || '')]"
+              class="btn btn-primary w-full"
               @click="router.push({ path: '/purchase', query: { tab: 'subscription', group: String(subscription.group_id) } })"
             >
               {{ t('payment.renewNow') }}
@@ -278,18 +278,8 @@ import type { UserSubscription } from '@/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { formatDateOnly } from '@/utils/format'
-import { platformBadgeClass, platformButtonClass, platformLabel } from '@/utils/platformColors'
+import { platformBadgeClass, platformLabel } from '@/utils/platformColors'
 import { getRemainingDurationParts, isOneTimeDailyQuota, type RemainingDurationParts } from '@/utils/subscriptionQuota'
-
-function platformAccentDotClass(p: string): string {
-  switch (p) {
-    case 'anthropic': return 'bg-orange-500'
-    case 'openai': return 'bg-emerald-500'
-    case 'antigravity': return 'bg-purple-500'
-    case 'gemini': return 'bg-blue-500'
-    default: return 'bg-gray-400'
-  }
-}
 
 // Brand tile background for the platform avatar (Antigravity uses a light tile
 // so its colorful logo reads).
