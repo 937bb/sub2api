@@ -1,12 +1,19 @@
 package migrations
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
+
+func migrationChecksum(raw []byte) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(string(raw))))
+	return hex.EncodeToString(sum[:])
+}
 
 func TestSchedulerDirtyWorkMigrationKeepsSourcePromotionContracts(t *testing.T) {
 	raw, err := FS.ReadFile("161_scheduler_dirty_work.sql")
@@ -53,8 +60,18 @@ func TestSchedulerDirtyWorkMigrationKeepsSourcePromotionContracts(t *testing.T) 
 	require.NotContains(t, sql, "event_id")
 }
 
-func TestSchedulerAccountDirtyProjectionExcludesOnlyRuntimeOverlays(t *testing.T) {
+func TestSchedulerAccountDirtyProjectionMigration164RemainsImmutable(t *testing.T) {
 	raw, err := FS.ReadFile("164_scheduler_account_dirty_projection.sql")
+	require.NoError(t, err)
+	require.Equal(t,
+		"16df6786b87a931aeff0d8d81f1c9007baa6a88c07e72eb02da8db242800488a",
+		migrationChecksum(raw),
+		"published migrations must not be edited; extend the function in a new migration",
+	)
+}
+
+func TestSchedulerAccountDirtyProjectionExcludesOnlyRuntimeOverlays(t *testing.T) {
+	raw, err := FS.ReadFile("165_scheduler_fable_runtime_projection.sql")
 	require.NoError(t, err)
 	sql := strings.ToLower(string(raw))
 
@@ -113,9 +130,13 @@ func TestSchedulerAccountDirtyProjectionExcludesOnlyRuntimeOverlays(t *testing.T
 	require.ElementsMatch(t, exactKeys, migrationKeys)
 	require.NotContains(t, sql, "starts_with(entry.key")
 
-	require.Contains(t, sql, "scheduler_account_lifecycle_extra(o.extra) is distinct from")
-	require.Contains(t, sql, "o.extra -> 'mixed_scheduling'")
-	require.Contains(t, sql, "o.extra is distinct from n.extra")
 	require.Contains(t, sql, "jsonb_object_agg(entry.key, entry.value)")
-	require.NotContains(t, sql, "where o.extra is distinct from n.extra")
+
+	triggerRaw, err := FS.ReadFile("164_scheduler_account_dirty_projection.sql")
+	require.NoError(t, err)
+	triggerSQL := strings.ToLower(string(triggerRaw))
+	require.Contains(t, triggerSQL, "scheduler_account_lifecycle_extra(o.extra) is distinct from")
+	require.Contains(t, triggerSQL, "o.extra -> 'mixed_scheduling'")
+	require.Contains(t, triggerSQL, "o.extra is distinct from n.extra")
+	require.NotContains(t, triggerSQL, "where o.extra is distinct from n.extra")
 }

@@ -37,8 +37,6 @@ AS $$
                     'codex_7d_reset_at',
                     'passive_usage_7d_utilization',
                     'passive_usage_7d_reset',
-                    'passive_usage_7d_oi_utilization',
-                    'passive_usage_7d_oi_reset',
                     'passive_usage_sampled_at'
                 )
             ),
