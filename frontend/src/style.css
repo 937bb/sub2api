@@ -6,20 +6,21 @@
   /* ============ Liquid Glass 设计变量 ============ */
   :root {
     /* 中性玻璃材质(零染色,颜色只来自背后透射) */
-    --glass-bg-float: rgba(255, 255, 255, 0.48);
-    --glass-bg-content: rgba(255, 255, 255, 0.56);
-    --glass-bg-solid: rgba(255, 255, 255, 0.72);
-    /* 浮在深色蒙层上的模态/对话框:高不透明磨砂,避免吸入黑蒙层发黑 */
-    --glass-bg-overlay: rgba(255, 255, 255, 0.82);
-    /* 下拉框:半透明(能透出一点背后),但不全透,保证可读 */
-    --glass-bg-dropdown: rgba(255, 255, 255, 0.7);
-    --glass-border: rgba(255, 255, 255, 0.55);
-    --glass-border-strong: rgba(255, 255, 255, 0.7);
-    /* 镜面高光边:亮顶边 + 发丝内环 + 顶部柔光 —— 让面板"像玻璃"的关键 */
+    --glass-bg-float: rgba(255, 255, 255, 0.62);
+    --glass-bg-content: rgba(255, 255, 255, 0.7);
+    --glass-bg-solid: rgba(255, 255, 255, 0.82);
+    /* 浮在深色蒙层上的模态/对话框:接近实心磨砂,避免发灰发脏 */
+    --glass-bg-overlay: rgba(255, 255, 255, 0.94);
+    /* 下拉框:半透明但足够实,叠在内容上仍清晰可读 */
+    --glass-bg-dropdown: rgba(255, 255, 255, 0.88);
+    /* 边框:浅色下用中性深色描边,白边在白底上看不见 */
+    --glass-border: rgba(15, 23, 42, 0.1);
+    --glass-border-strong: rgba(15, 23, 42, 0.16);
+    /* 镜面高光边:浅色下顶边留一点白高光 + 外圈极淡深色描边,让面板"浮起来" */
     --glass-highlight:
-      inset 0 0.5px 0 0 rgba(255, 255, 255, 0.95),
-      inset 0 0 0 0.5px rgba(255, 255, 255, 0.5),
-      inset 0 7px 18px -12px rgba(255, 255, 255, 0.9);
+      inset 0 0.5px 0 0 rgba(255, 255, 255, 0.9),
+      inset 0 0 0 0.5px rgba(15, 23, 42, 0.06),
+      inset 0 7px 20px -14px rgba(15, 23, 42, 0.12);
     --glass-blur: 20px;
     --glass-blur-sm: 12px;
     /* 磨砂:适度模糊 + 轻微提饱和(不提亮,避免发白发糊) */
@@ -33,8 +34,8 @@
     --glass-bg-float: rgba(40, 42, 48, 0.44);
     --glass-bg-content: rgba(40, 42, 48, 0.52);
     --glass-bg-solid: rgba(40, 42, 48, 0.68);
-    --glass-bg-overlay: rgba(38, 40, 46, 0.82);
-    --glass-bg-dropdown: rgba(40, 42, 48, 0.72);
+    --glass-bg-overlay: rgba(38, 40, 46, 0.9);
+    --glass-bg-dropdown: rgba(40, 42, 48, 0.85);
     --glass-border: rgba(255, 255, 255, 0.12);
     --glass-border-strong: rgba(255, 255, 255, 0.2);
     --glass-highlight:
