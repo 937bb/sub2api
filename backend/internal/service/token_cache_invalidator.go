@@ -10,6 +10,10 @@ type TokenCacheInvalidator interface {
 	InvalidateToken(ctx context.Context, account *Account) error
 }
 
+type TokenCacheAccountChangeInvalidator interface {
+	InvalidateTokenForAccountChange(ctx context.Context, previousAccount, updatedAccount *Account) error
+}
+
 type CompositeTokenCacheInvalidator struct {
 	cache GeminiTokenCache // 统一使用一个缓存接口，通过缓存键前缀区分平台
 }
@@ -24,11 +28,34 @@ func (c *CompositeTokenCacheInvalidator) InvalidateToken(ctx context.Context, ac
 	if c == nil || c.cache == nil || account == nil {
 		return nil
 	}
-	if account.Type != AccountTypeOAuth && !(account.Platform == PlatformOpenAI && account.Type == AccountTypeSetupToken) {
+	return c.deleteTokenCacheKeys(ctx, account, tokenCacheKeysForAccount(account))
+}
+
+func (c *CompositeTokenCacheInvalidator) InvalidateTokenForAccountChange(ctx context.Context, previousAccount, updatedAccount *Account) error {
+	if c == nil || c.cache == nil {
 		return nil
 	}
 
 	var keysToDelete []string
+	keysToDelete = append(keysToDelete, tokenCacheKeysForAccount(previousAccount)...)
+	keysToDelete = append(keysToDelete, tokenCacheKeysForAccount(updatedAccount)...)
+
+	account := updatedAccount
+	if account == nil {
+		account = previousAccount
+	}
+	return c.deleteTokenCacheKeys(ctx, account, keysToDelete)
+}
+
+func tokenCacheKeysForAccount(account *Account) []string {
+	if account == nil {
+		return nil
+	}
+	if account.Type != AccountTypeOAuth && !(account.Platform == PlatformOpenAI && account.Type == AccountTypeSetupToken) {
+		return nil
+	}
+
+	var keys []string
 	accountIDKey := "account:" + strconv.FormatInt(account.ID, 10)
 
 	switch account.Platform {
@@ -36,20 +63,35 @@ func (c *CompositeTokenCacheInvalidator) InvalidateToken(ctx context.Context, ac
 		// Gemini 可能有两种缓存键：project_id 或 account_id
 		// 首次获取 token 时可能没有 project_id，之后自动检测到 project_id 后会使用新 key
 		// 刷新时需要同时删除两种可能的 key，确保不会遗留旧缓存
-		keysToDelete = append(keysToDelete, GeminiTokenCacheKey(account))
-		keysToDelete = append(keysToDelete, "gemini:"+accountIDKey)
+		keys = append(keys, GeminiTokenCacheKey(account))
+		keys = append(keys, "gemini:"+accountIDKey)
 	case PlatformAntigravity:
 		// Antigravity 同样可能有两种缓存键
-		keysToDelete = append(keysToDelete, AntigravityTokenCacheKey(account))
-		keysToDelete = append(keysToDelete, "ag:"+accountIDKey)
+		keys = append(keys, AntigravityTokenCacheKey(account))
+		keys = append(keys, "ag:"+accountIDKey)
 	case PlatformOpenAI:
-		keysToDelete = append(keysToDelete, OpenAITokenCacheKey(account))
+		keys = append(keys, OpenAITokenCacheKey(account))
 	case PlatformAnthropic:
-		keysToDelete = append(keysToDelete, ClaudeTokenCacheKey(account))
+		keys = append(keys, ClaudeTokenCacheKey(account))
 	default:
 		return nil
 	}
+	return keys
+}
 
+func cloneAccountForTokenInvalidation(account *Account) *Account {
+	if account == nil {
+		return nil
+	}
+	return &Account{
+		ID:          account.ID,
+		Platform:    account.Platform,
+		Type:        account.Type,
+		Credentials: cloneCredentials(account.Credentials),
+	}
+}
+
+func (c *CompositeTokenCacheInvalidator) deleteTokenCacheKeys(ctx context.Context, account *Account, keysToDelete []string) error {
 	// 删除所有可能的缓存键（去重后）
 	seen := make(map[string]bool)
 	for _, key := range keysToDelete {
@@ -58,7 +100,11 @@ func (c *CompositeTokenCacheInvalidator) InvalidateToken(ctx context.Context, ac
 		}
 		seen[key] = true
 		if err := c.cache.DeleteAccessToken(ctx, key); err != nil {
-			slog.Warn("token_cache_delete_failed", "key", key, "account_id", account.ID, "error", err)
+			accountID := int64(0)
+			if account != nil {
+				accountID = account.ID
+			}
+			slog.Warn("token_cache_delete_failed", "key", key, "account_id", accountID, "error", err)
 		}
 	}
 

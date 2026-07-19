@@ -129,7 +129,7 @@ const antigravityUserAgentVersionErrorTTL = 5 * time.Second
 const antigravityUserAgentVersionDBTimeout = 5 * time.Second
 
 // DefaultOpenAICodexUserAgent OpenAI Codex 默认 User-Agent（用于规避 Cloudflare 对浏览器 UA 的质询）
-const DefaultOpenAICodexUserAgent = "codex-tui/0.136.0 (Mac OS 26.5.0; arm64) Apple_Terminal/470.2 (codex-tui; 0.136.0)"
+const DefaultOpenAICodexUserAgent = codexCLIUserAgent
 
 // cachedOpenAICodexUserAgent 缓存 OpenAI Codex UA（进程内缓存，60s TTL）
 type cachedOpenAICodexUserAgent struct {
@@ -701,9 +701,14 @@ func (s *SettingService) GetAllSettings(ctx context.Context) (*SystemSettings, e
 func (s *SettingService) GetFrontendURL(ctx context.Context) string {
 	val, err := s.settingRepo.GetValue(ctx, SettingKeyFrontendURL)
 	if err == nil && strings.TrimSpace(val) != "" {
-		return strings.TrimSpace(val)
+		val = strings.TrimSpace(val)
+		if validateErr := config.ValidateFrontendBaseURL(val); validateErr == nil {
+			return val
+		} else {
+			slog.Warn("invalid frontend_url setting; falling back to startup config")
+		}
 	}
-	return s.cfg.Server.FrontendURL
+	return strings.TrimSpace(s.cfg.Server.FrontendURL)
 }
 
 // GetPublicSettings 获取公开设置（无需登录）
@@ -2342,6 +2347,8 @@ func (s *SettingService) getGatewayForwardingSettingsCached(ctx context.Context)
 // GetGatewayForwardingSettings returns cached gateway forwarding settings.
 // Uses in-process atomic.Value cache with 60s TTL, zero-lock hot path.
 // Returns (fingerprintUnification, metadataPassthrough, cchSigning).
+// cchSigning is deprecated and kept only for API/storage compatibility; gateway
+// request builders no longer generate or sign cch billing attribution fields.
 func (s *SettingService) GetGatewayForwardingSettings(ctx context.Context) (fingerprintUnification, metadataPassthrough, cchSigning bool) {
 	result := s.getGatewayForwardingSettingsCached(ctx)
 	return result.fp, result.mp, result.cch
@@ -3349,7 +3356,7 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	// 分组隔离
 	result.AllowUngroupedKeyScheduling = settings[SettingKeyAllowUngroupedKeyScheduling] == "true"
 
-	// Gateway forwarding behavior (defaults: fingerprint=true, metadata_passthrough=false, cch_signing=false)
+	// Gateway forwarding behavior (defaults: fingerprint=true, metadata_passthrough=false, cch_signing=false/no-op)
 	if v, ok := settings[SettingKeyEnableFingerprintUnification]; ok && v != "" {
 		result.EnableFingerprintUnification = v == "true"
 	} else {

@@ -1,6 +1,9 @@
 package service
 
 import (
+	"net/http"
+	"strings"
+
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/gin-gonic/gin"
@@ -11,8 +14,6 @@ const (
 	CodexClientRestrictionReasonDisabled = "codex_cli_only_disabled"
 	// CodexClientRestrictionReasonMatchedUA 表示请求命中官方客户端 UA 白名单。
 	CodexClientRestrictionReasonMatchedUA = "official_client_user_agent_matched"
-	// CodexClientRestrictionReasonMatchedOriginator 表示请求命中官方客户端 originator 白名单。
-	CodexClientRestrictionReasonMatchedOriginator = "official_client_originator_matched"
 	// CodexClientRestrictionReasonMatchedAllowedClient 表示请求命中账号级额外放行的命名客户端预设。
 	CodexClientRestrictionReasonMatchedAllowedClient = "allowed_client_matched"
 	// CodexClientRestrictionReasonMatchedGlobalAllowedClient 表示请求命中全局额外放行的命名客户端预设。
@@ -63,22 +64,15 @@ func (d *OpenAICodexClientRestrictionDetector) Detect(c *gin.Context, account *A
 
 	userAgent := ""
 	originator := ""
-	if c != nil {
+	if c != nil && c.Request != nil {
 		userAgent = c.GetHeader("User-Agent")
 		originator = c.GetHeader("originator")
 	}
-	if openai.IsCodexOfficialClientRequest(userAgent) {
+	if openai.IsCodexOfficialClientRequestStrict(userAgent) && hasNonEmptyCodexRequestHeader(c) {
 		return CodexClientRestrictionDetectionResult{
 			Enabled: true,
 			Matched: true,
 			Reason:  CodexClientRestrictionReasonMatchedUA,
-		}
-	}
-	if openai.IsCodexOfficialClientOriginator(originator) {
-		return CodexClientRestrictionDetectionResult{
-			Enabled: true,
-			Matched: true,
-			Reason:  CodexClientRestrictionReasonMatchedOriginator,
 		}
 	}
 
@@ -107,4 +101,30 @@ func (d *OpenAICodexClientRestrictionDetector) Detect(c *gin.Context, account *A
 		Matched: false,
 		Reason:  CodexClientRestrictionReasonNotMatchedUA,
 	}
+}
+
+func hasNonEmptyCodexRequestHeader(c *gin.Context) bool {
+	if c == nil || c.Request == nil {
+		return false
+	}
+	return hasNonEmptyCodexHTTPHeader(c.Request.Header)
+}
+
+func hasNonEmptyCodexHTTPHeader(headers http.Header) bool {
+	for name, values := range headers {
+		if !hasCodexHeaderPrefix(name) {
+			continue
+		}
+		for _, value := range values {
+			if strings.TrimSpace(value) != "" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func hasCodexHeaderPrefix(name string) bool {
+	const prefix = "x-codex-"
+	return len(name) >= len(prefix) && strings.EqualFold(name[:len(prefix)], prefix)
 }

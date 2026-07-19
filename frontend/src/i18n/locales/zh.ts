@@ -344,6 +344,26 @@ export default {
     }
   },
 
+  legal: {
+    loginAgreementPrompt: {
+      checkboxPrefix: '我已阅读并同意',
+      documentSeparator: '、',
+      noticeTitle: '继续登录前需要先同意最新条款。',
+      noticeDescription: '未同意前，账号密码输入和快捷登录会保持禁用。',
+      viewTerms: '查看条款',
+      dialogTitle: '条款更新通知',
+      dialogDescription: '我们的服务条款已于 {date} 更新。在继续使用服务之前，请仔细阅读并同意以下条款。',
+      recently: '近期',
+      relatedDocuments: '相关文档',
+      reject: '拒绝',
+      accept: '同意并继续',
+      loginRejectedWarning: '未同意最新条款前，无法输入账号密码或使用快捷登录。',
+      loginRequiredWarning: '请先阅读并同意最新条款后再登录。',
+      registerRejectedWarning: '未同意最新条款前，无法注册或使用快捷登录。',
+      registerRequiredWarning: '请先阅读并同意最新条款后再注册。'
+    }
+  },
+
   // Navigation
   nav: {
     dashboard: '仪表盘',
@@ -677,6 +697,9 @@ export default {
   keys: {
     title: 'API 密钥',
     description: '管理您的 API 密钥和访问令牌',
+    summaryTotal: '密钥总数',
+    summaryActive: '活跃',
+    summaryInactive: '非活跃',
     searchPlaceholder: '搜索名称或Key...',
     endpoints: {
       title: 'API 端点',
@@ -848,7 +871,7 @@ export default {
   usage: {
     title: '使用记录',
     description: '查看和分析您的 API 使用历史',
-    costDetails: '成本明细',
+    costDetails: '费用明细',
     tokenDetails: 'Token 明细',
     cacheTtlOverriddenHint: '缓存 TTL Override 已启用',
     cacheTtlOverriddenLabel: 'TTL 替换',
@@ -856,6 +879,10 @@ export default {
     cacheTtlOverridden1h: '按 1h 计费',
     totalRequests: '总请求数',
     totalTokens: '总 Token',
+    cacheTotal: '缓存',
+    cacheBreakdown: '缓存 Token 明细',
+    cacheCreationTokensLabel: '缓存创建',
+    cacheReadTokensLabel: '缓存读取',
     totalCost: '总消费',
     standardCost: '标准',
     actualCost: '实际',
@@ -917,7 +944,7 @@ export default {
     imageOutputSize: '输出尺寸',
     imageOutputTokens: '图片输出 Token',
     imageOutputTokenPrice: '图片输出单价',
-    imageOutputCost: '图片输出成本',
+    imageOutputCost: '图片输出费用',
     imageSizeSource: '尺寸来源',
     imageSizeBreakdown: '尺寸明细',
     imageSizeSourceOutput: '上游输出',
@@ -1004,6 +1031,7 @@ export default {
   // Channel Status (user-facing read-only view)
   channelStatus: {
     title: '渠道状态',
+    heroHeading: '服务可用性总览',
     description: '查看渠道可用性、延迟和近期状态',
     searchPlaceholder: '搜索渠道...',
     allProviders: '全部供应商',
@@ -1049,6 +1077,22 @@ export default {
     title: '可用渠道',
     description: '查看您可访问的渠道与其支持的模型、定价',
     searchPlaceholder: '搜索渠道或模型...',
+    summaryChannels: '可用渠道',
+    summaryPlatforms: '覆盖平台',
+    summaryModels: '支持模型',
+    modelSearchPlaceholder: '在该渠道内搜索模型...',
+    modelCount: '{count} 个模型',
+    priceInput: '输入',
+    priceOutput: '输出',
+    priceCacheRead: '缓存读',
+    priceCacheWrite: '缓存写',
+    pricePerRequest: '每次',
+    priceImage: '每图',
+    priceTiered: '阶梯计价',
+    perMillionHint: '价格单位：美元 / 每百万 token',
+    modelColumn: '模型',
+    billingColumn: '计费',
+    noModelsInChannel: '该渠道暂无模型',
     empty: '暂无可用渠道',
     noModels: '未配置模型',
     noPricing: '未配置定价',
@@ -2127,6 +2171,9 @@ export default {
     groups: {
       title: '分组管理',
       description: '管理 API 密钥分组和费率配置',
+      summaryTotal: '分组总数',
+      summaryActive: '启用中',
+      summaryInactive: '已停用',
       searchGroups: '搜索分组...',
       createGroup: '创建分组',
       editGroup: '编辑分组',
@@ -2431,6 +2478,9 @@ export default {
     channels: {
       title: '渠道管理',
       description: '管理渠道和自定义模型定价',
+      summaryTotal: '渠道总数',
+      summaryActive: '启用中',
+      summaryDisabled: '已停用',
       searchChannels: '搜索渠道...',
       createChannel: '创建渠道',
       editChannel: '编辑渠道',
@@ -2451,8 +2501,23 @@ export default {
       deleteError: '删除渠道失败',
       nameRequired: '请输入渠道名称',
       duplicateModels: '模型「{0}」在多个定价条目中重复',
-      modelConflict: "模型模式 '{model1}' 和 '{model2}' 冲突：匹配范围重叠",
-      mappingConflict: "模型映射源 '{model1}' 和 '{model2}' 冲突：匹配范围重叠",
+      modelConflict: "模型模式 '{model1}' 和 '{model2}' 冲突：匹配范围重叠。模型名称按大小写不敏感匹配，已有条目已覆盖其所有大小写变体，无需重复添加。",
+      mappingConflict: "模型映射源 '{model1}' 和 '{model2}' 冲突：匹配范围重叠。源模式按大小写不敏感匹配，已有条目已覆盖其所有大小写变体。",
+      intervalValidation: {
+        negativeMin: '区间 #{index}：最小 token 数（{value}）不能为负数',
+        maxPositive: '区间 #{index}：最大 token 数（{value}）必须大于 0',
+        maxGreaterThanMin: '区间 #{index}：最大 token 数（{max}）必须大于最小 token 数（{min}）',
+        negativePrice: '区间 #{index}：{field}不能为负数',
+        unboundedLast: '区间 #{index}：无上限区间（最大 token 数为空）必须放在最后',
+        overlap: '区间 #{previousIndex} 和 #{currentIndex} 重叠：前一个上界（{previousMax}）大于当前下界（{currentMin}）',
+        price: {
+          inputPrice: '输入价格',
+          outputPrice: '输出价格',
+          cacheWritePrice: '缓存写入价格',
+          cacheReadPrice: '缓存读取价格',
+          perRequestPrice: '单次价格'
+        }
+      },
       deleteConfirm: '确定要删除渠道「{name}」吗？此操作不可撤销。',
       columns: {
         name: '名称',
@@ -3304,6 +3369,10 @@ export default {
         api_key: 'API Key',
         cookie: 'Cookie'
       },
+      antigravityProjectIdLabel: 'GCP Project ID（可选）',
+      antigravityProjectIdPlaceholder: 'your-gcp-project-id',
+      antigravityProjectIdHint:
+        '用于未自动返回 project_id 的 Antigravity standard-tier OAuth 账号。',
       status: {
         active: '正常',
         inactive: '停用',
@@ -3389,7 +3458,9 @@ export default {
         resetTooltipNeedQuery: '先点击「次数」加载剩余重置次数',
         resetTooltipNoCredits: '没有可用的重置次数',
         noCreditsAvailable: '没有可用的重置次数',
-        resetSuccess: '已重置 {windows} 个窗口'
+        resetSuccess: '已重置 {windows} 个窗口',
+        confirmTitle: '确认重置周限',
+        confirmMessage: '将消耗 1 次重置次数立即恢复当前窗口，剩余 {count} 次。此操作不可撤销，确定继续吗？'
       },
       tier: {
         free: 'Free',
@@ -3592,11 +3663,14 @@ export default {
         codexImageGenerationBridgeInheritDesc: '不写入账号覆盖，继续使用渠道或全局策略。',
         codexImageGenerationBridgeEnabled: '强制开启',
         codexImageGenerationBridgeEnabledDesc: '允许 Codex /responses 请求获得图片工具注入。',
-        codexImageGenerationBridgeDisabled: '强制关闭',
-        codexImageGenerationBridgeDisabledDesc: '阻断 Codex /responses 的图片工具注入。',
+        codexImageGenerationBridgeDisabled: '关闭自动注入',
+        codexImageGenerationBridgeDisabledDesc: '不自动注入图片工具，但保留客户端显式携带的图片工具。',
+        codexImageGenerationBridgeBlock: '完全阻断',
+        codexImageGenerationBridgeBlockDesc: '移除客户端自带的图片工具及指向它的 tool_choice。',
         codexImageGenerationBridgeBadgeInherit: '渠道策略',
         codexImageGenerationBridgeBadgeEnabled: '账号开启',
-        codexImageGenerationBridgeBadgeDisabled: '账号关闭',
+        codexImageGenerationBridgeBadgeDisabled: '仅关闭注入',
+        codexImageGenerationBridgeBadgeBlock: '完全阻断',
         compactMode: 'Compact 模式',
         compactModeDesc:
           '控制本账号在 /responses/compact 调度中的参与方式。Auto 跟随探测结果，Force On 强制允许，Force Off 强制排除。',
@@ -4271,6 +4345,9 @@ export default {
     proxies: {
       title: 'IP管理',
       description: '管理代理服务器配置',
+      summaryTotal: '代理总数',
+      summaryActive: '启用中',
+      summaryInactive: '已停用',
       createProxy: '添加代理',
       editProxy: '编辑代理',
       deleteProxy: '删除代理',
@@ -4451,6 +4528,9 @@ export default {
     redeem: {
       title: '兑换码管理',
       description: '生成和管理兑换码',
+      summaryTotal: '兑换码总数',
+      summaryUnused: '未使用',
+      summaryUsed: '已使用',
       generateCodes: '生成兑换码',
       columns: {
         code: '兑换码',
@@ -4583,6 +4663,9 @@ export default {
     announcements: {
       title: '公告管理',
       description: '创建公告并按条件投放',
+      summaryTotal: '公告总数',
+      summaryActive: '展示中',
+      summaryOnPage: '本页数量',
       createAnnouncement: '创建公告',
       editAnnouncement: '编辑公告',
       deleteAnnouncement: '删除公告',
@@ -4657,6 +4740,9 @@ export default {
     promo: {
       title: '优惠码管理',
       description: '创建和管理注册优惠码',
+      summaryTotal: '优惠码总数',
+      summaryActive: '启用中',
+      summaryDisabled: '已停用',
       createCode: '创建优惠码',
       editCode: '编辑优惠码',
       deleteCode: '删除优惠码',
@@ -4730,10 +4816,10 @@ export default {
       allAccounts: '全部账户',
       allGroups: '全部分组',
       allTypes: '全部类型',
-      inputCost: '输入成本',
-      outputCost: '输出成本',
-      cacheCreationCost: '缓存创建成本',
-      cacheReadCost: '缓存读取成本',
+      inputCost: '输入费用',
+      outputCost: '输出费用',
+      cacheCreationCost: '缓存创建费用',
+      cacheReadCost: '缓存读取费用',
       inputTokens: '输入 Token',
       outputTokens: '输出 Token',
       cacheCreationTokens: '缓存创建 Token',
@@ -5851,8 +5937,8 @@ export default {
         fingerprintUnificationHint: '统一共享同一 OAuth 账号的用户的 X-Stainless-* 请求头。关闭后透传客户端原始请求头。',
         metadataPassthrough: 'Metadata 透传',
         metadataPassthroughHint: '透传客户端原始 metadata.user_id，不进行重写。可能提高上游缓存命中率。',
-        cchSigning: 'CCH 签名',
-        cchSigningHint: '对转发请求的 billing header 进行 CCH 哈希签名。关闭时保留原始占位符。',
+        cchSigning: 'CCH 签名（已弃用）',
+        cchSigningHint: '已弃用的兼容设置。该值仍会保存和返回，但转发的 billing header 不再包含或签名 cch。',
         anthropicCacheTTL1hInjection: 'Anthropic 缓存 TTL 注入',
         anthropicCacheTTL1hInjectionHint: '开启后，对 Anthropic OAuth/Setup Token 请求体中已有的 ephemeral 缓存块强制写入 1h；响应 usage 默认按 5m 回写计费，账号级 TTL 计费设置优先。',
         rewriteMessageCacheControl: '改写消息缓存断点',
@@ -6782,7 +6868,24 @@ export default {
     restartRequired: '请重启服务以应用更新',
     restartNow: '立即重启',
     restarting: '正在重启...',
-    retry: '重试'
+    retry: '重试',
+    rollback: '版本回退',
+    rollbackSelectVersion: '选择要回退到的版本（近 3 个版本）',
+    rollbackConfirm: '回退到 {version}',
+    rollbackWarning: '回退将下载所选版本并替换当前程序，完成后需重启服务',
+    rollingBack: '正在回退...',
+    rollbackComplete: '回退完成',
+    rollbackFailed: '回退失败',
+    manualRollbackCommand: '手动回退方式',
+    copyCommand: '复制',
+    copied: '已复制',
+    noRollbackVersions: '暂无可回退的版本',
+    loadVersionsFailed: '获取版本列表失败',
+    rollbackSourceHint: '源码构建不支持在线回退',
+    deployScript: '脚本部署',
+    deployDocker: 'Docker',
+    dockerEditCompose: '修改 docker-compose.yml 中的镜像版本',
+    dockerRecreate: '重新创建容器'
   },
 
   // Recharge / Subscription Page
@@ -6834,6 +6937,9 @@ export default {
   userSubscriptions: {
     title: '我的订阅',
     description: '查看您的订阅计划和用量',
+    summaryTotal: '订阅总数',
+    summaryActive: '生效中',
+    summaryExpiring: '即将到期',
     noActiveSubscriptions: '暂无有效订阅',
     noActiveSubscriptionsDesc: '您没有任何有效订阅。请联系管理员获取订阅。',
     failedToLoad: '加载订阅失败',

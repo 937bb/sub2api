@@ -2743,42 +2743,7 @@ func (r *usageLogRepository) GetUserUsageTrendByUserID(ctx context.Context, user
 
 // GetUserModelStats 获取指定用户的模型统计
 func (r *usageLogRepository) GetUserModelStats(ctx context.Context, userID int64, startTime, endTime time.Time) (results []ModelStat, err error) {
-	query := `
-		SELECT
-			model,
-			COUNT(*) as requests,
-			COALESCE(SUM(input_tokens), 0) as input_tokens,
-			COALESCE(SUM(output_tokens), 0) as output_tokens,
-			COALESCE(SUM(cache_creation_tokens), 0) as cache_creation_tokens,
-			COALESCE(SUM(cache_read_tokens), 0) as cache_read_tokens,
-			COALESCE(SUM(input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens), 0) as total_tokens,
-			COALESCE(SUM(total_cost), 0) as cost,
-			COALESCE(SUM(actual_cost), 0) as actual_cost,
-			COALESCE(SUM(COALESCE(account_stats_cost, total_cost) * COALESCE(account_rate_multiplier, 1)), 0) as account_cost
-		FROM usage_logs
-		WHERE user_id = $1 AND created_at >= $2 AND created_at < $3
-		GROUP BY model
-		ORDER BY total_tokens DESC
-	`
-
-	rows, err := r.sql.QueryContext(ctx, query, userID, startTime, endTime)
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		// 保持主错误优先；仅在无错误时回传 Close 失败。
-		// 同时清空返回值，避免误用不完整结果。
-		if closeErr := rows.Close(); closeErr != nil && err == nil {
-			err = closeErr
-			results = nil
-		}
-	}()
-
-	results, err = scanModelStatsRows(rows)
-	if err != nil {
-		return nil, err
-	}
-	return results, nil
+	return r.getModelStatsWithFiltersBySource(ctx, startTime, endTime, userID, 0, 0, 0, nil, nil, nil, usagestats.ModelSourceRequested)
 }
 
 // UsageLogFilters represents filters for usage log queries
@@ -3356,10 +3321,10 @@ func (r *usageLogRepository) GetUserBreakdownStats(ctx context.Context, startTim
 		args = append(args, dim.AccountID)
 	}
 	if dim.RequestType != nil {
-		query += fmt.Sprintf(" AND ul.request_type = $%d", len(args)+1)
-		args = append(args, *dim.RequestType)
-	}
-	if dim.Stream != nil {
+		condition, conditionArgs := buildRequestTypeFilterCondition(len(args)+1, *dim.RequestType, requestTypeColumnsUsageLog)
+		query += " AND " + condition
+		args = append(args, conditionArgs...)
+	} else if dim.Stream != nil {
 		query += fmt.Sprintf(" AND ul.stream = $%d", len(args)+1)
 		args = append(args, *dim.Stream)
 	}
@@ -3544,6 +3509,8 @@ func (r *usageLogRepository) GetStatsWithFilters(ctx context.Context, filters Us
 			COALESCE(SUM(input_tokens), 0) as total_input_tokens,
 			COALESCE(SUM(output_tokens), 0) as total_output_tokens,
 			COALESCE(SUM(cache_creation_tokens + cache_read_tokens), 0) as total_cache_tokens,
+			COALESCE(SUM(cache_creation_tokens), 0) as total_cache_creation_tokens,
+			COALESCE(SUM(cache_read_tokens), 0) as total_cache_read_tokens,
 			COALESCE(SUM(total_cost), 0) as total_cost,
 			COALESCE(SUM(actual_cost), 0) as total_actual_cost,
 			COALESCE(SUM(COALESCE(account_stats_cost, total_cost) * COALESCE(account_rate_multiplier, 1)), 0) as total_account_cost,
@@ -3574,6 +3541,8 @@ func (r *usageLogRepository) GetStatsWithFilters(ctx context.Context, filters Us
 			&stats.TotalInputTokens,
 			&stats.TotalOutputTokens,
 			&stats.TotalCacheTokens,
+			&stats.TotalCacheCreationTokens,
+			&stats.TotalCacheReadTokens,
 			&stats.TotalCost,
 			&stats.TotalActualCost,
 			&totalAccountCost,
@@ -4525,7 +4494,7 @@ func buildWhere(conditions []string) string {
 
 func appendRequestTypeOrStreamWhereCondition(conditions []string, args []any, requestType *int16, stream *bool) ([]string, []any) {
 	if requestType != nil {
-		condition, conditionArgs := buildRequestTypeFilterCondition(len(args)+1, *requestType)
+		condition, conditionArgs := buildRequestTypeFilterCondition(len(args)+1, *requestType, requestTypeColumnsUnqualified)
 		conditions = append(conditions, condition)
 		args = append(args, conditionArgs...)
 		return conditions, args
@@ -4539,7 +4508,7 @@ func appendRequestTypeOrStreamWhereCondition(conditions []string, args []any, re
 
 func appendRequestTypeOrStreamQueryFilter(query string, args []any, requestType *int16, stream *bool) (string, []any) {
 	if requestType != nil {
-		condition, conditionArgs := buildRequestTypeFilterCondition(len(args)+1, *requestType)
+		condition, conditionArgs := buildRequestTypeFilterCondition(len(args)+1, *requestType, requestTypeColumnsUnqualified)
 		query += " AND " + condition
 		args = append(args, conditionArgs...)
 		return query, args
@@ -4551,19 +4520,29 @@ func appendRequestTypeOrStreamQueryFilter(query string, args []any, requestType 
 	return query, args
 }
 
+type requestTypeColumnPrefix string
+
+const (
+	requestTypeColumnsUnqualified requestTypeColumnPrefix = ""
+	requestTypeColumnsUsageLog    requestTypeColumnPrefix = "ul."
+)
+
 // buildRequestTypeFilterCondition 在 request_type 过滤时兼容 legacy 字段，避免历史数据漏查。
-func buildRequestTypeFilterCondition(startArgIndex int, requestType int16) (string, []any) {
+func buildRequestTypeFilterCondition(startArgIndex int, requestType int16, prefix requestTypeColumnPrefix) (string, []any) {
 	normalized := service.RequestTypeFromInt16(requestType)
 	requestTypeArg := int16(normalized)
+	requestTypeColumn := string(prefix) + "request_type"
+	streamColumn := string(prefix) + "stream"
+	wsModeColumn := string(prefix) + "openai_ws_mode"
 	switch normalized {
 	case service.RequestTypeSync:
-		return fmt.Sprintf("(request_type = $%d OR (request_type = %d AND stream = FALSE AND openai_ws_mode = FALSE))", startArgIndex, int16(service.RequestTypeUnknown)), []any{requestTypeArg}
+		return fmt.Sprintf("(%s = $%d OR (%s = %d AND %s = FALSE AND %s = FALSE))", requestTypeColumn, startArgIndex, requestTypeColumn, int16(service.RequestTypeUnknown), streamColumn, wsModeColumn), []any{requestTypeArg}
 	case service.RequestTypeStream:
-		return fmt.Sprintf("(request_type = $%d OR (request_type = %d AND stream = TRUE AND openai_ws_mode = FALSE))", startArgIndex, int16(service.RequestTypeUnknown)), []any{requestTypeArg}
+		return fmt.Sprintf("(%s = $%d OR (%s = %d AND %s = TRUE AND %s = FALSE))", requestTypeColumn, startArgIndex, requestTypeColumn, int16(service.RequestTypeUnknown), streamColumn, wsModeColumn), []any{requestTypeArg}
 	case service.RequestTypeWSV2:
-		return fmt.Sprintf("(request_type = $%d OR (request_type = %d AND openai_ws_mode = TRUE))", startArgIndex, int16(service.RequestTypeUnknown)), []any{requestTypeArg}
+		return fmt.Sprintf("(%s = $%d OR (%s = %d AND %s = TRUE))", requestTypeColumn, startArgIndex, requestTypeColumn, int16(service.RequestTypeUnknown), wsModeColumn), []any{requestTypeArg}
 	default:
-		return fmt.Sprintf("request_type = $%d", startArgIndex), []any{requestTypeArg}
+		return fmt.Sprintf("%s = $%d", requestTypeColumn, startArgIndex), []any{requestTypeArg}
 	}
 }
 

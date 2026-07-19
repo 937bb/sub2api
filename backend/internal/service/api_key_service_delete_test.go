@@ -71,6 +71,18 @@ func (s *apiKeyRepoStub) GetByKeyForAuth(ctx context.Context, key string) (*APIK
 func (s *apiKeyRepoStub) Update(ctx context.Context, key *APIKey) error {
 	panic("unexpected Update call")
 }
+func (s *apiKeyRepoStub) UpdateConfig(context.Context, int64, int64, APIKeyConfigPatch) (*APIKey, error) {
+	panic("unexpected UpdateConfig call")
+}
+func (s *apiKeyRepoStub) UpdateGroupID(context.Context, int64, *int64) (*APIKey, error) {
+	panic("unexpected UpdateGroupID call")
+}
+func (s *apiKeyRepoStub) ResetRateLimitUsage(context.Context, int64) (*APIKey, error) {
+	panic("unexpected ResetRateLimitUsage call")
+}
+func (s *apiKeyRepoStub) IncrementQuotaUsedAndGetState(context.Context, int64, float64) (*APIKeyQuotaUsageState, error) {
+	panic("unexpected IncrementQuotaUsedAndGetState call")
+}
 
 // Delete 记录被删除的 API Key ID 并返回预设的错误。
 // 通过 deletedIDs 可以验证删除操作是否被正确调用。

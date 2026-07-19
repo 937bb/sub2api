@@ -865,9 +865,53 @@ func TestOpenAISelectAccountForModelWithExclusions_NoModelSupport(t *testing.T) 
 	if acc != nil {
 		t.Fatalf("expected nil account for unsupported model")
 	}
-	if !strings.Contains(err.Error(), "supporting model") {
-		t.Fatalf("unexpected error: %v", err)
+	require.ErrorIs(t, err, ErrNoAvailableAccounts)
+	require.NotErrorIs(t, err, ErrModelNotSupportedByAccounts)
+	require.Contains(t, err.Error(), "no available OpenAI accounts supporting model")
+}
+
+func TestOpenAISelectAccountForModelWithExclusions_WildcardMappingDoesNotReturnUnsupportedModel(t *testing.T) {
+	repo := stubOpenAIAccountRepo{
+		accounts: []Account{
+			{
+				ID:          1,
+				Platform:    PlatformOpenAI,
+				Status:      StatusActive,
+				Schedulable: true,
+				Credentials: map[string]any{"model_mapping": map[string]any{"gpt-*": "gpt-4o"}},
+			},
+		},
 	}
+	svc := &OpenAIGatewayService{
+		accountRepo: repo,
+		cache:       &stubGatewayCache{},
+	}
+
+	acc, err := svc.SelectAccountForModelWithExclusions(context.Background(), nil, "", "gpt-4.1", nil)
+	require.NoError(t, err)
+	require.NotNil(t, acc)
+}
+
+func TestOpenAISelectAccountForModelWithExclusions_EmptyMappingAllowsModel(t *testing.T) {
+	repo := stubOpenAIAccountRepo{
+		accounts: []Account{
+			{
+				ID:          1,
+				Platform:    PlatformOpenAI,
+				Status:      StatusActive,
+				Schedulable: true,
+				Credentials: map[string]any{"model_mapping": map[string]any{}},
+			},
+		},
+	}
+	svc := &OpenAIGatewayService{
+		accountRepo: repo,
+		cache:       &stubGatewayCache{},
+	}
+
+	acc, err := svc.SelectAccountForModelWithExclusions(context.Background(), nil, "", "gpt-any-public", nil)
+	require.NoError(t, err)
+	require.NotNil(t, acc)
 }
 
 func TestOpenAISelectAccountWithLoadAwareness_LoadBatchErrorFallback(t *testing.T) {
@@ -1103,9 +1147,8 @@ func TestOpenAISelectAccountForModelWithExclusions_NoAccounts(t *testing.T) {
 	if acc != nil {
 		t.Fatalf("expected nil account")
 	}
-	if !strings.Contains(err.Error(), "no available OpenAI accounts") {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.ErrorIs(t, err, ErrNoAvailableAccounts)
+	require.NotErrorIs(t, err, ErrModelNotSupportedByAccounts)
 }
 
 func TestOpenAISelectAccountWithLoadAwareness_NoCandidates(t *testing.T) {
@@ -1132,6 +1175,49 @@ func TestOpenAISelectAccountWithLoadAwareness_NoCandidates(t *testing.T) {
 	if selection != nil {
 		t.Fatalf("expected nil selection")
 	}
+	require.ErrorIs(t, err, ErrNoAvailableAccounts)
+	require.NotErrorIs(t, err, ErrModelNotSupportedByAccounts)
+}
+
+func TestOpenAISelectAccountWithLoadAwareness_EndpointCapabilityMismatchNotUnsupportedModel(t *testing.T) {
+	groupID := int64(1)
+	repo := stubOpenAIAccountRepo{
+		accounts: []Account{
+			{
+				ID:          1,
+				Platform:    PlatformOpenAI,
+				Type:        AccountTypeAPIKey,
+				Status:      StatusActive,
+				Schedulable: true,
+				Concurrency: 1,
+				Priority:    1,
+				Credentials: map[string]any{
+					"openai_capabilities": []any{"chat_completions"},
+				},
+			},
+		},
+	}
+	svc := &OpenAIGatewayService{
+		accountRepo:        repo,
+		cache:              &stubGatewayCache{},
+		concurrencyService: NewConcurrencyService(stubConcurrencyCache{}),
+	}
+
+	selection, _, err := svc.SelectAccountWithSchedulerForCapability(
+		context.Background(),
+		&groupID,
+		"",
+		"",
+		"text-embedding-3-small",
+		nil,
+		OpenAIUpstreamTransportHTTPSSE,
+		OpenAIEndpointCapabilityEmbeddings,
+		false,
+	)
+	require.Error(t, err)
+	require.Nil(t, selection)
+	require.ErrorIs(t, err, ErrNoAvailableAccounts)
+	require.NotErrorIs(t, err, ErrModelNotSupportedByAccounts)
 }
 
 func TestOpenAISelectAccountWithLoadAwareness_AllFullWaitPlan(t *testing.T) {
@@ -1454,6 +1540,44 @@ func TestOpenAIStreamingResponseFailedBeforeOutputCapacityErrorReturnsFailover(t
 	require.ErrorAs(t, err, &failoverErr)
 	require.Equal(t, http.StatusBadGateway, failoverErr.StatusCode)
 	require.Contains(t, string(failoverErr.ResponseBody), "Selected model is at capacity")
+	require.False(t, c.Writer.Written())
+	require.Empty(t, rec.Body.String())
+}
+
+func TestOpenAIStreamingResponseFailedBeforeOutputServerOverloadedCodeReturnsFailover(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cfg := &config.Config{
+		Gateway: config.GatewayConfig{
+			StreamDataIntervalTimeout: 0,
+			StreamKeepaliveInterval:   0,
+			MaxLineSize:               defaultMaxLineSize,
+		},
+	}
+	svc := &OpenAIGatewayService{cfg: cfg}
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/", nil)
+
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body: io.NopCloser(strings.NewReader(strings.Join([]string{
+			"event: response.created",
+			`data: {"type":"response.created","response":{"id":"resp_1"}}`,
+			"",
+			"event: response.failed",
+			`data: {"type":"response.failed","response":{"id":"resp_1","error":{"code":"server_is_overloaded","message":"Please retry later."}}}`,
+			"",
+		}, "\n"))),
+		Header: http.Header{"X-Request-Id": []string{"rid-overloaded-failed"}},
+	}
+
+	_, err := svc.handleStreamingResponse(c.Request.Context(), resp, c, &Account{ID: 1, Platform: PlatformOpenAI, Name: "acc"}, time.Now(), "model", "model")
+	require.Error(t, err)
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.Equal(t, http.StatusBadGateway, failoverErr.StatusCode)
+	require.Contains(t, string(failoverErr.ResponseBody), "Please retry later")
 	require.False(t, c.Writer.Written())
 	require.Empty(t, rec.Body.String())
 }
@@ -2364,11 +2488,11 @@ func TestOpenAIBuildUpstreamRequestCompactForcesJSONAcceptForOAuth(t *testing.T)
 }
 
 func TestCodexDefaultUserAgentUsesOfficialFingerprint(t *testing.T) {
-	require.Equal(t, "0.136.0", codexCLIVersion)
+	require.Equal(t, "0.144.1", codexCLIVersion)
 	require.Equal(t, "Mac OS 26.5.0; arm64", codexOSFingerprint)
 	require.Equal(t, "Apple_Terminal/470.2", codexTerminalName)
 	require.Equal(t, "codex-tui", codexOfficialOriginator)
-	require.Equal(t, "codex-tui/0.136.0 (Mac OS 26.5.0; arm64) Apple_Terminal/470.2 (codex-tui; 0.136.0)", codexCLIUserAgent)
+	require.Equal(t, "codex-tui/0.144.1 (Mac OS 26.5.0; arm64) Apple_Terminal/470.2 (codex-tui; 0.144.1)", codexCLIUserAgent)
 }
 
 func TestOpenAIBuildUpstreamRequestOAuthAddsCodexIdentityFallbacks(t *testing.T) {
@@ -2918,19 +3042,30 @@ func TestParseSSEUsage_SelectiveParsing(t *testing.T) {
 }
 
 func TestExtractOpenAIUsageFromJSONBytes_AcceptsResponseAndChatUsageShapes(t *testing.T) {
-	usage, ok := extractOpenAIUsageFromJSONBytes([]byte(`{"id":"resp_1","usage":{"input_tokens":3,"output_tokens":5,"input_tokens_details":{"cached_tokens":2,"image_tokens":1}}}`))
+	usage, ok := extractOpenAIUsageFromJSONBytes([]byte(`{"id":"resp_1","usage":{"input_tokens":3,"output_tokens":5,"input_tokens_details":{"cached_tokens":2,"cache_write_tokens":7,"image_tokens":1}}}`))
 	require.True(t, ok)
 	require.Equal(t, 3, usage.InputTokens)
 	require.Equal(t, 1, usage.ImageInputTokens)
 	require.Equal(t, 5, usage.OutputTokens)
+	require.Equal(t, 7, usage.CacheCreationInputTokens)
 	require.Equal(t, 2, usage.CacheReadInputTokens)
 
-	usage, ok = extractOpenAIUsageFromJSONBytes([]byte(`{"type":"response.completed","response":{"usage":{"prompt_tokens":13,"completion_tokens":7,"prompt_tokens_details":{"cached_tokens":4,"image_tokens":3}}}}`))
+	usage, ok = extractOpenAIUsageFromJSONBytes([]byte(`{"type":"response.completed","response":{"usage":{"prompt_tokens":13,"completion_tokens":7,"cache_creation_input_tokens":9,"prompt_tokens_details":{"cached_tokens":4,"cache_creation_tokens":0,"image_tokens":3}}}}`))
 	require.True(t, ok)
 	require.Equal(t, 13, usage.InputTokens)
 	require.Equal(t, 3, usage.ImageInputTokens)
 	require.Equal(t, 7, usage.OutputTokens)
+	require.Zero(t, usage.CacheCreationInputTokens)
 	require.Equal(t, 4, usage.CacheReadInputTokens)
+
+	usage, ok = extractOpenAIUsageFromJSONBytes([]byte(`{"usage":{"input_tokens":11,"output_tokens":2,"cache_creation_input_tokens":0,"cache_write_input_tokens":8,"input_tokens_details":{"cache_write_tokens":0,"cache_creation_tokens":6}}}`))
+	require.True(t, ok)
+	require.Zero(t, usage.CacheCreationInputTokens)
+
+	usage, ok = extractOpenAIUsageFromJSONBytes([]byte(`{"usage":{"prompt_tokens":11,"completion_tokens":2,"prompt_tokens_details":{"cached_tokens":3,"cache_write_tokens":6}}}`))
+	require.True(t, ok)
+	require.Equal(t, 6, usage.CacheCreationInputTokens)
+	require.Equal(t, 3, usage.CacheReadInputTokens)
 }
 
 func TestExtractOpenAIResponseIDFromJSONBytes(t *testing.T) {
@@ -3014,6 +3149,54 @@ func TestHandleNonStreamingResponse_APIKeyFallsBackToSSEBodyWhenContentTypeIsWro
 	require.Equal(t, "hello", gjson.Get(rec.Body.String(), "output.0.content.0.text").String())
 }
 
+func TestHandleNonStreamingResponse_OAuthJSONBodyWithDataEventTextKeepsJSONUsage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/compact", nil)
+
+	svc := &OpenAIGatewayService{cfg: &config.Config{}}
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body: io.NopCloser(strings.NewReader(`{"id":"resp_oauth_compact","object":"response","model":"gpt-5.4","status":"completed",` +
+			`"output":[{"type":"message","content":[{"type":"output_text","text":"processing data: 1,2,3 then event: click finished"}]}],` +
+			`"usage":{"input_tokens":11,"output_tokens":22,"total_tokens":33}}`)),
+	}
+	account := &Account{ID: 146, Type: AccountTypeOAuth}
+
+	result, err := svc.handleNonStreamingResponse(context.Background(), resp, c, account, "gpt-5.4", "gpt-5.4")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, 11, result.InputTokens)
+	require.Equal(t, 22, result.OutputTokens)
+	require.Equal(t, "application/json", rec.Header().Get("Content-Type"))
+	require.Equal(t, "resp_oauth_compact", gjson.Get(rec.Body.String(), "id").String())
+	require.Equal(t, int64(33), gjson.Get(rec.Body.String(), "usage.total_tokens").Int())
+	require.Contains(t, rec.Body.String(), "processing data: 1,2,3 then event: click finished")
+}
+
+func TestBodyHasSSEFramingMatchesOnlyPhysicalLineStarts(t *testing.T) {
+	tests := []struct {
+		name string
+		body []byte
+		want bool
+	}{
+		{name: "lf data line", body: []byte("data: {}\n\n"), want: true},
+		{name: "crlf event line", body: []byte("event: response.completed\r\ndata: {}\r\n\r\n"), want: true},
+		{name: "final data line without newline", body: []byte("data: {}"), want: true},
+		{name: "json text contains markers", body: []byte(`{"text":"processing data: 1 then event: done"}`), want: false},
+		{name: "indented marker is not framing", body: []byte(" data: {}\n"), want: false},
+		{name: "marker after json prefix is not framing", body: []byte(`{"text":` + "\n" + `"data: not framing"}`), want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, bodyHasSSEFraming(tt.body))
+		})
+	}
+}
+
 func TestHandleSSEToJSON_ReconstructsImageGenerationOutputItemDone(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
@@ -3026,7 +3209,7 @@ func TestHandleSSEToJSON_ReconstructsImageGenerationOutputItemDone(t *testing.T)
 		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
 	}
 	body := []byte(strings.Join([]string{
-		`data: {"type":"response.output_item.done","item":{"id":"ig_123","type":"image_generation_call","result":"aGVsbG8=","revised_prompt":"draw a cat","output_format":"png"}}`,
+		`data: {"type":"response.output_item.done","item":{"id":"ig_123","type":"image_generation_call","status":"generating","result":"aGVsbG8=","revised_prompt":"draw a cat","output_format":"png","opaque":{"keep":true}}}`,
 		`data: {"type":"response.completed","response":{"id":"resp_img","model":"gpt-5.4","output":[],"usage":{"input_tokens":7,"output_tokens":9,"output_tokens_details":{"image_tokens":4}}}}`,
 		`data: [DONE]`,
 	}, "\n"))
@@ -3039,6 +3222,127 @@ func TestHandleSSEToJSON_ReconstructsImageGenerationOutputItemDone(t *testing.T)
 	require.Equal(t, "image_generation_call", gjson.Get(rec.Body.String(), "output.0.type").String())
 	require.Equal(t, "aGVsbG8=", gjson.Get(rec.Body.String(), "output.0.result").String())
 	require.Equal(t, "draw a cat", gjson.Get(rec.Body.String(), "output.0.revised_prompt").String())
+	require.Equal(t, "completed", gjson.Get(rec.Body.String(), "output.0.status").String())
+	require.True(t, gjson.Get(rec.Body.String(), "output.0.opaque.keep").Bool())
+}
+
+func TestHandleSSEToJSON_ReconstructsEventLineOnlyImageGenerationOutput(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/", nil)
+
+	svc := &OpenAIGatewayService{cfg: &config.Config{}}
+	resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}}
+	body := []byte(strings.Join([]string{
+		`event: response.output_item.done`,
+		`data: {"item":{"id":"ig_event_only","type":"image_generation_call","status":"generating","result":"aGVsbG8="}}`,
+		``,
+		`event: response.completed`,
+		`data: {"response":{"id":"resp_event_only","output":[],"usage":{"input_tokens":3,"output_tokens":4}}}`,
+		``,
+	}, "\n"))
+
+	result, err := svc.handleSSEToJSON(resp, c, body, "gpt-5.4", "gpt-5.4")
+	require.NoError(t, err)
+	require.Equal(t, 3, result.usage.InputTokens)
+	require.Equal(t, 4, result.usage.OutputTokens)
+	require.Equal(t, "image_generation_call", gjson.Get(rec.Body.String(), "output.0.type").String())
+	require.Equal(t, "completed", gjson.Get(rec.Body.String(), "output.0.status").String())
+	require.Equal(t, "aGVsbG8=", gjson.Get(rec.Body.String(), "output.0.result").String())
+}
+
+func TestHandleSSEToJSON_NormalizesCompletedImageStatuses(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/", nil)
+	svc := &OpenAIGatewayService{cfg: &config.Config{}}
+	resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}}
+	body := []byte(`data: {"type":"response.completed","response":{"id":"resp_img","output":[{"type":"image_generation_call","status":"generating","result":"one","opaque":1},{"type":"image_generation_call","status":"in_progress","result":"two","opaque":2}],"usage":{"input_tokens":5,"output_tokens":6}}}`)
+
+	result, err := svc.handleSSEToJSON(resp, c, body, "gpt-5.4", "gpt-5.4")
+	require.NoError(t, err)
+	require.Equal(t, 5, result.usage.InputTokens)
+	require.Equal(t, 6, result.usage.OutputTokens)
+	require.Equal(t, "completed", gjson.Get(rec.Body.String(), "output.0.status").String())
+	require.Equal(t, "completed", gjson.Get(rec.Body.String(), "output.1.status").String())
+	require.Equal(t, int64(2), gjson.Get(rec.Body.String(), "output.1.opaque").Int())
+}
+
+func TestHandlePassthroughSSEToJSON_NormalizesCompletedImageStatuses(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/", nil)
+	svc := &OpenAIGatewayService{cfg: &config.Config{}}
+	resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}}
+	body := []byte(`data: {"type":"response.done","response":{"id":"resp_img","output":[{"type":"image_generation_call","status":"in_progress","result":"one","opaque":"kept"}],"usage":{"input_tokens":7,"output_tokens":8}}}`)
+
+	result, err := svc.handlePassthroughSSEToJSON(resp, c, body, "", "")
+	require.NoError(t, err)
+	require.Equal(t, 7, result.usage.InputTokens)
+	require.Equal(t, 8, result.usage.OutputTokens)
+	require.Equal(t, "completed", gjson.Get(rec.Body.String(), "output.0.status").String())
+	require.Equal(t, "kept", gjson.Get(rec.Body.String(), "output.0.opaque").String())
+}
+
+func TestNormalizeCompletedImageGenerationStatusPreservesOpaqueRawBytes(t *testing.T) {
+	input := []byte("{\n  \"type\" : \"response.completed\", \"response\" : { \"status\":\"completed\", \"output\" : [" +
+		`{ "type":"image_generation_call", "status" : "generating", "result":"one", "slash":"a\\/b", "unicode":"\\u0061", "number":1.2300e+04, "dup":1, "dup":2, "nested" : { "raw" : [ 1,  2 ] } },` +
+		` {"type":"message","status":"in_progress","opaque" : { "x" : "\\u263a" }},` +
+		` {"type":"image_generation_call","status":"in_progress","result":"two","raw":[ true ,null, {"k" : "v"} ]}` +
+		"] , \"tail\" : { \"keep\" : -0.00E-2 } } }")
+	want := bytes.Replace(input, []byte(`"status" : "generating"`), []byte(`"status" : "completed"`), 1)
+	want = bytes.Replace(want, []byte(`"status":"in_progress","result":"two"`), []byte(`"status":"completed","result":"two"`), 1)
+
+	got, changed := normalizeCompletedImageGenerationStatus(input)
+	require.True(t, changed)
+	require.Equal(t, string(want), string(got))
+}
+
+func TestNormalizeCompletedImageGenerationStatusLargeOutput(t *testing.T) {
+	const itemCount = 5000
+	var input strings.Builder
+	input.WriteString(`{"type":"response.done","response":{"output":[`)
+	for i := 0; i < itemCount; i++ {
+		if i > 0 {
+			input.WriteByte(',')
+		}
+		fmt.Fprintf(&input, ` {"type":"image_generation_call","status":"in_progress","result":"%d","opaque":1.00e+02}`, i)
+	}
+	input.WriteString(`]}}`)
+
+	got, changed := normalizeCompletedImageGenerationStatus([]byte(input.String()))
+	require.True(t, changed)
+	require.Equal(t, itemCount, bytes.Count(got, []byte(`"status":"completed"`)))
+	require.Equal(t, itemCount, bytes.Count(got, []byte(`"opaque":1.00e+02`)))
+}
+
+func BenchmarkNormalizeCompletedImageGenerationStatusLargeOutput(b *testing.B) {
+	for _, itemCount := range []int{100, 1000, 5000} {
+		b.Run(fmt.Sprintf("items_%d", itemCount), func(b *testing.B) {
+			var input strings.Builder
+			input.WriteString(`{"type":"response.completed","response":{"output":[`)
+			for i := 0; i < itemCount; i++ {
+				if i > 0 {
+					input.WriteByte(',')
+				}
+				fmt.Fprintf(&input, `{"type":"image_generation_call","status":"generating","result":"%d","opaque":{"n":1.00e+02}}`, i)
+			}
+			input.WriteString(`]}}`)
+			payload := []byte(input.String())
+			b.SetBytes(int64(len(payload)))
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				_, changed := normalizeCompletedImageGenerationStatus(payload)
+				if !changed {
+					b.Fatal("expected normalization")
+				}
+			}
+		})
+	}
 }
 
 func TestHandleSSEToJSON_NoFinalResponseKeepsSSEBody(t *testing.T) {

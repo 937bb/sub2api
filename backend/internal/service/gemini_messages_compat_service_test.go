@@ -293,6 +293,146 @@ func TestConvertClaudeToolsToGeminiTools_CustomType(t *testing.T) {
 	}
 }
 
+func TestCleanToolSchema_NormalizesGeminiUnsupportedSchemaFields(t *testing.T) {
+	schema := map[string]any{
+		"type": "object",
+		"$defs": map[string]any{
+			"unused": map[string]any{"type": "string"},
+		},
+		"definitions": map[string]any{
+			"legacy": map[string]any{"type": "number"},
+		},
+		"properties": map[string]any{
+			"path": map[string]any{
+				"type": []any{"string", "null"},
+			},
+			"count": map[string]any{
+				"type": []any{"null", "integer"},
+			},
+			"empty": map[string]any{
+				"type": []any{"null"},
+			},
+			"ambiguous": map[string]any{
+				"type": []any{"string", "integer"},
+			},
+			"ambiguousNullable": map[string]any{
+				"type": []any{"string", "integer", "null"},
+			},
+			"definitions": map[string]any{
+				"type":      "object",
+				"minLength": 1,
+			},
+			"$defs": map[string]any{
+				"type": "string",
+			},
+			"metadata": map[string]any{
+				"type": "object",
+				"default": map[string]any{
+					"type":        "object",
+					"definitions": "literal default key",
+					"$defs":       "literal default key",
+				},
+			},
+		},
+	}
+	originalSchema, err := json.Marshal(schema)
+	require.NoError(t, err)
+
+	cleaned, ok := cleanToolSchema(schema).(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "OBJECT", cleaned["type"])
+	require.NotContains(t, cleaned, "$defs")
+	require.NotContains(t, cleaned, "definitions")
+
+	properties, ok := cleaned["properties"].(map[string]any)
+	require.True(t, ok)
+
+	pathSchema, ok := properties["path"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "STRING", pathSchema["type"])
+
+	countSchema, ok := properties["count"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "INTEGER", countSchema["type"])
+
+	emptySchema, ok := properties["empty"].(map[string]any)
+	require.True(t, ok)
+	require.NotContains(t, emptySchema, "type")
+
+	ambiguousSchema, ok := properties["ambiguous"].(map[string]any)
+	require.True(t, ok)
+	require.NotContains(t, ambiguousSchema, "type")
+
+	ambiguousNullableSchema, ok := properties["ambiguousNullable"].(map[string]any)
+	require.True(t, ok)
+	require.NotContains(t, ambiguousNullableSchema, "type")
+
+	definitionsProperty, ok := properties["definitions"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "OBJECT", definitionsProperty["type"])
+	require.NotContains(t, definitionsProperty, "minLength")
+
+	defsProperty, ok := properties["$defs"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "STRING", defsProperty["type"])
+
+	metadataProperty, ok := properties["metadata"].(map[string]any)
+	require.True(t, ok)
+	defaultValue, ok := metadataProperty["default"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "object", defaultValue["type"])
+	require.Equal(t, "literal default key", defaultValue["definitions"])
+	require.Equal(t, "literal default key", defaultValue["$defs"])
+
+	currentSchema, err := json.Marshal(schema)
+	require.NoError(t, err)
+	require.JSONEq(t, string(originalSchema), string(currentSchema))
+}
+
+func TestConvertClaudeToolsToGeminiTools_CleansSchemaOnlyInsideGeminiConversion(t *testing.T) {
+	tools := []any{
+		map[string]any{
+			"name":        "read_file",
+			"description": "Read file",
+			"input_schema": map[string]any{
+				"type": "object",
+				"$defs": map[string]any{
+					"Path": map[string]any{"type": "string"},
+				},
+				"properties": map[string]any{
+					"path": map[string]any{
+						"type": []any{"string", "null"},
+					},
+				},
+			},
+		},
+	}
+
+	result := convertClaudeToolsToGeminiTools(tools)
+	require.Len(t, result, 1)
+
+	functionDecl, ok := result[0].(map[string]any)
+	require.True(t, ok)
+	funcDecls, ok := functionDecl["functionDeclarations"].([]any)
+	require.True(t, ok)
+	require.Len(t, funcDecls, 1)
+
+	decl, ok := funcDecls[0].(map[string]any)
+	require.True(t, ok)
+	params, ok := decl["parameters"].(map[string]any)
+	require.True(t, ok)
+	require.NotContains(t, params, "$defs")
+
+	properties, ok := params["properties"].(map[string]any)
+	require.True(t, ok)
+	pathSchema, ok := properties["path"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "STRING", pathSchema["type"])
+
+	inputSchema := tools[0].(map[string]any)["input_schema"].(map[string]any)
+	require.Contains(t, inputSchema, "$defs")
+}
+
 func TestConvertClaudeToolsToGeminiTools_PreservesWebSearchAlongsideFunctions(t *testing.T) {
 	tools := []any{
 		map[string]any{

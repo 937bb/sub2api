@@ -74,8 +74,10 @@ var openAIWSIngressPreflightPingIdle = 20 * time.Second
 
 // openAIWSFallbackError 表示可安全回退到 HTTP 的 WS 错误（尚未写下游）。
 type openAIWSFallbackError struct {
-	Reason string
-	Err    error
+	Reason           string
+	Err              error
+	UpstreamURL      string
+	UpstreamEndpoint string
 }
 
 func (e *openAIWSFallbackError) Error() string {
@@ -97,6 +99,16 @@ func (e *openAIWSFallbackError) Unwrap() error {
 
 func wrapOpenAIWSFallback(reason string, err error) error {
 	return &openAIWSFallbackError{Reason: strings.TrimSpace(reason), Err: err}
+}
+
+func wrapOpenAIWSFallbackWithUpstream(reason string, err error, upstreamURL string) error {
+	safeURL := safeUpstreamURL(upstreamURL)
+	return &openAIWSFallbackError{
+		Reason:           strings.TrimSpace(reason),
+		Err:              err,
+		UpstreamURL:      safeURL,
+		UpstreamEndpoint: endpointFromSafeUpstreamURL(safeURL),
+	}
 }
 
 // OpenAIWSClientCloseError 表示应以指定 WebSocket close code 主动关闭客户端连接的错误。
@@ -950,6 +962,7 @@ func isOpenAIWSClientDisconnectError(err error) bool {
 		strings.Contains(message, "unexpected eof") ||
 		strings.Contains(message, "use of closed network connection") ||
 		strings.Contains(message, "connection reset by peer") ||
+		strings.Contains(message, "an existing connection was forcibly closed by the remote host") ||
 		strings.Contains(message, "broken pipe") ||
 		strings.Contains(message, "an established connection was aborted")
 }
@@ -2116,6 +2129,9 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	if err != nil {
 		return nil, wrapOpenAIWSFallback("build_ws_url", err)
 	}
+	wrapFallback := func(reason string, err error) error {
+		return wrapOpenAIWSFallbackWithUpstream(reason, err, wsURL)
+	}
 	wsHost := "-"
 	wsPath := "-"
 	if parsed, parseErr := url.Parse(wsURL); parseErr == nil && parsed != nil {
@@ -2214,7 +2230,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	fallbackSessionID := fallbackOpenAICodexSessionID(c, account, payloadAsJSONBytes(payload))
 	wsHeaders, sessionResolution, err := s.buildOpenAIWSHeaders(c, account, token, decision, isCodexCLI, turnState, turnMetadata, promptCacheKey, fallbackSessionID, openAIWSPayloadClientMetadataString(payload, openAICodexWindowIDHeader))
 	if err != nil {
-		return nil, wrapOpenAIWSFallback("ensure_codex_fingerprint", err)
+		return nil, wrapFallback("ensure_codex_fingerprint", err)
 	}
 	if account != nil && account.IsOpenAIOAuthLike() {
 		setOpenAIWSCodexClientMetadata(payload, wsHeaders)
@@ -2294,7 +2310,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		if errors.As(err, &dialErr) && dialErr != nil && dialErr.StatusCode == http.StatusTooManyRequests {
 			s.persistOpenAIWSRateLimitSignal(ctx, account, dialErr.ResponseHeaders, nil, "rate_limit_exceeded", "rate_limit_error", strings.TrimSpace(sanitizeOpenAIUpstreamDiagnosticText(err.Error())))
 		}
-		return nil, wrapOpenAIWSFallback(classifyOpenAIWSAcquireError(err), err)
+		return nil, wrapFallback(classifyOpenAIWSAcquireError(err), err)
 	}
 	// cleanExit 标记正常终端事件退出，此时上游不会再发送帧，连接可安全归还复用。
 	// 所有异常路径（读写错误、error 事件等）已在各自分支中提前调用 MarkBroken，
@@ -2375,6 +2391,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		account,
 		stateStore,
 		groupID,
+		wsURL,
 	); err != nil {
 		return nil, err
 	}
@@ -2388,7 +2405,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 			truncateOpenAIWSLogValue(sanitizeOpenAIUpstreamDiagnosticText(err.Error()), openAIWSLogValueMaxLen),
 			resolvePayloadBytes(),
 		)
-		return nil, wrapOpenAIWSFallback("write_request", err)
+		return nil, wrapFallback("write_request", err)
 	}
 	if debugEnabled {
 		logOpenAIWSModeDebug(
@@ -2433,7 +2450,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		f, ok := c.Writer.(http.Flusher)
 		if !ok {
 			lease.MarkBroken()
-			return nil, wrapOpenAIWSFallback("streaming_not_supported", errors.New("streaming not supported"))
+			return nil, wrapFallback("streaming_not_supported", errors.New("streaming not supported"))
 		}
 		flusher = f
 	}
@@ -2499,9 +2516,28 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	}
 
 	readTimeout := s.openAIWSReadTimeout()
+	var pendingJSONDocuments [][]byte
 
 	for {
-		message, readErr := lease.ReadMessageWithContextTimeout(ctx, readTimeout)
+		var message []byte
+		var readErr error
+		if len(pendingJSONDocuments) > 0 {
+			message = pendingJSONDocuments[0]
+			pendingJSONDocuments = pendingJSONDocuments[1:]
+		} else {
+			message, readErr = lease.ReadMessageWithContextTimeout(ctx, readTimeout)
+			if readErr == nil {
+				documents, outcome := splitOpenAIConcatenatedJSONDocuments(message)
+				switch outcome {
+				case openAIJSONDocumentsRepaired:
+					message = documents[0]
+					pendingJSONDocuments = append(pendingJSONDocuments, documents[1:]...)
+				case openAIJSONDocumentsRejected:
+					lease.MarkBroken()
+					readErr = errOpenAIConcatenatedJSONRejected
+				}
+			}
+		}
 		if readErr != nil {
 			lease.MarkBroken()
 			closeStatus, closeReason := summarizeOpenAIWSReadCloseError(readErr)
@@ -2522,7 +2558,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 				truncateOpenAIWSLogValue(lastEventType, openAIWSLogValueMaxLen),
 			)
 			if !wroteDownstream {
-				return nil, wrapOpenAIWSFallback(classifyOpenAIWSReadFallbackReason(readErr), readErr)
+				return nil, wrapFallback(classifyOpenAIWSReadFallbackReason(readErr), readErr)
 			}
 			if clientDisconnected {
 				break
@@ -2633,7 +2669,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 			// error 事件后连接不再可复用，避免回池后污染下一请求。
 			lease.MarkBroken()
 			if !wroteDownstream && canFallback {
-				return nil, wrapOpenAIWSFallback(fallbackReason, errors.New(errMsg))
+				return nil, wrapFallback(fallbackReason, errors.New(errMsg))
 			}
 			statusCode := openAIWSErrorHTTPStatusFromRaw(errCodeRaw, errTypeRaw)
 			setOpsUpstreamError(c, statusCode, errMsg, "")
@@ -2683,7 +2719,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		}
 
 		if isTerminalEvent {
-			cleanExit = true
+			cleanExit = len(pendingJSONDocuments) == 0
 			break
 		}
 	}
@@ -2700,7 +2736,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 				wroteDownstream,
 			)
 			if !wroteDownstream {
-				return nil, wrapOpenAIWSFallback("missing_final_response", errors.New("no terminal response payload"))
+				return nil, wrapFallback("missing_final_response", errors.New("no terminal response payload"))
 			}
 			return nil, errors.New("ws finished without final response")
 		}
@@ -2758,13 +2794,32 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		ImageCount:       imageCounter.Count(),
 		ImageOutputSizes: imageCounter.Sizes(),
 		ServiceTier:      extractOpenAIServiceTier(reqBody),
-		ReasoningEffort:  ApplyThinkingEnabledFallback(extractOpenAIReasoningEffort(reqBody, originalModel), payloadAsJSONBytes(payload), mappedModel),
+		ReasoningEffort:  ApplyThinkingEnabledFallback(extractOpenAIReasoningEffort(reqBody, originalModel, mappedModel), payloadAsJSONBytes(payload), mappedModel),
 		Stream:           reqStream,
 		OpenAIWSMode:     true,
 		ResponseHeaders:  lease.HandshakeHeaders(),
 		Duration:         time.Since(startTime),
 		FirstTokenMs:     firstTokenMs,
 	}, nil
+}
+
+func stripCodexSparkImageGenerationToolFromRawPayload(payload []byte, model string, account *Account) ([]byte, bool, error) {
+	return stripCodexSparkImageGenerationToolingFromBody(payload, model)
+}
+
+func stripOpenAIImageGenerationToolFromRawPayload(payload []byte) ([]byte, bool, error) {
+	reqBody, err := decodeOpenAIRequestBodyMapUseNumber(payload)
+	if err != nil {
+		return payload, false, err
+	}
+	if !stripOpenAIImageGenerationTools(reqBody) {
+		return payload, false, nil
+	}
+	rebuilt, err := marshalOpenAIUpstreamJSON(reqBody)
+	if err != nil {
+		return payload, false, err
+	}
+	return rebuilt, true, nil
 }
 
 // ProxyResponsesWebSocketFromClient 处理客户端入站 WebSocket（OpenAI Responses WS Mode）并转发到上游。
@@ -2968,7 +3023,11 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}
 		apiKey := getAPIKeyFromContext(c)
 		imageGenerationAllowed := GroupAllowsImageGeneration(apiKeyGroup(apiKey))
-		codexBridgeEnabled := isCodexCLI && imageGenerationAllowed && s.isCodexImageGenerationBridgeEnabled(ctx, account, apiKey)
+		codexImageGenerationExplicitToolPolicy := codexImageGenerationExplicitToolPolicyAllow
+		if isCodexCLI {
+			codexImageGenerationExplicitToolPolicy = account.CodexImageGenerationExplicitToolPolicy()
+		}
+		codexBridgeEnabled := isCodexCLI && imageGenerationAllowed && codexImageGenerationExplicitToolPolicy != codexImageGenerationExplicitToolPolicyStrip && s.isCodexImageGenerationBridgeEnabled(ctx, account, apiKey)
 		if codexBridgeEnabled {
 			payloadMap, decodeErr := decodeOpenAIWSBridgePayloadMap(normalized, account)
 			if decodeErr != nil {
@@ -3001,6 +3060,20 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", setErr)
 			}
 			normalized = next
+		}
+		if isCodexCLI && codexImageGenerationExplicitToolPolicy == codexImageGenerationExplicitToolPolicyStrip {
+			if stripped, changed, stripErr := stripOpenAIImageGenerationToolFromRawPayload(normalized); stripErr != nil {
+				return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", stripErr)
+			} else if changed {
+				normalized = stripped
+				logOpenAIWSModeInfo("ingress_ws_codex_image_tool_stripped_by_policy account_id=%d", account.ID)
+			}
+		}
+		if stripped, changed, stripErr := stripCodexSparkImageGenerationToolFromRawPayload(normalized, upstreamModel, account); stripErr != nil {
+			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", stripErr)
+		} else if changed {
+			normalized = stripped
+			logOpenAIWSModeInfo("ingress_ws_codex_spark_image_tool_stripped account_id=%d", account.ID)
 		}
 		imageIntent := IsImageGenerationIntent(openAIResponsesEndpoint, originalModel, normalized)
 		if imageIntent && !imageGenerationAllowed {
@@ -3448,6 +3521,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	}
 
 	sendAndRelay := func(turn int, lease *openAIWSConnLease, payload []byte, payloadBytes int, originalModel string, imageBillingModel string, imageSizeTier string, imageInputSize string) (*OpenAIForwardResult, error) {
+		billingModel := strings.TrimSpace(account.GetMappedModel(originalModel))
 		if lease == nil {
 			return nil, errors.New("upstream websocket lease is nil")
 		}
@@ -3666,9 +3740,10 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					RequestID:       responseID,
 					Usage:           usage,
 					Model:           originalModel,
+					BillingModel:    billingModel,
 					UpstreamModel:   mappedModel,
 					ServiceTier:     extractOpenAIServiceTierFromBody(payload),
-					ReasoningEffort: ApplyThinkingEnabledFallback(extractOpenAIReasoningEffortFromBody(payload, originalModel), payload, mappedModel),
+					ReasoningEffort: ApplyThinkingEnabledFallback(extractOpenAIReasoningEffortFromBody(payload, originalModel, mappedModel), payload, mappedModel),
 					Stream:          reqStream,
 					OpenAIWSMode:    true,
 					ResponseHeaders: lease.HandshakeHeaders(),
@@ -4367,6 +4442,7 @@ func (s *OpenAIGatewayService) performOpenAIWSGeneratePrewarm(
 	account *Account,
 	stateStore OpenAIWSStateStore,
 	groupID int64,
+	upstreamURL string,
 ) error {
 	if s == nil {
 		return nil
@@ -4423,7 +4499,7 @@ func (s *OpenAIGatewayService) performOpenAIWSGeneratePrewarm(
 			connID,
 			truncateOpenAIWSLogValue(sanitizeOpenAIUpstreamDiagnosticText(err.Error()), openAIWSLogValueMaxLen),
 		)
-		return wrapOpenAIWSFallback("prewarm_write", err)
+		return wrapOpenAIWSFallbackWithUpstream("prewarm_write", err, upstreamURL)
 	}
 	logOpenAIWSModeInfo("prewarm_write_sent account_id=%d conn_id=%s payload_bytes=%d", account.ID, connID, len(prewarmPayloadJSON))
 
@@ -4444,7 +4520,7 @@ func (s *OpenAIGatewayService) performOpenAIWSGeneratePrewarm(
 				truncateOpenAIWSLogValue(sanitizeOpenAIUpstreamDiagnosticText(readErr.Error()), openAIWSLogValueMaxLen),
 				prewarmEventCount,
 			)
-			return wrapOpenAIWSFallback("prewarm_"+classifyOpenAIWSReadFallbackReason(readErr), readErr)
+			return wrapOpenAIWSFallbackWithUpstream("prewarm_"+classifyOpenAIWSReadFallbackReason(readErr), readErr, upstreamURL)
 		}
 
 		eventType, eventResponseID, _ := parseOpenAIWSEventEnvelope(message)
@@ -4485,9 +4561,9 @@ func (s *OpenAIGatewayService) performOpenAIWSGeneratePrewarm(
 			)
 			lease.MarkBroken()
 			if canFallback {
-				return wrapOpenAIWSFallback("prewarm_"+fallbackReason, errors.New(errMsg))
+				return wrapOpenAIWSFallbackWithUpstream("prewarm_"+fallbackReason, errors.New(errMsg), upstreamURL)
 			}
-			return wrapOpenAIWSFallback("prewarm_error_event", errors.New(errMsg))
+			return wrapOpenAIWSFallbackWithUpstream("prewarm_error_event", errors.New(errMsg), upstreamURL)
 		}
 
 		if isOpenAIWSTerminalEvent(eventType) {

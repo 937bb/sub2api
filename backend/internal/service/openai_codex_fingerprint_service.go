@@ -15,7 +15,7 @@ type OpenAICodexFingerprintAccountRepository interface {
 }
 
 type atomicOpenAICodexFingerprintRepository interface {
-	EnsureOpenAICodexFingerprint(ctx context.Context, id int64, fingerprint OpenAICodexFingerprint, replaceExisting bool) (OpenAICodexFingerprint, error)
+	EnsureOpenAICodexFingerprint(ctx context.Context, id int64, fingerprint OpenAICodexFingerprint, expectedOld *OpenAICodexFingerprint) (OpenAICodexFingerprint, error)
 }
 
 type openAICodexFingerprintContextKey struct{}
@@ -80,7 +80,7 @@ func ensureOpenAICodexFingerprintWithProfile(ctx context.Context, account *Accou
 	}
 	if repo, ok := accountRepo.(atomicOpenAICodexFingerprintRepository); ok {
 		var err error
-		fp, err = repo.EnsureOpenAICodexFingerprint(ctx, account.ID, fp, changedExistingOpenAICodexFingerprint(account.Extra[OpenAICodexFingerprintExtraKey]))
+		fp, err = repo.EnsureOpenAICodexFingerprint(ctx, account.ID, fp, expectedOldOpenAICodexFingerprint(account.Extra[OpenAICodexFingerprintExtraKey]))
 		if err != nil {
 			return OpenAICodexFingerprint{}, err
 		}
@@ -142,8 +142,12 @@ func applyOpenAICodexFingerprintHeaders(req *http.Request, fp OpenAICodexFingerp
 	}
 }
 
-func changedExistingOpenAICodexFingerprint(existing any) bool {
-	return existing != nil
+func expectedOldOpenAICodexFingerprint(existing any) *OpenAICodexFingerprint {
+	fp, ok := coerceOpenAICodexFingerprint(existing)
+	if !ok {
+		return nil
+	}
+	return &fp
 }
 
 func (s *OpenAICodexFingerprintService) defaultUserAgent(ctx context.Context) string {

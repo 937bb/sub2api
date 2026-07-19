@@ -4,6 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+
+	"github.com/Wei-Shaw/sub2api/internal/config"
+	pkghttputil "github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 )
 
 func extractMaxBytesError(err error) (*http.MaxBytesError, bool) {
@@ -12,6 +15,14 @@ func extractMaxBytesError(err error) (*http.MaxBytesError, bool) {
 		return maxErr, true
 	}
 	return nil, false
+}
+
+func readLenientJSONRequestBody(req *http.Request, cfg *config.Config) ([]byte, error) {
+	var limit int64
+	if cfg != nil {
+		limit = cfg.Gateway.MaxBodySize
+	}
+	return pkghttputil.ReadLenientJSONRequestBodyWithPrealloc(req, limit)
 }
 
 func formatBodyLimit(limit int64) string {

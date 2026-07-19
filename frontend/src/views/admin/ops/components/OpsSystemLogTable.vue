@@ -51,6 +51,7 @@ const filters = reactive({
   request_id: '',
   client_request_id: '',
   user_id: '',
+  api_key_id: '',
   account_id: '',
   platform: '',
   model: '',
@@ -92,7 +93,7 @@ const levelBadgeClass = (level: string) => {
   const v = String(level || '').toLowerCase()
   if (v === 'error' || v === 'fatal') return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
   if (v === 'warn' || v === 'warning') return 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
-  if (v === 'debug') return 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
+  if (v === 'debug') return 'bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300'
   return 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
 }
 
@@ -138,6 +139,7 @@ const formatSystemLogDetail = (row: OpsSystemLog) => {
   if (row.request_id) corrParts.push(`req=${row.request_id}`)
   if (row.client_request_id) corrParts.push(`client_req=${row.client_request_id}`)
   if (row.user_id != null) corrParts.push(`user=${row.user_id}`)
+  if (row.api_key_id != null) corrParts.push(`key=${row.api_key_id}`)
   if (row.account_id != null) corrParts.push(`acc=${row.account_id}`)
   if (row.platform) corrParts.push(`platform=${row.platform}`)
   if (row.model) corrParts.push(`model=${row.model}`)
@@ -178,6 +180,10 @@ const buildQuery = () => {
   if (filters.user_id.trim()) {
     const v = Number.parseInt(filters.user_id.trim(), 10)
     if (Number.isFinite(v) && v > 0) query.user_id = v
+  }
+  if (filters.api_key_id.trim()) {
+    const v = Number.parseInt(filters.api_key_id.trim(), 10)
+    if (Number.isFinite(v) && v > 0) query.api_key_id = v
   }
   if (filters.account_id.trim()) {
     const v = Number.parseInt(filters.account_id.trim(), 10)
@@ -285,6 +291,7 @@ const cleanupCurrentFilter = async () => {
       request_id: filters.request_id.trim() || undefined,
       client_request_id: filters.client_request_id.trim() || undefined,
       user_id: filters.user_id.trim() ? Number.parseInt(filters.user_id.trim(), 10) : undefined,
+      api_key_id: filters.api_key_id.trim() ? Number.parseInt(filters.api_key_id.trim(), 10) : undefined,
       account_id: filters.account_id.trim() ? Number.parseInt(filters.account_id.trim(), 10) : undefined,
       platform: filters.platform.trim() || undefined,
       model: filters.model.trim() || undefined,
@@ -309,6 +316,7 @@ const resetFilters = () => {
   filters.request_id = ''
   filters.client_request_id = ''
   filters.user_id = ''
+  filters.api_key_id = ''
   filters.account_id = ''
   filters.platform = props.platformFilter || ''
   filters.model = ''
@@ -357,7 +365,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <section class="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-dark-700 dark:bg-dark-900/60">
+  <section class="rounded-2xl border border-gray-200 bg-[var(--glass-bg-content)] p-4 shadow-sm dark:border-dark-700 ">
     <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
       <div>
         <h3 class="text-sm font-bold text-gray-900 dark:text-white">系统日志</h3>
@@ -457,6 +465,10 @@ onMounted(async () => {
         <input v-model="filters.user_id" type="text" class="input mt-1" />
       </label>
       <label class="text-xs text-gray-600 dark:text-gray-300">
+        api_key_id
+        <input v-model="filters.api_key_id" type="text" class="input mt-1" />
+      </label>
+      <label class="text-xs text-gray-600 dark:text-gray-300">
         account_id
         <input v-model="filters.account_id" type="text" class="input mt-1" />
       </label>
@@ -486,7 +498,7 @@ onMounted(async () => {
       <div v-else-if="!hasData" class="px-4 py-8 text-center text-sm text-gray-500">暂无系统日志</div>
       <div v-else class="overflow-auto">
         <table class="min-w-full table-fixed divide-y divide-gray-200 dark:divide-dark-700">
-          <thead class="bg-gray-50 dark:bg-dark-900">
+          <thead class="border border-gray-200 bg-white/40 dark:border-white/10 dark:bg-white/[0.03]">
             <tr>
               <th class="w-[170px] px-3 py-2 text-left text-[11px] font-semibold text-gray-500">时间</th>
               <th class="w-[80px] px-3 py-2 text-left text-[11px] font-semibold text-gray-500">级别</th>

@@ -5,6 +5,9 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/stretchr/testify/require"
 )
 
 type outboxPollCache struct {
@@ -37,11 +40,11 @@ func (c *outboxPollCache) UpdateLastUsed(context.Context, map[int64]time.Time) e
 	return c.updateErr
 }
 
-func (c *outboxPollCache) TryLockBucket(context.Context, SchedulerBucket, time.Duration) (bool, error) {
-	return true, nil
+func (c *outboxPollCache) TryLockBucket(context.Context, SchedulerBucket, time.Duration) (string, bool, error) {
+	return "test-lock", true, nil
 }
 
-func (c *outboxPollCache) UnlockBucket(context.Context, SchedulerBucket) error {
+func (c *outboxPollCache) UnlockBucket(context.Context, SchedulerBucket, string) error {
 	return nil
 }
 
@@ -60,8 +63,9 @@ func (c *outboxPollCache) SetOutboxWatermark(_ context.Context, id int64) error 
 }
 
 type outboxPollRepo struct {
-	events []SchedulerOutboxEvent
-	rows   []int64
+	events     []SchedulerOutboxEvent
+	rows       []int64
+	maxIDCalls int
 }
 
 func (r *outboxPollRepo) ListAfterAndReleaseDedup(_ context.Context, afterID int64, limit int) ([]SchedulerOutboxEvent, error) {
@@ -79,6 +83,7 @@ func (r *outboxPollRepo) ListAfterAndReleaseDedup(_ context.Context, afterID int
 }
 
 func (r *outboxPollRepo) MaxID(context.Context) (int64, error) {
+	r.maxIDCalls++
 	var maxID int64
 	for _, id := range r.rows {
 		if id > maxID {
@@ -106,6 +111,33 @@ func TestSchedulerSnapshotServicePollOutboxAdvancesWatermarkAfterHandling(t *tes
 	if len(cache.setWatermarks) != 1 || cache.setWatermarks[0] != 10000 {
 		t.Fatalf("unexpected watermark writes: %#v", cache.setWatermarks)
 	}
+}
+
+func TestSchedulerSnapshotServicePollOutboxSkipsLegacyLagArithmeticInDirtyMode(t *testing.T) {
+	cache := &outboxPollCache{}
+	repo := &outboxPollRepo{
+		events: []SchedulerOutboxEvent{{
+			ID:        100,
+			CreatedAt: time.Now().Add(-time.Minute),
+			EventType: SchedulerOutboxEventAccountChanged,
+		}},
+		rows: []int64{100, 20000},
+	}
+	dirtyRepo := &dirtyWorkTestRepo{}
+	svc := &SchedulerSnapshotService{
+		cache:         cache,
+		outboxRepo:    repo,
+		dirtyWorkRepo: dirtyRepo,
+		ownershipRepo: dirtyWorkTestOwnershipRepo{},
+		cfg: &config.Config{Gateway: config.GatewayConfig{Scheduling: config.GatewaySchedulingConfig{
+			OutboxBacklogRebuildRows: 1,
+		}}},
+	}
+
+	svc.pollOutbox()
+
+	require.Zero(t, repo.maxIDCalls)
+	require.Zero(t, dirtyRepo.fullRebuildRequests)
 }
 
 func TestSchedulerSnapshotServicePollOutboxDoesNotAdvanceWatermarkOnHandleFailure(t *testing.T) {

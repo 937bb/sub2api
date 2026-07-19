@@ -151,6 +151,9 @@ type openAI429SnapshotRepo struct {
 	mockAccountRepoForGemini
 	rateLimitedID      int64
 	updatedExtra       map[string]any
+	observedAtKey      string
+	observedAt         time.Time
+	sessionWindowEnd   *time.Time
 	bulkUpdatedIDs     []int64
 	bulkUpdatedPayload AccountBulkUpdate
 }
@@ -162,6 +165,18 @@ func (r *openAI429SnapshotRepo) SetRateLimited(_ context.Context, id int64, _ ti
 
 func (r *openAI429SnapshotRepo) UpdateExtra(_ context.Context, _ int64, updates map[string]any) error {
 	r.updatedExtra = updates
+	return nil
+}
+
+func (r *openAI429SnapshotRepo) UpdateRuntimeExtra(_ context.Context, _ int64, updates map[string]any, observedAtKey string, observedAt time.Time) (bool, error) {
+	r.updatedExtra = updates
+	r.observedAtKey = observedAtKey
+	r.observedAt = observedAt
+	return true, nil
+}
+
+func (r *openAI429SnapshotRepo) UpdateSessionWindowEnd(_ context.Context, _ int64, end time.Time) error {
+	r.sessionWindowEnd = &end
 	return nil
 }
 
@@ -198,6 +213,16 @@ func TestHandle429_OpenAIPersistsCodexSnapshotImmediately(t *testing.T) {
 	if got := repo.updatedExtra["codex_7d_used_percent"]; got != 100.0 {
 		t.Fatalf("codex_7d_used_percent = %v, want 100", got)
 	}
+	if repo.observedAtKey != "codex_usage_updated_at" {
+		t.Fatalf("observedAtKey = %q, want codex_usage_updated_at", repo.observedAtKey)
+	}
+	parsed, err := runtimeExtraObservedAt(repo.updatedExtra, repo.observedAtKey)
+	require.NoError(t, err)
+	require.Equal(t, parsed, repo.observedAt)
+	require.NotNil(t, repo.sessionWindowEnd)
+	resetAt, err := parseTime(repo.updatedExtra["codex_5h_reset_at"].(string))
+	require.NoError(t, err)
+	require.Equal(t, resetAt, *repo.sessionWindowEnd)
 }
 
 func TestHandle429_OpenAISyncsObservedPlanType(t *testing.T) {

@@ -101,7 +101,7 @@
               {{ selectedEventMeta.label }}
             </div>
             <span
-              class="rounded-full bg-white px-2.5 py-1 text-xs font-medium text-gray-600 shadow-sm ring-1 ring-gray-200 dark:bg-dark-800 dark:text-gray-300 dark:ring-dark-600"
+              class="rounded-full bg-[var(--glass-bg-content)] px-2.5 py-1 text-xs font-medium text-gray-600 shadow-sm ring-1 ring-gray-200  dark:text-gray-300 dark:ring-dark-600"
             >
               {{ selectedEventMeta.categoryLabel }}
             </span>
@@ -178,7 +178,7 @@
                   v-for="placeholder in placeholderList"
                   :key="placeholder"
                   type="button"
-                  class="rounded-full border border-gray-200 bg-white px-3 py-1 font-mono text-xs text-gray-700 transition-colors hover:border-primary-300 hover:text-primary-600 dark:border-dark-600 dark:bg-dark-700 dark:text-gray-200 dark:hover:border-primary-500 dark:hover:text-primary-300"
+                  class="rounded-full border border-gray-200 bg-[var(--glass-bg-content)] px-3 py-1 font-mono text-xs text-gray-700 transition-colors hover:border-primary-300 hover:text-primary-600 dark:border-dark-600  dark:text-gray-200 dark:hover:border-primary-500 dark:hover:text-primary-300"
                   @click="copyPlaceholder(placeholder)"
                 >
                   {{ placeholder }}
@@ -189,7 +189,7 @@
 
           <div class="space-y-4">
             <div
-              class="rounded-lg border border-gray-200 bg-white dark:border-dark-700 dark:bg-dark-800"
+              class="rounded-lg border border-gray-200 bg-[var(--glass-bg-content)] dark:border-dark-700 "
             >
               <div
                 class="flex items-center justify-between border-b border-gray-100 px-4 py-3 dark:border-dark-700"

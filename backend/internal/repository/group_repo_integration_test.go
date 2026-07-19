@@ -69,6 +69,115 @@ func groupIDs(groups []service.Group) []int64 {
 
 // --- Create / GetByID / Update / Delete ---
 
+func (s *GroupRepoSuite) TestCreate_RollbackKeepsGroupAndOutboxAtomic() {
+	client := testEntClient(s.T())
+	repo := newGroupRepositoryWithSQL(client, integrationDB)
+	_, err := integrationDB.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+	groupIn := &service.Group{
+		Name:     s.uniqueGroupName("create-rollback"),
+		Platform: service.PlatformOpenAI,
+		Status:   service.StatusActive,
+	}
+
+	s.Require().NoError(repo.Create(txCtx, groupIn))
+	s.Require().Positive(groupIn.ID)
+	s.Require().NoError(tx.Rollback())
+
+	var groupCount, outboxCount int
+	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, "SELECT count(*) FROM groups WHERE id = $1", groupIn.ID).Scan(&groupCount))
+	s.Require().Zero(groupCount)
+	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, "SELECT count(*) FROM scheduler_outbox").Scan(&outboxCount))
+	s.Require().Zero(outboxCount)
+}
+
+func (s *GroupRepoSuite) TestUpdate_RollbackKeepsGroupAndOutboxAtomic() {
+	client := testEntClient(s.T())
+	name := s.uniqueGroupName("update-rollback")
+	var groupID int64
+	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, `INSERT INTO groups(name, platform, status) VALUES($1, 'openai', 'active') RETURNING id`, name).Scan(&groupID))
+	s.T().Cleanup(func() {
+		_, _ = integrationDB.ExecContext(context.Background(), "DELETE FROM groups WHERE id = $1", groupID)
+	})
+	repo := newGroupRepositoryWithSQL(client, integrationDB)
+	_, err := integrationDB.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+	groupIn := &service.Group{
+		ID:       groupID,
+		Name:     s.uniqueGroupName("updated"),
+		Platform: service.PlatformOpenAI,
+		Status:   service.StatusActive,
+	}
+
+	s.Require().NoError(repo.Update(txCtx, groupIn))
+	s.Require().NoError(tx.Rollback())
+
+	var gotName string
+	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, "SELECT name FROM groups WHERE id = $1", groupID).Scan(&gotName))
+	s.Require().Equal(name, gotName)
+	var outboxCount int
+	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, "SELECT count(*) FROM scheduler_outbox").Scan(&outboxCount))
+	s.Require().Zero(outboxCount)
+}
+
+func (s *GroupRepoSuite) TestDelete_RollbackKeepsGroupAndOutboxAtomic() {
+	client := testEntClient(s.T())
+	name := s.uniqueGroupName("delete-rollback")
+	var groupID int64
+	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, `INSERT INTO groups(name, platform, status) VALUES($1, 'openai', 'active') RETURNING id`, name).Scan(&groupID))
+	s.T().Cleanup(func() {
+		_, _ = integrationDB.ExecContext(context.Background(), "DELETE FROM groups WHERE id = $1", groupID)
+	})
+	repo := newGroupRepositoryWithSQL(client, integrationDB)
+	_, err := integrationDB.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+
+	s.Require().NoError(repo.Delete(txCtx, groupID))
+	s.Require().NoError(tx.Rollback())
+
+	var groupCount, outboxCount int
+	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, "SELECT count(*) FROM groups WHERE id = $1", groupID).Scan(&groupCount))
+	s.Require().Equal(1, groupCount)
+	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, "SELECT count(*) FROM scheduler_outbox").Scan(&outboxCount))
+	s.Require().Zero(outboxCount)
+}
+
+func (s *GroupRepoSuite) TestDeleteCascade_RollbackKeepsGroupAndOutboxAtomic() {
+	client := testEntClient(s.T())
+	name := s.uniqueGroupName("cascade-rollback")
+	var groupID int64
+	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, `INSERT INTO groups(name, platform, status) VALUES($1, 'openai', 'active') RETURNING id`, name).Scan(&groupID))
+	s.T().Cleanup(func() {
+		_, _ = integrationDB.ExecContext(context.Background(), "DELETE FROM groups WHERE id = $1", groupID)
+	})
+	repo := newGroupRepositoryWithSQL(client, integrationDB)
+	_, err := integrationDB.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+
+	_, err = repo.DeleteCascade(txCtx, groupID)
+	s.Require().NoError(err)
+	s.Require().NoError(tx.Rollback())
+
+	var deletedAt sql.NullTime
+	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, "SELECT deleted_at FROM groups WHERE id = $1", groupID).Scan(&deletedAt))
+	s.Require().False(deletedAt.Valid)
+	var outboxCount int
+	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, "SELECT count(*) FROM scheduler_outbox").Scan(&outboxCount))
+	s.Require().Zero(outboxCount)
+}
+
 func (s *GroupRepoSuite) TestCreate() {
 	group := &service.Group{
 		Name:             "test-create",
@@ -440,6 +549,31 @@ func (s *GroupRepoSuite) TestListWithFilters_Search() {
 		s.Require().True(containsID(groups, underscoreTarget.ID), "expected literal _ match")
 		s.Require().False(containsID(groups, underscoreOther.ID), "expected _ not to act as wildcard")
 	})
+}
+
+func (s *GroupRepoSuite) TestUpdateSortOrders_RollbackKeepsOrderAndOutboxAtomic() {
+	client := testEntClient(s.T())
+	name := s.uniqueGroupName("sort-rollback")
+	var groupID int64
+	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, `INSERT INTO groups(name, platform, status, sort_order) VALUES($1, 'openai', 'active', 7) RETURNING id`, name).Scan(&groupID))
+	s.T().Cleanup(func() {
+		_, _ = integrationDB.ExecContext(context.Background(), "DELETE FROM groups WHERE id = $1", groupID)
+	})
+	_, err := integrationDB.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
+	repo := newGroupRepositoryWithSQL(client, integrationDB)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+
+	s.Require().NoError(repo.UpdateSortOrders(txCtx, []service.GroupSortOrderUpdate{{ID: groupID, SortOrder: 99}}))
+	s.Require().NoError(tx.Rollback())
+
+	var sortOrder, outboxCount int
+	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, "SELECT sort_order FROM groups WHERE id = $1", groupID).Scan(&sortOrder))
+	s.Require().Equal(7, sortOrder)
+	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, "SELECT count(*) FROM scheduler_outbox").Scan(&outboxCount))
+	s.Require().Zero(outboxCount)
 }
 
 func (s *GroupRepoSuite) TestUpdateSortOrders_BatchCaseWhen() {
@@ -873,6 +1007,66 @@ func (s *GroupRepoSuite) TestListWithFilters_RateLimitedAccountCount() {
 }
 
 // --- DeleteAccountGroupsByGroupID ---
+
+func (s *GroupRepoSuite) TestDeleteAccountGroupsByGroupID_RollbackKeepsMembershipAndOutboxAtomic() {
+	client := testEntClient(s.T())
+	name := s.uniqueGroupName("unbind-rollback")
+	var groupID, accountID int64
+	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, `INSERT INTO groups(name, platform, status) VALUES($1, 'openai', 'active') RETURNING id`, name).Scan(&groupID))
+	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, `INSERT INTO accounts(name, platform, type) VALUES($1, 'openai', 'oauth') RETURNING id`, name).Scan(&accountID))
+	s.T().Cleanup(func() {
+		_, _ = integrationDB.ExecContext(context.Background(), "DELETE FROM account_groups WHERE account_id = $1", accountID)
+		_, _ = integrationDB.ExecContext(context.Background(), "DELETE FROM accounts WHERE id = $1", accountID)
+		_, _ = integrationDB.ExecContext(context.Background(), "DELETE FROM groups WHERE id = $1", groupID)
+	})
+	_, err := integrationDB.ExecContext(s.ctx, "INSERT INTO account_groups(account_id, group_id) VALUES($1, $2)", accountID, groupID)
+	s.Require().NoError(err)
+	_, err = integrationDB.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
+	repo := newGroupRepositoryWithSQL(client, integrationDB)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+
+	affected, err := repo.DeleteAccountGroupsByGroupID(txCtx, groupID)
+	s.Require().NoError(err)
+	s.Require().Equal(int64(1), affected)
+	s.Require().NoError(tx.Rollback())
+
+	var membershipCount, outboxCount int
+	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, "SELECT count(*) FROM account_groups WHERE account_id = $1 AND group_id = $2", accountID, groupID).Scan(&membershipCount))
+	s.Require().Equal(1, membershipCount)
+	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, "SELECT count(*) FROM scheduler_outbox").Scan(&outboxCount))
+	s.Require().Zero(outboxCount)
+}
+
+func (s *GroupRepoSuite) TestBindAccountsToGroup_RollbackKeepsMembershipAndOutboxAtomic() {
+	client := testEntClient(s.T())
+	name := s.uniqueGroupName("bind-rollback")
+	var groupID, accountID int64
+	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, `INSERT INTO groups(name, platform, status) VALUES($1, 'openai', 'active') RETURNING id`, name).Scan(&groupID))
+	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, `INSERT INTO accounts(name, platform, type) VALUES($1, 'openai', 'oauth') RETURNING id`, name).Scan(&accountID))
+	s.T().Cleanup(func() {
+		_, _ = integrationDB.ExecContext(context.Background(), "DELETE FROM account_groups WHERE account_id = $1", accountID)
+		_, _ = integrationDB.ExecContext(context.Background(), "DELETE FROM accounts WHERE id = $1", accountID)
+		_, _ = integrationDB.ExecContext(context.Background(), "DELETE FROM groups WHERE id = $1", groupID)
+	})
+	_, err := integrationDB.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
+	repo := newGroupRepositoryWithSQL(client, integrationDB)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+
+	s.Require().NoError(repo.BindAccountsToGroup(txCtx, groupID, []int64{accountID}))
+	s.Require().NoError(tx.Rollback())
+
+	var membershipCount, outboxCount int
+	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, "SELECT count(*) FROM account_groups WHERE account_id = $1 AND group_id = $2", accountID, groupID).Scan(&membershipCount))
+	s.Require().Zero(membershipCount)
+	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, "SELECT count(*) FROM scheduler_outbox").Scan(&outboxCount))
+	s.Require().Zero(outboxCount)
+}
 
 func (s *GroupRepoSuite) TestDeleteAccountGroupsByGroupID() {
 	g := &service.Group{

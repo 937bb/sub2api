@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -259,6 +260,105 @@ func TestAuthServiceRecordSuccessfulLoginBackfillsEmailIdentity(t *testing.T) {
 	require.Equal(t, user.ID, identity.UserID)
 }
 
+func TestAuthServiceRecordSuccessfulLoginConcurrentDuplicateBackfillCreatesOneEmailIdentity(t *testing.T) {
+	svc, _, client := newAuthServiceWithEnt(t, map[string]string{
+		service.SettingKeyRegistrationEnabled: "true",
+	}, nil)
+	ctx := context.Background()
+
+	user, err := client.User.Create().
+		SetEmail("Concurrent.Backfill@Example.com").
+		SetUsername("concurrent-backfill-user").
+		SetPasswordHash("hash").
+		SetRole(service.RoleUser).
+		SetStatus(service.StatusActive).
+		SetBalance(1).
+		SetConcurrency(1).
+		Save(ctx)
+	require.NoError(t, err)
+
+	beforeCount, err := client.AuthIdentity.Query().
+		Where(
+			authidentity.ProviderTypeEQ("email"),
+			authidentity.ProviderKeyEQ("email"),
+			authidentity.ProviderSubjectEQ("concurrent.backfill@example.com"),
+		).
+		Count(ctx)
+	require.NoError(t, err)
+	require.Zero(t, beforeCount)
+
+	const goroutines = 4
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+	for i := 0; i < goroutines; i++ {
+		go func() {
+			defer wg.Done()
+			<-start
+			svc.RecordSuccessfulLogin(ctx, user.ID)
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	identities, err := client.AuthIdentity.Query().
+		Where(
+			authidentity.ProviderTypeEQ("email"),
+			authidentity.ProviderKeyEQ("email"),
+			authidentity.ProviderSubjectEQ("concurrent.backfill@example.com"),
+		).
+		All(ctx)
+	require.NoError(t, err)
+	require.Len(t, identities, 1)
+	require.Equal(t, user.ID, identities[0].UserID)
+}
+
+func TestAuthServiceRecordSuccessfulLoginSkipsDefaultsWhenEmailIdentityCreateFails(t *testing.T) {
+	_, _, client := newAuthServiceWithEnt(t, map[string]string{
+		service.SettingKeyRegistrationEnabled: "true",
+	}, nil)
+	ctx := context.Background()
+	assigner := &authIdentityDefaultSubAssignerStub{}
+	user := &service.User{
+		ID:          404040,
+		Email:       "missing-ent-user@example.com",
+		Role:        service.RoleUser,
+		Status:      service.StatusActive,
+		Balance:     1,
+		Concurrency: 1,
+	}
+	svc := service.NewAuthService(
+		client,
+		&recordLoginMissingEntUserRepo{user: user},
+		nil,
+		nil,
+		&config.Config{},
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		assigner,
+		nil,
+		nil,
+	)
+
+	require.NotPanics(t, func() {
+		svc.RecordSuccessfulLogin(ctx, user.ID)
+	})
+	require.Empty(t, assigner.calls)
+
+	identityCount, err := client.AuthIdentity.Query().
+		Where(
+			authidentity.ProviderTypeEQ("email"),
+			authidentity.ProviderKeyEQ("email"),
+			authidentity.ProviderSubjectEQ("missing-ent-user@example.com"),
+		).
+		Count(ctx)
+	require.NoError(t, err)
+	require.Zero(t, identityCount)
+}
+
 func TestAuthServiceLogin_DoesNotApplyEmailFirstBindDefaultsWhenBackfillingLegacyEmailIdentity(t *testing.T) {
 	assigner := &authIdentityDefaultSubAssignerStub{}
 	svc, _, client := newAuthServiceWithEnt(t, map[string]string{
@@ -479,4 +579,13 @@ func countProviderGrantRecords(
 	require.NoError(t, rows.Scan(&count))
 	require.NoError(t, rows.Err())
 	return count
+}
+
+type recordLoginMissingEntUserRepo struct {
+	service.UserRepository
+	user *service.User
+}
+
+func (r *recordLoginMissingEntUserRepo) GetByID(context.Context, int64) (*service.User, error) {
+	return r.user, nil
 }

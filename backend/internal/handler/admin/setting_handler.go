@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"log/slog"
 	"net/http"
 	"regexp"
@@ -609,7 +610,7 @@ type UpdateSettingsRequest struct {
 	// Gateway forwarding behavior
 	EnableFingerprintUnification       *bool                     `json:"enable_fingerprint_unification"`
 	EnableMetadataPassthrough          *bool                     `json:"enable_metadata_passthrough"`
-	EnableCCHSigning                   *bool                     `json:"enable_cch_signing"`
+	EnableCCHSigning                   *bool                     `json:"enable_cch_signing"` // Deprecated no-op; persisted for compatibility.
 	EnableAnthropicCacheTTL1hInjection *bool                     `json:"enable_anthropic_cache_ttl_1h_injection"`
 	RewriteMessageCacheControl         *bool                     `json:"rewrite_message_cache_control"`
 	AntigravityUserAgentVersion        *string                   `json:"antigravity_user_agent_version"`
@@ -1287,7 +1288,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	// Frontend URL 验证
 	req.FrontendURL = strings.TrimSpace(req.FrontendURL)
 	if req.FrontendURL != "" {
-		if err := config.ValidateAbsoluteHTTPURL(req.FrontendURL); err != nil {
+		if err := config.ValidateFrontendBaseURL(req.FrontendURL); err != nil {
 			response.BadRequest(c, "Frontend URL must be an absolute http(s) URL")
 			return
 		}
@@ -3036,7 +3037,7 @@ func (h *SettingHandler) SendTestEmail(c *gin.Context) {
 <body>
     <div class="container">
         <div class="header">
-            <h1>` + siteName + `</h1>
+            <h1>` + html.EscapeString(siteName) + `</h1>
         </div>
         <div class="content">
             <div class="success">✓</div>

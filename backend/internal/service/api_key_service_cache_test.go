@@ -48,6 +48,18 @@ func (s *authRepoStub) GetByKeyForAuth(ctx context.Context, key string) (*APIKey
 func (s *authRepoStub) Update(ctx context.Context, key *APIKey) error {
 	panic("unexpected Update call")
 }
+func (s *authRepoStub) UpdateConfig(context.Context, int64, int64, APIKeyConfigPatch) (*APIKey, error) {
+	panic("unexpected UpdateConfig call")
+}
+func (s *authRepoStub) UpdateGroupID(context.Context, int64, *int64) (*APIKey, error) {
+	panic("unexpected UpdateGroupID call")
+}
+func (s *authRepoStub) ResetRateLimitUsage(context.Context, int64) (*APIKey, error) {
+	panic("unexpected ResetRateLimitUsage call")
+}
+func (s *authRepoStub) IncrementQuotaUsedAndGetState(context.Context, int64, float64) (*APIKeyQuotaUsageState, error) {
+	panic("unexpected IncrementQuotaUsedAndGetState call")
+}
 
 func (s *authRepoStub) Delete(ctx context.Context, id int64) error {
 	panic("unexpected Delete call")

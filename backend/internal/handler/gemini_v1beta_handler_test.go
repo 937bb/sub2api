@@ -3,8 +3,11 @@
 package handler
 
 import (
+	"context"
 	"net/http"
 	"testing"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
@@ -141,6 +144,22 @@ func TestGeminiV1BetaHandler_GetModelAntigravityFallback(t *testing.T) {
 			require.Equal(t, tt.expectedBehavior, behavior)
 		})
 	}
+}
+
+func TestGeminiAIStudioGETAttributionFollowsAdmission(t *testing.T) {
+	c, _ := newCanceledSelectionContext(context.Background())
+	account := &service.Account{ID: 73, Platform: service.PlatformGemini}
+
+	err := error(nil)
+	if !handleHTTPAttemptNotAdmitted(c, err) {
+		setOpsSelectedAccount(c, account.ID, account.Platform)
+	}
+
+	accountID, ok := c.Get(opsAccountIDKey)
+	require.True(t, ok)
+	require.Equal(t, account.ID, accountID)
+	require.Equal(t, account.ID, c.Request.Context().Value(ctxkey.AccountID))
+	require.Equal(t, account.Platform, c.Request.Context().Value(ctxkey.Platform))
 }
 
 func TestShouldFallbackGeminiModel_KnownFallbackOn404(t *testing.T) {

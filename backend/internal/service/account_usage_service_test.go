@@ -371,9 +371,10 @@ func TestAccountUsageService_GetUsageOpenAISetupTokenUsesCodexFingerprintProbe(t
 		Platform: PlatformOpenAI,
 		Type:     AccountTypeSetupToken,
 		Credentials: map[string]any{
-			"access_token":       "setup-access-token",
-			"chatgpt_account_id": "chatgpt-acc",
-			"user_agent":         "malicious-inbound/1.0",
+			"access_token":               "setup-access-token",
+			"chatgpt_account_id":         "chatgpt-acc",
+			"chatgpt_account_is_fedramp": true,
+			"user_agent":                 "malicious-inbound/1.0",
 		},
 		Extra: map[string]any{"openai_oauth_ws_mode": OpenAIOAuthWSModeManagedSession},
 	}
@@ -404,6 +405,12 @@ func TestAccountUsageService_GetUsageOpenAISetupTokenUsesCodexFingerprintProbe(t
 	}
 	if got := capturedReq.Header.Get("Authorization"); got != "Bearer setup-access-token" {
 		t.Fatalf("Authorization = %q", got)
+	}
+	if got := capturedReq.Header.Get("chatgpt-account-id"); got != "chatgpt-acc" {
+		t.Fatalf("chatgpt-account-id = %q, want chatgpt-acc", got)
+	}
+	if got := capturedReq.Header.Get("x-openai-fedramp"); got != "true" {
+		t.Fatalf("x-openai-fedramp = %q, want true", got)
 	}
 	if got := capturedReq.Header.Get("User-Agent"); got != DefaultOpenAICodexUserAgent {
 		t.Fatalf("User-Agent = %q, want fingerprint default", got)
@@ -451,6 +458,122 @@ func TestAccountUsageService_GetUsageOpenAISetupTokenUsesCodexFingerprintProbe(t
 	}
 	if !sawUsage {
 		t.Fatal("expected setup-token usage path to persist Codex usage snapshot")
+	}
+}
+
+func TestAccountUsageService_GetUsageOpenAISetupTokenNonFedRAMPOmitsFedRAMPHeader(t *testing.T) {
+	tests := []struct {
+		name           string
+		fedrampPresent bool
+		fedrampValue   any
+	}{
+		{name: "absent"},
+		{name: "false", fedrampPresent: true, fedrampValue: false},
+	}
+
+	for i, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var capturedReq *http.Request
+			var capturedBody []byte
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				capturedReq = r.Clone(context.Background())
+				var err error
+				capturedBody, err = io.ReadAll(r.Body)
+				if err != nil {
+					t.Fatalf("read body: %v", err)
+				}
+				w.Header().Set(openAICodexPrimaryUsedPercentHeader, "78")
+				w.Header().Set(openAICodexPrimaryResetSecondsHeader, "604800")
+				w.Header().Set(openAICodexPrimaryWindowMinutesHeader, "10080")
+				w.Header().Set(openAICodexSecondUsedPercentHeader, "56")
+				w.Header().Set(openAICodexSecondResetSecondsHeader, "18000")
+				w.Header().Set(openAICodexSecondWindowMinutesHeader, "300")
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer server.Close()
+
+			targetURL, err := url.Parse(server.URL)
+			if err != nil {
+				t.Fatalf("parse test server URL: %v", err)
+			}
+			originalFactory := openAICodexProbeHTTPClientFactory
+			openAICodexProbeHTTPClientFactory = func(_ httppool.Options) (*http.Client, error) {
+				client := server.Client()
+				client.Transport = rewriteChatGPTTestRoundTripper{target: targetURL, base: client.Transport}
+				return client, nil
+			}
+			t.Cleanup(func() { openAICodexProbeHTTPClientFactory = originalFactory })
+
+			credentials := map[string]any{
+				"access_token":       "setup-access-token",
+				"chatgpt_account_id": "chatgpt-acc",
+				"user_agent":         "malicious-inbound/1.0",
+			}
+			if tc.fedrampPresent {
+				credentials["chatgpt_account_is_fedramp"] = tc.fedrampValue
+			}
+			repo := &accountUsageCodexProbeRepo{updateExtraCh: make(chan map[string]any, 2)}
+			account := &Account{
+				ID:          int64(4243 + i),
+				Platform:    PlatformOpenAI,
+				Type:        AccountTypeSetupToken,
+				Credentials: credentials,
+				Extra:       map[string]any{"openai_oauth_ws_mode": OpenAIOAuthWSModeManagedSession},
+			}
+			repo.getByID = func(_ context.Context, id int64) (*Account, error) {
+				if id == account.ID {
+					return account, nil
+				}
+				return nil, errors.New("not found")
+			}
+			svc := &AccountUsageService{
+				accountRepo:             repo,
+				cache:                   NewUsageCache(),
+				codexFingerprintService: NewOpenAICodexFingerprintService(repo, nil),
+			}
+
+			usage, err := svc.GetUsage(context.Background(), account.ID, true)
+			if err != nil {
+				t.Fatalf("GetUsage() error = %v", err)
+			}
+			if usage.FiveHour == nil || usage.FiveHour.Utilization != 56.0 {
+				t.Fatalf("FiveHour = %#v, want utilization 56", usage.FiveHour)
+			}
+			if usage.SevenDay == nil || usage.SevenDay.Utilization != 78.0 {
+				t.Fatalf("SevenDay = %#v, want utilization 78", usage.SevenDay)
+			}
+			if capturedReq == nil {
+				t.Fatal("expected setup-token Codex probe request")
+			}
+			if got := capturedReq.Header.Get("x-openai-fedramp"); got != "" {
+				t.Fatalf("x-openai-fedramp = %q, want empty", got)
+			}
+			if got := capturedReq.Header.Get("Authorization"); got != "Bearer setup-access-token" {
+				t.Fatalf("Authorization = %q", got)
+			}
+			if got := capturedReq.Header.Get("chatgpt-account-id"); got != "chatgpt-acc" {
+				t.Fatalf("chatgpt-account-id = %q, want chatgpt-acc", got)
+			}
+			if got := capturedReq.Header.Get("User-Agent"); got != DefaultOpenAICodexUserAgent {
+				t.Fatalf("User-Agent = %q, want fingerprint default", got)
+			}
+			if got := capturedReq.Header.Get("originator"); got != codexOfficialOriginator {
+				t.Fatalf("originator = %q", got)
+			}
+			if got := capturedReq.Header.Get("Version"); got != codexCLIVersion {
+				t.Fatalf("Version = %q", got)
+			}
+			fp, ok := coerceOpenAICodexFingerprint(account.Extra[OpenAICodexFingerprintExtraKey])
+			if !ok {
+				t.Fatalf("expected in-memory Codex fingerprint, got %#v", account.Extra[OpenAICodexFingerprintExtraKey])
+			}
+			if got := capturedReq.Header.Get(openAICodexInstallationIDHeader); got != fp.InstallationID {
+				t.Fatalf("%s = %q, want fingerprint installation id", openAICodexInstallationIDHeader, got)
+			}
+			if got := gjson.GetBytes(capturedBody, "client_metadata.x-codex-installation-id").String(); got != fp.InstallationID {
+				t.Fatalf("body installation id = %q, want fingerprint installation id", got)
+			}
+		})
 	}
 }
 
@@ -654,8 +777,9 @@ func TestAccountUsageService_PersistOpenAICodexProbeSnapshotOnlyUpdatesExtraWith
 	}
 	svc := &AccountUsageService{accountRepo: repo}
 	err := svc.persistOpenAICodexProbeSnapshot(context.Background(), 321, map[string]any{
-		"codex_7d_used_percent": 100.0,
-		"codex_7d_reset_at":     time.Now().Add(2 * time.Hour).UTC().Truncate(time.Second).Format(time.RFC3339),
+		"codex_usage_updated_at": time.Now().UTC().Format(time.RFC3339),
+		"codex_7d_used_percent":  100.0,
+		"codex_7d_reset_at":      time.Now().Add(2 * time.Hour).UTC().Truncate(time.Second).Format(time.RFC3339),
 	})
 	if err != nil {
 		t.Fatalf("persistOpenAICodexProbeSnapshot() error = %v", err)
@@ -695,8 +819,9 @@ func TestAccountUsageService_PersistOpenAICodexProbeSnapshotWritesFiveHourSessio
 	svc := &AccountUsageService{accountRepo: repo}
 	resetAt := time.Now().Add(90 * time.Minute).UTC().Truncate(time.Second)
 	err := svc.persistOpenAICodexProbeSnapshot(context.Background(), 321, map[string]any{
-		"codex_5h_used_percent": 42.0,
-		"codex_5h_reset_at":     resetAt.Format(time.RFC3339),
+		"codex_usage_updated_at": time.Now().UTC().Format(time.RFC3339),
+		"codex_5h_used_percent":  42.0,
+		"codex_5h_reset_at":      resetAt.Format(time.RFC3339),
 	})
 	if err != nil {
 		t.Fatalf("persistOpenAICodexProbeSnapshot() error = %v", err)
@@ -717,6 +842,67 @@ func TestAccountUsageService_PersistOpenAICodexProbeSnapshotWritesFiveHourSessio
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("等待 5h reset 回写 SessionWindowEnd 超时")
+	}
+}
+
+func TestBuildUsageInfo_FableWindow(t *testing.T) {
+	resetAt := time.Now().Add(6 * 24 * time.Hour).UTC().Truncate(time.Second)
+	resp := &ClaudeUsageResponse{
+		SevenDayOverageIncluded: ClaudeUsageWindow{
+			Utilization: 87,
+			ResetsAt:    resetAt.Format(time.RFC3339),
+		},
+	}
+
+	info := (&AccountUsageService{}).buildUsageInfo(resp, nil)
+	if info.SevenDayFable == nil {
+		t.Fatal("expected Fable usage window")
+	}
+	if info.SevenDayFable.Utilization != 87 {
+		t.Fatalf("utilization = %v, want 87", info.SevenDayFable.Utilization)
+	}
+	if info.SevenDayFable.ResetsAt == nil || !info.SevenDayFable.ResetsAt.Equal(resetAt) {
+		t.Fatalf("reset = %v, want %v", info.SevenDayFable.ResetsAt, resetAt)
+	}
+}
+
+func TestBuildPassiveUsageWindow_Fable(t *testing.T) {
+	resetAt := time.Now().Add(6 * 24 * time.Hour).Unix()
+	window := buildPassiveUsageWindow(map[string]any{
+		"passive_usage_7d_oi_utilization": 0.87,
+		"passive_usage_7d_oi_reset":       resetAt,
+	}, "passive_usage_7d_oi_utilization", "passive_usage_7d_oi_reset")
+
+	if window == nil {
+		t.Fatal("expected Fable passive usage window")
+	}
+	if window.Utilization != 87 {
+		t.Fatalf("utilization = %v, want 87", window.Utilization)
+	}
+	if window.ResetsAt == nil || window.ResetsAt.Unix() != resetAt {
+		t.Fatalf("reset = %v, want %d", window.ResetsAt, resetAt)
+	}
+}
+
+func TestSyncActiveToPassive_WritesFableWindow(t *testing.T) {
+	repo := &accountUsageCodexProbeRepo{updateExtraCh: make(chan map[string]any, 1)}
+	svc := &AccountUsageService{accountRepo: repo}
+	resetAt := time.Now().Add(6 * 24 * time.Hour).UTC().Truncate(time.Second)
+
+	svc.syncActiveToPassive(context.Background(), 456, &UsageInfo{
+		SevenDayFable: &UsageProgress{Utilization: 87, ResetsAt: &resetAt},
+	})
+
+	select {
+	case updates := <-repo.updateExtraCh:
+		if got := updates["passive_usage_7d_oi_utilization"]; got != 0.87 {
+			t.Fatalf("passive_usage_7d_oi_utilization = %v, want 0.87", got)
+		}
+		if got := updates["passive_usage_7d_oi_reset"]; got != resetAt.Unix() {
+			t.Fatalf("passive_usage_7d_oi_reset = %v, want %d", got, resetAt.Unix())
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("等待 Fable usage 写入 extra 超时")
 	}
 }
 

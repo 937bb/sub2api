@@ -12,7 +12,6 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	middleware "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
@@ -47,10 +46,10 @@ func (f *fakeSchedulerCache) DeleteAccount(_ context.Context, _ int64) error    
 func (f *fakeSchedulerCache) UpdateLastUsed(_ context.Context, _ map[int64]time.Time) error {
 	return nil
 }
-func (f *fakeSchedulerCache) TryLockBucket(_ context.Context, _ service.SchedulerBucket, _ time.Duration) (bool, error) {
-	return true, nil
+func (f *fakeSchedulerCache) TryLockBucket(_ context.Context, _ service.SchedulerBucket, _ time.Duration) (string, bool, error) {
+	return "test-lock", true, nil
 }
-func (f *fakeSchedulerCache) UnlockBucket(_ context.Context, _ service.SchedulerBucket) error {
+func (f *fakeSchedulerCache) UnlockBucket(_ context.Context, _ service.SchedulerBucket, _ string) error {
 	return nil
 }
 func (f *fakeSchedulerCache) ListBuckets(_ context.Context) ([]service.SchedulerBucket, error) {
@@ -58,48 +57,6 @@ func (f *fakeSchedulerCache) ListBuckets(_ context.Context) ([]service.Scheduler
 }
 func (f *fakeSchedulerCache) GetOutboxWatermark(_ context.Context) (int64, error) { return 0, nil }
 func (f *fakeSchedulerCache) SetOutboxWatermark(_ context.Context, _ int64) error { return nil }
-
-type fakeGroupRepo struct {
-	group *service.Group
-}
-
-func (f *fakeGroupRepo) Create(context.Context, *service.Group) error { return nil }
-func (f *fakeGroupRepo) GetByID(context.Context, int64) (*service.Group, error) {
-	return f.group, nil
-}
-func (f *fakeGroupRepo) GetByIDLite(context.Context, int64) (*service.Group, error) {
-	return f.group, nil
-}
-func (f *fakeGroupRepo) Update(context.Context, *service.Group) error          { return nil }
-func (f *fakeGroupRepo) Delete(context.Context, int64) error                   { return nil }
-func (f *fakeGroupRepo) DeleteCascade(context.Context, int64) ([]int64, error) { return nil, nil }
-func (f *fakeGroupRepo) List(context.Context, pagination.PaginationParams) ([]service.Group, *pagination.PaginationResult, error) {
-	return nil, nil, nil
-}
-func (f *fakeGroupRepo) ListWithFilters(context.Context, pagination.PaginationParams, string, string, string, *bool) ([]service.Group, *pagination.PaginationResult, error) {
-	return nil, nil, nil
-}
-func (f *fakeGroupRepo) ListActive(context.Context) ([]service.Group, error) { return nil, nil }
-func (f *fakeGroupRepo) ListActiveByPlatform(context.Context, string) ([]service.Group, error) {
-	return nil, nil
-}
-func (f *fakeGroupRepo) ListAllIncludingInactive(context.Context, string) ([]service.Group, error) {
-	return nil, nil
-}
-func (f *fakeGroupRepo) ExistsByName(context.Context, string) (bool, error) { return false, nil }
-func (f *fakeGroupRepo) GetAccountCount(context.Context, int64) (int64, int64, error) {
-	return 0, 0, nil
-}
-func (f *fakeGroupRepo) DeleteAccountGroupsByGroupID(context.Context, int64) (int64, error) {
-	return 0, nil
-}
-func (f *fakeGroupRepo) GetAccountIDsByGroupIDs(context.Context, []int64) ([]int64, error) {
-	return nil, nil
-}
-func (f *fakeGroupRepo) BindAccountsToGroup(context.Context, int64, []int64) error { return nil }
-func (f *fakeGroupRepo) UpdateSortOrders(context.Context, []service.GroupSortOrderUpdate) error {
-	return nil
-}
 
 type fakeConcurrencyCache struct{}
 
@@ -140,6 +97,7 @@ func (f *fakeConcurrencyCache) GetAccountConcurrencyBatch(_ context.Context, acc
 	return result, nil
 }
 func (f *fakeConcurrencyCache) CleanupExpiredAccountSlots(context.Context, int64) error { return nil }
+func (f *fakeConcurrencyCache) CleanupExpiredAccountSlotKeys(context.Context) error     { return nil }
 func (f *fakeConcurrencyCache) CleanupStaleProcessSlots(context.Context, string) error  { return nil }
 
 func newTestGatewayHandler(t *testing.T, group *service.Group, accounts []*service.Account) (*GatewayHandler, func()) {

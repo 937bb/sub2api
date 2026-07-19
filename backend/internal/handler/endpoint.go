@@ -19,6 +19,7 @@ const (
 	EndpointChatCompletions   = "/v1/chat/completions"
 	EndpointEmbeddings        = "/v1/embeddings"
 	EndpointResponses         = "/v1/responses"
+	EndpointResponsesCompact  = "/v1/responses/compact"
 	EndpointImagesGenerations = "/v1/images/generations"
 	EndpointImagesEdits       = "/v1/images/edits"
 	EndpointGeminiModels      = "/v1beta/models"
@@ -42,24 +43,64 @@ const (
 //	"/v1beta/models/gemini:gen"  → "/v1beta/models"
 func NormalizeInboundEndpoint(path string) string {
 	path = strings.TrimSpace(path)
-	switch {
-	case strings.Contains(path, EndpointEmbeddings):
-		return EndpointEmbeddings
-	case strings.Contains(path, EndpointChatCompletions):
-		return EndpointChatCompletions
-	case strings.Contains(path, EndpointMessages):
-		return EndpointMessages
-	case strings.Contains(path, EndpointImagesGenerations) || strings.Contains(path, "/images/generations"):
-		return EndpointImagesGenerations
-	case strings.Contains(path, EndpointImagesEdits) || strings.Contains(path, "/images/edits"):
-		return EndpointImagesEdits
-	case strings.Contains(path, EndpointResponses):
-		return EndpointResponses
-	case strings.Contains(path, EndpointGeminiModels):
-		return EndpointGeminiModels
-	default:
+	if path == "" {
 		return path
 	}
+
+	bestEndpoint := ""
+	bestIndex := len(path) + 1
+	consider := func(endpoint, pattern string) {
+		idx := strings.Index(path, pattern)
+		if idx >= 0 && idx < bestIndex {
+			bestEndpoint = endpoint
+			bestIndex = idx
+		}
+	}
+
+	considerBoundary := func(endpoint, pattern string) {
+		idx := endpointIndex(path, pattern)
+		if idx >= 0 && idx < bestIndex {
+			bestEndpoint = endpoint
+			bestIndex = idx
+		}
+	}
+
+	consider(EndpointEmbeddings, EndpointEmbeddings)
+	consider(EndpointChatCompletions, EndpointChatCompletions)
+	consider(EndpointMessages, EndpointMessages)
+	consider(EndpointImagesGenerations, EndpointImagesGenerations)
+	consider(EndpointImagesGenerations, "/images/generations")
+	consider(EndpointImagesEdits, EndpointImagesEdits)
+	consider(EndpointImagesEdits, "/images/edits")
+	considerBoundary(EndpointResponsesCompact, EndpointResponsesCompact)
+	considerBoundary(EndpointResponsesCompact, "/responses/compact")
+	considerBoundary(EndpointResponsesCompact, "/backend-api/codex/responses/compact")
+	considerBoundary(EndpointResponses, EndpointResponses)
+	considerBoundary(EndpointResponses, "/responses")
+	considerBoundary(EndpointResponses, "/backend-api/codex/responses")
+	consider(EndpointGeminiModels, EndpointGeminiModels)
+
+	if bestEndpoint != "" {
+		return bestEndpoint
+	}
+	return path
+}
+
+func endpointIndex(path, endpoint string) int {
+	searchFrom := 0
+	for searchFrom < len(path) {
+		idx := strings.Index(path[searchFrom:], endpoint)
+		if idx < 0 {
+			return -1
+		}
+		idx += searchFrom
+		next := idx + len(endpoint)
+		if next == len(path) || strings.ContainsRune("/?#", rune(path[next])) {
+			return idx
+		}
+		searchFrom = idx + 1
+	}
+	return -1
 }
 
 // DeriveUpstreamEndpoint determines the upstream endpoint from the
@@ -83,8 +124,13 @@ func DeriveUpstreamEndpoint(inbound, rawRequestPath, platform string) string {
 		}
 		// OpenAI forwards everything to the Responses API.
 		// Preserve subresource suffix (e.g. /v1/responses/compact).
-		if suffix := responsesSubpathSuffix(rawRequestPath); suffix != "" {
-			return EndpointResponses + suffix
+		if inbound == EndpointResponses || inbound == EndpointResponsesCompact {
+			if suffix := responsesSubpathSuffix(rawRequestPath); suffix != "" {
+				return EndpointResponses + suffix
+			}
+			if inbound == EndpointResponsesCompact {
+				return EndpointResponsesCompact
+			}
 		}
 		return EndpointResponses
 
@@ -111,7 +157,7 @@ func DeriveUpstreamEndpoint(inbound, rawRequestPath, platform string) string {
 // Returns "" when there is no meaningful suffix.
 func responsesSubpathSuffix(rawPath string) string {
 	trimmed := strings.TrimRight(strings.TrimSpace(rawPath), "/")
-	idx := strings.LastIndex(trimmed, "/responses")
+	idx := endpointIndex(trimmed, "/responses")
 	if idx < 0 {
 		return ""
 	}
@@ -136,9 +182,12 @@ func responsesSubpathSuffix(rawPath string) string {
 // Apply this middleware to all gateway route groups.
 func InboundEndpointMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		path := c.FullPath()
-		if path == "" && c.Request != nil && c.Request.URL != nil {
+		path := ""
+		if c.Request != nil && c.Request.URL != nil {
 			path = c.Request.URL.Path
+		}
+		if path == "" {
+			path = c.FullPath()
 		}
 		c.Set(ctxKeyInboundEndpoint, NormalizeInboundEndpoint(path))
 		c.Next()
@@ -152,7 +201,7 @@ func InboundEndpointMiddleware() gin.HandlerFunc {
 
 // GetInboundEndpoint returns the canonical inbound endpoint stored by
 // InboundEndpointMiddleware. If the middleware did not run (e.g. in
-// tests), it falls back to normalizing c.FullPath() on the fly.
+// tests), it falls back to normalizing c.Request.URL.Path on the fly.
 func GetInboundEndpoint(c *gin.Context) string {
 	if v, ok := c.Get(ctxKeyInboundEndpoint); ok {
 		if s, ok := v.(string); ok && s != "" {
@@ -162,9 +211,11 @@ func GetInboundEndpoint(c *gin.Context) string {
 	// Fallback: normalize on the fly.
 	path := ""
 	if c != nil {
-		path = c.FullPath()
-		if path == "" && c.Request != nil && c.Request.URL != nil {
+		if c.Request != nil && c.Request.URL != nil {
 			path = c.Request.URL.Path
+		}
+		if path == "" {
+			path = c.FullPath()
 		}
 	}
 	return NormalizeInboundEndpoint(path)

@@ -4,9 +4,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	openaipkg "github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 )
 
 var codexModelMap = map[string]string{
+	"gpt-5.6-sol":                "gpt-5.6-sol",
+	"gpt-5.6-terra":              "gpt-5.6-terra",
+	"gpt-5.6-luna":               "gpt-5.6-luna",
 	"gpt-5.5":                    "gpt-5.5",
 	"codex-auto-review":          "codex-auto-review",
 	"gpt-5.4":                    "gpt-5.4",
@@ -55,6 +60,9 @@ var codexVersionModelPrefixes = []struct {
 	prefix string
 	target string
 }{
+	{prefix: "gpt-5.6-sol", target: "gpt-5.6-sol"},
+	{prefix: "gpt-5.6-terra", target: "gpt-5.6-terra"},
+	{prefix: "gpt-5.6-luna", target: "gpt-5.6-luna"},
 	{prefix: "gpt-5.3-codex-spark", target: "gpt-5.3-codex-spark"},
 	{prefix: "gpt-5.3-codex", target: "gpt-5.3-codex"},
 	{prefix: "gpt-5.4-mini", target: "gpt-5.4-mini"},
@@ -156,6 +164,11 @@ func applyCodexOAuthTransformWithOptions(reqBody map[string]any, opts codexOAuth
 	if normalizeCodexTools(reqBody) {
 		result.Modified = true
 	}
+	// The ChatGPT Codex adapter rejects the client-only image_gen namespace.
+	// Keep native image_generation and unrelated namespaces available upstream.
+	if stripCodexImageGenNamespaceDeclarations(reqBody) {
+		result.Modified = true
+	}
 	if normalizeCodexToolChoice(reqBody) {
 		result.Modified = true
 	}
@@ -168,16 +181,21 @@ func applyCodexOAuthTransformWithOptions(reqBody map[string]any, opts codexOAuth
 		}
 	}
 
-	// 提取 input 中 role:"system" 消息至 instructions（OAuth 上游不支持 system role）。
-	if extractSystemMessagesFromInput(reqBody) {
+	// Codex OAuth does not accept role:"system". JSON object mode requires its
+	// guidance in input; other requests retain the established instructions form.
+	if extractSystemMessagesFromInput(reqBody, isJSONObjMode(reqBody)) {
 		result.Modified = true
 	}
 
 	// instructions 处理逻辑：根据是否是 Codex CLI 分别调用不同方法
-	if !opts.SkipDefaultInstructions && applyInstructions(reqBody, opts.IsCodexCLI) {
+	if !opts.SkipDefaultInstructions && applyInstructions(reqBody, opts.IsCodexCLI, normalizedModel) {
 		result.Modified = true
 	}
 	if isCodexSparkModel(normalizedModel) && applyCodexSparkImageUnsupportedInstructions(reqBody) {
+		result.Modified = true
+	}
+	// Codex CLI advertises image_generation by default, but Spark rejects it.
+	if stripCodexSparkImageGenerationTooling(reqBody, normalizedModel) {
 		result.Modified = true
 	}
 
@@ -538,10 +556,11 @@ func isCodexSparkModel(model string) bool {
 }
 
 func hasOpenAIImageGenerationTool(reqBody map[string]any) bool {
-	rawTools, ok := reqBody["tools"]
-	if !ok || rawTools == nil {
-		return false
-	}
+	return openAIAnyToolsContainImageGeneration(reqBody["tools"]) ||
+		openAIAnyInputContainsImageGenNamespace(reqBody["input"])
+}
+
+func openAIAnyToolsContainImageGeneration(rawTools any) bool {
 	tools, ok := rawTools.([]any)
 	if !ok {
 		return false
@@ -554,8 +573,197 @@ func hasOpenAIImageGenerationTool(reqBody map[string]any) bool {
 		if strings.TrimSpace(firstNonEmptyString(toolMap["type"])) == "image_generation" {
 			return true
 		}
+		if openAIAnyToolIsImageGenNamespace(toolMap) {
+			return true
+		}
 	}
 	return false
+}
+
+func openAIAnyToolIsImageGenNamespace(tool map[string]any) bool {
+	return strings.TrimSpace(firstNonEmptyString(tool["type"])) == "namespace" &&
+		strings.TrimSpace(firstNonEmptyString(tool["name"])) == "image_gen"
+}
+
+func openAIAnyInputContainsImageGenNamespace(rawInput any) bool {
+	input, ok := rawInput.([]any)
+	if !ok {
+		return false
+	}
+	for _, rawItem := range input {
+		item, ok := rawItem.(map[string]any)
+		if !ok || strings.TrimSpace(firstNonEmptyString(item["type"])) != "additional_tools" {
+			continue
+		}
+		if openAIAnyToolsContainImageGeneration(item["tools"]) {
+			return true
+		}
+	}
+	return false
+}
+
+func stripCodexImageGenNamespaceDeclarations(reqBody map[string]any) bool {
+	modified := stripCodexImageGenNamespaceList(reqBody)
+	if choice, ok := reqBody["tool_choice"].(map[string]any); ok && openAIAnyToolIsImageGenNamespace(choice) {
+		delete(reqBody, "tool_choice")
+		modified = true
+	}
+	input, ok := reqBody["input"].([]any)
+	if !ok {
+		return modified
+	}
+
+	filteredInput := make([]any, 0, len(input))
+	for _, rawItem := range input {
+		item, ok := rawItem.(map[string]any)
+		if !ok || strings.TrimSpace(firstNonEmptyString(item["type"])) != "additional_tools" || !stripCodexImageGenNamespaceList(item) {
+			filteredInput = append(filteredInput, rawItem)
+			continue
+		}
+		modified = true
+		if _, hasTools := item["tools"]; hasTools {
+			filteredInput = append(filteredInput, rawItem)
+		}
+	}
+	if modified {
+		reqBody["input"] = filteredInput
+	}
+	return modified
+}
+
+func stripCodexImageGenNamespaceList(container map[string]any) bool {
+	tools, ok := container["tools"].([]any)
+	if !ok {
+		return false
+	}
+	filtered := make([]any, 0, len(tools))
+	removed := false
+	for _, rawTool := range tools {
+		if tool, ok := rawTool.(map[string]any); ok && openAIAnyToolIsImageGenNamespace(tool) {
+			removed = true
+			continue
+		}
+		filtered = append(filtered, rawTool)
+	}
+	if !removed {
+		return false
+	}
+	if len(filtered) == 0 {
+		delete(container, "tools")
+	} else {
+		container["tools"] = filtered
+	}
+	return true
+}
+
+// stripCodexSparkImageGenerationTooling removes Spark-unsupported
+// image_generation tooling while preserving unrelated tools and choices.
+func stripCodexSparkImageGenerationTooling(reqBody map[string]any, model string) bool {
+	if len(reqBody) == 0 {
+		return false
+	}
+	model = strings.TrimSpace(model)
+	if model == "" {
+		model = strings.TrimSpace(firstNonEmptyString(reqBody["model"]))
+	}
+	if !isCodexSparkModel(model) {
+		return false
+	}
+
+	modified := stripCodexSparkImageGenerationTools(reqBody)
+	if stripCodexSparkAdditionalImageGenerationTools(reqBody) {
+		modified = true
+	}
+	if openAIAnyToolChoiceSelectsImageGeneration(reqBody["tool_choice"]) {
+		delete(reqBody, "tool_choice")
+		modified = true
+	}
+	return modified
+}
+
+func stripCodexSparkImageGenerationToolingFromBody(body []byte, model string) ([]byte, bool, error) {
+	if !isCodexSparkModel(model) || !openAIRequestBodyHasImageGenerationTooling(body) {
+		return body, false, nil
+	}
+	reqBody, err := decodeOpenAIRequestBodyMapUseNumber(body)
+	if err != nil {
+		return body, false, err
+	}
+	if !stripCodexSparkImageGenerationTooling(reqBody, model) {
+		return body, false, nil
+	}
+	rebuilt, err := marshalOpenAIUpstreamJSON(reqBody)
+	if err != nil {
+		return body, false, err
+	}
+	return rebuilt, true, nil
+}
+
+func stripOpenAIImageGenerationTools(reqBody map[string]any) bool {
+	rawTools, ok := reqBody["tools"]
+	if !ok || rawTools == nil {
+		if openAIAnyToolChoiceSelectsImageGeneration(reqBody["tool_choice"]) {
+			delete(reqBody, "tool_choice")
+			return true
+		}
+		return false
+	}
+	tools, ok := rawTools.([]any)
+	if !ok {
+		if openAIAnyToolChoiceSelectsImageGeneration(reqBody["tool_choice"]) {
+			delete(reqBody, "tool_choice")
+			return true
+		}
+		return false
+	}
+	filtered := make([]any, 0, len(tools))
+	removed := false
+	for _, rawTool := range tools {
+		if toolMap, ok := rawTool.(map[string]any); ok &&
+			(strings.TrimSpace(firstNonEmptyString(toolMap["type"])) == "image_generation" ||
+				openAIAnyToolIsImageGenNamespace(toolMap)) {
+			removed = true
+			continue
+		}
+		filtered = append(filtered, rawTool)
+	}
+	if !removed && !openAIAnyToolChoiceSelectsImageGeneration(reqBody["tool_choice"]) {
+		return false
+	}
+	if removed {
+		if len(filtered) == 0 {
+			delete(reqBody, "tools")
+		} else {
+			reqBody["tools"] = filtered
+		}
+	}
+	if openAIAnyToolChoiceSelectsImageGeneration(reqBody["tool_choice"]) {
+		delete(reqBody, "tool_choice")
+	}
+	return true
+}
+
+// stripCodexSparkImageGenerationTools removes image-generation tool entries.
+func stripCodexSparkImageGenerationTools(reqBody map[string]any) bool {
+	return stripOpenAIImageGenerationTools(reqBody)
+}
+
+func stripCodexSparkAdditionalImageGenerationTools(reqBody map[string]any) bool {
+	input, ok := reqBody["input"].([]any)
+	if !ok {
+		return false
+	}
+	modified := false
+	for _, rawItem := range input {
+		item, ok := rawItem.(map[string]any)
+		if !ok || strings.TrimSpace(firstNonEmptyString(item["type"])) != "additional_tools" {
+			continue
+		}
+		if stripCodexSparkImageGenerationTools(item) {
+			modified = true
+		}
+	}
+	return modified
 }
 
 func hasOpenAIInputImage(reqBody map[string]any) bool {
@@ -864,11 +1072,10 @@ func extractTextFromContent(content any) string {
 	}
 }
 
-// extractSystemMessagesFromInput scans the input array for items with role=="system",
-// removes them, and merges their content into reqBody["instructions"].
-// If instructions is already non-empty, extracted content is prepended with "\n\n".
-// Returns true if any system messages were extracted.
-func extractSystemMessagesFromInput(reqBody map[string]any) bool {
+// extractSystemMessagesFromInput removes OAuth-unsupported system roles. JSON
+// object mode keeps them in place as developer messages because upstream
+// validates JSON guidance in input. Other modes move their text to instructions.
+func extractSystemMessagesFromInput(reqBody map[string]any, preserveInInput bool) bool {
 	input, ok := reqBody["input"].([]any)
 	if !ok || len(input) == 0 {
 		return false
@@ -876,7 +1083,7 @@ func extractSystemMessagesFromInput(reqBody map[string]any) bool {
 
 	var systemTexts []string
 	remaining := make([]any, 0, len(input))
-
+	modified := false
 	for _, item := range input {
 		m, ok := item.(map[string]any)
 		if !ok {
@@ -887,23 +1094,44 @@ func extractSystemMessagesFromInput(reqBody map[string]any) bool {
 			remaining = append(remaining, item)
 			continue
 		}
+		modified = true
+		if preserveInInput {
+			m["role"] = "developer"
+			remaining = append(remaining, item)
+			continue
+		}
 		if text := extractTextFromContent(m["content"]); text != "" {
 			systemTexts = append(systemTexts, text)
 		}
 	}
 
-	if len(systemTexts) == 0 {
+	if !modified {
 		return false
 	}
-
-	extracted := strings.Join(systemTexts, "\n\n")
-	if existing, ok := reqBody["instructions"].(string); ok && strings.TrimSpace(existing) != "" {
-		reqBody["instructions"] = extracted + "\n\n" + existing
-	} else {
-		reqBody["instructions"] = extracted
-	}
 	reqBody["input"] = remaining
+
+	if len(systemTexts) > 0 {
+		extracted := strings.Join(systemTexts, "\n\n")
+		if existing, ok := reqBody["instructions"].(string); ok && strings.TrimSpace(existing) != "" {
+			reqBody["instructions"] = extracted + "\n\n" + existing
+		} else {
+			reqBody["instructions"] = extracted
+		}
+	}
 	return true
+}
+
+func isJSONObjMode(reqBody map[string]any) bool {
+	text, ok := reqBody["text"].(map[string]any)
+	if !ok {
+		return false
+	}
+	format, ok := text["format"].(map[string]any)
+	if !ok {
+		return false
+	}
+	typeName, _ := format["type"].(string)
+	return typeName == "json_object"
 }
 
 func extractPromptLikeInstructionsFromInput(reqBody map[string]any) string {
@@ -929,11 +1157,11 @@ func extractPromptLikeInstructionsFromInput(reqBody map[string]any) string {
 }
 
 // applyInstructions 处理 instructions 字段：仅在 instructions 为空时填充默认值。
-func applyInstructions(reqBody map[string]any, isCodexCLI bool) bool {
+func applyInstructions(reqBody map[string]any, isCodexCLI bool, model string) bool {
 	if !isInstructionsEmpty(reqBody) {
 		return false
 	}
-	reqBody["instructions"] = "You are a helpful coding assistant."
+	reqBody["instructions"] = openaipkg.CodexSyntheticDefaultInstructionsForModel(model)
 	return true
 }
 
@@ -977,11 +1205,26 @@ func filterCodexInputWithOptions(input []any, opts codexInputFilterOptions) []an
 		}
 		typ, _ := m["type"].(string)
 
-		// chatgpt.com codex backend (OAuth path) does not persist reasoning
-		// items because applyCodexOAuthTransform forces store=false. Any rs_*
-		// reference replayed in input is guaranteed to 404 upstream
-		// ("Item with id 'rs_...' not found"). Drop reasoning items entirely.
+		// OAuth Codex runs with store=false, so replaying a reasoning item's
+		// persisted rs_* id can fail upstream. Keep only the self-contained
+		// encrypted context, strip the id, and retain the previous behavior of
+		// dropping bare reasoning references.
 		if typ == "reasoning" {
+			encryptedContent, ok := m["encrypted_content"].(string)
+			if !ok || strings.TrimSpace(encryptedContent) == "" {
+				continue
+			}
+			newItem := make(map[string]any, len(m))
+			for key, value := range m {
+				if key == "id" {
+					continue
+				}
+				newItem[key] = value
+			}
+			if summary, ok := newItem["summary"]; !ok || summary == nil {
+				newItem["summary"] = []any{}
+			}
+			filtered = append(filtered, newItem)
 			continue
 		}
 
@@ -1029,6 +1272,13 @@ func filterCodexInputWithOptions(input []any, opts codexInputFilterOptions) []an
 			copied = true
 		}
 
+		// `namespace` is client-facing Responses metadata. ChatGPT's Codex
+		// request schema rejects it when a prior tool call is replayed.
+		if (typ == "function_call" || typ == "custom_tool_call") && m["namespace"] != nil {
+			ensureCopy()
+			delete(newItem, "namespace")
+		}
+
 		if isCodexToolCallItemType(typ) {
 			callID, ok := m["call_id"].(string)
 			if !ok || strings.TrimSpace(callID) == "" {
@@ -1072,6 +1322,18 @@ func filterCodexInputWithOptions(input []any, opts codexInputFilterOptions) []an
 		if !opts.PreserveReferences {
 			ensureCopy()
 			delete(newItem, "id")
+		} else if isCodexToolCallInputType(typ) {
+			if id, ok := m["id"].(string); ok && id != "" && !strings.HasPrefix(id, "fc") {
+				ensureCopy()
+				delete(newItem, "id")
+			}
+		} else if typ == "message" {
+			// Upstream only accepts persisted message IDs beginning with "msg".
+			// Do not rewrite invalid IDs because that could create a false reference.
+			if id, ok := m["id"].(string); ok && id != "" && !strings.HasPrefix(id, "msg") {
+				ensureCopy()
+				delete(newItem, "id")
+			}
 		}
 
 		filtered = append(filtered, newItem)
@@ -1091,6 +1353,20 @@ func isCodexToolCallItemType(typ string) bool {
 		"mcp_tool_call_output",
 		"custom_tool_call_output",
 		"tool_search_output":
+		return true
+	default:
+		return false
+	}
+}
+
+func isCodexToolCallInputType(typ string) bool {
+	switch typ {
+	case "function_call",
+		"tool_call",
+		"local_shell_call",
+		"tool_search_call",
+		"custom_tool_call",
+		"mcp_tool_call":
 		return true
 	default:
 		return false

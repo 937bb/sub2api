@@ -11,11 +11,16 @@ import (
 )
 
 const (
-	OpenAICodexFingerprintExtraKey = "openai_codex_fingerprint"
-	openAICodexFingerprintSchemaV1 = 1
+	OpenAICodexFingerprintExtraKey    = "openai_codex_fingerprint"
+	openAICodexFingerprintSchemaV1    = 1
+	legacyBuiltInOpenAICodexUserAgent = "codex-tui/0.136.0 (Mac OS 26.5.0; arm64) Apple_Terminal/470.2 (codex-tui; 0.136.0)"
 )
 
-var openAICodexUARe = regexp.MustCompile(`^([^/\s]+)/([^\s]+) \(([^)]*)\)\s+(.+?)(?:\s+\(([^;()]+);\s*([^()]+)\))?$`)
+var (
+	openAICodexUARe                    = regexp.MustCompile(`^([^/\s]+)/([^\s]+) \(([^)]*)\)\s+(.+?)(?:\s+\(([^;()]+);\s*([^()]+)\))?$`)
+	legacyBuiltInOpenAICodexUAProfile  = ParseOpenAICodexUAProfile(legacyBuiltInOpenAICodexUserAgent)
+	currentBuiltInOpenAICodexUAProfile = ParseOpenAICodexUAProfile(DefaultOpenAICodexUserAgent)
+)
 
 // OpenAICodexUAProfile is the codex-tui identity snapshot persisted per
 // OpenAI OAuth-like account. RawUserAgent stays authoritative so admin-provided
@@ -124,6 +129,9 @@ func NormalizeOpenAICodexFingerprint(existing any, defaultProfile OpenAICodexUAP
 		changed = true
 	} else {
 		normalized := normalizeOpenAICodexUAProfile(fp.UAProfile)
+		if normalized == legacyBuiltInOpenAICodexUAProfile {
+			normalized = currentBuiltInOpenAICodexUAProfile
+		}
 		if normalized != fp.UAProfile {
 			fp.UAProfile = normalized
 			changed = true

@@ -16,6 +16,11 @@ func TestGetPoolModeRetryCount(t *testing.T) {
 		expected int
 	}{
 		{
+			name:     "default_when_account_is_nil",
+			account:  nil,
+			expected: defaultPoolModeRetryCount,
+		},
+		{
 			name: "default_when_not_pool_mode",
 			account: &Account{
 				Type:        AccountTypeAPIKey,

@@ -284,6 +284,11 @@ func sanitizeOpsUpstreamErrors(entry *OpsInsertErrorLogInput) error {
 		out.Platform = strings.TrimSpace(out.Platform)
 		out.UpstreamRequestID = truncateString(strings.TrimSpace(out.UpstreamRequestID), 128)
 		out.Kind = truncateString(strings.TrimSpace(out.Kind), 64)
+		out.UpstreamURL = safeUpstreamURL(out.UpstreamURL)
+		out.UpstreamEndpoint = strings.TrimSpace(out.UpstreamEndpoint)
+		if out.UpstreamEndpoint == "" {
+			out.UpstreamEndpoint = endpointFromSafeUpstreamURL(out.UpstreamURL)
+		}
 
 		if out.AccountID < 0 {
 			out.AccountID = 0

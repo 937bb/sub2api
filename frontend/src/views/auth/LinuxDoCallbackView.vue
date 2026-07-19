@@ -38,7 +38,7 @@
 
               <label
                 v-if="suggestedDisplayName"
-                class="flex items-start gap-3 rounded-lg border border-gray-200 bg-white p-3 text-sm dark:border-dark-600 dark:bg-dark-900/50"
+                class="flex items-start gap-3 rounded-lg border border-gray-200 bg-[var(--glass-bg-content)] p-3 text-sm dark:border-dark-600 "
               >
                 <input v-model="adoptDisplayName" type="checkbox" class="mt-1 h-4 w-4" />
                 <span class="space-y-1">
@@ -53,7 +53,7 @@
 
               <label
                 v-if="suggestedAvatarUrl"
-                class="flex items-start gap-3 rounded-lg border border-gray-200 bg-white p-3 text-sm dark:border-dark-600 dark:bg-dark-900/50"
+                class="flex items-start gap-3 rounded-lg border border-gray-200 bg-[var(--glass-bg-content)] p-3 text-sm dark:border-dark-600 "
               >
                 <input v-model="adoptAvatar" type="checkbox" class="mt-1 h-4 w-4" />
                 <img

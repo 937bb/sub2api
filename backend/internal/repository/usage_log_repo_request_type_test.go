@@ -379,6 +379,38 @@ func TestUsageLogRepositoryGetModelStatsWithFiltersRequestTypePriority(t *testin
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestUsageLogRepositoryGetUserBreakdownRequestTypeIncludesLegacyRows(t *testing.T) {
+	start := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	end := start.Add(24 * time.Hour)
+	streamFilter := true
+	tests := []struct {
+		name        string
+		requestType service.RequestType
+		condition   string
+	}{
+		{"sync", service.RequestTypeSync, `AND \(ul\.request_type = \$3 OR \(ul\.request_type = 0 AND ul\.stream = FALSE AND ul\.openai_ws_mode = FALSE\)\)`},
+		{"stream", service.RequestTypeStream, `AND \(ul\.request_type = \$3 OR \(ul\.request_type = 0 AND ul\.stream = TRUE AND ul\.openai_ws_mode = FALSE\)\)`},
+		{"ws_v2", service.RequestTypeWSV2, `AND \(ul\.request_type = \$3 OR \(ul\.request_type = 0 AND ul\.openai_ws_mode = TRUE\)\)`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db, mock := newSQLMock(t)
+			repo := &usageLogRepository{sql: db}
+			requestType := int16(tt.requestType)
+			mock.ExpectQuery(tt.condition).WithArgs(start, end, requestType).WillReturnRows(sqlmock.NewRows([]string{
+				"user_id", "email", "requests", "total_tokens", "cost", "actual_cost", "account_cost",
+			}))
+			stats, err := repo.GetUserBreakdownStats(context.Background(), start, end, usagestats.UserBreakdownDimension{
+				RequestType: &requestType,
+				Stream:      &streamFilter,
+			}, 50)
+			require.NoError(t, err)
+			require.Empty(t, stats)
+			require.NoError(t, mock.ExpectationsWereMet())
+		})
+	}
+}
+
 func TestUsageLogRepositoryGetStatsWithFiltersRequestTypePriority(t *testing.T) {
 	db, mock := newSQLMock(t)
 	repo := &usageLogRepository{sql: db}
@@ -397,11 +429,13 @@ func TestUsageLogRepositoryGetStatsWithFiltersRequestTypePriority(t *testing.T) 
 			"total_input_tokens",
 			"total_output_tokens",
 			"total_cache_tokens",
+			"total_cache_creation_tokens",
+			"total_cache_read_tokens",
 			"total_cost",
 			"total_actual_cost",
 			"total_account_cost",
 			"avg_duration_ms",
-		}).AddRow(int64(1), int64(2), int64(3), int64(4), 1.2, 1.0, 1.2, 20.0))
+		}).AddRow(int64(1), int64(2), int64(3), int64(4), int64(1), int64(3), 1.2, 1.0, 1.2, 20.0))
 	mock.ExpectQuery("SELECT COALESCE\\(NULLIF\\(TRIM\\(inbound_endpoint\\), ''\\), 'unknown'\\) AS endpoint").
 		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), requestType).
 		WillReturnRows(sqlmock.NewRows([]string{"endpoint", "requests", "total_tokens", "cost", "actual_cost"}))
@@ -450,6 +484,31 @@ func TestUsageLogRepositoryGetModelStatsAccountCostColumn(t *testing.T) {
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestUsageLogRepositoryGetUserModelStatsUsesRequestedModel(t *testing.T) {
+	db, mock := newSQLMock(t)
+	repo := &usageLogRepository{sql: db}
+
+	start := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	end := start.Add(24 * time.Hour)
+	requestedModelExpr := "COALESCE\\(NULLIF\\(TRIM\\(requested_model\\), ''\\), model\\)"
+
+	mock.ExpectQuery("(?s)SELECT\\s+" + requestedModelExpr + " as model,.*WHERE created_at >= \\$1 AND created_at < \\$2\\s+AND user_id = \\$3.*GROUP BY " + requestedModelExpr + " ORDER BY total_tokens DESC").
+		WithArgs(start, end, int64(7)).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"model", "requests", "input_tokens", "output_tokens",
+			"cache_creation_tokens", "cache_read_tokens", "total_tokens",
+			"cost", "actual_cost", "account_cost",
+		}).
+			AddRow("gpt-5.5", int64(2), int64(10), int64(20), int64(0), int64(0), int64(30), 0.1, 0.08, 0.07).
+			AddRow("billed-model-legacy", int64(1), int64(3), int64(4), int64(0), int64(0), int64(7), 0.02, 0.01, 0.01))
+
+	stats, err := repo.GetUserModelStats(context.Background(), 7, start, end)
+	require.NoError(t, err)
+	require.Len(t, stats, 2)
+	require.Equal(t, []string{"gpt-5.5", "billed-model-legacy"}, []string{stats[0].Model, stats[1].Model})
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
 func TestUsageLogRepositoryGetGroupStatsAccountCostColumn(t *testing.T) {
 	db, mock := newSQLMock(t)
 	repo := &usageLogRepository{sql: db}
@@ -489,9 +548,10 @@ func TestUsageLogRepositoryGetStatsWithFiltersAlwaysReturnsAccountCost(t *testin
 	mock.ExpectQuery("FROM usage_logs").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"total_requests", "total_input_tokens", "total_output_tokens",
-			"total_cache_tokens", "total_cost", "total_actual_cost",
+			"total_cache_tokens", "total_cache_creation_tokens", "total_cache_read_tokens",
+			"total_cost", "total_actual_cost",
 			"total_account_cost", "avg_duration_ms",
-		}).AddRow(int64(50), int64(1000), int64(2000), int64(100), 15.0, 12.5, 11.0, 100.0))
+		}).AddRow(int64(50), int64(1000), int64(2000), int64(100), int64(60), int64(40), 15.0, 12.5, 11.0, 100.0))
 	mock.ExpectQuery("SELECT COALESCE\\(NULLIF\\(TRIM\\(inbound_endpoint\\)").
 		WillReturnRows(sqlmock.NewRows([]string{"endpoint", "requests", "total_tokens", "cost", "actual_cost"}))
 	mock.ExpectQuery("SELECT COALESCE\\(NULLIF\\(TRIM\\(upstream_endpoint\\)").
@@ -572,7 +632,7 @@ func TestBuildRequestTypeFilterConditionLegacyFallback(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			where, args := buildRequestTypeFilterCondition(3, tt.request)
+			where, args := buildRequestTypeFilterCondition(3, tt.request, requestTypeColumnsUnqualified)
 			require.Equal(t, tt.wantWhere, where)
 			require.Equal(t, []any{tt.wantArg}, args)
 		})

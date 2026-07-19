@@ -117,6 +117,16 @@ func TestAntigravityTokenCacheKey(t *testing.T) {
 			expected: "ag:account:202",
 		},
 		{
+			name: "configured_project_fallback_does_not_change_token_cache_key",
+			account: &Account{
+				ID: 206,
+				Credentials: map[string]any{
+					antigravityProjectFallbackCredentialKey: "configured-project",
+				},
+			},
+			expected: "ag:account:206",
+		},
+		{
 			name: "whitespace_only_project_id_fallback_to_account_id",
 			account: &Account{
 				ID: 203,

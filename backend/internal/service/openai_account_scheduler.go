@@ -3,6 +3,7 @@ package service
 import (
 	"container/heap"
 	"context"
+	"errors"
 	"fmt"
 	"hash/fnv"
 	"log/slog"
@@ -290,9 +291,6 @@ func (s *defaultOpenAIAccountScheduler) Select(
 			decision.StickyPreviousHit = true
 			decision.SelectedAccountID = selection.Account.ID
 			decision.SelectedAccountType = selection.Account.Type
-			if req.SessionHash != "" {
-				_ = s.service.BindStickySession(ctx, req.GroupID, req.SessionHash, selection.Account.ID)
-			}
 			return selection, decision, nil
 		}
 	}
@@ -854,9 +852,6 @@ func (s *defaultOpenAIAccountScheduler) tryAcquireOpenAISelectionOrder(
 			return nil, compactBlocked, acquireErr
 		}
 		if result != nil && result.Acquired {
-			if req.SessionHash != "" {
-				_ = s.service.BindStickySession(ctx, req.GroupID, req.SessionHash, fresh.ID)
-			}
 			return &AccountSelectionResult{
 				Account:     fresh,
 				Acquired:    true,
@@ -914,7 +909,10 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 		})
 	}
 	if len(filtered) == 0 {
-		return nil, 0, 0, 0, noAvailableOpenAISelectionError(req.RequestedModel, false)
+		if isPureOpenAIModelSupportMiss(ctx, s.service, req.GroupID, accounts, req.RequestedModel, req.ExcludedIDs, req.RequireCompact, req.RequiredCapability, req.RequiredImageCapability, req.RequiredTransport, schedGroup) {
+			return nil, 0, 0, 0, newModelNotSupportedByAccountsError(req.RequestedModel)
+		}
+		return nil, 0, 0, 0, noAvailableOpenAISelectionCapacityError(req.RequestedModel)
 	}
 
 	loadMap := map[int64]*AccountLoadInfo{}
@@ -1214,6 +1212,9 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 			for {
 				selection, err := s.selectAccountWithLoadAwareness(ctx, groupID, sessionHash, requestedModel, effectiveExcludedIDs, requireCompact, requiredCapability)
 				if err != nil {
+					if len(effectiveExcludedIDs) > len(excludedIDs) && errors.Is(err, ErrNoAvailableAccounts) {
+						return nil, decision, noAvailableOpenAISelectionCapacityError(requestedModel)
+					}
 					return nil, decision, err
 				}
 				if selection == nil || selection.Account == nil {
@@ -1239,6 +1240,9 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 		for {
 			selection, err := s.selectAccountWithLoadAwareness(ctx, groupID, sessionHash, requestedModel, effectiveExcludedIDs, requireCompact, requiredCapability)
 			if err != nil {
+				if len(effectiveExcludedIDs) > len(excludedIDs) && errors.Is(err, ErrNoAvailableAccounts) {
+					return nil, decision, noAvailableOpenAISelectionCapacityError(requestedModel)
+				}
 				return nil, decision, err
 			}
 			if selection == nil || selection.Account == nil {

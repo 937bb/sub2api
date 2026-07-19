@@ -59,7 +59,7 @@
         <button
           v-if="!hideActions"
           @click="emit('deposit')"
-          class="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 transition-colors hover:bg-gray-50 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-300 dark:hover:bg-dark-700"
+          class="flex items-center gap-2 rounded-lg border border-gray-200 bg-[var(--glass-bg-content)] px-3 py-2 text-sm text-gray-700 transition-colors hover:bg-gray-50 dark:border-dark-600  dark:text-gray-300 dark:hover:bg-dark-700"
         >
           <Icon name="plus" size="sm" class="text-emerald-500" :stroke-width="2" />
           {{ t('admin.users.deposit') }}
@@ -68,7 +68,7 @@
         <button
           v-if="!hideActions"
           @click="emit('withdraw')"
-          class="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 transition-colors hover:bg-gray-50 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-300 dark:hover:bg-dark-700"
+          class="flex items-center gap-2 rounded-lg border border-gray-200 bg-[var(--glass-bg-content)] px-3 py-2 text-sm text-gray-700 transition-colors hover:bg-gray-50 dark:border-dark-600  dark:text-gray-300 dark:hover:bg-dark-700"
         >
           <svg class="h-4 w-4 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4" />
@@ -95,7 +95,7 @@
         <div
           v-for="item in history"
           :key="item.id"
-          class="rounded-xl border border-gray-200 bg-white p-4 dark:border-dark-600 dark:bg-dark-800"
+          class="rounded-xl border border-gray-200 bg-[var(--glass-bg-content)] p-4 dark:border-dark-600 "
         >
           <div class="flex items-start justify-between">
             <!-- Left: type icon + description -->

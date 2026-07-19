@@ -167,6 +167,9 @@ func responsesItemWire(item *ResponsesOutput) map[string]any {
 		m["call_id"] = item.CallID
 		m["name"] = item.Name
 		m["arguments"] = item.Arguments
+		if item.Namespace != "" {
+			m["namespace"] = item.Namespace
+		}
 	}
 	return m
 }

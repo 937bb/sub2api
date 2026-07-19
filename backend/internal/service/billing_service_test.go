@@ -3,7 +3,10 @@
 package service
 
 import (
+	"bytes"
+	"log"
 	"math"
+	"strings"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -55,6 +58,50 @@ func TestCalculateCost_WithCacheTokens(t *testing.T) {
 	require.InDelta(t, expectedTotal, cost.TotalCost, 1e-10)
 }
 
+func TestCalculateCost_GPT56CacheCreationPricing(t *testing.T) {
+	svc := newTestBillingService()
+	tokens := UsageTokens{
+		InputTokens:         1000,
+		OutputTokens:        100,
+		CacheCreationTokens: 2000,
+		CacheReadTokens:     3000,
+	}
+
+	tests := []struct {
+		name               string
+		model              string
+		serviceTier        string
+		cacheCreationPrice float64
+		cacheReadPrice     float64
+	}{
+		{name: "bare alias uses sol", model: "gpt-5.6", cacheCreationPrice: 6.25e-6, cacheReadPrice: 0.5e-6},
+		{name: "sol", model: "gpt-5.6-sol", cacheCreationPrice: 6.25e-6, cacheReadPrice: 0.5e-6},
+		{name: "sol priority", model: "gpt-5.6-sol", serviceTier: "priority", cacheCreationPrice: 12.5e-6, cacheReadPrice: 1e-6},
+		{name: "terra", model: "gpt-5.6-terra", cacheCreationPrice: 3.125e-6, cacheReadPrice: 0.25e-6},
+		{name: "terra priority", model: "gpt-5.6-terra", serviceTier: "priority", cacheCreationPrice: 6.25e-6, cacheReadPrice: 0.5e-6},
+		{name: "luna", model: "gpt-5.6-luna", cacheCreationPrice: 1.25e-6, cacheReadPrice: 0.1e-6},
+		{name: "luna priority", model: "gpt-5.6-luna", serviceTier: "priority", cacheCreationPrice: 2.5e-6, cacheReadPrice: 0.2e-6},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cost, err := svc.CalculateCostWithServiceTier(tt.model, tokens, 1, tt.serviceTier)
+			require.NoError(t, err)
+			require.InDelta(t, float64(tokens.CacheCreationTokens)*tt.cacheCreationPrice, cost.CacheCreationCost, 1e-12)
+			require.InDelta(t, float64(tokens.CacheReadTokens)*tt.cacheReadPrice, cost.CacheReadCost, 1e-12)
+			require.InDelta(t, cost.InputCost+cost.OutputCost+cost.CacheCreationCost+cost.CacheReadCost, cost.TotalCost, 1e-12)
+		})
+	}
+}
+
+func TestCalculateCost_GPT56CacheCreationRequiresReportedTokens(t *testing.T) {
+	svc := newTestBillingService()
+	cost, err := svc.CalculateCost("gpt-5.6-sol", UsageTokens{CacheReadTokens: 3000}, 1)
+	require.NoError(t, err)
+	require.Zero(t, cost.CacheCreationCost)
+	require.InDelta(t, 3000*0.5e-6, cost.CacheReadCost, 1e-12)
+}
+
 func TestCalculateCost_RateMultiplier(t *testing.T) {
 	svc := newTestBillingService()
 
@@ -103,6 +150,34 @@ func TestGetModelPricing_CaseInsensitive(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, p1.InputPricePerToken, p2.InputPricePerToken)
+}
+
+func TestGetModelPricing_FallbackWarningDedupesByFallbackFamily(t *testing.T) {
+	svc := newTestBillingService()
+
+	var buf bytes.Buffer
+	originalOutput := log.Writer()
+	log.SetOutput(&buf)
+	defer log.SetOutput(originalOutput)
+
+	for _, model := range []string{
+		"claude-x-alpha",
+		"claude-x-bravo",
+		"claude-x-charlie",
+	} {
+		_, err := svc.GetModelPricing(model)
+		require.NoError(t, err)
+	}
+
+	require.Equal(t, 1, strings.Count(buf.String(), "Using fallback pricing for model:"))
+	require.Contains(t, buf.String(), "fallback: claude-sonnet-4")
+
+	seenCount := 0
+	svc.fallbackWarnSeen.Range(func(_, _ any) bool {
+		seenCount++
+		return true
+	})
+	require.Equal(t, 1, seenCount)
 }
 
 func TestGetModelPricing_UnknownClaudeModelFallsBackToSonnet(t *testing.T) {
@@ -978,6 +1053,30 @@ func TestGetModelPricingWithChannel_OverrideInputPriceOnly(t *testing.T) {
 	require.InDelta(t, 15e-6, pricing.OutputPricePerToken, 1e-12)
 }
 
+func TestGetModelPricing_FallbackReturnsOwnedValue(t *testing.T) {
+	svc := newTestBillingService()
+
+	pricing, err := svc.GetModelPricing("claude-sonnet-4")
+	require.NoError(t, err)
+	pricing.InputPricePerToken = 99
+
+	again, err := svc.GetModelPricing("CLAUDE-SONNET-4")
+	require.NoError(t, err)
+	require.InDelta(t, 3e-6, again.InputPricePerToken, 1e-12)
+}
+
+func TestGetModelPricingWithChannel_DoesNotMutateFallback(t *testing.T) {
+	svc := newTestBillingService()
+	override := 99.0
+
+	_, err := svc.GetModelPricingWithChannel("claude-sonnet-4", &ChannelModelPricing{InputPrice: &override})
+	require.NoError(t, err)
+
+	again, err := svc.GetModelPricing("claude-sonnet-4")
+	require.NoError(t, err)
+	require.InDelta(t, 3e-6, again.InputPricePerToken, 1e-12)
+}
+
 func TestGetModelPricingWithChannel_OverrideOutputPriceOnly(t *testing.T) {
 	svc := newTestBillingService()
 
@@ -1090,7 +1189,8 @@ func TestComputeTokenBreakdown_ExplicitZeroImagePrice_NoFallback(t *testing.T) {
 		OutputTokens:      200,
 		ImageOutputTokens: 50,
 	}
-	bd := svc.computeTokenBreakdown(pricing, tokens, 1.0, "", false)
+	bd, err := svc.computeTokenBreakdown(pricing, tokens, 1.0, "", false)
+	require.NoError(t, err)
 
 	// ImageOutputTokens should NOT fall back to outputPrice
 	require.Equal(t, 0.0, bd.ImageOutputCost)
@@ -1112,10 +1212,35 @@ func TestComputeTokenBreakdown_NonExplicitZeroImagePrice_FallsBackToOutput(t *te
 		OutputTokens:      200,
 		ImageOutputTokens: 50,
 	}
-	bd := svc.computeTokenBreakdown(pricing, tokens, 1.0, "", false)
+	bd, err := svc.computeTokenBreakdown(pricing, tokens, 1.0, "", false)
+	require.NoError(t, err)
 
 	// Should fall back to outputPrice since not explicit
 	require.InDelta(t, 50*15e-6, bd.ImageOutputCost, 1e-12)
 	// textOutputTokens = 200 - 50 = 150
 	require.InDelta(t, 150*15e-6, bd.OutputCost, 1e-12)
+}
+
+func TestComputeTokenBreakdown_LongContextTokenSumOverflow(t *testing.T) {
+	svc := newTestBillingService()
+	pricing := &ModelPricing{
+		LongContextInputThreshold:  1,
+		LongContextInputMultiplier: 2,
+	}
+	tokens := UsageTokens{InputTokens: int(^uint(0) >> 1), CacheReadTokens: 1}
+
+	bd, err := svc.computeTokenBreakdown(pricing, tokens, 1.0, "", true)
+
+	require.Nil(t, bd)
+	require.ErrorContains(t, err, "token total overflows int")
+}
+
+func TestCalculateCost_LegacyLongContextTokenSumOverflow(t *testing.T) {
+	svc := newTestBillingService()
+	tokens := UsageTokens{InputTokens: int(^uint(0) >> 1), CacheCreationTokens: 1}
+
+	bd, err := svc.CalculateCost("gpt-5.4", tokens, 1.0)
+
+	require.Nil(t, bd)
+	require.ErrorContains(t, err, "token total overflows int")
 }

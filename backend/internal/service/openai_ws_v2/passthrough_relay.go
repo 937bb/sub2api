@@ -1,6 +1,7 @@
 package openai_ws_v2
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -12,6 +13,7 @@ import (
 
 	coderws "github.com/coder/websocket"
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 type FrameConn interface {
@@ -498,6 +500,9 @@ func runUpstreamToClient(
 			markActivity()
 			continue
 		}
+		if (msgType == coderws.MessageText && observedEvent.eventType == "response.failed") || msgType == coderws.MessageBinary {
+			payload, _ = sanitizeResponseFailedMessageForClient(payload)
+		}
 		if err := writeClient(msgType, payload); err != nil {
 			emitRelayTrace(onTrace, RelayTraceEvent{
 				Stage:           "write_client_failed",
@@ -787,7 +792,7 @@ func parseUsageAndAccumulate(
 	parsedUsage := Usage{
 		InputTokens:              inputTokens,
 		OutputTokens:             outputTokens,
-		CacheCreationInputTokens: int(usageResult.Get("cache_creation_input_tokens").Int()),
+		CacheCreationInputTokens: openAICacheCreationTokensFromUsage(usageResult),
 		CacheReadInputTokens:     cachedTokens,
 		ImageOutputTokens:        int(imageTokens),
 	}
@@ -808,6 +813,32 @@ func parseUsageIntField(value gjson.Result, required bool) (int, bool) {
 		return 0, false
 	}
 	return int(value.Int()), true
+}
+
+func openAICacheCreationTokensFromUsage(value gjson.Result) int {
+	cacheCreationTokens := 0
+	for _, field := range []string{
+		"cache_creation_input_tokens",
+		"cache_write_input_tokens",
+		"cache_creation_tokens",
+		"cache_write_tokens",
+	} {
+		if tokens := int(value.Get(field).Int()); tokens > 0 {
+			cacheCreationTokens = tokens
+			break
+		}
+	}
+	for _, field := range []string{
+		"input_tokens_details.cache_write_tokens",
+		"prompt_tokens_details.cache_write_tokens",
+		"input_tokens_details.cache_creation_tokens",
+		"prompt_tokens_details.cache_creation_tokens",
+	} {
+		if result := value.Get(field); result.Exists() {
+			return max(int(result.Int()), 0)
+		}
+	}
+	return cacheCreationTokens
 }
 
 func enrichResult(result *RelayResult, state *relayState, duration time.Duration) {
@@ -863,6 +894,43 @@ func shouldParseUsage(eventType string) bool {
 	default:
 		return false
 	}
+}
+
+func sanitizeResponseFailedMessageForClient(payload []byte) ([]byte, bool) {
+	if len(payload) == 0 || !gjson.ValidBytes(payload) {
+		return payload, false
+	}
+	if strings.TrimSpace(gjson.GetBytes(payload, "type").String()) != "response.failed" {
+		return payload, false
+	}
+
+	updated := payload
+	for _, path := range []string{
+		"instructions",
+		"input",
+		"output",
+		"usage",
+		"metadata",
+		"reasoning",
+		"tools",
+		"tool_choice",
+		"parallel_tool_calls",
+		"prompt_cache_key",
+		"previous_response_id",
+		"text",
+		"truncation",
+		"max_output_tokens",
+		"incomplete_details",
+	} {
+		for _, prefix := range []string{"", "response."} {
+			next, err := sjson.DeleteBytes(updated, prefix+path)
+			if err != nil {
+				return payload, false
+			}
+			updated = next
+		}
+	}
+	return updated, !bytes.Equal(updated, payload)
 }
 
 func isTokenEvent(eventType string) bool {

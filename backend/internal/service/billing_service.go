@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -89,22 +91,24 @@ type BillingCache interface {
 
 // ModelPricing 模型价格配置（per-token价格，与LiteLLM格式一致）
 type ModelPricing struct {
-	InputPricePerToken             float64 // 每token输入价格 (USD)
-	InputPricePerTokenPriority     float64 // priority service tier 下每token输入价格 (USD)
-	ImageInputPricePerToken        float64 // 图片输入 token 价格 (USD)，为 0 时回退到输入价格
-	OutputPricePerToken            float64 // 每token输出价格 (USD)
-	OutputPricePerTokenPriority    float64 // priority service tier 下每token输出价格 (USD)
-	CacheCreationPricePerToken     float64 // 缓存创建每token价格 (USD)
-	CacheReadPricePerToken         float64 // 缓存读取每token价格 (USD)
-	CacheReadPricePerTokenPriority float64 // priority service tier 下缓存读取每token价格 (USD)
-	CacheCreation5mPrice           float64 // 5分钟缓存创建每token价格 (USD)
-	CacheCreation1hPrice           float64 // 1小时缓存创建每token价格 (USD)
-	SupportsCacheBreakdown         bool    // 是否支持详细的缓存分类
-	LongContextInputThreshold      int     // 超过阈值后按整次会话提升输入价格
-	LongContextInputMultiplier     float64 // 长上下文整次会话输入倍率
-	LongContextOutputMultiplier    float64 // 长上下文整次会话输出倍率
-	ImageOutputPricePerToken       float64 // 图片输出 token 价格 (USD)
-	ImageOutputPriceExplicit       bool    // 是否由渠道定价显式设定（为 true 时即使 == 0 也不回退）
+	InputPricePerToken                 float64 // 每token输入价格 (USD)
+	InputPricePerTokenPriority         float64 // priority service tier 下每token输入价格 (USD)
+	ImageInputPricePerToken            float64 // 图片输入 token 价格 (USD)，为 0 时回退到输入价格
+	OutputPricePerToken                float64 // 每token输出价格 (USD)
+	OutputPricePerTokenPriority        float64 // priority service tier 下每token输出价格 (USD)
+	CacheCreationPricePerToken         float64 // 缓存创建每token价格 (USD)
+	CacheCreationPricePerTokenPriority float64 // priority service tier 下缓存创建每token价格 (USD)
+	CacheCreationPriceExplicit         bool    // 是否由渠道/区间定价显式设定（为 true 时即使 == 0 也不回退）
+	CacheReadPricePerToken             float64 // 缓存读取每token价格 (USD)
+	CacheReadPricePerTokenPriority     float64 // priority service tier 下缓存读取每token价格 (USD)
+	CacheCreation5mPrice               float64 // 5分钟缓存创建每token价格 (USD)
+	CacheCreation1hPrice               float64 // 1小时缓存创建每token价格 (USD)
+	SupportsCacheBreakdown             bool    // 是否支持详细的缓存分类
+	LongContextInputThreshold          int     // 超过阈值后按整次会话提升输入价格
+	LongContextInputMultiplier         float64 // 长上下文整次会话输入倍率
+	LongContextOutputMultiplier        float64 // 长上下文整次会话输出倍率
+	ImageOutputPricePerToken           float64 // 图片输出 token 价格 (USD)
+	ImageOutputPriceExplicit           bool    // 是否由渠道定价显式设定（为 true 时即使 == 0 也不回退）
 }
 
 const (
@@ -121,7 +125,8 @@ func usePriorityServiceTierPricing(serviceTier string, pricing *ModelPricing) bo
 	if pricing == nil || normalizeBillingServiceTier(serviceTier) != "priority" {
 		return false
 	}
-	return pricing.InputPricePerTokenPriority > 0 || pricing.OutputPricePerTokenPriority > 0 || pricing.CacheReadPricePerTokenPriority > 0
+	return pricing.InputPricePerTokenPriority > 0 || pricing.OutputPricePerTokenPriority > 0 ||
+		pricing.CacheCreationPricePerTokenPriority > 0 || pricing.CacheReadPricePerTokenPriority > 0
 }
 
 func serviceTierCostMultiplier(serviceTier string) float64 {
@@ -165,9 +170,10 @@ var ErrModelPricingUnavailable = errors.New("pricing not found")
 
 // BillingService 计费服务
 type BillingService struct {
-	cfg            *config.Config
-	pricingService *PricingService
-	fallbackPrices map[string]*ModelPricing // 硬编码回退价格
+	cfg              *config.Config
+	pricingService   *PricingService
+	fallbackPrices   map[string]*ModelPricing // 硬编码回退价格
+	fallbackWarnSeen sync.Map
 }
 
 // NewBillingService 创建计费服务实例
@@ -272,6 +278,12 @@ func (s *BillingService) initFallbackPricing() {
 	}
 	// GPT-5.5 暂无独立定价，回退到 GPT-5.4
 	s.fallbackPrices["gpt-5.5"] = s.fallbackPrices["gpt-5.4"]
+	s.fallbackPrices["gpt-5.5-pro"] = s.fallbackPrices["gpt-5.4"]
+
+	// OpenAI GPT-5.6 官方价格（USD/token）。缓存写入为输入价的 1.25 倍。
+	s.fallbackPrices["gpt-5.6-sol"] = &ModelPricing{InputPricePerToken: 5e-6, InputPricePerTokenPriority: 10e-6, OutputPricePerToken: 30e-6, OutputPricePerTokenPriority: 60e-6, CacheCreationPricePerToken: 6.25e-6, CacheCreationPricePerTokenPriority: 12.5e-6, CacheReadPricePerToken: 0.5e-6, CacheReadPricePerTokenPriority: 1e-6, LongContextInputThreshold: openAIGPT54LongContextInputThreshold, LongContextInputMultiplier: openAIGPT54LongContextInputMultiplier, LongContextOutputMultiplier: openAIGPT54LongContextOutputMultiplier}
+	s.fallbackPrices["gpt-5.6-terra"] = &ModelPricing{InputPricePerToken: 2.5e-6, InputPricePerTokenPriority: 5e-6, OutputPricePerToken: 15e-6, OutputPricePerTokenPriority: 30e-6, CacheCreationPricePerToken: 3.125e-6, CacheCreationPricePerTokenPriority: 6.25e-6, CacheReadPricePerToken: 0.25e-6, CacheReadPricePerTokenPriority: 0.5e-6, LongContextInputThreshold: openAIGPT54LongContextInputThreshold, LongContextInputMultiplier: openAIGPT54LongContextInputMultiplier, LongContextOutputMultiplier: openAIGPT54LongContextOutputMultiplier}
+	s.fallbackPrices["gpt-5.6-luna"] = &ModelPricing{InputPricePerToken: 1e-6, InputPricePerTokenPriority: 2e-6, OutputPricePerToken: 6e-6, OutputPricePerTokenPriority: 12e-6, CacheCreationPricePerToken: 1.25e-6, CacheCreationPricePerTokenPriority: 2.5e-6, CacheReadPricePerToken: 0.1e-6, CacheReadPricePerTokenPriority: 0.2e-6, LongContextInputThreshold: openAIGPT54LongContextInputThreshold, LongContextInputMultiplier: openAIGPT54LongContextInputMultiplier, LongContextOutputMultiplier: openAIGPT54LongContextOutputMultiplier}
 
 	s.fallbackPrices["gpt-5.4-mini"] = &ModelPricing{
 		InputPricePerToken:     7.5e-7,
@@ -361,153 +373,169 @@ func (s *BillingService) initFallbackPricing() {
 	}
 }
 
-// getFallbackPricing 根据模型系列获取回退价格
-func (s *BillingService) getFallbackPricing(model string) *ModelPricing {
+func fallbackPricingKey(model string) string {
 	modelLower := strings.ToLower(model)
 
 	// 按模型系列匹配
 	if strings.Contains(modelLower, "opus") {
 		if strings.Contains(modelLower, "4.7") || strings.Contains(modelLower, "4-7") {
-			return s.fallbackPrices["claude-opus-4.7"]
+			return "claude-opus-4.7"
 		}
 		if strings.Contains(modelLower, "4.6") || strings.Contains(modelLower, "4-6") {
-			return s.fallbackPrices["claude-opus-4.6"]
+			return "claude-opus-4.6"
 		}
 		if strings.Contains(modelLower, "4.5") || strings.Contains(modelLower, "4-5") {
-			return s.fallbackPrices["claude-opus-4.5"]
+			return "claude-opus-4.5"
 		}
-		return s.fallbackPrices["claude-3-opus"]
+		return "claude-3-opus"
 	}
 	if strings.Contains(modelLower, "sonnet") {
 		if strings.Contains(modelLower, "4") && !strings.Contains(modelLower, "3") {
-			return s.fallbackPrices["claude-sonnet-4"]
+			return "claude-sonnet-4"
 		}
-		return s.fallbackPrices["claude-3-5-sonnet"]
+		return "claude-3-5-sonnet"
 	}
 	if strings.Contains(modelLower, "haiku") {
 		if strings.Contains(modelLower, "3-5") || strings.Contains(modelLower, "3.5") {
-			return s.fallbackPrices["claude-3-5-haiku"]
+			return "claude-3-5-haiku"
 		}
-		return s.fallbackPrices["claude-3-haiku"]
+		return "claude-3-haiku"
 	}
 	// Claude 未知型号统一回退到 Sonnet，避免计费中断。
 	if strings.Contains(modelLower, "claude") {
-		return s.fallbackPrices["claude-sonnet-4"]
+		return "claude-sonnet-4"
 	}
 	if strings.Contains(modelLower, "gemini-3.1-pro") || strings.Contains(modelLower, "gemini-3-1-pro") {
-		return s.fallbackPrices["gemini-3.1-pro"]
+		return "gemini-3.1-pro"
 	}
 
 	// DeepSeek V4 系列：仅匹配已知 V4 Pro/Flash 与官方兼容别名。
 	if strings.Contains(modelLower, "deepseek-v4-flash") {
-		return s.fallbackPrices["deepseek-v4-flash"]
+		return "deepseek-v4-flash"
 	}
 	if strings.Contains(modelLower, "deepseek-v4-pro") {
-		return s.fallbackPrices["deepseek-v4-pro"]
+		return "deepseek-v4-pro"
 	}
 	if strings.Contains(modelLower, "deepseek-chat") || strings.Contains(modelLower, "deepseek-reasoner") {
-		return s.fallbackPrices["deepseek-v4-flash"]
+		return "deepseek-v4-flash"
 	}
 
 	// 国产 LLM 兜底采用白名单语义：长 key 优先，未知 alias 不回退。
 	if strings.Contains(modelLower, "glm-5.1") {
-		return s.fallbackPrices["glm-5.1"]
+		return "glm-5.1"
 	}
 	if strings.Contains(modelLower, "glm-5-turbo") || strings.Contains(modelLower, "glm-5turbo") {
-		return s.fallbackPrices["glm-5-turbo"]
+		return "glm-5-turbo"
 	}
 	if strings.Contains(modelLower, "glm-5") {
-		return s.fallbackPrices["glm-5"]
+		return "glm-5"
 	}
 	if strings.Contains(modelLower, "glm-4.7-flashx") {
-		return s.fallbackPrices["glm-4.7-flashx"]
+		return "glm-4.7-flashx"
 	}
 	if strings.Contains(modelLower, "glm-4.7-flash") {
-		return s.fallbackPrices["glm-4.7-flash"]
+		return "glm-4.7-flash"
 	}
 	if strings.Contains(modelLower, "glm-4.7") {
-		return s.fallbackPrices["glm-4.7"]
+		return "glm-4.7"
 	}
 	if strings.Contains(modelLower, "glm-4.6") {
-		return s.fallbackPrices["glm-4.6"]
+		return "glm-4.6"
 	}
 	if strings.Contains(modelLower, "glm-4.5-flash") {
-		return s.fallbackPrices["glm-4.5-flash"]
+		return "glm-4.5-flash"
 	}
 	if strings.Contains(modelLower, "glm-4.5-x") || strings.Contains(modelLower, "glm-4.5x") {
-		return s.fallbackPrices["glm-4.5-x"]
+		return "glm-4.5-x"
 	}
 	if strings.Contains(modelLower, "glm-4.5-airx") || strings.Contains(modelLower, "glm-4.5airx") {
-		return s.fallbackPrices["glm-4.5-airx"]
+		return "glm-4.5-airx"
 	}
 	if strings.Contains(modelLower, "glm-4.5-air") || strings.Contains(modelLower, "glm-4.5air") {
-		return s.fallbackPrices["glm-4.5-air"]
+		return "glm-4.5-air"
 	}
 	if strings.Contains(modelLower, "glm-4.5") {
-		return s.fallbackPrices["glm-4.5"]
+		return "glm-4.5"
 	}
 	if strings.Contains(modelLower, "glm-4-32b") {
-		return s.fallbackPrices["glm-4-32b-0414-128k"]
+		return "glm-4-32b-0414-128k"
 	}
 
 	if strings.Contains(modelLower, "kimi-for-coding") {
-		return s.fallbackPrices["kimi-for-coding"]
+		return "kimi-for-coding"
 	}
 	if strings.Contains(modelLower, "kimi-k2.6") || strings.Contains(modelLower, "kimi-k2-6") {
-		return s.fallbackPrices["kimi-k2.6"]
+		return "kimi-k2.6"
 	}
 	if strings.Contains(modelLower, "kimi-k2.5") || strings.Contains(modelLower, "kimi-k2-5") {
-		return s.fallbackPrices["kimi-k2.5"]
+		return "kimi-k2.5"
 	}
 	if strings.Contains(modelLower, "kimi-k2-thinking") {
-		return s.fallbackPrices["kimi-k2-thinking"]
+		return "kimi-k2-thinking"
 	}
 	if strings.Contains(modelLower, "kimi-k2") || strings.Contains(modelLower, "kimi/k2") {
-		return s.fallbackPrices["kimi-k2"]
+		return "kimi-k2"
 	}
 
 	if strings.Contains(modelLower, "minimax-m3") {
-		return s.fallbackPrices["minimax-m3"]
+		return "minimax-m3"
 	}
 	if strings.Contains(modelLower, "minimax-m2.7-highspeed") || strings.Contains(modelLower, "minimax-m2-7-highspeed") {
-		return s.fallbackPrices["minimax-m2.7-highspeed"]
+		return "minimax-m2.7-highspeed"
 	}
 	if strings.Contains(modelLower, "minimax-m2.7") || strings.Contains(modelLower, "minimax-m2-7") {
-		return s.fallbackPrices["minimax-m2.7"]
+		return "minimax-m2.7"
 	}
 	if strings.Contains(modelLower, "minimax-m2.5") || strings.Contains(modelLower, "minimax-m2-5") {
-		return s.fallbackPrices["minimax-m2.5"]
+		return "minimax-m2.5"
 	}
 	if strings.Contains(modelLower, "minimax-m2.1") || strings.Contains(modelLower, "minimax-m2-1") {
-		return s.fallbackPrices["minimax-m2.1"]
+		return "minimax-m2.1"
 	}
 	if strings.Contains(modelLower, "minimax-m2") || strings.Contains(modelLower, "minimax-m-2") {
-		return s.fallbackPrices["minimax-m2"]
+		return "minimax-m2"
 	}
 
 	if strings.Contains(modelLower, "doubao-embedding-vision") {
-		return s.fallbackPrices["doubao-embedding-vision"]
+		return "doubao-embedding-vision"
 	}
 
 	// OpenAI 仅匹配已知 GPT-5/Codex 族，避免未知 OpenAI 型号误计价。
 	if normalized := normalizeKnownOpenAICodexModel(modelLower); normalized != "" {
 		switch normalized {
+		case "gpt-5.6-sol":
+			return "gpt-5.6-sol"
+		case "gpt-5.6-terra":
+			return "gpt-5.6-terra"
+		case "gpt-5.6-luna":
+			return "gpt-5.6-luna"
+		case "gpt-5.5-pro":
+			return "gpt-5.5-pro"
 		case "gpt-5.5":
-			return s.fallbackPrices["gpt-5.5"]
+			return "gpt-5.5"
 		case "gpt-5.4-mini":
-			return s.fallbackPrices["gpt-5.4-mini"]
+			return "gpt-5.4-mini"
 		case "gpt-5.4-nano":
-			return s.fallbackPrices["gpt-5.4-nano"]
+			return "gpt-5.4-nano"
 		case "gpt-5.4":
-			return s.fallbackPrices["gpt-5.4"]
+			return "gpt-5.4"
 		case "gpt-5.2":
-			return s.fallbackPrices["gpt-5.2"]
+			return "gpt-5.2"
 		case "gpt-5.3-codex", "gpt-5.3-codex-spark":
-			return s.fallbackPrices["gpt-5.3-codex"]
+			return "gpt-5.3-codex"
 		}
 	}
 
-	return nil
+	return ""
+}
+
+// getFallbackPricing 根据模型系列获取回退价格
+func (s *BillingService) getFallbackPricing(model string) *ModelPricing {
+	key := fallbackPricingKey(model)
+	if key == "" {
+		return nil
+	}
+	return s.fallbackPrices[key]
 }
 
 // GetModelPricing 获取模型价格配置
@@ -518,7 +546,7 @@ func (s *BillingService) GetModelPricing(model string) (*ModelPricing, error) {
 	// 1. 优先从动态价格服务获取
 	if s.pricingService != nil {
 		litellmPricing := s.pricingService.GetModelPricing(model)
-		if litellmPricing != nil {
+		if litellmPricing != nil && !litellmPricing.tokenBillingUnsupported {
 			// 启用 5m/1h 分类计费的条件：
 			// 1. 存在 1h 价格
 			// 2. 1h 价格 > 5m 价格（防止 LiteLLM 数据错误导致少收费）
@@ -546,10 +574,16 @@ func (s *BillingService) GetModelPricing(model string) (*ModelPricing, error) {
 	}
 
 	// 2. 使用硬编码回退价格
-	fallback := s.getFallbackPricing(model)
+	fallbackKey := fallbackPricingKey(model)
+	fallback := s.fallbackPrices[fallbackKey]
 	if fallback != nil {
-		log.Printf("[Billing] Using fallback pricing for model: %s", model)
-		return s.applyModelSpecificPricingPolicy(model, fallback), nil
+		if _, seen := s.fallbackWarnSeen.LoadOrStore(fallbackKey, struct{}{}); !seen {
+			log.Printf("[Billing] Using fallback pricing for model: %s (fallback: %s)", model, fallbackKey)
+		}
+		// fallbackPrices is shared across requests; callers may apply channel
+		// overrides to the returned value.
+		pricing := *fallback
+		return s.applyModelSpecificPricingPolicy(model, &pricing), nil
 	}
 
 	return nil, fmt.Errorf("%w for model: %s", ErrModelPricingUnavailable, model)
@@ -610,6 +644,9 @@ type CostInput struct {
 // CalculateCostUnified 统一计费入口，支持三种计费模式。
 // 使用 ModelPricingResolver 解析定价，然后根据 BillingMode 分发计算。
 func (s *BillingService) CalculateCostUnified(input CostInput) (*CostBreakdown, error) {
+	if err := validateUsageTokensForBilling(input.Tokens); err != nil {
+		return nil, err
+	}
 	if input.Resolver == nil {
 		// 无 Resolver，回退到旧路径
 		return s.calculateCostInternal(input.Model, input.Tokens, input.RateMultiplier, input.ServiceTier, nil)
@@ -633,6 +670,9 @@ func (s *BillingService) CalculateCostUnified(input CostInput) (*CostBreakdown, 
 	var err error
 	switch resolved.Mode {
 	case BillingModePerRequest, BillingModeImage:
+		if err := validateRequestCountForBilling(input.RequestCount); err != nil {
+			return nil, err
+		}
 		breakdown, err = s.calculatePerRequestCost(resolved, input)
 	default: // BillingModeToken
 		breakdown, err = s.calculateTokenCost(resolved, input)
@@ -642,13 +682,80 @@ func (s *BillingService) CalculateCostUnified(input CostInput) (*CostBreakdown, 
 		if breakdown.BillingMode == "" {
 			breakdown.BillingMode = string(BillingModeToken)
 		}
+		err = validateCostBreakdownForBilling(breakdown)
 	}
 	return breakdown, err
 }
 
+func validateRequestCountForBilling(requestCount int) error {
+	if requestCount < 0 {
+		return fmt.Errorf("invalid usage for billing: request_count is negative: %d", requestCount)
+	}
+	return nil
+}
+
+func validateUsageTokensForBilling(tokens UsageTokens) error {
+	checks := [...]struct {
+		name  string
+		value int
+	}{
+		{"input_tokens", tokens.InputTokens}, {"image_input_tokens", tokens.ImageInputTokens},
+		{"output_tokens", tokens.OutputTokens}, {"image_output_tokens", tokens.ImageOutputTokens},
+		{"cache_read_tokens", tokens.CacheReadTokens}, {"cache_creation_tokens", tokens.CacheCreationTokens},
+		{"cache_creation_5m_tokens", tokens.CacheCreation5mTokens}, {"cache_creation_1h_tokens", tokens.CacheCreation1hTokens},
+	}
+	for _, check := range checks {
+		if check.value < 0 {
+			return fmt.Errorf("invalid usage for billing: %s is negative: %d", check.name, check.value)
+		}
+	}
+	return nil
+}
+
+func validateImageCountForBilling(imageCount int) error {
+	if imageCount < 0 {
+		return fmt.Errorf("invalid usage for billing: image_count is negative: %d", imageCount)
+	}
+	return nil
+}
+
+func checkedBillingTokenSum(values ...int) (int, error) {
+	total := 0
+	for _, value := range values {
+		if value < 0 || total > int(^uint(0)>>1)-value {
+			return 0, fmt.Errorf("invalid usage for billing: token total overflows int")
+		}
+		total += value
+	}
+	return total, nil
+}
+
+func validateCostBreakdownForBilling(cost *CostBreakdown) error {
+	if cost == nil {
+		return nil
+	}
+	values := [...]struct {
+		name  string
+		value float64
+	}{
+		{"input_cost", cost.InputCost}, {"output_cost", cost.OutputCost}, {"image_output_cost", cost.ImageOutputCost},
+		{"cache_creation_cost", cost.CacheCreationCost}, {"cache_read_cost", cost.CacheReadCost},
+		{"total_cost", cost.TotalCost}, {"actual_cost", cost.ActualCost},
+	}
+	for _, item := range values {
+		if math.IsNaN(item.value) || math.IsInf(item.value, 0) || item.value < 0 {
+			return fmt.Errorf("invalid billing cost: %s must be finite and nonnegative: %v", item.name, item.value)
+		}
+	}
+	return nil
+}
+
 // calculateTokenCost 按 token 区间计费
 func (s *BillingService) calculateTokenCost(resolved *ResolvedPricing, input CostInput) (*CostBreakdown, error) {
-	totalContext := input.Tokens.InputTokens + input.Tokens.CacheReadTokens
+	totalContext, err := checkedBillingTokenSum(input.Tokens.InputTokens, input.Tokens.CacheCreationTokens, input.Tokens.CacheReadTokens)
+	if err != nil {
+		return nil, err
+	}
 
 	pricing := input.Resolver.GetIntervalPricing(resolved, totalContext)
 	if pricing == nil {
@@ -660,7 +767,7 @@ func (s *BillingService) calculateTokenCost(resolved *ResolvedPricing, input Cos
 	// 长上下文定价仅在无区间定价时应用（区间定价已包含上下文分层）
 	applyLongCtx := len(resolved.Intervals) == 0
 
-	return s.computeTokenBreakdown(pricing, input.Tokens, input.RateMultiplier, input.ServiceTier, applyLongCtx), nil
+	return s.computeTokenBreakdown(pricing, input.Tokens, input.RateMultiplier, input.ServiceTier, applyLongCtx)
 }
 
 // computeTokenBreakdown 是 token 计费的核心逻辑，由 calculateTokenCost 和 calculateCostInternal 共用。
@@ -669,7 +776,7 @@ func (s *BillingService) computeTokenBreakdown(
 	pricing *ModelPricing, tokens UsageTokens,
 	rateMultiplier float64, serviceTier string,
 	applyLongCtx bool,
-) *CostBreakdown {
+) (*CostBreakdown, error) {
 	// 保存时强制 > 0；若仍有负数泄漏，按 0 处理避免按 1x 误扣。
 	if rateMultiplier < 0 {
 		rateMultiplier = 0
@@ -678,6 +785,7 @@ func (s *BillingService) computeTokenBreakdown(
 	inputPrice := pricing.InputPricePerToken
 	outputPrice := pricing.OutputPricePerToken
 	cacheReadPrice := pricing.CacheReadPricePerToken
+	cacheCreationPrice := pricing.CacheCreationPricePerToken
 	cacheCreationMultiplier := 1.0
 	tierMultiplier := 1.0
 
@@ -691,12 +799,23 @@ func (s *BillingService) computeTokenBreakdown(
 		if pricing.CacheReadPricePerTokenPriority > 0 {
 			cacheReadPrice = pricing.CacheReadPricePerTokenPriority
 		}
+		if pricing.CacheCreationPricePerTokenPriority > 0 {
+			cacheCreationPrice = pricing.CacheCreationPricePerTokenPriority
+		}
 	} else {
 		tierMultiplier = serviceTierCostMultiplier(serviceTier)
 	}
 
 	imageInputPrice := pricing.ImageInputPricePerToken
-	if applyLongCtx && s.shouldApplySessionLongContextPricing(tokens, pricing) {
+	applySessionLongContext := false
+	if applyLongCtx {
+		var err error
+		applySessionLongContext, err = s.shouldApplySessionLongContextPricing(tokens, pricing)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if applySessionLongContext {
 		inputPrice *= pricing.LongContextInputMultiplier
 		if imageInputPrice > 0 {
 			imageInputPrice *= pricing.LongContextInputMultiplier
@@ -731,7 +850,7 @@ func (s *BillingService) computeTokenBreakdown(
 	}
 
 	// 缓存创建费用
-	bd.CacheCreationCost = s.computeCacheCreationCost(pricing, tokens, cacheCreationMultiplier)
+	bd.CacheCreationCost = s.computeCacheCreationCost(pricing, tokens, cacheCreationPrice, cacheCreationMultiplier)
 
 	bd.CacheReadCost = float64(tokens.CacheReadTokens) * cacheReadPrice
 
@@ -747,7 +866,7 @@ func (s *BillingService) computeTokenBreakdown(
 		bd.CacheCreationCost + bd.CacheReadCost
 	bd.ActualCost = bd.TotalCost * rateMultiplier
 
-	return bd
+	return bd, nil
 }
 
 func computeInputCostWithImageTokens(tokens UsageTokens, inputPrice, imageInputPrice float64) float64 {
@@ -768,7 +887,7 @@ func computeInputCostWithImageTokens(tokens UsageTokens, inputPrice, imageInputP
 
 // computeCacheCreationCost 计算缓存创建费用（支持 5m/1h 分类或标准计费）。
 // multiplier 用于长上下文等场景下的整体价格缩放（普通调用传 1.0 即可）。
-func (s *BillingService) computeCacheCreationCost(pricing *ModelPricing, tokens UsageTokens, multiplier float64) float64 {
+func (s *BillingService) computeCacheCreationCost(pricing *ModelPricing, tokens UsageTokens, price, multiplier float64) float64 {
 	if pricing.SupportsCacheBreakdown && (pricing.CacheCreation5mPrice > 0 || pricing.CacheCreation1hPrice > 0) {
 		if tokens.CacheCreation5mTokens == 0 && tokens.CacheCreation1hTokens == 0 && tokens.CacheCreationTokens > 0 {
 			// API 未返回 ephemeral 明细，回退到全部按 5m 单价计费
@@ -777,7 +896,7 @@ func (s *BillingService) computeCacheCreationCost(pricing *ModelPricing, tokens 
 		return float64(tokens.CacheCreation5mTokens)*pricing.CacheCreation5mPrice*multiplier +
 			float64(tokens.CacheCreation1hTokens)*pricing.CacheCreation1hPrice*multiplier
 	}
-	return float64(tokens.CacheCreationTokens) * pricing.CacheCreationPricePerToken * multiplier
+	return float64(tokens.CacheCreationTokens) * price * multiplier
 }
 
 // calculatePerRequestCost 按次/图片计费
@@ -794,7 +913,10 @@ func (s *BillingService) calculatePerRequestCost(resolved *ResolvedPricing, inpu
 	}
 
 	if unitPrice == 0 {
-		totalContext := input.Tokens.InputTokens + input.Tokens.CacheReadTokens
+		totalContext, err := checkedBillingTokenSum(input.Tokens.InputTokens, input.Tokens.CacheCreationTokens, input.Tokens.CacheReadTokens)
+		if err != nil {
+			return nil, err
+		}
 		unitPrice = input.Resolver.GetRequestTierPriceByContext(resolved, totalContext)
 	}
 
@@ -822,6 +944,9 @@ func (s *BillingService) CalculateCostWithServiceTier(model string, tokens Usage
 }
 
 func (s *BillingService) calculateCostInternal(model string, tokens UsageTokens, rateMultiplier float64, serviceTier string, channelPricing *ChannelModelPricing) (*CostBreakdown, error) {
+	if err := validateUsageTokensForBilling(tokens); err != nil {
+		return nil, err
+	}
 	var pricing *ModelPricing
 	var err error
 	if channelPricing != nil {
@@ -834,20 +959,40 @@ func (s *BillingService) calculateCostInternal(model string, tokens UsageTokens,
 	}
 
 	// 旧路径始终检查长上下文定价（无区间定价概念）
-	return s.computeTokenBreakdown(pricing, tokens, rateMultiplier, serviceTier, true), nil
+	breakdown, err := s.computeTokenBreakdown(pricing, tokens, rateMultiplier, serviceTier, true)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateCostBreakdownForBilling(breakdown); err != nil {
+		return nil, err
+	}
+	return breakdown, nil
 }
 
 func (s *BillingService) applyModelSpecificPricingPolicy(model string, pricing *ModelPricing) *ModelPricing {
 	if pricing == nil {
 		return nil
 	}
-	if !isOpenAIGPT54Model(model) {
+	normalized := normalizeKnownOpenAICodexModel(model)
+	isGPT56 := isOpenAIGPT56Model(normalized)
+	usesLegacy := normalized == "gpt-5.4" || normalized == "gpt-5.5" || normalized == "gpt-5.5-pro"
+	if !isGPT56 && !usesLegacy {
 		return pricing
 	}
-	if pricing.LongContextInputThreshold > 0 && pricing.LongContextInputMultiplier > 0 && pricing.LongContextOutputMultiplier > 0 {
+	needsLong := pricing.LongContextInputThreshold <= 0 || pricing.LongContextInputMultiplier <= 0 || pricing.LongContextOutputMultiplier <= 0
+	needsCache := isGPT56 && !pricing.CacheCreationPriceExplicit && (pricing.CacheCreationPricePerToken <= 0 || (pricing.InputPricePerTokenPriority > 0 && pricing.CacheCreationPricePerTokenPriority <= 0))
+	if !needsLong && !needsCache {
 		return pricing
 	}
 	cloned := *pricing
+	if needsCache {
+		if cloned.CacheCreationPricePerToken <= 0 {
+			cloned.CacheCreationPricePerToken = cloned.InputPricePerToken * 1.25
+		}
+		if cloned.CacheCreationPricePerTokenPriority <= 0 {
+			cloned.CacheCreationPricePerTokenPriority = cloned.InputPricePerTokenPriority * 1.25
+		}
+	}
 	if cloned.LongContextInputThreshold <= 0 {
 		cloned.LongContextInputThreshold = openAIGPT54LongContextInputThreshold
 	}
@@ -860,23 +1005,18 @@ func (s *BillingService) applyModelSpecificPricingPolicy(model string, pricing *
 	return &cloned
 }
 
-func (s *BillingService) shouldApplySessionLongContextPricing(tokens UsageTokens, pricing *ModelPricing) bool {
+func (s *BillingService) shouldApplySessionLongContextPricing(tokens UsageTokens, pricing *ModelPricing) (bool, error) {
 	if pricing == nil || pricing.LongContextInputThreshold <= 0 {
-		return false
+		return false, nil
 	}
 	if pricing.LongContextInputMultiplier <= 1 && pricing.LongContextOutputMultiplier <= 1 {
-		return false
+		return false, nil
 	}
-	totalInputTokens := tokens.InputTokens + tokens.CacheReadTokens
-	return totalInputTokens > pricing.LongContextInputThreshold
-}
-
-func isOpenAIGPT54Model(model string) bool {
-	// 仅当模型字符串实际属于已知 GPT-5/Codex 族时才做归一判定，避免
-	// normalizeCodexModel 的默认兜底把非 OpenAI 模型（claude-*、gemini-*、gpt-4o）
-	// 误识别为 gpt-5.4。
-	normalized := normalizeKnownOpenAICodexModel(model)
-	return normalized == "gpt-5.4" || normalized == "gpt-5.5"
+	total, err := checkedBillingTokenSum(tokens.InputTokens, tokens.CacheCreationTokens, tokens.CacheReadTokens)
+	if err != nil {
+		return false, err
+	}
+	return total > pricing.LongContextInputThreshold, nil
 }
 
 // CalculateCostWithConfig 使用配置中的默认倍率计算费用
@@ -896,13 +1036,19 @@ func (s *BillingService) CalculateCostWithConfig(model string, tokens UsageToken
 // 拆分为：范围内 (200k, 0) + 范围外 (10k, 10k)
 // 范围内正常计费，范围外 × 2 计费
 func (s *BillingService) CalculateCostWithLongContext(model string, tokens UsageTokens, rateMultiplier float64, threshold int, extraMultiplier float64) (*CostBreakdown, error) {
+	if err := validateUsageTokensForBilling(tokens); err != nil {
+		return nil, err
+	}
 	// 未启用长上下文计费，直接走正常计费
 	if threshold <= 0 || extraMultiplier <= 1 {
 		return s.CalculateCost(model, tokens, rateMultiplier)
 	}
 
 	// 计算总输入 token（缓存读取 + 新输入）
-	total := tokens.CacheReadTokens + tokens.InputTokens
+	total, err := checkedBillingTokenSum(tokens.CacheReadTokens, tokens.InputTokens)
+	if err != nil {
+		return nil, err
+	}
 	if total <= threshold {
 		return s.CalculateCost(model, tokens, rateMultiplier)
 	}
@@ -951,7 +1097,7 @@ func (s *BillingService) CalculateCostWithLongContext(model string, tokens Usage
 	}
 
 	// 合并成本
-	return &CostBreakdown{
+	combined := &CostBreakdown{
 		InputCost:         inRangeCost.InputCost + outRangeCost.InputCost,
 		OutputCost:        inRangeCost.OutputCost,
 		ImageOutputCost:   inRangeCost.ImageOutputCost,
@@ -959,7 +1105,11 @@ func (s *BillingService) CalculateCostWithLongContext(model string, tokens Usage
 		CacheReadCost:     inRangeCost.CacheReadCost + outRangeCost.CacheReadCost,
 		TotalCost:         inRangeCost.TotalCost + outRangeCost.TotalCost,
 		ActualCost:        inRangeCost.ActualCost + outRangeCost.ActualCost,
-	}, nil
+	}
+	if err := validateCostBreakdownForBilling(combined); err != nil {
+		return nil, err
+	}
+	return combined, nil
 }
 
 // ListSupportedModels 列出所有支持的模型（现在总是返回true，因为有模糊匹配）

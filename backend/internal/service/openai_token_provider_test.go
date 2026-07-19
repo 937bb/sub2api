@@ -3,9 +3,11 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -341,6 +343,12 @@ func TestOpenAITokenProvider_PersonalAccessTokenHydrationPersistsViaUpdateCreden
 	}))
 	defer server.Close()
 	openAIAuthAPIBaseURL = server.URL
+	var slogOutput bytes.Buffer
+	previousLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&slogOutput, nil)))
+	t.Cleanup(func() {
+		slog.SetDefault(previousLogger)
+	})
 
 	cache := newOpenAITokenCacheStub()
 	repo := &openAISetupTokenBoundaryRepoStub{}
@@ -366,6 +374,19 @@ func TestOpenAITokenProvider_PersonalAccessTokenHydrationPersistsViaUpdateCreden
 	require.Equal(t, int32(0), atomic.LoadInt32(&repo.bulkUpdateCalls), "PAT hydration should not use bulk update")
 	require.Equal(t, "698727dc-d964-43d7-954f-932a4eb67eaf", repo.lastCredentials["chatgpt_account_id"])
 	require.Equal(t, "698727dc-d964-43d7-954f-932a4eb67eaf", account.GetChatGPTAccountID())
+	logs := slogOutput.String()
+	require.Contains(t, logs, `"msg":"openai_personal_access_token_metadata_hydrated"`)
+	require.Contains(t, logs, `"account_id":117`)
+	require.NotContains(t, logs, "user@example.com")
+	require.NotContains(t, logs, "user-123")
+	require.NotContains(t, logs, "698727dc-d964-43d7-954f-932a4eb67eaf")
+	require.NotContains(t, logs, `"email"`)
+	require.NotContains(t, logs, "chatgpt_user_id")
+	require.NotContains(t, logs, "chatgpt_account_id")
+	require.NotContains(t, logs, "chatgpt_plan_type")
+	require.NotContains(t, logs, "plan_type")
+	require.NotContains(t, logs, "chatgpt_account_is_fedramp")
+	require.NotContains(t, logs, "at-pat-token")
 }
 
 func TestOpenAITokenProvider_SetupTokenPersonalAccessTokenBypassesCache(t *testing.T) {
@@ -478,6 +499,45 @@ func TestOpenAITokenProvider_PersonalAccessTokenOwnerInactive403DisablesAccountD
 	require.NotContains(t, repo.lastErrorMsg, "at-runtime-inactive-403")
 	require.Equal(t, []int64{account.ID}, blocker.accounts)
 	require.Equal(t, []string{"openai_pat_owner_403"}, blocker.reasons)
+	_, cached := cache.tokens[OpenAITokenCacheKey(account)]
+	require.False(t, cached)
+}
+
+func TestOpenAITokenProvider_PersonalAccessTokenHydrationErrorBodyRedactsSensitiveMetadata(t *testing.T) {
+	repo := &openAISetupTokenBoundaryRepoStub{}
+	cache := newOpenAITokenCacheStub()
+	account := &Account{
+		ID:       118,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"personal_access_token": "at-existing-pat",
+		},
+	}
+	cache.tokens[OpenAITokenCacheKey(account)] = "stale-token"
+	provider := NewOpenAITokenProvider(repo, cache, nil)
+	provider.disableAccountPersonalAccessTokenOwner403(account, &openAIPersonalAccessTokenWhoamiError{
+		statusCode: http.StatusForbidden,
+		body: `{"error":{"code":"owner_403"},"email":"pat-user@example.com","chatgpt_user_id":"user-sensitive",` +
+			`"chatgpt_account_id":"acc-sensitive","chatgpt_plan_type":"enterprise","chatgpt_account_is_fedramp":true,` +
+			`"personal_access_token":"at-body-token","authorization":"Bearer at-body-auth-token"}`,
+	})
+
+	require.Equal(t, int32(1), atomic.LoadInt32(&repo.setErrorCalls))
+	require.Equal(t, account.ID, repo.lastErrorID)
+	require.Contains(t, repo.lastErrorMsg, "Access forbidden (403)")
+	require.Contains(t, repo.lastErrorMsg, `"code":"owner_403"`)
+	require.Contains(t, repo.lastErrorMsg, `"email":"[redacted]"`)
+	require.Contains(t, repo.lastErrorMsg, `"chatgpt_user_id":"[redacted]"`)
+	require.Contains(t, repo.lastErrorMsg, `"chatgpt_account_id":"[redacted]"`)
+	require.Contains(t, repo.lastErrorMsg, `"chatgpt_plan_type":"[redacted]"`)
+	require.Contains(t, repo.lastErrorMsg, `"chatgpt_account_is_fedramp":"[redacted]"`)
+	require.NotContains(t, repo.lastErrorMsg, "pat-user@example.com")
+	require.NotContains(t, repo.lastErrorMsg, "user-sensitive")
+	require.NotContains(t, repo.lastErrorMsg, "acc-sensitive")
+	require.NotContains(t, repo.lastErrorMsg, "enterprise")
+	require.NotContains(t, repo.lastErrorMsg, "at-body-token")
+	require.NotContains(t, repo.lastErrorMsg, "at-body-auth-token")
 	_, cached := cache.tokens[OpenAITokenCacheKey(account)]
 	require.False(t, cached)
 }

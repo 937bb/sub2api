@@ -8,7 +8,7 @@ describe('embedded-url', () => {
     Object.defineProperty(window, 'location', {
       value: {
         origin: 'https://app.example.com',
-        href: 'https://app.example.com/user/purchase',
+        href: 'https://app.example.com/user/purchase?return_to=%2Fkeys&invite=secret#payment',
       },
       writable: true,
       configurable: true,
@@ -43,6 +43,34 @@ describe('embedded-url', () => {
     expect(url.searchParams.get('ui_mode')).toBe('embedded')
     expect(url.searchParams.get('src_host')).toBe('https://app.example.com')
     expect(url.searchParams.get('src_url')).toBe('https://app.example.com/user/purchase')
+  })
+
+  it('does not disclose source query parameters or fragments', () => {
+    const result = buildEmbeddedUrl('https://pay.example.com/checkout')
+
+    const sourceUrl = new URL(result).searchParams.get('src_url')
+    expect(sourceUrl).toBe('https://app.example.com/user/purchase')
+    expect(sourceUrl).not.toContain('return_to')
+    expect(sourceUrl).not.toContain('invite')
+    expect(sourceUrl).not.toContain('#payment')
+  })
+
+  it('preserves embed parameters when the source URL is malformed', () => {
+    Object.defineProperty(window, 'location', {
+      value: { origin: 'https://app.example.com', href: '/relative-host-path' },
+      writable: true,
+      configurable: true,
+    })
+
+    const url = new URL(
+      buildEmbeddedUrl('https://pay.example.com/checkout', 42, 'token-123', 'dark'),
+    )
+    expect(url.searchParams.get('user_id')).toBe('42')
+    expect(url.searchParams.get('token')).toBe('token-123')
+    expect(url.searchParams.get('theme')).toBe('dark')
+    expect(url.searchParams.get('ui_mode')).toBe('embedded')
+    expect(url.searchParams.get('src_host')).toBe('https://app.example.com')
+    expect(url.searchParams.has('src_url')).toBe(false)
   })
 
   it('omits optional params when they are empty', () => {

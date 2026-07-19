@@ -116,7 +116,7 @@ func convertResponsesInputToAnthropic(inputRaw json.RawMessage) (json.RawMessage
 	var system json.RawMessage
 	var messages []AnthropicMessage
 
-	for _, item := range items {
+	for itemIndex, item := range items {
 		switch {
 		case item.Role == "system":
 			// System prompt → Anthropic system field
@@ -127,9 +127,9 @@ func convertResponsesInputToAnthropic(inputRaw json.RawMessage) (json.RawMessage
 
 		case item.Type == "function_call":
 			// function_call → assistant message with tool_use block
-			input := json.RawMessage("{}")
-			if item.Arguments != "" {
-				input = json.RawMessage(item.Arguments)
+			input, err := functionCallArgumentsObject(item.Arguments)
+			if err != nil {
+				return nil, nil, fmt.Errorf("responses input item %d function_call %q arguments: %w", itemIndex, item.CallID, err)
 			}
 			block := AnthropicContentBlock{
 				Type:  "tool_use",
@@ -202,6 +202,66 @@ func convertResponsesInputToAnthropic(inputRaw json.RawMessage) (json.RawMessage
 	messages = mergeConsecutiveMessages(messages)
 
 	return system, messages, nil
+}
+
+// functionCallArgumentsObject validates the Responses string field before it
+// becomes Anthropic's object-valued tool_use.input. Keep the original bytes so
+// arbitrary nested values pass through without lossy type conversion.
+func functionCallArgumentsObject(arguments string) (json.RawMessage, error) {
+	if arguments == "" {
+		return json.RawMessage("{}"), nil
+	}
+
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(arguments), &object); err != nil {
+		return nil, fmt.Errorf("must be a valid JSON object: %w", err)
+	}
+	if object == nil {
+		return nil, fmt.Errorf("must be a JSON object, got null")
+	}
+	if err := rejectDuplicateJSONNames(json.NewDecoder(strings.NewReader(arguments))); err != nil {
+		return nil, fmt.Errorf("must be a valid JSON object: %w", err)
+	}
+	return json.RawMessage(arguments), nil
+}
+
+func rejectDuplicateJSONNames(decoder *json.Decoder) error {
+	token, err := decoder.Token()
+	if err != nil {
+		return err
+	}
+
+	delim, isContainer := token.(json.Delim)
+	if !isContainer {
+		return nil
+	}
+	if delim == '[' {
+		for decoder.More() {
+			if err := rejectDuplicateJSONNames(decoder); err != nil {
+				return err
+			}
+		}
+		_, err = decoder.Token()
+		return err
+	}
+
+	seen := make(map[string]struct{})
+	for decoder.More() {
+		nameToken, err := decoder.Token()
+		if err != nil {
+			return err
+		}
+		name := nameToken.(string)
+		if _, exists := seen[name]; exists {
+			return fmt.Errorf("duplicate object key %q", name)
+		}
+		seen[name] = struct{}{}
+		if err := rejectDuplicateJSONNames(decoder); err != nil {
+			return err
+		}
+	}
+	_, err = decoder.Token()
+	return err
 }
 
 // normalizeAnthropicToolPairing rebuilds the message sequence so it satisfies
@@ -518,31 +578,59 @@ func convertResponsesToAnthropicTools(tools []ResponsesTool) []AnthropicTool {
 				Type: "web_search_20250305",
 				Name: "web_search",
 			})
-		case "function":
+		case "function", "custom":
 			out = append(out, AnthropicTool{
 				Name:        t.Name,
 				Description: t.Description,
 				InputSchema: normalizeAnthropicInputSchema(t.Parameters),
 			})
 		default:
-			// Pass through unknown tool types
+			// Pass through unknown tool types, but still keep Anthropic's required
+			// input_schema as an object so local/freeform tools do not marshal null.
 			out = append(out, AnthropicTool{
 				Type:        t.Type,
 				Name:        t.Name,
 				Description: t.Description,
-				InputSchema: t.Parameters,
+				InputSchema: normalizeAnthropicInputSchema(t.Parameters),
 			})
 		}
 	}
 	return out
 }
 
-// normalizeAnthropicInputSchema ensures the input_schema has a "type" field.
+// normalizeAnthropicInputSchema ensures input_schema is a valid object schema.
 func normalizeAnthropicInputSchema(schema json.RawMessage) json.RawMessage {
-	if len(schema) == 0 || string(schema) == "null" {
-		return json.RawMessage(`{"type":"object","properties":{}}`)
+	const emptyObjectSchema = `{"type":"object","properties":{}}`
+
+	trimmed := strings.TrimSpace(string(schema))
+	if trimmed == "" || trimmed == "null" {
+		return json.RawMessage(emptyObjectSchema)
 	}
-	return schema
+
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(schema, &m); err != nil {
+		return json.RawMessage(emptyObjectSchema)
+	}
+
+	typeRaw, ok := m["type"]
+	if !ok || strings.TrimSpace(string(typeRaw)) == "" || string(typeRaw) == "null" {
+		m["type"] = json.RawMessage(`"object"`)
+	} else {
+		var typ string
+		if err := json.Unmarshal(typeRaw, &typ); err != nil || typ != "object" {
+			return json.RawMessage(emptyObjectSchema)
+		}
+	}
+
+	if _, ok := m["properties"]; !ok {
+		m["properties"] = json.RawMessage(`{}`)
+	}
+
+	out, err := json.Marshal(m)
+	if err != nil {
+		return json.RawMessage(emptyObjectSchema)
+	}
+	return out
 }
 
 // convertResponsesToAnthropicToolChoice maps Responses tool_choice to Anthropic format.

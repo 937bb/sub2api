@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"runtime"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -129,6 +130,111 @@ func TestWrapReleaseOnDone_ConcurrentCalls(t *testing.T) {
 }
 
 // BenchmarkWrapReleaseOnDone 性能基准测试
+func TestHTTPAttemptReleaseSetCancellationBeforeTransfer(
+	t *testing.T,
+) {
+	ctx, cancel := context.WithCancel(context.Background())
+	released := make(chan struct{}, 1)
+	set := newHTTPAttemptReleaseSet(ctx)
+	release := set.Add(func() { released <- struct{}{} })
+
+	cancel()
+
+	select {
+	case <-released:
+	case <-time.After(time.Second):
+		t.Fatal("pending release was not reclaimed")
+	}
+	release()
+	select {
+	case <-released:
+		t.Fatal("release ran more than once")
+	default:
+	}
+}
+
+func TestHTTPAttemptReleaseSetTransferHoldsUntilCompletion(
+	t *testing.T,
+) {
+	ctx, cancel := context.WithCancel(context.Background())
+	released := make(chan struct{}, 1)
+	releaseStarted := make(chan struct{})
+	allowRelease := make(chan struct{})
+	var releaseOnce sync.Once
+	set := newHTTPAttemptReleaseSet(ctx)
+	release := set.Add(func() {
+		releaseOnce.Do(func() { close(releaseStarted) })
+		<-allowRelease
+		released <- struct{}{}
+	})
+	if !set.Transfer() {
+		t.Fatal("release ownership transfer failed")
+	}
+	if set.Transfer() {
+		t.Fatal("release ownership transferred more than once")
+	}
+
+	cancel()
+	select {
+	case <-releaseStarted:
+		t.Fatal("transferred release started on client cancellation")
+	default:
+	}
+
+	go release()
+	select {
+	case <-releaseStarted:
+	case <-time.After(time.Second):
+		t.Fatal("transferred release did not start at completion")
+	}
+	close(allowRelease)
+	select {
+	case <-released:
+	case <-time.After(time.Second):
+		t.Fatal("transferred release did not run at completion")
+	}
+}
+
+func TestHTTPAttemptReleaseSetLogicalTransferSurvivesMultipleAttempts(
+	t *testing.T,
+) {
+	set := newHTTPAttemptReleaseSet(context.Background())
+	if !set.transferLogical() {
+		t.Fatal("first logical transfer failed")
+	}
+	if !set.transferLogical() {
+		t.Fatal("later logical transfer was rejected")
+	}
+	set.finish()
+	if set.transferLogical() {
+		t.Fatal("completed logical lease transferred again")
+	}
+}
+
+func TestHTTPAttemptReleaseSetRejectsLateReleaseWithoutLeak(
+	t *testing.T,
+) {
+	ctx := context.Background()
+	set := newHTTPAttemptReleaseSet(ctx)
+	if !set.Transfer() {
+		t.Fatal("release ownership transfer failed")
+	}
+	released := make(chan struct{}, 1)
+	release := set.Add(func() { released <- struct{}{} })
+
+	select {
+	case <-released:
+	default:
+		t.Fatal("late release was not reclaimed")
+	}
+	release()
+	select {
+	case <-released:
+		t.Fatal("late release ran more than once")
+	default:
+	}
+}
+
 func BenchmarkWrapReleaseOnDone(b *testing.B) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

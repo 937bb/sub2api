@@ -2,13 +2,16 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
 	"github.com/stretchr/testify/require"
 )
 
@@ -27,6 +30,61 @@ func TestBuildV1ModelsURL(t *testing.T) {
 	require.Equal(t, "https://api.anthropic.com/v1/models", buildV1ModelsURL("https://api.anthropic.com/v1"))
 	require.Equal(t, "https://api.anthropic.com/v1/models", buildV1ModelsURL("https://api.anthropic.com/v1/models"))
 	require.Equal(t, "https://gateway.example.com/antigravity/v1/models", buildV1ModelsURL("https://gateway.example.com/antigravity/"))
+}
+
+func TestBuildOpenAIModelsURL(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		base string
+		want string
+	}{
+		{
+			name: "host fallback uses v1",
+			base: "https://api.openai.com",
+			want: "https://api.openai.com/v1/models",
+		},
+		{
+			name: "openai v1 base url",
+			base: "https://api.openai.com/v1",
+			want: "https://api.openai.com/v1/models",
+		},
+		{
+			name: "models url unchanged",
+			base: "https://api.openai.com/v1/models",
+			want: "https://api.openai.com/v1/models",
+		},
+		{
+			name: "third party v4 base url",
+			base: "https://open.bigmodel.cn/api/coding/paas/v4",
+			want: "https://open.bigmodel.cn/api/coding/paas/v4/models",
+		},
+		{
+			name: "third party v4 models url unchanged",
+			base: "https://open.bigmodel.cn/api/coding/paas/v4/models",
+			want: "https://open.bigmodel.cn/api/coding/paas/v4/models",
+		},
+		{
+			name: "trailing slash on versioned base",
+			base: "https://open.bigmodel.cn/api/coding/paas/v4/",
+			want: "https://open.bigmodel.cn/api/coding/paas/v4/models",
+		},
+		{
+			name: "non versioned path appends v1",
+			base: "https://gateway.example.com/openai",
+			want: "https://gateway.example.com/openai/v1/models",
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			require.Equal(t, tt.want, buildOpenAIModelsURL(tt.base))
+		})
+	}
 }
 
 func TestBuildGeminiModelsURL(t *testing.T) {
@@ -90,8 +148,27 @@ func TestBuildUpstreamModelsRequestsForAPIKeyAccounts(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, "https://anthropic.example.com/v1/models", anthropicReq.URL.String())
-	require.Equal(t, "anthropic-key", anthropicReq.Header.Get("x-api-key"))
+	require.Equal(t, "anthropic-key", getHeaderRaw(anthropicReq.Header, "x-api-key"))
+	require.Equal(t, "anthropic-key", anthropicReq.Header["x-api-key"][0])
 	require.Equal(t, "2023-06-01", anthropicReq.Header.Get("anthropic-version"))
+
+	anthropicBearerReq, err := svc.buildAnthropicUpstreamModelsRequest(ctx, &Account{
+		Platform: PlatformAnthropic,
+		Type:     AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"api_key":  "ollama-key",
+			"base_url": "https://ollama.com",
+		},
+		Extra: map[string]any{
+			"anthropic_apikey_auth_scheme": AnthropicAPIKeyAuthSchemeAuthorizationBearer,
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, "https://ollama.com/v1/models", anthropicBearerReq.URL.String())
+	require.Equal(t, "Bearer ollama-key", getHeaderRaw(anthropicBearerReq.Header, "authorization"))
+	require.Equal(t, "Bearer ollama-key", anthropicBearerReq.Header["authorization"][0])
+	require.Empty(t, getHeaderRaw(anthropicBearerReq.Header, "x-api-key"))
+	require.Equal(t, "2023-06-01", anthropicBearerReq.Header.Get("anthropic-version"))
 
 	openAIReq, err := svc.buildOpenAIUpstreamModelsRequest(ctx, &Account{
 		Platform: PlatformOpenAI,
@@ -223,4 +300,151 @@ func TestFetchUpstreamSupportedModelsDoesNotExposeUpstreamBody(t *testing.T) {
 	require.Equal(t, UpstreamModelSyncErrorUpstream, syncErr.Kind)
 	require.NotContains(t, syncErr.SafeMessage(), "SECRET_TOKEN")
 	require.Contains(t, syncErr.SafeMessage(), "HTTP 502")
+}
+
+func TestAntigravityUpstreamModelsUsesConfiguredProjectFallback(t *testing.T) {
+	var gotProject string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodPost, r.Method)
+		require.Equal(t, "/v1internal:fetchAvailableModels", r.URL.Path)
+
+		var req antigravity.FetchAvailableModelsRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+		gotProject = req.Project
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"models":{"gemini-2.5-flash":{},"claude-sonnet-4-5":{}}}`))
+	}))
+	defer server.Close()
+	withAntigravityModelSyncBaseURLs(t, []string{server.URL})
+
+	svc := &AccountTestService{
+		antigravityGatewayService: &AntigravityGatewayService{
+			tokenProvider: &AntigravityTokenProvider{},
+		},
+	}
+	account := &Account{
+		ID:       77,
+		Platform: PlatformAntigravity,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"access_token":                          "token",
+			antigravityProjectFallbackCredentialKey: " configured-project ",
+		},
+	}
+
+	models, err := svc.FetchUpstreamSupportedModels(context.Background(), account)
+	require.NoError(t, err)
+	require.Equal(t, []string{"claude-sonnet-4-5", "gemini-2.5-flash"}, models)
+	require.Equal(t, "configured-project", gotProject)
+	require.Empty(t, account.GetCredential("project_id"), "configured fallback must not backfill project_id")
+}
+
+func TestAntigravityUpstreamModelsBackfillsMissingProjectBeforeResolve(t *testing.T) {
+	cache := &recordingAntigravityTokenCache{}
+	probe := newAntigravityV1InternalProbe(t)
+
+	svc := &AccountTestService{
+		antigravityGatewayService: &AntigravityGatewayService{
+			tokenProvider: newRecordingAntigravityTokenProvider(cache),
+		},
+	}
+	account := &Account{
+		ID:       78,
+		Platform: PlatformAntigravity,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"access_token": "token",
+		},
+	}
+
+	models, err := svc.FetchUpstreamSupportedModels(context.Background(), account)
+	require.NoError(t, err)
+	require.Equal(t, []string{"gemini-2.5-flash"}, models)
+	require.Equal(t, []string{"ag:account:78"}, cache.getCalls)
+	require.Equal(t, []string{"ag:backfilled-project"}, cache.setCalls)
+	require.Contains(t, probe.paths, "/v1internal:loadCodeAssist")
+	require.Contains(t, probe.paths, "/v1internal:fetchAvailableModels")
+	require.Equal(t, "backfilled-project", account.GetCredential("project_id"))
+}
+
+func TestAntigravityUpstreamModelsAPIKeyIgnoresConfiguredProjectFallback(t *testing.T) {
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"data":[{"id":"claude-sonnet-4-5"}]}`)),
+	}}
+	probe := newAntigravityV1InternalProbe(t)
+	svc := &AccountTestService{
+		httpUpstream: upstream,
+		cfg:          upstreamModelSyncTestConfig(),
+		antigravityGatewayService: &AntigravityGatewayService{
+			tokenProvider: newRecordingAntigravityTokenProvider(&recordingAntigravityTokenCache{}),
+		},
+	}
+
+	models, err := svc.FetchUpstreamSupportedModels(context.Background(), &Account{
+		ID:       79,
+		Platform: PlatformAntigravity,
+		Type:     AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"api_key":                               "antigravity-key",
+			"base_url":                              "https://gateway.example.com/antigravity",
+			antigravityProjectFallbackCredentialKey: " configured-project ",
+		},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, []string{"claude-sonnet-4-5"}, models)
+	require.Equal(t, "https://gateway.example.com/antigravity/v1/models", upstream.lastReq.URL.String())
+	require.Equal(t, "antigravity-key", upstream.lastReq.Header.Get("x-api-key"))
+	require.Empty(t, probe.paths, "API-key model sync must not call Antigravity OAuth v1internal APIs")
+}
+
+func TestAntigravityUpstreamModelsUpstreamDoesNotUseOAuthFallback(t *testing.T) {
+	cache := &recordingAntigravityTokenCache{}
+	probe := newAntigravityV1InternalProbe(t)
+	upstream := &httpUpstreamRecorder{}
+	svc := &AccountTestService{
+		httpUpstream: upstream,
+		cfg:          upstreamModelSyncTestConfig(),
+		antigravityGatewayService: &AntigravityGatewayService{
+			tokenProvider: newRecordingAntigravityTokenProvider(cache),
+		},
+	}
+
+	_, err := svc.FetchUpstreamSupportedModels(context.Background(), &Account{
+		ID:       80,
+		Platform: PlatformAntigravity,
+		Type:     AccountTypeUpstream,
+		Credentials: map[string]any{
+			"api_key":                               "upstream-key",
+			"base_url":                              "https://gateway.example.com/antigravity",
+			antigravityProjectFallbackCredentialKey: " configured-project ",
+		},
+	})
+
+	require.Error(t, err)
+	cache.requireNoTokenWork(t)
+	require.Empty(t, probe.paths)
+	require.Nil(t, upstream.lastReq)
+
+	var syncErr *UpstreamModelSyncError
+	require.True(t, errors.As(err, &syncErr))
+	require.Equal(t, UpstreamModelSyncErrorUnsupported, syncErr.Kind)
+	require.Contains(t, syncErr.SafeMessage(), "Unsupported Antigravity account type")
+}
+
+func withAntigravityModelSyncBaseURLs(t *testing.T, urls []string) {
+	t.Helper()
+	origBaseURLs := antigravity.BaseURLs
+	origBaseURL := antigravity.BaseURL
+	antigravity.BaseURLs = urls
+	if len(urls) > 0 {
+		antigravity.BaseURL = urls[0]
+	}
+	t.Cleanup(func() {
+		antigravity.BaseURLs = origBaseURLs
+		antigravity.BaseURL = origBaseURL
+	})
 }

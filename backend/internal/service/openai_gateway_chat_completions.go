@@ -54,9 +54,22 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	account *Account,
 	body []byte,
 	promptCacheKey string,
-	defaultMappedModel string,
 ) (*OpenAIForwardResult, error) {
+	ctx = withHTTPAttemptAuthority(ctx)
 	startTime := time.Now()
+
+	restrictionResult := s.detectCodexClientRestriction(c, account)
+	logCodexCLIOnlyDetection(ctx, c, account, getAPIKeyIDFromContext(c), restrictionResult, body)
+	if restrictionResult.Enabled && !restrictionResult.Matched {
+		MarkOpsClientBusinessLimited(c, OpsClientBusinessLimitedReasonLocalPolicyDenied)
+		c.JSON(http.StatusForbidden, gin.H{
+			"error": gin.H{
+				"type":    "forbidden_error",
+				"message": "This account only allows Codex official clients",
+			},
+		})
+		return nil, errors.New("codex_cli_only restriction: only codex official clients are allowed")
+	}
 
 	// 1. Parse Chat Completions request
 	var chatReq apicompat.ChatCompletionsRequest
@@ -68,13 +81,13 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 
 	// 2. Resolve model mapping early so compat prompt_cache_key injection can
 	// derive a stable seed from the final upstream model family.
-	billingModel := resolveOpenAIForwardModel(account, originalModel, defaultMappedModel)
+	billingModel := resolveOpenAIForwardModel(account, originalModel)
 	upstreamModel := normalizeOpenAIModelForUpstream(account, billingModel)
 
 	// 入口分流：APIKey 账号 + 强制或已探测确认上游模型不支持 Responses，走 CC 直转。
 	// 自动模式下标记缺失（未探测）按"现状即证据"原则继续走下方原 Responses 转换路径。
 	if account.Type == AccountTypeAPIKey && !openai_compat.ShouldUseResponsesAPIForModel(account.Extra, upstreamModel) {
-		return s.forwardAsRawChatCompletions(ctx, c, account, body, defaultMappedModel)
+		return s.forwardAsRawChatCompletions(ctx, c, account, body)
 	}
 
 	promptCacheKey = strings.TrimSpace(promptCacheKey)
@@ -154,7 +167,10 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 		if err != nil {
 			return nil, fmt.Errorf("unmarshal for codex transform: %w", err)
 		}
-		codexResult := applyCodexOAuthTransform(reqBody, false, false)
+		codexResult := applyCodexOAuthTransformWithOptions(reqBody, codexOAuthTransformOptions{
+			SkipDefaultInstructions: true,
+		})
+		ensureCodexOAuthInstructionsField(reqBody)
 		if codexResult.NormalizedModel != "" {
 			upstreamModel = codexResult.NormalizedModel
 		}
@@ -210,38 +226,64 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 		return nil, fmt.Errorf("get access token: %w", err)
 	}
 
-	// 6. Build upstream request
-	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
-	upstreamReq, err := s.buildUpstreamRequest(upstreamCtx, c, account, responsesBody, token, true, promptCacheKey, false)
-	releaseUpstreamCtx()
-	if err != nil {
-		return nil, fmt.Errorf("build upstream request: %w", err)
-	}
-
-	if promptCacheKey != "" && !account.IsOpenAIOAuthLike() {
-		apiKeyID := getAPIKeyIDFromContext(c)
-		upstreamReq.Header.Set("session_id", generateSessionUUID(isolateOpenAISessionID(apiKeyID, promptCacheKey)))
-	}
-
-	// 7. Send request
 	proxyURL := ""
 	if account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
 	}
-	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
-	if err != nil {
-		safeErr := sanitizeOpenAIUpstreamDiagnosticText(err.Error())
-		setOpsUpstreamError(c, 0, safeErr, "")
-		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
-			Platform:           account.Platform,
-			AccountID:          account.ID,
-			AccountName:        account.Name,
-			UpstreamStatusCode: 0,
-			Kind:               "request_error",
-			Message:            safeErr,
-		})
-		writeChatCompletionsError(c, http.StatusBadGateway, "upstream_error", "Upstream request failed")
-		return nil, fmt.Errorf("upstream request failed: %s", safeErr)
+
+	var resp *http.Response
+	var completedError completedResponseSnapshot
+	encryptedContextRetryTried := false
+	for {
+		// 6. Build and send the upstream request. Responses-shaped OAuth bridge
+		// requests share native Responses recovery for stale encrypted context.
+		upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
+		upstreamReq, buildErr := s.buildUpstreamRequest(upstreamCtx, c, account, responsesBody, token, true, promptCacheKey, false)
+		releaseUpstreamCtx()
+		if buildErr != nil {
+			return nil, fmt.Errorf("build upstream request: %w", buildErr)
+		}
+		if promptCacheKey != "" && !account.IsOpenAIOAuthLike() {
+			apiKeyID := getAPIKeyIDFromContext(c)
+			upstreamReq.Header.Set("session_id", generateSessionUUID(isolateOpenAISessionID(apiKeyID, promptCacheKey)))
+		}
+
+		resp, err = doHTTPUpstream(ctx, s.httpUpstream, upstreamReq, proxyURL, account.ID, account.Concurrency)
+		if err != nil {
+			if restored, notAdmitted := completedError.ifRetryNotAdmitted(err); notAdmitted {
+				resp = restored
+				break
+			}
+			return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
+		}
+		if !isResponsesShape || !account.IsOpenAIOAuthLike() || encryptedContextRetryTried || resp.StatusCode != http.StatusBadRequest {
+			break
+		}
+
+		respBody := s.readUpstreamErrorBody(resp)
+		_ = resp.Body.Close()
+		completedError = snapshotCompletedResponse(resp, respBody)
+		if !isOpenAIEncryptedContextErrorCode(extractUpstreamErrorCode(respBody)) {
+			resp.Body = io.NopCloser(bytes.NewReader(respBody))
+			break
+		}
+		decoded, decodeErr := decodeOpenAIRequestBodyMapUseNumber(responsesBody)
+		if decodeErr != nil {
+			return nil, fmt.Errorf("decode encrypted context retry body: %w", decodeErr)
+		}
+		if !trimOpenAIEncryptedReasoningItems(decoded) {
+			resp.Body = io.NopCloser(bytes.NewReader(respBody))
+			break
+		}
+		responsesBody, err = marshalOpenAIUpstreamJSON(decoded)
+		if err != nil {
+			return nil, fmt.Errorf("serialize encrypted context retry body: %w", err)
+		}
+		encryptedContextRetryTried = true
+		if restored, canceled := completedError.ifRetryCanceled(ctx); canceled {
+			resp = restored
+			break
+		}
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -261,7 +303,7 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 				zap.Int("upstream_status", resp.StatusCode),
 				zap.String("upstream_message", upstreamMsg),
 			)
-			return s.forwardAsRawChatCompletions(ctx, c, account, body, defaultMappedModel)
+			return s.forwardAsRawChatCompletions(ctx, c, account, body)
 		}
 		if s.shouldFailoverOpenAIUpstreamResponse(resp.StatusCode, upstreamMsg, respBody) {
 			upstreamDetail := ""
@@ -289,7 +331,7 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 				RetryableOnSameAccount: account.IsPoolMode() && (account.IsPoolModeRetryableStatus(resp.StatusCode) || isOpenAITransientProcessingError(resp.StatusCode, upstreamMsg, respBody)),
 			}
 		}
-		return s.handleChatCompletionsErrorResponse(resp, c, account, billingModel)
+		return s.handleChatCompletionsErrorResponse(resp, c, account, upstreamModel)
 	}
 
 	// 9. Handle normal response
@@ -342,6 +384,16 @@ func buildOpenAIChatCompletionsResponsesShapeBridgeBody(body []byte, upstreamMod
 	responsesBody, normalizedServiceTier, err := normalizeResponsesBodyServiceTier(responsesBody)
 	if err != nil {
 		return nil, "", fmt.Errorf("normalize service_tier in responses-shape body: %w", err)
+	}
+	if account != nil && account.Type == AccountTypeAPIKey {
+		var stripped bool
+		responsesBody, stripped, err = stripCodexSparkImageGenerationToolingFromBody(responsesBody, upstreamModel)
+		if err != nil {
+			return nil, "", fmt.Errorf("strip spark image_generation tooling in responses-shape body: %w", err)
+		}
+		if stripped {
+			normalizedServiceTier = strings.TrimSpace(gjson.GetBytes(responsesBody, "service_tier").String())
+		}
 	}
 	return responsesBody, normalizedServiceTier, nil
 }

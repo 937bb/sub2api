@@ -69,8 +69,9 @@ type Account struct {
 type OpenAIEndpointCapability string
 
 const (
-	OpenAIEndpointCapabilityChatCompletions OpenAIEndpointCapability = "chat_completions"
-	OpenAIEndpointCapabilityEmbeddings      OpenAIEndpointCapability = "embeddings"
+	OpenAIEndpointCapabilityChatCompletions        OpenAIEndpointCapability = "chat_completions"
+	OpenAIEndpointCapabilityEmbeddings             OpenAIEndpointCapability = "embeddings"
+	OpenAIEndpointCapabilityOAuthCompactBodySignal OpenAIEndpointCapability = "oauth_compact_body_signal"
 )
 
 const openAIEndpointCapabilitiesCredentialKey = "openai_capabilities"
@@ -564,9 +565,9 @@ func (a *Account) resolveModelMapping(rawMapping map[string]any) map[string]stri
 		if a.Platform == domain.PlatformAntigravity {
 			ensureAntigravityDefaultPassthroughs(result, []string{
 				"gemini-3-flash",
-				"gemini-3.1-pro-high",
 				"gemini-3.1-pro-low",
 			})
+			normalizeAntigravityGemini31ProMappings(result)
 		}
 		return result
 	}
@@ -630,6 +631,25 @@ func ensureAntigravityDefaultPassthroughs(mapping map[string]string, models []st
 	}
 }
 
+func normalizeAntigravityGemini31ProMappings(mapping map[string]string) {
+	legacyTargets := map[string]map[string]struct{}{
+		"gemini-3.1-pro":         {"gemini-3.1-pro": {}},
+		"gemini-3.1-pro-high":    {"gemini-3.1-pro-high": {}},
+		"gemini-3.1-pro-preview": {"gemini-3.1-pro-preview": {}, "gemini-3.1-pro-high": {}},
+	}
+	for model, legacy := range legacyTargets {
+		if target, exists := mapping[model]; exists {
+			if _, upgrade := legacy[strings.TrimSpace(target)]; upgrade {
+				mapping[model] = domain.AntigravityGemini31ProAgentModel
+			}
+			continue
+		}
+		if !mappingSupportsRequestedModel(mapping, model) {
+			mapping[model] = domain.AntigravityGemini31ProAgentModel
+		}
+	}
+}
+
 func normalizeRequestedModelForLookup(platform, requestedModel string) string {
 	trimmed := strings.TrimSpace(requestedModel)
 	if trimmed == "" {
@@ -674,13 +694,31 @@ func resolveRequestedModelInMapping(mapping map[string]string, requestedModel st
 func (a *Account) IsModelSupported(requestedModel string) bool {
 	mapping := a.GetModelMapping()
 	if len(mapping) == 0 {
+		// Managed OpenAI OAuth forwards to the Codex upstream, whose accepted model
+		// aliases are the same set handled by the canonical Codex normalizer. Keep
+		// APIKey and passthrough accounts fail-open for compatible/custom upstreams.
+		if a.IsOpenAIOAuth() {
+			_, known := normalizeKnownCodexModel(requestedModel)
+			return known
+		}
 		return true // 无映射 = 允许所有
 	}
-	if mappingSupportsRequestedModel(mapping, requestedModel) {
-		return true
+	lookupModel := requestedModel
+	mappedModel, matched := resolveRequestedModelInMapping(mapping, lookupModel)
+	if !matched {
+		lookupModel = normalizeRequestedModelForLookup(a.Platform, requestedModel)
+		if lookupModel != requestedModel {
+			mappedModel, matched = resolveRequestedModelInMapping(mapping, lookupModel)
+		}
 	}
-	normalized := normalizeRequestedModelForLookup(a.Platform, requestedModel)
-	return normalized != requestedModel && mappingSupportsRequestedModel(mapping, normalized)
+	if !matched {
+		return false
+	}
+	if a.IsOpenAIOAuth() {
+		_, known := normalizeKnownCodexModel(mappedModel)
+		return known
+	}
+	return true
 }
 
 // GetMappedModel 获取映射后的模型名（支持通配符，最长优先匹配）
@@ -1236,6 +1274,8 @@ func (a *Account) SupportsOpenAIEndpointCapability(capability OpenAIEndpointCapa
 		if a.Type != AccountTypeAPIKey {
 			return false
 		}
+	case OpenAIEndpointCapabilityOAuthCompactBodySignal:
+		return a.IsOpenAIOAuthLike()
 	default:
 		return false
 	}

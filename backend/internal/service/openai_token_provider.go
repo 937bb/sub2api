@@ -307,7 +307,7 @@ func (p *OpenAITokenProvider) ensurePersonalAccessTokenMetadata(ctx context.Cont
 	if err := persistOpenAIPersonalAccessTokenMetadata(ctx, p.accountRepo, account, personalAccessToken, metadata); err != nil {
 		return err
 	}
-	slog.Info("openai_personal_access_token_metadata_hydrated", "account_id", account.ID, "chatgpt_account_id", metadata.ChatGPTAccountID, "plan_type", metadata.ChatGPTPlanType)
+	slog.Info("openai_personal_access_token_metadata_hydrated", "account_id", account.ID)
 	return nil
 }
 
@@ -378,15 +378,15 @@ func isOpenAIPersonalAccessTokenHydrationOwner403(account *Account, err error) b
 func openAIPersonalAccessTokenHydrationErrorMessage(err error) string {
 	var whoamiErr *openAIPersonalAccessTokenWhoamiError
 	if errors.As(err, &whoamiErr) {
-		return sanitizeOpenAIUpstreamDiagnosticText(extractUpstreamErrorMessage([]byte(whoamiErr.body)))
+		return sanitizeOpenAIPersonalAccessTokenDiagnosticText(extractUpstreamErrorMessage([]byte(whoamiErr.body)))
 	}
-	return sanitizeOpenAIUpstreamDiagnosticText(err.Error())
+	return sanitizeOpenAIPersonalAccessTokenDiagnosticText(err.Error())
 }
 
 func openAIPersonalAccessTokenHydrationErrorBody(err error) []byte {
 	var whoamiErr *openAIPersonalAccessTokenWhoamiError
 	if errors.As(err, &whoamiErr) {
-		return []byte(whoamiErr.body)
+		return []byte(sanitizeOpenAIPersonalAccessTokenDiagnosticText(whoamiErr.body))
 	}
 	return nil
 }

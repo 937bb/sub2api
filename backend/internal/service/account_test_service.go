@@ -125,6 +125,13 @@ func openAICodexAccountTestProbePromptCacheKey(prefix string, account *Account, 
 	return openAICodexProbePromptCacheKey(prefix, account, fingerprint)
 }
 
+func applyOpenAIChatGPTFedRAMPHeader(req *http.Request, account *Account) {
+	if req == nil || account == nil || !account.IsOpenAIChatGPTFedRAMPAccount() {
+		return
+	}
+	req.Header.Set("x-openai-fedramp", "true")
+}
+
 func (s *AccountTestService) validateUpstreamBaseURL(raw string) (string, error) {
 	if s.cfg == nil {
 		return "", errors.New("config is not available")
@@ -252,20 +259,17 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 
 	// Determine authentication method and API URL
 	var authToken string
-	var useBearer bool
 	var apiURL string
 
 	if account.IsOAuth() {
 		// OAuth or Setup Token - use Bearer token
-		useBearer = true
 		apiURL = testClaudeAPIURL
 		authToken = account.GetCredential("access_token")
 		if authToken == "" {
 			return s.sendErrorAndEnd(c, "No access token available")
 		}
 	} else if account.Type == "apikey" {
-		// API Key - use x-api-key header
-		useBearer = false
+		// API Key - use the account's configured Anthropic auth scheme.
 		authToken = account.GetCredential("api_key")
 		if authToken == "" {
 			return s.sendErrorAndEnd(c, "No API key available")
@@ -316,12 +320,12 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 	}
 
 	// Set authentication header
-	if useBearer {
+	if account.IsOAuth() {
 		req.Header.Set("anthropic-beta", claude.DefaultBetaHeader)
 		req.Header.Set("Authorization", "Bearer "+authToken)
 	} else {
 		req.Header.Set("anthropic-beta", claude.APIKeyBetaHeader)
-		req.Header.Set("x-api-key", authToken)
+		setAnthropicAPIKeyAuthHeader(req.Header, account, authToken)
 	}
 
 	// Get proxy URL
@@ -601,8 +605,13 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	c.Writer.Header().Set("X-Accel-Buffering", "no")
 	c.Writer.Flush()
 
-	// Create OpenAI Responses API payload
-	payload := createOpenAITestPayload(testModelID, isOAuth)
+	// OAuth probes must use the same upstream model normalization as live forwarding.
+	// Keep testModelID unchanged for client-facing probe events.
+	upstreamTestModelID := testModelID
+	if isOAuth {
+		upstreamTestModelID = normalizeOpenAIModelForUpstream(account, testModelID)
+	}
+	payload := createOpenAITestPayload(upstreamTestModelID, isOAuth)
 	payloadBytes, _ := json.Marshal(payload)
 
 	// Send test_start event
@@ -628,6 +637,7 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 		if chatgptAccountID != "" {
 			req.Header.Set("chatgpt-account-id", chatgptAccountID)
 		}
+		applyOpenAIChatGPTFedRAMPHeader(req, account)
 		fingerprint, err := s.ensureOpenAICodexFingerprint(ctx, account, req)
 		if err != nil {
 			return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to ensure Codex fingerprint: %s", err.Error()))
@@ -799,6 +809,7 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 		if chatgptAccountID != "" {
 			req.Header.Set("chatgpt-account-id", chatgptAccountID)
 		}
+		applyOpenAIChatGPTFedRAMPHeader(req, account)
 		fingerprint, err := s.ensureOpenAICodexFingerprint(ctx, account, req)
 		if err != nil {
 			return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to ensure Codex fingerprint: %s", err.Error()))
@@ -890,7 +901,17 @@ func (s *AccountTestService) persistOpenAIAccountTestExtraUpdates(ctx context.Co
 	if s == nil || s.accountRepo == nil || account == nil || account.ID <= 0 || len(updates) == 0 {
 		return nil
 	}
-	if err := s.accountRepo.UpdateExtra(ctx, account.ID, updates); err != nil {
+	if _, ok := updates["codex_usage_updated_at"]; ok {
+		observedAt, err := runtimeExtraObservedAt(updates, "codex_usage_updated_at")
+		if err != nil {
+			return err
+		}
+		updated, err := updateRuntimeExtra(ctx, s.accountRepo, account.ID, updates, "codex_usage_updated_at", observedAt)
+		if err != nil || !updated {
+			return err
+		}
+		syncCodexFiveHourSessionWindowEnd(ctx, s.accountRepo, account.ID, updates, "account_test")
+	} else if err := s.accountRepo.UpdateExtra(ctx, account.ID, updates); err != nil {
 		return err
 	}
 	mergeAccountExtra(account, updates)
@@ -1026,9 +1047,9 @@ func (s *AccountTestService) testGeminiAccountConnection(c *gin.Context, account
 }
 
 // routeAntigravityTest 路由 Antigravity 账号的测试请求。
-// APIKey 类型走原生协议（与 gateway_handler 路由一致），OAuth/Upstream 走 CRS 中转。
+// APIKey/Upstream 类型走原生协议（与 gateway_handler 路由一致），OAuth 走 CRS 中转。
 func (s *AccountTestService) routeAntigravityTest(c *gin.Context, account *Account, modelID string, prompt string) error {
-	if account.Type == AccountTypeAPIKey {
+	if account.Type != AccountTypeOAuth {
 		if strings.HasPrefix(modelID, "gemini-") {
 			return s.testGeminiAccountConnection(c, account, modelID, prompt)
 		}
@@ -1718,6 +1739,7 @@ func (s *AccountTestService) testOpenAIImageOAuth(c *gin.Context, ctx context.Co
 	if chatgptAccountID := strings.TrimSpace(account.GetChatGPTAccountID()); chatgptAccountID != "" {
 		req.Header.Set("chatgpt-account-id", chatgptAccountID)
 	}
+	applyOpenAIChatGPTFedRAMPHeader(req, account)
 	fingerprint, err := s.ensureOpenAICodexFingerprint(ctx, account, req)
 	if err != nil {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to ensure Codex fingerprint: %s", err.Error()))

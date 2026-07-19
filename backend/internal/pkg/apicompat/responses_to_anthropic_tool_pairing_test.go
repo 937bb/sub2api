@@ -163,3 +163,34 @@ func TestAnthropicPairing_SingleCall(t *testing.T) {
 	require.True(t, hasToolUse(parseContentBlocks(msgs[1].Content), "call_A"))
 	require.True(t, hasToolResult(parseContentBlocks(msgs[2].Content), "call_A"))
 }
+
+func TestResponsesInputToAnthropic_RejectsMalformedFunctionArguments(t *testing.T) {
+	for _, arguments := range []string{
+		`{"cmd":`,
+		`{"cmd":"pwd"}{"cmd":"ls"}`,
+	} {
+		t.Run(arguments, func(t *testing.T) {
+			input, err := json.Marshal([]ResponsesInputItem{{
+				Type:      "function_call",
+				CallID:    "call_bad",
+				Name:      "exec",
+				Arguments: arguments,
+			}})
+			require.NoError(t, err)
+
+			_, _, err = convertResponsesInputToAnthropic(input)
+			require.ErrorContains(t, err, `responses input item 0 function_call "call_bad" arguments: must be a valid JSON object:`)
+		})
+	}
+}
+
+func TestResponsesInputToAnthropic_AcceptsValidFunctionArguments(t *testing.T) {
+	msgs := convertAnthropic(t, `[
+		{"type":"function_call","call_id":"call_A","name":"exec","arguments":"{\"cmd\":\"pwd\"}"},
+		{"type":"function_call_output","call_id":"call_A","output":"ok"}
+	]`)
+
+	blocks := parseContentBlocks(msgs[0].Content)
+	require.Len(t, blocks, 1)
+	require.JSONEq(t, `{"cmd":"pwd"}`, string(blocks[0].Input))
+}

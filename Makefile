@@ -1,11 +1,13 @@
-.PHONY: build build-backend build-frontend build-datamanagementd test test-backend test-frontend test-frontend-critical test-datamanagementd secret-scan
+.PHONY: build build-backend build-frontend build-datamanagementd test test-backend test-frontend test-frontend-critical test-admin-cli test-datamanagementd secret-scan
 
 FRONTEND_CRITICAL_VITEST := \
 	src/views/auth/__tests__/LinuxDoCallbackView.spec.ts \
 	src/views/auth/__tests__/WechatCallbackView.spec.ts \
 	src/views/user/__tests__/PaymentView.spec.ts \
 	src/views/user/__tests__/PaymentResultView.spec.ts \
+	src/components/keys/__tests__/UseKeyModal.spec.ts \
 	src/components/user/profile/__tests__/ProfileInfoCard.spec.ts \
+	src/utils/__tests__/ccswitchImport.spec.ts \
 	src/views/admin/__tests__/SettingsView.spec.ts
 
 # 一键编译前后端
@@ -23,8 +25,8 @@ build-frontend:
 build-datamanagementd:
 	@cd datamanagement && go build -o datamanagementd ./cmd/datamanagementd
 
-# 运行测试（后端 + 前端）
-test: test-backend test-frontend
+# 运行测试（后端 + 前端 + admin CLI）
+test: test-backend test-frontend test-admin-cli
 
 test-backend:
 	@$(MAKE) -C backend test
@@ -33,9 +35,14 @@ test-frontend:
 	@pnpm --dir frontend run lint:check
 	@pnpm --dir frontend run typecheck
 	@$(MAKE) test-frontend-critical
+	@sh deploy/test-caddyfile-cache.sh
 
 test-frontend-critical:
 	@pnpm --dir frontend exec vitest run $(FRONTEND_CRITICAL_VITEST)
+
+test-admin-cli:
+	@node --check skills/sub2api-admin/scripts/sub2api-admin.js
+	@node --test skills/sub2api-admin/sub2api-admin.auth.test.js
 
 test-datamanagementd:
 	@cd datamanagement && go test ./...

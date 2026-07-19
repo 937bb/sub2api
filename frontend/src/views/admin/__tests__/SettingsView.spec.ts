@@ -679,6 +679,32 @@ describe("admin SettingsView payment visible method controls", () => {
     );
   });
 
+  it("resets an empty Codex version from the backend profile before saving", async () => {
+    getSettings.mockResolvedValueOnce({
+      ...baseSettingsResponse,
+      openai_codex_ua_profile: {
+        originator: "codex-tui",
+        codex_version: "0.144.1",
+        os_fingerprint: "Mac OS 26.5.0; arm64",
+        terminal_token: "Apple_Terminal/470.2",
+      },
+    });
+    const wrapper = mountView();
+    await flushPromises();
+    const versionInput = wrapper.findAll("input").find((input) => input.element.value === "0.144.1");
+    expect(versionInput).toBeDefined();
+    await versionInput!.setValue("");
+    const originatorInput = wrapper.findAll("input").find((input) => input.element.value === "codex-tui");
+    expect(originatorInput).toBeDefined();
+    await originatorInput!.setValue("codex-vscode");
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({
+      openai_codex_user_agent: "codex-vscode/0.144.1 (Mac OS 26.5.0; arm64) Apple_Terminal/470.2 (codex-vscode; 0.144.1)",
+      openai_codex_ua_profile: expect.objectContaining({ originator: "codex-vscode", codex_version: "0.144.1" }),
+    }));
+  });
+
   it("updates provider enablement immediately and reloads providers", async () => {
     const provider = {
       id: 7,
@@ -825,6 +851,65 @@ describe("admin SettingsView payment visible method controls", () => {
     expect(paymentHelpImageUpload).toBeDefined();
     expect(paymentHelpImageUpload?.attributes("data-upload-label")).toBe("上传图片");
     expect(paymentHelpImageUpload?.attributes("data-remove-label")).toBe("移除");
+  });
+
+  it("normalizes null supported_types from provider API responses", async () => {
+    const provider = {
+      id: 42,
+      provider_key: "easypay",
+      name: "EasyPay",
+      config: {},
+      supported_types: null as unknown as string[],
+      enabled: true,
+      payment_mode: "",
+      refund_enabled: false,
+      allow_user_refund: false,
+      limits: "",
+      sort_order: 0,
+    };
+    getProviders.mockReset();
+    getProviders.mockResolvedValue({ data: [provider] });
+
+    let receivedProviders: Array<Record<string, unknown>> = [];
+    const PaymentProviderListCapture = defineComponent({
+      props: {
+        providers: {
+          type: Array,
+          default: () => [],
+        },
+      },
+      setup(props) {
+        return () => {
+          receivedProviders = props.providers as Array<Record<string, unknown>>;
+          return h("div", { class: "provider-list-capture" });
+        };
+      },
+    });
+
+    const wrapper = mount(SettingsView, {
+      global: {
+        stubs: {
+          AppLayout: AppLayoutStub,
+          Select: SelectStub,
+          Toggle: ToggleStub,
+          Icon: true,
+          ConfirmDialog: true,
+          PaymentProviderList: PaymentProviderListCapture,
+          PaymentProviderDialog: true,
+          GroupBadge: true,
+          GroupOptionItem: true,
+          ProxySelector: true,
+          ImageUpload: ImageUploadStub,
+          BackupSettings: true,
+        },
+      },
+    });
+
+    await flushPromises();
+    await openPaymentTab(wrapper);
+
+    expect(receivedProviders).toHaveLength(1);
+    expect(receivedProviders[0].supported_types).toEqual([]);
   });
 });
 

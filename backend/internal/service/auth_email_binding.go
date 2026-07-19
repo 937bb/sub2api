@@ -37,6 +37,9 @@ func (s *AuthService) BindEmailIdentity(
 	if strings.TrimSpace(password) == "" {
 		return nil, ErrPasswordRequired
 	}
+	if err := s.validateRegistrationEmailPolicy(ctx, normalizedEmail); err != nil {
+		return nil, err
+	}
 	if err := s.VerifyOAuthEmailCode(ctx, normalizedEmail, verifyCode); err != nil {
 		return nil, err
 	}
@@ -105,6 +108,9 @@ func (s *AuthService) SendEmailIdentityBindCode(ctx context.Context, userID int6
 	}
 	if isReservedEmail(normalizedEmail) {
 		return ErrEmailReserved
+	}
+	if err := s.validateRegistrationEmailPolicy(ctx, normalizedEmail); err != nil {
+		return err
 	}
 	if s.emailService == nil {
 		return ErrServiceUnavailable

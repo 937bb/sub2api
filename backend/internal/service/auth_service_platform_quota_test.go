@@ -7,19 +7,23 @@ import (
 	"fmt"
 	"testing"
 	"time"
+
+	dbent "github.com/Wei-Shaw/sub2api/ent"
 )
 
 // fakeInsertRecorder 记录 BulkInsertInitial 调用，实现 UserPlatformQuotaRepository port。
 type fakeInsertRecorder struct {
 	records []UserPlatformQuotaRecord
 	err     error
+	lastCtx context.Context
 }
 
 func (f *fakeInsertRecorder) GetByUserPlatform(_ context.Context, _ int64, _ string) (*UserPlatformQuotaRecord, error) {
 	return nil, nil
 }
 
-func (f *fakeInsertRecorder) BulkInsertInitial(_ context.Context, recs []UserPlatformQuotaRecord) error {
+func (f *fakeInsertRecorder) BulkInsertInitial(ctx context.Context, recs []UserPlatformQuotaRecord) error {
+	f.lastCtx = ctx
 	if f.err != nil {
 		return f.err
 	}
@@ -74,6 +78,29 @@ func TestSnapshotPlatformQuotaDefaults_PassesToRepoBulkInsert(t *testing.T) {
 	}
 	if !found {
 		t.Error("anthropic daily = 5 not snapshotted")
+	}
+}
+
+func TestSnapshotPlatformQuotaDefaults_DetachesCallerTransaction(t *testing.T) {
+	fakeRepo := &fakeInsertRecorder{}
+	s := &AuthService{userPlatformQuotaRepo: fakeRepo}
+
+	five := 5.0
+	plan := &signupGrantPlan{
+		PlatformQuotas: map[string]*DefaultPlatformQuotaSetting{
+			"anthropic": {DailyLimitUSD: &five},
+		},
+	}
+	txCtx := dbent.NewTxContext(context.Background(), &dbent.Tx{})
+
+	if err := s.snapshotPlatformQuotaDefaults(txCtx, 999, plan); err != nil {
+		t.Fatalf("snapshot should fail open: %v", err)
+	}
+	if fakeRepo.lastCtx == nil {
+		t.Fatal("expected BulkInsertInitial to be called")
+	}
+	if tx := dbent.TxFromContext(fakeRepo.lastCtx); tx != nil {
+		t.Fatal("expected platform quota snapshot to run outside caller transaction")
 	}
 }
 

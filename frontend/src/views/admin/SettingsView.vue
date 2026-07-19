@@ -179,7 +179,7 @@
                   </p>
                   <div class="flex items-center gap-2">
                     <code
-                      class="flex-1 select-all break-all rounded border border-green-300 bg-white px-3 py-2 font-mono text-sm dark:border-green-700 dark:bg-dark-800"
+                      class="flex-1 select-all break-all rounded border border-green-300 bg-[var(--glass-bg-content)] px-3 py-2 font-mono text-sm dark:border-green-700 "
                     >
                       {{ newAdminApiKey }}
                     </code>
@@ -1624,7 +1624,7 @@
                   }}
                 </p>
                 <div
-                  class="mt-3 rounded-lg border border-gray-300 bg-white p-2 dark:border-dark-500 dark:bg-dark-700"
+                  class="mt-3 rounded-lg border border-gray-300 bg-[var(--glass-bg-content)] p-2 dark:border-dark-500 "
                 >
                   <div class="flex flex-wrap items-center gap-2">
                     <span
@@ -4584,7 +4584,7 @@
             @click.self="wsTestDialogOpen = false"
           >
             <div
-              class="mx-4 w-full max-w-lg rounded-xl bg-white p-6 shadow-xl dark:bg-dark-800"
+              class="mx-4 w-full max-w-lg rounded-xl bg-[var(--glass-bg-content)] p-6 shadow-xl "
             >
               <h3
                 class="mb-4 text-lg font-semibold text-gray-900 dark:text-white"
@@ -5279,7 +5279,7 @@
                       class="inline-flex items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition"
                       :class="
                         form.login_agreement_mode === 'modal'
-                          ? 'bg-white text-primary-700 shadow-sm dark:bg-dark-800 dark:text-primary-300'
+                          ? 'bg-[var(--glass-bg-content)] text-primary-700 shadow-sm  dark:text-primary-300'
                           : 'text-gray-600 hover:text-gray-900 dark:text-dark-300 dark:hover:text-white'
                       "
                       @click="form.login_agreement_mode = 'modal'"
@@ -5292,7 +5292,7 @@
                       class="inline-flex items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition"
                       :class="
                         form.login_agreement_mode === 'checkbox'
-                          ? 'bg-white text-primary-700 shadow-sm dark:bg-dark-800 dark:text-primary-300'
+                          ? 'bg-[var(--glass-bg-content)] text-primary-700 shadow-sm  dark:text-primary-300'
                           : 'text-gray-600 hover:text-gray-900 dark:text-dark-300 dark:hover:text-white'
                       "
                       @click="form.login_agreement_mode = 'checkbox'"
@@ -5354,7 +5354,7 @@
                   <div
                     v-for="(doc, index) in form.login_agreement_documents"
                     :key="doc.id || index"
-                    class="rounded-lg border border-gray-200 bg-white p-4 dark:border-dark-700 dark:bg-dark-800/60"
+                    class="rounded-lg border border-gray-200 bg-[var(--glass-bg-content)] p-4 dark:border-dark-700 "
                   >
                     <div class="mb-3 flex items-center justify-between gap-3">
                       <div class="flex min-w-0 items-center gap-3">
@@ -5410,7 +5410,7 @@
                         <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
                           {{ localText("路由标识", "Route slug") }}
                         </label>
-                        <div class="flex overflow-hidden rounded-lg border border-gray-300 bg-white focus-within:border-primary-500 focus-within:ring-1 focus-within:ring-primary-500 dark:border-dark-600 dark:bg-dark-900">
+                        <div class="flex overflow-hidden rounded-lg border border-gray-300 bg-[var(--glass-bg-content)] focus-within:border-primary-500 focus-within:ring-1 focus-within:ring-primary-500 dark:border-dark-600 ">
                           <span class="inline-flex flex-shrink-0 items-center border-r border-gray-200 bg-gray-50 px-3 text-sm text-gray-500 dark:border-dark-700 dark:bg-dark-800 dark:text-dark-400">
                             /legal/
                           </span>
@@ -5599,7 +5599,7 @@
                     class="input pr-8"
                     placeholder="20"
                   />
-                  <span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-400">%</span>
+                  <span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 dark:text-dark-400">%</span>
                 </div>
                 <p class="mt-1 text-xs text-gray-400">
                   {{ t('admin.settings.features.affiliate.rebateRateHint') }}
@@ -5712,7 +5712,7 @@
                         <th class="px-3 py-2 text-left text-xs font-medium uppercase text-gray-500">{{ t('admin.settings.features.affiliate.customUsers.col.actions') }}</th>
                       </tr>
                     </thead>
-                    <tbody class="divide-y divide-gray-200 bg-white dark:divide-dark-700 dark:bg-dark-900">
+                    <tbody class="divide-y divide-gray-200 bg-[var(--glass-bg-content)] dark:divide-dark-700 ">
                       <tr v-if="affiliateState.loading">
                         <td colspan="6" class="px-3 py-6 text-center text-sm text-gray-500">
                           {{ t('common.loading') }}
@@ -5798,7 +5798,7 @@
           class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
           @click.self="closeAffiliateModal"
         >
-          <div class="w-full max-w-md rounded-lg bg-white p-6 shadow-xl dark:bg-dark-900">
+          <div class="w-full max-w-md rounded-lg bg-[var(--glass-bg-content)] p-6 shadow-xl ">
             <h3 class="mb-4 text-lg font-semibold">
               {{ affiliateModal.mode === 'add' ? t('admin.settings.features.affiliate.modal.addTitle') : t('admin.settings.features.affiliate.modal.editTitle') }}
             </h3>
@@ -5884,7 +5884,7 @@
                     class="input pr-8"
                     :placeholder="t('admin.settings.features.affiliate.modal.ratePlaceholder')"
                   />
-                  <span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-400">%</span>
+                  <span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 dark:text-dark-400">%</span>
                 </div>
                 <p class="mt-1 text-xs text-gray-400">
                   {{ t('admin.settings.features.affiliate.modal.rateHint') }}
@@ -5923,7 +5923,7 @@
           class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
           @click.self="affiliateBatchModal.open = false"
         >
-          <div class="w-full max-w-md rounded-lg bg-white p-6 shadow-xl dark:bg-dark-900">
+          <div class="w-full max-w-md rounded-lg bg-[var(--glass-bg-content)] p-6 shadow-xl ">
             <h3 class="mb-4 text-lg font-semibold">
               {{ t('admin.settings.features.affiliate.batchModal.title', { count: affiliateState.selected.length }) }}
             </h3>
@@ -5940,7 +5940,7 @@
                 class="input pr-8"
                 :placeholder="t('admin.settings.features.affiliate.batchModal.placeholder')"
               />
-              <span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-400">%</span>
+              <span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 dark:text-dark-400">%</span>
             </div>
             <p class="mt-2 text-xs text-gray-400">
               {{ t('admin.settings.features.affiliate.batchModal.clearHint') }}
@@ -6176,7 +6176,7 @@
                         class="input pr-8"
                       />
                       <span
-                        class="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3 text-gray-400"
+                        class="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3 text-gray-500 dark:text-dark-400"
                         >%</span
                       >
                     </div>
@@ -6373,7 +6373,7 @@
                         'rounded-lg border px-3 py-1.5 text-sm font-medium transition-all',
                         isPaymentTypeEnabled(pt.value)
                           ? 'border-primary-500 bg-primary-500 text-white shadow-sm'
-                          : 'border-gray-300 bg-white text-gray-600 hover:border-gray-400 hover:bg-gray-50 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-300 dark:hover:border-dark-500',
+                          : 'border-gray-300 bg-[var(--glass-bg-content)] text-gray-600 hover:border-gray-400 hover:bg-gray-50 dark:border-dark-600  dark:text-gray-300 dark:hover:border-dark-500',
                       ]"
                     >
                       {{ pt.label }}
@@ -6766,7 +6766,7 @@
                 >
                 <div class="relative">
                   <span
-                    class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+                    class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 dark:text-dark-400"
                     >$</span
                   >
                   <input
@@ -7024,12 +7024,13 @@ function localText(zh: string, en: string): string {
   return isZhLocale.value ? zh : en;
 }
 
-const defaultOpenAICodexUAProfile: OpenAICodexUAProfile = {
+const canonicalOpenAICodexUAProfile: OpenAICodexUAProfile = {
   originator: "codex-tui",
-  codex_version: "0.136.0",
+  codex_version: "0.144.1",
   os_fingerprint: "Mac OS 26.5.0; arm64",
   terminal_token: "Apple_Terminal/470.2",
 };
+let backendOpenAICodexUAProfile = canonicalOpenAICodexUAProfile;
 
 function isOpenAICodexHeaderValueSafe(value: string): boolean {
   return Array.from(value).every((char) => {
@@ -7085,23 +7086,24 @@ function sanitizeOpenAICodexUACommentComponent(
 
 function normalizeOpenAICodexUAProfile(
   profile?: Partial<OpenAICodexUAProfile> | null,
+  fallback = backendOpenAICodexUAProfile,
 ): OpenAICodexUAProfile {
   return {
     originator: sanitizeOpenAICodexUAPathTokenComponent(
       profile?.originator,
-      defaultOpenAICodexUAProfile.originator,
+      fallback.originator,
     ),
     codex_version: sanitizeOpenAICodexUAPathTokenComponent(
       profile?.codex_version,
-      defaultOpenAICodexUAProfile.codex_version,
+      fallback.codex_version,
     ),
     os_fingerprint: sanitizeOpenAICodexUACommentComponent(
       profile?.os_fingerprint,
-      defaultOpenAICodexUAProfile.os_fingerprint,
+      fallback.os_fingerprint,
     ),
     terminal_token: sanitizeOpenAICodexUATokenComponent(
       profile?.terminal_token,
-      defaultOpenAICodexUAProfile.terminal_token,
+      fallback.terminal_token,
     ),
     user_agent: profile?.user_agent?.trim() || undefined,
   };
@@ -8250,9 +8252,11 @@ async function loadSettings() {
         : defaultLoginAgreementDocuments();
     Object.assign(authSourceDefaults, buildAuthSourceDefaultsState(settings));
     form.default_platform_quotas = normalizePlatformQuotasMap(settings.default_platform_quotas);
-    form.openai_codex_ua_profile = normalizeOpenAICodexUAProfile(
+    backendOpenAICodexUAProfile = normalizeOpenAICodexUAProfile(
       settings.openai_codex_ua_profile,
+      canonicalOpenAICodexUAProfile,
     );
+    form.openai_codex_ua_profile = { ...backendOpenAICodexUAProfile };
     form.openai_codex_user_agent = settings.openai_codex_user_agent || "";
     initialOpenAICodexUAProfileKey.value = openAICodexUAProfileKey(
       form.openai_codex_ua_profile,
@@ -8833,9 +8837,11 @@ async function saveSettings() {
     }
     Object.assign(authSourceDefaults, buildAuthSourceDefaultsState(updated));
     form.default_platform_quotas = normalizePlatformQuotasMap(updated.default_platform_quotas);
-    form.openai_codex_ua_profile = normalizeOpenAICodexUAProfile(
+    backendOpenAICodexUAProfile = normalizeOpenAICodexUAProfile(
       updated.openai_codex_ua_profile,
+      canonicalOpenAICodexUAProfile,
     );
+    form.openai_codex_ua_profile = { ...backendOpenAICodexUAProfile };
     form.openai_codex_user_agent = updated.openai_codex_user_agent || "";
     initialOpenAICodexUAProfileKey.value = openAICodexUAProfileKey(
       form.openai_codex_ua_profile,
@@ -9630,11 +9636,22 @@ function showProviderEnablementConflict(
   );
 }
 
+function normalizeProviderInstance(provider: ProviderInstance): ProviderInstance {
+  return {
+    ...provider,
+    // Backend serializes empty Go slices as null; payment UI code treats the
+    // supported types list as an array, so normalize once at the API boundary.
+    supported_types: Array.isArray(provider.supported_types)
+      ? provider.supported_types
+      : [],
+  };
+}
+
 async function loadProviders() {
   providersLoading.value = true;
   try {
     const res = await adminAPI.payment.getProviders();
-    providers.value = res.data || [];
+    providers.value = (res.data || []).map(normalizeProviderInstance);
   } catch (err: unknown) {
     appStore.showError(extractI18nErrorMessage(err, t, "payment.errors", t("common.error")));
   } finally {
@@ -9728,9 +9745,12 @@ async function handleToggleField(
 }
 
 async function handleToggleType(provider: ProviderInstance, type: string) {
-  const updated = provider.supported_types.includes(type)
-    ? provider.supported_types.filter((t) => t !== type)
-    : [...provider.supported_types, type];
+  const currentTypes = Array.isArray(provider.supported_types)
+    ? provider.supported_types
+    : [];
+  const updated = currentTypes.includes(type)
+    ? currentTypes.filter((t) => t !== type)
+    : [...currentTypes, type];
   const conflict = findProviderEnablementConflict({
     id: provider.id,
     provider_key: provider.provider_key,
@@ -10183,7 +10203,7 @@ watch(
   @apply sticky z-20 -mx-1 rounded-2xl border border-white/80 bg-white/90 p-1.5 backdrop-blur-xl;
   top: 4.75rem;
   box-shadow:
-    0 12px 28px rgb(15 23 42 / 0.07),
+    0 12px 28px rgb(24 24 27 / 0.07),
     0 1px 0 rgb(255 255 255 / 0.9) inset;
 }
 
@@ -10235,9 +10255,9 @@ watch(
 }
 
 .settings-tab-active {
-  @apply border-primary-200/80 bg-white text-primary-700 shadow-sm dark:border-primary-400/30 dark:bg-dark-700/95 dark:text-primary-200;
+  @apply border-primary-200/80 bg-[var(--glass-bg-content)] text-primary-700 shadow-sm dark:border-primary-400/30  dark:text-primary-200;
   box-shadow:
-    0 8px 18px rgb(15 23 42 / 0.08),
+    0 8px 18px rgb(24 24 27 / 0.08),
     0 1px 0 rgb(255 255 255 / 0.92) inset;
 }
 
@@ -10253,7 +10273,7 @@ watch(
   height: 2px;
   border-radius: 9999px;
   content: "";
-  background: linear-gradient(90deg, #14b8a6, #0ea5e9);
+  background: linear-gradient(90deg, #0a84ff, #5ac8fa);
 }
 
 .settings-tab-icon {
@@ -10279,15 +10299,15 @@ watch(
    because Vue's scoped-CSS compiler was dropping the `:global(.dark) ...`
    rules in the production build, leaving inactive tabs unreadable on dark. */
 .dark .settings-tabs-shell {
-  border-color: rgb(51 65 85 / 0.65);
-  background: rgb(15 23 42 / 0.86);
+  border-color: rgb(63 63 70 / 0.65);
+  background: rgb(24 24 27 / 0.86);
   box-shadow:
     0 16px 36px rgb(0 0 0 / 0.28),
     0 1px 0 rgb(255 255 255 / 0.06) inset;
 }
 
 .dark .settings-tab::before {
-  background: linear-gradient(135deg, rgb(30 41 59 / 0.9), rgb(51 65 85 / 0.62));
+  background: linear-gradient(135deg, rgb(39 39 42 / 0.9), rgb(63 63 70 / 0.62));
 }
 
 .dark .settings-tab-active {

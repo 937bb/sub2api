@@ -1,78 +1,95 @@
 <template>
-  <div class="relative flex min-h-screen items-center justify-center overflow-hidden p-4">
-    <!-- Background -->
-    <div
-      class="absolute inset-0 bg-gradient-to-br from-gray-50 via-primary-50/30 to-gray-100 dark:from-dark-950 dark:via-dark-900 dark:to-dark-950"
-    ></div>
+  <div class="auth-shell min-h-screen w-full lg:grid lg:grid-cols-[1.05fr_0.95fr]">
+    <!-- ============ 左:品牌展示区(深色高级分屏,lg 以上显示) ============ -->
+    <aside class="brand-panel relative hidden overflow-hidden p-12 xl:p-16 lg:flex lg:flex-col lg:justify-between">
+      <!-- 细网格 + 单点柔光 + 顶部高光 -->
+      <div class="brand-grid pointer-events-none absolute inset-0"></div>
+      <div class="brand-glow pointer-events-none absolute inset-0"></div>
 
-    <!-- Decorative Elements -->
-    <div class="pointer-events-none absolute inset-0 overflow-hidden">
-      <!-- Gradient Orbs -->
-      <div
-        class="absolute -right-40 -top-40 h-80 w-80 rounded-full bg-primary-400/20 blur-3xl"
-      ></div>
-      <div
-        class="absolute -bottom-40 -left-40 h-80 w-80 rounded-full bg-primary-500/15 blur-3xl"
-      ></div>
-      <div
-        class="absolute left-1/2 top-1/2 h-96 w-96 -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary-300/10 blur-3xl"
-      ></div>
+      <!-- 顶部 wordmark -->
+      <div class="relative z-10 flex items-center gap-3">
+        <div class="h-10 w-10 overflow-hidden rounded-xl ring-1 ring-black/10 dark:ring-white/15">
+          <img :src="siteLogo || '/logo.png'" alt="Logo" class="h-full w-full object-contain" />
+        </div>
+        <span class="text-sm font-medium tracking-wide text-gray-500 dark:text-white/70">{{ siteName }}</span>
+      </div>
 
-      <!-- Grid Pattern -->
-      <div
-        class="absolute inset-0 bg-[linear-gradient(rgba(20,184,166,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(20,184,166,0.03)_1px,transparent_1px)] bg-[size:64px_64px]"
-      ></div>
-    </div>
+      <!-- 中部:大标题 + 副标题 + 能力标签 -->
+      <div class="relative z-10 max-w-md">
+        <h1 class="font-display text-5xl font-extrabold leading-[1.05] tracking-tight text-gray-900 dark:text-white xl:text-6xl">
+          {{ siteName }}
+        </h1>
+        <p class="mt-5 text-lg leading-relaxed text-gray-500 dark:text-white/60">
+          {{ siteSubtitle }}
+        </p>
+        <ul class="mt-9 space-y-3.5">
+          <li v-for="cap in capabilities" :key="cap" class="flex items-center gap-3 text-[15px] text-gray-600 dark:text-white/75">
+            <span class="cap-dot"></span>
+            {{ cap }}
+          </li>
+        </ul>
+      </div>
 
-    <!-- Content Container -->
-    <div class="relative z-10 w-full max-w-md">
-      <!-- Logo/Brand -->
-      <div class="mb-8 text-center">
-        <!-- Custom Logo or Default Logo -->
-        <template v-if="settingsLoaded">
-          <div
-            class="mb-4 inline-flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl shadow-lg shadow-primary-500/30"
-          >
+      <!-- 底部:mono 装饰行 + 版权 -->
+      <div class="relative z-10 space-y-4">
+        <div class="brand-code inline-flex items-center gap-2 rounded-lg px-3 py-1.5 font-mono text-xs text-gray-600 dark:text-white/55">
+          <span class="text-emerald-500 dark:text-emerald-400">$</span>
+          <span>curl -X POST /v1/messages</span>
+        </div>
+        <p class="text-xs text-gray-400 dark:text-white/35">&copy; {{ currentYear }} {{ siteName }}. All rights reserved.</p>
+      </div>
+    </aside>
+
+    <!-- ============ 右:表单区 ============ -->
+    <main class="relative flex items-center justify-center px-5 py-10 sm:px-8">
+      <div class="relative z-10 w-full max-w-[420px]">
+        <!-- 移动端品牌头 -->
+        <div class="mb-9 flex flex-col items-center text-center lg:hidden">
+          <div class="mb-4 h-14 w-14 overflow-hidden rounded-2xl shadow-glass-sm ring-1 ring-black/5 dark:ring-white/10">
             <img :src="siteLogo || '/logo.png'" alt="Logo" class="h-full w-full object-contain" />
           </div>
-          <h1 class="text-gradient mb-2 text-3xl font-bold">
+          <h1 class="font-display text-3xl font-bold tracking-tight text-gray-900 dark:text-white">
             {{ siteName }}
           </h1>
-          <p class="text-sm text-gray-500 dark:text-dark-400">
-            {{ siteSubtitle }}
-          </p>
-        </template>
-      </div>
+          <p class="mt-1.5 text-sm text-gray-500 dark:text-dark-400">{{ siteSubtitle }}</p>
+        </div>
 
-      <!-- Card Container -->
-      <div class="card-glass rounded-2xl p-8 shadow-glass">
-        <slot />
-      </div>
+        <!-- 表单玻璃卡 -->
+        <div class="auth-card">
+          <slot />
+        </div>
 
-      <!-- Footer Links -->
-      <div class="mt-6 text-center text-sm">
-        <slot name="footer" />
+        <!-- 页脚 -->
+        <div class="mt-6 text-center text-sm">
+          <slot name="footer" />
+        </div>
       </div>
-
-      <!-- Copyright -->
-      <div class="mt-8 text-center text-xs text-gray-400 dark:text-dark-500">
-        &copy; {{ currentYear }} {{ siteName }}. All rights reserved.
-      </div>
-    </div>
+    </main>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores'
 import { sanitizeUrl } from '@/utils/url'
 
+const { t } = useI18n()
 const appStore = useAppStore()
 
 const siteName = computed(() => appStore.siteName || 'Sub2API')
-const siteLogo = computed(() => sanitizeUrl(appStore.siteLogo || '', { allowRelative: true, allowDataUrl: true }))
-const siteSubtitle = computed(() => appStore.cachedPublicSettings?.site_subtitle || 'Subscription to API Conversion Platform')
-const settingsLoaded = computed(() => appStore.publicSettingsLoaded)
+const siteLogo = computed(() =>
+  sanitizeUrl(appStore.siteLogo || '', { allowRelative: true, allowDataUrl: true })
+)
+const siteSubtitle = computed(
+  () => appStore.cachedPublicSettings?.site_subtitle || 'Subscription to API Conversion Platform'
+)
+
+const capabilities = computed(() => [
+  t('home.tags.subscriptionToApi'),
+  t('home.tags.stickySession'),
+  t('home.tags.realtimeBilling')
+])
 
 const currentYear = computed(() => new Date().getFullYear())
 
@@ -82,7 +99,76 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.text-gradient {
-  @apply bg-gradient-to-r from-primary-600 to-primary-500 bg-clip-text text-transparent;
+/* 右侧表单区背景由全局 body mesh 提供,保持透明 */
+
+/* 左侧品牌面板 —— 浅色玻璃基底 + 单点电光蓝柔光,与右侧表单区以细分隔线区分 */
+.brand-panel {
+  background:
+    radial-gradient(120% 80% at 15% 0%, #ffffff 0%, #e9edf4 60%),
+    #e6eaf1;
+  border-right: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.dark .brand-panel {
+  background:
+    radial-gradient(120% 80% at 15% 0%, #1a1c22 0%, #0b0c10 55%),
+    #0b0c10;
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.brand-grid {
+  background-image:
+    linear-gradient(rgba(0, 0, 0, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 0, 0, 0.045) 1px, transparent 1px);
+  background-size: 56px 56px;
+  mask-image: radial-gradient(120% 100% at 30% 20%, #000 0%, transparent 75%);
+  -webkit-mask-image: radial-gradient(120% 100% at 30% 20%, #000 0%, transparent 75%);
+}
+
+.dark .brand-grid {
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+}
+
+/* 单一柔和电光蓝辉光(克制,只此一处) */
+.brand-glow {
+  background: radial-gradient(50% 45% at 78% 78%, rgba(10, 132, 255, 0.14) 0%, transparent 70%);
+}
+
+.dark .brand-glow {
+  background: radial-gradient(50% 45% at 78% 78%, rgba(10, 132, 255, 0.22) 0%, transparent 70%);
+}
+
+.cap-dot {
+  height: 6px;
+  width: 6px;
+  border-radius: 9999px;
+  background: #0a84ff;
+  box-shadow: 0 0 10px rgba(10, 132, 255, 0.6);
+  flex: none;
+}
+
+.brand-code {
+  background: rgba(255, 255, 255, 0.6);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: inset 0 0.5px 0 rgba(255, 255, 255, 0.9);
+}
+
+.dark .brand-code {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 0.5px 0 rgba(255, 255, 255, 0.12);
+}
+
+/* 表单卡:中性磨砂玻璃 + 镜面高光边 */
+.auth-card {
+  background-color: var(--glass-bg-content);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-highlight), 0 20px 50px -20px rgba(0, 0, 0, 0.28);
+  border-radius: 1.5rem;
+  padding: 2rem;
 }
 </style>

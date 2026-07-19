@@ -148,7 +148,7 @@
         <div
           v-for="plan in plans"
           :key="plan.id"
-          class="rounded-xl border border-gray-200 bg-white transition-all dark:border-dark-600 dark:bg-dark-800"
+          class="rounded-xl border border-gray-200 bg-[var(--glass-bg-content)] transition-all dark:border-dark-600 "
         >
           <!-- Plan Header -->
           <div

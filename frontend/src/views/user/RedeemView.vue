@@ -1,25 +1,44 @@
 <template>
   <AppLayout>
-    <div class="mx-auto max-w-2xl space-y-6">
-      <!-- Current Balance Card -->
-      <div class="card overflow-hidden">
-        <div class="bg-gradient-to-br from-primary-500 to-primary-600 px-6 py-8 text-center">
-          <div
-            class="mb-4 inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-white/20 backdrop-blur-sm"
-          >
-            <Icon name="creditCard" size="xl" class="text-white" />
-          </div>
-          <p class="text-sm font-medium text-primary-100">{{ t('redeem.currentBalance') }}</p>
-          <p class="mt-2 text-4xl font-bold text-white">
-            {{ currentBalanceLabel }}
-          </p>
-          <p class="mt-2 text-sm text-primary-100">
-            {{ t('redeem.concurrency') }}: {{ user?.concurrency || 0 }} {{ t('redeem.requests') }}
-          </p>
-        </div>
-      </div>
+    <div class="mx-auto max-w-[1180px]">
+      <!-- Page header -->
+      <header class="mb-8">
+        <p class="text-xs font-semibold uppercase tracking-[0.18em] text-primary-500 dark:text-primary-400">
+          {{ t('nav.redeem') }}
+        </p>
+        <h1 class="font-display mt-1 text-3xl font-bold tracking-tight text-gray-900 dark:text-white">
+          {{ t('redeem.title') }}
+        </h1>
+        <p class="mt-2 max-w-xl text-sm text-gray-500 dark:text-gray-400">
+          {{ t('redeem.description') }}
+        </p>
+      </header>
 
-      <!-- Redeem Form -->
+      <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <!-- Left column: balance + redeem form + result -->
+        <div class="space-y-6">
+          <!-- Current Balance Card -->
+          <div class="card overflow-hidden p-0">
+            <div class="relative overflow-hidden bg-gradient-to-br from-primary-500 to-primary-600 px-6 py-8">
+              <div class="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full bg-white/10 blur-2xl"></div>
+              <div class="relative flex items-center gap-5">
+                <div class="flex h-16 w-16 flex-none items-center justify-center rounded-2xl bg-white/20 backdrop-blur-sm">
+                  <Icon name="creditCard" size="xl" class="text-white" />
+                </div>
+                <div>
+                  <p class="text-sm font-medium text-primary-100">{{ t('redeem.currentBalance') }}</p>
+                  <p class="font-display mt-1 text-4xl font-bold tracking-tight text-white">
+                    {{ currentBalanceLabel }}
+                  </p>
+                  <p class="mt-1 text-sm text-primary-100">
+                    {{ t('redeem.concurrency') }}: {{ user?.concurrency || 0 }} {{ t('redeem.requests') }}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Redeem Form -->
       <div class="card">
         <div class="p-6">
           <form @submit.prevent="handleRedeem" class="space-y-5">
@@ -29,7 +48,7 @@
               </label>
               <div class="relative mt-1">
                 <div class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-4">
-                  <Icon name="gift" size="md" class="text-gray-400 dark:text-dark-500" />
+                  <Icon name="gift" size="md" class="text-gray-500 dark:text-dark-300" :stroke-width="2" />
                 </div>
                 <input
                   id="code"
@@ -161,11 +180,14 @@
           </div>
         </div>
       </transition>
+        </div>
 
-      <!-- Information Card -->
-      <div
-        class="card border-primary-200 bg-primary-50 dark:border-primary-800/50 dark:bg-primary-900/20"
-      >
+        <!-- Right column: rules + recent activity -->
+        <div class="space-y-6">
+          <!-- Information Card -->
+          <div
+            class="card border-primary-200 bg-primary-50 dark:border-primary-800/50 dark:bg-primary-900/20"
+          >
         <div class="p-6">
           <div class="flex items-start gap-4">
             <div
@@ -334,6 +356,8 @@
             <p class="text-sm text-gray-500 dark:text-dark-400">
               {{ t('redeem.historyWillAppear') }}
             </p>
+          </div>
+        </div>
           </div>
         </div>
       </div>

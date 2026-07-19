@@ -286,6 +286,26 @@ func TestNormalizeOpenAICodexFingerprintKeepsValidExisting(t *testing.T) {
 	}
 }
 
+func TestNormalizeOpenAICodexFingerprintMigratesExactLegacyBuiltIn(t *testing.T) {
+	now := time.Date(2026, 7, 10, 1, 2, 3, 0, time.UTC)
+	existing := OpenAICodexFingerprint{SchemaVersion: 1, InstallationID: "550e8400-e29b-41d4-a716-446655440000", UAProfile: legacyBuiltInOpenAICodexUAProfile, CreatedAt: "2026-06-12T00:00:00Z", UpdatedAt: "2026-06-13T00:00:00Z"}
+	fp, changed := NormalizeOpenAICodexFingerprint(existing, ParseOpenAICodexUAProfile("custom/9 (Custom OS) term (custom; 9)"), now)
+	if !changed || fp.UAProfile.UserAgent() != DefaultOpenAICodexUserAgent {
+		t.Fatalf("legacy fingerprint did not migrate: %#v", fp)
+	}
+	if fp.InstallationID != existing.InstallationID || fp.CreatedAt != existing.CreatedAt {
+		t.Fatalf("installation identity changed: %#v", fp)
+	}
+}
+
+func TestNormalizeOpenAICodexFingerprintPreservesCustomLegacyVersionProfile(t *testing.T) {
+	existing := OpenAICodexFingerprint{SchemaVersion: 1, InstallationID: "550e8400-e29b-41d4-a716-446655440000", UAProfile: ParseOpenAICodexUAProfile("custom/0.136.0 (Linux; x86_64) vscode (custom; 0.136.0)"), CreatedAt: "2026-06-12T00:00:00Z", UpdatedAt: "2026-06-13T00:00:00Z"}
+	fp, changed := NormalizeOpenAICodexFingerprint(existing, currentBuiltInOpenAICodexUAProfile, time.Now())
+	if changed || fp != existing {
+		t.Fatalf("custom fingerprint changed: %#v", fp)
+	}
+}
+
 func TestNormalizeOpenAICodexFingerprintRepairsMissingFields(t *testing.T) {
 	now := time.Date(2026, 6, 13, 1, 2, 3, 0, time.UTC)
 	defaultProfile := ParseOpenAICodexUAProfile(DefaultOpenAICodexUserAgent)

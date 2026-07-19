@@ -5,10 +5,12 @@ package service
 import (
 	"context"
 	"errors"
+	"net/http"
 	"testing"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/stretchr/testify/require"
 )
 
@@ -20,6 +22,8 @@ type tokenRefreshAccountRepo struct {
 	setErrorCalls          int
 	clearTempCalls         int
 	setTempUnschedCalls    int
+	lastErrorMessage       string
+	lastTempUnschedReason  string
 	lastAccount            *Account
 	updateErr              error
 }
@@ -51,6 +55,7 @@ func (r *tokenRefreshAccountRepo) UpdateCredentials(ctx context.Context, id int6
 
 func (r *tokenRefreshAccountRepo) SetError(ctx context.Context, id int64, errorMsg string) error {
 	r.setErrorCalls++
+	r.lastErrorMessage = errorMsg
 	return nil
 }
 
@@ -61,6 +66,7 @@ func (r *tokenRefreshAccountRepo) ClearTempUnschedulable(ctx context.Context, id
 
 func (r *tokenRefreshAccountRepo) SetTempUnschedulable(ctx context.Context, id int64, until time.Time, reason string) error {
 	r.setTempUnschedCalls++
+	r.lastTempUnschedReason = reason
 	return nil
 }
 
@@ -94,6 +100,7 @@ func (s *tempUnschedCacheStub) DeleteTempUnsched(ctx context.Context, accountID 
 type tokenRefresherStub struct {
 	credentials map[string]any
 	err         error
+	calls       int
 }
 
 func (r *tokenRefresherStub) CanRefresh(account *Account) bool {
@@ -105,6 +112,7 @@ func (r *tokenRefresherStub) NeedsRefresh(account *Account, refreshWindowDuratio
 }
 
 func (r *tokenRefresherStub) Refresh(ctx context.Context, account *Account) (map[string]any, error) {
+	r.calls++
 	if r.err != nil {
 		return nil, r.err
 	}
@@ -521,8 +529,76 @@ func TestTokenRefreshService_RefreshWithRetry_NoRefreshTokenDoesNotTempUnschedul
 	require.Equal(t, 1, repo.setErrorCalls, "missing refresh token should be treated as a non-retryable credential state")
 }
 
+func TestTokenRefreshService_RefreshWithRetry_RedactsPersistedNonRetryableError(t *testing.T) {
+	repo := &tokenRefreshAccountRepo{}
+	cfg := &config.Config{
+		TokenRefresh: config.TokenRefreshConfig{
+			MaxRetries:          3,
+			RetryBackoffSeconds: 0,
+		},
+	}
+	service := NewTokenRefreshService(repo, nil, nil, nil, nil, nil, nil, cfg, nil)
+	account := &Account{
+		ID:       20,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+	}
+	rawErr := errors.New(`invalid_grant: token refresh failed: status 400, body: {"error":"invalid_grant","access_token":"access-secret","refresh_token":"refresh-secret","client_secret":"client-secret"}`)
+	refresher := &tokenRefresherStub{err: rawErr}
+
+	err := service.refreshWithRetry(context.Background(), account, refresher, refresher, time.Hour)
+
+	require.ErrorIs(t, err, rawErr)
+	require.Equal(t, 1, refresher.calls, "non-retryable errors should not be retried")
+	require.Equal(t, 1, repo.setErrorCalls)
+	require.Equal(t, 0, repo.setTempUnschedCalls)
+	require.Contains(t, repo.lastErrorMessage, "Token refresh failed (non-retryable):")
+	require.Contains(t, repo.lastErrorMessage, `"access_token":"***"`)
+	require.Contains(t, repo.lastErrorMessage, `"refresh_token":"***"`)
+	require.Contains(t, repo.lastErrorMessage, `"client_secret":"***"`)
+	require.NotContains(t, repo.lastErrorMessage, "access-secret")
+	require.NotContains(t, repo.lastErrorMessage, "refresh-secret")
+	require.NotContains(t, repo.lastErrorMessage, "client-secret")
+}
+
+func TestTokenRefreshService_RefreshWithRetry_RedactsPersistedRetryExhaustedReason(t *testing.T) {
+	repo := &tokenRefreshAccountRepo{}
+	cfg := &config.Config{
+		TokenRefresh: config.TokenRefreshConfig{
+			MaxRetries:          2,
+			RetryBackoffSeconds: 0,
+		},
+	}
+	service := NewTokenRefreshService(repo, nil, nil, nil, nil, nil, nil, cfg, nil)
+	account := &Account{
+		ID:       21,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+	}
+	rawErr := errors.New("temporary upstream timeout: access_token=access-secret refresh_token=refresh-secret client_secret=client-secret")
+	refresher := &tokenRefresherStub{err: rawErr}
+
+	err := service.refreshWithRetry(context.Background(), account, refresher, refresher, time.Hour)
+
+	require.ErrorIs(t, err, rawErr)
+	require.Equal(t, 2, refresher.calls, "retryable errors should still exhaust configured retries")
+	require.Equal(t, 0, repo.setErrorCalls)
+	require.Equal(t, 1, repo.setTempUnschedCalls)
+	require.Contains(t, repo.lastTempUnschedReason, "token refresh retry exhausted:")
+	require.Contains(t, repo.lastTempUnschedReason, "access_token=***")
+	require.Contains(t, repo.lastTempUnschedReason, "refresh_token=***")
+	require.Contains(t, repo.lastTempUnschedReason, "client_secret=***")
+	require.NotContains(t, repo.lastTempUnschedReason, "access-secret")
+	require.NotContains(t, repo.lastTempUnschedReason, "refresh-secret")
+	require.NotContains(t, repo.lastTempUnschedReason, "client-secret")
+}
+
 // TestIsNonRetryableRefreshError 测试不可重试错误判断
 func TestIsNonRetryableRefreshError(t *testing.T) {
+	openAIRefreshErr := func(message string) error {
+		return infraerrors.New(http.StatusBadGateway, openAIOAuthTokenRefreshFailedReason, message)
+	}
+
 	tests := []struct {
 		name     string
 		err      error
@@ -534,7 +610,17 @@ func TestIsNonRetryableRefreshError(t *testing.T) {
 		{name: "invalid_client", err: errors.New("invalid_client"), expected: true},
 		{name: "invalid_refresh_token", err: errors.New(`OPENAI_OAUTH_TOKEN_REFRESH_FAILED: token refresh failed: status 401, body: {"error":{"code":"invalid_refresh_token"}}`), expected: true},
 		{name: "refresh_token_reused", err: errors.New(`OPENAI_OAUTH_TOKEN_REFRESH_FAILED: token refresh failed: status 401, body: {"error":{"code":"refresh_token_reused"}}`), expected: true},
+		{name: "refresh_token_invalidated", err: errors.New(`OPENAI_OAUTH_TOKEN_REFRESH_FAILED: token refresh failed: status 401, body: {"error":{"code":"refresh_token_invalidated"}}`), expected: true},
 		{name: "app_session_terminated", err: errors.New(`OPENAI_OAUTH_TOKEN_REFRESH_FAILED: token refresh failed: status 401, body: {"error": {"code": "app_session_terminated"}}`), expected: true},
+		{name: "openai_token_expired_typed_json_code", err: openAIRefreshErr(`token refresh failed: status 401, body: {"error":{"code":"token_expired","message":"session expired"}}`), expected: true},
+		{name: "openai_token_expired_plain_reason_string", err: errors.New(`OPENAI_OAUTH_TOKEN_REFRESH_FAILED: token refresh failed: status 401, body: {"error":{"code":"token_expired","message":"session expired"}}`), expected: false},
+		{name: "openai_token_expired_escaped_application_error_string", err: errors.New(infraerrors.Newf(http.StatusBadGateway, openAIOAuthTokenRefreshFailedReason, `token refresh failed: status 401, body: {"error":{"code":"token_expired","message":"session expired"}}`).Error()), expected: false},
+		{name: "openai_token_expired_injected_reason_string", err: errors.New(`other refresher failed: OPENAI_OAUTH_TOKEN_REFRESH_FAILED: token refresh failed: status 401, body: {"error":{"code":"token_expired"}}`), expected: false},
+		{name: "openai_token_expired_typed_code_outside_body", err: openAIRefreshErr(`wrapper metadata {"code":"token_expired"} before upstream response; token refresh failed: status 500, body: {"error":{"code":"server_error"}}`), expected: false},
+		{name: "openai_token_expired_typed_code_in_wrapper_body", err: openAIRefreshErr(`wrapper body: {"error":{"code":"token_expired"}} before refresh failure`), expected: false},
+		{name: "openai_token_expired_typed_top_level_body_code", err: openAIRefreshErr(`token refresh failed: status 401, body: {"code":"token_expired","error":{"code":"server_error"}}`), expected: false},
+		{name: "openai_token_expired_typed_malformed_body", err: openAIRefreshErr(`token refresh failed: status 401, body: upstream token_expired response was not JSON`), expected: false},
+		{name: "openai_token_expired_free_text", err: errors.New("network timeout while checking token_expired state"), expected: false},
 		{name: "unauthorized_client", err: errors.New("unauthorized_client"), expected: true},
 		{name: "access_denied", err: errors.New("access_denied"), expected: true},
 		{name: "no_refresh_token", err: errors.New("no refresh token available"), expected: true},
@@ -548,6 +634,32 @@ func TestIsNonRetryableRefreshError(t *testing.T) {
 			require.Equal(t, tt.expected, result)
 		})
 	}
+}
+
+func TestTokenRefreshService_RefreshWithRetry_OpenAITokenExpiredNonRetryable(t *testing.T) {
+	repo := &tokenRefreshAccountRepo{}
+	cfg := &config.Config{
+		TokenRefresh: config.TokenRefreshConfig{
+			MaxRetries:          3,
+			RetryBackoffSeconds: 0,
+		},
+	}
+	service := NewTokenRefreshService(repo, nil, nil, nil, nil, nil, nil, cfg, nil)
+	account := &Account{
+		ID:       19,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+	}
+	refresher := &tokenRefresherStub{
+		err: infraerrors.Newf(http.StatusBadGateway, openAIOAuthTokenRefreshFailedReason, `token refresh failed: status 401, body: {"error":{"code":"token_expired"}}`),
+	}
+
+	err := service.refreshWithRetry(context.Background(), account, refresher, refresher, time.Hour)
+	require.Error(t, err)
+	require.Equal(t, 1, refresher.calls, "token_expired should not be retried")
+	require.Equal(t, 1, repo.setErrorCalls)
+	require.Equal(t, 0, repo.setTempUnschedCalls, "non-retryable token_expired should not use retry-exhausted temp unschedule")
+	require.Equal(t, 0, repo.updateCalls)
 }
 
 // ========== Path A (refreshAPI) 测试用例 ==========

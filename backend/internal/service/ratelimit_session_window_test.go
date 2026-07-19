@@ -314,21 +314,21 @@ func TestUpdateSessionWindow_ClearsUtilizationOnWindowReset(t *testing.T) {
 
 	svc.UpdateSessionWindow(context.Background(), account, headers)
 
-	// Should have 2 UpdateExtra calls: one to clear utilization, one to store new utilization
-	if len(repo.updateExtraCalls) != 2 {
-		t.Fatalf("expected 2 UpdateExtra calls, got %d", len(repo.updateExtraCalls))
+	// Reset cleanup and the replacement sample must be one write so a cleanup
+	// cannot erase a newer concurrent observation.
+	if len(repo.updateExtraCalls) != 1 {
+		t.Fatalf("expected 1 merged UpdateExtra call, got %d", len(repo.updateExtraCalls))
 	}
 
-	// First call: clear utilization (nil value)
-	clearCall := repo.updateExtraCalls[0]
-	if clearCall.Updates["session_window_utilization"] != nil {
-		t.Errorf("expected utilization cleared to nil, got %v", clearCall.Updates["session_window_utilization"])
-	}
-
-	// Second call: store new utilization
-	storeCall := repo.updateExtraCalls[1]
+	storeCall := repo.updateExtraCalls[0]
 	if val, ok := storeCall.Updates["session_window_utilization"].(float64); !ok || val != 0.15 {
 		t.Errorf("expected utilization stored as 0.15, got %v", storeCall.Updates["session_window_utilization"])
+	}
+	if storeCall.Updates["passive_usage_7d_utilization"] != nil {
+		t.Errorf("expected stale 7d utilization cleared, got %v", storeCall.Updates["passive_usage_7d_utilization"])
+	}
+	if storeCall.Updates["passive_usage_7d_reset"] != nil {
+		t.Errorf("expected stale 7d reset cleared, got %v", storeCall.Updates["passive_usage_7d_reset"])
 	}
 }
 
@@ -358,6 +358,30 @@ func TestUpdateSessionWindow_NoClearUtilizationOnCorrection(t *testing.T) {
 
 	if val, ok := repo.updateExtraCalls[0].Updates["session_window_utilization"].(float64); !ok || val != 0.30 {
 		t.Errorf("expected utilization 0.30, got %v", repo.updateExtraCalls[0].Updates["session_window_utilization"])
+	}
+}
+
+func TestUpdateSessionWindow_SamplesFableWindow(t *testing.T) {
+	resetUnix := time.Now().Add(6 * 24 * time.Hour).Unix()
+	repo := &sessionWindowMockRepo{}
+	svc := newRateLimitServiceForTest(repo)
+	account := &Account{ID: 81}
+	headers := http.Header{}
+	headers.Set("anthropic-ratelimit-unified-5h-status", "allowed")
+	headers.Set("anthropic-ratelimit-unified-7d_oi-utilization", "0.87")
+	headers.Set("anthropic-ratelimit-unified-7d_oi-reset", fmt.Sprintf("%d", resetUnix))
+
+	svc.UpdateSessionWindow(context.Background(), account, headers)
+
+	if len(repo.updateExtraCalls) != 1 {
+		t.Fatalf("expected 1 UpdateExtra call, got %d", len(repo.updateExtraCalls))
+	}
+	updates := repo.updateExtraCalls[0].Updates
+	if got := updates["passive_usage_7d_oi_utilization"]; got != 0.87 {
+		t.Fatalf("passive_usage_7d_oi_utilization = %v, want 0.87", got)
+	}
+	if got := updates["passive_usage_7d_oi_reset"]; got != resetUnix {
+		t.Fatalf("passive_usage_7d_oi_reset = %v, want %d", got, resetUnix)
 	}
 }
 

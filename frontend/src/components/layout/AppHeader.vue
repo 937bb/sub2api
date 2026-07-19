@@ -1,5 +1,7 @@
 <template>
-  <header class="glass sticky top-0 z-30 border-b border-gray-200/50 dark:border-dark-700/50">
+  <header
+    class="glass sticky top-3 z-30 mx-3 mt-3 rounded-2xl border border-[var(--glass-border)] shadow-[inset_0_0.5px_0_0_rgba(255,255,255,0.6),0_16px_40px_-24px_rgba(0,0,0,0.35)] lg:mx-0 lg:mr-3"
+  >
     <div class="flex h-16 items-center justify-between px-4 md:px-6">
       <!-- Left: Mobile Menu Toggle + Page Title -->
       <div class="flex items-center gap-4">
@@ -222,6 +224,7 @@ import LocaleSwitcher from '@/components/common/LocaleSwitcher.vue'
 import SubscriptionProgressMini from '@/components/common/SubscriptionProgressMini.vue'
 import AnnouncementBell from '@/components/common/AnnouncementBell.vue'
 import Icon from '@/components/icons/Icon.vue'
+import { sanitizeUrl } from '@/utils/url'
 
 const router = useRouter()
 const route = useRoute()
@@ -235,7 +238,7 @@ const user = computed(() => authStore.user)
 const dropdownOpen = ref(false)
 const dropdownRef = ref<HTMLElement | null>(null)
 const contactInfo = computed(() => appStore.contactInfo)
-const docUrl = computed(() => appStore.docUrl)
+const docUrl = computed(() => sanitizeUrl(appStore.docUrl || ''))
 const avatarUrl = computed(() => user.value?.avatar_url?.trim() || '')
 const balanceLabel = computed(() => {
   if (typeof user.value?.balance !== 'number' || Number.isNaN(user.value.balance)) {

@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"errors"
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -9,6 +11,14 @@ import (
 
 type openAI403CounterResetStub struct {
 	resetCalls []int64
+}
+
+func newOpenAIRecordUsageServiceWith403CounterForTest(counter *openAI403CounterResetStub, billingRepo *openAIRecordUsageBillingRepoStub) *OpenAIGatewayService {
+	rateLimitSvc := NewRateLimitService(nil, nil, nil, nil, nil)
+	rateLimitSvc.SetOpenAI403CounterCache(counter)
+	svc := newOpenAIRecordUsageServiceWithBillingRepoForTest(&openAIRecordUsageLogRepoStub{inserted: true}, billingRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{}, nil)
+	svc.rateLimitService = rateLimitSvc
+	return svc
 }
 
 func (s *openAI403CounterResetStub) IncrementOpenAI403Count(context.Context, int64, int) (int64, error) {
@@ -45,4 +55,31 @@ func TestOpenAIGatewayServiceRecordUsage_ResetsOpenAI403CounterForZeroUsage(t *t
 	require.NoError(t, err)
 	require.Equal(t, []int64{777}, counter.resetCalls)
 	require.Equal(t, 1, usageRepo.calls)
+}
+
+func TestOpenAIGatewayServiceRecordUsage_InvalidPricingDoesNotResetOpenAI403Counter(t *testing.T) {
+	counter := &openAI403CounterResetStub{}
+	svc := newOpenAIRecordUsageServiceWith403CounterForTest(counter, &openAIRecordUsageBillingRepoStub{result: &UsageBillingApplyResult{Applied: true}})
+	svc.cfg.Default.RateMultiplier = math.NaN()
+
+	err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
+		Result: &OpenAIForwardResult{RequestID: "invalid_pricing_no_reset", Model: "gpt-5.1", Usage: OpenAIUsage{InputTokens: 1}},
+		APIKey: &APIKey{ID: 1002}, User: &User{ID: 2002}, Account: &Account{ID: 778, Platform: PlatformOpenAI},
+	})
+
+	require.ErrorContains(t, err, "invalid billing cost")
+	require.Empty(t, counter.resetCalls)
+}
+
+func TestOpenAIGatewayServiceRecordUsage_PersistenceFailureDoesNotResetOpenAI403Counter(t *testing.T) {
+	counter := &openAI403CounterResetStub{}
+	svc := newOpenAIRecordUsageServiceWith403CounterForTest(counter, &openAIRecordUsageBillingRepoStub{err: errors.New("billing tx failed")})
+
+	err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
+		Result: &OpenAIForwardResult{RequestID: "persistence_failure_no_reset", Model: "gpt-5.1", Usage: OpenAIUsage{InputTokens: 1}},
+		APIKey: &APIKey{ID: 1003}, User: &User{ID: 2003}, Account: &Account{ID: 779, Platform: PlatformOpenAI},
+	})
+
+	require.ErrorContains(t, err, "billing tx failed")
+	require.Empty(t, counter.resetCalls)
 }

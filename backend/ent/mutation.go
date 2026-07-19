@@ -20660,6 +20660,7 @@ type PaymentOrderMutation struct {
 	provider_key             *string
 	provider_snapshot        *map[string]interface{}
 	status                   *string
+	fulfillment_lease_token  *string
 	refund_amount            *float64
 	addrefund_amount         *float64
 	refund_reason            *string
@@ -21829,6 +21830,55 @@ func (m *PaymentOrderMutation) ResetStatus() {
 	m.status = nil
 }
 
+// SetFulfillmentLeaseToken sets the "fulfillment_lease_token" field.
+func (m *PaymentOrderMutation) SetFulfillmentLeaseToken(s string) {
+	m.fulfillment_lease_token = &s
+}
+
+// FulfillmentLeaseToken returns the value of the "fulfillment_lease_token" field in the mutation.
+func (m *PaymentOrderMutation) FulfillmentLeaseToken() (r string, exists bool) {
+	v := m.fulfillment_lease_token
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldFulfillmentLeaseToken returns the old "fulfillment_lease_token" field's value of the PaymentOrder entity.
+// If the PaymentOrder object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *PaymentOrderMutation) OldFulfillmentLeaseToken(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldFulfillmentLeaseToken is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldFulfillmentLeaseToken requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldFulfillmentLeaseToken: %w", err)
+	}
+	return oldValue.FulfillmentLeaseToken, nil
+}
+
+// ClearFulfillmentLeaseToken clears the value of the "fulfillment_lease_token" field.
+func (m *PaymentOrderMutation) ClearFulfillmentLeaseToken() {
+	m.fulfillment_lease_token = nil
+	m.clearedFields[paymentorder.FieldFulfillmentLeaseToken] = struct{}{}
+}
+
+// FulfillmentLeaseTokenCleared returns if the "fulfillment_lease_token" field was cleared in this mutation.
+func (m *PaymentOrderMutation) FulfillmentLeaseTokenCleared() bool {
+	_, ok := m.clearedFields[paymentorder.FieldFulfillmentLeaseToken]
+	return ok
+}
+
+// ResetFulfillmentLeaseToken resets all changes to the "fulfillment_lease_token" field.
+func (m *PaymentOrderMutation) ResetFulfillmentLeaseToken() {
+	m.fulfillment_lease_token = nil
+	delete(m.clearedFields, paymentorder.FieldFulfillmentLeaseToken)
+}
+
 // SetRefundAmount sets the "refund_amount" field.
 func (m *PaymentOrderMutation) SetRefundAmount(f float64) {
 	m.refund_amount = &f
@@ -22652,7 +22702,7 @@ func (m *PaymentOrderMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *PaymentOrderMutation) Fields() []string {
-	fields := make([]string, 0, 39)
+	fields := make([]string, 0, 40)
 	if m.user != nil {
 		fields = append(fields, paymentorder.FieldUserID)
 	}
@@ -22718,6 +22768,9 @@ func (m *PaymentOrderMutation) Fields() []string {
 	}
 	if m.status != nil {
 		fields = append(fields, paymentorder.FieldStatus)
+	}
+	if m.fulfillment_lease_token != nil {
+		fields = append(fields, paymentorder.FieldFulfillmentLeaseToken)
 	}
 	if m.refund_amount != nil {
 		fields = append(fields, paymentorder.FieldRefundAmount)
@@ -22822,6 +22875,8 @@ func (m *PaymentOrderMutation) Field(name string) (ent.Value, bool) {
 		return m.ProviderSnapshot()
 	case paymentorder.FieldStatus:
 		return m.Status()
+	case paymentorder.FieldFulfillmentLeaseToken:
+		return m.FulfillmentLeaseToken()
 	case paymentorder.FieldRefundAmount:
 		return m.RefundAmount()
 	case paymentorder.FieldRefundReason:
@@ -22909,6 +22964,8 @@ func (m *PaymentOrderMutation) OldField(ctx context.Context, name string) (ent.V
 		return m.OldProviderSnapshot(ctx)
 	case paymentorder.FieldStatus:
 		return m.OldStatus(ctx)
+	case paymentorder.FieldFulfillmentLeaseToken:
+		return m.OldFulfillmentLeaseToken(ctx)
 	case paymentorder.FieldRefundAmount:
 		return m.OldRefundAmount(ctx)
 	case paymentorder.FieldRefundReason:
@@ -23105,6 +23162,13 @@ func (m *PaymentOrderMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetStatus(v)
+		return nil
+	case paymentorder.FieldFulfillmentLeaseToken:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetFulfillmentLeaseToken(v)
 		return nil
 	case paymentorder.FieldRefundAmount:
 		v, ok := value.(float64)
@@ -23372,6 +23436,9 @@ func (m *PaymentOrderMutation) ClearedFields() []string {
 	if m.FieldCleared(paymentorder.FieldProviderSnapshot) {
 		fields = append(fields, paymentorder.FieldProviderSnapshot)
 	}
+	if m.FieldCleared(paymentorder.FieldFulfillmentLeaseToken) {
+		fields = append(fields, paymentorder.FieldFulfillmentLeaseToken)
+	}
 	if m.FieldCleared(paymentorder.FieldRefundReason) {
 		fields = append(fields, paymentorder.FieldRefundReason)
 	}
@@ -23445,6 +23512,9 @@ func (m *PaymentOrderMutation) ClearField(name string) error {
 		return nil
 	case paymentorder.FieldProviderSnapshot:
 		m.ClearProviderSnapshot()
+		return nil
+	case paymentorder.FieldFulfillmentLeaseToken:
+		m.ClearFulfillmentLeaseToken()
 		return nil
 	case paymentorder.FieldRefundReason:
 		m.ClearRefundReason()
@@ -23549,6 +23619,9 @@ func (m *PaymentOrderMutation) ResetField(name string) error {
 		return nil
 	case paymentorder.FieldStatus:
 		m.ResetStatus()
+		return nil
+	case paymentorder.FieldFulfillmentLeaseToken:
+		m.ResetFulfillmentLeaseToken()
 		return nil
 	case paymentorder.FieldRefundAmount:
 		m.ResetRefundAmount()

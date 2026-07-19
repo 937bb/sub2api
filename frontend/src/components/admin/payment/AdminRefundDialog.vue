@@ -35,15 +35,15 @@
         </div>
         <div class="mt-1 flex justify-between text-sm">
           <span class="text-gray-500 dark:text-gray-400">{{ t('payment.orders.creditedAmount') }}</span>
-          <span class="font-medium text-gray-900 dark:text-white">{{ order?.order_type === 'balance' ? '$' : '¥' }}{{ order?.amount?.toFixed(2) }}</span>
+          <span class="font-medium text-gray-900 dark:text-white">{{ formatOrderProductAmount(order?.amount) }}</span>
         </div>
         <div class="mt-1 flex justify-between text-sm">
           <span class="text-gray-500 dark:text-gray-400">{{ t('payment.orders.payAmount') }}</span>
-          <span class="font-medium text-gray-900 dark:text-white">¥{{ order?.pay_amount?.toFixed(2) }}</span>
+          <span class="font-medium text-gray-900 dark:text-white">{{ formatGatewayAmount(order?.pay_amount) }}</span>
         </div>
         <div v-if="actuallyRefunded > 0" class="mt-1 flex justify-between text-sm">
           <span class="text-gray-500 dark:text-gray-400">{{ t('payment.admin.alreadyRefunded') }}</span>
-          <span class="font-medium text-red-600 dark:text-red-400">{{ order?.order_type === 'balance' ? '$' : '¥' }}{{ actuallyRefunded.toFixed(2) }}</span>
+          <span class="font-medium text-red-600 dark:text-red-400">{{ formatOrderProductAmount(actuallyRefunded) }}</span>
         </div>
       </div>
 
@@ -66,11 +66,11 @@
         <div v-if="form.deduct_balance && userBalance != null" class="mt-3 grid grid-cols-2 gap-3">
           <div class="rounded-lg bg-gray-50 p-3 text-sm dark:bg-dark-700">
             <div class="text-gray-500 dark:text-gray-400">{{ t('payment.admin.userBalance') }}</div>
-            <div class="mt-1 font-semibold text-gray-900 dark:text-white">${{ userBalance.toFixed(2) }}</div>
+            <div class="mt-1 font-semibold text-gray-900 dark:text-white">{{ formatBalanceAmount(userBalance) }}</div>
           </div>
           <div class="rounded-lg bg-gray-50 p-3 text-sm dark:bg-dark-700">
             <div class="text-gray-500 dark:text-gray-400">{{ t('payment.admin.orderAmount') }}</div>
-            <div class="mt-1 font-semibold text-gray-900 dark:text-white">{{ order?.order_type === 'balance' ? '$' : '¥' }}{{ order?.amount?.toFixed(2) }}</div>
+            <div class="mt-1 font-semibold text-gray-900 dark:text-white">{{ formatOrderProductAmount(order?.amount) }}</div>
           </div>
         </div>
 
@@ -95,7 +95,7 @@
       <div>
         <label class="input-label">{{ t('payment.admin.refundAmount') }}</label>
         <div class="relative">
-          <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">{{ order?.order_type === 'balance' ? '$' : '¥' }}</span>
+          <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">{{ refundInputPrefix }}</span>
           <input
             v-model.number="form.amount"
             type="number"
@@ -107,7 +107,7 @@
           />
         </div>
         <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-          {{ t('payment.admin.maxRefundable') }}: {{ order?.order_type === 'balance' ? '$' : '¥' }}{{ maxRefundable.toFixed(2) }}
+          {{ t('payment.admin.maxRefundable') }}: {{ formatOrderProductAmount(maxRefundable) }}
         </p>
       </div>
 
@@ -169,8 +169,10 @@ import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import type { PaymentOrder } from '@/types/payment'
 import { formatOrderDateTime } from '@/components/payment/orderUtils'
+import { formatPaymentAmount, normalizePaymentCurrency } from '@/components/payment/currency'
 
-const { t } = useI18n()
+const i18n = useI18n()
+const { t } = i18n
 
 const props = defineProps<{
   show: boolean
@@ -193,6 +195,25 @@ const form = reactive({
   force: false,
 })
 
+const localeCode = computed(() => {
+  const raw = i18n.locale as unknown
+  if (typeof raw === 'string') return raw
+  if (raw && typeof raw === 'object' && 'value' in raw) {
+    return String((raw as { value?: string }).value || '')
+  }
+  return undefined
+})
+
+const productCurrency = computed(() => {
+  if (props.order?.order_type === 'balance') return 'USD'
+  return normalizePaymentCurrency(props.order?.currency)
+})
+
+const refundInputPrefix = computed(() => {
+  const formatted = formatPaymentAmount(0, productCurrency.value, localeCode.value)
+  return formatted.replace(/[0-9\s.,]+/g, '') || productCurrency.value
+})
+
 // In REFUND_REQUESTED status, refund_amount is the REQUESTED amount, not actually refunded.
 // Only PARTIALLY_REFUNDED / REFUNDED have real refund amounts.
 const actuallyRefunded = computed(() => {
@@ -211,6 +232,18 @@ const balanceInsufficient = computed(() => {
   if (props.userBalance == null || !props.order) return false
   return props.userBalance < props.order.amount
 })
+
+function formatBalanceAmount(amount?: number | null): string {
+  return formatPaymentAmount(Number(amount), 'USD', localeCode.value)
+}
+
+function formatOrderProductAmount(amount?: number | null): string {
+  return formatPaymentAmount(Number(amount), productCurrency.value, localeCode.value)
+}
+
+function formatGatewayAmount(amount?: number | null): string {
+  return formatPaymentAmount(Number(amount), props.order?.currency, localeCode.value)
+}
 
 watch(() => props.show, (val) => {
   if (val && props.order) {

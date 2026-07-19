@@ -25,3 +25,23 @@ func TestNormalizeOpenAIMessagesDispatchModelConfig(t *testing.T) {
 		"claude-sonnet-4-5-20250929": "gpt-5.2",
 	}, cfg.ExactModelMappings)
 }
+
+func TestResolveMessagesDispatchModel(t *testing.T) {
+	t.Parallel()
+
+	group := &Group{MessagesDispatchModelConfig: OpenAIMessagesDispatchModelConfig{
+		ExactModelMappings: map[string]string{
+			" claude-fable-5 ": " gpt-5.6-sol ",
+			"claude-empty-5":   " ",
+			"custom-model":     "gpt-5.5",
+		},
+	}}
+
+	require.Equal(t, "gpt-5.6-sol", group.ResolveMessagesDispatchModel("claude-fable-5"))
+	require.Empty(t, group.ResolveMessagesDispatchModel("claude-empty-5"))
+	require.Equal(t, "gpt-5.5", group.ResolveMessagesDispatchModel("custom-model"))
+	require.Equal(t, defaultOpenAIMessagesDispatchOpusMappedModel, group.ResolveMessagesDispatchModel("claude-opus-4-6"))
+	require.Equal(t, defaultOpenAIMessagesDispatchSonnetMappedModel, group.ResolveMessagesDispatchModel("claude-sonnet-4-5"))
+	require.Equal(t, defaultOpenAIMessagesDispatchHaikuMappedModel, group.ResolveMessagesDispatchModel("claude-haiku-4-5"))
+	require.Empty(t, group.ResolveMessagesDispatchModel("gpt-5.4"))
+}

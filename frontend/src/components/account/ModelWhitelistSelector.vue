@@ -4,7 +4,7 @@
     <div class="relative mb-3">
       <div
         @click="toggleDropdown"
-        class="cursor-pointer rounded-lg border border-gray-300 bg-white px-3 py-2 dark:border-dark-500 dark:bg-dark-700"
+        class="cursor-pointer rounded-lg border border-gray-300 bg-[var(--glass-bg-content)] px-3 py-2 dark:border-dark-500 "
       >
         <div class="grid grid-cols-2 gap-1.5">
           <span
@@ -35,9 +35,9 @@
       <!-- Dropdown List -->
       <div
         v-if="showDropdown"
-        class="absolute left-0 right-0 top-full z-50 mt-1 rounded-lg border border-gray-200 bg-white shadow-lg dark:border-dark-600 dark:bg-dark-700"
+        class="absolute left-0 right-0 top-full z-50 mt-1 rounded-lg border border-gray-200 bg-[var(--glass-bg-dropdown)] backdrop-blur-xl shadow-lg dark:border-dark-600 "
       >
-        <div class="sticky top-0 border-b border-gray-200 bg-white p-2 dark:border-dark-600 dark:bg-dark-700">
+        <div class="sticky top-0 border-b border-gray-200 bg-[var(--glass-bg-content)] p-2 dark:border-dark-600 ">
           <input
             v-model="searchQuery"
             type="text"

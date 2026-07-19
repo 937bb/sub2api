@@ -3,10 +3,12 @@
 package repository
 
 import (
+	"context"
 	"math"
 	"testing"
 	"time"
 
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 )
 
@@ -44,6 +46,62 @@ func TestBillingBalanceKey(t *testing.T) {
 			require.Equal(t, tc.expected, got)
 		})
 	}
+}
+
+func TestBillingBalanceGenerationKey(t *testing.T) {
+	got := billingBalanceGenerationKey(123)
+	require.Equal(t, "billing:balance:gen:123", got)
+}
+
+func TestBillingBalanceGenerationGuardsStalePositiveFill(t *testing.T) {
+	cache, _ := newMiniRedisCache(t)
+	ctx := context.Background()
+	userID := int64(42)
+
+	generation, err := cache.GetUserBalanceGeneration(ctx, userID)
+	require.NoError(t, err)
+	require.Equal(t, int64(0), generation)
+
+	set, err := cache.SetUserBalanceIfGeneration(ctx, userID, 5, generation)
+	require.NoError(t, err)
+	require.True(t, set)
+
+	got, err := cache.GetUserBalance(ctx, userID)
+	require.NoError(t, err)
+	require.Equal(t, 5.0, got)
+
+	require.NoError(t, cache.InvalidateUserBalance(ctx, userID))
+	advanced, err := cache.GetUserBalanceGeneration(ctx, userID)
+	require.NoError(t, err)
+	require.Greater(t, advanced, generation)
+
+	set, err = cache.SetUserBalanceIfGeneration(ctx, userID, 5, generation)
+	require.NoError(t, err)
+	require.False(t, set)
+
+	_, err = cache.GetUserBalance(ctx, userID)
+	require.ErrorIs(t, err, redis.Nil)
+}
+
+func TestBillingBalanceDeductAdvancesGenerationEvenWhenCacheMisses(t *testing.T) {
+	cache, _ := newMiniRedisCache(t)
+	ctx := context.Background()
+	userID := int64(43)
+
+	generation, err := cache.GetUserBalanceGeneration(ctx, userID)
+	require.NoError(t, err)
+
+	require.NoError(t, cache.DeductUserBalance(ctx, userID, 1))
+	advanced, err := cache.GetUserBalanceGeneration(ctx, userID)
+	require.NoError(t, err)
+	require.Greater(t, advanced, generation)
+
+	set, err := cache.SetUserBalanceIfGeneration(ctx, userID, 5, generation)
+	require.NoError(t, err)
+	require.False(t, set)
+
+	_, err = cache.GetUserBalance(ctx, userID)
+	require.ErrorIs(t, err, redis.Nil)
 }
 
 func TestBillingSubKey(t *testing.T) {

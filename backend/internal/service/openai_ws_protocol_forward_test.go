@@ -472,6 +472,10 @@ func TestOpenAIGatewayService_Forward_WSv2Dial426FallbackHTTP(t *testing.T) {
 	require.Nil(t, upstream.lastReq, "WS 模式下不应再回退 HTTP")
 	require.Equal(t, http.StatusUpgradeRequired, rec.Code)
 	require.Contains(t, rec.Body.String(), "426")
+	event := requireLastOpsUpstreamErrorEvent(t, c)
+	require.Equal(t, "ws_error", event.Kind)
+	require.Equal(t, "ws://"+strings.TrimPrefix(ws426Server.URL, "http://")+"/v1/responses", event.UpstreamURL)
+	require.Equal(t, "/v1/responses", event.UpstreamEndpoint)
 }
 
 func TestOpenAIGatewayService_Forward_WSv2FallbackCoolingSkipWS(t *testing.T) {

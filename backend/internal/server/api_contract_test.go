@@ -5,6 +5,7 @@ package server_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"math"
@@ -1233,6 +1234,80 @@ func TestAPIContracts(t *testing.T) {
 	}
 }
 
+func TestAPIKeyUpdatePreservesBoundKeyGetResponseEdges(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	deps := newContractDeps(t)
+	groupID := int64(10)
+	user := &service.User{ID: 1, Email: "alice@example.com", Username: "alice", Status: service.StatusActive}
+	group := &service.Group{ID: groupID, Name: "Bound Group", Platform: service.PlatformAnthropic, Status: service.StatusActive}
+	deps.apiKeyRepo.MustSeed(&service.APIKey{
+		ID: 100, UserID: user.ID, Key: "sk_bound", Name: "Before", GroupID: &groupID,
+		Status: service.StatusAPIKeyActive, User: user, Group: group, CreatedAt: deps.now, UpdatedAt: deps.now,
+	})
+
+	getStatus, getBody := doRequest(t, deps.router, http.MethodGet, "/api/v1/keys/100", "", nil)
+	putStatus, putBody := doRequest(t, deps.router, http.MethodPut, "/api/v1/keys/100", `{"name":"After"}`, map[string]string{"Content-Type": "application/json"})
+	require.Equal(t, http.StatusOK, getStatus)
+	require.Equal(t, http.StatusOK, putStatus)
+
+	decodeData := func(body string) map[string]any {
+		t.Helper()
+		var envelope struct {
+			Data map[string]any `json:"data"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(body), &envelope))
+		return envelope.Data
+	}
+	getData := decodeData(getBody)
+	putData := decodeData(putBody)
+	require.Equal(t, "After", putData["name"])
+	require.Equal(t, getData["user"], putData["user"])
+	require.Equal(t, getData["group"], putData["group"])
+}
+
+func TestAdminAPIKeyUpdateResponseEdges(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	deps := newContractDeps(t)
+	user := &service.User{ID: 1, Email: "alice@example.com", Username: "alice", Status: service.StatusActive}
+	group := service.Group{ID: 10, Name: "Bound Group", Platform: service.PlatformAnthropic, Status: service.StatusActive}
+	deps.groupRepo.SetActive([]service.Group{group})
+	deps.apiKeyRepo.MustSeed(&service.APIKey{ID: 100, UserID: user.ID, Key: "sk_admin", Name: "Admin", Status: service.StatusAPIKeyActive, User: user})
+
+	status, body := doRequest(t, deps.router, http.MethodPut, "/api/v1/admin/api-keys/100", `{"group_id":10}`, map[string]string{"Content-Type": "application/json"})
+	require.Equal(t, http.StatusOK, status)
+	assertAdminAPIKeyEdges(t, body, user.ID, &group.ID)
+
+	status, body = doRequest(t, deps.router, http.MethodPut, "/api/v1/admin/api-keys/100", `{"reset_rate_limit_usage":true}`, map[string]string{"Content-Type": "application/json"})
+	require.Equal(t, http.StatusOK, status)
+	assertAdminAPIKeyEdges(t, body, user.ID, &group.ID)
+
+	status, body = doRequest(t, deps.router, http.MethodPut, "/api/v1/admin/api-keys/100", `{"group_id":0}`, map[string]string{"Content-Type": "application/json"})
+	require.Equal(t, http.StatusOK, status)
+	assertAdminAPIKeyEdges(t, body, user.ID, nil)
+}
+
+func assertAdminAPIKeyEdges(t *testing.T, body string, userID int64, groupID *int64) {
+	t.Helper()
+	var envelope struct {
+		Data struct {
+			APIKey struct {
+				GroupID *int64         `json:"group_id"`
+				User    map[string]any `json:"user"`
+				Group   map[string]any `json:"group"`
+			} `json:"api_key"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(body), &envelope))
+	require.Equal(t, float64(userID), envelope.Data.APIKey.User["id"])
+	if groupID == nil {
+		require.Nil(t, envelope.Data.APIKey.GroupID)
+		require.Nil(t, envelope.Data.APIKey.Group)
+		return
+	}
+	require.Equal(t, *groupID, *envelope.Data.APIKey.GroupID)
+	require.Equal(t, float64(*groupID), envelope.Data.APIKey.Group["id"])
+}
+
 type contractDeps struct {
 	now         time.Time
 	router      http.Handler
@@ -1304,6 +1379,7 @@ func newContractDeps(t *testing.T) *contractDeps {
 	usageHandler := handler.NewUsageHandler(usageService, apiKeyService, nil, nil)
 	adminSettingHandler := adminhandler.NewSettingHandler(settingService, nil, nil, nil, nil, nil, nil)
 	adminAccountHandler := adminhandler.NewAccountHandler(adminService, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	adminAPIKeyHandler := adminhandler.NewAdminAPIKeyHandler(adminService)
 
 	jwtAuth := func(c *gin.Context) {
 		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{
@@ -1334,6 +1410,8 @@ func newContractDeps(t *testing.T) *contractDeps {
 	v1Keys.Use(jwtAuth)
 	v1Keys.GET("/keys", apiKeyHandler.List)
 	v1Keys.POST("/keys", apiKeyHandler.Create)
+	v1Keys.GET("/keys/:id", apiKeyHandler.GetByID)
+	v1Keys.PUT("/keys/:id", apiKeyHandler.Update)
 	v1Keys.GET("/groups/available", apiKeyHandler.GetAvailableGroups)
 
 	v1Usage := v1.Group("")
@@ -1353,6 +1431,7 @@ func newContractDeps(t *testing.T) *contractDeps {
 	v1Admin.Use(adminAuth)
 	v1Admin.GET("/settings", adminSettingHandler.GetSettings)
 	v1Admin.POST("/accounts/bulk-update", adminAccountHandler.BulkUpdate)
+	v1Admin.PUT("/api-keys/:id", adminAPIKeyHandler.UpdateGroup)
 
 	return &contractDeps{
 		now:         now,
@@ -1572,12 +1651,18 @@ func (stubGroupRepo) Create(ctx context.Context, group *service.Group) error {
 	return errors.New("not implemented")
 }
 
-func (stubGroupRepo) GetByID(ctx context.Context, id int64) (*service.Group, error) {
+func (r *stubGroupRepo) GetByID(ctx context.Context, id int64) (*service.Group, error) {
+	for i := range r.active {
+		if r.active[i].ID == id {
+			clone := r.active[i]
+			return &clone, nil
+		}
+	}
 	return nil, service.ErrGroupNotFound
 }
 
-func (stubGroupRepo) GetByIDLite(ctx context.Context, id int64) (*service.Group, error) {
-	return nil, service.ErrGroupNotFound
+func (r *stubGroupRepo) GetByIDLite(ctx context.Context, id int64) (*service.Group, error) {
+	return r.GetByID(ctx, id)
 }
 
 func (stubGroupRepo) Update(ctx context.Context, group *service.Group) error {
@@ -2022,13 +2107,16 @@ func (stubUserSubscriptionRepo) UpdateNotes(ctx context.Context, subscriptionID 
 func (stubUserSubscriptionRepo) ActivateWindows(ctx context.Context, id int64, start time.Time) error {
 	return errors.New("not implemented")
 }
-func (stubUserSubscriptionRepo) ResetDailyUsage(ctx context.Context, id int64, newWindowStart time.Time) error {
+func (stubUserSubscriptionRepo) ResetUsageWindows(ctx context.Context, id int64, resetDaily, resetWeekly, resetMonthly bool, newWindowStart time.Time) error {
 	return errors.New("not implemented")
 }
-func (stubUserSubscriptionRepo) ResetWeeklyUsage(ctx context.Context, id int64, newWindowStart time.Time) error {
+func (stubUserSubscriptionRepo) ResetDailyUsage(ctx context.Context, id int64, expectedWindowStart *time.Time, newWindowStart time.Time) error {
 	return errors.New("not implemented")
 }
-func (stubUserSubscriptionRepo) ResetMonthlyUsage(ctx context.Context, id int64, newWindowStart time.Time) error {
+func (stubUserSubscriptionRepo) ResetWeeklyUsage(ctx context.Context, id int64, expectedWindowStart *time.Time, newWindowStart time.Time) error {
+	return errors.New("not implemented")
+}
+func (stubUserSubscriptionRepo) ResetMonthlyUsage(ctx context.Context, id int64, expectedWindowStart *time.Time, newWindowStart time.Time) error {
 	return errors.New("not implemented")
 }
 func (stubUserSubscriptionRepo) IncrementUsage(ctx context.Context, id int64, costUSD float64) error {
@@ -2128,6 +2216,70 @@ func (r *stubApiKeyRepo) Update(ctx context.Context, key *service.APIKey) error 
 	r.byID[clone.ID] = &clone
 	r.byKey[clone.Key] = &clone
 	return nil
+}
+func (r *stubApiKeyRepo) UpdateConfig(_ context.Context, id, userID int64, p service.APIKeyConfigPatch) (*service.APIKey, error) {
+	key, ok := r.byID[id]
+	if !ok || key.UserID != userID {
+		return nil, service.ErrAPIKeyNotFound
+	}
+	clone := *key
+	if p.Name != nil {
+		clone.Name = *p.Name
+	}
+	if p.Quota != nil {
+		clone.Quota = *p.Quota
+	}
+	if p.Status != nil {
+		clone.Status = *p.Status
+	}
+	if p.ResetQuota {
+		clone.QuotaUsed = 0
+	}
+	if p.GroupID != nil {
+		clone.GroupID = *p.GroupID
+		if clone.GroupID == nil {
+			clone.Group = nil
+		} else {
+			clone.Group = &service.Group{ID: *clone.GroupID, Name: "Bound Group", Platform: service.PlatformAnthropic, Status: service.StatusActive}
+		}
+	}
+	r.byID[id] = &clone
+	r.byKey[clone.Key] = &clone
+	updated := clone
+	return &updated, nil
+}
+func (r *stubApiKeyRepo) UpdateGroupID(_ context.Context, id int64, groupID *int64) (*service.APIKey, error) {
+	key, ok := r.byID[id]
+	if !ok {
+		return nil, service.ErrAPIKeyNotFound
+	}
+	clone := *key
+	if groupID == nil {
+		clone.GroupID = nil
+		clone.Group = nil
+	} else {
+		gid := *groupID
+		clone.GroupID = &gid
+		clone.Group = &service.Group{ID: gid, Name: "Bound Group", Platform: service.PlatformAnthropic, Status: service.StatusActive}
+	}
+	r.byID[id] = &clone
+	r.byKey[clone.Key] = &clone
+	return &clone, nil
+}
+func (r *stubApiKeyRepo) ResetRateLimitUsage(_ context.Context, id int64) (*service.APIKey, error) {
+	key, ok := r.byID[id]
+	if !ok {
+		return nil, service.ErrAPIKeyNotFound
+	}
+	clone := *key
+	clone.Usage5h, clone.Usage1d, clone.Usage7d = 0, 0, 0
+	clone.Window5hStart, clone.Window1dStart, clone.Window7dStart = nil, nil, nil
+	r.byID[id] = &clone
+	r.byKey[clone.Key] = &clone
+	return &clone, nil
+}
+func (r *stubApiKeyRepo) IncrementQuotaUsedAndGetState(context.Context, int64, float64) (*service.APIKeyQuotaUsageState, error) {
+	return nil, nil
 }
 
 func (r *stubApiKeyRepo) Delete(ctx context.Context, id int64) error {

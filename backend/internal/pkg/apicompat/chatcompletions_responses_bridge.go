@@ -1,45 +1,96 @@
 package apicompat
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
+
+type ResponsesToChatConversion struct {
+	Request        *ChatCompletionsRequest
+	NamespaceTools map[string]NamespacedToolName
+}
 
 // ResponsesToChatCompletionsRequest converts a Responses API request into a
 // Chat Completions request for upstreams that only implement
 // /v1/chat/completions.
-func ResponsesToChatCompletionsRequest(req *ResponsesRequest) (*ChatCompletionsRequest, error) {
+func ResponsesToChatCompletionsRequest(req *ResponsesRequest) (*ResponsesToChatConversion, error) {
+	return responsesToChatCompletionsRequest(req, decodeResponsesInputItems)
+}
+
+type responsesInputItemsDecoder func(json.RawMessage) ([]json.RawMessage, error)
+
+func decodeResponsesInputItems(inputRaw json.RawMessage) ([]json.RawMessage, error) {
+	var rawItems []json.RawMessage
+	if err := json.Unmarshal(inputRaw, &rawItems); err != nil {
+		return nil, err
+	}
+	return rawItems, nil
+}
+
+func responsesToChatCompletionsRequest(req *ResponsesRequest, decodeInput responsesInputItemsDecoder) (*ResponsesToChatConversion, error) {
 	if req == nil {
 		return nil, fmt.Errorf("responses request is nil")
 	}
 
-	messages, err := responsesInputToChatMessages(req.Instructions, req.Input)
+	input, err := convertResponsesInput(req.Instructions, req.Input, decodeInput)
 	if err != nil {
 		return nil, err
 	}
 
 	out := &ChatCompletionsRequest{
 		Model:               req.Model,
-		Messages:            messages,
+		Messages:            input.messages,
 		MaxCompletionTokens: req.MaxOutputTokens,
 		Temperature:         req.Temperature,
 		TopP:                req.TopP,
 		Stream:              req.Stream,
 		ServiceTier:         req.ServiceTier,
+		ParallelToolCalls:   req.ParallelToolCalls,
 	}
 	if req.Reasoning != nil {
 		out.ReasoningEffort = req.Reasoning.Effort
 	}
-	if len(req.Tools) > 0 {
-		out.Tools = responsesToolsToChatTools(req.Tools)
+	effectiveTools := req.Tools
+	if len(input.additionalTools) > 0 {
+		// Additional declarations use the same conversion rules as top-level
+		// tools. Tool kinds unsupported by this local bridge remain ignored.
+		effectiveTools = make([]ResponsesTool, 0, len(req.Tools)+len(input.additionalTools))
+		effectiveTools = append(effectiveTools, req.Tools...)
+		effectiveTools = append(effectiveTools, input.additionalTools...)
 	}
-	if len(req.ToolChoice) > 0 {
-		out.ToolChoice = responsesToolChoiceToChatToolChoice(req.ToolChoice)
+	namespaceTools := make(map[string]NamespacedToolName)
+	if len(effectiveTools) > 0 {
+		out.Tools, namespaceTools, err = responsesToolsToChatTools(effectiveTools)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if len(req.ToolChoice) > 0 && (len(out.Tools) > 0 || !input.hasAdditionalTools) {
+		out.ToolChoice, err = responsesToolChoiceToChatToolChoice(req.ToolChoice, namespaceTools)
+		if err != nil {
+			return nil, err
+		}
+		if input.hasAdditionalTools && !chatToolChoiceIsDeclared(out.ToolChoice, out.Tools) {
+			out.ToolChoice = nil
+		}
+	}
+	if req.Text != nil {
+		out.ResponseFormat = responsesTextFormatToChatResponseFormat(req.Text.Format)
 	}
 
-	return out, nil
+	return &ResponsesToChatConversion{Request: out, NamespaceTools: namespaceTools}, nil
+}
+
+type responsesInputConversion struct {
+	messages           []ChatMessage
+	additionalTools    []ResponsesTool
+	hasAdditionalTools bool
 }
 
 // responsesInputToChatMessages converts a Responses request's instructions +
@@ -56,6 +107,14 @@ func ResponsesToChatCompletionsRequest(req *ResponsesRequest) (*ChatCompletionsR
 // scattered across per-item cases, and makes unknown future codex item types
 // fail safe instead of leaking into the upstream request.
 func responsesInputToChatMessages(instructions string, inputRaw json.RawMessage) ([]ChatMessage, error) {
+	input, err := convertResponsesInput(instructions, inputRaw, decodeResponsesInputItems)
+	if err != nil {
+		return nil, err
+	}
+	return input.messages, nil
+}
+
+func convertResponsesInput(instructions string, inputRaw json.RawMessage, decodeInput responsesInputItemsDecoder) (responsesInputConversion, error) {
 	var messages []ChatMessage
 	if strings.TrimSpace(instructions) != "" {
 		content, _ := json.Marshal(instructions)
@@ -64,32 +123,39 @@ func responsesInputToChatMessages(instructions string, inputRaw json.RawMessage)
 
 	inputRaw = bytesTrimSpace(inputRaw)
 	if len(inputRaw) == 0 || string(inputRaw) == "null" {
-		return messages, nil
+		return responsesInputConversion{messages: messages}, nil
 	}
 
 	// Bare string input is a single user turn.
-	var inputText string
-	if err := json.Unmarshal(inputRaw, &inputText); err == nil {
+	if inputRaw[0] == '"' {
+		var inputText string
+		if err := json.Unmarshal(inputRaw, &inputText); err != nil {
+			return responsesInputConversion{}, fmt.Errorf("parse responses input: %w", err)
+		}
 		content, _ := json.Marshal(inputText)
 		messages = append(messages, ChatMessage{Role: "user", Content: content})
-		return messages, nil
+		return responsesInputConversion{messages: messages}, nil
 	}
 
-	var rawItems []json.RawMessage
-	if err := json.Unmarshal(inputRaw, &rawItems); err != nil {
-		return nil, fmt.Errorf("parse responses input: %w", err)
-	}
-
-	built, err := buildChatMessagesFromItems(messages, rawItems)
+	rawItems, err := decodeInput(inputRaw)
 	if err != nil {
-		return nil, err
+		return responsesInputConversion{}, fmt.Errorf("parse responses input: %w", err)
 	}
-	return normalizeChatMessages(built), nil
+
+	built, additionalTools, hasAdditionalTools, err := buildChatMessagesFromItems(messages, rawItems)
+	if err != nil {
+		return responsesInputConversion{}, err
+	}
+	return responsesInputConversion{
+		messages:           normalizeChatMessages(built),
+		additionalTools:    additionalTools,
+		hasAdditionalTools: hasAdditionalTools,
+	}, nil
 }
 
 // buildChatMessagesFromItems walks the Responses input items and appends the
 // corresponding Chat messages.
-func buildChatMessagesFromItems(messages []ChatMessage, rawItems []json.RawMessage) ([]ChatMessage, error) {
+func buildChatMessagesFromItems(messages []ChatMessage, rawItems []json.RawMessage) ([]ChatMessage, []ResponsesTool, bool, error) {
 	// pendingReasoning holds the reasoning text from a reasoning item until the
 	// assistant message it belongs to is emitted. DeepSeek's thinking mode
 	// requires the reasoning_content that produced a tool call to be passed back
@@ -97,6 +163,8 @@ func buildChatMessagesFromItems(messages []ChatMessage, rawItems []json.RawMessa
 	// across an assistant message (so a following tool call in the same turn
 	// still receives it); any other role ends the thinking span.
 	var pendingReasoning string
+	var additionalTools []ResponsesTool
+	var hasAdditionalTools bool
 
 	for _, raw := range rawItems {
 		raw = bytesTrimSpace(raw)
@@ -113,12 +181,24 @@ func buildChatMessagesFromItems(messages []ChatMessage, rawItems []json.RawMessa
 				pendingReasoning = ""
 				continue
 			}
-			return nil, fmt.Errorf("parse responses input item: %w", err)
+			return nil, nil, false, fmt.Errorf("parse responses input item: %w", err)
 		}
 
 		role := chatCompletionsBridgeRole(rawString(item["role"]))
 		itemType := rawString(item["type"])
 		switch itemType {
+		case "additional_tools":
+			hasAdditionalTools = true
+			toolsRaw := bytesTrimSpace(item["tools"])
+			if len(toolsRaw) > 0 && string(toolsRaw) != "null" {
+				var tools []ResponsesTool
+				if err := json.Unmarshal(toolsRaw, &tools); err != nil {
+					return nil, nil, false, fmt.Errorf("parse responses additional tools: %w", err)
+				}
+				additionalTools = append(additionalTools, tools...)
+			}
+			pendingReasoning = ""
+			continue
 		case "reasoning":
 			if txt := extractResponsesReasoningText(item); txt != "" {
 				pendingReasoning = txt
@@ -129,11 +209,15 @@ func buildChatMessagesFromItems(messages []ChatMessage, rawItems []json.RawMessa
 			if strings.TrimSpace(arguments) == "" {
 				arguments = "{}"
 			}
+			name := rawString(item["name"])
+			if namespace := rawString(item["namespace"]); namespace != "" {
+				name = flattenNamespaceToolName(namespace, name)
+			}
 			toolCall := ChatToolCall{
 				ID:   rawString(item["call_id"]),
 				Type: "function",
 				Function: ChatFunctionCall{
-					Name:      rawString(item["name"]),
+					Name:      name,
 					Arguments: arguments,
 				},
 			}
@@ -171,7 +255,7 @@ func buildChatMessagesFromItems(messages []ChatMessage, rawItems []json.RawMessa
 		case "input_image":
 			content, err := chatContentFromSingleResponsesPart(itemType, item)
 			if err != nil {
-				return nil, err
+				return nil, nil, false, err
 			}
 			messages = append(messages, ChatMessage{Role: "user", Content: content})
 			pendingReasoning = ""
@@ -197,7 +281,7 @@ func buildChatMessagesFromItems(messages []ChatMessage, rawItems []json.RawMessa
 		}
 		chatContent, err := responsesContentToChatContent(content, role)
 		if err != nil {
-			return nil, err
+			return nil, nil, false, err
 		}
 		messages = append(messages, ChatMessage{Role: role, Content: chatContent})
 		// Reasoning only survives across an assistant text message.
@@ -206,7 +290,7 @@ func buildChatMessagesFromItems(messages []ChatMessage, rawItems []json.RawMessa
 		}
 	}
 
-	return messages, nil
+	return messages, additionalTools, hasAdditionalTools, nil
 }
 
 // normalizeChatMessages is the single place that enforces the tool-call
@@ -423,12 +507,61 @@ func chatContentFromSingleResponsesPart(partType string, part map[string]json.Ra
 	}
 }
 
-func responsesToolsToChatTools(tools []ResponsesTool) []ChatTool {
+type NamespacedToolName struct {
+	Namespace string
+	Name      string
+}
+
+func responsesToolsToChatTools(tools []ResponsesTool) ([]ChatTool, map[string]NamespacedToolName, error) {
+	topLevel := make(map[string]ResponsesTool)
+	for _, tool := range tools {
+		if tool.Type == "function" && tool.Name != "" {
+			if previous, ok := topLevel[tool.Name]; ok && !sameResponsesToolDefinition(previous, tool) {
+				return nil, nil, fmt.Errorf("conflicting function tool declarations for %q", tool.Name)
+			}
+			topLevel[tool.Name] = tool
+		}
+	}
+	owners := make(map[string]NamespacedToolName)
+	definitions := make(map[string]ResponsesTool)
 	out := make([]ChatTool, 0, len(tools))
 	for _, tool := range tools {
+		if tool.Type == "namespace" {
+			children := tool.Tools
+			if len(children) == 0 {
+				children = tool.Children
+			}
+			for _, child := range children {
+				if child.Type != "function" || child.Name == "" || tool.Name == "" {
+					continue
+				}
+				flat := flattenNamespaceToolName(tool.Name, child.Name)
+				owner := NamespacedToolName{Namespace: tool.Name, Name: child.Name}
+				if _, ok := topLevel[flat]; ok {
+					return nil, nil, fmt.Errorf("namespace tool %q/%q flattens to %q which conflicts with a top-level tool", tool.Name, child.Name, flat)
+				}
+				if previous, ok := owners[flat]; ok {
+					if previous == owner && sameResponsesToolDefinition(definitions[flat], child) {
+						continue
+					}
+					return nil, nil, fmt.Errorf("conflicting namespace tool declarations %q/%q flatten to %q", tool.Name, child.Name, flat)
+				}
+				owners[flat] = owner
+				definitions[flat] = child
+				out = append(out, ChatTool{Type: "function", Function: &ChatFunction{Name: flat, Description: child.Description, Parameters: child.Parameters, Strict: child.Strict}})
+			}
+			continue
+		}
 		if tool.Type != "function" {
 			continue
 		}
+		if previous, ok := definitions[tool.Name]; ok {
+			if sameResponsesToolDefinition(previous, tool) {
+				continue
+			}
+			return nil, nil, fmt.Errorf("conflicting function tool declarations for %q", tool.Name)
+		}
+		definitions[tool.Name] = tool
 		out = append(out, ChatTool{
 			Type: "function",
 			Function: &ChatFunction{
@@ -439,23 +572,55 @@ func responsesToolsToChatTools(tools []ResponsesTool) []ChatTool {
 			},
 		})
 	}
-	return out
+	return out, owners, nil
 }
 
-func responsesToolChoiceToChatToolChoice(raw json.RawMessage) json.RawMessage {
+func sameResponsesToolDefinition(a, b ResponsesTool) bool {
+	return a.Type == b.Type && a.Name == b.Name && a.Description == b.Description && string(a.Parameters) == string(b.Parameters) && ((a.Strict == nil && b.Strict == nil) || (a.Strict != nil && b.Strict != nil && *a.Strict == *b.Strict))
+}
+
+func flattenNamespaceToolName(namespace, name string) string {
+	full := namespace + "__" + name
+	if len(full) <= 64 && utf8.ValidString(full) {
+		return full
+	}
+	sum := sha256.Sum256([]byte(full))
+	suffix := "__" + hex.EncodeToString(sum[:4])
+	limit := 64 - len(suffix)
+	for limit > 0 && !utf8.RuneStart(full[limit]) {
+		limit--
+	}
+	return full[:limit] + suffix
+}
+
+func responsesToolChoiceToChatToolChoice(raw json.RawMessage, namespaceTools map[string]NamespacedToolName) (json.RawMessage, error) {
 	var choice map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &choice); err != nil {
-		return raw
+		return raw, nil
 	}
-	if rawString(choice["type"]) != "function" {
-		return raw
+	choiceType := rawString(choice["type"])
+	if choiceType != "function" && choiceType != "namespace" {
+		return raw, nil
 	}
 	name := rawString(choice["name"])
+	namespace := rawString(choice["namespace"])
 	if name == "" {
 		name = rawNestedString(choice["function"], "name")
 	}
 	if name == "" {
-		return raw
+		return raw, nil
+	}
+	if choiceType == "namespace" && namespace == "" {
+		namespace = rawString(choice["name"])
+		name = rawNestedString(choice["function"], "name")
+	}
+	if namespace != "" {
+		flat := flattenNamespaceToolName(namespace, name)
+		owner, ok := namespaceTools[flat]
+		if !ok || owner.Namespace != namespace || owner.Name != name {
+			return nil, fmt.Errorf("tool_choice namespace tool %q/%q is not declared", namespace, name)
+		}
+		name = flat
 	}
 	out, err := json.Marshal(map[string]any{
 		"type": "function",
@@ -464,14 +629,45 @@ func responsesToolChoiceToChatToolChoice(raw json.RawMessage) json.RawMessage {
 		},
 	})
 	if err != nil {
-		return raw
+		return raw, nil
 	}
-	return out
+	return out, nil
+}
+
+// chatToolChoiceIsDeclared validates the lossy additional_tools conversion.
+// Ordinary Responses fallback traffic retains its pre-existing pass-through
+// behavior; requests using additional_tools may only select Chat-supported
+// modes or a function that survived conversion.
+func chatToolChoiceIsDeclared(raw json.RawMessage, tools []ChatTool) bool {
+	var mode string
+	if err := json.Unmarshal(raw, &mode); err == nil {
+		return mode == "none" || mode == "auto" || mode == "required"
+	}
+
+	var choice struct {
+		Type     string `json:"type"`
+		Function struct {
+			Name string `json:"name"`
+		} `json:"function"`
+	}
+	if err := json.Unmarshal(raw, &choice); err != nil || choice.Type != "function" || choice.Function.Name == "" {
+		return false
+	}
+	for _, tool := range tools {
+		if tool.Type == "function" && tool.Function != nil && tool.Function.Name == choice.Function.Name {
+			return true
+		}
+	}
+	return false
 }
 
 // ChatCompletionsResponseToResponses converts a non-streaming Chat Completions
 // response into a Responses API response.
 func ChatCompletionsResponseToResponses(resp *ChatCompletionsResponse, model string) *ResponsesResponse {
+	return ChatCompletionsResponseToResponsesWithNamespace(resp, model, nil)
+}
+
+func ChatCompletionsResponseToResponsesWithNamespace(resp *ChatCompletionsResponse, model string, namespaceTools map[string]NamespacedToolName) *ResponsesResponse {
 	id := ""
 	if resp != nil {
 		id = resp.ID
@@ -496,7 +692,7 @@ func ChatCompletionsResponseToResponses(resp *ChatCompletionsResponse, model str
 
 	if len(resp.Choices) > 0 {
 		choice := resp.Choices[0]
-		out.Output = chatMessageToResponsesOutput(choice.Message)
+		out.Output = chatMessageToResponsesOutput(choice.Message, namespaceTools)
 		if choice.FinishReason == "length" {
 			out.Status = "incomplete"
 			out.IncompleteDetails = &ResponsesIncompleteDetails{Reason: "max_output_tokens"}
@@ -511,7 +707,7 @@ func ChatCompletionsResponseToResponses(resp *ChatCompletionsResponse, model str
 	return out
 }
 
-func chatMessageToResponsesOutput(message ChatMessage) []ResponsesOutput {
+func chatMessageToResponsesOutput(message ChatMessage, namespaceTools map[string]NamespacedToolName) []ResponsesOutput {
 	var outputs []ResponsesOutput
 	if message.ReasoningContent != "" {
 		outputs = append(outputs, ResponsesOutput{
@@ -546,11 +742,16 @@ func chatMessageToResponsesOutput(message ChatMessage) []ResponsesOutput {
 		if strings.TrimSpace(arguments) == "" {
 			arguments = "{}"
 		}
+		name, namespace := toolCall.Function.Name, ""
+		if ns, ok := namespaceTools[name]; ok {
+			name, namespace = ns.Name, ns.Namespace
+		}
 		outputs = append(outputs, ResponsesOutput{
 			Type:      "function_call",
 			ID:        generateItemID(),
 			CallID:    toolCall.ID,
-			Name:      toolCall.Function.Name,
+			Name:      name,
+			Namespace: namespace,
 			Arguments: arguments,
 			Status:    "completed",
 		})
@@ -605,9 +806,17 @@ func ChatUsageToResponsesUsage(usage *ChatUsage) *ResponsesUsage {
 	if out.TotalTokens == 0 {
 		out.TotalTokens = out.InputTokens + out.OutputTokens
 	}
-	if usage.PromptTokensDetails != nil && usage.PromptTokensDetails.CachedTokens > 0 {
+	if usage.PromptTokensDetails != nil && (usage.PromptTokensDetails.CachedTokens > 0 ||
+		usage.PromptTokensDetails.CacheCreationTokens > 0 || usage.PromptTokensDetails.CacheWriteTokens > 0) {
 		out.InputTokensDetails = &ResponsesInputTokensDetails{
-			CachedTokens: usage.PromptTokensDetails.CachedTokens,
+			CachedTokens:        usage.PromptTokensDetails.CachedTokens,
+			CacheCreationTokens: usage.PromptTokensDetails.CacheCreationTokens,
+			CacheWriteTokens:    usage.PromptTokensDetails.CacheWriteTokens,
+		}
+		if usage.PromptTokensDetails.CacheWriteTokens > 0 {
+			out.CacheCreationInputTokens = usage.PromptTokensDetails.CacheWriteTokens
+		} else {
+			out.CacheCreationInputTokens = usage.PromptTokensDetails.CacheCreationTokens
 		}
 	}
 	return out
@@ -649,6 +858,7 @@ type ChatCompletionsToResponsesStreamState struct {
 	ToolCalls       map[int]*ChatToolCall
 	ToolItemIDs     map[int]string
 	ToolOutputIndex map[int]int
+	NamespaceTools  map[string]NamespacedToolName
 
 	FinishReason string
 	Usage        *ResponsesUsage
@@ -737,21 +947,13 @@ func ChatCompletionsChunkToResponsesEvents(
 					copyCall.ID = generateItemID()
 				}
 				copyCall.Type = "function"
+				// Arguments are accumulated by the shared block below so the
+				// emitted delta and the stored value stay in sync. Some upstreams
+				// pack id+name+arguments into the first tool_call chunk; without
+				// this reset, that first argument delta would be counted twice.
+				copyCall.Function.Arguments = ""
 				state.ToolCalls[idx] = &copyCall
 				stored = &copyCall
-				itemID := generateItemID()
-				state.ToolItemIDs[idx] = itemID
-				state.ToolOutputIndex[idx] = state.allocOutputIndex()
-				events = append(events, chatToResponsesEvent(state, "response.output_item.added", &ResponsesStreamEvent{
-					OutputIndex: state.ToolOutputIndex[idx],
-					Item: &ResponsesOutput{
-						Type:   "function_call",
-						ID:     itemID,
-						CallID: stored.ID,
-						Name:   stored.Function.Name,
-						Status: "in_progress",
-					},
-				}))
 			} else {
 				if toolCall.ID != "" {
 					stored.ID = toolCall.ID
@@ -760,14 +962,44 @@ func ChatCompletionsChunkToResponsesEvents(
 					stored.Function.Name = toolCall.Function.Name
 				}
 			}
+			if _, announced := state.ToolItemIDs[idx]; !announced && stored.Function.Name != "" {
+				itemID := generateItemID()
+				state.ToolItemIDs[idx] = itemID
+				state.ToolOutputIndex[idx] = state.allocOutputIndex()
+				name, namespace := stored.Function.Name, ""
+				if ns, ok := state.NamespaceTools[name]; ok {
+					name, namespace = ns.Name, ns.Namespace
+				}
+				events = append(events, chatToResponsesEvent(state, "response.output_item.added", &ResponsesStreamEvent{
+					OutputIndex: state.ToolOutputIndex[idx],
+					Item: &ResponsesOutput{
+						Type:      "function_call",
+						ID:        itemID,
+						CallID:    stored.ID,
+						Name:      name,
+						Namespace: namespace,
+						Status:    "in_progress",
+					},
+				}))
+				if stored.Function.Arguments != "" {
+					events = append(events, chatToResponsesEvent(state, "response.function_call_arguments.delta", &ResponsesStreamEvent{OutputIndex: state.ToolOutputIndex[idx], ItemID: itemID, Delta: stored.Function.Arguments, CallID: stored.ID, Name: name}))
+				}
+			}
 			if toolCall.Function.Arguments != "" {
 				stored.Function.Arguments += toolCall.Function.Arguments
+				if _, announced := state.ToolItemIDs[idx]; !announced {
+					continue
+				}
+				name := stored.Function.Name
+				if ns, ok := state.NamespaceTools[name]; ok {
+					name = ns.Name
+				}
 				events = append(events, chatToResponsesEvent(state, "response.function_call_arguments.delta", &ResponsesStreamEvent{
 					OutputIndex: state.ToolOutputIndex[idx],
 					ItemID:      state.ToolItemIDs[idx],
 					Delta:       toolCall.Function.Arguments,
 					CallID:      stored.ID,
-					Name:        stored.Function.Name,
+					Name:        name,
 				}))
 			}
 		}
@@ -988,7 +1220,7 @@ func closeChatToolItems(state *ChatCompletionsToResponsesStreamState) []Response
 		return nil
 	}
 	var events []ResponsesStreamEvent
-	for i := 0; i < len(state.ToolCalls); i++ {
+	for _, i := range sortedToolCallIndexes(state.ToolCalls) {
 		toolCall, ok := state.ToolCalls[i]
 		if !ok || toolCall == nil {
 			continue
@@ -1002,12 +1234,16 @@ func closeChatToolItems(state *ChatCompletionsToResponsesStreamState) []Response
 			arguments = "{}"
 		}
 		outputIndex := state.ToolOutputIndex[i]
+		name, namespace := toolCall.Function.Name, ""
+		if ns, ok := state.NamespaceTools[name]; ok {
+			name, namespace = ns.Name, ns.Namespace
+		}
 		events = append(events,
 			chatToResponsesEvent(state, "response.function_call_arguments.done", &ResponsesStreamEvent{
 				OutputIndex: outputIndex,
 				ItemID:      itemID,
 				CallID:      toolCall.ID,
-				Name:        toolCall.Function.Name,
+				Name:        name,
 				Arguments:   arguments,
 			}),
 			chatToResponsesEvent(state, "response.output_item.done", &ResponsesStreamEvent{
@@ -1016,7 +1252,8 @@ func closeChatToolItems(state *ChatCompletionsToResponsesStreamState) []Response
 					Type:      "function_call",
 					ID:        itemID,
 					CallID:    toolCall.ID,
-					Name:      toolCall.Function.Name,
+					Name:      name,
+					Namespace: namespace,
 					Arguments: arguments,
 					Status:    "completed",
 				},
@@ -1050,7 +1287,7 @@ func (state *ChatCompletionsToResponsesStreamState) chatOutput() []ResponsesOutp
 			Status: "completed",
 		})
 	}
-	for i := 0; i < len(state.ToolCalls); i++ {
+	for _, i := range sortedToolCallIndexes(state.ToolCalls) {
 		toolCall, ok := state.ToolCalls[i]
 		if !ok || toolCall == nil {
 			continue
@@ -1059,16 +1296,30 @@ func (state *ChatCompletionsToResponsesStreamState) chatOutput() []ResponsesOutp
 		if strings.TrimSpace(arguments) == "" {
 			arguments = "{}"
 		}
+		name, namespace := toolCall.Function.Name, ""
+		if ns, ok := state.NamespaceTools[name]; ok {
+			name, namespace = ns.Name, ns.Namespace
+		}
 		outputs = append(outputs, ResponsesOutput{
 			Type:      "function_call",
 			ID:        generateItemID(),
 			CallID:    toolCall.ID,
-			Name:      toolCall.Function.Name,
+			Name:      name,
+			Namespace: namespace,
 			Arguments: arguments,
 			Status:    "completed",
 		})
 	}
 	return outputs
+}
+
+func sortedToolCallIndexes(calls map[int]*ChatToolCall) []int {
+	indexes := make([]int, 0, len(calls))
+	for index := range calls {
+		indexes = append(indexes, index)
+	}
+	sort.Ints(indexes)
+	return indexes
 }
 
 func chatToResponsesEvent(

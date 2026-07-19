@@ -2,22 +2,30 @@ package service
 
 import "strings"
 
-// resolveOpenAIForwardModel 解析 OpenAI 兼容转发使用的模型。
-// defaultMappedModel 只服务于 /v1/messages 的 Claude 系列显式调度映射，
-// 不作为普通 OpenAI 请求的未知模型兜底。
-func resolveOpenAIForwardModel(account *Account, requestedModel, defaultMappedModel string) string {
+// resolveOpenAIForwardModel resolves account-scoped model mappings for ordinary
+// OpenAI forwarding paths.
+func resolveOpenAIForwardModel(account *Account, requestedModel string) string {
 	if account == nil {
-		if defaultMappedModel != "" && claudeMessagesDispatchFamily(requestedModel) != "" {
-			return defaultMappedModel
-		}
 		return requestedModel
 	}
 
-	mappedModel, matched := account.ResolveMappedModel(requestedModel)
-	if !matched && defaultMappedModel != "" && claudeMessagesDispatchFamily(requestedModel) != "" {
-		return defaultMappedModel
-	}
+	mappedModel, _ := account.ResolveMappedModel(requestedModel)
 	return mappedModel
+}
+
+// resolveOpenAIMessagesForwardModel additionally applies the exact/group
+// dispatch selected for the /v1/messages caller.
+func resolveOpenAIMessagesForwardModel(account *Account, requestedModel, dispatchMappedModel string) string {
+	dispatchMappedModel = strings.TrimSpace(dispatchMappedModel)
+	if account != nil {
+		if mappedModel, matched := account.ResolveMappedModel(requestedModel); matched {
+			return mappedModel
+		}
+	}
+	if dispatchMappedModel != "" {
+		return dispatchMappedModel
+	}
+	return requestedModel
 }
 
 // resolveOpenAICompactForwardModel determines the compact-only upstream model

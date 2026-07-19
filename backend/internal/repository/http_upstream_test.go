@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"golang.org/x/net/http2"
 )
 
 // HTTPUpstreamSuite HTTP 上游服务测试套件
@@ -99,6 +101,98 @@ func (s *HTTPUpstreamSuite) TestOpenAIProfileDefaultsToHTTP2AndNoHeaderTimeout()
 	require.Equal(s.T(), time.Duration(0), transport.ResponseHeaderTimeout, "OpenAI profile should not inherit generic header timeout")
 	require.True(s.T(), transport.ForceAttemptHTTP2, "OpenAI profile should prefer HTTP/2")
 	require.Equal(s.T(), upstreamProtocolModeOpenAIH2, entry.protocolMode)
+}
+
+func TestBuildUpstreamTransportOpenAIH2ActiveProbing(t *testing.T) {
+	original := configureHTTP2Transports
+	t.Cleanup(func() { configureHTTP2Transports = original })
+
+	var calls int
+	var configured *http2.Transport
+	configureHTTP2Transports = func(transport *http.Transport) (*http2.Transport, error) {
+		calls++
+		var err error
+		configured, err = original(transport)
+		return configured, err
+	}
+
+	for _, rawProxy := range []string{"", "http://proxy.local:8080", "https://proxy.local:8443"} {
+		var proxyURL *url.URL
+		if rawProxy != "" {
+			var err error
+			proxyURL, err = url.Parse(rawProxy)
+			require.NoError(t, err)
+		}
+		transport, err := buildUpstreamTransport(poolSettings{}, proxyURL, upstreamProtocolModeOpenAIH2)
+		require.NoError(t, err)
+		require.NotNil(t, transport.TLSNextProto["h2"])
+		require.NotNil(t, configured)
+		require.Equal(t, 30*time.Second, configured.ReadIdleTimeout)
+		require.Equal(t, 10*time.Second, configured.PingTimeout)
+	}
+	require.Equal(t, 3, calls)
+}
+
+func TestBuildUpstreamTransportOpenAIH2ProbingExclusions(t *testing.T) {
+	original := configureHTTP2Transports
+	t.Cleanup(func() { configureHTTP2Transports = original })
+	var calls int
+	configureHTTP2Transports = func(transport *http.Transport) (*http2.Transport, error) {
+		calls++
+		return original(transport)
+	}
+
+	for _, tc := range []struct {
+		mode     string
+		proxyURL *url.URL
+	}{
+		{mode: upstreamProtocolModeDefault},
+		{mode: upstreamProtocolModeOpenAIH1},
+		{mode: upstreamProtocolModeOpenAIH1Fallback},
+		{mode: upstreamProtocolModeOpenAIH2, proxyURL: &url.URL{Scheme: "socks5", Host: "proxy.local:1080"}},
+		{mode: upstreamProtocolModeOpenAIH2, proxyURL: &url.URL{Scheme: "socks5h", Host: "proxy.local:1080"}},
+	} {
+		_, err := buildUpstreamTransport(poolSettings{}, tc.proxyURL, tc.mode)
+		require.NoError(t, err)
+	}
+	require.Zero(t, calls)
+
+	_, err := buildUpstreamTransportWithTLSFingerprint(poolSettings{}, nil, &tlsfingerprint.Profile{Name: "test"})
+	require.NoError(t, err)
+	require.Zero(t, calls)
+}
+
+func TestOpenAIH2ConfigureFailureIsNotCached(t *testing.T) {
+	original := configureHTTP2Transports
+	t.Cleanup(func() { configureHTTP2Transports = original })
+	configureHTTP2Transports = func(*http.Transport) (*http2.Transport, error) {
+		return nil, errors.New("configure failed")
+	}
+
+	cfg := &config.Config{Gateway: config.GatewayConfig{OpenAIHTTP2: config.GatewayOpenAIHTTP2Config{Enabled: true}}}
+	svc := NewHTTPUpstream(cfg).(*httpUpstreamService)
+	entry, err := svc.getClientEntry("", 1, 1, service.HTTPUpstreamProfileOpenAI, false, false)
+	require.ErrorContains(t, err, "configure OpenAI HTTP/2 transport")
+	require.Nil(t, entry)
+	require.Empty(t, svc.clients)
+}
+
+func TestOpenAIH2UnsupportedProxyFailsBeforeConfigureAndCache(t *testing.T) {
+	original := configureHTTP2Transports
+	t.Cleanup(func() { configureHTTP2Transports = original })
+	var calls int
+	configureHTTP2Transports = func(transport *http.Transport) (*http2.Transport, error) {
+		calls++
+		return original(transport)
+	}
+
+	cfg := &config.Config{Gateway: config.GatewayConfig{OpenAIHTTP2: config.GatewayOpenAIHTTP2Config{Enabled: true}}}
+	svc := NewHTTPUpstream(cfg).(*httpUpstreamService)
+	entry, err := svc.getClientEntry("ftp://proxy.local:21", 1, 1, service.HTTPUpstreamProfileOpenAI, false, false)
+	require.Error(t, err)
+	require.Nil(t, entry)
+	require.Zero(t, calls)
+	require.Empty(t, svc.clients)
 }
 
 func (s *HTTPUpstreamSuite) TestOpenAIProfileCustomHeaderTimeout() {

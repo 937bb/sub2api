@@ -3,6 +3,22 @@
     <TablePageLayout>
       <template #filters>
         <div class="flex flex-col gap-3">
+          <!-- Summary strip -->
+          <div class="card grid grid-cols-3 divide-x divide-gray-200/70 dark:divide-dark-700">
+            <div class="px-5 py-3">
+              <p class="font-display text-2xl font-bold tracking-tight text-gray-900 dark:text-white">{{ pagination.total }}</p>
+              <p class="mt-0.5 text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('keys.summaryTotal') }}</p>
+            </div>
+            <div class="px-5 py-3">
+              <p class="font-display text-2xl font-bold tracking-tight text-emerald-600 dark:text-emerald-400">{{ activeKeyCount }}</p>
+              <p class="mt-0.5 text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('keys.summaryActive') }}</p>
+            </div>
+            <div class="px-5 py-3">
+              <p class="font-display text-2xl font-bold tracking-tight text-gray-500 dark:text-gray-400">{{ inactiveKeyCount }}</p>
+              <p class="mt-0.5 text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('keys.summaryInactive') }}</p>
+            </div>
+          </div>
+
           <div class="flex flex-wrap items-center gap-3">
             <SearchInput
               v-model="filterSearch"
@@ -1007,7 +1023,7 @@
       <div
         v-if="groupSelectorKeyId !== null && dropdownPosition"
         ref="dropdownRef"
-        class="animate-in fade-in slide-in-from-top-2 fixed z-[100000020] w-max min-w-[380px] overflow-hidden rounded-xl bg-white shadow-lg ring-1 ring-black/5 duration-200 dark:bg-dark-800 dark:ring-white/10"
+        class="animate-in fade-in slide-in-from-top-2 fixed z-[100000020] w-max min-w-[380px] overflow-hidden rounded-xl bg-[var(--glass-bg-dropdown)] backdrop-blur-xl shadow-lg ring-1 ring-black/5 duration-200  dark:ring-white/10"
         style="pointer-events: auto !important;"
         :style="{
           top: dropdownPosition.top !== undefined ? dropdownPosition.top + 'px' : undefined,
@@ -1070,33 +1086,34 @@
 </template>
 
 <script setup lang="ts">
-	import { ref, computed, onMounted, onUnmounted, type ComponentPublicInstance } from 'vue'
-	import { useI18n } from 'vue-i18n'
-	import { useAppStore } from '@/stores/app'
-	import { useOnboardingStore } from '@/stores/onboarding'
-	import { useClipboard } from '@/composables/useClipboard'
+import { ref, computed, onMounted, onUnmounted, type ComponentPublicInstance } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { useAppStore } from '@/stores/app'
+import { useOnboardingStore } from '@/stores/onboarding'
+import { useClipboard } from '@/composables/useClipboard'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 
 const { t } = useI18n()
 import { keysAPI, authAPI, usageAPI, userGroupsAPI } from '@/api'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
-	import DataTable from '@/components/common/DataTable.vue'
-	import Pagination from '@/components/common/Pagination.vue'
-	import BaseDialog from '@/components/common/BaseDialog.vue'
-	import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
-	import EmptyState from '@/components/common/EmptyState.vue'
-	import Select from '@/components/common/Select.vue'
-	import SearchInput from '@/components/common/SearchInput.vue'
-	import Icon from '@/components/icons/Icon.vue'
-	import UseKeyModal from '@/components/keys/UseKeyModal.vue'
-	import EndpointPopover from '@/components/keys/EndpointPopover.vue'
-	import GroupBadge from '@/components/common/GroupBadge.vue'
-	import GroupOptionItem from '@/components/common/GroupOptionItem.vue'
-	import type { ApiKey, Group, PublicSettings, SubscriptionType, GroupPlatform } from '@/types'
+import DataTable from '@/components/common/DataTable.vue'
+import Pagination from '@/components/common/Pagination.vue'
+import BaseDialog from '@/components/common/BaseDialog.vue'
+import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
+import EmptyState from '@/components/common/EmptyState.vue'
+import Select from '@/components/common/Select.vue'
+import SearchInput from '@/components/common/SearchInput.vue'
+import Icon from '@/components/icons/Icon.vue'
+import UseKeyModal from '@/components/keys/UseKeyModal.vue'
+import EndpointPopover from '@/components/keys/EndpointPopover.vue'
+import GroupBadge from '@/components/common/GroupBadge.vue'
+import GroupOptionItem from '@/components/common/GroupOptionItem.vue'
+import type { ApiKey, Group, PublicSettings, SubscriptionType, GroupPlatform, UpdateApiKeyRequest } from '@/types'
 import type { Column } from '@/components/common/types'
 import type { BatchApiKeyUsageStats } from '@/api/usage'
 import { formatDateTime } from '@/utils/format'
+import { assignApiKeyEditStatus } from '@/utils/apiKeyUpdatePayload'
 import { maskApiKey } from '@/utils/maskApiKey'
 import {
   buildCcSwitchImportDeeplink,
@@ -1138,6 +1155,11 @@ const columns = computed<Column[]>(() => [
 ])
 
 const apiKeys = ref<ApiKey[]>([])
+
+// Page-scoped status breakdown (server total lives in pagination.total).
+const activeKeyCount = computed(() => apiKeys.value.filter((k) => k.status === 'active').length)
+const inactiveKeyCount = computed(() => apiKeys.value.filter((k) => k.status !== 'active').length)
+
 const groups = ref<Group[]>([])
 const loading = ref(false)
 const submitting = ref(false)
@@ -1569,10 +1591,9 @@ const handleSubmit = async () => {
   submitting.value = true
   try {
     if (showEditModal.value && selectedKey.value) {
-      await keysAPI.update(selectedKey.value.id, {
+      const updatePayload: UpdateApiKeyRequest = {
         name: formData.value.name,
         group_id: formData.value.group_id,
-        status: formData.value.status,
         ip_whitelist: ipWhitelist,
         ip_blacklist: ipBlacklist,
         quota: quota,
@@ -1581,7 +1602,9 @@ const handleSubmit = async () => {
         rate_limit_1d: rateLimitData.rate_limit_1d,
         rate_limit_7d: rateLimitData.rate_limit_7d,
         openai_force_priority_tier: formData.value.openai_force_priority_tier,
-      })
+      }
+      assignApiKeyEditStatus(updatePayload, selectedKey.value, formData.value.status)
+      await keysAPI.update(selectedKey.value.id, updatePayload)
       appStore.showSuccess(t('keys.keyUpdatedSuccess'))
     } else {
       const customKey = formData.value.use_custom_key ? formData.value.custom_key : undefined

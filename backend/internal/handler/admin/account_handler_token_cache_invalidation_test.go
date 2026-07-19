@@ -18,7 +18,8 @@ import (
 )
 
 type recordingTokenCacheInvalidator struct {
-	calls []*service.Account
+	calls       []*service.Account
+	changeCalls []recordingTokenCacheInvalidatorChangeCall
 }
 
 func (r *recordingTokenCacheInvalidator) InvalidateToken(ctx context.Context, account *service.Account) error {
@@ -27,6 +28,40 @@ func (r *recordingTokenCacheInvalidator) InvalidateToken(ctx context.Context, ac
 		r.calls = append(r.calls, &cloned)
 	}
 	return nil
+}
+
+type recordingTokenCacheInvalidatorChangeCall struct {
+	previous *service.Account
+	updated  *service.Account
+}
+
+func (r *recordingTokenCacheInvalidator) InvalidateTokenForAccountChange(ctx context.Context, previousAccount, updatedAccount *service.Account) error {
+	call := recordingTokenCacheInvalidatorChangeCall{}
+	if previousAccount != nil {
+		cloned := *previousAccount
+		call.previous = &cloned
+	}
+	if updatedAccount != nil {
+		cloned := *updatedAccount
+		call.updated = &cloned
+	}
+	r.changeCalls = append(r.changeCalls, call)
+
+	account := updatedAccount
+	if account == nil || !shouldRecordTokenInvalidationAccount(account) {
+		account = previousAccount
+	}
+	return r.InvalidateToken(ctx, account)
+}
+
+func shouldRecordTokenInvalidationAccount(account *service.Account) bool {
+	if account == nil {
+		return false
+	}
+	if account.IsOpenAIOAuthLike() {
+		return true
+	}
+	return account.Platform == service.PlatformAntigravity && account.Type == service.AccountTypeOAuth
 }
 
 func setupAccountUpdateRouterWithInvalidator(adminSvc service.AdminService, invalidator service.TokenCacheInvalidator) *gin.Engine {
@@ -113,6 +148,53 @@ func TestAccountHandlerUpdateInvalidatesResultingOpenAISetupToken(t *testing.T) 
 	require.Len(t, invalidator.calls, 1)
 	require.Equal(t, int64(45), invalidator.calls[0].ID)
 	require.Equal(t, service.AccountTypeSetupToken, invalidator.calls[0].Type)
+}
+
+func TestAccountHandlerUpdateInvalidatesAntigravityWithPreviousProjectIdentity(t *testing.T) {
+	adminSvc := newStubAdminService()
+	adminSvc.getAccountResult = &service.Account{
+		ID:       46,
+		Platform: service.PlatformAntigravity,
+		Type:     service.AccountTypeOAuth,
+		Status:   service.StatusActive,
+		Credentials: map[string]any{
+			"project_id": "old-project",
+		},
+	}
+	adminSvc.updateAccountFunc = func(ctx context.Context, id int64, input *service.UpdateAccountInput) (*service.Account, error) {
+		return &service.Account{
+			ID:       id,
+			Platform: service.PlatformAntigravity,
+			Type:     service.AccountTypeOAuth,
+			Status:   service.StatusActive,
+			Credentials: map[string]any{
+				"antigravity_project_id": "configured-project",
+			},
+		}, nil
+	}
+	invalidator := &recordingTokenCacheInvalidator{}
+	router := setupAccountUpdateRouterWithInvalidator(adminSvc, invalidator)
+
+	body, err := json.Marshal(map[string]any{
+		"credentials": map[string]any{
+			"antigravity_project_id": "configured-project",
+		},
+	})
+	require.NoError(t, err)
+	w := httptest.NewRecorder()
+	req, err := http.NewRequest(http.MethodPut, "/api/v1/admin/accounts/46", bytes.NewReader(body))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Len(t, invalidator.changeCalls, 1)
+	require.NotNil(t, invalidator.changeCalls[0].previous)
+	require.NotNil(t, invalidator.changeCalls[0].updated)
+	require.Equal(t, "old-project", invalidator.changeCalls[0].previous.GetCredential("project_id"))
+	require.Empty(t, invalidator.changeCalls[0].updated.GetCredential("project_id"))
+	require.Equal(t, "configured-project", invalidator.changeCalls[0].updated.GetCredential("antigravity_project_id"))
 }
 
 type batchCredentialInvalidationAdminService struct {

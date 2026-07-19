@@ -2,6 +2,23 @@
   <AppLayout>
     <TablePageLayout>
       <template #filters>
+        <div class="space-y-4">
+          <!-- Summary strip -->
+          <div class="card grid grid-cols-3 divide-x divide-gray-200/70 dark:divide-dark-700">
+            <div class="px-5 py-3">
+              <p class="font-display text-2xl font-bold tracking-tight text-gray-900 dark:text-white">{{ pagination.total }}</p>
+              <p class="mt-0.5 text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.channels.summaryTotal') }}</p>
+            </div>
+            <div class="px-5 py-3">
+              <p class="font-display text-2xl font-bold tracking-tight text-emerald-600 dark:text-emerald-400">{{ activeChannelCount }}</p>
+              <p class="mt-0.5 text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.channels.summaryActive') }}</p>
+            </div>
+            <div class="px-5 py-3">
+              <p class="font-display text-2xl font-bold tracking-tight text-gray-500 dark:text-gray-400">{{ disabledChannelCount }}</p>
+              <p class="mt-0.5 text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.channels.summaryDisabled') }}</p>
+            </div>
+          </div>
+
         <div class="flex flex-col justify-between gap-4 lg:flex-row lg:items-start">
           <!-- Left: Search + Filters -->
           <div class="flex flex-1 flex-wrap items-center gap-3">
@@ -9,7 +26,8 @@
               <Icon
                 name="search"
                 size="md"
-                class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500"
+                class="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-gray-500 dark:text-dark-300"
+                :stroke-width="2"
               />
               <input
                 v-model="searchQuery"
@@ -44,6 +62,7 @@
               {{ t('admin.channels.createChannel', 'Create Channel') }}
             </button>
           </div>
+        </div>
         </div>
       </template>
 
@@ -540,7 +559,7 @@
                     <!-- Search results dropdown -->
                     <div
                       v-if="showRuleAccountDropdown[`${section.platform}-${ruleIndex}`] && (ruleAccountSearchResults[`${section.platform}-${ruleIndex}`]?.length ?? 0) > 0"
-                      class="absolute z-50 mt-1 max-h-48 w-full overflow-auto rounded-lg border bg-white shadow-lg dark:border-dark-600 dark:bg-dark-800"
+                      class="absolute z-50 mt-1 max-h-48 w-full overflow-auto rounded-lg border bg-[var(--glass-bg-dropdown)] backdrop-blur-xl shadow-lg dark:border-dark-600 "
                     >
                       <button
                         v-for="account in ruleAccountSearchResults[`${section.platform}-${ruleIndex}`]"
@@ -718,6 +737,11 @@ const billingModelSourceOptions = computed(() => [
 
 // ── State ──
 const channels = ref<Channel[]>([])
+
+// Page-scoped status breakdown (server total lives in pagination.total).
+const activeChannelCount = computed(() => channels.value.filter((c) => c.status === 'active').length)
+const disabledChannelCount = computed(() => channels.value.filter((c) => c.status !== 'active').length)
+
 const loading = ref(false)
 const searchQuery = ref('')
 const filters = reactive({ status: '' })
@@ -1499,7 +1523,7 @@ async function handleSubmit() {
   for (const section of form.platforms.filter(s => s.enabled)) {
     for (const entry of section.model_pricing) {
       if (!entry.intervals || entry.intervals.length === 0) continue
-      const intervalErr = validateIntervals(entry.intervals, entry.billing_mode)
+      const intervalErr = validateIntervals(entry.intervals, entry.billing_mode, t)
       if (intervalErr) {
         const platformLabel = t('admin.groups.platforms.' + section.platform, section.platform)
         const modelLabel = entry.models.join(', ') || t('admin.channels.form.unnamed')

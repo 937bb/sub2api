@@ -303,6 +303,7 @@ type UpdateAccountInput struct {
 	Notes                 *string
 	Type                  string // Account type: oauth, setup-token, apikey
 	Credentials           map[string]any
+	SensitiveDeletes      []string
 	Extra                 map[string]any
 	ProxyID               *int64
 	Concurrency           *int     // 使用指针区分"未提供"和"设置为0"
@@ -406,11 +407,12 @@ type UserGroupRPMStatus struct {
 
 // BulkUpdateAccountsResult is the aggregated response for bulk updates.
 type BulkUpdateAccountsResult struct {
-	Success    int                       `json:"success"`
-	Failed     int                       `json:"failed"`
-	SuccessIDs []int64                   `json:"success_ids"`
-	FailedIDs  []int64                   `json:"failed_ids"`
-	Results    []BulkUpdateAccountResult `json:"results"`
+	Success          int                       `json:"success"`
+	Failed           int                       `json:"failed"`
+	SuccessIDs       []int64                   `json:"success_ids"`
+	FailedIDs        []int64                   `json:"failed_ids"`
+	Results          []BulkUpdateAccountResult `json:"results"`
+	PreviousAccounts []*Account                `json:"-"`
 }
 
 type CreateProxyInput struct {
@@ -2403,9 +2405,11 @@ func (s *adminServiceImpl) AdminUpdateAPIKeyGroupID(ctx context.Context, keyID i
 			if addErr := s.userRepo.AddGroupToAllowedGroups(opCtx, apiKey.UserID, gid); addErr != nil {
 				return nil, fmt.Errorf("add group to user allowed groups: %w", addErr)
 			}
-			if err := s.apiKeyRepo.Update(opCtx, apiKey); err != nil {
+			updated, err := s.apiKeyRepo.UpdateGroupID(opCtx, keyID, &gid)
+			if err != nil {
 				return nil, fmt.Errorf("update api key: %w", err)
 			}
+			apiKey = updated
 			if tx != nil {
 				if err := tx.Commit(); err != nil {
 					return nil, fmt.Errorf("commit transaction: %w", err)
@@ -2428,9 +2432,16 @@ func (s *adminServiceImpl) AdminUpdateAPIKeyGroupID(ctx context.Context, keyID i
 	}
 
 	// 非专属分组 / 解绑：无需事务，单步更新即可
-	if err := s.apiKeyRepo.Update(ctx, apiKey); err != nil {
+	updated, err := s.apiKeyRepo.UpdateGroupID(ctx, keyID, func() *int64 {
+		if *groupID == 0 {
+			return nil
+		}
+		return groupID
+	}())
+	if err != nil {
 		return nil, fmt.Errorf("update api key: %w", err)
 	}
+	apiKey = updated
 
 	// 失效认证缓存
 	if s.authCacheInvalidator != nil {
@@ -2447,13 +2458,8 @@ func (s *adminServiceImpl) AdminResetAPIKeyRateLimitUsage(ctx context.Context, k
 	if err != nil {
 		return nil, err
 	}
-	apiKey.Usage5h = 0
-	apiKey.Usage1d = 0
-	apiKey.Usage7d = 0
-	apiKey.Window5hStart = nil
-	apiKey.Window1dStart = nil
-	apiKey.Window7dStart = nil
-	if err := s.apiKeyRepo.Update(ctx, apiKey); err != nil {
+	apiKey, err = s.apiKeyRepo.ResetRateLimitUsage(ctx, keyID)
+	if err != nil {
 		return nil, fmt.Errorf("reset api key rate limit usage: %w", err)
 	}
 	if s.authCacheInvalidator != nil {
@@ -2692,6 +2698,10 @@ type openAICodexFingerprintResetter interface {
 	ResetOpenAICodexFingerprint(ctx context.Context, id int64, fingerprint OpenAICodexFingerprint) error
 }
 
+type modelRateLimitScopeClearer interface {
+	ClearModelRateLimit(ctx context.Context, id int64, scope string) error
+}
+
 func (s *adminServiceImpl) ApplyOAuthCredentials(ctx context.Context, id int64, input *ApplyOAuthCredentialsInput) (*Account, error) {
 	input.Extra = sanitizeOpenAICodexFingerprintExtraUpdates(input.Extra)
 	account, err := s.accountRepo.GetByID(ctx, id)
@@ -2797,6 +2807,8 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	existingExtra := cloneAccountExtraForServerOwnedWrite(account.Extra)
 	existingWasOpenAIOAuthLike := account.IsOpenAIOAuthLike()
 	wasOveragesEnabled := account.IsOveragesEnabled()
+	clearCreditsExhausted := false
+	clearModelRateLimits := false
 
 	if input.Name != "" {
 		account.Name = input.Name
@@ -2811,6 +2823,11 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		// 敏感子键采用"incoming 没提供就保留"的合并语义：前端响应已脱敏，
 		// 全对象 PUT 编辑时不会再带回 token，避免覆盖时清空已有凭证。
 		account.Credentials = MergePreservingSensitiveCreds(account.Credentials, input.Credentials)
+		for _, key := range input.SensitiveDeletes {
+			if IsSensitiveCredentialKey(key) {
+				delete(account.Credentials, key)
+			}
+		}
 	}
 	// Extra 使用 map：需要区分“未提供(nil)”与“显式清空({})”。
 	// 关闭配额限制时前端会删除 quota_* 键并提交 extra:{}，此时也必须落库。
@@ -2824,14 +2841,12 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		account.Extra = input.Extra
 		if account.Platform == PlatformAntigravity && wasOveragesEnabled && !account.IsOveragesEnabled() {
 			delete(account.Extra, "antigravity_credits_overages") // 清理旧版 overages 运行态
-			// 清除 AICredits 限流 key
-			if rawLimits, ok := account.Extra[modelRateLimitsKey].(map[string]any); ok {
-				delete(rawLimits, creditsExhaustedKey)
-			}
+			clearCreditsExhausted = true
 		}
 		if account.Platform == PlatformAntigravity && !wasOveragesEnabled && account.IsOveragesEnabled() {
 			delete(account.Extra, modelRateLimitsKey)
 			delete(account.Extra, "antigravity_credits_overages") // 清理旧版 overages 运行态
+			clearModelRateLimits = true
 		}
 		// 校验并预计算固定时间重置的下次重置时间
 		if err := ValidateQuotaResetConfig(account.Extra); err != nil {
@@ -2905,8 +2920,37 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		}
 	}
 
-	if err := s.accountRepo.Update(ctx, account); err != nil {
+	opCtx := ctx
+	var tx *dbent.Tx
+	if (clearModelRateLimits || clearCreditsExhausted) && s.entClient != nil {
+		tx, err = s.entClient.Tx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = tx.Rollback() }()
+		opCtx = dbent.NewTxContext(ctx, tx)
+	}
+
+	if err := s.accountRepo.Update(opCtx, account); err != nil {
 		return nil, err
+	}
+	if clearModelRateLimits {
+		if err := s.accountRepo.ClearModelRateLimits(opCtx, account.ID); err != nil {
+			return nil, err
+		}
+	} else if clearCreditsExhausted {
+		clearer, ok := s.accountRepo.(modelRateLimitScopeClearer)
+		if !ok {
+			return nil, errors.New("account repository does not support model rate limit scope cleanup")
+		}
+		if err := clearer.ClearModelRateLimit(opCtx, account.ID, creditsExhaustedKey); err != nil {
+			return nil, err
+		}
+	}
+	if tx != nil {
+		if err := tx.Commit(); err != nil {
+			return nil, err
+		}
 	}
 
 	// 绑定分组
@@ -2983,6 +3027,7 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 		if account != nil {
 			platformByID[account.ID] = account.Platform
 			foundAccountIDs[account.ID] = true
+			result.PreviousAccounts = append(result.PreviousAccounts, cloneAccountForTokenInvalidation(account))
 		}
 	}
 	validUpdateIDs := make([]int64, 0, len(input.AccountIDs))
@@ -4059,7 +4104,7 @@ func (s *adminServiceImpl) EnsureAntigravityPrivacy(ctx context.Context, account
 		return ""
 	}
 
-	projectID, _ := account.Credentials["project_id"].(string)
+	projectID, _ := resolveAntigravityProjectID(account)
 
 	var proxyURL string
 	if account.ProxyID != nil {
@@ -4068,7 +4113,7 @@ func (s *adminServiceImpl) EnsureAntigravityPrivacy(ctx context.Context, account
 		}
 	}
 
-	mode := setAntigravityPrivacy(ctx, token, projectID, proxyURL)
+	mode := setAntigravityPrivacyForAccount(ctx, token, projectID, proxyURL)
 	if mode == "" {
 		return ""
 	}
@@ -4092,7 +4137,7 @@ func (s *adminServiceImpl) ForceAntigravityPrivacy(ctx context.Context, account 
 		return ""
 	}
 
-	projectID, _ := account.Credentials["project_id"].(string)
+	projectID, _ := resolveAntigravityProjectID(account)
 
 	var proxyURL string
 	if account.ProxyID != nil {
@@ -4101,7 +4146,7 @@ func (s *adminServiceImpl) ForceAntigravityPrivacy(ctx context.Context, account 
 		}
 	}
 
-	mode := setAntigravityPrivacy(ctx, token, projectID, proxyURL)
+	mode := setAntigravityPrivacyForAccount(ctx, token, projectID, proxyURL)
 	if mode == "" {
 		return ""
 	}

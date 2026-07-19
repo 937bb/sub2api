@@ -4,11 +4,17 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
+	"strconv"
 	"testing"
 	"time"
 
+	baseent "entgo.io/ent"
+	entsql "entgo.io/ent/dialect/sql"
 	dbent "github.com/Wei-Shaw/sub2api/ent"
+	dbaccount "github.com/Wei-Shaw/sub2api/ent/account"
 	"github.com/Wei-Shaw/sub2api/ent/accountgroup"
+	"github.com/Wei-Shaw/sub2api/ent/intercept"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/suite"
@@ -65,11 +71,11 @@ func (s *schedulerCacheRecorder) UpdateLastUsed(ctx context.Context, updates map
 	return nil
 }
 
-func (s *schedulerCacheRecorder) TryLockBucket(ctx context.Context, bucket service.SchedulerBucket, ttl time.Duration) (bool, error) {
-	return true, nil
+func (s *schedulerCacheRecorder) TryLockBucket(ctx context.Context, bucket service.SchedulerBucket, ttl time.Duration) (string, bool, error) {
+	return "test-lock", true, nil
 }
 
-func (s *schedulerCacheRecorder) UnlockBucket(ctx context.Context, bucket service.SchedulerBucket) error {
+func (s *schedulerCacheRecorder) UnlockBucket(ctx context.Context, bucket service.SchedulerBucket, token string) error {
 	return nil
 }
 
@@ -97,6 +103,31 @@ func TestAccountRepoSuite(t *testing.T) {
 }
 
 // --- Create / GetByID / Update / Delete ---
+
+func (s *AccountRepoSuite) TestCreate_RollbackKeepsAccountAndOutboxAtomic() {
+	client := testEntClient(s.T())
+	repo := newAccountRepositoryWithSQL(client, integrationDB, nil)
+	_, err := integrationDB.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+	account := &service.Account{
+		Name:     "create-rollback-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		Platform: service.PlatformOpenAI,
+		Type:     service.AccountTypeOAuth,
+	}
+
+	s.Require().NoError(repo.Create(txCtx, account))
+	s.Require().Positive(account.ID)
+	s.Require().NoError(tx.Rollback())
+
+	var accountCount, outboxCount int
+	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, "SELECT count(*) FROM accounts WHERE id = $1", account.ID).Scan(&accountCount))
+	s.Require().Zero(accountCount)
+	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, "SELECT count(*) FROM scheduler_outbox").Scan(&outboxCount))
+	s.Require().Zero(outboxCount)
+}
 
 func (s *AccountRepoSuite) TestCreate() {
 	account := &service.Account{
@@ -149,7 +180,7 @@ func (s *AccountRepoSuite) TestUpdate_OpenAIOAuthLikePreservesConcurrentFingerpr
 
 	stale := *account
 	stale.Extra = map[string]any{"editable": "fresh"}
-	_, err := s.repo.EnsureOpenAICodexFingerprint(s.ctx, account.ID, fingerprint, false)
+	_, err := s.repo.EnsureOpenAICodexFingerprint(s.ctx, account.ID, fingerprint, nil)
 	s.Require().NoError(err)
 
 	s.Require().NoError(s.repo.Update(s.ctx, &stale))
@@ -160,6 +191,80 @@ func (s *AccountRepoSuite) TestUpdate_OpenAIOAuthLikePreservesConcurrentFingerpr
 	persisted, changed := service.NormalizeOpenAICodexFingerprint(got.Extra[service.OpenAICodexFingerprintExtraKey], profile, time.Now())
 	s.Require().False(changed)
 	s.Require().Equal(fingerprint.InstallationID, persisted.InstallationID)
+}
+
+func (s *AccountRepoSuite) TestUpdate_PreservesConcurrentRuntimeState() {
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:  "acc-update-runtime-race",
+		Extra: map[string]any{"editable": "stale"},
+	})
+	stale := *account
+	stale.Name = "updated"
+	stale.Extra = map[string]any{
+		"editable":                    "fresh",
+		"codex_usage_updated_at":      "2025-01-01T00:00:00Z",
+		"codex_5h_used_percent":       10.0,
+		"unknown_lifecycle_attribute": "preserved",
+	}
+
+	observedAt := time.Now().UTC()
+	resetAt := observedAt.Add(5 * time.Hour)
+	tempUntil := observedAt.Add(10 * time.Minute)
+	s.Require().NoError(s.repo.SetRateLimited(s.ctx, account.ID, resetAt))
+	s.Require().NoError(s.repo.SetOverloaded(s.ctx, account.ID, observedAt.Add(time.Minute)))
+	s.Require().NoError(s.repo.SetTempUnschedulable(s.ctx, account.ID, tempUntil, "runtime penalty"))
+	s.Require().NoError(s.repo.UpdateSessionWindow(
+		s.ctx,
+		account.ID,
+		&observedAt,
+		&resetAt,
+		"allowed_warning",
+	))
+	updated, err := s.repo.UpdateRuntimeExtra(s.ctx, account.ID, map[string]any{
+		"codex_5h_used_percent": 75.0,
+	}, "codex_usage_updated_at", observedAt)
+	s.Require().NoError(err)
+	s.Require().True(updated)
+
+	s.Require().NoError(s.repo.Update(s.ctx, &stale))
+
+	got, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().Equal("updated", got.Name)
+	s.Require().Equal("fresh", got.Extra["editable"])
+	s.Require().Equal("preserved", got.Extra["unknown_lifecycle_attribute"])
+	s.Require().Equal(75.0, got.Extra["codex_5h_used_percent"])
+	s.Require().Equal(observedAt.Format(time.RFC3339Nano), got.Extra["codex_usage_updated_at"])
+	s.Require().NotNil(got.RateLimitedAt)
+	s.Require().WithinDuration(resetAt, *got.RateLimitResetAt, time.Microsecond)
+	s.Require().WithinDuration(observedAt.Add(time.Minute), *got.OverloadUntil, time.Microsecond)
+	s.Require().NotNil(got.TempUnschedulableUntil)
+	s.Require().WithinDuration(tempUntil, *got.TempUnschedulableUntil, time.Microsecond)
+	s.Require().Equal("runtime penalty", got.TempUnschedulableReason)
+	s.Require().WithinDuration(observedAt, *got.SessionWindowStart, time.Microsecond)
+	s.Require().WithinDuration(resetAt, *got.SessionWindowEnd, time.Microsecond)
+	s.Require().Equal("allowed_warning", got.SessionWindowStatus)
+}
+
+func (s *AccountRepoSuite) TestUpdate_PreservesConcurrentLastUsed() {
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name: "acc-update-last-used-race",
+	})
+	stale := *account
+	stale.Name = "updated"
+
+	s.Require().NoError(s.repo.UpdateLastUsed(s.ctx, account.ID))
+	stored, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().NotNil(stored.LastUsedAt)
+
+	s.Require().NoError(s.repo.Update(s.ctx, &stale))
+
+	got, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().Equal("updated", got.Name)
+	s.Require().NotNil(got.LastUsedAt)
+	s.Require().WithinDuration(*stored.LastUsedAt, *got.LastUsedAt, time.Microsecond)
 }
 
 func (s *AccountRepoSuite) TestUpdate_SyncSchedulerSnapshotOnDisabled() {
@@ -174,6 +279,51 @@ func (s *AccountRepoSuite) TestUpdate_SyncSchedulerSnapshotOnDisabled() {
 	s.Require().Len(cacheRecorder.setAccounts, 1)
 	s.Require().Equal(account.ID, cacheRecorder.setAccounts[0].ID)
 	s.Require().Equal(service.StatusDisabled, cacheRecorder.setAccounts[0].Status)
+}
+
+func (s *AccountRepoSuite) TestUpdate_PublishesOnlyAfterCommit() {
+	client := testEntClient(s.T())
+	account := mustCreateAccount(s.T(), client, &service.Account{
+		Name:   "update-transaction-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		Status: service.StatusActive,
+	})
+	s.T().Cleanup(func() { _, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background()) })
+	cacheRecorder := &schedulerCacheRecorder{}
+	repo := newAccountRepositoryWithSQL(client, integrationDB, cacheRecorder)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+	account.Status = service.StatusDisabled
+
+	s.Require().NoError(repo.Update(txCtx, account))
+	s.Require().Empty(cacheRecorder.setAccounts)
+	s.Require().NoError(tx.Commit())
+
+	s.Require().Len(cacheRecorder.setAccounts, 1)
+	s.Require().Equal(service.StatusDisabled, cacheRecorder.setAccounts[0].Status)
+}
+
+func (s *AccountRepoSuite) TestUpdate_RollbackKeepsOutboxAtomic() {
+	client := testEntClient(s.T())
+	account := mustCreateAccount(s.T(), client, &service.Account{
+		Name:   "update-outbox-rollback-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		Status: service.StatusActive,
+	})
+	s.T().Cleanup(func() { _, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background()) })
+	repo := newAccountRepositoryWithSQL(client, integrationDB, &schedulerCacheRecorder{})
+	_, err := integrationDB.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+	account.Status = service.StatusDisabled
+
+	s.Require().NoError(repo.Update(txCtx, account))
+	s.Require().NoError(tx.Rollback())
+
+	var outboxCount int
+	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, "SELECT count(*) FROM scheduler_outbox").Scan(&outboxCount))
+	s.Require().Zero(outboxCount)
 }
 
 func (s *AccountRepoSuite) TestUpdate_SyncSchedulerSnapshotOnCredentialsChange() {
@@ -236,6 +386,31 @@ func (s *AccountRepoSuite) TestDelete_RemovesSchedulerAccountSnapshot() {
 	s.Require().NotContains(cacheRecorder.accounts, account.ID)
 }
 
+func (s *AccountRepoSuite) TestDelete_RollbackKeepsAccountOutboxAndCacheAtomic() {
+	client := testEntClient(s.T())
+	account := mustCreateAccount(s.T(), client, &service.Account{Name: "delete-rollback-" + strconv.FormatInt(time.Now().UnixNano(), 10)})
+	s.T().Cleanup(func() { _, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background()) })
+	cacheRecorder := &schedulerCacheRecorder{accounts: map[int64]*service.Account{account.ID: account}}
+	repo := newAccountRepositoryWithSQL(client, integrationDB, cacheRecorder)
+	_, err := integrationDB.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+
+	s.Require().NoError(repo.Delete(txCtx, account.ID))
+	s.Require().Empty(cacheRecorder.deleteIDs)
+	s.Require().NoError(tx.Rollback())
+
+	got, err := repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().Equal(account.ID, got.ID)
+	s.Require().Contains(cacheRecorder.accounts, account.ID)
+	var outboxCount int
+	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, "SELECT count(*) FROM scheduler_outbox").Scan(&outboxCount))
+	s.Require().Zero(outboxCount)
+}
+
 func (s *AccountRepoSuite) TestDelete_WithGroupBindings() {
 	group := mustCreateGroup(s.T(), s.client, &service.Group{Name: "g-del"})
 	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-del"})
@@ -259,6 +434,47 @@ func (s *AccountRepoSuite) TestList() {
 	s.Require().NoError(err, "List")
 	s.Require().Len(accounts, 2)
 	s.Require().Equal(int64(2), page.Total)
+}
+
+func (s *AccountRepoSuite) TestListWithFilters_PaginationCountCloneDoesNotMutateListQuery() {
+	for _, account := range []service.Account{
+		{Name: "clone-page-1", Platform: service.PlatformOpenAI, Priority: 10},
+		{Name: "clone-page-2", Platform: service.PlatformOpenAI, Priority: 20},
+		{Name: "clone-page-3", Platform: service.PlatformOpenAI, Priority: 30},
+		{Name: "clone-page-4", Platform: service.PlatformOpenAI, Priority: 40},
+		{Name: "clone-page-other", Platform: service.PlatformAnthropic, Priority: 100},
+	} {
+		account := account
+		mustCreateAccount(s.T(), s.client, &account)
+	}
+
+	s.client.Account.Intercept(intercept.TraverseFunc(func(ctx context.Context, q intercept.Query) error {
+		qc := baseent.QueryFromContext(ctx)
+		if qc != nil && qc.Op == baseent.OpQueryCount && q.Type() == dbent.TypeAccount {
+			q.WhereP(func(s *entsql.Selector) {
+				s.Select(s.C("id"))
+			})
+		}
+		return nil
+	}))
+
+	accounts, page, err := s.repo.ListWithFilters(s.ctx, pagination.PaginationParams{
+		Page:      2,
+		PageSize:  2,
+		SortBy:    "priority",
+		SortOrder: "asc",
+	}, service.AccountListFilters{
+		Platform: service.PlatformOpenAI,
+	})
+
+	s.Require().NoError(err, "ListWithFilters")
+	s.Require().Equal(int64(4), page.Total)
+	s.Require().Equal(2, page.Page)
+	s.Require().Equal(2, page.PageSize)
+	s.Require().Equal(2, page.Pages)
+	s.Require().Len(accounts, 2)
+	s.Require().Equal("clone-page-3", accounts[0].Name)
+	s.Require().Equal("clone-page-4", accounts[1].Name)
 }
 
 func (s *AccountRepoSuite) TestListWithFilters() {
@@ -598,6 +814,61 @@ func (s *AccountRepoSuite) TestGroupBinding_And_BindGroups() {
 	s.Require().Len(groups, 2, "expected 2 groups after bind")
 }
 
+func (s *AccountRepoSuite) TestAddToGroup_RollbackKeepsMembershipAndOutboxAtomic() {
+	client := testEntClient(s.T())
+	group := mustCreateGroup(s.T(), client, &service.Group{Name: "group-rollback-" + strconv.FormatInt(time.Now().UnixNano(), 10)})
+	account := mustCreateAccount(s.T(), client, &service.Account{Name: "membership-rollback-" + strconv.FormatInt(time.Now().UnixNano(), 10)})
+	s.T().Cleanup(func() {
+		_, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background())
+		_, _ = integrationDB.ExecContext(context.Background(), "DELETE FROM groups WHERE id = $1", group.ID)
+	})
+	repo := newAccountRepositoryWithSQL(client, integrationDB, nil)
+	_, err := integrationDB.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+
+	s.Require().NoError(repo.AddToGroup(txCtx, account.ID, group.ID, 1))
+	s.Require().NoError(tx.Rollback())
+
+	groups, err := repo.GetGroups(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().Empty(groups)
+	var outboxCount int
+	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, "SELECT count(*) FROM scheduler_outbox").Scan(&outboxCount))
+	s.Require().Zero(outboxCount)
+}
+
+func (s *AccountRepoSuite) TestBindGroups_RollbackKeepsReplacementAndOutboxAtomic() {
+	client := testEntClient(s.T())
+	oldGroup := mustCreateGroup(s.T(), client, &service.Group{Name: "bind-old-" + strconv.FormatInt(time.Now().UnixNano(), 10)})
+	newGroup := mustCreateGroup(s.T(), client, &service.Group{Name: "bind-new-" + strconv.FormatInt(time.Now().UnixNano(), 10)})
+	account := mustCreateAccount(s.T(), client, &service.Account{Name: "bind-rollback-" + strconv.FormatInt(time.Now().UnixNano(), 10)})
+	mustBindAccountToGroup(s.T(), client, account.ID, oldGroup.ID, 1)
+	s.T().Cleanup(func() {
+		_, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background())
+		_, _ = integrationDB.ExecContext(context.Background(), "DELETE FROM groups WHERE id = ANY($1)", []int64{oldGroup.ID, newGroup.ID})
+	})
+	repo := newAccountRepositoryWithSQL(client, integrationDB, nil)
+	_, err := integrationDB.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+
+	s.Require().NoError(repo.BindGroups(txCtx, account.ID, []int64{newGroup.ID}))
+	s.Require().NoError(tx.Rollback())
+
+	groups, err := repo.GetGroups(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().Len(groups, 1)
+	s.Require().Equal(oldGroup.ID, groups[0].ID)
+	var outboxCount int
+	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, "SELECT count(*) FROM scheduler_outbox").Scan(&outboxCount))
+	s.Require().Zero(outboxCount)
+}
+
 func (s *AccountRepoSuite) TestBindGroups_EmptyList() {
 	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-empty"})
 	group := mustCreateGroup(s.T(), s.client, &service.Group{Name: "g-empty"})
@@ -695,6 +966,95 @@ func (s *AccountRepoSuite) TestSetSchedulable() {
 	s.Require().Equal(account.ID, cacheRecorder.setAccounts[0].ID)
 }
 
+func (s *AccountRepoSuite) TestSetSchedulable_RollbackKeepsStateAndOutboxAtomic() {
+	client := testEntClient(s.T())
+	account := mustCreateAccount(s.T(), client, &service.Account{
+		Name:        "schedulable-rollback-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		Schedulable: true,
+	})
+	s.T().Cleanup(func() { _, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background()) })
+	cacheRecorder := &schedulerCacheRecorder{}
+	repo := newAccountRepositoryWithSQL(client, integrationDB, cacheRecorder)
+	_, err := integrationDB.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+
+	s.Require().NoError(repo.SetSchedulable(txCtx, account.ID, false))
+	s.Require().NoError(tx.Rollback())
+
+	s.Require().Empty(cacheRecorder.setAccounts)
+	got, err := repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().True(got.Schedulable)
+	var outboxCount int
+	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, "SELECT count(*) FROM scheduler_outbox").Scan(&outboxCount))
+	s.Require().Zero(outboxCount)
+}
+
+func (s *AccountRepoSuite) TestBulkUpdate_RollbackKeepsStateOutboxAndCacheAtomic() {
+	client := testEntClient(s.T())
+	account := mustCreateAccount(s.T(), client, &service.Account{
+		Name:        "bulk-rollback-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		Status:      service.StatusActive,
+		Schedulable: true,
+	})
+	s.T().Cleanup(func() {
+		_, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background())
+	})
+	cacheRecorder := &schedulerCacheRecorder{}
+	repo := newAccountRepositoryWithSQL(client, integrationDB, cacheRecorder)
+	_, err := integrationDB.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+	disabled := service.StatusDisabled
+
+	rows, err := repo.BulkUpdate(txCtx, []int64{account.ID}, service.AccountBulkUpdate{Status: &disabled})
+	s.Require().NoError(err)
+	s.Require().Equal(int64(1), rows)
+	s.Require().Empty(cacheRecorder.setAccounts)
+	s.Require().NoError(tx.Rollback())
+
+	got, err := repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().Equal(service.StatusActive, got.Status)
+	s.Require().Empty(cacheRecorder.setAccounts)
+	var outboxCount int
+	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, "SELECT count(*) FROM scheduler_outbox").Scan(&outboxCount))
+	s.Require().Zero(outboxCount)
+}
+
+func (s *AccountRepoSuite) TestBulkUpdate_PublishesSnapshotOnlyAfterCommit() {
+	client := testEntClient(s.T())
+	account := mustCreateAccount(s.T(), client, &service.Account{
+		Name:        "bulk-commit-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		Status:      service.StatusActive,
+		Schedulable: true,
+	})
+	s.T().Cleanup(func() {
+		_, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background())
+	})
+	cacheRecorder := &schedulerCacheRecorder{}
+	repo := newAccountRepositoryWithSQL(client, integrationDB, cacheRecorder)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+	disabled := service.StatusDisabled
+
+	rows, err := repo.BulkUpdate(txCtx, []int64{account.ID}, service.AccountBulkUpdate{Status: &disabled})
+	s.Require().NoError(err)
+	s.Require().Equal(int64(1), rows)
+	s.Require().Empty(cacheRecorder.setAccounts)
+	s.Require().NoError(tx.Commit())
+
+	s.Require().Len(cacheRecorder.setAccounts, 1)
+	s.Require().Equal(account.ID, cacheRecorder.setAccounts[0].ID)
+	s.Require().Equal(service.StatusDisabled, cacheRecorder.setAccounts[0].Status)
+}
+
 func (s *AccountRepoSuite) TestBulkUpdate_SyncSchedulerSnapshotOnDisabled() {
 	account1 := mustCreateAccount(s.T(), s.client, &service.Account{Name: "bulk-1", Status: service.StatusActive, Schedulable: true})
 	account2 := mustCreateAccount(s.T(), s.client, &service.Account{Name: "bulk-2", Status: service.StatusActive, Schedulable: true})
@@ -719,11 +1079,269 @@ func (s *AccountRepoSuite) TestBulkUpdate_SyncSchedulerSnapshotOnDisabled() {
 
 // --- SetOverloaded / SetRateLimited / ClearRateLimit ---
 
+func (s *AccountRepoSuite) requireNoSchedulerOutbox() {
+	s.T().Helper()
+	var count int
+	s.Require().NoError(scanSingleRow(s.ctx, s.repo.sql, "SELECT COUNT(*) FROM scheduler_outbox", nil, &count))
+	s.Require().Zero(count)
+}
+
+func (s *AccountRepoSuite) TestUpdateSessionWindow_SyncsSchedulerSnapshot() {
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:                "session-window-sync",
+		SessionWindowStatus: "idle",
+	})
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
+	_, err := s.repo.sql.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
+
+	s.Require().NoError(s.repo.UpdateSessionWindow(s.ctx, account.ID, nil, nil, "active"))
+
+	s.Require().Len(cacheRecorder.setAccounts, 1)
+	s.Require().Equal(account.ID, cacheRecorder.setAccounts[0].ID)
+	s.Require().Equal("active", cacheRecorder.setAccounts[0].SessionWindowStatus)
+	var outboxCount int
+	s.Require().NoError(scanSingleRow(s.ctx, s.repo.sql, "SELECT COUNT(*) FROM scheduler_outbox", nil, &outboxCount))
+	s.Require().Zero(outboxCount)
+}
+
+func (s *AccountRepoSuite) TestUpdateSessionWindow_AvoidsRedundantSnapshotWrite() {
+	start := time.Now().UTC().Truncate(time.Second)
+	end := start.Add(5 * time.Hour)
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:                "session-window-unchanged",
+		SessionWindowStart:  &start,
+		SessionWindowEnd:    &end,
+		SessionWindowStatus: "active",
+	})
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
+
+	s.Require().NoError(s.repo.UpdateSessionWindow(s.ctx, account.ID, &start, &end, "active"))
+
+	s.Require().Empty(cacheRecorder.setAccounts)
+}
+
+func (s *AccountRepoSuite) TestUpdateSessionWindow_DoesNotReplaceNewerWindow() {
+	laterStart := time.Now().UTC().Truncate(time.Second)
+	laterEnd := laterStart.Add(5 * time.Hour)
+	earlierStart := laterStart.Add(-time.Hour)
+	earlierEnd := laterEnd.Add(-time.Hour)
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:                "session-window-monotonic-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		SessionWindowStart:  &laterStart,
+		SessionWindowEnd:    &laterEnd,
+		SessionWindowStatus: "active",
+	})
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
+
+	s.Require().NoError(s.repo.UpdateSessionWindow(s.ctx, account.ID, &earlierStart, &earlierEnd, "rejected"))
+
+	got, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().NotNil(got.SessionWindowStart)
+	s.Require().NotNil(got.SessionWindowEnd)
+	s.Require().WithinDuration(laterStart, *got.SessionWindowStart, time.Microsecond)
+	s.Require().WithinDuration(laterEnd, *got.SessionWindowEnd, time.Microsecond)
+	s.Require().Equal("active", got.SessionWindowStatus)
+	s.Require().Empty(cacheRecorder.setAccounts)
+}
+
+func (s *AccountRepoSuite) TestUpdateSessionWindowEnd_SyncsWithoutLifecycleOutbox() {
+	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "session-window-end-sync"})
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
+	_, err := s.repo.sql.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
+	end := time.Now().UTC().Add(5 * time.Hour)
+
+	s.Require().NoError(s.repo.UpdateSessionWindowEnd(s.ctx, account.ID, end))
+
+	s.Require().Len(cacheRecorder.setAccounts, 1)
+	s.Require().Equal(account.ID, cacheRecorder.setAccounts[0].ID)
+	s.Require().NotNil(cacheRecorder.setAccounts[0].SessionWindowEnd)
+	s.Require().WithinDuration(end, *cacheRecorder.setAccounts[0].SessionWindowEnd, time.Second)
+	var outboxCount int
+	s.Require().NoError(scanSingleRow(s.ctx, s.repo.sql, "SELECT COUNT(*) FROM scheduler_outbox", nil, &outboxCount))
+	s.Require().Zero(outboxCount)
+}
+
+func (s *AccountRepoSuite) TestUpdateSessionWindow_PublishesOnlyAfterCommit() {
+	client := testEntClient(s.T())
+	account := mustCreateAccount(s.T(), client, &service.Account{
+		Name:                "session-window-transaction-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		SessionWindowStatus: "idle",
+	})
+	s.T().Cleanup(func() { _, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background()) })
+	cacheRecorder := &schedulerCacheRecorder{}
+	repo := newAccountRepositoryWithSQL(client, integrationDB, cacheRecorder)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+
+	s.Require().NoError(repo.UpdateSessionWindow(txCtx, account.ID, nil, nil, "active"))
+	s.Require().Empty(cacheRecorder.setAccounts)
+	s.Require().NoError(tx.Commit())
+
+	s.Require().Len(cacheRecorder.setAccounts, 1)
+	s.Require().Equal("active", cacheRecorder.setAccounts[0].SessionWindowStatus)
+}
+
+func (s *AccountRepoSuite) TestUpdateSessionWindowEnd_DoesNotShortenExistingWindow() {
+	laterEnd := time.Now().UTC().Add(5 * time.Hour).Truncate(time.Second)
+	earlierEnd := laterEnd.Add(-time.Hour)
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:             "session-window-end-monotonic-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		SessionWindowEnd: &laterEnd,
+	})
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
+
+	s.Require().NoError(s.repo.UpdateSessionWindowEnd(s.ctx, account.ID, earlierEnd))
+
+	got, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().NotNil(got.SessionWindowEnd)
+	s.Require().WithinDuration(laterEnd, *got.SessionWindowEnd, time.Microsecond)
+	s.Require().Empty(cacheRecorder.setAccounts)
+}
+
+func (s *AccountRepoSuite) TestUpdateSessionWindowEnd_PublishesOnlyAfterCommit() {
+	client := testEntClient(s.T())
+	originalEnd := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+	account := mustCreateAccount(s.T(), client, &service.Account{
+		Name:             "session-window-end-transaction-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		SessionWindowEnd: &originalEnd,
+	})
+	s.T().Cleanup(func() { _, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background()) })
+	cacheRecorder := &schedulerCacheRecorder{}
+	repo := newAccountRepositoryWithSQL(client, integrationDB, cacheRecorder)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+	updatedEnd := originalEnd.Add(4 * time.Hour)
+
+	s.Require().NoError(repo.UpdateSessionWindowEnd(txCtx, account.ID, updatedEnd))
+	s.Require().Empty(cacheRecorder.setAccounts)
+	s.Require().NoError(tx.Commit())
+
+	s.Require().Len(cacheRecorder.setAccounts, 1)
+	s.Require().NotNil(cacheRecorder.setAccounts[0].SessionWindowEnd)
+	s.Require().WithinDuration(updatedEnd, *cacheRecorder.setAccounts[0].SessionWindowEnd, time.Microsecond)
+}
+
+func (s *AccountRepoSuite) TestUpdateSessionWindowEnd_RollbackDoesNotPublishSnapshot() {
+	client := testEntClient(s.T())
+	originalEnd := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+	account := mustCreateAccount(s.T(), client, &service.Account{
+		Name:             "session-window-end-rollback-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		SessionWindowEnd: &originalEnd,
+	})
+	s.T().Cleanup(func() { _, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background()) })
+	cacheRecorder := &schedulerCacheRecorder{}
+	repo := newAccountRepositoryWithSQL(client, integrationDB, cacheRecorder)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+
+	s.Require().NoError(repo.UpdateSessionWindowEnd(txCtx, account.ID, originalEnd.Add(4*time.Hour)))
+	s.Require().NoError(tx.Rollback())
+
+	s.Require().Empty(cacheRecorder.setAccounts)
+	got, err := repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().NotNil(got.SessionWindowEnd)
+	s.Require().WithinDuration(originalEnd, *got.SessionWindowEnd, time.Microsecond)
+}
+
+func (s *AccountRepoSuite) TestUpdateSessionWindow_RollbackDoesNotPublishSnapshot() {
+	client := testEntClient(s.T())
+	account := mustCreateAccount(s.T(), client, &service.Account{
+		Name:                "session-window-rollback-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		SessionWindowStatus: "idle",
+	})
+	s.T().Cleanup(func() { _, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background()) })
+	cacheRecorder := &schedulerCacheRecorder{}
+	repo := newAccountRepositoryWithSQL(client, integrationDB, cacheRecorder)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+
+	s.Require().NoError(repo.UpdateSessionWindow(txCtx, account.ID, nil, nil, "active"))
+	s.Require().NoError(tx.Rollback())
+
+	s.Require().Empty(cacheRecorder.setAccounts)
+	got, err := repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().Equal("idle", got.SessionWindowStatus)
+}
+
+func (s *AccountRepoSuite) TestUpdateSessionWindowEnd_AvoidsRedundantSnapshotWrite() {
+	end := time.Now().UTC().Add(5 * time.Hour).Truncate(time.Second)
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:             "session-window-end-unchanged",
+		SessionWindowEnd: &end,
+	})
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
+
+	s.Require().NoError(s.repo.UpdateSessionWindowEnd(s.ctx, account.ID, end))
+
+	s.Require().Empty(cacheRecorder.setAccounts)
+}
+
+func (s *AccountRepoSuite) TestUpdateExtraRuntimeOverlay_PublishesOnlyAfterCommit() {
+	client := testEntClient(s.T())
+	account := mustCreateAccount(s.T(), client, &service.Account{
+		Name:  "extra-runtime-transaction-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		Extra: map[string]any{"session_window_utilization": 0.1},
+	})
+	s.T().Cleanup(func() { _, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background()) })
+	cacheRecorder := &schedulerCacheRecorder{}
+	repo := newAccountRepositoryWithSQL(client, integrationDB, cacheRecorder)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+
+	s.Require().NoError(repo.UpdateExtra(txCtx, account.ID, map[string]any{"session_window_utilization": 0.5}))
+	s.Require().Empty(cacheRecorder.setAccounts)
+	s.Require().NoError(tx.Commit())
+
+	s.Require().Len(cacheRecorder.setAccounts, 1)
+	s.Require().Equal(0.5, cacheRecorder.setAccounts[0].Extra["session_window_utilization"])
+}
+
+func (s *AccountRepoSuite) TestUpdateExtraRuntimeOverlay_RollbackDoesNotPublishSnapshot() {
+	client := testEntClient(s.T())
+	account := mustCreateAccount(s.T(), client, &service.Account{
+		Name:  "extra-runtime-rollback-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		Extra: map[string]any{"session_window_utilization": 0.1},
+	})
+	s.T().Cleanup(func() { _, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background()) })
+	cacheRecorder := &schedulerCacheRecorder{}
+	repo := newAccountRepositoryWithSQL(client, integrationDB, cacheRecorder)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+
+	s.Require().NoError(repo.UpdateExtra(txCtx, account.ID, map[string]any{"session_window_utilization": 0.5}))
+	s.Require().NoError(tx.Rollback())
+
+	s.Require().Empty(cacheRecorder.setAccounts)
+	got, err := repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().Equal(0.1, got.Extra["session_window_utilization"])
+}
+
 func (s *AccountRepoSuite) TestSetOverloaded() {
 	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-over"})
 	until := time.Date(2025, 6, 15, 12, 0, 0, 0, time.UTC)
 	cacheRecorder := &schedulerCacheRecorder{}
 	s.repo.schedulerCache = cacheRecorder
+	_, err := s.repo.sql.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
 
 	s.Require().NoError(s.repo.SetOverloaded(s.ctx, account.ID, until))
 
@@ -735,11 +1353,54 @@ func (s *AccountRepoSuite) TestSetOverloaded() {
 	s.Require().Equal(account.ID, cacheRecorder.setAccounts[0].ID)
 	s.Require().NotNil(cacheRecorder.setAccounts[0].OverloadUntil)
 	s.Require().WithinDuration(until, *cacheRecorder.setAccounts[0].OverloadUntil, time.Second)
+	s.requireNoSchedulerOutbox()
+}
+
+func (s *AccountRepoSuite) TestSetOverloaded_DoesNotShortenExistingCooldown() {
+	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-over-monotonic"})
+	later := time.Now().UTC().Add(2 * time.Hour)
+	earlier := later.Add(-time.Hour)
+	s.Require().NoError(s.repo.SetOverloaded(s.ctx, account.ID, later))
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
+
+	s.Require().NoError(s.repo.SetOverloaded(s.ctx, account.ID, earlier))
+
+	got, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().NotNil(got.OverloadUntil)
+	s.Require().WithinDuration(later, *got.OverloadUntil, time.Microsecond)
+	s.Require().Empty(cacheRecorder.setAccounts)
+}
+
+func (s *AccountRepoSuite) TestSetOverloaded_RollbackDoesNotPublishSnapshot() {
+	client := testEntClient(s.T())
+	account := mustCreateAccount(s.T(), client, &service.Account{
+		Name: "overload-rollback-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+	})
+	s.T().Cleanup(func() { _, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background()) })
+	cacheRecorder := &schedulerCacheRecorder{}
+	repo := newAccountRepositoryWithSQL(client, integrationDB, cacheRecorder)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+
+	s.Require().NoError(repo.SetOverloaded(txCtx, account.ID, time.Now().UTC().Add(time.Hour)))
+	s.Require().NoError(tx.Rollback())
+
+	s.Require().Empty(cacheRecorder.setAccounts)
+	got, err := repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().Nil(got.OverloadUntil)
 }
 
 func (s *AccountRepoSuite) TestSetRateLimited() {
 	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-rl"})
 	resetAt := time.Date(2025, 6, 15, 14, 0, 0, 0, time.UTC)
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
+	_, err := s.repo.sql.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
 
 	s.Require().NoError(s.repo.SetRateLimited(s.ctx, account.ID, resetAt))
 
@@ -748,6 +1409,95 @@ func (s *AccountRepoSuite) TestSetRateLimited() {
 	s.Require().NotNil(got.RateLimitedAt)
 	s.Require().NotNil(got.RateLimitResetAt)
 	s.Require().WithinDuration(resetAt, *got.RateLimitResetAt, time.Second)
+	s.Require().Len(cacheRecorder.setAccounts, 1)
+	s.Require().Equal(account.ID, cacheRecorder.setAccounts[0].ID)
+	s.requireNoSchedulerOutbox()
+}
+
+func (s *AccountRepoSuite) TestSetRateLimited_DoesNotShortenExistingCooldown() {
+	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-rate-limit-monotonic"})
+	later := time.Now().UTC().Add(2 * time.Hour)
+	earlier := later.Add(-time.Hour)
+	s.Require().NoError(s.repo.SetRateLimited(s.ctx, account.ID, later))
+	first, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().NotNil(first.RateLimitedAt)
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
+
+	s.Require().NoError(s.repo.SetRateLimited(s.ctx, account.ID, earlier))
+
+	got, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().NotNil(got.RateLimitedAt)
+	s.Require().NotNil(got.RateLimitResetAt)
+	s.Require().WithinDuration(*first.RateLimitedAt, *got.RateLimitedAt, time.Microsecond)
+	s.Require().WithinDuration(later, *got.RateLimitResetAt, time.Microsecond)
+	s.Require().Empty(cacheRecorder.setAccounts)
+}
+
+func (s *AccountRepoSuite) TestSetTempUnschedulable_DoesNotShortenExistingPenalty() {
+	later := time.Now().UTC().Add(2 * time.Hour).Truncate(time.Second)
+	earlier := later.Add(-time.Hour)
+	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "temp-unsched-monotonic-" + strconv.FormatInt(time.Now().UnixNano(), 10)})
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
+
+	s.Require().NoError(s.repo.SetTempUnschedulable(s.ctx, account.ID, later, "longer penalty"))
+	s.Require().Len(cacheRecorder.setAccounts, 1)
+	cacheRecorder.setAccounts = nil
+
+	s.Require().NoError(s.repo.SetTempUnschedulable(s.ctx, account.ID, earlier, "stale penalty"))
+
+	got, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().NotNil(got.TempUnschedulableUntil)
+	s.Require().WithinDuration(later, *got.TempUnschedulableUntil, time.Microsecond)
+	s.Require().Equal("longer penalty", got.TempUnschedulableReason)
+	s.Require().Empty(cacheRecorder.setAccounts)
+}
+
+func (s *AccountRepoSuite) TestSetTempUnschedulable_RollbackDoesNotPublishSnapshot() {
+	client := testEntClient(s.T())
+	account := mustCreateAccount(s.T(), client, &service.Account{
+		Name: "temp-unsched-rollback-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+	})
+	s.T().Cleanup(func() { _, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background()) })
+	cacheRecorder := &schedulerCacheRecorder{}
+	repo := newAccountRepositoryWithSQL(client, integrationDB, cacheRecorder)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+
+	s.Require().NoError(repo.SetTempUnschedulable(txCtx, account.ID, time.Now().UTC().Add(time.Hour), "retry"))
+	s.Require().NoError(tx.Rollback())
+
+	s.Require().Empty(cacheRecorder.setAccounts)
+	got, err := repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().Nil(got.TempUnschedulableUntil)
+}
+
+func (s *AccountRepoSuite) TestSetRateLimited_PublishesOnlyAfterCommit() {
+	client := testEntClient(s.T())
+	account := mustCreateAccount(s.T(), client, &service.Account{
+		Name: "rate-limit-transaction-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+	})
+	s.T().Cleanup(func() { _, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background()) })
+	cacheRecorder := &schedulerCacheRecorder{}
+	repo := newAccountRepositoryWithSQL(client, integrationDB, cacheRecorder)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+	resetAt := time.Now().UTC().Add(time.Hour)
+
+	s.Require().NoError(repo.SetRateLimited(txCtx, account.ID, resetAt))
+	s.Require().Empty(cacheRecorder.setAccounts)
+	s.Require().NoError(tx.Commit())
+
+	s.Require().Len(cacheRecorder.setAccounts, 1)
+	s.Require().NotNil(cacheRecorder.setAccounts[0].RateLimitResetAt)
+	s.Require().WithinDuration(resetAt, *cacheRecorder.setAccounts[0].RateLimitResetAt, time.Second)
 }
 
 func (s *AccountRepoSuite) TestClearRateLimit() {
@@ -755,6 +1505,10 @@ func (s *AccountRepoSuite) TestClearRateLimit() {
 	until := time.Now().Add(1 * time.Hour)
 	s.Require().NoError(s.repo.SetOverloaded(s.ctx, account.ID, until))
 	s.Require().NoError(s.repo.SetRateLimited(s.ctx, account.ID, until))
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
+	_, err := s.repo.sql.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
 
 	s.Require().NoError(s.repo.ClearRateLimit(s.ctx, account.ID))
 
@@ -763,15 +1517,49 @@ func (s *AccountRepoSuite) TestClearRateLimit() {
 	s.Require().Nil(got.RateLimitedAt)
 	s.Require().Nil(got.RateLimitResetAt)
 	s.Require().Nil(got.OverloadUntil)
+	s.Require().Len(cacheRecorder.setAccounts, 1)
+	s.Require().Equal(account.ID, cacheRecorder.setAccounts[0].ID)
+	s.requireNoSchedulerOutbox()
+}
+
+func (s *AccountRepoSuite) TestClearRateLimit_AvoidsRedundantSnapshotWrite() {
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name: "rate-limit-clear-unchanged-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+	})
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
+
+	s.Require().NoError(s.repo.ClearRateLimit(s.ctx, account.ID))
+
+	s.Require().Empty(cacheRecorder.setAccounts)
+}
+
+func (s *AccountRepoSuite) TestClearTempUnschedulable_AvoidsRedundantSnapshotWrite() {
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name: "temp-unsched-unchanged-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+	})
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
+
+	s.Require().NoError(s.repo.ClearTempUnschedulable(s.ctx, account.ID))
+
+	s.Require().Empty(cacheRecorder.setAccounts)
 }
 
 func (s *AccountRepoSuite) TestTempUnschedulableFieldsLoadedByGetByIDAndGetByIDs() {
 	acc1 := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-temp-1"})
 	acc2 := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-temp-2"})
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
+	_, err := s.repo.sql.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
 
 	until := time.Now().Add(15 * time.Minute).UTC().Truncate(time.Second)
 	reason := `{"rule":"429","matched_keyword":"too many requests"}`
 	s.Require().NoError(s.repo.SetTempUnschedulable(s.ctx, acc1.ID, until, reason))
+	s.Require().Len(cacheRecorder.setAccounts, 1)
+	s.Require().Equal(acc1.ID, cacheRecorder.setAccounts[0].ID)
+	s.requireNoSchedulerOutbox()
 
 	gotByID, err := s.repo.GetByID(s.ctx, acc1.ID)
 	s.Require().NoError(err)
@@ -790,8 +1578,7 @@ func (s *AccountRepoSuite) TestTempUnschedulableFieldsLoadedByGetByIDAndGetByIDs
 	s.Require().WithinDuration(until, *gotByIDs[1].TempUnschedulableUntil, time.Second)
 	s.Require().Equal(reason, gotByIDs[1].TempUnschedulableReason)
 
-	cacheRecorder := &schedulerCacheRecorder{}
-	s.repo.schedulerCache = cacheRecorder
+	cacheRecorder.setAccounts = nil
 
 	s.Require().NoError(s.repo.ClearTempUnschedulable(s.ctx, acc1.ID))
 	cleared, err := s.repo.GetByID(s.ctx, acc1.ID)
@@ -802,6 +1589,138 @@ func (s *AccountRepoSuite) TestTempUnschedulableFieldsLoadedByGetByIDAndGetByIDs
 	s.Require().Equal(acc1.ID, cacheRecorder.setAccounts[0].ID)
 	s.Require().Nil(cacheRecorder.setAccounts[0].TempUnschedulableUntil)
 	s.Require().Equal("", cacheRecorder.setAccounts[0].TempUnschedulableReason)
+	s.requireNoSchedulerOutbox()
+}
+
+func (s *AccountRepoSuite) TestSetModelRateLimit_SyncsWithoutLifecycleOutbox() {
+	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-set-model-rate"})
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
+	_, err := s.repo.sql.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
+	resetAt := time.Now().UTC().Add(time.Hour)
+
+	s.Require().NoError(s.repo.SetModelRateLimit(s.ctx, account.ID, "gpt-5", resetAt, "runtime cooldown"))
+
+	s.Require().Len(cacheRecorder.setAccounts, 1)
+	s.Require().Equal(account.ID, cacheRecorder.setAccounts[0].ID)
+	s.Require().Contains(cacheRecorder.setAccounts[0].Extra, "model_rate_limits")
+	s.requireNoSchedulerOutbox()
+}
+
+func (s *AccountRepoSuite) TestSetModelRateLimit_DoesNotShortenExistingCooldown() {
+	later := time.Now().UTC().Add(2 * time.Hour).Truncate(time.Second)
+	earlier := later.Add(-time.Hour)
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name: "model-rate-monotonic-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		Extra: map[string]any{
+			"model_rate_limits": map[string]any{
+				"gpt-5": map[string]any{
+					"rate_limited_at":     "2026-07-18T00:00:00Z",
+					"rate_limit_reset_at": later.Format(time.RFC3339),
+					"reason":              "longer cooldown",
+				},
+			},
+		},
+	})
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
+
+	s.Require().NoError(s.repo.SetModelRateLimit(s.ctx, account.ID, "gpt-5", earlier, "stale cooldown"))
+
+	got, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	limits, ok := got.Extra["model_rate_limits"].(map[string]any)
+	s.Require().True(ok)
+	limit, ok := limits["gpt-5"].(map[string]any)
+	s.Require().True(ok)
+	s.Require().Equal(later.Format(time.RFC3339), limit["rate_limit_reset_at"])
+	s.Require().Equal("longer cooldown", limit["reason"])
+	s.Require().Empty(cacheRecorder.setAccounts)
+}
+
+func (s *AccountRepoSuite) TestSetModelRateLimit_PublishesOnlyAfterCommit() {
+	client := testEntClient(s.T())
+	account := mustCreateAccount(s.T(), client, &service.Account{
+		Name: "model-rate-transaction-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+	})
+	s.T().Cleanup(func() { _, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background()) })
+	cacheRecorder := &schedulerCacheRecorder{}
+	repo := newAccountRepositoryWithSQL(client, integrationDB, cacheRecorder)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+
+	s.Require().NoError(repo.SetModelRateLimit(txCtx, account.ID, "gpt-5", time.Now().UTC().Add(time.Hour)))
+	s.Require().Empty(cacheRecorder.setAccounts)
+	s.Require().NoError(tx.Commit())
+
+	s.Require().Len(cacheRecorder.setAccounts, 1)
+	s.Require().Contains(cacheRecorder.setAccounts[0].Extra, "model_rate_limits")
+}
+
+func (s *AccountRepoSuite) TestClearAntigravityQuotaScopes_RollbackKeepsExtraAndOutboxAtomic() {
+	client := testEntClient(s.T())
+	account := mustCreateAccount(s.T(), client, &service.Account{
+		Name: "clear-quota-scopes-rollback-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		Extra: map[string]any{
+			"antigravity_quota_scopes": map[string]any{"scope": "value"},
+		},
+	})
+	s.T().Cleanup(func() {
+		_, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background())
+	})
+	repo := newAccountRepositoryWithSQL(client, integrationDB, nil)
+	_, err := integrationDB.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+
+	s.Require().NoError(repo.ClearAntigravityQuotaScopes(txCtx, account.ID))
+	s.Require().NoError(tx.Rollback())
+
+	got, err := repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().Contains(got.Extra, "antigravity_quota_scopes")
+	var outboxCount int
+	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, "SELECT count(*) FROM scheduler_outbox").Scan(&outboxCount))
+	s.Require().Zero(outboxCount)
+}
+
+func (s *AccountRepoSuite) TestClearAntigravityQuotaScopes_UnchangedAvoidsRedundantOutbox() {
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name: "clear-quota-scopes-unchanged-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+	})
+	_, err := s.repo.sql.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
+
+	s.Require().NoError(s.repo.ClearAntigravityQuotaScopes(s.ctx, account.ID))
+
+	s.requireNoSchedulerOutbox()
+}
+
+func (s *AccountRepoSuite) TestClearAntigravityQuotaScopes_UnchangedHonorsCallerTransaction() {
+	client := testEntClient(s.T())
+	account := mustCreateAccount(s.T(), client, &service.Account{
+		Name: "clear-quota-scopes-unchanged-tx-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+	})
+	s.T().Cleanup(func() {
+		_, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background())
+	})
+	repo := newAccountRepositoryWithSQL(client, integrationDB, nil)
+	_, err := integrationDB.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+
+	s.Require().NoError(repo.ClearAntigravityQuotaScopes(txCtx, account.ID))
+	s.Require().NoError(tx.Rollback())
+
+	var outboxCount int
+	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, "SELECT count(*) FROM scheduler_outbox").Scan(&outboxCount))
+	s.Require().Zero(outboxCount)
 }
 
 func (s *AccountRepoSuite) TestClearModelRateLimits_SyncsSchedulerSnapshot() {
@@ -817,6 +1736,8 @@ func (s *AccountRepoSuite) TestClearModelRateLimits_SyncsSchedulerSnapshot() {
 	})
 	cacheRecorder := &schedulerCacheRecorder{}
 	s.repo.schedulerCache = cacheRecorder
+	_, err := s.repo.sql.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
 
 	s.Require().NoError(s.repo.ClearModelRateLimits(s.ctx, account.ID))
 
@@ -826,6 +1747,41 @@ func (s *AccountRepoSuite) TestClearModelRateLimits_SyncsSchedulerSnapshot() {
 	s.Require().Len(cacheRecorder.setAccounts, 1)
 	s.Require().Equal(account.ID, cacheRecorder.setAccounts[0].ID)
 	s.Require().NotContains(cacheRecorder.setAccounts[0].Extra, "model_rate_limits")
+	var outboxCount int
+	s.Require().NoError(scanSingleRow(s.ctx, s.repo.sql, "SELECT COUNT(*) FROM scheduler_outbox", nil, &outboxCount))
+	s.Require().Zero(outboxCount)
+}
+
+func (s *AccountRepoSuite) TestClearModelRateLimits_AvoidsRedundantSnapshotWrite() {
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name: "model-rate-clear-unchanged-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+	})
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
+
+	s.Require().NoError(s.repo.ClearModelRateLimits(s.ctx, account.ID))
+
+	s.Require().Empty(cacheRecorder.setAccounts)
+}
+
+func (s *AccountRepoSuite) TestClearModelRateLimits_UnchangedHonorsCallerTransaction() {
+	client := testEntClient(s.T())
+	account := mustCreateAccount(s.T(), client, &service.Account{
+		Name: "model-rate-clear-unchanged-tx-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+	})
+	s.T().Cleanup(func() {
+		_, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background())
+	})
+	cacheRecorder := &schedulerCacheRecorder{}
+	repo := newAccountRepositoryWithSQL(client, integrationDB, cacheRecorder)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+
+	s.Require().NoError(repo.ClearModelRateLimits(txCtx, account.ID))
+	s.Require().NoError(tx.Rollback())
+
+	s.Require().Empty(cacheRecorder.setAccounts)
 }
 
 // --- UpdateLastUsed ---
@@ -839,6 +1795,127 @@ func (s *AccountRepoSuite) TestUpdateLastUsed() {
 	got, err := s.repo.GetByID(s.ctx, account.ID)
 	s.Require().NoError(err)
 	s.Require().NotNil(got.LastUsedAt)
+}
+
+func (s *AccountRepoSuite) TestUpdateLastUsed_RollbackKeepsTimestampAndOutboxAtomic() {
+	client := testEntClient(s.T())
+	original := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+	account := mustCreateAccount(s.T(), client, &service.Account{
+		Name:       "last-used-rollback-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		LastUsedAt: &original,
+	})
+	s.T().Cleanup(func() {
+		_, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background())
+	})
+	repo := newAccountRepositoryWithSQL(client, integrationDB, nil)
+	_, err := integrationDB.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+
+	s.Require().NoError(repo.UpdateLastUsed(txCtx, account.ID))
+	s.Require().NoError(tx.Rollback())
+
+	got, err := repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().NotNil(got.LastUsedAt)
+	s.Require().WithinDuration(original, *got.LastUsedAt, time.Millisecond)
+	var outboxCount int
+	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, "SELECT count(*) FROM scheduler_outbox").Scan(&outboxCount))
+	s.Require().Zero(outboxCount)
+}
+
+func (s *AccountRepoSuite) TestBatchUpdateLastUsed_RollbackKeepsTimestampAndOutboxAtomic() {
+	client := testEntClient(s.T())
+	original := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+	account := mustCreateAccount(s.T(), client, &service.Account{
+		Name:       "batch-last-used-rollback-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		LastUsedAt: &original,
+	})
+	s.T().Cleanup(func() {
+		_, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background())
+	})
+	repo := newAccountRepositoryWithSQL(client, integrationDB, nil)
+	_, err := integrationDB.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+
+	s.Require().NoError(repo.BatchUpdateLastUsed(txCtx, map[int64]time.Time{account.ID: original.Add(30 * time.Minute)}))
+	s.Require().NoError(tx.Rollback())
+
+	got, err := repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().NotNil(got.LastUsedAt)
+	s.Require().WithinDuration(original, *got.LastUsedAt, time.Millisecond)
+	var outboxCount int
+	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, "SELECT count(*) FROM scheduler_outbox").Scan(&outboxCount))
+	s.Require().Zero(outboxCount)
+}
+
+func (s *AccountRepoSuite) TestLastUsedOutboxPublishesStoredTimestampsAndExistingIDsOnly() {
+	account1 := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-used-monotonic-1"})
+	account2 := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-used-monotonic-2"})
+	stored1 := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+	stored2 := stored1.Add(time.Hour)
+	_, err := s.repo.sql.ExecContext(s.ctx, "UPDATE accounts SET last_used_at = $1 WHERE id = $2", stored1, account1.ID)
+	s.Require().NoError(err)
+	_, err = s.repo.sql.ExecContext(s.ctx, "UPDATE accounts SET last_used_at = $1 WHERE id = $2", stored2, account2.ID)
+	s.Require().NoError(err)
+	_, err = s.repo.sql.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
+
+	s.Require().NoError(s.repo.UpdateLastUsed(s.ctx, account1.ID))
+	s.Require().Equal(map[string]int64{strconv.FormatInt(account1.ID, 10): stored1.Unix()}, s.lastUsedOutboxPayload())
+
+	_, err = s.repo.sql.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
+	missingID := account2.ID + 1000000
+	s.Require().NoError(s.repo.BatchUpdateLastUsed(s.ctx, map[int64]time.Time{
+		account1.ID: stored1.Add(-time.Hour),
+		account2.ID: stored2.Add(-time.Hour),
+		missingID:   stored2,
+	}))
+	s.Require().Equal(map[string]int64{
+		strconv.FormatInt(account1.ID, 10): stored1.Unix(),
+		strconv.FormatInt(account2.ID, 10): stored2.Unix(),
+	}, s.lastUsedOutboxPayload())
+}
+
+func (s *AccountRepoSuite) TestBatchUpdateLastUsedChunksLargeInput() {
+	const total = accountLastUsedBatchSize + 1
+	updates := make(map[int64]time.Time, total)
+	ids := make([]int64, 0, total)
+	usedAt := time.Now().UTC().Truncate(time.Second)
+	for i := 0; i < total; i++ {
+		account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-used-large-" + strconv.Itoa(i)})
+		ids = append(ids, account.ID)
+		updates[account.ID] = usedAt.Add(time.Duration(i) * time.Second)
+	}
+	_, err := s.repo.sql.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
+
+	s.Require().NoError(s.repo.BatchUpdateLastUsed(s.ctx, updates))
+
+	var outboxRows int
+	s.Require().NoError(scanSingleRow(s.ctx, s.repo.sql, `SELECT count(*) FROM scheduler_outbox WHERE event_type=$1`, []any{service.SchedulerOutboxEventAccountLastUsed}, &outboxRows))
+	s.Require().Equal(2, outboxRows)
+	var stored time.Time
+	s.Require().NoError(scanSingleRow(s.ctx, s.repo.sql, `SELECT last_used_at FROM accounts WHERE id=$1`, []any{ids[len(ids)-1]}, &stored))
+	s.Require().True(updates[ids[len(ids)-1]].Equal(stored))
+}
+
+func (s *AccountRepoSuite) lastUsedOutboxPayload() map[string]int64 {
+	var raw []byte
+	err := scanSingleRow(s.ctx, s.repo.sql, `SELECT payload FROM scheduler_outbox WHERE event_type = $1 ORDER BY id DESC LIMIT 1`, []any{service.SchedulerOutboxEventAccountLastUsed}, &raw)
+	s.Require().NoError(err)
+	var payload struct {
+		LastUsed map[string]int64 `json:"last_used"`
+	}
+	s.Require().NoError(json.Unmarshal(raw, &payload))
+	return payload.LastUsed
 }
 
 // --- SetError ---
@@ -890,7 +1967,92 @@ func (s *AccountRepoSuite) TestClearError_SyncSchedulerSnapshotOnRecovery() {
 	s.Require().Equal(service.StatusActive, cacheRecorder.setAccounts[0].Status)
 }
 
+func (s *AccountRepoSuite) TestClearError_UnchangedAvoidsRedundantEffects() {
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:   "clear-error-unchanged-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		Status: service.StatusActive,
+	})
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
+	_, err := s.repo.sql.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
+
+	s.Require().NoError(s.repo.ClearError(s.ctx, account.ID))
+
+	s.Require().Empty(cacheRecorder.setAccounts)
+	s.requireNoSchedulerOutbox()
+}
+
+func (s *AccountRepoSuite) TestClearError_UnchangedHonorsCallerTransaction() {
+	client := testEntClient(s.T())
+	account := mustCreateAccount(s.T(), client, &service.Account{
+		Name:   "clear-error-unchanged-tx-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		Status: service.StatusActive,
+	})
+	s.T().Cleanup(func() {
+		_, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background())
+	})
+	cacheRecorder := &schedulerCacheRecorder{}
+	repo := newAccountRepositoryWithSQL(client, integrationDB, cacheRecorder)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+
+	s.Require().NoError(repo.ClearError(txCtx, account.ID))
+	s.Require().NoError(tx.Rollback())
+
+	s.Require().Empty(cacheRecorder.setAccounts)
+}
+
 // --- UpdateSessionWindow ---
+
+func (s *AccountRepoSuite) TestClearModelRateLimit_PublishesOnlyAfterCommit() {
+	client := testEntClient(s.T())
+	account := mustCreateAccount(s.T(), client, &service.Account{
+		Name: "clear-model-rate-limit-transaction-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		Extra: map[string]any{
+			"model_rate_limits": map[string]any{
+				"AICredits": map[string]any{"rate_limit_reset_at": "2099-01-01T00:00:00Z"},
+			},
+		},
+	})
+	s.T().Cleanup(func() { _, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background()) })
+	cacheRecorder := &schedulerCacheRecorder{}
+	repo := newAccountRepositoryWithSQL(client, integrationDB, cacheRecorder)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+
+	s.Require().NoError(repo.ClearModelRateLimit(txCtx, account.ID, "AICredits"))
+	s.Require().Empty(cacheRecorder.setAccounts)
+	s.Require().NoError(tx.Commit())
+
+	s.Require().Len(cacheRecorder.setAccounts, 1)
+	limits, ok := cacheRecorder.setAccounts[0].Extra["model_rate_limits"].(map[string]any)
+	s.Require().True(ok)
+	s.Require().NotContains(limits, "AICredits")
+}
+
+func (s *AccountRepoSuite) TestClearModelRateLimit_PreservesConcurrentScopes() {
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name: "clear-model-rate-limit-scope",
+		Extra: map[string]any{
+			"model_rate_limits": map[string]any{
+				"AICredits": map[string]any{"rate_limit_reset_at": "2099-01-01T00:00:00Z"},
+				"model-a":   map[string]any{"rate_limit_reset_at": "2099-01-02T00:00:00Z"},
+			},
+		},
+	})
+
+	s.Require().NoError(s.repo.ClearModelRateLimit(s.ctx, account.ID, "AICredits"))
+
+	got, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	limits, ok := got.Extra["model_rate_limits"].(map[string]any)
+	s.Require().True(ok)
+	s.Require().NotContains(limits, "AICredits")
+	s.Require().Contains(limits, "model-a")
+}
 
 func (s *AccountRepoSuite) TestUpdateSessionWindow() {
 	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-win"})
@@ -926,6 +2088,146 @@ func (s *AccountRepoSuite) TestUpdateExtra_EmptyUpdates() {
 	s.Require().NoError(s.repo.UpdateExtra(s.ctx, account.ID, map[string]any{}))
 }
 
+func (s *AccountRepoSuite) TestUpdateExtra_UnchangedRuntimeAvoidsRedundantEffects() {
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name: "acc-extra-unchanged-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		Extra: map[string]any{
+			"session_window_utilization": 0.5,
+		},
+	})
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
+	_, err := s.repo.sql.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
+
+	s.Require().NoError(s.repo.UpdateExtra(s.ctx, account.ID, map[string]any{
+		"session_window_utilization": 0.5,
+	}))
+
+	s.Require().Empty(cacheRecorder.setAccounts)
+	s.requireNoSchedulerOutbox()
+}
+
+func (s *AccountRepoSuite) TestUpdateRuntimeExtra_StaleSnapshotIsNoOp() {
+	newer := time.Now().UTC().Truncate(time.Second)
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name: "runtime-extra-stale-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		Extra: map[string]any{
+			"codex_usage_updated_at": newer.Format(time.RFC3339),
+			"codex_5h_used_percent":  20.0,
+		},
+	})
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
+	_, err := s.repo.sql.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
+
+	updated, err := s.repo.UpdateRuntimeExtra(s.ctx, account.ID, map[string]any{
+		"codex_usage_updated_at": newer.Add(-time.Minute).Format(time.RFC3339),
+		"codex_5h_used_percent":  10.0,
+	}, "codex_usage_updated_at", newer.Add(-time.Minute))
+	s.Require().NoError(err)
+	s.Require().False(updated)
+
+	got, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().Equal(20.0, got.Extra["codex_5h_used_percent"])
+	s.Require().Equal(newer.Format(time.RFC3339), got.Extra["codex_usage_updated_at"])
+	s.Require().Empty(cacheRecorder.setAccounts)
+	s.requireNoSchedulerOutbox()
+}
+
+func (s *AccountRepoSuite) TestUpdateRuntimeExtra_PersistsComparedObservationTime() {
+	observedAt := time.Now().UTC().Truncate(time.Microsecond)
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name: "runtime-extra-observation-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		Extra: map[string]any{
+			"passive_usage_sampled_at":     observedAt.Add(-time.Hour).Format(time.RFC3339Nano),
+			"passive_usage_7d_utilization": 0.1,
+		},
+	})
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
+
+	updated, err := s.repo.UpdateRuntimeExtra(s.ctx, account.ID, map[string]any{
+		// A producer cannot weaken the repository watermark by supplying a stale
+		// payload value that differs from the timestamp used for ordering.
+		"passive_usage_sampled_at":     observedAt.Add(-time.Minute).Format(time.RFC3339Nano),
+		"passive_usage_7d_utilization": 0.7,
+	}, "passive_usage_sampled_at", observedAt)
+	s.Require().NoError(err)
+	s.Require().True(updated)
+
+	got, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().Equal(observedAt.Format(time.RFC3339Nano), got.Extra["passive_usage_sampled_at"])
+	s.Require().Equal(0.7, got.Extra["passive_usage_7d_utilization"])
+	s.Require().Len(cacheRecorder.setAccounts, 1)
+}
+
+func (s *AccountRepoSuite) TestUpdateRuntimeExtra_NewerSnapshotPublishesAfterCommit() {
+	older := time.Now().UTC().Add(-time.Minute).Truncate(time.Second)
+	newer := older.Add(time.Minute)
+	client := testEntClient(s.T())
+	account := mustCreateAccount(s.T(), client, &service.Account{
+		Name: "runtime-extra-newer-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		Extra: map[string]any{
+			"passive_usage_sampled_at":     older.Format(time.RFC3339),
+			"passive_usage_7d_utilization": 0.1,
+		},
+	})
+	s.T().Cleanup(func() { _, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background()) })
+	cacheRecorder := &schedulerCacheRecorder{}
+	repo := newAccountRepositoryWithSQL(client, integrationDB, cacheRecorder)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+
+	updated, err := repo.UpdateRuntimeExtra(txCtx, account.ID, map[string]any{
+		"passive_usage_sampled_at":     newer.Format(time.RFC3339),
+		"passive_usage_7d_utilization": 0.7,
+	}, "passive_usage_sampled_at", newer)
+	s.Require().NoError(err)
+	s.Require().True(updated)
+	s.Require().Empty(cacheRecorder.setAccounts)
+	s.Require().NoError(tx.Commit())
+
+	s.Require().Len(cacheRecorder.setAccounts, 1)
+	s.Require().Equal(0.7, cacheRecorder.setAccounts[0].Extra["passive_usage_7d_utilization"])
+}
+
+func (s *AccountRepoSuite) TestUpdateRuntimeExtra_RollbackDoesNotPublishSnapshot() {
+	older := time.Now().UTC().Add(-time.Minute).Truncate(time.Second)
+	newer := older.Add(time.Minute)
+	client := testEntClient(s.T())
+	account := mustCreateAccount(s.T(), client, &service.Account{
+		Name: "runtime-extra-rollback-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		Extra: map[string]any{
+			"passive_usage_sampled_at":     older.Format(time.RFC3339),
+			"passive_usage_7d_utilization": 0.1,
+		},
+	})
+	s.T().Cleanup(func() { _, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background()) })
+	cacheRecorder := &schedulerCacheRecorder{}
+	repo := newAccountRepositoryWithSQL(client, integrationDB, cacheRecorder)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+
+	updated, err := repo.UpdateRuntimeExtra(txCtx, account.ID, map[string]any{
+		"passive_usage_sampled_at":     newer.Format(time.RFC3339),
+		"passive_usage_7d_utilization": 0.7,
+	}, "passive_usage_sampled_at", newer)
+	s.Require().NoError(err)
+	s.Require().True(updated)
+	s.Require().NoError(tx.Rollback())
+
+	s.Require().Empty(cacheRecorder.setAccounts)
+	got, err := repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().Equal(0.1, got.Extra["passive_usage_7d_utilization"])
+}
+
 func (s *AccountRepoSuite) TestUpdateExtra_NilExtra() {
 	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-nil-extra", Extra: nil})
 	s.Require().NoError(s.repo.UpdateExtra(s.ctx, account.ID, map[string]any{"key": "val"}))
@@ -933,6 +2235,88 @@ func (s *AccountRepoSuite) TestUpdateExtra_NilExtra() {
 	got, err := s.repo.GetByID(s.ctx, account.ID)
 	s.Require().NoError(err)
 	s.Require().Equal("val", got.Extra["key"])
+}
+
+func (s *AccountRepoSuite) TestUpdateExtra_UnchangedHonorsCallerTransaction() {
+	client := testEntClient(s.T())
+	account := mustCreateAccount(s.T(), client, &service.Account{
+		Name: "extra-unchanged-transaction-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		Extra: map[string]any{
+			"session_window_utilization": 0.5,
+		},
+	})
+	s.T().Cleanup(func() { _, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background()) })
+	cacheRecorder := &schedulerCacheRecorder{}
+	repo := newAccountRepositoryWithSQL(client, integrationDB, cacheRecorder)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+
+	s.Require().NoError(repo.UpdateExtra(txCtx, account.ID, map[string]any{
+		"session_window_utilization": 0.5,
+	}))
+	s.Require().NoError(tx.Rollback())
+
+	s.Require().Empty(cacheRecorder.setAccounts)
+}
+
+func (s *AccountRepoSuite) TestUpdateExtraNestedBool_UnchangedAvoidsRedundantEffects() {
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name: "nested-extra-unchanged-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		Extra: map[string]any{
+			"openai_responses_supported": true,
+			"openai_responses_supported_by_model": map[string]any{
+				"gpt-5": true,
+			},
+		},
+	})
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
+	_, err := s.repo.sql.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
+
+	s.Require().NoError(s.repo.UpdateExtraNestedBool(
+		s.ctx,
+		account.ID,
+		map[string]any{"openai_responses_supported": true},
+		"openai_responses_supported_by_model",
+		"gpt-5",
+		true,
+	))
+
+	s.Require().Empty(cacheRecorder.setAccounts)
+	s.requireNoSchedulerOutbox()
+}
+
+func (s *AccountRepoSuite) TestUpdateExtraNestedBool_UnchangedHonorsCallerTransaction() {
+	client := testEntClient(s.T())
+	account := mustCreateAccount(s.T(), client, &service.Account{
+		Name: "nested-extra-unchanged-tx-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		Extra: map[string]any{
+			"openai_responses_supported": true,
+			"openai_responses_supported_by_model": map[string]any{
+				"gpt-5": true,
+			},
+		},
+	})
+	s.T().Cleanup(func() { _, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background()) })
+	cacheRecorder := &schedulerCacheRecorder{}
+	repo := newAccountRepositoryWithSQL(client, integrationDB, cacheRecorder)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+
+	s.Require().NoError(repo.UpdateExtraNestedBool(
+		txCtx,
+		account.ID,
+		map[string]any{"openai_responses_supported": true},
+		"openai_responses_supported_by_model",
+		"gpt-5",
+		true,
+	))
+	s.Require().NoError(tx.Rollback())
+
+	s.Require().Empty(cacheRecorder.setAccounts)
 }
 
 func (s *AccountRepoSuite) TestResetOpenAICodexFingerprint_UpdatesOnlyOAuthLikeAccounts() {
@@ -958,6 +2342,79 @@ func (s *AccountRepoSuite) TestResetOpenAICodexFingerprint_UpdatesOnlyOAuthLikeA
 			s.Require().Equal(fingerprint.UAProfile, persisted.UAProfile)
 		})
 	}
+}
+
+func (s *AccountRepoSuite) TestResetOpenAICodexFingerprint_PublishesOnlyAfterCommit() {
+	client := testEntClient(s.T())
+	account := mustCreateAccount(s.T(), client, &service.Account{
+		Name:     "fingerprint-transaction-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		Platform: service.PlatformOpenAI,
+		Type:     service.AccountTypeOAuth,
+	})
+	s.T().Cleanup(func() { _, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background()) })
+	cacheRecorder := &schedulerCacheRecorder{}
+	repo := newAccountRepositoryWithSQL(client, integrationDB, cacheRecorder)
+	fingerprint, _ := service.NormalizeOpenAICodexFingerprint(nil, service.ParseOpenAICodexUAProfile(service.DefaultOpenAICodexUserAgent), time.Now())
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+
+	s.Require().NoError(repo.ResetOpenAICodexFingerprint(txCtx, account.ID, fingerprint))
+	s.Require().Empty(cacheRecorder.setAccounts)
+	s.Require().NoError(tx.Commit())
+
+	s.Require().Len(cacheRecorder.setAccounts, 1)
+	s.Require().Contains(cacheRecorder.setAccounts[0].Extra, service.OpenAICodexFingerprintExtraKey)
+}
+
+func (s *AccountRepoSuite) TestResetOpenAICodexFingerprint_UnchangedAvoidsRedundantSnapshotWrite() {
+	fingerprint, _ := service.NormalizeOpenAICodexFingerprint(
+		nil,
+		service.ParseOpenAICodexUAProfile(service.DefaultOpenAICodexUserAgent),
+		time.Now(),
+	)
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:     "fingerprint-unchanged-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		Platform: service.PlatformOpenAI,
+		Type:     service.AccountTypeOAuth,
+		Extra: map[string]any{
+			service.OpenAICodexFingerprintExtraKey: fingerprint,
+		},
+	})
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
+
+	s.Require().NoError(s.repo.ResetOpenAICodexFingerprint(s.ctx, account.ID, fingerprint))
+
+	s.Require().Empty(cacheRecorder.setAccounts)
+}
+
+func (s *AccountRepoSuite) TestResetOpenAICodexFingerprint_UnchangedHonorsCallerTransaction() {
+	client := testEntClient(s.T())
+	fingerprint, _ := service.NormalizeOpenAICodexFingerprint(
+		nil,
+		service.ParseOpenAICodexUAProfile(service.DefaultOpenAICodexUserAgent),
+		time.Now(),
+	)
+	account := mustCreateAccount(s.T(), client, &service.Account{
+		Name:     "fingerprint-unchanged-tx-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		Platform: service.PlatformOpenAI,
+		Type:     service.AccountTypeOAuth,
+		Extra: map[string]any{
+			service.OpenAICodexFingerprintExtraKey: fingerprint,
+		},
+	})
+	s.T().Cleanup(func() { _, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background()) })
+	cacheRecorder := &schedulerCacheRecorder{}
+	repo := newAccountRepositoryWithSQL(client, integrationDB, cacheRecorder)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+
+	s.Require().NoError(repo.ResetOpenAICodexFingerprint(txCtx, account.ID, fingerprint))
+	s.Require().NoError(tx.Rollback())
+
+	s.Require().Empty(cacheRecorder.setAccounts)
 }
 
 func (s *AccountRepoSuite) TestResetOpenAICodexFingerprint_RejectsAPIKeyAccount() {
@@ -998,7 +2455,7 @@ func (s *AccountRepoSuite) TestEnsureOpenAICodexFingerprint_RejectsNonOAuthLikeA
 				Extra:    map[string]any{"keep": "value"},
 			})
 
-			_, err := s.repo.EnsureOpenAICodexFingerprint(s.ctx, account.ID, fingerprint, false)
+			_, err := s.repo.EnsureOpenAICodexFingerprint(s.ctx, account.ID, fingerprint, nil)
 
 			s.Require().ErrorIs(err, service.ErrAccountNotFound)
 			got, getErr := s.repo.GetByID(s.ctx, account.ID)
@@ -1008,6 +2465,79 @@ func (s *AccountRepoSuite) TestEnsureOpenAICodexFingerprint_RejectsNonOAuthLikeA
 			s.Require().False(ok)
 		})
 	}
+}
+
+func (s *AccountRepoSuite) TestEnsureOpenAICodexFingerprint_ExpectedOldCASPreservesConcurrentCustomWinner() {
+	legacyProfile := service.ParseOpenAICodexUAProfile("codex-tui/0.136.0 (Mac OS 26.5.0; arm64) Apple_Terminal/470.2 (codex-tui; 0.136.0)")
+	legacy, _ := service.NormalizeOpenAICodexFingerprint(nil, legacyProfile, time.Now())
+	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-fingerprint-cas", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Extra: map[string]any{service.OpenAICodexFingerprintExtraKey: legacy}})
+	custom := legacy
+	custom.UAProfile = service.ParseOpenAICodexUAProfile("custom/9 (Custom OS) term (custom; 9)")
+	s.Require().NoError(s.repo.UpdateExtra(s.ctx, account.ID, map[string]any{service.OpenAICodexFingerprintExtraKey: custom}))
+	migrated := legacy
+	migrated.UAProfile = service.ParseOpenAICodexUAProfile(service.DefaultOpenAICodexUserAgent)
+	winner, err := s.repo.EnsureOpenAICodexFingerprint(s.ctx, account.ID, migrated, &legacy)
+	s.Require().NoError(err)
+	s.Require().Equal(custom, winner)
+}
+
+func (s *AccountRepoSuite) TestEnsureOpenAICodexFingerprint_ExpectedOldCASMigratesOnce() {
+	legacy, _ := service.NormalizeOpenAICodexFingerprint(nil, service.ParseOpenAICodexUAProfile("codex-tui/0.136.0 (Mac OS 26.5.0; arm64) Apple_Terminal/470.2 (codex-tui; 0.136.0)"), time.Now())
+	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-fingerprint-migrate", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Extra: map[string]any{service.OpenAICodexFingerprintExtraKey: legacy}})
+	migrated := legacy
+	migrated.UAProfile = service.ParseOpenAICodexUAProfile(service.DefaultOpenAICodexUserAgent)
+	winner, err := s.repo.EnsureOpenAICodexFingerprint(s.ctx, account.ID, migrated, &legacy)
+	s.Require().NoError(err)
+	s.Require().Equal(migrated, winner)
+	winner, err = s.repo.EnsureOpenAICodexFingerprint(s.ctx, account.ID, migrated, &legacy)
+	s.Require().NoError(err)
+	s.Require().Equal(migrated, winner)
+}
+
+func (s *AccountRepoSuite) TestUpdateCredentials_PublishesOnlyAfterCommit() {
+	client := testEntClient(s.T())
+	account := mustCreateAccount(s.T(), client, &service.Account{
+		Name:        "credentials-transaction-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		Credentials: map[string]any{"access_token": "old"},
+	})
+	s.T().Cleanup(func() { _, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background()) })
+	cacheRecorder := &schedulerCacheRecorder{}
+	repo := newAccountRepositoryWithSQL(client, integrationDB, cacheRecorder)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+
+	s.Require().NoError(repo.UpdateCredentials(txCtx, account.ID, map[string]any{"access_token": "new"}))
+	s.Require().Empty(cacheRecorder.setAccounts)
+	s.Require().NoError(tx.Commit())
+
+	s.Require().Len(cacheRecorder.setAccounts, 1)
+	s.Require().Equal("new", cacheRecorder.setAccounts[0].Credentials["access_token"])
+}
+
+func (s *AccountRepoSuite) TestUpdateAuthAndMergeExtra_PublishesOnlyAfterCommit() {
+	client := testEntClient(s.T())
+	account := mustCreateAccount(s.T(), client, &service.Account{
+		Name:        "auth-extra-transaction-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		Platform:    service.PlatformOpenAI,
+		Type:        service.AccountTypeOAuth,
+		Credentials: map[string]any{"access_token": "old"},
+	})
+	s.T().Cleanup(func() { _, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background()) })
+	cacheRecorder := &schedulerCacheRecorder{}
+	repo := newAccountRepositoryWithSQL(client, integrationDB, cacheRecorder)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+
+	s.Require().NoError(repo.UpdateAuthAndMergeExtra(txCtx, account.ID, service.AccountTypeOAuth,
+		map[string]any{"access_token": "new"}, map[string]any{"org_uuid": "org"}, nil))
+	s.Require().Empty(cacheRecorder.setAccounts)
+	s.Require().NoError(tx.Commit())
+
+	s.Require().Len(cacheRecorder.setAccounts, 1)
+	s.Require().Equal("new", cacheRecorder.setAccounts[0].Credentials["access_token"])
+	s.Require().Equal("org", cacheRecorder.setAccounts[0].Extra["org_uuid"])
 }
 
 func (s *AccountRepoSuite) TestUpdateAuthAndMergeExtraPreservesConcurrentExtra() {
@@ -1105,24 +2635,53 @@ func (s *AccountRepoSuite) TestUpdateExtra_ExhaustedCodexSnapshotSyncsSchedulerC
 	s.Require().Equal(100.0, cacheRecorder.setAccounts[0].Extra["codex_7d_used_percent"])
 }
 
-func (s *AccountRepoSuite) TestUpdateExtra_SchedulerRelevantStillEnqueuesOutbox() {
+func (s *AccountRepoSuite) TestUpdateExtra_MixedLifecycleAndRuntimePublishesBothEffects() {
 	account := mustCreateAccount(s.T(), s.client, &service.Account{
 		Name:     "acc-extra-mixed",
-		Platform: service.PlatformAntigravity,
+		Platform: service.PlatformOpenAI,
 		Extra:    map[string]any{},
 	})
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
 	_, err := s.repo.sql.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
 	s.Require().NoError(err)
 
 	s.Require().NoError(s.repo.UpdateExtra(s.ctx, account.ID, map[string]any{
-		"mixed_scheduling":       true,
-		"codex_usage_updated_at": "2026-03-11T10:00:00Z",
+		"openai_compact_supported": true,
+		"codex_usage_updated_at":   "2026-03-11T10:00:00Z",
+		"codex_5h_used_percent":    42.5,
 	}))
 
 	var count int
 	err = scanSingleRow(s.ctx, s.repo.sql, "SELECT COUNT(*) FROM scheduler_outbox", nil, &count)
 	s.Require().NoError(err)
 	s.Require().Equal(1, count)
+	s.Require().Len(cacheRecorder.setAccounts, 1)
+	s.Require().Equal(true, cacheRecorder.setAccounts[0].Extra["openai_compact_supported"])
+	s.Require().Equal("2026-03-11T10:00:00Z", cacheRecorder.setAccounts[0].Extra["codex_usage_updated_at"])
+	s.Require().Equal(42.5, cacheRecorder.setAccounts[0].Extra["codex_5h_used_percent"])
+}
+
+func (s *AccountRepoSuite) TestUpdateExtra_LifecycleOnlyAvoidsDirectSnapshotWrite() {
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:     "acc-extra-lifecycle",
+		Platform: service.PlatformOpenAI,
+		Extra:    map[string]any{},
+	})
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
+	_, err := s.repo.sql.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
+
+	s.Require().NoError(s.repo.UpdateExtra(s.ctx, account.ID, map[string]any{
+		"openai_compact_supported": true,
+	}))
+
+	var count int
+	err = scanSingleRow(s.ctx, s.repo.sql, "SELECT COUNT(*) FROM scheduler_outbox", nil, &count)
+	s.Require().NoError(err)
+	s.Require().Equal(1, count)
+	s.Require().Empty(cacheRecorder.setAccounts)
 }
 
 // --- GetByCRSAccountID ---
@@ -1169,6 +2728,66 @@ func (s *AccountRepoSuite) TestBulkUpdate() {
 	got2, _ := s.repo.GetByID(s.ctx, a2.ID)
 	s.Require().Equal(99, got1.Priority)
 	s.Require().Equal(99, got2.Priority)
+}
+
+func (s *AccountRepoSuite) TestIncrementQuotaUsed_RollbackKeepsUsageAndOutboxAtomic() {
+	client := testEntClient(s.T())
+	account := mustCreateAccount(s.T(), client, &service.Account{
+		Name: "increment-quota-rollback-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		Extra: map[string]any{
+			"quota_limit": 10.0,
+			"quota_used":  9.0,
+		},
+	})
+	s.T().Cleanup(func() {
+		_, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background())
+	})
+	repo := newAccountRepositoryWithSQL(client, integrationDB, nil)
+	_, err := integrationDB.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+
+	s.Require().NoError(repo.IncrementQuotaUsed(txCtx, account.ID, 1))
+	s.Require().NoError(tx.Rollback())
+
+	got, err := repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().Equal(9.0, got.Extra["quota_used"])
+	var outboxCount int
+	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, "SELECT count(*) FROM scheduler_outbox").Scan(&outboxCount))
+	s.Require().Zero(outboxCount)
+}
+
+func (s *AccountRepoSuite) TestResetQuotaUsed_RollbackKeepsUsageAndOutboxAtomic() {
+	client := testEntClient(s.T())
+	account := mustCreateAccount(s.T(), client, &service.Account{
+		Name: "reset-quota-rollback-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		Extra: map[string]any{
+			"quota_limit": 10.0,
+			"quota_used":  10.0,
+		},
+	})
+	s.T().Cleanup(func() {
+		_, _ = client.Account.Delete().Where(dbaccount.IDEQ(account.ID)).Exec(context.Background())
+	})
+	repo := newAccountRepositoryWithSQL(client, integrationDB, nil)
+	_, err := integrationDB.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
+	tx, err := client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+
+	s.Require().NoError(repo.ResetQuotaUsed(txCtx, account.ID))
+	s.Require().NoError(tx.Rollback())
+
+	got, err := repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().Equal(10.0, got.Extra["quota_used"])
+	var outboxCount int
+	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, "SELECT count(*) FROM scheduler_outbox").Scan(&outboxCount))
+	s.Require().Zero(outboxCount)
 }
 
 func (s *AccountRepoSuite) TestBulkUpdate_MergeCredentials() {

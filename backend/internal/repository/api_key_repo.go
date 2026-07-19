@@ -250,82 +250,191 @@ func (r *apiKeyRepository) GetByKeyForAuth(ctx context.Context, key string) (*se
 	return apiKeyEntityToService(m), nil
 }
 
-func (r *apiKeyRepository) Update(ctx context.Context, key *service.APIKey) error {
-	// 使用原子操作：将软删除检查与更新合并到同一语句，避免竞态条件。
-	// 之前的实现先检查 Exist 再 UpdateOneID，若在两步之间发生软删除，
-	// 则会更新已删除的记录。
-	// 这里选择 Update().Where()，确保只有未软删除记录能被更新。
-	// 同时显式设置 updated_at，避免二次查询带来的并发可见性问题。
-	client := clientFromContext(ctx, r.client)
-	now := time.Now()
-	builder := client.APIKey.Update().
-		Where(apikey.IDEQ(key.ID), apikey.DeletedAtIsNil()).
-		SetName(key.Name).
-		SetStatus(key.Status).
-		SetQuota(key.Quota).
-		SetQuotaUsed(key.QuotaUsed).
-		SetRateLimit5h(key.RateLimit5h).
-		SetRateLimit1d(key.RateLimit1d).
-		SetRateLimit7d(key.RateLimit7d).
-		SetUsage5h(key.Usage5h).
-		SetUsage1d(key.Usage1d).
-		SetUsage7d(key.Usage7d).
-		SetOpenaiForcePriorityTier(key.OpenAIForcePriorityTier).
-		SetUpdatedAt(now)
-	if key.GroupID != nil {
-		builder.SetGroupID(*key.GroupID)
-	} else {
-		builder.ClearGroupID()
-	}
+func (r *apiKeyRepository) UpdateConfig(ctx context.Context, id, expectedUserID int64, patch service.APIKeyConfigPatch) (*service.APIKey, error) {
+	var result *service.APIKey
+	err := r.withAPIKeyTx(ctx, func(opCtx context.Context, client *dbent.Client) error {
+		q := client.APIKey.Query().Where(apikey.IDEQ(id), apikey.UserIDEQ(expectedUserID), apikey.DeletedAtIsNil())
+		if client.Driver().Dialect() == dialect.Postgres {
+			q.ForUpdate()
+		}
+		current, err := q.Only(opCtx)
+		if dbent.IsNotFound(err) {
+			return service.ErrAPIKeyNotFound
+		}
+		if err != nil {
+			return err
+		}
+		b := current.Update().SetUpdatedAt(time.Now())
+		if patch.Name != nil {
+			b.SetName(*patch.Name)
+		}
+		if patch.GroupID != nil {
+			if *patch.GroupID == nil {
+				b.ClearGroupID()
+			} else {
+				b.SetGroupID(**patch.GroupID)
+			}
+		}
+		if patch.Quota != nil {
+			b.SetQuota(*patch.Quota)
+		}
+		if patch.ExpiresAt != nil {
+			if *patch.ExpiresAt == nil {
+				b.ClearExpiresAt()
+			} else {
+				b.SetExpiresAt(**patch.ExpiresAt)
+			}
+		}
+		if patch.IPWhitelist != nil {
+			if len(*patch.IPWhitelist) == 0 {
+				b.ClearIPWhitelist()
+			} else {
+				b.SetIPWhitelist(*patch.IPWhitelist)
+			}
+		}
+		if patch.IPBlacklist != nil {
+			if len(*patch.IPBlacklist) == 0 {
+				b.ClearIPBlacklist()
+			} else {
+				b.SetIPBlacklist(*patch.IPBlacklist)
+			}
+		}
+		if patch.RateLimit5h != nil {
+			b.SetRateLimit5h(*patch.RateLimit5h)
+		}
+		if patch.RateLimit1d != nil {
+			b.SetRateLimit1d(*patch.RateLimit1d)
+		}
+		if patch.RateLimit7d != nil {
+			b.SetRateLimit7d(*patch.RateLimit7d)
+		}
+		if patch.OpenAIForcePriorityTier != nil {
+			b.SetOpenaiForcePriorityTier(*patch.OpenAIForcePriorityTier)
+		}
+		if patch.Status != nil {
+			current.Status = *patch.Status
+		}
+		if patch.ResetQuota {
+			b.SetQuotaUsed(0)
+			current.QuotaUsed = 0
+		}
+		if patch.ResetRateLimitUsage {
+			b.SetUsage5h(0).SetUsage1d(0).SetUsage7d(0).ClearWindow5hStart().ClearWindow1dStart().ClearWindow7dStart()
+		}
+		if patch.Quota != nil {
+			current.Quota = *patch.Quota
+		}
+		if patch.ExpiresAt != nil {
+			current.ExpiresAt = *patch.ExpiresAt
+		}
+		status := current.Status
+		managedStatus := status == service.StatusAPIKeyActive || status == "inactive" || status == service.StatusAPIKeyExpired || status == service.StatusAPIKeyQuotaExhausted
+		if !managedStatus {
+			// Preserve disabled and administrator-defined statuses exactly as
+			// reconcileAPIKeyTerminalStatus does at the service boundary.
+		} else if current.ExpiresAt != nil && !current.ExpiresAt.After(time.Now()) {
+			status = service.StatusAPIKeyExpired
+		} else if current.Quota > 0 && current.QuotaUsed >= current.Quota {
+			status = service.StatusAPIKeyQuotaExhausted
+		} else if patch.Status != nil && (*patch.Status == service.StatusAPIKeyDisabled || *patch.Status == "inactive") {
+			status = *patch.Status
+		} else if patch.Status != nil || current.Status == service.StatusAPIKeyExpired || current.Status == service.StatusAPIKeyQuotaExhausted {
+			status = service.StatusAPIKeyActive
+		}
+		b.SetStatus(status)
+		if _, err := b.Save(opCtx); err != nil {
+			return err
+		}
+		result, err = loadAPIKeyResponseView(opCtx, client, id)
+		if err != nil {
+			return err
+		}
+		return nil
+	})
+	return result, err
+}
 
-	// Expiration time
-	if key.ExpiresAt != nil {
-		builder.SetExpiresAt(*key.ExpiresAt)
-	} else {
-		builder.ClearExpiresAt()
-	}
+func (r *apiKeyRepository) UpdateGroupID(ctx context.Context, id int64, groupID *int64) (*service.APIKey, error) {
+	var result *service.APIKey
+	err := r.withAPIKeyTx(ctx, func(opCtx context.Context, client *dbent.Client) error {
+		b := client.APIKey.UpdateOneID(id).Where(apikey.DeletedAtIsNil()).SetUpdatedAt(time.Now())
+		if groupID == nil {
+			b.ClearGroupID()
+		} else {
+			b.SetGroupID(*groupID)
+		}
+		if _, err := b.Save(opCtx); err != nil {
+			if dbent.IsNotFound(err) {
+				return service.ErrAPIKeyNotFound
+			}
+			return err
+		}
+		var err error
+		result, err = loadAPIKeyResponseView(opCtx, client, id)
+		return err
+	})
+	return result, err
+}
 
-	// Rate limit window start times
-	if key.Window5hStart != nil {
-		builder.SetWindow5hStart(*key.Window5hStart)
-	} else {
-		builder.ClearWindow5hStart()
-	}
-	if key.Window1dStart != nil {
-		builder.SetWindow1dStart(*key.Window1dStart)
-	} else {
-		builder.ClearWindow1dStart()
-	}
-	if key.Window7dStart != nil {
-		builder.SetWindow7dStart(*key.Window7dStart)
-	} else {
-		builder.ClearWindow7dStart()
-	}
+func (r *apiKeyRepository) ResetRateLimitUsage(ctx context.Context, id int64) (*service.APIKey, error) {
+	var result *service.APIKey
+	err := r.withAPIKeyTx(ctx, func(opCtx context.Context, client *dbent.Client) error {
+		_, err := client.APIKey.UpdateOneID(id).Where(apikey.DeletedAtIsNil()).
+			SetUsage5h(0).SetUsage1d(0).SetUsage7d(0).
+			ClearWindow5hStart().ClearWindow1dStart().ClearWindow7dStart().SetUpdatedAt(time.Now()).Save(opCtx)
+		if dbent.IsNotFound(err) {
+			return service.ErrAPIKeyNotFound
+		}
+		if err != nil {
+			return err
+		}
+		result, err = loadAPIKeyResponseView(opCtx, client, id)
+		return err
+	})
+	return result, err
+}
 
-	// IP 限制字段
-	if len(key.IPWhitelist) > 0 {
-		builder.SetIPWhitelist(key.IPWhitelist)
-	} else {
-		builder.ClearIPWhitelist()
+// loadAPIKeyResponseView materializes the scalar row and response edges from one
+// transaction. Callers keep the row's update lock until this view is loaded.
+func loadAPIKeyResponseView(ctx context.Context, client *dbent.Client, id int64) (*service.APIKey, error) {
+	m, err := client.APIKey.Query().
+		Where(apikey.IDEQ(id), apikey.DeletedAtIsNil()).
+		WithUser().
+		WithGroup().
+		Only(ctx)
+	if dbent.IsNotFound(err) {
+		return nil, service.ErrAPIKeyNotFound
 	}
-	if len(key.IPBlacklist) > 0 {
-		builder.SetIPBlacklist(key.IPBlacklist)
-	} else {
-		builder.ClearIPBlacklist()
+	if err != nil {
+		return nil, err
 	}
+	return apiKeyEntityToService(m), nil
+}
 
-	affected, err := builder.Save(ctx)
+func (r *apiKeyRepository) withAPIKeyTx(ctx context.Context, fn func(context.Context, *dbent.Client) error) error {
+	if tx := dbent.TxFromContext(ctx); tx != nil {
+		return fn(ctx, tx.Client())
+	}
+	tx, err := r.client.Tx(ctx)
+	if errors.Is(err, dbent.ErrTxStarted) {
+		return fn(ctx, r.client)
+	}
 	if err != nil {
 		return err
 	}
-	if affected == 0 {
-		// 更新影响行数为 0，说明记录不存在或已被软删除。
-		return service.ErrAPIKeyNotFound
+	defer func() { _ = tx.Rollback() }()
+	opCtx := dbent.NewTxContext(ctx, tx)
+	if err := fn(opCtx, tx.Client()); err != nil {
+		return err
 	}
+	return tx.Commit()
+}
 
-	// 使用同一时间戳回填，避免并发删除导致二次查询失败。
-	key.UpdatedAt = now
-	return nil
+func (r *apiKeyRepository) sqlFromContext(ctx context.Context) sqlExecutor {
+	if tx := dbent.TxFromContext(ctx); tx != nil {
+		return tx.Client()
+	}
+	return r.sql
 }
 
 func (r *apiKeyRepository) Delete(ctx context.Context, id int64) error {
@@ -750,7 +859,7 @@ func (r *apiKeyRepository) IncrementQuotaUsedAndGetState(ctx context.Context, id
 	`
 
 	state := &service.APIKeyQuotaUsageState{}
-	if err := scanSingleRow(ctx, r.sql, query, []any{amount, service.StatusAPIKeyQuotaExhausted, id}, &state.QuotaUsed, &state.Quota, &state.Key, &state.Status); err != nil {
+	if err := scanSingleRow(ctx, r.sqlFromContext(ctx), query, []any{amount, service.StatusAPIKeyQuotaExhausted, id}, &state.QuotaUsed, &state.Quota, &state.Key, &state.Status); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, service.ErrAPIKeyNotFound
 		}
@@ -777,7 +886,7 @@ func (r *apiKeyRepository) UpdateLastUsed(ctx context.Context, id int64, usedAt 
 // IncrementRateLimitUsage atomically increments all rate limit usage counters and initializes
 // window start times via COALESCE if not already set.
 func (r *apiKeyRepository) IncrementRateLimitUsage(ctx context.Context, id int64, cost float64) error {
-	_, err := r.sql.ExecContext(ctx, `
+	_, err := r.sqlFromContext(ctx).ExecContext(ctx, `
 		UPDATE api_keys SET
 			usage_5h = CASE WHEN window_5h_start IS NOT NULL AND window_5h_start + INTERVAL '5 hours' <= NOW() THEN $1 ELSE usage_5h + $1 END,
 			usage_1d = CASE WHEN window_1d_start IS NOT NULL AND window_1d_start + INTERVAL '24 hours' <= NOW() THEN $1 ELSE usage_1d + $1 END,
@@ -793,7 +902,7 @@ func (r *apiKeyRepository) IncrementRateLimitUsage(ctx context.Context, id int64
 
 // ResetRateLimitWindows resets expired rate limit windows atomically.
 func (r *apiKeyRepository) ResetRateLimitWindows(ctx context.Context, id int64) error {
-	_, err := r.sql.ExecContext(ctx, `
+	_, err := r.sqlFromContext(ctx).ExecContext(ctx, `
 		UPDATE api_keys SET
 			usage_5h = CASE WHEN window_5h_start IS NOT NULL AND window_5h_start + INTERVAL '5 hours' <= NOW() THEN 0 ELSE usage_5h END,
 			window_5h_start = CASE WHEN window_5h_start IS NOT NULL AND window_5h_start + INTERVAL '5 hours' <= NOW() THEN NOW() ELSE window_5h_start END,
@@ -809,7 +918,7 @@ func (r *apiKeyRepository) ResetRateLimitWindows(ctx context.Context, id int64) 
 
 // GetRateLimitData returns the current rate limit usage and window start times for an API key.
 func (r *apiKeyRepository) GetRateLimitData(ctx context.Context, id int64) (result *service.APIKeyRateLimitData, err error) {
-	rows, err := r.sql.QueryContext(ctx, `
+	rows, err := r.sqlFromContext(ctx).QueryContext(ctx, `
 		SELECT usage_5h, usage_1d, usage_7d, window_5h_start, window_1d_start, window_7d_start
 		FROM api_keys
 		WHERE id = $1 AND deleted_at IS NULL`,

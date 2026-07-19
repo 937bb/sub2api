@@ -63,6 +63,93 @@ func newTestContext() (*gin.Context, *httptest.ResponseRecorder) {
 	return c, rec
 }
 
+func TestAccountTestService_OpenAIProbeModelNormalizationBoundaries(t *testing.T) {
+	tests := []struct {
+		name           string
+		accountType    string
+		model          string
+		modelMapping   map[string]any
+		wantUpstream   string
+		wantEventModel string
+	}{
+		{
+			name:           "oauth alias",
+			accountType:    AccountTypeOAuth,
+			model:          "gpt-5.6",
+			wantUpstream:   "gpt-5.6-sol",
+			wantEventModel: "gpt-5.6",
+		},
+		{
+			name:           "setup token alias",
+			accountType:    AccountTypeSetupToken,
+			model:          "gpt-5.6",
+			wantUpstream:   "gpt-5.6-sol",
+			wantEventModel: "gpt-5.6",
+		},
+		{
+			name:           "oauth account mapping before normalization",
+			accountType:    AccountTypeOAuth,
+			model:          "client-gpt",
+			modelMapping:   map[string]any{"client-gpt": "gpt-5.6"},
+			wantUpstream:   "gpt-5.6-sol",
+			wantEventModel: "gpt-5.6",
+		},
+		{
+			name:           "oauth already upstream",
+			accountType:    AccountTypeOAuth,
+			model:          "gpt-5.6-sol",
+			wantUpstream:   "gpt-5.6-sol",
+			wantEventModel: "gpt-5.6-sol",
+		},
+		{
+			name:           "api key alias remains unchanged",
+			accountType:    AccountTypeAPIKey,
+			model:          "gpt-5.6",
+			wantUpstream:   "gpt-5.6",
+			wantEventModel: "gpt-5.6",
+		},
+		{
+			name:           "oauth unknown model remains unchanged",
+			accountType:    AccountTypeOAuth,
+			model:          "future-model",
+			wantUpstream:   "future-model",
+			wantEventModel: "future-model",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, recorder := newTestContext()
+			resp := newJSONResponse(http.StatusOK, "")
+			resp.Body = io.NopCloser(strings.NewReader("data: {\"type\":\"response.completed\"}\n\n"))
+			upstream := &queuedHTTPUpstream{responses: []*http.Response{resp}}
+			svc := &AccountTestService{
+				httpUpstream: upstream,
+				cfg:          &config.Config{Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}}},
+			}
+			account := &Account{
+				ID:          90,
+				Platform:    PlatformOpenAI,
+				Type:        tt.accountType,
+				Concurrency: 1,
+				Credentials: map[string]any{
+					"access_token":  "test-token",
+					"api_key":       "sk-test",
+					"base_url":      "https://upstream.example",
+					"model_mapping": tt.modelMapping,
+				},
+			}
+
+			require.NoError(t, svc.testOpenAIAccountConnection(ctx, account, tt.model, "", ""))
+			require.Len(t, upstream.requests, 1)
+			body := readTestRequestBody(t, upstream.requests[0])
+			require.Equal(t, tt.wantUpstream, gjson.GetBytes(body, "model").String())
+			require.Contains(t, recorder.Body.String(), `"type":"test_start"`)
+			require.Contains(t, recorder.Body.String(), `"model":"`+tt.wantEventModel+`"`)
+		})
+	}
+}
+
 type openAIAccountNestedBoolUpdate struct {
 	updates   map[string]any
 	mapKey    string
@@ -73,6 +160,9 @@ type openAIAccountNestedBoolUpdate struct {
 type openAIAccountTestRepo struct {
 	mockAccountRepoForGemini
 	updatedExtra       map[string]any
+	observedAtKey      string
+	observedAt         time.Time
+	sessionWindowEnd   *time.Time
 	nestedBoolUpdates  []openAIAccountNestedBoolUpdate
 	updateExtraErr     error
 	updateExtraErrFor  func(map[string]any) error
@@ -95,6 +185,26 @@ func (r *openAIAccountTestRepo) UpdateExtra(_ context.Context, _ int64, updates 
 	if r.updateExtraErr != nil {
 		return r.updateExtraErr
 	}
+	return nil
+}
+
+func (r *openAIAccountTestRepo) UpdateRuntimeExtra(_ context.Context, _ int64, updates map[string]any, observedAtKey string, observedAt time.Time) (bool, error) {
+	r.updatedExtra = updates
+	r.observedAtKey = observedAtKey
+	r.observedAt = observedAt
+	if r.updateExtraErrFor != nil {
+		if err := r.updateExtraErrFor(updates); err != nil {
+			return false, err
+		}
+	}
+	if r.updateExtraErr != nil {
+		return false, r.updateExtraErr
+	}
+	return true, nil
+}
+
+func (r *openAIAccountTestRepo) UpdateSessionWindowEnd(_ context.Context, _ int64, end time.Time) error {
+	r.sessionWindowEnd = &end
 	return nil
 }
 
@@ -163,6 +273,7 @@ func TestProbeOpenAIAPIKeyResponsesSupportDefaultProbeWritesAccountMarkerOnly(t 
 	require.Equal(t, map[string]any{openai_compat.ExtraKeyResponsesSupported: false}, repo.updatedExtra)
 	require.Len(t, upstream.requests, 1)
 	require.Equal(t, "https://upstream.example/v1/responses", upstream.requests[0].URL.String())
+	require.Empty(t, upstream.requests[0].Header.Get("x-openai-fedramp"))
 	require.Equal(t, openai.DefaultTestModel, gjson.GetBytes(readTestRequestBody(t, upstream.requests[0]), "model").String())
 }
 
@@ -268,6 +379,14 @@ func TestAccountTestService_OpenAISuccessPersistsSnapshotFromHeaders(t *testing.
 	require.NotEmpty(t, repo.updatedExtra)
 	require.Equal(t, 42.0, repo.updatedExtra["codex_5h_used_percent"])
 	require.Equal(t, 88.0, repo.updatedExtra["codex_7d_used_percent"])
+	require.Equal(t, "codex_usage_updated_at", repo.observedAtKey)
+	parsed, err := runtimeExtraObservedAt(repo.updatedExtra, repo.observedAtKey)
+	require.NoError(t, err)
+	require.Equal(t, parsed, repo.observedAt)
+	require.NotNil(t, repo.sessionWindowEnd)
+	resetAt, err := parseTime(repo.updatedExtra["codex_5h_reset_at"].(string))
+	require.NoError(t, err)
+	require.Equal(t, resetAt, *repo.sessionWindowEnd)
 	require.Contains(t, recorder.Body.String(), "test_complete")
 }
 
@@ -316,7 +435,7 @@ func TestAccountTestService_OpenAIErrorSanitizesOAuthUpstreamBody(t *testing.T) 
 	installationID := "550e8400-e29b-41d4-a716-446655440000"
 	threadID := "018fed75-1b7e-7000-8000-000000000123"
 	accessToken := "setup-secret-access-token"
-	resp := newJSONResponse(http.StatusUnauthorized, fmt.Sprintf(`{"error":{"message":"bad auth x-codex-installation-id=%s thread-id=%s Authorization=Bearer %s"},"raw":{"x-codex-installation-id":"%s","thread-id":"%s","authorization":"Bearer %s"}}`, installationID, threadID, accessToken, installationID, threadID, accessToken))
+	resp := newJSONResponse(http.StatusUnauthorized, fmt.Sprintf(`{"error":{"message":"bad auth x-codex-installation-id=%s thread-id=%s Authorization=Bearer %s x-openai-fedramp=true {\"x-openai-fedramp\":true}"},"raw":{"x-codex-installation-id":"%s","thread-id":"%s","authorization":"Bearer %s"}}`, installationID, threadID, accessToken, installationID, threadID, accessToken))
 
 	repo := &openAIAccountTestRepo{}
 	upstream := &queuedHTTPUpstream{responses: []*http.Response{resp}}
@@ -334,13 +453,17 @@ func TestAccountTestService_OpenAIErrorSanitizesOAuthUpstreamBody(t *testing.T) 
 	output := recorder.Body.String()
 	require.Contains(t, output, "API returned 401")
 	require.Contains(t, repo.setErrorMsg, "Authentication failed (401)")
-	for _, leaked := range []string{installationID, threadID, accessToken, "setup-secret"} {
+	for _, leaked := range []string{installationID, threadID, accessToken, "setup-secret", "x-openai-fedramp=true", `"x-openai-fedramp":true`, `\"x-openai-fedramp\":true`} {
 		require.NotContains(t, output, leaked)
 		require.NotContains(t, repo.setErrorMsg, leaked)
 	}
 	require.Contains(t, output, "x-codex-installation-id=[redacted]")
 	require.Contains(t, output, "thread-id=[redacted]")
+	require.Contains(t, output, "x-openai-fedramp=[redacted]")
+	require.Contains(t, output, `\"x-openai-fedramp\":\"[redacted]\"`)
 	require.Contains(t, repo.setErrorMsg, "Authorization=[redacted]")
+	require.Contains(t, repo.setErrorMsg, "x-openai-fedramp=[redacted]")
+	require.Contains(t, repo.setErrorMsg, `"x-openai-fedramp":"[redacted]"`)
 }
 
 func TestAccountTestService_OpenAIPATWorkspace403MarksError(t *testing.T) {
@@ -416,8 +539,9 @@ func TestAccountTestService_OpenAIOAuthProbeSendsCodexFingerprint(t *testing.T) 
 		Type:        AccountTypeOAuth,
 		Concurrency: 1,
 		Credentials: map[string]any{
-			"access_token":       "test-token",
-			"chatgpt_account_id": "chatgpt-acc",
+			"access_token":               "test-token",
+			"chatgpt_account_id":         "chatgpt-acc",
+			"chatgpt_account_is_fedramp": true,
 		},
 	}
 
@@ -430,6 +554,7 @@ func TestAccountTestService_OpenAIOAuthProbeSendsCodexFingerprint(t *testing.T) 
 	require.Equal(t, codexCLIUserAgent, upstream.lastReq.Header.Get("User-Agent"))
 	require.Equal(t, codexCLIVersion, upstream.lastReq.Header.Get("Version"))
 	require.Equal(t, "chatgpt-acc", upstream.lastReq.Header.Get("chatgpt-account-id"))
+	require.Equal(t, "true", upstream.lastReq.Header.Get("x-openai-fedramp"))
 	require.NotEmpty(t, upstream.lastReq.Header.Get(openAICodexSessionIDHeader))
 	require.NotEmpty(t, upstream.lastReq.Header.Get(openAICodexThreadIDHeader))
 	require.NotEmpty(t, upstream.lastReq.Header.Get(openAICodexClientRequestIDHeader))
@@ -442,6 +567,36 @@ func TestAccountTestService_OpenAIOAuthProbeSendsCodexFingerprint(t *testing.T) 
 	require.Equal(t, upstream.lastReq.Header.Get(openAICodexInstallationIDHeader), gjson.GetBytes(upstream.lastBody, "client_metadata.x-codex-installation-id").String())
 	// Codex HTTP 不在 client_metadata 中放 x-codex-window-id，仅放在 HTTP header。
 	require.False(t, gjson.GetBytes(upstream.lastBody, "client_metadata.x-codex-window-id").Exists())
+}
+
+func TestAccountTestService_OpenAIOAuthProbeOmitsFedRAMPHeaderWhenAccountMetadataFalse(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := newTestContext()
+
+	resp := newJSONResponse(http.StatusOK, "")
+	resp.Body = io.NopCloser(strings.NewReader(`data: {"type":"response.completed"}
+
+`))
+
+	upstream := &httpUpstreamRecorder{resp: resp}
+	svc := &AccountTestService{httpUpstream: upstream}
+	account := &Account{
+		ID:          925,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"access_token":               "test-token",
+			"chatgpt_account_id":         "chatgpt-acc",
+			"chatgpt_account_is_fedramp": false,
+		},
+	}
+
+	err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.4", "", "")
+	require.NoError(t, err)
+	require.NotNil(t, upstream.lastReq)
+	require.Equal(t, "chatgpt-acc", upstream.lastReq.Header.Get("chatgpt-account-id"))
+	require.Empty(t, upstream.lastReq.Header.Get("x-openai-fedramp"))
 }
 
 func TestAccountTestService_OpenAIOAuthProbeIDsAreAccountScoped(t *testing.T) {
@@ -728,6 +883,7 @@ func TestAccountTestService_OpenAIAPIKeyResponsesUnsupportedUsesChatCompletionsP
 	require.Equal(t, "https://compat-upstream.example/v1/chat/completions", upstream.lastReq.URL.String())
 	require.Equal(t, "Bearer sk-test", upstream.lastReq.Header.Get("Authorization"))
 	require.Equal(t, "text/event-stream", upstream.lastReq.Header.Get("Accept"))
+	require.Empty(t, upstream.lastReq.Header.Get("x-openai-fedramp"))
 	require.Equal(t, "gpt-5.4", gjson.GetBytes(upstream.lastBody, "model").String())
 	require.True(t, gjson.GetBytes(upstream.lastBody, "stream").Bool())
 	require.Equal(t, "hello", gjson.GetBytes(upstream.lastBody, "messages.0.content").String())

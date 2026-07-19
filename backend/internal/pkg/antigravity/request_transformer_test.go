@@ -376,6 +376,82 @@ func TestBuildGenerationConfig_ThinkingDynamicBudget(t *testing.T) {
 	}
 }
 
+func TestBuildGenerationConfig_RestrictedGeminiArguments(t *testing.T) {
+	temperature := 0.7
+	topP := 0.8
+	topK := 32
+
+	for _, model := range []string{
+		"gemini-2.5-flash-thinking",
+		"gemini-3-pro-high",
+		"gemini-3.1-pro-high",
+		"gemini-3-pro-preview",
+	} {
+		t.Run(model, func(t *testing.T) {
+			cfg := buildGenerationConfig(&ClaudeRequest{
+				Model: model, Temperature: &temperature, TopP: &topP, TopK: &topK,
+			})
+			require.Nil(t, cfg.StopSequences)
+			require.Nil(t, cfg.Temperature)
+			require.Nil(t, cfg.TopP)
+			require.Nil(t, cfg.TopK)
+		})
+	}
+
+	t.Run("ordinary and near-match models preserve arguments", func(t *testing.T) {
+		for _, model := range []string{"gemini-3-flash", "vendor-gemini-3-pro-high-copy"} {
+			cfg := buildGenerationConfig(&ClaudeRequest{
+				Model: model, Temperature: &temperature, TopP: &topP, TopK: &topK,
+			})
+			require.Equal(t, DefaultStopSequences, cfg.StopSequences)
+			require.Equal(t, temperature, *cfg.Temperature)
+			require.Equal(t, topP, *cfg.TopP)
+			require.Equal(t, topK, *cfg.TopK)
+		}
+	})
+}
+
+func TestTransformClaudeToGeminiWithOptions_RestrictedArgumentsUseMappedTarget(t *testing.T) {
+	transform := func(t *testing.T, mappedModel string, tools []ClaudeTool) V1InternalRequest {
+		t.Helper()
+		temperature := 0.7
+		body, err := TransformClaudeToGeminiWithOptions(&ClaudeRequest{
+			Model:       "client-alias",
+			Temperature: &temperature,
+			Messages: []ClaudeMessage{{
+				Role: "user", Content: json.RawMessage(`[{"type":"text","text":"hello"}]`),
+			}},
+			Tools: tools,
+		}, "project-1", mappedModel, DefaultTransformOptions())
+		require.NoError(t, err)
+		var got V1InternalRequest
+		require.NoError(t, json.Unmarshal(body, &got))
+		return got
+	}
+
+	t.Run("mapped restricted target omits empty tool config and sampling", func(t *testing.T) {
+		got := transform(t, "gemini-3.1-pro-high", nil)
+		require.Nil(t, got.Request.ToolConfig)
+		require.Nil(t, got.Request.GenerationConfig.Temperature)
+		require.Nil(t, got.Request.GenerationConfig.StopSequences)
+	})
+
+	t.Run("restricted target keeps tool config when tools exist", func(t *testing.T) {
+		got := transform(t, "gemini-3.1-pro-high", []ClaudeTool{{
+			Name: "lookup", InputSchema: map[string]any{"type": "object"},
+		}})
+		require.NotNil(t, got.Request.ToolConfig)
+		require.NotEmpty(t, got.Request.Tools)
+	})
+
+	t.Run("ordinary target preserves existing behavior", func(t *testing.T) {
+		got := transform(t, "gemini-3-flash", nil)
+		require.NotNil(t, got.Request.ToolConfig)
+		require.NotNil(t, got.Request.GenerationConfig.Temperature)
+		require.Equal(t, DefaultStopSequences, got.Request.GenerationConfig.StopSequences)
+	})
+}
+
 func TestTransformClaudeToGeminiWithOptions_PreservesBillingHeaderSystemBlock(t *testing.T) {
 	tests := []struct {
 		name   string

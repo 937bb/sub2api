@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
+	openaipkg "github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -166,6 +168,48 @@ func TestOpenAIGatewayService_ForwardOAuthHTTPAllowlistPreservesRawNumbersAfterC
 	require.False(t, gjson.GetBytes(upstream.lastBody, "unknown_field").Exists())
 }
 
+func TestOpenAIGatewayService_OAuthHTTPResponsesInstructions(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	tests := []struct {
+		name             string
+		body             []byte
+		wantInstructions string
+	}{
+		{
+			name:             "empty native responses uses model aware synthetic default",
+			body:             []byte(`{"model":"gpt-5.5","stream":false,"store":true,"input":[{"type":"text","text":"hi"}]}`),
+			wantInstructions: openaipkg.CodexSyntheticDefaultInstructionsForModel("gpt-5.5"),
+		},
+		{
+			name:             "explicit native responses instructions preserved",
+			body:             []byte(`{"model":"gpt-5.5","stream":false,"store":true,"instructions":"  keep these exact instructions  ","input":[{"type":"text","text":"hi"}]}`),
+			wantInstructions: "  keep these exact instructions  ",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(tt.body))
+			c.Request.Header.Set("Content-Type", "application/json")
+			c.Request.Header.Set("User-Agent", "codex_cli_rs/0.98.0")
+
+			upstream := &httpUpstreamRecorder{resp: &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}, "x-request-id": []string{"rid-instructions"}},
+				Body:       io.NopCloser(strings.NewReader(`{"id":"resp_instructions","status":"completed","model":"gpt-5.5","output":[],"usage":{"input_tokens":1,"output_tokens":1}}`)),
+			}}
+			svc := &OpenAIGatewayService{httpUpstream: upstream}
+
+			_, err := svc.Forward(context.Background(), c, httptestOpenAIOAuthBodyPolicyAccount(), tt.body)
+			require.NoError(t, err)
+			require.Equal(t, tt.wantInstructions, gjson.GetBytes(upstream.lastBody, "instructions").String())
+		})
+	}
+}
+
 func TestOpenAIGatewayService_ForwardOAuthHTTPRejectsMalformedJSONBeforeUpstream(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	body := []byte(`{"model":"gpt-5.4","input":"hello"} trailing`)
@@ -276,7 +320,7 @@ func TestOpenAIGatewayService_ForwardChatCompletionsOAuthResponsesShapePreserves
 	}}
 	svc := &OpenAIGatewayService{httpUpstream: upstream}
 
-	_, err := svc.ForwardAsChatCompletions(context.Background(), c, httptestOpenAIOAuthBodyPolicyAccount(), body, "", "gpt-5.4")
+	_, err := svc.ForwardAsChatCompletions(context.Background(), c, httptestOpenAIOAuthBodyPolicyAccount(), body, "")
 	require.NoError(t, err)
 	require.Equal(t, "9007199254740993", gjson.GetBytes(upstream.lastBody, "tools.0.parameters.properties.id.const").Raw)
 	require.Equal(t, "9007199254740995", gjson.GetBytes(upstream.lastBody, "client_metadata.trace_id").Raw)
@@ -316,10 +360,10 @@ func TestOpenAIGatewayService_ForwardChatCompletionsSetupTokenResponsesShapeUses
 	account := httptestOpenAIOAuthBodyPolicyAccount()
 	account.Type = AccountTypeSetupToken
 
-	_, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, "", "gpt-5.4")
+	_, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, "")
 	require.NoError(t, err)
 	require.Equal(t, chatgptCodexURL, upstream.lastReq.URL.String())
-	require.Equal(t, "chatgpt-acc", upstream.lastReq.Header.Get("chatgpt-account-id"))
+	require.Equal(t, "chatgpt-acc", getHeaderRaw(upstream.lastReq.Header, "ChatGPT-Account-ID"))
 	require.Equal(t, "9007199254740993", gjson.GetBytes(upstream.lastBody, "tools.0.parameters.properties.id.const").Raw)
 	require.Equal(t, "9007199254740995", gjson.GetBytes(upstream.lastBody, "client_metadata.trace_id").Raw)
 	for _, field := range []string{"metadata", "stream_options"} {
@@ -354,7 +398,7 @@ func TestOpenAIGatewayService_ForwardChatCompletionsSetupTokenNormalPathUsesOAut
 	account := httptestOpenAIOAuthBodyPolicyAccount()
 	account.Type = AccountTypeSetupToken
 
-	_, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, "", "gpt-5.4")
+	_, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, "")
 	require.NoError(t, err)
 	require.Equal(t, chatgptCodexURL, upstream.lastReq.URL.String())
 	require.Equal(t, "gpt-5.4", gjson.GetBytes(upstream.lastBody, "model").String())
@@ -387,7 +431,7 @@ func TestOpenAIGatewayService_ForwardChatCompletionsOAuthKeepsIsolatedAdapterSes
 	svc := &OpenAIGatewayService{httpUpstream: upstream}
 	account := httptestOpenAIOAuthBodyPolicyAccount()
 
-	_, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, "shared-cache-key", "gpt-5.4")
+	_, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, "shared-cache-key")
 
 	require.NoError(t, err)
 	isolatedSessionID := isolateOpenAICodexOAuthSessionID(77, "shared-cache-key", "session")
@@ -493,6 +537,51 @@ func TestOpenAIGatewayService_ForwardOAuthCompactTreatsAllowlistedBodyAsNonStrea
 	require.NotNil(t, result)
 	require.False(t, result.Stream)
 	require.False(t, gjson.GetBytes(upstream.lastBody, "stream").Exists())
+}
+
+func TestOpenAIGatewayService_ForwardOAuthCompactSkipsCodexImageBridge(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := []byte(`{"model":"gpt-5.4","stream":true,"instructions":"compact","input":[{"type":"message","role":"user","content":"compact me"}]}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/compact", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.98.0")
+	groupID := int64(4242)
+	c.Set("api_key", &APIKey{
+		ID:      2424,
+		GroupID: &groupID,
+		Group: &Group{
+			ID:                   groupID,
+			AllowImageGeneration: true,
+			RateMultiplier:       1,
+			ImageRateMultiplier:  1,
+		},
+	})
+
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}, "x-request-id": []string{"rid-compact-bridge-skip"}},
+		Body:       io.NopCloser(strings.NewReader(`{"id":"resp_compact","status":"completed","model":"gpt-5.4","output":[],"usage":{"input_tokens":1,"output_tokens":1}}`)),
+	}}
+	svc := &OpenAIGatewayService{
+		cfg:          &config.Config{},
+		httpUpstream: upstream,
+	}
+	svc.cfg.Gateway.CodexImageGenerationBridgeEnabled = true
+
+	result, err := svc.Forward(context.Background(), c, httptestOpenAIOAuthBodyPolicyAccount(), body)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.False(t, result.Stream)
+	require.NotNil(t, upstream.lastReq)
+	require.False(t, gjson.GetBytes(upstream.lastBody, `tools.#(type=="image_generation")`).Exists())
+	require.False(t, gjson.GetBytes(upstream.lastBody, "stream").Exists())
+	instructions := gjson.GetBytes(upstream.lastBody, "instructions").String()
+	require.Equal(t, "compact", instructions)
+	require.NotContains(t, instructions, codexImageGenerationBridgeMarker)
+	require.NotContains(t, instructions, "image_generation")
 }
 
 func TestOpenAIGatewayService_ForwardOAuthCompactRejectsMalformedJSONBeforeUpstream(t *testing.T) {

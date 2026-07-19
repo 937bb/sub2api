@@ -1000,6 +1000,21 @@
         </div>
       </div>
 
+      <div
+        v-if="account.platform === 'antigravity' && account.type === 'oauth'"
+        class="border-t border-gray-200 pt-4 dark:border-dark-600"
+      >
+        <label class="input-label">{{ t('admin.accounts.antigravityProjectIdLabel') }}</label>
+        <input
+          v-model="antigravityProjectId"
+          data-testid="antigravity-project-id-input"
+          type="text"
+          class="input font-mono"
+          :placeholder="t('admin.accounts.antigravityProjectIdPlaceholder')"
+        />
+        <p class="input-hint">{{ t('admin.accounts.antigravityProjectIdHint') }}</p>
+      </div>
+
       <!-- Antigravity model restriction (applies to all antigravity types) -->
       <!-- Antigravity 只支持模型映射模式，不支持白名单模式 -->
       <div v-if="account.platform === 'antigravity'" class="border-t border-gray-200 pt-4 dark:border-dark-600">
@@ -1362,7 +1377,7 @@
       >
         <div class="overflow-hidden rounded-lg border border-sky-100 bg-sky-50/60 shadow-sm dark:border-sky-900/50 dark:bg-sky-950/20">
           <div class="flex items-start gap-3 px-4 py-3">
-            <div class="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-white text-sky-600 shadow-sm ring-1 ring-sky-100 dark:bg-dark-800 dark:text-sky-300 dark:ring-sky-900/60">
+            <div class="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-[var(--glass-bg-content)] text-sky-600 shadow-sm ring-1 ring-sky-100  dark:text-sky-300 dark:ring-sky-900/60">
               <Icon name="sparkles" size="sm" />
             </div>
             <div class="min-w-0 flex-1">
@@ -1375,13 +1390,13 @@
                   {{ codexImageGenerationBridgeBadgeLabel }}
                 </span>
               </div>
-              <p class="mt-1 text-xs leading-5 text-slate-600 dark:text-slate-300">
+              <p class="mt-1 text-xs leading-5 text-zinc-600 dark:text-zinc-300">
                 {{ t('admin.accounts.openai.codexImageGenerationBridgeDesc') }}
               </p>
             </div>
           </div>
-          <div class="border-t border-sky-100 bg-white/70 p-2 dark:border-sky-900/50 dark:bg-dark-800/70">
-            <div class="grid grid-cols-1 gap-2 sm:grid-cols-3">
+          <div class="border-t border-sky-100 bg-[var(--glass-bg-content)] p-2 dark:border-sky-900/50 ">
+            <div class="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
               <button
                 v-for="option in codexImageGenerationBridgeOptions"
                 :key="option.value"
@@ -1392,7 +1407,7 @@
                   'group flex min-h-[68px] items-start gap-2 rounded-md border px-3 py-2 text-left transition-all',
                   codexImageGenerationBridgeMode === option.value
                     ? 'border-sky-300 bg-sky-50 text-sky-900 shadow-sm ring-1 ring-sky-200 dark:border-sky-700 dark:bg-sky-900/25 dark:text-sky-100 dark:ring-sky-800'
-                    : 'border-transparent bg-transparent text-slate-600 hover:border-gray-200 hover:bg-gray-50 dark:text-slate-300 dark:hover:border-dark-500 dark:hover:bg-dark-700'
+                    : 'border-transparent bg-transparent text-zinc-600 hover:border-gray-200 hover:bg-gray-50 dark:text-zinc-300 dark:hover:border-dark-500 dark:hover:bg-dark-700'
                 ]"
               >
                 <span
@@ -1407,7 +1422,7 @@
                 </span>
                 <span class="min-w-0">
                   <span class="block text-sm font-medium">{{ option.label }}</span>
-                  <span class="mt-0.5 block text-xs leading-4 text-slate-500 dark:text-slate-400">{{ option.description }}</span>
+                  <span class="mt-0.5 block text-xs leading-4 text-zinc-500 dark:text-zinc-400">{{ option.description }}</span>
                 </span>
               </button>
             </div>
@@ -2103,7 +2118,7 @@
                   'px-3 py-1.5 text-sm rounded-md border transition-colors',
                   userMsgQueueMode === opt.value
                     ? 'bg-primary-600 text-white border-primary-600'
-                    : 'bg-white dark:bg-dark-700 text-gray-700 dark:text-gray-300 border-gray-300 dark:border-dark-500 hover:bg-gray-50 dark:hover:bg-dark-600'
+                    : 'bg-[var(--glass-bg-content)]  text-gray-700 dark:text-gray-300 border-gray-300 dark:border-dark-500 hover:bg-gray-50 dark:hover:bg-dark-600'
                 ]">
                 {{ opt.label }}
               </button>
@@ -2202,7 +2217,7 @@
             <label class="input-label text-xs">{{ t('admin.accounts.quotaControl.cacheTTLOverride.target') }}</label>
             <select
               v-model="cacheTTLOverrideTarget"
-              class="mt-1 block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500 dark:border-dark-500 dark:bg-dark-700 dark:text-white"
+              class="mt-1 block w-full rounded-md border border-gray-300 bg-[var(--glass-bg-content)] px-3 py-2 text-sm shadow-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500 dark:border-dark-500  dark:text-white"
             >
               <option value="5m">5m</option>
               <option value="1h">1h</option>
@@ -2402,7 +2417,10 @@ import ProxyAdBanner from '@/components/common/ProxyAdBanner.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
 import QuotaLimitCard from '@/components/account/QuotaLimitCard.vue'
-import { applyInterceptWarmup } from '@/components/account/credentialsBuilder'
+import {
+  applyAntigravityProjectID,
+  applyInterceptWarmup
+} from '@/components/account/credentialsBuilder'
 import { formatDateTime, formatDateTimeLocalInput, parseDateTimeLocalInput } from '@/utils/format'
 import { createStableObjectKeyResolver } from '@/utils/stableObjectKey'
 import { VERTEX_LOCATION_OPTIONS } from '@/constants/account'
@@ -2539,6 +2557,7 @@ const autoPause5hDisabled = ref(false)
 const autoPause7dDisabled = ref(false)
 const mixedScheduling = ref(false) // For antigravity accounts: enable mixed scheduling
 const allowOverages = ref(false) // For antigravity accounts: enable AI Credits overages
+const antigravityProjectId = ref('')
 const antigravityModelRestrictionMode = ref<'whitelist' | 'mapping'>('whitelist')
 const antigravityWhitelistModels = ref<string[]>([])
 const antigravityModelMappings = ref<ModelMapping[]>([])
@@ -2593,7 +2612,7 @@ const openaiOAuthResponsesWebSocketV2Mode = ref<OpenAIOAuthWSMode>(OPENAI_WS_MOD
 const openaiAPIKeyResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
 const codexCLIOnlyEnabled = ref(false)
 const codexCLIOnlyAllowClaudeCodeEnabled = ref(false)
-type CodexImageGenerationBridgeMode = 'inherit' | 'enabled' | 'disabled'
+type CodexImageGenerationBridgeMode = 'inherit' | 'enabled' | 'disabled' | 'block'
 const codexImageGenerationBridgeMode = ref<CodexImageGenerationBridgeMode>('inherit')
 const anthropicPassthroughEnabled = ref(false)
 const webSearchEmulationMode = ref('default')
@@ -2671,6 +2690,11 @@ const codexImageGenerationBridgeOptions = computed<Array<{
     value: 'disabled',
     label: t('admin.accounts.openai.codexImageGenerationBridgeDisabled'),
     description: t('admin.accounts.openai.codexImageGenerationBridgeDisabledDesc')
+  },
+  {
+    value: 'block',
+    label: t('admin.accounts.openai.codexImageGenerationBridgeBlock'),
+    description: t('admin.accounts.openai.codexImageGenerationBridgeBlockDesc')
   }
 ])
 const codexImageGenerationBridgeBadgeLabel = computed(() => {
@@ -2679,6 +2703,8 @@ const codexImageGenerationBridgeBadgeLabel = computed(() => {
       return t('admin.accounts.openai.codexImageGenerationBridgeBadgeEnabled')
     case 'disabled':
       return t('admin.accounts.openai.codexImageGenerationBridgeBadgeDisabled')
+    case 'block':
+      return t('admin.accounts.openai.codexImageGenerationBridgeBadgeBlock')
     default:
       return t('admin.accounts.openai.codexImageGenerationBridgeBadgeInherit')
   }
@@ -2688,9 +2714,11 @@ const codexImageGenerationBridgeBadgeClass = computed(() => {
     case 'enabled':
       return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
     case 'disabled':
+      return 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300'
+    case 'block':
       return 'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300'
     default:
-      return 'bg-slate-100 text-slate-600 dark:bg-dark-600 dark:text-slate-300'
+      return 'bg-zinc-100 text-zinc-600 dark:bg-dark-600 dark:text-zinc-300'
   }
 })
 const openAICompactModeOptions = computed(() => [
@@ -2955,6 +2983,12 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   editVertexProjectId.value = ''
   editVertexClientEmail.value = ''
   editVertexLocation.value = 'us-central1'
+  antigravityProjectId.value =
+    newAccount.platform === 'antigravity' &&
+    newAccount.type === 'oauth' &&
+    typeof credentials?.antigravity_project_id === 'string'
+      ? credentials.antigravity_project_id.trim()
+      : ''
 
   // Load mixed scheduling setting (only for antigravity accounts)
   mixedScheduling.value = false
@@ -2999,7 +3033,9 @@ const syncFormFromAccount = (newAccount: Account | null) => {
       const codexImageGenerationBridgeValue = typeof extra?.codex_image_generation_bridge === 'boolean'
         ? extra.codex_image_generation_bridge
         : extra?.codex_image_generation_bridge_enabled
-      if (codexImageGenerationBridgeValue === true) {
+      if (extra?.codex_image_generation_explicit_tool_policy === 'strip') {
+        codexImageGenerationBridgeMode.value = 'block'
+      } else if (codexImageGenerationBridgeValue === true) {
         codexImageGenerationBridgeMode.value = 'enabled'
       } else if (codexImageGenerationBridgeValue === false) {
         codexImageGenerationBridgeMode.value = 'disabled'
@@ -3947,6 +3983,9 @@ const handleSubmit = async () => {
       const currentCredentials = (updatePayload.credentials as Record<string, unknown>) ||
         ((props.account.credentials as Record<string, unknown>) || {})
       const newCredentials: Record<string, unknown> = { ...currentCredentials }
+      if (props.account.type === 'oauth') {
+        applyAntigravityProjectID(newCredentials, antigravityProjectId.value, 'edit')
+      }
 
       // 移除旧字段
       delete newCredentials.model_whitelist
@@ -4152,13 +4191,20 @@ const handleSubmit = async () => {
 
       delete newExtra.codex_image_generation_bridge_enabled
       if (props.account.type === 'oauth' || props.account.type === 'apikey') {
-        if (codexImageGenerationBridgeMode.value === 'inherit') {
+        if (codexImageGenerationBridgeMode.value === 'block') {
+          newExtra.codex_image_generation_explicit_tool_policy = 'strip'
           delete newExtra.codex_image_generation_bridge
         } else {
-          newExtra.codex_image_generation_bridge = codexImageGenerationBridgeMode.value === 'enabled'
+          delete newExtra.codex_image_generation_explicit_tool_policy
+          if (codexImageGenerationBridgeMode.value === 'inherit') {
+            delete newExtra.codex_image_generation_bridge
+          } else {
+            newExtra.codex_image_generation_bridge = codexImageGenerationBridgeMode.value === 'enabled'
+          }
         }
       } else {
         delete newExtra.codex_image_generation_bridge
+        delete newExtra.codex_image_generation_explicit_tool_policy
       }
 
       if (props.account.type === 'oauth') {

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
@@ -13,18 +14,30 @@ const (
 	opsConcurrencyBatchChunkSize = 200
 )
 
-func (s *OpsService) listAllAccountsForOps(ctx context.Context, platformFilter string) ([]Account, error) {
+type opsAccountStatsRepository interface {
+	ListOpsAccountsForStats(ctx context.Context, platformFilter string, groupIDFilter *int64) ([]Account, error)
+}
+
+func (s *OpsService) listAllAccountsForOps(ctx context.Context, platformFilter string, groupIDFilter *int64) ([]Account, error) {
 	if s == nil || s.accountRepo == nil {
 		return []Account{}, nil
+	}
+	platformFilter = strings.TrimSpace(platformFilter)
+	if repo, ok := s.accountRepo.(opsAccountStatsRepository); ok {
+		return repo.ListOpsAccountsForStats(ctx, platformFilter, groupIDFilter)
 	}
 
 	out := make([]Account, 0, 128)
 	page := 1
+	groupID := int64(0)
+	if groupIDFilter != nil {
+		groupID = *groupIDFilter
+	}
 	for {
 		accounts, pageInfo, err := s.accountRepo.ListWithFilters(ctx, pagination.PaginationParams{
 			Page:     page,
 			PageSize: opsAccountsPageSize,
-		}, AccountListFilters{Platform: platformFilter})
+		}, AccountListFilters{Platform: platformFilter, GroupID: groupID})
 		if err != nil {
 			return nil, err
 		}
@@ -112,7 +125,7 @@ func (s *OpsService) GetConcurrencyStats(
 		return nil, nil, nil, nil, err
 	}
 
-	accounts, err := s.listAllAccountsForOps(ctx, platformFilter)
+	accounts, err := s.listAllAccountsForOps(ctx, platformFilter, groupIDFilter)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}

@@ -643,6 +643,10 @@ type ProxyProbeConfig struct {
 
 type BillingConfig struct {
 	CircuitBreaker CircuitBreakerConfig `mapstructure:"circuit_breaker"`
+	// MinimumBalanceReserve is the conservative preflight floor for balance billing.
+	// With the default 0, balance billing requires balance > 0. When configured,
+	// requests are rejected at balance <= minimum_balance_reserve.
+	MinimumBalanceReserve float64 `mapstructure:"minimum_balance_reserve"`
 	// UserPlatformQuotaCacheTTLSeconds 用户 × 平台 quota 缓存 TTL（秒），默认 86400=1天，覆盖典型 daily 窗口。
 	// 消费点：
 	//   - billing_cache_service.cacheWriteWorker 异步累加
@@ -1586,6 +1590,7 @@ func setDefaults() {
 	viper.SetDefault("billing.circuit_breaker.failure_threshold", 5)
 	viper.SetDefault("billing.circuit_breaker.reset_timeout_seconds", 30)
 	viper.SetDefault("billing.circuit_breaker.half_open_requests", 3)
+	viper.SetDefault("billing.minimum_balance_reserve", 0)
 	viper.SetDefault("billing.user_platform_quota_cache_ttl_seconds", 86400)
 	viper.SetDefault("billing.user_platform_quota_sentinel_ttl_seconds", 3600)
 
@@ -2023,18 +2028,8 @@ func (c *Config) Validate() error {
 	}
 
 	if strings.TrimSpace(c.Server.FrontendURL) != "" {
-		if err := ValidateAbsoluteHTTPURL(c.Server.FrontendURL); err != nil {
+		if err := ValidateFrontendBaseURL(c.Server.FrontendURL); err != nil {
 			return fmt.Errorf("server.frontend_url invalid: %w", err)
-		}
-		u, err := url.Parse(strings.TrimSpace(c.Server.FrontendURL))
-		if err != nil {
-			return fmt.Errorf("server.frontend_url invalid: %w", err)
-		}
-		if u.RawQuery != "" || u.ForceQuery {
-			return fmt.Errorf("server.frontend_url invalid: must not include query")
-		}
-		if u.User != nil {
-			return fmt.Errorf("server.frontend_url invalid: must not include userinfo")
 		}
 		warnIfInsecureURL("server.frontend_url", c.Server.FrontendURL)
 	}
@@ -2245,6 +2240,9 @@ func (c *Config) Validate() error {
 		if c.Billing.CircuitBreaker.HalfOpenRequests <= 0 {
 			return fmt.Errorf("billing.circuit_breaker.half_open_requests must be positive")
 		}
+	}
+	if c.Billing.MinimumBalanceReserve < 0 {
+		return fmt.Errorf("billing.minimum_balance_reserve must be non-negative")
 	}
 	if c.Database.MaxOpenConns <= 0 {
 		return fmt.Errorf("database.max_open_conns must be positive")
@@ -2874,6 +2872,38 @@ func ValidateAbsoluteHTTPURL(raw string) error {
 	}
 	if u.Fragment != "" {
 		return fmt.Errorf("must not include fragment")
+	}
+	return nil
+}
+
+// ValidateFrontendBaseURL validates the external frontend base used to build links.
+func ValidateFrontendBaseURL(raw string) error {
+	raw = strings.TrimSpace(raw)
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("invalid frontend base URL")
+	}
+	if raw == "" {
+		return fmt.Errorf("frontend base URL is empty")
+	}
+	if !u.IsAbs() {
+		return fmt.Errorf("frontend base URL must be absolute")
+	}
+	if !isHTTPScheme(u.Scheme) {
+		return fmt.Errorf("frontend base URL must use http or https")
+	}
+	if strings.TrimSpace(u.Hostname()) == "" {
+		return fmt.Errorf("frontend base URL must include a hostname")
+	}
+	if u.RawQuery != "" || u.ForceQuery {
+		return fmt.Errorf("frontend base URL must not include a query")
+	}
+	if u.User != nil {
+		return fmt.Errorf("frontend base URL must not include userinfo")
+	}
+	// net/url does not retain an empty fragment delimiter (the equivalent of ForceQuery).
+	if strings.Contains(raw, "#") {
+		return fmt.Errorf("frontend base URL must not include a fragment")
 	}
 	return nil
 }

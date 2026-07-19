@@ -1,7 +1,10 @@
 package service
 
 import (
+	"context"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestResolveDefaultTierID(t *testing.T) {
@@ -79,4 +82,116 @@ func TestResolveDefaultTierID(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestAntigravityOAuthService_EnrichRefreshAccountTokenInfo_FallbackOnlySkipsProjectProbe(t *testing.T) {
+	probe := newAntigravityV1InternalProbe(t)
+	svc := NewAntigravityOAuthService(nil)
+	account := &Account{
+		ID:       701,
+		Platform: PlatformAntigravity,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"email":                                 "user@example.com",
+			antigravityProjectFallbackCredentialKey: " configured-project ",
+		},
+	}
+	tokenInfo := &AntigravityTokenInfo{AccessToken: "refreshed-token"}
+
+	svc.enrichRefreshAccountTokenInfo(context.Background(), account, tokenInfo, "")
+
+	require.Equal(t, "user@example.com", tokenInfo.Email)
+	require.Empty(t, tokenInfo.ProjectID)
+	require.False(t, tokenInfo.ProjectIDMissing)
+	require.Empty(t, tokenInfo.PlanType)
+	require.Empty(t, probe.paths, "fallback-only refresh must not call LoadCodeAssist or OnboardUser")
+}
+
+func TestAntigravityOAuthService_EnrichRefreshAccountTokenInfo_PrimaryProjectStillProbes(t *testing.T) {
+	probe := newAntigravityV1InternalProbe(t)
+	svc := NewAntigravityOAuthService(nil)
+	account := &Account{
+		ID:       702,
+		Platform: PlatformAntigravity,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"project_id":                            "existing-project",
+			antigravityProjectFallbackCredentialKey: " configured-project ",
+		},
+	}
+	tokenInfo := &AntigravityTokenInfo{AccessToken: "refreshed-token"}
+
+	svc.enrichRefreshAccountTokenInfo(context.Background(), account, tokenInfo, "")
+
+	require.Contains(t, probe.paths, "/v1internal:loadCodeAssist")
+	require.Equal(t, "backfilled-project", tokenInfo.ProjectID)
+}
+
+func TestAntigravityOAuthService_EnrichRefreshAccountTokenInfo_NoFallbackStillBackfills(t *testing.T) {
+	probe := newAntigravityV1InternalProbe(t)
+	svc := NewAntigravityOAuthService(nil)
+	account := &Account{
+		ID:          703,
+		Platform:    PlatformAntigravity,
+		Type:        AccountTypeOAuth,
+		Credentials: map[string]any{},
+	}
+	tokenInfo := &AntigravityTokenInfo{AccessToken: "refreshed-token"}
+
+	svc.enrichRefreshAccountTokenInfo(context.Background(), account, tokenInfo, "")
+
+	require.Contains(t, probe.paths, "/v1internal:loadCodeAssist")
+	require.Equal(t, "backfilled-project", tokenInfo.ProjectID)
+}
+
+func TestAntigravityOAuthService_BuildRefreshAccountCredentials_FallbackOnlyDropsBlankProjectID(t *testing.T) {
+	svc := NewAntigravityOAuthService(nil)
+	account := &Account{
+		ID:       704,
+		Platform: PlatformAntigravity,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"access_token":                          "old-token",
+			"refresh_token":                         "old-refresh",
+			"project_id":                            "  ",
+			"plan_type":                             "Pro",
+			antigravityProjectFallbackCredentialKey: " configured-project ",
+		},
+	}
+	tokenInfo := &AntigravityTokenInfo{
+		AccessToken:  "new-token",
+		RefreshToken: "new-refresh",
+		ExpiresAt:    1234567890,
+		TokenType:    "Bearer",
+	}
+
+	creds := svc.BuildRefreshAccountCredentials(account, tokenInfo)
+
+	require.Equal(t, "new-token", creds["access_token"])
+	require.Equal(t, "new-refresh", creds["refresh_token"])
+	require.Equal(t, "Pro", creds["plan_type"])
+	require.Equal(t, " configured-project ", creds[antigravityProjectFallbackCredentialKey])
+	require.NotContains(t, creds, "project_id")
+}
+
+func TestAntigravityOAuthService_BuildRefreshAccountCredentials_PrimaryProjectIDWins(t *testing.T) {
+	svc := NewAntigravityOAuthService(nil)
+	account := &Account{
+		ID:       705,
+		Platform: PlatformAntigravity,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"project_id":                            "primary-project",
+			antigravityProjectFallbackCredentialKey: " configured-project ",
+		},
+	}
+	tokenInfo := &AntigravityTokenInfo{
+		AccessToken: "new-token",
+		ExpiresAt:   1234567890,
+	}
+
+	creds := svc.BuildRefreshAccountCredentials(account, tokenInfo)
+
+	require.Equal(t, "primary-project", creds["project_id"])
+	require.Equal(t, " configured-project ", creds[antigravityProjectFallbackCredentialKey])
 }

@@ -20,6 +20,7 @@ import (
 
 	"github.com/andybalholm/brotli"
 	"github.com/klauspost/compress/zstd"
+	"golang.org/x/net/http2"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyurl"
@@ -32,6 +33,9 @@ import (
 // 默认配置常量
 // 这些值在配置文件未指定时作为回退默认值使用
 const (
+	openAIH2ReadIdleTimeout = 30 * time.Second
+	openAIH2PingTimeout     = 10 * time.Second
+
 	// directProxyKey: 无代理时的缓存键标识
 	directProxyKey = "direct"
 	// defaultMaxIdleConns: 默认最大空闲连接总数
@@ -58,6 +62,8 @@ const (
 	defaultOpenAIHTTP2FallbackWindow         = 60 * time.Second
 	defaultOpenAIHTTP2FallbackTTL            = 10 * time.Minute
 )
+
+var configureHTTP2Transports = http2.ConfigureTransports
 
 const (
 	upstreamProtocolModeDefault          = "default"
@@ -1073,7 +1079,28 @@ func buildUpstreamTransport(settings poolSettings, proxyURL *url.URL, protocolMo
 	if err := proxyutil.ConfigureTransportProxy(transport, proxyURL); err != nil {
 		return nil, err
 	}
+	if protocolMode == upstreamProtocolModeOpenAIH2 && supportsOpenAIH2ActiveProbing(proxyURL) {
+		h2Transport, err := configureHTTP2Transports(transport)
+		if err != nil {
+			transport.CloseIdleConnections()
+			return nil, fmt.Errorf("configure OpenAI HTTP/2 transport: %w", err)
+		}
+		h2Transport.ReadIdleTimeout = openAIH2ReadIdleTimeout
+		h2Transport.PingTimeout = openAIH2PingTimeout
+	}
 	return transport, nil
+}
+
+func supportsOpenAIH2ActiveProbing(proxyURL *url.URL) bool {
+	if proxyURL == nil {
+		return true
+	}
+	switch strings.ToLower(proxyURL.Scheme) {
+	case "http", "https":
+		return true
+	default:
+		return false
+	}
 }
 
 // buildUpstreamTransportWithTLSFingerprint 构建带 TLS 指纹伪装的 Transport

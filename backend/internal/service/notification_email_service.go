@@ -17,6 +17,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/config"
 )
 
 const (
@@ -534,6 +536,12 @@ func (s *NotificationEmailService) baseURL(ctx context.Context) string {
 	for _, key := range []string{SettingKeyAPIBaseURL, SettingKeyFrontendURL} {
 		value, err := s.settingRepo.GetValue(ctx, key)
 		if err == nil && strings.TrimSpace(value) != "" {
+			if key == SettingKeyFrontendURL {
+				if validateErr := config.ValidateFrontendBaseURL(value); validateErr != nil {
+					slog.Warn("invalid frontend_url setting; omitting unsafe unsubscribe link base")
+					continue
+				}
+			}
 			return strings.TrimRight(strings.TrimSpace(value), "/")
 		}
 	}

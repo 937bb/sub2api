@@ -42,6 +42,7 @@ type stubAdminService struct {
 	updateAccountExtraErr             error
 	updateAccountExtraCalled          bool
 	bulkUpdateAccountErr              error
+	bulkUpdateAccountsFunc            func(context.Context, *service.BulkUpdateAccountsInput) (*service.BulkUpdateAccountsResult, error)
 	checkMixedErr                     error
 	lastMixedCheck                    struct {
 		accountID int64
@@ -478,6 +479,9 @@ func (s *stubAdminService) SetAccountSchedulable(ctx context.Context, id int64, 
 
 func (s *stubAdminService) BulkUpdateAccounts(ctx context.Context, input *service.BulkUpdateAccountsInput) (*service.BulkUpdateAccountsResult, error) {
 	s.lastBulkUpdateInput = input
+	if s.bulkUpdateAccountsFunc != nil {
+		return s.bulkUpdateAccountsFunc(ctx, input)
+	}
 	if s.bulkUpdateAccountErr != nil {
 		return nil, s.bulkUpdateAccountErr
 	}

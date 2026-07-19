@@ -4,106 +4,87 @@
       <template #actions>
         <div class="grid grid-cols-2 gap-4 lg:grid-cols-4">
           <!-- Total Requests -->
-          <div class="card p-4">
-          <div class="flex items-center gap-3">
-            <div class="rounded-lg bg-blue-100 p-2 dark:bg-blue-900/30">
-              <Icon name="document" size="md" class="text-blue-600 dark:text-blue-400" />
+          <div class="card p-5">
+            <div class="flex items-start justify-between">
+              <span class="text-sm font-medium text-gray-500 dark:text-gray-400">{{ t('usage.totalRequests') }}</span>
+              <div class="rounded-xl bg-blue-100 p-2 dark:bg-blue-900/30">
+                <Icon name="document" size="md" class="text-blue-600 dark:text-blue-400" />
+              </div>
             </div>
-            <div>
-              <p class="text-xs font-medium text-gray-500 dark:text-gray-400">
-                {{ t('usage.totalRequests') }}
-              </p>
-              <p class="text-xl font-bold text-gray-900 dark:text-white">
-                {{ usageStats?.total_requests?.toLocaleString() || '0' }}
-              </p>
-              <p class="text-xs text-gray-500 dark:text-gray-400">
-                {{ t('usage.inSelectedRange') }}
-              </p>
-            </div>
+            <p class="font-display mt-3 text-3xl font-bold tracking-tight text-gray-900 dark:text-white">
+              {{ usageStats?.total_requests?.toLocaleString() || '0' }}
+            </p>
+            <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">{{ t('usage.inSelectedRange') }}</p>
           </div>
-        </div>
 
-        <!-- Total Tokens -->
-        <div class="card p-4">
-          <div class="flex items-center gap-3">
-            <div class="rounded-lg bg-amber-100 p-2 dark:bg-amber-900/30">
-              <Icon name="cube" size="md" class="text-amber-600 dark:text-amber-400" />
+          <!-- Total Tokens -->
+          <div class="card p-5">
+            <div class="flex items-start justify-between">
+              <span class="text-sm font-medium text-gray-500 dark:text-gray-400">{{ t('usage.totalTokens') }}</span>
+              <div class="rounded-xl bg-amber-100 p-2 dark:bg-amber-900/30">
+                <Icon name="cube" size="md" class="text-amber-600 dark:text-amber-400" />
+              </div>
             </div>
-            <div class="min-w-0 flex-1">
-              <p class="text-xs font-medium text-gray-500 dark:text-gray-400">
-                {{ t('usage.totalTokens') }}
-              </p>
-              <p class="text-xl font-bold text-gray-900 dark:text-white">
-                {{ formatTokens(usageStats?.total_tokens || 0) }}
-              </p>
-              <p class="text-xs text-gray-500 dark:text-gray-400">
-                <span>{{ t('usage.in') }} {{ formatTokens(usageStats?.total_input_tokens || 0) }}</span>
-                <span> · </span>
-                <span>{{ t('usage.out') }} {{ formatTokens(usageStats?.total_output_tokens || 0) }}</span>
-                <span> · </span>
-                <span class="text-sky-600 dark:text-sky-400">{{ t('usage.cacheHit') }} {{ formatTokens(usageStats?.total_cache_read_tokens || 0) }}</span>
-                <span> · </span>
-                <span class="text-amber-600 dark:text-amber-400">{{ t('usage.cacheCreate') }} {{ formatTokens(usageStats?.total_cache_creation_tokens || 0) }}</span>
-              </p>
-              <p class="text-xs text-gray-400 dark:text-gray-500">
-                {{ t('usage.cacheHitRate') }}:
-                <template v-if="cacheStats.totalInput > 0">
-                  <span class="text-sky-600 dark:text-sky-400">{{ formatTokens(cacheStats.cacheRead) }}</span>
-                  <span class="text-gray-400">/</span>
-                  <span class="text-gray-600 dark:text-gray-300">{{ formatTokens(cacheStats.totalInput) }}</span>
-                  <span class="ml-1">{{ cacheStats.ratePercent }}</span>
-                </template>
-                <template v-else>-</template>
-              </p>
-            </div>
+            <p class="font-display mt-3 text-3xl font-bold tracking-tight text-gray-900 dark:text-white">
+              {{ formatTokens(usageStats?.total_tokens || 0) }}
+            </p>
+            <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
+              <span>{{ t('usage.in') }} {{ formatTokens(usageStats?.total_input_tokens || 0) }}</span>
+              <span> · </span>
+              <span>{{ t('usage.out') }} {{ formatTokens(usageStats?.total_output_tokens || 0) }}</span>
+              <span> · </span>
+              <span class="text-sky-600 dark:text-sky-400">{{ t('usage.cacheHit') }} {{ formatTokens(usageStats?.total_cache_read_tokens || 0) }}</span>
+              <span> · </span>
+              <span class="text-amber-600 dark:text-amber-400">{{ t('usage.cacheCreate') }} {{ formatTokens(usageStats?.total_cache_creation_tokens || 0) }}</span>
+            </p>
+            <p class="mt-1 text-xs text-gray-400 dark:text-gray-500">
+              {{ t('usage.cacheHitRate') }}:
+              <template v-if="cacheStats.totalInput > 0">
+                <span class="text-sky-600 dark:text-sky-400">{{ formatTokens(cacheStats.cacheRead) }}</span>
+                <span class="text-gray-400">/</span>
+                <span class="text-gray-600 dark:text-gray-300">{{ formatTokens(cacheStats.totalInput) }}</span>
+                <span class="ml-1">{{ cacheStats.ratePercent }}</span>
+              </template>
+              <template v-else>-</template>
+            </p>
           </div>
-        </div>
 
-        <!-- Total Cost -->
-        <div class="card p-4">
-          <div class="flex items-center gap-3">
-            <div class="rounded-lg bg-green-100 p-2 dark:bg-green-900/30">
-              <Icon name="dollar" size="md" class="text-green-600 dark:text-green-400" />
+          <!-- Total Cost -->
+          <div class="card p-5">
+            <div class="flex items-start justify-between">
+              <span class="text-sm font-medium text-gray-500 dark:text-gray-400">{{ t('usage.totalCost') }}</span>
+              <div class="rounded-xl bg-green-100 p-2 dark:bg-green-900/30">
+                <Icon name="dollar" size="md" class="text-green-600 dark:text-green-400" />
+              </div>
             </div>
-            <div class="min-w-0 flex-1">
-              <p class="text-xs font-medium text-gray-500 dark:text-gray-400">
-                {{ t('usage.totalCost') }}
-              </p>
-              <p class="text-xl font-bold text-green-600 dark:text-green-400">
-                ${{ (usageStats?.total_actual_cost || 0).toFixed(4) }}
-              </p>
-              <p class="text-xs text-gray-500 dark:text-gray-400">
-                {{ t('usage.actualCost') }} /
-                <span class="line-through">${{ (usageStats?.total_cost || 0).toFixed(4) }}</span>
-                {{ t('usage.standardCost') }}
-              </p>
-            </div>
+            <p class="font-display mt-3 text-3xl font-bold tracking-tight text-green-600 dark:text-green-400">
+              ${{ (usageStats?.total_actual_cost || 0).toFixed(4) }}
+            </p>
+            <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('usage.actualCost') }} /
+              <span class="line-through">${{ (usageStats?.total_cost || 0).toFixed(4) }}</span>
+              {{ t('usage.standardCost') }}
+            </p>
           </div>
-        </div>
 
-        <!-- Average Duration -->
-        <div class="card p-4">
-          <div class="flex items-center gap-3">
-            <div class="rounded-lg bg-purple-100 p-2 dark:bg-purple-900/30">
-              <Icon name="clock" size="md" class="text-purple-600 dark:text-purple-400" />
+          <!-- Average Duration -->
+          <div class="card p-5">
+            <div class="flex items-start justify-between">
+              <span class="text-sm font-medium text-gray-500 dark:text-gray-400">{{ t('usage.avgDuration') }}</span>
+              <div class="rounded-xl bg-purple-100 p-2 dark:bg-purple-900/30">
+                <Icon name="clock" size="md" class="text-purple-600 dark:text-purple-400" />
+              </div>
             </div>
-            <div>
-              <p class="text-xs font-medium text-gray-500 dark:text-gray-400">
-                {{ t('usage.avgDuration') }}
-              </p>
-              <p class="text-xl font-bold text-gray-900 dark:text-white">
-                {{ formatDuration(usageStats?.average_duration_ms || 0) }}
-              </p>
-              <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('usage.perRequest') }}</p>
-            </div>
+            <p class="font-display mt-3 text-3xl font-bold tracking-tight text-gray-900 dark:text-white">
+              {{ formatDuration(usageStats?.average_duration_ms || 0) }}
+            </p>
+            <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">{{ t('usage.perRequest') }}</p>
           </div>
-        </div>
         </div>
       </template>
 
       <template #filters>
-        <div class="card">
-          <div class="px-6 py-4">
+        <div class="card p-4">
           <div class="flex flex-wrap items-end gap-4">
             <!-- API Key Filter -->
             <div class="min-w-[180px]">
@@ -159,7 +140,6 @@
               </button>
             </div>
           </div>
-        </div>
         </div>
       </template>
 
@@ -295,22 +275,19 @@
                   </div>
                 </div>
               </div>
-              <!-- Token Detail Tooltip -->
-              <div
-                class="group relative"
+              <!-- Token Detail Tooltip (simplified DOM for perf) -->
+              <svg
+                class="h-4 w-4 cursor-help text-gray-400 transition-colors hover:text-blue-500 dark:text-gray-500 dark:hover:text-blue-400"
                 @mouseenter="showTokenTooltip($event, row)"
                 @mouseleave="hideTokenTooltip"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                stroke-width="2"
               >
-                <div
-                  class="flex h-4 w-4 cursor-help items-center justify-center rounded-full bg-gray-100 transition-colors group-hover:bg-blue-100 dark:bg-gray-700 dark:group-hover:bg-blue-900/50"
-                >
-                  <Icon
-                    name="infoCircle"
-                    size="xs"
-                    class="text-gray-400 group-hover:text-blue-500 dark:text-gray-500 dark:group-hover:text-blue-400"
-                  />
-                </div>
-              </div>
+                <circle cx="12" cy="12" r="10" />
+                <path d="M12 16v-4m0-4h.01" />
+              </svg>
             </div>
           </template>
 
@@ -319,22 +296,19 @@
               <span class="font-medium text-green-600 dark:text-green-400">
                 ${{ (row.actual_cost ?? 0).toFixed(6) }}
               </span>
-              <!-- Cost Detail Tooltip -->
-              <div
-                class="group relative"
+              <!-- Cost Detail Tooltip (simplified DOM for perf) -->
+              <svg
+                class="h-4 w-4 cursor-help text-gray-400 transition-colors hover:text-blue-500 dark:text-gray-500 dark:hover:text-blue-400"
                 @mouseenter="showTooltip($event, row)"
                 @mouseleave="hideTooltip"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                stroke-width="2"
               >
-                <div
-                  class="flex h-4 w-4 cursor-help items-center justify-center rounded-full bg-gray-100 transition-colors group-hover:bg-blue-100 dark:bg-gray-700 dark:group-hover:bg-blue-900/50"
-                >
-                  <Icon
-                    name="infoCircle"
-                    size="xs"
-                    class="text-gray-400 group-hover:text-blue-500 dark:text-gray-500 dark:group-hover:text-blue-400"
-                  />
-                </div>
-              </div>
+                <circle cx="12" cy="12" r="10" />
+                <path d="M12 16v-4m0-4h.01" />
+              </svg>
             </div>
           </template>
 
@@ -1016,7 +990,7 @@ const exportToCSV = async () => {
       ...rows.map((row) => row.join(','))
     ].join('\n')
 
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+    const blob = new Blob(['﻿' + csvContent], { type: 'text/csv;charset=utf-8;' })
     const url = window.URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url

@@ -2,13 +2,31 @@
   <AppLayout>
     <TablePageLayout>
       <template #filters>
-        <div class="flex flex-wrap items-center gap-3">
+        <div class="space-y-4">
+          <!-- Summary strip -->
+          <div class="card grid grid-cols-3 divide-x divide-gray-200/70 dark:divide-dark-700">
+            <div class="px-5 py-3">
+              <p class="font-display text-2xl font-bold tracking-tight text-gray-900 dark:text-white">{{ pagination.total }}</p>
+              <p class="mt-0.5 text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.proxies.summaryTotal') }}</p>
+            </div>
+            <div class="px-5 py-3">
+              <p class="font-display text-2xl font-bold tracking-tight text-emerald-600 dark:text-emerald-400">{{ activeProxyCount }}</p>
+              <p class="mt-0.5 text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.proxies.summaryActive') }}</p>
+            </div>
+            <div class="px-5 py-3">
+              <p class="font-display text-2xl font-bold tracking-tight text-gray-500 dark:text-gray-400">{{ inactiveProxyCount }}</p>
+              <p class="mt-0.5 text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.proxies.summaryInactive') }}</p>
+            </div>
+          </div>
+
+          <div class="flex flex-wrap items-center gap-3">
           <!-- Left: Search + Filters -->
           <div class="relative w-full sm:w-64">
             <Icon
               name="search"
               size="md"
-              class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500"
+              class="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-gray-500 dark:text-dark-300"
+              :stroke-width="2"
             />
             <input
               v-model="searchQuery"
@@ -84,6 +102,7 @@
               {{ t('admin.proxies.createProxy') }}
             </button>
           </div>
+          </div>
         </div>
       </template>
 
@@ -148,7 +167,7 @@
                 <!-- 右键展开格式选择菜单 -->
                 <div
                   v-if="copyMenuProxyId === row.id"
-                  class="absolute left-0 top-full z-50 mt-1 w-auto min-w-[180px] rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-dark-500 dark:bg-dark-700"
+                  class="absolute left-0 top-full z-50 mt-1 w-auto min-w-[180px] rounded-lg border border-gray-200 bg-[var(--glass-bg-dropdown)] backdrop-blur-xl py-1 shadow-lg dark:border-dark-500 "
                 >
                   <button
                     v-for="fmt in getCopyFormats(row)"
@@ -801,7 +820,7 @@
                 <th class="px-3 py-2 text-left">{{ t('admin.proxies.qualityTableMessage') }}</th>
               </tr>
             </thead>
-            <tbody class="divide-y divide-gray-200 bg-white dark:divide-dark-700 dark:bg-dark-900">
+            <tbody class="divide-y divide-gray-200 bg-[var(--glass-bg-content)] dark:divide-dark-700 ">
               <tr v-for="item in qualityReport.items" :key="item.target">
                 <td class="px-3 py-2 text-gray-900 dark:text-white">{{ qualityTargetLabel(item.target) }}</td>
                 <td class="px-3 py-2">
@@ -852,7 +871,7 @@
               <th class="px-4 py-2 text-left">{{ t('admin.proxies.accountNotes') }}</th>
             </tr>
           </thead>
-          <tbody class="divide-y divide-gray-200 bg-white dark:divide-dark-700 dark:bg-dark-900">
+          <tbody class="divide-y divide-gray-200 bg-[var(--glass-bg-content)] dark:divide-dark-700 ">
             <tr v-for="account in proxyAccounts" :key="account.id">
               <td class="px-4 py-2 font-medium text-gray-900 dark:text-white">{{ account.name }}</td>
               <td class="px-4 py-2">
@@ -946,6 +965,10 @@ const editStatusOptions = computed(() => [
 ])
 
 const proxies = ref<Proxy[]>([])
+
+// Page-scoped status breakdown (server total lives in pagination.total).
+const activeProxyCount = computed(() => proxies.value.filter((p) => p.status === 'active').length)
+const inactiveProxyCount = computed(() => proxies.value.filter((p) => p.status !== 'active').length)
 const visiblePasswordIds = reactive(new Set<number>())
 const copyMenuProxyId = ref<number | null>(null)
 const loading = ref(false)

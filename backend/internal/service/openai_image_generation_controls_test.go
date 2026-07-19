@@ -1,7 +1,9 @@
 package service
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -144,6 +146,84 @@ func TestOpenAIGatewayServiceForward_ExplicitImageToolWorksWithBridgeDisabled(t 
 	require.Equal(t, "jpeg", gjson.GetBytes(upstream.lastBody, `tools.#(type=="image_generation").output_format`).String())
 	require.False(t, gjson.GetBytes(upstream.lastBody, `tools.#(type=="image_generation").format`).Exists())
 	instructions := gjson.GetBytes(upstream.lastBody, "instructions").String()
+	require.NotContains(t, instructions, "image_generation")
+}
+
+func TestOpenAIGatewayServiceForward_AccountPolicyStripsExplicitImageTool(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"id":"resp_stripped_image","usage":{"input_tokens":2,"output_tokens":1}}`))}}
+	svc := newOpenAIImageGenerationControlTestService(upstream)
+	c, _ := newOpenAIImageGenerationControlTestContext(true, "codex_cli_rs/0.98.0")
+	account := newOpenAIImageGenerationControlTestAccount()
+	account.Extra = map[string]any{featureKeyCodexImageGenerationExplicitToolPolicy: codexImageGenerationExplicitToolPolicyStrip}
+	body := []byte(`{"model":"gpt-5.4","input":"draw","stream":false,"tools":[{"type":"function","name":"shell"},{"type":"image_generation"}],"tool_choice":{"type":"image_generation"}}`)
+
+	result, err := svc.Forward(context.Background(), c, account, body)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.False(t, gjson.GetBytes(upstream.lastBody, `tools.#(type=="image_generation")`).Exists())
+	require.True(t, gjson.GetBytes(upstream.lastBody, `tools.#(type=="function")`).Exists())
+	require.False(t, gjson.GetBytes(upstream.lastBody, "tool_choice").Exists())
+}
+
+func TestOpenAIGatewayServiceForward_CodexCompactSkipsImplicitImageBridge(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	upstream := &httpUpstreamRecorder{
+		resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"id":"resp_compact","model":"gpt-5.4","usage":{"input_tokens":1,"output_tokens":1}}`)),
+		},
+	}
+	svc := newOpenAIImageGenerationControlTestService(upstream)
+	svc.cfg.Gateway.CodexImageGenerationBridgeEnabled = true
+	c, _ := newOpenAIImageGenerationControlTestContext(true, "codex_cli_rs/0.98.0")
+	body := []byte(`{"model":"gpt-5.4","input":"compact this","stream":false}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/compact", bytes.NewReader(body))
+	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.98.0")
+	account := newOpenAIImageGenerationControlTestAccount()
+
+	result, err := svc.Forward(context.Background(), c, account, body)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, upstream.lastReq)
+	require.False(t, gjson.GetBytes(upstream.lastBody, `tools.#(type=="image_generation")`).Exists())
+	instructions := gjson.GetBytes(upstream.lastBody, "instructions").String()
+	require.NotContains(t, instructions, codexImageGenerationBridgeMarker)
+	require.NotContains(t, instructions, "image_generation")
+}
+
+func TestOpenAIGatewayServiceForward_CodexCompactPreservesExplicitImageToolWithoutBridgeInstructions(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	upstream := &httpUpstreamRecorder{
+		resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"id":"resp_compact_explicit_image","model":"gpt-5.4","usage":{"input_tokens":2,"output_tokens":1}}`)),
+		},
+	}
+	svc := newOpenAIImageGenerationControlTestService(upstream)
+	svc.cfg.Gateway.CodexImageGenerationBridgeEnabled = true
+	c, _ := newOpenAIImageGenerationControlTestContext(true, "codex_cli_rs/0.98.0")
+	body := []byte(`{"model":"gpt-5.4","input":"draw","stream":false,"tools":[{"type":"image_generation","format":"jpeg"}]}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/compact", bytes.NewReader(body))
+	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.98.0")
+	account := newOpenAIImageGenerationControlTestAccount()
+
+	result, err := svc.Forward(context.Background(), c, account, body)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, upstream.lastReq)
+	require.True(t, gjson.GetBytes(upstream.lastBody, `tools.#(type=="image_generation")`).Exists())
+	require.Equal(t, "jpeg", gjson.GetBytes(upstream.lastBody, `tools.#(type=="image_generation").output_format`).String())
+	require.False(t, gjson.GetBytes(upstream.lastBody, `tools.#(type=="image_generation").format`).Exists())
+	instructions := gjson.GetBytes(upstream.lastBody, "instructions").String()
+	require.NotContains(t, instructions, codexImageGenerationBridgeMarker)
 	require.NotContains(t, instructions, "image_generation")
 }
 
@@ -299,13 +379,13 @@ func TestOpenAIGatewayServiceHandleResponsesImageOutputs_Streaming(t *testing.T)
 	gin.SetMode(gin.TestMode)
 
 	svc := newOpenAIImageGenerationControlTestService(&httpUpstreamRecorder{})
-	c, _ := newOpenAIImageGenerationControlTestContext(true, "unit-test-agent/1.0")
+	c, recorder := newOpenAIImageGenerationControlTestContext(true, "unit-test-agent/1.0")
 	resp := &http.Response{
 		StatusCode: http.StatusOK,
 		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
 		Body: io.NopCloser(strings.NewReader(
-			"data: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"ig_stream_1\",\"type\":\"image_generation_call\",\"result\":\"final-image\"}}\n\n" +
-				"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_image_stream\",\"model\":\"gpt-5.5\",\"output\":[{\"id\":\"ig_stream_1\",\"type\":\"image_generation_call\",\"result\":\"final-image\"}],\"usage\":{\"input_tokens\":11,\"output_tokens\":5,\"output_tokens_details\":{\"image_tokens\":4}}}}\n\n",
+			"data: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"ig_stream_1\",\"type\":\"image_generation_call\",\"status\":\"generating\",\"result\":\"final-image\",\"opaque\":{\"n\":1}}}\n\n" +
+				"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_image_stream\",\"model\":\"gpt-5.5\",\"output\":[{\"id\":\"ig_stream_1\",\"type\":\"image_generation_call\",\"status\":\"in_progress\",\"result\":\"final-image\",\"opaque\":{\"n\":2}}],\"usage\":{\"input_tokens\":11,\"output_tokens\":5,\"output_tokens_details\":{\"image_tokens\":4}}}}\n\n",
 		)),
 	}
 
@@ -318,6 +398,273 @@ func TestOpenAIGatewayServiceHandleResponsesImageOutputs_Streaming(t *testing.T)
 	require.Equal(t, 11, result.usage.InputTokens)
 	require.Equal(t, 5, result.usage.OutputTokens)
 	require.Equal(t, 4, result.usage.ImageOutputTokens)
+	require.Equal(t, 1, strings.Count(recorder.Body.String(), `"status":"completed"`))
+	require.Contains(t, recorder.Body.String(), `"status":"generating"`)
+	require.Equal(t, 1, strings.Count(recorder.Body.String(), `"type":"response.completed"`))
+	require.Equal(t, 1, strings.Count(recorder.Body.String(), `"usage"`))
+	require.Contains(t, recorder.Body.String(), `"opaque":{"n":1}`)
+}
+
+func TestNormalizeCompletedImageGenerationStatusBoundaries(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		changed bool
+	}{
+		{"done generating result", `{"type":"response.output_item.done","item":{"type":"image_generation_call","status":"generating","result":"image","opaque":true}}`, true},
+		{"done in progress result", `{"type":"response.output_item.done","item":{"type":"image_generation_call","status":"in_progress","result":"image"}}`, true},
+		{"failed with result", `{"type":"response.output_item.done","item":{"type":"image_generation_call","status":"failed","result":"partial"}}`, false},
+		{"missing result", `{"type":"response.output_item.done","item":{"type":"image_generation_call","status":"generating"}}`, false},
+		{"empty result", `{"type":"response.output_item.done","item":{"type":"image_generation_call","status":"generating","result":"  "}}`, false},
+		{"unknown status", `{"type":"response.output_item.done","item":{"type":"image_generation_call","status":"queued","result":"image"}}`, false},
+		{"partial event", `{"type":"response.image_generation_call.partial_image","item":{"type":"image_generation_call","status":"generating","result":"image"}}`, false},
+		{"incomplete terminal", `{"type":"response.incomplete","response":{"output":[{"type":"image_generation_call","status":"generating","result":"image"}]}}`, false},
+		{"cancelled terminal", `{"type":"response.cancelled","response":{"output":[{"type":"image_generation_call","status":"generating","result":"image"}]}}`, false},
+		{"ordinary response", `{"id":"resp","output":[{"type":"image_generation_call","status":"generating","result":"image"}]}`, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, changed := normalizeCompletedImageGenerationStatus([]byte(tt.input))
+			require.Equal(t, tt.changed, changed)
+			if changed {
+				require.Equal(t, "completed", gjson.GetBytes(got, "item.status").String())
+				if gjson.Get(tt.input, "item.opaque").Exists() {
+					require.True(t, gjson.GetBytes(got, "item.opaque").Bool())
+				}
+			} else {
+				require.Equal(t, tt.input, string(got))
+			}
+		})
+	}
+}
+
+func TestNormalizeCompletedImageGenerationStatusRequiresStringResult(t *testing.T) {
+	tests := []struct {
+		name   string
+		result string
+	}{
+		{"number", `123`},
+		{"boolean", `true`},
+		{"object", `{"data":"image"}`},
+		{"array", `["image"]`},
+		{"null", `null`},
+		{"empty string", `""`},
+		{"whitespace string", `"  \t"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := []byte(`{"type":"response.output_item.done","item":{"type":"image_generation_call","status":"generating","result":` + tt.result + `}}`)
+			got, changed := normalizeCompletedImageGenerationStatus(input)
+			require.False(t, changed)
+			require.Equal(t, input, got)
+		})
+	}
+}
+
+func TestNormalizeCompletedImageGenerationStatusRejectsFailedTerminalEnvelope(t *testing.T) {
+	tests := []struct {
+		name       string
+		eventType  string
+		responseKV string
+	}{
+		{"completed failed", "response.completed", `"status":"failed"`},
+		{"done incomplete", "response.done", `"status":"incomplete"`},
+		{"completed cancelled", "response.completed", `"status":"cancelled"`},
+		{"done canceled", "response.done", `"status":"canceled"`},
+		{"completed string error", "response.completed", `"error":"render failed"`},
+		{"done object error", "response.done", `"error":{"message":"render failed"}`},
+		{"completed false error", "response.completed", `"error":false`},
+		{"completed unknown status", "response.completed", `"status":"aborted"`},
+	}
+	for _, rootKV := range []string{`"status":"failed"`, `"status":"incomplete"`, `"status":"cancelled"`, `"error":"render failed"`, `"error":{"message":"render failed"}`} {
+		t.Run("root "+rootKV, func(t *testing.T) {
+			input := []byte(`{"type":"response.completed",` + rootKV + `,"response":{"output":[{"type":"image_generation_call","status":"generating","result":"image"}]}}`)
+			got, changed := normalizeCompletedImageGenerationStatus(input)
+			require.False(t, changed)
+			require.Equal(t, input, got)
+		})
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := []byte(`{"type":"` + tt.eventType + `","response":{` + tt.responseKV + `,"output":[{"type":"image_generation_call","status":"generating","result":"image"}]}}`)
+			got, changed := normalizeCompletedImageGenerationStatus(input)
+			require.False(t, changed)
+			require.Equal(t, input, got)
+		})
+	}
+}
+
+func TestNormalizeCompletedImageGenerationStatusAllowsSuccessfulTerminalEnvelope(t *testing.T) {
+	for _, responseKV := range []string{"", `"status":"completed",`, `"error":null,`} {
+		input := []byte(`{"type":"response.done","response":{` + responseKV + `"output":[{"type":"image_generation_call","status":"generating","result":"image"}]}}`)
+		got, changed := normalizeCompletedImageGenerationStatus(input)
+		require.True(t, changed)
+		require.Equal(t, "completed", gjson.GetBytes(got, "response.output.0.status").String())
+	}
+}
+
+func TestNormalizeCompletedImageGenerationStatusMultipleTerminalOutputs(t *testing.T) {
+	input := []byte(`{"type":"response.done","response":{"opaque":"keep","output":[{"id":"a","type":"image_generation_call","status":"generating","result":"one","extra":{"x":1}},{"type":"message","status":"in_progress","result":"text"},{"id":"b","type":"image_generation_call","status":"in_progress","result":"two","unknown":[1,2]},{"id":"c","type":"image_generation_call","status":"queued","result":"three"}]}}`)
+	got, changed := normalizeCompletedImageGenerationStatus(input)
+	require.True(t, changed)
+	require.Equal(t, "completed", gjson.GetBytes(got, "response.output.0.status").String())
+	require.Equal(t, "completed", gjson.GetBytes(got, "response.output.2.status").String())
+	require.Equal(t, "queued", gjson.GetBytes(got, "response.output.3.status").String())
+	require.Equal(t, "keep", gjson.GetBytes(got, "response.opaque").String())
+	require.Equal(t, int64(1), gjson.GetBytes(got, "response.output.0.extra.x").Int())
+	require.Equal(t, int64(2), gjson.GetBytes(got, "response.output.2.unknown.1").Int())
+}
+
+func TestNormalizeCompletedImageGenerationStatusOrdinaryDeltaSkipsRelevantPath(t *testing.T) {
+	input := []byte(`{"type":"response.output_text.delta","delta":"` + strings.Repeat("x", 1<<20))
+	got, changed := normalizeCompletedImageGenerationStatus(input)
+	require.False(t, changed)
+	require.Equal(t, &input[0], &got[0])
+	require.Zero(t, testing.AllocsPerRun(100, func() {
+		_, _ = normalizeCompletedImageGenerationStatusForEvent(input, "response.output_text.delta")
+	}))
+}
+
+func TestExtractImageGenerationOutputReusesCallerNormalizedPayload(t *testing.T) {
+	input := []byte(`{"type":"response.output_item.done","item":{"id":"ig_once","type":"image_generation_call","status":"generating","result":"image"}}`)
+	normalized, changed := normalizeCompletedImageGenerationStatusForEvent(input, "response.output_item.done")
+	require.True(t, changed)
+
+	item, ok := extractImageGenerationOutputFromSSEData(normalized, "response.output_item.done", make(map[string]struct{}))
+	require.True(t, ok)
+	require.Equal(t, "completed", gjson.GetBytes(item, "status").String())
+
+	staleItem, ok := extractImageGenerationOutputFromSSEData(input, "response.output_item.done", make(map[string]struct{}))
+	require.True(t, ok)
+	require.Equal(t, "generating", gjson.GetBytes(staleItem, "status").String())
+}
+
+func BenchmarkNormalizeCompletedImageGenerationStatusOrdinaryDelta(b *testing.B) {
+	for _, size := range []int{128, 1 << 20} {
+		b.Run(fmt.Sprintf("bytes_%d", size), func(b *testing.B) {
+			input := []byte(`{"type":"response.output_text.delta","delta":"` + strings.Repeat("x", size))
+			b.ReportAllocs()
+			b.SetBytes(int64(len(input)))
+			for i := 0; i < b.N; i++ {
+				_, _ = normalizeCompletedImageGenerationStatusForEvent(input, "response.output_text.delta")
+			}
+		})
+	}
+}
+
+func TestOpenAIImageStatusStreamingPassthrough(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	svc := newOpenAIImageGenerationControlTestService(&httpUpstreamRecorder{})
+	c, recorder := newOpenAIImageGenerationControlTestContext(true, "unit-test-agent/1.0")
+	resp := &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(
+		"data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"image_generation_call\",\"status\":\"in_progress\",\"result\":\"image\"}}\n\n" +
+			"data: {\"type\":\"response.done\",\"response\":{\"output\":[{\"type\":\"image_generation_call\",\"status\":\"generating\",\"result\":\"image\"}],\"usage\":{\"input_tokens\":2,\"output_tokens\":3}}}\n\n"))}
+	result, err := svc.handleStreamingResponsePassthrough(context.Background(), resp, c, &Account{ID: 1}, time.Now(), "", "")
+	require.NoError(t, err)
+	require.Equal(t, 1, strings.Count(recorder.Body.String(), `"status":"completed"`))
+	require.Contains(t, recorder.Body.String(), `"status":"in_progress"`)
+	require.Equal(t, 1, strings.Count(recorder.Body.String(), `"type":"response.done"`))
+	require.Equal(t, 1, strings.Count(recorder.Body.String(), `"usage"`))
+	require.Equal(t, 2, result.usage.InputTokens)
+	require.Equal(t, 3, result.usage.OutputTokens)
+}
+
+func TestOpenAIImageStatusStreamingDoesNotCompleteBeforeSuccess(t *testing.T) {
+	terminalCases := []struct {
+		name     string
+		terminal string
+	}{
+		{name: "failed", terminal: `{"type":"response.failed","response":{"status":"failed","error":{"message":"render failed"},"usage":{"input_tokens":2,"output_tokens":3}}}`},
+		{name: "incomplete", terminal: `{"type":"response.incomplete","response":{"status":"incomplete","usage":{"input_tokens":2,"output_tokens":3}}}`},
+		{name: "cancelled", terminal: `{"type":"response.cancelled","response":{"status":"cancelled","usage":{"input_tokens":2,"output_tokens":3}}}`},
+		{name: "done with error", terminal: `{"type":"response.done","error":{"message":"render failed"},"response":{"output":[{"type":"image_generation_call","status":"generating","result":"partial"}],"usage":{"input_tokens":2,"output_tokens":3}}}`},
+	}
+
+	for _, tt := range terminalCases {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, passthrough := range []bool{false, true} {
+				pathName := "oauth"
+				if passthrough {
+					pathName = "passthrough"
+				}
+				t.Run(pathName, func(t *testing.T) {
+					gin.SetMode(gin.TestMode)
+					svc := newOpenAIImageGenerationControlTestService(&httpUpstreamRecorder{})
+					c, recorder := newOpenAIImageGenerationControlTestContext(true, "unit-test-agent/1.0")
+					resp := &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(
+						"data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"image_generation_call\",\"status\":\"generating\",\"result\":\"partial\"}}\n\n" +
+							"data: " + tt.terminal + "\n\n"))}
+
+					if passthrough {
+						_, _ = svc.handleStreamingResponsePassthrough(context.Background(), resp, c, &Account{ID: 1}, time.Now(), "", "")
+					} else {
+						_, _ = svc.handleStreamingResponse(context.Background(), resp, c, &Account{ID: 1}, time.Now(), "gpt-5.5", "gpt-5.5")
+					}
+
+					require.NotContains(t, recorder.Body.String(), `"status":"completed"`)
+					require.Contains(t, recorder.Body.String(), `"status":"generating"`)
+				})
+			}
+		})
+	}
+}
+
+func TestExtractCodexFinalResponseRejectsConflictingTerminalState(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+	}{
+		{name: "failed then completed", body: "data: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\"}}\n\n" + "data: {\"type\":\"response.completed\",\"response\":{\"output\":[{\"type\":\"image_generation_call\",\"status\":\"generating\",\"result\":\"image\"}]}}"},
+		{name: "completed then failed", body: "data: {\"type\":\"response.completed\",\"response\":{\"output\":[{\"type\":\"image_generation_call\",\"status\":\"generating\",\"result\":\"image\"}]}}\n\n" + "data: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\"}}"},
+		{name: "completed then done", body: "data: {\"type\":\"response.completed\",\"response\":{\"output\":[]}}\n\n" + "data: {\"type\":\"response.done\",\"response\":{\"output\":[]}}"},
+		{name: "unknown success status", body: "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"aborted\",\"output\":[]}}"},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			_, ok := extractCodexFinalResponse(tt.body)
+			require.False(t, ok)
+		})
+	}
+}
+
+func TestOpenAIImageStatusStreamingSuppressesDuplicateTerminal(t *testing.T) {
+	for _, passthrough := range []bool{false, true} {
+		name := "oauth"
+		if passthrough {
+			name = "passthrough"
+		}
+		t.Run(name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			svc := newOpenAIImageGenerationControlTestService(&httpUpstreamRecorder{})
+			c, recorder := newOpenAIImageGenerationControlTestContext(true, "unit-test-agent/1.0")
+			resp := &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(strings.Join([]string{
+				`event: response.completed`,
+				`data: {"response":{"output":[{"type":"image_generation_call","status":"generating","result":"image"}],"usage":{"input_tokens":2,"output_tokens":3}}}`,
+				``,
+				`event: response.done`,
+				`data: {"response":{"output":[{"type":"image_generation_call","status":"in_progress","result":"image"}],"usage":{"input_tokens":20,"output_tokens":30}}}`,
+				``,
+			}, "\n")))}
+
+			var inputTokens, outputTokens int
+			if passthrough {
+				result, err := svc.handleStreamingResponsePassthrough(context.Background(), resp, c, &Account{ID: 1}, time.Now(), "", "")
+				require.NoError(t, err)
+				inputTokens, outputTokens = result.usage.InputTokens, result.usage.OutputTokens
+			} else {
+				result, err := svc.handleStreamingResponse(context.Background(), resp, c, &Account{ID: 1}, time.Now(), "gpt-5.5", "gpt-5.5")
+				require.NoError(t, err)
+				inputTokens, outputTokens = result.usage.InputTokens, result.usage.OutputTokens
+			}
+
+			require.Equal(t, 1, strings.Count(recorder.Body.String(), `event: response.completed`))
+			require.NotContains(t, recorder.Body.String(), `event: response.done`)
+			require.Contains(t, recorder.Body.String(), "}\n\n")
+			require.Equal(t, 1, strings.Count(recorder.Body.String(), `"status":"completed"`))
+			require.Equal(t, 2, inputTokens)
+			require.Equal(t, 3, outputTokens)
+		})
+	}
 }
 
 func newOpenAIImageGenerationControlTestService(upstream *httpUpstreamRecorder) *OpenAIGatewayService {

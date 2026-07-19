@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"regexp"
 	"strings"
 	"testing"
 
@@ -409,7 +408,7 @@ func TestBuildCountTokensRequestAnthropicAPIKeyPassthrough_StripsContextManageme
 // ============================================================================
 // 集成测试：buildUpstreamRequest
 // 全路径验证上游 outgoing body 与 anthropic-beta header 严格对称。
-// 这个测试能挡住未来某人忘调 sanitize / 将 sanitize 挪到 CCH 之后 等 regression。
+// 这个测试能挡住未来某人忘调 sanitize，导致 body/header 能力维度不对称的 regression。
 // ============================================================================
 
 func TestBuildUpstreamRequest_OAuthMimicHaiku_StripsContextManagementEndToEnd(t *testing.T) {
@@ -503,66 +502,101 @@ func TestBuildUpstreamRequest_OAuthTransparentHaikuWithRealCCBeta_PreservesField
 		"回归保护：真 CC + haiku + 客户端带 beta token 时，clear_thinking_20251015 功能不能静默失效")
 }
 
-// CCH 顺序语义测试：sanitize 必须在 signBillingHeaderCCH 之前，
-// 否则签名的 hash 与最终发送的 body 不一致，被 Anthropic 判 third-party。
-//
-// 该测试不走 buildUpstreamRequest 完整路径（需要 mock SettingService 成本高），
-// 而是直接验证两个顺序产生的 cch 不同，证明二者不可交换。
-// 测试名本身是语义约束的文档化 marker。
-func TestSanitizeMustBeBeforeCCHSigning_HashConsistency(t *testing.T) {
-	// 构造 body：含 context_management + cch=00000 占位符
-	body := []byte(`{"model":"claude-haiku-4-5","context_management":{"edits":[{"type":"clear_thinking_20251015"}]},"system":[{"type":"text","text":"x-anthropic-billing-header: cc_version=2.1.92; cch=00000;"}],"messages":[]}`)
+func TestBuildUpstreamRequest_CCHSettingNoOpForMessages(t *testing.T) {
+	falseBody := buildMessagesWireBodyWithCCHSetting(t, false)
+	trueBody := buildMessagesWireBodyWithCCHSetting(t, true)
 
-	// 最终发送场景：final beta 不含 context-management beta → sanitize 会 strip
-	finalBeta := "oauth-2025-04-20,interleaved-thinking-2025-05-14"
+	require.JSONEq(t, string(falseBody), string(trueBody))
+	require.NotContains(t, string(trueBody), "cch=")
+	require.False(t, gjson.GetBytes(trueBody, "context_management").Exists(),
+		"context_management sanitize must still run before request construction")
+}
 
-	extractCCH := func(t *testing.T, b []byte) string {
-		t.Helper()
-		m := regexp.MustCompile(`\bcch=([0-9a-fA-F]{5})\b`).FindSubmatch(b)
-		require.NotNil(t, m, "body 里找不到 cch=<5hex> ：%s", string(b))
-		return string(m[1])
+func TestBuildCountTokensRequest_CCHSettingNoOpForCountTokens(t *testing.T) {
+	falseBody := buildCountTokensWireBodyWithCCHSetting(t, false)
+	trueBody := buildCountTokensWireBodyWithCCHSetting(t, true)
+
+	require.JSONEq(t, string(falseBody), string(trueBody))
+	require.NotContains(t, string(trueBody), "cch=")
+	require.False(t, gjson.GetBytes(trueBody, "temperature").Exists(),
+		"count_tokens request sanitize must still run")
+}
+
+func buildMessagesWireBodyWithCCHSetting(t *testing.T, enabled bool) []byte {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	body := rewriteSystemForNonClaudeCode(
+		[]byte(`{"model":"claude-haiku-4-5","system":"Be concise","context_management":{"edits":[{"type":"clear_thinking_20251015"}]},"messages":[{"role":"user","content":"hello"}]}`),
+		"Be concise",
+	)
+	repo := &gatewayTTLSettingRepo{data: map[string]string{
+		SettingKeyEnableCCHSigning: boolString(enabled),
+	}}
+	gatewayForwardingCache.Store(&cachedGatewayForwardingSettings{})
+	t.Cleanup(func() {
+		gatewayForwardingCache.Store(&cachedGatewayForwardingSettings{})
+	})
+	svc := &GatewayService{
+		cfg:            &config.Config{},
+		settingService: NewSettingService(repo, &config.Config{}),
+	}
+	account := &Account{ID: 421, Platform: PlatformAnthropic, Type: AccountTypeOAuth,
+		Credentials: map[string]any{"access_token": "oauth-tok"},
+		Status:      StatusActive, Schedulable: true,
 	}
 
-	// === 正确顺序：sanitize → signBillingHeaderCCH ===
-	// 1. strip context_management
-	sanitizedFirst, changed := sanitizeAnthropicBodyForBetaTokens(body, finalBeta)
-	require.True(t, changed)
-	require.False(t, gjson.GetBytes(sanitizedFirst, "context_management").Exists())
-	// 2. 基于“strip 后的 body”算 hash
-	correctFinal := signBillingHeaderCCH(sanitizedFirst)
-	correctCCH := extractCCH(t, correctFinal)
-	require.NotEqual(t, "00000", correctCCH, "placeholder 应被替换")
+	req, _, err := svc.buildUpstreamRequest(
+		context.Background(), c, account, body,
+		"oauth-tok", "oauth", "claude-haiku-4-5", false, true,
+	)
+	require.NoError(t, err)
+	return readUpstreamBodyForTest(t, req)
+}
 
-	// === 错误顺序：signBillingHeaderCCH → sanitize（未来 regression 场景）===
-	// 1. 先基于“含 context_management 的 body”算 hash → cch=H_with
-	signedFirst := signBillingHeaderCCH(body)
-	wrongCCH := extractCCH(t, signedFirst)
-	require.NotEqual(t, "00000", wrongCCH)
-	// 2. 后 strip context_management → body 变化但 cch 仍是 H_with
-	wrongFinal, _ := sanitizeAnthropicBodyForBetaTokens(signedFirst, finalBeta)
-	wrongFinalCCH := extractCCH(t, wrongFinal)
+func buildCountTokensWireBodyWithCCHSetting(t *testing.T, enabled bool) []byte {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages/count_tokens", nil)
 
-	// === 关键断言 ===
-	// 上游验证逻辑：将 outgoing body 的 cch 还原为 00000、重算 hash、与 cch 字段比较。
-	// 模拟上游验证：用发送 body 算出“期望的 cch”，与发送 body 里的 cch 字段比。
-	recomputeExpected := func(b []byte, currentCCH string) string {
-		t.Helper()
-		// 把 cch=<currentCCH> 还原为 cch=00000
-		re := regexp.MustCompile(`(\bcch=)` + currentCCH + `(\b)`)
-		restored := re.ReplaceAll(b, []byte("${1}00000${2}"))
-		return extractCCH(t, signBillingHeaderCCH(restored))
+	body := rewriteSystemForNonClaudeCode(
+		[]byte(`{"model":"claude-haiku-4-5","system":"Be concise","temperature":0.2,"messages":[{"role":"user","content":"hello"}]}`),
+		"Be concise",
+	)
+	repo := &gatewayTTLSettingRepo{data: map[string]string{
+		SettingKeyEnableCCHSigning: boolString(enabled),
+	}}
+	gatewayForwardingCache.Store(&cachedGatewayForwardingSettings{})
+	t.Cleanup(func() {
+		gatewayForwardingCache.Store(&cachedGatewayForwardingSettings{})
+	})
+	svc := &GatewayService{
+		cfg:            &config.Config{},
+		settingService: NewSettingService(repo, &config.Config{}),
+	}
+	account := &Account{ID: 422, Platform: PlatformAnthropic, Type: AccountTypeOAuth,
+		Credentials: map[string]any{"access_token": "oauth-tok"},
+		Status:      StatusActive, Schedulable: true,
 	}
 
-	// 正确顺序：发送 body 的 cch == 重算 hash → 上游验证过
-	require.Equal(t, correctCCH, recomputeExpected(correctFinal, correctCCH),
-		"正确顺序：final body 里的 cch 与重算 hash 一致 → 上游验证通过")
+	req, _, err := svc.buildCountTokensRequest(
+		context.Background(), c, account, body,
+		"oauth-tok", "oauth", "claude-haiku-4-5", true,
+	)
+	require.NoError(t, err)
+	return readUpstreamBodyForTest(t, req)
+}
 
-	// 错误顺序：发送 body 的 cch 是“含 ctx 算的”，但最终 body 不含 ctx → 重算 hash 不同
-	require.NotEqual(t, wrongFinalCCH, recomputeExpected(wrongFinal, wrongFinalCCH),
-		"错误顺序：final body 里的 cch 是基于含 ctx 的 body 算的，"+
-			"但发送 body 已 strip ctx → 上游重算 hash 与 cch 不一致 → 被判 third-party。"+
-			"这是 buildUpstreamRequest / buildCountTokensRequest 里 sanitize 必须在 "+
-			"signBillingHeaderCCH 之前的原因。")
+func boolString(v bool) string {
+	if v {
+		return "true"
+	}
+	return "false"
 }
 
 // count_tokens 主路径 E2E 集成测试

@@ -478,6 +478,11 @@ func TestContentModerationCheck_PreBlockKeywordHitSkipsUpstreamCall(t *testing.T
 	require.True(t, logs[0].Flagged)
 	require.Equal(t, ContentModerationActionKeywordBlock, logs[0].Action)
 	require.Equal(t, contentModerationKeywordCategory, logs[0].HighestCategory)
+	require.Equal(t, "secret-token", logs[0].MatchedKeyword)
+	decisionJSON, err := json.Marshal(decision)
+	require.NoError(t, err)
+	require.NotContains(t, string(decisionJSON), "secret-token", "matched keyword must not leak to the user response")
+	require.NotContains(t, string(decisionJSON), "matched_keyword")
 }
 
 func TestContentModerationCheck_KeywordsIgnoredInObserveMode(t *testing.T) {

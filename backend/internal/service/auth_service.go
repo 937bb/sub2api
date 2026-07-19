@@ -951,15 +951,15 @@ func (s *AuthService) shouldApplyEmailFirstBindDefaults(
 	identity *dbent.AuthIdentity,
 	created bool,
 ) bool {
+	if s == nil || s.entClient == nil || userID <= 0 || identity == nil || identity.UserID != userID {
+		return false
+	}
 	source := emailAuthIdentitySource(identity.Metadata)
 	if source == "auth_service_login_backfill" {
 		return false
 	}
 	if created {
 		return true
-	}
-	if s == nil || s.entClient == nil || userID <= 0 || identity == nil || identity.UserID != userID {
-		return false
 	}
 	if source != "auth_service_dual_write" {
 		return false
@@ -1041,7 +1041,7 @@ func (s *AuthService) ensureEmailAuthIdentity(ctx context.Context, user *User, s
 	}
 
 	if !existed {
-		if err := client.AuthIdentity.Create().
+		if err = client.AuthIdentity.Create().
 			SetUserID(user.ID).
 			SetProviderType("email").
 			SetProviderKey("email").
@@ -1664,6 +1664,7 @@ func (s *AuthService) snapshotPlatformQuotaDefaults(ctx context.Context, userID 
 	if s.userPlatformQuotaRepo == nil || plan == nil || len(plan.PlatformQuotas) == 0 {
 		return nil
 	}
+	ctx = dbent.WithoutTx(ctx)
 	records := make([]UserPlatformQuotaRecord, 0, len(plan.PlatformQuotas))
 	for platform, q := range plan.PlatformQuotas {
 		rec := UserPlatformQuotaRecord{

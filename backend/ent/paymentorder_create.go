@@ -259,6 +259,20 @@ func (_c *PaymentOrderCreate) SetNillableStatus(v *string) *PaymentOrderCreate {
 	return _c
 }
 
+// SetFulfillmentLeaseToken sets the "fulfillment_lease_token" field.
+func (_c *PaymentOrderCreate) SetFulfillmentLeaseToken(v string) *PaymentOrderCreate {
+	_c.mutation.SetFulfillmentLeaseToken(v)
+	return _c
+}
+
+// SetNillableFulfillmentLeaseToken sets the "fulfillment_lease_token" field if the given value is not nil.
+func (_c *PaymentOrderCreate) SetNillableFulfillmentLeaseToken(v *string) *PaymentOrderCreate {
+	if v != nil {
+		_c.SetFulfillmentLeaseToken(*v)
+	}
+	return _c
+}
+
 // SetRefundAmount sets the "refund_amount" field.
 func (_c *PaymentOrderCreate) SetRefundAmount(v float64) *PaymentOrderCreate {
 	_c.mutation.SetRefundAmount(v)
@@ -635,6 +649,11 @@ func (_c *PaymentOrderCreate) check() error {
 			return &ValidationError{Name: "status", err: fmt.Errorf(`ent: validator failed for field "PaymentOrder.status": %w`, err)}
 		}
 	}
+	if v, ok := _c.mutation.FulfillmentLeaseToken(); ok {
+		if err := paymentorder.FulfillmentLeaseTokenValidator(v); err != nil {
+			return &ValidationError{Name: "fulfillment_lease_token", err: fmt.Errorf(`ent: validator failed for field "PaymentOrder.fulfillment_lease_token": %w`, err)}
+		}
+	}
 	if _, ok := _c.mutation.RefundAmount(); !ok {
 		return &ValidationError{Name: "refund_amount", err: errors.New(`ent: missing required field "PaymentOrder.refund_amount"`)}
 	}
@@ -784,6 +803,10 @@ func (_c *PaymentOrderCreate) createSpec() (*PaymentOrder, *sqlgraph.CreateSpec)
 	if value, ok := _c.mutation.Status(); ok {
 		_spec.SetField(paymentorder.FieldStatus, field.TypeString, value)
 		_node.Status = value
+	}
+	if value, ok := _c.mutation.FulfillmentLeaseToken(); ok {
+		_spec.SetField(paymentorder.FieldFulfillmentLeaseToken, field.TypeString, value)
+		_node.FulfillmentLeaseToken = &value
 	}
 	if value, ok := _c.mutation.RefundAmount(); ok {
 		_spec.SetField(paymentorder.FieldRefundAmount, field.TypeFloat64, value)
@@ -1279,6 +1302,24 @@ func (u *PaymentOrderUpsert) SetStatus(v string) *PaymentOrderUpsert {
 // UpdateStatus sets the "status" field to the value that was provided on create.
 func (u *PaymentOrderUpsert) UpdateStatus() *PaymentOrderUpsert {
 	u.SetExcluded(paymentorder.FieldStatus)
+	return u
+}
+
+// SetFulfillmentLeaseToken sets the "fulfillment_lease_token" field.
+func (u *PaymentOrderUpsert) SetFulfillmentLeaseToken(v string) *PaymentOrderUpsert {
+	u.Set(paymentorder.FieldFulfillmentLeaseToken, v)
+	return u
+}
+
+// UpdateFulfillmentLeaseToken sets the "fulfillment_lease_token" field to the value that was provided on create.
+func (u *PaymentOrderUpsert) UpdateFulfillmentLeaseToken() *PaymentOrderUpsert {
+	u.SetExcluded(paymentorder.FieldFulfillmentLeaseToken)
+	return u
+}
+
+// ClearFulfillmentLeaseToken clears the value of the "fulfillment_lease_token" field.
+func (u *PaymentOrderUpsert) ClearFulfillmentLeaseToken() *PaymentOrderUpsert {
+	u.SetNull(paymentorder.FieldFulfillmentLeaseToken)
 	return u
 }
 
@@ -2002,6 +2043,27 @@ func (u *PaymentOrderUpsertOne) SetStatus(v string) *PaymentOrderUpsertOne {
 func (u *PaymentOrderUpsertOne) UpdateStatus() *PaymentOrderUpsertOne {
 	return u.Update(func(s *PaymentOrderUpsert) {
 		s.UpdateStatus()
+	})
+}
+
+// SetFulfillmentLeaseToken sets the "fulfillment_lease_token" field.
+func (u *PaymentOrderUpsertOne) SetFulfillmentLeaseToken(v string) *PaymentOrderUpsertOne {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.SetFulfillmentLeaseToken(v)
+	})
+}
+
+// UpdateFulfillmentLeaseToken sets the "fulfillment_lease_token" field to the value that was provided on create.
+func (u *PaymentOrderUpsertOne) UpdateFulfillmentLeaseToken() *PaymentOrderUpsertOne {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.UpdateFulfillmentLeaseToken()
+	})
+}
+
+// ClearFulfillmentLeaseToken clears the value of the "fulfillment_lease_token" field.
+func (u *PaymentOrderUpsertOne) ClearFulfillmentLeaseToken() *PaymentOrderUpsertOne {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.ClearFulfillmentLeaseToken()
 	})
 }
 
@@ -2934,6 +2996,27 @@ func (u *PaymentOrderUpsertBulk) SetStatus(v string) *PaymentOrderUpsertBulk {
 func (u *PaymentOrderUpsertBulk) UpdateStatus() *PaymentOrderUpsertBulk {
 	return u.Update(func(s *PaymentOrderUpsert) {
 		s.UpdateStatus()
+	})
+}
+
+// SetFulfillmentLeaseToken sets the "fulfillment_lease_token" field.
+func (u *PaymentOrderUpsertBulk) SetFulfillmentLeaseToken(v string) *PaymentOrderUpsertBulk {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.SetFulfillmentLeaseToken(v)
+	})
+}
+
+// UpdateFulfillmentLeaseToken sets the "fulfillment_lease_token" field to the value that was provided on create.
+func (u *PaymentOrderUpsertBulk) UpdateFulfillmentLeaseToken() *PaymentOrderUpsertBulk {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.UpdateFulfillmentLeaseToken()
+	})
+}
+
+// ClearFulfillmentLeaseToken clears the value of the "fulfillment_lease_token" field.
+func (u *PaymentOrderUpsertBulk) ClearFulfillmentLeaseToken() *PaymentOrderUpsertBulk {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.ClearFulfillmentLeaseToken()
 	})
 }
 

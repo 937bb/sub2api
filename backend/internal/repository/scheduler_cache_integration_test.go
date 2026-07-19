@@ -12,6 +12,26 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestSchedulerCacheBucketUnlockRequiresOwnerToken(t *testing.T) {
+	ctx := context.Background()
+	rdb := testRedis(t)
+	cache := NewSchedulerCache(rdb)
+	bucket := service.SchedulerBucket{GroupID: 91, Platform: service.PlatformOpenAI, Mode: service.SchedulerModeSingle}
+
+	firstToken, acquired, err := cache.TryLockBucket(ctx, bucket, time.Minute)
+	require.NoError(t, err)
+	require.True(t, acquired)
+	require.NotEmpty(t, firstToken)
+
+	// A timed-out former owner must not delete a lock acquired by its successor.
+	require.NoError(t, rdb.Set(ctx, schedulerBucketKey(schedulerLockPrefix, bucket), "successor", time.Minute).Err())
+	require.NoError(t, cache.UnlockBucket(ctx, bucket, firstToken))
+	require.Equal(t, "successor", rdb.Get(ctx, schedulerBucketKey(schedulerLockPrefix, bucket)).Val())
+
+	require.NoError(t, cache.UnlockBucket(ctx, bucket, "successor"))
+	require.Equal(t, int64(0), rdb.Exists(ctx, schedulerBucketKey(schedulerLockPrefix, bucket)).Val())
+}
+
 func TestSchedulerCacheSnapshotUsesSlimMetadataButKeepsFullAccount(t *testing.T) {
 	ctx := context.Background()
 	rdb := testRedis(t)
@@ -102,4 +122,28 @@ func TestSchedulerCacheSnapshotUsesSlimMetadataButKeepsFullAccount(t *testing.T)
 	require.Equal(t, strings.Repeat("x", 4096), full.GetCredential("huge_blob"))
 	require.Len(t, full.AccountGroups, 1)
 	require.NotNil(t, full.AccountGroups[0].Group)
+}
+
+func TestSchedulerCacheUpdateLastUsedDoesNotRegress(t *testing.T) {
+	ctx := context.Background()
+	rdb := testRedis(t)
+	cache := NewSchedulerCache(rdb)
+
+	newer := time.Now().UTC().Truncate(time.Second)
+	older := newer.Add(-time.Hour)
+	account := service.Account{ID: 202, LastUsedAt: &newer}
+	require.NoError(t, cache.SetAccount(ctx, &account))
+
+	require.NoError(t, cache.UpdateLastUsed(ctx, map[int64]time.Time{account.ID: older}))
+	got, err := cache.GetAccount(ctx, account.ID)
+	require.NoError(t, err)
+	require.NotNil(t, got.LastUsedAt)
+	require.Equal(t, newer, *got.LastUsedAt)
+
+	metaRaw, err := rdb.Get(ctx, schedulerAccountMetaKey("202")).Result()
+	require.NoError(t, err)
+	meta, err := decodeCachedAccount(metaRaw)
+	require.NoError(t, err)
+	require.NotNil(t, meta.LastUsedAt)
+	require.Equal(t, newer, *meta.LastUsedAt)
 }

@@ -17,6 +17,10 @@ import (
 	"github.com/tidwall/sjson"
 )
 
+const (
+	InvalidJSONCategoryValidation = "validation"
+)
+
 var (
 	// 这些字节模式用于 fast-path 判断，避免每次 []byte("...") 产生临时分配。
 	patternTypeThinking         = []byte(`"type":"thinking"`)
@@ -168,7 +172,7 @@ func parseGatewayRequestCurrentBody(parsed *ParsedRequest, protocol string) erro
 
 	bodyBytes := parsed.Body.Bytes()
 	if !gjson.ValidBytes(bodyBytes) {
-		return fmt.Errorf("invalid json")
+		return DescribeInvalidJSON(bodyBytes)
 	}
 
 	// 只在当前函数内零拷贝读取 JSON 字段；ReplaceBody 后必须重新进入本函数刷新派生状态。
@@ -214,6 +218,33 @@ func parseGatewayRequestCurrentBody(parsed *ParsedRequest, protocol string) erro
 
 func refreshGatewayRequestRanges(parsed *ParsedRequest, protocol string) error {
 	return parseGatewayRequestCurrentBody(parsed, protocol)
+}
+
+type InvalidJSONDiagnostic struct {
+	Length   int
+	Offset   int64
+	Category string
+}
+
+func (d InvalidJSONDiagnostic) Error() string {
+	if d.Offset > 0 {
+		return fmt.Sprintf("invalid json (len=%d, offset=%d, category=%s)", d.Length, d.Offset, d.Category)
+	}
+	return fmt.Sprintf("invalid json (len=%d, category=%s)", d.Length, d.Category)
+}
+
+// DescribeInvalidJSON returns a sanitized diagnostic for a request body that
+// failed JSON validation. It intentionally excludes parser strings, field names,
+// and body bytes because encoding/json errors can echo offending input.
+func DescribeInvalidJSON(body []byte) error {
+	return NewInvalidJSONDiagnostic(body)
+}
+
+func NewInvalidJSONDiagnostic(body []byte) InvalidJSONDiagnostic {
+	return InvalidJSONDiagnostic{
+		Length:   len(body),
+		Category: InvalidJSONCategoryValidation,
+	}
 }
 
 // ParsedRequest 保存网关请求的预解析结果
@@ -839,8 +870,8 @@ const anthropicBetaContextManagementToken = "context-management-2025-06-27"
 // context_management 字段：缺 beta token → strip。这将限制完全建立在
 // "能力维度" 上，与 model 名 / token type / mimicry 子路径无关。
 //
-// 调用约束：必须在 CCH 签名之前调用，否则签名 hash 与最终 body
-// 不一致，上游会以 third-party 拒收。
+// 调用约束：必须在构造最终上游请求前调用，确保 body 与最终
+// anthropic-beta header 的能力维度保持一致。
 //
 // 返回 (sanitized, changed)：changed 表示是否发生实际删除，供调用方决定
 // 是否重用原 body 引用。
@@ -1232,6 +1263,52 @@ func NormalizeChineseLLMThinking(body []byte, mappedModel string) ([]byte, bool)
 		return body, false
 	}
 	return modified, true
+}
+
+// NormalizeGLMOpenAIReasoningEffort rewrites OpenAI-compatible reasoning effort
+// values to GLM's native upstream scale while leaving other providers untouched.
+func NormalizeGLMOpenAIReasoningEffort(body []byte, mappedModel string) ([]byte, bool) {
+	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(mappedModel)), "glm-") {
+		return body, false
+	}
+
+	path := "reasoning.effort"
+	raw := strings.TrimSpace(gjson.GetBytes(body, path).String())
+	if raw == "" {
+		path = "reasoning_effort"
+		raw = strings.TrimSpace(gjson.GetBytes(body, path).String())
+	}
+	if raw == "" {
+		return body, false
+	}
+
+	mapped := normalizeGLMOpenAIReasoningEffort(raw)
+	if mapped == "" || mapped == raw {
+		return body, false
+	}
+
+	modified, err := sjson.SetBytes(body, path, mapped)
+	if err != nil {
+		return body, false
+	}
+	return modified, true
+}
+
+func normalizeGLMOpenAIReasoningEffort(raw string) string {
+	value := strings.ToLower(strings.TrimSpace(raw))
+	if value == "" {
+		return ""
+	}
+	value = strings.NewReplacer("-", "", "_", "", " ", "").Replace(value)
+
+	switch value {
+	case "low", "medium", "high":
+		return "high"
+	case "xhigh", "extrahigh", "max", "ultracode":
+		return "max"
+	default:
+		return ""
+	}
 }
 
 // =========================

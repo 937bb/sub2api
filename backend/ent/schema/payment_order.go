@@ -103,6 +103,10 @@ func (PaymentOrder) Fields() []ent.Field {
 		field.String("status").
 			MaxLen(30).
 			Default("PENDING"),
+		field.String("fulfillment_lease_token").
+			Optional().
+			Nillable().
+			MaxLen(64),
 
 		// 退款信息
 		field.Float("refund_amount").

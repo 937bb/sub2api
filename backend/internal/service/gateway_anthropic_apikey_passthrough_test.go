@@ -65,6 +65,83 @@ func (u *anthropicHTTPUpstreamRecorder) DoWithTLS(req *http.Request, proxyURL st
 	return u.Do(req, proxyURL, accountID, accountConcurrency)
 }
 
+type anthropicQueuedHTTPUpstream struct {
+	responses []*http.Response
+	onDo      func(int)
+	calls     int
+}
+
+func (u *anthropicQueuedHTTPUpstream) Do(
+	_ *http.Request,
+	_ string,
+	_ int64,
+	_ int,
+) (*http.Response, error) {
+	u.calls++
+	if u.onDo != nil {
+		u.onDo(u.calls)
+	}
+	if u.calls > len(u.responses) {
+		return nil, errors.New("unexpected upstream call")
+	}
+	return u.responses[u.calls-1], nil
+}
+
+func (u *anthropicQueuedHTTPUpstream) DoWithTLS(
+	req *http.Request,
+	proxyURL string,
+	accountID int64,
+	accountConcurrency int,
+	_ *tlsfingerprint.Profile,
+) (*http.Response, error) {
+	return u.Do(req, proxyURL, accountID, accountConcurrency)
+}
+
+func TestGatewayService_AnthropicAPIKeyPassthrough_RetryCancellationPreservesCompletedError(
+	t *testing.T,
+) {
+	gin.SetMode(gin.TestMode)
+	ctx, cancel := context.WithCancel(context.Background())
+	ctx = withHTTPAttemptAuthority(ctx)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	upstream := &anthropicQueuedHTTPUpstream{
+		responses: []*http.Response{{
+			StatusCode: http.StatusServiceUnavailable,
+			Header:     http.Header{"X-Request-Id": []string{"completed"}},
+			Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"completed error"}}`)),
+		}},
+		onDo: func(call int) {
+			if call == 1 {
+				cancel()
+			}
+		},
+	}
+	svc := &GatewayService{
+		httpUpstream: upstream,
+		cfg:          &config.Config{},
+	}
+	account := newAnthropicAPIKeyAccountForTest()
+
+	_, err := svc.forwardAnthropicAPIKeyPassthrough(
+		ctx,
+		c,
+		account,
+		[]byte(`{"model":"claude-3-5-sonnet-latest","messages":[]}`),
+		"claude-3-5-sonnet-latest",
+		"claude-3-5-sonnet-latest",
+		false,
+		time.Now(),
+	)
+
+	require.Error(t, err)
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.Contains(t, string(failoverErr.ResponseBody), "completed error")
+	require.Equal(t, 1, upstream.calls)
+}
+
 type streamReadCloser struct {
 	payload []byte
 	sent    bool
@@ -190,6 +267,33 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_ForwardStreamPreservesBodyAnd
 	require.Empty(t, rec.Header().Get("Set-Cookie"), "响应头应经过安全过滤")
 }
 
+func TestGatewayService_AnthropicAPIKeyPassthrough_CountTokensCancellationBeforeAdmissionHasNoSideEffects(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, cancel := context.WithCancel(context.Background())
+	ctx = WithHTTPAttemptAdmissionHook(ctx, cancel)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages/count_tokens", nil)
+	upstream := &anthropicHTTPUpstreamRecorder{}
+	svc := &GatewayService{
+		httpUpstream: upstream,
+		cfg:          &config.Config{},
+	}
+	account := newAnthropicAPIKeyAccountForTest()
+	parsed := &ParsedRequest{
+		Model: "claude-3-5-sonnet-latest",
+		Body:  NewRequestBodyRef([]byte(`{"model":"claude-3-5-sonnet-latest","messages":[]}`)),
+	}
+
+	err := svc.ForwardCountTokens(ctx, c, account, parsed)
+
+	require.True(t, IsHTTPUpstreamAttemptNotAdmitted(err))
+	require.ErrorIs(t, err, context.Canceled)
+	require.Nil(t, upstream.lastReq)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Empty(t, rec.Body.String())
+}
+
 func TestGatewayService_AnthropicAPIKeyPassthrough_ForwardCountTokensPreservesBody(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -259,6 +363,101 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_ForwardCountTokensPreservesBo
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.JSONEq(t, upstreamRespBody, rec.Body.String())
 	require.Empty(t, rec.Header().Get("Set-Cookie"))
+}
+
+func TestGatewayService_AnthropicAPIKeyPassthrough_BearerAuthScheme(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	c.Request.Header.Set("Authorization", "Bearer inbound-token")
+	c.Request.Header.Set("X-Api-Key", "inbound-api-key")
+	c.Request.Header.Set("Cookie", "secret=1")
+
+	svc := &GatewayService{
+		cfg: &config.Config{
+			Security: config.SecurityConfig{
+				URLAllowlist: config.URLAllowlistConfig{Enabled: false},
+			},
+		},
+	}
+	account := &Account{
+		Platform: PlatformAnthropic,
+		Type:     AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"api_key":  "ollama-key",
+			"base_url": "https://ollama.com",
+		},
+		Extra: map[string]any{
+			"anthropic_passthrough":        true,
+			"anthropic_apikey_auth_scheme": AnthropicAPIKeyAuthSchemeAuthorizationBearer,
+		},
+	}
+
+	msgReq, wireBody, err := svc.buildUpstreamRequestAnthropicAPIKeyPassthrough(
+		context.Background(), c, account, []byte(`{"model":"gpt-oss:20b","messages":[]}`), "ollama-key",
+	)
+	require.NoError(t, err)
+	require.Equal(t, "https://ollama.com/v1/messages?beta=true", msgReq.URL.String())
+	require.JSONEq(t, `{"model":"gpt-oss:20b","messages":[]}`, string(wireBody))
+	require.Equal(t, "Bearer ollama-key", msgReq.Header["authorization"][0])
+	require.Empty(t, getHeaderRaw(msgReq.Header, "x-api-key"))
+	require.Empty(t, getHeaderRaw(msgReq.Header, "cookie"))
+
+	countReq, err := svc.buildCountTokensRequestAnthropicAPIKeyPassthrough(
+		context.Background(), c, account, []byte(`{"model":"gpt-oss:20b","messages":[]}`), "ollama-key",
+	)
+	require.NoError(t, err)
+	require.Equal(t, "https://ollama.com/v1/messages/count_tokens?beta=true", countReq.URL.String())
+	require.Equal(t, "Bearer ollama-key", countReq.Header["authorization"][0])
+	require.Empty(t, getHeaderRaw(countReq.Header, "x-api-key"))
+	require.Empty(t, getHeaderRaw(countReq.Header, "cookie"))
+}
+
+func TestGatewayService_AnthropicAPIKeyAuthSchemeRegularRequests(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	c.Request.Header.Set("Authorization", "Bearer inbound-token")
+	c.Request.Header.Set("X-Api-Key", "inbound-api-key")
+
+	svc := &GatewayService{cfg: &config.Config{Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}}}}
+	account := &Account{
+		Platform: PlatformAnthropic,
+		Type:     AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"base_url": "https://ollama.com",
+		},
+		Extra: map[string]any{
+			"anthropic_apikey_auth_scheme": AnthropicAPIKeyAuthSchemeAuthorizationBearer,
+		},
+	}
+	body := []byte(`{"model":"gpt-oss:20b","messages":[]}`)
+
+	msgReq, _, err := svc.buildUpstreamRequest(
+		context.Background(), c, account, body, "ollama-key", "apikey", "gpt-oss:20b", false, false,
+	)
+	require.NoError(t, err)
+	require.Equal(t, "Bearer ollama-key", msgReq.Header["authorization"][0])
+	require.Empty(t, getHeaderRaw(msgReq.Header, "x-api-key"))
+
+	countReq, _, err := svc.buildCountTokensRequest(
+		context.Background(), c, account, body, "ollama-key", "apikey", "gpt-oss:20b", false,
+	)
+	require.NoError(t, err)
+	require.Equal(t, "Bearer ollama-key", countReq.Header["authorization"][0])
+	require.Empty(t, getHeaderRaw(countReq.Header, "x-api-key"))
+
+	delete(account.Extra, "anthropic_apikey_auth_scheme")
+	defaultReq, _, err := svc.buildUpstreamRequest(
+		context.Background(), c, account, body, "anthropic-key", "apikey", "claude-3-5-sonnet-latest", false, false,
+	)
+	require.NoError(t, err)
+	require.Equal(t, "anthropic-key", defaultReq.Header["x-api-key"][0])
+	require.Empty(t, getHeaderRaw(defaultReq.Header, "authorization"))
 }
 
 // TestGatewayService_AnthropicAPIKeyPassthrough_ModelMappingEdgeCases 覆盖透传模式下模型映射的各种边界情况

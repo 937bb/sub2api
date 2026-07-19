@@ -2,18 +2,24 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+	"github.com/Wei-Shaw/sub2api/internal/util/logredact"
 )
 
 // tokenRefreshTempUnschedDuration token 刷新重试耗尽后临时不可调度的持续时间
 const tokenRefreshTempUnschedDuration = 10 * time.Minute
+
+const openAIOAuthTokenRefreshFailedReason = "OPENAI_OAUTH_TOKEN_REFRESH_FAILED"
 
 // TokenRefreshService OAuth token自动刷新服务
 // 定期检查并刷新即将过期的token
@@ -265,6 +271,7 @@ func (s *TokenRefreshService) refreshWithRetry(ctx context.Context, account *Acc
 	var lastErr error
 
 	for attempt := 1; attempt <= s.cfg.MaxRetries; attempt++ {
+		previousAccount := cloneAccountForTokenInvalidation(account)
 		var newCredentials map[string]any
 		var err error
 
@@ -295,13 +302,13 @@ func (s *TokenRefreshService) refreshWithRetry(ctx context.Context, account *Acc
 		}
 
 		if err == nil {
-			s.postRefreshActions(ctx, account)
+			s.postRefreshActions(ctx, previousAccount, account)
 			return nil
 		}
 
 		// 不可重试错误（invalid_grant/invalid_client 等）直接标记 error 状态并返回
 		if isNonRetryableRefreshError(err) {
-			errorMsg := fmt.Sprintf("Token refresh failed (non-retryable): %v", err)
+			errorMsg := fmt.Sprintf("Token refresh failed (non-retryable): %s", redactRefreshErrorText(err))
 			s.notifyAccountSchedulingBlocked(account, time.Time{}, "token_refresh_non_retryable")
 			if setErr := s.accountRepo.SetError(ctx, account.ID, errorMsg); setErr != nil {
 				slog.Error("token_refresh.set_error_status_failed",
@@ -338,7 +345,7 @@ func (s *TokenRefreshService) refreshWithRetry(ctx context.Context, account *Acc
 
 	// 设置临时不可调度 10 分钟（不标记 error，保持 status=active 让下个刷新周期能继续尝试）
 	until := time.Now().Add(tokenRefreshTempUnschedDuration)
-	reason := fmt.Sprintf("token refresh retry exhausted: %v", lastErr)
+	reason := fmt.Sprintf("token refresh retry exhausted: %s", redactRefreshErrorText(lastErr))
 	s.notifyAccountSchedulingBlocked(account, until, "token_refresh_retry_exhausted")
 	if setErr := s.accountRepo.SetTempUnschedulable(ctx, account.ID, until, reason); setErr != nil {
 		slog.Warn("token_refresh.set_temp_unschedulable_failed",
@@ -355,8 +362,15 @@ func (s *TokenRefreshService) refreshWithRetry(ctx context.Context, account *Acc
 	return lastErr
 }
 
+func redactRefreshErrorText(err error) string {
+	if err == nil {
+		return "<nil>"
+	}
+	return logredact.RedactText(err.Error())
+}
+
 // postRefreshActions 刷新成功后的后续动作（清除错误状态、缓存失效、调度器同步等）
-func (s *TokenRefreshService) postRefreshActions(ctx context.Context, account *Account) {
+func (s *TokenRefreshService) postRefreshActions(ctx context.Context, previousAccount, account *Account) {
 	// Antigravity 账户：如果之前是因为缺少 project_id 而标记为 error，现在成功获取到了，清除错误状态
 	if account.Platform == PlatformAntigravity &&
 		account.Status == StatusError &&
@@ -394,7 +408,13 @@ func (s *TokenRefreshService) postRefreshActions(ctx context.Context, account *A
 	}
 	// 对所有 OAuth 账号调用缓存失效（InvalidateToken 内部根据平台判断是否需要处理）
 	if s.cacheInvalidator != nil && account.Type == AccountTypeOAuth {
-		if err := s.cacheInvalidator.InvalidateToken(ctx, account); err != nil {
+		var err error
+		if changeInvalidator, ok := s.cacheInvalidator.(TokenCacheAccountChangeInvalidator); ok {
+			err = changeInvalidator.InvalidateTokenForAccountChange(ctx, previousAccount, account)
+		} else {
+			err = s.cacheInvalidator.InvalidateToken(ctx, account)
+		}
+		if err != nil {
 			slog.Warn("token_refresh.invalidate_token_cache_failed",
 				"account_id", account.ID,
 				"error", err,
@@ -430,16 +450,20 @@ func isNonRetryableRefreshError(err error) bool {
 	if err == nil {
 		return false
 	}
+	if isOpenAIOAuthTokenExpiredRefreshError(err) {
+		return true
+	}
 	msg := strings.ToLower(err.Error())
 	nonRetryable := []string{
-		"invalid_grant",          // refresh_token 已失效
-		"invalid_refresh_token",  // refresh_token 无效, team 账号工作区被删除会出现
-		"app_session_terminated", // refresh_token team 账号工作区被删除
-		"refresh_token_reused",   // OpenAI refresh_token 已被使用，必须重新授权
-		"invalid_client",         // 客户端配置错误
-		"unauthorized_client",    // 客户端未授权
-		"access_denied",          // 访问被拒绝
-		"missing_project_id",     // 缺少 project_id
+		"invalid_grant",             // refresh_token 已失效
+		"invalid_refresh_token",     // refresh_token 无效, team 账号工作区被删除会出现
+		"app_session_terminated",    // refresh_token team 账号工作区被删除
+		"refresh_token_reused",      // OpenAI refresh_token 已被使用，必须重新授权
+		"refresh_token_invalidated", // OpenAI session ended; refresh token invalidated
+		"invalid_client",            // 客户端配置错误
+		"unauthorized_client",       // 客户端未授权
+		"access_denied",             // 访问被拒绝
+		"missing_project_id",        // 缺少 project_id
 		"no refresh token available",
 	}
 	for _, needle := range nonRetryable {
@@ -448,6 +472,65 @@ func isNonRetryableRefreshError(err error) bool {
 		}
 	}
 	return false
+}
+
+func isOpenAIOAuthTokenExpiredRefreshError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	var appErr *infraerrors.ApplicationError
+	if errors.As(err, &appErr) && strings.EqualFold(appErr.Reason, openAIOAuthTokenRefreshFailedReason) {
+		return openAIRefreshMessageHasTokenExpiredCode(appErr.Message)
+	}
+
+	return false
+}
+
+func openAIRefreshMessageHasTokenExpiredCode(msg string) bool {
+	return openAIRefreshJSONBodyHasTokenExpiredCode(msg)
+}
+
+func openAIRefreshJSONBodyHasTokenExpiredCode(msg string) bool {
+	body, ok := extractOpenAIRefreshResponseBody(msg)
+	if !ok {
+		return false
+	}
+
+	var parsed struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	dec := json.NewDecoder(strings.NewReader(body))
+	if err := dec.Decode(&parsed); err != nil {
+		return false
+	}
+	var extra any
+	if err := dec.Decode(&extra); err != io.EOF {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(parsed.Error.Code), "token_expired")
+}
+
+func extractOpenAIRefreshResponseBody(msg string) (string, bool) {
+	lowerMsg := strings.ToLower(msg)
+	refreshIdx := strings.Index(lowerMsg, "token refresh failed")
+	if refreshIdx < 0 {
+		return "", false
+	}
+
+	bodyIdx := strings.Index(lowerMsg[refreshIdx:], "body:")
+	if bodyIdx < 0 {
+		return "", false
+	}
+	bodyIdx += refreshIdx
+
+	body := strings.TrimSpace(msg[bodyIdx+len("body:"):])
+	if body == "" {
+		return "", false
+	}
+	return body, true
 }
 
 // ensureOpenAIPrivacy 检查 OpenAI OAuth 账号是否已设置 privacy_mode，
@@ -511,7 +594,7 @@ func (s *TokenRefreshService) ensureAntigravityPrivacy(ctx context.Context, acco
 		return
 	}
 
-	projectID, _ := account.Credentials["project_id"].(string)
+	projectID, _ := resolveAntigravityProjectID(account)
 
 	var proxyURL string
 	if account.ProxyID != nil && s.proxyRepo != nil {
@@ -520,7 +603,7 @@ func (s *TokenRefreshService) ensureAntigravityPrivacy(ctx context.Context, acco
 		}
 	}
 
-	mode := setAntigravityPrivacy(ctx, token, projectID, proxyURL)
+	mode := setAntigravityPrivacyForAccount(ctx, token, projectID, proxyURL)
 	if mode == "" {
 		return
 	}
