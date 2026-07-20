@@ -255,6 +255,30 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/checkin',
+    name: 'Checkin',
+    component: () => import('@/views/user/CheckinView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: false,
+      title: 'Daily Check-in',
+      titleKey: 'growth.checkin.title',
+      descriptionKey: 'growth.checkin.description'
+    }
+  },
+  {
+    path: '/leaderboard',
+    name: 'Leaderboard',
+    component: () => import('@/views/user/LeaderboardView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: false,
+      title: 'Spending Leaderboard',
+      titleKey: 'growth.leaderboard.title',
+      descriptionKey: 'growth.leaderboard.description'
+    }
+  },
+  {
     path: '/available-channels',
     name: 'UserAvailableChannels',
     component: () => import('@/views/user/AvailableChannelsView.vue'),
@@ -610,6 +634,18 @@ const routes: RouteRecordRaw[] = [
       title: 'Usage Records',
       titleKey: 'admin.usage.title',
       descriptionKey: 'admin.usage.description'
+    }
+  },
+  {
+    path: '/admin/growth',
+    name: 'AdminGrowth',
+    component: () => import('@/views/admin/GrowthView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Growth Incentives',
+      titleKey: 'growth.admin.title',
+      descriptionKey: 'growth.admin.description'
     }
   },
   {

@@ -31,6 +31,21 @@ func GetSecurityClientIP(c *gin.Context, _ bool) string {
 	return GetTrustedClientIP(c)
 }
 
+// AbuseIdentity normalizes an address for abuse controls. IPv6 clients can
+// rotate interface identifiers cheaply, so all addresses in the same /64 share
+// one identity. IPv4 addresses remain per-host.
+func AbuseIdentity(value string) string {
+	parsed := net.ParseIP(normalizeIP(value))
+	if parsed == nil {
+		return ""
+	}
+	if v4 := parsed.To4(); v4 != nil {
+		return v4.String()
+	}
+	masked := parsed.Mask(net.CIDRMask(64, 128))
+	return masked.String() + "/64"
+}
+
 // normalizeIP 规范化 IP 地址，去除端口号和空格。
 func normalizeIP(ip string) string {
 	ip = strings.TrimSpace(ip)

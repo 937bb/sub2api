@@ -32,6 +32,13 @@ func TestGetTrustedClientIPUsesGinClientIP(t *testing.T) {
 	require.Equal(t, "9.9.9.9", w.Body.String())
 }
 
+func TestAbuseIdentity(t *testing.T) {
+	require.Equal(t, "192.0.2.10", AbuseIdentity("192.0.2.10"))
+	require.Equal(t, "2001:db8:1234:5678::/64", AbuseIdentity("2001:db8:1234:5678:abcd::1"))
+	require.Equal(t, "2001:db8:1234:5678::/64", AbuseIdentity("2001:db8:1234:5678:ffff::9"))
+	require.Empty(t, AbuseIdentity("invalid"))
+}
+
 func TestCheckIPRestrictionWithCompiledRules(t *testing.T) {
 	whitelist := CompileIPRules([]string{"10.0.0.0/8", "192.168.1.2"})
 	blacklist := CompileIPRules([]string{"10.1.1.1"})

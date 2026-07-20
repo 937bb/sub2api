@@ -8,6 +8,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
+	basemiddleware "github.com/Wei-Shaw/sub2api/internal/middleware"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
@@ -185,6 +186,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 
+	basemiddleware.MarkSuccessfulRateLimit(c)
 	h.respondWithTokenPair(c, user)
 }
 

@@ -74,6 +74,25 @@ describe('API Client', () => {
       expect(config.headers.get('Authorization')).toBeFalsy()
     })
 
+    it('attaches a stable browser device digest', async () => {
+      const adapter = vi.fn().mockResolvedValue({
+        status: 200,
+        data: { code: 0, data: {} },
+        headers: {},
+        config: {},
+        statusText: 'OK',
+      })
+      apiClient.defaults.adapter = adapter
+
+      await apiClient.post('/auth/register', {})
+      await apiClient.post('/auth/register', {})
+
+      const first = adapter.mock.calls[0][0].headers.get('X-Sub2API-Device-ID')
+      const second = adapter.mock.calls[1][0].headers.get('X-Sub2API-Device-ID')
+      expect(first).toMatch(/^[a-f0-9]{64}$/)
+      expect(second).toBe(first)
+    })
+
     it('GET 请求自动附加 timezone 参数', async () => {
       const adapter = vi.fn().mockResolvedValue({
         status: 200,

@@ -112,6 +112,7 @@ func provideCleanup(
 	quotaFlusher *service.UserPlatformQuotaUsageFlusher,
 	upstreamBillingProbe *service.UpstreamBillingProbeService,
 	auditLog *service.AuditLogService,
+	growthSettlement *service.GrowthSettlementService,
 	promptAudit *securityaudit.PromptService,
 ) func() {
 	return func() {
@@ -125,6 +126,12 @@ func provideCleanup(
 
 		// 应用层清理步骤可并行执行，基础设施资源（Redis/Ent）最后按顺序关闭。
 		parallelSteps := []cleanupStep{
+			{"GrowthSettlementService", func() error {
+				if growthSettlement != nil {
+					growthSettlement.Stop()
+				}
+				return nil
+			}},
 			{"OpsIngressRejectAggregator", func() error {
 				if opsIngressReject != nil {
 					opsIngressReject.Stop()

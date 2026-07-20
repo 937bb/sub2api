@@ -2,10 +2,13 @@ package routes
 
 import (
 	"github.com/Wei-Shaw/sub2api/internal/handler"
+	basemiddleware "github.com/Wei-Shaw/sub2api/internal/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
 	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
+	"time"
 )
 
 // RegisterUserRoutes 注册用户相关路由（需要认证）
@@ -15,7 +18,9 @@ func RegisterUserRoutes(
 	jwtAuth middleware.JWTAuthMiddleware,
 	auditLog middleware.AuditLogMiddleware,
 	settingService *service.SettingService,
+	redisClient *redis.Client,
 ) {
+	rateLimiter := basemiddleware.NewRateLimiter(redisClient)
 	authenticated := v1.Group("")
 	authenticated.Use(gin.HandlerFunc(jwtAuth))
 	authenticated.Use(middleware.BackendModeUserGuard(settingService))
@@ -127,6 +132,15 @@ func RegisterUserRoutes(
 		{
 			monitors.GET("", h.ChannelMonitor.List)
 			monitors.GET("/:id/status", h.ChannelMonitor.GetStatus)
+		}
+
+		growth := authenticated.Group("/growth")
+		{
+			growth.GET("/checkin", h.Growth.GetCheckinStatus)
+			growth.POST("/checkin", rateLimiter.LimitWithOptions("growth-checkin", 10, time.Minute, basemiddleware.RateLimitOptions{
+				FailureMode: basemiddleware.RateLimitFailClose,
+			}), h.Growth.Checkin)
+			growth.GET("/leaderboard", h.Growth.GetLeaderboard)
 		}
 	}
 }

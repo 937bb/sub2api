@@ -441,6 +441,12 @@ func ProvideAuditLogService(repo AuditLogRepository, settingService *SettingServ
 	return svc
 }
 
+func ProvideGrowthSettlementService(growth *GrowthService, lockCache LeaderLockCache, db *sql.DB) *GrowthSettlementService {
+	svc := NewGrowthSettlementService(growth, lockCache, db)
+	svc.Start()
+	return svc
+}
+
 func buildIdempotencyConfig(cfg *config.Config) IdempotencyConfig {
 	idempotencyCfg := DefaultIdempotencyConfig()
 	if cfg != nil {
@@ -762,6 +768,8 @@ var ProviderSet = wire.NewSet(
 	NewModelPricingResolver,
 	NewContentModerationService,
 	NewAffiliateService,
+	NewGrowthService,
+	ProvideGrowthSettlementService,
 	ProvidePaymentConfigService,
 	ProvidePaymentService,
 	ProvidePaymentOrderExpiryService,

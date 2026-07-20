@@ -18,6 +18,7 @@ import (
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	dbuser "github.com/Wei-Shaw/sub2api/ent/user"
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	basemiddleware "github.com/Wei-Shaw/sub2api/internal/middleware"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/oauth"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
@@ -341,6 +342,7 @@ func (h *AuthHandler) LinuxDoOAuthCallback(c *gin.Context) {
 			"linuxdo",
 		)
 		if err == nil {
+			basemiddleware.MarkSuccessfulRateLimit(c)
 			if err := applyPendingOAuthBinding(
 				c.Request.Context(),
 				h.entClient(),
@@ -597,6 +599,7 @@ func (h *AuthHandler) CompleteLinuxDoOAuthRegistration(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
+	basemiddleware.MarkSuccessfulRateLimit(c)
 	if err := applyPendingOAuthAdoptionAndConsumeSession(c.Request.Context(), client, h.authService, h.userService, session, decision, user.ID); err != nil {
 		respondPendingOAuthBindingApplyError(c, err)
 		return

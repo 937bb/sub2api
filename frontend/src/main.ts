@@ -5,6 +5,7 @@ import router from './router'
 import i18n, { initI18n } from './i18n'
 import { useAppStore } from '@/stores/app'
 import { updateFavicon } from '@/utils/branding'
+import { primeBrowserDeviceIdentity } from '@/utils/deviceIdentity'
 import './style.css'
 
 function initThemeClass() {
@@ -16,6 +17,7 @@ function initThemeClass() {
 }
 
 async function bootstrap() {
+  primeBrowserDeviceIdentity()
   // Apply theme class globally before app mount to keep all routes consistent.
   initThemeClass()
 

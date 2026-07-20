@@ -114,8 +114,21 @@ func RegisterAdminRoutes(
 		// 邀请返利（专属用户管理）
 		registerAffiliateRoutes(admin, h)
 
+		registerGrowthRoutes(admin, h, stepUpAuth)
+
 		// 操作审计日志
 		registerAuditLogRoutes(admin, h, stepUpAuth)
+	}
+}
+
+func registerGrowthRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAuth middleware.StepUpAuthMiddleware) {
+	growth := admin.Group("/growth")
+	{
+		growth.GET("/config", h.Admin.Growth.GetConfig)
+		growth.PUT("/config", gin.HandlerFunc(stepUpAuth), h.Admin.Growth.UpdateConfig)
+		growth.GET("/rewards", h.Admin.Growth.ListRewardLedger)
+		growth.GET("/risk-events", h.Admin.Growth.ListRiskEvents)
+		growth.POST("/leaderboard/settle/:period", gin.HandlerFunc(stepUpAuth), h.Admin.Growth.SettleLeaderboard)
 	}
 }
 

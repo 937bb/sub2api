@@ -23,6 +23,33 @@ func RegisterAuthRoutes(
 ) {
 	// 创建速率限制器
 	rateLimiter := middleware.NewRateLimiter(redisClient)
+	registrationMinuteLimit := rateLimiter.LimitWithOptions("auth-register-minute", 5, time.Minute, middleware.RateLimitOptions{
+		FailureMode: middleware.RateLimitFailClose,
+	})
+	registrationHourLimit := rateLimiter.LimitSuccessfulWithOptions("auth-register-success-hour", 10, time.Hour, middleware.RateLimitOptions{
+		FailureMode: middleware.RateLimitFailClose,
+	})
+	registrationDayLimit := rateLimiter.LimitSuccessfulWithOptions("auth-register-success-day", 20, 24*time.Hour, middleware.RateLimitOptions{
+		FailureMode: middleware.RateLimitFailClose,
+	})
+	registrationDeviceHourLimit := rateLimiter.LimitSuccessfulByDeviceWithOptions("auth-register-device-success-hour", 3, time.Hour, middleware.RateLimitOptions{
+		FailureMode: middleware.RateLimitFailClose,
+	})
+	registrationDeviceDayLimit := rateLimiter.LimitSuccessfulByDeviceWithOptions("auth-register-device-success-day", 5, 24*time.Hour, middleware.RateLimitOptions{
+		FailureMode: middleware.RateLimitFailClose,
+	})
+	registrationHourLimitLoginCompatible := rateLimiter.LimitSuccessfulWithOptions("auth-register-success-hour", 10, time.Hour, middleware.RateLimitOptions{
+		FailureMode: middleware.RateLimitFailOpen,
+	})
+	registrationDayLimitLoginCompatible := rateLimiter.LimitSuccessfulWithOptions("auth-register-success-day", 20, 24*time.Hour, middleware.RateLimitOptions{
+		FailureMode: middleware.RateLimitFailOpen,
+	})
+	registrationDeviceHourLimitLoginCompatible := rateLimiter.LimitSuccessfulByDeviceWithOptions("auth-register-device-success-hour", 3, time.Hour, middleware.RateLimitOptions{
+		FailureMode: middleware.RateLimitFailOpen,
+	})
+	registrationDeviceDayLimitLoginCompatible := rateLimiter.LimitSuccessfulByDeviceWithOptions("auth-register-device-success-day", 5, 24*time.Hour, middleware.RateLimitOptions{
+		FailureMode: middleware.RateLimitFailOpen,
+	})
 
 	// 公开接口
 	auth := v1.Group("/auth")
@@ -30,10 +57,16 @@ func RegisterAuthRoutes(
 	// 认证事件（登录/注册/2FA/token 刷新失败）入审计
 	auth.Use(gin.HandlerFunc(auditLog))
 	{
-		// 注册/登录/2FA/验证码发送均属于高风险入口，增加服务端兜底限流（Redis 故障时 fail-close）
-		auth.POST("/register", rateLimiter.LimitWithOptions("auth-register", 5, time.Minute, middleware.RateLimitOptions{
-			FailureMode: middleware.RateLimitFailClose,
-		}), h.Auth.Register)
+		// 分钟窗口限制所有尝试；小时和天窗口只保留成功注册，避免无效请求
+		// 消耗共享 NAT 的长期额度。长窗口由全部注册入口共享。
+		auth.POST("/register",
+			registrationMinuteLimit,
+			registrationHourLimit,
+			registrationDayLimit,
+			registrationDeviceHourLimit,
+			registrationDeviceDayLimit,
+			h.Auth.Register,
+		)
 		auth.POST("/login", rateLimiter.LimitWithOptions("auth-login", 20, time.Minute, middleware.RateLimitOptions{
 			FailureMode: middleware.RateLimitFailClose,
 		}), h.Auth.Login)
@@ -72,6 +105,10 @@ func RegisterAuthRoutes(
 			rateLimiter.LimitWithOptions("oauth-github-complete", 10, time.Minute, middleware.RateLimitOptions{
 				FailureMode: middleware.RateLimitFailClose,
 			}),
+			registrationHourLimit,
+			registrationDayLimit,
+			registrationDeviceHourLimit,
+			registrationDeviceDayLimit,
 			h.Auth.CompleteGitHubOAuthRegistration,
 		)
 		auth.GET("/oauth/google/start", h.Auth.GoogleOAuthStart)
@@ -80,6 +117,10 @@ func RegisterAuthRoutes(
 			rateLimiter.LimitWithOptions("oauth-google-complete", 10, time.Minute, middleware.RateLimitOptions{
 				FailureMode: middleware.RateLimitFailClose,
 			}),
+			registrationHourLimit,
+			registrationDayLimit,
+			registrationDeviceHourLimit,
+			registrationDeviceDayLimit,
 			h.Auth.CompleteGoogleOAuthRegistration,
 		)
 		auth.GET("/oauth/linuxdo/bind/start", func(c *gin.Context) {
@@ -88,7 +129,13 @@ func RegisterAuthRoutes(
 			c.Request.URL.RawQuery = query.Encode()
 			h.Auth.LinuxDoOAuthStart(c)
 		})
-		auth.GET("/oauth/linuxdo/callback", h.Auth.LinuxDoOAuthCallback)
+		auth.GET("/oauth/linuxdo/callback",
+			registrationHourLimitLoginCompatible,
+			registrationDayLimitLoginCompatible,
+			registrationDeviceHourLimitLoginCompatible,
+			registrationDeviceDayLimitLoginCompatible,
+			h.Auth.LinuxDoOAuthCallback,
+		)
 		auth.GET("/oauth/wechat/start", h.Auth.WeChatOAuthStart)
 		auth.GET("/oauth/wechat/bind/start", func(c *gin.Context) {
 			query := c.Request.URL.Query()
@@ -115,6 +162,10 @@ func RegisterAuthRoutes(
 			rateLimiter.LimitWithOptions("oauth-pending-create-account", 10, time.Minute, middleware.RateLimitOptions{
 				FailureMode: middleware.RateLimitFailClose,
 			}),
+			registrationHourLimit,
+			registrationDayLimit,
+			registrationDeviceHourLimit,
+			registrationDeviceDayLimit,
 			h.Auth.CreatePendingOAuthAccount,
 		)
 		auth.POST("/oauth/pending/bind-login",
@@ -127,6 +178,10 @@ func RegisterAuthRoutes(
 			rateLimiter.LimitWithOptions("oauth-linuxdo-complete", 10, time.Minute, middleware.RateLimitOptions{
 				FailureMode: middleware.RateLimitFailClose,
 			}),
+			registrationHourLimit,
+			registrationDayLimit,
+			registrationDeviceHourLimit,
+			registrationDeviceDayLimit,
 			h.Auth.CompleteLinuxDoOAuthRegistration,
 		)
 		auth.POST("/oauth/linuxdo/bind-login",
@@ -139,12 +194,20 @@ func RegisterAuthRoutes(
 			rateLimiter.LimitWithOptions("oauth-linuxdo-create-account", 10, time.Minute, middleware.RateLimitOptions{
 				FailureMode: middleware.RateLimitFailClose,
 			}),
+			registrationHourLimit,
+			registrationDayLimit,
+			registrationDeviceHourLimit,
+			registrationDeviceDayLimit,
 			h.Auth.CreateLinuxDoOAuthAccount,
 		)
 		auth.POST("/oauth/wechat/complete-registration",
 			rateLimiter.LimitWithOptions("oauth-wechat-complete", 10, time.Minute, middleware.RateLimitOptions{
 				FailureMode: middleware.RateLimitFailClose,
 			}),
+			registrationHourLimit,
+			registrationDayLimit,
+			registrationDeviceHourLimit,
+			registrationDeviceDayLimit,
 			h.Auth.CompleteWeChatOAuthRegistration,
 		)
 		auth.POST("/oauth/wechat/bind-login",
@@ -157,6 +220,10 @@ func RegisterAuthRoutes(
 			rateLimiter.LimitWithOptions("oauth-wechat-create-account", 10, time.Minute, middleware.RateLimitOptions{
 				FailureMode: middleware.RateLimitFailClose,
 			}),
+			registrationHourLimit,
+			registrationDayLimit,
+			registrationDeviceHourLimit,
+			registrationDeviceDayLimit,
 			h.Auth.CreateWeChatOAuthAccount,
 		)
 		auth.GET("/oauth/oidc/start", h.Auth.OIDCOAuthStart)
@@ -171,6 +238,10 @@ func RegisterAuthRoutes(
 			rateLimiter.LimitWithOptions("oauth-oidc-complete", 10, time.Minute, middleware.RateLimitOptions{
 				FailureMode: middleware.RateLimitFailClose,
 			}),
+			registrationHourLimit,
+			registrationDayLimit,
+			registrationDeviceHourLimit,
+			registrationDeviceDayLimit,
 			h.Auth.CompleteOIDCOAuthRegistration,
 		)
 		auth.POST("/oauth/oidc/bind-login",
@@ -183,6 +254,10 @@ func RegisterAuthRoutes(
 			rateLimiter.LimitWithOptions("oauth-oidc-create-account", 10, time.Minute, middleware.RateLimitOptions{
 				FailureMode: middleware.RateLimitFailClose,
 			}),
+			registrationHourLimit,
+			registrationDayLimit,
+			registrationDeviceHourLimit,
+			registrationDeviceDayLimit,
 			h.Auth.CreateOIDCOAuthAccount,
 		)
 		auth.GET("/oauth/dingtalk/start", h.Auth.DingTalkOAuthStart)
@@ -197,6 +272,10 @@ func RegisterAuthRoutes(
 			rateLimiter.LimitWithOptions("oauth-dingtalk-complete", 10, time.Minute, middleware.RateLimitOptions{
 				FailureMode: middleware.RateLimitFailClose,
 			}),
+			registrationHourLimit,
+			registrationDayLimit,
+			registrationDeviceHourLimit,
+			registrationDeviceDayLimit,
 			h.Auth.CompleteDingTalkOAuthRegistration,
 		)
 		auth.POST("/oauth/dingtalk/bind-login",
@@ -209,6 +288,10 @@ func RegisterAuthRoutes(
 			rateLimiter.LimitWithOptions("oauth-dingtalk-create-account", 10, time.Minute, middleware.RateLimitOptions{
 				FailureMode: middleware.RateLimitFailClose,
 			}),
+			registrationHourLimit,
+			registrationDayLimit,
+			registrationDeviceHourLimit,
+			registrationDeviceDayLimit,
 			h.Auth.CreateDingTalkOAuthAccount,
 		)
 	}

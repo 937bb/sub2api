@@ -1,0 +1,164 @@
+<template>
+  <AppLayout>
+    <div class="space-y-5">
+      <div class="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 pb-4 dark:border-dark-700">
+        <div class="inline-flex rounded-md border border-gray-200 bg-white p-1 dark:border-dark-700 dark:bg-dark-900">
+          <button v-for="item in tabs" :key="item.value" class="rounded px-4 py-2 text-sm font-medium" :class="tab === item.value ? 'bg-primary-600 text-white' : 'text-gray-600 hover:bg-gray-100 dark:text-dark-300 dark:hover:bg-dark-800'" @click="tab = item.value; onTabChange()">{{ item.label }}</button>
+        </div>
+        <button v-if="tab === 'config'" class="btn btn-primary" :disabled="saving || !config" @click="save">
+          <Icon name="check" size="sm" />
+          <span>{{ saving ? t('common.saving') : t('common.save') }}</span>
+        </button>
+      </div>
+
+      <div v-if="loading" class="flex justify-center py-16"><Icon name="refresh" size="lg" class="animate-spin text-primary-500" /></div>
+
+      <template v-else-if="tab === 'config' && config">
+        <section class="border-b border-gray-200 pb-6 dark:border-dark-700">
+          <div class="mb-4 flex items-center justify-between gap-4">
+            <div><h2 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('growth.admin.checkinSettings') }}</h2><p class="mt-1 text-sm text-gray-500 dark:text-dark-400">{{ t('growth.admin.checkinSettingsDescription') }}</p></div>
+            <Toggle v-model="config.checkin_enabled" />
+          </div>
+          <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <div><label class="input-label">{{ t('growth.admin.rewardMode') }}</label><Select v-model="config.checkin_reward_mode" :options="rewardModeOptions" /></div>
+            <div v-if="config.checkin_reward_mode === 'fixed'"><label class="input-label">{{ t('growth.admin.fixedReward') }}</label><input v-model.number="config.checkin_fixed_reward" class="input" type="number" min="0.01" max="100" step="0.01" /></div>
+            <template v-else>
+              <div><label class="input-label">{{ t('growth.admin.minReward') }}</label><input v-model.number="config.checkin_min_reward" class="input" type="number" min="1" max="100" step="0.01" /></div>
+              <div><label class="input-label">{{ t('growth.admin.maxReward') }}</label><input v-model.number="config.checkin_max_reward" class="input" type="number" min="1" max="100" step="0.01" /></div>
+            </template>
+          </div>
+        </section>
+
+        <section class="border-b border-gray-200 py-6 dark:border-dark-700">
+          <div class="mb-4 flex items-center justify-between"><div><h2 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('growth.admin.streakRewards') }}</h2><p class="mt-1 text-sm text-gray-500 dark:text-dark-400">{{ t('growth.admin.streakRewardsDescription') }}</p></div><button class="btn btn-secondary btn-sm" @click="addStreak"><Icon name="plus" size="sm" />{{ t('common.add') }}</button></div>
+          <div v-if="config.checkin_streak_rewards.length" class="space-y-2">
+            <div v-for="(reward, index) in config.checkin_streak_rewards" :key="index" class="grid grid-cols-[1fr_1fr_40px] gap-3">
+              <input v-model.number="reward.days" class="input" type="number" min="2" max="365" :placeholder="t('growth.admin.days')" />
+              <input v-model.number="reward.amount" class="input" type="number" min="0.01" max="100" step="0.01" :placeholder="t('growth.admin.rewardAmount')" />
+              <button class="btn btn-secondary px-2" :title="t('common.delete')" @click="config.checkin_streak_rewards.splice(index, 1)"><Icon name="trash" size="sm" /></button>
+            </div>
+          </div>
+          <p v-else class="text-sm text-gray-400 dark:text-dark-500">{{ t('common.noData') }}</p>
+        </section>
+
+        <section class="border-b border-gray-200 py-6 dark:border-dark-700">
+          <h2 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('growth.admin.antiAbuse') }}</h2>
+          <p class="mt-1 text-sm text-gray-500 dark:text-dark-400">{{ t('growth.admin.antiAbuseDescription') }}</p>
+          <div class="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <div><label class="input-label">{{ t('growth.admin.accountAge') }}</label><input v-model.number="config.checkin_min_account_age_days" class="input" type="number" min="0" /></div>
+            <div><label class="input-label">{{ t('growth.admin.totalRecharged') }}</label><input v-model.number="config.checkin_min_total_recharged" class="input" type="number" min="0" step="0.01" /></div>
+            <div><label class="input-label">{{ t('growth.admin.rewardPaidRatio') }}</label><input v-model.number="config.checkin_max_reward_paid_ratio" class="input" type="number" min="0.01" max="1" step="0.01" /></div>
+            <div><label class="input-label">{{ t('growth.admin.totalRewardPaidRatio') }}</label><input v-model.number="config.max_total_reward_paid_ratio" class="input" type="number" min="0.01" max="1" step="0.01" /></div>
+            <div><label class="input-label">{{ t('growth.admin.recentSpend') }}</label><input v-model.number="config.checkin_min_recent_spend" class="input" type="number" min="0" step="0.01" /></div>
+            <div><label class="input-label">{{ t('growth.admin.spendWindow') }}</label><input v-model.number="config.checkin_recent_spend_days" class="input" type="number" min="1" max="365" /></div>
+            <div><label class="input-label">{{ t('growth.admin.ipLimit') }}</label><input v-model.number="config.checkin_max_accounts_per_ip" class="input" type="number" min="1" /></div>
+            <div><label class="input-label">{{ t('growth.admin.deviceLimit') }}</label><input v-model.number="config.checkin_max_accounts_per_device" class="input" type="number" min="1" /></div>
+          </div>
+        </section>
+
+        <section class="pt-6">
+          <div class="mb-4 flex items-center justify-between gap-4">
+            <div><h2 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('growth.admin.leaderboardSettings') }}</h2><p class="mt-1 text-sm text-gray-500 dark:text-dark-400">{{ t('growth.admin.leaderboardSettingsDescription') }}</p></div>
+            <Toggle v-model="config.leaderboard_enabled" />
+          </div>
+          <label class="mb-4 flex items-center gap-3 text-sm text-gray-700 dark:text-dark-300"><input v-model="config.leaderboard_anonymous" type="checkbox" class="h-4 w-4 rounded border-gray-300 text-primary-600" />{{ t('growth.admin.anonymous') }}</label>
+          <div class="mb-3 flex items-center justify-between"><h3 class="text-sm font-medium text-gray-700 dark:text-dark-300">{{ t('growth.admin.rewardRules') }}</h3><button class="btn btn-secondary btn-sm" @click="addRule"><Icon name="plus" size="sm" />{{ t('common.add') }}</button></div>
+          <div class="space-y-2">
+            <div v-for="(rule, index) in config.leaderboard_reward_rules" :key="rule.id" class="grid gap-2 md:grid-cols-[80px_140px_1fr_1fr_1fr_40px]">
+              <label class="flex items-center justify-center"><input v-model="rule.enabled" type="checkbox" class="h-4 w-4 rounded border-gray-300 text-primary-600" /></label>
+              <Select v-model="rule.period" :options="periodOptions" />
+              <input v-model.number="rule.rank_start" class="input" type="number" min="1" max="100" :placeholder="t('growth.admin.rankStart')" />
+              <input v-model.number="rule.rank_end" class="input" type="number" min="1" max="100" :placeholder="t('growth.admin.rankEnd')" />
+              <input v-model.number="rule.reward_amount" class="input" type="number" min="0.01" step="0.01" :placeholder="t('growth.admin.rewardAmount')" />
+              <button class="btn btn-secondary px-2" :title="t('common.delete')" @click="config.leaderboard_reward_rules.splice(index, 1)"><Icon name="trash" size="sm" /></button>
+            </div>
+          </div>
+          <div class="mt-5 flex flex-wrap gap-2">
+            <button v-for="option in periodOptions" :key="option.value" class="btn btn-secondary btn-sm" :disabled="settling" @click="settle(option.value)"><Icon name="badge" size="sm" />{{ t('growth.admin.settlePrevious', { period: option.label }) }}</button>
+          </div>
+        </section>
+      </template>
+
+      <div v-else-if="tab === 'rewards'" class="card overflow-x-auto">
+        <table class="w-full min-w-[780px] text-left text-sm"><thead class="border-b border-gray-100 bg-gray-50 text-xs uppercase text-gray-500 dark:border-dark-700 dark:bg-dark-800 dark:text-dark-400"><tr><th class="px-4 py-3">{{ t('growth.admin.user') }}</th><th class="px-4 py-3">{{ t('growth.admin.source') }}</th><th class="px-4 py-3 text-right">{{ t('growth.admin.amount') }}</th><th class="px-4 py-3 text-right">{{ t('growth.admin.balanceAfter') }}</th><th class="px-4 py-3">{{ t('growth.admin.time') }}</th></tr></thead><tbody><tr v-for="item in rewards" :key="item.id" class="border-b border-gray-100 dark:border-dark-800"><td class="px-4 py-3">{{ item.email || `#${item.user_id}` }}</td><td class="px-4 py-3">{{ item.source_type }}</td><td class="px-4 py-3 text-right font-medium text-emerald-600">+${{ item.amount.toFixed(2) }}</td><td class="px-4 py-3 text-right">${{ item.balance_after.toFixed(2) }}</td><td class="px-4 py-3 text-gray-500">{{ formatDateTime(item.created_at) }}</td></tr></tbody></table>
+        <Pagination v-if="rewardTotal > 0" :page="rewardPage" :page-size="pageSize" :total="rewardTotal" :show-page-size-selector="false" @update:page="loadRewardPage" />
+      </div>
+
+      <div v-else class="card overflow-x-auto">
+        <table class="w-full min-w-[760px] text-left text-sm"><thead class="border-b border-gray-100 bg-gray-50 text-xs uppercase text-gray-500 dark:border-dark-700 dark:bg-dark-800 dark:text-dark-400"><tr><th class="px-4 py-3">{{ t('growth.admin.user') }}</th><th class="px-4 py-3">{{ t('growth.admin.decision') }}</th><th class="px-4 py-3">{{ t('growth.admin.reason') }}</th><th class="px-4 py-3">{{ t('growth.admin.evidence') }}</th><th class="px-4 py-3">{{ t('growth.admin.time') }}</th></tr></thead><tbody><tr v-for="item in riskEvents" :key="item.id" class="border-b border-gray-100 dark:border-dark-800"><td class="px-4 py-3">{{ item.email || `#${item.user_id || '-'}` }}</td><td class="px-4 py-3"><span class="badge badge-error">{{ item.decision }}</span></td><td class="px-4 py-3 font-medium">{{ item.reason_code }}</td><td class="max-w-xs truncate px-4 py-3 text-gray-500" :title="JSON.stringify(item.evidence)">{{ JSON.stringify(item.evidence) }}</td><td class="px-4 py-3 text-gray-500">{{ formatDateTime(item.created_at) }}</td></tr></tbody></table>
+        <Pagination v-if="riskTotal > 0" :page="riskPage" :page-size="pageSize" :total="riskTotal" :show-page-size-selector="false" @update:page="loadRiskPage" />
+      </div>
+    </div>
+  </AppLayout>
+</template>
+
+<script setup lang="ts">
+import { onMounted, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
+import AppLayout from '@/components/layout/AppLayout.vue'
+import Icon from '@/components/icons/Icon.vue'
+import Toggle from '@/components/common/Toggle.vue'
+import Select from '@/components/common/Select.vue'
+import Pagination from '@/components/common/Pagination.vue'
+import { getGrowthConfig, listGrowthRewards, listGrowthRiskEvents, settleGrowthLeaderboard, updateGrowthConfig, type GrowthConfig, type GrowthPeriod, type GrowthRewardLedgerItem, type GrowthRiskEvent } from '@/api/growth'
+import { useAppStore } from '@/stores/app'
+import { extractApiErrorMessage } from '@/utils/apiError'
+
+const { t } = useI18n()
+const appStore = useAppStore()
+const tab = ref<'config' | 'rewards' | 'risk'>('config')
+const config = ref<GrowthConfig | null>(null)
+const rewards = ref<GrowthRewardLedgerItem[]>([])
+const riskEvents = ref<GrowthRiskEvent[]>([])
+const loading = ref(false)
+const saving = ref(false)
+const settling = ref(false)
+const pageSize = 20
+const rewardPage = ref(1)
+const rewardTotal = ref(0)
+const riskPage = ref(1)
+const riskTotal = ref(0)
+const tabs = [{ value: 'config' as const, label: t('growth.admin.configTab') }, { value: 'rewards' as const, label: t('growth.admin.rewardsTab') }, { value: 'risk' as const, label: t('growth.admin.riskTab') }]
+const rewardModeOptions = [{ value: 'fixed', label: t('growth.admin.fixed') }, { value: 'random', label: t('growth.admin.random') }]
+const periodOptions = [{ value: 'daily' as const, label: t('growth.period.daily') }, { value: 'weekly' as const, label: t('growth.period.weekly') }, { value: 'monthly' as const, label: t('growth.period.monthly') }]
+
+function addStreak(): void { config.value?.checkin_streak_rewards.push({ days: 7, amount: 1 }) }
+function addRule(): void { config.value?.leaderboard_reward_rules.push({ id: crypto.randomUUID(), enabled: true, period: 'weekly', rank_start: 1, rank_end: 1, reward_amount: 5 }) }
+function formatDateTime(value: string): string { return new Date(value).toLocaleString() }
+async function loadConfig(): Promise<void> { config.value = await getGrowthConfig() }
+async function loadRewardPage(page: number): Promise<void> {
+  const result = await listGrowthRewards(page, pageSize)
+  rewardPage.value = result.page
+  rewardTotal.value = result.total
+  rewards.value = result.items
+}
+async function loadRiskPage(page: number): Promise<void> {
+  const result = await listGrowthRiskEvents(page, pageSize)
+  riskPage.value = result.page
+  riskTotal.value = result.total
+  riskEvents.value = result.items
+}
+async function onTabChange(): Promise<void> {
+  loading.value = true
+  try {
+    if (tab.value === 'config') await loadConfig()
+    else if (tab.value === 'rewards') await loadRewardPage(1)
+    else await loadRiskPage(1)
+  } catch (error) { appStore.showError(extractApiErrorMessage(error, t('growth.loadFailed'))) }
+  finally { loading.value = false }
+}
+async function save(): Promise<void> {
+  if (!config.value) return
+  saving.value = true
+  try { config.value = await updateGrowthConfig(config.value); appStore.showSuccess(t('common.saved')) }
+  catch (error) { appStore.showError(extractApiErrorMessage(error, t('growth.admin.saveFailed'))) }
+  finally { saving.value = false }
+}
+async function settle(period: GrowthPeriod): Promise<void> {
+  settling.value = true
+  try { const result = await settleGrowthLeaderboard(period); appStore.showSuccess(t('growth.admin.settleSuccess', { count: result.rewarded_users, amount: result.total_reward.toFixed(2) })) }
+  catch (error) { appStore.showError(extractApiErrorMessage(error, t('growth.admin.settleFailed'))) }
+  finally { settling.value = false }
+}
+onMounted(() => void onTabChange())
+</script>

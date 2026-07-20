@@ -2,12 +2,15 @@ package middleware
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
+	ippkg "github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
 )
@@ -37,6 +40,62 @@ elseif ttl == -1 then
 end
 return {current, repaired}
 `)
+
+var successfulRateLimitReserveScript = redis.NewScript(`
+local current = tonumber(redis.call('GET', KEYS[1]) or '0')
+if current >= tonumber(ARGV[2]) then
+  return {current, 0}
+end
+current = redis.call('INCR', KEYS[1])
+local ttl = redis.call('PTTL', KEYS[1])
+if current == 1 or ttl == -1 then
+  redis.call('PEXPIRE', KEYS[1], ARGV[1])
+end
+return {current, 1}
+`)
+
+var successfulRateLimitReleaseScript = redis.NewScript(`
+local current = tonumber(redis.call('GET', KEYS[1]) or '0')
+if current <= 0 then
+  return 0
+end
+return redis.call('DECR', KEYS[1])
+`)
+
+const successfulRateLimitCommittedKey = "rate_limit_successful_committed"
+
+const (
+	ClientDeviceHeader = "X-Sub2API-Device-ID"
+	ClientDeviceCookie = "sub2api_device_id"
+)
+
+// MarkSuccessfulRateLimit tells successful-only limiters that the protected
+// operation actually committed. HTTP status alone is insufficient for OAuth
+// flows, where a 2xx response may only represent an intermediate state.
+func MarkSuccessfulRateLimit(c *gin.Context) {
+	if c != nil {
+		c.Set(successfulRateLimitCommittedKey, true)
+	}
+}
+
+// ClientDeviceIdentity returns a server-side digest of the browser signal.
+// Missing or malformed signals share one intentionally strict bucket instead
+// of bypassing device limits.
+func ClientDeviceIdentity(c *gin.Context) string {
+	if c == nil {
+		return "missing"
+	}
+	raw := strings.TrimSpace(c.GetHeader(ClientDeviceHeader))
+	if raw == "" {
+		raw, _ = c.Cookie(ClientDeviceCookie)
+		raw = strings.TrimSpace(raw)
+	}
+	if len(raw) < 16 || len(raw) > 256 {
+		return "missing"
+	}
+	digest := sha256.Sum256([]byte(raw + "|" + c.GetHeader("User-Agent")))
+	return fmt.Sprintf("%x", digest[:])
+}
 
 // rateLimitRun 允许测试覆写脚本执行逻辑
 var rateLimitRun = func(ctx context.Context, client *redis.Client, key string, windowMillis int64) (int64, bool, error) {
@@ -88,8 +147,17 @@ func (r *RateLimiter) LimitWithOptions(key string, limit int, window time.Durati
 	}
 
 	return func(c *gin.Context) {
-		ip := c.ClientIP()
-		redisKey := r.prefix + key + ":" + ip
+		identity := ippkg.AbuseIdentity(c.ClientIP())
+		if identity == "" {
+			log.Printf("[RateLimit] invalid client IP: mode=%s", failureModeLabel(failureMode))
+			if failureMode == RateLimitFailClose {
+				abortRateLimit(c)
+				return
+			}
+			c.Next()
+			return
+		}
+		redisKey := r.prefix + key + ":" + identity
 
 		ctx := c.Request.Context()
 
@@ -118,6 +186,78 @@ func (r *RateLimiter) LimitWithOptions(key string, limit int, window time.Durati
 		}
 
 		c.Next()
+	}
+}
+
+// LimitSuccessfulWithOptions reserves capacity before the handler runs and
+// releases it unless the handler explicitly commits it. The reservation
+// makes concurrent account creations obey the same hard limit without letting
+// invalid requests permanently exhaust a shared NAT address's long window.
+func (r *RateLimiter) LimitSuccessfulWithOptions(key string, limit int, window time.Duration, opts RateLimitOptions) gin.HandlerFunc {
+	return r.limitSuccessfulByIdentity(key, limit, window, opts, func(c *gin.Context) string {
+		return ippkg.AbuseIdentity(c.ClientIP())
+	})
+}
+
+// LimitSuccessfulByDeviceWithOptions applies the successful-only limiter to a
+// browser installation signal rather than the network address.
+func (r *RateLimiter) LimitSuccessfulByDeviceWithOptions(key string, limit int, window time.Duration, opts RateLimitOptions) gin.HandlerFunc {
+	return r.limitSuccessfulByIdentity(key, limit, window, opts, ClientDeviceIdentity)
+}
+
+func (r *RateLimiter) limitSuccessfulByIdentity(key string, limit int, window time.Duration, opts RateLimitOptions, identityFor func(*gin.Context) string) gin.HandlerFunc {
+	failureMode := opts.FailureMode
+	if failureMode != RateLimitFailClose {
+		failureMode = RateLimitFailOpen
+	}
+	return func(c *gin.Context) {
+		identity := identityFor(c)
+		if identity == "" {
+			log.Printf("[RateLimit] invalid client IP: mode=%s", failureModeLabel(failureMode))
+			if failureMode == RateLimitFailClose {
+				abortRateLimit(c)
+				return
+			}
+			c.Next()
+			return
+		}
+		redisKey := r.prefix + key + ":" + identity
+		values, err := successfulRateLimitReserveScript.Run(
+			c.Request.Context(), r.redis, []string{redisKey}, windowTTLMillis(window), limit,
+		).Slice()
+		if err != nil || len(values) < 2 {
+			log.Printf("[RateLimit] successful-only reserve error: key=%s mode=%s err=%v", redisKey, failureModeLabel(failureMode), err)
+			if failureMode == RateLimitFailClose {
+				abortRateLimit(c)
+				return
+			}
+			c.Next()
+			return
+		}
+		reserved, parseErr := parseInt64(values[1])
+		if parseErr != nil {
+			log.Printf("[RateLimit] successful-only reserve parse error: key=%s mode=%s err=%v", redisKey, failureModeLabel(failureMode), parseErr)
+			if failureMode == RateLimitFailOpen {
+				c.Next()
+				return
+			}
+			abortRateLimit(c)
+			return
+		}
+		if reserved != 1 {
+			abortRateLimit(c)
+			return
+		}
+
+		c.Next()
+		committed, _ := c.Get(successfulRateLimitCommittedKey)
+		if committed != true {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			if err := successfulRateLimitReleaseScript.Run(ctx, r.redis, []string{redisKey}).Err(); err != nil {
+				log.Printf("[RateLimit] successful-only release error: key=%s err=%v", redisKey, err)
+			}
+		}
 	}
 }
 
