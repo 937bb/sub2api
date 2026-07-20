@@ -94,7 +94,7 @@ func SecurityHeaders(cfg config.CSPConfig, getFrameSrcOrigins func() []string) g
 		c.Header("X-Content-Type-Options", "nosniff")
 		c.Header("X-Frame-Options", "DENY")
 		c.Header("Referrer-Policy", "strict-origin-when-cross-origin")
-		if isAPIRoutePath(c) {
+		if IsAPIRoutePath(c) {
 			c.Next()
 			return
 		}
@@ -115,7 +115,9 @@ func SecurityHeaders(cfg config.CSPConfig, getFrameSrcOrigins func() []string) g
 	}
 }
 
-func isAPIRoutePath(c *gin.Context) bool {
+// IsAPIRoutePath reports whether the request targets an API route
+// (as opposed to the admin panel or other non-API endpoints).
+func IsAPIRoutePath(c *gin.Context) bool {
 	if c == nil || c.Request == nil || c.Request.URL == nil {
 		return false
 	}

@@ -128,8 +128,8 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 			c.JSON(http.StatusBadGateway, gin.H{
 				"type": "error",
 				"error": gin.H{
-					"type":    "upstream_error",
-					"message": "Upstream request failed",
+					"type":    "api_error",
+					"message": "Request failed",
 				},
 			})
 			return nil, fmt.Errorf("upstream request failed: %s", safeErr)
@@ -377,17 +377,11 @@ func (s *GatewayService) handleStreamingResponseAnthropicAPIKeyPassthrough(
 	writeAnthropicPassthroughResponseHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 
 	contentType := strings.TrimSpace(resp.Header.Get("Content-Type"))
-	if contentType == "" {
-		contentType = "text/event-stream"
+	responseheaders.SetSSEStreamingHeaders(c)
+	// Override Content-Type if upstream provided one
+	if contentType != "" && contentType != "text/event-stream" {
+		c.Header("Content-Type", contentType)
 	}
-	c.Header("Content-Type", contentType)
-	if c.Writer.Header().Get("Cache-Control") == "" {
-		c.Header("Cache-Control", "no-cache")
-	}
-	if c.Writer.Header().Get("Connection") == "" {
-		c.Header("Connection", "keep-alive")
-	}
-	c.Header("X-Accel-Buffering", "no")
 	if v := resp.Header.Get("x-request-id"); v != "" {
 		c.Header("x-request-id", v)
 	}

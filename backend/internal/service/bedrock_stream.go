@@ -17,6 +17,7 @@ import (
 	"github.com/tidwall/sjson"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 )
 
 // handleBedrockStreamingResponse 处理 Bedrock InvokeModelWithResponseStream 的 EventStream 响应
@@ -36,10 +37,7 @@ func (s *GatewayService) handleBedrockStreamingResponse(
 		return nil, errors.New("streaming not supported")
 	}
 
-	c.Header("Content-Type", "text/event-stream")
-	c.Header("Cache-Control", "no-cache")
-	c.Header("Connection", "keep-alive")
-	c.Header("X-Accel-Buffering", "no")
+	responseheaders.SetSSEStreamingHeaders(c)
 	if v := resp.Header.Get("x-amzn-requestid"); v != "" {
 		c.Header("x-request-id", v)
 	}

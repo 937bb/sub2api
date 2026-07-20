@@ -13,6 +13,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/gin-gonic/gin"
 )
 
@@ -84,15 +85,12 @@ func handleStreamReadError(err error, clientDisconnected bool, prefix string) (d
 
 func (s *AntigravityGatewayService) handleGeminiStreamingResponse(c *gin.Context, resp *http.Response, startTime time.Time) (*antigravityStreamResult, error) {
 	c.Status(resp.StatusCode)
-	c.Header("Cache-Control", "no-cache")
-	c.Header("Connection", "keep-alive")
-	c.Header("X-Accel-Buffering", "no")
+	responseheaders.SetSSEStreamingHeaders(c)
 
 	contentType := resp.Header.Get("Content-Type")
-	if contentType == "" {
-		contentType = "text/event-stream; charset=utf-8"
+	if contentType != "" && contentType != "text/event-stream" {
+		c.Header("Content-Type", contentType)
 	}
-	c.Header("Content-Type", contentType)
 
 	flusher, ok := c.Writer.(http.Flusher)
 	if !ok {
@@ -696,23 +694,23 @@ func (s *AntigravityGatewayService) writeMappedClaudeError(c *gin.Context, accou
 	case 401:
 		statusCode = http.StatusBadGateway
 		errType = "authentication_error"
-		errMsg = "Upstream authentication failed"
+		errMsg = "Authentication failed"
 	case 403:
 		statusCode = http.StatusBadGateway
-		errType = "permission_error"
-		errMsg = "Upstream access forbidden"
+		errType = "authentication_error"
+		errMsg = "Access forbidden"
 	case 429:
 		statusCode = http.StatusTooManyRequests
 		errType = "rate_limit_error"
-		errMsg = "Upstream rate limit exceeded"
+		errMsg = "Rate limit exceeded"
 	case 529:
 		statusCode = http.StatusServiceUnavailable
 		errType = "overloaded_error"
-		errMsg = "Upstream service overloaded"
+		errMsg = "Service overloaded"
 	default:
 		statusCode = http.StatusBadGateway
-		errType = "upstream_error"
-		errMsg = "Upstream request failed"
+		errType = "api_error"
+		errMsg = "Request failed"
 	}
 
 	c.JSON(statusCode, gin.H{
@@ -908,7 +906,7 @@ returnResponse:
 	claudeResp, agUsage, err := antigravity.TransformGeminiToClaude(geminiBody, originalModel)
 	if err != nil {
 		logger.LegacyPrintf("service.antigravity_gateway", "[antigravity-Forward] transform_error error=%v body=%s", err, string(geminiBody))
-		return nil, s.writeClaudeError(c, http.StatusBadGateway, "upstream_error", "Failed to parse upstream response")
+		return nil, s.writeClaudeError(c, http.StatusBadGateway, "api_error", "Failed to parse response")
 	}
 
 	c.Data(http.StatusOK, "application/json", claudeResp)
@@ -926,10 +924,7 @@ returnResponse:
 
 // handleClaudeStreamingResponse 处理 Claude 流式响应（Gemini SSE → Claude SSE 转换）
 func (s *AntigravityGatewayService) handleClaudeStreamingResponse(c *gin.Context, resp *http.Response, startTime time.Time, originalModel string) (*antigravityStreamResult, error) {
-	c.Header("Content-Type", "text/event-stream")
-	c.Header("Cache-Control", "no-cache")
-	c.Header("Connection", "keep-alive")
-	c.Header("X-Accel-Buffering", "no")
+	responseheaders.SetSSEStreamingHeaders(c)
 	c.Status(http.StatusOK)
 
 	flusher, ok := c.Writer.(http.Flusher)

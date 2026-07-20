@@ -248,8 +248,8 @@ func TestOpenAIEnsureForwardErrorResponse_WritesFallbackWhenNotWritten(t *testin
 	require.NoError(t, err)
 	errorObj, ok := parsed["error"].(map[string]any)
 	require.True(t, ok)
-	assert.Equal(t, "upstream_error", errorObj["type"])
-	assert.Equal(t, "Upstream request failed", errorObj["message"])
+	assert.Equal(t, "api_error", errorObj["type"])
+	assert.Equal(t, "Request failed", errorObj["message"])
 }
 
 // Writer 已写后 ensureForwardErrorResponse 必须仍然把错误信息以 SSE
@@ -292,8 +292,8 @@ func TestOpenAIEnsureForwardErrorResponse_ResponsesRouteAfterWrittenEmitsRespons
 	assert.Contains(t, body, ":\n\n", "earlier ping bytes preserved")
 	assert.Contains(t, body, "event: response.failed\n", "appended a Responses terminal event")
 	assert.Contains(t, body, `"type":"response.failed"`)
-	assert.Contains(t, body, `"code":"upstream_error"`)
-	assert.Contains(t, body, "Upstream request failed")
+	assert.Contains(t, body, `"code":"server_error"`)
+	assert.Contains(t, body, "Request failed")
 }
 
 func TestOpenAIEnsureForwardErrorResponse_AfterDeltaAppendsSingleValidResponseFailed(t *testing.T) {
@@ -359,8 +359,8 @@ func TestOpenAIEnsureForwardErrorResponse_ImageJSONKeepaliveWritesSingleJSONFall
 	var payload map[string]any
 	require.NoError(t, decoder.Decode(&payload))
 	require.ErrorIs(t, decoder.Decode(&payload), io.EOF)
-	require.Equal(t, "upstream_error", gjson.Get(w.Body.String(), "error.type").String())
-	require.Equal(t, "Upstream request failed", gjson.Get(w.Body.String(), "error.message").String())
+	require.Equal(t, "api_error", gjson.Get(w.Body.String(), "error.type").String())
+	require.Equal(t, "Request failed", gjson.Get(w.Body.String(), "error.message").String())
 }
 
 func TestOpenAIEnsureForwardErrorResponse_ImageJSONKeepalivePreservesCompletedJSON(t *testing.T) {
@@ -478,8 +478,8 @@ func TestOpenAIRecoverResponsesPanic_WritesFallbackResponse(t *testing.T) {
 
 	errorObj, ok := parsed["error"].(map[string]any)
 	require.True(t, ok)
-	assert.Equal(t, "upstream_error", errorObj["type"])
-	assert.Equal(t, "Upstream request failed", errorObj["message"])
+	assert.Equal(t, "api_error", errorObj["type"])
+	assert.Equal(t, "Request failed", errorObj["message"])
 }
 
 func TestOpenAIRecoverResponsesPanic_NoPanicNoWrite(t *testing.T) {
@@ -1737,8 +1737,8 @@ func TestOpenAIResponses_APIKeyPassthroughPool5xxRetriesThenExhaustsMaxSwitches(
 
 	require.Equal(t, []int64{9910, 9910, 9911}, upstream.calls())
 	require.Equal(t, http.StatusBadGateway, rec.Code)
-	require.Equal(t, "upstream_error", gjson.GetBytes(rec.Body.Bytes(), "error.type").String())
-	require.Equal(t, "Upstream service temporarily unavailable", gjson.GetBytes(rec.Body.Bytes(), "error.message").String())
+	require.Equal(t, "api_error", gjson.GetBytes(rec.Body.Bytes(), "error.type").String())
+	require.Equal(t, "Service temporarily unavailable", gjson.GetBytes(rec.Body.Bytes(), "error.message").String())
 }
 
 func TestOpenAIResponsesWebSocket_FailoverOnUpstreamUsageLimitEvent(t *testing.T) {
@@ -2356,7 +2356,7 @@ func testStringPtr(v string) *string {
 func TestOpenAIForwardErrorAlreadyCommunicated(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	t.Run("upstream response failed after write", func(t *testing.T) {
+	t.Run("response failed after write", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(w)
 		c.Request = httptest.NewRequest(http.MethodPost, EndpointResponses, nil)
@@ -2366,7 +2366,7 @@ data: {"type":"response.failed","error":{"message":"This content was flagged"}}
 
 `)
 
-		reported := openAIForwardErrorAlreadyCommunicated(c, before, errors.New("upstream response failed: This content was flagged"))
+		reported := openAIForwardErrorAlreadyCommunicated(c, before, errors.New("response failed: This content was flagged"))
 
 		require.True(t, reported)
 	})
@@ -2376,7 +2376,7 @@ data: {"type":"response.failed","error":{"message":"This content was flagged"}}
 		c, _ := gin.CreateTestContext(w)
 		c.Request = httptest.NewRequest(http.MethodPost, EndpointResponses, nil)
 
-		reported := openAIForwardErrorAlreadyCommunicated(c, c.Writer.Size(), errors.New("upstream response failed: This content was flagged"))
+		reported := openAIForwardErrorAlreadyCommunicated(c, c.Writer.Size(), errors.New("response failed: This content was flagged"))
 
 		require.False(t, reported)
 	})

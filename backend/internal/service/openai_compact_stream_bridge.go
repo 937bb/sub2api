@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/tidwall/gjson"
@@ -77,11 +78,7 @@ func writeOpenAICompactSSEBridge(c *gin.Context, statusCode int, finalResponse [
 		return false
 	}
 	if !committed {
-		header := c.Writer.Header()
-		header.Set("Content-Type", "text/event-stream")
-		header.Set("Cache-Control", "no-cache")
-		header.Set("Connection", "keep-alive")
-		header.Set("X-Accel-Buffering", "no")
+		responseheaders.SetSSEStreamingHeaders(c)
 		c.Writer.WriteHeader(statusCode)
 	}
 	_, _ = c.Writer.Write(payload)
@@ -98,9 +95,9 @@ func writeOpenAICompactSSEFailure(c *gin.Context, statusCode int, errorBody []by
 		message = sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(errorBody)))
 	}
 	if message == "" {
-		message = "Upstream compact request failed with HTTP " + strconv.Itoa(statusCode)
+		message = "Request failed with HTTP " + strconv.Itoa(statusCode)
 	}
-	writeOpenAICompactSSEFailureMessage(c, statusCode, "upstream_error", message)
+	writeOpenAICompactSSEFailureMessage(c, statusCode, "api_error", message)
 }
 
 // writeOpenAICompactSSEFailureMessage 写出 response.failed 终止事件。Codex 对

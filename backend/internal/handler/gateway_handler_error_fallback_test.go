@@ -31,8 +31,8 @@ func TestGatewayEnsureForwardErrorResponse_WritesFallbackWhenNotWritten(t *testi
 	assert.Equal(t, "error", parsed["type"])
 	errorObj, ok := parsed["error"].(map[string]any)
 	require.True(t, ok)
-	assert.Equal(t, "upstream_error", errorObj["type"])
-	assert.Equal(t, "Upstream request failed", errorObj["message"])
+	assert.Equal(t, "api_error", errorObj["type"])
+	assert.Equal(t, "Request failed", errorObj["message"])
 }
 
 // Writer 已写后 ensureForwardErrorResponse 必须把错误以 SSE 形式追加，

@@ -276,7 +276,7 @@ func sanitizeStreamError(err error) string {
 			return netErr.Op + " network error"
 		}
 	}
-	return "upstream connection error"
+	return "connection error"
 }
 
 // ExtractUpstreamErrorMessage 从上游响应体中提取错误消息
@@ -439,8 +439,8 @@ func (s *GatewayService) handleErrorResponse(ctx context.Context, resp *http.Res
 		resp.StatusCode,
 		body,
 		http.StatusBadGateway,
-		"upstream_error",
-		"Upstream request failed",
+		"api_error",
+		"Request failed",
 	); matched {
 		c.JSON(status, gin.H{
 			"type": "error",
@@ -477,28 +477,28 @@ func (s *GatewayService) handleErrorResponse(ctx context.Context, resp *http.Res
 		return nil, fmt.Errorf("upstream error: %d message=%s", resp.StatusCode, summary)
 	case 401:
 		statusCode = http.StatusBadGateway
-		errType = "upstream_error"
-		errMsg = "Upstream authentication failed, please contact administrator"
+		errType = "authentication_error"
+		errMsg = "Authentication failed"
 	case 403:
 		statusCode = http.StatusBadGateway
-		errType = "upstream_error"
-		errMsg = "Upstream access forbidden, please contact administrator"
+		errType = "authentication_error"
+		errMsg = "Access forbidden"
 	case 429:
 		statusCode = http.StatusTooManyRequests
 		errType = "rate_limit_error"
-		errMsg = "Upstream rate limit exceeded, please retry later"
+		errMsg = "Rate limit exceeded, please retry later"
 	case 529:
 		statusCode = http.StatusServiceUnavailable
 		errType = "overloaded_error"
-		errMsg = "Upstream service overloaded, please retry later"
+		errMsg = "Service overloaded, please retry later"
 	case 500, 502, 503, 504:
 		statusCode = http.StatusBadGateway
-		errType = "upstream_error"
-		errMsg = "Upstream service temporarily unavailable"
+		errType = "api_error"
+		errMsg = "Service temporarily unavailable"
 	default:
 		statusCode = http.StatusBadGateway
-		errType = "upstream_error"
-		errMsg = "Upstream request failed"
+		errType = "api_error"
+		errMsg = "Request failed"
 	}
 
 	// 返回自定义错误响应
@@ -602,8 +602,8 @@ func (s *GatewayService) handleRetryExhaustedError(ctx context.Context, resp *ht
 		resp.StatusCode,
 		respBody,
 		http.StatusBadGateway,
-		"upstream_error",
-		"Upstream request failed after retries",
+		"api_error",
+		"Request failed after retries",
 	); matched {
 		c.JSON(status, gin.H{
 			"type": "error",
@@ -627,8 +627,8 @@ func (s *GatewayService) handleRetryExhaustedError(ctx context.Context, resp *ht
 	c.JSON(http.StatusBadGateway, gin.H{
 		"type": "error",
 		"error": gin.H{
-			"type":    "upstream_error",
-			"message": "Upstream request failed after retries",
+			"type":    "api_error",
+			"message": "Request failed after retries",
 		},
 	})
 
@@ -654,10 +654,7 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 	}
 
 	// 设置SSE响应头
-	c.Header("Content-Type", "text/event-stream")
-	c.Header("Cache-Control", "no-cache")
-	c.Header("Connection", "keep-alive")
-	c.Header("X-Accel-Buffering", "no")
+	responseheaders.SetSSEStreamingHeaders(c)
 
 	// 透传其他响应头
 	if v := resp.Header.Get("x-request-id"); v != "" {

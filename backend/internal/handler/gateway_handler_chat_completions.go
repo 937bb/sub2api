@@ -240,7 +240,7 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 		var result *service.ForwardResult
 		if account.Platform == service.PlatformGemini {
 			if h.geminiCompatService == nil {
-				h.chatCompletionsErrorResponse(c, http.StatusBadGateway, "upstream_error", "Gemini compatibility service is not configured")
+				h.chatCompletionsErrorResponse(c, http.StatusBadGateway, "api_error", "Service not configured")
 				if accountReleaseFunc != nil {
 					accountReleaseFunc()
 				}
@@ -351,7 +351,7 @@ func (h *GatewayHandler) handleCCFailoverExhausted(c *gin.Context, lastErr *serv
 	}
 	if lastErr != nil && service.IsOpenAISilentRefusalErrorBody(lastErr.ResponseBody) {
 		service.SetOpsUpstreamError(c, statusCode, service.OpenAISilentRefusalClientMessage(), "")
-		h.chatCompletionsErrorResponse(c, http.StatusBadGateway, "upstream_error", service.OpenAISilentRefusalClientMessage())
+		h.chatCompletionsErrorResponse(c, http.StatusBadGateway, "api_error", service.OpenAISilentRefusalClientMessage())
 		return
 	}
 	h.chatCompletionsErrorResponse(c, statusCode, "server_error", "All available accounts exhausted")

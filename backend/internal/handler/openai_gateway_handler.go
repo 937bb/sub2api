@@ -963,7 +963,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 				if lastFailoverErr != nil {
 					h.handleAnthropicFailoverExhausted(c, lastFailoverErr, streamStarted)
 				} else {
-					h.anthropicStreamingAwareError(c, http.StatusBadGateway, "api_error", "Upstream request failed", streamStarted)
+					h.anthropicStreamingAwareError(c, http.StatusBadGateway, "api_error", "Request failed", streamStarted)
 				}
 				return
 			}
@@ -1215,7 +1215,7 @@ func (h *OpenAIGatewayHandler) ensureAnthropicErrorResponse(c *gin.Context, stre
 	if c == nil || c.Writer == nil || c.Writer.Written() {
 		return false
 	}
-	h.anthropicStreamingAwareError(c, http.StatusBadGateway, "api_error", "Upstream request failed", streamStarted)
+	h.anthropicStreamingAwareError(c, http.StatusBadGateway, "api_error", "Request failed", streamStarted)
 	return true
 }
 
@@ -1920,7 +1920,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				closeOpenAIClientWS(wsConn, closeErr.StatusCode(), closeErr.Reason())
 				return
 			}
-			closeOpenAIClientWS(wsConn, coderws.StatusInternalError, "upstream websocket proxy failed")
+			closeOpenAIClientWS(wsConn, coderws.StatusInternalError, "websocket connection failed")
 			return
 		}
 		reqLog.Info("openai.websocket_ingress_closed", zap.Int64("account_id", account.ID))
@@ -2135,14 +2135,14 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 	copyFailoverRetryAfter(c, failoverErr.ResponseHeaders)
 	if failoverErr.IsCredentialFailure() {
 		status, message := credentialFailoverClientResponse(failoverErr)
-		h.handleStreamingAwareError(c, status, "upstream_error", message, streamStarted)
+		h.handleStreamingAwareError(c, status, "api_error", message, streamStarted)
 		return
 	}
 	statusCode := failoverErr.StatusCode
 	responseBody := failoverErr.ResponseBody
 	if service.IsOpenAISilentRefusalErrorBody(responseBody) {
 		service.SetOpsUpstreamError(c, statusCode, service.OpenAISilentRefusalClientMessage(), "")
-		h.handleStreamingAwareError(c, http.StatusBadGateway, "upstream_error", service.OpenAISilentRefusalClientMessage(), streamStarted)
+		h.handleStreamingAwareError(c, http.StatusBadGateway, "api_error", service.OpenAISilentRefusalClientMessage(), streamStarted)
 		return
 	}
 
@@ -2165,7 +2165,7 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 				c.Set(service.OpsSkipPassthroughKey, true)
 			}
 
-			h.handleStreamingAwareError(c, respCode, "upstream_error", msg, streamStarted)
+			h.handleStreamingAwareError(c, respCode, "api_error", msg, streamStarted)
 			return
 		}
 	}
@@ -2224,17 +2224,17 @@ func (h *OpenAIGatewayHandler) handleFailoverExhaustedSimple(c *gin.Context, sta
 func (h *OpenAIGatewayHandler) mapUpstreamError(statusCode int) (int, string, string) {
 	switch statusCode {
 	case 401:
-		return http.StatusBadGateway, "upstream_error", "Upstream authentication failed, please contact administrator"
+		return http.StatusBadGateway, "api_error", "Authentication failed"
 	case 403:
-		return http.StatusBadGateway, "upstream_error", "Upstream access forbidden, please contact administrator"
+		return http.StatusBadGateway, "api_error", "Access forbidden"
 	case 429:
-		return http.StatusTooManyRequests, "rate_limit_error", "Upstream rate limit exceeded, please retry later"
+		return http.StatusTooManyRequests, "rate_limit_error", "Rate limit exceeded, please retry later"
 	case 529:
-		return http.StatusServiceUnavailable, "upstream_error", "Upstream service overloaded, please retry later"
+		return http.StatusServiceUnavailable, "api_error", "Service overloaded, please retry later"
 	case 500, 502, 503, 504:
-		return http.StatusBadGateway, "upstream_error", "Upstream service temporarily unavailable"
+		return http.StatusBadGateway, "api_error", "Service temporarily unavailable"
 	default:
-		return http.StatusBadGateway, "upstream_error", "Upstream request failed"
+		return http.StatusBadGateway, "api_error", "Request failed"
 	}
 }
 
@@ -2281,7 +2281,7 @@ func (h *OpenAIGatewayHandler) handleStreamingAwareErrorWithCode(
 			}
 			payload, err := json.Marshal(gin.H{"error": errorObject})
 			if err != nil {
-				payload = []byte(`{"error":{"type":"upstream_error","message":"Upstream request failed"}}`)
+				payload = []byte(`{"error":{"type":"api_error","message":"Request failed"}}`)
 			}
 			errorEvent := "event: error\ndata: " + string(payload) + "\n\n"
 			if _, err := fmt.Fprint(c.Writer, errorEvent); err != nil {
@@ -2311,7 +2311,7 @@ func (h *OpenAIGatewayHandler) ensureOpenAIStreamReadErrorResponse(c *gin.Contex
 		streamStarted = true
 	}
 	h.handleStreamingAwareErrorWithCode(
-		c, http.StatusBadGateway, "upstream_error", code, message, streamStarted, true,
+		c, http.StatusBadGateway, "api_error", code, message, streamStarted, true,
 	)
 	return true
 }
@@ -2341,7 +2341,7 @@ func (h *OpenAIGatewayHandler) ensureForwardErrorResponse(c *gin.Context, stream
 	if c.Writer.Written() && !imageKeepalivePaddingOnly {
 		streamStarted = true
 	}
-	h.handleStreamingAwareError(c, http.StatusBadGateway, "upstream_error", "Upstream request failed", streamStarted)
+	h.handleStreamingAwareError(c, http.StatusBadGateway, "api_error", "Request failed", streamStarted)
 	return true
 }
 
@@ -2387,7 +2387,7 @@ func openAIForwardErrorAlreadyCommunicated(c *gin.Context, writerSizeBeforeForwa
 
 	msg := strings.TrimSpace(err.Error())
 	for _, prefix := range []string{
-		"upstream response failed:",
+		"response failed:",
 		"non-streaming openai protocol error:",
 	} {
 		if strings.HasPrefix(msg, prefix) {
@@ -2500,7 +2500,7 @@ func closeOpenAIClientWS(conn *coderws.Conn, status coderws.StatusCode, reason s
 
 func closeOpenAIWSFailoverExhausted(conn *coderws.Conn, failoverErr *service.UpstreamFailoverError) {
 	if failoverErr == nil {
-		closeOpenAIClientWS(conn, coderws.StatusInternalError, "upstream websocket proxy failed")
+		closeOpenAIClientWS(conn, coderws.StatusInternalError, "websocket connection failed")
 		return
 	}
 	if failoverErr.Stage == service.GatewayFailureStageAccountAuth {
@@ -2509,13 +2509,13 @@ func closeOpenAIWSFailoverExhausted(conn *coderws.Conn, failoverErr *service.Ups
 	}
 	switch failoverErr.StatusCode {
 	case http.StatusTooManyRequests:
-		closeOpenAIClientWS(conn, coderws.StatusTryAgainLater, "upstream rate limit exceeded, please retry later")
+		closeOpenAIClientWS(conn, coderws.StatusTryAgainLater, "rate limit exceeded, please retry later")
 	case 529, http.StatusInternalServerError, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
-		closeOpenAIClientWS(conn, coderws.StatusTryAgainLater, "upstream service temporarily unavailable")
+		closeOpenAIClientWS(conn, coderws.StatusTryAgainLater, "service temporarily unavailable")
 	case http.StatusUnauthorized, http.StatusForbidden:
-		closeOpenAIClientWS(conn, coderws.StatusPolicyViolation, "upstream websocket authentication failed")
+		closeOpenAIClientWS(conn, coderws.StatusPolicyViolation, "websocket authentication failed")
 	default:
-		closeOpenAIClientWS(conn, coderws.StatusInternalError, "upstream websocket proxy failed")
+		closeOpenAIClientWS(conn, coderws.StatusInternalError, "websocket connection failed")
 	}
 }
 

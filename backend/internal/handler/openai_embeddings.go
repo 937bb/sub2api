@@ -145,7 +145,7 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 			if lastFailoverErr != nil {
 				h.handleFailoverExhausted(c, lastFailoverErr, false)
 			} else {
-				h.errorResponse(c, http.StatusBadGateway, "api_error", "Upstream request failed")
+				h.errorResponse(c, http.StatusBadGateway, "api_error", "Request failed")
 			}
 			return
 		}
@@ -223,7 +223,7 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 			}
 			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, account.GetMappedModel(reqModel), false, nil)
 			if c.Writer.Size() == writerSizeBeforeForward {
-				h.errorResponse(c, http.StatusBadGateway, "upstream_error", "Upstream request failed")
+				h.errorResponse(c, http.StatusBadGateway, "api_error", "Request failed")
 			}
 			reqLog.Warn("openai_embeddings.forward_failed",
 				zap.Int64("account_id", account.ID),

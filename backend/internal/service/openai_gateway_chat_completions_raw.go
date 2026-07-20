@@ -122,7 +122,7 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 		if bridgeErr != nil {
 			var failoverErr *UpstreamFailoverError
 			if !errors.As(bridgeErr, &failoverErr) && c != nil && c.Writer != nil && !c.Writer.Written() {
-				writeChatCompletionsError(c, http.StatusBadGateway, "upstream_error", bridgeErr.Error())
+				writeChatCompletionsError(c, http.StatusBadGateway, "api_error", bridgeErr.Error())
 			}
 			return nil, bridgeErr
 		}

@@ -28,6 +28,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/securityaudit"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -1642,7 +1643,7 @@ func (h *GatewayHandler) handleFailoverExhausted(c *gin.Context, failoverErr *se
 	responseBody := failoverErr.ResponseBody
 	if service.IsOpenAISilentRefusalErrorBody(responseBody) {
 		service.SetOpsUpstreamError(c, statusCode, service.OpenAISilentRefusalClientMessage(), "")
-		h.handleStreamingAwareError(c, http.StatusBadGateway, "upstream_error", service.OpenAISilentRefusalClientMessage(), streamStarted)
+		h.handleStreamingAwareError(c, http.StatusBadGateway, "api_error", service.OpenAISilentRefusalClientMessage(), streamStarted)
 		return
 	}
 
@@ -1665,7 +1666,7 @@ func (h *GatewayHandler) handleFailoverExhausted(c *gin.Context, failoverErr *se
 				c.Set(service.OpsSkipPassthroughKey, true)
 			}
 
-			h.handleStreamingAwareError(c, respCode, "upstream_error", msg, streamStarted)
+			h.handleStreamingAwareError(c, respCode, "api_error", msg, streamStarted)
 			return
 		}
 	}
@@ -1689,17 +1690,17 @@ func (h *GatewayHandler) handleFailoverExhaustedSimple(c *gin.Context, statusCod
 func (h *GatewayHandler) mapUpstreamError(statusCode int) (int, string, string) {
 	switch statusCode {
 	case 401:
-		return http.StatusBadGateway, "upstream_error", "Upstream authentication failed, please contact administrator"
+		return http.StatusInternalServerError, "authentication_error", "Authentication failed"
 	case 403:
-		return http.StatusBadGateway, "upstream_error", "Upstream access forbidden, please contact administrator"
+		return http.StatusInternalServerError, "authentication_error", "Access forbidden"
 	case 429:
-		return http.StatusTooManyRequests, "rate_limit_error", "Upstream rate limit exceeded, please retry later"
+		return http.StatusTooManyRequests, "rate_limit_error", "Rate limit exceeded, please retry later"
 	case 529:
-		return http.StatusServiceUnavailable, "overloaded_error", "Upstream service overloaded, please retry later"
+		return http.StatusServiceUnavailable, "overloaded_error", "Service overloaded, please retry later"
 	case 500, 502, 503, 504:
-		return http.StatusBadGateway, "upstream_error", "Upstream service temporarily unavailable"
+		return http.StatusInternalServerError, "api_error", "Service temporarily unavailable"
 	default:
-		return http.StatusBadGateway, "upstream_error", "Upstream request failed"
+		return http.StatusInternalServerError, "api_error", "Request failed"
 	}
 }
 
@@ -1750,7 +1751,7 @@ func (h *GatewayHandler) ensureForwardErrorResponse(c *gin.Context, streamStarte
 	if c.Writer.Written() {
 		streamStarted = true
 	}
-	h.handleStreamingAwareError(c, http.StatusBadGateway, "upstream_error", "Upstream request failed", streamStarted)
+	h.handleStreamingAwareError(c, http.StatusBadGateway, "api_error", "Request failed", streamStarted)
 	return true
 }
 
@@ -2038,10 +2039,7 @@ func detectInterceptType(body []byte, model string, maxTokens int, isClaudeCodeC
 
 // sendMockInterceptStream 发送流式 mock 响应（用于请求拦截）
 func sendMockInterceptStream(c *gin.Context, model string, interceptType InterceptType) {
-	c.Header("Content-Type", "text/event-stream")
-	c.Header("Cache-Control", "no-cache")
-	c.Header("Connection", "keep-alive")
-	c.Header("X-Accel-Buffering", "no")
+	responseheaders.SetSSEStreamingHeaders(c)
 
 	// 根据拦截类型决定响应内容
 	var msgID string

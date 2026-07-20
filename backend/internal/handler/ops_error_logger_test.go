@@ -343,7 +343,7 @@ func TestLogOpsStreamError_UpstreamFailureCountsTowardsSLA(t *testing.T) {
 	job := <-opsErrorLogQueue
 	require.NotNil(t, job.entry)
 	require.Equal(t, http.StatusBadGateway, job.entry.StatusCode)
-	require.Equal(t, "upstream_error", job.entry.ErrorType)
+	require.Equal(t, "api_error", job.entry.ErrorType)
 	require.Equal(t, "upstream", job.entry.ErrorPhase)
 	require.Equal(t, "provider", job.entry.ErrorOwner)
 	require.False(t, job.entry.IsBusinessLimited)
@@ -405,7 +405,6 @@ func TestIsKnownOpsErrorType(t *testing.T) {
 		"rate_limit_error",
 		"billing_error",
 		"subscription_error",
-		"upstream_error",
 		"overloaded_error",
 		"api_error",
 		"not_found_error",
@@ -415,7 +414,7 @@ func TestIsKnownOpsErrorType(t *testing.T) {
 		require.True(t, isKnownOpsErrorType(k), "expected known: %s", k)
 	}
 
-	unknown := []string{"<nil>", "null", "", "random_error", "some_new_type", "<nil>\u003e"}
+	unknown := []string{"<nil>", "null", "", "upstream_error", "random_error", "some_new_type", "<nil>\u003e"}
 	for _, u := range unknown {
 		require.False(t, isKnownOpsErrorType(u), "expected unknown: %q", u)
 	}
@@ -431,7 +430,7 @@ func TestNormalizeOpsErrorType(t *testing.T) {
 		// Known types pass through.
 		{"known invalid_request_error", "invalid_request_error", "", "invalid_request_error"},
 		{"known rate_limit_error", "rate_limit_error", "", "rate_limit_error"},
-		{"known upstream_error", "upstream_error", "", "upstream_error"},
+		{"legacy upstream_error", "upstream_error", "", "api_error"},
 
 		// Unknown/garbage types are rejected and fall through to code-based or default.
 		{"nil literal from upstream", "<nil>", "", "api_error"},
@@ -926,10 +925,10 @@ func TestClassifyOpsOtherErrorsStillCountForSLA(t *testing.T) {
 	phase, isBusinessLimited, errorOwner, errorSource := classifyOpsErrorLog(c, errType, "Failed to validate API key", "INTERNAL_ERROR", http.StatusInternalServerError)
 
 	require.Equal(t, "api_error", errType)
-	require.Equal(t, "internal", phase)
+	require.Equal(t, "upstream", phase)
 	require.False(t, isBusinessLimited)
-	require.Equal(t, "platform", errorOwner)
-	require.Equal(t, "gateway", errorSource)
+	require.Equal(t, "provider", errorOwner)
+	require.Equal(t, "upstream_http", errorSource)
 }
 
 func TestClassifyOpsUnsupportedModelExcludedFromSLA(t *testing.T) {

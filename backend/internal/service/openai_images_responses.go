@@ -72,17 +72,17 @@ func (e *OpenAIImagesUpstreamError) clientStatusCode() int {
 
 func (e *OpenAIImagesUpstreamError) clientErrorType() string {
 	if e == nil {
-		return "upstream_error"
+		return "api_error"
 	}
 	if trimmed := strings.TrimSpace(e.ErrorType); trimmed != "" {
 		return trimmed
 	}
-	return "upstream_error"
+	return "api_error"
 }
 
 func (e *OpenAIImagesUpstreamError) clientMessage() string {
 	if e == nil {
-		return "Upstream request failed"
+		return "Request failed"
 	}
 	if trimmed := strings.TrimSpace(e.Message); trimmed != "" {
 		return trimmed
@@ -90,7 +90,7 @@ func (e *OpenAIImagesUpstreamError) clientMessage() string {
 	if trimmed := strings.TrimSpace(e.Code); trimmed != "" {
 		return trimmed
 	}
-	return "Upstream request failed"
+	return "Request failed"
 }
 
 // IsOpenAIImagesRetryableUpstreamError reports whether an Images error is an
@@ -748,7 +748,7 @@ func openAIImagesUpstreamErrorFromGJSON(errorObj gjson.Result, upstreamRequestID
 	param := strings.TrimSpace(errorObj.Get("param").String())
 	statusCode := openAIImagesSSEErrorStatus(errType, code)
 	if message == "" {
-		message = "Upstream request failed"
+		message = "Request failed"
 	}
 	return &OpenAIImagesUpstreamError{
 		StatusCode:        statusCode,
@@ -777,7 +777,7 @@ func openAIImagesErrorTypeForStatus(status int) string {
 	case status >= 500:
 		return "api_error"
 	default:
-		return "upstream_error"
+		return "api_error"
 	}
 }
 
@@ -813,7 +813,7 @@ func openAIImagesUpstreamErrorFromHTTP(statusCode int, header http.Header, body 
 // handleOpenAIImagesErrorResponse is the non-failover error handler for the
 // images endpoints (/v1/images/generations and /v1/images/edits). Unlike the
 // generic handleErrorResponse — which collapses every non-failover upstream
-// error into a generic 502 "Upstream request failed" — it surfaces the real
+// error into a generic 502 "Request failed" — it surfaces the real
 // upstream status code and error message/type/code/param to the client. This
 // mirrors how the Chat Completions and Messages compat paths use
 // handleCompatErrorResponse.
@@ -859,8 +859,8 @@ func (s *OpenAIGatewayService) handleOpenAIImagesErrorResponse(
 		resp.StatusCode,
 		body,
 		http.StatusBadGateway,
-		"upstream_error",
-		"Upstream request failed",
+		"api_error",
+		"Request failed",
 	); matched {
 		upErr := &OpenAIImagesUpstreamError{
 			StatusCode:        status,
@@ -888,8 +888,8 @@ func (s *OpenAIGatewayService) handleOpenAIImagesErrorResponse(
 		})
 		upErr := &OpenAIImagesUpstreamError{
 			StatusCode:        http.StatusInternalServerError,
-			ErrorType:         "upstream_error",
-			Message:           "Upstream gateway error",
+			ErrorType:         "api_error",
+			Message:           "Gateway error",
 			UpstreamRequestID: strings.TrimSpace(resp.Header.Get("x-request-id")),
 		}
 		writeOpenAIImagesUpstreamErrorResponse(c, upErr)
@@ -988,9 +988,9 @@ func openAIImagesStreamPrefix(parsed *OpenAIImagesRequest) string {
 }
 
 func buildOpenAIImagesStreamErrorBody(message string) []byte {
-	body := []byte(`{"type":"error","error":{"type":"upstream_error","message":""}}`)
+	body := []byte(`{"type":"error","error":{"type":"api_error","message":""}}`)
 	if strings.TrimSpace(message) == "" {
-		message = "upstream request failed"
+		message = "request failed"
 	}
 	body, _ = sjson.SetBytes(body, "error.message", message)
 	return body
@@ -1312,9 +1312,7 @@ func (s *OpenAIGatewayService) handleOpenAIImagesOAuthStreamingResponse(
 	fallbackModel string,
 ) (OpenAIUsage, int, []string, *int, error) {
 	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
-	c.Header("Content-Type", "text/event-stream")
-	c.Header("Cache-Control", "no-cache")
-	c.Header("Connection", "keep-alive")
+	responseheaders.SetSSEStreamingHeaders(c)
 	c.Status(resp.StatusCode)
 
 	flusher, ok := c.Writer.(http.Flusher)

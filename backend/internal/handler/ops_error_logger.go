@@ -870,7 +870,7 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 			}
 			recoveredMsg = truncateString(recoveredMsg, 2048)
 			recoveredPhase, recoveredBusinessLimited, recoveredOwner, recoveredSource := classifyOpsErrorLog(
-				c, "upstream_error", recoveredMsg, "", effectiveUpstreamStatus,
+				c, "api_error", recoveredMsg, "", effectiveUpstreamStatus,
 			)
 
 			entry := &service.OpsInsertErrorLogInput{
@@ -913,9 +913,9 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 				UserAgent: c.GetHeader("User-Agent"),
 
 				ErrorPhase: recoveredPhase,
-				ErrorType:  "upstream_error",
+				ErrorType:  "api_error",
 				// Severity should reflect the upstream failure, not the final client status (200).
-				Severity:          classifyOpsSeverity("upstream_error", effectiveUpstreamStatus),
+				Severity:          classifyOpsSeverity("api_error", effectiveUpstreamStatus),
 				StatusCode:        status,
 				IsBusinessLimited: recoveredBusinessLimited,
 				IsCountTokens:     isCountTokensRequest(c),
@@ -1463,9 +1463,8 @@ func isKnownOpsErrorType(t string) bool {
 		"rate_limit_error",
 		"billing_error",
 		"subscription_error",
-		"upstream_error",
-		"overloaded_error",
 		"api_error",
+		"overloaded_error",
 		"not_found_error",
 		"forbidden_error":
 		return true
@@ -1510,13 +1509,11 @@ func classifyOpsPhase(errType, message, code string) string {
 		return "upstream"
 	case "invalid_request_error":
 		return "request"
-	case "upstream_error", "overloaded_error":
-		return "upstream"
-	case "api_error":
+	case "api_error", "overloaded_error":
 		if isOpsNoAvailableAccountMessage(msg) {
 			return "routing"
 		}
-		return "internal"
+		return "upstream"
 	default:
 		return "internal"
 	}

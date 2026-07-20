@@ -160,9 +160,7 @@ func mapResponsesErrorCode(errType string) string {
 		return "permission_denied"
 	case "authentication_error":
 		return "authentication_failed"
-	case "upstream_error":
-		return "upstream_error"
-	case "server_error", "api_error", "":
+	case "api_error", "server_error", "":
 		return "server_error"
 	default:
 		return errType

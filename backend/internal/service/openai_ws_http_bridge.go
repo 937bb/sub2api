@@ -136,19 +136,19 @@ func buildOpenAIWSHTTPBridgeErrorEvent(statusCode int, message string) []byte {
 		message = http.StatusText(statusCode)
 	}
 	if message == "" {
-		message = "upstream request failed"
+		message = "request failed"
 	}
 	event := map[string]any{
 		"type":   "error",
 		"status": statusCode,
 		"error": map[string]any{
-			"type":    "upstream_error",
+			"type":    "api_error",
 			"message": message,
 		},
 	}
 	body, err := json.Marshal(event)
 	if err != nil {
-		return []byte(`{"type":"error","error":{"type":"upstream_error","message":"upstream request failed"}}`)
+		return []byte(`{"type":"error","error":{"type":"api_error","message":"request failed"}}`)
 	}
 	return body
 }
@@ -235,7 +235,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, true)
 		}
 		safeErr := sanitizeUpstreamErrorMessage(err.Error())
-		_ = writeClientMessage(buildOpenAIWSHTTPBridgeErrorEvent(http.StatusBadGateway, "Upstream request failed"))
+		_ = writeClientMessage(buildOpenAIWSHTTPBridgeErrorEvent(http.StatusBadGateway, "Request failed"))
 		return nil, fmt.Errorf("upstream http bridge request failed: %s", safeErr)
 	}
 	defer func() { _ = resp.Body.Close() }()

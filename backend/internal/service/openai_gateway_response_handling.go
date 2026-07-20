@@ -60,10 +60,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	}
 
 	// Set SSE response headers
-	c.Header("Content-Type", "text/event-stream")
-	c.Header("Cache-Control", "no-cache")
-	c.Header("Connection", "keep-alive")
-	c.Header("X-Accel-Buffering", "no")
+	responseheaders.SetSSEStreamingHeaders(c)
 
 	// Pass through other headers
 	if !guardFirstOutput && resp.Header.Get("x-request-id") != "" {
@@ -81,10 +78,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		}
 		// These headers describe this gateway's SSE stream and are stable across
 		// account attempts. Keep them authoritative over upstream values.
-		c.Header("Content-Type", "text/event-stream")
-		c.Header("Cache-Control", "no-cache")
-		c.Header("Connection", "keep-alive")
-		c.Header("X-Accel-Buffering", "no")
+		responseheaders.SetSSEStreamingHeaders(c)
 	}
 
 	w := c.Writer
@@ -267,7 +261,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			return
 		}
 		errorEventSent = true
-		payload := `{"type":"error","sequence_number":0,"error":{"type":"upstream_error","message":` + strconv.Quote(reason) + `,"code":` + strconv.Quote(reason) + `}}`
+		payload := `{"type":"error","sequence_number":0,"error":{"type":"api_error","message":` + strconv.Quote(reason) + `,"code":` + strconv.Quote(reason) + `}}`
 		if err := flushBuffered(); err != nil {
 			clientDisconnected = true
 			return
@@ -372,7 +366,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		}
 		if errors.Is(scanErr, bufio.ErrTooLong) {
 			logger.LegacyPrintf("service.openai_gateway", "SSE line too long: account=%d max_size=%d error=%v", account.ID, maxLineSize, scanErr)
-			sendErrorEvent("response_too_large")
+			sendErrorEvent("Response too large")
 			return resultWithUsage(), scanErr, true
 		}
 		if !openAIStreamClientOutputStarted(c, clientOutputStarted) && !eventShouldFlush {
@@ -386,7 +380,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		if clientDisconnected {
 			return resultWithUsage(), fmt.Errorf("stream usage incomplete after disconnect: %w", scanErr), true
 		}
-		sendErrorEvent("stream_read_error")
+		sendErrorEvent("Stream read error")
 		return resultWithUsage(), fmt.Errorf("stream read error: %w", scanErr), true
 	}
 	processSSELine := func(line string, queueDrained bool) {
@@ -674,7 +668,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			if s.rateLimitService != nil {
 				s.rateLimitService.HandleStreamTimeout(ctx, account, originalModel)
 			}
-			sendErrorEvent("stream_timeout")
+			sendErrorEvent("Stream idle timeout")
 			return resultWithUsage(), fmt.Errorf("stream data interval timeout")
 
 		case <-firstOutputCh:
@@ -1322,14 +1316,14 @@ func (s *OpenAIGatewayService) writeOpenAINonStreamingProtocolError(resp *http.R
 	// body-signal compact 心跳可能已把响应头提交为 200，此时只能以
 	// response.failed 终止事件回传错误，不能再写 JSON+状态码。
 	if openAICompactClientWantsStream(c) && StopOpenAICompactSSEKeepaliveCommitted(c) {
-		writeOpenAICompactSSEFailureMessage(c, http.StatusBadGateway, "upstream_error", message)
+		writeOpenAICompactSSEFailureMessage(c, http.StatusBadGateway, "api_error", message)
 		return fmt.Errorf("non-streaming openai protocol error: %s", message)
 	}
 	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 	c.Writer.Header().Set("Content-Type", "application/json; charset=utf-8")
 	c.JSON(http.StatusBadGateway, gin.H{
 		"error": gin.H{
-			"type":    "upstream_error",
+			"type":    "api_error",
 			"message": message,
 		},
 	})

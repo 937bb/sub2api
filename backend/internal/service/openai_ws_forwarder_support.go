@@ -254,10 +254,10 @@ func openAIWSPayloadTransientStatus(payload []byte) int {
 		return http.StatusServiceUnavailable
 	case strings.Contains(code, "server_error"),
 		strings.Contains(code, "internal_error"),
-		strings.Contains(code, "upstream_error"),
+		strings.Contains(code, "api_error"),
 		strings.Contains(errType, "server_error"),
 		strings.Contains(errType, "internal_error"),
-		strings.Contains(errType, "upstream_error"):
+		strings.Contains(errType, "api_error"):
 		return http.StatusInternalServerError
 	default:
 		return 0

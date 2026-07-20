@@ -12,6 +12,7 @@ import (
 
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 
 	"github.com/gin-gonic/gin"
 )
@@ -390,10 +391,7 @@ func (h *ConcurrencyHelper) waitForSlotWithPingTimeout(c *gin.Context, slotType 
 		case <-pingCh:
 			// Send ping to keep connection alive
 			if !*streamStarted {
-				c.Header("Content-Type", "text/event-stream")
-				c.Header("Cache-Control", "no-cache")
-				c.Header("Connection", "keep-alive")
-				c.Header("X-Accel-Buffering", "no")
+				responseheaders.SetSSEStreamingHeaders(c)
 				*streamStarted = true
 			}
 			if _, err := fmt.Fprint(c.Writer, string(h.pingFormat)); err != nil {

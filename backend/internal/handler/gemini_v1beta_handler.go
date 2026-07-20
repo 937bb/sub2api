@@ -584,7 +584,7 @@ func parseGeminiModelAction(rest string) (model string, action string, err error
 
 func (h *GatewayHandler) handleGeminiFailoverExhausted(c *gin.Context, failoverErr *service.UpstreamFailoverError) {
 	if failoverErr == nil {
-		googleError(c, http.StatusBadGateway, "Upstream request failed")
+		googleError(c, http.StatusBadGateway, "Request failed")
 		return
 	}
 
@@ -627,17 +627,17 @@ func (h *GatewayHandler) handleGeminiFailoverExhausted(c *gin.Context, failoverE
 func mapGeminiUpstreamError(statusCode int) (int, string) {
 	switch statusCode {
 	case 401:
-		return http.StatusBadGateway, "Upstream authentication failed, please contact administrator"
+		return http.StatusBadGateway, "Authentication failed"
 	case 403:
-		return http.StatusBadGateway, "Upstream access forbidden, please contact administrator"
+		return http.StatusBadGateway, "Access forbidden"
 	case 429:
-		return http.StatusTooManyRequests, "Upstream rate limit exceeded, please retry later"
+		return http.StatusTooManyRequests, "Rate limit exceeded, please retry later"
 	case 529:
-		return http.StatusServiceUnavailable, "Upstream service overloaded, please retry later"
+		return http.StatusServiceUnavailable, "Service overloaded, please retry later"
 	case 500, 502, 503, 504:
-		return http.StatusBadGateway, "Upstream service temporarily unavailable"
+		return http.StatusBadGateway, "Service temporarily unavailable"
 	default:
-		return http.StatusBadGateway, "Upstream request failed"
+		return http.StatusBadGateway, "Request failed"
 	}
 }
 

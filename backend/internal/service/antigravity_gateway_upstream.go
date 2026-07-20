@@ -14,6 +14,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/gin-gonic/gin"
 )
 
@@ -111,10 +112,7 @@ func (s *AntigravityGatewayService) ForwardUpstream(ctx context.Context, c *gin.
 
 	if claudeReq.Stream {
 		// 流式响应：透传
-		c.Header("Content-Type", "text/event-stream")
-		c.Header("Cache-Control", "no-cache")
-		c.Header("Connection", "keep-alive")
-		c.Header("X-Accel-Buffering", "no")
+		responseheaders.SetSSEStreamingHeaders(c)
 		c.Status(http.StatusOK)
 
 		streamRes := s.streamUpstreamResponse(c, resp, startTime)

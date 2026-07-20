@@ -774,7 +774,7 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 			if strings.Contains(err.Error(), "missing project_id") {
 				return nil, s.writeClaudeError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 			}
-			return nil, s.writeClaudeError(c, http.StatusBadGateway, "upstream_error", err.Error())
+			return nil, s.writeClaudeError(c, http.StatusBadGateway, "api_error", err.Error())
 		}
 		requestIDHeader = idHeader
 
@@ -795,7 +795,7 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 				continue
 			}
 			setOpsUpstreamError(c, 0, safeErr, "")
-			return nil, s.writeClaudeError(c, http.StatusBadGateway, "upstream_error", "Upstream request failed after retries: "+safeErr)
+			return nil, s.writeClaudeError(c, http.StatusBadGateway, "api_error", "Request failed: "+safeErr)
 		}
 
 		// Special-case: signature/thought_signature validation errors are not transient, but may be fixed by
@@ -1065,7 +1065,7 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 		if useUpstreamStream {
 			collected, usageObj, err := collectGeminiSSE(resp.Body, true)
 			if err != nil {
-				return nil, s.writeClaudeError(c, http.StatusBadGateway, "upstream_error", "Failed to read upstream stream")
+				return nil, s.writeClaudeError(c, http.StatusBadGateway, "api_error", "Failed to read response stream")
 			}
 			collectedBytes, _ := json.Marshal(collected)
 			claudeResp, usageObj2 := convertGeminiToClaudeMessage(collected, originalModel, collectedBytes)
@@ -1335,7 +1335,7 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 				}, nil
 			}
 			setOpsUpstreamError(c, 0, safeErr, "")
-			return nil, s.writeGoogleError(c, http.StatusBadGateway, "Upstream request failed after retries: "+safeErr)
+			return nil, s.writeGoogleError(c, http.StatusBadGateway, "Request failed after retries: "+safeErr)
 		}
 
 		// 错误策略优先：匹配则跳过重试直接处理。
@@ -1593,7 +1593,7 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 		if useUpstreamStream {
 			collected, usageObj, err := collectGeminiSSE(resp.Body, isOAuth)
 			if err != nil {
-				return nil, s.writeGoogleError(c, http.StatusBadGateway, "Failed to read upstream stream")
+				return nil, s.writeGoogleError(c, http.StatusBadGateway, "Failed to read response stream")
 			}
 			b, _ := json.Marshal(collected)
 			c.Data(http.StatusOK, "application/json", b)
@@ -1744,8 +1744,8 @@ func (s *GeminiMessagesCompatService) writeGeminiMappedError(c *gin.Context, acc
 		upstreamStatus,
 		body,
 		http.StatusBadGateway,
-		"upstream_error",
-		"Upstream request failed",
+		"api_error",
+		"Request failed",
 	); matched {
 		c.JSON(status, gin.H{
 			"type":  "error",
@@ -1792,17 +1792,17 @@ func (s *GeminiMessagesCompatService) writeGeminiMappedError(c *gin.Context, acc
 			errType = "authentication_error"
 		}
 		if errMsg == "" {
-			errMsg = "Upstream authentication failed, please contact administrator"
+			errMsg = "Authentication failed"
 		}
 	case 403:
 		if statusCode == 0 {
 			statusCode = http.StatusBadGateway
 		}
 		if errType == "" {
-			errType = "permission_error"
+			errType = "authentication_error"
 		}
 		if errMsg == "" {
-			errMsg = "Upstream access forbidden, please contact administrator"
+			errMsg = "Access forbidden"
 		}
 	case 404:
 		if statusCode == 0 {
@@ -1822,7 +1822,7 @@ func (s *GeminiMessagesCompatService) writeGeminiMappedError(c *gin.Context, acc
 			errType = "rate_limit_error"
 		}
 		if errMsg == "" {
-			errMsg = "Upstream rate limit exceeded, please retry later"
+			errMsg = "Rate limit exceeded, please retry later"
 		}
 	case 529:
 		if statusCode == 0 {
@@ -1832,7 +1832,7 @@ func (s *GeminiMessagesCompatService) writeGeminiMappedError(c *gin.Context, acc
 			errType = "overloaded_error"
 		}
 		if errMsg == "" {
-			errMsg = "Upstream service overloaded, please retry later"
+			errMsg = "Service overloaded, please retry later"
 		}
 	case 500, 502, 503, 504:
 		if statusCode == 0 {
@@ -1849,17 +1849,17 @@ func (s *GeminiMessagesCompatService) writeGeminiMappedError(c *gin.Context, acc
 			}
 		}
 		if errMsg == "" {
-			errMsg = "Upstream service temporarily unavailable"
+			errMsg = "Service temporarily unavailable"
 		}
 	default:
 		if statusCode == 0 {
 			statusCode = http.StatusBadGateway
 		}
 		if errType == "" {
-			errType = "upstream_error"
+			errType = "api_error"
 		}
 		if errMsg == "" {
-			errMsg = "Upstream request failed"
+			errMsg = "Request failed"
 		}
 	}
 
@@ -1903,7 +1903,7 @@ func mapGeminiErrorBodyToClaudeError(body []byte) *claudeErrorMapping {
 		Message: "",
 	}
 	if mapped.Type == "" {
-		mapped.Type = "upstream_error"
+		mapped.Type = "api_error"
 	}
 
 	switch strings.ToUpper(strings.TrimSpace(parsed.Error.Status)) {
@@ -1952,17 +1952,17 @@ type geminiStreamResult struct {
 func (s *GeminiMessagesCompatService) handleNonStreamingResponse(c *gin.Context, resp *http.Response, originalModel string) (*ClaudeUsage, error) {
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if err != nil {
-		return nil, s.writeClaudeError(c, http.StatusBadGateway, "upstream_error", "Failed to read upstream response")
+		return nil, s.writeClaudeError(c, http.StatusBadGateway, "api_error", "Failed to read response")
 	}
 
 	unwrappedBody, err := unwrapGeminiResponse(body)
 	if err != nil {
-		return nil, s.writeClaudeError(c, http.StatusBadGateway, "upstream_error", "Failed to parse upstream response")
+		return nil, s.writeClaudeError(c, http.StatusBadGateway, "api_error", "Failed to parse response")
 	}
 
 	var geminiResp map[string]any
 	if err := json.Unmarshal(unwrappedBody, &geminiResp); err != nil {
-		return nil, s.writeClaudeError(c, http.StatusBadGateway, "upstream_error", "Failed to parse upstream response")
+		return nil, s.writeClaudeError(c, http.StatusBadGateway, "api_error", "Failed to parse response")
 	}
 
 	claudeResp, usage := convertGeminiToClaudeMessage(geminiResp, originalModel, unwrappedBody)
@@ -1972,10 +1972,7 @@ func (s *GeminiMessagesCompatService) handleNonStreamingResponse(c *gin.Context,
 }
 
 func (s *GeminiMessagesCompatService) handleStreamingResponse(c *gin.Context, resp *http.Response, startTime time.Time, originalModel string) (*geminiStreamResult, error) {
-	c.Header("Content-Type", "text/event-stream")
-	c.Header("Cache-Control", "no-cache")
-	c.Header("Connection", "keep-alive")
-	c.Header("X-Accel-Buffering", "no")
+	responseheaders.SetSSEStreamingHeaders(c)
 	c.Status(http.StatusOK)
 
 	flusher, ok := c.Writer.(http.Flusher)
@@ -2559,9 +2556,7 @@ func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Conte
 	}
 
 	c.Status(resp.StatusCode)
-	c.Header("Cache-Control", "no-cache")
-	c.Header("Connection", "keep-alive")
-	c.Header("X-Accel-Buffering", "no")
+	responseheaders.SetSSEStreamingHeaders(c)
 
 	contentType := resp.Header.Get("Content-Type")
 	if contentType == "" {

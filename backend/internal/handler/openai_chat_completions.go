@@ -178,7 +178,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 				if lastFailoverErr != nil {
 					h.handleFailoverExhausted(c, lastFailoverErr, streamStarted)
 				} else {
-					h.handleStreamingAwareError(c, http.StatusBadGateway, "api_error", "Upstream request failed", streamStarted)
+					h.handleStreamingAwareError(c, http.StatusBadGateway, "api_error", "Request failed", streamStarted)
 				}
 				return
 			}

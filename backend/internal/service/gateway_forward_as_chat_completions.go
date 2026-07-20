@@ -141,7 +141,7 @@ func (s *GatewayService) ForwardAsChatCompletions(
 			Kind:               "request_error",
 			Message:            safeErr,
 		})
-		writeGatewayCCError(c, http.StatusBadGateway, "server_error", "Upstream request failed")
+		writeGatewayCCError(c, http.StatusBadGateway, "server_error", "Request failed")
 		return nil, fmt.Errorf("upstream request failed: %s", safeErr)
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -301,7 +301,7 @@ func (s *GatewayService) handleCCBufferedFromAnthropic(
 	}
 
 	if finalResp == nil {
-		writeGatewayCCError(c, http.StatusBadGateway, "server_error", "Upstream stream ended without a response")
+		writeGatewayCCError(c, http.StatusBadGateway, "server_error", "Stream ended without a response")
 		return nil, fmt.Errorf("upstream stream ended without response")
 	}
 
@@ -364,10 +364,7 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 	if s.responseHeaderFilter != nil {
 		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 	}
-	c.Writer.Header().Set("Content-Type", "text/event-stream")
-	c.Writer.Header().Set("Cache-Control", "no-cache")
-	c.Writer.Header().Set("Connection", "keep-alive")
-	c.Writer.Header().Set("X-Accel-Buffering", "no")
+	responseheaders.SetSSEStreamingHeaders(c)
 	c.Writer.WriteHeader(http.StatusOK)
 
 	// Use Anthropic→Responses state machine, then convert Responses→CC

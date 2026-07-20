@@ -241,7 +241,7 @@ func (h *AsyncImageHandler) run(taskID, platform string, taskCtx *gin.Context, r
 	}
 	if statusCode >= http.StatusOK && statusCode < http.StatusMultipleChoices {
 		if len(body) == 0 || !json.Valid(body) {
-			h.failTask(taskID, http.StatusBadGateway, imageTaskErrorPayload("api_error", "upstream returned an invalid image response"))
+			h.failTask(taskID, http.StatusBadGateway, imageTaskErrorPayload("api_error", "invalid image response"))
 			return
 		}
 		if err := h.tasks.Complete(context.Background(), taskID, statusCode, json.RawMessage(body)); err != nil {

@@ -140,7 +140,7 @@ func (s *GatewayService) ForwardAsResponses(
 			Kind:               "request_error",
 			Message:            safeErr,
 		})
-		writeResponsesError(c, http.StatusBadGateway, "server_error", "Upstream request failed")
+		writeResponsesError(c, http.StatusBadGateway, "server_error", "Request failed")
 		return nil, fmt.Errorf("upstream request failed: %s", safeErr)
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -318,7 +318,7 @@ func (s *GatewayService) handleResponsesBufferedStreamingResponse(
 	}
 
 	if finalResp == nil {
-		writeResponsesError(c, http.StatusBadGateway, "server_error", "Upstream stream ended without a response")
+		writeResponsesError(c, http.StatusBadGateway, "server_error", "Stream ended without a response")
 		return nil, fmt.Errorf("upstream stream ended without response")
 	}
 
@@ -378,10 +378,7 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 	if s.responseHeaderFilter != nil {
 		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 	}
-	c.Writer.Header().Set("Content-Type", "text/event-stream")
-	c.Writer.Header().Set("Cache-Control", "no-cache")
-	c.Writer.Header().Set("Connection", "keep-alive")
-	c.Writer.Header().Set("X-Accel-Buffering", "no")
+	responseheaders.SetSSEStreamingHeaders(c)
 	c.Writer.WriteHeader(http.StatusOK)
 
 	state := apicompat.NewAnthropicEventToResponsesState()

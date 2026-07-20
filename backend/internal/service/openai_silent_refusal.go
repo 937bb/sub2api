@@ -269,13 +269,13 @@ func newOpenAISilentRefusalFailoverError(c *gin.Context, account *Account, upstr
 func openAISilentRefusalErrorBody() []byte {
 	body, err := json.Marshal(map[string]any{
 		"error": map[string]any{
-			"type":    "upstream_error",
+			"type":    "api_error",
 			"code":    openAISilentRefusalErrorCode,
 			"message": openAISilentRefusalUpstreamMessage,
 		},
 	})
 	if err != nil {
-		return []byte(`{"error":{"type":"upstream_error","code":"openai_silent_refusal","message":"OpenAI upstream returned an empty completion stream with finish_reason=stop and no usage"}}`)
+		return []byte(`{"error":{"type":"api_error","code":"openai_silent_refusal","message":"OpenAI upstream returned an empty completion stream with finish_reason=stop and no usage"}}`)
 	}
 	return body
 }

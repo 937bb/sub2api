@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/gin-gonic/gin"
 )
 
@@ -27,6 +28,7 @@ const openAICompactSSEKeepaliveKey = "openai_compact_sse_keepalive"
 type openAICompactSSEKeepalive struct {
 	mu      sync.Mutex
 	writer  gin.ResponseWriter
+	req     *http.Request
 	started bool
 	stopped bool
 	// bytes 是心跳已写出的注释字节数。心跳不构成语义响应，handler 的
@@ -49,6 +51,7 @@ func StartOpenAICompactSSEKeepalive(c *gin.Context, interval time.Duration) func
 	originalWriter := c.Writer
 	k := &openAICompactSSEKeepalive{
 		writer: originalWriter,
+		req:    c.Request,
 		stop:   make(chan struct{}),
 	}
 	c.Set(openAICompactSSEKeepaliveKey, k)
@@ -95,11 +98,7 @@ func (k *openAICompactSSEKeepalive) beat() bool {
 		return false
 	}
 	if !k.started {
-		header := k.writer.Header()
-		header.Set("Content-Type", "text/event-stream")
-		header.Set("Cache-Control", "no-cache")
-		header.Set("Connection", "keep-alive")
-		header.Set("X-Accel-Buffering", "no")
+		responseheaders.SetSSEStreamingHeadersRaw(k.writer.Header(), k.req)
 		k.writer.WriteHeader(http.StatusOK)
 		k.started = true
 	}

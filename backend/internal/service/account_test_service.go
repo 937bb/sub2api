@@ -24,6 +24,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
+	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/Wei-Shaw/sub2api/internal/util/urlvalidator"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -259,10 +260,7 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 	}
 
 	// Set SSE headers
-	c.Writer.Header().Set("Content-Type", "text/event-stream")
-	c.Writer.Header().Set("Cache-Control", "no-cache")
-	c.Writer.Header().Set("Connection", "keep-alive")
-	c.Writer.Header().Set("X-Accel-Buffering", "no")
+	responseheaders.SetSSEStreamingHeaders(c)
 	c.Writer.Flush()
 
 	// Create Claude Code style payload (same for all account types)
@@ -336,10 +334,7 @@ func (s *AccountTestService) testClaudeVertexServiceAccountConnection(c *gin.Con
 		testModelID = normalizeVertexAnthropicModelID(claude.NormalizeModelID(testModelID))
 	}
 
-	c.Writer.Header().Set("Content-Type", "text/event-stream")
-	c.Writer.Header().Set("Cache-Control", "no-cache")
-	c.Writer.Header().Set("Connection", "keep-alive")
-	c.Writer.Header().Set("X-Accel-Buffering", "no")
+	responseheaders.SetSSEStreamingHeaders(c)
 	c.Writer.Flush()
 
 	payload, err := createTestPayload(testModelID)
@@ -407,10 +402,7 @@ func (s *AccountTestService) testBedrockAccountConnection(c *gin.Context, ctx co
 	testModelID = resolvedModelID
 
 	// Set SSE headers (test UI expects SSE)
-	c.Writer.Header().Set("Content-Type", "text/event-stream")
-	c.Writer.Header().Set("Cache-Control", "no-cache")
-	c.Writer.Header().Set("Connection", "keep-alive")
-	c.Writer.Header().Set("X-Accel-Buffering", "no")
+	responseheaders.SetSSEStreamingHeaders(c)
 	c.Writer.Flush()
 
 	// Create a minimal Bedrock-compatible payload (no stream, no cache_control)
@@ -581,10 +573,7 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	}
 
 	// Set SSE headers
-	c.Writer.Header().Set("Content-Type", "text/event-stream")
-	c.Writer.Header().Set("Cache-Control", "no-cache")
-	c.Writer.Header().Set("Connection", "keep-alive")
-	c.Writer.Header().Set("X-Accel-Buffering", "no")
+	responseheaders.SetSSEStreamingHeaders(c)
 	c.Writer.Flush()
 
 	// Create OpenAI Responses API payload. OAuth accounts use ChatGPT Codex
@@ -731,10 +720,7 @@ func (s *AccountTestService) testGrokAccountConnection(c *gin.Context, account *
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Invalid Grok base URL: %s", err.Error()))
 	}
 
-	c.Writer.Header().Set("Content-Type", "text/event-stream")
-	c.Writer.Header().Set("Cache-Control", "no-cache")
-	c.Writer.Header().Set("Connection", "keep-alive")
-	c.Writer.Header().Set("X-Accel-Buffering", "no")
+	responseheaders.SetSSEStreamingHeaders(c)
 	c.Writer.Flush()
 
 	payloadBytes, err := buildGrokQuotaProbeBody(testModelID)
@@ -810,10 +796,7 @@ func (s *AccountTestService) testOpenAIChatCompletionsConnection(
 	ctx := c.Request.Context()
 	apiURL := buildOpenAIChatCompletionsURL(normalizedBaseURL)
 
-	c.Writer.Header().Set("Content-Type", "text/event-stream")
-	c.Writer.Header().Set("Cache-Control", "no-cache")
-	c.Writer.Header().Set("Connection", "keep-alive")
-	c.Writer.Header().Set("X-Accel-Buffering", "no")
+	responseheaders.SetSSEStreamingHeaders(c)
 	c.Writer.Flush()
 
 	payload := createOpenAIChatCompletionsTestPayload(testModelID, prompt)
@@ -905,10 +888,7 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Unsupported account type: %s", account.Type))
 	}
 
-	c.Writer.Header().Set("Content-Type", "text/event-stream")
-	c.Writer.Header().Set("Cache-Control", "no-cache")
-	c.Writer.Header().Set("Connection", "keep-alive")
-	c.Writer.Header().Set("X-Accel-Buffering", "no")
+	responseheaders.SetSSEStreamingHeaders(c)
 	c.Writer.Flush()
 
 	payloadBytes, _ := json.Marshal(createOpenAICompactProbePayload(testModelID))
@@ -1064,10 +1044,7 @@ func (s *AccountTestService) testGeminiAccountConnection(c *gin.Context, account
 	}
 
 	// Set SSE headers
-	c.Writer.Header().Set("Content-Type", "text/event-stream")
-	c.Writer.Header().Set("Cache-Control", "no-cache")
-	c.Writer.Header().Set("Connection", "keep-alive")
-	c.Writer.Header().Set("X-Accel-Buffering", "no")
+	responseheaders.SetSSEStreamingHeaders(c)
 	c.Writer.Flush()
 
 	// Create test payload (Gemini format)
@@ -1144,10 +1121,7 @@ func (s *AccountTestService) testAntigravityAccountConnection(c *gin.Context, ac
 	}
 
 	// Set SSE headers
-	c.Writer.Header().Set("Content-Type", "text/event-stream")
-	c.Writer.Header().Set("Cache-Control", "no-cache")
-	c.Writer.Header().Set("Connection", "keep-alive")
-	c.Writer.Header().Set("X-Accel-Buffering", "no")
+	responseheaders.SetSSEStreamingHeaders(c)
 	c.Writer.Flush()
 
 	// Send test_start event
@@ -1689,10 +1663,7 @@ func (s *AccountTestService) testOpenAIImageAPIKey(c *gin.Context, ctx context.C
 	apiURL := buildOpenAIImagesURL(normalizedBaseURL, openAIImagesGenerationsEndpoint)
 
 	// Set SSE headers
-	c.Writer.Header().Set("Content-Type", "text/event-stream")
-	c.Writer.Header().Set("Cache-Control", "no-cache")
-	c.Writer.Header().Set("Connection", "keep-alive")
-	c.Writer.Header().Set("X-Accel-Buffering", "no")
+	responseheaders.SetSSEStreamingHeaders(c)
 	c.Writer.Flush()
 
 	s.sendEvent(c, TestEvent{Type: "test_start", Model: modelID})
@@ -1787,10 +1758,7 @@ func (s *AccountTestService) testOpenAIImageOAuth(c *gin.Context, ctx context.Co
 	}
 
 	// Set SSE headers
-	c.Writer.Header().Set("Content-Type", "text/event-stream")
-	c.Writer.Header().Set("Cache-Control", "no-cache")
-	c.Writer.Header().Set("Connection", "keep-alive")
-	c.Writer.Header().Set("X-Accel-Buffering", "no")
+	responseheaders.SetSSEStreamingHeaders(c)
 	c.Writer.Flush()
 
 	s.sendEvent(c, TestEvent{Type: "test_start", Model: modelID})

@@ -33,13 +33,25 @@ func Recovery() gin.HandlerFunc {
 			return
 		}
 
-		response.ErrorWithDetails(
-			c,
-			http.StatusInternalServerError,
-			infraerrors.UnknownMessage,
-			infraerrors.UnknownReason,
-			nil,
-		)
+		if IsAPIRoutePath(c) {
+			// Return Anthropic-compatible error format so API clients
+			// cannot distinguish a panic from a real Anthropic 500.
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"type": "error",
+				"error": gin.H{
+					"type":    "api_error",
+					"message": "Internal server error",
+				},
+			})
+		} else {
+			response.ErrorWithDetails(
+				c,
+				http.StatusInternalServerError,
+				infraerrors.UnknownMessage,
+				infraerrors.UnknownReason,
+				nil,
+			)
+		}
 		c.Abort()
 	})
 }

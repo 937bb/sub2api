@@ -2,10 +2,56 @@ package responseheaders
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/gin-gonic/gin"
 )
+
+func TestSetSSEStreamingHeadersUsesProtocolAndProxyAwareHeaders(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	tests := []struct {
+		name           string
+		protoMajor     int
+		forwardedFor   string
+		wantConnection bool
+		wantAccel      bool
+	}{
+		{name: "http1 direct", protoMajor: 1, wantConnection: true},
+		{name: "http1 proxied", protoMajor: 1, forwardedFor: "192.0.2.1", wantConnection: true, wantAccel: true},
+		{name: "http2 direct", protoMajor: 2},
+		{name: "http2 proxied", protoMajor: 2, forwardedFor: "192.0.2.1", wantAccel: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(recorder)
+			ctx.Request = httptest.NewRequest(http.MethodGet, "/v1/messages", nil)
+			ctx.Request.ProtoMajor = tt.protoMajor
+			if tt.forwardedFor != "" {
+				ctx.Request.Header.Set("X-Forwarded-For", tt.forwardedFor)
+			}
+
+			SetSSEStreamingHeaders(ctx)
+
+			if got := recorder.Header().Get("Content-Type"); got != "text/event-stream" {
+				t.Fatalf("Content-Type = %q, want text/event-stream", got)
+			}
+			if got := recorder.Header().Get("Cache-Control"); got != "no-cache" {
+				t.Fatalf("Cache-Control = %q, want no-cache", got)
+			}
+			if got := recorder.Header().Get("Connection") != ""; got != tt.wantConnection {
+				t.Fatalf("Connection presence = %v, want %v", got, tt.wantConnection)
+			}
+			if got := recorder.Header().Get("X-Accel-Buffering") != ""; got != tt.wantAccel {
+				t.Fatalf("X-Accel-Buffering presence = %v, want %v", got, tt.wantAccel)
+			}
+		})
+	}
+}
 
 func TestFilterHeadersDisabledUsesDefaultAllowlist(t *testing.T) {
 	src := http.Header{}

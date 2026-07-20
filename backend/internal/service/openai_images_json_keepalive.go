@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/gin-gonic/gin"
 )
 
@@ -24,6 +25,7 @@ const openAIImagesJSONKeepaliveKey = "openai_images_json_keepalive"
 type openAIImagesJSONKeepalive struct {
 	mu      sync.Mutex
 	writer  gin.ResponseWriter
+	req     *http.Request
 	started bool
 	stopped bool
 	bytes   int
@@ -39,6 +41,7 @@ func StartOpenAIImagesJSONKeepalive(c *gin.Context, interval time.Duration) func
 	originalWriter := c.Writer
 	k := &openAIImagesJSONKeepalive{
 		writer: originalWriter,
+		req:    c.Request,
 		stop:   make(chan struct{}),
 	}
 	c.Set(openAIImagesJSONKeepaliveKey, k)
@@ -85,7 +88,9 @@ func (k *openAIImagesJSONKeepalive) beat() bool {
 		header := k.writer.Header()
 		header.Set("Content-Type", "application/json; charset=utf-8")
 		header.Set("Cache-Control", "no-cache")
-		header.Set("X-Accel-Buffering", "no")
+		if responseheaders.IsBehindReverseProxy(k.req) {
+			header.Set("X-Accel-Buffering", "no")
+		}
 		k.writer.WriteHeader(http.StatusOK)
 		k.started = true
 	}

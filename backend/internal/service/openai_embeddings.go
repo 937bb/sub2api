@@ -101,7 +101,7 @@ func (s *OpenAIGatewayService) ForwardEmbeddings(
 			Kind:               "request_error",
 			Message:            safeErr,
 		})
-		writeOpenAIEmbeddingsError(c, http.StatusBadGateway, "upstream_error", "Upstream request failed")
+		writeOpenAIEmbeddingsError(c, http.StatusBadGateway, "api_error", "Request failed")
 		return nil, fmt.Errorf("upstream request failed: %s", safeErr)
 	}
 	defer func() { _ = resp.Body.Close() }()

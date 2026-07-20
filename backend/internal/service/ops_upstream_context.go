@@ -117,7 +117,7 @@ type OpsStreamError struct {
 
 // MarkOpsStreamError 记录一次就地 SSE 错误，供 ops 日志采集。
 // 采用「首个标记生效」策略：同一请求若先后补发多帧（如上游透传错误后又追加通用兜底帧），
-// 保留最先记录的根因错误，而不是被后续的 "Upstream request failed" 覆盖。
+// 保留最先记录的根因错误，而不是被后续的 "Request failed" 覆盖。
 func MarkOpsStreamError(c *gin.Context, errType, message string, intendedStatus int) {
 	markOpsStreamError(c, OpsStreamError{
 		ErrType:        errType,

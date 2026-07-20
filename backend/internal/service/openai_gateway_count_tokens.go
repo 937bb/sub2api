@@ -82,7 +82,7 @@ func (s *OpenAIGatewayService) ForwardCountTokensAsAnthropic(
 	defaultMappedModel string,
 ) error {
 	if account == nil {
-		writeAnthropicCountTokensError(c, http.StatusServiceUnavailable, "api_error", "No available OpenAI accounts")
+		writeAnthropicCountTokensError(c, http.StatusServiceUnavailable, "api_error", "Service temporarily unavailable")
 		return fmt.Errorf("count_tokens: missing account")
 	}
 
@@ -108,7 +108,7 @@ func (s *OpenAIGatewayService) ForwardCountTokensAsAnthropic(
 
 	token, _, err := s.GetAccessToken(ctx, account)
 	if err != nil {
-		writeAnthropicCountTokensError(c, http.StatusBadGateway, "upstream_error", "Failed to get access token")
+		writeAnthropicCountTokensError(c, http.StatusBadGateway, "api_error", "Failed to get access token")
 		return fmt.Errorf("get access token: %w", err)
 	}
 
@@ -126,14 +126,14 @@ func (s *OpenAIGatewayService) ForwardCountTokensAsAnthropic(
 	if err != nil {
 		safeErr := sanitizeUpstreamErrorMessage(err.Error())
 		setOpsUpstreamError(c, 0, safeErr, "")
-		writeAnthropicCountTokensError(c, http.StatusBadGateway, "upstream_error", "Upstream request failed")
+		writeAnthropicCountTokensError(c, http.StatusBadGateway, "api_error", "Request failed")
 		return fmt.Errorf("openai input_tokens upstream request failed: %s", safeErr)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		writeAnthropicCountTokensError(c, http.StatusBadGateway, "upstream_error", "Failed to read response")
+		writeAnthropicCountTokensError(c, http.StatusBadGateway, "api_error", "Failed to read response")
 		return fmt.Errorf("read input_tokens response: %w", err)
 	}
 
@@ -163,14 +163,14 @@ func (s *OpenAIGatewayService) ForwardCountTokensAsAnthropic(
 		}
 		setOpsUpstreamError(c, resp.StatusCode, upstreamMsg, upstreamDetail)
 
-		errMsg := "Upstream request failed"
+		errMsg := "Request failed"
 		switch resp.StatusCode {
 		case 429:
 			errMsg = "Rate limit exceeded"
 		case 500, 502, 503, 504, 529:
 			errMsg = "Upstream service temporarily unavailable"
 		}
-		writeAnthropicCountTokensError(c, resp.StatusCode, "upstream_error", errMsg)
+		writeAnthropicCountTokensError(c, resp.StatusCode, "api_error", errMsg)
 		if upstreamMsg == "" {
 			return fmt.Errorf("input_tokens upstream error: %d", resp.StatusCode)
 		}
@@ -179,7 +179,7 @@ func (s *OpenAIGatewayService) ForwardCountTokensAsAnthropic(
 
 	inputTokens := gjson.GetBytes(respBody, "input_tokens")
 	if !inputTokens.Exists() {
-		writeAnthropicCountTokensError(c, http.StatusBadGateway, "upstream_error", "Upstream response missing input_tokens")
+		writeAnthropicCountTokensError(c, http.StatusBadGateway, "api_error", "Response missing input_tokens")
 		return fmt.Errorf("input_tokens response missing input_tokens field")
 	}
 
