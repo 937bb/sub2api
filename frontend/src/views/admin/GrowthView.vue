@@ -21,10 +21,10 @@
           </div>
           <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             <div><label class="input-label">{{ t('growth.admin.rewardMode') }}</label><Select v-model="config.checkin_reward_mode" :options="rewardModeOptions" /></div>
-            <div v-if="config.checkin_reward_mode === 'fixed'"><label class="input-label">{{ t('growth.admin.fixedReward') }}</label><input v-model.number="config.checkin_fixed_reward" class="input" type="number" min="0.01" max="100" step="0.01" /></div>
+            <div v-if="config.checkin_reward_mode === 'fixed'"><label class="input-label">{{ t('growth.admin.fixedReward') }}</label><input v-model.number="config.checkin_fixed_reward" class="input" type="number" min="0" max="100" step="0.01" /></div>
             <template v-else>
-              <div><label class="input-label">{{ t('growth.admin.minReward') }}</label><input v-model.number="config.checkin_min_reward" class="input" type="number" min="1" max="100" step="0.01" /></div>
-              <div><label class="input-label">{{ t('growth.admin.maxReward') }}</label><input v-model.number="config.checkin_max_reward" class="input" type="number" min="1" max="100" step="0.01" /></div>
+              <div><label class="input-label">{{ t('growth.admin.minReward') }}</label><input v-model.number="config.checkin_min_reward" class="input" type="number" min="0" max="100" step="0.01" /></div>
+              <div><label class="input-label">{{ t('growth.admin.maxReward') }}</label><input v-model.number="config.checkin_max_reward" class="input" type="number" min="0" max="100" step="0.01" /></div>
             </template>
           </div>
         </section>

@@ -36,7 +36,8 @@ func TestGrowthValidateConfig(t *testing.T) {
 		name   string
 		mutate func(*GrowthConfig)
 	}{
-		{"random below one", func(c *GrowthConfig) { c.CheckinMinReward = 0.99 }},
+		{"negative fixed reward", func(c *GrowthConfig) { c.CheckinFixedReward = -0.01 }},
+		{"negative random reward", func(c *GrowthConfig) { c.CheckinMinReward = -0.01 }},
 		{"reward above one hundred", func(c *GrowthConfig) { c.CheckinMaxReward = 100.01 }},
 		{"duplicate streak day", func(c *GrowthConfig) {
 			c.CheckinStreakRewards = append(c.CheckinStreakRewards, GrowthStreakReward{Days: 7, Amount: 1})
@@ -57,6 +58,29 @@ func TestGrowthValidateConfig(t *testing.T) {
 			test.mutate(&candidate)
 			if err := ValidateGrowthConfig(&candidate); err == nil {
 				t.Fatal("invalid config accepted")
+			}
+		})
+	}
+}
+
+func TestGrowthAllowsZeroCheckinReward(t *testing.T) {
+	for _, mode := range []string{GrowthRewardModeFixed, GrowthRewardModeRandom} {
+		t.Run(mode, func(t *testing.T) {
+			config := validGrowthConfig()
+			config.CheckinRewardMode = mode
+			config.CheckinFixedReward = 0
+			config.CheckinMinReward = 0
+			config.CheckinMaxReward = 0
+
+			if err := ValidateGrowthConfig(&config); err != nil {
+				t.Fatalf("zero check-in reward rejected: %v", err)
+			}
+			amount, err := growthRewardAmount(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if amount != 0 {
+				t.Fatalf("expected zero reward, got %.2f", amount)
 			}
 		})
 	}

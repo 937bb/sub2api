@@ -303,9 +303,6 @@ func ValidateGrowthConfig(config *GrowthConfig) error {
 	if config.CheckinFixedReward > 100 || config.CheckinMinReward > 100 || config.CheckinMaxReward > 100 {
 		return errors.New("daily check-in rewards cannot exceed 100")
 	}
-	if config.CheckinFixedReward <= 0 || config.CheckinMinReward < 1 || config.CheckinMaxReward < 1 {
-		return errors.New("fixed reward must be positive and random rewards must be within 1-100")
-	}
 	if !hasCentPrecision(config.CheckinFixedReward) || !hasCentPrecision(config.CheckinMinReward) || !hasCentPrecision(config.CheckinMaxReward) {
 		return errors.New("check-in reward amounts must have at most two decimal places")
 	}

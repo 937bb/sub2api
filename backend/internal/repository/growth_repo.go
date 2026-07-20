@@ -210,8 +210,8 @@ WHERE user_id = $1 AND status IN ('PAID', 'RECHARGING', 'COMPLETED', 'PARTIALLY_
 		}
 	}
 	totalReward := roundGrowthAmount(claim.BaseReward + streakReward)
-	if totalReward <= 0 {
-		return nil, fmt.Errorf("check-in reward must be positive")
+	if totalReward < 0 {
+		return nil, fmt.Errorf("check-in reward must be non-negative")
 	}
 	var lifetimeCheckinReward, lifetimeGrowthReward float64
 	if err := tx.QueryRowContext(ctx, `
