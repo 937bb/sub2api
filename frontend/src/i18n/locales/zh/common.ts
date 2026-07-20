@@ -197,6 +197,7 @@ export default {
     checkin: '每日签到',
     leaderboard: '消费排行',
     growth: '增长激励',
+    timeBilling: '分时计费',
   },
 
   growth: {
@@ -276,6 +277,26 @@ export default {
       reason: '原因',
       evidence: '证据',
     },
+  },
+
+  timeBilling: {
+    title: '分时计费',
+    description: '按分组管理每日时段倍率',
+    searchPlaceholder: '搜索分组或平台',
+    reload: '重新加载',
+    timezone: '系统时区',
+    group: '分组',
+    platform: '平台',
+    baseMultiplier: '基础倍率',
+    enabled: '启用规则',
+    start: '开始时间',
+    end: '结束时间',
+    multiplier: '时段倍率',
+    effectiveMultiplier: '时段最终倍率',
+    loadFailed: '加载分时计费规则失败',
+    saveFailed: '保存分时计费规则失败',
+    saveSuccess: '已保存“{group}”的分时计费规则',
+    invalidRule: '开始时间必须早于结束时间，倍率不能为负数',
   },
 
   // Auth

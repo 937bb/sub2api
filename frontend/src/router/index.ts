@@ -476,6 +476,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/time-billing',
+    name: 'AdminTimeBilling',
+    component: () => import('@/views/admin/TimeBillingView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Time-based Billing',
+      titleKey: 'timeBilling.title',
+      descriptionKey: 'timeBilling.description'
+    }
+  },
+  {
     path: '/admin/channels',
     redirect: '/admin/channels/pricing'
   },

@@ -1,6 +1,6 @@
 <template>
   <AppLayout>
-    <div class="mx-auto max-w-5xl space-y-5">
+    <div class="w-full space-y-5">
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div class="inline-flex rounded-md border border-gray-200 bg-white p-1 dark:border-dark-700 dark:bg-dark-900">
           <button v-for="option in periods" :key="option.value" class="rounded px-4 py-2 text-sm font-medium transition-colors" :class="period === option.value ? 'bg-primary-600 text-white' : 'text-gray-600 hover:bg-gray-100 dark:text-dark-300 dark:hover:bg-dark-800'" @click="changePeriod(option.value)">

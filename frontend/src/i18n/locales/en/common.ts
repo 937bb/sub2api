@@ -197,6 +197,7 @@ export default {
     checkin: 'Daily Check-in',
     leaderboard: 'Spending Ranking',
     growth: 'Growth Incentives',
+    timeBilling: 'Time-based Billing',
   },
 
   growth: {
@@ -276,6 +277,26 @@ export default {
       reason: 'Reason',
       evidence: 'Evidence',
     },
+  },
+
+  timeBilling: {
+    title: 'Time-based Billing',
+    description: 'Manage daily rate windows by group',
+    searchPlaceholder: 'Search group or platform',
+    reload: 'Reload',
+    timezone: 'System timezone',
+    group: 'Group',
+    platform: 'Platform',
+    baseMultiplier: 'Base multiplier',
+    enabled: 'Rule enabled',
+    start: 'Start time',
+    end: 'End time',
+    multiplier: 'Window multiplier',
+    effectiveMultiplier: 'Window final rate',
+    loadFailed: 'Failed to load time-based billing rules',
+    saveFailed: 'Failed to save the time-based billing rule',
+    saveSuccess: 'Saved the time-based billing rule for {group}',
+    invalidRule: 'The start time must be earlier than the end time and the multiplier cannot be negative',
   },
 
   // Auth

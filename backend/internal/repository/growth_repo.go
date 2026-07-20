@@ -322,14 +322,18 @@ WHERE deleted_at IS NULL AND status = 'active'`).Scan(&result.Total); err != nil
 	const query = `
 WITH ranked AS (
     SELECT u.id AS user_id,
-           COALESCE(NULLIF(u.username, ''), 'User #' || u.id::text) AS display_name,
+           COALESCE(
+               NULLIF(BTRIM(u.username), ''),
+               NULLIF(SPLIT_PART(BTRIM(u.email), '@', 1), ''),
+               'User #' || u.id::text
+           ) AS display_name,
            COALESCE(SUM(ul.actual_cost), 0)::double precision AS actual_cost,
            COUNT(ul.id) AS requests,
            ROW_NUMBER() OVER (ORDER BY COALESCE(SUM(ul.actual_cost), 0) DESC, u.id ASC) AS rank
     FROM users u
     LEFT JOIN usage_logs ul ON ul.user_id = u.id AND ul.created_at >= $1 AND ul.created_at < $2
     WHERE u.deleted_at IS NULL AND u.status = 'active'
-    GROUP BY u.id, u.username
+    GROUP BY u.id, u.username, u.email
 )
 SELECT user_id, display_name, actual_cost, requests, rank
 FROM ranked WHERE (rank > $3 AND rank <= $4) OR user_id = $5
