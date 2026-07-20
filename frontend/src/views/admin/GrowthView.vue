@@ -61,9 +61,8 @@
             <div><h2 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('growth.admin.leaderboardSettings') }}</h2><p class="mt-1 text-sm text-gray-500 dark:text-dark-400">{{ t('growth.admin.leaderboardSettingsDescription') }}</p></div>
             <Toggle v-model="config.leaderboard_enabled" />
           </div>
-          <div class="mb-6 grid gap-4 md:grid-cols-2">
+          <div class="mb-6 max-w-sm">
             <div><label class="input-label">{{ t('growth.admin.displayLimit') }}</label><input v-model.number="config.leaderboard_display_limit" class="input" type="number" min="1" max="100" step="1" /><p class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ t('growth.admin.displayLimitHint') }}</p></div>
-            <label class="flex items-center gap-3 self-start pt-7 text-sm text-gray-700 dark:text-dark-300"><input v-model="config.leaderboard_anonymous" type="checkbox" class="h-4 w-4 rounded border-gray-300 text-primary-600" />{{ t('growth.admin.anonymous') }}</label>
           </div>
           <div class="mb-3"><h3 class="text-sm font-medium text-gray-700 dark:text-dark-300">{{ t('growth.admin.rewardRules') }}</h3><p class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ t('growth.admin.rewardRulesDescription') }}</p></div>
           <section v-for="option in periodOptions" :key="option.value" class="border-t border-gray-200 py-4 first:border-t-0 dark:border-dark-700">

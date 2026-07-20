@@ -157,7 +157,7 @@ type GrowthRepository interface {
 	UpdateConfig(ctx context.Context, config GrowthConfig, updatedBy int64) (*GrowthConfig, error)
 	GetCheckinStatus(ctx context.Context, userID int64, monthStart, monthEnd, today time.Time) (*GrowthCheckinStatus, error)
 	ClaimCheckin(ctx context.Context, claim GrowthCheckinClaim) (*GrowthCheckin, error)
-	GetLeaderboard(ctx context.Context, start, end time.Time, currentUserID int64, limit int, anonymous bool) (*GrowthLeaderboard, error)
+	GetLeaderboard(ctx context.Context, start, end time.Time, currentUserID int64, limit int) (*GrowthLeaderboard, error)
 	SettleLeaderboard(ctx context.Context, period string, start, end time.Time, rules []GrowthLeaderboardRewardRule, maxTotalRewardPaidRatio float64) ([]int64, float64, error)
 	ListRewardLedger(ctx context.Context, page, pageSize int) ([]GrowthRewardLedgerItem, int64, error)
 	ListRiskEvents(ctx context.Context, page, pageSize int) ([]GrowthRiskEvent, int64, error)
@@ -242,7 +242,7 @@ func (s *GrowthService) GetLeaderboard(ctx context.Context, period string, curre
 	if err != nil {
 		return nil, infraerrors.BadRequest("GROWTH_PERIOD_INVALID", err.Error())
 	}
-	result, err := s.repo.GetLeaderboard(ctx, start, end, currentUserID, config.LeaderboardDisplayLimit, config.LeaderboardAnonymous)
+	result, err := s.repo.GetLeaderboard(ctx, start, end, currentUserID, config.LeaderboardDisplayLimit)
 	if result != nil {
 		result.Period = normalized
 		result.PeriodStart = start

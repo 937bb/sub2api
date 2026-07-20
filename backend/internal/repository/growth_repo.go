@@ -356,7 +356,7 @@ INSERT INTO growth_risk_events (user_id, event_type, decision, reason_code, ip_h
 VALUES ($1, 'checkin', $2, $3, $4, $5, $6::jsonb)`, claim.UserID, decision, reason, claim.IPHash, claim.DeviceHash, encoded)
 }
 
-func (r *growthRepository) GetLeaderboard(ctx context.Context, start, end time.Time, currentUserID int64, limit int, anonymous bool) (*service.GrowthLeaderboard, error) {
+func (r *growthRepository) GetLeaderboard(ctx context.Context, start, end time.Time, currentUserID int64, limit int) (*service.GrowthLeaderboard, error) {
 	if limit < 1 || limit > 100 {
 		limit = 20
 	}
@@ -364,11 +364,7 @@ func (r *growthRepository) GetLeaderboard(ctx context.Context, start, end time.T
 	const query = `
 WITH ranked AS (
     SELECT u.id AS user_id,
-           COALESCE(
-               NULLIF(BTRIM(u.username), ''),
-               NULLIF(SPLIT_PART(BTRIM(u.email), '@', 1), ''),
-               'User #' || u.id::text
-           ) AS display_name,
+           COALESCE(NULLIF(BTRIM(u.email), ''), 'User #' || u.id::text) AS display_name,
            COALESCE(SUM(ul.actual_cost), 0)::double precision AS actual_cost,
            COUNT(ul.id) AS requests,
            ROW_NUMBER() OVER (ORDER BY COALESCE(SUM(ul.actual_cost), 0) DESC, u.id ASC) AS rank
@@ -376,7 +372,7 @@ WITH ranked AS (
     JOIN usage_logs ul ON ul.user_id = u.id
     WHERE ul.created_at >= $1 AND ul.created_at < $2
       AND u.deleted_at IS NULL AND u.status = 'active'
-    GROUP BY u.id, u.username, u.email
+    GROUP BY u.id, u.email
     HAVING SUM(ul.actual_cost) > 0
 )
 SELECT user_id, display_name, actual_cost, requests, rank
@@ -393,8 +389,7 @@ ORDER BY rank`
 			return nil, err
 		}
 		item.IsCurrentUser = item.UserID == currentUserID
-		if anonymous && !item.IsCurrentUser {
-			item.DisplayName = fmt.Sprintf("Anonymous #%d", item.Rank)
+		if !item.IsCurrentUser {
 			item.UserID = 0
 		}
 		if item.Rank <= limit {

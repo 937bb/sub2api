@@ -11,25 +11,25 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestGrowthRepositoryLeaderboardFallsBackToEmailPrefix(t *testing.T) {
+func TestGrowthRepositoryLeaderboardUsesFullEmail(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
 
 	start := time.Date(2026, time.July, 20, 0, 0, 0, 0, time.UTC)
 	end := start.AddDate(0, 0, 1)
-	mock.ExpectQuery(regexp.QuoteMeta("NULLIF(SPLIT_PART(BTRIM(u.email), '@', 1), '')")).
+	mock.ExpectQuery(regexp.QuoteMeta("NULLIF(BTRIM(u.email), '')")).
 		WithArgs(start, end, 50, int64(1)).
 		WillReturnRows(sqlmock.NewRows([]string{"user_id", "display_name", "actual_cost", "requests", "rank"}).
-			AddRow(1, "w97bb", 12.4133, 471, 1))
+			AddRow(1, "w97bb@example.com", 12.4133, 471, 1))
 
-	result, err := NewGrowthRepository(db).GetLeaderboard(context.Background(), start, end, 1, 50, false)
+	result, err := NewGrowthRepository(db).GetLeaderboard(context.Background(), start, end, 1, 50)
 
 	require.NoError(t, err)
 	require.Len(t, result.Items, 1)
-	require.Equal(t, "w97bb", result.Items[0].DisplayName)
+	require.Equal(t, "w97bb@example.com", result.Items[0].DisplayName)
 	require.NotNil(t, result.CurrentUser)
-	require.Equal(t, "w97bb", result.CurrentUser.DisplayName)
+	require.Equal(t, "w97bb@example.com", result.CurrentUser.DisplayName)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
@@ -65,7 +65,7 @@ func TestGrowthRepositoryLeaderboardCapsVisibleRowsButKeepsCurrentUser(t *testin
 			AddRow(1, "first", 100.0, 1000, 1).
 			AddRow(75, "current", 5.0, 20, 75))
 
-	result, err := NewGrowthRepository(db).GetLeaderboard(context.Background(), start, end, 75, 10, false)
+	result, err := NewGrowthRepository(db).GetLeaderboard(context.Background(), start, end, 75, 10)
 
 	require.NoError(t, err)
 	require.Equal(t, int64(1), result.Total)

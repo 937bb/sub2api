@@ -238,7 +238,7 @@ export default {
       title: '消费排行榜',
       description: '查看日、周、月消费排名',
       yourRank: '我的排名',
-      user: '用户',
+      user: '邮箱',
       requests: '请求数',
       spend: '消费额度',
       visibleTop: '仅展示消费前 {count} 名',

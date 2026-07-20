@@ -238,7 +238,7 @@ export default {
       title: 'Spending Leaderboard',
       description: 'View daily, weekly, and monthly spending ranks',
       yourRank: 'Your rank',
-      user: 'User',
+      user: 'Email',
       requests: 'Requests',
       spend: 'Spend',
       visibleTop: 'Showing top {count} spenders only',
