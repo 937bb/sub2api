@@ -28,7 +28,7 @@ const growthEligibleFundingValueSQL = `(
         FROM redeem_codes rc
         WHERE rc.used_by = $1
           AND rc.status = 'used'
-          AND rc.type = 'admin_balance'
+          AND rc.type IN ('balance', 'admin_balance')
     ), 0), 0)
 )`
 

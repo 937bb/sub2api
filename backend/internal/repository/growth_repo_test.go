@@ -33,12 +33,12 @@ func TestGrowthRepositoryLeaderboardFallsBackToEmailPrefix(t *testing.T) {
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
-func TestGrowthEligibleFundingIncludesNetAdminBalanceAdjustments(t *testing.T) {
+func TestGrowthEligibleFundingIncludesBalanceCodesAndNetAdminAdjustments(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
 
-	mock.ExpectQuery(regexp.QuoteMeta("AND rc.type = 'admin_balance'")).
+	mock.ExpectQuery(regexp.QuoteMeta("AND rc.type IN ('balance', 'admin_balance')")).
 		WithArgs(int64(42)).
 		WillReturnRows(sqlmock.NewRows([]string{"eligible_funding"}).AddRow(75.5))
 
@@ -49,7 +49,7 @@ func TestGrowthEligibleFundingIncludesNetAdminBalanceAdjustments(t *testing.T) {
 	require.NoError(t, mock.ExpectationsWereMet())
 	require.Contains(t, growthEligibleFundingSQL, "SELECT SUM(rc.value)")
 	require.NotContains(t, growthEligibleFundingSQL, "rc.value > 0")
-	require.NotContains(t, growthEligibleFundingSQL, "type = 'balance'")
+	require.Contains(t, growthEligibleFundingSQL, "rc.type IN ('balance', 'admin_balance')")
 }
 
 func TestGrowthRepositoryLeaderboardCapsVisibleRowsButKeepsCurrentUser(t *testing.T) {
