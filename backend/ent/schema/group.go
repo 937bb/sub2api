@@ -64,7 +64,7 @@ func (Group) Fields() []ent.Field {
 		field.JSON("time_billing_rules", []domain.TimeBillingRule{}).
 			Default([]domain.TimeBillingRule{}).
 			SchemaType(map[string]string{dialect.Postgres: "jsonb"}).
-			Comment("分时计费规则数组；开始时间大于结束时间表示跨日"),
+			Comment("分时计费循环规则数组；支持每日跨日和每周跨周区间"),
 		field.Bool("is_exclusive").
 			Default(false),
 		field.String("status").

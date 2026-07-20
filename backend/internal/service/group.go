@@ -248,15 +248,9 @@ func (g *Group) PeakMultiplierAt(now time.Time) float64 {
 		return 1.0
 	}
 	current := now.In(timezone.Location())
-	minute := current.Hour()*60 + current.Minute()
 	if len(g.TimeBillingRules) > 0 {
 		for _, rule := range g.TimeBillingRules {
-			if !rule.Enabled {
-				continue
-			}
-			start, startOK := parseMinutes(rule.Start)
-			end, endOK := parseMinutes(rule.End)
-			if startOK && endOK && start != end && minuteInTimeWindow(minute, start, end) {
+			if rule.Enabled && timeBillingRuleMatches(rule, current) {
 				return rule.RateMultiplier
 			}
 		}
@@ -270,10 +264,47 @@ func (g *Group) PeakMultiplierAt(now time.Time) float64 {
 	if !ok1 || !ok2 || start == end {
 		return 1.0
 	}
+	minute := current.Hour()*60 + current.Minute()
 	if minuteInTimeWindow(minute, start, end) {
 		return g.PeakRateMultiplier
 	}
 	return 1.0
+}
+
+func normalizedTimeBillingRepeatType(repeatType string) string {
+	if repeatType == "" {
+		return domain.TimeBillingRepeatDaily
+	}
+	return repeatType
+}
+
+func timeBillingRuleMatches(rule TimeBillingRule, current time.Time) bool {
+	start, startOK := parseMinutes(rule.Start)
+	end, endOK := parseMinutes(rule.End)
+	if !startOK || !endOK {
+		return false
+	}
+	switch normalizedTimeBillingRepeatType(rule.RepeatType) {
+	case domain.TimeBillingRepeatDaily:
+		if start == end {
+			return false
+		}
+		return minuteInTimeWindow(current.Hour()*60+current.Minute(), start, end)
+	case domain.TimeBillingRepeatWeekly:
+		if rule.StartWeekday < 1 || rule.StartWeekday > 7 || rule.EndWeekday < 1 || rule.EndWeekday > 7 {
+			return false
+		}
+		startOfWeek := (rule.StartWeekday-1)*minutesPerDay + start
+		endOfWeek := (rule.EndWeekday-1)*minutesPerDay + end
+		if startOfWeek == endOfWeek {
+			return false
+		}
+		weekday := (int(current.Weekday()) + 6) % 7 // Monday = 0.
+		currentMinute := weekday*minutesPerDay + current.Hour()*60 + current.Minute()
+		return minuteInTimeWindow(currentMinute, startOfWeek, endOfWeek)
+	default:
+		return false
+	}
 }
 
 func minuteInTimeWindow(minute, start, end int) bool {
@@ -288,21 +319,56 @@ type timeBillingMinuteRange struct {
 	end   int
 }
 
-func timeBillingRuleRanges(start, end int) []timeBillingMinuteRange {
+const (
+	minutesPerDay  = 24 * 60
+	minutesPerWeek = 7 * minutesPerDay
+)
+
+func splitTimeBillingRange(start, end int) []timeBillingMinuteRange {
 	if start < end {
 		return []timeBillingMinuteRange{{start: start, end: end}}
 	}
-	ranges := []timeBillingMinuteRange{{start: start, end: 24 * 60}}
+	ranges := []timeBillingMinuteRange{{start: start, end: minutesPerWeek}}
 	if end > 0 {
 		ranges = append(ranges, timeBillingMinuteRange{start: 0, end: end})
 	}
 	return ranges
 }
 
-func timeBillingRulesOverlap(leftStart, leftEnd, rightStart, rightEnd int) bool {
-	for _, left := range timeBillingRuleRanges(leftStart, leftEnd) {
-		for _, right := range timeBillingRuleRanges(rightStart, rightEnd) {
-			if left.start < right.end && right.start < left.end {
+func timeBillingRuleRanges(rule TimeBillingRule, start, end int) []timeBillingMinuteRange {
+	switch normalizedTimeBillingRepeatType(rule.RepeatType) {
+	case domain.TimeBillingRepeatDaily:
+		duration := end - start
+		if duration <= 0 {
+			duration += minutesPerDay
+		}
+		ranges := make([]timeBillingMinuteRange, 0, 8)
+		for day := 0; day < 7; day++ {
+			absoluteStart := day*minutesPerDay + start
+			absoluteEnd := absoluteStart + duration
+			if absoluteEnd <= minutesPerWeek {
+				ranges = append(ranges, timeBillingMinuteRange{start: absoluteStart, end: absoluteEnd})
+				continue
+			}
+			ranges = append(ranges,
+				timeBillingMinuteRange{start: absoluteStart, end: minutesPerWeek},
+				timeBillingMinuteRange{start: 0, end: absoluteEnd - minutesPerWeek},
+			)
+		}
+		return ranges
+	case domain.TimeBillingRepeatWeekly:
+		absoluteStart := (rule.StartWeekday-1)*minutesPerDay + start
+		absoluteEnd := (rule.EndWeekday-1)*minutesPerDay + end
+		return splitTimeBillingRange(absoluteStart, absoluteEnd)
+	default:
+		return nil
+	}
+}
+
+func timeBillingRulesOverlap(left, right []timeBillingMinuteRange) bool {
+	for _, leftRange := range left {
+		for _, rightRange := range right {
+			if leftRange.start < rightRange.end && rightRange.start < leftRange.end {
 				return true
 			}
 		}
@@ -315,9 +381,8 @@ func ValidateTimeBillingRules(rules []TimeBillingRule) error {
 		return errors.New("time_billing_rules cannot contain more than 48 rules")
 	}
 	type parsedRule struct {
-		index int
-		start int
-		end   int
+		index  int
+		ranges []timeBillingMinuteRange
 	}
 	seenIDs := make(map[string]struct{}, len(rules))
 	enabled := make([]parsedRule, 0, len(rules))
@@ -332,19 +397,34 @@ func ValidateTimeBillingRules(rules []TimeBillingRule) error {
 		seenIDs[id] = struct{}{}
 		start, startOK := parseMinutes(rule.Start)
 		end, endOK := parseMinutes(rule.End)
-		if !startOK || !endOK || start == end {
-			return fmt.Errorf("time_billing_rules[%d] must use distinct valid HH:MM times", i)
+		if !startOK || !endOK {
+			return fmt.Errorf("time_billing_rules[%d] must use valid HH:MM times", i)
+		}
+		switch normalizedTimeBillingRepeatType(rule.RepeatType) {
+		case domain.TimeBillingRepeatDaily:
+			if start == end {
+				return fmt.Errorf("time_billing_rules[%d] daily start and end times must differ", i)
+			}
+		case domain.TimeBillingRepeatWeekly:
+			if rule.StartWeekday < 1 || rule.StartWeekday > 7 || rule.EndWeekday < 1 || rule.EndWeekday > 7 {
+				return fmt.Errorf("time_billing_rules[%d] weekly weekdays must be between 1 and 7", i)
+			}
+			if rule.StartWeekday == rule.EndWeekday && start == end {
+				return fmt.Errorf("time_billing_rules[%d] weekly start and end must differ", i)
+			}
+		default:
+			return fmt.Errorf("time_billing_rules[%d].repeat_type must be daily or weekly", i)
 		}
 		if math.IsNaN(rule.RateMultiplier) || math.IsInf(rule.RateMultiplier, 0) || rule.RateMultiplier < 0 {
 			return fmt.Errorf("time_billing_rules[%d].rate_multiplier must be finite and non-negative", i)
 		}
 		if rule.Enabled {
-			enabled = append(enabled, parsedRule{index: i, start: start, end: end})
+			enabled = append(enabled, parsedRule{index: i, ranges: timeBillingRuleRanges(rule, start, end)})
 		}
 	}
 	for i, left := range enabled {
 		for _, right := range enabled[i+1:] {
-			if timeBillingRulesOverlap(left.start, left.end, right.start, right.end) {
+			if timeBillingRulesOverlap(left.ranges, right.ranges) {
 				return fmt.Errorf("enabled time_billing_rules[%d] and time_billing_rules[%d] overlap", left.index, right.index)
 			}
 		}
@@ -358,7 +438,7 @@ func syncLegacyPeakRateFromRules(group *Group) {
 	group.PeakEnd = ""
 	group.PeakRateMultiplier = 1
 	for _, rule := range group.TimeBillingRules {
-		if !rule.Enabled {
+		if !rule.Enabled || normalizedTimeBillingRepeatType(rule.RepeatType) != domain.TimeBillingRepeatDaily {
 			continue
 		}
 		group.PeakRateEnabled = true

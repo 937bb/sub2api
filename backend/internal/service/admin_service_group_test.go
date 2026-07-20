@@ -725,6 +725,25 @@ func TestAdminService_UpdateGroup_ClearsLegacyPeakWhenRulesAreRemoved(t *testing
 	require.Equal(t, 1.0, repo.updated.PeakRateMultiplier)
 }
 
+func TestAdminService_UpdateGroup_DoesNotExposeWeeklyRuleAsLegacyDailyPeak(t *testing.T) {
+	existingGroup := &Group{ID: 1, Name: "existing-group", Platform: PlatformOpenAI, Status: StatusActive, SubscriptionType: SubscriptionTypeStandard}
+	repo := &groupRepoStubForAdmin{getByID: existingGroup}
+	svc := &adminServiceImpl{groupRepo: repo}
+	rules := []TimeBillingRule{{
+		ID: "weekend", Enabled: true, RepeatType: "weekly", StartWeekday: 6, EndWeekday: 1,
+		Start: "00:00", End: "00:00", RateMultiplier: 0.7,
+	}}
+
+	_, err := svc.UpdateGroup(context.Background(), 1, &UpdateGroupInput{TimeBillingRules: &rules})
+
+	require.NoError(t, err)
+	require.Equal(t, rules, repo.updated.TimeBillingRules)
+	require.False(t, repo.updated.PeakRateEnabled)
+	require.Empty(t, repo.updated.PeakStart)
+	require.Empty(t, repo.updated.PeakEnd)
+	require.Equal(t, 1.0, repo.updated.PeakRateMultiplier)
+}
+
 func TestAdminService_CreateGroup_NormalizesMessagesDispatchModelConfig(t *testing.T) {
 	repo := &groupRepoStubForAdmin{}
 	svc := &adminServiceImpl{groupRepo: repo}

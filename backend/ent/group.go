@@ -39,7 +39,7 @@ type Group struct {
 	PeakEnd string `json:"peak_end,omitempty"`
 	// 高峰时段叠加倍率，仅在 peak_rate_enabled 且处于 [peak_start, peak_end) 时乘入文本倍率
 	PeakRateMultiplier float64 `json:"peak_rate_multiplier,omitempty"`
-	// 分时计费规则数组；开始时间大于结束时间表示跨日
+	// 分时计费循环规则数组；支持每日跨日和每周跨周区间
 	TimeBillingRules []domain.TimeBillingRule `json:"time_billing_rules,omitempty"`
 	// IsExclusive holds the value of the "is_exclusive" field.
 	IsExclusive bool `json:"is_exclusive,omitempty"`

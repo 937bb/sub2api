@@ -29,6 +29,10 @@ func at(hour, min int) time.Time {
 	return time.Date(2026, 6, 29, hour, min, 0, 0, time.UTC)
 }
 
+func atDate(month time.Month, day, hour, min int) time.Time {
+	return time.Date(2026, month, day, hour, min, 0, 0, time.UTC)
+}
+
 func TestPeakMultiplierAt_DisabledOrUnconfigured(t *testing.T) {
 	cases := []struct {
 		name string
@@ -160,6 +164,43 @@ func TestTimeBillingRulesMultipleWindowsAndCrossDay(t *testing.T) {
 	}
 }
 
+func TestTimeBillingRulesDailyAndWeeklyRecurrence(t *testing.T) {
+	t.Run("daily overnight repeats every day", func(t *testing.T) {
+		g := &Group{TimeBillingRules: []TimeBillingRule{{
+			ID: "night", Enabled: true, RepeatType: "daily", Start: "23:00", End: "06:00", RateMultiplier: 1.8,
+		}}}
+		require.NoError(t, ValidateTimeBillingRules(g.TimeBillingRules))
+		require.Equal(t, 1.8, g.PeakMultiplierAt(atDate(time.June, 29, 1, 0))) // Monday.
+		require.Equal(t, 1.8, g.PeakMultiplierAt(atDate(time.June, 30, 1, 0))) // Tuesday.
+		require.Equal(t, 1.8, g.PeakMultiplierAt(atDate(time.June, 30, 23, 0)))
+		require.Equal(t, 1.0, g.PeakMultiplierAt(atDate(time.June, 30, 6, 0)))
+	})
+
+	t.Run("weekly weekday range repeats every week", func(t *testing.T) {
+		g := &Group{TimeBillingRules: []TimeBillingRule{{
+			ID: "workweek", Enabled: true, RepeatType: "weekly", StartWeekday: 1, EndWeekday: 5,
+			Start: "00:00", End: "00:00", RateMultiplier: 1.2,
+		}}}
+		require.NoError(t, ValidateTimeBillingRules(g.TimeBillingRules))
+		require.Equal(t, 1.2, g.PeakMultiplierAt(atDate(time.June, 29, 0, 0))) // Monday start.
+		require.Equal(t, 1.2, g.PeakMultiplierAt(atDate(time.July, 2, 12, 0))) // Thursday.
+		require.Equal(t, 1.0, g.PeakMultiplierAt(atDate(time.July, 3, 0, 0)))  // Friday end.
+		require.Equal(t, 1.2, g.PeakMultiplierAt(atDate(time.July, 6, 12, 0))) // Next Monday.
+	})
+
+	t.Run("weekly weekend range crosses the week boundary", func(t *testing.T) {
+		g := &Group{TimeBillingRules: []TimeBillingRule{{
+			ID: "weekend", Enabled: true, RepeatType: "weekly", StartWeekday: 6, EndWeekday: 1,
+			Start: "00:00", End: "00:00", RateMultiplier: 0.7,
+		}}}
+		require.NoError(t, ValidateTimeBillingRules(g.TimeBillingRules))
+		require.Equal(t, 1.0, g.PeakMultiplierAt(atDate(time.July, 3, 23, 59))) // Friday.
+		require.Equal(t, 0.7, g.PeakMultiplierAt(atDate(time.July, 4, 0, 0)))   // Saturday start.
+		require.Equal(t, 0.7, g.PeakMultiplierAt(atDate(time.July, 5, 23, 59))) // Sunday.
+		require.Equal(t, 1.0, g.PeakMultiplierAt(atDate(time.July, 6, 0, 0)))   // Monday end.
+	})
+}
+
 func TestValidateTimeBillingRulesRejectsOverlapAcrossMidnight(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -189,6 +230,21 @@ func TestValidateTimeBillingRulesRejectsOverlapAcrossMidnight(t *testing.T) {
 			},
 			valid: true,
 		},
+		{
+			name: "daily and weekly ranges overlap",
+			rules: []TimeBillingRule{
+				{ID: "night", Enabled: true, RepeatType: "daily", Start: "23:00", End: "06:00", RateMultiplier: 1},
+				{ID: "monday", Enabled: true, RepeatType: "weekly", StartWeekday: 1, EndWeekday: 1, Start: "01:00", End: "02:00", RateMultiplier: 2},
+			},
+		},
+		{
+			name: "adjacent workweek and weekend ranges",
+			rules: []TimeBillingRule{
+				{ID: "workweek", Enabled: true, RepeatType: "weekly", StartWeekday: 1, EndWeekday: 6, Start: "00:00", End: "00:00", RateMultiplier: 1},
+				{ID: "weekend", Enabled: true, RepeatType: "weekly", StartWeekday: 6, EndWeekday: 1, Start: "00:00", End: "00:00", RateMultiplier: 2},
+			},
+			valid: true,
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -199,6 +255,17 @@ func TestValidateTimeBillingRulesRejectsOverlapAcrossMidnight(t *testing.T) {
 				require.ErrorContains(t, err, "overlap")
 			}
 		})
+	}
+}
+
+func TestValidateTimeBillingRulesRejectsInvalidRecurrence(t *testing.T) {
+	tests := []TimeBillingRule{
+		{ID: "type", Enabled: true, RepeatType: "monthly", Start: "09:00", End: "10:00", RateMultiplier: 1},
+		{ID: "weekday", Enabled: true, RepeatType: "weekly", StartWeekday: 0, EndWeekday: 5, Start: "09:00", End: "10:00", RateMultiplier: 1},
+		{ID: "same", Enabled: true, RepeatType: "weekly", StartWeekday: 1, EndWeekday: 1, Start: "09:00", End: "09:00", RateMultiplier: 1},
+	}
+	for _, rule := range tests {
+		require.Error(t, ValidateTimeBillingRules([]TimeBillingRule{rule}))
 	}
 }
 

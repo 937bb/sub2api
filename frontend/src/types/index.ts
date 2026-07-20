@@ -496,9 +496,14 @@ export type GroupPlatform = 'anthropic' | 'openai' | 'gemini' | 'antigravity' | 
 
 export type SubscriptionType = 'standard' | 'subscription'
 
+export type TimeBillingRepeatType = 'daily' | 'weekly'
+
 export interface TimeBillingRule {
   id: string
   enabled: boolean
+  repeat_type?: TimeBillingRepeatType
+  start_weekday?: number
+  end_weekday?: number
   start: string
   end: string
   rate_multiplier: number
