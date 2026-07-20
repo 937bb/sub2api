@@ -7,6 +7,7 @@ import (
 	"time"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/stretchr/testify/require"
 )
 
@@ -82,6 +83,26 @@ func TestGrowthLeaderboardRewardAllowed(t *testing.T) {
 			)
 			require.Equal(t, test.want, allowed)
 			require.Equal(t, test.wantMaximum, maximum)
+		})
+	}
+}
+
+func TestGrowthClaimDeniedErrorReturnsSpecificPublicReason(t *testing.T) {
+	tests := map[string]string{
+		"account_inactive":        "GROWTH_ACCOUNT_INACTIVE",
+		"account_too_new":         "GROWTH_ACCOUNT_TOO_NEW",
+		"total_recharged_too_low": "GROWTH_RECHARGE_TOO_LOW",
+		"recent_spend_too_low":    "GROWTH_RECENT_SPEND_TOO_LOW",
+		"ip_account_limit":        "GROWTH_IDENTITY_RISK",
+		"device_account_limit":    "GROWTH_IDENTITY_RISK",
+		"missing_identity_signal": "GROWTH_IDENTITY_RISK",
+		"lifetime_reward_cap":     "GROWTH_CHECKIN_REWARD_CAP",
+		"total_growth_reward_cap": "GROWTH_TOTAL_REWARD_CAP",
+		"unknown":                 "GROWTH_REWARD_INELIGIBLE",
+	}
+	for reason, expected := range tests {
+		t.Run(reason, func(t *testing.T) {
+			require.Equal(t, expected, infraerrors.Reason(growthClaimDeniedError(reason)))
 		})
 	}
 }

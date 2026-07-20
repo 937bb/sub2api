@@ -294,7 +294,28 @@ func (r *growthRepository) checkClaimIdentityLimit(ctx context.Context, tx *sql.
 func (r *growthRepository) denyClaim(ctx context.Context, tx *sql.Tx, claim service.GrowthCheckinClaim, reason string, evidence map[string]any) error {
 	_ = tx.Rollback()
 	r.recordRiskEvent(ctx, claim, "denied", reason, evidence)
-	return service.ErrGrowthRewardIneligible
+	return growthClaimDeniedError(reason)
+}
+
+func growthClaimDeniedError(reason string) error {
+	switch reason {
+	case "account_inactive":
+		return service.ErrGrowthAccountInactive
+	case "account_too_new":
+		return service.ErrGrowthAccountTooNew
+	case "total_recharged_too_low":
+		return service.ErrGrowthRechargeTooLow
+	case "recent_spend_too_low":
+		return service.ErrGrowthRecentSpendTooLow
+	case "ip_account_limit", "device_account_limit", "missing_identity_signal":
+		return service.ErrGrowthIdentityRisk
+	case "lifetime_reward_cap":
+		return service.ErrGrowthCheckinRewardCap
+	case "total_growth_reward_cap":
+		return service.ErrGrowthTotalRewardCap
+	default:
+		return service.ErrGrowthRewardIneligible
+	}
 }
 
 func (r *growthRepository) recordRiskEvent(ctx context.Context, claim service.GrowthCheckinClaim, decision, reason string, evidence map[string]any) {

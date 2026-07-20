@@ -24,6 +24,13 @@ var (
 	ErrGrowthCheckinDisabled     = infraerrors.Forbidden("GROWTH_CHECKIN_DISABLED", "daily check-in is disabled")
 	ErrGrowthAlreadyChecked      = infraerrors.Conflict("GROWTH_ALREADY_CHECKED_IN", "already checked in today")
 	ErrGrowthRewardIneligible    = infraerrors.Forbidden("GROWTH_REWARD_INELIGIBLE", "account is not eligible for a check-in reward")
+	ErrGrowthAccountInactive     = infraerrors.Forbidden("GROWTH_ACCOUNT_INACTIVE", "account is inactive")
+	ErrGrowthAccountTooNew       = infraerrors.Forbidden("GROWTH_ACCOUNT_TOO_NEW", "account has not reached the minimum age")
+	ErrGrowthRechargeTooLow      = infraerrors.Forbidden("GROWTH_RECHARGE_TOO_LOW", "lifetime real recharge is below the configured minimum")
+	ErrGrowthRecentSpendTooLow   = infraerrors.Forbidden("GROWTH_RECENT_SPEND_TOO_LOW", "recent actual spend is below the configured minimum")
+	ErrGrowthIdentityRisk        = infraerrors.Forbidden("GROWTH_IDENTITY_RISK", "network or device risk control rejected this check-in")
+	ErrGrowthCheckinRewardCap    = infraerrors.Forbidden("GROWTH_CHECKIN_REWARD_CAP", "lifetime check-in reward cap has been reached")
+	ErrGrowthTotalRewardCap      = infraerrors.Forbidden("GROWTH_TOTAL_REWARD_CAP", "lifetime growth reward cap has been reached")
 	ErrGrowthLeaderboardDisabled = infraerrors.Forbidden("GROWTH_LEADERBOARD_DISABLED", "leaderboard is disabled")
 )
 

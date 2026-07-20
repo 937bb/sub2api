@@ -85,7 +85,7 @@ import Icon from '@/components/icons/Icon.vue'
 import { claimCheckin, getCheckinStatus, type GrowthCheckin, type GrowthCheckinStatus } from '@/api/growth'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
-import { extractApiErrorMessage } from '@/utils/apiError'
+import { extractApiErrorMessage, extractI18nErrorMessage } from '@/utils/apiError'
 import { getBrowserDeviceID } from '@/utils/deviceIdentity'
 
 const { t, locale } = useI18n()
@@ -142,7 +142,7 @@ async function checkin(): Promise<void> {
     appStore.showSuccess(t('growth.checkin.success', { amount: formatAmount(result.total_reward) }))
     await Promise.all([load(), authStore.refreshUser().catch(() => undefined)])
   } catch (error) {
-    appStore.showError(extractApiErrorMessage(error, t('growth.checkin.failed')))
+    appStore.showError(extractI18nErrorMessage(error, t, 'growth.checkin.errors', t('growth.checkin.failed')))
   } finally {
     claiming.value = false
   }
