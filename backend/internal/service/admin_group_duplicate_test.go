@@ -121,15 +121,19 @@ func groupDuplicateTestPointer[T any](value T) *T { return &value }
 func TestDuplicateGroupCopiesConfigurationDeeplyAndResetsRuntimeState(t *testing.T) {
 	createdAt := time.Date(2026, time.July, 1, 2, 3, 4, 0, time.UTC)
 	source := &Group{
-		ID:                              41,
-		Name:                            "高级订阅",
-		Description:                     "configuration",
-		Platform:                        PlatformOpenAI,
-		RateMultiplier:                  1.75,
-		PeakRateEnabled:                 true,
-		PeakStart:                       "09:00",
-		PeakEnd:                         "18:00",
-		PeakRateMultiplier:              1.2,
+		ID:                 41,
+		Name:               "高级订阅",
+		Description:        "configuration",
+		Platform:           PlatformOpenAI,
+		RateMultiplier:     1.75,
+		PeakRateEnabled:    true,
+		PeakStart:          "09:00",
+		PeakEnd:            "18:00",
+		PeakRateMultiplier: 1.2,
+		TimeBillingRules: []TimeBillingRule{
+			{ID: "day", Enabled: true, Start: "09:00", End: "18:00", RateMultiplier: 1.2},
+			{ID: "night", Enabled: true, Start: "22:00", End: "02:00", RateMultiplier: 1.8},
+		},
 		IsExclusive:                     true,
 		Status:                          StatusActive,
 		Hydrated:                        true,
@@ -199,6 +203,7 @@ func TestDuplicateGroupCopiesConfigurationDeeplyAndResetsRuntimeState(t *testing
 	require.Equal(t, source.Platform, duplicate.Platform)
 	require.Equal(t, source.RateMultiplier, duplicate.RateMultiplier)
 	require.Equal(t, source.PeakRateMultiplier, duplicate.PeakRateMultiplier)
+	require.Equal(t, source.TimeBillingRules, duplicate.TimeBillingRules)
 	require.Equal(t, source.DefaultValidityDays, duplicate.DefaultValidityDays)
 	require.Equal(t, source.ImagePrice4K, duplicate.ImagePrice4K)
 	require.Equal(t, source.WebSearchPricePerCall, duplicate.WebSearchPricePerCall)

@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 
 type OpenAIMessagesDispatchModelConfig = domain.OpenAIMessagesDispatchModelConfig
 type GroupModelsListConfig = domain.GroupModelsListConfig
+type TimeBillingRule = domain.TimeBillingRule
 
 type Group struct {
 	ID             int64
@@ -25,6 +27,7 @@ type Group struct {
 	PeakStart          string
 	PeakEnd            string
 	PeakRateMultiplier float64
+	TimeBillingRules   []TimeBillingRule
 	IsExclusive        bool
 	Status             string
 	Hydrated           bool // indicates the group was loaded from a trusted repository source
@@ -235,31 +238,139 @@ func parseMinutes(hhmm string) (int, bool) {
 	return h*60 + m, true
 }
 
-// PeakMultiplierAt 返回指定时刻 now 的高峰因子。
-//   - 未启用 / 未配置 / 配置非法（start>=end 或格式错误） / 非高峰时段 → 返回 1.0（安全降级）
-//   - 区间为左闭右开 [PeakStart, PeakEnd)，仅支持当日区间，不支持跨天（如 22:00-次日02:00）
+// PeakMultiplierAt returns the configured time-based billing factor.
+// New multi-window rules take precedence over the legacy single peak window.
 //   - 时刻基于全局系统时区（timezone.Location）判定
 //
 // 该方法是纯函数，不读取任何外部状态，便于单测。
 func (g *Group) PeakMultiplierAt(now time.Time) float64 {
-	if g == nil || !g.PeakRateEnabled || g.PeakStart == "" || g.PeakEnd == "" {
+	if g == nil {
+		return 1.0
+	}
+	current := now.In(timezone.Location())
+	minute := current.Hour()*60 + current.Minute()
+	if len(g.TimeBillingRules) > 0 {
+		for _, rule := range g.TimeBillingRules {
+			if !rule.Enabled {
+				continue
+			}
+			start, startOK := parseMinutes(rule.Start)
+			end, endOK := parseMinutes(rule.End)
+			if startOK && endOK && start != end && minuteInTimeWindow(minute, start, end) {
+				return rule.RateMultiplier
+			}
+		}
+		return 1.0
+	}
+	if !g.PeakRateEnabled || g.PeakStart == "" || g.PeakEnd == "" {
 		return 1.0
 	}
 	start, ok1 := parseMinutes(g.PeakStart)
 	end, ok2 := parseMinutes(g.PeakEnd)
-	if !ok1 || !ok2 || start >= end {
+	if !ok1 || !ok2 || start == end {
 		return 1.0
 	}
-	t := now.In(timezone.Location())
-	cur := t.Hour()*60 + t.Minute()
-	if cur >= start && cur < end {
+	if minuteInTimeWindow(minute, start, end) {
 		return g.PeakRateMultiplier
 	}
 	return 1.0
 }
 
+func minuteInTimeWindow(minute, start, end int) bool {
+	if start < end {
+		return minute >= start && minute < end
+	}
+	return minute >= start || minute < end
+}
+
+type timeBillingMinuteRange struct {
+	start int
+	end   int
+}
+
+func timeBillingRuleRanges(start, end int) []timeBillingMinuteRange {
+	if start < end {
+		return []timeBillingMinuteRange{{start: start, end: end}}
+	}
+	ranges := []timeBillingMinuteRange{{start: start, end: 24 * 60}}
+	if end > 0 {
+		ranges = append(ranges, timeBillingMinuteRange{start: 0, end: end})
+	}
+	return ranges
+}
+
+func timeBillingRulesOverlap(leftStart, leftEnd, rightStart, rightEnd int) bool {
+	for _, left := range timeBillingRuleRanges(leftStart, leftEnd) {
+		for _, right := range timeBillingRuleRanges(rightStart, rightEnd) {
+			if left.start < right.end && right.start < left.end {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func ValidateTimeBillingRules(rules []TimeBillingRule) error {
+	if len(rules) > 48 {
+		return errors.New("time_billing_rules cannot contain more than 48 rules")
+	}
+	type parsedRule struct {
+		index int
+		start int
+		end   int
+	}
+	seenIDs := make(map[string]struct{}, len(rules))
+	enabled := make([]parsedRule, 0, len(rules))
+	for i, rule := range rules {
+		id := strings.TrimSpace(rule.ID)
+		if id == "" || id != rule.ID || len(id) > 64 {
+			return fmt.Errorf("time_billing_rules[%d].id is invalid", i)
+		}
+		if _, exists := seenIDs[id]; exists {
+			return fmt.Errorf("time_billing_rules contains duplicate id %q", id)
+		}
+		seenIDs[id] = struct{}{}
+		start, startOK := parseMinutes(rule.Start)
+		end, endOK := parseMinutes(rule.End)
+		if !startOK || !endOK || start == end {
+			return fmt.Errorf("time_billing_rules[%d] must use distinct valid HH:MM times", i)
+		}
+		if math.IsNaN(rule.RateMultiplier) || math.IsInf(rule.RateMultiplier, 0) || rule.RateMultiplier < 0 {
+			return fmt.Errorf("time_billing_rules[%d].rate_multiplier must be finite and non-negative", i)
+		}
+		if rule.Enabled {
+			enabled = append(enabled, parsedRule{index: i, start: start, end: end})
+		}
+	}
+	for i, left := range enabled {
+		for _, right := range enabled[i+1:] {
+			if timeBillingRulesOverlap(left.start, left.end, right.start, right.end) {
+				return fmt.Errorf("enabled time_billing_rules[%d] and time_billing_rules[%d] overlap", left.index, right.index)
+			}
+		}
+	}
+	return nil
+}
+
+func syncLegacyPeakRateFromRules(group *Group) {
+	group.PeakRateEnabled = false
+	group.PeakStart = ""
+	group.PeakEnd = ""
+	group.PeakRateMultiplier = 1
+	for _, rule := range group.TimeBillingRules {
+		if !rule.Enabled {
+			continue
+		}
+		group.PeakRateEnabled = true
+		group.PeakStart = rule.Start
+		group.PeakEnd = rule.End
+		group.PeakRateMultiplier = rule.RateMultiplier
+		return
+	}
+}
+
 // ValidatePeakRateConfig 是高峰倍率配置的唯一校验来源，供 handler 与 service 层共用。
-// enabled=true 时要求 start/end 合法且 end>start（不支持跨天），multiplier>=0。
+// enabled=true 时要求 start/end 合法且不相同；start>end 表示跨日，multiplier>=0。
 // multiplier=0 是允许的，表示高峰 token 请求按 0 倍计费，可用于折扣/免费策略。
 // enabled=false 时放行。
 func ValidatePeakRateConfig(_ string, enabled bool, start, end string, multiplier float64) error {
@@ -277,8 +388,8 @@ func ValidatePeakRateConfig(_ string, enabled bool, start, end string, multiplie
 	if !okEnd {
 		return fmt.Errorf("peak_end 格式应为 HH:MM，got %q", end)
 	}
-	if st >= en {
-		return errors.New("peak_end 必须大于 peak_start（不支持跨天区间，如 22:00-02:00）")
+	if st == en {
+		return errors.New("peak_start 与 peak_end 不能相同")
 	}
 	if multiplier < 0 {
 		return errors.New("peak_rate_multiplier 不能为负")

@@ -200,6 +200,18 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 	if err := ValidatePeakRateConfig(subscriptionType, peakRateEnabled, peakStart, peakEnd, peakRateMultiplier); err != nil {
 		return nil, err
 	}
+	timeBillingRules := append([]TimeBillingRule(nil), input.TimeBillingRules...)
+	if err := ValidateTimeBillingRules(timeBillingRules); err != nil {
+		return nil, err
+	}
+	if len(timeBillingRules) > 0 {
+		legacy := &Group{TimeBillingRules: timeBillingRules}
+		syncLegacyPeakRateFromRules(legacy)
+		peakRateEnabled = legacy.PeakRateEnabled
+		peakStart = legacy.PeakStart
+		peakEnd = legacy.PeakEnd
+		peakRateMultiplier = legacy.PeakRateMultiplier
+	}
 
 	// 校验降级分组
 	if input.FallbackGroupID != nil {
@@ -282,6 +294,7 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		PeakStart:                       peakStart,
 		PeakEnd:                         peakEnd,
 		PeakRateMultiplier:              peakRateMultiplier,
+		TimeBillingRules:                timeBillingRules,
 		ImagePrice1K:                    imagePrice1K,
 		ImagePrice2K:                    imagePrice2K,
 		ImagePrice4K:                    imagePrice4K,
@@ -519,6 +532,14 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	}
 	if input.PeakRateMultiplier != nil {
 		group.PeakRateMultiplier = *input.PeakRateMultiplier
+	}
+	if input.TimeBillingRules != nil {
+		rules := append([]TimeBillingRule(nil), (*input.TimeBillingRules)...)
+		if err := ValidateTimeBillingRules(rules); err != nil {
+			return nil, err
+		}
+		group.TimeBillingRules = rules
+		syncLegacyPeakRateFromRules(group)
 	}
 	// 先清洗停用状态下的脏字段，再收敛校验。Update 可能只传部分 peak 字段，需对合并后的最终配置统一校验，
 	// 防止单独修改 start/end 导致最终 start>=end 等非法配置入库。与 CreateGroup 同一收口。

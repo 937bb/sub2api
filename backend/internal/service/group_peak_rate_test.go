@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
+	"github.com/stretchr/testify/require"
 )
 
 func init() {
@@ -115,7 +116,7 @@ func TestValidatePeakRateConfig(t *testing.T) {
 		{"enabled malformed start", "subscription", true, "99:99", "18:00", 1.0, true},
 		{"enabled malformed end", "subscription", true, "14:00", "25:00", 1.0, true},
 		{"enabled equal start==end", "subscription", true, "14:00", "14:00", 1.0, true},
-		{"enabled cross-day rejected", "subscription", true, "22:00", "02:00", 1.0, true},
+		{"enabled cross-day allowed", "subscription", true, "22:00", "02:00", 1.0, false},
 		{"enabled negative multiplier", "subscription", true, "14:00", "18:00", -0.5, true},
 		{"enabled zero multiplier allowed", "subscription", true, "14:00", "18:00", 0, false},
 	}
@@ -127,6 +128,75 @@ func TestValidatePeakRateConfig(t *testing.T) {
 			}
 			if !c.wantErr && err != nil {
 				t.Fatalf("expect no error, got %v", err)
+			}
+		})
+	}
+}
+
+func TestTimeBillingRulesMultipleWindowsAndCrossDay(t *testing.T) {
+	g := &Group{TimeBillingRules: []TimeBillingRule{
+		{ID: "morning", Enabled: true, Start: "06:00", End: "10:00", RateMultiplier: 0.8},
+		{ID: "day", Enabled: true, Start: "10:00", End: "18:00", RateMultiplier: 1.2},
+		{ID: "night", Enabled: true, Start: "22:00", End: "02:00", RateMultiplier: 1.8},
+	}}
+	require.NoError(t, ValidateTimeBillingRules(g.TimeBillingRules))
+
+	cases := []struct {
+		name string
+		time time.Time
+		want float64
+	}{
+		{name: "morning", time: at(8, 0), want: 0.8},
+		{name: "adjacent boundary", time: at(10, 0), want: 1.2},
+		{name: "unconfigured evening", time: at(20, 0), want: 1},
+		{name: "cross-day before midnight", time: at(23, 30), want: 1.8},
+		{name: "cross-day after midnight", time: at(1, 30), want: 1.8},
+		{name: "cross-day end boundary", time: at(2, 0), want: 1},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			require.Equal(t, test.want, g.PeakMultiplierAt(test.time))
+		})
+	}
+}
+
+func TestValidateTimeBillingRulesRejectsOverlapAcrossMidnight(t *testing.T) {
+	tests := []struct {
+		name  string
+		rules []TimeBillingRule
+		valid bool
+	}{
+		{
+			name: "adjacent windows",
+			rules: []TimeBillingRule{
+				{ID: "one", Enabled: true, Start: "08:00", End: "12:00", RateMultiplier: 1},
+				{ID: "two", Enabled: true, Start: "12:00", End: "18:00", RateMultiplier: 2},
+			},
+			valid: true,
+		},
+		{
+			name: "cross-day overlaps after midnight",
+			rules: []TimeBillingRule{
+				{ID: "night", Enabled: true, Start: "22:00", End: "02:00", RateMultiplier: 1},
+				{ID: "early", Enabled: true, Start: "01:00", End: "03:00", RateMultiplier: 2},
+			},
+		},
+		{
+			name: "disabled overlap ignored",
+			rules: []TimeBillingRule{
+				{ID: "night", Enabled: true, Start: "22:00", End: "02:00", RateMultiplier: 1},
+				{ID: "early", Enabled: false, Start: "01:00", End: "03:00", RateMultiplier: 2},
+			},
+			valid: true,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := ValidateTimeBillingRules(test.rules)
+			if test.valid {
+				require.NoError(t, err)
+			} else {
+				require.ErrorContains(t, err, "overlap")
 			}
 		})
 	}
@@ -204,14 +274,18 @@ func TestPeakMultiplier_GatewayBillingSequence(t *testing.T) {
 	})
 }
 
-// TestPeakMultiplier_SnapshotRoundTrip 防回归：认证缓存快照（APIKeyAuthGroupSnapshot）
-// 必须携带高峰倍率 4 字段，否则扣费路径拿到的 apiKey.Group 会缺字段、PeakMultiplierAt 恒降级为 1.0。
-// 调用真实链路 snapshotFromAPIKey → snapshotToAPIKey，验证 peak 配置经快照往返后仍生效。
+// TestPeakMultiplier_SnapshotRoundTrip verifies both multi-window rules and
+// legacy peak fields survive the API-key authentication cache round trip.
 func TestPeakMultiplier_SnapshotRoundTrip(t *testing.T) {
+	rules := []TimeBillingRule{
+		{ID: "day", Enabled: true, Start: "09:00", End: "18:00", RateMultiplier: 1.2},
+		{ID: "night", Enabled: true, Start: "22:00", End: "02:00", RateMultiplier: 1.8},
+	}
 	apiKey := &APIKey{
 		User:  &User{ID: 1, Status: StatusActive, Role: RoleUser},
 		Group: newPeakGroup(true, "14:00", "18:00", 3.0),
 	}
+	apiKey.Group.TimeBillingRules = rules
 	svc := &APIKeyService{}
 
 	snapshot := svc.snapshotFromAPIKey(context.Background(), apiKey)
@@ -229,10 +303,12 @@ func TestPeakMultiplier_SnapshotRoundTrip(t *testing.T) {
 		restored.Group.PeakRateMultiplier != 3.0 {
 		t.Fatalf("peak fields lost in snapshot round-trip: %+v", restored.Group)
 	}
-	if got := restored.Group.PeakMultiplierAt(at(15, 30)); got != 3.0 {
-		t.Fatalf("peak hour multiplier after round-trip: got %v, want 3.0", got)
+	if got := restored.Group.PeakMultiplierAt(at(15, 30)); got != 1.2 {
+		t.Fatalf("day rule multiplier after round-trip: got %v, want 1.2", got)
 	}
 	if got := restored.Group.PeakMultiplierAt(at(20, 0)); got != 1.0 {
 		t.Fatalf("off-peak multiplier after round-trip: got %v, want 1.0", got)
 	}
+	require.Equal(t, rules, restored.Group.TimeBillingRules)
+	require.Equal(t, 1.8, restored.Group.PeakMultiplierAt(at(1, 0)))
 }

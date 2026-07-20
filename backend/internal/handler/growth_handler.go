@@ -87,8 +87,7 @@ func (h *GrowthHandler) GetLeaderboard(c *gin.Context) {
 		return
 	}
 	period := c.DefaultQuery("period", "daily")
-	page, pageSize := response.ParsePagination(c)
-	result, err := h.service.GetLeaderboard(c.Request.Context(), period, subject.UserID, page, pageSize)
+	result, err := h.service.GetLeaderboard(c.Request.Context(), period, subject.UserID)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return

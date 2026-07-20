@@ -161,6 +161,12 @@ func (_c *GroupCreate) SetNillablePeakRateMultiplier(v *float64) *GroupCreate {
 	return _c
 }
 
+// SetTimeBillingRules sets the "time_billing_rules" field.
+func (_c *GroupCreate) SetTimeBillingRules(v []domain.TimeBillingRule) *GroupCreate {
+	_c.mutation.SetTimeBillingRules(v)
+	return _c
+}
+
 // SetIsExclusive sets the "is_exclusive" field.
 func (_c *GroupCreate) SetIsExclusive(v bool) *GroupCreate {
 	_c.mutation.SetIsExclusive(v)
@@ -852,6 +858,10 @@ func (_c *GroupCreate) defaults() error {
 		v := group.DefaultPeakRateMultiplier
 		_c.mutation.SetPeakRateMultiplier(v)
 	}
+	if _, ok := _c.mutation.TimeBillingRules(); !ok {
+		v := group.DefaultTimeBillingRules
+		_c.mutation.SetTimeBillingRules(v)
+	}
 	if _, ok := _c.mutation.IsExclusive(); !ok {
 		v := group.DefaultIsExclusive
 		_c.mutation.SetIsExclusive(v)
@@ -995,6 +1005,9 @@ func (_c *GroupCreate) check() error {
 	}
 	if _, ok := _c.mutation.PeakRateMultiplier(); !ok {
 		return &ValidationError{Name: "peak_rate_multiplier", err: errors.New(`ent: missing required field "Group.peak_rate_multiplier"`)}
+	}
+	if _, ok := _c.mutation.TimeBillingRules(); !ok {
+		return &ValidationError{Name: "time_billing_rules", err: errors.New(`ent: missing required field "Group.time_billing_rules"`)}
 	}
 	if _, ok := _c.mutation.IsExclusive(); !ok {
 		return &ValidationError{Name: "is_exclusive", err: errors.New(`ent: missing required field "Group.is_exclusive"`)}
@@ -1162,6 +1175,10 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.PeakRateMultiplier(); ok {
 		_spec.SetField(group.FieldPeakRateMultiplier, field.TypeFloat64, value)
 		_node.PeakRateMultiplier = value
+	}
+	if value, ok := _c.mutation.TimeBillingRules(); ok {
+		_spec.SetField(group.FieldTimeBillingRules, field.TypeJSON, value)
+		_node.TimeBillingRules = value
 	}
 	if value, ok := _c.mutation.IsExclusive(); ok {
 		_spec.SetField(group.FieldIsExclusive, field.TypeBool, value)
@@ -1604,6 +1621,18 @@ func (u *GroupUpsert) UpdatePeakRateMultiplier() *GroupUpsert {
 // AddPeakRateMultiplier adds v to the "peak_rate_multiplier" field.
 func (u *GroupUpsert) AddPeakRateMultiplier(v float64) *GroupUpsert {
 	u.Add(group.FieldPeakRateMultiplier, v)
+	return u
+}
+
+// SetTimeBillingRules sets the "time_billing_rules" field.
+func (u *GroupUpsert) SetTimeBillingRules(v []domain.TimeBillingRule) *GroupUpsert {
+	u.Set(group.FieldTimeBillingRules, v)
+	return u
+}
+
+// UpdateTimeBillingRules sets the "time_billing_rules" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateTimeBillingRules() *GroupUpsert {
+	u.SetExcluded(group.FieldTimeBillingRules)
 	return u
 }
 
@@ -2454,6 +2483,20 @@ func (u *GroupUpsertOne) AddPeakRateMultiplier(v float64) *GroupUpsertOne {
 func (u *GroupUpsertOne) UpdatePeakRateMultiplier() *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdatePeakRateMultiplier()
+	})
+}
+
+// SetTimeBillingRules sets the "time_billing_rules" field.
+func (u *GroupUpsertOne) SetTimeBillingRules(v []domain.TimeBillingRule) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetTimeBillingRules(v)
+	})
+}
+
+// UpdateTimeBillingRules sets the "time_billing_rules" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateTimeBillingRules() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateTimeBillingRules()
 	})
 }
 
@@ -3578,6 +3621,20 @@ func (u *GroupUpsertBulk) AddPeakRateMultiplier(v float64) *GroupUpsertBulk {
 func (u *GroupUpsertBulk) UpdatePeakRateMultiplier() *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdatePeakRateMultiplier()
+	})
+}
+
+// SetTimeBillingRules sets the "time_billing_rules" field.
+func (u *GroupUpsertBulk) SetTimeBillingRules(v []domain.TimeBillingRule) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetTimeBillingRules(v)
+	})
+}
+
+// UpdateTimeBillingRules sets the "time_billing_rules" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateTimeBillingRules() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateTimeBillingRules()
 	})
 }
 

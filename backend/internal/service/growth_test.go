@@ -18,6 +18,7 @@ func validGrowthConfig() GrowthConfig {
 		CheckinRecentSpendDays:      30,
 		CheckinMaxAccountsPerIP:     2,
 		CheckinMaxAccountsPerDevice: 1,
+		LeaderboardDisplayLimit:     20,
 		CheckinStreakRewards:        []GrowthStreakReward{{Days: 7, Amount: 2}},
 		LeaderboardRewardRules: []GrowthLeaderboardRewardRule{{
 			ID: "daily-top-3", Period: "daily", RankStart: 1, RankEnd: 3,
@@ -48,6 +49,8 @@ func TestGrowthValidateConfig(t *testing.T) {
 		}},
 		{"fractional cent", func(c *GrowthConfig) { c.CheckinFixedReward = 1.001 }},
 		{"invalid total paid ratio", func(c *GrowthConfig) { c.MaxTotalRewardPaidRatio = 1.01 }},
+		{"zero leaderboard display limit", func(c *GrowthConfig) { c.LeaderboardDisplayLimit = 0 }},
+		{"excessive leaderboard display limit", func(c *GrowthConfig) { c.LeaderboardDisplayLimit = 101 }},
 		{"overlapping ranks", func(c *GrowthConfig) {
 			c.LeaderboardRewardRules = append(c.LeaderboardRewardRules, GrowthLeaderboardRewardRule{ID: "overlap", Period: "daily", RankStart: 3, RankEnd: 4, RewardAmount: 1, Enabled: true})
 		}},

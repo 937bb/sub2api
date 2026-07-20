@@ -496,6 +496,14 @@ export type GroupPlatform = 'anthropic' | 'openai' | 'gemini' | 'antigravity' | 
 
 export type SubscriptionType = 'standard' | 'subscription'
 
+export interface TimeBillingRule {
+  id: string
+  enabled: boolean
+  start: string
+  end: string
+  rate_multiplier: number
+}
+
 export interface OpenAIMessagesDispatchModelConfig {
   opus_mapped_model?: string
   sonnet_mapped_model?: string
@@ -538,6 +546,7 @@ export interface Group {
   peak_start: string
   peak_end: string
   peak_rate_multiplier: number
+  time_billing_rules?: TimeBillingRule[]
   // Claude Code 客户端限制
   claude_code_only: boolean
   fallback_group_id: number | null
@@ -671,6 +680,7 @@ export interface CreateGroupRequest {
   peak_start?: string
   peak_end?: string
   peak_rate_multiplier?: number
+  time_billing_rules?: TimeBillingRule[]
   claude_code_only?: boolean
   fallback_group_id?: number | null
   fallback_group_id_on_invalid_request?: number | null
@@ -719,6 +729,7 @@ export interface UpdateGroupRequest {
   peak_start?: string
   peak_end?: string
   peak_rate_multiplier?: number
+  time_billing_rules?: TimeBillingRule[]
   claude_code_only?: boolean
   fallback_group_id?: number | null
   fallback_group_id_on_invalid_request?: number | null

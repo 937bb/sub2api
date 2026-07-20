@@ -20806,6 +20806,8 @@ type GroupMutation struct {
 	peak_end                                *string
 	peak_rate_multiplier                    *float64
 	addpeak_rate_multiplier                 *float64
+	time_billing_rules                      *[]domain.TimeBillingRule
+	appendtime_billing_rules                []domain.TimeBillingRule
 	is_exclusive                            *bool
 	status                                  *string
 	duplicate_operation_id                  *string
@@ -21411,6 +21413,57 @@ func (m *GroupMutation) AddedPeakRateMultiplier() (r float64, exists bool) {
 func (m *GroupMutation) ResetPeakRateMultiplier() {
 	m.peak_rate_multiplier = nil
 	m.addpeak_rate_multiplier = nil
+}
+
+// SetTimeBillingRules sets the "time_billing_rules" field.
+func (m *GroupMutation) SetTimeBillingRules(dbr []domain.TimeBillingRule) {
+	m.time_billing_rules = &dbr
+	m.appendtime_billing_rules = nil
+}
+
+// TimeBillingRules returns the value of the "time_billing_rules" field in the mutation.
+func (m *GroupMutation) TimeBillingRules() (r []domain.TimeBillingRule, exists bool) {
+	v := m.time_billing_rules
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldTimeBillingRules returns the old "time_billing_rules" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldTimeBillingRules(ctx context.Context) (v []domain.TimeBillingRule, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldTimeBillingRules is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldTimeBillingRules requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldTimeBillingRules: %w", err)
+	}
+	return oldValue.TimeBillingRules, nil
+}
+
+// AppendTimeBillingRules adds dbr to the "time_billing_rules" field.
+func (m *GroupMutation) AppendTimeBillingRules(dbr []domain.TimeBillingRule) {
+	m.appendtime_billing_rules = append(m.appendtime_billing_rules, dbr...)
+}
+
+// AppendedTimeBillingRules returns the list of values that were appended to the "time_billing_rules" field in this mutation.
+func (m *GroupMutation) AppendedTimeBillingRules() ([]domain.TimeBillingRule, bool) {
+	if len(m.appendtime_billing_rules) == 0 {
+		return nil, false
+	}
+	return m.appendtime_billing_rules, true
+}
+
+// ResetTimeBillingRules resets all changes to the "time_billing_rules" field.
+func (m *GroupMutation) ResetTimeBillingRules() {
+	m.time_billing_rules = nil
+	m.appendtime_billing_rules = nil
 }
 
 // SetIsExclusive sets the "is_exclusive" field.
@@ -23764,7 +23817,7 @@ func (m *GroupMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *GroupMutation) Fields() []string {
-	fields := make([]string, 0, 49)
+	fields := make([]string, 0, 50)
 	if m.created_at != nil {
 		fields = append(fields, group.FieldCreatedAt)
 	}
@@ -23794,6 +23847,9 @@ func (m *GroupMutation) Fields() []string {
 	}
 	if m.peak_rate_multiplier != nil {
 		fields = append(fields, group.FieldPeakRateMultiplier)
+	}
+	if m.time_billing_rules != nil {
+		fields = append(fields, group.FieldTimeBillingRules)
 	}
 	if m.is_exclusive != nil {
 		fields = append(fields, group.FieldIsExclusive)
@@ -23940,6 +23996,8 @@ func (m *GroupMutation) Field(name string) (ent.Value, bool) {
 		return m.PeakEnd()
 	case group.FieldPeakRateMultiplier:
 		return m.PeakRateMultiplier()
+	case group.FieldTimeBillingRules:
+		return m.TimeBillingRules()
 	case group.FieldIsExclusive:
 		return m.IsExclusive()
 	case group.FieldStatus:
@@ -24047,6 +24105,8 @@ func (m *GroupMutation) OldField(ctx context.Context, name string) (ent.Value, e
 		return m.OldPeakEnd(ctx)
 	case group.FieldPeakRateMultiplier:
 		return m.OldPeakRateMultiplier(ctx)
+	case group.FieldTimeBillingRules:
+		return m.OldTimeBillingRules(ctx)
 	case group.FieldIsExclusive:
 		return m.OldIsExclusive(ctx)
 	case group.FieldStatus:
@@ -24203,6 +24263,13 @@ func (m *GroupMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetPeakRateMultiplier(v)
+		return nil
+	case group.FieldTimeBillingRules:
+		v, ok := value.([]domain.TimeBillingRule)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetTimeBillingRules(v)
 		return nil
 	case group.FieldIsExclusive:
 		v, ok := value.(bool)
@@ -24909,6 +24976,9 @@ func (m *GroupMutation) ResetField(name string) error {
 		return nil
 	case group.FieldPeakRateMultiplier:
 		m.ResetPeakRateMultiplier()
+		return nil
+	case group.FieldTimeBillingRules:
+		m.ResetTimeBillingRules()
 		return nil
 	case group.FieldIsExclusive:
 		m.ResetIsExclusive()

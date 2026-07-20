@@ -58,6 +58,7 @@ type GrowthConfig struct {
 	CheckinMaxAccountsPerDevice int                           `json:"checkin_max_accounts_per_device"`
 	LeaderboardEnabled          bool                          `json:"leaderboard_enabled"`
 	LeaderboardAnonymous        bool                          `json:"leaderboard_anonymous"`
+	LeaderboardDisplayLimit     int                           `json:"leaderboard_display_limit"`
 	LeaderboardRewardRules      []GrowthLeaderboardRewardRule `json:"leaderboard_reward_rules"`
 	UpdatedAt                   time.Time                     `json:"updated_at"`
 }
@@ -149,7 +150,7 @@ type GrowthRepository interface {
 	UpdateConfig(ctx context.Context, config GrowthConfig, updatedBy int64) (*GrowthConfig, error)
 	GetCheckinStatus(ctx context.Context, userID int64, monthStart, monthEnd, today time.Time) (*GrowthCheckinStatus, error)
 	ClaimCheckin(ctx context.Context, claim GrowthCheckinClaim) (*GrowthCheckin, error)
-	GetLeaderboard(ctx context.Context, start, end time.Time, currentUserID int64, page, pageSize int, anonymous bool) (*GrowthLeaderboard, error)
+	GetLeaderboard(ctx context.Context, start, end time.Time, currentUserID int64, limit int, anonymous bool) (*GrowthLeaderboard, error)
 	SettleLeaderboard(ctx context.Context, period string, start, end time.Time, rules []GrowthLeaderboardRewardRule, maxTotalRewardPaidRatio float64) ([]int64, float64, error)
 	ListRewardLedger(ctx context.Context, page, pageSize int) ([]GrowthRewardLedgerItem, int64, error)
 	ListRiskEvents(ctx context.Context, page, pageSize int) ([]GrowthRiskEvent, int64, error)
@@ -222,7 +223,7 @@ func (s *GrowthService) Checkin(ctx context.Context, userID int64, ipHash, devic
 	return result, nil
 }
 
-func (s *GrowthService) GetLeaderboard(ctx context.Context, period string, currentUserID int64, page, pageSize int) (*GrowthLeaderboard, error) {
+func (s *GrowthService) GetLeaderboard(ctx context.Context, period string, currentUserID int64) (*GrowthLeaderboard, error) {
 	config, err := s.repo.GetConfig(ctx)
 	if err != nil {
 		return nil, err
@@ -234,13 +235,7 @@ func (s *GrowthService) GetLeaderboard(ctx context.Context, period string, curre
 	if err != nil {
 		return nil, infraerrors.BadRequest("GROWTH_PERIOD_INVALID", err.Error())
 	}
-	if page < 1 {
-		page = 1
-	}
-	if pageSize < 1 || pageSize > 100 {
-		pageSize = 50
-	}
-	result, err := s.repo.GetLeaderboard(ctx, start, end, currentUserID, page, pageSize, config.LeaderboardAnonymous)
+	result, err := s.repo.GetLeaderboard(ctx, start, end, currentUserID, config.LeaderboardDisplayLimit, config.LeaderboardAnonymous)
 	if result != nil {
 		result.Period = normalized
 		result.PeriodStart = start
@@ -320,6 +315,9 @@ func ValidateGrowthConfig(config *GrowthConfig) error {
 	}
 	if math.IsNaN(config.MaxTotalRewardPaidRatio) || math.IsInf(config.MaxTotalRewardPaidRatio, 0) || config.MaxTotalRewardPaidRatio <= 0 || config.MaxTotalRewardPaidRatio > 1 {
 		return errors.New("total growth reward to paid amount ratio must be within 0-1")
+	}
+	if config.LeaderboardDisplayLimit < 1 || config.LeaderboardDisplayLimit > 100 {
+		return errors.New("leaderboard_display_limit must be within 1-100")
 	}
 	seenDays := map[int]struct{}{}
 	if len(config.CheckinStreakRewards) > 100 {

@@ -33,7 +33,9 @@
               </tr>
             </tbody>
           </table>
-          <Pagination v-if="data.total > 0" :page="data.page" :page-size="data.page_size" :total="data.total" :show-page-size-selector="false" @update:page="changePage" />
+          <div class="border-t border-gray-100 px-5 py-3 text-right text-xs text-gray-500 dark:border-dark-800 dark:text-dark-400">
+            {{ t('growth.leaderboard.visibleTop', { count: data.page_size }) }}
+          </div>
         </div>
         <div v-else class="py-16 text-center text-sm text-gray-500 dark:text-dark-400">{{ t('common.noData') }}</div>
       </template>
@@ -46,7 +48,6 @@ import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
-import Pagination from '@/components/common/Pagination.vue'
 import { getLeaderboard, type GrowthLeaderboard, type GrowthPeriod } from '@/api/growth'
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
@@ -56,7 +57,6 @@ const appStore = useAppStore()
 const period = ref<GrowthPeriod>('daily')
 const data = ref<GrowthLeaderboard | null>(null)
 const loading = ref(false)
-const page = ref(1)
 const periods = [
   { value: 'daily' as const, label: t('growth.period.daily') },
   { value: 'weekly' as const, label: t('growth.period.weekly') },
@@ -73,11 +73,10 @@ function rankClass(rank: number): string {
 }
 async function load(): Promise<void> {
   loading.value = true
-  try { data.value = await getLeaderboard(period.value, page.value) }
+  try { data.value = await getLeaderboard(period.value) }
   catch (error) { data.value = null; appStore.showError(extractApiErrorMessage(error, t('growth.loadFailed'))) }
   finally { loading.value = false }
 }
-function changePeriod(value: GrowthPeriod): void { period.value = value; page.value = 1; void load() }
-function changePage(value: number): void { page.value = value; void load() }
+function changePeriod(value: GrowthPeriod): void { period.value = value; void load() }
 void load()
 </script>

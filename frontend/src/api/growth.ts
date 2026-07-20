@@ -34,6 +34,7 @@ export interface GrowthConfig {
   checkin_max_accounts_per_device: number
   leaderboard_enabled: boolean
   leaderboard_anonymous: boolean
+  leaderboard_display_limit: number
   leaderboard_reward_rules: GrowthLeaderboardRewardRule[]
   updated_at?: string
 }
@@ -126,8 +127,8 @@ export function claimCheckin(payload: { device_id: string }): Promise<GrowthChec
   return apiClient.post<GrowthCheckin>('/growth/checkin', payload).then(({ data }) => data)
 }
 
-export function getLeaderboard(period: GrowthPeriod, page = 1, pageSize = 50): Promise<GrowthLeaderboard> {
-  return apiClient.get<GrowthLeaderboard>('/growth/leaderboard', { params: { period, page, page_size: pageSize } }).then(({ data }) => data)
+export function getLeaderboard(period: GrowthPeriod): Promise<GrowthLeaderboard> {
+  return apiClient.get<GrowthLeaderboard>('/growth/leaderboard', { params: { period } }).then(({ data }) => data)
 }
 
 export function getGrowthConfig(): Promise<GrowthConfig> {

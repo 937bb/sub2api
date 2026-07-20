@@ -31,7 +31,8 @@ SELECT checkin_enabled, checkin_reward_mode,
        checkin_min_recent_spend::double precision,
        checkin_recent_spend_days, checkin_max_accounts_per_ip,
        checkin_max_accounts_per_device, leaderboard_enabled,
-       leaderboard_anonymous, leaderboard_reward_rules, updated_at
+       leaderboard_anonymous, leaderboard_display_limit,
+       leaderboard_reward_rules, updated_at
 FROM growth_configs WHERE id = 1`
 	var config service.GrowthConfig
 	var streakJSON, rulesJSON []byte
@@ -45,7 +46,8 @@ FROM growth_configs WHERE id = 1`
 		&config.CheckinMinRecentSpend,
 		&config.CheckinRecentSpendDays, &config.CheckinMaxAccountsPerIP,
 		&config.CheckinMaxAccountsPerDevice, &config.LeaderboardEnabled,
-		&config.LeaderboardAnonymous, &rulesJSON, &config.UpdatedAt,
+		&config.LeaderboardAnonymous, &config.LeaderboardDisplayLimit,
+		&rulesJSON, &config.UpdatedAt,
 	); err != nil {
 		return nil, fmt.Errorf("get growth config: %w", err)
 	}
@@ -76,8 +78,9 @@ UPDATE growth_configs SET
     max_total_reward_paid_ratio = $10, checkin_min_recent_spend = $11,
     checkin_recent_spend_days = $12, checkin_max_accounts_per_ip = $13,
     checkin_max_accounts_per_device = $14, leaderboard_enabled = $15,
-    leaderboard_anonymous = $16, leaderboard_reward_rules = $17::jsonb,
-    updated_by = $18, updated_at = NOW()
+    leaderboard_anonymous = $16, leaderboard_display_limit = $17,
+    leaderboard_reward_rules = $18::jsonb,
+    updated_by = $19, updated_at = NOW()
 WHERE id = 1`
 	if _, err := r.db.ExecContext(ctx, query,
 		config.CheckinEnabled, config.CheckinRewardMode,
@@ -88,7 +91,8 @@ WHERE id = 1`
 		config.CheckinMinRecentSpend,
 		config.CheckinRecentSpendDays, config.CheckinMaxAccountsPerIP,
 		config.CheckinMaxAccountsPerDevice, config.LeaderboardEnabled,
-		config.LeaderboardAnonymous, rulesJSON, updatedBy,
+		config.LeaderboardAnonymous, config.LeaderboardDisplayLimit,
+		rulesJSON, updatedBy,
 	); err != nil {
 		return nil, fmt.Errorf("update growth config: %w", err)
 	}
@@ -303,22 +307,11 @@ INSERT INTO growth_risk_events (user_id, event_type, decision, reason_code, ip_h
 VALUES ($1, 'checkin', $2, $3, $4, $5, $6::jsonb)`, claim.UserID, decision, reason, claim.IPHash, claim.DeviceHash, encoded)
 }
 
-func (r *growthRepository) GetLeaderboard(ctx context.Context, start, end time.Time, currentUserID int64, page, pageSize int, anonymous bool) (*service.GrowthLeaderboard, error) {
-	page, pageSize = normalizeGrowthPagination(page, pageSize)
-	result := &service.GrowthLeaderboard{Items: []service.GrowthLeaderboardItem{}, Page: page, PageSize: pageSize}
-	if err := r.db.QueryRowContext(ctx, `
-SELECT COUNT(*) FROM users
-WHERE deleted_at IS NULL AND status = 'active'`).Scan(&result.Total); err != nil {
-		return nil, err
+func (r *growthRepository) GetLeaderboard(ctx context.Context, start, end time.Time, currentUserID int64, limit int, anonymous bool) (*service.GrowthLeaderboard, error) {
+	if limit < 1 || limit > 100 {
+		limit = 20
 	}
-	result.Pages = int((result.Total + int64(pageSize) - 1) / int64(pageSize))
-	if result.Pages < 1 {
-		result.Pages = 1
-	}
-	if page > result.Pages {
-		page = result.Pages
-		result.Page = page
-	}
+	result := &service.GrowthLeaderboard{Items: []service.GrowthLeaderboardItem{}, Page: 1, PageSize: limit, Pages: 1}
 	const query = `
 WITH ranked AS (
     SELECT u.id AS user_id,
@@ -331,15 +324,16 @@ WITH ranked AS (
            COUNT(ul.id) AS requests,
            ROW_NUMBER() OVER (ORDER BY COALESCE(SUM(ul.actual_cost), 0) DESC, u.id ASC) AS rank
     FROM users u
-    LEFT JOIN usage_logs ul ON ul.user_id = u.id AND ul.created_at >= $1 AND ul.created_at < $2
-    WHERE u.deleted_at IS NULL AND u.status = 'active'
+    JOIN usage_logs ul ON ul.user_id = u.id
+    WHERE ul.created_at >= $1 AND ul.created_at < $2
+      AND u.deleted_at IS NULL AND u.status = 'active'
     GROUP BY u.id, u.username, u.email
+    HAVING SUM(ul.actual_cost) > 0
 )
 SELECT user_id, display_name, actual_cost, requests, rank
-FROM ranked WHERE (rank > $3 AND rank <= $4) OR user_id = $5
+FROM ranked WHERE rank <= $3 OR user_id = $4
 ORDER BY rank`
-	offset := (page - 1) * pageSize
-	rows, err := r.db.QueryContext(ctx, query, start, end, offset, offset+pageSize, currentUserID)
+	rows, err := r.db.QueryContext(ctx, query, start, end, limit, currentUserID)
 	if err != nil {
 		return nil, err
 	}
@@ -354,8 +348,9 @@ ORDER BY rank`
 			item.DisplayName = fmt.Sprintf("Anonymous #%d", item.Rank)
 			item.UserID = 0
 		}
-		if item.Rank > offset && item.Rank <= offset+pageSize {
+		if item.Rank <= limit {
 			result.Items = append(result.Items, item)
+			result.Total++
 		}
 		if item.IsCurrentUser {
 			copy := item

@@ -180,6 +180,18 @@ func (_u *GroupUpdate) AddPeakRateMultiplier(v float64) *GroupUpdate {
 	return _u
 }
 
+// SetTimeBillingRules sets the "time_billing_rules" field.
+func (_u *GroupUpdate) SetTimeBillingRules(v []domain.TimeBillingRule) *GroupUpdate {
+	_u.mutation.SetTimeBillingRules(v)
+	return _u
+}
+
+// AppendTimeBillingRules appends value to the "time_billing_rules" field.
+func (_u *GroupUpdate) AppendTimeBillingRules(v []domain.TimeBillingRule) *GroupUpdate {
+	_u.mutation.AppendTimeBillingRules(v)
+	return _u
+}
+
 // SetIsExclusive sets the "is_exclusive" field.
 func (_u *GroupUpdate) SetIsExclusive(v bool) *GroupUpdate {
 	_u.mutation.SetIsExclusive(v)
@@ -1267,6 +1279,14 @@ func (_u *GroupUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if value, ok := _u.mutation.AddedPeakRateMultiplier(); ok {
 		_spec.AddField(group.FieldPeakRateMultiplier, field.TypeFloat64, value)
 	}
+	if value, ok := _u.mutation.TimeBillingRules(); ok {
+		_spec.SetField(group.FieldTimeBillingRules, field.TypeJSON, value)
+	}
+	if value, ok := _u.mutation.AppendedTimeBillingRules(); ok {
+		_spec.AddModifier(func(u *sql.UpdateBuilder) {
+			sqljson.Append(u, group.FieldTimeBillingRules, value)
+		})
+	}
 	if value, ok := _u.mutation.IsExclusive(); ok {
 		_spec.SetField(group.FieldIsExclusive, field.TypeBool, value)
 	}
@@ -1940,6 +1960,18 @@ func (_u *GroupUpdateOne) SetNillablePeakRateMultiplier(v *float64) *GroupUpdate
 // AddPeakRateMultiplier adds value to the "peak_rate_multiplier" field.
 func (_u *GroupUpdateOne) AddPeakRateMultiplier(v float64) *GroupUpdateOne {
 	_u.mutation.AddPeakRateMultiplier(v)
+	return _u
+}
+
+// SetTimeBillingRules sets the "time_billing_rules" field.
+func (_u *GroupUpdateOne) SetTimeBillingRules(v []domain.TimeBillingRule) *GroupUpdateOne {
+	_u.mutation.SetTimeBillingRules(v)
+	return _u
+}
+
+// AppendTimeBillingRules appends value to the "time_billing_rules" field.
+func (_u *GroupUpdateOne) AppendTimeBillingRules(v []domain.TimeBillingRule) *GroupUpdateOne {
+	_u.mutation.AppendTimeBillingRules(v)
 	return _u
 }
 
@@ -3059,6 +3091,14 @@ func (_u *GroupUpdateOne) sqlSave(ctx context.Context) (_node *Group, err error)
 	}
 	if value, ok := _u.mutation.AddedPeakRateMultiplier(); ok {
 		_spec.AddField(group.FieldPeakRateMultiplier, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.TimeBillingRules(); ok {
+		_spec.SetField(group.FieldTimeBillingRules, field.TypeJSON, value)
+	}
+	if value, ok := _u.mutation.AppendedTimeBillingRules(); ok {
+		_spec.AddModifier(func(u *sql.UpdateBuilder) {
+			sqljson.Append(u, group.FieldTimeBillingRules, value)
+		})
 	}
 	if value, ok := _u.mutation.IsExclusive(); ok {
 		_spec.SetField(group.FieldIsExclusive, field.TypeBool, value)

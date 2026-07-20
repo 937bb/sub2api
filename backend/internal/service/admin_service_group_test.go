@@ -686,6 +686,45 @@ func TestAdminService_UpdateGroup_RetainsPeakRateWhenChangingToStandard(t *testi
 	require.Equal(t, 3.0, repo.updated.PeakRateMultiplier)
 }
 
+func TestAdminService_UpdateGroup_SavesMultipleTimeBillingRulesAndSyncsLegacy(t *testing.T) {
+	existingGroup := &Group{ID: 1, Name: "existing-group", Platform: PlatformOpenAI, Status: StatusActive, SubscriptionType: SubscriptionTypeStandard}
+	repo := &groupRepoStubForAdmin{getByID: existingGroup}
+	svc := &adminServiceImpl{groupRepo: repo}
+	rules := []TimeBillingRule{
+		{ID: "day", Enabled: true, Start: "09:00", End: "18:00", RateMultiplier: 1.2},
+		{ID: "night", Enabled: true, Start: "22:00", End: "02:00", RateMultiplier: 1.8},
+	}
+
+	_, err := svc.UpdateGroup(context.Background(), 1, &UpdateGroupInput{TimeBillingRules: &rules})
+
+	require.NoError(t, err)
+	require.Equal(t, rules, repo.updated.TimeBillingRules)
+	require.True(t, repo.updated.PeakRateEnabled)
+	require.Equal(t, "09:00", repo.updated.PeakStart)
+	require.Equal(t, "18:00", repo.updated.PeakEnd)
+	require.Equal(t, 1.2, repo.updated.PeakRateMultiplier)
+}
+
+func TestAdminService_UpdateGroup_ClearsLegacyPeakWhenRulesAreRemoved(t *testing.T) {
+	existingGroup := &Group{
+		ID: 1, Name: "existing-group", Platform: PlatformOpenAI, Status: StatusActive, SubscriptionType: SubscriptionTypeStandard,
+		PeakRateEnabled: true, PeakStart: "22:00", PeakEnd: "02:00", PeakRateMultiplier: 1.8,
+		TimeBillingRules: []TimeBillingRule{{ID: "night", Enabled: true, Start: "22:00", End: "02:00", RateMultiplier: 1.8}},
+	}
+	repo := &groupRepoStubForAdmin{getByID: existingGroup}
+	svc := &adminServiceImpl{groupRepo: repo}
+	rules := []TimeBillingRule{}
+
+	_, err := svc.UpdateGroup(context.Background(), 1, &UpdateGroupInput{TimeBillingRules: &rules})
+
+	require.NoError(t, err)
+	require.Empty(t, repo.updated.TimeBillingRules)
+	require.False(t, repo.updated.PeakRateEnabled)
+	require.Empty(t, repo.updated.PeakStart)
+	require.Empty(t, repo.updated.PeakEnd)
+	require.Equal(t, 1.0, repo.updated.PeakRateMultiplier)
+}
+
 func TestAdminService_CreateGroup_NormalizesMessagesDispatchModelConfig(t *testing.T) {
 	repo := &groupRepoStubForAdmin{}
 	svc := &adminServiceImpl{groupRepo: repo}
