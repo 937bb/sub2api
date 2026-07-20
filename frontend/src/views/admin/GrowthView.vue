@@ -46,10 +46,6 @@
           <p class="mt-1 text-sm text-gray-500 dark:text-dark-400">{{ t('growth.admin.antiAbuseDescription') }}</p>
           <div class="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             <div><label class="input-label">{{ t('growth.admin.accountAge') }}</label><input v-model.number="config.checkin_min_account_age_days" class="input" type="number" min="0" /></div>
-            <div><label class="input-label">{{ t('growth.admin.totalRecharged') }}</label><input v-model.number="config.checkin_min_total_recharged" class="input" type="number" min="0" step="0.01" /></div>
-            <div><label class="input-label">{{ t('growth.admin.rewardPaidRatio') }}</label><input v-model.number="config.checkin_max_reward_paid_ratio" class="input" type="number" min="0.01" max="1" step="0.01" /><p class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ t('growth.admin.rewardPaidRatioHint') }}</p></div>
-            <div><label class="input-label">{{ t('growth.admin.totalRewardPaidRatio') }}</label><input v-model.number="config.max_total_reward_paid_ratio" class="input" type="number" min="0.01" max="1" step="0.01" /><p class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ t('growth.admin.totalRewardPaidRatioHint') }}</p></div>
-            <div><label class="input-label">{{ t('growth.admin.recentSpend') }}</label><input v-model.number="config.checkin_min_recent_spend" class="input" type="number" min="0" step="0.01" /></div>
             <div><label class="input-label">{{ t('growth.admin.spendWindow') }}</label><input v-model.number="config.checkin_recent_spend_days" class="input" type="number" min="1" max="365" /></div>
             <div><label class="input-label">{{ t('growth.admin.ipLimit') }}</label><input v-model.number="config.checkin_max_accounts_per_ip" class="input" type="number" min="1" /></div>
             <div><label class="input-label">{{ t('growth.admin.deviceLimit') }}</label><input v-model.number="config.checkin_max_accounts_per_device" class="input" type="number" min="1" /></div>

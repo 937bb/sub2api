@@ -26,11 +26,8 @@ var (
 	ErrGrowthRewardIneligible    = infraerrors.Forbidden("GROWTH_REWARD_INELIGIBLE", "account is not eligible for a check-in reward")
 	ErrGrowthAccountInactive     = infraerrors.Forbidden("GROWTH_ACCOUNT_INACTIVE", "account is inactive")
 	ErrGrowthAccountTooNew       = infraerrors.Forbidden("GROWTH_ACCOUNT_TOO_NEW", "account has not reached the minimum age")
-	ErrGrowthRechargeTooLow      = infraerrors.Forbidden("GROWTH_RECHARGE_TOO_LOW", "eligible funding is below the configured minimum")
-	ErrGrowthRecentSpendTooLow   = infraerrors.Forbidden("GROWTH_RECENT_SPEND_TOO_LOW", "recent actual spend is below the configured minimum")
+	ErrGrowthRecentSpendTooLow   = infraerrors.Forbidden("GROWTH_RECENT_SPEND_TOO_LOW", "no actual spend was found in the configured activity window")
 	ErrGrowthIdentityRisk        = infraerrors.Forbidden("GROWTH_IDENTITY_RISK", "network or device risk control rejected this check-in")
-	ErrGrowthCheckinRewardCap    = infraerrors.Forbidden("GROWTH_CHECKIN_REWARD_CAP", "lifetime check-in reward cap based on eligible funding has been reached")
-	ErrGrowthTotalRewardCap      = infraerrors.Forbidden("GROWTH_TOTAL_REWARD_CAP", "lifetime growth reward cap based on eligible funding has been reached")
 	ErrGrowthLeaderboardDisabled = infraerrors.Forbidden("GROWTH_LEADERBOARD_DISABLED", "leaderboard is disabled")
 )
 
@@ -158,7 +155,7 @@ type GrowthRepository interface {
 	GetCheckinStatus(ctx context.Context, userID int64, monthStart, monthEnd, today time.Time) (*GrowthCheckinStatus, error)
 	ClaimCheckin(ctx context.Context, claim GrowthCheckinClaim) (*GrowthCheckin, error)
 	GetLeaderboard(ctx context.Context, start, end time.Time, currentUserID int64, limit int) (*GrowthLeaderboard, error)
-	SettleLeaderboard(ctx context.Context, period string, start, end time.Time, rules []GrowthLeaderboardRewardRule, maxTotalRewardPaidRatio float64) ([]int64, float64, error)
+	SettleLeaderboard(ctx context.Context, period string, start, end time.Time, rules []GrowthLeaderboardRewardRule) ([]int64, float64, error)
 	ListRewardLedger(ctx context.Context, page, pageSize int) ([]GrowthRewardLedgerItem, int64, error)
 	ListRiskEvents(ctx context.Context, page, pageSize int) ([]GrowthRiskEvent, int64, error)
 }
@@ -272,7 +269,7 @@ func (s *GrowthService) SettlePreviousPeriod(ctx context.Context, period string)
 	if len(rules) == 0 {
 		return 0, 0, nil
 	}
-	userIDs, total, err := s.repo.SettleLeaderboard(ctx, normalized, start, end, rules, config.MaxTotalRewardPaidRatio)
+	userIDs, total, err := s.repo.SettleLeaderboard(ctx, normalized, start, end, rules)
 	if err == nil && s.billingCacheService != nil {
 		for _, userID := range userIDs {
 			_ = s.billingCacheService.InvalidateUserBalance(ctx, userID)

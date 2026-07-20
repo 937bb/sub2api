@@ -12,38 +12,25 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
-type growthRepository struct {
-	db *sql.DB
-}
-
-const growthEligibleFundingValueSQL = `(
-    COALESCE((
-        SELECT SUM(GREATEST(po.amount - po.refund_amount, 0))
-        FROM payment_orders po
-        WHERE po.user_id = $1
-          AND po.status IN ('PAID', 'RECHARGING', 'COMPLETED', 'PARTIALLY_REFUNDED')
-    ), 0)
-    + GREATEST(COALESCE((
-        SELECT SUM(rc.value)
-        FROM redeem_codes rc
-        WHERE rc.used_by = $1
-          AND rc.status = 'used'
-          AND rc.type IN ('balance', 'admin_balance')
-    ), 0), 0)
+const growthHasRecentSpendSQL = `SELECT EXISTS(
+    SELECT 1 FROM usage_logs
+    WHERE user_id = $1 AND created_at >= $2 AND actual_cost > 0
 )`
-
-const growthEligibleFundingSQL = `SELECT ` + growthEligibleFundingValueSQL + `::double precision`
 
 type growthQueryRower interface {
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
-func getGrowthEligibleFunding(ctx context.Context, queryer growthQueryRower, userID int64) (float64, error) {
-	var amount float64
-	if err := queryer.QueryRowContext(ctx, growthEligibleFundingSQL, userID).Scan(&amount); err != nil {
-		return 0, err
+func hasGrowthRecentSpend(ctx context.Context, queryer growthQueryRower, userID int64, since time.Time) (bool, error) {
+	var hasRecentSpend bool
+	if err := queryer.QueryRowContext(ctx, growthHasRecentSpendSQL, userID, since).Scan(&hasRecentSpend); err != nil {
+		return false, err
 	}
-	return amount, nil
+	return hasRecentSpend, nil
+}
+
+type growthRepository struct {
+	db *sql.DB
 }
 
 func NewGrowthRepository(db *sql.DB) service.GrowthRepository {
@@ -178,7 +165,6 @@ func (r *growthRepository) ClaimCheckin(ctx context.Context, claim service.Growt
 	defer func() { _ = tx.Rollback() }()
 
 	var createdAt time.Time
-	var eligibleFunding float64
 	var status string
 	if err := tx.QueryRowContext(ctx, `SELECT created_at, status FROM users WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`, claim.UserID).Scan(&createdAt, &status); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -202,21 +188,13 @@ func (r *growthRepository) ClaimCheckin(ctx context.Context, claim service.Growt
 	if createdAt.After(minimumCreatedAt) {
 		return nil, r.denyClaim(ctx, tx, claim, "account_too_new", map[string]any{"minimum_age_days": claim.Config.CheckinMinAccountAgeDays})
 	}
-	eligibleFunding, err = getGrowthEligibleFunding(ctx, tx, claim.UserID)
+	spendSince := claim.Now.AddDate(0, 0, -claim.Config.CheckinRecentSpendDays)
+	hasRecentSpend, err := hasGrowthRecentSpend(ctx, tx, claim.UserID, spendSince)
 	if err != nil {
 		return nil, err
 	}
-	if eligibleFunding+1e-9 < claim.Config.CheckinMinTotalRecharged {
-		return nil, r.denyClaim(ctx, tx, claim, "total_recharged_too_low", map[string]any{"eligible_funding": eligibleFunding, "required_funding": claim.Config.CheckinMinTotalRecharged})
-	}
-
-	var recentSpend float64
-	spendSince := claim.Now.AddDate(0, 0, -claim.Config.CheckinRecentSpendDays)
-	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(actual_cost), 0)::double precision FROM usage_logs WHERE user_id = $1 AND created_at >= $2`, claim.UserID, spendSince).Scan(&recentSpend); err != nil {
-		return nil, err
-	}
-	if recentSpend+1e-9 < claim.Config.CheckinMinRecentSpend {
-		return nil, r.denyClaim(ctx, tx, claim, "recent_spend_too_low", map[string]any{"recent_spend": recentSpend, "required_spend": claim.Config.CheckinMinRecentSpend})
+	if !hasRecentSpend {
+		return nil, r.denyClaim(ctx, tx, claim, "recent_spend_too_low", map[string]any{"window_days": claim.Config.CheckinRecentSpendDays})
 	}
 
 	if err := r.checkClaimIdentityLimit(ctx, tx, claim, "ip_hash", claim.IPHash, claim.Config.CheckinMaxAccountsPerIP, "ip_account_limit"); err != nil {
@@ -245,32 +223,6 @@ func (r *growthRepository) ClaimCheckin(ctx context.Context, claim service.Growt
 	if totalReward < 0 {
 		return nil, fmt.Errorf("check-in reward must be non-negative")
 	}
-	var lifetimeCheckinReward, lifetimeGrowthReward float64
-	if err := tx.QueryRowContext(ctx, `
-SELECT COALESCE(SUM(amount) FILTER (WHERE source_type = 'checkin'), 0)::double precision,
-       COALESCE(SUM(amount), 0)::double precision
-FROM growth_reward_ledger WHERE user_id = $1`, claim.UserID).Scan(&lifetimeCheckinReward, &lifetimeGrowthReward); err != nil {
-		return nil, err
-	}
-	maximumLifetimeReward := roundGrowthAmount(eligibleFunding * claim.Config.CheckinMaxRewardPaidRatio)
-	if lifetimeCheckinReward+totalReward > maximumLifetimeReward+1e-9 {
-		return nil, r.denyClaim(ctx, tx, claim, "lifetime_reward_cap", map[string]any{
-			"lifetime_checkin_reward": lifetimeCheckinReward,
-			"requested_reward":        totalReward,
-			"maximum_reward":          maximumLifetimeReward,
-			"eligible_funding":        eligibleFunding,
-		})
-	}
-	maximumLifetimeGrowthReward := roundGrowthAmount(eligibleFunding * claim.Config.MaxTotalRewardPaidRatio)
-	if lifetimeGrowthReward+totalReward > maximumLifetimeGrowthReward+1e-9 {
-		return nil, r.denyClaim(ctx, tx, claim, "total_growth_reward_cap", map[string]any{
-			"lifetime_growth_reward": lifetimeGrowthReward,
-			"requested_reward":       totalReward,
-			"maximum_reward":         maximumLifetimeGrowthReward,
-			"eligible_funding":       eligibleFunding,
-		})
-	}
-
 	var balanceAfter float64
 	if err := tx.QueryRowContext(ctx, `UPDATE users SET balance = balance + $1, updated_at = NOW() WHERE id = $2 RETURNING balance::double precision`, totalReward, claim.UserID).Scan(&balanceAfter); err != nil {
 		return nil, err
@@ -331,16 +283,10 @@ func growthClaimDeniedError(reason string) error {
 		return service.ErrGrowthAccountInactive
 	case "account_too_new":
 		return service.ErrGrowthAccountTooNew
-	case "total_recharged_too_low":
-		return service.ErrGrowthRechargeTooLow
 	case "recent_spend_too_low":
 		return service.ErrGrowthRecentSpendTooLow
 	case "ip_account_limit", "device_account_limit", "missing_identity_signal":
 		return service.ErrGrowthIdentityRisk
-	case "lifetime_reward_cap":
-		return service.ErrGrowthCheckinRewardCap
-	case "total_growth_reward_cap":
-		return service.ErrGrowthTotalRewardCap
 	default:
 		return service.ErrGrowthRewardIneligible
 	}
@@ -404,16 +350,13 @@ ORDER BY rank`
 	return result, rows.Err()
 }
 
-func (r *growthRepository) SettleLeaderboard(ctx context.Context, period string, start, end time.Time, rules []service.GrowthLeaderboardRewardRule, maxTotalRewardPaidRatio float64) ([]int64, float64, error) {
+func (r *growthRepository) SettleLeaderboard(ctx context.Context, period string, start, end time.Time, rules []service.GrowthLeaderboardRewardRule) ([]int64, float64, error) {
 	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
 	if err != nil {
 		return nil, 0, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	rulesJSON, _ := json.Marshal(map[string]any{
-		"rules": rules, "max_total_reward_paid_ratio": maxTotalRewardPaidRatio,
-		"reward_must_not_exceed_period_spend": true,
-	})
+	rulesJSON, _ := json.Marshal(map[string]any{"rules": rules, "reward_must_not_exceed_period_spend": true})
 	var settlementID int64
 	err = tx.QueryRowContext(ctx, `
 INSERT INTO growth_leaderboard_settlements (period_type, period_start, period_end, rule_snapshot)
@@ -470,31 +413,17 @@ SELECT user_id, actual_cost, rank FROM (
 			if ranked.rank < rule.RankStart || ranked.rank > rule.RankEnd {
 				continue
 			}
-			var eligibleFunding, lifetimeGrowthReward float64
-			if err := tx.QueryRowContext(ctx, `SELECT `+growthEligibleFundingValueSQL+`::double precision,
-       COALESCE((
-           SELECT SUM(grl.amount) FROM growth_reward_ledger grl WHERE grl.user_id = u.id
-       ), 0)::double precision
-FROM users u
-WHERE u.id = $1 AND u.deleted_at IS NULL AND u.status = 'active'
-FOR UPDATE`, ranked.userID).Scan(&eligibleFunding, &lifetimeGrowthReward); err != nil {
+			if !growthLeaderboardRewardAllowed(ranked.spend, rule.RewardAmount) {
+				continue
+			}
+			var balanceAfter float64
+			if err := tx.QueryRowContext(ctx, `UPDATE users SET balance = balance + $1, updated_at = NOW() WHERE id = $2 AND deleted_at IS NULL AND status = 'active' RETURNING balance::double precision`, rule.RewardAmount, ranked.userID).Scan(&balanceAfter); err != nil {
 				if errors.Is(err, sql.ErrNoRows) {
 					continue
 				}
 				return nil, 0, err
 			}
-			allowed, maximumLifetimeReward := growthLeaderboardRewardAllowed(
-				ranked.spend, eligibleFunding, lifetimeGrowthReward,
-				rule.RewardAmount, maxTotalRewardPaidRatio,
-			)
-			if !allowed {
-				continue
-			}
-			var balanceAfter float64
-			if err := tx.QueryRowContext(ctx, `UPDATE users SET balance = balance + $1, updated_at = NOW() WHERE id = $2 AND deleted_at IS NULL RETURNING balance::double precision`, rule.RewardAmount, ranked.userID).Scan(&balanceAfter); err != nil {
-				return nil, 0, err
-			}
-			metadata, _ := json.Marshal(map[string]any{"period": period, "period_start": start, "period_end": end, "rank": ranked.rank, "spend": ranked.spend, "eligible_funding": eligibleFunding, "max_lifetime_growth_reward": maximumLifetimeReward, "rule_id": rule.ID, "settlement_id": settlementID})
+			metadata, _ := json.Marshal(map[string]any{"period": period, "period_start": start, "period_end": end, "rank": ranked.rank, "spend": ranked.spend, "rule_id": rule.ID, "settlement_id": settlementID})
 			sourceKey := fmt.Sprintf("%s:%s:%s:%d", period, start.Format(time.RFC3339), rule.ID, ranked.userID)
 			if _, err := tx.ExecContext(ctx, `INSERT INTO growth_reward_ledger (user_id, source_type, source_key, amount, balance_after, metadata) VALUES ($1, 'leaderboard', $2, $3, $4, $5::jsonb)`, ranked.userID, sourceKey, rule.RewardAmount, balanceAfter, metadata); err != nil {
 				return nil, 0, err
@@ -587,12 +516,8 @@ func roundGrowthAmount(value float64) float64 {
 
 func growthDate(value time.Time) string { return value.Format("2006-01-02") }
 
-func growthLeaderboardRewardAllowed(periodSpend, eligibleFunding, lifetimeGrowthReward, rewardAmount, maxPaidRatio float64) (bool, float64) {
-	maximumLifetimeReward := roundGrowthAmount(eligibleFunding * maxPaidRatio)
-	if rewardAmount <= 0 || rewardAmount > periodSpend+1e-9 {
-		return false, maximumLifetimeReward
-	}
-	return lifetimeGrowthReward+rewardAmount <= maximumLifetimeReward+1e-9, maximumLifetimeReward
+func growthLeaderboardRewardAllowed(periodSpend, rewardAmount float64) bool {
+	return rewardAmount > 0 && rewardAmount <= periodSpend+1e-9
 }
 
 func normalizeGrowthPagination(page, pageSize int) (int, int) {

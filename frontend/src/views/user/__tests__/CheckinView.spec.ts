@@ -21,7 +21,7 @@ vi.mock('vue-i18n', async () => {
     ...actual,
     useI18n: () => ({
       locale: { value: 'zh-CN' },
-      t: (key: string) => key === 'growth.checkin.errors.GROWTH_RECHARGE_TOO_LOW' ? '累计真实充值不足' : key,
+      t: (key: string) => key === 'growth.checkin.errors.GROWTH_RECENT_SPEND_TOO_LOW' ? '近期没有实际消费' : key,
     }),
   }
 })
@@ -50,13 +50,13 @@ describe('CheckinView errors', () => {
   })
 
   it('shows the localized rejection reason returned by the API', async () => {
-    claimCheckin.mockRejectedValue({ reason: 'GROWTH_RECHARGE_TOO_LOW', message: 'lifetime real recharge is below the configured minimum' })
+    claimCheckin.mockRejectedValue({ reason: 'GROWTH_RECENT_SPEND_TOO_LOW', message: 'no actual spend in the configured activity window' })
     const wrapper = mount(CheckinView, { global: { stubs: { AppLayout: AppLayoutStub } } })
     await flushPromises()
 
     await wrapper.find('button.btn-primary').trigger('click')
     await flushPromises()
 
-    expect(showError).toHaveBeenCalledWith('累计真实充值不足')
+    expect(showError).toHaveBeenCalledWith('近期没有实际消费')
   })
 })
