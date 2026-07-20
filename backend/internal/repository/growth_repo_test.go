@@ -33,6 +33,25 @@ func TestGrowthRepositoryLeaderboardFallsBackToEmailPrefix(t *testing.T) {
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestGrowthEligibleFundingIncludesNetAdminBalanceAdjustments(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	mock.ExpectQuery(regexp.QuoteMeta("AND rc.type = 'admin_balance'")).
+		WithArgs(int64(42)).
+		WillReturnRows(sqlmock.NewRows([]string{"eligible_funding"}).AddRow(75.5))
+
+	amount, err := getGrowthEligibleFunding(context.Background(), db, 42)
+
+	require.NoError(t, err)
+	require.Equal(t, 75.5, amount)
+	require.NoError(t, mock.ExpectationsWereMet())
+	require.Contains(t, growthEligibleFundingSQL, "SELECT SUM(rc.value)")
+	require.NotContains(t, growthEligibleFundingSQL, "rc.value > 0")
+	require.NotContains(t, growthEligibleFundingSQL, "type = 'balance'")
+}
+
 func TestGrowthRepositoryLeaderboardCapsVisibleRowsButKeepsCurrentUser(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
@@ -60,25 +79,25 @@ func TestGrowthRepositoryLeaderboardCapsVisibleRowsButKeepsCurrentUser(t *testin
 
 func TestGrowthLeaderboardRewardAllowed(t *testing.T) {
 	tests := []struct {
-		name           string
-		periodSpend    float64
-		totalRecharged float64
-		lifetimeReward float64
-		reward         float64
-		ratio          float64
-		want           bool
-		wantMaximum    float64
+		name            string
+		periodSpend     float64
+		eligibleFunding float64
+		lifetimeReward  float64
+		reward          float64
+		ratio           float64
+		want            bool
+		wantMaximum     float64
 	}{
-		{name: "valid paid spend", periodSpend: 20, totalRecharged: 100, lifetimeReward: 5, reward: 10, ratio: 0.5, want: true, wantMaximum: 50},
-		{name: "free balance spend", periodSpend: 20, totalRecharged: 0, reward: 5, ratio: 1, want: false, wantMaximum: 0},
-		{name: "reward exceeds spend", periodSpend: 4, totalRecharged: 100, reward: 5, ratio: 1, want: false, wantMaximum: 100},
-		{name: "lifetime paid cap", periodSpend: 20, totalRecharged: 10, lifetimeReward: 8, reward: 3, ratio: 1, want: false, wantMaximum: 10},
+		{name: "valid funded spend", periodSpend: 20, eligibleFunding: 100, lifetimeReward: 5, reward: 10, ratio: 0.5, want: true, wantMaximum: 50},
+		{name: "unfunded spend", periodSpend: 20, eligibleFunding: 0, reward: 5, ratio: 1, want: false, wantMaximum: 0},
+		{name: "reward exceeds spend", periodSpend: 4, eligibleFunding: 100, reward: 5, ratio: 1, want: false, wantMaximum: 100},
+		{name: "lifetime funding cap", periodSpend: 20, eligibleFunding: 10, lifetimeReward: 8, reward: 3, ratio: 1, want: false, wantMaximum: 10},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			allowed, maximum := growthLeaderboardRewardAllowed(
-				test.periodSpend, test.totalRecharged, test.lifetimeReward,
+				test.periodSpend, test.eligibleFunding, test.lifetimeReward,
 				test.reward, test.ratio,
 			)
 			require.Equal(t, test.want, allowed)
