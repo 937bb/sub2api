@@ -17,6 +17,11 @@ const growthHasRecentSpendSQL = `SELECT EXISTS(
     WHERE user_id = $1 AND created_at >= $2 AND actual_cost > 0
 )`
 
+const (
+	growthDeviceRiskEscalationDays   = 3
+	growthDeviceRiskEscalationWindow = 7
+)
+
 type growthQueryRower interface {
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
@@ -220,10 +225,12 @@ func (r *growthRepository) ClaimCheckin(ctx context.Context, claim service.Growt
 	}
 	bypassIdentityRisk := growthRiskBypassesIdentity(riskStatus)
 	if !bypassIdentityRisk {
-		if err := r.checkClaimIdentityLimit(ctx, tx, claim, "ip_hash", claim.IPHash, claim.Config.CheckinMaxAccountsPerIP, "ip_account_limit"); err != nil {
+		// Device reuse is a stronger signal than a shared network. Check it first so
+		// a shared IP cannot mask repeated multi-account use of the same browser.
+		if err := r.checkClaimIdentityLimit(ctx, tx, claim, "device_hash", claim.DeviceHash, claim.Config.CheckinMaxAccountsPerDevice, "device_account_limit"); err != nil {
 			return nil, err
 		}
-		if err := r.checkClaimIdentityLimit(ctx, tx, claim, "device_hash", claim.DeviceHash, claim.Config.CheckinMaxAccountsPerDevice, "device_account_limit"); err != nil {
+		if err := r.checkClaimIdentityLimit(ctx, tx, claim, "ip_hash", claim.IPHash, claim.Config.CheckinMaxAccountsPerIP, "ip_account_limit"); err != nil {
 			return nil, err
 		}
 	}
@@ -336,19 +343,37 @@ INSERT INTO growth_risk_events (user_id, event_type, decision, reason_code, ip_h
 VALUES ($1, 'checkin', $2, $3, $4, $5, $6::jsonb)`, claim.UserID, decision, reason, claim.IPHash, claim.DeviceHash, encoded); err != nil {
 		return
 	}
-	if reason == "ip_account_limit" || reason == "device_account_limit" || reason == "missing_identity_signal" {
+	// A shared IP or a missing client signal can reject today's reward, but is
+	// not enough evidence to classify the account itself. Escalate only repeated
+	// device reuse across distinct dates so retries on one day cannot create a flag.
+	if reason == "device_account_limit" {
+		var riskDays int
+		if err := tx.QueryRowContext(ctx, `
+SELECT COUNT(DISTINCT created_at::date)
+FROM growth_risk_events
+WHERE user_id = $1
+  AND event_type = 'checkin'
+  AND decision = 'denied'
+  AND reason_code = 'device_account_limit'
+  AND created_at >= NOW() - ($2 * INTERVAL '1 day')`, claim.UserID, growthDeviceRiskEscalationWindow).Scan(&riskDays); err != nil {
+			return
+		}
+		if riskDays < growthDeviceRiskEscalationDays {
+			_ = tx.Commit()
+			return
+		}
 		if _, err := tx.ExecContext(ctx, `
 INSERT INTO growth_risk_account_states (user_id, status, reason_code, event_count, first_flagged_at, last_flagged_at, updated_at)
-VALUES ($1, 'flagged', $2, 1, NOW(), NOW(), NOW())
+VALUES ($1, 'flagged', $2, $3, NOW(), NOW(), NOW())
 ON CONFLICT (user_id) DO UPDATE SET
     status = CASE WHEN growth_risk_account_states.status = 'whitelisted' THEN 'whitelisted' ELSE 'flagged' END,
     reason_code = EXCLUDED.reason_code,
-    event_count = growth_risk_account_states.event_count + 1,
+    event_count = GREATEST(growth_risk_account_states.event_count + 1, EXCLUDED.event_count),
     last_flagged_at = NOW(),
     action_note = CASE WHEN growth_risk_account_states.status = 'whitelisted' THEN growth_risk_account_states.action_note ELSE '' END,
     action_by = CASE WHEN growth_risk_account_states.status = 'whitelisted' THEN growth_risk_account_states.action_by ELSE NULL END,
     action_at = CASE WHEN growth_risk_account_states.status = 'whitelisted' THEN growth_risk_account_states.action_at ELSE NULL END,
-    updated_at = NOW()`, claim.UserID, reason); err != nil {
+    updated_at = NOW()`, claim.UserID, reason, riskDays); err != nil {
 			return
 		}
 	}

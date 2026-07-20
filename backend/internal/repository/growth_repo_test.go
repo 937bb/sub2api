@@ -127,9 +127,53 @@ func TestGrowthRepositoryFlagsIdentityRiskAccount(t *testing.T) {
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO growth_risk_events")).
 		WithArgs(int64(42), "denied", "device_account_limit", "ip-hash", "device-hash", sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(DISTINCT created_at::date)")).
+		WithArgs(int64(42), growthDeviceRiskEscalationWindow).
+		WillReturnRows(sqlmock.NewRows([]string{"risk_days"}).AddRow(growthDeviceRiskEscalationDays))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO growth_risk_account_states")).
-		WithArgs(int64(42), "device_account_limit").
+		WithArgs(int64(42), "device_account_limit", growthDeviceRiskEscalationDays).
 		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+
+	repo.recordRiskEvent(context.Background(), service.GrowthCheckinClaim{
+		UserID: 42, IPHash: "ip-hash", DeviceHash: "device-hash",
+	}, "denied", "device_account_limit", map[string]any{"limit": 1})
+
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestGrowthRepositoryDoesNotFlagAccountFromSharedIP(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+	repo := &growthRepository{db: db}
+
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO growth_risk_events")).
+		WithArgs(int64(42), "denied", "ip_account_limit", "ip-hash", "device-hash", sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+
+	repo.recordRiskEvent(context.Background(), service.GrowthCheckinClaim{
+		UserID: 42, IPHash: "ip-hash", DeviceHash: "device-hash",
+	}, "denied", "ip_account_limit", map[string]any{"limit": 2})
+
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestGrowthRepositoryDoesNotFlagAccountFromSingleDayDeviceRisk(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+	repo := &growthRepository{db: db}
+
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO growth_risk_events")).
+		WithArgs(int64(42), "denied", "device_account_limit", "ip-hash", "device-hash", sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(DISTINCT created_at::date)")).
+		WithArgs(int64(42), growthDeviceRiskEscalationWindow).
+		WillReturnRows(sqlmock.NewRows([]string{"risk_days"}).AddRow(growthDeviceRiskEscalationDays - 1))
 	mock.ExpectCommit()
 
 	repo.recordRiskEvent(context.Background(), service.GrowthCheckinClaim{
