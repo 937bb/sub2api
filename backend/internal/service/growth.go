@@ -18,6 +18,14 @@ import (
 const (
 	GrowthRewardModeFixed  = "fixed"
 	GrowthRewardModeRandom = "random"
+
+	GrowthRiskStatusFlagged     = "flagged"
+	GrowthRiskStatusClearedOnce = "cleared_once"
+	GrowthRiskStatusWhitelisted = "whitelisted"
+	GrowthRiskStatusCleared     = "cleared"
+	GrowthRiskActionClear       = "clear"
+	GrowthRiskActionWhitelist   = "whitelist"
+	GrowthRiskActionRemoveWhite = "remove_whitelist"
 )
 
 var (
@@ -29,6 +37,7 @@ var (
 	ErrGrowthRecentSpendTooLow   = infraerrors.Forbidden("GROWTH_RECENT_SPEND_TOO_LOW", "no actual spend was found in the configured activity window")
 	ErrGrowthIdentityRisk        = infraerrors.Forbidden("GROWTH_IDENTITY_RISK", "network or device risk control rejected this check-in")
 	ErrGrowthLeaderboardDisabled = infraerrors.Forbidden("GROWTH_LEADERBOARD_DISABLED", "leaderboard is disabled")
+	ErrGrowthRiskAccountNotFound = infraerrors.NotFound("GROWTH_RISK_ACCOUNT_NOT_FOUND", "growth risk account state not found")
 )
 
 type GrowthStreakReward struct {
@@ -149,6 +158,19 @@ type GrowthRiskEvent struct {
 	CreatedAt  time.Time      `json:"created_at"`
 }
 
+type GrowthRiskAccount struct {
+	UserID        int64      `json:"user_id"`
+	Email         string     `json:"email"`
+	Status        string     `json:"status"`
+	ReasonCode    string     `json:"reason_code"`
+	EventCount    int        `json:"event_count"`
+	FirstFlagged  time.Time  `json:"first_flagged_at"`
+	LastFlagged   time.Time  `json:"last_flagged_at"`
+	ActionNote    string     `json:"action_note"`
+	ActionByEmail string     `json:"action_by_email"`
+	ActionAt      *time.Time `json:"action_at,omitempty"`
+}
+
 type GrowthRepository interface {
 	GetConfig(ctx context.Context) (*GrowthConfig, error)
 	UpdateConfig(ctx context.Context, config GrowthConfig, updatedBy int64) (*GrowthConfig, error)
@@ -158,6 +180,8 @@ type GrowthRepository interface {
 	SettleLeaderboard(ctx context.Context, period string, start, end time.Time, rules []GrowthLeaderboardRewardRule) ([]int64, float64, error)
 	ListRewardLedger(ctx context.Context, page, pageSize int) ([]GrowthRewardLedgerItem, int64, error)
 	ListRiskEvents(ctx context.Context, page, pageSize int) ([]GrowthRiskEvent, int64, error)
+	ListRiskAccounts(ctx context.Context, page, pageSize int) ([]GrowthRiskAccount, int64, error)
+	UpdateRiskAccount(ctx context.Context, userID int64, action, note string, updatedBy int64) error
 }
 
 type GrowthService struct {
@@ -284,6 +308,25 @@ func (s *GrowthService) ListRewardLedger(ctx context.Context, page, pageSize int
 
 func (s *GrowthService) ListRiskEvents(ctx context.Context, page, pageSize int) ([]GrowthRiskEvent, int64, error) {
 	return s.repo.ListRiskEvents(ctx, page, pageSize)
+}
+
+func (s *GrowthService) ListRiskAccounts(ctx context.Context, page, pageSize int) ([]GrowthRiskAccount, int64, error) {
+	return s.repo.ListRiskAccounts(ctx, page, pageSize)
+}
+
+func (s *GrowthService) UpdateRiskAccount(ctx context.Context, userID int64, action, note string, updatedBy int64) error {
+	if userID <= 0 {
+		return infraerrors.BadRequest("GROWTH_RISK_ACTION_INVALID", "user_id must be positive")
+	}
+	action = strings.ToLower(strings.TrimSpace(action))
+	if action != GrowthRiskActionClear && action != GrowthRiskActionWhitelist && action != GrowthRiskActionRemoveWhite {
+		return infraerrors.BadRequest("GROWTH_RISK_ACTION_INVALID", "invalid growth risk action")
+	}
+	note = strings.TrimSpace(note)
+	if len([]rune(note)) > 500 {
+		return infraerrors.BadRequest("GROWTH_RISK_ACTION_INVALID", "note must be at most 500 characters")
+	}
+	return s.repo.UpdateRiskAccount(ctx, userID, action, note, updatedBy)
 }
 
 func ValidateGrowthConfig(config *GrowthConfig) error {

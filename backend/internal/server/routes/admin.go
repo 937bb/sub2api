@@ -128,6 +128,8 @@ func registerGrowthRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAut
 		growth.PUT("/config", gin.HandlerFunc(stepUpAuth), h.Admin.Growth.UpdateConfig)
 		growth.GET("/rewards", h.Admin.Growth.ListRewardLedger)
 		growth.GET("/risk-events", h.Admin.Growth.ListRiskEvents)
+		growth.GET("/risk-accounts", h.Admin.Growth.ListRiskAccounts)
+		growth.POST("/risk-accounts/:user_id/action", gin.HandlerFunc(stepUpAuth), h.Admin.Growth.UpdateRiskAccount)
 		growth.POST("/leaderboard/settle/:period", gin.HandlerFunc(stepUpAuth), h.Admin.Growth.SettleLeaderboard)
 	}
 }

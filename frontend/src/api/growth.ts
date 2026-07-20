@@ -111,6 +111,22 @@ export interface GrowthRiskEvent {
   created_at: string
 }
 
+export type GrowthRiskAccountStatus = 'flagged' | 'cleared_once' | 'whitelisted'
+export type GrowthRiskAccountAction = 'clear' | 'whitelist' | 'remove_whitelist'
+
+export interface GrowthRiskAccount {
+  user_id: number
+  email: string
+  status: GrowthRiskAccountStatus
+  reason_code: string
+  event_count: number
+  first_flagged_at: string
+  last_flagged_at: string
+  action_note: string
+  action_by_email: string
+  action_at?: string
+}
+
 export interface PaginatedGrowthResponse<T> {
   items: T[]
   total: number
@@ -145,6 +161,14 @@ export function listGrowthRewards(page = 1, pageSize = 20): Promise<PaginatedGro
 
 export function listGrowthRiskEvents(page = 1, pageSize = 20): Promise<PaginatedGrowthResponse<GrowthRiskEvent>> {
   return apiClient.get<PaginatedGrowthResponse<GrowthRiskEvent>>('/admin/growth/risk-events', { params: { page, page_size: pageSize } }).then(({ data }) => data)
+}
+
+export function listGrowthRiskAccounts(page = 1, pageSize = 20): Promise<PaginatedGrowthResponse<GrowthRiskAccount>> {
+  return apiClient.get<PaginatedGrowthResponse<GrowthRiskAccount>>('/admin/growth/risk-accounts', { params: { page, page_size: pageSize } }).then(({ data }) => data)
+}
+
+export function updateGrowthRiskAccount(userID: number, action: GrowthRiskAccountAction, note = ''): Promise<{ user_id: number; action: GrowthRiskAccountAction }> {
+  return apiClient.post(`/admin/growth/risk-accounts/${userID}/action`, { action, note }).then(({ data }) => data)
 }
 
 export function settleGrowthLeaderboard(period: GrowthPeriod): Promise<{ period: GrowthPeriod; rewarded_users: number; total_reward: number }> {

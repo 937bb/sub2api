@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
@@ -63,6 +64,42 @@ func (h *GrowthHandler) ListRiskEvents(c *gin.Context) {
 		return
 	}
 	response.Paginated(c, items, total, page, pageSize)
+}
+
+func (h *GrowthHandler) ListRiskAccounts(c *gin.Context) {
+	page, pageSize := response.ParsePagination(c)
+	items, total, err := h.service.ListRiskAccounts(c.Request.Context(), page, pageSize)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Paginated(c, items, total, page, pageSize)
+}
+
+func (h *GrowthHandler) UpdateRiskAccount(c *gin.Context) {
+	userID, err := strconv.ParseInt(c.Param("user_id"), 10, 64)
+	if err != nil || userID <= 0 {
+		response.BadRequest(c, "Invalid user ID")
+		return
+	}
+	var req struct {
+		Action string `json:"action" binding:"required"`
+		Note   string `json:"note"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	subject, ok := middleware.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	if err := h.service.UpdateRiskAccount(c.Request.Context(), userID, req.Action, req.Note, subject.UserID); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"user_id": userID, "action": strings.ToLower(strings.TrimSpace(req.Action))})
 }
 
 func (h *GrowthHandler) SettleLeaderboard(c *gin.Context) {

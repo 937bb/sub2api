@@ -5,9 +5,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import GrowthView from '@/views/admin/GrowthView.vue'
 import type { GrowthConfig } from '@/api/growth'
 
-const { getGrowthConfig, updateGrowthConfig, showSuccess, showError } = vi.hoisted(() => ({
+const { getGrowthConfig, updateGrowthConfig, listGrowthRiskAccounts, updateGrowthRiskAccount, showSuccess, showError } = vi.hoisted(() => ({
   getGrowthConfig: vi.fn(),
   updateGrowthConfig: vi.fn(),
+  listGrowthRiskAccounts: vi.fn(),
+  updateGrowthRiskAccount: vi.fn(),
   showSuccess: vi.fn(),
   showError: vi.fn(),
 }))
@@ -19,8 +21,10 @@ vi.mock('@/api/growth', async () => {
     getGrowthConfig,
     updateGrowthConfig,
     listGrowthRewards: vi.fn(),
+    listGrowthRiskAccounts,
     listGrowthRiskEvents: vi.fn(),
     settleGrowthLeaderboard: vi.fn(),
+    updateGrowthRiskAccount,
   }
 })
 
@@ -52,12 +56,19 @@ const config: GrowthConfig = {
 }
 
 const AppLayoutStub = defineComponent({ template: '<main><slot /></main>' })
+const ConfirmDialogStub = defineComponent({
+  props: ['show'],
+  emits: ['confirm', 'cancel'],
+  template: '<div v-if="show" data-test="risk-confirm"><slot /><button data-test="confirm-risk-action" @click="$emit(\'confirm\')">confirm</button></div>',
+})
 
 describe('GrowthView leaderboard settings', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     getGrowthConfig.mockResolvedValue(structuredClone(config))
     updateGrowthConfig.mockImplementation(async (value: GrowthConfig) => JSON.parse(JSON.stringify(value)) as GrowthConfig)
+    listGrowthRiskAccounts.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20, pages: 1 })
+    updateGrowthRiskAccount.mockResolvedValue({ user_id: 7, action: 'clear' })
   })
 
   it('shows first-place rules for every period and saves the display limit', async () => {
@@ -87,5 +98,29 @@ describe('GrowthView leaderboard settings', () => {
       expect.objectContaining({ period: 'monthly', rank_start: 1, rank_end: 1, enabled: false }),
     ]))
     expect(showSuccess).toHaveBeenCalled()
+  })
+
+  it('lists flagged accounts and clears one with an audited action', async () => {
+    listGrowthRiskAccounts.mockResolvedValue({
+      items: [{ user_id: 7, email: 'flagged@example.com', status: 'flagged', reason_code: 'device_account_limit', event_count: 3, first_flagged_at: '2026-07-19T00:00:00Z', last_flagged_at: '2026-07-20T00:00:00Z', action_note: '', action_by_email: '' }],
+      total: 1, page: 1, page_size: 20, pages: 1,
+    })
+    const wrapper = mount(GrowthView, { global: { stubs: { AppLayout: AppLayoutStub, ConfirmDialog: ConfirmDialogStub } } })
+    await flushPromises()
+
+    const riskTab = wrapper.findAll('button').find((button) => button.text() === 'growth.admin.riskTab')
+    expect(riskTab).toBeDefined()
+    await riskTab!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('flagged@example.com')
+    const clearButton = wrapper.findAll('button').find((button) => button.text().includes('growth.admin.clearRisk'))
+    expect(clearButton).toBeDefined()
+    await clearButton!.trigger('click')
+    await wrapper.get('[data-test="confirm-risk-action"]').trigger('click')
+    await flushPromises()
+
+    expect(updateGrowthRiskAccount).toHaveBeenCalledWith(7, 'clear', '')
+    expect(showSuccess).toHaveBeenCalledWith('growth.admin.riskActionSuccess')
   })
 })

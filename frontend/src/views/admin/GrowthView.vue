@@ -90,23 +90,58 @@
         <Pagination v-if="rewardTotal > 0" :page="rewardPage" :page-size="pageSize" :total="rewardTotal" :show-page-size-selector="false" @update:page="loadRewardPage" />
       </div>
 
-      <div v-else class="card overflow-x-auto">
-        <table class="w-full min-w-[760px] text-left text-sm"><thead class="border-b border-gray-100 bg-gray-50 text-xs uppercase text-gray-500 dark:border-dark-700 dark:bg-dark-800 dark:text-dark-400"><tr><th class="px-4 py-3">{{ t('growth.admin.user') }}</th><th class="px-4 py-3">{{ t('growth.admin.decision') }}</th><th class="px-4 py-3">{{ t('growth.admin.reason') }}</th><th class="px-4 py-3">{{ t('growth.admin.evidence') }}</th><th class="px-4 py-3">{{ t('growth.admin.time') }}</th></tr></thead><tbody><tr v-for="item in riskEvents" :key="item.id" class="border-b border-gray-100 dark:border-dark-800"><td class="px-4 py-3">{{ item.email || `#${item.user_id || '-'}` }}</td><td class="px-4 py-3"><span class="badge badge-error">{{ item.decision }}</span></td><td class="px-4 py-3 font-medium">{{ item.reason_code }}</td><td class="max-w-xs truncate px-4 py-3 text-gray-500" :title="JSON.stringify(item.evidence)">{{ JSON.stringify(item.evidence) }}</td><td class="px-4 py-3 text-gray-500">{{ formatDateTime(item.created_at) }}</td></tr></tbody></table>
-        <Pagination v-if="riskTotal > 0" :page="riskPage" :page-size="pageSize" :total="riskTotal" :show-page-size-selector="false" @update:page="loadRiskPage" />
+      <div v-else class="space-y-4">
+        <div class="inline-flex rounded-md border border-gray-200 bg-white p-1 dark:border-dark-700 dark:bg-dark-900">
+          <button class="rounded px-3 py-1.5 text-sm font-medium" :class="riskView === 'accounts' ? 'bg-primary-600 text-white' : 'text-gray-600 hover:bg-gray-100 dark:text-dark-300 dark:hover:bg-dark-800'" @click="switchRiskView('accounts')">{{ t('growth.admin.riskAccounts') }}</button>
+          <button class="rounded px-3 py-1.5 text-sm font-medium" :class="riskView === 'events' ? 'bg-primary-600 text-white' : 'text-gray-600 hover:bg-gray-100 dark:text-dark-300 dark:hover:bg-dark-800'" @click="switchRiskView('events')">{{ t('growth.admin.riskEvents') }}</button>
+        </div>
+
+        <div v-if="riskView === 'accounts'" class="card overflow-x-auto">
+          <table class="w-full min-w-[980px] text-left text-sm">
+            <thead class="border-b border-gray-100 bg-gray-50 text-xs uppercase text-gray-500 dark:border-dark-700 dark:bg-dark-800 dark:text-dark-400"><tr><th class="px-4 py-3">{{ t('growth.admin.user') }}</th><th class="px-4 py-3">{{ t('growth.admin.status') }}</th><th class="px-4 py-3">{{ t('growth.admin.reason') }}</th><th class="px-4 py-3 text-right">{{ t('growth.admin.riskCount') }}</th><th class="px-4 py-3">{{ t('growth.admin.lastRiskTime') }}</th><th class="px-4 py-3">{{ t('growth.admin.adminAction') }}</th><th class="px-4 py-3 text-right">{{ t('growth.admin.actions') }}</th></tr></thead>
+            <tbody>
+              <tr v-for="item in riskAccounts" :key="item.user_id" class="border-b border-gray-100 dark:border-dark-800">
+                <td class="px-4 py-3 font-medium">{{ item.email || `#${item.user_id}` }}</td>
+                <td class="px-4 py-3"><span class="badge" :class="riskStatusClass(item.status)">{{ riskStatusLabel(item.status) }}</span></td>
+                <td class="px-4 py-3">{{ riskReasonLabel(item.reason_code) }}</td>
+                <td class="px-4 py-3 text-right tabular-nums">{{ item.event_count }}</td>
+                <td class="px-4 py-3 text-gray-500">{{ formatDateTime(item.last_flagged_at) }}</td>
+                <td class="max-w-[220px] px-4 py-3 text-gray-500"><div class="truncate" :title="item.action_note">{{ item.action_note || '-' }}</div><div v-if="item.action_at" class="mt-0.5 text-xs">{{ item.action_by_email || '-' }} | {{ formatDateTime(item.action_at) }}</div></td>
+                <td class="px-4 py-3"><div class="flex justify-end gap-2">
+                  <button v-if="item.status === 'flagged'" class="btn btn-secondary btn-sm" :disabled="riskActionSubmitting" @click="openRiskAction(item, 'clear')"><Icon name="checkCircle" size="sm" />{{ t('growth.admin.clearRisk') }}</button>
+                  <button v-if="item.status !== 'whitelisted'" class="btn btn-primary btn-sm" :disabled="riskActionSubmitting" @click="openRiskAction(item, 'whitelist')"><Icon name="shield" size="sm" />{{ t('growth.admin.addWhitelist') }}</button>
+                  <button v-else class="btn btn-secondary btn-sm" :disabled="riskActionSubmitting" @click="openRiskAction(item, 'remove_whitelist')"><Icon name="ban" size="sm" />{{ t('growth.admin.removeWhitelist') }}</button>
+                </div></td>
+              </tr>
+              <tr v-if="!riskAccounts.length"><td colspan="7" class="px-4 py-12 text-center text-sm text-gray-400 dark:text-dark-500">{{ t('common.noData') }}</td></tr>
+            </tbody>
+          </table>
+          <Pagination v-if="riskAccountTotal > 0" :page="riskAccountPage" :page-size="pageSize" :total="riskAccountTotal" :show-page-size-selector="false" @update:page="loadRiskAccountPage" />
+        </div>
+
+        <div v-else class="card overflow-x-auto">
+          <table class="w-full min-w-[760px] text-left text-sm"><thead class="border-b border-gray-100 bg-gray-50 text-xs uppercase text-gray-500 dark:border-dark-700 dark:bg-dark-800 dark:text-dark-400"><tr><th class="px-4 py-3">{{ t('growth.admin.user') }}</th><th class="px-4 py-3">{{ t('growth.admin.decision') }}</th><th class="px-4 py-3">{{ t('growth.admin.reason') }}</th><th class="px-4 py-3">{{ t('growth.admin.evidence') }}</th><th class="px-4 py-3">{{ t('growth.admin.time') }}</th></tr></thead><tbody><tr v-for="item in riskEvents" :key="item.id" class="border-b border-gray-100 dark:border-dark-800"><td class="px-4 py-3">{{ item.email || `#${item.user_id || '-'}` }}</td><td class="px-4 py-3"><span class="badge badge-error">{{ item.decision }}</span></td><td class="px-4 py-3 font-medium">{{ riskReasonLabel(item.reason_code) }}</td><td class="max-w-xs truncate px-4 py-3 text-gray-500" :title="JSON.stringify(item.evidence)">{{ JSON.stringify(item.evidence) }}</td><td class="px-4 py-3 text-gray-500">{{ formatDateTime(item.created_at) }}</td></tr></tbody></table>
+          <Pagination v-if="riskTotal > 0" :page="riskPage" :page-size="pageSize" :total="riskTotal" :show-page-size-selector="false" @update:page="loadRiskPage" />
+        </div>
       </div>
     </div>
+
+    <ConfirmDialog :show="!!pendingRiskAction" :title="riskActionTitle" :message="riskActionMessage" :confirm-text="t('common.confirm')" :danger="pendingRiskAction?.action === 'remove_whitelist'" @confirm="submitRiskAction" @cancel="closeRiskAction">
+      <div><label class="input-label">{{ t('growth.admin.actionNote') }}</label><input v-model.trim="riskActionNote" class="input" maxlength="500" :placeholder="t('growth.admin.actionNotePlaceholder')" /></div>
+    </ConfirmDialog>
   </AppLayout>
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
 import Toggle from '@/components/common/Toggle.vue'
 import Select from '@/components/common/Select.vue'
 import Pagination from '@/components/common/Pagination.vue'
-import { getGrowthConfig, listGrowthRewards, listGrowthRiskEvents, settleGrowthLeaderboard, updateGrowthConfig, type GrowthConfig, type GrowthLeaderboardRewardRule, type GrowthPeriod, type GrowthRewardLedgerItem, type GrowthRiskEvent } from '@/api/growth'
+import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
+import { getGrowthConfig, listGrowthRewards, listGrowthRiskAccounts, listGrowthRiskEvents, settleGrowthLeaderboard, updateGrowthConfig, updateGrowthRiskAccount, type GrowthConfig, type GrowthLeaderboardRewardRule, type GrowthPeriod, type GrowthRewardLedgerItem, type GrowthRiskAccount, type GrowthRiskAccountAction, type GrowthRiskAccountStatus, type GrowthRiskEvent } from '@/api/growth'
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
 
@@ -116,6 +151,8 @@ const tab = ref<'config' | 'rewards' | 'risk'>('config')
 const config = ref<GrowthConfig | null>(null)
 const rewards = ref<GrowthRewardLedgerItem[]>([])
 const riskEvents = ref<GrowthRiskEvent[]>([])
+const riskAccounts = ref<GrowthRiskAccount[]>([])
+const riskView = ref<'accounts' | 'events'>('accounts')
 const loading = ref(false)
 const saving = ref(false)
 const settling = ref(false)
@@ -124,6 +161,11 @@ const rewardPage = ref(1)
 const rewardTotal = ref(0)
 const riskPage = ref(1)
 const riskTotal = ref(0)
+const riskAccountPage = ref(1)
+const riskAccountTotal = ref(0)
+const riskActionSubmitting = ref(false)
+const riskActionNote = ref('')
+const pendingRiskAction = ref<{ account: GrowthRiskAccount; action: GrowthRiskAccountAction } | null>(null)
 const tabs = [{ value: 'config' as const, label: t('growth.admin.configTab') }, { value: 'rewards' as const, label: t('growth.admin.rewardsTab') }, { value: 'risk' as const, label: t('growth.admin.riskTab') }]
 const rewardModeOptions = [{ value: 'fixed', label: t('growth.admin.fixed') }, { value: 'random', label: t('growth.admin.random') }]
 const periodOptions = [{ value: 'daily' as const, label: t('growth.period.daily') }, { value: 'weekly' as const, label: t('growth.period.weekly') }, { value: 'monthly' as const, label: t('growth.period.monthly') }]
@@ -147,6 +189,9 @@ function ensureFirstPlaceRules(value: GrowthConfig): GrowthConfig {
   return value
 }
 function formatDateTime(value: string): string { return new Date(value).toLocaleString() }
+function riskStatusLabel(status: GrowthRiskAccountStatus): string { return t(`growth.admin.riskStatus.${status}`) }
+function riskStatusClass(status: GrowthRiskAccountStatus): string { return status === 'flagged' ? 'badge-error' : status === 'whitelisted' ? 'badge-success' : 'badge-warning' }
+function riskReasonLabel(reason: string): string { return ['ip_account_limit', 'device_account_limit', 'missing_identity_signal'].includes(reason) ? t(`growth.admin.riskReason.${reason}`) : reason || '-' }
 async function loadConfig(): Promise<void> { config.value = ensureFirstPlaceRules(await getGrowthConfig()) }
 async function loadRewardPage(page: number): Promise<void> {
   const result = await listGrowthRewards(page, pageSize)
@@ -160,11 +205,25 @@ async function loadRiskPage(page: number): Promise<void> {
   riskTotal.value = result.total
   riskEvents.value = result.items
 }
+async function loadRiskAccountPage(page: number): Promise<void> {
+  const result = await listGrowthRiskAccounts(page, pageSize)
+  riskAccountPage.value = result.page
+  riskAccountTotal.value = result.total
+  riskAccounts.value = result.items
+}
+async function switchRiskView(value: 'accounts' | 'events'): Promise<void> {
+  riskView.value = value
+  loading.value = true
+  try { if (value === 'accounts') await loadRiskAccountPage(1); else await loadRiskPage(1) }
+  catch (error) { appStore.showError(extractApiErrorMessage(error, t('growth.loadFailed'))) }
+  finally { loading.value = false }
+}
 async function onTabChange(): Promise<void> {
   loading.value = true
   try {
     if (tab.value === 'config') await loadConfig()
     else if (tab.value === 'rewards') await loadRewardPage(1)
+    else if (riskView.value === 'accounts') await loadRiskAccountPage(1)
     else await loadRiskPage(1)
   } catch (error) { appStore.showError(extractApiErrorMessage(error, t('growth.loadFailed'))) }
   finally { loading.value = false }
@@ -181,6 +240,22 @@ async function settle(period: GrowthPeriod): Promise<void> {
   try { const result = await settleGrowthLeaderboard(period); appStore.showSuccess(t('growth.admin.settleSuccess', { count: result.rewarded_users, amount: result.total_reward.toFixed(2) })) }
   catch (error) { appStore.showError(extractApiErrorMessage(error, t('growth.admin.settleFailed'))) }
   finally { settling.value = false }
+}
+function openRiskAction(account: GrowthRiskAccount, action: GrowthRiskAccountAction): void { pendingRiskAction.value = { account, action }; riskActionNote.value = '' }
+function closeRiskAction(): void { if (!riskActionSubmitting.value) { pendingRiskAction.value = null; riskActionNote.value = '' } }
+const riskActionTitle = computed(() => pendingRiskAction.value ? t(`growth.admin.riskAction.${pendingRiskAction.value.action}Title`) : '')
+const riskActionMessage = computed(() => pendingRiskAction.value ? t(`growth.admin.riskAction.${pendingRiskAction.value.action}Message`, { email: pendingRiskAction.value.account.email || `#${pendingRiskAction.value.account.user_id}` }) : '')
+async function submitRiskAction(): Promise<void> {
+  if (!pendingRiskAction.value || riskActionSubmitting.value) return
+  riskActionSubmitting.value = true
+  try {
+    await updateGrowthRiskAccount(pendingRiskAction.value.account.user_id, pendingRiskAction.value.action, riskActionNote.value)
+    appStore.showSuccess(t('growth.admin.riskActionSuccess'))
+    pendingRiskAction.value = null
+    riskActionNote.value = ''
+    await loadRiskAccountPage(riskAccountPage.value)
+  } catch (error) { appStore.showError(extractApiErrorMessage(error, t('growth.admin.riskActionFailed'))) }
+  finally { riskActionSubmitting.value = false }
 }
 onMounted(() => void onTabChange())
 </script>

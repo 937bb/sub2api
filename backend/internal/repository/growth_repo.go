@@ -29,6 +29,23 @@ func hasGrowthRecentSpend(ctx context.Context, queryer growthQueryRower, userID 
 	return hasRecentSpend, nil
 }
 
+func getGrowthRiskStatus(ctx context.Context, queryer growthQueryRower, userID int64) (string, error) {
+	var status string
+	err := queryer.QueryRowContext(ctx, `SELECT status FROM growth_risk_account_states WHERE user_id = $1 FOR UPDATE`, userID).Scan(&status)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return status, err
+}
+
+func growthRiskBypassesIdentity(status string) bool {
+	return status == service.GrowthRiskStatusClearedOnce || status == service.GrowthRiskStatusWhitelisted
+}
+
+func growthRiskClearsAfterCheckin(status string) bool {
+	return status == service.GrowthRiskStatusFlagged || status == service.GrowthRiskStatusClearedOnce
+}
+
 type growthRepository struct {
 	db *sql.DB
 }
@@ -197,11 +214,18 @@ func (r *growthRepository) ClaimCheckin(ctx context.Context, claim service.Growt
 		return nil, r.denyClaim(ctx, tx, claim, "recent_spend_too_low", map[string]any{"window_days": claim.Config.CheckinRecentSpendDays})
 	}
 
-	if err := r.checkClaimIdentityLimit(ctx, tx, claim, "ip_hash", claim.IPHash, claim.Config.CheckinMaxAccountsPerIP, "ip_account_limit"); err != nil {
+	riskStatus, err := getGrowthRiskStatus(ctx, tx, claim.UserID)
+	if err != nil {
 		return nil, err
 	}
-	if err := r.checkClaimIdentityLimit(ctx, tx, claim, "device_hash", claim.DeviceHash, claim.Config.CheckinMaxAccountsPerDevice, "device_account_limit"); err != nil {
-		return nil, err
+	bypassIdentityRisk := growthRiskBypassesIdentity(riskStatus)
+	if !bypassIdentityRisk {
+		if err := r.checkClaimIdentityLimit(ctx, tx, claim, "ip_hash", claim.IPHash, claim.Config.CheckinMaxAccountsPerIP, "ip_account_limit"); err != nil {
+			return nil, err
+		}
+		if err := r.checkClaimIdentityLimit(ctx, tx, claim, "device_hash", claim.DeviceHash, claim.Config.CheckinMaxAccountsPerDevice, "device_account_limit"); err != nil {
+			return nil, err
+		}
 	}
 
 	streakDays := 1
@@ -245,6 +269,11 @@ VALUES ($1, $2::date, $3, $4, $5, $6, $7, $8, $9)`, claim.UserID, growthDate(cla
 			return nil, service.ErrGrowthAlreadyChecked
 		}
 		return nil, err
+	}
+	if growthRiskClearsAfterCheckin(riskStatus) {
+		if _, err := tx.ExecContext(ctx, `UPDATE growth_risk_account_states SET status = 'cleared', updated_at = NOW() WHERE user_id = $1`, claim.UserID); err != nil {
+			return nil, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
@@ -297,9 +326,33 @@ func (r *growthRepository) recordRiskEvent(ctx context.Context, claim service.Gr
 		evidence = map[string]any{}
 	}
 	encoded, _ := json.Marshal(evidence)
-	_, _ = r.db.ExecContext(ctx, `
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `
 INSERT INTO growth_risk_events (user_id, event_type, decision, reason_code, ip_hash, device_hash, evidence)
-VALUES ($1, 'checkin', $2, $3, $4, $5, $6::jsonb)`, claim.UserID, decision, reason, claim.IPHash, claim.DeviceHash, encoded)
+VALUES ($1, 'checkin', $2, $3, $4, $5, $6::jsonb)`, claim.UserID, decision, reason, claim.IPHash, claim.DeviceHash, encoded); err != nil {
+		return
+	}
+	if reason == "ip_account_limit" || reason == "device_account_limit" || reason == "missing_identity_signal" {
+		if _, err := tx.ExecContext(ctx, `
+INSERT INTO growth_risk_account_states (user_id, status, reason_code, event_count, first_flagged_at, last_flagged_at, updated_at)
+VALUES ($1, 'flagged', $2, 1, NOW(), NOW(), NOW())
+ON CONFLICT (user_id) DO UPDATE SET
+    status = CASE WHEN growth_risk_account_states.status = 'whitelisted' THEN 'whitelisted' ELSE 'flagged' END,
+    reason_code = EXCLUDED.reason_code,
+    event_count = growth_risk_account_states.event_count + 1,
+    last_flagged_at = NOW(),
+    action_note = CASE WHEN growth_risk_account_states.status = 'whitelisted' THEN growth_risk_account_states.action_note ELSE '' END,
+    action_by = CASE WHEN growth_risk_account_states.status = 'whitelisted' THEN growth_risk_account_states.action_by ELSE NULL END,
+    action_at = CASE WHEN growth_risk_account_states.status = 'whitelisted' THEN growth_risk_account_states.action_at ELSE NULL END,
+    updated_at = NOW()`, claim.UserID, reason); err != nil {
+			return
+		}
+	}
+	_ = tx.Commit()
 }
 
 func (r *growthRepository) GetLeaderboard(ctx context.Context, start, end time.Time, currentUserID int64, limit int) (*service.GrowthLeaderboard, error) {
@@ -502,6 +555,83 @@ ORDER BY e.id DESC LIMIT $1 OFFSET $2`, pageSize, (page-1)*pageSize)
 		items = append(items, item)
 	}
 	return items, total, rows.Err()
+}
+
+func (r *growthRepository) ListRiskAccounts(ctx context.Context, page, pageSize int) ([]service.GrowthRiskAccount, int64, error) {
+	page, pageSize = normalizeGrowthPagination(page, pageSize)
+	const activeStatuses = `'flagged', 'cleared_once', 'whitelisted'`
+	var total int64
+	if err := r.db.QueryRowContext(ctx, `
+SELECT COUNT(*) FROM growth_risk_account_states s
+JOIN users u ON u.id = s.user_id AND u.deleted_at IS NULL
+WHERE s.status IN (`+activeStatuses+`)`).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	rows, err := r.db.QueryContext(ctx, `
+SELECT s.user_id, COALESCE(u.email, ''), s.status, s.reason_code, s.event_count,
+       s.first_flagged_at, s.last_flagged_at, s.action_note,
+       COALESCE(admin.email, ''), s.action_at
+FROM growth_risk_account_states s
+JOIN users u ON u.id = s.user_id AND u.deleted_at IS NULL
+LEFT JOIN users admin ON admin.id = s.action_by
+WHERE s.status IN (`+activeStatuses+`)
+ORDER BY CASE s.status WHEN 'flagged' THEN 0 WHEN 'cleared_once' THEN 1 ELSE 2 END,
+         s.last_flagged_at DESC
+LIMIT $1 OFFSET $2`, pageSize, (page-1)*pageSize)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer func() { _ = rows.Close() }()
+	items := make([]service.GrowthRiskAccount, 0, pageSize)
+	for rows.Next() {
+		var item service.GrowthRiskAccount
+		var actionAt sql.NullTime
+		if err := rows.Scan(
+			&item.UserID, &item.Email, &item.Status, &item.ReasonCode, &item.EventCount,
+			&item.FirstFlagged, &item.LastFlagged, &item.ActionNote, &item.ActionByEmail, &actionAt,
+		); err != nil {
+			return nil, 0, err
+		}
+		if actionAt.Valid {
+			value := actionAt.Time
+			item.ActionAt = &value
+		}
+		items = append(items, item)
+	}
+	return items, total, rows.Err()
+}
+
+func (r *growthRepository) UpdateRiskAccount(ctx context.Context, userID int64, action, note string, updatedBy int64) error {
+	status := ""
+	condition := ""
+	switch action {
+	case service.GrowthRiskActionClear:
+		status = service.GrowthRiskStatusClearedOnce
+		condition = `status IN ('flagged', 'cleared_once')`
+	case service.GrowthRiskActionWhitelist:
+		status = service.GrowthRiskStatusWhitelisted
+		condition = `status IN ('flagged', 'cleared_once', 'whitelisted')`
+	case service.GrowthRiskActionRemoveWhite:
+		status = service.GrowthRiskStatusCleared
+		condition = `status = 'whitelisted'`
+	default:
+		return service.ErrGrowthRiskAccountNotFound
+	}
+	result, err := r.db.ExecContext(ctx, `
+UPDATE growth_risk_account_states
+SET status = $1, action_note = $2, action_by = $3, action_at = NOW(), updated_at = NOW()
+WHERE user_id = $4 AND `+condition, status, note, updatedBy, userID)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return service.ErrGrowthRiskAccountNotFound
+	}
+	return nil
 }
 
 func sameDate(a, b time.Time) bool {
