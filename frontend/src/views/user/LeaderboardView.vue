@@ -25,9 +25,9 @@
               <tr><th class="px-5 py-3">#</th><th class="px-5 py-3">{{ t('growth.leaderboard.user') }}</th><th class="px-5 py-3 text-right">{{ t('growth.leaderboard.requests') }}</th><th class="px-5 py-3 text-right">{{ t('growth.leaderboard.spend') }}</th></tr>
             </thead>
             <tbody>
-              <tr v-for="item in data.items" :key="`${item.rank}-${item.display_name}`" class="border-b border-gray-100 last:border-b-0 dark:border-dark-800" :class="item.is_current_user ? 'bg-primary-50/70 dark:bg-primary-900/10' : ''">
+              <tr v-for="item in data.items" :key="item.rank" class="border-b border-gray-100 last:border-b-0 dark:border-dark-800" :class="item.is_current_user ? 'bg-primary-50/70 dark:bg-primary-900/10' : ''">
                 <td class="px-5 py-4"><span class="inline-flex h-7 min-w-7 items-center justify-center rounded-full px-2 text-xs font-semibold" :class="rankClass(item.rank)">{{ item.rank }}</span></td>
-                <td class="break-all px-5 py-4 font-medium text-gray-900 dark:text-white" :title="item.display_name">{{ item.display_name }}</td>
+                <td class="break-all px-5 py-4 font-medium text-gray-900 dark:text-white">{{ maskLeaderboardIdentity(item.display_name, item.rank) }}</td>
                 <td class="px-5 py-4 text-right text-gray-600 dark:text-dark-300">{{ item.requests.toLocaleString() }}</td>
                 <td class="px-5 py-4 text-right font-semibold text-gray-900 dark:text-white">${{ formatAmount(item.actual_cost) }}</td>
               </tr>
@@ -51,6 +51,7 @@ import Icon from '@/components/icons/Icon.vue'
 import { getLeaderboard, type GrowthLeaderboard, type GrowthPeriod } from '@/api/growth'
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
+import { maskLeaderboardIdentity } from '@/utils/leaderboardIdentity'
 
 const { t } = useI18n()
 const appStore = useAppStore()

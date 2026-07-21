@@ -1,7 +1,9 @@
 package service
 
 import (
+	"encoding/json"
 	"math"
+	"strings"
 	"testing"
 	"time"
 )
@@ -123,5 +125,60 @@ func TestGrowthPeriodBounds(t *testing.T) {
 				t.Fatalf("invalid bounds: previous=[%s,%s), current=[%s,%s)", previousStart, previousEnd, currentStart, currentEnd)
 			}
 		})
+	}
+}
+
+func TestGrowthLeaderboardDisplayNameMasksIdentity(t *testing.T) {
+	tests := []struct {
+		name      string
+		value     string
+		rank      int
+		anonymous bool
+		want      string
+	}{
+		{name: "long email", value: "599155162@qq.com", rank: 1, want: "59***62@qq.com"},
+		{name: "short email", value: "ab@example.com", rank: 2, want: "a***b@example.com"},
+		{name: "single character local", value: "a@example.com", rank: 3, want: "a***@example.com"},
+		{name: "unicode local", value: "用户名字@example.com", rank: 4, want: "用***字@example.com"},
+		{name: "already masked", value: "59***62@qq.com", rank: 5, want: "59***62@qq.com"},
+		{name: "invalid identity", value: "User #42", rank: 6, want: "User #6"},
+		{name: "anonymous mode", value: "599155162@qq.com", rank: 7, anonymous: true, want: "Anonymous #7"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := growthLeaderboardDisplayName(test.value, test.rank, test.anonymous); got != test.want {
+				t.Fatalf("growthLeaderboardDisplayName() = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+func TestSanitizeGrowthLeaderboardCoversItemsAndCurrentUser(t *testing.T) {
+	result := &GrowthLeaderboard{
+		Items: []GrowthLeaderboardItem{
+			{Rank: 1, DisplayName: "first@example.com"},
+			{Rank: 2, DisplayName: "second@example.com"},
+		},
+		CurrentUser: &GrowthLeaderboardItem{Rank: 2, DisplayName: "second@example.com"},
+	}
+
+	sanitizeGrowthLeaderboard(result, false)
+
+	if result.Items[0].DisplayName != "fi***st@example.com" {
+		t.Fatalf("first item was not masked: %q", result.Items[0].DisplayName)
+	}
+	if result.Items[1].DisplayName != "se***nd@example.com" {
+		t.Fatalf("second item was not masked: %q", result.Items[1].DisplayName)
+	}
+	if result.CurrentUser == nil || result.CurrentUser.DisplayName != "se***nd@example.com" {
+		t.Fatalf("current user was not masked: %#v", result.CurrentUser)
+	}
+	payload, err := json.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(payload), "first@example.com") || strings.Contains(string(payload), "second@example.com") {
+		t.Fatalf("serialized leaderboard leaked a full email: %s", payload)
 	}
 }

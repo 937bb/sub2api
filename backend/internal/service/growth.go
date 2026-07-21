@@ -268,8 +268,48 @@ func (s *GrowthService) GetLeaderboard(ctx context.Context, period string, curre
 		result.Period = normalized
 		result.PeriodStart = start
 		result.PeriodEnd = end
+		sanitizeGrowthLeaderboard(result, config.LeaderboardAnonymous)
 	}
 	return result, err
+}
+
+func sanitizeGrowthLeaderboard(result *GrowthLeaderboard, anonymous bool) {
+	if result == nil {
+		return
+	}
+	for i := range result.Items {
+		result.Items[i].DisplayName = growthLeaderboardDisplayName(result.Items[i].DisplayName, result.Items[i].Rank, anonymous)
+	}
+	if result.CurrentUser != nil {
+		result.CurrentUser.DisplayName = growthLeaderboardDisplayName(result.CurrentUser.DisplayName, result.CurrentUser.Rank, anonymous)
+	}
+}
+
+func growthLeaderboardDisplayName(value string, rank int, anonymous bool) string {
+	if anonymous {
+		return fmt.Sprintf("Anonymous #%d", rank)
+	}
+
+	local, domain, ok := strings.Cut(strings.TrimSpace(value), "@")
+	if !ok || local == "" || domain == "" {
+		return fmt.Sprintf("User #%d", rank)
+	}
+	if strings.Contains(local, "*") {
+		return local + "@" + domain
+	}
+
+	runes := []rune(local)
+	switch len(runes) {
+	case 1:
+		local = string(runes[0]) + "***"
+	case 2:
+		local = string(runes[0]) + "***" + string(runes[1])
+	case 3, 4:
+		local = string(runes[0]) + "***" + string(runes[len(runes)-1])
+	default:
+		local = string(runes[:2]) + "***" + string(runes[len(runes)-2:])
+	}
+	return local + "@" + domain
 }
 
 func (s *GrowthService) SettlePreviousPeriod(ctx context.Context, period string) (int, float64, error) {
