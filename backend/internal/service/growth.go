@@ -268,28 +268,24 @@ func (s *GrowthService) GetLeaderboard(ctx context.Context, period string, curre
 		result.Period = normalized
 		result.PeriodStart = start
 		result.PeriodEnd = end
-		sanitizeGrowthLeaderboard(result, config.LeaderboardAnonymous)
+		sanitizeGrowthLeaderboard(result)
 	}
 	return result, err
 }
 
-func sanitizeGrowthLeaderboard(result *GrowthLeaderboard, anonymous bool) {
+func sanitizeGrowthLeaderboard(result *GrowthLeaderboard) {
 	if result == nil {
 		return
 	}
 	for i := range result.Items {
-		result.Items[i].DisplayName = growthLeaderboardDisplayName(result.Items[i].DisplayName, result.Items[i].Rank, anonymous)
+		result.Items[i].DisplayName = growthLeaderboardDisplayName(result.Items[i].DisplayName, result.Items[i].Rank)
 	}
 	if result.CurrentUser != nil {
-		result.CurrentUser.DisplayName = growthLeaderboardDisplayName(result.CurrentUser.DisplayName, result.CurrentUser.Rank, anonymous)
+		result.CurrentUser.DisplayName = growthLeaderboardDisplayName(result.CurrentUser.DisplayName, result.CurrentUser.Rank)
 	}
 }
 
-func growthLeaderboardDisplayName(value string, rank int, anonymous bool) string {
-	if anonymous {
-		return fmt.Sprintf("Anonymous #%d", rank)
-	}
-
+func growthLeaderboardDisplayName(value string, rank int) string {
 	local, domain, ok := strings.Cut(strings.TrimSpace(value), "@")
 	if !ok || local == "" || domain == "" {
 		return fmt.Sprintf("User #%d", rank)

@@ -130,11 +130,10 @@ func TestGrowthPeriodBounds(t *testing.T) {
 
 func TestGrowthLeaderboardDisplayNameMasksIdentity(t *testing.T) {
 	tests := []struct {
-		name      string
-		value     string
-		rank      int
-		anonymous bool
-		want      string
+		name  string
+		value string
+		rank  int
+		want  string
 	}{
 		{name: "long email", value: "599155162@qq.com", rank: 1, want: "59***62@qq.com"},
 		{name: "short email", value: "ab@example.com", rank: 2, want: "a***b@example.com"},
@@ -142,12 +141,11 @@ func TestGrowthLeaderboardDisplayNameMasksIdentity(t *testing.T) {
 		{name: "unicode local", value: "用户名字@example.com", rank: 4, want: "用***字@example.com"},
 		{name: "already masked", value: "59***62@qq.com", rank: 5, want: "59***62@qq.com"},
 		{name: "invalid identity", value: "User #42", rank: 6, want: "User #6"},
-		{name: "anonymous mode", value: "599155162@qq.com", rank: 7, anonymous: true, want: "Anonymous #7"},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if got := growthLeaderboardDisplayName(test.value, test.rank, test.anonymous); got != test.want {
+			if got := growthLeaderboardDisplayName(test.value, test.rank); got != test.want {
 				t.Fatalf("growthLeaderboardDisplayName() = %q, want %q", got, test.want)
 			}
 		})
@@ -163,7 +161,7 @@ func TestSanitizeGrowthLeaderboardCoversItemsAndCurrentUser(t *testing.T) {
 		CurrentUser: &GrowthLeaderboardItem{Rank: 2, DisplayName: "second@example.com"},
 	}
 
-	sanitizeGrowthLeaderboard(result, false)
+	sanitizeGrowthLeaderboard(result)
 
 	if result.Items[0].DisplayName != "fi***st@example.com" {
 		t.Fatalf("first item was not masked: %q", result.Items[0].DisplayName)
