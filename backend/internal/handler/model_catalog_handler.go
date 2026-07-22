@@ -67,7 +67,7 @@ func (h *AvailableChannelHandler) ModelCatalog(c *gin.Context) {
 		response.Unauthorized(c, "User not authenticated")
 		return
 	}
-	groups, err := h.apiKeyService.GetAvailableGroups(c.Request.Context(), subject.UserID)
+	groups, err := h.catalogGroups(c, subject.UserID)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -89,6 +89,14 @@ func (h *AvailableChannelHandler) ModelCatalog(c *gin.Context) {
 		"calculated_at": timezone.Now().UTC(),
 		"timezone":      timezone.Name(),
 	})
+}
+
+func (h *AvailableChannelHandler) catalogGroups(c *gin.Context, userID int64) ([]service.Group, error) {
+	role, _ := middleware.GetUserRoleFromContext(c)
+	if role == service.RoleAdmin {
+		return h.apiKeyService.GetAllActiveGroups(c.Request.Context())
+	}
+	return h.apiKeyService.GetAvailableGroups(c.Request.Context(), userID)
 }
 
 func buildModelCatalog(channels []service.AvailableChannel, groups []service.Group, userRates map[int64]float64, now time.Time) []modelCatalogModel {
