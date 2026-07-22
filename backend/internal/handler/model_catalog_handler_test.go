@@ -65,6 +65,7 @@ func TestBuildModelCatalogDeduplicatesModelAcrossChannels(t *testing.T) {
 	channels := []service.AvailableChannel{
 		{Status: service.StatusActive, Groups: []service.AvailableGroupRef{{ID: 1, Platform: "openai"}}, SupportedModels: []service.SupportedModel{{Name: "same", Platform: "openai", Pricing: pricing}}},
 		{Status: service.StatusActive, Groups: []service.AvailableGroupRef{{ID: 1, Platform: "openai"}}, SupportedModels: []service.SupportedModel{{Name: "SAME", Platform: "openai", Pricing: pricing}}},
+		{Status: service.StatusActive, Groups: []service.AvailableGroupRef{{ID: 99, Platform: "openai"}}, SupportedModels: []service.SupportedModel{{Name: "same", Platform: "openai", Pricing: pricing}}},
 	}
 	rows := buildModelCatalog(channels, []service.Group{{ID: 1, Name: "public", Platform: "openai", RateMultiplier: 1}}, nil, time.Now())
 	require.Len(t, rows, 1)

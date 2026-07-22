@@ -58,19 +58,15 @@ type modelCatalogKey struct {
 }
 
 // ModelCatalog returns a model-centric view of the currently accessible
-// catalog. It intentionally uses the same opt-in switch as available channels
-// so deployments do not expose a second public surface unexpectedly.
+// catalog. This endpoint is intentionally independent from the legacy
+// available-channels feature switch: the model marketplace is its own user
+// page and must remain usable when that legacy page is disabled.
 func (h *AvailableChannelHandler) ModelCatalog(c *gin.Context) {
 	subject, ok := middleware.GetAuthSubjectFromContext(c)
 	if !ok {
 		response.Unauthorized(c, "User not authenticated")
 		return
 	}
-	if !h.featureEnabled(c) {
-		response.Success(c, []modelCatalogModel{})
-		return
-	}
-
 	groups, err := h.apiKeyService.GetAvailableGroups(c.Request.Context(), subject.UserID)
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -122,6 +118,7 @@ func buildModelCatalog(channels []service.AvailableChannel, groups []service.Gro
 			}
 
 			seenGroups := make(map[int64]struct{}, len(row.Groups))
+			channelHasAccess := false
 			for _, existing := range row.Groups {
 				seenGroups[existing.ID] = struct{}{}
 			}
@@ -131,12 +128,16 @@ func buildModelCatalog(channels []service.AvailableChannel, groups []service.Gro
 					continue
 				}
 				if _, exists := seenGroups[group.ID]; exists {
+					channelHasAccess = true
 					continue
 				}
 				row.Groups = append(row.Groups, buildModelCatalogGroup(group, userRates, supported.Pricing, now))
 				seenGroups[group.ID] = struct{}{}
+				channelHasAccess = true
 			}
-			row.ChannelCount++
+			if channelHasAccess {
+				row.ChannelCount++
+			}
 		}
 	}
 
