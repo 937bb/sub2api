@@ -72,3 +72,18 @@ func TestBuildModelCatalogDeduplicatesModelAcrossChannels(t *testing.T) {
 	require.Equal(t, 2, rows[0].ChannelCount)
 	require.Len(t, rows[0].Groups, 1)
 }
+
+func TestBuildModelCatalogIncludesPublicGroupFallbackModels(t *testing.T) {
+	rows := buildModelCatalogWithGroupFallbacks(
+		nil,
+		[]service.Group{{ID: 7, Name: "public", Platform: service.PlatformOpenAI, RateMultiplier: 1}},
+		nil,
+		time.Now(),
+		map[int64][]string{7: {"gpt-public"}},
+	)
+
+	require.Len(t, rows, 1)
+	require.Equal(t, "gpt-public", rows[0].Name)
+	require.Len(t, rows[0].Groups, 1)
+	require.Equal(t, int64(7), rows[0].Groups[0].ID)
+}

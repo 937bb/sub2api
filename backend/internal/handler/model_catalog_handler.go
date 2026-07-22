@@ -83,12 +83,46 @@ func (h *AvailableChannelHandler) ModelCatalog(c *gin.Context) {
 		return
 	}
 
-	rows := buildModelCatalog(channels, groups, rates, timezone.Now())
+	rows := buildModelCatalogWithGroupFallbacks(channels, groups, rates, timezone.Now(), h.groupCatalogModels(groups, channels))
 	response.Success(c, gin.H{
 		"models":        rows,
 		"calculated_at": timezone.Now().UTC(),
 		"timezone":      timezone.Name(),
 	})
+}
+
+// groupCatalogModels supplies the model list for groups that do not have a
+// usable channel model row. Public groups predate the channel pricing feature,
+// so their availability is still defined by account mappings and the gateway's
+// default model list.
+func (h *AvailableChannelHandler) groupCatalogModels(groups []service.Group, channels []service.AvailableChannel) map[int64][]string {
+	modelsByGroup := make(map[int64][]string)
+	groupHasChannelModels := make(map[int64]bool)
+	for _, channel := range channels {
+		for _, supported := range channel.SupportedModels {
+			for _, ref := range channel.Groups {
+				if ref.Platform == supported.Platform {
+					groupHasChannelModels[ref.ID] = true
+				}
+			}
+		}
+	}
+
+	for _, group := range groups {
+		if groupHasChannelModels[group.ID] {
+			continue
+		}
+		var models []string
+		if group.CustomModelsListEnabled() {
+			models = append(models, group.ModelsListConfig.Models...)
+		} else {
+			models = service.DefaultModelIDsForPlatform(group.Platform)
+		}
+		if len(models) > 0 {
+			modelsByGroup[group.ID] = models
+		}
+	}
+	return modelsByGroup
 }
 
 func (h *AvailableChannelHandler) catalogGroups(c *gin.Context, userID int64) ([]service.Group, error) {
@@ -100,6 +134,10 @@ func (h *AvailableChannelHandler) catalogGroups(c *gin.Context, userID int64) ([
 }
 
 func buildModelCatalog(channels []service.AvailableChannel, groups []service.Group, userRates map[int64]float64, now time.Time) []modelCatalogModel {
+	return buildModelCatalogWithGroupFallbacks(channels, groups, userRates, now, nil)
+}
+
+func buildModelCatalogWithGroupFallbacks(channels []service.AvailableChannel, groups []service.Group, userRates map[int64]float64, now time.Time, fallbackModels map[int64][]string) []modelCatalogModel {
 	groupByID := make(map[int64]service.Group, len(groups))
 	for _, group := range groups {
 		groupByID[group.ID] = group
@@ -111,6 +149,18 @@ func buildModelCatalog(channels []service.AvailableChannel, groups []service.Gro
 			continue
 		}
 		for _, supported := range channel.SupportedModels {
+			channelHasAccess := false
+			accessibleGroups := make([]service.Group, 0, len(channel.Groups))
+			for _, ref := range channel.Groups {
+				group, ok := groupByID[ref.ID]
+				if !ok || group.Platform != supported.Platform {
+					continue
+				}
+				accessibleGroups = append(accessibleGroups, group)
+			}
+			if len(accessibleGroups) == 0 {
+				continue
+			}
 			key := modelCatalogKey{Platform: supported.Platform, Name: strings.ToLower(supported.Name)}
 			row := rows[key]
 			if row == nil {
@@ -124,17 +174,11 @@ func buildModelCatalog(channels []service.AvailableChannel, groups []service.Gro
 				}
 				rows[key] = row
 			}
-
 			seenGroups := make(map[int64]struct{}, len(row.Groups))
-			channelHasAccess := false
 			for _, existing := range row.Groups {
 				seenGroups[existing.ID] = struct{}{}
 			}
-			for _, ref := range channel.Groups {
-				group, ok := groupByID[ref.ID]
-				if !ok || group.Platform != supported.Platform {
-					continue
-				}
+			for _, group := range accessibleGroups {
 				if _, exists := seenGroups[group.ID]; exists {
 					channelHasAccess = true
 					continue
@@ -145,6 +189,34 @@ func buildModelCatalog(channels []service.AvailableChannel, groups []service.Gro
 			}
 			if channelHasAccess {
 				row.ChannelCount++
+			}
+		}
+	}
+
+	for _, group := range groups {
+		for _, modelName := range fallbackModels[group.ID] {
+			modelName = strings.TrimSpace(modelName)
+			if modelName == "" || group.Platform == "" {
+				continue
+			}
+			key := modelCatalogKey{Platform: group.Platform, Name: strings.ToLower(modelName)}
+			row := rows[key]
+			if row == nil {
+				row = &modelCatalogModel{
+					Name: modelName, Platform: group.Platform, BillingMode: service.BillingModeToken,
+					Groups: make([]modelCatalogGroup, 0),
+				}
+				rows[key] = row
+			}
+			seen := false
+			for _, existing := range row.Groups {
+				if existing.ID == group.ID {
+					seen = true
+					break
+				}
+			}
+			if !seen {
+				row.Groups = append(row.Groups, buildModelCatalogGroup(group, userRates, nil, now))
 			}
 		}
 	}
