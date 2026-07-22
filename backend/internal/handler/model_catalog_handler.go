@@ -37,6 +37,7 @@ type modelCatalogGroup struct {
 	ResolvedRateMultiplier  float64                       `json:"resolved_rate_multiplier"`
 	TimeRateMultiplier      float64                       `json:"time_rate_multiplier"`
 	EffectiveRateMultiplier float64                       `json:"effective_rate_multiplier"`
+	BillingRateMultiplier   float64                       `json:"billing_rate_multiplier"`
 	ImageRateMultiplier     float64                       `json:"image_rate_multiplier"`
 	VideoRateMultiplier     float64                       `json:"video_rate_multiplier"`
 	TimeBillingRules        []modelCatalogTimeBillingRule `json:"time_billing_rules,omitempty"`
@@ -285,7 +286,8 @@ func buildModelCatalogGroup(group service.Group, userRates map[int64]float64, ba
 		SubscriptionType: group.SubscriptionType, IsExclusive: group.IsExclusive,
 		DefaultRateMultiplier: group.RateMultiplier, UserRateMultiplier: userRate,
 		ResolvedRateMultiplier: resolved, TimeRateMultiplier: timeRate,
-		EffectiveRateMultiplier: effective, ImageRateMultiplier: imageRate,
+		EffectiveRateMultiplier: effective, BillingRateMultiplier: priceRate,
+		ImageRateMultiplier: imageRate,
 		VideoRateMultiplier: videoRate, TimeBillingRules: rules,
 		Pricing: scaleCatalogPricing(basePricing, priceRate),
 	}

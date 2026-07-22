@@ -46,6 +46,7 @@ export interface ModelCatalogGroup {
   resolved_rate_multiplier: number
   time_rate_multiplier: number
   effective_rate_multiplier: number
+  billing_rate_multiplier?: number
   image_rate_multiplier: number
   video_rate_multiplier: number
   time_billing_rules?: ModelCatalogTimeRule[]

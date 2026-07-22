@@ -526,21 +526,36 @@ export default {
 
   modelMarketplace: {
     title: '模型广场',
-    description: '查看当前身份可用的模型、分组和实际计费倍率',
-    searchPlaceholder: '搜索模型、平台或分组...',
-    allPlatforms: '全部平台',
-    allGroups: '全部分组',
+    description: '选择计费分组，查看可用模型、当前倍率和实际价格',
+    searchPlaceholder: '搜索当前分组中的模型...',
+    selectGroup: '计费分组',
+    groupModelCount: '{count} 个模型',
+    groupRate: '当前分组倍率',
+    publicGroup: '公开分组',
+    exclusiveGroup: '专属分组',
+    subscriptionGroup: '订阅分组',
     allBillingModes: '全部计费方式',
-    visibleCount: '显示 {count} 个模型',
-    identityHint: '价格已按当前用户专属倍率和当前时段计算',
-    empty: '没有匹配的可用模型',
+    empty: '当前分组没有匹配的模型',
+    noGroups: '当前身份没有可用分组',
     loadFailed: '加载模型广场失败',
-    customRate: '专属',
+    customRate: '专属倍率',
     timeRate: '时段 {value}x',
     notConfigured: '未配置价格',
-    columns: { model: '模型', mode: '计费方式', groups: '可用分组', rate: '实际倍率', price: '当前价格', channels: '渠道数' },
+    perMillion: '/ 1M Token',
+    perRequest: '/ 次',
+    tiered: '{count} 档定价',
+    columns: {
+      model: '模型',
+      mode: '计费方式',
+      rate: '当前倍率',
+      input: '输入',
+      output: '输出',
+      cacheWrite: '缓存写入',
+      cacheRead: '缓存读取',
+      perRequest: '按次价格'
+    },
     billing: { token: '按 Token', perRequest: '按次', image: '按图片', video: '按视频' },
-    sort: { name: '按名称', price: '按价格', rate: '按倍率' }
+    sort: { label: '排序', name: '按名称', price: '按价格' }
   },
 
   affiliate: {

@@ -521,21 +521,36 @@ export default {
 
   modelMarketplace: {
     title: 'Model Marketplace',
-    description: 'See the models, groups, and effective billing rates available to your identity',
-    searchPlaceholder: 'Search models, platforms, or groups...',
-    allPlatforms: 'All platforms',
-    allGroups: 'All groups',
+    description: 'Select a billing group to compare available models, effective rates, and prices',
+    searchPlaceholder: 'Search models in this group...',
+    selectGroup: 'Billing group',
+    groupModelCount: '{count} models',
+    groupRate: 'Current group rate',
+    publicGroup: 'Public group',
+    exclusiveGroup: 'Exclusive group',
+    subscriptionGroup: 'Subscription group',
     allBillingModes: 'All billing modes',
-    visibleCount: '{count} models shown',
-    identityHint: 'Prices include your custom rate and the current time window',
-    empty: 'No matching models available',
+    empty: 'No matching models in this group',
+    noGroups: 'No groups are available to this identity',
     loadFailed: 'Failed to load model marketplace',
-    customRate: 'Custom',
+    customRate: 'Custom rate',
     timeRate: 'Time {value}x',
     notConfigured: 'Price not configured',
-    columns: { model: 'Model', mode: 'Billing', groups: 'Available groups', rate: 'Effective rate', price: 'Current price', channels: 'Channels' },
+    perMillion: '/ 1M tokens',
+    perRequest: '/ request',
+    tiered: '{count} pricing tiers',
+    columns: {
+      model: 'Model',
+      mode: 'Billing',
+      rate: 'Current rate',
+      input: 'Input',
+      output: 'Output',
+      cacheWrite: 'Cache write',
+      cacheRead: 'Cache read',
+      perRequest: 'Per request'
+    },
     billing: { token: 'Per token', perRequest: 'Per request', image: 'Per image', video: 'Per video' },
-    sort: { name: 'Name', price: 'Price', rate: 'Rate' }
+    sort: { label: 'Sort', name: 'Name', price: 'Price' }
   },
 
   affiliate: {
