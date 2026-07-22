@@ -519,6 +519,25 @@ export default {
     }
   },
 
+  modelMarketplace: {
+    title: 'Model Marketplace',
+    description: 'See the models, groups, and effective billing rates available to your identity',
+    searchPlaceholder: 'Search models, platforms, or groups...',
+    allPlatforms: 'All platforms',
+    allGroups: 'All groups',
+    allBillingModes: 'All billing modes',
+    visibleCount: '{count} models shown',
+    identityHint: 'Prices include your custom rate and the current time window',
+    empty: 'No matching models available',
+    loadFailed: 'Failed to load model marketplace',
+    customRate: 'Custom',
+    timeRate: 'Time {value}x',
+    notConfigured: 'Price not configured',
+    columns: { model: 'Model', mode: 'Billing', groups: 'Available groups', rate: 'Effective rate', price: 'Current price', channels: 'Channels' },
+    billing: { token: 'Per token', perRequest: 'Per request', image: 'Per image', video: 'Per video' },
+    sort: { name: 'Name', price: 'Price', rate: 'Rate' }
+  },
+
   affiliate: {
     title: 'Affiliate Rebates',
     description: 'Invite new users and convert your rebate quota into account balance',

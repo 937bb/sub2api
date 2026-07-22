@@ -524,6 +524,25 @@ export default {
     }
   },
 
+  modelMarketplace: {
+    title: '模型广场',
+    description: '查看当前身份可用的模型、分组和实际计费倍率',
+    searchPlaceholder: '搜索模型、平台或分组...',
+    allPlatforms: '全部平台',
+    allGroups: '全部分组',
+    allBillingModes: '全部计费方式',
+    visibleCount: '显示 {count} 个模型',
+    identityHint: '价格已按当前用户专属倍率和当前时段计算',
+    empty: '没有匹配的可用模型',
+    loadFailed: '加载模型广场失败',
+    customRate: '专属',
+    timeRate: '时段 {value}x',
+    notConfigured: '未配置价格',
+    columns: { model: '模型', mode: '计费方式', groups: '可用分组', rate: '实际倍率', price: '当前价格', channels: '渠道数' },
+    billing: { token: '按 Token', perRequest: '按次', image: '按图片', video: '按视频' },
+    sort: { name: '按名称', price: '按价格', rate: '按倍率' }
+  },
+
   affiliate: {
     title: '邀请返利',
     description: '邀请新用户注册，并将返利额度转入账户余额',
