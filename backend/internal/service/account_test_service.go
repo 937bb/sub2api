@@ -1926,7 +1926,17 @@ func (s *AccountTestService) RunTestBackground(ctx context.Context, accountID in
 	ginCtx, _ := gin.CreateTestContext(w)
 	ginCtx.Request = (&http.Request{}).WithContext(ctx)
 
-	testErr := s.TestAccountConnection(ginCtx, accountID, modelID, "", AccountTestModeDefault)
+	mode := AccountTestModeDefault
+	if acct, err := s.accountRepo.GetByID(ctx, accountID); err == nil && acct != nil {
+		for _, g := range acct.Groups {
+			if IsQuotaBypassEligible(acct, g) {
+				mode = AccountTestModeQuotaBypass
+				break
+			}
+		}
+	}
+
+	testErr := s.TestAccountConnection(ginCtx, accountID, modelID, "", mode)
 
 	finishedAt := time.Now()
 	body := w.Body.String()
