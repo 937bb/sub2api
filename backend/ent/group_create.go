@@ -711,6 +711,20 @@ func (_c *GroupCreate) SetReasoningEffortMappings(v []domain.ReasoningEffortMapp
 	return _c
 }
 
+// SetQuotaBypassEnabled sets the "quota_bypass_enabled" field.
+func (_c *GroupCreate) SetQuotaBypassEnabled(v bool) *GroupCreate {
+	_c.mutation.SetQuotaBypassEnabled(v)
+	return _c
+}
+
+// SetNillableQuotaBypassEnabled sets the "quota_bypass_enabled" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableQuotaBypassEnabled(v *bool) *GroupCreate {
+	if v != nil {
+		_c.SetQuotaBypassEnabled(*v)
+	}
+	return _c
+}
+
 // AddAPIKeyIDs adds the "api_keys" edge to the APIKey entity by IDs.
 func (_c *GroupCreate) AddAPIKeyIDs(ids ...int64) *GroupCreate {
 	_c.mutation.AddAPIKeyIDs(ids...)
@@ -980,6 +994,10 @@ func (_c *GroupCreate) defaults() error {
 		v := group.DefaultReasoningEffortMappings
 		_c.mutation.SetReasoningEffortMappings(v)
 	}
+	if _, ok := _c.mutation.QuotaBypassEnabled(); !ok {
+		v := group.DefaultQuotaBypassEnabled
+		_c.mutation.SetQuotaBypassEnabled(v)
+	}
 	return nil
 }
 
@@ -1134,6 +1152,9 @@ func (_c *GroupCreate) check() error {
 	}
 	if _, ok := _c.mutation.ReasoningEffortMappings(); !ok {
 		return &ValidationError{Name: "reasoning_effort_mappings", err: errors.New(`ent: missing required field "Group.reasoning_effort_mappings"`)}
+	}
+	if _, ok := _c.mutation.QuotaBypassEnabled(); !ok {
+		return &ValidationError{Name: "quota_bypass_enabled", err: errors.New(`ent: missing required field "Group.quota_bypass_enabled"`)}
 	}
 	return nil
 }
@@ -1365,6 +1386,10 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.ReasoningEffortMappings(); ok {
 		_spec.SetField(group.FieldReasoningEffortMappings, field.TypeJSON, value)
 		_node.ReasoningEffortMappings = value
+	}
+	if value, ok := _c.mutation.QuotaBypassEnabled(); ok {
+		_spec.SetField(group.FieldQuotaBypassEnabled, field.TypeBool, value)
+		_node.QuotaBypassEnabled = value
 	}
 	if nodes := _c.mutation.APIKeysIDs(); len(nodes) > 0 {
 		edge := &sqlgraph.EdgeSpec{
@@ -2323,6 +2348,18 @@ func (u *GroupUpsert) SetReasoningEffortMappings(v []domain.ReasoningEffortMappi
 // UpdateReasoningEffortMappings sets the "reasoning_effort_mappings" field to the value that was provided on create.
 func (u *GroupUpsert) UpdateReasoningEffortMappings() *GroupUpsert {
 	u.SetExcluded(group.FieldReasoningEffortMappings)
+	return u
+}
+
+// SetQuotaBypassEnabled sets the "quota_bypass_enabled" field.
+func (u *GroupUpsert) SetQuotaBypassEnabled(v bool) *GroupUpsert {
+	u.Set(group.FieldQuotaBypassEnabled, v)
+	return u
+}
+
+// UpdateQuotaBypassEnabled sets the "quota_bypass_enabled" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateQuotaBypassEnabled() *GroupUpsert {
+	u.SetExcluded(group.FieldQuotaBypassEnabled)
 	return u
 }
 
@@ -3309,6 +3346,20 @@ func (u *GroupUpsertOne) SetReasoningEffortMappings(v []domain.ReasoningEffortMa
 func (u *GroupUpsertOne) UpdateReasoningEffortMappings() *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateReasoningEffortMappings()
+	})
+}
+
+// SetQuotaBypassEnabled sets the "quota_bypass_enabled" field.
+func (u *GroupUpsertOne) SetQuotaBypassEnabled(v bool) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetQuotaBypassEnabled(v)
+	})
+}
+
+// UpdateQuotaBypassEnabled sets the "quota_bypass_enabled" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateQuotaBypassEnabled() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateQuotaBypassEnabled()
 	})
 }
 
@@ -4461,6 +4512,20 @@ func (u *GroupUpsertBulk) SetReasoningEffortMappings(v []domain.ReasoningEffortM
 func (u *GroupUpsertBulk) UpdateReasoningEffortMappings() *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateReasoningEffortMappings()
+	})
+}
+
+// SetQuotaBypassEnabled sets the "quota_bypass_enabled" field.
+func (u *GroupUpsertBulk) SetQuotaBypassEnabled(v bool) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetQuotaBypassEnabled(v)
+	})
+}
+
+// UpdateQuotaBypassEnabled sets the "quota_bypass_enabled" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateQuotaBypassEnabled() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateQuotaBypassEnabled()
 	})
 }
 

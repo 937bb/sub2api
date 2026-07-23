@@ -1048,6 +1048,10 @@ export default {
         hint: '仅当上游明确返回 prompt too long 时才会触发，留空表示不兜底',
         noFallback: '不兜底'
       },
+      quotaBypass: {
+        enable: '启用 Codex 超额绕过',
+        tooltip: '为该分组下的 OpenAI OAuth 账号注入 function_call_output 以绕过 Codex 配额限制。可在账号 extra 中通过 quota_bypass_enabled 单独覆盖。'
+      },
       copyAccounts: {
         title: '从分组复制账号',
         tooltip: '选择一个或多个相同平台的分组，创建后会自动将这些分组的所有账号绑定到新分组（去重）。',

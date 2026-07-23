@@ -98,6 +98,9 @@ type Group struct {
 	// ReasoningEffortMappings rewrites explicit request values before applying the ceiling.
 	ReasoningEffortMappings []ReasoningEffortMapping
 
+	// QuotaBypassEnabled 是否为该分组下的 Team 账号启用 Codex 超额绕过（仅 OpenAI 平台有效）
+	QuotaBypassEnabled bool
+
 	CreatedAt time.Time
 	UpdatedAt time.Time
 

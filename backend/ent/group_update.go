@@ -939,6 +939,20 @@ func (_u *GroupUpdate) AppendReasoningEffortMappings(v []domain.ReasoningEffortM
 	return _u
 }
 
+// SetQuotaBypassEnabled sets the "quota_bypass_enabled" field.
+func (_u *GroupUpdate) SetQuotaBypassEnabled(v bool) *GroupUpdate {
+	_u.mutation.SetQuotaBypassEnabled(v)
+	return _u
+}
+
+// SetNillableQuotaBypassEnabled sets the "quota_bypass_enabled" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableQuotaBypassEnabled(v *bool) *GroupUpdate {
+	if v != nil {
+		_u.SetQuotaBypassEnabled(*v)
+	}
+	return _u
+}
+
 // AddAPIKeyIDs adds the "api_keys" edge to the APIKey entity by IDs.
 func (_u *GroupUpdate) AddAPIKeyIDs(ids ...int64) *GroupUpdate {
 	_u.mutation.AddAPIKeyIDs(ids...)
@@ -1526,6 +1540,9 @@ func (_u *GroupUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 		_spec.AddModifier(func(u *sql.UpdateBuilder) {
 			sqljson.Append(u, group.FieldReasoningEffortMappings, value)
 		})
+	}
+	if value, ok := _u.mutation.QuotaBypassEnabled(); ok {
+		_spec.SetField(group.FieldQuotaBypassEnabled, field.TypeBool, value)
 	}
 	if _u.mutation.APIKeysCleared() {
 		edge := &sqlgraph.EdgeSpec{
@@ -2744,6 +2761,20 @@ func (_u *GroupUpdateOne) AppendReasoningEffortMappings(v []domain.ReasoningEffo
 	return _u
 }
 
+// SetQuotaBypassEnabled sets the "quota_bypass_enabled" field.
+func (_u *GroupUpdateOne) SetQuotaBypassEnabled(v bool) *GroupUpdateOne {
+	_u.mutation.SetQuotaBypassEnabled(v)
+	return _u
+}
+
+// SetNillableQuotaBypassEnabled sets the "quota_bypass_enabled" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableQuotaBypassEnabled(v *bool) *GroupUpdateOne {
+	if v != nil {
+		_u.SetQuotaBypassEnabled(*v)
+	}
+	return _u
+}
+
 // AddAPIKeyIDs adds the "api_keys" edge to the APIKey entity by IDs.
 func (_u *GroupUpdateOne) AddAPIKeyIDs(ids ...int64) *GroupUpdateOne {
 	_u.mutation.AddAPIKeyIDs(ids...)
@@ -3361,6 +3392,9 @@ func (_u *GroupUpdateOne) sqlSave(ctx context.Context) (_node *Group, err error)
 		_spec.AddModifier(func(u *sql.UpdateBuilder) {
 			sqljson.Append(u, group.FieldReasoningEffortMappings, value)
 		})
+	}
+	if value, ok := _u.mutation.QuotaBypassEnabled(); ok {
+		_spec.SetField(group.FieldQuotaBypassEnabled, field.TypeBool, value)
 	}
 	if _u.mutation.APIKeysCleared() {
 		edge := &sqlgraph.EdgeSpec{

@@ -118,6 +118,8 @@ const (
 	FieldMaxReasoningEffort = "max_reasoning_effort"
 	// FieldReasoningEffortMappings holds the string denoting the reasoning_effort_mappings field in the database.
 	FieldReasoningEffortMappings = "reasoning_effort_mappings"
+	// FieldQuotaBypassEnabled holds the string denoting the quota_bypass_enabled field in the database.
+	FieldQuotaBypassEnabled = "quota_bypass_enabled"
 	// EdgeAPIKeys holds the string denoting the api_keys edge name in mutations.
 	EdgeAPIKeys = "api_keys"
 	// EdgeRedeemCodes holds the string denoting the redeem_codes edge name in mutations.
@@ -244,6 +246,7 @@ var Columns = []string{
 	FieldRpmLimit,
 	FieldMaxReasoningEffort,
 	FieldReasoningEffortMappings,
+	FieldQuotaBypassEnabled,
 }
 
 var (
@@ -361,6 +364,8 @@ var (
 	MaxReasoningEffortValidator func(string) error
 	// DefaultReasoningEffortMappings holds the default value on creation for the "reasoning_effort_mappings" field.
 	DefaultReasoningEffortMappings []domain.ReasoningEffortMapping
+	// DefaultQuotaBypassEnabled holds the default value on creation for the "quota_bypass_enabled" field.
+	DefaultQuotaBypassEnabled bool
 )
 
 // OrderOption defines the ordering options for the Group queries.
@@ -599,6 +604,11 @@ func ByRpmLimit(opts ...sql.OrderTermOption) OrderOption {
 // ByMaxReasoningEffort orders the results by the max_reasoning_effort field.
 func ByMaxReasoningEffort(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldMaxReasoningEffort, opts...).ToFunc()
+}
+
+// ByQuotaBypassEnabled orders the results by the quota_bypass_enabled field.
+func ByQuotaBypassEnabled(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldQuotaBypassEnabled, opts...).ToFunc()
 }
 
 // ByAPIKeysCount orders the results by api_keys count.

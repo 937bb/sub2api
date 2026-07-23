@@ -1074,6 +1074,21 @@ func (h *AccountHandler) Test(c *gin.Context) {
 	}
 }
 
+// TestQuotaBypass is a convenience endpoint that runs the connection test with
+// quota-bypass mode pre-selected.
+// POST /api/v1/admin/accounts/:id/test-quota-bypass
+func (h *AccountHandler) TestQuotaBypass(c *gin.Context) {
+	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid account ID")
+		return
+	}
+
+	if err := h.accountTestService.TestAccountConnection(c, accountID, "", "", service.AccountTestModeQuotaBypass); err != nil {
+		return
+	}
+}
+
 // RecoverState handles unified recovery of recoverable account runtime state.
 // POST /api/v1/admin/accounts/:id/recover-state
 func (h *AccountHandler) RecoverState(c *gin.Context) {

@@ -313,6 +313,7 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		RPMLimit:                        input.RPMLimit,
 		MaxReasoningEffort:              maxReasoningEffort,
 		ReasoningEffortMappings:         reasoningEffortMappings,
+		QuotaBypassEnabled:              input.QuotaBypassEnabled,
 	}
 	sanitizeGroupMessagesDispatchFields(group)
 	sanitizeGroupReasoningEffortPolicy(group)
@@ -643,6 +644,9 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 			return nil, infraerrors.Newf(http.StatusBadRequest, "INVALID_REASONING_EFFORT_MAPPING", "%v", err)
 		}
 		group.ReasoningEffortMappings = reasoningEffortMappings
+	}
+	if input.QuotaBypassEnabled != nil {
+		group.QuotaBypassEnabled = *input.QuotaBypassEnabled
 	}
 	sanitizeGroupMessagesDispatchFields(group)
 	sanitizeGroupReasoningEffortPolicy(group)

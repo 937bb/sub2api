@@ -231,6 +231,10 @@ func (Group) Fields() []ent.Field {
 			Default([]domain.ReasoningEffortMapping{}).
 			SchemaType(map[string]string{dialect.Postgres: "jsonb"}).
 			Comment("OpenAI reasoning effort 自定义精确映射；先映射再应用上限"),
+
+		field.Bool("quota_bypass_enabled").
+			Default(false).
+			Comment("是否为该分组下的账号启用 Codex 超额绕过"),
 	}
 }
 

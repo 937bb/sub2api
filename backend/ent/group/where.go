@@ -285,6 +285,11 @@ func MaxReasoningEffort(v string) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldMaxReasoningEffort, v))
 }
 
+// QuotaBypassEnabled applies equality check predicate on the "quota_bypass_enabled" field. It's identical to QuotaBypassEnabledEQ.
+func QuotaBypassEnabled(v bool) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldQuotaBypassEnabled, v))
+}
+
 // CreatedAtEQ applies the EQ predicate on the "created_at" field.
 func CreatedAtEQ(v time.Time) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldCreatedAt, v))
@@ -2173,6 +2178,16 @@ func MaxReasoningEffortEqualFold(v string) predicate.Group {
 // MaxReasoningEffortContainsFold applies the ContainsFold predicate on the "max_reasoning_effort" field.
 func MaxReasoningEffortContainsFold(v string) predicate.Group {
 	return predicate.Group(sql.FieldContainsFold(FieldMaxReasoningEffort, v))
+}
+
+// QuotaBypassEnabledEQ applies the EQ predicate on the "quota_bypass_enabled" field.
+func QuotaBypassEnabledEQ(v bool) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldQuotaBypassEnabled, v))
+}
+
+// QuotaBypassEnabledNEQ applies the NEQ predicate on the "quota_bypass_enabled" field.
+func QuotaBypassEnabledNEQ(v bool) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldQuotaBypassEnabled, v))
 }
 
 // HasAPIKeys applies the HasEdge predicate on the "api_keys" edge.

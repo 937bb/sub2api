@@ -596,6 +596,14 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	payload := createOpenAITestPayload(upstreamTestModelID, isOAuth)
 	payloadBytes, _ := json.Marshal(payload)
 
+	if mode == AccountTestModeQuotaBypass {
+		if injected, ok := InjectFunctionCallOutputSuffix(payloadBytes); ok {
+			payloadBytes = injected
+		} else {
+			return s.sendErrorAndEnd(c, "Failed to inject quota bypass payload")
+		}
+	}
+
 	// Send test_start event once. A task-invalid Agent Identity response may
 	// restart this probe after registering a replacement task.
 	if !agentIdentityTaskRecoveryWasTried(ctx) {

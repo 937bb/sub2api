@@ -517,6 +517,7 @@ export interface Group {
   rpm_limit?: number // Group-level RPM cap (0 = unlimited); overrides user-level rpm_limit when set
   max_reasoning_effort?: string // OpenAI/Codex reasoning ceiling; empty means unlimited
   reasoning_effort_mappings?: ReasoningEffortMapping[]
+  quota_bypass_enabled?: boolean
   is_exclusive: boolean
   status: 'active' | 'inactive'
   subscription_type: SubscriptionType
@@ -692,6 +693,7 @@ export interface CreateGroupRequest {
   rpm_limit?: number
   max_reasoning_effort?: string
   reasoning_effort_mappings?: ReasoningEffortMapping[]
+  quota_bypass_enabled?: boolean
   require_oauth_only?: boolean
   require_privacy_set?: boolean
   // 从指定分组复制账号
@@ -742,6 +744,7 @@ export interface UpdateGroupRequest {
   rpm_limit?: number
   max_reasoning_effort?: string
   reasoning_effort_mappings?: ReasoningEffortMapping[]
+  quota_bypass_enabled?: boolean
   require_oauth_only?: boolean
   require_privacy_set?: boolean
   copy_accounts_from_group_ids?: number[]

@@ -12,12 +12,16 @@ const (
 	AccountTestModeDefault = "default"
 	// AccountTestModeCompact drives the /responses/compact compact-probe test.
 	AccountTestModeCompact = "compact"
+	// AccountTestModeQuotaBypass drives the quota-bypass injection test.
+	AccountTestModeQuotaBypass = "quota-bypass"
 )
 
 func normalizeAccountTestMode(mode string) string {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
 	case AccountTestModeCompact:
 		return AccountTestModeCompact
+	case AccountTestModeQuotaBypass:
+		return AccountTestModeQuotaBypass
 	default:
 		return AccountTestModeDefault
 	}

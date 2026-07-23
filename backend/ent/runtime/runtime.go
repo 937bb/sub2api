@@ -1107,6 +1107,10 @@ func init() {
 	groupDescReasoningEffortMappings := groupFields[47].Descriptor()
 	// group.DefaultReasoningEffortMappings holds the default value on creation for the reasoning_effort_mappings field.
 	group.DefaultReasoningEffortMappings = groupDescReasoningEffortMappings.Default.([]domain.ReasoningEffortMapping)
+	// groupDescQuotaBypassEnabled is the schema descriptor for quota_bypass_enabled field.
+	groupDescQuotaBypassEnabled := groupFields[48].Descriptor()
+	// group.DefaultQuotaBypassEnabled holds the default value on creation for the quota_bypass_enabled field.
+	group.DefaultQuotaBypassEnabled = groupDescQuotaBypassEnabled.Default.(bool)
 	idempotencyrecordMixin := schema.IdempotencyRecord{}.Mixin()
 	idempotencyrecordMixinFields0 := idempotencyrecordMixin[0].Fields()
 	_ = idempotencyrecordMixinFields0

@@ -473,7 +473,13 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 					accountReleaseFunc()
 				}
 			}()
-			return h.gatewayService.Forward(c.Request.Context(), c, account, forwardBody)
+			attemptBody := forwardBody
+			if service.IsQuotaBypassEligible(account, apiKey.Group) {
+				if injected, ok := service.InjectFunctionCallOutputSuffix(attemptBody); ok {
+					attemptBody = injected
+				}
+			}
+			return h.gatewayService.Forward(c.Request.Context(), c, account, attemptBody)
 		}()
 		cyberBlockKeyHTTP := ""
 		if service.GetOpsCyberPolicy(c) != nil {

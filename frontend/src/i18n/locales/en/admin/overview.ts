@@ -1050,6 +1050,10 @@ export default {
         hint: 'Triggered only when upstream explicitly returns prompt too long. Leave empty to disable fallback.',
         noFallback: 'No Fallback'
       },
+      quotaBypass: {
+        enable: 'Enable Codex Quota Bypass',
+        tooltip: 'Inject function_call_output for OpenAI OAuth accounts in this group to bypass Codex quota limits. Can be overridden per account via extra.quota_bypass_enabled.'
+      },
       copyAccounts: {
         title: 'Copy Accounts from Groups',
         tooltip: 'Select one or more groups of the same platform. After creation, all accounts from these groups will be automatically bound to the new group (deduplicated).',
