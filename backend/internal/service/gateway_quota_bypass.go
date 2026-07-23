@@ -22,6 +22,25 @@ func IsQuotaBypassEligible(account *Account, group *Group) bool {
 	return group != nil && group.QuotaBypassEnabled
 }
 
+// IsAccountQuotaBypassEligible checks whether an account is bypass-eligible
+// via its own Extra flag or any of its attached Groups.
+func IsAccountQuotaBypassEligible(account *Account) bool {
+	if account == nil || account.Platform != PlatformOpenAI || account.Type != AccountTypeOAuth {
+		return false
+	}
+	if account.Extra != nil {
+		if v, ok := account.Extra["quota_bypass_enabled"].(bool); ok {
+			return v
+		}
+	}
+	for _, g := range account.Groups {
+		if g != nil && g.QuotaBypassEnabled {
+			return true
+		}
+	}
+	return false
+}
+
 // InjectFunctionCallOutputSuffix appends a synthetic function_call +
 // function_call_output pair to the Responses API "input" array, which
 // causes the upstream to skip its first-stage quota check.

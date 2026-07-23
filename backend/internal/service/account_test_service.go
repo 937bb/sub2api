@@ -685,7 +685,7 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 			return s.testOpenAIAccountConnection(c, account, modelID, prompt, mode)
 		}
 		if resp.StatusCode == http.StatusTooManyRequests {
-			s.reconcileOpenAI429State(ctx, account, resp.Header, body)
+			s.reconcileOpenAI429State(ctx, account, resp.Header, body, mode == AccountTestModeQuotaBypass)
 		}
 		// 401 Unauthorized: 标记账号为永久错误
 		if resp.StatusCode == http.StatusUnauthorized && s.accountRepo != nil {
@@ -1016,12 +1016,16 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 	return nil
 }
 
-func (s *AccountTestService) reconcileOpenAI429State(ctx context.Context, account *Account, headers http.Header, body []byte) {
+func (s *AccountTestService) reconcileOpenAI429State(ctx context.Context, account *Account, headers http.Header, body []byte, skipRateLimit ...bool) {
 	if s == nil || s.accountRepo == nil || account == nil {
 		return
 	}
 
 	persistOpenAI429PlanType(ctx, s.accountRepo, account, body)
+
+	if len(skipRateLimit) > 0 && skipRateLimit[0] {
+		return
+	}
 
 	var resetAt *time.Time
 	if calculated := calculateOpenAI429ResetTime(headers); calculated != nil {
