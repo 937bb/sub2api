@@ -615,13 +615,13 @@
             class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-700"
           />
           <label for="create-quota-bypass-enabled" class="text-sm font-medium text-gray-700 dark:text-gray-300">
-            {{ t("admin.groups.form.quotaBypass.enable") }}
+            {{ t("admin.groups.quotaBypass.enable") }}
           </label>
           <div class="group relative inline-flex">
             <Icon name="questionCircle" size="sm" class="text-gray-400 cursor-help" />
             <div class="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 -translate-x-1/2 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100">
               <div class="w-64 rounded-lg bg-gray-900 px-3 py-2 text-xs text-white shadow-lg dark:bg-gray-700">
-                {{ t("admin.groups.form.quotaBypass.tooltip") }}
+                {{ t("admin.groups.quotaBypass.tooltip") }}
               </div>
             </div>
           </div>
@@ -2154,13 +2154,13 @@
             class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-700"
           />
           <label for="edit-quota-bypass-enabled" class="text-sm font-medium text-gray-700 dark:text-gray-300">
-            {{ t("admin.groups.form.quotaBypass.enable") }}
+            {{ t("admin.groups.quotaBypass.enable") }}
           </label>
           <div class="group relative inline-flex">
             <Icon name="questionCircle" size="sm" class="text-gray-400 cursor-help" />
             <div class="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 -translate-x-1/2 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100">
               <div class="w-64 rounded-lg bg-gray-900 px-3 py-2 text-xs text-white shadow-lg dark:bg-gray-700">
-                {{ t("admin.groups.form.quotaBypass.tooltip") }}
+                {{ t("admin.groups.quotaBypass.tooltip") }}
               </div>
             </div>
           </div>
