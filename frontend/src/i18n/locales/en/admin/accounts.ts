@@ -531,6 +531,8 @@ export default {
         testModeDefault: 'Default request',
         testModeCompact: 'Compact probe',
         testModeQuotaBypass: 'Quota bypass test',
+        quotaBypass: 'Codex Quota Bypass',
+        quotaBypassDesc: 'When enabled, this account will automatically attempt to bypass OpenAI Codex quota limits when hitting 429 rate limits.',
         modelRestrictionDisabledByPassthrough: 'Automatic passthrough is enabled: model whitelist/mapping will not take effect.',
       },
       grok: {
