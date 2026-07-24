@@ -486,16 +486,6 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 		}
 	}
 
-	// Bypass 账号遇到 429 是上游速率限制（非配额），走同账号重试而非直接报错。
-	if resp.StatusCode == http.StatusTooManyRequests && IsAccountQuotaBypassEligible(account) {
-		return nil, &UpstreamFailoverError{
-			StatusCode:             resp.StatusCode,
-			ResponseBody:           body,
-			ResponseHeaders:        resp.Header.Clone(),
-			RetryableOnSameAccount: true,
-		}
-	}
-
 	MarkResponseCommitted(c)
 
 	// Return appropriate error response

@@ -413,7 +413,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 				s.handleOpenAIAccountUpstreamError(ctx, account, accountStatus, resp.Header, upstreamMessage, canonicalModel)
 			}
 			if turn == 1 && !wroteDownstream && shouldFailover {
-				retryable := statusCode == http.StatusTooManyRequests && IsAccountQuotaBypassEligible(account)
+				retryable := false
 				return nil, newOpenAIUpstreamFailoverError(statusCode, resp.Header, upstreamMessage, errMessage, retryable)
 			}
 			upstreamEventErr = errors.New(errMessage)

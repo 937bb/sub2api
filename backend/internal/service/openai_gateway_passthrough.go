@@ -594,9 +594,6 @@ func (s *OpenAIGatewayService) handleFailoverErrorResponsePassthrough(
 		UpstreamResponseBody: upstreamDetail,
 	})
 	retryable := !shouldDisable && account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode)
-	if !retryable && resp.StatusCode == http.StatusTooManyRequests && IsAccountQuotaBypassEligible(account) {
-		retryable = true
-	}
 	return newOpenAIUpstreamFailoverError(
 		resp.StatusCode,
 		resp.Header,
