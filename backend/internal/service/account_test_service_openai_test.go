@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -71,6 +72,8 @@ type openAIAccountTestRepo struct {
 	clearedErrorID     int64
 	setErrorID         int64
 	setErrorMsg        string
+	setErrorCtxErr     error
+	setErrorErr        error
 }
 
 func (r *openAIAccountTestRepo) UpdateExtra(_ context.Context, _ int64, updates map[string]any) error {
@@ -95,10 +98,11 @@ func (r *openAIAccountTestRepo) ClearError(_ context.Context, id int64) error {
 	return nil
 }
 
-func (r *openAIAccountTestRepo) SetError(_ context.Context, id int64, errorMsg string) error {
+func (r *openAIAccountTestRepo) SetError(ctx context.Context, id int64, errorMsg string) error {
 	r.setErrorID = id
 	r.setErrorMsg = errorMsg
-	return nil
+	r.setErrorCtxErr = ctx.Err()
+	return r.setErrorErr
 }
 
 func TestAccountTestService_OpenAISuccessPersistsSnapshotFromHeaders(t *testing.T) {
@@ -426,7 +430,7 @@ func TestAccountTestService_OpenAI401SetsPermanentErrorOnly(t *testing.T) {
 
 func TestAccountTestService_OpenAIQuotaBypass403SetsPermanentError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	ctx, _ := newTestContext()
+	ctx, recorder := newTestContext()
 
 	resp := newJSONResponse(http.StatusForbidden, `{"error":{"message":"account is not active"}}`)
 	repo := &openAIAccountTestRepo{}
@@ -437,6 +441,7 @@ func TestAccountTestService_OpenAIQuotaBypass403SetsPermanentError(t *testing.T)
 		Platform:    PlatformOpenAI,
 		Type:        AccountTypeOAuth,
 		Status:      StatusActive,
+		Schedulable: true,
 		Concurrency: 1,
 		Credentials: map[string]any{"access_token": "test-token"},
 	}
@@ -446,14 +451,74 @@ func TestAccountTestService_OpenAIQuotaBypass403SetsPermanentError(t *testing.T)
 	require.Equal(t, account.ID, repo.setErrorID)
 	require.Contains(t, repo.setErrorMsg, "Access forbidden (403)")
 	require.Contains(t, repo.setErrorMsg, "account is not active")
+	require.Equal(t, StatusError, account.Status)
+	require.False(t, account.Schedulable)
 	require.Zero(t, repo.rateLimitedID)
 	require.Zero(t, repo.clearedErrorID)
+	require.Contains(t, recorder.Body.String(), `"type":"account_status"`)
+	require.Contains(t, recorder.Body.String(), `"status":"error"`)
 
 	require.Len(t, upstream.requests, 1)
 	body, readErr := io.ReadAll(upstream.requests[0].Body)
 	require.NoError(t, readErr)
 	require.Equal(t, "function_call", gjson.GetBytes(body, "input.1.type").String())
 	require.Equal(t, "function_call_output", gjson.GetBytes(body, "input.2.type").String())
+}
+
+func TestAccountTestService_OpenAI403PersistsStatusAfterRequestCancellation(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, recorder := newTestContext()
+	requestCtx, cancel := context.WithCancel(ctx.Request.Context())
+	cancel()
+	ctx.Request = ctx.Request.WithContext(requestCtx)
+
+	resp := newJSONResponse(http.StatusForbidden, `{"error":{"message":"account is not active"}}`)
+	repo := &openAIAccountTestRepo{}
+	upstream := &queuedHTTPUpstream{responses: []*http.Response{resp}}
+	svc := &AccountTestService{accountRepo: repo, httpUpstream: upstream}
+	account := &Account{
+		ID:          82,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Credentials: map[string]any{"access_token": "test-token"},
+	}
+
+	err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.4", "", AccountTestModeQuotaBypass)
+	require.Error(t, err)
+	require.Equal(t, account.ID, repo.setErrorID)
+	require.NoError(t, repo.setErrorCtxErr)
+	require.Equal(t, StatusError, account.Status)
+	require.False(t, account.Schedulable)
+	require.Contains(t, recorder.Body.String(), `"type":"account_status"`)
+}
+
+func TestAccountTestService_OpenAI403ReportsStatusPersistenceFailure(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, recorder := newTestContext()
+
+	resp := newJSONResponse(http.StatusForbidden, `{"error":{"message":"account is not active"}}`)
+	repo := &openAIAccountTestRepo{setErrorErr: errors.New("database unavailable")}
+	upstream := &queuedHTTPUpstream{responses: []*http.Response{resp}}
+	svc := &AccountTestService{accountRepo: repo, httpUpstream: upstream}
+	account := &Account{
+		ID:          83,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Credentials: map[string]any{"access_token": "test-token"},
+	}
+
+	err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.4", "", AccountTestModeQuotaBypass)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "failed to update account status: database unavailable")
+	require.Equal(t, StatusActive, account.Status)
+	require.True(t, account.Schedulable)
+	require.NotContains(t, recorder.Body.String(), `"type":"account_status"`)
 }
 
 func TestAccountTestService_OpenAIAPIKeyResponsesUsesCodexProbeHeaders(t *testing.T) {

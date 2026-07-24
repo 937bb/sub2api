@@ -274,6 +274,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'close'): void
+  (e: 'status-changed', status: Account['status']): void
 }>()
 
 const terminalRef = ref<HTMLElement | null>(null)
@@ -499,6 +500,7 @@ const handleEvent = (event: {
   model?: string
   success?: boolean
   error?: string
+  status?: string
   image_url?: string
   mime_type?: string
 }) => {
@@ -538,6 +540,12 @@ const handleEvent = (event: {
     case 'status':
       if (event.text) {
         addLine(event.text, 'text-cyan-300')
+      }
+      break
+
+    case 'account_status':
+      if (event.status === 'active' || event.status === 'inactive' || event.status === 'error') {
+        emit('status-changed', event.status)
       }
       break
 

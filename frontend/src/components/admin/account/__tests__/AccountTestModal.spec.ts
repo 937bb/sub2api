@@ -216,4 +216,34 @@ describe('AccountTestModal', () => {
       mode: 'compact'
     })
   })
+
+  it('emits a persisted account status change immediately', async () => {
+    getAvailableModels.mockResolvedValue([
+      { id: 'gpt-5.6-sol', display_name: 'GPT-5.6 Sol' }
+    ])
+    global.fetch = vi.fn().mockResolvedValue(
+      createStreamResponse([
+        'data: {"type":"test_start","model":"gpt-5.6-sol"}\n',
+        'data: {"type":"account_status","status":"error"}\n',
+        'data: {"type":"error","error":"API returned 403"}\n'
+      ])
+    ) as any
+
+    const wrapper = mountModal({
+      id: 42,
+      name: 'OpenAI OAuth',
+      platform: 'openai',
+      type: 'oauth',
+      status: 'active'
+    })
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+
+    ;(wrapper.vm as any).selectedModelId = 'gpt-5.6-sol'
+    ;(wrapper.vm as any).testMode = 'quota-bypass'
+    await (wrapper.vm as any).startTest()
+    await flushPromises()
+
+    expect(wrapper.emitted('status-changed')).toEqual([['error']])
+  })
 })

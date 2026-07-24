@@ -56,6 +56,7 @@ const (
 	defaultGeminiTextTestPrompt  = "hi"
 	defaultGeminiImageTestPrompt = "Generate a cute orange cat astronaut sticker on a clean pastel background."
 	defaultOpenAIImageTestPrompt = "Generate a cute orange cat astronaut sticker on a clean pastel background."
+	accountTestStateWriteTimeout = 5 * time.Second
 )
 
 // isOpenAIImageModel checks if the model is an OpenAI image generation model (e.g. gpt-image-2).
@@ -116,6 +117,28 @@ func (s *AccountTestService) validateUpstreamBaseURL(raw string) (string, error)
 		return "", err
 	}
 	return normalized, nil
+}
+
+func (s *AccountTestService) persistAccountTestError(ctx context.Context, account *Account, errorMsg string) error {
+	if s == nil || s.accountRepo == nil || account == nil {
+		return errors.New("account repository is not configured")
+	}
+
+	// The SSE client may disconnect as soon as it receives the upstream error.
+	// Keep the short state write alive so a canceled request cannot leave the
+	// account schedulable after an authentication failure.
+	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), accountTestStateWriteTimeout)
+	defer cancel()
+
+	if err := s.accountRepo.SetError(persistCtx, account.ID, errorMsg); err != nil {
+		log.Printf("Account test failed to persist error status for account %d: %v", account.ID, err)
+		return err
+	}
+
+	account.Status = StatusError
+	account.ErrorMessage = errorMsg
+	account.Schedulable = false
+	return nil
 }
 
 // generateSessionString generates a Claude Code style session string.
@@ -687,13 +710,18 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 		if resp.StatusCode == http.StatusTooManyRequests {
 			s.reconcileOpenAI429State(ctx, account, resp.Header, body)
 		}
-		if s.accountRepo != nil {
-			switch resp.StatusCode {
-			case http.StatusUnauthorized:
-				_ = s.accountRepo.SetError(ctx, account.ID, fmt.Sprintf("Authentication failed (401): %s", string(body)))
-			case http.StatusForbidden:
-				_ = s.accountRepo.SetError(ctx, account.ID, fmt.Sprintf("Access forbidden (403): %s", string(body)))
+		var accountErrorMsg string
+		switch resp.StatusCode {
+		case http.StatusUnauthorized:
+			accountErrorMsg = fmt.Sprintf("Authentication failed (401): %s", string(body))
+		case http.StatusForbidden:
+			accountErrorMsg = fmt.Sprintf("Access forbidden (403): %s", string(body))
+		}
+		if accountErrorMsg != "" {
+			if err := s.persistAccountTestError(ctx, account, accountErrorMsg); err != nil {
+				return s.sendErrorAndEnd(c, fmt.Sprintf("API returned %d: %s (failed to update account status: %s)", resp.StatusCode, string(body), err.Error()))
 			}
+			s.sendEvent(c, TestEvent{Type: "account_status", Status: StatusError})
 		}
 		return s.sendErrorAndEnd(c, fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body)))
 	}
