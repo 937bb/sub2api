@@ -904,11 +904,19 @@ func filterSchedulerAccountGroups(accountGroups []service.AccountGroup) []servic
 		if ag.GroupID <= 0 {
 			continue
 		}
+		var minGroup *service.Group
+		if ag.Group != nil {
+			minGroup = &service.Group{
+				ID:                 ag.Group.ID,
+				QuotaBypassEnabled: ag.Group.QuotaBypassEnabled,
+			}
+		}
 		filtered = append(filtered, service.AccountGroup{
 			AccountID: ag.AccountID,
 			GroupID:   ag.GroupID,
 			Priority:  ag.Priority,
 			CreatedAt: ag.CreatedAt,
+			Group:     minGroup,
 		})
 	}
 	if len(filtered) == 0 {

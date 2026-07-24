@@ -38,6 +38,11 @@ func IsAccountQuotaBypassEligible(account *Account) bool {
 			return true
 		}
 	}
+	for _, ag := range account.AccountGroups {
+		if ag.Group != nil && ag.Group.QuotaBypassEnabled {
+			return true
+		}
+	}
 	return false
 }
 

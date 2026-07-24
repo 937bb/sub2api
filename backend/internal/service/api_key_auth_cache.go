@@ -113,6 +113,8 @@ type APIKeyAuthGroupSnapshot struct {
 	PeakStart          string  `json:"peak_start"`
 	PeakEnd            string  `json:"peak_end"`
 	PeakRateMultiplier float64 `json:"peak_rate_multiplier"`
+
+	QuotaBypassEnabled bool `json:"quota_bypass_enabled"`
 }
 
 // APIKeyAuthCacheEntry 缓存条目，支持负缓存
