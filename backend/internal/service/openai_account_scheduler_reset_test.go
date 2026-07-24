@@ -99,6 +99,22 @@ func TestOpenAIQuotaHeadroomFactor_PrimaryUsedPercent(t *testing.T) {
 	require.InDelta(t, 0.8, openAIQuotaHeadroomFactor(account, now), 0.0001)
 }
 
+func TestOpenAIQuotaHeadroomFactor_QuotaBypassIgnoresExhaustedSnapshot(t *testing.T) {
+	now := time.Date(2026, 3, 11, 10, 0, 0, 0, time.UTC)
+	account := &Account{
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Extra: map[string]any{
+			"quota_bypass_enabled":       true,
+			"codex_primary_used_percent": 100.0,
+			"codex_primary_reset_at":     now.Add(24 * time.Hour).Format(time.RFC3339),
+			"codex_usage_updated_at":     now.Add(-time.Minute).Format(time.RFC3339),
+		},
+	}
+
+	require.Equal(t, 1.0, openAIQuotaHeadroomFactor(account, now))
+}
+
 func TestOpenAIQuotaHeadroomFactor_PrimaryMissingIsNeutral(t *testing.T) {
 	now := time.Date(2026, 3, 11, 10, 0, 0, 0, time.UTC)
 	account := &Account{

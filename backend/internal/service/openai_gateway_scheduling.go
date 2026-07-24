@@ -375,6 +375,13 @@ func shouldAutoPauseOpenAIAccountByQuota(ctx context.Context, account *Account) 
 	if account == nil || !account.IsOpenAI() {
 		return false, openAIQuotaAutoPauseDecision{}
 	}
+	// Quota-bypass OAuth accounts can continue serving after the normal Codex
+	// usage window is exhausted. The usage snapshot is only a pre-request
+	// scheduling signal; a real upstream 429 is still handled by the standard
+	// runtime and persisted rate-limit paths before this guard is reached again.
+	if IsAccountQuotaBypassEligible(account) {
+		return false, openAIQuotaAutoPauseDecision{}
+	}
 	// Per-account explicit-disable flags must take precedence over the global default.
 	// Without these, leaving the account threshold blank means "use global default",
 	// so an admin has no way to exempt a single account from auto-pause once a global

@@ -1576,6 +1576,96 @@ func TestOpenAIGatewayService_SelectAccountForModelWithExclusions_UsesGlobalDefa
 	require.Equal(t, int64(35402), account.ID)
 }
 
+func TestShouldAutoPauseOpenAIAccountByQuota_QuotaBypassSkipsSnapshotPause(t *testing.T) {
+	ctx := withOpenAIQuotaAutoPauseSettings(context.Background(), OpsOpenAIAccountQuotaAutoPauseSettings{DefaultThreshold7d: 0.95})
+	usage := map[string]any{
+		"codex_7d_used_percent":  100.0,
+		"codex_7d_reset_at":      time.Now().Add(24 * time.Hour).Format(time.RFC3339),
+		"codex_usage_updated_at": time.Now().Format(time.RFC3339),
+	}
+
+	tests := []struct {
+		name    string
+		account *Account
+		paused  bool
+	}{
+		{
+			name: "account override",
+			account: &Account{
+				Platform: PlatformOpenAI,
+				Type:     AccountTypeOAuth,
+				Extra: map[string]any{
+					"quota_bypass_enabled":   true,
+					"codex_7d_used_percent":  usage["codex_7d_used_percent"],
+					"codex_7d_reset_at":      usage["codex_7d_reset_at"],
+					"codex_usage_updated_at": usage["codex_usage_updated_at"],
+				},
+			},
+		},
+		{
+			name: "attached bypass group",
+			account: &Account{
+				Platform: PlatformOpenAI,
+				Type:     AccountTypeOAuth,
+				Extra:    usage,
+				AccountGroups: []AccountGroup{{
+					Group: &Group{QuotaBypassEnabled: true},
+				}},
+			},
+		},
+		{
+			name: "explicit account disable overrides group",
+			account: &Account{
+				Platform: PlatformOpenAI,
+				Type:     AccountTypeOAuth,
+				Extra: map[string]any{
+					"quota_bypass_enabled":   false,
+					"codex_7d_used_percent":  usage["codex_7d_used_percent"],
+					"codex_7d_reset_at":      usage["codex_7d_reset_at"],
+					"codex_usage_updated_at": usage["codex_usage_updated_at"],
+				},
+				AccountGroups: []AccountGroup{{
+					Group: &Group{QuotaBypassEnabled: true},
+				}},
+			},
+			paused: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			paused, _ := shouldAutoPauseOpenAIAccountByQuota(ctx, tt.account)
+			require.Equal(t, tt.paused, paused)
+		})
+	}
+}
+
+func TestOpenAIGatewayService_SelectAccountForModelWithExclusions_QuotaBypassStillHonorsReal429Cooldown(t *testing.T) {
+	ctx := withOpenAIQuotaAutoPauseSettings(context.Background(), OpsOpenAIAccountQuotaAutoPauseSettings{DefaultThreshold7d: 0.95})
+	rateLimitResetAt := time.Now().Add(time.Hour)
+	primary := Account{
+		ID:               35411,
+		Platform:         PlatformOpenAI,
+		Type:             AccountTypeOAuth,
+		Status:           StatusActive,
+		Schedulable:      true,
+		Concurrency:      1,
+		Priority:         0,
+		RateLimitResetAt: &rateLimitResetAt,
+		Extra: map[string]any{
+			"quota_bypass_enabled":  true,
+			"codex_7d_used_percent": 100.0,
+		},
+	}
+	secondary := Account{ID: 35412, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 5}
+	svc := &OpenAIGatewayService{accountRepo: schedulerTestOpenAIAccountRepo{accounts: []Account{primary, secondary}}, cfg: &config.Config{}}
+
+	account, err := svc.SelectAccountForModelWithExclusions(ctx, nil, "", "gpt-5.1", nil)
+	require.NoError(t, err)
+	require.NotNil(t, account)
+	require.Equal(t, int64(35412), account.ID)
+}
+
 // Regression: a per-account explicit-disable flag exempts the account from auto-pause
 // even when a global default threshold is set. Without this, "leave threshold blank"
 // silently falls back to global default and admins have no way to whitelist a single

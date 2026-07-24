@@ -252,7 +252,7 @@ func TestAccountTestService_OpenAIStreamEOFBeforeCompletedFails(t *testing.T) {
 	require.NotContains(t, recorder.Body.String(), `"success":true`)
 }
 
-func TestAccountTestService_OpenAI429PersistsSnapshotAndRateLimitState(t *testing.T) {
+func TestAccountTestService_OpenAIQuotaBypass429PersistsSnapshotAndRateLimitState(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, _ := newTestContext()
 
@@ -274,9 +274,10 @@ func TestAccountTestService_OpenAI429PersistsSnapshotAndRateLimitState(t *testin
 		Status:      StatusError,
 		Concurrency: 1,
 		Credentials: map[string]any{"access_token": "test-token"},
+		Extra:       map[string]any{"quota_bypass_enabled": true},
 	}
 
-	err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.4", "", "")
+	err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.4", "", AccountTestModeQuotaBypass)
 	require.Error(t, err)
 	require.NotEmpty(t, repo.updatedExtra)
 	require.Equal(t, 100.0, repo.updatedExtra["codex_5h_used_percent"])
