@@ -7,9 +7,10 @@ import (
 	"github.com/tidwall/sjson"
 )
 
-// IsQuotaBypassEligible reports whether an account+group combination qualifies
-// for Codex quota bypass injection.
-// Priority: account Extra["quota_bypass_enabled"] > group QuotaBypassEnabled.
+// IsQuotaBypassEligible reports whether an account qualifies for Codex quota
+// bypass injection through an account override, the request group, or any group
+// attached to the scheduled account.
+// Priority: account Extra["quota_bypass_enabled"] > group settings.
 func IsQuotaBypassEligible(account *Account, group *Group) bool {
 	if account == nil || account.Platform != PlatformOpenAI || account.Type != AccountTypeOAuth {
 		return false
@@ -19,19 +20,8 @@ func IsQuotaBypassEligible(account *Account, group *Group) bool {
 			return v
 		}
 	}
-	return group != nil && group.QuotaBypassEnabled
-}
-
-// IsAccountQuotaBypassEligible checks whether an account is bypass-eligible
-// via its own Extra flag or any of its attached Groups.
-func IsAccountQuotaBypassEligible(account *Account) bool {
-	if account == nil || account.Platform != PlatformOpenAI || account.Type != AccountTypeOAuth {
-		return false
-	}
-	if account.Extra != nil {
-		if v, ok := account.Extra["quota_bypass_enabled"].(bool); ok {
-			return v
-		}
+	if group != nil && group.QuotaBypassEnabled {
+		return true
 	}
 	for _, g := range account.Groups {
 		if g != nil && g.QuotaBypassEnabled {
@@ -44,6 +34,22 @@ func IsAccountQuotaBypassEligible(account *Account) bool {
 		}
 	}
 	return false
+}
+
+// IsAccountQuotaBypassEligible checks whether an account is bypass-eligible
+// via its own Extra flag or any of its attached Groups.
+func IsAccountQuotaBypassEligible(account *Account) bool {
+	return IsQuotaBypassEligible(account, nil)
+}
+
+func applyOpenAIWSQuotaBypass(payload []byte, hooks *OpenAIWSIngressHooks) []byte {
+	if hooks == nil || !hooks.QuotaBypassEnabled {
+		return payload
+	}
+	if injected, ok := InjectFunctionCallOutputSuffix(payload); ok {
+		return injected
+	}
+	return payload
 }
 
 // InjectFunctionCallOutputSuffix appends a synthetic function_call +

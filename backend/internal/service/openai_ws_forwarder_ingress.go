@@ -480,7 +480,6 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				c.Request.Header.Set(openAIWSTurnStateHeader, turnState)
 			}
 			bridgePayloadRaw := currentBridgePayload.payloadRaw
-			bridgePayloadBytes := currentBridgePayload.payloadBytes
 			needsBridgeReplay := currentBridgePayload.previousResponseID != "" || openAIWSRawPayloadHasToolCallOutput(currentBridgePayload.payloadRaw)
 			turnReplayInput, turnReplayInputExists, replayInputErr := buildOpenAIWSReplayInputSequence(
 				bridgeReplayInput,
@@ -501,7 +500,6 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					return fmt.Errorf("set websocket http bridge replay input: %w", setInputErr)
 				}
 				bridgePayloadRaw = updatedPayload
-				bridgePayloadBytes = len(updatedPayload)
 				logOpenAIWSModeInfo(
 					"ingress_ws_http_bridge_replay_input account_id=%d turn=%d input_items=%d previous_response_id_present=%v has_tool_output=%v",
 					account.ID,
@@ -511,6 +509,8 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					openAIWSRawPayloadHasToolCallOutput(currentBridgePayload.payloadRaw),
 				)
 			}
+			bridgePayloadRaw = applyOpenAIWSQuotaBypass(bridgePayloadRaw, hooks)
+			bridgePayloadBytes := len(bridgePayloadRaw)
 			grokCacheIdentity := ""
 			if account.Platform == PlatformGrok {
 				grokCacheIdentity, err = resolveGrokWSCacheIdentity(c, account, grokCacheSeedPayload, currentBridgePayload.originalModel)
@@ -1021,7 +1021,6 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	currentImageBillingModel := firstPayload.imageBillingModel
 	currentImageSizeTier := firstPayload.imageSizeTier
 	currentImageInputSize := firstPayload.imageInputSize
-	currentPayloadBytes := firstPayload.payloadBytes
 	isStrictAffinityTurn := func(payload []byte) bool {
 		if !storeDisabled {
 			return false
@@ -1170,7 +1169,6 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			truncateOpenAIWSLogValue(connID, openAIWSIDValueMaxLen),
 		)
 		currentPayload = updatedWithInput
-		currentPayloadBytes = len(updatedWithInput)
 		resetSessionLease(true)
 		skipBeforeTurn = true
 		return true
@@ -1246,7 +1244,6 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				)
 			} else {
 				currentPayload = updatedPayload
-				currentPayloadBytes = len(updatedPayload)
 				currentPreviousResponseID = expectedPrev
 				logOpenAIWSModeInfo(
 					"ingress_ws_function_call_output_prev_infer account_id=%d turn=%d conn_id=%s action=set_previous_response_id previous_response_id=%s",
@@ -1349,7 +1346,6 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 						)
 					} else {
 						currentPayload = updatedWithInput
-						currentPayloadBytes = len(updatedWithInput)
 						logOpenAIWSModeInfo(
 							"ingress_ws_prev_response_strict_eval account_id=%d turn=%d conn_id=%s action=drop_previous_response_id_full_create reason=%s previous_response_id=%s expected_previous_response_id=%s has_function_call_output=%v",
 							account.ID,
@@ -1444,7 +1440,6 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 								)
 								turnPrevRecoveryTried = true
 								currentPayload = updatedWithInput
-								currentPayloadBytes = len(updatedWithInput)
 								resetSessionLease(true)
 								skipBeforeTurn = true
 								continue
@@ -1509,7 +1504,8 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			)
 		}
 
-		result, relayErr := sendAndRelay(turn, sessionLease, currentPayload, currentPayloadBytes, currentOriginalModel, currentImageBillingModel, currentImageSizeTier, currentImageInputSize)
+		upstreamPayload := applyOpenAIWSQuotaBypass(currentPayload, hooks)
+		result, relayErr := sendAndRelay(turn, sessionLease, upstreamPayload, len(upstreamPayload), currentOriginalModel, currentImageBillingModel, currentImageSizeTier, currentImageInputSize)
 		if relayErr != nil {
 			lastTurnClean = false
 			if recoverIngressPrevResponseNotFound(relayErr, turn, connID) {
@@ -1642,7 +1638,6 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		currentImageBillingModel = nextPayload.imageBillingModel
 		currentImageSizeTier = nextPayload.imageSizeTier
 		currentImageInputSize = nextPayload.imageInputSize
-		currentPayloadBytes = nextPayload.payloadBytes
 		storeDisabled = s.isOpenAIWSStoreDisabledInRequestRaw(currentPayload, account)
 		if !storeDisabled {
 			unpinSessionConn(sessionConnID)

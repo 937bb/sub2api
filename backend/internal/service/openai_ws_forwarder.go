@@ -214,9 +214,11 @@ type OpenAIWSIngressHooks struct {
 	MaxReasoningEffort string
 	// ReasoningEffortMappings rewrites explicit effort values for this WS session.
 	ReasoningEffortMappings []ReasoningEffortMapping
-	BeforeTurn              func(turn int) error
-	BeforeRequest           func(turn int, payload []byte, originalModel string) error
-	AfterTurn               func(turn int, result *OpenAIForwardResult, turnErr error)
+	// QuotaBypassEnabled applies the quota-bypass suffix to every response.create turn.
+	QuotaBypassEnabled bool
+	BeforeTurn         func(turn int) error
+	BeforeRequest      func(turn int, payload []byte, originalModel string) error
+	AfterTurn          func(turn int, result *OpenAIForwardResult, turnErr error)
 }
 
 func (s *OpenAIGatewayService) getOpenAIWSConnPool() *openAIWSConnPool {
