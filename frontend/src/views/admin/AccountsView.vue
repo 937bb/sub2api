@@ -1892,7 +1892,7 @@ const handleExportData = async () => {
   }
 }
 const accountExportStepUp = useStepUp()
-const closeTestModal = () => { showTest.value = false; testingAcc.value = null }
+const closeTestModal = () => { showTest.value = false; testingAcc.value = null; reload() }
 const closeStatsModal = () => { showStats.value = false; statsAcc.value = null }
 const closeReAuthModal = () => { showReAuth.value = false; reAuthAcc.value = null }
 const handleTest = (a: Account) => { testingAcc.value = a; showTest.value = true }

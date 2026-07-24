@@ -424,6 +424,38 @@ func TestAccountTestService_OpenAI401SetsPermanentErrorOnly(t *testing.T) {
 	require.Nil(t, account.RateLimitResetAt)
 }
 
+func TestAccountTestService_OpenAIQuotaBypass403SetsPermanentError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := newTestContext()
+
+	resp := newJSONResponse(http.StatusForbidden, `{"error":{"message":"account is not active"}}`)
+	repo := &openAIAccountTestRepo{}
+	upstream := &queuedHTTPUpstream{responses: []*http.Response{resp}}
+	svc := &AccountTestService{accountRepo: repo, httpUpstream: upstream}
+	account := &Account{
+		ID:          81,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Concurrency: 1,
+		Credentials: map[string]any{"access_token": "test-token"},
+	}
+
+	err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.4", "", AccountTestModeQuotaBypass)
+	require.Error(t, err)
+	require.Equal(t, account.ID, repo.setErrorID)
+	require.Contains(t, repo.setErrorMsg, "Access forbidden (403)")
+	require.Contains(t, repo.setErrorMsg, "account is not active")
+	require.Zero(t, repo.rateLimitedID)
+	require.Zero(t, repo.clearedErrorID)
+
+	require.Len(t, upstream.requests, 1)
+	body, readErr := io.ReadAll(upstream.requests[0].Body)
+	require.NoError(t, readErr)
+	require.Equal(t, "function_call", gjson.GetBytes(body, "input.1.type").String())
+	require.Equal(t, "function_call_output", gjson.GetBytes(body, "input.2.type").String())
+}
+
 func TestAccountTestService_OpenAIAPIKeyResponsesUsesCodexProbeHeaders(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, _ := newTestContext()
