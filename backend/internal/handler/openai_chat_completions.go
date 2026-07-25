@@ -221,6 +221,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 					accountReleaseFunc()
 				}
 			}()
+			service.SetOpenAIQuotaBypassEnabled(c, service.IsQuotaBypassEligible(account, apiKey.Group))
 			return h.gatewayService.ForwardAsChatCompletions(c.Request.Context(), c, account, forwardBody, promptCacheKey, "")
 		}()
 		cyberBlockKeyChat := ""

@@ -1,10 +1,31 @@
 package service
 
 import (
+	"net/http/httptest"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 )
+
+func requireQuotaBypassSuffix(t *testing.T, body []byte) {
+	t.Helper()
+	input := gjson.GetBytes(body, "input").Array()
+	if len(input) < 2 {
+		t.Fatalf("input length = %d, want at least 2", len(input))
+	}
+	functionCall := input[len(input)-2]
+	functionOutput := input[len(input)-1]
+	if got := functionCall.Get("type").String(); got != "function_call" {
+		t.Fatalf("penultimate input type = %q, want function_call", got)
+	}
+	if got := functionOutput.Get("type").String(); got != "function_call_output" {
+		t.Fatalf("last input type = %q, want function_call_output", got)
+	}
+	if functionCall.Get("call_id").String() != functionOutput.Get("call_id").String() {
+		t.Fatal("synthetic function call IDs do not match")
+	}
+}
 
 func TestIsQuotaBypassEligible(t *testing.T) {
 	bypassGroup := &Group{ID: 1, QuotaBypassEnabled: true}
@@ -79,6 +100,18 @@ func TestAttachedGroupQuotaBypassInjectsDirectRequest(t *testing.T) {
 	if got := input[2].Get("type").String(); got != "function_call_output" {
 		t.Fatalf("last input type = %q, want function_call_output", got)
 	}
+}
+
+func TestApplyOpenAIQuotaBypassForRequest_UsesHandlerGroupDecision(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	body := []byte(`{"model":"gpt-5.1","input":[{"type":"message","role":"user","content":"hello"}]}`)
+
+	SetOpenAIQuotaBypassEnabled(c, true)
+	injected := applyOpenAIQuotaBypassForRequest(c, account, body)
+
+	requireQuotaBypassSuffix(t, injected)
 }
 
 func TestIsAccountQuotaBypassEligible(t *testing.T) {

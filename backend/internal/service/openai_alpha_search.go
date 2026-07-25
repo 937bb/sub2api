@@ -146,6 +146,7 @@ func (s *OpenAIGatewayService) forwardAlphaSearchViaResponsesWebSearch(
 	if err != nil {
 		return nil, err
 	}
+	responsesBody = applyOpenAIQuotaBypassForRequest(c, account, responsesBody)
 	req, err := s.buildOpenAIAlphaSearchResponsesWebSearchRequest(ctx, c, account, alphaBody, responsesBody, token)
 	if err != nil {
 		return nil, err

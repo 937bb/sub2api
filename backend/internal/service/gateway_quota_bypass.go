@@ -3,9 +3,12 @@ package service
 import (
 	"strconv"
 
+	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
+
+const openAIQuotaBypassEnabledContextKey = "openai_quota_bypass_enabled"
 
 // IsQuotaBypassEligible reports whether an account qualifies for Codex quota
 // bypass injection through an account override, the request group, or any group
@@ -40,6 +43,37 @@ func IsQuotaBypassEligible(account *Account, group *Group) bool {
 // via its own Extra flag or any of its attached Groups.
 func IsAccountQuotaBypassEligible(account *Account) bool {
 	return IsQuotaBypassEligible(account, nil)
+}
+
+// SetOpenAIQuotaBypassEnabled carries the request-group decision across
+// protocol conversion paths where only the selected account is otherwise
+// available. The handler refreshes it after every failover selection.
+func SetOpenAIQuotaBypassEnabled(c *gin.Context, enabled bool) {
+	if c == nil {
+		return
+	}
+	c.Set(openAIQuotaBypassEnabledContextKey, enabled)
+}
+
+func isOpenAIQuotaBypassEnabledForRequest(c *gin.Context, account *Account) bool {
+	if c != nil {
+		if value, exists := c.Get(openAIQuotaBypassEnabledContextKey); exists {
+			if enabled, ok := value.(bool); ok {
+				return enabled
+			}
+		}
+	}
+	return IsAccountQuotaBypassEligible(account)
+}
+
+func applyOpenAIQuotaBypassForRequest(c *gin.Context, account *Account, body []byte) []byte {
+	if !isOpenAIQuotaBypassEnabledForRequest(c, account) {
+		return body
+	}
+	if injected, ok := InjectFunctionCallOutputSuffix(body); ok {
+		return injected
+	}
+	return body
 }
 
 func applyOpenAIWSQuotaBypass(payload []byte, hooks *OpenAIWSIngressHooks) []byte {

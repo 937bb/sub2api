@@ -474,7 +474,9 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 				}
 			}()
 			attemptBody := forwardBody
-			if service.IsQuotaBypassEligible(account, apiKey.Group) {
+			quotaBypassEnabled := service.IsQuotaBypassEligible(account, apiKey.Group)
+			service.SetOpenAIQuotaBypassEnabled(c, quotaBypassEnabled)
+			if quotaBypassEnabled {
 				if injected, ok := service.InjectFunctionCallOutputSuffix(attemptBody); ok {
 					attemptBody = injected
 				}
@@ -1011,6 +1013,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 					accountReleaseFunc()
 				}
 			}()
+			service.SetOpenAIQuotaBypassEnabled(c, service.IsQuotaBypassEligible(account, apiKey.Group))
 			return h.gatewayService.ForwardAsAnthropic(c.Request.Context(), c, account, forwardBody, promptCacheKey, defaultMappedModel)
 		}()
 		cyberBlockKeyMsg := ""

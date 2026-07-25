@@ -1087,6 +1087,12 @@ func (h *AccountHandler) TestQuotaBypass(c *gin.Context) {
 	if err := h.accountTestService.TestAccountConnection(c, accountID, "", "", service.AccountTestModeQuotaBypass); err != nil {
 		return
 	}
+
+	if h.rateLimitService != nil {
+		if _, err := h.rateLimitService.RecoverAccountAfterSuccessfulTest(c.Request.Context(), accountID); err != nil {
+			_ = c.Error(err)
+		}
+	}
 }
 
 // RecoverState handles unified recovery of recoverable account runtime state.
