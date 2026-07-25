@@ -15,7 +15,7 @@ const openAIQuotaBypassEnabledContextKey = "openai_quota_bypass_enabled"
 // attached to the scheduled account.
 // Priority: account Extra["quota_bypass_enabled"] > group settings.
 func IsQuotaBypassEligible(account *Account, group *Group) bool {
-	if account == nil || account.Platform != PlatformOpenAI || account.Type != AccountTypeOAuth {
+	if account == nil || account.Platform != PlatformOpenAI || !account.IsOAuth() {
 		return false
 	}
 	if account.Extra != nil {
@@ -56,10 +56,21 @@ func SetOpenAIQuotaBypassEnabled(c *gin.Context, enabled bool) {
 }
 
 func isOpenAIQuotaBypassEnabledForRequest(c *gin.Context, account *Account) bool {
+	// A request-scoped positive decision is needed when the scheduler snapshot
+	// does not carry the request group's full definition. A stale negative
+	// decision must not hide an account override or an attached bypass group.
+	// An explicit account-level false remains authoritative.
+	if account != nil && account.Extra != nil {
+		if value, ok := account.Extra["quota_bypass_enabled"].(bool); ok && !value {
+			return false
+		}
+	}
 	if c != nil {
 		if value, exists := c.Get(openAIQuotaBypassEnabledContextKey); exists {
 			if enabled, ok := value.(bool); ok {
-				return enabled
+				if enabled {
+					return true
+				}
 			}
 		}
 	}

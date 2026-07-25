@@ -54,6 +54,12 @@ func TestIsQuotaBypassEligible(t *testing.T) {
 			want: true,
 		},
 		{
+			name:    "setup token account is eligible",
+			account: &Account{Platform: PlatformOpenAI, Type: AccountTypeSetupToken},
+			group:   bypassGroup,
+			want:    true,
+		},
+		{
 			name: "explicit account disable overrides groups",
 			account: &Account{
 				Platform: PlatformOpenAI,
@@ -109,6 +115,25 @@ func TestApplyOpenAIQuotaBypassForRequest_UsesHandlerGroupDecision(t *testing.T)
 	body := []byte(`{"model":"gpt-5.1","input":[{"type":"message","role":"user","content":"hello"}]}`)
 
 	SetOpenAIQuotaBypassEnabled(c, true)
+	injected := applyOpenAIQuotaBypassForRequest(c, account, body)
+
+	requireQuotaBypassSuffix(t, injected)
+}
+
+func TestApplyOpenAIQuotaBypassForRequest_StaleNegativeContextDoesNotHideAccountEligibility(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	account := &Account{
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		AccountGroups: []AccountGroup{{
+			GroupID: 42,
+			Group:   &Group{ID: 42, QuotaBypassEnabled: true},
+		}},
+	}
+	body := []byte(`{"model":"gpt-5.1","input":[{"type":"message","role":"user","content":"hello"}]}`)
+
+	SetOpenAIQuotaBypassEnabled(c, false)
 	injected := applyOpenAIQuotaBypassForRequest(c, account, body)
 
 	requireQuotaBypassSuffix(t, injected)

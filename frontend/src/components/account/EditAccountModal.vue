@@ -4555,7 +4555,15 @@ const handleSubmit = async () => {
         newExtra.openai_long_context_billing_enabled = openAILongContextBillingEnabled.value
       }
       if (props.account.type === 'oauth' || props.account.type === 'setup-token') {
-        newExtra.quota_bypass_enabled = quotaBypassEnabled.value
+        // An absent account override inherits the selected group's setting.
+        // Do not materialize the default-off switch as `false`, because the
+        // backend treats an explicit false as an override of group bypass.
+        const existingQuotaBypass = currentExtra.quota_bypass_enabled
+        if (quotaBypassEnabled.value || typeof existingQuotaBypass === 'boolean') {
+          newExtra.quota_bypass_enabled = quotaBypassEnabled.value
+        } else {
+          delete newExtra.quota_bypass_enabled
+        }
       }
       if (openAICompactMode.value === 'auto') {
         delete newExtra.openai_compact_mode

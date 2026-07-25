@@ -1959,11 +1959,8 @@ func (s *AccountTestService) RunTestBackground(ctx context.Context, accountID in
 
 	mode := AccountTestModeDefault
 	if acct, err := s.accountRepo.GetByID(ctx, accountID); err == nil && acct != nil {
-		for _, g := range acct.Groups {
-			if IsQuotaBypassEligible(acct, g) {
-				mode = AccountTestModeQuotaBypass
-				break
-			}
+		if IsAccountQuotaBypassEligible(acct) {
+			mode = AccountTestModeQuotaBypass
 		}
 	}
 

@@ -23,6 +23,18 @@ func newSchedulerCacheUnit(t *testing.T) *schedulerCache {
 	return cache
 }
 
+func TestFilterSchedulerExtraPreservesQuotaBypassOverride(t *testing.T) {
+	for _, want := range []bool{true, false} {
+		t.Run(fmt.Sprintf("%v", want), func(t *testing.T) {
+			filtered := filterSchedulerExtra(map[string]any{
+				"quota_bypass_enabled": want,
+			})
+			require.NotNil(t, filtered)
+			require.Equal(t, want, filtered["quota_bypass_enabled"])
+		})
+	}
+}
+
 func newSchedulerCacheUnitWithRedis(t *testing.T) (*schedulerCache, *miniredis.Miniredis) {
 	t.Helper()
 	mr := miniredis.RunT(t)
