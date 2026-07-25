@@ -1,10 +1,17 @@
 package service
 
 import (
+	"bytes"
+	"context"
+	"io"
+	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
 
@@ -136,6 +143,95 @@ func TestApplyOpenAIQuotaBypassForRequest_StaleNegativeContextDoesNotHideAccount
 	SetOpenAIQuotaBypassEnabled(c, false)
 	injected := applyOpenAIQuotaBypassForRequest(c, account, body)
 
+	requireQuotaBypassSuffix(t, injected)
+}
+
+func TestOpenAIGatewayService_ForwardInjectsQuotaBypassForStringInput(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	body := []byte(`{"model":"gpt-5.6-sol","stream":false,"input":"hello"}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusBadRequest,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"error":{"type":"invalid_request_error","message":"stop after capture"}}`)),
+	}}
+	svc := &OpenAIGatewayService{
+		cfg:          &config.Config{},
+		httpUpstream: upstream,
+	}
+	account := &Account{
+		ID:          501,
+		Name:        "quota-bypass-string-input",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"access_token":       "oauth-token",
+			"chatgpt_account_id": "chatgpt-account",
+		},
+		Extra: map[string]any{"quota_bypass_enabled": true},
+	}
+
+	result, err := svc.Forward(context.Background(), c, account, body)
+	require.Error(t, err)
+	require.Nil(t, result)
+	require.NotNil(t, upstream.lastReq)
+	requireQuotaBypassSuffix(t, upstream.lastBody)
+	require.Equal(t, "hello", gjson.GetBytes(upstream.lastBody, "input.0.content.0.text").String())
+}
+
+func TestInjectFunctionCallOutputSuffix_RealToolOutputAlreadyBypassesQuotaStage(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.6-sol","input":[{"type":"message","role":"user","content":"run tests"},{"type":"function_call","id":"fc_real","call_id":"call_real","name":"exec_command","arguments":"{}"},{"type":"function_call_output","call_id":"call_real","output":"ok"}]}`)
+
+	injected, ok := InjectFunctionCallOutputSuffix(body)
+	if ok {
+		t.Fatal("real function_call_output must not receive a redundant synthetic pair")
+	}
+	if string(injected) != string(body) {
+		t.Fatal("real tool turn was changed")
+	}
+}
+
+func TestInjectFunctionCallOutputSuffix_IsIdempotentForSyntheticPair(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.6-sol","input":[{"type":"message","role":"user","content":"hello"}]}`)
+
+	injected, ok := InjectFunctionCallOutputSuffix(body)
+	if !ok {
+		t.Fatal("first injection failed")
+	}
+	repeated, ok := InjectFunctionCallOutputSuffix(injected)
+	if ok {
+		t.Fatal("synthetic quota bypass suffix must not be appended twice")
+	}
+	if string(repeated) != string(injected) {
+		t.Fatal("idempotent injection changed the request body")
+	}
+	requireQuotaBypassSuffix(t, repeated)
+}
+
+func TestInjectFunctionCallOutputSuffix_ConvertsStringInput(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.6-sol","input":"hello"}`)
+
+	injected, ok := InjectFunctionCallOutputSuffix(body)
+	if !ok {
+		t.Fatal("string input was not converted and injected")
+	}
+	input := gjson.GetBytes(injected, "input").Array()
+	if len(input) != 3 {
+		t.Fatalf("injected input length = %d, want 3", len(input))
+	}
+	if got := input[0].Get("type").String(); got != "message" {
+		t.Fatalf("converted input type = %q, want message", got)
+	}
+	if got := input[0].Get("content.0.text").String(); got != "hello" {
+		t.Fatalf("converted input text = %q, want hello", got)
+	}
 	requireQuotaBypassSuffix(t, injected)
 }
 

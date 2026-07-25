@@ -112,7 +112,10 @@ func TestOpenAIQuotaHeadroomFactor_QuotaBypassIgnoresExhaustedSnapshot(t *testin
 		},
 	}
 
-	require.Equal(t, 1.0, openAIQuotaHeadroomFactor(account, now))
+	// Bypass keeps the account schedulable, but the quota signal is meaningless
+	// for it — a full 1.0 would let an exhausted account outrank healthy peers
+	// and absorb all concurrency until the upstream rate-limits it.
+	require.Equal(t, openAIQuotaHeadroomNeutralFactor, openAIQuotaHeadroomFactor(account, now))
 }
 
 func TestOpenAIQuotaHeadroomFactor_PrimaryMissingIsNeutral(t *testing.T) {

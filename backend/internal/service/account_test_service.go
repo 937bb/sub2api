@@ -708,6 +708,10 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 			return s.testOpenAIAccountConnection(c, account, modelID, prompt, mode)
 		}
 		if resp.StatusCode == http.StatusTooManyRequests {
+			// Quota-bypass accounts reconcile 429 exactly like every other
+			// account. A bypass test that still comes back 429 means the
+			// injection did not take effect, so clearing the rate limit here
+			// would hide a real failure and leave the account looking healthy.
 			s.reconcileOpenAI429State(ctx, account, resp.Header, body)
 		}
 		var accountErrorMsg string

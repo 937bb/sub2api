@@ -27,7 +27,7 @@ func TestOpenAI429FastPath_MarksOAuthAccountCoolingDown(t *testing.T) {
 	require.False(t, svc.isOpenAIAccountRuntimeBlocked(apiKeyAccount))
 }
 
-func TestOpenAI429FastPath_QuotaBypassStillMarksOAuthAccountCoolingDown(t *testing.T) {
+func TestOpenAI429FastPath_QuotaBypassRealRateLimitStillMarksOAuthAccountCoolingDown(t *testing.T) {
 	svc := &OpenAIGatewayService{}
 	account := &Account{
 		ID:       44,
@@ -36,10 +36,68 @@ func TestOpenAI429FastPath_QuotaBypassStillMarksOAuthAccountCoolingDown(t *testi
 		Extra:    map[string]any{"quota_bypass_enabled": true},
 	}
 
-	shouldDisable := svc.handleOpenAIAccountUpstreamError(context.Background(), account, http.StatusTooManyRequests, http.Header{}, nil)
+	shouldDisable := svc.handleOpenAIAccountUpstreamError(
+		context.Background(),
+		account,
+		http.StatusTooManyRequests,
+		http.Header{},
+		[]byte(`{"error":{"type":"rate_limit_error","code":"rate_limit_exceeded","message":"slow down"}}`),
+	)
 
 	require.False(t, shouldDisable)
 	require.True(t, svc.isOpenAIAccountRuntimeBlocked(account))
+}
+
+// A quota-bypass account that still returns 429 usage_limit_reached means the
+// injection did not take effect upstream. It must reconcile through the same
+// path as any other account: clearing the cooldown here would leave an account
+// the upstream is actively refusing looking healthy and permanently
+// schedulable, which is what kept exhausted accounts in "normal" status.
+func TestOpenAI429FastPath_QuotaBypassUsageLimitKeepsCooldown(t *testing.T) {
+	rateLimitedAt := time.Now()
+	resetAt := time.Now().Add(time.Hour)
+	repo := &rateLimitClearRepoStub{}
+	svc := &OpenAIGatewayService{accountRepo: repo}
+	account := &Account{
+		ID:               45,
+		Platform:         PlatformOpenAI,
+		Type:             AccountTypeOAuth,
+		Extra:            map[string]any{"quota_bypass_enabled": true},
+		RateLimitedAt:    &rateLimitedAt,
+		RateLimitResetAt: &resetAt,
+	}
+	svc.BlockAccountScheduling(account, resetAt, "stale_usage_limit")
+	require.True(t, svc.isOpenAIAccountRuntimeBlocked(account))
+
+	svc.handleOpenAIAccountUpstreamError(
+		context.Background(),
+		account,
+		http.StatusTooManyRequests,
+		http.Header{},
+		[]byte(`{"error":{"type":"usage_limit_reached","message":"The usage limit has been reached"}}`),
+	)
+
+	require.Equal(t, 0, repo.clearRateLimitCalls, "bypass must not clear an upstream-imposed rate limit")
+	require.NotNil(t, account.RateLimitedAt)
+	require.NotNil(t, account.RateLimitResetAt)
+	require.True(t, svc.isOpenAIAccountRuntimeBlocked(account))
+}
+
+func TestOpenAI429FastPath_RequestGroupQuotaBypassUsageLimitKeepsCooldown(t *testing.T) {
+	repo := &rateLimitClearRepoStub{}
+	svc := &OpenAIGatewayService{accountRepo: repo}
+	account := &Account{ID: 46, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	ctx := withOpenAIQuotaBypassEnabled(context.Background(), true)
+
+	svc.handleOpenAIAccountUpstreamError(
+		ctx,
+		account,
+		http.StatusTooManyRequests,
+		http.Header{},
+		[]byte(`{"error":{"type":"usage_limit_reached","message":"The usage limit has been reached"}}`),
+	)
+
+	require.Equal(t, 0, repo.clearRateLimitCalls, "request-group bypass must not clear an upstream-imposed rate limit")
 }
 
 // TestOpenAI429FastPath_SkipsSparkShadow 外审第8轮 P1:spark 影子被选中后若 /responses 返回 429,

@@ -1673,7 +1673,10 @@ func TestOpenAIAccountScheduler_RequestGroupQuotaBypassSkipsSnapshotPause(t *tes
 
 	compatible, reason := scheduler.isAccountRequestCompatibleReason(ctx, account, req)
 	require.True(t, compatible, "request group bypass must keep the account in the scheduler, reason=%s", reason)
-	require.Equal(t, 1.0, openAIQuotaHeadroomFactorForRequest(account, req, time.Now()))
+	// Schedulable, but on a neutral quota signal rather than a top score, so the
+	// exhausted account shares concurrency with healthy peers instead of
+	// monopolising it.
+	require.Equal(t, openAIQuotaHeadroomNeutralFactor, openAIQuotaHeadroomFactorForRequest(account, req, time.Now()))
 }
 
 func TestOpenAIAccountScheduler_ResolvesRequestGroupQuotaBypass(t *testing.T) {

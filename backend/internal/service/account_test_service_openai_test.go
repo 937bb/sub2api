@@ -69,6 +69,7 @@ type openAIAccountTestRepo struct {
 	bulkUpdatedPayload AccountBulkUpdate
 	rateLimitedID      int64
 	rateLimitedAt      *time.Time
+	clearedRateLimitID int64
 	clearedErrorID     int64
 	setErrorID         int64
 	setErrorMsg        string
@@ -90,6 +91,11 @@ func (r *openAIAccountTestRepo) BulkUpdate(_ context.Context, ids []int64, updat
 func (r *openAIAccountTestRepo) SetRateLimited(_ context.Context, id int64, resetAt time.Time) error {
 	r.rateLimitedID = id
 	r.rateLimitedAt = &resetAt
+	return nil
+}
+
+func (r *openAIAccountTestRepo) ClearRateLimit(_ context.Context, id int64) error {
+	r.clearedRateLimitID = id
 	return nil
 }
 
@@ -252,7 +258,10 @@ func TestAccountTestService_OpenAIStreamEOFBeforeCompletedFails(t *testing.T) {
 	require.NotContains(t, recorder.Body.String(), `"success":true`)
 }
 
-func TestAccountTestService_OpenAIQuotaBypass429PersistsSnapshotAndRateLimitState(t *testing.T) {
+// A bypass-mode test that comes back 429 usage_limit_reached proves the
+// injection did not work against this account, so it reconciles the cooldown
+// like any other account instead of clearing it.
+func TestAccountTestService_OpenAIQuotaBypassUsageLimitPersistsSnapshotAndCooldown(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, _ := newTestContext()
 
@@ -267,26 +276,28 @@ func TestAccountTestService_OpenAIQuotaBypass429PersistsSnapshotAndRateLimitStat
 	repo := &openAIAccountTestRepo{}
 	upstream := &queuedHTTPUpstream{responses: []*http.Response{resp}}
 	svc := &AccountTestService{accountRepo: repo, httpUpstream: upstream}
+	existingLimitedAt := time.Now()
+	existingResetAt := time.Now().Add(time.Hour)
 	account := &Account{
-		ID:          88,
-		Platform:    PlatformOpenAI,
-		Type:        AccountTypeOAuth,
-		Status:      StatusError,
-		Concurrency: 1,
-		Credentials: map[string]any{"access_token": "test-token"},
-		Extra:       map[string]any{"quota_bypass_enabled": true},
+		ID:               88,
+		Platform:         PlatformOpenAI,
+		Type:             AccountTypeOAuth,
+		Status:           StatusActive,
+		Concurrency:      1,
+		Credentials:      map[string]any{"access_token": "test-token"},
+		Extra:            map[string]any{"quota_bypass_enabled": true},
+		RateLimitedAt:    &existingLimitedAt,
+		RateLimitResetAt: &existingResetAt,
 	}
 
 	err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.4", "", AccountTestModeQuotaBypass)
 	require.Error(t, err)
 	require.NotEmpty(t, repo.updatedExtra)
 	require.Equal(t, 100.0, repo.updatedExtra["codex_5h_used_percent"])
-	require.Equal(t, account.ID, repo.rateLimitedID)
+	require.Equal(t, account.ID, repo.rateLimitedID, "bypass mode must still persist the 429 cooldown")
 	require.NotNil(t, repo.rateLimitedAt)
-	require.Equal(t, account.ID, repo.clearedErrorID)
-	require.Equal(t, StatusActive, account.Status)
-	require.Empty(t, account.ErrorMessage)
-	require.NotNil(t, account.RateLimitResetAt)
+	require.Zero(t, repo.clearedRateLimitID, "bypass mode must not clear an upstream-imposed rate limit")
+	require.NotNil(t, account.RateLimitedAt)
 }
 
 func TestAccountTestService_OpenAI429BodyOnlyPersistsRateLimitAndClearsStaleError(t *testing.T) {

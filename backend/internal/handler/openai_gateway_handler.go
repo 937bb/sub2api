@@ -1747,11 +1747,14 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			reasoningEffortMappings = apiKey.Group.ReasoningEffortMappings
 		}
 		var requestPayloadHash string
+		quotaBypassEnabled := service.IsQuotaBypassEligible(account, apiKey.Group)
+		service.SetOpenAIQuotaBypassEnabled(c, quotaBypassEnabled)
+		ctx = c.Request.Context()
 		hooks := &service.OpenAIWSIngressHooks{
 			InitialRequestModel:     reqModel,
 			MaxReasoningEffort:      maxReasoningEffort,
 			ReasoningEffortMappings: reasoningEffortMappings,
-			QuotaBypassEnabled:      service.IsQuotaBypassEligible(account, apiKey.Group),
+			QuotaBypassEnabled:      quotaBypassEnabled,
 			BeforeRequest: func(turn int, payload []byte, originalModel string) error {
 				if turn == 1 {
 					return nil

@@ -2718,8 +2718,14 @@ func openAIFreshUpstreamBillingRate(account *Account, now time.Time) (float64, b
 }
 
 func openAIQuotaHeadroomFactor(account *Account, now time.Time) float64 {
+	// Quota bypass makes the Codex usage snapshot meaningless as a scheduling
+	// signal: the account keeps serving past 100% utilization. Returning a full
+	// 1 here would rank an exhausted bypass account above every healthy peer on
+	// this dimension, so a single account absorbs all concurrency until the
+	// upstream rate-limits it for real. Treat the signal as unavailable instead,
+	// exactly like a stale or reset snapshot, and let load/queue decide.
 	if IsAccountQuotaBypassEligible(account) {
-		return 1
+		return openAIQuotaHeadroomNeutralFactor
 	}
 	if account == nil || len(account.Extra) == 0 || openAIQuotaHeadroomSnapshotStale(account.Extra, now) {
 		return openAIQuotaHeadroomNeutralFactor
@@ -2741,8 +2747,11 @@ func openAIQuotaHeadroomFactor(account *Account, now time.Time) float64 {
 }
 
 func openAIQuotaHeadroomFactorForRequest(account *Account, req OpenAIAccountScheduleRequest, now time.Time) float64 {
+	// The request group can enable bypass for an account whose own snapshot does
+	// not carry a bypass group (scheduler snapshots keep only a minimal group).
+	// Same neutral-signal reasoning as openAIQuotaHeadroomFactor.
 	if req.GroupQuotaBypassEnabled && IsQuotaBypassEligible(account, &Group{QuotaBypassEnabled: true}) {
-		return 1
+		return openAIQuotaHeadroomNeutralFactor
 	}
 	return openAIQuotaHeadroomFactor(account, now)
 }

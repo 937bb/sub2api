@@ -1,6 +1,8 @@
 package service
 
 import (
+	"context"
+	"encoding/json"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -9,6 +11,10 @@ import (
 )
 
 const openAIQuotaBypassEnabledContextKey = "openai_quota_bypass_enabled"
+
+type openAIQuotaBypassContextKeyType struct{}
+
+var openAIQuotaBypassContextKey openAIQuotaBypassContextKeyType
 
 // IsQuotaBypassEligible reports whether an account qualifies for Codex quota
 // bypass injection through an account override, the request group, or any group
@@ -53,6 +59,36 @@ func SetOpenAIQuotaBypassEnabled(c *gin.Context, enabled bool) {
 		return
 	}
 	c.Set(openAIQuotaBypassEnabledContextKey, enabled)
+	if c.Request != nil {
+		c.Request = c.Request.WithContext(withOpenAIQuotaBypassEnabled(c.Request.Context(), enabled))
+	}
+}
+
+func withOpenAIQuotaBypassEnabled(ctx context.Context, enabled bool) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, openAIQuotaBypassContextKey, enabled)
+}
+
+func openAIQuotaBypassEnabledFromContext(ctx context.Context) (bool, bool) {
+	if ctx == nil {
+		return false, false
+	}
+	enabled, ok := ctx.Value(openAIQuotaBypassContextKey).(bool)
+	return enabled, ok
+}
+
+func isOpenAIQuotaBypassEnabledForContext(ctx context.Context, account *Account) bool {
+	if account != nil && account.Extra != nil {
+		if value, ok := account.Extra["quota_bypass_enabled"].(bool); ok && !value {
+			return false
+		}
+	}
+	if enabled, exists := openAIQuotaBypassEnabledFromContext(ctx); exists && enabled {
+		return true
+	}
+	return IsAccountQuotaBypassEligible(account)
 }
 
 func isOpenAIQuotaBypassEnabledForRequest(c *gin.Context, account *Account) bool {
@@ -72,6 +108,9 @@ func isOpenAIQuotaBypassEnabledForRequest(c *gin.Context, account *Account) bool
 					return true
 				}
 			}
+		}
+		if c.Request != nil && isOpenAIQuotaBypassEnabledForContext(c.Request.Context(), account) {
+			return true
 		}
 	}
 	return IsAccountQuotaBypassEligible(account)
@@ -102,10 +141,33 @@ func applyOpenAIWSQuotaBypass(payload []byte, hooks *OpenAIWSIngressHooks) []byt
 // causes the upstream to skip its first-stage quota check.
 func InjectFunctionCallOutputSuffix(body []byte) ([]byte, bool) {
 	inputArr := gjson.GetBytes(body, "input")
-	if !inputArr.Exists() || !inputArr.IsArray() {
+	if !inputArr.Exists() {
+		return body, false
+	}
+	if inputArr.Type == gjson.String {
+		message, err := json.Marshal([]map[string]any{{
+			"type": "message",
+			"role": "user",
+			"content": []map[string]any{{
+				"type": "input_text",
+				"text": inputArr.String(),
+			}},
+		}})
+		if err != nil {
+			return body, false
+		}
+		body, err = sjson.SetRawBytes(body, "input", message)
+		if err != nil {
+			return body, false
+		}
+		inputArr = gjson.GetBytes(body, "input")
+	}
+	if !inputArr.IsArray() {
 		return body, false
 	}
 	items := inputArr.Array()
+	// A real function output already passes the same upstream quota stage, so
+	// adding another synthetic call would only perturb an otherwise valid turn.
 	if len(items) > 0 && items[len(items)-1].Get("type").String() == "function_call_output" {
 		return body, false
 	}
