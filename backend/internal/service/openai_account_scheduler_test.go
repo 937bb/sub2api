@@ -62,6 +62,15 @@ type schedulerGroupAwareOpenAIAccountRepo struct {
 	schedulerTestOpenAIAccountRepo
 }
 
+type schedulerTestGroupRepo struct {
+	GroupRepository
+	group *Group
+}
+
+func (r schedulerTestGroupRepo) GetByID(context.Context, int64) (*Group, error) {
+	return r.group, nil
+}
+
 func (r schedulerGroupAwareOpenAIAccountRepo) ListSchedulableByGroupIDAndPlatform(ctx context.Context, groupID int64, platform string) ([]Account, error) {
 	var result []Account
 	for _, acc := range r.accounts {
@@ -1638,6 +1647,86 @@ func TestShouldAutoPauseOpenAIAccountByQuota_QuotaBypassSkipsSnapshotPause(t *te
 			require.Equal(t, tt.paused, paused)
 		})
 	}
+}
+
+func TestOpenAIAccountScheduler_RequestGroupQuotaBypassSkipsSnapshotPause(t *testing.T) {
+	ctx := withOpenAIQuotaAutoPauseSettings(context.Background(), OpsOpenAIAccountQuotaAutoPauseSettings{DefaultThreshold7d: 0.95})
+	account := &Account{
+		ID:          35901,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		// This is the scheduler-cache shape: group IDs survive, but the
+		// lightweight AccountGroup.Group metadata may be absent in an older
+		// snapshot.
+		GroupIDs: []int64{42},
+		Extra: map[string]any{
+			"codex_7d_used_percent":  100.0,
+			"codex_7d_reset_at":      time.Now().Add(24 * time.Hour).Format(time.RFC3339),
+			"codex_usage_updated_at": time.Now().Format(time.RFC3339),
+		},
+	}
+	req := OpenAIAccountScheduleRequest{GroupID: ptrInt64(42), GroupQuotaBypassEnabled: true}
+	scheduler := &defaultOpenAIAccountScheduler{service: &OpenAIGatewayService{cfg: &config.Config{}}}
+
+	compatible, reason := scheduler.isAccountRequestCompatibleReason(ctx, account, req)
+	require.True(t, compatible, "request group bypass must keep the account in the scheduler, reason=%s", reason)
+	require.Equal(t, 1.0, openAIQuotaHeadroomFactorForRequest(account, req, time.Now()))
+}
+
+func TestOpenAIAccountScheduler_ResolvesRequestGroupQuotaBypass(t *testing.T) {
+	groupID := int64(42)
+	scheduler := &defaultOpenAIAccountScheduler{service: &OpenAIGatewayService{
+		schedulerSnapshot: &SchedulerSnapshotService{
+			groupRepo: schedulerTestGroupRepo{group: &Group{ID: groupID, QuotaBypassEnabled: true}},
+		},
+	}}
+
+	group := scheduler.resolveRequestGroup(context.Background(), OpenAIAccountScheduleRequest{GroupID: &groupID})
+	require.NotNil(t, group)
+	require.True(t, group.QuotaBypassEnabled)
+}
+
+func TestOpenAIGatewayService_SelectAccountWithScheduler_RequestGroupBypassAllowsExhaustedAccount(t *testing.T) {
+	resetOpenAIAdvancedSchedulerSettingCacheForTest()
+	defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
+
+	groupID := int64(42)
+	account := &Account{
+		ID:          35911,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		GroupIDs:    []int64{groupID},
+		Extra: map[string]any{
+			"codex_7d_used_percent":  100.0,
+			"codex_7d_reset_at":      time.Now().Add(24 * time.Hour).Format(time.RFC3339),
+			"codex_usage_updated_at": time.Now().Format(time.RFC3339),
+		},
+	}
+	snapshot := &SchedulerSnapshotService{
+		cache: &openAISnapshotCacheStub{
+			snapshotAccounts: []*Account{account},
+			accountsByID:     map[int64]*Account{account.ID: account},
+		},
+		groupRepo: schedulerTestGroupRepo{group: &Group{ID: groupID, QuotaBypassEnabled: true}},
+	}
+	svc := &OpenAIGatewayService{
+		accountRepo:       schedulerTestOpenAIAccountRepo{accounts: []Account{*account}},
+		schedulerSnapshot: snapshot,
+		rateLimitService:  newOpenAIAdvancedSchedulerRateLimitService("true"),
+		cfg:               &config.Config{},
+	}
+
+	selection, _, err := svc.SelectAccountWithScheduler(context.Background(), &groupID, "", "", "gpt-5.1", nil, OpenAIUpstreamTransportAny, false)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.Account)
+	require.Equal(t, account.ID, selection.Account.ID)
 }
 
 func TestOpenAIGatewayService_SelectAccountForModelWithExclusions_QuotaBypassStillHonorsReal429Cooldown(t *testing.T) {
