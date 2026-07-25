@@ -130,6 +130,10 @@ func (s *OpenAIGatewayService) markOpenAIOAuth429RateLimited(ctx context.Context
 	if account.IsShadow() {
 		return
 	}
+	if isOpenAIQuotaBypassEnabledForContext(ctx, account) {
+		s.ClearAccountSchedulingBlock(account.ID)
+		return
+	}
 	s.recordOpenAIOAuth429()
 
 	cooldownUntil := time.Now().Add(openAIOAuth429FallbackCooldown)

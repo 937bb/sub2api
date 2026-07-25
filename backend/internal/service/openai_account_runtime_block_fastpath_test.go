@@ -27,7 +27,7 @@ func TestOpenAI429FastPath_MarksOAuthAccountCoolingDown(t *testing.T) {
 	require.False(t, svc.isOpenAIAccountRuntimeBlocked(apiKeyAccount))
 }
 
-func TestOpenAI429FastPath_QuotaBypassStillMarksOAuthAccountCoolingDown(t *testing.T) {
+func TestOpenAI429FastPath_QuotaBypassSkipsOAuthAccountCooldown(t *testing.T) {
 	svc := &OpenAIGatewayService{}
 	account := &Account{
 		ID:       44,
@@ -35,11 +35,24 @@ func TestOpenAI429FastPath_QuotaBypassStillMarksOAuthAccountCoolingDown(t *testi
 		Type:     AccountTypeOAuth,
 		Extra:    map[string]any{"quota_bypass_enabled": true},
 	}
+	svc.BlockAccountScheduling(account, time.Now().Add(time.Hour), "stale_429")
+	require.True(t, svc.isOpenAIAccountRuntimeBlocked(account))
 
 	shouldDisable := svc.handleOpenAIAccountUpstreamError(context.Background(), account, http.StatusTooManyRequests, http.Header{}, nil)
 
 	require.False(t, shouldDisable)
-	require.True(t, svc.isOpenAIAccountRuntimeBlocked(account))
+	require.False(t, svc.isOpenAIAccountRuntimeBlocked(account))
+}
+
+func TestOpenAI429FastPath_RequestGroupQuotaBypassSkipsOAuthAccountCooldown(t *testing.T) {
+	svc := &OpenAIGatewayService{}
+	account := &Account{ID: 45, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	ctx := withOpenAIQuotaBypassEnabled(context.Background(), true)
+
+	shouldDisable := svc.handleOpenAIAccountUpstreamError(ctx, account, http.StatusTooManyRequests, http.Header{}, nil)
+
+	require.False(t, shouldDisable)
+	require.False(t, svc.isOpenAIAccountRuntimeBlocked(account))
 }
 
 // TestOpenAI429FastPath_SkipsSparkShadow 外审第8轮 P1:spark 影子被选中后若 /responses 返回 429,

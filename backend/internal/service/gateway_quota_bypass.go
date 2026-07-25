@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -9,6 +10,10 @@ import (
 )
 
 const openAIQuotaBypassEnabledContextKey = "openai_quota_bypass_enabled"
+
+type openAIQuotaBypassContextKeyType struct{}
+
+var openAIQuotaBypassContextKey openAIQuotaBypassContextKeyType
 
 // IsQuotaBypassEligible reports whether an account qualifies for Codex quota
 // bypass injection through an account override, the request group, or any group
@@ -53,12 +58,42 @@ func SetOpenAIQuotaBypassEnabled(c *gin.Context, enabled bool) {
 		return
 	}
 	c.Set(openAIQuotaBypassEnabledContextKey, enabled)
+	if c.Request != nil {
+		c.Request = c.Request.WithContext(withOpenAIQuotaBypassEnabled(c.Request.Context(), enabled))
+	}
+}
+
+func withOpenAIQuotaBypassEnabled(ctx context.Context, enabled bool) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, openAIQuotaBypassContextKey, enabled)
+}
+
+func openAIQuotaBypassEnabledFromContext(ctx context.Context) (bool, bool) {
+	if ctx == nil {
+		return false, false
+	}
+	enabled, ok := ctx.Value(openAIQuotaBypassContextKey).(bool)
+	return enabled, ok
+}
+
+func isOpenAIQuotaBypassEnabledForContext(ctx context.Context, account *Account) bool {
+	if enabled, exists := openAIQuotaBypassEnabledFromContext(ctx); exists {
+		return enabled
+	}
+	return IsAccountQuotaBypassEligible(account)
 }
 
 func isOpenAIQuotaBypassEnabledForRequest(c *gin.Context, account *Account) bool {
 	if c != nil {
 		if value, exists := c.Get(openAIQuotaBypassEnabledContextKey); exists {
 			if enabled, ok := value.(bool); ok {
+				return enabled
+			}
+		}
+		if c.Request != nil {
+			if enabled, exists := openAIQuotaBypassEnabledFromContext(c.Request.Context()); exists {
 				return enabled
 			}
 		}

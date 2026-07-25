@@ -150,6 +150,7 @@ func TestCalculateOpenAI429ResetTime_ReversedWindowOrder(t *testing.T) {
 type openAI429SnapshotRepo struct {
 	mockAccountRepoForGemini
 	rateLimitedID      int64
+	clearedRateLimitID int64
 	updatedExtra       map[string]any
 	bulkUpdatedIDs     []int64
 	bulkUpdatedPayload AccountBulkUpdate
@@ -157,6 +158,11 @@ type openAI429SnapshotRepo struct {
 
 func (r *openAI429SnapshotRepo) SetRateLimited(_ context.Context, id int64, _ time.Time) error {
 	r.rateLimitedID = id
+	return nil
+}
+
+func (r *openAI429SnapshotRepo) ClearRateLimit(_ context.Context, id int64) error {
+	r.clearedRateLimitID = id
 	return nil
 }
 
@@ -217,6 +223,49 @@ func TestHandle429_OpenAISyncsObservedPlanType(t *testing.T) {
 	require.Equal(t, "free", repo.bulkUpdatedPayload.Credentials["plan_type"])
 	require.Equal(t, "free", account.Credentials["plan_type"])
 	require.Equal(t, account.ID, repo.rateLimitedID)
+}
+
+func TestHandle429_OpenAIQuotaBypassClearsCooldownWithoutSettingRateLimit(t *testing.T) {
+	repo := &openAI429SnapshotRepo{}
+	blocker := &runtimeBlockRecorder{}
+	svc := NewRateLimitService(repo, nil, nil, nil, nil)
+	svc.SetAccountRuntimeBlocker(blocker)
+	limitedAt := time.Now()
+	resetAt := limitedAt.Add(time.Hour)
+	account := &Account{
+		ID:               125,
+		Platform:         PlatformOpenAI,
+		Type:             AccountTypeOAuth,
+		Extra:            map[string]any{"quota_bypass_enabled": true},
+		RateLimitedAt:    &limitedAt,
+		RateLimitResetAt: &resetAt,
+	}
+	headers := http.Header{}
+	headers.Set("x-codex-primary-used-percent", "100")
+	headers.Set("x-codex-primary-reset-after-seconds", "604800")
+	headers.Set("x-codex-primary-window-minutes", "10080")
+
+	svc.handle429(context.Background(), account, headers, nil)
+
+	require.Zero(t, repo.rateLimitedID)
+	require.Equal(t, account.ID, repo.clearedRateLimitID)
+	require.Nil(t, account.RateLimitedAt)
+	require.Nil(t, account.RateLimitResetAt)
+	require.NotEmpty(t, repo.updatedExtra)
+	require.Equal(t, []int64{account.ID}, blocker.clearedIDs)
+	require.Empty(t, blocker.accounts)
+}
+
+func TestHandle429_OpenAIRequestGroupQuotaBypassClearsCooldown(t *testing.T) {
+	repo := &openAI429SnapshotRepo{}
+	svc := NewRateLimitService(repo, nil, nil, nil, nil)
+	account := &Account{ID: 126, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	ctx := withOpenAIQuotaBypassEnabled(context.Background(), true)
+
+	svc.handle429(ctx, account, http.Header{}, nil)
+
+	require.Zero(t, repo.rateLimitedID)
+	require.Equal(t, account.ID, repo.clearedRateLimitID)
 }
 
 // TestHandle429_SkipsSparkShadow 外审第8轮 P1:spark 影子的限流状态只由 QueryUsage(/wham/usage
