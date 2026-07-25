@@ -69,7 +69,6 @@ type openAIAccountTestRepo struct {
 	bulkUpdatedPayload AccountBulkUpdate
 	rateLimitedID      int64
 	rateLimitedAt      *time.Time
-	clearedRateLimitID int64
 	clearedErrorID     int64
 	setErrorID         int64
 	setErrorMsg        string
@@ -91,11 +90,6 @@ func (r *openAIAccountTestRepo) BulkUpdate(_ context.Context, ids []int64, updat
 func (r *openAIAccountTestRepo) SetRateLimited(_ context.Context, id int64, resetAt time.Time) error {
 	r.rateLimitedID = id
 	r.rateLimitedAt = &resetAt
-	return nil
-}
-
-func (r *openAIAccountTestRepo) ClearRateLimit(_ context.Context, id int64) error {
-	r.clearedRateLimitID = id
 	return nil
 }
 
@@ -258,7 +252,7 @@ func TestAccountTestService_OpenAIStreamEOFBeforeCompletedFails(t *testing.T) {
 	require.NotContains(t, recorder.Body.String(), `"success":true`)
 }
 
-func TestAccountTestService_OpenAIQuotaBypass429PersistsSnapshotWithoutCoolingDown(t *testing.T) {
+func TestAccountTestService_OpenAIQuotaBypass429PersistsSnapshotAndRateLimitState(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, _ := newTestContext()
 
@@ -273,36 +267,29 @@ func TestAccountTestService_OpenAIQuotaBypass429PersistsSnapshotWithoutCoolingDo
 	repo := &openAIAccountTestRepo{}
 	upstream := &queuedHTTPUpstream{responses: []*http.Response{resp}}
 	svc := &AccountTestService{accountRepo: repo, httpUpstream: upstream}
-	staleResetAt := time.Now().Add(time.Hour)
-	staleLimitedAt := time.Now()
 	account := &Account{
-		ID:               88,
-		Platform:         PlatformOpenAI,
-		Type:             AccountTypeOAuth,
-		Status:           StatusError,
-		ErrorMessage:     "Access forbidden (403): account is inactive",
-		Concurrency:      1,
-		Credentials:      map[string]any{"access_token": "test-token"},
-		Extra:            map[string]any{"quota_bypass_enabled": true},
-		RateLimitedAt:    &staleLimitedAt,
-		RateLimitResetAt: &staleResetAt,
+		ID:          88,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusError,
+		Concurrency: 1,
+		Credentials: map[string]any{"access_token": "test-token"},
+		Extra:       map[string]any{"quota_bypass_enabled": true},
 	}
 
 	err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.4", "", AccountTestModeQuotaBypass)
 	require.Error(t, err)
 	require.NotEmpty(t, repo.updatedExtra)
 	require.Equal(t, 100.0, repo.updatedExtra["codex_5h_used_percent"])
-	require.Zero(t, repo.rateLimitedID)
-	require.Nil(t, repo.rateLimitedAt)
-	require.Equal(t, account.ID, repo.clearedRateLimitID)
-	require.Zero(t, repo.clearedErrorID)
-	require.Equal(t, StatusError, account.Status)
-	require.Contains(t, account.ErrorMessage, "403")
-	require.Nil(t, account.RateLimitedAt)
-	require.Nil(t, account.RateLimitResetAt)
+	require.Equal(t, account.ID, repo.rateLimitedID)
+	require.NotNil(t, repo.rateLimitedAt)
+	require.Equal(t, account.ID, repo.clearedErrorID)
+	require.Equal(t, StatusActive, account.Status)
+	require.Empty(t, account.ErrorMessage)
+	require.NotNil(t, account.RateLimitResetAt)
 }
 
-func TestAccountTestService_OpenAI429BodyOnlyPersistsRateLimitAndPreservesExistingError(t *testing.T) {
+func TestAccountTestService_OpenAI429BodyOnlyPersistsRateLimitAndClearsStaleError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, _ := newTestContext()
 
@@ -325,9 +312,9 @@ func TestAccountTestService_OpenAI429BodyOnlyPersistsRateLimitAndPreservesExisti
 	require.Error(t, err)
 	require.Equal(t, account.ID, repo.rateLimitedID)
 	require.NotNil(t, repo.rateLimitedAt)
-	require.Zero(t, repo.clearedErrorID)
-	require.Equal(t, StatusError, account.Status)
-	require.Contains(t, account.ErrorMessage, "403")
+	require.Equal(t, account.ID, repo.clearedErrorID)
+	require.Equal(t, StatusActive, account.Status)
+	require.Empty(t, account.ErrorMessage)
 	require.NotNil(t, account.RateLimitResetAt)
 	require.Empty(t, repo.updatedExtra)
 }
@@ -477,38 +464,6 @@ func TestAccountTestService_OpenAIQuotaBypass403SetsPermanentError(t *testing.T)
 	require.NoError(t, readErr)
 	require.Equal(t, "function_call", gjson.GetBytes(body, "input.1.type").String())
 	require.Equal(t, "function_call_output", gjson.GetBytes(body, "input.2.type").String())
-}
-
-func TestAccountTestService_OpenAIQuotaBypassStream403SetsPermanentError(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	ctx, recorder := newTestContext()
-
-	resp := newJSONResponse(http.StatusOK, "")
-	resp.Body = io.NopCloser(strings.NewReader(`data: {"type":"response.failed","response":{"error":{"message":"Personal access token owner is inactive.","code":"biscuit_baker_service_auth_credential_error_status","status":403}}}
-
-`))
-	repo := &openAIAccountTestRepo{}
-	upstream := &queuedHTTPUpstream{responses: []*http.Response{resp}}
-	svc := &AccountTestService{accountRepo: repo, httpUpstream: upstream}
-	account := &Account{
-		ID:          84,
-		Platform:    PlatformOpenAI,
-		Type:        AccountTypeOAuth,
-		Status:      StatusActive,
-		Schedulable: true,
-		Concurrency: 1,
-		Credentials: map[string]any{"access_token": "test-token"},
-	}
-
-	err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.4", "", AccountTestModeQuotaBypass)
-	require.Error(t, err)
-	require.Equal(t, account.ID, repo.setErrorID)
-	require.Contains(t, repo.setErrorMsg, "Access forbidden (403)")
-	require.Contains(t, repo.setErrorMsg, "Personal access token owner is inactive")
-	require.Equal(t, StatusError, account.Status)
-	require.False(t, account.Schedulable)
-	require.Contains(t, recorder.Body.String(), `"type":"account_status"`)
-	require.Contains(t, recorder.Body.String(), `"status":"error"`)
 }
 
 func TestAccountTestService_OpenAI403PersistsStatusAfterRequestCancellation(t *testing.T) {

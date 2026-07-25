@@ -1,7 +1,6 @@
 package service
 
 import (
-	"net/http"
 	"net/http/httptest"
 	"testing"
 
@@ -113,19 +112,6 @@ func TestApplyOpenAIQuotaBypassForRequest_UsesHandlerGroupDecision(t *testing.T)
 	injected := applyOpenAIQuotaBypassForRequest(c, account, body)
 
 	requireQuotaBypassSuffix(t, injected)
-}
-
-func TestSetOpenAIQuotaBypassEnabled_PropagatesToRequestContext(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	c, _ := gin.CreateTestContext(httptest.NewRecorder())
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
-
-	SetOpenAIQuotaBypassEnabled(c, true)
-
-	enabled, exists := openAIQuotaBypassEnabledFromContext(c.Request.Context())
-	if !exists || !enabled {
-		t.Fatalf("request context quota bypass = (%v, %v), want (true, true)", enabled, exists)
-	}
 }
 
 func TestIsAccountQuotaBypassEligible(t *testing.T) {

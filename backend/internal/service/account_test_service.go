@@ -14,7 +14,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -139,26 +138,6 @@ func (s *AccountTestService) persistAccountTestError(ctx context.Context, accoun
 	account.Status = StatusError
 	account.ErrorMessage = errorMsg
 	account.Schedulable = false
-	return nil
-}
-
-func (s *AccountTestService) persistOpenAIAccountTestAuthFailure(c *gin.Context, account *Account, statusCode int, detail string) error {
-	if account == nil || account.Platform != PlatformOpenAI {
-		return nil
-	}
-	var errorMsg string
-	switch statusCode {
-	case http.StatusUnauthorized:
-		errorMsg = fmt.Sprintf("Authentication failed (401): %s", detail)
-	case http.StatusForbidden:
-		errorMsg = fmt.Sprintf("Access forbidden (403): %s", detail)
-	default:
-		return nil
-	}
-	if err := s.persistAccountTestError(c.Request.Context(), account, errorMsg); err != nil {
-		return err
-	}
-	s.sendEvent(c, TestEvent{Type: "account_status", Status: StatusError})
 	return nil
 }
 
@@ -729,18 +708,26 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 			return s.testOpenAIAccountConnection(c, account, modelID, prompt, mode)
 		}
 		if resp.StatusCode == http.StatusTooManyRequests {
-			s.reconcileOpenAI429State(ctx, account, resp.Header, body, mode == AccountTestModeQuotaBypass)
+			s.reconcileOpenAI429State(ctx, account, resp.Header, body)
 		}
-		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-			if err := s.persistOpenAIAccountTestAuthFailure(c, account, resp.StatusCode, string(body)); err != nil {
+		var accountErrorMsg string
+		switch resp.StatusCode {
+		case http.StatusUnauthorized:
+			accountErrorMsg = fmt.Sprintf("Authentication failed (401): %s", string(body))
+		case http.StatusForbidden:
+			accountErrorMsg = fmt.Sprintf("Access forbidden (403): %s", string(body))
+		}
+		if accountErrorMsg != "" {
+			if err := s.persistAccountTestError(ctx, account, accountErrorMsg); err != nil {
 				return s.sendErrorAndEnd(c, fmt.Sprintf("API returned %d: %s (failed to update account status: %s)", resp.StatusCode, string(body), err.Error()))
 			}
+			s.sendEvent(c, TestEvent{Type: "account_status", Status: StatusError})
 		}
 		return s.sendErrorAndEnd(c, fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body)))
 	}
 
 	// Process SSE stream
-	return s.processOpenAIStream(c, account, resp.Body)
+	return s.processOpenAIStream(c, resp.Body)
 }
 
 // testGrokAccountConnection tests a Grok OAuth or API-key account through xAI's Responses API.
@@ -849,7 +836,7 @@ func (s *AccountTestService) testGrokAccountConnection(c *gin.Context, account *
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Grok Responses API returned %d: %s", resp.StatusCode, string(body)))
 	}
 
-	return s.processOpenAIStream(c, account, resp.Body)
+	return s.processOpenAIStream(c, resp.Body)
 }
 
 // testOpenAIChatCompletionsConnection tests an OpenAI-compatible APIKey account
@@ -903,12 +890,11 @@ func (s *AccountTestService) testOpenAIChatCompletionsConnection(
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		if resp.StatusCode == http.StatusTooManyRequests {
-			s.reconcileOpenAI429State(ctx, account, resp.Header, body, false)
+			s.reconcileOpenAI429State(ctx, account, resp.Header, body)
 		}
-		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-			if err := s.persistOpenAIAccountTestAuthFailure(c, account, resp.StatusCode, string(body)); err != nil {
-				return s.sendErrorAndEnd(c, fmt.Sprintf("Chat Completions API returned %d (failed to update account status: %s)", resp.StatusCode, err.Error()))
-			}
+		if resp.StatusCode == http.StatusUnauthorized && s.accountRepo != nil {
+			errMsg := fmt.Sprintf("Chat Completions authentication failed (401): %s", string(body))
+			_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
 		}
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Chat Completions API (/v1/chat/completions) returned %d: %s", resp.StatusCode, string(body)))
 	}
@@ -1044,15 +1030,14 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 		}
 		// 探测如返回 429,主动同步限流状态,避免后续短时间内继续选中。
 		if resp.StatusCode == http.StatusTooManyRequests {
-			s.reconcileOpenAI429State(ctx, account, resp.Header, body, false)
+			s.reconcileOpenAI429State(ctx, account, resp.Header, body)
 		}
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-			if err := s.persistOpenAIAccountTestAuthFailure(c, account, resp.StatusCode, string(body)); err != nil {
-				return s.sendErrorAndEnd(c, fmt.Sprintf("API returned %d (failed to update account status: %s)", resp.StatusCode, err.Error()))
-			}
+		if resp.StatusCode == http.StatusUnauthorized && s.accountRepo != nil {
+			errMsg := fmt.Sprintf("Authentication failed (401): %s", string(body))
+			_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
 		}
 		return s.sendErrorAndEnd(c, fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body)))
 	}
@@ -1062,19 +1047,12 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 	return nil
 }
 
-func (s *AccountTestService) reconcileOpenAI429State(ctx context.Context, account *Account, headers http.Header, body []byte, skipRateLimit bool) {
+func (s *AccountTestService) reconcileOpenAI429State(ctx context.Context, account *Account, headers http.Header, body []byte) {
 	if s == nil || s.accountRepo == nil || account == nil {
 		return
 	}
 
 	persistOpenAI429PlanType(ctx, s.accountRepo, account, body)
-	if skipRateLimit {
-		if err := s.accountRepo.ClearRateLimit(ctx, account.ID); err == nil {
-			account.RateLimitedAt = nil
-			account.RateLimitResetAt = nil
-		}
-		return
-	}
 
 	var resetAt *time.Time
 	if calculated := calculateOpenAI429ResetTime(headers); calculated != nil {
@@ -1095,6 +1073,13 @@ func (s *AccountTestService) reconcileOpenAI429State(ctx context.Context, accoun
 	account.RateLimitedAt = &now
 	account.RateLimitResetAt = resetAt
 
+	if account.Status == StatusError {
+		if err := s.accountRepo.ClearError(ctx, account.ID); err != nil {
+			return
+		}
+		account.Status = StatusActive
+		account.ErrorMessage = ""
+	}
 }
 
 // testGeminiAccountConnection tests a Gemini account's connection
@@ -1655,53 +1640,8 @@ func (s *AccountTestService) processOpenAIChatCompletionsStream(c *gin.Context, 
 	}
 }
 
-func openAIAccountTestStreamError(data map[string]any, fallback string) (string, int) {
-	errorData, _ := data["error"].(map[string]any)
-	if responseData, ok := data["response"].(map[string]any); ok {
-		if nested, ok := responseData["error"].(map[string]any); ok {
-			errorData = nested
-		}
-	}
-	message := fallback
-	if value, ok := errorData["message"].(string); ok && strings.TrimSpace(value) != "" {
-		message = strings.TrimSpace(value)
-	}
-	statusCode := 0
-	switch value := errorData["status"].(type) {
-	case float64:
-		statusCode = int(value)
-	case int:
-		statusCode = value
-	case json.Number:
-		statusCode, _ = strconv.Atoi(value.String())
-	case string:
-		statusCode, _ = strconv.Atoi(strings.TrimSpace(value))
-	}
-	if statusCode != http.StatusUnauthorized && statusCode != http.StatusForbidden {
-		code, _ := errorData["code"].(string)
-		authSignal := strings.ToLower(strings.TrimSpace(code) + " " + message)
-		if strings.Contains(authSignal, "biscuit_baker_service_auth_credential_error_status") ||
-			strings.Contains(authSignal, "personal access token owner is inactive") {
-			statusCode = http.StatusForbidden
-		} else {
-			statusCode = 0
-		}
-	}
-	return message, statusCode
-}
-
-func (s *AccountTestService) sendOpenAIStreamFailure(c *gin.Context, account *Account, data map[string]any, fallback string) error {
-	message, statusCode := openAIAccountTestStreamError(data, fallback)
-	if statusCode != 0 && account != nil && account.Platform == PlatformOpenAI {
-		if err := s.persistOpenAIAccountTestAuthFailure(c, account, statusCode, message); err != nil {
-			return s.sendErrorAndEnd(c, fmt.Sprintf("%s (failed to update account status: %s)", message, err.Error()))
-		}
-	}
-	return s.sendErrorAndEnd(c, message)
-}
-
-// processOpenAIStream processes the SSE stream from OpenAI Responses API.
-func (s *AccountTestService) processOpenAIStream(c *gin.Context, account *Account, body io.Reader) error {
+// processOpenAIStream processes the SSE stream from OpenAI Responses API
+func (s *AccountTestService) processOpenAIStream(c *gin.Context, body io.Reader) error {
 	reader := bufio.NewReader(body)
 	seenCompleted := false
 
@@ -1749,9 +1689,23 @@ func (s *AccountTestService) processOpenAIStream(c *gin.Context, account *Accoun
 			s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
 			return nil
 		case "response.failed":
-			return s.sendOpenAIStreamFailure(c, account, data, "OpenAI response failed")
+			errorMsg := "OpenAI response failed"
+			if responseData, ok := data["response"].(map[string]any); ok {
+				if errData, ok := responseData["error"].(map[string]any); ok {
+					if msg, ok := errData["message"].(string); ok && msg != "" {
+						errorMsg = msg
+					}
+				}
+			}
+			return s.sendErrorAndEnd(c, errorMsg)
 		case "error":
-			return s.sendOpenAIStreamFailure(c, account, data, "Unknown error")
+			errorMsg := "Unknown error"
+			if errData, ok := data["error"].(map[string]any); ok {
+				if msg, ok := errData["message"].(string); ok {
+					errorMsg = msg
+				}
+			}
+			return s.sendErrorAndEnd(c, errorMsg)
 		}
 	}
 }
@@ -1818,11 +1772,6 @@ func (s *AccountTestService) testOpenAIImageAPIKey(c *gin.Context, ctx context.C
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-			if err := s.persistOpenAIAccountTestAuthFailure(c, account, resp.StatusCode, string(body)); err != nil {
-				return s.sendErrorAndEnd(c, fmt.Sprintf("API returned %d (failed to update account status: %s)", resp.StatusCode, err.Error()))
-			}
-		}
 		return s.sendErrorAndEnd(c, fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body)))
 	}
 
@@ -1946,11 +1895,6 @@ func (s *AccountTestService) testOpenAIImageOAuth(c *gin.Context, ctx context.Co
 	if resp.StatusCode >= 400 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 		body = redactAgentIdentitySensitiveBodyForAccount(ctx, s.accountRepo, credentialAccount, body)
-		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-			if err := s.persistOpenAIAccountTestAuthFailure(c, account, resp.StatusCode, string(body)); err != nil {
-				return s.sendErrorAndEnd(c, fmt.Sprintf("Responses API returned %d (failed to update account status: %s)", resp.StatusCode, err.Error()))
-			}
-		}
 		message := strings.TrimSpace(extractUpstreamErrorMessage(body))
 		if message == "" {
 			message = fmt.Sprintf("Responses API returned %d", resp.StatusCode)

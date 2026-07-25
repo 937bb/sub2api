@@ -940,10 +940,6 @@ func (s *RateLimitService) handle429(ctx context.Context, account *Account, head
 	if account.Platform == PlatformOpenAI {
 		persistOpenAI429PlanType(ctx, s.accountRepo, account, responseBody)
 		s.persistOpenAICodexSnapshot(ctx, account, headers)
-		if isOpenAIQuotaBypassEnabledForContext(ctx, account) {
-			s.clearOpenAIQuotaBypass429Cooldown(ctx, account)
-			return
-		}
 		if resetAt := s.calculateOpenAI429ResetTime(headers); resetAt != nil {
 			s.notifyAccountSchedulingBlocked(account, *resetAt, "429")
 			if err := s.accountRepo.SetRateLimited(ctx, account.ID, *resetAt); err != nil {
@@ -1052,19 +1048,6 @@ func (s *RateLimitService) handle429(ctx context.Context, account *Account, head
 	}
 
 	slog.Info("account_rate_limited", "account_id", account.ID, "reset_at", resetAt)
-}
-
-func (s *RateLimitService) clearOpenAIQuotaBypass429Cooldown(ctx context.Context, account *Account) {
-	if s == nil || s.accountRepo == nil || account == nil {
-		return
-	}
-	if err := s.accountRepo.ClearRateLimit(ctx, account.ID); err != nil {
-		slog.Warn("quota_bypass_clear_rate_limit_failed", "account_id", account.ID, "error", err)
-		return
-	}
-	account.RateLimitedAt = nil
-	account.RateLimitResetAt = nil
-	s.notifyAccountSchedulingBlockCleared(account.ID)
 }
 
 func (s *RateLimitService) apply429FallbackRateLimit(ctx context.Context, account *Account, reason string) {

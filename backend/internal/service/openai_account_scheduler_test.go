@@ -1640,7 +1640,7 @@ func TestShouldAutoPauseOpenAIAccountByQuota_QuotaBypassSkipsSnapshotPause(t *te
 	}
 }
 
-func TestOpenAIGatewayService_SelectAccountForModelWithExclusions_QuotaBypassIgnoresStale429Cooldown(t *testing.T) {
+func TestOpenAIGatewayService_SelectAccountForModelWithExclusions_QuotaBypassStillHonorsReal429Cooldown(t *testing.T) {
 	ctx := withOpenAIQuotaAutoPauseSettings(context.Background(), OpsOpenAIAccountQuotaAutoPauseSettings{DefaultThreshold7d: 0.95})
 	rateLimitResetAt := time.Now().Add(time.Hour)
 	primary := Account{
@@ -1663,7 +1663,7 @@ func TestOpenAIGatewayService_SelectAccountForModelWithExclusions_QuotaBypassIgn
 	account, err := svc.SelectAccountForModelWithExclusions(ctx, nil, "", "gpt-5.1", nil)
 	require.NoError(t, err)
 	require.NotNil(t, account)
-	require.Equal(t, int64(35411), account.ID)
+	require.Equal(t, int64(35412), account.ID)
 }
 
 // Regression: a per-account explicit-disable flag exempts the account from auto-pause
