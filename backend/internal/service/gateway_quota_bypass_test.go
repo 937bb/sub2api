@@ -34,6 +34,50 @@ func requireQuotaBypassSuffix(t *testing.T, body []byte) {
 	}
 }
 
+// The injected turn must look like a real Codex shell call, not a constant.
+// A fixed call_id shared by every request this proxy sends is a trivial
+// upstream fingerprint, and "_sys"/"[continue]" advertise the turn as synthetic.
+func TestInjectFunctionCallOutputSuffix_LooksLikeRealToolCall(t *testing.T) {
+	base := []byte(`{"model":"gpt-5.4","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}]}`)
+
+	first, ok := InjectFunctionCallOutputSuffix(base)
+	if !ok {
+		t.Fatal("injection did not apply")
+	}
+	requireQuotaBypassSuffix(t, first)
+
+	items := gjson.GetBytes(first, "input").Array()
+	call := items[len(items)-2]
+
+	if got := call.Get("name").String(); got != "shell" {
+		t.Fatalf("tool name = %q, want shell", got)
+	}
+	if !gjson.Valid(call.Get("arguments").String()) {
+		t.Fatalf("arguments must be a JSON document, got %q", call.Get("arguments").String())
+	}
+	if cmd := gjson.Get(call.Get("arguments").String(), "command").Array(); len(cmd) == 0 {
+		t.Fatal("shell arguments must carry a command argv")
+	}
+
+	for _, forbidden := range []string{"fc_syn_00", "call_syn_00", "_sys", "[continue]"} {
+		if bytes.Contains(first, []byte(forbidden)) {
+			t.Fatalf("payload still contains the synthetic marker %q", forbidden)
+		}
+	}
+
+	// Two injections of the same request must not reuse identifiers.
+	second, ok := InjectFunctionCallOutputSuffix(base)
+	if !ok {
+		t.Fatal("second injection did not apply")
+	}
+	firstID := call.Get("call_id").String()
+	secondItems := gjson.GetBytes(second, "input").Array()
+	secondID := secondItems[len(secondItems)-2].Get("call_id").String()
+	if firstID == "" || firstID == secondID {
+		t.Fatalf("call_id must be unique per request, got %q twice", firstID)
+	}
+}
+
 func TestIsQuotaBypassEligible(t *testing.T) {
 	bypassGroup := &Group{ID: 1, QuotaBypassEnabled: true}
 
