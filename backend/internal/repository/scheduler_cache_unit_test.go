@@ -416,7 +416,13 @@ func TestBuildSchedulerMetadataAccount_KeepsSlimGroupMembership(t *testing.T) {
 	require.Equal(t, int64(7), got.AccountGroups[0].GroupID)
 	require.Equal(t, 2, got.AccountGroups[0].Priority)
 	require.Nil(t, got.AccountGroups[0].Account)
-	require.Nil(t, got.AccountGroups[0].Group)
+	// The group is reduced to the minimum the scheduler needs rather than
+	// dropped: quota-bypass eligibility is resolved from the attached groups, so
+	// the flag has to survive into the metadata. Everything else is stripped.
+	require.NotNil(t, got.AccountGroups[0].Group)
+	require.Equal(t, int64(7), got.AccountGroups[0].Group.ID)
+	require.False(t, got.AccountGroups[0].Group.QuotaBypassEnabled)
+	require.Empty(t, got.AccountGroups[0].Group.Name, "slim group must not carry the full record")
 	require.Equal(t, int64(11), got.AccountGroups[1].GroupID)
 	require.Nil(t, got.Groups)
 }

@@ -26,6 +26,15 @@ const (
 	codeBuddyConversationHeader   = "X-Conversation-ID"
 )
 
+var explicitOpenAIHeaderSessionNames = []string{
+	"session_id",
+	"conversation_id",
+	openCodeSessionAffinityHeader,
+	openCodeSessionIDHeader,
+	openCodeNativeSessionHeader,
+	codeBuddyConversationHeader,
+}
+
 // explicitOpenAIHeaderSessionID resolves stable conversation identifiers sent
 // by OpenAI-compatible clients. Keep this list limited to session-scoped
 // fields: request/message IDs rotate every turn and would defeat sticky routing
@@ -35,14 +44,7 @@ func explicitOpenAIHeaderSessionID(c *gin.Context) string {
 		return ""
 	}
 
-	for _, header := range []string{
-		"session_id",
-		"conversation_id",
-		openCodeSessionAffinityHeader,
-		openCodeSessionIDHeader,
-		openCodeNativeSessionHeader,
-		codeBuddyConversationHeader,
-	} {
+	for _, header := range explicitOpenAIHeaderSessionNames {
 		if sessionID := strings.TrimSpace(c.GetHeader(header)); sessionID != "" {
 			return sessionID
 		}
@@ -1248,6 +1250,9 @@ func (s *OpenAIGatewayService) resolveFreshSchedulableOpenAIAccount(ctx context.
 	if s.isOpenAIAccountRequestRuntimeBlocked(fresh, requestedModel) {
 		return nil
 	}
+	if s.isOpenAIProxyStreamQuarantined(fresh) {
+		return nil
+	}
 	return fresh
 }
 
@@ -1277,6 +1282,9 @@ func (s *OpenAIGatewayService) recheckSelectedOpenAIAccountFromDB(ctx context.Co
 		if !parentHealthyForShadow(account, s.parentAccountLookup(ctx)) {
 			return nil
 		}
+		if s.isOpenAIProxyStreamQuarantined(account) {
+			return nil
+		}
 		return account
 	}
 
@@ -1294,6 +1302,9 @@ func (s *OpenAIGatewayService) recheckSelectedOpenAIAccountFromDB(ctx context.Co
 		return nil
 	}
 	if s.isOpenAIAccountRequestRuntimeBlocked(latest, requestedModel) {
+		return nil
+	}
+	if s.isOpenAIProxyStreamQuarantined(latest) {
 		return nil
 	}
 	return latest
