@@ -52,6 +52,17 @@ func (r *groupRepository) Create(ctx context.Context, groupIn *service.Group) er
 	return nil
 }
 
+// nonNilTimeBillingRules guarantees the column receives a JSON array. A nil
+// slice marshals to null, which the groups_time_billing_rules_array check
+// constraint rejects, so a group with no time billing rules would fail to
+// persist at all.
+func nonNilTimeBillingRules(rules []service.TimeBillingRule) []service.TimeBillingRule {
+	if rules == nil {
+		return []service.TimeBillingRule{}
+	}
+	return rules
+}
+
 func createGroupRecord(ctx context.Context, client *dbent.Client, groupIn *service.Group) error {
 	if groupIn == nil {
 		return errors.New("group is nil")
@@ -103,7 +114,7 @@ func createGroupRecord(ctx context.Context, client *dbent.Client, groupIn *servi
 		SetPeakStart(groupIn.PeakStart).
 		SetPeakEnd(groupIn.PeakEnd).
 		SetPeakRateMultiplier(groupIn.PeakRateMultiplier).
-		SetTimeBillingRules(groupIn.TimeBillingRules)
+		SetTimeBillingRules(nonNilTimeBillingRules(groupIn.TimeBillingRules))
 	if groupIn.DuplicateOperationID != "" {
 		builder = builder.SetDuplicateOperationID(groupIn.DuplicateOperationID)
 	}
@@ -270,7 +281,7 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 		SetPeakStart(groupIn.PeakStart).
 		SetPeakEnd(groupIn.PeakEnd).
 		SetPeakRateMultiplier(groupIn.PeakRateMultiplier).
-		SetTimeBillingRules(groupIn.TimeBillingRules)
+		SetTimeBillingRules(nonNilTimeBillingRules(groupIn.TimeBillingRules))
 
 	// 显式处理可空字段：nil 需要 clear，非 nil 需要 set。
 	if groupIn.DailyLimitUSD != nil {

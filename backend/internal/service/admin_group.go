@@ -374,7 +374,11 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 	if err := ValidatePeakRateConfig(subscriptionType, peakRateEnabled, peakStart, peakEnd, peakRateMultiplier); err != nil {
 		return nil, err
 	}
-	timeBillingRules := append([]TimeBillingRule(nil), input.TimeBillingRules...)
+	// Must stay non-nil: a nil slice marshals to JSON null, and the
+	// groups_time_billing_rules_array check constraint requires an array, so
+	// creating a group without time billing rules would fail outright.
+	timeBillingRules := make([]TimeBillingRule, 0, len(input.TimeBillingRules))
+	timeBillingRules = append(timeBillingRules, input.TimeBillingRules...)
 	if err := ValidateTimeBillingRules(timeBillingRules); err != nil {
 		return nil, err
 	}
@@ -715,7 +719,10 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 		group.PeakRateMultiplier = *input.PeakRateMultiplier
 	}
 	if input.TimeBillingRules != nil {
-		rules := append([]TimeBillingRule(nil), (*input.TimeBillingRules)...)
+		// Non-nil even when the caller clears every rule: a nil slice marshals to
+		// JSON null and violates the groups_time_billing_rules_array constraint.
+		rules := make([]TimeBillingRule, 0, len(*input.TimeBillingRules))
+		rules = append(rules, (*input.TimeBillingRules)...)
 		if err := ValidateTimeBillingRules(rules); err != nil {
 			return nil, err
 		}
