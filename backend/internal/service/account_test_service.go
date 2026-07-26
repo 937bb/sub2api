@@ -1490,8 +1490,14 @@ func createOpenAITestPayload(modelID string, isOAuth bool) map[string]any {
 		payload["store"] = false
 	}
 
-	// All accounts require instructions for Responses API
-	payload["instructions"] = openai.DefaultInstructions
+	// All accounts require instructions for Responses API. Pick them the same way
+	// the live gateway does (defaultCodexSynthInstructions ->
+	// openai.CodexBaseInstructionsForModel) instead of always sending the
+	// GPT-5-Codex prompt. A quota-bypass test is only meaningful if the request
+	// it sends matches what real traffic sends for that model; hardcoding the
+	// codex prompt meant a gpt-5.x test passed while live requests for the same
+	// model carried a different prompt entirely.
+	payload["instructions"] = defaultCodexSynthInstructions(modelID)
 
 	return payload
 }
