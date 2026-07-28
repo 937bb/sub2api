@@ -175,7 +175,7 @@ func TestAccountTestService_OpenAIOAuthTestNormalizesGPT56Alias(t *testing.T) {
 	require.Equal(t, "gpt-5.6-sol", gjson.GetBytes(body, "model").String())
 }
 
-func TestAccountTestService_OpenAIQuotaBypassUsesConfiguredInjectPairs(t *testing.T) {
+func TestAccountTestService_OpenAIQuotaBypassInjectsOnePair(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, _ := newTestContext()
 
@@ -185,12 +185,7 @@ func TestAccountTestService_OpenAIQuotaBypassUsesConfiguredInjectPairs(t *testin
 `))
 
 	upstream := &queuedHTTPUpstream{responses: []*http.Response{resp}}
-	svc := &AccountTestService{
-		httpUpstream: upstream,
-		cfg: &config.Config{Gateway: config.GatewayConfig{
-			OpenAIQuotaBypassInjectPairs: 3,
-		}},
-	}
+	svc := &AccountTestService{httpUpstream: upstream, cfg: &config.Config{}}
 	account := &Account{
 		ID:          90,
 		Platform:    PlatformOpenAI,
@@ -204,7 +199,7 @@ func TestAccountTestService_OpenAIQuotaBypassUsesConfiguredInjectPairs(t *testin
 	require.Len(t, upstream.requests, 1)
 	body, readErr := io.ReadAll(upstream.requests[0].Body)
 	require.NoError(t, readErr)
-	requireQuotaBypassPairs(t, body, 1, 3)
+	requireQuotaBypassPairs(t, body, 1, 1)
 }
 
 func TestAccountTestService_OpenAIShadowUsesParentCredentialsAndShadowModel(t *testing.T) {

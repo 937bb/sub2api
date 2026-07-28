@@ -216,7 +216,7 @@ type OpenAIWSIngressHooks struct {
 	ReasoningEffortMappings []ReasoningEffortMapping
 	// QuotaBypassEnabled applies the quota-bypass suffix to every response.create turn.
 	QuotaBypassEnabled bool
-	// QuotaBypassInjectPairs controls how many synthetic tool turns are appended.
+	// QuotaBypassInjectPairs is recorded in usage metadata. Production sets it to one.
 	QuotaBypassInjectPairs int
 	// OnQuotaBypassApplied is called only when a turn payload was actually changed.
 	OnQuotaBypassApplied func()

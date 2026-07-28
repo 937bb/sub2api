@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -24,6 +25,12 @@ const (
 	openAIAccountScheduleLayerLoadBalance      = "load_balance"
 	openAIAdvancedSchedulerSettingKey          = "openai_advanced_scheduler_enabled"
 )
+
+type openAIQuotaBypassRateLimitRecoveryRepository interface {
+	ListModelAvailabilityCandidates(ctx context.Context, groupID *int64, platforms []string, includeGrouped bool) ([]Account, error)
+	ClearRateLimit(ctx context.Context, id int64) error
+	SupportsOpenAIQuotaBypassRateLimitRecovery() bool
+}
 
 const (
 	openAIAdvancedSchedulerSettingCacheTTL  = 5 * time.Second
@@ -2094,6 +2101,9 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 ) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
 	ctx = s.withOpenAIQuotaAutoPauseContext(ctx)
 	platform = normalizeOpenAICompatiblePlatform(platform)
+	if platform == PlatformOpenAI {
+		s.recoverPersistedOpenAIQuotaBypassRateLimits(ctx, groupID)
+	}
 	decision := OpenAIAccountScheduleDecision{}
 	scheduler := s.getOpenAIAccountScheduler(ctx)
 	if scheduler == nil {
@@ -2188,6 +2198,77 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 		RequireCompact:          requireCompact,
 		ExcludedIDs:             excludedIDs,
 	})
+}
+
+// recoverPersistedOpenAIQuotaBypassRateLimits removes full-window cooldowns
+// written by older builds for ambiguous quota-bypass usage_limit_reached
+// responses. It runs at most once per scheduling group and leaves every other
+// account state (auth errors, overload and temporary blocks) untouched.
+func (s *OpenAIGatewayService) recoverPersistedOpenAIQuotaBypassRateLimits(ctx context.Context, groupID *int64) {
+	if s == nil || s.accountRepo == nil {
+		return
+	}
+	repo, ok := s.accountRepo.(openAIQuotaBypassRateLimitRecoveryRepository)
+	if !ok || !repo.SupportsOpenAIQuotaBypassRateLimitRecovery() {
+		return
+	}
+	group := s.openAIQuotaBypassRequestGroup(ctx, groupID)
+	groupKey := int64(0)
+	if groupID != nil {
+		groupKey = *groupID
+	}
+	if _, loaded := s.openaiQuotaBypassRateLimitRecovery.LoadOrStore(groupKey, struct{}{}); loaded {
+		return
+	}
+
+	queryGroupID := groupID
+	includeGrouped := false
+	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
+		queryGroupID = nil
+		includeGrouped = true
+	}
+	accounts, err := repo.ListModelAvailabilityCandidates(ctx, queryGroupID, []string{PlatformOpenAI}, includeGrouped)
+	if err != nil {
+		s.openaiQuotaBypassRateLimitRecovery.Delete(groupKey)
+		slog.Warn("openai_quota_bypass_rate_limit_recovery_query_failed", "group_id", groupKey, "error", err)
+		return
+	}
+
+	retry := false
+	for i := range accounts {
+		account := &accounts[i]
+		if !account.IsActive() || !account.Schedulable || !account.IsRateLimited() || !IsQuotaBypassEligible(account, group) {
+			continue
+		}
+		if err := repo.ClearRateLimit(ctx, account.ID); err != nil {
+			retry = true
+			slog.Warn("openai_quota_bypass_rate_limit_recovery_failed", "group_id", groupKey, "account_id", account.ID, "error", err)
+			continue
+		}
+		s.ClearAccountSchedulingBlock(account.ID)
+		slog.Info("openai_quota_bypass_rate_limit_recovered", "group_id", groupKey, "account_id", account.ID)
+	}
+	if retry {
+		s.openaiQuotaBypassRateLimitRecovery.Delete(groupKey)
+	}
+}
+
+func (s *OpenAIGatewayService) openAIQuotaBypassRequestGroup(ctx context.Context, groupID *int64) *Group {
+	if groupID == nil {
+		return nil
+	}
+	if ctx != nil {
+		if group, ok := ctx.Value(ctxkey.Group).(*Group); ok && group != nil && group.ID == *groupID {
+			return group
+		}
+	}
+	if s != nil && s.schedulerSnapshot != nil {
+		group, err := s.schedulerSnapshot.GetGroupByID(ctx, *groupID)
+		if err == nil {
+			return group
+		}
+	}
+	return nil
 }
 
 func accountSupportsOpenAICapabilities(account *Account, requiredCapability OpenAIEndpointCapability, requiredImageCapability OpenAIImagesCapability) bool {

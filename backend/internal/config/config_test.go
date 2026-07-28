@@ -345,34 +345,6 @@ func TestValidateOpenAIFirstOutputTimeoutMinimum(t *testing.T) {
 	require.NoError(t, cfg.Validate())
 }
 
-func TestLoadOpenAIQuotaBypassInjectPairs(t *testing.T) {
-	t.Run("default", func(t *testing.T) {
-		resetViperWithJWTSecret(t)
-		cfg, err := Load()
-		require.NoError(t, err)
-		require.Equal(t, 1, cfg.Gateway.OpenAIQuotaBypassInjectPairs)
-	})
-
-	t.Run("environment override", func(t *testing.T) {
-		resetViperWithJWTSecret(t)
-		t.Setenv("GATEWAY_OPENAI_QUOTA_BYPASS_INJECT_PAIRS", "4")
-		cfg, err := Load()
-		require.NoError(t, err)
-		require.Equal(t, 4, cfg.Gateway.OpenAIQuotaBypassInjectPairs)
-	})
-}
-
-func TestValidateOpenAIQuotaBypassInjectPairs(t *testing.T) {
-	for _, pairs := range []int{0, 17} {
-		resetViperWithJWTSecret(t)
-		cfg, err := Load()
-		require.NoError(t, err)
-		cfg.Gateway.OpenAIQuotaBypassInjectPairs = pairs
-		err = cfg.Validate()
-		require.ErrorContains(t, err, "gateway.openai_quota_bypass_inject_pairs")
-	}
-}
-
 func TestLoadDefaultOpenAIWSConfig(t *testing.T) {
 	resetViperWithJWTSecret(t)
 

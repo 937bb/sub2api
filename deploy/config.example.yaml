@@ -293,9 +293,6 @@ gateway:
   # Use this to avoid compact failures when newer models are not yet supported by the compact endpoint.
   # 当 compact 端点暂未支持更新模型时，可通过这里降级规避失败。
   openai_compact_model: "gpt-5.4"
-  # Number of synthetic function_call/function_call_output pairs injected for OpenAI quota bypass (1-16).
-  # OpenAI 超额绕过注入的工具调用对数（1-16，默认 1；增加会消耗更多输入 token）。
-  openai_quota_bypass_inject_pairs: 1
   # ChatGPT Frameless Live 单会话硬上限（秒）。
   live:
     max_session_duration_seconds: 3600

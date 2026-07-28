@@ -1063,6 +1063,17 @@ func (s *RateLimitService) handle429(ctx context.Context, account *Account, head
 	slog.Info("account_rate_limited", "account_id", account.ID, "reset_at", resetAt)
 }
 
+// recordOpenAIQuotaBypassUsageLimit keeps the upstream quota snapshot useful
+// without persisting an ambiguous usage_limit_reached response as a full-window
+// cooldown. The gateway applies a short in-memory retry delay for this case.
+func (s *RateLimitService) recordOpenAIQuotaBypassUsageLimit(ctx context.Context, account *Account, headers http.Header, responseBody []byte) {
+	if s == nil || account == nil || account.Platform != PlatformOpenAI || account.IsShadow() {
+		return
+	}
+	persistOpenAI429PlanType(ctx, s.accountRepo, account, responseBody)
+	s.persistOpenAICodexSnapshot(ctx, account, headers)
+}
+
 func (s *RateLimitService) apply429FallbackRateLimit(ctx context.Context, account *Account, reason string) {
 	cooldown, enabled := s.get429FallbackCooldown(ctx, account)
 	if !enabled {

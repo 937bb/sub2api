@@ -120,12 +120,19 @@ func TestInjectFunctionCallOutputSuffixN_ClampsPairCount(t *testing.T) {
 func TestResolveOpenAIQuotaBypassInjectPairs(t *testing.T) {
 	require.Equal(t, 1, ResolveOpenAIQuotaBypassInjectPairs(nil))
 	require.Equal(t, 1, ResolveOpenAIQuotaBypassInjectPairs(&config.Config{}))
-	require.Equal(t, 4, ResolveOpenAIQuotaBypassInjectPairs(&config.Config{
-		Gateway: config.GatewayConfig{OpenAIQuotaBypassInjectPairs: 4},
-	}))
-	require.Equal(t, quotaBypassMaxInjectPairs, ResolveOpenAIQuotaBypassInjectPairs(&config.Config{
-		Gateway: config.GatewayConfig{OpenAIQuotaBypassInjectPairs: quotaBypassMaxInjectPairs + 1},
-	}))
+}
+
+func TestInjectOpenAIQuotaBypassForRequest_AlwaysInjectsOnePair(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	body := []byte(`{"model":"gpt-5.4","input":[{"type":"message","role":"user","content":"hi"}]}`)
+
+	injected, ok := InjectOpenAIQuotaBypassForRequest(c, body, quotaBypassMaxInjectPairs)
+	require.True(t, ok)
+	requireQuotaBypassPairs(t, injected, 1, 1)
+	applied, pairs := OpenAIQuotaBypassUsageSnapshot(c)
+	require.True(t, applied)
+	require.Equal(t, 1, pairs)
 }
 
 func TestIsQuotaBypassEligible(t *testing.T) {
@@ -265,12 +272,7 @@ func TestOpenAIGatewayService_ForwardInjectsQuotaBypassForStringInput(t *testing
 		Header:     http.Header{"Content-Type": []string{"application/json"}},
 		Body:       io.NopCloser(strings.NewReader(`{"error":{"type":"invalid_request_error","message":"stop after capture"}}`)),
 	}}
-	svc := &OpenAIGatewayService{
-		cfg: &config.Config{Gateway: config.GatewayConfig{
-			OpenAIQuotaBypassInjectPairs: 3,
-		}},
-		httpUpstream: upstream,
-	}
+	svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
 	account := &Account{
 		ID:          501,
 		Name:        "quota-bypass-string-input",
@@ -290,7 +292,7 @@ func TestOpenAIGatewayService_ForwardInjectsQuotaBypassForStringInput(t *testing
 	require.Error(t, err)
 	require.Nil(t, result)
 	require.NotNil(t, upstream.lastReq)
-	requireQuotaBypassPairs(t, upstream.lastBody, 1, 3)
+	requireQuotaBypassPairs(t, upstream.lastBody, 1, 1)
 	require.Equal(t, "hello", gjson.GetBytes(upstream.lastBody, "input.0.content.0.text").String())
 }
 

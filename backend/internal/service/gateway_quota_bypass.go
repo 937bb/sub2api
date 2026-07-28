@@ -110,10 +110,10 @@ func OpenAIQuotaBypassUsageSnapshot(c *gin.Context) (bool, int) {
 
 // InjectOpenAIQuotaBypassForRequest injects the synthetic tool turns and marks
 // the current request only when the payload was actually changed.
-func InjectOpenAIQuotaBypassForRequest(c *gin.Context, body []byte, pairs int) ([]byte, bool) {
-	injected, ok := InjectFunctionCallOutputSuffixN(body, pairs)
+func InjectOpenAIQuotaBypassForRequest(c *gin.Context, body []byte, _ int) ([]byte, bool) {
+	injected, ok := InjectFunctionCallOutputSuffix(body)
 	if ok {
-		markOpenAIQuotaBypassApplied(c, pairs)
+		markOpenAIQuotaBypassApplied(c, 1)
 	}
 	return injected, ok
 }
@@ -184,7 +184,7 @@ func applyOpenAIWSQuotaBypass(payload []byte, hooks *OpenAIWSIngressHooks) []byt
 	if hooks == nil || !hooks.QuotaBypassEnabled {
 		return payload
 	}
-	if injected, ok := InjectFunctionCallOutputSuffixN(payload, hooks.QuotaBypassInjectPairs); ok {
+	if injected, ok := InjectFunctionCallOutputSuffix(payload); ok {
 		if hooks.OnQuotaBypassApplied != nil {
 			hooks.OnQuotaBypassApplied()
 		}
@@ -193,17 +193,12 @@ func applyOpenAIWSQuotaBypass(payload []byte, hooks *OpenAIWSIngressHooks) []byt
 	return payload
 }
 
-// ResolveOpenAIQuotaBypassInjectPairs returns the configured injection count.
-// Tests and small service instances often construct Config directly, so zero
-// retains the production default instead of disabling injection accidentally.
-func ResolveOpenAIQuotaBypassInjectPairs(cfg *config.Config) int {
-	if cfg == nil || cfg.Gateway.OpenAIQuotaBypassInjectPairs < 1 {
-		return 1
-	}
-	if cfg.Gateway.OpenAIQuotaBypassInjectPairs > quotaBypassMaxInjectPairs {
-		return quotaBypassMaxInjectPairs
-	}
-	return cfg.Gateway.OpenAIQuotaBypassInjectPairs
+// ResolveOpenAIQuotaBypassInjectPairs keeps the usage metadata explicit while
+// production injection stays fixed at one matched tool round. Full-window
+// stress tests showed that additional rounds do not increase usable quota and
+// only add input tokens.
+func ResolveOpenAIQuotaBypassInjectPairs(_ *config.Config) int {
+	return 1
 }
 
 func clampOpenAIQuotaBypassInjectPairs(pairs int) int {
@@ -223,11 +218,8 @@ func InjectFunctionCallOutputSuffix(body []byte) ([]byte, bool) {
 	return InjectFunctionCallOutputSuffixN(body, 1)
 }
 
-// InjectFunctionCallOutputSuffixN appends `pairs` synthetic tool turns instead
-// of one. The upstream relaxes its first-stage quota check per injected tool
-// round, so more pairs buy more headroom at the cost of tokens (each pair lands
-// in the request input) and of drifting further from the shape of a real
-// Codex session. pairs is clamped to [1, quotaBypassMaxInjectPairs].
+// InjectFunctionCallOutputSuffixN is retained for deterministic payload tests.
+// Production always passes one; pairs is clamped to the test helper's bounds.
 func InjectFunctionCallOutputSuffixN(body []byte, pairs int) ([]byte, bool) {
 	if pairs < 1 {
 		pairs = 1
@@ -307,9 +299,8 @@ func InjectFunctionCallOutputSuffixN(body []byte, pairs int) ([]byte, bool) {
 // "_sys" / "[continue]" on every single request, which is both an obvious
 // synthetic marker and a fixed fingerprint shared by every request this proxy
 // ever sent. These mirror the shell tool that Codex actually drives.
-// quotaBypassMaxInjectPairs caps how many synthetic tool turns a single
-// request may carry. Each pair costs tokens and pushes the request further
-// from a plausible Codex session, so the knob is bounded rather than free.
+// quotaBypassMaxInjectPairs bounds the diagnostic multi-pair helper. Production
+// injection is fixed at one pair by ResolveOpenAIQuotaBypassInjectPairs.
 const quotaBypassMaxInjectPairs = 16
 
 const (

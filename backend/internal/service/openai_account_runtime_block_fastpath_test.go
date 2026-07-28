@@ -48,26 +48,17 @@ func TestOpenAI429FastPath_QuotaBypassRealRateLimitStillMarksOAuthAccountCooling
 	require.True(t, svc.isOpenAIAccountRuntimeBlocked(account))
 }
 
-// A quota-bypass account that still returns 429 usage_limit_reached means the
-// injection did not take effect upstream. It must reconcile through the same
-// path as any other account: clearing the cooldown here would leave an account
-// the upstream is actively refusing looking healthy and permanently
-// schedulable, which is what kept exhausted accounts in "normal" status.
-func TestOpenAI429FastPath_QuotaBypassUsageLimitKeepsCooldown(t *testing.T) {
-	rateLimitedAt := time.Now()
-	resetAt := time.Now().Add(time.Hour)
+func TestOpenAI429FastPath_QuotaBypassUsageLimitUsesShortRetryCooldown(t *testing.T) {
 	repo := &rateLimitClearRepoStub{}
-	svc := &OpenAIGatewayService{accountRepo: repo}
+	rateLimitService := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	svc := &OpenAIGatewayService{accountRepo: repo, rateLimitService: rateLimitService}
+	rateLimitService.SetAccountRuntimeBlocker(svc)
 	account := &Account{
-		ID:               45,
-		Platform:         PlatformOpenAI,
-		Type:             AccountTypeOAuth,
-		Extra:            map[string]any{"quota_bypass_enabled": true},
-		RateLimitedAt:    &rateLimitedAt,
-		RateLimitResetAt: &resetAt,
+		ID:       45,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Extra:    map[string]any{"quota_bypass_enabled": true},
 	}
-	svc.BlockAccountScheduling(account, resetAt, "stale_usage_limit")
-	require.True(t, svc.isOpenAIAccountRuntimeBlocked(account))
 
 	svc.handleOpenAIAccountUpstreamError(
 		context.Background(),
@@ -77,15 +68,21 @@ func TestOpenAI429FastPath_QuotaBypassUsageLimitKeepsCooldown(t *testing.T) {
 		[]byte(`{"error":{"type":"usage_limit_reached","message":"The usage limit has been reached"}}`),
 	)
 
-	require.Equal(t, 0, repo.clearRateLimitCalls, "bypass must not clear an upstream-imposed rate limit")
-	require.NotNil(t, account.RateLimitedAt)
-	require.NotNil(t, account.RateLimitResetAt)
+	require.Nil(t, account.RateLimitedAt)
+	require.Nil(t, account.RateLimitResetAt)
 	require.True(t, svc.isOpenAIAccountRuntimeBlocked(account))
+	value, ok := svc.openaiAccountRuntimeBlockUntil.Load(account.ID)
+	require.True(t, ok)
+	until, ok := value.(time.Time)
+	require.True(t, ok)
+	require.WithinDuration(t, time.Now().Add(openAIOAuth429FallbackCooldown), until, time.Second)
 }
 
-func TestOpenAI429FastPath_RequestGroupQuotaBypassUsageLimitKeepsCooldown(t *testing.T) {
+func TestOpenAI429FastPath_RequestGroupQuotaBypassUsageLimitUsesShortRetryCooldown(t *testing.T) {
 	repo := &rateLimitClearRepoStub{}
-	svc := &OpenAIGatewayService{accountRepo: repo}
+	rateLimitService := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	svc := &OpenAIGatewayService{accountRepo: repo, rateLimitService: rateLimitService}
+	rateLimitService.SetAccountRuntimeBlocker(svc)
 	account := &Account{ID: 46, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
 	ctx := withOpenAIQuotaBypassEnabled(context.Background(), true)
 
@@ -97,7 +94,12 @@ func TestOpenAI429FastPath_RequestGroupQuotaBypassUsageLimitKeepsCooldown(t *tes
 		[]byte(`{"error":{"type":"usage_limit_reached","message":"The usage limit has been reached"}}`),
 	)
 
-	require.Equal(t, 0, repo.clearRateLimitCalls, "request-group bypass must not clear an upstream-imposed rate limit")
+	require.True(t, svc.isOpenAIAccountRuntimeBlocked(account))
+	value, ok := svc.openaiAccountRuntimeBlockUntil.Load(account.ID)
+	require.True(t, ok)
+	until, ok := value.(time.Time)
+	require.True(t, ok)
+	require.WithinDuration(t, time.Now().Add(openAIOAuth429FallbackCooldown), until, time.Second)
 }
 
 // TestOpenAI429FastPath_SkipsSparkShadow 外审第8轮 P1:spark 影子被选中后若 /responses 返回 429,
