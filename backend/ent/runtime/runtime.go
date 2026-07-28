@@ -2090,8 +2090,18 @@ func init() {
 	usagelogDescCacheTTLOverridden := usagelogFields[43].Descriptor()
 	// usagelog.DefaultCacheTTLOverridden holds the default value on creation for the cache_ttl_overridden field.
 	usagelog.DefaultCacheTTLOverridden = usagelogDescCacheTTLOverridden.Default.(bool)
+	// usagelogDescQuotaBypassApplied is the schema descriptor for quota_bypass_applied field.
+	usagelogDescQuotaBypassApplied := usagelogFields[44].Descriptor()
+	// usagelog.DefaultQuotaBypassApplied holds the default value on creation for the quota_bypass_applied field.
+	usagelog.DefaultQuotaBypassApplied = usagelogDescQuotaBypassApplied.Default.(bool)
+	// usagelogDescQuotaBypassInjectPairs is the schema descriptor for quota_bypass_inject_pairs field.
+	usagelogDescQuotaBypassInjectPairs := usagelogFields[45].Descriptor()
+	// usagelog.DefaultQuotaBypassInjectPairs holds the default value on creation for the quota_bypass_inject_pairs field.
+	usagelog.DefaultQuotaBypassInjectPairs = usagelogDescQuotaBypassInjectPairs.Default.(int)
+	// usagelog.QuotaBypassInjectPairsValidator is a validator for the "quota_bypass_inject_pairs" field. It is called by the builders before save.
+	usagelog.QuotaBypassInjectPairsValidator = usagelogDescQuotaBypassInjectPairs.Validators[0].(func(int) error)
 	// usagelogDescCreatedAt is the schema descriptor for created_at field.
-	usagelogDescCreatedAt := usagelogFields[44].Descriptor()
+	usagelogDescCreatedAt := usagelogFields[46].Descriptor()
 	// usagelog.DefaultCreatedAt holds the default value on creation for the created_at field.
 	usagelog.DefaultCreatedAt = usagelogDescCreatedAt.Default.(func() time.Time)
 	userMixin := schema.User{}.Mixin()

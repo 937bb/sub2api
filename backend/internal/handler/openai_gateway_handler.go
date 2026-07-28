@@ -9,6 +9,7 @@ import (
 	"runtime/debug"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -492,7 +493,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			quotaBypassEnabled := service.IsQuotaBypassEligible(account, apiKey.Group)
 			service.SetOpenAIQuotaBypassEnabled(c, quotaBypassEnabled)
 			if quotaBypassEnabled {
-				if injected, ok := service.InjectFunctionCallOutputSuffixN(attemptBody, service.ResolveOpenAIQuotaBypassInjectPairs(h.cfg)); ok {
+				if injected, ok := service.InjectOpenAIQuotaBypassForRequest(c, attemptBody, service.ResolveOpenAIQuotaBypassInjectPairs(h.cfg)); ok {
 					attemptBody = injected
 				}
 			}
@@ -502,7 +503,8 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		if service.GetOpsCyberPolicy(c) != nil {
 			cyberBlockKeyHTTP = service.CyberSessionBlockKey(apiKey.ID, c, sessionHashBody)
 		}
-		h.recordCyberPolicyIfMarked(c, apiKey, account, subscription, reqModel, err != nil, cyberBlockKeyHTTP, clientRequestedUsageFields(c, channelMapping, reqModel, ""), service.HashUsageRequestPayload(body))
+		quotaBypassApplied, quotaBypassInjectPairs := service.OpenAIQuotaBypassUsageSnapshot(c)
+		h.recordCyberPolicyIfMarkedWithQuota(c, apiKey, account, subscription, reqModel, err != nil, cyberBlockKeyHTTP, clientRequestedUsageFields(c, channelMapping, reqModel, ""), service.HashUsageRequestPayload(body), quotaBypassApplied, quotaBypassInjectPairs)
 		forwardDurationMs := time.Since(forwardStart).Milliseconds()
 		upstreamLatencyMs, _ := getContextInt64(c, service.OpsUpstreamLatencyMsKey)
 		responseLatencyMs := forwardDurationMs
@@ -641,21 +643,23 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		cyberBlocked := service.GetOpsCyberPolicy(c) != nil
 		h.submitOpenAIUsageRecordTask(c.Request.Context(), result, func(ctx context.Context) {
 			if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
-				Result:             result,
-				APIKey:             apiKey,
-				User:               apiKey.User,
-				Account:            account,
-				Subscription:       subscription,
-				InboundEndpoint:    inboundEndpoint,
-				UpstreamEndpoint:   upstreamEndpoint,
-				UserAgent:          userAgent,
-				IPAddress:          clientIP,
-				RequestPayloadHash: requestPayloadHash,
-				APIKeyService:      h.apiKeyService,
-				QuotaPlatform:      quotaPlatform,
-				SessionID:          sessionID,
-				ChannelUsageFields: clientRequestedUsageFields(c, channelMapping, reqModel, result.UpstreamModel),
-				CyberBlocked:       cyberBlocked,
+				Result:                 result,
+				APIKey:                 apiKey,
+				User:                   apiKey.User,
+				Account:                account,
+				Subscription:           subscription,
+				InboundEndpoint:        inboundEndpoint,
+				UpstreamEndpoint:       upstreamEndpoint,
+				UserAgent:              userAgent,
+				IPAddress:              clientIP,
+				RequestPayloadHash:     requestPayloadHash,
+				APIKeyService:          h.apiKeyService,
+				QuotaPlatform:          quotaPlatform,
+				SessionID:              sessionID,
+				QuotaBypassApplied:     quotaBypassApplied,
+				QuotaBypassInjectPairs: quotaBypassInjectPairs,
+				ChannelUsageFields:     clientRequestedUsageFields(c, channelMapping, reqModel, result.UpstreamModel),
+				CyberBlocked:           cyberBlocked,
 			}); err != nil {
 				logger.L().With(
 					zap.String("component", "handler.openai_gateway.responses"),
@@ -1042,7 +1046,8 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		if service.GetOpsCyberPolicy(c) != nil {
 			cyberBlockKeyMsg = service.CyberSessionBlockKey(apiKey.ID, c, body)
 		}
-		h.recordCyberPolicyIfMarked(c, apiKey, account, subscription, reqModel, err != nil, cyberBlockKeyMsg, clientRequestedUsageFields(c, channelMappingMsg, reqModel, ""), service.HashUsageRequestPayload(body))
+		quotaBypassApplied, quotaBypassInjectPairs := service.OpenAIQuotaBypassUsageSnapshot(c)
+		h.recordCyberPolicyIfMarkedWithQuota(c, apiKey, account, subscription, reqModel, err != nil, cyberBlockKeyMsg, clientRequestedUsageFields(c, channelMappingMsg, reqModel, ""), service.HashUsageRequestPayload(body), quotaBypassApplied, quotaBypassInjectPairs)
 		forwardDurationMs := time.Since(forwardStart).Milliseconds()
 		upstreamLatencyMs, _ := getContextInt64(c, service.OpsUpstreamLatencyMsKey)
 		responseLatencyMs := forwardDurationMs
@@ -1154,21 +1159,23 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		cyberBlocked := service.GetOpsCyberPolicy(c) != nil
 		h.submitOpenAIUsageRecordTask(c.Request.Context(), result, func(ctx context.Context) {
 			if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
-				Result:             result,
-				APIKey:             apiKey,
-				User:               apiKey.User,
-				Account:            account,
-				Subscription:       subscription,
-				InboundEndpoint:    inboundEndpoint,
-				UpstreamEndpoint:   upstreamEndpoint,
-				UserAgent:          userAgent,
-				IPAddress:          clientIP,
-				RequestPayloadHash: requestPayloadHash,
-				APIKeyService:      h.apiKeyService,
-				QuotaPlatform:      quotaPlatform,
-				SessionID:          sessionID,
-				ChannelUsageFields: clientRequestedUsageFields(c, channelMappingMsg, reqModel, result.UpstreamModel),
-				CyberBlocked:       cyberBlocked,
+				Result:                 result,
+				APIKey:                 apiKey,
+				User:                   apiKey.User,
+				Account:                account,
+				Subscription:           subscription,
+				InboundEndpoint:        inboundEndpoint,
+				UpstreamEndpoint:       upstreamEndpoint,
+				UserAgent:              userAgent,
+				IPAddress:              clientIP,
+				RequestPayloadHash:     requestPayloadHash,
+				APIKeyService:          h.apiKeyService,
+				QuotaPlatform:          quotaPlatform,
+				SessionID:              sessionID,
+				QuotaBypassApplied:     quotaBypassApplied,
+				QuotaBypassInjectPairs: quotaBypassInjectPairs,
+				ChannelUsageFields:     clientRequestedUsageFields(c, channelMappingMsg, reqModel, result.UpstreamModel),
+				CyberBlocked:           cyberBlocked,
 			}); err != nil {
 				logger.L().With(
 					zap.String("component", "handler.openai_gateway.messages"),
@@ -1781,6 +1788,8 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		}
 		var requestPayloadHash string
 		quotaBypassEnabled := service.IsQuotaBypassEligible(account, apiKey.Group)
+		quotaBypassInjectPairs := service.ResolveOpenAIQuotaBypassInjectPairs(h.cfg)
+		var quotaBypassApplied atomic.Bool
 		service.SetOpenAIQuotaBypassEnabled(c, quotaBypassEnabled)
 		ctx = c.Request.Context()
 		hooks := &service.OpenAIWSIngressHooks{
@@ -1788,7 +1797,8 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			MaxReasoningEffort:      maxReasoningEffort,
 			ReasoningEffortMappings: reasoningEffortMappings,
 			QuotaBypassEnabled:      quotaBypassEnabled,
-			QuotaBypassInjectPairs:  service.ResolveOpenAIQuotaBypassInjectPairs(h.cfg),
+			QuotaBypassInjectPairs:  quotaBypassInjectPairs,
+			OnQuotaBypassApplied:    func() { quotaBypassApplied.Store(true) },
 			BeforeRequest: func(turn int, payload []byte, originalModel string) error {
 				if turn == 1 {
 					return nil
@@ -1845,12 +1855,17 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				return nil
 			},
 			AfterTurn: func(turn int, result *service.OpenAIForwardResult, turnErr error) {
+				turnQuotaBypassApplied := quotaBypassApplied.Swap(false)
 				// F1: cyber 标记按 turn 生命周期清理——defer 保证任意早返回路径都执行；
 				// CyberBlocked 必须在 submit 前同步预捕获（task 闭包由 worker 池异步执行，
 				// 届时 defer 已清除标记）。
 				defer clearCyberPolicyTurnState(c)
 				releaseTurnSlots()
-				h.recordCyberPolicyIfMarked(c, apiKey, account, subscription, reqModel, turnErr != nil, cyberBlockKey, clientRequestedUsageFields(c, channelMappingWS, reqModel, ""), requestPayloadHash)
+				turnQuotaBypassInjectPairs := 0
+				if turnQuotaBypassApplied {
+					turnQuotaBypassInjectPairs = quotaBypassInjectPairs
+				}
+				h.recordCyberPolicyIfMarkedWithQuota(c, apiKey, account, subscription, reqModel, turnErr != nil, cyberBlockKey, clientRequestedUsageFields(c, channelMappingWS, reqModel, ""), requestPayloadHash, turnQuotaBypassApplied, turnQuotaBypassInjectPairs)
 				if service.GetOpsCyberPolicy(c) != nil {
 					cyberBlockedThisConn = true
 				}
@@ -1897,6 +1912,13 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 						APIKeyService:      h.apiKeyService,
 						QuotaPlatform:      quotaPlatform,
 						SessionID:          sessionID,
+						QuotaBypassApplied: turnQuotaBypassApplied,
+						QuotaBypassInjectPairs: func() int {
+							if turnQuotaBypassApplied {
+								return quotaBypassInjectPairs
+							}
+							return 0
+						}(),
 						ChannelUsageFields: clientRequestedUsageFields(c, channelMappingWS, reqModel, result.UpstreamModel),
 						CyberBlocked:       cyberBlocked,
 					}); err != nil {
@@ -2846,6 +2868,11 @@ func (h *OpenAIGatewayHandler) enqueueCyberSessionBlockedOpsEntry(c *gin.Context
 // 当前请求已发给用户，本方法只做事后记录，不影响响应。forwardErrored 为 true 时才写用量行，
 // 避免与正常 RecordUsage(forward 成功路径)重复。每请求至多记录一次。
 func (h *OpenAIGatewayHandler) recordCyberPolicyIfMarked(c *gin.Context, apiKey *service.APIKey, account *service.Account, subscription *service.UserSubscription, model string, forwardErrored bool, cyberBlockKey string, channelFields service.ChannelUsageFields, requestPayloadHash string) {
+	quotaBypassApplied, quotaBypassInjectPairs := service.OpenAIQuotaBypassUsageSnapshot(c)
+	h.recordCyberPolicyIfMarkedWithQuota(c, apiKey, account, subscription, model, forwardErrored, cyberBlockKey, channelFields, requestPayloadHash, quotaBypassApplied, quotaBypassInjectPairs)
+}
+
+func (h *OpenAIGatewayHandler) recordCyberPolicyIfMarkedWithQuota(c *gin.Context, apiKey *service.APIKey, account *service.Account, subscription *service.UserSubscription, model string, forwardErrored bool, cyberBlockKey string, channelFields service.ChannelUsageFields, requestPayloadHash string, quotaBypassApplied bool, quotaBypassInjectPairs int) {
 	mark := service.GetOpsCyberPolicy(c)
 	if mark == nil {
 		return
@@ -2950,22 +2977,24 @@ func (h *OpenAIGatewayHandler) recordCyberPolicyIfMarked(c *gin.Context, apiKey 
 		}
 		if forwardErrored && gwSvc != nil {
 			gwSvc.RecordCyberPolicyUsageLog(ctx, service.CyberPolicyUsageInput{
-				APIKey:             apiKey,
-				Account:            account,
-				Subscription:       subscription,
-				RequestID:          requestID,
-				Model:              model,
-				Stream:             stream,
-				InputTokens:        mark.UpstreamInTok,
-				OutputTokens:       mark.UpstreamOutTok,
-				InboundEndpoint:    inboundEndpoint,
-				UpstreamEndpoint:   upstreamEndpoint,
-				UserAgent:          userAgent,
-				IPAddress:          clientIPStr,
-				SessionID:          sessionID,
-				RequestPayloadHash: requestPayloadHash,
-				APIKeyService:      apiKeySvc,
-				ChannelUsageFields: channelFields,
+				APIKey:                 apiKey,
+				Account:                account,
+				Subscription:           subscription,
+				RequestID:              requestID,
+				Model:                  model,
+				Stream:                 stream,
+				InputTokens:            mark.UpstreamInTok,
+				OutputTokens:           mark.UpstreamOutTok,
+				InboundEndpoint:        inboundEndpoint,
+				UpstreamEndpoint:       upstreamEndpoint,
+				UserAgent:              userAgent,
+				IPAddress:              clientIPStr,
+				SessionID:              sessionID,
+				QuotaBypassApplied:     quotaBypassApplied,
+				QuotaBypassInjectPairs: quotaBypassInjectPairs,
+				RequestPayloadHash:     requestPayloadHash,
+				APIKeyService:          apiKeySvc,
+				ChannelUsageFields:     channelFields,
 			})
 		}
 		if gwSvc != nil && cyberBlockKey != "" {

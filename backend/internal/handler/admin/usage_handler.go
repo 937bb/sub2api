@@ -200,6 +200,23 @@ func (h *UsageHandler) List(c *gin.Context) {
 	response.Paginated(c, out, result.Total, page, pageSize)
 }
 
+// GetByID returns one complete usage record. The list endpoint remains compact;
+// the admin UI calls this endpoint only after the details action is opened.
+// GET /api/v1/admin/usage/:id
+func (h *UsageHandler) GetByID(c *gin.Context) {
+	usageID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || usageID <= 0 {
+		response.BadRequest(c, "Invalid usage ID")
+		return
+	}
+	record, err := h.usageService.GetByID(c.Request.Context(), usageID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, dto.UsageLogFromServiceAdmin(record))
+}
+
 // Stats handles getting usage statistics with filters
 // GET /api/v1/admin/usage/stats
 func (h *UsageHandler) Stats(c *gin.Context) {

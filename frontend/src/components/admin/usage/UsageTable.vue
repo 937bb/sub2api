@@ -104,6 +104,30 @@
           </span>
         </template>
 
+        <template #cell-request_detail="{ row }">
+          <div class="flex min-w-24 items-center gap-2">
+            <span
+              class="inline-flex items-center rounded px-2 py-0.5 text-xs font-medium"
+              :class="row.quota_bypass_applied
+                ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200'
+                : 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200'"
+            >
+              {{ row.quota_bypass_applied
+                ? t('admin.usage.quotaBypassShort', { count: row.quota_bypass_inject_pairs || 0 })
+                : t('admin.usage.regularRequest') }}
+            </span>
+            <button
+              type="button"
+              class="flex h-8 w-8 shrink-0 items-center justify-center rounded text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:text-gray-400 dark:hover:bg-dark-700 dark:hover:text-primary-400"
+              :title="t('admin.usage.viewRequestDetail')"
+              :aria-label="t('admin.usage.viewRequestDetail')"
+              @click="emit('detailClick', row)"
+            >
+              <Icon name="eye" size="sm" />
+            </button>
+          </div>
+        </template>
+
         <template #cell-billing_mode="{ row }">
           <span class="inline-flex items-center rounded px-2 py-0.5 text-xs font-medium" :class="getBillingModeBadgeClass(getDisplayBillingMode(row))">
             {{ getBillingModeLabel(getDisplayBillingMode(row), t) }}
@@ -538,6 +562,7 @@ const props = withDefaults(defineProps<Props>(), {
 })
 const emit = defineEmits<{
   userClick: [userID: number, email?: string]
+  detailClick: [row: AdminUsageLog]
   sort: [key: string, order: 'asc' | 'desc']
   ipGeoBatchFailed: []
 }>()

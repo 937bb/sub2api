@@ -43238,6 +43238,9 @@ type UsageLogMutation struct {
 	video_duration_seconds       *int
 	addvideo_duration_seconds    *int
 	cache_ttl_overridden         *bool
+	quota_bypass_applied         *bool
+	quota_bypass_inject_pairs    *int
+	addquota_bypass_inject_pairs *int
 	created_at                   *time.Time
 	clearedFields                map[string]struct{}
 	user                         *int64
@@ -45622,6 +45625,98 @@ func (m *UsageLogMutation) ResetCacheTTLOverridden() {
 	m.cache_ttl_overridden = nil
 }
 
+// SetQuotaBypassApplied sets the "quota_bypass_applied" field.
+func (m *UsageLogMutation) SetQuotaBypassApplied(b bool) {
+	m.quota_bypass_applied = &b
+}
+
+// QuotaBypassApplied returns the value of the "quota_bypass_applied" field in the mutation.
+func (m *UsageLogMutation) QuotaBypassApplied() (r bool, exists bool) {
+	v := m.quota_bypass_applied
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldQuotaBypassApplied returns the old "quota_bypass_applied" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldQuotaBypassApplied(ctx context.Context) (v bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldQuotaBypassApplied is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldQuotaBypassApplied requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldQuotaBypassApplied: %w", err)
+	}
+	return oldValue.QuotaBypassApplied, nil
+}
+
+// ResetQuotaBypassApplied resets all changes to the "quota_bypass_applied" field.
+func (m *UsageLogMutation) ResetQuotaBypassApplied() {
+	m.quota_bypass_applied = nil
+}
+
+// SetQuotaBypassInjectPairs sets the "quota_bypass_inject_pairs" field.
+func (m *UsageLogMutation) SetQuotaBypassInjectPairs(i int) {
+	m.quota_bypass_inject_pairs = &i
+	m.addquota_bypass_inject_pairs = nil
+}
+
+// QuotaBypassInjectPairs returns the value of the "quota_bypass_inject_pairs" field in the mutation.
+func (m *UsageLogMutation) QuotaBypassInjectPairs() (r int, exists bool) {
+	v := m.quota_bypass_inject_pairs
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldQuotaBypassInjectPairs returns the old "quota_bypass_inject_pairs" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldQuotaBypassInjectPairs(ctx context.Context) (v int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldQuotaBypassInjectPairs is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldQuotaBypassInjectPairs requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldQuotaBypassInjectPairs: %w", err)
+	}
+	return oldValue.QuotaBypassInjectPairs, nil
+}
+
+// AddQuotaBypassInjectPairs adds i to the "quota_bypass_inject_pairs" field.
+func (m *UsageLogMutation) AddQuotaBypassInjectPairs(i int) {
+	if m.addquota_bypass_inject_pairs != nil {
+		*m.addquota_bypass_inject_pairs += i
+	} else {
+		m.addquota_bypass_inject_pairs = &i
+	}
+}
+
+// AddedQuotaBypassInjectPairs returns the value that was added to the "quota_bypass_inject_pairs" field in this mutation.
+func (m *UsageLogMutation) AddedQuotaBypassInjectPairs() (r int, exists bool) {
+	v := m.addquota_bypass_inject_pairs
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetQuotaBypassInjectPairs resets all changes to the "quota_bypass_inject_pairs" field.
+func (m *UsageLogMutation) ResetQuotaBypassInjectPairs() {
+	m.quota_bypass_inject_pairs = nil
+	m.addquota_bypass_inject_pairs = nil
+}
+
 // SetCreatedAt sets the "created_at" field.
 func (m *UsageLogMutation) SetCreatedAt(t time.Time) {
 	m.created_at = &t
@@ -45827,7 +45922,7 @@ func (m *UsageLogMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *UsageLogMutation) Fields() []string {
-	fields := make([]string, 0, 45)
+	fields := make([]string, 0, 47)
 	if m.user != nil {
 		fields = append(fields, usagelog.FieldUserID)
 	}
@@ -45960,6 +46055,12 @@ func (m *UsageLogMutation) Fields() []string {
 	if m.cache_ttl_overridden != nil {
 		fields = append(fields, usagelog.FieldCacheTTLOverridden)
 	}
+	if m.quota_bypass_applied != nil {
+		fields = append(fields, usagelog.FieldQuotaBypassApplied)
+	}
+	if m.quota_bypass_inject_pairs != nil {
+		fields = append(fields, usagelog.FieldQuotaBypassInjectPairs)
+	}
 	if m.created_at != nil {
 		fields = append(fields, usagelog.FieldCreatedAt)
 	}
@@ -46059,6 +46160,10 @@ func (m *UsageLogMutation) Field(name string) (ent.Value, bool) {
 		return m.VideoDurationSeconds()
 	case usagelog.FieldCacheTTLOverridden:
 		return m.CacheTTLOverridden()
+	case usagelog.FieldQuotaBypassApplied:
+		return m.QuotaBypassApplied()
+	case usagelog.FieldQuotaBypassInjectPairs:
+		return m.QuotaBypassInjectPairs()
 	case usagelog.FieldCreatedAt:
 		return m.CreatedAt()
 	}
@@ -46158,6 +46263,10 @@ func (m *UsageLogMutation) OldField(ctx context.Context, name string) (ent.Value
 		return m.OldVideoDurationSeconds(ctx)
 	case usagelog.FieldCacheTTLOverridden:
 		return m.OldCacheTTLOverridden(ctx)
+	case usagelog.FieldQuotaBypassApplied:
+		return m.OldQuotaBypassApplied(ctx)
+	case usagelog.FieldQuotaBypassInjectPairs:
+		return m.OldQuotaBypassInjectPairs(ctx)
 	case usagelog.FieldCreatedAt:
 		return m.OldCreatedAt(ctx)
 	}
@@ -46477,6 +46586,20 @@ func (m *UsageLogMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetCacheTTLOverridden(v)
 		return nil
+	case usagelog.FieldQuotaBypassApplied:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetQuotaBypassApplied(v)
+		return nil
+	case usagelog.FieldQuotaBypassInjectPairs:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetQuotaBypassInjectPairs(v)
+		return nil
 	case usagelog.FieldCreatedAt:
 		v, ok := value.(time.Time)
 		if !ok {
@@ -46555,6 +46678,9 @@ func (m *UsageLogMutation) AddedFields() []string {
 	if m.addvideo_duration_seconds != nil {
 		fields = append(fields, usagelog.FieldVideoDurationSeconds)
 	}
+	if m.addquota_bypass_inject_pairs != nil {
+		fields = append(fields, usagelog.FieldQuotaBypassInjectPairs)
+	}
 	return fields
 }
 
@@ -46605,6 +46731,8 @@ func (m *UsageLogMutation) AddedField(name string) (ent.Value, bool) {
 		return m.AddedVideoCount()
 	case usagelog.FieldVideoDurationSeconds:
 		return m.AddedVideoDurationSeconds()
+	case usagelog.FieldQuotaBypassInjectPairs:
+		return m.AddedQuotaBypassInjectPairs()
 	}
 	return nil, false
 }
@@ -46760,6 +46888,13 @@ func (m *UsageLogMutation) AddField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.AddVideoDurationSeconds(v)
+		return nil
+	case usagelog.FieldQuotaBypassInjectPairs:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddQuotaBypassInjectPairs(v)
 		return nil
 	}
 	return fmt.Errorf("unknown UsageLog numeric field %s", name)
@@ -47042,6 +47177,12 @@ func (m *UsageLogMutation) ResetField(name string) error {
 		return nil
 	case usagelog.FieldCacheTTLOverridden:
 		m.ResetCacheTTLOverridden()
+		return nil
+	case usagelog.FieldQuotaBypassApplied:
+		m.ResetQuotaBypassApplied()
+		return nil
+	case usagelog.FieldQuotaBypassInjectPairs:
+		m.ResetQuotaBypassInjectPairs()
 		return nil
 	case usagelog.FieldCreatedAt:
 		m.ResetCreatedAt()

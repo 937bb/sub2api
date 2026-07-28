@@ -218,9 +218,11 @@ type OpenAIWSIngressHooks struct {
 	QuotaBypassEnabled bool
 	// QuotaBypassInjectPairs controls how many synthetic tool turns are appended.
 	QuotaBypassInjectPairs int
-	BeforeTurn             func(turn int) error
-	BeforeRequest          func(turn int, payload []byte, originalModel string) error
-	AfterTurn              func(turn int, result *OpenAIForwardResult, turnErr error)
+	// OnQuotaBypassApplied is called only when a turn payload was actually changed.
+	OnQuotaBypassApplied func()
+	BeforeTurn           func(turn int) error
+	BeforeRequest        func(turn int, payload []byte, originalModel string) error
+	AfterTurn            func(turn int, result *OpenAIForwardResult, turnErr error)
 }
 
 func (s *OpenAIGatewayService) getOpenAIWSConnPool() *openAIWSConnPool {

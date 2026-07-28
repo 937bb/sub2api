@@ -15,7 +15,13 @@ import (
 	"github.com/tidwall/sjson"
 )
 
-const openAIQuotaBypassEnabledContextKey = "openai_quota_bypass_enabled"
+const (
+	openAIQuotaBypassEnabledContextKey     = "openai_quota_bypass_enabled"
+	openAIQuotaBypassAppliedContextKey     = "openai_quota_bypass_applied"
+	openAIQuotaBypassInjectPairsContextKey = "openai_quota_bypass_inject_pairs"
+	openAIQuotaBypassResponseHeader        = "X-Sub2API-Quota-Bypass"
+	openAIQuotaBypassPairsResponseHeader   = "X-Sub2API-Quota-Bypass-Pairs"
+)
 
 type openAIQuotaBypassContextKeyType struct{}
 
@@ -64,9 +70,52 @@ func SetOpenAIQuotaBypassEnabled(c *gin.Context, enabled bool) {
 		return
 	}
 	c.Set(openAIQuotaBypassEnabledContextKey, enabled)
+	// A failover selection starts a new attempt. Do not let an injection made
+	// for the previous account leak into the final account's usage snapshot.
+	c.Set(openAIQuotaBypassAppliedContextKey, false)
+	c.Set(openAIQuotaBypassInjectPairsContextKey, 0)
+	c.Writer.Header().Del(openAIQuotaBypassResponseHeader)
+	c.Writer.Header().Del(openAIQuotaBypassPairsResponseHeader)
 	if c.Request != nil {
 		c.Request = c.Request.WithContext(withOpenAIQuotaBypassEnabled(c.Request.Context(), enabled))
 	}
+}
+
+func markOpenAIQuotaBypassApplied(c *gin.Context, pairs int) {
+	if c == nil {
+		return
+	}
+	c.Set(openAIQuotaBypassAppliedContextKey, true)
+	pairs = clampOpenAIQuotaBypassInjectPairs(pairs)
+	c.Set(openAIQuotaBypassInjectPairsContextKey, pairs)
+	c.Header(openAIQuotaBypassResponseHeader, "applied")
+	c.Header(openAIQuotaBypassPairsResponseHeader, strconv.Itoa(pairs))
+}
+
+// OpenAIQuotaBypassUsageSnapshot returns the immutable request metadata that
+// should be copied into a usage log before billing is dispatched asynchronously.
+func OpenAIQuotaBypassUsageSnapshot(c *gin.Context) (bool, int) {
+	if c == nil {
+		return false, 0
+	}
+	appliedValue, exists := c.Get(openAIQuotaBypassAppliedContextKey)
+	applied, ok := appliedValue.(bool)
+	if !exists || !ok || !applied {
+		return false, 0
+	}
+	pairsValue, _ := c.Get(openAIQuotaBypassInjectPairsContextKey)
+	pairs, _ := pairsValue.(int)
+	return true, clampOpenAIQuotaBypassInjectPairs(pairs)
+}
+
+// InjectOpenAIQuotaBypassForRequest injects the synthetic tool turns and marks
+// the current request only when the payload was actually changed.
+func InjectOpenAIQuotaBypassForRequest(c *gin.Context, body []byte, pairs int) ([]byte, bool) {
+	injected, ok := InjectFunctionCallOutputSuffixN(body, pairs)
+	if ok {
+		markOpenAIQuotaBypassApplied(c, pairs)
+	}
+	return injected, ok
 }
 
 func withOpenAIQuotaBypassEnabled(ctx context.Context, enabled bool) context.Context {
@@ -125,7 +174,7 @@ func applyOpenAIQuotaBypassForRequest(c *gin.Context, account *Account, body []b
 	if !isOpenAIQuotaBypassEnabledForRequest(c, account) {
 		return body
 	}
-	if injected, ok := InjectFunctionCallOutputSuffixN(body, pairs); ok {
+	if injected, ok := InjectOpenAIQuotaBypassForRequest(c, body, pairs); ok {
 		return injected
 	}
 	return body
@@ -136,6 +185,9 @@ func applyOpenAIWSQuotaBypass(payload []byte, hooks *OpenAIWSIngressHooks) []byt
 		return payload
 	}
 	if injected, ok := InjectFunctionCallOutputSuffixN(payload, hooks.QuotaBypassInjectPairs); ok {
+		if hooks.OnQuotaBypassApplied != nil {
+			hooks.OnQuotaBypassApplied()
+		}
 		return injected
 	}
 	return payload
@@ -152,6 +204,16 @@ func ResolveOpenAIQuotaBypassInjectPairs(cfg *config.Config) int {
 		return quotaBypassMaxInjectPairs
 	}
 	return cfg.Gateway.OpenAIQuotaBypassInjectPairs
+}
+
+func clampOpenAIQuotaBypassInjectPairs(pairs int) int {
+	if pairs < 1 {
+		return 1
+	}
+	if pairs > quotaBypassMaxInjectPairs {
+		return quotaBypassMaxInjectPairs
+	}
+	return pairs
 }
 
 // InjectFunctionCallOutputSuffix appends one synthetic function_call +

@@ -169,6 +169,13 @@ func (UsageLog) Fields() []ent.Field {
 		// Cache TTL Override 标记（管理员强制替换了缓存 TTL 计费）
 		field.Bool("cache_ttl_overridden").
 			Default(false),
+		field.Bool("quota_bypass_applied").
+			Default(false).
+			Comment("Whether synthetic quota-bypass tool turns were applied to this request"),
+		field.Int("quota_bypass_inject_pairs").
+			Default(0).
+			NonNegative().
+			Comment("Number of synthetic quota-bypass tool turn pairs applied to this request"),
 
 		// 时间戳（只有 created_at，日志不可修改）
 		field.Time("created_at").

@@ -20,19 +20,21 @@ import (
 
 // OpenAIRecordUsageInput input for recording usage
 type OpenAIRecordUsageInput struct {
-	Result             *OpenAIForwardResult
-	APIKey             *APIKey
-	User               *User
-	Account            *Account
-	Subscription       *UserSubscription
-	InboundEndpoint    string
-	UpstreamEndpoint   string
-	UserAgent          string // 请求的 User-Agent
-	IPAddress          string // 请求的客户端 IP 地址
-	SessionID          string // 客户端显式会话标识（session_id / X-Session-Id 等请求头），仅用于用量行会话关联
-	RequestPayloadHash string
-	APIKeyService      APIKeyQuotaUpdater
-	QuotaPlatform      string // user×platform quota platform resolved by the handler before async billing.
+	Result                 *OpenAIForwardResult
+	APIKey                 *APIKey
+	User                   *User
+	Account                *Account
+	Subscription           *UserSubscription
+	InboundEndpoint        string
+	UpstreamEndpoint       string
+	UserAgent              string // 请求的 User-Agent
+	IPAddress              string // 请求的客户端 IP 地址
+	SessionID              string // 客户端显式会话标识（session_id / X-Session-Id 等请求头），仅用于用量行会话关联
+	QuotaBypassApplied     bool
+	QuotaBypassInjectPairs int
+	RequestPayloadHash     string
+	APIKeyService          APIKeyQuotaUpdater
+	QuotaPlatform          string // user×platform quota platform resolved by the handler before async billing.
 	// CyberBlocked 为 true 时把该用量行标记为 cyber（request_type=cyber），计费逻辑不变。
 	CyberBlocked bool
 	ChannelUsageFields
@@ -52,13 +54,15 @@ type CyberPolicyUsageInput struct {
 	OutputTokens int
 	// 渠道归因与请求级 meta，使 cyber 计费行与正常 RecordUsage 行口径一致
 	// （否则 cyber 行 channel_id 等为空，渠道维度统计会遗漏 cyber 命中）。
-	InboundEndpoint    string
-	UpstreamEndpoint   string
-	UserAgent          string
-	IPAddress          string
-	SessionID          string
-	RequestPayloadHash string
-	APIKeyService      APIKeyQuotaUpdater
+	InboundEndpoint        string
+	UpstreamEndpoint       string
+	UserAgent              string
+	IPAddress              string
+	SessionID              string
+	QuotaBypassApplied     bool
+	QuotaBypassInjectPairs int
+	RequestPayloadHash     string
+	APIKeyService          APIKeyQuotaUpdater
 	ChannelUsageFields
 }
 
@@ -82,20 +86,22 @@ func (s *OpenAIGatewayService) RecordCyberPolicyUsageLog(ctx context.Context, in
 		},
 	}
 	if err := s.RecordUsage(ctx, &OpenAIRecordUsageInput{
-		Result:             result,
-		APIKey:             in.APIKey,
-		User:               in.APIKey.User,
-		Account:            in.Account,
-		Subscription:       in.Subscription,
-		InboundEndpoint:    in.InboundEndpoint,
-		UpstreamEndpoint:   in.UpstreamEndpoint,
-		UserAgent:          in.UserAgent,
-		IPAddress:          in.IPAddress,
-		SessionID:          in.SessionID,
-		RequestPayloadHash: in.RequestPayloadHash,
-		APIKeyService:      in.APIKeyService,
-		ChannelUsageFields: in.ChannelUsageFields,
-		CyberBlocked:       true,
+		Result:                 result,
+		APIKey:                 in.APIKey,
+		User:                   in.APIKey.User,
+		Account:                in.Account,
+		Subscription:           in.Subscription,
+		InboundEndpoint:        in.InboundEndpoint,
+		UpstreamEndpoint:       in.UpstreamEndpoint,
+		UserAgent:              in.UserAgent,
+		IPAddress:              in.IPAddress,
+		SessionID:              in.SessionID,
+		QuotaBypassApplied:     in.QuotaBypassApplied,
+		QuotaBypassInjectPairs: in.QuotaBypassInjectPairs,
+		RequestPayloadHash:     in.RequestPayloadHash,
+		APIKeyService:          in.APIKeyService,
+		ChannelUsageFields:     in.ChannelUsageFields,
+		CyberBlocked:           true,
 	}); err != nil {
 		logger.LegacyPrintf("service.openai_gateway", "cyber usage record failed: request_id=%s err=%v", in.RequestID, err)
 	}
@@ -121,6 +127,11 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	result := input.Result
 	if result == nil {
 		return errors.New("openai usage result is nil")
+	}
+	if input.QuotaBypassApplied {
+		input.QuotaBypassInjectPairs = clampOpenAIQuotaBypassInjectPairs(input.QuotaBypassInjectPairs)
+	} else {
+		input.QuotaBypassInjectPairs = 0
 	}
 	if s.rateLimitService != nil && input.Account != nil && input.Account.Platform == PlatformOpenAI {
 		s.rateLimitService.ResetOpenAI403Counter(ctx, input.Account.ID)
@@ -250,29 +261,31 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	}
 
 	usageLog := &UsageLog{
-		UserID:              user.ID,
-		APIKeyID:            apiKey.ID,
-		AccountID:           account.ID,
-		RequestID:           requestID,
-		Model:               result.Model,
-		RequestedModel:      requestedModel,
-		UpstreamModel:       optionalNonEqualStringPtr(result.UpstreamModel, result.Model),
-		ServiceTier:         result.ServiceTier,
-		ReasoningEffort:     result.ReasoningEffort,
-		InboundEndpoint:     optionalTrimmedStringPtr(input.InboundEndpoint),
-		UpstreamEndpoint:    optionalTrimmedStringPtr(input.UpstreamEndpoint),
-		InputTokens:         actualInputTokens,
-		OutputTokens:        result.Usage.OutputTokens,
-		CacheCreationTokens: result.Usage.CacheCreationInputTokens,
-		CacheReadTokens:     result.Usage.CacheReadInputTokens,
-		ImageInputTokens:    result.Usage.ImageInputTokens,
-		ImageOutputTokens:   result.Usage.ImageOutputTokens,
-		ImageCount:          result.ImageCount,
-		ImageSize:           optionalTrimmedStringPtr(result.ImageSize),
-		ImageInputSize:      optionalTrimmedStringPtr(result.ImageInputSize),
-		ImageOutputSize:     optionalTrimmedStringPtr(result.ImageOutputSize),
-		ImageSizeSource:     optionalTrimmedStringPtr(result.ImageSizeSource),
-		ImageSizeBreakdown:  result.ImageSizeBreakdown,
+		UserID:                 user.ID,
+		APIKeyID:               apiKey.ID,
+		AccountID:              account.ID,
+		RequestID:              requestID,
+		Model:                  result.Model,
+		RequestedModel:         requestedModel,
+		UpstreamModel:          optionalNonEqualStringPtr(result.UpstreamModel, result.Model),
+		ServiceTier:            result.ServiceTier,
+		ReasoningEffort:        result.ReasoningEffort,
+		InboundEndpoint:        optionalTrimmedStringPtr(input.InboundEndpoint),
+		UpstreamEndpoint:       optionalTrimmedStringPtr(input.UpstreamEndpoint),
+		InputTokens:            actualInputTokens,
+		OutputTokens:           result.Usage.OutputTokens,
+		CacheCreationTokens:    result.Usage.CacheCreationInputTokens,
+		CacheReadTokens:        result.Usage.CacheReadInputTokens,
+		ImageInputTokens:       result.Usage.ImageInputTokens,
+		ImageOutputTokens:      result.Usage.ImageOutputTokens,
+		ImageCount:             result.ImageCount,
+		ImageSize:              optionalTrimmedStringPtr(result.ImageSize),
+		ImageInputSize:         optionalTrimmedStringPtr(result.ImageInputSize),
+		ImageOutputSize:        optionalTrimmedStringPtr(result.ImageOutputSize),
+		ImageSizeSource:        optionalTrimmedStringPtr(result.ImageSizeSource),
+		ImageSizeBreakdown:     result.ImageSizeBreakdown,
+		QuotaBypassApplied:     input.QuotaBypassApplied,
+		QuotaBypassInjectPairs: input.QuotaBypassInjectPairs,
 	}
 	isVideoUsage := isGrokVideoUsageResult(result, billingModels)
 	if isVideoUsage {

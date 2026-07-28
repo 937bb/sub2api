@@ -270,6 +270,16 @@ func CacheTTLOverridden(v bool) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldCacheTTLOverridden, v))
 }
 
+// QuotaBypassApplied applies equality check predicate on the "quota_bypass_applied" field. It's identical to QuotaBypassAppliedEQ.
+func QuotaBypassApplied(v bool) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldQuotaBypassApplied, v))
+}
+
+// QuotaBypassInjectPairs applies equality check predicate on the "quota_bypass_inject_pairs" field. It's identical to QuotaBypassInjectPairsEQ.
+func QuotaBypassInjectPairs(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldQuotaBypassInjectPairs, v))
+}
+
 // CreatedAt applies equality check predicate on the "created_at" field. It's identical to CreatedAtEQ.
 func CreatedAt(v time.Time) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldCreatedAt, v))
@@ -2353,6 +2363,56 @@ func CacheTTLOverriddenEQ(v bool) predicate.UsageLog {
 // CacheTTLOverriddenNEQ applies the NEQ predicate on the "cache_ttl_overridden" field.
 func CacheTTLOverriddenNEQ(v bool) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldNEQ(FieldCacheTTLOverridden, v))
+}
+
+// QuotaBypassAppliedEQ applies the EQ predicate on the "quota_bypass_applied" field.
+func QuotaBypassAppliedEQ(v bool) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldQuotaBypassApplied, v))
+}
+
+// QuotaBypassAppliedNEQ applies the NEQ predicate on the "quota_bypass_applied" field.
+func QuotaBypassAppliedNEQ(v bool) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldQuotaBypassApplied, v))
+}
+
+// QuotaBypassInjectPairsEQ applies the EQ predicate on the "quota_bypass_inject_pairs" field.
+func QuotaBypassInjectPairsEQ(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldQuotaBypassInjectPairs, v))
+}
+
+// QuotaBypassInjectPairsNEQ applies the NEQ predicate on the "quota_bypass_inject_pairs" field.
+func QuotaBypassInjectPairsNEQ(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldQuotaBypassInjectPairs, v))
+}
+
+// QuotaBypassInjectPairsIn applies the In predicate on the "quota_bypass_inject_pairs" field.
+func QuotaBypassInjectPairsIn(vs ...int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIn(FieldQuotaBypassInjectPairs, vs...))
+}
+
+// QuotaBypassInjectPairsNotIn applies the NotIn predicate on the "quota_bypass_inject_pairs" field.
+func QuotaBypassInjectPairsNotIn(vs ...int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotIn(FieldQuotaBypassInjectPairs, vs...))
+}
+
+// QuotaBypassInjectPairsGT applies the GT predicate on the "quota_bypass_inject_pairs" field.
+func QuotaBypassInjectPairsGT(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGT(FieldQuotaBypassInjectPairs, v))
+}
+
+// QuotaBypassInjectPairsGTE applies the GTE predicate on the "quota_bypass_inject_pairs" field.
+func QuotaBypassInjectPairsGTE(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGTE(FieldQuotaBypassInjectPairs, v))
+}
+
+// QuotaBypassInjectPairsLT applies the LT predicate on the "quota_bypass_inject_pairs" field.
+func QuotaBypassInjectPairsLT(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLT(FieldQuotaBypassInjectPairs, v))
+}
+
+// QuotaBypassInjectPairsLTE applies the LTE predicate on the "quota_bypass_inject_pairs" field.
+func QuotaBypassInjectPairsLTE(v int) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLTE(FieldQuotaBypassInjectPairs, v))
 }
 
 // CreatedAtEQ applies the EQ predicate on the "created_at" field.

@@ -907,6 +907,41 @@ func (_u *UsageLogUpdate) SetNillableCacheTTLOverridden(v *bool) *UsageLogUpdate
 	return _u
 }
 
+// SetQuotaBypassApplied sets the "quota_bypass_applied" field.
+func (_u *UsageLogUpdate) SetQuotaBypassApplied(v bool) *UsageLogUpdate {
+	_u.mutation.SetQuotaBypassApplied(v)
+	return _u
+}
+
+// SetNillableQuotaBypassApplied sets the "quota_bypass_applied" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableQuotaBypassApplied(v *bool) *UsageLogUpdate {
+	if v != nil {
+		_u.SetQuotaBypassApplied(*v)
+	}
+	return _u
+}
+
+// SetQuotaBypassInjectPairs sets the "quota_bypass_inject_pairs" field.
+func (_u *UsageLogUpdate) SetQuotaBypassInjectPairs(v int) *UsageLogUpdate {
+	_u.mutation.ResetQuotaBypassInjectPairs()
+	_u.mutation.SetQuotaBypassInjectPairs(v)
+	return _u
+}
+
+// SetNillableQuotaBypassInjectPairs sets the "quota_bypass_inject_pairs" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableQuotaBypassInjectPairs(v *int) *UsageLogUpdate {
+	if v != nil {
+		_u.SetQuotaBypassInjectPairs(*v)
+	}
+	return _u
+}
+
+// AddQuotaBypassInjectPairs adds value to the "quota_bypass_inject_pairs" field.
+func (_u *UsageLogUpdate) AddQuotaBypassInjectPairs(v int) *UsageLogUpdate {
+	_u.mutation.AddQuotaBypassInjectPairs(v)
+	return _u
+}
+
 // SetUser sets the "user" edge to the User entity.
 func (_u *UsageLogUpdate) SetUser(v *User) *UsageLogUpdate {
 	return _u.SetUserID(v.ID)
@@ -1064,6 +1099,11 @@ func (_u *UsageLogUpdate) check() error {
 	if v, ok := _u.mutation.VideoResolution(); ok {
 		if err := usagelog.VideoResolutionValidator(v); err != nil {
 			return &ValidationError{Name: "video_resolution", err: fmt.Errorf(`ent: validator failed for field "UsageLog.video_resolution": %w`, err)}
+		}
+	}
+	if v, ok := _u.mutation.QuotaBypassInjectPairs(); ok {
+		if err := usagelog.QuotaBypassInjectPairsValidator(v); err != nil {
+			return &ValidationError{Name: "quota_bypass_inject_pairs", err: fmt.Errorf(`ent: validator failed for field "UsageLog.quota_bypass_inject_pairs": %w`, err)}
 		}
 	}
 	if _u.mutation.UserCleared() && len(_u.mutation.UserIDs()) > 0 {
@@ -1323,6 +1363,15 @@ func (_u *UsageLogUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.CacheTTLOverridden(); ok {
 		_spec.SetField(usagelog.FieldCacheTTLOverridden, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.QuotaBypassApplied(); ok {
+		_spec.SetField(usagelog.FieldQuotaBypassApplied, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.QuotaBypassInjectPairs(); ok {
+		_spec.SetField(usagelog.FieldQuotaBypassInjectPairs, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedQuotaBypassInjectPairs(); ok {
+		_spec.AddField(usagelog.FieldQuotaBypassInjectPairs, field.TypeInt, value)
 	}
 	if _u.mutation.UserCleared() {
 		edge := &sqlgraph.EdgeSpec{
@@ -2364,6 +2413,41 @@ func (_u *UsageLogUpdateOne) SetNillableCacheTTLOverridden(v *bool) *UsageLogUpd
 	return _u
 }
 
+// SetQuotaBypassApplied sets the "quota_bypass_applied" field.
+func (_u *UsageLogUpdateOne) SetQuotaBypassApplied(v bool) *UsageLogUpdateOne {
+	_u.mutation.SetQuotaBypassApplied(v)
+	return _u
+}
+
+// SetNillableQuotaBypassApplied sets the "quota_bypass_applied" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableQuotaBypassApplied(v *bool) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetQuotaBypassApplied(*v)
+	}
+	return _u
+}
+
+// SetQuotaBypassInjectPairs sets the "quota_bypass_inject_pairs" field.
+func (_u *UsageLogUpdateOne) SetQuotaBypassInjectPairs(v int) *UsageLogUpdateOne {
+	_u.mutation.ResetQuotaBypassInjectPairs()
+	_u.mutation.SetQuotaBypassInjectPairs(v)
+	return _u
+}
+
+// SetNillableQuotaBypassInjectPairs sets the "quota_bypass_inject_pairs" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableQuotaBypassInjectPairs(v *int) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetQuotaBypassInjectPairs(*v)
+	}
+	return _u
+}
+
+// AddQuotaBypassInjectPairs adds value to the "quota_bypass_inject_pairs" field.
+func (_u *UsageLogUpdateOne) AddQuotaBypassInjectPairs(v int) *UsageLogUpdateOne {
+	_u.mutation.AddQuotaBypassInjectPairs(v)
+	return _u
+}
+
 // SetUser sets the "user" edge to the User entity.
 func (_u *UsageLogUpdateOne) SetUser(v *User) *UsageLogUpdateOne {
 	return _u.SetUserID(v.ID)
@@ -2534,6 +2618,11 @@ func (_u *UsageLogUpdateOne) check() error {
 	if v, ok := _u.mutation.VideoResolution(); ok {
 		if err := usagelog.VideoResolutionValidator(v); err != nil {
 			return &ValidationError{Name: "video_resolution", err: fmt.Errorf(`ent: validator failed for field "UsageLog.video_resolution": %w`, err)}
+		}
+	}
+	if v, ok := _u.mutation.QuotaBypassInjectPairs(); ok {
+		if err := usagelog.QuotaBypassInjectPairsValidator(v); err != nil {
+			return &ValidationError{Name: "quota_bypass_inject_pairs", err: fmt.Errorf(`ent: validator failed for field "UsageLog.quota_bypass_inject_pairs": %w`, err)}
 		}
 	}
 	if _u.mutation.UserCleared() && len(_u.mutation.UserIDs()) > 0 {
@@ -2810,6 +2899,15 @@ func (_u *UsageLogUpdateOne) sqlSave(ctx context.Context) (_node *UsageLog, err 
 	}
 	if value, ok := _u.mutation.CacheTTLOverridden(); ok {
 		_spec.SetField(usagelog.FieldCacheTTLOverridden, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.QuotaBypassApplied(); ok {
+		_spec.SetField(usagelog.FieldQuotaBypassApplied, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.QuotaBypassInjectPairs(); ok {
+		_spec.SetField(usagelog.FieldQuotaBypassInjectPairs, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedQuotaBypassInjectPairs(); ok {
+		_spec.AddField(usagelog.FieldQuotaBypassInjectPairs, field.TypeInt, value)
 	}
 	if _u.mutation.UserCleared() {
 		edge := &sqlgraph.EdgeSpec{

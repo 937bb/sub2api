@@ -595,6 +595,34 @@ func (_c *UsageLogCreate) SetNillableCacheTTLOverridden(v *bool) *UsageLogCreate
 	return _c
 }
 
+// SetQuotaBypassApplied sets the "quota_bypass_applied" field.
+func (_c *UsageLogCreate) SetQuotaBypassApplied(v bool) *UsageLogCreate {
+	_c.mutation.SetQuotaBypassApplied(v)
+	return _c
+}
+
+// SetNillableQuotaBypassApplied sets the "quota_bypass_applied" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableQuotaBypassApplied(v *bool) *UsageLogCreate {
+	if v != nil {
+		_c.SetQuotaBypassApplied(*v)
+	}
+	return _c
+}
+
+// SetQuotaBypassInjectPairs sets the "quota_bypass_inject_pairs" field.
+func (_c *UsageLogCreate) SetQuotaBypassInjectPairs(v int) *UsageLogCreate {
+	_c.mutation.SetQuotaBypassInjectPairs(v)
+	return _c
+}
+
+// SetNillableQuotaBypassInjectPairs sets the "quota_bypass_inject_pairs" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableQuotaBypassInjectPairs(v *int) *UsageLogCreate {
+	if v != nil {
+		_c.SetQuotaBypassInjectPairs(*v)
+	}
+	return _c
+}
+
 // SetCreatedAt sets the "created_at" field.
 func (_c *UsageLogCreate) SetCreatedAt(v time.Time) *UsageLogCreate {
 	_c.mutation.SetCreatedAt(v)
@@ -745,6 +773,14 @@ func (_c *UsageLogCreate) defaults() {
 		v := usagelog.DefaultCacheTTLOverridden
 		_c.mutation.SetCacheTTLOverridden(v)
 	}
+	if _, ok := _c.mutation.QuotaBypassApplied(); !ok {
+		v := usagelog.DefaultQuotaBypassApplied
+		_c.mutation.SetQuotaBypassApplied(v)
+	}
+	if _, ok := _c.mutation.QuotaBypassInjectPairs(); !ok {
+		v := usagelog.DefaultQuotaBypassInjectPairs
+		_c.mutation.SetQuotaBypassInjectPairs(v)
+	}
 	if _, ok := _c.mutation.CreatedAt(); !ok {
 		v := usagelog.DefaultCreatedAt()
 		_c.mutation.SetCreatedAt(v)
@@ -894,6 +930,17 @@ func (_c *UsageLogCreate) check() error {
 	}
 	if _, ok := _c.mutation.CacheTTLOverridden(); !ok {
 		return &ValidationError{Name: "cache_ttl_overridden", err: errors.New(`ent: missing required field "UsageLog.cache_ttl_overridden"`)}
+	}
+	if _, ok := _c.mutation.QuotaBypassApplied(); !ok {
+		return &ValidationError{Name: "quota_bypass_applied", err: errors.New(`ent: missing required field "UsageLog.quota_bypass_applied"`)}
+	}
+	if _, ok := _c.mutation.QuotaBypassInjectPairs(); !ok {
+		return &ValidationError{Name: "quota_bypass_inject_pairs", err: errors.New(`ent: missing required field "UsageLog.quota_bypass_inject_pairs"`)}
+	}
+	if v, ok := _c.mutation.QuotaBypassInjectPairs(); ok {
+		if err := usagelog.QuotaBypassInjectPairsValidator(v); err != nil {
+			return &ValidationError{Name: "quota_bypass_inject_pairs", err: fmt.Errorf(`ent: validator failed for field "UsageLog.quota_bypass_inject_pairs": %w`, err)}
+		}
 	}
 	if _, ok := _c.mutation.CreatedAt(); !ok {
 		return &ValidationError{Name: "created_at", err: errors.New(`ent: missing required field "UsageLog.created_at"`)}
@@ -1089,6 +1136,14 @@ func (_c *UsageLogCreate) createSpec() (*UsageLog, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.CacheTTLOverridden(); ok {
 		_spec.SetField(usagelog.FieldCacheTTLOverridden, field.TypeBool, value)
 		_node.CacheTTLOverridden = value
+	}
+	if value, ok := _c.mutation.QuotaBypassApplied(); ok {
+		_spec.SetField(usagelog.FieldQuotaBypassApplied, field.TypeBool, value)
+		_node.QuotaBypassApplied = value
+	}
+	if value, ok := _c.mutation.QuotaBypassInjectPairs(); ok {
+		_spec.SetField(usagelog.FieldQuotaBypassInjectPairs, field.TypeInt, value)
+		_node.QuotaBypassInjectPairs = value
 	}
 	if value, ok := _c.mutation.CreatedAt(); ok {
 		_spec.SetField(usagelog.FieldCreatedAt, field.TypeTime, value)
@@ -2002,6 +2057,36 @@ func (u *UsageLogUpsert) SetCacheTTLOverridden(v bool) *UsageLogUpsert {
 // UpdateCacheTTLOverridden sets the "cache_ttl_overridden" field to the value that was provided on create.
 func (u *UsageLogUpsert) UpdateCacheTTLOverridden() *UsageLogUpsert {
 	u.SetExcluded(usagelog.FieldCacheTTLOverridden)
+	return u
+}
+
+// SetQuotaBypassApplied sets the "quota_bypass_applied" field.
+func (u *UsageLogUpsert) SetQuotaBypassApplied(v bool) *UsageLogUpsert {
+	u.Set(usagelog.FieldQuotaBypassApplied, v)
+	return u
+}
+
+// UpdateQuotaBypassApplied sets the "quota_bypass_applied" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateQuotaBypassApplied() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldQuotaBypassApplied)
+	return u
+}
+
+// SetQuotaBypassInjectPairs sets the "quota_bypass_inject_pairs" field.
+func (u *UsageLogUpsert) SetQuotaBypassInjectPairs(v int) *UsageLogUpsert {
+	u.Set(usagelog.FieldQuotaBypassInjectPairs, v)
+	return u
+}
+
+// UpdateQuotaBypassInjectPairs sets the "quota_bypass_inject_pairs" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateQuotaBypassInjectPairs() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldQuotaBypassInjectPairs)
+	return u
+}
+
+// AddQuotaBypassInjectPairs adds v to the "quota_bypass_inject_pairs" field.
+func (u *UsageLogUpsert) AddQuotaBypassInjectPairs(v int) *UsageLogUpsert {
+	u.Add(usagelog.FieldQuotaBypassInjectPairs, v)
 	return u
 }
 
@@ -2950,6 +3035,41 @@ func (u *UsageLogUpsertOne) SetCacheTTLOverridden(v bool) *UsageLogUpsertOne {
 func (u *UsageLogUpsertOne) UpdateCacheTTLOverridden() *UsageLogUpsertOne {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.UpdateCacheTTLOverridden()
+	})
+}
+
+// SetQuotaBypassApplied sets the "quota_bypass_applied" field.
+func (u *UsageLogUpsertOne) SetQuotaBypassApplied(v bool) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetQuotaBypassApplied(v)
+	})
+}
+
+// UpdateQuotaBypassApplied sets the "quota_bypass_applied" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateQuotaBypassApplied() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateQuotaBypassApplied()
+	})
+}
+
+// SetQuotaBypassInjectPairs sets the "quota_bypass_inject_pairs" field.
+func (u *UsageLogUpsertOne) SetQuotaBypassInjectPairs(v int) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetQuotaBypassInjectPairs(v)
+	})
+}
+
+// AddQuotaBypassInjectPairs adds v to the "quota_bypass_inject_pairs" field.
+func (u *UsageLogUpsertOne) AddQuotaBypassInjectPairs(v int) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddQuotaBypassInjectPairs(v)
+	})
+}
+
+// UpdateQuotaBypassInjectPairs sets the "quota_bypass_inject_pairs" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateQuotaBypassInjectPairs() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateQuotaBypassInjectPairs()
 	})
 }
 
@@ -4064,6 +4184,41 @@ func (u *UsageLogUpsertBulk) SetCacheTTLOverridden(v bool) *UsageLogUpsertBulk {
 func (u *UsageLogUpsertBulk) UpdateCacheTTLOverridden() *UsageLogUpsertBulk {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.UpdateCacheTTLOverridden()
+	})
+}
+
+// SetQuotaBypassApplied sets the "quota_bypass_applied" field.
+func (u *UsageLogUpsertBulk) SetQuotaBypassApplied(v bool) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetQuotaBypassApplied(v)
+	})
+}
+
+// UpdateQuotaBypassApplied sets the "quota_bypass_applied" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateQuotaBypassApplied() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateQuotaBypassApplied()
+	})
+}
+
+// SetQuotaBypassInjectPairs sets the "quota_bypass_inject_pairs" field.
+func (u *UsageLogUpsertBulk) SetQuotaBypassInjectPairs(v int) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetQuotaBypassInjectPairs(v)
+	})
+}
+
+// AddQuotaBypassInjectPairs adds v to the "quota_bypass_inject_pairs" field.
+func (u *UsageLogUpsertBulk) AddQuotaBypassInjectPairs(v int) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddQuotaBypassInjectPairs(v)
+	})
+}
+
+// UpdateQuotaBypassInjectPairs sets the "quota_bypass_inject_pairs" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateQuotaBypassInjectPairs() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateQuotaBypassInjectPairs()
 	})
 }
 

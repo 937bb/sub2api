@@ -1702,7 +1702,8 @@ func TestOpenAIAccountScheduler_RequestGroupQuotaBypassSkipsSnapshotPause(t *tes
 			"codex_usage_updated_at": time.Now().Format(time.RFC3339),
 		},
 	}
-	req := OpenAIAccountScheduleRequest{GroupID: ptrInt64(42), GroupQuotaBypassEnabled: true}
+	groupID := int64(42)
+	req := OpenAIAccountScheduleRequest{GroupID: &groupID, GroupQuotaBypassEnabled: true}
 	scheduler := &defaultOpenAIAccountScheduler{service: &OpenAIGatewayService{cfg: &config.Config{}}}
 
 	compatible, reason := scheduler.isAccountRequestCompatibleReason(ctx, account, req)

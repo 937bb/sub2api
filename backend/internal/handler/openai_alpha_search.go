@@ -239,23 +239,26 @@ func (h *OpenAIGatewayHandler) recordAlphaSearchUsage(
 	inboundEndpoint := GetInboundEndpoint(c)
 	upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
 	quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
+	quotaBypassApplied, quotaBypassInjectPairs := service.OpenAIQuotaBypassUsageSnapshot(c)
 
 	h.submitMandatoryUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
 		if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
-			Result:             result,
-			APIKey:             apiKey,
-			User:               apiKey.User,
-			Account:            account,
-			Subscription:       subscription,
-			InboundEndpoint:    inboundEndpoint,
-			UpstreamEndpoint:   upstreamEndpoint,
-			UserAgent:          userAgent,
-			IPAddress:          clientIP,
-			RequestPayloadHash: requestPayloadHash,
-			APIKeyService:      h.apiKeyService,
-			QuotaPlatform:      quotaPlatform,
-			SessionID:          sessionID,
-			ChannelUsageFields: channelMapping.ToUsageFields(requestedModel, result.UpstreamModel),
+			Result:                 result,
+			APIKey:                 apiKey,
+			User:                   apiKey.User,
+			Account:                account,
+			Subscription:           subscription,
+			InboundEndpoint:        inboundEndpoint,
+			UpstreamEndpoint:       upstreamEndpoint,
+			UserAgent:              userAgent,
+			IPAddress:              clientIP,
+			RequestPayloadHash:     requestPayloadHash,
+			APIKeyService:          h.apiKeyService,
+			QuotaPlatform:          quotaPlatform,
+			SessionID:              sessionID,
+			QuotaBypassApplied:     quotaBypassApplied,
+			QuotaBypassInjectPairs: quotaBypassInjectPairs,
+			ChannelUsageFields:     channelMapping.ToUsageFields(requestedModel, result.UpstreamModel),
 		}); err != nil {
 			logger.L().With(
 				zap.String("component", "handler.openai_gateway.alpha_search"),

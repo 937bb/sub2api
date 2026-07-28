@@ -174,6 +174,10 @@ type UsageLog struct {
 	// (e.g. the session_id / X-Session-Id headers). Nil when the client sent no
 	// valid session header. It is never derived from prompt_cache_key or content.
 	SessionID *string
+	// QuotaBypassApplied records whether this request was actually sent with
+	// the synthetic quota-bypass tool suffix. Historical rows default to false.
+	QuotaBypassApplied     bool
+	QuotaBypassInjectPairs int
 
 	// Cache TTL Override 标记（管理员强制替换了缓存 TTL 计费）
 	CacheTTLOverridden bool

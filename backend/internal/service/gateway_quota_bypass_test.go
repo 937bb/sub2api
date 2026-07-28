@@ -219,6 +219,18 @@ func TestApplyOpenAIQuotaBypassForRequest_UsesHandlerGroupDecision(t *testing.T)
 	injected := applyOpenAIQuotaBypassForRequest(c, account, body, 1)
 
 	requireQuotaBypassSuffix(t, injected)
+	applied, pairs := OpenAIQuotaBypassUsageSnapshot(c)
+	require.True(t, applied)
+	require.Equal(t, 1, pairs)
+	require.Equal(t, "applied", c.Writer.Header().Get(openAIQuotaBypassResponseHeader))
+	require.Equal(t, "1", c.Writer.Header().Get(openAIQuotaBypassPairsResponseHeader))
+
+	SetOpenAIQuotaBypassEnabled(c, false)
+	applied, pairs = OpenAIQuotaBypassUsageSnapshot(c)
+	require.False(t, applied)
+	require.Zero(t, pairs)
+	require.Empty(t, c.Writer.Header().Get(openAIQuotaBypassResponseHeader))
+	require.Empty(t, c.Writer.Header().Get(openAIQuotaBypassPairsResponseHeader))
 }
 
 func TestApplyOpenAIQuotaBypassForRequest_StaleNegativeContextDoesNotHideAccountEligibility(t *testing.T) {

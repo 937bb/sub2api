@@ -131,6 +131,7 @@
             :default-sort-order="'desc'"
             @sort="handleSort"
             @userClick="handleUserClick"
+            @detailClick="openUsageDetail"
             @ipGeoBatchFailed="handleIpGeoBatchFailed"
           />
           <Pagination v-if="pagination.total > 0" :page="pagination.page" :total="pagination.total" :page-size="pagination.page_size" @update:page="handlePageChange" @update:pageSize="handlePageSizeChange" />
@@ -172,6 +173,12 @@
     :end-date="endDate"
     @close="cleanupDialogVisible = false"
   />
+  <UsageDetailDialog
+    :show="showUsageDetail"
+    :usage-id="selectedUsage?.id ?? null"
+    :summary="selectedUsage"
+    @close="showUsageDetail = false; selectedUsage = null"
+  />
   <!-- Balance history modal triggered from usage table user click -->
   <UserBalanceHistoryModal
     :show="showBalanceHistoryModal"
@@ -193,6 +200,7 @@ import { resolveUsageRequestType, requestTypeToLegacyStream } from '@/utils/usag
 import AppLayout from '@/components/layout/AppLayout.vue'; import Pagination from '@/components/common/Pagination.vue'; import Select from '@/components/common/Select.vue'; import DateRangePicker from '@/components/common/DateRangePicker.vue'
 import UsageStatsCards from '@/components/admin/usage/UsageStatsCards.vue'; import UsageFilters from '@/components/admin/usage/UsageFilters.vue'
 import UsageTable from '@/components/admin/usage/UsageTable.vue'; import UsageExportProgress from '@/components/admin/usage/UsageExportProgress.vue'
+import UsageDetailDialog from '@/components/admin/usage/UsageDetailDialog.vue'
 import UserTokenRanking from '@/components/admin/usage/UserTokenRanking.vue'
 import UsageCleanupDialog from '@/components/admin/usage/UsageCleanupDialog.vue'
 import UserBalanceHistoryModal from '@/components/admin/user/UserBalanceHistoryModal.vue'
@@ -233,6 +241,12 @@ let statsReqSeq = 0
 let modelStatsReqSeq = 0
 const exportProgress = reactive({ show: false, progress: 0, current: 0, total: 0, estimatedTime: '' })
 const cleanupDialogVisible = ref(false)
+const showUsageDetail = ref(false)
+const selectedUsage = ref<AdminUsageLog | null>(null)
+const openUsageDetail = (row: AdminUsageLog) => {
+  selectedUsage.value = row
+  showUsageDetail.value = true
+}
 // Balance history modal state
 const showBalanceHistoryModal = ref(false)
 const balanceHistoryUser = ref<AdminUser | null>(null)
@@ -602,7 +616,7 @@ const exportToExcel = async () => {
 }
 
 // Column visibility
-const ALWAYS_VISIBLE = ['user', 'created_at']
+const ALWAYS_VISIBLE = ['user', 'request_detail', 'created_at']
 const DEFAULT_HIDDEN_COLUMNS = ['reasoning_effort', 'user_agent']
 const HIDDEN_COLUMNS_KEY = 'usage-hidden-columns'
 
@@ -615,6 +629,7 @@ const allColumns = computed(() => [
   { key: 'endpoint', label: t('usage.endpoint'), sortable: false },
   { key: 'group', label: t('admin.usage.group'), sortable: false },
   { key: 'stream', label: t('usage.type'), sortable: false },
+  { key: 'request_detail', label: t('admin.usage.requestDetail'), sortable: false },
   { key: 'billing_mode', label: t('admin.usage.billingMode'), sortable: false },
   { key: 'tokens', label: t('usage.tokens'), sortable: false },
   { key: 'cost', label: t('usage.cost'), sortable: false },

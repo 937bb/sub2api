@@ -87,9 +87,11 @@ func TestQuotaBypassWebSocketInjectsEveryTurn(t *testing.T) {
 					{AccountID: 902, GroupID: bypassGroup.ID, Group: bypassGroup},
 				},
 			}
+			appliedTurns := 0
 			hooks := &OpenAIWSIngressHooks{
 				QuotaBypassEnabled:     IsQuotaBypassEligible(account, nil),
 				QuotaBypassInjectPairs: ResolveOpenAIQuotaBypassInjectPairs(cfg),
+				OnQuotaBypassApplied:   func() { appliedTurns++ },
 			}
 			require.True(t, hooks.QuotaBypassEnabled)
 
@@ -178,6 +180,7 @@ func TestQuotaBypassWebSocketInjectsEveryTurn(t *testing.T) {
 					assertBypassSuffix(encoded, turn+1)
 				}
 			}
+			require.Equal(t, 2, appliedTurns)
 		})
 	}
 }

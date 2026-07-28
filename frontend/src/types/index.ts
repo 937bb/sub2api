@@ -1578,6 +1578,7 @@ export interface UsageLog {
   // User-Agent
   user_agent: string | null
   ip_address?: string | null
+  session_id?: string | null
 
   // Cache TTL Override
   cache_ttl_overridden: boolean
@@ -1599,6 +1600,8 @@ export interface UsageLogAccountSummary {
 }
 
 export interface AdminUsageLog extends UsageLog {
+  quota_bypass_applied?: boolean
+  quota_bypass_inject_pairs?: number
   upstream_model?: string | null
   model_mapping_chain?: string | null
 

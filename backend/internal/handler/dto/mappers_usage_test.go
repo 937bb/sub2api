@@ -28,6 +28,29 @@ func TestUsageLogFromService_IncludesOpenAIWSMode(t *testing.T) {
 	require.False(t, UsageLogFromServiceAdmin(httpLog).OpenAIWSMode)
 }
 
+func TestUsageLogFromService_QuotaBypassMetadataIsAdminOnly(t *testing.T) {
+	log := &service.UsageLog{
+		ID:                     7,
+		UserID:                 1,
+		APIKeyID:               2,
+		AccountID:              3,
+		RequestID:              "req-quota-bypass",
+		Model:                  "gpt-5.6-sol",
+		QuotaBypassApplied:     true,
+		QuotaBypassInjectPairs: 3,
+	}
+
+	userDTO := UsageLogFromService(log)
+	adminDTO := UsageLogFromServiceAdmin(log)
+
+	require.NotNil(t, userDTO)
+	userJSON, err := json.Marshal(userDTO)
+	require.NoError(t, err)
+	require.NotContains(t, string(userJSON), "quota_bypass_applied")
+	require.True(t, adminDTO.QuotaBypassApplied)
+	require.Equal(t, 3, adminDTO.QuotaBypassInjectPairs)
+}
+
 func TestUsageLogFromService_PrefersRequestTypeForLegacyFields(t *testing.T) {
 	t.Parallel()
 
