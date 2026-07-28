@@ -1090,16 +1090,10 @@ func (h *AccountHandler) Test(c *gin.Context) {
 	// Allow empty body, model_id is optional
 	_ = c.ShouldBindJSON(&req)
 
-	// Use AccountTestService to test the account with SSE streaming
-	if err := h.accountTestService.TestAccountConnection(c, accountID, req.ModelID, req.Prompt, req.Mode); err != nil {
+	// Manual tests are diagnostic only and must not mutate account state.
+	if err := h.accountTestService.TestAccountConnectionReadOnly(c, accountID, req.ModelID, req.Prompt, req.Mode); err != nil {
 		// Error already sent via SSE, just log
 		return
-	}
-
-	if h.rateLimitService != nil {
-		if _, err := h.rateLimitService.RecoverAccountAfterSuccessfulTest(c.Request.Context(), accountID); err != nil {
-			_ = c.Error(err)
-		}
 	}
 }
 
@@ -1113,14 +1107,8 @@ func (h *AccountHandler) TestQuotaBypass(c *gin.Context) {
 		return
 	}
 
-	if err := h.accountTestService.TestAccountConnection(c, accountID, "", "", service.AccountTestModeQuotaBypass); err != nil {
+	if err := h.accountTestService.TestAccountConnectionReadOnly(c, accountID, "", "", service.AccountTestModeQuotaBypass); err != nil {
 		return
-	}
-
-	if h.rateLimitService != nil {
-		if _, err := h.rateLimitService.RecoverAccountAfterSuccessfulTest(c.Request.Context(), accountID); err != nil {
-			_ = c.Error(err)
-		}
 	}
 }
 

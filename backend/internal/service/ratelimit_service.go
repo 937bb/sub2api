@@ -151,6 +151,19 @@ const (
 // CheckErrorPolicy 检查自定义错误码和临时不可调度规则。
 // 自定义错误码开启时覆盖后续所有逻辑（包括临时不可调度）。
 func (s *RateLimitService) CheckErrorPolicy(ctx context.Context, account *Account, statusCode int, responseBody []byte, requestedModel ...string) ErrorPolicyResult {
+	if isReadOnlyAccountTest(ctx) {
+		if account.IsCustomErrorCodesEnabled() {
+			if account.ShouldHandleErrorCode(statusCode) {
+				return ErrorPolicyMatched
+			}
+			return ErrorPolicySkipped
+		}
+		if account.IsPoolMode() {
+			return ErrorPolicySkipped
+		}
+		return ErrorPolicyNone
+	}
+
 	ctx = withTempUnschedulableModel(ctx, requestedModel)
 	if account.IsCustomErrorCodesEnabled() {
 		if account.ShouldHandleErrorCode(statusCode) {

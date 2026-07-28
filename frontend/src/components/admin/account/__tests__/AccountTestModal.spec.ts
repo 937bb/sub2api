@@ -217,7 +217,7 @@ describe('AccountTestModal', () => {
     })
   })
 
-  it('emits a persisted account status change immediately', async () => {
+  it('ignores account status events from older servers', async () => {
     getAvailableModels.mockResolvedValue([
       { id: 'gpt-5.6-sol', display_name: 'GPT-5.6 Sol' }
     ])
@@ -244,6 +244,6 @@ describe('AccountTestModal', () => {
     await (wrapper.vm as any).startTest()
     await flushPromises()
 
-    expect(wrapper.emitted('status-changed')).toEqual([['error']])
+    expect(wrapper.emitted('status-changed')).toBeUndefined()
   })
 })

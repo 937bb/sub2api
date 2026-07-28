@@ -59,6 +59,17 @@ const (
 	accountTestStateWriteTimeout = 5 * time.Second
 )
 
+type accountTestReadOnlyContextKey struct{}
+
+func withReadOnlyAccountTest(ctx context.Context) context.Context {
+	return context.WithValue(ctx, accountTestReadOnlyContextKey{}, true)
+}
+
+func isReadOnlyAccountTest(ctx context.Context) bool {
+	readOnly, _ := ctx.Value(accountTestReadOnlyContextKey{}).(bool)
+	return readOnly
+}
+
 // isOpenAIImageModel checks if the model is an OpenAI image generation model (e.g. gpt-image-2).
 func isOpenAIImageModel(model string) bool {
 	return strings.HasPrefix(strings.ToLower(model), "gpt-image-")
@@ -229,6 +240,16 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 	return s.testClaudeAccountConnection(c, account, modelID)
 }
 
+// TestAccountConnectionReadOnly runs an admin-initiated diagnostic without
+// changing the account's error or rate-limit state.
+func (s *AccountTestService) TestAccountConnectionReadOnly(c *gin.Context, accountID int64, modelID string, prompt string, mode string) error {
+	originalRequest := c.Request
+	c.Request = c.Request.WithContext(withReadOnlyAccountTest(c.Request.Context()))
+	defer func() { c.Request = originalRequest }()
+
+	return s.TestAccountConnection(c, accountID, modelID, prompt, mode)
+}
+
 // testClaudeAccountConnection tests an Anthropic Claude account's connection
 func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account *Account, modelID string) error {
 	ctx := c.Request.Context()
@@ -341,7 +362,7 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 		errMsg := fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body))
 
 		// 403 表示账号被上游封禁，标记为 error 状态
-		if resp.StatusCode == http.StatusForbidden {
+		if resp.StatusCode == http.StatusForbidden && !isReadOnlyAccountTest(ctx) {
 			_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
 		}
 
@@ -411,7 +432,7 @@ func (s *AccountTestService) testClaudeVertexServiceAccountConnection(c *gin.Con
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		errMsg := fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body))
-		if resp.StatusCode == http.StatusForbidden {
+		if resp.StatusCode == http.StatusForbidden && !isReadOnlyAccountTest(ctx) {
 			_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
 		}
 		return s.sendErrorAndEnd(c, errMsg)
@@ -721,7 +742,7 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 		case http.StatusForbidden:
 			accountErrorMsg = fmt.Sprintf("Access forbidden (403): %s", string(body))
 		}
-		if accountErrorMsg != "" {
+		if accountErrorMsg != "" && !isReadOnlyAccountTest(ctx) {
 			if err := s.persistAccountTestError(ctx, account, accountErrorMsg); err != nil {
 				return s.sendErrorAndEnd(c, fmt.Sprintf("API returned %d: %s (failed to update account status: %s)", resp.StatusCode, string(body), err.Error()))
 			}
@@ -826,12 +847,12 @@ func (s *AccountTestService) testGrokAccountConnection(c *gin.Context, account *
 		_ = s.accountRepo.UpdateExtra(ctx, account.ID, map[string]any{
 			grokQuotaSnapshotExtraKey: snapshot,
 		})
-		if limited {
+		if limited && !isReadOnlyAccountTest(ctx) {
 			persistGrokRateLimit(ctx, s.accountRepo, account, resetAt)
-		} else if isSuccessfulGrokRateLimitRecovery(account, snapshot) {
+		} else if !isReadOnlyAccountTest(ctx) && isSuccessfulGrokRateLimitRecovery(account, snapshot) {
 			clearGrokRateLimitAfterRecovery(ctx, s.accountRepo, account)
 		}
-	} else if s.accountRepo != nil && isSuccessfulGrokRateLimitRecovery(account, &xai.QuotaSnapshot{StatusCode: resp.StatusCode}) {
+	} else if s.accountRepo != nil && !isReadOnlyAccountTest(ctx) && isSuccessfulGrokRateLimitRecovery(account, &xai.QuotaSnapshot{StatusCode: resp.StatusCode}) {
 		clearGrokRateLimitAfterRecovery(ctx, s.accountRepo, account)
 	}
 
@@ -896,7 +917,7 @@ func (s *AccountTestService) testOpenAIChatCompletionsConnection(
 		if resp.StatusCode == http.StatusTooManyRequests {
 			s.reconcileOpenAI429State(ctx, account, resp.Header, body)
 		}
-		if resp.StatusCode == http.StatusUnauthorized && s.accountRepo != nil {
+		if resp.StatusCode == http.StatusUnauthorized && s.accountRepo != nil && !isReadOnlyAccountTest(ctx) {
 			errMsg := fmt.Sprintf("Chat Completions authentication failed (401): %s", string(body))
 			_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
 		}
@@ -1039,7 +1060,7 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		if resp.StatusCode == http.StatusUnauthorized && s.accountRepo != nil {
+		if resp.StatusCode == http.StatusUnauthorized && s.accountRepo != nil && !isReadOnlyAccountTest(ctx) {
 			errMsg := fmt.Sprintf("Authentication failed (401): %s", string(body))
 			_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
 		}
@@ -1052,7 +1073,7 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 }
 
 func (s *AccountTestService) reconcileOpenAI429State(ctx context.Context, account *Account, headers http.Header, body []byte) {
-	if s == nil || s.accountRepo == nil || account == nil {
+	if s == nil || s.accountRepo == nil || account == nil || isReadOnlyAccountTest(ctx) {
 		return
 	}
 

@@ -477,6 +477,70 @@ func TestAccountTestService_OpenAIQuotaBypass403SetsPermanentError(t *testing.T)
 	require.Equal(t, "function_call_output", gjson.GetBytes(body, "input.2.type").String())
 }
 
+func TestAccountTestService_ReadOnlyOpenAI403DoesNotChangeStatus(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, recorder := newTestContext()
+
+	resp := newJSONResponse(http.StatusForbidden, `{"error":{"message":"account is not active"}}`)
+	account := &Account{
+		ID:          91,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Credentials: map[string]any{"access_token": "test-token"},
+	}
+	repo := &openAIAccountTestRepo{}
+	repo.accountsByID = map[int64]*Account{account.ID: account}
+	svc := &AccountTestService{
+		accountRepo:  repo,
+		httpUpstream: &queuedHTTPUpstream{responses: []*http.Response{resp}},
+	}
+
+	err := svc.TestAccountConnectionReadOnly(ctx, account.ID, "gpt-5.4", "", AccountTestModeQuotaBypass)
+	require.Error(t, err)
+	require.Zero(t, repo.setErrorID)
+	require.Equal(t, StatusActive, account.Status)
+	require.True(t, account.Schedulable)
+	require.Empty(t, account.ErrorMessage)
+	require.NotContains(t, recorder.Body.String(), `"type":"account_status"`)
+	require.Contains(t, recorder.Body.String(), `"type":"error"`)
+}
+
+func TestAccountTestService_ReadOnlyOpenAI429DoesNotChangeRateLimit(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := newTestContext()
+
+	resp := newJSONResponse(http.StatusTooManyRequests, `{"error":{"type":"usage_limit_reached","resets_in_seconds":3600}}`)
+	existingLimitedAt := time.Now().Add(-time.Minute)
+	existingResetAt := time.Now().Add(time.Hour)
+	account := &Account{
+		ID:               92,
+		Platform:         PlatformOpenAI,
+		Type:             AccountTypeOAuth,
+		Status:           StatusActive,
+		Schedulable:      true,
+		Concurrency:      1,
+		Credentials:      map[string]any{"access_token": "test-token"},
+		RateLimitedAt:    &existingLimitedAt,
+		RateLimitResetAt: &existingResetAt,
+	}
+	repo := &openAIAccountTestRepo{}
+	repo.accountsByID = map[int64]*Account{account.ID: account}
+	svc := &AccountTestService{
+		accountRepo:  repo,
+		httpUpstream: &queuedHTTPUpstream{responses: []*http.Response{resp}},
+	}
+
+	err := svc.TestAccountConnectionReadOnly(ctx, account.ID, "gpt-5.4", "", AccountTestModeDefault)
+	require.Error(t, err)
+	require.Zero(t, repo.rateLimitedID)
+	require.Zero(t, repo.clearedErrorID)
+	require.Equal(t, &existingLimitedAt, account.RateLimitedAt)
+	require.Equal(t, &existingResetAt, account.RateLimitResetAt)
+}
+
 func TestAccountTestService_OpenAI403PersistsStatusAfterRequestCancellation(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, recorder := newTestContext()

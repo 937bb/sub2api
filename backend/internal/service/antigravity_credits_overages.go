@@ -59,7 +59,7 @@ func (a *Account) isCreditsExhausted() bool {
 
 // setCreditsExhausted 标记账号积分耗尽：写入 model_rate_limits["AICredits"] + 更新缓存。
 func (s *AntigravityGatewayService) setCreditsExhausted(ctx context.Context, account *Account) {
-	if account == nil || account.ID == 0 {
+	if account == nil || account.ID == 0 || isReadOnlyAccountTest(ctx) {
 		return
 	}
 	resetAt := time.Now().Add(creditsExhaustedDuration)
@@ -74,7 +74,7 @@ func (s *AntigravityGatewayService) setCreditsExhausted(ctx context.Context, acc
 
 // clearCreditsExhausted 清除账号的 AICredits 限流 key。
 func (s *AntigravityGatewayService) clearCreditsExhausted(ctx context.Context, account *Account) {
-	if account == nil || account.ID == 0 || account.Extra == nil {
+	if account == nil || account.ID == 0 || account.Extra == nil || isReadOnlyAccountTest(ctx) {
 		return
 	}
 	rawLimits, ok := account.Extra[modelRateLimitsKey].(map[string]any)

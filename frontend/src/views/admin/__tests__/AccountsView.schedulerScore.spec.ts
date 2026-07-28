@@ -92,7 +92,11 @@ function mountView() {
         AccountActionMenu: true,
         ImportDataModal: true,
         ReAuthAccountModal: true,
-        AccountTestModal: true,
+        AccountTestModal: {
+          props: ['show'],
+          emits: ['close'],
+          template: '<button data-test="close-account-test" @click="$emit(\'close\')">close</button>'
+        },
         AccountStatsModal: true,
         ScheduledTestsPanel: true,
         SyncFromCrsModal: true,
@@ -249,5 +253,16 @@ describe('admin AccountsView scheduler score column', () => {
     const emptyCell = wrapper.find('[data-test="scheduler-score-3"]')
     expect(emptyCell.exists()).toBe(true)
     expect(emptyCell.text()).toBe('-')
+  })
+
+  it('does not reload the account list when the manual test modal closes', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    expect(listAccounts).toHaveBeenCalledTimes(1)
+
+    await wrapper.get('[data-test="close-account-test"]').trigger('click')
+    await flushPromises()
+
+    expect(listAccounts).toHaveBeenCalledTimes(1)
   })
 })

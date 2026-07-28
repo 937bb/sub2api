@@ -860,7 +860,7 @@ func setModelRateLimitByModelName(ctx context.Context, repo AccountRepository, a
 }
 
 func (s *AntigravityGatewayService) setAntigravityModelRateLimits(ctx context.Context, repo AccountRepository, account *Account, modelName, prefix string, statusCode int, resetAt time.Time, afterSmartRetry bool) bool {
-	if account == nil || repo == nil {
+	if account == nil || repo == nil || isReadOnlyAccountTest(ctx) {
 		return false
 	}
 	keys := antigravityModelRateLimitKeys(modelName)
