@@ -3,15 +3,30 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
+
+type quotaBypassRateLimitRepo struct {
+	mockAccountRepoForGemini
+	setRateLimitedCalls int
+}
+
+func (r *quotaBypassRateLimitRepo) SetRateLimited(context.Context, int64, time.Time) error {
+	r.setRateLimitedCalls++
+	return nil
+}
 
 func TestOpenAI429FastPath_MarksOAuthAccountCoolingDown(t *testing.T) {
 	svc := &OpenAIGatewayService{}
@@ -95,6 +110,59 @@ func TestOpenAI429FastPath_RequestGroupQuotaBypassUsageLimitUsesShortRetryCooldo
 	)
 
 	require.True(t, svc.isOpenAIAccountRuntimeBlocked(account))
+	value, ok := svc.openaiAccountRuntimeBlockUntil.Load(account.ID)
+	require.True(t, ok)
+	until, ok := value.(time.Time)
+	require.True(t, ok)
+	require.WithinDuration(t, time.Now().Add(openAIOAuth429FallbackCooldown), until, time.Second)
+}
+
+func TestOpenAIGatewayForward_LateGroupBypassDecisionAvoidsPersistent429(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := []byte(`{"model":"gpt-5.6-sol","stream":false,"input":"hello"}`)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	staleContext := c.Request.Context()
+
+	repo := &quotaBypassRateLimitRepo{}
+	rateLimitService := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	upstreamHeaders := http.Header{}
+	upstreamHeaders.Set("x-codex-primary-used-percent", "100")
+	upstreamHeaders.Set("x-codex-primary-reset-after-seconds", "18000")
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusTooManyRequests,
+		Header:     upstreamHeaders,
+		Body:       io.NopCloser(strings.NewReader(`{"error":{"type":"usage_limit_reached","message":"The usage limit has been reached"}}`)),
+	}}
+	svc := &OpenAIGatewayService{
+		cfg:              &config.Config{},
+		accountRepo:      repo,
+		rateLimitService: rateLimitService,
+		httpUpstream:     upstream,
+	}
+	rateLimitService.SetAccountRuntimeBlocker(svc)
+	account := &Account{
+		ID:          47,
+		Name:        "group-bypass-account",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"access_token":       "oauth-token",
+			"chatgpt_account_id": "chatgpt-account",
+		},
+	}
+
+	SetOpenAIQuotaBypassEnabled(c, true)
+	result, err := svc.Forward(staleContext, c, account, body)
+
+	require.Error(t, err)
+	require.Nil(t, result)
+	requireQuotaBypassPairs(t, upstream.lastBody, 1, 1)
+	require.Zero(t, repo.setRateLimitedCalls, "bypass usage limit must not persist a full-window 429")
 	value, ok := svc.openaiAccountRuntimeBlockUntil.Load(account.ID)
 	require.True(t, ok)
 	until, ok := value.(time.Time)

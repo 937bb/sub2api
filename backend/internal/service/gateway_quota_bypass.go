@@ -170,6 +170,14 @@ func isOpenAIQuotaBypassEnabledForRequest(c *gin.Context, account *Account) bool
 	return IsAccountQuotaBypassEligible(account)
 }
 
+// syncOpenAIQuotaBypassRequestContext copies the final per-attempt decision
+// from Gin into the context used by upstream error handling. Some handlers
+// derive an intent context before account selection, so their ctx predates
+// SetOpenAIQuotaBypassEnabled even though the outgoing body is injected.
+func syncOpenAIQuotaBypassRequestContext(ctx context.Context, c *gin.Context, account *Account) context.Context {
+	return withOpenAIQuotaBypassEnabled(ctx, isOpenAIQuotaBypassEnabledForRequest(c, account))
+}
+
 func applyOpenAIQuotaBypassForRequest(c *gin.Context, account *Account, body []byte, pairs int) []byte {
 	if !isOpenAIQuotaBypassEnabledForRequest(c, account) {
 		return body
