@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
@@ -120,11 +121,11 @@ func isOpenAIQuotaBypassEnabledForRequest(c *gin.Context, account *Account) bool
 	return IsAccountQuotaBypassEligible(account)
 }
 
-func applyOpenAIQuotaBypassForRequest(c *gin.Context, account *Account, body []byte) []byte {
+func applyOpenAIQuotaBypassForRequest(c *gin.Context, account *Account, body []byte, pairs int) []byte {
 	if !isOpenAIQuotaBypassEnabledForRequest(c, account) {
 		return body
 	}
-	if injected, ok := InjectFunctionCallOutputSuffix(body); ok {
+	if injected, ok := InjectFunctionCallOutputSuffixN(body, pairs); ok {
 		return injected
 	}
 	return body
@@ -134,16 +135,44 @@ func applyOpenAIWSQuotaBypass(payload []byte, hooks *OpenAIWSIngressHooks) []byt
 	if hooks == nil || !hooks.QuotaBypassEnabled {
 		return payload
 	}
-	if injected, ok := InjectFunctionCallOutputSuffix(payload); ok {
+	if injected, ok := InjectFunctionCallOutputSuffixN(payload, hooks.QuotaBypassInjectPairs); ok {
 		return injected
 	}
 	return payload
 }
 
-// InjectFunctionCallOutputSuffix appends a synthetic function_call +
-// function_call_output pair to the Responses API "input" array, which
-// causes the upstream to skip its first-stage quota check.
+// ResolveOpenAIQuotaBypassInjectPairs returns the configured injection count.
+// Tests and small service instances often construct Config directly, so zero
+// retains the production default instead of disabling injection accidentally.
+func ResolveOpenAIQuotaBypassInjectPairs(cfg *config.Config) int {
+	if cfg == nil || cfg.Gateway.OpenAIQuotaBypassInjectPairs < 1 {
+		return 1
+	}
+	if cfg.Gateway.OpenAIQuotaBypassInjectPairs > quotaBypassMaxInjectPairs {
+		return quotaBypassMaxInjectPairs
+	}
+	return cfg.Gateway.OpenAIQuotaBypassInjectPairs
+}
+
+// InjectFunctionCallOutputSuffix appends one synthetic function_call +
+// function_call_output pair to the Responses API "input" array, which causes
+// the upstream to skip its first-stage quota check.
 func InjectFunctionCallOutputSuffix(body []byte) ([]byte, bool) {
+	return InjectFunctionCallOutputSuffixN(body, 1)
+}
+
+// InjectFunctionCallOutputSuffixN appends `pairs` synthetic tool turns instead
+// of one. The upstream relaxes its first-stage quota check per injected tool
+// round, so more pairs buy more headroom at the cost of tokens (each pair lands
+// in the request input) and of drifting further from the shape of a real
+// Codex session. pairs is clamped to [1, quotaBypassMaxInjectPairs].
+func InjectFunctionCallOutputSuffixN(body []byte, pairs int) ([]byte, bool) {
+	if pairs < 1 {
+		pairs = 1
+	}
+	if pairs > quotaBypassMaxInjectPairs {
+		pairs = quotaBypassMaxInjectPairs
+	}
 	inputArr := gjson.GetBytes(body, "input")
 	if !inputArr.Exists() {
 		return body, false
@@ -176,33 +205,39 @@ func InjectFunctionCallOutputSuffix(body []byte) ([]byte, bool) {
 		return body, false
 	}
 	idx := len(items)
-	callID, fcID := newQuotaBypassCallIDs()
+	for i := 0; i < pairs; i++ {
+		callID, fcID := newQuotaBypassCallIDs()
 
-	call, err := json.Marshal(map[string]any{
-		"type":      "function_call",
-		"id":        fcID,
-		"call_id":   callID,
-		"name":      quotaBypassToolName,
-		"arguments": quotaBypassCallArguments,
-	})
-	if err != nil {
-		return body, false
-	}
-	output, err := json.Marshal(map[string]any{
-		"type":    "function_call_output",
-		"call_id": callID,
-		"output":  quotaBypassCallOutput,
-	})
-	if err != nil {
-		return body, false
-	}
+		call, err := json.Marshal(map[string]any{
+			"type":      "function_call",
+			"id":        fcID,
+			"call_id":   callID,
+			"name":      quotaBypassToolName,
+			"arguments": quotaBypassCallArguments,
+		})
+		if err != nil {
+			return body, false
+		}
+		output, err := json.Marshal(map[string]any{
+			"type":    "function_call_output",
+			"call_id": callID,
+			"output":  quotaBypassCallOutput,
+		})
+		if err != nil {
+			return body, false
+		}
 
-	body, err = sjson.SetRawBytes(body, "input."+strconv.Itoa(idx), call)
-	if err != nil {
-		return body, false
+		body, err = sjson.SetRawBytes(body, "input."+strconv.Itoa(idx), call)
+		if err != nil {
+			return body, false
+		}
+		body, err = sjson.SetRawBytes(body, "input."+strconv.Itoa(idx+1), output)
+		if err != nil {
+			return body, false
+		}
+		idx += 2
 	}
-	body, err = sjson.SetRawBytes(body, "input."+strconv.Itoa(idx+1), output)
-	return body, err == nil
+	return body, true
 }
 
 // The injected turn has to be indistinguishable from a real Codex tool call.
@@ -210,6 +245,11 @@ func InjectFunctionCallOutputSuffix(body []byte) ([]byte, bool) {
 // "_sys" / "[continue]" on every single request, which is both an obvious
 // synthetic marker and a fixed fingerprint shared by every request this proxy
 // ever sent. These mirror the shell tool that Codex actually drives.
+// quotaBypassMaxInjectPairs caps how many synthetic tool turns a single
+// request may carry. Each pair costs tokens and pushes the request further
+// from a plausible Codex session, so the knob is bounded rather than free.
+const quotaBypassMaxInjectPairs = 16
+
 const (
 	quotaBypassToolName = "shell"
 	// Matches the shell tool's real argument shape: an argv array plus the

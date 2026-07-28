@@ -911,6 +911,11 @@ type GatewayConfig struct {
 	// OpenAICompactModel: /responses/compact 上游使用的模型。
 	// compact 端点支持模型滞后于普通 /responses 时，可用该配置降级规避上游错误。
 	OpenAICompactModel string `mapstructure:"openai_compact_model"`
+	// OpenAIQuotaBypassInjectPairs: 超额注入的 function_call/function_call_output
+	// 对数（默认 1）。上游按注入的工具轮次放宽第一阶段额度判定，注入更多对可换取
+	// 更多额度，但每对都会进入 input 并计入 token，且过量注入会让请求明显偏离真实
+	// Codex 会话形态。取值范围 1-16，建议从 1 起按实际额度表现逐步上调。
+	OpenAIQuotaBypassInjectPairs int `mapstructure:"openai_quota_bypass_inject_pairs"`
 	// OpenAIWS: OpenAI Responses WebSocket 配置（默认开启，可按需回滚到 HTTP）
 	OpenAIWS GatewayOpenAIWSConfig `mapstructure:"openai_ws"`
 	// Live: ChatGPT Frameless Live 会话配置。
@@ -2195,6 +2200,7 @@ func setDefaults() {
 	viper.SetDefault("gateway.codex_image_generation_bridge_enabled", false)
 	viper.SetDefault("gateway.openai_passthrough_allow_timeout_headers", false)
 	viper.SetDefault("gateway.openai_compact_model", "gpt-5.4")
+	viper.SetDefault("gateway.openai_quota_bypass_inject_pairs", 1)
 	viper.SetDefault("gateway.live.max_session_duration_seconds", 3600)
 	// OpenAI Responses WebSocket（默认开启；可通过 force_http 紧急回滚）
 	viper.SetDefault("gateway.openai_ws.enabled", true)
@@ -2458,6 +2464,9 @@ func (c *Config) Validate() error {
 	c.SetForwardedClientIPSettings(c.Security.TrustForwardedIPForAPIKeyACL, forwardedClientIPHeaders)
 	if c.Server.ReadHeaderTimeout < 1 || c.Server.ReadHeaderTimeout > 60 {
 		return fmt.Errorf("server.read_header_timeout must be between 1 and 60 seconds")
+	}
+	if c.Gateway.OpenAIQuotaBypassInjectPairs < 1 || c.Gateway.OpenAIQuotaBypassInjectPairs > 16 {
+		return fmt.Errorf("gateway.openai_quota_bypass_inject_pairs must be between 1 and 16")
 	}
 	if c.Server.MaxHeaderBytes < 8*1024 || c.Server.MaxHeaderBytes > 1024*1024 {
 		return fmt.Errorf("server.max_header_bytes must be between 8192 and 1048576 bytes")

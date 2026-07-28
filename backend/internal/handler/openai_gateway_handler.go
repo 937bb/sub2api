@@ -492,7 +492,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			quotaBypassEnabled := service.IsQuotaBypassEligible(account, apiKey.Group)
 			service.SetOpenAIQuotaBypassEnabled(c, quotaBypassEnabled)
 			if quotaBypassEnabled {
-				if injected, ok := service.InjectFunctionCallOutputSuffix(attemptBody); ok {
+				if injected, ok := service.InjectFunctionCallOutputSuffixN(attemptBody, service.ResolveOpenAIQuotaBypassInjectPairs(h.cfg)); ok {
 					attemptBody = injected
 				}
 			}
@@ -1788,6 +1788,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			MaxReasoningEffort:      maxReasoningEffort,
 			ReasoningEffortMappings: reasoningEffortMappings,
 			QuotaBypassEnabled:      quotaBypassEnabled,
+			QuotaBypassInjectPairs:  service.ResolveOpenAIQuotaBypassInjectPairs(h.cfg),
 			BeforeRequest: func(turn int, payload []byte, originalModel string) error {
 				if turn == 1 {
 					return nil

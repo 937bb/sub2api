@@ -641,7 +641,7 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	payloadBytes, _ := json.Marshal(payload)
 
 	if mode == AccountTestModeQuotaBypass {
-		if injected, ok := InjectFunctionCallOutputSuffix(payloadBytes); ok {
+		if injected, ok := InjectFunctionCallOutputSuffixN(payloadBytes, ResolveOpenAIQuotaBypassInjectPairs(s.cfg)); ok {
 			payloadBytes = injected
 		} else {
 			return s.sendErrorAndEnd(c, "Failed to inject quota bypass payload")

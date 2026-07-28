@@ -34,6 +34,25 @@ func requireQuotaBypassSuffix(t *testing.T, body []byte) {
 	}
 }
 
+func requireQuotaBypassPairs(t *testing.T, body []byte, originalItems, pairs int) {
+	t.Helper()
+	input := gjson.GetBytes(body, "input").Array()
+	require.Len(t, input, originalItems+pairs*2)
+	seenCallIDs := make(map[string]struct{}, pairs)
+	for i := 0; i < pairs; i++ {
+		call := input[originalItems+i*2]
+		output := input[originalItems+i*2+1]
+		require.Equal(t, "function_call", call.Get("type").String())
+		require.Equal(t, "function_call_output", output.Get("type").String())
+		callID := call.Get("call_id").String()
+		require.NotEmpty(t, callID)
+		require.Equal(t, callID, output.Get("call_id").String())
+		_, duplicate := seenCallIDs[callID]
+		require.False(t, duplicate, "each injected pair must use a unique call_id")
+		seenCallIDs[callID] = struct{}{}
+	}
+}
+
 // The injected turn must look like a real Codex shell call, not a constant.
 // A fixed call_id shared by every request this proxy sends is a trivial
 // upstream fingerprint, and "_sys"/"[continue]" advertise the turn as synthetic.
@@ -76,6 +95,37 @@ func TestInjectFunctionCallOutputSuffix_LooksLikeRealToolCall(t *testing.T) {
 	if firstID == "" || firstID == secondID {
 		t.Fatalf("call_id must be unique per request, got %q twice", firstID)
 	}
+}
+
+func TestInjectFunctionCallOutputSuffixN_AppendsConfiguredPairs(t *testing.T) {
+	base := []byte(`{"model":"gpt-5.4","input":[{"type":"message","role":"user","content":"hi"}]}`)
+
+	injected, ok := InjectFunctionCallOutputSuffixN(base, 3)
+	require.True(t, ok)
+	requireQuotaBypassPairs(t, injected, 1, 3)
+}
+
+func TestInjectFunctionCallOutputSuffixN_ClampsPairCount(t *testing.T) {
+	base := []byte(`{"model":"gpt-5.4","input":[{"type":"message","role":"user","content":"hi"}]}`)
+
+	minimum, ok := InjectFunctionCallOutputSuffixN(base, 0)
+	require.True(t, ok)
+	requireQuotaBypassPairs(t, minimum, 1, 1)
+
+	maximum, ok := InjectFunctionCallOutputSuffixN(base, quotaBypassMaxInjectPairs+1)
+	require.True(t, ok)
+	requireQuotaBypassPairs(t, maximum, 1, quotaBypassMaxInjectPairs)
+}
+
+func TestResolveOpenAIQuotaBypassInjectPairs(t *testing.T) {
+	require.Equal(t, 1, ResolveOpenAIQuotaBypassInjectPairs(nil))
+	require.Equal(t, 1, ResolveOpenAIQuotaBypassInjectPairs(&config.Config{}))
+	require.Equal(t, 4, ResolveOpenAIQuotaBypassInjectPairs(&config.Config{
+		Gateway: config.GatewayConfig{OpenAIQuotaBypassInjectPairs: 4},
+	}))
+	require.Equal(t, quotaBypassMaxInjectPairs, ResolveOpenAIQuotaBypassInjectPairs(&config.Config{
+		Gateway: config.GatewayConfig{OpenAIQuotaBypassInjectPairs: quotaBypassMaxInjectPairs + 1},
+	}))
 }
 
 func TestIsQuotaBypassEligible(t *testing.T) {
@@ -166,7 +216,7 @@ func TestApplyOpenAIQuotaBypassForRequest_UsesHandlerGroupDecision(t *testing.T)
 	body := []byte(`{"model":"gpt-5.1","input":[{"type":"message","role":"user","content":"hello"}]}`)
 
 	SetOpenAIQuotaBypassEnabled(c, true)
-	injected := applyOpenAIQuotaBypassForRequest(c, account, body)
+	injected := applyOpenAIQuotaBypassForRequest(c, account, body, 1)
 
 	requireQuotaBypassSuffix(t, injected)
 }
@@ -185,7 +235,7 @@ func TestApplyOpenAIQuotaBypassForRequest_StaleNegativeContextDoesNotHideAccount
 	body := []byte(`{"model":"gpt-5.1","input":[{"type":"message","role":"user","content":"hello"}]}`)
 
 	SetOpenAIQuotaBypassEnabled(c, false)
-	injected := applyOpenAIQuotaBypassForRequest(c, account, body)
+	injected := applyOpenAIQuotaBypassForRequest(c, account, body, 1)
 
 	requireQuotaBypassSuffix(t, injected)
 }
@@ -204,7 +254,9 @@ func TestOpenAIGatewayService_ForwardInjectsQuotaBypassForStringInput(t *testing
 		Body:       io.NopCloser(strings.NewReader(`{"error":{"type":"invalid_request_error","message":"stop after capture"}}`)),
 	}}
 	svc := &OpenAIGatewayService{
-		cfg:          &config.Config{},
+		cfg: &config.Config{Gateway: config.GatewayConfig{
+			OpenAIQuotaBypassInjectPairs: 3,
+		}},
 		httpUpstream: upstream,
 	}
 	account := &Account{
@@ -226,7 +278,7 @@ func TestOpenAIGatewayService_ForwardInjectsQuotaBypassForStringInput(t *testing
 	require.Error(t, err)
 	require.Nil(t, result)
 	require.NotNil(t, upstream.lastReq)
-	requireQuotaBypassSuffix(t, upstream.lastBody)
+	requireQuotaBypassPairs(t, upstream.lastBody, 1, 3)
 	require.Equal(t, "hello", gjson.GetBytes(upstream.lastBody, "input.0.content.0.text").String())
 }
 

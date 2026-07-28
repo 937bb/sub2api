@@ -36,6 +36,7 @@ func TestQuotaBypassWebSocketInjectsEveryTurn(t *testing.T) {
 			cfg.Gateway.OpenAIWS.DialTimeoutSeconds = 3
 			cfg.Gateway.OpenAIWS.ReadTimeoutSeconds = 3
 			cfg.Gateway.OpenAIWS.WriteTimeoutSeconds = 3
+			cfg.Gateway.OpenAIQuotaBypassInjectPairs = 3
 
 			responses := []string{
 				`{"type":"response.completed","response":{"id":"resp_bypass_1","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`,
@@ -87,7 +88,8 @@ func TestQuotaBypassWebSocketInjectsEveryTurn(t *testing.T) {
 				},
 			}
 			hooks := &OpenAIWSIngressHooks{
-				QuotaBypassEnabled: IsQuotaBypassEligible(account, nil),
+				QuotaBypassEnabled:     IsQuotaBypassEligible(account, nil),
+				QuotaBypassInjectPairs: ResolveOpenAIQuotaBypassInjectPairs(cfg),
 			}
 			require.True(t, hooks.QuotaBypassEnabled)
 
@@ -126,9 +128,11 @@ func TestQuotaBypassWebSocketInjectsEveryTurn(t *testing.T) {
 
 			assertBypassSuffix := func(payload []byte, turn int) {
 				input := gjson.GetBytes(payload, "input").Array()
-				require.Len(t, input, 3, "turn %d must contain the bypass suffix", turn)
-				require.Equal(t, "function_call", input[1].Get("type").String())
-				require.Equal(t, "function_call_output", input[2].Get("type").String())
+				require.Len(t, input, 7, "turn %d must contain all configured bypass pairs", turn)
+				for i := 0; i < 3; i++ {
+					require.Equal(t, "function_call", input[1+i*2].Get("type").String())
+					require.Equal(t, "function_call_output", input[2+i*2].Get("type").String())
+				}
 			}
 			writeTurn := func(turn int, payload string) {
 				writeCtx, cancelWrite := context.WithTimeout(context.Background(), 3*time.Second)

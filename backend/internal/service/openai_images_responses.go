@@ -1699,7 +1699,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 	if err != nil {
 		return nil, err
 	}
-	responsesBody = applyOpenAIQuotaBypassForRequest(c, account, responsesBody)
+	responsesBody = applyOpenAIQuotaBypassForRequest(c, account, responsesBody, ResolveOpenAIQuotaBypassInjectPairs(s.cfg))
 	upstreamReq, err := s.buildUpstreamRequest(upstreamCtx, c, account, responsesBody, token, true, parsed.StickySessionSeed(), false)
 	if err != nil {
 		return nil, err

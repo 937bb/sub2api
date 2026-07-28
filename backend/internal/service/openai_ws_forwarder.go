@@ -216,9 +216,11 @@ type OpenAIWSIngressHooks struct {
 	ReasoningEffortMappings []ReasoningEffortMapping
 	// QuotaBypassEnabled applies the quota-bypass suffix to every response.create turn.
 	QuotaBypassEnabled bool
-	BeforeTurn         func(turn int) error
-	BeforeRequest      func(turn int, payload []byte, originalModel string) error
-	AfterTurn          func(turn int, result *OpenAIForwardResult, turnErr error)
+	// QuotaBypassInjectPairs controls how many synthetic tool turns are appended.
+	QuotaBypassInjectPairs int
+	BeforeTurn             func(turn int) error
+	BeforeRequest          func(turn int, payload []byte, originalModel string) error
+	AfterTurn              func(turn int, result *OpenAIForwardResult, turnErr error)
 }
 
 func (s *OpenAIGatewayService) getOpenAIWSConnPool() *openAIWSConnPool {

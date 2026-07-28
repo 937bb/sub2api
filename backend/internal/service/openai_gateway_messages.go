@@ -257,7 +257,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		return nil, policyErr
 	}
 	responsesBody = updatedBody
-	responsesBody = applyOpenAIQuotaBypassForRequest(c, account, responsesBody)
+	responsesBody = applyOpenAIQuotaBypassForRequest(c, account, responsesBody, ResolveOpenAIQuotaBypassInjectPairs(s.cfg))
 	grokCacheIdentity := ""
 	if account.Platform == PlatformGrok {
 		grokIntentBody := responsesBody
