@@ -19,7 +19,6 @@ import (
 
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
-	ctx = syncOpenAIQuotaBypassRequestContext(ctx, c, account)
 	clearGrokResponsesClientToolMapping(c)
 	startTime := time.Now()
 	body = applyOpenAIQuotaBypassForRequest(c, account, body, ResolveOpenAIQuotaBypassInjectPairs(s.cfg))

@@ -7,8 +7,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/tidwall/gjson"
 )
 
 const (
@@ -85,17 +83,6 @@ func (s *OpenAIGatewayService) handleOpenAIAccountUpstreamError(ctx context.Cont
 		s.rateLimitService.HandleTempUnschedulable(stateCtx, account, statusCode, responseBody, canonicalModel[0]) {
 		return true
 	}
-	if statusCode == http.StatusTooManyRequests && isOpenAIQuotaBypassUsageLimit(stateCtx, account, responseBody) {
-		// A bypass request can be rejected when the remaining allowance is too
-		// small for that request while a smaller request still succeeds. Do not
-		// turn this ambiguous response into a full-window account cooldown.
-		s.recordOpenAIOAuth429()
-		s.BlockAccountScheduling(account, time.Now().Add(openAIOAuth429FallbackCooldown), "quota_bypass_usage_limit")
-		if s.rateLimitService != nil {
-			s.rateLimitService.recordOpenAIQuotaBypassUsageLimit(stateCtx, account, headers, responseBody)
-		}
-		return false
-	}
 	if statusCode == http.StatusTooManyRequests {
 		s.markOpenAIOAuth429RateLimited(stateCtx, account, headers, responseBody)
 	}
@@ -130,14 +117,6 @@ func (s *OpenAIGatewayService) handleOpenAIAccountUpstreamError(ctx context.Cont
 		}
 	}
 	return shouldDisable
-}
-
-func isOpenAIQuotaBypassUsageLimit(ctx context.Context, account *Account, responseBody []byte) bool {
-	if account == nil || account.Platform != PlatformOpenAI ||
-		!isOpenAIQuotaBypassEnabledForContext(ctx, account) {
-		return false
-	}
-	return strings.EqualFold(strings.TrimSpace(gjson.GetBytes(responseBody, "error.type").String()), "usage_limit_reached")
 }
 
 func shouldCooldownOpenAITransientUpstreamError(statusCode int, responseBody []byte) bool {

@@ -21,10 +21,24 @@ import (
 type quotaBypassRateLimitRepo struct {
 	mockAccountRepoForGemini
 	setRateLimitedCalls int
+	setRateLimitedID    int64
+	setRateLimitResetAt time.Time
+	setErrorCalls       int
+	setErrorID          int64
+	setErrorMessage     string
 }
 
-func (r *quotaBypassRateLimitRepo) SetRateLimited(context.Context, int64, time.Time) error {
+func (r *quotaBypassRateLimitRepo) SetRateLimited(_ context.Context, id int64, resetAt time.Time) error {
 	r.setRateLimitedCalls++
+	r.setRateLimitedID = id
+	r.setRateLimitResetAt = resetAt
+	return nil
+}
+
+func (r *quotaBypassRateLimitRepo) SetError(_ context.Context, id int64, message string) error {
+	r.setErrorCalls++
+	r.setErrorID = id
+	r.setErrorMessage = message
 	return nil
 }
 
@@ -63,61 +77,42 @@ func TestOpenAI429FastPath_QuotaBypassRealRateLimitStillMarksOAuthAccountCooling
 	require.True(t, svc.isOpenAIAccountRuntimeBlocked(account))
 }
 
-func TestOpenAI429FastPath_QuotaBypassUsageLimitUsesShortRetryCooldown(t *testing.T) {
-	repo := &rateLimitClearRepoStub{}
-	rateLimitService := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
-	svc := &OpenAIGatewayService{accountRepo: repo, rateLimitService: rateLimitService}
-	rateLimitService.SetAccountRuntimeBlocker(svc)
-	account := &Account{
-		ID:       45,
-		Platform: PlatformOpenAI,
-		Type:     AccountTypeOAuth,
-		Extra:    map[string]any{"quota_bypass_enabled": true},
+func TestOpenAI429FastPath_QuotaBypassUsageLimitMatchesRegularAccount(t *testing.T) {
+	for _, bypassEnabled := range []bool{false, true} {
+		name := "regular"
+		if bypassEnabled {
+			name = "quota_bypass"
+		}
+		t.Run(name, func(t *testing.T) {
+			repo := &quotaBypassRateLimitRepo{}
+			rateLimitService := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+			svc := &OpenAIGatewayService{accountRepo: repo, rateLimitService: rateLimitService}
+			rateLimitService.SetAccountRuntimeBlocker(svc)
+			account := &Account{ID: 45, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+			if bypassEnabled {
+				account.Extra = map[string]any{"quota_bypass_enabled": true}
+			}
+			headers := http.Header{}
+			headers.Set("x-codex-primary-used-percent", "100")
+			headers.Set("x-codex-primary-reset-after-seconds", "18000")
+
+			svc.handleOpenAIAccountUpstreamError(
+				context.Background(),
+				account,
+				http.StatusTooManyRequests,
+				headers,
+				[]byte(`{"error":{"type":"usage_limit_reached","message":"The usage limit has been reached"}}`),
+			)
+
+			require.Equal(t, 1, repo.setRateLimitedCalls)
+			require.Equal(t, account.ID, repo.setRateLimitedID)
+			require.WithinDuration(t, time.Now().Add(5*time.Hour), repo.setRateLimitResetAt, time.Second)
+			require.True(t, svc.isOpenAIAccountRuntimeBlocked(account))
+		})
 	}
-
-	svc.handleOpenAIAccountUpstreamError(
-		context.Background(),
-		account,
-		http.StatusTooManyRequests,
-		http.Header{},
-		[]byte(`{"error":{"type":"usage_limit_reached","message":"The usage limit has been reached"}}`),
-	)
-
-	require.Nil(t, account.RateLimitedAt)
-	require.Nil(t, account.RateLimitResetAt)
-	require.True(t, svc.isOpenAIAccountRuntimeBlocked(account))
-	value, ok := svc.openaiAccountRuntimeBlockUntil.Load(account.ID)
-	require.True(t, ok)
-	until, ok := value.(time.Time)
-	require.True(t, ok)
-	require.WithinDuration(t, time.Now().Add(openAIOAuth429FallbackCooldown), until, time.Second)
 }
 
-func TestOpenAI429FastPath_RequestGroupQuotaBypassUsageLimitUsesShortRetryCooldown(t *testing.T) {
-	repo := &rateLimitClearRepoStub{}
-	rateLimitService := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
-	svc := &OpenAIGatewayService{accountRepo: repo, rateLimitService: rateLimitService}
-	rateLimitService.SetAccountRuntimeBlocker(svc)
-	account := &Account{ID: 46, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
-	ctx := withOpenAIQuotaBypassEnabled(context.Background(), true)
-
-	svc.handleOpenAIAccountUpstreamError(
-		ctx,
-		account,
-		http.StatusTooManyRequests,
-		http.Header{},
-		[]byte(`{"error":{"type":"usage_limit_reached","message":"The usage limit has been reached"}}`),
-	)
-
-	require.True(t, svc.isOpenAIAccountRuntimeBlocked(account))
-	value, ok := svc.openaiAccountRuntimeBlockUntil.Load(account.ID)
-	require.True(t, ok)
-	until, ok := value.(time.Time)
-	require.True(t, ok)
-	require.WithinDuration(t, time.Now().Add(openAIOAuth429FallbackCooldown), until, time.Second)
-}
-
-func TestOpenAIGatewayForward_LateGroupBypassDecisionAvoidsPersistent429(t *testing.T) {
+func TestOpenAIGatewayForward_GroupBypassInjectionPersistsUpstream429(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	body := []byte(`{"model":"gpt-5.6-sol","stream":false,"input":"hello"}`)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
@@ -162,12 +157,61 @@ func TestOpenAIGatewayForward_LateGroupBypassDecisionAvoidsPersistent429(t *test
 	require.Error(t, err)
 	require.Nil(t, result)
 	requireQuotaBypassPairs(t, upstream.lastBody, 1, 1)
-	require.Zero(t, repo.setRateLimitedCalls, "bypass usage limit must not persist a full-window 429")
+	require.Equal(t, 1, repo.setRateLimitedCalls, "quota bypass must use the standard 429 persistence path")
+	require.Equal(t, account.ID, repo.setRateLimitedID)
+	require.WithinDuration(t, time.Now().Add(5*time.Hour), repo.setRateLimitResetAt, time.Second)
 	value, ok := svc.openaiAccountRuntimeBlockUntil.Load(account.ID)
 	require.True(t, ok)
 	until, ok := value.(time.Time)
 	require.True(t, ok)
-	require.WithinDuration(t, time.Now().Add(openAIOAuth429FallbackCooldown), until, time.Second)
+	require.WithinDuration(t, repo.setRateLimitResetAt, until, time.Second)
+}
+
+func TestOpenAIGatewayForward_GroupBypassInjectionUsesStandard403Handling(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := []byte(`{"model":"gpt-5.6-sol","stream":false,"input":"hello"}`)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	repo := &quotaBypassRateLimitRepo{}
+	rateLimitService := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusForbidden,
+		Header:     http.Header{},
+		Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"Personal access token owner is inactive."}}`)),
+	}}
+	svc := &OpenAIGatewayService{
+		cfg:              &config.Config{},
+		accountRepo:      repo,
+		rateLimitService: rateLimitService,
+		httpUpstream:     upstream,
+	}
+	rateLimitService.SetAccountRuntimeBlocker(svc)
+	account := &Account{
+		ID:          48,
+		Name:        "group-bypass-inactive-account",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"access_token":       "oauth-token",
+			"chatgpt_account_id": "chatgpt-account",
+		},
+	}
+
+	SetOpenAIQuotaBypassEnabled(c, true)
+	result, err := svc.Forward(context.Background(), c, account, body)
+
+	require.Error(t, err)
+	require.Nil(t, result)
+	requireQuotaBypassPairs(t, upstream.lastBody, 1, 1)
+	require.Equal(t, 1, repo.setErrorCalls, "quota bypass must use the standard 403 account-error path")
+	require.Equal(t, account.ID, repo.setErrorID)
+	require.Contains(t, repo.setErrorMessage, "Personal access token owner is inactive")
+	require.True(t, svc.isOpenAIAccountRuntimeBlocked(account))
 }
 
 // TestOpenAI429FastPath_SkipsSparkShadow 外审第8轮 P1:spark 影子被选中后若 /responses 返回 429,

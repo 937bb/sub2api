@@ -641,7 +641,7 @@ export default {
         testModeCompact: 'Compact 探测',
         testModeQuotaBypass: '超额绕过测试',
         quotaBypass: 'Codex 超额绕过',
-        quotaBypassDesc: '开启后，该账号遇到 429 限额时将自动尝试绕过 OpenAI Codex 配额限制。',
+        quotaBypassDesc: '开启后，该账号的每个 Codex 请求都会注入一组超额工具调用；上游错误仍按常规请求处理。',
         modelRestrictionDisabledByPassthrough: '已开启自动透传：模型白名单/映射不会生效。',
       },
       grok: {

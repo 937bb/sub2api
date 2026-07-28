@@ -30,7 +30,6 @@ func (s *OpenAIGatewayService) ForwardAlphaSearch(ctx context.Context, c *gin.Co
 	if s == nil || c == nil || account == nil {
 		return nil, fmt.Errorf("service, context, and account are required")
 	}
-	ctx = syncOpenAIQuotaBypassRequestContext(ctx, c, account)
 	modelResult := gjson.GetBytes(body, "model")
 	requestedModel := strings.TrimSpace(modelResult.String())
 	if modelResult.Type != gjson.String || requestedModel == "" {

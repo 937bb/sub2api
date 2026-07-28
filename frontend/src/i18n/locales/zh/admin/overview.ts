@@ -1108,7 +1108,7 @@ export default {
       },
       quotaBypass: {
         enable: '启用 Codex 超额绕过',
-        tooltip: '为该分组下的 OpenAI OAuth 账号注入 function_call_output 以绕过 Codex 配额限制。可在账号 extra 中通过 quota_bypass_enabled 单独覆盖。'
+        tooltip: '为该分组下 OpenAI OAuth 账号的每个请求注入一组 function_call + function_call_output。仅修改请求体，响应错误仍按常规逻辑处理；可由账号设置单独覆盖。'
       },
       copyAccounts: {
         title: '从分组复制账号',

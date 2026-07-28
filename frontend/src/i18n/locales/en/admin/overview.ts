@@ -1110,7 +1110,7 @@ export default {
       },
       quotaBypass: {
         enable: 'Enable Codex Quota Bypass',
-        tooltip: 'Inject function_call_output for OpenAI OAuth accounts in this group to bypass Codex quota limits. Can be overridden per account via extra.quota_bypass_enabled.'
+        tooltip: 'Inject one function_call + function_call_output pair into every request for OpenAI OAuth accounts in this group. Only the request body changes; response errors use standard handling. Account settings can override it.'
       },
       copyAccounts: {
         title: 'Copy Accounts from Groups',

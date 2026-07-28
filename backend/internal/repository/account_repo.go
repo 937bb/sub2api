@@ -51,10 +51,6 @@ type accountRepository struct {
 	schedulerCache service.SchedulerCache
 }
 
-func (r *accountRepository) SupportsOpenAIQuotaBypassRateLimitRecovery() bool {
-	return true
-}
-
 var schedulerNeutralExtraKeyPrefixes = []string{
 	"codex_primary_",
 	"codex_secondary_",

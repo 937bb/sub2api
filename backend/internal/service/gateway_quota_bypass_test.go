@@ -259,21 +259,6 @@ func TestApplyOpenAIQuotaBypassForRequest_StaleNegativeContextDoesNotHideAccount
 	requireQuotaBypassSuffix(t, injected)
 }
 
-func TestSyncOpenAIQuotaBypassRequestContext_UsesLateHandlerGroupDecision(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	c, _ := gin.CreateTestContext(httptest.NewRecorder())
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
-	staleIntentContext := context.WithValue(c.Request.Context(), struct{}{}, "image-intent")
-	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth}
-
-	SetOpenAIQuotaBypassEnabled(c, true)
-	synced := syncOpenAIQuotaBypassRequestContext(staleIntentContext, c, account)
-
-	enabled, exists := openAIQuotaBypassEnabledFromContext(synced)
-	require.True(t, exists)
-	require.True(t, enabled)
-}
-
 func TestOpenAIGatewayService_ForwardInjectsQuotaBypassForStringInput(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()

@@ -1,7 +1,6 @@
 package service
 
 import (
-	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -22,10 +21,6 @@ const (
 	openAIQuotaBypassResponseHeader        = "X-Sub2API-Quota-Bypass"
 	openAIQuotaBypassPairsResponseHeader   = "X-Sub2API-Quota-Bypass-Pairs"
 )
-
-type openAIQuotaBypassContextKeyType struct{}
-
-var openAIQuotaBypassContextKey openAIQuotaBypassContextKeyType
 
 // IsQuotaBypassEligible reports whether an account qualifies for Codex quota
 // bypass injection through an account override, the request group, or any group
@@ -76,9 +71,6 @@ func SetOpenAIQuotaBypassEnabled(c *gin.Context, enabled bool) {
 	c.Set(openAIQuotaBypassInjectPairsContextKey, 0)
 	c.Writer.Header().Del(openAIQuotaBypassResponseHeader)
 	c.Writer.Header().Del(openAIQuotaBypassPairsResponseHeader)
-	if c.Request != nil {
-		c.Request = c.Request.WithContext(withOpenAIQuotaBypassEnabled(c.Request.Context(), enabled))
-	}
 }
 
 func markOpenAIQuotaBypassApplied(c *gin.Context, pairs int) {
@@ -118,38 +110,10 @@ func InjectOpenAIQuotaBypassForRequest(c *gin.Context, body []byte, _ int) ([]by
 	return injected, ok
 }
 
-func withOpenAIQuotaBypassEnabled(ctx context.Context, enabled bool) context.Context {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	return context.WithValue(ctx, openAIQuotaBypassContextKey, enabled)
-}
-
-func openAIQuotaBypassEnabledFromContext(ctx context.Context) (bool, bool) {
-	if ctx == nil {
-		return false, false
-	}
-	enabled, ok := ctx.Value(openAIQuotaBypassContextKey).(bool)
-	return enabled, ok
-}
-
-func isOpenAIQuotaBypassEnabledForContext(ctx context.Context, account *Account) bool {
-	if account != nil && account.Extra != nil {
-		if value, ok := account.Extra["quota_bypass_enabled"].(bool); ok && !value {
-			return false
-		}
-	}
-	if enabled, exists := openAIQuotaBypassEnabledFromContext(ctx); exists && enabled {
-		return true
-	}
-	return IsAccountQuotaBypassEligible(account)
-}
-
 func isOpenAIQuotaBypassEnabledForRequest(c *gin.Context, account *Account) bool {
-	// A request-scoped positive decision is needed when the scheduler snapshot
-	// does not carry the request group's full definition. A stale negative
-	// decision must not hide an account override or an attached bypass group.
-	// An explicit account-level false remains authoritative.
+	// The selected request group may enable injection even when the scheduler's
+	// account snapshot does not carry full group metadata. An explicit
+	// account-level false remains authoritative.
 	if account != nil && account.Extra != nil {
 		if value, ok := account.Extra["quota_bypass_enabled"].(bool); ok && !value {
 			return false
@@ -163,25 +127,17 @@ func isOpenAIQuotaBypassEnabledForRequest(c *gin.Context, account *Account) bool
 				}
 			}
 		}
-		if c.Request != nil && isOpenAIQuotaBypassEnabledForContext(c.Request.Context(), account) {
-			return true
-		}
 	}
 	return IsAccountQuotaBypassEligible(account)
-}
-
-// syncOpenAIQuotaBypassRequestContext copies the final per-attempt decision
-// from Gin into the context used by upstream error handling. Some handlers
-// derive an intent context before account selection, so their ctx predates
-// SetOpenAIQuotaBypassEnabled even though the outgoing body is injected.
-func syncOpenAIQuotaBypassRequestContext(ctx context.Context, c *gin.Context, account *Account) context.Context {
-	return withOpenAIQuotaBypassEnabled(ctx, isOpenAIQuotaBypassEnabledForRequest(c, account))
 }
 
 func applyOpenAIQuotaBypassForRequest(c *gin.Context, account *Account, body []byte, pairs int) []byte {
 	if !isOpenAIQuotaBypassEnabledForRequest(c, account) {
 		return body
 	}
+	// Injection is the complete quota-bypass behavior. Never propagate this
+	// decision into response handling: upstream 401/403/429 and all other
+	// failures must follow the same account-state path as an ordinary request.
 	if injected, ok := InjectOpenAIQuotaBypassForRequest(c, body, pairs); ok {
 		return injected
 	}
