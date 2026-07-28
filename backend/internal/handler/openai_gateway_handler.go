@@ -492,11 +492,6 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			attemptBody := forwardBody
 			quotaBypassEnabled := service.IsQuotaBypassEligible(account, apiKey.Group)
 			service.SetOpenAIQuotaBypassEnabled(c, quotaBypassEnabled)
-			if quotaBypassEnabled {
-				if injected, ok := service.InjectOpenAIQuotaBypassForRequest(c, attemptBody, service.ResolveOpenAIQuotaBypassInjectPairs(h.cfg)); ok {
-					attemptBody = injected
-				}
-			}
 			return h.gatewayService.Forward(c.Request.Context(), c, account, attemptBody)
 		}()
 		cyberBlockKeyHTTP := ""
