@@ -21,6 +21,7 @@ func TestOpenAIImagesJSONKeepalive_PreservesValidJSONResponse(t *testing.T) {
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
+	c.Request.Header.Set("X-Forwarded-For", "192.0.2.1")
 	originalWriter := c.Writer
 
 	stop := StartOpenAIImagesJSONKeepalive(c, 5*time.Millisecond)

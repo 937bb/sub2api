@@ -51,6 +51,7 @@ func TestStartOpenAICompactSSEKeepalive_NoopWhenUnmarkedOrDisabled(t *testing.T)
 
 func TestOpenAICompactSSEKeepalive_CommitsHeadersAndComments(t *testing.T) {
 	c, rec := newCompactBridgeTestContext(t, true)
+	c.Request.Header.Set("X-Forwarded-For", "192.0.2.1")
 	stop := StartOpenAICompactSSEKeepalive(c, keepaliveTestInterval)
 	defer stop()
 	waitForKeepaliveBeats()

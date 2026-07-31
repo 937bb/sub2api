@@ -1276,7 +1276,7 @@ func TestOpenAIStreamingTimeout(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "stream data interval timeout") {
 		t.Fatalf("expected stream timeout error, got %v", err)
 	}
-	if !strings.Contains(rec.Body.String(), "\"type\":\"error\"") || !strings.Contains(rec.Body.String(), "stream_timeout") {
+	if !strings.Contains(rec.Body.String(), "\"type\":\"api_error\"") || !strings.Contains(rec.Body.String(), "Stream idle timeout") {
 		t.Fatalf("expected OpenAI-compatible error SSE event, got %q", rec.Body.String())
 	}
 }
@@ -1356,6 +1356,14 @@ func TestOpenAIStreamingPostOutputDisconnectQuarantinesSharedProxyWithoutSameStr
 	svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{
 		MaxLineSize: defaultMaxLineSize,
 	}}}
+	// collapseInterval 0: the two loop iterations below record within the
+	// production collapse window and must count as distinct failure events here.
+	svc.openaiProxyStreamCircuit = newOpenAIProxyStreamCircuit(openAIProxyStreamCircuitSettings{
+		failureThreshold: 2,
+		failureWindow:    time.Minute,
+		quarantineTTL:    10 * time.Minute,
+		maxEntries:       16,
+	})
 
 	for _, readErr := range []error{
 		io.ErrUnexpectedEOF,
@@ -1689,7 +1697,7 @@ func TestOpenAIStreamingContextWindowResponseFailedBeforeOutputAppliesPassthroug
 	require.True(t, IsResponseCommitted(c))
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 	body := rec.Body.String()
-	require.Equal(t, "upstream_error", gjson.Get(body, "error.type").String())
+	require.Equal(t, "api_error", gjson.Get(body, "error.type").String())
 	require.Equal(t, upstreamMessage, gjson.Get(body, "error.message").String())
 	require.NotContains(t, body, "response.failed")
 	require.NotContains(t, body, "Upstream request failed")
@@ -2008,6 +2016,14 @@ func TestOpenAIStreamingPassthroughPostOutputDisconnectQuarantinesSharedProxy(t 
 	proxyID := int64(4698)
 	account := &Account{ID: 469804, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, ProxyID: &proxyID}
 	svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}}
+	// collapseInterval 0: the loop below records within the production collapse
+	// window and must count as distinct failure events here.
+	svc.openaiProxyStreamCircuit = newOpenAIProxyStreamCircuit(openAIProxyStreamCircuitSettings{
+		failureThreshold: 2,
+		failureWindow:    time.Minute,
+		quarantineTTL:    10 * time.Minute,
+		maxEntries:       16,
+	})
 
 	for _, readErr := range []error{io.ErrUnexpectedEOF, errors.New("http2: client connection lost")} {
 		rec := httptest.NewRecorder()
@@ -2029,7 +2045,7 @@ func TestOpenAIStreamingPassthroughPostOutputDisconnectQuarantinesSharedProxy(t 
 		require.Contains(t, rec.Body.String(), "partial")
 	}
 
-	require.True(t, svc.isOpenAIProxyStreamQuarantined(account))
+	require.True(t, svc.isOpenAIProxyStreamQuarantined(context.Background(), account))
 }
 
 func TestOpenAIStreamingPassthroughResponseFailedBeforeOutputReturnsFailover(t *testing.T) {
@@ -2109,7 +2125,7 @@ func TestOpenAIStreamingPassthroughContextWindowResponseFailedBeforeOutputApplie
 	require.True(t, IsResponseCommitted(c))
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 	body := rec.Body.String()
-	require.Equal(t, "upstream_error", gjson.Get(body, "error.type").String())
+	require.Equal(t, "api_error", gjson.Get(body, "error.type").String())
 	require.Equal(t, upstreamMessage, gjson.Get(body, "error.message").String())
 	require.NotContains(t, body, "response.failed")
 	require.NotContains(t, body, "Upstream request failed")
@@ -2309,7 +2325,7 @@ func TestOpenAIStreamingTooLong(t *testing.T) {
 	if !errors.Is(err, bufio.ErrTooLong) {
 		t.Fatalf("expected ErrTooLong, got %v", err)
 	}
-	if !strings.Contains(rec.Body.String(), "\"type\":\"error\"") || !strings.Contains(rec.Body.String(), "response_too_large") {
+	if !strings.Contains(rec.Body.String(), "\"type\":\"api_error\"") || !strings.Contains(rec.Body.String(), "Response too large") {
 		t.Fatalf("expected OpenAI-compatible error SSE event, got %q", rec.Body.String())
 	}
 }

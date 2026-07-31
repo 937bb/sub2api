@@ -149,7 +149,7 @@ func TestResolveOpenAIWSFallbackErrorResponse(t *testing.T) {
 		)
 		require.True(t, ok)
 		require.Equal(t, http.StatusForbidden, statusCode)
-		require.Equal(t, "upstream_error", errType)
+		require.Equal(t, "api_error", errType)
 		require.Equal(t, "forbidden", clientMessage)
 		require.Equal(t, "forbidden", upstreamMessage)
 	})
