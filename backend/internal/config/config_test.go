@@ -301,7 +301,9 @@ func TestLoadReturnsErrorForMissingConfigFile(t *testing.T) {
 func TestLoadForBootstrapAllowsMissingJWTSecret(t *testing.T) {
 	viper.Reset()
 	t.Cleanup(viper.Reset)
-	t.Setenv("CONFIG_FILE", "")
+	configFile := filepath.Join(t.TempDir(), "config.yaml")
+	require.NoError(t, os.WriteFile(configFile, nil, 0o600))
+	t.Setenv("CONFIG_FILE", configFile)
 	t.Setenv("DATA_DIR", "")
 	t.Setenv("JWT_SECRET", "")
 
@@ -545,6 +547,7 @@ func TestLoadDefaultOpenAIHTTP2Enabled(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, cfg.Gateway.OpenAIHTTP2.Enabled)
 	require.True(t, cfg.Gateway.OpenAIHTTP2.AllowProxyFallbackToHTTP1)
+	require.False(t, cfg.Gateway.OpenAIProxyStreamCircuit.Disabled)
 	require.Equal(t, 2, cfg.Gateway.OpenAIProxyStreamCircuit.FailureThreshold)
 	require.Equal(t, 60, cfg.Gateway.OpenAIProxyStreamCircuit.WindowSeconds)
 	require.Equal(t, 600, cfg.Gateway.OpenAIProxyStreamCircuit.TTLSeconds)
@@ -552,12 +555,14 @@ func TestLoadDefaultOpenAIHTTP2Enabled(t *testing.T) {
 
 func TestLoadOpenAIProxyStreamCircuitFromEnv(t *testing.T) {
 	resetViperWithJWTSecret(t)
+	t.Setenv("GATEWAY_OPENAI_PROXY_STREAM_CIRCUIT_DISABLED", "true")
 	t.Setenv("GATEWAY_OPENAI_PROXY_STREAM_CIRCUIT_FAILURE_THRESHOLD", "3")
 	t.Setenv("GATEWAY_OPENAI_PROXY_STREAM_CIRCUIT_WINDOW_SECONDS", "90")
 	t.Setenv("GATEWAY_OPENAI_PROXY_STREAM_CIRCUIT_TTL_SECONDS", "420")
 
 	cfg, err := Load()
 	require.NoError(t, err)
+	require.True(t, cfg.Gateway.OpenAIProxyStreamCircuit.Disabled)
 	require.Equal(t, 3, cfg.Gateway.OpenAIProxyStreamCircuit.FailureThreshold)
 	require.Equal(t, 90, cfg.Gateway.OpenAIProxyStreamCircuit.WindowSeconds)
 	require.Equal(t, 420, cfg.Gateway.OpenAIProxyStreamCircuit.TTLSeconds)
@@ -774,6 +779,9 @@ func TestLoadDefaultSecurityToggles(t *testing.T) {
 
 func TestLoadDefaultServerMode(t *testing.T) {
 	resetViperWithJWTSecret(t)
+	configFile := filepath.Join(t.TempDir(), "config.yaml")
+	require.NoError(t, os.WriteFile(configFile, nil, 0o600))
+	t.Setenv("CONFIG_FILE", configFile)
 
 	cfg, err := Load()
 	if err != nil {
@@ -817,6 +825,9 @@ func TestLoadJWTAccessTokenExpireMinutesFromEnv(t *testing.T) {
 
 func TestLoadDefaultDatabaseSSLMode(t *testing.T) {
 	resetViperWithJWTSecret(t)
+	configFile := filepath.Join(t.TempDir(), "config.yaml")
+	require.NoError(t, os.WriteFile(configFile, nil, 0o600))
+	t.Setenv("CONFIG_FILE", configFile)
 
 	cfg, err := Load()
 	if err != nil {
