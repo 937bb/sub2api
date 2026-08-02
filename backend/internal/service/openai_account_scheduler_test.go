@@ -71,6 +71,10 @@ func (r schedulerTestGroupRepo) GetByID(context.Context, int64) (*Group, error) 
 	return r.group, nil
 }
 
+func (r schedulerTestGroupRepo) GetByIDLite(context.Context, int64) (*Group, error) {
+	return r.group, nil
+}
+
 func (r schedulerGroupAwareOpenAIAccountRepo) ListSchedulableByGroupIDAndPlatform(ctx context.Context, groupID int64, platform string) ([]Account, error) {
 	var result []Account
 	for _, acc := range r.accounts {
@@ -164,7 +168,7 @@ func (c *schedulerTestGatewayCache) GetSessionAccountID(ctx context.Context, gro
 	if id, ok := c.sessionBindings[sessionHash]; ok {
 		return id, nil
 	}
-	return 0, errors.New("not found")
+	return 0, ErrStickySessionNotFound
 }
 
 func (c *schedulerTestGatewayCache) SetSessionAccountID(ctx context.Context, groupID int64, sessionHash string, accountID int64, ttl time.Duration) error {

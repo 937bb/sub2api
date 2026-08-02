@@ -14,11 +14,10 @@ import (
 	"github.com/dgraph-io/ristretto"
 )
 
-// v18: upstream's v17 (OpenAI group Live gate) and this fork's v17 (group
-// QuotaBypassEnabled) are different payloads under the same number. Bumping to
-// 18 invalidates both, so a cache entry written by either side cannot be read
-// back with the other's field set silently missing.
-const apiKeyAuthSnapshotVersion = 18
+// v19 combines this fork's quota-bypass field with upstream's v18 profit-control
+// fields. Invalidate both earlier v18 payload variants so neither feature can
+// silently read a missing field as its zero value.
+const apiKeyAuthSnapshotVersion = 19
 
 type apiKeyAuthCacheConfig struct {
 	l1Size        int
@@ -425,6 +424,9 @@ func (s *APIKeyService) snapshotFromAPIKey(ctx context.Context, apiKey *APIKey) 
 			PeakEnd:                         apiKey.Group.PeakEnd,
 			PeakRateMultiplier:              apiKey.Group.PeakRateMultiplier,
 			QuotaBypassEnabled:              apiKey.Group.QuotaBypassEnabled,
+			ProfitControlEnabled:            apiKey.Group.ProfitControlEnabled,
+			ProfitMinMargin:                 apiKey.Group.ProfitMinMargin,
+			ProfitSafetyBuffer:              apiKey.Group.ProfitSafetyBuffer,
 		}
 	}
 	return snapshot
@@ -513,6 +515,9 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 			PeakEnd:                         snapshot.Group.PeakEnd,
 			PeakRateMultiplier:              snapshot.Group.PeakRateMultiplier,
 			QuotaBypassEnabled:              snapshot.Group.QuotaBypassEnabled,
+			ProfitControlEnabled:            snapshot.Group.ProfitControlEnabled,
+			ProfitMinMargin:                 snapshot.Group.ProfitMinMargin,
+			ProfitSafetyBuffer:              snapshot.Group.ProfitSafetyBuffer,
 		}
 	}
 	s.compileAPIKeyIPRules(apiKey)
