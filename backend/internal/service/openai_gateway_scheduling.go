@@ -1016,6 +1016,14 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 	if len(candidates) == 0 {
 		return nil, ErrNoAvailableAccounts
 	}
+	quotaBypassGroup := s.resolveOpenAIQuotaBypassSchedulingGroup(ctx, groupID, platform)
+	hasQuotaBypassCandidates := false
+	for _, candidate := range candidates {
+		if IsQuotaBypassEligible(candidate, quotaBypassGroup) {
+			hasQuotaBypassCandidates = true
+			break
+		}
+	}
 	rateOrder := openAILegacyUpstreamRateOrder{}
 	if preferLowUpstreamRate {
 		rateOrder = newOpenAILegacyUpstreamRateOrder(candidates, time.Now(), s.openAIOAuthSchedulingRateMultiplier(ctx))
@@ -1050,11 +1058,25 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 
 		sort.SliceStable(available, func(i, j int) bool {
 			a, b := available[i], available[j]
+			aQuotaBypass := hasQuotaBypassCandidates && IsQuotaBypassEligible(a.account, quotaBypassGroup)
+			bQuotaBypass := hasQuotaBypassCandidates && IsQuotaBypassEligible(b.account, quotaBypassGroup)
+			if aQuotaBypass != bQuotaBypass {
+				return aQuotaBypass
+			}
 			if a.account.Priority != b.account.Priority {
 				return a.account.Priority < b.account.Priority
 			}
 			if a.loadInfo.LoadRate != b.loadInfo.LoadRate {
+				if aQuotaBypass {
+					return a.loadInfo.LoadRate > b.loadInfo.LoadRate
+				}
 				return a.loadInfo.LoadRate < b.loadInfo.LoadRate
+			}
+			if aQuotaBypass && a.loadInfo.CurrentConcurrency != b.loadInfo.CurrentConcurrency {
+				return a.loadInfo.CurrentConcurrency > b.loadInfo.CurrentConcurrency
+			}
+			if aQuotaBypass {
+				return a.account.ID < b.account.ID
 			}
 			switch {
 			case a.account.LastUsedAt == nil && b.account.LastUsedAt != nil:
@@ -1067,8 +1089,10 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 				return a.account.LastUsedAt.Before(*b.account.LastUsedAt)
 			}
 		})
-		shuffleWithinSortGroups(available)
-		if rateOrder.enabled {
+		if !hasQuotaBypassCandidates {
+			shuffleWithinSortGroups(available)
+		}
+		if rateOrder.enabled && !hasQuotaBypassCandidates {
 			sort.SliceStable(available, func(i, j int) bool {
 				return rateOrder.compare(available[i].account, available[j].account) < 0
 			})
@@ -1206,6 +1230,17 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		return nil, ErrNoAvailableCompactAccounts
 	}
 	return nil, ErrNoAvailableAccounts
+}
+
+func (s *OpenAIGatewayService) resolveOpenAIQuotaBypassSchedulingGroup(ctx context.Context, groupID *int64, platform string) *Group {
+	if normalizeOpenAICompatiblePlatform(platform) != PlatformOpenAI || groupID == nil || s == nil || s.schedulerSnapshot == nil {
+		return nil
+	}
+	group, err := s.schedulerSnapshot.GetGroupByID(ctx, *groupID)
+	if err != nil || group == nil || !group.QuotaBypassEnabled {
+		return nil
+	}
+	return group
 }
 
 func (s *OpenAIGatewayService) listSchedulableAccounts(ctx context.Context, groupID *int64, platform string) ([]Account, error) {

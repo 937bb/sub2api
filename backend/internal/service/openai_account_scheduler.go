@@ -1018,9 +1018,17 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAISelectionOrder(
 	req OpenAIAccountScheduleRequest,
 	plan openAIAccountLoadPlan,
 ) []openAIAccountCandidateScore {
-	buildSelectionOrder := func(pool []openAIAccountCandidateScore) []openAIAccountCandidateScore {
+	var buildSelectionOrder func([]openAIAccountCandidateScore, bool) []openAIAccountCandidateScore
+	buildSelectionOrder = func(pool []openAIAccountCandidateScore, allowConcentration bool) []openAIAccountCandidateScore {
 		if len(pool) == 0 || plan.topK <= 0 {
 			return nil
+		}
+		if allowConcentration {
+			bypassPool, regularPool := partitionOpenAIQuotaBypassCandidates(pool, req)
+			if len(bypassPool) > 0 {
+				ordered := buildOpenAIQuotaBypassConcentratedOrder(bypassPool)
+				return append(ordered, buildSelectionOrder(regularPool, false)...)
+			}
 		}
 		groupTopK := plan.topK
 		if groupTopK > len(pool) {
@@ -1080,15 +1088,52 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAISelectionOrder(
 			}
 		}
 		selectionOrder := make([]openAIAccountCandidateScore, 0, len(plan.allCandidates))
-		selectionOrder = append(selectionOrder, buildSelectionOrder(supported)...)
-		selectionOrder = append(selectionOrder, buildSelectionOrder(unknown)...)
+		selectionOrder = append(selectionOrder, buildSelectionOrder(supported, true)...)
+		selectionOrder = append(selectionOrder, buildSelectionOrder(unknown, true)...)
 		if len(plan.staleSnapshotCompactRetry) > 0 && s.service.schedulerSnapshot != nil {
 			selectionOrder = append(selectionOrder, sortOpenAICompactRetryCandidates(plan.staleSnapshotCompactRetry)...)
 		}
 		return selectionOrder
 	}
 
-	return buildSelectionOrder(plan.candidates)
+	return buildSelectionOrder(plan.candidates, true)
+}
+
+func partitionOpenAIQuotaBypassCandidates(pool []openAIAccountCandidateScore, req OpenAIAccountScheduleRequest) ([]openAIAccountCandidateScore, []openAIAccountCandidateScore) {
+	bypass := make([]openAIAccountCandidateScore, 0, len(pool))
+	regular := make([]openAIAccountCandidateScore, 0, len(pool))
+	for _, candidate := range pool {
+		if isOpenAIQuotaBypassEligibleForScheduleRequest(candidate.account, req) {
+			bypass = append(bypass, candidate)
+			continue
+		}
+		regular = append(regular, candidate)
+	}
+	return bypass, regular
+}
+
+// buildOpenAIQuotaBypassConcentratedOrder fills one account before moving to
+// the next. This preserves the concurrency concentration needed by quota
+// bypass groups instead of smoothing their traffic across the whole pool.
+func buildOpenAIQuotaBypassConcentratedOrder(pool []openAIAccountCandidateScore) []openAIAccountCandidateScore {
+	ordered := append([]openAIAccountCandidateScore(nil), pool...)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		a, b := ordered[i], ordered[j]
+		if a.account.Priority != b.account.Priority {
+			return a.account.Priority < b.account.Priority
+		}
+		if a.loadInfo.LoadRate != b.loadInfo.LoadRate {
+			return a.loadInfo.LoadRate > b.loadInfo.LoadRate
+		}
+		if a.loadInfo.CurrentConcurrency != b.loadInfo.CurrentConcurrency {
+			return a.loadInfo.CurrentConcurrency > b.loadInfo.CurrentConcurrency
+		}
+		if a.loadInfo.WaitingCount != b.loadInfo.WaitingCount {
+			return a.loadInfo.WaitingCount < b.loadInfo.WaitingCount
+		}
+		return a.account.ID < b.account.ID
+	})
+	return ordered
 }
 
 func sortOpenAICompactRetryCandidates(pool []openAIAccountCandidateScore) []openAIAccountCandidateScore {

@@ -3530,6 +3530,237 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_LoadBalanceDistributesA
 	require.GreaterOrEqual(t, len(selected), 2)
 }
 
+func TestBuildOpenAIQuotaBypassConcentratedOrder_FillsBusyAccountFirst(t *testing.T) {
+	candidates := []openAIAccountCandidateScore{
+		{
+			account:  &Account{ID: 30, Priority: 0},
+			loadInfo: &AccountLoadInfo{AccountID: 30, CurrentConcurrency: 1, LoadRate: 25},
+		},
+		{
+			account:  &Account{ID: 20, Priority: 0},
+			loadInfo: &AccountLoadInfo{AccountID: 20, CurrentConcurrency: 3, LoadRate: 75},
+		},
+		{
+			account:  &Account{ID: 10, Priority: 0},
+			loadInfo: &AccountLoadInfo{AccountID: 10, CurrentConcurrency: 0, LoadRate: 0},
+		},
+		{
+			account:  &Account{ID: 5, Priority: 1},
+			loadInfo: &AccountLoadInfo{AccountID: 5, CurrentConcurrency: 4, LoadRate: 90},
+		},
+	}
+
+	ordered := buildOpenAIQuotaBypassConcentratedOrder(candidates)
+	require.Len(t, ordered, 4)
+	require.Equal(t, []int64{20, 30, 10, 5}, []int64{
+		ordered[0].account.ID,
+		ordered[1].account.ID,
+		ordered[2].account.ID,
+		ordered[3].account.ID,
+	})
+}
+
+func TestBuildOpenAISelectionOrder_QuotaBypassUsesAllCandidatesInConcentratedOrder(t *testing.T) {
+	scheduler := &defaultOpenAIAccountScheduler{}
+	plan := openAIAccountLoadPlan{
+		topK: 1,
+		candidates: []openAIAccountCandidateScore{
+			{account: &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth}, loadInfo: &AccountLoadInfo{AccountID: 1, LoadRate: 80}},
+			{account: &Account{ID: 2, Platform: PlatformOpenAI, Type: AccountTypeOAuth}, loadInfo: &AccountLoadInfo{AccountID: 2, LoadRate: 20}},
+		},
+	}
+
+	ordered := scheduler.buildOpenAISelectionOrder(OpenAIAccountScheduleRequest{GroupQuotaBypassEnabled: true}, plan)
+	require.Len(t, ordered, 2)
+	require.Equal(t, int64(1), ordered[0].account.ID)
+	require.Equal(t, int64(2), ordered[1].account.ID)
+}
+
+func TestBuildOpenAISelectionOrder_QuotaBypassKeepsIneligibleAccountsAsFallback(t *testing.T) {
+	scheduler := &defaultOpenAIAccountScheduler{}
+	plan := openAIAccountLoadPlan{
+		topK: 2,
+		candidates: []openAIAccountCandidateScore{
+			{
+				account: &Account{
+					ID:       1,
+					Platform: PlatformOpenAI,
+					Type:     AccountTypeOAuth,
+					Extra:    map[string]any{"quota_bypass_enabled": false},
+				},
+				loadInfo: &AccountLoadInfo{AccountID: 1, LoadRate: 90},
+			},
+			{
+				account:  &Account{ID: 2, Platform: PlatformOpenAI, Type: AccountTypeOAuth},
+				loadInfo: &AccountLoadInfo{AccountID: 2, LoadRate: 20},
+			},
+			{
+				account:  &Account{ID: 3, Platform: PlatformOpenAI, Type: AccountTypeAPIKey},
+				loadInfo: &AccountLoadInfo{AccountID: 3, LoadRate: 10},
+			},
+		},
+	}
+
+	ordered := scheduler.buildOpenAISelectionOrder(OpenAIAccountScheduleRequest{GroupQuotaBypassEnabled: true}, plan)
+	require.Len(t, ordered, 3)
+	require.Equal(t, int64(2), ordered[0].account.ID)
+	require.ElementsMatch(t, []int64{1, 3}, []int64{ordered[1].account.ID, ordered[2].account.ID})
+}
+
+func TestOpenAIGatewayService_SelectAccountWithScheduler_QuotaBypassConcentratesUntilFull(t *testing.T) {
+	resetOpenAIAdvancedSchedulerSettingCacheForTest()
+	defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
+
+	groupID := int64(42)
+	accounts := []Account{
+		{
+			ID:          6101,
+			Platform:    PlatformOpenAI,
+			Type:        AccountTypeOAuth,
+			Status:      StatusActive,
+			Schedulable: true,
+			Concurrency: 4,
+			Priority:    0,
+			GroupIDs:    []int64{groupID},
+		},
+		{
+			ID:          6102,
+			Platform:    PlatformOpenAI,
+			Type:        AccountTypeOAuth,
+			Status:      StatusActive,
+			Schedulable: true,
+			Concurrency: 4,
+			Priority:    0,
+			GroupIDs:    []int64{groupID},
+		},
+	}
+	accountPointers := []*Account{&accounts[0], &accounts[1]}
+	acquiredIDs := make([]int64, 0, 2)
+	concurrencyCache := schedulerTestConcurrencyCache{
+		loadMap: map[int64]*AccountLoadInfo{
+			6101: {AccountID: 6101, CurrentConcurrency: 3, LoadRate: 75},
+			6102: {AccountID: 6102, CurrentConcurrency: 1, LoadRate: 25},
+		},
+		acquireResults: map[int64]bool{
+			6101: false,
+			6102: true,
+		},
+		acquiredIDs: &acquiredIDs,
+	}
+	snapshot := &SchedulerSnapshotService{
+		cache: &openAISnapshotCacheStub{
+			snapshotAccounts: accountPointers,
+			accountsByID:     map[int64]*Account{6101: &accounts[0], 6102: &accounts[1]},
+		},
+		groupRepo: schedulerTestGroupRepo{group: &Group{ID: groupID, QuotaBypassEnabled: true}},
+	}
+	svc := &OpenAIGatewayService{
+		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: accounts},
+		schedulerSnapshot:  snapshot,
+		cfg:                &config.Config{},
+		rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("true"),
+		concurrencyService: NewConcurrencyService(concurrencyCache),
+	}
+
+	selection, _, err := svc.SelectAccountWithScheduler(
+		context.Background(),
+		&groupID,
+		"",
+		"",
+		"gpt-5.1",
+		nil,
+		OpenAIUpstreamTransportAny,
+		false,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.Account)
+	require.Equal(t, int64(6102), selection.Account.ID)
+	require.Equal(t, []int64{6101, 6102}, acquiredIDs)
+}
+
+func TestOpenAIGatewayService_SelectAccountWithScheduler_NormalGroupPrefersAssociatedBypassAccount(t *testing.T) {
+	resetOpenAIAdvancedSchedulerSettingCacheForTest()
+	defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
+
+	normalGroupID := int64(42)
+	bypassGroupID := int64(99)
+	normalGroup := &Group{ID: normalGroupID, QuotaBypassEnabled: false}
+	bypassGroup := &Group{ID: bypassGroupID, QuotaBypassEnabled: true}
+	accounts := []Account{
+		{
+			ID:          6201,
+			Platform:    PlatformOpenAI,
+			Type:        AccountTypeOAuth,
+			Status:      StatusActive,
+			Schedulable: true,
+			Concurrency: 4,
+			Priority:    0,
+			GroupIDs:    []int64{normalGroupID, bypassGroupID},
+			AccountGroups: []AccountGroup{
+				{GroupID: normalGroupID, Group: normalGroup},
+				{GroupID: bypassGroupID, Group: bypassGroup},
+			},
+		},
+		{
+			ID:          6202,
+			Platform:    PlatformOpenAI,
+			Type:        AccountTypeOAuth,
+			Status:      StatusActive,
+			Schedulable: true,
+			Concurrency: 4,
+			Priority:    0,
+			GroupIDs:    []int64{normalGroupID},
+			AccountGroups: []AccountGroup{
+				{GroupID: normalGroupID, Group: normalGroup},
+			},
+		},
+	}
+	accountPointers := []*Account{&accounts[0], &accounts[1]}
+	acquiredIDs := make([]int64, 0, 2)
+	concurrencyCache := schedulerTestConcurrencyCache{
+		loadMap: map[int64]*AccountLoadInfo{
+			6201: {AccountID: 6201, CurrentConcurrency: 3, LoadRate: 75},
+			6202: {AccountID: 6202, CurrentConcurrency: 0, LoadRate: 0},
+		},
+		acquireResults: map[int64]bool{
+			6201: false,
+			6202: true,
+		},
+		acquiredIDs: &acquiredIDs,
+	}
+	snapshot := &SchedulerSnapshotService{
+		cache: &openAISnapshotCacheStub{
+			snapshotAccounts: accountPointers,
+			accountsByID:     map[int64]*Account{6201: &accounts[0], 6202: &accounts[1]},
+		},
+		groupRepo: schedulerTestGroupRepo{group: normalGroup},
+	}
+	svc := &OpenAIGatewayService{
+		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: accounts},
+		schedulerSnapshot:  snapshot,
+		cfg:                &config.Config{},
+		rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("true"),
+		concurrencyService: NewConcurrencyService(concurrencyCache),
+	}
+
+	selection, _, err := svc.SelectAccountWithScheduler(
+		context.Background(),
+		&normalGroupID,
+		"",
+		"",
+		"gpt-5.1",
+		nil,
+		OpenAIUpstreamTransportAny,
+		false,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.Account)
+	require.Equal(t, int64(6202), selection.Account.ID)
+	require.Equal(t, []int64{6201, 6202}, acquiredIDs)
+}
+
 func TestDeriveOpenAISelectionSeed_NoAffinityAddsEntropy(t *testing.T) {
 	req := OpenAIAccountScheduleRequest{
 		RequestedModel: "gpt-5.1",
