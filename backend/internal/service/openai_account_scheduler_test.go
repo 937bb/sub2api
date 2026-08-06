@@ -2581,6 +2581,94 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_SessionStickyBusyEscape
 	}
 }
 
+func TestOpenAIGatewayService_SelectAccountWithScheduler_PlusAttachedQuotaBypassPreservesBusyStickySession(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(10105)
+	bypassGroupID := int64(10106)
+	normalGroup := &Group{ID: groupID, QuotaBypassEnabled: false}
+	bypassGroup := &Group{ID: bypassGroupID, QuotaBypassEnabled: true}
+	accounts := []Account{
+		{
+			ID:          21501,
+			Platform:    PlatformOpenAI,
+			Type:        AccountTypeOAuth,
+			Status:      StatusActive,
+			Schedulable: true,
+			Concurrency: 1,
+			Priority:    0,
+			GroupIDs:    []int64{groupID, bypassGroupID},
+			Credentials: map[string]any{"plan_type": "plus"},
+			AccountGroups: []AccountGroup{
+				{GroupID: groupID, Group: normalGroup},
+				{GroupID: bypassGroupID, Group: bypassGroup},
+			},
+		},
+		{
+			ID:          21502,
+			Platform:    PlatformOpenAI,
+			Type:        AccountTypeOAuth,
+			Status:      StatusActive,
+			Schedulable: true,
+			Concurrency: 1,
+			Priority:    1,
+			GroupIDs:    []int64{groupID},
+			Credentials: map[string]any{"plan_type": "team"},
+			AccountGroups: []AccountGroup{
+				{GroupID: groupID, Group: normalGroup},
+			},
+		},
+	}
+	cache := &schedulerTestGatewayCache{sessionBindings: map[string]int64{
+		"openai:session_hash_plus_quota_bypass": 21501,
+	}}
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIScheduler.StickyEscapeEnabled = true
+	cfg.Gateway.OpenAIScheduler.StickyEscapeTTFTMs = 15000
+	cfg.Gateway.OpenAIScheduler.StickyEscapeErrorRate = 0.5
+	cfg.Gateway.Scheduling.StickySessionMaxWaiting = 2
+	cfg.Gateway.Scheduling.StickySessionWaitTimeout = 45 * time.Second
+	concurrencyCache := schedulerTestConcurrencyCache{
+		acquireResults: map[int64]bool{21501: false, 21502: true},
+		waitCounts:     map[int64]int{21501: 999},
+		loadMap: map[int64]*AccountLoadInfo{
+			21501: {AccountID: 21501, LoadRate: 100, WaitingCount: 9},
+			21502: {AccountID: 21502, LoadRate: 0, WaitingCount: 0},
+		},
+	}
+	svc := &OpenAIGatewayService{
+		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: accounts},
+		cache:              cache,
+		cfg:                cfg,
+		rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("true"),
+		concurrencyService: NewConcurrencyService(concurrencyCache),
+		openaiAccountStats: newOpenAIAccountRuntimeStats(),
+	}
+	slowTTFT := 20000
+	for i := 0; i < 5; i++ {
+		svc.openaiAccountStats.report(21501, false, &slowTTFT)
+	}
+
+	selection, decision, err := svc.SelectAccountWithScheduler(
+		ctx,
+		&groupID,
+		"",
+		"session_hash_plus_quota_bypass",
+		"gpt-5.1",
+		nil,
+		OpenAIUpstreamTransportAny,
+		false,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.Account)
+	require.Equal(t, int64(21501), selection.Account.ID)
+	require.False(t, selection.Acquired)
+	require.NotNil(t, selection.WaitPlan)
+	require.Equal(t, int64(21501), selection.WaitPlan.AccountID)
+	require.Equal(t, openAIAccountScheduleLayerSessionSticky, decision.Layer)
+	require.True(t, decision.StickySessionHit)
+}
+
 func TestOpenAIGatewayService_SelectAccountWithScheduler_SessionStickyEscapeDisabledKeepsLegacyBehavior(t *testing.T) {
 	ctx := context.Background()
 	groupID := int64(10104)

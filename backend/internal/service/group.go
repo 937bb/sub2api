@@ -100,7 +100,7 @@ type Group struct {
 	// ReasoningEffortMappings rewrites explicit request values before applying the ceiling.
 	ReasoningEffortMappings []ReasoningEffortMapping
 
-	// QuotaBypassEnabled 是否为该分组下的 Team 账号启用 Codex 超额绕过（仅 OpenAI 平台有效）
+	// QuotaBypassEnabled enables Codex quota bypass for eligible OpenAI OAuth accounts in this group.
 	QuotaBypassEnabled bool
 	// 分组利润控制（五个 token 计费平台可启用）。
 	// 调度准入条件：账号倍率 U 满足 U <= D*(1-margin-buffer)，

@@ -146,7 +146,7 @@ type Group struct {
 	// ReasoningEffortMappings OpenAI/Codex 推理强度精确映射。
 	ReasoningEffortMappings []domain.ReasoningEffortMapping `json:"reasoning_effort_mappings"`
 
-	// QuotaBypassEnabled 是否为该分组下的 Team 账号启用 Codex 超额绕过
+	// QuotaBypassEnabled applies to eligible OpenAI OAuth accounts regardless of subscription plan.
 	QuotaBypassEnabled bool `json:"quota_bypass_enabled"`
 
 	CreatedAt time.Time `json:"created_at"`

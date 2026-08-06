@@ -145,16 +145,31 @@ func TestIsQuotaBypassEligible(t *testing.T) {
 		want    bool
 	}{
 		{
-			name:    "request group enabled",
-			account: &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth},
-			group:   bypassGroup,
-			want:    true,
+			name: "request group enabled",
+			account: &Account{
+				Platform:    PlatformOpenAI,
+				Type:        AccountTypeOAuth,
+				Credentials: map[string]any{"plan_type": "plus"},
+			},
+			group: bypassGroup,
+			want:  true,
 		},
 		{
-			name: "attached group enabled without request group",
+			name: "plus account override enabled",
 			account: &Account{
-				Platform: PlatformOpenAI,
-				Type:     AccountTypeOAuth,
+				Platform:    PlatformOpenAI,
+				Type:        AccountTypeOAuth,
+				Credentials: map[string]any{"plan_type": "plus"},
+				Extra:       map[string]any{"quota_bypass_enabled": true},
+			},
+			want: true,
+		},
+		{
+			name: "plus account attached group enabled without request group",
+			account: &Account{
+				Platform:    PlatformOpenAI,
+				Type:        AccountTypeOAuth,
+				Credentials: map[string]any{"plan_type": "plus"},
 				AccountGroups: []AccountGroup{
 					{GroupID: 1, Group: bypassGroup},
 				},
@@ -177,6 +192,15 @@ func TestIsQuotaBypassEligible(t *testing.T) {
 			},
 			group: bypassGroup,
 			want:  false,
+		},
+		{
+			name: "team plan alone does not enable bypass",
+			account: &Account{
+				Platform:    PlatformOpenAI,
+				Type:        AccountTypeOAuth,
+				Credentials: map[string]any{"plan_type": "team"},
+			},
+			want: false,
 		},
 	}
 

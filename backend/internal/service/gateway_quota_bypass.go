@@ -24,7 +24,8 @@ const (
 
 // IsQuotaBypassEligible reports whether an account qualifies for Codex quota
 // bypass injection through an account override, the request group, or any group
-// attached to the scheduled account.
+// attached to the scheduled account. Eligibility is intentionally independent
+// of plan_type, so Plus, Team, Pro and other OpenAI OAuth plans behave alike.
 // Priority: account Extra["quota_bypass_enabled"] > group settings.
 func IsQuotaBypassEligible(account *Account, group *Group) bool {
 	if account == nil || account.Platform != PlatformOpenAI || !account.IsOAuth() {
