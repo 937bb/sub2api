@@ -1060,11 +1060,11 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			a, b := available[i], available[j]
 			aQuotaBypass := hasQuotaBypassCandidates && IsQuotaBypassEligible(a.account, quotaBypassGroup)
 			bQuotaBypass := hasQuotaBypassCandidates && IsQuotaBypassEligible(b.account, quotaBypassGroup)
-			if aQuotaBypass != bQuotaBypass {
-				return aQuotaBypass
-			}
 			if a.account.Priority != b.account.Priority {
 				return a.account.Priority < b.account.Priority
+			}
+			if aQuotaBypass != bQuotaBypass {
+				return aQuotaBypass
 			}
 			if a.loadInfo.LoadRate != b.loadInfo.LoadRate {
 				if aQuotaBypass {

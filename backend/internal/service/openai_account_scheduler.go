@@ -1035,11 +1035,33 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAISelectionOrder(
 			return nil
 		}
 		if allowConcentration {
-			bypassPool, regularPool := partitionOpenAIQuotaBypassCandidates(pool, req)
-			if len(bypassPool) > 0 {
-				ordered := buildOpenAIQuotaBypassConcentratedOrder(bypassPool)
-				return append(ordered, buildSelectionOrder(regularPool, false)...)
+			bypassPool, _ := partitionOpenAIQuotaBypassCandidates(pool, req)
+			if len(bypassPool) == 0 {
+				// Preserve the stock weighted/sticky scheduler exactly when the
+				// candidate pool has no quota-bypass accounts.
+				return buildSelectionOrder(pool, false)
 			}
+			// Account priority is the primary scheduler key. Within the same
+			// priority, quota-bypass accounts are concentrated before regular
+			// accounts; a lower-priority bypass account never jumps a higher-
+			// priority regular account.
+			priorities := make([]int, 0)
+			byPriority := make(map[int][]openAIAccountCandidateScore)
+			for _, candidate := range pool {
+				priority := candidate.account.Priority
+				if _, ok := byPriority[priority]; !ok {
+					priorities = append(priorities, priority)
+				}
+				byPriority[priority] = append(byPriority[priority], candidate)
+			}
+			sort.Ints(priorities)
+			ordered := make([]openAIAccountCandidateScore, 0, len(pool))
+			for _, priority := range priorities {
+				bypassPool, regularPool := partitionOpenAIQuotaBypassCandidates(byPriority[priority], req)
+				ordered = append(ordered, buildOpenAIQuotaBypassConcentratedOrder(bypassPool)...)
+				ordered = append(ordered, buildSelectionOrder(regularPool, false)...)
+			}
+			return ordered
 		}
 		groupTopK := plan.topK
 		if groupTopK > len(pool) {

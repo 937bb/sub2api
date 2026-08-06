@@ -3711,6 +3711,21 @@ func TestBuildOpenAISelectionOrder_QuotaBypassKeepsIneligibleAccountsAsFallback(
 	require.ElementsMatch(t, []int64{1, 3}, []int64{ordered[1].account.ID, ordered[2].account.ID})
 }
 
+func TestBuildOpenAISelectionOrder_PriorityPrecedesQuotaBypass(t *testing.T) {
+	scheduler := &defaultOpenAIAccountScheduler{}
+	plan := openAIAccountLoadPlan{
+		topK: 1,
+		candidates: []openAIAccountCandidateScore{
+			{account: &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Priority: 0}, loadInfo: &AccountLoadInfo{AccountID: 1, LoadRate: 0}},
+			{account: &Account{ID: 2, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Priority: 1, Extra: map[string]any{"quota_bypass_enabled": true}}, loadInfo: &AccountLoadInfo{AccountID: 2, LoadRate: 90}},
+			{account: &Account{ID: 3, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Priority: 1, Extra: map[string]any{"quota_bypass_enabled": true}}, loadInfo: &AccountLoadInfo{AccountID: 3, LoadRate: 20}},
+		},
+	}
+
+	ordered := scheduler.buildOpenAISelectionOrder(OpenAIAccountScheduleRequest{}, plan)
+	require.Equal(t, []int64{1, 2, 3}, []int64{ordered[0].account.ID, ordered[1].account.ID, ordered[2].account.ID})
+}
+
 func TestOpenAIGatewayService_SelectAccountWithScheduler_QuotaBypassConcentratesUntilFull(t *testing.T) {
 	resetOpenAIAdvancedSchedulerSettingCacheForTest()
 	defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
