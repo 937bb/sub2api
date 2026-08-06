@@ -2611,8 +2611,23 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_PlusAttachedQuotaBypass
 			Schedulable: true,
 			Concurrency: 1,
 			Priority:    1,
-			GroupIDs:    []int64{groupID},
+			GroupIDs:    []int64{groupID, bypassGroupID},
 			Credentials: map[string]any{"plan_type": "team"},
+			AccountGroups: []AccountGroup{
+				{GroupID: groupID, Group: normalGroup},
+				{GroupID: bypassGroupID, Group: bypassGroup},
+			},
+		},
+		{
+			ID:          21503,
+			Platform:    PlatformOpenAI,
+			Type:        AccountTypeOAuth,
+			Status:      StatusActive,
+			Schedulable: true,
+			Concurrency: 1,
+			Priority:    2,
+			GroupIDs:    []int64{groupID},
+			Credentials: map[string]any{"plan_type": "plus"},
 			AccountGroups: []AccountGroup{
 				{GroupID: groupID, Group: normalGroup},
 			},
@@ -2628,11 +2643,12 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_PlusAttachedQuotaBypass
 	cfg.Gateway.Scheduling.StickySessionMaxWaiting = 2
 	cfg.Gateway.Scheduling.StickySessionWaitTimeout = 45 * time.Second
 	concurrencyCache := schedulerTestConcurrencyCache{
-		acquireResults: map[int64]bool{21501: false, 21502: true},
+		acquireResults: map[int64]bool{21501: false, 21502: true, 21503: true},
 		waitCounts:     map[int64]int{21501: 999},
 		loadMap: map[int64]*AccountLoadInfo{
 			21501: {AccountID: 21501, LoadRate: 100, WaitingCount: 9},
 			21502: {AccountID: 21502, LoadRate: 0, WaitingCount: 0},
+			21503: {AccountID: 21503, LoadRate: 0, WaitingCount: 0},
 		},
 	}
 	svc := &OpenAIGatewayService{
@@ -2661,12 +2677,12 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_PlusAttachedQuotaBypass
 	require.NoError(t, err)
 	require.NotNil(t, selection)
 	require.NotNil(t, selection.Account)
-	require.Equal(t, int64(21501), selection.Account.ID)
-	require.False(t, selection.Acquired)
-	require.NotNil(t, selection.WaitPlan)
-	require.Equal(t, int64(21501), selection.WaitPlan.AccountID)
-	require.Equal(t, openAIAccountScheduleLayerSessionSticky, decision.Layer)
-	require.True(t, decision.StickySessionHit)
+	require.Equal(t, int64(21502), selection.Account.ID)
+	require.True(t, selection.Acquired)
+	require.Nil(t, selection.WaitPlan)
+	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
+	require.False(t, decision.StickySessionHit)
+	require.Equal(t, int64(21502), cache.sessionBindings["openai:session_hash_plus_quota_bypass"])
 }
 
 func TestOpenAIGatewayService_SelectAccountWithScheduler_SessionStickyEscapeDisabledKeepsLegacyBehavior(t *testing.T) {
