@@ -49,6 +49,7 @@ func TestQuotaBypassWebSocketInjectsEveryTurn(t *testing.T) {
 				dialer = &stagedPassthroughDialer{conn: stagedConn}
 			} else {
 				captureConn = &openAIWSCaptureConn{events: [][]byte{
+					[]byte(`{"type":"response.completed","response":{"id":"resp_bypass_prewarm","model":"gpt-5.1","usage":{"input_tokens":0,"output_tokens":0}}}`),
 					[]byte(responses[0]),
 					[]byte(responses[1]),
 				}}
@@ -138,9 +139,21 @@ func TestQuotaBypassWebSocketInjectsEveryTurn(t *testing.T) {
 				require.NoError(t, clientConn.Write(writeCtx, coderws.MessageText, []byte(payload)))
 				cancelWrite()
 				if stagedConn != nil {
+					if turn == 1 {
+						select {
+						case prewarmPayload := <-stagedConn.writes:
+							assertBypassSuffix(prewarmPayload, 0)
+							require.True(t, gjson.GetBytes(prewarmPayload, "generate").Exists())
+							require.False(t, gjson.GetBytes(prewarmPayload, "generate").Bool())
+						case <-time.After(3 * time.Second):
+							t.Fatal("session prewarm was not forwarded upstream")
+						}
+						stagedConn.Send(`{"type":"response.completed","response":{"id":"resp_bypass_prewarm","model":"gpt-5.1","usage":{"input_tokens":0,"output_tokens":0}}}`)
+					}
 					select {
 					case upstreamPayload := <-stagedConn.writes:
 						assertBypassSuffix(upstreamPayload, turn)
+						require.False(t, gjson.GetBytes(upstreamPayload, "generate").Exists())
 					case <-time.After(3 * time.Second):
 						t.Fatalf("turn %d was not forwarded upstream", turn)
 					}
@@ -170,11 +183,17 @@ func TestQuotaBypassWebSocketInjectsEveryTurn(t *testing.T) {
 				captureConn.mu.Lock()
 				writes := append([]map[string]any(nil), captureConn.writes...)
 				captureConn.mu.Unlock()
-				require.Len(t, writes, 2)
+				require.Len(t, writes, 3)
 				for turn, write := range writes {
 					encoded, marshalErr := json.Marshal(write)
 					require.NoError(t, marshalErr)
-					assertBypassSuffix(encoded, turn+1)
+					assertBypassSuffix(encoded, turn)
+					if turn == 0 {
+						require.True(t, gjson.GetBytes(encoded, "generate").Exists())
+						require.False(t, gjson.GetBytes(encoded, "generate").Bool())
+					} else {
+						require.False(t, gjson.GetBytes(encoded, "generate").Exists())
+					}
 				}
 			}
 			require.Equal(t, 2, appliedTurns)

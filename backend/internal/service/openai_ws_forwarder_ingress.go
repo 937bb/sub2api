@@ -1113,6 +1113,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	currentTurnReplayInput := []json.RawMessage(nil)
 	currentTurnReplayInputExists := false
 	skipBeforeTurn := false
+	prewarmAttempted := false
 	hasCurrentOrReplayFunctionCallOutput := func(payload []byte) bool {
 		if openAIWSRawPayloadHasToolCallOutput(payload) {
 			return true
@@ -1397,6 +1398,31 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				pinSessionConn(sessionConnID)
 			} else {
 				unpinSessionConn(sessionConnID)
+			}
+		}
+		if turn == 1 && !prewarmAttempted && s.shouldPrewarmOpenAIWSSession(hooks) {
+			prewarmAttempted = true
+			if prewarmErr := s.prewarmOpenAIWSSession(ctx, sessionLease, currentPayload, account, hooks); prewarmErr != nil {
+				var failoverErr *UpstreamFailoverError
+				resetSessionLease(true)
+				if errors.As(prewarmErr, &failoverErr) {
+					return prewarmErr
+				}
+				logOpenAIWSModeInfo(
+					"ingress_ws_session_prewarm_failed_continue account_id=%d turn=%d cause=%s",
+					account.ID,
+					turn,
+					truncateOpenAIWSLogValue(prewarmErr.Error(), openAIWSLogValueMaxLen),
+				)
+				acquiredLease, acquireErr := acquireTurnLease(turn, preferredConnID, forcePreferredConn)
+				if acquireErr != nil {
+					return fmt.Errorf("acquire upstream websocket after session prewarm failure: %w", acquireErr)
+				}
+				sessionLease = acquiredLease
+				sessionConnID = strings.TrimSpace(sessionLease.ConnID())
+				if storeDisabled {
+					pinSessionConn(sessionConnID)
+				}
 			}
 		}
 		shouldPreflightPing := turn > 1 && sessionLease != nil && sessionLease.SupportsIdlePingWithoutReader() && turnRetry == 0

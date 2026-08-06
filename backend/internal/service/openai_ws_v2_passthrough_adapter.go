@@ -752,6 +752,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, blocked.Message, blocked)
 	}
 	firstClientMessage = updatedFirst
+	prewarmPayload := append([]byte(nil), firstClientMessage...)
 	firstClientMessage = applyOpenAIWSQuotaBypass(firstClientMessage, hooks)
 
 	// 在 policy filter 之后再提取 service_tier / reasoning_effort 用于
@@ -872,6 +873,20 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	upstreamFrameConn, ok := upstreamConn.(openaiwsv2.FrameConn)
 	if !ok {
 		return errors.New("openai ws passthrough upstream connection does not support frame relay")
+	}
+	if s.shouldPrewarmOpenAIWSSession(hooks) {
+		if prewarmErr := s.prewarmOpenAIWSPassthroughSession(ctx, upstreamConn, prewarmPayload, account, hooks, handshakeHeaders); prewarmErr != nil {
+			var failoverErr *UpstreamFailoverError
+			if errors.As(prewarmErr, &failoverErr) {
+				return prewarmErr
+			}
+			return &UpstreamFailoverError{
+				StatusCode:      http.StatusBadGateway,
+				ResponseBody:    []byte(prewarmErr.Error()),
+				ResponseHeaders: cloneHeader(handshakeHeaders),
+				ClientMessage:   "upstream websocket session prewarm failed",
+			}
+		}
 	}
 	relayUpstreamFrameConn := &openAIWSPassthroughFirstOutputFrameConn{
 		inner:             upstreamFrameConn,
