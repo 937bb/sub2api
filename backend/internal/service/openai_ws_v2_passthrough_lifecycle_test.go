@@ -42,13 +42,7 @@ func (c *stagedPassthroughConn) Send(payload string) {
 	c.frames <- stagedPassthroughFrame{messageType: coderws.MessageText, payload: []byte(payload)}
 }
 
-func (c *stagedPassthroughConn) WriteJSON(ctx context.Context, value any) error {
-	payload, err := json.Marshal(value)
-	if err != nil {
-		return err
-	}
-	return c.WriteFrame(ctx, coderws.MessageText, payload)
-}
+func (c *stagedPassthroughConn) WriteJSON(context.Context, any) error { return nil }
 
 func (c *stagedPassthroughConn) ReadMessage(ctx context.Context) ([]byte, error) {
 	_, payload, err := c.ReadFrame(ctx)
