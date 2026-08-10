@@ -126,13 +126,13 @@ func (s *OpenAIGatewayService) failoverOpenAIUpstreamHTTPError(
 		shouldDisable = s.handleOpenAIAccountUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody, upstreamModel)
 	}
 	retryable := !shouldDisable && account.IsPoolMode() && (account.IsPoolModeRetryableStatus(resp.StatusCode) || isOpenAITransientProcessingError(resp.StatusCode, upstreamMsg, respBody))
-	return newOpenAIUpstreamFailoverError(
+	return s.configureOpenAIQuotaBypass429Retry(c, account, newOpenAIUpstreamFailoverError(
 		resp.StatusCode,
 		resp.Header,
 		respBody,
 		upstreamMsg,
 		retryable,
-	)
+	), true)
 }
 
 // openAIChatCompletionsTargetURL 解析账号的（非 Grok）Chat Completions 上游端点。

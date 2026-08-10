@@ -156,6 +156,13 @@ func TestOpenAIGatewayForward_GroupBypassInjectionPersistsUpstream429(t *testing
 
 	require.Error(t, err)
 	require.Nil(t, result)
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.True(t, failoverErr.RetryableOnSameAccount)
+	require.Equal(t, openAIQuotaBypassSameAccountRetries, failoverErr.SameAccountRetryLimit)
+	require.True(t, failoverErr.ClearRateLimitBeforeRetry)
+	require.False(t, failoverErr.RateLimitObservedBefore.IsZero())
+	require.NotZero(t, failoverErr.RuntimeBlockGeneration)
 	requireQuotaBypassPairs(t, upstream.lastBody, 1, 1)
 	require.Equal(t, 1, repo.setRateLimitedCalls, "quota bypass must use the standard 429 persistence path")
 	require.Equal(t, account.ID, repo.setRateLimitedID)

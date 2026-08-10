@@ -421,7 +421,8 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			}
 			if turn == 1 && !wroteDownstream && shouldFailover {
 				retryable := false
-				return nil, newOpenAIUpstreamFailoverError(statusCode, resp.Header, upstreamMessage, errMessage, retryable)
+				return nil, s.configureOpenAIQuotaBypass429Retry(c, account,
+					newOpenAIUpstreamFailoverError(statusCode, resp.Header, upstreamMessage, errMessage, retryable), true)
 			}
 			upstreamEventErr = errors.New(errMessage)
 		}

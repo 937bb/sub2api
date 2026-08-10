@@ -653,19 +653,35 @@ type GatewayFailureReason string
 // trigger account failover. Additive metadata keeps existing composite literals
 // source-compatible and preserves their legacy retry-next-account behavior.
 type UpstreamFailoverError struct {
-	StatusCode               int
-	ResponseBody             []byte      // 上游响应体，用于错误透传规则匹配
-	ResponseHeaders          http.Header // 上游响应头，用于透传 cf-ray/cf-mitigated/content-type 等诊断信息
-	ForceCacheBilling        bool        // Antigravity 粘性会话切换时设为 true
-	RetryableOnSameAccount   bool        // 临时性错误（如 Google 间歇性 400、空响应），应在同一账号上重试 N 次再切换
-	RequestScopedTransient   bool        // 故障因素与账号无关（如上游按客户端身份/模型容量降载）：可同账号重试，但不得据此对账号做临时封禁
-	SafeToFailoverAfterWrite bool        // 仅写出 SSE 注释等非语义字节时，仍可在同一客户端流中切换账号
-	Stage                    GatewayFailureStage
-	Scope                    GatewayFailureScope
-	Reason                   GatewayFailureReason
-	NextAccountAction        NextAccountAction
-	ClientStatusCode         int
-	ClientMessage            string
+	StatusCode                int
+	ResponseBody              []byte      // 上游响应体，用于错误透传规则匹配
+	ResponseHeaders           http.Header // 上游响应头，用于透传 cf-ray/cf-mitigated/content-type 等诊断信息
+	ForceCacheBilling         bool        // Antigravity 粘性会话切换时设为 true
+	RetryableOnSameAccount    bool        // 临时性错误（如 Google 间歇性 400、空响应），应在同一账号上重试 N 次再切换
+	SameAccountRetryLimit     int         // 请求级重试上限覆盖；0 表示继续使用账号的 pool-mode 配置
+	ClearRateLimitBeforeRetry bool        // 仅在确定执行下一次同账号尝试时清除刚写入的 429 状态
+	RateLimitObservedBefore   time.Time   // 仅清除不晚于本次 429 的持久化状态，避免覆盖其他并发写入的新一代限流
+	RuntimeBlockGeneration    uint64      // 本次 429 完成时观察到的内存阻断版本
+	RequestScopedTransient    bool        // 故障因素与账号无关（如上游按客户端身份/模型容量降载）：可同账号重试，但不得据此对账号做临时封禁
+	SafeToFailoverAfterWrite  bool        // 仅写出 SSE 注释等非语义字节时，仍可在同一客户端流中切换账号
+	Stage                     GatewayFailureStage
+	Scope                     GatewayFailureScope
+	Reason                    GatewayFailureReason
+	NextAccountAction         NextAccountAction
+	ClientStatusCode          int
+	ClientMessage             string
+}
+
+// ResolveSameAccountRetryLimit applies a request-scoped override without
+// changing the account's regular pool-mode retry configuration.
+func (e *UpstreamFailoverError) ResolveSameAccountRetryLimit(fallback int) int {
+	if e != nil && e.SameAccountRetryLimit > 0 {
+		return e.SameAccountRetryLimit
+	}
+	if fallback < 0 {
+		return 0
+	}
+	return fallback
 }
 
 func (e *UpstreamFailoverError) Error() string {

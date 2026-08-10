@@ -920,13 +920,13 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 
 				shouldDisable := s.handleFailoverSideEffects(ctx, resp, account, respBody, upstreamModel)
 				retryable := !shouldDisable && account.IsPoolMode() && (account.IsPoolModeRetryableStatus(resp.StatusCode) || isOpenAITransientProcessingError(resp.StatusCode, upstreamMsg, respBody))
-				return nil, newOpenAIUpstreamFailoverError(
+				return nil, s.configureOpenAIQuotaBypass429Retry(c, account, newOpenAIUpstreamFailoverError(
 					resp.StatusCode,
 					resp.Header,
 					respBody,
 					upstreamMsg,
 					retryable,
-				)
+				), true)
 			}
 			return s.handleErrorResponse(ctx, resp, c, account, body, billingModel)
 		}

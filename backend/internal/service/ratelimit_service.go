@@ -1860,6 +1860,23 @@ func (s *RateLimitService) ClearRateLimit(ctx context.Context, accountID int64) 
 	return nil
 }
 
+type openAIQuotaBypassRateLimitRecoveryRepository interface {
+	ClearOpenAIQuotaBypassRateLimit(ctx context.Context, id int64, observedBefore time.Time) (bool, error)
+}
+
+// clearRateLimitForQuotaBypassRetry clears only the OpenAI OAuth 429 generation
+// observed by this request, leaving newer 429s and unrelated policy state intact.
+func (s *RateLimitService) clearRateLimitForQuotaBypassRetry(ctx context.Context, accountID int64, observedBefore time.Time) (bool, error) {
+	if s == nil || s.accountRepo == nil {
+		return false, fmt.Errorf("rate limit service is not configured")
+	}
+	recoveryRepo, ok := s.accountRepo.(openAIQuotaBypassRateLimitRecoveryRepository)
+	if !ok {
+		return false, fmt.Errorf("account repository does not support conditional OpenAI rate-limit recovery")
+	}
+	return recoveryRepo.ClearOpenAIQuotaBypassRateLimit(ctx, accountID, observedBefore)
+}
+
 func (s *RateLimitService) ResetOpenAI403Counter(ctx context.Context, accountID int64) {
 	if s == nil || s.openAI403CounterCache == nil || accountID <= 0 {
 		return

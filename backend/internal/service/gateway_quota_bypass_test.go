@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/gin-gonic/gin"
@@ -51,6 +52,62 @@ func requireQuotaBypassPairs(t *testing.T, body []byte, originalItems, pairs int
 		require.False(t, duplicate, "each injected pair must use a unique call_id")
 		seenCallIDs[callID] = struct{}{}
 	}
+}
+
+func TestConfigureOpenAIQuotaBypass429Retry(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	account := &Account{ID: 42, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+
+	svc := &OpenAIGatewayService{}
+	regular := svc.configureOpenAIQuotaBypass429Retry(c, account, &UpstreamFailoverError{
+		StatusCode: http.StatusTooManyRequests,
+	}, true)
+	require.False(t, regular.RetryableOnSameAccount)
+	require.Zero(t, regular.SameAccountRetryLimit)
+	require.False(t, regular.ClearRateLimitBeforeRetry)
+
+	markOpenAIQuotaBypassApplied(c, 1)
+	bypass := svc.configureOpenAIQuotaBypass429Retry(c, account, &UpstreamFailoverError{
+		StatusCode: http.StatusTooManyRequests,
+	}, true)
+	require.True(t, bypass.RetryableOnSameAccount)
+	require.Equal(t, openAIQuotaBypassSameAccountRetries, bypass.SameAccountRetryLimit)
+	require.Equal(t, openAIQuotaBypassSameAccountRetries, bypass.ResolveSameAccountRetryLimit(0))
+	require.True(t, bypass.ClearRateLimitBeforeRetry)
+	require.False(t, bypass.RateLimitObservedBefore.IsZero())
+}
+
+func TestPrepareOpenAIQuotaBypassSameAccountRetryClearsRuntimeBlock(t *testing.T) {
+	svc := &OpenAIGatewayService{}
+	account := &Account{ID: 43, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	svc.BlockAccountScheduling(account, time.Now().Add(time.Hour), "429")
+	require.True(t, svc.isOpenAIAccountRuntimeBlocked(account))
+	generation, ok := svc.openaiAccountRuntimeBlockGeneration.Load(account.ID)
+	require.True(t, ok)
+
+	ok = svc.PrepareOpenAIQuotaBypassSameAccountRetry(context.Background(), account.ID, &UpstreamFailoverError{
+		ClearRateLimitBeforeRetry: true,
+		RuntimeBlockGeneration:    generation.(uint64),
+	})
+	require.True(t, ok)
+	require.False(t, svc.isOpenAIAccountRuntimeBlocked(account))
+}
+
+func TestPrepareOpenAIQuotaBypassSameAccountRetryPreservesNewerRuntimeBlock(t *testing.T) {
+	svc := &OpenAIGatewayService{}
+	account := &Account{ID: 44, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	svc.BlockAccountScheduling(account, time.Now().Add(time.Minute), "429")
+	staleGeneration, ok := svc.openaiAccountRuntimeBlockGeneration.Load(account.ID)
+	require.True(t, ok)
+	svc.BlockAccountScheduling(account, time.Now().Add(time.Hour), "newer_429")
+
+	ok = svc.PrepareOpenAIQuotaBypassSameAccountRetry(context.Background(), account.ID, &UpstreamFailoverError{
+		ClearRateLimitBeforeRetry: true,
+		RuntimeBlockGeneration:    staleGeneration.(uint64),
+	})
+	require.False(t, ok)
+	require.True(t, svc.isOpenAIAccountRuntimeBlocked(account))
 }
 
 // The injected turn must look like a real Codex shell call, not a constant.

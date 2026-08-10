@@ -610,8 +610,9 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 					}
 					// 池模式：同账号重试
 					if failoverErr.RetryableOnSameAccount {
-						retryLimit := account.GetPoolModeRetryCount()
-						if sameAccountRetryCount[account.ID] < retryLimit {
+						retryLimit := failoverErr.ResolveSameAccountRetryLimit(account.GetPoolModeRetryCount())
+						if sameAccountRetryCount[account.ID] < retryLimit &&
+							h.gatewayService.PrepareOpenAIQuotaBypassSameAccountRetry(c.Request.Context(), account.ID, failoverErr) {
 							sameAccountRetryCount[account.ID]++
 							reqLog.Warn("openai.pool_mode_same_account_retry",
 								zap.Int64("account_id", account.ID),
@@ -1162,8 +1163,9 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 					}
 					// 池模式：同账号重试
 					if failoverErr.RetryableOnSameAccount {
-						retryLimit := account.GetPoolModeRetryCount()
-						if sameAccountRetryCount[account.ID] < retryLimit {
+						retryLimit := failoverErr.ResolveSameAccountRetryLimit(account.GetPoolModeRetryCount())
+						if sameAccountRetryCount[account.ID] < retryLimit &&
+							h.gatewayService.PrepareOpenAIQuotaBypassSameAccountRetry(c.Request.Context(), account.ID, failoverErr) {
 							sameAccountRetryCount[account.ID]++
 							reqLog.Warn("openai_messages.pool_mode_same_account_retry",
 								zap.Int64("account_id", account.ID),
@@ -1823,6 +1825,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	switchCount := 0
 	profitVetoCount := 0
 	failedAccountIDs := make(map[int64]struct{})
+	sameAccountRetryCount := make(map[int64]int)
 	var lastFailoverErr *service.UpstreamFailoverError
 	var oauth429FailoverState service.OpenAIOAuth429FailoverState
 	handleWSFailover := func(account *service.Account, failoverErr *service.UpstreamFailoverError) bool {
@@ -1839,6 +1842,25 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		}
 		if ctx.Err() != nil {
 			return false
+		}
+		if failoverErr.RetryableOnSameAccount {
+			retryLimit := failoverErr.ResolveSameAccountRetryLimit(account.GetPoolModeRetryCount())
+			if sameAccountRetryCount[account.ID] < retryLimit &&
+				h.gatewayService.PrepareOpenAIQuotaBypassSameAccountRetry(ctx, account.ID, failoverErr) {
+				sameAccountRetryCount[account.ID]++
+				reqLog.Warn("openai.websocket_same_account_retry",
+					zap.Int64("account_id", account.ID),
+					zap.Int("upstream_status", failoverErr.StatusCode),
+					zap.Int("retry_limit", retryLimit),
+					zap.Int("retry_count", sameAccountRetryCount[account.ID]),
+				)
+				select {
+				case <-ctx.Done():
+					return false
+				case <-time.After(sameAccountRetryDelay):
+				}
+				return ensureUserSlotHeld()
+			}
 		}
 		h.gatewayService.RecordOpenAIAccountSwitch()
 		failedAccountIDs[account.ID] = struct{}{}

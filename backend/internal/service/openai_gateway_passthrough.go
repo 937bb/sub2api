@@ -633,13 +633,13 @@ func (s *OpenAIGatewayService) handleFailoverErrorResponsePassthrough(
 		UpstreamResponseBody: upstreamDetail,
 	})
 	retryable := !shouldDisable && account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode)
-	return newOpenAIUpstreamFailoverError(
+	return s.configureOpenAIQuotaBypass429Retry(c, account, newOpenAIUpstreamFailoverError(
 		resp.StatusCode,
 		resp.Header,
 		body,
 		upstreamMsg,
 		retryable,
-	)
+	), true)
 }
 
 func (s *OpenAIGatewayService) handleErrorResponsePassthrough(
@@ -1114,13 +1114,14 @@ func (s *OpenAIGatewayService) newOpenAIStreamFailoverError(
 			"message": message,
 		},
 	})
-	return &UpstreamFailoverError{
+	failoverErr := &UpstreamFailoverError{
 		StatusCode:             statusCode,
 		ResponseBody:           body,
 		ResponseHeaders:        headers,
 		RetryableOnSameAccount: openAIStreamFailedEventRetryableOnSameAccount(account, payload, message),
 		RequestScopedTransient: isOpenAIUpstreamCapacityShedEvent(payload),
 	}
+	return s.configureOpenAIQuotaBypass429Retry(c, account, failoverErr, false)
 }
 
 func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(

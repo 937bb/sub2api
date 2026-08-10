@@ -1,9 +1,12 @@
 package service
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"log/slog"
+	"net/http"
 	"strconv"
 	"sync/atomic"
 	"time"
@@ -20,6 +23,7 @@ const (
 	openAIQuotaBypassInjectPairsContextKey = "openai_quota_bypass_inject_pairs"
 	openAIQuotaBypassResponseHeader        = "X-Sub2API-Quota-Bypass"
 	openAIQuotaBypassPairsResponseHeader   = "X-Sub2API-Quota-Bypass-Pairs"
+	openAIQuotaBypassSameAccountRetries    = 3
 )
 
 // IsQuotaBypassEligible reports whether an account qualifies for Codex quota
@@ -156,6 +160,84 @@ func applyOpenAIWSQuotaBypass(payload []byte, hooks *OpenAIWSIngressHooks) []byt
 		return injected
 	}
 	return payload
+}
+
+// configureOpenAIQuotaBypass429Retry converts the manual "recover state and
+// retry" workflow into a bounded request-local retry. The final failed attempt
+// remains rate-limited so normal account failover still applies.
+func (s *OpenAIGatewayService) configureOpenAIQuotaBypass429Retry(
+	c *gin.Context,
+	account *Account,
+	failoverErr *UpstreamFailoverError,
+	clearRateLimitBeforeRetry bool,
+) *UpstreamFailoverError {
+	if failoverErr == nil || failoverErr.StatusCode != http.StatusTooManyRequests ||
+		account == nil || account.Platform != PlatformOpenAI || !account.IsOAuth() {
+		return failoverErr
+	}
+	applied, _ := OpenAIQuotaBypassUsageSnapshot(c)
+	return s.configureOpenAIQuotaBypass429RetryEnabled(account, failoverErr, applied, clearRateLimitBeforeRetry)
+}
+
+func (s *OpenAIGatewayService) configureOpenAIQuotaBypass429RetryEnabled(
+	account *Account,
+	failoverErr *UpstreamFailoverError,
+	enabled bool,
+	clearRateLimitBeforeRetry bool,
+) *UpstreamFailoverError {
+	if !enabled || failoverErr == nil || failoverErr.StatusCode != http.StatusTooManyRequests ||
+		account == nil || account.Platform != PlatformOpenAI || !account.IsOAuth() {
+		return failoverErr
+	}
+	failoverErr.RetryableOnSameAccount = true
+	failoverErr.SameAccountRetryLimit = openAIQuotaBypassSameAccountRetries
+	failoverErr.ClearRateLimitBeforeRetry = clearRateLimitBeforeRetry
+	if clearRateLimitBeforeRetry {
+		failoverErr.RateLimitObservedBefore = time.Now().UTC()
+		if s != nil {
+			if rawGeneration, ok := s.openaiAccountRuntimeBlockGeneration.Load(account.ID); ok {
+				failoverErr.RuntimeBlockGeneration, _ = rawGeneration.(uint64)
+			}
+		}
+	}
+	return failoverErr
+}
+
+// PrepareOpenAIQuotaBypassSameAccountRetry clears only the 429 state written by
+// the failed attempt, after the handler has confirmed another attempt will run.
+func (s *OpenAIGatewayService) PrepareOpenAIQuotaBypassSameAccountRetry(
+	ctx context.Context,
+	accountID int64,
+	failoverErr *UpstreamFailoverError,
+) bool {
+	if failoverErr == nil || !failoverErr.ClearRateLimitBeforeRetry {
+		return true
+	}
+	if s == nil || accountID <= 0 {
+		return false
+	}
+	mu := s.openAIAccountRuntimeBlockLock(accountID)
+	mu.Lock()
+	defer mu.Unlock()
+	if failoverErr.RuntimeBlockGeneration > 0 {
+		currentGeneration, ok := s.openaiAccountRuntimeBlockGeneration.Load(accountID)
+		if !ok || currentGeneration != failoverErr.RuntimeBlockGeneration {
+			return false
+		}
+	}
+	if s.rateLimitService != nil {
+		cleared, err := s.rateLimitService.clearRateLimitForQuotaBypassRetry(ctx, accountID, failoverErr.RateLimitObservedBefore)
+		if err != nil {
+			slog.Warn("openai_quota_bypass_retry_state_clear_failed", "account_id", accountID, "error", err)
+			return false
+		}
+		if !cleared {
+			return false
+		}
+	}
+	s.openaiAccountRuntimeBlockUntil.Delete(accountID)
+	s.openaiAccountRuntimeBlockGeneration.Store(accountID, s.openaiAccountRuntimeBlockSequence.Add(1))
+	return true
 }
 
 // ResolveOpenAIQuotaBypassInjectPairs keeps the usage metadata explicit while
