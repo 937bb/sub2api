@@ -170,6 +170,74 @@ func TestGeminiForwardAsChatCompletions_StreamsOpenAIChunksFromGeminiSSE(t *test
 	require.Contains(t, out, "data: [DONE]")
 }
 
+func TestGeminiForwardAsChatCompletions_FunctionNamedWebSearchStaysClientSide(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	httpStub := &geminiCompatHTTPUpstreamStub{
+		response: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body: io.NopCloser(strings.NewReader(
+				`{"candidates":[{"content":{"parts":[{"text":"hello"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":1}}`,
+			)),
+		},
+	}
+	svc := &GeminiMessagesCompatService{
+		httpUpstream: httpStub,
+		cfg:          &config.Config{},
+	}
+	account := &Account{
+		ID:       103,
+		Platform: PlatformGemini,
+		Type:     AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"api_key": "gemini-api-key",
+		},
+		Concurrency: 1,
+	}
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	body := []byte(`{
+		"model":"gemini-3.6-flash-high",
+		"messages":[{"role":"user","content":"search and read"}],
+		"tools":[
+			{"type":"function","function":{"name":"web_search","description":"Search through the Hermes client","parameters":{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}}},
+			{"type":"function","function":{"name":"read_file","description":"Read a local file","parameters":{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}}}
+		]
+	}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+
+	result, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NotNil(t, httpStub.lastReq)
+
+	postedBody, err := io.ReadAll(httpStub.lastReq.Body)
+	require.NoError(t, err)
+
+	var posted map[string]any
+	require.NoError(t, json.Unmarshal(postedBody, &posted))
+	tools, ok := posted["tools"].([]any)
+	require.True(t, ok)
+	require.Len(t, tools, 1, "Chat Completions function tools must not be promoted to Gemini built-ins by name")
+
+	functionTool, ok := tools[0].(map[string]any)
+	require.True(t, ok)
+	functionDecls, ok := functionTool["functionDeclarations"].([]any)
+	require.True(t, ok)
+	require.Len(t, functionDecls, 2)
+	webSearchDecl, ok := functionDecls[0].(map[string]any)
+	require.True(t, ok)
+	readFileDecl, ok := functionDecls[1].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "web_search", webSearchDecl["name"])
+	require.Equal(t, "read_file", readFileDecl["name"])
+	require.NotContains(t, functionTool, "googleSearch")
+	require.NotContains(t, functionTool, "google_search")
+}
+
 // TestConvertClaudeToolsToGeminiTools_CustomType 测试custom类型工具转换
 func TestConvertClaudeToolsToGeminiTools_CustomType(t *testing.T) {
 	tests := []struct {
@@ -312,31 +380,8 @@ func TestCleanToolSchema_NormalizesGeminiUnsupportedSchemaFields(t *testing.T) {
 			"empty": map[string]any{
 				"type": []any{"null"},
 			},
-			"ambiguous": map[string]any{
-				"type": []any{"string", "integer"},
-			},
-			"ambiguousNullable": map[string]any{
-				"type": []any{"string", "integer", "null"},
-			},
-			"definitions": map[string]any{
-				"type":      "object",
-				"minLength": 1,
-			},
-			"$defs": map[string]any{
-				"type": "string",
-			},
-			"metadata": map[string]any{
-				"type": "object",
-				"default": map[string]any{
-					"type":        "object",
-					"definitions": "literal default key",
-					"$defs":       "literal default key",
-				},
-			},
 		},
 	}
-	originalSchema, err := json.Marshal(schema)
-	require.NoError(t, err)
 
 	cleaned, ok := cleanToolSchema(schema).(map[string]any)
 	require.True(t, ok)
@@ -358,79 +403,6 @@ func TestCleanToolSchema_NormalizesGeminiUnsupportedSchemaFields(t *testing.T) {
 	emptySchema, ok := properties["empty"].(map[string]any)
 	require.True(t, ok)
 	require.NotContains(t, emptySchema, "type")
-
-	ambiguousSchema, ok := properties["ambiguous"].(map[string]any)
-	require.True(t, ok)
-	require.NotContains(t, ambiguousSchema, "type")
-
-	ambiguousNullableSchema, ok := properties["ambiguousNullable"].(map[string]any)
-	require.True(t, ok)
-	require.NotContains(t, ambiguousNullableSchema, "type")
-
-	definitionsProperty, ok := properties["definitions"].(map[string]any)
-	require.True(t, ok)
-	require.Equal(t, "OBJECT", definitionsProperty["type"])
-	require.NotContains(t, definitionsProperty, "minLength")
-
-	defsProperty, ok := properties["$defs"].(map[string]any)
-	require.True(t, ok)
-	require.Equal(t, "STRING", defsProperty["type"])
-
-	metadataProperty, ok := properties["metadata"].(map[string]any)
-	require.True(t, ok)
-	defaultValue, ok := metadataProperty["default"].(map[string]any)
-	require.True(t, ok)
-	require.Equal(t, "object", defaultValue["type"])
-	require.Equal(t, "literal default key", defaultValue["definitions"])
-	require.Equal(t, "literal default key", defaultValue["$defs"])
-
-	currentSchema, err := json.Marshal(schema)
-	require.NoError(t, err)
-	require.JSONEq(t, string(originalSchema), string(currentSchema))
-}
-
-func TestConvertClaudeToolsToGeminiTools_CleansSchemaOnlyInsideGeminiConversion(t *testing.T) {
-	tools := []any{
-		map[string]any{
-			"name":        "read_file",
-			"description": "Read file",
-			"input_schema": map[string]any{
-				"type": "object",
-				"$defs": map[string]any{
-					"Path": map[string]any{"type": "string"},
-				},
-				"properties": map[string]any{
-					"path": map[string]any{
-						"type": []any{"string", "null"},
-					},
-				},
-			},
-		},
-	}
-
-	result := convertClaudeToolsToGeminiTools(tools)
-	require.Len(t, result, 1)
-
-	functionDecl, ok := result[0].(map[string]any)
-	require.True(t, ok)
-	funcDecls, ok := functionDecl["functionDeclarations"].([]any)
-	require.True(t, ok)
-	require.Len(t, funcDecls, 1)
-
-	decl, ok := funcDecls[0].(map[string]any)
-	require.True(t, ok)
-	params, ok := decl["parameters"].(map[string]any)
-	require.True(t, ok)
-	require.NotContains(t, params, "$defs")
-
-	properties, ok := params["properties"].(map[string]any)
-	require.True(t, ok)
-	pathSchema, ok := properties["path"].(map[string]any)
-	require.True(t, ok)
-	require.Equal(t, "STRING", pathSchema["type"])
-
-	inputSchema := tools[0].(map[string]any)["input_schema"].(map[string]any)
-	require.Contains(t, inputSchema, "$defs")
 }
 
 func TestConvertClaudeToolsToGeminiTools_PreservesWebSearchAlongsideFunctions(t *testing.T) {

@@ -183,7 +183,8 @@ func TestStream_ToolCallLifecycleComplete(t *testing.T) {
 // where a single tool_call delta chunk carries id+name+arguments together.
 // Earlier code copied the whole tool_call (including arguments) into state and
 // then accumulated the same chunk's arguments again, producing a doubled,
-// invalid JSON like {"cmd":"ls"}{"cmd":"ls"} that breaks Codex tool parsing.
+// invalid JSON like {"cmd":"ls"}{"cmd":"ls"} that breaks Codex tool parsing
+// ("trailing characters").
 func TestStream_ToolCallArgumentsInFirstChunkNotDoubled(t *testing.T) {
 	events := collectStreamEvents(t, []string{
 		`{"choices":[{"index":0,"delta":{"role":"assistant"}}]}`,

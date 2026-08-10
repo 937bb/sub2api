@@ -12,10 +12,8 @@ import (
 
 type updateAccountOveragesRepoStub struct {
 	mockAccountRepoForGemini
-	account                    *Account
-	updateCalls                int
-	clearedModelRateLimitScope string
-	clearModelRateLimitsCalls  int
+	account     *Account
+	updateCalls int
 }
 
 func (r *updateAccountOveragesRepoStub) GetByID(ctx context.Context, id int64) (*Account, error) {
@@ -25,20 +23,6 @@ func (r *updateAccountOveragesRepoStub) GetByID(ctx context.Context, id int64) (
 func (r *updateAccountOveragesRepoStub) Update(ctx context.Context, account *Account) error {
 	r.updateCalls++
 	r.account = account
-	return nil
-}
-
-func (r *updateAccountOveragesRepoStub) ClearModelRateLimit(_ context.Context, _ int64, scope string) error {
-	r.clearedModelRateLimitScope = scope
-	if rawLimits, ok := r.account.Extra[modelRateLimitsKey].(map[string]any); ok {
-		delete(rawLimits, scope)
-	}
-	return nil
-}
-
-func (r *updateAccountOveragesRepoStub) ClearModelRateLimits(_ context.Context, _ int64) error {
-	r.clearModelRateLimitsCalls++
-	delete(r.account.Extra, modelRateLimitsKey)
 	return nil
 }
 
@@ -87,7 +71,6 @@ func TestUpdateAccount_DisableOveragesClearsAICreditsKey(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, updated)
 	require.Equal(t, 1, repo.updateCalls)
-	require.Equal(t, creditsExhaustedKey, repo.clearedModelRateLimitScope)
 	require.False(t, updated.IsOveragesEnabled())
 
 	// 关闭 overages 后，AICredits key 应被清除
@@ -133,7 +116,6 @@ func TestUpdateAccount_EnableOveragesClearsModelRateLimitsBeforePersist(t *testi
 	require.NoError(t, err)
 	require.NotNil(t, updated)
 	require.Equal(t, 1, repo.updateCalls)
-	require.Equal(t, 1, repo.clearModelRateLimitsCalls)
 	require.True(t, updated.IsOveragesEnabled())
 
 	_, exists := repo.account.Extra[modelRateLimitsKey]

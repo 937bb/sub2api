@@ -33,6 +33,7 @@ function createPublicSettings(overrides: Partial<PublicSettings> = {}): PublicSe
     contact_info: '',
     doc_url: '',
     home_content: '',
+    compact_home_enabled: false,
     hide_ccs_import_button: false,
     payment_enabled: false,
     risk_control_enabled: false,
@@ -54,6 +55,8 @@ function createPublicSettings(overrides: Partial<PublicSettings> = {}): PublicSe
     channel_monitor_enabled: true,
     channel_monitor_default_interval_seconds: 60,
     available_channels_enabled: false,
+    model_plaza_enabled: false,
+    model_plaza_require_auth: false,
     service_quota_enabled: false,
     affiliate_enabled: false,
     ...overrides,
@@ -307,14 +310,12 @@ describe('useAppStore', () => {
       const store = useAppStore()
 
       store.setSidebarCollapsed(true)
-      store.sidebarScrollTop = 256
       store.setLoading(true)
       store.showSuccess('消息')
 
       store.reset()
 
       expect(store.sidebarCollapsed).toBe(false)
-      expect(store.sidebarScrollTop).toBe(0)
       expect(store.loading).toBe(false)
       expect(store.toasts).toHaveLength(0)
     })
@@ -452,6 +453,7 @@ describe('useAppStore', () => {
         contact_info: '',
         doc_url: '',
         home_content: '',
+        compact_home_enabled: false,
         hide_ccs_import_button: false,
         purchase_subscription_enabled: false,
         purchase_subscription_url: '',

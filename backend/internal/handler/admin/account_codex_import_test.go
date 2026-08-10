@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -144,9 +145,11 @@ func TestNormalizeCodexSessionJSONExtractsCredentialsAndIgnoresSessionToken(t *t
 	}
 }
 
-func TestMergeCodexImportCredentialsClearsStaleRefreshFieldsWhenIncomingHasNoRefreshToken(t *testing.T) {
+func TestMergeCodexImportCredentialsPreservesExistingRefreshFieldsWhenIncomingHasNoRefreshToken(t *testing.T) {
 	existing := map[string]any{
 		"access_token":       "old-access-token",
+		"refresh_token":      "old-refresh-token",
+		"client_id":          "old-client-id",
 		"id_token":           "old-id-token",
 		"model_mapping":      map[string]any{"from": "existing"},
 		"chatgpt_account_id": "acct-old",
@@ -169,11 +172,11 @@ func TestMergeCodexImportCredentialsClearsStaleRefreshFieldsWhenIncomingHasNoRef
 	if merged["chatgpt_account_id"] != "acct-new" {
 		t.Fatalf("chatgpt_account_id = %v, want acct-new", merged["chatgpt_account_id"])
 	}
-	if _, ok := merged["refresh_token"]; ok {
-		t.Fatalf("refresh_token should be cleared")
+	if merged["refresh_token"] != "old-refresh-token" {
+		t.Fatalf("refresh_token = %v, want old-refresh-token", merged["refresh_token"])
 	}
-	if _, ok := merged["client_id"]; ok {
-		t.Fatalf("client_id should be cleared")
+	if merged["client_id"] != "old-client-id" {
+		t.Fatalf("client_id = %v, want old-client-id", merged["client_id"])
 	}
 	if _, ok := merged["id_token"]; ok {
 		t.Fatalf("id_token should be cleared")
@@ -183,37 +186,6 @@ func TestMergeCodexImportCredentialsClearsStaleRefreshFieldsWhenIncomingHasNoRef
 	}
 	if _, ok := merged["model_mapping"]; !ok {
 		t.Fatalf("model_mapping should be preserved")
-	}
-}
-
-func TestMergeCodexImportCredentialsPreservesExistingRefreshFieldsWhenAccessOnlyImportMatches(t *testing.T) {
-	existing := map[string]any{
-		"access_token":  "old-access-token",
-		"refresh_token": "old-refresh-token",
-		"client_id":     "old-client-id",
-		"id_token":      "old-id-token",
-	}
-	incoming := map[string]any{
-		"access_token": "new-access-token",
-		"expires_at":   "2026-08-05T13:40:42Z",
-	}
-	item := &codexImportAccount{
-		AccessToken: "new-access-token",
-	}
-
-	merged := mergeCodexImportCredentials(existing, incoming, item)
-
-	if merged["access_token"] != "new-access-token" {
-		t.Fatalf("access_token = %v, want new-access-token", merged["access_token"])
-	}
-	if merged["refresh_token"] != "old-refresh-token" {
-		t.Fatalf("refresh_token = %v, want old-refresh-token", merged["refresh_token"])
-	}
-	if merged["client_id"] != "old-client-id" {
-		t.Fatalf("client_id = %v, want old-client-id", merged["client_id"])
-	}
-	if _, ok := merged["id_token"]; ok {
-		t.Fatalf("id_token should be cleared when incoming has no id_token")
 	}
 }
 
@@ -330,413 +302,699 @@ func TestResolveCodexImportExpiryForNoRefreshTokenUsesEarlierRequestExpiry(t *te
 }
 
 func TestCodexIdentityKeysPreferStrongIdentifiers(t *testing.T) {
-	keys := buildCodexIdentityKeys("acct-1", "user-1", "same@example.com", "token")
-	for _, key := range keys {
-		if key == "account:acct-1" || key == "email:same@example.com" || key == "user:user-1" {
-			t.Fatalf("strong identity should not include broad fallback key %q: %v", key, keys)
-		}
+	keys := buildCodexImportIdentityKeys("acct-1", "user-1", "same@example.com", "token", "refresh")
+	if len(keys) == 0 || keys[0] != "user:user-1" {
+		t.Fatalf("user key should have highest priority when refresh token exists: %v", keys)
 	}
-	for _, want := range []string{
-		"account_user:acct-1:user-1",
-		"account_email:acct-1:same@example.com",
-	} {
-		if !codexTestHasIdentityKey(keys, want) {
-			t.Fatalf("identity keys missing %q: %v", want, keys)
+	if keys[len(keys)-1] != "account:acct-1" {
+		t.Fatalf("shared account key should be the last fallback: %v", keys)
+	}
+	for _, key := range keys {
+		if strings.HasPrefix(key, "email:") {
+			t.Fatalf("strong identity should not include email fallback: %v", keys)
 		}
 	}
 
-	keys = buildCodexIdentityKeys("", "", "same@example.com", "token")
-	if !codexTestHasIdentityKey(keys, "email:same@example.com") {
+	keys = buildCodexImportIdentityKeys("", "", "same@example.com", "token", "refresh")
+	hasEmail := false
+	for _, key := range keys {
+		if key == "email:same@example.com" {
+			hasEmail = true
+		}
+	}
+	if !hasEmail {
 		t.Fatalf("weak identity should include email fallback: %v", keys)
 	}
-}
 
-func TestCodexImportIdentityKeysUseAccessOnlyIdentityWhenRefreshTokenMissing(t *testing.T) {
-	keys := buildCodexImportIdentityKeys("acct-1", "user-1", "same@example.com", "access-token", "")
-	if len(keys) != 1 {
-		t.Fatalf("access-only import keys = %v, want exactly one access fingerprint key", keys)
-	}
-	if want := "access:" + codexTokenFingerprint("access-token"); keys[0] != want {
-		t.Fatalf("access-only import key = %q, want %q", keys[0], want)
+	keys = buildCodexImportIdentityKeys("acct-1", "user-1", "same@example.com", "token", "")
+	if len(keys) != 1 || !strings.HasPrefix(keys[0], "access:") {
+		t.Fatalf("accessToken-only identity should use only access fingerprint: %v", keys)
 	}
 }
 
-func TestCodexImportIdentityKeysUseStrongIdentityWhenRefreshTokenPresent(t *testing.T) {
-	keys := buildCodexImportIdentityKeys("acct-1", "user-1", "same@example.com", "access-token", "refresh-token")
-	if !codexTestHasIdentityKey(keys, "account_user:acct-1:user-1") {
-		t.Fatalf("refreshable import should include account_user key: %v", keys)
-	}
-	if !codexTestHasIdentityKey(keys, "account_email:acct-1:same@example.com") {
-		t.Fatalf("refreshable import should include account_email key: %v", keys)
-	}
-}
-
-func TestCodexAccountIndexDoesNotMatchSameWorkspaceDifferentUser(t *testing.T) {
-	index := buildCodexAccountIndex([]service.Account{{
-		ID:   1,
-		Name: "existing-user-1",
+func TestCodexAccountIndexDoesNotMatchDifferentUsersInSameChatGPTAccount(t *testing.T) {
+	existing := service.Account{
+		ID: 10,
 		Credentials: map[string]any{
-			"chatgpt_account_id": "acct-1",
+			"chatgpt_account_id": "team-1",
 			"chatgpt_user_id":    "user-1",
-			"email":              "user1@example.com",
 			"access_token":       "token-1",
+			"refresh_token":      "refresh-1",
+		},
+	}
+	index := buildCodexAccountIndex([]service.Account{existing})
+
+	keys := buildCodexImportIdentityKeys("team-1", "user-2", "", "token-2", "refresh-2")
+	if got, _ := index.Find(keys, "user-2"); got != nil {
+		t.Fatalf("Find matched account ID %d for a different chatgpt_user_id in the same team", got.ID)
+	}
+
+	keys = buildCodexImportIdentityKeys("team-1", "user-1", "", "token-2", "refresh-2")
+	got, _ := index.Find(keys, "user-1")
+	if got == nil || got.ID != existing.ID {
+		t.Fatalf("Find by same chatgpt_user_id = %v, want account ID %d", got, existing.ID)
+	}
+}
+
+func TestCodexAccountIndexFallsBackToAccountKeyWhenRefreshTokenExistsAndUserIDMissing(t *testing.T) {
+	// 含 refresh_token 的常规导入沿用 a5638a4e 的兼容逻辑：存量账号缺少
+	// chatgpt_user_id 时，携带 user id 的重新导入仍可命中并回填。
+	legacy := service.Account{
+		ID: 20,
+		Credentials: map[string]any{
+			"chatgpt_account_id": "team-1",
+			"access_token":       "token-old",
+			"refresh_token":      "refresh-old",
+		},
+	}
+	index := buildCodexAccountIndex([]service.Account{legacy})
+
+	keys := buildCodexImportIdentityKeys("team-1", "user-1", "", "token-new", "refresh-new")
+	got, matchedKey := index.Find(keys, "user-1")
+	if got == nil || got.ID != legacy.ID {
+		t.Fatalf("Find legacy account without stored user id = %v, want account ID %d", got, legacy.ID)
+	}
+	if matchedKey != "account:team-1" {
+		t.Fatalf("matched key = %q, want account:team-1", matchedKey)
+	}
+
+	// 反向：含 refresh_token 的导入条目无法解析出 user id 时，仍应通过
+	// account 键命中已有账号，保持常规导入去重行为。
+	full := service.Account{
+		ID: 21,
+		Credentials: map[string]any{
+			"chatgpt_account_id": "team-2",
+			"chatgpt_user_id":    "user-9",
+			"access_token":       "token-old",
+			"refresh_token":      "refresh-old",
+		},
+	}
+	index = buildCodexAccountIndex([]service.Account{full})
+
+	keys = buildCodexImportIdentityKeys("team-2", "", "", "token-opaque", "refresh-new")
+	got, _ = index.Find(keys, "")
+	if got == nil || got.ID != full.ID {
+		t.Fatalf("Find by account key without entry user id = %v, want account ID %d", got, full.ID)
+	}
+}
+
+func TestCodexAccountIndexAccessTokenOnlyUsesTokenFingerprint(t *testing.T) {
+	existing := service.Account{
+		ID: 22,
+		Credentials: map[string]any{
+			"chatgpt_account_id": "team-1",
+			"chatgpt_user_id":    "user-1",
+			"access_token":       "token-old",
+		},
+	}
+	index := buildCodexAccountIndex([]service.Account{existing})
+
+	keys := buildCodexImportIdentityKeys("team-1", "user-1", "", "token-new", "")
+	if got, matchedKey := index.Find(keys, "user-1"); got != nil {
+		t.Fatalf("accessToken-only import matched by %q despite different token: account ID %d", matchedKey, got.ID)
+	}
+
+	keys = buildCodexImportIdentityKeys("team-1", "user-1", "", "token-old", "")
+	got, matchedKey := index.Find(keys, "user-1")
+	if got == nil || got.ID != existing.ID {
+		t.Fatalf("Find accessToken-only duplicate by fingerprint = %v, want account ID %d", got, existing.ID)
+	}
+	if !strings.HasPrefix(matchedKey, "access:") {
+		t.Fatalf("matched key = %q, want access fingerprint", matchedKey)
+	}
+}
+
+func TestCodexAccountIndexKeepsAllCandidatesForSharedAccountKey(t *testing.T) {
+	legacy := service.Account{
+		ID: 30,
+		Credentials: map[string]any{
+			"chatgpt_account_id": "team-1",
+			"access_token":       "token-legacy",
+			"refresh_token":      "refresh-legacy",
+		},
+	}
+	member := service.Account{
+		ID: 31,
+		Credentials: map[string]any{
+			"chatgpt_account_id": "team-1",
+			"chatgpt_user_id":    "user-2",
+			"access_token":       "token-member",
+			"refresh_token":      "refresh-member",
+		},
+	}
+
+	// 无论索引构建顺序如何，携带新 user id 的条目都应跳过 user-2 的账号，
+	// 命中缺少 user id 的存量账号，而不是因单一候选被遮蔽而落空。
+	for _, accounts := range [][]service.Account{
+		{member, legacy},
+		{legacy, member},
+	} {
+		index := buildCodexAccountIndex(accounts)
+
+		keys := buildCodexImportIdentityKeys("team-1", "user-1", "", "token-new", "refresh-new")
+		got, matchedKey := index.Find(keys, "user-1")
+		if got == nil || got.ID != legacy.ID {
+			t.Fatalf("Find with shared account key = %v, want legacy account ID %d", got, legacy.ID)
+		}
+		if matchedKey != "account:team-1" {
+			t.Fatalf("matched key = %q, want account:team-1", matchedKey)
+		}
+
+		keys = buildCodexImportIdentityKeys("team-1", "user-2", "", "token-new", "refresh-new")
+		got, matchedKey = index.Find(keys, "user-2")
+		if got == nil || got.ID != member.ID {
+			t.Fatalf("Find by user key = %v, want member account ID %d", got, member.ID)
+		}
+		if matchedKey != "user:user-2" {
+			t.Fatalf("matched key = %q, want user:user-2", matchedKey)
+		}
+	}
+}
+
+func TestCodexAccountIndexUpsertReplacesSameAccount(t *testing.T) {
+	legacy := service.Account{
+		ID: 40,
+		Credentials: map[string]any{
+			"chatgpt_account_id": "team-1",
+			"access_token":       "token-old",
+		},
+	}
+	index := buildCodexAccountIndex([]service.Account{legacy})
+
+	backfilled := service.Account{
+		ID: 40,
+		Credentials: map[string]any{
+			"chatgpt_account_id": "team-1",
+			"chatgpt_user_id":    "user-1",
+			"access_token":       "token-new",
+			"refresh_token":      "refresh-new",
+		},
+	}
+	index.Add(backfilled)
+
+	// 回填后同一账号在 account 键下应被原位替换而非残留旧副本：
+	// 其他成员的条目不应再通过旧副本（无 user id）命中该账号。
+	keys := buildCodexImportIdentityKeys("team-1", "user-2", "", "token-other", "refresh-other")
+	if got, matchedKey := index.Find(keys, "user-2"); got != nil {
+		t.Fatalf("stale candidate matched after upsert by %q: account ID %d", matchedKey, got.ID)
+	}
+
+	keys = buildCodexImportIdentityKeys("team-1", "user-1", "", "token-other", "refresh-other")
+	got, _ := index.Find(keys, "user-1")
+	if got == nil || got.ID != backfilled.ID {
+		t.Fatalf("Find after upsert = %v, want account ID %d", got, backfilled.ID)
+	}
+	if uid := codexCredentialString(got.Credentials, "chatgpt_user_id"); uid != "user-1" {
+		t.Fatalf("upsert did not replace credentials, chatgpt_user_id = %q", uid)
+	}
+}
+
+func TestCodexAccountIndexUpdateRemovesAllPreviousKeys(t *testing.T) {
+	legacy := service.Account{
+		ID: 50,
+		Credentials: map[string]any{
+			"chatgpt_account_id": "team-old",
+			"chatgpt_user_id":    "user-old",
+			"email":              "old@example.com",
+			"access_token":       "access-old",
+			"agent_runtime_id":   "runtime-old",
+		},
+	}
+	index := buildCodexAccountIndex([]service.Account{legacy})
+
+	updated := service.Account{
+		ID: 50,
+		Credentials: map[string]any{
+			"chatgpt_account_id": "team-new",
+			"chatgpt_user_id":    "user-new",
+			"email":              "new@example.com",
+			"access_token":       "access-new",
+			"agent_runtime_id":   "runtime-new",
+		},
+	}
+	index.Add(updated)
+
+	oldKeys := append(buildCodexStoredIdentityKeys("team-old", "user-old", "old@example.com", "access-old"), "agent:runtime-old")
+	for _, key := range oldKeys {
+		if got, matchedKey := index.Find([]string{key}, "user-old"); got != nil {
+			t.Fatalf("stale account matched by %q: account ID %d", matchedKey, got.ID)
+		}
+	}
+
+	newKeys := append(buildCodexStoredIdentityKeys("team-new", "user-new", "new@example.com", "access-new"), "agent:runtime-new")
+	for _, key := range newKeys {
+		got, matchedKey := index.Find([]string{key}, "user-new")
+		if got == nil || got.ID != updated.ID {
+			t.Fatalf("updated account not found by %q: account=%v matched=%q", key, got, matchedKey)
+		}
+	}
+}
+
+func TestCodexAccountIndexUpdatePreservesSharedKeyCandidateOrder(t *testing.T) {
+	first := service.Account{
+		ID: 60,
+		Credentials: map[string]any{
+			"chatgpt_account_id": "team-shared",
+			"access_token":       "access-first-old",
+		},
+	}
+	second := service.Account{
+		ID: 61,
+		Credentials: map[string]any{
+			"chatgpt_account_id": "team-shared",
+			"access_token":       "access-second",
+		},
+	}
+	index := buildCodexAccountIndex([]service.Account{first, second})
+
+	first.Credentials["access_token"] = "access-first-new"
+	index.Add(first)
+
+	got, matchedKey := index.Find([]string{"account:team-shared"}, "")
+	if got == nil || got.ID != first.ID {
+		t.Fatalf("shared key candidate order changed after update: account=%v matched=%q", got, matchedKey)
+	}
+}
+
+func TestCodexIdentitySeenDistinguishesTeamMembers(t *testing.T) {
+	seen := map[string]codexSeenIdentity{}
+	member1 := buildCodexImportIdentityKeys("team-1", "user-1", "", "token-1", "refresh-1")
+	markCodexIdentitySeen(seen, member1, 1, "user-1")
+
+	member2 := buildCodexImportIdentityKeys("team-1", "user-2", "", "token-2", "refresh-2")
+	if index, ok := firstSeenCodexIdentity(seen, member2, "user-2"); ok {
+		t.Fatalf("different team member treated as duplicate of entry %d", index)
+	}
+
+	again := buildCodexImportIdentityKeys("team-1", "user-1", "", "token-3", "refresh-3")
+	index, ok := firstSeenCodexIdentity(seen, again, "user-1")
+	if !ok || index != 1 {
+		t.Fatalf("same user re-entry dedup = (%d, %v), want (1, true)", index, ok)
+	}
+
+	// 无 user id 的条目不应因共享 account id 与已见团队成员互相去重；
+	// 只有相同 access token 指纹才视为重复。
+	opaque := buildCodexImportIdentityKeys("team-1", "", "", "token-4", "")
+	index, ok = firstSeenCodexIdentity(seen, opaque, "")
+	if ok {
+		t.Fatalf("entry without user id dedup = (%d, %v), want no match", index, ok)
+	}
+}
+
+func TestNormalizeCodexImportUsesJWTSubForAccessTokenOnlyIdentity(t *testing.T) {
+	accessToken := buildCodexImportTestJWT(t, time.Now().Add(time.Hour), map[string]any{
+		"sub": "user-from-access-token",
+		"https://api.openai.com/auth": map[string]any{
+			"chatgpt_account_id": "workspace-1",
+		},
+	})
+
+	item, err := normalizeCodexImportEntry(codexImportEntry{Index: 1, Value: accessToken})
+	if err != nil {
+		t.Fatalf("normalizeCodexImportEntry error = %v", err)
+	}
+	if item.UserID != "user-from-access-token" {
+		t.Fatalf("UserID = %q, want JWT sub", item.UserID)
+	}
+	if len(item.IdentityKeys) != 1 || !strings.HasPrefix(item.IdentityKeys[0], "access:") {
+		t.Fatalf("IdentityKeys = %v, want access fingerprint only for accessToken-only import", item.IdentityKeys)
+	}
+	if got := item.Credentials["chatgpt_user_id"]; got != "user-from-access-token" {
+		t.Fatalf("credential chatgpt_user_id = %v, want JWT sub", got)
+	}
+}
+
+func TestImportCodexSessionsAccessTokenOnlySameWorkspaceDifferentUsersCreatesTwoAccounts(t *testing.T) {
+	svc := newCodexImportMemoryAdminService(nil)
+	handler := NewAccountHandler(svc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	req := CodexSessionImportRequest{SkipDefaultGroupBind: boolPtr(true)}
+	entries := []codexImportEntry{
+		{Index: 1, Value: buildCodexAccessOnlyImportValue(t, "workspace-1", "user-1")},
+		{Index: 2, Value: buildCodexAccessOnlyImportValue(t, "workspace-1", "user-2")},
+	}
+
+	result, err := handler.importCodexSessions(context.Background(), req, entries)
+	if err != nil {
+		t.Fatalf("importCodexSessions error = %v", err)
+	}
+	if result.Created != 2 || result.Updated != 0 || result.Skipped != 0 || result.Failed != 0 {
+		t.Fatalf("result = %+v, want two created accounts", result)
+	}
+	if len(svc.createdAccounts) != 2 {
+		t.Fatalf("created accounts = %d, want 2", len(svc.createdAccounts))
+	}
+	if svc.createdAccounts[0].Credentials["chatgpt_user_id"] == svc.createdAccounts[1].Credentials["chatgpt_user_id"] {
+		t.Fatalf("created accounts share user id: %v", svc.createdAccounts)
+	}
+}
+
+func TestImportCodexSessionsAccessTokenOnlySameWorkspaceAndUserDifferentTokensCreatesTwoAccounts(t *testing.T) {
+	svc := newCodexImportMemoryAdminService(nil)
+	handler := NewAccountHandler(svc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	req := CodexSessionImportRequest{SkipDefaultGroupBind: boolPtr(true)}
+	entries := []codexImportEntry{
+		{Index: 1, Value: map[string]any{
+			"access_token": buildCodexImportTestJWT(t, time.Now().Add(time.Hour), map[string]any{
+				"sub": "shared-user",
+				"jti": "token-1",
+				"https://api.openai.com/auth": map[string]any{
+					"chatgpt_account_id": "workspace-1",
+				},
+			}),
+		}},
+		{Index: 2, Value: map[string]any{
+			"access_token": buildCodexImportTestJWT(t, time.Now().Add(time.Hour), map[string]any{
+				"sub": "shared-user",
+				"jti": "token-2",
+				"https://api.openai.com/auth": map[string]any{
+					"chatgpt_account_id": "workspace-1",
+				},
+			}),
+		}},
+	}
+
+	result, err := handler.importCodexSessions(context.Background(), req, entries)
+	if err != nil {
+		t.Fatalf("importCodexSessions error = %v", err)
+	}
+	if result.Created != 2 || result.Updated != 0 || result.Skipped != 0 || result.Failed != 0 {
+		t.Fatalf("result = %+v, want two created accounts", result)
+	}
+	if len(svc.createdAccounts) != 2 {
+		t.Fatalf("created accounts = %d, want 2", len(svc.createdAccounts))
+	}
+}
+
+func TestImportCodexSessionsAccessTokenOnlySameUserUpdatesExisting(t *testing.T) {
+	existingToken := buildCodexAccessToken(t, "workspace-1", "user-1", time.Now().Add(time.Hour))
+	svc := newCodexImportMemoryAdminService([]service.Account{{
+		ID:       10,
+		Name:     "existing",
+		Platform: service.PlatformOpenAI,
+		Type:     service.AccountTypeOAuth,
+		Credentials: map[string]any{
+			"chatgpt_account_id": "workspace-1",
+			"chatgpt_user_id":    "user-1",
+			"access_token":       existingToken,
+		},
+		Extra: map[string]any{"openai_long_context_billing_enabled": false},
+	}})
+	handler := NewAccountHandler(svc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	req := CodexSessionImportRequest{SkipDefaultGroupBind: boolPtr(true)}
+	entries := []codexImportEntry{
+		{Index: 1, Value: map[string]any{"access_token": existingToken}},
+	}
+
+	result, err := handler.importCodexSessions(context.Background(), req, entries)
+	if err != nil {
+		t.Fatalf("importCodexSessions error = %v", err)
+	}
+	if result.Created != 0 || result.Updated != 1 || result.Failed != 0 {
+		t.Fatalf("result = %+v, want one updated account", result)
+	}
+	if len(svc.createdAccounts) != 0 {
+		t.Fatalf("created accounts = %d, want 0", len(svc.createdAccounts))
+	}
+	if len(svc.updatedAccounts) != 1 || svc.updatedAccounts[0].id != 10 {
+		t.Fatalf("updated accounts = %+v, want account 10", svc.updatedAccounts)
+	}
+	if got := svc.updatedAccounts[0].input.Extra["openai_long_context_billing_enabled"]; got != false {
+		t.Fatalf("openai_long_context_billing_enabled = %v, want false", got)
+	}
+}
+
+func TestImportCodexSessionsUpgradesAccessTokenOnlyAccountWithRefreshToken(t *testing.T) {
+	oldToken := buildCodexAccessTokenWithJTI(t, "workspace-1", "user-1", "old-token", time.Now().Add(time.Hour))
+	newToken := buildCodexAccessTokenWithJTI(t, "workspace-1", "user-1", "new-token", time.Now().Add(time.Hour))
+	svc := newCodexImportMemoryAdminService([]service.Account{{
+		ID:       12,
+		Name:     "existing",
+		Platform: service.PlatformOpenAI,
+		Type:     service.AccountTypeOAuth,
+		Credentials: map[string]any{
+			"chatgpt_account_id": "workspace-1",
+			"chatgpt_user_id":    "user-1",
+			"access_token":       oldToken,
 		},
 	}})
+	handler := NewAccountHandler(svc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	req := CodexSessionImportRequest{SkipDefaultGroupBind: boolPtr(true)}
+	entries := []codexImportEntry{
+		{Index: 1, Value: map[string]any{
+			"access_token":  newToken,
+			"refresh_token": "refresh-new",
+		}},
+	}
 
-	keys := buildCodexIdentityKeys("acct-1", "user-2", "user2@example.com", "token-2")
-	if existing := index.Find(keys); existing != nil {
-		t.Fatalf("same workspace with different user matched account %d", existing.ID)
+	result, err := handler.importCodexSessions(context.Background(), req, entries)
+	if err != nil {
+		t.Fatalf("importCodexSessions error = %v", err)
+	}
+	if result.Created != 0 || result.Updated != 1 || result.Failed != 0 {
+		t.Fatalf("result = %+v, want one updated account", result)
+	}
+	if len(svc.updatedAccounts) != 1 || svc.updatedAccounts[0].id != 12 {
+		t.Fatalf("updated accounts = %+v, want account 12", svc.updatedAccounts)
+	}
+	if got := svc.updatedAccounts[0].input.Credentials["refresh_token"]; got != "refresh-new" {
+		t.Fatalf("updated refresh_token = %v, want refresh-new", got)
 	}
 }
 
-func TestCodexAccountIndexMatchesSameWorkspaceAndUser(t *testing.T) {
-	index := buildCodexAccountIndex([]service.Account{{
-		ID:   1,
-		Name: "existing-user-1",
+func TestImportCodexSessionsAccessTokenOnlyPreservesExistingRefreshToken(t *testing.T) {
+	existingToken := buildCodexAccessToken(t, "workspace-1", "user-1", time.Now().Add(time.Hour))
+	svc := newCodexImportMemoryAdminService([]service.Account{{
+		ID:       13,
+		Name:     "existing",
+		Platform: service.PlatformOpenAI,
+		Type:     service.AccountTypeOAuth,
 		Credentials: map[string]any{
-			"chatgpt_account_id": "acct-1",
+			"chatgpt_account_id": "workspace-1",
 			"chatgpt_user_id":    "user-1",
-			"email":              "user1@example.com",
-			"access_token":       "token-1",
+			"access_token":       existingToken,
+			"refresh_token":      "refresh-old",
+			"client_id":          "client-old",
 		},
 	}})
+	handler := NewAccountHandler(svc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	req := CodexSessionImportRequest{SkipDefaultGroupBind: boolPtr(true)}
+	entries := []codexImportEntry{
+		{Index: 1, Value: map[string]any{"access_token": existingToken}},
+	}
 
-	keys := buildCodexIdentityKeys("acct-1", "user-1", "other@example.com", "token-2")
-	existing := index.Find(keys)
-	if existing == nil || existing.ID != 1 {
-		t.Fatalf("same workspace and user should match account 1, got %#v", existing)
+	result, err := handler.importCodexSessions(context.Background(), req, entries)
+	if err != nil {
+		t.Fatalf("importCodexSessions error = %v", err)
+	}
+	if result.Created != 0 || result.Updated != 1 || result.Failed != 0 {
+		t.Fatalf("result = %+v, want one updated account", result)
+	}
+	update := svc.updatedAccounts[0].input
+	if got := update.Credentials["refresh_token"]; got != "refresh-old" {
+		t.Fatalf("refresh_token = %v, want refresh-old", got)
+	}
+	if got := update.Credentials["client_id"]; got != "client-old" {
+		t.Fatalf("client_id = %v, want client-old", got)
+	}
+	if update.ExpiresAt != nil {
+		t.Fatalf("ExpiresAt = %v, want nil to preserve OAuth account expiry", *update.ExpiresAt)
+	}
+	if update.AutoPauseOnExpired != nil {
+		t.Fatalf("AutoPauseOnExpired = %v, want nil to preserve OAuth account scheduling", *update.AutoPauseOnExpired)
 	}
 }
 
-func codexTestHasIdentityKey(keys []string, want string) bool {
-	for _, key := range keys {
-		if key == want {
-			return true
+func TestImportCodexSessionsBatchOldAccessTokenDoesNotRollbackRefreshToken(t *testing.T) {
+	oldToken := buildCodexAccessTokenWithJTI(t, "workspace-1", "user-1", "old-token", time.Now().Add(time.Hour))
+	newToken := buildCodexAccessTokenWithJTI(t, "workspace-1", "user-1", "new-token", time.Now().Add(time.Hour))
+	svc := newCodexImportMemoryAdminService([]service.Account{{
+		ID:       14,
+		Name:     "existing",
+		Platform: service.PlatformOpenAI,
+		Type:     service.AccountTypeOAuth,
+		Credentials: map[string]any{
+			"chatgpt_account_id": "workspace-1",
+			"chatgpt_user_id":    "user-1",
+			"access_token":       oldToken,
+			"refresh_token":      "refresh-old",
+		},
+	}})
+	handler := NewAccountHandler(svc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	req := CodexSessionImportRequest{SkipDefaultGroupBind: boolPtr(true)}
+	entries := []codexImportEntry{
+		{Index: 1, Value: map[string]any{
+			"access_token":  newToken,
+			"refresh_token": "refresh-new",
+		}},
+		{Index: 2, Value: map[string]any{"access_token": oldToken}},
+	}
+
+	result, err := handler.importCodexSessions(context.Background(), req, entries)
+	if err != nil {
+		t.Fatalf("importCodexSessions error = %v", err)
+	}
+	if result.Updated != 1 || result.Created != 1 || result.Failed != 0 {
+		t.Fatalf("result = %+v, want first item updated and stale access token created separately", result)
+	}
+	if len(svc.updatedAccounts) != 1 || svc.updatedAccounts[0].id != 14 {
+		t.Fatalf("updated accounts = %+v, want account 14 updated once", svc.updatedAccounts)
+	}
+	stored, err := svc.GetAccount(context.Background(), 14)
+	if err != nil {
+		t.Fatalf("GetAccount error = %v", err)
+	}
+	if got := stored.Credentials["access_token"]; got != newToken {
+		t.Fatalf("stored access_token rolled back = %v, want new token", got)
+	}
+	if got := stored.Credentials["refresh_token"]; got != "refresh-new" {
+		t.Fatalf("stored refresh_token = %v, want refresh-new", got)
+	}
+}
+
+func TestImportCodexSessionsWithRefreshTokenKeepsExistingDedup(t *testing.T) {
+	existingToken := buildCodexAccessToken(t, "workspace-1", "user-1", time.Now().Add(time.Hour))
+	svc := newCodexImportMemoryAdminService([]service.Account{{
+		ID:       11,
+		Name:     "existing",
+		Platform: service.PlatformOpenAI,
+		Type:     service.AccountTypeOAuth,
+		Credentials: map[string]any{
+			"chatgpt_account_id": "workspace-1",
+			"chatgpt_user_id":    "user-1",
+			"access_token":       existingToken,
+			"refresh_token":      "refresh-old",
+		},
+	}})
+	handler := NewAccountHandler(svc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	req := CodexSessionImportRequest{SkipDefaultGroupBind: boolPtr(true)}
+	entries := []codexImportEntry{
+		{Index: 1, Value: buildCodexRefreshImportValue(t, "workspace-1", "user-1", "refresh-new")},
+	}
+
+	result, err := handler.importCodexSessions(context.Background(), req, entries)
+	if err != nil {
+		t.Fatalf("importCodexSessions error = %v", err)
+	}
+	if result.Created != 0 || result.Updated != 1 || result.Failed != 0 {
+		t.Fatalf("result = %+v, want one updated account", result)
+	}
+	if got := svc.updatedAccounts[0].input.Credentials["refresh_token"]; got != "refresh-new" {
+		t.Fatalf("updated refresh_token = %v, want refresh-new", got)
+	}
+}
+
+type codexImportMemoryAdminService struct {
+	*stubAdminService
+	nextID          int64
+	updatedAccounts []struct {
+		id    int64
+		input *service.UpdateAccountInput
+	}
+}
+
+func newCodexImportMemoryAdminService(accounts []service.Account) *codexImportMemoryAdminService {
+	stub := newStubAdminService()
+	stub.accounts = append([]service.Account(nil), accounts...)
+	return &codexImportMemoryAdminService{
+		stubAdminService: stub,
+		nextID:           100,
+	}
+}
+
+func (s *codexImportMemoryAdminService) CreateAccount(ctx context.Context, input *service.CreateAccountInput) (*service.Account, error) {
+	s.createdAccounts = append(s.createdAccounts, input)
+	if s.createAccountErr != nil {
+		return nil, s.createAccountErr
+	}
+	account := service.Account{
+		ID:          s.nextID,
+		Name:        input.Name,
+		Platform:    input.Platform,
+		Type:        input.Type,
+		Status:      service.StatusActive,
+		Credentials: cloneCodexImportTestMap(input.Credentials),
+		Extra:       cloneCodexImportTestMap(input.Extra),
+	}
+	s.nextID++
+	s.accounts = append(s.accounts, account)
+	return &account, nil
+}
+
+func (s *codexImportMemoryAdminService) UpdateAccount(ctx context.Context, id int64, input *service.UpdateAccountInput) (*service.Account, error) {
+	s.updatedAccounts = append(s.updatedAccounts, struct {
+		id    int64
+		input *service.UpdateAccountInput
+	}{id: id, input: input})
+	if s.updateAccountErr != nil {
+		return nil, s.updateAccountErr
+	}
+	for idx := range s.accounts {
+		if s.accounts[idx].ID == id {
+			s.accounts[idx].Credentials = cloneCodexImportTestMap(input.Credentials)
+			s.accounts[idx].Extra = cloneCodexImportTestMap(input.Extra)
+			return &s.accounts[idx], nil
 		}
 	}
-	return false
+	account := service.Account{ID: id, Status: service.StatusActive, Credentials: cloneCodexImportTestMap(input.Credentials)}
+	return &account, nil
 }
 
-func TestNormalizeCodexImportPersonalAccessTokenStoresPATMetadataAndFedRAMP(t *testing.T) {
-	raw := map[string]any{
-		"personalAccessToken": "pat-token",
-		"email":               "pat@example.com",
-		"chatgptAccountId":    "acct-pat",
-		"chatgptUserId":       "user-pat",
-		"chatgptPlanType":     "team",
-		"account": map[string]any{
-			"isFedramp": true,
-		},
-	}
-
-	item, err := normalizeCodexImportEntry(codexImportEntry{Index: 1, Value: raw})
-	if err != nil {
-		t.Fatalf("normalizeCodexImportEntry error = %v", err)
-	}
-	if item.Credentials["personal_access_token"] != "pat-token" {
-		t.Fatalf("personal_access_token = %v, want pat-token", item.Credentials["personal_access_token"])
-	}
-	if _, ok := item.Credentials["access_token"]; ok {
-		t.Fatalf("access_token should not be stored for PAT import")
-	}
-	if item.Credentials["email"] != "pat@example.com" {
-		t.Fatalf("email = %v, want pat@example.com", item.Credentials["email"])
-	}
-	if item.Credentials["chatgpt_account_id"] != "acct-pat" {
-		t.Fatalf("chatgpt_account_id = %v, want acct-pat", item.Credentials["chatgpt_account_id"])
-	}
-	if item.Credentials["chatgpt_user_id"] != "user-pat" {
-		t.Fatalf("chatgpt_user_id = %v, want user-pat", item.Credentials["chatgpt_user_id"])
-	}
-	if item.Credentials["plan_type"] != "team" {
-		t.Fatalf("plan_type = %v, want team", item.Credentials["plan_type"])
-	}
-	if item.Credentials["chatgpt_account_is_fedramp"] != true {
-		t.Fatalf("chatgpt_account_is_fedramp = %v, want true", item.Credentials["chatgpt_account_is_fedramp"])
-	}
-	if _, ok := item.Extra["personal_access_token_sha256"]; ok {
-		t.Fatalf("personal_access_token_sha256 should not be recorded for PAT import")
-	}
-	if _, ok := item.Extra["access_token_sha256"]; ok {
-		t.Fatalf("access_token_sha256 should not be recorded for PAT import")
-	}
-	if item.TokenExpiresAt != nil {
-		t.Fatalf("TokenExpiresAt = %v, want nil for PAT import", item.TokenExpiresAt)
-	}
-}
-
-func TestSanitizeCodexImportCredentialExtrasProtectsHydratedAuthMetadata(t *testing.T) {
-	credentials := service.ApplyOpenAIPersonalAccessTokenMetadata(map[string]any{
-		"auth_mode":        "personal_access_token",
-		"openai_auth_mode": "codex_pat",
-		"token_type":       "Bearer",
-	}, "at-server", &service.OpenAIPersonalAccessTokenMetadata{
-		Email:                   "server@example.com",
-		ChatGPTUserID:           "user-server",
-		ChatGPTAccountID:        "acct-server",
-		ChatGPTPlanType:         "team",
-		ChatGPTAccountIsFedRAMP: true,
-	})
-	extras := sanitizeCodexImportCredentialExtras(map[string]any{
-		"auth_mode":                   "oauth",
-		"openai_auth_mode":            "oauth",
-		"token_type":                  "service_account",
-		"chatgpt_account_is_fedramp":  false,
-		"chatgpt_plan_type":           "free",
-		"plan_type":                   "free",
-		"custom_passthrough_metadata": "kept",
-	})
-
-	merged := mergeCodexImportMap(credentials, extras)
-
-	if merged["auth_mode"] != "personal_access_token" {
-		t.Fatalf("auth_mode = %v, want personal_access_token", merged["auth_mode"])
-	}
-	if merged["openai_auth_mode"] != "codex_pat" {
-		t.Fatalf("openai_auth_mode = %v, want codex_pat", merged["openai_auth_mode"])
-	}
-	if merged["token_type"] != "Bearer" {
-		t.Fatalf("token_type = %v, want Bearer", merged["token_type"])
-	}
-	if merged["chatgpt_account_is_fedramp"] != true {
-		t.Fatalf("chatgpt_account_is_fedramp = %v, want true", merged["chatgpt_account_is_fedramp"])
-	}
-	if merged["chatgpt_plan_type"] != "team" {
-		t.Fatalf("chatgpt_plan_type = %v, want team", merged["chatgpt_plan_type"])
-	}
-	if merged["plan_type"] != "team" {
-		t.Fatalf("plan_type = %v, want team", merged["plan_type"])
-	}
-	if merged["custom_passthrough_metadata"] != "kept" {
-		t.Fatalf("custom_passthrough_metadata = %v, want kept", merged["custom_passthrough_metadata"])
-	}
-}
-
-func TestNormalizeCodexImportPersonalAccessTokenIgnoresExpiredAccessToken(t *testing.T) {
-	raw := map[string]any{
-		"personal_access_token": "pat-token",
-		"accessToken":           buildCodexImportTestJWT(t, time.Now().Add(-time.Hour), nil),
-		"expiresAt":             time.Now().Add(-time.Hour).UTC().Format(time.RFC3339),
-	}
-
-	item, err := normalizeCodexImportEntry(codexImportEntry{Index: 1, Value: raw})
-	if err != nil {
-		t.Fatalf("normalizeCodexImportEntry error = %v", err)
-	}
-	if item.Credentials["personal_access_token"] != "pat-token" {
-		t.Fatalf("personal_access_token = %v, want pat-token", item.Credentials["personal_access_token"])
-	}
-	if _, ok := item.Credentials["access_token"]; ok {
-		t.Fatalf("expired access_token should be ignored for PAT import")
-	}
-	if _, ok := item.Credentials["expires_at"]; ok {
-		t.Fatalf("expires_at should be ignored for PAT import")
-	}
-}
-
-func TestMergeCodexImportExtraStripsInternalHCPAFields(t *testing.T) {
-	extra := mergeCodexImportExtra(
-		map[string]any{
-			"existing":             "value",
-			"hcpa_disabled":        true,
-			"hcpa_expired_at":      "2026-01-01T00:00:00Z",
-			"hcpa_last_refresh_at": "2026-01-01T00:00:00Z",
-		},
-		map[string]any{
-			"keep":                 "value",
-			"import_source":        "hcpa",
-			"import_format":        "hcpa",
-			"imported_at":          "2026-06-23T14:06:08+08:00",
-			"hcpa_disabled":        false,
-			"hcpa_expired_at":      "2026-12-31T10:00:00+08:00",
-			"hcpa_last_refresh_at": "2026-06-23T14:06:08+08:00",
-		},
-	)
-
-	if extra["existing"] != "value" {
-		t.Fatalf("existing = %v, want value", extra["existing"])
-	}
-	if extra["keep"] != "value" {
-		t.Fatalf("keep = %v, want value", extra["keep"])
-	}
-	for _, key := range internalHCPAAccountExtraKeys() {
-		if _, ok := extra[key]; ok {
-			t.Fatalf("internal HCPA import field %q should not be retained in Extra: %v", key, extra)
+func (s *codexImportMemoryAdminService) GetAccount(ctx context.Context, id int64) (*service.Account, error) {
+	for idx := range s.accounts {
+		if s.accounts[idx].ID == id {
+			return &s.accounts[idx], nil
 		}
 	}
+	return s.stubAdminService.GetAccount(ctx, id)
 }
 
-func TestNormalizeCodexImportHCPAFormatExtractsAllFields(t *testing.T) {
-	accountExpiry := time.Now().Add(24 * time.Hour).UTC().Truncate(time.Second)
-	lastRefresh := time.Now().Add(-time.Hour).UTC().Truncate(time.Second)
-	raw := map[string]any{
-		"at":           "hcpa-access-token",
-		"rt":           "hcpa-refresh-token",
-		"id_token":     "hcpa-id-token",
-		"account_id":   "acct-hcpa",
-		"email":        "hcpa@example.com",
-		"expired":      accountExpiry.Format(time.RFC3339),
-		"disabled":     true,
-		"last_refresh": lastRefresh.Format(time.RFC3339),
-		"type":         "codex",
-		"headers": map[string]any{
-			"Authorization": "Bearer hcpa-pat-token",
+func buildCodexAccessOnlyImportValue(t *testing.T, accountID, userID string) map[string]any {
+	t.Helper()
+	return map[string]any{
+		"access_token": buildCodexAccessToken(t, accountID, userID, time.Now().Add(time.Hour)),
+	}
+}
+
+func buildCodexRefreshImportValue(t *testing.T, accountID, userID, refreshToken string) map[string]any {
+	t.Helper()
+	return map[string]any{
+		"access_token":  buildCodexAccessToken(t, accountID, userID, time.Now().Add(time.Hour)),
+		"refresh_token": refreshToken,
+	}
+}
+
+func buildCodexAccessToken(t *testing.T, accountID, userID string, exp time.Time) string {
+	t.Helper()
+	return buildCodexAccessTokenWithJTI(t, accountID, userID, "", exp)
+}
+
+func buildCodexAccessTokenWithJTI(t *testing.T, accountID, userID, jti string, exp time.Time) string {
+	t.Helper()
+	claims := map[string]any{
+		"sub": userID,
+		"https://api.openai.com/auth": map[string]any{
+			"chatgpt_account_id": accountID,
 		},
 	}
-
-	item, err := normalizeCodexImportEntry(codexImportEntry{Index: 1, Value: raw})
-	if err != nil {
-		t.Fatalf("normalizeCodexImportEntry error = %v", err)
+	if jti != "" {
+		claims["jti"] = jti
 	}
-	if item.ImportFormat != codexImportFormatHCPA {
-		t.Fatalf("ImportFormat = %q, want %q", item.ImportFormat, codexImportFormatHCPA)
-	}
-	if item.Credentials["personal_access_token"] != "hcpa-pat-token" {
-		t.Fatalf("personal_access_token = %v, want hcpa-pat-token", item.Credentials["personal_access_token"])
-	}
-	if item.Credentials["access_token"] != "hcpa-access-token" {
-		t.Fatalf("access_token = %v, want hcpa-access-token", item.Credentials["access_token"])
-	}
-	if item.Credentials["refresh_token"] != "hcpa-refresh-token" {
-		t.Fatalf("refresh_token = %v, want hcpa-refresh-token", item.Credentials["refresh_token"])
-	}
-	if item.Credentials["id_token"] != "hcpa-id-token" {
-		t.Fatalf("id_token = %v, want hcpa-id-token", item.Credentials["id_token"])
-	}
-	if item.Credentials["client_id"] == "" {
-		t.Fatalf("client_id should be stored when HCPA rt is present")
-	}
-	if item.Credentials["chatgpt_account_id"] != "acct-hcpa" {
-		t.Fatalf("chatgpt_account_id = %v, want acct-hcpa", item.Credentials["chatgpt_account_id"])
-	}
-	if item.Credentials["email"] != "hcpa@example.com" {
-		t.Fatalf("email = %v, want hcpa@example.com", item.Credentials["email"])
-	}
-	if item.Status != "disabled" {
-		t.Fatalf("Status = %q, want disabled", item.Status)
-	}
-	if item.AccountExpiresAt == nil || item.AccountExpiresAt.Unix() != accountExpiry.Unix() {
-		t.Fatalf("AccountExpiresAt = %v, want %s", item.AccountExpiresAt, accountExpiry)
-	}
-	for _, key := range []string{"import_source", "import_format", "imported_at", "hcpa_disabled", "hcpa_expired_at", "hcpa_last_refresh_at"} {
-		if _, ok := item.Extra[key]; ok {
-			t.Fatalf("internal HCPA import field %q should not be stored in Extra: %v", key, item.Extra)
-		}
-	}
-	if _, ok := item.Extra["personal_access_token_sha256"]; ok {
-		t.Fatalf("personal_access_token_sha256 should not be recorded for HCPA PAT import")
-	}
-	if _, ok := item.Extra["access_token_sha256"]; ok {
-		t.Fatalf("access_token_sha256 should not be recorded for HCPA PAT import")
-	}
-
-	accountExpiresAt, credentialExpiresAt, _, _, err := resolveCodexImportExpiry(CodexSessionImportRequest{}, item)
-	if err != nil {
-		t.Fatalf("resolveCodexImportExpiry error = %v", err)
-	}
-	if accountExpiresAt == nil || *accountExpiresAt != accountExpiry.Unix() {
-		t.Fatalf("account expires_at = %v, want %d", accountExpiresAt, accountExpiry.Unix())
-	}
-	if credentialExpiresAt != nil {
-		t.Fatalf("credential expires_at = %v, want nil for opaque HCPA at", credentialExpiresAt)
-	}
+	return buildCodexImportTestJWT(t, exp, claims)
 }
 
-func TestResolveCodexImportExpiryForPersonalAccessTokenDoesNotRequireExpiry(t *testing.T) {
-	item := &codexImportAccount{
-		PersonalAccessToken: "pat-token",
-		Credentials:         map[string]any{"personal_access_token": "pat-token"},
-		WarningTexts:        []string{},
+func cloneCodexImportTestMap(input map[string]any) map[string]any {
+	if input == nil {
+		return nil
 	}
-
-	accountExpiresAt, credentialExpiresAt, autoPause, warnings, err := resolveCodexImportExpiry(CodexSessionImportRequest{}, item)
-	if err != nil {
-		t.Fatalf("resolveCodexImportExpiry error = %v", err)
+	out := make(map[string]any, len(input))
+	for key, value := range input {
+		out[key] = value
 	}
-	if accountExpiresAt != nil || credentialExpiresAt != nil || autoPause != nil {
-		t.Fatalf("PAT without requested expiry should not force expiry: account=%v credential=%v auto=%v", accountExpiresAt, credentialExpiresAt, autoPause)
-	}
-	if len(warnings) != 0 {
-		t.Fatalf("warnings = %v, want none", warnings)
-	}
-
-	requestExpiresAt := time.Now().Add(time.Hour).UTC().Unix()
-	autoPauseInput := false
-	accountExpiresAt, credentialExpiresAt, autoPause, _, err = resolveCodexImportExpiry(CodexSessionImportRequest{
-		ExpiresAt:          &requestExpiresAt,
-		AutoPauseOnExpired: &autoPauseInput,
-	}, item)
-	if err != nil {
-		t.Fatalf("resolveCodexImportExpiry with request expiry error = %v", err)
-	}
-	if accountExpiresAt == nil || *accountExpiresAt != requestExpiresAt {
-		t.Fatalf("account expires_at = %v, want %d", accountExpiresAt, requestExpiresAt)
-	}
-	if credentialExpiresAt != nil {
-		t.Fatalf("credential expires_at = %v, want nil for PAT", credentialExpiresAt)
-	}
-	if autoPause == nil || *autoPause != false {
-		t.Fatalf("autoPause = %v, want false", autoPause)
-	}
+	return out
 }
 
-func TestMergeCodexImportCredentialsPersonalAccessTokenClearsStaleOAuthFields(t *testing.T) {
-	existing := map[string]any{
-		"access_token":       "old-access-token",
-		"refresh_token":      "old-refresh-token",
-		"client_id":          "old-client-id",
-		"id_token":           "old-id-token",
-		"expires_at":         "2026-08-05T13:40:42Z",
-		"unrelated_existing": "keep",
-	}
-	incoming := map[string]any{
-		"personal_access_token": "pat-new",
-		"chatgpt_account_id":    "acct-new",
-	}
-	item := &codexImportAccount{PersonalAccessToken: "pat-new"}
-
-	merged := mergeCodexImportCredentials(existing, incoming, item)
-
-	if merged["personal_access_token"] != "pat-new" {
-		t.Fatalf("personal_access_token = %v, want pat-new", merged["personal_access_token"])
-	}
-	for _, key := range []string{"access_token", "refresh_token", "client_id", "id_token", "expires_at"} {
-		if _, ok := merged[key]; ok {
-			t.Fatalf("%s should be cleared on PAT import", key)
-		}
-	}
-	if merged["unrelated_existing"] != "keep" {
-		t.Fatalf("unrelated_existing = %v, want keep", merged["unrelated_existing"])
-	}
-}
-
-func TestMergeCodexImportCredentialsMissingPersonalAccessTokenPreservesExistingPAT(t *testing.T) {
-	existing := map[string]any{
-		"personal_access_token": "pat-existing",
-		"access_token":          "old-access-token",
-		"refresh_token":         "old-refresh-token",
-		"client_id":             "old-client-id",
-	}
-	incoming := map[string]any{
-		"access_token": "new-access-token",
-		"expires_at":   "2026-08-05T13:40:42Z",
-	}
-	item := &codexImportAccount{AccessToken: "new-access-token"}
-
-	merged := mergeCodexImportCredentials(existing, incoming, item)
-
-	if merged["personal_access_token"] != "pat-existing" {
-		t.Fatalf("personal_access_token = %v, want preserved PAT", merged["personal_access_token"])
-	}
-	if merged["access_token"] != "new-access-token" {
-		t.Fatalf("access_token = %v, want new-access-token", merged["access_token"])
-	}
-	if _, ok := merged["refresh_token"]; ok {
-		t.Fatalf("refresh_token should be cleared when incoming has no refresh token")
-	}
-	if _, ok := merged["client_id"]; ok {
-		t.Fatalf("client_id should be cleared when incoming has no refresh token")
-	}
+func boolPtr(v bool) *bool {
+	return &v
 }
 
 func buildCodexImportTestJWT(t *testing.T, exp time.Time, extraClaims map[string]any) string {

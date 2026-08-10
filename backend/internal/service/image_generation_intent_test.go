@@ -43,6 +43,20 @@ func TestIsImageGenerationIntent(t *testing.T) {
 			want:     true,
 		},
 		{
+			name:     "namespace image_gen tool choice",
+			endpoint: "/v1/responses",
+			model:    "gpt-5.5",
+			body:     []byte(`{"model":"gpt-5.5","tool_choice":{"type":"namespace","name":"image_gen"}}`),
+			want:     true,
+		},
+		{
+			name:     "custom imagegen function tool choice is not image intent",
+			endpoint: "/v1/responses",
+			model:    "gpt-5.5",
+			body:     []byte(`{"model":"gpt-5.5","tool_choice":{"function":{"name":"imagegen"}}}`),
+			want:     false,
+		},
+		{
 			name:     "required tool choice alone is text",
 			endpoint: "/v1/responses",
 			model:    "gpt-5.4",
@@ -57,28 +71,28 @@ func TestIsImageGenerationIntent(t *testing.T) {
 			want:     false,
 		},
 		{
-			name:     "codex image_gen namespace top level tool",
+			name:     "namespace image_gen tool in top-level tools",
 			endpoint: "/v1/responses",
 			model:    "gpt-5.5",
 			body:     []byte(`{"model":"gpt-5.5","tools":[{"type":"namespace","name":"image_gen","tools":[{"type":"function","name":"imagegen"}]}]}`),
 			want:     true,
 		},
 		{
-			name:     "codex image_gen namespace additional tools",
+			name:     "custom namespace with nested imagegen function is not image intent",
+			endpoint: "/v1/responses",
+			model:    "gpt-5.5",
+			body:     []byte(`{"model":"gpt-5.5","tools":[{"type":"namespace","name":"media_tools","tools":[{"type":"function","name":"imagegen"}]}]}`),
+			want:     false,
+		},
+		{
+			name:     "namespace image_gen in input additional_tools (Responses Lite)",
 			endpoint: "/v1/responses",
 			model:    "gpt-5.5",
 			body:     []byte(`{"model":"gpt-5.5","input":[{"type":"additional_tools","role":"developer","tools":[{"type":"namespace","name":"image_gen","tools":[{"type":"function","name":"imagegen"}]}]}]}`),
 			want:     true,
 		},
 		{
-			name:     "native image_generation additional tools",
-			endpoint: "/v1/responses",
-			model:    "gpt-5.5",
-			body:     []byte(`{"model":"gpt-5.5","input":[{"type":"additional_tools","role":"developer","tools":[{"type":"image_generation","output_format":"png"}]}]}`),
-			want:     true,
-		},
-		{
-			name:     "non image namespace remains text intent",
+			name:     "non-image namespace tool is not flagged",
 			endpoint: "/v1/responses",
 			model:    "gpt-5.5",
 			body:     []byte(`{"model":"gpt-5.5","tools":[{"type":"namespace","name":"code_tools","tools":[{"type":"function","name":"run"}]}]}`),
@@ -93,45 +107,97 @@ func TestIsImageGenerationIntent(t *testing.T) {
 	}
 }
 
-func TestOpenAIRequestBodyMayContainAdditionalImageTooling(t *testing.T) {
-	textOnlyInput := []byte(`{"model":"gpt-5.5","input":[{"type":"message","content":[{"type":"input_text","text":"write a long plain text answer"}]}]}`)
-	require.False(t, openAIRequestBodyMayContainAdditionalImageTooling(textOnlyInput))
+func TestIsImageGenerationIntentJSONSemantics(t *testing.T) {
+	largeInput := strings.Repeat("x", 1<<20)
+	tests := []struct {
+		name     string
+		endpoint string
+		body     []byte
+		want     bool
+	}{
+		{
+			name:     "chat body image model",
+			endpoint: "/v1/chat/completions",
+			body:     []byte(`{"model":"gpt-image-2"}`),
+			want:     true,
+		},
+		{
+			name:     "large responses input with trailing namespace tool choice",
+			endpoint: "/v1/responses",
+			body:     []byte(`{"model":"gpt-5.5","input":"` + largeInput + `","tool_choice":{"type":"namespace","name":"image_gen"}}`),
+			want:     true,
+		},
+		{
+			name:     "invalid json with image tool",
+			endpoint: "/v1/responses",
+			body:     []byte(`{"tools":[{"type":"image_generation"}]`),
+			want:     false,
+		},
+		{
+			name:     "duplicate model uses first value",
+			endpoint: "/v1/responses",
+			body:     []byte(`{"model":"gpt-5.5","model":"gpt-image-2"}`),
+			want:     false,
+		},
+		{
+			name:     "duplicate null model still uses first value",
+			endpoint: "/v1/responses",
+			body:     []byte(`{"model":null,"model":"gpt-image-2"}`),
+			want:     false,
+		},
+		{
+			name:     "duplicate tools uses first value",
+			endpoint: "/v1/responses",
+			body:     []byte(`{"tools":[],"tools":[{"type":"image_generation"}]}`),
+			want:     false,
+		},
+		{
+			name:     "duplicate input uses first value",
+			endpoint: "/v1/responses",
+			body:     []byte(`{"input":[],"input":[{"type":"additional_tools","tools":[{"type":"namespace","name":"image_gen"}]}]}`),
+			want:     false,
+		},
+		{
+			name:     "duplicate tool choice uses first value",
+			endpoint: "/v1/responses",
+			body:     []byte(`{"tool_choice":"required","tool_choice":{"type":"image_generation"}}`),
+			want:     false,
+		},
+		{
+			name:     "escaped top level key",
+			endpoint: "/v1/responses",
+			body:     []byte(`{"tool_\u0063hoice":{"type":"image_generation"}}`),
+			want:     true,
+		},
+	}
 
-	largeTextOnlyInput := []byte(`{"model":"gpt-5.5","input":[{"type":"message","content":[{"type":"input_text","text":"` + strings.Repeat("ordinary text ", 20000) + `"}]}]}`)
-	require.False(t, openAIRequestBodyMayContainAdditionalImageTooling(largeTextOnlyInput))
-
-	require.True(t, openAIRequestBodyMayContainAdditionalImageTooling(
-		[]byte(`{"input":[{"type":"additional_tools","tools":[{"type":"image_generation"}]}]}`),
-	))
-	require.True(t, openAIRequestBodyMayContainAdditionalImageTooling(
-		[]byte(`{"input":[{"type":"additional_tools","tools":[{"type":"namespace","name":"image_gen"}]}]}`),
-	))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, IsImageGenerationIntent(tt.endpoint, "gpt-5.5", tt.body))
+		})
+	}
 }
 
-func TestIsImageGenerationIntentMapDetectsCodexImageGenNamespace(t *testing.T) {
+func TestIsImageGenerationIntentMap_NamespaceImageGen(t *testing.T) {
 	tests := []struct {
 		name    string
 		reqBody map[string]any
 		want    bool
 	}{
 		{
-			name: "top level namespace",
+			name: "top-level namespace image_gen",
 			reqBody: map[string]any{
 				"model": "gpt-5.5",
 				"tools": []any{
-					map[string]any{
-						"type": "namespace",
-						"name": "image_gen",
-						"tools": []any{
-							map[string]any{"type": "function", "name": "imagegen"},
-						},
-					},
+					map[string]any{"type": "namespace", "name": "image_gen", "tools": []any{
+						map[string]any{"type": "function", "name": "imagegen"},
+					}},
 				},
 			},
 			want: true,
 		},
 		{
-			name: "additional tools namespace",
+			name: "additional_tools in input",
 			reqBody: map[string]any{
 				"model": "gpt-5.5",
 				"input": []any{
@@ -146,7 +212,41 @@ func TestIsImageGenerationIntentMapDetectsCodexImageGenNamespace(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "non image namespace",
+			name: "custom namespace with nested imagegen function is not image intent",
+			reqBody: map[string]any{
+				"model": "gpt-5.5",
+				"tools": []any{
+					map[string]any{
+						"type": "namespace",
+						"name": "media_tools",
+						"tools": []any{
+							map[string]any{"type": "function", "name": "imagegen"},
+						},
+					},
+				},
+			},
+			want: false,
+		},
+		{
+			name: "namespace image_gen tool choice",
+			reqBody: map[string]any{
+				"model":       "gpt-5.5",
+				"tool_choice": map[string]any{"type": "namespace", "name": "image_gen"},
+			},
+			want: true,
+		},
+		{
+			name: "custom imagegen function tool choice is not image intent",
+			reqBody: map[string]any{
+				"model": "gpt-5.5",
+				"tool_choice": map[string]any{
+					"function": map[string]any{"name": "imagegen"},
+				},
+			},
+			want: false,
+		},
+		{
+			name: "non-image namespace not flagged",
 			reqBody: map[string]any{
 				"model": "gpt-5.5",
 				"tools": []any{
@@ -182,96 +282,6 @@ func TestResolveOpenAIResponsesImageBillingConfigToolModelWins(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "gpt-image-2", imageModel)
 	require.Equal(t, "2K", imageSize)
-}
-
-func TestResolveOpenAIResponsesImageBillingConfigNamespaceDefaultsToImageModel(t *testing.T) {
-	cfg, err := resolveOpenAIResponsesImageBillingConfigDetailedFromBody(
-		[]byte(`{"model":"mapped-text-model","tools":[{"type":"namespace","name":"image_gen","tools":[{"type":"function","name":"imagegen"}]}]}`),
-		"requested-model",
-	)
-	require.NoError(t, err)
-	require.Equal(t, "gpt-image-2", cfg.Model)
-	require.Equal(t, "2K", cfg.SizeTier)
-	require.Equal(t, "", cfg.InputSize)
-}
-
-func TestResolveOpenAIResponsesImageBillingConfigNestedNamespaceDefaultsToImageModel(t *testing.T) {
-	cfg, err := resolveOpenAIResponsesImageBillingConfigDetailedFromBody(
-		[]byte(`{"model":"mapped-text-model","input":[{"type":"message","content":"draw"},{"type":"additional_tools","tools":[{"type":"namespace","name":"image_gen","tools":[{"type":"function","name":"imagegen"}]}]}]}`),
-		"requested-model",
-	)
-	require.NoError(t, err)
-	require.Equal(t, "gpt-image-2", cfg.Model)
-	require.Equal(t, "2K", cfg.SizeTier)
-	require.Equal(t, "", cfg.InputSize)
-}
-
-func TestResolveOpenAIResponsesImageBillingConfigNamespaceDefaultsToImageModelMap(t *testing.T) {
-	cfg, err := resolveOpenAIResponsesImageBillingConfigDetailed(map[string]any{
-		"model": "mapped-text-model",
-		"tools": []any{
-			map[string]any{
-				"type": "namespace",
-				"name": "image_gen",
-				"tools": []any{
-					map[string]any{"type": "function", "name": "imagegen"},
-				},
-			},
-		},
-	}, "requested-model")
-	require.NoError(t, err)
-	require.Equal(t, "gpt-image-2", cfg.Model)
-	require.Equal(t, "2K", cfg.SizeTier)
-	require.Equal(t, "", cfg.InputSize)
-}
-
-func TestResolveOpenAIResponsesImageBillingConfigNestedNamespaceDefaultsToImageModelMap(t *testing.T) {
-	cfg, err := resolveOpenAIResponsesImageBillingConfigDetailed(map[string]any{
-		"model": "mapped-text-model",
-		"input": []any{
-			map[string]any{"type": "message", "content": "draw"},
-			map[string]any{
-				"type": "additional_tools",
-				"tools": []any{
-					map[string]any{"type": "namespace", "name": "image_gen"},
-				},
-			},
-		},
-	}, "requested-model")
-	require.NoError(t, err)
-	require.Equal(t, "gpt-image-2", cfg.Model)
-	require.Equal(t, "2K", cfg.SizeTier)
-	require.Equal(t, "", cfg.InputSize)
-}
-
-func TestResolveOpenAIResponsesImageBillingConfigNestedAdditionalToolModelWins(t *testing.T) {
-	cfg, err := resolveOpenAIResponsesImageBillingConfigDetailedFromBody(
-		[]byte(`{"model":"mapped-text-model","input":[{"type":"message","content":"draw"},{"type":"additional_tools","tools":[{"type":"image_generation","model":"gpt-image-2","size":"3840x2160"}]}]}`),
-		"requested-model",
-	)
-	require.NoError(t, err)
-	require.Equal(t, "gpt-image-2", cfg.Model)
-	require.Equal(t, "4K", cfg.SizeTier)
-	require.Equal(t, "3840x2160", cfg.InputSize)
-}
-
-func TestResolveOpenAIResponsesImageBillingConfigNestedAdditionalToolModelWinsMap(t *testing.T) {
-	cfg, err := resolveOpenAIResponsesImageBillingConfigDetailed(map[string]any{
-		"model": "mapped-text-model",
-		"input": []any{
-			map[string]any{"type": "message", "content": "draw"},
-			map[string]any{
-				"type": "additional_tools",
-				"tools": []any{
-					map[string]any{"type": "image_generation", "model": "gpt-image-2", "size": "2048x1152"},
-				},
-			},
-		},
-	}, "requested-model")
-	require.NoError(t, err)
-	require.Equal(t, "gpt-image-2", cfg.Model)
-	require.Equal(t, "2K", cfg.SizeTier)
-	require.Equal(t, "2048x1152", cfg.InputSize)
 }
 
 func TestResolveOpenAIResponsesImageBillingConfigFromBodyIgnoresUnrelatedLargeInput(t *testing.T) {

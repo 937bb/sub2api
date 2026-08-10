@@ -30,8 +30,8 @@ func (a *Account) GetAnthropicAPIKeyAuthScheme() string {
 
 func setAnthropicAPIKeyAuthHeader(header http.Header, account *Account, token string) {
 	if account.GetAnthropicAPIKeyAuthScheme() == AnthropicAPIKeyAuthSchemeAuthorizationBearer {
-		setHeaderRaw(header, "authorization", "Bearer "+token)
+		header.Set("Authorization", "Bearer "+token)
 		return
 	}
-	setHeaderRaw(header, "x-api-key", token)
+	header.Set("x-api-key", token)
 }

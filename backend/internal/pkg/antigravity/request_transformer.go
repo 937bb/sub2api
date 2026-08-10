@@ -146,7 +146,11 @@ func TransformClaudeToGeminiWithOptions(claudeReq *ClaudeRequest, projectID, map
 		// 总是生成 sessionId，基于用户消息内容
 		SessionID: generateStableSessionID(contents),
 	}
-	if !requiresRestrictedGeminiArguments(targetModel) || len(tools) > 0 {
+
+	// 针对 Gemini Reasoning 模型（如 gemini-3.1-pro-high等）过滤强制空 ToolConfig
+	isReasoning := IsGeminiReasoningModel(targetModel)
+	if !isReasoning || len(tools) > 0 {
+		// 总是设置 toolConfig，与官方客户端一致
 		innerRequest.ToolConfig = &GeminiToolConfig{
 			FunctionCallingConfig: &GeminiFunctionCallingConfig{
 				Mode: "VALIDATED",
@@ -607,23 +611,14 @@ func isAntigravityOpusHighTierModel(model string) bool {
 		strings.HasPrefix(lower, "claude-opus-4-8")
 }
 
-// requiresRestrictedGeminiArguments identifies Antigravity targets that reject
-// sampling/stop arguments and an empty forced tool configuration.
-func requiresRestrictedGeminiArguments(model string) bool {
-	switch model {
-	case "gemini-2.5-flash-thinking", "gemini-3-pro-high", "gemini-3.1-pro-high", "gemini-3-pro-preview":
-		return true
-	default:
-		return false
-	}
-}
-
 func buildGenerationConfig(req *ClaudeRequest) *GeminiGenerationConfig {
 	maxLimit := maxOutputTokensLimit(req.Model)
 	config := &GeminiGenerationConfig{
 		MaxOutputTokens: defaultMaxOutputTokens, // 默认最大输出
 	}
-	if !requiresRestrictedGeminiArguments(req.Model) {
+
+	isReasoning := IsGeminiReasoningModel(req.Model)
+	if !isReasoning {
 		config.StopSequences = DefaultStopSequences
 	}
 
@@ -670,7 +665,7 @@ func buildGenerationConfig(req *ClaudeRequest) *GeminiGenerationConfig {
 	}
 
 	// 其他参数
-	if !requiresRestrictedGeminiArguments(req.Model) {
+	if !isReasoning {
 		if req.Temperature != nil {
 			config.Temperature = req.Temperature
 		}

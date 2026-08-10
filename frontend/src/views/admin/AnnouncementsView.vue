@@ -2,24 +2,7 @@
   <AppLayout>
     <TablePageLayout>
       <template #filters>
-        <div class="space-y-4">
-          <!-- Summary strip -->
-          <div class="card grid grid-cols-2 divide-x divide-gray-200/70 dark:divide-dark-700 sm:grid-cols-3">
-            <div class="px-5 py-3">
-              <p class="font-display text-2xl font-bold tracking-tight text-gray-900 dark:text-white">{{ pagination.total }}</p>
-              <p class="mt-0.5 text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.announcements.summaryTotal') }}</p>
-            </div>
-            <div class="px-5 py-3">
-              <p class="font-display text-2xl font-bold tracking-tight text-emerald-600 dark:text-emerald-400">{{ activeCount }}</p>
-              <p class="mt-0.5 text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.announcements.summaryActive') }}</p>
-            </div>
-            <div class="col-span-2 px-5 py-3 sm:col-span-1">
-              <p class="font-display text-2xl font-bold tracking-tight text-gray-900 dark:text-white">{{ announcements.length }}</p>
-              <p class="mt-0.5 text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.announcements.summaryOnPage') }}</p>
-            </div>
-          </div>
-
-          <div class="flex flex-wrap items-center gap-3">
+        <div class="flex flex-wrap items-center gap-3">
           <!-- Left: Search + Filters -->
           <div class="flex-1 sm:max-w-64">
             <input
@@ -51,7 +34,6 @@
               <Icon name="plus" size="md" class="mr-1" />
               {{ t('admin.announcements.createAnnouncement') }}
             </button>
-          </div>
           </div>
         </div>
       </template>
@@ -133,11 +115,18 @@
           <template #cell-actions="{ row }">
             <div class="flex items-center space-x-1">
               <button
+                @click="openPreview(row)"
+                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-900/20 dark:hover:text-blue-400"
+                :title="t('admin.announcements.preview')"
+              >
+                <Icon name="eye" size="sm" />
+              </button>
+              <button
                 @click="openReadStatus(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-900/20 dark:hover:text-blue-400"
                 :title="t('admin.announcements.readStatus')"
               >
-                <Icon name="eye" size="sm" />
+                <Icon name="chartBar" size="sm" />
               </button>
               <button
                 @click="openEditDialog(row)"
@@ -258,6 +247,12 @@
       :announcement-id="readStatusAnnouncementId"
       @close="showReadStatusDialog = false"
     />
+
+    <AnnouncementPopup
+      :announcement="previewAnnouncement"
+      preview
+      @close="previewAnnouncement = null"
+    />
   </AppLayout>
 </template>
 
@@ -283,16 +278,13 @@ import Icon from '@/components/icons/Icon.vue'
 
 import AnnouncementTargetingEditor from '@/components/admin/announcements/AnnouncementTargetingEditor.vue'
 import AnnouncementReadStatusDialog from '@/components/admin/announcements/AnnouncementReadStatusDialog.vue'
+import AnnouncementPopup from '@/components/common/AnnouncementPopup.vue'
 
 const { t } = useI18n()
 const appStore = useAppStore()
 
 const announcements = ref<Announcement[]>([])
 const loading = ref(false)
-
-// Count of active announcements on the current page (server-side total lives
-// in pagination.total; this is a page-scoped breakdown).
-const activeCount = computed(() => announcements.value.filter((a) => a.status === 'active').length)
 
 const filters = reactive({
   status: '',
@@ -610,6 +602,11 @@ async function confirmDelete() {
 // ===== Read status =====
 const showReadStatusDialog = ref(false)
 const readStatusAnnouncementId = ref<number | null>(null)
+const previewAnnouncement = ref<Announcement | null>(null)
+
+function openPreview(row: Announcement) {
+  previewAnnouncement.value = row
+}
 
 function openReadStatus(row: Announcement) {
   readStatusAnnouncementId.value = row.id

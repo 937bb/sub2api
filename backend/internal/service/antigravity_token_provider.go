@@ -23,15 +23,11 @@ const (
 // AntigravityTokenCache token cache interface.
 type AntigravityTokenCache = GeminiTokenCache
 
-type antigravityProjectIDBackfiller interface {
-	FillProjectID(ctx context.Context, account *Account, accessToken string) (string, error)
-}
-
 // AntigravityTokenProvider manages access_token for antigravity accounts.
 type AntigravityTokenProvider struct {
 	accountRepo             AccountRepository
 	tokenCache              AntigravityTokenCache
-	antigravityOAuthService antigravityProjectIDBackfiller
+	antigravityOAuthService *AntigravityOAuthService
 	backfillCooldown        sync.Map // key: accountID -> last attempt time
 	refreshAPI              *OAuthRefreshAPI
 	executor                OAuthRefreshExecutor
@@ -44,14 +40,10 @@ func NewAntigravityTokenProvider(
 	tokenCache AntigravityTokenCache,
 	antigravityOAuthService *AntigravityOAuthService,
 ) *AntigravityTokenProvider {
-	var projectIDBackfiller antigravityProjectIDBackfiller
-	if antigravityOAuthService != nil {
-		projectIDBackfiller = antigravityOAuthService
-	}
 	return &AntigravityTokenProvider{
 		accountRepo:             accountRepo,
 		tokenCache:              tokenCache,
-		antigravityOAuthService: projectIDBackfiller,
+		antigravityOAuthService: antigravityOAuthService,
 		refreshPolicy:           AntigravityProviderRefreshPolicy(),
 	}
 }
@@ -77,7 +69,6 @@ func (p *AntigravityTokenProvider) GetAccessToken(ctx context.Context, account *
 	if account == nil {
 		return "", errors.New("account is nil")
 	}
-	requestAccount := account
 	if account.Platform != PlatformAntigravity {
 		return "", errors.New("not an antigravity account")
 	}
@@ -94,10 +85,6 @@ func (p *AntigravityTokenProvider) GetAccessToken(ctx context.Context, account *
 		return "", errors.New("not an antigravity oauth account")
 	}
 
-	account = p.latestAccountForTokenUse(ctx, requestAccount, account)
-	expiresAt := account.GetCredentialAsTime("expires_at")
-	needsRefresh := expiresAt == nil || time.Until(*expiresAt) <= antigravityTokenRefreshSkew
-
 	cacheKey := AntigravityTokenCacheKey(account)
 
 	// 1) Try cache first.
@@ -108,6 +95,8 @@ func (p *AntigravityTokenProvider) GetAccessToken(ctx context.Context, account *
 	}
 
 	// 2) Refresh if needed (pre-expiry skew).
+	expiresAt := account.GetCredentialAsTime("expires_at")
+	needsRefresh := expiresAt == nil || time.Until(*expiresAt) <= antigravityTokenRefreshSkew
 	if needsRefresh && p.refreshAPI != nil && p.executor != nil {
 		// 请求路径使用短超时，避免代理不通时阻塞过久（后台刷新服务会继续重试）
 		refreshCtx, cancel := context.WithTimeout(ctx, antigravityRequestRefreshTimeout)
@@ -115,7 +104,7 @@ func (p *AntigravityTokenProvider) GetAccessToken(ctx context.Context, account *
 		result, err := p.refreshAPI.RefreshIfNeeded(refreshCtx, account, p.executor, antigravityTokenRefreshSkew)
 		if err != nil {
 			// 标记账号临时不可调度，避免后续请求继续命中
-			p.markTempUnschedulable(account, err)
+			p.markTempUnschedulable(ctx, account, err)
 			if p.refreshPolicy.OnRefreshError == ProviderRefreshErrorReturn {
 				return "", err
 			}
@@ -127,10 +116,7 @@ func (p *AntigravityTokenProvider) GetAccessToken(ctx context.Context, account *
 			}
 			// default policy: continue with existing token.
 		} else {
-			if result.Account != nil {
-				account = result.Account
-				syncAccountCredentials(requestAccount, account)
-			}
+			account = result.Account
 			expiresAt = account.GetCredentialAsTime("expires_at")
 		}
 	} else if needsRefresh && p.tokenCache != nil {
@@ -147,23 +133,26 @@ func (p *AntigravityTokenProvider) GetAccessToken(ctx context.Context, account *
 	}
 
 	// Backfill project_id online when missing, with cooldown to avoid hammering.
-	if err := p.BackfillProjectIDIfMissing(ctx, account, accessToken); err != nil {
-		slog.Debug("antigravity_project_id_backfill_skipped",
-			"account_id", account.ID,
-			"error", errAntigravityProjectBackfillUnavailable,
-		)
+	if strings.TrimSpace(account.GetCredential("project_id")) == "" && p.antigravityOAuthService != nil {
+		if p.shouldAttemptBackfill(account.ID) {
+			p.markBackfillAttempted(account.ID)
+			if projectID, err := p.antigravityOAuthService.FillProjectID(ctx, account, accessToken); err == nil && projectID != "" {
+				account.Credentials["project_id"] = projectID
+				if updateErr := persistAccountCredentials(ctx, p.accountRepo, account, account.Credentials); updateErr != nil {
+					slog.Warn("antigravity_project_id_backfill_persist_failed",
+						"account_id", account.ID,
+						"error", updateErr,
+					)
+				}
+			}
+		}
 	}
-	syncAccountCredentials(requestAccount, account)
-
-	cacheKey = AntigravityTokenCacheKey(account)
 
 	// 3) Populate cache with TTL.
 	if p.tokenCache != nil {
 		latestAccount, isStale := CheckTokenVersion(ctx, account, p.accountRepo)
 		if isStale && latestAccount != nil {
 			slog.Debug("antigravity_token_version_stale_use_latest", "account_id", account.ID)
-			account = latestAccount
-			syncAccountCredentials(requestAccount, account)
 			accessToken = latestAccount.GetCredential("access_token")
 			if strings.TrimSpace(accessToken) == "" {
 				return "", errors.New("access_token not found after version check")
@@ -188,98 +177,6 @@ func (p *AntigravityTokenProvider) GetAccessToken(ctx context.Context, account *
 	return accessToken, nil
 }
 
-// BackfillProjectIDIfMissing preserves the legacy online project_id discovery
-// for no-fallback OAuth accounts. Configured fallback accounts deliberately
-// remain project_id-free so their cache key stays account-scoped.
-func (p *AntigravityTokenProvider) BackfillProjectIDIfMissing(ctx context.Context, account *Account, accessToken string) error {
-	if account == nil {
-		return errors.New("account is nil")
-	}
-	if account.Platform != PlatformAntigravity || account.Type != AccountTypeOAuth {
-		return nil
-	}
-	if strings.TrimSpace(account.GetCredential("project_id")) != "" || hasAntigravityOAuthProjectFallback(account) {
-		return nil
-	}
-	if p == nil {
-		return errAntigravityProjectIDRequired
-	}
-	originalAccount := account
-	account = p.latestAccountForProjectBackfill(ctx, account)
-	if strings.TrimSpace(account.GetCredential("project_id")) != "" || hasAntigravityOAuthProjectFallback(account) {
-		syncAccountCredentials(originalAccount, account)
-		return nil
-	}
-	if p.antigravityOAuthService == nil {
-		return errAntigravityProjectIDRequired
-	}
-	accessToken = strings.TrimSpace(accessToken)
-	if accessToken == "" {
-		return errors.New("access_token not found in credentials")
-	}
-	if !p.shouldAttemptBackfill(account.ID) {
-		return errAntigravityProjectIDRequired
-	}
-
-	p.markBackfillAttempted(account.ID)
-	projectID, err := p.antigravityOAuthService.FillProjectID(ctx, account, accessToken)
-	if err != nil {
-		return errAntigravityProjectBackfillUnavailable
-	}
-	projectID = strings.TrimSpace(projectID)
-	if projectID == "" {
-		return errAntigravityProjectIDRequired
-	}
-	credentials := cloneCredentials(account.Credentials)
-	credentials["project_id"] = projectID
-	account.Credentials = credentials
-	if updateErr := persistAccountCredentials(ctx, p.accountRepo, account, account.Credentials); updateErr != nil {
-		slog.Warn("antigravity_project_id_backfill_persist_failed",
-			"account_id", account.ID,
-			"error", updateErr,
-		)
-	}
-	syncAccountCredentials(originalAccount, account)
-	return nil
-}
-
-func (p *AntigravityTokenProvider) latestAccountForProjectBackfill(ctx context.Context, account *Account) *Account {
-	if p == nil || p.accountRepo == nil || account == nil || account.ID == 0 {
-		return account
-	}
-	latest, err := p.accountRepo.GetByID(ctx, account.ID)
-	if err != nil || latest == nil {
-		return account
-	}
-	if latest.Platform != account.Platform || latest.Type != account.Type {
-		return account
-	}
-	syncAccountCredentials(account, latest)
-	return latest
-}
-
-func (p *AntigravityTokenProvider) latestAccountForTokenUse(ctx context.Context, requestAccount, account *Account) *Account {
-	if p == nil || p.accountRepo == nil || account == nil || account.ID == 0 {
-		return account
-	}
-	latest, err := p.accountRepo.GetByID(ctx, account.ID)
-	if err != nil || latest == nil {
-		return account
-	}
-	if latest.Platform != account.Platform || latest.Type != account.Type {
-		return account
-	}
-	syncAccountCredentials(requestAccount, latest)
-	return latest
-}
-
-func syncAccountCredentials(target, source *Account) {
-	if target == nil || source == nil || target == source {
-		return
-	}
-	target.Credentials = cloneCredentials(source.Credentials)
-}
-
 // shouldAttemptBackfill checks backfill cooldown.
 func (p *AntigravityTokenProvider) shouldAttemptBackfill(accountID int64) bool {
 	if v, ok := p.backfillCooldown.Load(accountID); ok {
@@ -293,8 +190,8 @@ func (p *AntigravityTokenProvider) shouldAttemptBackfill(accountID int64) bool {
 // markTempUnschedulable 在请求路径上 token 刷新失败时标记账号临时不可调度。
 // 同时写 DB 和 Redis 缓存，确保调度器立即跳过该账号。
 // 使用 background context 因为请求 context 可能已超时。
-func (p *AntigravityTokenProvider) markTempUnschedulable(account *Account, refreshErr error) {
-	if p.accountRepo == nil || account == nil {
+func (p *AntigravityTokenProvider) markTempUnschedulable(ctx context.Context, account *Account, refreshErr error) {
+	if p.accountRepo == nil || account == nil || isReadOnlyAccountTest(ctx) {
 		return
 	}
 	now := time.Now()

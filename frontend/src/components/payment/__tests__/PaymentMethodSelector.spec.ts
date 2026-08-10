@@ -4,43 +4,60 @@ import PaymentMethodSelector from '@/components/payment/PaymentMethodSelector.vu
 
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({
-    t: (key: string) => key,
+    t: (key: string, fallback?: string) => fallback ?? key,
   }),
 }))
 
 describe('PaymentMethodSelector', () => {
-  it('uses branded presentation only for built-in alipay and wxpay aliases', () => {
+  it('wraps large custom method collections without letting labels widen the selector', () => {
+    const methods = Array.from({ length: 12 }, (_, index) => ({
+      type: `custom_${index}`,
+      display_name: `CUSTOM_PAYMENT_METHOD_${index}`,
+      fee_rate: 0,
+      available: true,
+    }))
+
     const wrapper = mount(PaymentMethodSelector, {
       props: {
-        selected: 'wxpay_direct',
-        methods: [
-          { type: 'alipay', fee_rate: 0, available: true },
-          { type: 'alipay_direct', fee_rate: 0, available: true },
-          { type: 'wxpay', fee_rate: 0, available: true },
-          { type: 'wxpay_direct', fee_rate: 0, available: true },
-        ],
+        selected: 'custom_0',
+        methods,
       },
     })
 
+    const grid = wrapper.get('[data-testid="payment-method-grid"]')
+    expect(grid.classes()).toEqual(expect.arrayContaining(['grid', 'sm:grid-cols-3', 'lg:grid-cols-4']))
+    expect(grid.classes()).not.toContain('sm:flex')
+
     const buttons = wrapper.findAll('button')
-    expect(buttons.slice(0, 2).every(button => button.get('img').attributes('src').includes('alipay'))).toBe(true)
-    expect(buttons.slice(2).every(button => button.get('img').attributes('src').includes('wxpay'))).toBe(true)
-    expect(buttons[3].classes()).toContain('border-[#09BB07]')
+    expect(buttons).toHaveLength(methods.length)
+    expect(buttons.every(button => button.classes().includes('min-w-0'))).toBe(true)
+    expect(buttons.every((button, index) => button.attributes('title') === methods[index].display_name)).toBe(true)
+    expect(wrapper.findAll('[data-testid="payment-method-label"]').every(label => label.classes().includes('truncate'))).toBe(true)
   })
 
-  it.each(['card_alipay', 'card_wxpay'])('uses neutral presentation for custom method %s', (type) => {
+  it('shows the configured display name for custom EasyPay methods', () => {
     const wrapper = mount(PaymentMethodSelector, {
       props: {
-        selected: type,
-        methods: [{ type, fee_rate: 0, available: true }],
+        selected: 'ldc',
+        methods: [{ type: 'ldc', display_name: 'LDC Pay', fee_rate: 0, available: true }],
+      },
+    })
+
+    expect(wrapper.text()).toContain('LDC Pay')
+    expect(wrapper.text()).not.toContain('ldc')
+    expect(wrapper.text()).not.toContain('payment.methods.ldc')
+  })
+
+  it('uses the generic selected style for custom methods that contain built-in names', () => {
+    const wrapper = mount(PaymentMethodSelector, {
+      props: {
+        selected: 'card_alipay',
+        methods: [{ type: 'card_alipay', display_name: 'Card Pay', fee_rate: 0, available: true }],
       },
     })
 
     const button = wrapper.get('button')
     expect(button.classes()).toContain('border-primary-500')
     expect(button.classes()).not.toContain('border-[#02A9F1]')
-    expect(button.classes()).not.toContain('border-[#09BB07]')
-    expect(button.get('img').attributes('src')).toContain('easypay')
-    expect(button.get('img').attributes('alt')).toBe(`payment.methods.${type}`)
   })
 })

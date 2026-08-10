@@ -3,89 +3,97 @@ package apicompat
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestResponsesAnthropicCacheCreationUsageNonStreaming(t *testing.T) {
-	responsesUsage := &ResponsesUsage{
+func TestAnthropicUsageFromResponsesUsage_CacheCreation(t *testing.T) {
+	usage := &ResponsesUsage{
 		InputTokens:              20,
 		OutputTokens:             5,
 		CacheCreationInputTokens: 6,
-		InputTokensDetails:       &ResponsesInputTokensDetails{CachedTokens: 4},
+		InputTokensDetails: &ResponsesInputTokensDetails{
+			CachedTokens: 4,
+		},
 	}
 
-	anthropicUsage := anthropicUsageFromResponsesUsage(responsesUsage)
-	require.Equal(t, 10, anthropicUsage.InputTokens)
-	require.Equal(t, 4, anthropicUsage.CacheReadInputTokens)
-	require.Equal(t, 6, anthropicUsage.CacheCreationInputTokens)
+	got := anthropicUsageFromResponsesUsage(usage)
 
-	converted := AnthropicToResponsesResponse(&AnthropicResponse{Usage: anthropicUsage})
-	require.Equal(t, 20, converted.Usage.InputTokens)
-	require.Equal(t, 4, converted.Usage.InputTokensDetails.CachedTokens)
-	require.Equal(t, 6, converted.Usage.CacheCreationInputTokens)
+	assert.Equal(t, 10, got.InputTokens, "input = total(20) - cache_read(4) - cache_creation(6)")
+	assert.Equal(t, 5, got.OutputTokens)
+	assert.Equal(t, 4, got.CacheReadInputTokens)
+	assert.Equal(t, 6, got.CacheCreationInputTokens, "cache creation must be preserved")
 }
 
-func TestResponsesAnthropicCacheCreationUsageStreaming(t *testing.T) {
-	t.Run("Responses to Anthropic", func(t *testing.T) {
-		state := NewResponsesEventToAnthropicState()
-		state.MessageStartSent = true
-		events := ResponsesEventToAnthropicEvents(&ResponsesStreamEvent{
-			Type: "response.completed",
-			Response: &ResponsesResponse{Status: "completed", Usage: &ResponsesUsage{
-				InputTokens:              20,
-				OutputTokens:             5,
-				CacheCreationInputTokens: 6,
-				InputTokensDetails:       &ResponsesInputTokensDetails{CachedTokens: 4},
-			}},
-		}, state)
+func TestAnthropicUsageFromResponsesUsage_NoCacheCreation(t *testing.T) {
+	usage := &ResponsesUsage{
+		InputTokens:  10,
+		OutputTokens: 5,
+		InputTokensDetails: &ResponsesInputTokensDetails{
+			CachedTokens: 3,
+		},
+	}
 
-		require.Len(t, events, 2)
-		require.Equal(t, 10, events[0].Usage.InputTokens)
-		require.Equal(t, 4, events[0].Usage.CacheReadInputTokens)
-		require.Equal(t, 6, events[0].Usage.CacheCreationInputTokens)
-	})
+	got := anthropicUsageFromResponsesUsage(usage)
 
-	t.Run("Anthropic to Responses", func(t *testing.T) {
-		state := NewAnthropicEventToResponsesState()
-		state.CreatedSent = true
-		state.InputTokens = 10
-		state.OutputTokens = 5
-		state.CacheReadInputTokens = 4
-		state.CacheCreationInputTokens = 6
+	assert.Equal(t, 7, got.InputTokens)
+	assert.Equal(t, 3, got.CacheReadInputTokens)
+	assert.Equal(t, 0, got.CacheCreationInputTokens)
+}
 
-		events := FinalizeAnthropicResponsesStream(state)
-		require.Len(t, events, 1)
-		require.Equal(t, 20, events[0].Response.Usage.InputTokens)
-		require.Equal(t, 4, events[0].Response.Usage.InputTokensDetails.CachedTokens)
-		require.Equal(t, 6, events[0].Response.Usage.CacheCreationInputTokens)
-	})
+func TestResponsesEventToAnthropicEvents_StreamingCacheCreation(t *testing.T) {
+	state := NewResponsesEventToAnthropicState()
+	state.MessageStartSent = true
 
-	t.Run("Responses top-level terminal usage", func(t *testing.T) {
-		state := NewResponsesEventToAnthropicState()
-		state.MessageStartSent = true
-		events := ResponsesEventToAnthropicEvents(&ResponsesStreamEvent{
-			Type: "response.completed",
+	completedEvt := &ResponsesStreamEvent{
+		Type: "response.completed",
+		Response: &ResponsesResponse{
+			Status: "completed",
 			Usage: &ResponsesUsage{
 				InputTokens:              20,
 				OutputTokens:             5,
 				CacheCreationInputTokens: 6,
-				InputTokensDetails:       &ResponsesInputTokensDetails{CachedTokens: 4},
+				InputTokensDetails: &ResponsesInputTokensDetails{
+					CachedTokens: 4,
+				},
 			},
-		}, state)
-		require.Len(t, events, 2)
-		require.Equal(t, 10, events[0].Usage.InputTokens)
-		require.Equal(t, 6, events[0].Usage.CacheCreationInputTokens)
-	})
+		},
+	}
 
-	t.Run("Responses synthetic finalization", func(t *testing.T) {
-		state := NewResponsesEventToAnthropicState()
-		state.MessageStartSent = true
-		state.InputTokens = 10
-		state.OutputTokens = 5
-		state.CacheReadInputTokens = 4
-		state.CacheCreationInputTokens = 6
-		events := FinalizeResponsesAnthropicStream(state)
-		require.Len(t, events, 2)
-		require.Equal(t, 6, events[0].Usage.CacheCreationInputTokens)
-	})
+	events := ResponsesEventToAnthropicEvents(completedEvt, state)
+
+	var deltaEvt *AnthropicStreamEvent
+	for i := range events {
+		if events[i].Type == "message_delta" {
+			deltaEvt = &events[i]
+			break
+		}
+	}
+	require.NotNil(t, deltaEvt, "should have message_delta event")
+	require.NotNil(t, deltaEvt.Usage)
+	assert.Equal(t, 6, deltaEvt.Usage.CacheCreationInputTokens, "streaming cache_creation must be preserved")
+	assert.Equal(t, 10, deltaEvt.Usage.InputTokens, "input = 20 - 4(read) - 6(creation)")
+	assert.Equal(t, 4, deltaEvt.Usage.CacheReadInputTokens)
+}
+
+func TestAnthropicToResponsesResponse_CacheCreation(t *testing.T) {
+	resp := AnthropicResponse{
+		ID:    "msg_test",
+		Type:  "message",
+		Role:  "assistant",
+		Model: "claude-opus-4-6",
+		Usage: AnthropicUsage{
+			InputTokens:              10,
+			OutputTokens:             5,
+			CacheReadInputTokens:     4,
+			CacheCreationInputTokens: 6,
+		},
+		StopReason: AnthropicStopReasonPtr("end_turn"),
+	}
+
+	out := AnthropicToResponsesResponse(&resp)
+
+	require.NotNil(t, out.Usage)
+	assert.Equal(t, 20, out.Usage.InputTokens, "total = input(10) + cache_read(4) + cache_creation(6)")
+	assert.Equal(t, 6, out.Usage.CacheCreationInputTokens, "cache creation must round-trip")
 }

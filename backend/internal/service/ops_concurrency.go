@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"log"
-	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
@@ -22,7 +21,6 @@ func (s *OpsService) listAllAccountsForOps(ctx context.Context, platformFilter s
 	if s == nil || s.accountRepo == nil {
 		return []Account{}, nil
 	}
-	platformFilter = strings.TrimSpace(platformFilter)
 	if repo, ok := s.accountRepo.(opsAccountStatsRepository); ok {
 		return repo.ListOpsAccountsForStats(ctx, platformFilter, groupIDFilter)
 	}
@@ -37,7 +35,7 @@ func (s *OpsService) listAllAccountsForOps(ctx context.Context, platformFilter s
 		accounts, pageInfo, err := s.accountRepo.ListWithFilters(ctx, pagination.PaginationParams{
 			Page:     page,
 			PageSize: opsAccountsPageSize,
-		}, AccountListFilters{Platform: platformFilter, GroupID: groupID})
+		}, platformFilter, "", "", "", groupID, "")
 		if err != nil {
 			return nil, err
 		}

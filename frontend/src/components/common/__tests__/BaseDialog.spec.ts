@@ -1,41 +1,37 @@
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
-import { createI18n } from 'vue-i18n'
-import { describe, expect, it } from 'vitest'
+import { nextTick } from 'vue'
 import BaseDialog from '../BaseDialog.vue'
 
-const getByRole = (role: 'button', { name }: { name: string }) => {
-  const selector = role === 'button' ? 'button, [role="button"]' : `[role="${role}"]`
-  const element = [...document.body.querySelectorAll<HTMLElement>(selector)].find(
-    (element) => element.getAttribute('aria-label') === name
-  )
-
-  if (!element) throw new Error(`Unable to find ${role} with accessible name "${name}"`)
-  return element
-}
+vi.mock('vue-i18n', () => ({
+  useI18n: () => ({ t: (key: string) => key })
+}))
 
 describe('BaseDialog', () => {
-  it('reactively localizes the accessible name of the close button', async () => {
-    const i18n = createI18n({
-      legacy: false,
-      locale: 'zh',
-      messages: {
-        zh: { common: { close: () => '关闭' } },
-        en: { common: { close: () => 'Close' } }
-      }
-    })
+  afterEach(() => {
+    document.body.innerHTML = ''
+    document.body.classList.remove('modal-open')
+  })
 
+  it('resets body scroll position when reopened', async () => {
     const wrapper = mount(BaseDialog, {
-      props: { show: true, title: '设置' },
-      global: { plugins: [i18n] },
-      attachTo: document.body
+      attachTo: document.body,
+      props: { show: false, title: 'Details' },
+      slots: { default: '<div style="height: 2000px">content</div>' },
+      global: { stubs: { Icon: true } }
     })
 
-    const closeButton = getByRole('button', { name: '关闭' })
+    await wrapper.setProps({ show: true })
+    await nextTick()
+    const body = document.body.querySelector<HTMLElement>('.modal-body')
+    expect(body).not.toBeNull()
+    body!.scrollTop = 480
 
-    i18n.global.locale.value = 'en'
-    await wrapper.vm.$nextTick()
+    await wrapper.setProps({ show: false })
+    await wrapper.setProps({ show: true })
+    await nextTick()
 
-    expect(getByRole('button', { name: 'Close' })).toBe(closeButton)
+    expect(document.body.querySelector<HTMLElement>('.modal-body')?.scrollTop).toBe(0)
     wrapper.unmount()
   })
 })

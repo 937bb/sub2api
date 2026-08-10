@@ -31,6 +31,12 @@ type delayedReadFrameConn struct {
 	once       sync.Once
 }
 
+type readStartSpyFrameConn struct {
+	base      FrameConn
+	started   chan struct{}
+	startOnce sync.Once
+}
+
 type closeSpyFrameConn struct {
 	closeCalls atomic.Int32
 }
@@ -123,6 +129,19 @@ func (c *delayedReadFrameConn) Close() error {
 	if c == nil || c.base == nil {
 		return nil
 	}
+	return c.base.Close()
+}
+
+func (c *readStartSpyFrameConn) ReadFrame(ctx context.Context) (coderws.MessageType, []byte, error) {
+	c.startOnce.Do(func() { close(c.started) })
+	return c.base.ReadFrame(ctx)
+}
+
+func (c *readStartSpyFrameConn) WriteFrame(ctx context.Context, msgType coderws.MessageType, payload []byte) error {
+	return c.base.WriteFrame(ctx, msgType, payload)
+}
+
+func (c *readStartSpyFrameConn) Close() error {
 	return c.base.Close()
 }
 
@@ -453,151 +472,56 @@ func TestRelay_OnTurnComplete_PerTerminalEvent(t *testing.T) {
 	require.Equal(t, 5, result.Usage.OutputTokens)
 }
 
-func TestRelay_ResponseFailedTextSanitizesClientPayloadAndKeepsUsage(t *testing.T) {
+func TestRelay_OnTurnComplete_UsesCurrentResponseCreateModel(t *testing.T) {
 	t.Parallel()
 
-	failedPayload := []byte(`{"type":"response.failed","instructions":"top-secret instructions","input":[{"role":"user","content":"top secret prompt"}],"output":[{"type":"message","content":"top secret output"}],"usage":{"input_tokens":99,"output_tokens":88},"metadata":{"top":"top-secret"},"reasoning":{"effort":"high"},"tools":[{"type":"function","name":"top_secret_tool"}],"tool_choice":"auto","parallel_tool_calls":true,"prompt_cache_key":"top-secret-cache","previous_response_id":"resp_prev_top","text":{"verbosity":"high"},"truncation":"auto","max_output_tokens":8192,"incomplete_details":{"reason":"max"},"response":{"id":"resp_failed","status":"failed","instructions":"secret instructions","input":[{"role":"user","content":"sensitive prompt"}],"output":[{"type":"message","content":"secret output"}],"usage":{"input_tokens":11,"output_tokens":13,"input_tokens_details":{"cached_tokens":2},"cache_creation_input_tokens":3,"output_tokens_details":{"image_tokens":4}},"metadata":{"tenant":"tenant-secret"},"reasoning":{"effort":"high"},"tools":[{"type":"function","name":"secret_tool"}],"tool_choice":"auto","parallel_tool_calls":true,"prompt_cache_key":"secret-cache","previous_response_id":"resp_prev_inner","text":{"verbosity":"high"},"truncation":"auto","max_output_tokens":4096,"incomplete_details":{"reason":"max_output_tokens"},"error":{"code":"context_length_exceeded","message":"too long"}}}`)
 	clientConn := newPassthroughTestFrameConn(nil, false)
-	upstreamConn := newPassthroughTestFrameConn([]passthroughTestFrame{
-		{msgType: coderws.MessageText, payload: failedPayload},
-	}, true)
+	upstreamConn := newPassthroughTestFrameConn(nil, false)
+	firstPayload := []byte(`{"type":"response.create","model":"gpt-5.6-sol","input":[]}`)
 
-	firstPayload := []byte(`{"type":"response.create","model":"gpt-5.3-codex","input":[]}`)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
+	turns := make(chan RelayTurnResult, 2)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = Relay(ctx, clientConn, upstreamConn, firstPayload, RelayOptions{
+			OnTurnComplete: func(turn RelayTurnResult) {
+				turns <- turn
+			},
+		})
+	}()
 
-	turns := make([]RelayTurnResult, 0, 1)
-	result, relayExit := Relay(ctx, clientConn, upstreamConn, firstPayload, RelayOptions{
-		OnTurnComplete: func(turn RelayTurnResult) {
-			turns = append(turns, turn)
-		},
-	})
-	require.Nil(t, relayExit)
-	require.Equal(t, "resp_failed", result.RequestID)
-	require.Equal(t, "response.failed", result.TerminalEventType)
-	require.Equal(t, 11, result.Usage.InputTokens)
-	require.Equal(t, 13, result.Usage.OutputTokens)
-	require.Equal(t, 2, result.Usage.CacheReadInputTokens)
-	require.Equal(t, 3, result.Usage.CacheCreationInputTokens)
-	require.Equal(t, 4, result.Usage.ImageOutputTokens)
-	require.Len(t, turns, 1)
-	require.Equal(t, "resp_failed", turns[0].RequestID)
-	require.Equal(t, "response.failed", turns[0].TerminalEventType)
-	require.Equal(t, result.Usage, turns[0].Usage)
+	upstreamConn.readCh <- passthroughTestFrame{
+		msgType: coderws.MessageText,
+		payload: []byte(`{"type":"response.completed","response":{"id":"resp_sol","usage":{"input_tokens":2,"output_tokens":1}}}`),
+	}
+	firstTurn := <-turns
+	require.Equal(t, "gpt-5.6-sol", firstTurn.RequestModel)
 
-	clientWrites := clientConn.Writes()
-	require.Len(t, clientWrites, 1)
-	require.Equal(t, coderws.MessageText, clientWrites[0].msgType)
-	got := string(clientWrites[0].payload)
-	require.JSONEq(t, `{"type":"response.failed","response":{"id":"resp_failed","status":"failed","error":{"code":"context_length_exceeded","message":"too long"}}}`, got)
-	for _, sensitive := range []string{
-		`"instructions"`,
-		`"input"`,
-		`"output"`,
-		`"usage"`,
-		`"metadata"`,
-		`"reasoning"`,
-		`"tools"`,
-		`"tool_choice"`,
-		`"parallel_tool_calls"`,
-		`"prompt_cache_key"`,
-		`"previous_response_id"`,
-		`"text"`,
-		`"truncation"`,
-		`"max_output_tokens"`,
-		`"incomplete_details"`,
-		"sensitive prompt",
-		"secret_tool",
-		"tenant-secret",
-	} {
-		require.NotContains(t, got, sensitive)
+	clientConn.readCh <- passthroughTestFrame{
+		msgType: coderws.MessageText,
+		payload: []byte(`{"type":"response.create","model":"gpt-5.6-terra","input":[]}`),
+	}
+	require.Eventually(t, func() bool {
+		return len(upstreamConn.Writes()) == 2
+	}, time.Second, 10*time.Millisecond)
+	upstreamConn.readCh <- passthroughTestFrame{
+		msgType: coderws.MessageText,
+		payload: []byte(`{"type":"response.completed","response":{"id":"resp_terra","usage":{"input_tokens":3,"output_tokens":1}}}`),
+	}
+	secondTurn := <-turns
+	require.Equal(t, "gpt-5.6-terra", secondTurn.RequestModel)
+
+	_ = clientConn.Close()
+	_ = upstreamConn.Close()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("relay did not stop after client close")
 	}
 }
 
-func TestRelay_BinaryResponseFailedFrameSanitizedAndNotObserved(t *testing.T) {
-	t.Parallel()
-
-	binaryPayload := []byte(`{"type":"response.failed","instructions":"top-secret instructions","input":[{"role":"user","content":"top secret prompt"}],"output":[{"type":"message","content":"top secret output"}],"usage":{"input_tokens":99,"output_tokens":88},"metadata":{"top":"top-secret"},"reasoning":{"effort":"high"},"tools":[{"type":"function","name":"top_secret_tool"}],"tool_choice":"auto","parallel_tool_calls":true,"prompt_cache_key":"top-secret-cache","previous_response_id":"resp_prev_top","text":{"verbosity":"high"},"truncation":"auto","max_output_tokens":8192,"incomplete_details":{"reason":"max"},"response":{"id":"resp_binary_failed","status":"failed","instructions":"secret instructions","input":[{"role":"user","content":"sensitive prompt"}],"output":[{"type":"message","content":"secret output"}],"usage":{"input_tokens":7,"output_tokens":3},"metadata":{"tenant":"secret"},"reasoning":{"effort":"high"},"tools":[{"type":"function","name":"secret_tool"}],"tool_choice":"auto","parallel_tool_calls":true,"prompt_cache_key":"secret-cache","previous_response_id":"resp_prev_inner","text":{"verbosity":"high"},"truncation":"auto","max_output_tokens":4096,"incomplete_details":{"reason":"max_output_tokens"},"error":{"code":"bad"}}}`)
-	clientConn := newPassthroughTestFrameConn(nil, false)
-	upstreamConn := newPassthroughTestFrameConn([]passthroughTestFrame{
-		{msgType: coderws.MessageBinary, payload: binaryPayload},
-	}, true)
-
-	firstPayload := []byte(`{"type":"response.create","model":"gpt-4o","input":[]}`)
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	turns := make([]RelayTurnResult, 0, 1)
-	result, relayExit := Relay(ctx, clientConn, upstreamConn, firstPayload, RelayOptions{
-		OnTurnComplete: func(turn RelayTurnResult) {
-			turns = append(turns, turn)
-		},
-	})
-	require.Nil(t, relayExit)
-	require.Equal(t, 0, result.Usage.InputTokens)
-	require.Equal(t, "", result.RequestID)
-	require.Equal(t, "", result.TerminalEventType)
-	require.Empty(t, turns)
-
-	clientWrites := clientConn.Writes()
-	require.Len(t, clientWrites, 1)
-	require.Equal(t, coderws.MessageBinary, clientWrites[0].msgType)
-	require.JSONEq(t, `{"type":"response.failed","response":{"id":"resp_binary_failed","status":"failed","error":{"code":"bad"}}}`, string(clientWrites[0].payload))
-	require.NotContains(t, string(clientWrites[0].payload), "tenant")
-	require.NotContains(t, string(clientWrites[0].payload), "usage")
-}
-
-func TestRelay_NonJSONTextFramePreserved(t *testing.T) {
-	t.Parallel()
-
-	payload := []byte(`not-json {"type":"response.failed","response":{"usage":{"input_tokens":7,"output_tokens":3}}}`)
-	clientConn := newPassthroughTestFrameConn(nil, false)
-	upstreamConn := newPassthroughTestFrameConn([]passthroughTestFrame{
-		{msgType: coderws.MessageText, payload: payload},
-	}, true)
-
-	firstPayload := []byte(`{"type":"response.create","model":"gpt-4o","input":[]}`)
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	_, relayExit := Relay(ctx, clientConn, upstreamConn, firstPayload, RelayOptions{})
-	require.Nil(t, relayExit)
-
-	clientWrites := clientConn.Writes()
-	require.Len(t, clientWrites, 1)
-	require.Equal(t, coderws.MessageText, clientWrites[0].msgType)
-	require.Equal(t, payload, clientWrites[0].payload)
-}
-
-func TestRelay_NonFailedJSONFramesPreserved(t *testing.T) {
-	t.Parallel()
-
-	deltaPayload := []byte(`{"type":"response.output_text.delta","delta":"hi","metadata":{"tenant":"keep"},"tools":[{"name":"keep_tool"}]}`)
-	completedPayload := []byte(`{"type":"response.completed","instructions":"keep instructions","output":[{"type":"message","content":"keep output"}],"metadata":{"tenant":"keep"},"tools":[{"name":"keep_tool"}],"response":{"id":"resp_completed","output":[{"type":"message","content":"keep output"}],"usage":{"input_tokens":2,"output_tokens":1},"metadata":{"tenant":"keep"}}}`)
-	clientConn := newPassthroughTestFrameConn(nil, false)
-	upstreamConn := newPassthroughTestFrameConn([]passthroughTestFrame{
-		{msgType: coderws.MessageText, payload: deltaPayload},
-		{msgType: coderws.MessageText, payload: completedPayload},
-	}, true)
-
-	firstPayload := []byte(`{"type":"response.create","model":"gpt-4o","input":[]}`)
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	result, relayExit := Relay(ctx, clientConn, upstreamConn, firstPayload, RelayOptions{})
-	require.Nil(t, relayExit)
-	require.Equal(t, "resp_completed", result.RequestID)
-	require.Equal(t, "response.completed", result.TerminalEventType)
-	require.Equal(t, 2, result.Usage.InputTokens)
-	require.Equal(t, 1, result.Usage.OutputTokens)
-
-	clientWrites := clientConn.Writes()
-	require.Len(t, clientWrites, 2)
-	require.Equal(t, coderws.MessageText, clientWrites[0].msgType)
-	require.Equal(t, deltaPayload, clientWrites[0].payload)
-	require.Equal(t, coderws.MessageText, clientWrites[1].msgType)
-	require.Equal(t, completedPayload, clientWrites[1].payload)
-}
 func TestRelay_OnTurnComplete_ProvidesTurnMetrics(t *testing.T) {
 	t.Parallel()
 
@@ -711,11 +635,8 @@ func TestRelay_UpstreamErrorEventPassthroughRaw(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	result, relayExit := Relay(ctx, clientConn, upstreamConn, firstPayload, RelayOptions{})
+	_, relayExit := Relay(ctx, clientConn, upstreamConn, firstPayload, RelayOptions{})
 	require.Nil(t, relayExit)
-	require.Equal(t, 0, result.Usage.InputTokens)
-	require.Equal(t, "", result.RequestID)
-	require.Equal(t, "", result.TerminalEventType)
 
 	clientWrites := clientConn.Writes()
 	require.Len(t, clientWrites, 1)
@@ -807,6 +728,51 @@ func TestRelay_ContextCanceled(t *testing.T) {
 	_, relayExit := Relay(ctx, clientConn, upstreamConn, firstPayload, RelayOptions{})
 	// context 取消导致写首包失败
 	require.NotNil(t, relayExit)
+}
+
+func TestRelay_DownstreamPreambleStartsClientReader(t *testing.T) {
+	clientBase := newPassthroughTestFrameConn(nil, false)
+	clientConn := &readStartSpyFrameConn{base: clientBase, started: make(chan struct{})}
+	upstreamConn := newPassthroughTestFrameConn(nil, false)
+	resultCh := make(chan *RelayExit, 1)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	go func() {
+		_, relayExit := Relay(
+			ctx,
+			clientConn,
+			upstreamConn,
+			[]byte(`{"type":"response.create","model":"gpt-5.1"}`),
+			RelayOptions{
+				StartClientAfterFirstDownstream: true,
+			},
+		)
+		resultCh <- relayExit
+	}()
+
+	upstreamConn.readCh <- passthroughTestFrame{
+		msgType: coderws.MessageText,
+		payload: []byte(`{"type":"response.created","response":{"id":"resp_semantic_gate"}}`),
+	}
+	require.Eventually(t, func() bool { return len(clientBase.Writes()) == 1 }, time.Second, 10*time.Millisecond)
+	select {
+	case <-clientConn.started:
+	case <-time.After(time.Second):
+		t.Fatal("response.created did not start the client reader")
+	}
+
+	upstreamConn.readCh <- passthroughTestFrame{
+		msgType: coderws.MessageText,
+		payload: []byte(`{"type":"response.completed","response":{"id":"resp_semantic_gate","usage":{"input_tokens":1,"output_tokens":1}}}`),
+	}
+	_ = upstreamConn.Close()
+	select {
+	case relayExit := <-resultCh:
+		require.Nil(t, relayExit)
+	case <-time.After(time.Second):
+		t.Fatal("relay did not finish after terminal event and upstream close")
+	}
 }
 
 func TestRelay_TraceEvents_ContainsLifecycleStages(t *testing.T) {

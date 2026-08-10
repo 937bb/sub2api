@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -14,29 +15,22 @@ import (
 	"sync"
 	"testing"
 	"time"
-	"unicode/utf8"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
-	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
 
-func init() {
-	gin.SetMode(gin.TestMode)
-}
-
 type openAICompatFailingWriter struct {
 	gin.ResponseWriter
 	failAfter int
 	writes    int
-	attempts  int
 }
 
 func (w *openAICompatFailingWriter) Write(p []byte) (int, error) {
-	w.attempts++
 	if w.writes >= w.failAfter {
 		return 0, errors.New("write failed: client disconnected")
 	}
@@ -73,81 +67,6 @@ func (r *openAICompatBlockingReadCloser) Close() error {
 		close(r.closed)
 	})
 	return nil
-}
-
-type openAICompatDelayedChunkReadCloser struct {
-	chunks   []string
-	delays   []time.Duration
-	chunkIdx int
-	offset   int
-}
-
-func newOpenAICompatDelayedChunkReadCloser(chunks []string, delays []time.Duration) *openAICompatDelayedChunkReadCloser {
-	return &openAICompatDelayedChunkReadCloser{chunks: chunks, delays: delays}
-}
-
-func (r *openAICompatDelayedChunkReadCloser) Read(p []byte) (int, error) {
-	for r.chunkIdx < len(r.chunks) {
-		chunk := []byte(r.chunks[r.chunkIdx])
-		if len(chunk) == 0 {
-			r.chunkIdx++
-			continue
-		}
-		if r.offset == 0 && r.chunkIdx < len(r.delays) && r.delays[r.chunkIdx] > 0 {
-			time.Sleep(r.delays[r.chunkIdx])
-			r.delays[r.chunkIdx] = 0
-		}
-		n := copy(p, chunk[r.offset:])
-		r.offset += n
-		if r.offset >= len(chunk) {
-			r.chunkIdx++
-			r.offset = 0
-		}
-		return n, nil
-	}
-	return 0, io.EOF
-}
-
-func (r *openAICompatDelayedChunkReadCloser) Close() error {
-	r.chunkIdx = len(r.chunks)
-	return nil
-}
-
-func newOpenAICompatMessagesTestContext(body []byte) (*gin.Context, *httptest.ResponseRecorder) {
-	rec := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(rec)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
-	c.Request.Header.Set("Content-Type", "application/json")
-	return c, rec
-}
-
-func newOpenAICompatMessagesTestAccount() *Account {
-	return &Account{
-		ID:          1,
-		Name:        "openai-oauth",
-		Platform:    PlatformOpenAI,
-		Type:        AccountTypeOAuth,
-		Concurrency: 1,
-		Credentials: map[string]any{
-			"access_token":       "oauth-token",
-			"chatgpt_account_id": "chatgpt-acc",
-		},
-	}
-}
-
-func newOpenAICompatMessagesSSEService(body io.ReadCloser, requestID string, cfg *config.Config) *OpenAIGatewayService {
-	if cfg == nil {
-		cfg = &config.Config{}
-	}
-	cfg.Security.URLAllowlist.Enabled = false
-	return &OpenAIGatewayService{
-		httpUpstream: &httpUpstreamRecorder{resp: &http.Response{
-			StatusCode: http.StatusOK,
-			Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "x-request-id": []string{requestID}},
-			Body:       body,
-		}},
-		cfg: cfg,
-	}
 }
 
 func TestNormalizeOpenAICompatRequestedModel(t *testing.T) {
@@ -207,8 +126,90 @@ func TestApplyOpenAICompatModelNormalization(t *testing.T) {
 	})
 }
 
+func TestForwardAsAnthropic_UsesExactFableMessagesDispatchModel(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	body := []byte(`{"model":"claude-fable-5","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":false}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	upstreamBody := strings.Join([]string{
+		`data: {"type":"response.completed","response":{"id":"resp_fable","object":"response","model":"gpt-5.6-sol","status":"completed","output":[{"type":"message","id":"msg_fable","role":"assistant","status":"completed","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":5,"output_tokens":2,"total_tokens":7}}}`,
+		"",
+		"data: [DONE]",
+		"",
+	}, "\n")
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "x-request-id": []string{"rid_fable"}},
+		Body:       io.NopCloser(strings.NewReader(upstreamBody)),
+	}}
+
+	svc := &OpenAIGatewayService{
+		httpUpstream: upstream,
+		cfg:          &config.Config{Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}}},
+	}
+	account := &Account{
+		ID:          1,
+		Name:        "openai-oauth",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"access_token":       "oauth-token",
+			"chatgpt_account_id": "chatgpt-acc",
+		},
+	}
+
+	result, err := svc.ForwardAsAnthropic(context.Background(), c, account, body, "", "gpt-5.6-sol")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, "claude-fable-5", result.Model)
+	require.Equal(t, "gpt-5.6-sol", result.BillingModel)
+	require.Equal(t, "gpt-5.6-sol", result.UpstreamModel)
+	require.Equal(t, "gpt-5.6-sol", gjson.GetBytes(upstream.lastBody, "model").String())
+	require.NotContains(t, string(upstream.lastBody), "claude-fable-5")
+	require.Equal(t, "claude-fable-5", gjson.GetBytes(rec.Body.Bytes(), "model").String())
+}
+
+func TestForwardAsAnthropic_QuotaBypassInjectsConvertedResponsesBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":false}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusBadRequest,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"stop after capture"}}`)),
+	}}
+	svc := &OpenAIGatewayService{
+		httpUpstream: upstream,
+		cfg:          &config.Config{Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}}},
+	}
+	account := &Account{
+		ID:          32,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Concurrency: 1,
+		Credentials: map[string]any{"access_token": "oauth-token"},
+		Extra:       map[string]any{"quota_bypass_enabled": true},
+	}
+
+	_, err := svc.ForwardAsAnthropic(context.Background(), c, account, body, "", "gpt-5.4")
+	require.Error(t, err)
+	requireQuotaBypassSuffix(t, upstream.lastBody)
+}
+
 func TestForwardAsAnthropic_NormalizesRoutingAndEffortForGpt54XHigh(t *testing.T) {
 	t.Parallel()
+	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -265,749 +266,119 @@ func TestForwardAsAnthropic_NormalizesRoutingAndEffortForGpt54XHigh(t *testing.T
 	t.Logf("response body: %s", rec.Body.String())
 }
 
-func TestForwardAsAnthropic_PlanGateUsesFinalUpstreamModel(t *testing.T) {
-	body := []byte(`{"model":"claude-fable-5","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":false}`)
-	c, _ := newOpenAICompatMessagesTestContext(body)
-	upstream := &httpUpstreamRecorder{resp: &http.Response{
-		StatusCode: http.StatusBadRequest,
-		Header:     http.Header{"Content-Type": []string{"application/json"}},
-		Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"The 'gpt-5.4' model is not supported when using Codex with a ChatGPT account."}}`)),
-	}}
-	repo := &modelNotFoundAccountRepoStub{}
-	svc := &OpenAIGatewayService{
-		httpUpstream: upstream,
-		rateLimitService: &RateLimitService{
-			accountRepo: repo,
+func TestForwardAsAnthropic_PreservesMaxForFinalGPT56ResponsesModel(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.TestMode)
+
+	tests := []struct {
+		name          string
+		account       *Account
+		model         string
+		defaultMapped string
+		effort        string
+		wantModel     string
+		wantEffort    string
+	}{
+		{
+			name:          "API Key mapping wins and keeps Luna max",
+			account:       rawGPT56ResponsesAPIKeyAccount("luna", "gpt-5.6-luna"),
+			model:         "luna",
+			defaultMapped: "gpt-5.6-sol",
+			effort:        "max",
+			wantModel:     "gpt-5.6-luna",
+			wantEffort:    "max",
 		},
-		cfg: &config.Config{Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}}},
+		{
+			name:          "OAuth mapping wins and keeps Sol max",
+			account:       rawGPT56ResponsesOAuthAccount("sol", "gpt-5.6-sol"),
+			model:         "sol",
+			defaultMapped: "gpt-5.6-terra",
+			effort:        "max",
+			wantModel:     "gpt-5.6-sol",
+			wantEffort:    "max",
+		},
+		{
+			name:       "old model still maps max to xhigh",
+			account:    rawGPT56ResponsesAPIKeyAccount("gpt-5.5", "gpt-5.5"),
+			model:      "gpt-5.5",
+			effort:     "max",
+			wantModel:  "gpt-5.5",
+			wantEffort: "xhigh",
+		},
+		{
+			name:       "GPT56 default remains medium",
+			account:    rawGPT56ResponsesAPIKeyAccount("gpt-5.6-sol", "gpt-5.6-sol"),
+			model:      "gpt-5.6-sol",
+			wantModel:  "gpt-5.6-sol",
+			wantEffort: "medium",
+		},
 	}
-	account := &Account{
-		ID:          4,
-		Name:        "openai-oauth",
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			body := `{"model":"` + tt.model + `","max_tokens":16,"messages":[{"role":"user","content":"hello"}`
+			if tt.effort != "" {
+				body += `],"output_config":{"effort":"` + tt.effort + `"},"stream":false}`
+			} else {
+				body += `],"stream":false}`
+			}
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(body))
+			c.Request.Header.Set("Content-Type", "application/json")
+
+			upstream := &httpUpstreamRecorder{resp: openAICompatSSECompletedResponse("resp_gpt56_"+tt.name, tt.wantModel)}
+			svc := &OpenAIGatewayService{
+				httpUpstream: upstream,
+				cfg:          &config.Config{Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}}},
+			}
+
+			result, err := svc.ForwardAsAnthropic(context.Background(), c, tt.account, []byte(body), "", tt.defaultMapped)
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.Equal(t, tt.wantModel, result.UpstreamModel)
+			require.Equal(t, tt.wantModel, gjson.GetBytes(upstream.lastBody, "model").String())
+			require.Equal(t, tt.wantEffort, gjson.GetBytes(upstream.lastBody, "reasoning.effort").String())
+			require.NotNil(t, result.ReasoningEffort)
+			require.Equal(t, tt.wantEffort, *result.ReasoningEffort)
+		})
+	}
+}
+
+func rawGPT56ResponsesAPIKeyAccount(requestedModel, mappedModel string) *Account {
+	return &Account{
+		ID:          501,
+		Name:        "gpt56-apikey",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key":       "sk-test",
+			"base_url":      "https://api.example.com/v1",
+			"model_mapping": map[string]any{requestedModel: mappedModel},
+		},
+		Extra: map[string]any{"use_responses_api": true},
+	}
+}
+
+func rawGPT56ResponsesOAuthAccount(requestedModel, mappedModel string) *Account {
+	return &Account{
+		ID:          502,
+		Name:        "gpt56-oauth",
 		Platform:    PlatformOpenAI,
 		Type:        AccountTypeOAuth,
 		Concurrency: 1,
 		Credentials: map[string]any{
 			"access_token":       "oauth-token",
 			"chatgpt_account_id": "chatgpt-acc",
-			"model_mapping": map[string]any{
-				"gpt-5.4": "gpt-5.4-xhigh",
-			},
+			"model_mapping":      map[string]any{requestedModel: mappedModel},
 		},
 	}
-
-	result, err := svc.ForwardAsAnthropic(context.Background(), c, account, body, "", "gpt-5.4")
-	require.Nil(t, result)
-	var failoverErr *UpstreamFailoverError
-	require.ErrorAs(t, err, &failoverErr)
-	wireModel := gjson.GetBytes(upstream.lastBody, "model").String()
-	require.Equal(t, "gpt-5.4", wireModel)
-	require.Len(t, repo.modelRateLimitCalls, 1)
-	require.Equal(t, wireModel, repo.modelRateLimitCalls[0].scope)
-	require.Equal(t, openAIPlanGatedModelReason, repo.modelRateLimitCalls[0].reason)
-}
-
-func TestForwardAsAnthropic_ExactMessagesDispatchPreservesPublicModel(t *testing.T) {
-	t.Parallel()
-
-	body := []byte(`{"model":"claude-fable-5","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":false}`)
-	c, rec := newOpenAICompatMessagesTestContext(body)
-	upstream := &httpUpstreamRecorder{resp: openAICompatSSECompletedResponse("resp_exact", "gpt-5.6-sol")}
-	svc := &OpenAIGatewayService{
-		httpUpstream: upstream,
-		cfg:          &config.Config{Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}}},
-	}
-
-	result, err := svc.ForwardAsAnthropic(context.Background(), c, newOpenAICompatMessagesTestAccount(), body, "", "gpt-5.6-sol")
-	require.NoError(t, err)
-	require.Equal(t, "gpt-5.6-sol", gjson.GetBytes(upstream.lastBody, "model").String())
-	require.Equal(t, "claude-fable-5", result.Model)
-	require.Equal(t, "gpt-5.6-sol", result.UpstreamModel)
-	require.Equal(t, "claude-fable-5", gjson.GetBytes(rec.Body.Bytes(), "model").String())
-}
-
-func TestForwardAsAnthropic_BufferedResponseFailedTriggersFailover(t *testing.T) {
-	t.Parallel()
-
-	rec := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(rec)
-	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":false}`)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
-	c.Request.Header.Set("Content-Type", "application/json")
-
-	upstreamBody := strings.Join([]string{
-		`data: {"type":"response.failed","response":{"id":"resp_failed","object":"response","model":"gpt-5.4","status":"failed","error":{"code":"server_error","message":"bad upstream"},"output":[],"usage":{"input_tokens":5,"output_tokens":0,"total_tokens":5}}}`,
-		"",
-		"data: [DONE]",
-		"",
-	}, "\n")
-	upstream := &httpUpstreamRecorder{resp: &http.Response{
-		StatusCode: http.StatusOK,
-		Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "x-request-id": []string{"rid_failed"}},
-		Body:       io.NopCloser(strings.NewReader(upstreamBody)),
-	}}
-
-	svc := &OpenAIGatewayService{
-		httpUpstream: upstream,
-		cfg:          &config.Config{Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}}},
-	}
-	account := &Account{
-		ID:          1,
-		Name:        "openai-oauth",
-		Platform:    PlatformOpenAI,
-		Type:        AccountTypeOAuth,
-		Concurrency: 1,
-		Credentials: map[string]any{
-			"access_token":       "oauth-token",
-			"chatgpt_account_id": "chatgpt-acc",
-		},
-	}
-
-	result, err := svc.ForwardAsAnthropic(context.Background(), c, account, body, "", "gpt-5.4")
-	require.Nil(t, result)
-	var failoverErr *UpstreamFailoverError
-	require.ErrorAs(t, err, &failoverErr)
-	require.Equal(t, http.StatusBadGateway, failoverErr.StatusCode)
-	require.Equal(t, "bad upstream", gjson.GetBytes(failoverErr.ResponseBody, "error.message").String())
-}
-
-func TestForwardAsAnthropic_StreamingResponseFailedBeforeOutputTriggersFailover(t *testing.T) {
-	t.Parallel()
-
-	rec := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(rec)
-	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":true}`)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
-	c.Request.Header.Set("Content-Type", "application/json")
-
-	upstreamBody := strings.Join([]string{
-		`data: {"type":"response.failed","response":{"id":"resp_failed","object":"response","model":"gpt-5.4","status":"failed","error":{"code":"server_error","message":"bad upstream"},"output":[],"usage":{"input_tokens":5,"output_tokens":0,"total_tokens":5}}}`,
-		"",
-		"data: [DONE]",
-		"",
-	}, "\n")
-	upstream := &httpUpstreamRecorder{resp: &http.Response{
-		StatusCode: http.StatusOK,
-		Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "x-request-id": []string{"rid_stream_failed"}},
-		Body:       io.NopCloser(strings.NewReader(upstreamBody)),
-	}}
-
-	svc := &OpenAIGatewayService{
-		httpUpstream: upstream,
-		cfg:          &config.Config{Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}}},
-	}
-	account := &Account{
-		ID:          1,
-		Name:        "openai-oauth",
-		Platform:    PlatformOpenAI,
-		Type:        AccountTypeOAuth,
-		Concurrency: 1,
-		Credentials: map[string]any{
-			"access_token":       "oauth-token",
-			"chatgpt_account_id": "chatgpt-acc",
-		},
-	}
-
-	result, err := svc.ForwardAsAnthropic(context.Background(), c, account, body, "", "gpt-5.4")
-	require.Nil(t, result)
-	var failoverErr *UpstreamFailoverError
-	require.ErrorAs(t, err, &failoverErr)
-	require.Equal(t, http.StatusBadGateway, failoverErr.StatusCode)
-	require.Equal(t, "bad upstream", gjson.GetBytes(failoverErr.ResponseBody, "error.message").String())
-	require.Empty(t, rec.Body.String())
-}
-
-func TestForwardAsAnthropic_StreamingPreludeThenResponseFailedBeforeOutputTriggersFailover(t *testing.T) {
-	t.Parallel()
-
-	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":true}`)
-	c, rec := newOpenAICompatMessagesTestContext(body)
-
-	upstreamBody := strings.Join([]string{
-		`data: {"type":"response.created","response":{"id":"resp_failed","object":"response","model":"gpt-5.4","status":"in_progress","output":[]}}`,
-		"",
-		`data: {"type":"response.failed","response":{"id":"resp_failed","object":"response","model":"gpt-5.4","status":"failed","error":{"code":"server_error","message":"bad upstream"},"output":[],"usage":{"input_tokens":5,"output_tokens":0,"total_tokens":5}}}`,
-		"",
-		"data: [DONE]",
-		"",
-	}, "\n")
-	svc := newOpenAICompatMessagesSSEService(io.NopCloser(strings.NewReader(upstreamBody)), "rid_stream_prelude_failed", nil)
-
-	result, err := svc.ForwardAsAnthropic(context.Background(), c, newOpenAICompatMessagesTestAccount(), body, "", "gpt-5.4")
-	require.Nil(t, result)
-	var failoverErr *UpstreamFailoverError
-	require.ErrorAs(t, err, &failoverErr)
-	require.Equal(t, http.StatusBadGateway, failoverErr.StatusCode)
-	require.Equal(t, "bad upstream", gjson.GetBytes(failoverErr.ResponseBody, "error.message").String())
-	require.False(t, OpenAICompatAnthropicClientOutputStarted(c))
-	require.Empty(t, rec.Body.String())
-}
-
-func TestForwardAsAnthropic_StreamingKeepaliveBeforeResponseFailedDoesNotBlockFailover(t *testing.T) {
-	t.Parallel()
-
-	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":true}`)
-	c, rec := newOpenAICompatMessagesTestContext(body)
-
-	failedFrame := strings.Join([]string{
-		`data: {"type":"response.failed","response":{"id":"resp_failed","object":"response","model":"gpt-5.4","status":"failed","error":{"code":"server_error","message":"bad upstream"},"output":[],"usage":{"input_tokens":5,"output_tokens":0,"total_tokens":5}}}`,
-		"",
-	}, "\n")
-	bodyReader := newOpenAICompatDelayedChunkReadCloser(
-		[]string{failedFrame},
-		[]time.Duration{1500 * time.Millisecond},
-	)
-	svc := newOpenAICompatMessagesSSEService(bodyReader, "rid_stream_ping_failed", &config.Config{
-		Gateway: config.GatewayConfig{StreamKeepaliveInterval: 1},
-	})
-
-	result, err := svc.ForwardAsAnthropic(context.Background(), c, newOpenAICompatMessagesTestAccount(), body, "", "gpt-5.4")
-	require.Nil(t, result)
-	var failoverErr *UpstreamFailoverError
-	require.ErrorAs(t, err, &failoverErr)
-	require.Equal(t, "bad upstream", gjson.GetBytes(failoverErr.ResponseBody, "error.message").String())
-	require.False(t, OpenAICompatAnthropicClientOutputStarted(c))
-	require.Contains(t, rec.Body.String(), `event: ping`)
-}
-
-func TestForwardAsAnthropic_StreamingKeepaliveBeforePolicyFailureWritesSSEError(t *testing.T) {
-	t.Parallel()
-
-	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":true}`)
-	c, rec := newOpenAICompatMessagesTestContext(body)
-
-	failedFrame := strings.Join([]string{
-		`data: {"type":"response.failed","response":{"id":"resp_failed","object":"response","model":"gpt-5.4","status":"failed","error":{"code":"content_policy_violation","message":"request violates safety policy"},"output":[],"usage":{"input_tokens":5,"output_tokens":0,"total_tokens":5}}}`,
-		"",
-	}, "\n")
-	bodyReader := newOpenAICompatDelayedChunkReadCloser(
-		[]string{failedFrame},
-		[]time.Duration{1500 * time.Millisecond},
-	)
-	svc := newOpenAICompatMessagesSSEService(bodyReader, "rid_stream_ping_policy_failed", &config.Config{
-		Gateway: config.GatewayConfig{StreamKeepaliveInterval: 1},
-	})
-
-	result, err := svc.ForwardAsAnthropic(context.Background(), c, newOpenAICompatMessagesTestAccount(), body, "", "gpt-5.4")
-	require.Error(t, err)
-	var failoverErr *UpstreamFailoverError
-	require.False(t, errors.As(err, &failoverErr))
-	require.NotNil(t, result)
-	require.Equal(t, 5, result.Usage.InputTokens)
-	require.False(t, OpenAICompatAnthropicClientOutputStarted(c))
-	require.Contains(t, rec.Body.String(), `event: ping`)
-	require.Contains(t, rec.Body.String(), `event: error`)
-	require.Contains(t, rec.Body.String(), `request violates safety policy`)
-	require.NotContains(t, rec.Body.String(), "\n\n{\"error\"")
-}
-
-func TestForwardAsAnthropic_StreamingResponseFailedAfterOutputReturnsUsage(t *testing.T) {
-	t.Parallel()
-
-	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":true}`)
-	c, rec := newOpenAICompatMessagesTestContext(body)
-
-	upstreamBody := strings.Join([]string{
-		`data: {"type":"response.created","response":{"id":"resp_failed","object":"response","model":"gpt-5.4","status":"in_progress","output":[]}}`,
-		"",
-		`data: {"type":"response.output_text.delta","output_index":0,"content_index":0,"delta":"hello"}`,
-		"",
-		`data: {"type":"response.failed","response":{"id":"resp_failed","object":"response","model":"gpt-5.4","status":"failed","error":{"code":"server_error","message":"late upstream failure"},"output":[],"usage":{"input_tokens":5,"output_tokens":2,"total_tokens":7}}}`,
-		"",
-	}, "\n")
-	svc := newOpenAICompatMessagesSSEService(io.NopCloser(strings.NewReader(upstreamBody)), "rid_stream_late_failed", nil)
-
-	result, err := svc.ForwardAsAnthropic(context.Background(), c, newOpenAICompatMessagesTestAccount(), body, "", "gpt-5.4")
-	require.Error(t, err)
-	var failoverErr *UpstreamFailoverError
-	require.False(t, errors.As(err, &failoverErr))
-	require.NotNil(t, result)
-	require.Equal(t, 5, result.Usage.InputTokens)
-	require.Equal(t, 2, result.Usage.OutputTokens)
-	require.True(t, OpenAICompatAnthropicClientOutputStarted(c))
-	require.Contains(t, rec.Body.String(), `event: content_block_delta`)
-	require.Contains(t, rec.Body.String(), `late upstream failure`)
-
-	events := openAICompatOpsEvents(t, c)
-	require.Len(t, events, 1)
-	require.Equal(t, "stream_failed", events[0].Kind)
-	require.Equal(t, "/v1/responses", events[0].UpstreamEndpoint)
-}
-
-func TestForwardAsAnthropic_StreamingBareErrorBeforeOutputTriggersFailover(t *testing.T) {
-	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":true}`)
-	c, rec := newOpenAICompatMessagesTestContext(body)
-	upstreamBody := strings.Join([]string{
-		`data: {"type":"error","error":{"code":"server_error","message":"bare upstream failure"}}`,
-		"",
-		`data: {"type":"response.output_text.delta","delta":"must not leak"}`,
-		"",
-	}, "\n")
-	svc := newOpenAICompatMessagesSSEService(io.NopCloser(strings.NewReader(upstreamBody)), "rid_bare_error", nil)
-
-	result, err := svc.ForwardAsAnthropic(context.Background(), c, newOpenAICompatMessagesTestAccount(), body, "", "gpt-5.4")
-	require.Nil(t, result)
-	var failoverErr *UpstreamFailoverError
-	require.ErrorAs(t, err, &failoverErr)
-	require.Equal(t, "bare upstream failure", gjson.GetBytes(failoverErr.ResponseBody, "error.message").String())
-	require.False(t, OpenAICompatAnthropicClientOutputStarted(c))
-	require.Empty(t, rec.Body.String())
-}
-
-func TestForwardAsAnthropic_StreamingEventNamedBareErrorSuppliesType(t *testing.T) {
-	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":true}`)
-	c, rec := newOpenAICompatMessagesTestContext(body)
-	upstreamBody := "event: error\ndata: {\"error\":{\"code\":\"server_error\",\"message\":\"event named failure\"}}\n\n"
-	svc := newOpenAICompatMessagesSSEService(io.NopCloser(strings.NewReader(upstreamBody)), "rid_named_bare_error", nil)
-
-	result, err := svc.ForwardAsAnthropic(context.Background(), c, newOpenAICompatMessagesTestAccount(), body, "", "gpt-5.4")
-	require.Nil(t, result)
-	var failoverErr *UpstreamFailoverError
-	require.ErrorAs(t, err, &failoverErr)
-	require.Equal(t, "event named failure", gjson.GetBytes(failoverErr.ResponseBody, "error.message").String())
-	require.Empty(t, rec.Body.String())
-}
-
-func TestForwardAsAnthropic_StreamingBareErrorAfterOutputReturnsUsageOnce(t *testing.T) {
-	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":true}`)
-	c, rec := newOpenAICompatMessagesTestContext(body)
-	upstreamBody := strings.Join([]string{
-		`data: {"type":"response.created","response":{"id":"resp_bare","model":"gpt-5.4","status":"in_progress","output":[]}}`, "",
-		`data: {"type":"response.output_text.delta","delta":"hello"}`, "",
-		`data: {"type":"error","error":{"code":"server_error","message":"first terminal"},"usage":{"input_tokens":7,"output_tokens":3,"total_tokens":10}}`, "",
-		`data: {"type":"error","error":{"code":"server_error","message":"second terminal"}}`, "",
-	}, "\n")
-	svc := newOpenAICompatMessagesSSEService(io.NopCloser(strings.NewReader(upstreamBody)), "rid_late_bare_error", nil)
-
-	result, err := svc.ForwardAsAnthropic(context.Background(), c, newOpenAICompatMessagesTestAccount(), body, "", "gpt-5.4")
-	require.Error(t, err)
-	var failoverErr *UpstreamFailoverError
-	require.False(t, errors.As(err, &failoverErr))
-	require.NotNil(t, result)
-	require.Equal(t, 7, result.Usage.InputTokens)
-	require.Equal(t, 3, result.Usage.OutputTokens)
-	require.Equal(t, 1, strings.Count(rec.Body.String(), "event: error"))
-	require.Contains(t, rec.Body.String(), "first terminal")
-	require.NotContains(t, rec.Body.String(), "second terminal")
-	require.NotContains(t, rec.Body.String(), "event: message_stop")
-	require.Len(t, openAICompatOpsEvents(t, c), 1)
-}
-
-func TestForwardAsAnthropic_StreamingBarePolicyErrorDoesNotFailover(t *testing.T) {
-	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":true}`)
-	c, rec := newOpenAICompatMessagesTestContext(body)
-	upstreamBody := `data: {"type":"error","error":{"code":"content_policy_violation","message":"request violates safety policy"},"usage":{"input_tokens":5,"output_tokens":0,"total_tokens":5}}` + "\n\n"
-	svc := newOpenAICompatMessagesSSEService(io.NopCloser(strings.NewReader(upstreamBody)), "rid_bare_policy", nil)
-
-	result, err := svc.ForwardAsAnthropic(context.Background(), c, newOpenAICompatMessagesTestAccount(), body, "", "gpt-5.4")
-	require.Error(t, err)
-	var failoverErr *UpstreamFailoverError
-	require.False(t, errors.As(err, &failoverErr))
-	require.NotNil(t, result)
-	require.Equal(t, 5, result.Usage.InputTokens)
-	require.Contains(t, rec.Body.String(), "request violates safety policy")
-}
-
-func TestForwardAsAnthropic_StreamingBareErrorLatePolicyMarkerDoesNotFailover(t *testing.T) {
-	message := "authorization=" + strings.Repeat("x", openAISensitiveDiagnosticKVValueMaxScan+1) + " request violates safety policy"
-	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":true}`)
-	c, rec := newOpenAICompatMessagesTestContext(body)
-	upstreamBody := fmt.Sprintf("event: error\ndata: {\"error\":{\"code\":\"server_error\",\"type\":\"upstream_error\",\"message\":%q}}\n\n", message)
-	svc := newOpenAICompatMessagesSSEService(io.NopCloser(strings.NewReader(upstreamBody)), "rid_late_policy", nil)
-
-	result, err := svc.ForwardAsAnthropic(context.Background(), c, newOpenAICompatMessagesTestAccount(), body, "", "gpt-5.4")
-	require.Error(t, err)
-	var failoverErr *UpstreamFailoverError
-	require.False(t, errors.As(err, &failoverErr))
-	require.NotNil(t, result)
-	outwardMessage := gjson.GetBytes(rec.Body.Bytes(), "error.message").String()
-	require.Contains(t, outwardMessage, "authorization=[redacted]")
-	require.NotContains(t, outwardMessage, strings.Repeat("x", 64))
-	require.NotContains(t, outwardMessage, "request violates safety policy")
-	require.LessOrEqual(t, len(outwardMessage), openAIMessagesErrorMessageMaxBytes)
-}
-
-func TestForwardAsAnthropic_StreamingMalformedBareErrorRemainsMissingTerminal(t *testing.T) {
-	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":true}`)
-	c, rec := newOpenAICompatMessagesTestContext(body)
-	upstreamBody := "event: error\ndata: {not-json}\n\ndata: [DONE]\n\n"
-	svc := newOpenAICompatMessagesSSEService(io.NopCloser(strings.NewReader(upstreamBody)), "rid_malformed_bare", nil)
-
-	result, err := svc.ForwardAsAnthropic(context.Background(), c, newOpenAICompatMessagesTestAccount(), body, "", "gpt-5.4")
-	require.NotNil(t, result)
-	var failoverErr *UpstreamFailoverError
-	require.ErrorAs(t, err, &failoverErr)
-	require.Contains(t, string(failoverErr.ResponseBody), "terminal event")
-	require.Empty(t, rec.Body.String())
-}
-
-func TestForwardAsAnthropic_StreamingBareErrorMessageIsRedactedAndCapped(t *testing.T) {
-	secrets := []string{"bearer-secret", "auth-secret", "api-secret", "refresh-secret", "person@example.com", "acct-secret", "123e4567-e89b-12d3-a456-426614174000", "query-secret"}
-	longMessage := `failure Bearer bearer-secret authorization=auth-secret api_key=api-secret refresh_token=refresh-secret ` +
-		`{"email":"person@example.com","chatgpt_account_id":"acct-secret"} uuid=123e4567-e89b-12d3-a456-426614174000 ` +
-		`https://host.invalid/path?access_token=query-secret ` + strings.Repeat("x", openAIMessagesErrorMessageMaxBytes*2)
-	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":true}`)
-	c, rec := newOpenAICompatMessagesTestContext(body)
-	upstreamBody := strings.Join([]string{
-		`data: {"type":"response.output_text.delta","delta":"hello"}`, "",
-		fmt.Sprintf(`data: {"type":"error","error":{"code":"server_error","message":%q}}`, longMessage), "",
-	}, "\n")
-	svc := newOpenAICompatMessagesSSEService(io.NopCloser(strings.NewReader(upstreamBody)), "rid_large_bare", nil)
-
-	result, err := svc.ForwardAsAnthropic(context.Background(), c, newOpenAICompatMessagesTestAccount(), body, "", "gpt-5.4")
-	require.NotNil(t, result)
-	require.Error(t, err)
-	for _, secret := range secrets {
-		require.NotContains(t, err.Error(), secret)
-		require.NotContains(t, rec.Body.String(), secret)
-	}
-	require.Contains(t, rec.Body.String(), "[redacted]")
-	require.LessOrEqual(t, len(rec.Body.String()), openAIMessagesErrorMessageMaxBytes+2048)
-	events := openAICompatOpsEvents(t, c)
-	require.Len(t, events, 1)
-	for _, secret := range secrets {
-		require.NotContains(t, events[0].Message, secret)
-	}
-	require.LessOrEqual(t, len(events[0].Message), openAIMessagesErrorMessageMaxBytes)
-}
-
-func TestForwardAsAnthropic_StreamingBareErrorAfterClientWriteFailureDoesNotFailoverOrWrite(t *testing.T) {
-	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":true}`)
-	c, rec := newOpenAICompatMessagesTestContext(body)
-	failingWriter := &openAICompatFailingWriter{ResponseWriter: c.Writer, failAfter: 0}
-	c.Writer = failingWriter
-	upstreamBody := strings.Join([]string{
-		`data: {"type":"response.created","response":{"id":"resp_disconnect","model":"gpt-5.4","status":"in_progress","output":[]}}`, "",
-		`data: {"type":"response.output_text.delta","delta":"hello"}`, "",
-		`data: {"type":"error","error":{"code":"server_error","message":"terminal after disconnect"},"usage":{"input_tokens":11,"output_tokens":2,"total_tokens":13}}`, "",
-	}, "\n")
-	svc := newOpenAICompatMessagesSSEService(io.NopCloser(strings.NewReader(upstreamBody)), "rid_disconnected_bare", nil)
-
-	result, err := svc.ForwardAsAnthropic(context.Background(), c, newOpenAICompatMessagesTestAccount(), body, "", "gpt-5.4")
-	require.Error(t, err)
-	var failoverErr *UpstreamFailoverError
-	require.False(t, errors.As(err, &failoverErr))
-	require.NotNil(t, result)
-	require.True(t, result.ClientDisconnect)
-	require.Equal(t, 11, result.Usage.InputTokens)
-	require.Equal(t, 2, result.Usage.OutputTokens)
-	require.Equal(t, 1, failingWriter.attempts)
-	require.Empty(t, rec.Body.String())
-}
-
-func TestForwardAsAnthropic_BufferedMissingTerminalTriggersFailover(t *testing.T) {
-	t.Parallel()
-
-	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":false}`)
-	c, rec := newOpenAICompatMessagesTestContext(body)
-
-	upstreamBody := strings.Join([]string{
-		`data: {"type":"response.created","response":{"id":"resp_missing","object":"response","model":"gpt-5.4","status":"in_progress","output":[]}}`,
-		"",
-		"data: [DONE]",
-		"",
-	}, "\n")
-	svc := newOpenAICompatMessagesSSEService(io.NopCloser(strings.NewReader(upstreamBody)), "rid_buffered_missing_terminal", nil)
-
-	result, err := svc.ForwardAsAnthropic(context.Background(), c, newOpenAICompatMessagesTestAccount(), body, "", "gpt-5.4")
-	require.Nil(t, result)
-	var failoverErr *UpstreamFailoverError
-	require.ErrorAs(t, err, &failoverErr)
-	require.Equal(t, http.StatusBadGateway, failoverErr.StatusCode)
-	require.Contains(t, string(failoverErr.ResponseBody), "terminal event")
-	require.Empty(t, rec.Body.String())
-}
-
-func TestForwardAsAnthropic_BufferedBareErrorTriggersFailover(t *testing.T) {
-	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":false}`)
-	c, rec := newOpenAICompatMessagesTestContext(body)
-	upstreamBody := strings.Join([]string{
-		`data: {"type":"error","error":{"code":"server_error","message":"bare buffered failure"},"usage":{"input_tokens":7,"output_tokens":2,"total_tokens":9}}`, "",
-		`data: {"type":"response.completed","response":{"id":"must_not_win","status":"completed","output":[]}}`, "",
-	}, "\n")
-	svc := newOpenAICompatMessagesSSEService(io.NopCloser(strings.NewReader(upstreamBody)), "rid_buffered_bare", nil)
-
-	result, err := svc.ForwardAsAnthropic(context.Background(), c, newOpenAICompatMessagesTestAccount(), body, "", "gpt-5.4")
-	require.Nil(t, result)
-	var failoverErr *UpstreamFailoverError
-	require.ErrorAs(t, err, &failoverErr)
-	require.Equal(t, "bare buffered failure", gjson.GetBytes(failoverErr.ResponseBody, "error.message").String())
-	require.Empty(t, rec.Body.String())
-}
-
-func TestForwardAsAnthropic_BufferedBareResponseErrorTriggersFailover(t *testing.T) {
-	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":false}`)
-	c, rec := newOpenAICompatMessagesTestContext(body)
-	upstreamBody := strings.Join([]string{
-		`data: {"type":"error","response":{"error":{"code":"server_error","message":"nested buffered failure"}},"usage":{"input_tokens":8,"output_tokens":3,"total_tokens":11}}`, "",
-		`data: {"type":"response.completed","response":{"id":"must_not_win","status":"completed","output":[]}}`, "",
-	}, "\n")
-	svc := newOpenAICompatMessagesSSEService(io.NopCloser(strings.NewReader(upstreamBody)), "rid_buffered_nested_bare", nil)
-
-	result, err := svc.ForwardAsAnthropic(context.Background(), c, newOpenAICompatMessagesTestAccount(), body, "", "gpt-5.4")
-	require.Nil(t, result)
-	var failoverErr *UpstreamFailoverError
-	require.ErrorAs(t, err, &failoverErr)
-	require.Equal(t, "nested buffered failure", gjson.GetBytes(failoverErr.ResponseBody, "error.message").String())
-	require.Empty(t, rec.Body.String())
-}
-
-func TestForwardAsAnthropic_BufferedBareResponseErrorPreservesNestedUsage(t *testing.T) {
-	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":false}`)
-	c, rec := newOpenAICompatMessagesTestContext(body)
-	upstreamBody := `data: {"type":"error","response":{"error":{"code":"content_policy_violation","message":"request violates safety policy"},"usage":{"input_tokens":8,"output_tokens":2,"total_tokens":10}}}` + "\n\n"
-	svc := newOpenAICompatMessagesSSEService(io.NopCloser(strings.NewReader(upstreamBody)), "rid_buffered_nested_usage", nil)
-
-	result, err := svc.ForwardAsAnthropic(context.Background(), c, newOpenAICompatMessagesTestAccount(), body, "", "gpt-5.4")
-	require.Error(t, err)
-	var failoverErr *UpstreamFailoverError
-	require.False(t, errors.As(err, &failoverErr))
-	require.NotNil(t, result)
-	require.Equal(t, 8, result.Usage.InputTokens)
-	require.Equal(t, 2, result.Usage.OutputTokens)
-	require.Equal(t, "request violates safety policy", gjson.GetBytes(rec.Body.Bytes(), "error.message").String())
-}
-
-func TestForwardAsAnthropic_BufferedBareResponseErrorTopLevelUsageTakesPrecedence(t *testing.T) {
-	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":false}`)
-	c, _ := newOpenAICompatMessagesTestContext(body)
-	upstreamBody := `data: {"type":"error","response":{"error":{"code":"content_policy_violation","message":"request violates safety policy"},"usage":{"input_tokens":80,"output_tokens":20,"total_tokens":100}},"usage":{"input_tokens":8,"output_tokens":2,"total_tokens":10}}` + "\n\n"
-	svc := newOpenAICompatMessagesSSEService(io.NopCloser(strings.NewReader(upstreamBody)), "rid_buffered_usage_precedence", nil)
-
-	result, err := svc.ForwardAsAnthropic(context.Background(), c, newOpenAICompatMessagesTestAccount(), body, "", "gpt-5.4")
-	require.Error(t, err)
-	require.NotNil(t, result)
-	require.Equal(t, 8, result.Usage.InputTokens)
-	require.Equal(t, 2, result.Usage.OutputTokens)
-}
-
-func TestForwardAsAnthropic_BufferedBareResponseErrorAccountsFirstTerminalOnce(t *testing.T) {
-	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":false}`)
-	c, rec := newOpenAICompatMessagesTestContext(body)
-	upstreamBody := strings.Join([]string{
-		`data: {"type":"error","response":{"error":{"code":"content_policy_violation","message":"first terminal"},"usage":{"input_tokens":8,"output_tokens":2,"total_tokens":10}}}`, "",
-		`data: {"type":"error","response":{"error":{"code":"content_policy_violation","message":"second terminal"},"usage":{"input_tokens":80,"output_tokens":20,"total_tokens":100}}}`, "",
-	}, "\n")
-	svc := newOpenAICompatMessagesSSEService(io.NopCloser(strings.NewReader(upstreamBody)), "rid_buffered_first_terminal_usage", nil)
-
-	result, err := svc.ForwardAsAnthropic(context.Background(), c, newOpenAICompatMessagesTestAccount(), body, "", "gpt-5.4")
-	require.Error(t, err)
-	require.NotNil(t, result)
-	require.Equal(t, 8, result.Usage.InputTokens)
-	require.Equal(t, 2, result.Usage.OutputTokens)
-	require.Contains(t, rec.Body.String(), "first terminal")
-	require.NotContains(t, rec.Body.String(), "second terminal")
-}
-
-func TestForwardAsAnthropic_BufferedBareTopLevelPolicyMessagePreservesUsage(t *testing.T) {
-	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":false}`)
-	c, rec := newOpenAICompatMessagesTestContext(body)
-	upstreamBody := `data: {"type":"error","message":"request violates safety policy","usage":{"input_tokens":6,"output_tokens":1,"total_tokens":7}}` + "\n\n"
-	svc := newOpenAICompatMessagesSSEService(io.NopCloser(strings.NewReader(upstreamBody)), "rid_buffered_top_message", nil)
-
-	result, err := svc.ForwardAsAnthropic(context.Background(), c, newOpenAICompatMessagesTestAccount(), body, "", "gpt-5.4")
-	require.Error(t, err)
-	var failoverErr *UpstreamFailoverError
-	require.False(t, errors.As(err, &failoverErr))
-	require.NotNil(t, result)
-	require.Equal(t, 6, result.Usage.InputTokens)
-	require.Equal(t, 1, result.Usage.OutputTokens)
-	require.Equal(t, http.StatusBadGateway, rec.Code)
-	require.Equal(t, "request violates safety policy", gjson.GetBytes(rec.Body.Bytes(), "error.message").String())
-}
-
-func TestForwardAsAnthropic_BufferedEventNamedBarePolicyErrorPreservesUsage(t *testing.T) {
-	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":false}`)
-	c, rec := newOpenAICompatMessagesTestContext(body)
-	upstreamBody := "event: error\ndata: {\"error\":{\"code\":\"content_policy_violation\",\"message\":\"request violates safety policy\"},\"usage\":{\"input_tokens\":5,\"output_tokens\":0,\"total_tokens\":5}}\n\n"
-	svc := newOpenAICompatMessagesSSEService(io.NopCloser(strings.NewReader(upstreamBody)), "rid_buffered_bare_policy", nil)
-
-	result, err := svc.ForwardAsAnthropic(context.Background(), c, newOpenAICompatMessagesTestAccount(), body, "", "gpt-5.4")
-	require.Error(t, err)
-	var failoverErr *UpstreamFailoverError
-	require.False(t, errors.As(err, &failoverErr))
-	require.NotNil(t, result)
-	require.Equal(t, 5, result.Usage.InputTokens)
-	require.Equal(t, http.StatusBadGateway, rec.Code)
-	require.Equal(t, "request violates safety policy", gjson.GetBytes(rec.Body.Bytes(), "error.message").String())
-}
-
-func TestForwardAsAnthropic_BufferedBareErrorLatePolicyMarkerDoesNotFailover(t *testing.T) {
-	message := strings.Repeat("x", openAIMessagesErrorMessageMaxBytes+512) + " content policy violation"
-	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":false}`)
-	c, rec := newOpenAICompatMessagesTestContext(body)
-	upstreamBody := fmt.Sprintf("event: error\ndata: {\"error\":{\"code\":\"server_error\",\"type\":\"upstream_error\",\"message\":%q}}\n\n", message)
-	svc := newOpenAICompatMessagesSSEService(io.NopCloser(strings.NewReader(upstreamBody)), "rid_buffered_late_policy", nil)
-
-	result, err := svc.ForwardAsAnthropic(context.Background(), c, newOpenAICompatMessagesTestAccount(), body, "", "gpt-5.4")
-	require.Error(t, err)
-	var failoverErr *UpstreamFailoverError
-	require.False(t, errors.As(err, &failoverErr))
-	require.NotNil(t, result)
-	require.Equal(t, http.StatusBadGateway, rec.Code)
-	require.LessOrEqual(t, len(gjson.GetBytes(rec.Body.Bytes(), "error.message").String()), openAIMessagesErrorMessageMaxBytes)
-}
-
-func TestForwardAsAnthropic_BufferedBareErrorMessageIsRedactedAndCapped(t *testing.T) {
-	const secret = "buffered-secret-token"
-	message := "failure ?access_token=" + secret + " " + strings.Repeat("界", openAIMessagesErrorMessageMaxBytes)
-	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":false}`)
-	c, rec := newOpenAICompatMessagesTestContext(body)
-	upstreamBody := fmt.Sprintf("event: error\ndata: {\"error\":{\"code\":\"content_policy_violation\",\"message\":%q}}\n\n", message)
-	svc := newOpenAICompatMessagesSSEService(io.NopCloser(strings.NewReader(upstreamBody)), "rid_buffered_bare_large", nil)
-
-	result, err := svc.ForwardAsAnthropic(context.Background(), c, newOpenAICompatMessagesTestAccount(), body, "", "gpt-5.4")
-	require.NotNil(t, result)
-	require.Error(t, err)
-	require.NotContains(t, err.Error(), secret)
-	require.NotContains(t, rec.Body.String(), secret)
-	require.True(t, utf8.Valid(rec.Body.Bytes()))
-	require.LessOrEqual(t, len(gjson.GetBytes(rec.Body.Bytes(), "error.message").String()), openAIMessagesErrorMessageMaxBytes)
-}
-
-func TestForwardAsAnthropic_BufferedTopLevelResponseFailedTriggersFailover(t *testing.T) {
-	t.Parallel()
-
-	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":false}`)
-	c, _ := newOpenAICompatMessagesTestContext(body)
-
-	upstreamBody := strings.Join([]string{
-		`event: response.failed`,
-		`data: {"id":"resp_failed","object":"response","model":"gpt-5.4","status":"failed","error":{"code":"server_error","message":"bad upstream"},"output":[],"usage":{"input_tokens":5,"output_tokens":0,"total_tokens":5}}`,
-		"",
-		"data: [DONE]",
-		"",
-	}, "\n")
-	svc := newOpenAICompatMessagesSSEService(io.NopCloser(strings.NewReader(upstreamBody)), "rid_buffered_top_failed", nil)
-
-	result, err := svc.ForwardAsAnthropic(context.Background(), c, newOpenAICompatMessagesTestAccount(), body, "", "gpt-5.4")
-	require.Nil(t, result)
-	var failoverErr *UpstreamFailoverError
-	require.ErrorAs(t, err, &failoverErr)
-	require.Equal(t, "bad upstream", gjson.GetBytes(failoverErr.ResponseBody, "error.message").String())
-}
-
-func TestForwardAsAnthropic_BufferedPolicyResponseFailedDoesNotFailover(t *testing.T) {
-	t.Parallel()
-
-	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":false}`)
-	c, rec := newOpenAICompatMessagesTestContext(body)
-
-	upstreamBody := strings.Join([]string{
-		`data: {"type":"response.failed","response":{"id":"resp_failed","object":"response","model":"gpt-5.4","status":"failed","error":{"code":"content_policy_violation","message":"request violates safety policy"},"output":[],"usage":{"input_tokens":5,"output_tokens":0,"total_tokens":5}}}`,
-		"",
-		"data: [DONE]",
-		"",
-	}, "\n")
-	svc := newOpenAICompatMessagesSSEService(io.NopCloser(strings.NewReader(upstreamBody)), "rid_buffered_policy_failed", nil)
-
-	result, err := svc.ForwardAsAnthropic(context.Background(), c, newOpenAICompatMessagesTestAccount(), body, "", "gpt-5.4")
-	require.NotNil(t, result)
-	require.Equal(t, 5, result.Usage.InputTokens)
-	require.False(t, result.Stream)
-	require.Error(t, err)
-	var failoverErr *UpstreamFailoverError
-	require.False(t, errors.As(err, &failoverErr))
-	require.Equal(t, http.StatusBadGateway, rec.Code)
-	require.Equal(t, "error", gjson.GetBytes(rec.Body.Bytes(), "type").String())
-	require.Equal(t, "request violates safety policy", gjson.GetBytes(rec.Body.Bytes(), "error.message").String())
-}
-
-func TestForwardAsAnthropic_BufferedInvalidRequestTypeDoesNotFailover(t *testing.T) {
-	t.Parallel()
-
-	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":false}`)
-	c, rec := newOpenAICompatMessagesTestContext(body)
-
-	upstreamBody := strings.Join([]string{
-		`data: {"type":"response.failed","response":{"id":"resp_failed","object":"response","model":"gpt-5.4","status":"failed","error":{"type":"invalid_request_error","message":"Unsupported parameter"},"output":[],"usage":{"input_tokens":5,"output_tokens":0,"total_tokens":5}}}`,
-		"",
-		"data: [DONE]",
-		"",
-	}, "\n")
-	svc := newOpenAICompatMessagesSSEService(io.NopCloser(strings.NewReader(upstreamBody)), "rid_buffered_invalid_request_type", nil)
-
-	result, err := svc.ForwardAsAnthropic(context.Background(), c, newOpenAICompatMessagesTestAccount(), body, "", "gpt-5.4")
-	require.NotNil(t, result)
-	require.Equal(t, 5, result.Usage.InputTokens)
-	require.Error(t, err)
-	var failoverErr *UpstreamFailoverError
-	require.False(t, errors.As(err, &failoverErr))
-	require.Equal(t, http.StatusBadGateway, rec.Code)
-	require.Equal(t, "Unsupported parameter", gjson.GetBytes(rec.Body.Bytes(), "error.message").String())
-}
-
-func TestOpenAIStreamFailoverErrorHonorsPoolModeRetryStatusPolicy(t *testing.T) {
-	t.Parallel()
-
-	account := &Account{
-		Platform: PlatformOpenAI,
-		Type:     AccountTypeAPIKey,
-		Credentials: map[string]any{
-			"api_key":                      "sk-test",
-			"pool_mode":                    true,
-			"pool_mode_retry_status_codes": []any{},
-		},
-	}
-	svc := &OpenAIGatewayService{}
-	payload := []byte(`{"type":"response.failed","response":{"error":{"code":"server_error","message":"server overloaded"}}}`)
-
-	err := svc.newOpenAIStreamFailoverError(nil, account, false, "rid", payload, "server overloaded")
-	require.False(t, err.RetryableOnSameAccount)
-
-	account.Credentials["pool_mode_retry_status_codes"] = []any{502}
-	err = svc.newOpenAIStreamFailoverError(nil, account, false, "rid", payload, "server overloaded")
-	require.True(t, err.RetryableOnSameAccount)
-}
-
-func TestForwardAsAnthropic_BufferedResponseForcesJSONContentType(t *testing.T) {
-	t.Parallel()
-
-	rec := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(rec)
-	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":false}`)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
-	c.Request.Header.Set("Content-Type", "application/json")
-
-	upstreamBody := strings.Join([]string{
-		`data: {"type":"response.completed","response":{"id":"resp_1","object":"response","model":"gpt-5.4","status":"completed","output":[{"type":"message","id":"msg_1","role":"assistant","status":"completed","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":5,"output_tokens":2,"total_tokens":7}}}`,
-		"",
-		"data: [DONE]",
-		"",
-	}, "\n")
-	upstream := &httpUpstreamRecorder{resp: &http.Response{
-		StatusCode: http.StatusOK,
-		Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "x-request-id": []string{"rid_json"}},
-		Body:       io.NopCloser(strings.NewReader(upstreamBody)),
-	}}
-
-	svc := &OpenAIGatewayService{
-		httpUpstream:         upstream,
-		cfg:                  &config.Config{Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}}},
-		responseHeaderFilter: responseheaders.CompileHeaderFilter(config.ResponseHeaderConfig{}),
-	}
-	account := &Account{
-		ID:          1,
-		Name:        "openai-oauth",
-		Platform:    PlatformOpenAI,
-		Type:        AccountTypeOAuth,
-		Concurrency: 1,
-		Credentials: map[string]any{
-			"access_token":       "oauth-token",
-			"chatgpt_account_id": "chatgpt-acc",
-		},
-	}
-
-	result, err := svc.ForwardAsAnthropic(context.Background(), c, account, body, "", "gpt-5.4")
-	require.NoError(t, err)
-	require.NotNil(t, result)
-	require.Equal(t, http.StatusOK, rec.Code)
-	require.Equal(t, "application/json; charset=utf-8", rec.Header().Get("Content-Type"))
-	require.Equal(t, "ok", gjson.GetBytes(rec.Body.Bytes(), "content.0.text").String())
 }
 
 func TestForwardAsAnthropic_MappedClaudeModelAcceptsChatUsageShape(t *testing.T) {
 	t.Parallel()
+	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -1064,6 +435,7 @@ func TestForwardAsAnthropic_MappedClaudeModelAcceptsChatUsageShape(t *testing.T)
 
 func TestForwardAsAnthropic_InjectsPromptCacheKeyForAPIKeyMessagesDispatch(t *testing.T) {
 	t.Parallel()
+	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -1109,6 +481,7 @@ func TestForwardAsAnthropic_InjectsPromptCacheKeyForAPIKeyMessagesDispatch(t *te
 
 func TestForwardAsAnthropic_AutoDerivesPromptCacheKeyWhenMessagesDispatchHasNoSessionID(t *testing.T) {
 	t.Parallel()
+	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -1155,6 +528,7 @@ func TestForwardAsAnthropic_AutoDerivesPromptCacheKeyWhenMessagesDispatchHasNoSe
 
 func TestForwardAsAnthropic_DoesNotAutoDerivePromptCacheKeyForNonCodexModel(t *testing.T) {
 	t.Parallel()
+	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -1197,12 +571,12 @@ func TestForwardAsAnthropic_DoesNotAutoDerivePromptCacheKeyForNonCodexModel(t *t
 	require.Empty(t, upstream.lastReq.Header.Get("session_id"))
 }
 
-func TestForwardAsAnthropic_KeepsFullReplayWithoutContinuation(t *testing.T) {
+func TestForwardAsAnthropic_TrimsFullReplayOnlyForCodexCompatModels(t *testing.T) {
 	t.Parallel()
+	gin.SetMode(gin.TestMode)
 
-	const messageCount = 15
-	messages := make([]string, 0, messageCount)
-	for i := 0; i < messageCount; i++ {
+	messages := make([]string, 0, openAICompatAnthropicReplayMaxTailMessages+3)
+	for i := 0; i < openAICompatAnthropicReplayMaxTailMessages+3; i++ {
 		messages = append(messages, `{"role":"user","content":"message-`+fmt.Sprintf("%02d", i)+`"}`)
 	}
 	body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[` + strings.Join(messages, ",") + `],"stream":false}`)
@@ -1250,23 +624,23 @@ func TestForwardAsAnthropic_KeepsFullReplayWithoutContinuation(t *testing.T) {
 	}
 
 	codexBody := run(t, "gpt-5.3-codex")
-	require.Equal(t, int64(messageCount+1), gjson.GetBytes(codexBody, "input.#").Int())
+	require.Equal(t, int64(openAICompatAnthropicReplayMaxTailMessages+1), gjson.GetBytes(codexBody, "input.#").Int())
 	require.Equal(t, "developer", gjson.GetBytes(codexBody, "input.0.role").String())
 	require.Contains(t, gjson.GetBytes(codexBody, "input.0.content.0.text").String(), "<sub2api-claude-code-todo-guard>")
-	require.Equal(t, "message-00", gjson.GetBytes(codexBody, "input.1.content.0.text").String())
-	require.Equal(t, "message-14", gjson.GetBytes(codexBody, "input.15.content.0.text").String())
+	require.Equal(t, "message-03", gjson.GetBytes(codexBody, "input.1.content.0.text").String())
+	require.Equal(t, "message-14", gjson.GetBytes(codexBody, "input.12.content.0.text").String())
 
 	nonCompatBody := run(t, "gpt-4o")
-	require.Equal(t, int64(messageCount), gjson.GetBytes(nonCompatBody, "input.#").Int())
+	require.Equal(t, int64(openAICompatAnthropicReplayMaxTailMessages+3), gjson.GetBytes(nonCompatBody, "input.#").Int())
 	require.Equal(t, "message-00", gjson.GetBytes(nonCompatBody, "input.0.content.0.text").String())
 }
 
 func TestForwardAsAnthropic_OAuthCompatKeepsFullReplayForCacheGrowth(t *testing.T) {
 	t.Parallel()
+	gin.SetMode(gin.TestMode)
 
-	const messageCount = 15
-	messages := make([]string, 0, messageCount)
-	for i := 0; i < messageCount; i++ {
+	messages := make([]string, 0, openAICompatAnthropicReplayMaxTailMessages+3)
+	for i := 0; i < openAICompatAnthropicReplayMaxTailMessages+3; i++ {
 		messages = append(messages, `{"role":"user","content":"message-`+fmt.Sprintf("%02d", i)+`"}`)
 	}
 	body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[` + strings.Join(messages, ",") + `],"stream":false}`)
@@ -1296,7 +670,7 @@ func TestForwardAsAnthropic_OAuthCompatKeepsFullReplayForCacheGrowth(t *testing.
 	result, err := svc.ForwardAsAnthropic(context.Background(), c, account, body, "", "gpt-5.4")
 	require.NoError(t, err)
 	require.NotNil(t, result)
-	require.Equal(t, int64(messageCount+1), gjson.GetBytes(upstream.lastBody, "input.#").Int())
+	require.Equal(t, int64(openAICompatAnthropicReplayMaxTailMessages+4), gjson.GetBytes(upstream.lastBody, "input.#").Int())
 	require.Equal(t, "developer", gjson.GetBytes(upstream.lastBody, "input.0.role").String())
 	require.Contains(t, gjson.GetBytes(upstream.lastBody, "input.0.content.0.text").String(), "<sub2api-claude-code-todo-guard>")
 	require.Equal(t, "message-00", gjson.GetBytes(upstream.lastBody, "input.1.content.0.text").String())
@@ -1306,6 +680,7 @@ func TestForwardAsAnthropic_OAuthCompatKeepsFullReplayForCacheGrowth(t *testing.
 
 func TestForwardAsAnthropic_AttachesPreviousResponseIDForCompatContinuation(t *testing.T) {
 	t.Parallel()
+	gin.SetMode(gin.TestMode)
 
 	upstream := &httpUpstreamRecorder{}
 	svc := &OpenAIGatewayService{
@@ -1357,6 +732,7 @@ func TestForwardAsAnthropic_AttachesPreviousResponseIDForCompatContinuation(t *t
 
 func TestForwardAsAnthropic_PreviousResponseIDKeepsMultiToolCallContext(t *testing.T) {
 	t.Parallel()
+	gin.SetMode(gin.TestMode)
 
 	upstream := &httpUpstreamRecorder{}
 	svc := &OpenAIGatewayService{
@@ -1411,6 +787,7 @@ func TestForwardAsAnthropic_PreviousResponseIDKeepsMultiToolCallContext(t *testi
 
 func TestForwardAsAnthropic_ReplaysWithoutContinuationWhenPreviousResponseMissing(t *testing.T) {
 	t.Parallel()
+	gin.SetMode(gin.TestMode)
 
 	upstream := &httpUpstreamRecorder{}
 	svc := &OpenAIGatewayService{
@@ -1430,12 +807,7 @@ func TestForwardAsAnthropic_ReplaysWithoutContinuationWhenPreviousResponseMissin
 	}
 
 	svc.bindOpenAICompatSessionResponseID(context.Background(), nil, account, "stable-cache-key", "resp_missing")
-	const messageCount = 15
-	messages := make([]string, 0, messageCount)
-	for i := 0; i < messageCount; i++ {
-		messages = append(messages, `{"role":"user","content":"message-`+fmt.Sprintf("%02d", i)+`"}`)
-	}
-	secondBody := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[` + strings.Join(messages, ",") + `],"stream":false}`)
+	secondBody := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"first"},{"role":"assistant","content":"ok"},{"role":"user","content":"second"}],"stream":false}`)
 	upstream.responses = []*http.Response{
 		{
 			StatusCode: http.StatusBadRequest,
@@ -1457,15 +829,16 @@ func TestForwardAsAnthropic_ReplaysWithoutContinuationWhenPreviousResponseMissin
 	require.Len(t, upstream.requests, 2)
 	require.Equal(t, "resp_missing", gjson.GetBytes(upstream.bodies[0], "previous_response_id").String())
 	require.False(t, gjson.GetBytes(upstream.bodies[1], "previous_response_id").Exists())
-	require.Equal(t, int64(messageCount+1), gjson.GetBytes(upstream.bodies[1], "input.#").Int())
+	require.Equal(t, int64(4), gjson.GetBytes(upstream.bodies[1], "input.#").Int())
 	require.Equal(t, "developer", gjson.GetBytes(upstream.bodies[1], "input.0.role").String())
 	require.Contains(t, gjson.GetBytes(upstream.bodies[1], "input.0.content.0.text").String(), "<sub2api-claude-code-todo-guard>")
-	require.Equal(t, "message-00", gjson.GetBytes(upstream.bodies[1], "input.1.content.0.text").String())
-	require.Equal(t, "message-14", gjson.GetBytes(upstream.bodies[1], "input.15.content.0.text").String())
+	require.Equal(t, "first", gjson.GetBytes(upstream.bodies[1], "input.1.content.0.text").String())
+	require.Equal(t, "second", gjson.GetBytes(upstream.bodies[1], "input.3.content.0.text").String())
 }
 
 func TestForwardAsAnthropic_DisablesAPIKeyContinuationWhenUpstreamRequiresWebSocketV2(t *testing.T) {
 	t.Parallel()
+	gin.SetMode(gin.TestMode)
 
 	upstream := &httpUpstreamRecorder{}
 	svc := &OpenAIGatewayService{
@@ -1524,13 +897,13 @@ func TestForwardAsAnthropic_DisablesAPIKeyContinuationWhenUpstreamRequiresWebSoc
 
 func TestForwardAsAnthropic_APIKeyMetadataSessionSurvivesChangingCacheControlAnchorAfterContinuationDisabled(t *testing.T) {
 	t.Parallel()
+	gin.SetMode(gin.TestMode)
 
 	metadata := `{"user_id":"{\"device_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"account_uuid\":\"\",\"session_id\":\"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\"}"}`
 	firstBody := []byte(`{"model":"claude-haiku-4-5-20251001","max_tokens":16,"metadata":` + metadata + `,"system":[{"type":"text","text":"project docs","cache_control":{"type":"ephemeral"}}],"messages":[{"role":"user","content":"first"}],"stream":false}`)
-	const messageCount = 16
-	messages := make([]string, 0, messageCount)
+	messages := make([]string, 0, openAICompatAnthropicReplayMaxTailMessages+4)
 	messages = append(messages, `{"role":"user","content":[{"type":"text","text":"rewritten context","cache_control":{"type":"ephemeral"}}]}`)
-	for i := 1; i < messageCount; i++ {
+	for i := 1; i < openAICompatAnthropicReplayMaxTailMessages+4; i++ {
 		messages = append(messages, `{"role":"user","content":"message-`+fmt.Sprintf("%02d", i)+`"}`)
 	}
 	secondBody := []byte(`{"model":"claude-haiku-4-5-20251001","max_tokens":16,"metadata":` + metadata + `,"messages":[` + strings.Join(messages, ",") + `],"stream":false}`)
@@ -1580,7 +953,7 @@ func TestForwardAsAnthropic_APIKeyMetadataSessionSurvivesChangingCacheControlAnc
 	require.Len(t, upstream.requests, 2)
 	require.Equal(t, firstKey, gjson.GetBytes(upstream.bodies[1], "prompt_cache_key").String())
 	require.False(t, gjson.GetBytes(upstream.bodies[1], "previous_response_id").Exists())
-	require.Equal(t, int64(messageCount+1), gjson.GetBytes(upstream.bodies[1], "input.#").Int())
+	require.Equal(t, int64(openAICompatAnthropicReplayMaxTailMessages+5), gjson.GetBytes(upstream.bodies[1], "input.#").Int())
 	require.Equal(t, "developer", gjson.GetBytes(upstream.bodies[1], "input.0.role").String())
 	require.Contains(t, gjson.GetBytes(upstream.bodies[1], "input.0.content.0.text").String(), "<sub2api-claude-code-todo-guard>")
 	require.Equal(t, "rewritten context", gjson.GetBytes(upstream.bodies[1], "input.1.content.0.text").String())
@@ -1589,6 +962,7 @@ func TestForwardAsAnthropic_APIKeyMetadataSessionSurvivesChangingCacheControlAnc
 
 func TestForwardAsAnthropic_DoesNotAttachPreviousResponseIDForOAuthCompat(t *testing.T) {
 	t.Parallel()
+	gin.SetMode(gin.TestMode)
 
 	upstream := &httpUpstreamRecorder{resp: openAICompatSSECompletedResponse("resp_oauth_next", "gpt-5.4")}
 	svc := &OpenAIGatewayService{
@@ -1622,6 +996,7 @@ func TestForwardAsAnthropic_DoesNotAttachPreviousResponseIDForOAuthCompat(t *tes
 
 func TestForwardAsAnthropic_ReusesOAuthCodexTurnState(t *testing.T) {
 	t.Parallel()
+	gin.SetMode(gin.TestMode)
 
 	firstResp := openAICompatSSECompletedResponse("resp_oauth_first", "gpt-5.4")
 	firstResp.Header.Set("x-codex-turn-state", "turn_state_first")
@@ -1655,8 +1030,7 @@ func TestForwardAsAnthropic_ReusesOAuthCodexTurnState(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, firstResult)
 	require.Empty(t, upstream.requests[0].Header.Get("x-codex-turn-state"))
-	require.Empty(t, upstream.requests[0].Header.Get("OpenAI-Beta"))
-	require.Equal(t, codexOfficialOriginator, upstream.requests[0].Header.Get("originator"))
+	requireOpenAIMessagesCodexIdentity(t, upstream.requests[0], codexCLIUserAgent, openai.CodexDefaultOriginator)
 
 	secondBody := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"first"},{"role":"assistant","content":"ok"},{"role":"user","content":"second"}],"stream":false}`)
 	secondRec := httptest.NewRecorder()
@@ -1668,16 +1042,67 @@ func TestForwardAsAnthropic_ReusesOAuthCodexTurnState(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, secondResult)
 	require.Equal(t, "turn_state_first", upstream.requests[1].Header.Get("x-codex-turn-state"))
-	require.Equal(t, isolateOpenAICodexOAuthSessionID(0, "stable-cache-key", "session"), upstream.requests[1].Header.Get("session_id"))
+	require.Equal(t, generateSessionUUID(isolateOpenAISessionID(0, "stable-cache-key")), upstream.requests[1].Header.Get("session_id"))
 	require.Empty(t, upstream.requests[1].Header.Get("conversation_id"))
-	require.Empty(t, upstream.requests[1].Header.Get("OpenAI-Beta"))
-	require.Equal(t, codexOfficialOriginator, upstream.requests[1].Header.Get("originator"))
+	requireOpenAIMessagesCodexIdentity(t, upstream.requests[1], codexCLIUserAgent, openai.CodexDefaultOriginator)
 	require.False(t, gjson.GetBytes(upstream.bodies[1], "prompt_cache_key").Exists())
 	require.False(t, gjson.GetBytes(upstream.bodies[1], "previous_response_id").Exists())
 }
 
+func TestForwardAsAnthropic_OAuthRestoresCodexIdentityHeaders(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	const tuiUA = "codex-tui/9.9.9 (Mac OS X 14.0; arm64) iTerm (codex-tui; 9.9.9)"
+	const vscodeUA = "codex_vscode/9.9.9 (Mac OS X 14.0; arm64) vscode (codex_vscode; 9.9.9)"
+	// messages 桥接路径同样强制统一出站身份：三类客户端身份都收敛到规范身份。
+	tests := []struct {
+		name       string
+		userAgent  string
+		originator string
+	}{
+		{name: "官方vscode身份", userAgent: vscodeUA, originator: "opencode"},
+		{name: "TUI身份", userAgent: tuiUA, originator: "opencode"},
+		{name: "第三方UA", userAgent: "third-party-client/1.0.0", originator: "opencode"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":false}`)
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
+			c.Request.Header.Set("Content-Type", "application/json")
+			c.Request.Header.Set("User-Agent", tt.userAgent)
+			c.Request.Header.Set("originator", tt.originator)
+
+			upstream := &httpUpstreamRecorder{resp: openAICompatSSECompletedResponse("resp_identity", "gpt-5.4")}
+			svc := &OpenAIGatewayService{
+				httpUpstream: upstream,
+				cfg:          &config.Config{Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}}},
+			}
+			account := &Account{
+				ID:          1,
+				Name:        "openai-oauth",
+				Platform:    PlatformOpenAI,
+				Type:        AccountTypeOAuth,
+				Concurrency: 1,
+				Credentials: map[string]any{
+					"access_token":       "oauth-token",
+					"chatgpt_account_id": "chatgpt-acc",
+				},
+			}
+
+			result, err := svc.ForwardAsAnthropic(context.Background(), c, account, body, "", "gpt-5.4")
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			requireOpenAIMessagesCodexIdentity(t, upstream.lastReq, codexCLIUserAgent, openai.CodexDefaultOriginator)
+		})
+	}
+}
+
 func TestForwardAsAnthropic_OAuthDigestFallbackReusesTurnStateWithoutExplicitKey(t *testing.T) {
 	t.Parallel()
+	gin.SetMode(gin.TestMode)
 
 	firstResp := openAICompatSSECompletedResponse("resp_oauth_digest_first", "gpt-5.4")
 	firstResp.Header.Set("x-codex-turn-state", "turn_state_digest_first")
@@ -1713,6 +1138,7 @@ func TestForwardAsAnthropic_OAuthDigestFallbackReusesTurnStateWithoutExplicitKey
 	firstSessionID := upstream.requests[0].Header.Get("session_id")
 	require.NotEmpty(t, firstSessionID)
 	require.Empty(t, upstream.requests[0].Header.Get("x-codex-turn-state"))
+	requireOpenAIMessagesCodexIdentity(t, upstream.requests[0], codexCLIUserAgent, openai.CodexDefaultOriginator)
 	require.False(t, gjson.GetBytes(upstream.bodies[0], "prompt_cache_key").Exists())
 
 	secondBody := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"first"},{"role":"assistant","content":"ok"},{"role":"user","content":"second"}],"stream":false}`)
@@ -1727,12 +1153,14 @@ func TestForwardAsAnthropic_OAuthDigestFallbackReusesTurnStateWithoutExplicitKey
 	require.Equal(t, firstSessionID, upstream.requests[1].Header.Get("session_id"))
 	require.Equal(t, "turn_state_digest_first", upstream.requests[1].Header.Get("x-codex-turn-state"))
 	require.Empty(t, upstream.requests[1].Header.Get("conversation_id"))
+	requireOpenAIMessagesCodexIdentity(t, upstream.requests[1], codexCLIUserAgent, openai.CodexDefaultOriginator)
 	require.False(t, gjson.GetBytes(upstream.bodies[1], "prompt_cache_key").Exists())
 	require.False(t, gjson.GetBytes(upstream.bodies[1], "previous_response_id").Exists())
 }
 
 func TestForwardAsAnthropic_OAuthMetadataSessionSurvivesDigestPrefixRewrite(t *testing.T) {
 	t.Parallel()
+	gin.SetMode(gin.TestMode)
 
 	firstResp := openAICompatSSECompletedResponse("resp_oauth_metadata_first", "gpt-5.5")
 	firstResp.Header.Set("x-codex-turn-state", "turn_state_metadata_first")
@@ -1789,6 +1217,7 @@ func TestForwardAsAnthropic_OAuthMetadataSessionSurvivesDigestPrefixRewrite(t *t
 
 func TestForwardAsAnthropic_OAuthMetadataSessionSurvivesChangingCacheControlAnchor(t *testing.T) {
 	t.Parallel()
+	gin.SetMode(gin.TestMode)
 
 	firstResp := openAICompatSSECompletedResponse("resp_oauth_cache_anchor_first", "gpt-5.5")
 	firstResp.Header.Set("x-codex-turn-state", "turn_state_cache_anchor_first")
@@ -1845,6 +1274,7 @@ func TestForwardAsAnthropic_OAuthMetadataSessionSurvivesChangingCacheControlAnch
 
 func TestForwardAsAnthropic_OAuthKeepsSystemAsDeveloperInput(t *testing.T) {
 	t.Parallel()
+	gin.SetMode(gin.TestMode)
 
 	upstream := &httpUpstreamRecorder{resp: openAICompatSSECompletedResponse("resp_oauth_system", "gpt-5.4")}
 	svc := &OpenAIGatewayService{
@@ -1878,12 +1308,12 @@ func TestForwardAsAnthropic_OAuthKeepsSystemAsDeveloperInput(t *testing.T) {
 	instructions := gjson.GetBytes(upstream.lastBody, "instructions")
 	require.True(t, instructions.Exists())
 	require.Empty(t, instructions.String())
-	require.Empty(t, upstream.requests[0].Header.Get("OpenAI-Beta"))
-	require.Equal(t, codexOfficialOriginator, upstream.requests[0].Header.Get("originator"))
+	requireOpenAIMessagesCodexIdentity(t, upstream.requests[0], codexCLIUserAgent, openai.CodexDefaultOriginator)
 }
 
 func TestForwardAsAnthropic_OAuthAddsClaudeCodeTodoGuardForCompatModel(t *testing.T) {
 	t.Parallel()
+	gin.SetMode(gin.TestMode)
 
 	upstream := &httpUpstreamRecorder{resp: openAICompatSSECompletedResponse("resp_oauth_todo_guard", "gpt-5.5")}
 	svc := &OpenAIGatewayService{
@@ -1920,6 +1350,7 @@ func TestForwardAsAnthropic_OAuthAddsClaudeCodeTodoGuardForCompatModel(t *testin
 
 func TestForwardAsAnthropic_OAuthPreservesClaudeCodeToolCallID(t *testing.T) {
 	t.Parallel()
+	gin.SetMode(gin.TestMode)
 
 	upstream := &httpUpstreamRecorder{resp: openAICompatSSECompletedResponse("resp_oauth_tool", "gpt-5.4")}
 	svc := &OpenAIGatewayService{
@@ -1956,6 +1387,7 @@ func TestForwardAsAnthropic_OAuthPreservesClaudeCodeToolCallID(t *testing.T) {
 
 func TestForwardAsAnthropic_StoresStreamingResponseIDWithoutUsage(t *testing.T) {
 	t.Parallel()
+	gin.SetMode(gin.TestMode)
 
 	upstream := &httpUpstreamRecorder{}
 	svc := &OpenAIGatewayService{
@@ -2013,6 +1445,15 @@ func openAICompatSSECompletedResponse(responseID, model string) *http.Response {
 	}
 }
 
+func requireOpenAIMessagesCodexIdentity(t *testing.T, req *http.Request, wantUserAgent, wantOriginator string) {
+	t.Helper()
+	require.NotNil(t, req)
+	require.Equal(t, wantUserAgent, req.Header.Get("User-Agent"))
+	require.Equal(t, wantOriginator, req.Header.Get("originator"))
+	require.Equal(t, codexCLIVersion, req.Header.Get("version"))
+	require.Equal(t, "responses=experimental", req.Header.Get("OpenAI-Beta"))
+}
+
 func openAICompatSSEResponseWithoutUsage(responseID, model string) *http.Response {
 	body := strings.Join([]string{
 		`data: {"type":"response.completed","response":{"id":"` + responseID + `","object":"response","model":"` + model + `","status":"completed","output":[{"type":"message","id":"msg_1","role":"assistant","status":"completed","content":[{"type":"output_text","text":"ok"}]}]}}`,
@@ -2029,6 +1470,7 @@ func openAICompatSSEResponseWithoutUsage(responseID, model string) *http.Respons
 
 func TestForwardAsAnthropic_ForcedCodexInstructionsTemplatePrependsRenderedInstructions(t *testing.T) {
 	t.Parallel()
+	gin.SetMode(gin.TestMode)
 
 	templateDir := t.TempDir()
 	templatePath := filepath.Join(templateDir, "codex-instructions.md.tmpl")
@@ -2079,6 +1521,7 @@ func TestForwardAsAnthropic_ForcedCodexInstructionsTemplatePrependsRenderedInstr
 
 func TestForwardAsAnthropic_ForcedCodexInstructionsTemplateUsesCachedTemplateContent(t *testing.T) {
 	t.Parallel()
+	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -2124,6 +1567,7 @@ func TestForwardAsAnthropic_ForcedCodexInstructionsTemplateUsesCachedTemplateCon
 }
 
 func TestForwardAsAnthropic_ClientDisconnectDrainsUpstreamUsage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -2170,6 +1614,7 @@ func TestForwardAsAnthropic_ClientDisconnectDrainsUpstreamUsage(t *testing.T) {
 }
 
 func TestForwardAsAnthropic_TerminalUsageWithoutUpstreamCloseReturns(t *testing.T) {
+	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -2225,6 +1670,7 @@ func TestForwardAsAnthropic_TerminalUsageWithoutUpstreamCloseReturns(t *testing.
 }
 
 func TestForwardAsAnthropic_EventNamedTerminalWithoutUpstreamCloseReturns(t *testing.T) {
+	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -2285,6 +1731,7 @@ func TestForwardAsAnthropic_EventNamedTerminalWithoutUpstreamCloseReturns(t *tes
 }
 
 func TestForwardAsAnthropic_EventNamedTerminalWithKeepaliveReturns(t *testing.T) {
+	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -2352,6 +1799,7 @@ func TestForwardAsAnthropic_EventNamedTerminalWithKeepaliveReturns(t *testing.T)
 }
 
 func TestForwardAsAnthropic_BufferedTerminalWithoutUpstreamCloseReturns(t *testing.T) {
+	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -2406,7 +1854,45 @@ func TestForwardAsAnthropic_BufferedTerminalWithoutUpstreamCloseReturns(t *testi
 	}
 }
 
+func TestHandleAnthropicBufferedStreamingResponse_OverridesUpstreamContentType(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body: io.NopCloser(strings.NewReader(
+			`data: {"type":"response.completed","response":{"id":"resp_buffered_json","object":"response","model":"gpt-5.4","status":"completed","output":[{"type":"message","id":"msg_1","role":"assistant","status":"completed","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":15,"output_tokens":6,"total_tokens":21,"input_tokens_details":{"cached_tokens":5}}}}` + "\n\n",
+		)),
+	}
+	cfg := &config.Config{}
+	svc := &OpenAIGatewayService{
+		cfg:                  cfg,
+		responseHeaderFilter: compileResponseHeaderFilter(cfg),
+	}
+
+	result, err := svc.handleAnthropicBufferedStreamingResponse(
+		resp, c, &Account{}, "claude-sonnet-4-5", "gpt-5.4", "gpt-5.4", time.Now(),
+	)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, "application/json; charset=utf-8", rec.Header().Get("Content-Type"))
+	require.NotContains(t, rec.Header().Get("Content-Type"), "text/event-stream")
+
+	var message apicompat.AnthropicResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &message))
+	require.Equal(t, "message", message.Type)
+	require.Equal(t, "resp_buffered_json", message.ID)
+	require.Equal(t, 10, message.Usage.InputTokens)
+	require.Equal(t, 6, message.Usage.OutputTokens)
+	require.Equal(t, 5, message.Usage.CacheReadInputTokens)
+}
+
 func TestForwardAsAnthropic_BufferedEventNamedTerminalWithoutUpstreamCloseReturns(t *testing.T) {
+	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -2467,6 +1953,7 @@ func TestForwardAsAnthropic_BufferedEventNamedTerminalWithoutUpstreamCloseReturn
 }
 
 func TestForwardAsAnthropic_MissingTerminalBeforeOutputReturnsFailoverAndOps(t *testing.T) {
+	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -2516,6 +2003,7 @@ func TestForwardAsAnthropic_MissingTerminalBeforeOutputReturnsFailoverAndOps(t *
 }
 
 func TestForwardAsAnthropic_MissingTerminalAfterOutputRecordsOpsWithoutFailover(t *testing.T) {
+	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -2566,11 +2054,10 @@ func TestForwardAsAnthropic_MissingTerminalAfterOutputRecordsOpsWithoutFailover(
 	require.Equal(t, int64(1), events[0].AccountID)
 	require.Equal(t, "rid_partial_missing_terminal", events[0].UpstreamRequestID)
 	require.Contains(t, events[0].Message, "terminal event")
-	require.Equal(t, "https://chatgpt.com/backend-api/codex/responses", events[0].UpstreamURL)
-	require.Equal(t, "/v1/responses", events[0].UpstreamEndpoint)
 }
 
 func TestForwardAsAnthropic_MissingTerminalAfterClientDisconnectSkipsOpsAndFailover(t *testing.T) {
+	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -2581,8 +2068,6 @@ func TestForwardAsAnthropic_MissingTerminalAfterClientDisconnectSkipsOpsAndFailo
 
 	upstreamBody := strings.Join([]string{
 		`data: {"type":"response.created","response":{"id":"resp_1","model":"gpt-5.4","status":"in_progress","output":[]}}`,
-		"",
-		`data: {"type":"response.output_text.delta","delta":"ok"}`,
 		"",
 	}, "\n")
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
@@ -2617,6 +2102,7 @@ func TestForwardAsAnthropic_MissingTerminalAfterClientDisconnectSkipsOpsAndFailo
 }
 
 func TestForwardAsAnthropic_CompleteStreamDoesNotRecordMissingTerminalOps(t *testing.T) {
+	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -2672,7 +2158,8 @@ func openAICompatOpsEvents(t *testing.T, c *gin.Context) []*OpsUpstreamErrorEven
 	return events
 }
 
-func TestForwardAsAnthropic_RejectsClientCancelBeforeAdmission(t *testing.T) {
+func TestForwardAsAnthropic_UpstreamRequestIgnoresClientCancel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -2708,7 +2195,8 @@ func TestForwardAsAnthropic_RejectsClientCancelBeforeAdmission(t *testing.T) {
 	}
 
 	result, err := svc.ForwardAsAnthropic(reqCtx, c, account, body, "", "gpt-5.1")
-	require.ErrorIs(t, err, context.Canceled)
-	require.Nil(t, result)
-	require.Nil(t, upstream.lastReq)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, upstream.lastReq)
+	require.NoError(t, upstream.lastReq.Context().Err())
 }

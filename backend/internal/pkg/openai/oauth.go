@@ -26,14 +26,9 @@ const (
 	DefaultRedirectURI = "http://localhost:1455/auth/callback"
 
 	// Scopes
-	DefaultScopes = "openid profile email offline_access api.connectors.read api.connectors.invoke"
+	DefaultScopes = "openid profile email offline_access"
 	// RefreshScopes - scope for token refresh (without offline_access, aligned with CRS project)
 	RefreshScopes = "openid profile email"
-
-	// Originator matches current Codex CLI browser-login authorize URLs.
-	DefaultOriginator = "codex_cli_rs"
-	// CodexUserAgent matches the requested Codex CLI OAuth token-exchange UA.
-	CodexUserAgent = "codex_cli_rs/0.140.0"
 
 	// Session TTL
 	SessionTTL = 30 * time.Minute
@@ -139,13 +134,13 @@ func GenerateRandomBytes(n int) ([]byte, error) {
 	return b, nil
 }
 
-// GenerateState generates a Codex-compatible random state string for OAuth.
+// GenerateState generates a random state string for OAuth
 func GenerateState() (string, error) {
 	bytes, err := GenerateRandomBytes(32)
 	if err != nil {
 		return "", err
 	}
-	return base64URLEncode(bytes), nil
+	return hex.EncodeToString(bytes), nil
 }
 
 // GenerateSessionID generates a unique session ID
@@ -157,13 +152,14 @@ func GenerateSessionID() (string, error) {
 	return hex.EncodeToString(bytes), nil
 }
 
-// GenerateCodeVerifier generates a Codex-compatible PKCE code verifier.
+// GenerateCodeVerifier generates a PKCE code verifier (64 bytes -> hex for OpenAI)
+// OpenAI uses hex encoding instead of base64url
 func GenerateCodeVerifier() (string, error) {
 	bytes, err := GenerateRandomBytes(64)
 	if err != nil {
 		return "", err
 	}
-	return base64URLEncode(bytes), nil
+	return hex.EncodeToString(bytes), nil
 }
 
 // GenerateCodeChallenge generates a PKCE code challenge using S256 method
@@ -180,23 +176,6 @@ func base64URLEncode(data []byte) string {
 	return strings.TrimRight(encoded, "=")
 }
 
-type CodexFormValue struct {
-	Key   string
-	Value string
-}
-
-func EncodeCodexForm(values []CodexFormValue) string {
-	parts := make([]string, 0, len(values))
-	for _, item := range values {
-		parts = append(parts, item.Key+"="+encodeCodexFormValue(item.Value))
-	}
-	return strings.Join(parts, "&")
-}
-
-func encodeCodexFormValue(value string) string {
-	return strings.ReplaceAll(url.QueryEscape(value), "+", "%20")
-}
-
 // BuildAuthorizationURL builds the OpenAI OAuth authorization URL
 func BuildAuthorizationURL(state, codeChallenge, redirectURI string) string {
 	return BuildAuthorizationURLForPlatform(state, codeChallenge, redirectURI, OAuthPlatformOpenAI)
@@ -204,41 +183,27 @@ func BuildAuthorizationURL(state, codeChallenge, redirectURI string) string {
 
 // BuildAuthorizationURLForPlatform builds authorization URL by platform.
 func BuildAuthorizationURLForPlatform(state, codeChallenge, redirectURI, platform string) string {
-	return BuildAuthorizationURLForPlatformWithOriginator(state, codeChallenge, redirectURI, platform, DefaultOriginator)
-}
-
-// BuildAuthorizationURLForPlatformWithOriginator builds authorization URL by platform
-// and lets account-scoped callers keep the authorize originator aligned with the
-// token-exchange UA profile captured for the pending OAuth session.
-func BuildAuthorizationURLForPlatformWithOriginator(state, codeChallenge, redirectURI, platform, originator string) string {
 	if redirectURI == "" {
 		redirectURI = DefaultRedirectURI
 	}
 
 	clientID, codexFlow := OAuthClientConfigByPlatform(platform)
-	originator = strings.TrimSpace(originator)
-	if originator == "" {
-		originator = DefaultOriginator
-	}
 
-	query := []CodexFormValue{
-		{Key: "response_type", Value: "code"},
-		{Key: "client_id", Value: clientID},
-		{Key: "redirect_uri", Value: redirectURI},
-		{Key: "scope", Value: DefaultScopes},
-		{Key: "code_challenge", Value: codeChallenge},
-		{Key: "code_challenge_method", Value: "S256"},
-		{Key: "id_token_add_organizations", Value: "true"},
-	}
+	params := url.Values{}
+	params.Set("response_type", "code")
+	params.Set("client_id", clientID)
+	params.Set("redirect_uri", redirectURI)
+	params.Set("scope", DefaultScopes)
+	params.Set("state", state)
+	params.Set("code_challenge", codeChallenge)
+	params.Set("code_challenge_method", "S256")
+	// OpenAI specific parameters
+	params.Set("id_token_add_organizations", "true")
 	if codexFlow {
-		query = append(query, CodexFormValue{Key: "codex_cli_simplified_flow", Value: "true"})
+		params.Set("codex_cli_simplified_flow", "true")
 	}
-	query = append(query,
-		CodexFormValue{Key: "state", Value: state},
-		CodexFormValue{Key: "originator", Value: originator},
-	)
 
-	return fmt.Sprintf("%s?%s", AuthorizeURL, EncodeCodexForm(query))
+	return fmt.Sprintf("%s?%s", AuthorizeURL, params.Encode())
 }
 
 // OAuthClientConfigByPlatform returns oauth client_id and whether codex simplified flow should be enabled.

@@ -2,69 +2,49 @@
   <AppLayout>
     <div
       data-testid="profile-shell"
-      class="mx-auto max-w-[1600px]"
+      class="mx-auto max-w-[950px] space-y-6"
     >
-      <!-- Page header -->
-      <header class="mb-8">
-        <p class="text-xs font-semibold uppercase tracking-[0.18em] text-primary-500 dark:text-primary-400">
-          {{ t('nav.profile') }}
-        </p>
-        <h1 class="font-display mt-1 text-3xl font-bold tracking-tight text-gray-900 dark:text-white">
-          {{ t('profile.title') }}
-        </h1>
-        <p class="mt-2 max-w-xl text-sm text-gray-500 dark:text-gray-400">
-          {{ t('profile.description') }}
-        </p>
-      </header>
+      <ProfileInfoCard
+        :user="user"
+        :linuxdo-enabled="linuxdoOAuthEnabled"
+        :dingtalk-enabled="dingtalkOAuthEnabled"
+        :oidc-enabled="oidcOAuthEnabled"
+        :oidc-provider-name="oidcOAuthProviderName"
+        :wechat-enabled="wechatOAuthEnabled"
+        :wechat-open-enabled="wechatOAuthOpenEnabled"
+        :wechat-mp-enabled="wechatOAuthMPEnabled"
+      />
 
-      <div class="grid grid-cols-1 gap-6 xl:grid-cols-3">
-        <!-- Primary column: identity + profile + linked sources (needs full width) -->
-        <div class="min-w-0 xl:col-span-2">
-          <ProfileInfoCard
-            :user="user"
-            :linuxdo-enabled="linuxdoOAuthEnabled"
-            :dingtalk-enabled="dingtalkOAuthEnabled"
-            :oidc-enabled="oidcOAuthEnabled"
-            :oidc-provider-name="oidcOAuthProviderName"
-            :wechat-enabled="wechatOAuthEnabled"
-            :wechat-open-enabled="wechatOAuthOpenEnabled"
-            :wechat-mp-enabled="wechatOAuthMPEnabled"
-          />
-        </div>
-
-        <!-- Side column: security & preferences -->
-        <div class="min-w-0 space-y-6 xl:col-span-1">
-          <div
-            v-if="contactInfo"
-            class="card p-5"
-          >
-            <div class="flex items-center gap-4">
-              <div class="rounded-xl bg-primary-100 p-3 text-primary-600 dark:bg-primary-900/30 dark:text-primary-400">
-                <Icon name="chat" size="lg" />
-              </div>
-              <div class="min-w-0">
-                <h3 class="text-sm font-semibold text-gray-900 dark:text-white">
-                  {{ t('common.contactSupport') }}
-                </h3>
-                <p class="mt-0.5 truncate text-sm text-gray-500 dark:text-gray-400">{{ contactInfo }}</p>
-              </div>
-            </div>
+      <div
+        v-if="contactInfo"
+        class="card border-primary-200 bg-primary-50 p-6 dark:bg-primary-900/20"
+      >
+        <div class="flex items-center gap-4">
+          <div class="rounded-xl bg-primary-100 p-3 text-primary-600">
+            <Icon name="chat" size="lg" />
           </div>
-
-          <ProfilePasswordForm />
-
-          <ProfileBalanceNotifyCard
-            v-if="user && balanceLowNotifyEnabled"
-            :enabled="user.balance_notify_enabled ?? true"
-            :threshold="user.balance_notify_threshold"
-            :extra-emails="user.balance_notify_extra_emails ?? []"
-            :system-default-threshold="systemDefaultThreshold"
-            :user-email="user.email"
-          />
-
-          <ProfileTotpCard />
+          <div>
+            <h3 class="font-semibold text-primary-800 dark:text-primary-200">
+              {{ t('common.contactSupport') }}
+            </h3>
+            <p class="text-sm font-medium">{{ contactInfo }}</p>
+          </div>
         </div>
       </div>
+
+      <ProfilePasswordForm />
+
+      <ProfileBalanceNotifyCard
+        v-if="user && balanceLowNotifyEnabled"
+        :enabled="user.balance_notify_enabled ?? true"
+        :threshold="user.balance_notify_threshold"
+        :extra-emails="user.balance_notify_extra_emails ?? []"
+        :system-default-threshold="systemDefaultThreshold"
+        :user-email="user.email"
+      />
+
+      <ProfileTotpCard />
+      <ProfilePasskeyCard :enabled="passkeyEnabled" />
     </div>
   </AppLayout>
 </template>
@@ -78,6 +58,7 @@ import ProfileBalanceNotifyCard from '@/components/user/profile/ProfileBalanceNo
 import ProfileInfoCard from '@/components/user/profile/ProfileInfoCard.vue'
 import ProfilePasswordForm from '@/components/user/profile/ProfilePasswordForm.vue'
 import ProfileTotpCard from '@/components/user/profile/ProfileTotpCard.vue'
+import ProfilePasskeyCard from '@/components/user/profile/ProfilePasskeyCard.vue'
 import { isWeChatWebOAuthEnabled } from '@/api/auth'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
@@ -97,6 +78,7 @@ const wechatOAuthOpenEnabled = ref<boolean | undefined>(undefined)
 const wechatOAuthMPEnabled = ref<boolean | undefined>(undefined)
 const oidcOAuthEnabled = ref(false)
 const oidcOAuthProviderName = ref('OIDC')
+const passkeyEnabled = ref(false)
 
 onMounted(async () => {
   const profileRefresh = authStore.refreshUser().catch((error) => {
@@ -122,6 +104,7 @@ onMounted(async () => {
         : undefined
       oidcOAuthEnabled.value = settings.oidc_oauth_enabled ?? false
       oidcOAuthProviderName.value = settings.oidc_oauth_provider_name || 'OIDC'
+      passkeyEnabled.value = settings.passkey_enabled === true
     })
     .catch((error) => {
       console.error('Failed to load settings:', error)

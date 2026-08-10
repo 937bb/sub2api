@@ -28,21 +28,6 @@ func TestOpenAIWSStateStore_BindGetDeleteResponseAccount(t *testing.T) {
 	require.Zero(t, accountID)
 }
 
-func TestOpenAIWSStateStore_ResponseAccountLocalCacheIsGroupScoped(t *testing.T) {
-	store := NewOpenAIWSStateStore(nil)
-	ctx := context.Background()
-
-	require.NoError(t, store.BindResponseAccount(ctx, 7, "resp_group_scoped", 101, time.Minute))
-
-	accountID, err := store.GetResponseAccount(ctx, 8, "resp_group_scoped")
-	require.NoError(t, err)
-	require.Zero(t, accountID)
-
-	accountID, err = store.GetResponseAccount(ctx, 7, "resp_group_scoped")
-	require.NoError(t, err)
-	require.Equal(t, int64(101), accountID)
-}
-
 func TestOpenAIWSStateStore_ResponseConnTTL(t *testing.T) {
 	store := NewOpenAIWSStateStore(nil)
 	store.BindResponseConn("resp_conn", "conn_1", 30*time.Millisecond)
@@ -205,6 +190,20 @@ func (c *openAIWSStateStoreTimeoutProbeCache) DeleteSessionAccountID(ctx context
 		c.deleteHasDeadline = true
 		c.delDeadlineDelta = time.Until(deadline)
 	}
+	return nil
+}
+
+func (c *openAIWSStateStoreTimeoutProbeCache) SetGrokVideoPendingBilling(_ context.Context, _ string, _ []byte, _ time.Duration) error {
+	return nil
+}
+func (c *openAIWSStateStoreTimeoutProbeCache) GetGrokVideoPendingBilling(_ context.Context, _ string) ([]byte, error) {
+	return nil, nil
+}
+func (c *openAIWSStateStoreTimeoutProbeCache) ClaimGrokVideoBilled(_ context.Context, _ string, _ time.Duration) (bool, error) {
+	return true, nil
+}
+
+func (c *openAIWSStateStoreTimeoutProbeCache) ReleaseGrokVideoBilled(_ context.Context, _ string) error {
 	return nil
 }
 

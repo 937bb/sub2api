@@ -16,6 +16,7 @@ export interface OpenAITokenInfo {
   email?: string
   name?: string
   plan_type?: string
+  subscription_expires_at?: string
   privacy_mode?: string
   // OpenAI specific IDs (extracted from ID Token)
   chatgpt_account_id?: string
@@ -25,12 +26,6 @@ export interface OpenAITokenInfo {
 }
 
 export type OpenAIOAuthPlatform = 'openai'
-
-interface OpenAIGenerateAuthURLOptions {
-  proxyId?: number | null
-  redirectUri?: string
-  accountId?: number | null
-}
 
 export function useOpenAIOAuth() {
   const appStore = useAppStore()
@@ -55,7 +50,7 @@ export function useOpenAIOAuth() {
 
   // Generate auth URL for OpenAI OAuth
   const generateAuthUrl = async (
-    proxyOrOptions?: number | null | OpenAIGenerateAuthURLOptions,
+    proxyId?: number | null,
     redirectUri?: string
   ): Promise<boolean> => {
     loading.value = true
@@ -65,18 +60,12 @@ export function useOpenAIOAuth() {
     error.value = ''
 
     try {
-      const options = typeof proxyOrOptions === 'object' && proxyOrOptions !== null
-        ? proxyOrOptions
-        : { proxyId: proxyOrOptions, redirectUri }
       const payload: Record<string, unknown> = {}
-      if (options.proxyId) {
-        payload.proxy_id = options.proxyId
+      if (proxyId) {
+        payload.proxy_id = proxyId
       }
-      if (options.redirectUri) {
-        payload.redirect_uri = options.redirectUri
-      }
-      if (options.accountId) {
-        payload.account_id = options.accountId
+      if (redirectUri) {
+        payload.redirect_uri = redirectUri
       }
 
       const response = await adminAPI.accounts.generateAuthUrl(
@@ -208,6 +197,9 @@ export function useOpenAIOAuth() {
     }
     if (tokenInfo.plan_type) {
       creds.plan_type = tokenInfo.plan_type
+    }
+    if (tokenInfo.subscription_expires_at) {
+      creds.subscription_expires_at = tokenInfo.subscription_expires_at
     }
     if (tokenInfo.client_id) {
       creds.client_id = tokenInfo.client_id

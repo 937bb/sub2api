@@ -1,14 +1,19 @@
-.PHONY: build build-backend build-frontend build-datamanagementd test test-backend test-frontend test-frontend-critical test-admin-cli test-datamanagementd secret-scan
+.PHONY: build build-backend build-frontend test test-backend test-frontend test-frontend-critical
 
 FRONTEND_CRITICAL_VITEST := \
+	src/api/__tests__/client.spec.ts \
+	src/api/__tests__/tokenRefresh.spec.ts \
+	src/api/__tests__/channelMonitorV2.spec.ts \
 	src/views/auth/__tests__/LinuxDoCallbackView.spec.ts \
 	src/views/auth/__tests__/WechatCallbackView.spec.ts \
 	src/views/user/__tests__/PaymentView.spec.ts \
 	src/views/user/__tests__/PaymentResultView.spec.ts \
-	src/components/keys/__tests__/UseKeyModal.spec.ts \
+	src/views/user/__tests__/ChannelStatusView.mode.spec.ts \
 	src/components/user/profile/__tests__/ProfileInfoCard.spec.ts \
-	src/utils/__tests__/ccswitchImport.spec.ts \
-	src/views/admin/__tests__/SettingsView.spec.ts
+	src/views/admin/__tests__/SettingsView.spec.ts \
+	src/features/channel-monitor-v2/__tests__/designSystem.structure.spec.ts \
+	src/features/channel-monitor-v2/__tests__/monitorFormat.spec.ts \
+	src/features/channel-monitor-v2/__tests__/monitorZoom.spec.ts
 
 # 一键编译前后端
 build: build-backend build-frontend
@@ -21,12 +26,8 @@ build-backend:
 build-frontend:
 	@pnpm --dir frontend run build
 
-# 编译 datamanagementd（宿主机数据管理进程）
-build-datamanagementd:
-	@cd datamanagement && go build -o datamanagementd ./cmd/datamanagementd
-
-# 运行测试（后端 + 前端 + admin CLI）
-test: test-backend test-frontend test-admin-cli
+# 运行测试（后端 + 前端）
+test: test-backend test-frontend
 
 test-backend:
 	@$(MAKE) -C backend test
@@ -35,17 +36,6 @@ test-frontend:
 	@pnpm --dir frontend run lint:check
 	@pnpm --dir frontend run typecheck
 	@$(MAKE) test-frontend-critical
-	@sh deploy/test-caddyfile-cache.sh
 
 test-frontend-critical:
 	@pnpm --dir frontend exec vitest run $(FRONTEND_CRITICAL_VITEST)
-
-test-admin-cli:
-	@node --check skills/sub2api-admin/scripts/sub2api-admin.js
-	@node --test skills/sub2api-admin/sub2api-admin.auth.test.js
-
-test-datamanagementd:
-	@cd datamanagement && go test ./...
-
-secret-scan:
-	@python3 tools/secret_scan.py

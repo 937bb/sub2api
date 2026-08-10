@@ -18,46 +18,44 @@ type rateLimitAccountRepoStub struct {
 	setErrorCalls          int
 	tempCalls              int
 	updateCredentialsCalls int
+	updateExtraCalls       int
 	lastCredentials        map[string]any
+	lastExtraUpdates       map[string]any
 	lastErrorMsg           string
 	lastTempReason         string
+	lastErrorID            int64
+	lastTempID             int64
 }
 
 func (r *rateLimitAccountRepoStub) SetError(ctx context.Context, id int64, errorMsg string) error {
 	r.setErrorCalls++
+	r.lastErrorID = id
 	r.lastErrorMsg = errorMsg
 	return nil
 }
 
 func (r *rateLimitAccountRepoStub) SetTempUnschedulable(ctx context.Context, id int64, until time.Time, reason string) error {
 	r.tempCalls++
+	r.lastTempID = id
 	r.lastTempReason = reason
 	return nil
 }
 
 func (r *rateLimitAccountRepoStub) UpdateCredentials(ctx context.Context, id int64, credentials map[string]any) error {
 	r.updateCredentialsCalls++
-	r.lastCredentials = cloneCredentials(credentials)
+	r.lastCredentials = shallowCopyMap(credentials)
+	return nil
+}
+
+func (r *rateLimitAccountRepoStub) UpdateExtra(ctx context.Context, id int64, updates map[string]any) error {
+	r.updateExtraCalls++
+	r.lastExtraUpdates = shallowCopyMap(updates)
 	return nil
 }
 
 type tokenCacheInvalidatorRecorder struct {
 	accounts []*Account
 	err      error
-}
-
-type openAIPATWhoamiVerifierStub struct {
-	calls    int
-	metadata *OpenAIPersonalAccessTokenMetadata
-	err      error
-}
-
-func (s *openAIPATWhoamiVerifierStub) HydratePersonalAccessToken(ctx context.Context, personalAccessToken string, proxyID *int64) (*OpenAIPersonalAccessTokenMetadata, error) {
-	s.calls++
-	if s.err != nil {
-		return nil, s.err
-	}
-	return s.metadata, nil
 }
 
 type openAI403CounterCacheStub struct {
@@ -120,9 +118,7 @@ func TestRateLimitService_HandleUpstreamError_OAuth401SetsTempUnschedulable(t *t
 		require.Len(t, invalidator.accounts, 1)
 	})
 
-	t.Run("antigravity_401_uses_SetError", func(t *testing.T) {
-		// Antigravity 401 由 applyErrorPolicy 的 temp_unschedulable_rules 控制，
-		// HandleUpstreamError 中走 SetError 路径。
+	t.Run("antigravity_401_sets_temp_unschedulable", func(t *testing.T) {
 		repo := &rateLimitAccountRepoStub{}
 		invalidator := &tokenCacheInvalidatorRecorder{}
 		service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
@@ -131,15 +127,66 @@ func TestRateLimitService_HandleUpstreamError_OAuth401SetsTempUnschedulable(t *t
 			ID:       100,
 			Platform: PlatformAntigravity,
 			Type:     AccountTypeOAuth,
+			Status:   StatusActive,
+			Credentials: map[string]any{
+				"access_token":  "expired-at",
+				"refresh_token": "rt-100",
+			},
 		}
 
 		shouldDisable := service.HandleUpstreamError(context.Background(), account, 401, http.Header{}, []byte("unauthorized"))
 
 		require.True(t, shouldDisable)
-		require.Equal(t, 1, repo.setErrorCalls)
-		require.Equal(t, 0, repo.tempCalls)
-		require.Empty(t, invalidator.accounts)
+		require.Equal(t, 0, repo.setErrorCalls, "Antigravity OAuth 401 must keep status=active so refresh worker can recover it")
+		require.Equal(t, 1, repo.tempCalls)
+		require.Equal(t, int64(100), repo.lastTempID)
+		require.Contains(t, repo.lastTempReason, "invalid or expired credentials")
+		require.Equal(t, 1, repo.updateExtraCalls)
+		require.Equal(t, true, repo.lastExtraUpdates[antigravityForceTokenRefreshExtraKey])
+		require.Equal(t, "401_invalid", repo.lastExtraUpdates[antigravityForceTokenRefreshReasonExtraKey])
+		require.Equal(t, true, account.Extra[antigravityForceTokenRefreshExtraKey])
+		require.Len(t, invalidator.accounts, 1)
+		require.Equal(t, int64(100), invalidator.accounts[0].ID)
 	})
+}
+
+// TestRateLimitService_HandleUpstreamError_SparkShadow401RedirectsToParent 外审第9轮:影子无独立凭据,
+// 401(母账号 token 问题)必须重定向到凭据 owner(母账号)——母账号 temp-unschedulable + token cache 失效,
+// 影子不得被永久禁用(否则母账号可恢复的 token 问题会把影子永久打死)。
+func TestRateLimitService_HandleUpstreamError_SparkShadow401RedirectsToParent(t *testing.T) {
+	repo := &rateLimitAccountRepoStub{}
+	repo.accountsByID = map[int64]*Account{}
+	invalidator := &tokenCacheInvalidatorRecorder{}
+	service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	service.SetTokenCacheInvalidator(invalidator)
+
+	const parentID = int64(500)
+	mother := &Account{
+		ID:          parentID,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Credentials: map[string]any{"refresh_token": "rt-mother"},
+	}
+	repo.accountsByID[parentID] = mother
+
+	shadowParent := parentID
+	shadow := &Account{
+		ID:              501,
+		Platform:        PlatformOpenAI,
+		Type:            AccountTypeOAuth,
+		ParentAccountID: &shadowParent,
+		QuotaDimension:  QuotaDimensionSpark,
+		// 影子不持凭据:GetCredential("refresh_token") == ""
+	}
+
+	shouldDisable := service.HandleUpstreamError(context.Background(), shadow, 401, http.Header{}, []byte("unauthorized"))
+
+	require.True(t, shouldDisable)
+	require.Equal(t, 0, repo.setErrorCalls, "spark shadow must not be permanently disabled on a parent-token 401")
+	require.Equal(t, 1, repo.tempCalls)
+	require.Equal(t, parentID, repo.lastTempID, "temp-unschedulable must target the credential owner (parent)")
+	require.Len(t, invalidator.accounts, 1)
+	require.Equal(t, parentID, invalidator.accounts[0].ID, "token cache invalidation must target the parent")
 }
 
 // TestRateLimitService_HandleUpstreamError_OAuth401InvalidatorError
@@ -210,6 +257,7 @@ func TestRateLimitService_HandleUpstreamError_OAuth401DoesNotOverwriteCredential
 
 	require.True(t, shouldDisable)
 	require.Equal(t, 0, repo.updateCredentialsCalls, "401 handler must not write credentials back from the request-start snapshot")
+	require.Equal(t, 0, repo.updateExtraCalls, "OpenAI 401 must not set Antigravity force-refresh marker")
 	require.Equal(t, 1, repo.tempCalls, "401 handler should still set temp-unschedulable cooldown")
 	require.Nil(t, repo.lastCredentials, "no credentials should have been persisted")
 }
@@ -262,122 +310,26 @@ func TestRateLimitService_HandleUpstreamError_OAuth401NoRefreshTokenSetsError(t 
 		require.Equal(t, 0, repo.tempCalls)
 	})
 
-	t.Run("openai_pat_401_with_valid_whoami_is_temporary_not_set_error", func(t *testing.T) {
+	t.Run("antigravity_no_refresh_token_sets_error", func(t *testing.T) {
 		repo := &rateLimitAccountRepoStub{}
 		invalidator := &tokenCacheInvalidatorRecorder{}
-		verifier := &openAIPATWhoamiVerifierStub{metadata: &OpenAIPersonalAccessTokenMetadata{
-			Email:            "user@example.com",
-			ChatGPTUserID:    "user-123",
-			ChatGPTAccountID: "acc-123",
-			ChatGPTPlanType:  "team",
-		}}
 		service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
 		service.SetTokenCacheInvalidator(invalidator)
-		service.SetOpenAIPersonalAccessToken401Verifier(verifier, nil)
 		account := &Account{
 			ID:       2883,
-			Platform: PlatformOpenAI,
+			Platform: PlatformAntigravity,
 			Type:     AccountTypeOAuth,
 			Credentials: map[string]any{
-				"access_token":               "expired-at",
-				"personal_access_token":      "at-valid-pat",
-				"chatgpt_account_id":         "acc-123",
-				"chatgpt_account_is_fedramp": false,
-				// no refresh_token: PAT-backed requests are not OAuth-refreshable.
+				"access_token": "expired-at",
 			},
 		}
 
-		shouldDisable := service.HandleUpstreamError(context.Background(), account, 401, http.Header{}, []byte("Unauthorized"))
+		shouldDisable := service.HandleUpstreamError(context.Background(), account, 401, http.Header{}, []byte("unauthorized"))
 
-		require.False(t, shouldDisable)
-		require.Equal(t, 1, verifier.calls)
-		require.Equal(t, 0, repo.setErrorCalls)
+		require.True(t, shouldDisable)
+		require.Equal(t, 1, repo.setErrorCalls, "Antigravity OAuth without refresh_token cannot self-recover")
 		require.Equal(t, 0, repo.tempCalls)
-		require.Empty(t, repo.lastTempReason)
-		require.Empty(t, invalidator.accounts, "PAT-present 401 should not invalidate OAuth AT cache without knowing the bearer used")
-	})
-
-	t.Run("openai_pat_401_whoami_runs_once_per_account", func(t *testing.T) {
-		repo := &rateLimitAccountRepoStub{}
-		verifier := &openAIPATWhoamiVerifierStub{metadata: &OpenAIPersonalAccessTokenMetadata{
-			Email:            "user@example.com",
-			ChatGPTUserID:    "user-123",
-			ChatGPTAccountID: "acc-123",
-			ChatGPTPlanType:  "team",
-		}}
-		service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
-		service.SetOpenAIPersonalAccessToken401Verifier(verifier, nil)
-		account := &Account{
-			ID:       2884,
-			Platform: PlatformOpenAI,
-			Type:     AccountTypeOAuth,
-			Credentials: map[string]any{
-				"personal_access_token": "at-valid-pat",
-				"chatgpt_account_id":    "acc-123",
-			},
-		}
-
-		first := service.HandleUpstreamError(context.Background(), account, 401, http.Header{}, []byte("Unauthorized"))
-		second := service.HandleUpstreamError(context.Background(), account, 401, http.Header{}, []byte("Unauthorized"))
-
-		require.False(t, first)
-		require.False(t, second)
-		require.Equal(t, 1, verifier.calls)
-		require.Equal(t, 0, repo.setErrorCalls)
-		require.Equal(t, 0, repo.tempCalls)
-	})
-
-	t.Run("openai_pat_401_whoami_cache_expires_after_ttl", func(t *testing.T) {
-		repo := &rateLimitAccountRepoStub{}
-		verifier := &openAIPATWhoamiVerifierStub{metadata: &OpenAIPersonalAccessTokenMetadata{
-			Email:            "user@example.com",
-			ChatGPTUserID:    "user-123",
-			ChatGPTAccountID: "acc-123",
-			ChatGPTPlanType:  "team",
-		}}
-		service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
-		service.SetOpenAIPersonalAccessToken401Verifier(verifier, nil)
-		account := &Account{
-			ID:       2885,
-			Platform: PlatformOpenAI,
-			Type:     AccountTypeOAuth,
-			Credentials: map[string]any{
-				"personal_access_token": "at-valid-pat",
-				"chatgpt_account_id":    "acc-123",
-			},
-		}
-		key := OpenAITokenCacheKey(account) + ":pat401-whoami"
-		service.openAIPAT401LocalResults.Store(key, openAIPAT401WhoamiResult{failed: false, expiresAt: time.Now().Add(-time.Second)})
-
-		shouldDisable := service.HandleUpstreamError(context.Background(), account, 401, http.Header{}, []byte("Unauthorized"))
-
-		require.False(t, shouldDisable)
-		require.Equal(t, 1, verifier.calls)
-	})
-
-	t.Run("openai_pat_401_sets_error_only_when_whoami_401_or_403", func(t *testing.T) {
-		for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden} {
-			repo := &rateLimitAccountRepoStub{}
-			verifier := &openAIPATWhoamiVerifierStub{err: &openAIPersonalAccessTokenWhoamiError{statusCode: status, body: `{"error":{"message":"bad pat"}}`}}
-			service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
-			service.SetOpenAIPersonalAccessToken401Verifier(verifier, nil)
-			account := &Account{
-				ID:       int64(3000 + status),
-				Platform: PlatformOpenAI,
-				Type:     AccountTypeOAuth,
-				Credentials: map[string]any{
-					"personal_access_token": "at-invalid-pat",
-					"chatgpt_account_id":    "acc-123",
-				},
-			}
-
-			shouldDisable := service.HandleUpstreamError(context.Background(), account, 401, http.Header{}, []byte("Unauthorized"))
-
-			require.True(t, shouldDisable)
-			require.Equal(t, 1, verifier.calls)
-			require.Equal(t, 1, repo.setErrorCalls)
-			require.Equal(t, 0, repo.tempCalls)
-			require.Contains(t, repo.lastErrorMsg, "OpenAI PAT whoami failed")
-		}
+		require.Contains(t, repo.lastErrorMsg, "refresh_token missing")
+		require.Len(t, invalidator.accounts, 1)
 	})
 }

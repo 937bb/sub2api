@@ -28,47 +28,6 @@ func TestOpenAIStreamingPassthroughRepairsConcatenatedJSONDocumentsInSingleDataL
 	testOpenAIStreamingRepairsConcatenatedJSONDocuments(t, true, 0)
 }
 
-func TestOpenAIStreamingRepairedDocumentsOverrideHostileEventField(t *testing.T) {
-	inProgress := `{"type":"response.in_progress","response":{"id":"resp_event_override"}}`
-	completed := `{"type":"response.completed","response":{"id":"resp_event_override","usage":{"input_tokens":3,"output_tokens":4}}}`
-	tail := `{"type":"error","error":{"message":"must not escape"}}`
-	body := "event: response.failed\ndata: " + inProgress + completed + tail + "\n\n"
-
-	recorder := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(recorder)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
-	resp := &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body))}
-	svc := &OpenAIGatewayService{cfg: &config.Config{}, toolCorrector: NewCodexToolCorrector()}
-	result, err := svc.handleStreamingResponse(c.Request.Context(), resp, c, &Account{ID: 1}, time.Now(), "", "")
-	require.NoError(t, err)
-	require.Equal(t, 3, result.usage.InputTokens)
-	require.Equal(t, 4, result.usage.OutputTokens)
-	assertOpenAISSEFrames(t, recorder.Body.String(), []string{"response.in_progress", "response.completed"})
-	require.Equal(t, 1, strings.Count(recorder.Body.String(), `"type":"response.completed"`))
-	require.Equal(t, 1, strings.Count(recorder.Body.String(), `"usage"`))
-	require.NotContains(t, recorder.Body.String(), "must not escape")
-}
-
-func TestOpenAIStreamingRejectedConcatenationIsNotForwarded(t *testing.T) {
-	cases := map[string]string{
-		"malformed": `{"type":"response.in_progress"}{bad}`,
-		"count":     strings.Repeat(`{"type":"response.in_progress"}`, maxOpenAIConcatenatedJSONDocuments+1),
-		"oversized": `{"type":"response.in_progress","padding":"` + strings.Repeat("x", maxOpenAIConcatenatedJSONBytes) + `"}{"type":"response.completed"}`,
-	}
-	for name, hostile := range cases {
-		t.Run(name, func(t *testing.T) {
-			recorder := httptest.NewRecorder()
-			c, _ := gin.CreateTestContext(recorder)
-			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
-			resp := &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("data: " + hostile + "\n\n"))}
-			svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{MaxLineSize: len(hostile) + 32}}, toolCorrector: NewCodexToolCorrector()}
-			_, err := svc.handleStreamingResponse(c.Request.Context(), resp, c, &Account{ID: 1}, time.Now(), "", "")
-			require.Error(t, err)
-			require.NotContains(t, recorder.Body.String(), hostile)
-		})
-	}
-}
-
 func TestOpenAIWSv2StreamingRepairsConcatenatedJSONDocumentsInSingleMessage(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -131,21 +90,155 @@ func TestOpenAIWSv2StreamingRepairsConcatenatedJSONDocumentsInSingleMessage(t *t
 	})
 }
 
+func TestOpenAIWSv2RejectsMalformedTypedEventBeforeWritingDownstream(t *testing.T) {
+	largeInProgress, _, _ := openAIConcatenatedJSONTestEvents(t)
+	testOpenAIWSv2RejectsMalformedEventBeforeWritingDownstream(t, []byte(largeInProgress+"unexpected-tail"))
+}
+
+func TestOpenAIWSv2RejectsMalformedUntypedMessageBeforeWritingDownstream(t *testing.T) {
+	testOpenAIWSv2RejectsMalformedEventBeforeWritingDownstream(t, []byte("not-json"))
+}
+
+func TestOpenAIWSv2RejectsMalformedEventAfterWritingDownstream(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	outputTextDelta := `{"type":"response.output_text.delta","delta":"ok","sequence_number":1}`
+	malformedMessage := `{"type":"response.in_progress"}unexpected-tail`
+	captureConn := &openAIWSCaptureConn{events: [][]byte{
+		[]byte(outputTextDelta),
+		[]byte(malformedMessage),
+	}}
+
+	cfg := &config.Config{}
+	cfg.Security.URLAllowlist.Enabled = false
+	cfg.Gateway.OpenAIWS.Enabled = true
+	cfg.Gateway.OpenAIWS.APIKeyEnabled = true
+	cfg.Gateway.OpenAIWS.ResponsesWebsocketsV2 = true
+	cfg.Gateway.OpenAIWS.MaxConnsPerAccount = 1
+	cfg.Gateway.OpenAIWS.MaxIdlePerAccount = 1
+	cfg.Gateway.OpenAIWS.QueueLimitPerConn = 8
+	cfg.Gateway.OpenAIWS.DialTimeoutSeconds = 3
+	cfg.Gateway.OpenAIWS.ReadTimeoutSeconds = 5
+	cfg.Gateway.OpenAIWS.WriteTimeoutSeconds = 3
+
+	pool := newOpenAIWSConnPool(cfg)
+	pool.setClientDialerForTest(&openAIWSCaptureDialer{conn: captureConn})
+	svc := &OpenAIGatewayService{
+		cfg:              cfg,
+		cache:            &stubGatewayCache{},
+		httpUpstream:     &httpUpstreamRecorder{},
+		openaiWSResolver: NewOpenAIWSProtocolResolver(cfg),
+		openaiWSPool:     pool,
+		toolCorrector:    NewCodexToolCorrector(),
+	}
+	account := &Account{
+		ID:          5,
+		Name:        "ws-malformed-event-after-output",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Credentials: map[string]any{"api_key": "sk-test"},
+		Extra:       map[string]any{"responses_websockets_v2_enabled": true},
+	}
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	groupID := int64(1)
+	c.Set("api_key", &APIKey{GroupID: &groupID})
+
+	result, err := svc.Forward(context.Background(), c, account, []byte(`{"model":"gpt-5.6-sol","stream":true,"input":"hello"}`))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "after downstream output")
+	require.Nil(t, result)
+	require.True(t, captureConn.closed)
+	require.Contains(t, recorder.Body.String(), `"delta":"ok"`)
+	require.NotContains(t, recorder.Body.String(), "unexpected-tail")
+	require.NotContains(t, recorder.Body.String(), "response.in_progress")
+	assertOpenAISSEFrames(t, recorder.Body.String(), []string{"response.output_text.delta"})
+}
+
+func testOpenAIWSv2RejectsMalformedEventBeforeWritingDownstream(t *testing.T, malformedMessage []byte) {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+
+	_, _, completed := openAIConcatenatedJSONTestEvents(t)
+	outputTextDelta := `{"type":"response.output_text.delta","delta":"ok","sequence_number":3}`
+	captureConn := &openAIWSCaptureConn{events: [][]byte{
+		malformedMessage,
+		[]byte(outputTextDelta),
+		[]byte(completed),
+	}}
+
+	cfg := &config.Config{}
+	cfg.Security.URLAllowlist.Enabled = false
+	cfg.Gateway.OpenAIWS.Enabled = true
+	cfg.Gateway.OpenAIWS.APIKeyEnabled = true
+	cfg.Gateway.OpenAIWS.ResponsesWebsocketsV2 = true
+	cfg.Gateway.OpenAIWS.MaxConnsPerAccount = 1
+	cfg.Gateway.OpenAIWS.MaxIdlePerAccount = 1
+	cfg.Gateway.OpenAIWS.QueueLimitPerConn = 8
+	cfg.Gateway.OpenAIWS.DialTimeoutSeconds = 3
+	cfg.Gateway.OpenAIWS.ReadTimeoutSeconds = 5
+	cfg.Gateway.OpenAIWS.WriteTimeoutSeconds = 3
+
+	pool := newOpenAIWSConnPool(cfg)
+	pool.setClientDialerForTest(&openAIWSCaptureDialer{conn: captureConn})
+	svc := &OpenAIGatewayService{
+		cfg:              cfg,
+		cache:            &stubGatewayCache{},
+		httpUpstream:     &httpUpstreamRecorder{},
+		openaiWSResolver: NewOpenAIWSProtocolResolver(cfg),
+		openaiWSPool:     pool,
+		toolCorrector:    NewCodexToolCorrector(),
+	}
+	account := &Account{
+		ID:          4,
+		Name:        "ws-malformed-event",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Credentials: map[string]any{"api_key": "sk-test"},
+		Extra:       map[string]any{"responses_websockets_v2_enabled": true},
+	}
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	groupID := int64(1)
+	c.Set("api_key", &APIKey{GroupID: &groupID})
+
+	result, err := svc.Forward(context.Background(), c, account, []byte(`{"model":"gpt-5.6-sol","stream":true,"input":"hello"}`))
+	require.Error(t, err)
+	var fallbackErr *openAIWSFallbackError
+	require.ErrorAs(t, err, &fallbackErr)
+	require.Equal(t, "invalid_event_json", fallbackErr.Reason)
+	require.Nil(t, result)
+	require.Empty(t, recorder.Body.String())
+	require.True(t, captureConn.closed)
+}
+
 func TestSplitOpenAIConcatenatedJSONDocumentsRejectsPayloadOverRepairLimit(t *testing.T) {
 	first := `{"type":"response.in_progress","padding":"` + strings.Repeat("x", 16*1024*1024) + `"}`
 	second := `{"type":"response.completed"}`
 	payload := first + second
 
-	documents, outcome := splitOpenAIConcatenatedJSONDocuments([]byte(payload))
-	require.Equal(t, openAIJSONDocumentsRejected, outcome)
+	documents, repaired := splitOpenAIConcatenatedJSONDocuments([]byte(payload))
+	require.False(t, repaired)
 	require.Nil(t, documents)
 
 	line := "data: " + payload
 	scanner := bufio.NewScanner(strings.NewReader(line))
 	scanner.Buffer(make([]byte, 1024), len(line)+1)
 	documentScanner := newOpenAISSEJSONDocumentScanner(scanner)
+	require.True(t, documentScanner.Scan())
+	require.Equal(t, line, documentScanner.Text())
 	require.False(t, documentScanner.Scan())
-	require.ErrorIs(t, documentScanner.Err(), errOpenAIConcatenatedJSONRejected)
+	require.NoError(t, documentScanner.Err())
 }
 
 func TestOpenAIWSv2StreamingBreaksConnectionWhenTerminalHasTrailingDocument(t *testing.T) {
@@ -213,7 +306,6 @@ func testOpenAIStreamingRepairsConcatenatedJSONDocuments(t *testing.T, passthrou
 		"",
 		"event: response.completed",
 		"data: " + completed,
-		"",
 		"",
 	}, "\n")
 	resp := &http.Response{

@@ -24,16 +24,6 @@ func init() {
 }
 
 func TestInjectSiteTitle(t *testing.T) {
-	t.Run("escapes_title_end_markup_quotes_and_ampersand", func(t *testing.T) {
-		html := []byte(`<html><head><title>Sub2API</title></head><body></body></html>`)
-		settingsJSON := []byte(`{"site_name":"A&B </title><script>alert(1)</script> \"quoted\""}`)
-
-		result := string(injectSiteTitle(html, settingsJSON))
-
-		assert.Contains(t, result, `<title>A&amp;B &lt;/title&gt;&lt;script&gt;alert(1)&lt;/script&gt; &#34;quoted&#34; - AI API Gateway</title>`)
-		assert.NotContains(t, result, `<script>alert(1)</script>`)
-	})
-
 	t.Run("replaces_title_with_site_name", func(t *testing.T) {
 		html := []byte(`<html><head><title>Sub2API - AI API Gateway</title></head><body></body></html>`)
 		settingsJSON := []byte(`{"site_name":"MyCustomSite"}`)
@@ -92,6 +82,25 @@ func TestInjectSiteTitle(t *testing.T) {
 		assert.Equal(t, string(html), string(result))
 	})
 
+	t.Run("escapes_html_in_site_name", func(t *testing.T) {
+		html := []byte(`<html><head><title>Sub2API - AI API Gateway</title></head><body></body></html>`)
+		settingsJSON := []byte(`{"site_name":"</title><script>alert(1)</script><title>"}`)
+
+		result := injectSiteTitle(html, settingsJSON)
+
+		assert.NotContains(t, string(result), "<script>")
+		assert.Contains(t, string(result), "&lt;/title&gt;&lt;script&gt;alert(1)&lt;/script&gt;&lt;title&gt;")
+	})
+
+	t.Run("escapes_ampersand_in_site_name", func(t *testing.T) {
+		html := []byte(`<html><head><title>Sub2API</title></head><body></body></html>`)
+		settingsJSON := []byte(`{"site_name":"A&B"}`)
+
+		result := injectSiteTitle(html, settingsJSON)
+
+		assert.Contains(t, string(result), "<title>A&amp;B - AI API Gateway</title>")
+	})
+
 	t.Run("preserves_rest_of_html", func(t *testing.T) {
 		html := []byte(`<html><head><meta charset="UTF-8"><title>Sub2API</title><script src="app.js"></script></head><body><div id="app"></div></body></html>`)
 		settingsJSON := []byte(`{"site_name":"TestSite"}`)
@@ -102,6 +111,41 @@ func TestInjectSiteTitle(t *testing.T) {
 		assert.Contains(t, string(result), `<script src="app.js"></script>`)
 		assert.Contains(t, string(result), `<div id="app"></div>`)
 		assert.Contains(t, string(result), "<title>TestSite - AI API Gateway</title>")
+	})
+}
+
+func TestInjectSiteFavicon(t *testing.T) {
+	t.Run("replaces_favicon_with_site_logo", func(t *testing.T) {
+		html := []byte(`<html><head><link rel="icon" type="image/png" href="/logo.png" /></head></html>`)
+		settingsJSON := []byte(`{"site_logo":"https://example.com/custom-logo.png"}`)
+
+		result := injectSiteFavicon(html, settingsJSON)
+
+		assert.Contains(t, string(result), `<link rel="icon" href="https://example.com/custom-logo.png" />`)
+		assert.NotContains(t, string(result), `/logo.png`)
+	})
+
+	t.Run("supports_relative_and_data_image_urls", func(t *testing.T) {
+		html := []byte(`<link rel="icon" href="/logo.png" />`)
+
+		assert.Contains(t, string(injectSiteFavicon(html, []byte(`{"site_logo":"/uploads/logo.svg"}`))), `/uploads/logo.svg`)
+		assert.Contains(t, string(injectSiteFavicon(html, []byte(`{"site_logo":"data:image/png;base64,abc"}`))), `data:image/png;base64,abc`)
+	})
+
+	t.Run("rejects_unsafe_logo_urls", func(t *testing.T) {
+		html := []byte(`<link rel="icon" href="/logo.png" />`)
+
+		result := injectSiteFavicon(html, []byte(`{"site_logo":"javascript:alert(1)"}`))
+
+		assert.Equal(t, string(html), string(result))
+	})
+
+	t.Run("escapes_logo_url_for_html", func(t *testing.T) {
+		html := []byte(`<link rel="icon" href="/logo.png" />`)
+
+		result := injectSiteFavicon(html, []byte(`{"site_logo":"https://example.com/logo.png?a=1&b=2"}`))
+
+		assert.Contains(t, string(result), `a=1&amp;b=2`)
 	})
 }
 
@@ -165,16 +209,6 @@ type mockSettingsProvider struct {
 	settings any
 	err      error
 	called   int
-}
-
-type countingFS struct {
-	fs.FS
-	opens int
-}
-
-func (f *countingFS) Open(name string) (fs.File, error) {
-	f.opens++
-	return f.FS.Open(name)
 }
 
 func (m *mockSettingsProvider) GetPublicSettingsForInjection(ctx context.Context) (any, error) {
@@ -444,30 +478,34 @@ func TestFrontendServer_InvalidateCache(t *testing.T) {
 	})
 }
 
-func TestOverrideFilesAlwaysRevalidate(t *testing.T) {
+func TestOverrideFilesNeverReceiveImmutableCacheHeaders(t *testing.T) {
+	t.Parallel()
+
 	overrideDir := t.TempDir()
 	cleanPath := "assets/index-AbCd1234.js"
 	filePath := filepath.Join(overrideDir, cleanPath)
 	require.NoError(t, os.MkdirAll(filepath.Dir(filePath), 0o755))
 	require.NoError(t, os.WriteFile(filePath, []byte("override"), 0o644))
 
-	t.Run("frontend server", func(t *testing.T) {
+	t.Run("frontend_server_override", func(t *testing.T) {
+		t.Parallel()
 		w := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(w)
 		c.Request = httptest.NewRequest(http.MethodGet, "/"+cleanPath, nil)
-		server := &FrontendServer{overrideDir: overrideDir}
 
+		server := &FrontendServer{overrideDir: overrideDir}
 		assert.True(t, server.tryServeOverride(c, cleanPath))
-		assert.Equal(t, mutableAssetCacheControl, w.Header().Get("Cache-Control"))
+		assert.Empty(t, w.Header().Get("Cache-Control"))
 	})
 
-	t.Run("legacy server", func(t *testing.T) {
+	t.Run("legacy_override", func(t *testing.T) {
+		t.Parallel()
 		w := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(w)
 		c.Request = httptest.NewRequest(http.MethodGet, "/"+cleanPath, nil)
 
 		assert.True(t, tryServeOverrideFile(c, overrideDir, cleanPath))
-		assert.Equal(t, mutableAssetCacheControl, w.Header().Get("Cache-Control"))
+		assert.Empty(t, w.Header().Get("Cache-Control"))
 	})
 }
 
@@ -482,6 +520,7 @@ func TestFrontendServer_Middleware(t *testing.T) {
 
 		apiPaths := []string{
 			"/api/v1/users",
+			"/models",
 			"/v1/models",
 			"/v1beta/chat",
 			"/backend-api/codex/responses",
@@ -538,6 +577,32 @@ func TestFrontendServer_Middleware(t *testing.T) {
 		assert.JSONEq(t, `{"ok":true}`, w.Body.String())
 	})
 
+	t.Run("skips_alpha_search_post_route", func(t *testing.T) {
+		provider := &mockSettingsProvider{
+			settings: map[string]string{"test": "value"},
+		}
+
+		server, err := NewFrontendServer(provider)
+		require.NoError(t, err)
+
+		router := gin.New()
+		router.Use(server.Middleware())
+		nextCalled := false
+		router.POST("/alpha/search", func(c *gin.Context) {
+			nextCalled = true
+			c.JSON(http.StatusOK, gin.H{"ok": true})
+		})
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/alpha/search", strings.NewReader(`{"model":"gpt-5.6-sol"}`))
+		req.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(w, req)
+
+		assert.True(t, nextCalled, "next handler should be called for alpha search API route")
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.JSONEq(t, `{"ok":true}`, w.Body.String())
+	})
+
 	t.Run("serves_index_for_spa_routes", func(t *testing.T) {
 		provider := &mockSettingsProvider{
 			settings: map[string]string{"test": "value"},
@@ -590,7 +655,7 @@ func TestFrontendServer_Middleware(t *testing.T) {
 
 		assert.Equal(t, http.StatusOK, w.Code)
 		assert.Contains(t, w.Header().Get("Content-Type"), "image/png")
-		assert.Equal(t, mutableAssetCacheControl, w.Header().Get("Cache-Control"))
+		assert.Empty(t, w.Header().Get("Cache-Control"))
 
 		entries, err := fs.ReadDir(server.distFS, "assets")
 		require.NoError(t, err)
@@ -602,62 +667,26 @@ func TestFrontendServer_Middleware(t *testing.T) {
 				break
 			}
 		}
-		require.NotEmpty(t, fingerprintedPath, "generated Vite output must contain a fingerprinted asset")
+		require.NotEmpty(t, fingerprintedPath)
 
 		assetWriter := httptest.NewRecorder()
-		router.ServeHTTP(assetWriter, httptest.NewRequest(http.MethodGet, "/"+fingerprintedPath, nil))
+		assetRequest := httptest.NewRequest(http.MethodGet, "/"+fingerprintedPath, nil)
+		router.ServeHTTP(assetWriter, assetRequest)
+
 		assert.Equal(t, http.StatusOK, assetWriter.Code)
-		assert.Equal(t, immutableAssetCacheControl, assetWriter.Header().Get("Cache-Control"))
+		assert.Equal(t, staticAssetsCacheControl, assetWriter.Header().Get("Cache-Control"))
 	})
+}
 
-	t.Run("routes_missing_assets_and_dotted_spa_paths", func(t *testing.T) {
-		for _, tc := range []struct {
-			method       string
-			path         string
-			wantStatus   int
-			wantHTML     bool
-			wantProvider int
-		}{
-			{method: http.MethodGet, path: "/dashboard.v2", wantStatus: http.StatusOK, wantHTML: true, wantProvider: 1},
-			{method: http.MethodGet, path: "/dashboard%2Ev2", wantStatus: http.StatusOK, wantHTML: true, wantProvider: 1},
-			{method: http.MethodGet, path: "/assets-v2/route.js", wantStatus: http.StatusOK, wantHTML: true, wantProvider: 1},
-			{method: http.MethodGet, path: "/assets%5Croute.js", wantStatus: http.StatusOK, wantHTML: true, wantProvider: 1},
-			{method: http.MethodGet, path: "/assets/missing.js", wantStatus: http.StatusNotFound},
-			{method: http.MethodGet, path: "/assets/missing", wantStatus: http.StatusNotFound},
-			{method: http.MethodGet, path: "/assets/missing.js/", wantStatus: http.StatusNotFound},
-			{method: http.MethodGet, path: "/assets/missing.js/?v=1", wantStatus: http.StatusNotFound},
-			{method: http.MethodGet, path: "/assets/missing%2Ejs%2F", wantStatus: http.StatusNotFound},
-			{method: http.MethodGet, path: "/assets/../dashboard.v2", wantStatus: http.StatusNotFound},
-			{method: http.MethodHead, path: "/assets/missing.js", wantStatus: http.StatusNotFound},
-		} {
-			provider := &mockSettingsProvider{}
-			server, err := NewFrontendServer(provider)
-			require.NoError(t, err)
-			router := gin.New()
-			router.Use(server.Middleware())
-
-			w := httptest.NewRecorder()
-			router.ServeHTTP(w, httptest.NewRequest(tc.method, tc.path, nil))
-			assert.Equal(t, tc.wantStatus, w.Code, "%s %s", tc.method, tc.path)
-			assert.Equal(t, tc.wantHTML, strings.Contains(w.Header().Get("Content-Type"), "text/html"), "%s %s", tc.method, tc.path)
-			assert.Equal(t, tc.wantProvider, provider.called, "%s %s", tc.method, tc.path)
-		}
-	})
-
-	t.Run("looks_up_a_missing_file_once", func(t *testing.T) {
-		server, err := NewFrontendServer(&mockSettingsProvider{})
-		require.NoError(t, err)
-		counted := &countingFS{FS: server.distFS}
-		server.distFS = counted
-		router := gin.New()
-		router.Use(server.Middleware())
-
-		w := httptest.NewRecorder()
-		router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/assets/missing.js", nil))
-
-		assert.Equal(t, http.StatusNotFound, w.Code)
-		assert.Equal(t, 1, counted.opens)
-	})
+func TestEmbeddedFrontendBypassesBareVideoAPIRoutes(t *testing.T) {
+	for _, path := range []string{
+		"/videos/generations",
+		"/videos/edits",
+		"/videos/extensions",
+		"/videos/request-123",
+	} {
+		require.True(t, shouldBypassEmbeddedFrontend(path), "path=%s", path)
+	}
 }
 
 func TestNewFrontendServer(t *testing.T) {
@@ -748,41 +777,12 @@ func TestServeEmbeddedFrontend(t *testing.T) {
 		}
 	})
 
-	t.Run("routes_missing_assets_and_dotted_spa_paths", func(t *testing.T) {
-		middleware := ServeEmbeddedFrontend()
-		router := gin.New()
-		router.Use(middleware)
-
-		for _, tc := range []struct {
-			method     string
-			path       string
-			wantStatus int
-			wantHTML   bool
-		}{
-			{method: http.MethodGet, path: "/dashboard.v2", wantStatus: http.StatusOK, wantHTML: true},
-			{method: http.MethodGet, path: "/dashboard%2Ev2", wantStatus: http.StatusOK, wantHTML: true},
-			{method: http.MethodGet, path: "/assets-v2/route.js", wantStatus: http.StatusOK, wantHTML: true},
-			{method: http.MethodGet, path: "/assets%5Croute.js", wantStatus: http.StatusOK, wantHTML: true},
-			{method: http.MethodGet, path: "/assets/missing.js", wantStatus: http.StatusNotFound},
-			{method: http.MethodGet, path: "/assets/missing", wantStatus: http.StatusNotFound},
-			{method: http.MethodGet, path: "/assets/missing.js/", wantStatus: http.StatusNotFound},
-			{method: http.MethodGet, path: "/assets/missing.js/?v=1", wantStatus: http.StatusNotFound},
-			{method: http.MethodGet, path: "/assets/missing%2Ejs%2F", wantStatus: http.StatusNotFound},
-			{method: http.MethodGet, path: "/assets/../dashboard.v2", wantStatus: http.StatusNotFound},
-			{method: http.MethodHead, path: "/assets/missing.js", wantStatus: http.StatusNotFound},
-		} {
-			w := httptest.NewRecorder()
-			router.ServeHTTP(w, httptest.NewRequest(tc.method, tc.path, nil))
-			assert.Equal(t, tc.wantStatus, w.Code, "%s %s", tc.method, tc.path)
-			assert.Equal(t, tc.wantHTML, strings.Contains(w.Header().Get("Content-Type"), "text/html"), "%s %s", tc.method, tc.path)
-		}
-	})
-
 	t.Run("skips_api_routes", func(t *testing.T) {
 		middleware := ServeEmbeddedFrontend()
 
 		apiPaths := []string{
 			"/api/users",
+			"/models",
 			"/v1/models",
 			"/v1beta/chat",
 			"/backend-api/codex/responses",

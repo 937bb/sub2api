@@ -1,12 +1,12 @@
 <template>
-  <div class="flex min-h-screen items-center justify-center bg-zinc-50 p-4 dark:bg-zinc-950">
+  <div class="flex min-h-screen items-center justify-center bg-slate-50 p-4 dark:bg-slate-950">
     <div
-      class="w-full max-w-md space-y-4 rounded-2xl border border-zinc-200 bg-white p-6 shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
+      class="w-full max-w-md space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-lg dark:border-slate-700 dark:bg-slate-900"
     >
       <!-- Amount + Order ID -->
       <div v-if="amount" class="text-center">
-        <p class="text-3xl font-bold" :style="{ color: methodColor }">{{ formattedAmount }}</p>
-        <p v-if="orderId" class="mt-1 text-sm text-gray-500 dark:text-zinc-400">
+        <p class="text-3xl font-bold" :style="{ color: methodColor }">¥{{ amount }}</p>
+        <p v-if="orderId" class="mt-1 text-sm text-gray-500 dark:text-slate-400">
           {{ t('payment.orders.orderId') }}: {{ orderId }}
         </p>
       </div>
@@ -30,7 +30,7 @@
       <!-- Success -->
       <div v-else-if="success" class="space-y-3 py-4 text-center">
         <div class="text-5xl text-green-600 dark:text-green-400">✓</div>
-        <p class="text-sm text-gray-500 dark:text-zinc-400">{{ t('payment.result.success') }}</p>
+        <p class="text-sm text-gray-500 dark:text-slate-400">{{ t('payment.result.success') }}</p>
         <button
           class="text-sm underline dark:text-blue-400 dark:hover:text-blue-300"
           :style="{ color: methodColor }"
@@ -46,7 +46,7 @@
           class="h-8 w-8 animate-spin rounded-full border-2 border-t-transparent"
           :style="{ borderColor: methodColor, borderTopColor: 'transparent' }"
         />
-        <span class="ml-3 text-sm text-gray-500 dark:text-zinc-400">{{ hint }}</span>
+        <span class="ml-3 text-sm text-gray-500 dark:text-slate-400">{{ hint }}</span>
       </div>
     </div>
   </div>
@@ -58,7 +58,7 @@ import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { extractI18nErrorMessage } from '@/utils/apiError'
 import { isMobileDevice } from '@/utils/device'
-import { formatPaymentAmount } from '@/components/payment/currency'
+import { buildApiUrl } from '@/api/client'
 
 interface StripeWithWechatPay {
   confirmWechatPayPayment(clientSecret: string, options: Record<string, unknown>): Promise<{ error?: { message?: string }; paymentIntent?: { status: string } }>
@@ -70,48 +70,52 @@ const METHOD_COLORS: Record<string, string> = {
 }
 const DEFAULT_METHOD_COLOR = '#635bff'
 
-const i18n = useI18n()
-const { t } = i18n
+const { t } = useI18n()
 const route = useRoute()
 
 const orderId = String(route.query.order_id || '')
 const method = String(route.query.method || 'alipay')
 const amount = String(route.query.amount || '')
-const currency = String(route.query.currency || '')
 
 const methodColor = computed(() => METHOD_COLORS[method] || DEFAULT_METHOD_COLOR)
-const localeCode = computed(() => {
-  const raw = i18n.locale as unknown
-  if (typeof raw === 'string') return raw
-  if (raw && typeof raw === 'object' && 'value' in raw) {
-    return String((raw as { value?: string }).value || '')
-  }
-  return undefined
-})
-const formattedAmount = computed(() => formatPaymentAmount(Number(amount), currency, localeCode.value))
 
 const error = ref('')
 const success = ref(false)
 const hint = ref(t('payment.stripePopup.redirecting'))
 
 let pollTimer: ReturnType<typeof setInterval> | null = null
+let initTimeoutTimer: ReturnType<typeof setTimeout> | null = null
+let messageHandler: ((event: MessageEvent) => void) | null = null
 
 function closeWindow() { window.close() }
 
+function clearInitTimeout() {
+  if (initTimeoutTimer) {
+    clearTimeout(initTimeoutTimer)
+    initTimeoutTimer = null
+  }
+}
+
 onMounted(() => {
-  const handler = (event: MessageEvent) => {
+  messageHandler = (event: MessageEvent) => {
     if (event.origin !== window.location.origin) return
     if (event.data?.type !== 'STRIPE_POPUP_INIT') return
-    window.removeEventListener('message', handler)
+    // INIT 已到达，取消兜底超时，避免长时间的扫码支付被误判为超时。
+    clearInitTimeout()
+    if (messageHandler) {
+      window.removeEventListener('message', messageHandler)
+      messageHandler = null
+    }
     initStripe(event.data.clientSecret, event.data.publishableKey)
   }
-  window.addEventListener('message', handler)
+  window.addEventListener('message', messageHandler)
 
   if (window.opener) {
     window.opener.postMessage({ type: 'STRIPE_POPUP_READY' }, window.location.origin)
   }
 
-  setTimeout(() => {
+  // 仅兜底“父窗口始终未发 STRIPE_POPUP_INIT”的场景。
+  initTimeoutTimer = setTimeout(() => {
     if (!error.value && !success.value) {
       error.value = t('payment.stripePopup.timeout')
     }
@@ -119,7 +123,12 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  if (pollTimer) clearInterval(pollTimer)
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
+  clearInitTimeout()
+  if (messageHandler) {
+    window.removeEventListener('message', messageHandler)
+    messageHandler = null
+  }
 })
 
 async function initStripe(clientSecret: string, publishableKey: string) {
@@ -128,7 +137,7 @@ async function initStripe(clientSecret: string, publishableKey: string) {
     return
   }
   try {
-    const { loadStripe } = await import('@stripe/stripe-js')
+    const { loadStripe } = await import('@stripe/stripe-js/pure')
     const stripe = await loadStripe(publishableKey)
     if (!stripe) { error.value = t('payment.stripeLoadFailed'); return }
 
@@ -160,11 +169,16 @@ async function initStripe(clientSecret: string, publishableKey: string) {
 }
 
 function startPolling() {
+  let inFlight = false
   pollTimer = setInterval(async () => {
+    // 防重入：接口响应慢于轮询间隔时避免并发重叠请求。
+    if (inFlight) return
+    inFlight = true
     try {
-      const token = document.cookie.split('; ').find(c => c.startsWith('token='))?.split('=')[1]
-        || localStorage.getItem('token') || ''
-      const res = await fetch('/api/v1/payment/orders/' + orderId, {
+      // access token 存储在 localStorage 的 'auth_token' 键下（见 api/client.ts），
+      // 之前误读 'token' 导致轮询请求不带认证、永远 401，支付成功无法被检测到。
+      const token = localStorage.getItem('auth_token') || ''
+      const res = await fetch(buildApiUrl(`/payment/orders/${orderId}`), {
         headers: token ? { Authorization: 'Bearer ' + token } : {},
         credentials: 'include',
       })
@@ -176,7 +190,9 @@ function startPolling() {
         success.value = true
         setTimeout(closeWindow, 2000)
       }
-    } catch { /* ignore */ }
+    } catch { /* ignore */ } finally {
+      inFlight = false
+    }
   }, 3000)
 }
 </script>

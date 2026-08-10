@@ -4,93 +4,161 @@ import (
 	"context"
 	"regexp"
 	"testing"
+	"time"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	"github.com/stretchr/testify/require"
 )
 
-func TestSchedulerOutboxRepositoryListAfterAndReleaseDedupReleasesStrandedKeys(t *testing.T) {
+func TestSchedulerOutboxRepositoryFirstCreatedAtAfter(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
 
 	repo := &schedulerOutboxRepository{db: db}
-	mock.ExpectQuery(regexp.QuoteMeta(`
-			WITH stranded AS (
-				UPDATE scheduler_outbox
-				SET dedup_key = NULL
-				WHERE id <= $1
-					AND dedup_key IS NOT NULL
-				RETURNING id
-			), selected AS MATERIALIZED (
-				SELECT id, event_type, account_id, group_id, payload, created_at
-				FROM scheduler_outbox
-				WHERE id > $1
-				ORDER BY id ASC
-				LIMIT $2
-				FOR UPDATE
-			), released AS (
-				UPDATE scheduler_outbox AS o
-				SET dedup_key = NULL
-				FROM selected AS s
-				WHERE o.id = s.id
-					AND o.dedup_key IS NOT NULL
-				RETURNING o.id
-			)
-			SELECT s.id, s.event_type, s.account_id, s.group_id, s.payload, s.created_at
-			FROM selected AS s
-			CROSS JOIN (SELECT COUNT(*) FROM stranded) AS stranded_barrier
-			CROSS JOIN (SELECT COUNT(*) FROM released) AS release_barrier
-			ORDER BY s.id ASC
-		`)).
-		WithArgs(int64(42), 100).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "event_type", "account_id", "group_id", "payload", "created_at"}))
+	createdAt := time.Now().UTC().Truncate(time.Microsecond)
+	const expectedSQL = `
+		SELECT created_at
+		FROM scheduler_outbox
+		WHERE id > $1
+		ORDER BY id ASC
+		LIMIT 1
+	`
+	mock.ExpectQuery(regexp.QuoteMeta(expectedSQL)).
+		WithArgs(int64(42)).
+		WillReturnRows(sqlmock.NewRows([]string{"created_at"}).AddRow(createdAt))
 
-	events, err := repo.ListAfterAndReleaseDedup(context.Background(), 42, 100)
+	got, ok, err := repo.FirstCreatedAtAfter(context.Background(), 42)
 
 	require.NoError(t, err)
-	require.Empty(t, events)
+	require.True(t, ok)
+	require.Equal(t, createdAt, got)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
-// buildSchedulerGroupPayload must return untyped nil for empty groups. Otherwise
-// enqueueSchedulerOutbox would marshal a typed-nil map as JSON null and produce
-// a different dedup key than literal nil for the same ungrouped-account event.
-func TestEnqueueSchedulerOutbox_DedupConflictRefreshesLaggingRow(t *testing.T) {
+func TestSchedulerOutboxRepositoryFirstCreatedAtAfterReturnsNotFound(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
 
-	mock.ExpectExec(regexp.QuoteMeta(`
-				INSERT INTO scheduler_outbox (event_type, account_id, group_id, payload, dedup_key)
-				VALUES ($1, $2, $3, $4, $5)
-				ON CONFLICT (dedup_key) WHERE dedup_key IS NOT NULL DO UPDATE
-				SET id = EXCLUDED.id,
-					event_type = EXCLUDED.event_type,
-					account_id = EXCLUDED.account_id,
-					group_id = EXCLUDED.group_id,
-					payload = EXCLUDED.payload,
-					created_at = EXCLUDED.created_at
-				WHERE scheduler_outbox.id < (SELECT COALESCE(MAX(id), 0) FROM scheduler_outbox)
-			`)).
-		WithArgs("account_changed", nil, nil, nil, sqlmock.AnyArg()).
-		WillReturnResult(sqlmock.NewResult(0, 1))
+	repo := &schedulerOutboxRepository{db: db}
+	const expectedSQL = `
+		SELECT created_at
+		FROM scheduler_outbox
+		WHERE id > $1
+		ORDER BY id ASC
+		LIMIT 1
+	`
+	mock.ExpectQuery(regexp.QuoteMeta(expectedSQL)).
+		WithArgs(int64(42)).
+		WillReturnRows(sqlmock.NewRows([]string{"created_at"}))
 
-	err = enqueueSchedulerOutbox(context.Background(), db, "account_changed", nil, nil, nil)
+	got, ok, err := repo.FirstCreatedAtAfter(context.Background(), 42)
 
 	require.NoError(t, err)
+	require.False(t, ok)
+	require.True(t, got.IsZero())
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestSchedulerOutboxRepositoryDeleteConsumedUpToUsesBoundedCTE(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	repo := &schedulerOutboxRepository{db: db}
+	const expectedSQL = `
+		WITH doomed AS (
+			SELECT id
+			FROM scheduler_outbox
+			WHERE id <= $1
+				AND created_at < NOW() - INTERVAL '10 seconds'
+			ORDER BY id ASC
+			LIMIT $2
+		)
+		DELETE FROM scheduler_outbox o
+		USING doomed d
+		WHERE o.id = d.id
+	`
+	mock.ExpectExec(regexp.QuoteMeta(expectedSQL)).
+		WithArgs(int64(42), 5000).
+		WillReturnResult(sqlmock.NewResult(0, 17))
+
+	deleted, err := repo.DeleteConsumedUpTo(context.Background(), 42, 5000)
+
+	require.NoError(t, err)
+	require.EqualValues(t, 17, deleted)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSchedulerOutboxRepositoryDeleteConsumedUpToSkipsNonPositiveWatermark(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	repo := &schedulerOutboxRepository{db: db}
+
+	deleted, err := repo.DeleteConsumedUpTo(context.Background(), 0, 5000)
+
+	require.NoError(t, err)
+	require.EqualValues(t, 0, deleted)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSchedulerOutboxRepositoryTryAcquireCleanupLock(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	repo := &schedulerOutboxRepository{db: db}
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT pg_try_advisory_lock(hashtext('scheduler_outbox_cleanup'))")).
+		WillReturnRows(sqlmock.NewRows([]string{"pg_try_advisory_lock"}).AddRow(true))
+	mock.ExpectExec(regexp.QuoteMeta("SELECT pg_advisory_unlock(hashtext('scheduler_outbox_cleanup'))")).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	lease, acquired, err := repo.TryAcquireCleanupLock(context.Background())
+	require.NoError(t, err)
+	require.True(t, acquired)
+	require.NotNil(t, lease)
+
+	lease.Release()
+
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSchedulerOutboxRepositoryTryAcquireCleanupLockUnavailable(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	repo := &schedulerOutboxRepository{db: db}
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT pg_try_advisory_lock(hashtext('scheduler_outbox_cleanup'))")).
+		WillReturnRows(sqlmock.NewRows([]string{"pg_try_advisory_lock"}).AddRow(false))
+
+	lease, acquired, err := repo.TryAcquireCleanupLock(context.Background())
+	require.NoError(t, err)
+	require.False(t, acquired)
+	require.Nil(t, lease)
+
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+// buildSchedulerGroupPayload 在 groupIDs 为空时必须返回 untyped nil（any），
+// 否则 enqueueSchedulerOutbox 的 "payload != nil" 接口判空会被 typed-nil 欺骗，
+// 把 payload marshal 成 "null" 写入 dedup_key 哈希，破坏与其他 nil-payload
+// 调用的去重一致性。本测试用 ungrouped 账号场景验证两条路径的 dedup_key 一致。
 func TestEnqueueSchedulerOutbox_UngroupedAccountDedupesWithLiteralNilPayload(t *testing.T) {
 	accountID := int64(42)
 
+	// Path A: 显式 nil payload（如 SetError、SetStatus 等调用模式）
 	keyLiteralNil := schedulerOutboxDedupKey("account_changed", &accountID, nil, nil)
 
+	// Path B: buildSchedulerGroupPayload(account.GroupIDs) 当账号没有任何分组
 	emptyGroupsPayload := buildSchedulerGroupPayload(nil)
 	require.Nil(t, emptyGroupsPayload,
 		"buildSchedulerGroupPayload(empty) must return untyped-nil any to avoid typed-nil marshal")
 
+	// 模拟 enqueueSchedulerOutbox 内部的判空逻辑
 	var payloadJSON []byte
 	if emptyGroupsPayload != nil {
 		t.Fatalf("typed-nil regression: buildSchedulerGroupPayload(empty) interface should be nil")

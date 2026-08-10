@@ -43,7 +43,8 @@ func validateInterval(sec int) error {
 	return nil
 }
 
-// validateJitter 校验每次调度的随机抖动窗口，保证最短等待不低于最小间隔。
+// validateJitter 校验 jitter_seconds（调度 ± 随机抖动）：
+// 非负，且 interval - jitter 不得低于最小检测间隔，防止随机偏移后实际间隔过短打爆上游。
 func validateJitter(jitterSec, intervalSec int) error {
 	if jitterSec < 0 || intervalSec-jitterSec < monitorMinIntervalSeconds {
 		return ErrChannelMonitorInvalidJitter
@@ -74,19 +75,10 @@ func validateEndpoint(ep string) error {
 	if u.Host == "" {
 		return ErrChannelMonitorInvalidEndpoint
 	}
-	if u.Hostname() == "" {
-		return ErrChannelMonitorInvalidEndpoint
-	}
-	if strings.Contains(u.Host, "%") || !validMonitorURLAuthority(u) {
-		return ErrChannelMonitorInvalidEndpoint
-	}
-	if u.User != nil {
-		return ErrChannelMonitorEndpointPath
-	}
 	if u.Path != "" && u.Path != "/" {
 		return ErrChannelMonitorEndpointPath
 	}
-	if u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || strings.Contains(ep, "#") {
+	if u.RawQuery != "" || u.Fragment != "" {
 		return ErrChannelMonitorEndpointPath
 	}
 
@@ -101,20 +93,6 @@ func validateEndpoint(ep string) error {
 		return ErrChannelMonitorEndpointPrivate
 	}
 	return nil
-}
-
-func validMonitorURLAuthority(u *url.URL) bool {
-	host := u.Host
-	if strings.HasPrefix(host, "[") {
-		closeBracket := strings.LastIndexByte(host, ']')
-		if closeBracket < 0 {
-			return false
-		}
-		suffix := host[closeBracket+1:]
-		return suffix == "" || (strings.HasPrefix(suffix, ":") && validMonitorPort(suffix[1:]))
-	}
-	colon := strings.LastIndexByte(host, ':')
-	return colon < 0 || validMonitorPort(host[colon+1:])
 }
 
 // normalizeEndpoint 去除前后空白与末尾 `/`，保证存储统一为 origin。
@@ -144,6 +122,16 @@ func normalizeModels(in []string) []string {
 		out = append(out, m)
 	}
 	return out
+}
+
+// normalizeMonitorPrimaryModel applies the Grok health-check default while
+// preserving the existing required-model behavior for every other provider.
+func normalizeMonitorPrimaryModel(provider, model string) string {
+	model = strings.TrimSpace(model)
+	if model == "" && provider == MonitorProviderGrok {
+		return MonitorDefaultGrokModel
+	}
+	return model
 }
 
 // defaultAPIMode 空串归一为 chat_completions，保证历史数据与旧客户端兼容。

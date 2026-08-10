@@ -2,24 +2,7 @@
   <AppLayout>
     <TablePageLayout>
       <template #filters>
-        <div class="space-y-4">
-          <!-- Summary strip -->
-          <div class="card grid grid-cols-3 divide-x divide-gray-200/70 dark:divide-dark-700">
-            <div class="px-5 py-3">
-              <p class="font-display text-2xl font-bold tracking-tight text-gray-900 dark:text-white">{{ pagination.total }}</p>
-              <p class="mt-0.5 text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.promo.summaryTotal') }}</p>
-            </div>
-            <div class="px-5 py-3">
-              <p class="font-display text-2xl font-bold tracking-tight text-emerald-600 dark:text-emerald-400">{{ activePromoCount }}</p>
-              <p class="mt-0.5 text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.promo.summaryActive') }}</p>
-            </div>
-            <div class="px-5 py-3">
-              <p class="font-display text-2xl font-bold tracking-tight text-gray-500 dark:text-gray-400">{{ disabledPromoCount }}</p>
-              <p class="mt-0.5 text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.promo.summaryDisabled') }}</p>
-            </div>
-          </div>
-
-          <div class="flex flex-wrap items-center gap-3">
+        <div class="flex flex-wrap items-center gap-3">
           <!-- Left: Search + Filters -->
           <div class="flex-1 sm:max-w-64">
             <input
@@ -51,7 +34,6 @@
               <Icon name="plus" size="md" class="mr-1" />
               {{ t('admin.promo.createCode') }}
             </button>
-          </div>
           </div>
         </div>
       </template>
@@ -410,7 +392,7 @@ import { useAppStore } from '@/stores/app'
 import { useClipboard } from '@/composables/useClipboard'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { adminAPI } from '@/api/admin'
-import { formatDateTime } from '@/utils/format'
+import { formatDateTime, formatDateTimeLocalInput } from '@/utils/format'
 import type { PromoCode, PromoCodeUsage } from '@/types'
 import type { Column } from '@/components/common/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
@@ -428,10 +410,6 @@ const { copyToClipboard: clipboardCopy } = useClipboard()
 
 // State
 const codes = ref<PromoCode[]>([])
-
-// Page-scoped status breakdown (server total lives in pagination.total).
-const activePromoCount = computed(() => codes.value.filter((c) => c.status === 'active').length)
-const disabledPromoCount = computed(() => codes.value.filter((c) => c.status !== 'active').length)
 const loading = ref(false)
 const creating = ref(false)
 const updating = ref(false)
@@ -650,7 +628,9 @@ const handleEdit = (code: PromoCode) => {
   editForm.bonus_amount = code.bonus_amount
   editForm.max_uses = code.max_uses
   editForm.status = code.status
-  editForm.expires_at_str = code.expires_at ? new Date(code.expires_at).toISOString().slice(0, 16) : ''
+  editForm.expires_at_str = code.expires_at
+    ? formatDateTimeLocalInput(Math.floor(new Date(code.expires_at).getTime() / 1000))
+    : ''
   editForm.notes = code.notes || ''
   showEditDialog.value = true
 }

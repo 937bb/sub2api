@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 )
 
@@ -11,6 +12,10 @@ const (
 	// antigravityRefreshWindow Antigravity token 提前刷新窗口：15分钟
 	// Google OAuth token 有效期55分钟，提前15分钟刷新
 	antigravityRefreshWindow = 15 * time.Minute
+
+	antigravityForceTokenRefreshExtraKey       = "antigravity_force_token_refresh"
+	antigravityForceTokenRefreshReasonExtraKey = "antigravity_force_token_refresh_reason"
+	antigravityForceTokenRefreshAtExtraKey     = "antigravity_force_token_refresh_at"
 )
 
 // AntigravityTokenRefresher 实现 TokenRefresher 接口
@@ -40,6 +45,9 @@ func (r *AntigravityTokenRefresher) NeedsRefresh(account *Account, _ time.Durati
 	if !r.CanRefresh(account) {
 		return false
 	}
+	if accountNeedsAntigravityForceTokenRefresh(account) {
+		return true
+	}
 	expiresAt := account.GetCredentialAsTime("expires_at")
 	if expiresAt == nil {
 		return false
@@ -53,6 +61,29 @@ func (r *AntigravityTokenRefresher) NeedsRefresh(account *Account, _ time.Durati
 	return needsRefresh
 }
 
+func accountNeedsAntigravityForceTokenRefresh(account *Account) bool {
+	return account != nil &&
+		account.Platform == PlatformAntigravity &&
+		account.Type == AccountTypeOAuth &&
+		account.getExtraBool(antigravityForceTokenRefreshExtraKey)
+}
+
+func antigravityForceTokenRefreshExtra(reason string) map[string]any {
+	return map[string]any{
+		antigravityForceTokenRefreshExtraKey:       true,
+		antigravityForceTokenRefreshReasonExtraKey: reason,
+		antigravityForceTokenRefreshAtExtraKey:     time.Now().UTC().Format(time.RFC3339),
+	}
+}
+
+func clearAntigravityForceTokenRefreshExtra() map[string]any {
+	return map[string]any{
+		antigravityForceTokenRefreshExtraKey:       false,
+		antigravityForceTokenRefreshReasonExtraKey: "",
+		antigravityForceTokenRefreshAtExtraKey:     "",
+	}
+}
+
 // Refresh 执行 token 刷新
 func (r *AntigravityTokenRefresher) Refresh(ctx context.Context, account *Account) (map[string]any, error) {
 	tokenInfo, err := r.antigravityOAuthService.RefreshAccountToken(ctx, account)
@@ -60,7 +91,17 @@ func (r *AntigravityTokenRefresher) Refresh(ctx context.Context, account *Accoun
 		return nil, err
 	}
 
-	newCredentials := r.antigravityOAuthService.BuildRefreshAccountCredentials(account, tokenInfo)
+	newCredentials := r.antigravityOAuthService.BuildAccountCredentials(tokenInfo)
+	// 合并旧的 credentials，保留新 credentials 中不存在的字段
+	newCredentials = MergeCredentials(account.Credentials, newCredentials)
+
+	// 特殊处理 project_id：如果新值为空但旧值非空，保留旧值
+	// 这确保了即使 LoadCodeAssist 失败，project_id 也不会丢失
+	if newProjectID, _ := newCredentials["project_id"].(string); newProjectID == "" {
+		if oldProjectID := strings.TrimSpace(account.GetCredential("project_id")); oldProjectID != "" {
+			newCredentials["project_id"] = oldProjectID
+		}
+	}
 
 	// 如果 project_id 获取失败，只记录警告，不返回错误
 	// LoadCodeAssist 失败可能是临时网络问题，应该允许重试而不是立即标记为不可重试错误

@@ -8,24 +8,65 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/stretchr/testify/require"
 
-	_ "github.com/jackc/pgx/v5/stdlib"
+	_ "github.com/lib/pq"
 )
 
-func TestBuildDBPoolSettings(t *testing.T) {
-	cfg := &config.Config{
-		Database: config.DatabaseConfig{
-			MaxOpenConns:           50,
-			MaxIdleConns:           10,
-			ConnMaxLifetimeMinutes: 30,
-			ConnMaxIdleTimeMinutes: 5,
+func TestClampDBPoolSettings(t *testing.T) {
+	tests := []struct {
+		name                string
+		connMaxLifetime     int
+		connMaxIdleTime     int
+		wantMaxLifetime     time.Duration
+		wantConnMaxIdleTime time.Duration
+	}{
+		{
+			name:                "zero values fall back to safe defaults",
+			connMaxLifetime:     0,
+			connMaxIdleTime:     0,
+			wantMaxLifetime:     30 * time.Minute,
+			wantConnMaxIdleTime: 5 * time.Minute,
+		},
+		{
+			name:                "negative values fall back to safe defaults",
+			connMaxLifetime:     -1,
+			connMaxIdleTime:     -5,
+			wantMaxLifetime:     30 * time.Minute,
+			wantConnMaxIdleTime: 5 * time.Minute,
+		},
+		{
+			name:                "reasonable values pass through",
+			connMaxLifetime:     15,
+			connMaxIdleTime:     3,
+			wantMaxLifetime:     15 * time.Minute,
+			wantConnMaxIdleTime: 3 * time.Minute,
+		},
+		{
+			name:                "values over twenty four hours fall back to safe defaults",
+			connMaxLifetime:     24*60 + 1,
+			connMaxIdleTime:     24*60 + 1,
+			wantMaxLifetime:     30 * time.Minute,
+			wantConnMaxIdleTime: 5 * time.Minute,
 		},
 	}
 
-	settings := buildDBPoolSettings(cfg)
-	require.Equal(t, 50, settings.MaxOpenConns)
-	require.Equal(t, 10, settings.MaxIdleConns)
-	require.Equal(t, 30*time.Minute, settings.ConnMaxLifetime)
-	require.Equal(t, 5*time.Minute, settings.ConnMaxIdleTime)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.Config{
+				Database: config.DatabaseConfig{
+					MaxOpenConns:           50,
+					MaxIdleConns:           10,
+					ConnMaxLifetimeMinutes: tt.connMaxLifetime,
+					ConnMaxIdleTimeMinutes: tt.connMaxIdleTime,
+				},
+			}
+
+			settings := clampDBPoolSettings(cfg)
+			require.Equal(t, 50, settings.MaxOpenConns)
+			require.Equal(t, 10, settings.MaxIdleConns)
+			require.Equal(t, tt.wantMaxLifetime, settings.ConnMaxLifetime)
+			require.Equal(t, tt.wantConnMaxIdleTime, settings.ConnMaxIdleTime)
+		})
+	}
 }
 
 func TestApplyDBPoolSettings(t *testing.T) {
@@ -38,7 +79,7 @@ func TestApplyDBPoolSettings(t *testing.T) {
 		},
 	}
 
-	db, err := sql.Open("pgx", "host=127.0.0.1 port=5432 user=postgres sslmode=disable")
+	db, err := sql.Open("postgres", "host=127.0.0.1 port=5432 user=postgres sslmode=disable")
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		_ = db.Close()

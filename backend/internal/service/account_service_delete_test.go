@@ -79,7 +79,11 @@ func (s *accountRepoStub) List(ctx context.Context, params pagination.Pagination
 	panic("unexpected List call")
 }
 
-func (s *accountRepoStub) ListWithFilters(_ context.Context, _ pagination.PaginationParams, _ AccountListFilters) ([]Account, *pagination.PaginationResult, error) {
+func (s *accountRepoStub) ListAllWithFilters(context.Context, string, string, string, string, int64, string) ([]Account, error) {
+	return nil, nil
+}
+
+func (s *accountRepoStub) ListWithFilters(ctx context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64, privacyMode string) ([]Account, *pagination.PaginationResult, error) {
 	panic("unexpected ListWithFilters call")
 }
 
@@ -91,16 +95,8 @@ func (s *accountRepoStub) ListActive(ctx context.Context) ([]Account, error) {
 	panic("unexpected ListActive call")
 }
 
-func (s *accountRepoStub) ListOAuthRefreshCandidates(ctx context.Context) ([]Account, error) {
-	panic("unexpected ListOAuthRefreshCandidates call")
-}
-
 func (s *accountRepoStub) ListByPlatform(ctx context.Context, platform string) ([]Account, error) {
 	panic("unexpected ListByPlatform call")
-}
-
-func (s *accountRepoStub) ListByPlatformForValidation(ctx context.Context, platform string) ([]Account, error) {
-	panic("unexpected ListByPlatformForValidation call")
 }
 
 func (s *accountRepoStub) UpdateLastUsed(ctx context.Context, id int64) error {
@@ -163,6 +159,10 @@ func (s *accountRepoStub) ListSchedulableUngroupedByPlatforms(ctx context.Contex
 	panic("unexpected ListSchedulableUngroupedByPlatforms call")
 }
 
+func (s *accountRepoStub) ListModelAvailabilityCandidates(ctx context.Context, groupID *int64, platforms []string, includeGrouped bool) ([]Account, error) {
+	panic("unexpected ListModelAvailabilityCandidates call")
+}
+
 func (s *accountRepoStub) SetRateLimited(ctx context.Context, id int64, resetAt time.Time) error {
 	panic("unexpected SetRateLimited call")
 }
@@ -199,6 +199,10 @@ func (s *accountRepoStub) UpdateSessionWindow(ctx context.Context, id int64, sta
 	panic("unexpected UpdateSessionWindow call")
 }
 
+func (s *accountRepoStub) UpdateSessionWindowEnd(ctx context.Context, id int64, end time.Time) error {
+	panic("unexpected UpdateSessionWindowEnd call")
+}
+
 func (s *accountRepoStub) UpdateExtra(ctx context.Context, id int64, updates map[string]any) error {
 	panic("unexpected UpdateExtra call")
 }
@@ -213,6 +217,14 @@ func (s *accountRepoStub) IncrementQuotaUsed(ctx context.Context, id int64, amou
 
 func (s *accountRepoStub) ResetQuotaUsed(ctx context.Context, id int64) error {
 	return nil
+}
+
+func (s *accountRepoStub) RevertProxyFallback(ctx context.Context, accountID int64) error {
+	panic("unexpected RevertProxyFallback call")
+}
+
+func (s *accountRepoStub) ListShadowsByParent(ctx context.Context, parentID int64) ([]*Account, error) {
+	return nil, nil
 }
 
 // TestAccountService_Delete_NotFound 测试删除不存在的账号时返回正确的错误。

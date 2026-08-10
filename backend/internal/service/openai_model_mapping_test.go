@@ -3,36 +3,152 @@ package service
 import "testing"
 
 func TestResolveOpenAIForwardModel(t *testing.T) {
-	account := &Account{Credentials: map[string]any{"model_mapping": map[string]any{"gpt-5": "gpt-5.4"}}}
-	if got := resolveOpenAIForwardModel(account, "gpt-5"); got != "gpt-5.4" {
-		t.Fatalf("resolveOpenAIForwardModel(...) = %q, want %q", got, "gpt-5.4")
-	}
-	if got := resolveOpenAIForwardModel(nil, "claude-opus-4-6"); got != "claude-opus-4-6" {
-		t.Fatalf("resolveOpenAIForwardModel(...) = %q, want original model", got)
-	}
-}
-
-func TestResolveOpenAIMessagesForwardModel(t *testing.T) {
 	tests := []struct {
-		name      string
-		account   *Account
-		requested string
-		dispatch  string
-		want      string
+		name                        string
+		account                     *Account
+		requestedModel              string
+		messagesDispatchMappedModel string
+		expectedModel               string
 	}{
-		{name: "unknown family exact dispatch", account: &Account{Credentials: map[string]any{}}, requested: "claude-fable-5", dispatch: "gpt-5.6-sol", want: "gpt-5.6-sol"},
-		{name: "trims dispatch", account: &Account{Credentials: map[string]any{}}, requested: "claude-fable-5", dispatch: "  gpt-5.6-sol  ", want: "gpt-5.6-sol"},
-		{name: "empty dispatch uses requested", account: &Account{Credentials: map[string]any{}}, requested: "claude-fable-5", dispatch: " \t ", want: "claude-fable-5"},
-		{name: "nil account uses dispatch", requested: "claude-fable-5", dispatch: "gpt-5.6-sol", want: "gpt-5.6-sol"},
-		{name: "exact account mapping wins", account: &Account{Credentials: map[string]any{"model_mapping": map[string]any{"claude-fable-5": "gpt-5.5"}}}, requested: "claude-fable-5", dispatch: "gpt-5.6-sol", want: "gpt-5.5"},
-		{name: "wildcard account mapping wins", account: &Account{Credentials: map[string]any{"model_mapping": map[string]any{"claude-*": "gpt-5.4"}}}, requested: "claude-fable-5", dispatch: "gpt-5.6-sol", want: "gpt-5.4"},
-		{name: "passthrough account mapping wins", account: &Account{Credentials: map[string]any{"model_mapping": map[string]any{"claude-fable-5": "claude-fable-5"}}}, requested: "claude-fable-5", dispatch: "gpt-5.6-sol", want: "claude-fable-5"},
+		{
+			name: "uses messages dispatch model for known claude family",
+			account: &Account{
+				Credentials: map[string]any{},
+			},
+			requestedModel:              "claude-opus-4-6",
+			messagesDispatchMappedModel: "gpt-4o-mini",
+			expectedModel:               "gpt-4o-mini",
+		},
+		{
+			name: "uses exact messages dispatch model for unknown claude family",
+			account: &Account{
+				Credentials: map[string]any{},
+			},
+			requestedModel:              "claude-fable-5",
+			messagesDispatchMappedModel: " gpt-5.6-sol ",
+			expectedModel:               "gpt-5.6-sol",
+		},
+		{
+			name:                        "nil account uses messages dispatch model",
+			requestedModel:              "claude-fable-5",
+			messagesDispatchMappedModel: "gpt-5.6-sol",
+			expectedModel:               "gpt-5.6-sol",
+		},
+		{
+			name:           "nil account without messages dispatch keeps requested model",
+			requestedModel: "claude-fable-5",
+			expectedModel:  "claude-fable-5",
+		},
+		{
+			name: "ordinary unknown gpt model has no messages dispatch fallback",
+			account: &Account{
+				Credentials: map[string]any{},
+			},
+			requestedModel: "gpt6",
+			expectedModel:  "gpt6",
+		},
+		{
+			name: "account exact mapping overrides messages dispatch model",
+			account: &Account{
+				Credentials: map[string]any{
+					"model_mapping": map[string]any{
+						"claude-fable-5": "gpt-5.5",
+					},
+				},
+			},
+			requestedModel:              "claude-fable-5",
+			messagesDispatchMappedModel: "gpt-5.6-sol",
+			expectedModel:               "gpt-5.5",
+		},
+		{
+			name: "account wildcard mapping overrides messages dispatch model",
+			account: &Account{
+				Credentials: map[string]any{
+					"model_mapping": map[string]any{
+						"claude-*": "gpt-5.4",
+					},
+				},
+			},
+			requestedModel:              "claude-fable-5",
+			messagesDispatchMappedModel: "gpt-5.6-sol",
+			expectedModel:               "gpt-5.4",
+		},
+		{
+			name: "account passthrough mapping overrides messages dispatch model",
+			account: &Account{
+				Credentials: map[string]any{
+					"model_mapping": map[string]any{
+						"claude-fable-5": "claude-fable-5",
+					},
+				},
+			},
+			requestedModel:              "claude-fable-5",
+			messagesDispatchMappedModel: "gpt-5.6-sol",
+			expectedModel:               "claude-fable-5",
+		},
+		{
+			name: "ordinary codex spark request keeps requested model",
+			account: &Account{
+				Credentials: map[string]any{},
+			},
+			requestedModel: "gpt-5.3-codex-spark",
+			expectedModel:  "gpt-5.3-codex-spark",
+		},
+		{
+			name: "ordinary gpt-5.5 request keeps requested model",
+			account: &Account{
+				Credentials: map[string]any{},
+			},
+			requestedModel: "gpt-5.5",
+			expectedModel:  "gpt-5.5",
+		},
+		{
+			name: "ordinary gpt-5.5-pro request keeps requested model",
+			account: &Account{
+				Credentials: map[string]any{},
+			},
+			requestedModel: "gpt-5.5-pro",
+			expectedModel:  "gpt-5.5-pro",
+		},
+		{
+			name: "ordinary compact-spelled gpt5.5 request keeps requested model",
+			account: &Account{
+				Credentials: map[string]any{},
+			},
+			requestedModel: "gpt5.5",
+			expectedModel:  "gpt5.5",
+		},
+		{
+			name: "ordinary namespaced gpt-5.5 request keeps requested model",
+			account: &Account{
+				Credentials: map[string]any{},
+			},
+			requestedModel: "openai/gpt-5.5",
+			expectedModel:  "openai/gpt-5.5",
+		},
+		{
+			name: "ordinary compact gpt-5.5 request keeps requested model",
+			account: &Account{
+				Credentials: map[string]any{},
+			},
+			requestedModel: "gpt-5.5-openai-compact",
+			expectedModel:  "gpt-5.5-openai-compact",
+		},
+		{
+			name: "whitespace-only messages dispatch model is ignored",
+			account: &Account{
+				Credentials: map[string]any{},
+			},
+			requestedModel:              "gpt-5.5",
+			messagesDispatchMappedModel: "  ",
+			expectedModel:               "gpt-5.5",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := resolveOpenAIMessagesForwardModel(tt.account, tt.requested, tt.dispatch); got != tt.want {
-				t.Fatalf("resolveOpenAIMessagesForwardModel(...) = %q, want %q", got, tt.want)
+			if got := resolveOpenAIForwardModel(tt.account, tt.requestedModel, tt.messagesDispatchMappedModel); got != tt.expectedModel {
+				t.Fatalf("resolveOpenAIForwardModel(...) = %q, want %q", got, tt.expectedModel)
 			}
 		})
 	}
@@ -164,10 +280,10 @@ func TestNormalizeOpenAIModelForUpstream(t *testing.T) {
 			want:    "gpt-5.4",
 		},
 		{
-			name:    "setup-token normalizes known codex alias",
-			account: &Account{Type: AccountTypeSetupToken},
-			model:   "gpt-5.4-high",
-			want:    "gpt-5.4",
+			name:    "oauth preserves GPT-5.5 Pro model",
+			account: &Account{Type: AccountTypeOAuth},
+			model:   "openai/gpt-5.5-pro",
+			want:    "gpt-5.5-pro",
 		},
 		{
 			name:    "oauth preserves codex auto review model",
@@ -214,6 +330,20 @@ func TestUsageBillingModelCandidatesPreserveCodexAutoReviewModel(t *testing.T) {
 	for i := range expected {
 		if candidates[i] != expected[i] {
 			t.Fatalf("usageBillingModelCandidates(codex-auto-review) = %#v, want %#v", candidates, expected)
+		}
+	}
+}
+
+func TestUsageBillingModelCandidatesPreserveGPT55ProModel(t *testing.T) {
+	candidates := usageBillingModelCandidates("openai/gpt-5.5-pro")
+
+	expected := []string{"openai/gpt-5.5-pro", "gpt-5.5-pro"}
+	if len(candidates) != len(expected) {
+		t.Fatalf("usageBillingModelCandidates(openai/gpt-5.5-pro) = %#v, want %#v", candidates, expected)
+	}
+	for i := range expected {
+		if candidates[i] != expected[i] {
+			t.Fatalf("usageBillingModelCandidates(openai/gpt-5.5-pro) = %#v, want %#v", candidates, expected)
 		}
 	}
 }

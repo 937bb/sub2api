@@ -12,12 +12,16 @@ const (
 	AccountTestModeDefault = "default"
 	// AccountTestModeCompact drives the /responses/compact compact-probe test.
 	AccountTestModeCompact = "compact"
+	// AccountTestModeQuotaBypass drives the quota-bypass injection test.
+	AccountTestModeQuotaBypass = "quota-bypass"
 )
 
 func normalizeAccountTestMode(mode string) string {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
 	case AccountTestModeCompact:
 		return AccountTestModeCompact
+	case AccountTestModeQuotaBypass:
+		return AccountTestModeQuotaBypass
 	default:
 		return AccountTestModeDefault
 	}
@@ -72,7 +76,7 @@ func buildOpenAICompactProbeExtraUpdates(resp *http.Response, body []byte, probe
 
 	switch {
 	case probeErr != nil:
-		updates["openai_compact_last_error"] = truncateString(sanitizeOpenAIUpstreamDiagnosticText(probeErr.Error()), 2048)
+		updates["openai_compact_last_error"] = truncateString(sanitizeUpstreamErrorMessage(probeErr.Error()), 2048)
 	case resp == nil:
 		updates["openai_compact_last_error"] = "compact probe failed"
 	default:
@@ -83,7 +87,7 @@ func buildOpenAICompactProbeExtraUpdates(resp *http.Response, body []byte, probe
 		if errMsg == "" && (resp.StatusCode < 200 || resp.StatusCode >= 300) {
 			errMsg = "HTTP " + strconv.Itoa(resp.StatusCode)
 		}
-		errMsg = truncateString(sanitizeOpenAIUpstreamDiagnosticText(errMsg), 2048)
+		errMsg = truncateString(sanitizeUpstreamErrorMessage(errMsg), 2048)
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 			updates["openai_compact_supported"] = true
 			updates["openai_compact_last_error"] = ""

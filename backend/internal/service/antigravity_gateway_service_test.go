@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
-	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/gin-gonic/gin"
@@ -186,34 +185,6 @@ func (s *queuedHTTPUpstreamStub) DoWithTLS(req *http.Request, proxyURL string, a
 	return s.Do(req, proxyURL, accountID, concurrency)
 }
 
-func TestAttemptCreditsOveragesRetryUsesHTTPAttemptAuthority(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	ctx = withHTTPAttemptAuthority(WithHTTPAttemptAdmissionHook(ctx, cancel))
-	upstream := &queuedHTTPUpstreamStub{}
-	account := &Account{ID: 1, Concurrency: 1}
-	svc := &AntigravityGatewayService{}
-
-	result := svc.attemptCreditsOveragesRetry(
-		antigravityRetryLoopParams{
-			ctx:          ctx,
-			prefix:       "test",
-			account:      account,
-			action:       "generateContent",
-			body:         []byte(`{"model":"test"}`),
-			httpUpstream: upstream,
-		},
-		"https://example.com",
-		"test",
-		0,
-		http.StatusTooManyRequests,
-		nil,
-	)
-
-	require.True(t, result.handled)
-	require.Nil(t, result.resp)
-	require.Zero(t, upstream.callCount)
-}
-
 type recordingInternal500CounterCache struct {
 	incrementCalls []int64
 	resetCalls     []int64
@@ -229,98 +200,18 @@ func (c *recordingInternal500CounterCache) ResetInternal500Count(_ context.Conte
 	return nil
 }
 
-type recordingAntigravityTokenCache struct {
-	getCalls     []string
-	setCalls     []string
-	deleteCalls  []string
-	acquireCalls []string
-	releaseCalls []string
-	hitToken     string
-	hitTokens    map[string]string
+type antigravitySettingRepoStub struct {
+	values map[string]string
 }
-
-func (c *recordingAntigravityTokenCache) GetAccessToken(_ context.Context, cacheKey string) (string, error) {
-	c.getCalls = append(c.getCalls, cacheKey)
-	if c.hitTokens != nil {
-		if token := strings.TrimSpace(c.hitTokens[cacheKey]); token != "" {
-			return token, nil
-		}
-		return "", errors.New("cache miss")
-	}
-	if strings.TrimSpace(c.hitToken) != "" {
-		return c.hitToken, nil
-	}
-	return "", errors.New("cache miss")
-}
-
-func (c *recordingAntigravityTokenCache) SetAccessToken(_ context.Context, cacheKey string, _ string, _ time.Duration) error {
-	c.setCalls = append(c.setCalls, cacheKey)
-	return nil
-}
-
-func (c *recordingAntigravityTokenCache) DeleteAccessToken(_ context.Context, cacheKey string) error {
-	c.deleteCalls = append(c.deleteCalls, cacheKey)
-	return nil
-}
-
-func (c *recordingAntigravityTokenCache) AcquireRefreshLock(_ context.Context, cacheKey string, _ time.Duration) (bool, error) {
-	c.acquireCalls = append(c.acquireCalls, cacheKey)
-	return true, nil
-}
-
-func (c *recordingAntigravityTokenCache) ReleaseRefreshLock(_ context.Context, cacheKey string) error {
-	c.releaseCalls = append(c.releaseCalls, cacheKey)
-	return nil
-}
-
-func (c *recordingAntigravityTokenCache) requireNoTokenWork(t *testing.T) {
-	t.Helper()
-	require.Empty(t, c.getCalls)
-	require.Empty(t, c.setCalls)
-	require.Empty(t, c.deleteCalls)
-	require.Empty(t, c.acquireCalls)
-	require.Empty(t, c.releaseCalls)
-}
-
-func newRecordingAntigravityTokenProvider(cache *recordingAntigravityTokenCache) *AntigravityTokenProvider {
-	return &AntigravityTokenProvider{
-		tokenCache:              cache,
-		antigravityOAuthService: NewAntigravityOAuthService(nil),
-	}
-}
-
-type antigravityV1InternalProbe struct {
-	paths []string
-}
-
-func newAntigravityV1InternalProbe(t *testing.T) *antigravityV1InternalProbe {
-	t.Helper()
-
-	probe := &antigravityV1InternalProbe{}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		probe.paths = append(probe.paths, r.URL.Path)
-		w.Header().Set("Content-Type", "application/json")
-		switch r.URL.Path {
-		case "/v1internal:loadCodeAssist":
-			_, _ = w.Write([]byte(`{"cloudaicompanionProject":"backfilled-project"}`))
-		case "/v1internal:fetchAvailableModels":
-			_, _ = w.Write([]byte(`{"models":{"gemini-2.5-flash":{}}}`))
-		default:
-			_, _ = w.Write([]byte(`{}`))
-		}
-	}))
-	t.Cleanup(server.Close)
-	withAntigravityModelSyncBaseURLs(t, []string{server.URL})
-	return probe
-}
-
-type antigravitySettingRepoStub struct{}
 
 func (s *antigravitySettingRepoStub) Get(ctx context.Context, key string) (*Setting, error) {
 	panic("unexpected Get call")
 }
 
 func (s *antigravitySettingRepoStub) GetValue(ctx context.Context, key string) (string, error) {
+	if value, ok := s.values[key]; ok {
+		return value, nil
+	}
 	return "", ErrSettingNotFound
 }
 
@@ -344,38 +235,6 @@ func (s *antigravitySettingRepoStub) Delete(ctx context.Context, key string) err
 	panic("unexpected Delete call")
 }
 
-const antigravityBackfillSensitiveBody = `{"error":"SECRET_TOKEN_SHOULD_NOT_LEAK","authorization":"Bearer hidden-token","email":"alice@example.com","url":"https://antigravity.example.test/private?access_token=hidden","account":"sensitive-account-metadata"}`
-
-func requireNoAntigravityBackfillSensitiveLeak(t *testing.T, text string) {
-	t.Helper()
-	for _, forbidden := range []string{
-		"SECRET_TOKEN_SHOULD_NOT_LEAK",
-		"Bearer hidden-token",
-		"alice@example.com",
-		"antigravity.example.test/private",
-		"access_token=hidden",
-		"sensitive-account-metadata",
-		"loadCodeAssist",
-		"HTTP 400",
-	} {
-		require.NotContains(t, text, forbidden)
-	}
-}
-
-type failingAntigravityProjectIDBackfiller struct {
-	err error
-}
-
-func (f failingAntigravityProjectIDBackfiller) FillProjectID(context.Context, *Account, string) (string, error) {
-	return "", f.err
-}
-
-func newFailingAntigravityTokenProvider(rawErr error) *AntigravityTokenProvider {
-	return &AntigravityTokenProvider{
-		antigravityOAuthService: failingAntigravityProjectIDBackfiller{err: rawErr},
-	}
-}
-
 func TestResolveAntigravityProjectID(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -384,54 +243,30 @@ func TestResolveAntigravityProjectID(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name: "project_id wins",
-			account: &Account{
-				Platform: PlatformAntigravity,
-				Type:     AccountTypeOAuth,
-				Credentials: map[string]any{
-					"project_id":                            " onboard-project ",
-					antigravityProjectFallbackCredentialKey: " configured-project ",
-				},
-			},
+			name: "uses onboard project_id first",
+			account: &Account{Credentials: map[string]any{
+				"project_id": " onboard-project ",
+				antigravityProjectIDFallbackCredentialKey: " configured-project ",
+			}},
 			want: "onboard-project",
 		},
 		{
-			name: "fallback credential",
-			account: &Account{
-				Platform: PlatformAntigravity,
-				Type:     AccountTypeOAuth,
-				Credentials: map[string]any{
-					antigravityProjectFallbackCredentialKey: " configured-project ",
-				},
-			},
+			name: "uses configured credentials fallback",
+			account: &Account{Credentials: map[string]any{
+				antigravityProjectIDFallbackCredentialKey: " configured-project ",
+			}},
 			want: "configured-project",
 		},
 		{
-			name: "missing project",
-			account: &Account{
-				Platform: PlatformAntigravity,
-				Type:     AccountTypeOAuth,
-				Credentials: map[string]any{
-					"project_id":                            " ",
-					antigravityProjectFallbackCredentialKey: "\t",
-				},
-			},
-			wantErr: true,
+			name: "uses configured extra fallback",
+			account: &Account{Extra: map[string]any{
+				antigravityProjectIDFallbackCredentialKey: " extra-project ",
+			}},
+			want: "extra-project",
 		},
 		{
-			name: "upstream account ignores fallback credential",
-			account: &Account{
-				Platform: PlatformAntigravity,
-				Type:     AccountTypeUpstream,
-				Credentials: map[string]any{
-					antigravityProjectFallbackCredentialKey: " configured-project ",
-				},
-			},
-			wantErr: true,
-		},
-		{
-			name:    "nil account",
-			account: nil,
+			name:    "missing project",
+			account: &Account{Credentials: map[string]any{}},
 			wantErr: true,
 		},
 	}
@@ -448,134 +283,6 @@ func TestResolveAntigravityProjectID(t *testing.T) {
 			require.Equal(t, tc.want, got)
 		})
 	}
-}
-
-func TestResolveAntigravityProjectIDAfterToken_BackfillFailureSanitizesCause(t *testing.T) {
-	rawErr := fmt.Errorf("获取 project_id 失败 (重试 3 次后): loadCodeAssist 失败 (HTTP 400): %s", antigravityBackfillSensitiveBody)
-	account := &Account{
-		ID:       120,
-		Platform: PlatformAntigravity,
-		Type:     AccountTypeOAuth,
-		Credentials: map[string]any{
-			"access_token": "token",
-		},
-	}
-	provider := newFailingAntigravityTokenProvider(rawErr)
-
-	projectID, err := resolveAntigravityProjectIDAfterToken(context.Background(), account, provider, "token")
-
-	require.Empty(t, projectID)
-	require.ErrorIs(t, err, errAntigravityProjectIDRequired)
-	require.ErrorIs(t, err, errAntigravityProjectBackfillUnavailable)
-	require.Contains(t, err.Error(), errAntigravityProjectBackfillUnavailable.Error())
-	requireNoAntigravityBackfillSensitiveLeak(t, err.Error())
-}
-
-func TestAntigravityGatewayService_WrapV1InternalRequestRequiresProject(t *testing.T) {
-	svc := &AntigravityGatewayService{}
-
-	wrapped, err := svc.wrapV1InternalRequest("  configured-project  ", "gemini-2.5-flash", []byte(`{"contents":[]}`))
-	require.NoError(t, err)
-
-	var body map[string]any
-	require.NoError(t, json.Unmarshal(wrapped, &body))
-	require.Equal(t, "configured-project", body["project"])
-
-	wrapped, err = svc.wrapV1InternalRequest(" \t", "gemini-2.5-flash", []byte(`{"contents":[]}`))
-	require.ErrorIs(t, err, errAntigravityProjectIDRequired)
-	require.Nil(t, wrapped)
-}
-
-func TestAntigravityGatewayService_TestConnectionUsesConfiguredProjectFallback(t *testing.T) {
-	upstreamBody := []byte("data: {\"response\":{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"ok\"}]},\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":1,\"candidatesTokenCount\":1}}}\n\n")
-	upstream := &queuedHTTPUpstreamStub{
-		responses: []*http.Response{
-			{
-				StatusCode: http.StatusOK,
-				Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
-				Body:       io.NopCloser(bytes.NewReader(upstreamBody)),
-			},
-		},
-	}
-	svc := &AntigravityGatewayService{
-		settingService: NewSettingService(&antigravitySettingRepoStub{}, &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}),
-		tokenProvider:  &AntigravityTokenProvider{},
-		httpUpstream:   upstream,
-	}
-	account := &Account{
-		ID:          100,
-		Name:        "acc-test-connection-fallback",
-		Platform:    PlatformAntigravity,
-		Type:        AccountTypeOAuth,
-		Status:      StatusActive,
-		Concurrency: 1,
-		Credentials: map[string]any{
-			"access_token":                          "token",
-			antigravityProjectFallbackCredentialKey: " configured-project ",
-			"model_mapping": map[string]any{
-				"gemini-2.5-flash": "gemini-2.5-flash",
-			},
-		},
-	}
-
-	result, err := svc.TestConnection(context.Background(), account, "gemini-2.5-flash")
-	require.NoError(t, err)
-	require.NotNil(t, result)
-	require.Equal(t, "ok", result.Text)
-	require.Empty(t, account.GetCredential("project_id"), "configured fallback must not backfill project_id")
-	require.Len(t, upstream.requestBodies, 1)
-
-	var wrapped map[string]any
-	require.NoError(t, json.Unmarshal(upstream.requestBodies[0], &wrapped))
-	require.Equal(t, "configured-project", wrapped["project"])
-}
-
-func TestAntigravityGatewayService_TestConnection_MissingProjectBackfillsBeforeResolve(t *testing.T) {
-	cache := &recordingAntigravityTokenCache{}
-	probe := newAntigravityV1InternalProbe(t)
-	upstreamBody := []byte("data: {\"response\":{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"ok\"}]},\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":1,\"candidatesTokenCount\":1}}}\n\n")
-	upstream := &queuedHTTPUpstreamStub{
-		responses: []*http.Response{
-			{
-				StatusCode: http.StatusOK,
-				Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
-				Body:       io.NopCloser(bytes.NewReader(upstreamBody)),
-			},
-		},
-	}
-	svc := &AntigravityGatewayService{
-		settingService: NewSettingService(&antigravitySettingRepoStub{}, &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}),
-		tokenProvider:  newRecordingAntigravityTokenProvider(cache),
-		httpUpstream:   upstream,
-	}
-	account := &Account{
-		ID:          103,
-		Name:        "acc-test-connection-missing-project",
-		Platform:    PlatformAntigravity,
-		Type:        AccountTypeOAuth,
-		Status:      StatusActive,
-		Concurrency: 1,
-		Credentials: map[string]any{
-			"access_token": "token",
-			"model_mapping": map[string]any{
-				"gemini-2.5-flash": "gemini-2.5-flash",
-			},
-		},
-	}
-
-	result, err := svc.TestConnection(context.Background(), account, "gemini-2.5-flash")
-	require.NoError(t, err)
-	require.NotNil(t, result)
-	require.Equal(t, "ok", result.Text)
-	require.Equal(t, []string{"ag:account:103"}, cache.getCalls)
-	require.Equal(t, []string{"ag:backfilled-project"}, cache.setCalls)
-	require.Contains(t, probe.paths, "/v1internal:loadCodeAssist")
-	require.Equal(t, "backfilled-project", account.GetCredential("project_id"))
-	require.Len(t, upstream.requestBodies, 1)
-
-	var wrapped map[string]any
-	require.NoError(t, json.Unmarshal(upstream.requestBodies[0], &wrapped))
-	require.Equal(t, "backfilled-project", wrapped["project"])
 }
 
 func TestAntigravityGatewayService_ForwardGemini_UsesConfiguredProjectFallback(t *testing.T) {
@@ -615,8 +322,8 @@ func TestAntigravityGatewayService_ForwardGemini_UsesConfiguredProjectFallback(t
 		Status:      StatusActive,
 		Concurrency: 1,
 		Credentials: map[string]any{
-			"access_token":                          "token",
-			antigravityProjectFallbackCredentialKey: " configured-project ",
+			"access_token": "token",
+			antigravityProjectIDFallbackCredentialKey: "configured-project",
 			"model_mapping": map[string]any{
 				"gemini-2.5-flash": "gemini-2.5-flash",
 			},
@@ -627,14 +334,13 @@ func TestAntigravityGatewayService_ForwardGemini_UsesConfiguredProjectFallback(t
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.Len(t, upstream.requestBodies, 1)
-	require.Empty(t, account.GetCredential("project_id"), "configured fallback must not backfill project_id")
 
 	var wrapped map[string]any
 	require.NoError(t, json.Unmarshal(upstream.requestBodies[0], &wrapped))
 	require.Equal(t, "configured-project", wrapped["project"])
 }
 
-func TestAntigravityGatewayService_ForwardGemini_RefreshThenBackfillDoesNotPersistStaleTokens(t *testing.T) {
+func TestAntigravityGatewayService_ForwardGemini_MissingProjectReturnsLocalError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	writer := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(writer)
@@ -647,106 +353,10 @@ func TestAntigravityGatewayService_ForwardGemini_RefreshThenBackfillDoesNotPersi
 	require.NoError(t, err)
 	c.Request = httptest.NewRequest(http.MethodPost, "/antigravity/v1beta/models/gemini-2.5-flash:streamGenerateContent", bytes.NewReader(body))
 
-	refreshHTTP := withAntigravityRefreshHTTPStub(t, "")
-	upstreamBody := []byte("data: {\"response\":{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"ok\"}]},\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":1,\"candidatesTokenCount\":1}}}\n\n")
-	upstream := &queuedHTTPUpstreamStub{
-		responses: []*http.Response{
-			{
-				StatusCode: http.StatusOK,
-				Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
-				Body:       io.NopCloser(bytes.NewReader(upstreamBody)),
-			},
-		},
-	}
-	requestAccount := &Account{
-		ID:          106,
-		Name:        "acc-forward-gemini-refresh-backfill",
-		Platform:    PlatformAntigravity,
-		Type:        AccountTypeOAuth,
-		Status:      StatusActive,
-		Concurrency: 1,
-		Credentials: map[string]any{
-			"access_token":  "stale-token",
-			"refresh_token": "old-refresh",
-			"expires_at":    time.Now().Add(time.Minute).Format(time.RFC3339),
-			"model_mapping": map[string]any{
-				"gemini-2.5-flash": "gemini-2.5-flash",
-			},
-		},
-	}
-	repoAccount := &Account{
-		ID:          requestAccount.ID,
-		Name:        requestAccount.Name,
-		Platform:    requestAccount.Platform,
-		Type:        requestAccount.Type,
-		Status:      requestAccount.Status,
-		Concurrency: requestAccount.Concurrency,
-		Credentials: cloneCredentials(requestAccount.Credentials),
-	}
-	cache := &recordingAntigravityTokenCache{}
-	repo := &antigravityTokenProviderAccountRepoStub{account: repoAccount}
-	executor := NewAntigravityTokenRefresher(NewAntigravityOAuthService(nil))
-	tokenProvider := NewAntigravityTokenProvider(repo, cache, NewAntigravityOAuthService(nil))
-	tokenProvider.SetRefreshAPI(NewOAuthRefreshAPI(repo, cache), executor)
-	svc := &AntigravityGatewayService{
-		settingService: NewSettingService(&antigravitySettingRepoStub{}, &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}),
-		tokenProvider:  tokenProvider,
-		httpUpstream:   upstream,
-	}
-
-	result, err := svc.ForwardGemini(context.Background(), c, requestAccount, "gemini-2.5-flash", "streamGenerateContent", true, body, false)
-	require.NoError(t, err)
-	require.NotNil(t, result)
-	require.Equal(t, http.StatusOK, writer.Code)
-
-	require.Equal(t, []string{"/token", "/v1internal:loadCodeAssist"}, refreshHTTP.requestPaths)
-	require.Equal(t, 1, repo.updateCredentialsCalls)
-	require.Equal(t, "refreshed-token", repo.updateCredentialsPayload[0]["access_token"])
-	require.Equal(t, "refreshed-refresh", repo.updateCredentialsPayload[0]["refresh_token"])
-	require.Equal(t, "backfilled-project", repo.updateCredentialsPayload[0]["project_id"])
-	require.Equal(t, "refreshed-token", requestAccount.GetCredential("access_token"))
-	require.Equal(t, "refreshed-refresh", requestAccount.GetCredential("refresh_token"))
-	require.Equal(t, "backfilled-project", requestAccount.GetCredential("project_id"))
-	require.Equal(t, []string{"ag:account:106"}, cache.getCalls)
-	require.Equal(t, []string{"ag:account:106"}, cache.acquireCalls)
-	require.Equal(t, []string{"ag:account:106"}, cache.releaseCalls)
-	require.Equal(t, []string{"ag:backfilled-project"}, cache.setCalls)
-	require.Len(t, upstream.requestBodies, 1)
-
-	var wrapped map[string]any
-	require.NoError(t, json.Unmarshal(upstream.requestBodies[0], &wrapped))
-	require.Equal(t, "backfilled-project", wrapped["project"])
-}
-
-func TestAntigravityGatewayService_ForwardGemini_MissingProjectBackfillsBeforeResolve(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	writer := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(writer)
-
-	body, err := json.Marshal(map[string]any{
-		"contents": []map[string]any{
-			{"role": "user", "parts": []map[string]any{{"text": "hello"}}},
-		},
-	})
-	require.NoError(t, err)
-	c.Request = httptest.NewRequest(http.MethodPost, "/antigravity/v1beta/models/gemini-2.5-flash:streamGenerateContent", bytes.NewReader(body))
-
-	cache := &recordingAntigravityTokenCache{hitToken: "cached-token"}
-	probe := newAntigravityV1InternalProbe(t)
-	upstreamBody := []byte("data: {\"response\":{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"ok\"}]},\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":1,\"candidatesTokenCount\":1}}}\n\n")
-	upstream := &queuedHTTPUpstreamStub{
-		responses: []*http.Response{
-			{
-				StatusCode: http.StatusOK,
-				Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
-				Body:       io.NopCloser(bytes.NewReader(upstreamBody)),
-			},
-		},
-	}
+	upstream := &queuedHTTPUpstreamStub{}
 	internal500Cache := &recordingInternal500CounterCache{}
 	svc := &AntigravityGatewayService{
-		settingService:   NewSettingService(&antigravitySettingRepoStub{}, &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}),
-		tokenProvider:    newRecordingAntigravityTokenProvider(cache),
+		tokenProvider:    &AntigravityTokenProvider{},
 		httpUpstream:     upstream,
 		internal500Cache: internal500Cache,
 	}
@@ -767,432 +377,13 @@ func TestAntigravityGatewayService_ForwardGemini_MissingProjectBackfillsBeforeRe
 	}
 
 	result, err := svc.ForwardGemini(context.Background(), c, account, "gemini-2.5-flash", "streamGenerateContent", true, body, false)
-	require.NoError(t, err)
-	require.NotNil(t, result)
-	require.Equal(t, http.StatusOK, writer.Code)
-	require.Len(t, upstream.requestBodies, 1)
-	require.Empty(t, internal500Cache.incrementCalls)
-	require.Equal(t, []string{"ag:account:102"}, cache.getCalls)
-	require.Empty(t, cache.setCalls)
-	require.Contains(t, probe.paths, "/v1internal:loadCodeAssist")
-	require.Equal(t, "backfilled-project", account.GetCredential("project_id"))
-
-	var wrapped map[string]any
-	require.NoError(t, json.Unmarshal(upstream.requestBodies[0], &wrapped))
-	require.Equal(t, "backfilled-project", wrapped["project"])
-}
-
-func TestAntigravityGatewayService_Forward_MissingProjectBackfillsBeforeResolve(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	writer := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(writer)
-
-	body, err := json.Marshal(map[string]any{
-		"model": "claude-sonnet-4-5",
-		"messages": []map[string]any{
-			{"role": "user", "content": "hello"},
-		},
-		"max_tokens": 1,
-		"stream":     false,
-	})
-	require.NoError(t, err)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
-
-	cache := &recordingAntigravityTokenCache{}
-	probe := newAntigravityV1InternalProbe(t)
-	upstreamBody := []byte("data: {\"response\":{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"ok\"}]},\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":1,\"candidatesTokenCount\":1}}}\n\n")
-	upstream := &queuedHTTPUpstreamStub{
-		responses: []*http.Response{
-			{
-				StatusCode: http.StatusOK,
-				Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
-				Body:       io.NopCloser(bytes.NewReader(upstreamBody)),
-			},
-		},
-	}
-	internal500Cache := &recordingInternal500CounterCache{}
-	svc := &AntigravityGatewayService{
-		settingService:   NewSettingService(&antigravitySettingRepoStub{}, &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}),
-		tokenProvider:    newRecordingAntigravityTokenProvider(cache),
-		httpUpstream:     upstream,
-		internal500Cache: internal500Cache,
-	}
-	account := &Account{
-		ID:          104,
-		Name:        "acc-forward-missing-project",
-		Platform:    PlatformAntigravity,
-		Type:        AccountTypeOAuth,
-		Status:      StatusActive,
-		Concurrency: 1,
-		Credentials: map[string]any{
-			"access_token": "token",
-			"model_mapping": map[string]any{
-				"claude-sonnet-4-5": "gemini-2.5-flash",
-			},
-		},
-	}
-
-	result, err := svc.Forward(context.Background(), c, account, body, false)
-	require.NoError(t, err)
-	require.NotNil(t, result)
-	require.Equal(t, http.StatusOK, writer.Code)
-	require.Len(t, upstream.requestBodies, 1)
-	require.Empty(t, internal500Cache.incrementCalls)
-	require.Equal(t, []string{"ag:account:104"}, cache.getCalls)
-	require.Equal(t, []string{"ag:backfilled-project"}, cache.setCalls)
-	require.Contains(t, probe.paths, "/v1internal:loadCodeAssist")
-	require.Equal(t, "backfilled-project", account.GetCredential("project_id"))
-
-	var wrapped map[string]any
-	require.NoError(t, json.Unmarshal(upstream.requestBodies[0], &wrapped))
-	require.Equal(t, "backfilled-project", wrapped["project"])
-	require.Contains(t, writer.Body.String(), `"text":"ok"`)
-}
-
-func TestAntigravityGatewayService_Forward_BackfillFailureSanitizesClientError(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	writer := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(writer)
-
-	body, err := json.Marshal(map[string]any{
-		"model": "claude-sonnet-4-5",
-		"messages": []map[string]any{
-			{"role": "user", "content": "hello"},
-		},
-		"max_tokens": 1,
-	})
-	require.NoError(t, err)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
-
-	rawErr := fmt.Errorf("获取 project_id 失败 (重试 3 次后): loadCodeAssist 失败 (HTTP 400): %s", antigravityBackfillSensitiveBody)
-	svc := &AntigravityGatewayService{
-		settingService: NewSettingService(&antigravitySettingRepoStub{}, &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}),
-		tokenProvider:  newFailingAntigravityTokenProvider(rawErr),
-	}
-	account := &Account{
-		ID:          121,
-		Name:        "acc-forward-backfill-failure",
-		Platform:    PlatformAntigravity,
-		Type:        AccountTypeOAuth,
-		Status:      StatusActive,
-		Concurrency: 1,
-		Credentials: map[string]any{
-			"access_token": "token",
-			"model_mapping": map[string]any{
-				"claude-sonnet-4-5": "gemini-2.5-flash",
-			},
-		},
-	}
-
-	result, err := svc.Forward(context.Background(), c, account, body, false)
-
 	require.Nil(t, result)
 	require.ErrorIs(t, err, errAntigravityProjectIDRequired)
-	require.ErrorIs(t, err, errAntigravityProjectBackfillUnavailable)
 	require.Equal(t, http.StatusBadRequest, writer.Code)
-	require.Contains(t, writer.Body.String(), errAntigravityProjectBackfillUnavailable.Error())
-	requireNoAntigravityBackfillSensitiveLeak(t, writer.Body.String())
-	requireNoAntigravityBackfillSensitiveLeak(t, err.Error())
-}
-
-func TestAntigravityGatewayService_ForwardGemini_BackfillFailureSanitizesClientError(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	writer := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(writer)
-
-	body, err := json.Marshal(map[string]any{
-		"contents": []map[string]any{
-			{"role": "user", "parts": []map[string]any{{"text": "hello"}}},
-		},
-	})
-	require.NoError(t, err)
-	c.Request = httptest.NewRequest(http.MethodPost, "/antigravity/v1beta/models/gemini-2.5-flash:generateContent", bytes.NewReader(body))
-
-	rawErr := fmt.Errorf("获取 project_id 失败 (重试 3 次后): loadCodeAssist 失败 (HTTP 400): %s", antigravityBackfillSensitiveBody)
-	svc := &AntigravityGatewayService{
-		settingService: NewSettingService(&antigravitySettingRepoStub{}, &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}),
-		tokenProvider:  newFailingAntigravityTokenProvider(rawErr),
-	}
-	account := &Account{
-		ID:          122,
-		Name:        "acc-gemini-backfill-failure",
-		Platform:    PlatformAntigravity,
-		Type:        AccountTypeOAuth,
-		Status:      StatusActive,
-		Concurrency: 1,
-		Credentials: map[string]any{
-			"access_token": "token",
-			"model_mapping": map[string]any{
-				"gemini-2.5-flash": "gemini-2.5-flash",
-			},
-		},
-	}
-
-	result, err := svc.ForwardGemini(context.Background(), c, account, "gemini-2.5-flash", "generateContent", false, body, false)
-
-	require.Nil(t, result)
-	require.ErrorIs(t, err, errAntigravityProjectIDRequired)
-	require.ErrorIs(t, err, errAntigravityProjectBackfillUnavailable)
-	require.Equal(t, http.StatusBadRequest, writer.Code)
-	require.Contains(t, writer.Body.String(), errAntigravityProjectBackfillUnavailable.Error())
-	requireNoAntigravityBackfillSensitiveLeak(t, writer.Body.String())
-	requireNoAntigravityBackfillSensitiveLeak(t, err.Error())
-}
-
-func TestAntigravityGatewayService_Forward_RefreshUsesLatestFallbackWithoutStaleProject(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	writer := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(writer)
-
-	body, err := json.Marshal(map[string]any{
-		"model": "claude-sonnet-4-5",
-		"messages": []map[string]any{
-			{"role": "user", "content": "hello"},
-		},
-		"max_tokens": 1,
-		"stream":     false,
-	})
-	require.NoError(t, err)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
-
-	cache := &recordingAntigravityTokenCache{}
-	probe := newAntigravityV1InternalProbe(t)
-	upstreamBody := []byte("data: {\"response\":{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"ok\"}]},\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":1,\"candidatesTokenCount\":1}}}\n\n")
-	upstream := &queuedHTTPUpstreamStub{
-		responses: []*http.Response{
-			{
-				StatusCode: http.StatusOK,
-				Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
-				Body:       io.NopCloser(bytes.NewReader(upstreamBody)),
-			},
-		},
-	}
-	requestAccount := &Account{
-		ID:          107,
-		Name:        "acc-forward-stale-primary-latest-fallback",
-		Platform:    PlatformAntigravity,
-		Type:        AccountTypeOAuth,
-		Status:      StatusActive,
-		Concurrency: 1,
-		Credentials: map[string]any{
-			"access_token":  "stale-token",
-			"refresh_token": "old-refresh",
-			"expires_at":    time.Now().Add(time.Minute).Format(time.RFC3339),
-			"project_id":    "stale-primary-project",
-			"model_mapping": map[string]any{
-				"claude-sonnet-4-5": "gemini-2.5-flash",
-			},
-		},
-	}
-	repoAccount := &Account{
-		ID:          requestAccount.ID,
-		Name:        requestAccount.Name,
-		Platform:    requestAccount.Platform,
-		Type:        requestAccount.Type,
-		Status:      requestAccount.Status,
-		Concurrency: requestAccount.Concurrency,
-		Credentials: map[string]any{
-			"access_token":                          "fresh-token",
-			"refresh_token":                         "fresh-refresh",
-			"expires_at":                            time.Now().Add(time.Hour).Format(time.RFC3339),
-			"_token_version":                        int64(2),
-			antigravityProjectFallbackCredentialKey: " fallback-project ",
-			"model_mapping": map[string]any{
-				"claude-sonnet-4-5": "gemini-2.5-flash",
-			},
-		},
-	}
-	repo := &antigravityTokenProviderAccountRepoStub{account: repoAccount}
-	executor := NewAntigravityTokenRefresher(NewAntigravityOAuthService(nil))
-	tokenProvider := NewAntigravityTokenProvider(repo, cache, NewAntigravityOAuthService(nil))
-	tokenProvider.SetRefreshAPI(NewOAuthRefreshAPI(repo, cache), executor)
-	internal500Cache := &recordingInternal500CounterCache{}
-	svc := &AntigravityGatewayService{
-		settingService:   NewSettingService(&antigravitySettingRepoStub{}, &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}),
-		tokenProvider:    tokenProvider,
-		httpUpstream:     upstream,
-		internal500Cache: internal500Cache,
-	}
-
-	result, err := svc.Forward(context.Background(), c, requestAccount, body, false)
-	require.NoError(t, err)
-	require.NotNil(t, result)
-	require.Equal(t, http.StatusOK, writer.Code)
-
-	require.Equal(t, []string{"ag:account:107"}, cache.getCalls)
-	require.Empty(t, cache.acquireCalls)
-	require.Empty(t, cache.releaseCalls)
-	require.Equal(t, []string{"ag:account:107"}, cache.setCalls)
-	require.Zero(t, repo.updateCredentialsCalls)
-	require.Empty(t, probe.paths, "latest fallback-only account must not backfill project_id")
-	require.Equal(t, "fresh-token", requestAccount.GetCredential("access_token"))
-	require.Equal(t, "fresh-refresh", requestAccount.GetCredential("refresh_token"))
-	require.Empty(t, requestAccount.GetCredential("project_id"), "latest fallback-only credentials must delete stale project_id")
-	require.Equal(t, "fallback-project", strings.TrimSpace(requestAccount.GetCredential(antigravityProjectFallbackCredentialKey)))
+	require.Empty(t, upstream.requestBodies)
 	require.Empty(t, internal500Cache.incrementCalls)
-	require.Len(t, upstream.requestBodies, 1)
-
-	var wrapped map[string]any
-	require.NoError(t, json.Unmarshal(upstream.requestBodies[0], &wrapped))
-	require.Equal(t, "fallback-project", wrapped["project"])
-	require.Contains(t, writer.Body.String(), `"text":"ok"`)
-}
-
-func TestAntigravityGatewayService_Forward_CacheHitUsesLatestFallbackWithoutStaleProject(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	writer := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(writer)
-
-	body, err := json.Marshal(map[string]any{
-		"model": "claude-sonnet-4-5",
-		"messages": []map[string]any{
-			{"role": "user", "content": "hello"},
-		},
-		"max_tokens": 1,
-		"stream":     false,
-	})
-	require.NoError(t, err)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
-
-	cache := &recordingAntigravityTokenCache{
-		hitTokens: map[string]string{
-			"ag:stale-primary-project": "stale-cached-token",
-			"ag:account:108":           "fresh-cached-token",
-		},
-	}
-	probe := newAntigravityV1InternalProbe(t)
-	upstreamBody := []byte("data: {\"response\":{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"ok\"}]},\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":1,\"candidatesTokenCount\":1}}}\n\n")
-	upstream := &queuedHTTPUpstreamStub{
-		responses: []*http.Response{
-			{
-				StatusCode: http.StatusOK,
-				Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
-				Body:       io.NopCloser(bytes.NewReader(upstreamBody)),
-			},
-		},
-	}
-	requestAccount := &Account{
-		ID:          108,
-		Name:        "acc-forward-stale-cache-hit-latest-fallback",
-		Platform:    PlatformAntigravity,
-		Type:        AccountTypeOAuth,
-		Status:      StatusActive,
-		Concurrency: 1,
-		Credentials: map[string]any{
-			"access_token": "stale-token",
-			"expires_at":   time.Now().Add(time.Hour).Format(time.RFC3339),
-			"project_id":   "stale-primary-project",
-			"model_mapping": map[string]any{
-				"claude-sonnet-4-5": "gemini-2.5-flash",
-			},
-		},
-	}
-	repoAccount := &Account{
-		ID:          requestAccount.ID,
-		Name:        requestAccount.Name,
-		Platform:    requestAccount.Platform,
-		Type:        requestAccount.Type,
-		Status:      requestAccount.Status,
-		Concurrency: requestAccount.Concurrency,
-		Credentials: map[string]any{
-			"access_token":                          "fresh-token",
-			"refresh_token":                         "fresh-refresh",
-			"expires_at":                            time.Now().Add(time.Hour).Format(time.RFC3339),
-			"_token_version":                        int64(3),
-			antigravityProjectFallbackCredentialKey: " fallback-project ",
-			"model_mapping": map[string]any{
-				"claude-sonnet-4-5": "gemini-2.5-flash",
-			},
-		},
-	}
-	repo := &antigravityTokenProviderAccountRepoStub{account: repoAccount}
-	tokenProvider := NewAntigravityTokenProvider(repo, cache, NewAntigravityOAuthService(nil))
-	internal500Cache := &recordingInternal500CounterCache{}
-	svc := &AntigravityGatewayService{
-		settingService:   NewSettingService(&antigravitySettingRepoStub{}, &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}),
-		tokenProvider:    tokenProvider,
-		httpUpstream:     upstream,
-		internal500Cache: internal500Cache,
-	}
-
-	result, err := svc.Forward(context.Background(), c, requestAccount, body, false)
-	require.NoError(t, err)
-	require.NotNil(t, result)
-	require.Equal(t, http.StatusOK, writer.Code)
-
-	require.Equal(t, []string{"ag:account:108"}, cache.getCalls)
-	require.Empty(t, cache.setCalls)
-	require.Empty(t, cache.acquireCalls)
-	require.Empty(t, cache.releaseCalls)
-	require.Zero(t, repo.updateCredentialsCalls)
-	require.Empty(t, probe.paths, "latest fallback-only cache hit must not backfill project_id")
-	require.Equal(t, "fresh-token", requestAccount.GetCredential("access_token"))
-	require.Empty(t, requestAccount.GetCredential("project_id"), "latest fallback-only credentials must delete stale project_id before request construction")
-	require.Equal(t, "fallback-project", strings.TrimSpace(requestAccount.GetCredential(antigravityProjectFallbackCredentialKey)))
-	require.Empty(t, internal500Cache.incrementCalls)
-	require.Len(t, upstream.requestBodies, 1)
-
-	var wrapped map[string]any
-	require.NoError(t, json.Unmarshal(upstream.requestBodies[0], &wrapped))
-	require.Equal(t, "fallback-project", wrapped["project"])
-	require.Contains(t, writer.Body.String(), `"text":"ok"`)
-}
-
-func TestAntigravityGatewayService_Forward_UpstreamAccountIgnoresConfiguredProjectFallback(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	writer := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(writer)
-
-	body, err := json.Marshal(map[string]any{
-		"model": "claude-sonnet-4-5",
-		"messages": []map[string]any{
-			{"role": "user", "content": "hello"},
-		},
-		"max_tokens": 1,
-		"stream":     false,
-	})
-	require.NoError(t, err)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
-
-	cache := &recordingAntigravityTokenCache{}
-	probe := newAntigravityV1InternalProbe(t)
-	upstream := &queuedHTTPUpstreamStub{
-		responses: []*http.Response{
-			{
-				StatusCode: http.StatusOK,
-				Header:     http.Header{"Content-Type": []string{"application/json"}},
-				Body:       io.NopCloser(strings.NewReader(`{"content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":1,"output_tokens":2}}`)),
-			},
-		},
-	}
-	svc := &AntigravityGatewayService{
-		tokenProvider: newRecordingAntigravityTokenProvider(cache),
-		httpUpstream:  upstream,
-	}
-	account := &Account{
-		ID:          105,
-		Name:        "acc-forward-upstream-fallback",
-		Platform:    PlatformAntigravity,
-		Type:        AccountTypeUpstream,
-		Status:      StatusActive,
-		Concurrency: 1,
-		Credentials: map[string]any{
-			"api_key":                               "upstream-key",
-			"base_url":                              "https://gateway.example.com/antigravity",
-			antigravityProjectFallbackCredentialKey: " configured-project ",
-		},
-	}
-
-	result, err := svc.Forward(context.Background(), c, account, body, false)
-	require.NoError(t, err)
-	require.NotNil(t, result)
-	require.Equal(t, http.StatusOK, writer.Code)
-	require.Equal(t, "claude-sonnet-4-5", result.Model)
-	require.Len(t, upstream.requestBodies, 1)
-	cache.requireNoTokenWork(t)
-	require.Empty(t, probe.paths)
-	require.Empty(t, account.GetCredential("project_id"))
-	require.Contains(t, writer.Body.String(), `"text":"ok"`)
+	require.Contains(t, writer.Body.String(), "project_id")
+	require.NotContains(t, writer.Body.String(), `"project":""`)
 }
 
 func TestAntigravityGatewayService_Forward_PromptTooLong(t *testing.T) {
@@ -1676,6 +867,73 @@ func TestAntigravityGatewayService_ForwardGemini_BillsWithMappedModel(t *testing
 	require.Equal(t, mappedModel, result.UpstreamModel)
 }
 
+func TestAntigravityGatewayService_ForwardGemini_FallbackReportsActualUpstreamModel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	writer := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(writer)
+
+	body := []byte(`{"contents":[{"role":"user","parts":[{"text":"hello"}]}]}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1beta/models/gemini-primary:generateContent", bytes.NewReader(body))
+
+	const (
+		originalModel = "gemini-primary"
+		mappedModel   = "gemini-primary-upstream"
+		fallbackModel = "gemini-fallback-upstream"
+	)
+	upstream := &queuedHTTPUpstreamStub{responses: []*http.Response{
+		{
+			StatusCode: http.StatusNotFound,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"error":{"code":404,"message":"model not found"}}`)),
+		},
+		{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body: io.NopCloser(strings.NewReader(
+				`data: {"response":{"modelVersion":"gemini-fallback-upstream","candidates":[{"content":{"parts":[{"text":"ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":8,"candidatesTokenCount":3}}}` + "\n\n",
+			)),
+		},
+	}}
+	settings := &antigravitySettingRepoStub{values: map[string]string{
+		SettingKeyEnableModelFallback:      "true",
+		SettingKeyFallbackModelAntigravity: fallbackModel,
+	}}
+	svc := &AntigravityGatewayService{
+		settingService: NewSettingService(settings, &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}),
+		tokenProvider:  &AntigravityTokenProvider{},
+		httpUpstream:   upstream,
+	}
+	account := &Account{
+		ID:          9,
+		Name:        "acc-gemini-fallback",
+		Platform:    PlatformAntigravity,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"access_token": "token",
+			"project_id":   "proj",
+			"model_mapping": map[string]any{
+				originalModel: mappedModel,
+			},
+		},
+	}
+
+	result, err := svc.ForwardGemini(context.Background(), c, account, originalModel, "generateContent", true, body, false)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, originalModel, result.Model)
+	require.Equal(t, fallbackModel, result.UpstreamModel)
+	require.Equal(t, fallbackModel, result.UpstreamResponseModel)
+	require.False(t, result.UpstreamResponseModelConflict)
+	mismatch := upstreamModelMismatch(result.UpstreamModel, result.UpstreamResponseModel)
+	require.NotNil(t, mismatch)
+	require.False(t, *mismatch)
+	require.Len(t, upstream.requestBodies, 2)
+	require.Contains(t, string(upstream.requestBodies[0]), `"model":"`+mappedModel+`"`)
+	require.Contains(t, string(upstream.requestBodies[1]), `"model":"`+fallbackModel+`"`)
+}
+
 func TestAntigravityGatewayService_ForwardGemini_RetriesCorruptedThoughtSignature(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	writer := httptest.NewRecorder()
@@ -1724,7 +982,7 @@ func TestAntigravityGatewayService_ForwardGemini_RetriesCorruptedThoughtSignatur
 	}
 
 	const originalModel = "gemini-3.1-pro-preview"
-	const mappedModel = domain.AntigravityGemini31ProAgentModel
+	const mappedModel = "gemini-3.1-pro-high"
 	account := &Account{
 		ID:          7,
 		Name:        "acc-gemini-signature",
@@ -1783,7 +1041,7 @@ func TestAntigravityGatewayService_ForwardGemini_SignatureRetryPropagatesFailove
 	firstRespBody := []byte(`{"response":{"error":{"code":400,"message":"Corrupted thought signature.","status":"INVALID_ARGUMENT"}}}`)
 
 	const originalModel = "gemini-3.1-pro-preview"
-	const mappedModel = domain.AntigravityGemini31ProAgentModel
+	const mappedModel = "gemini-3.1-pro-high"
 	account := &Account{
 		ID:          8,
 		Name:        "acc-gemini-signature-failover",

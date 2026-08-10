@@ -55,8 +55,6 @@ func (s *openAIResponsesRejectedFieldRetryState) remember(body []byte) {
 	s.seenBodyHashes[sha256.Sum256(body)] = struct{}{}
 }
 
-// normalizeOpenAIResponsesRejectedFieldRetryBody only removes narrow,
-// explicitly rejected Responses fields. Ambiguous 400s remain client errors.
 func normalizeOpenAIResponsesRejectedFieldRetryBody(statusCode int, body, responseBody []byte) ([]byte, string, bool, error) {
 	if statusCode != http.StatusBadRequest || len(body) == 0 || len(responseBody) == 0 {
 		return nil, "", false, nil

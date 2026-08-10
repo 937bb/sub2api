@@ -74,11 +74,6 @@ func openaiResponsesProbePayload(modelID string) []byte {
 // 的上游模型(值),按字典序取首个具体(非通配符)模型以保证可复现;无映射时回退
 // DefaultTestModel(适配 OpenAI 官方 APIKey 账号)。
 func selectResponsesProbeModel(account *Account) string {
-	model, _ := selectResponsesProbeModelWithScope(account)
-	return model
-}
-
-func selectResponsesProbeModelWithScope(account *Account) (string, bool) {
 	mapping := account.GetModelMapping()
 	candidates := make([]string, 0, len(mapping))
 	for _, upstream := range mapping {
@@ -89,63 +84,14 @@ func selectResponsesProbeModelWithScope(account *Account) (string, bool) {
 		candidates = append(candidates, upstream)
 	}
 	if len(candidates) == 0 {
-		return openai.DefaultTestModel, false
+		return openai.DefaultTestModel
 	}
 	sort.Strings(candidates)
-	return candidates[0], true
-}
-
-func mergeResponsesSupportByModel(extra map[string]any, upstreamModel string, supported bool) map[string]any {
-	merged := make(map[string]any)
-	if extra != nil {
-		// Legacy fallback for tests/mocks that do not expose repository-level
-		// jsonb_set. Production writes use UpdateExtraNestedBool to avoid
-		// replacing sibling model entries from a stale account snapshot.
-		switch modelMap := extra[openai_compat.ExtraKeyResponsesSupportedByModel].(type) {
-		case map[string]any:
-			for model, value := range modelMap {
-				merged[model] = value
-			}
-		case map[string]bool:
-			for model, value := range modelMap {
-				merged[model] = value
-			}
-		}
-	}
-	if upstreamModel = strings.TrimSpace(upstreamModel); upstreamModel != "" {
-		merged[upstreamModel] = supported
-	}
-	return merged
-}
-
-func buildResponsesProbeExtraUpdates(extra map[string]any, probeModel string, modelScoped bool, supported bool) map[string]any {
-	return buildResponsesProbeExtraUpdatesWithNestedMap(extra, probeModel, modelScoped, supported, true)
-}
-
-func buildResponsesProbeExtraUpdatesWithNestedMap(extra map[string]any, probeModel string, modelScoped bool, supported bool, includeNestedMap bool) map[string]any {
-	updates := map[string]any{
-		openai_compat.ExtraKeyResponsesSupported: supported,
-	}
-	if !modelScoped {
-		if _, ok := extra[openai_compat.ExtraKeyResponsesSupportedByModel]; ok {
-			// A default-model probe is account-scoped. Clear stale per-model maps so
-			// missing real upstream models continue to honor the account-level result.
-			updates[openai_compat.ExtraKeyResponsesSupportedByModel] = nil
-		}
-		return updates
-	}
-	if includeNestedMap {
-		updates[openai_compat.ExtraKeyResponsesSupportedByModel] = mergeResponsesSupportByModel(extra, probeModel, supported)
-	}
-	return updates
-}
-
-type responsesSupportByModelUpdater interface {
-	UpdateExtraNestedBool(ctx context.Context, id int64, updates map[string]any, mapKey string, nestedKey string, value bool) error
+	return candidates[0]
 }
 
 // ProbeOpenAIAPIKeyResponsesSupport 探测 OpenAI APIKey 账号上游是否支持
-// /v1/responses 端点，并将结果持久化到账号级与上游模型级能力标记。
+// /v1/responses 端点，并将结果持久化到 accounts.extra.openai_responses_supported。
 //
 // 调用时机：账号创建/更新后，且仅当 platform=openai && type=apikey 时。
 //
@@ -188,7 +134,7 @@ func (s *AccountTestService) ProbeOpenAIAPIKeyResponsesSupport(ctx context.Conte
 	}
 
 	probeURL := buildOpenAIResponsesURL(normalizedBaseURL)
-	probeModel, modelScoped := selectResponsesProbeModelWithScope(account)
+	probeModel := selectResponsesProbeModel(account)
 
 	probeCtx, cancel := context.WithTimeout(ctx, openaiResponsesProbeTimeout)
 	defer cancel()
@@ -202,6 +148,10 @@ func (s *AccountTestService) ProbeOpenAIAPIKeyResponsesSupport(ctx context.Conte
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("Accept", "application/json")
+	applyOpenAICodexProbeHeaders(req.Header)
+
+	// 账号级请求头覆写：能力探测与真实转发保持一致的最终头
+	account.ApplyHeaderOverrides(req.Header)
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
@@ -227,19 +177,9 @@ func (s *AccountTestService) ProbeOpenAIAPIKeyResponsesSupport(ctx context.Conte
 
 	supported := decideResponsesProbeSupport(resp.StatusCode, bodyBytes)
 
-	updates := buildResponsesProbeExtraUpdates(account.Extra, probeModel, modelScoped, supported)
-	if modelScoped {
-		if updater, ok := s.accountRepo.(responsesSupportByModelUpdater); ok {
-			updates = buildResponsesProbeExtraUpdatesWithNestedMap(account.Extra, probeModel, modelScoped, supported, false)
-			if err := updater.UpdateExtraNestedBool(ctx, accountID, updates, openai_compat.ExtraKeyResponsesSupportedByModel, probeModel, supported); err != nil {
-				logger.LegacyPrintf("service.openai_probe", "probe_persist_failed: account_id=%d supported=%v err=%v", accountID, supported, err)
-				return
-			}
-		} else if err := s.accountRepo.UpdateExtra(ctx, accountID, updates); err != nil {
-			logger.LegacyPrintf("service.openai_probe", "probe_persist_failed: account_id=%d supported=%v err=%v", accountID, supported, err)
-			return
-		}
-	} else if err := s.accountRepo.UpdateExtra(ctx, accountID, updates); err != nil {
+	if err := s.accountRepo.UpdateExtra(ctx, accountID, map[string]any{
+		openai_compat.ExtraKeyResponsesSupported: supported,
+	}); err != nil {
 		logger.LegacyPrintf("service.openai_probe", "probe_persist_failed: account_id=%d supported=%v err=%v", accountID, supported, err)
 		return
 	}

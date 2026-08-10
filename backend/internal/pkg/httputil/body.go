@@ -16,32 +16,16 @@ import (
 const (
 	requestBodyReadInitCap    = 512
 	requestBodyReadMaxInitCap = 1 << 20
+	jsonUTF8BOMLen            = 3
 	// maxDecompressedBodySize limits the decompressed request body to 64 MB
 	// to prevent decompression bomb attacks.
 	maxDecompressedBodySize = 64 << 20
 )
 
-var errRawJSONControlAfterEscape = errors.New("raw JSON control character after escape")
-
 // ReadRequestBodyWithPrealloc reads request body with preallocated buffer based
 // on content length, transparently decoding any Content-Encoding the upstream
 // client used to compress the body (zstd, gzip, deflate).
 func ReadRequestBodyWithPrealloc(req *http.Request) ([]byte, error) {
-	return readRequestBodyWithPrealloc(req, maxDecompressedBodySize)
-}
-
-// ReadLenientJSONRequestBodyWithPrealloc reads a JSON request and escapes raw
-// control bytes inside strings. Strictly valid JSON is returned without a copy.
-func ReadLenientJSONRequestBodyWithPrealloc(req *http.Request, decodedLimit int64) ([]byte, error) {
-	limit := effectiveDecodedLimit(decodedLimit)
-	body, err := readRequestBodyWithPrealloc(req, limit)
-	if err != nil {
-		return nil, err
-	}
-	return NormalizeLenientJSONRequestBody(body, limit)
-}
-
-func readRequestBodyWithPrealloc(req *http.Request, decodedLimit int64) ([]byte, error) {
 	if req == nil || req.Body == nil {
 		return nil, nil
 	}
@@ -58,25 +42,18 @@ func readRequestBodyWithPrealloc(req *http.Request, decodedLimit int64) ([]byte,
 		}
 	}
 
-	enc := strings.ToLower(strings.TrimSpace(req.Header.Get("Content-Encoding")))
-	var source io.Reader = req.Body
-	if enc == "" || enc == "identity" {
-		source = io.LimitReader(req.Body, decodedLimit+1)
-	}
 	buf := bytes.NewBuffer(make([]byte, 0, capHint))
-	if _, err := io.Copy(buf, source); err != nil {
+	if _, err := io.Copy(buf, req.Body); err != nil {
 		return nil, err
 	}
 	raw := buf.Bytes()
 
+	enc := strings.ToLower(strings.TrimSpace(req.Header.Get("Content-Encoding")))
 	if enc == "" || enc == "identity" {
-		if int64(len(raw)) > decodedLimit {
-			return nil, &http.MaxBytesError{Limit: decodedLimit}
-		}
 		return raw, nil
 	}
 
-	decoded, err := decompressRequestBodyLimited(enc, raw, decodedLimit)
+	decoded, err := decompressRequestBody(enc, raw)
 	if err != nil {
 		return nil, fmt.Errorf("decode Content-Encoding %q: %w", enc, err)
 	}
@@ -88,22 +65,17 @@ func readRequestBodyWithPrealloc(req *http.Request, decodedLimit int64) ([]byte,
 	return decoded, nil
 }
 
-func decompressRequestBody(encoding string, raw []byte) ([]byte, error) {
-	return decompressRequestBodyLimited(encoding, raw, maxDecompressedBodySize)
+// ReadLenientJSONRequestBodyWithPrealloc reads a request body and normalizes
+// JSON string control bytes before strict validation.
+func ReadLenientJSONRequestBodyWithPrealloc(req *http.Request, maxNormalizedBytes int64) ([]byte, error) {
+	body, err := ReadRequestBodyWithPrealloc(req)
+	if err != nil {
+		return nil, err
+	}
+	return NormalizeLenientJSONRequestBody(body, maxNormalizedBytes)
 }
 
-func decompressRequestBodyLimited(encoding string, raw []byte, decodedLimit int64) ([]byte, error) {
-	readLimited := func(r io.Reader) ([]byte, error) {
-		decoded, err := io.ReadAll(io.LimitReader(r, decodedLimit+1))
-		if err != nil {
-			return nil, err
-		}
-		if int64(len(decoded)) > decodedLimit {
-			return nil, &http.MaxBytesError{Limit: decodedLimit}
-		}
-		return decoded, nil
-	}
-
+func decompressRequestBody(encoding string, raw []byte) ([]byte, error) {
 	switch encoding {
 	case "zstd":
 		dec, err := zstd.NewReader(bytes.NewReader(raw))
@@ -111,56 +83,59 @@ func decompressRequestBodyLimited(encoding string, raw []byte, decodedLimit int6
 			return nil, err
 		}
 		defer dec.Close()
-		return readLimited(dec)
+		return io.ReadAll(io.LimitReader(dec, maxDecompressedBodySize))
 	case "gzip", "x-gzip":
 		gr, err := gzip.NewReader(bytes.NewReader(raw))
 		if err != nil {
 			return nil, err
 		}
 		defer func() { _ = gr.Close() }()
-		return readLimited(gr)
+		return io.ReadAll(io.LimitReader(gr, maxDecompressedBodySize))
 	case "deflate":
 		zr, err := zlib.NewReader(bytes.NewReader(raw))
 		if err != nil {
 			return nil, err
 		}
 		defer func() { _ = zr.Close() }()
-		return readLimited(zr)
+		return io.ReadAll(io.LimitReader(zr, maxDecompressedBodySize))
 	default:
 		return nil, errors.New("unsupported Content-Encoding")
 	}
 }
 
-func effectiveDecodedLimit(configured int64) int64 {
-	if configured > 0 && configured < maxDecompressedBodySize {
-		return configured
+// NormalizeLenientJSONRequestBody escapes raw control bytes that broken
+// OpenAI-compatible clients sometimes place inside JSON strings.
+func NormalizeLenientJSONRequestBody(body []byte, maxNormalizedBytes int64) ([]byte, error) {
+	if maxNormalizedBytes <= 0 {
+		maxNormalizedBytes = maxDecompressedBodySize
 	}
-	return maxDecompressedBodySize
-}
 
-// NormalizeLenientJSONRequestBody repairs only raw control bytes in JSON
-// strings. It intentionally leaves all other malformed JSON for strict parsing.
-func NormalizeLenientJSONRequestBody(body []byte, limit int64) ([]byte, error) {
-	if int64(len(body)) > limit {
-		return nil, &http.MaxBytesError{Limit: limit}
+	body = trimUTF8BOM(body)
+	if len(body) == 0 {
+		return body, nil
+	}
+	if int64(len(body)) > maxNormalizedBytes {
+		return nil, &http.MaxBytesError{Limit: maxNormalizedBytes}
 	}
 
 	var out []byte
-	inString, escaped := false, false
+	inString := false
+	escaped := false
 	for i, b := range body {
-		if inString && b < 0x20 {
-			if escaped {
-				return nil, errRawJSONControlAfterEscape
-			}
+		if inString && isJSONControlByte(b) {
 			if out == nil {
-				out = make([]byte, 0, len(body))
+				capHint := len(body) + 6
+				if int64(capHint) > maxNormalizedBytes {
+					capHint = int(maxNormalizedBytes)
+				}
+				out = make([]byte, 0, capHint)
 				out = append(out, body[:i]...)
 			}
-			if int64(len(out)+6+len(body)-i-1) > limit {
-				return nil, &http.MaxBytesError{Limit: limit}
+			if int64(len(out)+6) > maxNormalizedBytes {
+				return nil, &http.MaxBytesError{Limit: maxNormalizedBytes}
 			}
-			const hex = "0123456789abcdef"
-			out = append(out, '\\', 'u', '0', '0', hex[b>>4], hex[b&0xf])
+			out = appendJSONUnicodeEscape(out, b)
+			escaped = false
 			continue
 		}
 
@@ -172,7 +147,11 @@ func NormalizeLenientJSONRequestBody(body []byte, limit int64) ([]byte, error) {
 		case b == '"':
 			inString = !inString
 		}
+
 		if out != nil {
+			if int64(len(out)+1) > maxNormalizedBytes {
+				return nil, &http.MaxBytesError{Limit: maxNormalizedBytes}
+			}
 			out = append(out, b)
 		}
 	}
@@ -180,4 +159,20 @@ func NormalizeLenientJSONRequestBody(body []byte, limit int64) ([]byte, error) {
 		return out, nil
 	}
 	return body, nil
+}
+
+func trimUTF8BOM(body []byte) []byte {
+	if len(body) >= jsonUTF8BOMLen && body[0] == 0xef && body[1] == 0xbb && body[2] == 0xbf {
+		return body[jsonUTF8BOMLen:]
+	}
+	return body
+}
+
+func isJSONControlByte(b byte) bool {
+	return b < 0x20 || b == 0x7f
+}
+
+func appendJSONUnicodeEscape(dst []byte, b byte) []byte {
+	const hex = "0123456789abcdef"
+	return append(dst, '\\', 'u', '0', '0', hex[b>>4], hex[b&0x0f])
 }

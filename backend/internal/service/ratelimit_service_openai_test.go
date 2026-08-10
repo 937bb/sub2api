@@ -151,9 +151,6 @@ type openAI429SnapshotRepo struct {
 	mockAccountRepoForGemini
 	rateLimitedID      int64
 	updatedExtra       map[string]any
-	observedAtKey      string
-	observedAt         time.Time
-	sessionWindowEnd   *time.Time
 	bulkUpdatedIDs     []int64
 	bulkUpdatedPayload AccountBulkUpdate
 }
@@ -165,18 +162,6 @@ func (r *openAI429SnapshotRepo) SetRateLimited(_ context.Context, id int64, _ ti
 
 func (r *openAI429SnapshotRepo) UpdateExtra(_ context.Context, _ int64, updates map[string]any) error {
 	r.updatedExtra = updates
-	return nil
-}
-
-func (r *openAI429SnapshotRepo) UpdateRuntimeExtra(_ context.Context, _ int64, updates map[string]any, observedAtKey string, observedAt time.Time) (bool, error) {
-	r.updatedExtra = updates
-	r.observedAtKey = observedAtKey
-	r.observedAt = observedAt
-	return true, nil
-}
-
-func (r *openAI429SnapshotRepo) UpdateSessionWindowEnd(_ context.Context, _ int64, end time.Time) error {
-	r.sessionWindowEnd = &end
 	return nil
 }
 
@@ -201,8 +186,8 @@ func TestHandle429_OpenAIPersistsCodexSnapshotImmediately(t *testing.T) {
 
 	svc.handle429(context.Background(), account, headers, nil)
 
-	if repo.rateLimitedID != 0 {
-		t.Fatalf("rateLimitedID = %d, want no direct OAuth rate limit", repo.rateLimitedID)
+	if repo.rateLimitedID != account.ID {
+		t.Fatalf("rateLimitedID = %d, want %d", repo.rateLimitedID, account.ID)
 	}
 	if len(repo.updatedExtra) == 0 {
 		t.Fatal("expected codex snapshot to be persisted on 429")
@@ -213,16 +198,6 @@ func TestHandle429_OpenAIPersistsCodexSnapshotImmediately(t *testing.T) {
 	if got := repo.updatedExtra["codex_7d_used_percent"]; got != 100.0 {
 		t.Fatalf("codex_7d_used_percent = %v, want 100", got)
 	}
-	if repo.observedAtKey != "codex_usage_updated_at" {
-		t.Fatalf("observedAtKey = %q, want codex_usage_updated_at", repo.observedAtKey)
-	}
-	parsed, err := runtimeExtraObservedAt(repo.updatedExtra, repo.observedAtKey)
-	require.NoError(t, err)
-	require.Equal(t, parsed, repo.observedAt)
-	require.NotNil(t, repo.sessionWindowEnd)
-	resetAt, err := parseTime(repo.updatedExtra["codex_5h_reset_at"].(string))
-	require.NoError(t, err)
-	require.Equal(t, resetAt, *repo.sessionWindowEnd)
 }
 
 func TestHandle429_OpenAISyncsObservedPlanType(t *testing.T) {
@@ -241,7 +216,45 @@ func TestHandle429_OpenAISyncsObservedPlanType(t *testing.T) {
 	require.Equal(t, []int64{account.ID}, repo.bulkUpdatedIDs)
 	require.Equal(t, "free", repo.bulkUpdatedPayload.Credentials["plan_type"])
 	require.Equal(t, "free", account.Credentials["plan_type"])
-	require.Zero(t, repo.rateLimitedID)
+	require.Equal(t, account.ID, repo.rateLimitedID)
+}
+
+// TestHandle429_SkipsSparkShadow 外审第8轮 P1:spark 影子的限流状态只由 QueryUsage(/wham/usage
+// codex_bengalfox)维护;/responses 429 携带的 global x-codex-* 不得对影子做任何 DB 限流写入,
+// 否则会把 spark 误耦合到 global codex 窗口、冷却到 global reset。
+func TestHandle429_SkipsSparkShadow(t *testing.T) {
+	headers := http.Header{}
+	headers.Set("x-codex-primary-used-percent", "100")
+	headers.Set("x-codex-primary-reset-after-seconds", "604800")
+	headers.Set("x-codex-primary-window-minutes", "10080")
+	headers.Set("x-codex-secondary-used-percent", "100")
+	headers.Set("x-codex-secondary-reset-after-seconds", "18000")
+	headers.Set("x-codex-secondary-window-minutes", "300")
+
+	parentID := int64(900)
+	shadowRepo := &openAI429SnapshotRepo{}
+	shadowSvc := NewRateLimitService(shadowRepo, nil, nil, nil, nil)
+	shadow := &Account{
+		ID:              901,
+		Platform:        PlatformOpenAI,
+		Type:            AccountTypeOAuth,
+		ParentAccountID: &parentID,
+		QuotaDimension:  QuotaDimensionSpark,
+	}
+
+	shadowSvc.handle429(context.Background(), shadow, headers, nil)
+
+	require.Zero(t, shadowRepo.rateLimitedID, "spark shadow must not be SetRateLimited from /responses global 429")
+	require.Empty(t, shadowRepo.updatedExtra, "spark shadow must not get a codex snapshot from /responses 429")
+
+	// 反向对照:普通 OpenAI OAuth 账号仍按 global 429 限流。
+	normalRepo := &openAI429SnapshotRepo{}
+	normalSvc := NewRateLimitService(normalRepo, nil, nil, nil, nil)
+	normal := &Account{ID: 902, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+
+	normalSvc.handle429(context.Background(), normal, headers, nil)
+
+	require.Equal(t, normal.ID, normalRepo.rateLimitedID, "normal OpenAI OAuth account should still be rate limited")
 }
 
 func TestNormalizedCodexLimits(t *testing.T) {

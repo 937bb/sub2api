@@ -147,7 +147,7 @@ func (h *PromoHandler) Update(c *gin.Context) {
 
 	if req.ExpiresAt != nil {
 		if *req.ExpiresAt == 0 {
-			// 用 zero-time 哨兵区分“字段未传”和“明确清除过期时间”。
+			// 0 表示清除过期时间
 			input.ExpiresAt = &time.Time{}
 		} else {
 			t := time.Unix(*req.ExpiresAt, 0)

@@ -33,6 +33,9 @@ vi.mock('vue-i18n', async () => {
         if (key === 'admin.accounts.imageReceived' && params?.count) {
           return `received-${params.count}`
         }
+        if (key === 'admin.accounts.imagePreviewAlt' && params?.index) {
+          return `test-image-${params.index}`
+        }
         return messages[key] || key
       }
     })
@@ -59,7 +62,7 @@ function createStreamResponse(lines: string[]) {
   } as Response
 }
 
-function mountModal(account = {
+function mountModal(account: Record<string, unknown> = {
   id: 42,
   name: 'Gemini Image Test',
   platform: 'gemini',
@@ -121,8 +124,6 @@ describe('AccountTestModal', () => {
     await wrapper.setProps({ show: true })
     await flushPromises()
 
-    expect(wrapper.findAll('.select-stub')).toHaveLength(1)
-
     const promptInput = wrapper.find('textarea.textarea-stub')
     expect(promptInput.exists()).toBe(true)
     await promptInput.setValue('draw a tiny orange cat astronaut')
@@ -147,6 +148,45 @@ describe('AccountTestModal', () => {
     expect(preview.attributes('src')).toBe('data:image/png;base64,QUJD')
   })
 
+  it('grok 账号测试默认选择 Grok 模型', async () => {
+    getAvailableModels.mockResolvedValue([
+      { id: 'grok-4.3', display_name: 'Grok 4.3' },
+      { id: 'grok-build-0.1', display_name: 'Grok Build 0.1' }
+    ])
+    global.fetch = vi.fn().mockResolvedValue(
+      createStreamResponse([
+        'data: {"type":"test_start","model":"grok-4.3"}\n',
+        'data: {"type":"content","text":"ok"}\n',
+        'data: {"type":"test_complete","success":true}\n'
+      ])
+    ) as any
+
+    const wrapper = mountModal({
+      id: 13,
+      name: 'Grok Account',
+      platform: 'grok',
+      type: 'oauth',
+      status: 'active'
+    })
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+
+    const buttons = wrapper.findAll('button')
+    const startButton = buttons.find((button) => button.text().includes('admin.accounts.startTest'))
+    expect(startButton).toBeTruthy()
+
+    await startButton!.trigger('click')
+    await flushPromises()
+
+    expect(global.fetch).toHaveBeenCalledTimes(1)
+    const [, request] = (global.fetch as any).mock.calls[0]
+    expect(JSON.parse(request.body)).toEqual({
+      model_id: 'grok-4.3',
+      prompt: '',
+      mode: 'text'
+    })
+  })
+
   it('OpenAI Compact 探测会携带 compact 测试模式', async () => {
     getAvailableModels.mockResolvedValue([
       { id: 'gpt-5.4', display_name: 'GPT-5.4' }
@@ -167,7 +207,6 @@ describe('AccountTestModal', () => {
     await wrapper.setProps({ show: true })
     await flushPromises()
 
-    expect(wrapper.findAll('.select-stub')).toHaveLength(2)
     ;(wrapper.vm as any).selectedModelId = 'gpt-5.4'
     ;(wrapper.vm as any).testMode = 'compact'
     await (wrapper.vm as any).startTest()
@@ -182,41 +221,15 @@ describe('AccountTestModal', () => {
     })
   })
 
-  it('OpenAI 图片模型不发送 compact 测试模式', async () => {
+  it('ignores account status events from older servers', async () => {
     getAvailableModels.mockResolvedValue([
-      { id: 'gpt-image-1', display_name: 'GPT Image 1' }
-    ])
-
-    const wrapper = mountModal({
-      id: 42,
-      name: 'OpenAI API Key',
-      platform: 'openai',
-      type: 'apikey',
-      status: 'active'
-    })
-    await wrapper.setProps({ show: true })
-    await flushPromises()
-
-    expect(wrapper.findAll('.select-stub')).toHaveLength(1)
-    ;(wrapper.vm as any).testMode = 'compact'
-    await (wrapper.vm as any).startTest()
-    await flushPromises()
-
-    const [, request] = (global.fetch as any).mock.calls[0]
-    expect(JSON.parse(request.body)).toEqual({
-      model_id: 'gpt-image-1',
-      prompt: 'Generate a cute orange cat astronaut sticker on a clean pastel background.'
-    })
-  })
-
-  it('渲染账号测试 SSE status 消息', async () => {
-    getAvailableModels.mockResolvedValue([
-      { id: 'gpt-5.4', display_name: 'GPT-5.4' }
+      { id: 'gpt-5.6-sol', display_name: 'GPT-5.6 Sol' }
     ])
     global.fetch = vi.fn().mockResolvedValue(
       createStreamResponse([
-        'data: {"type":"status","text":"已通过 /v1/chat/completions 验证"}\n',
-        'data: {"type":"test_complete","success":true}\n'
+        'data: {"type":"test_start","model":"gpt-5.6-sol"}\n',
+        'data: {"type":"account_status","status":"error"}\n',
+        'data: {"type":"error","error":"API returned 403"}\n'
       ])
     ) as any
 
@@ -230,11 +243,11 @@ describe('AccountTestModal', () => {
     await wrapper.setProps({ show: true })
     await flushPromises()
 
-    ;(wrapper.vm as any).selectedModelId = 'gpt-5.4'
+    ;(wrapper.vm as any).selectedModelId = 'gpt-5.6-sol'
+    ;(wrapper.vm as any).testMode = 'quota-bypass'
     await (wrapper.vm as any).startTest()
     await flushPromises()
-    await flushPromises()
 
-    expect(wrapper.text()).toContain('已通过 /v1/chat/completions 验证')
+    expect(wrapper.emitted('status-changed')).toBeUndefined()
   })
 })

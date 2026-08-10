@@ -1,108 +1,12 @@
 package service
 
 import (
-	"context"
-	"io"
-	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
-	"time"
 
-	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
-
-func TestExecuteBedrockUpstreamCancellationBeforeAdmissionHasNoSideEffects(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	ctx, cancel := context.WithCancel(context.Background())
-	ctx = withHTTPAttemptAuthority(WithHTTPAttemptAdmissionHook(ctx, cancel))
-	rec := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(rec)
-	upstream := &attemptRecordingUpstream{}
-	svc := &GatewayService{httpUpstream: upstream}
-	account := &Account{
-		ID:          1,
-		Name:        "bedrock-test",
-		Platform:    PlatformAnthropic,
-		Type:        AccountTypeBedrock,
-		Concurrency: 1,
-		Credentials: map[string]any{"api_key": "test", "auth_mode": "apikey"},
-	}
-
-	resp, err := svc.executeBedrockUpstream(ctx, c, account, []byte(`{}`), "model", "us-east-1", false, nil, "test", "")
-
-	require.Nil(t, resp)
-	require.True(t, IsHTTPUpstreamAttemptNotAdmitted(err))
-	require.ErrorIs(t, err, context.Canceled)
-	require.Zero(t, upstream.calls)
-	require.Equal(t, http.StatusOK, rec.Code)
-	require.Empty(t, rec.Body.String())
-}
-
-func TestExecuteBedrockUpstreamAdmittedContextCanceledWithLiveDownstreamWritesError(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	rec := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(rec)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
-	upstream := &attemptRecordingUpstream{err: context.Canceled}
-	svc := &GatewayService{httpUpstream: upstream}
-	account := &Account{
-		ID:          1,
-		Name:        "bedrock-test",
-		Platform:    PlatformAnthropic,
-		Type:        AccountTypeBedrock,
-		Concurrency: 1,
-		Credentials: map[string]any{"api_key": "test", "auth_mode": "apikey"},
-	}
-
-	resp, err := svc.executeBedrockUpstream(withHTTPAttemptAuthority(context.Background()), c, account, []byte(`{}`), "model", "us-east-1", false, nil, "test", "")
-
-	require.Nil(t, resp)
-	require.EqualError(t, err, "upstream request failed: context canceled")
-	require.Equal(t, 1, upstream.calls)
-	require.Contains(t, rec.Body.String(), "Upstream request failed")
-}
-
-func TestExecuteBedrockUpstreamLaterCancellationPreservesCompletedResponse(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	ctx, cancel := context.WithCancel(context.Background())
-	upstream := &attemptRecordingUpstream{
-		response: &http.Response{
-			StatusCode: http.StatusServiceUnavailable,
-			Header:     http.Header{"X-Amzn-Requestid": []string{"completed"}},
-			Body:       io.NopCloser(strings.NewReader(`{"error":"completed"}`)),
-		},
-		onDo: func(call int) {
-			if call == 1 {
-				cancel()
-			}
-		},
-	}
-	svc := &GatewayService{httpUpstream: upstream}
-	account := &Account{
-		ID:          1,
-		Name:        "bedrock-test",
-		Platform:    PlatformAnthropic,
-		Type:        AccountTypeBedrock,
-		Concurrency: 1,
-		Credentials: map[string]any{"api_key": "test", "auth_mode": "apikey"},
-	}
-
-	resp, err := svc.executeBedrockUpstream(withHTTPAttemptAuthority(ctx), nil, account, []byte(`{}`), "model", "us-east-1", false, nil, "test", "")
-
-	require.NoError(t, err)
-	require.NotNil(t, resp)
-	require.Equal(t, http.StatusServiceUnavailable, resp.StatusCode)
-	require.Equal(t, "completed", resp.Header.Get("X-Amzn-Requestid"))
-	body, readErr := io.ReadAll(resp.Body)
-	require.NoError(t, readErr)
-	require.NoError(t, resp.Body.Close())
-	require.Equal(t, `{"error":"completed"}`, string(body))
-	require.Equal(t, 1, upstream.calls)
-}
 
 func TestPrepareBedrockRequestBody_BasicFields(t *testing.T) {
 	input := `{"model":"claude-opus-4-6","stream":true,"max_tokens":1024,"messages":[{"role":"user","content":"hi"}]}`
@@ -508,7 +412,7 @@ func TestPrepareBedrockRequestBodyWithTokens_ContextManagementRequiresSupportedB
 		assert.Equal(t, int64(100), gjson.GetBytes(result, "max_tokens").Int())
 	})
 
-	t.Run("keeps supported context-management beta and field", func(t *testing.T) {
+	t.Run("keeps supported context-management beta and retains field", func(t *testing.T) {
 		input := `{
 			"messages":[{"role":"user","content":"hi"}],
 			"max_tokens":100,
@@ -526,102 +430,6 @@ func TestPrepareBedrockRequestBodyWithTokens_ContextManagementRequiresSupportedB
 		assert.True(t, gjson.GetBytes(result, "context_management").Exists())
 		assert.Equal(t, []string{bedrockContextManagementBetaToken, "context-1m-2025-08-07"}, bedrockAnthropicBetaNames(result))
 	})
-}
-
-func TestPrepareBedrockRequestBodyWithTokens_StripsUnsupportedTopLevelFields(t *testing.T) {
-	input := `{
-		"model":"claude-opus-4-6",
-		"messages":[{"role":"user","content":"hi"}],
-		"max_tokens":100,
-		"anthropic_beta":[],
-		"provider":"anthropic",
-		"metadata":{"user_id":"abc"}
-	}`
-
-	result, err := PrepareBedrockRequestBodyWithTokens([]byte(input), "us.anthropic.claude-opus-4-6-v1", nil, false)
-	require.NoError(t, err)
-
-	assert.False(t, gjson.GetBytes(result, "anthropic_beta").Exists())
-	assert.False(t, gjson.GetBytes(result, "provider").Exists())
-	assert.False(t, gjson.GetBytes(result, "metadata").Exists())
-}
-
-func TestFilterBedrockBetaTokens_AWSDocumentedTokens(t *testing.T) {
-	tokens := []string{bedrockContextManagementBetaToken, "fine-grained-tool-streaming-2025-05-14"}
-	assert.Equal(t, tokens, filterBedrockBetaTokens(tokens))
-}
-
-func TestApplyBedrockCCCompat_ContextManagementFollowsFinalBetaTokens(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	groupID := int64(7)
-	svc := newBedrockCCCompatTestGatewayService(groupID)
-	account := &Account{Platform: PlatformAnthropic}
-
-	t.Run("keeps context_management from supported HTTP beta", func(t *testing.T) {
-		rec := httptest.NewRecorder()
-		c, _ := gin.CreateTestContext(rec)
-		c.Request = httptest.NewRequest("POST", "/v1/messages", nil)
-		c.Request.Header.Set("anthropic-beta", bedrockContextManagementBetaToken)
-		body := []byte(`{"model":"claude-opus-4-6","messages":[{"role":"user","content":"hi"}],"context_management":{"edits":[{"type":"clear_thinking_20251015"}]}}`)
-
-		result := svc.ApplyBedrockCCCompat(c, body, "us.anthropic.claude-opus-4-6-v1", account, &groupID)
-
-		assert.True(t, gjson.GetBytes(result, "context_management").Exists())
-	})
-
-	t.Run("strips context_management when final tokens omit beta", func(t *testing.T) {
-		rec := httptest.NewRecorder()
-		c, _ := gin.CreateTestContext(rec)
-		c.Request = httptest.NewRequest("POST", "/v1/messages", nil)
-		c.Request.Header.Set("anthropic-beta", "output-128k-2025-02-19")
-		body := []byte(`{"model":"claude-opus-4-6","messages":[{"role":"user","content":"hi"}],"context_management":{"edits":[{"type":"clear_thinking_20251015"}]}}`)
-
-		result := svc.ApplyBedrockCCCompat(c, body, "us.anthropic.claude-opus-4-6-v1", account, &groupID)
-
-		assert.False(t, gjson.GetBytes(result, "context_management").Exists())
-	})
-}
-
-func TestApplyBedrockCCCompat_FiltersHTTPBetaHeaderWithoutPersistingMutation(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	rec := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(rec)
-	c.Request = httptest.NewRequest("POST", "/v1/messages", nil)
-	originalBeta := "fine-grained-tool-streaming-2025-05-14, output-128k-2025-02-19"
-	c.Request.Header.Set("anthropic-beta", originalBeta)
-
-	groupID := int64(7)
-	svc := newBedrockCCCompatTestGatewayService(groupID)
-
-	body := []byte(`{"model":"claude-opus-4-6","messages":[{"role":"user","content":"hi"}],"anthropic_beta":["output-128k-2025-02-19"]}`)
-	account := &Account{Platform: PlatformAnthropic, Type: AccountTypeAPIKey}
-	result := svc.ApplyBedrockCCCompat(c, body, "us.anthropic.claude-opus-4-6-v1", account, &groupID)
-
-	assert.Equal(t, originalBeta, c.GetHeader("anthropic-beta"))
-	assert.False(t, gjson.GetBytes(result, "anthropic_beta").Exists())
-	assert.Equal(t, "bedrock-2023-05-31", gjson.GetBytes(result, "anthropic_version").String())
-
-	restore := svc.ApplyBedrockCCCompatBetaHeaderOverride(c, result, "us.anthropic.claude-opus-4-6-v1", account, &groupID)
-	assert.Equal(t, "fine-grained-tool-streaming-2025-05-14", c.GetHeader("anthropic-beta"))
-	restore()
-	assert.Equal(t, originalBeta, c.GetHeader("anthropic-beta"))
-}
-
-func newBedrockCCCompatTestGatewayService(groupID int64) *GatewayService {
-	svc := &GatewayService{channelService: &ChannelService{}}
-	svc.channelService.cache.Store(&channelCache{
-		channelByGroupID: map[int64]*Channel{
-			groupID: {
-				ID:     99,
-				Status: StatusActive,
-				FeaturesConfig: map[string]any{
-					featureKeyBedrockCCCompat: true,
-				},
-			},
-		},
-		loadedAt: time.Now(),
-	})
-	return svc
 }
 
 func bedrockAnthropicBetaNames(body []byte) []string {
@@ -1187,10 +995,10 @@ func TestSanitizeBedrockCCFields(t *testing.T) {
 		assert.True(t, gjson.GetBytes(result, "messages").Exists())
 	})
 
-	t.Run("leaves context_management for beta-token sanitizer", func(t *testing.T) {
+	t.Run("removes context_management", func(t *testing.T) {
 		body := []byte(`{"model":"claude-opus-4-6","context_management":{"edits":[{"type":"clear_thinking_20251015","keep":"all"}]},"messages":[]}`)
 		result := sanitizeBedrockCCFields(body)
-		assert.True(t, gjson.GetBytes(result, "context_management").Exists())
+		assert.False(t, gjson.GetBytes(result, "context_management").Exists())
 		assert.True(t, gjson.GetBytes(result, "messages").Exists())
 	})
 
@@ -1240,7 +1048,7 @@ func TestSanitizeBedrockCCFields(t *testing.T) {
 		result := sanitizeBedrockCCFields(body)
 		assert.False(t, gjson.GetBytes(result, "service_tier").Exists())
 		assert.False(t, gjson.GetBytes(result, "interface_geo").Exists())
-		assert.True(t, gjson.GetBytes(result, "context_management").Exists())
+		assert.False(t, gjson.GetBytes(result, "context_management").Exists())
 		assert.Equal(t, int64(defaultCCMaxTokens), gjson.GetBytes(result, "max_tokens").Int())
 		assert.Equal(t, "bedrock-2023-05-31", gjson.GetBytes(result, "anthropic_version").String())
 		assert.Equal(t, "enabled", gjson.GetBytes(result, "thinking.type").String())
@@ -1250,7 +1058,7 @@ func TestSanitizeBedrockCCFields(t *testing.T) {
 func TestSanitizeBedrockCCBetaTokens(t *testing.T) {
 	t.Run("filters unsupported beta tokens", func(t *testing.T) {
 		input := `{"anthropic_beta":["prompt-caching-2024-07-31","context-1m-2025-08-07","unsupported-feature"],"messages":[]}`
-		result := sanitizeBedrockCCBetaTokens([]byte(input), "claude-opus-4-6", "")
+		result := sanitizeBedrockCCBetaTokens([]byte(input), "claude-opus-4-6")
 		beta := gjson.GetBytes(result, "anthropic_beta")
 		assert.True(t, beta.Exists())
 		assert.True(t, beta.IsArray())
@@ -1261,19 +1069,19 @@ func TestSanitizeBedrockCCBetaTokens(t *testing.T) {
 
 	t.Run("removes anthropic_beta if all tokens filtered", func(t *testing.T) {
 		input := `{"anthropic_beta":["prompt-caching-2024-07-31","unsupported-feature"],"messages":[]}`
-		result := sanitizeBedrockCCBetaTokens([]byte(input), "claude-opus-4-6", "")
+		result := sanitizeBedrockCCBetaTokens([]byte(input), "claude-opus-4-6")
 		assert.False(t, gjson.GetBytes(result, "anthropic_beta").Exists())
 	})
 
 	t.Run("thinking alone does not auto-inject beta tokens", func(t *testing.T) {
 		input := `{"anthropic_beta":[],"thinking":{"type":"enabled"},"messages":[]}`
-		result := sanitizeBedrockCCBetaTokens([]byte(input), "claude-opus-4-6", "")
+		result := sanitizeBedrockCCBetaTokens([]byte(input), "claude-opus-4-6")
 		assert.False(t, gjson.GetBytes(result, "anthropic_beta").Exists())
 	})
 
 	t.Run("auto-injects computer-use beta token", func(t *testing.T) {
 		input := `{"anthropic_beta":[],"tools":[{"type":"computer_20250124","name":"computer"}],"messages":[]}`
-		result := sanitizeBedrockCCBetaTokens([]byte(input), "claude-opus-4-6", "")
+		result := sanitizeBedrockCCBetaTokens([]byte(input), "claude-opus-4-6")
 		beta := gjson.GetBytes(result, "anthropic_beta")
 		assert.True(t, beta.Exists())
 		tokens := beta.Array()
@@ -1283,7 +1091,7 @@ func TestSanitizeBedrockCCBetaTokens(t *testing.T) {
 
 	t.Run("transforms advanced-tool-use to tool-search-tool", func(t *testing.T) {
 		input := `{"anthropic_beta":["advanced-tool-use-2025-11-20"],"messages":[]}`
-		result := sanitizeBedrockCCBetaTokens([]byte(input), "claude-opus-4-6", "")
+		result := sanitizeBedrockCCBetaTokens([]byte(input), "claude-opus-4-6")
 		beta := gjson.GetBytes(result, "anthropic_beta")
 		tokens := beta.Array()
 		assert.Equal(t, 2, len(tokens)) // tool-search-tool + tool-examples (auto-associated)
@@ -1293,13 +1101,13 @@ func TestSanitizeBedrockCCBetaTokens(t *testing.T) {
 
 	t.Run("no-op when anthropic_beta not present", func(t *testing.T) {
 		input := `{"messages":[]}`
-		result := sanitizeBedrockCCBetaTokens([]byte(input), "claude-opus-4-6", "")
+		result := sanitizeBedrockCCBetaTokens([]byte(input), "claude-opus-4-6")
 		assert.False(t, gjson.GetBytes(result, "anthropic_beta").Exists())
 	})
 
 	t.Run("preserves supported beta tokens", func(t *testing.T) {
 		input := `{"anthropic_beta":["computer-use-2025-11-24","context-1m-2025-08-07"],"messages":[]}`
-		result := sanitizeBedrockCCBetaTokens([]byte(input), "claude-opus-4-6", "")
+		result := sanitizeBedrockCCBetaTokens([]byte(input), "claude-opus-4-6")
 		beta := gjson.GetBytes(result, "anthropic_beta")
 		tokens := beta.Array()
 		assert.Equal(t, 2, len(tokens))

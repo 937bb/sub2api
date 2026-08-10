@@ -23,7 +23,7 @@ import (
 
 	"entgo.io/ent/dialect"
 	entsql "entgo.io/ent/dialect/sql"
-	_ "github.com/jackc/pgx/v5/stdlib"
+	_ "github.com/lib/pq"
 	redisclient "github.com/redis/go-redis/v9"
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 	tcredis "github.com/testcontainers/testcontainers-go/modules/redis"
@@ -140,7 +140,20 @@ func dockerIsAvailable(ctx context.Context) bool {
 	return cmd.Run() == nil
 }
 
+// selectDockerImage resolves the container image for the harness.
+//
+// SUB2API_TEST_POSTGRES_IMAGE overrides the PostgreSQL image so the suite can be
+// run against the oldest documented-supported server, not just the newest. That
+// matters for SQL that behaves differently across major versions: jsonpath
+// .datetime() only accepts the ISO-8601 "Z" designator from PostgreSQL 17 on, so
+// a suite pinned to 18 cannot observe breakage on 14-16.
+//
+//	SUB2API_TEST_POSTGRES_IMAGE=postgres:15-alpine go test -tags integration ./internal/repository/
 func selectDockerImage(ctx context.Context, preferred string) string {
+	if override := strings.TrimSpace(os.Getenv("SUB2API_TEST_POSTGRES_IMAGE")); override != "" &&
+		strings.HasPrefix(preferred, "postgres:") {
+		return override
+	}
 	if dockerImageExists(ctx, preferred) {
 		return preferred
 	}
@@ -161,7 +174,7 @@ func openSQLWithRetry(ctx context.Context, dsn string, timeout time.Duration) (*
 	var lastErr error
 
 	for time.Now().Before(deadline) {
-		db, err := sql.Open("pgx", dsn)
+		db, err := sql.Open("postgres", dsn)
 		if err != nil {
 			lastErr = err
 			time.Sleep(250 * time.Millisecond)

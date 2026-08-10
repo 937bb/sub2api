@@ -1,12 +1,53 @@
 package service
 
 import (
+	"context"
+	"io"
+	"net/http"
+	"strings"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
 	"github.com/stretchr/testify/require"
 )
+
+func TestProbeOpenAIAPIKeyResponsesSupportUsesCodexProbeHeaders(t *testing.T) {
+	updateCalls := make(chan map[string]any, 1)
+	account := Account{
+		ID:          96,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key":  "sk-test",
+			"base_url": "https://compat-upstream.example/v1",
+		},
+	}
+	repo := &snapshotUpdateAccountRepo{
+		stubOpenAIAccountRepo: stubOpenAIAccountRepo{accounts: []Account{account}},
+		updateExtraCalls:      updateCalls,
+	}
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     make(http.Header),
+		Body:       io.NopCloser(strings.NewReader(`{"output":[{"type":"function_call","name":"probe_ping"}]}`)),
+	}}
+	svc := &AccountTestService{
+		accountRepo:  repo,
+		httpUpstream: upstream,
+		cfg:          &config.Config{Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}}},
+	}
+
+	svc.ProbeOpenAIAPIKeyResponsesSupport(context.Background(), account.ID)
+
+	require.NotNil(t, upstream.lastReq)
+	require.Equal(t, "https://compat-upstream.example/v1/responses", upstream.lastReq.URL.String())
+	requireOpenAICodexProbeHeaders(t, upstream.lastReq.Header)
+	updates := <-updateCalls
+	require.Equal(t, true, updates[openai_compat.ExtraKeyResponsesSupported])
+}
 
 func TestDecideResponsesProbeSupport(t *testing.T) {
 	fnCall := []byte(`{"output":[{"type":"reasoning"},{"type":"function_call","name":"probe_ping"}]}`)
@@ -50,9 +91,6 @@ func TestResponsesProbeBodyHasFunctionCall(t *testing.T) {
 
 func TestSelectResponsesProbeModel(t *testing.T) {
 	// No model_mapping -> fall back to DefaultTestModel (OpenAI official APIKey).
-	model, scoped := selectResponsesProbeModelWithScope(&Account{})
-	require.Equal(t, openai.DefaultTestModel, model)
-	require.False(t, scoped)
 	require.Equal(t, openai.DefaultTestModel, selectResponsesProbeModel(&Account{}))
 
 	// model_mapping values are upstream models; pick first by sort for reproducibility.
@@ -62,9 +100,6 @@ func TestSelectResponsesProbeModel(t *testing.T) {
 			"client-a": "alpha-model",
 		},
 	}}
-	model, scoped = selectResponsesProbeModelWithScope(acct)
-	require.Equal(t, "alpha-model", model)
-	require.True(t, scoped)
 	require.Equal(t, "alpha-model", selectResponsesProbeModel(acct))
 
 	// Wildcard / blank upstream values are skipped.
@@ -75,69 +110,11 @@ func TestSelectResponsesProbeModel(t *testing.T) {
 			"c": "real-model",
 		},
 	}}
-	model, scoped = selectResponsesProbeModelWithScope(acctWild)
-	require.Equal(t, "real-model", model)
-	require.True(t, scoped)
+	require.Equal(t, "real-model", selectResponsesProbeModel(acctWild))
 
 	// Only wildcard mappings -> DefaultTestModel.
 	acctAllWild := &Account{Credentials: map[string]any{
 		"model_mapping": map[string]any{"a": "gpt-*"},
 	}}
-	model, scoped = selectResponsesProbeModelWithScope(acctAllWild)
-	require.Equal(t, openai.DefaultTestModel, model)
-	require.False(t, scoped)
-}
-
-func TestBuildResponsesProbeExtraUpdatesDefaultProbeClearsStaleModelMap(t *testing.T) {
-	extra := map[string]any{
-		openai_compat.ExtraKeyResponsesSupportedByModel: map[string]any{"old-probe-model": false},
-	}
-
-	updates := buildResponsesProbeExtraUpdates(extra, openai.DefaultTestModel, false, false)
-
-	require.Equal(t, false, updates[openai_compat.ExtraKeyResponsesSupported])
-	require.Contains(t, updates, openai_compat.ExtraKeyResponsesSupportedByModel)
-	require.Nil(t, updates[openai_compat.ExtraKeyResponsesSupportedByModel])
-}
-
-func TestBuildResponsesProbeExtraUpdatesModelScopedIncludesMergedMap(t *testing.T) {
-	extra := map[string]any{
-		openai_compat.ExtraKeyResponsesSupportedByModel: map[string]any{"model-a": true},
-	}
-
-	updates := buildResponsesProbeExtraUpdatesWithNestedMap(extra, "model-b", true, false, false)
-	require.Equal(t, map[string]any{openai_compat.ExtraKeyResponsesSupported: false}, updates)
-
-	updates = buildResponsesProbeExtraUpdates(extra, "model-b", true, false)
-	require.Equal(t, false, updates[openai_compat.ExtraKeyResponsesSupported])
-	require.Equal(t, map[string]any{"model-a": true, "model-b": false}, updates[openai_compat.ExtraKeyResponsesSupportedByModel])
-}
-
-func TestMergeResponsesSupportByModelPreservesSiblings(t *testing.T) {
-	extra := map[string]any{
-		openai_compat.ExtraKeyResponsesSupportedByModel: map[string]any{
-			"model-a": true,
-			"model-b": false,
-		},
-	}
-
-	merged := mergeResponsesSupportByModel(extra, "model-c", true)
-
-	require.Equal(t, map[string]any{
-		"model-a": true,
-		"model-b": false,
-		"model-c": true,
-	}, merged)
-}
-
-func TestMergeResponsesSupportByModelOverwritesProbeModel(t *testing.T) {
-	extra := map[string]any{
-		openai_compat.ExtraKeyResponsesSupportedByModel: map[string]bool{
-			"model-a": true,
-		},
-	}
-
-	merged := mergeResponsesSupportByModel(extra, "model-a", false)
-
-	require.Equal(t, map[string]any{"model-a": false}, merged)
+	require.Equal(t, openai.DefaultTestModel, selectResponsesProbeModel(acctAllWild))
 }

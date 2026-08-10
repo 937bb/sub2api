@@ -12,7 +12,6 @@ import (
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/ent/paymentauditlog"
-	"github.com/Wei-Shaw/sub2api/ent/paymentorder"
 	"github.com/Wei-Shaw/sub2api/internal/payment"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/stretchr/testify/assert"
@@ -637,7 +636,7 @@ func TestAlreadyProcessedRecoversStaleRechargingLease(t *testing.T) {
 	require.Equal(t, OrderStatusCompleted, reloaded.Status)
 }
 
-func TestFulfillmentLeaseTokenRotationRejectsStaleFinalizeAndFail(t *testing.T) {
+func TestFulfillmentLeaseVersionRejectsStaleWorker(t *testing.T) {
 	ctx := context.Background()
 	client := newPaymentConfigServiceTestClient(t)
 	staleAt := time.Now().Add(-paymentFulfillmentLeaseDuration - time.Minute)
@@ -656,7 +655,7 @@ func TestFulfillmentLeaseTokenRotationRejectsStaleFinalizeAndFail(t *testing.T) 
 	secondLease, err := svc.acquirePaymentFulfillmentLease(ctx, staleOrder)
 	require.NoError(t, err)
 	require.NotNil(t, secondLease)
-	require.NotEqual(t, firstLease.token, secondLease.token)
+	require.False(t, firstLease.version.Equal(secondLease.version))
 
 	err = svc.markCompleted(ctx, order, firstLease, "SUBSCRIPTION_SUCCESS")
 	require.Error(t, err)
@@ -667,78 +666,6 @@ func TestFulfillmentLeaseTokenRotationRejectsStaleFinalizeAndFail(t *testing.T) 
 	require.NoError(t, err)
 	require.Equal(t, OrderStatusRecharging, reloaded.Status)
 	require.NoError(t, svc.markCompleted(ctx, order, secondLease, "SUBSCRIPTION_SUCCESS"))
-	reloaded, err = client.PaymentOrder.Get(ctx, order.ID)
-	require.NoError(t, err)
-	require.Nil(t, reloaded.FulfillmentLeaseToken)
-}
-
-func TestFulfillmentLeaseIdenticalStaleSnapshotOnlyOneClaimSucceeds(t *testing.T) {
-	ctx := context.Background()
-	client := newPaymentConfigServiceTestClient(t)
-	staleAt := time.Now().Add(-paymentFulfillmentLeaseDuration - time.Minute)
-	order := createPaymentFulfillmentSubscriptionOrder(t, ctx, client, OrderStatusRecharging, staleAt)
-	svc := &PaymentService{entClient: client}
-
-	first, err := svc.acquirePaymentFulfillmentLease(ctx, order)
-	require.NoError(t, err)
-	require.NotEmpty(t, first.token)
-
-	second, err := svc.acquirePaymentFulfillmentLease(ctx, order)
-	require.Error(t, err)
-	require.Nil(t, second)
-	require.Equal(t, "CONFLICT", infraerrors.Reason(err))
-}
-
-func TestFulfillmentLeaseLegacyWorkerReclaimRejectsNewWorkerFinalize(t *testing.T) {
-	ctx := context.Background()
-	client := newPaymentConfigServiceTestClient(t)
-	order := createPaymentFulfillmentSubscriptionOrder(t, ctx, client, OrderStatusPaid, time.Now())
-	svc := &PaymentService{entClient: client}
-
-	lease, err := svc.acquirePaymentFulfillmentLease(ctx, order)
-	require.NoError(t, err)
-
-	// A pre-token worker reclaims by updating only the status timestamp. It leaves
-	// the token untouched, so the timestamp must remain part of the final CAS.
-	legacyVersion := lease.version.Add(time.Second)
-	updated, err := client.PaymentOrder.Update().
-		Where(paymentorder.IDEQ(order.ID), paymentorder.StatusEQ(OrderStatusRecharging)).
-		SetUpdatedAt(legacyVersion).
-		Save(ctx)
-	require.NoError(t, err)
-	require.Equal(t, 1, updated)
-
-	err = svc.markCompleted(ctx, order, lease, "SUBSCRIPTION_SUCCESS")
-	require.Error(t, err)
-	require.Equal(t, "CONFLICT", infraerrors.Reason(err))
-	svc.markFailed(ctx, order.ID, lease, errors.New("stale worker"))
-
-	reloaded, err := client.PaymentOrder.Get(ctx, order.ID)
-	require.NoError(t, err)
-	require.Equal(t, OrderStatusRecharging, reloaded.Status)
-	require.Equal(t, legacyVersion, reloaded.UpdatedAt)
-}
-
-func TestFulfillmentLeaseReclaimsLegacyNullTokenAndClearsOnFailure(t *testing.T) {
-	ctx := context.Background()
-	client := newPaymentConfigServiceTestClient(t)
-	staleAt := time.Now().Add(-paymentFulfillmentLeaseDuration - time.Minute)
-	order := createPaymentFulfillmentSubscriptionOrder(t, ctx, client, OrderStatusRecharging, staleAt)
-	require.Nil(t, order.FulfillmentLeaseToken)
-	svc := &PaymentService{entClient: client}
-
-	lease, err := svc.acquirePaymentFulfillmentLease(ctx, order)
-	require.NoError(t, err)
-	require.Len(t, lease.token, 64)
-	claimed, err := client.PaymentOrder.Get(ctx, order.ID)
-	require.NoError(t, err)
-	require.Equal(t, lease.token, *claimed.FulfillmentLeaseToken)
-
-	svc.markFailed(ctx, order.ID, lease, errors.New("fulfillment failed"))
-	failed, err := client.PaymentOrder.Get(ctx, order.ID)
-	require.NoError(t, err)
-	require.Equal(t, OrderStatusFailed, failed.Status)
-	require.Nil(t, failed.FulfillmentLeaseToken)
 }
 
 func TestExecuteBalanceFulfillmentRecoversAfterRedeemWithoutCreditingAgain(t *testing.T) {
@@ -775,6 +702,72 @@ func TestExecuteBalanceFulfillmentRecoversAfterRedeemWithoutCreditingAgain(t *te
 	reloaded, err := client.PaymentOrder.Get(ctx, order.ID)
 	require.NoError(t, err)
 	require.Equal(t, OrderStatusCompleted, reloaded.Status)
+}
+
+func TestDuplicatePaymentNotificationDoesNotReprocessCompletedBalanceOrder(t *testing.T) {
+	ctx := context.Background()
+	client := newPaymentConfigServiceTestClient(t)
+	order := createPaymentFulfillmentSubscriptionOrder(t, ctx, client, OrderStatusCompleted, time.Now())
+	order, err := client.PaymentOrder.UpdateOneID(order.ID).
+		SetOrderType(payment.OrderTypeBalance).
+		ClearPlanID().
+		ClearSubscriptionGroupID().
+		ClearSubscriptionDays().
+		Save(ctx)
+	require.NoError(t, err)
+
+	redeemRepo := &redeemCodeRepoStub{codesByCode: map[string]*RedeemCode{
+		order.RechargeCode: {
+			ID:     102,
+			Code:   order.RechargeCode,
+			Type:   RedeemTypeBalance,
+			Value:  order.Amount,
+			Status: StatusUnused,
+		},
+	}}
+	svc := &PaymentService{
+		entClient:     client,
+		redeemService: &RedeemService{redeemRepo: redeemRepo},
+	}
+	notification := &payment.PaymentNotification{
+		TradeNo: "alipay-trade-replayed",
+		OrderID: order.OutTradeNo,
+		Amount:  order.PayAmount,
+		Status:  payment.NotificationStatusSuccess,
+	}
+	require.NoError(t, svc.HandlePaymentNotification(ctx, notification, payment.TypeAlipay))
+	require.NoError(t, svc.HandlePaymentNotification(ctx, notification, payment.TypeAlipay))
+
+	reloaded, err := client.PaymentOrder.Get(ctx, order.ID)
+	require.NoError(t, err)
+	require.Equal(t, OrderStatusCompleted, reloaded.Status)
+	require.Empty(t, redeemRepo.useCalls, "a duplicate notification must not redeem the balance code again")
+}
+
+func TestPaymentNotificationRejectsAmountMismatchBeforeFulfillment(t *testing.T) {
+	ctx := context.Background()
+	client := newPaymentConfigServiceTestClient(t)
+	order := createPaymentFulfillmentSubscriptionOrder(t, ctx, client, OrderStatusPending, time.Now())
+	order, err := client.PaymentOrder.UpdateOneID(order.ID).
+		SetOrderType(payment.OrderTypeBalance).
+		ClearPlanID().
+		ClearSubscriptionGroupID().
+		ClearSubscriptionDays().
+		Save(ctx)
+	require.NoError(t, err)
+
+	svc := &PaymentService{entClient: client}
+	err = svc.HandlePaymentNotification(ctx, &payment.PaymentNotification{
+		TradeNo: "alipay-trade-wrong-amount",
+		OrderID: order.OutTradeNo,
+		Amount:  order.PayAmount - 1,
+		Status:  payment.NotificationStatusSuccess,
+	}, payment.TypeAlipay)
+	require.ErrorContains(t, err, "amount mismatch")
+
+	reloaded, err := client.PaymentOrder.Get(ctx, order.ID)
+	require.NoError(t, err)
+	require.Equal(t, OrderStatusPending, reloaded.Status)
 }
 
 func TestExecuteSubscriptionFulfillmentRecoversCommittedAssignmentWithoutExtendingAgain(t *testing.T) {
@@ -1045,16 +1038,6 @@ func TestExecuteSubscriptionFulfillmentDoesNotDuplicateWorkAfterLegacySuccessAud
 		SettingKeyAffiliateRebateRate: "20",
 	}}, nil)
 	subRepo := newSubscriptionUserSubRepoStub()
-	expiresAt := time.Now().Add(30 * 24 * time.Hour).Truncate(time.Second)
-	subRepo.seed(&UserSubscription{
-		ID:        99,
-		UserID:    order.UserID,
-		GroupID:   *order.SubscriptionGroupID,
-		StartsAt:  time.Now().Add(-time.Hour),
-		ExpiresAt: expiresAt,
-		Status:    SubscriptionStatusActive,
-		Notes:     "legacy assignment\n" + subscriptionPaymentOrderNote(order.ID),
-	})
 	subscriptionSvc := NewSubscriptionService(&subscriptionGroupRepoStub{
 		group: &Group{ID: 7, Status: payment.EntityStatusActive, SubscriptionType: SubscriptionTypeSubscription},
 	}, subRepo, nil, nil, nil)
@@ -1073,16 +1056,6 @@ func TestExecuteSubscriptionFulfillmentDoesNotDuplicateWorkAfterLegacySuccessAud
 	require.Equal(t, OrderStatusCompleted, reloaded.Status)
 	require.Empty(t, affiliateRepo.accrueCalls)
 	require.Zero(t, subRepo.createCalls)
-	assertPaymentSubscriptionExpiry(t, subRepo, order, expiresAt)
-
-	assignmentAudit, err := client.PaymentAuditLog.Query().
-		Where(
-			paymentauditlog.OrderIDEQ(strconv.FormatInt(order.ID, 10)),
-			paymentauditlog.ActionEQ("SUBSCRIPTION_ASSIGNED"),
-		).
-		Only(ctx)
-	require.NoError(t, err)
-	require.Contains(t, assignmentAudit.Detail, `"recoveredFromNote":true`)
 }
 
 var _ AffiliateRepository = (*paymentFulfillmentAffiliateRepoStub)(nil)

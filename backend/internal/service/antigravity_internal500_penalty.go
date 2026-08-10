@@ -71,7 +71,7 @@ func (s *AntigravityGatewayService) applyInternal500Penalty(
 func (s *AntigravityGatewayService) handleInternal500RetryExhausted(
 	ctx context.Context, prefix string, account *Account,
 ) {
-	if s.internal500Cache == nil {
+	if s.internal500Cache == nil || isReadOnlyAccountTest(ctx) {
 		return
 	}
 	count, err := s.internal500Cache.IncrementInternal500Count(ctx, account.ID)
@@ -87,7 +87,7 @@ func (s *AntigravityGatewayService) handleInternal500RetryExhausted(
 func (s *AntigravityGatewayService) resetInternal500Counter(
 	ctx context.Context, prefix string, accountID int64,
 ) {
-	if s.internal500Cache == nil {
+	if s.internal500Cache == nil || isReadOnlyAccountTest(ctx) {
 		return
 	}
 	if err := s.internal500Cache.ResetInternal500Count(ctx, accountID); err != nil {

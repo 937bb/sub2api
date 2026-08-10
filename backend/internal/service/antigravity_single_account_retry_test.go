@@ -5,7 +5,6 @@ package service
 import (
 	"bytes"
 	"context"
-	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -637,9 +636,9 @@ func TestHandleSingleAccountRetryInPlace_NetworkError_ContinuesRetry(t *testing.
 		Body:       io.NopCloser(strings.NewReader(`{"result":"ok"}`)),
 	}
 	upstream := &mockSmartRetryUpstream{
-		// 第1次 admitted 请求传输失败，第2次成功。
+		// 第1次网络错误（nil resp），第2次成功
 		responses: []*http.Response{nil, successResp},
-		errors:    []error{errors.New("temporary transport failure"), nil},
+		errors:    []error{nil, nil},
 	}
 
 	account := &Account{
@@ -673,41 +672,6 @@ func TestHandleSingleAccountRetryInPlace_NetworkError_ContinuesRetry(t *testing.
 	require.NotNil(t, result.resp, "should return successful response after network error recovery")
 	require.Equal(t, http.StatusOK, result.resp.StatusCode)
 	require.Len(t, upstream.calls, 2, "first call fails (network error), second succeeds")
-}
-
-func TestHandleSingleAccountRetryInPlace_NetworkErrorThenNonAdmissionDoesNotRestore503(t *testing.T) {
-	ctx, cancel := context.WithCancel(ctxWithSingleAccountRetry())
-	admissions := 0
-	ctx = withHTTPAttemptAuthority(WithHTTPAttemptAdmissionHook(ctx, func() {
-		admissions++
-		if admissions == 2 {
-			cancel()
-		}
-	}))
-	upstream := &mockSmartRetryUpstream{
-		responses: []*http.Response{nil},
-		errors:    []error{errors.New("temporary transport failure")},
-	}
-	resp := &http.Response{StatusCode: http.StatusServiceUnavailable, Header: http.Header{}}
-	params := antigravityRetryLoopParams{
-		ctx:          ctx,
-		prefix:       "[test]",
-		account:      &Account{ID: 15, Platform: PlatformAntigravity, Type: AccountTypeOAuth, Concurrency: 1},
-		accessToken:  "token",
-		action:       "generateContent",
-		body:         []byte(`{"input":"test"}`),
-		httpUpstream: upstream,
-	}
-
-	result := (&AntigravityGatewayService{}).handleSingleAccountRetryInPlace(
-		params, resp, []byte(`{"error":"completed overload"}`), "https://ag-1.test", time.Second, "gemini-3-pro",
-	)
-
-	require.NotNil(t, result)
-	require.EqualError(t, result.err, "temporary transport failure")
-	require.Nil(t, result.resp)
-	require.Len(t, upstream.calls, 1)
-	require.Equal(t, 2, admissions)
 }
 
 // ---------------------------------------------------------------------------

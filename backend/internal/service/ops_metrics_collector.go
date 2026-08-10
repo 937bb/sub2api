@@ -49,7 +49,6 @@ type OpsMetricsCollector struct {
 	cfg         *config.Config
 
 	accountRepo        AccountRepository
-	accountLoadRepo    opsSchedulableAccountLoadRepository
 	concurrencyService *ConcurrencyService
 
 	db          *sql.DB
@@ -76,13 +75,11 @@ func NewOpsMetricsCollector(
 	redisClient *redis.Client,
 	cfg *config.Config,
 ) *OpsMetricsCollector {
-	accountLoadRepo, _ := accountRepo.(opsSchedulableAccountLoadRepository)
 	return &OpsMetricsCollector{
 		opsRepo:            opsRepo,
 		settingRepo:        settingRepo,
 		cfg:                cfg,
 		accountRepo:        accountRepo,
-		accountLoadRepo:    accountLoadRepo,
 		concurrencyService: concurrencyService,
 		db:                 db,
 		redisClient:        redisClient,
@@ -382,35 +379,7 @@ func (c *OpsMetricsCollector) collectConcurrencyQueueDepth(parentCtx context.Con
 	ctx, cancel := context.WithTimeout(parentCtx, 2*time.Second)
 	defer cancel()
 
-	var accountLoads []AccountWithConcurrency
-	var err error
-	accountLoadRepo := c.accountLoadRepo
-	if accountLoadRepo == nil {
-		// Directly constructed collectors do not pass through the constructor's
-		// capability capture; discover the narrow repository path at collection time.
-		accountLoadRepo, _ = c.accountRepo.(opsSchedulableAccountLoadRepository)
-	}
-	if accountLoadRepo != nil {
-		accountLoads, err = accountLoadRepo.ListSchedulableAccountLoads(ctx)
-	} else {
-		// Keep compatibility for repository decorators that predate the narrow capability.
-		// The concrete repository takes the projection path above; wrappers retain the
-		// previous behavior rather than silently removing this operational metric.
-		var accounts []Account
-		accounts, err = c.accountRepo.ListSchedulable(ctx)
-		if err == nil {
-			accountLoads = make([]AccountWithConcurrency, 0, len(accounts))
-			for _, account := range accounts {
-				if account.ID <= 0 {
-					continue
-				}
-				accountLoads = append(accountLoads, AccountWithConcurrency{
-					ID:             account.ID,
-					MaxConcurrency: account.EffectiveLoadFactor(),
-				})
-			}
-		}
-	}
+	accountLoads, err := c.listSchedulableAccountLoads(ctx)
 	if err != nil {
 		return nil
 	}
@@ -441,6 +410,28 @@ func (c *OpsMetricsCollector) collectConcurrencyQueueDepth(parentCtx context.Con
 	}
 	v := int(total)
 	return &v
+}
+
+func (c *OpsMetricsCollector) listSchedulableAccountLoads(ctx context.Context) ([]AccountWithConcurrency, error) {
+	if repo, ok := c.accountRepo.(opsSchedulableAccountLoadRepository); ok {
+		return repo.ListSchedulableAccountLoads(ctx)
+	}
+
+	accounts, err := c.accountRepo.ListSchedulable(ctx)
+	if err != nil {
+		return nil, err
+	}
+	loads := make([]AccountWithConcurrency, 0, len(accounts))
+	for _, account := range accounts {
+		if account.ID <= 0 {
+			continue
+		}
+		loads = append(loads, AccountWithConcurrency{
+			ID:             account.ID,
+			MaxConcurrency: account.EffectiveLoadFactor(),
+		})
+	}
+	return loads, nil
 }
 
 type opsCollectedPercentiles struct {

@@ -5,34 +5,42 @@ package service
 import (
 	"context"
 	"errors"
+	"net/http"
 	"reflect"
 	"testing"
 
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/stretchr/testify/require"
 )
 
 type accountRepoStubForBulkUpdate struct {
 	accountRepoStub
-	bulkUpdateErr    error
-	bulkUpdateIDs    []int64
-	bindGroupErrByID map[int64]error
-	bindGroupsCalls  []int64
-	getByIDsAccounts []*Account
-	getByIDsErr      error
-	getByIDsCalled   bool
-	getByIDsIDs      []int64
-	getByIDAccounts  map[int64]*Account
-	getByIDErrByID   map[int64]error
-	getByIDCalled    []int64
-	listByGroupData  map[int64][]Account
-	listByGroupErr   map[int64]error
-	listData         []Account
-	listResult       *pagination.PaginationResult
-	listErr          error
-	listCalled       bool
-	lastListParams   pagination.PaginationParams
-	lastListFilters  struct {
+	bulkUpdateErr       error
+	bulkUpdateIDs       []int64
+	bindGroupErrByID    map[int64]error
+	bindGroupsCalls     []int64
+	bindGroupsByAccount map[int64][]int64
+	createAccount       *Account
+	createID            int64
+	createErr           error
+	updatedAccounts     []*Account
+	updateErr           error
+	getByIDsAccounts    []*Account
+	getByIDsErr         error
+	getByIDsCalled      bool
+	getByIDsIDs         []int64
+	getByIDAccounts     map[int64]*Account
+	getByIDErrByID      map[int64]error
+	getByIDCalled       []int64
+	listByGroupData     map[int64][]Account
+	listByGroupErr      map[int64]error
+	listData            []Account
+	listResult          *pagination.PaginationResult
+	listErr             error
+	listCalled          bool
+	lastListParams      pagination.PaginationParams
+	lastListFilters     struct {
 		platform    string
 		accountType string
 		status      string
@@ -50,8 +58,25 @@ func (s *accountRepoStubForBulkUpdate) BulkUpdate(_ context.Context, ids []int64
 	return int64(len(ids)), nil
 }
 
-func (s *accountRepoStubForBulkUpdate) BindGroups(_ context.Context, accountID int64, _ []int64) error {
+func (s *accountRepoStubForBulkUpdate) Create(_ context.Context, account *Account) error {
+	s.createAccount = account
+	if s.createID > 0 {
+		account.ID = s.createID
+	}
+	return s.createErr
+}
+
+func (s *accountRepoStubForBulkUpdate) Update(_ context.Context, account *Account) error {
+	s.updatedAccounts = append(s.updatedAccounts, account)
+	return s.updateErr
+}
+
+func (s *accountRepoStubForBulkUpdate) BindGroups(_ context.Context, accountID int64, groupIDs []int64) error {
 	s.bindGroupsCalls = append(s.bindGroupsCalls, accountID)
+	if s.bindGroupsByAccount == nil {
+		s.bindGroupsByAccount = make(map[int64][]int64)
+	}
+	s.bindGroupsByAccount[accountID] = append([]int64{}, groupIDs...)
 	if err, ok := s.bindGroupErrByID[accountID]; ok {
 		return err
 	}
@@ -64,14 +89,7 @@ func (s *accountRepoStubForBulkUpdate) GetByIDs(_ context.Context, ids []int64) 
 	if s.getByIDsErr != nil {
 		return nil, s.getByIDsErr
 	}
-	if s.getByIDsAccounts != nil {
-		return s.getByIDsAccounts, nil
-	}
-	accounts := make([]*Account, 0, len(ids))
-	for _, id := range ids {
-		accounts = append(accounts, &Account{ID: id, Platform: PlatformOpenAI})
-	}
-	return accounts, nil
+	return s.getByIDsAccounts, nil
 }
 
 func (s *accountRepoStubForBulkUpdate) GetByID(_ context.Context, id int64) (*Account, error) {
@@ -95,15 +113,19 @@ func (s *accountRepoStubForBulkUpdate) ListByGroup(_ context.Context, groupID in
 	return nil, nil
 }
 
-func (s *accountRepoStubForBulkUpdate) ListWithFilters(_ context.Context, params pagination.PaginationParams, filters AccountListFilters) ([]Account, *pagination.PaginationResult, error) {
+func (s *accountRepoStubForBulkUpdate) ListAllWithFilters(context.Context, string, string, string, string, int64, string) ([]Account, error) {
+	return nil, nil
+}
+
+func (s *accountRepoStubForBulkUpdate) ListWithFilters(_ context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64, privacyMode string) ([]Account, *pagination.PaginationResult, error) {
 	s.listCalled = true
 	s.lastListParams = params
-	s.lastListFilters.platform = filters.Platform
-	s.lastListFilters.accountType = filters.AccountType
-	s.lastListFilters.status = filters.Status
-	s.lastListFilters.search = filters.Search
-	s.lastListFilters.groupID = filters.GroupID
-	s.lastListFilters.privacyMode = filters.PrivacyMode
+	s.lastListFilters.platform = platform
+	s.lastListFilters.accountType = accountType
+	s.lastListFilters.status = status
+	s.lastListFilters.search = search
+	s.lastListFilters.groupID = groupID
+	s.lastListFilters.privacyMode = privacyMode
 	if s.listErr != nil {
 		return nil, nil, s.listErr
 	}
@@ -131,6 +153,38 @@ func TestAdminService_BulkUpdateAccounts_AllSuccessIDs(t *testing.T) {
 	require.ElementsMatch(t, []int64{1, 2, 3}, result.SuccessIDs)
 	require.Empty(t, result.FailedIDs)
 	require.Len(t, result.Results, 3)
+}
+
+func TestAdminService_BulkUpdateAccounts_RejectsRateChangeForSyncedAccounts(t *testing.T) {
+	repo := &accountRepoStubForBulkUpdate{
+		getByIDsAccounts: []*Account{
+			{
+				ID: 1,
+				Extra: map[string]any{
+					UpstreamBillingProbeEnabledExtraKey:    true,
+					UpstreamBillingRateSyncEnabledExtraKey: true,
+				},
+			},
+			{ID: 2, Extra: map[string]any{}},
+		},
+	}
+	svc := &adminServiceImpl{accountRepo: repo}
+	rateMultiplier := 0.5
+
+	result, err := svc.BulkUpdateAccounts(context.Background(), &BulkUpdateAccountsInput{
+		AccountIDs:     []int64{1, 2},
+		RateMultiplier: &rateMultiplier,
+	})
+
+	require.Nil(t, result)
+	require.Error(t, err)
+	var appErr *infraerrors.ApplicationError
+	require.ErrorAs(t, err, &appErr)
+	require.Equal(t, int32(http.StatusConflict), appErr.Code)
+	require.Equal(t, "UPSTREAM_BILLING_RATE_SYNC_BULK_CONFLICT", appErr.Reason)
+	require.Equal(t, "1", appErr.Metadata["count"])
+	require.True(t, repo.getByIDsCalled)
+	require.Empty(t, repo.bulkUpdateIDs, "rate conflict must be rejected before any write")
 }
 
 // TestAdminService_BulkUpdateAccounts_PartialFailureIDs 验证部分失败时 success_ids/failed_ids 正确。
@@ -209,49 +263,6 @@ func TestAdminService_BulkUpdateAccounts_MixedChannelPreCheckBlocksOnExistingCon
 	require.Contains(t, err.Error(), "mixed channel")
 	// No BindGroups should have been called since the check runs before any write.
 	require.Empty(t, repo.bindGroupsCalls)
-}
-
-func TestAdminService_BulkUpdateAccounts_ExtraPayloadMarksMissingIDsFailed(t *testing.T) {
-	repo := &accountRepoStubForBulkUpdate{getByIDsAccounts: []*Account{}}
-	svc := &adminServiceImpl{accountRepo: repo}
-
-	result, err := svc.BulkUpdateAccounts(context.Background(), &BulkUpdateAccountsInput{
-		AccountIDs: []int64{999999},
-		Extra:      map[string]any{"org_uuid": "org"},
-	})
-
-	require.NoError(t, err)
-	require.Equal(t, 0, result.Success)
-	require.Equal(t, 1, result.Failed)
-	require.Empty(t, result.SuccessIDs)
-	require.Equal(t, []int64{999999}, result.FailedIDs)
-	require.Len(t, result.Results, 1)
-	require.False(t, result.Results[0].Success)
-	require.Contains(t, result.Results[0].Error, "account not found")
-}
-
-func TestAdminService_BulkUpdateAccounts_StatusOnlyMarksMissingIDsFailed(t *testing.T) {
-	repo := &accountRepoStubForBulkUpdate{
-		getByIDsAccounts: []*Account{{ID: 1}},
-	}
-	svc := &adminServiceImpl{accountRepo: repo}
-
-	result, err := svc.BulkUpdateAccounts(context.Background(), &BulkUpdateAccountsInput{
-		AccountIDs: []int64{1, 999999},
-		Status:     StatusDisabled,
-	})
-
-	require.NoError(t, err)
-	require.True(t, repo.getByIDsCalled, "bulk update must preload accounts for every update type to report missing IDs")
-	require.Equal(t, []int64{1}, repo.bulkUpdateIDs)
-	require.Equal(t, 1, result.Success)
-	require.Equal(t, 1, result.Failed)
-	require.Equal(t, []int64{1}, result.SuccessIDs)
-	require.Equal(t, []int64{999999}, result.FailedIDs)
-	require.Len(t, result.Results, 2)
-	require.True(t, result.Results[0].Success)
-	require.False(t, result.Results[1].Success)
-	require.Contains(t, result.Results[1].Error, "account not found")
 }
 
 func TestAdminServiceBulkUpdateAccounts_ResolvesIDsFromFilters(t *testing.T) {

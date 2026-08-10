@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -154,154 +155,23 @@ func NewConcurrencyHelper(concurrencyService *service.ConcurrencyService, pingFo
 	}
 }
 
-// wrapReleaseOnDone ensures release runs at most once and still triggers on
-// context cancellation. HTTP requests that detach admitted upstream work must
-// transfer their slots to a separate attempt-owned lease before detaching.
+// wrapReleaseOnDone ensures release runs at most once and still triggers on context cancellation.
+// 用于避免客户端断开或上游超时导致的并发槽位泄漏。
+// 优化：基于 context.AfterFunc 注册回调，避免每请求额外守护 goroutine。
 func wrapReleaseOnDone(ctx context.Context, releaseFunc func()) func() {
 	if releaseFunc == nil {
 		return nil
 	}
 	var once sync.Once
-	var stop func() bool
+	releaseOnce := func() {
+		once.Do(releaseFunc)
+	}
+	stop := context.AfterFunc(ctx, releaseOnce)
 
-	release := func() {
-		once.Do(func() {
-			if stop != nil {
-				_ = stop()
-			}
-			releaseFunc()
-		})
+	return func() {
+		_ = stop()
+		releaseOnce()
 	}
-
-	stop = context.AfterFunc(ctx, release)
-
-	return release
-}
-
-type httpAttemptReleaseSet struct {
-	mu          sync.Mutex
-	transferred bool
-	released    bool
-	releases    []func()
-}
-
-func newHTTPAttemptReleaseSet(
-	ctx context.Context,
-) *httpAttemptReleaseSet {
-	set := &httpAttemptReleaseSet{}
-	context.AfterFunc(ctx, set.releasePending)
-	return set
-}
-
-func (s *httpAttemptReleaseSet) Add(release func()) func() {
-	if s == nil || release == nil {
-		return nil
-	}
-	var once sync.Once
-	ownedRelease := func() {
-		once.Do(release)
-	}
-	s.mu.Lock()
-	if s.transferred || s.released {
-		s.mu.Unlock()
-		ownedRelease()
-		return ownedRelease
-	}
-	s.releases = append(s.releases, ownedRelease)
-	s.mu.Unlock()
-	return ownedRelease
-}
-
-func (s *httpAttemptReleaseSet) Transfer() bool {
-	if s == nil {
-		return true
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.released || s.transferred {
-		return false
-	}
-	s.transferred = true
-	return true
-}
-
-// transferLogical keeps one logical lease across multiple admitted account
-// attempts. Unlike an attempt lease, an earlier transfer remains valid.
-func (s *httpAttemptReleaseSet) transferLogical() bool {
-	if s == nil {
-		return true
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.released {
-		return false
-	}
-	s.transferred = true
-	return true
-}
-
-func (s *httpAttemptReleaseSet) releasePending() {
-	if s == nil {
-		return
-	}
-	s.mu.Lock()
-	if s.transferred || s.released {
-		s.mu.Unlock()
-		return
-	}
-	s.released = true
-	releases := s.releases
-	s.releases = nil
-	s.mu.Unlock()
-	for _, release := range releases {
-		release()
-	}
-}
-
-func (s *httpAttemptReleaseSet) releaseTransferred() {
-	if s == nil {
-		return
-	}
-	s.mu.Lock()
-	if s.released {
-		s.mu.Unlock()
-		return
-	}
-	s.released = true
-	releases := s.releases
-	s.releases = nil
-	s.mu.Unlock()
-	for _, release := range releases {
-		release()
-	}
-}
-
-// finish releases pending or transferred ownership when the logical handler
-// has completed all accounting derived from admitted work.
-func (s *httpAttemptReleaseSet) finish() {
-	s.releaseTransferred()
-}
-
-func withHTTPAttemptReleaseAuthority(
-	ctx context.Context,
-	logical *httpAttemptReleaseSet,
-	attempt *httpAttemptReleaseSet,
-	onFirst func(),
-) context.Context {
-	return service.WithHTTPAttemptAuthority(
-		ctx,
-		func() bool {
-			if !attempt.Transfer() {
-				return false
-			}
-			if !logical.transferLogical() {
-				attempt.releaseTransferred()
-				return false
-			}
-			return true
-		},
-		onFirst,
-	)
 }
 
 // IncrementWaitCount increments the wait count for a user
@@ -337,6 +207,23 @@ func (h *ConcurrencyHelper) TryAcquireUserSlot(ctx context.Context, userID int64
 	return result.ReleaseFunc, true, nil
 }
 
+func (h *ConcurrencyHelper) TryAcquireUserSlotForAPIKey(ctx context.Context, userID int64, maxConcurrency int, apiKeyID int64) (func(), bool, error) {
+	releaseFunc, acquired, err := h.TryAcquireUserSlot(ctx, userID, maxConcurrency)
+	if err != nil || !acquired {
+		return releaseFunc, acquired, err
+	}
+	return h.withAPIKeySlot(ctx, apiKeyID, releaseFunc), true, nil
+}
+
+// AcquireOpenAIWSIngressLease bounds the whole client WebSocket lifecycle,
+// independently from per-turn user and account slots.
+func (h *ConcurrencyHelper) AcquireOpenAIWSIngressLease(ctx context.Context, apiKeyID int64, maxConnections int) (*service.OpenAIWSIngressLease, bool, error) {
+	if h == nil || h.concurrencyService == nil {
+		return nil, false, fmt.Errorf("concurrency service is unavailable")
+	}
+	return h.concurrencyService.AcquireOpenAIWSIngressLease(ctx, apiKeyID, maxConnections)
+}
+
 // TryAcquireAccountSlot 尝试立即获取账号并发槽位。
 // 返回值: (releaseFunc, acquired, error)
 func (h *ConcurrencyHelper) TryAcquireAccountSlot(ctx context.Context, accountID int64, maxConcurrency int) (func(), bool, error) {
@@ -360,18 +247,21 @@ func (h *ConcurrencyHelper) AcquireUserSlotWithWait(c *gin.Context, userID int64
 func (h *ConcurrencyHelper) acquireUserSlotWithWaitTimeout(c *gin.Context, userID int64, maxConcurrency int, timeout time.Duration, isStream bool, streamStarted *bool) (func(), error) {
 	ctx := c.Request.Context()
 
-	// Try to acquire immediately before touching the Redis wait queue; successful
-	// hot-path requests should not pay a wait-counter round trip.
+	// Try to acquire immediately
 	releaseFunc, acquired, err := h.TryAcquireUserSlot(ctx, userID, maxConcurrency)
 	if err != nil {
 		return nil, err
 	}
 
 	if acquired {
-		return releaseFunc, nil
+		return h.withAPIKeySlotFromGin(c, releaseFunc), nil
 	}
 
-	canWait, err := h.IncrementWaitCount(ctx, userID, service.CalculateMaxWait(maxConcurrency))
+	queueLimit := service.CalculateMaxWait(maxConcurrency) - maxConcurrency
+	if queueLimit < 1 {
+		queueLimit = 1
+	}
+	canWait, err := h.IncrementWaitCount(ctx, userID, queueLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -381,7 +271,37 @@ func (h *ConcurrencyHelper) acquireUserSlotWithWaitTimeout(c *gin.Context, userI
 	defer h.DecrementWaitCount(ctx, userID)
 
 	// Need to wait - handle streaming ping if needed
-	return h.waitForSlotWithPingTimeout(c, "user", userID, maxConcurrency, timeout, isStream, streamStarted, false)
+	releaseFunc, err = h.waitForSlotWithPingTimeout(c, "user", userID, maxConcurrency, timeout, isStream, streamStarted, false)
+	if err != nil {
+		return nil, err
+	}
+	return h.withAPIKeySlotFromGin(c, releaseFunc), nil
+}
+
+func (h *ConcurrencyHelper) withAPIKeySlotFromGin(c *gin.Context, releaseFunc func()) func() {
+	if c == nil {
+		return releaseFunc
+	}
+	apiKey, ok := middleware2.GetAPIKeyFromContext(c)
+	if !ok || apiKey == nil {
+		return releaseFunc
+	}
+	return h.withAPIKeySlot(c.Request.Context(), apiKey.ID, releaseFunc)
+}
+
+func (h *ConcurrencyHelper) withAPIKeySlot(ctx context.Context, apiKeyID int64, releaseFunc func()) func() {
+	if h == nil || h.concurrencyService == nil || apiKeyID <= 0 {
+		return releaseFunc
+	}
+	apiKeyReleaseFunc := h.concurrencyService.TrackAPIKeySlot(ctx, apiKeyID)
+	return func() {
+		if releaseFunc != nil {
+			releaseFunc()
+		}
+		if apiKeyReleaseFunc != nil {
+			apiKeyReleaseFunc()
+		}
+	}
 }
 
 // AcquireAccountSlotWithWait acquires an account concurrency slot, waiting if necessary.

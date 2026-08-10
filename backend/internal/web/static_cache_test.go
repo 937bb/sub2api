@@ -12,55 +12,60 @@ import (
 func TestIsFingerprintedEmbeddedAssetPath(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
+	cases := []struct {
 		name string
 		path string
 		want bool
 	}{
-		{name: "javascript", path: "assets/index-AbCd1234.js", want: true},
-		{name: "css", path: "assets/app-a1B2c3D4.css", want: true},
-		{name: "url safe hash", path: "assets/app-aB1-2_Cd.css", want: true},
-		{name: "nested", path: "assets/vendor/chunk-AbCd1234.js", want: true},
-		{name: "leading slash", path: "/assets/index-AbCd1234.js", want: true},
-		{name: "unhashed", path: "assets/index.js"},
-		{name: "short hash", path: "assets/index-abc123.js"},
-		{name: "missing extension", path: "assets/index-AbCd1234"},
-		{name: "invalid hash", path: "assets/index-AbCd12!4.js"},
-		{name: "trailing slash", path: "assets/index-AbCd1234.js/"},
-		{name: "double slash", path: "assets//index-AbCd1234.js"},
-		{name: "dot segment", path: "assets/vendor/../index-AbCd1234.js"},
-		{name: "backslash", path: `assets\index-AbCd1234.js`},
-		{name: "outside assets", path: "downloads/index-AbCd1234.js"},
-		{name: "similar prefix", path: "assets-v2/index-AbCd1234.js"},
-		{name: "root mutable", path: "logo.png"},
+		{name: "fingerprinted_js", path: "assets/index-AbCd1234.js", want: true},
+		{name: "fingerprinted_css", path: "assets/app-a1B2c3D4.css", want: true},
+		{name: "fingerprinted_url_safe_hash", path: "assets/app-aB1-2_Cd.css", want: true},
+		{name: "nested_fingerprinted_asset", path: "assets/vendor/chunk-AbCd1234.js", want: true},
+		{name: "leading_slash_fingerprinted_asset", path: "/assets/index-AbCd1234.js", want: true},
+		{name: "unhashed_asset", path: "assets/index.js", want: false},
+		{name: "short_suffix", path: "assets/index-abc123.js", want: false},
+		{name: "logo", path: "logo.png", want: false},
+		{name: "favicon", path: "favicon.ico", want: false},
+		{name: "fingerprint_outside_assets", path: "downloads/index-AbCd1234.js", want: false},
+		{name: "index_html", path: "index.html", want: false},
+		{name: "spa_route", path: "dashboard", want: false},
+		{name: "assets_prefix_only", path: "assets", want: false},
+		{name: "similar_name", path: "assets-backup/x.js", want: false},
+		{name: "empty", path: "", want: false},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			assert.Equal(t, tt.want, isFingerprintedEmbeddedAssetPath(tt.path))
+			assert.Equal(t, tc.want, isFingerprintedEmbeddedAssetPath(tc.path))
 		})
 	}
 }
 
-func TestApplyEmbeddedAssetCacheHeaders(t *testing.T) {
+func TestApplyStaticAssetCacheHeaders(t *testing.T) {
 	t.Parallel()
 
-	for _, tt := range []struct {
-		path string
-		want string
-	}{
-		{path: "assets/index-AbCd1234.js", want: immutableAssetCacheControl},
-		{path: "assets/index.js", want: mutableAssetCacheControl},
-		{path: "logo.png", want: mutableAssetCacheControl},
-		{path: "index.html", want: mutableAssetCacheControl},
-	} {
-		t.Run(tt.path, func(t *testing.T) {
+	t.Run("sets_immutable_cache_for_fingerprinted_asset", func(t *testing.T) {
+		t.Parallel()
+		header := make(http.Header)
+		applyStaticAssetCacheHeaders(header, "assets/index-AbCd1234.js")
+		assert.Equal(t, staticAssetsCacheControl, header.Get("Cache-Control"))
+	})
+
+	for _, path := range []string{"assets/index.js", "logo.png", "favicon.ico", "index.html"} {
+		path := path
+		t.Run("skips_"+path, func(t *testing.T) {
+			t.Parallel()
 			header := make(http.Header)
-			applyEmbeddedAssetCacheHeaders(header, tt.path)
-			assert.Equal(t, tt.want, header.Get("Cache-Control"))
+			applyStaticAssetCacheHeaders(header, path)
+			assert.Empty(t, header.Get("Cache-Control"))
 		})
 	}
 
-	assert.NotPanics(t, func() { applyEmbeddedAssetCacheHeaders(nil, "assets/index-AbCd1234.js") })
+	t.Run("nil_header_is_noop", func(t *testing.T) {
+		t.Parallel()
+		assert.NotPanics(t, func() {
+			applyStaticAssetCacheHeaders(nil, "assets/index-AbCd1234.js")
+		})
+	})
 }

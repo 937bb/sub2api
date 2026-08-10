@@ -5,7 +5,9 @@ package service
 import (
 	"context"
 	"testing"
+	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/stretchr/testify/require"
 )
 
@@ -458,6 +460,26 @@ func TestTryModelFilePricing_Success(t *testing.T) {
 	require.InDelta(t, 0.2, *result, 1e-12)
 }
 
+func TestTryModelFilePricing_AppliesLongContextPricing(t *testing.T) {
+	bs := newTestBillingServiceWithPrices(map[string]*ModelPricing{
+		"gpt-5.6-sol": {
+			InputPricePerToken:          0.001,
+			OutputPricePerToken:         0.002,
+			CacheReadPricePerToken:      0.0001,
+			LongContextInputThreshold:   100,
+			LongContextInputMultiplier:  2,
+			LongContextOutputMultiplier: 1.5,
+		},
+	})
+	tokens := UsageTokens{InputTokens: 101, OutputTokens: 10, CacheReadTokens: 5}
+
+	result := tryModelFilePricing(bs, "gpt-5.6-sol", tokens)
+
+	require.NotNil(t, result)
+	// Input and cache-read use the 2x input tier; output uses the 1.5x tier.
+	require.InDelta(t, 0.233, *result, 1e-12)
+}
+
 func TestTryModelFilePricing_PricingNotFound(t *testing.T) {
 	// "nonexistent-model" does not match any fallback pattern
 	bs := newTestBillingServiceWithPrices(map[string]*ModelPricing{})
@@ -677,6 +699,25 @@ func TestResolveAccountStatsCost_FallsBackToLiteLLM(t *testing.T) {
 	require.InDelta(t, 0.2, *result, 1e-12)
 }
 
+func TestResolveAccountStatsCost_Gemini36FlashTierUsesFallbackPricing(t *testing.T) {
+	channel := &Channel{
+		ID:                         1,
+		Status:                     StatusActive,
+		ApplyPricingToAccountStats: false,
+	}
+	cs := newTestChannelServiceForStats(t, channel, 10, "antigravity")
+	bs := NewBillingService(&config.Config{}, nil)
+
+	result := resolveAccountStatsCost(
+		context.Background(),
+		cs, bs,
+		1, 10, "gemini-3.6-flash-low",
+		UsageTokens{InputTokens: 1_000_000, OutputTokens: 1_000_000, CacheReadTokens: 1_000_000}, 1, 0,
+	)
+	require.NotNil(t, result)
+	require.InDelta(t, 9.15, *result, 1e-12)
+}
+
 func TestResolveAccountStatsCost_AllMiss_ReturnsNil(t *testing.T) {
 	channel := &Channel{
 		ID:                         1,
@@ -750,4 +791,21 @@ func TestResolveAccountStatsCost_CustomRulePriorityOverApplyPricing(t *testing.T
 	require.NotNil(t, result)
 	// Custom rule: 100*0.05 = 5.0 (NOT 99.0 from totalCost)
 	require.InDelta(t, 5.0, *result, 1e-12)
+}
+
+// ---------------------------------------------------------------------------
+// helpers for resolveAccountStatsCost tests
+// ---------------------------------------------------------------------------
+
+// newTestChannelServiceForStats creates a ChannelService with a single channel
+// mapped to the given groupID, suitable for resolveAccountStatsCost tests.
+func newTestChannelServiceForStats(t *testing.T, channel *Channel, groupID int64, platform string) *ChannelService {
+	t.Helper()
+	cache := newEmptyChannelCache()
+	cache.channelByGroupID[groupID] = channel
+	cache.groupPlatform[groupID] = platform
+	cs := &ChannelService{}
+	cache.loadedAt = time.Now()
+	cs.cache.Store(cache)
+	return cs
 }

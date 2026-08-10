@@ -84,8 +84,13 @@ export interface AdminUsageQueryParams extends UsageQueryParams {
   user_id?: number
   exact_total?: boolean
   billing_mode?: string
+  upstream_model_mismatch?: boolean
   sort_by?: string
   sort_order?: 'asc' | 'desc'
+  // 错误请求 tab 专属筛选(仅传给错误列表接口;共用同一 filters 对象)
+  error_phase?: string | null
+  error_category?: string | null
+  status_code?: number | null
 }
 
 // ==================== API Functions ====================
@@ -106,6 +111,12 @@ export async function list(
   return data
 }
 
+/** Load one usage record on demand for the admin details dialog. */
+export async function getById(id: number): Promise<AdminUsageLog> {
+  const { data } = await apiClient.get<AdminUsageLog>(`/admin/usage/${id}`)
+  return data
+}
+
 /**
  * Get usage statistics with optional filters (admin only)
  * @param params - Query parameters for filtering
@@ -119,6 +130,7 @@ export async function getStats(params: {
   model?: string
   request_type?: UsageRequestType
   stream?: boolean
+  upstream_model_mismatch?: boolean
   period?: string
   start_date?: string
   end_date?: string
@@ -202,6 +214,7 @@ export async function cancelCleanupTask(taskId: number): Promise<{ id: number; s
 
 export const adminUsageAPI = {
   list,
+  getById,
   getStats,
   searchUsers,
   searchApiKeys,

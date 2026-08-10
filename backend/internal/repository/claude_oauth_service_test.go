@@ -243,7 +243,7 @@ func (s *ClaudeOAuthServiceSuite) TestExchangeCodeForToken() {
 				AccessToken: "at",
 			},
 			validate: func(captured requestCapture) {
-				require.NotContains(s.T(), captured.bodyJSON, "expires_in", "setup token should not include expires_in")
+				require.Nil(s.T(), captured.bodyJSON["expires_in"], "setup token should not include expires_in")
 			},
 		},
 		{

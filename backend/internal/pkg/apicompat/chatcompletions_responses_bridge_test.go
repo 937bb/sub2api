@@ -63,15 +63,68 @@ func TestResponsesToChatCompletionsRequest_InstructionsAndInputDeveloperRole(t *
 		]`),
 	}
 
-	conversion, err := ResponsesToChatCompletionsRequest(req)
+	out, err := ResponsesToChatCompletionsRequest(req)
 	require.NoError(t, err)
-	out := conversion.Request
 	require.Len(t, out.Messages, 3)
 
 	assert.Equal(t, []string{"system", "system", "user"}, chatMessageRoles(out.Messages))
 	assert.JSONEq(t, `"Use concise answers."`, string(out.Messages[0].Content))
 	assert.JSONEq(t, `"Prefer JSON."`, string(out.Messages[1].Content))
 	assert.JSONEq(t, `"Hello"`, string(out.Messages[2].Content))
+}
+
+func TestResponsesToChatCompletionsRequest_TextFormatJsonObject(t *testing.T) {
+	req := &ResponsesRequest{
+		Model: "gpt-4o",
+		Input: json.RawMessage(`[
+			{"role":"user","content":"Return JSON"}
+		]`),
+		Text: &ResponsesText{
+			Format: json.RawMessage(`{"type":"json_object"}`),
+		},
+	}
+
+	out, err := ResponsesToChatCompletionsRequest(req)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"type":"json_object"}`, string(out.ResponseFormat))
+}
+
+func TestResponsesToChatCompletionsRequest_TextFormatJsonSchema(t *testing.T) {
+	req := &ResponsesRequest{
+		Model: "gpt-4o",
+		Input: json.RawMessage(`[
+			{"role":"user","content":"Return structured JSON"}
+		]`),
+		Text: &ResponsesText{
+			Format: json.RawMessage(`{
+				"type":"json_schema",
+				"name":"answer",
+				"schema":{
+					"type":"object",
+					"properties":{"ok":{"type":"boolean"}},
+					"required":["ok"],
+					"additionalProperties":false
+				},
+				"strict":true
+			}`),
+		},
+	}
+
+	out, err := ResponsesToChatCompletionsRequest(req)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{
+		"type":"json_schema",
+		"json_schema":{
+			"name":"answer",
+			"schema":{
+				"type":"object",
+				"properties":{"ok":{"type":"boolean"}},
+				"required":["ok"],
+				"additionalProperties":false
+			},
+			"strict":true
+		}
+	}`, string(out.ResponseFormat))
 }
 
 func TestResponsesToChatCompletionsRequest_ParallelToolCalls(t *testing.T) {
@@ -84,9 +137,8 @@ func TestResponsesToChatCompletionsRequest_ParallelToolCalls(t *testing.T) {
 		ParallelToolCalls: &parallel,
 	}
 
-	conversion, err := ResponsesToChatCompletionsRequest(req)
+	out, err := ResponsesToChatCompletionsRequest(req)
 	require.NoError(t, err)
-	out := conversion.Request
 	require.NotNil(t, out.ParallelToolCalls)
 	assert.False(t, *out.ParallelToolCalls)
 

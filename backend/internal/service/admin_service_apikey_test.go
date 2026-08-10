@@ -33,6 +33,9 @@ func (s *userRepoStubForGroupUpdate) AddGroupToAllowedGroups(_ context.Context, 
 }
 
 func (s *userRepoStubForGroupUpdate) Create(context.Context, *User) error { panic("unexpected") }
+func (s *userRepoStubForGroupUpdate) CreateWithEmailAliasGuard(context.Context, *User) error {
+	panic("unexpected")
+}
 func (s *userRepoStubForGroupUpdate) GetByID(context.Context, int64) (*User, error) {
 	panic("unexpected")
 }
@@ -42,7 +45,9 @@ func (s *userRepoStubForGroupUpdate) GetByEmail(context.Context, string) (*User,
 func (s *userRepoStubForGroupUpdate) GetFirstAdmin(context.Context) (*User, error) {
 	panic("unexpected")
 }
-func (s *userRepoStubForGroupUpdate) Update(context.Context, *User) error { panic("unexpected") }
+func (s *userRepoStubForGroupUpdate) Update(context.Context, *User, UserUpdateFields) error {
+	panic("unexpected")
+}
 func (s *userRepoStubForGroupUpdate) Delete(context.Context, int64) error { panic("unexpected") }
 func (s *userRepoStubForGroupUpdate) GetUserAvatar(context.Context, int64) (*UserAvatar, error) {
 	panic("unexpected")
@@ -65,6 +70,14 @@ func (s *userRepoStubForGroupUpdate) UpdateBalance(context.Context, int64, float
 func (s *userRepoStubForGroupUpdate) DeductBalance(context.Context, int64, float64) error {
 	panic("unexpected")
 }
+
+func (s *userRepoStubForGroupUpdate) AdjustBalance(ctx context.Context, id int64, delta float64) (BalanceChange, error) {
+	panic("unexpected AdjustBalance call")
+}
+
+func (s *userRepoStubForGroupUpdate) SetBalance(ctx context.Context, id int64, value float64) (BalanceChange, error) {
+	panic("unexpected SetBalance call")
+}
 func (s *userRepoStubForGroupUpdate) UpdateConcurrency(context.Context, int64, int) error {
 	panic("unexpected")
 }
@@ -75,7 +88,13 @@ func (s *userRepoStubForGroupUpdate) BatchSetConcurrency(context.Context, []int6
 func (s *userRepoStubForGroupUpdate) BatchAddConcurrency(context.Context, []int64, int) (int, error) {
 	return 0, nil
 }
+func (s *userRepoStubForGroupUpdate) BatchUpdateLimits(context.Context, []int64, *int, *int) (int, error) {
+	return 0, nil
+}
 func (s *userRepoStubForGroupUpdate) ExistsByEmail(context.Context, string) (bool, error) {
+	panic("unexpected")
+}
+func (s *userRepoStubForGroupUpdate) ExistsByEmailAlias(context.Context, string) (bool, error) {
 	panic("unexpected")
 }
 func (s *userRepoStubForGroupUpdate) RemoveGroupFromAllowedGroups(context.Context, int64) (int64, error) {
@@ -116,7 +135,6 @@ type apiKeyRepoStubForGroupUpdate struct {
 	getErr    error
 	updateErr error
 	updated   *APIKey // captures what was passed to Update
-	group     *Group
 }
 
 func (s *apiKeyRepoStubForGroupUpdate) GetByID(_ context.Context, _ int64) (*APIKey, error) {
@@ -126,53 +144,13 @@ func (s *apiKeyRepoStubForGroupUpdate) GetByID(_ context.Context, _ int64) (*API
 	clone := *s.key
 	return &clone, nil
 }
-func (s *apiKeyRepoStubForGroupUpdate) Update(_ context.Context, key *APIKey) error {
+func (s *apiKeyRepoStubForGroupUpdate) Update(_ context.Context, key *APIKey, _ APIKeyUpdateFields) error {
 	if s.updateErr != nil {
 		return s.updateErr
 	}
 	clone := *key
 	s.updated = &clone
 	return nil
-}
-func (s *apiKeyRepoStubForGroupUpdate) UpdateGroupID(_ context.Context, _ int64, groupID *int64) (*APIKey, error) {
-	if s.updateErr != nil {
-		return nil, s.updateErr
-	}
-	clone := *s.key
-	if groupID != nil {
-		gid := *groupID
-		clone.GroupID = &gid
-		if s.group != nil {
-			group := *s.group
-			clone.Group = &group
-		} else {
-			clone.Group = &Group{ID: gid}
-		}
-	} else {
-		clone.GroupID = nil
-		clone.Group = nil
-	}
-	s.updated = &clone
-	return &clone, nil
-}
-func (s *apiKeyRepoStubForGroupUpdate) UpdateConfig(context.Context, int64, int64, APIKeyConfigPatch) (*APIKey, error) {
-	panic("unexpected")
-}
-func (s *apiKeyRepoStubForGroupUpdate) ResetRateLimitUsage(context.Context, int64) (*APIKey, error) {
-	if s.updateErr != nil {
-		return nil, s.updateErr
-	}
-	clone := *s.key
-	clone.Usage5h = 0
-	clone.Usage1d = 0
-	clone.Usage7d = 0
-	clone.Window5hStart = nil
-	clone.Window1dStart = nil
-	clone.Window7dStart = nil
-	return &clone, nil
-}
-func (s *apiKeyRepoStubForGroupUpdate) IncrementQuotaUsedAndGetState(context.Context, int64, float64) (*APIKeyQuotaUsageState, error) {
-	panic("unexpected")
 }
 
 // Unused methods – panic on unexpected call.
@@ -277,9 +255,6 @@ func (s *groupRepoStubForGroupUpdate) ListActive(context.Context) ([]Group, erro
 func (s *groupRepoStubForGroupUpdate) ListActiveByPlatform(context.Context, string) ([]Group, error) {
 	panic("unexpected")
 }
-func (s *groupRepoStubForGroupUpdate) ListAllIncludingInactive(context.Context, string) ([]Group, error) {
-	panic("unexpected")
-}
 func (s *groupRepoStubForGroupUpdate) ExistsByName(context.Context, string) (bool, error) {
 	panic("unexpected")
 }
@@ -347,7 +322,7 @@ func TestAdminService_AdminUpdateAPIKeyGroupID_NilGroupID_NoOp(t *testing.T) {
 }
 
 func TestAdminService_AdminUpdateAPIKeyGroupID_Unbind(t *testing.T) {
-	existing := &APIKey{ID: 1, UserID: 9, Key: "sk-test", GroupID: int64Ptr(5), User: &User{ID: 9}, Group: &Group{ID: 5, Name: "Old"}}
+	existing := &APIKey{ID: 1, Key: "sk-test", GroupID: int64Ptr(5), Group: &Group{ID: 5, Name: "Old"}}
 	repo := &apiKeyRepoStubForGroupUpdate{key: existing}
 	cache := &authCacheInvalidatorStub{}
 	svc := &adminServiceImpl{apiKeyRepo: repo, authCacheInvalidator: cache}
@@ -356,15 +331,14 @@ func TestAdminService_AdminUpdateAPIKeyGroupID_Unbind(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, got.APIKey.GroupID, "group_id should be nil after unbind")
 	require.Nil(t, got.APIKey.Group, "group object should be nil after unbind")
-	require.Equal(t, int64(9), got.APIKey.User.ID)
 	require.NotNil(t, repo.updated, "Update should have been called")
 	require.Nil(t, repo.updated.GroupID)
 	require.Equal(t, []string{"sk-test"}, cache.keys, "cache should be invalidated")
 }
 
 func TestAdminService_AdminUpdateAPIKeyGroupID_BindActiveGroup(t *testing.T) {
-	existing := &APIKey{ID: 1, UserID: 9, Key: "sk-test", GroupID: nil, User: &User{ID: 9}}
-	apiKeyRepo := &apiKeyRepoStubForGroupUpdate{key: existing, group: &Group{ID: 10, Name: "Pro", Status: StatusActive}}
+	existing := &APIKey{ID: 1, Key: "sk-test", GroupID: nil}
+	apiKeyRepo := &apiKeyRepoStubForGroupUpdate{key: existing}
 	groupRepo := &groupRepoStubForGroupUpdate{group: &Group{ID: 10, Name: "Pro", Status: StatusActive}}
 	cache := &authCacheInvalidatorStub{}
 	svc := &adminServiceImpl{apiKeyRepo: apiKeyRepo, groupRepo: groupRepo, authCacheInvalidator: cache}
@@ -380,24 +354,6 @@ func TestAdminService_AdminUpdateAPIKeyGroupID_BindActiveGroup(t *testing.T) {
 	// C1 fix: verify Group object is populated
 	require.NotNil(t, got.APIKey.Group)
 	require.Equal(t, "Pro", got.APIKey.Group.Name)
-	require.Equal(t, int64(9), got.APIKey.User.ID)
-}
-
-func TestAdminService_AdminResetAPIKeyRateLimitUsage_ReturnsResponseEdges(t *testing.T) {
-	start := time.Now()
-	existing := &APIKey{
-		ID: 1, UserID: 9, Key: "sk-test", GroupID: int64Ptr(5), User: &User{ID: 9}, Group: &Group{ID: 5},
-		Usage5h: 1, Usage1d: 2, Usage7d: 3, Window5hStart: &start, Window1dStart: &start, Window7dStart: &start,
-	}
-	repo := &apiKeyRepoStubForGroupUpdate{key: existing}
-	svc := &adminServiceImpl{apiKeyRepo: repo}
-
-	got, err := svc.AdminResetAPIKeyRateLimitUsage(context.Background(), existing.ID)
-	require.NoError(t, err)
-	require.Zero(t, got.Usage5h)
-	require.Nil(t, got.Window5hStart)
-	require.Equal(t, int64(9), got.User.ID)
-	require.Equal(t, *got.GroupID, got.Group.ID)
 }
 
 func TestAdminService_AdminUpdateAPIKeyGroupID_SameGroup_Idempotent(t *testing.T) {
@@ -512,9 +468,6 @@ func TestAdminService_AdminUpdateAPIKeyGroupID_ExclusiveGroup_AddsAllowedGroup(t
 	require.NotNil(t, got.GrantedGroupID)
 	require.Equal(t, int64(10), *got.GrantedGroupID)
 	require.Equal(t, "Exclusive", got.GrantedGroupName)
-	// 自动授权会影响该用户所有 Key 的认证快照，不能只失效当前 Key。
-	require.Equal(t, []int64{42}, cache.userIDs)
-	require.Empty(t, cache.keys)
 }
 
 func TestAdminService_AdminUpdateAPIKeyGroupID_NonExclusiveGroup_NoAllowedGroupUpdate(t *testing.T) {

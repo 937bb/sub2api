@@ -39,7 +39,7 @@ type ChannelMonitor struct {
 	GroupName       string
 	Enabled         bool
 	IntervalSeconds int
-	JitterSeconds   int
+	JitterSeconds   int // 每次调度 ± [0, jitter] 的随机偏移（秒），0 = 固定间隔
 	LastCheckedAt   *time.Time
 	CreatedBy       int64
 	CreatedAt       time.Time
@@ -50,6 +50,12 @@ type ChannelMonitor struct {
 	ExtraHeaders     map[string]string // 与 adapter 默认 headers 合并，用户优先
 	BodyOverrideMode string            // off / merge / replace
 	BodyOverride     map[string]any    // 仅 mode != off 时使用
+
+	// DuplicateOperationID is internal persistence metadata used to recover an
+	// already committed duplicate after an ambiguous idempotency-store failure.
+	// Repository implementations must keep it out of ExtraHeaders so it can
+	// never be serialized to clients or forwarded to an upstream provider.
+	DuplicateOperationID string
 
 	// APIKeyDecryptFailed 表示 APIKey 字段无法解密（密钥不一致或损坏）。
 	// 此时 APIKey 为空字符串，runner / RunCheck 必须跳过该监控并提示重填。

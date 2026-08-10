@@ -58,7 +58,7 @@ func hasToolResult(blocks []AnthropicContentBlock, toolUseID string) bool {
 
 func convertAnthropic(t *testing.T, input string) []AnthropicMessage {
 	t.Helper()
-	_, messages, err := convertResponsesInputToAnthropic(json.RawMessage(input))
+	_, messages, err := convertResponsesInputToAnthropic("", json.RawMessage(input))
 	require.NoError(t, err)
 	assertAnthropicPairing(t, messages)
 	return messages
@@ -164,33 +164,27 @@ func TestAnthropicPairing_SingleCall(t *testing.T) {
 	require.True(t, hasToolResult(parseContentBlocks(msgs[2].Content), "call_A"))
 }
 
-func TestResponsesInputToAnthropic_RejectsMalformedFunctionArguments(t *testing.T) {
-	for _, arguments := range []string{
-		`{"cmd":`,
-		`{"cmd":"pwd"}{"cmd":"ls"}`,
-	} {
-		t.Run(arguments, func(t *testing.T) {
-			input, err := json.Marshal([]ResponsesInputItem{{
-				Type:      "function_call",
-				CallID:    "call_bad",
-				Name:      "exec",
-				Arguments: arguments,
-			}})
-			require.NoError(t, err)
-
-			_, _, err = convertResponsesInputToAnthropic(input)
-			require.ErrorContains(t, err, `responses input item 0 function_call "call_bad" arguments: must be a valid JSON object:`)
-		})
-	}
-}
-
-func TestResponsesInputToAnthropic_AcceptsValidFunctionArguments(t *testing.T) {
+func TestResponsesToAnthropic_FunctionOutputContentArray(t *testing.T) {
 	msgs := convertAnthropic(t, `[
-		{"type":"function_call","call_id":"call_A","name":"exec","arguments":"{\"cmd\":\"pwd\"}"},
-		{"type":"function_call_output","call_id":"call_A","output":"ok"}
+		{"type":"function_call","call_id":"call_A","name":"view_image","arguments":"{}"},
+		{"type":"function_call_output","call_id":"call_A","output":[
+			{"type":"input_text","text":"image loaded"},
+			{"type":"input_image","image_url":"data:image/png;base64,YQ=="}
+		]}
 	]`)
 
-	blocks := parseContentBlocks(msgs[0].Content)
-	require.Len(t, blocks, 1)
-	require.JSONEq(t, `{"cmd":"pwd"}`, string(blocks[0].Input))
+	require.Len(t, msgs, 2)
+	resultBlocks := parseContentBlocks(msgs[1].Content)
+	require.Len(t, resultBlocks, 1)
+	require.Equal(t, "tool_result", resultBlocks[0].Type)
+
+	var content []AnthropicContentBlock
+	require.NoError(t, json.Unmarshal(resultBlocks[0].Content, &content))
+	require.Len(t, content, 2)
+	require.Equal(t, "text", content[0].Type)
+	require.Equal(t, "image loaded", content[0].Text)
+	require.Equal(t, "image", content[1].Type)
+	require.NotNil(t, content[1].Source)
+	require.Equal(t, "image/png", content[1].Source.MediaType)
+	require.Equal(t, "YQ==", content[1].Source.Data)
 }

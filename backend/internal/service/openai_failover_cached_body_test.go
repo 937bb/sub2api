@@ -111,8 +111,7 @@ func TestOpenAIGatewayService_Forward_FailoverReparsesCachedBodyForNextAccount(t
 }
 
 func TestOpenAIGatewayService_HandleFailoverSideEffects_DoesNotRereadResponseBody(t *testing.T) {
-	repo := &modelNotFoundAccountRepoStub{}
-	svc := &OpenAIGatewayService{rateLimitService: &RateLimitService{accountRepo: repo}}
+	svc := &OpenAIGatewayService{}
 	account := &Account{
 		ID:       88,
 		Platform: PlatformOpenAI,
@@ -123,15 +122,12 @@ func TestOpenAIGatewayService_HandleFailoverSideEffects_DoesNotRereadResponseBod
 		Header:     http.Header{},
 		Body:       panicOnReadCloser{},
 	}
-	body := []byte(`{"error":{"type":"rate_limit_exceeded","message":"Rate limit reached for gpt-image-2-codex (for limit gpt-image) on input-images per min. Please try again in 2s."}}`)
 
 	require.NotPanics(t, func() {
-		svc.handleFailoverSideEffects(context.Background(), resp, account, body)
+		svc.handleFailoverSideEffects(context.Background(), resp, account, []byte(`{"error":{"type":"rate_limit_error","message":"rate limited"}}`))
 	})
 
-	require.Len(t, repo.modelRateLimitCalls, 1)
-	require.Equal(t, account.ID, repo.modelRateLimitCalls[0].accountID)
-	require.Equal(t, openAIImageGenerationRateLimitKey, repo.modelRateLimitCalls[0].scope)
+	require.True(t, svc.isOpenAIAccountRuntimeBlocked(account))
 }
 
 func TestGetOpenAIRequestBodyMap_IgnoresLegacyContextCache(t *testing.T) {

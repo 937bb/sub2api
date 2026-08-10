@@ -19,7 +19,7 @@ func TestOpenAIWSProtocolResolver_Resolve(t *testing.T) {
 		Platform: PlatformOpenAI,
 		Type:     AccountTypeOAuth,
 		Extra: map[string]any{
-			"openai_oauth_ws_mode": OpenAIOAuthWSModeManagedSession,
+			"openai_oauth_responses_websockets_v2_enabled": true,
 		},
 	}
 
@@ -42,8 +42,8 @@ func TestOpenAIWSProtocolResolver_Resolve(t *testing.T) {
 	t.Run("透传开关不影响WS协议判定", func(t *testing.T) {
 		account := *openAIOAuthEnabled
 		account.Extra = map[string]any{
-			"openai_oauth_ws_mode": OpenAIOAuthWSModeManagedSession,
-			"openai_passthrough":   true,
+			"openai_oauth_responses_websockets_v2_enabled": true,
+			"openai_passthrough":                           true,
 		}
 		decision := NewOpenAIWSProtocolResolver(baseCfg).Resolve(&account)
 		require.Equal(t, OpenAIUpstreamTransportResponsesWebsocketV2, decision.Transport)
@@ -53,8 +53,8 @@ func TestOpenAIWSProtocolResolver_Resolve(t *testing.T) {
 	t.Run("账号级强制HTTP", func(t *testing.T) {
 		account := *openAIOAuthEnabled
 		account.Extra = map[string]any{
-			"openai_oauth_ws_mode": OpenAIOAuthWSModeManagedSession,
-			"openai_ws_force_http": true,
+			"openai_oauth_responses_websockets_v2_enabled": true,
+			"openai_ws_force_http":                         true,
 		}
 		decision := NewOpenAIWSProtocolResolver(baseCfg).Resolve(&account)
 		require.Equal(t, OpenAIUpstreamTransportHTTPSSE, decision.Transport)
@@ -72,7 +72,7 @@ func TestOpenAIWSProtocolResolver_Resolve(t *testing.T) {
 	t.Run("账号开关关闭保持HTTP", func(t *testing.T) {
 		account := *openAIOAuthEnabled
 		account.Extra = map[string]any{
-			"openai_oauth_ws_mode": OpenAIOAuthWSModeOff,
+			"openai_oauth_responses_websockets_v2_enabled": false,
 		}
 		decision := NewOpenAIWSProtocolResolver(baseCfg).Resolve(&account)
 		require.Equal(t, OpenAIUpstreamTransportHTTPSSE, decision.Transport)
@@ -89,30 +89,12 @@ func TestOpenAIWSProtocolResolver_Resolve(t *testing.T) {
 		require.Equal(t, "account_disabled", decision.Reason)
 	})
 
-	t.Run("OAuth不再继承通用旧键openai_ws_enabled", func(t *testing.T) {
+	t.Run("兼容旧键openai_ws_enabled", func(t *testing.T) {
 		account := *openAIOAuthEnabled
 		account.Extra = map[string]any{
 			"openai_ws_enabled": true,
 		}
 		decision := NewOpenAIWSProtocolResolver(baseCfg).Resolve(&account)
-		require.Equal(t, OpenAIUpstreamTransportHTTPSSE, decision.Transport)
-		require.Equal(t, "account_disabled", decision.Reason)
-	})
-
-	t.Run("SetupToken使用OAuth WS开关且不继承通用旧键", func(t *testing.T) {
-		account := &Account{
-			Platform: PlatformOpenAI,
-			Type:     AccountTypeSetupToken,
-			Extra: map[string]any{
-				"openai_ws_enabled": true,
-			},
-		}
-		decision := NewOpenAIWSProtocolResolver(baseCfg).Resolve(account)
-		require.Equal(t, OpenAIUpstreamTransportHTTPSSE, decision.Transport)
-		require.Equal(t, "account_disabled", decision.Reason)
-
-		account.Extra = map[string]any{"openai_oauth_ws_mode": OpenAIOAuthWSModeManagedSession}
-		decision = NewOpenAIWSProtocolResolver(baseCfg).Resolve(account)
 		require.Equal(t, OpenAIUpstreamTransportResponsesWebsocketV2, decision.Transport)
 		require.Equal(t, "ws_v2_enabled", decision.Reason)
 	})
@@ -168,7 +150,7 @@ func TestOpenAIWSProtocolResolver_Resolve_ModeRouterV2(t *testing.T) {
 		Type:        AccountTypeOAuth,
 		Concurrency: 1,
 		Extra: map[string]any{
-			"openai_oauth_ws_mode": OpenAIOAuthWSModeManagedSession,
+			"openai_oauth_responses_websockets_v2_mode": OpenAIWSIngressModeCtxPool,
 		},
 	}
 
@@ -184,7 +166,7 @@ func TestOpenAIWSProtocolResolver_Resolve_ModeRouterV2(t *testing.T) {
 			Type:        AccountTypeOAuth,
 			Concurrency: 1,
 			Extra: map[string]any{
-				"openai_oauth_ws_mode": OpenAIOAuthWSModeOff,
+				"openai_oauth_responses_websockets_v2_mode": OpenAIWSIngressModeOff,
 			},
 		}
 		decision := NewOpenAIWSProtocolResolver(cfg).Resolve(offAccount)
@@ -206,7 +188,7 @@ func TestOpenAIWSProtocolResolver_Resolve_ModeRouterV2(t *testing.T) {
 		require.Equal(t, "ws_v2_mode_ctx_pool", decision.Reason)
 	})
 
-	t.Run("OAuth legacy passthrough mode no longer routes runtime", func(t *testing.T) {
+	t.Run("passthrough mode routes to ws v2", func(t *testing.T) {
 		passthroughAccount := &Account{
 			Platform:    PlatformOpenAI,
 			Type:        AccountTypeOAuth,
@@ -216,35 +198,22 @@ func TestOpenAIWSProtocolResolver_Resolve_ModeRouterV2(t *testing.T) {
 			},
 		}
 		decision := NewOpenAIWSProtocolResolver(cfg).Resolve(passthroughAccount)
-		require.Equal(t, OpenAIUpstreamTransportHTTPSSE, decision.Transport)
-		require.Equal(t, "account_mode_off", decision.Reason)
+		require.Equal(t, OpenAIUpstreamTransportResponsesWebsocketV2, decision.Transport)
+		require.Equal(t, "ws_v2_mode_passthrough", decision.Reason)
 	})
 
-	t.Run("OAuth nil extra缺少迁移后mode时关闭WS", func(t *testing.T) {
-		cfgWithPassthroughDefault := *cfg
-		cfgWithPassthroughDefault.Gateway.OpenAIWS.IngressModeDefault = OpenAIWSIngressModePassthrough
-		passthroughAccount := &Account{
+	t.Run("http_bridge mode routes to http_sse", func(t *testing.T) {
+		httpBridgeAccount := &Account{
 			Platform:    PlatformOpenAI,
 			Type:        AccountTypeOAuth,
 			Concurrency: 1,
-		}
-		decision := NewOpenAIWSProtocolResolver(&cfgWithPassthroughDefault).Resolve(passthroughAccount)
-		require.Equal(t, OpenAIUpstreamTransportHTTPSSE, decision.Transport)
-		require.Equal(t, "account_mode_off", decision.Reason)
-	})
-
-	t.Run("APIKey passthrough mode still routes to native relay", func(t *testing.T) {
-		passthroughAccount := &Account{
-			Platform:    PlatformOpenAI,
-			Type:        AccountTypeAPIKey,
-			Concurrency: 1,
 			Extra: map[string]any{
-				"openai_apikey_responses_websockets_v2_mode": OpenAIWSIngressModePassthrough,
+				"openai_oauth_responses_websockets_v2_mode": OpenAIWSIngressModeHTTPBridge,
 			},
 		}
-		decision := NewOpenAIWSProtocolResolver(cfg).Resolve(passthroughAccount)
-		require.Equal(t, OpenAIUpstreamTransportResponsesWebsocketV2, decision.Transport)
-		require.Equal(t, "ws_v2_mode_passthrough", decision.Reason)
+		decision := NewOpenAIWSProtocolResolver(cfg).Resolve(httpBridgeAccount)
+		require.Equal(t, OpenAIUpstreamTransportHTTPSSE, decision.Transport)
+		require.Equal(t, "ws_v2_mode_http_bridge", decision.Reason)
 	})
 
 	t.Run("non-positive concurrency is rejected in v2 router", func(t *testing.T) {
@@ -252,7 +221,7 @@ func TestOpenAIWSProtocolResolver_Resolve_ModeRouterV2(t *testing.T) {
 			Platform: PlatformOpenAI,
 			Type:     AccountTypeOAuth,
 			Extra: map[string]any{
-				"openai_oauth_ws_mode": OpenAIOAuthWSModeManagedSession,
+				"openai_oauth_responses_websockets_v2_mode": OpenAIWSIngressModeCtxPool,
 			},
 		}
 		decision := NewOpenAIWSProtocolResolver(cfg).Resolve(invalidConcurrency)

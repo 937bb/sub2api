@@ -1,6 +1,6 @@
 import { i18n } from '@/i18n'
-import type { CustomMenuItem } from '@/types'
 import type { RouteLocationNormalizedLoaded } from 'vue-router'
+import type { CustomMenuItem } from '@/types'
 
 /**
  * 统一生成页面标题，避免多处写入 document.title 产生覆盖冲突。
@@ -34,9 +34,5 @@ export function resolveRouteDocumentTitle(
     : undefined
   const menuTitle = menuItem?.label.trim()
 
-  return resolveDocumentTitle(
-    menuTitle || route.meta.title,
-    siteName,
-    menuTitle ? undefined : route.meta.titleKey as string,
-  )
+  return resolveDocumentTitle(menuTitle || route.meta.title, siteName, menuTitle ? undefined : route.meta.titleKey as string)
 }

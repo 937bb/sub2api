@@ -4,7 +4,8 @@ package repository
 
 import (
 	"context"
-	"fmt"
+	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -34,7 +35,6 @@ func (s *UserRepoSuite) SetupTest() {
 	_, _ = integrationDB.ExecContext(s.ctx, "DELETE FROM auth_identities")
 	_, _ = integrationDB.ExecContext(s.ctx, "DELETE FROM user_subscriptions")
 	_, _ = integrationDB.ExecContext(s.ctx, "DELETE FROM user_allowed_groups")
-	_, _ = integrationDB.ExecContext(s.ctx, "DELETE FROM api_keys")
 	_, _ = integrationDB.ExecContext(s.ctx, "DELETE FROM users")
 }
 
@@ -63,6 +63,44 @@ func (s *UserRepoSuite) mustCreateUser(u *service.User) *service.User {
 
 	s.Require().NoError(s.repo.Create(s.ctx, u), "create user")
 	return u
+}
+
+func (s *UserRepoSuite) TestCreateWithEmailAliasGuardAndDomainLimitConcurrent() {
+	domain := "race-" + strings.ToLower(strings.ReplaceAll(time.Now().Format("150405.000000000"), ".", "")) + ".example"
+	users := []*service.User{
+		{Email: "first@" + domain, PasswordHash: "hash", Role: service.RoleUser, Status: service.StatusActive},
+		{Email: "second@" + domain, PasswordHash: "hash", Role: service.RoleUser, Status: service.StatusActive},
+	}
+
+	errs := make(chan error, len(users))
+	var wg sync.WaitGroup
+	for _, user := range users {
+		wg.Add(1)
+		go func(user *service.User) {
+			defer wg.Done()
+			errs <- s.repo.CreateWithEmailAliasGuardAndDomainLimit(s.ctx, user, domain)
+		}(user)
+	}
+	wg.Wait()
+	close(errs)
+
+	var success, limited int
+	for err := range errs {
+		switch {
+		case err == nil:
+			success++
+		case errors.Is(err, service.ErrEmailDomainRegistrationLimit):
+			limited++
+		default:
+			s.Require().NoError(err)
+		}
+	}
+	s.Require().Equal(1, success)
+	s.Require().Equal(1, limited)
+
+	count, err := s.repo.CountUsersByEmailDomain(s.ctx, domain)
+	s.Require().NoError(err)
+	s.Require().Equal(1, count)
 }
 
 func (s *UserRepoSuite) mustCreateGroup(name string) *service.Group {
@@ -156,11 +194,65 @@ func (s *UserRepoSuite) TestUpdate() {
 	got, err := s.repo.GetByID(s.ctx, user.ID)
 	s.Require().NoError(err)
 	got.Username = "updated"
-	s.Require().NoError(s.repo.Update(s.ctx, got), "Update")
+	s.Require().NoError(s.repo.Update(s.ctx, got, service.UserUpdateFields{Username: true}), "Update")
 
 	updated, err := s.repo.GetByID(s.ctx, user.ID)
 	s.Require().NoError(err, "GetByID after update")
 	s.Require().Equal("updated", updated.Username)
+}
+
+func (s *UserRepoSuite) TestBatchUpdateLimitsUpdatesOnlyProvidedFields() {
+	user := s.mustCreateUser(&service.User{
+		Email:       "batch-limits-one-field@test.com",
+		Concurrency: 4,
+		RPMLimit:    20,
+	})
+	concurrency := 9
+
+	affected, err := s.repo.BatchUpdateLimits(s.ctx, []int64{user.ID}, &concurrency, nil)
+	s.Require().NoError(err)
+	s.Equal(1, affected)
+
+	updated, err := s.repo.GetByID(s.ctx, user.ID)
+	s.Require().NoError(err)
+	s.Equal(9, updated.Concurrency)
+	s.Equal(20, updated.RPMLimit)
+}
+
+func (s *UserRepoSuite) TestBatchUpdateLimitsUpdatesBothFieldsToZero() {
+	user := s.mustCreateUser(&service.User{
+		Email:       "batch-limits-zero@test.com",
+		Concurrency: 4,
+		RPMLimit:    20,
+	})
+	zero := 0
+
+	affected, err := s.repo.BatchUpdateLimits(s.ctx, []int64{user.ID}, &zero, &zero)
+	s.Require().NoError(err)
+	s.Equal(1, affected)
+
+	updated, err := s.repo.GetByID(s.ctx, user.ID)
+	s.Require().NoError(err)
+	s.Zero(updated.Concurrency)
+	s.Zero(updated.RPMLimit)
+}
+
+func (s *UserRepoSuite) TestBatchUpdateLimitsIgnoresDeletedUsersAndReturnsAffectedRows() {
+	active := s.mustCreateUser(&service.User{Email: "batch-limits-active@test.com", RPMLimit: 10})
+	deleted := s.mustCreateUser(&service.User{Email: "batch-limits-deleted@test.com", RPMLimit: 10})
+	s.Require().NoError(s.client.User.DeleteOneID(deleted.ID).Exec(s.ctx))
+	rpmLimit := 45
+
+	affected, err := s.repo.BatchUpdateLimits(s.ctx, []int64{active.ID, deleted.ID}, nil, &rpmLimit)
+	s.Require().NoError(err)
+	s.Equal(1, affected)
+
+	updatedActive, err := s.repo.GetByID(s.ctx, active.ID)
+	s.Require().NoError(err)
+	s.Equal(45, updatedActive.RPMLimit)
+	updatedDeleted, err := s.repo.GetByIDIncludeDeleted(s.ctx, deleted.ID)
+	s.Require().NoError(err)
+	s.Equal(10, updatedDeleted.RPMLimit)
 }
 
 func (s *UserRepoSuite) TestUpdateIgnoresNoRowsFromConflictingEmailIdentityUpsert() {
@@ -180,7 +272,7 @@ func (s *UserRepoSuite) TestUpdateIgnoresNoRowsFromConflictingEmailIdentityUpser
 	got, err := s.repo.GetByID(s.ctx, user.ID)
 	s.Require().NoError(err)
 	got.Username = "updated"
-	s.Require().NoError(s.repo.Update(s.ctx, got), "Update should tolerate ON CONFLICT DO NOTHING returning no rows")
+	s.Require().NoError(s.repo.Update(s.ctx, got, service.UserUpdateFields{Username: true}), "Update should tolerate ON CONFLICT DO NOTHING returning no rows")
 
 	updated, err := s.repo.GetByID(s.ctx, user.ID)
 	s.Require().NoError(err)
@@ -332,102 +424,6 @@ func (s *UserRepoSuite) TestListWithFilters_CombinedFilters() {
 	s.Require().Equal(target.ID, users[0].ID, "ListWithFilters result mismatch")
 }
 
-func (s *UserRepoSuite) TestListWithFilters_APIKeyGroupID() {
-	group := s.mustCreateGroup(s.uniqueGroupName("api-key-target"))
-	otherGroup := s.mustCreateGroup(s.uniqueGroupName("api-key-other"))
-	target := s.mustCreateUser(&service.User{Email: s.uniqueEmail("api-key-target")})
-	miss := s.mustCreateUser(&service.User{Email: s.uniqueEmail("api-key-miss")})
-
-	mustCreateApiKey(s.T(), s.client, &service.APIKey{UserID: target.ID, Key: s.uniqueAPIKey("target"), Name: "target", GroupID: &group.ID})
-	mustCreateApiKey(s.T(), s.client, &service.APIKey{UserID: miss.ID, Key: s.uniqueAPIKey("miss"), Name: "miss", GroupID: &otherGroup.ID})
-
-	users, page, err := s.repo.ListWithFilters(s.ctx, pagination.PaginationParams{Page: 1, PageSize: 10}, service.UserListFilters{APIKeyGroupID: group.ID})
-	s.Require().NoError(err)
-	s.Require().Equal(int64(1), page.Total)
-	s.Require().Len(users, 1)
-	s.Require().Equal(target.ID, users[0].ID)
-}
-
-func (s *UserRepoSuite) TestListWithFilters_APIKeyGroupIDExcludesSoftDeletedKeys() {
-	group := s.mustCreateGroup(s.uniqueGroupName("api-key-soft"))
-	user := s.mustCreateUser(&service.User{Email: s.uniqueEmail("api-key-soft")})
-	key := mustCreateApiKey(s.T(), s.client, &service.APIKey{UserID: user.ID, Key: s.uniqueAPIKey("soft"), Name: "soft", GroupID: &group.ID})
-
-	s.Require().NoError(s.client.APIKey.DeleteOneID(key.ID).Exec(s.ctx), "soft-delete api key")
-
-	users, page, err := s.repo.ListWithFilters(s.ctx, pagination.PaginationParams{Page: 1, PageSize: 10}, service.UserListFilters{APIKeyGroupID: group.ID})
-	s.Require().NoError(err)
-	s.Require().Zero(page.Total)
-	s.Require().Empty(users)
-}
-
-func (s *UserRepoSuite) TestListWithFilters_APIKeyGroupIDDeduplicatesUsersWithMultipleKeys() {
-	group := s.mustCreateGroup(s.uniqueGroupName("api-key-dedup"))
-	user := s.mustCreateUser(&service.User{Email: s.uniqueEmail("api-key-dedup")})
-
-	mustCreateApiKey(s.T(), s.client, &service.APIKey{UserID: user.ID, Key: s.uniqueAPIKey("dedup-a"), Name: "dedup-a", GroupID: &group.ID})
-	mustCreateApiKey(s.T(), s.client, &service.APIKey{UserID: user.ID, Key: s.uniqueAPIKey("dedup-b"), Name: "dedup-b", GroupID: &group.ID})
-
-	users, page, err := s.repo.ListWithFilters(s.ctx, pagination.PaginationParams{Page: 1, PageSize: 10}, service.UserListFilters{APIKeyGroupID: group.ID})
-	s.Require().NoError(err)
-	s.Require().Equal(int64(1), page.Total)
-	s.Require().Len(users, 1)
-	s.Require().Equal(user.ID, users[0].ID)
-}
-
-func (s *UserRepoSuite) TestListWithFilters_APIKeyGroupIDCombinesWithStatus() {
-	group := s.mustCreateGroup(s.uniqueGroupName("api-key-status"))
-	active := s.mustCreateUser(&service.User{Email: s.uniqueEmail("api-key-active"), Status: service.StatusActive})
-	disabled := s.mustCreateUser(&service.User{Email: s.uniqueEmail("api-key-disabled"), Status: service.StatusDisabled})
-
-	mustCreateApiKey(s.T(), s.client, &service.APIKey{UserID: active.ID, Key: s.uniqueAPIKey("active"), Name: "active", GroupID: &group.ID})
-	mustCreateApiKey(s.T(), s.client, &service.APIKey{UserID: disabled.ID, Key: s.uniqueAPIKey("disabled"), Name: "disabled", GroupID: &group.ID})
-
-	users, page, err := s.repo.ListWithFilters(s.ctx, pagination.PaginationParams{Page: 1, PageSize: 10}, service.UserListFilters{APIKeyGroupID: group.ID, Status: service.StatusActive})
-	s.Require().NoError(err)
-	s.Require().Equal(int64(1), page.Total)
-	s.Require().Len(users, 1)
-	s.Require().Equal(active.ID, users[0].ID)
-}
-
-func (s *UserRepoSuite) TestListWithFilters_APIKeyGroupIDZeroDoesNotFilter() {
-	group := s.mustCreateGroup(s.uniqueGroupName("api-key-zero"))
-	withKey := s.mustCreateUser(&service.User{Email: s.uniqueEmail("api-key-zero-with")})
-	withoutKey := s.mustCreateUser(&service.User{Email: s.uniqueEmail("api-key-zero-without")})
-	mustCreateApiKey(s.T(), s.client, &service.APIKey{UserID: withKey.ID, Key: s.uniqueAPIKey("zero"), Name: "zero", GroupID: &group.ID})
-
-	users, page, err := s.repo.ListWithFilters(s.ctx, pagination.PaginationParams{Page: 1, PageSize: 10}, service.UserListFilters{APIKeyGroupID: 0})
-	s.Require().NoError(err)
-	s.Require().GreaterOrEqual(page.Total, int64(2))
-	s.Require().ElementsMatch([]int64{withKey.ID, withoutKey.ID}, filterUserIDs(users, withKey.ID, withoutKey.ID))
-}
-
-func (s *UserRepoSuite) uniqueEmail(prefix string) string {
-	return fmt.Sprintf("%s-%d@example.com", prefix, time.Now().UnixNano())
-}
-
-func (s *UserRepoSuite) uniqueGroupName(prefix string) string {
-	return fmt.Sprintf("%s-%d", prefix, time.Now().UnixNano())
-}
-
-func (s *UserRepoSuite) uniqueAPIKey(prefix string) string {
-	return fmt.Sprintf("sk-%s-%d", prefix, time.Now().UnixNano())
-}
-
-func filterUserIDs(users []service.User, ids ...int64) []int64 {
-	wanted := make(map[int64]struct{}, len(ids))
-	for _, id := range ids {
-		wanted[id] = struct{}{}
-	}
-	out := make([]int64, 0, len(ids))
-	for _, user := range users {
-		if _, ok := wanted[user.ID]; ok {
-			out = append(out, user.ID)
-		}
-	}
-	return out
-}
-
 // --- Balance operations ---
 
 func (s *UserRepoSuite) TestUpdateBalance() {
@@ -521,6 +517,30 @@ func (s *UserRepoSuite) TestDeductBalance_AllowsOverdraft() {
 	got, err := s.repo.GetByID(s.ctx, user.ID)
 	s.Require().NoError(err)
 	s.Require().InDelta(-5.0, got.Balance, 1e-6, "Balance should be -5.0 after overdraft")
+}
+
+func (s *UserRepoSuite) TestDeductAvailableBalance_ClampsToNonnegativeBalance() {
+	for _, tc := range []struct {
+		name        string
+		balance     float64
+		requested   float64
+		wantDeduct  float64
+		wantBalance float64
+	}{
+		{name: "enough balance", balance: 10, requested: 4, wantDeduct: 4, wantBalance: 6},
+		{name: "insufficient balance", balance: 5, requested: 10, wantDeduct: 5, wantBalance: 0},
+		{name: "negative balance unchanged", balance: -3, requested: 10, wantDeduct: 0, wantBalance: -3},
+	} {
+		s.Run(tc.name, func() {
+			user := s.mustCreateUser(&service.User{Email: "available-" + strings.ReplaceAll(tc.name, " ", "-") + "@test.com", Balance: tc.balance})
+			deducted, err := s.repo.DeductAvailableBalance(s.ctx, user.ID, tc.requested)
+			s.Require().NoError(err)
+			s.Require().InDelta(tc.wantDeduct, deducted, 1e-6)
+			got, err := s.repo.GetByID(s.ctx, user.ID)
+			s.Require().NoError(err)
+			s.Require().InDelta(tc.wantBalance, got.Balance, 1e-6)
+		})
+	}
 }
 
 // --- Concurrency ---
@@ -702,7 +722,7 @@ func (s *UserRepoSuite) TestCRUD_And_Filters_And_AtomicUpdates() {
 	s.Require().Equal(user2.ID, gotByEmail.ID, "GetByEmail ID mismatch")
 
 	got.Username = "Alice2"
-	s.Require().NoError(s.repo.Update(s.ctx, got), "Update")
+	s.Require().NoError(s.repo.Update(s.ctx, got, service.UserUpdateFields{Username: true}), "Update")
 	got2, err := s.repo.GetByID(s.ctx, user1.ID)
 	s.Require().NoError(err, "GetByID after update")
 	s.Require().Equal("Alice2", got2.Username, "Update did not persist")

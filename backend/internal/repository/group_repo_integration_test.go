@@ -6,10 +6,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 	"strings"
 	"testing"
-	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
@@ -49,134 +47,7 @@ func TestGroupRepoSuite(t *testing.T) {
 	suite.Run(t, new(GroupRepoSuite))
 }
 
-func (s *GroupRepoSuite) uniqueGroupName(prefix string) string {
-	name := strings.ReplaceAll(s.T().Name(), "/", "-")
-	suffix := fmt.Sprintf("-%d", time.Now().UnixNano())
-	maxNameLen := 100 - len(prefix) - len(suffix) - 1
-	if len(name) > maxNameLen {
-		name = name[:maxNameLen]
-	}
-	return fmt.Sprintf("%s-%s%s", prefix, name, suffix)
-}
-
-func groupIDs(groups []service.Group) []int64 {
-	ids := make([]int64, 0, len(groups))
-	for _, group := range groups {
-		ids = append(ids, group.ID)
-	}
-	return ids
-}
-
 // --- Create / GetByID / Update / Delete ---
-
-func (s *GroupRepoSuite) TestCreate_RollbackKeepsGroupAndOutboxAtomic() {
-	client := testEntClient(s.T())
-	repo := newGroupRepositoryWithSQL(client, integrationDB)
-	_, err := integrationDB.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
-	s.Require().NoError(err)
-	tx, err := client.Tx(s.ctx)
-	s.Require().NoError(err)
-	txCtx := dbent.NewTxContext(s.ctx, tx)
-	groupIn := &service.Group{
-		Name:     s.uniqueGroupName("create-rollback"),
-		Platform: service.PlatformOpenAI,
-		Status:   service.StatusActive,
-	}
-
-	s.Require().NoError(repo.Create(txCtx, groupIn))
-	s.Require().Positive(groupIn.ID)
-	s.Require().NoError(tx.Rollback())
-
-	var groupCount, outboxCount int
-	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, "SELECT count(*) FROM groups WHERE id = $1", groupIn.ID).Scan(&groupCount))
-	s.Require().Zero(groupCount)
-	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, "SELECT count(*) FROM scheduler_outbox").Scan(&outboxCount))
-	s.Require().Zero(outboxCount)
-}
-
-func (s *GroupRepoSuite) TestUpdate_RollbackKeepsGroupAndOutboxAtomic() {
-	client := testEntClient(s.T())
-	name := s.uniqueGroupName("update-rollback")
-	var groupID int64
-	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, `INSERT INTO groups(name, platform, status) VALUES($1, 'openai', 'active') RETURNING id`, name).Scan(&groupID))
-	s.T().Cleanup(func() {
-		_, _ = integrationDB.ExecContext(context.Background(), "DELETE FROM groups WHERE id = $1", groupID)
-	})
-	repo := newGroupRepositoryWithSQL(client, integrationDB)
-	_, err := integrationDB.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
-	s.Require().NoError(err)
-	tx, err := client.Tx(s.ctx)
-	s.Require().NoError(err)
-	txCtx := dbent.NewTxContext(s.ctx, tx)
-	groupIn := &service.Group{
-		ID:       groupID,
-		Name:     s.uniqueGroupName("updated"),
-		Platform: service.PlatformOpenAI,
-		Status:   service.StatusActive,
-	}
-
-	s.Require().NoError(repo.Update(txCtx, groupIn))
-	s.Require().NoError(tx.Rollback())
-
-	var gotName string
-	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, "SELECT name FROM groups WHERE id = $1", groupID).Scan(&gotName))
-	s.Require().Equal(name, gotName)
-	var outboxCount int
-	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, "SELECT count(*) FROM scheduler_outbox").Scan(&outboxCount))
-	s.Require().Zero(outboxCount)
-}
-
-func (s *GroupRepoSuite) TestDelete_RollbackKeepsGroupAndOutboxAtomic() {
-	client := testEntClient(s.T())
-	name := s.uniqueGroupName("delete-rollback")
-	var groupID int64
-	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, `INSERT INTO groups(name, platform, status) VALUES($1, 'openai', 'active') RETURNING id`, name).Scan(&groupID))
-	s.T().Cleanup(func() {
-		_, _ = integrationDB.ExecContext(context.Background(), "DELETE FROM groups WHERE id = $1", groupID)
-	})
-	repo := newGroupRepositoryWithSQL(client, integrationDB)
-	_, err := integrationDB.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
-	s.Require().NoError(err)
-	tx, err := client.Tx(s.ctx)
-	s.Require().NoError(err)
-	txCtx := dbent.NewTxContext(s.ctx, tx)
-
-	s.Require().NoError(repo.Delete(txCtx, groupID))
-	s.Require().NoError(tx.Rollback())
-
-	var groupCount, outboxCount int
-	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, "SELECT count(*) FROM groups WHERE id = $1", groupID).Scan(&groupCount))
-	s.Require().Equal(1, groupCount)
-	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, "SELECT count(*) FROM scheduler_outbox").Scan(&outboxCount))
-	s.Require().Zero(outboxCount)
-}
-
-func (s *GroupRepoSuite) TestDeleteCascade_RollbackKeepsGroupAndOutboxAtomic() {
-	client := testEntClient(s.T())
-	name := s.uniqueGroupName("cascade-rollback")
-	var groupID int64
-	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, `INSERT INTO groups(name, platform, status) VALUES($1, 'openai', 'active') RETURNING id`, name).Scan(&groupID))
-	s.T().Cleanup(func() {
-		_, _ = integrationDB.ExecContext(context.Background(), "DELETE FROM groups WHERE id = $1", groupID)
-	})
-	repo := newGroupRepositoryWithSQL(client, integrationDB)
-	_, err := integrationDB.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
-	s.Require().NoError(err)
-	tx, err := client.Tx(s.ctx)
-	s.Require().NoError(err)
-	txCtx := dbent.NewTxContext(s.ctx, tx)
-
-	_, err = repo.DeleteCascade(txCtx, groupID)
-	s.Require().NoError(err)
-	s.Require().NoError(tx.Rollback())
-
-	var deletedAt sql.NullTime
-	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, "SELECT deleted_at FROM groups WHERE id = $1", groupID).Scan(&deletedAt))
-	s.Require().False(deletedAt.Valid)
-	var outboxCount int
-	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, "SELECT count(*) FROM scheduler_outbox").Scan(&outboxCount))
-	s.Require().Zero(outboxCount)
-}
 
 func (s *GroupRepoSuite) TestCreate() {
 	group := &service.Group{
@@ -195,6 +66,91 @@ func (s *GroupRepoSuite) TestCreate() {
 	got, err := s.repo.GetByID(s.ctx, group.ID)
 	s.Require().NoError(err, "GetByID")
 	s.Require().Equal("test-create", got.Name)
+}
+
+func (s *GroupRepoSuite) TestCreateFromSourcePreservesPriorityAndFiltersIneligibleAccounts() {
+	source := &service.Group{
+		Name:             "duplicate-source",
+		Platform:         service.PlatformOpenAI,
+		RateMultiplier:   1,
+		Status:           service.StatusActive,
+		SubscriptionType: service.SubscriptionTypeStandard,
+		RequireOAuthOnly: true,
+	}
+	s.Require().NoError(s.repo.Create(s.ctx, source))
+
+	insertAccount := func(name, accountType string, deleted bool) int64 {
+		var id int64
+		deletedAt := any(nil)
+		if deleted {
+			deletedAt = "2026-07-16T00:00:00Z"
+		}
+		s.Require().NoError(scanSingleRow(
+			s.ctx,
+			s.tx,
+			"INSERT INTO accounts (name, platform, type, deleted_at) VALUES ($1, $2, $3, $4) RETURNING id",
+			[]any{name, service.PlatformOpenAI, accountType, deletedAt},
+			&id,
+		))
+		return id
+	}
+	oauthID := insertAccount("duplicate-oauth", service.AccountTypeOAuth, false)
+	apiKeyID := insertAccount("duplicate-apikey", service.AccountTypeAPIKey, false)
+	deletedID := insertAccount("duplicate-deleted", service.AccountTypeOAuth, true)
+	for _, binding := range []struct {
+		accountID int64
+		priority  int
+	}{{oauthID, 37}, {apiKeyID, 8}, {deletedID, 3}} {
+		_, err := s.tx.ExecContext(
+			s.ctx,
+			"INSERT INTO account_groups (account_id, group_id, priority, created_at) VALUES ($1, $2, $3, NOW())",
+			binding.accountID,
+			source.ID,
+			binding.priority,
+		)
+		s.Require().NoError(err)
+	}
+
+	duplicate := &service.Group{
+		Name:                 "duplicate-source (Copy)",
+		Platform:             source.Platform,
+		RateMultiplier:       source.RateMultiplier,
+		Status:               "inactive",
+		SubscriptionType:     source.SubscriptionType,
+		RequireOAuthOnly:     true,
+		DuplicateOperationID: strings.Repeat("a", 64),
+	}
+	s.Require().NoError(s.repo.CreateFromSource(s.ctx, duplicate, source.ID))
+	s.Require().EqualValues(1, duplicate.AccountCount)
+
+	rows, err := s.tx.QueryContext(
+		s.ctx,
+		"SELECT account_id, priority FROM account_groups WHERE group_id = $1 ORDER BY account_id",
+		duplicate.ID,
+	)
+	s.Require().NoError(err)
+	defer func() { _ = rows.Close() }()
+	s.Require().True(rows.Next())
+	var copiedAccountID int64
+	var copiedPriority int
+	s.Require().NoError(rows.Scan(&copiedAccountID, &copiedPriority))
+	s.Require().Equal(oauthID, copiedAccountID)
+	s.Require().Equal(37, copiedPriority)
+	s.Require().False(rows.Next(), "API-key and soft-deleted accounts must not be copied")
+
+	recovered, err := s.repo.FindByDuplicateOperationID(s.ctx, duplicate.DuplicateOperationID)
+	s.Require().NoError(err)
+	s.Require().Equal(duplicate.ID, recovered.ID)
+
+	var outboxCount int
+	s.Require().NoError(scanSingleRow(
+		s.ctx,
+		s.tx,
+		"SELECT COUNT(*) FROM scheduler_outbox WHERE group_id = $1",
+		[]any{duplicate.ID},
+		&outboxCount,
+	))
+	s.Require().Equal(1, outboxCount)
 }
 
 func (s *GroupRepoSuite) TestGetByID_NotFound() {
@@ -379,48 +335,6 @@ func (s *GroupRepoSuite) TestListWithFilters_Status() {
 	s.Require().Equal(service.StatusDisabled, groups[0].Status)
 }
 
-func (s *GroupRepoSuite) TestListAllIncludingInactive_PlatformScoped() {
-	activeOpenAI := &service.Group{
-		Name:             s.uniqueGroupName("all-active-openai"),
-		Platform:         service.PlatformOpenAI,
-		RateMultiplier:   1.0,
-		Status:           service.StatusActive,
-		SubscriptionType: service.SubscriptionTypeStandard,
-	}
-	inactiveOpenAI := &service.Group{
-		Name:             s.uniqueGroupName("all-inactive-openai"),
-		Platform:         service.PlatformOpenAI,
-		RateMultiplier:   1.0,
-		Status:           service.StatusDisabled,
-		SubscriptionType: service.SubscriptionTypeStandard,
-	}
-	inactiveAnthropic := &service.Group{
-		Name:             s.uniqueGroupName("all-inactive-anthropic"),
-		Platform:         service.PlatformAnthropic,
-		RateMultiplier:   1.0,
-		Status:           service.StatusDisabled,
-		SubscriptionType: service.SubscriptionTypeStandard,
-	}
-	s.Require().NoError(s.repo.Create(s.ctx, activeOpenAI))
-	s.Require().NoError(s.repo.Create(s.ctx, inactiveOpenAI))
-	s.Require().NoError(s.repo.Create(s.ctx, inactiveAnthropic))
-
-	groups, err := s.repo.ListAllIncludingInactive(s.ctx, service.PlatformOpenAI)
-	s.Require().NoError(err)
-	ids := groupIDs(groups)
-	s.Require().Contains(ids, activeOpenAI.ID)
-	s.Require().Contains(ids, inactiveOpenAI.ID)
-	s.Require().NotContains(ids, inactiveAnthropic.ID)
-	for _, group := range groups {
-		s.Require().Equal(service.PlatformOpenAI, group.Platform)
-	}
-
-	groups, err = s.repo.ListAllIncludingInactive(s.ctx, "")
-	s.Require().NoError(err)
-	ids = groupIDs(groups)
-	s.Require().Contains(ids, inactiveAnthropic.ID)
-}
-
 func (s *GroupRepoSuite) TestListWithFilters_IsExclusive() {
 	s.Require().NoError(s.repo.Create(s.ctx, &service.Group{
 		Name:             "g1",
@@ -549,31 +463,6 @@ func (s *GroupRepoSuite) TestListWithFilters_Search() {
 		s.Require().True(containsID(groups, underscoreTarget.ID), "expected literal _ match")
 		s.Require().False(containsID(groups, underscoreOther.ID), "expected _ not to act as wildcard")
 	})
-}
-
-func (s *GroupRepoSuite) TestUpdateSortOrders_RollbackKeepsOrderAndOutboxAtomic() {
-	client := testEntClient(s.T())
-	name := s.uniqueGroupName("sort-rollback")
-	var groupID int64
-	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, `INSERT INTO groups(name, platform, status, sort_order) VALUES($1, 'openai', 'active', 7) RETURNING id`, name).Scan(&groupID))
-	s.T().Cleanup(func() {
-		_, _ = integrationDB.ExecContext(context.Background(), "DELETE FROM groups WHERE id = $1", groupID)
-	})
-	_, err := integrationDB.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
-	s.Require().NoError(err)
-	repo := newGroupRepositoryWithSQL(client, integrationDB)
-	tx, err := client.Tx(s.ctx)
-	s.Require().NoError(err)
-	txCtx := dbent.NewTxContext(s.ctx, tx)
-
-	s.Require().NoError(repo.UpdateSortOrders(txCtx, []service.GroupSortOrderUpdate{{ID: groupID, SortOrder: 99}}))
-	s.Require().NoError(tx.Rollback())
-
-	var sortOrder, outboxCount int
-	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, "SELECT sort_order FROM groups WHERE id = $1", groupID).Scan(&sortOrder))
-	s.Require().Equal(7, sortOrder)
-	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, "SELECT count(*) FROM scheduler_outbox").Scan(&outboxCount))
-	s.Require().Zero(outboxCount)
 }
 
 func (s *GroupRepoSuite) TestUpdateSortOrders_BatchCaseWhen() {
@@ -1007,66 +896,6 @@ func (s *GroupRepoSuite) TestListWithFilters_RateLimitedAccountCount() {
 }
 
 // --- DeleteAccountGroupsByGroupID ---
-
-func (s *GroupRepoSuite) TestDeleteAccountGroupsByGroupID_RollbackKeepsMembershipAndOutboxAtomic() {
-	client := testEntClient(s.T())
-	name := s.uniqueGroupName("unbind-rollback")
-	var groupID, accountID int64
-	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, `INSERT INTO groups(name, platform, status) VALUES($1, 'openai', 'active') RETURNING id`, name).Scan(&groupID))
-	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, `INSERT INTO accounts(name, platform, type) VALUES($1, 'openai', 'oauth') RETURNING id`, name).Scan(&accountID))
-	s.T().Cleanup(func() {
-		_, _ = integrationDB.ExecContext(context.Background(), "DELETE FROM account_groups WHERE account_id = $1", accountID)
-		_, _ = integrationDB.ExecContext(context.Background(), "DELETE FROM accounts WHERE id = $1", accountID)
-		_, _ = integrationDB.ExecContext(context.Background(), "DELETE FROM groups WHERE id = $1", groupID)
-	})
-	_, err := integrationDB.ExecContext(s.ctx, "INSERT INTO account_groups(account_id, group_id) VALUES($1, $2)", accountID, groupID)
-	s.Require().NoError(err)
-	_, err = integrationDB.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
-	s.Require().NoError(err)
-	repo := newGroupRepositoryWithSQL(client, integrationDB)
-	tx, err := client.Tx(s.ctx)
-	s.Require().NoError(err)
-	txCtx := dbent.NewTxContext(s.ctx, tx)
-
-	affected, err := repo.DeleteAccountGroupsByGroupID(txCtx, groupID)
-	s.Require().NoError(err)
-	s.Require().Equal(int64(1), affected)
-	s.Require().NoError(tx.Rollback())
-
-	var membershipCount, outboxCount int
-	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, "SELECT count(*) FROM account_groups WHERE account_id = $1 AND group_id = $2", accountID, groupID).Scan(&membershipCount))
-	s.Require().Equal(1, membershipCount)
-	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, "SELECT count(*) FROM scheduler_outbox").Scan(&outboxCount))
-	s.Require().Zero(outboxCount)
-}
-
-func (s *GroupRepoSuite) TestBindAccountsToGroup_RollbackKeepsMembershipAndOutboxAtomic() {
-	client := testEntClient(s.T())
-	name := s.uniqueGroupName("bind-rollback")
-	var groupID, accountID int64
-	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, `INSERT INTO groups(name, platform, status) VALUES($1, 'openai', 'active') RETURNING id`, name).Scan(&groupID))
-	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, `INSERT INTO accounts(name, platform, type) VALUES($1, 'openai', 'oauth') RETURNING id`, name).Scan(&accountID))
-	s.T().Cleanup(func() {
-		_, _ = integrationDB.ExecContext(context.Background(), "DELETE FROM account_groups WHERE account_id = $1", accountID)
-		_, _ = integrationDB.ExecContext(context.Background(), "DELETE FROM accounts WHERE id = $1", accountID)
-		_, _ = integrationDB.ExecContext(context.Background(), "DELETE FROM groups WHERE id = $1", groupID)
-	})
-	_, err := integrationDB.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
-	s.Require().NoError(err)
-	repo := newGroupRepositoryWithSQL(client, integrationDB)
-	tx, err := client.Tx(s.ctx)
-	s.Require().NoError(err)
-	txCtx := dbent.NewTxContext(s.ctx, tx)
-
-	s.Require().NoError(repo.BindAccountsToGroup(txCtx, groupID, []int64{accountID}))
-	s.Require().NoError(tx.Rollback())
-
-	var membershipCount, outboxCount int
-	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, "SELECT count(*) FROM account_groups WHERE account_id = $1 AND group_id = $2", accountID, groupID).Scan(&membershipCount))
-	s.Require().Zero(membershipCount)
-	s.Require().NoError(integrationDB.QueryRowContext(s.ctx, "SELECT count(*) FROM scheduler_outbox").Scan(&outboxCount))
-	s.Require().Zero(outboxCount)
-}
 
 func (s *GroupRepoSuite) TestDeleteAccountGroupsByGroupID() {
 	g := &service.Group{

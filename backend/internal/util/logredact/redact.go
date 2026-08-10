@@ -12,15 +12,14 @@ import (
 const maxRedactDepth = 32
 
 var defaultSensitiveKeys = map[string]struct{}{
-	"authorization_code":    {},
-	"code":                  {},
-	"code_verifier":         {},
-	"access_token":          {},
-	"refresh_token":         {},
-	"id_token":              {},
-	"personal_access_token": {},
-	"client_secret":         {},
-	"password":              {},
+	"authorization_code": {},
+	"code":               {},
+	"code_verifier":      {},
+	"access_token":       {},
+	"refresh_token":      {},
+	"id_token":           {},
+	"client_secret":      {},
+	"password":           {},
 }
 
 var defaultSensitiveKeyList = []string{
@@ -30,7 +29,6 @@ var defaultSensitiveKeyList = []string{
 	"access_token",
 	"refresh_token",
 	"id_token",
-	"personal_access_token",
 	"client_secret",
 	"password",
 }

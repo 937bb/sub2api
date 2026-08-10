@@ -6,7 +6,7 @@
     </label>
     <div
       v-if="isSearchable"
-      class="flex items-center gap-2 rounded-t-lg border border-b-0 border-gray-200 bg-white/40 px-3 py-2 dark:border-dark-600 dark:bg-white/[0.04]"
+      class="flex items-center gap-2 rounded-t-lg border border-b-0 border-gray-200 bg-gray-50 px-3 py-2 dark:border-dark-600 dark:bg-dark-800"
     >
       <Icon name="search" size="sm" class="shrink-0 text-gray-400" />
       <input
@@ -20,8 +20,8 @@
       :class="[
         'grid max-h-32 grid-cols-2 gap-1 overflow-y-auto p-2',
         isSearchable
-          ? 'rounded-b-lg border border-t-0 border-gray-200 bg-white/40 dark:border-dark-600 dark:bg-white/[0.04]'
-          : 'rounded-lg border border-gray-200 bg-white/40 dark:border-dark-600 dark:bg-white/[0.04]'
+          ? 'rounded-b-lg border border-t-0 border-gray-200 bg-gray-50 dark:border-dark-600 dark:bg-dark-800'
+          : 'rounded-lg border border-gray-200 bg-gray-50 dark:border-dark-600 dark:bg-dark-800'
       ]"
     >
       <label
@@ -94,11 +94,11 @@ const filteredGroups = computed(() => {
     // antigravity 账户启用混合调度后，可选择 anthropic/gemini 分组
     if (props.platform === 'antigravity' && props.mixedScheduling) {
       result = result.filter(
-        (g) => g.platform === 'antigravity' || g.platform === 'anthropic' || g.platform === 'gemini'
+        (g) => g.platform === 'antigravity' || g.platform === 'anthropic' || g.platform === 'gemini' || g.platform === 'composite'
       )
     } else {
-      // 默认：只能选择同 platform 的分组
-      result = result.filter((g) => g.platform === props.platform)
+      // 默认：只能选择同 platform 的分组；composite 分组可接收任意具体平台账号
+      result = result.filter((g) => g.platform === props.platform || g.platform === 'composite')
     }
   }
   if (isSearchable.value && searchText.value) {

@@ -14,6 +14,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/schema/mixins"
 	"github.com/Wei-Shaw/sub2api/ent/user"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/lib/pq"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 
@@ -40,47 +41,7 @@ func (r *apiKeyRepository) activeQuery() *dbent.APIKeyQuery {
 }
 
 func (r *apiKeyRepository) Create(ctx context.Context, key *service.APIKey) error {
-	if existingTx := dbent.TxFromContext(ctx); existingTx != nil {
-		return r.create(ctx, existingTx.Client(), key)
-	}
-
-	tx, err := r.client.Tx(ctx)
-	if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
-		return translatePersistenceError(err, nil, service.ErrAPIKeyExists)
-	}
-	exec := r.client
-	if err == nil {
-		defer func() { _ = tx.Rollback() }()
-		exec = tx.Client()
-	}
-	// err == dbent.ErrTxStarted 时复用当前事务(exec = r.client)。
-
-	if err := r.create(ctx, exec, key); err != nil {
-		return err
-	}
-	if tx != nil {
-		return translatePersistenceError(tx.Commit(), nil, service.ErrAPIKeyExists)
-	}
-	return nil
-}
-
-func (r *apiKeyRepository) create(ctx context.Context, exec *dbent.Client, key *service.APIKey) error {
-	// 与删除用户流程串行化：PostgreSQL 下创建 Key 前锁定 active user row，避免在
-	// 用户软删除并清理 Key 的事务窗口内插入新的 active Key。SQLite 测试库不支持
-	// SELECT ... FOR UPDATE，保留 active-user 校验但不加锁。
-	userQuery := exec.User.Query().
-		Where(user.IDEQ(key.UserID), user.DeletedAtIsNil())
-	if exec.Driver().Dialect() == dialect.Postgres {
-		userQuery.ForUpdate()
-	}
-	if _, err := userQuery.Only(ctx); err != nil {
-		if dbent.IsNotFound(err) {
-			return service.ErrUserNotFound
-		}
-		return err
-	}
-
-	builder := exec.APIKey.Create().
+	builder := r.client.APIKey.Create().
 		SetUserID(key.UserID).
 		SetKey(key.Key).
 		SetName(key.Name).
@@ -220,11 +181,23 @@ func (r *apiKeyRepository) GetByKeyForAuth(ctx context.Context, key string) (*se
 				group.FieldWeeklyLimitUsd,
 				group.FieldMonthlyLimitUsd,
 				group.FieldAllowImageGeneration,
+				group.FieldAllowBatchImageGeneration,
 				group.FieldImageRateIndependent,
 				group.FieldImageRateMultiplier,
 				group.FieldImagePrice1k,
 				group.FieldImagePrice2k,
 				group.FieldImagePrice4k,
+				group.FieldVideoRateIndependent,
+				group.FieldVideoRateMultiplier,
+				group.FieldVideoPrice480p,
+				group.FieldVideoPrice720p,
+				group.FieldVideoPrice1080p,
+				group.FieldVideoModelPrices,
+				group.FieldWebSearchPricePerCall,
+				group.FieldSearchPricePer1k,
+				group.FieldAudioRealtimePricePerMin,
+				group.FieldAudioTtsPricePerMillionChars,
+				group.FieldAudioSttPricePerHour,
 				group.FieldClaudeCodeOnly,
 				group.FieldFallbackGroupID,
 				group.FieldFallbackGroupIDOnInvalidRequest,
@@ -233,11 +206,24 @@ func (r *apiKeyRepository) GetByKeyForAuth(ctx context.Context, key string) (*se
 				group.FieldMcpXMLInject,
 				group.FieldSupportedModelScopes,
 				group.FieldAllowMessagesDispatch,
-				group.FieldRequirePrivacySet,
+				group.FieldAllowLive,
 				group.FieldDefaultMappedModel,
 				group.FieldMessagesDispatchModelConfig,
 				group.FieldModelsListConfig,
 				group.FieldRpmLimit,
+				group.FieldMaxReasoningEffort,
+				group.FieldReasoningEffortMappings,
+				group.FieldQuotaBypassEnabled,
+				group.FieldPeakRateEnabled,
+				group.FieldPeakStart,
+				group.FieldPeakEnd,
+				group.FieldPeakRateMultiplier,
+				// 分组利润控制：认证快照是调度门 enable 判定的直接来源，
+				// 漏选会让门静默失效；新增快照分组字段时必须同步本投影，
+				// 集成测试对账兜底。
+				group.FieldProfitControlEnabled,
+				group.FieldProfitMinMargin,
+				group.FieldProfitSafetyBuffer,
 			)
 		}).
 		Only(ctx)
@@ -250,191 +236,109 @@ func (r *apiKeyRepository) GetByKeyForAuth(ctx context.Context, key string) (*se
 	return apiKeyEntityToService(m), nil
 }
 
-func (r *apiKeyRepository) UpdateConfig(ctx context.Context, id, expectedUserID int64, patch service.APIKeyConfigPatch) (*service.APIKey, error) {
-	var result *service.APIKey
-	err := r.withAPIKeyTx(ctx, func(opCtx context.Context, client *dbent.Client) error {
-		q := client.APIKey.Query().Where(apikey.IDEQ(id), apikey.UserIDEQ(expectedUserID), apikey.DeletedAtIsNil())
-		if client.Driver().Dialect() == dialect.Postgres {
-			q.ForUpdate()
-		}
-		current, err := q.Only(opCtx)
-		if dbent.IsNotFound(err) {
-			return service.ErrAPIKeyNotFound
-		}
-		if err != nil {
-			return err
-		}
-		b := current.Update().SetUpdatedAt(time.Now())
-		if patch.Name != nil {
-			b.SetName(*patch.Name)
-		}
-		if patch.GroupID != nil {
-			if *patch.GroupID == nil {
-				b.ClearGroupID()
-			} else {
-				b.SetGroupID(**patch.GroupID)
-			}
-		}
-		if patch.Quota != nil {
-			b.SetQuota(*patch.Quota)
-		}
-		if patch.ExpiresAt != nil {
-			if *patch.ExpiresAt == nil {
-				b.ClearExpiresAt()
-			} else {
-				b.SetExpiresAt(**patch.ExpiresAt)
-			}
-		}
-		if patch.IPWhitelist != nil {
-			if len(*patch.IPWhitelist) == 0 {
-				b.ClearIPWhitelist()
-			} else {
-				b.SetIPWhitelist(*patch.IPWhitelist)
-			}
-		}
-		if patch.IPBlacklist != nil {
-			if len(*patch.IPBlacklist) == 0 {
-				b.ClearIPBlacklist()
-			} else {
-				b.SetIPBlacklist(*patch.IPBlacklist)
-			}
-		}
-		if patch.RateLimit5h != nil {
-			b.SetRateLimit5h(*patch.RateLimit5h)
-		}
-		if patch.RateLimit1d != nil {
-			b.SetRateLimit1d(*patch.RateLimit1d)
-		}
-		if patch.RateLimit7d != nil {
-			b.SetRateLimit7d(*patch.RateLimit7d)
-		}
-		if patch.OpenAIForcePriorityTier != nil {
-			b.SetOpenaiForcePriorityTier(*patch.OpenAIForcePriorityTier)
-		}
-		if patch.Status != nil {
-			current.Status = *patch.Status
-		}
-		if patch.ResetQuota {
-			b.SetQuotaUsed(0)
-			current.QuotaUsed = 0
-		}
-		if patch.ResetRateLimitUsage {
-			b.SetUsage5h(0).SetUsage1d(0).SetUsage7d(0).ClearWindow5hStart().ClearWindow1dStart().ClearWindow7dStart()
-		}
-		if patch.Quota != nil {
-			current.Quota = *patch.Quota
-		}
-		if patch.ExpiresAt != nil {
-			current.ExpiresAt = *patch.ExpiresAt
-		}
-		status := current.Status
-		managedStatus := status == service.StatusAPIKeyActive || status == "inactive" || status == service.StatusAPIKeyExpired || status == service.StatusAPIKeyQuotaExhausted
-		if !managedStatus {
-			// Preserve disabled and administrator-defined statuses exactly as
-			// reconcileAPIKeyTerminalStatus does at the service boundary.
-		} else if current.ExpiresAt != nil && !current.ExpiresAt.After(time.Now()) {
-			status = service.StatusAPIKeyExpired
-		} else if current.Quota > 0 && current.QuotaUsed >= current.Quota {
-			status = service.StatusAPIKeyQuotaExhausted
-		} else if patch.Status != nil && (*patch.Status == service.StatusAPIKeyDisabled || *patch.Status == "inactive") {
-			status = *patch.Status
-		} else if patch.Status != nil || current.Status == service.StatusAPIKeyExpired || current.Status == service.StatusAPIKeyQuotaExhausted {
-			status = service.StatusAPIKeyActive
-		}
-		b.SetStatus(status)
-		if _, err := b.Save(opCtx); err != nil {
-			return err
-		}
-		result, err = loadAPIKeyResponseView(opCtx, client, id)
-		if err != nil {
-			return err
-		}
+func (r *apiKeyRepository) Update(ctx context.Context, key *service.APIKey, fields service.APIKeyUpdateFields) error {
+	// 空掩码代表调用方不改任何列，直接返回，避免产生一次无意义的整行写。
+	if fields.IsEmpty() {
 		return nil
-	})
-	return result, err
-}
+	}
 
-func (r *apiKeyRepository) UpdateGroupID(ctx context.Context, id int64, groupID *int64) (*service.APIKey, error) {
-	var result *service.APIKey
-	err := r.withAPIKeyTx(ctx, func(opCtx context.Context, client *dbent.Client) error {
-		b := client.APIKey.UpdateOneID(id).Where(apikey.DeletedAtIsNil()).SetUpdatedAt(time.Now())
-		if groupID == nil {
-			b.ClearGroupID()
+	// 使用原子操作：将软删除检查与更新合并到同一语句，避免竞态条件。
+	// 之前的实现先检查 Exist 再 UpdateOneID，若在两步之间发生软删除，
+	// 则会更新已删除的记录。
+	// 这里选择 Update().Where()，确保只有未软删除记录能被更新。
+	// 同时显式设置 updated_at，避免二次查询带来的并发可见性问题。
+	client := clientFromContext(ctx, r.client)
+	now := time.Now()
+	builder := client.APIKey.Update().
+		Where(apikey.IDEQ(key.ID), apikey.DeletedAtIsNil()).
+		SetUpdatedAt(now)
+	if fields.Name {
+		builder.SetName(key.Name)
+	}
+	if fields.Status {
+		builder.SetStatus(key.Status)
+	}
+	if fields.Quota {
+		builder.SetQuota(key.Quota)
+	}
+	if fields.QuotaUsed {
+		builder.SetQuotaUsed(key.QuotaUsed)
+	}
+	if fields.RateLimits {
+		builder.
+			SetRateLimit5h(key.RateLimit5h).
+			SetRateLimit1d(key.RateLimit1d).
+			SetRateLimit7d(key.RateLimit7d)
+	}
+	if fields.OpenAIOverride {
+		builder.SetOpenaiForcePriorityTier(key.OpenAIForcePriorityTier)
+	}
+	if fields.RateLimitUsage {
+		builder.
+			SetUsage5h(key.Usage5h).
+			SetUsage1d(key.Usage1d).
+			SetUsage7d(key.Usage7d)
+
+		// Rate limit window start times
+		if key.Window5hStart != nil {
+			builder.SetWindow5hStart(*key.Window5hStart)
 		} else {
-			b.SetGroupID(*groupID)
+			builder.ClearWindow5hStart()
 		}
-		if _, err := b.Save(opCtx); err != nil {
-			if dbent.IsNotFound(err) {
-				return service.ErrAPIKeyNotFound
-			}
-			return err
+		if key.Window1dStart != nil {
+			builder.SetWindow1dStart(*key.Window1dStart)
+		} else {
+			builder.ClearWindow1dStart()
 		}
-		var err error
-		result, err = loadAPIKeyResponseView(opCtx, client, id)
-		return err
-	})
-	return result, err
-}
+		if key.Window7dStart != nil {
+			builder.SetWindow7dStart(*key.Window7dStart)
+		} else {
+			builder.ClearWindow7dStart()
+		}
+	}
+	if fields.GroupID {
+		if key.GroupID != nil {
+			builder.SetGroupID(*key.GroupID)
+		} else {
+			builder.ClearGroupID()
+		}
+	}
 
-func (r *apiKeyRepository) ResetRateLimitUsage(ctx context.Context, id int64) (*service.APIKey, error) {
-	var result *service.APIKey
-	err := r.withAPIKeyTx(ctx, func(opCtx context.Context, client *dbent.Client) error {
-		_, err := client.APIKey.UpdateOneID(id).Where(apikey.DeletedAtIsNil()).
-			SetUsage5h(0).SetUsage1d(0).SetUsage7d(0).
-			ClearWindow5hStart().ClearWindow1dStart().ClearWindow7dStart().SetUpdatedAt(time.Now()).Save(opCtx)
-		if dbent.IsNotFound(err) {
-			return service.ErrAPIKeyNotFound
+	// Expiration time
+	if fields.ExpiresAt {
+		if key.ExpiresAt != nil {
+			builder.SetExpiresAt(*key.ExpiresAt)
+		} else {
+			builder.ClearExpiresAt()
 		}
-		if err != nil {
-			return err
+	}
+
+	// IP 限制字段
+	if fields.IPRules {
+		if len(key.IPWhitelist) > 0 {
+			builder.SetIPWhitelist(key.IPWhitelist)
+		} else {
+			builder.ClearIPWhitelist()
 		}
-		result, err = loadAPIKeyResponseView(opCtx, client, id)
-		return err
-	})
-	return result, err
-}
+		if len(key.IPBlacklist) > 0 {
+			builder.SetIPBlacklist(key.IPBlacklist)
+		} else {
+			builder.ClearIPBlacklist()
+		}
+	}
 
-// loadAPIKeyResponseView materializes the scalar row and response edges from one
-// transaction. Callers keep the row's update lock until this view is loaded.
-func loadAPIKeyResponseView(ctx context.Context, client *dbent.Client, id int64) (*service.APIKey, error) {
-	m, err := client.APIKey.Query().
-		Where(apikey.IDEQ(id), apikey.DeletedAtIsNil()).
-		WithUser().
-		WithGroup().
-		Only(ctx)
-	if dbent.IsNotFound(err) {
-		return nil, service.ErrAPIKeyNotFound
-	}
-	if err != nil {
-		return nil, err
-	}
-	return apiKeyEntityToService(m), nil
-}
-
-func (r *apiKeyRepository) withAPIKeyTx(ctx context.Context, fn func(context.Context, *dbent.Client) error) error {
-	if tx := dbent.TxFromContext(ctx); tx != nil {
-		return fn(ctx, tx.Client())
-	}
-	tx, err := r.client.Tx(ctx)
-	if errors.Is(err, dbent.ErrTxStarted) {
-		return fn(ctx, r.client)
-	}
+	affected, err := builder.Save(ctx)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = tx.Rollback() }()
-	opCtx := dbent.NewTxContext(ctx, tx)
-	if err := fn(opCtx, tx.Client()); err != nil {
-		return err
+	if affected == 0 {
+		// 更新影响行数为 0，说明记录不存在或已被软删除。
+		return service.ErrAPIKeyNotFound
 	}
-	return tx.Commit()
-}
 
-func (r *apiKeyRepository) sqlFromContext(ctx context.Context) sqlExecutor {
-	if tx := dbent.TxFromContext(ctx); tx != nil {
-		return tx.Client()
-	}
-	return r.sql
+	// 使用同一时间戳回填，避免并发删除导致二次查询失败。
+	key.UpdatedAt = now
+	return nil
 }
 
 func (r *apiKeyRepository) Delete(ctx context.Context, id int64) error {
@@ -467,16 +371,14 @@ func (r *apiKeyRepository) Delete(ctx context.Context, id int64) error {
 	return nil
 }
 
-// DeleteWithAudit 在同一事务内:
-//  1. 把(明文 key、所有者、key 名称)写入 deleted_api_key_audits;
-//  2. 软删除该 key(tombstone 覆盖 key 列以释放唯一约束)。
-//
-// 保证"被删除的 key 一定能反查到所有者"。事务模式与 group_repo.DeleteCascade 一致。
+// DeleteWithAudit keeps the legacy method name for rolling-upgrade compatibility.
+// It atomically tombstones and soft-deletes the key without retaining credential
+// material. Tombstoning releases the unique key value for safe reuse.
 func (r *apiKeyRepository) DeleteWithAudit(ctx context.Context, id int64) error {
 	tombstoneKey := fmt.Sprintf("__deleted__%d__%d", id, time.Now().UnixNano())
 
 	if existingTx := dbent.TxFromContext(ctx); existingTx != nil {
-		return r.deleteWithAudit(ctx, existingTx.Client(), id, tombstoneKey)
+		return r.deleteWithTombstone(ctx, existingTx.Client(), id, tombstoneKey)
 	}
 
 	tx, err := r.client.Tx(ctx)
@@ -488,9 +390,8 @@ func (r *apiKeyRepository) DeleteWithAudit(ctx context.Context, id int64) error 
 		defer func() { _ = tx.Rollback() }()
 		exec = tx.Client()
 	}
-	// err == dbent.ErrTxStarted 时复用当前事务(exec = r.client)。
 
-	if err := r.deleteWithAudit(ctx, exec, id, tombstoneKey); err != nil {
+	if err := r.deleteWithTombstone(ctx, exec, id, tombstoneKey); err != nil {
 		return err
 	}
 
@@ -500,139 +401,37 @@ func (r *apiKeyRepository) DeleteWithAudit(ctx context.Context, id int64) error 
 	return nil
 }
 
-func (r *apiKeyRepository) deleteWithAudit(ctx context.Context, exec *dbent.Client, id int64, tombstoneKey string) error {
-	// 先锁定并 tombstone 覆盖 active key，再用 RETURNING 的原始值写审计，避免并发删除
-	// 在审计 INSERT 与软删除 UPDATE 之间交错导致重复审计行。
-	rows, err := exec.QueryContext(ctx, `
-		WITH locked AS (
-			SELECT id, key, user_id, name
-			FROM api_keys
-			WHERE id = $2 AND deleted_at IS NULL
-			FOR UPDATE
-		), deleted AS (
-			UPDATE api_keys AS ak
-			SET key = $1, deleted_at = NOW(), updated_at = NOW()
-			FROM locked
-			WHERE ak.id = locked.id
-			RETURNING locked.key AS original_key, ak.id, ak.user_id, ak.name, ak.deleted_at
-		), audited AS (
-			INSERT INTO deleted_api_key_audits (key, api_key_id, user_id, key_name, deleted_at)
-			SELECT original_key, id, user_id, name, deleted_at
-			FROM deleted
-			RETURNING api_key_id
-		)
-		SELECT deleted.id
-		FROM deleted
-		JOIN audited ON audited.api_key_id = deleted.id`, tombstoneKey, id)
+func (r *apiKeyRepository) deleteWithTombstone(ctx context.Context, exec *dbent.Client, id int64, tombstoneKey string) error {
+	res, err := exec.ExecContext(ctx, `
+		UPDATE api_keys
+		SET key = $1, deleted_at = NOW(), updated_at = NOW()
+		WHERE id = $2 AND deleted_at IS NULL`, tombstoneKey, id)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = rows.Close() }()
-
-	if rows.Next() {
-		return rows.Err()
-	}
-	if err := rows.Err(); err != nil {
+	affected, err := res.RowsAffected()
+	if err != nil {
 		return err
 	}
-
-	// 并发/重复删除:记录已存在(已软删)则幂等返回 nil，否则 NotFound。
-	exists, existErr := exec.APIKey.Query().
-		Where(apikey.IDEQ(id)).
-		Exist(mixins.SkipSoftDelete(ctx))
-	if existErr != nil {
-		return existErr
+	if affected == 0 {
+		// 并发/重复删除:记录已存在(已软删)则幂等返回 nil(defer 回滚空事务),否则 NotFound。
+		exists, existErr := r.client.APIKey.Query().
+			Where(apikey.IDEQ(id)).
+			Exist(mixins.SkipSoftDelete(ctx))
+		if existErr != nil {
+			return existErr
+		}
+		if exists {
+			return nil
+		}
+		return service.ErrAPIKeyNotFound
 	}
-	if exists {
-		return nil
-	}
-	return service.ErrAPIKeyNotFound
+	return nil
 }
 
-// DeleteByUserIDWithAudit soft-deletes every active API key owned by userID and
-// returns the original key values for post-commit auth-cache invalidation.
-func (r *apiKeyRepository) DeleteByUserIDWithAudit(ctx context.Context, userID int64) ([]string, error) {
-	if existingTx := dbent.TxFromContext(ctx); existingTx != nil {
-		return r.deleteByUserIDWithAudit(ctx, existingTx.Client(), userID)
-	}
+func (r *apiKeyRepository) apiKeyListByUserIDQuery(userID int64, filters service.APIKeyListFilters) *dbent.APIKeyQuery {
+	q := r.activeQuery().Where(apikey.UserIDEQ(userID))
 
-	tx, err := r.client.Tx(ctx)
-	if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
-		return nil, err
-	}
-	exec := r.client
-	if err == nil {
-		defer func() { _ = tx.Rollback() }()
-		exec = tx.Client()
-	}
-	// err == dbent.ErrTxStarted 时复用当前事务(exec = r.client)。
-
-	keys, err := r.deleteByUserIDWithAudit(ctx, exec, userID)
-	if err != nil {
-		return nil, err
-	}
-	if tx != nil {
-		if err := tx.Commit(); err != nil {
-			return nil, err
-		}
-	}
-	return keys, nil
-}
-
-func (r *apiKeyRepository) deleteByUserIDWithAudit(ctx context.Context, exec *dbent.Client, userID int64) ([]string, error) {
-	tombstoneSuffix := fmt.Sprintf("%d", time.Now().UnixNano())
-
-	// Lock and tombstone the complete active-key set in one statement. This avoids
-	// offset pagination gaps if another transaction deletes a key while admin user
-	// deletion is collecting the target list.
-	rows, err := exec.QueryContext(ctx, `
-		WITH locked AS (
-			SELECT id, key, user_id, name
-			FROM api_keys
-			WHERE user_id = $1 AND deleted_at IS NULL
-			ORDER BY id
-			FOR UPDATE
-		), deleted AS (
-			UPDATE api_keys AS ak
-			SET key = CONCAT('__deleted__', ak.id, '__', $2::text), deleted_at = NOW(), updated_at = NOW()
-			FROM locked
-			WHERE ak.id = locked.id
-			RETURNING locked.key AS original_key, ak.id, ak.user_id, ak.name, ak.deleted_at
-		), audited AS (
-			INSERT INTO deleted_api_key_audits (key, api_key_id, user_id, key_name, deleted_at)
-			SELECT original_key, id, user_id, name, deleted_at
-			FROM deleted
-			RETURNING api_key_id
-		)
-		SELECT deleted.original_key
-		FROM deleted
-		JOIN audited ON audited.api_key_id = deleted.id`, userID, tombstoneSuffix)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-
-	keys := make([]string, 0)
-	for rows.Next() {
-		var key string
-		if err := rows.Scan(&key); err != nil {
-			return nil, err
-		}
-		if key = strings.TrimSpace(key); key != "" {
-			keys = append(keys, key)
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return keys, nil
-}
-
-func (r *apiKeyRepository) ListByUserID(ctx context.Context, userID int64, params pagination.PaginationParams, filters service.APIKeyListFilters) ([]service.APIKey, *pagination.PaginationResult, error) {
-	client := clientFromContext(ctx, r.client)
-	q := client.APIKey.Query().Where(apikey.DeletedAtIsNil(), apikey.UserIDEQ(userID))
-
-	// Apply filters
 	if filters.Search != "" {
 		q = q.Where(apikey.Or(
 			apikey.NameContainsFold(filters.Search),
@@ -649,6 +448,12 @@ func (r *apiKeyRepository) ListByUserID(ctx context.Context, userID int64, param
 			q = q.Where(apikey.GroupIDEQ(*filters.GroupID))
 		}
 	}
+
+	return q
+}
+
+func (r *apiKeyRepository) ListByUserID(ctx context.Context, userID int64, params pagination.PaginationParams, filters service.APIKeyListFilters) ([]service.APIKey, *pagination.PaginationResult, error) {
+	q := r.apiKeyListByUserIDQuery(userID, filters)
 
 	total, err := q.Count(ctx)
 	if err != nil {
@@ -672,8 +477,119 @@ func (r *apiKeyRepository) ListByUserID(ctx context.Context, userID int64, param
 	for i := range keys {
 		outKeys = append(outKeys, *apiKeyEntityToService(keys[i]))
 	}
+	if err := r.attachLastUsedIPs(ctx, outKeys); err != nil {
+		return nil, nil, err
+	}
 
 	return outKeys, paginationResultFromTotal(int64(total), params), nil
+}
+
+func (r *apiKeyRepository) ListAllByUserID(ctx context.Context, userID int64, filters service.APIKeyListFilters) ([]service.APIKey, error) {
+	keys, err := r.apiKeyListByUserIDQuery(userID, filters).
+		WithGroup().
+		Order(dbent.Asc(apikey.FieldID)).
+		All(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	outKeys := make([]service.APIKey, 0, len(keys))
+	for i := range keys {
+		outKeys = append(outKeys, *apiKeyEntityToService(keys[i]))
+	}
+	if err := r.attachLastUsedIPs(ctx, outKeys); err != nil {
+		return nil, err
+	}
+	return outKeys, nil
+}
+
+func (r *apiKeyRepository) attachLastUsedIPs(ctx context.Context, keys []service.APIKey) error {
+	if len(keys) == 0 || r.sql == nil {
+		return nil
+	}
+
+	apiKeyIDs := make([]int64, 0, len(keys))
+	for i := range keys {
+		apiKeyIDs = append(apiKeyIDs, keys[i].ID)
+	}
+
+	lastUsedIPs, err := r.latestUsageLogIPs(ctx, apiKeyIDs)
+	if err != nil {
+		return err
+	}
+	for i := range keys {
+		if ip, ok := lastUsedIPs[keys[i].ID]; ok {
+			keys[i].LastUsedIP = &ip
+		}
+	}
+	return nil
+}
+
+func (r *apiKeyRepository) latestUsageLogIPs(ctx context.Context, apiKeyIDs []int64) (result map[int64]string, err error) {
+	if len(apiKeyIDs) == 0 || r.sql == nil {
+		return map[int64]string{}, nil
+	}
+
+	query, args := latestUsageLogIPsQuery(apiKeyIDs, r.client.Driver().Dialect())
+	rows, err := r.sql.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil && err == nil {
+			err = closeErr
+		}
+	}()
+
+	out := make(map[int64]string, len(apiKeyIDs))
+	for rows.Next() {
+		var apiKeyID int64
+		var ipAddress string
+		if err := rows.Scan(&apiKeyID, &ipAddress); err != nil {
+			return nil, err
+		}
+		out[apiKeyID] = ipAddress
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func latestUsageLogIPsQuery(apiKeyIDs []int64, dialectName string) (string, []any) {
+	if dialectName == dialect.Postgres {
+		// Keep each key lookup bounded to one ordered index probe instead of ranking its full history.
+		return `
+		SELECT requested.api_key_id, latest.ip_address
+		FROM unnest($1::bigint[]) AS requested(api_key_id)
+		CROSS JOIN LATERAL (
+			SELECT ul.ip_address
+			FROM usage_logs AS ul
+			WHERE ul.api_key_id = requested.api_key_id
+				AND ul.ip_address IS NOT NULL
+				AND ul.ip_address <> ''
+			ORDER BY ul.created_at DESC, ul.id DESC
+			LIMIT 1
+		) AS latest`, []any{pq.Array(apiKeyIDs)}
+	}
+
+	placeholders := make([]string, len(apiKeyIDs))
+	args := make([]any, len(apiKeyIDs))
+	for i, id := range apiKeyIDs {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+	return fmt.Sprintf(`
+		SELECT api_key_id, ip_address
+		FROM (
+			SELECT api_key_id, ip_address,
+				ROW_NUMBER() OVER (PARTITION BY api_key_id ORDER BY created_at DESC, id DESC) AS rn
+			FROM usage_logs
+			WHERE api_key_id IN (%s)
+				AND ip_address IS NOT NULL
+				AND ip_address <> ''
+		) ranked
+		WHERE rn = 1`, strings.Join(placeholders, ", ")), args
 }
 
 func (r *apiKeyRepository) VerifyOwnership(ctx context.Context, userID int64, apiKeyIDs []int64) ([]int64, error) {
@@ -681,8 +597,7 @@ func (r *apiKeyRepository) VerifyOwnership(ctx context.Context, userID int64, ap
 		return []int64{}, nil
 	}
 
-	client := clientFromContext(ctx, r.client)
-	ids, err := client.APIKey.Query().
+	ids, err := r.client.APIKey.Query().
 		Where(apikey.UserIDEQ(userID), apikey.IDIn(apiKeyIDs...), apikey.DeletedAtIsNil()).
 		IDs(ctx)
 	if err != nil {
@@ -692,8 +607,7 @@ func (r *apiKeyRepository) VerifyOwnership(ctx context.Context, userID int64, ap
 }
 
 func (r *apiKeyRepository) CountByUserID(ctx context.Context, userID int64) (int64, error) {
-	client := clientFromContext(ctx, r.client)
-	count, err := client.APIKey.Query().Where(apikey.DeletedAtIsNil(), apikey.UserIDEQ(userID)).Count(ctx)
+	count, err := r.activeQuery().Where(apikey.UserIDEQ(userID)).Count(ctx)
 	return int64(count), err
 }
 
@@ -747,14 +661,24 @@ func apiKeyListOrder(params pagination.PaginationParams) []func(*entsql.Selector
 		field = apikey.FieldLastUsedAt
 	case "created_at":
 		field = apikey.FieldCreatedAt
+	case "id":
+		field = apikey.FieldID
 	default:
 		field = apikey.FieldID
 	}
 
 	if sortOrder == pagination.SortOrderAsc {
-		return []func(*entsql.Selector){dbent.Asc(field), dbent.Asc(apikey.FieldID)}
+		orders := []func(*entsql.Selector){dbent.Asc(field)}
+		if field != apikey.FieldID {
+			orders = append(orders, dbent.Asc(apikey.FieldID))
+		}
+		return orders
 	}
-	return []func(*entsql.Selector){dbent.Desc(field), dbent.Desc(apikey.FieldID)}
+	orders := []func(*entsql.Selector){dbent.Desc(field)}
+	if field != apikey.FieldID {
+		orders = append(orders, dbent.Desc(apikey.FieldID))
+	}
+	return orders
 }
 
 // SearchAPIKeys searches API keys by user ID and/or keyword (name)
@@ -859,7 +783,7 @@ func (r *apiKeyRepository) IncrementQuotaUsedAndGetState(ctx context.Context, id
 	`
 
 	state := &service.APIKeyQuotaUsageState{}
-	if err := scanSingleRow(ctx, r.sqlFromContext(ctx), query, []any{amount, service.StatusAPIKeyQuotaExhausted, id}, &state.QuotaUsed, &state.Quota, &state.Key, &state.Status); err != nil {
+	if err := scanSingleRow(ctx, r.sql, query, []any{amount, service.StatusAPIKeyQuotaExhausted, id}, &state.QuotaUsed, &state.Quota, &state.Key, &state.Status); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, service.ErrAPIKeyNotFound
 		}
@@ -886,7 +810,7 @@ func (r *apiKeyRepository) UpdateLastUsed(ctx context.Context, id int64, usedAt 
 // IncrementRateLimitUsage atomically increments all rate limit usage counters and initializes
 // window start times via COALESCE if not already set.
 func (r *apiKeyRepository) IncrementRateLimitUsage(ctx context.Context, id int64, cost float64) error {
-	_, err := r.sqlFromContext(ctx).ExecContext(ctx, `
+	_, err := r.sql.ExecContext(ctx, `
 		UPDATE api_keys SET
 			usage_5h = CASE WHEN window_5h_start IS NOT NULL AND window_5h_start + INTERVAL '5 hours' <= NOW() THEN $1 ELSE usage_5h + $1 END,
 			usage_1d = CASE WHEN window_1d_start IS NOT NULL AND window_1d_start + INTERVAL '24 hours' <= NOW() THEN $1 ELSE usage_1d + $1 END,
@@ -902,7 +826,7 @@ func (r *apiKeyRepository) IncrementRateLimitUsage(ctx context.Context, id int64
 
 // ResetRateLimitWindows resets expired rate limit windows atomically.
 func (r *apiKeyRepository) ResetRateLimitWindows(ctx context.Context, id int64) error {
-	_, err := r.sqlFromContext(ctx).ExecContext(ctx, `
+	_, err := r.sql.ExecContext(ctx, `
 		UPDATE api_keys SET
 			usage_5h = CASE WHEN window_5h_start IS NOT NULL AND window_5h_start + INTERVAL '5 hours' <= NOW() THEN 0 ELSE usage_5h END,
 			window_5h_start = CASE WHEN window_5h_start IS NOT NULL AND window_5h_start + INTERVAL '5 hours' <= NOW() THEN NOW() ELSE window_5h_start END,
@@ -918,7 +842,7 @@ func (r *apiKeyRepository) ResetRateLimitWindows(ctx context.Context, id int64) 
 
 // GetRateLimitData returns the current rate limit usage and window start times for an API key.
 func (r *apiKeyRepository) GetRateLimitData(ctx context.Context, id int64) (result *service.APIKeyRateLimitData, err error) {
-	rows, err := r.sqlFromContext(ctx).QueryContext(ctx, `
+	rows, err := r.sql.QueryContext(ctx, `
 		SELECT usage_5h, usage_1d, usage_7d, window_5h_start, window_1d_start, window_7d_start
 		FROM api_keys
 		WHERE id = $1 AND deleted_at IS NULL`,
@@ -946,34 +870,41 @@ func apiKeyEntityToService(m *dbent.APIKey) *service.APIKey {
 		return nil
 	}
 	out := &service.APIKey{
-		ID:            m.ID,
-		UserID:        m.UserID,
-		Key:           m.Key,
-		Name:          m.Name,
-		Status:        m.Status,
-		IPWhitelist:   m.IPWhitelist,
-		IPBlacklist:   m.IPBlacklist,
-		LastUsedAt:    m.LastUsedAt,
-		CreatedAt:     m.CreatedAt,
-		UpdatedAt:     m.UpdatedAt,
-		GroupID:       m.GroupID,
-		Quota:         m.Quota,
-		QuotaUsed:     m.QuotaUsed,
-		ExpiresAt:     m.ExpiresAt,
-		RateLimit5h:   m.RateLimit5h,
-		RateLimit1d:   m.RateLimit1d,
-		RateLimit7d:   m.RateLimit7d,
-		Usage5h:       m.Usage5h,
-		Usage1d:       m.Usage1d,
-		Usage7d:       m.Usage7d,
-		Window5hStart: m.Window5hStart,
-		Window1dStart: m.Window1dStart,
-		Window7dStart: m.Window7dStart,
-
+		ID:                      m.ID,
+		UserID:                  m.UserID,
+		Key:                     m.Key,
+		Name:                    m.Name,
+		Status:                  m.Status,
+		IPWhitelist:             m.IPWhitelist,
+		IPBlacklist:             m.IPBlacklist,
+		LastUsedAt:              m.LastUsedAt,
+		CreatedAt:               m.CreatedAt,
+		UpdatedAt:               m.UpdatedAt,
+		GroupID:                 m.GroupID,
+		Quota:                   m.Quota,
+		QuotaUsed:               m.QuotaUsed,
+		ExpiresAt:               m.ExpiresAt,
+		RateLimit5h:             m.RateLimit5h,
+		RateLimit1d:             m.RateLimit1d,
+		RateLimit7d:             m.RateLimit7d,
+		Usage5h:                 m.Usage5h,
+		Usage1d:                 m.Usage1d,
+		Usage7d:                 m.Usage7d,
+		Window5hStart:           m.Window5hStart,
+		Window1dStart:           m.Window1dStart,
+		Window7dStart:           m.Window7dStart,
 		OpenAIForcePriorityTier: m.OpenaiForcePriorityTier,
 	}
 	if m.Edges.User != nil {
 		out.User = userEntityToService(m.Edges.User)
+		if allowed := m.Edges.User.Edges.AllowedGroups; len(allowed) > 0 {
+			out.User.AllowedGroups = make([]int64, 0, len(allowed))
+			for _, g := range allowed {
+				if g != nil {
+					out.User.AllowedGroups = append(out.User.AllowedGroups, g.ID)
+				}
+			}
+		}
 	}
 	if m.Edges.Group != nil {
 		out.Group = groupEntityToService(m.Edges.Group)
@@ -993,6 +924,7 @@ func userEntityToService(u *dbent.User) *service.User {
 		PasswordHash:               u.PasswordHash,
 		Role:                       u.Role,
 		Balance:                    u.Balance,
+		FrozenBalance:              u.FrozenBalance,
 		Concurrency:                u.Concurrency,
 		Status:                     u.Status,
 		SignupSource:               u.SignupSource,
@@ -1014,14 +946,6 @@ func userEntityToService(u *dbent.User) *service.User {
 	if u.BalanceNotifyExtraEmails != "" && u.BalanceNotifyExtraEmails != "[]" {
 		out.BalanceNotifyExtraEmails = service.ParseNotifyEmails(u.BalanceNotifyExtraEmails)
 	}
-	if len(u.Edges.AllowedGroups) > 0 {
-		out.AllowedGroups = make([]int64, 0, len(u.Edges.AllowedGroups))
-		for _, g := range u.Edges.AllowedGroups {
-			if g != nil {
-				out.AllowedGroups = append(out.AllowedGroups, g.ID)
-			}
-		}
-	}
 	return out
 }
 
@@ -1038,16 +962,31 @@ func groupEntityToService(g *dbent.Group) *service.Group {
 		IsExclusive:                     g.IsExclusive,
 		Status:                          g.Status,
 		Hydrated:                        true,
+		DuplicateOperationID:            derefString(g.DuplicateOperationID),
 		SubscriptionType:                g.SubscriptionType,
 		DailyLimitUSD:                   g.DailyLimitUsd,
 		WeeklyLimitUSD:                  g.WeeklyLimitUsd,
 		MonthlyLimitUSD:                 g.MonthlyLimitUsd,
 		AllowImageGeneration:            g.AllowImageGeneration,
+		AllowBatchImageGeneration:       g.AllowBatchImageGeneration,
 		ImageRateIndependent:            g.ImageRateIndependent,
 		ImageRateMultiplier:             g.ImageRateMultiplier,
 		ImagePrice1K:                    g.ImagePrice1k,
 		ImagePrice2K:                    g.ImagePrice2k,
 		ImagePrice4K:                    g.ImagePrice4k,
+		BatchImageDiscountMultiplier:    g.BatchImageDiscountMultiplier,
+		BatchImageHoldMultiplier:        g.BatchImageHoldMultiplier,
+		VideoRateIndependent:            g.VideoRateIndependent,
+		VideoRateMultiplier:             g.VideoRateMultiplier,
+		VideoPrice480P:                  g.VideoPrice480p,
+		VideoPrice720P:                  g.VideoPrice720p,
+		VideoPrice1080P:                 g.VideoPrice1080p,
+		VideoModelPrices:                service.NormalizeVideoModelPrices(g.VideoModelPrices),
+		WebSearchPricePerCall:           g.WebSearchPricePerCall,
+		SearchPricePer1k:                g.SearchPricePer1k,
+		AudioRealtimePricePerMin:        g.AudioRealtimePricePerMin,
+		AudioTTSPricePerMillionChars:    g.AudioTtsPricePerMillionChars,
+		AudioSTTPricePerHour:            g.AudioSttPricePerHour,
 		DefaultValidityDays:             g.DefaultValidityDays,
 		ClaudeCodeOnly:                  g.ClaudeCodeOnly,
 		FallbackGroupID:                 g.FallbackGroupID,
@@ -1058,12 +997,23 @@ func groupEntityToService(g *dbent.Group) *service.Group {
 		SupportedModelScopes:            g.SupportedModelScopes,
 		SortOrder:                       g.SortOrder,
 		AllowMessagesDispatch:           g.AllowMessagesDispatch,
+		AllowLive:                       g.AllowLive,
 		RequireOAuthOnly:                g.RequireOauthOnly,
 		RequirePrivacySet:               g.RequirePrivacySet,
 		DefaultMappedModel:              g.DefaultMappedModel,
 		MessagesDispatchModelConfig:     g.MessagesDispatchModelConfig,
 		ModelsListConfig:                g.ModelsListConfig,
 		RPMLimit:                        g.RpmLimit,
+		MaxReasoningEffort:              g.MaxReasoningEffort,
+		ReasoningEffortMappings:         g.ReasoningEffortMappings,
+		QuotaBypassEnabled:              g.QuotaBypassEnabled,
+		PeakRateEnabled:                 g.PeakRateEnabled,
+		PeakStart:                       g.PeakStart,
+		PeakEnd:                         g.PeakEnd,
+		PeakRateMultiplier:              g.PeakRateMultiplier,
+		ProfitControlEnabled:            g.ProfitControlEnabled,
+		ProfitMinMargin:                 g.ProfitMinMargin,
+		ProfitSafetyBuffer:              g.ProfitSafetyBuffer,
 		CreatedAt:                       g.CreatedAt,
 		UpdatedAt:                       g.UpdatedAt,
 	}

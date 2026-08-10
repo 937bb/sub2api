@@ -1,8 +1,6 @@
 package main
 
 import (
-	"os"
-	"strings"
 	"testing"
 	"time"
 
@@ -42,6 +40,8 @@ func TestProvideCleanup_WithMinimalDependencies_NoPanic(t *testing.T) {
 		nil,
 	)
 	accountExpirySvc := service.NewAccountExpiryService(nil, time.Second)
+	codexVersionSyncSvc := service.NewOpenAICodexVersionSyncService(nil, nil, nil, time.Second)
+	proxyExpirySvc := service.NewProxyExpiryService(nil, time.Second)
 	subscriptionExpirySvc := service.NewSubscriptionExpiryService(nil, time.Second)
 	pricingSvc := service.NewPricingService(cfg, nil)
 	emailQueueSvc := service.NewEmailQueueService(nil, 1)
@@ -59,59 +59,44 @@ func TestProvideCleanup_WithMinimalDependencies_NoPanic(t *testing.T) {
 		&service.OpsCleanupService{},
 		&service.OpsScheduledReportService{},
 		opsSystemLogSinkSvc,
+		nil, // opsService
+		nil, // opsIngressRejectAggregator
+		nil, // apiKeyService
+		nil, // authCacheInvalidationWorker
 		schedulerSnapshotSvc,
 		tokenRefreshSvc,
 		accountExpirySvc,
+		codexVersionSyncSvc,
+		proxyExpirySvc,
 		subscriptionExpirySvc,
 		&service.UsageCleanupService{},
 		idempotencyCleanupSvc,
+		&service.BatchImageCleanupService{},
+		nil, // batchImageWorker
 		pricingSvc,
 		emailQueueSvc,
 		billingCacheSvc,
 		&service.UsageRecordWorkerPool{},
 		&service.SubscriptionService{},
-		&service.OpenAIOAuthStartupConfigValidation{},
 		oauthSvc,
 		openAIOAuthSvc,
 		geminiOAuthSvc,
 		antigravityOAuthSvc,
+		nil, // grokOAuth
 		nil, // openAIGateway
 		nil, // scheduledTestRunner
 		nil, // backupSvc
 		nil, // paymentOrderExpiry
 		nil, // channelMonitorRunner
+		nil, // channelMonitorV2Aggregator
 		nil, // quotaFlusher
+		nil, // upstreamBillingProbe
+		nil, // ollamaCloudUsage
+		nil, // auditLog
+		nil, // promptAudit
 	)
 
 	require.NotPanics(t, func() {
 		cleanup()
 	})
-}
-
-func TestWireGeneratedStartupValidationRunsBeforeSideEffectingProviders(t *testing.T) {
-	content, err := os.ReadFile("wire_gen.go")
-	require.NoError(t, err)
-	wireGen := string(content)
-
-	validationIndex := strings.Index(wireGen, "service.ProvideOpenAIOAuthStartupConfigValidation")
-	require.NotEqual(t, -1, validationIndex, "startup validation must be wired into initializeApplication")
-
-	for _, provider := range []string{
-		"service.ProvideEmailQueueService",
-		"service.ProvideBillingCacheService",
-		"service.ProvideAPIKeyAuthCacheInvalidator",
-		"service.ProvideConcurrencyService",
-		"service.ProvideTimingWheelService",
-		"service.ProvideDeferredService",
-		"service.ProvideSchedulerSnapshotService",
-		"service.ProvideDashboardAggregationService",
-		"service.ProvideUsageCleanupService",
-		"service.ProvideTokenRefreshService",
-		"service.ProvideAccountExpiryService",
-		"service.ProvideSubscriptionExpiryService",
-	} {
-		providerIndex := strings.Index(wireGen, provider)
-		require.NotEqual(t, -1, providerIndex, "%s must be present in generated wiring", provider)
-		require.Less(t, validationIndex, providerIndex, "startup validation must run before side-effecting provider %s", provider)
-	}
 }

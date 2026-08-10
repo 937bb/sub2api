@@ -106,7 +106,7 @@
             <span class="text-xs text-gray-500 dark:text-gray-400">
               {{
                 geminiOAuthType === 'google_one'
-                  ? '个人账号'
+                  ? t('admin.accounts.gemini.oauthType.googleOneDesc')
                   : geminiOAuthType === 'code_assist'
                     ? t('admin.accounts.gemini.oauthType.builtInDesc')
                     : t('admin.accounts.gemini.oauthType.customDesc')
@@ -281,29 +281,6 @@ const canExchangeCode = computed(() => {
   return authCode.trim() && sessionId && !loading
 })
 
-const openAIOAuthExtraCleanupKeys = [
-  'openai_oauth_passthrough',
-  'openai_passthrough',
-  'openai_oauth_responses_websockets_v2_mode',
-  'openai_oauth_responses_websockets_v2_enabled',
-  'responses_websockets_v2_enabled',
-  'openai_ws_enabled',
-  'openai_apikey_responses_websockets_v2_mode',
-  'openai_apikey_responses_websockets_v2_enabled'
-]
-
-const buildOpenAIReAuthExtra = (tokenExtra?: Record<string, unknown>): Record<string, unknown> | undefined => {
-  const extra: Record<string, unknown> = { ...(tokenExtra || {}) }
-  for (const key of openAIOAuthExtraCleanupKeys) {
-    delete extra[key]
-  }
-  return Object.keys(extra).length > 0 ? extra : undefined
-}
-
-const resolveOpenAIReAuthType = (): 'oauth' | 'setup-token' => {
-  return props.account?.type === 'setup-token' ? 'setup-token' : 'oauth'
-}
-
 // Watchers
 watch(
   () => props.show,
@@ -350,10 +327,7 @@ const handleGenerateUrl = async () => {
   if (!props.account) return
 
   if (isOpenAILike.value) {
-    await openaiOAuth.generateAuthUrl({
-      proxyId: props.account.proxy_id,
-      accountId: props.account.id
-    })
+    await openaiOAuth.generateAuthUrl(props.account.proxy_id)
   } else if (isGemini.value) {
     const creds = (props.account.credentials || {}) as Record<string, unknown>
     const tierId = typeof creds.tier_id === 'string' ? creds.tier_id : undefined
@@ -377,8 +351,7 @@ const handleExchangeCode = async () => {
     const oauthClient = openaiOAuth
     const sessionId = oauthClient.sessionId.value
     if (!sessionId) return
-    // Prefer the generated session state; pasted callback state can be stale after regenerating the URL.
-    const stateToUse = (oauthClient.oauthState.value || oauthFlowRef.value?.oauthState || '').trim()
+    const stateToUse = (oauthFlowRef.value?.oauthState || oauthClient.oauthState.value || '').trim()
     if (!stateToUse) {
       oauthClient.error.value = t('admin.accounts.oauth.authFailed')
       appStore.showError(oauthClient.error.value)
@@ -393,18 +366,20 @@ const handleExchangeCode = async () => {
     )
     if (!tokenInfo) return
 
-    // Build credentials and merge adapter metadata without dropping OAuth WS config.
+    // Build credentials and extra info
     const credentials = oauthClient.buildCredentials(tokenInfo)
-    const extra = buildOpenAIReAuthExtra(oauthClient.buildExtraInfo(tokenInfo))
+    const extra = oauthClient.buildExtraInfo(tokenInfo)
 
     try {
-      // Preserve setup-token type; re-auth updates credentials, not account semantics.
-      await adminAPI.accounts.applyOAuthCredentials(props.account.id, {
-        type: resolveOpenAIReAuthType(),
+      // Update account with new credentials
+      await adminAPI.accounts.update(props.account.id, {
+        type: 'oauth', // OpenAI OAuth is always 'oauth' type
         credentials,
-        extra,
-        extra_delete_keys: openAIOAuthExtraCleanupKeys
+        extra
       })
+
+      // Clear error status after successful re-authorization
+      await adminAPI.accounts.clearError(props.account.id)
 
       appStore.showSuccess(t('admin.accounts.reAuthorizedSuccess'))
       emit('reauthorized')

@@ -1,6 +1,6 @@
 # Sub2API Docker Image
 
-Sub2API is an independently maintained AI API gateway. The image basename remains `sub2api` for deployment compatibility.
+Sub2API is an AI API Gateway Platform for distributing and managing AI product subscription API quotas.
 
 ## Quick Start
 
@@ -10,15 +10,17 @@ docker run -d \
   -p 8080:8080 \
   -e DATABASE_URL="postgres://user:pass@host:5432/sub2api" \
   -e REDIS_URL="redis://host:6379" \
-  ghcr.io/is7qin/sub2api:latest
+  weishaw/sub2api:latest
 ```
 
 ## Docker Compose
 
 ```yaml
+version: '3.8'
+
 services:
   sub2api:
-    image: ghcr.io/is7qin/sub2api:latest
+    image: weishaw/sub2api:latest
     ports:
       - "8080:8080"
     environment:
@@ -63,12 +65,12 @@ volumes:
 
 ## Tags
 
-- `latest` - Latest stable release for this repository
+- `latest` - Latest stable release
 - `x.y.z` - Specific version
-- `x.y` - Latest patch of a minor version
-- `x` - Latest minor release of a major version
+- `x.y` - Latest patch of minor version
+- `x` - Latest minor of major version
 
 ## Links
 
-- [GitHub Repository](https://github.com/is7Qin/sub2api)
-- [Documentation](https://github.com/is7Qin/sub2api#readme)
+- [GitHub Repository](https://github.com/weishaw/sub2api)
+- [Documentation](https://github.com/weishaw/sub2api#readme)

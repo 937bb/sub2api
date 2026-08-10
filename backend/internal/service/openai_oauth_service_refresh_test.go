@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -13,42 +15,21 @@ import (
 )
 
 type openaiOAuthClientRefreshStub struct {
-	refreshCalls     int32
-	lastRefreshToken string
-	lastProxyURL     string
-	lastOpts         OpenAIOAuthTokenOptions
-	refreshResponse  *openai.TokenResponse
-	refreshErr       error
+	refreshCalls int32
 }
 
-func (s *openaiOAuthClientRefreshStub) ExchangeCode(ctx context.Context, code, codeVerifier, redirectURI, proxyURL string, opts OpenAIOAuthTokenOptions) (*openai.TokenResponse, error) {
+func (s *openaiOAuthClientRefreshStub) ExchangeCode(ctx context.Context, code, codeVerifier, redirectURI, proxyURL, clientID string) (*openai.TokenResponse, error) {
 	return nil, errors.New("not implemented")
 }
 
 func (s *openaiOAuthClientRefreshStub) RefreshToken(ctx context.Context, refreshToken, proxyURL string) (*openai.TokenResponse, error) {
-	return s.RefreshTokenWithOptions(ctx, refreshToken, proxyURL, OpenAIOAuthTokenOptions{})
+	atomic.AddInt32(&s.refreshCalls, 1)
+	return nil, errors.New("not implemented")
 }
 
 func (s *openaiOAuthClientRefreshStub) RefreshTokenWithClientID(ctx context.Context, refreshToken, proxyURL string, clientID string) (*openai.TokenResponse, error) {
-	return s.RefreshTokenWithOptions(ctx, refreshToken, proxyURL, OpenAIOAuthTokenOptions{ClientID: clientID})
-}
-
-func (s *openaiOAuthClientRefreshStub) RefreshTokenWithOptions(ctx context.Context, refreshToken, proxyURL string, opts OpenAIOAuthTokenOptions) (*openai.TokenResponse, error) {
 	atomic.AddInt32(&s.refreshCalls, 1)
-	s.lastRefreshToken = refreshToken
-	s.lastProxyURL = proxyURL
-	s.lastOpts = opts
-	if s.refreshErr != nil {
-		return nil, s.refreshErr
-	}
-	if s.refreshResponse != nil {
-		return s.refreshResponse, nil
-	}
-	return &openai.TokenResponse{
-		AccessToken:  "refreshed-access-token",
-		RefreshToken: "refreshed-refresh-token",
-		ExpiresIn:    3600,
-	}, nil
+	return nil, errors.New("not implemented")
 }
 
 func TestOpenAIOAuthService_RefreshAccountToken_NoRefreshTokenUsesExistingAccessToken(t *testing.T) {
@@ -81,88 +62,48 @@ func TestOpenAIOAuthService_RefreshAccountToken_NoRefreshTokenUsesExistingAccess
 	require.Positive(t, atomic.LoadInt32(&privacyClientCalls), "existing access token should still run enrichment")
 }
 
-func TestOpenAIOAuthService_RefreshAccountToken_SetupTokenWithAccessTokenUsesExistingAccessToken(t *testing.T) {
+func TestOpenAIOAuthService_RefreshAccountToken_PATIgnoresStaleRefreshToken(t *testing.T) {
 	client := &openaiOAuthClientRefreshStub{}
+	var whoamiCalls int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&whoamiCalls, 1)
+		w.Header().Set("content-type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"email":"user@example.com",
+			"chatgpt_user_id":"user-123",
+			"chatgpt_account_id":"acct-123",
+			"chatgpt_plan_type":"plus",
+			"chatgpt_account_is_fedramp":false
+		}`))
+	}))
+	defer server.Close()
+
+	originalURL := openAICodexPATWhoamiURL
+	openAICodexPATWhoamiURL = server.URL
+	defer func() { openAICodexPATWhoamiURL = originalURL }()
+
 	svc := NewOpenAIOAuthService(nil, client)
-	var privacyClientCalls int32
-	svc.SetPrivacyClientFactory(func(proxyURL string) (*req.Client, error) {
-		atomic.AddInt32(&privacyClientCalls, 1)
-		return nil, errors.New("stop before request")
-	})
+	defer svc.Stop()
 
 	account := &Account{
-		ID:       78,
-		Platform: PlatformOpenAI,
-		Type:     AccountTypeSetupToken,
-		Credentials: map[string]any{
-			"access_token": "setup-access-token",
-		},
-	}
-
-	info, err := svc.RefreshAccountToken(context.Background(), account)
-	require.NoError(t, err)
-	require.NotNil(t, info)
-	require.Equal(t, "setup-access-token", info.AccessToken)
-	require.NotNil(t, info.CodexFingerprint)
-	require.Zero(t, atomic.LoadInt32(&client.refreshCalls), "setup-token access token reuse must not call token refresh")
-	require.Positive(t, atomic.LoadInt32(&privacyClientCalls), "setup-token access token reuse should still run enrichment")
-}
-
-func TestOpenAIOAuthService_RefreshAccountToken_UsesAccountFingerprintUAProfile(t *testing.T) {
-	client := &openaiOAuthClientRefreshStub{}
-	svc := NewOpenAIOAuthService(nil, client)
-	fingerprint, _ := NormalizeOpenAICodexFingerprint(OpenAICodexFingerprint{
-		SchemaVersion:  openAICodexFingerprintSchemaV1,
-		InstallationID: "550e8400-e29b-41d4-a716-446655440000",
-		UAProfile: OpenAICodexUAProfile{
-			Originator:    "account-originator",
-			CodexVersion:  "9.8.7",
-			OSFingerprint: "Test OS; amd64",
-			TerminalToken: "Test_Terminal/1.0",
-		},
-		CreatedAt: "2026-06-16T00:00:00Z",
-		UpdatedAt: "2026-06-16T00:00:00Z",
-	}, ParseOpenAICodexUAProfile(DefaultOpenAICodexUserAgent), time.Now())
-	account := &Account{
-		ID:       79,
+		ID:       77,
 		Platform: PlatformOpenAI,
 		Type:     AccountTypeOAuth,
 		Credentials: map[string]any{
-			"refresh_token": "account-refresh-token",
-			"client_id":     "account-client-id",
-		},
-		Extra: map[string]any{
-			OpenAICodexFingerprintExtraKey: fingerprint,
+			"access_token":  "at-test-token",
+			"refresh_token": "stale-refresh-token",
+			"expires_at":    time.Now().Add(-time.Hour).UTC().Format(time.RFC3339),
+			"auth_mode":     "personal_access_token",
 		},
 	}
 
 	info, err := svc.RefreshAccountToken(context.Background(), account)
 	require.NoError(t, err)
-	require.NotNil(t, info)
-	require.Equal(t, int32(1), atomic.LoadInt32(&client.refreshCalls))
-	require.Equal(t, "account-refresh-token", client.lastRefreshToken)
-	require.Equal(t, "account-client-id", client.lastOpts.ClientID)
-	require.Equal(t, fingerprint.UAProfile, client.lastOpts.UAProfile)
-	require.Equal(t, fingerprint, *info.CodexFingerprint)
-}
-
-func TestOpenAIOAuthService_RefreshTokenForNewAccount_UsesFreshFingerprintUAProfile(t *testing.T) {
-	client := &openaiOAuthClientRefreshStub{}
-	svc := NewOpenAIOAuthService(nil, client)
-	profile := ParseOpenAICodexUAProfile("manual-originator/7.8.9 (Manual OS; arm64) Manual_Terminal/2.0 (manual-originator; 7.8.9)")
-	svc.SetCodexFingerprintDependencies(nil, openAICodexFingerprintUAProviderStub{ua: profile.UserAgent()})
-
-	info, err := svc.RefreshTokenForNewAccount(context.Background(), "manual-refresh-token", "http://proxy.example", "manual-client-id")
-	require.NoError(t, err)
-	require.NotNil(t, info)
-	require.Equal(t, int32(1), atomic.LoadInt32(&client.refreshCalls))
-	require.Equal(t, "manual-refresh-token", client.lastRefreshToken)
-	require.Equal(t, "http://proxy.example", client.lastProxyURL)
-	require.Equal(t, "manual-client-id", client.lastOpts.ClientID)
-	require.Equal(t, profile, client.lastOpts.UAProfile)
-	require.NotNil(t, info.CodexFingerprint)
-	require.NotEmpty(t, info.CodexFingerprint.InstallationID)
-	require.Equal(t, profile, info.CodexFingerprint.UAProfile)
+	require.Equal(t, OpenAIAuthModePersonalAccessToken, info.AuthMode)
+	require.Equal(t, "at-test-token", info.AccessToken)
+	require.Empty(t, info.RefreshToken)
+	require.Equal(t, int32(1), atomic.LoadInt32(&whoamiCalls))
+	require.Zero(t, atomic.LoadInt32(&client.refreshCalls), "PAT accounts must not call OAuth refresh even if stale refresh_token remains")
 }
 
 func TestOpenAITokenRefresher_NeedsRefresh_SkipsAccountWithoutRefreshToken(t *testing.T) {
@@ -190,17 +131,66 @@ func TestOpenAITokenRefresher_NeedsRefresh_SkipsAccountWithoutRefreshToken(t *te
 	}
 	require.True(t, refresher.NeedsRefresh(withRT, 5*time.Minute))
 
-	withPAT := &Account{
+	patWithStaleRT := &Account{
 		Platform: PlatformOpenAI,
 		Type:     AccountTypeOAuth,
 		Credentials: map[string]any{
-			"access_token":          "access-token",
-			"personal_access_token": "pat-token",
-			"refresh_token":         "refresh-token",
-			"expires_at":            expiresAt,
+			"access_token":  "at-test-token",
+			"refresh_token": "stale-refresh-token",
+			"expires_at":    expiresAt,
+			"auth_mode":     OpenAIAuthModePersonalAccessToken,
 		},
 	}
-	require.False(t, refresher.NeedsRefresh(withPAT, 5*time.Minute))
+	require.False(t, refresher.NeedsRefresh(patWithStaleRT, 5*time.Minute))
+}
+
+func TestOpenAITokenRefresher_Refresh_PATRemovesStaleOAuthFields(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("content-type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"email":"user@example.com",
+			"chatgpt_user_id":"user-123",
+			"chatgpt_account_id":"acct-123",
+			"chatgpt_plan_type":"plus",
+			"chatgpt_account_is_fedramp":true
+		}`))
+	}))
+	defer server.Close()
+
+	originalURL := openAICodexPATWhoamiURL
+	openAICodexPATWhoamiURL = server.URL
+	defer func() { openAICodexPATWhoamiURL = originalURL }()
+
+	svc := NewOpenAIOAuthService(nil, nil)
+	defer svc.Stop()
+	refresher := NewOpenAITokenRefresher(svc, nil)
+
+	account := &Account{
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"access_token":  "at-test-token",
+			"refresh_token": "stale-refresh-token",
+			"id_token":      "stale-id-token",
+			"expires_at":    time.Now().Add(-time.Hour).UTC().Format(time.RFC3339),
+			"expires_in":    3600,
+			"client_id":     "stale-client",
+			"auth_mode":     OpenAIAuthModePersonalAccessToken,
+			"model_mapping": map[string]any{"gpt-5": "gpt-5-codex"},
+		},
+	}
+
+	credentials, err := refresher.Refresh(context.Background(), account)
+	require.NoError(t, err)
+	require.Equal(t, "at-test-token", credentials["access_token"])
+	require.Equal(t, OpenAIAuthModePersonalAccessToken, credentials["auth_mode"])
+	require.Equal(t, "personal_access_token", credentials["openai_auth_mode"])
+	require.NotContains(t, credentials, "refresh_token")
+	require.NotContains(t, credentials, "id_token")
+	require.NotContains(t, credentials, "expires_at")
+	require.NotContains(t, credentials, "expires_in")
+	require.NotContains(t, credentials, "client_id")
+	require.Equal(t, map[string]any{"gpt-5": "gpt-5-codex"}, credentials["model_mapping"])
 }
 
 func TestOpenAITokenProvider_NoRefreshTokenExpiredAccessTokenReturnsError(t *testing.T) {

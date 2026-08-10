@@ -137,9 +137,9 @@ func (s *APIKeyRepoSuite) TestUpdate() {
 	}
 	s.Require().NoError(s.repo.Create(s.ctx, key))
 
-	name := "Renamed"
-	status := service.StatusDisabled
-	_, err := s.repo.UpdateConfig(s.ctx, key.ID, user.ID, service.APIKeyConfigPatch{Name: &name, Status: &status})
+	key.Name = "Renamed"
+	key.Status = service.StatusDisabled
+	err := s.repo.Update(s.ctx, key, service.APIKeyUpdateFields{Name: true, Status: true})
 	s.Require().NoError(err, "Update")
 
 	got, err := s.repo.GetByID(s.ctx, key.ID)
@@ -162,190 +162,13 @@ func (s *APIKeyRepoSuite) TestUpdate_ClearGroupID() {
 	}
 	s.Require().NoError(s.repo.Create(s.ctx, key))
 
-	err := func() error { _, err := s.repo.UpdateGroupID(s.ctx, key.ID, nil); return err }()
+	key.GroupID = nil
+	err := s.repo.Update(s.ctx, key, service.APIKeyUpdateFields{GroupID: true})
 	s.Require().NoError(err, "Update")
 
 	got, err := s.repo.GetByID(s.ctx, key.ID)
 	s.Require().NoError(err)
 	s.Require().Nil(got.GroupID, "expected GroupID to be cleared")
-}
-
-func (s *APIKeyRepoSuite) TestUpdateConfigPreservesConcurrentRuntimeState() {
-	user := s.mustCreateUser("scoped-update@test.com")
-	key := &service.APIKey{UserID: user.ID, Key: "sk-scoped-update", Name: "before", Status: service.StatusActive, Quota: 10, QuotaUsed: 9}
-	s.Require().NoError(s.repo.Create(s.ctx, key))
-
-	_, err := s.repo.IncrementQuotaUsedAndGetState(s.ctx, key.ID, 2)
-	s.Require().NoError(err)
-	s.Require().NoError(s.repo.IncrementRateLimitUsage(s.ctx, key.ID, 3))
-
-	name := "after"
-	updated, err := s.repo.UpdateConfig(s.ctx, key.ID, user.ID, service.APIKeyConfigPatch{Name: &name})
-	s.Require().NoError(err)
-	s.Equal("after", updated.Name)
-	s.Equal(11.0, updated.QuotaUsed)
-	s.Equal(service.StatusAPIKeyQuotaExhausted, updated.Status)
-	s.Equal(3.0, updated.Usage5h)
-	s.NotNil(updated.Window5hStart)
-}
-
-func TestAPIKeyUpdateResponseViewConcurrentGroupChanges(t *testing.T) {
-	client := testEntClient(t)
-	repo := NewAPIKeyRepository(client, integrationDB).(*apiKeyRepository)
-	ctx := context.Background()
-	user, err := client.User.Create().SetEmail("response-view-" + time.Now().Format(time.RFC3339Nano) + "@test.com").SetPasswordHash("hash").SetStatus(service.StatusActive).SetRole(service.RoleUser).Save(ctx)
-	require.NoError(t, err)
-	groupA, err := client.Group.Create().SetName("response-a-" + time.Now().Format(time.RFC3339Nano)).SetStatus(service.StatusActive).Save(ctx)
-	require.NoError(t, err)
-	groupB, err := client.Group.Create().SetName("response-b-" + time.Now().Format(time.RFC3339Nano)).SetStatus(service.StatusActive).Save(ctx)
-	require.NoError(t, err)
-	cleanupAPIKeyResponseViewFixtures(t, user.ID, groupA.ID, groupB.ID)
-
-	cases := []struct {
-		name    string
-		initial *int64
-		target  *int64
-	}{
-		{name: "unchanged", initial: &groupA.ID, target: &groupA.ID},
-		{name: "bind", target: &groupA.ID},
-		{name: "unbind", initial: &groupA.ID},
-		{name: "rebind", initial: &groupA.ID, target: &groupB.ID},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			key := &service.APIKey{UserID: user.ID, Key: "sk-response-" + tc.name + time.Now().Format(time.RFC3339Nano), Name: "before", GroupID: tc.initial, Status: service.StatusActive}
-			require.NoError(t, repo.Create(ctx, key))
-
-			tx, err := client.Tx(ctx)
-			require.NoError(t, err)
-			txCtx := dbent.NewTxContext(ctx, tx)
-			txRepo := newAPIKeyRepositoryWithSQL(tx.Client(), tx.Client())
-			adminView, err := txRepo.UpdateGroupID(txCtx, key.ID, tc.target)
-			require.NoError(t, err)
-			assertAPIKeyResponseEdges(t, adminView, user.ID, tc.target)
-
-			result := make(chan struct {
-				key *service.APIKey
-				err error
-			}, 1)
-			go func() {
-				name := "after"
-				got, updateErr := repo.UpdateConfig(ctx, key.ID, user.ID, service.APIKeyConfigPatch{Name: &name})
-				result <- struct {
-					key *service.APIKey
-					err error
-				}{got, updateErr}
-			}()
-			select {
-			case got := <-result:
-				t.Fatalf("user update bypassed held row lock: %v", got.err)
-			case <-time.After(100 * time.Millisecond):
-			}
-			require.NoError(t, tx.Commit())
-			got := <-result
-			require.NoError(t, got.err)
-			assertAPIKeyResponseEdges(t, got.key, user.ID, tc.target)
-		})
-	}
-}
-
-func assertAPIKeyResponseEdges(t *testing.T, key *service.APIKey, userID int64, groupID *int64) {
-	t.Helper()
-	require.NotNil(t, key.User)
-	require.Equal(t, userID, key.User.ID)
-	if groupID == nil {
-		require.Nil(t, key.GroupID)
-		require.Nil(t, key.Group)
-		return
-	}
-	require.NotNil(t, key.GroupID)
-	require.NotNil(t, key.Group)
-	require.Equal(t, *key.GroupID, key.Group.ID)
-	require.Equal(t, *groupID, key.Group.ID)
-}
-
-func TestAPIKeyUpdateResponseViewRollbackAndNotFound(t *testing.T) {
-	client := testEntClient(t)
-	repo := NewAPIKeyRepository(client, integrationDB).(*apiKeyRepository)
-	ctx := context.Background()
-	_, err := repo.UpdateGroupID(ctx, 999999999, nil)
-	require.ErrorIs(t, err, service.ErrAPIKeyNotFound)
-	_, err = repo.ResetRateLimitUsage(ctx, 999999999)
-	require.ErrorIs(t, err, service.ErrAPIKeyNotFound)
-
-	user, err := client.User.Create().SetEmail("response-rollback-" + time.Now().Format(time.RFC3339Nano) + "@test.com").SetPasswordHash("hash").SetStatus(service.StatusActive).SetRole(service.RoleUser).Save(ctx)
-	require.NoError(t, err)
-	group, err := client.Group.Create().SetName("response-rollback-" + time.Now().Format(time.RFC3339Nano)).SetStatus(service.StatusActive).Save(ctx)
-	require.NoError(t, err)
-	cleanupAPIKeyResponseViewFixtures(t, user.ID, group.ID)
-	key := &service.APIKey{UserID: user.ID, Key: "sk-response-rollback-" + time.Now().Format(time.RFC3339Nano), Name: "before", Status: service.StatusActive}
-	require.NoError(t, repo.Create(ctx, key))
-	tx, err := client.Tx(ctx)
-	require.NoError(t, err)
-	txCtx := dbent.NewTxContext(ctx, tx)
-	txRepo := newAPIKeyRepositoryWithSQL(tx.Client(), tx.Client())
-	view, err := txRepo.UpdateGroupID(txCtx, key.ID, &group.ID)
-	require.NoError(t, err)
-	assertAPIKeyResponseEdges(t, view, user.ID, &group.ID)
-	require.NoError(t, tx.Rollback())
-	view, err = repo.GetByID(ctx, key.ID)
-	require.NoError(t, err)
-	assertAPIKeyResponseEdges(t, view, user.ID, nil)
-}
-
-func cleanupAPIKeyResponseViewFixtures(t *testing.T, userID int64, groupIDs ...int64) {
-	t.Helper()
-	t.Cleanup(func() {
-		ctx := context.Background()
-		_, _ = integrationDB.ExecContext(ctx, `DELETE FROM api_keys WHERE user_id = $1`, userID)
-		for _, groupID := range groupIDs {
-			_, _ = integrationDB.ExecContext(ctx, `DELETE FROM groups WHERE id = $1`, groupID)
-		}
-		_, _ = integrationDB.ExecContext(ctx, `DELETE FROM users WHERE id = $1`, userID)
-	})
-}
-
-func (s *APIKeyRepoSuite) TestUpdateConfigOwnershipAndExplicitResets() {
-	owner := s.mustCreateUser("scoped-owner@test.com")
-	other := s.mustCreateUser("scoped-other@test.com")
-	key := &service.APIKey{UserID: owner.ID, Key: "sk-scoped-owner", Name: "before", Status: service.StatusAPIKeyQuotaExhausted, Quota: 10, QuotaUsed: 10, Usage5h: 4}
-	s.Require().NoError(s.repo.Create(s.ctx, key))
-
-	name := "forbidden"
-	_, err := s.repo.UpdateConfig(s.ctx, key.ID, other.ID, service.APIKeyConfigPatch{Name: &name})
-	s.ErrorIs(err, service.ErrAPIKeyNotFound)
-
-	updated, err := s.repo.UpdateConfig(s.ctx, key.ID, owner.ID, service.APIKeyConfigPatch{ResetQuota: true, ResetRateLimitUsage: true})
-	s.Require().NoError(err)
-	s.Zero(updated.QuotaUsed)
-	s.Zero(updated.Usage5h)
-	s.Nil(updated.Window5hStart)
-	s.Equal(service.StatusAPIKeyActive, updated.Status)
-}
-
-func (s *APIKeyRepoSuite) TestUpdateConfigPreservesUnmanagedStatuses() {
-	user := s.mustCreateUser("unmanaged-status@test.com")
-	past := time.Now().Add(-time.Hour)
-
-	for _, status := range []string{service.StatusAPIKeyDisabled, "admin_suspended"} {
-		s.Run(status, func() {
-			key := &service.APIKey{
-				UserID: user.ID, Key: "sk-unmanaged-" + status, Name: "before", Status: status,
-				Quota: 10, QuotaUsed: 10, ExpiresAt: &past,
-			}
-			s.Require().NoError(s.repo.Create(s.ctx, key))
-
-			name := "after"
-			quota := 20.0
-			updated, err := s.repo.UpdateConfig(s.ctx, key.ID, user.ID, service.APIKeyConfigPatch{
-				Name: &name, Quota: &quota, ResetQuota: true,
-			})
-			s.Require().NoError(err)
-			s.Equal(status, updated.Status)
-			s.Equal("after", updated.Name)
-			s.Zero(updated.QuotaUsed)
-		})
-	}
 }
 
 // --- Delete ---
@@ -542,11 +365,10 @@ func (s *APIKeyRepoSuite) TestCRUD_Search_ClearGroupID() {
 	s.Require().NotNil(got.Group)
 	s.Require().Equal(group.ID, got.Group.ID)
 
-	name := "Renamed"
-	status := service.StatusDisabled
-	clearGroup := (*int64)(nil)
-	_, err = s.repo.UpdateConfig(s.ctx, key.ID, user.ID, service.APIKeyConfigPatch{Name: &name, Status: &status, GroupID: &clearGroup})
-	s.Require().NoError(err, "UpdateConfig")
+	key.Name = "Renamed"
+	key.Status = service.StatusDisabled
+	key.GroupID = nil
+	s.Require().NoError(s.repo.Update(s.ctx, key, service.APIKeyUpdateFields{Name: true, Status: true, GroupID: true}), "Update")
 
 	got2, err := s.repo.GetByID(s.ctx, key.ID)
 	s.Require().NoError(err, "GetByID")
@@ -662,11 +484,9 @@ func (s *APIKeyRepoSuite) TestIncrementQuotaUsed_DeletedKey() {
 func (s *APIKeyRepoSuite) TestIncrementQuotaUsedAndGetState() {
 	user := s.mustCreateUser("quota-state@test.com")
 	key := s.mustCreateApiKey(user.ID, "sk-quota-state", "QuotaState", nil)
-	quota := 3.0
-	_, err := s.repo.UpdateConfig(s.ctx, key.ID, user.ID, service.APIKeyConfigPatch{Quota: &quota})
-	s.Require().NoError(err, "Update quota")
-	_, err = s.repo.IncrementQuotaUsed(s.ctx, key.ID, 1)
-	s.Require().NoError(err)
+	key.Quota = 3
+	key.QuotaUsed = 1
+	s.Require().NoError(s.repo.Update(s.ctx, key, service.APIKeyUpdateFields{Quota: true, QuotaUsed: true}), "Update quota")
 
 	state, err := s.repo.IncrementQuotaUsedAndGetState(s.ctx, key.ID, 2.5)
 	s.Require().NoError(err, "IncrementQuotaUsedAndGetState")
@@ -736,7 +556,7 @@ func TestIncrementQuotaUsed_Concurrent(t *testing.T) {
 		"并发递增后总和应为 %v，实际为 %v", float64(goroutines)*increment, got.QuotaUsed)
 }
 
-func (s *APIKeyRepoSuite) TestDeleteWithAudit_WritesAuditAndSoftDeletes() {
+func (s *APIKeyRepoSuite) TestDeleteWithAudit_TombstonesWithoutRetainingCredential() {
 	user := s.mustCreateUser("delwithaudit@test.com")
 	key := &service.APIKey{
 		UserID: user.ID,
@@ -751,18 +571,24 @@ func (s *APIKeyRepoSuite) TestDeleteWithAudit_WritesAuditAndSoftDeletes() {
 	_, err := s.repo.GetByID(s.ctx, key.ID)
 	s.Require().Error(err)
 
-	rows, qErr := s.client.QueryContext(s.ctx,
-		`SELECT key, key_name, user_id, api_key_id FROM deleted_api_key_audits WHERE api_key_id = $1`, key.ID)
-	s.Require().NoError(qErr)
-	defer rows.Close()
-	s.Require().True(rows.Next(), "expected one audit row")
-	var auditKey, auditName string
-	var auditUserID, auditAPIKeyID int64
-	s.Require().NoError(rows.Scan(&auditKey, &auditName, &auditUserID, &auditAPIKeyID))
-	s.Require().Equal("sk-del-audit-1", auditKey)
-	s.Require().Equal("Audit Me", auditName)
-	s.Require().Equal(user.ID, auditUserID)
-	s.Require().Equal(key.ID, auditAPIKeyID)
+	var tombstone string
+	var deletedAt time.Time
+	rows, err := s.repo.sql.QueryContext(s.ctx, `SELECT key, deleted_at FROM api_keys WHERE id = $1`, key.ID)
+	s.Require().NoError(err)
+	s.Require().True(rows.Next())
+	s.Require().NoError(rows.Scan(&tombstone, &deletedAt))
+	s.Require().NoError(rows.Close())
+	s.Require().NotEqual("sk-del-audit-1", tombstone)
+	s.Require().Contains(tombstone, "__deleted__")
+
+	var auditCount int
+	auditRows, err := s.repo.sql.QueryContext(s.ctx,
+		`SELECT COUNT(*) FROM deleted_api_key_audits WHERE api_key_id = $1`, key.ID)
+	s.Require().NoError(err)
+	s.Require().True(auditRows.Next())
+	s.Require().NoError(auditRows.Scan(&auditCount))
+	s.Require().NoError(auditRows.Close())
+	s.Require().Zero(auditCount, "deleted credentials must not be retained")
 }
 
 func (s *APIKeyRepoSuite) TestDeleteWithAudit_RepeatIsIdempotent() {

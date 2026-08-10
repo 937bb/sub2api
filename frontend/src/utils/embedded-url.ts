@@ -37,15 +37,7 @@ export function buildEmbeddedUrl(
     // Source tracking: let the embedded page know where it's being loaded from
     if (typeof window !== 'undefined') {
       url.searchParams.set(EMBEDDED_SRC_HOST_QUERY_KEY, window.location.origin)
-      try {
-        const sourceUrl = new URL(window.location.href)
-        url.searchParams.set(
-          EMBEDDED_SRC_QUERY_KEY,
-          `${sourceUrl.origin}${sourceUrl.pathname}`,
-        )
-      } catch {
-        // Keep the embed contract intact when the host cannot provide an absolute URL.
-      }
+      url.searchParams.set(EMBEDDED_SRC_QUERY_KEY, window.location.href)
     }
     return url.toString()
   } catch {

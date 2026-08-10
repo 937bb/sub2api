@@ -7,7 +7,6 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -207,212 +206,6 @@ func TestSettingHandler_UpdateSettings_PreservesOmittedAuthSourceDefaults(t *tes
 	require.Equal(t, true, data["force_email_on_third_party_signup"])
 }
 
-func TestSettingHandler_UpdateSettings_RejectsInvalidFrontendURLWithoutPersistence(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	repo := &settingHandlerRepoStub{values: map[string]string{}}
-	svc := service.NewSettingService(repo, &config.Config{})
-	handler := NewSettingHandler(svc, nil, nil, nil, nil, nil, nil)
-
-	body, err := json.Marshal(map[string]any{"frontend_url": "https://user:pass@example.com?token=secret"})
-	require.NoError(t, err)
-	rec := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(rec)
-	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(body))
-	c.Request.Header.Set("Content-Type", "application/json")
-
-	handler.UpdateSettings(c)
-
-	require.Equal(t, http.StatusBadRequest, rec.Code)
-	require.Nil(t, repo.lastUpdates)
-}
-
-func TestSettingHandler_UpdateSettings_MalformedFrontendURLDoesNotLeakCredentials(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	repo := &settingHandlerRepoStub{values: map[string]string{}}
-	svc := service.NewSettingService(repo, &config.Config{})
-	handler := NewSettingHandler(svc, nil, nil, nil, nil, nil, nil)
-
-	const malformedWithCredentials = "https://user:secret@example.com/%"
-	body, err := json.Marshal(map[string]any{"frontend_url": malformedWithCredentials})
-	require.NoError(t, err)
-	rec := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(rec)
-	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(body))
-	c.Request.Header.Set("Content-Type", "application/json")
-
-	handler.UpdateSettings(c)
-
-	require.Equal(t, http.StatusBadRequest, rec.Code)
-	require.NotContains(t, rec.Body.String(), malformedWithCredentials)
-	require.NotContains(t, rec.Body.String(), "user:secret")
-	require.NotContains(t, rec.Body.String(), "invalid URL escape")
-	require.Nil(t, repo.lastUpdates)
-}
-
-func TestSettingHandler_GetSettings_ReturnsOpenAICodexUAProfile(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	const rawUA = "codex-custom/1.2.3 (Linux 6.0; x64) XTerm/380 (codex-custom; 1.2.3)"
-	repo := &settingHandlerRepoStub{
-		values: map[string]string{
-			service.SettingKeyOpenAICodexUserAgent: rawUA,
-		},
-	}
-	svc := service.NewSettingService(repo, &config.Config{Default: config.DefaultConfig{UserConcurrency: 5}})
-	handler := NewSettingHandler(svc, nil, nil, nil, nil, nil, nil)
-
-	rec := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(rec)
-	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/admin/settings", nil)
-
-	handler.GetSettings(c)
-
-	require.Equal(t, http.StatusOK, rec.Code)
-	var resp response.Response
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
-	data, ok := resp.Data.(map[string]any)
-	require.True(t, ok)
-	require.Equal(t, rawUA, data["openai_codex_user_agent"])
-	profile, ok := data["openai_codex_ua_profile"].(map[string]any)
-	require.True(t, ok)
-	require.Equal(t, "codex-custom", profile["originator"])
-	require.Equal(t, "1.2.3", profile["codex_version"])
-	require.Equal(t, "Linux 6.0; x64", profile["os_fingerprint"])
-	require.Equal(t, "XTerm/380", profile["terminal_token"])
-	require.Equal(t, rawUA, profile["user_agent"])
-}
-
-func TestSettingHandler_UpdateSettings_OpenAICodexUAProfileRoundTripPreservesRawUserAgent(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	const rawUA = "custom raw ua"
-	repo := &settingHandlerRepoStub{
-		values: map[string]string{
-			service.SettingKeyOpenAICodexUserAgent: rawUA,
-		},
-	}
-	svc := service.NewSettingService(repo, &config.Config{Default: config.DefaultConfig{UserConcurrency: 5}})
-	handler := NewSettingHandler(svc, nil, nil, nil, nil, nil, nil)
-
-	body := map[string]any{
-		"openai_codex_ua_profile": map[string]any{
-			"originator":     "codex-tui",
-			"codex_version":  "0.144.1",
-			"os_fingerprint": "Mac OS 26.5.0; arm64",
-			"terminal_token": "Apple_Terminal/470.2",
-			"user_agent":     rawUA,
-		},
-	}
-	rawBody, err := json.Marshal(body)
-	require.NoError(t, err)
-
-	rec := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(rec)
-	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(rawBody))
-	c.Request.Header.Set("Content-Type", "application/json")
-
-	handler.UpdateSettings(c)
-
-	require.Equal(t, http.StatusOK, rec.Code)
-	require.Equal(t, rawUA, repo.values[service.SettingKeyOpenAICodexUserAgent])
-
-	var resp response.Response
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
-	data, ok := resp.Data.(map[string]any)
-	require.True(t, ok)
-	require.Equal(t, rawUA, data["openai_codex_user_agent"])
-	profile, ok := data["openai_codex_ua_profile"].(map[string]any)
-	require.True(t, ok)
-	require.Equal(t, rawUA, profile["user_agent"])
-}
-
-func TestSettingHandler_UpdateSettings_OpenAICodexUAProfileFullPUTAllowsExplicitRawUserAgentChange(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	const oldRawUA = "custom raw ua"
-	const newRawUA = "custom raw ua v2"
-	repo := &settingHandlerRepoStub{
-		values: map[string]string{
-			service.SettingKeyOpenAICodexUserAgent: oldRawUA,
-		},
-	}
-	svc := service.NewSettingService(repo, &config.Config{Default: config.DefaultConfig{UserConcurrency: 5}})
-	handler := NewSettingHandler(svc, nil, nil, nil, nil, nil, nil)
-
-	body := map[string]any{
-		"openai_codex_user_agent": newRawUA,
-		"openai_codex_ua_profile": map[string]any{
-			"originator":     "codex-tui",
-			"codex_version":  "0.144.1",
-			"os_fingerprint": "Mac OS 26.5.0; arm64",
-			"terminal_token": "Apple_Terminal/470.2",
-			"user_agent":     oldRawUA,
-		},
-	}
-	rawBody, err := json.Marshal(body)
-	require.NoError(t, err)
-
-	rec := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(rec)
-	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(rawBody))
-	c.Request.Header.Set("Content-Type", "application/json")
-
-	handler.UpdateSettings(c)
-
-	require.Equal(t, http.StatusOK, rec.Code)
-	require.Equal(t, newRawUA, repo.values[service.SettingKeyOpenAICodexUserAgent])
-
-	var resp response.Response
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
-	data, ok := resp.Data.(map[string]any)
-	require.True(t, ok)
-	require.Equal(t, newRawUA, data["openai_codex_user_agent"])
-	profile, ok := data["openai_codex_ua_profile"].(map[string]any)
-	require.True(t, ok)
-	require.Equal(t, newRawUA, profile["user_agent"])
-}
-
-func TestSettingHandler_UpdateSettings_OpenAICodexUAProfileWritesCanonicalRawUA(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	repo := &settingHandlerRepoStub{
-		values: map[string]string{
-			service.SettingKeyPromoCodeEnabled: "true",
-		},
-	}
-	svc := service.NewSettingService(repo, &config.Config{Default: config.DefaultConfig{UserConcurrency: 5}})
-	handler := NewSettingHandler(svc, nil, nil, nil, nil, nil, nil)
-
-	body := map[string]any{
-		"openai_codex_user_agent": strings.Repeat("x", 513),
-		"openai_codex_ua_profile": map[string]any{
-			"originator":     "codex-custom",
-			"codex_version":  "1.2.3",
-			"os_fingerprint": "Linux 6.0; x64",
-			"terminal_token": "XTerm/380",
-		},
-	}
-	rawBody, err := json.Marshal(body)
-	require.NoError(t, err)
-
-	rec := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(rec)
-	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(rawBody))
-	c.Request.Header.Set("Content-Type", "application/json")
-
-	handler.UpdateSettings(c)
-
-	const expectedUA = "codex-custom/1.2.3 (Linux 6.0; x64) XTerm/380 (codex-custom; 1.2.3)"
-	require.Equal(t, http.StatusOK, rec.Code)
-	require.Equal(t, expectedUA, repo.values[service.SettingKeyOpenAICodexUserAgent])
-
-	var resp response.Response
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
-	data, ok := resp.Data.(map[string]any)
-	require.True(t, ok)
-	require.Equal(t, expectedUA, data["openai_codex_user_agent"])
-	profile, ok := data["openai_codex_ua_profile"].(map[string]any)
-	require.True(t, ok)
-	require.Equal(t, "codex-custom", profile["originator"])
-	require.Equal(t, expectedUA, profile["user_agent"])
-}
-
 func TestSettingHandler_UpdateSettings_PersistsPaymentVisibleMethodsAndAdvancedScheduler(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	repo := &settingHandlerRepoStub{
@@ -424,12 +217,14 @@ func TestSettingHandler_UpdateSettings_PersistsPaymentVisibleMethodsAndAdvancedS
 	handler := NewSettingHandler(svc, nil, nil, nil, nil, nil, nil)
 
 	body := map[string]any{
-		"promo_code_enabled":                    true,
-		"payment_visible_method_alipay_source":  "easypay",
-		"payment_visible_method_wxpay_source":   "wxpay",
-		"payment_visible_method_alipay_enabled": true,
-		"payment_visible_method_wxpay_enabled":  false,
-		"openai_advanced_scheduler_enabled":     true,
+		"promo_code_enabled":                                      true,
+		"payment_visible_method_alipay_source":                    "easypay",
+		"payment_visible_method_wxpay_source":                     "wxpay",
+		"payment_visible_method_alipay_enabled":                   true,
+		"payment_visible_method_wxpay_enabled":                    false,
+		"openai_advanced_scheduler_enabled":                       true,
+		"openai_oauth_scheduling_rate_multiplier":                 0.05,
+		"openai_advanced_scheduler_subscription_priority_enabled": true,
 	}
 	rawBody, err := json.Marshal(body)
 	require.NoError(t, err)
@@ -447,6 +242,8 @@ func TestSettingHandler_UpdateSettings_PersistsPaymentVisibleMethodsAndAdvancedS
 	require.Equal(t, "true", repo.values[service.SettingPaymentVisibleMethodAlipayEnabled])
 	require.Equal(t, "false", repo.values[service.SettingPaymentVisibleMethodWxpayEnabled])
 	require.Equal(t, "true", repo.values["openai_advanced_scheduler_enabled"])
+	require.Equal(t, "0.05", repo.values[service.SettingKeyOpenAIOAuthSchedulingRateMultiplier])
+	require.Equal(t, "true", repo.values[service.SettingKeyOpenAIAdvancedSchedulerSubscriptionPriorityEnabled])
 
 	var resp response.Response
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
@@ -457,6 +254,8 @@ func TestSettingHandler_UpdateSettings_PersistsPaymentVisibleMethodsAndAdvancedS
 	require.Equal(t, true, data["payment_visible_method_alipay_enabled"])
 	require.Equal(t, false, data["payment_visible_method_wxpay_enabled"])
 	require.Equal(t, true, data["openai_advanced_scheduler_enabled"])
+	require.Equal(t, 0.05, data["openai_oauth_scheduling_rate_multiplier"])
+	require.Equal(t, true, data["openai_advanced_scheduler_subscription_priority_enabled"])
 }
 
 func TestSettingHandler_UpdateSettings_PreservesLegacyBlankPaymentVisibleMethodSource(t *testing.T) {

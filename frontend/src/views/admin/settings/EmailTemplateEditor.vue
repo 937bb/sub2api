@@ -101,7 +101,7 @@
               {{ selectedEventMeta.label }}
             </div>
             <span
-              class="rounded-full bg-[var(--glass-bg-content)] px-2.5 py-1 text-xs font-medium text-gray-600 shadow-sm ring-1 ring-gray-200  dark:text-gray-300 dark:ring-dark-600"
+              class="rounded-full bg-white px-2.5 py-1 text-xs font-medium text-gray-600 shadow-sm ring-1 ring-gray-200 dark:bg-dark-800 dark:text-gray-300 dark:ring-dark-600"
             >
               {{ selectedEventMeta.categoryLabel }}
             </span>
@@ -178,7 +178,7 @@
                   v-for="placeholder in placeholderList"
                   :key="placeholder"
                   type="button"
-                  class="rounded-full border border-gray-200 bg-[var(--glass-bg-content)] px-3 py-1 font-mono text-xs text-gray-700 transition-colors hover:border-primary-300 hover:text-primary-600 dark:border-dark-600  dark:text-gray-200 dark:hover:border-primary-500 dark:hover:text-primary-300"
+                  class="rounded-full border border-gray-200 bg-white px-3 py-1 font-mono text-xs text-gray-700 transition-colors hover:border-primary-300 hover:text-primary-600 dark:border-dark-600 dark:bg-dark-700 dark:text-gray-200 dark:hover:border-primary-500 dark:hover:text-primary-300"
                   @click="copyPlaceholder(placeholder)"
                 >
                   {{ placeholder }}
@@ -189,7 +189,7 @@
 
           <div class="space-y-4">
             <div
-              class="rounded-lg border border-gray-200 bg-[var(--glass-bg-content)] dark:border-dark-700 "
+              class="rounded-lg border border-gray-200 bg-white dark:border-dark-700 dark:bg-dark-800"
             >
               <div
                 class="flex items-center justify-between border-b border-gray-100 px-4 py-3 dark:border-dark-700"
@@ -286,6 +286,29 @@ const fallbackPlaceholders = [
   "{{report_type}}",
   "{{report_start_time}}",
   "{{report_end_time}}",
+  "{{report_summary_display}}",
+  "{{report_detail_display}}",
+  "{{report_total_requests}}",
+  "{{report_success_count}}",
+  "{{report_sla_error_count}}",
+  "{{report_business_limited_count}}",
+  "{{report_sla}}",
+  "{{report_error_rate}}",
+  "{{report_upstream_error_rate}}",
+  "{{report_upstream_error_count_excl_429_529}}",
+  "{{report_upstream_429_count}}",
+  "{{report_upstream_529_count}}",
+  "{{report_latency_p50}}",
+  "{{report_latency_p99}}",
+  "{{report_ttft_p50}}",
+  "{{report_ttft_p99}}",
+  "{{report_tokens}}",
+  "{{report_qps_current}}",
+  "{{report_qps_peak}}",
+  "{{report_qps_avg}}",
+  "{{report_tps_current}}",
+  "{{report_tps_peak}}",
+  "{{report_tps_avg}}",
   "{{report_html}}",
 ];
 
@@ -374,7 +397,7 @@ const eventDisplayMeta: Record<string, EventDisplayMeta> = {
   },
   "ops.scheduled_report": {
     label: "运维定时报表",
-    timing: "运维日报、周报、错误摘要或账号健康报表到达配置的发送时间时发送。",
+    timing: "运维日报、周报、错误摘要或账号健康报表到达配置的发送时间时发送；日报和周报的完整指标均可在模板中编辑。",
     categoryLabel: "运维",
   },
 };
@@ -437,7 +460,7 @@ const eventDisplayMetaEn: Record<string, EventDisplayMeta> = {
   },
   "ops.scheduled_report": {
     label: "Ops Scheduled Report",
-    timing: "Sent when a configured daily, weekly, error digest, or account health report reaches its scheduled send time.",
+    timing: "Sent when a configured daily, weekly, error digest, or account health report reaches its scheduled send time. Every daily and weekly summary metric is editable in this template.",
     categoryLabel: "Ops",
   },
 };
@@ -505,7 +528,9 @@ const selectedEventDescription = computed(() => {
 });
 
 const placeholderList = computed(() => {
-  const combined = [...placeholders.value, ...fallbackPlaceholders];
+  const combined = placeholders.value.length
+    ? placeholders.value
+    : fallbackPlaceholders;
   return Array.from(
     new Set(
       combined

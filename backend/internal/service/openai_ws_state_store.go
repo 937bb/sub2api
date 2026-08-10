@@ -99,14 +99,11 @@ func (s *defaultOpenAIWSStateStore) BindResponseAccount(ctx context.Context, gro
 	ttl = normalizeOpenAIWSTTL(ttl)
 	s.maybeCleanup()
 
-	localKey := openAIWSResponseAccountLocalKey(groupID, id)
-	if localKey == "" {
-		return nil
-	}
 	expiresAt := time.Now().Add(ttl)
+	mapKey := openAIWSResponseAccountMapKey(groupID, id)
 	s.responseToAccountMu.Lock()
-	ensureBindingCapacity(s.responseToAccount, localKey, openAIWSStateStoreMaxEntriesPerMap)
-	s.responseToAccount[localKey] = openAIWSAccountBinding{accountID: accountID, expiresAt: expiresAt}
+	ensureBindingCapacity(s.responseToAccount, mapKey, openAIWSStateStoreMaxEntriesPerMap)
+	s.responseToAccount[mapKey] = openAIWSAccountBinding{accountID: accountID, expiresAt: expiresAt}
 	s.responseToAccountMu.Unlock()
 
 	if s.cache == nil {
@@ -125,13 +122,10 @@ func (s *defaultOpenAIWSStateStore) GetResponseAccount(ctx context.Context, grou
 	}
 	s.maybeCleanup()
 
-	localKey := openAIWSResponseAccountLocalKey(groupID, id)
-	if localKey == "" {
-		return 0, nil
-	}
 	now := time.Now()
+	mapKey := openAIWSResponseAccountMapKey(groupID, id)
 	s.responseToAccountMu.RLock()
-	if binding, ok := s.responseToAccount[localKey]; ok {
+	if binding, ok := s.responseToAccount[mapKey]; ok {
 		if now.Before(binding.expiresAt) {
 			accountID := binding.accountID
 			s.responseToAccountMu.RUnlock()
@@ -160,12 +154,8 @@ func (s *defaultOpenAIWSStateStore) DeleteResponseAccount(ctx context.Context, g
 	if id == "" {
 		return nil
 	}
-	localKey := openAIWSResponseAccountLocalKey(groupID, id)
-	if localKey == "" {
-		return nil
-	}
 	s.responseToAccountMu.Lock()
-	delete(s.responseToAccount, localKey)
+	delete(s.responseToAccount, openAIWSResponseAccountMapKey(groupID, id))
 	s.responseToAccountMu.Unlock()
 
 	if s.cache == nil {
@@ -429,12 +419,9 @@ func openAIWSResponseAccountCacheKey(responseID string) string {
 	return openAIWSResponseAccountCachePrefix + hex.EncodeToString(sum[:])
 }
 
-func openAIWSResponseAccountLocalKey(groupID int64, responseID string) string {
-	id := normalizeOpenAIWSResponseID(responseID)
-	if id == "" {
-		return ""
-	}
-	return fmt.Sprintf("%d:%s", groupID, id)
+// openAIWSResponseAccountMapKey 本地热缓存按分组隔离的 key，与 Redis 层保持一致，避免跨组命中。
+func openAIWSResponseAccountMapKey(groupID int64, responseID string) string {
+	return fmt.Sprintf("%d:%s", groupID, responseID)
 }
 
 func normalizeOpenAIWSTTL(ttl time.Duration) time.Duration {

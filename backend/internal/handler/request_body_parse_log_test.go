@@ -3,9 +3,9 @@
 package handler
 
 import (
+	"strings"
 	"testing"
 
-	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
@@ -26,8 +26,8 @@ func loggedFields(t *testing.T, logs *observer.ObservedLogs) map[string]any {
 		switch f.Key {
 		case "body_len":
 			fields[f.Key] = int(f.Integer)
-		case "json_error_offset":
-			fields[f.Key] = f.Integer
+		case "error":
+			fields[f.Key] = f.Interface.(error).Error()
 		default:
 			fields[f.Key] = f.String
 		}
@@ -43,31 +43,54 @@ func TestLogRequestBodyParseFailure_DerivesErrorWhenNil(t *testing.T) {
 
 	fields := loggedFields(t, logs)
 	require.Equal(t, len(body), fields["body_len"])
-	require.Equal(t, service.InvalidJSONCategoryValidation, fields["json_error_category"])
-	require.NotContains(t, fields, "json_error_offset")
+	require.Contains(t, fields["error"], "invalid json")
+	require.Contains(t, fields["error"], "offset=11")
 }
 
-func TestLogRequestBodyParseFailure_NoBodyBytesOrParserText(t *testing.T) {
+func TestLogRequestBodyParseFailure_ShortBodyHasNoTail(t *testing.T) {
 	log, logs := newObservedLogger(t)
-	secret := "sk-super-secret-value"
-	field := "api_key"
-	body := []byte(`{"` + field + `":` + secret + `}`)
+	body := []byte(`{"broken":`)
 
 	logRequestBodyParseFailure(log, body, nil)
 
 	fields := loggedFields(t, logs)
-	require.NotContains(t, fields, "error")
-	require.NotContains(t, fields, "body_head")
+	require.Contains(t, fields, "body_head")
 	require.NotContains(t, fields, "body_tail")
-	for _, value := range fields {
-		text, ok := value.(string)
-		if !ok {
-			continue
-		}
-		require.NotContains(t, text, secret)
-		require.NotContains(t, text, field)
-		require.NotContains(t, text, "invalid character")
-	}
+	require.Contains(t, fields["body_head"].(string), `{\"broken\":`)
+}
+
+func TestLogRequestBodyParseFailure_LargeBodyBoundedSnippets(t *testing.T) {
+	log, logs := newObservedLogger(t)
+	// ~1MB body: head must show the structural prefix, tail the trailing bytes,
+	// and neither snippet may exceed the configured bound (plus quoting overhead).
+	body := []byte(`{"model":"claude-sonnet-4-6","big":"` + strings.Repeat("A", 1<<20) + `"`)
+
+	logRequestBodyParseFailure(log, body, nil)
+
+	fields := loggedFields(t, logs)
+	require.Equal(t, len(body), fields["body_len"])
+	head := fields["body_head"].(string)
+	tail := fields["body_tail"].(string)
+	require.Contains(t, head, "claude-sonnet-4-6")
+	require.Contains(t, tail, "AAA")
+	require.NotContains(t, tail, "claude-sonnet-4-6")
+	// strconv.Quote adds surrounding quotes and escapes; 4x is a generous cap.
+	require.LessOrEqual(t, len(head), parseFailureSnippetLen*4)
+	require.LessOrEqual(t, len(tail), parseFailureSnippetLen*4)
+}
+
+func TestLogRequestBodyParseFailure_EscapesControlCharacters(t *testing.T) {
+	log, logs := newObservedLogger(t)
+	body := []byte("{\"model\":\x01\n\"x\"}")
+
+	logRequestBodyParseFailure(log, body, nil)
+
+	fields := loggedFields(t, logs)
+	head := fields["body_head"].(string)
+	require.NotContains(t, head, "\n")
+	require.NotContains(t, head, "\x01")
+	require.Contains(t, head, `\n`)
+	require.Contains(t, head, `\x01`)
 }
 
 func TestLogRequestBodyParseFailure_NilLoggerNoPanic(t *testing.T) {

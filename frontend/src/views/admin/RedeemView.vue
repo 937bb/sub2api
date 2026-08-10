@@ -2,24 +2,7 @@
   <AppLayout>
     <TablePageLayout>
       <template #filters>
-        <div class="space-y-4">
-          <!-- Summary strip -->
-          <div class="card grid grid-cols-3 divide-x divide-gray-200/70 dark:divide-dark-700">
-            <div class="px-5 py-3">
-              <p class="font-display text-2xl font-bold tracking-tight text-gray-900 dark:text-white">{{ pagination.total }}</p>
-              <p class="mt-0.5 text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.redeem.summaryTotal') }}</p>
-            </div>
-            <div class="px-5 py-3">
-              <p class="font-display text-2xl font-bold tracking-tight text-emerald-600 dark:text-emerald-400">{{ unusedCount }}</p>
-              <p class="mt-0.5 text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.redeem.summaryUnused') }}</p>
-            </div>
-            <div class="px-5 py-3">
-              <p class="font-display text-2xl font-bold tracking-tight text-gray-500 dark:text-gray-400">{{ usedCount }}</p>
-              <p class="mt-0.5 text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.redeem.summaryUsed') }}</p>
-            </div>
-          </div>
-
-          <div class="flex flex-wrap items-center gap-3">
+        <div class="flex flex-wrap items-center gap-3">
           <!-- Left: Search + Filters -->
           <div class="flex-1 sm:max-w-64">
             <input
@@ -69,7 +52,6 @@
               {{ t('admin.redeem.generateCodes') }}
             </button>
           </div>
-        </div>
         </div>
       </template>
 
@@ -295,7 +277,7 @@
       <div v-if="showGenerateDialog" class="fixed inset-0 z-50 flex items-center justify-center">
         <div class="fixed inset-0 bg-black/50" @click="showGenerateDialog = false"></div>
         <div
-          class="relative z-10 w-full max-w-md rounded-xl bg-[var(--glass-bg-content)] p-6 shadow-xl "
+          class="relative z-10 w-full max-w-md rounded-xl bg-white p-6 shadow-xl dark:bg-dark-800"
         >
           <h2 class="mb-4 text-lg font-semibold text-gray-900 dark:text-white">
             {{ t('admin.redeem.generateCodesTitle') }}
@@ -435,7 +417,7 @@
       >
         <div class="fixed inset-0 bg-black/50" @click="closeBatchUpdateDialog"></div>
         <div
-          class="relative z-10 w-full max-w-lg rounded-xl bg-[var(--glass-bg-content)] p-6 shadow-xl "
+          class="relative z-10 w-full max-w-lg rounded-xl bg-white p-6 shadow-xl dark:bg-dark-800"
         >
           <h2 class="mb-1 text-lg font-semibold text-gray-900 dark:text-white">
             {{ t('admin.redeem.batchUpdateTitle') }}
@@ -542,7 +524,7 @@
     <Teleport to="body">
       <div v-if="showResultDialog" class="fixed inset-0 z-50 flex items-center justify-center p-4">
         <div class="fixed inset-0 bg-black/50" @click="closeResultDialog"></div>
-        <div class="relative z-10 w-full max-w-lg rounded-xl bg-[var(--glass-bg-content)] shadow-xl ">
+        <div class="relative z-10 w-full max-w-lg rounded-xl bg-white shadow-xl dark:bg-dark-800">
           <!-- Header -->
           <div
             class="flex items-center justify-between border-b border-gray-200 px-5 py-4 dark:border-dark-600"
@@ -786,10 +768,6 @@ const codes = ref<RedeemCode[]>([])
 const loading = ref(false)
 const generating = ref(false)
 const batchUpdating = ref(false)
-
-// Page-scoped status breakdown (server total lives in pagination.total).
-const unusedCount = computed(() => codes.value.filter((c) => c.status === 'unused').length)
-const usedCount = computed(() => codes.value.filter((c) => c.status === 'used').length)
 const searchQuery = ref('')
 const filters = reactive({
   type: '',

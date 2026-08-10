@@ -92,8 +92,11 @@ func (m *mockAccountRepoForPlatform) Delete(ctx context.Context, id int64) error
 func (m *mockAccountRepoForPlatform) List(ctx context.Context, params pagination.PaginationParams) ([]Account, *pagination.PaginationResult, error) {
 	return nil, nil, nil
 }
-func (m *mockAccountRepoForPlatform) ListWithFilters(_ context.Context, _ pagination.PaginationParams, _ AccountListFilters) ([]Account, *pagination.PaginationResult, error) {
+func (m *mockAccountRepoForPlatform) ListWithFilters(ctx context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64, privacyMode string) ([]Account, *pagination.PaginationResult, error) {
 	return nil, nil, nil
+}
+func (m *mockAccountRepoForPlatform) ListAllWithFilters(ctx context.Context, platform, accountType, status, search string, groupID int64, privacyMode string) ([]Account, error) {
+	return nil, nil
 }
 func (m *mockAccountRepoForPlatform) ListByGroup(ctx context.Context, groupID int64) ([]Account, error) {
 	return nil, nil
@@ -101,13 +104,7 @@ func (m *mockAccountRepoForPlatform) ListByGroup(ctx context.Context, groupID in
 func (m *mockAccountRepoForPlatform) ListActive(ctx context.Context) ([]Account, error) {
 	return nil, nil
 }
-func (m *mockAccountRepoForPlatform) ListOAuthRefreshCandidates(ctx context.Context) ([]Account, error) {
-	return nil, nil
-}
 func (m *mockAccountRepoForPlatform) ListByPlatform(ctx context.Context, platform string) ([]Account, error) {
-	return nil, nil
-}
-func (m *mockAccountRepoForPlatform) ListByPlatformForValidation(ctx context.Context, platform string) ([]Account, error) {
 	return nil, nil
 }
 func (m *mockAccountRepoForPlatform) UpdateLastUsed(ctx context.Context, id int64) error {
@@ -159,6 +156,34 @@ func (m *mockAccountRepoForPlatform) ListSchedulableUngroupedByPlatform(ctx cont
 func (m *mockAccountRepoForPlatform) ListSchedulableUngroupedByPlatforms(ctx context.Context, platforms []string) ([]Account, error) {
 	return m.ListSchedulableByPlatforms(ctx, platforms)
 }
+func (m *mockAccountRepoForPlatform) ListModelAvailabilityCandidates(_ context.Context, groupID *int64, platforms []string, includeGrouped bool) ([]Account, error) {
+	platformSet := make(map[string]struct{}, len(platforms))
+	for _, platform := range platforms {
+		platformSet[platform] = struct{}{}
+	}
+	result := make([]Account, 0, len(m.accounts))
+	for _, acc := range m.accounts {
+		if _, ok := platformSet[acc.Platform]; !ok || acc.Status != StatusActive || !acc.Schedulable {
+			continue
+		}
+		if groupID != nil {
+			inGroup := false
+			for _, accountGroup := range acc.AccountGroups {
+				if accountGroup.GroupID == *groupID {
+					inGroup = true
+					break
+				}
+			}
+			if !inGroup {
+				continue
+			}
+		} else if !includeGrouped && (len(acc.AccountGroups) > 0 || len(acc.GroupIDs) > 0) {
+			continue
+		}
+		result = append(result, acc)
+	}
+	return result, nil
+}
 func (m *mockAccountRepoForPlatform) SetRateLimited(ctx context.Context, id int64, resetAt time.Time) error {
 	return nil
 }
@@ -186,6 +211,9 @@ func (m *mockAccountRepoForPlatform) ClearModelRateLimits(ctx context.Context, i
 func (m *mockAccountRepoForPlatform) UpdateSessionWindow(ctx context.Context, id int64, start, end *time.Time, status string) error {
 	return nil
 }
+func (m *mockAccountRepoForPlatform) UpdateSessionWindowEnd(ctx context.Context, id int64, end time.Time) error {
+	return nil
+}
 func (m *mockAccountRepoForPlatform) UpdateExtra(ctx context.Context, id int64, updates map[string]any) error {
 	return nil
 }
@@ -199,6 +227,14 @@ func (m *mockAccountRepoForPlatform) IncrementQuotaUsed(ctx context.Context, id 
 
 func (m *mockAccountRepoForPlatform) ResetQuotaUsed(ctx context.Context, id int64) error {
 	return nil
+}
+
+func (m *mockAccountRepoForPlatform) RevertProxyFallback(ctx context.Context, accountID int64) error {
+	return nil
+}
+
+func (m *mockAccountRepoForPlatform) ListShadowsByParent(ctx context.Context, parentID int64) ([]*Account, error) {
+	return nil, nil
 }
 
 // Verify interface implementation
@@ -241,6 +277,20 @@ func (m *mockGatewayCacheForPlatform) DeleteSessionAccountID(ctx context.Context
 	return nil
 }
 
+func (m *mockGatewayCacheForPlatform) SetGrokVideoPendingBilling(_ context.Context, _ string, _ []byte, _ time.Duration) error {
+	return nil
+}
+func (m *mockGatewayCacheForPlatform) GetGrokVideoPendingBilling(_ context.Context, _ string) ([]byte, error) {
+	return nil, nil
+}
+func (m *mockGatewayCacheForPlatform) ClaimGrokVideoBilled(_ context.Context, _ string, _ time.Duration) (bool, error) {
+	return true, nil
+}
+
+func (m *mockGatewayCacheForPlatform) ReleaseGrokVideoBilled(_ context.Context, _ string) error {
+	return nil
+}
+
 type mockGroupRepoForGateway struct {
 	groups           map[int64]*Group
 	getByIDCalls     int
@@ -279,9 +329,6 @@ func (m *mockGroupRepoForGateway) ListActive(ctx context.Context) ([]Group, erro
 	return nil, nil
 }
 func (m *mockGroupRepoForGateway) ListActiveByPlatform(ctx context.Context, platform string) ([]Group, error) {
-	return nil, nil
-}
-func (m *mockGroupRepoForGateway) ListAllIncludingInactive(ctx context.Context, platform string) ([]Group, error) {
 	return nil, nil
 }
 func (m *mockGroupRepoForGateway) ExistsByName(ctx context.Context, name string) (bool, error) {
@@ -450,44 +497,6 @@ func TestGatewayService_SelectAccountForModelWithPlatform_NoAvailableAccounts(t 
 	require.Error(t, err)
 	require.Nil(t, acc)
 	require.ErrorIs(t, err, ErrNoAvailableAccounts)
-	require.NotErrorIs(t, err, ErrModelNotSupportedByAccounts)
-}
-
-func TestGatewayService_SelectAccountForModelWithPlatform_ModelRateLimitedNotUnsupportedModel(t *testing.T) {
-	ctx := context.Background()
-	resetAt := time.Now().Add(time.Hour)
-
-	repo := &mockAccountRepoForPlatform{
-		accounts: []Account{
-			{
-				ID:                     1,
-				Platform:               PlatformAnthropic,
-				Priority:               1,
-				Status:                 StatusActive,
-				Schedulable:            true,
-				Concurrency:            1,
-				RateLimitedAt:          &resetAt,
-				RateLimitResetAt:       &resetAt,
-				TempUnschedulableUntil: nil,
-			},
-		},
-		accountsByID: map[int64]*Account{},
-	}
-	for i := range repo.accounts {
-		repo.accountsByID[repo.accounts[i].ID] = &repo.accounts[i]
-	}
-
-	svc := &GatewayService{
-		accountRepo: repo,
-		cache:       &mockGatewayCacheForPlatform{},
-		cfg:         testConfig(),
-	}
-
-	acc, err := svc.selectAccountForModelWithPlatform(ctx, nil, "", "claude-3-5-sonnet-20241022", nil, PlatformAnthropic)
-	require.Error(t, err)
-	require.Nil(t, acc)
-	require.ErrorIs(t, err, ErrNoAvailableAccounts)
-	require.NotErrorIs(t, err, ErrModelNotSupportedByAccounts)
 }
 
 // TestGatewayService_SelectAccountForModelWithPlatform_AllExcluded 测试所有账户被排除
@@ -925,90 +934,7 @@ func TestGatewayService_SelectAccountForModelWithPlatform_NoModelSupport(t *test
 	acc, err := svc.selectAccountForModelWithPlatform(ctx, nil, "", "claude-3-5-sonnet-20241022", nil, PlatformAnthropic)
 	require.Error(t, err)
 	require.Nil(t, acc)
-	require.ErrorIs(t, err, ErrNoAvailableAccounts)
-	require.NotErrorIs(t, err, ErrModelNotSupportedByAccounts)
 	require.Contains(t, err.Error(), "supporting model")
-}
-
-func TestGatewayService_SelectAccountForModelWithPlatform_BedrockSupportMissRequiresPublicOptIn(t *testing.T) {
-	repo := &mockAccountRepoForPlatform{
-		accounts: []Account{
-			{
-				ID:          1,
-				Platform:    PlatformAnthropic,
-				Type:        AccountTypeBedrock,
-				Priority:    1,
-				Status:      StatusActive,
-				Schedulable: true,
-				Credentials: map[string]any{"aws_region": "us-east-1"},
-			},
-		},
-		accountsByID: map[int64]*Account{},
-	}
-	for i := range repo.accounts {
-		repo.accountsByID[repo.accounts[i].ID] = &repo.accounts[i]
-	}
-	svc := &GatewayService{
-		accountRepo: repo,
-		cache:       &mockGatewayCacheForPlatform{},
-		cfg:         testConfig(),
-	}
-
-	acc, err := svc.selectAccountForModelWithPlatform(context.Background(), nil, "", "claude-3-5-sonnet-20241022", nil, PlatformAnthropic)
-	require.Error(t, err)
-	require.Nil(t, acc)
-	require.ErrorIs(t, err, ErrNoAvailableAccounts)
-	require.NotErrorIs(t, err, ErrModelNotSupportedByAccounts)
-	require.Contains(t, err.Error(), "supporting model")
-
-	acc, err = svc.selectAccountForModelWithPlatform(WithPublicModelSupportMiss404(context.Background()), nil, "", "claude-3-5-sonnet-20241022", nil, PlatformAnthropic)
-	require.Error(t, err)
-	require.Nil(t, acc)
-	require.ErrorIs(t, err, ErrNoAvailableAccounts)
-	require.ErrorIs(t, err, ErrModelNotSupportedByAccounts)
-	model, ok := ModelNotSupportedRequestedModel(err)
-	require.True(t, ok)
-	require.Equal(t, "claude-3-5-sonnet-20241022", model)
-}
-
-func TestGatewayService_SelectAccountForModelWithPlatform_AntigravitySupportMissRequiresPublicOptIn(t *testing.T) {
-	repo := &mockAccountRepoForPlatform{
-		accounts: []Account{
-			{
-				ID:          1,
-				Platform:    PlatformAntigravity,
-				Type:        AccountTypeAPIKey,
-				Priority:    1,
-				Status:      StatusActive,
-				Schedulable: true,
-			},
-		},
-		accountsByID: map[int64]*Account{},
-	}
-	for i := range repo.accounts {
-		repo.accountsByID[repo.accounts[i].ID] = &repo.accounts[i]
-	}
-	svc := &GatewayService{
-		accountRepo: repo,
-		cache:       &mockGatewayCacheForPlatform{},
-		cfg:         testConfig(),
-	}
-
-	acc, err := svc.selectAccountForModelWithPlatform(context.Background(), nil, "", "gpt-4", nil, PlatformAntigravity)
-	require.Error(t, err)
-	require.Nil(t, acc)
-	require.ErrorIs(t, err, ErrNoAvailableAccounts)
-	require.NotErrorIs(t, err, ErrModelNotSupportedByAccounts)
-	require.Contains(t, err.Error(), "supporting model")
-
-	acc, err = svc.selectAccountForModelWithPlatform(WithPublicModelSupportMiss404(context.Background()), nil, "", "gpt-4", nil, PlatformAntigravity)
-	require.Error(t, err)
-	require.Nil(t, acc)
-	require.ErrorIs(t, err, ErrNoAvailableAccounts)
-	require.ErrorIs(t, err, ErrModelNotSupportedByAccounts)
-	model, ok := ModelNotSupportedRequestedModel(err)
-	require.True(t, ok)
-	require.Equal(t, "gpt-4", model)
 }
 
 func TestGatewayService_SelectAccountForModelWithPlatform_GeminiPreferOAuth(t *testing.T) {

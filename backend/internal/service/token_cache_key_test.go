@@ -117,16 +117,6 @@ func TestAntigravityTokenCacheKey(t *testing.T) {
 			expected: "ag:account:202",
 		},
 		{
-			name: "configured_project_fallback_does_not_change_token_cache_key",
-			account: &Account{
-				ID: 206,
-				Credentials: map[string]any{
-					antigravityProjectFallbackCredentialKey: "configured-project",
-				},
-			},
-			expected: "ag:account:206",
-		},
-		{
 			name: "whitespace_only_project_id_fallback_to_account_id",
 			account: &Account{
 				ID: 203,
@@ -207,6 +197,68 @@ func TestOpenAITokenCacheKey(t *testing.T) {
 			require.Equal(t, tt.expected, result)
 		})
 	}
+}
+
+func TestGrokTokenCacheKey(t *testing.T) {
+	tests := []struct {
+		name     string
+		account  *Account
+		expected string
+	}{
+		{
+			name: "basic_account",
+			account: &Account{
+				ID: 350,
+			},
+			expected: "grok:account:350",
+		},
+		{
+			name: "account_with_email_uses_account_id",
+			account: &Account{
+				ID: 351,
+				Credentials: map[string]any{
+					"email": "same-user@example.com",
+				},
+			},
+			expected: "grok:account:351",
+		},
+		{
+			name: "account_id_zero",
+			account: &Account{
+				ID: 0,
+			},
+			expected: "grok:account:0",
+		},
+		{
+			name:     "nil_account",
+			account:  nil,
+			expected: "grok:account:0",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := GrokTokenCacheKey(tt.account)
+			require.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestGrokTokenCacheKeySeparatesAccountsWithSameEmail(t *testing.T) {
+	first := &Account{
+		ID: 351,
+		Credentials: map[string]any{
+			"email": "same-user@example.com",
+		},
+	}
+	second := &Account{
+		ID: 352,
+		Credentials: map[string]any{
+			"email": "same-user@example.com",
+		},
+	}
+
+	require.NotEqual(t, GrokTokenCacheKey(first), GrokTokenCacheKey(second))
 }
 
 func TestClaudeTokenCacheKey(t *testing.T) {

@@ -17,14 +17,6 @@ func extractMaxBytesError(err error) (*http.MaxBytesError, bool) {
 	return nil, false
 }
 
-func readLenientJSONRequestBody(req *http.Request, cfg *config.Config) ([]byte, error) {
-	var limit int64
-	if cfg != nil {
-		limit = cfg.Gateway.MaxBodySize
-	}
-	return pkghttputil.ReadLenientJSONRequestBodyWithPrealloc(req, limit)
-}
-
 func formatBodyLimit(limit int64) string {
 	const mb = 1024 * 1024
 	if limit >= mb {
@@ -35,4 +27,15 @@ func formatBodyLimit(limit int64) string {
 
 func buildBodyTooLargeMessage(limit int64) string {
 	return fmt.Sprintf("Request body too large, limit is %s", formatBodyLimit(limit))
+}
+
+func readLenientJSONRequestBodyWithPrealloc(req *http.Request, cfg *config.Config) ([]byte, error) {
+	return pkghttputil.ReadLenientJSONRequestBodyWithPrealloc(req, gatewayMaxBodySize(cfg))
+}
+
+func gatewayMaxBodySize(cfg *config.Config) int64 {
+	if cfg == nil {
+		return 0
+	}
+	return cfg.Gateway.MaxBodySize
 }

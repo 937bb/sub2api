@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -22,7 +23,7 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-func TestOpenAIGatewayService_Forward_WSv2_CompactUsesCompactMappedBillingModel(t *testing.T) {
+func TestOpenAIGatewayService_Forward_WSv2_SuccessAndBindSticky(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	type receivedPayload struct {
@@ -30,8 +31,6 @@ func TestOpenAIGatewayService_Forward_WSv2_CompactUsesCompactMappedBillingModel(
 		PreviousResponseID string
 		StreamExists       bool
 		Stream             bool
-		ClientRequestID    string
-		MetadataSessionID  string
 	}
 	receivedCh := make(chan receivedPayload, 1)
 
@@ -57,8 +56,6 @@ func TestOpenAIGatewayService_Forward_WSv2_CompactUsesCompactMappedBillingModel(
 			PreviousResponseID: strings.TrimSpace(gjson.Get(requestJSON, "previous_response_id").String()),
 			StreamExists:       gjson.Get(requestJSON, "stream").Exists(),
 			Stream:             gjson.Get(requestJSON, "stream").Bool(),
-			ClientRequestID:    strings.TrimSpace(gjson.Get(requestJSON, "client_metadata."+openAICodexClientRequestIDHeader).String()),
-			MetadataSessionID:  strings.TrimSpace(gjson.Get(requestJSON, "client_metadata.session_id").String()),
 		}
 
 		if err := conn.WriteJSON(map[string]any{
@@ -93,7 +90,7 @@ func TestOpenAIGatewayService_Forward_WSv2_CompactUsesCompactMappedBillingModel(
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses/compact", nil)
+	c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", nil)
 	c.Request.Header.Set("User-Agent", "unit-test-agent/1.0")
 	groupID := int64(1001)
 	c.Set("api_key", &APIKey{GroupID: &groupID})
@@ -138,17 +135,15 @@ func TestOpenAIGatewayService_Forward_WSv2_CompactUsesCompactMappedBillingModel(
 		Schedulable: true,
 		Concurrency: 2,
 		Credentials: map[string]any{
-			"api_key":               "sk-test",
-			"base_url":              wsServer.URL,
-			"model_mapping":         map[string]any{"billing-alias": "gpt-5.4"},
-			"compact_model_mapping": map[string]any{"gpt-5.4": "gpt-5.4-openai-compact"},
+			"api_key":  "sk-test",
+			"base_url": wsServer.URL,
 		},
 		Extra: map[string]any{
 			"responses_websockets_v2_enabled": true,
 		},
 	}
 
-	body := []byte(`{"model":"billing-alias","stream":false,"previous_response_id":"resp_prev_1","input":[{"type":"input_text","text":"hello"}],"client_metadata":{"x-client-request-id":"api-key-client-request","session_id":"api-key-session"}}`)
+	body := []byte(`{"model":"gpt-5.1","stream":false,"previous_response_id":"resp_prev_1","input":[{"type":"input_text","text":"hello"}]}`)
 	result, err := svc.Forward(context.Background(), c, account, body)
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -156,9 +151,6 @@ func TestOpenAIGatewayService_Forward_WSv2_CompactUsesCompactMappedBillingModel(
 	require.Equal(t, 7, result.Usage.OutputTokens)
 	require.Equal(t, 3, result.Usage.CacheReadInputTokens)
 	require.Equal(t, "resp_new_1", result.RequestID)
-	require.Equal(t, "billing-alias", result.Model)
-	require.Equal(t, "gpt-5.4-openai-compact", result.BillingModel)
-	require.Equal(t, "gpt-5.4-openai-compact", result.UpstreamModel)
 	require.True(t, result.OpenAIWSMode)
 	require.False(t, gjson.GetBytes(upstream.lastBody, "model").Exists(), "WSv2 成功时不应回落 HTTP 上游")
 
@@ -167,8 +159,6 @@ func TestOpenAIGatewayService_Forward_WSv2_CompactUsesCompactMappedBillingModel(
 	require.Equal(t, "resp_prev_1", received.PreviousResponseID)
 	require.True(t, received.StreamExists, "WS 请求应携带 stream 字段")
 	require.False(t, received.Stream, "应保持客户端 stream=false 的原始语义")
-	require.Equal(t, "api-key-client-request", received.ClientRequestID)
-	require.Equal(t, "api-key-session", received.MetadataSessionID)
 
 	store := svc.getOpenAIWSStateStore()
 	mappedAccountID, getErr := store.GetResponseAccount(context.Background(), groupID, "resp_new_1")
@@ -292,6 +282,7 @@ func TestOpenAIGatewayService_Forward_WSv2_ImageGenerationCountsOutputs(t *testi
 			"item": map[string]any{
 				"id":     "ig_ws_1",
 				"type":   "image_generation_call",
+				"status": "generating",
 				"result": "final-image",
 			},
 		}); err != nil {
@@ -307,6 +298,7 @@ func TestOpenAIGatewayService_Forward_WSv2_ImageGenerationCountsOutputs(t *testi
 					map[string]any{
 						"id":     "ig_ws_1",
 						"type":   "image_generation_call",
+						"status": "in_progress",
 						"result": "final-image",
 					},
 				},
@@ -386,6 +378,7 @@ func TestOpenAIGatewayService_Forward_WSv2_ImageGenerationCountsOutputs(t *testi
 	require.Equal(t, 4, result.Usage.OutputTokens)
 	require.True(t, result.OpenAIWSMode)
 	require.Equal(t, "resp_ws_image_1", gjson.GetBytes(rec.Body.Bytes(), "id").String())
+	require.Equal(t, "completed", gjson.GetBytes(rec.Body.Bytes(), "output.0.status").String())
 }
 
 func requestToJSONString(payload map[string]any) string {
@@ -397,6 +390,38 @@ func requestToJSONString(payload map[string]any) string {
 		return "{}"
 	}
 	return string(b)
+}
+
+func TestOpenAIGatewayService_BuildOpenAIWSHeadersPreservesCodexIdentity(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.144.1")
+	c.Request.Header.Set("X-Codex-Window-ID", "window-ws")
+	c.Request.Header.Set("X-Codex-Installation-ID", "installation-ws")
+	c.Request.Header.Set("X-Test", "blocked")
+
+	svc := &OpenAIGatewayService{}
+	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+	headers, _, err := svc.buildOpenAIWSHeaders(
+		context.Background(),
+		c,
+		account,
+		"token",
+		OpenAIWSProtocolDecision{Transport: OpenAIUpstreamTransportResponsesWebsocketV2},
+		true,
+		"",
+		"",
+		"",
+		"",
+		"",
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, "window-ws", headers.Get("X-Codex-Window-ID"))
+	require.Equal(t, "installation-ws", headers.Get("X-Codex-Installation-ID"))
+	require.Empty(t, headers.Get("X-Test"))
 }
 
 func TestLogOpenAIWSBindResponseAccountWarn(t *testing.T) {
@@ -475,8 +500,59 @@ func TestOpenAIGatewayService_Forward_WSv2_RewriteModelAndToolCallsOnCompletedEv
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.Equal(t, "resp_model_tool_1", result.RequestID)
+	require.Equal(t, "response.completed", result.UpstreamTerminalEvent)
+	require.True(t, result.SucceededForScheduling())
 	require.Equal(t, "custom-original-model", gjson.GetBytes(rec.Body.Bytes(), "model").String(), "响应模型应回写为原始请求模型")
 	require.Equal(t, "edit", gjson.GetBytes(rec.Body.Bytes(), "tool_calls.0.function.name").String(), "工具名称应被修正为 OpenCode 规范")
+}
+
+func TestOpenAIGatewayService_Forward_WSv2_ResponseFailedIsNotSchedulingSuccess(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", nil)
+	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.98.0")
+
+	cfg := newOpenAIWSV2TestConfig()
+	cfg.Security.URLAllowlist.Enabled = false
+	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
+	cfg.Gateway.OpenAIWS.MinIdlePerAccount = 0
+
+	captureConn := &openAIWSCaptureConn{events: [][]byte{
+		[]byte(`{"type":"response.failed","response":{"id":"resp_failed_1","model":"gpt-5.5","error":{"code":"server_error","message":"Internal error"}}}`),
+	}}
+	pool := newOpenAIWSConnPool(cfg)
+	pool.setClientDialerForTest(&openAIWSCaptureDialer{conn: captureConn})
+
+	svc := &OpenAIGatewayService{
+		cfg:              cfg,
+		rateLimitService: NewRateLimitService(transientCooldownAccountRepo{}, nil, cfg, nil, nil),
+		httpUpstream:     &httpUpstreamRecorder{},
+		cache:            &stubGatewayCache{},
+		openaiWSResolver: NewOpenAIWSProtocolResolver(cfg),
+		toolCorrector:    NewCodexToolCorrector(),
+		openaiWSPool:     pool,
+	}
+	account := &Account{
+		ID:          1302,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Credentials: map[string]any{"api_key": "sk-test"},
+		Extra:       map[string]any{"responses_websockets_v2_enabled": true},
+	}
+	svc.recordOpenAIAccountModelTransientFailure(account, "gpt-5.5", time.Now())
+
+	result, err := svc.Forward(context.Background(), c, account, []byte(`{"model":"gpt-5.5","stream":false,"input":"hello"}`))
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, "response.failed", result.UpstreamTerminalEvent)
+	require.False(t, result.SucceededForScheduling())
+	require.True(t, svc.isOpenAIAccountModelRuntimeBlocked(account, "gpt-5.5"))
 }
 
 func TestOpenAIWSPayloadString_OnlyAcceptsStringValues(t *testing.T) {
@@ -613,9 +689,7 @@ func TestOpenAIGatewayService_Forward_WSv2_OAuthStoreFalseByDefault(t *testing.T
 	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.98.0")
 	c.Request.Header.Set("session_id", "sess-oauth-1")
 	c.Request.Header.Set("conversation_id", "conv-oauth-1")
-	c.Request.Header.Set(openAICodexSubagentHeader, "collab_spawn")
-	c.Request.Header.Set(openAICodexParentThreadIDHeader, "parent-thread-1")
-	c.Request.Header.Set(openAITracestateHeader, "vendor=value")
+	c.Request.Header.Set("x-codex-beta-features", "remote_compaction_v2")
 
 	cfg := &config.Config{}
 	cfg.Security.URLAllowlist.Enabled = false
@@ -658,33 +732,11 @@ func TestOpenAIGatewayService_Forward_WSv2_OAuthStoreFalseByDefault(t *testing.T
 			"access_token": "oauth-token-1",
 		},
 		Extra: map[string]any{
-			"openai_oauth_ws_mode": OpenAIOAuthWSModeManagedSession,
+			"responses_websockets_v2_enabled": true,
 		},
 	}
 
-	body := []byte(`{
-		"model":"gpt-5.1",
-		"stream":false,
-		"store":true,
-		"input":[{"type":"input_text","text":"hello"}],
-		"instructions":"be helpful",
-		"reasoning":{"effort":"medium"},
-		"tools":[{"type":"function","name":"shell","parameters":{"type":"object","properties":{"nonce":{"const":9007199254740993}}}}],
-		"tool_choice":"auto",
-		"parallel_tool_calls":true,
-		"include":["reasoning.encrypted_content"],
-		"service_tier":"default",
-		"prompt_cache_key":"cache-oauth-ws",
-		"text":{"verbosity":"low"},
-		"generate":false,
-		"max_output_tokens":1024,
-		"temperature":0.5,
-		"top_p":0.9,
-		"metadata":{"should":"drop"},
-		"user":"should-drop",
-		"background":true,
-		"unknown_field":"should-drop"
-	}`)
+	body := []byte(`{"model":"gpt-5.1","stream":false,"store":true,"input":[{"type":"input_text","text":"hello","namespace":"native-wsv2"}]}`)
 	result, err := svc.Forward(context.Background(), c, account, body)
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -696,227 +748,37 @@ func TestOpenAIGatewayService_Forward_WSv2_OAuthStoreFalseByDefault(t *testing.T
 	require.False(t, gjson.Get(requestJSON, "store").Bool(), "默认策略应将 OAuth store 置为 false")
 	require.True(t, gjson.Get(requestJSON, "stream").Exists(), "WSv2 payload 应保留 stream 字段")
 	require.True(t, gjson.Get(requestJSON, "stream").Bool(), "OAuth Codex 规范化后应强制 stream=true")
-	require.Equal(t, "response.create", gjson.Get(requestJSON, "type").String())
-	require.Equal(t, "gpt-5.4", gjson.Get(requestJSON, "model").String())
-	require.Equal(t, "be helpful", gjson.Get(requestJSON, "instructions").String())
-	require.Equal(t, "medium", gjson.Get(requestJSON, "reasoning.effort").String())
-	require.Equal(t, "function", gjson.Get(requestJSON, "tools.0.type").String())
-	require.Contains(t, requestJSON, "9007199254740993")
-	require.NotContains(t, requestJSON, "9007199254740992")
-	require.Equal(t, "auto", gjson.Get(requestJSON, "tool_choice").String())
-	require.True(t, gjson.Get(requestJSON, "parallel_tool_calls").Bool())
-	require.Equal(t, "reasoning.encrypted_content", gjson.Get(requestJSON, "include.0").String())
-	require.Equal(t, "cache-oauth-ws", gjson.Get(requestJSON, "prompt_cache_key").String())
-	require.Equal(t, "low", gjson.Get(requestJSON, "text.verbosity").String())
-	require.False(t, gjson.Get(requestJSON, "generate").Bool())
-	for _, field := range []string{"max_output_tokens", "temperature", "top_p", "metadata", "user", "background", "unknown_field"} {
-		require.False(t, gjson.Get(requestJSON, field).Exists(), "%s should be removed by OAuth WS allowlist", field)
-	}
+	require.Equal(t, "native-wsv2", gjson.Get(requestJSON, "input.0.namespace").String(), "OAuth WSv2 应保留原生 namespace")
 	require.Equal(t, openAIWSBetaV2Value, captureDialer.lastHeaders.Get("OpenAI-Beta"))
-	// OAuth 账号的 session_id/conversation_id 应隔离成 UUID 形态，
+	require.Equal(t, "remote_compaction_v2", captureDialer.lastHeaders.Get("x-codex-beta-features"))
+	// OAuth 账号的 session_id/conversation_id 应被 isolateOpenAISessionID 隔离，
 	// 测试中未设置 api_key 到 context，apiKeyID=0。
-	wantSessionID := isolateOpenAICodexOAuthSessionID(0, "sess-oauth-1", "session")
-	wantThreadID := isolateOpenAICodexOAuthSessionID(0, "conv-oauth-1", "thread")
-	require.Equal(t, wantSessionID, captureDialer.lastHeaders.Get("session_id"))
-	require.Equal(t, wantSessionID, captureDialer.lastHeaders.Get(openAICodexSessionIDHeader))
-	require.Equal(t, wantThreadID, captureDialer.lastHeaders.Get("conversation_id"))
-	require.Equal(t, wantThreadID, captureDialer.lastHeaders.Get(openAICodexThreadIDHeader))
-	require.Equal(t, wantThreadID, captureDialer.lastHeaders.Get(openAICodexClientRequestIDHeader))
-	require.NotEmpty(t, captureDialer.lastHeaders.Get(openAICodexInstallationIDHeader))
-	require.Equal(t, wantThreadID+":0", captureDialer.lastHeaders.Get(openAICodexWindowIDHeader))
-	require.Equal(t, "collab_spawn", captureDialer.lastHeaders.Get(openAICodexSubagentHeader))
-	require.Equal(t, "parent-thread-1", captureDialer.lastHeaders.Get(openAICodexParentThreadIDHeader))
-	require.Equal(t, "vendor=value", captureDialer.lastHeaders.Get(openAITracestateHeader))
-	require.Equal(t, captureDialer.lastHeaders.Get(openAICodexInstallationIDHeader), gjson.Get(requestJSON, "client_metadata."+openAICodexInstallationIDHeader).String())
-	require.Equal(t, captureDialer.lastHeaders.Get(openAICodexWindowIDHeader), gjson.Get(requestJSON, "client_metadata."+openAICodexWindowIDHeader).String())
-	require.Equal(t, "collab_spawn", gjson.Get(requestJSON, "client_metadata."+openAICodexSubagentHeader).String())
-	require.Equal(t, "parent-thread-1", gjson.Get(requestJSON, "client_metadata."+openAICodexParentThreadIDHeader).String())
-	// traceparent/tracestate 在 client_metadata 中映射为 ws_request_header_* key。
-	require.Equal(t, "vendor=value", gjson.Get(requestJSON, "client_metadata."+openAICodexWSTracestateMetadataKey).String())
-}
-
-func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_OAuthStripsClientMetadataIdentity(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
-	cfg := &config.Config{}
-	cfg.Security.URLAllowlist.Enabled = false
-	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
-	cfg.Gateway.OpenAIWS.Enabled = true
-	cfg.Gateway.OpenAIWS.OAuthEnabled = true
-	cfg.Gateway.OpenAIWS.APIKeyEnabled = true
-	cfg.Gateway.OpenAIWS.ResponsesWebsocketsV2 = true
-	cfg.Gateway.OpenAIWS.MaxConnsPerAccount = 1
-	cfg.Gateway.OpenAIWS.MinIdlePerAccount = 0
-	cfg.Gateway.OpenAIWS.MaxIdlePerAccount = 1
-	cfg.Gateway.OpenAIWS.QueueLimitPerConn = 8
-	cfg.Gateway.OpenAIWS.DialTimeoutSeconds = 3
-	cfg.Gateway.OpenAIWS.ReadTimeoutSeconds = 3
-	cfg.Gateway.OpenAIWS.WriteTimeoutSeconds = 3
-
-	captureConn := &openAIWSCaptureConn{
-		events: [][]byte{
-			[]byte(`{"type":"response.completed","response":{"id":"resp_ingress_meta_1","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`),
-			[]byte(`{"type":"response.completed","response":{"id":"resp_ingress_meta_2","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`),
-		},
-	}
-	captureDialer := &openAIWSCaptureDialer{conn: captureConn}
-	pool := newOpenAIWSConnPool(cfg)
-	pool.setClientDialerForTest(captureDialer)
-
-	svc := &OpenAIGatewayService{
-		cfg:              cfg,
-		httpUpstream:     &httpUpstreamRecorder{},
-		cache:            &stubGatewayCache{},
-		openaiWSResolver: NewOpenAIWSProtocolResolver(cfg),
-		toolCorrector:    NewCodexToolCorrector(),
-		openaiWSPool:     pool,
-	}
-	persisted := OpenAICodexFingerprint{
-		SchemaVersion:  openAICodexFingerprintSchemaV1,
-		InstallationID: "550e8400-e29b-41d4-a716-446655440000",
-		UAProfile:      ParseOpenAICodexUAProfile(codexCLIUserAgent),
-		CreatedAt:      "2026-06-12T00:00:00Z",
-		UpdatedAt:      "2026-06-12T00:00:00Z",
-	}
-	account := &Account{
-		ID:          229,
-		Name:        "openai-oauth-ingress-metadata",
-		Platform:    PlatformOpenAI,
-		Type:        AccountTypeOAuth,
-		Status:      StatusActive,
-		Schedulable: true,
-		Concurrency: 1,
-		Credentials: map[string]any{"access_token": "oauth-token-1"},
-		Extra: map[string]any{
-			"openai_oauth_ws_mode":         OpenAIOAuthWSModeManagedSession,
-			OpenAICodexFingerprintExtraKey: persisted,
-		},
-	}
-
-	serverErrCh := make(chan error, 1)
-	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		conn, err := coderws.Accept(w, r, &coderws.AcceptOptions{CompressionMode: coderws.CompressionContextTakeover})
-		if err != nil {
-			serverErrCh <- err
-			return
-		}
-		defer func() { _ = conn.CloseNow() }()
-
-		rec := httptest.NewRecorder()
-		ginCtx, _ := gin.CreateTestContext(rec)
-		req := r.Clone(r.Context())
-		req.Header = req.Header.Clone()
-		req.Header.Set("User-Agent", codexCLIUserAgent)
-		ginCtx.Request = req
-
-		readCtx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
-		_, firstMessage, readErr := conn.Read(readCtx)
-		cancel()
-		if readErr != nil {
-			serverErrCh <- readErr
-			return
-		}
-		serverErrCh <- svc.ProxyResponsesWebSocketFromClient(r.Context(), ginCtx, conn, account, "oauth-token-1", firstMessage, nil)
-	}))
-	defer wsServer.Close()
-
-	dialCtx, cancelDial := context.WithTimeout(context.Background(), 3*time.Second)
-	clientConn, _, err := coderws.Dial(dialCtx, "ws"+strings.TrimPrefix(wsServer.URL, "http"), nil)
-	cancelDial()
-	require.NoError(t, err)
-	defer func() { _ = clientConn.CloseNow() }()
-
-	firstPayload := []byte(`{"type":"response.create","model":"gpt-5.1","stream":false,"input":"first","client_metadata":{"keep":"first","x-codex-installation-id":"attacker-installation-1","x-codex-window-id":"attacker-window-1","session-id":"attacker-session-header-1","thread-id":"attacker-thread-header-1","x-client-request-id":"attacker-request-header-1","x-codex-parent-thread-id":"attacker-parent-1","x-codex-turn-metadata":"attacker-turn-metadata-1","x-codex-turn-state":"attacker-turn-state-1","x-openai-subagent":"attacker-subagent-1","ws_request_header_traceparent":"attacker-traceparent-1","ws_request_header_tracestate":"attacker-tracestate-1","ws_request_header_authorization":"attacker-auth-1","ws_request_header_cookie":"attacker-cookie-1","x-codex-ws-stream-request-start-ms":"attacker-start-1","session_id":"attacker-session-1","conversation_id":"attacker-conversation-1","prompt_cache_key":"attacker-cache-1"}}`)
-	writeCtx, cancelWrite := context.WithTimeout(context.Background(), 3*time.Second)
-	require.NoError(t, clientConn.Write(writeCtx, coderws.MessageText, firstPayload))
-	cancelWrite()
-
-	readCtx, cancelRead := context.WithTimeout(context.Background(), 3*time.Second)
-	_, event, readErr := clientConn.Read(readCtx)
-	cancelRead()
-	require.NoError(t, readErr)
-	require.Equal(t, "response.completed", gjson.GetBytes(event, "type").String())
-
-	secondPayload := []byte(`{"type":"response.create","model":"gpt-5.1","stream":false,"input":"second","client_metadata":{"keep":"second","x-codex-installation-id":"attacker-installation-2","x-codex-window-id":"attacker-thread-2:7","session-id":"attacker-session-header-2","thread-id":"attacker-thread-header-2","x-client-request-id":"attacker-request-header-2","x-codex-parent-thread-id":"attacker-parent-2","x-codex-turn-metadata":"attacker-turn-metadata-2","x-codex-turn-state":"attacker-turn-state-2","x-openai-subagent":"attacker-subagent-2","ws_request_header_traceparent":"attacker-traceparent-2","ws_request_header_tracestate":"attacker-tracestate-2","ws_request_header_authorization":"attacker-auth-2","ws_request_header_cookie":"attacker-cookie-2","x-codex-ws-stream-request-start-ms":"attacker-start-2","session_id":"attacker-session-2","conversation_id":"attacker-conversation-2","prompt_cache_key":"attacker-cache-2"}}`)
-	writeCtx, cancelWrite = context.WithTimeout(context.Background(), 3*time.Second)
-	require.NoError(t, clientConn.Write(writeCtx, coderws.MessageText, secondPayload))
-	cancelWrite()
-
-	readCtx, cancelRead = context.WithTimeout(context.Background(), 3*time.Second)
-	_, event, readErr = clientConn.Read(readCtx)
-	cancelRead()
-	require.NoError(t, readErr)
-	require.Equal(t, "response.completed", gjson.GetBytes(event, "type").String())
-
-	require.NoError(t, clientConn.Close(coderws.StatusNormalClosure, "done"))
-	select {
-	case serverErr := <-serverErrCh:
-		require.NoError(t, serverErr)
-	case <-time.After(5 * time.Second):
-		t.Fatal("等待 ingress websocket 结束超时")
-	}
-
-	require.Len(t, captureConn.writes, 2)
-	assertSanitized := func(index int, keep string, attackerSuffix string) {
-		require.Less(t, index, len(captureConn.rawWrites))
-		requestJSON := requestToJSONString(captureConn.writes[index])
-		rawWrite := string(captureConn.rawWrites[index])
-		require.Equal(t, keep, gjson.Get(requestJSON, "client_metadata.keep").String())
-		require.Equal(t, persisted.InstallationID, gjson.Get(requestJSON, "client_metadata."+openAICodexInstallationIDHeader).String())
-		require.NotEmpty(t, gjson.Get(requestJSON, "client_metadata."+openAICodexWindowIDHeader).String())
-		require.True(t, gjson.Get(requestJSON, "client_metadata."+openAICodexWSStreamRequestStartMSKey).Exists())
-		require.False(t, gjson.Get(requestJSON, "client_metadata."+openAICodexSessionIDHeader).Exists())
-		require.False(t, gjson.Get(requestJSON, "client_metadata."+openAICodexThreadIDHeader).Exists())
-		require.False(t, gjson.Get(requestJSON, "client_metadata."+openAICodexClientRequestIDHeader).Exists())
-		require.False(t, gjson.Get(requestJSON, "client_metadata."+openAICodexParentThreadIDHeader).Exists())
-		require.False(t, gjson.Get(requestJSON, "client_metadata."+openAICodexTurnStateHeader).Exists())
-		require.False(t, gjson.Get(requestJSON, "client_metadata."+openAICodexTurnMetadataHeader).Exists())
-		require.False(t, gjson.Get(requestJSON, "client_metadata."+openAICodexSubagentHeader).Exists())
-		require.False(t, gjson.Get(requestJSON, "client_metadata."+openAICodexWSTraceparentMetadataKey).Exists())
-		require.False(t, gjson.Get(requestJSON, "client_metadata."+openAICodexWSTracestateMetadataKey).Exists())
-		require.False(t, gjson.Get(requestJSON, "client_metadata.ws_request_header_authorization").Exists())
-		require.False(t, gjson.Get(requestJSON, "client_metadata.ws_request_header_cookie").Exists())
-		require.NotEqual(t, "attacker-start-"+attackerSuffix, gjson.Get(requestJSON, "client_metadata."+openAICodexWSStreamRequestStartMSKey).String())
-		require.False(t, gjson.Get(requestJSON, "client_metadata.session_id").Exists())
-		require.False(t, gjson.Get(requestJSON, "client_metadata.conversation_id").Exists())
-		require.False(t, gjson.Get(requestJSON, "client_metadata.prompt_cache_key").Exists())
-		require.NotContains(t, rawWrite, "attacker-installation-"+attackerSuffix)
-		require.NotContains(t, rawWrite, "attacker-window-"+attackerSuffix)
-		require.NotContains(t, rawWrite, "attacker-session-"+attackerSuffix)
-		require.NotContains(t, rawWrite, "attacker-thread-header-"+attackerSuffix)
-		require.NotContains(t, rawWrite, "attacker-request-header-"+attackerSuffix)
-		require.NotContains(t, rawWrite, "attacker-parent-"+attackerSuffix)
-		require.NotContains(t, rawWrite, "attacker-turn-metadata-"+attackerSuffix)
-		require.NotContains(t, rawWrite, "attacker-turn-state-"+attackerSuffix)
-		require.NotContains(t, rawWrite, "attacker-subagent-"+attackerSuffix)
-		require.NotContains(t, rawWrite, "attacker-traceparent-"+attackerSuffix)
-		require.NotContains(t, rawWrite, "attacker-tracestate-"+attackerSuffix)
-		require.NotContains(t, rawWrite, "attacker-auth-"+attackerSuffix)
-		require.NotContains(t, rawWrite, "attacker-cookie-"+attackerSuffix)
-		require.NotContains(t, rawWrite, "attacker-conversation-"+attackerSuffix)
-		require.NotContains(t, rawWrite, "attacker-cache-"+attackerSuffix)
-	}
-	assertSanitized(0, "first", "1")
-	assertSanitized(1, "second", "2")
-	firstWindowID := gjson.Get(requestToJSONString(captureConn.writes[0]), "client_metadata."+openAICodexWindowIDHeader).String()
-	secondWindowID := gjson.Get(requestToJSONString(captureConn.writes[1]), "client_metadata."+openAICodexWindowIDHeader).String()
-	require.True(t, strings.HasSuffix(firstWindowID, ":0"))
-	require.True(t, strings.HasSuffix(secondWindowID, ":7"))
-	require.Equal(t, strings.TrimSuffix(firstWindowID, ":0"), strings.TrimSuffix(secondWindowID, ":7"))
+	require.Equal(t, isolateOpenAISessionID(0, "sess-oauth-1"), captureDialer.lastHeaders.Get("session_id"))
+	require.Equal(t, isolateOpenAISessionID(0, "conv-oauth-1"), captureDialer.lastHeaders.Get("conversation_id"))
 }
 
 func TestOpenAIGatewayService_Forward_WSv2_OAuthOriginatorCompatibility(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
+	// WS 握手头与 HTTP 出站共用身份收口：同样强制统一为网关规范身份，
+	// 客户端自报的 originator / user-agent 不参与构造（issue #3901 的配对不变式自然满足）。
 	tests := []struct {
-		name           string
-		userAgent      string
-		originator     string
-		wantOriginator string
+		name       string
+		userAgent  string
+		originator string
 	}{
-		{name: "desktop originator ignored for OAuth fingerprint", originator: "Codex Desktop", wantOriginator: codexOfficialOriginator},
-		{name: "vscode originator ignored for OAuth fingerprint", originator: "codex_vscode", wantOriginator: codexOfficialOriginator},
-		{name: "official ua fallback to fingerprint originator", userAgent: codexCLIUserAgent, wantOriginator: codexOfficialOriginator},
+		{name: "official desktop ua", userAgent: "Codex Desktop/1.2.3"},
+		{
+			name:       "mismatched originator",
+			userAgent:  "codex_vscode/0.140.2 (Mac OS X 14.0; arm64) vscode (codex_vscode; 0.140.2)",
+			originator: "codex_cli_rs",
+		},
+		{
+			name:       "tui identity",
+			userAgent:  "codex-tui/0.140.2 (Mac OS X 14.0; arm64) iTerm (codex-tui; 0.140.2)",
+			originator: "codex-tui",
+		},
+		{name: "official originator without ua", originator: "codex_vscode"},
 	}
 
 	for _, tt := range tests {
@@ -972,7 +834,7 @@ func TestOpenAIGatewayService_Forward_WSv2_OAuthOriginatorCompatibility(t *testi
 					"access_token": "oauth-token-1",
 				},
 				Extra: map[string]any{
-					"openai_oauth_ws_mode": OpenAIOAuthWSModeManagedSession,
+					"responses_websockets_v2_enabled": true,
 				},
 			}
 
@@ -980,9 +842,80 @@ func TestOpenAIGatewayService_Forward_WSv2_OAuthOriginatorCompatibility(t *testi
 			result, err := svc.Forward(context.Background(), c, account, body)
 			require.NoError(t, err)
 			require.NotNil(t, result)
-			require.Equal(t, tt.wantOriginator, captureDialer.lastHeaders.Get("originator"))
+			require.Equal(t, openai.CodexDefaultOriginator, captureDialer.lastHeaders.Get("originator"))
+			require.Equal(t, codexCLIUserAgent, captureDialer.lastHeaders.Get("user-agent"))
+			require.Equal(t, codexCLIVersion, captureDialer.lastHeaders.Get("version"))
 		})
 	}
+}
+
+// 账号级自定义 UA 是管理员的显式配置，WS 握手与 HTTP 出站必须一视同仁地生效——
+// 否则同一个账号在两种传输上以不同身份出站。指纹保留、版本段重建、originator 配套。
+func TestOpenAIGatewayService_Forward_WSv2_OAuthHonorsAccountUserAgent(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", nil)
+	c.Request.Header.Set("User-Agent", "luna/1.0.0")
+
+	cfg := &config.Config{}
+	cfg.Security.URLAllowlist.Enabled = false
+	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
+	cfg.Gateway.OpenAIWS.Enabled = true
+	cfg.Gateway.OpenAIWS.OAuthEnabled = true
+	cfg.Gateway.OpenAIWS.APIKeyEnabled = true
+	cfg.Gateway.OpenAIWS.ResponsesWebsocketsV2 = true
+	cfg.Gateway.OpenAIWS.AllowStoreRecovery = false
+	cfg.Gateway.OpenAIWS.MaxConnsPerAccount = 1
+	cfg.Gateway.OpenAIWS.MinIdlePerAccount = 0
+	cfg.Gateway.OpenAIWS.MaxIdlePerAccount = 1
+
+	captureConn := &openAIWSCaptureConn{
+		events: [][]byte{
+			[]byte(`{"type":"response.completed","response":{"id":"resp_oauth_account_ua","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`),
+		},
+	}
+	captureDialer := &openAIWSCaptureDialer{conn: captureConn}
+	pool := newOpenAIWSConnPool(cfg)
+	pool.setClientDialerForTest(captureDialer)
+
+	svc := &OpenAIGatewayService{
+		cfg:              cfg,
+		httpUpstream:     &httpUpstreamRecorder{},
+		cache:            &stubGatewayCache{},
+		openaiWSResolver: NewOpenAIWSProtocolResolver(cfg),
+		toolCorrector:    NewCodexToolCorrector(),
+		openaiWSPool:     pool,
+	}
+	account := &Account{
+		ID:          130,
+		Name:        "openai-oauth-custom-ua",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"access_token": "oauth-token-1",
+			// 填写于某个历史版本的账号级 UA：指纹要保留，版本段不能被逐字沿用。
+			"user_agent": "codex-tui/0.125.0 (Mac OS X 15.1.0; arm64) iTerm.app",
+		},
+		Extra: map[string]any{
+			"responses_websockets_v2_enabled": true,
+		},
+	}
+
+	body := []byte(`{"model":"gpt-5.1","stream":false,"input":[{"type":"input_text","text":"hello"}]}`)
+	result, err := svc.Forward(context.Background(), c, account, body)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, "codex-tui", captureDialer.lastHeaders.Get("originator"))
+	require.Equal(t,
+		"codex-tui/"+codexCLIVersion+" (Mac OS X 15.1.0; arm64) iTerm.app",
+		captureDialer.lastHeaders.Get("user-agent"),
+	)
+	require.Equal(t, codexCLIVersion, captureDialer.lastHeaders.Get("version"))
 }
 
 func TestOpenAIGatewayService_Forward_WSv2_HeaderSessionFallbackFromPromptCacheKey(t *testing.T) {
@@ -1033,7 +966,7 @@ func TestOpenAIGatewayService_Forward_WSv2_HeaderSessionFallbackFromPromptCacheK
 			"access_token": "oauth-token-1",
 		},
 		Extra: map[string]any{
-			"openai_oauth_ws_mode": OpenAIOAuthWSModeManagedSession,
+			"responses_websockets_v2_enabled": true,
 		},
 	}
 
@@ -1043,8 +976,8 @@ func TestOpenAIGatewayService_Forward_WSv2_HeaderSessionFallbackFromPromptCacheK
 	require.NotNil(t, result)
 	require.Equal(t, "resp_prompt_cache_key", result.RequestID)
 
-	// OAuth 账号的 session_id 应隔离成 UUID 形态（apiKeyID=0，未在 context 设置）。
-	require.Equal(t, isolateOpenAICodexOAuthSessionID(0, "pcache_123", "session"), captureDialer.lastHeaders.Get("session_id"))
+	// OAuth 账号的 session_id 应被 isolateOpenAISessionID 隔离（apiKeyID=0，未在 context 设置）。
+	require.Equal(t, isolateOpenAISessionID(0, "pcache_123"), captureDialer.lastHeaders.Get("session_id"))
 	require.Empty(t, captureDialer.lastHeaders.Get("conversation_id"))
 	require.NotNil(t, captureConn.lastWrite)
 	require.True(t, gjson.Get(requestToJSONString(captureConn.lastWrite), "stream").Exists())
@@ -1405,15 +1338,10 @@ func TestOpenAIGatewayService_PrewarmReadHonorsParentContext(t *testing.T) {
 		account,
 		nil,
 		0,
-		"wss://api.openai.com/v1/responses",
 	)
 	elapsed := time.Since(start)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "prewarm_read_event")
-	var fallbackErr *openAIWSFallbackError
-	require.ErrorAs(t, err, &fallbackErr)
-	require.Equal(t, "wss://api.openai.com/v1/responses", fallbackErr.UpstreamURL)
-	require.Equal(t, "/v1/responses", fallbackErr.UpstreamEndpoint)
 	require.Less(t, elapsed, 180*time.Millisecond, "预热读取应受父 context 取消控制，不应阻塞到 read_timeout")
 }
 
@@ -1816,14 +1744,12 @@ func (d *openAIWSCaptureDialer) DialCount() int {
 }
 
 type openAIWSCaptureConn struct {
-	mu           sync.Mutex
-	readDelays   []time.Duration
-	events       [][]byte
-	lastWrite    map[string]any
-	writes       []map[string]any
-	lastRawWrite []byte
-	rawWrites    [][]byte
-	closed       bool
+	mu         sync.Mutex
+	readDelays []time.Duration
+	events     [][]byte
+	lastWrite  map[string]any
+	writes     []map[string]any
+	closed     bool
 }
 
 func (c *openAIWSCaptureConn) WriteJSON(ctx context.Context, value any) error {
@@ -1835,22 +1761,15 @@ func (c *openAIWSCaptureConn) WriteJSON(ctx context.Context, value any) error {
 	}
 	switch payload := value.(type) {
 	case map[string]any:
-		raw, _ := json.Marshal(payload)
-		c.lastRawWrite = append([]byte(nil), raw...)
-		c.rawWrites = append(c.rawWrites, append([]byte(nil), raw...))
 		c.lastWrite = cloneMapStringAny(payload)
 		c.writes = append(c.writes, cloneMapStringAny(payload))
 	case json.RawMessage:
-		c.lastRawWrite = append([]byte(nil), payload...)
-		c.rawWrites = append(c.rawWrites, append([]byte(nil), payload...))
 		var parsed map[string]any
 		if err := json.Unmarshal(payload, &parsed); err == nil {
 			c.lastWrite = cloneMapStringAny(parsed)
 			c.writes = append(c.writes, cloneMapStringAny(parsed))
 		}
 	case []byte:
-		c.lastRawWrite = append([]byte(nil), payload...)
-		c.rawWrites = append(c.rawWrites, append([]byte(nil), payload...))
 		var parsed map[string]any
 		if err := json.Unmarshal(payload, &parsed); err == nil {
 			c.lastWrite = cloneMapStringAny(parsed)

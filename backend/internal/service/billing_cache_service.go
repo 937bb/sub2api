@@ -78,38 +78,27 @@ const (
 	cacheWriteTimeout         = 2 * time.Second // 单个写入操作超时
 	cacheWriteDropLogInterval = 5 * time.Second // 丢弃日志节流间隔
 	balanceLoadTimeout        = 3 * time.Second
-	balanceStaleMarkerTTL     = 6 * time.Minute
 )
 
 // cacheWriteTask 缓存写入任务
 type cacheWriteTask struct {
-	kind              cacheWriteKind
-	userID            int64
-	groupID           int64
-	apiKeyID          int64
-	balance           float64
-	amount            float64
-	balanceVersion    uint64
-	balanceGeneration int64
-	balanceCAS        bool
-	createdAt         time.Time
-	subscriptionData  *subscriptionCacheData
-}
-
-type balanceCacheState struct {
-	mu                 sync.Mutex
-	version            uint64
-	staleUntilUnixNano atomic.Int64
-}
-
-type balanceGenerationCache interface {
-	GetUserBalanceGeneration(ctx context.Context, userID int64) (int64, error)
-	SetUserBalanceIfGeneration(ctx context.Context, userID int64, balance float64, generation int64) (bool, error)
+	kind             cacheWriteKind
+	userID           int64
+	groupID          int64
+	apiKeyID         int64
+	balance          float64
+	amount           float64
+	subscriptionData *subscriptionCacheData
 }
 
 // apiKeyRateLimitLoader defines the interface for loading rate limit data from DB.
 type apiKeyRateLimitLoader interface {
 	GetRateLimitData(ctx context.Context, keyID int64) (*APIKeyRateLimitData, error)
+}
+
+type subscriptionCacheInvalidationPubSub interface {
+	PublishSubscriptionCacheInvalidation(ctx context.Context, cacheKey string) error
+	SubscribeSubscriptionCacheInvalidation(ctx context.Context, handler func(cacheKey string)) error
 }
 
 // BillingCacheService 计费缓存服务
@@ -132,7 +121,6 @@ type BillingCacheService struct {
 	stopped            atomic.Bool
 	balanceLoadSF      singleflight.Group
 	quotaLoadSF        singleflight.Group
-	balanceStates      sync.Map
 	// 丢弃日志节流计数器（减少高负载下日志噪音）
 	cacheWriteDropFullCount     uint64
 	cacheWriteDropFullLastLog   int64
@@ -231,7 +219,7 @@ func (s *BillingCacheService) cacheWriteWorker(ch <-chan cacheWriteTask) {
 		ctx, cancel := context.WithTimeout(context.Background(), cacheWriteTimeout)
 		switch task.kind {
 		case cacheWriteSetBalance:
-			s.setBalanceCacheIfCurrent(ctx, task)
+			s.setBalanceCache(ctx, task.userID, task.balance)
 		case cacheWriteSetSubscription:
 			s.setSubscriptionCache(ctx, task.userID, task.groupID, task.subscriptionData)
 		case cacheWriteUpdateSubscriptionUsage:
@@ -241,8 +229,10 @@ func (s *BillingCacheService) cacheWriteWorker(ch <-chan cacheWriteTask) {
 				}
 			}
 		case cacheWriteDeductBalance:
-			if err := s.DeductBalanceCache(ctx, task.userID, task.amount); err != nil {
-				logger.LegacyPrintf("service.billing_cache", "Warning: deduct balance cache failed for user %d: %v", task.userID, err)
+			if s.cache != nil {
+				if err := s.cache.DeductUserBalance(ctx, task.userID, task.amount); err != nil {
+					logger.LegacyPrintf("service.billing_cache", "Warning: deduct balance cache failed for user %d: %v", task.userID, err)
+				}
 			}
 		case cacheWriteUpdateRateLimitUsage:
 			if s.cache != nil {
@@ -327,9 +317,7 @@ func (s *BillingCacheService) GetUserBalance(ctx context.Context, userID int64) 
 	// 尝试从缓存读取
 	balance, err := s.cache.GetUserBalance(ctx, userID)
 	if err == nil {
-		if s.cachedBalanceUsable(userID, balance) {
-			return balance, nil
-		}
+		return balance, nil
 	}
 
 	// 缓存未命中：singleflight 合并同一 userID 的并发回源请求。
@@ -337,22 +325,17 @@ func (s *BillingCacheService) GetUserBalance(ctx context.Context, userID int64) 
 		loadCtx, cancel := context.WithTimeout(context.Background(), balanceLoadTimeout)
 		defer cancel()
 
-		version := s.currentBalanceCacheVersion(userID)
-		generation, useCAS, generationErr := s.currentBalanceCacheGeneration(loadCtx, userID)
-		if generationErr != nil {
-			logger.LegacyPrintf("service.billing_cache", "Warning: get balance cache generation failed for user %d: %v", userID, generationErr)
-		}
-
 		balance, err := s.getUserBalanceFromDB(loadCtx, userID)
 		if err != nil {
 			return nil, err
 		}
 
-		if useCAS {
-			s.queueSetBalanceIfCurrent(userID, balance, version, generation)
-		} else if generationErr == nil {
-			s.queueSetBalanceIfCurrentWithoutGeneration(userID, balance, version)
-		}
+		// 异步建立缓存
+		_ = s.enqueueCacheWrite(cacheWriteTask{
+			kind:    cacheWriteSetBalance,
+			userID:  userID,
+			balance: balance,
+		})
 		return balance, nil
 	})
 	if err != nil {
@@ -365,92 +348,6 @@ func (s *BillingCacheService) GetUserBalance(ctx context.Context, userID int64) 
 	return balance, nil
 }
 
-func (s *BillingCacheService) balanceState(userID int64) *balanceCacheState {
-	if s == nil {
-		return nil
-	}
-	state, _ := s.balanceStates.LoadOrStore(userID, &balanceCacheState{})
-	return state.(*balanceCacheState)
-}
-
-func (s *BillingCacheService) currentBalanceCacheVersion(userID int64) uint64 {
-	state := s.balanceState(userID)
-	state.mu.Lock()
-	version := state.version
-	state.mu.Unlock()
-	return version
-}
-
-func (s *BillingCacheService) balanceGenerationCache() (balanceGenerationCache, bool) {
-	if s == nil || s.cache == nil {
-		return nil, false
-	}
-	cache, ok := s.cache.(balanceGenerationCache)
-	return cache, ok
-}
-
-func (s *BillingCacheService) currentBalanceCacheGeneration(ctx context.Context, userID int64) (int64, bool, error) {
-	cache, ok := s.balanceGenerationCache()
-	if !ok {
-		return 0, false, nil
-	}
-	generation, err := cache.GetUserBalanceGeneration(ctx, userID)
-	if err != nil {
-		return 0, false, err
-	}
-	return generation, true, nil
-}
-
-func (s *BillingCacheService) cachedBalanceUsable(userID int64, balance float64) bool {
-	if s == nil {
-		return true
-	}
-	raw, ok := s.balanceStates.Load(userID)
-	if !ok {
-		return true
-	}
-	state := raw.(*balanceCacheState)
-	staleUntil := state.staleUntilUnixNano.Load()
-	if staleUntil <= 0 {
-		return true
-	}
-	now := time.Now().UnixNano()
-	if now >= staleUntil {
-		state.staleUntilUnixNano.CompareAndSwap(staleUntil, 0)
-		return true
-	}
-	return false
-}
-
-func (s *BillingCacheService) markBalanceCacheStaleLocked(state *balanceCacheState) (uint64, bool) {
-	now := time.Now()
-	wasStale := state.staleUntilUnixNano.Load() > now.UnixNano()
-	state.version++
-	state.staleUntilUnixNano.Store(now.Add(balanceStaleMarkerTTL).UnixNano())
-	return state.version, wasStale
-}
-
-func (s *BillingCacheService) clearBalanceCacheStaleLocked(state *balanceCacheState, version uint64) {
-	if state.version == version {
-		state.staleUntilUnixNano.Store(0)
-	}
-}
-
-func (s *BillingCacheService) minimumBalanceReserve() float64 {
-	if s == nil || s.cfg == nil || s.cfg.Billing.MinimumBalanceReserve <= 0 {
-		return 0
-	}
-	return s.cfg.Billing.MinimumBalanceReserve
-}
-
-func (s *BillingCacheService) balanceBelowEligibilityThreshold(balance float64) bool {
-	minimumReserve := s.minimumBalanceReserve()
-	if minimumReserve <= 0 {
-		return balance <= 0
-	}
-	return balance <= minimumReserve
-}
-
 // getUserBalanceFromDB 从数据库获取用户余额
 func (s *BillingCacheService) getUserBalanceFromDB(ctx context.Context, userID int64) (float64, error) {
 	user, err := s.userRepo.GetByID(ctx, userID)
@@ -461,113 +358,12 @@ func (s *BillingCacheService) getUserBalanceFromDB(ctx context.Context, userID i
 }
 
 // setBalanceCache 设置余额缓存
-func (s *BillingCacheService) setBalanceCache(ctx context.Context, userID int64, balance float64) error {
+func (s *BillingCacheService) setBalanceCache(ctx context.Context, userID int64, balance float64) {
 	if s.cache == nil {
-		return nil
+		return
 	}
 	if err := s.cache.SetUserBalance(ctx, userID, balance); err != nil {
 		logger.LegacyPrintf("service.billing_cache", "Warning: set balance cache failed for user %d: %v", userID, err)
-		return err
-	}
-	return nil
-}
-
-func (s *BillingCacheService) setBalanceCacheIfGeneration(ctx context.Context, userID int64, balance float64, generation int64) (bool, error) {
-	cache, ok := s.balanceGenerationCache()
-	if !ok {
-		return true, s.setBalanceCache(ctx, userID, balance)
-	}
-	set, err := cache.SetUserBalanceIfGeneration(ctx, userID, balance, generation)
-	if err != nil {
-		logger.LegacyPrintf("service.billing_cache", "Warning: set balance cache with generation failed for user %d: %v", userID, err)
-		return false, err
-	}
-	return set, nil
-}
-
-// QueueSetBalance asynchronously fills the balance cache after a DB load. It
-// skips stale positive fills after the same user has been invalidated or marked
-// ineligible by a later deduction.
-func (s *BillingCacheService) QueueSetBalance(userID int64, balance float64) {
-	version := s.currentBalanceCacheVersion(userID)
-	ctx, cancel := context.WithTimeout(context.Background(), cacheWriteTimeout)
-	defer cancel()
-	generation, useCAS, err := s.currentBalanceCacheGeneration(ctx, userID)
-	if err != nil {
-		logger.LegacyPrintf("service.billing_cache", "Warning: get balance cache generation failed for user %d: %v", userID, err)
-		return
-	}
-	if useCAS {
-		s.queueSetBalanceIfCurrent(userID, balance, version, generation)
-		return
-	}
-	s.queueSetBalanceIfCurrentWithoutGeneration(userID, balance, version)
-}
-
-func (s *BillingCacheService) queueSetBalanceIfCurrent(userID int64, balance float64, version uint64, generation int64) {
-	if s.cache == nil {
-		return
-	}
-	task := cacheWriteTask{
-		kind:              cacheWriteSetBalance,
-		userID:            userID,
-		balance:           balance,
-		balanceVersion:    version,
-		balanceGeneration: generation,
-		balanceCAS:        true,
-		createdAt:         time.Now(),
-	}
-	if s.enqueueCacheWrite(task) {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), cacheWriteTimeout)
-	defer cancel()
-	s.setBalanceCacheIfCurrent(ctx, task)
-}
-
-func (s *BillingCacheService) queueSetBalanceIfCurrentWithoutGeneration(userID int64, balance float64, version uint64) {
-	if s.cache == nil {
-		return
-	}
-	task := cacheWriteTask{
-		kind:           cacheWriteSetBalance,
-		userID:         userID,
-		balance:        balance,
-		balanceVersion: version,
-		createdAt:      time.Now(),
-	}
-	if s.enqueueCacheWrite(task) {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), cacheWriteTimeout)
-	defer cancel()
-	s.setBalanceCacheIfCurrent(ctx, task)
-}
-
-func (s *BillingCacheService) setBalanceCacheIfCurrent(ctx context.Context, task cacheWriteTask) {
-	if task.createdAt.IsZero() {
-		task.createdAt = time.Now()
-	}
-	if task.balanceCAS && time.Since(task.createdAt) >= balanceStaleMarkerTTL {
-		return
-	}
-	state := s.balanceState(task.userID)
-	state.mu.Lock()
-	defer state.mu.Unlock()
-
-	if state.version != task.balanceVersion {
-		return
-	}
-	set := false
-	var err error
-	if task.balanceCAS {
-		set, err = s.setBalanceCacheIfGeneration(ctx, task.userID, task.balance, task.balanceGeneration)
-	} else {
-		err = s.setBalanceCache(ctx, task.userID, task.balance)
-		set = err == nil
-	}
-	if err == nil && set {
-		s.clearBalanceCacheStaleLocked(state, task.balanceVersion)
 	}
 }
 
@@ -576,32 +372,7 @@ func (s *BillingCacheService) DeductBalanceCache(ctx context.Context, userID int
 	if s.cache == nil {
 		return nil
 	}
-	state := s.balanceState(userID)
-	state.mu.Lock()
-	defer state.mu.Unlock()
-	version, wasStale := s.markBalanceCacheStaleLocked(state)
-	if err := s.cache.DeductUserBalance(ctx, userID, amount); err != nil {
-		return err
-	}
-	if !wasStale {
-		s.clearBalanceCacheStaleLocked(state, version)
-	}
-	return nil
-}
-
-// SyncBalanceCacheAfterDeduction keeps Redis eligibility aligned with a DB
-// deduction when the caller already knows the post-deduction balance.
-func (s *BillingCacheService) SyncBalanceCacheAfterDeduction(ctx context.Context, userID int64, amount float64, newBalance *float64) error {
-	if s == nil || s.cache == nil {
-		return nil
-	}
-	if newBalance != nil && s.balanceBelowEligibilityThreshold(*newBalance) {
-		return s.markBalanceIneligible(ctx, userID)
-	}
-	if amount <= 0 {
-		return nil
-	}
-	return s.DeductBalanceCache(ctx, userID, amount)
+	return s.cache.DeductUserBalance(ctx, userID, amount)
 }
 
 // QueueDeductBalance 异步扣减余额缓存
@@ -629,31 +400,10 @@ func (s *BillingCacheService) InvalidateUserBalance(ctx context.Context, userID 
 	if s.cache == nil {
 		return nil
 	}
-	state := s.balanceState(userID)
-	state.mu.Lock()
-	defer state.mu.Unlock()
-	version, _ := s.markBalanceCacheStaleLocked(state)
 	if err := s.cache.InvalidateUserBalance(ctx, userID); err != nil {
 		logger.LegacyPrintf("service.billing_cache", "Warning: invalidate balance cache failed for user %d: %v", userID, err)
 		return err
 	}
-	s.clearBalanceCacheStaleLocked(state, version)
-	return nil
-}
-
-func (s *BillingCacheService) markBalanceIneligible(ctx context.Context, userID int64) error {
-	state := s.balanceState(userID)
-	state.mu.Lock()
-	defer state.mu.Unlock()
-	version, _ := s.markBalanceCacheStaleLocked(state)
-	if s.cache == nil {
-		return nil
-	}
-	if err := s.cache.InvalidateUserBalance(ctx, userID); err != nil {
-		logger.LegacyPrintf("service.billing_cache", "Warning: invalidate exhausted balance cache failed for user %d: %v", userID, err)
-		return err
-	}
-	s.clearBalanceCacheStaleLocked(state, version)
 	return nil
 }
 
@@ -778,6 +528,28 @@ func (s *BillingCacheService) InvalidateSubscription(ctx context.Context, userID
 		return err
 	}
 	return nil
+}
+
+func (s *BillingCacheService) PublishSubscriptionCacheInvalidation(ctx context.Context, cacheKey string) error {
+	if s.cache == nil {
+		return nil
+	}
+	pubsub, ok := s.cache.(subscriptionCacheInvalidationPubSub)
+	if !ok {
+		return nil
+	}
+	return pubsub.PublishSubscriptionCacheInvalidation(ctx, cacheKey)
+}
+
+func (s *BillingCacheService) SubscribeSubscriptionCacheInvalidation(ctx context.Context, handler func(cacheKey string)) error {
+	if s.cache == nil {
+		return nil
+	}
+	pubsub, ok := s.cache.(subscriptionCacheInvalidationPubSub)
+	if !ok {
+		return nil
+	}
+	return pubsub.SubscribeSubscriptionCacheInvalidation(ctx, handler)
 }
 
 // InvalidateAPIKeyRateLimit invalidates the Redis rate-limit usage cache for an API key.
@@ -1086,6 +858,21 @@ func (s *BillingCacheService) checkRPM(ctx context.Context, user *User, group *G
 	}
 
 	return nil
+}
+
+func (s *BillingCacheService) minimumBalanceReserve() float64 {
+	if s == nil || s.cfg == nil || s.cfg.Billing.MinimumBalanceReserve <= 0 {
+		return 0
+	}
+	return s.cfg.Billing.MinimumBalanceReserve
+}
+
+func (s *BillingCacheService) balanceBelowEligibilityThreshold(balance float64) bool {
+	if balance <= 0 {
+		return true
+	}
+	minimumReserve := s.minimumBalanceReserve()
+	return minimumReserve > 0 && balance < minimumReserve
 }
 
 // checkBalanceEligibility 检查余额模式资格

@@ -5,8 +5,14 @@
 
 import { defineStore } from 'pinia'
 import { ref, computed, readonly } from 'vue'
-import { authAPI, isTotp2FARequired, type LoginResponse } from '@/api'
-import type { User, LoginRequest, RegisterRequest, AuthResponse } from '@/types'
+import { authAPI, isTotp2FARequired, passkeyAPI, type LoginResponse } from '@/api'
+import type {
+  User,
+  LoginRequest,
+  RegisterRequest,
+  AuthResponse,
+  ActionCaptchaRequestProof
+} from '@/types'
 
 const AUTH_TOKEN_KEY = 'auth_token'
 const AUTH_USER_KEY = 'auth_user'
@@ -26,14 +32,6 @@ interface PendingAuthSessionSummary {
   adoption_required?: boolean
   suggested_display_name?: string
   suggested_avatar_url?: string
-}
-
-interface RefreshUserOptions {
-  force?: boolean
-}
-
-type PersistedUser = User & {
-  run_mode?: 'standard' | 'simple'
 }
 
 function normalizePendingAuthTokenField(value: unknown): PendingAuthTokenField {
@@ -76,20 +74,6 @@ function clearPendingAuthSessionStorage(): void {
   localStorage.removeItem(PENDING_AUTH_SESSION_KEY)
 }
 
-function stripBalanceFromPersistedUser<T extends Partial<PersistedUser> | null | undefined>(user: T): T {
-  if (!user || typeof user !== 'object') {
-    return user
-  }
-  const cloned = { ...user } as Record<string, unknown>
-  delete cloned.balance
-  return cloned as T
-}
-
-function persistAuthUser(user: PersistedUser): void {
-  // Balance changes independently from profile data; do not re-seed stale UI balance on reload.
-  localStorage.setItem(AUTH_USER_KEY, JSON.stringify(stripBalanceFromPersistedUser(user)))
-}
-
 export const useAuthStore = defineStore('auth', () => {
   // ==================== State ====================
 
@@ -101,8 +85,6 @@ export const useAuthStore = defineStore('auth', () => {
   const pendingAuthSession = ref<PendingAuthSessionSummary | null>(null)
   let refreshIntervalId: ReturnType<typeof setInterval> | null = null
   let tokenRefreshTimeoutId: ReturnType<typeof setTimeout> | null = null
-  let refreshUserPromise: Promise<User> | null = null
-  let latestUserRefreshRequestId = 0
 
   // ==================== Computed ====================
 
@@ -134,12 +116,7 @@ export const useAuthStore = defineStore('auth', () => {
     if (savedToken && savedUser) {
       try {
         token.value = savedToken
-        const persistedUser = JSON.parse(savedUser) as PersistedUser
-        if (persistedUser.run_mode) {
-          runMode.value = persistedUser.run_mode
-        }
-        const { run_mode: _run_mode, ...userData } = stripBalanceFromPersistedUser(persistedUser)
-        user.value = userData as User
+        user.value = JSON.parse(savedUser)
         refreshTokenValue.value = savedRefreshToken
         tokenExpiresAt.value = savedExpiresAt ? parseInt(savedExpiresAt, 10) : null
 
@@ -304,6 +281,17 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  async function loginWithPasskey(proof?: ActionCaptchaRequestProof): Promise<User> {
+    try {
+      const response = await passkeyAPI.login(proof)
+      setAuthFromResponse(response)
+      return user.value!
+    } catch (error) {
+      clearAuth({ preservePendingAuthSession: pendingAuthSession.value !== null })
+      throw error
+    }
+  }
+
   /**
    * Set auth state from an AuthResponse
    * Internal helper function
@@ -327,7 +315,7 @@ export const useAuthStore = defineStore('auth', () => {
 
     // Persist to localStorage
     localStorage.setItem(AUTH_TOKEN_KEY, response.access_token)
-    persistAuthUser(userData)
+    localStorage.setItem(AUTH_USER_KEY, JSON.stringify(userData))
     clearPendingAuthSession()
 
     // Start auto-refresh interval for user data
@@ -426,11 +414,16 @@ export const useAuthStore = defineStore('auth', () => {
    * Clears all authentication state and persisted data
    */
   async function logout(): Promise<void> {
-    // Call API logout (revokes refresh token on server)
-    await authAPI.logout()
-
-    // Clear state
-    clearAuth()
+    try {
+      // Call API logout (revokes refresh token on server)
+      await authAPI.logout()
+    } catch (err) {
+      // 服务端吊销失败（网络/5xx/超时）不应阻止本地登出，否则用户点了退出仍处于登录态。
+      console.warn('Logout API call failed, clearing local session anyway', err)
+    } finally {
+      // Always clear local state (tokens, user data, refresh timers)
+      clearAuth()
+    }
   }
 
   /**
@@ -439,48 +432,30 @@ export const useAuthStore = defineStore('auth', () => {
    * @returns Promise resolving to the updated user
    * @throws Error if not authenticated or request fails
    */
-  async function refreshUser(options: RefreshUserOptions = {}): Promise<User> {
+  async function refreshUser(): Promise<User> {
     if (!token.value) {
       throw new Error('Not authenticated')
     }
 
-    if (refreshUserPromise && !options.force) {
-      return refreshUserPromise
+    try {
+      const response = await authAPI.getCurrentUser()
+      if (response.data.run_mode) {
+        runMode.value = response.data.run_mode
+      }
+      const { run_mode: _run_mode, ...userData } = response.data
+      user.value = userData
+
+      // Update localStorage
+      localStorage.setItem(AUTH_USER_KEY, JSON.stringify(userData))
+
+      return userData
+    } catch (error) {
+      // If refresh fails with 401, clear auth state
+      if ((error as { status?: number }).status === 401) {
+        clearAuth({ preservePendingAuthSession: pendingAuthSession.value !== null })
+      }
+      throw error
     }
-
-    const requestId = ++latestUserRefreshRequestId
-    const refreshPromise = Promise.resolve()
-      .then(() => authAPI.getCurrentUser())
-      .then((response) => {
-        const { run_mode: _run_mode, ...userData } = response.data
-
-        if (requestId === latestUserRefreshRequestId) {
-          if (response.data.run_mode) {
-            runMode.value = response.data.run_mode
-          }
-          user.value = userData
-
-          // Update localStorage without persisting balance that may be stale on reload.
-          persistAuthUser(userData)
-        }
-
-        return userData
-      })
-      .catch((error) => {
-        // If the newest refresh fails with 401, clear auth state.
-        if (requestId === latestUserRefreshRequestId && (error as { status?: number }).status === 401) {
-          clearAuth({ preservePendingAuthSession: pendingAuthSession.value !== null })
-        }
-        throw error
-      })
-      .finally(() => {
-        if (refreshUserPromise === refreshPromise) {
-          refreshUserPromise = null
-        }
-      })
-
-    refreshUserPromise = refreshPromise
-    return refreshPromise
   }
 
   /**
@@ -492,8 +467,6 @@ export const useAuthStore = defineStore('auth', () => {
     stopAutoRefresh()
     // Stop token refresh
     stopTokenRefresh()
-    refreshUserPromise = null
-    latestUserRefreshRequestId++
 
     token.value = null
     refreshTokenValue.value = null
@@ -530,6 +503,7 @@ export const useAuthStore = defineStore('auth', () => {
 
     // Actions
     login,
+    loginWithPasskey,
     login2FA,
     register,
     setToken,

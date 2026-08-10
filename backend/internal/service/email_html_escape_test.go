@@ -9,22 +9,59 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestBuildVerifyCodeEmailBodyEscapesSiteName(t *testing.T) {
-	body := (&EmailService{}).buildVerifyCodeEmailBody("123456", `A&B <b>site</b> "quoted"`)
+func TestBuildVerifyCodeEmailBody_EscapesSiteName(t *testing.T) {
+	svc := &EmailService{}
 
-	assert.Contains(t, body, `<h1>A&amp;B &lt;b&gt;site&lt;/b&gt; &#34;quoted&#34;</h1>`)
-	assert.NotContains(t, body, "<b>site</b>")
-	assert.Contains(t, body, `<div class="code">123456</div>`)
+	t.Run("escapes_script_injection", func(t *testing.T) {
+		body := svc.buildVerifyCodeEmailBody("123456", `</h1><script>alert(1)</script><h1>`)
+
+		assert.NotContains(t, body, "<script>")
+		assert.Contains(t, body, "&lt;script&gt;")
+	})
+
+	t.Run("escapes_html_entities", func(t *testing.T) {
+		body := svc.buildVerifyCodeEmailBody("123456", `A&B<C>"D`)
+
+		assert.Contains(t, body, "A&amp;B&lt;C&gt;&#34;D")
+	})
+
+	t.Run("normal_site_name_unchanged", func(t *testing.T) {
+		body := svc.buildVerifyCodeEmailBody("654321", "My Site")
+
+		assert.Contains(t, body, "<h1>My Site</h1>")
+		assert.Contains(t, body, "654321")
+	})
 }
 
-func TestBuildPasswordResetEmailBodyEscapesHTMLContexts(t *testing.T) {
-	resetURL := `https://example.test/reset?next=" onmouseover="alert(1)&label=<b>go</b>`
-	body := (&EmailService{}).buildPasswordResetEmailBody(resetURL, `A&B </h1><img src=x onerror=alert(1)> "site"`)
+func TestBuildPasswordResetEmailBody_EscapesSiteName(t *testing.T) {
+	svc := &EmailService{}
 
-	assert.Contains(t, body, `<h1>A&amp;B &lt;/h1&gt;&lt;img src=x onerror=alert(1)&gt; &#34;site&#34;</h1>`)
-	assert.NotContains(t, body, `<img src=x`)
-	assert.NotContains(t, body, `onmouseover="alert(1)"`)
-	escapedURL := `https://example.test/reset?next=&#34; onmouseover=&#34;alert(1)&amp;label=&lt;b&gt;go&lt;/b&gt;`
-	assert.Contains(t, body, `href="`+escapedURL+`"`)
-	assert.Equal(t, 2, strings.Count(body, escapedURL))
+	t.Run("escapes_html_tags_in_site_name", func(t *testing.T) {
+		body := svc.buildPasswordResetEmailBody("https://example.com/reset?token=abc", `</h1><img src=x onerror=alert(1)>`)
+
+		assert.NotContains(t, body, "<img src=x")
+		assert.True(t, strings.Contains(body, "&lt;img"))
+	})
+
+	t.Run("escapes_html_entities", func(t *testing.T) {
+		body := svc.buildPasswordResetEmailBody("https://example.com/reset", `A&B<C>`)
+
+		assert.Contains(t, body, "A&amp;B&lt;C&gt;")
+	})
+
+	t.Run("normal_site_name_and_url_unchanged", func(t *testing.T) {
+		resetURL := "https://example.com/reset?token=xyz"
+		body := svc.buildPasswordResetEmailBody(resetURL, "Sub2API")
+
+		assert.Contains(t, body, "<h1>Sub2API</h1>")
+		assert.Contains(t, body, resetURL)
+	})
+
+	t.Run("escapes_ampersand_in_reset_url", func(t *testing.T) {
+		resetURL := "https://example.com/reset?a=1&b=2"
+		body := svc.buildPasswordResetEmailBody(resetURL, "Site")
+
+		assert.NotContains(t, body, `href="https://example.com/reset?a=1&b=2"`)
+		assert.Contains(t, body, `href="https://example.com/reset?a=1&amp;b=2"`)
+	})
 }

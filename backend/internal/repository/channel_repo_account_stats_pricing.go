@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/lib/pq"
 )
 
 // --- 账号统计定价规则 ---
@@ -17,7 +18,7 @@ func (r *channelRepository) batchLoadAccountStatsPricingRules(ctx context.Contex
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT id, channel_id, name, group_ids, account_ids, sort_order, created_at, updated_at
 		 FROM channel_account_stats_pricing_rules WHERE channel_id = ANY($1) ORDER BY channel_id, sort_order, id`,
-		channelIDs,
+		pq.Array(channelIDs),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("batch load account stats pricing rules: %w", err)
@@ -30,7 +31,7 @@ func (r *channelRepository) batchLoadAccountStatsPricingRules(ctx context.Contex
 		var rule service.AccountStatsPricingRule
 		if err := rows.Scan(
 			&rule.ID, &rule.ChannelID, &rule.Name,
-			scanPostgresInt64Array(&rule.GroupIDs), scanPostgresInt64Array(&rule.AccountIDs),
+			pq.Array(&rule.GroupIDs), pq.Array(&rule.AccountIDs),
 			&rule.SortOrder, &rule.CreatedAt, &rule.UpdatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan account stats pricing rule: %w", err)
@@ -68,7 +69,7 @@ func (r *channelRepository) batchLoadAccountStatsModelPricing(ctx context.Contex
 		`SELECT id, rule_id, platform, models, billing_mode, input_price, output_price,
 		        cache_write_price, cache_read_price, image_output_price, per_request_price, created_at, updated_at
 		 FROM channel_account_stats_model_pricing WHERE rule_id = ANY($1) ORDER BY rule_id, id`,
-		ruleIDs,
+		pq.Array(ruleIDs),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("batch load account stats model pricing: %w", err)
@@ -151,7 +152,7 @@ func createAccountStatsPricingRuleTx(ctx context.Context, tx *sql.Tx, rule *serv
 	err := tx.QueryRowContext(ctx,
 		`INSERT INTO channel_account_stats_pricing_rules (channel_id, name, group_ids, account_ids, sort_order)
 		 VALUES ($1, $2, $3, $4, $5) RETURNING id, created_at, updated_at`,
-		rule.ChannelID, rule.Name, postgresInt64Array(rule.GroupIDs), postgresInt64Array(rule.AccountIDs), rule.SortOrder,
+		rule.ChannelID, rule.Name, pq.Array(rule.GroupIDs), pq.Array(rule.AccountIDs), rule.SortOrder,
 	).Scan(&rule.ID, &rule.CreatedAt, &rule.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("insert account stats pricing rule: %w", err)
@@ -220,7 +221,7 @@ func (r *channelRepository) batchLoadAccountStatsIntervals(ctx context.Context, 
 		        per_request_price, sort_order, created_at, updated_at
 		 FROM channel_account_stats_pricing_intervals
 		 WHERE pricing_id = ANY($1) ORDER BY pricing_id, sort_order, id`,
-		pricingIDs,
+		pq.Array(pricingIDs),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("batch load account stats pricing intervals: %w", err)

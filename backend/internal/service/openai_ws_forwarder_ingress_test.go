@@ -144,115 +144,105 @@ func TestDropPreviousResponseIDFromRawPayload(t *testing.T) {
 }
 
 func TestStripCodexSparkImageGenerationToolFromRawPayload(t *testing.T) {
-	t.Parallel()
-
-	t.Run("spark_keeps_non_image_tools", func(t *testing.T) {
+	t.Run("strips_image_generation_for_spark", func(t *testing.T) {
 		payload := []byte(`{"type":"response.create","model":"gpt-5.3-codex-spark","tools":[{"type":"function","name":"shell"},{"type":"image_generation","output_format":"png"}]}`)
-		updated, changed, err := stripCodexSparkImageGenerationToolFromRawPayload(payload, "gpt-5.3-codex-spark", nil)
+		updated, changed, err := stripCodexSparkImageGenerationToolFromRawPayload(payload, "gpt-5.3-codex-spark")
 		require.NoError(t, err)
 		require.True(t, changed)
 		require.False(t, gjson.GetBytes(updated, `tools.#(type=="image_generation")`).Exists())
 		require.True(t, gjson.GetBytes(updated, `tools.#(type=="function")`).Exists())
 	})
 
-	t.Run("spark_removes_image_gen_namespace_top_level", func(t *testing.T) {
-		payload := []byte(`{"type":"response.create","model":"gpt-5.3-codex-spark","tools":[{"type":"function","name":"shell"},{"type":"namespace","name":"image_gen","tools":[{"type":"function","name":"imagegen"}]}]}`)
-		updated, changed, err := stripCodexSparkImageGenerationToolFromRawPayload(payload, "gpt-5.3-codex-spark", nil)
+	t.Run("strips_namespace_tools_for_spark", func(t *testing.T) {
+		payload := []byte(`{
+			"type":"response.create",
+			"model":"gpt-5.3-codex-spark",
+			"input":[
+				{"type":"message","role":"user","content":"hello"},
+				{"type":"additional_tools","tools":[{"type":"namespace","name":"image_gen"}]}
+			],
+			"tool_choice":{"type":"namespace","name":"image_gen"}
+		}`)
+		updated, changed, err := stripCodexSparkImageGenerationToolFromRawPayload(payload, "gpt-5.3-codex-spark")
 		require.NoError(t, err)
 		require.True(t, changed)
-		require.False(t, gjson.GetBytes(updated, `tools.#(type=="namespace").name`).Exists())
-		require.True(t, gjson.GetBytes(updated, `tools.#(type=="function")`).Exists())
-	})
-
-	t.Run("spark_removes_image_gen_namespace_additional_tools", func(t *testing.T) {
-		payload := []byte(`{"type":"response.create","model":"gpt-5.3-codex-spark","input":[{"type":"message","content":"hi"},{"type":"additional_tools","tools":[{"type":"namespace","name":"image_gen","tools":[{"type":"function","name":"imagegen"}]},{"type":"function","name":"shell"}]}]}`)
-		updated, changed, err := stripCodexSparkImageGenerationToolFromRawPayload(payload, "gpt-5.3-codex-spark", nil)
-		require.NoError(t, err)
-		require.True(t, changed)
-		require.False(t, gjson.GetBytes(updated, `input.#(type=="additional_tools").tools.#(type=="namespace").name`).Exists())
-		require.True(t, gjson.GetBytes(updated, `input.#(type=="additional_tools").tools.#(type=="function")`).Exists())
-	})
-
-	t.Run("spark_removes_native_image_generation_additional_tools", func(t *testing.T) {
-		payload := []byte(`{"type":"response.create","model":"gpt-5.3-codex-spark","input":[{"type":"message","content":"hi"},{"type":"additional_tools","tools":[{"type":"image_generation","output_format":"png"},{"type":"function","name":"shell"}]}]}`)
-		updated, changed, err := stripCodexSparkImageGenerationToolFromRawPayload(payload, "gpt-5.3-codex-spark", nil)
-		require.NoError(t, err)
-		require.True(t, changed)
-		require.False(t, gjson.GetBytes(updated, `input.#(type=="additional_tools").tools.#(type=="image_generation")`).Exists())
-		require.True(t, gjson.GetBytes(updated, `input.#(type=="additional_tools").tools.#(type=="function")`).Exists())
-	})
-
-	t.Run("spark_removes_empty_tools", func(t *testing.T) {
-		payload := []byte(`{"type":"response.create","model":"gpt-5.3-codex-spark","tools":[{"type":"image_generation","output_format":"png"}]}`)
-		updated, changed, err := stripCodexSparkImageGenerationToolFromRawPayload(payload, "gpt-5.3-codex-spark", nil)
-		require.NoError(t, err)
-		require.True(t, changed)
-		require.False(t, gjson.GetBytes(updated, "tools").Exists())
-	})
-
-	t.Run("spark_removes_image_tool_choice", func(t *testing.T) {
-		payload := []byte(`{"type":"response.create","model":"gpt-5.3-codex-spark","tools":[{"type":"function","name":"shell"},{"type":"image_generation","output_format":"png"}],"tool_choice":{"type":"image_generation"}}`)
-		updated, changed, err := stripCodexSparkImageGenerationToolFromRawPayload(payload, "gpt-5.3-codex-spark", nil)
-		require.NoError(t, err)
-		require.True(t, changed)
-		require.False(t, gjson.GetBytes(updated, `tools.#(type=="image_generation")`).Exists())
-		require.True(t, gjson.GetBytes(updated, `tools.#(type=="function")`).Exists())
+		require.False(t, IsImageGenerationIntent(openAIResponsesEndpoint, "gpt-5.3-codex-spark", updated))
+		require.Equal(t, "hello", gjson.GetBytes(updated, "input.0.content").String())
 		require.False(t, gjson.GetBytes(updated, "tool_choice").Exists())
 	})
 
-	t.Run("spark_removes_only_image_tool_choice", func(t *testing.T) {
-		payload := []byte(`{"type":"response.create","model":"gpt-5.3-codex-spark","tool_choice":{"type":"image_generation"}}`)
-		updated, changed, err := stripCodexSparkImageGenerationToolFromRawPayload(payload, "gpt-5.3-codex-spark", nil)
-		require.NoError(t, err)
-		require.True(t, changed)
-		require.False(t, gjson.GetBytes(updated, "tool_choice").Exists())
-	})
-
-	t.Run("non_spark_unchanged", func(t *testing.T) {
+	t.Run("keeps_image_generation_for_non_spark", func(t *testing.T) {
 		payload := []byte(`{"type":"response.create","model":"gpt-5.3-codex","tools":[{"type":"image_generation","output_format":"png"}]}`)
-		updated, changed, err := stripCodexSparkImageGenerationToolFromRawPayload(payload, "gpt-5.3-codex", nil)
+		updated, changed, err := stripCodexSparkImageGenerationToolFromRawPayload(payload, "gpt-5.3-codex")
 		require.NoError(t, err)
 		require.False(t, changed)
 		require.Equal(t, string(payload), string(updated))
 	})
 
-	t.Run("non_spark_preserves_image_gen_namespace", func(t *testing.T) {
-		payload := []byte(`{"type":"response.create","model":"gpt-5.3-codex","tools":[{"type":"namespace","name":"image_gen","tools":[{"type":"function","name":"imagegen"}]}],"input":[{"type":"additional_tools","tools":[{"type":"namespace","name":"image_gen"}]}]}`)
-		updated, changed, err := stripCodexSparkImageGenerationToolFromRawPayload(payload, "gpt-5.3-codex", nil)
+	t.Run("noop_when_no_image_tool", func(t *testing.T) {
+		payload := []byte(`{"type":"response.create","model":"gpt-5.3-codex-spark","tools":[{"type":"function","name":"shell"}]}`)
+		updated, changed, err := stripCodexSparkImageGenerationToolFromRawPayload(payload, "gpt-5.3-codex-spark")
 		require.NoError(t, err)
 		require.False(t, changed)
 		require.Equal(t, string(payload), string(updated))
-	})
-
-	t.Run("oauth_preserves_large_json_number", func(t *testing.T) {
-		payload := []byte(`{"type":"response.create","model":"gpt-5.3-codex-spark","input":[{"type":"message","content":[{"type":"input_text","nonce":9007199254740993}]}],"tools":[{"type":"image_generation","output_format":"png"}]}`)
-		account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth}
-		updated, changed, err := stripCodexSparkImageGenerationToolFromRawPayload(payload, "gpt-5.3-codex-spark", account)
-		require.NoError(t, err)
-		require.True(t, changed)
-		require.False(t, gjson.GetBytes(updated, "tools").Exists())
-		require.Equal(t, "9007199254740993", gjson.GetBytes(updated, "input.0.content.0.nonce").Raw)
 	})
 }
 
-func TestStripOpenAIImageGenerationToolFromRawPayload(t *testing.T) {
-	payload := []byte(`{
-		"type":"response.create",
-		"model":"gpt-5.4",
-		"tools":[
-			{"type":"function","name":"shell"},
-			{"type":"image_generation","output_format":"png"}
-		],
-		"tool_choice":{"type":"image_generation"}
-	}`)
+func TestStripOpenAIImageGenerationToolsFromRawPayload(t *testing.T) {
+	t.Run("flat image tool", func(t *testing.T) {
+		payload := []byte(`{
+			"type":"response.create",
+			"model":"gpt-5.4",
+			"tools":[
+				{"type":"function","name":"shell"},
+				{"type":"image_generation","output_format":"png"}
+			],
+			"tool_choice":{"type":"image_generation"}
+		}`)
 
-	updated, changed, err := stripOpenAIImageGenerationToolFromRawPayload(payload)
+		updated, changed, err := stripOpenAIImageGenerationToolsFromRawPayload(payload)
 
-	require.NoError(t, err)
-	require.True(t, changed)
-	require.False(t, gjson.GetBytes(updated, `tools.#(type=="image_generation")`).Exists())
-	require.True(t, gjson.GetBytes(updated, `tools.#(type=="function")`).Exists())
-	require.False(t, gjson.GetBytes(updated, "tool_choice").Exists())
+		require.NoError(t, err)
+		require.True(t, changed)
+		require.False(t, gjson.GetBytes(updated, `tools.#(type=="image_generation")`).Exists())
+		require.True(t, gjson.GetBytes(updated, `tools.#(type=="function")`).Exists())
+		require.False(t, gjson.GetBytes(updated, "tool_choice").Exists())
+	})
+
+	t.Run("namespace and Responses Lite tools", func(t *testing.T) {
+		payload := []byte(`{
+			"type":"response.create",
+			"model":"gpt-5.5",
+			"tools":[
+				{"type":"namespace","name":"image_gen","tools":[{"type":"function","name":"imagegen"}]},
+				{"type":"namespace","name":"code_tools","tools":[{"type":"function","name":"run"}]}
+			],
+			"input":[
+				{"type":"message","role":"user","content":"hello"},
+				{"type":"additional_tools","tools":[{"type":"namespace","name":"image_gen"}]}
+			],
+			"tool_choice":{"type":"namespace","name":"image_gen"}
+		}`)
+
+		updated, changed, err := stripOpenAIImageGenerationToolsFromRawPayload(payload)
+
+		require.NoError(t, err)
+		require.True(t, changed)
+		require.False(t, IsImageGenerationIntent(openAIResponsesEndpoint, "gpt-5.5", updated))
+		require.True(t, gjson.GetBytes(updated, `tools.#(name=="code_tools")`).Exists())
+		require.Equal(t, "hello", gjson.GetBytes(updated, "input.0.content").String())
+		require.False(t, gjson.GetBytes(updated, "tool_choice").Exists())
+	})
+
+	t.Run("non-image namespace is unchanged", func(t *testing.T) {
+		payload := []byte(`{"type":"response.create","model":"gpt-5.5","tools":[{"type":"namespace","name":"code_tools"}]}`)
+
+		updated, changed, err := stripOpenAIImageGenerationToolsFromRawPayload(payload)
+
+		require.NoError(t, err)
+		require.False(t, changed)
+		require.Equal(t, payload, updated)
+	})
 }
 
 func TestAlignStoreDisabledPreviousResponseID(t *testing.T) {
@@ -561,12 +551,21 @@ func TestNormalizeOpenAIWSPayloadWithoutInputAndPreviousResponseID(t *testing.T)
 	t.Parallel()
 
 	normalized, err := normalizeOpenAIWSPayloadWithoutInputAndPreviousResponseID(
-		[]byte(`{"model":"gpt-5.1","input":[1],"previous_response_id":"resp_x","metadata":{"b":2,"a":1}}`),
+		[]byte(`{"model":"gpt-5.1","input":[1],"previous_response_id":"resp_x","client_metadata":{"request_start_ms":"1"},"stream_options":{"include_usage":true},"generate":false,"metadata":{"b":2,"a":1}}`),
 	)
 	require.NoError(t, err)
 	require.False(t, gjson.GetBytes(normalized, "input").Exists())
 	require.False(t, gjson.GetBytes(normalized, "previous_response_id").Exists())
+	require.False(t, gjson.GetBytes(normalized, "client_metadata").Exists())
+	require.False(t, gjson.GetBytes(normalized, "stream_options").Exists())
+	require.False(t, gjson.GetBytes(normalized, "generate").Exists())
 	require.Equal(t, float64(1), gjson.GetBytes(normalized, "metadata.a").Float())
+
+	normalized, err = normalizeOpenAIWSPayloadWithoutInputAndPreviousResponseID(
+		[]byte(`{"model":"gpt-5.1","generate":true}`),
+	)
+	require.NoError(t, err)
+	require.True(t, gjson.GetBytes(normalized, "generate").Bool())
 
 	_, err = normalizeOpenAIWSPayloadWithoutInputAndPreviousResponseID(nil)
 	require.Error(t, err)
@@ -667,6 +666,36 @@ func TestShouldKeepIngressPreviousResponseID(t *testing.T) {
 
 	t.Run("strict_incremental_keep", func(t *testing.T) {
 		keep, reason, err := shouldKeepIngressPreviousResponseID(previousPayload, currentStrictPayload, "resp_turn_1", false)
+		require.NoError(t, err)
+		require.True(t, keep)
+		require.Equal(t, "strict_incremental_ok", reason)
+	})
+
+	t.Run("codex_prewarm_to_business_keep", func(t *testing.T) {
+		prewarmPayload := []byte(`{
+			"type":"response.create",
+			"model":"gpt-5.1",
+			"store":false,
+			"generate":false,
+			"client_metadata":{"x-codex-ws-stream-request-start-ms":"100"},
+			"stream_options":{"include_usage":true},
+			"input":[{"type":"input_text","text":"hello"}]
+		}`)
+		businessPayload := []byte(`{
+			"type":"response.create",
+			"model":"gpt-5.1",
+			"store":false,
+			"client_metadata":{"x-codex-ws-stream-request-start-ms":"200"},
+			"previous_response_id":"resp_prewarm",
+			"input":[{"type":"input_text","text":"hello"}]
+		}`)
+
+		keep, reason, err := shouldKeepIngressPreviousResponseID(
+			prewarmPayload,
+			businessPayload,
+			"resp_prewarm",
+			false,
+		)
 		require.NoError(t, err)
 		require.True(t, keep)
 		require.Equal(t, "strict_incremental_ok", reason)

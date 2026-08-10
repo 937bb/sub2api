@@ -79,8 +79,11 @@ func (m *mockAccountRepoForGemini) Delete(ctx context.Context, id int64) error  
 func (m *mockAccountRepoForGemini) List(ctx context.Context, params pagination.PaginationParams) ([]Account, *pagination.PaginationResult, error) {
 	return nil, nil, nil
 }
-func (m *mockAccountRepoForGemini) ListWithFilters(_ context.Context, _ pagination.PaginationParams, _ AccountListFilters) ([]Account, *pagination.PaginationResult, error) {
+func (m *mockAccountRepoForGemini) ListWithFilters(ctx context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64, privacyMode string) ([]Account, *pagination.PaginationResult, error) {
 	return nil, nil, nil
+}
+func (m *mockAccountRepoForGemini) ListAllWithFilters(ctx context.Context, platform, accountType, status, search string, groupID int64, privacyMode string) ([]Account, error) {
+	return nil, nil
 }
 func (m *mockAccountRepoForGemini) ListByGroup(ctx context.Context, groupID int64) ([]Account, error) {
 	return nil, nil
@@ -88,13 +91,7 @@ func (m *mockAccountRepoForGemini) ListByGroup(ctx context.Context, groupID int6
 func (m *mockAccountRepoForGemini) ListActive(ctx context.Context) ([]Account, error) {
 	return nil, nil
 }
-func (m *mockAccountRepoForGemini) ListOAuthRefreshCandidates(ctx context.Context) ([]Account, error) {
-	return m.ListActive(ctx)
-}
 func (m *mockAccountRepoForGemini) ListByPlatform(ctx context.Context, platform string) ([]Account, error) {
-	return nil, nil
-}
-func (m *mockAccountRepoForGemini) ListByPlatformForValidation(ctx context.Context, platform string) ([]Account, error) {
 	return nil, nil
 }
 func (m *mockAccountRepoForGemini) UpdateLastUsed(ctx context.Context, id int64) error { return nil }
@@ -150,6 +147,9 @@ func (m *mockAccountRepoForGemini) ListSchedulableUngroupedByPlatform(ctx contex
 func (m *mockAccountRepoForGemini) ListSchedulableUngroupedByPlatforms(ctx context.Context, platforms []string) ([]Account, error) {
 	return m.ListSchedulableByPlatforms(ctx, platforms)
 }
+func (m *mockAccountRepoForGemini) ListModelAvailabilityCandidates(ctx context.Context, _ *int64, platforms []string, _ bool) ([]Account, error) {
+	return m.ListSchedulableByPlatforms(ctx, platforms)
+}
 func (m *mockAccountRepoForGemini) SetRateLimited(ctx context.Context, id int64, resetAt time.Time) error {
 	return nil
 }
@@ -175,6 +175,9 @@ func (m *mockAccountRepoForGemini) ClearModelRateLimits(ctx context.Context, id 
 func (m *mockAccountRepoForGemini) UpdateSessionWindow(ctx context.Context, id int64, start, end *time.Time, status string) error {
 	return nil
 }
+func (m *mockAccountRepoForGemini) UpdateSessionWindowEnd(ctx context.Context, id int64, end time.Time) error {
+	return nil
+}
 func (m *mockAccountRepoForGemini) UpdateExtra(ctx context.Context, id int64, updates map[string]any) error {
 	return nil
 }
@@ -188,6 +191,14 @@ func (m *mockAccountRepoForGemini) IncrementQuotaUsed(ctx context.Context, id in
 
 func (m *mockAccountRepoForGemini) ResetQuotaUsed(ctx context.Context, id int64) error {
 	return nil
+}
+
+func (m *mockAccountRepoForGemini) RevertProxyFallback(ctx context.Context, accountID int64) error {
+	return nil
+}
+
+func (m *mockAccountRepoForGemini) ListShadowsByParent(ctx context.Context, parentID int64) ([]*Account, error) {
+	return nil, nil
 }
 
 // Verify interface implementation
@@ -231,9 +242,6 @@ func (m *mockGroupRepoForGemini) ListWithFilters(ctx context.Context, params pag
 }
 func (m *mockGroupRepoForGemini) ListActive(ctx context.Context) ([]Group, error) { return nil, nil }
 func (m *mockGroupRepoForGemini) ListActiveByPlatform(ctx context.Context, platform string) ([]Group, error) {
-	return nil, nil
-}
-func (m *mockGroupRepoForGemini) ListAllIncludingInactive(ctx context.Context, platform string) ([]Group, error) {
 	return nil, nil
 }
 func (m *mockGroupRepoForGemini) ExistsByName(ctx context.Context, name string) (bool, error) {
@@ -297,6 +305,20 @@ func (m *mockGatewayCacheForGemini) DeleteSessionAccountID(ctx context.Context, 
 	return nil
 }
 
+func (m *mockGatewayCacheForGemini) SetGrokVideoPendingBilling(_ context.Context, _ string, _ []byte, _ time.Duration) error {
+	return nil
+}
+func (m *mockGatewayCacheForGemini) GetGrokVideoPendingBilling(_ context.Context, _ string) ([]byte, error) {
+	return nil, nil
+}
+func (m *mockGatewayCacheForGemini) ClaimGrokVideoBilled(_ context.Context, _ string, _ time.Duration) (bool, error) {
+	return true, nil
+}
+
+func (m *mockGatewayCacheForGemini) ReleaseGrokVideoBilled(_ context.Context, _ string) error {
+	return nil
+}
+
 // TestGeminiMessagesCompatService_SelectAccountForModelWithExclusions_GeminiPlatform 测试 Gemini 单平台选择
 func TestGeminiMessagesCompatService_SelectAccountForModelWithExclusions_GeminiPlatform(t *testing.T) {
 	ctx := context.Background()
@@ -328,68 +350,6 @@ func TestGeminiMessagesCompatService_SelectAccountForModelWithExclusions_GeminiP
 	require.NotNil(t, acc)
 	require.Equal(t, int64(1), acc.ID, "应选择优先级最高的 gemini 账户")
 	require.Equal(t, PlatformGemini, acc.Platform, "无分组时应只返回 gemini 平台账户")
-}
-
-func TestGeminiMessagesCompatService_SelectAccountForAIStudioEndpoints_PrefersAPIKeyFromSchedulerMetadata(t *testing.T) {
-	ctx := context.Background()
-	cache := &snapshotHydrationCache{
-		snapshot: []*Account{
-			{
-				ID:          1,
-				Platform:    PlatformGemini,
-				Type:        AccountTypeOAuth,
-				Status:      StatusActive,
-				Schedulable: true,
-				Concurrency: 1,
-				Priority:    1,
-			},
-			{
-				ID:          2,
-				Platform:    PlatformGemini,
-				Type:        AccountTypeAPIKey,
-				Status:      StatusActive,
-				Schedulable: true,
-				Concurrency: 1,
-				Priority:    10,
-				Credentials: map[string]any{
-					"has_api_key": true,
-				},
-			},
-		},
-		accounts: map[int64]*Account{
-			1: {
-				ID:          1,
-				Platform:    PlatformGemini,
-				Type:        AccountTypeOAuth,
-				Status:      StatusActive,
-				Schedulable: true,
-				Concurrency: 1,
-				Priority:    1,
-			},
-			2: {
-				ID:          2,
-				Platform:    PlatformGemini,
-				Type:        AccountTypeAPIKey,
-				Status:      StatusActive,
-				Schedulable: true,
-				Concurrency: 1,
-				Priority:    10,
-				Credentials: map[string]any{
-					"api_key": "live-api-key",
-				},
-			},
-		},
-	}
-	svc := &GeminiMessagesCompatService{
-		schedulerSnapshot: NewSchedulerSnapshotService(cache, nil, nil, nil, nil),
-	}
-
-	account, err := svc.SelectAccountForAIStudioEndpoints(ctx, nil)
-
-	require.NoError(t, err)
-	require.NotNil(t, account)
-	require.Equal(t, int64(2), account.ID)
-	require.Equal(t, "live-api-key", account.GetCredential("api_key"))
 }
 
 func TestGeminiMessagesCompatService_GroupResolution_ReusesContextGroup(t *testing.T) {

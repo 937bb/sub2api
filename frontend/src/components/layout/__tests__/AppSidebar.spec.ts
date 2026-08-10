@@ -26,7 +26,7 @@ describe('AppSidebar scroll position persistence', () => {
   })
 
   it('declares sidebarNavRef in script setup', () => {
-    expect(componentSource).toContain('const sidebarNavRef = ref<HTMLElement | null>(null)')
+    expect(componentSource).toContain("const sidebarNavRef = ref<HTMLElement | null>(null)")
   })
 
   it('saves scroll position on beforeUnmount', () => {
@@ -51,14 +51,5 @@ describe('AppSidebar header styles', () => {
     expect(sidebarBrandBlockMatch).not.toBeNull()
     expect(sidebarHeaderBlockMatch?.[0]).not.toContain('@apply overflow-hidden;')
     expect(sidebarBrandBlockMatch?.[0]).not.toContain('overflow: hidden;')
-  })
-})
-
-describe('AppSidebar home links', () => {
-  it('keeps focusable brand controls out of the collapsed aria-hidden brand block', () => {
-    expect(componentSource).toContain('const homePath = computed(() => (isAdmin.value ? \'/admin/dashboard\' : \'/dashboard\'))')
-    expect(componentSource).toContain('<router-link\n        :to="homePath"\n        class="sidebar-logo')
-    expect(componentSource).toContain('<router-link\n          v-if="!sidebarCollapsed"\n          :to="homePath"')
-    expect(componentSource).toContain('<VersionBadge v-if="!sidebarCollapsed" :version="siteVersion" />')
   })
 })

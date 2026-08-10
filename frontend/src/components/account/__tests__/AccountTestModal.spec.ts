@@ -78,7 +78,7 @@ const TextAreaStub = defineComponent({
   `
 })
 
-function buildAccount(overrides: Record<string, unknown> = {}) {
+function buildAccount() {
   return {
     id: 1,
     name: 'OpenAI OAuth',
@@ -90,8 +90,7 @@ function buildAccount(overrides: Record<string, unknown> = {}) {
     concurrency: 1,
     priority: 1,
     proxy_id: null,
-    auto_pause_on_expired: false,
-    ...overrides
+    auto_pause_on_expired: false
   } as any
 }
 
@@ -146,40 +145,6 @@ describe('AccountTestModal', () => {
     expect(JSON.parse(options.body)).toMatchObject({
       model_id: 'gpt-5.4',
       mode: 'compact'
-    })
-  })
-
-  it('omits compact mode for OpenAI image model tests', async () => {
-    getAvailableModelsMock.mockResolvedValue([
-      { id: 'gpt-image-1', display_name: 'GPT Image 1' }
-    ])
-
-    const wrapper = mount(AccountTestModal, {
-      props: {
-        show: true,
-        account: buildAccount({ type: 'apikey' })
-      },
-      global: {
-        stubs: {
-          BaseDialog: BaseDialogStub,
-          Select: SelectStub,
-          TextArea: TextAreaStub,
-          Icon: true
-        }
-      }
-    })
-
-    await flushPromises()
-    ;(wrapper.vm as any).selectedModelId = 'gpt-image-1'
-    ;(wrapper.vm as any).testPrompt = 'admin.accounts.imagePromptDefault'
-    ;(wrapper.vm as any).testMode = 'compact'
-    await (wrapper.vm as any).startTest()
-    await flushPromises()
-
-    const [, options] = (global.fetch as any).mock.calls[0]
-    expect(JSON.parse(options.body)).toEqual({
-      model_id: 'gpt-image-1',
-      prompt: 'admin.accounts.imagePromptDefault'
     })
   })
 

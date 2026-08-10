@@ -8,16 +8,15 @@ import (
 	"strings"
 )
 
-const (
-	immutableAssetCacheControl = "public, max-age=31536000, immutable"
-	mutableAssetCacheControl   = "no-cache"
-)
+// Vite emits content-hashed filenames under assets/, so the backend can apply
+// immutable caching without relying on a reverse proxy to classify paths.
+const staticAssetsCacheControl = "public, max-age=31536000, immutable"
 
-// isFingerprintedEmbeddedAssetPath recognizes Vite's default eight-character
-// content hash only within the assets tree.
+// isFingerprintedEmbeddedAssetPath reports whether a cleaned URL path refers to
+// a Vite asset whose filename contains the default eight-character build hash.
 func isFingerprintedEmbeddedAssetPath(cleanPath string) bool {
 	cleanPath = strings.TrimPrefix(cleanPath, "/")
-	if cleanPath == "" || cleanPath != path.Clean(cleanPath) || strings.Contains(cleanPath, "\\") || !strings.HasPrefix(cleanPath, "assets/") {
+	if !strings.HasPrefix(cleanPath, "assets/") {
 		return false
 	}
 
@@ -25,14 +24,18 @@ func isFingerprintedEmbeddedAssetPath(cleanPath string) bool {
 	extension := path.Ext(filename)
 	stem := strings.TrimSuffix(filename, extension)
 	const fingerprintLength = 8
-	delimiter := len(stem) - fingerprintLength - 1
-	if extension == "" || delimiter < 1 || stem[delimiter] != '-' {
+	delimiterIndex := len(stem) - fingerprintLength - 1
+	if extension == "" || delimiterIndex < 1 || stem[delimiterIndex] != '-' {
 		return false
 	}
 
-	for _, char := range stem[delimiter+1:] {
-		if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') ||
-			(char >= '0' && char <= '9') || char == '_' || char == '-' {
+	// Vite hashes use URL-safe characters and are stable for immutable caching.
+	fingerprint := stem[delimiterIndex+1:]
+	for _, char := range fingerprint {
+		if (char >= 'a' && char <= 'z') ||
+			(char >= 'A' && char <= 'Z') ||
+			(char >= '0' && char <= '9') ||
+			char == '_' || char == '-' {
 			continue
 		}
 		return false
@@ -40,13 +43,11 @@ func isFingerprintedEmbeddedAssetPath(cleanPath string) bool {
 	return true
 }
 
-func applyEmbeddedAssetCacheHeaders(header http.Header, cleanPath string) {
-	if header == nil {
+// applyStaticAssetCacheHeaders sets Cache-Control for long-cacheable static paths.
+// index.html / SPA routes must keep no-cache and are not handled here.
+func applyStaticAssetCacheHeaders(header http.Header, cleanPath string) {
+	if header == nil || !isFingerprintedEmbeddedAssetPath(cleanPath) {
 		return
 	}
-	if isFingerprintedEmbeddedAssetPath(cleanPath) {
-		header.Set("Cache-Control", immutableAssetCacheControl)
-		return
-	}
-	header.Set("Cache-Control", mutableAssetCacheControl)
+	header.Set("Cache-Control", staticAssetsCacheControl)
 }
