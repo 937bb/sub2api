@@ -2,13 +2,15 @@
 
 ## Scope
 
-- Released donor branch: `is7qin/local` at `54fe05f1fef211c9a7b6361e43d4cb229eb67757` (2026-07-20).
-- Latest donor integration branch: `is7qin/dev` at `d4acaace4b5886baad2d940e43129b3c232d6806` (2026-08-10).
-- Integration branch before this follow-up: `937sub2b` at `6e566f9b830b00a35398154635a2ab571315f6a8`.
-- The released donor delta from the shared base contains 488 non-merge commits and changes 950 paths. Of 218 added paths, 115 do not exist under the same name in the current tree.
-- Donor `dev` and `local` diverged after `3a55ad2b8e03ff2dab09bb1929a9126f3f4e8c10`: `dev` is 402 commits ahead and `local` is 14 commits ahead. Both sides were inspected because `local` is released but old, while `dev` contains later corrections.
+- Authoritative upstream baseline: `Wei-Shaw/sub2api` branch `main` at `10a4c6e3ad319587e817109c071259269855ec30` (2026-08-10, version `0.1.173`).
+- Released donor source: `is7qin/local` at `54fe05f1fef211c9a7b6361e43d4cb229eb67757` (2026-07-20, version `1.1.0`).
+- Integration branch before this correction: `937sub2b` at `d145253ff37a0c5f9b6c3be07a83ae869ef57fab`.
+- The official baseline and donor release share ancestor `aa69e3947dac0282c5973bc3a51fadf058bbc9ca`. From that ancestor, the donor branch is 506 commits ahead and official `main` is 1999 commits ahead.
+- The donor side has 488 non-merge commits. Patch-equivalence comparison against official `main` classifies 433 as having no equivalent official patch and 55 as already represented upstream.
+- The ancestor-to-donor diff changes 950 paths with 96,118 insertions and 11,293 deletions. This is a branch-divergence measurement, not a pure custom patch set, because both repositories continued development after the shared ancestor.
+- `is7qin/dev` at `d4acaace4b5886baad2d940e43129b3c232d6806` is only an optional follow-up reference for later corrections to donor-owned features. It is not an upstream baseline and is not used to decide whether official functionality is present or missing.
 
-This was a semantic audit. File-level copying was rejected because the donor release is based on an older service, scheduler, migration, and frontend layout.
+This was a semantic audit against official `main`. File-level copying was rejected because the donor release is based on an older service, scheduler, migration, and frontend layout.
 
 ## Ported Or Reimplemented
 
@@ -47,4 +49,4 @@ This was a semantic audit. File-level copying was rejected because the donor rel
 - OAuth Redis tests cover successful persistence, authoritative misses, expired data, deletion, and memory fallback after Redis write failure.
 - Subscription switching tests cover success, idempotence, invalid groups, no active subscription, and write conflicts.
 
-The audit conclusion is not that every donor file was copied. All released and latest donor deltas were classified, and only donor-specific behavior that remains valid against the current architecture was retained or reimplemented.
+The audit conclusion is not that every donor file was copied. Donor release candidates were measured against official `main`, then only donor-specific behavior that remains valid against the current architecture was retained or reimplemented. Donor `dev` was consulted only where a later fix clarified behavior already owned by the donor feature.
