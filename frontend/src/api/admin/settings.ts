@@ -1300,6 +1300,46 @@ export async function updateRateLimit429CooldownSettings(
   return data;
 }
 
+export interface OpenAIOAuth429DynamicPolicy {
+  enabled: boolean;
+  window_seconds: number;
+  min_samples: number;
+  min_429: number;
+  ratio_threshold: number;
+  block_seconds: number;
+  usage_window_check_enabled: boolean;
+  usage_window_5h_threshold_percent: number;
+  usage_window_7d_threshold_percent: number;
+  usage_window_missing_data_fallback_seconds: number;
+}
+
+export interface OpenAIOAuth429DynamicPlanTypeSettings
+  extends OpenAIOAuth429DynamicPolicy {
+  plan_type: string;
+}
+
+export interface OpenAIOAuth429DynamicSettings
+  extends OpenAIOAuth429DynamicPolicy {
+  plan_type_settings: OpenAIOAuth429DynamicPlanTypeSettings[];
+}
+
+export async function getOpenAIOAuth429DynamicSettings(): Promise<OpenAIOAuth429DynamicSettings> {
+  const { data } = await apiClient.get<OpenAIOAuth429DynamicSettings>(
+    "/admin/settings/openai-oauth-429-dynamic",
+  );
+  return data;
+}
+
+export async function updateOpenAIOAuth429DynamicSettings(
+  settings: OpenAIOAuth429DynamicSettings,
+): Promise<OpenAIOAuth429DynamicSettings> {
+  const { data } = await apiClient.put<OpenAIOAuth429DynamicSettings>(
+    "/admin/settings/openai-oauth-429-dynamic",
+    settings,
+  );
+  return data;
+}
+
 // ==================== Panel Rate Limit Settings ====================
 
 /**
@@ -1559,6 +1599,8 @@ export const settingsAPI = {
   updateOverloadCooldownSettings,
   getRateLimit429CooldownSettings,
   updateRateLimit429CooldownSettings,
+  getOpenAIOAuth429DynamicSettings,
+  updateOpenAIOAuth429DynamicSettings,
   getPanelRateLimitSettings,
   updatePanelRateLimitSettings,
   getStreamTimeoutSettings,

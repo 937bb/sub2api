@@ -561,6 +561,45 @@ type RateLimit429CooldownSettings struct {
 	CooldownSeconds int `json:"cooldown_seconds"`
 }
 
+const (
+	OpenAIOAuth429DynamicMaxBlockSeconds     = 30 * 24 * 60 * 60
+	OpenAIOAuth429DynamicMaxPlanTypeSettings = 100
+)
+
+type OpenAIOAuth429DynamicPolicy struct {
+	Enabled                               bool    `json:"enabled"`
+	WindowSeconds                         int     `json:"window_seconds"`
+	MinSamples                            int     `json:"min_samples"`
+	Min429                                int     `json:"min_429"`
+	RatioThreshold                        float64 `json:"ratio_threshold"`
+	BlockSeconds                          int     `json:"block_seconds"`
+	UsageWindowCheckEnabled               bool    `json:"usage_window_check_enabled"`
+	UsageWindow5hThresholdPercent         float64 `json:"usage_window_5h_threshold_percent"`
+	UsageWindow7dThresholdPercent         float64 `json:"usage_window_7d_threshold_percent"`
+	UsageWindowMissingDataFallbackSeconds int     `json:"usage_window_missing_data_fallback_seconds"`
+}
+
+type OpenAIOAuth429DynamicPlanTypeSettings struct {
+	PlanType string `json:"plan_type"`
+	OpenAIOAuth429DynamicPolicy
+}
+
+// OpenAIOAuth429DynamicSettings retains the original top-level JSON fields
+// and adds optional exact plan-type overrides.
+type OpenAIOAuth429DynamicSettings struct {
+	Enabled                               bool                                    `json:"enabled"`
+	WindowSeconds                         int                                     `json:"window_seconds"`
+	MinSamples                            int                                     `json:"min_samples"`
+	Min429                                int                                     `json:"min_429"`
+	RatioThreshold                        float64                                 `json:"ratio_threshold"`
+	BlockSeconds                          int                                     `json:"block_seconds"`
+	UsageWindowCheckEnabled               bool                                    `json:"usage_window_check_enabled"`
+	UsageWindow5hThresholdPercent         float64                                 `json:"usage_window_5h_threshold_percent"`
+	UsageWindow7dThresholdPercent         float64                                 `json:"usage_window_7d_threshold_percent"`
+	UsageWindowMissingDataFallbackSeconds int                                     `json:"usage_window_missing_data_fallback_seconds"`
+	PlanTypeSettings                      []OpenAIOAuth429DynamicPlanTypeSettings `json:"plan_type_settings,omitempty"`
+}
+
 // DefaultOverloadCooldownSettings 返回默认的过载冷却配置（启用，10分钟）
 func DefaultOverloadCooldownSettings() *OverloadCooldownSettings {
 	return &OverloadCooldownSettings{
@@ -575,6 +614,49 @@ func DefaultRateLimit429CooldownSettings() *RateLimit429CooldownSettings {
 		Enabled:         true,
 		CooldownSeconds: 5,
 	}
+}
+
+func DefaultOpenAIOAuth429DynamicSettings() *OpenAIOAuth429DynamicSettings {
+	return &OpenAIOAuth429DynamicSettings{
+		Enabled:                               false,
+		WindowSeconds:                         300,
+		MinSamples:                            20,
+		Min429:                                3,
+		RatioThreshold:                        0.5,
+		BlockSeconds:                          60,
+		UsageWindowCheckEnabled:               false,
+		UsageWindow5hThresholdPercent:         100,
+		UsageWindow7dThresholdPercent:         100,
+		UsageWindowMissingDataFallbackSeconds: 0,
+		PlanTypeSettings:                      []OpenAIOAuth429DynamicPlanTypeSettings{},
+	}
+}
+
+func (s *OpenAIOAuth429DynamicSettings) defaultPolicy() *OpenAIOAuth429DynamicPolicy {
+	if s == nil {
+		return DefaultOpenAIOAuth429DynamicSettings().defaultPolicy()
+	}
+	return &OpenAIOAuth429DynamicPolicy{
+		Enabled: s.Enabled, WindowSeconds: s.WindowSeconds, MinSamples: s.MinSamples,
+		Min429: s.Min429, RatioThreshold: s.RatioThreshold, BlockSeconds: s.BlockSeconds,
+		UsageWindowCheckEnabled:               s.UsageWindowCheckEnabled,
+		UsageWindow5hThresholdPercent:         s.UsageWindow5hThresholdPercent,
+		UsageWindow7dThresholdPercent:         s.UsageWindow7dThresholdPercent,
+		UsageWindowMissingDataFallbackSeconds: s.UsageWindowMissingDataFallbackSeconds,
+	}
+}
+
+func (s *OpenAIOAuth429DynamicSettings) PolicyForPlanType(planType string) *OpenAIOAuth429DynamicPolicy {
+	normalized := normalizeOpenAIOAuth429PlanType(planType)
+	if normalized != "" && s != nil {
+		for i := range s.PlanTypeSettings {
+			if normalizeOpenAIOAuth429PlanType(s.PlanTypeSettings[i].PlanType) == normalized {
+				policy := s.PlanTypeSettings[i].OpenAIOAuth429DynamicPolicy
+				return &policy
+			}
+		}
+	}
+	return s.defaultPolicy()
 }
 
 // DefaultBetaPolicySettings 返回默认的 Beta 策略配置

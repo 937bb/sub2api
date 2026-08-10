@@ -411,6 +411,195 @@
             </div>
           </div>
 
+          <!-- OpenAI OAuth 429 Dynamic Scheduling -->
+          <div class="card">
+            <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
+              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+                {{ t("admin.settings.openAIOAuth429Dynamic.title") }}
+              </h2>
+              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                {{ t("admin.settings.openAIOAuth429Dynamic.description") }}
+              </p>
+            </div>
+            <div class="space-y-5 p-6">
+              <div
+                v-if="openAIOAuth429DynamicLoading"
+                class="flex items-center gap-2 text-gray-500"
+              >
+                <div class="h-4 w-4 animate-spin rounded-full border-b-2 border-primary-600"></div>
+                {{ t("common.loading") }}
+              </div>
+              <template v-else>
+                <div class="flex items-center justify-between gap-4">
+                  <div>
+                    <label class="font-medium text-gray-900 dark:text-white">
+                      {{ t("admin.settings.openAIOAuth429Dynamic.enabled") }}
+                    </label>
+                    <p class="text-sm text-gray-500 dark:text-gray-400">
+                      {{ t("admin.settings.openAIOAuth429Dynamic.enabledHint") }}
+                    </p>
+                  </div>
+                  <Toggle v-model="openAIOAuth429DynamicForm.enabled" />
+                </div>
+                <div
+                  v-if="openAIOAuth429DynamicForm.enabled"
+                  class="grid grid-cols-1 gap-4 border-t border-gray-100 pt-4 sm:grid-cols-2 dark:border-dark-700"
+                >
+                  <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    {{ t("admin.settings.openAIOAuth429Dynamic.windowSeconds") }}
+                    <input v-model.number="openAIOAuth429DynamicForm.window_seconds" type="number" min="60" max="3600" class="input mt-2 w-full" />
+                  </label>
+                  <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    {{ t("admin.settings.openAIOAuth429Dynamic.minSamples") }}
+                    <input v-model.number="openAIOAuth429DynamicForm.min_samples" type="number" min="2" max="10000" class="input mt-2 w-full" />
+                  </label>
+                  <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    {{ t("admin.settings.openAIOAuth429Dynamic.min429") }}
+                    <input v-model.number="openAIOAuth429DynamicForm.min_429" type="number" min="1" :max="openAIOAuth429DynamicForm.min_samples" class="input mt-2 w-full" />
+                  </label>
+                  <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    {{ t("admin.settings.openAIOAuth429Dynamic.ratioThreshold") }}
+                    <input v-model.number="openAIOAuth429DynamicForm.ratio_threshold" type="number" min="0.01" max="1" step="0.05" class="input mt-2 w-full" />
+                  </label>
+                  <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    {{ t("admin.settings.openAIOAuth429Dynamic.blockSeconds") }}
+                    <input v-model.number="openAIOAuth429DynamicForm.block_seconds" type="number" min="1" max="2592000" class="input mt-2 w-full" />
+                  </label>
+                </div>
+                <div
+                  v-if="openAIOAuth429DynamicForm.enabled"
+                  class="space-y-4 border-t border-gray-100 pt-4 dark:border-dark-700"
+                >
+                  <div class="flex items-center justify-between gap-4">
+                    <div>
+                      <label class="text-sm font-medium text-gray-900 dark:text-white">
+                        {{ t("admin.settings.openAIOAuth429Dynamic.usageWindowCheck") }}
+                      </label>
+                      <p class="text-xs text-gray-500 dark:text-gray-400">
+                        {{ t("admin.settings.openAIOAuth429Dynamic.usageWindowCheckHint") }}
+                      </p>
+                    </div>
+                    <Toggle v-model="openAIOAuth429DynamicForm.usage_window_check_enabled" />
+                  </div>
+                  <div
+                    v-if="openAIOAuth429DynamicForm.usage_window_check_enabled"
+                    class="grid grid-cols-1 gap-4 sm:grid-cols-3"
+                  >
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      {{ t("admin.settings.openAIOAuth429Dynamic.usage5hThreshold") }}
+                      <input v-model.number="openAIOAuth429DynamicForm.usage_window_5h_threshold_percent" type="number" min="0.01" max="100" step="0.1" class="input mt-2 w-full" />
+                    </label>
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      {{ t("admin.settings.openAIOAuth429Dynamic.usage7dThreshold") }}
+                      <input v-model.number="openAIOAuth429DynamicForm.usage_window_7d_threshold_percent" type="number" min="0.01" max="100" step="0.1" class="input mt-2 w-full" />
+                    </label>
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      {{ t("admin.settings.openAIOAuth429Dynamic.missingDataFallback") }}
+                      <input v-model.number="openAIOAuth429DynamicForm.usage_window_missing_data_fallback_seconds" type="number" min="0" class="input mt-2 w-full" />
+                    </label>
+                  </div>
+                </div>
+                <p v-if="openAIOAuth429DynamicForm.enabled" class="text-xs text-gray-500 dark:text-gray-400">
+                  {{ t("admin.settings.openAIOAuth429Dynamic.hint") }}
+                </p>
+                <div class="border-t border-gray-100 pt-4 dark:border-dark-700">
+                  <div class="flex items-center justify-between gap-4">
+                    <div>
+                      <h3 class="text-sm font-medium text-gray-900 dark:text-white">
+                        {{ t("admin.settings.openAIOAuth429Dynamic.planOverrides") }}
+                      </h3>
+                      <p class="text-xs text-gray-500 dark:text-gray-400">
+                        {{ t("admin.settings.openAIOAuth429Dynamic.planOverridesHint") }}
+                      </p>
+                    </div>
+                    <button type="button" class="btn btn-secondary btn-sm" @click="addOpenAIOAuth429PlanOverride">
+                      <Icon name="plus" size="sm" class="mr-1" />
+                      {{ t("admin.settings.openAIOAuth429Dynamic.addOverride") }}
+                    </button>
+                  </div>
+                  <div
+                    v-for="(override, index) in openAIOAuth429DynamicForm.plan_type_settings"
+                    :key="index"
+                    class="mt-4 space-y-4 border-t border-gray-100 pt-4 dark:border-dark-700"
+                  >
+                    <div class="flex items-end gap-3">
+                      <label class="min-w-0 flex-1 text-sm font-medium text-gray-700 dark:text-gray-300">
+                        {{ t("admin.settings.openAIOAuth429Dynamic.planType") }}
+                        <input v-model.trim="override.plan_type" type="text" maxlength="64" class="input mt-2 w-full" placeholder="plus" />
+                      </label>
+                      <div class="flex h-10 items-center gap-3">
+                        <Toggle v-model="override.enabled" />
+                        <button
+                          type="button"
+                          class="btn btn-ghost btn-sm text-red-600"
+                          :title="t('common.delete')"
+                          @click="removeOpenAIOAuth429PlanOverride(index)"
+                        >
+                          <Icon name="trash" size="sm" />
+                        </button>
+                      </div>
+                    </div>
+                    <div v-if="override.enabled" class="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                      <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                        {{ t("admin.settings.openAIOAuth429Dynamic.windowSeconds") }}
+                        <input v-model.number="override.window_seconds" type="number" min="60" max="3600" class="input mt-2 w-full" />
+                      </label>
+                      <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                        {{ t("admin.settings.openAIOAuth429Dynamic.minSamples") }}
+                        <input v-model.number="override.min_samples" type="number" min="2" max="10000" class="input mt-2 w-full" />
+                      </label>
+                      <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                        {{ t("admin.settings.openAIOAuth429Dynamic.min429") }}
+                        <input v-model.number="override.min_429" type="number" min="1" :max="override.min_samples" class="input mt-2 w-full" />
+                      </label>
+                      <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                        {{ t("admin.settings.openAIOAuth429Dynamic.ratioThreshold") }}
+                        <input v-model.number="override.ratio_threshold" type="number" min="0.01" max="1" step="0.05" class="input mt-2 w-full" />
+                      </label>
+                      <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                        {{ t("admin.settings.openAIOAuth429Dynamic.blockSeconds") }}
+                        <input v-model.number="override.block_seconds" type="number" min="1" max="2592000" class="input mt-2 w-full" />
+                      </label>
+                      <div class="flex items-end pb-2">
+                        <label class="flex items-center gap-3 text-sm font-medium text-gray-700 dark:text-gray-300">
+                          <Toggle v-model="override.usage_window_check_enabled" />
+                          {{ t("admin.settings.openAIOAuth429Dynamic.usageWindowCheck") }}
+                        </label>
+                      </div>
+                    </div>
+                    <div
+                      v-if="override.enabled && override.usage_window_check_enabled"
+                      class="grid grid-cols-1 gap-4 sm:grid-cols-3"
+                    >
+                      <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                        {{ t("admin.settings.openAIOAuth429Dynamic.usage5hThreshold") }}
+                        <input v-model.number="override.usage_window_5h_threshold_percent" type="number" min="0.01" max="100" step="0.1" class="input mt-2 w-full" />
+                      </label>
+                      <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                        {{ t("admin.settings.openAIOAuth429Dynamic.usage7dThreshold") }}
+                        <input v-model.number="override.usage_window_7d_threshold_percent" type="number" min="0.01" max="100" step="0.1" class="input mt-2 w-full" />
+                      </label>
+                      <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                        {{ t("admin.settings.openAIOAuth429Dynamic.missingDataFallback") }}
+                        <input v-model.number="override.usage_window_missing_data_fallback_seconds" type="number" min="0" class="input mt-2 w-full" />
+                      </label>
+                    </div>
+                  </div>
+                </div>
+                <div class="flex justify-end border-t border-gray-100 pt-4 dark:border-dark-700">
+                  <button
+                    type="button"
+                    class="btn btn-primary btn-sm"
+                    :disabled="openAIOAuth429DynamicSaving"
+                    @click="saveOpenAIOAuth429DynamicSettings"
+                  >
+                    {{ openAIOAuth429DynamicSaving ? t("common.saving") : t("common.save") }}
+                  </button>
+                </div>
+              </template>
+            </div>
+          </div>
+
           <!-- Stream Timeout Settings -->
           <div class="card">
             <div
@@ -8676,6 +8865,7 @@ import type {
   UpdateSettingsRequest,
   DefaultSubscriptionSetting,
   DefaultPlatformQuotasMap,
+  OpenAIOAuth429DynamicPlanTypeSettings,
   OpenAIFastPolicyRule,
   WeChatConnectMode,
   WebSearchEmulationConfig,
@@ -8877,6 +9067,22 @@ const rateLimit429CooldownSaving = ref(false);
 const rateLimit429CooldownForm = reactive({
   enabled: true,
   cooldown_seconds: 5,
+});
+
+const openAIOAuth429DynamicLoading = ref(true);
+const openAIOAuth429DynamicSaving = ref(false);
+const openAIOAuth429DynamicForm = reactive({
+  enabled: false,
+  window_seconds: 300,
+  min_samples: 20,
+  min_429: 3,
+  ratio_threshold: 0.5,
+  block_seconds: 60,
+  usage_window_check_enabled: false,
+  usage_window_5h_threshold_percent: 100,
+  usage_window_7d_threshold_percent: 100,
+  usage_window_missing_data_fallback_seconds: 0,
+  plan_type_settings: [] as OpenAIOAuth429DynamicPlanTypeSettings[],
 });
 
 // Panel API Rate Limit 状态
@@ -11786,6 +11992,59 @@ async function saveRateLimit429CooldownSettings() {
   }
 }
 
+async function loadOpenAIOAuth429DynamicSettings() {
+  openAIOAuth429DynamicLoading.value = true;
+  try {
+    const settings = await adminAPI.settings.getOpenAIOAuth429DynamicSettings();
+    Object.assign(openAIOAuth429DynamicForm, settings);
+  } catch (_error: unknown) {
+    // Keep defaults when upgrading from a backend without this endpoint.
+  } finally {
+    openAIOAuth429DynamicLoading.value = false;
+  }
+}
+
+function addOpenAIOAuth429PlanOverride() {
+  openAIOAuth429DynamicForm.plan_type_settings.push({
+    plan_type: "",
+    enabled: true,
+    window_seconds: openAIOAuth429DynamicForm.window_seconds,
+    min_samples: openAIOAuth429DynamicForm.min_samples,
+    min_429: openAIOAuth429DynamicForm.min_429,
+    ratio_threshold: openAIOAuth429DynamicForm.ratio_threshold,
+    block_seconds: openAIOAuth429DynamicForm.block_seconds,
+    usage_window_check_enabled:
+      openAIOAuth429DynamicForm.usage_window_check_enabled,
+    usage_window_5h_threshold_percent:
+      openAIOAuth429DynamicForm.usage_window_5h_threshold_percent,
+    usage_window_7d_threshold_percent:
+      openAIOAuth429DynamicForm.usage_window_7d_threshold_percent,
+    usage_window_missing_data_fallback_seconds:
+      openAIOAuth429DynamicForm.usage_window_missing_data_fallback_seconds,
+  });
+}
+
+function removeOpenAIOAuth429PlanOverride(index: number) {
+  openAIOAuth429DynamicForm.plan_type_settings.splice(index, 1);
+}
+
+async function saveOpenAIOAuth429DynamicSettings() {
+  openAIOAuth429DynamicSaving.value = true;
+  try {
+    const updated = await adminAPI.settings.updateOpenAIOAuth429DynamicSettings({
+      ...openAIOAuth429DynamicForm,
+    });
+    Object.assign(openAIOAuth429DynamicForm, updated);
+    appStore.showSuccess(t("admin.settings.openAIOAuth429Dynamic.saved"));
+  } catch (error: unknown) {
+    appStore.showError(
+      extractApiErrorMessage(error, t("admin.settings.openAIOAuth429Dynamic.saveFailed")),
+    );
+  } finally {
+    openAIOAuth429DynamicSaving.value = false;
+  }
+}
+
 // Stream Timeout 方法
 async function loadStreamTimeoutSettings() {
   streamTimeoutLoading.value = true;
@@ -12418,6 +12677,7 @@ onMounted(() => {
   loadOllamaCloudUsageSettings();
   loadOverloadCooldownSettings();
   loadRateLimit429CooldownSettings();
+  loadOpenAIOAuth429DynamicSettings();
   loadPanelRateLimitSettings();
   loadStreamTimeoutSettings();
   loadRectifierSettings();

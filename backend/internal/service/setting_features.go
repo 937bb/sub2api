@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -762,6 +763,247 @@ func (s *SettingService) SetRateLimit429CooldownSettings(ctx context.Context, se
 	}
 
 	return s.settingRepo.Set(ctx, SettingKeyRateLimit429CooldownSettings, string(data))
+}
+
+const (
+	openAIOAuth429DynamicSettingsCacheTTL = 5 * time.Second
+	openAIOAuth429DynamicSettingsCacheKey = "openai_oauth_429_dynamic"
+)
+
+func (s *SettingService) GetOpenAIOAuth429DynamicSettings(ctx context.Context) (*OpenAIOAuth429DynamicSettings, error) {
+	if s == nil || s.settingRepo == nil {
+		return DefaultOpenAIOAuth429DynamicSettings(), nil
+	}
+	if cached := s.getCachedOpenAIOAuth429DynamicSettings(); cached != nil {
+		return cloneOpenAIOAuth429DynamicSettings(&cached.settings), nil
+	}
+	loaded, err, _ := s.openAIOAuth429DynamicSettingsSF.Do(openAIOAuth429DynamicSettingsCacheKey, func() (any, error) {
+		if cached := s.getCachedOpenAIOAuth429DynamicSettings(); cached != nil {
+			return cloneOpenAIOAuth429DynamicSettings(&cached.settings), nil
+		}
+		value, loadErr := s.settingRepo.GetValue(ctx, SettingKeyOpenAIOAuth429DynamicSettings)
+		if loadErr != nil && !errors.Is(loadErr, ErrSettingNotFound) {
+			return nil, fmt.Errorf("get openai oauth 429 dynamic settings: %w", loadErr)
+		}
+		settings := DefaultOpenAIOAuth429DynamicSettings()
+		if loadErr == nil && value != "" {
+			var stored OpenAIOAuth429DynamicSettings
+			if json.Unmarshal([]byte(value), &stored) == nil {
+				settings = &stored
+			}
+		}
+		normalizeOpenAIOAuth429DynamicSettings(settings)
+		s.storeOpenAIOAuth429DynamicSettingsCache(settings)
+		return cloneOpenAIOAuth429DynamicSettings(settings), nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return loaded.(*OpenAIOAuth429DynamicSettings), nil
+}
+
+func (s *SettingService) SetOpenAIOAuth429DynamicSettings(ctx context.Context, settings *OpenAIOAuth429DynamicSettings) error {
+	if settings == nil {
+		return fmt.Errorf("settings cannot be nil")
+	}
+	if err := validateOpenAIOAuth429DynamicPlanTypeSettings(settings.PlanTypeSettings); err != nil {
+		return err
+	}
+	if err := validateOpenAIOAuth429DynamicPolicy(settings.defaultPolicy()); err != nil {
+		if settings.Enabled {
+			return err
+		}
+		defaults := DefaultOpenAIOAuth429DynamicSettings()
+		settings.Enabled = defaults.Enabled
+		settings.WindowSeconds = defaults.WindowSeconds
+		settings.MinSamples = defaults.MinSamples
+		settings.Min429 = defaults.Min429
+		settings.RatioThreshold = defaults.RatioThreshold
+		settings.BlockSeconds = defaults.BlockSeconds
+		settings.UsageWindowCheckEnabled = defaults.UsageWindowCheckEnabled
+		settings.UsageWindow5hThresholdPercent = defaults.UsageWindow5hThresholdPercent
+		settings.UsageWindow7dThresholdPercent = defaults.UsageWindow7dThresholdPercent
+		settings.UsageWindowMissingDataFallbackSeconds = defaults.UsageWindowMissingDataFallbackSeconds
+	}
+	normalizeOpenAIOAuth429DynamicSettings(settings)
+	data, err := json.Marshal(settings)
+	if err != nil {
+		return fmt.Errorf("marshal openai oauth 429 dynamic settings: %w", err)
+	}
+	if err := s.settingRepo.Set(ctx, SettingKeyOpenAIOAuth429DynamicSettings, string(data)); err != nil {
+		return err
+	}
+	s.storeOpenAIOAuth429DynamicSettingsCache(settings)
+	s.openAIOAuth429DynamicSettingsSF.Forget(openAIOAuth429DynamicSettingsCacheKey)
+	return nil
+}
+
+func (s *SettingService) GetOpenAIOAuth429DynamicPolicy(ctx context.Context, planType string) (OpenAIOAuth429DynamicPolicy, error) {
+	if s == nil || s.settingRepo == nil {
+		return *DefaultOpenAIOAuth429DynamicSettings().PolicyForPlanType(planType), nil
+	}
+	cached := s.getCachedOpenAIOAuth429DynamicSettings()
+	if cached == nil {
+		if _, err := s.GetOpenAIOAuth429DynamicSettings(ctx); err != nil {
+			return OpenAIOAuth429DynamicPolicy{}, err
+		}
+		cached = s.getCachedOpenAIOAuth429DynamicSettings()
+		if cached == nil {
+			return OpenAIOAuth429DynamicPolicy{}, fmt.Errorf("get openai oauth 429 dynamic policy: cache unavailable")
+		}
+	}
+	if policy, ok := cached.byPlanType[normalizeOpenAIOAuth429PlanType(planType)]; ok {
+		return policy, nil
+	}
+	return *cached.settings.defaultPolicy(), nil
+}
+
+func (s *SettingService) getCachedOpenAIOAuth429DynamicSettings() *cachedOpenAIOAuth429DynamicSettings {
+	if s == nil {
+		return nil
+	}
+	cached, _ := s.openAIOAuth429DynamicSettingsCache.Load().(*cachedOpenAIOAuth429DynamicSettings)
+	if cached == nil || time.Now().UnixNano() >= cached.expiresAt {
+		return nil
+	}
+	return cached
+}
+
+func (s *SettingService) storeOpenAIOAuth429DynamicSettingsCache(settings *OpenAIOAuth429DynamicSettings) {
+	if s == nil || settings == nil {
+		return
+	}
+	cloned := cloneOpenAIOAuth429DynamicSettings(settings)
+	normalizeOpenAIOAuth429DynamicSettings(cloned)
+	byPlanType := make(map[string]OpenAIOAuth429DynamicPolicy, len(cloned.PlanTypeSettings))
+	for i := range cloned.PlanTypeSettings {
+		byPlanType[cloned.PlanTypeSettings[i].PlanType] = cloned.PlanTypeSettings[i].OpenAIOAuth429DynamicPolicy
+	}
+	s.openAIOAuth429DynamicSettingsCache.Store(&cachedOpenAIOAuth429DynamicSettings{
+		settings:   *cloned,
+		byPlanType: byPlanType,
+		expiresAt:  time.Now().Add(openAIOAuth429DynamicSettingsCacheTTL).UnixNano(),
+	})
+}
+
+func cloneOpenAIOAuth429DynamicSettings(settings *OpenAIOAuth429DynamicSettings) *OpenAIOAuth429DynamicSettings {
+	if settings == nil {
+		return nil
+	}
+	cloned := *settings
+	cloned.PlanTypeSettings = append([]OpenAIOAuth429DynamicPlanTypeSettings(nil), settings.PlanTypeSettings...)
+	return &cloned
+}
+
+func normalizeOpenAIOAuth429DynamicSettings(settings *OpenAIOAuth429DynamicSettings) {
+	if settings == nil {
+		return
+	}
+	policy := settings.defaultPolicy()
+	normalizeOpenAIOAuth429DynamicPolicy(policy)
+	settings.Enabled = policy.Enabled
+	settings.WindowSeconds = policy.WindowSeconds
+	settings.MinSamples = policy.MinSamples
+	settings.Min429 = policy.Min429
+	settings.RatioThreshold = policy.RatioThreshold
+	settings.BlockSeconds = policy.BlockSeconds
+	settings.UsageWindowCheckEnabled = policy.UsageWindowCheckEnabled
+	settings.UsageWindow5hThresholdPercent = policy.UsageWindow5hThresholdPercent
+	settings.UsageWindow7dThresholdPercent = policy.UsageWindow7dThresholdPercent
+	settings.UsageWindowMissingDataFallbackSeconds = policy.UsageWindowMissingDataFallbackSeconds
+	for i := range settings.PlanTypeSettings {
+		settings.PlanTypeSettings[i].PlanType = normalizeOpenAIOAuth429PlanType(settings.PlanTypeSettings[i].PlanType)
+		normalizeOpenAIOAuth429DynamicPolicy(&settings.PlanTypeSettings[i].OpenAIOAuth429DynamicPolicy)
+	}
+	sort.Slice(settings.PlanTypeSettings, func(i, j int) bool {
+		return settings.PlanTypeSettings[i].PlanType < settings.PlanTypeSettings[j].PlanType
+	})
+}
+
+func normalizeOpenAIOAuth429PlanType(planType string) string {
+	return strings.ToLower(strings.TrimSpace(planType))
+}
+
+func normalizeOpenAIOAuth429DynamicPolicy(settings *OpenAIOAuth429DynamicPolicy) {
+	settings.WindowSeconds = max(60, min(settings.WindowSeconds, 3600))
+	settings.MinSamples = max(2, min(settings.MinSamples, 10000))
+	settings.Min429 = max(1, min(settings.Min429, settings.MinSamples))
+	if settings.RatioThreshold < 0.01 {
+		settings.RatioThreshold = 0.01
+	}
+	if settings.RatioThreshold > 1 {
+		settings.RatioThreshold = 1
+	}
+	settings.BlockSeconds = max(1, min(settings.BlockSeconds, OpenAIOAuth429DynamicMaxBlockSeconds))
+	if settings.UsageWindow5hThresholdPercent <= 0 {
+		settings.UsageWindow5hThresholdPercent = 100
+	}
+	if settings.UsageWindow5hThresholdPercent > 100 {
+		settings.UsageWindow5hThresholdPercent = 100
+	}
+	if settings.UsageWindow7dThresholdPercent <= 0 {
+		settings.UsageWindow7dThresholdPercent = 100
+	}
+	if settings.UsageWindow7dThresholdPercent > 100 {
+		settings.UsageWindow7dThresholdPercent = 100
+	}
+	if settings.UsageWindowMissingDataFallbackSeconds < 0 {
+		settings.UsageWindowMissingDataFallbackSeconds = 0
+	}
+}
+
+func validateOpenAIOAuth429DynamicPlanTypeSettings(settings []OpenAIOAuth429DynamicPlanTypeSettings) error {
+	if len(settings) > OpenAIOAuth429DynamicMaxPlanTypeSettings {
+		return fmt.Errorf("plan_type_settings must not exceed %d entries", OpenAIOAuth429DynamicMaxPlanTypeSettings)
+	}
+	seen := make(map[string]struct{}, len(settings))
+	for i := range settings {
+		planType := normalizeOpenAIOAuth429PlanType(settings[i].PlanType)
+		if planType == "" || len(planType) > 64 {
+			return fmt.Errorf("plan_type must contain 1-64 characters")
+		}
+		if _, ok := seen[planType]; ok {
+			return fmt.Errorf("duplicate plan_type: %s", planType)
+		}
+		seen[planType] = struct{}{}
+		if err := validateOpenAIOAuth429DynamicPolicy(&settings[i].OpenAIOAuth429DynamicPolicy); err != nil {
+			return fmt.Errorf("plan_type %q: %w", planType, err)
+		}
+	}
+	return nil
+}
+
+func validateOpenAIOAuth429DynamicPolicy(settings *OpenAIOAuth429DynamicPolicy) error {
+	if settings == nil {
+		return fmt.Errorf("policy cannot be nil")
+	}
+	if settings.WindowSeconds < 60 || settings.WindowSeconds > 3600 {
+		return fmt.Errorf("window_seconds must be between 60-3600")
+	}
+	if settings.MinSamples < 2 || settings.MinSamples > 10000 {
+		return fmt.Errorf("min_samples must be between 2-10000")
+	}
+	if settings.Min429 < 1 || settings.Min429 > settings.MinSamples {
+		return fmt.Errorf("min_429 must be between 1-min_samples")
+	}
+	if settings.RatioThreshold <= 0 || settings.RatioThreshold > 1 {
+		return fmt.Errorf("ratio_threshold must be between 0.01-1")
+	}
+	if settings.BlockSeconds < 1 || settings.BlockSeconds > OpenAIOAuth429DynamicMaxBlockSeconds {
+		return fmt.Errorf("block_seconds must be between 1-%d", OpenAIOAuth429DynamicMaxBlockSeconds)
+	}
+	if settings.UsageWindowCheckEnabled {
+		if settings.UsageWindow5hThresholdPercent <= 0 || settings.UsageWindow5hThresholdPercent > 100 {
+			return fmt.Errorf("usage_window_5h_threshold_percent must be between 0-100")
+		}
+		if settings.UsageWindow7dThresholdPercent <= 0 || settings.UsageWindow7dThresholdPercent > 100 {
+			return fmt.Errorf("usage_window_7d_threshold_percent must be between 0-100")
+		}
+		if settings.UsageWindowMissingDataFallbackSeconds < 0 {
+			return fmt.Errorf("usage_window_missing_data_fallback_seconds must not be negative")
+		}
+	}
+	return nil
 }
 
 // GetStreamTimeoutSettings 获取流超时处理配置

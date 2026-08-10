@@ -10,6 +10,7 @@ import (
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
+	"github.com/redis/go-redis/v9"
 )
 
 // OpenAIOAuthService handles OpenAI OAuth authentication flows
@@ -22,8 +23,18 @@ type OpenAIOAuthService struct {
 
 // NewOpenAIOAuthService creates a new OpenAI OAuth service
 func NewOpenAIOAuthService(proxyRepo ProxyRepository, oauthClient OpenAIOAuthClient) *OpenAIOAuthService {
+	return newOpenAIOAuthService(proxyRepo, oauthClient, openai.NewSessionStore())
+}
+
+// NewOpenAIOAuthServiceWithRedis keeps pending authorization state available
+// across replicas and rolling restarts.
+func NewOpenAIOAuthServiceWithRedis(proxyRepo ProxyRepository, oauthClient OpenAIOAuthClient, rdb *redis.Client) *OpenAIOAuthService {
+	return newOpenAIOAuthService(proxyRepo, oauthClient, openai.NewRedisSessionStore(rdb))
+}
+
+func newOpenAIOAuthService(proxyRepo ProxyRepository, oauthClient OpenAIOAuthClient, sessionStore *openai.SessionStore) *OpenAIOAuthService {
 	return &OpenAIOAuthService{
-		sessionStore: openai.NewSessionStore(),
+		sessionStore: sessionStore,
 		proxyRepo:    proxyRepo,
 		oauthClient:  oauthClient,
 	}

@@ -147,11 +147,19 @@ type SettingService struct {
 	// goroutine refreshes it via openAIQuotaAutoPauseSettingsSF (stale-while-revalidate).
 	// This per-service field also gives tests natural isolation — each SettingService
 	// instance owns its own cache, no shared package-level state.
-	openAIQuotaAutoPauseSettingsCache atomic.Value // *cachedOpenAIQuotaAutoPauseSettings
-	openAIQuotaAutoPauseSettingsSF    singleflight.Group
+	openAIQuotaAutoPauseSettingsCache  atomic.Value // *cachedOpenAIQuotaAutoPauseSettings
+	openAIQuotaAutoPauseSettingsSF     singleflight.Group
+	openAIOAuth429DynamicSettingsCache atomic.Value // *cachedOpenAIOAuth429DynamicSettings
+	openAIOAuth429DynamicSettingsSF    singleflight.Group
 
 	channelMonitorRuntimeListenersMu sync.Mutex
 	channelMonitorRuntimeListeners   []func()
+}
+
+type cachedOpenAIOAuth429DynamicSettings struct {
+	settings   OpenAIOAuth429DynamicSettings
+	byPlanType map[string]OpenAIOAuth429DynamicPolicy
+	expiresAt  int64
 }
 
 // DefaultPlatformQuotaSetting 单 platform 三档限额（nil = 沿用上层；0 = 显式禁用；>0 = 上限）

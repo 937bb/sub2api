@@ -56,6 +56,17 @@ func TestApplyCodexClientMetadata(t *testing.T) {
 	cm3, _ := body3["client_metadata"].(map[string]any)
 	require.Equal(t, "t", cm3["x-codex-turn-metadata"])
 	require.Equal(t, "dev-xyz", cm3["x-codex-installation-id"])
+
+	// installation ID is server-owned; preserve other metadata but replace a
+	// client-provided value so the request header and body cannot disagree.
+	body4 := map[string]any{"client_metadata": map[string]any{
+		"x-codex-turn-metadata":   "t2",
+		"x-codex-installation-id": "client-controlled",
+	}}
+	require.True(t, applyCodexClientMetadata(body4, acc))
+	cm4, _ := body4["client_metadata"].(map[string]any)
+	require.Equal(t, "t2", cm4["x-codex-turn-metadata"])
+	require.Equal(t, "dev-xyz", cm4["x-codex-installation-id"])
 }
 
 // defaultCodexSynthInstructions：按模型选用真实 Codex base prompt。

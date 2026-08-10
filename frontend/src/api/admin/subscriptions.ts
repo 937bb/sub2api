@@ -10,6 +10,7 @@ import type {
   AssignSubscriptionRequest,
   BulkAssignSubscriptionRequest,
   ExtendSubscriptionRequest,
+  SwitchSubscriptionGroupRequest,
   PaginatedResponse
 } from '@/types'
 
@@ -112,6 +113,20 @@ export async function extend(
 }
 
 /**
+ * Move a subscription to another group without resetting its term or usage.
+ */
+export async function switchGroup(
+  id: number,
+  request: SwitchSubscriptionGroupRequest
+): Promise<UserSubscription> {
+  const { data } = await apiClient.post<UserSubscription>(
+    `/admin/subscriptions/${id}/switch`,
+    request
+  )
+  return data
+}
+
+/**
  * Revoke subscription
  * @param id - Subscription ID
  * @returns Success confirmation
@@ -197,6 +212,7 @@ export const subscriptionsAPI = {
   assign,
   bulkAssign,
   extend,
+  switchGroup,
   revoke,
   restore,
   resetQuota,

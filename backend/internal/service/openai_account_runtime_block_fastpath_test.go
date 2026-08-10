@@ -247,6 +247,22 @@ func TestOpenAI429FastPath_SkipsSparkShadow(t *testing.T) {
 	require.True(t, svc.isOpenAIAccountRuntimeBlocked(normal), "normal OpenAI OAuth account should still be runtime-blocked")
 }
 
+func TestOpenAI429FastPath_DynamicModeDefersRuntimeBlock(t *testing.T) {
+	settingRepo := newMockSettingRepo()
+	storeOpenAIOAuth429DynamicSettings(t, settingRepo, OpenAIOAuth429DynamicSettings{
+		Enabled: true, WindowSeconds: 60, MinSamples: 3, Min429: 2,
+		RatioThreshold: 0.6, BlockSeconds: 12,
+	})
+	rateLimitService := NewRateLimitService(&rateLimit429AccountRepoStub{}, nil, &config.Config{}, nil, nil)
+	rateLimitService.SetSettingService(NewSettingService(settingRepo, &config.Config{}))
+	svc := &OpenAIGatewayService{rateLimitService: rateLimitService}
+	account := &Account{ID: 803, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+
+	svc.markOpenAIOAuth429RateLimited(context.Background(), account, http.Header{}, nil)
+
+	require.False(t, svc.isOpenAIAccountRuntimeBlocked(account))
+}
+
 func TestOpenAIRuntimeBlock_AppliesToOpenAIAPIKeyWhenRateLimitServiceStopsScheduling(t *testing.T) {
 	svc := &OpenAIGatewayService{}
 	account := &Account{ID: 44, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"math/rand/v2"
@@ -31,6 +32,7 @@ var (
 	ErrSubscriptionSuspended       = infraerrors.Forbidden("SUBSCRIPTION_SUSPENDED", "subscription is suspended")
 	ErrSubscriptionAlreadyExists   = infraerrors.Conflict("SUBSCRIPTION_ALREADY_EXISTS", "subscription already exists for this user and group")
 	ErrSubscriptionAssignConflict  = infraerrors.Conflict("SUBSCRIPTION_ASSIGN_CONFLICT", "subscription exists but request conflicts with existing assignment semantics")
+	ErrSubscriptionSwitchConflict  = infraerrors.Conflict("SUBSCRIPTION_SWITCH_CONFLICT", "target subscription group already exists for this user")
 	ErrSubscriptionNotRevoked      = infraerrors.Conflict("SUBSCRIPTION_NOT_REVOKED", "subscription is not revoked")
 	ErrSubscriptionRestoreConflict = infraerrors.Conflict("SUBSCRIPTION_RESTORE_CONFLICT", "subscription already exists for this user and group")
 	ErrGroupNotSubscriptionType    = infraerrors.BadRequest("GROUP_NOT_SUBSCRIPTION_TYPE", "group is not a subscription type")
@@ -714,6 +716,71 @@ func (s *SubscriptionService) ExtendSubscription(ctx context.Context, subscripti
 		}()
 	}
 
+	return s.userSubRepo.GetByID(ctx, subscriptionID)
+}
+
+// SwitchSubscriptionGroup moves an existing subscription to another active
+// subscription group without resetting its term or usage windows.
+func (s *SubscriptionService) SwitchSubscriptionGroup(ctx context.Context, subscriptionID, targetGroupID int64) (*UserSubscription, error) {
+	if targetGroupID <= 0 {
+		return nil, infraerrors.BadRequest("INVALID_GROUP_ID", "target group is required")
+	}
+
+	var userID, oldGroupID int64
+	changed := false
+	err := s.withSubscriptionUpdateTx(ctx, func(txCtx context.Context) error {
+		sub, err := s.userSubRepo.GetByIDForUpdate(txCtx, subscriptionID)
+		if err != nil {
+			return err
+		}
+
+		targetGroup, err := s.groupRepo.GetByID(txCtx, targetGroupID)
+		if err != nil {
+			return err
+		}
+		if !targetGroup.IsActive() {
+			return infraerrors.BadRequest("GROUP_NOT_ACTIVE", "group is not active")
+		}
+		if !targetGroup.IsSubscriptionType() {
+			return ErrGroupNotSubscriptionType
+		}
+
+		userID = sub.UserID
+		oldGroupID = sub.GroupID
+		if oldGroupID == targetGroupID {
+			return nil
+		}
+
+		exists, err := s.userSubRepo.ExistsByUserIDAndGroupID(txCtx, sub.UserID, targetGroupID)
+		if err != nil {
+			return err
+		}
+		if exists {
+			return ErrSubscriptionSwitchConflict
+		}
+
+		sub.GroupID = targetGroupID
+		if err := s.userSubRepo.Update(txCtx, sub); err != nil {
+			if errors.Is(err, ErrSubscriptionAlreadyExists) {
+				return ErrSubscriptionSwitchConflict
+			}
+			return err
+		}
+		changed = true
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	if changed {
+		if err := s.invalidateSubscriptionCaches(userID, oldGroupID); err != nil {
+			return nil, err
+		}
+		if err := s.invalidateSubscriptionCaches(userID, targetGroupID); err != nil {
+			return nil, err
+		}
+	}
 	return s.userSubRepo.GetByID(ctx, subscriptionID)
 }
 

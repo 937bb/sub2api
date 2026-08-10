@@ -1,16 +1,21 @@
 package openai
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/redissession"
+	"github.com/redis/go-redis/v9"
 )
 
 // OpenAI OAuth Constants (from CRS project - Codex CLI client)
@@ -49,34 +54,106 @@ type OAuthSession struct {
 	CreatedAt    time.Time `json:"created_at"`
 }
 
-// SessionStore manages OAuth sessions in memory
+// SessionStore manages OAuth sessions in memory with optional Redis sharing.
 type SessionStore struct {
-	mu       sync.RWMutex
-	sessions map[string]*OAuthSession
-	stopOnce sync.Once
-	stopCh   chan struct{}
+	mu        sync.RWMutex
+	sessions  map[string]*OAuthSession
+	localOnly map[string]struct{}
+	stopOnce  sync.Once
+	stopCh    chan struct{}
+	remote    *redissession.Store
+}
+
+type oauthSessionDTO struct {
+	State        string    `json:"state"`
+	CodeVerifier string    `json:"code_verifier"`
+	ClientID     string    `json:"client_id,omitempty"`
+	ProxyURL     string    `json:"proxy_url,omitempty"`
+	RedirectURI  string    `json:"redirect_uri"`
+	CreatedAt    time.Time `json:"created_at"`
 }
 
 // NewSessionStore creates a new session store
 func NewSessionStore() *SessionStore {
 	store := &SessionStore{
-		sessions: make(map[string]*OAuthSession),
-		stopCh:   make(chan struct{}),
+		sessions:  make(map[string]*OAuthSession),
+		localOnly: make(map[string]struct{}),
+		stopCh:    make(chan struct{}),
 	}
 	// Start cleanup goroutine
 	go store.cleanup()
 	return store
 }
 
+// NewRedisSessionStore creates a multi-instance OpenAI OAuth session store.
+// Redis is authoritative after a successful write, while a failed write falls
+// back to memory on the instance that created the authorization flow.
+func NewRedisSessionStore(rdb *redis.Client) *SessionStore {
+	store := NewSessionStore()
+	if rdb != nil {
+		store.remote = redissession.New(rdb, "oauth:session:openai", SessionTTL)
+	}
+	return store
+}
+
 // Set stores a session
 func (s *SessionStore) Set(sessionID string, session *OAuthSession) {
+	if s == nil || session == nil || strings.TrimSpace(sessionID) == "" {
+		return
+	}
+	var remoteErr error
+	if s.remote != nil {
+		remoteErr = s.remote.Set(context.Background(), sessionID, oauthSessionDTO{
+			State:        session.State,
+			CodeVerifier: session.CodeVerifier,
+			ClientID:     session.ClientID,
+			ProxyURL:     session.ProxyURL,
+			RedirectURI:  session.RedirectURI,
+			CreatedAt:    session.CreatedAt,
+		})
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.sessions[sessionID] = session
+	if remoteErr != nil {
+		s.localOnly[sessionID] = struct{}{}
+		slog.Warn("openai oauth session Redis write failed; using process-local fallback", "error", remoteErr)
+	} else {
+		delete(s.localOnly, sessionID)
+	}
 }
 
 // Get retrieves a session
 func (s *SessionStore) Get(sessionID string) (*OAuthSession, bool) {
+	if s == nil || strings.TrimSpace(sessionID) == "" {
+		return nil, false
+	}
+	if s.isLocalOnly(sessionID) {
+		return s.getMemory(sessionID)
+	}
+	if s.remote != nil {
+		var dto oauthSessionDTO
+		ok, err := s.remote.Get(context.Background(), sessionID, &dto)
+		if err != nil || !ok || time.Since(dto.CreatedAt) > SessionTTL {
+			return nil, false
+		}
+		session := &OAuthSession{
+			State:        dto.State,
+			CodeVerifier: dto.CodeVerifier,
+			ClientID:     dto.ClientID,
+			ProxyURL:     dto.ProxyURL,
+			RedirectURI:  dto.RedirectURI,
+			CreatedAt:    dto.CreatedAt,
+		}
+		s.mu.Lock()
+		s.sessions[sessionID] = session
+		s.mu.Unlock()
+		return session, true
+	}
+	return s.getMemory(sessionID)
+}
+
+func (s *SessionStore) getMemory(sessionID string) (*OAuthSession, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	session, ok := s.sessions[sessionID]
@@ -92,9 +169,23 @@ func (s *SessionStore) Get(sessionID string) (*OAuthSession, bool) {
 
 // Delete removes a session
 func (s *SessionStore) Delete(sessionID string) {
+	if s == nil {
+		return
+	}
+	if s.remote != nil {
+		_ = s.remote.Delete(context.Background(), sessionID)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.sessions, sessionID)
+	delete(s.localOnly, sessionID)
+}
+
+func (s *SessionStore) isLocalOnly(sessionID string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	_, ok := s.localOnly[sessionID]
+	return ok
 }
 
 // Stop stops the cleanup goroutine
@@ -117,6 +208,7 @@ func (s *SessionStore) cleanup() {
 			for id, session := range s.sessions {
 				if time.Since(session.CreatedAt) > SessionTTL {
 					delete(s.sessions, id)
+					delete(s.localOnly, id)
 				}
 			}
 			s.mu.Unlock()

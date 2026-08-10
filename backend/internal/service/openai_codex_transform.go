@@ -1292,14 +1292,14 @@ func applyCodexClientMetadata(reqBody map[string]any, account *Account) bool {
 	const key = "x-codex-installation-id"
 	switch existing := reqBody["client_metadata"].(type) {
 	case map[string]any:
-		if v, ok := existing[key].(string); ok && strings.TrimSpace(v) != "" {
+		if v, ok := existing[key].(string); ok && strings.TrimSpace(v) == deviceID {
 			return false
 		}
 		existing[key] = deviceID
 		reqBody["client_metadata"] = existing
 		return true
 	case map[string]string:
-		if strings.TrimSpace(existing[key]) != "" {
+		if strings.TrimSpace(existing[key]) == deviceID {
 			return false
 		}
 		next := make(map[string]any, len(existing)+1)

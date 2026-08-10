@@ -1257,6 +1257,12 @@ func (a *Account) IsOpenAIOAuth() bool {
 	return a.IsOpenAI() && a.Type == AccountTypeOAuth
 }
 
+// IsOpenAIOAuthLike reports whether the account uses a ChatGPT/Codex
+// subscription credential rather than an OpenAI API key.
+func (a *Account) IsOpenAIOAuthLike() bool {
+	return a.IsOpenAI() && (a.Type == AccountTypeOAuth || a.Type == AccountTypeSetupToken)
+}
+
 func (a *Account) IsOpenAIChatGPTSubscription() bool {
 	if !a.IsOpenAIOAuth() {
 		return false
@@ -1447,7 +1453,7 @@ func (a *Account) IsChatGPTAccountFedRAMP() bool {
 }
 
 func (a *Account) GetOpenAIDeviceID() string {
-	if !a.IsOpenAIOAuth() {
+	if !a.IsOpenAIOAuthLike() {
 		return ""
 	}
 	return strings.TrimSpace(a.GetExtraString("openai_device_id"))

@@ -150,3 +150,158 @@ func TestHandle429_FallbackUsesDefaultSecondsWhenSettingServiceMissing(t *testin
 	require.Equal(t, int64(44), accountRepo.lastRateLimitID)
 	require.True(t, !accountRepo.lastRateLimitReset.Before(before.Add(5*time.Second)) && !accountRepo.lastRateLimitReset.After(after.Add(5*time.Second)))
 }
+
+func storeOpenAIOAuth429DynamicSettings(t *testing.T, repo *mockSettingRepo, settings OpenAIOAuth429DynamicSettings) {
+	t.Helper()
+	data, err := json.Marshal(settings)
+	require.NoError(t, err)
+	repo.data[SettingKeyOpenAIOAuth429DynamicSettings] = string(data)
+}
+
+func TestOpenAIOAuth429Dynamic_RateLimitsOnlyAfterThreshold(t *testing.T) {
+	accountRepo := &rateLimit429AccountRepoStub{}
+	settingRepo := newMockSettingRepo()
+	storeOpenAIOAuth429DynamicSettings(t, settingRepo, OpenAIOAuth429DynamicSettings{
+		Enabled: true, WindowSeconds: 60, MinSamples: 3, Min429: 2,
+		RatioThreshold: 0.6, BlockSeconds: 12,
+	})
+	settingSvc := NewSettingService(settingRepo, &config.Config{})
+	svc := NewRateLimitService(accountRepo, nil, &config.Config{}, nil, nil)
+	svc.SetSettingService(settingSvc)
+	account := &Account{ID: 47, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+
+	svc.handle429(context.Background(), account, http.Header{}, nil)
+	require.Zero(t, accountRepo.rateLimitCalls)
+	svc.RecordOpenAIOAuthUpstreamOutcome(context.Background(), account, http.StatusOK)
+	require.Zero(t, accountRepo.rateLimitCalls)
+
+	before := time.Now()
+	svc.handle429(context.Background(), account, http.Header{}, nil)
+	after := time.Now()
+	require.Equal(t, 1, accountRepo.rateLimitCalls)
+	require.True(t, !accountRepo.lastRateLimitReset.Before(before.Add(12*time.Second)) && !accountRepo.lastRateLimitReset.After(after.Add(12*time.Second)))
+	require.False(t, svc.hasOpenAIOAuth429DynamicStats(account.ID))
+}
+
+func TestOpenAIOAuth429Dynamic_IncludesSetupTokenAndResetClearsWindow(t *testing.T) {
+	accountRepo := &rateLimit429AccountRepoStub{}
+	settingRepo := newMockSettingRepo()
+	storeOpenAIOAuth429DynamicSettings(t, settingRepo, OpenAIOAuth429DynamicSettings{
+		Enabled: true, WindowSeconds: 60, MinSamples: 2, Min429: 2,
+		RatioThreshold: 1, BlockSeconds: 12,
+	})
+	settingSvc := NewSettingService(settingRepo, &config.Config{})
+	svc := NewRateLimitService(accountRepo, nil, &config.Config{}, nil, nil)
+	svc.SetSettingService(settingSvc)
+	account := &Account{ID: 48, Platform: PlatformOpenAI, Type: AccountTypeSetupToken}
+
+	svc.handle429(context.Background(), account, http.Header{}, nil)
+	require.True(t, svc.hasOpenAIOAuth429DynamicStats(account.ID))
+	svc.ResetOpenAIOAuth429DynamicStats(account.ID)
+	svc.handle429(context.Background(), account, http.Header{}, nil)
+
+	require.Zero(t, accountRepo.rateLimitCalls)
+	require.True(t, svc.hasOpenAIOAuth429DynamicStats(account.ID))
+}
+
+func TestSetOpenAIOAuth429DynamicSettings_ValidatesEnabledValues(t *testing.T) {
+	svc := NewSettingService(newMockSettingRepo(), &config.Config{})
+	settings := *DefaultOpenAIOAuth429DynamicSettings()
+	settings.Enabled = true
+	settings.RatioThreshold = 0
+
+	err := svc.SetOpenAIOAuth429DynamicSettings(context.Background(), &settings)
+	require.ErrorContains(t, err, "ratio_threshold")
+}
+
+func TestOpenAIOAuth429Dynamic_UsesExactPlanTypePolicy(t *testing.T) {
+	accountRepo := &rateLimit429AccountRepoStub{}
+	settingRepo := newMockSettingRepo()
+	settings := *DefaultOpenAIOAuth429DynamicSettings()
+	settings.PlanTypeSettings = []OpenAIOAuth429DynamicPlanTypeSettings{{
+		PlanType: "plus",
+		OpenAIOAuth429DynamicPolicy: OpenAIOAuth429DynamicPolicy{
+			Enabled: true, WindowSeconds: 60, MinSamples: 2, Min429: 2,
+			RatioThreshold: 1, BlockSeconds: 15,
+			UsageWindow5hThresholdPercent: 100,
+			UsageWindow7dThresholdPercent: 100,
+		},
+	}}
+	storeOpenAIOAuth429DynamicSettings(t, settingRepo, settings)
+	settingSvc := NewSettingService(settingRepo, &config.Config{})
+	svc := NewRateLimitService(accountRepo, nil, &config.Config{}, nil, nil)
+	svc.SetSettingService(settingSvc)
+
+	plus := &Account{
+		ID: 49, Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+		Credentials: map[string]any{"plan_type": " Plus "},
+	}
+	team := &Account{
+		ID: 50, Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+		Credentials: map[string]any{"plan_type": "team"},
+	}
+	svc.handle429(context.Background(), plus, http.Header{}, nil)
+	svc.handle429(context.Background(), plus, http.Header{}, nil)
+	svc.RecordOpenAIOAuthUpstreamOutcome(context.Background(), team, http.StatusTooManyRequests)
+
+	require.Equal(t, 1, accountRepo.rateLimitCalls)
+	require.Equal(t, plus.ID, accountRepo.lastRateLimitID)
+	require.False(t, svc.hasOpenAIOAuth429DynamicStats(team.ID))
+}
+
+func TestOpenAIOAuth429Dynamic_RequiresConfiguredUsageWindow(t *testing.T) {
+	accountRepo := &rateLimit429AccountRepoStub{}
+	settingRepo := newMockSettingRepo()
+	settings := *DefaultOpenAIOAuth429DynamicSettings()
+	settings.Enabled = true
+	settings.WindowSeconds = 60
+	settings.MinSamples = 2
+	settings.Min429 = 2
+	settings.RatioThreshold = 1
+	settings.BlockSeconds = 15
+	settings.UsageWindowCheckEnabled = true
+	settings.UsageWindow5hThresholdPercent = 90
+	settings.UsageWindow7dThresholdPercent = 95
+	storeOpenAIOAuth429DynamicSettings(t, settingRepo, settings)
+	settingSvc := NewSettingService(settingRepo, &config.Config{})
+	svc := NewRateLimitService(accountRepo, nil, &config.Config{}, nil, nil)
+	svc.SetSettingService(settingSvc)
+	account := &Account{ID: 51, Platform: PlatformOpenAI, Type: AccountTypeOAuth, CreatedAt: time.Now()}
+
+	used5h, window5h := 80.0, 300
+	belowThreshold := &OpenAICodexUsageSnapshot{
+		PrimaryUsedPercent: &used5h, PrimaryWindowMinutes: &window5h,
+	}
+	svc.RecordOpenAIOAuthUpstreamOutcome(context.Background(), account, http.StatusTooManyRequests, belowThreshold)
+	svc.RecordOpenAIOAuthUpstreamOutcome(context.Background(), account, http.StatusTooManyRequests, belowThreshold)
+	require.Zero(t, accountRepo.rateLimitCalls)
+
+	used5h = 90
+	atThreshold := &OpenAICodexUsageSnapshot{
+		PrimaryUsedPercent: &used5h, PrimaryWindowMinutes: &window5h,
+	}
+	svc.RecordOpenAIOAuthUpstreamOutcome(context.Background(), account, http.StatusTooManyRequests, atThreshold)
+	require.Equal(t, 1, accountRepo.rateLimitCalls)
+}
+
+func TestOpenAIOAuth429UsageWindowReached_MissingDataFallback(t *testing.T) {
+	now := time.Now()
+	policy := &OpenAIOAuth429DynamicPolicy{UsageWindowMissingDataFallbackSeconds: 300}
+
+	require.False(t, openAIOAuth429UsageWindowReached(nil, nil, now.Add(-299*time.Second), now, policy))
+	require.True(t, openAIOAuth429UsageWindowReached(nil, nil, now.Add(-301*time.Second), now, policy))
+	require.False(t, openAIOAuth429UsageWindowReached(nil, nil, time.Time{}, now, policy))
+}
+
+func TestSetOpenAIOAuth429DynamicSettings_RejectsDuplicatePlanTypes(t *testing.T) {
+	svc := NewSettingService(newMockSettingRepo(), &config.Config{})
+	policy := *DefaultOpenAIOAuth429DynamicSettings().defaultPolicy()
+	settings := *DefaultOpenAIOAuth429DynamicSettings()
+	settings.PlanTypeSettings = []OpenAIOAuth429DynamicPlanTypeSettings{
+		{PlanType: "Plus", OpenAIOAuth429DynamicPolicy: policy},
+		{PlanType: " plus ", OpenAIOAuth429DynamicPolicy: policy},
+	}
+
+	err := svc.SetOpenAIOAuth429DynamicSettings(context.Background(), &settings)
+	require.ErrorContains(t, err, "duplicate plan_type")
+}
