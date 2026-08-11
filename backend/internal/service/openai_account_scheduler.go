@@ -1094,7 +1094,11 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAISelectionOrder(
 			ordered := make([]openAIAccountCandidateScore, 0, len(pool))
 			for _, priority := range priorities {
 				bypassPool, regularPool := partitionOpenAIQuotaBypassCandidates(byPriority[priority], req)
-				ordered = append(ordered, buildOpenAIQuotaBypassConcentratedOrder(bypassPool)...)
+				bypassOrder, bypassHasMore := s.buildOpenAIQuotaBypassCursorOrder(req, bypassPool, plan.topK)
+				ordered = append(ordered, bypassOrder...)
+				if bypassHasMore {
+					return ordered
+				}
 				ordered = append(ordered, buildSelectionOrder(regularPool, false)...)
 			}
 			return ordered
@@ -1220,6 +1224,44 @@ func buildOpenAIQuotaBypassConcentratedOrder(pool []openAIAccountCandidateScore)
 	return ordered
 }
 
+func (s *defaultOpenAIAccountScheduler) buildOpenAIQuotaBypassCursorOrder(
+	req OpenAIAccountScheduleRequest,
+	pool []openAIAccountCandidateScore,
+	topK int,
+) ([]openAIAccountCandidateScore, bool) {
+	if len(pool) == 0 {
+		return nil, false
+	}
+	if s == nil || s.service == nil {
+		ordered := buildOpenAIQuotaBypassConcentratedOrder(pool)
+		window := openAIQuotaBypassWindowSize(topK)
+		hasMore := len(ordered) > window
+		if len(ordered) > window {
+			ordered = ordered[:window]
+		}
+		return ordered, hasMore
+	}
+
+	accountIDs := make([]int64, 0, len(pool))
+	byID := make(map[int64]openAIAccountCandidateScore, len(pool))
+	priority := openAIAccountSchedulingPriority(pool[0].account)
+	for _, candidate := range pool {
+		if candidate.account == nil {
+			continue
+		}
+		accountIDs = append(accountIDs, candidate.account.ID)
+		byID[candidate.account.ID] = candidate
+	}
+	window := s.service.quotaBypassSelectionWindow(req.GroupID, req.Platform, priority, accountIDs, topK)
+	ordered := make([]openAIAccountCandidateScore, 0, len(window.accountIDs))
+	for _, accountID := range window.accountIDs {
+		if candidate, ok := byID[accountID]; ok {
+			ordered = append(ordered, candidate)
+		}
+	}
+	return ordered, window.hasMore
+}
+
 func sortOpenAICompactRetryCandidates(pool []openAIAccountCandidateScore) []openAIAccountCandidateScore {
 	if len(pool) == 0 {
 		return nil
@@ -1277,8 +1319,12 @@ func (s *defaultOpenAIAccountScheduler) tryAcquireOpenAISelectionOrderWithBudget
 		if candidate.account == nil {
 			continue
 		}
+		quotaBypassCandidate := isOpenAIQuotaBypassEligibleForScheduleRequest(candidate.account, req)
 		if candidate.loadKnown && candidate.account.Concurrency > 0 &&
 			candidate.loadInfo.CurrentConcurrency >= candidate.account.Concurrency {
+			if quotaBypassCandidate {
+				s.service.markQuotaBypassAccountFull(req.GroupID, req.Platform, candidate.account)
+			}
 			continue
 		}
 
@@ -1290,6 +1336,9 @@ func (s *defaultOpenAIAccountScheduler) tryAcquireOpenAISelectionOrderWithBudget
 			return nil, compactBlocked, acquireErr
 		}
 		if result == nil || !result.Acquired {
+			if quotaBypassCandidate {
+				s.service.markQuotaBypassAccountFull(req.GroupID, req.Platform, candidate.account)
+			}
 			continue
 		}
 
@@ -1323,16 +1372,23 @@ func (s *defaultOpenAIAccountScheduler) tryAcquireOpenAISelectionOrderWithBudget
 				return nil, compactBlocked, acquireErr
 			}
 			if result == nil || !result.Acquired {
+				if quotaBypassCandidate {
+					s.service.markQuotaBypassAccountFull(req.GroupID, req.Platform, fresh)
+				}
 				continue
 			}
 		}
 		if req.SessionHash != "" && !req.PreserveStickyBinding {
 			_ = s.service.bindOpenAIStickySessionDuringSelection(ctx, req.GroupID, req.SessionHash, fresh.ID)
 		}
+		releaseFunc := result.ReleaseFunc
+		if isOpenAIQuotaBypassEligibleForScheduleRequest(fresh, req) {
+			releaseFunc = s.service.wrapQuotaBypassAccountRelease(req.GroupID, req.Platform, fresh, releaseFunc)
+		}
 		return attachSelectionProfitGate(ctx, &AccountSelectionResult{
 			Account:     fresh,
 			Acquired:    true,
-			ReleaseFunc: result.ReleaseFunc,
+			ReleaseFunc: releaseFunc,
 		}), compactBlocked, nil
 	}
 	return nil, compactBlocked, nil
@@ -1576,10 +1632,15 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 			continue
 		}
 		filtered = append(filtered, account)
-		loadReq = append(loadReq, AccountWithConcurrency{
-			ID:             account.ID,
-			MaxConcurrency: account.EffectiveLoadFactor(),
-		})
+		// Quota-bypass accounts use the atomic fill-first cursor below. Reading
+		// every bypass account's Redis load on every request defeats large-pool
+		// scaling and is unnecessary because AcquireAccountSlot is authoritative.
+		if !isOpenAIQuotaBypassEligibleForScheduleRequest(account, req) {
+			loadReq = append(loadReq, AccountWithConcurrency{
+				ID:             account.ID,
+				MaxConcurrency: account.EffectiveLoadFactor(),
+			})
+		}
 	}
 	if len(filtered) == 0 {
 		return nil, 0, 0, 0, noAvailableOpenAISelectionError(req.RequestedModel, false, filterStats.summary(""))
@@ -1662,6 +1723,12 @@ func (s *defaultOpenAIAccountScheduler) trySelectByLoadBalancePool(
 	loadMap map[int64]*AccountLoadInfo,
 	budget *openAISelectionProbeBudget,
 ) openAIAccountLoadSelectionAttempt {
+	for _, account := range filtered {
+		if isOpenAIQuotaBypassEligibleForScheduleRequest(account, req) {
+			budget.enableLimit()
+			break
+		}
+	}
 	plan := s.buildOpenAIAccountLoadPlan(ctx, req, filtered, loadMap)
 	if openAICostOverflowExpanded(req, plan) {
 		budget.enableLimit()
@@ -1699,7 +1766,7 @@ func (s *defaultOpenAIAccountScheduler) trySelectByLoadBalancePool(
 	}
 
 	if s.service.concurrencyService != nil && !budget.acquireExhausted() {
-		loadReq := buildOpenAIAccountLoadRequest(filtered)
+		loadReq := buildOpenAIAccountLoadRequest(filtered, req)
 		if freshLoadMap, loadErr := s.service.concurrencyService.GetAccountsLoadBatchFresh(ctx, loadReq); loadErr == nil {
 			freshPlan := s.buildOpenAIAccountLoadPlan(ctx, req, filtered, freshLoadMap)
 			if openAICostOverflowExpanded(req, freshPlan) {
@@ -1750,10 +1817,10 @@ func openAICostOverflowExpanded(req OpenAIAccountScheduleRequest, plan openAIAcc
 	return supported > plan.topK || unknown > plan.topK
 }
 
-func buildOpenAIAccountLoadRequest(accounts []*Account) []AccountWithConcurrency {
+func buildOpenAIAccountLoadRequest(accounts []*Account, req OpenAIAccountScheduleRequest) []AccountWithConcurrency {
 	loadReq := make([]AccountWithConcurrency, 0, len(accounts))
 	for _, account := range accounts {
-		if account == nil {
+		if account == nil || isOpenAIQuotaBypassEligibleForScheduleRequest(account, req) {
 			continue
 		}
 		loadReq = append(loadReq, AccountWithConcurrency{

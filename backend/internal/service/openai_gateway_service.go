@@ -432,21 +432,23 @@ type OpenAIGatewayService struct {
 	liveAttestation       liveattestation.Provider
 	liveAttestationCipher SecretEncryptor
 
-	openaiWSPoolOnce               sync.Once
-	openaiWSStateStoreOnce         sync.Once
-	openaiSchedulerOnce            sync.Once
-	openaiProxyStreamCircuitOnce   sync.Once
-	openaiWSPassthroughDialerOnce  sync.Once
-	openaiModelTransientOnce       sync.Once
-	agentIdentityTaskMu            sync.Mutex
-	openaiWSPool                   *openAIWSConnPool
-	openaiWSStateStore             OpenAIWSStateStore
-	openaiScheduler                OpenAIAccountScheduler
-	openaiWSPassthroughDialer      openAIWSClientDialer
-	openaiAccountStats             *openAIAccountRuntimeStats
-	openaiModelTransient           *openAIAccountModelTransientState
-	openaiProxyStreamCircuit       *openAIProxyStreamCircuit
-	openaiProxyStreamFailOpenLogAt atomic.Int64
+	openaiWSPoolOnce                  sync.Once
+	openaiWSStateStoreOnce            sync.Once
+	openaiSchedulerOnce               sync.Once
+	openaiQuotaBypassConcentratorOnce sync.Once
+	openaiProxyStreamCircuitOnce      sync.Once
+	openaiWSPassthroughDialerOnce     sync.Once
+	openaiModelTransientOnce          sync.Once
+	agentIdentityTaskMu               sync.Mutex
+	openaiWSPool                      *openAIWSConnPool
+	openaiWSStateStore                OpenAIWSStateStore
+	openaiScheduler                   OpenAIAccountScheduler
+	openaiQuotaBypassConcentrator     *openAIQuotaBypassConcentrator
+	openaiWSPassthroughDialer         openAIWSClientDialer
+	openaiAccountStats                *openAIAccountRuntimeStats
+	openaiModelTransient              *openAIAccountModelTransientState
+	openaiProxyStreamCircuit          *openAIProxyStreamCircuit
+	openaiProxyStreamFailOpenLogAt    atomic.Int64
 
 	openaiWSFallbackUntil               sync.Map // key: int64(accountID), value: time.Time
 	openaiAccountRuntimeBlockUntil      sync.Map // key: int64(accountID), value: time.Time
