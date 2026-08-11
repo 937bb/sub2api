@@ -253,6 +253,7 @@ type stubConcurrencyCache struct {
 	acquireResults  map[int64]bool
 	waitCounts      map[int64]int
 	skipDefaultLoad bool
+	acquiredIDs     *[]int64
 }
 
 type cancelReadCloser struct{}
@@ -296,6 +297,9 @@ func (w *failingGinWriter) Write(p []byte) (int, error) {
 }
 
 func (c stubConcurrencyCache) AcquireAccountSlot(ctx context.Context, accountID int64, maxConcurrency int, requestID string) (bool, error) {
+	if c.acquiredIDs != nil {
+		*c.acquiredIDs = append(*c.acquiredIDs, accountID)
+	}
 	if c.acquireResults != nil {
 		if result, ok := c.acquireResults[accountID]; ok {
 			return result, nil
@@ -1183,6 +1187,124 @@ func TestOpenAISelectAccountWithLoadAwareness_PriorityPrecedesQuotaBypass(t *tes
 	require.NotNil(t, selection)
 	require.NotNil(t, selection.Account)
 	require.Equal(t, int64(1), selection.Account.ID)
+}
+
+func TestOpenAISelectAccountWithLoadAwareness_NormalGroupRebindsRegularStickyToAssociatedQuotaBypass(t *testing.T) {
+	groupAID := int64(101)
+	groupBID := int64(102)
+	groupCID := int64(103)
+	groupA := &Group{ID: groupAID, QuotaBypassEnabled: true}
+	groupB := &Group{ID: groupBID}
+	groupC := &Group{ID: groupCID}
+	accounts := []Account{
+		{
+			ID:          10101,
+			Platform:    PlatformOpenAI,
+			Type:        AccountTypeOAuth,
+			Status:      StatusActive,
+			Schedulable: true,
+			Concurrency: 100,
+			Priority:    0,
+			GroupIDs:    []int64{groupAID, groupBID, groupCID},
+			AccountGroups: []AccountGroup{
+				{GroupID: groupAID, Group: groupA},
+				{GroupID: groupBID, Group: groupB},
+				{GroupID: groupCID, Group: groupC},
+			},
+		},
+		{
+			ID:          10102,
+			Platform:    PlatformOpenAI,
+			Type:        AccountTypeOAuth,
+			Status:      StatusActive,
+			Schedulable: true,
+			Concurrency: 100,
+			Priority:    0,
+			GroupIDs:    []int64{groupBID, groupCID},
+			AccountGroups: []AccountGroup{
+				{GroupID: groupBID, Group: groupB},
+				{GroupID: groupCID, Group: groupC},
+			},
+		},
+	}
+	cache := &stubGatewayCache{
+		sessionBindings: map[string]int64{"openai:group-c-session": 10102},
+	}
+	acquiredIDs := make([]int64, 0, 1)
+	concurrencyCache := stubConcurrencyCache{
+		loadMap: map[int64]*AccountLoadInfo{
+			10101: {AccountID: 10101, CurrentConcurrency: 2, LoadRate: 2},
+			10102: {AccountID: 10102, CurrentConcurrency: 2, LoadRate: 2},
+		},
+		acquireResults: map[int64]bool{10101: true, 10102: true},
+		acquiredIDs:    &acquiredIDs,
+	}
+	svc := &OpenAIGatewayService{
+		accountRepo:        groupAwareStubOpenAIAccountRepo{stubOpenAIAccountRepo{accounts: accounts}},
+		cache:              cache,
+		concurrencyService: NewConcurrencyService(concurrencyCache),
+	}
+
+	selection, err := svc.SelectAccountWithLoadAwareness(context.Background(), &groupCID, "group-c-session", "gpt-5.1", nil)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.Account)
+	require.Equal(t, int64(10101), selection.Account.ID)
+	require.Equal(t, []int64{10101}, acquiredIDs)
+	require.Equal(t, int64(10101), cache.sessionBindings["openai:group-c-session"])
+}
+
+func TestOpenAISelectAccountWithLoadAwareness_NormalGroupSpillsAfterAssociatedQuotaBypassFull(t *testing.T) {
+	groupAID := int64(111)
+	groupBID := int64(112)
+	groupCID := int64(113)
+	groupA := &Group{ID: groupAID, QuotaBypassEnabled: true}
+	groupB := &Group{ID: groupBID}
+	groupC := &Group{ID: groupCID}
+	accounts := []Account{
+		{
+			ID: 11101, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive,
+			Schedulable: true, Concurrency: 100, Priority: 0, GroupIDs: []int64{groupAID, groupBID, groupCID},
+			AccountGroups: []AccountGroup{
+				{GroupID: groupAID, Group: groupA},
+				{GroupID: groupBID, Group: groupB},
+				{GroupID: groupCID, Group: groupC},
+			},
+		},
+		{
+			ID: 11102, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive,
+			Schedulable: true, Concurrency: 100, Priority: 0, GroupIDs: []int64{groupBID, groupCID},
+			AccountGroups: []AccountGroup{
+				{GroupID: groupBID, Group: groupB},
+				{GroupID: groupCID, Group: groupC},
+			},
+		},
+	}
+	cache := &stubGatewayCache{
+		sessionBindings: map[string]int64{"openai:group-c-spill": 11102},
+	}
+	acquiredIDs := make([]int64, 0, 2)
+	concurrencyCache := stubConcurrencyCache{
+		loadMap: map[int64]*AccountLoadInfo{
+			11101: {AccountID: 11101, CurrentConcurrency: 99, LoadRate: 99},
+			11102: {AccountID: 11102, CurrentConcurrency: 2, LoadRate: 2},
+		},
+		acquireResults: map[int64]bool{11101: false, 11102: true},
+		acquiredIDs:    &acquiredIDs,
+	}
+	svc := &OpenAIGatewayService{
+		accountRepo:        groupAwareStubOpenAIAccountRepo{stubOpenAIAccountRepo{accounts: accounts}},
+		cache:              cache,
+		concurrencyService: NewConcurrencyService(concurrencyCache),
+	}
+
+	selection, err := svc.SelectAccountWithLoadAwareness(context.Background(), &groupCID, "group-c-spill", "gpt-5.1", nil)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.Account)
+	require.Equal(t, int64(11102), selection.Account.ID)
+	require.Equal(t, []int64{11101, 11102}, acquiredIDs)
+	require.Equal(t, int64(11102), cache.sessionBindings["openai:group-c-spill"])
 }
 
 func TestOpenAISelectAccountForModelWithExclusions_StickyExcludedFallback(t *testing.T) {

@@ -997,9 +997,23 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		_, excluded := excludedIDs[accountID]
 		return excluded
 	}
+	quotaBypassGroup := s.resolveOpenAIQuotaBypassSchedulingGroup(ctx, groupID, platform)
+	hasQuotaBypassPoolAccounts := false
+	for i := range accounts {
+		if isExcluded(accounts[i].ID) {
+			continue
+		}
+		if IsQuotaBypassEligible(&accounts[i], quotaBypassGroup) {
+			hasQuotaBypassPoolAccounts = true
+			break
+		}
+	}
 
 	// ============ Layer 1: Sticky session ============
-	if sessionHash != "" {
+	// Hard previous_response affinity is handled before this path. Soft session
+	// affinity must yield so the load-aware layer can concentrate same-priority
+	// quota-bypass accounts and spill only after they are full.
+	if sessionHash != "" && !hasQuotaBypassPoolAccounts {
 		accountID := stickyAccountID
 		if accountID > 0 && !isExcluded(accountID) {
 			account, err := s.getSchedulableAccount(ctx, accountID)
@@ -1090,7 +1104,6 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 	if len(candidates) == 0 {
 		return nil, ErrNoAvailableAccounts
 	}
-	quotaBypassGroup := s.resolveOpenAIQuotaBypassSchedulingGroup(ctx, groupID, platform)
 	hasQuotaBypassCandidates := false
 	for _, candidate := range candidates {
 		if IsQuotaBypassEligible(candidate, quotaBypassGroup) {

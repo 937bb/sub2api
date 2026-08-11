@@ -94,6 +94,11 @@ type OpenAIAccountScheduleRequest struct {
 	RequiredImageCapability OpenAIImagesCapability
 	RequireCompact          bool
 	ExcludedIDs             map[int64]struct{}
+
+	// prefetchedAccounts avoids a second scheduler snapshot read when a soft
+	// session binding must yield to quota-bypass concentration.
+	prefetchedAccounts      []Account
+	prefetchedAccountsReady bool
 }
 
 type OpenAIAccountScheduleDecision struct {
@@ -427,7 +432,19 @@ func (s *defaultOpenAIAccountScheduler) Select(
 		}
 	}
 
-	if !req.StickyWeighted {
+	useSessionSticky := !req.StickyWeighted
+	if useSessionSticky && strings.TrimSpace(req.SessionHash) != "" && s != nil && s.service != nil {
+		if accounts, err := s.service.listSchedulableAccounts(ctx, req.GroupID, req.Platform); err == nil {
+			req.prefetchedAccounts = accounts
+			req.prefetchedAccountsReady = true
+			// Hard previous_response affinity was handled above. Soft session
+			// affinity must not bypass quota-bypass concentration.
+			if hasOpenAIQuotaBypassCandidatesForScheduleRequest(accounts, req) {
+				useSessionSticky = false
+			}
+		}
+	}
+	if useSessionSticky {
 		selection, escapedSticky, err := s.selectBySessionHash(ctx, req)
 		if err != nil {
 			return nil, decision, err
@@ -1164,6 +1181,21 @@ func partitionOpenAIQuotaBypassCandidates(pool []openAIAccountCandidateScore, re
 	return bypass, regular
 }
 
+func hasOpenAIQuotaBypassCandidatesForScheduleRequest(accounts []Account, req OpenAIAccountScheduleRequest) bool {
+	for i := range accounts {
+		account := &accounts[i]
+		if req.ExcludedIDs != nil {
+			if _, excluded := req.ExcludedIDs[account.ID]; excluded {
+				continue
+			}
+		}
+		if isOpenAIQuotaBypassEligibleForScheduleRequest(account, req) {
+			return true
+		}
+	}
+	return false
+}
+
 // buildOpenAIQuotaBypassConcentratedOrder fills one account before moving to
 // the next. This preserves the concurrency concentration needed by quota
 // bypass groups instead of smoothing their traffic across the whole pool.
@@ -1462,9 +1494,13 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 	req OpenAIAccountScheduleRequest,
 ) (*AccountSelectionResult, int, int, float64, error) {
 	budget := newOpenAISelectionProbeBudget()
-	accounts, err := s.service.listSchedulableAccounts(ctx, req.GroupID, req.Platform)
-	if err != nil {
-		return nil, 0, 0, 0, err
+	accounts := req.prefetchedAccounts
+	if !req.prefetchedAccountsReady {
+		var err error
+		accounts, err = s.service.listSchedulableAccounts(ctx, req.GroupID, req.Platform)
+		if err != nil {
+			return nil, 0, 0, 0, err
+		}
 	}
 	if len(accounts) == 0 {
 		return nil, 0, 0, 0, noAvailableOpenAISelectionError(req.RequestedModel, false, openAISelectionFilterStats{}.summary(""))
