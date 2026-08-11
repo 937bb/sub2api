@@ -1268,17 +1268,20 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			}
 		}
 	} else {
-		if selection, attempted, selectErr := tryAcquireFromLoadMap(loadMap); selectErr != nil {
+		if selection, _, selectErr := tryAcquireFromLoadMap(loadMap); selectErr != nil {
 			return nil, selectErr
 		} else if selection != nil {
 			return selection, nil
-		} else if attempted {
-			if freshLoadMap, loadErr := s.concurrencyService.GetAccountsLoadBatchFresh(ctx, accountLoads); loadErr == nil {
-				if selection, _, selectErr := tryAcquireFromLoadMap(freshLoadMap); selectErr != nil {
-					return nil, selectErr
-				} else if selection != nil {
-					return selection, nil
-				}
+		}
+		// The short-TTL load snapshot can still report every account as full
+		// after a slot has been released. Always perform one uncached pass before
+		// returning a single-account WaitPlan; otherwise requests can wait outside
+		// the pool while another healthy account already has free capacity.
+		if freshLoadMap, loadErr := s.concurrencyService.GetAccountsLoadBatchFresh(ctx, accountLoads); loadErr == nil {
+			if selection, _, selectErr := tryAcquireFromLoadMap(freshLoadMap); selectErr != nil {
+				return nil, selectErr
+			} else if selection != nil {
+				return selection, nil
 			}
 		}
 	}

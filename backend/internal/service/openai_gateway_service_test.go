@@ -256,6 +256,31 @@ type stubConcurrencyCache struct {
 	acquiredIDs     *[]int64
 }
 
+type staleThenFreshOpenAILoadCache struct {
+	ConcurrencyCache
+	loadMaps       []map[int64]*AccountLoadInfo
+	loadBatchCalls int
+	acquiredIDs    []int64
+}
+
+func (c *staleThenFreshOpenAILoadCache) AcquireAccountSlot(_ context.Context, accountID int64, _ int, _ string) (bool, error) {
+	c.acquiredIDs = append(c.acquiredIDs, accountID)
+	return accountID == 12102, nil
+}
+
+func (c *staleThenFreshOpenAILoadCache) ReleaseAccountSlot(context.Context, int64, string) error {
+	return nil
+}
+
+func (c *staleThenFreshOpenAILoadCache) GetAccountsLoadBatch(_ context.Context, _ []AccountWithConcurrency) (map[int64]*AccountLoadInfo, error) {
+	index := c.loadBatchCalls
+	c.loadBatchCalls++
+	if index >= len(c.loadMaps) {
+		index = len(c.loadMaps) - 1
+	}
+	return c.loadMaps[index], nil
+}
+
 type cancelReadCloser struct{}
 
 func (c cancelReadCloser) Read(p []byte) (int, error) { return 0, context.Canceled }
@@ -1305,6 +1330,57 @@ func TestOpenAISelectAccountWithLoadAwareness_NormalGroupSpillsAfterAssociatedQu
 	require.Equal(t, int64(11102), selection.Account.ID)
 	require.Equal(t, []int64{11101, 11102}, acquiredIDs)
 	require.Equal(t, int64(11102), cache.sessionBindings["openai:group-c-spill"])
+}
+
+func TestOpenAISelectAccountWithLoadAwareness_RefreshesAllFullCacheBeforeWaiting(t *testing.T) {
+	groupAID := int64(121)
+	groupCID := int64(123)
+	groupA := &Group{ID: groupAID, QuotaBypassEnabled: true}
+	groupC := &Group{ID: groupCID}
+	accounts := []Account{
+		{
+			ID: 12101, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive,
+			Schedulable: true, Concurrency: 100, Priority: 0, GroupIDs: []int64{groupAID, groupCID},
+			AccountGroups: []AccountGroup{
+				{GroupID: groupAID, Group: groupA},
+				{GroupID: groupCID, Group: groupC},
+			},
+		},
+		{
+			ID: 12102, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive,
+			Schedulable: true, Concurrency: 100, Priority: 0, GroupIDs: []int64{groupCID},
+			AccountGroups: []AccountGroup{
+				{GroupID: groupCID, Group: groupC},
+			},
+		},
+	}
+	concurrencyCache := &staleThenFreshOpenAILoadCache{
+		loadMaps: []map[int64]*AccountLoadInfo{
+			{
+				12101: {AccountID: 12101, CurrentConcurrency: 100, LoadRate: 100},
+				12102: {AccountID: 12102, CurrentConcurrency: 100, LoadRate: 100},
+			},
+			{
+				12101: {AccountID: 12101, CurrentConcurrency: 100, LoadRate: 100},
+				12102: {AccountID: 12102, CurrentConcurrency: 99, LoadRate: 99},
+			},
+		},
+	}
+	svc := &OpenAIGatewayService{
+		accountRepo:        groupAwareStubOpenAIAccountRepo{stubOpenAIAccountRepo{accounts: accounts}},
+		cache:              &stubGatewayCache{},
+		concurrencyService: NewConcurrencyService(concurrencyCache),
+	}
+
+	selection, err := svc.SelectAccountWithLoadAwareness(context.Background(), &groupCID, "fresh-capacity", "gpt-5.1", nil)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.True(t, selection.Acquired)
+	require.Nil(t, selection.WaitPlan)
+	require.NotNil(t, selection.Account)
+	require.Equal(t, int64(12102), selection.Account.ID)
+	require.Equal(t, 2, concurrencyCache.loadBatchCalls)
+	require.Equal(t, []int64{12102}, concurrencyCache.acquiredIDs)
 }
 
 func TestOpenAISelectAccountForModelWithExclusions_StickyExcludedFallback(t *testing.T) {
