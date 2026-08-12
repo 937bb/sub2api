@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -37,6 +38,8 @@ const (
 	// ordinary request slots, because idle ingress sessions do not hold a turn slot.
 	openAIWSIngressLeaseKeyPrefix  = "concurrency:openai_ws_ingress:api_key:"
 	openAIWSIngressLeaseTTLSeconds = 60
+	quotaBypassActiveKeyPrefix     = "scheduler:openai:quota_bypass:active:"
+	quotaBypassActiveTTLSeconds    = 15 * 60
 	liveLeaseTTLSeconds            = 60
 	// 等待队列计数器格式: concurrency:wait:{userID}
 	waitQueueKeyPrefix = "concurrency:wait:"
@@ -61,6 +64,35 @@ const (
 )
 
 var (
+	quotaBypassActiveGetScript = redis.NewScript(`
+		local value = redis.call('GET', KEYS[1])
+		if value then
+			redis.call('EXPIRE', KEYS[1], ARGV[1])
+		end
+		return value
+	`)
+	quotaBypassActivePromoteScript = redis.NewScript(`
+		local candidate = tonumber(ARGV[1])
+		local current = tonumber(redis.call('GET', KEYS[1]))
+		if not current or candidate < current then
+			redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2])
+		else
+			redis.call('EXPIRE', KEYS[1], ARGV[2])
+		end
+		return 1
+	`)
+	quotaBypassActiveAdvanceScript = redis.NewScript(`
+		local observed = tonumber(ARGV[1])
+		local next = tonumber(ARGV[2])
+		local current = tonumber(redis.call('GET', KEYS[1]))
+		if not current or current == observed then
+			redis.call('SET', KEYS[1], ARGV[2], 'EX', ARGV[3])
+			return next
+		end
+		redis.call('EXPIRE', KEYS[1], ARGV[3])
+		return current
+	`)
+
 	// acquireScript 使用有序集合计数并在未达上限时添加槽位
 	// 使用 Redis TIME 命令获取服务器时间，避免多实例时钟不同步问题
 	// KEYS[1] = 普通槽位键，KEYS[2] = 对应 Live 槽位键
@@ -404,6 +436,76 @@ func liveAPIKeySlotKey(apiKeyID int64) string {
 
 func openAIWSIngressLeaseKey(apiKeyID int64) string {
 	return fmt.Sprintf("%s%d", openAIWSIngressLeaseKeyPrefix, apiKeyID)
+}
+
+func quotaBypassActiveAccountKey(poolKey string) string {
+	return quotaBypassActiveKeyPrefix + poolKey
+}
+
+func (c *concurrencyCache) GetQuotaBypassActiveAccount(ctx context.Context, poolKey string) (int64, error) {
+	if c == nil || c.rdb == nil || poolKey == "" {
+		return 0, nil
+	}
+	value, err := quotaBypassActiveGetScript.Run(
+		ctx,
+		c.rdb,
+		[]string{quotaBypassActiveAccountKey(poolKey)},
+		quotaBypassActiveTTLSeconds,
+	).Text()
+	if errors.Is(err, redis.Nil) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	accountID, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || accountID <= 0 {
+		return 0, fmt.Errorf("invalid quota bypass active account %q", value)
+	}
+	return accountID, nil
+}
+
+func (c *concurrencyCache) SetQuotaBypassActiveAccount(ctx context.Context, poolKey string, accountID int64, ttl time.Duration) error {
+	if c == nil || c.rdb == nil || poolKey == "" || accountID <= 0 {
+		return nil
+	}
+	if ttl <= 0 {
+		ttl = 15 * time.Minute
+	}
+	return c.rdb.Set(ctx, quotaBypassActiveAccountKey(poolKey), accountID, ttl).Err()
+}
+
+func (c *concurrencyCache) AdvanceQuotaBypassActiveAccount(ctx context.Context, poolKey string, observedAccountID, nextAccountID int64, ttl time.Duration) (int64, error) {
+	if c == nil || c.rdb == nil || poolKey == "" || observedAccountID <= 0 || nextAccountID <= 0 {
+		return 0, nil
+	}
+	if ttl <= 0 {
+		ttl = 15 * time.Minute
+	}
+	return quotaBypassActiveAdvanceScript.Run(
+		ctx,
+		c.rdb,
+		[]string{quotaBypassActiveAccountKey(poolKey)},
+		observedAccountID,
+		nextAccountID,
+		int64(ttl/time.Second),
+	).Int64()
+}
+
+func (c *concurrencyCache) PromoteQuotaBypassActiveAccount(ctx context.Context, poolKey string, accountID int64, ttl time.Duration) error {
+	if c == nil || c.rdb == nil || poolKey == "" || accountID <= 0 {
+		return nil
+	}
+	if ttl <= 0 {
+		ttl = 15 * time.Minute
+	}
+	return quotaBypassActivePromoteScript.Run(
+		ctx,
+		c.rdb,
+		[]string{quotaBypassActiveAccountKey(poolKey)},
+		accountID,
+		int64(ttl/time.Second),
+	).Err()
 }
 
 func waitQueueKey(userID int64) string {

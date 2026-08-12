@@ -1,6 +1,7 @@
 package service
 
 import (
+	"fmt"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -9,8 +10,11 @@ import (
 
 const (
 	openAIQuotaBypassMinWindowSize = 8
-	openAIQuotaBypassFullHintTTL   = 250 * time.Millisecond
-	openAIQuotaBypassPoolStateTTL  = 15 * time.Minute
+	// Production routing uses a single active target. A larger window is only
+	// useful for diagnostics and must not be exposed as parallel candidates.
+	openAIQuotaBypassActiveWindowSize = 1
+	openAIQuotaBypassFullHintTTL      = 250 * time.Millisecond
+	openAIQuotaBypassPoolStateTTL     = 15 * time.Minute
 )
 
 type openAIQuotaBypassPoolKey struct {
@@ -18,6 +22,13 @@ type openAIQuotaBypassPoolKey struct {
 	ungrouped bool
 	platform  string
 	priority  int
+}
+
+func (k openAIQuotaBypassPoolKey) sharedKey() string {
+	if k.ungrouped {
+		return fmt.Sprintf("ungrouped:%s:%d", k.platform, k.priority)
+	}
+	return fmt.Sprintf("group:%d:%s:%d", k.groupID, k.platform, k.priority)
 }
 
 type openAIQuotaBypassPoolState struct {
@@ -45,8 +56,8 @@ func newOpenAIQuotaBypassConcentrator() *openAIQuotaBypassConcentrator {
 }
 
 func openAIQuotaBypassWindowSize(topK int) int {
-	if topK < openAIQuotaBypassMinWindowSize {
-		topK = openAIQuotaBypassMinWindowSize
+	if topK <= 0 {
+		topK = openAIQuotaBypassActiveWindowSize
 	}
 	if topK > openAIAccountSelectionProbeLimit {
 		return openAIAccountSelectionProbeLimit
@@ -214,6 +225,22 @@ func (c *openAIQuotaBypassConcentrator) markReleased(key openAIQuotaBypassPoolKe
 	c.markAcquired(key, accountID)
 }
 
+func (c *openAIQuotaBypassConcentrator) isFullHinted(key openAIQuotaBypassPoolKey, accountID int64) bool {
+	if c == nil || accountID <= 0 {
+		return false
+	}
+	state := c.state(key)
+	nowUnixNano := time.Now().UnixNano()
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	until := state.fullUntil[accountID]
+	if until <= nowUnixNano {
+		delete(state.fullUntil, accountID)
+		return false
+	}
+	return true
+}
+
 func (c *openAIQuotaBypassConcentrator) cleanup(now time.Time) {
 	if c == nil {
 		return
@@ -250,7 +277,51 @@ func (s *OpenAIGatewayService) quotaBypassSelectionWindow(
 		return openAIQuotaBypassCursorWindow{}
 	}
 	key := newOpenAIQuotaBypassPoolKey(groupID, platform, priority)
-	return concentrator.window(key, accountIDs, openAIQuotaBypassWindowSize(topK))
+	window := concentrator.window(key, accountIDs, openAIQuotaBypassWindowSize(topK))
+	if len(window.accountIDs) == 0 || s.concurrencyService == nil {
+		return window
+	}
+
+	sharedKey := key.sharedKey()
+	sharedID, sharedOK := s.concurrencyService.getQuotaBypassActiveAccount(sharedKey)
+	if sharedOK &&
+		containsOpenAIQuotaBypassAccountID(accountIDs, sharedID) &&
+		!concentrator.isFullHinted(key, sharedID) {
+		concentrator.markAcquired(key, sharedID)
+		return openAIQuotaBypassCursorWindow{
+			accountIDs: []int64{sharedID},
+			hasMore:    len(accountIDs) > 1,
+		}
+	}
+
+	activeID := window.accountIDs[0]
+	if sharedOK {
+		if currentID, ok := s.concurrencyService.advanceQuotaBypassActiveAccount(
+			sharedKey,
+			sharedID,
+			activeID,
+			openAIQuotaBypassPoolStateTTL,
+		); ok && containsOpenAIQuotaBypassAccountID(accountIDs, currentID) && !concentrator.isFullHinted(key, currentID) {
+			activeID = currentID
+		}
+	}
+	concentrator.markAcquired(key, activeID)
+	if !sharedOK {
+		s.concurrencyService.setQuotaBypassActiveAccount(sharedKey, activeID, openAIQuotaBypassPoolStateTTL)
+	}
+	return openAIQuotaBypassCursorWindow{
+		accountIDs: []int64{activeID},
+		hasMore:    len(accountIDs) > 1,
+	}
+}
+
+func containsOpenAIQuotaBypassAccountID(accountIDs []int64, accountID int64) bool {
+	for _, candidateID := range accountIDs {
+		if candidateID == accountID {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *OpenAIGatewayService) markQuotaBypassAccountFull(groupID *int64, platform string, account *Account) {
@@ -280,6 +351,9 @@ func (s *OpenAIGatewayService) wrapQuotaBypassAccountRelease(
 				release()
 			}
 			concentrator.markReleased(key, account.ID)
+			if s.concurrencyService != nil {
+				s.concurrencyService.promoteQuotaBypassActiveAccount(key.sharedKey(), account.ID, openAIQuotaBypassPoolStateTTL)
+			}
 		})
 	}
 }

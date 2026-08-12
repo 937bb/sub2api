@@ -1126,6 +1126,8 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			MaxConcurrency: acc.EffectiveLoadFactor(),
 		})
 	}
+	legacyQuotaBypassAttempted := make(map[int64]struct{})
+	legacyQuotaBypassProbeCount := 0
 
 	tryAcquireFromLoadMap := func(loadMap map[int64]*AccountLoadInfo) (*AccountSelectionResult, bool, error) {
 		var available []accountWithLoad
@@ -1187,64 +1189,117 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 				return rateOrder.compare(available[i].account, available[j].account) < 0
 			})
 		}
-		if hasQuotaBypassCandidates {
-			available = s.orderOpenAILegacyQuotaBypassCandidates(groupID, platform, quotaBypassGroup, available)
-		}
-
-		selectionOrder := make([]accountWithLoad, 0, len(available))
-		if requireCompact {
-			appendTier := func(out []accountWithLoad, tier int) []accountWithLoad {
-				for _, item := range available {
-					if openAICompactSupportTier(item.account) == tier {
-						out = append(out, item)
+		quotaBypassPool := available
+		if hasQuotaBypassCandidates && len(legacyQuotaBypassAttempted) > 0 {
+			quotaBypassPool = make([]accountWithLoad, 0, len(available))
+			for _, item := range available {
+				if IsQuotaBypassEligible(item.account, quotaBypassGroup) {
+					if _, attempted := legacyQuotaBypassAttempted[item.account.ID]; attempted {
+						continue
 					}
 				}
-				return out
+				quotaBypassPool = append(quotaBypassPool, item)
 			}
-			selectionOrder = appendTier(selectionOrder, 2)
-			selectionOrder = appendTier(selectionOrder, 1)
-			// tier 0 候选作为兜底追加：DB recheck 时若发现 cache tier 0 实际
-			// 已升级为 1/2（探测刚跑完，cache 尚未刷新），仍可正常命中。
-			selectionOrder = appendTier(selectionOrder, 0)
-		} else {
-			selectionOrder = append(selectionOrder, available...)
 		}
+		for legacyQuotaBypassProbeCount < openAIAccountSelectionProbeLimit {
+			quotaBypassHasMore := false
+			if hasQuotaBypassCandidates {
+				available, quotaBypassHasMore = s.orderOpenAILegacyQuotaBypassCandidatesWithState(groupID, platform, quotaBypassGroup, quotaBypassPool)
+			}
 
-		for _, item := range selectionOrder {
-			fresh := s.resolveFreshSchedulableOpenAIAccount(ctx, item.account, platform, requestedModel, false, requiredCapability)
-			if fresh == nil {
-				continue
-			}
-			fresh = s.recheckSelectedOpenAIAccountFromDB(ctx, fresh, groupID, platform, requestedModel, requireCompact, requiredCapability)
-			if fresh == nil {
-				continue
-			}
-			if needsUpstreamCheck && s.isUpstreamModelRestrictedByChannel(ctx, *groupID, fresh, requestedModel, requireCompact) {
-				continue
-			}
-			result, err := s.tryAcquireAccountSlot(ctx, fresh.ID, fresh.Concurrency)
-			if err == nil && result != nil && result.Acquired {
-				releaseFunc := result.ReleaseFunc
-				if IsQuotaBypassEligible(fresh, quotaBypassGroup) {
-					releaseFunc = s.wrapQuotaBypassAccountRelease(groupID, platform, fresh, releaseFunc)
+			selectionOrder := make([]accountWithLoad, 0, len(available))
+			if requireCompact {
+				appendTier := func(out []accountWithLoad, tier int) []accountWithLoad {
+					for _, item := range available {
+						if openAICompactSupportTier(item.account) == tier {
+							out = append(out, item)
+						}
+					}
+					return out
 				}
-				selection, selectErr := s.newAcquiredSelectionResult(ctx, fresh, releaseFunc)
-				if selectErr != nil {
-					return nil, true, selectErr
-				}
-				if sessionHash != "" && !gatewayProfitControlGateActive(ctx) {
-					_ = s.setStickySessionAccountID(ctx, groupID, sessionHash, fresh.ID, openaiStickySessionTTL)
-				}
-				return selection, true, nil
+				selectionOrder = appendTier(selectionOrder, 2)
+				selectionOrder = appendTier(selectionOrder, 1)
+				// tier 0 候选作为兜底追加：DB recheck 时若发现 cache tier 0 实际
+				// 已升级为 1/2（探测刚跑完，cache 尚未刷新），仍可正常命中。
+				selectionOrder = appendTier(selectionOrder, 0)
+			} else {
+				selectionOrder = append(selectionOrder, available...)
 			}
-			if err == nil && IsQuotaBypassEligible(fresh, quotaBypassGroup) {
-				s.markQuotaBypassAccountFull(groupID, platform, fresh)
+
+			for _, item := range selectionOrder {
+				quotaBypassCandidate := IsQuotaBypassEligible(item.account, quotaBypassGroup)
+				if quotaBypassCandidate {
+					if _, attempted := legacyQuotaBypassAttempted[item.account.ID]; attempted {
+						continue
+					}
+					legacyQuotaBypassAttempted[item.account.ID] = struct{}{}
+					legacyQuotaBypassProbeCount++
+				}
+				fresh := s.resolveFreshSchedulableOpenAIAccount(ctx, item.account, platform, requestedModel, false, requiredCapability)
+				if fresh == nil {
+					continue
+				}
+				fresh = s.recheckSelectedOpenAIAccountFromDB(ctx, fresh, groupID, platform, requestedModel, requireCompact, requiredCapability)
+				if fresh == nil {
+					continue
+				}
+				if needsUpstreamCheck && s.isUpstreamModelRestrictedByChannel(ctx, *groupID, fresh, requestedModel, requireCompact) {
+					continue
+				}
+				result, err := s.tryAcquireAccountSlot(ctx, fresh.ID, fresh.Concurrency)
+				if err == nil && result != nil && result.Acquired {
+					releaseFunc := result.ReleaseFunc
+					if IsQuotaBypassEligible(fresh, quotaBypassGroup) {
+						releaseFunc = s.wrapQuotaBypassAccountRelease(groupID, platform, fresh, releaseFunc)
+					}
+					selection, selectErr := s.newAcquiredSelectionResult(ctx, fresh, releaseFunc)
+					if selectErr != nil {
+						return nil, true, selectErr
+					}
+					if sessionHash != "" && !gatewayProfitControlGateActive(ctx) {
+						_ = s.setStickySessionAccountID(ctx, groupID, sessionHash, fresh.ID, openaiStickySessionTTL)
+					}
+					return selection, true, nil
+				}
+				if err == nil && IsQuotaBypassEligible(fresh, quotaBypassGroup) {
+					s.markQuotaBypassAccountFull(groupID, platform, fresh)
+				}
+			}
+			if !quotaBypassHasMore {
+				break
+			}
+			remainingPool := quotaBypassPool[:0]
+			for _, item := range quotaBypassPool {
+				if IsQuotaBypassEligible(item.account, quotaBypassGroup) {
+					if _, attempted := legacyQuotaBypassAttempted[item.account.ID]; attempted {
+						continue
+					}
+				}
+				remainingPool = append(remainingPool, item)
+			}
+			quotaBypassPool = remainingPool
+			for _, item := range selectionOrder {
+				if IsQuotaBypassEligible(item.account, quotaBypassGroup) {
+					s.markQuotaBypassAccountFull(groupID, platform, item.account)
+				}
 			}
 		}
 		return nil, true, nil
 	}
 
 	loadMap, err := s.concurrencyService.GetAccountsLoadBatch(ctx, accountLoads)
+	if err != nil && hasQuotaBypassCandidates {
+		// A batch-load read can fail independently from atomic slot acquisition.
+		// Keep using the bounded single-account cursor so a transient read error
+		// cannot collapse concentration into a wait on the first full account.
+		if selection, _, selectErr := tryAcquireFromLoadMap(map[int64]*AccountLoadInfo{}); selectErr != nil {
+			return nil, selectErr
+		} else if selection != nil {
+			return selection, nil
+		}
+		loadMap = map[int64]*AccountLoadInfo{}
+		err = nil
+	}
 	if err != nil {
 		ordered := append([]*Account(nil), candidates...)
 		sortAccountsByPriorityAndLastUsed(ordered, false)
@@ -1320,7 +1375,16 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		candidates = prioritizeOpenAICompactAccounts(candidates)
 	}
 	if hasQuotaBypassCandidates {
-		candidates = s.orderOpenAILegacyQuotaBypassAccounts(groupID, platform, quotaBypassGroup, candidates)
+		unattempted := make([]*Account, 0, len(candidates))
+		for _, account := range candidates {
+			if IsQuotaBypassEligible(account, quotaBypassGroup) {
+				if _, attempted := legacyQuotaBypassAttempted[account.ID]; attempted {
+					continue
+				}
+			}
+			unattempted = append(unattempted, account)
+		}
+		candidates = s.orderOpenAILegacyQuotaBypassAccounts(groupID, platform, quotaBypassGroup, unattempted)
 	}
 	for _, acc := range candidates {
 		fresh := s.resolveFreshSchedulableOpenAIAccount(ctx, acc, platform, requestedModel, false, requiredCapability)
@@ -1354,8 +1418,18 @@ func (s *OpenAIGatewayService) orderOpenAILegacyQuotaBypassCandidates(
 	quotaBypassGroup *Group,
 	available []accountWithLoad,
 ) []accountWithLoad {
+	ordered, _ := s.orderOpenAILegacyQuotaBypassCandidatesWithState(groupID, platform, quotaBypassGroup, available)
+	return ordered
+}
+
+func (s *OpenAIGatewayService) orderOpenAILegacyQuotaBypassCandidatesWithState(
+	groupID *int64,
+	platform string,
+	quotaBypassGroup *Group,
+	available []accountWithLoad,
+) ([]accountWithLoad, bool) {
 	if len(available) == 0 {
-		return nil
+		return nil, false
 	}
 	ordered := make([]accountWithLoad, 0, len(available))
 	for start := 0; start < len(available); {
@@ -1376,19 +1450,19 @@ func (s *OpenAIGatewayService) orderOpenAILegacyQuotaBypassCandidates(
 			}
 			regular = append(regular, item)
 		}
-		window := s.quotaBypassSelectionWindow(groupID, platform, priority, bypassIDs, s.openAIWSLBTopK())
+		window := s.quotaBypassSelectionWindow(groupID, platform, priority, bypassIDs, openAIQuotaBypassActiveWindowSize)
 		for _, accountID := range window.accountIDs {
 			if item, ok := bypassByID[accountID]; ok {
 				ordered = append(ordered, item)
 			}
 		}
 		if window.hasMore {
-			return ordered
+			return ordered, true
 		}
 		ordered = append(ordered, regular...)
 		start = end
 	}
-	return ordered
+	return ordered, false
 }
 
 func (s *OpenAIGatewayService) orderOpenAILegacyQuotaBypassAccounts(

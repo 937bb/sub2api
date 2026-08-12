@@ -70,6 +70,15 @@ type OpenAIWSIngressLeaseCache interface {
 	ReleaseOpenAIWSIngressLease(ctx context.Context, apiKeyID int64, leaseID string) error
 }
 
+// QuotaBypassRoutingCache shares the single active quota-bypass account
+// between gateway instances. Account slot acquisition remains authoritative.
+type QuotaBypassRoutingCache interface {
+	GetQuotaBypassActiveAccount(ctx context.Context, poolKey string) (int64, error)
+	SetQuotaBypassActiveAccount(ctx context.Context, poolKey string, accountID int64, ttl time.Duration) error
+	AdvanceQuotaBypassActiveAccount(ctx context.Context, poolKey string, observedAccountID, nextAccountID int64, ttl time.Duration) (int64, error)
+	PromoteQuotaBypassActiveAccount(ctx context.Context, poolKey string, accountID int64, ttl time.Duration) error
+}
+
 const (
 	openAIWSIngressLeaseTTL             = 60 * time.Second
 	openAIWSIngressLeaseRefreshInterval = 20 * time.Second
@@ -250,6 +259,66 @@ func NewConcurrencyService(cache ConcurrencyCache) *ConcurrencyService {
 	}
 	svc.SetAccountLoadBatchCacheTTL(defaultAccountLoadBatchCacheTTL)
 	return svc
+}
+
+func (s *ConcurrencyService) getQuotaBypassActiveAccount(poolKey string) (int64, bool) {
+	if s == nil || s.cache == nil || poolKey == "" {
+		return 0, false
+	}
+	cache, ok := s.cache.(QuotaBypassRoutingCache)
+	if !ok {
+		return 0, false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	accountID, err := cache.GetQuotaBypassActiveAccount(ctx, poolKey)
+	if err != nil || accountID <= 0 {
+		return 0, false
+	}
+	return accountID, true
+}
+
+func (s *ConcurrencyService) setQuotaBypassActiveAccount(poolKey string, accountID int64, ttl time.Duration) {
+	if s == nil || s.cache == nil || poolKey == "" || accountID <= 0 {
+		return
+	}
+	cache, ok := s.cache.(QuotaBypassRoutingCache)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	_ = cache.SetQuotaBypassActiveAccount(ctx, poolKey, accountID, ttl)
+}
+
+func (s *ConcurrencyService) advanceQuotaBypassActiveAccount(poolKey string, observedAccountID, nextAccountID int64, ttl time.Duration) (int64, bool) {
+	if s == nil || s.cache == nil || poolKey == "" || observedAccountID <= 0 || nextAccountID <= 0 {
+		return 0, false
+	}
+	cache, ok := s.cache.(QuotaBypassRoutingCache)
+	if !ok {
+		return 0, false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	activeAccountID, err := cache.AdvanceQuotaBypassActiveAccount(ctx, poolKey, observedAccountID, nextAccountID, ttl)
+	if err != nil || activeAccountID <= 0 {
+		return 0, false
+	}
+	return activeAccountID, true
+}
+
+func (s *ConcurrencyService) promoteQuotaBypassActiveAccount(poolKey string, accountID int64, ttl time.Duration) {
+	if s == nil || s.cache == nil || poolKey == "" || accountID <= 0 {
+		return
+	}
+	cache, ok := s.cache.(QuotaBypassRoutingCache)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	_ = cache.PromoteQuotaBypassActiveAccount(ctx, poolKey, accountID, ttl)
 }
 
 // AcquireOpenAIWSIngressLease atomically reserves one live ingress connection
