@@ -1262,6 +1262,7 @@ func TestOpenAISelectAccountWithLoadAwareness_NormalGroupRebindsRegularStickyToA
 			Schedulable: true,
 			Concurrency: 100,
 			Priority:    0,
+			Extra:       map[string]any{"quota_bypass_enabled": false},
 			GroupIDs:    []int64{groupAID, groupBID, groupCID},
 			AccountGroups: []AccountGroup{
 				{GroupID: groupAID, Group: groupA},

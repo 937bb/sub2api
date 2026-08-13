@@ -240,7 +240,7 @@ func TestIsQuotaBypassEligible(t *testing.T) {
 			want:    true,
 		},
 		{
-			name: "explicit account disable overrides groups",
+			name: "account switch off still inherits enabled group",
 			account: &Account{
 				Platform: PlatformOpenAI,
 				Type:     AccountTypeOAuth,
@@ -248,7 +248,7 @@ func TestIsQuotaBypassEligible(t *testing.T) {
 				Groups:   []*Group{bypassGroup},
 			},
 			group: bypassGroup,
-			want:  false,
+			want:  true,
 		},
 		{
 			name: "team plan alone does not enable bypass",
@@ -300,7 +300,11 @@ func TestAttachedGroupQuotaBypassInjectsDirectRequest(t *testing.T) {
 func TestApplyOpenAIQuotaBypassForRequest_UsesHandlerGroupDecision(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
-	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	account := &Account{
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Extra:    map[string]any{"quota_bypass_enabled": false},
+	}
 	body := []byte(`{"model":"gpt-5.1","input":[{"type":"message","role":"user","content":"hello"}]}`)
 
 	SetOpenAIQuotaBypassEnabled(c, true)
@@ -319,6 +323,8 @@ func TestApplyOpenAIQuotaBypassForRequest_UsesHandlerGroupDecision(t *testing.T)
 	require.Zero(t, pairs)
 	require.Empty(t, c.Writer.Header().Get(openAIQuotaBypassResponseHeader))
 	require.Empty(t, c.Writer.Header().Get(openAIQuotaBypassPairsResponseHeader))
+	notInjected := applyOpenAIQuotaBypassForRequest(c, account, body, 1)
+	require.Equal(t, body, notInjected)
 }
 
 func TestApplyOpenAIQuotaBypassForRequest_StaleNegativeContextDoesNotHideAccountEligibility(t *testing.T) {
@@ -327,6 +333,7 @@ func TestApplyOpenAIQuotaBypassForRequest_StaleNegativeContextDoesNotHideAccount
 	account := &Account{
 		Platform: PlatformOpenAI,
 		Type:     AccountTypeOAuth,
+		Extra:    map[string]any{"quota_bypass_enabled": false},
 		AccountGroups: []AccountGroup{{
 			GroupID: 42,
 			Group:   &Group{ID: 42, QuotaBypassEnabled: true},

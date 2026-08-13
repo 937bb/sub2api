@@ -30,14 +30,16 @@ const (
 // bypass injection through an account override, the request group, or any group
 // attached to the scheduled account. Eligibility is intentionally independent
 // of plan_type, so Plus, Team, Pro and other OpenAI OAuth plans behave alike.
-// Priority: account Extra["quota_bypass_enabled"] > group settings.
+// Eligibility is additive: an account-level true value or any enabled group is
+// sufficient. A stored false value means only that the account-level switch is
+// off; it must not disable bypass inherited from a request or attached group.
 func IsQuotaBypassEligible(account *Account, group *Group) bool {
 	if account == nil || account.Platform != PlatformOpenAI || !account.IsOAuth() {
 		return false
 	}
 	if account.Extra != nil {
-		if v, ok := account.Extra["quota_bypass_enabled"].(bool); ok {
-			return v
+		if v, ok := account.Extra["quota_bypass_enabled"].(bool); ok && v {
+			return true
 		}
 	}
 	if group != nil && group.QuotaBypassEnabled {
@@ -117,13 +119,7 @@ func InjectOpenAIQuotaBypassForRequest(c *gin.Context, body []byte, _ int) ([]by
 
 func isOpenAIQuotaBypassEnabledForRequest(c *gin.Context, account *Account) bool {
 	// The selected request group may enable injection even when the scheduler's
-	// account snapshot does not carry full group metadata. An explicit
-	// account-level false remains authoritative.
-	if account != nil && account.Extra != nil {
-		if value, ok := account.Extra["quota_bypass_enabled"].(bool); ok && !value {
-			return false
-		}
-	}
+	// account snapshot does not carry full group metadata.
 	if c != nil {
 		if value, exists := c.Get(openAIQuotaBypassEnabledContextKey); exists {
 			if enabled, ok := value.(bool); ok {

@@ -1810,7 +1810,7 @@ func TestShouldAutoPauseOpenAIAccountByQuota_QuotaBypassSkipsSnapshotPause(t *te
 			},
 		},
 		{
-			name: "explicit account disable overrides group",
+			name: "account switch off still inherits attached group",
 			account: &Account{
 				Platform: PlatformOpenAI,
 				Type:     AccountTypeOAuth,
@@ -1824,7 +1824,7 @@ func TestShouldAutoPauseOpenAIAccountByQuota_QuotaBypassSkipsSnapshotPause(t *te
 					Group: &Group{QuotaBypassEnabled: true},
 				}},
 			},
-			paused: true,
+			paused: false,
 		},
 	}
 
@@ -3791,7 +3791,7 @@ func TestBuildOpenAISelectionOrder_QuotaBypassUsesAllCandidatesInConcentratedOrd
 	require.Equal(t, int64(2), ordered[1].account.ID)
 }
 
-func TestBuildOpenAISelectionOrder_QuotaBypassKeepsIneligibleAccountsAsFallback(t *testing.T) {
+func TestBuildOpenAISelectionOrder_RequestGroupBypassOverridesStoredFalse(t *testing.T) {
 	scheduler := &defaultOpenAIAccountScheduler{}
 	plan := openAIAccountLoadPlan{
 		topK: 2,
@@ -3818,8 +3818,11 @@ func TestBuildOpenAISelectionOrder_QuotaBypassKeepsIneligibleAccountsAsFallback(
 
 	ordered := scheduler.buildOpenAISelectionOrder(OpenAIAccountScheduleRequest{GroupQuotaBypassEnabled: true}, plan)
 	require.Len(t, ordered, 3)
-	require.Equal(t, int64(2), ordered[0].account.ID)
-	require.ElementsMatch(t, []int64{1, 3}, []int64{ordered[1].account.ID, ordered[2].account.ID})
+	require.Equal(t, []int64{1, 2, 3}, []int64{
+		ordered[0].account.ID,
+		ordered[1].account.ID,
+		ordered[2].account.ID,
+	})
 }
 
 func TestBuildOpenAISelectionOrder_PriorityPrecedesQuotaBypass(t *testing.T) {
@@ -4328,6 +4331,7 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_NormalGroupRebindsRegul
 			Schedulable: true,
 			Concurrency: 100,
 			Priority:    0,
+			Extra:       map[string]any{"quota_bypass_enabled": false},
 			GroupIDs:    []int64{groupAID, groupBID, groupCID},
 			AccountGroups: []AccountGroup{
 				{GroupID: groupAID, Group: groupA},
