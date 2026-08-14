@@ -147,6 +147,7 @@ func cloneGroupForDuplicate(source *Group, operationID string) *Group {
 		RequireOAuthOnly:                source.RequireOAuthOnly,
 		RequirePrivacySet:               source.RequirePrivacySet,
 		DefaultMappedModel:              source.DefaultMappedModel,
+		OpenAIModelMapping:              CloneOpenAIModelMapping(source.OpenAIModelMapping),
 		MessagesDispatchModelConfig:     cloneGroupMessagesDispatchModelConfig(source.MessagesDispatchModelConfig),
 		ModelsListConfig: GroupModelsListConfig{
 			Enabled: source.ModelsListConfig.Enabled,

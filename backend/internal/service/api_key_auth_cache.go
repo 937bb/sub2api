@@ -101,6 +101,7 @@ type APIKeyAuthGroupSnapshot struct {
 	AllowMessagesDispatch       bool                              `json:"allow_messages_dispatch"`
 	AllowLive                   bool                              `json:"allow_live"`
 	DefaultMappedModel          string                            `json:"default_mapped_model,omitempty"`
+	OpenAIModelMapping          map[string]string                 `json:"openai_model_mapping,omitempty"`
 	MessagesDispatchModelConfig OpenAIMessagesDispatchModelConfig `json:"messages_dispatch_model_config,omitempty"`
 	ModelsListConfig            GroupModelsListConfig             `json:"models_list_config,omitempty"`
 

@@ -1134,6 +1134,17 @@ export default {
         targetModelPlaceholder: '例如: gpt-5.4',
         removeExactMapping: '删除精确映射'
       },
+      openaiModelMapping: {
+        title: 'OpenAI 分组自动模型映射',
+        hint: '命中后直接作为最终上游模型，不再经过账号映射或 Codex 别名归一化。源模型支持尾部 * 通配，最长前缀优先。compact 请求不使用此规则。',
+        add: '添加映射',
+        empty: '暂未配置分组级自动映射',
+        requested: '请求模型',
+        requestedPlaceholder: '例如 gpt-5.6-sol 或 gpt-5.*',
+        upstream: '上游模型',
+        upstreamPlaceholder: '例如 gpt-5.6-sol-wm',
+        remove: '删除映射'
+      },
       openaiLive: {
         title: 'OpenAI Live',
         allow: '允许访问 Live',

@@ -39,7 +39,18 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 ) (*OpenAIForwardResult, error) {
 	upstreamPassthroughModel := ""
 	mappedRequestModel := strings.TrimSpace(reqModel)
-	if account != nil {
+	if groupMappedModel, matched := openAIGroupMappedModel(c); matched {
+		mappedRequestModel = groupMappedModel
+		upstreamPassthroughModel = groupMappedModel
+		if groupMappedModel != strings.TrimSpace(reqModel) {
+			nextBody, setErr := sjson.SetBytes(body, "model", groupMappedModel)
+			if setErr != nil {
+				return nil, fmt.Errorf("set passthrough group mapped model: %w", setErr)
+			}
+			body = nextBody
+			attemptImageIntentInvalidated = true
+		}
+	} else if account != nil {
 		if mappedModel, matched := account.ResolveMappedModel(reqModel); matched {
 			if mappedModel = strings.TrimSpace(mappedModel); mappedModel != "" {
 				mappedRequestModel = mappedModel

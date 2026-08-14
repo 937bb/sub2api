@@ -185,6 +185,9 @@ Sub2API is an AI API gateway platform designed to distribute and manage API quot
 - 2026-08-14: OpenAI OAuth account `model_mapping` targets are now treated as final upstream model identifiers. Explicit mappings such as `gpt-5.6-sol -> gpt-5.6-sol-wm` are preserved across normal Responses forwarding, automatic passthrough, compatible protocol paths, and WebSocket policy resolution instead of being rewritten by built-in Codex aliases.
 - 2026-08-14: GPT-5.6 Codex alias normalization now rewrites only exact Sol/Terra/Luna models and supported effort/date variants; unknown upstream suffixes remain unchanged.
 - 2026-08-14: OpenAI API-key capability probing now treats every non-404/405 `/v1/responses` HTTP result as endpoint support and records endpoint-probe semantics as version 2. Legacy negative probe results that may only mean "the model omitted `function_call`" no longer cause native Responses traffic to be silently converted to Chat Completions; explicit `force_chat_completions` and version-2 missing-endpoint results still retain the compatibility fallback.
+- 2026-08-14: Added OpenAI group-level automatic model mappings with exact and longest-prefix wildcard matching. A matched target is treated as the final upstream model and bypasses account mapping and Codex alias normalization.
+- 2026-08-14: Added JSONB persistence, admin API, auth-cache propagation, group duplication support, and the reusable admin mapping editor.
+- 2026-08-14: Remote compaction v2 requests are recognized even when they stay on `/responses`; normal group mappings are excluded from compact requests. Compact probes and the SSE bridge now require exactly one compaction output item instead of accepting ordinary reasoning/message output.
 
 ## Features
 

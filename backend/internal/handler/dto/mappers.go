@@ -154,6 +154,7 @@ func GroupFromServiceAdmin(g *service.Group) *AdminGroup {
 		ModelRoutingEnabled:         g.ModelRoutingEnabled,
 		MCPXMLInject:                g.MCPXMLInject,
 		DefaultMappedModel:          g.DefaultMappedModel,
+		OpenAIModelMapping:          service.CloneOpenAIModelMapping(g.OpenAIModelMapping),
 		MessagesDispatchModelConfig: g.MessagesDispatchModelConfig,
 		ModelsListConfig:            g.ModelsListConfig,
 		SupportedModelScopes:        g.SupportedModelScopes,

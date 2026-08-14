@@ -289,7 +289,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	if originalModel != "" {
 		mappedModel = strings.TrimSpace(gjson.GetBytes(body, "model").String())
 		if mappedModel == "" {
-			mappedModel = normalizeOpenAIModelForUpstream(account, account.GetMappedModel(originalModel))
+			mappedModel = resolveOpenAIModelForUpstream(c, account, account.GetMappedModel(originalModel))
 		}
 		needModelReplace = mappedModel != "" && mappedModel != originalModel
 		if needModelReplace {

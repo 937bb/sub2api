@@ -1031,6 +1031,12 @@ func (_u *GroupUpdate) SetNillableDefaultMappedModel(v *string) *GroupUpdate {
 	return _u
 }
 
+// SetOpenaiModelMapping sets the "openai_model_mapping" field.
+func (_u *GroupUpdate) SetOpenaiModelMapping(v map[string]string) *GroupUpdate {
+	_u.mutation.SetOpenaiModelMapping(v)
+	return _u
+}
+
 // SetMessagesDispatchModelConfig sets the "messages_dispatch_model_config" field.
 func (_u *GroupUpdate) SetMessagesDispatchModelConfig(v domain.OpenAIMessagesDispatchModelConfig) *GroupUpdate {
 	_u.mutation.SetMessagesDispatchModelConfig(v)
@@ -1805,6 +1811,9 @@ func (_u *GroupUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.DefaultMappedModel(); ok {
 		_spec.SetField(group.FieldDefaultMappedModel, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.OpenaiModelMapping(); ok {
+		_spec.SetField(group.FieldOpenaiModelMapping, field.TypeJSON, value)
 	}
 	if value, ok := _u.mutation.MessagesDispatchModelConfig(); ok {
 		_spec.SetField(group.FieldMessagesDispatchModelConfig, field.TypeJSON, value)
@@ -3152,6 +3161,12 @@ func (_u *GroupUpdateOne) SetNillableDefaultMappedModel(v *string) *GroupUpdateO
 	return _u
 }
 
+// SetOpenaiModelMapping sets the "openai_model_mapping" field.
+func (_u *GroupUpdateOne) SetOpenaiModelMapping(v map[string]string) *GroupUpdateOne {
+	_u.mutation.SetOpenaiModelMapping(v)
+	return _u
+}
+
 // SetMessagesDispatchModelConfig sets the "messages_dispatch_model_config" field.
 func (_u *GroupUpdateOne) SetMessagesDispatchModelConfig(v domain.OpenAIMessagesDispatchModelConfig) *GroupUpdateOne {
 	_u.mutation.SetMessagesDispatchModelConfig(v)
@@ -3956,6 +3971,9 @@ func (_u *GroupUpdateOne) sqlSave(ctx context.Context) (_node *Group, err error)
 	}
 	if value, ok := _u.mutation.DefaultMappedModel(); ok {
 		_spec.SetField(group.FieldDefaultMappedModel, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.OpenaiModelMapping(); ok {
+		_spec.SetField(group.FieldOpenaiModelMapping, field.TypeJSON, value)
 	}
 	if value, ok := _u.mutation.MessagesDispatchModelConfig(); ok {
 		_spec.SetField(group.FieldMessagesDispatchModelConfig, field.TypeJSON, value)

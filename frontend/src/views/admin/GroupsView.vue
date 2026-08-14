@@ -1606,6 +1606,7 @@
           <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
             {{ t("admin.groups.openaiMessages.title") }}
           </h4>
+          <GroupModelMappingEditor v-model="createForm.openai_model_mapping" />
 
           <!-- 允许 Messages 调度开关 -->
           <div class="flex items-center justify-between">
@@ -3328,6 +3329,7 @@
           <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
             {{ t("admin.groups.openaiMessages.title") }}
           </h4>
+          <GroupModelMappingEditor v-model="editForm.openai_model_mapping" />
 
           <!-- 允许 Messages 调度开关 -->
           <div class="flex items-center justify-between">
@@ -4416,6 +4418,9 @@ import GroupRPMOverridesModal from "@/components/admin/group/GroupRPMOverridesMo
 import GroupCapacityBadge from "@/components/common/GroupCapacityBadge.vue";
 import ReasoningEffortPolicyFields from "@/components/admin/group/ReasoningEffortPolicyFields.vue";
 import PricingEntryCard from "@/components/admin/channel/PricingEntryCard.vue";
+import GroupModelMappingEditor, {
+  type GroupModelMappingRow,
+} from "@/components/admin/group/GroupModelMappingEditor.vue";
 import type { PricingFormEntry } from "@/components/admin/channel/types";
 import {
   apiIntervalsToForm,
@@ -4477,6 +4482,17 @@ import {
   serializeVideoModelPrices,
   videoModelPriceFamilyRows,
 } from "./groupsVideoModelPricing";
+
+const groupModelMappingRowsToRecord = (rows: GroupModelMappingRow[]) =>
+  rows.reduce<Record<string, string>>((result, row) => {
+    const source = row.source.trim();
+    const target = row.target.trim();
+    if (source && target) result[source] = target;
+    return result;
+  }, {});
+
+const groupModelMappingRecordToRows = (mapping?: Record<string, string>) =>
+  Object.entries(mapping || {}).map(([source, target]) => ({ source, target }));
 
 const emptyGroupPricing = (): PricingFormEntry => ({
   models: [],
@@ -5057,6 +5073,7 @@ const createForm = reactive({
   // OpenAI Messages 调度配置（仅 openai 平台使用）
   allow_messages_dispatch: false,
   allow_live: false,
+  openai_model_mapping: [] as GroupModelMappingRow[],
   opus_mapped_model: createMessagesDispatchDefaults.opus_mapped_model,
   sonnet_mapped_model: createMessagesDispatchDefaults.sonnet_mapped_model,
   haiku_mapped_model: createMessagesDispatchDefaults.haiku_mapped_model,
@@ -5419,6 +5436,7 @@ const editForm = reactive({
   allow_messages_dispatch: false,
   allow_live: false,
   default_mapped_model: '',
+  openai_model_mapping: [] as GroupModelMappingRow[],
   opus_mapped_model: editMessagesDispatchDefaults.opus_mapped_model,
   sonnet_mapped_model: editMessagesDispatchDefaults.sonnet_mapped_model,
   haiku_mapped_model: editMessagesDispatchDefaults.haiku_mapped_model,
@@ -5870,6 +5888,7 @@ const closeCreateModal = () => {
   createForm.fallback_group_id_on_invalid_request = null;
   resetMessagesDispatchFormState(createForm);
   createForm.allow_live = false;
+  createForm.openai_model_mapping = [];
   createForm.require_oauth_only = false;
   createForm.require_privacy_set = false;
   createForm.supported_model_scopes = ["claude", "gemini_text", "gemini_image"];
@@ -5956,6 +5975,10 @@ const handleCreateGroup = async () => {
         createForm.model_pricing,
         createForm.platform,
       ),
+      openai_model_mapping:
+        createForm.platform === "openai"
+          ? groupModelMappingRowsToRecord(createForm.openai_model_mapping)
+          : {},
       daily_limit_usd: normalizeOptionalLimit(
         createForm.daily_limit_usd as number | string | null,
       ),
@@ -6127,6 +6150,7 @@ const handleEdit = async (group: AdminGroup) => {
     group.allow_messages_dispatch ||
     messagesDispatchFormState.allow_messages_dispatch;
   editForm.allow_live = group.allow_live ?? false;
+  editForm.openai_model_mapping = groupModelMappingRecordToRows(group.openai_model_mapping);
   editForm.opus_mapped_model = messagesDispatchFormState.opus_mapped_model;
   editForm.sonnet_mapped_model = messagesDispatchFormState.sonnet_mapped_model;
   editForm.haiku_mapped_model = messagesDispatchFormState.haiku_mapped_model;
@@ -6194,6 +6218,7 @@ const closeEditModal = () => {
   editForm.audio_stt_price_per_hour = null;
   resetMessagesDispatchFormState(editForm);
   editForm.allow_live = false;
+  editForm.openai_model_mapping = [];
   resetModelsListState(editModelsListState);
 };
 
@@ -6223,6 +6248,10 @@ const handleUpdateGroup = async () => {
         editForm.model_pricing,
         editForm.platform,
       ),
+      openai_model_mapping:
+        editForm.platform === "openai"
+          ? groupModelMappingRowsToRecord(editForm.openai_model_mapping)
+          : {},
       daily_limit_usd: normalizeOptionalLimit(
         editForm.daily_limit_usd as number | string | null,
       ),

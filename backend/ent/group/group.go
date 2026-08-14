@@ -124,6 +124,8 @@ const (
 	FieldRequirePrivacySet = "require_privacy_set"
 	// FieldDefaultMappedModel holds the string denoting the default_mapped_model field in the database.
 	FieldDefaultMappedModel = "default_mapped_model"
+	// FieldOpenaiModelMapping holds the string denoting the openai_model_mapping field in the database.
+	FieldOpenaiModelMapping = "openai_model_mapping"
 	// FieldMessagesDispatchModelConfig holds the string denoting the messages_dispatch_model_config field in the database.
 	FieldMessagesDispatchModelConfig = "messages_dispatch_model_config"
 	// FieldModelsListConfig holds the string denoting the models_list_config field in the database.
@@ -269,6 +271,7 @@ var Columns = []string{
 	FieldRequireOauthOnly,
 	FieldRequirePrivacySet,
 	FieldDefaultMappedModel,
+	FieldOpenaiModelMapping,
 	FieldMessagesDispatchModelConfig,
 	FieldModelsListConfig,
 	FieldRpmLimit,
@@ -394,6 +397,8 @@ var (
 	DefaultDefaultMappedModel string
 	// DefaultMappedModelValidator is a validator for the "default_mapped_model" field. It is called by the builders before save.
 	DefaultMappedModelValidator func(string) error
+	// DefaultOpenaiModelMapping holds the default value on creation for the "openai_model_mapping" field.
+	DefaultOpenaiModelMapping map[string]string
 	// DefaultMessagesDispatchModelConfig holds the default value on creation for the "messages_dispatch_model_config" field.
 	DefaultMessagesDispatchModelConfig domain.OpenAIMessagesDispatchModelConfig
 	// DefaultModelsListConfig holds the default value on creation for the "models_list_config" field.

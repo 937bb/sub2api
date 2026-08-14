@@ -144,6 +144,9 @@ func buildOpenAICompactSSEPayload(finalResponse []byte) ([]byte, bool) {
 	if len(finalResponse) == 0 || !gjson.ValidBytes(finalResponse) {
 		return nil, false
 	}
+	if countResponsesCompactionItems(finalResponse) != 1 {
+		return nil, false
+	}
 	if !gjson.ParseBytes(finalResponse).IsObject() {
 		return nil, false
 	}

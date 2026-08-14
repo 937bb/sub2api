@@ -1136,6 +1136,17 @@ export default {
         targetModelPlaceholder: 'e.g., gpt-5.4',
         removeExactMapping: 'Remove Exact Mapping'
       },
+      openaiModelMapping: {
+        title: 'OpenAI Group Automatic Model Mapping',
+        hint: 'A matched target is the final upstream model and skips account mapping and Codex alias normalization. Sources support a trailing * wildcard with longest-prefix matching. Compact requests do not use this mapping.',
+        add: 'Add Mapping',
+        empty: 'No group-level automatic mappings configured',
+        requested: 'Requested model',
+        requestedPlaceholder: 'e.g. gpt-5.6-sol or gpt-5.*',
+        upstream: 'Upstream model',
+        upstreamPlaceholder: 'e.g. gpt-5.6-sol-wm',
+        remove: 'Remove mapping'
+      },
       openaiLive: {
         title: 'OpenAI Live',
         allow: 'Allow Live access',

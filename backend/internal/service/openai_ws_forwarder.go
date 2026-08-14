@@ -224,7 +224,10 @@ type OpenAIWSIngressHooks struct {
 	// MapRequestModel resolves the current turn's client model to the model
 	// that must be written into the upstream response.create frame.
 	MapRequestModel func(turn int, originalModel string) (string, error)
-	AfterTurn       func(turn int, result *OpenAIForwardResult, turnErr error)
+	// ResolveRequestModel also reports whether the mapped model is a final
+	// group-level upstream ID that must skip account mapping and aliasing.
+	ResolveRequestModel func(turn int, originalModel string) (mappedModel string, final bool, err error)
+	AfterTurn           func(turn int, result *OpenAIForwardResult, turnErr error)
 }
 
 func (s *OpenAIGatewayService) getOpenAIWSConnPool() *openAIWSConnPool {

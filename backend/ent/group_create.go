@@ -746,6 +746,12 @@ func (_c *GroupCreate) SetNillableDefaultMappedModel(v *string) *GroupCreate {
 	return _c
 }
 
+// SetOpenaiModelMapping sets the "openai_model_mapping" field.
+func (_c *GroupCreate) SetOpenaiModelMapping(v map[string]string) *GroupCreate {
+	_c.mutation.SetOpenaiModelMapping(v)
+	return _c
+}
+
 // SetMessagesDispatchModelConfig sets the "messages_dispatch_model_config" field.
 func (_c *GroupCreate) SetMessagesDispatchModelConfig(v domain.OpenAIMessagesDispatchModelConfig) *GroupCreate {
 	_c.mutation.SetMessagesDispatchModelConfig(v)
@@ -1107,6 +1113,10 @@ func (_c *GroupCreate) defaults() error {
 		v := group.DefaultDefaultMappedModel
 		_c.mutation.SetDefaultMappedModel(v)
 	}
+	if _, ok := _c.mutation.OpenaiModelMapping(); !ok {
+		v := group.DefaultOpenaiModelMapping
+		_c.mutation.SetOpenaiModelMapping(v)
+	}
 	if _, ok := _c.mutation.MessagesDispatchModelConfig(); !ok {
 		v := group.DefaultMessagesDispatchModelConfig
 		_c.mutation.SetMessagesDispatchModelConfig(v)
@@ -1299,6 +1309,9 @@ func (_c *GroupCreate) check() error {
 		if err := group.DefaultMappedModelValidator(v); err != nil {
 			return &ValidationError{Name: "default_mapped_model", err: fmt.Errorf(`ent: validator failed for field "Group.default_mapped_model": %w`, err)}
 		}
+	}
+	if _, ok := _c.mutation.OpenaiModelMapping(); !ok {
+		return &ValidationError{Name: "openai_model_mapping", err: errors.New(`ent: missing required field "Group.openai_model_mapping"`)}
 	}
 	if _, ok := _c.mutation.MessagesDispatchModelConfig(); !ok {
 		return &ValidationError{Name: "messages_dispatch_model_config", err: errors.New(`ent: missing required field "Group.messages_dispatch_model_config"`)}
@@ -1571,6 +1584,10 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.DefaultMappedModel(); ok {
 		_spec.SetField(group.FieldDefaultMappedModel, field.TypeString, value)
 		_node.DefaultMappedModel = value
+	}
+	if value, ok := _c.mutation.OpenaiModelMapping(); ok {
+		_spec.SetField(group.FieldOpenaiModelMapping, field.TypeJSON, value)
+		_node.OpenaiModelMapping = value
 	}
 	if value, ok := _c.mutation.MessagesDispatchModelConfig(); ok {
 		_spec.SetField(group.FieldMessagesDispatchModelConfig, field.TypeJSON, value)
@@ -2651,6 +2668,18 @@ func (u *GroupUpsert) SetDefaultMappedModel(v string) *GroupUpsert {
 // UpdateDefaultMappedModel sets the "default_mapped_model" field to the value that was provided on create.
 func (u *GroupUpsert) UpdateDefaultMappedModel() *GroupUpsert {
 	u.SetExcluded(group.FieldDefaultMappedModel)
+	return u
+}
+
+// SetOpenaiModelMapping sets the "openai_model_mapping" field.
+func (u *GroupUpsert) SetOpenaiModelMapping(v map[string]string) *GroupUpsert {
+	u.Set(group.FieldOpenaiModelMapping, v)
+	return u
+}
+
+// UpdateOpenaiModelMapping sets the "openai_model_mapping" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateOpenaiModelMapping() *GroupUpsert {
+	u.SetExcluded(group.FieldOpenaiModelMapping)
 	return u
 }
 
@@ -3856,6 +3885,20 @@ func (u *GroupUpsertOne) SetDefaultMappedModel(v string) *GroupUpsertOne {
 func (u *GroupUpsertOne) UpdateDefaultMappedModel() *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateDefaultMappedModel()
+	})
+}
+
+// SetOpenaiModelMapping sets the "openai_model_mapping" field.
+func (u *GroupUpsertOne) SetOpenaiModelMapping(v map[string]string) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetOpenaiModelMapping(v)
+	})
+}
+
+// UpdateOpenaiModelMapping sets the "openai_model_mapping" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateOpenaiModelMapping() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateOpenaiModelMapping()
 	})
 }
 
@@ -5246,6 +5289,20 @@ func (u *GroupUpsertBulk) SetDefaultMappedModel(v string) *GroupUpsertBulk {
 func (u *GroupUpsertBulk) UpdateDefaultMappedModel() *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateDefaultMappedModel()
+	})
+}
+
+// SetOpenaiModelMapping sets the "openai_model_mapping" field.
+func (u *GroupUpsertBulk) SetOpenaiModelMapping(v map[string]string) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetOpenaiModelMapping(v)
+	})
+}
+
+// UpdateOpenaiModelMapping sets the "openai_model_mapping" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateOpenaiModelMapping() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateOpenaiModelMapping()
 	})
 }
 

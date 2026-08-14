@@ -97,7 +97,7 @@ type Group struct {
 	AudioTtsPricePerMillionChars *float64 `json:"audio_tts_price_per_million_chars,omitempty"`
 	// STT 每小时价格（USD）
 	AudioSttPricePerHour *float64 `json:"audio_stt_price_per_hour,omitempty"`
-	// 是否按上下文长度应用模型阶梯价格
+	// 是否按上下文长度应用模型阶梯价格；默认开启以保持官方/渠道长上下文价
 	LongContextPricingEnabled bool `json:"long_context_pricing_enabled,omitempty"`
 	// 分组逐模型定价；优先级高于渠道和内置定价
 	ModelPricing json.RawMessage `json:"model_pricing,omitempty"`
@@ -127,6 +127,8 @@ type Group struct {
 	RequirePrivacySet bool `json:"require_privacy_set,omitempty"`
 	// 默认映射模型 ID，当账号级映射找不到时使用此值
 	DefaultMappedModel string `json:"default_mapped_model,omitempty"`
+	// OpenAI group-level request model mapping; matched targets are final upstream model IDs
+	OpenaiModelMapping map[string]string `json:"openai_model_mapping,omitempty"`
 	// OpenAI Messages 调度模型配置：按 Claude 系列/精确模型映射到目标 GPT 模型
 	MessagesDispatchModelConfig domain.OpenAIMessagesDispatchModelConfig `json:"messages_dispatch_model_config,omitempty"`
 	// 自定义 /v1/models 展示列表配置；仅影响模型列表响应，不影响调度
@@ -249,7 +251,7 @@ func (*Group) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
-		case group.FieldVideoModelPrices, group.FieldModelPricing, group.FieldModelRouting, group.FieldSupportedModelScopes, group.FieldMessagesDispatchModelConfig, group.FieldModelsListConfig, group.FieldReasoningEffortMappings:
+		case group.FieldVideoModelPrices, group.FieldModelPricing, group.FieldModelRouting, group.FieldSupportedModelScopes, group.FieldOpenaiModelMapping, group.FieldMessagesDispatchModelConfig, group.FieldModelsListConfig, group.FieldReasoningEffortMappings:
 			values[i] = new([]byte)
 		case group.FieldPeakRateEnabled, group.FieldIsExclusive, group.FieldAllowImageGeneration, group.FieldAllowBatchImageGeneration, group.FieldImageRateIndependent, group.FieldVideoRateIndependent, group.FieldLongContextPricingEnabled, group.FieldClaudeCodeOnly, group.FieldModelRoutingEnabled, group.FieldMcpXMLInject, group.FieldAllowMessagesDispatch, group.FieldAllowLive, group.FieldRequireOauthOnly, group.FieldRequirePrivacySet, group.FieldProfitControlEnabled:
 			values[i] = new(sql.NullBool)
@@ -633,6 +635,14 @@ func (_m *Group) assignValues(columns []string, values []any) error {
 			} else if value.Valid {
 				_m.DefaultMappedModel = value.String
 			}
+		case group.FieldOpenaiModelMapping:
+			if value, ok := values[i].(*[]byte); !ok {
+				return fmt.Errorf("unexpected type %T for field openai_model_mapping", values[i])
+			} else if value != nil && len(*value) > 0 {
+				if err := json.Unmarshal(*value, &_m.OpenaiModelMapping); err != nil {
+					return fmt.Errorf("unmarshal field openai_model_mapping: %w", err)
+				}
+			}
 		case group.FieldMessagesDispatchModelConfig:
 			if value, ok := values[i].(*[]byte); !ok {
 				return fmt.Errorf("unexpected type %T for field messages_dispatch_model_config", values[i])
@@ -962,6 +972,9 @@ func (_m *Group) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("default_mapped_model=")
 	builder.WriteString(_m.DefaultMappedModel)
+	builder.WriteString(", ")
+	builder.WriteString("openai_model_mapping=")
+	builder.WriteString(fmt.Sprintf("%v", _m.OpenaiModelMapping))
 	builder.WriteString(", ")
 	builder.WriteString("messages_dispatch_model_config=")
 	builder.WriteString(fmt.Sprintf("%v", _m.MessagesDispatchModelConfig))

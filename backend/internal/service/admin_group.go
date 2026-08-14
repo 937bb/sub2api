@@ -452,6 +452,11 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		}
 	}
 
+	openAIModelMapping, err := NormalizeOpenAIGroupModelMapping(platform, input.OpenAIModelMapping)
+	if err != nil {
+		return nil, infraerrors.Newf(http.StatusBadRequest, "INVALID_OPENAI_MODEL_MAPPING", "%v", err)
+	}
+
 	group := &Group{
 		Name:                            input.Name,
 		Description:                     input.Description,
@@ -503,6 +508,7 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		RequireOAuthOnly:                input.RequireOAuthOnly,
 		RequirePrivacySet:               input.RequirePrivacySet,
 		DefaultMappedModel:              input.DefaultMappedModel,
+		OpenAIModelMapping:              openAIModelMapping,
 		MessagesDispatchModelConfig:     normalizeOpenAIMessagesDispatchModelConfig(input.MessagesDispatchModelConfig),
 		ModelsListConfig:                normalizeGroupModelsListConfig(input.ModelsListConfig),
 		RPMLimit:                        input.RPMLimit,
@@ -866,6 +872,13 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	if input.DefaultMappedModel != nil {
 		group.DefaultMappedModel = *input.DefaultMappedModel
 	}
+	if input.OpenAIModelMapping != nil {
+		openAIModelMapping, err := NormalizeOpenAIGroupModelMapping(group.Platform, *input.OpenAIModelMapping)
+		if err != nil {
+			return nil, infraerrors.Newf(http.StatusBadRequest, "INVALID_OPENAI_MODEL_MAPPING", "%v", err)
+		}
+		group.OpenAIModelMapping = openAIModelMapping
+	}
 	if input.MessagesDispatchModelConfig != nil {
 		group.MessagesDispatchModelConfig = normalizeOpenAIMessagesDispatchModelConfig(*input.MessagesDispatchModelConfig)
 	}
@@ -892,6 +905,7 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	sanitizeGroupMessagesDispatchFields(group)
 	if group.Platform != PlatformOpenAI {
 		group.AllowLive = false
+		group.OpenAIModelMapping = map[string]string{}
 	}
 	sanitizeGroupReasoningEffortPolicy(group)
 

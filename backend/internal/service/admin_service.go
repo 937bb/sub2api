@@ -264,6 +264,7 @@ type CreateGroupInput struct {
 	AllowMessagesDispatch       bool
 	AllowLive                   bool
 	DefaultMappedModel          string
+	OpenAIModelMapping          map[string]string
 	RequireOAuthOnly            bool
 	RequirePrivacySet           bool
 	MessagesDispatchModelConfig OpenAIMessagesDispatchModelConfig
@@ -339,6 +340,7 @@ type UpdateGroupInput struct {
 	AllowMessagesDispatch       *bool
 	AllowLive                   *bool
 	DefaultMappedModel          *string
+	OpenAIModelMapping          *map[string]string
 	RequireOAuthOnly            *bool
 	RequirePrivacySet           *bool
 	MessagesDispatchModelConfig *OpenAIMessagesDispatchModelConfig

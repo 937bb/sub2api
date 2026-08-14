@@ -33,7 +33,7 @@ func (s *OpenAIGatewayService) ForwardEmbeddings(
 	}
 
 	billingModel := resolveOpenAIForwardModel(account, originalModel, defaultMappedModel)
-	upstreamModel := normalizeOpenAIModelForUpstream(account, billingModel)
+	upstreamModel := resolveOpenAIModelForUpstream(c, account, billingModel)
 	upstreamBody := body
 	if upstreamModel != originalModel {
 		upstreamBody = ReplaceModelInBody(body, upstreamModel)

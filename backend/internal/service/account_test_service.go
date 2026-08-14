@@ -2115,6 +2115,9 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 		}
 		return s.sendErrorAndEnd(c, fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body)))
 	}
+	if countResponsesCompactionItems(body) != 1 {
+		return s.sendErrorAndEnd(c, "Compact probe returned no single compaction output item")
+	}
 
 	s.sendEvent(c, TestEvent{Type: "content", Text: "Compact probe succeeded"})
 	s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})

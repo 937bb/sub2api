@@ -39,7 +39,7 @@ func TestAccountTestService_TestAccountConnection_OpenAICompactOAuthSuccessPersi
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusOK,
 		Header:     http.Header{"Content-Type": []string{"application/json"}, "x-request-id": []string{"rid-probe"}},
-		Body:       io.NopCloser(strings.NewReader(`{"id":"cmp_probe","status":"completed"}`)),
+		Body:       io.NopCloser(strings.NewReader(`{"id":"cmp_probe","status":"completed","output":[{"type":"compaction"}]}`)),
 	}}
 	svc := &AccountTestService{
 		accountRepo:  repo,
@@ -139,7 +139,7 @@ func TestAccountTestService_TestAccountConnection_OpenAICompactAPIKeyUsesCompact
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusOK,
 		Header:     http.Header{"Content-Type": []string{"application/json"}},
-		Body:       io.NopCloser(strings.NewReader(`{"id":"cmp_probe_apikey","status":"completed"}`)),
+		Body:       io.NopCloser(strings.NewReader(`{"id":"cmp_probe_apikey","status":"completed","output":[{"type":"compaction"}]}`)),
 	}}
 	svc := &AccountTestService{
 		accountRepo:  repo,
@@ -184,7 +184,7 @@ func TestAccountTestService_TestAccountConnection_OpenAICompactAPIKeyDefaultBase
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusOK,
 		Header:     http.Header{"Content-Type": []string{"application/json"}},
-		Body:       io.NopCloser(strings.NewReader(`{"id":"cmp_probe_apikey_default","status":"completed"}`)),
+		Body:       io.NopCloser(strings.NewReader(`{"id":"cmp_probe_apikey_default","status":"completed","output":[{"type":"compaction"}]}`)),
 	}}
 	svc := &AccountTestService{
 		accountRepo:  repo,

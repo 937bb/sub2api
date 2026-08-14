@@ -86,7 +86,7 @@ func (s *OpenAIGatewayService) ForwardCountTokensAsAnthropic(
 		return fmt.Errorf("count_tokens: missing account")
 	}
 
-	prepared, err := prepareOpenAIInputTokensCountRequest(body, account, defaultMappedModel)
+	prepared, err := prepareOpenAIInputTokensCountRequest(c, body, account, defaultMappedModel)
 	if err != nil {
 		writeAnthropicCountTokensError(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
 		return err
@@ -190,6 +190,7 @@ func (s *OpenAIGatewayService) ForwardCountTokensAsAnthropic(
 }
 
 func prepareOpenAIInputTokensCountRequest(
+	c *gin.Context,
 	body []byte,
 	account *Account,
 	defaultMappedModel string,
@@ -203,7 +204,7 @@ func prepareOpenAIInputTokensCountRequest(
 	applyOpenAICompatModelNormalization(&anthropicReq)
 	normalizedModel := anthropicReq.Model
 	billingModel := resolveOpenAIForwardModel(account, normalizedModel, strings.TrimSpace(defaultMappedModel))
-	upstreamModel := normalizeOpenAIModelForUpstream(account, billingModel)
+	upstreamModel := resolveOpenAIModelForUpstream(c, account, billingModel)
 
 	responsesReq, err := apicompat.AnthropicToResponses(&anthropicReq)
 	if err != nil {

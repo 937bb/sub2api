@@ -1688,6 +1688,16 @@ func isResponsesCompactionItemType(itemType string) bool {
 	}
 }
 
+func countResponsesCompactionItems(response []byte) int {
+	count := 0
+	for _, item := range gjson.GetBytes(response, "output").Array() {
+		if isResponsesCompactionItemType(item.Get("type").String()) {
+			count++
+		}
+	}
+	return count
+}
+
 // supplementCompactionItemFromSSE 保证 compact 请求的终态 output 携带
 // compaction item：终态 output 非空但缺失 compaction、而原始事件流的
 // output_item.done（或 added）中存在时（上游不一致形态），以 raw JSON 补入。

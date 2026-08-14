@@ -1,6 +1,21 @@
 package service
 
-import "github.com/tidwall/gjson"
+import (
+	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
+)
+
+const openAICompactRequestContextKey = "openai_compact_request"
+
+func MarkOpenAICompactRequest(c *gin.Context) {
+	if c != nil {
+		c.Set(openAICompactRequestContextKey, true)
+	}
+}
+
+func IsOpenAIResponsesCompactRequest(c *gin.Context) bool {
+	return isOpenAIResponsesCompactPath(c)
+}
 
 // HasCompactionTriggerInInput detects an input item with
 // type="compaction_trigger". The handler combines this body signal with the

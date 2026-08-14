@@ -252,6 +252,10 @@ func (Group) Fields() []ent.Field {
 			MaxLen(100).
 			Default("").
 			Comment("默认映射模型 ID，当账号级映射找不到时使用此值"),
+		field.JSON("openai_model_mapping", map[string]string{}).
+			Default(map[string]string{}).
+			SchemaType(map[string]string{dialect.Postgres: "jsonb"}).
+			Comment("OpenAI group-level request model mapping; matched targets are final upstream model IDs"),
 		field.JSON("messages_dispatch_model_config", domain.OpenAIMessagesDispatchModelConfig{}).
 			Default(domain.OpenAIMessagesDispatchModelConfig{}).
 			SchemaType(map[string]string{dialect.Postgres: "jsonb"}).

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -85,8 +86,17 @@ func buildOpenAICompactProbeExtraUpdates(resp *http.Response, body []byte, probe
 		}
 		errMsg = truncateString(sanitizeUpstreamErrorMessage(errMsg), 2048)
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-			updates["openai_compact_supported"] = true
-			updates["openai_compact_last_error"] = ""
+			compactionItems := countResponsesCompactionItems(body)
+			if compactionItems == 1 {
+				updates["openai_compact_supported"] = true
+				updates["openai_compact_last_error"] = ""
+			} else {
+				updates["openai_compact_supported"] = false
+				updates["openai_compact_last_error"] = fmt.Sprintf(
+					"compact probe expected exactly one compaction output item, got %d",
+					compactionItems,
+				)
+			}
 		} else {
 			if shouldMarkOpenAICompactUnsupported(resp.StatusCode, body) {
 				updates["openai_compact_supported"] = false

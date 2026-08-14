@@ -177,6 +177,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 		// 透传分支只需要轻量提取字段，避免热路径全量 Unmarshal。
 		mappedModel := account.GetMappedModel(reqModel)
+		if groupMappedModel, matched := openAIGroupMappedModel(c); matched {
+			mappedModel = groupMappedModel
+		}
 		reasoningEffort := extractOpenAIReasoningEffortFromBody(body, mappedModel)
 		// 国产模型默认 effort 补充：也要用 mappedModel 判定是否是 passback-required 上游。
 		reasoningEffort = ApplyThinkingEnabledFallback(reasoningEffort, body, mappedModel)
@@ -283,6 +286,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	}
 
 	billingModel := account.GetMappedModel(reqModel)
+	if groupMappedModel, matched := openAIGroupMappedModel(c); matched {
+		billingModel = groupMappedModel
+	}
 	if billingModel != reqModel {
 		logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Model mapping applied: %s -> %s (account: %s, isCodexCLI: %v)", reqModel, billingModel, account.Name, isCodexCLI)
 		reqModel = billingModel
@@ -306,7 +312,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		if modelForNormalize == "" {
 			modelForNormalize = requestView.Model
 		}
-		upstreamModel = normalizeOpenAIModelForUpstream(account, modelForNormalize)
+		upstreamModel = resolveOpenAIModelForUpstream(c, account, modelForNormalize)
 		if upstreamModel != "" && upstreamModel != modelForNormalize {
 			logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Upstream model resolved: %s -> %s (account: %s, type: %s, isCodexCLI: %v)", modelForNormalize, upstreamModel, account.Name, account.Type, isCodexCLI)
 			reqModel = upstreamModel

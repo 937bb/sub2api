@@ -597,6 +597,7 @@ export interface Group {
   // OpenAI Live 接口开关
   allow_live: boolean
   default_mapped_model?: string
+  openai_model_mapping?: Record<string, string>
   messages_dispatch_model_config?: OpenAIMessagesDispatchModelConfig
   require_oauth_only: boolean
   require_privacy_set: boolean
@@ -629,6 +630,7 @@ export interface AdminGroup extends Group {
 
   // OpenAI Messages 调度配置（仅 openai 平台使用）
   default_mapped_model?: string
+  openai_model_mapping?: Record<string, string>
   messages_dispatch_model_config?: OpenAIMessagesDispatchModelConfig
   models_list_config?: ModelsListConfig
 
@@ -807,6 +809,7 @@ export interface CreateGroupRequest {
   allow_messages_dispatch?: boolean
   allow_live?: boolean
   default_mapped_model?: string
+  openai_model_mapping?: Record<string, string>
   messages_dispatch_model_config?: OpenAIMessagesDispatchModelConfig
   model_routing?: Record<string, number[]> | null
   model_routing_enabled?: boolean
@@ -869,6 +872,7 @@ export interface UpdateGroupRequest {
   allow_messages_dispatch?: boolean
   allow_live?: boolean
   default_mapped_model?: string
+  openai_model_mapping?: Record<string, string>
   messages_dispatch_model_config?: OpenAIMessagesDispatchModelConfig
   model_routing?: Record<string, number[]> | null
   model_routing_enabled?: boolean
