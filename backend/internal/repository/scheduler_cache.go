@@ -27,7 +27,7 @@ const (
 	schedulerRetiredPrefix         = "sched:retired:"
 	schedulerSnapshotPrefix        = "sched:"
 	schedulerLockPrefix            = "sched:lock:"
-	schedulerMetadataSchemaVersion = 1
+	schedulerMetadataSchemaVersion = 2
 
 	defaultSchedulerSnapshotMGetChunkSize  = 128
 	defaultSchedulerSnapshotWriteChunkSize = 256

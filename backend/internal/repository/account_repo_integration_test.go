@@ -175,6 +175,46 @@ func (s *AccountRepoSuite) TestGetByID_NotFound() {
 	s.Require().Error(err, "expected error for non-existent ID")
 }
 
+func (s *AccountRepoSuite) TestCreateWithAccountGroupsPublishesCompleteSchedulerState() {
+	normalGroup := mustCreateGroup(s.T(), s.client, &service.Group{Name: "atomic-normal"})
+	bypassGroup := mustCreateGroup(s.T(), s.client, &service.Group{Name: "atomic-bypass", QuotaBypassEnabled: true})
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
+	account := &service.Account{
+		Name:        "atomic-admin-account",
+		Platform:    service.PlatformOpenAI,
+		Type:        service.AccountTypeOAuth,
+		Status:      service.StatusActive,
+		Schedulable: true,
+		Concurrency: 100,
+		Priority:    1,
+	}
+
+	err := s.repo.CreateWithAccountGroups(s.ctx, account, []service.AccountGroup{
+		{GroupID: normalGroup.ID, Priority: 1},
+		{GroupID: bypassGroup.ID, Priority: 2},
+	})
+	s.Require().NoError(err)
+	s.Require().NotZero(account.ID)
+	s.Require().Len(cacheRecorder.setAccounts, 1)
+	cached := cacheRecorder.setAccounts[0]
+	s.Require().Equal(1, cached.Priority)
+	s.Require().Equal([]int64{normalGroup.ID, bypassGroup.ID}, cached.GroupIDs)
+	s.Require().Len(cached.AccountGroups, 2)
+	s.Require().True(service.IsAccountQuotaBypassEligible(cached))
+
+	var outboxCount int
+	err = scanSingleRow(
+		s.ctx,
+		s.repo.sql,
+		"SELECT COUNT(*) FROM scheduler_outbox WHERE event_type = $1 AND account_id = $2",
+		[]any{service.SchedulerOutboxEventAccountChanged, account.ID},
+		&outboxCount,
+	)
+	s.Require().NoError(err)
+	s.Require().Equal(1, outboxCount)
+}
+
 func (s *AccountRepoSuite) TestUpdate() {
 	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "original"})
 
@@ -724,12 +764,16 @@ func (s *AccountRepoSuite) TestBindGroups_EmptyList() {
 	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-empty"})
 	group := mustCreateGroup(s.T(), s.client, &service.Group{Name: "g-empty"})
 	mustBindAccountToGroup(s.T(), s.client, account.ID, group.ID, 1)
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
 
 	s.Require().NoError(s.repo.BindGroups(s.ctx, account.ID, []int64{}), "BindGroups empty")
 
 	groups, err := s.repo.GetGroups(s.ctx, account.ID)
 	s.Require().NoError(err)
 	s.Require().Empty(groups, "expected 0 groups after binding empty list")
+	s.Require().Len(cacheRecorder.setAccounts, 1)
+	s.Require().Empty(cacheRecorder.setAccounts[0].GroupIDs, "scheduler metadata must be refreshed after clearing groups")
 }
 
 // --- Schedulable ---

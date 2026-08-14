@@ -560,7 +560,7 @@ func TestOpenAIGatewayServiceLegacyLowRatePriorityUsesConfiguredOAuthReference(t
 		account.Schedulable = true
 		account.Concurrency = 1
 	}
-	cheap.Priority, oauth.Priority, expensive.Priority = 20, 10, 0
+	cheap.Priority, oauth.Priority, expensive.Priority = 0, 0, 0
 
 	settings := &openAIAdvancedSchedulerSettingRepoStub{values: map[string]string{
 		openAIAdvancedSchedulerSettingKey:              "false",
@@ -631,9 +631,9 @@ func TestOpenAIGatewayServiceLegacyLowRatePriorityIsIndependentFromAdvancedSched
 		wantID    int64
 	}{
 		{name: "switch off keeps priority first", loadBatch: true, wantID: 2},
-		{name: "load batch", enabled: true, loadBatch: true, wantID: 1},
-		{name: "load batch disabled", enabled: true, wantID: 1},
-		{name: "load lookup failure", enabled: true, loadBatch: true, loadErr: errors.New("load unavailable"), wantID: 1},
+		{name: "load batch keeps priority first", enabled: true, loadBatch: true, wantID: 2},
+		{name: "load batch disabled keeps priority first", enabled: true, wantID: 2},
+		{name: "load lookup failure keeps priority first", enabled: true, loadBatch: true, loadErr: errors.New("load unavailable"), wantID: 2},
 	}
 
 	for _, tt := range tests {

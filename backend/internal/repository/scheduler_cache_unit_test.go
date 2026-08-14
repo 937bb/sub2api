@@ -62,6 +62,17 @@ func TestSchedulerCacheSnapshotRejectsLegacyMetadataSchema(t *testing.T) {
 	require.False(t, hit)
 	require.Nil(t, snapshot)
 
+	previousSchemaPayload, err := json.Marshal(schedulerMetadataEnvelope{
+		SchemaVersion: schedulerMetadataSchemaVersion - 1,
+		Account:       buildSchedulerMetadataAccount(account),
+	})
+	require.NoError(t, err)
+	require.NoError(t, cache.rdb.Set(ctx, schedulerAccountMetaKey(strconv.FormatInt(account.ID, 10)), previousSchemaPayload, 0).Err())
+	snapshot, hit, err = cache.GetSnapshot(ctx, bucket)
+	require.NoError(t, err)
+	require.False(t, hit)
+	require.Nil(t, snapshot)
+
 	require.NoError(t, cache.SetAccount(ctx, &account))
 	snapshot, hit, err = cache.GetSnapshot(ctx, bucket)
 	require.NoError(t, err)

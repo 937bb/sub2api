@@ -886,6 +886,9 @@ func (s *OpenAIGatewayService) selectBestAccount(ctx context.Context, groupID *i
 		if requireCompact && compactTiers[a.ID] != compactTiers[b.ID] {
 			return compactTiers[a.ID] > compactTiers[b.ID]
 		}
+		if a.Priority != b.Priority {
+			return a.Priority < b.Priority
+		}
 		if rateCmp := rateOrder.compare(a, b); rateCmp != 0 {
 			return rateCmp < 0
 		}
@@ -1206,6 +1209,9 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		}
 		if rateOrder.enabled && !hasQuotaBypassCandidates {
 			sort.SliceStable(available, func(i, j int) bool {
+				if available[i].account.Priority != available[j].account.Priority {
+					return available[i].account.Priority < available[j].account.Priority
+				}
 				return rateOrder.compare(available[i].account, available[j].account) < 0
 			})
 		}
@@ -1330,6 +1336,9 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		sortAccountsByPriorityAndLastUsed(ordered, false)
 		if rateOrder.enabled {
 			sort.SliceStable(ordered, func(i, j int) bool {
+				if ordered[i].Priority != ordered[j].Priority {
+					return ordered[i].Priority < ordered[j].Priority
+				}
 				return rateOrder.compare(ordered[i], ordered[j]) < 0
 			})
 		}
@@ -1393,6 +1402,9 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 	sortAccountsByPriorityAndLastUsed(candidates, false)
 	if rateOrder.enabled {
 		sort.SliceStable(candidates, func(i, j int) bool {
+			if candidates[i].Priority != candidates[j].Priority {
+				return candidates[i].Priority < candidates[j].Priority
+			}
 			return rateOrder.compare(candidates[i], candidates[j]) < 0
 		})
 	}

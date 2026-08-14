@@ -503,16 +503,32 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 	if err != nil {
 		return nil, err
 	}
-	if err := s.accountRepo.Create(ctx, account); err != nil {
+	groups := make([]AccountGroup, 0, len(groupIDs))
+	for i, groupID := range groupIDs {
+		groups = append(groups, AccountGroup{GroupID: groupID, Priority: i + 1})
+	}
+	if s.accountDuplicateRepo != nil {
+		// The admin-key API and web console share this path. Persist the account,
+		// group bindings, and scheduler event in one transaction.
+		if err := s.accountDuplicateRepo.CreateWithAccountGroups(ctx, account, groups); err != nil {
+			return nil, err
+		}
+	} else if err := s.accountRepo.Create(ctx, account); err != nil {
+		// Narrow tests and internal callers may not use the production constructor.
 		return nil, err
 	}
 
 	// 绑定分组
-	if len(groupIDs) > 0 {
+	if s.accountDuplicateRepo == nil && len(groupIDs) > 0 {
 		if err := s.accountRepo.BindGroups(ctx, account.ID, groupIDs); err != nil {
 			return nil, err
 		}
 	}
+	for i := range groups {
+		groups[i].AccountID = account.ID
+	}
+	account.GroupIDs = append([]int64(nil), groupIDs...)
+	account.AccountGroups = groups
 
 	// OAuth 账号：创建后异步设置隐私。
 	// 使用 Ensure（幂等）而非 Force：新建账号 Extra 为空时效果相同，但更安全。

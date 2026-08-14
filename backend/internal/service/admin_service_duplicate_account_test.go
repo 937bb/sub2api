@@ -70,6 +70,34 @@ func (s *duplicateAccountRepoStub) FindByExtraField(_ context.Context, key strin
 	return matches, nil
 }
 
+func TestCreateAccountPersistsGroupsAtomicallyForAdminAPI(t *testing.T) {
+	repo := newDuplicateAccountRepoStub()
+	svc := &adminServiceImpl{accountRepo: repo, accountDuplicateRepo: repo}
+
+	created, err := svc.CreateAccount(context.Background(), &CreateAccountInput{
+		Name:                  "admin-key-openai",
+		Platform:              PlatformOpenAI,
+		Type:                  AccountTypeAPIKey,
+		Credentials:           map[string]any{"api_key": "sk-test"},
+		Priority:              1,
+		Concurrency:           100,
+		GroupIDs:              []int64{41, 99},
+		SkipMixedChannelCheck: true,
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, created.Priority)
+	require.Equal(t, []int64{41, 99}, created.GroupIDs)
+	require.Len(t, created.AccountGroups, 2)
+	require.Equal(t, []AccountGroup{
+		{AccountID: created.ID, GroupID: 41, Priority: 1},
+		{AccountID: created.ID, GroupID: 99, Priority: 2},
+	}, []AccountGroup{
+		{AccountID: created.AccountGroups[0].AccountID, GroupID: created.AccountGroups[0].GroupID, Priority: created.AccountGroups[0].Priority},
+		{AccountID: created.AccountGroups[1].AccountID, GroupID: created.AccountGroups[1].GroupID, Priority: created.AccountGroups[1].Priority},
+	})
+	require.Len(t, repo.accountGroupsOf[created.ID], 2, "atomic create path must persist group bindings")
+}
+
 func TestDuplicateAccountCopiesConfigurationAndResetsRuntimeState(t *testing.T) {
 	ctx := context.Background()
 	repo := newDuplicateAccountRepoStub()
