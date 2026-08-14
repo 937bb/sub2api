@@ -641,7 +641,10 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_ResponsesCapabilityExcl
 	unsupported := Account{
 		ID: 37002, Platform: PlatformOpenAI, Type: AccountTypeAPIKey,
 		Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 5,
-		Extra: map[string]any{"openai_responses_supported": false},
+		Extra: map[string]any{
+			"openai_responses_supported":     false,
+			"openai_responses_probe_version": 2,
+		},
 	}
 
 	t.Run("生图意图仅选中支持 responses 的账号", func(t *testing.T) {

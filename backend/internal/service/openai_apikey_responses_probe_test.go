@@ -47,6 +47,7 @@ func TestProbeOpenAIAPIKeyResponsesSupportUsesCodexProbeHeaders(t *testing.T) {
 	requireOpenAICodexProbeHeaders(t, upstream.lastReq.Header)
 	updates := <-updateCalls
 	require.Equal(t, true, updates[openai_compat.ExtraKeyResponsesSupported])
+	require.Equal(t, openai_compat.ResponsesEndpointProbeVersion, updates[openai_compat.ExtraKeyResponsesProbeVersion])
 }
 
 func TestDecideResponsesProbeSupport(t *testing.T) {

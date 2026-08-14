@@ -64,6 +64,30 @@ func TestShouldUseResponsesAPI(t *testing.T) {
 	}
 }
 
+func TestShouldUseResponsesAPIForNativeIngress(t *testing.T) {
+	tests := []struct {
+		name  string
+		extra map[string]any
+		want  bool
+	}{
+		{"unknown defaults to responses", nil, true},
+		{"supported probe", map[string]any{ExtraKeyResponsesSupported: true}, true},
+		{"legacy false is inconclusive", map[string]any{ExtraKeyResponsesSupported: false}, true},
+		{"endpoint probe false downgrades", map[string]any{ExtraKeyResponsesSupported: false, ExtraKeyResponsesProbeVersion: ResponsesEndpointProbeVersion}, false},
+		{"json number probe version", map[string]any{ExtraKeyResponsesSupported: false, ExtraKeyResponsesProbeVersion: float64(ResponsesEndpointProbeVersion)}, false},
+		{"force responses overrides endpoint probe", map[string]any{ExtraKeyResponsesMode: string(ResponsesSupportModeForceResponses), ExtraKeyResponsesSupported: false, ExtraKeyResponsesProbeVersion: ResponsesEndpointProbeVersion}, true},
+		{"force chat overrides legacy probe", map[string]any{ExtraKeyResponsesMode: string(ResponsesSupportModeForceChatCompletions), ExtraKeyResponsesSupported: false}, false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ShouldUseResponsesAPIForNativeIngress(tc.extra); got != tc.want {
+				t.Fatalf("ShouldUseResponsesAPIForNativeIngress(%v) = %v, want %v", tc.extra, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestNormalizeResponsesSupportMode(t *testing.T) {
 	tests := []struct {
 		name string

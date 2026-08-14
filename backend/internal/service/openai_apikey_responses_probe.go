@@ -196,7 +196,8 @@ func (s *AccountTestService) ProbeOpenAIAPIKeyResponsesSupport(ctx context.Conte
 	supported := decideResponsesProbeSupport(resp.StatusCode, bodyBytes)
 
 	if err := s.accountRepo.UpdateExtra(ctx, accountID, map[string]any{
-		openai_compat.ExtraKeyResponsesSupported: supported,
+		openai_compat.ExtraKeyResponsesSupported:    supported,
+		openai_compat.ExtraKeyResponsesProbeVersion: openai_compat.ResponsesEndpointProbeVersion,
 	}); err != nil {
 		logger.LegacyPrintf("service.openai_probe", "probe_persist_failed: account_id=%d supported=%v err=%v", accountID, supported, err)
 		return

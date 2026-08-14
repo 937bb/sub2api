@@ -58,6 +58,13 @@ const ExtraKeyResponsesMode = "openai_responses_mode"
 // 值类型为 bool：true=支持、false=不支持、键缺失=未探测。
 const ExtraKeyResponsesSupported = "openai_responses_supported"
 
+// ExtraKeyResponsesProbeVersion identifies the semantics used to produce an
+// automatic capability result. Version 2 distinguishes endpoint availability
+// from model-level tool behavior.
+const ExtraKeyResponsesProbeVersion = "openai_responses_probe_version"
+
+const ResponsesEndpointProbeVersion = 2
+
 // NormalizeResponsesSupportMode 归一化账号级 Responses API 路由覆盖模式。
 // 缺失或非法值按 auto 处理，以保持存量行为。
 func NormalizeResponsesSupportMode(mode string) ResponsesSupportMode {
@@ -112,4 +119,39 @@ func ResolveResponsesSupport(extra map[string]any) AccountResponsesSupport {
 // （详见 internal/service/openai_gateway_chat_completions_raw.go）。
 func ShouldUseResponsesAPI(extra map[string]any) bool {
 	return ResolveResponsesSupport(extra) != ResponsesSupportNo
+}
+
+// ShouldUseResponsesAPIForNativeIngress applies endpoint-only probe semantics
+// to native /v1/responses traffic. Legacy false results were allowed to mean
+// "the probe model omitted function_call" and therefore cannot prove that
+// the endpoint is absent. Explicit operator overrides remain authoritative.
+func ShouldUseResponsesAPIForNativeIngress(extra map[string]any) bool {
+	if extra == nil {
+		return true
+	}
+	if mode, ok := extra[ExtraKeyResponsesMode].(string); ok {
+		switch NormalizeResponsesSupportMode(mode) {
+		case ResponsesSupportModeForceResponses:
+			return true
+		case ResponsesSupportModeForceChatCompletions:
+			return false
+		}
+	}
+	if ResolveResponsesSupport(extra) != ResponsesSupportNo {
+		return true
+	}
+	return responsesProbeVersion(extra[ExtraKeyResponsesProbeVersion]) < ResponsesEndpointProbeVersion
+}
+
+func responsesProbeVersion(value any) int {
+	switch version := value.(type) {
+	case int:
+		return version
+	case int64:
+		return int(version)
+	case float64:
+		return int(version)
+	default:
+		return 0
+	}
 }

@@ -599,11 +599,24 @@ func TestAccountSupportsOpenAIEndpointCapability(t *testing.T) {
 		require.True(t, account.SupportsOpenAIEndpointCapability(OpenAIEndpointCapabilityResponses))
 	})
 
-	t.Run("responses 能力：探测确认不支持的 APIKey 被排除", func(t *testing.T) {
+	t.Run("responses 能力：旧版不支持标记不再排除 APIKey", func(t *testing.T) {
 		account := &Account{
 			Platform: PlatformOpenAI,
 			Type:     AccountTypeAPIKey,
 			Extra:    map[string]any{"openai_responses_supported": false},
+		}
+
+		require.True(t, account.SupportsOpenAIEndpointCapability(OpenAIEndpointCapabilityResponses))
+	})
+
+	t.Run("responses 能力：新版探测确认端点不存在的 APIKey 被排除", func(t *testing.T) {
+		account := &Account{
+			Platform: PlatformOpenAI,
+			Type:     AccountTypeAPIKey,
+			Extra: map[string]any{
+				"openai_responses_supported":     false,
+				"openai_responses_probe_version": 2,
+			},
 		}
 
 		require.False(t, account.SupportsOpenAIEndpointCapability(OpenAIEndpointCapabilityResponses))
