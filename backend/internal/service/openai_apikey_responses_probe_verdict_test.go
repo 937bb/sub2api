@@ -101,19 +101,18 @@ func TestProbeOpenAIAPIKeyResponsesSupport_ConclusiveResponsesStillPersist(t *te
 			want:   true,
 		},
 		{
-			// 火山方舟 coding/v3 × kimi-k2.6：端点在、跑完了、就是不产出 function_call。
-			// 这正是探测要抓的目标，必须继续落标为不支持。
+			// 端点在且请求成功；是否产出 function_call 是模型行为，不能触发协议降级。
 			name:   "completed_reasoning_only",
 			status: http.StatusOK,
 			body:   `{"status":"completed","output":[{"type":"reasoning"}]}`,
-			want:   false,
+			want:   true,
 		},
 		{
-			// 非 max_output_tokens 的截断（如内容过滤）不在放行范围内，维持原判定。
+			// 内容过滤导致的截断同样证明 Responses 端点存在。
 			name:   "incomplete_other_reason",
 			status: http.StatusOK,
 			body:   `{"status":"incomplete","incomplete_details":{"reason":"content_filter"},"output":[]}`,
-			want:   false,
+			want:   true,
 		},
 		{
 			// 响应体没有 status 字段（第三方兼容上游常见）时维持既有行为。

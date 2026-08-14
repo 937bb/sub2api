@@ -62,12 +62,12 @@ func TestDecideResponsesProbeSupport(t *testing.T) {
 		// Endpoint clearly absent on third-party OpenAI-compatible upstreams.
 		{"404 endpoint absent", 404, fnCall, false},
 		{"405 method not allowed", 405, fnCall, false},
-		// 2xx: tool capability is judged by presence of a function_call output item.
+		// Any 2xx proves that the Responses endpoint exists. Tool behavior must not
+		// silently switch native Responses traffic to Chat Completions.
 		{"200 with function_call", 200, fnCall, true},
-		// Volcengine Ark coding/v3 × kimi-k2.6: reasoning only, no function_call.
-		{"200 reasoning only", 200, reasoningOnly, false},
-		{"200 invalid json", 200, []byte("not-json"), false},
-		{"200 no output field", 200, []byte(`{"status":"completed"}`), false},
+		{"200 reasoning only", 200, reasoningOnly, true},
+		{"200 invalid json", 200, []byte("not-json"), true},
+		{"200 no output field", 200, []byte(`{"status":"completed"}`), true},
 		// Non-2xx (other than 404/405): endpoint exists, capability undecidable -> conservative true.
 		{"400 conservative true", 400, reasoningOnly, true},
 		{"401 conservative true", 401, nil, true},
@@ -78,15 +78,6 @@ func TestDecideResponsesProbeSupport(t *testing.T) {
 			require.Equal(t, tc.want, decideResponsesProbeSupport(tc.status, tc.body))
 		})
 	}
-}
-
-func TestResponsesProbeBodyHasFunctionCall(t *testing.T) {
-	require.True(t, responsesProbeBodyHasFunctionCall([]byte(`{"output":[{"type":"function_call"}]}`)))
-	require.True(t, responsesProbeBodyHasFunctionCall([]byte(`{"output":[{"type":"reasoning"},{"type":"function_call"}]}`)))
-	require.False(t, responsesProbeBodyHasFunctionCall([]byte(`{"output":[{"type":"reasoning"}]}`)))
-	require.False(t, responsesProbeBodyHasFunctionCall([]byte(`{"output":[]}`)))
-	require.False(t, responsesProbeBodyHasFunctionCall([]byte(`{}`)))
-	require.False(t, responsesProbeBodyHasFunctionCall([]byte(`garbage`)))
 }
 
 func TestSelectResponsesProbeModel(t *testing.T) {

@@ -103,9 +103,7 @@ func selectResponsesProbeModel(account *Account) string {
 //
 // 探测策略（参见包文档 internal/pkg/openai_compat）：
 //   - 上游 404 / 405 → 端点不存在,写 false
-//   - 上游 2xx → 端点存在,进一步看工具能力:响应含 function_call 输出项才写 true;
-//     仅 reasoning / 无 function_call(如火山方舟 coding/v3 × kimi-k2.6)写 false
-//   - 其他非 2xx（401/422/400/5xx 等）→ 端点存在但无法判定工具能力,保守写 true
+//   - 其他 HTTP 响应 → 端点存在,写 true
 //   - 网络层失败（连接错误、超时）→ 不写标记，保持 unknown
 //     （后续请求仍按"现状即证据"默认走 Responses）
 //
@@ -223,19 +221,15 @@ func (s *AccountTestService) ProbeOpenAIAPIKeyResponsesSupport(ctx context.Conte
 	)
 }
 
-// responsesProbeVerdictIsConclusive 判断本次探测响应是否足以对「上游是否支持带工具的
-// Responses 调用」下结论。
-//
-// 2xx 分支靠「output 里有没有 function_call」下结论，但这只在响应真的跑完时成立：
+// responsesProbeVerdictIsConclusive 判断本次探测响应是否足以对「上游是否暴露
+// Responses 端点」下结论。
 //
 //   - status=incomplete 且 incomplete_details.reason=max_output_tokens：探测请求自己
 //     只给了 openaiResponsesProbeMaxOutputTokens 的预算，推理型模型可能把预算全烧在
-//     reasoning 上，还没轮到 function_call 就被截断。此时「没有 function_call」是探测
-//     预算不足造成的，不是上游能力缺失。
+//     reasoning 上而被截断。此时保持 unknown，避免将探测预算不足固化为路由策略。
 //   - status=failed：HTTP 200 携带的失败响应（上游瞬时故障）同样不构成能力证据。
 //
-// 其余 2xx 一律可下结论——尤其 status=completed 却只回 reasoning 的上游（火山方舟
-// coding/v3 × kimi-k2.6），仍按原逻辑判为不支持。
+// 其余 2xx 一律证明 Responses 端点存在；具体模型是否按要求调用工具不参与端点判定。
 //
 // 非 2xx 的结论只看状态码、不依赖响应内容，恒可下结论。
 // 缺少 status 字段的响应体（含非 JSON）也按可下结论处理，保持既有行为。
@@ -271,36 +265,14 @@ func isResponsesEndpointSupportedByStatus(status int) bool {
 	return true
 }
 
-// decideResponsesProbeSupport 依据探测响应判定上游 /v1/responses 是否真正可用于
-// 携带工具的请求。
+// decideResponsesProbeSupport 依据探测响应判定上游是否暴露 /v1/responses。
 //
 //   - 404 / 405：端点不存在 → false
-//   - 其他非 2xx（401/403/422/5xx 等）：端点存在,但本次无法判定工具能力
-//     （鉴权/校验/瞬时故障）→ 保守按 true,保持既有"端点存在即支持"行为
-//   - 2xx：探测以 tool_choice=required 强制工具调用,响应必须含 function_call
-//     输出项才算真正可用;否则(如火山方舟 coding/v3 × kimi-k2.6 仅回 reasoning)
-//     判为 false,使网关改走 /v1/chat/completions 直转路径。
+//   - 其他响应：端点存在 → true
+//
+// function_call 是模型行为，不是协议端点能力。不能因为一次成功响应没有工具调用，
+// 就把后续原生 Responses 入站静默转换成 Chat Completions。
 func decideResponsesProbeSupport(status int, body []byte) bool {
-	if status == http.StatusNotFound || status == http.StatusMethodNotAllowed {
-		return false
-	}
-	if status < 200 || status >= 300 {
-		return true
-	}
-	return responsesProbeBodyHasFunctionCall(body)
-}
-
-// responsesProbeBodyHasFunctionCall 判断非流式 Responses 响应体的 output 数组里
-// 是否存在 function_call 输出项。
-func responsesProbeBodyHasFunctionCall(body []byte) bool {
-	output := gjson.GetBytes(body, "output")
-	if !output.IsArray() {
-		return false
-	}
-	for _, item := range output.Array() {
-		if strings.TrimSpace(item.Get("type").String()) == "function_call" {
-			return true
-		}
-	}
-	return false
+	_ = body
+	return isResponsesEndpointSupportedByStatus(status)
 }
