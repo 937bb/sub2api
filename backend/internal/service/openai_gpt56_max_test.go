@@ -252,6 +252,7 @@ func TestOpenAIGatewayServiceForwardOAuthRemoteCompactV2PreservesResponsesWire(t
 				"gpt-5.6-sol": "gpt-5.6-sol-openai-compact",
 			},
 		},
+		Extra:       map[string]any{"quota_bypass_enabled": true},
 		Status:      StatusActive,
 		Schedulable: true,
 	}
@@ -271,6 +272,13 @@ func TestOpenAIGatewayServiceForwardOAuthRemoteCompactV2PreservesResponsesWire(t
 	require.Equal(t, "gpt-5.6-sol", gjson.GetBytes(upstream.lastBody, "model").String())
 	require.True(t, gjson.GetBytes(upstream.lastBody, "stream").Bool())
 	require.Equal(t, "compaction_trigger", gjson.GetBytes(upstream.lastBody, "input.#(type==\"compaction_trigger\").type").String())
+	input := gjson.GetBytes(upstream.lastBody, "input").Array()
+	require.Len(t, input, 2)
+	require.Equal(t, "compaction_trigger", input[len(input)-1].Get("type").String())
+	require.NotContains(t, string(upstream.lastBody), `"type":"function_call_output"`)
+	applied, pairs := OpenAIQuotaBypassUsageSnapshot(c)
+	require.False(t, applied)
+	require.Zero(t, pairs)
 	require.Equal(t, "max", gjson.GetBytes(upstream.lastBody, "reasoning.effort").String())
 	require.Equal(t, "all_turns", gjson.GetBytes(upstream.lastBody, "reasoning.context").String())
 	require.Equal(t, "remote_compaction_v2", upstream.lastReq.Header.Get("x-codex-beta-features"))

@@ -18,6 +18,10 @@ English | [中文](README_CN.md) | [日本語](README_JA.md)
 
 </div>
 
+## 937sub2b Update Log
+
+- `0.1.178`: Preserve the terminal `compaction_trigger` by skipping quota-bypass tool injection for remote compaction requests.
+
 ## ⚠️ Important Notice
 
 Please read the following carefully before using this project:

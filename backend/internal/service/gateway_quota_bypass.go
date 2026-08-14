@@ -264,6 +264,13 @@ func InjectFunctionCallOutputSuffix(body []byte) ([]byte, bool) {
 // InjectFunctionCallOutputSuffixN is retained for deterministic payload tests.
 // Production always passes one; pairs is clamped to the test helper's bounds.
 func InjectFunctionCallOutputSuffixN(body []byte, pairs int) ([]byte, bool) {
+	// Remote compaction has a strict terminal-item contract: compaction_trigger
+	// must remain the final input item. Synthetic tool turns also depend on their
+	// function_call_output being the suffix, so the two protocols cannot safely
+	// share one request. Keep compact payloads byte-for-byte unchanged.
+	if HasCompactionTriggerInInput(body) {
+		return body, false
+	}
 	if pairs < 1 {
 		pairs = 1
 	}

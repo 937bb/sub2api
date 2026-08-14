@@ -327,6 +327,27 @@ func TestApplyOpenAIQuotaBypassForRequest_UsesHandlerGroupDecision(t *testing.T)
 	require.Equal(t, body, notInjected)
 }
 
+func TestApplyOpenAIQuotaBypassForRequest_SkipsCompactionTrigger(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	account := &Account{
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Extra:    map[string]any{"quota_bypass_enabled": true},
+	}
+	body := []byte(`{"model":"gpt-5.6-sol","input":[{"type":"message","role":"user","content":"compact"},{"type":"compaction_trigger"}]}`)
+
+	forwarded := applyOpenAIQuotaBypassForRequest(c, account, body, 1)
+
+	require.Equal(t, body, forwarded)
+	applied, pairs := OpenAIQuotaBypassUsageSnapshot(c)
+	require.False(t, applied)
+	require.Zero(t, pairs)
+	require.Empty(t, recorder.Header().Get(openAIQuotaBypassResponseHeader))
+	require.Empty(t, recorder.Header().Get(openAIQuotaBypassPairsResponseHeader))
+}
+
 func TestApplyOpenAIQuotaBypassForRequest_StaleNegativeContextDoesNotHideAccountEligibility(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
@@ -411,6 +432,43 @@ func TestInjectFunctionCallOutputSuffix_IsIdempotentForSyntheticPair(t *testing.
 		t.Fatal("idempotent injection changed the request body")
 	}
 	requireQuotaBypassSuffix(t, repeated)
+}
+
+func TestInjectFunctionCallOutputSuffix_SkipsCompactionTrigger(t *testing.T) {
+	tests := []struct {
+		name string
+		body []byte
+	}{
+		{
+			name: "valid final trigger",
+			body: []byte(`{"model":"gpt-5.6-sol","input":[{"type":"message","role":"user","content":"compact"},{"type":"compaction_trigger"}]}`),
+		},
+		{
+			name: "malformed non-final trigger remains untouched",
+			body: []byte(`{"model":"gpt-5.6-sol","input":[{"type":"compaction_trigger"},{"type":"message","role":"user","content":"compact"}]}`),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			injected, ok := InjectFunctionCallOutputSuffix(tt.body)
+			require.False(t, ok)
+			require.Equal(t, tt.body, injected)
+		})
+	}
+}
+
+func TestApplyOpenAIWSQuotaBypass_SkipsCompactionTrigger(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.6-sol","input":[{"type":"message","role":"user","content":"compact"},{"type":"compaction_trigger"}]}`)
+	applied := 0
+	hooks := &OpenAIWSIngressHooks{
+		QuotaBypassEnabled:   true,
+		OnQuotaBypassApplied: func() { applied++ },
+	}
+
+	forwarded := applyOpenAIWSQuotaBypass(body, hooks)
+	require.Equal(t, body, forwarded)
+	require.Zero(t, applied)
 }
 
 func TestInjectFunctionCallOutputSuffix_ConvertsStringInput(t *testing.T) {
