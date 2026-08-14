@@ -954,7 +954,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			stickyAccountID = accountID
 		}
 	}
-	if s.concurrencyService == nil || !cfg.LoadBatchEnabled {
+	selectWithoutLoadBatch := func() (*AccountSelectionResult, error) {
 		account, err := s.selectAccountForModelWithExclusions(ctx, groupID, platform, sessionHash, requestedModel, excludedIDs, requireCompact, stickyAccountID, requiredCapability, preferLowUpstreamRate)
 		if err != nil {
 			return nil, err
@@ -981,12 +981,18 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			MaxWaiting:     cfg.FallbackMaxWaiting,
 		})
 	}
+	if s.concurrencyService == nil {
+		return selectWithoutLoadBatch()
+	}
 
 	accounts, err := s.listSchedulableAccounts(ctx, groupID, platform)
 	if err != nil {
 		return nil, err
 	}
 	if len(accounts) == 0 {
+		if !cfg.LoadBatchEnabled {
+			return selectWithoutLoadBatch()
+		}
 		return nil, ErrNoAvailableAccounts
 	}
 
@@ -1007,6 +1013,9 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			hasQuotaBypassPoolAccounts = true
 			break
 		}
+	}
+	if !cfg.LoadBatchEnabled && !hasQuotaBypassPoolAccounts {
+		return selectWithoutLoadBatch()
 	}
 
 	// ============ Layer 1: Sticky session ============
@@ -1102,6 +1111,9 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 	}
 
 	if len(candidates) == 0 {
+		if !cfg.LoadBatchEnabled {
+			return selectWithoutLoadBatch()
+		}
 		return nil, ErrNoAvailableAccounts
 	}
 	hasQuotaBypassCandidates := false
@@ -1110,6 +1122,14 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			hasQuotaBypassCandidates = true
 			break
 		}
+	}
+	// Disabling batch load must not disable quota-bypass concentration. The
+	// legacy fast path otherwise returns before associated bypass groups are
+	// inspected and lets low-cost/large API-key accounts absorb every request.
+	// Preserve the stock fast path when this request has no eligible bypass
+	// candidate; bypass pools use atomic slot acquisition without a load read.
+	if !cfg.LoadBatchEnabled && !hasQuotaBypassCandidates {
+		return selectWithoutLoadBatch()
 	}
 	rateOrder := openAILegacyUpstreamRateOrder{}
 	if preferLowUpstreamRate {
@@ -1287,7 +1307,12 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		return nil, true, nil
 	}
 
-	loadMap, err := s.concurrencyService.GetAccountsLoadBatch(ctx, accountLoads)
+	loadMap := map[int64]*AccountLoadInfo{}
+	if cfg.LoadBatchEnabled {
+		loadMap, err = s.concurrencyService.GetAccountsLoadBatch(ctx, accountLoads)
+	} else {
+		err = nil
+	}
 	if err != nil && hasQuotaBypassCandidates {
 		// A batch-load read can fail independently from atomic slot acquisition.
 		// Keep using the bounded single-account cursor so a transient read error

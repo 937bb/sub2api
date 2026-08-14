@@ -20,6 +20,7 @@ English | [中文](README_CN.md) | [日本語](README_JA.md)
 
 ## 937sub2b Update Log
 
+- `0.1.180`: Keep associated quota-bypass OAuth accounts concentrated when legacy batch-load scheduling is disabled, invalidate legacy Redis scheduler metadata, and refresh group flags immediately in simple mode.
 - `0.1.179`: Let movable `previous_response_id` continuations yield ordinary account affinity to an associated quota-bypass account, while preserving unmovable tool chains.
 - `0.1.178`: Preserve the terminal `compaction_trigger` by skipping quota-bypass tool injection for remote compaction requests.
 

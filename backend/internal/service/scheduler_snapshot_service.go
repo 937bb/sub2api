@@ -686,8 +686,14 @@ func (s *SchedulerSnapshotService) handleAccountEvent(ctx context.Context, accou
 }
 
 func (s *SchedulerSnapshotService) handleGroupEvent(ctx context.Context, groupID *int64, seen map[batchSeenKey]struct{}) error {
-	if groupID == nil || *groupID <= 0 || s.isRunModeSimple() {
+	if groupID == nil || *groupID <= 0 {
 		return nil
+	}
+	if s.isRunModeSimple() {
+		// Simple mode uses group zero for every request. A group flag still forms
+		// part of each account's shared scheduler metadata, so ignoring this event
+		// leaves associated quota-bypass eligibility stale until a full rebuild.
+		return s.rebuildByGroupIDs(ctx, []int64{0}, "group_change", seen)
 	}
 	if seen != nil {
 		if _, ok := seen[batchSeenKey{groupID: *groupID, lifecycle: true}]; ok {

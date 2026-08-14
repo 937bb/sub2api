@@ -27,6 +27,7 @@ const (
 	schedulerRetiredPrefix         = "sched:retired:"
 	schedulerSnapshotPrefix        = "sched:"
 	schedulerLockPrefix            = "sched:lock:"
+	schedulerMetadataSchemaVersion = 1
 
 	defaultSchedulerSnapshotMGetChunkSize  = 128
 	defaultSchedulerSnapshotWriteChunkSize = 256
@@ -225,6 +226,11 @@ type schedulerCache struct {
 	writeChunkSize int
 }
 
+type schedulerMetadataEnvelope struct {
+	SchemaVersion int             `json:"schema_version"`
+	Account       service.Account `json:"account"`
+}
+
 func NewSchedulerCache(rdb *redis.Client) service.SchedulerCache {
 	return newSchedulerCacheWithChunkSizes(rdb, defaultSchedulerSnapshotMGetChunkSize, defaultSchedulerSnapshotWriteChunkSize)
 }
@@ -296,9 +302,12 @@ func (c *schedulerCache) GetSnapshot(ctx context.Context, bucket service.Schedul
 		if val == nil {
 			return nil, false, nil
 		}
-		account, err := decodeCachedAccount(val)
+		account, current, err := decodeSchedulerMetadataAccount(val)
 		if err != nil {
 			return nil, false, err
+		}
+		if !current {
+			return nil, false, nil
 		}
 		if err := applySchedulerLastUsed(account, lastUsedValues[i]); err != nil {
 			return nil, false, err
@@ -760,20 +769,51 @@ func applySchedulerLastUsed(account *service.Account, value any) error {
 }
 
 func decodeCachedAccount(val any) (*service.Account, error) {
-	var payload []byte
-	switch raw := val.(type) {
-	case string:
-		payload = []byte(raw)
-	case []byte:
-		payload = raw
-	default:
-		return nil, fmt.Errorf("unexpected account cache type: %T", val)
+	payload, err := cachedAccountPayload(val)
+	if err != nil {
+		return nil, err
+	}
+	var envelope schedulerMetadataEnvelope
+	if err := json.Unmarshal(payload, &envelope); err != nil {
+		return nil, err
+	}
+	if envelope.SchemaVersion != 0 {
+		if envelope.SchemaVersion != schedulerMetadataSchemaVersion {
+			return nil, fmt.Errorf("unsupported scheduler metadata schema version: %d", envelope.SchemaVersion)
+		}
+		return &envelope.Account, nil
 	}
 	var account service.Account
 	if err := json.Unmarshal(payload, &account); err != nil {
 		return nil, err
 	}
 	return &account, nil
+}
+
+func decodeSchedulerMetadataAccount(val any) (*service.Account, bool, error) {
+	payload, err := cachedAccountPayload(val)
+	if err != nil {
+		return nil, false, err
+	}
+	var envelope schedulerMetadataEnvelope
+	if err := json.Unmarshal(payload, &envelope); err != nil {
+		return nil, false, err
+	}
+	if envelope.SchemaVersion != schedulerMetadataSchemaVersion {
+		return nil, false, nil
+	}
+	return &envelope.Account, true, nil
+}
+
+func cachedAccountPayload(val any) ([]byte, error) {
+	switch raw := val.(type) {
+	case string:
+		return []byte(raw), nil
+	case []byte:
+		return raw, nil
+	default:
+		return nil, fmt.Errorf("unexpected account cache type: %T", val)
+	}
 }
 
 func (c *schedulerCache) writeAccountIDs(ctx context.Context, accounts []service.Account) ([]int64, error) {
@@ -831,7 +871,10 @@ func marshalSchedulerCacheAccount(account service.Account) ([]byte, []byte, erro
 	if err != nil {
 		return nil, nil, fmt.Errorf("marshal account: %w", err)
 	}
-	metaPayload, err := json.Marshal(buildSchedulerMetadataAccount(account))
+	metaPayload, err := json.Marshal(schedulerMetadataEnvelope{
+		SchemaVersion: schedulerMetadataSchemaVersion,
+		Account:       buildSchedulerMetadataAccount(account),
+	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("marshal account metadata: %w", err)
 	}

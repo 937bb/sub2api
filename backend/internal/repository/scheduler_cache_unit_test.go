@@ -35,6 +35,41 @@ func TestFilterSchedulerExtraPreservesQuotaBypassOverride(t *testing.T) {
 	}
 }
 
+func TestSchedulerCacheSnapshotRejectsLegacyMetadataSchema(t *testing.T) {
+	ctx := context.Background()
+	cache := newSchedulerCacheUnit(t)
+	bucket := service.SchedulerBucket{GroupID: 77, Platform: service.PlatformOpenAI, Mode: service.SchedulerModeSingle}
+	bypassGroup := &service.Group{ID: 88, QuotaBypassEnabled: true}
+	account := service.Account{
+		ID: 7701, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth,
+		Status: service.StatusActive, Schedulable: true, Concurrency: 10,
+		GroupIDs: []int64{bucket.GroupID, bypassGroup.ID},
+		AccountGroups: []service.AccountGroup{
+			{AccountID: 7701, GroupID: bucket.GroupID, Group: &service.Group{ID: bucket.GroupID}},
+			{AccountID: 7701, GroupID: bypassGroup.ID, Group: bypassGroup},
+		},
+	}
+	token, err := cache.CaptureBucketWriteToken(ctx, bucket)
+	require.NoError(t, err)
+	require.NoError(t, cache.SetSnapshot(ctx, bucket, token, []service.Account{account}))
+
+	legacyPayload, err := json.Marshal(buildSchedulerMetadataAccount(account))
+	require.NoError(t, err)
+	require.NoError(t, cache.rdb.Set(ctx, schedulerAccountMetaKey(strconv.FormatInt(account.ID, 10)), legacyPayload, 0).Err())
+
+	snapshot, hit, err := cache.GetSnapshot(ctx, bucket)
+	require.NoError(t, err)
+	require.False(t, hit)
+	require.Nil(t, snapshot)
+
+	require.NoError(t, cache.SetAccount(ctx, &account))
+	snapshot, hit, err = cache.GetSnapshot(ctx, bucket)
+	require.NoError(t, err)
+	require.True(t, hit)
+	require.Len(t, snapshot, 1)
+	require.True(t, service.IsAccountQuotaBypassEligible(snapshot[0]))
+}
+
 func newSchedulerCacheUnitWithRedis(t *testing.T) (*schedulerCache, *miniredis.Miniredis) {
 	t.Helper()
 	mr := miniredis.RunT(t)
@@ -122,7 +157,10 @@ func TestSchedulerCacheSnapshotAccountIDReusePreservesPayloadAndMembers(t *testi
 
 	wantFull, err := json.Marshal(validOne)
 	require.NoError(t, err)
-	wantMeta, err := json.Marshal(buildSchedulerMetadataAccount(validOne))
+	wantMeta, err := json.Marshal(schedulerMetadataEnvelope{
+		SchemaVersion: schedulerMetadataSchemaVersion,
+		Account:       buildSchedulerMetadataAccount(validOne),
+	})
 	require.NoError(t, err)
 	fullBefore, err := cache.rdb.Get(ctx, schedulerAccountKey("701")).Bytes()
 	require.NoError(t, err)
@@ -302,7 +340,10 @@ func TestMarshalSchedulerCacheAccountKeepsEncodingJSONWireFormat(t *testing.T) {
 			require.NoError(t, err)
 			wantFull, err := json.Marshal(tc.account)
 			require.NoError(t, err)
-			wantMeta, err := json.Marshal(buildSchedulerMetadataAccount(tc.account))
+			wantMeta, err := json.Marshal(schedulerMetadataEnvelope{
+				SchemaVersion: schedulerMetadataSchemaVersion,
+				Account:       buildSchedulerMetadataAccount(tc.account),
+			})
 			require.NoError(t, err)
 			require.Equal(t, wantFull, full)
 			require.Equal(t, wantMeta, meta)

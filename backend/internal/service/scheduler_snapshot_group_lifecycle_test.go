@@ -308,6 +308,18 @@ func (r *groupLifecycleTestAccountRepo) ListSchedulableByGroupIDAndPlatforms(ctx
 	return r.load(ctx, platform)
 }
 
+func (r *groupLifecycleTestAccountRepo) ListSchedulableByPlatform(ctx context.Context, platform string) ([]Account, error) {
+	return r.load(ctx, platform)
+}
+
+func (r *groupLifecycleTestAccountRepo) ListSchedulableByPlatforms(ctx context.Context, platforms []string) ([]Account, error) {
+	platform := "mixed"
+	if len(platforms) > 0 {
+		platform = platforms[0]
+	}
+	return r.load(ctx, platform)
+}
+
 func (r *groupLifecycleTestAccountRepo) callCount() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -776,7 +788,7 @@ func TestSchedulerGroupLifecycleCanceledAfterFreshQueryUsesIndependentReleaseCon
 	require.NoError(t, cache.releaseCtxErr)
 }
 
-func TestSchedulerGroupLifecycleGroupZeroAndSimpleModeAreNoOps(t *testing.T) {
+func TestSchedulerGroupLifecycleGroupZeroIsNoOpAndSimpleModeRebuildsGlobalBuckets(t *testing.T) {
 	cache := newGroupLifecycleTestCache()
 	groups := &groupLifecycleTestGroupRepo{group: &Group{ID: 88, Status: StatusActive, Hydrated: true}}
 	accounts := &groupLifecycleTestAccountRepo{}
@@ -792,5 +804,5 @@ func TestSchedulerGroupLifecycleGroupZeroAndSimpleModeAreNoOps(t *testing.T) {
 	require.Zero(t, releases)
 	require.Zero(t, listCalls)
 	require.Zero(t, groups.callCount())
-	require.Zero(t, accounts.callCount())
+	require.Equal(t, 7, accounts.callCount())
 }
