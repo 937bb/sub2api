@@ -1337,6 +1337,160 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_StickyWeightedPreviousR
 	}
 }
 
+func TestOpenAIGatewayService_MovablePreviousResponseYieldsToAssociatedQuotaBypass(t *testing.T) {
+	tests := []struct {
+		name            string
+		previousCanMove bool
+		regularPriority int
+		bypassPriority  int
+		wantAccountID   int64
+		wantLayer       string
+		wantPreviousHit bool
+	}{
+		{
+			name:            "movable same priority yields to bypass",
+			previousCanMove: true,
+			regularPriority: 0,
+			bypassPriority:  0,
+			wantAccountID:   56447,
+			wantLayer:       openAIAccountScheduleLayerLoadBalance,
+		},
+		{
+			name:            "unmovable tool chain keeps previous account",
+			previousCanMove: false,
+			regularPriority: 0,
+			bypassPriority:  0,
+			wantAccountID:   56261,
+			wantLayer:       openAIAccountScheduleLayerPreviousResponse,
+			wantPreviousHit: true,
+		},
+		{
+			name:            "higher priority regular account keeps precedence",
+			previousCanMove: true,
+			regularPriority: 0,
+			bypassPriority:  1,
+			wantAccountID:   56261,
+			wantLayer:       openAIAccountScheduleLayerPreviousResponse,
+			wantPreviousHit: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resetOpenAIAdvancedSchedulerSettingCacheForTest()
+			defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
+
+			ctx := context.Background()
+			normalGroupID := int64(501)
+			bypassGroupID := int64(502)
+			normalGroup := &Group{ID: normalGroupID}
+			bypassGroup := &Group{ID: bypassGroupID, QuotaBypassEnabled: true}
+			accounts := []Account{
+				{
+					ID: 56261, Platform: PlatformOpenAI, Type: AccountTypeAPIKey,
+					Status: StatusActive, Schedulable: true, Concurrency: 1000,
+					Priority: tt.regularPriority, GroupIDs: []int64{normalGroupID},
+					AccountGroups: []AccountGroup{{GroupID: normalGroupID, Group: normalGroup}},
+					Extra:         map[string]any{"openai_apikey_responses_websockets_v2_enabled": true},
+				},
+				{
+					ID: 56447, Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+					Status: StatusActive, Schedulable: true, Concurrency: 100,
+					Priority: tt.bypassPriority, GroupIDs: []int64{normalGroupID, bypassGroupID},
+					AccountGroups: []AccountGroup{
+						{GroupID: normalGroupID, Group: normalGroup},
+						{GroupID: bypassGroupID, Group: bypassGroup},
+					},
+				},
+			}
+			acquiredIDs := make([]int64, 0, 1)
+			svc := &OpenAIGatewayService{
+				accountRepo:      schedulerGroupAwareOpenAIAccountRepo{schedulerTestOpenAIAccountRepo{accounts: accounts}},
+				cache:            &schedulerTestGatewayCache{},
+				cfg:              newSchedulerTestOpenAIWSV2Config(),
+				rateLimitService: newOpenAIAdvancedSchedulerRateLimitService("true"),
+				concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{
+					acquiredIDs: &acquiredIDs,
+				}),
+			}
+			require.NoError(t, svc.getOpenAIWSStateStore().BindResponseAccount(ctx, normalGroupID, "resp_regular_001", 56261, time.Hour))
+
+			selection, decision, err := svc.SelectAccountWithSchedulerForCapability(
+				ctx, &normalGroupID, "resp_regular_001", "", "gpt-5.1", nil,
+				OpenAIUpstreamTransportAny, OpenAIEndpointCapabilityChatCompletions,
+				false, tt.previousCanMove, true, PlatformOpenAI,
+			)
+
+			require.NoError(t, err)
+			require.NotNil(t, selection)
+			require.Equal(t, tt.wantAccountID, selection.Account.ID)
+			require.Equal(t, tt.wantLayer, decision.Layer)
+			require.Equal(t, tt.wantPreviousHit, decision.StickyPreviousHit)
+			require.Equal(t, []int64{tt.wantAccountID}, acquiredIDs)
+			if selection.ReleaseFunc != nil {
+				selection.ReleaseFunc()
+			}
+		})
+	}
+}
+
+func TestOpenAIGatewayService_AssociatedQuotaBypassConsumesCapacityBeforeRegularAPIKey(t *testing.T) {
+	resetOpenAIAdvancedSchedulerSettingCacheForTest()
+	defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
+
+	normalGroupID := int64(511)
+	bypassGroupID := int64(512)
+	normalGroup := &Group{ID: normalGroupID}
+	bypassGroup := &Group{ID: bypassGroupID, QuotaBypassEnabled: true}
+	accounts := []Account{
+		{
+			ID: 56261, Platform: PlatformOpenAI, Type: AccountTypeAPIKey,
+			Status: StatusActive, Schedulable: true, Concurrency: 1000,
+			Priority: 0, GroupIDs: []int64{normalGroupID},
+			AccountGroups: []AccountGroup{{GroupID: normalGroupID, Group: normalGroup}},
+		},
+		{
+			ID: 56447, Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+			Status: StatusActive, Schedulable: true, Concurrency: 100,
+			Priority: 0, GroupIDs: []int64{normalGroupID, bypassGroupID},
+			AccountGroups: []AccountGroup{
+				{GroupID: normalGroupID, Group: normalGroup},
+				{GroupID: bypassGroupID, Group: bypassGroup},
+			},
+		},
+	}
+	sharedCache := newSchedulerSharedQuotaBypassCache()
+	svc := &OpenAIGatewayService{
+		accountRepo:        schedulerGroupAwareOpenAIAccountRepo{schedulerTestOpenAIAccountRepo{accounts: accounts}},
+		cfg:                &config.Config{},
+		rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("true"),
+		concurrencyService: NewConcurrencyService(sharedCache),
+	}
+
+	selectedIDs := make([]int64, 0, 101)
+	releases := make([]func(), 0, 101)
+	for i := 0; i < 101; i++ {
+		selection, _, err := svc.SelectAccountWithScheduler(
+			context.Background(), &normalGroupID, "", "", "gpt-5.1", nil,
+			OpenAIUpstreamTransportAny, false,
+		)
+		require.NoError(t, err)
+		require.NotNil(t, selection)
+		selectedIDs = append(selectedIDs, selection.Account.ID)
+		releases = append(releases, selection.ReleaseFunc)
+	}
+
+	for i := 0; i < 100; i++ {
+		require.Equal(t, int64(56447), selectedIDs[i], "request %d must fill the associated bypass account", i+1)
+	}
+	require.Equal(t, int64(56261), selectedIDs[100])
+	for _, release := range releases {
+		if release != nil {
+			release()
+		}
+	}
+}
+
 func TestOpenAIGatewayService_SelectAccountWithScheduler_PreviousResponseCompactUnsupportedDeletesBinding(t *testing.T) {
 	resetOpenAIAdvancedSchedulerSettingCacheForTest()
 

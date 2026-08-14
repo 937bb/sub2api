@@ -430,8 +430,13 @@ func (s *defaultOpenAIAccountScheduler) Select(
 	}
 
 	previousResponseID := strings.TrimSpace(req.PreviousResponseID)
+	previousResponseShouldYield := false
+	if previousResponseID != "" && req.PreviousResponseCanMove &&
+		normalizeOpenAICompatiblePlatform(req.Platform) == PlatformOpenAI {
+		previousResponseShouldYield = s.shouldYieldOpenAIPreviousResponseToQuotaBypass(ctx, &req)
+	}
 	if previousResponseID != "" && normalizeOpenAICompatiblePlatform(req.Platform) == PlatformOpenAI &&
-		(!req.StickyWeighted || !req.PreviousResponseCanMove) {
+		(!req.StickyWeighted || !req.PreviousResponseCanMove) && !previousResponseShouldYield {
 		selection, err := s.service.selectAccountByPreviousResponseIDForCapability(
 			ctx,
 			req.GroupID,
@@ -466,14 +471,11 @@ func (s *defaultOpenAIAccountScheduler) Select(
 
 	useSessionSticky := !req.StickyWeighted
 	if useSessionSticky && strings.TrimSpace(req.SessionHash) != "" && s != nil && s.service != nil {
-		if accounts, err := s.service.listSchedulableAccounts(ctx, req.GroupID, req.Platform); err == nil {
-			req.prefetchedAccounts = accounts
-			req.prefetchedAccountsReady = true
-			// Hard previous_response affinity was handled above. Soft session
-			// affinity must not bypass quota-bypass concentration.
-			if hasOpenAIQuotaBypassCandidatesForScheduleRequest(accounts, req) {
-				useSessionSticky = false
-			}
+		// Hard previous_response affinity was handled above. Soft session
+		// affinity must not bypass quota-bypass concentration.
+		if s.prefetchOpenAIAccountCandidates(ctx, &req) &&
+			hasOpenAIQuotaBypassCandidatesForScheduleRequest(req.prefetchedAccounts, req) {
+			useSessionSticky = false
 		}
 	}
 	if useSessionSticky {
@@ -504,16 +506,73 @@ func (s *defaultOpenAIAccountScheduler) Select(
 	if selection != nil && selection.Account != nil {
 		decision.SelectedAccountID = selection.Account.ID
 		decision.SelectedAccountType = selection.Account.Type
+		if req.StickyPreviousAccountID > 0 && selection.Account.ID == req.StickyPreviousAccountID {
+			decision.StickyPreviousHit = true
+		}
 		if req.StickyWeighted {
-			if req.StickyPreviousAccountID > 0 && selection.Account.ID == req.StickyPreviousAccountID {
-				decision.StickyPreviousHit = true
-			}
 			if req.StickyAccountID > 0 && selection.Account.ID == req.StickyAccountID {
 				decision.StickySessionHit = true
 			}
 		}
 	}
 	return selection, decision, nil
+}
+
+func (s *defaultOpenAIAccountScheduler) prefetchOpenAIAccountCandidates(
+	ctx context.Context,
+	req *OpenAIAccountScheduleRequest,
+) bool {
+	if req == nil || s == nil || s.service == nil {
+		return false
+	}
+	if !req.prefetchedAccountsReady {
+		accounts, err := s.service.listSchedulableAccounts(ctx, req.GroupID, req.Platform)
+		if err != nil {
+			return false
+		}
+		req.prefetchedAccounts = accounts
+		req.prefetchedAccountsReady = true
+	}
+	return true
+}
+
+func (s *defaultOpenAIAccountScheduler) shouldYieldOpenAIPreviousResponseToQuotaBypass(
+	ctx context.Context,
+	req *OpenAIAccountScheduleRequest,
+) bool {
+	if !s.prefetchOpenAIAccountCandidates(ctx, req) {
+		return false
+	}
+	minPriority := 0
+	minPrioritySet := false
+	minPriorityHasQuotaBypass := false
+	// A continuation already bound to a healthy bypass account is concentrated
+	// correctly and should retain upstream response affinity. Only ordinary or
+	// stale bindings yield, and only when the highest-priority tier contains a
+	// bypass account. This preserves the scheduler's priority-first contract.
+	for i := range req.prefetchedAccounts {
+		account := &req.prefetchedAccounts[i]
+		if req.ExcludedIDs != nil {
+			if _, excluded := req.ExcludedIDs[account.ID]; excluded {
+				continue
+			}
+		}
+		quotaBypass := isOpenAIQuotaBypassEligibleForScheduleRequest(account, *req)
+		if account.ID == req.StickyPreviousAccountID && quotaBypass {
+			return false
+		}
+		priority := openAIAccountSchedulingPriority(account)
+		if !minPrioritySet || priority < minPriority {
+			minPriority = priority
+			minPrioritySet = true
+			minPriorityHasQuotaBypass = quotaBypass
+			continue
+		}
+		if priority == minPriority && quotaBypass {
+			minPriorityHasQuotaBypass = true
+		}
+	}
+	return minPriorityHasQuotaBypass
 }
 
 func (s *defaultOpenAIAccountScheduler) resolveRequestGroup(ctx context.Context, req OpenAIAccountScheduleRequest) *Group {
@@ -2570,7 +2629,7 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 	stickyWeighted := s.isOpenAIAdvancedSchedulerStickyWeightedEnabled(ctx)
 	subscriptionPriority := s.isOpenAIAdvancedSchedulerSubscriptionPriorityEnabled(ctx)
 	stickyPreviousAccountID := int64(0)
-	if stickyWeighted && previousResponseCanMove && strings.TrimSpace(previousResponseID) != "" && platform == PlatformOpenAI {
+	if previousResponseCanMove && strings.TrimSpace(previousResponseID) != "" && platform == PlatformOpenAI {
 		stickyPreviousAccountID = s.ResolveAccountIDByPreviousResponseIDForScheduler(ctx, groupID, previousResponseID, requestedModel, excludedIDs, requiredCapability, requireCompact)
 	}
 
