@@ -40,3 +40,23 @@ func TestWSPassthroughUsageMeta_UpdateFromResponseCreate_MappedModelCandidate(t 
 	require.NotNil(t, got)
 	require.Equal(t, "max", *got, "mapped model should preserve max on multi-turn update")
 }
+
+func TestOpenAIWSPassthroughPolicyModelPreservesExplicitMappingTarget(t *testing.T) {
+	account := &Account{
+		Type: AccountTypeOAuth,
+		Credentials: map[string]any{
+			"model_mapping": map[string]any{
+				"gpt-5.6-sol": "gpt-5.6-sol-wm",
+			},
+		},
+	}
+
+	require.Equal(t,
+		"gpt-5.6-sol-wm",
+		openAIWSPassthroughPolicyModelForFrame(account, []byte(`{"type":"response.create","model":"gpt-5.6-sol"}`)),
+	)
+	require.Equal(t,
+		"gpt-5.6-sol-wm",
+		openAIWSPassthroughPolicyModelFromSessionFrame(account, []byte(`{"type":"session.update","session":{"model":"gpt-5.6-sol"}}`)),
+	)
+}

@@ -180,6 +180,11 @@ Please read the following carefully before using this project:
 
 Sub2API is an AI API gateway platform designed to distribute and manage API quotas from AI product subscriptions. Users can access upstream AI services through platform-generated API Keys, while the platform handles authentication, billing, load balancing, and request forwarding.
 
+### 937sub2p Update Record
+
+- 2026-08-14: OpenAI OAuth account `model_mapping` targets are now treated as final upstream model identifiers. Explicit mappings such as `gpt-5.6-sol -> gpt-5.6-sol-wm` are preserved across normal Responses forwarding, automatic passthrough, compatible protocol paths, and WebSocket policy resolution instead of being rewritten by built-in Codex aliases.
+- 2026-08-14: GPT-5.6 Codex alias normalization now rewrites only exact Sol/Terra/Luna models and supported effort/date variants; unknown upstream suffixes remain unchanged.
+
 ## Features
 
 - **Multi-Account Management** - Support multiple upstream account types (OAuth, API Key)

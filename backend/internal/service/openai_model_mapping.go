@@ -100,3 +100,22 @@ func resolveOpenAICompactForwardModel(account *Account, model string) string {
 	}
 	return trimmedModel
 }
+
+// isConfiguredOpenAIUpstreamModel reports whether model is explicitly configured
+// as an account model-mapping target. Mapping targets are final upstream model
+// identifiers and must not be rewritten by the built-in Codex alias normalizer.
+func isConfiguredOpenAIUpstreamModel(account *Account, model string) bool {
+	if account == nil {
+		return false
+	}
+	target := strings.TrimSpace(model)
+	if target == "" {
+		return false
+	}
+	for _, configuredTarget := range account.GetModelMapping() {
+		if strings.TrimSpace(configuredTarget) == target {
+			return true
+		}
+	}
+	return false
+}

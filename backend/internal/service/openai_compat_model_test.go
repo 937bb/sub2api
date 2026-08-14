@@ -266,6 +266,15 @@ func TestForwardAsAnthropic_PreservesMaxForFinalGPT56ResponsesModel(t *testing.T
 			wantEffort:    "max",
 		},
 		{
+			name:          "OAuth mapping preserves custom upstream suffix",
+			account:       rawGPT56ResponsesOAuthAccount("gpt-5.6-sol", "gpt-5.6-sol-wm"),
+			model:         "gpt-5.6-sol",
+			defaultMapped: "gpt-5.6-terra",
+			effort:        "max",
+			wantModel:     "gpt-5.6-sol-wm",
+			wantEffort:    "max",
+		},
+		{
 			name:       "old model still maps max to xhigh",
 			account:    rawGPT56ResponsesAPIKeyAccount("gpt-5.5", "gpt-5.5"),
 			model:      "gpt-5.5",

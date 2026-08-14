@@ -34,3 +34,16 @@ func TestUsageBillingModelCandidates_BareGPT56IncludesSol(t *testing.T) {
 		usageBillingModelCandidates("openai/gpt-5.6"),
 	)
 }
+
+func TestNormalizeKnownOpenAICodexModel_PreservesUnknownUpstreamSuffixes(t *testing.T) {
+	for _, model := range []string{
+		"gpt-5.6-sol-wm",
+		"gpt-5.6-terra-private",
+		"gpt-5.6-luna-enterprise",
+	} {
+		t.Run(model, func(t *testing.T) {
+			require.Empty(t, normalizeKnownOpenAICodexModel(model))
+			require.Equal(t, model, normalizeCodexModel(model))
+		})
+	}
+}

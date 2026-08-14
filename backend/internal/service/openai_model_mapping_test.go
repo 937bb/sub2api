@@ -262,6 +262,32 @@ func TestNormalizeOpenAIModelForUpstream(t *testing.T) {
 			want:    "gpt-5.6-sol",
 		},
 		{
+			name: "oauth preserves exact configured GPT-5.6 upstream target",
+			account: &Account{
+				Type: AccountTypeOAuth,
+				Credentials: map[string]any{
+					"model_mapping": map[string]any{
+						"gpt-5.6-sol": "gpt-5.6-sol-wm",
+					},
+				},
+			},
+			model: "gpt-5.6-sol-wm",
+			want:  "gpt-5.6-sol-wm",
+		},
+		{
+			name: "oauth preserves generic configured upstream target",
+			account: &Account{
+				Type: AccountTypeOAuth,
+				Credentials: map[string]any{
+					"model_mapping": map[string]any{
+						"public-model": "gpt-5.4-high",
+					},
+				},
+			},
+			model: "gpt-5.4-high",
+			want:  "gpt-5.4-high",
+		},
+		{
 			name:    "oauth preserves unknown non codex model",
 			account: &Account{Type: AccountTypeOAuth},
 			model:   "gemini-3-flash-preview",

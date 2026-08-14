@@ -38,9 +38,26 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	startTime time.Time,
 ) (*OpenAIForwardResult, error) {
 	upstreamPassthroughModel := ""
+	mappedRequestModel := strings.TrimSpace(reqModel)
+	if account != nil {
+		if mappedModel, matched := account.ResolveMappedModel(reqModel); matched {
+			if mappedModel = strings.TrimSpace(mappedModel); mappedModel != "" {
+				mappedRequestModel = mappedModel
+				upstreamPassthroughModel = mappedModel
+				if mappedModel != strings.TrimSpace(reqModel) {
+					nextBody, setErr := sjson.SetBytes(body, "model", mappedModel)
+					if setErr != nil {
+						return nil, fmt.Errorf("set passthrough mapped model: %w", setErr)
+					}
+					body = nextBody
+					attemptImageIntentInvalidated = true
+				}
+			}
+		}
+	}
 	if isOpenAIResponsesCompactPath(c) {
-		compactMappedModel := resolveOpenAICompactForwardModel(account, reqModel)
-		if compactMappedModel != "" && compactMappedModel != reqModel {
+		compactMappedModel := resolveOpenAICompactForwardModel(account, mappedRequestModel)
+		if compactMappedModel != "" && compactMappedModel != mappedRequestModel {
 			nextBody, setErr := sjson.SetBytes(body, "model", compactMappedModel)
 			if setErr != nil {
 				return nil, fmt.Errorf("set compact passthrough model: %w", setErr)
