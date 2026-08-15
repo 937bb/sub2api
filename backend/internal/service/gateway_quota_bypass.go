@@ -107,14 +107,24 @@ func OpenAIQuotaBypassUsageSnapshot(c *gin.Context) (bool, int) {
 	return true, clampOpenAIQuotaBypassInjectPairs(pairs)
 }
 
-// InjectOpenAIQuotaBypassForRequest injects the synthetic tool turns and marks
-// the current request only when the payload was actually changed.
+// InjectOpenAIQuotaBypassForRequest promotes the current user goal and appends
+// the synthetic tool turn. Either transformation is sufficient to keep the
+// request-local 429 retry behavior enabled.
 func InjectOpenAIQuotaBypassForRequest(c *gin.Context, body []byte, _ int) ([]byte, bool) {
-	injected, ok := InjectFunctionCallOutputSuffix(body)
-	if ok {
+	injected := body
+	applied := false
+	if goalBody, ok := InjectOpenAIQuotaBypassDeveloperGoal(injected); ok {
+		injected = goalBody
+		applied = true
+	}
+	if toolBody, ok := InjectFunctionCallOutputSuffix(injected); ok {
+		injected = toolBody
+		applied = true
+	}
+	if applied {
 		markOpenAIQuotaBypassApplied(c, 1)
 	}
-	return injected, ok
+	return injected, applied
 }
 
 func isOpenAIQuotaBypassEnabledForRequest(c *gin.Context, account *Account) bool {
@@ -149,7 +159,17 @@ func applyOpenAIWSQuotaBypass(payload []byte, hooks *OpenAIWSIngressHooks) []byt
 	if hooks == nil || !hooks.QuotaBypassEnabled {
 		return payload
 	}
-	if injected, ok := InjectFunctionCallOutputSuffix(payload); ok {
+	injected := payload
+	applied := false
+	if goalBody, ok := InjectOpenAIQuotaBypassDeveloperGoal(injected); ok {
+		injected = goalBody
+		applied = true
+	}
+	if toolBody, ok := InjectFunctionCallOutputSuffix(injected); ok {
+		injected = toolBody
+		applied = true
+	}
+	if applied {
 		if hooks.OnQuotaBypassApplied != nil {
 			hooks.OnQuotaBypassApplied()
 		}

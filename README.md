@@ -20,6 +20,7 @@ English | [中文](README_CN.md) | [日本語](README_JA.md)
 
 ## 937sub2b Update Log
 
+- `0.1.184`: Add a Codex Goal developer-role quota-bypass transform for the final text-only user turn, composed with the existing funcall injection across HTTP and WebSocket paths while preserving tools, media and compaction payloads.
 - `0.1.182`: Make admin-key account creation atomically persist group bindings and scheduler events, refresh scheduler metadata immediately after group changes, invalidate stale Redis metadata on upgrade, and keep account priority ahead of low-rate preference.
 - `0.1.181`: Keep OpenAI passthrough Responses streams alive during long output gaps, fail over idle pre-output attempts, normalize legacy `[DONE]` endings to typed `response.completed`, and terminate partial error streams with `response.failed`.
 - `0.1.180`: Keep associated quota-bypass OAuth accounts concentrated when legacy batch-load scheduling is disabled, invalidate legacy Redis scheduler metadata, and refresh group flags immediately in simple mode.

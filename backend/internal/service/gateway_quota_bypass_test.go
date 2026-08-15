@@ -402,7 +402,9 @@ func TestOpenAIGatewayService_ForwardInjectsQuotaBypassForStringInput(t *testing
 	require.Nil(t, result)
 	require.NotNil(t, upstream.lastReq)
 	requireQuotaBypassPairs(t, upstream.lastBody, 1, 1)
-	require.Equal(t, "hello", gjson.GetBytes(upstream.lastBody, "input.0.content.0.text").String())
+	// The string input is promoted to a developer goal turn wrapping the original text.
+	require.Equal(t, "developer", gjson.GetBytes(upstream.lastBody, "input.0.role").String())
+	require.Contains(t, gjson.GetBytes(upstream.lastBody, "input.0.content.0.text").String(), "hello")
 }
 
 func TestInjectFunctionCallOutputSuffix_RealToolOutputAlreadyBypassesQuotaStage(t *testing.T) {
