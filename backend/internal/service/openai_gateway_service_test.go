@@ -1246,7 +1246,7 @@ func TestOpenAISelectAccountWithLoadAwareness_PriorityPrecedesQuotaBypass(t *tes
 	require.Equal(t, int64(1), selection.Account.ID)
 }
 
-func TestOpenAISelectAccountWithLoadAwareness_NormalGroupRebindsRegularStickyToAssociatedQuotaBypass(t *testing.T) {
+func TestOpenAISelectAccountWithLoadAwareness_CurrentGroupWithoutConcentrationKeepsRegularSticky(t *testing.T) {
 	groupAID := int64(101)
 	groupBID := int64(102)
 	groupCID := int64(103)
@@ -1307,12 +1307,12 @@ func TestOpenAISelectAccountWithLoadAwareness_NormalGroupRebindsRegularStickyToA
 	require.NoError(t, err)
 	require.NotNil(t, selection)
 	require.NotNil(t, selection.Account)
-	require.Equal(t, int64(10101), selection.Account.ID)
-	require.Equal(t, []int64{10101}, acquiredIDs)
-	require.Equal(t, int64(10101), cache.sessionBindings["openai:group-c-session"])
+	require.Equal(t, int64(10102), selection.Account.ID)
+	require.Equal(t, []int64{10102}, acquiredIDs)
+	require.Equal(t, int64(10102), cache.sessionBindings["openai:group-c-session"])
 }
 
-func TestOpenAISelectAccountWithLoadAwareness_NormalGroupSpillsAfterAssociatedQuotaBypassFull(t *testing.T) {
+func TestOpenAISelectAccountWithLoadAwareness_CurrentGroupWithoutConcentrationDoesNotProbeAssociatedBypassFirst(t *testing.T) {
 	groupAID := int64(111)
 	groupBID := int64(112)
 	groupCID := int64(113)
@@ -1361,7 +1361,7 @@ func TestOpenAISelectAccountWithLoadAwareness_NormalGroupSpillsAfterAssociatedQu
 	require.NotNil(t, selection)
 	require.NotNil(t, selection.Account)
 	require.Equal(t, int64(11102), selection.Account.ID)
-	require.Equal(t, []int64{11101, 11102}, acquiredIDs)
+	require.Equal(t, []int64{11102}, acquiredIDs)
 	require.Equal(t, int64(11102), cache.sessionBindings["openai:group-c-spill"])
 }
 

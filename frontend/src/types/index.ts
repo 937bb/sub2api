@@ -553,6 +553,7 @@ export interface Group {
   max_reasoning_effort?: string // OpenAI/Codex reasoning ceiling; empty means unlimited
   reasoning_effort_mappings?: ReasoningEffortMapping[]
   quota_bypass_enabled?: boolean
+  quota_bypass_concentrated_scheduling_enabled?: boolean
   is_exclusive: boolean
   status: 'active' | 'inactive'
   subscription_type: SubscriptionType
@@ -814,6 +815,7 @@ export interface CreateGroupRequest {
   max_reasoning_effort?: string
   reasoning_effort_mappings?: ReasoningEffortMapping[]
   quota_bypass_enabled?: boolean
+  quota_bypass_concentrated_scheduling_enabled?: boolean
   require_oauth_only?: boolean
   require_privacy_set?: boolean
   // 从指定分组复制账号
@@ -875,6 +877,7 @@ export interface UpdateGroupRequest {
   max_reasoning_effort?: string
   reasoning_effort_mappings?: ReasoningEffortMapping[]
   quota_bypass_enabled?: boolean
+  quota_bypass_concentrated_scheduling_enabled?: boolean
   require_oauth_only?: boolean
   require_privacy_set?: boolean
   copy_accounts_from_group_ids?: number[]

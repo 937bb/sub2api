@@ -123,7 +123,8 @@ type APIKeyAuthGroupSnapshot struct {
 	PeakEnd            string  `json:"peak_end"`
 	PeakRateMultiplier float64 `json:"peak_rate_multiplier"`
 
-	QuotaBypassEnabled bool `json:"quota_bypass_enabled"`
+	QuotaBypassEnabled                       bool `json:"quota_bypass_enabled"`
+	QuotaBypassConcentratedSchedulingEnabled bool `json:"quota_bypass_concentrated_scheduling_enabled"`
 	// 分组利润控制：调度准入门在直连热路径上读的就是这份快照——门解析
 	// （resolveOpenAIProfitControlGate / resolveProfitControlGroup）优先取
 	// 认证中间件放入 ctx 的 Group，而它正是本快照物化出来的对象，生产绝大

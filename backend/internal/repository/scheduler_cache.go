@@ -950,8 +950,9 @@ func filterSchedulerAccountGroups(accountGroups []service.AccountGroup) []servic
 		var minGroup *service.Group
 		if ag.Group != nil {
 			minGroup = &service.Group{
-				ID:                 ag.Group.ID,
-				QuotaBypassEnabled: ag.Group.QuotaBypassEnabled,
+				ID:                                       ag.Group.ID,
+				QuotaBypassEnabled:                       ag.Group.QuotaBypassEnabled,
+				QuotaBypassConcentratedSchedulingEnabled: ag.Group.QuotaBypassConcentratedSchedulingEnabled,
 			}
 		}
 		filtered = append(filtered, service.AccountGroup{

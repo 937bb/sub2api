@@ -75,6 +75,26 @@ func (r schedulerTestGroupRepo) GetByIDLite(context.Context, int64) (*Group, err
 	return r.group, nil
 }
 
+func newQuotaBypassConcentratedSchedulerTestSnapshot(groupID int64, accounts []Account) *SchedulerSnapshotService {
+	accountPointers := make([]*Account, 0, len(accounts))
+	accountsByID := make(map[int64]*Account, len(accounts))
+	for i := range accounts {
+		accountPointers = append(accountPointers, &accounts[i])
+		accountsByID[accounts[i].ID] = &accounts[i]
+	}
+	return &SchedulerSnapshotService{
+		cache: &openAISnapshotCacheStub{
+			snapshotAccounts: accountPointers,
+			accountsByID:     accountsByID,
+		},
+		groupRepo: schedulerTestGroupRepo{group: &Group{
+			ID:                                       groupID,
+			QuotaBypassEnabled:                       true,
+			QuotaBypassConcentratedSchedulingEnabled: true,
+		}},
+	}
+}
+
 func (r schedulerGroupAwareOpenAIAccountRepo) ListSchedulableByGroupIDAndPlatform(ctx context.Context, groupID int64, platform string) ([]Account, error) {
 	var result []Account
 	for _, acc := range r.accounts {
@@ -1337,7 +1357,7 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_StickyWeightedPreviousR
 	}
 }
 
-func TestOpenAIGatewayService_MovablePreviousResponseYieldsToAssociatedQuotaBypass(t *testing.T) {
+func TestOpenAIGatewayService_AssociatedQuotaBypassDoesNotOverrideCurrentGroupPreviousResponse(t *testing.T) {
 	tests := []struct {
 		name            string
 		previousCanMove bool
@@ -1348,12 +1368,13 @@ func TestOpenAIGatewayService_MovablePreviousResponseYieldsToAssociatedQuotaBypa
 		wantPreviousHit bool
 	}{
 		{
-			name:            "movable same priority yields to bypass",
+			name:            "movable same priority keeps previous without current group concentration",
 			previousCanMove: true,
 			regularPriority: 0,
 			bypassPriority:  0,
-			wantAccountID:   56447,
-			wantLayer:       openAIAccountScheduleLayerLoadBalance,
+			wantAccountID:   56261,
+			wantLayer:       openAIAccountScheduleLayerPreviousResponse,
+			wantPreviousHit: true,
 		},
 		{
 			name:            "unmovable tool chain keeps previous account",
@@ -1434,7 +1455,7 @@ func TestOpenAIGatewayService_MovablePreviousResponseYieldsToAssociatedQuotaBypa
 	}
 }
 
-func TestOpenAIGatewayService_AssociatedQuotaBypassConsumesCapacityBeforeRegularAPIKey(t *testing.T) {
+func TestOpenAIGatewayService_AssociatedQuotaBypassUsesOrdinaryCurrentGroupScheduling(t *testing.T) {
 	resetOpenAIAdvancedSchedulerSettingCacheForTest()
 	defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
 
@@ -1480,10 +1501,12 @@ func TestOpenAIGatewayService_AssociatedQuotaBypassConsumesCapacityBeforeRegular
 		releases = append(releases, selection.ReleaseFunc)
 	}
 
-	for i := 0; i < 100; i++ {
-		require.Equal(t, int64(56447), selectedIDs[i], "request %d must fill the associated bypass account", i+1)
+	selectedSet := make(map[int64]struct{}, 2)
+	for _, accountID := range selectedIDs {
+		selectedSet[accountID] = struct{}{}
 	}
-	require.Equal(t, int64(56261), selectedIDs[100])
+	require.Contains(t, selectedSet, int64(56261))
+	require.Contains(t, selectedSet, int64(56447))
 	for _, release := range releases {
 		if release != nil {
 			release()
@@ -2015,10 +2038,9 @@ func TestOpenAIAccountScheduler_RequestGroupQuotaBypassSkipsSnapshotPause(t *tes
 
 	compatible, reason := scheduler.isAccountRequestCompatibleReason(ctx, account, req)
 	require.True(t, compatible, "request group bypass must keep the account in the scheduler, reason=%s", reason)
-	// Schedulable, but on a neutral quota signal rather than a top score, so the
-	// exhausted account shares concurrency with healthy peers instead of
-	// monopolising it.
-	require.Equal(t, openAIQuotaHeadroomNeutralFactor, openAIQuotaHeadroomFactorForRequest(account, req, time.Now()))
+	// Bypass keeps the account schedulable, while disabled concentration restores
+	// the ordinary exhausted quota score.
+	require.Equal(t, 0.0, openAIQuotaHeadroomFactorForRequest(account, req, time.Now()))
 }
 
 func TestOpenAIAccountScheduler_ResolvesRequestGroupQuotaBypass(t *testing.T) {
@@ -2846,11 +2868,15 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_SessionStickyBusyEscape
 	}
 }
 
-func TestOpenAIGatewayService_SelectAccountWithScheduler_PlusAttachedQuotaBypassPreservesBusyStickySession(t *testing.T) {
+func TestOpenAIGatewayService_SelectAccountWithScheduler_CurrentGroupConcentrationMovesBusyStickySession(t *testing.T) {
 	ctx := context.Background()
 	groupID := int64(10105)
 	bypassGroupID := int64(10106)
-	normalGroup := &Group{ID: groupID, QuotaBypassEnabled: false}
+	normalGroup := &Group{
+		ID:                                       groupID,
+		QuotaBypassEnabled:                       true,
+		QuotaBypassConcentratedSchedulingEnabled: true,
+	}
 	bypassGroup := &Group{ID: bypassGroupID, QuotaBypassEnabled: true}
 	accounts := []Account{
 		{
@@ -2917,7 +2943,18 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_PlusAttachedQuotaBypass
 		},
 	}
 	svc := &OpenAIGatewayService{
-		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: accounts},
+		accountRepo: schedulerTestOpenAIAccountRepo{accounts: accounts},
+		schedulerSnapshot: &SchedulerSnapshotService{
+			cache: &openAISnapshotCacheStub{
+				snapshotAccounts: []*Account{&accounts[0], &accounts[1], &accounts[2]},
+				accountsByID: map[int64]*Account{
+					21501: &accounts[0],
+					21502: &accounts[1],
+					21503: &accounts[2],
+				},
+			},
+			groupRepo: schedulerTestGroupRepo{group: normalGroup},
+		},
 		cache:              cache,
 		cfg:                cfg,
 		rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("true"),
@@ -3939,10 +3976,84 @@ func TestBuildOpenAISelectionOrder_QuotaBypassUsesAllCandidatesInConcentratedOrd
 		},
 	}
 
-	ordered := scheduler.buildOpenAISelectionOrder(OpenAIAccountScheduleRequest{GroupQuotaBypassEnabled: true}, plan)
+	ordered := scheduler.buildOpenAISelectionOrder(OpenAIAccountScheduleRequest{
+		GroupQuotaBypassEnabled:                       true,
+		GroupQuotaBypassConcentratedSchedulingEnabled: true,
+	}, plan)
 	require.Len(t, ordered, 2)
 	require.Equal(t, int64(1), ordered[0].account.ID)
 	require.Equal(t, int64(2), ordered[1].account.ID)
+}
+
+func TestBuildOpenAISelectionOrder_QuotaBypassWithoutConcentrationUsesOrdinaryLoadOrder(t *testing.T) {
+	scheduler := &defaultOpenAIAccountScheduler{}
+	plan := openAIAccountLoadPlan{
+		topK: 1,
+		candidates: []openAIAccountCandidateScore{
+			{account: &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth}, loadInfo: &AccountLoadInfo{AccountID: 1, LoadRate: 80}},
+			{account: &Account{ID: 2, Platform: PlatformOpenAI, Type: AccountTypeOAuth}, loadInfo: &AccountLoadInfo{AccountID: 2, LoadRate: 20}},
+		},
+	}
+
+	ordered := scheduler.buildOpenAISelectionOrder(OpenAIAccountScheduleRequest{
+		GroupQuotaBypassEnabled:                       true,
+		GroupQuotaBypassConcentratedSchedulingEnabled: false,
+	}, plan)
+	require.Len(t, ordered, 1)
+	require.Equal(t, int64(2), ordered[0].account.ID)
+}
+
+func TestResolveOpenAIQuotaBypassSchedulingGroup_RequiresCurrentGroupConcentration(t *testing.T) {
+	groupID := int64(55)
+	tests := []struct {
+		name         string
+		concentrated bool
+		wantGroup    bool
+	}{
+		{name: "disabled uses ordinary scheduler", concentrated: false, wantGroup: false},
+		{name: "enabled activates concentrated scheduler", concentrated: true, wantGroup: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := &OpenAIGatewayService{
+				schedulerSnapshot: &SchedulerSnapshotService{
+					groupRepo: schedulerTestGroupRepo{group: &Group{
+						ID:                                       groupID,
+						QuotaBypassEnabled:                       true,
+						QuotaBypassConcentratedSchedulingEnabled: tt.concentrated,
+					}},
+				},
+			}
+
+			got := svc.resolveOpenAIQuotaBypassSchedulingGroup(context.Background(), &groupID, PlatformOpenAI)
+			require.Equal(t, tt.wantGroup, got != nil)
+		})
+	}
+}
+
+func TestOpenAIQuotaBypassConcentratedForScheduleRequest_IgnoresOtherAttachedGroup(t *testing.T) {
+	account := &Account{
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		AccountGroups: []AccountGroup{{
+			GroupID: 99,
+			Group: &Group{
+				ID:                                       99,
+				QuotaBypassEnabled:                       true,
+				QuotaBypassConcentratedSchedulingEnabled: true,
+			},
+		}},
+	}
+
+	require.False(t, isOpenAIQuotaBypassConcentratedForScheduleRequest(account, OpenAIAccountScheduleRequest{}))
+	require.False(t, isOpenAIQuotaBypassConcentratedForScheduleRequest(account, OpenAIAccountScheduleRequest{
+		GroupQuotaBypassEnabled: true,
+	}))
+	require.True(t, isOpenAIQuotaBypassConcentratedForScheduleRequest(account, OpenAIAccountScheduleRequest{
+		GroupQuotaBypassEnabled:                       true,
+		GroupQuotaBypassConcentratedSchedulingEnabled: true,
+	}))
 }
 
 func TestBuildOpenAISelectionOrder_RequestGroupBypassOverridesStoredFalse(t *testing.T) {
@@ -3970,7 +4081,10 @@ func TestBuildOpenAISelectionOrder_RequestGroupBypassOverridesStoredFalse(t *tes
 		},
 	}
 
-	ordered := scheduler.buildOpenAISelectionOrder(OpenAIAccountScheduleRequest{GroupQuotaBypassEnabled: true}, plan)
+	ordered := scheduler.buildOpenAISelectionOrder(OpenAIAccountScheduleRequest{
+		GroupQuotaBypassEnabled:                       true,
+		GroupQuotaBypassConcentratedSchedulingEnabled: true,
+	}, plan)
 	require.Len(t, ordered, 3)
 	require.Equal(t, []int64{1, 2, 3}, []int64{
 		ordered[0].account.ID,
@@ -3990,7 +4104,10 @@ func TestBuildOpenAISelectionOrder_PriorityPrecedesQuotaBypass(t *testing.T) {
 		},
 	}
 
-	ordered := scheduler.buildOpenAISelectionOrder(OpenAIAccountScheduleRequest{}, plan)
+	ordered := scheduler.buildOpenAISelectionOrder(OpenAIAccountScheduleRequest{
+		GroupQuotaBypassEnabled:                       true,
+		GroupQuotaBypassConcentratedSchedulingEnabled: true,
+	}, plan)
 	require.Equal(t, []int64{1, 2, 3}, []int64{ordered[0].account.ID, ordered[1].account.ID, ordered[2].account.ID})
 }
 
@@ -4039,7 +4156,11 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_QuotaBypassConcentrates
 			snapshotAccounts: accountPointers,
 			accountsByID:     map[int64]*Account{6101: &accounts[0], 6102: &accounts[1]},
 		},
-		groupRepo: schedulerTestGroupRepo{group: &Group{ID: groupID, QuotaBypassEnabled: true}},
+		groupRepo: schedulerTestGroupRepo{group: &Group{
+			ID:                                       groupID,
+			QuotaBypassEnabled:                       true,
+			QuotaBypassConcentratedSchedulingEnabled: true,
+		}},
 	}
 	svc := &OpenAIGatewayService{
 		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: accounts},
@@ -4066,13 +4187,17 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_QuotaBypassConcentrates
 	require.Equal(t, []int64{6101, 6102}, acquiredIDs)
 }
 
-func TestOpenAIGatewayService_LegacyWithoutBatchLoadConcentratesAssociatedQuotaBypass(t *testing.T) {
+func TestOpenAIGatewayService_LegacyWithoutBatchLoadConcentratesCurrentGroupBypass(t *testing.T) {
 	resetOpenAIAdvancedSchedulerSettingCacheForTest()
 	defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
 
 	normalGroupID := int64(4211)
 	bypassGroupID := int64(9911)
-	normalGroup := &Group{ID: normalGroupID}
+	normalGroup := &Group{
+		ID:                                       normalGroupID,
+		QuotaBypassEnabled:                       true,
+		QuotaBypassConcentratedSchedulingEnabled: true,
+	}
 	bypassGroup := &Group{ID: bypassGroupID, QuotaBypassEnabled: true}
 	accounts := []Account{
 		{
@@ -4251,6 +4376,7 @@ func TestOpenAIGatewayService_AdvancedQuotaBypassLargePoolSkipsFullRedisLoadRead
 	cfg.Gateway.OpenAIWS.LBTopK = 3
 	svc := &OpenAIGatewayService{
 		accountRepo:        schedulerGroupAwareOpenAIAccountRepo{schedulerTestOpenAIAccountRepo{accounts: accounts}},
+		schedulerSnapshot:  newQuotaBypassConcentratedSchedulerTestSnapshot(groupID, accounts),
 		cfg:                cfg,
 		rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("true"),
 		concurrencyService: NewConcurrencyService(concurrencyCache),
@@ -4301,6 +4427,7 @@ func TestOpenAIGatewayService_AdvancedQuotaBypassChecksNextWindowBeforeRegularFa
 	cfg.Gateway.OpenAIWS.LBTopK = 1
 	svc := &OpenAIGatewayService{
 		accountRepo:        schedulerGroupAwareOpenAIAccountRepo{schedulerTestOpenAIAccountRepo{accounts: accounts}},
+		schedulerSnapshot:  newQuotaBypassConcentratedSchedulerTestSnapshot(groupID, accounts),
 		cfg:                cfg,
 		rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("true"),
 		concurrencyService: NewConcurrencyService(concurrencyCache),
@@ -4348,6 +4475,7 @@ func TestOpenAIGatewayService_AdvancedQuotaBypassUsesRegularFallbackAfterProbeLi
 	acquiredIDs := make([]int64, 0, openAIAccountSelectionProbeLimit+1)
 	svc := &OpenAIGatewayService{
 		accountRepo:        schedulerGroupAwareOpenAIAccountRepo{schedulerTestOpenAIAccountRepo{accounts: accounts}},
+		schedulerSnapshot:  newQuotaBypassConcentratedSchedulerTestSnapshot(groupID, accounts),
 		cfg:                &config.Config{},
 		rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("true"),
 		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{acquireResults: acquireResults, acquiredIDs: &acquiredIDs}),
@@ -4393,6 +4521,7 @@ func TestOpenAIGatewayService_AdvancedQuotaBypassWaitsOnNextUnprobedAccountAfter
 	acquiredIDs := make([]int64, 0, openAIAccountSelectionProbeLimit)
 	svc := &OpenAIGatewayService{
 		accountRepo:        schedulerGroupAwareOpenAIAccountRepo{schedulerTestOpenAIAccountRepo{accounts: accounts}},
+		schedulerSnapshot:  newQuotaBypassConcentratedSchedulerTestSnapshot(groupID, accounts),
 		cfg:                &config.Config{},
 		rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("true"),
 		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{acquireResults: acquireResults, acquiredIDs: &acquiredIDs}),
@@ -4444,6 +4573,7 @@ func TestOpenAIGatewayService_LegacyQuotaBypassLargePoolSkipsFullRedisLoadRead(t
 	}
 	svc := &OpenAIGatewayService{
 		accountRepo:        schedulerGroupAwareOpenAIAccountRepo{schedulerTestOpenAIAccountRepo{accounts: accounts}},
+		schedulerSnapshot:  newQuotaBypassConcentratedSchedulerTestSnapshot(groupID, accounts),
 		concurrencyService: NewConcurrencyService(concurrencyCache),
 	}
 
@@ -4481,7 +4611,8 @@ func TestOpenAIGatewayService_LegacyQuotaBypassChecksNextAccountBeforeRegularFal
 
 	acquiredIDs := make([]int64, 0, openAIQuotaBypassMinWindowSize+1)
 	svc := &OpenAIGatewayService{
-		accountRepo: schedulerGroupAwareOpenAIAccountRepo{schedulerTestOpenAIAccountRepo{accounts: accounts}},
+		accountRepo:       schedulerGroupAwareOpenAIAccountRepo{schedulerTestOpenAIAccountRepo{accounts: accounts}},
+		schedulerSnapshot: newQuotaBypassConcentratedSchedulerTestSnapshot(groupID, accounts),
 		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{
 			acquireResults: acquireResults,
 			acquiredIDs:    &acquiredIDs,
@@ -4510,7 +4641,8 @@ func TestOpenAIGatewayService_LegacyQuotaBypassAdvancesWhenBatchLoadFails(t *tes
 	}
 	acquiredIDs := make([]int64, 0, 2)
 	svc := &OpenAIGatewayService{
-		accountRepo: schedulerGroupAwareOpenAIAccountRepo{schedulerTestOpenAIAccountRepo{accounts: accounts}},
+		accountRepo:       schedulerGroupAwareOpenAIAccountRepo{schedulerTestOpenAIAccountRepo{accounts: accounts}},
+		schedulerSnapshot: newQuotaBypassConcentratedSchedulerTestSnapshot(groupID, accounts),
 		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{
 			loadBatchErr:   errors.New("redis batch read unavailable"),
 			acquireResults: map[int64]bool{180_001: false, 180_002: true, 180_003: true},
@@ -4552,7 +4684,8 @@ func TestOpenAIGatewayService_LegacyQuotaBypassProbesPastThirtyTwoAccounts(t *te
 
 	acquiredIDs := make([]int64, 0, targetOffset+1)
 	svc := &OpenAIGatewayService{
-		accountRepo: schedulerGroupAwareOpenAIAccountRepo{schedulerTestOpenAIAccountRepo{accounts: accounts}},
+		accountRepo:       schedulerGroupAwareOpenAIAccountRepo{schedulerTestOpenAIAccountRepo{accounts: accounts}},
+		schedulerSnapshot: newQuotaBypassConcentratedSchedulerTestSnapshot(groupID, accounts),
 		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{
 			acquireResults: acquireResults,
 			acquiredIDs:    &acquiredIDs,
@@ -4569,7 +4702,7 @@ func TestOpenAIGatewayService_LegacyQuotaBypassProbesPastThirtyTwoAccounts(t *te
 	require.NotContains(t, acquiredIDs, regularID)
 }
 
-func TestOpenAIGatewayService_SelectAccountWithScheduler_NormalGroupRebindsRegularStickyToAssociatedBypassAccount(t *testing.T) {
+func TestOpenAIGatewayService_SelectAccountWithScheduler_CurrentGroupConcentrationRebindsRegularSticky(t *testing.T) {
 	resetOpenAIAdvancedSchedulerSettingCacheForTest()
 	defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
 
@@ -4578,7 +4711,11 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_NormalGroupRebindsRegul
 	groupCID := int64(43)
 	groupA := &Group{ID: groupAID, QuotaBypassEnabled: true}
 	groupB := &Group{ID: groupBID}
-	groupC := &Group{ID: groupCID}
+	groupC := &Group{
+		ID:                                       groupCID,
+		QuotaBypassEnabled:                       true,
+		QuotaBypassConcentratedSchedulingEnabled: true,
+	}
 	accounts := []Account{
 		{
 			ID:          6201,
@@ -4660,13 +4797,17 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_NormalGroupRebindsRegul
 	require.Equal(t, int64(6201), cache.sessionBindings["openai:group-c-session"])
 }
 
-func TestOpenAIGatewayService_SelectAccountWithScheduler_NormalGroupSpillsAfterAssociatedBypassAccountFull(t *testing.T) {
+func TestOpenAIGatewayService_SelectAccountWithScheduler_CurrentGroupConcentrationSpillsAfterFull(t *testing.T) {
 	resetOpenAIAdvancedSchedulerSettingCacheForTest()
 	defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
 
 	normalGroupID := int64(42)
 	bypassGroupID := int64(99)
-	normalGroup := &Group{ID: normalGroupID, QuotaBypassEnabled: false}
+	normalGroup := &Group{
+		ID:                                       normalGroupID,
+		QuotaBypassEnabled:                       true,
+		QuotaBypassConcentratedSchedulingEnabled: true,
+	}
 	bypassGroup := &Group{ID: bypassGroupID, QuotaBypassEnabled: true}
 	accounts := []Account{
 		{
@@ -4748,7 +4889,11 @@ func TestOpenAIGatewayService_QuotaBypassConcentratesAcrossGatewayInstances(t *t
 
 	normalGroupID := int64(4210)
 	bypassGroupID := int64(9910)
-	normalGroup := &Group{ID: normalGroupID}
+	normalGroup := &Group{
+		ID:                                       normalGroupID,
+		QuotaBypassEnabled:                       true,
+		QuotaBypassConcentratedSchedulingEnabled: true,
+	}
 	bypassGroup := &Group{ID: bypassGroupID, QuotaBypassEnabled: true}
 	accounts := []Account{
 		{
@@ -4782,6 +4927,7 @@ func TestOpenAIGatewayService_QuotaBypassConcentratesAcrossGatewayInstances(t *t
 	newGateway := func() *OpenAIGatewayService {
 		return &OpenAIGatewayService{
 			accountRepo:        schedulerGroupAwareOpenAIAccountRepo{schedulerTestOpenAIAccountRepo{accounts: accounts}},
+			schedulerSnapshot:  newQuotaBypassConcentratedSchedulerTestSnapshot(normalGroupID, accounts),
 			cfg:                &config.Config{},
 			rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("true"),
 			concurrencyService: NewConcurrencyService(sharedCache),

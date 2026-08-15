@@ -78,22 +78,25 @@ type OpenAIAccountScheduleRequest struct {
 	// relying on AccountGroups metadata here can incorrectly auto-pause a
 	// quota-bypass account at 100% usage.
 	GroupQuotaBypassEnabled bool
-	Platform                string
-	SessionHash             string
-	StickyAccountID         int64
-	StickyPreviousAccountID int64
-	StickyWeighted          bool
-	SubscriptionPriority    bool
-	PreserveStickyBinding   bool
-	PreviousResponseID      string
-	PreviousResponseCanMove bool
-	UseUpstreamTokenCost    bool
-	RequestedModel          string
-	RequiredTransport       OpenAIUpstreamTransport
-	RequiredCapability      OpenAIEndpointCapability
-	RequiredImageCapability OpenAIImagesCapability
-	RequireCompact          bool
-	ExcludedIDs             map[int64]struct{}
+	// GroupQuotaBypassConcentratedSchedulingEnabled is resolved only from the
+	// current request group and gates Bypass-first fill-first scheduling.
+	GroupQuotaBypassConcentratedSchedulingEnabled bool
+	Platform                                      string
+	SessionHash                                   string
+	StickyAccountID                               int64
+	StickyPreviousAccountID                       int64
+	StickyWeighted                                bool
+	SubscriptionPriority                          bool
+	PreserveStickyBinding                         bool
+	PreviousResponseID                            string
+	PreviousResponseCanMove                       bool
+	UseUpstreamTokenCost                          bool
+	RequestedModel                                string
+	RequiredTransport                             OpenAIUpstreamTransport
+	RequiredCapability                            OpenAIEndpointCapability
+	RequiredImageCapability                       OpenAIImagesCapability
+	RequireCompact                                bool
+	ExcludedIDs                                   map[int64]struct{}
 
 	// prefetchedAccounts avoids a second scheduler snapshot read when a soft
 	// session binding must yield to quota-bypass concentration.
@@ -427,6 +430,7 @@ func (s *defaultOpenAIAccountScheduler) Select(
 	req.SchedulingGroup = s.resolveRequestGroup(ctx, req)
 	if req.SchedulingGroup != nil {
 		req.GroupQuotaBypassEnabled = req.SchedulingGroup.QuotaBypassEnabled
+		req.GroupQuotaBypassConcentratedSchedulingEnabled = req.SchedulingGroup.QuotaBypassConcentratedSchedulingEnabled
 	}
 
 	previousResponseID := strings.TrimSpace(req.PreviousResponseID)
@@ -557,7 +561,7 @@ func (s *defaultOpenAIAccountScheduler) shouldYieldOpenAIPreviousResponseToQuota
 				continue
 			}
 		}
-		quotaBypass := isOpenAIQuotaBypassEligibleForScheduleRequest(account, *req)
+		quotaBypass := isOpenAIQuotaBypassConcentratedForScheduleRequest(account, *req)
 		if account.ID == req.StickyPreviousAccountID && quotaBypass {
 			return false
 		}
@@ -579,8 +583,11 @@ func (s *defaultOpenAIAccountScheduler) resolveRequestGroup(ctx context.Context,
 	if req.SchedulingGroup != nil {
 		return req.SchedulingGroup
 	}
-	if req.GroupQuotaBypassEnabled {
-		return &Group{QuotaBypassEnabled: true}
+	if req.GroupQuotaBypassEnabled || req.GroupQuotaBypassConcentratedSchedulingEnabled {
+		return &Group{
+			QuotaBypassEnabled:                       req.GroupQuotaBypassEnabled,
+			QuotaBypassConcentratedSchedulingEnabled: req.GroupQuotaBypassConcentratedSchedulingEnabled,
+		}
 	}
 	if req.GroupID == nil || s == nil || s.service == nil || s.service.schedulerSnapshot == nil {
 		return nil
@@ -642,7 +649,7 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 	// Quota bypass depends on keeping an established Codex session on the same
 	// account. This is plan-agnostic: Plus, Team and other OAuth plans use the
 	// same account/group eligibility rule.
-	preserveQuotaBypassSession := isOpenAIQuotaBypassEligibleForScheduleRequest(account, req)
+	preserveQuotaBypassSession := isOpenAIQuotaBypassConcentratedForScheduleRequest(account, req)
 	// Free-tier soft gate: sticky session must not pin an over-quota free OAuth account.
 	// Admin QueryQuota / import probes do not use this path.
 	if account != nil && len(s.filterGrokFreeQuotaAccounts(ctx, []Account{*account})) == 0 {
@@ -1285,7 +1292,7 @@ func partitionOpenAIQuotaBypassCandidates(pool []openAIAccountCandidateScore, re
 	bypass := make([]openAIAccountCandidateScore, 0, len(pool))
 	regular := make([]openAIAccountCandidateScore, 0, len(pool))
 	for _, candidate := range pool {
-		if isOpenAIQuotaBypassEligibleForScheduleRequest(candidate.account, req) {
+		if isOpenAIQuotaBypassConcentratedForScheduleRequest(candidate.account, req) {
 			bypass = append(bypass, candidate)
 			continue
 		}
@@ -1302,7 +1309,7 @@ func hasOpenAIQuotaBypassCandidatesForScheduleRequest(accounts []Account, req Op
 				continue
 			}
 		}
-		if isOpenAIQuotaBypassEligibleForScheduleRequest(account, req) {
+		if isOpenAIQuotaBypassConcentratedForScheduleRequest(account, req) {
 			return true
 		}
 	}
@@ -1423,7 +1430,7 @@ func (s *defaultOpenAIAccountScheduler) tryAcquireOpenAISelectionOrderWithBudget
 		if candidate.account == nil {
 			continue
 		}
-		quotaBypassCandidate := isOpenAIQuotaBypassEligibleForScheduleRequest(candidate.account, req)
+		quotaBypassCandidate := isOpenAIQuotaBypassConcentratedForScheduleRequest(candidate.account, req)
 		if candidate.loadKnown && candidate.account.Concurrency > 0 &&
 			candidate.loadInfo.CurrentConcurrency >= candidate.account.Concurrency {
 			if quotaBypassCandidate {
@@ -1486,7 +1493,7 @@ func (s *defaultOpenAIAccountScheduler) tryAcquireOpenAISelectionOrderWithBudget
 			_ = s.service.bindOpenAIStickySessionDuringSelection(ctx, req.GroupID, req.SessionHash, fresh.ID)
 		}
 		releaseFunc := result.ReleaseFunc
-		if isOpenAIQuotaBypassEligibleForScheduleRequest(fresh, req) {
+		if isOpenAIQuotaBypassConcentratedForScheduleRequest(fresh, req) {
 			releaseFunc = s.service.wrapQuotaBypassAccountRelease(req.GroupID, req.Platform, fresh, releaseFunc)
 		}
 		return attachSelectionProfitGate(ctx, &AccountSelectionResult{
@@ -1748,7 +1755,7 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 		// Quota-bypass accounts use the atomic fill-first cursor below. Reading
 		// every bypass account's Redis load on every request defeats large-pool
 		// scaling and is unnecessary because AcquireAccountSlot is authoritative.
-		if !isOpenAIQuotaBypassEligibleForScheduleRequest(account, req) {
+		if !isOpenAIQuotaBypassConcentratedForScheduleRequest(account, req) {
 			loadReq = append(loadReq, AccountWithConcurrency{
 				ID:             account.ID,
 				MaxConcurrency: account.EffectiveLoadFactor(),
@@ -1837,7 +1844,7 @@ func (s *defaultOpenAIAccountScheduler) trySelectByLoadBalancePool(
 	budget *openAISelectionProbeBudget,
 ) openAIAccountLoadSelectionAttempt {
 	for _, account := range filtered {
-		if isOpenAIQuotaBypassEligibleForScheduleRequest(account, req) {
+		if isOpenAIQuotaBypassConcentratedForScheduleRequest(account, req) {
 			budget.enableLimit()
 			break
 		}
@@ -1884,7 +1891,7 @@ func (s *defaultOpenAIAccountScheduler) trySelectByLoadBalancePool(
 	// without leaving the request waiting outside a large pool.
 	for cursorProbe := 1; plan.quotaBypassHasMore && cursorProbe < openAIAccountSelectionProbeLimit && !budget.quotaBypassProbeExhausted(); cursorProbe++ {
 		for _, candidate := range plan.selectionOrder {
-			if isOpenAIQuotaBypassEligibleForScheduleRequest(candidate.account, req) {
+			if isOpenAIQuotaBypassConcentratedForScheduleRequest(candidate.account, req) {
 				s.service.markQuotaBypassAccountFull(req.GroupID, req.Platform, candidate.account)
 			}
 		}
@@ -1961,7 +1968,7 @@ func filterUnattemptedOpenAIQuotaBypassAccounts(
 	}
 	filtered := make([]*Account, 0, len(accounts))
 	for _, account := range accounts {
-		if account != nil && isOpenAIQuotaBypassEligibleForScheduleRequest(account, req) && budget.wasAttempted(account.ID) {
+		if account != nil && isOpenAIQuotaBypassConcentratedForScheduleRequest(account, req) && budget.wasAttempted(account.ID) {
 			continue
 		}
 		filtered = append(filtered, account)
@@ -1991,7 +1998,7 @@ func openAICostOverflowExpanded(req OpenAIAccountScheduleRequest, plan openAIAcc
 func buildOpenAIAccountLoadRequest(accounts []*Account, req OpenAIAccountScheduleRequest) []AccountWithConcurrency {
 	loadReq := make([]AccountWithConcurrency, 0, len(accounts))
 	for _, account := range accounts {
-		if account == nil || isOpenAIQuotaBypassEligibleForScheduleRequest(account, req) {
+		if account == nil || isOpenAIQuotaBypassConcentratedForScheduleRequest(account, req) {
 			continue
 		}
 		loadReq = append(loadReq, AccountWithConcurrency{
@@ -2110,6 +2117,13 @@ func isOpenAIQuotaBypassEligibleForScheduleRequest(account *Account, req OpenAIA
 		return true
 	}
 	if !req.GroupQuotaBypassEnabled {
+		return false
+	}
+	return IsQuotaBypassEligible(account, &Group{QuotaBypassEnabled: true})
+}
+
+func isOpenAIQuotaBypassConcentratedForScheduleRequest(account *Account, req OpenAIAccountScheduleRequest) bool {
+	if !req.GroupQuotaBypassEnabled || !req.GroupQuotaBypassConcentratedSchedulingEnabled {
 		return false
 	}
 	return IsQuotaBypassEligible(account, &Group{QuotaBypassEnabled: true})
@@ -3206,6 +3220,10 @@ func openAIQuotaHeadroomFactor(account *Account, now time.Time) float64 {
 	if IsAccountQuotaBypassEligible(account) {
 		return openAIQuotaHeadroomNeutralFactor
 	}
+	return openAIQuotaHeadroomFactorRaw(account, now)
+}
+
+func openAIQuotaHeadroomFactorRaw(account *Account, now time.Time) float64 {
 	if account == nil || len(account.Extra) == 0 || openAIQuotaHeadroomSnapshotStale(account.Extra, now) {
 		return openAIQuotaHeadroomNeutralFactor
 	}
@@ -3226,13 +3244,10 @@ func openAIQuotaHeadroomFactor(account *Account, now time.Time) float64 {
 }
 
 func openAIQuotaHeadroomFactorForRequest(account *Account, req OpenAIAccountScheduleRequest, now time.Time) float64 {
-	// The request group can enable bypass for an account whose own snapshot does
-	// not carry a bypass group (scheduler snapshots keep only a minimal group).
-	// Same neutral-signal reasoning as openAIQuotaHeadroomFactor.
-	if req.GroupQuotaBypassEnabled && IsQuotaBypassEligible(account, &Group{QuotaBypassEnabled: true}) {
+	if isOpenAIQuotaBypassConcentratedForScheduleRequest(account, req) {
 		return openAIQuotaHeadroomNeutralFactor
 	}
-	return openAIQuotaHeadroomFactor(account, now)
+	return openAIQuotaHeadroomFactorRaw(account, now)
 }
 
 func openAIQuotaHeadroomSnapshotStale(extra map[string]any, now time.Time) bool {

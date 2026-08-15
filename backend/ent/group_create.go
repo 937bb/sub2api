@@ -801,6 +801,20 @@ func (_c *GroupCreate) SetNillableQuotaBypassEnabled(v *bool) *GroupCreate {
 	return _c
 }
 
+// SetQuotaBypassConcentratedSchedulingEnabled sets the "quota_bypass_concentrated_scheduling_enabled" field.
+func (_c *GroupCreate) SetQuotaBypassConcentratedSchedulingEnabled(v bool) *GroupCreate {
+	_c.mutation.SetQuotaBypassConcentratedSchedulingEnabled(v)
+	return _c
+}
+
+// SetNillableQuotaBypassConcentratedSchedulingEnabled sets the "quota_bypass_concentrated_scheduling_enabled" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableQuotaBypassConcentratedSchedulingEnabled(v *bool) *GroupCreate {
+	if v != nil {
+		_c.SetQuotaBypassConcentratedSchedulingEnabled(*v)
+	}
+	return _c
+}
+
 // SetProfitControlEnabled sets the "profit_control_enabled" field.
 func (_c *GroupCreate) SetProfitControlEnabled(v bool) *GroupCreate {
 	_c.mutation.SetProfitControlEnabled(v)
@@ -1120,6 +1134,10 @@ func (_c *GroupCreate) defaults() error {
 		v := group.DefaultQuotaBypassEnabled
 		_c.mutation.SetQuotaBypassEnabled(v)
 	}
+	if _, ok := _c.mutation.QuotaBypassConcentratedSchedulingEnabled(); !ok {
+		v := group.DefaultQuotaBypassConcentratedSchedulingEnabled
+		_c.mutation.SetQuotaBypassConcentratedSchedulingEnabled(v)
+	}
 	if _, ok := _c.mutation.ProfitControlEnabled(); !ok {
 		v := group.DefaultProfitControlEnabled
 		_c.mutation.SetProfitControlEnabled(v)
@@ -1312,6 +1330,9 @@ func (_c *GroupCreate) check() error {
 	}
 	if _, ok := _c.mutation.QuotaBypassEnabled(); !ok {
 		return &ValidationError{Name: "quota_bypass_enabled", err: errors.New(`ent: missing required field "Group.quota_bypass_enabled"`)}
+	}
+	if _, ok := _c.mutation.QuotaBypassConcentratedSchedulingEnabled(); !ok {
+		return &ValidationError{Name: "quota_bypass_concentrated_scheduling_enabled", err: errors.New(`ent: missing required field "Group.quota_bypass_concentrated_scheduling_enabled"`)}
 	}
 	if _, ok := _c.mutation.ProfitControlEnabled(); !ok {
 		return &ValidationError{Name: "profit_control_enabled", err: errors.New(`ent: missing required field "Group.profit_control_enabled"`)}
@@ -1580,6 +1601,10 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.QuotaBypassEnabled(); ok {
 		_spec.SetField(group.FieldQuotaBypassEnabled, field.TypeBool, value)
 		_node.QuotaBypassEnabled = value
+	}
+	if value, ok := _c.mutation.QuotaBypassConcentratedSchedulingEnabled(); ok {
+		_spec.SetField(group.FieldQuotaBypassConcentratedSchedulingEnabled, field.TypeBool, value)
+		_node.QuotaBypassConcentratedSchedulingEnabled = value
 	}
 	if value, ok := _c.mutation.ProfitControlEnabled(); ok {
 		_spec.SetField(group.FieldProfitControlEnabled, field.TypeBool, value)
@@ -2688,6 +2713,18 @@ func (u *GroupUpsert) SetQuotaBypassEnabled(v bool) *GroupUpsert {
 // UpdateQuotaBypassEnabled sets the "quota_bypass_enabled" field to the value that was provided on create.
 func (u *GroupUpsert) UpdateQuotaBypassEnabled() *GroupUpsert {
 	u.SetExcluded(group.FieldQuotaBypassEnabled)
+	return u
+}
+
+// SetQuotaBypassConcentratedSchedulingEnabled sets the "quota_bypass_concentrated_scheduling_enabled" field.
+func (u *GroupUpsert) SetQuotaBypassConcentratedSchedulingEnabled(v bool) *GroupUpsert {
+	u.Set(group.FieldQuotaBypassConcentratedSchedulingEnabled, v)
+	return u
+}
+
+// UpdateQuotaBypassConcentratedSchedulingEnabled sets the "quota_bypass_concentrated_scheduling_enabled" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateQuotaBypassConcentratedSchedulingEnabled() *GroupUpsert {
+	u.SetExcluded(group.FieldQuotaBypassConcentratedSchedulingEnabled)
 	return u
 }
 
@@ -3883,6 +3920,20 @@ func (u *GroupUpsertOne) SetQuotaBypassEnabled(v bool) *GroupUpsertOne {
 func (u *GroupUpsertOne) UpdateQuotaBypassEnabled() *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateQuotaBypassEnabled()
+	})
+}
+
+// SetQuotaBypassConcentratedSchedulingEnabled sets the "quota_bypass_concentrated_scheduling_enabled" field.
+func (u *GroupUpsertOne) SetQuotaBypassConcentratedSchedulingEnabled(v bool) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetQuotaBypassConcentratedSchedulingEnabled(v)
+	})
+}
+
+// UpdateQuotaBypassConcentratedSchedulingEnabled sets the "quota_bypass_concentrated_scheduling_enabled" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateQuotaBypassConcentratedSchedulingEnabled() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateQuotaBypassConcentratedSchedulingEnabled()
 	})
 }
 
@@ -5252,6 +5303,20 @@ func (u *GroupUpsertBulk) SetQuotaBypassEnabled(v bool) *GroupUpsertBulk {
 func (u *GroupUpsertBulk) UpdateQuotaBypassEnabled() *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateQuotaBypassEnabled()
+	})
+}
+
+// SetQuotaBypassConcentratedSchedulingEnabled sets the "quota_bypass_concentrated_scheduling_enabled" field.
+func (u *GroupUpsertBulk) SetQuotaBypassConcentratedSchedulingEnabled(v bool) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetQuotaBypassConcentratedSchedulingEnabled(v)
+	})
+}
+
+// UpdateQuotaBypassConcentratedSchedulingEnabled sets the "quota_bypass_concentrated_scheduling_enabled" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateQuotaBypassConcentratedSchedulingEnabled() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateQuotaBypassConcentratedSchedulingEnabled()
 	})
 }
 

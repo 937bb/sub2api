@@ -1144,7 +1144,9 @@ export default {
       },
       quotaBypass: {
         enable: 'Enable Codex Quota Bypass',
-        tooltip: 'Inject one function_call + function_call_output pair into every request for OpenAI OAuth accounts in this group. Only the request body changes; response errors use standard handling. Account settings can override it.'
+        tooltip: 'Inject one function_call + function_call_output pair into every request for OpenAI OAuth accounts in this group. Only the request body changes; response errors use standard handling. Account settings can override it.',
+        concentratedScheduling: 'Concentrated Scheduling',
+        concentratedSchedulingTooltip: 'Prefer concentrating requests on the same pool of Bypass accounts. When disabled, quota bypass remains active but standard scheduling is used. Only this group setting applies.'
       },
       copyAccounts: {
         title: 'Copy Accounts from Groups',

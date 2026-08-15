@@ -113,6 +113,8 @@ type Group struct {
 
 	// QuotaBypassEnabled enables Codex quota bypass for eligible OpenAI OAuth accounts in this group.
 	QuotaBypassEnabled bool
+	// QuotaBypassConcentratedSchedulingEnabled enables Bypass-first fill-first scheduling for this request group.
+	QuotaBypassConcentratedSchedulingEnabled bool
 	// 分组利润控制（五个 token 计费平台可启用）。
 	// 调度准入条件：账号倍率 U 满足 U <= D*(1-margin-buffer)，
 	// D 为请求用户当刻有效下游倍率（用户覆盖 ?? 分组默认，再乘高峰因子）。

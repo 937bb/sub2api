@@ -132,6 +132,8 @@ const (
 	FieldReasoningEffortMappings = "reasoning_effort_mappings"
 	// FieldQuotaBypassEnabled holds the string denoting the quota_bypass_enabled field in the database.
 	FieldQuotaBypassEnabled = "quota_bypass_enabled"
+	// FieldQuotaBypassConcentratedSchedulingEnabled holds the string denoting the quota_bypass_concentrated_scheduling_enabled field in the database.
+	FieldQuotaBypassConcentratedSchedulingEnabled = "quota_bypass_concentrated_scheduling_enabled"
 	// FieldProfitControlEnabled holds the string denoting the profit_control_enabled field in the database.
 	FieldProfitControlEnabled = "profit_control_enabled"
 	// FieldProfitMinMargin holds the string denoting the profit_min_margin field in the database.
@@ -271,6 +273,7 @@ var Columns = []string{
 	FieldMaxReasoningEffort,
 	FieldReasoningEffortMappings,
 	FieldQuotaBypassEnabled,
+	FieldQuotaBypassConcentratedSchedulingEnabled,
 	FieldProfitControlEnabled,
 	FieldProfitMinMargin,
 	FieldProfitSafetyBuffer,
@@ -403,6 +406,8 @@ var (
 	DefaultReasoningEffortMappings []domain.ReasoningEffortMapping
 	// DefaultQuotaBypassEnabled holds the default value on creation for the "quota_bypass_enabled" field.
 	DefaultQuotaBypassEnabled bool
+	// DefaultQuotaBypassConcentratedSchedulingEnabled holds the default value on creation for the "quota_bypass_concentrated_scheduling_enabled" field.
+	DefaultQuotaBypassConcentratedSchedulingEnabled bool
 	// DefaultProfitControlEnabled holds the default value on creation for the "profit_control_enabled" field.
 	DefaultProfitControlEnabled bool
 	// DefaultProfitMinMargin holds the default value on creation for the "profit_min_margin" field.
@@ -677,6 +682,11 @@ func ByMaxReasoningEffort(opts ...sql.OrderTermOption) OrderOption {
 // ByQuotaBypassEnabled orders the results by the quota_bypass_enabled field.
 func ByQuotaBypassEnabled(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldQuotaBypassEnabled, opts...).ToFunc()
+}
+
+// ByQuotaBypassConcentratedSchedulingEnabled orders the results by the quota_bypass_concentrated_scheduling_enabled field.
+func ByQuotaBypassConcentratedSchedulingEnabled(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldQuotaBypassConcentratedSchedulingEnabled, opts...).ToFunc()
 }
 
 // ByProfitControlEnabled orders the results by the profit_control_enabled field.

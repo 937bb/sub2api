@@ -444,7 +444,12 @@ func TestBuildSchedulerMetadataAccount_KeepsSlimGroupMembership(t *testing.T) {
 				GroupID:   7,
 				Priority:  2,
 				Account:   &service.Account{ID: 42, Name: "drop-from-metadata"},
-				Group:     &service.Group{ID: 7, Name: "drop-from-metadata"},
+				Group: &service.Group{
+					ID:                                       7,
+					Name:                                     "drop-from-metadata",
+					QuotaBypassEnabled:                       true,
+					QuotaBypassConcentratedSchedulingEnabled: true,
+				},
 			},
 			{
 				AccountID: 42,
@@ -473,7 +478,8 @@ func TestBuildSchedulerMetadataAccount_KeepsSlimGroupMembership(t *testing.T) {
 	// the flag has to survive into the metadata. Everything else is stripped.
 	require.NotNil(t, got.AccountGroups[0].Group)
 	require.Equal(t, int64(7), got.AccountGroups[0].Group.ID)
-	require.False(t, got.AccountGroups[0].Group.QuotaBypassEnabled)
+	require.True(t, got.AccountGroups[0].Group.QuotaBypassEnabled)
+	require.True(t, got.AccountGroups[0].Group.QuotaBypassConcentratedSchedulingEnabled)
 	require.Empty(t, got.AccountGroups[0].Group.Name, "slim group must not carry the full record")
 	require.Equal(t, int64(11), got.AccountGroups[1].GroupID)
 	require.Nil(t, got.Groups)

@@ -32,13 +32,14 @@ func TestQuotaBypassEligible_APIKeySnapshotRoundTrip(t *testing.T) {
 			Concurrency: 3,
 		},
 		Group: &Group{
-			ID:                 groupID,
-			Name:               "bypass-group",
-			Platform:           PlatformOpenAI,
-			Status:             StatusActive,
-			SubscriptionType:   SubscriptionTypeStandard,
-			RateMultiplier:     1,
-			QuotaBypassEnabled: true,
+			ID:                                       groupID,
+			Name:                                     "bypass-group",
+			Platform:                                 PlatformOpenAI,
+			Status:                                   StatusActive,
+			SubscriptionType:                         SubscriptionTypeStandard,
+			RateMultiplier:                           1,
+			QuotaBypassEnabled:                       true,
+			QuotaBypassConcentratedSchedulingEnabled: true,
 		},
 	}
 
@@ -47,6 +48,8 @@ func TestQuotaBypassEligible_APIKeySnapshotRoundTrip(t *testing.T) {
 	require.NotNil(t, snapshot)
 	require.NotNil(t, snapshot.Group)
 	require.True(t, snapshot.Group.QuotaBypassEnabled, "snapshot must preserve QuotaBypassEnabled")
+	require.True(t, snapshot.Group.QuotaBypassConcentratedSchedulingEnabled,
+		"snapshot must preserve QuotaBypassConcentratedSchedulingEnabled")
 
 	// Step 2: JSON round-trip (what happens in Redis)
 	jsonBytes, err := json.Marshal(snapshot)
@@ -55,12 +58,16 @@ func TestQuotaBypassEligible_APIKeySnapshotRoundTrip(t *testing.T) {
 	require.NoError(t, json.Unmarshal(jsonBytes, &deserialized))
 	require.NotNil(t, deserialized.Group)
 	require.True(t, deserialized.Group.QuotaBypassEnabled, "JSON round-trip must preserve QuotaBypassEnabled")
+	require.True(t, deserialized.Group.QuotaBypassConcentratedSchedulingEnabled,
+		"JSON round-trip must preserve QuotaBypassConcentratedSchedulingEnabled")
 
 	// Step 3: Reconstruct APIKey from snapshot (what happens on cache hit)
 	roundTrip := svc.snapshotToAPIKey(apiKey.Key, &deserialized)
 	require.NotNil(t, roundTrip)
 	require.NotNil(t, roundTrip.Group)
 	require.True(t, roundTrip.Group.QuotaBypassEnabled, "reconstructed apiKey.Group must have QuotaBypassEnabled=true")
+	require.True(t, roundTrip.Group.QuotaBypassConcentratedSchedulingEnabled,
+		"reconstructed apiKey.Group must preserve concentrated scheduling")
 
 	// Step 4: The actual bypass eligibility check (handler line 477)
 	account := &Account{

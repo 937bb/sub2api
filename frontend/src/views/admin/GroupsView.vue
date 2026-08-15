@@ -617,21 +617,77 @@
           v-model:max-effort="createForm.max_reasoning_effort"
           v-model:mappings="createForm.reasoning_effort_mappings"
         />
-        <div v-if="createForm.platform === 'openai'" class="flex items-center gap-2">
-          <input
-            id="create-quota-bypass-enabled"
-            type="checkbox"
-            v-model="createForm.quota_bypass_enabled"
-            class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-700"
-          />
-          <label for="create-quota-bypass-enabled" class="text-sm font-medium text-gray-700 dark:text-gray-300">
-            {{ t("admin.groups.quotaBypass.enable") }}
-          </label>
-          <div class="group relative inline-flex">
-            <Icon name="questionCircle" size="sm" class="text-gray-400 cursor-help" />
-            <div class="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 -translate-x-1/2 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100">
-              <div class="w-64 rounded-lg bg-gray-900 px-3 py-2 text-xs text-white shadow-lg dark:bg-gray-700">
-                {{ t("admin.groups.quotaBypass.tooltip") }}
+        <div
+          v-if="createForm.platform === 'openai'"
+          class="flex flex-wrap items-center gap-x-5 gap-y-2"
+        >
+          <div class="flex items-center gap-2">
+            <input
+              id="create-quota-bypass-enabled"
+              v-model="createForm.quota_bypass_enabled"
+              type="checkbox"
+              class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-700"
+            />
+            <label
+              for="create-quota-bypass-enabled"
+              class="text-sm font-medium text-gray-700 dark:text-gray-300"
+            >
+              {{ t("admin.groups.quotaBypass.enable") }}
+            </label>
+            <div class="group relative inline-flex">
+              <Icon
+                name="questionCircle"
+                size="sm"
+                class="cursor-help text-gray-400"
+              />
+              <div
+                class="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 -translate-x-1/2 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100"
+              >
+                <div
+                  class="w-64 rounded-lg bg-gray-900 px-3 py-2 text-xs text-white shadow-lg dark:bg-gray-700"
+                >
+                  {{ t("admin.groups.quotaBypass.tooltip") }}
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="flex items-center gap-2">
+            <input
+              id="create-quota-bypass-concentrated-scheduling-enabled"
+              v-model="createForm.quota_bypass_concentrated_scheduling_enabled"
+              type="checkbox"
+              :disabled="!createForm.quota_bypass_enabled"
+              class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-700"
+            />
+            <label
+              for="create-quota-bypass-concentrated-scheduling-enabled"
+              :class="[
+                'text-sm font-medium',
+                createForm.quota_bypass_enabled
+                  ? 'text-gray-700 dark:text-gray-300'
+                  : 'text-gray-400 dark:text-gray-500',
+              ]"
+            >
+              {{ t("admin.groups.quotaBypass.concentratedScheduling") }}
+            </label>
+            <div class="group relative inline-flex">
+              <Icon
+                name="questionCircle"
+                size="sm"
+                class="cursor-help text-gray-400"
+              />
+              <div
+                class="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 -translate-x-1/2 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100"
+              >
+                <div
+                  class="w-72 rounded-lg bg-gray-900 px-3 py-2 text-xs text-white shadow-lg dark:bg-gray-700"
+                >
+                  {{
+                    t(
+                      "admin.groups.quotaBypass.concentratedSchedulingTooltip",
+                    )
+                  }}
+                </div>
               </div>
             </div>
           </div>
@@ -2341,21 +2397,77 @@
           v-model:max-effort="editForm.max_reasoning_effort"
           v-model:mappings="editForm.reasoning_effort_mappings"
         />
-        <div v-if="editForm.platform === 'openai'" class="flex items-center gap-2">
-          <input
-            id="edit-quota-bypass-enabled"
-            type="checkbox"
-            v-model="editForm.quota_bypass_enabled"
-            class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-700"
-          />
-          <label for="edit-quota-bypass-enabled" class="text-sm font-medium text-gray-700 dark:text-gray-300">
-            {{ t("admin.groups.quotaBypass.enable") }}
-          </label>
-          <div class="group relative inline-flex">
-            <Icon name="questionCircle" size="sm" class="text-gray-400 cursor-help" />
-            <div class="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 -translate-x-1/2 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100">
-              <div class="w-64 rounded-lg bg-gray-900 px-3 py-2 text-xs text-white shadow-lg dark:bg-gray-700">
-                {{ t("admin.groups.quotaBypass.tooltip") }}
+        <div
+          v-if="editForm.platform === 'openai'"
+          class="flex flex-wrap items-center gap-x-5 gap-y-2"
+        >
+          <div class="flex items-center gap-2">
+            <input
+              id="edit-quota-bypass-enabled"
+              v-model="editForm.quota_bypass_enabled"
+              type="checkbox"
+              class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-700"
+            />
+            <label
+              for="edit-quota-bypass-enabled"
+              class="text-sm font-medium text-gray-700 dark:text-gray-300"
+            >
+              {{ t("admin.groups.quotaBypass.enable") }}
+            </label>
+            <div class="group relative inline-flex">
+              <Icon
+                name="questionCircle"
+                size="sm"
+                class="cursor-help text-gray-400"
+              />
+              <div
+                class="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 -translate-x-1/2 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100"
+              >
+                <div
+                  class="w-64 rounded-lg bg-gray-900 px-3 py-2 text-xs text-white shadow-lg dark:bg-gray-700"
+                >
+                  {{ t("admin.groups.quotaBypass.tooltip") }}
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="flex items-center gap-2">
+            <input
+              id="edit-quota-bypass-concentrated-scheduling-enabled"
+              v-model="editForm.quota_bypass_concentrated_scheduling_enabled"
+              type="checkbox"
+              :disabled="!editForm.quota_bypass_enabled"
+              class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-700"
+            />
+            <label
+              for="edit-quota-bypass-concentrated-scheduling-enabled"
+              :class="[
+                'text-sm font-medium',
+                editForm.quota_bypass_enabled
+                  ? 'text-gray-700 dark:text-gray-300'
+                  : 'text-gray-400 dark:text-gray-500',
+              ]"
+            >
+              {{ t("admin.groups.quotaBypass.concentratedScheduling") }}
+            </label>
+            <div class="group relative inline-flex">
+              <Icon
+                name="questionCircle"
+                size="sm"
+                class="cursor-help text-gray-400"
+              />
+              <div
+                class="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 -translate-x-1/2 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100"
+              >
+                <div
+                  class="w-72 rounded-lg bg-gray-900 px-3 py-2 text-xs text-white shadow-lg dark:bg-gray-700"
+                >
+                  {{
+                    t(
+                      "admin.groups.quotaBypass.concentratedSchedulingTooltip",
+                    )
+                  }}
+                </div>
               </div>
             </div>
           </div>
@@ -4437,6 +4549,7 @@ import {
 } from "./groupsModelsList";
 import { createModelsListCandidatesTracker } from "./groupsModelsListCandidates";
 import { normalizeSupportedModelScopesForPlatform } from "./groupsSupportedModelScopes";
+import { normalizeQuotaBypassScheduling } from "./groupsQuotaBypass";
 import {
   isProfitControlPlatform,
   profitPercentToDecimal,
@@ -5010,6 +5123,7 @@ const createForm = reactive({
   max_reasoning_effort: "",
   reasoning_effort_mappings: [] as ReasoningEffortMappingRow[],
   quota_bypass_enabled: false,
+  quota_bypass_concentrated_scheduling_enabled: false,
 });
 
 // 简单账号类型（用于模型路由选择）
@@ -5371,6 +5485,7 @@ const editForm = reactive({
   max_reasoning_effort: "",
   reasoning_effort_mappings: [] as ReasoningEffortMappingRow[],
   quota_bypass_enabled: false,
+  quota_bypass_concentrated_scheduling_enabled: false,
 });
 
 type ImagePricingFormState = {
@@ -5810,6 +5925,7 @@ const closeCreateModal = () => {
   createForm.max_reasoning_effort = "";
   createForm.reasoning_effort_mappings = [];
   createForm.quota_bypass_enabled = false;
+  createForm.quota_bypass_concentrated_scheduling_enabled = false;
   createReasoningEffortPolicyRef.value?.resetValidation();
   resetModelsListState(createModelsListState);
   createModelRoutingRules.value = [];
@@ -6077,6 +6193,9 @@ const handleEdit = async (group: AdminGroup) => {
     group.platform,
   );
   editForm.quota_bypass_enabled = group.quota_bypass_enabled ?? false;
+  editForm.quota_bypass_concentrated_scheduling_enabled =
+    group.quota_bypass_concentrated_scheduling_enabled ?? false;
+  normalizeQuotaBypassScheduling(editForm);
   resetModelsListState(editModelsListState, group.models_list_config);
   // 加载模型路由规则（异步加载账号名称）
   editModelRoutingRules.value = await convertApiFormatToRoutingRules(
@@ -6096,6 +6215,7 @@ const closeEditModal = () => {
   editForm.max_reasoning_effort = "";
   editForm.reasoning_effort_mappings = [];
   editForm.quota_bypass_enabled = false;
+  editForm.quota_bypass_concentrated_scheduling_enabled = false;
   editReasoningEffortPolicyRef.value?.resetValidation();
   editModelRoutingRules.value = [];
   editForm.copy_accounts_from_group_ids = [];
@@ -6552,6 +6672,8 @@ watch(
     if (newVal !== "openai") {
       resetMessagesDispatchFormState(createForm);
       createForm.allow_live = false;
+      createForm.quota_bypass_enabled = false;
+      normalizeQuotaBypassScheduling(createForm);
     }
     if (!isProfitControlPlatform(newVal)) {
       createForm.profit_control_enabled = false;
@@ -6600,6 +6722,8 @@ watch(
     if (newVal !== "openai") {
       resetMessagesDispatchFormState(editForm);
       editForm.allow_live = false;
+      editForm.quota_bypass_enabled = false;
+      normalizeQuotaBypassScheduling(editForm);
     }
     if (!isProfitControlPlatform(newVal)) {
       editForm.profit_control_enabled = false;
@@ -6625,6 +6749,16 @@ watch(
       loadModelsListCandidates("edit", editingGroup.value.id, newVal);
     }
   },
+);
+
+watch(
+  () => createForm.quota_bypass_enabled,
+  () => normalizeQuotaBypassScheduling(createForm),
+);
+
+watch(
+  () => editForm.quota_bypass_enabled,
+  () => normalizeQuotaBypassScheduling(editForm),
 );
 
 watch(

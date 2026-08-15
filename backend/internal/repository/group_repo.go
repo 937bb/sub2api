@@ -105,6 +105,7 @@ func createGroupRecord(ctx context.Context, client *dbent.Client, groupIn *servi
 		SetMaxReasoningEffort(groupIn.MaxReasoningEffort).
 		SetReasoningEffortMappings(groupIn.ReasoningEffortMappings).
 		SetQuotaBypassEnabled(groupIn.QuotaBypassEnabled).
+		SetQuotaBypassConcentratedSchedulingEnabled(groupIn.QuotaBypassConcentratedSchedulingEnabled).
 		SetPeakRateEnabled(groupIn.PeakRateEnabled).
 		SetPeakStart(groupIn.PeakStart).
 		SetPeakEnd(groupIn.PeakEnd).
@@ -276,6 +277,7 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 		SetMaxReasoningEffort(groupIn.MaxReasoningEffort).
 		SetReasoningEffortMappings(groupIn.ReasoningEffortMappings).
 		SetQuotaBypassEnabled(groupIn.QuotaBypassEnabled).
+		SetQuotaBypassConcentratedSchedulingEnabled(groupIn.QuotaBypassConcentratedSchedulingEnabled).
 		SetPeakRateEnabled(groupIn.PeakRateEnabled).
 		SetPeakStart(groupIn.PeakStart).
 		SetPeakEnd(groupIn.PeakEnd).

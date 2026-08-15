@@ -118,6 +118,26 @@ func TestOpenAIQuotaHeadroomFactor_QuotaBypassIgnoresExhaustedSnapshot(t *testin
 	require.Equal(t, openAIQuotaHeadroomNeutralFactor, openAIQuotaHeadroomFactor(account, now))
 }
 
+func TestOpenAIQuotaHeadroomFactorForRequest_BypassWithoutConcentrationUsesOrdinaryScore(t *testing.T) {
+	now := time.Date(2026, 3, 11, 10, 0, 0, 0, time.UTC)
+	account := &Account{
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Extra: map[string]any{
+			"quota_bypass_enabled":       true,
+			"codex_primary_used_percent": 20.0,
+			"codex_primary_reset_at":     now.Add(24 * time.Hour).Format(time.RFC3339),
+			"codex_usage_updated_at":     now.Add(-time.Minute).Format(time.RFC3339),
+		},
+	}
+	req := OpenAIAccountScheduleRequest{
+		GroupQuotaBypassEnabled:                       true,
+		GroupQuotaBypassConcentratedSchedulingEnabled: false,
+	}
+
+	require.InDelta(t, 0.8, openAIQuotaHeadroomFactorForRequest(account, req, now), 0.0001)
+}
+
 func TestOpenAIQuotaHeadroomFactor_PrimaryMissingIsNeutral(t *testing.T) {
 	now := time.Date(2026, 3, 11, 10, 0, 0, 0, time.UTC)
 	account := &Account{

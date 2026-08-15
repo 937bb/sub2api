@@ -1012,7 +1012,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		if isExcluded(accounts[i].ID) {
 			continue
 		}
-		if IsQuotaBypassEligible(&accounts[i], quotaBypassGroup) {
+		if isOpenAILegacyQuotaBypassConcentrated(&accounts[i], quotaBypassGroup) {
 			hasQuotaBypassPoolAccounts = true
 			break
 		}
@@ -1121,7 +1121,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 	}
 	hasQuotaBypassCandidates := false
 	for _, candidate := range candidates {
-		if IsQuotaBypassEligible(candidate, quotaBypassGroup) {
+		if isOpenAILegacyQuotaBypassConcentrated(candidate, quotaBypassGroup) {
 			hasQuotaBypassCandidates = true
 			break
 		}
@@ -1141,7 +1141,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 
 	accountLoads := make([]AccountWithConcurrency, 0, len(candidates))
 	for _, acc := range candidates {
-		if IsQuotaBypassEligible(acc, quotaBypassGroup) {
+		if isOpenAILegacyQuotaBypassConcentrated(acc, quotaBypassGroup) {
 			continue
 		}
 		accountLoads = append(accountLoads, AccountWithConcurrency{
@@ -1173,8 +1173,8 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 
 		sort.SliceStable(available, func(i, j int) bool {
 			a, b := available[i], available[j]
-			aQuotaBypass := hasQuotaBypassCandidates && IsQuotaBypassEligible(a.account, quotaBypassGroup)
-			bQuotaBypass := hasQuotaBypassCandidates && IsQuotaBypassEligible(b.account, quotaBypassGroup)
+			aQuotaBypass := hasQuotaBypassCandidates && isOpenAILegacyQuotaBypassConcentrated(a.account, quotaBypassGroup)
+			bQuotaBypass := hasQuotaBypassCandidates && isOpenAILegacyQuotaBypassConcentrated(b.account, quotaBypassGroup)
 			if a.account.Priority != b.account.Priority {
 				return a.account.Priority < b.account.Priority
 			}
@@ -1219,7 +1219,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		if hasQuotaBypassCandidates && len(legacyQuotaBypassAttempted) > 0 {
 			quotaBypassPool = make([]accountWithLoad, 0, len(available))
 			for _, item := range available {
-				if IsQuotaBypassEligible(item.account, quotaBypassGroup) {
+				if isOpenAILegacyQuotaBypassConcentrated(item.account, quotaBypassGroup) {
 					if _, attempted := legacyQuotaBypassAttempted[item.account.ID]; attempted {
 						continue
 					}
@@ -1253,7 +1253,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			}
 
 			for _, item := range selectionOrder {
-				quotaBypassCandidate := IsQuotaBypassEligible(item.account, quotaBypassGroup)
+				quotaBypassCandidate := isOpenAILegacyQuotaBypassConcentrated(item.account, quotaBypassGroup)
 				if quotaBypassCandidate {
 					if _, attempted := legacyQuotaBypassAttempted[item.account.ID]; attempted {
 						continue
@@ -1275,7 +1275,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 				result, err := s.tryAcquireAccountSlot(ctx, fresh.ID, fresh.Concurrency)
 				if err == nil && result != nil && result.Acquired {
 					releaseFunc := result.ReleaseFunc
-					if IsQuotaBypassEligible(fresh, quotaBypassGroup) {
+					if isOpenAILegacyQuotaBypassConcentrated(fresh, quotaBypassGroup) {
 						releaseFunc = s.wrapQuotaBypassAccountRelease(groupID, platform, fresh, releaseFunc)
 					}
 					selection, selectErr := s.newAcquiredSelectionResult(ctx, fresh, releaseFunc)
@@ -1287,7 +1287,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 					}
 					return selection, true, nil
 				}
-				if err == nil && IsQuotaBypassEligible(fresh, quotaBypassGroup) {
+				if err == nil && isOpenAILegacyQuotaBypassConcentrated(fresh, quotaBypassGroup) {
 					s.markQuotaBypassAccountFull(groupID, platform, fresh)
 				}
 			}
@@ -1296,7 +1296,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			}
 			remainingPool := quotaBypassPool[:0]
 			for _, item := range quotaBypassPool {
-				if IsQuotaBypassEligible(item.account, quotaBypassGroup) {
+				if isOpenAILegacyQuotaBypassConcentrated(item.account, quotaBypassGroup) {
 					if _, attempted := legacyQuotaBypassAttempted[item.account.ID]; attempted {
 						continue
 					}
@@ -1305,7 +1305,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			}
 			quotaBypassPool = remainingPool
 			for _, item := range selectionOrder {
-				if IsQuotaBypassEligible(item.account, quotaBypassGroup) {
+				if isOpenAILegacyQuotaBypassConcentrated(item.account, quotaBypassGroup) {
 					s.markQuotaBypassAccountFull(groupID, platform, item.account)
 				}
 			}
@@ -1363,7 +1363,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			result, err := s.tryAcquireAccountSlot(ctx, fresh.ID, fresh.Concurrency)
 			if err == nil && result != nil && result.Acquired {
 				releaseFunc := result.ReleaseFunc
-				if IsQuotaBypassEligible(fresh, quotaBypassGroup) {
+				if isOpenAILegacyQuotaBypassConcentrated(fresh, quotaBypassGroup) {
 					releaseFunc = s.wrapQuotaBypassAccountRelease(groupID, platform, fresh, releaseFunc)
 				}
 				selection, selectErr := s.newAcquiredSelectionResult(ctx, fresh, releaseFunc)
@@ -1375,7 +1375,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 				}
 				return selection, nil
 			}
-			if err == nil && IsQuotaBypassEligible(fresh, quotaBypassGroup) {
+			if err == nil && isOpenAILegacyQuotaBypassConcentrated(fresh, quotaBypassGroup) {
 				s.markQuotaBypassAccountFull(groupID, platform, fresh)
 			}
 		}
@@ -1414,7 +1414,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 	if hasQuotaBypassCandidates {
 		unattempted := make([]*Account, 0, len(candidates))
 		for _, account := range candidates {
-			if IsQuotaBypassEligible(account, quotaBypassGroup) {
+			if isOpenAILegacyQuotaBypassConcentrated(account, quotaBypassGroup) {
 				if _, attempted := legacyQuotaBypassAttempted[account.ID]; attempted {
 					continue
 				}
@@ -1480,7 +1480,7 @@ func (s *OpenAIGatewayService) orderOpenAILegacyQuotaBypassCandidatesWithState(
 		bypassByID := make(map[int64]accountWithLoad, end-start)
 		regular := make([]accountWithLoad, 0, end-start)
 		for _, item := range available[start:end] {
-			if IsQuotaBypassEligible(item.account, quotaBypassGroup) {
+			if isOpenAILegacyQuotaBypassConcentrated(item.account, quotaBypassGroup) {
 				bypassIDs = append(bypassIDs, item.account.ID)
 				bypassByID[item.account.ID] = item
 				continue
@@ -1534,10 +1534,14 @@ func (s *OpenAIGatewayService) resolveOpenAIQuotaBypassSchedulingGroup(ctx conte
 		return nil
 	}
 	group, err := s.schedulerSnapshot.GetGroupByID(ctx, *groupID)
-	if err != nil || group == nil || !group.QuotaBypassEnabled {
+	if err != nil || group == nil || !group.QuotaBypassEnabled || !group.QuotaBypassConcentratedSchedulingEnabled {
 		return nil
 	}
 	return group
+}
+
+func isOpenAILegacyQuotaBypassConcentrated(account *Account, quotaBypassGroup *Group) bool {
+	return quotaBypassGroup != nil && IsQuotaBypassEligible(account, quotaBypassGroup)
 }
 
 func (s *OpenAIGatewayService) listSchedulableAccounts(ctx context.Context, groupID *int64, platform string) ([]Account, error) {

@@ -315,6 +315,11 @@ func QuotaBypassEnabled(v bool) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldQuotaBypassEnabled, v))
 }
 
+// QuotaBypassConcentratedSchedulingEnabled applies equality check predicate on the "quota_bypass_concentrated_scheduling_enabled" field. It's identical to QuotaBypassConcentratedSchedulingEnabledEQ.
+func QuotaBypassConcentratedSchedulingEnabled(v bool) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldQuotaBypassConcentratedSchedulingEnabled, v))
+}
+
 // ProfitControlEnabled applies equality check predicate on the "profit_control_enabled" field. It's identical to ProfitControlEnabledEQ.
 func ProfitControlEnabled(v bool) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldProfitControlEnabled, v))
@@ -2448,6 +2453,16 @@ func QuotaBypassEnabledEQ(v bool) predicate.Group {
 // QuotaBypassEnabledNEQ applies the NEQ predicate on the "quota_bypass_enabled" field.
 func QuotaBypassEnabledNEQ(v bool) predicate.Group {
 	return predicate.Group(sql.FieldNEQ(FieldQuotaBypassEnabled, v))
+}
+
+// QuotaBypassConcentratedSchedulingEnabledEQ applies the EQ predicate on the "quota_bypass_concentrated_scheduling_enabled" field.
+func QuotaBypassConcentratedSchedulingEnabledEQ(v bool) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldQuotaBypassConcentratedSchedulingEnabled, v))
+}
+
+// QuotaBypassConcentratedSchedulingEnabledNEQ applies the NEQ predicate on the "quota_bypass_concentrated_scheduling_enabled" field.
+func QuotaBypassConcentratedSchedulingEnabledNEQ(v bool) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldQuotaBypassConcentratedSchedulingEnabled, v))
 }
 
 // ProfitControlEnabledEQ applies the EQ predicate on the "profit_control_enabled" field.

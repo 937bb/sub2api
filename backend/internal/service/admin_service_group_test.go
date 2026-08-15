@@ -318,6 +318,25 @@ func TestAdminService_CreateGroup_WithVideoPricing(t *testing.T) {
 	require.InDelta(t, 0.18, *repo.created.VideoPrice1080P, 0.0001)
 }
 
+func TestAdminService_CreateGroup_PreservesQuotaBypassConcentratedScheduling(t *testing.T) {
+	repo := &groupRepoStubForAdmin{}
+	svc := &adminServiceImpl{groupRepo: repo}
+
+	group, err := svc.CreateGroup(context.Background(), &CreateGroupInput{
+		Name:                                     "openai-bypass-concentrated",
+		Platform:                                 PlatformOpenAI,
+		RateMultiplier:                           1,
+		QuotaBypassEnabled:                       true,
+		QuotaBypassConcentratedSchedulingEnabled: true,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, group)
+	require.NotNil(t, repo.created)
+	require.True(t, repo.created.QuotaBypassEnabled)
+	require.True(t, repo.created.QuotaBypassConcentratedSchedulingEnabled)
+}
+
 // TestAdminService_CreateGroup_NilImagePricing 测试 ImagePrice 为 nil 时正常创建
 func TestAdminService_CreateGroup_NilImagePricing(t *testing.T) {
 	repo := &groupRepoStubForAdmin{}
@@ -485,6 +504,43 @@ func TestAdminService_UpdateGroup_WithVideoPricing(t *testing.T) {
 	require.InDelta(t, 0.09, *repo.updated.VideoPrice480P, 0.0001)
 	require.InDelta(t, 0.13, *repo.updated.VideoPrice720P, 0.0001)
 	require.InDelta(t, 0.19, *repo.updated.VideoPrice1080P, 0.0001)
+}
+
+func TestAdminService_UpdateGroup_QuotaBypassConcentratedSchedulingTriState(t *testing.T) {
+	tests := []struct {
+		name     string
+		initial  bool
+		update   *bool
+		expected bool
+	}{
+		{name: "omitted preserves enabled", initial: true, update: nil, expected: true},
+		{name: "explicit false disables", initial: true, update: boolPtr(false), expected: false},
+		{name: "explicit true enables", initial: false, update: boolPtr(true), expected: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			existing := &Group{
+				ID:                                       1,
+				Name:                                     "openai-bypass",
+				Platform:                                 PlatformOpenAI,
+				Status:                                   StatusActive,
+				QuotaBypassEnabled:                       true,
+				QuotaBypassConcentratedSchedulingEnabled: tt.initial,
+			}
+			repo := &groupRepoStubForAdmin{getByID: existing}
+			svc := &adminServiceImpl{groupRepo: repo}
+
+			group, err := svc.UpdateGroup(context.Background(), existing.ID, &UpdateGroupInput{
+				QuotaBypassConcentratedSchedulingEnabled: tt.update,
+			})
+
+			require.NoError(t, err)
+			require.NotNil(t, group)
+			require.NotNil(t, repo.updated)
+			require.Equal(t, tt.expected, repo.updated.QuotaBypassConcentratedSchedulingEnabled)
+		})
+	}
 }
 
 // TestAdminService_UpdateGroup_PartialImagePricing 测试仅更新部分 ImagePrice 字段
