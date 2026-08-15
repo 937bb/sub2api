@@ -78,8 +78,9 @@ type OpenAIAccountScheduleRequest struct {
 	// relying on AccountGroups metadata here can incorrectly auto-pause a
 	// quota-bypass account at 100% usage.
 	GroupQuotaBypassEnabled bool
-	// GroupQuotaBypassConcentratedSchedulingEnabled is resolved only from the
-	// current request group and gates Bypass-first fill-first scheduling.
+	// GroupQuotaBypassConcentratedSchedulingEnabled is resolved from the current
+	// request group. Account-attached dedicated bypass groups are evaluated
+	// separately so they can mark accounts used by ordinary public groups.
 	GroupQuotaBypassConcentratedSchedulingEnabled bool
 	Platform                                      string
 	SessionHash                                   string
@@ -2123,6 +2124,9 @@ func isOpenAIQuotaBypassEligibleForScheduleRequest(account *Account, req OpenAIA
 }
 
 func isOpenAIQuotaBypassConcentratedForScheduleRequest(account *Account, req OpenAIAccountScheduleRequest) bool {
+	if IsAccountQuotaBypassConcentrated(account) {
+		return true
+	}
 	if !req.GroupQuotaBypassEnabled || !req.GroupQuotaBypassConcentratedSchedulingEnabled {
 		return false
 	}

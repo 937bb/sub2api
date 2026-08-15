@@ -64,6 +64,30 @@ func IsAccountQuotaBypassEligible(account *Account) bool {
 	return IsQuotaBypassEligible(account, nil)
 }
 
+// IsAccountQuotaBypassConcentrated reports whether an account explicitly opts
+// into fill-first scheduling through an attached marker group. Both switches
+// must be enabled on the same group so a dedicated bypass group can mark
+// accounts used by other public request groups without turning those public
+// groups into bypass groups themselves. The account-level bypass override still
+// enables injection, but concentration remains controlled by a group switch.
+func IsAccountQuotaBypassConcentrated(account *Account) bool {
+	if account == nil || account.Platform != PlatformOpenAI || !account.IsOAuth() {
+		return false
+	}
+	for _, group := range account.Groups {
+		if group != nil && group.QuotaBypassEnabled && group.QuotaBypassConcentratedSchedulingEnabled {
+			return true
+		}
+	}
+	for _, accountGroup := range account.AccountGroups {
+		group := accountGroup.Group
+		if group != nil && group.QuotaBypassEnabled && group.QuotaBypassConcentratedSchedulingEnabled {
+			return true
+		}
+	}
+	return false
+}
+
 // SetOpenAIQuotaBypassEnabled carries the request-group decision across
 // protocol conversion paths where only the selected account is otherwise
 // available. The handler refreshes it after every failover selection.

@@ -1541,6 +1541,9 @@ func (s *OpenAIGatewayService) resolveOpenAIQuotaBypassSchedulingGroup(ctx conte
 }
 
 func isOpenAILegacyQuotaBypassConcentrated(account *Account, quotaBypassGroup *Group) bool {
+	if IsAccountQuotaBypassConcentrated(account) {
+		return true
+	}
 	return quotaBypassGroup != nil && IsQuotaBypassEligible(account, quotaBypassGroup)
 }
 

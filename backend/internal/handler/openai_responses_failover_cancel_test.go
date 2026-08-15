@@ -243,7 +243,7 @@ func TestOpenAIGatewayHandlerResponses_FailoverContinuesForConnectedClient(t *te
 	require.Equal(t, "upstream_error", gjson.GetBytes(rec.Body.Bytes(), "error.type").String())
 }
 
-func TestOpenAIGatewayHandlerResponses_NonStreamingCapacityFailureRetriesBeforeCommit(t *testing.T) {
+func TestOpenAIGatewayHandlerResponses_NonStreamingCapacityFailureFailsOverBeforeCommit(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	upstream := &openAIResponsesTransientCapacityUpstream{}
@@ -252,13 +252,13 @@ func TestOpenAIGatewayHandlerResponses_NonStreamingCapacityFailureRetriesBeforeC
 
 	handler.Responses(c)
 
-	require.Equal(t, []int64{1, 1}, upstream.calls(), "容量错误应先在同一账号重试")
+	require.Equal(t, []int64{1, 2}, upstream.calls(), "容量错误应切换账号")
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, "resp_retry_ok", gjson.GetBytes(rec.Body.Bytes(), "id").String())
 	require.Equal(t, "ok", gjson.GetBytes(rec.Body.Bytes(), "output.0.content.0.text").String())
 }
 
-func TestOpenAIGatewayHandlerResponses_StreamingMessageOnlyCapacityFailureRetriesBeforeCommit(t *testing.T) {
+func TestOpenAIGatewayHandlerResponses_StreamingMessageOnlyCapacityFailureFailsOverBeforeCommit(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	upstream := &openAIResponsesTransientCapacityUpstream{}
@@ -267,7 +267,7 @@ func TestOpenAIGatewayHandlerResponses_StreamingMessageOnlyCapacityFailureRetrie
 
 	handler.Responses(c)
 
-	require.Equal(t, []int64{1, 1}, upstream.calls(), "首个语义输出前的容量错误应在同一账号重试")
+	require.Equal(t, []int64{1, 2}, upstream.calls(), "首个语义输出前的容量错误应切换账号")
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Contains(t, rec.Header().Get("Content-Type"), "text/event-stream")
 	require.NotContains(t, rec.Body.String(), "Our servers are currently overloaded")
