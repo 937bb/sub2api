@@ -983,8 +983,11 @@ func openAIStreamFailureStatus(payload []byte, message string) int {
 	if len(bytes.TrimSpace(payload)) == 0 || !gjson.ValidBytes(payload) {
 		return http.StatusBadGateway
 	}
-	// Preserve the existing 502 wire status for HTTP 200 response.failed events;
-	// RequestScopedTransient still drives the retry/failover decision internally.
+	// Capacity shed is an upstream service-unavailable condition even when the
+	// transport used HTTP 200 for the SSE/JSON envelope.
+	if isOpenAIUpstreamCapacityShedEvent(payload) {
+		return http.StatusServiceUnavailable
+	}
 	if openAIStreamFailedEventSemanticStatus(payload, message) == http.StatusTooManyRequests {
 		return http.StatusTooManyRequests
 	}

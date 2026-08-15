@@ -69,7 +69,7 @@ func TestOpenAINonStreamingHTTP200OverloadReturnsFailover(t *testing.T) {
 	require.Nil(t, result)
 	var failoverErr *UpstreamFailoverError
 	require.ErrorAs(t, err, &failoverErr)
-	require.Equal(t, http.StatusBadGateway, failoverErr.StatusCode)
+	require.Equal(t, http.StatusServiceUnavailable, failoverErr.StatusCode)
 	require.True(t, failoverErr.RetryableOnSameAccount)
 	require.True(t, failoverErr.RequestScopedTransient)
 	require.False(t, c.Writer.Written())
@@ -103,7 +103,7 @@ func TestOpenAIPassthroughBufferedSSEOverloadReturnsFailover(t *testing.T) {
 	require.Nil(t, result)
 	var failoverErr *UpstreamFailoverError
 	require.ErrorAs(t, err, &failoverErr)
-	require.Equal(t, http.StatusBadGateway, failoverErr.StatusCode)
+	require.Equal(t, http.StatusServiceUnavailable, failoverErr.StatusCode)
 	require.True(t, failoverErr.RequestScopedTransient)
 	require.False(t, c.Writer.Written())
 }
