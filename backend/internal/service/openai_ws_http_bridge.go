@@ -247,7 +247,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		if upstreamMsg == "" {
 			upstreamMsg = http.StatusText(resp.StatusCode)
 		}
-		shouldFailover := s.shouldFailoverOpenAIUpstreamResponseForRequest(c, resp.StatusCode, upstreamMsg, respBody)
+		shouldFailover := s.shouldFailoverOpenAIUpstreamResponse(resp.StatusCode, upstreamMsg, respBody)
 		if account.Platform == PlatformGrok {
 			shouldFailover = s.shouldFailoverGrokUpstreamError(resp.StatusCode, respBody)
 			s.handleGrokAccountUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody)
@@ -399,7 +399,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 				errMessage = "upstream error event"
 			}
 			statusCode := openAIWSErrorHTTPStatusFromRaw(errCodeRaw, errTypeRaw)
-			shouldFailover := s.shouldFailoverOpenAIUpstreamResponseForRequest(c, statusCode, errMessage, upstreamMessage)
+			shouldFailover := s.shouldFailoverOpenAIUpstreamResponse(statusCode, errMessage, upstreamMessage)
 			if account.Platform == PlatformGrok {
 				// SSE error events do not carry an HTTP status. The local status
 				// mapper therefore defaults unknown xAI codes (for example
@@ -421,7 +421,6 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			}
 			if turn == 1 && !wroteDownstream && shouldFailover {
 				failoverErr := newOpenAIUpstreamFailoverError(statusCode, resp.Header, upstreamMessage, errMessage, false)
-				failoverErr = s.configureOpenAITransientErrorRetry(c, failoverErr, errMessage, upstreamMessage)
 				return nil, s.configureOpenAIQuotaBypass429Retry(c, account, failoverErr, true)
 			}
 			upstreamEventErr = errors.New(errMessage)

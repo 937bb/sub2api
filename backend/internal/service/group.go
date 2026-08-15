@@ -15,11 +15,6 @@ type OpenAIMessagesDispatchModelConfig = domain.OpenAIMessagesDispatchModelConfi
 type GroupModelsListConfig = domain.GroupModelsListConfig
 type ReasoningEffortMapping = domain.ReasoningEffortMapping
 
-const (
-	DefaultOpenAITransientErrorRetryCount = 3
-	MaxOpenAITransientErrorRetryCount     = 10
-)
-
 type Group struct {
 	ID             int64
 	Name           string
@@ -106,7 +101,6 @@ type Group struct {
 	OpenAIModelMappingEnabled        bool
 	OpenAIModelMapping               map[string]string
 	OpenAITransientErrorRetryEnabled bool
-	OpenAITransientErrorRetryCount   int
 	MessagesDispatchModelConfig      OpenAIMessagesDispatchModelConfig
 	ModelsListConfig                 GroupModelsListConfig
 
@@ -139,27 +133,6 @@ type Group struct {
 	AccountCount            int64
 	ActiveAccountCount      int64
 	RateLimitedAccountCount int64
-}
-
-func normalizeOpenAITransientErrorRetryCount(count int) (int, error) {
-	if count == 0 {
-		return DefaultOpenAITransientErrorRetryCount, nil
-	}
-	if count < 1 || count > MaxOpenAITransientErrorRetryCount {
-		return 0, fmt.Errorf("OpenAI transient error retry count must be between 1 and %d", MaxOpenAITransientErrorRetryCount)
-	}
-	return count, nil
-}
-
-func (g *Group) openAITransientErrorRetryPolicy() (bool, int) {
-	if g == nil || g.Platform != PlatformOpenAI || !g.OpenAITransientErrorRetryEnabled {
-		return false, DefaultOpenAITransientErrorRetryCount
-	}
-	count, err := normalizeOpenAITransientErrorRetryCount(g.OpenAITransientErrorRetryCount)
-	if err != nil {
-		return true, MaxOpenAITransientErrorRetryCount
-	}
-	return true, count
 }
 
 func (g *Group) IsActive() bool {

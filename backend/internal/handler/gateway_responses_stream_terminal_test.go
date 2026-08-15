@@ -33,3 +33,31 @@ func TestHandleResponsesFailoverExhaustedWritesTerminalEventAfterStreamStarted(t
 	require.True(t, ok)
 	require.Equal(t, "server_error", streamErr.ErrType)
 }
+
+func TestHandleFailoverExhaustedPreservesClassifiedOverload503(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	for _, tt := range []struct {
+		name                   string
+		requestScopedTransient bool
+		wantStatus             int
+	}{
+		{name: "classified model load", requestScopedTransient: true, wantStatus: http.StatusServiceUnavailable},
+		{name: "generic upstream 503", requestScopedTransient: false, wantStatus: http.StatusBadGateway},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+
+			h := &OpenAIGatewayHandler{}
+			h.handleFailoverExhausted(c, &service.UpstreamFailoverError{
+				StatusCode:             http.StatusServiceUnavailable,
+				ResponseBody:           []byte(`{"error":{"message":"Our servers are currently overloaded. Please try again later."}}`),
+				RequestScopedTransient: tt.requestScopedTransient,
+			}, false)
+
+			require.Equal(t, tt.wantStatus, rec.Code)
+		})
+	}
+}

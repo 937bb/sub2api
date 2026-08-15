@@ -1955,45 +1955,101 @@ func TestOpenAIStreamingResponseFailedBeforeOutputCapacityErrorReturnsFailover(t
 }
 
 func TestOpenAIStreamingResponseFailedBeforeOutputServerOverloadedCodeReturnsFailover(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		enabled    bool
+		wantStatus int
+	}{
+		{name: "model load retry enabled", enabled: true, wantStatus: http.StatusServiceUnavailable},
+		{name: "model load retry disabled", enabled: false, wantStatus: http.StatusBadGateway},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			cfg := &config.Config{
+				Gateway: config.GatewayConfig{
+					StreamDataIntervalTimeout: 0,
+					StreamKeepaliveInterval:   0,
+					MaxLineSize:               defaultMaxLineSize,
+				},
+			}
+			svc := &OpenAIGatewayService{cfg: cfg}
+
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/", nil)
+			c.Set("api_key", &APIKey{Group: &Group{
+				Platform:                         PlatformOpenAI,
+				OpenAITransientErrorRetryEnabled: tt.enabled,
+			}})
+
+			resp := &http.Response{
+				StatusCode: http.StatusOK,
+				Body: io.NopCloser(strings.NewReader(strings.Join([]string{
+					"event: response.created",
+					`data: {"type":"response.created","response":{"id":"resp_1"}}`,
+					"",
+					"event: response.failed",
+					`data: {"type":"response.failed","response":{"id":"resp_1","error":{"code":"server_is_overloaded","message":"Please retry later."}}}`,
+					"",
+				}, "\n"))),
+				Header: http.Header{"X-Request-Id": []string{"rid-overloaded-failed"}},
+			}
+
+			_, err := svc.handleStreamingResponse(c.Request.Context(), resp, c, &Account{ID: 1, Platform: PlatformOpenAI, Name: "acc"}, time.Now(), "model", "model")
+			require.Error(t, err)
+			var failoverErr *UpstreamFailoverError
+			require.ErrorAs(t, err, &failoverErr)
+			require.Equal(t, tt.wantStatus, failoverErr.StatusCode)
+			require.Contains(t, string(failoverErr.ResponseBody), "Please retry later")
+			// 旧版 coded capacity-shed 行为仍保留，不由新的分组开关控制。
+			require.True(t, failoverErr.RetryableOnSameAccount)
+			require.True(t, failoverErr.RequestScopedTransient)
+			require.False(t, c.Writer.Written())
+			require.Empty(t, rec.Body.String())
+		})
+	}
+}
+
+func TestOpenAIStreamingResponseFailedBeforeOutputMessageOnlyOverloadUsesModelLoadRetrySwitch(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	cfg := &config.Config{
-		Gateway: config.GatewayConfig{
-			StreamDataIntervalTimeout: 0,
-			StreamKeepaliveInterval:   0,
-			MaxLineSize:               defaultMaxLineSize,
-		},
+	svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}}
+
+	for _, tt := range []struct {
+		name       string
+		enabled    bool
+		wantStatus int
+	}{
+		{name: "enabled", enabled: true, wantStatus: http.StatusServiceUnavailable},
+		{name: "disabled", enabled: false, wantStatus: http.StatusBadGateway},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/", nil)
+			c.Set("api_key", &APIKey{Group: &Group{
+				Platform:                         PlatformOpenAI,
+				OpenAITransientErrorRetryEnabled: tt.enabled,
+			}})
+			resp := &http.Response{
+				StatusCode: http.StatusOK,
+				Body: io.NopCloser(strings.NewReader(strings.Join([]string{
+					"event: response.failed",
+					`data: {"type":"response.failed","response":{"id":"resp_1","error":{"message":"Our servers are currently overloaded. Please try again later."}}}`,
+					"",
+				}, "\n"))),
+				Header: http.Header{"X-Request-Id": []string{"rid-message-only-overload"}},
+			}
+
+			_, err := svc.handleStreamingResponse(c.Request.Context(), resp, c, &Account{ID: 1, Platform: PlatformOpenAI, Name: "acc"}, time.Now(), "model", "model")
+			require.Error(t, err)
+			var failoverErr *UpstreamFailoverError
+			require.ErrorAs(t, err, &failoverErr)
+			require.Equal(t, tt.wantStatus, failoverErr.StatusCode)
+			require.False(t, failoverErr.RetryableOnSameAccount)
+			require.Equal(t, tt.enabled, failoverErr.RequestScopedTransient)
+			require.False(t, c.Writer.Written())
+		})
 	}
-	svc := &OpenAIGatewayService{cfg: cfg}
-
-	rec := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(rec)
-	c.Request = httptest.NewRequest(http.MethodPost, "/", nil)
-
-	resp := &http.Response{
-		StatusCode: http.StatusOK,
-		Body: io.NopCloser(strings.NewReader(strings.Join([]string{
-			"event: response.created",
-			`data: {"type":"response.created","response":{"id":"resp_1"}}`,
-			"",
-			"event: response.failed",
-			`data: {"type":"response.failed","response":{"id":"resp_1","error":{"code":"server_is_overloaded","message":"Please retry later."}}}`,
-			"",
-		}, "\n"))),
-		Header: http.Header{"X-Request-Id": []string{"rid-overloaded-failed"}},
-	}
-
-	_, err := svc.handleStreamingResponse(c.Request.Context(), resp, c, &Account{ID: 1, Platform: PlatformOpenAI, Name: "acc"}, time.Now(), "model", "model")
-	require.Error(t, err)
-	var failoverErr *UpstreamFailoverError
-	require.ErrorAs(t, err, &failoverErr)
-	require.Equal(t, http.StatusBadGateway, failoverErr.StatusCode)
-	require.Contains(t, string(failoverErr.ResponseBody), "Please retry later")
-	// 容量降载是请求级信号：非池模式账号也要先在同账号重试，且不得据此临时封禁账号。
-	// 否则单个被降载的请求会把整池账号逐个消耗掉，而降载因素在每个账号上都相同。
-	require.True(t, failoverErr.RetryableOnSameAccount)
-	require.True(t, failoverErr.RequestScopedTransient)
-	require.False(t, c.Writer.Written())
-	require.Empty(t, rec.Body.String())
 }
 
 func TestOpenAIStreamingResponseFailedBeforeOutputRateLimitUsesPoolRetryPolicy(t *testing.T) {
@@ -3880,10 +3936,11 @@ func TestHandleSSEToJSON_ResponseFailedReturnsProtocolError(t *testing.T) {
 	require.Contains(t, rec.Header().Get("Content-Type"), "application/json")
 }
 
-func TestHandleNonStreamingResponse_CapacityFailureReturnsRetryableFailoverWhenEnabled(t *testing.T) {
+func TestHandleNonStreamingResponse_CapacityFailureReturns503WithoutSameAccountRetryWhenEnabled(t *testing.T) {
 	tests := []struct {
-		name    string
-		payload string
+		name                 string
+		payload              string
+		wantSameAccountRetry bool
 	}{
 		{
 			name:    "overloaded message without code",
@@ -3894,8 +3951,9 @@ func TestHandleNonStreamingResponse_CapacityFailureReturnsRetryableFailoverWhenE
 			payload: `{"type":"response.failed","error":{"type":"invalid_request_error","message":"Selected model is at capacity. Please try a different model."}}`,
 		},
 		{
-			name:    "server overloaded code",
-			payload: `{"type":"response.failed","response":{"error":{"code":"server_is_overloaded","message":"Please retry later."}}}`,
+			name:                 "server overloaded code",
+			payload:              `{"type":"response.failed","response":{"error":{"code":"server_is_overloaded","message":"Please retry later."}}}`,
+			wantSameAccountRetry: true,
 		},
 	}
 
@@ -3908,7 +3966,6 @@ func TestHandleNonStreamingResponse_CapacityFailureReturnsRetryableFailoverWhenE
 			c.Set("api_key", &APIKey{Group: &Group{
 				Platform:                         PlatformOpenAI,
 				OpenAITransientErrorRetryEnabled: true,
-				OpenAITransientErrorRetryCount:   2,
 			}})
 
 			svc := &OpenAIGatewayService{cfg: &config.Config{}}
@@ -3931,10 +3988,11 @@ func TestHandleNonStreamingResponse_CapacityFailureReturnsRetryableFailoverWhenE
 			require.Error(t, err)
 			var failoverErr *UpstreamFailoverError
 			require.ErrorAs(t, err, &failoverErr)
-			require.True(t, failoverErr.RetryableOnSameAccount)
+			require.Equal(t, tt.wantSameAccountRetry, failoverErr.RetryableOnSameAccount)
 			require.True(t, failoverErr.RequestScopedTransient)
-			require.Equal(t, 2, failoverErr.SameAccountRetryLimit)
-			require.False(t, rec.Body.Len() > 0, "retryable response.failed must not be committed to the client")
+			require.Equal(t, http.StatusServiceUnavailable, failoverErr.StatusCode)
+			require.Zero(t, failoverErr.SameAccountRetryLimit)
+			require.Zero(t, rec.Body.Len(), "classified response.failed must not be committed to the client")
 		})
 	}
 }
@@ -3966,7 +4024,7 @@ func TestHandleNonStreamingResponse_CapacityRetrySwitchDisabledPreservesProtocol
 	require.Contains(t, rec.Body.String(), "Our servers are currently overloaded")
 }
 
-func TestHandleNonStreamingPassthrough_CapacityFailureReturnsRetryableFailoverWhenEnabled(t *testing.T) {
+func TestHandleNonStreamingPassthrough_CapacityFailureReturns503WithoutSameAccountRetryWhenEnabled(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -3974,7 +4032,6 @@ func TestHandleNonStreamingPassthrough_CapacityFailureReturnsRetryableFailoverWh
 	c.Set("api_key", &APIKey{Group: &Group{
 		Platform:                         PlatformOpenAI,
 		OpenAITransientErrorRetryEnabled: true,
-		OpenAITransientErrorRetryCount:   1,
 	}})
 
 	svc := &OpenAIGatewayService{cfg: &config.Config{}}
@@ -3994,8 +4051,9 @@ func TestHandleNonStreamingPassthrough_CapacityFailureReturnsRetryableFailoverWh
 	require.Error(t, err)
 	var failoverErr *UpstreamFailoverError
 	require.ErrorAs(t, err, &failoverErr)
-	require.True(t, failoverErr.RetryableOnSameAccount)
-	require.Equal(t, 1, failoverErr.SameAccountRetryLimit)
+	require.False(t, failoverErr.RetryableOnSameAccount)
+	require.Equal(t, http.StatusServiceUnavailable, failoverErr.StatusCode)
+	require.Zero(t, failoverErr.SameAccountRetryLimit)
 	require.Zero(t, rec.Body.Len())
 }
 

@@ -930,7 +930,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 				logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Retrying non-WSv2 request after %s (account: %s)", reason, account.Name)
 				continue
 			}
-			if s.shouldFailoverOpenAIUpstreamResponseForRequest(c, resp.StatusCode, upstreamMsg, respBody) {
+			if s.shouldFailoverOpenAIUpstreamResponse(resp.StatusCode, upstreamMsg, respBody) {
 				upstreamDetail := ""
 				if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
 					maxBytes := s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes
@@ -959,7 +959,6 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 					upstreamMsg,
 					retryable,
 				)
-				failoverErr = s.configureOpenAITransientErrorRetry(c, failoverErr, upstreamMsg, respBody)
 				return nil, s.configureOpenAIQuotaBypass429Retry(c, account, failoverErr, true)
 			}
 			return s.handleErrorResponse(ctx, resp, c, account, body, billingModel)

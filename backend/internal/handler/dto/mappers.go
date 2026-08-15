@@ -157,7 +157,6 @@ func GroupFromServiceAdmin(g *service.Group) *AdminGroup {
 		OpenAIModelMappingEnabled:        g.OpenAIModelMappingEnabled,
 		OpenAIModelMapping:               service.CloneOpenAIModelMapping(g.OpenAIModelMapping),
 		OpenAITransientErrorRetryEnabled: g.OpenAITransientErrorRetryEnabled,
-		OpenAITransientErrorRetryCount:   g.OpenAITransientErrorRetryCount,
 		MessagesDispatchModelConfig:      g.MessagesDispatchModelConfig,
 		ModelsListConfig:                 g.ModelsListConfig,
 		SupportedModelScopes:             g.SupportedModelScopes,

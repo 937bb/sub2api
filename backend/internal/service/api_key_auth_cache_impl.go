@@ -14,7 +14,7 @@ import (
 	"github.com/dgraph-io/ristretto"
 )
 
-// v22 adds the group-level OpenAI model mapping and transient retry policy.
+// v22 adds group-level OpenAI model mapping and the model-load retry switch.
 const apiKeyAuthSnapshotVersion = 22
 
 type apiKeyAuthCacheConfig struct {
@@ -421,7 +421,6 @@ func (s *APIKeyService) snapshotFromAPIKey(ctx context.Context, apiKey *APIKey) 
 			OpenAIModelMappingEnabled:                apiKey.Group.OpenAIModelMappingEnabled,
 			OpenAIModelMapping:                       CloneOpenAIModelMapping(apiKey.Group.OpenAIModelMapping),
 			OpenAITransientErrorRetryEnabled:         apiKey.Group.OpenAITransientErrorRetryEnabled,
-			OpenAITransientErrorRetryCount:           apiKey.Group.OpenAITransientErrorRetryCount,
 			MessagesDispatchModelConfig:              apiKey.Group.MessagesDispatchModelConfig,
 			ModelsListConfig:                         apiKey.Group.ModelsListConfig,
 			RPMLimit:                                 apiKey.Group.RPMLimit,
@@ -523,7 +522,6 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 			OpenAIModelMappingEnabled:                snapshot.Group.OpenAIModelMappingEnabled,
 			OpenAIModelMapping:                       CloneOpenAIModelMapping(snapshot.Group.OpenAIModelMapping),
 			OpenAITransientErrorRetryEnabled:         snapshot.Group.OpenAITransientErrorRetryEnabled,
-			OpenAITransientErrorRetryCount:           snapshot.Group.OpenAITransientErrorRetryCount,
 			MessagesDispatchModelConfig:              snapshot.Group.MessagesDispatchModelConfig,
 			ModelsListConfig:                         snapshot.Group.ModelsListConfig,
 			RPMLimit:                                 snapshot.Group.RPMLimit,

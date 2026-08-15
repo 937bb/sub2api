@@ -1142,12 +1142,9 @@ export default {
         remove: 'Remove mapping'
       },
       openaiTransientRetry: {
-        title: 'OpenAI Transient Capacity Retry',
-        enable: 'Retry capacity and overload errors automatically',
-        hint: 'Matches explicit OpenAI overloaded, slow_down, and model-capacity failures only, and retries only before any response content reaches the client. Authentication, quota, billing, and context-limit errors are not retried.',
-        count: 'Maximum retries per account',
-        countHint: 'Choose 1-10 retries. The default is 3, with bounded increasing delays.',
-        invalidCount: 'OpenAI transient capacity retries must be an integer from 1 to 10'
+        title: 'Model Load Retry',
+        enable: 'Enable model load retry',
+        hint: 'When enabled, model load and overload failures before client output return 503 so the client can retry later; disabled groups keep the original error handling.'
       },
       openaiLive: {
         title: 'OpenAI Live',

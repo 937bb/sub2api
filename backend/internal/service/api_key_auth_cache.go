@@ -107,7 +107,6 @@ type APIKeyAuthGroupSnapshot struct {
 	OpenAIModelMappingEnabled        bool                              `json:"openai_model_mapping_enabled"`
 	OpenAIModelMapping               map[string]string                 `json:"openai_model_mapping,omitempty"`
 	OpenAITransientErrorRetryEnabled bool                              `json:"openai_transient_error_retry_enabled"`
-	OpenAITransientErrorRetryCount   int                               `json:"openai_transient_error_retry_count"`
 	MessagesDispatchModelConfig      OpenAIMessagesDispatchModelConfig `json:"messages_dispatch_model_config,omitempty"`
 	ModelsListConfig                 GroupModelsListConfig             `json:"models_list_config,omitempty"`
 

@@ -194,37 +194,8 @@ func (s *OpenAIGatewayService) openAITransientErrorRetryEnabled(c *gin.Context) 
 	if c == nil {
 		return false
 	}
-	enabled, _ := apiKeyGroup(getAPIKeyFromContext(c)).openAITransientErrorRetryPolicy()
-	return enabled
-}
-
-func (s *OpenAIGatewayService) openAITransientErrorRetryCount(c *gin.Context) int {
-	if c == nil {
-		return DefaultOpenAITransientErrorRetryCount
-	}
-	_, count := apiKeyGroup(getAPIKeyFromContext(c)).openAITransientErrorRetryPolicy()
-	return count
-}
-
-func (s *OpenAIGatewayService) configureOpenAITransientErrorRetry(
-	c *gin.Context,
-	failoverErr *UpstreamFailoverError,
-	message string,
-	payload []byte,
-) *UpstreamFailoverError {
-	if failoverErr == nil || !isOpenAITransientCapacityError(message, payload) {
-		return failoverErr
-	}
-
-	// Capacity shedding is request/model scoped, so it must never quarantine an
-	// otherwise healthy account. The opt-in switch adds bounded same-account
-	// retries; ordinary next-account failover remains available either way.
-	failoverErr.RequestScopedTransient = true
-	if s.openAITransientErrorRetryEnabled(c) {
-		failoverErr.RetryableOnSameAccount = true
-		failoverErr.SameAccountRetryLimit = s.openAITransientErrorRetryCount(c)
-	}
-	return failoverErr
+	group := apiKeyGroup(getAPIKeyFromContext(c))
+	return group != nil && group.Platform == PlatformOpenAI && group.OpenAITransientErrorRetryEnabled
 }
 
 func isOpenAIContextWindowError(upstreamMsg string, upstreamBody []byte) bool {
@@ -292,18 +263,6 @@ func (s *OpenAIGatewayService) shouldFailoverOpenAIUpstreamResponse(statusCode i
 		return true
 	}
 	return isOpenAITransientProcessingError(statusCode, upstreamMsg, upstreamBody)
-}
-
-func (s *OpenAIGatewayService) shouldFailoverOpenAIUpstreamResponseForRequest(
-	c *gin.Context,
-	statusCode int,
-	upstreamMsg string,
-	upstreamBody []byte,
-) bool {
-	if s.shouldFailoverOpenAIUpstreamResponse(statusCode, upstreamMsg, upstreamBody) {
-		return true
-	}
-	return s.openAITransientErrorRetryEnabled(c) && isOpenAITransientCapacityError(upstreamMsg, upstreamBody)
 }
 
 // OpenAIRequestBodyTooLargeClientMessage is the fixed downstream message used

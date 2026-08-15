@@ -1384,6 +1384,7 @@ func TestOpenAIGatewayService_OpenAIPassthrough_RetryableStatusesTriggerFailover
 		accountType    string
 		statusCode     int
 		body           string
+		modelLoadRetry bool
 		expectFailover bool
 		assertRepo     func(t *testing.T, repo *openAIPassthroughFailoverRepo, start time.Time)
 	}{
@@ -1437,6 +1438,18 @@ func TestOpenAIGatewayService_OpenAIPassthrough_RetryableStatusesTriggerFailover
 			},
 		},
 		{
+			name:           "oauth_503_overload_switch_enabled_no_extra_failover",
+			accountType:    AccountTypeOAuth,
+			statusCode:     http.StatusServiceUnavailable,
+			body:           `{"error":{"message":"Our servers are currently overloaded. Please try again later.","type":"server_error"}}`,
+			modelLoadRetry: true,
+			expectFailover: false,
+			assertRepo: func(t *testing.T, repo *openAIPassthroughFailoverRepo, _ time.Time) {
+				require.Empty(t, repo.rateLimitCalls)
+				require.Empty(t, repo.overloadCalls)
+			},
+		},
+		{
 			name:           "oauth_504_gateway_timeout",
 			accountType:    AccountTypeOAuth,
 			statusCode:     http.StatusGatewayTimeout,
@@ -1482,6 +1495,10 @@ func TestOpenAIGatewayService_OpenAIPassthrough_RetryableStatusesTriggerFailover
 			c, _ := gin.CreateTestContext(rec)
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
 			c.Request.Header.Set("User-Agent", "codex_cli_rs/0.1.0")
+			c.Set("api_key", &APIKey{Group: &Group{
+				Platform:                         PlatformOpenAI,
+				OpenAITransientErrorRetryEnabled: tc.modelLoadRetry,
+			}})
 
 			resp := &http.Response{
 				StatusCode: tc.statusCode,

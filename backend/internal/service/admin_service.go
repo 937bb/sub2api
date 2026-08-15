@@ -265,7 +265,6 @@ type CreateGroupInput struct {
 	OpenAIModelMappingEnabled        bool
 	OpenAIModelMapping               map[string]string
 	OpenAITransientErrorRetryEnabled bool
-	OpenAITransientErrorRetryCount   int
 	RequireOAuthOnly                 bool
 	RequirePrivacySet                bool
 	MessagesDispatchModelConfig      OpenAIMessagesDispatchModelConfig
@@ -346,7 +345,6 @@ type UpdateGroupInput struct {
 	OpenAIModelMappingEnabled        *bool
 	OpenAIModelMapping               *map[string]string
 	OpenAITransientErrorRetryEnabled *bool
-	OpenAITransientErrorRetryCount   *int
 	RequireOAuthOnly                 *bool
 	RequirePrivacySet                *bool
 	MessagesDispatchModelConfig      *OpenAIMessagesDispatchModelConfig

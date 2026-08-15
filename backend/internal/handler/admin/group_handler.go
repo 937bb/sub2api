@@ -151,7 +151,6 @@ type CreateGroupRequest struct {
 	OpenAIModelMappingEnabled        bool                                      `json:"openai_model_mapping_enabled"`
 	OpenAIModelMapping               map[string]string                         `json:"openai_model_mapping"`
 	OpenAITransientErrorRetryEnabled bool                                      `json:"openai_transient_error_retry_enabled"`
-	OpenAITransientErrorRetryCount   int                                       `json:"openai_transient_error_retry_count"`
 	MessagesDispatchModelConfig      service.OpenAIMessagesDispatchModelConfig `json:"messages_dispatch_model_config"`
 	ModelsListConfig                 service.GroupModelsListConfig             `json:"models_list_config"`
 	// 分组 RPM 上限（0 = 不限制）
@@ -226,7 +225,6 @@ type UpdateGroupRequest struct {
 	OpenAIModelMappingEnabled        *bool                                      `json:"openai_model_mapping_enabled"`
 	OpenAIModelMapping               *map[string]string                         `json:"openai_model_mapping"`
 	OpenAITransientErrorRetryEnabled *bool                                      `json:"openai_transient_error_retry_enabled"`
-	OpenAITransientErrorRetryCount   *int                                       `json:"openai_transient_error_retry_count"`
 	MessagesDispatchModelConfig      *service.OpenAIMessagesDispatchModelConfig `json:"messages_dispatch_model_config"`
 	ModelsListConfig                 *service.GroupModelsListConfig             `json:"models_list_config"`
 	// 分组 RPM 上限（0 = 不限制）；nil 表示未提供不改动
@@ -566,7 +564,6 @@ func (h *GroupHandler) Create(c *gin.Context) {
 		OpenAIModelMappingEnabled:                req.OpenAIModelMappingEnabled,
 		OpenAIModelMapping:                       req.OpenAIModelMapping,
 		OpenAITransientErrorRetryEnabled:         req.OpenAITransientErrorRetryEnabled,
-		OpenAITransientErrorRetryCount:           req.OpenAITransientErrorRetryCount,
 		MessagesDispatchModelConfig:              req.MessagesDispatchModelConfig,
 		ModelsListConfig:                         req.ModelsListConfig,
 		RPMLimit:                                 req.RPMLimit,
@@ -699,7 +696,6 @@ func (h *GroupHandler) Update(c *gin.Context) {
 		OpenAIModelMappingEnabled:                req.OpenAIModelMappingEnabled,
 		OpenAIModelMapping:                       req.OpenAIModelMapping,
 		OpenAITransientErrorRetryEnabled:         req.OpenAITransientErrorRetryEnabled,
-		OpenAITransientErrorRetryCount:           req.OpenAITransientErrorRetryCount,
 		MessagesDispatchModelConfig:              req.MessagesDispatchModelConfig,
 		ModelsListConfig:                         req.ModelsListConfig,
 		RPMLimit:                                 req.RPMLimit,

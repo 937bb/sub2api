@@ -308,26 +308,6 @@ func TestIsOpenAITransientProcessingError(t *testing.T) {
 	))
 }
 
-func TestConfigureOpenAITransientErrorRetry_EnablesBoundedOAuthRetry(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	c, _ := gin.CreateTestContext(httptest.NewRecorder())
-	c.Set("api_key", &APIKey{Group: &Group{
-		Platform:                         PlatformOpenAI,
-		OpenAITransientErrorRetryEnabled: true,
-		OpenAITransientErrorRetryCount:   2,
-	}})
-	svc := &OpenAIGatewayService{cfg: &config.Config{}}
-	failoverErr := &UpstreamFailoverError{StatusCode: http.StatusBadRequest}
-	body := []byte(`{"error":{"message":"Selected model is at capacity. Please try a different model."}}`)
-
-	got := svc.configureOpenAITransientErrorRetry(c, failoverErr, "", body)
-
-	require.Same(t, failoverErr, got)
-	require.True(t, got.RetryableOnSameAccount)
-	require.True(t, got.RequestScopedTransient)
-	require.Equal(t, 2, got.SameAccountRetryLimit)
-}
-
 func TestIsOpenAIContextWindowError(t *testing.T) {
 	require.True(t, isOpenAIContextWindowError(
 		"",

@@ -41,7 +41,6 @@ func profitAuthTestAPIKey() *APIKey {
 			ProfitMinMargin:                  0.2,
 			ProfitSafetyBuffer:               0.05,
 			OpenAITransientErrorRetryEnabled: true,
-			OpenAITransientErrorRetryCount:   7,
 		},
 	}
 }
@@ -73,7 +72,6 @@ func TestAPIKeyAuthSnapshotProfitControlRoundtrip(t *testing.T) {
 	require.InDelta(t, 0.05, materialized.Group.ProfitSafetyBuffer, 1e-12)
 	require.InDelta(t, 0.06, materialized.Group.RateMultiplier, 1e-12)
 	require.True(t, materialized.Group.OpenAITransientErrorRetryEnabled)
-	require.Equal(t, 7, materialized.Group.OpenAITransientErrorRetryCount)
 
 	// 中间件语义：materialized.Group 进请求 ctx → 门必须按快照配置装上。
 	ctx := context.WithValue(context.Background(), ctxkey.Group, materialized.Group)

@@ -943,75 +943,38 @@ func TestAdminService_UpdateGroup_ClearsPeakRateWhenChangingToStandard(t *testin
 	require.Equal(t, 1.0, repo.updated.PeakRateMultiplier)
 }
 
-func TestAdminService_CreateGroup_OpenAITransientErrorRetryPolicy(t *testing.T) {
-	t.Run("persists enabled policy", func(t *testing.T) {
-		repo := &groupRepoStubForAdmin{}
-		svc := &adminServiceImpl{groupRepo: repo}
+func TestAdminService_CreateGroup_OpenAIModelLoadRetrySwitch(t *testing.T) {
+	repo := &groupRepoStubForAdmin{}
+	svc := &adminServiceImpl{groupRepo: repo}
 
-		group, err := svc.CreateGroup(context.Background(), &CreateGroupInput{
-			Name:                             "retry-group",
-			Platform:                         PlatformOpenAI,
-			RateMultiplier:                   1,
-			OpenAITransientErrorRetryEnabled: true,
-			OpenAITransientErrorRetryCount:   4,
-		})
-		require.NoError(t, err)
-		require.True(t, group.OpenAITransientErrorRetryEnabled)
-		require.Equal(t, 4, group.OpenAITransientErrorRetryCount)
-		require.Same(t, group, repo.created)
+	group, err := svc.CreateGroup(context.Background(), &CreateGroupInput{
+		Name:                             "model-load-retry-group",
+		Platform:                         PlatformOpenAI,
+		RateMultiplier:                   1,
+		OpenAITransientErrorRetryEnabled: true,
 	})
-
-	t.Run("defaults count when omitted", func(t *testing.T) {
-		repo := &groupRepoStubForAdmin{}
-		svc := &adminServiceImpl{groupRepo: repo}
-
-		group, err := svc.CreateGroup(context.Background(), &CreateGroupInput{
-			Name:           "retry-default-group",
-			Platform:       PlatformOpenAI,
-			RateMultiplier: 1,
-		})
-		require.NoError(t, err)
-		require.False(t, group.OpenAITransientErrorRetryEnabled)
-		require.Equal(t, DefaultOpenAITransientErrorRetryCount, group.OpenAITransientErrorRetryCount)
-	})
-
-	t.Run("rejects out of range count", func(t *testing.T) {
-		repo := &groupRepoStubForAdmin{}
-		svc := &adminServiceImpl{groupRepo: repo}
-
-		_, err := svc.CreateGroup(context.Background(), &CreateGroupInput{
-			Name:                             "retry-invalid-group",
-			Platform:                         PlatformOpenAI,
-			RateMultiplier:                   1,
-			OpenAITransientErrorRetryEnabled: true,
-			OpenAITransientErrorRetryCount:   11,
-		})
-		require.Error(t, err)
-		require.Nil(t, repo.created)
-	})
+	require.NoError(t, err)
+	require.True(t, group.OpenAITransientErrorRetryEnabled)
+	require.Same(t, group, repo.created)
 }
 
-func TestAdminService_UpdateGroup_OpenAITransientErrorRetryPolicy(t *testing.T) {
+func TestAdminService_UpdateGroup_OpenAIModelLoadRetrySwitch(t *testing.T) {
 	t.Run("updates and invalidates through normal group update", func(t *testing.T) {
 		existing := &Group{
-			ID:                             1,
-			Name:                           "existing-openai-group",
-			Platform:                       PlatformOpenAI,
-			Status:                         StatusActive,
-			OpenAITransientErrorRetryCount: DefaultOpenAITransientErrorRetryCount,
+			ID:       1,
+			Name:     "existing-openai-group",
+			Platform: PlatformOpenAI,
+			Status:   StatusActive,
 		}
 		repo := &groupRepoStubForAdmin{getByID: existing}
 		svc := &adminServiceImpl{groupRepo: repo}
 		enabled := true
-		count := 6
 
 		group, err := svc.UpdateGroup(context.Background(), 1, &UpdateGroupInput{
 			OpenAITransientErrorRetryEnabled: &enabled,
-			OpenAITransientErrorRetryCount:   &count,
 		})
 		require.NoError(t, err)
 		require.True(t, group.OpenAITransientErrorRetryEnabled)
-		require.Equal(t, 6, group.OpenAITransientErrorRetryCount)
 		require.Same(t, group, repo.updated)
 	})
 
@@ -1022,7 +985,6 @@ func TestAdminService_UpdateGroup_OpenAITransientErrorRetryPolicy(t *testing.T) 
 			Platform:                         PlatformOpenAI,
 			Status:                           StatusActive,
 			OpenAITransientErrorRetryEnabled: true,
-			OpenAITransientErrorRetryCount:   5,
 		}
 		repo := &groupRepoStubForAdmin{getByID: existing}
 		svc := &adminServiceImpl{groupRepo: repo}
@@ -1030,18 +992,6 @@ func TestAdminService_UpdateGroup_OpenAITransientErrorRetryPolicy(t *testing.T) 
 		group, err := svc.UpdateGroup(context.Background(), 2, &UpdateGroupInput{Platform: PlatformAnthropic})
 		require.NoError(t, err)
 		require.False(t, group.OpenAITransientErrorRetryEnabled)
-		require.Equal(t, DefaultOpenAITransientErrorRetryCount, group.OpenAITransientErrorRetryCount)
-	})
-
-	t.Run("rejects out of range count", func(t *testing.T) {
-		existing := &Group{ID: 3, Name: "invalid-retry-group", Platform: PlatformOpenAI, Status: StatusActive}
-		repo := &groupRepoStubForAdmin{getByID: existing}
-		svc := &adminServiceImpl{groupRepo: repo}
-		count := -1
-
-		_, err := svc.UpdateGroup(context.Background(), 3, &UpdateGroupInput{OpenAITransientErrorRetryCount: &count})
-		require.Error(t, err)
-		require.Nil(t, repo.updated)
 	})
 }
 

@@ -1140,12 +1140,9 @@ export default {
         remove: '删除映射'
       },
       openaiTransientRetry: {
-        title: 'OpenAI 瞬时过载重试',
-        enable: '遇到容量或过载错误时自动重试',
-        hint: '仅匹配 OpenAI 明确返回的 overloaded、slow_down 或模型容量不足错误，并且只在尚未向客户端输出内容时重试。认证、额度、计费和上下文超限错误不会重试。',
-        count: '单账号最大重试次数',
-        countHint: '可设置 1-10 次，默认 3 次；重试采用有上限的递增等待。',
-        invalidCount: 'OpenAI 瞬时过载重试次数必须是 1-10 的整数'
+        title: '模型负载重试',
+        enable: '启用模型负载重试',
+        hint: '开启后，尚未向客户端输出内容时，模型负载或过载错误会返回 503，交由客户端稍后重试；关闭时保持原有错误处理。'
       },
       openaiLive: {
         title: 'OpenAI Live',

@@ -1009,7 +1009,6 @@ func groupEntityToService(g *dbent.Group) *service.Group {
 		OpenAIModelMappingEnabled:                g.OpenaiModelMappingEnabled,
 		OpenAIModelMapping:                       service.CloneOpenAIModelMapping(g.OpenaiModelMapping),
 		OpenAITransientErrorRetryEnabled:         g.OpenaiTransientErrorRetryEnabled,
-		OpenAITransientErrorRetryCount:           g.OpenaiTransientErrorRetryCount,
 		MessagesDispatchModelConfig:              g.MessagesDispatchModelConfig,
 		ModelsListConfig:                         g.ModelsListConfig,
 		RPMLimit:                                 g.RpmLimit,

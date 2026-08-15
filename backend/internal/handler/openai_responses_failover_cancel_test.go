@@ -187,7 +187,6 @@ func newOpenAIResponsesFailoverTestContextWithStream(t *testing.T, ctx context.C
 			Platform:                         service.PlatformOpenAI,
 			Hydrated:                         true,
 			OpenAITransientErrorRetryEnabled: true,
-			OpenAITransientErrorRetryCount:   1,
 		},
 		User: &service.User{ID: 100},
 	})

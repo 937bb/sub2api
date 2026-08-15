@@ -1705,25 +1705,6 @@
           <p class="input-hint mt-1">
             {{ t("admin.groups.openaiTransientRetry.hint") }}
           </p>
-          <div
-            v-if="createForm.openai_transient_error_retry_enabled"
-            class="mt-3 max-w-xs"
-          >
-            <label class="input-label">
-              {{ t("admin.groups.openaiTransientRetry.count") }}
-            </label>
-            <input
-              v-model.number="createForm.openai_transient_error_retry_count"
-              type="number"
-              min="1"
-              max="10"
-              step="1"
-              class="input"
-            />
-            <p class="input-hint">
-              {{ t("admin.groups.openaiTransientRetry.countHint") }}
-            </p>
-          </div>
         </div>
 
         <!-- OpenAI Messages 调度配置（仅 openai 平台） -->
@@ -3555,25 +3536,6 @@
           <p class="input-hint mt-1">
             {{ t("admin.groups.openaiTransientRetry.hint") }}
           </p>
-          <div
-            v-if="editForm.openai_transient_error_retry_enabled"
-            class="mt-3 max-w-xs"
-          >
-            <label class="input-label">
-              {{ t("admin.groups.openaiTransientRetry.count") }}
-            </label>
-            <input
-              v-model.number="editForm.openai_transient_error_retry_count"
-              type="number"
-              min="1"
-              max="10"
-              step="1"
-              class="input"
-            />
-            <p class="input-hint">
-              {{ t("admin.groups.openaiTransientRetry.countHint") }}
-            </p>
-          </div>
         </div>
 
         <!-- OpenAI Messages 调度配置（仅 openai 平台） -->
@@ -5263,7 +5225,6 @@ const createForm = reactive({
   openai_model_mapping_enabled: false,
   openai_model_mapping: [] as GroupModelMappingRow[],
   openai_transient_error_retry_enabled: false,
-  openai_transient_error_retry_count: 3,
   opus_mapped_model: createMessagesDispatchDefaults.opus_mapped_model,
   sonnet_mapped_model: createMessagesDispatchDefaults.sonnet_mapped_model,
   haiku_mapped_model: createMessagesDispatchDefaults.haiku_mapped_model,
@@ -5629,7 +5590,6 @@ const editForm = reactive({
   openai_model_mapping_enabled: false,
   openai_model_mapping: [] as GroupModelMappingRow[],
   openai_transient_error_retry_enabled: false,
-  openai_transient_error_retry_count: 3,
   opus_mapped_model: editMessagesDispatchDefaults.opus_mapped_model,
   sonnet_mapped_model: editMessagesDispatchDefaults.sonnet_mapped_model,
   haiku_mapped_model: editMessagesDispatchDefaults.haiku_mapped_model,
@@ -6084,7 +6044,6 @@ const closeCreateModal = () => {
   createForm.openai_model_mapping_enabled = false;
   createForm.openai_model_mapping = [];
   createForm.openai_transient_error_retry_enabled = false;
-  createForm.openai_transient_error_retry_count = 3;
   createForm.require_oauth_only = false;
   createForm.require_privacy_set = false;
   createForm.supported_model_scopes = ["claude", "gemini_text", "gemini_image"];
@@ -6142,25 +6101,6 @@ const validateProfitControlForm = (form: ProfitControlFormState): boolean => {
   return true;
 };
 
-const validateOpenAITransientRetryForm = (form: {
-  platform: GroupPlatform;
-  openai_transient_error_retry_enabled: boolean;
-  openai_transient_error_retry_count: number;
-}): boolean => {
-  if (
-    form.platform !== "openai" ||
-    !form.openai_transient_error_retry_enabled
-  ) {
-    return true;
-  }
-  const count = Number(form.openai_transient_error_retry_count);
-  if (!Number.isInteger(count) || count < 1 || count > 10) {
-    appStore.showError(t("admin.groups.openaiTransientRetry.invalidCount"));
-    return false;
-  }
-  return true;
-};
-
 const handleCreateGroup = async () => {
   if (!createForm.name.trim()) {
     appStore.showError(t("admin.groups.nameRequired"));
@@ -6174,9 +6114,6 @@ const handleCreateGroup = async () => {
     return;
   }
   if (!validateProfitControlForm(createForm)) {
-    return;
-  }
-  if (!validateOpenAITransientRetryForm(createForm)) {
     return;
   }
   submitting.value = true;
@@ -6201,10 +6138,6 @@ const handleCreateGroup = async () => {
       openai_transient_error_retry_enabled:
         createForm.platform === "openai" &&
         createForm.openai_transient_error_retry_enabled,
-      openai_transient_error_retry_count:
-        createForm.platform === "openai"
-          ? Number(createForm.openai_transient_error_retry_count)
-          : 3,
       daily_limit_usd: normalizeOptionalLimit(
         createForm.daily_limit_usd as number | string | null,
       ),
@@ -6378,8 +6311,6 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.openai_model_mapping = groupModelMappingRecordToRows(group.openai_model_mapping);
   editForm.openai_transient_error_retry_enabled =
     group.openai_transient_error_retry_enabled ?? false;
-  editForm.openai_transient_error_retry_count =
-    group.openai_transient_error_retry_count ?? 3;
   editForm.opus_mapped_model = messagesDispatchFormState.opus_mapped_model;
   editForm.sonnet_mapped_model = messagesDispatchFormState.sonnet_mapped_model;
   editForm.haiku_mapped_model = messagesDispatchFormState.haiku_mapped_model;
@@ -6454,7 +6385,6 @@ const closeEditModal = () => {
   editForm.openai_model_mapping_enabled = false;
   editForm.openai_model_mapping = [];
   editForm.openai_transient_error_retry_enabled = false;
-  editForm.openai_transient_error_retry_count = 3;
   resetModelsListState(editModelsListState);
 };
 
@@ -6474,9 +6404,6 @@ const handleUpdateGroup = async () => {
   if (!validateProfitControlForm(editForm)) {
     return;
   }
-  if (!validateOpenAITransientRetryForm(editForm)) {
-    return;
-  }
 
   submitting.value = true;
   try {
@@ -6493,10 +6420,6 @@ const handleUpdateGroup = async () => {
       openai_transient_error_retry_enabled:
         editForm.platform === "openai" &&
         editForm.openai_transient_error_retry_enabled,
-      openai_transient_error_retry_count:
-        editForm.platform === "openai"
-          ? Number(editForm.openai_transient_error_retry_count)
-          : 3,
       daily_limit_usd: normalizeOptionalLimit(
         editForm.daily_limit_usd as number | string | null,
       ),

@@ -150,7 +150,6 @@ func cloneGroupForDuplicate(source *Group, operationID string) *Group {
 		OpenAIModelMappingEnabled:        source.OpenAIModelMappingEnabled,
 		OpenAIModelMapping:               CloneOpenAIModelMapping(source.OpenAIModelMapping),
 		OpenAITransientErrorRetryEnabled: source.OpenAITransientErrorRetryEnabled,
-		OpenAITransientErrorRetryCount:   source.OpenAITransientErrorRetryCount,
 		MessagesDispatchModelConfig:      cloneGroupMessagesDispatchModelConfig(source.MessagesDispatchModelConfig),
 		ModelsListConfig: GroupModelsListConfig{
 			Enabled: source.ModelsListConfig.Enabled,

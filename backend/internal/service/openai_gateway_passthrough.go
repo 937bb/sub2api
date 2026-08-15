@@ -244,11 +244,10 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			continue
 		}
 
-		// 透传模式默认保持原样代理；容量错误以及 API-key 上游的瞬时
-		// 5xx 应先触发多账号 failover，且此时尚未写入下游响应。
+		// 透传模式默认保持原样代理；既有的容量错误以及 API-key 上游的
+		// 瞬时 5xx 应先触发多账号 failover，且此时尚未写入下游响应。
 		// probeBody 已在上方任务探测时读取过一次，直接复用避免重复读取。
-		if shouldFailoverOpenAIPassthroughResponse(account, resp.StatusCode, probeBody) ||
-			(s.openAITransientErrorRetryEnabled(c) && isOpenAITransientCapacityError("", probeBody)) {
+		if shouldFailoverOpenAIPassthroughResponse(account, resp.StatusCode, probeBody) {
 			return nil, s.handleFailoverErrorResponsePassthrough(ctx, resp, c, account, body, probeBody)
 		}
 		return nil, s.handleErrorResponsePassthrough(ctx, resp, c, account, body, probeBody)
@@ -661,7 +660,6 @@ func (s *OpenAIGatewayService) handleFailoverErrorResponsePassthrough(
 		upstreamMsg,
 		retryable,
 	)
-	failoverErr = s.configureOpenAITransientErrorRetry(c, failoverErr, upstreamMsg, body)
 	return s.configureOpenAIQuotaBypass429Retry(c, account, failoverErr, true)
 }
 
@@ -986,6 +984,13 @@ func openAIStreamFailureStatus(payload []byte, message string) int {
 	return http.StatusBadGateway
 }
 
+func (s *OpenAIGatewayService) openAIStreamFailureStatusForRequest(c *gin.Context, payload []byte, message string) int {
+	if s.openAITransientErrorRetryEnabled(c) && isOpenAITransientCapacityError(message, payload) {
+		return http.StatusServiceUnavailable
+	}
+	return openAIStreamFailureStatus(payload, message)
+}
+
 func openAIStreamFailedEventPassthroughBody(payload []byte, failedMessage string) []byte {
 	if len(payload) == 0 || !gjson.ValidBytes(payload) {
 		return payload
@@ -1062,13 +1067,6 @@ func openAIStreamFailedEventShouldFailover(payload []byte, message string) bool 
 	if isOpenAIContextWindowError(message, payload) {
 		return false
 	}
-	// Some OpenAI capacity-shed frames omit error.code entirely and only carry
-	// the overload message. Treat them exactly like coded overload frames so an
-	// early `error` event stays buffered until the following response.failed can
-	// return a failover error instead of committing the failed attempt.
-	if isOpenAITransientCapacityError(message, payload) {
-		return true
-	}
 	// A response.failed event is transported over HTTP 200. Prefer its semantic
 	// rate-limit status over a generic/invalid_request error type so it can enter
 	// the same 429 retry policy as a regular upstream HTTP response.
@@ -1139,7 +1137,7 @@ func (s *OpenAIGatewayService) recordOpenAIStreamUpstreamError(
 	if message == "" {
 		message = "OpenAI upstream response failed"
 	}
-	statusCode := openAIStreamFailureStatus(payload, message)
+	statusCode := s.openAIStreamFailureStatusForRequest(c, payload, message)
 	detail := ""
 	if len(payload) > 0 && s != nil && s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
 		maxBytes := s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes
@@ -1182,7 +1180,7 @@ func (s *OpenAIGatewayService) newOpenAIStreamFailoverError(
 	if message == "" {
 		message = "OpenAI stream disconnected before completion"
 	}
-	statusCode := openAIStreamFailureStatus(payload, message)
+	statusCode := s.openAIStreamFailureStatusForRequest(c, payload, message)
 	var headers http.Header
 	if len(responseHeaders) > 0 && responseHeaders[0] != nil {
 		headers = responseHeaders[0].Clone()
@@ -1201,14 +1199,15 @@ func (s *OpenAIGatewayService) newOpenAIStreamFailoverError(
 			"message": message,
 		},
 	})
+	requestScopedTransient := isOpenAIUpstreamCapacityShedEvent(payload) ||
+		(s.openAITransientErrorRetryEnabled(c) && isOpenAITransientCapacityError(message, payload))
 	failoverErr := &UpstreamFailoverError{
 		StatusCode:             statusCode,
 		ResponseBody:           body,
 		ResponseHeaders:        headers,
 		RetryableOnSameAccount: openAIStreamFailedEventRetryableOnSameAccount(account, payload, message),
-		RequestScopedTransient: isOpenAITransientCapacityError(message, payload),
+		RequestScopedTransient: requestScopedTransient,
 	}
-	failoverErr = s.configureOpenAITransientErrorRetry(c, failoverErr, message, payload)
 	return s.configureOpenAIQuotaBypass429Retry(c, account, failoverErr, false)
 }
 
