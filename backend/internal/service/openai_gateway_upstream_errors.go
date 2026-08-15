@@ -410,8 +410,8 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 		resp.StatusCode,
 		body,
 		http.StatusBadGateway,
-		"api_error",
-		"Request failed",
+		"upstream_error",
+		"Upstream request failed",
 	); matched {
 		MarkResponseCommitted(c)
 		c.JSON(status, gin.H{
@@ -444,8 +444,8 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 		MarkResponseCommitted(c)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": gin.H{
-				"type":    "api_error",
-				"message": "Gateway error",
+				"type":    "upstream_error",
+				"message": "Upstream gateway error",
 			},
 		})
 		if upstreamMsg == "" {
@@ -513,15 +513,15 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 	switch resp.StatusCode {
 	case 401:
 		statusCode = http.StatusBadGateway
-		errType = "api_error"
+		errType = "upstream_error"
 		errMsg = "Upstream authentication failed, please contact administrator"
 	case 402:
 		statusCode = http.StatusBadGateway
-		errType = "api_error"
+		errType = "upstream_error"
 		errMsg = "Upstream payment required: insufficient balance or billing issue"
 	case 403:
 		statusCode = http.StatusBadGateway
-		errType = "api_error"
+		errType = "upstream_error"
 		errMsg = "Upstream access forbidden, please contact administrator"
 	case 429:
 		statusCode = http.StatusTooManyRequests
@@ -529,8 +529,8 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 		errMsg = "Upstream rate limit exceeded, please retry later"
 	default:
 		statusCode = http.StatusBadGateway
-		errType = "api_error"
-		errMsg = "Request failed"
+		errType = "upstream_error"
+		errMsg = "Upstream request failed"
 	}
 	if isOpenAIContextWindowError(upstreamMsg, body) && upstreamMsg != "" {
 		errMsg = upstreamMsg
@@ -617,7 +617,7 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 	// Apply error passthrough rules
 	if status, errType, errMsg, matched := applyErrorPassthroughRule(
 		c, account.Platform, resp.StatusCode, body,
-		http.StatusBadGateway, "api_error", "Request failed",
+		http.StatusBadGateway, "api_error", "Upstream request failed",
 	); matched {
 		MarkResponseCommitted(c)
 		writeError(c, status, errType, errMsg)
@@ -644,7 +644,7 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 			Detail:             upstreamDetail,
 		})
 		MarkResponseCommitted(c)
-		writeError(c, http.StatusInternalServerError, "api_error", "Gateway error")
+		writeError(c, http.StatusInternalServerError, "api_error", "Upstream gateway error")
 		if upstreamMsg == "" {
 			return nil, fmt.Errorf("upstream error: %d (not in custom error codes)", resp.StatusCode)
 		}

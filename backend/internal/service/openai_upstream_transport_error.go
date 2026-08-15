@@ -22,7 +22,7 @@ const openAITransportErrorTempUnschedDuration = 10 * time.Minute
 // failover error for a transport-level failure. Kept identical to the legacy
 // inline 502 body so the client-visible payload is unchanged if failover is
 // ultimately exhausted.
-var openAITransportFailoverBody = []byte(`{"error":{"type":"api_error","message":"Request failed"}}`)
+var openAITransportFailoverBody = []byte(`{"error":{"type":"upstream_error","message":"Upstream request failed"}}`)
 
 // openAITransportErrorClass describes how to react to a transport-level upstream
 // failure — i.e. the HTTP round-trip never completed (proxy / DNS / TCP / TLS

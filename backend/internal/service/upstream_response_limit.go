@@ -66,8 +66,8 @@ func anthropicTooLargeError(c *gin.Context) {
 	c.JSON(http.StatusBadGateway, gin.H{
 		"type": "error",
 		"error": gin.H{
-			"type":    "api_error",
-			"message": "Response too large",
+			"type":    "upstream_error",
+			"message": "Upstream response too large",
 		},
 	})
 }
@@ -76,8 +76,8 @@ func anthropicTooLargeError(c *gin.Context) {
 func openAITooLargeError(c *gin.Context) {
 	c.JSON(http.StatusBadGateway, gin.H{
 		"error": gin.H{
-			"type":    "api_error",
-			"message": "Response too large",
+			"type":    "upstream_error",
+			"message": "Upstream response too large",
 		},
 	})
 }

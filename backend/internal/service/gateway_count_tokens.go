@@ -120,7 +120,7 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 	// 获取凭证
 	token, tokenType, err := s.GetAccessToken(ctx, account)
 	if err != nil {
-		s.countTokensError(c, http.StatusBadGateway, "api_error", "Failed to get access token")
+		s.countTokensError(c, http.StatusBadGateway, "upstream_error", "Failed to get access token")
 		return err
 	}
 
@@ -145,19 +145,19 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 	resp, err := s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
 	if err != nil {
 		setOpsUpstreamError(c, 0, sanitizeUpstreamErrorMessage(err.Error()), "")
-		s.countTokensError(c, http.StatusBadGateway, "api_error", "Request failed")
+		s.countTokensError(c, http.StatusBadGateway, "upstream_error", "Request failed")
 		return fmt.Errorf("upstream request failed: %w", err)
 	}
 
 	// 读取响应体
 	countTokensTooLarge := func(c *gin.Context) {
-		s.countTokensError(c, http.StatusBadGateway, "api_error", "Response too large")
+		s.countTokensError(c, http.StatusBadGateway, "upstream_error", "Upstream response too large")
 	}
 	respBody, err := ReadUpstreamResponseBody(resp.Body, s.cfg, c, countTokensTooLarge)
 	_ = resp.Body.Close()
 	if err != nil {
 		if !errors.Is(err, ErrUpstreamResponseBodyTooLarge) {
-			s.countTokensError(c, http.StatusBadGateway, "api_error", "Failed to read response")
+			s.countTokensError(c, http.StatusBadGateway, "upstream_error", "Failed to read response")
 		}
 		return err
 	}
@@ -180,7 +180,7 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 				_ = resp.Body.Close()
 				if err != nil {
 					if !errors.Is(err, ErrUpstreamResponseBodyTooLarge) {
-						s.countTokensError(c, http.StatusBadGateway, "api_error", "Failed to read response")
+						s.countTokensError(c, http.StatusBadGateway, "upstream_error", "Failed to read response")
 					}
 					return err
 				}
@@ -225,14 +225,14 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 		}
 
 		// 返回简化的错误响应
-		errMsg := "Request failed"
+		errMsg := "Upstream request failed"
 		switch resp.StatusCode {
 		case 429:
 			errMsg = "Rate limit exceeded"
 		case 529:
 			errMsg = "Service overloaded"
 		}
-		s.countTokensError(c, resp.StatusCode, "api_error", errMsg)
+		s.countTokensError(c, resp.StatusCode, "upstream_error", errMsg)
 		if upstreamMsg == "" {
 			return fmt.Errorf("upstream error: %d", resp.StatusCode)
 		}
@@ -247,11 +247,11 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 func (s *GatewayService) forwardCountTokensAnthropicAPIKeyPassthrough(ctx context.Context, c *gin.Context, account *Account, body []byte) error {
 	token, tokenType, err := s.GetAccessToken(ctx, account)
 	if err != nil {
-		s.countTokensError(c, http.StatusBadGateway, "api_error", "Failed to get access token")
+		s.countTokensError(c, http.StatusBadGateway, "upstream_error", "Failed to get access token")
 		return err
 	}
 	if tokenType != "apikey" {
-		s.countTokensError(c, http.StatusBadGateway, "api_error", "Invalid account token type")
+		s.countTokensError(c, http.StatusBadGateway, "upstream_error", "Invalid account token type")
 		return fmt.Errorf("anthropic api key passthrough requires apikey token, got: %s", tokenType)
 	}
 
@@ -279,18 +279,18 @@ func (s *GatewayService) forwardCountTokensAnthropicAPIKeyPassthrough(ctx contex
 			Kind:               "request_error",
 			Message:            sanitizeUpstreamErrorMessage(err.Error()),
 		})
-		s.countTokensError(c, http.StatusBadGateway, "api_error", "Request failed")
+		s.countTokensError(c, http.StatusBadGateway, "upstream_error", "Request failed")
 		return fmt.Errorf("upstream request failed: %w", err)
 	}
 
 	countTokensTooLarge := func(c *gin.Context) {
-		s.countTokensError(c, http.StatusBadGateway, "api_error", "Response too large")
+		s.countTokensError(c, http.StatusBadGateway, "upstream_error", "Upstream response too large")
 	}
 	respBody, err := ReadUpstreamResponseBody(resp.Body, s.cfg, c, countTokensTooLarge)
 	_ = resp.Body.Close()
 	if err != nil {
 		if !errors.Is(err, ErrUpstreamResponseBodyTooLarge) {
-			s.countTokensError(c, http.StatusBadGateway, "api_error", "Failed to read response")
+			s.countTokensError(c, http.StatusBadGateway, "upstream_error", "Failed to read response")
 		}
 		return err
 	}
@@ -336,14 +336,14 @@ func (s *GatewayService) forwardCountTokensAnthropicAPIKeyPassthrough(ctx contex
 			Detail:             upstreamDetail,
 		})
 
-		errMsg := "Request failed"
+		errMsg := "Upstream request failed"
 		switch resp.StatusCode {
 		case 429:
 			errMsg = "Rate limit exceeded"
 		case 529:
 			errMsg = "Service overloaded"
 		}
-		s.countTokensError(c, resp.StatusCode, "api_error", errMsg)
+		s.countTokensError(c, resp.StatusCode, "upstream_error", errMsg)
 		if upstreamMsg == "" {
 			return fmt.Errorf("upstream error: %d", resp.StatusCode)
 		}

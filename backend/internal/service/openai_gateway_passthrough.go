@@ -603,7 +603,7 @@ func validOpenAIPassthroughRetryAfter(raw string, now time.Time) bool {
 
 func writeSanitizedOpenAIPassthroughError(c *gin.Context, upstreamStatus int, upstreamHeaders http.Header) {
 	downstreamStatus := upstreamStatus
-	message := "Request failed"
+	message := "Upstream request failed"
 	switch upstreamStatus {
 	case http.StatusUnauthorized:
 		downstreamStatus = http.StatusBadGateway
@@ -627,7 +627,7 @@ func writeOpenAIPassthroughErrorEnvelope(c *gin.Context, downstreamStatus int, u
 	}
 	body, _ := json.Marshal(gin.H{
 		"error": gin.H{
-			"type":    "api_error",
+			"type":    "upstream_error",
 			"message": message,
 		},
 	})
@@ -1072,8 +1072,8 @@ func applyOpenAIStreamFailedErrorPassthroughRule(
 		upstreamStatus,
 		ruleBody,
 		http.StatusBadGateway,
-		"api_error",
-		"Request failed",
+		"upstream_error",
+		"Upstream request failed",
 	)
 }
 
@@ -1238,7 +1238,10 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 	writeOpenAIPassthroughResponseHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 
 	// SSE headers
-	responseheaders.SetSSEStreamingHeaders(c)
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("X-Accel-Buffering", "no")
 	if v := resp.Header.Get("x-request-id"); v != "" {
 		c.Header("x-request-id", v)
 	}

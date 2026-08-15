@@ -1249,8 +1249,8 @@ func (s *OpenAIGatewayService) handleGrokMediaErrorResponse(
 		resp.StatusCode,
 		body,
 		http.StatusBadGateway,
-		"api_error",
-		"Request failed",
+		"upstream_error",
+		"Upstream request failed",
 	); matched {
 		MarkResponseCommitted(c)
 		writeGrokMediaErrorResponse(c, status, errType, errMsg)
@@ -1310,7 +1310,7 @@ func grokMediaErrorType(statusCode int) string {
 	case http.StatusTooManyRequests:
 		return "rate_limit_error"
 	default:
-		return "api_error"
+		return "upstream_error"
 	}
 }
 

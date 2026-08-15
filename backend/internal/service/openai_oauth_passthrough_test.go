@@ -1166,7 +1166,7 @@ func TestOpenAIGatewayService_APIKeyPassthrough_RebuildsUpstreamErrors(t *testin
 			contentType:  "text/plain",
 			responseBody: `proxy secret-upstream.example rejected the request`,
 			wantStatus:   http.StatusBadRequest,
-			wantMessage:  "Request failed",
+			wantMessage:  "Upstream request failed",
 		},
 		{
 			name:         "malicious valid json 4xx",
@@ -1175,7 +1175,7 @@ func TestOpenAIGatewayService_APIKeyPassthrough_RebuildsUpstreamErrors(t *testin
 			responseBody: `{"error":{"message":"secret-upstream.example invalid parameter","type":"invalid_request_error","code":"upstream_secret_code","param":"private_field","internal_token":"sk-upstream-secret"},"rate_limit":{"remaining":0,"reset":"internal-window"},"debug":{"admin":"root"},"redirect":"https://secret-upstream.example/admin"}`,
 			retryAfter:   "not-a-valid-delay",
 			wantStatus:   http.StatusBadRequest,
-			wantMessage:  "Request failed",
+			wantMessage:  "Upstream request failed",
 		},
 	}
 
@@ -1244,7 +1244,7 @@ func TestOpenAIGatewayService_APIKeyPassthrough_RebuildsUpstreamErrors(t *testin
 			} {
 				require.Empty(t, rec.Header().Values(key), "sensitive upstream header %s must be dropped", key)
 			}
-			require.Equal(t, "api_error", gjson.Get(rec.Body.String(), "error.type").String())
+			require.Equal(t, "upstream_error", gjson.Get(rec.Body.String(), "error.type").String())
 			require.Equal(t, tt.wantMessage, gjson.Get(rec.Body.String(), "error.message").String())
 			require.False(t, gjson.Get(rec.Body.String(), "error.code").Exists())
 			require.False(t, gjson.Get(rec.Body.String(), "error.param").Exists())
@@ -1315,7 +1315,7 @@ func TestOpenAIGatewayService_APIKeyPassthrough_CompactErrorBeforeKeepaliveIsSin
 	require.Error(t, err)
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 	require.True(t, gjson.Valid(rec.Body.String()))
-	require.Equal(t, "api_error", gjson.Get(rec.Body.String(), "error.type").String())
+	require.Equal(t, "upstream_error", gjson.Get(rec.Body.String(), "error.type").String())
 	require.NotContains(t, rec.Body.String(), "event:")
 	require.NotContains(t, rec.Body.String(), ": keepalive")
 	require.NotContains(t, rec.Body.String(), "secret-upstream.example")
@@ -1354,8 +1354,8 @@ func TestOpenAIGatewayService_APIKeyPassthrough_CompactErrorAfterKeepaliveIsFail
 	require.Len(t, events, 1)
 	require.Equal(t, "response.failed", events[0][0])
 	require.Equal(t, "failed", gjson.Get(events[0][1], "response.status").String())
-	require.Equal(t, "api_error", gjson.Get(events[0][1], "response.error.code").String())
-	require.Equal(t, "Request failed", gjson.Get(events[0][1], "response.error.message").String())
+	require.Equal(t, "upstream_error", gjson.Get(events[0][1], "response.error.code").String())
+	require.Equal(t, "Upstream request failed", gjson.Get(events[0][1], "response.error.message").String())
 	require.NotContains(t, rec.Body.String(), "secret-upstream.example")
 }
 

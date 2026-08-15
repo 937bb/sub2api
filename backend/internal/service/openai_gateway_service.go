@@ -838,7 +838,7 @@ func resolveOpenAIWSFallbackErrorResponse(err error) (statusCode int, errType st
 		case "upstream_rate_limited":
 			upstreamMessage = "upstream rate limit exceeded, please retry later"
 		default:
-			upstreamMessage = "Request failed"
+			upstreamMessage = "Upstream request failed"
 		}
 	}
 
@@ -846,7 +846,7 @@ func resolveOpenAIWSFallbackErrorResponse(err error) (statusCode int, errType st
 		if statusCode == http.StatusTooManyRequests {
 			errType = "rate_limit_error"
 		} else {
-			errType = "api_error"
+			errType = "upstream_error"
 		}
 	}
 	clientMessage = upstreamMessage
@@ -862,7 +862,7 @@ func (s *OpenAIGatewayService) writeOpenAIWSFallbackErrorResponse(c *gin.Context
 		return false
 	}
 	if strings.TrimSpace(clientMessage) == "" {
-		clientMessage = "Request failed"
+		clientMessage = "Upstream request failed"
 	}
 	if strings.TrimSpace(upstreamMessage) == "" {
 		upstreamMessage = clientMessage

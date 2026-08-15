@@ -400,8 +400,8 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 			c.JSON(http.StatusBadGateway, gin.H{
 				"type": "error",
 				"error": gin.H{
-					"type":    "api_error",
-					"message": "Request failed",
+					"type":    "upstream_error",
+					"message": "Upstream request failed",
 				},
 			})
 			return nil, fmt.Errorf("upstream request failed: %s", safeErr)
