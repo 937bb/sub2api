@@ -276,7 +276,7 @@ func sanitizeStreamError(err error) string {
 			return netErr.Op + " network error"
 		}
 	}
-	return "connection error"
+	return "upstream connection error"
 }
 
 // ExtractUpstreamErrorMessage 从上游响应体中提取错误消息

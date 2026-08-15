@@ -695,7 +695,7 @@ func (s *OpenAIGatewayService) ForwardGrokMedia(
 		return s.handleGrokMediaErrorResponse(ctx, resp, c, account, requestIDHeader, requestModel)
 	}
 
-	s.updateGrokUsageFromResponse(ctx, account, resp.Header, resp.StatusCode)
+	s.updateGrokUsageFromResponse(withGrokTeamRateLimitModel(ctx, requestModel), account, resp.Header, resp.StatusCode)
 	respBody, err := ReadUpstreamResponseBody(resp.Body, s.cfg, c, openAITooLargeError)
 	if err != nil {
 		return nil, err
@@ -857,7 +857,7 @@ func (s *OpenAIGatewayService) forwardGrokMediaVideoContent(
 		return s.handleGrokMediaErrorResponse(ctx, contentResp, c, account, contentRequestID, "")
 	}
 
-	s.updateGrokUsageFromResponse(ctx, account, contentResp.Header, contentResp.StatusCode)
+	s.updateGrokUsageFromResponse(withGrokTeamRateLimitModel(ctx, ""), account, contentResp.Header, contentResp.StatusCode)
 	if err := writeGrokMediaContentResponse(c, contentResp); err != nil {
 		return nil, err
 	}
@@ -1269,7 +1269,7 @@ func (s *OpenAIGatewayService) handleGrokMediaErrorResponse(
 			Detail:             upstreamDetail,
 		})
 		MarkResponseCommitted(c)
-		writeGrokMediaErrorResponse(c, http.StatusInternalServerError, "api_error", "Gateway error")
+		writeGrokMediaErrorResponse(c, http.StatusInternalServerError, "upstream_error", "Upstream gateway error")
 		return nil, fmt.Errorf("upstream error: %d (not in custom error codes) message=%s", resp.StatusCode, upstreamMsg)
 	}
 

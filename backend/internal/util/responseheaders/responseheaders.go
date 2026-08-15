@@ -26,14 +26,14 @@ func SetSSEStreamingHeaders(c *gin.Context) {
 
 	// Connection: keep-alive is an HTTP/1.1 hop-by-hop header.
 	// It MUST NOT appear in HTTP/2 responses (RFC 9113 §8.2.2).
-	if c.Request.ProtoMajor < 2 {
+	if c.Request == nil || c.Request.ProtoMajor < 2 {
 		c.Header("Connection", "keep-alive")
 	}
 
 	// X-Accel-Buffering is an nginx-specific directive. Only set it when
 	// the request clearly came through a reverse proxy, so deployments
 	// without nginx don't leak this non-standard header.
-	if IsBehindReverseProxy(c.Request) {
+	if c.Request != nil && IsBehindReverseProxy(c.Request) {
 		c.Header("X-Accel-Buffering", "no")
 	}
 }
