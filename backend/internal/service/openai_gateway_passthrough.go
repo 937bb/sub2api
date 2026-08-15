@@ -39,6 +39,17 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	startTime time.Time,
 ) (*OpenAIForwardResult, error) {
 	upstreamPassthroughModel := ""
+	if groupMappedModel, matched := openAIGroupMappedModel(c); matched {
+		upstreamPassthroughModel = groupMappedModel
+		if groupMappedModel != strings.TrimSpace(reqModel) {
+			nextBody, setErr := sjson.SetBytes(body, "model", groupMappedModel)
+			if setErr != nil {
+				return nil, fmt.Errorf("set passthrough group mapped model: %w", setErr)
+			}
+			body = nextBody
+			attemptImageIntentInvalidated = true
+		}
+	}
 	if isOpenAIResponsesCompactPath(c) {
 		compactMappedModel := resolveOpenAICompactForwardModel(account, reqModel)
 		if compactMappedModel != "" && compactMappedModel != reqModel {
@@ -236,7 +247,8 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		// 透传模式默认保持原样代理；容量错误以及 API-key 上游的瞬时
 		// 5xx 应先触发多账号 failover，且此时尚未写入下游响应。
 		// probeBody 已在上方任务探测时读取过一次，直接复用避免重复读取。
-		if shouldFailoverOpenAIPassthroughResponse(account, resp.StatusCode, probeBody) {
+		if shouldFailoverOpenAIPassthroughResponse(account, resp.StatusCode, probeBody) ||
+			(s.openAITransientErrorRetryEnabled(c) && isOpenAITransientCapacityError("", probeBody)) {
 			return nil, s.handleFailoverErrorResponsePassthrough(ctx, resp, c, account, body, probeBody)
 		}
 		return nil, s.handleErrorResponsePassthrough(ctx, resp, c, account, body, probeBody)
@@ -261,7 +273,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		imageCount = result.imageCount
 		imageOutputSizes = result.imageOutputSizes
 	} else {
-		result, err := s.handleNonStreamingResponsePassthrough(ctx, resp, c, reqModel, upstreamPassthroughModel)
+		result, err := s.handleNonStreamingResponsePassthroughForAccount(ctx, resp, c, account, reqModel, upstreamPassthroughModel)
 		if err != nil {
 			return nil, err
 		}
@@ -642,13 +654,15 @@ func (s *OpenAIGatewayService) handleFailoverErrorResponsePassthrough(
 		UpstreamResponseBody: upstreamDetail,
 	})
 	retryable := !shouldDisable && account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode)
-	return s.configureOpenAIQuotaBypass429Retry(c, account, newOpenAIUpstreamFailoverError(
+	failoverErr := newOpenAIUpstreamFailoverError(
 		resp.StatusCode,
 		resp.Header,
 		body,
 		upstreamMsg,
 		retryable,
-	), true)
+	)
+	failoverErr = s.configureOpenAITransientErrorRetry(c, failoverErr, upstreamMsg, body)
+	return s.configureOpenAIQuotaBypass429Retry(c, account, failoverErr, true)
 }
 
 func (s *OpenAIGatewayService) handleErrorResponsePassthrough(
@@ -1048,6 +1062,13 @@ func openAIStreamFailedEventShouldFailover(payload []byte, message string) bool 
 	if isOpenAIContextWindowError(message, payload) {
 		return false
 	}
+	// Some OpenAI capacity-shed frames omit error.code entirely and only carry
+	// the overload message. Treat them exactly like coded overload frames so an
+	// early `error` event stays buffered until the following response.failed can
+	// return a failover error instead of committing the failed attempt.
+	if isOpenAITransientCapacityError(message, payload) {
+		return true
+	}
 	// A response.failed event is transported over HTTP 200. Prefer its semantic
 	// rate-limit status over a generic/invalid_request error type so it can enter
 	// the same 429 retry policy as a regular upstream HTTP response.
@@ -1185,8 +1206,9 @@ func (s *OpenAIGatewayService) newOpenAIStreamFailoverError(
 		ResponseBody:           body,
 		ResponseHeaders:        headers,
 		RetryableOnSameAccount: openAIStreamFailedEventRetryableOnSameAccount(account, payload, message),
-		RequestScopedTransient: isOpenAIUpstreamCapacityShedEvent(payload),
+		RequestScopedTransient: isOpenAITransientCapacityError(message, payload),
 	}
+	failoverErr = s.configureOpenAITransientErrorRetry(c, failoverErr, message, payload)
 	return s.configureOpenAIQuotaBypass429Retry(c, account, failoverErr, false)
 }
 
@@ -1595,6 +1617,17 @@ func (s *OpenAIGatewayService) handleNonStreamingResponsePassthrough(
 	originalModel string,
 	mappedModel string,
 ) (*openaiNonStreamingResultPassthrough, error) {
+	return s.handleNonStreamingResponsePassthroughForAccount(ctx, resp, c, nil, originalModel, mappedModel)
+}
+
+func (s *OpenAIGatewayService) handleNonStreamingResponsePassthroughForAccount(
+	ctx context.Context,
+	resp *http.Response,
+	c *gin.Context,
+	account *Account,
+	originalModel string,
+	mappedModel string,
+) (*openaiNonStreamingResultPassthrough, error) {
 	body, err := ReadUpstreamResponseBody(resp.Body, s.cfg, c, openAITooLargeError)
 	if err != nil {
 		return nil, err
@@ -1614,7 +1647,7 @@ func (s *OpenAIGatewayService) handleNonStreamingResponsePassthrough(
 	// stream=false was requested. Without this conversion the client would
 	// receive raw SSE text or a terminal event with empty output.
 	if isEventStreamResponse(resp.Header) {
-		return s.handlePassthroughSSEToJSON(resp, c, body, originalModel, mappedModel)
+		return s.handlePassthroughSSEToJSONForAccount(resp, c, account, body, originalModel, mappedModel)
 	}
 
 	usage := &OpenAIUsage{}
@@ -1660,6 +1693,10 @@ func (s *OpenAIGatewayService) handleNonStreamingResponsePassthrough(
 // preserving passthrough payloads, except compact-only model remapping may
 // rewrite model fields back to the original requested model.
 func (s *OpenAIGatewayService) handlePassthroughSSEToJSON(resp *http.Response, c *gin.Context, body []byte, originalModel string, mappedModel string) (*openaiNonStreamingResultPassthrough, error) {
+	return s.handlePassthroughSSEToJSONForAccount(resp, c, nil, body, originalModel, mappedModel)
+}
+
+func (s *OpenAIGatewayService) handlePassthroughSSEToJSONForAccount(resp *http.Response, c *gin.Context, account *Account, body []byte, originalModel string, mappedModel string) (*openaiNonStreamingResultPassthrough, error) {
 	bodyText := string(body)
 	finalResponse, ok := extractCodexFinalResponse(bodyText)
 
@@ -1695,6 +1732,17 @@ func (s *OpenAIGatewayService) handlePassthroughSSEToJSON(resp *http.Response, c
 			msg := extractOpenAISSEErrorMessage(terminalPayload)
 			if msg == "" {
 				msg = "Upstream compact response failed"
+			}
+			if s.openAITransientErrorRetryEnabled(c) && isOpenAITransientCapacityError(msg, terminalPayload) {
+				return nil, s.newOpenAIStreamFailoverError(
+					c,
+					account,
+					true,
+					resp.Header.Get("x-request-id"),
+					terminalPayload,
+					msg,
+					resp.Header,
+				)
 			}
 			return nil, s.writeOpenAINonStreamingProtocolError(resp, c, msg)
 		}

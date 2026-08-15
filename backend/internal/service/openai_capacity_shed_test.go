@@ -88,6 +88,8 @@ func TestOpenAIStreamErrorFrameDoesNotStartClientOutput(t *testing.T) {
 	}{
 		{`{"type":"error","error":{"code":"server_is_overloaded","message":"overloaded"}}`, "error", false},
 		{`{"type":"error","error":{"code":"slow_down","message":"slow down"}}`, "error", false},
+		{`{"type":"error","error":{"message":"Our servers are currently overloaded. Please try again later."}}`, "error", false},
+		{`{"type":"error","error":{"message":"Selected model is at capacity. Please try a different model."}}`, "error", false},
 		{`{"type":"error","error":{"type":"rate_limit_error","code":"rate_limit_exceeded","message":"limited"}}`, "error", false},
 		// 不可重试类错误帧维持原样转发（不进 failover），保留上游错误细节。
 		{`{"type":"error","error":{"type":"invalid_request_error","code":"content_policy_violation","message":"blocked"}}`, "error", true},

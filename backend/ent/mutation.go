@@ -21978,6 +21978,11 @@ type GroupMutation struct {
 	require_oauth_only                           *bool
 	require_privacy_set                          *bool
 	default_mapped_model                         *string
+	openai_model_mapping_enabled                 *bool
+	openai_model_mapping                         *map[string]string
+	openai_transient_error_retry_enabled         *bool
+	openai_transient_error_retry_count           *int
+	addopenai_transient_error_retry_count        *int
 	messages_dispatch_model_config               *domain.OpenAIMessagesDispatchModelConfig
 	models_list_config                           *domain.GroupModelsListConfig
 	rpm_limit                                    *int
@@ -24770,6 +24775,170 @@ func (m *GroupMutation) ResetDefaultMappedModel() {
 	m.default_mapped_model = nil
 }
 
+// SetOpenaiModelMappingEnabled sets the "openai_model_mapping_enabled" field.
+func (m *GroupMutation) SetOpenaiModelMappingEnabled(b bool) {
+	m.openai_model_mapping_enabled = &b
+}
+
+// OpenaiModelMappingEnabled returns the value of the "openai_model_mapping_enabled" field in the mutation.
+func (m *GroupMutation) OpenaiModelMappingEnabled() (r bool, exists bool) {
+	v := m.openai_model_mapping_enabled
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldOpenaiModelMappingEnabled returns the old "openai_model_mapping_enabled" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldOpenaiModelMappingEnabled(ctx context.Context) (v bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldOpenaiModelMappingEnabled is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldOpenaiModelMappingEnabled requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldOpenaiModelMappingEnabled: %w", err)
+	}
+	return oldValue.OpenaiModelMappingEnabled, nil
+}
+
+// ResetOpenaiModelMappingEnabled resets all changes to the "openai_model_mapping_enabled" field.
+func (m *GroupMutation) ResetOpenaiModelMappingEnabled() {
+	m.openai_model_mapping_enabled = nil
+}
+
+// SetOpenaiModelMapping sets the "openai_model_mapping" field.
+func (m *GroupMutation) SetOpenaiModelMapping(value map[string]string) {
+	m.openai_model_mapping = &value
+}
+
+// OpenaiModelMapping returns the value of the "openai_model_mapping" field in the mutation.
+func (m *GroupMutation) OpenaiModelMapping() (r map[string]string, exists bool) {
+	v := m.openai_model_mapping
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldOpenaiModelMapping returns the old "openai_model_mapping" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldOpenaiModelMapping(ctx context.Context) (v map[string]string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldOpenaiModelMapping is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldOpenaiModelMapping requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldOpenaiModelMapping: %w", err)
+	}
+	return oldValue.OpenaiModelMapping, nil
+}
+
+// ResetOpenaiModelMapping resets all changes to the "openai_model_mapping" field.
+func (m *GroupMutation) ResetOpenaiModelMapping() {
+	m.openai_model_mapping = nil
+}
+
+// SetOpenaiTransientErrorRetryEnabled sets the "openai_transient_error_retry_enabled" field.
+func (m *GroupMutation) SetOpenaiTransientErrorRetryEnabled(b bool) {
+	m.openai_transient_error_retry_enabled = &b
+}
+
+// OpenaiTransientErrorRetryEnabled returns the value of the "openai_transient_error_retry_enabled" field in the mutation.
+func (m *GroupMutation) OpenaiTransientErrorRetryEnabled() (r bool, exists bool) {
+	v := m.openai_transient_error_retry_enabled
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldOpenaiTransientErrorRetryEnabled returns the old "openai_transient_error_retry_enabled" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldOpenaiTransientErrorRetryEnabled(ctx context.Context) (v bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldOpenaiTransientErrorRetryEnabled is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldOpenaiTransientErrorRetryEnabled requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldOpenaiTransientErrorRetryEnabled: %w", err)
+	}
+	return oldValue.OpenaiTransientErrorRetryEnabled, nil
+}
+
+// ResetOpenaiTransientErrorRetryEnabled resets all changes to the "openai_transient_error_retry_enabled" field.
+func (m *GroupMutation) ResetOpenaiTransientErrorRetryEnabled() {
+	m.openai_transient_error_retry_enabled = nil
+}
+
+// SetOpenaiTransientErrorRetryCount sets the "openai_transient_error_retry_count" field.
+func (m *GroupMutation) SetOpenaiTransientErrorRetryCount(i int) {
+	m.openai_transient_error_retry_count = &i
+	m.addopenai_transient_error_retry_count = nil
+}
+
+// OpenaiTransientErrorRetryCount returns the value of the "openai_transient_error_retry_count" field in the mutation.
+func (m *GroupMutation) OpenaiTransientErrorRetryCount() (r int, exists bool) {
+	v := m.openai_transient_error_retry_count
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldOpenaiTransientErrorRetryCount returns the old "openai_transient_error_retry_count" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldOpenaiTransientErrorRetryCount(ctx context.Context) (v int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldOpenaiTransientErrorRetryCount is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldOpenaiTransientErrorRetryCount requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldOpenaiTransientErrorRetryCount: %w", err)
+	}
+	return oldValue.OpenaiTransientErrorRetryCount, nil
+}
+
+// AddOpenaiTransientErrorRetryCount adds i to the "openai_transient_error_retry_count" field.
+func (m *GroupMutation) AddOpenaiTransientErrorRetryCount(i int) {
+	if m.addopenai_transient_error_retry_count != nil {
+		*m.addopenai_transient_error_retry_count += i
+	} else {
+		m.addopenai_transient_error_retry_count = &i
+	}
+}
+
+// AddedOpenaiTransientErrorRetryCount returns the value that was added to the "openai_transient_error_retry_count" field in this mutation.
+func (m *GroupMutation) AddedOpenaiTransientErrorRetryCount() (r int, exists bool) {
+	v := m.addopenai_transient_error_retry_count
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetOpenaiTransientErrorRetryCount resets all changes to the "openai_transient_error_retry_count" field.
+func (m *GroupMutation) ResetOpenaiTransientErrorRetryCount() {
+	m.openai_transient_error_retry_count = nil
+	m.addopenai_transient_error_retry_count = nil
+}
+
 // SetMessagesDispatchModelConfig sets the "messages_dispatch_model_config" field.
 func (m *GroupMutation) SetMessagesDispatchModelConfig(damdmc domain.OpenAIMessagesDispatchModelConfig) {
 	m.messages_dispatch_model_config = &damdmc
@@ -25563,7 +25732,7 @@ func (m *GroupMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *GroupMutation) Fields() []string {
-	fields := make([]string, 0, 62)
+	fields := make([]string, 0, 66)
 	if m.created_at != nil {
 		fields = append(fields, group.FieldCreatedAt)
 	}
@@ -25720,6 +25889,18 @@ func (m *GroupMutation) Fields() []string {
 	if m.default_mapped_model != nil {
 		fields = append(fields, group.FieldDefaultMappedModel)
 	}
+	if m.openai_model_mapping_enabled != nil {
+		fields = append(fields, group.FieldOpenaiModelMappingEnabled)
+	}
+	if m.openai_model_mapping != nil {
+		fields = append(fields, group.FieldOpenaiModelMapping)
+	}
+	if m.openai_transient_error_retry_enabled != nil {
+		fields = append(fields, group.FieldOpenaiTransientErrorRetryEnabled)
+	}
+	if m.openai_transient_error_retry_count != nil {
+		fields = append(fields, group.FieldOpenaiTransientErrorRetryCount)
+	}
 	if m.messages_dispatch_model_config != nil {
 		fields = append(fields, group.FieldMessagesDispatchModelConfig)
 	}
@@ -25862,6 +26043,14 @@ func (m *GroupMutation) Field(name string) (ent.Value, bool) {
 		return m.RequirePrivacySet()
 	case group.FieldDefaultMappedModel:
 		return m.DefaultMappedModel()
+	case group.FieldOpenaiModelMappingEnabled:
+		return m.OpenaiModelMappingEnabled()
+	case group.FieldOpenaiModelMapping:
+		return m.OpenaiModelMapping()
+	case group.FieldOpenaiTransientErrorRetryEnabled:
+		return m.OpenaiTransientErrorRetryEnabled()
+	case group.FieldOpenaiTransientErrorRetryCount:
+		return m.OpenaiTransientErrorRetryCount()
 	case group.FieldMessagesDispatchModelConfig:
 		return m.MessagesDispatchModelConfig()
 	case group.FieldModelsListConfig:
@@ -25995,6 +26184,14 @@ func (m *GroupMutation) OldField(ctx context.Context, name string) (ent.Value, e
 		return m.OldRequirePrivacySet(ctx)
 	case group.FieldDefaultMappedModel:
 		return m.OldDefaultMappedModel(ctx)
+	case group.FieldOpenaiModelMappingEnabled:
+		return m.OldOpenaiModelMappingEnabled(ctx)
+	case group.FieldOpenaiModelMapping:
+		return m.OldOpenaiModelMapping(ctx)
+	case group.FieldOpenaiTransientErrorRetryEnabled:
+		return m.OldOpenaiTransientErrorRetryEnabled(ctx)
+	case group.FieldOpenaiTransientErrorRetryCount:
+		return m.OldOpenaiTransientErrorRetryCount(ctx)
 	case group.FieldMessagesDispatchModelConfig:
 		return m.OldMessagesDispatchModelConfig(ctx)
 	case group.FieldModelsListConfig:
@@ -26388,6 +26585,34 @@ func (m *GroupMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetDefaultMappedModel(v)
 		return nil
+	case group.FieldOpenaiModelMappingEnabled:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetOpenaiModelMappingEnabled(v)
+		return nil
+	case group.FieldOpenaiModelMapping:
+		v, ok := value.(map[string]string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetOpenaiModelMapping(v)
+		return nil
+	case group.FieldOpenaiTransientErrorRetryEnabled:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetOpenaiTransientErrorRetryEnabled(v)
+		return nil
+	case group.FieldOpenaiTransientErrorRetryCount:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetOpenaiTransientErrorRetryCount(v)
+		return nil
 	case group.FieldMessagesDispatchModelConfig:
 		v, ok := value.(domain.OpenAIMessagesDispatchModelConfig)
 		if !ok {
@@ -26538,6 +26763,9 @@ func (m *GroupMutation) AddedFields() []string {
 	if m.addsort_order != nil {
 		fields = append(fields, group.FieldSortOrder)
 	}
+	if m.addopenai_transient_error_retry_count != nil {
+		fields = append(fields, group.FieldOpenaiTransientErrorRetryCount)
+	}
 	if m.addrpm_limit != nil {
 		fields = append(fields, group.FieldRpmLimit)
 	}
@@ -26603,6 +26831,8 @@ func (m *GroupMutation) AddedField(name string) (ent.Value, bool) {
 		return m.AddedFallbackGroupIDOnInvalidRequest()
 	case group.FieldSortOrder:
 		return m.AddedSortOrder()
+	case group.FieldOpenaiTransientErrorRetryCount:
+		return m.AddedOpenaiTransientErrorRetryCount()
 	case group.FieldRpmLimit:
 		return m.AddedRpmLimit()
 	case group.FieldProfitMinMargin:
@@ -26785,6 +27015,13 @@ func (m *GroupMutation) AddField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.AddSortOrder(v)
+		return nil
+	case group.FieldOpenaiTransientErrorRetryCount:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddOpenaiTransientErrorRetryCount(v)
 		return nil
 	case group.FieldRpmLimit:
 		v, ok := value.(int)
@@ -27118,6 +27355,18 @@ func (m *GroupMutation) ResetField(name string) error {
 		return nil
 	case group.FieldDefaultMappedModel:
 		m.ResetDefaultMappedModel()
+		return nil
+	case group.FieldOpenaiModelMappingEnabled:
+		m.ResetOpenaiModelMappingEnabled()
+		return nil
+	case group.FieldOpenaiModelMapping:
+		m.ResetOpenaiModelMapping()
+		return nil
+	case group.FieldOpenaiTransientErrorRetryEnabled:
+		m.ResetOpenaiTransientErrorRetryEnabled()
+		return nil
+	case group.FieldOpenaiTransientErrorRetryCount:
+		m.ResetOpenaiTransientErrorRetryCount()
 		return nil
 	case group.FieldMessagesDispatchModelConfig:
 		m.ResetMessagesDispatchModelConfig()

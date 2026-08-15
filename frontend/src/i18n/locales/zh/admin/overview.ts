@@ -1127,6 +1127,26 @@ export default {
         targetModelPlaceholder: '例如: gpt-5.4',
         removeExactMapping: '删除精确映射'
       },
+      openaiModelMapping: {
+        title: 'OpenAI 分组自动模型映射',
+        hint: '开启后，命中的目标模型会直接透传上游，不再经过账号映射或 Codex 别名归一化。源模型支持尾部 * 通配，最长前缀优先。compact 请求不使用此规则。',
+        toggle: '启用分组模型映射',
+        add: '添加映射',
+        empty: '暂未配置分组级自动映射',
+        requested: '请求模型',
+        requestedPlaceholder: '例如 gpt-5.6-sol 或 gpt-5.*',
+        upstream: '上游模型',
+        upstreamPlaceholder: '例如 gpt-5.6-sol-wm',
+        remove: '删除映射'
+      },
+      openaiTransientRetry: {
+        title: 'OpenAI 瞬时过载重试',
+        enable: '遇到容量或过载错误时自动重试',
+        hint: '仅匹配 OpenAI 明确返回的 overloaded、slow_down 或模型容量不足错误，并且只在尚未向客户端输出内容时重试。认证、额度、计费和上下文超限错误不会重试。',
+        count: '单账号最大重试次数',
+        countHint: '可设置 1-10 次，默认 3 次；重试采用有上限的递增等待。',
+        invalidCount: 'OpenAI 瞬时过载重试次数必须是 1-10 的整数'
+      },
       openaiLive: {
         title: 'OpenAI Live',
         allow: '允许访问 Live',

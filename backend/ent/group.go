@@ -123,6 +123,14 @@ type Group struct {
 	RequirePrivacySet bool `json:"require_privacy_set,omitempty"`
 	// 默认映射模型 ID，当账号级映射找不到时使用此值
 	DefaultMappedModel string `json:"default_mapped_model,omitempty"`
+	// 是否启用 OpenAI 分组级请求模型映射
+	OpenaiModelMappingEnabled bool `json:"openai_model_mapping_enabled,omitempty"`
+	// OpenAI group-level request model mapping; matched targets are final upstream model IDs
+	OpenaiModelMapping map[string]string `json:"openai_model_mapping,omitempty"`
+	// Whether to retry explicit OpenAI capacity and overload errors before downstream output
+	OpenaiTransientErrorRetryEnabled bool `json:"openai_transient_error_retry_enabled,omitempty"`
+	// Maximum same-account retries for explicit OpenAI capacity and overload errors
+	OpenaiTransientErrorRetryCount int `json:"openai_transient_error_retry_count,omitempty"`
 	// OpenAI Messages 调度模型配置：按 Claude 系列/精确模型映射到目标 GPT 模型
 	MessagesDispatchModelConfig domain.OpenAIMessagesDispatchModelConfig `json:"messages_dispatch_model_config,omitempty"`
 	// 自定义 /v1/models 展示列表配置；仅影响模型列表响应，不影响调度
@@ -249,13 +257,13 @@ func (*Group) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
-		case group.FieldVideoModelPrices, group.FieldModelRouting, group.FieldSupportedModelScopes, group.FieldMessagesDispatchModelConfig, group.FieldModelsListConfig, group.FieldReasoningEffortMappings:
+		case group.FieldVideoModelPrices, group.FieldModelRouting, group.FieldSupportedModelScopes, group.FieldOpenaiModelMapping, group.FieldMessagesDispatchModelConfig, group.FieldModelsListConfig, group.FieldReasoningEffortMappings:
 			values[i] = new([]byte)
-		case group.FieldPeakRateEnabled, group.FieldIsExclusive, group.FieldAllowImageGeneration, group.FieldAllowBatchImageGeneration, group.FieldImageRateIndependent, group.FieldVideoRateIndependent, group.FieldClaudeCodeOnly, group.FieldModelRoutingEnabled, group.FieldMcpXMLInject, group.FieldAllowMessagesDispatch, group.FieldAllowLive, group.FieldRequireOauthOnly, group.FieldRequirePrivacySet, group.FieldQuotaBypassEnabled, group.FieldQuotaBypassConcentratedSchedulingEnabled, group.FieldProfitControlEnabled:
+		case group.FieldPeakRateEnabled, group.FieldIsExclusive, group.FieldAllowImageGeneration, group.FieldAllowBatchImageGeneration, group.FieldImageRateIndependent, group.FieldVideoRateIndependent, group.FieldClaudeCodeOnly, group.FieldModelRoutingEnabled, group.FieldMcpXMLInject, group.FieldAllowMessagesDispatch, group.FieldAllowLive, group.FieldRequireOauthOnly, group.FieldRequirePrivacySet, group.FieldOpenaiModelMappingEnabled, group.FieldOpenaiTransientErrorRetryEnabled, group.FieldQuotaBypassEnabled, group.FieldQuotaBypassConcentratedSchedulingEnabled, group.FieldProfitControlEnabled:
 			values[i] = new(sql.NullBool)
 		case group.FieldRateMultiplier, group.FieldPeakRateMultiplier, group.FieldDailyLimitUsd, group.FieldWeeklyLimitUsd, group.FieldMonthlyLimitUsd, group.FieldImageRateMultiplier, group.FieldImagePrice1k, group.FieldImagePrice2k, group.FieldImagePrice4k, group.FieldBatchImageDiscountMultiplier, group.FieldBatchImageHoldMultiplier, group.FieldVideoRateMultiplier, group.FieldVideoPrice480p, group.FieldVideoPrice720p, group.FieldVideoPrice1080p, group.FieldWebSearchPricePerCall, group.FieldSearchPricePer1k, group.FieldAudioRealtimePricePerMin, group.FieldAudioTtsPricePerMillionChars, group.FieldAudioSttPricePerHour, group.FieldProfitMinMargin, group.FieldProfitSafetyBuffer:
 			values[i] = new(sql.NullFloat64)
-		case group.FieldID, group.FieldDefaultValidityDays, group.FieldFallbackGroupID, group.FieldFallbackGroupIDOnInvalidRequest, group.FieldSortOrder, group.FieldRpmLimit:
+		case group.FieldID, group.FieldDefaultValidityDays, group.FieldFallbackGroupID, group.FieldFallbackGroupIDOnInvalidRequest, group.FieldSortOrder, group.FieldOpenaiTransientErrorRetryCount, group.FieldRpmLimit:
 			values[i] = new(sql.NullInt64)
 		case group.FieldName, group.FieldDescription, group.FieldPeakStart, group.FieldPeakEnd, group.FieldStatus, group.FieldDuplicateOperationID, group.FieldPlatform, group.FieldSubscriptionType, group.FieldDefaultMappedModel, group.FieldMaxReasoningEffort:
 			values[i] = new(sql.NullString)
@@ -619,6 +627,32 @@ func (_m *Group) assignValues(columns []string, values []any) error {
 			} else if value.Valid {
 				_m.DefaultMappedModel = value.String
 			}
+		case group.FieldOpenaiModelMappingEnabled:
+			if value, ok := values[i].(*sql.NullBool); !ok {
+				return fmt.Errorf("unexpected type %T for field openai_model_mapping_enabled", values[i])
+			} else if value.Valid {
+				_m.OpenaiModelMappingEnabled = value.Bool
+			}
+		case group.FieldOpenaiModelMapping:
+			if value, ok := values[i].(*[]byte); !ok {
+				return fmt.Errorf("unexpected type %T for field openai_model_mapping", values[i])
+			} else if value != nil && len(*value) > 0 {
+				if err := json.Unmarshal(*value, &_m.OpenaiModelMapping); err != nil {
+					return fmt.Errorf("unmarshal field openai_model_mapping: %w", err)
+				}
+			}
+		case group.FieldOpenaiTransientErrorRetryEnabled:
+			if value, ok := values[i].(*sql.NullBool); !ok {
+				return fmt.Errorf("unexpected type %T for field openai_transient_error_retry_enabled", values[i])
+			} else if value.Valid {
+				_m.OpenaiTransientErrorRetryEnabled = value.Bool
+			}
+		case group.FieldOpenaiTransientErrorRetryCount:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field openai_transient_error_retry_count", values[i])
+			} else if value.Valid {
+				_m.OpenaiTransientErrorRetryCount = int(value.Int64)
+			}
 		case group.FieldMessagesDispatchModelConfig:
 			if value, ok := values[i].(*[]byte); !ok {
 				return fmt.Errorf("unexpected type %T for field messages_dispatch_model_config", values[i])
@@ -954,6 +988,18 @@ func (_m *Group) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("default_mapped_model=")
 	builder.WriteString(_m.DefaultMappedModel)
+	builder.WriteString(", ")
+	builder.WriteString("openai_model_mapping_enabled=")
+	builder.WriteString(fmt.Sprintf("%v", _m.OpenaiModelMappingEnabled))
+	builder.WriteString(", ")
+	builder.WriteString("openai_model_mapping=")
+	builder.WriteString(fmt.Sprintf("%v", _m.OpenaiModelMapping))
+	builder.WriteString(", ")
+	builder.WriteString("openai_transient_error_retry_enabled=")
+	builder.WriteString(fmt.Sprintf("%v", _m.OpenaiTransientErrorRetryEnabled))
+	builder.WriteString(", ")
+	builder.WriteString("openai_transient_error_retry_count=")
+	builder.WriteString(fmt.Sprintf("%v", _m.OpenaiTransientErrorRetryCount))
 	builder.WriteString(", ")
 	builder.WriteString("messages_dispatch_model_config=")
 	builder.WriteString(fmt.Sprintf("%v", _m.MessagesDispatchModelConfig))

@@ -15,6 +15,11 @@ type OpenAIMessagesDispatchModelConfig = domain.OpenAIMessagesDispatchModelConfi
 type GroupModelsListConfig = domain.GroupModelsListConfig
 type ReasoningEffortMapping = domain.ReasoningEffortMapping
 
+const (
+	DefaultOpenAITransientErrorRetryCount = 3
+	MaxOpenAITransientErrorRetryCount     = 10
+)
+
 type Group struct {
 	ID             int64
 	Name           string
@@ -93,13 +98,17 @@ type Group struct {
 	SortOrder int
 
 	// OpenAI Messages 调度配置（仅 openai 平台使用）
-	AllowMessagesDispatch       bool
-	AllowLive                   bool
-	RequireOAuthOnly            bool // 仅允许非 apikey 类型账号关联（OpenAI/Antigravity/Anthropic/Gemini）
-	RequirePrivacySet           bool // 调度时仅允许 privacy 已成功设置的账号（OpenAI/Antigravity/Anthropic/Gemini）
-	DefaultMappedModel          string
-	MessagesDispatchModelConfig OpenAIMessagesDispatchModelConfig
-	ModelsListConfig            GroupModelsListConfig
+	AllowMessagesDispatch            bool
+	AllowLive                        bool
+	RequireOAuthOnly                 bool // 仅允许非 apikey 类型账号关联（OpenAI/Antigravity/Anthropic/Gemini）
+	RequirePrivacySet                bool // 调度时仅允许 privacy 已成功设置的账号（OpenAI/Antigravity/Anthropic/Gemini）
+	DefaultMappedModel               string
+	OpenAIModelMappingEnabled        bool
+	OpenAIModelMapping               map[string]string
+	OpenAITransientErrorRetryEnabled bool
+	OpenAITransientErrorRetryCount   int
+	MessagesDispatchModelConfig      OpenAIMessagesDispatchModelConfig
+	ModelsListConfig                 GroupModelsListConfig
 
 	// RPMLimit 分组级每分钟请求数上限（0 = 不限制）。
 	// 一旦设置即接管该分组用户的限流（覆盖用户级 rpm_limit），可被 user-group rpm_override 进一步覆盖。
@@ -130,6 +139,27 @@ type Group struct {
 	AccountCount            int64
 	ActiveAccountCount      int64
 	RateLimitedAccountCount int64
+}
+
+func normalizeOpenAITransientErrorRetryCount(count int) (int, error) {
+	if count == 0 {
+		return DefaultOpenAITransientErrorRetryCount, nil
+	}
+	if count < 1 || count > MaxOpenAITransientErrorRetryCount {
+		return 0, fmt.Errorf("OpenAI transient error retry count must be between 1 and %d", MaxOpenAITransientErrorRetryCount)
+	}
+	return count, nil
+}
+
+func (g *Group) openAITransientErrorRetryPolicy() (bool, int) {
+	if g == nil || g.Platform != PlatformOpenAI || !g.OpenAITransientErrorRetryEnabled {
+		return false, DefaultOpenAITransientErrorRetryCount
+	}
+	count, err := normalizeOpenAITransientErrorRetryCount(g.OpenAITransientErrorRetryCount)
+	if err != nil {
+		return true, MaxOpenAITransientErrorRetryCount
+	}
+	return true, count
 }
 
 func (g *Group) IsActive() bool {

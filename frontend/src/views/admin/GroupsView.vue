@@ -1654,6 +1654,78 @@
           </p>
         </div>
 
+        <!-- OpenAI 分组模型映射（仅 openai 平台） -->
+        <div
+          v-if="createForm.platform === 'openai'"
+          class="border-t border-gray-200 dark:border-dark-400 pt-4 mt-4"
+        >
+          <GroupModelMappingEditor
+            v-model="createForm.openai_model_mapping"
+            v-model:enabled="createForm.openai_model_mapping_enabled"
+          />
+        </div>
+
+        <div
+          v-if="createForm.platform === 'openai'"
+          class="border-t border-gray-200 dark:border-dark-400 pt-4 mt-4"
+        >
+          <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+            {{ t("admin.groups.openaiTransientRetry.title") }}
+          </h4>
+          <div class="flex items-center justify-between gap-4">
+            <label class="text-sm text-gray-600 dark:text-gray-400">
+              {{ t("admin.groups.openaiTransientRetry.enable") }}
+            </label>
+            <button
+              type="button"
+              role="switch"
+              :aria-checked="createForm.openai_transient_error_retry_enabled"
+              :aria-label="t('admin.groups.openaiTransientRetry.enable')"
+              class="relative inline-flex h-6 w-12 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none"
+              :class="
+                createForm.openai_transient_error_retry_enabled
+                  ? 'bg-primary-500'
+                  : 'bg-gray-300 dark:bg-dark-600'
+              "
+              @click="
+                createForm.openai_transient_error_retry_enabled =
+                  !createForm.openai_transient_error_retry_enabled
+              "
+            >
+              <span
+                class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"
+                :class="
+                  createForm.openai_transient_error_retry_enabled
+                    ? 'translate-x-6'
+                    : 'translate-x-1'
+                "
+              />
+            </button>
+          </div>
+          <p class="input-hint mt-1">
+            {{ t("admin.groups.openaiTransientRetry.hint") }}
+          </p>
+          <div
+            v-if="createForm.openai_transient_error_retry_enabled"
+            class="mt-3 max-w-xs"
+          >
+            <label class="input-label">
+              {{ t("admin.groups.openaiTransientRetry.count") }}
+            </label>
+            <input
+              v-model.number="createForm.openai_transient_error_retry_count"
+              type="number"
+              min="1"
+              max="10"
+              step="1"
+              class="input"
+            />
+            <p class="input-hint">
+              {{ t("admin.groups.openaiTransientRetry.countHint") }}
+            </p>
+          </div>
+        </div>
+
         <!-- OpenAI Messages 调度配置（仅 openai 平台） -->
         <div
           v-if="createForm.platform === 'openai'"
@@ -3432,6 +3504,78 @@
           </p>
         </div>
 
+        <!-- OpenAI 分组模型映射（仅 openai 平台） -->
+        <div
+          v-if="editForm.platform === 'openai'"
+          class="border-t border-gray-200 dark:border-dark-400 pt-4 mt-4"
+        >
+          <GroupModelMappingEditor
+            v-model="editForm.openai_model_mapping"
+            v-model:enabled="editForm.openai_model_mapping_enabled"
+          />
+        </div>
+
+        <div
+          v-if="editForm.platform === 'openai'"
+          class="border-t border-gray-200 dark:border-dark-400 pt-4 mt-4"
+        >
+          <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+            {{ t("admin.groups.openaiTransientRetry.title") }}
+          </h4>
+          <div class="flex items-center justify-between gap-4">
+            <label class="text-sm text-gray-600 dark:text-gray-400">
+              {{ t("admin.groups.openaiTransientRetry.enable") }}
+            </label>
+            <button
+              type="button"
+              role="switch"
+              :aria-checked="editForm.openai_transient_error_retry_enabled"
+              :aria-label="t('admin.groups.openaiTransientRetry.enable')"
+              class="relative inline-flex h-6 w-12 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none"
+              :class="
+                editForm.openai_transient_error_retry_enabled
+                  ? 'bg-primary-500'
+                  : 'bg-gray-300 dark:bg-dark-600'
+              "
+              @click="
+                editForm.openai_transient_error_retry_enabled =
+                  !editForm.openai_transient_error_retry_enabled
+              "
+            >
+              <span
+                class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"
+                :class="
+                  editForm.openai_transient_error_retry_enabled
+                    ? 'translate-x-6'
+                    : 'translate-x-1'
+                "
+              />
+            </button>
+          </div>
+          <p class="input-hint mt-1">
+            {{ t("admin.groups.openaiTransientRetry.hint") }}
+          </p>
+          <div
+            v-if="editForm.openai_transient_error_retry_enabled"
+            class="mt-3 max-w-xs"
+          >
+            <label class="input-label">
+              {{ t("admin.groups.openaiTransientRetry.count") }}
+            </label>
+            <input
+              v-model.number="editForm.openai_transient_error_retry_count"
+              type="number"
+              min="1"
+              max="10"
+              step="1"
+              class="input"
+            />
+            <p class="input-hint">
+              {{ t("admin.groups.openaiTransientRetry.countHint") }}
+            </p>
+          </div>
+        </div>
+
         <!-- OpenAI Messages 调度配置（仅 openai 平台） -->
         <div
           v-if="editForm.platform === 'openai'"
@@ -4527,6 +4671,9 @@ import GroupRateMultipliersModal from "@/components/admin/group/GroupRateMultipl
 import GroupRPMOverridesModal from "@/components/admin/group/GroupRPMOverridesModal.vue";
 import GroupCapacityBadge from "@/components/common/GroupCapacityBadge.vue";
 import ReasoningEffortPolicyFields from "@/components/admin/group/ReasoningEffortPolicyFields.vue";
+import GroupModelMappingEditor, {
+  type GroupModelMappingRow,
+} from "@/components/admin/group/GroupModelMappingEditor.vue";
 import { VueDraggable } from "vue-draggable-plus";
 import { createStableObjectKeyResolver } from "@/utils/stableObjectKey";
 import { extractApiErrorMessage } from "@/utils/apiError";
@@ -4581,6 +4728,16 @@ import {
   videoModelPriceFamilyRows,
 } from "./groupsVideoModelPricing";
 
+const groupModelMappingRowsToRecord = (rows: GroupModelMappingRow[]) =>
+  rows.reduce<Record<string, string>>((result, row) => {
+    const source = row.source.trim();
+    const target = row.target.trim();
+    if (source && target) result[source] = target;
+    return result;
+  }, {});
+
+const groupModelMappingRecordToRows = (mapping?: Record<string, string>) =>
+  Object.entries(mapping || {}).map(([source, target]) => ({ source, target }));
 const { t } = useI18n();
 const appStore = useAppStore();
 const onboardingStore = useOnboardingStore();
@@ -5103,6 +5260,10 @@ const createForm = reactive({
   // OpenAI Messages 调度配置（仅 openai 平台使用）
   allow_messages_dispatch: false,
   allow_live: false,
+  openai_model_mapping_enabled: false,
+  openai_model_mapping: [] as GroupModelMappingRow[],
+  openai_transient_error_retry_enabled: false,
+  openai_transient_error_retry_count: 3,
   opus_mapped_model: createMessagesDispatchDefaults.opus_mapped_model,
   sonnet_mapped_model: createMessagesDispatchDefaults.sonnet_mapped_model,
   haiku_mapped_model: createMessagesDispatchDefaults.haiku_mapped_model,
@@ -5465,6 +5626,10 @@ const editForm = reactive({
   allow_messages_dispatch: false,
   allow_live: false,
   default_mapped_model: '',
+  openai_model_mapping_enabled: false,
+  openai_model_mapping: [] as GroupModelMappingRow[],
+  openai_transient_error_retry_enabled: false,
+  openai_transient_error_retry_count: 3,
   opus_mapped_model: editMessagesDispatchDefaults.opus_mapped_model,
   sonnet_mapped_model: editMessagesDispatchDefaults.sonnet_mapped_model,
   haiku_mapped_model: editMessagesDispatchDefaults.haiku_mapped_model,
@@ -5916,6 +6081,10 @@ const closeCreateModal = () => {
   createForm.fallback_group_id_on_invalid_request = null;
   resetMessagesDispatchFormState(createForm);
   createForm.allow_live = false;
+  createForm.openai_model_mapping_enabled = false;
+  createForm.openai_model_mapping = [];
+  createForm.openai_transient_error_retry_enabled = false;
+  createForm.openai_transient_error_retry_count = 3;
   createForm.require_oauth_only = false;
   createForm.require_privacy_set = false;
   createForm.supported_model_scopes = ["claude", "gemini_text", "gemini_image"];
@@ -5973,6 +6142,25 @@ const validateProfitControlForm = (form: ProfitControlFormState): boolean => {
   return true;
 };
 
+const validateOpenAITransientRetryForm = (form: {
+  platform: GroupPlatform;
+  openai_transient_error_retry_enabled: boolean;
+  openai_transient_error_retry_count: number;
+}): boolean => {
+  if (
+    form.platform !== "openai" ||
+    !form.openai_transient_error_retry_enabled
+  ) {
+    return true;
+  }
+  const count = Number(form.openai_transient_error_retry_count);
+  if (!Number.isInteger(count) || count < 1 || count > 10) {
+    appStore.showError(t("admin.groups.openaiTransientRetry.invalidCount"));
+    return false;
+  }
+  return true;
+};
+
 const handleCreateGroup = async () => {
   if (!createForm.name.trim()) {
     appStore.showError(t("admin.groups.nameRequired"));
@@ -5988,6 +6176,9 @@ const handleCreateGroup = async () => {
   if (!validateProfitControlForm(createForm)) {
     return;
   }
+  if (!validateOpenAITransientRetryForm(createForm)) {
+    return;
+  }
   submitting.value = true;
   try {
     const {
@@ -6000,6 +6191,20 @@ const handleCreateGroup = async () => {
     // 构建请求数据，包含模型路由配置
     const requestData = {
       ...createGroupForm,
+      openai_model_mapping_enabled:
+        createForm.platform === "openai" &&
+        createForm.openai_model_mapping_enabled,
+      openai_model_mapping:
+        createForm.platform === "openai"
+          ? groupModelMappingRowsToRecord(createForm.openai_model_mapping)
+          : {},
+      openai_transient_error_retry_enabled:
+        createForm.platform === "openai" &&
+        createForm.openai_transient_error_retry_enabled,
+      openai_transient_error_retry_count:
+        createForm.platform === "openai"
+          ? Number(createForm.openai_transient_error_retry_count)
+          : 3,
       daily_limit_usd: normalizeOptionalLimit(
         createForm.daily_limit_usd as number | string | null,
       ),
@@ -6168,6 +6373,13 @@ const handleEdit = async (group: AdminGroup) => {
     group.allow_messages_dispatch ||
     messagesDispatchFormState.allow_messages_dispatch;
   editForm.allow_live = group.allow_live ?? false;
+  editForm.openai_model_mapping_enabled =
+    group.openai_model_mapping_enabled ?? false;
+  editForm.openai_model_mapping = groupModelMappingRecordToRows(group.openai_model_mapping);
+  editForm.openai_transient_error_retry_enabled =
+    group.openai_transient_error_retry_enabled ?? false;
+  editForm.openai_transient_error_retry_count =
+    group.openai_transient_error_retry_count ?? 3;
   editForm.opus_mapped_model = messagesDispatchFormState.opus_mapped_model;
   editForm.sonnet_mapped_model = messagesDispatchFormState.sonnet_mapped_model;
   editForm.haiku_mapped_model = messagesDispatchFormState.haiku_mapped_model;
@@ -6239,6 +6451,10 @@ const closeEditModal = () => {
   editForm.audio_stt_price_per_hour = null;
   resetMessagesDispatchFormState(editForm);
   editForm.allow_live = false;
+  editForm.openai_model_mapping_enabled = false;
+  editForm.openai_model_mapping = [];
+  editForm.openai_transient_error_retry_enabled = false;
+  editForm.openai_transient_error_retry_count = 3;
   resetModelsListState(editModelsListState);
 };
 
@@ -6258,12 +6474,29 @@ const handleUpdateGroup = async () => {
   if (!validateProfitControlForm(editForm)) {
     return;
   }
+  if (!validateOpenAITransientRetryForm(editForm)) {
+    return;
+  }
 
   submitting.value = true;
   try {
     // 转换 fallback_group_id: null -> 0 (后端使用 0 表示清除)
     const payload = {
       ...editForm,
+      openai_model_mapping_enabled:
+        editForm.platform === "openai" &&
+        editForm.openai_model_mapping_enabled,
+      openai_model_mapping:
+        editForm.platform === "openai"
+          ? groupModelMappingRowsToRecord(editForm.openai_model_mapping)
+          : {},
+      openai_transient_error_retry_enabled:
+        editForm.platform === "openai" &&
+        editForm.openai_transient_error_retry_enabled,
+      openai_transient_error_retry_count:
+        editForm.platform === "openai"
+          ? Number(editForm.openai_transient_error_retry_count)
+          : 3,
       daily_limit_usd: normalizeOptionalLimit(
         editForm.daily_limit_usd as number | string | null,
       ),

@@ -243,6 +243,21 @@ func (Group) Fields() []ent.Field {
 			MaxLen(100).
 			Default("").
 			Comment("默认映射模型 ID，当账号级映射找不到时使用此值"),
+		field.Bool("openai_model_mapping_enabled").
+			Default(false).
+			Comment("是否启用 OpenAI 分组级请求模型映射"),
+		field.JSON("openai_model_mapping", map[string]string{}).
+			Default(map[string]string{}).
+			SchemaType(map[string]string{dialect.Postgres: "jsonb"}).
+			Comment("OpenAI group-level request model mapping; matched targets are final upstream model IDs"),
+		field.Bool("openai_transient_error_retry_enabled").
+			Default(false).
+			Comment("Whether to retry explicit OpenAI capacity and overload errors before downstream output"),
+		field.Int("openai_transient_error_retry_count").
+			Default(3).
+			Min(1).
+			Max(10).
+			Comment("Maximum same-account retries for explicit OpenAI capacity and overload errors"),
 		field.JSON("messages_dispatch_model_config", domain.OpenAIMessagesDispatchModelConfig{}).
 			Default(domain.OpenAIMessagesDispatchModelConfig{}).
 			SchemaType(map[string]string{dialect.Postgres: "jsonb"}).

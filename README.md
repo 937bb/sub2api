@@ -20,6 +20,7 @@ English | [中文](README_CN.md) | [日本語](README_JA.md)
 
 ## 937sub2b Update Log
 
+- `0.1.182-937b.1`: Add opt-in OpenAI group model mapping. Exact and trailing-wildcard rules rewrite the selected request model to a final upstream model while preserving the client-requested model in usage records.
 - `0.1.182`: Make admin-key account creation atomically persist group bindings and scheduler events, refresh scheduler metadata immediately after group changes, invalidate stale Redis metadata on upgrade, and keep account priority ahead of low-rate preference.
 - `0.1.181`: Keep OpenAI passthrough Responses streams alive during long output gaps, fail over idle pre-output attempts, normalize legacy `[DONE]` endings to typed `response.completed`, and terminate partial error streams with `response.failed`.
 - `0.1.180`: Keep associated quota-bypass OAuth accounts concentrated when legacy batch-load scheduling is disabled, invalidate legacy Redis scheduler metadata, and refresh group flags immediately in simple mode.

@@ -14,8 +14,8 @@ import (
 	"github.com/dgraph-io/ristretto"
 )
 
-// v21 adds the per-key OpenAI priority-tier override.
-const apiKeyAuthSnapshotVersion = 21
+// v22 adds the group-level OpenAI model mapping and transient retry policy.
+const apiKeyAuthSnapshotVersion = 22
 
 type apiKeyAuthCacheConfig struct {
 	l1Size        int
@@ -418,6 +418,10 @@ func (s *APIKeyService) snapshotFromAPIKey(ctx context.Context, apiKey *APIKey) 
 			AllowMessagesDispatch:                    apiKey.Group.AllowMessagesDispatch,
 			AllowLive:                                apiKey.Group.AllowLive,
 			DefaultMappedModel:                       apiKey.Group.DefaultMappedModel,
+			OpenAIModelMappingEnabled:                apiKey.Group.OpenAIModelMappingEnabled,
+			OpenAIModelMapping:                       CloneOpenAIModelMapping(apiKey.Group.OpenAIModelMapping),
+			OpenAITransientErrorRetryEnabled:         apiKey.Group.OpenAITransientErrorRetryEnabled,
+			OpenAITransientErrorRetryCount:           apiKey.Group.OpenAITransientErrorRetryCount,
 			MessagesDispatchModelConfig:              apiKey.Group.MessagesDispatchModelConfig,
 			ModelsListConfig:                         apiKey.Group.ModelsListConfig,
 			RPMLimit:                                 apiKey.Group.RPMLimit,
@@ -516,6 +520,10 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 			AllowMessagesDispatch:                    snapshot.Group.AllowMessagesDispatch,
 			AllowLive:                                snapshot.Group.AllowLive,
 			DefaultMappedModel:                       snapshot.Group.DefaultMappedModel,
+			OpenAIModelMappingEnabled:                snapshot.Group.OpenAIModelMappingEnabled,
+			OpenAIModelMapping:                       CloneOpenAIModelMapping(snapshot.Group.OpenAIModelMapping),
+			OpenAITransientErrorRetryEnabled:         snapshot.Group.OpenAITransientErrorRetryEnabled,
+			OpenAITransientErrorRetryCount:           snapshot.Group.OpenAITransientErrorRetryCount,
 			MessagesDispatchModelConfig:              snapshot.Group.MessagesDispatchModelConfig,
 			ModelsListConfig:                         snapshot.Group.ModelsListConfig,
 			RPMLimit:                                 snapshot.Group.RPMLimit,

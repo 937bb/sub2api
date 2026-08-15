@@ -120,6 +120,14 @@ const (
 	FieldRequirePrivacySet = "require_privacy_set"
 	// FieldDefaultMappedModel holds the string denoting the default_mapped_model field in the database.
 	FieldDefaultMappedModel = "default_mapped_model"
+	// FieldOpenaiModelMappingEnabled holds the string denoting the openai_model_mapping_enabled field in the database.
+	FieldOpenaiModelMappingEnabled = "openai_model_mapping_enabled"
+	// FieldOpenaiModelMapping holds the string denoting the openai_model_mapping field in the database.
+	FieldOpenaiModelMapping = "openai_model_mapping"
+	// FieldOpenaiTransientErrorRetryEnabled holds the string denoting the openai_transient_error_retry_enabled field in the database.
+	FieldOpenaiTransientErrorRetryEnabled = "openai_transient_error_retry_enabled"
+	// FieldOpenaiTransientErrorRetryCount holds the string denoting the openai_transient_error_retry_count field in the database.
+	FieldOpenaiTransientErrorRetryCount = "openai_transient_error_retry_count"
 	// FieldMessagesDispatchModelConfig holds the string denoting the messages_dispatch_model_config field in the database.
 	FieldMessagesDispatchModelConfig = "messages_dispatch_model_config"
 	// FieldModelsListConfig holds the string denoting the models_list_config field in the database.
@@ -267,6 +275,10 @@ var Columns = []string{
 	FieldRequireOauthOnly,
 	FieldRequirePrivacySet,
 	FieldDefaultMappedModel,
+	FieldOpenaiModelMappingEnabled,
+	FieldOpenaiModelMapping,
+	FieldOpenaiTransientErrorRetryEnabled,
+	FieldOpenaiTransientErrorRetryCount,
 	FieldMessagesDispatchModelConfig,
 	FieldModelsListConfig,
 	FieldRpmLimit,
@@ -392,6 +404,16 @@ var (
 	DefaultDefaultMappedModel string
 	// DefaultMappedModelValidator is a validator for the "default_mapped_model" field. It is called by the builders before save.
 	DefaultMappedModelValidator func(string) error
+	// DefaultOpenaiModelMappingEnabled holds the default value on creation for the "openai_model_mapping_enabled" field.
+	DefaultOpenaiModelMappingEnabled bool
+	// DefaultOpenaiModelMapping holds the default value on creation for the "openai_model_mapping" field.
+	DefaultOpenaiModelMapping map[string]string
+	// DefaultOpenaiTransientErrorRetryEnabled holds the default value on creation for the "openai_transient_error_retry_enabled" field.
+	DefaultOpenaiTransientErrorRetryEnabled bool
+	// DefaultOpenaiTransientErrorRetryCount holds the default value on creation for the "openai_transient_error_retry_count" field.
+	DefaultOpenaiTransientErrorRetryCount int
+	// OpenaiTransientErrorRetryCountValidator is a validator for the "openai_transient_error_retry_count" field. It is called by the builders before save.
+	OpenaiTransientErrorRetryCountValidator func(int) error
 	// DefaultMessagesDispatchModelConfig holds the default value on creation for the "messages_dispatch_model_config" field.
 	DefaultMessagesDispatchModelConfig domain.OpenAIMessagesDispatchModelConfig
 	// DefaultModelsListConfig holds the default value on creation for the "models_list_config" field.
@@ -667,6 +689,21 @@ func ByRequirePrivacySet(opts ...sql.OrderTermOption) OrderOption {
 // ByDefaultMappedModel orders the results by the default_mapped_model field.
 func ByDefaultMappedModel(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldDefaultMappedModel, opts...).ToFunc()
+}
+
+// ByOpenaiModelMappingEnabled orders the results by the openai_model_mapping_enabled field.
+func ByOpenaiModelMappingEnabled(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldOpenaiModelMappingEnabled, opts...).ToFunc()
+}
+
+// ByOpenaiTransientErrorRetryEnabled orders the results by the openai_transient_error_retry_enabled field.
+func ByOpenaiTransientErrorRetryEnabled(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldOpenaiTransientErrorRetryEnabled, opts...).ToFunc()
+}
+
+// ByOpenaiTransientErrorRetryCount orders the results by the openai_transient_error_retry_count field.
+func ByOpenaiTransientErrorRetryCount(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldOpenaiTransientErrorRetryCount, opts...).ToFunc()
 }
 
 // ByRpmLimit orders the results by the rpm_limit field.

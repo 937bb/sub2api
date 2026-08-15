@@ -120,7 +120,6 @@ func isOpenAITransientProcessingError(upstreamStatusCode int, upstreamMsg string
 	if upstreamStatusCode != http.StatusBadRequest && upstreamStatusCode != http.StatusServiceUnavailable {
 		return false
 	}
-
 	hasOpenAIServerOverloadedCode := func(payload []byte) bool {
 		code := strings.ToLower(strings.TrimSpace(gjson.GetBytes(payload, "error.code").String()))
 		if code == "" {
@@ -162,6 +161,70 @@ func isOpenAITransientProcessingError(upstreamStatusCode int, upstreamMsg string
 		return true
 	}
 	return match(string(upstreamBody))
+}
+
+// isOpenAITransientCapacityError only matches provider load-shed signals that
+// are safe to replay before any semantic response reaches the client.
+func isOpenAITransientCapacityError(message string, payload []byte) bool {
+	for _, path := range []string{"response.error.code", "error.code", "code"} {
+		switch strings.ToLower(strings.TrimSpace(gjson.GetBytes(payload, path).String())) {
+		case "server_is_overloaded", "slow_down":
+			return true
+		}
+	}
+
+	matchesMessage := func(value string) bool {
+		value = strings.ToLower(strings.TrimSpace(value))
+		return strings.Contains(value, "our servers are currently overloaded") ||
+			strings.Contains(value, "the engine is currently overloaded") ||
+			strings.Contains(value, "selected model is at capacity")
+	}
+	if matchesMessage(message) {
+		return true
+	}
+	for _, path := range []string{"response.error.message", "error.message", "message"} {
+		if matchesMessage(gjson.GetBytes(payload, path).String()) {
+			return true
+		}
+	}
+	return matchesMessage(string(payload))
+}
+
+func (s *OpenAIGatewayService) openAITransientErrorRetryEnabled(c *gin.Context) bool {
+	if c == nil {
+		return false
+	}
+	enabled, _ := apiKeyGroup(getAPIKeyFromContext(c)).openAITransientErrorRetryPolicy()
+	return enabled
+}
+
+func (s *OpenAIGatewayService) openAITransientErrorRetryCount(c *gin.Context) int {
+	if c == nil {
+		return DefaultOpenAITransientErrorRetryCount
+	}
+	_, count := apiKeyGroup(getAPIKeyFromContext(c)).openAITransientErrorRetryPolicy()
+	return count
+}
+
+func (s *OpenAIGatewayService) configureOpenAITransientErrorRetry(
+	c *gin.Context,
+	failoverErr *UpstreamFailoverError,
+	message string,
+	payload []byte,
+) *UpstreamFailoverError {
+	if failoverErr == nil || !isOpenAITransientCapacityError(message, payload) {
+		return failoverErr
+	}
+
+	// Capacity shedding is request/model scoped, so it must never quarantine an
+	// otherwise healthy account. The opt-in switch adds bounded same-account
+	// retries; ordinary next-account failover remains available either way.
+	failoverErr.RequestScopedTransient = true
+	if s.openAITransientErrorRetryEnabled(c) {
+		failoverErr.RetryableOnSameAccount = true
+		failoverErr.SameAccountRetryLimit = s.openAITransientErrorRetryCount(c)
+	}
+	return failoverErr
 }
 
 func isOpenAIContextWindowError(upstreamMsg string, upstreamBody []byte) bool {
@@ -229,6 +292,18 @@ func (s *OpenAIGatewayService) shouldFailoverOpenAIUpstreamResponse(statusCode i
 		return true
 	}
 	return isOpenAITransientProcessingError(statusCode, upstreamMsg, upstreamBody)
+}
+
+func (s *OpenAIGatewayService) shouldFailoverOpenAIUpstreamResponseForRequest(
+	c *gin.Context,
+	statusCode int,
+	upstreamMsg string,
+	upstreamBody []byte,
+) bool {
+	if s.shouldFailoverOpenAIUpstreamResponse(statusCode, upstreamMsg, upstreamBody) {
+		return true
+	}
+	return s.openAITransientErrorRetryEnabled(c) && isOpenAITransientCapacityError(upstreamMsg, upstreamBody)
 }
 
 // OpenAIRequestBodyTooLargeClientMessage is the fixed downstream message used

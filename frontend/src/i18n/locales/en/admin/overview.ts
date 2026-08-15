@@ -1129,6 +1129,26 @@ export default {
         targetModelPlaceholder: 'e.g., gpt-5.4',
         removeExactMapping: 'Remove Exact Mapping'
       },
+      openaiModelMapping: {
+        title: 'OpenAI Group Automatic Model Mapping',
+        hint: 'When enabled, a matched target is sent directly upstream and skips account mapping and Codex alias normalization. Sources support a trailing * wildcard with longest-prefix matching. Compact requests do not use this mapping.',
+        toggle: 'Enable group model mapping',
+        add: 'Add Mapping',
+        empty: 'No group-level automatic mappings configured',
+        requested: 'Requested model',
+        requestedPlaceholder: 'e.g. gpt-5.6-sol or gpt-5.*',
+        upstream: 'Upstream model',
+        upstreamPlaceholder: 'e.g. gpt-5.6-sol-wm',
+        remove: 'Remove mapping'
+      },
+      openaiTransientRetry: {
+        title: 'OpenAI Transient Capacity Retry',
+        enable: 'Retry capacity and overload errors automatically',
+        hint: 'Matches explicit OpenAI overloaded, slow_down, and model-capacity failures only, and retries only before any response content reaches the client. Authentication, quota, billing, and context-limit errors are not retried.',
+        count: 'Maximum retries per account',
+        countHint: 'Choose 1-10 retries. The default is 3, with bounded increasing delays.',
+        invalidCount: 'OpenAI transient capacity retries must be an integer from 1 to 10'
+      },
       openaiLive: {
         title: 'OpenAI Live',
         allow: 'Allow Live access',

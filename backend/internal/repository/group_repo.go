@@ -56,6 +56,10 @@ func createGroupRecord(ctx context.Context, client *dbent.Client, groupIn *servi
 	if groupIn == nil {
 		return errors.New("group is nil")
 	}
+	openAITransientErrorRetryCount := groupIn.OpenAITransientErrorRetryCount
+	if openAITransientErrorRetryCount == 0 {
+		openAITransientErrorRetryCount = service.DefaultOpenAITransientErrorRetryCount
+	}
 	builder := client.Group.Create().
 		SetName(groupIn.Name).
 		SetDescription(groupIn.Description).
@@ -99,6 +103,10 @@ func createGroupRecord(ctx context.Context, client *dbent.Client, groupIn *servi
 		SetRequireOauthOnly(groupIn.RequireOAuthOnly).
 		SetRequirePrivacySet(groupIn.RequirePrivacySet).
 		SetDefaultMappedModel(groupIn.DefaultMappedModel).
+		SetOpenaiModelMappingEnabled(groupIn.OpenAIModelMappingEnabled).
+		SetOpenaiModelMapping(groupIn.OpenAIModelMapping).
+		SetOpenaiTransientErrorRetryEnabled(groupIn.OpenAITransientErrorRetryEnabled).
+		SetOpenaiTransientErrorRetryCount(openAITransientErrorRetryCount).
 		SetMessagesDispatchModelConfig(groupIn.MessagesDispatchModelConfig).
 		SetModelsListConfig(groupIn.ModelsListConfig).
 		SetRpmLimit(groupIn.RPMLimit).
@@ -236,6 +244,10 @@ func (r *groupRepository) GetByIDLite(ctx context.Context, id int64) (*service.G
 }
 
 func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) error {
+	openAITransientErrorRetryCount := groupIn.OpenAITransientErrorRetryCount
+	if openAITransientErrorRetryCount == 0 {
+		openAITransientErrorRetryCount = service.DefaultOpenAITransientErrorRetryCount
+	}
 	builder := r.client.Group.UpdateOneID(groupIn.ID).
 		SetName(groupIn.Name).
 		SetDescription(groupIn.Description).
@@ -271,6 +283,10 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 		SetRequireOauthOnly(groupIn.RequireOAuthOnly).
 		SetRequirePrivacySet(groupIn.RequirePrivacySet).
 		SetDefaultMappedModel(groupIn.DefaultMappedModel).
+		SetOpenaiModelMappingEnabled(groupIn.OpenAIModelMappingEnabled).
+		SetOpenaiModelMapping(groupIn.OpenAIModelMapping).
+		SetOpenaiTransientErrorRetryEnabled(groupIn.OpenAITransientErrorRetryEnabled).
+		SetOpenaiTransientErrorRetryCount(openAITransientErrorRetryCount).
 		SetMessagesDispatchModelConfig(groupIn.MessagesDispatchModelConfig).
 		SetModelsListConfig(groupIn.ModelsListConfig).
 		SetRpmLimit(groupIn.RPMLimit).

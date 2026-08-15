@@ -725,6 +725,54 @@ func (_c *GroupCreate) SetNillableDefaultMappedModel(v *string) *GroupCreate {
 	return _c
 }
 
+// SetOpenaiModelMappingEnabled sets the "openai_model_mapping_enabled" field.
+func (_c *GroupCreate) SetOpenaiModelMappingEnabled(v bool) *GroupCreate {
+	_c.mutation.SetOpenaiModelMappingEnabled(v)
+	return _c
+}
+
+// SetNillableOpenaiModelMappingEnabled sets the "openai_model_mapping_enabled" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableOpenaiModelMappingEnabled(v *bool) *GroupCreate {
+	if v != nil {
+		_c.SetOpenaiModelMappingEnabled(*v)
+	}
+	return _c
+}
+
+// SetOpenaiModelMapping sets the "openai_model_mapping" field.
+func (_c *GroupCreate) SetOpenaiModelMapping(v map[string]string) *GroupCreate {
+	_c.mutation.SetOpenaiModelMapping(v)
+	return _c
+}
+
+// SetOpenaiTransientErrorRetryEnabled sets the "openai_transient_error_retry_enabled" field.
+func (_c *GroupCreate) SetOpenaiTransientErrorRetryEnabled(v bool) *GroupCreate {
+	_c.mutation.SetOpenaiTransientErrorRetryEnabled(v)
+	return _c
+}
+
+// SetNillableOpenaiTransientErrorRetryEnabled sets the "openai_transient_error_retry_enabled" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableOpenaiTransientErrorRetryEnabled(v *bool) *GroupCreate {
+	if v != nil {
+		_c.SetOpenaiTransientErrorRetryEnabled(*v)
+	}
+	return _c
+}
+
+// SetOpenaiTransientErrorRetryCount sets the "openai_transient_error_retry_count" field.
+func (_c *GroupCreate) SetOpenaiTransientErrorRetryCount(v int) *GroupCreate {
+	_c.mutation.SetOpenaiTransientErrorRetryCount(v)
+	return _c
+}
+
+// SetNillableOpenaiTransientErrorRetryCount sets the "openai_transient_error_retry_count" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableOpenaiTransientErrorRetryCount(v *int) *GroupCreate {
+	if v != nil {
+		_c.SetOpenaiTransientErrorRetryCount(*v)
+	}
+	return _c
+}
+
 // SetMessagesDispatchModelConfig sets the "messages_dispatch_model_config" field.
 func (_c *GroupCreate) SetMessagesDispatchModelConfig(v domain.OpenAIMessagesDispatchModelConfig) *GroupCreate {
 	_c.mutation.SetMessagesDispatchModelConfig(v)
@@ -1110,6 +1158,22 @@ func (_c *GroupCreate) defaults() error {
 		v := group.DefaultDefaultMappedModel
 		_c.mutation.SetDefaultMappedModel(v)
 	}
+	if _, ok := _c.mutation.OpenaiModelMappingEnabled(); !ok {
+		v := group.DefaultOpenaiModelMappingEnabled
+		_c.mutation.SetOpenaiModelMappingEnabled(v)
+	}
+	if _, ok := _c.mutation.OpenaiModelMapping(); !ok {
+		v := group.DefaultOpenaiModelMapping
+		_c.mutation.SetOpenaiModelMapping(v)
+	}
+	if _, ok := _c.mutation.OpenaiTransientErrorRetryEnabled(); !ok {
+		v := group.DefaultOpenaiTransientErrorRetryEnabled
+		_c.mutation.SetOpenaiTransientErrorRetryEnabled(v)
+	}
+	if _, ok := _c.mutation.OpenaiTransientErrorRetryCount(); !ok {
+		v := group.DefaultOpenaiTransientErrorRetryCount
+		_c.mutation.SetOpenaiTransientErrorRetryCount(v)
+	}
 	if _, ok := _c.mutation.MessagesDispatchModelConfig(); !ok {
 		v := group.DefaultMessagesDispatchModelConfig
 		_c.mutation.SetMessagesDispatchModelConfig(v)
@@ -1306,6 +1370,23 @@ func (_c *GroupCreate) check() error {
 	if v, ok := _c.mutation.DefaultMappedModel(); ok {
 		if err := group.DefaultMappedModelValidator(v); err != nil {
 			return &ValidationError{Name: "default_mapped_model", err: fmt.Errorf(`ent: validator failed for field "Group.default_mapped_model": %w`, err)}
+		}
+	}
+	if _, ok := _c.mutation.OpenaiModelMappingEnabled(); !ok {
+		return &ValidationError{Name: "openai_model_mapping_enabled", err: errors.New(`ent: missing required field "Group.openai_model_mapping_enabled"`)}
+	}
+	if _, ok := _c.mutation.OpenaiModelMapping(); !ok {
+		return &ValidationError{Name: "openai_model_mapping", err: errors.New(`ent: missing required field "Group.openai_model_mapping"`)}
+	}
+	if _, ok := _c.mutation.OpenaiTransientErrorRetryEnabled(); !ok {
+		return &ValidationError{Name: "openai_transient_error_retry_enabled", err: errors.New(`ent: missing required field "Group.openai_transient_error_retry_enabled"`)}
+	}
+	if _, ok := _c.mutation.OpenaiTransientErrorRetryCount(); !ok {
+		return &ValidationError{Name: "openai_transient_error_retry_count", err: errors.New(`ent: missing required field "Group.openai_transient_error_retry_count"`)}
+	}
+	if v, ok := _c.mutation.OpenaiTransientErrorRetryCount(); ok {
+		if err := group.OpenaiTransientErrorRetryCountValidator(v); err != nil {
+			return &ValidationError{Name: "openai_transient_error_retry_count", err: fmt.Errorf(`ent: validator failed for field "Group.openai_transient_error_retry_count": %w`, err)}
 		}
 	}
 	if _, ok := _c.mutation.MessagesDispatchModelConfig(); !ok {
@@ -1577,6 +1658,22 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.DefaultMappedModel(); ok {
 		_spec.SetField(group.FieldDefaultMappedModel, field.TypeString, value)
 		_node.DefaultMappedModel = value
+	}
+	if value, ok := _c.mutation.OpenaiModelMappingEnabled(); ok {
+		_spec.SetField(group.FieldOpenaiModelMappingEnabled, field.TypeBool, value)
+		_node.OpenaiModelMappingEnabled = value
+	}
+	if value, ok := _c.mutation.OpenaiModelMapping(); ok {
+		_spec.SetField(group.FieldOpenaiModelMapping, field.TypeJSON, value)
+		_node.OpenaiModelMapping = value
+	}
+	if value, ok := _c.mutation.OpenaiTransientErrorRetryEnabled(); ok {
+		_spec.SetField(group.FieldOpenaiTransientErrorRetryEnabled, field.TypeBool, value)
+		_node.OpenaiTransientErrorRetryEnabled = value
+	}
+	if value, ok := _c.mutation.OpenaiTransientErrorRetryCount(); ok {
+		_spec.SetField(group.FieldOpenaiTransientErrorRetryCount, field.TypeInt, value)
+		_node.OpenaiTransientErrorRetryCount = value
 	}
 	if value, ok := _c.mutation.MessagesDispatchModelConfig(); ok {
 		_spec.SetField(group.FieldMessagesDispatchModelConfig, field.TypeJSON, value)
@@ -2635,6 +2732,60 @@ func (u *GroupUpsert) SetDefaultMappedModel(v string) *GroupUpsert {
 // UpdateDefaultMappedModel sets the "default_mapped_model" field to the value that was provided on create.
 func (u *GroupUpsert) UpdateDefaultMappedModel() *GroupUpsert {
 	u.SetExcluded(group.FieldDefaultMappedModel)
+	return u
+}
+
+// SetOpenaiModelMappingEnabled sets the "openai_model_mapping_enabled" field.
+func (u *GroupUpsert) SetOpenaiModelMappingEnabled(v bool) *GroupUpsert {
+	u.Set(group.FieldOpenaiModelMappingEnabled, v)
+	return u
+}
+
+// UpdateOpenaiModelMappingEnabled sets the "openai_model_mapping_enabled" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateOpenaiModelMappingEnabled() *GroupUpsert {
+	u.SetExcluded(group.FieldOpenaiModelMappingEnabled)
+	return u
+}
+
+// SetOpenaiModelMapping sets the "openai_model_mapping" field.
+func (u *GroupUpsert) SetOpenaiModelMapping(v map[string]string) *GroupUpsert {
+	u.Set(group.FieldOpenaiModelMapping, v)
+	return u
+}
+
+// UpdateOpenaiModelMapping sets the "openai_model_mapping" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateOpenaiModelMapping() *GroupUpsert {
+	u.SetExcluded(group.FieldOpenaiModelMapping)
+	return u
+}
+
+// SetOpenaiTransientErrorRetryEnabled sets the "openai_transient_error_retry_enabled" field.
+func (u *GroupUpsert) SetOpenaiTransientErrorRetryEnabled(v bool) *GroupUpsert {
+	u.Set(group.FieldOpenaiTransientErrorRetryEnabled, v)
+	return u
+}
+
+// UpdateOpenaiTransientErrorRetryEnabled sets the "openai_transient_error_retry_enabled" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateOpenaiTransientErrorRetryEnabled() *GroupUpsert {
+	u.SetExcluded(group.FieldOpenaiTransientErrorRetryEnabled)
+	return u
+}
+
+// SetOpenaiTransientErrorRetryCount sets the "openai_transient_error_retry_count" field.
+func (u *GroupUpsert) SetOpenaiTransientErrorRetryCount(v int) *GroupUpsert {
+	u.Set(group.FieldOpenaiTransientErrorRetryCount, v)
+	return u
+}
+
+// UpdateOpenaiTransientErrorRetryCount sets the "openai_transient_error_retry_count" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateOpenaiTransientErrorRetryCount() *GroupUpsert {
+	u.SetExcluded(group.FieldOpenaiTransientErrorRetryCount)
+	return u
+}
+
+// AddOpenaiTransientErrorRetryCount adds v to the "openai_transient_error_retry_count" field.
+func (u *GroupUpsert) AddOpenaiTransientErrorRetryCount(v int) *GroupUpsert {
+	u.Add(group.FieldOpenaiTransientErrorRetryCount, v)
 	return u
 }
 
@@ -3829,6 +3980,69 @@ func (u *GroupUpsertOne) SetDefaultMappedModel(v string) *GroupUpsertOne {
 func (u *GroupUpsertOne) UpdateDefaultMappedModel() *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateDefaultMappedModel()
+	})
+}
+
+// SetOpenaiModelMappingEnabled sets the "openai_model_mapping_enabled" field.
+func (u *GroupUpsertOne) SetOpenaiModelMappingEnabled(v bool) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetOpenaiModelMappingEnabled(v)
+	})
+}
+
+// UpdateOpenaiModelMappingEnabled sets the "openai_model_mapping_enabled" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateOpenaiModelMappingEnabled() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateOpenaiModelMappingEnabled()
+	})
+}
+
+// SetOpenaiModelMapping sets the "openai_model_mapping" field.
+func (u *GroupUpsertOne) SetOpenaiModelMapping(v map[string]string) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetOpenaiModelMapping(v)
+	})
+}
+
+// UpdateOpenaiModelMapping sets the "openai_model_mapping" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateOpenaiModelMapping() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateOpenaiModelMapping()
+	})
+}
+
+// SetOpenaiTransientErrorRetryEnabled sets the "openai_transient_error_retry_enabled" field.
+func (u *GroupUpsertOne) SetOpenaiTransientErrorRetryEnabled(v bool) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetOpenaiTransientErrorRetryEnabled(v)
+	})
+}
+
+// UpdateOpenaiTransientErrorRetryEnabled sets the "openai_transient_error_retry_enabled" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateOpenaiTransientErrorRetryEnabled() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateOpenaiTransientErrorRetryEnabled()
+	})
+}
+
+// SetOpenaiTransientErrorRetryCount sets the "openai_transient_error_retry_count" field.
+func (u *GroupUpsertOne) SetOpenaiTransientErrorRetryCount(v int) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetOpenaiTransientErrorRetryCount(v)
+	})
+}
+
+// AddOpenaiTransientErrorRetryCount adds v to the "openai_transient_error_retry_count" field.
+func (u *GroupUpsertOne) AddOpenaiTransientErrorRetryCount(v int) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.AddOpenaiTransientErrorRetryCount(v)
+	})
+}
+
+// UpdateOpenaiTransientErrorRetryCount sets the "openai_transient_error_retry_count" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateOpenaiTransientErrorRetryCount() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateOpenaiTransientErrorRetryCount()
 	})
 }
 
@@ -5212,6 +5426,69 @@ func (u *GroupUpsertBulk) SetDefaultMappedModel(v string) *GroupUpsertBulk {
 func (u *GroupUpsertBulk) UpdateDefaultMappedModel() *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateDefaultMappedModel()
+	})
+}
+
+// SetOpenaiModelMappingEnabled sets the "openai_model_mapping_enabled" field.
+func (u *GroupUpsertBulk) SetOpenaiModelMappingEnabled(v bool) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetOpenaiModelMappingEnabled(v)
+	})
+}
+
+// UpdateOpenaiModelMappingEnabled sets the "openai_model_mapping_enabled" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateOpenaiModelMappingEnabled() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateOpenaiModelMappingEnabled()
+	})
+}
+
+// SetOpenaiModelMapping sets the "openai_model_mapping" field.
+func (u *GroupUpsertBulk) SetOpenaiModelMapping(v map[string]string) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetOpenaiModelMapping(v)
+	})
+}
+
+// UpdateOpenaiModelMapping sets the "openai_model_mapping" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateOpenaiModelMapping() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateOpenaiModelMapping()
+	})
+}
+
+// SetOpenaiTransientErrorRetryEnabled sets the "openai_transient_error_retry_enabled" field.
+func (u *GroupUpsertBulk) SetOpenaiTransientErrorRetryEnabled(v bool) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetOpenaiTransientErrorRetryEnabled(v)
+	})
+}
+
+// UpdateOpenaiTransientErrorRetryEnabled sets the "openai_transient_error_retry_enabled" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateOpenaiTransientErrorRetryEnabled() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateOpenaiTransientErrorRetryEnabled()
+	})
+}
+
+// SetOpenaiTransientErrorRetryCount sets the "openai_transient_error_retry_count" field.
+func (u *GroupUpsertBulk) SetOpenaiTransientErrorRetryCount(v int) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetOpenaiTransientErrorRetryCount(v)
+	})
+}
+
+// AddOpenaiTransientErrorRetryCount adds v to the "openai_transient_error_retry_count" field.
+func (u *GroupUpsertBulk) AddOpenaiTransientErrorRetryCount(v int) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.AddOpenaiTransientErrorRetryCount(v)
+	})
+}
+
+// UpdateOpenaiTransientErrorRetryCount sets the "openai_transient_error_retry_count" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateOpenaiTransientErrorRetryCount() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateOpenaiTransientErrorRetryCount()
 	})
 }
 

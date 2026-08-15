@@ -300,6 +300,21 @@ func DefaultMappedModel(v string) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldDefaultMappedModel, v))
 }
 
+// OpenaiModelMappingEnabled applies equality check predicate on the "openai_model_mapping_enabled" field. It's identical to OpenaiModelMappingEnabledEQ.
+func OpenaiModelMappingEnabled(v bool) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldOpenaiModelMappingEnabled, v))
+}
+
+// OpenaiTransientErrorRetryEnabled applies equality check predicate on the "openai_transient_error_retry_enabled" field. It's identical to OpenaiTransientErrorRetryEnabledEQ.
+func OpenaiTransientErrorRetryEnabled(v bool) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldOpenaiTransientErrorRetryEnabled, v))
+}
+
+// OpenaiTransientErrorRetryCount applies equality check predicate on the "openai_transient_error_retry_count" field. It's identical to OpenaiTransientErrorRetryCountEQ.
+func OpenaiTransientErrorRetryCount(v int) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldOpenaiTransientErrorRetryCount, v))
+}
+
 // RpmLimit applies equality check predicate on the "rpm_limit" field. It's identical to RpmLimitEQ.
 func RpmLimit(v int) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldRpmLimit, v))
@@ -2338,6 +2353,66 @@ func DefaultMappedModelEqualFold(v string) predicate.Group {
 // DefaultMappedModelContainsFold applies the ContainsFold predicate on the "default_mapped_model" field.
 func DefaultMappedModelContainsFold(v string) predicate.Group {
 	return predicate.Group(sql.FieldContainsFold(FieldDefaultMappedModel, v))
+}
+
+// OpenaiModelMappingEnabledEQ applies the EQ predicate on the "openai_model_mapping_enabled" field.
+func OpenaiModelMappingEnabledEQ(v bool) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldOpenaiModelMappingEnabled, v))
+}
+
+// OpenaiModelMappingEnabledNEQ applies the NEQ predicate on the "openai_model_mapping_enabled" field.
+func OpenaiModelMappingEnabledNEQ(v bool) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldOpenaiModelMappingEnabled, v))
+}
+
+// OpenaiTransientErrorRetryEnabledEQ applies the EQ predicate on the "openai_transient_error_retry_enabled" field.
+func OpenaiTransientErrorRetryEnabledEQ(v bool) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldOpenaiTransientErrorRetryEnabled, v))
+}
+
+// OpenaiTransientErrorRetryEnabledNEQ applies the NEQ predicate on the "openai_transient_error_retry_enabled" field.
+func OpenaiTransientErrorRetryEnabledNEQ(v bool) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldOpenaiTransientErrorRetryEnabled, v))
+}
+
+// OpenaiTransientErrorRetryCountEQ applies the EQ predicate on the "openai_transient_error_retry_count" field.
+func OpenaiTransientErrorRetryCountEQ(v int) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldOpenaiTransientErrorRetryCount, v))
+}
+
+// OpenaiTransientErrorRetryCountNEQ applies the NEQ predicate on the "openai_transient_error_retry_count" field.
+func OpenaiTransientErrorRetryCountNEQ(v int) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldOpenaiTransientErrorRetryCount, v))
+}
+
+// OpenaiTransientErrorRetryCountIn applies the In predicate on the "openai_transient_error_retry_count" field.
+func OpenaiTransientErrorRetryCountIn(vs ...int) predicate.Group {
+	return predicate.Group(sql.FieldIn(FieldOpenaiTransientErrorRetryCount, vs...))
+}
+
+// OpenaiTransientErrorRetryCountNotIn applies the NotIn predicate on the "openai_transient_error_retry_count" field.
+func OpenaiTransientErrorRetryCountNotIn(vs ...int) predicate.Group {
+	return predicate.Group(sql.FieldNotIn(FieldOpenaiTransientErrorRetryCount, vs...))
+}
+
+// OpenaiTransientErrorRetryCountGT applies the GT predicate on the "openai_transient_error_retry_count" field.
+func OpenaiTransientErrorRetryCountGT(v int) predicate.Group {
+	return predicate.Group(sql.FieldGT(FieldOpenaiTransientErrorRetryCount, v))
+}
+
+// OpenaiTransientErrorRetryCountGTE applies the GTE predicate on the "openai_transient_error_retry_count" field.
+func OpenaiTransientErrorRetryCountGTE(v int) predicate.Group {
+	return predicate.Group(sql.FieldGTE(FieldOpenaiTransientErrorRetryCount, v))
+}
+
+// OpenaiTransientErrorRetryCountLT applies the LT predicate on the "openai_transient_error_retry_count" field.
+func OpenaiTransientErrorRetryCountLT(v int) predicate.Group {
+	return predicate.Group(sql.FieldLT(FieldOpenaiTransientErrorRetryCount, v))
+}
+
+// OpenaiTransientErrorRetryCountLTE applies the LTE predicate on the "openai_transient_error_retry_count" field.
+func OpenaiTransientErrorRetryCountLTE(v int) predicate.Group {
+	return predicate.Group(sql.FieldLTE(FieldOpenaiTransientErrorRetryCount, v))
 }
 
 // RpmLimitEQ applies the EQ predicate on the "rpm_limit" field.

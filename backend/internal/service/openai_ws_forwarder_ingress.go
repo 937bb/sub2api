@@ -309,7 +309,17 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			}
 		}
 		requestModel := originalModel
-		if hooks != nil && hooks.MapRequestModel != nil {
+		finalMappedModel := false
+		if hooks != nil && hooks.ResolveRequestModel != nil {
+			mappedModel, final, mapErr := hooks.ResolveRequestModel(turn, originalModel)
+			if mapErr != nil {
+				return openAIWSClientPayload{}, mapErr
+			}
+			if mappedModel = strings.TrimSpace(mappedModel); mappedModel != "" {
+				requestModel = mappedModel
+				finalMappedModel = final
+			}
+		} else if hooks != nil && hooks.MapRequestModel != nil {
 			mappedModel, mapErr := hooks.MapRequestModel(turn, originalModel)
 			if mapErr != nil {
 				return openAIWSClientPayload{}, mapErr
@@ -318,7 +328,10 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				requestModel = mappedModel
 			}
 		}
-		upstreamModel := normalizeOpenAIModelForUpstream(account, account.GetMappedModel(requestModel))
+		upstreamModel := requestModel
+		if !finalMappedModel {
+			upstreamModel = normalizeOpenAIModelForUpstream(account, account.GetMappedModel(requestModel))
+		}
 		if modelMissing || upstreamModel != originalModel {
 			next, setErr := applyPayloadMutation(normalized, "model", upstreamModel)
 			if setErr != nil {

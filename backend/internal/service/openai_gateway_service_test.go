@@ -3880,6 +3880,125 @@ func TestHandleSSEToJSON_ResponseFailedReturnsProtocolError(t *testing.T) {
 	require.Contains(t, rec.Header().Get("Content-Type"), "application/json")
 }
 
+func TestHandleNonStreamingResponse_CapacityFailureReturnsRetryableFailoverWhenEnabled(t *testing.T) {
+	tests := []struct {
+		name    string
+		payload string
+	}{
+		{
+			name:    "overloaded message without code",
+			payload: `{"type":"response.failed","error":{"message":"Our servers are currently overloaded. Please try again later."}}`,
+		},
+		{
+			name:    "model at capacity",
+			payload: `{"type":"response.failed","error":{"type":"invalid_request_error","message":"Selected model is at capacity. Please try a different model."}}`,
+		},
+		{
+			name:    "server overloaded code",
+			payload: `{"type":"response.failed","response":{"error":{"code":"server_is_overloaded","message":"Please retry later."}}}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+			c.Set("api_key", &APIKey{Group: &Group{
+				Platform:                         PlatformOpenAI,
+				OpenAITransientErrorRetryEnabled: true,
+				OpenAITransientErrorRetryCount:   2,
+			}})
+
+			svc := &OpenAIGatewayService{cfg: &config.Config{}}
+			resp := &http.Response{
+				StatusCode: http.StatusOK,
+				Header: http.Header{
+					"Content-Type": []string{"text/event-stream"},
+					"x-request-id": []string{"req_capacity_retry"},
+				},
+				Body: io.NopCloser(strings.NewReader(strings.Join([]string{
+					"event: response.failed",
+					"data: " + tt.payload,
+					"",
+				}, "\n"))),
+			}
+			account := &Account{ID: 901, Type: AccountTypeOAuth, Platform: PlatformOpenAI}
+
+			result, err := svc.handleNonStreamingResponse(context.Background(), resp, c, account, "gpt-5.6-sol", "gpt-5.6-sol")
+			require.Nil(t, result)
+			require.Error(t, err)
+			var failoverErr *UpstreamFailoverError
+			require.ErrorAs(t, err, &failoverErr)
+			require.True(t, failoverErr.RetryableOnSameAccount)
+			require.True(t, failoverErr.RequestScopedTransient)
+			require.Equal(t, 2, failoverErr.SameAccountRetryLimit)
+			require.False(t, rec.Body.Len() > 0, "retryable response.failed must not be committed to the client")
+		})
+	}
+}
+
+func TestHandleNonStreamingResponse_CapacityRetrySwitchDisabledPreservesProtocolError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+
+	svc := &OpenAIGatewayService{cfg: &config.Config{}}
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body: io.NopCloser(strings.NewReader(strings.Join([]string{
+			"event: response.failed",
+			`data: {"type":"response.failed","error":{"message":"Our servers are currently overloaded. Please try again later."}}`,
+			"",
+		}, "\n"))),
+	}
+	account := &Account{ID: 902, Type: AccountTypeOAuth, Platform: PlatformOpenAI}
+
+	result, err := svc.handleNonStreamingResponse(context.Background(), resp, c, account, "gpt-5.6-sol", "gpt-5.6-sol")
+	require.Nil(t, result)
+	require.Error(t, err)
+	var failoverErr *UpstreamFailoverError
+	require.False(t, errors.As(err, &failoverErr))
+	require.Equal(t, http.StatusBadGateway, rec.Code)
+	require.Contains(t, rec.Body.String(), "Our servers are currently overloaded")
+}
+
+func TestHandleNonStreamingPassthrough_CapacityFailureReturnsRetryableFailoverWhenEnabled(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	c.Set("api_key", &APIKey{Group: &Group{
+		Platform:                         PlatformOpenAI,
+		OpenAITransientErrorRetryEnabled: true,
+		OpenAITransientErrorRetryCount:   1,
+	}})
+
+	svc := &OpenAIGatewayService{cfg: &config.Config{}}
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body: io.NopCloser(strings.NewReader(strings.Join([]string{
+			"event: response.failed",
+			`data: {"type":"response.failed","error":{"message":"Selected model is at capacity. Please try a different model."}}`,
+			"",
+		}, "\n"))),
+	}
+	account := &Account{ID: 903, Type: AccountTypeOAuth, Platform: PlatformOpenAI}
+
+	result, err := svc.handleNonStreamingResponsePassthroughForAccount(context.Background(), resp, c, account, "gpt-5.6-sol", "gpt-5.6-sol")
+	require.Nil(t, result)
+	require.Error(t, err)
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.True(t, failoverErr.RetryableOnSameAccount)
+	require.Equal(t, 1, failoverErr.SameAccountRetryLimit)
+	require.Zero(t, rec.Body.Len())
+}
+
 func TestOpenAICompatSSEFrameParserResetsEventTypeAtFrameBoundary(t *testing.T) {
 	var parser openAICompatSSEFrameParser
 

@@ -448,6 +448,15 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		}
 	}
 
+	openAIModelMapping, err := NormalizeOpenAIGroupModelMapping(platform, input.OpenAIModelMapping)
+	if err != nil {
+		return nil, infraerrors.Newf(http.StatusBadRequest, "INVALID_OPENAI_MODEL_MAPPING", "%v", err)
+	}
+	openAITransientErrorRetryCount, err := normalizeOpenAITransientErrorRetryCount(input.OpenAITransientErrorRetryCount)
+	if err != nil {
+		return nil, infraerrors.Newf(http.StatusBadRequest, "INVALID_OPENAI_TRANSIENT_ERROR_RETRY_COUNT", "%v", err)
+	}
+
 	group := &Group{
 		Name:                                     input.Name,
 		Description:                              input.Description,
@@ -497,6 +506,10 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		RequireOAuthOnly:                         input.RequireOAuthOnly,
 		RequirePrivacySet:                        input.RequirePrivacySet,
 		DefaultMappedModel:                       input.DefaultMappedModel,
+		OpenAIModelMappingEnabled:                platform == PlatformOpenAI && input.OpenAIModelMappingEnabled,
+		OpenAIModelMapping:                       openAIModelMapping,
+		OpenAITransientErrorRetryEnabled:         platform == PlatformOpenAI && input.OpenAITransientErrorRetryEnabled,
+		OpenAITransientErrorRetryCount:           openAITransientErrorRetryCount,
 		MessagesDispatchModelConfig:              normalizeOpenAIMessagesDispatchModelConfig(input.MessagesDispatchModelConfig),
 		ModelsListConfig:                         normalizeGroupModelsListConfig(input.ModelsListConfig),
 		RPMLimit:                                 input.RPMLimit,
@@ -508,6 +521,10 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 	sanitizeGroupMessagesDispatchFields(group)
 	if group.Platform != PlatformOpenAI {
 		group.AllowLive = false
+		group.OpenAIModelMappingEnabled = false
+		group.OpenAIModelMapping = map[string]string{}
+		group.OpenAITransientErrorRetryEnabled = false
+		group.OpenAITransientErrorRetryCount = DefaultOpenAITransientErrorRetryCount
 	}
 	sanitizeGroupReasoningEffortPolicy(group)
 	if err := s.groupRepo.Create(ctx, group); err != nil {
@@ -849,6 +866,26 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	if input.DefaultMappedModel != nil {
 		group.DefaultMappedModel = *input.DefaultMappedModel
 	}
+	if input.OpenAIModelMappingEnabled != nil {
+		group.OpenAIModelMappingEnabled = *input.OpenAIModelMappingEnabled
+	}
+	if input.OpenAIModelMapping != nil {
+		openAIModelMapping, err := NormalizeOpenAIGroupModelMapping(group.Platform, *input.OpenAIModelMapping)
+		if err != nil {
+			return nil, infraerrors.Newf(http.StatusBadRequest, "INVALID_OPENAI_MODEL_MAPPING", "%v", err)
+		}
+		group.OpenAIModelMapping = openAIModelMapping
+	}
+	if input.OpenAITransientErrorRetryEnabled != nil {
+		group.OpenAITransientErrorRetryEnabled = *input.OpenAITransientErrorRetryEnabled
+	}
+	if input.OpenAITransientErrorRetryCount != nil {
+		openAITransientErrorRetryCount, err := normalizeOpenAITransientErrorRetryCount(*input.OpenAITransientErrorRetryCount)
+		if err != nil {
+			return nil, infraerrors.Newf(http.StatusBadRequest, "INVALID_OPENAI_TRANSIENT_ERROR_RETRY_COUNT", "%v", err)
+		}
+		group.OpenAITransientErrorRetryCount = openAITransientErrorRetryCount
+	}
 	if input.MessagesDispatchModelConfig != nil {
 		group.MessagesDispatchModelConfig = normalizeOpenAIMessagesDispatchModelConfig(*input.MessagesDispatchModelConfig)
 	}
@@ -881,6 +918,10 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	sanitizeGroupMessagesDispatchFields(group)
 	if group.Platform != PlatformOpenAI {
 		group.AllowLive = false
+		group.OpenAIModelMappingEnabled = false
+		group.OpenAIModelMapping = map[string]string{}
+		group.OpenAITransientErrorRetryEnabled = false
+		group.OpenAITransientErrorRetryCount = DefaultOpenAITransientErrorRetryCount
 	}
 	sanitizeGroupReasoningEffortPolicy(group)
 

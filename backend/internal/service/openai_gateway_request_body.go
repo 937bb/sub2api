@@ -289,6 +289,13 @@ func NormalizeOpenAICompactRequestBodyForTest(body []byte) ([]byte, bool, error)
 }
 
 func isOpenAIResponsesCompactPath(c *gin.Context) bool {
+	if c != nil {
+		if marked, ok := c.Get(openAICompactRequestContextKey); ok {
+			if compact, ok := marked.(bool); ok && compact {
+				return true
+			}
+		}
+	}
 	suffix := strings.TrimSpace(openAIResponsesRequestPathSuffix(c))
 	return suffix == "/compact" || strings.HasPrefix(suffix, "/compact/")
 }

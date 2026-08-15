@@ -28,6 +28,46 @@ type openAIResponsesFailoverCancelUpstream struct {
 	onFirstDo  func()
 }
 
+type openAIResponsesTransientCapacityUpstream struct {
+	service.HTTPUpstream
+	mu         sync.Mutex
+	accountIDs []int64
+}
+
+func (u *openAIResponsesTransientCapacityUpstream) Do(_ *http.Request, _ string, accountID int64, _ int) (*http.Response, error) {
+	u.mu.Lock()
+	u.accountIDs = append(u.accountIDs, accountID)
+	attempt := len(u.accountIDs)
+	u.mu.Unlock()
+
+	var body string
+	if attempt == 1 {
+		body = "event: response.created\n" +
+			`data: {"type":"response.created","response":{"id":"resp_overloaded","status":"in_progress"}}` + "\n\n" +
+			"event: response.in_progress\n" +
+			`data: {"type":"response.in_progress","response":{"id":"resp_overloaded","status":"in_progress"}}` + "\n\n" +
+			"event: error\n" +
+			`data: {"type":"error","error":{"message":"Our servers are currently overloaded. Please try again later."}}` + "\n\n" +
+			"event: response.failed\n" +
+			`data: {"type":"response.failed","response":{"id":"resp_overloaded","status":"failed","error":{"message":"Our servers are currently overloaded. Please try again later."}}}` + "\n\n"
+	} else {
+		body = "event: response.completed\n" +
+			`data: {"type":"response.completed","response":{"id":"resp_retry_ok","object":"response","model":"gpt-5.1","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}}` + "\n\n" +
+			"data: [DONE]\n\n"
+	}
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(bytes.NewBufferString(body)),
+	}, nil
+}
+
+func (u *openAIResponsesTransientCapacityUpstream) calls() []int64 {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return append([]int64(nil), u.accountIDs...)
+}
+
 func (u *openAIResponsesFailoverCancelUpstream) Do(_ *http.Request, _ string, accountID int64, _ int) (*http.Response, error) {
 	u.mu.Lock()
 	u.accountIDs = append(u.accountIDs, accountID)
@@ -120,9 +160,17 @@ func newOpenAIResponsesFailoverTestHandler(t *testing.T, upstream service.HTTPUp
 }
 
 func newOpenAIResponsesFailoverTestContext(t *testing.T, ctx context.Context) (*gin.Context, *httptest.ResponseRecorder) {
+	return newOpenAIResponsesFailoverTestContextWithStream(t, ctx, false)
+}
+
+func newOpenAIResponsesFailoverTestContextWithStream(t *testing.T, ctx context.Context, stream bool) (*gin.Context, *httptest.ResponseRecorder) {
 	t.Helper()
 	groupID := int64(3131)
-	body := []byte(`{"model":"gpt-5.1","stream":false,"input":"hello"}`)
+	streamValue := "false"
+	if stream {
+		streamValue = "true"
+	}
+	body := []byte(`{"model":"gpt-5.1","stream":` + streamValue + `,"input":"hello"}`)
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
 	if ctx != nil {
 		req = req.WithContext(ctx)
@@ -135,8 +183,11 @@ func newOpenAIResponsesFailoverTestContext(t *testing.T, ctx context.Context) (*
 		ID:      99,
 		GroupID: &groupID,
 		Group: &service.Group{
-			ID:       groupID,
-			Platform: service.PlatformOpenAI,
+			ID:                               groupID,
+			Platform:                         service.PlatformOpenAI,
+			Hydrated:                         true,
+			OpenAITransientErrorRetryEnabled: true,
+			OpenAITransientErrorRetryCount:   1,
 		},
 		User: &service.User{ID: 100},
 	})
@@ -191,4 +242,37 @@ func TestOpenAIGatewayHandlerResponses_FailoverContinuesForConnectedClient(t *te
 	require.Equal(t, []int64{1, 2}, upstream.calls(), "在线客户端应正常切换账号")
 	require.Equal(t, http.StatusBadGateway, rec.Code)
 	require.Equal(t, "upstream_error", gjson.GetBytes(rec.Body.Bytes(), "error.type").String())
+}
+
+func TestOpenAIGatewayHandlerResponses_NonStreamingCapacityFailureRetriesBeforeCommit(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	upstream := &openAIResponsesTransientCapacityUpstream{}
+	handler := newOpenAIResponsesFailoverTestHandler(t, upstream)
+	c, rec := newOpenAIResponsesFailoverTestContext(t, nil)
+
+	handler.Responses(c)
+
+	require.Equal(t, []int64{1, 1}, upstream.calls(), "容量错误应先在同一账号重试")
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "resp_retry_ok", gjson.GetBytes(rec.Body.Bytes(), "id").String())
+	require.Equal(t, "ok", gjson.GetBytes(rec.Body.Bytes(), "output.0.content.0.text").String())
+}
+
+func TestOpenAIGatewayHandlerResponses_StreamingMessageOnlyCapacityFailureRetriesBeforeCommit(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	upstream := &openAIResponsesTransientCapacityUpstream{}
+	handler := newOpenAIResponsesFailoverTestHandler(t, upstream)
+	c, rec := newOpenAIResponsesFailoverTestContextWithStream(t, nil, true)
+
+	handler.Responses(c)
+
+	require.Equal(t, []int64{1, 1}, upstream.calls(), "首个语义输出前的容量错误应在同一账号重试")
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Header().Get("Content-Type"), "text/event-stream")
+	require.NotContains(t, rec.Body.String(), "Our servers are currently overloaded")
+	require.NotContains(t, rec.Body.String(), "resp_overloaded")
+	require.Contains(t, rec.Body.String(), "resp_retry_ok")
+	require.Contains(t, rec.Body.String(), `"text":"ok"`)
 }
