@@ -51,6 +51,11 @@ func (s *OpenAIGatewayService) handleOpenAIAccountUpstreamError(ctx context.Cont
 	if account != nil && account.Platform == PlatformGrok && isGrokContentPolicyRejection(statusCode, responseBody) {
 		return false
 	}
+	// OpenAI capacity shedding is request/model-pool scoped. Do not turn a
+	// transient overload response into an account or account-model cooldown.
+	if account != nil && account.Platform == PlatformOpenAI && isOpenAIUpstreamCapacityShedEvent(responseBody) {
+		return false
+	}
 	// Any non-2xx upstream HTTP response means the model request was actually sent.
 	if s != nil {
 		scheduleOllamaCloudUsageActivity(s.deferredService, account)

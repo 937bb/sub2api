@@ -880,6 +880,19 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 
 			eventType, eventResponseID, _ := parseOpenAIWSEventEnvelope(upstreamMessage)
 			responseModelObserver.ObserveOpenAI(upstreamMessage, eventType)
+			capacityShed := (eventType == "error" || eventType == "response.failed") && isOpenAIUpstreamCapacityShedEvent(upstreamMessage)
+			if capacityShed && !wroteDownstream {
+				lease.MarkBroken()
+				return nil, s.newOpenAIStreamFailoverError(
+					c,
+					account,
+					false,
+					strings.TrimSpace(lease.HandshakeHeaders().Get("x-request-id")),
+					upstreamMessage,
+					extractOpenAISSEErrorMessage(upstreamMessage),
+					lease.HandshakeHeaders(),
+				)
+			}
 			if responseID == "" && eventResponseID != "" {
 				responseID = eventResponseID
 			}
@@ -992,6 +1005,11 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			}
 
 			if !clientDisconnected {
+				if capacityShed {
+					if sanitized, changed := sanitizeOpenAICapacityShedErrorCodeForClient(upstreamMessage); changed {
+						upstreamMessage = sanitized
+					}
+				}
 				if needModelReplace && len(mappedModelBytes) > 0 && openAIWSEventMayContainModel(eventType) && bytes.Contains(upstreamMessage, mappedModelBytes) {
 					upstreamMessage = replaceOpenAIWSMessageModel(upstreamMessage, mappedModel, originalModel)
 				}

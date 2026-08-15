@@ -270,6 +270,9 @@ func (s *OpenAIGatewayService) handleOpenAIWSTerminalTransientFailure(ctx contex
 	if terminalEvent != "response.failed" {
 		return terminalEvent
 	}
+	if isOpenAIUpstreamCapacityShedEvent(payload) {
+		return terminalEvent
+	}
 	status := openAIWSPayloadTransientStatus(payload)
 	if status != 0 {
 		s.handleOpenAIAccountUpstreamError(ctx, account, status, headers, payload, canonicalModel)
@@ -280,6 +283,9 @@ func (s *OpenAIGatewayService) handleOpenAIWSTerminalTransientFailure(ctx contex
 func (s *OpenAIGatewayService) handleOpenAIWSErrorEventTransientFailure(ctx context.Context, account *Account, canonicalModel string, headers http.Header, payload []byte) {
 	eventType, _, _ := parseOpenAIWSEventEnvelope(payload)
 	if eventType != "error" {
+		return
+	}
+	if isOpenAIUpstreamCapacityShedEvent(payload) {
 		return
 	}
 	status := openAIWSPayloadTransientStatus(payload)

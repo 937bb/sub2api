@@ -215,7 +215,7 @@ func (s *FailoverState) HandleFailoverError(
 }
 
 // HandleSelectionExhausted 处理选号失败（所有候选账号都在排除列表中）时的退避重试决策。
-// 针对 Antigravity 单账号分组的 503 (MODEL_CAPACITY_EXHAUSTED) 场景：
+// 针对单账号分组的 503 或请求级瞬时降载场景：
 // 清除排除列表、等待退避后重新选号。
 //
 // 返回 FailoverContinue 时，调用方应设置 SingleAccountRetry context 并 continue。
@@ -229,7 +229,7 @@ func (s *FailoverState) HandleSelectionExhausted(ctx context.Context) FailoverAc
 	}
 
 	if s.LastFailoverErr != nil &&
-		s.LastFailoverErr.StatusCode == http.StatusServiceUnavailable &&
+		(s.LastFailoverErr.StatusCode == http.StatusServiceUnavailable || s.LastFailoverErr.RequestScopedTransient) &&
 		s.SwitchCount <= s.MaxSwitches {
 
 		// 排除列表全由利润门否决贡献时，清空后会被原样恢复：退避重试拿不到

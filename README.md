@@ -188,6 +188,7 @@ Sub2API is an AI API gateway platform designed to distribute and manage API quot
 - 2026-08-14: Added OpenAI group-level automatic model mappings with exact and longest-prefix wildcard matching. A matched target is treated as the final upstream model and bypasses account mapping and Codex alias normalization.
 - 2026-08-14: Added JSONB persistence, admin API, auth-cache propagation, group duplication support, and the reusable admin mapping editor.
 - 2026-08-14: Remote compaction v2 requests are recognized even when they stay on `/responses`; normal group mappings are excluded from compact requests. Compact probes and the SSE bridge now require exactly one compaction output item instead of accepting ordinary reasoning/message output.
+- 2026-08-15: OpenAI capacity-shed responses are classified consistently across HTTP 503, HTTP 200 JSON/SSE, and Responses WebSocket paths. Structured overload errors are retried as request-scoped transient failures without incorrectly cooling down individual accounts.
 
 ## Features
 

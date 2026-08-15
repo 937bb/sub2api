@@ -1188,14 +1188,26 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					return nil
 				}
 				eventType, _, _ := parseOpenAIWSEventEnvelope(payload)
-				if isOpenAIWSTerminalEvent(eventType) {
+				capacityShed := (eventType == "error" || eventType == "response.failed") && isOpenAIUpstreamCapacityShedEvent(payload)
+				if !capacityShed && isOpenAIWSTerminalEvent(eventType) {
 					s.handleOpenAIWSTerminalTransientFailure(ctx, account, capturedSessionModel, handshakeHeaders, payload)
 				}
-				if eventType == "error" {
+				if !capacityShed && eventType == "error" {
 					s.handleOpenAIWSErrorEventTransientFailure(ctx, account, capturedSessionModel, handshakeHeaders, payload)
 				}
-				if wroteDownstream || eventType != "error" {
+				if wroteDownstream || (!capacityShed && eventType != "error") {
 					return nil
+				}
+				if capacityShed {
+					return s.newOpenAIStreamFailoverError(
+						c,
+						account,
+						true,
+						strings.TrimSpace(openAIWSHeaderValueForLog(handshakeHeaders, "x-request-id")),
+						payload,
+						extractOpenAISSEErrorMessage(payload),
+						handshakeHeaders,
+					)
 				}
 				errCodeRaw, errTypeRaw, errMsgRaw := parseOpenAIWSErrorEventFields(payload)
 				if !isOpenAIWSRateLimitError(errCodeRaw, errTypeRaw, errMsgRaw) {

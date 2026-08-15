@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -15,6 +16,97 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
+
+func TestDetectOpenAIUpstreamCapacityShedStructuredOnly(t *testing.T) {
+	tests := []struct {
+		name    string
+		payload string
+		want    bool
+	}{
+		{"official code", `{"error":{"code":"server_is_overloaded","message":"retry"}}`, true},
+		{"slow down code", `{"type":"error","error":{"code":"slow_down","message":"retry"}}`, true},
+		{"official message without code", `{"error":{"type":"server_error","message":"Our servers are currently overloaded. Please try again later."}}`, true},
+		{"nested response error", `{"type":"response.failed","response":{"error":{"message":"Selected model is at capacity. Please try again later."}}}`, true},
+		{"normal assistant output is not scanned", `{"output":[{"type":"message","content":[{"type":"output_text","text":"Our servers are currently overloaded"}]}]}`, false},
+		{"unstructured text is not scanned", `"Our servers are currently overloaded"`, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, got := detectOpenAIUpstreamCapacityShed([]byte(tt.payload))
+			require.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestNewOpenAIUpstreamFailoverErrorMarksHTTPOverloadRequestScoped(t *testing.T) {
+	err := newOpenAIUpstreamFailoverError(
+		http.StatusServiceUnavailable,
+		http.Header{"X-Request-Id": []string{"req-overload"}},
+		[]byte(`{"error":{"message":"Our servers are currently overloaded. Please try again later."}}`),
+		"Our servers are currently overloaded. Please try again later.",
+		false,
+	)
+
+	require.Equal(t, http.StatusServiceUnavailable, err.StatusCode)
+	require.True(t, err.RetryableOnSameAccount)
+	require.True(t, err.RequestScopedTransient)
+}
+
+func TestOpenAINonStreamingHTTP200OverloadReturnsFailover(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	svc := &OpenAIGatewayService{cfg: &config.Config{}}
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
+	account := &Account{ID: 41, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Name: "overload-account"}
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}, "X-Request-Id": []string{"req-200-overload"}},
+		Body:       io.NopCloser(strings.NewReader(`{"type":"error","error":{"type":"service_unavailable_error","code":"server_is_overloaded","message":"Our servers are currently overloaded. Please try again later."}}`)),
+	}
+
+	result, err := svc.handleNonStreamingResponse(context.Background(), resp, c, account, "gpt-5.6-sol", "gpt-5.6-sol-wm")
+	require.Nil(t, result)
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.Equal(t, http.StatusBadGateway, failoverErr.StatusCode)
+	require.True(t, failoverErr.RetryableOnSameAccount)
+	require.True(t, failoverErr.RequestScopedTransient)
+	require.False(t, c.Writer.Written())
+}
+
+func TestOpenAIPassthroughBufferedSSEOverloadReturnsFailover(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	svc := &OpenAIGatewayService{cfg: &config.Config{}}
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
+	account := &Account{ID: 42, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Name: "overload-passthrough"}
+	body := strings.Join([]string{
+		`event: response.created`,
+		`data: {"type":"response.created","response":{"id":"resp_overload"}}`,
+		``,
+		`event: error`,
+		`data: {"type":"error","error":{"code":"slow_down","message":"Please retry later."}}`,
+		``,
+		`event: response.failed`,
+		`data: {"type":"response.failed","response":{"id":"resp_overload","error":{"code":"slow_down","message":"Please retry later."}}}`,
+		``,
+	}, "\n")
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "X-Request-Id": []string{"req-sse-overload"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+
+	result, err := svc.handleNonStreamingResponsePassthrough(context.Background(), resp, c, account, "gpt-5.6-sol", "gpt-5.6-sol-wm")
+	require.Nil(t, result)
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.Equal(t, http.StatusBadGateway, failoverErr.StatusCode)
+	require.True(t, failoverErr.RequestScopedTransient)
+	require.False(t, c.Writer.Written())
+}
 
 // --- mock: 只记录临时不可调度写入，其余方法不应被调用 ---
 

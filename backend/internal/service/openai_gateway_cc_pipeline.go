@@ -121,8 +121,9 @@ func (s *OpenAIGatewayService) failoverOpenAIUpstreamHTTPError(
 		Message:            upstreamMsg,
 		Detail:             upstreamDetail,
 	})
+	capacityShed := isOpenAIUpstreamCapacityShedEvent(respBody)
 	shouldDisable := tempUnscheduled
-	if account.Platform != PlatformGrok && !tempUnscheduled {
+	if account.Platform != PlatformGrok && !tempUnscheduled && !capacityShed {
 		shouldDisable = s.handleOpenAIAccountUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody, upstreamModel)
 	}
 	return newOpenAIUpstreamFailoverError(

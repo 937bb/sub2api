@@ -1205,6 +1205,17 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 	if err != nil {
 		return nil, err
 	}
+	if payload, message, overloaded := findOpenAIUpstreamCapacityShed(body); overloaded {
+		return nil, s.newOpenAIStreamFailoverError(
+			c,
+			account,
+			false,
+			strings.TrimSpace(resp.Header.Get("x-request-id")),
+			payload,
+			message,
+			resp.Header,
+		)
+	}
 	observer := upstreamResponseModelObserverFromContext(c)
 	if observer == nil {
 		observer = beginUpstreamResponseModelObservation(c)

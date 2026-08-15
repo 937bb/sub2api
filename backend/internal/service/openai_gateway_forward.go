@@ -941,7 +941,10 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 					Detail:             upstreamDetail,
 				})
 
-				shouldDisable := s.handleFailoverSideEffects(ctx, resp, account, respBody, upstreamModel)
+				shouldDisable := false
+				if !isOpenAIUpstreamCapacityShedEvent(respBody) {
+					shouldDisable = s.handleFailoverSideEffects(ctx, resp, account, respBody, upstreamModel)
+				}
 				return nil, newOpenAIUpstreamFailoverError(
 					resp.StatusCode,
 					resp.Header,
