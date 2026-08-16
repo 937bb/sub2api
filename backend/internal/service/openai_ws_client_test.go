@@ -1,13 +1,49 @@
 package service
 
 import (
+	"bytes"
+	"context"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	coderws "github.com/coder/websocket"
 	"github.com/stretchr/testify/require"
 )
+
+func TestCoderOpenAIWSClientDialer_UsesConfiguredUpstreamReadLimit(t *testing.T) {
+	payload := bytes.Repeat([]byte("x"), 17*1024*1024)
+	serverErr := make(chan error, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := coderws.Accept(w, r, nil)
+		if err != nil {
+			serverErr <- err
+			return
+		}
+		defer conn.CloseNow()
+		serverErr <- conn.Write(r.Context(), coderws.MessageText, payload)
+	}))
+	defer server.Close()
+
+	dialer := newDefaultOpenAIWSClientDialer(20 * 1024 * 1024)
+	conn, status, _, err := dialer.Dial(
+		context.Background(),
+		strings.Replace(server.URL, "http://", "ws://", 1),
+		http.Header{},
+		"",
+	)
+	require.NoError(t, err)
+	require.Zero(t, status)
+	defer conn.Close()
+
+	got, err := conn.ReadMessage(context.Background())
+	require.NoError(t, err)
+	require.Len(t, got, len(payload))
+	require.NoError(t, <-serverErr)
+}
 
 func TestCoderOpenAIWSClientDialer_ProxyHTTPClientReuse(t *testing.T) {
 	dialer := newDefaultOpenAIWSClientDialer()

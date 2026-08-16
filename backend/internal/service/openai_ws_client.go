@@ -17,7 +17,6 @@ import (
 	"github.com/coder/websocket/wsjson"
 )
 
-const openAIWSMessageReadLimitBytes int64 = 16 * 1024 * 1024
 const (
 	openAIWSProxyTransportMaxIdleConns        = 128
 	openAIWSProxyTransportMaxIdleConnsPerHost = 64
@@ -56,17 +55,26 @@ type openAIWSTransportMetricsDialer interface {
 	SnapshotTransportMetrics() OpenAIWSTransportMetricsSnapshot
 }
 
-func newDefaultOpenAIWSClientDialer() openAIWSClientDialer {
+func newDefaultOpenAIWSClientDialer(readLimitBytes ...int64) openAIWSClientDialer {
+	upstreamReadLimitBytes := openAIWSUpstreamReadLimitBytesDefault
+	if len(readLimitBytes) > 0 && readLimitBytes[0] > 0 {
+		upstreamReadLimitBytes = readLimitBytes[0]
+	}
+	if upstreamReadLimitBytes > openAIWSUpstreamReadLimitBytesMax {
+		upstreamReadLimitBytes = openAIWSUpstreamReadLimitBytesMax
+	}
 	return &coderOpenAIWSClientDialer{
-		proxyClients: make(map[string]*openAIWSProxyClientEntry),
+		proxyClients:           make(map[string]*openAIWSProxyClientEntry),
+		upstreamReadLimitBytes: upstreamReadLimitBytes,
 	}
 }
 
 type coderOpenAIWSClientDialer struct {
-	proxyMu      sync.Mutex
-	proxyClients map[string]*openAIWSProxyClientEntry
-	proxyHits    atomic.Int64
-	proxyMisses  atomic.Int64
+	proxyMu                sync.Mutex
+	proxyClients           map[string]*openAIWSProxyClientEntry
+	proxyHits              atomic.Int64
+	proxyMisses            atomic.Int64
+	upstreamReadLimitBytes int64
 }
 
 // openAIWSHandshakeError keeps a bounded, non-logged HTTP error body so the
@@ -136,7 +144,7 @@ func (d *coderOpenAIWSClientDialer) Dial(
 	}
 	// coder/websocket 默认单消息读取上限为 32KB，Codex WS 事件（如 rate_limits/大 delta）
 	// 可能超过该阈值，需显式提高上限，避免本地 read_fail(message too big)。
-	conn.SetReadLimit(openAIWSMessageReadLimitBytes)
+	conn.SetReadLimit(d.upstreamReadLimitBytes)
 	respHeaders := http.Header(nil)
 	if resp != nil {
 		respHeaders = cloneHeader(resp.Header)

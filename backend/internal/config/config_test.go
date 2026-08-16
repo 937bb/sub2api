@@ -492,6 +492,9 @@ func TestLoadDefaultOpenAIWSConfig(t *testing.T) {
 	if cfg.Gateway.OpenAIWS.ClientReadLimitBytes != 64*1024*1024 {
 		t.Fatalf("Gateway.OpenAIWS.ClientReadLimitBytes = %d, want %d", cfg.Gateway.OpenAIWS.ClientReadLimitBytes, 64*1024*1024)
 	}
+	if cfg.Gateway.OpenAIWS.UpstreamReadLimitBytes != 64*1024*1024 {
+		t.Fatalf("Gateway.OpenAIWS.UpstreamReadLimitBytes = %d, want %d", cfg.Gateway.OpenAIWS.UpstreamReadLimitBytes, 64*1024*1024)
+	}
 	if !cfg.Gateway.OpenAIWS.HTTPBridgeEnabled {
 		t.Fatalf("Gateway.OpenAIWS.HTTPBridgeEnabled = false, want true")
 	}

@@ -359,6 +359,8 @@ gateway:
     store_disabled_force_new_conn: true
     # 是否启用 WSv2 generate=false 预热（默认 false）
     prewarm_generate_enabled: false
+    # 上游 WS 单消息解压后读取上限；与下游客户端入站限制独立，最大 256 MiB
+    upstream_read_limit_bytes: 67108864
     # 协议 feature 开关，v2 优先于 v1
     responses_websockets: false
     responses_websockets_v2: true
