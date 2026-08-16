@@ -12,7 +12,7 @@ func (h *OpenAIGatewayHandler) resolveOpenAIRequestModelMapping(
 	apiKey *service.APIKey,
 	requestedModel string,
 ) service.ChannelMappingResult {
-	if apiKey != nil && apiKey.Group != nil && !service.IsOpenAIResponsesCompactRequest(c) {
+	if apiKey != nil && apiKey.Group != nil && !isOpenAILegacyCompactPath(c) {
 		if target, matched := apiKey.Group.ResolveOpenAIModelMapping(requestedModel); matched {
 			target = strings.TrimSpace(target)
 			service.MarkOpenAIGroupModelMapping(c, requestedModel, target)

@@ -131,14 +131,13 @@ func OpenAIQuotaBypassUsageSnapshot(c *gin.Context) (bool, int) {
 	return true, clampOpenAIQuotaBypassInjectPairs(pairs)
 }
 
-// InjectOpenAIQuotaBypassForRequest injects the synthetic tool turns and marks
-// the current request only when the payload was actually changed.
+// InjectOpenAIQuotaBypassForRequest appends the synthetic tool turn.
 func InjectOpenAIQuotaBypassForRequest(c *gin.Context, body []byte, _ int) ([]byte, bool) {
-	injected, ok := InjectFunctionCallOutputSuffix(body)
-	if ok {
+	injected, applied := InjectFunctionCallOutputSuffix(body)
+	if applied {
 		markOpenAIQuotaBypassApplied(c, 1)
 	}
-	return injected, ok
+	return injected, applied
 }
 
 func isOpenAIQuotaBypassEnabledForRequest(c *gin.Context, account *Account) bool {
@@ -173,7 +172,8 @@ func applyOpenAIWSQuotaBypass(payload []byte, hooks *OpenAIWSIngressHooks) []byt
 	if hooks == nil || !hooks.QuotaBypassEnabled {
 		return payload
 	}
-	if injected, ok := InjectFunctionCallOutputSuffix(payload); ok {
+	injected, applied := InjectFunctionCallOutputSuffix(payload)
+	if applied {
 		if hooks.OnQuotaBypassApplied != nil {
 			hooks.OnQuotaBypassApplied()
 		}
