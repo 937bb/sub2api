@@ -1005,7 +1005,7 @@ describe('EditAccountModal', () => {
     expect(updateAccountMock.mock.calls[0]?.[1]?.extra).not.toHaveProperty('codex_image_generation_bridge')
   })
 
-  it('setup-token account can select and submit OAuth WS mode', async () => {
+  it('setup-token account uses mandatory WS and clears legacy mode fields', async () => {
     const account = buildOpenAISetupTokenAccount()
     updateAccountMock.mockReset()
     checkMixedChannelRiskMock.mockReset()
@@ -1014,12 +1014,12 @@ describe('EditAccountModal', () => {
 
     const wrapper = mountModal(account)
 
-    await wrapper.get('[data-testid="edit-openai-ws-mode-select"]').setValue('http_bridge')
+    expect(wrapper.find('[data-testid="edit-openai-ws-mode-select"]').exists()).toBe(false)
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
 
     expect(updateAccountMock).toHaveBeenCalledTimes(1)
-    expect(updateAccountMock.mock.calls[0]?.[1]?.extra?.openai_oauth_responses_websockets_v2_mode).toBe('http_bridge')
-    expect(updateAccountMock.mock.calls[0]?.[1]?.extra?.openai_oauth_responses_websockets_v2_enabled).toBe(true)
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).not.toHaveProperty('openai_oauth_responses_websockets_v2_mode')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).not.toHaveProperty('openai_oauth_responses_websockets_v2_enabled')
   })
 
   it('allows saving apikey account when backend redacted api_key but credentials_status reports it exists', async () => {

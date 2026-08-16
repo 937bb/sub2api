@@ -3503,7 +3503,7 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_RequiredWSV2_NoAvailabl
 		{
 			ID:          2301,
 			Platform:    PlatformOpenAI,
-			Type:        AccountTypeOAuth,
+			Type:        AccountTypeAPIKey,
 			Status:      StatusActive,
 			Schedulable: true,
 			Concurrency: 1,
@@ -5211,6 +5211,20 @@ func TestDefaultOpenAIAccountScheduler_IsAccountTransportCompatible_Branches(t *
 
 	account.Extra["openai_apikey_responses_websockets_v2_mode"] = OpenAIWSIngressModeOff
 	require.False(t, scheduler.isAccountTransportCompatible(account, OpenAIUpstreamTransportResponsesWebsocketV2Ingress))
+
+	subscriptionAccount := &Account{
+		ID:          8802,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeSetupToken,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Extra: map[string]any{
+			"openai_oauth_responses_websockets_v2_mode": OpenAIWSIngressModeOff,
+		},
+	}
+	require.True(t, scheduler.isAccountTransportCompatible(subscriptionAccount, OpenAIUpstreamTransportResponsesWebsocketV2))
+	require.True(t, scheduler.isAccountTransportCompatible(subscriptionAccount, OpenAIUpstreamTransportResponsesWebsocketV2Ingress))
 }
 
 func int64PtrForTest(v int64) *int64 {

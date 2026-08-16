@@ -35,6 +35,26 @@ func NewOpenAIWSProtocolResolver(cfg *config.Config) OpenAIWSProtocolResolver {
 	return &defaultOpenAIWSProtocolResolver{cfg: cfg}
 }
 
+// resolveOpenAIWSRoutingMode keeps ChatGPT subscription credentials on WS.
+// API key accounts remain opt-in because compatible upstreams may not expose
+// the Responses WebSocket endpoint.
+func resolveOpenAIWSRoutingMode(account *Account, defaultMode string) string {
+	if account == nil {
+		return OpenAIWSIngressModeOff
+	}
+	mode := account.ResolveOpenAIResponsesWebSocketV2Mode(defaultMode)
+	if !account.IsOpenAIOAuthLike() {
+		return mode
+	}
+	switch mode {
+	case OpenAIWSIngressModeCtxPool, OpenAIWSIngressModePassthrough,
+		OpenAIWSIngressModeShared, OpenAIWSIngressModeDedicated:
+		return mode
+	default:
+		return OpenAIWSIngressModeCtxPool
+	}
+}
+
 func (r *defaultOpenAIWSProtocolResolver) Resolve(account *Account) OpenAIWSProtocolDecision {
 	if account == nil {
 		return openAIWSHTTPDecision("account_missing")
@@ -56,7 +76,7 @@ func (r *defaultOpenAIWSProtocolResolver) Resolve(account *Account) OpenAIWSProt
 	if !wsCfg.Enabled {
 		return openAIWSHTTPDecision("global_disabled")
 	}
-	if account.IsOpenAIOAuth() {
+	if account.IsOpenAIOAuthLike() {
 		if !wsCfg.OAuthEnabled {
 			return openAIWSHTTPDecision("oauth_disabled")
 		}
@@ -68,7 +88,7 @@ func (r *defaultOpenAIWSProtocolResolver) Resolve(account *Account) OpenAIWSProt
 		return openAIWSHTTPDecision("unknown_auth_type")
 	}
 	if wsCfg.ModeRouterV2Enabled {
-		mode := account.ResolveOpenAIResponsesWebSocketV2Mode(wsCfg.IngressModeDefault)
+		mode := resolveOpenAIWSRoutingMode(account, wsCfg.IngressModeDefault)
 		switch mode {
 		case OpenAIWSIngressModeOff:
 			return openAIWSHTTPDecision("account_mode_off")
@@ -99,7 +119,7 @@ func (r *defaultOpenAIWSProtocolResolver) Resolve(account *Account) OpenAIWSProt
 		}
 		return openAIWSHTTPDecision("feature_disabled")
 	}
-	if !account.IsOpenAIResponsesWebSocketV2Enabled() {
+	if !account.IsOpenAIOAuthLike() && !account.IsOpenAIResponsesWebSocketV2Enabled() {
 		return openAIWSHTTPDecision("account_disabled")
 	}
 	if wsCfg.ResponsesWebsocketsV2 {
