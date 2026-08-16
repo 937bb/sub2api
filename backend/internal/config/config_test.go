@@ -490,8 +490,11 @@ func TestLoadDefaultOpenAIWSConfig(t *testing.T) {
 	if !cfg.Gateway.OpenAIWS.StoreDisabledForceNewConn {
 		t.Fatalf("Gateway.OpenAIWS.StoreDisabledForceNewConn = false, want true")
 	}
-	if cfg.Gateway.OpenAIWS.StoreDisabledConnMode != "strict" {
-		t.Fatalf("Gateway.OpenAIWS.StoreDisabledConnMode = %q, want %q", cfg.Gateway.OpenAIWS.StoreDisabledConnMode, "strict")
+	if !cfg.Gateway.OpenAIWS.HTTPIngressUpstreamWSEnabled {
+		t.Fatalf("Gateway.OpenAIWS.HTTPIngressUpstreamWSEnabled = false, want true")
+	}
+	if cfg.Gateway.OpenAIWS.StoreDisabledConnMode != "adaptive" {
+		t.Fatalf("Gateway.OpenAIWS.StoreDisabledConnMode = %q, want %q", cfg.Gateway.OpenAIWS.StoreDisabledConnMode, "adaptive")
 	}
 	if cfg.Gateway.OpenAIWS.ModeRouterV2Enabled {
 		t.Fatalf("Gateway.OpenAIWS.ModeRouterV2Enabled = true, want false")

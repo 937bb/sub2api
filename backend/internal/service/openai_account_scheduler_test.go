@@ -4370,6 +4370,21 @@ func TestOpenAIQuotaBypassConcentrator_LargePoolUsesBoundedCursorWindow(t *testi
 	require.Equal(t, int64(3), concentrator.window(key, accountIDs, openAIQuotaBypassMinWindowSize).accountIDs[0])
 }
 
+func TestOpenAIQuotaBypassConcentrator_ReleaseOrderKeepsEarliestAvailableAccount(t *testing.T) {
+	concentrator := newOpenAIQuotaBypassConcentrator()
+	key := newOpenAIQuotaBypassPoolKey(int64PtrForTest(42), PlatformOpenAI, 0)
+	accountIDs := []int64{1, 2, 3}
+
+	concentrator.markAcquired(key, 1)
+	concentrator.markReleased(key, 3)
+	require.Equal(t, int64(1), concentrator.window(key, accountIDs, 1).accountIDs[0])
+
+	concentrator.markFull(key, 1)
+	require.Equal(t, int64(2), concentrator.window(key, accountIDs, 1).accountIDs[0])
+	concentrator.markReleased(key, 1)
+	require.Equal(t, int64(1), concentrator.window(key, accountIDs, 1).accountIDs[0])
+}
+
 func TestOpenAIGatewayService_QuotaBypassProductionWindowUsesSingleActiveAccount(t *testing.T) {
 	svc := &OpenAIGatewayService{}
 	accountIDs := make([]int64, 5000)

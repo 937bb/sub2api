@@ -1547,6 +1547,12 @@ func (h *OpenAIGatewayHandler) acquireResponsesAccountSlot(
 		if err := h.gatewayService.BindStickySessionAfterProfitAdmission(ctx, groupID, sessionHash, account.ID); err != nil {
 			reqLog.Warn("openai.bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 		}
+		fastReleaseFunc = h.gatewayService.WrapOpenAIQuotaBypassConcentratedRelease(
+			groupID,
+			account.Platform,
+			account,
+			fastReleaseFunc,
+		)
 		return wrapReleaseOnDone(ctx, fastReleaseFunc), openAISlotAcquireOK
 	}
 
@@ -1602,6 +1608,12 @@ func (h *OpenAIGatewayHandler) acquireResponsesAccountSlot(
 	if err := h.gatewayService.BindStickySessionAfterProfitAdmission(ctx, groupID, sessionHash, account.ID); err != nil {
 		reqLog.Warn("openai.bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 	}
+	accountReleaseFunc = h.gatewayService.WrapOpenAIQuotaBypassConcentratedRelease(
+		groupID,
+		account.Platform,
+		account,
+		accountReleaseFunc,
+	)
 	return wrapReleaseOnDone(ctx, accountReleaseFunc), openAISlotAcquireOK
 }
 
@@ -2021,7 +2033,12 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			}
 			account = latest
 			selection.Account = latest
-			accountReleaseFunc = fastReleaseFunc
+			accountReleaseFunc = h.gatewayService.WrapOpenAIQuotaBypassConcentratedRelease(
+				apiKey.GroupID,
+				account.Platform,
+				account,
+				fastReleaseFunc,
+			)
 		}
 		// 准入完成：门并入连接 ctx，turn 级复核与 failover 重选共用。
 		ctx = admissionCtx
@@ -2158,6 +2175,12 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 					}
 					return service.NewOpenAIWSClientCloseError(coderws.StatusTryAgainLater, "account is busy, please retry later", nil)
 				}
+				accountReleaseFunc = h.gatewayService.WrapOpenAIQuotaBypassConcentratedRelease(
+					apiKey.GroupID,
+					account.Platform,
+					account,
+					accountReleaseFunc,
+				)
 				currentUserRelease = wrapReleaseOnDone(ctx, userReleaseFunc)
 				currentAccountRelease = wrapReleaseOnDone(ctx, accountReleaseFunc)
 				return nil

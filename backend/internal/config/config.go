@@ -1159,6 +1159,9 @@ type GatewayOpenAIWSConfig struct {
 	APIKeyEnabled bool `mapstructure:"apikey_enabled"`
 	// ForceHTTP: 全局强制 HTTP（用于紧急回滚）
 	ForceHTTP bool `mapstructure:"force_http"`
+	// HTTPIngressUpstreamWSEnabled allows HTTP/SSE Responses clients to use a
+	// WebSocket v2 upstream while preserving SSE on the downstream side.
+	HTTPIngressUpstreamWSEnabled bool `mapstructure:"http_ingress_upstream_ws_enabled"`
 	// AllowStoreRecovery: 允许在 WSv2 下按策略恢复 store=true（默认 false）
 	AllowStoreRecovery bool `mapstructure:"allow_store_recovery"`
 	// IngressPreviousResponseRecoveryEnabled: ingress 模式收到 previous_response_not_found 时，是否允许自动去掉 previous_response_id 重试一次（默认 true）
@@ -2287,7 +2290,8 @@ func setDefaults() {
 	viper.SetDefault("gateway.openai_ws.force_http", false)
 	viper.SetDefault("gateway.openai_ws.allow_store_recovery", false)
 	viper.SetDefault("gateway.openai_ws.ingress_previous_response_recovery_enabled", true)
-	viper.SetDefault("gateway.openai_ws.store_disabled_conn_mode", "strict")
+	viper.SetDefault("gateway.openai_ws.http_ingress_upstream_ws_enabled", true)
+	viper.SetDefault("gateway.openai_ws.store_disabled_conn_mode", "adaptive")
 	viper.SetDefault("gateway.openai_ws.store_disabled_force_new_conn", true)
 	viper.SetDefault("gateway.openai_ws.prewarm_generate_enabled", false)
 	viper.SetDefault("gateway.openai_ws.client_read_limit_bytes", 64*1024*1024)

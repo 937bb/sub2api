@@ -222,7 +222,20 @@ func (c *openAIQuotaBypassConcentrator) markAcquired(key openAIQuotaBypassPoolKe
 }
 
 func (c *openAIQuotaBypassConcentrator) markReleased(key openAIQuotaBypassPoolKey, accountID int64) {
-	c.markAcquired(key, accountID)
+	if c == nil || accountID <= 0 {
+		return
+	}
+	state := c.state(key)
+	state.mu.Lock()
+	delete(state.fullUntil, accountID)
+	// Match the Redis promotion rule: a released account may reclaim the
+	// active cursor only when it is earlier than the current target. Completion
+	// order must not make traffic bounce between concentrated accounts when the
+	// shared Redis hint is unavailable or briefly times out.
+	if state.cursorID == 0 || accountID < state.cursorID {
+		state.cursorID = accountID
+	}
+	state.mu.Unlock()
 }
 
 func (c *openAIQuotaBypassConcentrator) isFullHinted(key openAIQuotaBypassPoolKey, accountID int64) bool {
@@ -356,4 +369,19 @@ func (s *OpenAIGatewayService) wrapQuotaBypassAccountRelease(
 			}
 		})
 	}
+}
+
+// WrapOpenAIQuotaBypassConcentratedRelease applies the same cursor update to
+// slots acquired from a handler WaitPlan as slots acquired atomically inside
+// the scheduler.
+func (s *OpenAIGatewayService) WrapOpenAIQuotaBypassConcentratedRelease(
+	groupID *int64,
+	platform string,
+	account *Account,
+	release func(),
+) func() {
+	if !IsAccountQuotaBypassConcentrated(account) {
+		return release
+	}
+	return s.wrapQuotaBypassAccountRelease(groupID, platform, account, release)
 }

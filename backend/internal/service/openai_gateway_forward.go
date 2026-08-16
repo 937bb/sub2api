@@ -73,8 +73,14 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 	}
 	wsDecision := s.getOpenAIWSProtocolResolver().Resolve(account)
-	// 仅允许 WS 入站请求走 WS 上游，避免出现 HTTP -> WS 协议混用。
-	wsDecision = resolveOpenAIWSDecisionByClientTransport(wsDecision, GetOpenAIClientTransport(c))
+	// HTTP/SSE downstream can use the WSv2 upstream bridge when explicitly
+	// enabled. The client still receives the normal Responses SSE contract.
+	httpIngressUpstreamWSEnabled := s != nil && s.cfg != nil && s.cfg.Gateway.OpenAIWS.HTTPIngressUpstreamWSEnabled
+	wsDecision = resolveOpenAIWSDecisionByClientTransport(
+		wsDecision,
+		GetOpenAIClientTransport(c),
+		httpIngressUpstreamWSEnabled,
+	)
 	passthroughEnabled := account.IsOpenAIPassthroughEnabled()
 	compactPath := isOpenAIResponsesCompactPath(c)
 	if shouldFlattenOpenAIResponsesNamespaces(account, wsDecision.Transport, passthroughEnabled, compactPath) {
