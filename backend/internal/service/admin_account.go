@@ -378,6 +378,23 @@ func normalizeOpenAILongContextBillingExtra(platform string, extra map[string]an
 	return normalized, nil
 }
 
+// normalizeCodexFingerprintExtraForCreate persists the same default used by
+// runtime fingerprint resolution, so Admin API-created OAuth accounts expose
+// the effective mode to the console as well. An explicit "off" remains valid.
+func normalizeCodexFingerprintExtraForCreate(platform, accountType string, extra map[string]any) map[string]any {
+	if platform != PlatformOpenAI || accountType != AccountTypeOAuth {
+		return extra
+	}
+	normalized := maps.Clone(extra)
+	if normalized == nil {
+		normalized = make(map[string]any, 1)
+	}
+	if _, exists := normalized[codexFingerprintModeExtraKey]; !exists {
+		normalized[codexFingerprintModeExtraKey] = string(codexFingerprintFull)
+	}
+	return normalized
+}
+
 func normalizeOpenAILongContextBillingUpdateExtra(account *Account, input *UpdateAccountInput) (map[string]any, error) {
 	normalized, err := normalizeOpenAILongContextBillingExtra(account.Platform, input.Extra)
 	if err != nil || account.Platform != PlatformOpenAI {
@@ -468,6 +485,7 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 	if err != nil {
 		return nil, err
 	}
+	accountExtra = normalizeCodexFingerprintExtraForCreate(input.Platform, input.Type, accountExtra)
 
 	// 绑定分组
 	groupIDs := input.GroupIDs

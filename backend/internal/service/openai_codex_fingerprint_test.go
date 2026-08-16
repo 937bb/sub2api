@@ -70,6 +70,30 @@ func TestGetCodexFingerprintMode(t *testing.T) {
 	}
 }
 
+func TestNormalizeCodexFingerprintExtraForCreate(t *testing.T) {
+	tests := []struct {
+		name        string
+		platform    string
+		accountType string
+		extra       map[string]any
+		want        any
+	}{
+		{name: "OpenAI OAuth defaults full", platform: PlatformOpenAI, accountType: AccountTypeOAuth, want: "full"},
+		{name: "explicit off is preserved", platform: PlatformOpenAI, accountType: AccountTypeOAuth, extra: map[string]any{codexFingerprintModeExtraKey: "off"}, want: "off"},
+		{name: "non OAuth is unchanged", platform: PlatformOpenAI, accountType: AccountTypeAPIKey, extra: map[string]any{"keep": true}, want: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := normalizeCodexFingerprintExtraForCreate(tt.platform, tt.accountType, tt.extra)
+			if tt.want == nil {
+				assert.Equal(t, tt.extra, got)
+				return
+			}
+			assert.Equal(t, tt.want, got[codexFingerprintModeExtraKey])
+		})
+	}
+}
+
 // --- resolveConvergedInstallationID ---
 
 func TestResolveConvergedInstallationID_UsesDeviceID(t *testing.T) {
