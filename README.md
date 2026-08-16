@@ -4,7 +4,7 @@
 
 # Sub2API
 
-[![Go](https://img.shields.io/badge/Go-1.26.5-00ADD8.svg)](https://golang.org/)
+[![Go](https://img.shields.io/badge/Go-1.26.6-00ADD8.svg)](https://golang.org/)
 [![Vue](https://img.shields.io/badge/Vue-3.4+-4FC08D.svg)](https://vuejs.org/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15+-336791.svg)](https://www.postgresql.org/)
 [![Redis](https://img.shields.io/badge/Redis-7+-DC382D.svg)](https://redis.io/)
@@ -20,7 +20,7 @@ English | [中文](README_CN.md) | [日本語](README_JA.md)
 
 ## 937sub2b Update Log
 
-- `0.1.189`: Add an optional soft concurrency ceiling for concentrated quota-bypass accounts to limit queue-driven first-token latency, and make WSv2 fall back to HTTP after one immediate retry for replay-safe transport failures while preserving 429, authentication, policy, and tool-continuation semantics.
+- `0.1.189`: Add an optional soft concurrency ceiling for concentrated quota-bypass accounts to limit queue-driven first-token latency, make WSv2 fall back to HTTP after one immediate retry for replay-safe transport failures, and align Docker builders with Go 1.26.6 while preserving 429, authentication, policy, and tool-continuation semantics.
 - `0.1.188`: Make the quota-bypass concentration switch authoritative for both request groups and account-attached marker groups: disabled keeps funcall bypass but uses ordinary load balancing; enabled adds fill-first scheduling.
 - `0.1.187`: Preserve legacy concentrated scheduling for quota-bypass marker groups attached to an account, while allowing the current request group to explicitly disable concentration; keep candidate accounts scoped to the current request group.
 - `0.1.186`: Count admin and scheduled account probes against the target account's concurrency limit, so diagnostics cannot overload a busy account with extra upstream requests; add an AdminKey-created OpenAI subscription-account WS regression test.
@@ -222,7 +222,7 @@ Community projects that extend or integrate with Sub2API:
 
 | Component | Technology |
 |-----------|------------|
-| Backend | Go 1.26.5, Gin, Ent |
+| Backend | Go 1.26.6, Gin, Ent |
 | Frontend | Vue 3.4+, Vite 5+, TailwindCSS |
 | Database | PostgreSQL 15+ |
 | Cache/Queue | Redis 7+ |
