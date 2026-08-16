@@ -81,6 +81,8 @@ func firstAccountTestOptions(opts []AccountTestOptions) AccountTestOptions {
 // maxAccountTestMediaBytes caps inbound data-URL payloads for admin tests (~8 MiB).
 const maxAccountTestMediaBytes = 8 << 20
 
+var errAccountTestConcurrencyLimit = errors.New("account is at its concurrency limit")
+
 const (
 	defaultGeminiTextTestPrompt  = "hi"
 	defaultGeminiImageTestPrompt = "Generate a cute orange cat astronaut sticker on a clean pastel background."
@@ -150,6 +152,7 @@ func normalizeGrokAccountTestMode(mode string) string {
 // AccountTestService handles account testing operations
 type AccountTestService struct {
 	accountRepo               AccountRepository
+	concurrencyService        *ConcurrencyService
 	geminiTokenProvider       *GeminiTokenProvider
 	claudeTokenProvider       *ClaudeTokenProvider
 	grokTokenProvider         *GrokTokenProvider
@@ -169,6 +172,29 @@ func (s *AccountTestService) SetSettingService(settingService *SettingService) {
 	if s != nil {
 		s.settingService = settingService
 	}
+}
+
+func (s *AccountTestService) SetConcurrencyService(concurrencyService *ConcurrencyService) {
+	if s != nil {
+		s.concurrencyService = concurrencyService
+	}
+}
+
+func (s *AccountTestService) acquireAccountTestSlot(ctx context.Context, account *Account) (func(), error) {
+	if s == nil || s.concurrencyService == nil || account == nil || account.Concurrency <= 0 {
+		return func() {}, nil
+	}
+	result, err := s.concurrencyService.AcquireAccountSlot(ctx, account.ID, account.Concurrency)
+	if err != nil {
+		return nil, fmt.Errorf("check account concurrency: %w", err)
+	}
+	if result == nil || !result.Acquired {
+		return nil, errAccountTestConcurrencyLimit
+	}
+	if result.ReleaseFunc == nil {
+		return func() {}, nil
+	}
+	return result.ReleaseFunc, nil
 }
 
 // NewAccountTestService creates a new AccountTestService
@@ -317,6 +343,17 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 		s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
 		return nil
 	}
+
+	releaseAccountSlot, err := s.acquireAccountTestSlot(ctx, account)
+	if err != nil {
+		if errors.Is(err, errAccountTestConcurrencyLimit) {
+			message := "Account is busy at its configured concurrency limit; test skipped"
+			_ = s.sendErrorAndEnd(c, message)
+			return fmt.Errorf("%w: %s", errAccountTestConcurrencyLimit, message)
+		}
+		return s.sendErrorAndEnd(c, "Failed to reserve account capacity for the test")
+	}
+	defer releaseAccountSlot()
 
 	// Route to platform-specific test method
 	if account.IsOpenAI() {

@@ -245,6 +245,9 @@ func ProvideAccountTestService(
 	)
 	service.agentIdentityWS = openAIGatewayService
 	service.SetSettingService(settingService)
+	if openAIGatewayService != nil {
+		service.SetConcurrencyService(openAIGatewayService.concurrencyService)
+	}
 	return service
 }
 

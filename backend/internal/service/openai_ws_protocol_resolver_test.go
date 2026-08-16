@@ -158,6 +158,33 @@ func TestOpenAIWSProtocolResolver_Resolve(t *testing.T) {
 	})
 }
 
+func TestOpenAIWSProtocolResolver_AdminCreateInputDefaultsSubscriptionAccountsToWebSocket(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIWS.Enabled = true
+	cfg.Gateway.OpenAIWS.OAuthEnabled = true
+	cfg.Gateway.OpenAIWS.ResponsesWebsocketsV2 = true
+
+	for _, accountType := range []string{AccountTypeOAuth, AccountTypeSetupToken} {
+		t.Run(accountType, func(t *testing.T) {
+			account, err := buildAccountForCreate(&CreateAccountInput{
+				Name:        "admin-key-created-" + accountType,
+				Platform:    PlatformOpenAI,
+				Type:        accountType,
+				Credentials: map[string]any{"access_token": "test-token"},
+				Concurrency: 1,
+			}, map[string]any{
+				"openai_oauth_responses_websockets_v2_mode":    OpenAIWSIngressModeOff,
+				"openai_oauth_responses_websockets_v2_enabled": false,
+			})
+			require.NoError(t, err)
+
+			decision := NewOpenAIWSProtocolResolver(cfg).Resolve(account)
+			require.Equal(t, OpenAIUpstreamTransportResponsesWebsocketV2, decision.Transport)
+			require.Equal(t, "ws_v2_enabled", decision.Reason)
+		})
+	}
+}
+
 func TestOpenAIWSProtocolResolver_Resolve_ModeRouterV2(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Gateway.OpenAIWS.Enabled = true

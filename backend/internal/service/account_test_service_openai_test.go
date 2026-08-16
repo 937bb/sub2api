@@ -147,6 +147,54 @@ func TestAccountTestService_OpenAISuccessPersistsSnapshotFromHeaders(t *testing.
 	require.Contains(t, recorder.Body.String(), "test_complete")
 }
 
+func TestAccountTestService_OpenAIProbeRespectsAccountConcurrency(t *testing.T) {
+	account := &Account{
+		ID:          188,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Concurrency: 1,
+		Credentials: map[string]any{"access_token": "test-token"},
+	}
+	repo := &openAIAccountTestRepo{mockAccountRepoForGemini: mockAccountRepoForGemini{
+		accountsByID: map[int64]*Account{account.ID: account},
+	}}
+
+	t.Run("busy account skips upstream probe", func(t *testing.T) {
+		ctx, recorder := newTestContext()
+		cache := &stubConcurrencyCacheForTest{acquireResult: false}
+		upstream := &queuedHTTPUpstream{}
+		svc := &AccountTestService{
+			accountRepo:        repo,
+			concurrencyService: NewConcurrencyService(cache),
+			httpUpstream:       upstream,
+		}
+
+		err := svc.TestAccountConnectionReadOnly(ctx, account.ID, "gpt-5.4", "", "")
+		require.ErrorIs(t, err, errAccountTestConcurrencyLimit)
+		require.Empty(t, upstream.requests)
+		require.Contains(t, recorder.Body.String(), "Account is busy at its configured concurrency limit")
+		require.Empty(t, cache.releasedAccountIDs)
+	})
+
+	t.Run("available slot is released after probe", func(t *testing.T) {
+		ctx, _ := newTestContext()
+		cache := &stubConcurrencyCacheForTest{acquireResult: true}
+		resp := newJSONResponse(http.StatusOK, "")
+		resp.Body = io.NopCloser(strings.NewReader("data: {\"type\":\"response.completed\"}\n\n"))
+		upstream := &queuedHTTPUpstream{responses: []*http.Response{resp}}
+		svc := &AccountTestService{
+			accountRepo:        repo,
+			concurrencyService: NewConcurrencyService(cache),
+			httpUpstream:       upstream,
+		}
+
+		err := svc.TestAccountConnectionReadOnly(ctx, account.ID, "gpt-5.4", "", "")
+		require.NoError(t, err)
+		require.Len(t, upstream.requests, 1)
+		require.Equal(t, []int64{account.ID}, cache.releasedAccountIDs)
+	})
+}
+
 func TestAccountTestService_OpenAIOAuthTestNormalizesGPT56Alias(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, _ := newTestContext()

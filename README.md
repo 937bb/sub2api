@@ -20,6 +20,7 @@ English | [中文](README_CN.md) | [日本語](README_JA.md)
 
 ## 937sub2b Update Log
 
+- `0.1.186`: Count admin and scheduled account probes against the target account's concurrency limit, so diagnostics cannot overload a busy account with extra upstream requests; add an AdminKey-created OpenAI subscription-account WS regression test.
 - `0.1.185`: Route OpenAI OAuth, personal access token, and setup-token accounts through WSv2 by default, while keeping API key accounts opt-in and retaining global/account HTTP rollback controls.
 - `0.1.184`: Let HTTP/SSE Responses clients use the configured WSv2 upstream bridge, switch store-disabled WS reuse to adaptive mode, and keep quota-bypass concentration stable across rolling releases and handler wait paths.
 - `0.1.183`: Restore account-marker concentrated scheduling: an OpenAI OAuth account attached to a dedicated quota-bypass group with concentrated scheduling enabled now fills first when used from an ordinary public group, while account priority remains the primary scheduling key.
