@@ -120,6 +120,22 @@ func TestClassifyOpenAIWSReconnectReason(t *testing.T) {
 	require.True(t, retryable)
 }
 
+func TestShouldFallbackOpenAIWSToHTTP(t *testing.T) {
+	for _, reason := range []string{
+		"dial_failed", "acquire_timeout", "write_request", "read_event",
+		"upstream_5xx", "missing_final_response", "ws_connection_limit_reached",
+		"upgrade_required", "ws_unsupported", "prewarm_write_request",
+	} {
+		require.True(t, shouldFallbackOpenAIWSToHTTP(reason), reason)
+	}
+	for _, reason := range []string{
+		"policy_violation", "auth_failed", "previous_response_not_found",
+		"invalid_encrypted_content", "upstream_rate_limited", "upstream_error_event",
+	} {
+		require.False(t, shouldFallbackOpenAIWSToHTTP(reason), reason)
+	}
+}
+
 func TestOpenAIWSErrorHTTPStatus(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, openAIWSErrorHTTPStatus([]byte(`{"type":"error","error":{"type":"invalid_request_error","code":"invalid_request","message":"invalid input"}}`)))
 	require.Equal(t, http.StatusUnauthorized, openAIWSErrorHTTPStatus([]byte(`{"type":"error","error":{"type":"authentication_error","code":"invalid_api_key","message":"auth failed"}}`)))

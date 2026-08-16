@@ -2366,6 +2366,11 @@ func TestValidateConfig_OpenAIWSRules(t *testing.T) {
 			mutate:  func(c *Config) { c.Gateway.OpenAIScheduler.StickyEscapeErrorRate = 1.1 },
 			wantErr: "gateway.openai_scheduler.sticky_escape_error_rate",
 		},
+		{
+			name:    "quota_bypass_soft_concurrency 不能小于 0",
+			mutate:  func(c *Config) { c.Gateway.OpenAIScheduler.QuotaBypassSoftConcurrency = -1 },
+			wantErr: "gateway.openai_scheduler.quota_bypass_soft_concurrency",
+		},
 	}
 
 	for _, tc := range cases {

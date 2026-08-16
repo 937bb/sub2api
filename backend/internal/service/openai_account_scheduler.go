@@ -653,6 +653,7 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 	// account. This is plan-agnostic: Plus, Team and other OAuth plans use the
 	// same account/group eligibility rule.
 	preserveQuotaBypassSession := isOpenAIQuotaBypassConcentratedForScheduleRequest(account, req)
+	accountMaxConcurrency := s.service.openAISelectionMaxConcurrency(account, preserveQuotaBypassSession)
 	// Free-tier soft gate: sticky session must not pin an over-quota free OAuth account.
 	// Admin QueryQuota / import probes do not use this path.
 	if account != nil && len(s.filterGrokFreeQuotaAccounts(ctx, []Account{*account})) == 0 {
@@ -680,7 +681,7 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 		)
 		return nil, true, nil
 	}
-	result, acquireErr := s.service.tryAcquireAccountSlot(ctx, accountID, account.Concurrency)
+	result, acquireErr := s.service.tryAcquireAccountSlot(ctx, accountID, accountMaxConcurrency)
 	if acquireErr == nil && result != nil && result.Acquired {
 		_ = s.service.refreshStickySessionTTL(ctx, req.GroupID, sessionHash, s.service.openAIWSSessionStickyTTL())
 		return attachSelectionProfitGate(ctx, &AccountSelectionResult{
@@ -714,7 +715,7 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 			Account: account,
 			WaitPlan: &AccountWaitPlan{
 				AccountID:      accountID,
-				MaxConcurrency: account.Concurrency,
+				MaxConcurrency: accountMaxConcurrency,
 				Timeout:        cfg.StickySessionWaitTimeout,
 				MaxWaiting:     cfg.StickySessionMaxWaiting,
 			},
@@ -1434,15 +1435,16 @@ func (s *defaultOpenAIAccountScheduler) tryAcquireOpenAISelectionOrderWithBudget
 			continue
 		}
 		quotaBypassCandidate := isOpenAIQuotaBypassConcentratedForScheduleRequest(candidate.account, req)
-		if candidate.loadKnown && candidate.account.Concurrency > 0 &&
-			candidate.loadInfo.CurrentConcurrency >= candidate.account.Concurrency {
+		maxConcurrency := s.service.openAISelectionMaxConcurrency(candidate.account, quotaBypassCandidate)
+		if candidate.loadKnown && maxConcurrency > 0 &&
+			candidate.loadInfo.CurrentConcurrency >= maxConcurrency {
 			if quotaBypassCandidate {
 				s.service.markQuotaBypassAccountFull(req.GroupID, req.Platform, candidate.account)
 			}
 			continue
 		}
 
-		result, attempted, acquireErr := s.tryAcquireOpenAIAccountSlot(ctx, candidate.account.ID, candidate.account.Concurrency, budget, quotaBypassCandidate)
+		result, attempted, acquireErr := s.tryAcquireOpenAIAccountSlot(ctx, candidate.account.ID, maxConcurrency, budget, quotaBypassCandidate)
 		if !attempted {
 			break
 		}
@@ -1476,9 +1478,10 @@ func (s *defaultOpenAIAccountScheduler) tryAcquireOpenAISelectionOrderWithBudget
 			continue
 		}
 
-		if fresh.Concurrency != candidate.account.Concurrency {
+		freshMaxConcurrency := s.service.openAISelectionMaxConcurrency(fresh, quotaBypassCandidate)
+		if freshMaxConcurrency != maxConcurrency {
 			release(result)
-			result, attempted, acquireErr = s.tryAcquireOpenAIAccountSlot(ctx, fresh.ID, fresh.Concurrency, budget, quotaBypassCandidate)
+			result, attempted, acquireErr = s.tryAcquireOpenAIAccountSlot(ctx, fresh.ID, freshMaxConcurrency, budget, quotaBypassCandidate)
 			if !attempted {
 				continue
 			}
@@ -1591,7 +1594,9 @@ func (s *defaultOpenAIAccountScheduler) tryFallbackToWeightedSticky(
 			isGrokModelQuotaBlocked(account.ID, upstreamModel, now) {
 			continue
 		}
-		result, acquireErr := s.service.tryAcquireAccountSlot(ctx, account.ID, account.Concurrency)
+		concentrated := isOpenAIQuotaBypassConcentratedForScheduleRequest(account, req)
+		maxConcurrency := s.service.openAISelectionMaxConcurrency(account, concentrated)
+		result, acquireErr := s.service.tryAcquireAccountSlot(ctx, account.ID, maxConcurrency)
 		if acquireErr != nil {
 			return nil, acquireErr
 		}
@@ -1611,7 +1616,7 @@ func (s *defaultOpenAIAccountScheduler) tryFallbackToWeightedSticky(
 				Account: account,
 				WaitPlan: &AccountWaitPlan{
 					AccountID:      account.ID,
-					MaxConcurrency: account.Concurrency,
+					MaxConcurrency: maxConcurrency,
 					Timeout:        cfg.StickySessionWaitTimeout,
 					MaxWaiting:     cfg.StickySessionMaxWaiting,
 				},
@@ -2069,11 +2074,12 @@ func (s *defaultOpenAIAccountScheduler) finishLoadBalanceSelectionFallback(
 				compactBlocked = true
 				continue
 			}
+			concentrated := isOpenAIQuotaBypassConcentratedForScheduleRequest(fresh, req)
 			return attachSelectionProfitGate(ctx, &AccountSelectionResult{
 				Account: fresh,
 				WaitPlan: &AccountWaitPlan{
 					AccountID:      fresh.ID,
-					MaxConcurrency: fresh.Concurrency,
+					MaxConcurrency: s.service.openAISelectionMaxConcurrency(fresh, concentrated),
 					Timeout:        cfg.FallbackWaitTimeout,
 					MaxWaiting:     cfg.FallbackMaxWaiting,
 				},

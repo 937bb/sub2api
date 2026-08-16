@@ -1300,7 +1300,8 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 				if needsUpstreamCheck && s.isUpstreamModelRestrictedByChannel(ctx, *groupID, fresh, requestedModel, requireCompact) {
 					continue
 				}
-				result, err := s.tryAcquireAccountSlot(ctx, fresh.ID, fresh.Concurrency)
+				maxConcurrency := s.openAISelectionMaxConcurrency(fresh, quotaBypassCandidate)
+				result, err := s.tryAcquireAccountSlot(ctx, fresh.ID, maxConcurrency)
 				if err == nil && result != nil && result.Acquired {
 					releaseFunc := result.ReleaseFunc
 					if isOpenAILegacyQuotaBypassConcentrated(fresh, quotaBypassGroup) {
@@ -1388,7 +1389,9 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			if needsUpstreamCheck && s.isUpstreamModelRestrictedByChannel(ctx, *groupID, fresh, requestedModel, requireCompact) {
 				continue
 			}
-			result, err := s.tryAcquireAccountSlot(ctx, fresh.ID, fresh.Concurrency)
+			quotaBypassCandidate := isOpenAILegacyQuotaBypassConcentrated(fresh, quotaBypassGroup)
+			maxConcurrency := s.openAISelectionMaxConcurrency(fresh, quotaBypassCandidate)
+			result, err := s.tryAcquireAccountSlot(ctx, fresh.ID, maxConcurrency)
 			if err == nil && result != nil && result.Acquired {
 				releaseFunc := result.ReleaseFunc
 				if isOpenAILegacyQuotaBypassConcentrated(fresh, quotaBypassGroup) {
@@ -1403,7 +1406,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 				}
 				return selection, nil
 			}
-			if err == nil && isOpenAILegacyQuotaBypassConcentrated(fresh, quotaBypassGroup) {
+			if err == nil && quotaBypassCandidate {
 				s.markQuotaBypassAccountFull(groupID, platform, fresh)
 			}
 		}
@@ -1463,9 +1466,10 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		if needsUpstreamCheck && s.isUpstreamModelRestrictedByChannel(ctx, *groupID, fresh, requestedModel, requireCompact) {
 			continue
 		}
+		concentrated := isOpenAILegacyQuotaBypassConcentrated(fresh, quotaBypassGroup)
 		return s.newSelectionResult(ctx, fresh, false, nil, &AccountWaitPlan{
 			AccountID:      fresh.ID,
-			MaxConcurrency: fresh.Concurrency,
+			MaxConcurrency: s.openAISelectionMaxConcurrency(fresh, concentrated),
 			Timeout:        cfg.FallbackWaitTimeout,
 			MaxWaiting:     cfg.FallbackMaxWaiting,
 		})

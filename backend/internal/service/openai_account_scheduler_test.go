@@ -123,6 +123,7 @@ type schedulerTestConcurrencyCache struct {
 	waitCounts      map[int64]int
 	skipDefaultLoad bool
 	acquiredIDs     *[]int64
+	acquiredLimits  *[]int
 	releasedIDs     *[]int64
 	loadBatchIDs    *[][]int64
 }
@@ -219,6 +220,9 @@ func (c *schedulerSharedQuotaBypassCache) PromoteQuotaBypassActiveAccount(_ cont
 func (c schedulerTestConcurrencyCache) AcquireAccountSlot(ctx context.Context, accountID int64, maxConcurrency int, requestID string) (bool, error) {
 	if c.acquiredIDs != nil {
 		*c.acquiredIDs = append(*c.acquiredIDs, accountID)
+	}
+	if c.acquiredLimits != nil {
+		*c.acquiredLimits = append(*c.acquiredLimits, maxConcurrency)
 	}
 	if c.acquireResults != nil {
 		if result, ok := c.acquireResults[accountID]; ok {
@@ -4401,6 +4405,77 @@ func TestOpenAIGatewayService_QuotaBypassProductionWindowUsesSingleActiveAccount
 	)
 	require.Equal(t, []int64{1}, window.accountIDs)
 	require.True(t, window.hasMore)
+}
+
+func TestOpenAIGatewayService_QuotaBypassSoftConcurrencyOnlyCapsConcentratedAccounts(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIScheduler.QuotaBypassSoftConcurrency = 12
+	svc := &OpenAIGatewayService{cfg: cfg}
+	account := &Account{Concurrency: 100}
+
+	require.Equal(t, 12, svc.openAISelectionMaxConcurrency(account, true))
+	require.Equal(t, 100, svc.openAISelectionMaxConcurrency(account, false))
+
+	account.Concurrency = 8
+	require.Equal(t, 8, svc.openAISelectionMaxConcurrency(account, true), "soft limit must never raise the account hard limit")
+
+	cfg.Gateway.OpenAIScheduler.QuotaBypassSoftConcurrency = 0
+	account.Concurrency = 100
+	require.Equal(t, 100, svc.openAISelectionMaxConcurrency(account, true), "zero keeps legacy hard-limit behavior")
+}
+
+func TestOpenAIGatewayService_AdvancedQuotaBypassUsesSoftConcurrencyLimit(t *testing.T) {
+	resetOpenAIAdvancedSchedulerSettingCacheForTest()
+	defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
+
+	groupID := int64(4211)
+	accounts := []Account{{
+		ID: 71_000, Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+		Status: StatusActive, Schedulable: true, Concurrency: 100,
+		Priority: 0, GroupIDs: []int64{groupID}, Extra: map[string]any{"quota_bypass_enabled": true},
+	}}
+	limits := make([]int, 0, 1)
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIWS.LBTopK = 1
+	cfg.Gateway.OpenAIScheduler.QuotaBypassSoftConcurrency = 12
+	svc := &OpenAIGatewayService{
+		accountRepo:        schedulerGroupAwareOpenAIAccountRepo{schedulerTestOpenAIAccountRepo{accounts: accounts}},
+		schedulerSnapshot:  newQuotaBypassConcentratedSchedulerTestSnapshot(groupID, accounts),
+		cfg:                cfg,
+		rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("true"),
+		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{acquiredLimits: &limits}),
+	}
+
+	selection, _, err := svc.SelectAccountWithScheduler(
+		context.Background(), &groupID, "", "", "gpt-5.1", nil,
+		OpenAIUpstreamTransportAny, false,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.Equal(t, []int{12}, limits)
+}
+
+func TestOpenAIGatewayService_LegacyQuotaBypassUsesSoftConcurrencyLimit(t *testing.T) {
+	groupID := int64(4212)
+	accounts := []Account{{
+		ID: 81_000, Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+		Status: StatusActive, Schedulable: true, Concurrency: 100,
+		Priority: 0, GroupIDs: []int64{groupID}, Extra: map[string]any{"quota_bypass_enabled": true},
+	}}
+	limits := make([]int, 0, 1)
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIScheduler.QuotaBypassSoftConcurrency = 12
+	svc := &OpenAIGatewayService{
+		accountRepo:        schedulerGroupAwareOpenAIAccountRepo{schedulerTestOpenAIAccountRepo{accounts: accounts}},
+		schedulerSnapshot:  newQuotaBypassConcentratedSchedulerTestSnapshot(groupID, accounts),
+		cfg:                cfg,
+		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{acquiredLimits: &limits}),
+	}
+
+	selection, err := svc.SelectAccountWithLoadAwareness(context.Background(), &groupID, "", "gpt-5.1", nil)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.Equal(t, []int{12}, limits)
 }
 
 func TestOpenAIGatewayService_AdvancedQuotaBypassLargePoolSkipsFullRedisLoadRead(t *testing.T) {

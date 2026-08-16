@@ -1288,6 +1288,8 @@ type GatewayOpenAISchedulerConfig struct {
 	StickyEscapeTTFTMs int `mapstructure:"sticky_escape_ttft_ms"`
 	// StickyEscapeErrorRate: 错误率 EWMA 超过该阈值时跳过 sticky
 	StickyEscapeErrorRate float64 `mapstructure:"sticky_escape_error_rate"`
+	// QuotaBypassSoftConcurrency: 集中超额账号的延迟保护软上限；0 表示使用账号硬并发。
+	QuotaBypassSoftConcurrency int `mapstructure:"quota_bypass_soft_concurrency"`
 }
 
 // GatewayUsageRecordConfig 使用量记录异步队列配置
@@ -2496,6 +2498,7 @@ func setEnvReachableDefaults() {
 	viper.SetDefault("gateway.openai_scheduler.sticky_escape_enabled", true)
 	viper.SetDefault("gateway.openai_scheduler.sticky_escape_error_rate", 0.0)
 	viper.SetDefault("gateway.openai_scheduler.sticky_escape_ttft_ms", 0)
+	viper.SetDefault("gateway.openai_scheduler.quota_bypass_soft_concurrency", 0)
 
 	// server.trusted_proxies and security.forwarded_client_ip_headers are the
 	// other exception: load() distinguishes explicit configuration from absence
@@ -3426,6 +3429,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Gateway.OpenAIScheduler.StickyEscapeErrorRate < 0 || c.Gateway.OpenAIScheduler.StickyEscapeErrorRate > 1 {
 		return fmt.Errorf("gateway.openai_scheduler.sticky_escape_error_rate must be between 0 and 1")
+	}
+	if c.Gateway.OpenAIScheduler.QuotaBypassSoftConcurrency < 0 {
+		return fmt.Errorf("gateway.openai_scheduler.quota_bypass_soft_concurrency must be non-negative")
 	}
 	if c.Gateway.MaxLineSize < 0 {
 		return fmt.Errorf("gateway.max_line_size must be non-negative")

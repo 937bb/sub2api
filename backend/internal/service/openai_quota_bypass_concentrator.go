@@ -345,6 +345,40 @@ func (s *OpenAIGatewayService) markQuotaBypassAccountFull(groupID *int64, platfo
 	s.quotaBypassConcentrator().markFull(key, account.ID)
 }
 
+// quotaBypassConcentratedMaxConcurrency protects first-token latency without
+// changing the account's hard concurrency setting. It is only used after the
+// request has resolved this account as a concentrated quota-bypass candidate.
+func (s *OpenAIGatewayService) quotaBypassConcentratedMaxConcurrency(account *Account) int {
+	if account == nil {
+		return 0
+	}
+	maxConcurrency := account.Concurrency
+	if s == nil || s.cfg == nil {
+		return maxConcurrency
+	}
+	softLimit := s.cfg.Gateway.OpenAIScheduler.QuotaBypassSoftConcurrency
+	if softLimit > 0 && (maxConcurrency <= 0 || softLimit < maxConcurrency) {
+		return softLimit
+	}
+	return maxConcurrency
+}
+
+func (s *OpenAIGatewayService) openAISelectionMaxConcurrency(account *Account, concentrated bool) int {
+	if concentrated {
+		return s.quotaBypassConcentratedMaxConcurrency(account)
+	}
+	if account == nil {
+		return 0
+	}
+	return account.Concurrency
+}
+
+// OpenAISelectionMaxConcurrency exposes the resolved slot limit to handlers
+// that reacquire later turns on an already selected WebSocket account.
+func (s *OpenAIGatewayService) OpenAISelectionMaxConcurrency(account *Account, concentrated bool) int {
+	return s.openAISelectionMaxConcurrency(account, concentrated)
+}
+
 func (s *OpenAIGatewayService) wrapQuotaBypassAccountRelease(
 	groupID *int64,
 	platform string,

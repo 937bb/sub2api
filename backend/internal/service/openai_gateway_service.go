@@ -763,6 +763,28 @@ func classifyOpenAIWSReconnectReason(err error) (string, bool) {
 	}
 }
 
+func shouldFallbackOpenAIWSToHTTP(reason string) bool {
+	baseReason := strings.TrimPrefix(strings.TrimSpace(reason), "prewarm_")
+	switch baseReason {
+	case "dial_failed",
+		"acquire_timeout",
+		"acquire_conn",
+		"conn_queue_full",
+		"write_request",
+		"write",
+		"read_event",
+		"upstream_5xx",
+		"missing_final_response",
+		"ws_connection_limit_reached",
+		"upgrade_required",
+		"ws_unsupported",
+		"message_too_big":
+		return true
+	default:
+		return false
+	}
+}
+
 func resolveOpenAIWSFallbackErrorResponse(err error) (statusCode int, errType string, clientMessage string, upstreamMessage string, ok bool) {
 	if err == nil {
 		return 0, "", "", "", false

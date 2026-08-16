@@ -1988,7 +1988,11 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		}
 
 		account := selection.Account
-		accountMaxConcurrency := account.Concurrency
+		quotaBypassConcentrated := service.IsAccountQuotaBypassConcentrated(account) ||
+			(apiKey.Group != nil && apiKey.Group.QuotaBypassEnabled &&
+				apiKey.Group.QuotaBypassConcentratedSchedulingEnabled &&
+				service.IsQuotaBypassEligible(account, apiKey.Group))
+		accountMaxConcurrency := h.gatewayService.OpenAISelectionMaxConcurrency(account, quotaBypassConcentrated)
 		if selection.WaitPlan != nil && selection.WaitPlan.MaxConcurrency > 0 {
 			accountMaxConcurrency = selection.WaitPlan.MaxConcurrency
 		}

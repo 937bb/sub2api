@@ -262,10 +262,15 @@ func TestOpenAIGatewayService_Forward_WSv2Handshake502RecordsModelTransient(t *t
 		Credentials: map[string]any{"api_key": "sk-test", "base_url": server.URL},
 		Extra:       map[string]any{"responses_websockets_v2_enabled": true},
 	}
+	httpFallback := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusBadGateway,
+		Header:     http.Header{},
+		Body:       io.NopCloser(strings.NewReader(`{"error":{"type":"server_error","message":"bad gateway"}}`)),
+	}}
 	svc := &OpenAIGatewayService{
 		cfg:              cfg,
 		rateLimitService: NewRateLimitService(transientCooldownAccountRepo{}, nil, cfg, nil, nil),
-		httpUpstream:     &httpUpstreamRecorder{},
+		httpUpstream:     httpFallback,
 		cache:            &stubGatewayCache{},
 		openaiWSResolver: NewOpenAIWSProtocolResolver(cfg),
 		toolCorrector:    NewCodexToolCorrector(),
@@ -273,6 +278,11 @@ func TestOpenAIGatewayService_Forward_WSv2Handshake502RecordsModelTransient(t *t
 	body := []byte(`{"model":"gpt-5.5","stream":false,"input":"hello"}`)
 
 	for range 2 {
+		httpFallback.resp = &http.Response{
+			StatusCode: http.StatusBadGateway,
+			Header:     http.Header{},
+			Body:       io.NopCloser(strings.NewReader(`{"error":{"type":"server_error","message":"bad gateway"}}`)),
+		}
 		rec := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(rec)
 		c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", nil)
@@ -282,6 +292,7 @@ func TestOpenAIGatewayService_Forward_WSv2Handshake502RecordsModelTransient(t *t
 		require.Nil(t, result)
 	}
 
+	require.Len(t, httpFallback.requests, 2)
 	require.True(t, svc.isOpenAIAccountModelRuntimeBlocked(&account, "gpt-5.5"))
 }
 

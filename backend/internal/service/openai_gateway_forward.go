@@ -81,6 +81,13 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		GetOpenAIClientTransport(c),
 		httpIngressUpstreamWSEnabled,
 	)
+	if wsDecision.Transport == OpenAIUpstreamTransportResponsesWebsocketV2 && s.isOpenAIWSFallbackCooling(account.ID) {
+		wsDecision.Transport = OpenAIUpstreamTransportHTTPSSE
+		wsDecision.Reason = "fallback_cooling"
+		if c != nil {
+			c.Set("openai_ws_fallback_cooling", true)
+		}
+	}
 	passthroughEnabled := account.IsOpenAIPassthroughEnabled()
 	compactPath := isOpenAIResponsesCompactPath(c)
 	if shouldFlattenOpenAIResponsesNamespaces(account, wsDecision.Transport, passthroughEnabled, compactPath) {
@@ -597,7 +604,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		return nil, err
 	}
 
-	// 命中 WS 时仅走 WebSocket Mode；不再自动回退 HTTP。
+	// WS is preferred, but transport failures before any downstream output may
+	// safely fall back to HTTP. Once the client has observed a WS event, replay
+	// is forbidden because it could duplicate a partially delivered response.
 	if wsDecision.Transport == OpenAIUpstreamTransportResponsesWebsocketV2 {
 		// WS 分支需要结构化 payload 与重连恢复，命中后再触发 full-map decode。
 		wsReqBody, err := ensureReqBody()
@@ -613,7 +622,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			reqStream,
 			hasPreviousResponseID,
 		)
-		maxAttempts := openAIWSReconnectRetryLimit + 1
+		maxAttempts := 2
 		wsAttempts := 0
 		var wsResult *OpenAIForwardResult
 		var wsErr error
@@ -729,14 +738,14 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 				continue
 			}
 			if retryable && attempt < maxAttempts {
-				backoff := s.openAIWSRetryBackoff(attempt)
+				backoff := time.Duration(0)
 				if retryBudget > 0 && time.Since(retryStartedAt)+backoff > retryBudget {
 					s.recordOpenAIWSRetryExhausted()
 					logOpenAIWSModeInfo(
 						"reconnect_budget_exhausted account_id=%d attempts=%d max_retries=%d reason=%s elapsed_ms=%d budget_ms=%d",
 						account.ID,
 						attempt,
-						openAIWSReconnectRetryLimit,
+						maxAttempts-1,
 						normalizeOpenAIWSLogValue(reason),
 						time.Since(retryStartedAt).Milliseconds(),
 						retryBudget.Milliseconds(),
@@ -748,7 +757,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 					"reconnect_retry account_id=%d retry=%d max_retries=%d reason=%s backoff_ms=%d",
 					account.ID,
 					attempt,
-					openAIWSReconnectRetryLimit,
+					maxAttempts-1,
 					normalizeOpenAIWSLogValue(reason),
 					backoff.Milliseconds(),
 				)
@@ -772,7 +781,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 					"reconnect_exhausted account_id=%d attempts=%d max_retries=%d reason=%s",
 					account.ID,
 					attempt,
-					openAIWSReconnectRetryLimit,
+					maxAttempts-1,
 					normalizeOpenAIWSLogValue(reason),
 				)
 			} else if reason != "" {
@@ -816,8 +825,26 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			}
 			return wsResult, nil
 		}
-		s.writeOpenAIWSFallbackErrorResponse(c, account, wsErr)
-		return nil, wsErr
+		reason, _ := classifyOpenAIWSReconnectReason(wsErr)
+		if shouldFallbackOpenAIWSToHTTP(reason) && (c == nil || c.Writer == nil || !c.Writer.Written()) {
+			s.markOpenAIWSFallbackCooling(account.ID, reason)
+			if c != nil {
+				c.Set("openai_ws_fallback_to_http", true)
+				c.Set("openai_ws_fallback_reason", reason)
+				c.Set("openai_ws_transport_decision", string(OpenAIUpstreamTransportHTTPSSE))
+				c.Set("openai_ws_transport_reason", "ws_fast_fallback:"+reason)
+			}
+			logOpenAIWSModeInfo(
+				"fast_http_fallback account_id=%d attempts=%d reason=%s elapsed_ms=%d",
+				account.ID,
+				wsAttempts,
+				normalizeOpenAIWSLogValue(reason),
+				time.Since(retryStartedAt).Milliseconds(),
+			)
+		} else {
+			s.writeOpenAIWSFallbackErrorResponse(c, account, wsErr)
+			return nil, wsErr
+		}
 	}
 
 	reasoningEffort := extractOpenAIReasoningEffortFromBody(body, upstreamModel, billingModel, originalModel)
@@ -886,6 +913,18 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			// a failover so the handler switches to a healthy account, and temporarily
 			// unschedule the account on durable faults (e.g. rejected proxy credentials).
 			return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
+		}
+		if resp == nil {
+			if headerGuard != nil {
+				headerGuard.close()
+			}
+			return nil, s.handleOpenAIUpstreamTransportError(
+				ctx,
+				c,
+				account,
+				errors.New("OpenAI HTTP upstream returned an empty response"),
+				false,
+			)
 		}
 		if headerGuard != nil {
 			resp.Body = &openAIRequestContextReadCloser{ReadCloser: resp.Body, cleanup: headerGuard.close}
