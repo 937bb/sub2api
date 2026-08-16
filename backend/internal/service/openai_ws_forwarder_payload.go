@@ -167,6 +167,10 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 			headers.Set("x-codex-installation-id", installationID)
 		}
 	}
+	// The response.create payload and the WebSocket upgrade must present the
+	// same Codex identity. Forward stages one set of converged IDs per attempt;
+	// reuse it here just as the HTTP request builder does.
+	applyStagedCodexFingerprintHeaders(c, account, headers)
 
 	// 账号级请求头覆写（仅 openai api_key 账号启用时生效；OAuth 路径 no-op）。
 	// 覆盖所有 WS 模式（ctx_pool/dedicated/passthrough）的握手头。

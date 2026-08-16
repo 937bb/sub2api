@@ -751,9 +751,17 @@ func TestOpenAIGatewayService_Forward_WSv2_OAuthStoreFalseByDefault(t *testing.T
 	require.Equal(t, "native-wsv2", gjson.Get(requestJSON, "input.0.namespace").String(), "OAuth WSv2 应保留原生 namespace")
 	require.Equal(t, openAIWSBetaV2Value, captureDialer.lastHeaders.Get("OpenAI-Beta"))
 	require.Equal(t, "remote_compaction_v2", captureDialer.lastHeaders.Get("x-codex-beta-features"))
-	// OAuth 账号的 session_id/conversation_id 应被 isolateOpenAISessionID 隔离，
-	// 测试中未设置 api_key 到 context，apiKeyID=0。
-	require.Equal(t, isolateOpenAISessionID(0, "sess-oauth-1"), captureDialer.lastHeaders.Get("session_id"))
+	// 默认 full 模式必须让 WS 握手与 response.create 使用同一组收敛 ID。
+	require.NotEmpty(t, captureDialer.lastHeaders.Get("x-codex-installation-id"))
+	require.NotEmpty(t, captureDialer.lastHeaders.Get("x-codex-window-id"))
+	require.NotEmpty(t, captureDialer.lastHeaders.Get("x-client-request-id"))
+	require.NotEmpty(t, captureDialer.lastHeaders.Get("session-id"))
+	require.Equal(t, captureDialer.lastHeaders.Get("session-id"), captureDialer.lastHeaders.Get("session_id"))
+	require.Equal(t, captureDialer.lastHeaders.Get("x-client-request-id"), captureDialer.lastHeaders.Get("thread-id"))
+	require.Equal(t, gjson.Get(requestJSON, "client_metadata.x-codex-installation-id").String(), captureDialer.lastHeaders.Get("x-codex-installation-id"))
+	require.Equal(t, gjson.Get(requestJSON, "client_metadata.x-codex-window-id").String(), captureDialer.lastHeaders.Get("x-codex-window-id"))
+	require.Equal(t, gjson.Get(requestJSON, "client_metadata.session_id").String(), captureDialer.lastHeaders.Get("session-id"))
+	require.Equal(t, gjson.Get(requestJSON, "client_metadata.thread_id").String(), captureDialer.lastHeaders.Get("thread-id"))
 	require.Equal(t, isolateOpenAISessionID(0, "conv-oauth-1"), captureDialer.lastHeaders.Get("conversation_id"))
 }
 
@@ -967,6 +975,7 @@ func TestOpenAIGatewayService_Forward_WSv2_HeaderSessionFallbackFromPromptCacheK
 		},
 		Extra: map[string]any{
 			"responses_websockets_v2_enabled": true,
+			"codex_fingerprint_mode":          "off",
 		},
 	}
 

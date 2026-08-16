@@ -35,6 +35,11 @@ func TestClassifyOpenAIWSAcquireError(t *testing.T) {
 		require.Equal(t, "auth_failed", classifyOpenAIWSAcquireError(err))
 	})
 
+	t.Run("handshake_forbidden_403", func(t *testing.T) {
+		err := &openAIWSDialError{StatusCode: 403, Err: errors.New("forbidden")}
+		require.Equal(t, "handshake_forbidden", classifyOpenAIWSAcquireError(err))
+	})
+
 	t.Run("upstream_rate_limited", func(t *testing.T) {
 		err := &openAIWSDialError{StatusCode: 429, Err: errors.New("rate limited")}
 		require.Equal(t, "upstream_rate_limited", classifyOpenAIWSAcquireError(err))
@@ -118,13 +123,17 @@ func TestClassifyOpenAIWSReconnectReason(t *testing.T) {
 	reason, retryable = classifyOpenAIWSReconnectReason(wrapOpenAIWSFallback("read_event", errors.New("io")))
 	require.Equal(t, "read_event", reason)
 	require.True(t, retryable)
+
+	reason, retryable = classifyOpenAIWSReconnectReason(wrapOpenAIWSFallback("handshake_forbidden", errors.New("forbidden")))
+	require.Equal(t, "handshake_forbidden", reason)
+	require.False(t, retryable)
 }
 
 func TestShouldFallbackOpenAIWSToHTTP(t *testing.T) {
 	for _, reason := range []string{
 		"dial_failed", "acquire_timeout", "write_request", "read_event",
 		"upstream_5xx", "missing_final_response", "ws_connection_limit_reached",
-		"upgrade_required", "ws_unsupported", "prewarm_write_request",
+		"upgrade_required", "ws_unsupported", "handshake_forbidden", "prewarm_write_request",
 	} {
 		require.True(t, shouldFallbackOpenAIWSToHTTP(reason), reason)
 	}

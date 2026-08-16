@@ -738,6 +738,7 @@ func classifyOpenAIWSReconnectReason(err error) (string, bool) {
 		"upgrade_required",
 		"ws_unsupported",
 		"auth_failed",
+		"handshake_forbidden",
 		"invalid_encrypted_content",
 		"previous_response_not_found":
 		return reason, false
@@ -778,6 +779,7 @@ func shouldFallbackOpenAIWSToHTTP(reason string) bool {
 		"ws_connection_limit_reached",
 		"upgrade_required",
 		"ws_unsupported",
+		"handshake_forbidden",
 		"message_too_big":
 		return true
 	default:
