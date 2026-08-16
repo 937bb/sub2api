@@ -678,6 +678,14 @@ func classifyOpenAIWSReadFallbackReason(err error) string {
 	}
 }
 
+func isOpenAIWSRemoteMessageTooBig(err error) bool {
+	if err == nil || errors.Is(err, coderws.ErrMessageTooBig) {
+		return false
+	}
+	var closeErr coderws.CloseError
+	return errors.As(err, &closeErr) && closeErr.Code == coderws.StatusMessageTooBig
+}
+
 func sortedKeys(m map[string]any) []string {
 	if len(m) == 0 {
 		return nil

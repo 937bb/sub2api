@@ -127,13 +127,18 @@ func TestClassifyOpenAIWSReconnectReason(t *testing.T) {
 	reason, retryable = classifyOpenAIWSReconnectReason(wrapOpenAIWSFallback("handshake_forbidden", errors.New("forbidden")))
 	require.Equal(t, "handshake_forbidden", reason)
 	require.False(t, retryable)
+
+	reason, retryable = classifyOpenAIWSReconnectReason(wrapOpenAIWSFallback("payload_too_large_preflight", errors.New("large")))
+	require.Equal(t, "payload_too_large_preflight", reason)
+	require.False(t, retryable)
 }
 
 func TestShouldFallbackOpenAIWSToHTTP(t *testing.T) {
 	for _, reason := range []string{
 		"dial_failed", "acquire_timeout", "write_request", "read_event",
 		"upstream_5xx", "missing_final_response", "ws_connection_limit_reached",
-		"upgrade_required", "ws_unsupported", "handshake_forbidden", "prewarm_write_request",
+		"upgrade_required", "ws_unsupported", "handshake_forbidden", "message_too_big",
+		"payload_too_large_preflight", "prewarm_write_request",
 	} {
 		require.True(t, shouldFallbackOpenAIWSToHTTP(reason), reason)
 	}
@@ -196,6 +201,11 @@ func TestOpenAIWSFallbackCooling(t *testing.T) {
 	svc.clearOpenAIWSFallbackCooling(1)
 	require.False(t, svc.isOpenAIWSFallbackCooling(1))
 
+	svc.markOpenAIWSFallbackCooling(1, "message_too_big")
+	require.False(t, svc.isOpenAIWSFallbackCooling(1))
+	svc.markOpenAIWSFallbackCooling(1, "payload_too_large_preflight")
+	require.False(t, svc.isOpenAIWSFallbackCooling(1))
+
 	svc.markOpenAIWSFallbackCooling(2, "x")
 	time.Sleep(1200 * time.Millisecond)
 	require.False(t, svc.isOpenAIWSFallbackCooling(2))
@@ -226,6 +236,12 @@ func TestClassifyOpenAIWSReadFallbackReason(t *testing.T) {
 	require.Equal(t, "policy_violation", classifyOpenAIWSReadFallbackReason(coderws.CloseError{Code: coderws.StatusPolicyViolation}))
 	require.Equal(t, "message_too_big", classifyOpenAIWSReadFallbackReason(coderws.CloseError{Code: coderws.StatusMessageTooBig}))
 	require.Equal(t, "read_event", classifyOpenAIWSReadFallbackReason(errors.New("io")))
+}
+
+func TestIsOpenAIWSRemoteMessageTooBig(t *testing.T) {
+	require.True(t, isOpenAIWSRemoteMessageTooBig(coderws.CloseError{Code: coderws.StatusMessageTooBig}))
+	require.False(t, isOpenAIWSRemoteMessageTooBig(coderws.ErrMessageTooBig))
+	require.False(t, isOpenAIWSRemoteMessageTooBig(errors.New("io")))
 }
 
 func TestOpenAIWSStoreDisabledConnMode(t *testing.T) {

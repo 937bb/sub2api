@@ -741,8 +741,12 @@ func (s *OpenAIGatewayService) isOpenAIWSFallbackCooling(accountID int64) bool {
 	return false
 }
 
-func (s *OpenAIGatewayService) markOpenAIWSFallbackCooling(accountID int64, _ string) {
+func (s *OpenAIGatewayService) markOpenAIWSFallbackCooling(accountID int64, reason string) {
 	if s == nil || accountID <= 0 {
+		return
+	}
+	baseReason := strings.TrimPrefix(strings.TrimSpace(reason), "prewarm_")
+	if baseReason == "message_too_big" || baseReason == "payload_too_large_preflight" {
 		return
 	}
 	cooldown := s.openAIWSFallbackCooldown()

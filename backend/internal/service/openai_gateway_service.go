@@ -459,6 +459,7 @@ type OpenAIGatewayService struct {
 	openaiOAuth429WindowStartUnixNano   atomic.Int64
 	openaiOAuth429WindowCount           atomic.Int64
 	openaiCodexInstallationIDs          sync.Map // key: int64(accountID), value: canonical UUID
+	openaiWSPayloadSizeRouter           openAIWSPayloadSizeRouter
 	openaiWSRetryMetrics                openAIWSRetryMetrics
 	responseHeaderFilter                *responseheaders.CompiledHeaderFilter
 	codexSnapshotThrottle               *accountWriteThrottle
@@ -736,6 +737,7 @@ func classifyOpenAIWSReconnectReason(err error) (string, bool) {
 	switch baseReason {
 	case "policy_violation",
 		"message_too_big",
+		"payload_too_large_preflight",
 		"upgrade_required",
 		"ws_unsupported",
 		"auth_failed",
@@ -781,7 +783,8 @@ func shouldFallbackOpenAIWSToHTTP(reason string) bool {
 		"upgrade_required",
 		"ws_unsupported",
 		"handshake_forbidden",
-		"message_too_big":
+		"message_too_big",
+		"payload_too_large_preflight":
 		return true
 	default:
 		return false

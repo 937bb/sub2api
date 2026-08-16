@@ -87,6 +87,18 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		turnMetadata = strings.TrimSpace(c.GetHeader(openAIWSTurnMetadataHeader))
 	}
 	setOpenAIWSTurnMetadata(payload, turnMetadata)
+	payloadBytes = -1
+	if thresholdBytes, bypass := s.openaiWSPayloadSizeRouter.shouldBypass(wsURL, resolvePayloadBytes()); bypass {
+		logOpenAIWSModeInfo(
+			"payload_size_preflight_fallback account_id=%d payload_bytes=%d threshold_bytes=%d ws_host=%s ws_path=%s",
+			account.ID,
+			resolvePayloadBytes(),
+			thresholdBytes,
+			wsHost,
+			wsPath,
+		)
+		return nil, wrapOpenAIWSFallback("payload_too_large_preflight", errors.New("websocket request exceeds learned upstream payload limit"))
+	}
 	payloadEventType := openAIWSPayloadString(payload, "type")
 	if payloadEventType == "" {
 		payloadEventType = "response.create"
@@ -493,14 +505,23 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		if readErr != nil {
 			lease.MarkBroken()
 			closeStatus, closeReason := summarizeOpenAIWSReadCloseError(readErr)
+			fallbackReason := classifyOpenAIWSReadFallbackReason(readErr)
+			learnedThresholdBytes := 0
+			learnedThresholdUpdated := false
+			if isOpenAIWSRemoteMessageTooBig(readErr) {
+				learnedThresholdBytes, learnedThresholdUpdated = s.openaiWSPayloadSizeRouter.observeRemoteMessageTooBig(wsURL, resolvePayloadBytes())
+			}
 			logOpenAIWSModeInfo(
-				"read_fail account_id=%d conn_id=%s wrote_downstream=%v close_status=%s close_reason=%s cause=%s events=%d token_events=%d terminal_events=%d buffered_pending=%d buffered_flushed=%d first_event=%s last_event=%s",
+				"read_fail account_id=%d conn_id=%s wrote_downstream=%v close_status=%s close_reason=%s cause=%s payload_bytes=%d learned_threshold_bytes=%d learned_threshold_updated=%v events=%d token_events=%d terminal_events=%d buffered_pending=%d buffered_flushed=%d first_event=%s last_event=%s",
 				account.ID,
 				connID,
 				wroteDownstream,
 				closeStatus,
 				closeReason,
 				truncateOpenAIWSLogValue(readErr.Error(), openAIWSLogValueMaxLen),
+				resolvePayloadBytes(),
+				learnedThresholdBytes,
+				learnedThresholdUpdated,
 				eventCount,
 				tokenEventCount,
 				terminalEventCount,
@@ -510,7 +531,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 				truncateOpenAIWSLogValue(lastEventType, openAIWSLogValueMaxLen),
 			)
 			if !wroteDownstream {
-				return nil, wrapOpenAIWSFallback(classifyOpenAIWSReadFallbackReason(readErr), readErr)
+				return nil, wrapOpenAIWSFallback(fallbackReason, readErr)
 			}
 			if clientDisconnected {
 				break

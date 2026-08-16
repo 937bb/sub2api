@@ -20,6 +20,7 @@ English | [中文](README_CN.md) | [日本語](README_JA.md)
 
 ## 937sub2b Update Log
 
+- `0.1.193`: Learn remote WS close-1009 request boundaries and send similarly oversized turns directly over HTTP, avoiding repeated 1-2 second WS failures while small turns continue to use WS.
 - `0.1.192`: Raise the configurable upstream WS response-message read limit to 64 MiB while keeping downstream ingress bounded separately, preventing local close-1009 failures on large Codex events.
 - `0.1.191`: Keep default-full Codex identity consistent between WS upgrade headers and `response.create`, and make handshake-only 403 failures cool down and fall back to HTTP before downstream output instead of returning a gateway 403.
 - `0.1.190`: Default OpenAI OAuth Codex fingerprint convergence to `full` for existing and newly created accounts without an explicit mode, while preserving explicit `off`, `device`, and `session` overrides across Web and AdminKey account creation.
