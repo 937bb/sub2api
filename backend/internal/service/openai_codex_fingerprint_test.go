@@ -54,11 +54,10 @@ func TestGetCodexFingerprintMode(t *testing.T) {
 	}{
 		{"nil 账号", nil, codexFingerprintOff},
 		{"非 OAuth 账号", &Account{Platform: PlatformOpenAI, Type: "api_key"}, codexFingerprintOff},
-		// 收敛是显式 opt-in：缺省/空/非法一律 off（#5610）。存量账号普遍没有这个
-		// extra 键，升级不得把它们静默切进收敛。
-		{"无 extra 默认 off", newTestOAuthAccount(1, nil), codexFingerprintOff},
-		{"空值默认 off", newTestOAuthAccount(1, map[string]any{codexFingerprintModeExtraKey: ""}), codexFingerprintOff},
-		{"非法值默认 off", newTestOAuthAccount(1, map[string]any{codexFingerprintModeExtraKey: "invalid"}), codexFingerprintOff},
+		// OpenAI OAuth 缺省、空值或非法值统一回落到完全收敛；显式 off 仍可关闭。
+		{"无 extra 默认 full", newTestOAuthAccount(1, nil), codexFingerprintFull},
+		{"空值默认 full", newTestOAuthAccount(1, map[string]any{codexFingerprintModeExtraKey: ""}), codexFingerprintFull},
+		{"非法值默认 full", newTestOAuthAccount(1, map[string]any{codexFingerprintModeExtraKey: "invalid"}), codexFingerprintFull},
 		{"显式 off", newTestOAuthAccount(1, map[string]any{codexFingerprintModeExtraKey: "off"}), codexFingerprintOff},
 		{"device", newTestOAuthAccount(1, map[string]any{codexFingerprintModeExtraKey: "device"}), codexFingerprintDevice},
 		{"session", newTestOAuthAccount(1, map[string]any{codexFingerprintModeExtraKey: "session"}), codexFingerprintSession},
@@ -121,14 +120,18 @@ func TestResolveCodexFingerprintIDsFromRequest_ExplicitOff(t *testing.T) {
 	assert.Nil(t, ids, "显式 off 模式应返回 nil")
 }
 
-// 未显式配置的存量账号不得被收敛（#5610）：默认返回 nil，出站身份保持
-// v0.1.175 之前的客户端原值。
-func TestResolveCodexFingerprintIDsFromRequest_DefaultIsOff(t *testing.T) {
+// 未显式配置的 OpenAI OAuth 账号默认完全收敛。
+func TestResolveCodexFingerprintIDsFromRequest_DefaultIsFull(t *testing.T) {
 	account := newTestOAuthAccount(1, nil)
-	assert.Nil(t, resolveCodexFingerprintIDsFromRequest(account, nil), "无 extra 应视为 off")
+	ids := resolveCodexFingerprintIDsFromRequest(account, http.Header{"session-id": []string{"client-session"}})
+	require.NotNil(t, ids)
+	assert.Equal(t, codexFingerprintFull, ids.mode)
+	assert.NotEmpty(t, ids.installationID)
+	assert.NotEmpty(t, ids.sessionID)
+	assert.NotEmpty(t, ids.threadID)
 }
 
-// 管理员显式 opt-in 的账号行为不变。
+// 管理员显式选择较窄的收敛模式时仍按配置生效。
 func TestResolveCodexFingerprintIDsFromRequest_ExplicitOptInHonored(t *testing.T) {
 	for _, mode := range []string{"device", "session", "full"} {
 		t.Run(mode, func(t *testing.T) {
@@ -592,7 +595,7 @@ func TestApplyStagedCodexFingerprintHeaders_SkipsNonOAuthAccount(t *testing.T) {
 
 func TestBuildUpstreamRequestOpenAIPassthrough_AppliesStagedFingerprint(t *testing.T) {
 	svc := &OpenAIGatewayService{}
-	// 收敛是显式 opt-in（#5610）：显式开启后验证透传路径的出站头收敛。
+	// 显式 session 模式：验证透传路径的出站头按所选范围收敛。
 	account := newTestOAuthAccount(2001, map[string]any{
 		"openai_oauth_passthrough": true,
 		"codex_fingerprint_mode":   "session",

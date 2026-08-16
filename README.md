@@ -20,6 +20,7 @@ English | [中文](README_CN.md) | [日本語](README_JA.md)
 
 ## 937sub2b Update Log
 
+- `0.1.190`: Default OpenAI OAuth Codex fingerprint convergence to `full` for existing and newly created accounts without an explicit mode, while preserving explicit `off`, `device`, and `session` overrides across Web and AdminKey account creation.
 - `0.1.189`: Add an optional soft concurrency ceiling for concentrated quota-bypass accounts to limit queue-driven first-token latency, make WSv2 fall back to HTTP after one immediate retry for replay-safe transport failures, and repair the Go 1.26.6 and frozen-pnpm Docker build inputs while preserving 429, authentication, policy, and tool-continuation semantics.
 - `0.1.188`: Make the quota-bypass concentration switch authoritative for both request groups and account-attached marker groups: disabled keeps funcall bypass but uses ordinary load balancing; enabled adds fill-first scheduling.
 - `0.1.187`: Preserve legacy concentrated scheduling for quota-bypass marker groups attached to an account, while allowing the current request group to explicitly disable concentration; keep candidate accounts scoped to the current request group.
