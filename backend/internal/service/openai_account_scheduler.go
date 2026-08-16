@@ -2126,7 +2126,7 @@ func isOpenAIQuotaBypassEligibleForScheduleRequest(account *Account, req OpenAIA
 }
 
 func isOpenAIQuotaBypassConcentratedForScheduleRequest(account *Account, req OpenAIAccountScheduleRequest) bool {
-	if IsAccountQuotaBypassConcentrated(account) {
+	if IsAccountQuotaBypassConcentratedForRequestGroup(account, req.GroupID) {
 		return true
 	}
 	if !req.GroupQuotaBypassEnabled || !req.GroupQuotaBypassConcentratedSchedulingEnabled {
