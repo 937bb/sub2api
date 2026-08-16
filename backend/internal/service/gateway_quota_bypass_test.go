@@ -569,3 +569,22 @@ func TestIsAccountQuotaBypassEligible(t *testing.T) {
 		})
 	}
 }
+
+func TestAttachedQuotaBypassGroupSeparatesInjectionAndConcentration(t *testing.T) {
+	markerGroup := &Group{ID: 77, QuotaBypassEnabled: true}
+	account := &Account{
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		AccountGroups: []AccountGroup{{
+			GroupID: markerGroup.ID,
+			Group:   markerGroup,
+		}},
+	}
+
+	require.True(t, IsAccountQuotaBypassEligible(account), "quota bypass remains active while concentration is disabled")
+	require.False(t, IsAccountQuotaBypassConcentrated(account), "disabled concentration must use ordinary load balancing")
+
+	markerGroup.QuotaBypassConcentratedSchedulingEnabled = true
+	require.True(t, IsAccountQuotaBypassEligible(account))
+	require.True(t, IsAccountQuotaBypassConcentrated(account), "enabled concentration must use fill-first scheduling")
+}

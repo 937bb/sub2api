@@ -88,49 +88,6 @@ func IsAccountQuotaBypassConcentrated(account *Account) bool {
 	return false
 }
 
-// IsAccountQuotaBypassConcentratedForRequestGroup preserves the legacy marker
-// semantics while allowing the current request group to opt out explicitly.
-// An attached quota-bypass group other than the request group is an account
-// marker, so it remains concentrated even when that dedicated group's new
-// concentration toggle was never backfilled. The request group itself still
-// needs both switches and is handled by the scheduler request flags.
-func IsAccountQuotaBypassConcentratedForRequestGroup(account *Account, requestGroupID *int64) bool {
-	if account == nil || account.Platform != PlatformOpenAI || !account.IsOAuth() {
-		return false
-	}
-	if IsAccountQuotaBypassConcentrated(account) {
-		return true
-	}
-	for _, group := range account.Groups {
-		if isAttachedQuotaBypassMarkerForRequestGroup(group, groupIDForQuotaBypassMarker(group), requestGroupID) {
-			return true
-		}
-	}
-	for _, accountGroup := range account.AccountGroups {
-		if isAttachedQuotaBypassMarkerForRequestGroup(accountGroup.Group, accountGroup.GroupID, requestGroupID) {
-			return true
-		}
-	}
-	return false
-}
-
-func groupIDForQuotaBypassMarker(group *Group) int64 {
-	if group == nil {
-		return 0
-	}
-	return group.ID
-}
-
-func isAttachedQuotaBypassMarkerForRequestGroup(group *Group, groupID int64, requestGroupID *int64) bool {
-	if group == nil || !group.QuotaBypassEnabled {
-		return false
-	}
-	if group.QuotaBypassConcentratedSchedulingEnabled || requestGroupID == nil {
-		return true
-	}
-	return groupID > 0 && *requestGroupID != groupID
-}
-
 // SetOpenAIQuotaBypassEnabled carries the request-group decision across
 // protocol conversion paths where only the selected account is otherwise
 // available. The handler refreshes it after every failover selection.

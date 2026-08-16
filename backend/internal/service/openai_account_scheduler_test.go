@@ -4062,78 +4062,47 @@ func TestOpenAIQuotaBypassConcentratedForScheduleRequest_UsesAttachedGroupMarker
 	}))
 }
 
-func TestOpenAIQuotaBypassConcentratedForScheduleRequest_AttachedGroupPreservesLegacyMarker(t *testing.T) {
+func TestOpenAIQuotaBypassConcentratedForScheduleRequest_AttachedGroupRequiresBothSwitches(t *testing.T) {
 	tests := []struct {
-		name           string
-		groups         []*Group
-		requestGroupID *int64
-		want           bool
+		name   string
+		groups []*Group
+		want   bool
 	}{
 		{
-			name:           "attached bypass marker keeps legacy concentration",
-			groups:         []*Group{{ID: 91, QuotaBypassEnabled: true}},
-			requestGroupID: int64PtrForTest(90),
-			want:           true,
+			name:   "bypass only",
+			groups: []*Group{{ID: 91, QuotaBypassEnabled: true}},
+			want:   false,
 		},
 		{
-			name:           "current request group still honors concentration toggle",
-			groups:         []*Group{{ID: 92, QuotaBypassEnabled: true}},
-			requestGroupID: int64PtrForTest(92),
-			want:           false,
+			name:   "concentration only",
+			groups: []*Group{{ID: 92, QuotaBypassConcentratedSchedulingEnabled: true}},
+			want:   false,
 		},
 		{
-			name: "concentration only is not a marker",
+			name: "switches on different groups",
 			groups: []*Group{
-				{ID: 93, QuotaBypassConcentratedSchedulingEnabled: true},
+				{ID: 93, QuotaBypassEnabled: true},
+				{ID: 94, QuotaBypassConcentratedSchedulingEnabled: true},
 			},
-			requestGroupID: int64PtrForTest(90),
-			want:           false,
-		},
-		{
-			name: "bypass marker and concentration switch may be on different groups",
-			groups: []*Group{
-				{ID: 94, QuotaBypassEnabled: true},
-				{ID: 95, QuotaBypassConcentratedSchedulingEnabled: true},
-			},
-			requestGroupID: int64PtrForTest(90),
-			want:           true,
+			want: false,
 		},
 		{
 			name: "both switches on the marker group",
 			groups: []*Group{{
-				ID:                                       96,
+				ID:                                       95,
 				QuotaBypassEnabled:                       true,
 				QuotaBypassConcentratedSchedulingEnabled: true,
 			}},
-			requestGroupID: int64PtrForTest(90),
-			want:           true,
+			want: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth, Groups: tt.groups}
-			require.Equal(t, tt.want, isOpenAIQuotaBypassConcentratedForScheduleRequest(account, OpenAIAccountScheduleRequest{GroupID: tt.requestGroupID}))
+			require.Equal(t, tt.want, isOpenAIQuotaBypassConcentratedForScheduleRequest(account, OpenAIAccountScheduleRequest{}))
 		})
 	}
-}
-
-func TestOpenAIQuotaBypassConcentratedForScheduleRequest_AccountGroupMarker(t *testing.T) {
-	account := &Account{
-		Platform: PlatformOpenAI,
-		Type:     AccountTypeOAuth,
-		AccountGroups: []AccountGroup{{
-			GroupID: 91,
-			Group:   &Group{ID: 91, QuotaBypassEnabled: true},
-		}},
-	}
-
-	require.True(t, isOpenAIQuotaBypassConcentratedForScheduleRequest(account, OpenAIAccountScheduleRequest{
-		GroupID: int64PtrForTest(90),
-	}))
-	require.False(t, isOpenAIQuotaBypassConcentratedForScheduleRequest(account, OpenAIAccountScheduleRequest{
-		GroupID: int64PtrForTest(91),
-	}))
 }
 
 func TestBuildOpenAISelectionOrder_RequestGroupBypassOverridesStoredFalse(t *testing.T) {
