@@ -30,9 +30,9 @@ func TestClassifyOpenAIWSAcquireError(t *testing.T) {
 		require.Equal(t, "acquire_timeout", classifyOpenAIWSAcquireError(context.DeadlineExceeded))
 	})
 
-	t.Run("auth_failed_401", func(t *testing.T) {
+	t.Run("handshake_unauthorized_401", func(t *testing.T) {
 		err := &openAIWSDialError{StatusCode: 401, Err: errors.New("unauthorized")}
-		require.Equal(t, "auth_failed", classifyOpenAIWSAcquireError(err))
+		require.Equal(t, "handshake_unauthorized", classifyOpenAIWSAcquireError(err))
 	})
 
 	t.Run("handshake_forbidden_403", func(t *testing.T) {
@@ -128,6 +128,10 @@ func TestClassifyOpenAIWSReconnectReason(t *testing.T) {
 	require.Equal(t, "handshake_forbidden", reason)
 	require.False(t, retryable)
 
+	reason, retryable = classifyOpenAIWSReconnectReason(wrapOpenAIWSFallback("handshake_unauthorized", errors.New("unauthorized")))
+	require.Equal(t, "handshake_unauthorized", reason)
+	require.False(t, retryable)
+
 	reason, retryable = classifyOpenAIWSReconnectReason(wrapOpenAIWSFallback("payload_too_large_preflight", errors.New("large")))
 	require.Equal(t, "payload_too_large_preflight", reason)
 	require.False(t, retryable)
@@ -137,7 +141,7 @@ func TestShouldFallbackOpenAIWSToHTTP(t *testing.T) {
 	for _, reason := range []string{
 		"dial_failed", "acquire_timeout", "write_request", "read_event",
 		"upstream_5xx", "missing_final_response", "ws_connection_limit_reached",
-		"upgrade_required", "ws_unsupported", "handshake_forbidden", "message_too_big",
+		"upgrade_required", "ws_unsupported", "handshake_unauthorized", "handshake_forbidden", "message_too_big",
 		"payload_too_large_preflight", "prewarm_write_request",
 	} {
 		require.True(t, shouldFallbackOpenAIWSToHTTP(reason), reason)

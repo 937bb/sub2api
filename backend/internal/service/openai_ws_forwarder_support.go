@@ -568,7 +568,7 @@ func classifyOpenAIWSAcquireError(err error) string {
 		case 426:
 			return "upgrade_required"
 		case 401:
-			return "auth_failed"
+			return "handshake_unauthorized"
 		case 403:
 			return "handshake_forbidden"
 		case 429:
