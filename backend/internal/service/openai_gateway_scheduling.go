@@ -915,7 +915,7 @@ func (s *OpenAIGatewayService) selectBestAccount(ctx context.Context, groupID *i
 			return compactTiers[a.ID] > compactTiers[b.ID]
 		}
 		if a.Priority != b.Priority {
-			return a.Priority < b.Priority
+			return openAIAccountHasHigherSchedulingPriority(a, b)
 		}
 		if rateCmp := rateOrder.compare(a, b); rateCmp != 0 {
 			return rateCmp < 0
@@ -933,10 +933,10 @@ func (s *OpenAIGatewayService) selectBestAccount(ctx context.Context, groupID *i
 func (s *OpenAIGatewayService) isBetterAccount(candidate, current *Account) bool {
 	// 优先级更高（数值更小）
 	// Higher priority (lower value)
-	if candidate.Priority < current.Priority {
+	if openAIAccountHasHigherSchedulingPriority(candidate, current) {
 		return true
 	}
-	if candidate.Priority > current.Priority {
+	if openAIAccountHasHigherSchedulingPriority(current, candidate) {
 		return false
 	}
 
@@ -1204,7 +1204,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			aQuotaBypass := hasQuotaBypassCandidates && isOpenAILegacyQuotaBypassConcentrated(a.account, quotaBypassGroup)
 			bQuotaBypass := hasQuotaBypassCandidates && isOpenAILegacyQuotaBypassConcentrated(b.account, quotaBypassGroup)
 			if a.account.Priority != b.account.Priority {
-				return a.account.Priority < b.account.Priority
+				return openAIAccountHasHigherSchedulingPriority(a.account, b.account)
 			}
 			if aQuotaBypass != bQuotaBypass {
 				return aQuotaBypass
@@ -1238,7 +1238,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		if rateOrder.enabled && !hasQuotaBypassCandidates {
 			sort.SliceStable(available, func(i, j int) bool {
 				if available[i].account.Priority != available[j].account.Priority {
-					return available[i].account.Priority < available[j].account.Priority
+					return openAIAccountHasHigherSchedulingPriority(available[i].account, available[j].account)
 				}
 				return rateOrder.compare(available[i].account, available[j].account) < 0
 			})
@@ -1366,7 +1366,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		if rateOrder.enabled {
 			sort.SliceStable(ordered, func(i, j int) bool {
 				if ordered[i].Priority != ordered[j].Priority {
-					return ordered[i].Priority < ordered[j].Priority
+					return openAIAccountHasHigherSchedulingPriority(ordered[i], ordered[j])
 				}
 				return rateOrder.compare(ordered[i], ordered[j]) < 0
 			})
@@ -1434,7 +1434,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 	if rateOrder.enabled {
 		sort.SliceStable(candidates, func(i, j int) bool {
 			if candidates[i].Priority != candidates[j].Priority {
-				return candidates[i].Priority < candidates[j].Priority
+				return openAIAccountHasHigherSchedulingPriority(candidates[i], candidates[j])
 			}
 			return rateOrder.compare(candidates[i], candidates[j]) < 0
 		})

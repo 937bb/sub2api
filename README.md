@@ -20,6 +20,7 @@ English | [中文](README_CN.md) | [日本語](README_JA.md)
 
 ## 937sub2b Update Log
 
+- `0.1.198`: Centralize OpenAI account priority ordering so every scheduler path treats smaller numeric values as higher priority, and lock the mixed public-pool behavior where priority-1 associated quota-bypass OAuth accounts fill before priority-100 API key accounts.
 - `0.1.197`: Treat an upstream WS handshake-only 401 as a transport failure, immediately fall back to HTTP before downstream output, and cool down WS for that account without changing established-session or HTTP authentication error handling.
 - `0.1.196`: Add default-on system switches for OpenAI OAuth/PAT/Setup Token WS routing and full Codex fingerprint convergence, while preserving explicit account overrides and adding account-level inherit semantics for fingerprint mode.
 - `0.1.195`: Complete default-full Codex fingerprint convergence by synthesizing missing or malformed turn metadata and sharing one turn timestamp across HTTP/WS headers and request-body metadata, while preserving genuine client environment fields.

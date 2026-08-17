@@ -4347,6 +4347,75 @@ func TestOpenAIGatewayService_LegacyWithoutBatchLoadKeepsHigherPriorityRegularFi
 	}
 }
 
+func TestOpenAIGatewayService_LegacyLowerNumberBypassPriorityWinsWithBatchLoad(t *testing.T) {
+	resetOpenAIAdvancedSchedulerSettingCacheForTest()
+	defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
+
+	normalGroupID := int64(4213)
+	bypassGroupID := int64(9913)
+	normalGroup := &Group{ID: normalGroupID}
+	bypassGroup := &Group{
+		ID:                                       bypassGroupID,
+		QuotaBypassEnabled:                       true,
+		QuotaBypassConcentratedSchedulingEnabled: true,
+	}
+	accounts := []Account{
+		{
+			ID: 6421, Platform: PlatformOpenAI, Type: AccountTypeAPIKey,
+			Status: StatusActive, Schedulable: true, Concurrency: 5000, Priority: 100,
+			GroupIDs:      []int64{normalGroupID},
+			AccountGroups: []AccountGroup{{GroupID: normalGroupID, Group: normalGroup}},
+		},
+		{
+			ID: 6422, Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+			Status: StatusActive, Schedulable: true, Concurrency: 2, Priority: 1,
+			GroupIDs: []int64{normalGroupID, bypassGroupID},
+			AccountGroups: []AccountGroup{
+				{GroupID: normalGroupID, Group: normalGroup},
+				{GroupID: bypassGroupID, Group: bypassGroup},
+			},
+		},
+	}
+	sharedCache := newSchedulerSharedQuotaBypassCache()
+	cfg := &config.Config{}
+	cfg.Gateway.Scheduling.LoadBatchEnabled = true
+	settings := &openAIAdvancedSchedulerSettingRepoStub{values: map[string]string{
+		openAIAdvancedSchedulerSettingKey: "false",
+	}}
+	svc := &OpenAIGatewayService{
+		accountRepo: schedulerGroupAwareOpenAIAccountRepo{schedulerTestOpenAIAccountRepo{accounts: accounts}},
+		schedulerSnapshot: &SchedulerSnapshotService{
+			cache: &openAISnapshotCacheStub{
+				snapshotAccounts: []*Account{&accounts[0], &accounts[1]},
+				accountsByID:     map[int64]*Account{6421: &accounts[0], 6422: &accounts[1]},
+			},
+			groupRepo: schedulerTestGroupRepo{group: normalGroup},
+		},
+		cfg:                cfg,
+		rateLimitService:   &RateLimitService{settingService: NewSettingService(settings, cfg)},
+		concurrencyService: NewConcurrencyService(sharedCache),
+	}
+
+	selectedIDs := make([]int64, 0, 3)
+	releases := make([]func(), 0, 3)
+	for i := 0; i < 3; i++ {
+		selection, _, err := svc.SelectAccountWithScheduler(
+			context.Background(), &normalGroupID, "", "", "gpt-5.1", nil,
+			OpenAIUpstreamTransportAny, false,
+		)
+		require.NoError(t, err)
+		require.NotNil(t, selection)
+		selectedIDs = append(selectedIDs, selection.Account.ID)
+		releases = append(releases, selection.ReleaseFunc)
+	}
+	require.Equal(t, []int64{6422, 6422, 6421}, selectedIDs)
+	for _, release := range releases {
+		if release != nil {
+			release()
+		}
+	}
+}
+
 func TestOpenAIQuotaBypassConcentrator_LargePoolUsesBoundedCursorWindow(t *testing.T) {
 	concentrator := newOpenAIQuotaBypassConcentrator()
 	key := newOpenAIQuotaBypassPoolKey(int64PtrForTest(42), PlatformOpenAI, 0)

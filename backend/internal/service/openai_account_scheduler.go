@@ -751,6 +751,12 @@ func openAIAccountSchedulingPriority(account *Account) int {
 	return account.Priority
 }
 
+// OpenAI account priority follows the admin convention: a smaller number has
+// higher scheduling priority. Keep every scheduler path on this one rule.
+func openAIAccountHasHigherSchedulingPriority(candidate, current *Account) bool {
+	return openAIAccountSchedulingPriority(candidate) < openAIAccountSchedulingPriority(current)
+}
+
 func (s *defaultOpenAIAccountScheduler) shouldEscapeStickyAccount(accountID int64, cfg openAIStickyEscapeConfig) (reason string, errorRate float64, ttft float64, shouldEscape bool) {
 	if !cfg.enabled || s == nil || s.stats == nil || accountID <= 0 {
 		return "", 0, 0, false
@@ -812,7 +818,7 @@ func isOpenAIAccountCandidateBetter(left openAIAccountCandidateScore, right open
 		return left.score > right.score
 	}
 	if left.account.Priority != right.account.Priority {
-		return left.account.Priority < right.account.Priority
+		return openAIAccountHasHigherSchedulingPriority(left.account, right.account)
 	}
 	if left.loadInfo.LoadRate != right.loadInfo.LoadRate {
 		return left.loadInfo.LoadRate < right.loadInfo.LoadRate
@@ -1328,7 +1334,7 @@ func buildOpenAIQuotaBypassConcentratedOrder(pool []openAIAccountCandidateScore)
 	sort.SliceStable(ordered, func(i, j int) bool {
 		a, b := ordered[i], ordered[j]
 		if a.account.Priority != b.account.Priority {
-			return a.account.Priority < b.account.Priority
+			return openAIAccountHasHigherSchedulingPriority(a.account, b.account)
 		}
 		if a.loadInfo.LoadRate != b.loadInfo.LoadRate {
 			return a.loadInfo.LoadRate > b.loadInfo.LoadRate
@@ -1385,7 +1391,7 @@ func sortOpenAICompactRetryCandidates(pool []openAIAccountCandidateScore) []open
 	sort.SliceStable(ordered, func(i, j int) bool {
 		a, b := ordered[i], ordered[j]
 		if a.account.Priority != b.account.Priority {
-			return a.account.Priority < b.account.Priority
+			return openAIAccountHasHigherSchedulingPriority(a.account, b.account)
 		}
 		if a.loadInfo.LoadRate != b.loadInfo.LoadRate {
 			return a.loadInfo.LoadRate < b.loadInfo.LoadRate
