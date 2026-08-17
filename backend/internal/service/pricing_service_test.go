@@ -454,26 +454,21 @@ func TestGetModelPricing_OpenAICompactAliasUsesStaticFallback(t *testing.T) {
 	require.InDelta(t, 1.5e-5, got.OutputCostPerToken, 1e-12)
 }
 
-func TestPricingService_Gemini36FlashThinkingTiersUseBasePricing(t *testing.T) {
-	basePricing := &LiteLLMModelPricing{
-		InputCostPerToken:       1.5e-6,
-		OutputCostPerToken:      7.5e-6,
-		CacheReadInputTokenCost: 0.15e-6,
+func TestPricingService_GeminiFlashThinkingTiersUseMatchingBasePricing(t *testing.T) {
+	pricingByBase := map[string]*LiteLLMModelPricing{
+		"gemini-3.5-flash": {InputCostPerToken: 1.5e-6, OutputCostPerToken: 9e-6},
+		"gemini-3.6-flash": {InputCostPerToken: 1.5e-6, OutputCostPerToken: 7.5e-6},
+		"gemini-3.7-flash": {InputCostPerToken: 0.75e-6, OutputCostPerToken: 3.75e-6},
 	}
-	svc := &PricingService{pricingData: map[string]*LiteLLMModelPricing{
-		"gemini-3.6-flash": basePricing,
-	}}
+	svc := &PricingService{pricingData: pricingByBase}
 
-	for _, model := range []string{
-		"gemini-3.6-flash",
-		"gemini-3.6-flash-high",
-		"gemini-3.6-flash-low",
-		"gemini-3.6-flash-medium",
-		"gemini-3.6-flash-tiered",
-	} {
-		t.Run(model, func(t *testing.T) {
-			require.Same(t, basePricing, svc.GetModelPricing(model))
-		})
+	for baseModel, basePricing := range pricingByBase {
+		for _, suffix := range []string{"", "-high", "-low", "-extra-low", "-medium", "-tiered"} {
+			model := baseModel + suffix
+			t.Run(model, func(t *testing.T) {
+				require.Same(t, basePricing, svc.GetModelPricing(model))
+			})
+		}
 	}
 }
 
@@ -506,6 +501,34 @@ func TestBillingService_Gemini36FlashThinkingTierFallbacksAreBillable(t *testing
 			require.InDelta(t, 7.5, cost.OutputCost, 1e-12)
 			require.InDelta(t, 0.15, cost.CacheReadCost, 1e-12)
 			require.InDelta(t, 9.15, cost.TotalCost, 1e-12)
+		})
+	}
+}
+
+func TestBillingService_CPAFlashThinkingTierAliasesAreBillable(t *testing.T) {
+	pricingSvc := &PricingService{pricingData: map[string]*LiteLLMModelPricing{
+		"gemini-3.5-flash": {InputCostPerToken: 1.5e-6, OutputCostPerToken: 9e-6},
+		"gemini-3.7-flash": {InputCostPerToken: 0.75e-6, OutputCostPerToken: 3.75e-6},
+	}}
+	svc := NewBillingService(&config.Config{}, pricingSvc)
+	tokens := UsageTokens{InputTokens: 1_000_000, OutputTokens: 1_000_000}
+
+	tests := []struct {
+		model      string
+		inputCost  float64
+		outputCost float64
+	}{
+		{model: "gemini-3.5-flash-low", inputCost: 1.5, outputCost: 9},
+		{model: "gemini-3.5-flash-extra-low", inputCost: 1.5, outputCost: 9},
+		{model: "gemini-3.7-flash-high", inputCost: 0.75, outputCost: 3.75},
+	}
+	for _, tt := range tests {
+		t.Run(tt.model, func(t *testing.T) {
+			cost, err := svc.CalculateCost(tt.model, tokens, 1)
+			require.NoError(t, err)
+			require.InDelta(t, tt.inputCost, cost.InputCost, 1e-12)
+			require.InDelta(t, tt.outputCost, cost.OutputCost, 1e-12)
+			require.InDelta(t, tt.inputCost+tt.outputCost, cost.TotalCost, 1e-12)
 		})
 	}
 }

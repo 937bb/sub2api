@@ -738,8 +738,9 @@ func (s *PricingService) buildModelLookupCandidates(modelLower string) []string 
 	normalized := normalizeModelNameForPricing(modelLower)
 
 	// A tier-specific entry should take precedence when the pricing catalog gains
-	// one later. Today Antigravity's Gemini 3.6 Flash tiers share the base rate,
-	// so the normalized base remains the fallback after the exact aliases.
+	// one later. Antigravity/CPA thinking tiers share their corresponding base
+	// Gemini Flash rate, so the normalized base remains the fallback after the
+	// exact aliases.
 	candidates := rawCandidates
 	if normalizeGeminiThinkingTierAlias(lastSegment(modelLower)) != lastSegment(modelLower) {
 		candidates = append(candidates, normalized)
@@ -797,15 +798,19 @@ func normalizeModelNameForPricing(model string) string {
 	return normalizeGeminiThinkingTierAlias(model)
 }
 
-// normalizeGeminiThinkingTierAlias maps Antigravity's Gemini 3.6 Flash
-// thinking-tier model IDs to the public base model. The tier controls reasoning
-// behavior, not the published token rate, so this keeps -high/-low/-medium and
-// -tiered requests on the same price card as gemini-3.6-flash.
+// normalizeGeminiThinkingTierAlias maps Antigravity/CPA Gemini Flash
+// thinking-tier model IDs to the matching public base model. The tier controls
+// reasoning behavior, not the published token rate.
 func normalizeGeminiThinkingTierAlias(model string) string {
-	const baseModel = "gemini-3.6-flash"
-	for _, tier := range []string{"-high", "-low", "-medium", "-tiered"} {
-		if model == baseModel+tier {
-			return baseModel
+	for _, baseModel := range []string{
+		"gemini-3.5-flash",
+		"gemini-3.6-flash",
+		"gemini-3.7-flash",
+	} {
+		for _, tier := range []string{"-high", "-low", "-extra-low", "-medium", "-tiered"} {
+			if model == baseModel+tier {
+				return baseModel
+			}
 		}
 	}
 	return model
