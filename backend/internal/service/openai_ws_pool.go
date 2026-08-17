@@ -77,7 +77,9 @@ type openAIWSAcquireRequest struct {
 }
 
 type openAIWSHandshakeCompatibilityKey struct {
-	betaFeatures string
+	betaFeatures   string
+	parentThreadID string
+	subagent       string
 }
 
 type openAIWSConnLease struct {
@@ -2013,7 +2015,9 @@ func normalizeOpenAIWSBetaFeatures(headers http.Header) string {
 
 func normalizeOpenAIWSHandshakeCompatibility(headers http.Header) openAIWSHandshakeCompatibilityKey {
 	return openAIWSHandshakeCompatibilityKey{
-		betaFeatures: normalizeOpenAIWSBetaFeatures(headers),
+		betaFeatures:   normalizeOpenAIWSBetaFeatures(headers),
+		parentThreadID: strings.TrimSpace(headers.Get(openAICodexParentThreadIDHeader)),
+		subagent:       strings.TrimSpace(headers.Get(openAICodexSubagentHeader)),
 	}
 }
 

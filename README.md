@@ -20,6 +20,7 @@ English | [中文](README_CN.md) | [日本語](README_JA.md)
 
 ## 937sub2b Update Log
 
+- `0.1.194`: Align the Codex reverse proxy with the locally installed Codex Desktop 26.810.7004.0 / CLI 0.148.0-alpha.9 environment, preserving validated parent-thread and subagent lineage headers across HTTP, passthrough, and WS subscription paths while retaining store=false, Responses Lite, compaction, and fingerprint behavior.
 - `0.1.193`: Learn remote WS close-1009 request boundaries and send similarly oversized turns directly over HTTP, avoiding repeated 1-2 second WS failures while small turns continue to use WS.
 - `0.1.192`: Raise the configurable upstream WS response-message read limit to 64 MiB while keeping downstream ingress bounded separately, preventing local close-1009 failures on large Codex events.
 - `0.1.191`: Keep default-full Codex identity consistent between WS upgrade headers and `response.create`, and make handshake-only 403 failures cool down and fall back to HTTP before downstream output instead of returning a gateway 403.

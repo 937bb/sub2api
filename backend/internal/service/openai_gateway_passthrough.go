@@ -421,6 +421,11 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 			}
 		}
 	}
+	isCodexClient := c != nil && openai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator"))
+	if s != nil && s.cfg != nil && s.cfg.Gateway.ForceCodexCLI {
+		isCodexClient = true
+	}
+	copyOpenAICodexDelegationHeaders(c, account, isCodexClient, req.Header)
 
 	// 客户端回带的 x-codex-turn-state 若已知由其他账号铸造（failover 换号），
 	// 剥离后再出站（openai_codex_turn_state.go）。
