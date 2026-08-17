@@ -767,6 +767,8 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	}
 	firstClientMessage = updatedFirst
 	firstClientMessage = applyOpenAIWSQuotaBypass(firstClientMessage, hooks)
+	var quotaBypassEffective atomic.Bool
+	quotaBypassEffective.Store(hooks != nil && hooks.QuotaBypassEnabled && openAIQuotaBypassEffectivePayload(firstClientMessage))
 
 	// 在 policy filter 之后再提取 service_tier / reasoning_effort 用于
 	// usage 上报：filter
@@ -881,7 +883,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			return s.configureOpenAIQuotaBypass429RetryEnabled(account, &UpstreamFailoverError{
 				StatusCode:      http.StatusTooManyRequests,
 				ResponseHeaders: cloneHeader(handshakeHeaders),
-			}, hooks != nil && hooks.QuotaBypassEnabled, true)
+			}, false, true)
 		}
 		return s.mapOpenAIWSPassthroughDialError(err, statusCode, handshakeHeaders)
 	}
@@ -1065,6 +1067,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			//     service_tier 时按 default 处理，billing 应如实反映。
 			if policyErr == nil && blocked == nil && isResponseCreate {
 				out = applyOpenAIWSQuotaBypass(out, hooks)
+				quotaBypassEffective.Store(hooks != nil && hooks.QuotaBypassEnabled && openAIQuotaBypassEffectivePayload(out))
 				usageMeta.updateFromResponseCreate(out, model, requestModelForThisFrame)
 				acceptedTurn = true
 			}
@@ -1228,7 +1231,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					StatusCode:      http.StatusTooManyRequests,
 					ResponseBody:    append([]byte(nil), payload...),
 					ResponseHeaders: cloneHeader(handshakeHeaders),
-				}, hooks != nil && hooks.QuotaBypassEnabled, true)
+				}, quotaBypassEffective.Load(), true)
 			},
 			OnTrace: func(event openaiwsv2.RelayTraceEvent) {
 				logOpenAIWSV2Passthrough(

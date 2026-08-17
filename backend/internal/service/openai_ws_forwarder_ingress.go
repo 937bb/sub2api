@@ -772,7 +772,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				return nil, s.configureOpenAIQuotaBypass429RetryEnabled(account, &UpstreamFailoverError{
 					StatusCode:      http.StatusTooManyRequests,
 					ResponseHeaders: cloneHeader(dialErr.ResponseHeaders),
-				}, hooks != nil && hooks.QuotaBypassEnabled, true)
+				}, false, true)
 			}
 			if errors.Is(acquireErr, errOpenAIWSPreferredConnUnavailable) {
 				return nil, NewOpenAIWSClientCloseError(
@@ -822,6 +822,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			return nil, errors.New("upstream websocket lease is nil")
 		}
 		turnStart := time.Now()
+		turnQuotaBypassEffective := hooks != nil && hooks.QuotaBypassEnabled && openAIQuotaBypassEffectivePayload(payload)
 		wroteDownstream := false
 		if err := lease.WriteJSONWithContextTimeout(ctx, json.RawMessage(payload), s.openAIWSWriteTimeout()); err != nil {
 			return nil, wrapOpenAIWSIngressTurnError(
@@ -964,7 +965,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 						StatusCode:      http.StatusTooManyRequests,
 						ResponseBody:    append([]byte(nil), upstreamMessage...),
 						ResponseHeaders: cloneHeader(lease.HandshakeHeaders()),
-					}, hooks != nil && hooks.QuotaBypassEnabled, false)
+					}, turnQuotaBypassEffective, false)
 				}
 			}
 			isTokenEvent := isOpenAIWSTokenEvent(eventType)

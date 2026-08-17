@@ -142,7 +142,13 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		return errors.New("openai usage result is nil")
 	}
 	if input.QuotaBypassApplied {
-		input.QuotaBypassInjectPairs = clampOpenAIQuotaBypassInjectPairs(input.QuotaBypassInjectPairs)
+		if input.QuotaBypassInjectPairs > 0 {
+			input.QuotaBypassInjectPairs = clampOpenAIQuotaBypassInjectPairs(input.QuotaBypassInjectPairs)
+		} else {
+			// A real function_call_output uses the native quota stage without
+			// adding a synthetic pair.
+			input.QuotaBypassInjectPairs = 0
+		}
 	} else {
 		input.QuotaBypassInjectPairs = 0
 	}

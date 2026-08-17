@@ -82,20 +82,24 @@ type OpenAIAccountScheduleRequest struct {
 	// request group. Account-attached dedicated bypass groups are evaluated
 	// separately so they can mark accounts used by ordinary public groups.
 	GroupQuotaBypassConcentratedSchedulingEnabled bool
-	Platform                                      string
-	SessionHash                                   string
-	StickyAccountID                               int64
-	StickyPreviousAccountID                       int64
-	StickyWeighted                                bool
-	SubscriptionPriority                          bool
-	PreserveStickyBinding                         bool
-	PreviousResponseID                            string
-	PreviousResponseCanMove                       bool
-	UseUpstreamTokenCost                          bool
-	RequestedModel                                string
-	RequiredTransport                             OpenAIUpstreamTransport
-	RequiredCapability                            OpenAIEndpointCapability
-	RequiredImageCapability                       OpenAIImagesCapability
+	// QuotaBypassUnavailable prevents request shapes that cannot use native
+	// tool-output bypass or synthetic injection from bypassing quota health
+	// gates merely because the account carries a bypass marker.
+	QuotaBypassUnavailable  bool
+	Platform                string
+	SessionHash             string
+	StickyAccountID         int64
+	StickyPreviousAccountID int64
+	StickyWeighted          bool
+	SubscriptionPriority    bool
+	PreserveStickyBinding   bool
+	PreviousResponseID      string
+	PreviousResponseCanMove bool
+	UseUpstreamTokenCost    bool
+	RequestedModel          string
+	RequiredTransport       OpenAIUpstreamTransport
+	RequiredCapability      OpenAIEndpointCapability
+	RequiredImageCapability OpenAIImagesCapability
 	// RequireCompact is only for legacy /responses/compact capability filtering
 	// and compact_model_mapping; native remote compaction v2 leaves it false.
 	RequireCompact bool
@@ -2128,6 +2132,9 @@ func (s *defaultOpenAIAccountScheduler) isAccountRequestCompatible(ctx context.C
 }
 
 func isOpenAIQuotaBypassEligibleForScheduleRequest(account *Account, req OpenAIAccountScheduleRequest) bool {
+	if req.QuotaBypassUnavailable {
+		return false
+	}
 	if IsAccountQuotaBypassEligible(account) {
 		return true
 	}
@@ -2138,6 +2145,9 @@ func isOpenAIQuotaBypassEligibleForScheduleRequest(account *Account, req OpenAIA
 }
 
 func isOpenAIQuotaBypassConcentratedForScheduleRequest(account *Account, req OpenAIAccountScheduleRequest) bool {
+	if req.QuotaBypassUnavailable {
+		return false
+	}
 	if IsAccountQuotaBypassConcentrated(account) {
 		return true
 	}
@@ -2679,6 +2689,7 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 		RequiredCapability:      requiredCapability,
 		RequiredImageCapability: requiredImageCapability,
 		RequireCompact:          requireCompact,
+		QuotaBypassUnavailable:  requireCompact || openAIQuotaBypassRequestUnavailable(ctx),
 		ExcludedIDs:             excludedIDs,
 	})
 }

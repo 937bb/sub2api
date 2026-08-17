@@ -26,6 +26,63 @@ const (
 	openAIQuotaBypassSameAccountRetries    = 3
 )
 
+type openAIQuotaBypassRequestContextKey struct{}
+
+type OpenAIQuotaBypassRequestMode uint8
+
+const (
+	OpenAIQuotaBypassRequestUnavailable OpenAIQuotaBypassRequestMode = iota
+	OpenAIQuotaBypassRequestInjectable
+	OpenAIQuotaBypassRequestNativeToolOutput
+)
+
+// ClassifyOpenAIQuotaBypassRequest is the single request-shape decision shared
+// by scheduling and forwarding. A genuine tool output already reaches the same
+// upstream quota stage without an extra synthetic pair. Compaction requests
+// cannot be modified because compaction_trigger must remain the final item.
+func ClassifyOpenAIQuotaBypassRequest(body []byte) OpenAIQuotaBypassRequestMode {
+	if !gjson.ValidBytes(body) || HasCompactionTriggerInInput(body) {
+		return OpenAIQuotaBypassRequestUnavailable
+	}
+	input := gjson.GetBytes(body, "input")
+	if !input.Exists() || input.Type == gjson.Null {
+		// WS response.create commonly relies on conversation.item.create frames
+		// and omits input. The synthetic pair can be carried by response.create
+		// itself, so this is still an injectable turn.
+		return OpenAIQuotaBypassRequestInjectable
+	}
+	if input.Type == gjson.String {
+		return OpenAIQuotaBypassRequestInjectable
+	}
+	if !input.IsArray() {
+		return OpenAIQuotaBypassRequestUnavailable
+	}
+	items := input.Array()
+	if len(items) > 0 && items[len(items)-1].Get("type").String() == "function_call_output" {
+		return OpenAIQuotaBypassRequestNativeToolOutput
+	}
+	return OpenAIQuotaBypassRequestInjectable
+}
+
+// WithOpenAIQuotaBypassRequestBody carries request capability into account
+// selection, which runs before quota-bypass mutation. Missing context remains
+// fail-open for adapters that construct Responses input after account selection.
+func WithOpenAIQuotaBypassRequestBody(ctx context.Context, body []byte) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	unavailable := ClassifyOpenAIQuotaBypassRequest(body) == OpenAIQuotaBypassRequestUnavailable
+	return context.WithValue(ctx, openAIQuotaBypassRequestContextKey{}, unavailable)
+}
+
+func openAIQuotaBypassRequestUnavailable(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	unavailable, _ := ctx.Value(openAIQuotaBypassRequestContextKey{}).(bool)
+	return unavailable
+}
+
 // IsQuotaBypassEligible reports whether an account qualifies for Codex quota
 // bypass injection through an account override, the request group, or any group
 // attached to the scheduled account. Eligibility is intentionally independent
@@ -109,7 +166,11 @@ func markOpenAIQuotaBypassApplied(c *gin.Context, pairs int) {
 		return
 	}
 	c.Set(openAIQuotaBypassAppliedContextKey, true)
-	pairs = clampOpenAIQuotaBypassInjectPairs(pairs)
+	if pairs > 0 {
+		pairs = clampOpenAIQuotaBypassInjectPairs(pairs)
+	} else {
+		pairs = 0
+	}
 	c.Set(openAIQuotaBypassInjectPairsContextKey, pairs)
 	c.Header(openAIQuotaBypassResponseHeader, "applied")
 	c.Header(openAIQuotaBypassPairsResponseHeader, strconv.Itoa(pairs))
@@ -128,6 +189,9 @@ func OpenAIQuotaBypassUsageSnapshot(c *gin.Context) (bool, int) {
 	}
 	pairsValue, _ := c.Get(openAIQuotaBypassInjectPairsContextKey)
 	pairs, _ := pairsValue.(int)
+	if pairs <= 0 {
+		return true, 0
+	}
 	return true, clampOpenAIQuotaBypassInjectPairs(pairs)
 }
 
@@ -159,6 +223,20 @@ func applyOpenAIQuotaBypassForRequest(c *gin.Context, account *Account, body []b
 	if !isOpenAIQuotaBypassEnabledForRequest(c, account) {
 		return body
 	}
+	if c != nil && c.Request != nil && openAIQuotaBypassRequestUnavailable(c.Request.Context()) {
+		return body
+	}
+	switch ClassifyOpenAIQuotaBypassRequest(body) {
+	case OpenAIQuotaBypassRequestUnavailable:
+		return body
+	case OpenAIQuotaBypassRequestNativeToolOutput:
+		// No mutation is needed, but this attempt is quota-bypass capable and
+		// must use the same bounded 429 handling and usage classification.
+		if applied, _ := OpenAIQuotaBypassUsageSnapshot(c); !applied {
+			markOpenAIQuotaBypassApplied(c, 0)
+		}
+		return body
+	}
 	// Injection is the complete quota-bypass behavior. Never propagate this
 	// decision into response handling: upstream 401/403/429 and all other
 	// failures must follow the same account-state path as an ordinary request.
@@ -172,14 +250,30 @@ func applyOpenAIWSQuotaBypass(payload []byte, hooks *OpenAIWSIngressHooks) []byt
 	if hooks == nil || !hooks.QuotaBypassEnabled {
 		return payload
 	}
+	if ClassifyOpenAIQuotaBypassRequest(payload) == OpenAIQuotaBypassRequestNativeToolOutput {
+		if hooks.OnQuotaBypassApplied != nil {
+			hooks.OnQuotaBypassApplied()
+		}
+		if hooks.OnQuotaBypassAppliedWithPairs != nil {
+			hooks.OnQuotaBypassAppliedWithPairs(0)
+		}
+		return payload
+	}
 	injected, applied := InjectFunctionCallOutputSuffix(payload)
 	if applied {
 		if hooks.OnQuotaBypassApplied != nil {
 			hooks.OnQuotaBypassApplied()
 		}
+		if hooks.OnQuotaBypassAppliedWithPairs != nil {
+			hooks.OnQuotaBypassAppliedWithPairs(1)
+		}
 		return injected
 	}
 	return payload
+}
+
+func openAIQuotaBypassEffectivePayload(payload []byte) bool {
+	return ClassifyOpenAIQuotaBypassRequest(payload) == OpenAIQuotaBypassRequestNativeToolOutput
 }
 
 // configureOpenAIQuotaBypass429Retry converts the manual "recover state and
@@ -302,8 +396,13 @@ func InjectFunctionCallOutputSuffixN(body []byte, pairs int) ([]byte, bool) {
 		pairs = quotaBypassMaxInjectPairs
 	}
 	inputArr := gjson.GetBytes(body, "input")
-	if !inputArr.Exists() {
-		return body, false
+	if !inputArr.Exists() || inputArr.Type == gjson.Null {
+		var err error
+		body, err = sjson.SetRawBytes(body, "input", []byte("[]"))
+		if err != nil {
+			return body, false
+		}
+		inputArr = gjson.GetBytes(body, "input")
 	}
 	if inputArr.Type == gjson.String {
 		message, err := json.Marshal([]map[string]any{{

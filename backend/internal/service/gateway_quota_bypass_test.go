@@ -417,6 +417,51 @@ func TestInjectFunctionCallOutputSuffix_RealToolOutputAlreadyBypassesQuotaStage(
 	}
 }
 
+func TestApplyOpenAIQuotaBypassForRequest_RealToolOutputIsNativeBypass(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth, Extra: map[string]any{"quota_bypass_enabled": true}}
+	body := []byte(`{"model":"gpt-5.6-sol","input":[{"type":"function_call","call_id":"call_real"},{"type":"function_call_output","call_id":"call_real","output":"ok"}]}`)
+
+	forwarded := applyOpenAIQuotaBypassForRequest(c, account, body, 1)
+
+	require.Equal(t, body, forwarded)
+	applied, pairs := OpenAIQuotaBypassUsageSnapshot(c)
+	require.True(t, applied)
+	require.Zero(t, pairs)
+	failoverErr := (&OpenAIGatewayService{}).configureOpenAIQuotaBypass429Retry(c, account, &UpstreamFailoverError{StatusCode: http.StatusTooManyRequests}, true)
+	require.True(t, failoverErr.RetryableOnSameAccount)
+}
+
+func TestInjectFunctionCallOutputSuffix_AddsInputWhenResponseCreateOmitsIt(t *testing.T) {
+	body := []byte(`{"type":"response.create","model":"gpt-5.6-sol","stream":true}`)
+
+	injected, ok := InjectFunctionCallOutputSuffix(body)
+
+	require.True(t, ok)
+	requireQuotaBypassPairs(t, injected, 0, 1)
+}
+
+func TestClassifyOpenAIQuotaBypassRequest(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want OpenAIQuotaBypassRequestMode
+	}{
+		{name: "text", body: `{"input":"hello"}`, want: OpenAIQuotaBypassRequestInjectable},
+		{name: "missing input websocket turn", body: `{"type":"response.create"}`, want: OpenAIQuotaBypassRequestInjectable},
+		{name: "native tool output", body: `{"input":[{"type":"function_call_output","call_id":"call_real"}]}`, want: OpenAIQuotaBypassRequestNativeToolOutput},
+		{name: "compaction", body: `{"input":[{"type":"compaction_trigger"}]}`, want: OpenAIQuotaBypassRequestUnavailable},
+		{name: "invalid input object", body: `{"input":{"type":"message"}}`, want: OpenAIQuotaBypassRequestUnavailable},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, ClassifyOpenAIQuotaBypassRequest([]byte(tt.body)))
+		})
+	}
+}
+
 func TestInjectFunctionCallOutputSuffix_IsIdempotentForSyntheticPair(t *testing.T) {
 	body := []byte(`{"model":"gpt-5.6-sol","input":[{"type":"message","role":"user","content":"hello"}]}`)
 
@@ -469,6 +514,28 @@ func TestApplyOpenAIWSQuotaBypass_SkipsCompactionTrigger(t *testing.T) {
 	forwarded := applyOpenAIWSQuotaBypass(body, hooks)
 	require.Equal(t, body, forwarded)
 	require.Zero(t, applied)
+}
+
+func TestApplyOpenAIWSQuotaBypass_RealToolOutputReportsNativeBypass(t *testing.T) {
+	body := []byte(`{"type":"response.create","input":[{"type":"function_call_output","call_id":"call_real","output":"ok"}]}`)
+	applied := 0
+	pairs := -1
+	hooks := &OpenAIWSIngressHooks{
+		QuotaBypassEnabled: true,
+		OnQuotaBypassApplied: func() {
+			applied++
+		},
+		OnQuotaBypassAppliedWithPairs: func(value int) {
+			pairs = value
+		},
+	}
+
+	forwarded := applyOpenAIWSQuotaBypass(body, hooks)
+
+	require.Equal(t, body, forwarded)
+	require.Equal(t, 1, applied)
+	require.Zero(t, pairs)
+	require.True(t, openAIQuotaBypassEffectivePayload(forwarded))
 }
 
 func TestInjectFunctionCallOutputSuffix_ConvertsStringInput(t *testing.T) {

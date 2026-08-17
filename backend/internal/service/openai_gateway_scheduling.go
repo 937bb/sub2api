@@ -449,7 +449,7 @@ func shouldAutoPauseOpenAIAccountByQuota(ctx context.Context, account *Account) 
 	// usage window is exhausted. The usage snapshot is only a pre-request
 	// scheduling signal; a real upstream 429 is still handled by the standard
 	// runtime and persisted rate-limit paths before this guard is reached again.
-	if IsAccountQuotaBypassEligible(account) {
+	if IsAccountQuotaBypassEligible(account) && !openAIQuotaBypassRequestUnavailable(ctx) {
 		return false, openAIQuotaAutoPauseDecision{}
 	}
 	// Per-account explicit-disable flags must take precedence over the global default.
@@ -1035,12 +1035,16 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		return excluded
 	}
 	quotaBypassGroup := s.resolveOpenAIQuotaBypassSchedulingGroup(ctx, groupID, platform)
+	quotaBypassAvailable := !requireCompact && !openAIQuotaBypassRequestUnavailable(ctx)
+	isQuotaBypassConcentrated := func(account *Account) bool {
+		return quotaBypassAvailable && isOpenAILegacyQuotaBypassConcentrated(account, quotaBypassGroup)
+	}
 	hasQuotaBypassPoolAccounts := false
 	for i := range accounts {
 		if isExcluded(accounts[i].ID) {
 			continue
 		}
-		if isOpenAILegacyQuotaBypassConcentrated(&accounts[i], quotaBypassGroup) {
+		if isQuotaBypassConcentrated(&accounts[i]) {
 			hasQuotaBypassPoolAccounts = true
 			break
 		}
@@ -1149,7 +1153,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 	}
 	hasQuotaBypassCandidates := false
 	for _, candidate := range candidates {
-		if isOpenAILegacyQuotaBypassConcentrated(candidate, quotaBypassGroup) {
+		if isQuotaBypassConcentrated(candidate) {
 			hasQuotaBypassCandidates = true
 			break
 		}
@@ -1169,7 +1173,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 
 	accountLoads := make([]AccountWithConcurrency, 0, len(candidates))
 	for _, acc := range candidates {
-		if isOpenAILegacyQuotaBypassConcentrated(acc, quotaBypassGroup) {
+		if isQuotaBypassConcentrated(acc) {
 			continue
 		}
 		accountLoads = append(accountLoads, AccountWithConcurrency{
@@ -1201,8 +1205,8 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 
 		sort.SliceStable(available, func(i, j int) bool {
 			a, b := available[i], available[j]
-			aQuotaBypass := hasQuotaBypassCandidates && isOpenAILegacyQuotaBypassConcentrated(a.account, quotaBypassGroup)
-			bQuotaBypass := hasQuotaBypassCandidates && isOpenAILegacyQuotaBypassConcentrated(b.account, quotaBypassGroup)
+			aQuotaBypass := hasQuotaBypassCandidates && isQuotaBypassConcentrated(a.account)
+			bQuotaBypass := hasQuotaBypassCandidates && isQuotaBypassConcentrated(b.account)
 			if a.account.Priority != b.account.Priority {
 				return openAIAccountHasHigherSchedulingPriority(a.account, b.account)
 			}
@@ -1247,7 +1251,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		if hasQuotaBypassCandidates && len(legacyQuotaBypassAttempted) > 0 {
 			quotaBypassPool = make([]accountWithLoad, 0, len(available))
 			for _, item := range available {
-				if isOpenAILegacyQuotaBypassConcentrated(item.account, quotaBypassGroup) {
+				if isQuotaBypassConcentrated(item.account) {
 					if _, attempted := legacyQuotaBypassAttempted[item.account.ID]; attempted {
 						continue
 					}
@@ -1281,7 +1285,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			}
 
 			for _, item := range selectionOrder {
-				quotaBypassCandidate := isOpenAILegacyQuotaBypassConcentrated(item.account, quotaBypassGroup)
+				quotaBypassCandidate := isQuotaBypassConcentrated(item.account)
 				if quotaBypassCandidate {
 					if _, attempted := legacyQuotaBypassAttempted[item.account.ID]; attempted {
 						continue
@@ -1304,7 +1308,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 				result, err := s.tryAcquireAccountSlot(ctx, fresh.ID, maxConcurrency)
 				if err == nil && result != nil && result.Acquired {
 					releaseFunc := result.ReleaseFunc
-					if isOpenAILegacyQuotaBypassConcentrated(fresh, quotaBypassGroup) {
+					if isQuotaBypassConcentrated(fresh) {
 						releaseFunc = s.wrapQuotaBypassAccountRelease(groupID, platform, fresh, releaseFunc)
 					}
 					selection, selectErr := s.newAcquiredSelectionResult(ctx, fresh, releaseFunc)
@@ -1316,7 +1320,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 					}
 					return selection, true, nil
 				}
-				if err == nil && isOpenAILegacyQuotaBypassConcentrated(fresh, quotaBypassGroup) {
+				if err == nil && isQuotaBypassConcentrated(fresh) {
 					s.markQuotaBypassAccountFull(groupID, platform, fresh)
 				}
 			}
@@ -1325,7 +1329,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			}
 			remainingPool := quotaBypassPool[:0]
 			for _, item := range quotaBypassPool {
-				if isOpenAILegacyQuotaBypassConcentrated(item.account, quotaBypassGroup) {
+				if isQuotaBypassConcentrated(item.account) {
 					if _, attempted := legacyQuotaBypassAttempted[item.account.ID]; attempted {
 						continue
 					}
@@ -1334,7 +1338,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			}
 			quotaBypassPool = remainingPool
 			for _, item := range selectionOrder {
-				if isOpenAILegacyQuotaBypassConcentrated(item.account, quotaBypassGroup) {
+				if isQuotaBypassConcentrated(item.account) {
 					s.markQuotaBypassAccountFull(groupID, platform, item.account)
 				}
 			}
@@ -1389,12 +1393,12 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			if needsUpstreamCheck && s.isUpstreamModelRestrictedByChannel(ctx, *groupID, fresh, requestedModel, requireCompact) {
 				continue
 			}
-			quotaBypassCandidate := isOpenAILegacyQuotaBypassConcentrated(fresh, quotaBypassGroup)
+			quotaBypassCandidate := isQuotaBypassConcentrated(fresh)
 			maxConcurrency := s.openAISelectionMaxConcurrency(fresh, quotaBypassCandidate)
 			result, err := s.tryAcquireAccountSlot(ctx, fresh.ID, maxConcurrency)
 			if err == nil && result != nil && result.Acquired {
 				releaseFunc := result.ReleaseFunc
-				if isOpenAILegacyQuotaBypassConcentrated(fresh, quotaBypassGroup) {
+				if isQuotaBypassConcentrated(fresh) {
 					releaseFunc = s.wrapQuotaBypassAccountRelease(groupID, platform, fresh, releaseFunc)
 				}
 				selection, selectErr := s.newAcquiredSelectionResult(ctx, fresh, releaseFunc)
@@ -1445,7 +1449,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 	if hasQuotaBypassCandidates {
 		unattempted := make([]*Account, 0, len(candidates))
 		for _, account := range candidates {
-			if isOpenAILegacyQuotaBypassConcentrated(account, quotaBypassGroup) {
+			if isQuotaBypassConcentrated(account) {
 				if _, attempted := legacyQuotaBypassAttempted[account.ID]; attempted {
 					continue
 				}
@@ -1466,7 +1470,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		if needsUpstreamCheck && s.isUpstreamModelRestrictedByChannel(ctx, *groupID, fresh, requestedModel, requireCompact) {
 			continue
 		}
-		concentrated := isOpenAILegacyQuotaBypassConcentrated(fresh, quotaBypassGroup)
+		concentrated := isQuotaBypassConcentrated(fresh)
 		return s.newSelectionResult(ctx, fresh, false, nil, &AccountWaitPlan{
 			AccountID:      fresh.ID,
 			MaxConcurrency: s.openAISelectionMaxConcurrency(fresh, concentrated),

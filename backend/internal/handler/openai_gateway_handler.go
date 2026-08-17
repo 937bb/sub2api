@@ -403,6 +403,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		forwardModel,
 		legacyCompact,
 	))
+	c.Request = c.Request.WithContext(service.WithOpenAIQuotaBypassRequestBody(c.Request.Context(), forwardBody))
 
 	// 提前校验 function_call_output 是否具备可关联上下文，避免上游 400。
 	if !h.validateFunctionCallOutputRequest(c, body, reqLog) {
@@ -1945,7 +1946,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	// 继续按建连时刻的谷价计费。生图意图只影响能力路由与图片计费，不关门。
 	// 建连时刻只用于选号/准入，不作为任何 turn 的计费定价时刻。
 	wsPricingCtx, _ := h.gatewayService.WithOpenAIRequestPricingContext(ctx, apiKey.GroupID)
-	ctx = wsPricingCtx
+	ctx = service.WithOpenAIQuotaBypassRequestBody(wsPricingCtx, firstMessage)
 
 	for {
 		if ctx.Err() != nil {
@@ -2097,6 +2098,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		quotaBypassEnabled := service.IsQuotaBypassEligible(account, apiKey.Group)
 		quotaBypassInjectPairs := service.ResolveOpenAIQuotaBypassInjectPairs(h.cfg)
 		var quotaBypassApplied atomic.Bool
+		var quotaBypassAppliedPairs atomic.Int32
 		service.SetOpenAIQuotaBypassEnabled(c, quotaBypassEnabled)
 		ctx = c.Request.Context()
 		// Passthrough rejects overlapping response.create frames, so one immutable
@@ -2115,6 +2117,9 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			QuotaBypassEnabled:      quotaBypassEnabled,
 			QuotaBypassInjectPairs:  quotaBypassInjectPairs,
 			OnQuotaBypassApplied:    func() { quotaBypassApplied.Store(true) },
+			OnQuotaBypassAppliedWithPairs: func(pairs int) {
+				quotaBypassAppliedPairs.Store(int32(pairs))
+			},
 			BeforeRequest: func(turn int, payload []byte, originalModel string) error {
 				c.Set(securityAuditWSTurnContextKey, turn)
 				if turn == 1 {
@@ -2208,14 +2213,14 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			},
 			AfterTurn: func(turn int, result *service.OpenAIForwardResult, turnErr error) {
 				turnQuotaBypassApplied := quotaBypassApplied.Swap(false)
+				turnQuotaBypassInjectPairs := int(quotaBypassAppliedPairs.Swap(0))
 				// F1: cyber 标记按 turn 生命周期清理——defer 保证任意早返回路径都执行；
 				// CyberBlocked 必须在 submit 前同步预捕获（task 闭包由 worker 池异步执行，
 				// 届时 defer 已清除标记）。
 				defer clearCyberPolicyTurnState(c)
 				releaseTurnSlots()
-				turnQuotaBypassInjectPairs := 0
-				if turnQuotaBypassApplied {
-					turnQuotaBypassInjectPairs = quotaBypassInjectPairs
+				if !turnQuotaBypassApplied {
+					turnQuotaBypassInjectPairs = 0
 				}
 				turnRequestedModel := reqModel
 				turnUpstreamModel := ""

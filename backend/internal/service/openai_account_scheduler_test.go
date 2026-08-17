@@ -2023,6 +2023,41 @@ func TestShouldAutoPauseOpenAIAccountByQuota_QuotaBypassSkipsSnapshotPause(t *te
 	}
 }
 
+func TestShouldAutoPauseOpenAIAccountByQuota_UnavailableBypassRequestHonorsSnapshot(t *testing.T) {
+	ctx := withOpenAIQuotaAutoPauseSettings(context.Background(), OpsOpenAIAccountQuotaAutoPauseSettings{DefaultThreshold7d: 0.95})
+	ctx = WithOpenAIQuotaBypassRequestBody(ctx, []byte(`{"input":[{"type":"compaction_trigger"}]}`))
+	account := &Account{
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Extra: map[string]any{
+			"quota_bypass_enabled":   true,
+			"codex_7d_used_percent":  100.0,
+			"codex_7d_reset_at":      time.Now().Add(24 * time.Hour).Format(time.RFC3339),
+			"codex_usage_updated_at": time.Now().Format(time.RFC3339),
+		},
+	}
+
+	paused, decision := shouldAutoPauseOpenAIAccountByQuota(ctx, account)
+
+	require.True(t, paused)
+	require.Equal(t, "7d", decision.window)
+}
+
+func TestOpenAIQuotaBypassUnavailableDisablesSchedulingPrivileges(t *testing.T) {
+	account := &Account{
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Extra:    map[string]any{"quota_bypass_enabled": true},
+		AccountGroups: []AccountGroup{{
+			Group: &Group{QuotaBypassEnabled: true, QuotaBypassConcentratedSchedulingEnabled: true},
+		}},
+	}
+	req := OpenAIAccountScheduleRequest{QuotaBypassUnavailable: true}
+
+	require.False(t, isOpenAIQuotaBypassEligibleForScheduleRequest(account, req))
+	require.False(t, isOpenAIQuotaBypassConcentratedForScheduleRequest(account, req))
+}
+
 func TestOpenAIAccountScheduler_RequestGroupQuotaBypassSkipsSnapshotPause(t *testing.T) {
 	ctx := withOpenAIQuotaAutoPauseSettings(context.Background(), OpsOpenAIAccountQuotaAutoPauseSettings{DefaultThreshold7d: 0.95})
 	account := &Account{

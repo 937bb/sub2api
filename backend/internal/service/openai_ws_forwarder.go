@@ -223,10 +223,12 @@ type OpenAIWSIngressHooks struct {
 	QuotaBypassEnabled bool
 	// QuotaBypassInjectPairs is recorded in usage metadata. Production sets it to one.
 	QuotaBypassInjectPairs int
-	// OnQuotaBypassApplied is called only when a turn payload was actually changed.
-	OnQuotaBypassApplied func()
-	BeforeTurn           func(turn int) error
-	BeforeRequest        func(turn int, payload []byte, originalModel string) error
+	// OnQuotaBypassApplied is called when a turn either carries a genuine tool
+	// output or receives a synthetic pair.
+	OnQuotaBypassApplied          func()
+	OnQuotaBypassAppliedWithPairs func(pairs int)
+	BeforeTurn                    func(turn int) error
+	BeforeRequest                 func(turn int, payload []byte, originalModel string) error
 	// MapRequestModel resolves the current turn's client model to the model
 	// that must be written into the upstream response.create frame.
 	MapRequestModel func(turn int, originalModel string) (string, error)
