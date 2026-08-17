@@ -239,6 +239,8 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyOpenAICodexClientVersion:                           "",
 		SettingKeyOpenAICodexClientVersionSynced:                     "",
 		SettingKeyOpenAICodexVersionAutoSyncEnabled:                  "true",
+		SettingKeyOpenAIOAuthWSDefaultEnabled:                        "true",
+		SettingKeyOpenAICodexFingerprintDefaultFullEnabled:           "true",
 		SettingPaymentVisibleMethodAlipaySource:                      "",
 		SettingPaymentVisibleMethodWxpaySource:                       "",
 		SettingPaymentVisibleMethodAlipayEnabled:                     "false",
@@ -874,6 +876,16 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 		result.OpenAICodexVersionAutoSyncEnabled = v == "true"
 	} else {
 		result.OpenAICodexVersionAutoSyncEnabled = true
+	}
+	if v, ok := settings[SettingKeyOpenAIOAuthWSDefaultEnabled]; ok && v != "" {
+		result.OpenAIOAuthWSDefaultEnabled = v == "true"
+	} else {
+		result.OpenAIOAuthWSDefaultEnabled = true
+	}
+	if v, ok := settings[SettingKeyOpenAICodexFingerprintDefaultFullEnabled]; ok && v != "" {
+		result.OpenAICodexFingerprintDefaultFullEnabled = v == "true"
+	} else {
+		result.OpenAICodexFingerprintDefaultFullEnabled = true
 	}
 	// codex_cli_only 加固
 	result.MinCodexVersion = settings[SettingKeyMinCodexVersion]

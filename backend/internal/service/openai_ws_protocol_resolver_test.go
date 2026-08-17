@@ -75,8 +75,8 @@ func TestOpenAIWSProtocolResolver_Resolve(t *testing.T) {
 			"openai_oauth_responses_websockets_v2_enabled": false,
 		}
 		decision := NewOpenAIWSProtocolResolver(baseCfg).Resolve(&account)
-		require.Equal(t, OpenAIUpstreamTransportResponsesWebsocketV2, decision.Transport)
-		require.Equal(t, "ws_v2_enabled", decision.Reason)
+		require.Equal(t, OpenAIUpstreamTransportHTTPSSE, decision.Transport)
+		require.Equal(t, "account_mode_off", decision.Reason)
 	})
 
 	t.Run("OAuth账号不会读取API Key专用开关", func(t *testing.T) {
@@ -172,10 +172,7 @@ func TestOpenAIWSProtocolResolver_AdminCreateInputDefaultsSubscriptionAccountsTo
 				Type:        accountType,
 				Credentials: map[string]any{"access_token": "test-token"},
 				Concurrency: 1,
-			}, map[string]any{
-				"openai_oauth_responses_websockets_v2_mode":    OpenAIWSIngressModeOff,
-				"openai_oauth_responses_websockets_v2_enabled": false,
-			})
+			}, nil)
 			require.NoError(t, err)
 
 			decision := NewOpenAIWSProtocolResolver(cfg).Resolve(account)
@@ -219,8 +216,8 @@ func TestOpenAIWSProtocolResolver_Resolve_ModeRouterV2(t *testing.T) {
 			},
 		}
 		decision := NewOpenAIWSProtocolResolver(cfg).Resolve(offAccount)
-		require.Equal(t, OpenAIUpstreamTransportResponsesWebsocketV2, decision.Transport)
-		require.Equal(t, "ws_v2_mode_ctx_pool", decision.Reason)
+		require.Equal(t, OpenAIUpstreamTransportHTTPSSE, decision.Transport)
+		require.Equal(t, "account_mode_off", decision.Reason)
 	})
 
 	t.Run("legacy boolean maps to ctx_pool in v2 router", func(t *testing.T) {
@@ -261,8 +258,8 @@ func TestOpenAIWSProtocolResolver_Resolve_ModeRouterV2(t *testing.T) {
 			},
 		}
 		decision := NewOpenAIWSProtocolResolver(cfg).Resolve(httpBridgeAccount)
-		require.Equal(t, OpenAIUpstreamTransportResponsesWebsocketV2, decision.Transport)
-		require.Equal(t, "ws_v2_mode_ctx_pool", decision.Reason)
+		require.Equal(t, OpenAIUpstreamTransportHTTPSSE, decision.Transport)
+		require.Equal(t, "account_mode_http_bridge", decision.Reason)
 	})
 
 	t.Run("non-positive concurrency is rejected in v2 router", func(t *testing.T) {

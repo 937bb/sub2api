@@ -1,6 +1,10 @@
 package service
 
-import "github.com/Wei-Shaw/sub2api/internal/config"
+import (
+	"context"
+
+	"github.com/Wei-Shaw/sub2api/internal/config"
+)
 
 // OpenAIUpstreamTransport 表示 OpenAI 上游传输协议。
 type OpenAIUpstreamTransport string
@@ -42,17 +46,31 @@ func resolveOpenAIWSRoutingMode(account *Account, defaultMode string) string {
 	if account == nil {
 		return OpenAIWSIngressModeOff
 	}
-	mode := account.ResolveOpenAIResponsesWebSocketV2Mode(defaultMode)
-	if !account.IsOpenAIOAuthLike() {
-		return mode
+	return account.ResolveOpenAIResponsesWebSocketV2Mode(defaultMode)
+}
+
+// resolveOpenAIWSProtocolDecision applies the runtime system default without
+// weakening config-level hard gates or account-level explicit overrides.
+func (s *OpenAIGatewayService) resolveOpenAIWSProtocolDecision(ctx context.Context, account *Account) OpenAIWSProtocolDecision {
+	decision := s.getOpenAIWSProtocolResolver().Resolve(account)
+	if account == nil || !account.IsOpenAIOAuthLike() || account.IsOpenAIWSForceHTTPEnabled() {
+		return decision
 	}
-	switch mode {
-	case OpenAIWSIngressModeCtxPool, OpenAIWSIngressModePassthrough,
-		OpenAIWSIngressModeShared, OpenAIWSIngressModeDedicated:
-		return mode
-	default:
-		return OpenAIWSIngressModeCtxPool
+	if mode, explicit := account.resolveOpenAIResponsesWebSocketV2Override(); explicit {
+		switch mode {
+		case OpenAIWSIngressModeOff:
+			return openAIWSHTTPDecision("account_mode_off")
+		case OpenAIWSIngressModeHTTPBridge:
+			return openAIWSHTTPDecision("account_mode_http_bridge")
+		default:
+			return decision
+		}
 	}
+	oauthWSDefaultEnabled, _ := s.openAIRuntimeDefaults(ctx)
+	if !oauthWSDefaultEnabled {
+		return openAIWSHTTPDecision("system_default_disabled")
+	}
+	return decision
 }
 
 func (r *defaultOpenAIWSProtocolResolver) Resolve(account *Account) OpenAIWSProtocolDecision {
@@ -86,6 +104,16 @@ func (r *defaultOpenAIWSProtocolResolver) Resolve(account *Account) OpenAIWSProt
 		}
 	} else {
 		return openAIWSHTTPDecision("unknown_auth_type")
+	}
+	if account.IsOpenAIOAuthLike() {
+		if mode, explicit := account.resolveOpenAIResponsesWebSocketV2Override(); explicit {
+			switch mode {
+			case OpenAIWSIngressModeOff:
+				return openAIWSHTTPDecision("account_mode_off")
+			case OpenAIWSIngressModeHTTPBridge:
+				return openAIWSHTTPDecision("account_mode_http_bridge")
+			}
+		}
 	}
 	if wsCfg.ModeRouterV2Enabled {
 		mode := resolveOpenAIWSRoutingMode(account, wsCfg.IngressModeDefault)

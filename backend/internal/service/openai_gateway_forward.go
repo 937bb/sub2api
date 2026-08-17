@@ -72,7 +72,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			body = liteBody
 		}
 	}
-	wsDecision := s.getOpenAIWSProtocolResolver().Resolve(account)
+	wsDecision := s.resolveOpenAIWSProtocolDecision(ctx, account)
 	// HTTP/SSE downstream can use the WSv2 upstream bridge when explicitly
 	// enabled. The client still receives the normal Responses SSE contract.
 	httpIngressUpstreamWSEnabled := s != nil && s.cfg != nil && s.cfg.Gateway.OpenAIWS.HTTPIngressUpstreamWSEnabled
@@ -442,7 +442,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			if c != nil && c.Request != nil {
 				clientHeaders = c.Request.Header
 			}
-			fpIDs := resolveCodexFingerprintIDsFromRequest(account, clientHeaders)
+			fpIDs := s.resolveCodexFingerprintIDsForRequest(ctx, account, clientHeaders)
 			if fpIDs != nil {
 				if applyCodexFingerprintClientMetadata(decoded, fpIDs) {
 					markDecodedModified()

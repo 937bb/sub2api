@@ -504,6 +504,10 @@ export default {
         openaiCodexVersionAutoSync: '自动同步 Codex 版本号',
         openaiCodexVersionAutoSyncHint: '每 6 小时从官方仓库获取最新稳定版客户端版本号，无需为了跟版本而升级本服务。关闭后仅使用上方手填版本或内置版本。',
         openaiCodexVersionSyncedValue: '当前同步到：{version}',
+        openaiOAuthWSDefault: 'OpenAI 订阅账号默认使用 WS',
+        openaiOAuthWSDefaultHint: '默认开启。OAuth、PAT 和 Setup Token 账号未设置账号级模式时使用 WSv2；账号显式关闭或服务端配置硬开关优先。API Key 不受此默认值影响。',
+        openaiCodexFingerprintDefaultFull: 'Codex 指纹默认完全收敛',
+        openaiCodexFingerprintDefaultFullHint: '默认开启。订阅账号未设置账号级指纹模式时使用 full；账号显式 off、device、session 或 full 优先。',
         codexHardeningTitle: 'Codex 设置',
         codexClientRestrictionTitle: 'Codex 客户端限制',
         codexHardeningDesc:

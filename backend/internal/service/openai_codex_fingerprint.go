@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/json"
@@ -34,7 +35,7 @@ func stageCodexFingerprintIDs(c *gin.Context, ids *codexFingerprintIDs) {
 // 非透传与透传两个请求构造器共用本函数，防止应用语义漂移。仅 OAuth 账号
 // 生效（stale 键在账号类型混合 failover 下由该门挡住）。
 func applyStagedCodexFingerprintHeaders(c *gin.Context, account *Account, h http.Header) {
-	if c == nil || account == nil || account.Type != AccountTypeOAuth {
+	if c == nil || account == nil || !account.IsOpenAIOAuthLike() {
 		return
 	}
 	value, ok := c.Get(codexFingerprintIDsContextKey)
@@ -75,7 +76,13 @@ const codexFingerprintModeExtraKey = "codex_fingerprint_mode"
 // OpenAI OAuth 未设置、空值或非法值时默认完全收敛；管理员仍可显式配置
 // off、device 或 session 覆盖默认行为。非 OpenAI OAuth 账号始终关闭。
 func (a *Account) GetCodexFingerprintMode() codexFingerprintMode {
-	if a == nil || !a.IsOpenAIOAuth() {
+	return a.GetCodexFingerprintModeWithDefault(true)
+}
+
+// GetCodexFingerprintModeWithDefault resolves the account override first and
+// uses the system default only when the account has no valid explicit mode.
+func (a *Account) GetCodexFingerprintModeWithDefault(defaultFull bool) codexFingerprintMode {
+	if a == nil || !a.IsOpenAIOAuthLike() {
 		return codexFingerprintOff
 	}
 	raw := strings.TrimSpace(a.GetExtraString(codexFingerprintModeExtraKey))
@@ -83,7 +90,10 @@ func (a *Account) GetCodexFingerprintMode() codexFingerprintMode {
 	case codexFingerprintOff, codexFingerprintDevice, codexFingerprintSession, codexFingerprintFull:
 		return codexFingerprintMode(raw)
 	default:
-		return codexFingerprintFull
+		if defaultFull {
+			return codexFingerprintFull
+		}
+		return codexFingerprintOff
 	}
 }
 
@@ -203,10 +213,14 @@ func extractClientSessionID(h http.Header) string {
 // 结合账号配置一次性解析收敛 ID 集合。调用方应将返回的 ids 同时传给
 // applyCodexFingerprintHeaders 和 applyCodexFingerprintClientMetadata。
 func resolveCodexFingerprintIDsFromRequest(account *Account, clientHeaders http.Header) *codexFingerprintIDs {
+	return resolveCodexFingerprintIDsFromRequestWithDefault(account, clientHeaders, true)
+}
+
+func resolveCodexFingerprintIDsFromRequestWithDefault(account *Account, clientHeaders http.Header, defaultFull bool) *codexFingerprintIDs {
 	if account == nil {
 		return nil
 	}
-	mode := account.GetCodexFingerprintMode()
+	mode := account.GetCodexFingerprintModeWithDefault(defaultFull)
 	if mode == codexFingerprintOff {
 		return nil
 	}
@@ -215,6 +229,11 @@ func resolveCodexFingerprintIDsFromRequest(account *Account, clientHeaders http.
 		clientSessionID = extractClientSessionID(clientHeaders)
 	}
 	return resolveCodexFingerprintIDs(account, clientSessionID, mode)
+}
+
+func (s *OpenAIGatewayService) resolveCodexFingerprintIDsForRequest(ctx context.Context, account *Account, clientHeaders http.Header) *codexFingerprintIDs {
+	_, defaultFull := s.openAIRuntimeDefaults(ctx)
+	return resolveCodexFingerprintIDsFromRequestWithDefault(account, clientHeaders, defaultFull)
 }
 
 // applyCodexFingerprintHeaders 按预计算的收敛 ID 改写出站 HTTP 头中的设备指纹。

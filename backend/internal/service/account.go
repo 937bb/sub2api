@@ -1740,7 +1740,7 @@ func (a *Account) IsOpenAIResponsesWebSocketV2Enabled() bool {
 	if a == nil || !a.IsOpenAI() || a.Extra == nil {
 		return false
 	}
-	if a.IsOpenAIOAuth() {
+	if a.IsOpenAIOAuthLike() {
 		if enabled, ok := a.Extra["openai_oauth_responses_websockets_v2_enabled"].(bool); ok {
 			return enabled
 		}
@@ -1809,8 +1809,21 @@ func (a *Account) ResolveOpenAIResponsesWebSocketV2Mode(defaultMode string) stri
 	if a == nil || !a.IsOpenAI() {
 		return OpenAIWSIngressModeOff
 	}
-	if a.Extra == nil {
-		return resolvedDefault
+	if mode, ok := a.resolveOpenAIResponsesWebSocketV2Override(); ok {
+		return mode
+	}
+	// 兼容旧值：shared/dedicated 语义都归并到 ctx_pool。
+	if resolvedDefault == OpenAIWSIngressModeShared || resolvedDefault == OpenAIWSIngressModeDedicated {
+		return OpenAIWSIngressModeCtxPool
+	}
+	return resolvedDefault
+}
+
+// resolveOpenAIResponsesWebSocketV2Override returns only an explicit account
+// override. A missing value is distinct from off because it inherits the system default.
+func (a *Account) resolveOpenAIResponsesWebSocketV2Override() (string, bool) {
+	if a == nil || !a.IsOpenAI() || a.Extra == nil {
+		return "", false
 	}
 
 	resolveModeString := func(key string) (string, bool) {
@@ -1843,33 +1856,29 @@ func (a *Account) ResolveOpenAIResponsesWebSocketV2Mode(defaultMode string) stri
 		return OpenAIWSIngressModeOff, true
 	}
 
-	if a.IsOpenAIOAuth() {
+	if a.IsOpenAIOAuthLike() {
 		if mode, ok := resolveModeString("openai_oauth_responses_websockets_v2_mode"); ok {
-			return mode
+			return mode, true
 		}
 		if mode, ok := resolveBoolMode("openai_oauth_responses_websockets_v2_enabled"); ok {
-			return mode
+			return mode, true
 		}
 	}
 	if a.IsOpenAIApiKey() {
 		if mode, ok := resolveModeString("openai_apikey_responses_websockets_v2_mode"); ok {
-			return mode
+			return mode, true
 		}
 		if mode, ok := resolveBoolMode("openai_apikey_responses_websockets_v2_enabled"); ok {
-			return mode
+			return mode, true
 		}
 	}
 	if mode, ok := resolveBoolMode("responses_websockets_v2_enabled"); ok {
-		return mode
+		return mode, true
 	}
 	if mode, ok := resolveBoolMode("openai_ws_enabled"); ok {
-		return mode
+		return mode, true
 	}
-	// 兼容旧值：shared/dedicated 语义都归并到 ctx_pool。
-	if resolvedDefault == OpenAIWSIngressModeShared || resolvedDefault == OpenAIWSIngressModeDedicated {
-		return OpenAIWSIngressModeCtxPool
-	}
-	return resolvedDefault
+	return "", false
 }
 
 // IsOpenAIWSForceHTTPEnabled 返回账号级"强制 HTTP"开关。

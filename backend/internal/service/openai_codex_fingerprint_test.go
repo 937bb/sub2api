@@ -78,7 +78,8 @@ func TestNormalizeCodexFingerprintExtraForCreate(t *testing.T) {
 		extra       map[string]any
 		want        any
 	}{
-		{name: "OpenAI OAuth defaults full", platform: PlatformOpenAI, accountType: AccountTypeOAuth, want: "full"},
+		{name: "OpenAI OAuth inherits system default", platform: PlatformOpenAI, accountType: AccountTypeOAuth, want: nil},
+		{name: "OpenAI setup token inherits system default", platform: PlatformOpenAI, accountType: AccountTypeSetupToken, want: nil},
 		{name: "explicit off is preserved", platform: PlatformOpenAI, accountType: AccountTypeOAuth, extra: map[string]any{codexFingerprintModeExtraKey: "off"}, want: "off"},
 		{name: "non OAuth is unchanged", platform: PlatformOpenAI, accountType: AccountTypeAPIKey, extra: map[string]any{"keep": true}, want: nil},
 	}

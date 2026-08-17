@@ -488,6 +488,12 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if before.OpenAICodexVersionAutoSyncEnabled != after.OpenAICodexVersionAutoSyncEnabled {
 		changed = append(changed, "openai_codex_version_auto_sync_enabled")
 	}
+	if before.OpenAIOAuthWSDefaultEnabled != after.OpenAIOAuthWSDefaultEnabled {
+		changed = append(changed, "openai_oauth_ws_default_enabled")
+	}
+	if before.OpenAICodexFingerprintDefaultFullEnabled != after.OpenAICodexFingerprintDefaultFullEnabled {
+		changed = append(changed, "openai_codex_fingerprint_default_full_enabled")
+	}
 	if before.PaymentVisibleMethodAlipaySource != after.PaymentVisibleMethodAlipaySource {
 		changed = append(changed, "payment_visible_method_alipay_source")
 	}
