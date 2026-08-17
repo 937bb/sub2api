@@ -356,6 +356,55 @@ func TestFingerprintIDs_HeaderAndBody_TurnID_Consistent(t *testing.T) {
 	assert.Equal(t, headerTurnID, bodyTurnID, "头和体的 turn_id 必须一致")
 	assert.Equal(t, headerTurnID, bodyEmbeddedTurnID, "头和体内嵌 turn-metadata 的 turn_id 必须一致")
 	assert.Equal(t, ids.turnID, headerTurnID, "所有 turn_id 都应来自同一份 ids")
+	assert.Equal(t, headerMeta["turn_started_at_unix_ms"], bodyMeta["turn_started_at_unix_ms"], "头和体的启动时间必须一致")
+	assert.Equal(t, float64(ids.turnStartedAtUnixMs), headerMeta["turn_started_at_unix_ms"])
+}
+
+func TestCodexFingerprintSynthesizesMissingTurnMetadata(t *testing.T) {
+	account := newTestOAuthAccount(77, nil)
+	ids := resolveCodexFingerprintIDsFromRequest(account, nil)
+	require.NotNil(t, ids)
+
+	h := http.Header{}
+	body := map[string]any{}
+	applyCodexFingerprintHeaders(h, ids)
+	require.True(t, applyCodexFingerprintClientMetadata(body, ids))
+
+	var headerMeta map[string]any
+	require.NoError(t, json.Unmarshal([]byte(h.Get("x-codex-turn-metadata")), &headerMeta))
+	clientMetadata := body["client_metadata"].(map[string]any)
+	embedded, ok := clientMetadata["x-codex-turn-metadata"].(string)
+	require.True(t, ok)
+	var bodyMeta map[string]any
+	require.NoError(t, json.Unmarshal([]byte(embedded), &bodyMeta))
+
+	for _, key := range []string{"installation_id", "session_id", "thread_id", "turn_id", "window_id", "turn_started_at_unix_ms"} {
+		assert.Equal(t, headerMeta[key], bodyMeta[key], "%s 必须在头和请求体中一致", key)
+	}
+	assert.Equal(t, ids.turnID, clientMetadata["turn_id"])
+	assert.NotContains(t, headerMeta, "request_kind", "不得臆造客户端行为字段")
+}
+
+func TestCodexFingerprintRepairsMalformedTurnMetadataAndPreservesValidFields(t *testing.T) {
+	account := newTestOAuthAccount(78, nil)
+	ids := resolveCodexFingerprintIDsFromRequest(account, nil)
+	require.NotNil(t, ids)
+
+	h := http.Header{}
+	h.Set("x-codex-turn-metadata", "not-json")
+	applyCodexFingerprintHeaders(h, ids)
+	var repaired map[string]any
+	require.NoError(t, json.Unmarshal([]byte(h.Get("x-codex-turn-metadata")), &repaired))
+	assert.Equal(t, ids.sessionID, repaired["session_id"])
+
+	h.Set("x-codex-turn-metadata", `{"sandbox":"danger-full-access","request_kind":"review","thread_source":"user"}`)
+	applyCodexFingerprintHeaders(h, ids)
+	var preserved map[string]any
+	require.NoError(t, json.Unmarshal([]byte(h.Get("x-codex-turn-metadata")), &preserved))
+	assert.Equal(t, "danger-full-access", preserved["sandbox"])
+	assert.Equal(t, "review", preserved["request_kind"])
+	assert.Equal(t, "user", preserved["thread_source"])
+	assert.Equal(t, ids.threadID, preserved["thread_id"])
 }
 
 // --- applyCodexFingerprintClientMetadata ---

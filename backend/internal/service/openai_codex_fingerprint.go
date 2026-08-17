@@ -136,12 +136,13 @@ func resolveConvergedThreadID(account *Account, clientSessionID string) string {
 // 由 resolveCodexFingerprintIDs 一次性生成，同一个实例在头改写和体改写之间共享，
 // 确保所有载体中的 turn_id 等随机字段一致。
 type codexFingerprintIDs struct {
-	mode           codexFingerprintMode
-	installationID string
-	sessionID      string
-	threadID       string
-	turnID         string
-	windowID       string
+	mode                codexFingerprintMode
+	installationID      string
+	sessionID           string
+	threadID            string
+	turnID              string
+	windowID            string
+	turnStartedAtUnixMs int64
 }
 
 // resolveCodexFingerprintIDs 按收敛模式计算出站 ID 集合。
@@ -173,6 +174,7 @@ func resolveCodexFingerprintIDs(account *Account, clientSessionID string, mode c
 		}
 		ids.turnID = uuid.Must(uuid.NewV7()).String()
 		ids.windowID = ids.threadID + ":0"
+		ids.turnStartedAtUnixMs = time.Now().UnixMilli()
 		return ids
 
 	case codexFingerprintFull:
@@ -180,6 +182,7 @@ func resolveCodexFingerprintIDs(account *Account, clientSessionID string, mode c
 		ids.threadID = ids.sessionID
 		ids.turnID = uuid.Must(uuid.NewV7()).String()
 		ids.windowID = ids.threadID + ":0"
+		ids.turnStartedAtUnixMs = time.Now().UnixMilli()
 		return ids
 	}
 
@@ -245,29 +248,17 @@ func applyCodexFingerprintHeaders(h http.Header, ids *codexFingerprintIDs) {
 		"thread_id":               ids.threadID,
 		"turn_id":                 ids.turnID,
 		"window_id":               ids.windowID,
-		"turn_started_at_unix_ms": time.Now().UnixMilli(),
+		"turn_started_at_unix_ms": ids.turnStartedAtUnixMs,
 	})
 }
 
 // rewriteCodexTurnMetadataFields 解析 x-codex-turn-metadata 头中的 JSON，
-// 替换指定字段后回写。保留未指定字段原样（如 sandbox、thread_source 等）。
+// 替换指定字段后回写。缺少或畸形时创建一个最小、有效的身份对象；已有的
+// 未指定字段保持原样（如 request_kind、sandbox、thread_source 等）。
 func rewriteCodexTurnMetadataFields(h http.Header, fields map[string]any) {
-	raw := strings.TrimSpace(h.Get("x-codex-turn-metadata"))
-	if raw == "" {
-		return
+	if rebuilt, ok := mergeCodexTurnMetadata(h.Get("x-codex-turn-metadata"), fields); ok {
+		h.Set("x-codex-turn-metadata", rebuilt)
 	}
-	var metadata map[string]any
-	if err := json.Unmarshal([]byte(raw), &metadata); err != nil {
-		return
-	}
-	for k, v := range fields {
-		metadata[k] = v
-	}
-	rebuilt, err := json.Marshal(metadata)
-	if err != nil {
-		return
-	}
-	h.Set("x-codex-turn-metadata", string(rebuilt))
 }
 
 // applyCodexFingerprintClientMetadata 按预计算的收敛 ID 改写请求体中的 client_metadata。
@@ -323,7 +314,7 @@ func applyCodexFingerprintToClientMetadataMap(existing map[string]any, ids *code
 		"thread_id":               ids.threadID,
 		"turn_id":                 ids.turnID,
 		"window_id":               ids.windowID,
-		"turn_started_at_unix_ms": time.Now().UnixMilli(),
+		"turn_started_at_unix_ms": ids.turnStartedAtUnixMs,
 	})
 	return true
 }
@@ -367,20 +358,31 @@ func applyCodexFingerprintClientMetadataRaw(body []byte, ids *codexFingerprintID
 }
 
 // rewriteClientMetadataEmbeddedTurnMetadata 改写 client_metadata 中内嵌的
-// x-codex-turn-metadata JSON 字符串里的指定字段。
+// x-codex-turn-metadata JSON 字符串里的指定字段；缺少或畸形时补建最小对象。
 func rewriteClientMetadataEmbeddedTurnMetadata(clientMetadata map[string]any, fields map[string]any) {
-	raw, ok := clientMetadata["x-codex-turn-metadata"].(string)
-	if !ok || raw == "" {
-		return
+	raw, _ := clientMetadata["x-codex-turn-metadata"].(string)
+	if rebuilt, ok := mergeCodexTurnMetadata(raw, fields); ok {
+		clientMetadata["x-codex-turn-metadata"] = rebuilt
 	}
+}
+
+// mergeCodexTurnMetadata 合并官方 Codex turn metadata 身份字段。调用方只传入
+// 网关能够证明并保持一致的字段，不在客户端缺失时臆造 request_kind 或运行环境。
+func mergeCodexTurnMetadata(raw string, fields map[string]any) (string, bool) {
 	var metadata map[string]any
-	if err := json.Unmarshal([]byte(raw), &metadata); err != nil {
-		return
+	trimmed := strings.TrimSpace(raw)
+	if trimmed != "" {
+		_ = json.Unmarshal([]byte(trimmed), &metadata)
+	}
+	if metadata == nil {
+		metadata = make(map[string]any, len(fields))
 	}
 	for k, v := range fields {
 		metadata[k] = v
 	}
-	if rebuilt, err := json.Marshal(metadata); err == nil {
-		clientMetadata["x-codex-turn-metadata"] = string(rebuilt)
+	rebuilt, err := json.Marshal(metadata)
+	if err != nil {
+		return "", false
 	}
+	return string(rebuilt), true
 }
