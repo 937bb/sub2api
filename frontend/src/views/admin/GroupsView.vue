@@ -701,6 +701,20 @@
               </div>
             </div>
           </div>
+          <div
+            v-if="createForm.quota_bypass_enabled"
+            class="flex w-full flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500 dark:text-gray-400"
+          >
+            <span>{{ t("admin.groups.quotaBypass.wsTurnProcessing") }}</span>
+            <span>
+              {{
+                createForm.quota_bypass_concentrated_scheduling_enabled
+                  ? t("admin.groups.quotaBypass.concentrationActive")
+                  : t("admin.groups.quotaBypass.concentrationInactive")
+              }}
+            </span>
+            <span>{{ t("admin.groups.quotaBypass.retry429") }}</span>
+          </div>
         </div>
         <div
           v-if="createForm.subscription_type !== 'subscription'"
@@ -2552,6 +2566,20 @@
                 </div>
               </div>
             </div>
+          </div>
+          <div
+            v-if="editForm.quota_bypass_enabled"
+            class="flex w-full flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500 dark:text-gray-400"
+          >
+            <span>{{ t("admin.groups.quotaBypass.wsTurnProcessing") }}</span>
+            <span>
+              {{
+                editForm.quota_bypass_concentrated_scheduling_enabled
+                  ? t("admin.groups.quotaBypass.concentrationActive")
+                  : t("admin.groups.quotaBypass.concentrationInactive")
+              }}
+            </span>
+            <span>{{ t("admin.groups.quotaBypass.retry429") }}</span>
           </div>
         </div>
         <div v-if="editForm.subscription_type !== 'subscription'">

@@ -422,14 +422,14 @@ gateway:
       upstream_cost: 0.0
   # OpenAI 高级调度器补充配置
   openai_scheduler:
-    # 是否允许 session_hash sticky 在账号健康度恶化时临时逃逸；false 可一键回退旧行为
-    sticky_escape_enabled: true
+    # 是否允许 session_hash sticky 在账号健康度恶化时临时逃逸；默认关闭以保护多账号分组的 prompt cache 命中率
+    sticky_escape_enabled: false
     # TTFT EWMA 超过该阈值（毫秒）时跳过 sticky，默认 15s，避免轻微抖动就逃逸
     sticky_escape_ttft_ms: 15000
     # 错误率 EWMA 超过该阈值时跳过 sticky，默认 0.5，仅在明显降级时触发
     sticky_escape_error_rate: 0.5
-    # 集中调度的账号达到此在途并发后先启用下一个超额账号；0 表示一直用账号硬并发上限。
-    # 该值只影响开启“超额集中调度”的账号，不影响 funcall 超额和普通负载分配。
+    # 集中账号的新会话软并发；0 自动预留 15% 硬并发给已有 sticky 会话，显式正数优先。
+    # 只影响开启“超额集中调度”的新会话，不影响已有会话、funcall 超额和普通负载分配。
     quota_bypass_soft_concurrency: 0
   # OpenAI HTTP upstream protocol strategy.
   # OpenAI HTTP 上游协议策略（默认 HTTP/2；代理明确不兼容时可临时回退 HTTP/1.1）。

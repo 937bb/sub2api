@@ -481,14 +481,6 @@ func (s *defaultOpenAIAccountScheduler) Select(
 	}
 
 	useSessionSticky := !req.StickyWeighted
-	if useSessionSticky && strings.TrimSpace(req.SessionHash) != "" && s != nil && s.service != nil {
-		// Hard previous_response affinity was handled above. Soft session
-		// affinity must not bypass quota-bypass concentration.
-		if s.prefetchOpenAIAccountCandidates(ctx, &req) &&
-			hasOpenAIQuotaBypassCandidatesForScheduleRequest(req.prefetchedAccounts, req) {
-			useSessionSticky = false
-		}
-	}
 	if useSessionSticky {
 		selection, escapedSticky, err := s.selectBySessionHash(ctx, req)
 		if err != nil {
@@ -656,8 +648,10 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 	// Quota bypass depends on keeping an established Codex session on the same
 	// account. This is plan-agnostic: Plus, Team and other OAuth plans use the
 	// same account/group eligibility rule.
-	preserveQuotaBypassSession := isOpenAIQuotaBypassConcentratedForScheduleRequest(account, req)
-	accountMaxConcurrency := s.service.openAISelectionMaxConcurrency(account, preserveQuotaBypassSession)
+	concentratedQuotaBypass := isOpenAIQuotaBypassConcentratedForScheduleRequest(account, req)
+	// Existing sessions own their prompt-cache affinity up to the account's hard
+	// limit. The concentrated soft limit applies only while placing new sessions.
+	accountMaxConcurrency := account.Concurrency
 	// Free-tier soft gate: sticky session must not pin an over-quota free OAuth account.
 	// Admin QueryQuota / import probes do not use this path.
 	if account != nil && len(s.filterGrokFreeQuotaAccounts(ctx, []Account{*account})) == 0 {
@@ -676,7 +670,7 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 		return nil, false, nil
 	}
 	escapeCfg := s.service.openAIStickyEscapeConfig()
-	if reason, errorRate, ttft, shouldEscape := s.shouldEscapeStickyAccount(accountID, escapeCfg); shouldEscape && !preserveQuotaBypassSession {
+	if reason, errorRate, ttft, shouldEscape := s.shouldEscapeStickyAccount(accountID, escapeCfg); shouldEscape && !concentratedQuotaBypass {
 		slog.Info("sticky_escape_triggered",
 			"account_id", accountID,
 			"reason", reason,
@@ -698,23 +692,9 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 	cfg := s.service.schedulingConfig()
 	// WaitPlan.MaxConcurrency 使用 Concurrency（非 EffectiveLoadFactor），因为 WaitPlan 控制的是 Redis 实际并发槽位等待。
 	if s.service.concurrencyService != nil {
-		// A quota-bypass account must not queue excess work on itself. Let the
-		// load-balancer try the next bypass account, then regular accounts only
-		// after the entire bypass pool is full. Returning escapedSticky=false
-		// keeps the session binding movable to the newly selected account.
-		if preserveQuotaBypassSession && acquireErr == nil && result != nil && !result.Acquired {
-			return nil, false, nil
-		}
-		if escapeCfg.enabled && !preserveQuotaBypassSession && acquireErr == nil && result != nil && !result.Acquired {
-			errorRate, ttft, _ := s.stats.snapshot(accountID)
-			slog.Info("sticky_escape_triggered",
-				"account_id", accountID,
-				"reason", "concurrency_full",
-				"error_rate", errorRate,
-				"ttft", ttft,
-			)
-			return nil, true, nil
-		}
+		// A full concurrency slot is capacity pressure, not an account-health
+		// failure. Keep the session on its bound account and return a wait plan;
+		// moving it to another account fragments upstream prompt-cache locality.
 		return attachSelectionProfitGate(ctx, &AccountSelectionResult{
 			Account: account,
 			WaitPlan: &AccountWaitPlan{
@@ -1313,21 +1293,6 @@ func partitionOpenAIQuotaBypassCandidates(pool []openAIAccountCandidateScore, re
 		regular = append(regular, candidate)
 	}
 	return bypass, regular
-}
-
-func hasOpenAIQuotaBypassCandidatesForScheduleRequest(accounts []Account, req OpenAIAccountScheduleRequest) bool {
-	for i := range accounts {
-		account := &accounts[i]
-		if req.ExcludedIDs != nil {
-			if _, excluded := req.ExcludedIDs[account.ID]; excluded {
-				continue
-			}
-		}
-		if isOpenAIQuotaBypassConcentratedForScheduleRequest(account, req) {
-			return true
-		}
-	}
-	return false
 }
 
 // buildOpenAIQuotaBypassConcentratedOrder fills one account before moving to
@@ -2807,10 +2772,6 @@ func (s *OpenAIGatewayService) openAIWSLBTopKForRequest(ctx context.Context) int
 func (s *OpenAIGatewayService) openAIStickyEscapeConfig() openAIStickyEscapeConfig {
 	if s != nil && s.cfg != nil {
 		cfg := s.cfg.Gateway.OpenAIScheduler
-		enabled := cfg.StickyEscapeEnabled
-		if !enabled && cfg.StickyEscapeTTFTMs == 0 && cfg.StickyEscapeErrorRate == 0 {
-			enabled = true
-		}
 		ttftMs := float64(cfg.StickyEscapeTTFTMs)
 		if ttftMs <= 0 {
 			ttftMs = 15000
@@ -2823,13 +2784,13 @@ func (s *OpenAIGatewayService) openAIStickyEscapeConfig() openAIStickyEscapeConf
 			errorRate = 0.5
 		}
 		return openAIStickyEscapeConfig{
-			enabled:   enabled,
+			enabled:   cfg.StickyEscapeEnabled,
 			ttftMs:    ttftMs,
 			errorRate: errorRate,
 		}
 	}
 	return openAIStickyEscapeConfig{
-		enabled:   true,
+		enabled:   false,
 		ttftMs:    15000,
 		errorRate: 0.5,
 	}

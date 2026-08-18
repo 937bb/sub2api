@@ -71,16 +71,6 @@ var (
 		end
 		return value
 	`)
-	quotaBypassActivePromoteScript = redis.NewScript(`
-		local candidate = tonumber(ARGV[1])
-		local current = tonumber(redis.call('GET', KEYS[1]))
-		if not current or candidate < current then
-			redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2])
-		else
-			redis.call('EXPIRE', KEYS[1], ARGV[2])
-		end
-		return 1
-	`)
 	quotaBypassActiveAdvanceScript = redis.NewScript(`
 		local observed = tonumber(ARGV[1])
 		local next = tonumber(ARGV[2])
@@ -490,22 +480,6 @@ func (c *concurrencyCache) AdvanceQuotaBypassActiveAccount(ctx context.Context, 
 		nextAccountID,
 		int64(ttl/time.Second),
 	).Int64()
-}
-
-func (c *concurrencyCache) PromoteQuotaBypassActiveAccount(ctx context.Context, poolKey string, accountID int64, ttl time.Duration) error {
-	if c == nil || c.rdb == nil || poolKey == "" || accountID <= 0 {
-		return nil
-	}
-	if ttl <= 0 {
-		ttl = 15 * time.Minute
-	}
-	return quotaBypassActivePromoteScript.Run(
-		ctx,
-		c.rdb,
-		[]string{quotaBypassActiveAccountKey(poolKey)},
-		accountID,
-		int64(ttl/time.Second),
-	).Err()
 }
 
 func waitQueueKey(userID int64) string {

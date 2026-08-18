@@ -72,7 +72,7 @@ func TestLiveLeaseExpiresWithoutRefresh(t *testing.T) {
 	require.False(t, refreshed)
 }
 
-func TestQuotaBypassActiveAccountIsSharedAndReleaseOnlyPromotesEarlierAccount(t *testing.T) {
+func TestQuotaBypassActiveAccountIsSharedAndOnlyAdvancesByCompareAndSet(t *testing.T) {
 	redisServer := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: redisServer.Addr()})
 	routing, ok := NewConcurrencyCache(client, 15, 900).(service.QuotaBypassRoutingCache)
@@ -93,13 +93,9 @@ func TestQuotaBypassActiveAccountIsSharedAndReleaseOnlyPromotesEarlierAccount(t 
 	activeID, err = routing.AdvanceQuotaBypassActiveAccount(ctx, poolKey, 30, 40, 15*time.Minute)
 	require.NoError(t, err)
 	require.Equal(t, int64(40), activeID)
-	// A later account finishing must not steal the active cursor, while an
-	// earlier account release should pull new traffic back to refill it.
-	require.NoError(t, routing.PromoteQuotaBypassActiveAccount(ctx, poolKey, 50, 15*time.Minute))
-	require.NoError(t, routing.PromoteQuotaBypassActiveAccount(ctx, poolKey, 10, 15*time.Minute))
 	accountID, err = routing.GetQuotaBypassActiveAccount(ctx, poolKey)
 	require.NoError(t, err)
-	require.Equal(t, int64(10), accountID)
+	require.Equal(t, int64(40), accountID)
 
 	redisServer.FastForward(16 * time.Minute)
 	accountID, err = routing.GetQuotaBypassActiveAccount(ctx, poolKey)

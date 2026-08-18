@@ -1167,9 +1167,13 @@ export default {
       },
       quotaBypass: {
         enable: '启用 Codex 超额绕过',
-        tooltip: '为该分组下 OpenAI OAuth 账号的每个请求注入一组 function_call + function_call_output。仅修改请求体，响应错误仍按常规逻辑处理；可由账号设置单独覆盖。',
+        tooltip: '为该分组下 OpenAI OAuth 账号的每个请求注入一组 function_call + function_call_output。HTTP 与 WS 会话均在上游发送前逐轮处理；429 会在同账号有限重试后进入常规故障转移。可由账号设置单独启用。',
         concentratedScheduling: '集中调度',
-        concentratedSchedulingTooltip: '开启后优先将请求集中到同一批 Bypass 账号；关闭后仍保留超额绕过能力，但按普通规则调度。仅当前分组的设置生效。'
+        concentratedSchedulingTooltip: '开启后优先将并发集中到同一 Bypass 账号，满载后再推进下一账号；关闭后仍保留超额绕过能力，但按普通规则调度。',
+        wsTurnProcessing: 'WS 会话逐轮预处理',
+        concentrationActive: '并发集中：已启用',
+        concentrationInactive: '并发集中：普通调度',
+        retry429: '429 同账号有限重试'
       },
       copyAccounts: {
         title: '从分组复制账号',

@@ -208,15 +208,6 @@ func (c *schedulerSharedQuotaBypassCache) AdvanceQuotaBypassActiveAccount(_ cont
 	return current, nil
 }
 
-func (c *schedulerSharedQuotaBypassCache) PromoteQuotaBypassActiveAccount(_ context.Context, poolKey string, accountID int64, _ time.Duration) error {
-	c.mu.Lock()
-	if current := c.active[poolKey]; current == 0 || accountID < current {
-		c.active[poolKey] = accountID
-	}
-	c.mu.Unlock()
-	return nil
-}
-
 func (c schedulerTestConcurrencyCache) AcquireAccountSlot(ctx context.Context, accountID int64, maxConcurrency int, requestID string) (bool, error) {
 	if c.acquiredIDs != nil {
 		*c.acquiredIDs = append(*c.acquiredIDs, accountID)
@@ -1500,9 +1491,9 @@ func TestOpenAIGatewayService_AssociatedConcentratedQuotaBypassConsumesCapacityB
 		concurrencyService: NewConcurrencyService(sharedCache),
 	}
 
-	selectedIDs := make([]int64, 0, 101)
-	releases := make([]func(), 0, 101)
-	for i := 0; i < 101; i++ {
+	selectedIDs := make([]int64, 0, 86)
+	releases := make([]func(), 0, 86)
+	for i := 0; i < 86; i++ {
 		selection, _, err := svc.SelectAccountWithScheduler(
 			context.Background(), &normalGroupID, "", "", "gpt-5.1", nil,
 			OpenAIUpstreamTransportAny, false,
@@ -1513,10 +1504,10 @@ func TestOpenAIGatewayService_AssociatedConcentratedQuotaBypassConsumesCapacityB
 		releases = append(releases, selection.ReleaseFunc)
 	}
 
-	for i := 0; i < 100; i++ {
-		require.Equal(t, int64(56447), selectedIDs[i], "request %d must fill the attached bypass account", i+1)
+	for i := 0; i < 85; i++ {
+		require.Equal(t, int64(56447), selectedIDs[i], "request %d must fill the attached bypass account to its automatic soft limit", i+1)
 	}
-	require.Equal(t, int64(56261), selectedIDs[100])
+	require.Equal(t, int64(56261), selectedIDs[85])
 	for _, release := range releases {
 		if release != nil {
 			release()
@@ -2870,7 +2861,7 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_SessionStickyEscapeByEr
 	}
 }
 
-func TestOpenAIGatewayService_SelectAccountWithScheduler_SessionStickyBusyEscapes(t *testing.T) {
+func TestOpenAIGatewayService_SelectAccountWithScheduler_SessionStickyBusyWaitsEvenWhenHealthEscapeEnabled(t *testing.T) {
 	ctx := context.Background()
 	groupID := int64(10103)
 	accounts := []Account{
@@ -2904,16 +2895,15 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_SessionStickyBusyEscape
 	require.NoError(t, err)
 	require.NotNil(t, selection)
 	require.NotNil(t, selection.Account)
-	require.Equal(t, int64(21302), selection.Account.ID)
-	require.Nil(t, selection.WaitPlan)
-	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
-	require.False(t, decision.StickySessionHit)
-	if selection.ReleaseFunc != nil {
-		selection.ReleaseFunc()
-	}
+	require.Equal(t, int64(21301), selection.Account.ID)
+	require.False(t, selection.Acquired)
+	require.NotNil(t, selection.WaitPlan)
+	require.Equal(t, int64(21301), selection.WaitPlan.AccountID)
+	require.Equal(t, openAIAccountScheduleLayerSessionSticky, decision.Layer)
+	require.True(t, decision.StickySessionHit)
 }
 
-func TestOpenAIGatewayService_SelectAccountWithScheduler_CurrentGroupConcentrationMovesBusyStickySession(t *testing.T) {
+func TestOpenAIGatewayService_SelectAccountWithScheduler_CurrentGroupConcentrationKeepsBusyStickySession(t *testing.T) {
 	ctx := context.Background()
 	groupID := int64(10105)
 	bypassGroupID := int64(10106)
@@ -3024,12 +3014,50 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_CurrentGroupConcentrati
 	require.NoError(t, err)
 	require.NotNil(t, selection)
 	require.NotNil(t, selection.Account)
-	require.Equal(t, int64(21502), selection.Account.ID)
+	require.Equal(t, int64(21501), selection.Account.ID)
+	require.False(t, selection.Acquired)
+	require.NotNil(t, selection.WaitPlan)
+	require.Equal(t, int64(21501), selection.WaitPlan.AccountID)
+	require.Equal(t, 1, selection.WaitPlan.MaxConcurrency)
+	require.Equal(t, openAIAccountScheduleLayerSessionSticky, decision.Layer)
+	require.True(t, decision.StickySessionHit)
+	require.Equal(t, int64(21501), cache.sessionBindings["openai:session_hash_plus_quota_bypass"])
+}
+
+func TestOpenAIGatewayService_SelectAccountWithScheduler_ConcentratedStickySessionUsesHardLimit(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(10105)
+	account := Account{
+		ID: 21511, Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+		Status: StatusActive, Schedulable: true, Concurrency: 100,
+		Priority: 0, GroupIDs: []int64{groupID}, Extra: map[string]any{"quota_bypass_enabled": true},
+	}
+	accounts := []Account{account}
+	cache := &schedulerTestGatewayCache{sessionBindings: map[string]int64{"openai:sticky_above_soft_limit": account.ID}}
+	limits := make([]int, 0, 1)
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIScheduler.QuotaBypassSoftConcurrency = 12
+	svc := &OpenAIGatewayService{
+		accountRepo:        schedulerGroupAwareOpenAIAccountRepo{schedulerTestOpenAIAccountRepo{accounts: accounts}},
+		schedulerSnapshot:  newQuotaBypassConcentratedSchedulerTestSnapshot(groupID, accounts),
+		cache:              cache,
+		cfg:                cfg,
+		rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("true"),
+		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{acquiredLimits: &limits}),
+	}
+
+	selection, decision, err := svc.SelectAccountWithScheduler(
+		ctx, &groupID, "", "sticky_above_soft_limit", "gpt-5.1", nil,
+		OpenAIUpstreamTransportAny, false,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.Equal(t, account.ID, selection.Account.ID)
 	require.True(t, selection.Acquired)
 	require.Nil(t, selection.WaitPlan)
-	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
-	require.False(t, decision.StickySessionHit)
-	require.Equal(t, int64(21502), cache.sessionBindings["openai:session_hash_plus_quota_bypass"])
+	require.Equal(t, []int{100}, limits, "existing sticky sessions must acquire against the hard account limit")
+	require.Equal(t, openAIAccountScheduleLayerSessionSticky, decision.Layer)
+	require.True(t, decision.StickySessionHit)
 }
 
 func TestOpenAIGatewayService_SelectAccountWithScheduler_SessionStickyEscapeDisabledKeepsLegacyBehavior(t *testing.T) {
@@ -4326,9 +4354,9 @@ func TestOpenAIGatewayService_LegacyWithoutBatchLoadConcentratesAssociatedBypass
 		concurrencyService: NewConcurrencyService(sharedCache),
 	}
 
-	selectedIDs := make([]int64, 0, 101)
-	releases := make([]func(), 0, 101)
-	for i := 0; i < 101; i++ {
+	selectedIDs := make([]int64, 0, 86)
+	releases := make([]func(), 0, 86)
+	for i := 0; i < 86; i++ {
 		selection, _, err := svc.SelectAccountWithScheduler(
 			context.Background(), &normalGroupID, "", "", "gpt-5.1", nil,
 			OpenAIUpstreamTransportAny, false,
@@ -4338,10 +4366,10 @@ func TestOpenAIGatewayService_LegacyWithoutBatchLoadConcentratesAssociatedBypass
 		selectedIDs = append(selectedIDs, selection.Account.ID)
 		releases = append(releases, selection.ReleaseFunc)
 	}
-	for i := 0; i < 100; i++ {
-		require.Equal(t, int64(6402), selectedIDs[i], "slot %d must remain concentrated on OAuth bypass account", i+1)
+	for i := 0; i < 85; i++ {
+		require.Equal(t, int64(6402), selectedIDs[i], "slot %d must remain concentrated on OAuth bypass account to its automatic soft limit", i+1)
 	}
-	require.Equal(t, int64(6401), selectedIDs[100])
+	require.Equal(t, int64(6401), selectedIDs[85])
 	for _, release := range releases {
 		if release != nil {
 			release()
@@ -4443,7 +4471,7 @@ func TestOpenAIGatewayService_LegacyLowerNumberBypassPriorityWinsWithBatchLoad(t
 		selectedIDs = append(selectedIDs, selection.Account.ID)
 		releases = append(releases, selection.ReleaseFunc)
 	}
-	require.Equal(t, []int64{6422, 6422, 6421}, selectedIDs)
+	require.Equal(t, []int64{6422, 6421, 6421}, selectedIDs, "automatic reserve keeps one hard slot available for sticky sessions")
 	for _, release := range releases {
 		if release != nil {
 			release()
@@ -4475,10 +4503,10 @@ func TestOpenAIQuotaBypassConcentrator_LargePoolUsesBoundedCursorWindow(t *testi
 	concentrator.markAcquired(key, 12)
 	require.Equal(t, int64(12), concentrator.window(key, accountIDs, openAIQuotaBypassMinWindowSize).accountIDs[0])
 	concentrator.markReleased(key, 3)
-	require.Equal(t, int64(3), concentrator.window(key, accountIDs, openAIQuotaBypassMinWindowSize).accountIDs[0])
+	require.Equal(t, int64(12), concentrator.window(key, accountIDs, openAIQuotaBypassMinWindowSize).accountIDs[0])
 }
 
-func TestOpenAIQuotaBypassConcentrator_ReleaseOrderKeepsEarliestAvailableAccount(t *testing.T) {
+func TestOpenAIQuotaBypassConcentrator_ReleaseDoesNotMoveCursorBackward(t *testing.T) {
 	concentrator := newOpenAIQuotaBypassConcentrator()
 	key := newOpenAIQuotaBypassPoolKey(int64PtrForTest(42), PlatformOpenAI, 0)
 	accountIDs := []int64{1, 2, 3}
@@ -4489,8 +4517,9 @@ func TestOpenAIQuotaBypassConcentrator_ReleaseOrderKeepsEarliestAvailableAccount
 
 	concentrator.markFull(key, 1)
 	require.Equal(t, int64(2), concentrator.window(key, accountIDs, 1).accountIDs[0])
+	concentrator.markAcquired(key, 2)
 	concentrator.markReleased(key, 1)
-	require.Equal(t, int64(1), concentrator.window(key, accountIDs, 1).accountIDs[0])
+	require.Equal(t, int64(2), concentrator.window(key, accountIDs, 1).accountIDs[0])
 }
 
 func TestOpenAIGatewayService_QuotaBypassProductionWindowUsesSingleActiveAccount(t *testing.T) {
@@ -4522,10 +4551,16 @@ func TestOpenAIGatewayService_QuotaBypassSoftConcurrencyOnlyCapsConcentratedAcco
 
 	account.Concurrency = 8
 	require.Equal(t, 8, svc.openAISelectionMaxConcurrency(account, true), "soft limit must never raise the account hard limit")
+	account.Concurrency = 0
+	require.Equal(t, 12, svc.openAISelectionMaxConcurrency(account, true), "explicit soft limit still bounds accounts without a hard limit")
 
 	cfg.Gateway.OpenAIScheduler.QuotaBypassSoftConcurrency = 0
 	account.Concurrency = 100
-	require.Equal(t, 100, svc.openAISelectionMaxConcurrency(account, true), "zero keeps legacy hard-limit behavior")
+	require.Equal(t, 85, svc.openAISelectionMaxConcurrency(account, true), "zero reserves 15 percent for sticky sessions")
+	account.Concurrency = 8
+	require.Equal(t, 6, svc.openAISelectionMaxConcurrency(account, true))
+	account.Concurrency = 1
+	require.Equal(t, 1, svc.openAISelectionMaxConcurrency(account, true), "single-slot accounts must remain usable")
 }
 
 func TestOpenAIGatewayService_AdvancedQuotaBypassUsesSoftConcurrencyLimit(t *testing.T) {
@@ -4945,7 +4980,7 @@ func TestOpenAIGatewayService_LegacyQuotaBypassProbesPastThirtyTwoAccounts(t *te
 	require.NotContains(t, acquiredIDs, regularID)
 }
 
-func TestOpenAIGatewayService_SelectAccountWithScheduler_CurrentGroupConcentrationRebindsRegularSticky(t *testing.T) {
+func TestOpenAIGatewayService_SelectAccountWithScheduler_CurrentGroupConcentrationKeepsExistingSticky(t *testing.T) {
 	resetOpenAIAdvancedSchedulerSettingCacheForTest()
 	defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
 
@@ -5033,11 +5068,11 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_CurrentGroupConcentrati
 	require.NoError(t, err)
 	require.NotNil(t, selection)
 	require.NotNil(t, selection.Account)
-	require.Equal(t, int64(6201), selection.Account.ID)
-	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
-	require.False(t, decision.StickySessionHit)
-	require.Equal(t, []int64{6201}, acquiredIDs)
-	require.Equal(t, int64(6201), cache.sessionBindings["openai:group-c-session"])
+	require.Equal(t, int64(6202), selection.Account.ID)
+	require.Equal(t, openAIAccountScheduleLayerSessionSticky, decision.Layer)
+	require.True(t, decision.StickySessionHit)
+	require.Equal(t, []int64{6202}, acquiredIDs)
+	require.Equal(t, int64(6202), cache.sessionBindings["openai:group-c-session"])
 }
 
 func TestOpenAIGatewayService_SelectAccountWithScheduler_CurrentGroupConcentrationSpillsAfterFull(t *testing.T) {
@@ -5169,6 +5204,8 @@ func TestOpenAIGatewayService_QuotaBypassConcentratesAcrossGatewayInstances(t *t
 	accountPointers := []*Account{&accounts[0], &accounts[1], &accounts[2]}
 	accountsByID := map[int64]*Account{6301: &accounts[0], 6302: &accounts[1], 6303: &accounts[2]}
 	sharedCache := newSchedulerSharedQuotaBypassCache()
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIScheduler.QuotaBypassSoftConcurrency = 2
 	newGateway := func() *OpenAIGatewayService {
 		return &OpenAIGatewayService{
 			accountRepo: schedulerGroupAwareOpenAIAccountRepo{schedulerTestOpenAIAccountRepo{accounts: accounts}},
@@ -5179,15 +5216,15 @@ func TestOpenAIGatewayService_QuotaBypassConcentratesAcrossGatewayInstances(t *t
 				},
 				groupRepo: schedulerTestGroupRepo{group: normalGroup},
 			},
-			cfg:                &config.Config{},
+			cfg:                cfg,
 			rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("true"),
 			concurrencyService: NewConcurrencyService(sharedCache),
 		}
 	}
 	gateways := []*OpenAIGatewayService{newGateway(), newGateway()}
-	selectedIDs := make([]int64, 0, 5)
-	releases := make([]func(), 0, 5)
-	for i := 0; i < 5; i++ {
+	selectedIDs := make([]int64, 0, 4)
+	releases := make([]func(), 0, 4)
+	for i := 0; i < 3; i++ {
 		selection, _, err := gateways[i%len(gateways)].SelectAccountWithScheduler(
 			context.Background(), &normalGroupID, "", "", "gpt-5.1", nil,
 			OpenAIUpstreamTransportAny, false,
@@ -5197,7 +5234,20 @@ func TestOpenAIGatewayService_QuotaBypassConcentratesAcrossGatewayInstances(t *t
 		selectedIDs = append(selectedIDs, selection.Account.ID)
 		releases = append(releases, selection.ReleaseFunc)
 	}
-	require.Equal(t, []int64{6301, 6301, 6302, 6302, 6303}, selectedIDs)
+	require.Equal(t, []int64{6301, 6301, 6302}, selectedIDs)
+
+	// Releasing capacity on the old account must not pull new sessions back.
+	releases[0]()
+	releases[0] = nil
+	selection, _, err := gateways[1].SelectAccountWithScheduler(
+		context.Background(), &normalGroupID, "", "", "gpt-5.1", nil,
+		OpenAIUpstreamTransportAny, false,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	selectedIDs = append(selectedIDs, selection.Account.ID)
+	releases = append(releases, selection.ReleaseFunc)
+	require.Equal(t, []int64{6301, 6301, 6302, 6302}, selectedIDs)
 
 	for _, release := range releases {
 		if release != nil {

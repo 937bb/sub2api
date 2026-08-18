@@ -1169,9 +1169,13 @@ export default {
       },
       quotaBypass: {
         enable: 'Enable Codex Quota Bypass',
-        tooltip: 'Inject one function_call + function_call_output pair into every request for OpenAI OAuth accounts in this group. Only the request body changes; response errors use standard handling. Account settings can override it.',
+        tooltip: 'Inject one function_call + function_call_output pair into every request for OpenAI OAuth accounts in this group. HTTP and WS sessions are processed before each upstream turn; a 429 gets bounded same-account retries before normal failover. Account settings can also enable it.',
         concentratedScheduling: 'Concentrated Scheduling',
-        concentratedSchedulingTooltip: 'Prefer concentrating requests on the same pool of Bypass accounts. When disabled, quota bypass remains active but standard scheduling is used. Only this group setting applies.'
+        concentratedSchedulingTooltip: 'Concentrate concurrency on one Bypass account before advancing to the next. When disabled, quota bypass remains active but standard scheduling is used.',
+        wsTurnProcessing: 'Per-turn WS preprocessing',
+        concentrationActive: 'Concurrency concentration: on',
+        concentrationInactive: 'Concurrency concentration: standard',
+        retry429: 'Bounded same-account 429 retries'
       },
       copyAccounts: {
         title: 'Copy Accounts from Groups',

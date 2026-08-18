@@ -228,13 +228,8 @@ func (c *openAIQuotaBypassConcentrator) markReleased(key openAIQuotaBypassPoolKe
 	state := c.state(key)
 	state.mu.Lock()
 	delete(state.fullUntil, accountID)
-	// Match the Redis promotion rule: a released account may reclaim the
-	// active cursor only when it is earlier than the current target. Completion
-	// order must not make traffic bounce between concentrated accounts when the
-	// shared Redis hint is unavailable or briefly times out.
-	if state.cursorID == 0 || accountID < state.cursorID {
-		state.cursorID = accountID
-	}
+	// Release only clears the short full hint. New-session traffic stays on the
+	// current cursor until that account reaches its soft limit.
 	state.mu.Unlock()
 }
 
@@ -353,14 +348,34 @@ func (s *OpenAIGatewayService) quotaBypassConcentratedMaxConcurrency(account *Ac
 		return 0
 	}
 	maxConcurrency := account.Concurrency
-	if s == nil || s.cfg == nil {
+	softLimit := 0
+	if s != nil && s.cfg != nil {
+		softLimit = s.cfg.Gateway.OpenAIScheduler.QuotaBypassSoftConcurrency
+	}
+	if maxConcurrency <= 0 {
+		if softLimit > 0 {
+			return softLimit
+		}
 		return maxConcurrency
 	}
-	softLimit := s.cfg.Gateway.OpenAIScheduler.QuotaBypassSoftConcurrency
+	if maxConcurrency == 1 {
+		return 1
+	}
 	if softLimit > 0 && (maxConcurrency <= 0 || softLimit < maxConcurrency) {
 		return softLimit
 	}
-	return maxConcurrency
+	if softLimit > 0 {
+		return maxConcurrency
+	}
+
+	// With no explicit soft limit, reserve 15% of hard capacity for existing
+	// sticky sessions. ceil(3*n/20) is calculated without floating point.
+	reserve := (maxConcurrency/20)*3 + ((maxConcurrency%20)*3+19)/20
+	automaticSoftLimit := maxConcurrency - reserve
+	if automaticSoftLimit < 1 {
+		return 1
+	}
+	return automaticSoftLimit
 }
 
 func (s *OpenAIGatewayService) openAISelectionMaxConcurrency(account *Account, concentrated bool) int {
@@ -398,9 +413,6 @@ func (s *OpenAIGatewayService) wrapQuotaBypassAccountRelease(
 				release()
 			}
 			concentrator.markReleased(key, account.ID)
-			if s.concurrencyService != nil {
-				s.concurrencyService.promoteQuotaBypassActiveAccount(key.sharedKey(), account.ID, openAIQuotaBypassPoolStateTTL)
-			}
 		})
 	}
 }

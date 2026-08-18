@@ -20,6 +20,10 @@ English | [中文](README_CN.md) | [日本語](README_JA.md)
 
 ## 937sub2b Update Log
 
+- `0.1.177.2`: Adopt official-version-plus-branch-suffix numbering (`0.1.177` official baseline, `.2` for 937sub2b); expose quota-bypass WS turn preprocessing, concentrated concurrency, and bounded same-account 429 handling in group settings; place new sessions with a concentrated soft limit and 15% automatic sticky reserve, while existing sessions keep their bound account through the hard limit and wait there when full.
+
+The entries below retain the legacy standalone numbering used before the `.2` branch suffix was adopted.
+
 - `0.1.200`: Unify request-level OpenAI quota-bypass classification across scheduling, HTTP, and WS: inject turns that omit `input`, recognize genuine `function_call_output` turns as native bypass with zero synthetic pairs, keep compaction requests on ordinary quota-health routing, and only allow WS 429 same-account retries when the current turn actually used bypass.
 - `0.1.199`: Bill CPA/Antigravity Gemini 3.5, 3.6, and 3.7 Flash thinking-tier aliases against their matching base-model token prices, preventing successful requests with recorded tokens from silently producing zero cost.
 - `0.1.198`: Centralize OpenAI account priority ordering so every scheduler path treats smaller numeric values as higher priority, and lock the mixed public-pool behavior where priority-1 associated quota-bypass OAuth accounts fill before priority-100 API key accounts.
