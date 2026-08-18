@@ -3060,6 +3060,217 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_ConcentratedStickySessi
 	require.True(t, decision.StickySessionHit)
 }
 
+func TestOpenAIGatewayService_SelectAccountWithScheduler_StickyWeightedConcentratedSessionKeepsBoundAccount(t *testing.T) {
+	resetOpenAIAdvancedSchedulerSettingCacheForTest()
+	defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
+
+	ctx := context.Background()
+	groupID := int64(101051)
+	accounts := []Account{
+		{
+			ID: 21521, Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+			Status: StatusActive, Schedulable: true, Concurrency: 100,
+			Priority: 0, GroupIDs: []int64{groupID},
+		},
+		{
+			ID: 21522, Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+			Status: StatusActive, Schedulable: true, Concurrency: 100,
+			Priority: 0, GroupIDs: []int64{groupID},
+		},
+	}
+	cache := &schedulerTestGatewayCache{sessionBindings: map[string]int64{
+		"openai:weighted_concentrated_sticky": accounts[1].ID,
+	}}
+	acquiredIDs := make([]int64, 0, 1)
+	acquiredLimits := make([]int, 0, 1)
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIScheduler.QuotaBypassSoftConcurrency = 12
+	cfg.Gateway.OpenAIWS.LBTopK = 1
+	svc := &OpenAIGatewayService{
+		accountRepo:        schedulerGroupAwareOpenAIAccountRepo{schedulerTestOpenAIAccountRepo{accounts: accounts}},
+		schedulerSnapshot:  newQuotaBypassConcentratedSchedulerTestSnapshot(groupID, accounts),
+		cache:              cache,
+		cfg:                cfg,
+		rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("true", "true"),
+		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{acquiredIDs: &acquiredIDs, acquiredLimits: &acquiredLimits}),
+	}
+
+	selection, decision, err := svc.SelectAccountWithScheduler(
+		ctx, &groupID, "", "weighted_concentrated_sticky", "gpt-5.1", nil,
+		OpenAIUpstreamTransportAny, false,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.Equal(t, accounts[1].ID, selection.Account.ID)
+	require.True(t, selection.Acquired)
+	require.Nil(t, selection.WaitPlan)
+	require.Equal(t, []int64{accounts[1].ID}, acquiredIDs, "weighted scheduling must not move a concentrated session to the active new-session account")
+	require.Equal(t, []int{accounts[1].Concurrency}, acquiredLimits, "existing sessions acquire against the hard concurrency limit")
+	require.Equal(t, openAIAccountScheduleLayerSessionSticky, decision.Layer)
+	require.True(t, decision.StickySessionHit)
+}
+
+func TestOpenAIGatewayService_SelectAccountWithScheduler_StickyWeightedMovablePreviousKeepsConcentratedAccount(t *testing.T) {
+	resetOpenAIAdvancedSchedulerSettingCacheForTest()
+	defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
+
+	ctx := context.Background()
+	groupID := int64(101052)
+	accounts := []Account{
+		{
+			ID: 21531, Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+			Status: StatusActive, Schedulable: true, Concurrency: 100,
+			Priority: 0, GroupIDs: []int64{groupID},
+		},
+		{
+			ID: 21532, Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+			Status: StatusActive, Schedulable: true, Concurrency: 100,
+			Priority: 0, GroupIDs: []int64{groupID},
+		},
+	}
+	acquiredIDs := make([]int64, 0, 1)
+	acquiredLimits := make([]int, 0, 1)
+	cfg := newSchedulerTestOpenAIWSV2Config()
+	cfg.Gateway.OpenAIScheduler.QuotaBypassSoftConcurrency = 12
+	cfg.Gateway.OpenAIWS.LBTopK = 1
+	svc := &OpenAIGatewayService{
+		accountRepo:        schedulerGroupAwareOpenAIAccountRepo{schedulerTestOpenAIAccountRepo{accounts: accounts}},
+		schedulerSnapshot:  newQuotaBypassConcentratedSchedulerTestSnapshot(groupID, accounts),
+		cache:              &schedulerTestGatewayCache{},
+		cfg:                cfg,
+		rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("true", "true"),
+		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{acquiredIDs: &acquiredIDs, acquiredLimits: &acquiredLimits}),
+	}
+	store := svc.getOpenAIWSStateStore()
+	require.NoError(t, store.BindResponseAccount(ctx, groupID, "resp_weighted_concentrated", accounts[1].ID, time.Hour))
+
+	selection, decision, err := svc.SelectAccountWithSchedulerForCapability(
+		ctx,
+		&groupID,
+		"resp_weighted_concentrated",
+		"",
+		"gpt-5.1",
+		nil,
+		OpenAIUpstreamTransportAny,
+		OpenAIEndpointCapabilityChatCompletions,
+		false,
+		true,
+		true,
+		PlatformOpenAI,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.Equal(t, accounts[1].ID, selection.Account.ID)
+	require.True(t, selection.Acquired)
+	require.Nil(t, selection.WaitPlan)
+	require.Equal(t, []int64{accounts[1].ID}, acquiredIDs, "movable previous_response_id must retain a concentrated account")
+	require.Equal(t, []int{accounts[1].Concurrency}, acquiredLimits)
+	require.Equal(t, openAIAccountScheduleLayerPreviousResponse, decision.Layer)
+	require.True(t, decision.StickyPreviousHit)
+}
+
+func TestOpenAIGatewayService_LegacyConcentratedSessionKeepsBoundAccount(t *testing.T) {
+	resetOpenAIAdvancedSchedulerSettingCacheForTest()
+	defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
+
+	ctx := context.Background()
+	groupID := int64(101053)
+	accounts := []Account{
+		{
+			ID: 21541, Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+			Status: StatusActive, Schedulable: true, Concurrency: 100,
+			Priority: 0, GroupIDs: []int64{groupID},
+		},
+		{
+			ID: 21542, Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+			Status: StatusActive, Schedulable: true, Concurrency: 100,
+			Priority: 0, GroupIDs: []int64{groupID},
+		},
+	}
+	cache := &schedulerTestGatewayCache{sessionBindings: map[string]int64{
+		"openai:legacy_concentrated_sticky": accounts[1].ID,
+	}}
+	acquiredIDs := make([]int64, 0, 1)
+	acquiredLimits := make([]int, 0, 1)
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIScheduler.QuotaBypassSoftConcurrency = 12
+	svc := &OpenAIGatewayService{
+		accountRepo:        schedulerGroupAwareOpenAIAccountRepo{schedulerTestOpenAIAccountRepo{accounts: accounts}},
+		schedulerSnapshot:  newQuotaBypassConcentratedSchedulerTestSnapshot(groupID, accounts),
+		cache:              cache,
+		cfg:                cfg,
+		rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("false"),
+		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{acquiredIDs: &acquiredIDs, acquiredLimits: &acquiredLimits}),
+	}
+
+	selection, _, err := svc.SelectAccountWithScheduler(
+		ctx, &groupID, "", "legacy_concentrated_sticky", "gpt-5.1", nil,
+		OpenAIUpstreamTransportAny, false,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.Equal(t, accounts[1].ID, selection.Account.ID)
+	require.True(t, selection.Acquired)
+	require.Nil(t, selection.WaitPlan)
+	require.Equal(t, []int64{accounts[1].ID}, acquiredIDs, "legacy concentration must not bypass an existing session binding")
+	require.Equal(t, []int{accounts[1].Concurrency}, acquiredLimits)
+}
+
+func TestOpenAIGatewayService_LegacyConcentratedBusySessionWaitsOnBoundAccount(t *testing.T) {
+	resetOpenAIAdvancedSchedulerSettingCacheForTest()
+	defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
+
+	ctx := context.Background()
+	groupID := int64(101054)
+	accounts := []Account{
+		{
+			ID: 21551, Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+			Status: StatusActive, Schedulable: true, Concurrency: 100,
+			Priority: 0, GroupIDs: []int64{groupID},
+		},
+		{
+			ID: 21552, Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+			Status: StatusActive, Schedulable: true, Concurrency: 100,
+			Priority: 0, GroupIDs: []int64{groupID},
+		},
+	}
+	cache := &schedulerTestGatewayCache{sessionBindings: map[string]int64{
+		"openai:legacy_concentrated_busy": accounts[1].ID,
+	}}
+	acquiredIDs := make([]int64, 0, 1)
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIScheduler.QuotaBypassSoftConcurrency = 12
+	cfg.Gateway.Scheduling.StickySessionMaxWaiting = 2
+	cfg.Gateway.Scheduling.StickySessionWaitTimeout = 45 * time.Second
+	svc := &OpenAIGatewayService{
+		accountRepo:       schedulerGroupAwareOpenAIAccountRepo{schedulerTestOpenAIAccountRepo{accounts: accounts}},
+		schedulerSnapshot: newQuotaBypassConcentratedSchedulerTestSnapshot(groupID, accounts),
+		cache:             cache,
+		cfg:               cfg,
+		rateLimitService:  newOpenAIAdvancedSchedulerRateLimitService("false"),
+		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{
+			acquireResults: map[int64]bool{accounts[0].ID: true, accounts[1].ID: false},
+			waitCounts:     map[int64]int{accounts[1].ID: 999},
+			acquiredIDs:    &acquiredIDs,
+		}),
+	}
+
+	selection, _, err := svc.SelectAccountWithScheduler(
+		ctx, &groupID, "", "legacy_concentrated_busy", "gpt-5.1", nil,
+		OpenAIUpstreamTransportAny, false,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.Equal(t, accounts[1].ID, selection.Account.ID)
+	require.False(t, selection.Acquired)
+	require.NotNil(t, selection.WaitPlan)
+	require.Equal(t, accounts[1].ID, selection.WaitPlan.AccountID)
+	require.Equal(t, accounts[1].Concurrency, selection.WaitPlan.MaxConcurrency)
+	require.Equal(t, cfg.Gateway.Scheduling.StickySessionMaxWaiting, selection.WaitPlan.MaxWaiting)
+	require.Equal(t, []int64{accounts[1].ID}, acquiredIDs, "a full bound account must return WaitPlan without probing another account")
+	require.Equal(t, accounts[1].ID, cache.sessionBindings["openai:legacy_concentrated_busy"])
+}
+
 func TestOpenAIGatewayService_SelectAccountWithScheduler_SessionStickyEscapeDisabledKeepsLegacyBehavior(t *testing.T) {
 	ctx := context.Background()
 	groupID := int64(10104)

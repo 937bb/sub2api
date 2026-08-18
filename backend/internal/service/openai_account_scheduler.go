@@ -447,7 +447,8 @@ func (s *defaultOpenAIAccountScheduler) Select(
 		previousResponseShouldYield = s.shouldYieldOpenAIPreviousResponseToQuotaBypass(ctx, &req)
 	}
 	if previousResponseID != "" && normalizeOpenAICompatiblePlatform(req.Platform) == PlatformOpenAI &&
-		(!req.StickyWeighted || !req.PreviousResponseCanMove) && !previousResponseShouldYield {
+		(!req.StickyWeighted || !req.PreviousResponseCanMove || s.isConcentratedStickyAccount(ctx, req, req.StickyPreviousAccountID)) &&
+		!previousResponseShouldYield {
 		selection, err := s.service.selectAccountByPreviousResponseIDForCapability(
 			ctx,
 			req.GroupID,
@@ -480,22 +481,19 @@ func (s *defaultOpenAIAccountScheduler) Select(
 		}
 	}
 
-	useSessionSticky := !req.StickyWeighted
-	if useSessionSticky {
-		selection, escapedSticky, err := s.selectBySessionHash(ctx, req)
-		if err != nil {
-			return nil, decision, err
-		}
-		if selection != nil && selection.Account != nil {
-			decision.Layer = openAIAccountScheduleLayerSessionSticky
-			decision.StickySessionHit = true
-			decision.SelectedAccountID = selection.Account.ID
-			decision.SelectedAccountType = selection.Account.Type
-			return selection, decision, nil
-		}
-		if escapedSticky {
-			req.PreserveStickyBinding = true
-		}
+	selection, escapedSticky, err := s.selectBySessionHash(ctx, req)
+	if err != nil {
+		return nil, decision, err
+	}
+	if selection != nil && selection.Account != nil {
+		decision.Layer = openAIAccountScheduleLayerSessionSticky
+		decision.StickySessionHit = true
+		decision.SelectedAccountID = selection.Account.ID
+		decision.SelectedAccountType = selection.Account.Type
+		return selection, decision, nil
+	}
+	if escapedSticky {
+		req.PreserveStickyBinding = true
 	}
 
 	selection, candidateCount, topK, loadSkew, err := s.selectByLoadBalance(ctx, req)
@@ -649,6 +647,12 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 	// account. This is plan-agnostic: Plus, Team and other OAuth plans use the
 	// same account/group eligibility rule.
 	concentratedQuotaBypass := isOpenAIQuotaBypassConcentratedForScheduleRequest(account, req)
+	// Weighted sticky remains a soft preference for ordinary pools. Concentrated
+	// quota-bypass sessions are different: moving one to the active new-session
+	// cursor destroys its upstream prompt cache.
+	if req.StickyWeighted && !concentratedQuotaBypass {
+		return nil, false, nil
+	}
 	// Existing sessions own their prompt-cache affinity up to the account's hard
 	// limit. The concentrated soft limit applies only while placing new sessions.
 	accountMaxConcurrency := account.Concurrency
@@ -706,6 +710,21 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 		}), false, nil
 	}
 	return nil, false, nil
+}
+
+func (s *defaultOpenAIAccountScheduler) isConcentratedStickyAccount(
+	ctx context.Context,
+	req OpenAIAccountScheduleRequest,
+	accountID int64,
+) bool {
+	if accountID <= 0 || s == nil || s.service == nil {
+		return false
+	}
+	account, err := s.service.getSchedulableAccount(ctx, accountID)
+	if err != nil || account == nil {
+		return false
+	}
+	return isOpenAIQuotaBypassConcentratedForScheduleRequest(account, req)
 }
 
 func openAIStickyAccountMatchesGroup(account *Account, groupID *int64) bool {
