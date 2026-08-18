@@ -350,7 +350,7 @@ func TestForwardAsChatCompletions_OAuthPromotesSystemMessageWithoutDuplication(t
 
 	require.Equal(t, systemPrompt, gjson.GetBytes(upstreamBody, "instructions").String())
 	require.Equal(t, int64(1), gjson.GetBytes(upstreamBody, "input.#").Int())
-	require.Equal(t, "user", gjson.GetBytes(upstreamBody, "input.0.role").String())
+	require.Equal(t, "developer", gjson.GetBytes(upstreamBody, "input.0.role").String())
 	require.Equal(t, 1, strings.Count(string(upstreamBody), systemPrompt))
 }
 

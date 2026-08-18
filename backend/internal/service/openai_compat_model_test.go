@@ -1345,7 +1345,7 @@ func TestForwardAsAnthropic_OAuthAddsClaudeCodeTodoGuardForCompatModel(t *testin
 	require.Equal(t, "project instructions", gjson.GetBytes(upstream.lastBody, "input.0.content.0.text").String())
 	require.Equal(t, "developer", gjson.GetBytes(upstream.lastBody, "input.1.role").String())
 	require.Contains(t, gjson.GetBytes(upstream.lastBody, "input.1.content.0.text").String(), "<sub2api-claude-code-todo-guard>")
-	require.Equal(t, "user", gjson.GetBytes(upstream.lastBody, "input.2.role").String())
+	require.Equal(t, "developer", gjson.GetBytes(upstream.lastBody, "input.2.role").String())
 }
 
 func TestForwardAsAnthropic_OAuthPreservesClaudeCodeToolCallID(t *testing.T) {

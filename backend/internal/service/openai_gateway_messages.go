@@ -180,6 +180,16 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		if err := json.Unmarshal(responsesBody, &reqBody); err != nil {
 			return nil, fmt.Errorf("unmarshal for codex transform: %w", err)
 		}
+		// Snapshot actual instruction messages before user turns are normalized
+		// to developer. Re-scanning afterward would incorrectly fold user text
+		// (and the compatibility guard) into the forced instructions template.
+		promptLikeInstructions := extractPromptLikeInstructionsFromInput(reqBody)
+		// Insert the compatibility guard while the actual user turn still has
+		// role:user, so it remains between leading developer instructions and
+		// the user turn after the Codex role normalization below.
+		if shouldAutoInjectPromptCacheKeyForCompat(upstreamModel) {
+			appendOpenAICompatClaudeCodeTodoGuardToRequestBody(reqBody)
+		}
 		codexResult := applyCodexOAuthTransformWithOptions(reqBody, codexOAuthTransformOptions{
 			SkipDefaultInstructions: true,
 			PreserveToolCallIDs:     true,
@@ -194,7 +204,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		}
 		existingInstructions, _ := reqBody["instructions"].(string)
 		if strings.TrimSpace(existingInstructions) == "" {
-			existingInstructions = extractPromptLikeInstructionsFromInput(reqBody)
+			existingInstructions = promptLikeInstructions
 		}
 		if _, err := applyForcedCodexInstructionsTemplate(reqBody, forcedTemplateText, forcedCodexInstructionsTemplateData{
 			ExistingInstructions: strings.TrimSpace(existingInstructions),
@@ -206,9 +216,6 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 			return nil, err
 		}
 		ensureCodexOAuthInstructionsField(reqBody)
-		if shouldAutoInjectPromptCacheKeyForCompat(upstreamModel) {
-			appendOpenAICompatClaudeCodeTodoGuardToRequestBody(reqBody)
-		}
 		if codexResult.NormalizedModel != "" {
 			upstreamModel = codexResult.NormalizedModel
 		}

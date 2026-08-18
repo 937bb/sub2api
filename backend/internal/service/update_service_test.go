@@ -187,6 +187,6 @@ func TestUpdateServiceRollbackToVersionAcceptsVPrefix(t *testing.T) {
 }
 
 func TestCompareVersionsTreatsBranchSuffixAsOfficialBaseline(t *testing.T) {
-	require.Equal(t, 0, compareVersions("0.1.177.3", "0.1.177"))
-	require.Less(t, compareVersions("0.1.177.3", "0.1.178"), 0)
+	require.Equal(t, 0, compareVersions("0.1.177.4", "0.1.177"))
+	require.Less(t, compareVersions("0.1.177.4", "0.1.178"), 0)
 }
