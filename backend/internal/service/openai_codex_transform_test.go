@@ -306,6 +306,35 @@ func TestApplyCodexOAuthTransform_ImageAndWebSearchCallsDoNotGainCallID(t *testi
 	require.True(t, ok)
 	_, hasCallID = second["call_id"]
 	require.False(t, hasCallID)
+	_, hasStatus := first["status"]
+	require.False(t, hasStatus)
+	_, hasStatus = second["status"]
+	require.False(t, hasStatus)
+}
+
+func TestApplyCodexOAuthTransform_StripsResponseOnlyInputStatuses(t *testing.T) {
+	reqBody := map[string]any{
+		"model": "gpt-5.5",
+		"input": []any{
+			map[string]any{"type": "reasoning", "id": "rs_1", "status": "completed", "summary": []any{}},
+			map[string]any{"type": "item_reference", "id": "fc_1", "status": "completed"},
+			map[string]any{"type": "message", "role": "assistant", "status": "completed", "content": "ok"},
+			map[string]any{"type": "function_call", "id": "fc_1", "call_id": "call_1", "name": "exec_command", "arguments": "{}", "status": "completed"},
+			map[string]any{"type": "function_call_output", "call_id": "call_1", "output": "ok", "status": "completed"},
+		},
+	}
+
+	applyCodexOAuthTransform(reqBody, false, false)
+
+	input := reqBody["input"].([]any)
+	require.Len(t, input, 5)
+	for index, rawItem := range input {
+		item := rawItem.(map[string]any)
+		_, hasStatus := item["status"]
+		require.False(t, hasStatus, "input[%d] status must be stripped", index)
+	}
+	require.Equal(t, "fc_1", input[1].(map[string]any)["id"], "item reference must survive")
+	require.Equal(t, input[3].(map[string]any)["call_id"], input[4].(map[string]any)["call_id"], "tool pairing must survive")
 }
 
 func TestApplyCodexOAuthTransform_ConvertsToolRoleMessageToFunctionCallOutput(t *testing.T) {

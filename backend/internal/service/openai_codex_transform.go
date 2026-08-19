@@ -1391,8 +1391,9 @@ func filterCodexInputWithOptions(input []any, opts codexInputFilterOptions) []an
 		if typ == "reasoning" {
 			newItem := make(map[string]any, len(m))
 			for key, value := range m {
-				if key == "id" {
-					// rs_* id replayed under store=false 404s; strip it.
+				if key == "id" || key == "status" {
+					// rs_* id replayed under store=false 404s; status is
+					// response-only lifecycle metadata. Strip both on replay.
 					continue
 				}
 				newItem[key] = value
@@ -1433,6 +1434,7 @@ func filterCodexInputWithOptions(input []any, opts codexInputFilterOptions) []an
 			if id, ok := newItem["id"].(string); ok && strings.HasPrefix(id, "call_") {
 				newItem["id"] = fixCallIDPrefix(id)
 			}
+			delete(newItem, "status")
 			filtered = append(filtered, newItem)
 			continue
 		}
@@ -1497,6 +1499,12 @@ func filterCodexInputWithOptions(input []any, opts codexInputFilterOptions) []an
 		} else if id, ok := m["id"].(string); ok && shouldStripOpenAIResponsesInputItemID(typ, id) {
 			ensureCopy()
 			delete(newItem, "id")
+		}
+		if _, ok := m["status"]; ok {
+			// status is emitted for output-item lifecycle updates but is not a
+			// valid field when replaying the item through request.input.
+			ensureCopy()
+			delete(newItem, "status")
 		}
 
 		filtered = append(filtered, newItem)

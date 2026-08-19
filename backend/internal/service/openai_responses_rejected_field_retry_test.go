@@ -114,6 +114,20 @@ func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyBindsMaxOutputTokensToRej
 	require.False(t, gjson.GetBytes(retryBody, "max_output_tokens").Exists())
 }
 
+func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyRemovesIndexedStatus(t *testing.T) {
+	body := []byte(`{"input":[{"type":"function_call","call_id":"call_1","status":"completed"},{"type":"message","role":"user","status":"completed","content":"keep"}]}`)
+	responseBody := []byte(`{"error":{"code":"unknown_parameter","message":"Unknown parameter: 'input[1].status'.","param":"input[1].status","type":"invalid_request_error"}}`)
+
+	retryBody, reason, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, body, responseBody)
+
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, "indexed status parameter rejection", reason)
+	require.Equal(t, "completed", gjson.GetBytes(retryBody, "input.0.status").String())
+	require.False(t, gjson.GetBytes(retryBody, "input.1.status").Exists())
+	require.Equal(t, "keep", gjson.GetBytes(retryBody, "input.1.content").String())
+}
+
 func TestOpenAIGatewayService_APIKeyStripsAllIndexedNamespacesBeforeFirstForward(t *testing.T) {
 	body := []byte(`{"model":"gpt-5.5","stream":false,"input":[{"type":"function_call","name":"first","namespace":"remove-first","arguments":"{}"},{"type":"custom_tool_call","name":"second","namespace":"remove-second","input":"{}"}]}`)
 	upstream := &httpUpstreamRecorder{responses: []*http.Response{
@@ -164,6 +178,44 @@ func TestOpenAIGatewayService_OpenAIHTTPStripsInputNamespacesBeforeFirstForward(
 				require.Len(t, upstream.bodies, 1, "namespace must be removed before the first upstream request")
 				require.False(t, gjson.GetBytes(upstream.bodies[0], "input.0.namespace").Exists())
 				require.Equal(t, "nested-keep", gjson.GetBytes(upstream.bodies[0], "input.0.content.0.namespace").String())
+			})
+		}
+	}
+}
+
+func TestOpenAIGatewayService_OpenAIHTTPStripsInputStatusBeforeFirstForward(t *testing.T) {
+	accounts := []struct {
+		name       string
+		account    *Account
+		wantCallID string
+	}{
+		{name: "oauth", account: newOpenAIOAuthNamespaceTestAccount(), wantCallID: "fc_1"},
+		{name: "apikey", account: newOpenAIRejectedFieldTestAccount(), wantCallID: "call_1"},
+	}
+	for _, tt := range accounts {
+		for _, path := range []string{"/v1/responses", "/v1/responses/compact"} {
+			t.Run(tt.name+path, func(t *testing.T) {
+				body := []byte(`{"model":"gpt-5.5","stream":false,"instructions":"test","input":[{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"hello"}]},{"type":"function_call","id":"fc_1","call_id":"call_1","name":"exec_command","arguments":"{}","status":"completed"}]}`)
+				upstream := &httpUpstreamRecorder{responses: []*http.Response{
+					newOpenAIRejectedFieldTestResponse(http.StatusOK, `{"id":"resp_status_ok","output":[],"usage":{"input_tokens":1,"output_tokens":1,"input_tokens_details":{"cached_tokens":0}}}`),
+				}}
+				c := newOpenAIRejectedFieldTestContext(body)
+				c.Request.URL.Path = path
+
+				result, err := newOpenAIRejectedFieldTestService(upstream).Forward(
+					context.Background(),
+					c,
+					tt.account,
+					body,
+				)
+
+				require.NoError(t, err)
+				require.NotNil(t, result)
+				require.Len(t, upstream.bodies, 1, "status must be removed before the first upstream request")
+				require.False(t, gjson.GetBytes(upstream.bodies[0], "input.0.status").Exists())
+				require.Equal(t, "hello", gjson.GetBytes(upstream.bodies[0], "input.0.content.0.text").String())
+				require.False(t, gjson.GetBytes(upstream.bodies[0], "input.1.status").Exists())
+				require.Equal(t, tt.wantCallID, gjson.GetBytes(upstream.bodies[0], "input.1.call_id").String())
 			})
 		}
 	}

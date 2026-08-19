@@ -16,7 +16,8 @@ const maxOpenAIResponsesRejectedFieldRetries = 6
 
 var (
 	openAIResponsesRejectedNamespaceParamPattern = regexp.MustCompile(`(?i)^input\[(\d+)\]\.namespace$`)
-	openAIResponsesRejectedMessageParamPattern   = regexp.MustCompile(`(?i)(?:unknown|unsupported)[ _-]+parameter\s*(?::|=|is)?\s*["']?(max_output_tokens|input\[\d+\]\.namespace)(?:["']|\b)`)
+	openAIResponsesRejectedStatusParamPattern    = regexp.MustCompile(`(?i)^input\[(\d+)\]\.status$`)
+	openAIResponsesRejectedMessageParamPattern   = regexp.MustCompile(`(?i)(?:unknown|unsupported)[ _-]+parameter\s*(?::|=|is)?\s*["']?(max_output_tokens|input\[\d+\]\.(?:namespace|status))(?:["']|\b)`)
 )
 
 type openAIResponsesRejectedFieldRetryState struct {
@@ -73,6 +74,9 @@ func normalizeOpenAIResponsesRejectedFieldRetryBody(statusCode int, body, respon
 	if index, ok := openAIResponsesRejectedNamespaceIndex(param); ok {
 		return removeOpenAIResponsesRejectedNamespaceAtIndex(body, index)
 	}
+	if index, ok := openAIResponsesRejectedStatusIndex(param); ok {
+		return removeOpenAIResponsesRejectedStatusAtIndex(body, index)
+	}
 	if param == "max_output_tokens" && gjson.GetBytes(body, "max_output_tokens").Exists() {
 		retryBody, err := sjson.DeleteBytes(body, "max_output_tokens")
 		if err != nil {
@@ -101,7 +105,15 @@ func openAIResponsesRejectedParamFromMessage(message string) string {
 }
 
 func openAIResponsesRejectedNamespaceIndex(param string) (int, bool) {
-	match := openAIResponsesRejectedNamespaceParamPattern.FindStringSubmatch(strings.TrimSpace(param))
+	return openAIResponsesRejectedIndexedField(param, openAIResponsesRejectedNamespaceParamPattern)
+}
+
+func openAIResponsesRejectedStatusIndex(param string) (int, bool) {
+	return openAIResponsesRejectedIndexedField(param, openAIResponsesRejectedStatusParamPattern)
+}
+
+func openAIResponsesRejectedIndexedField(param string, pattern *regexp.Regexp) (int, bool) {
+	match := pattern.FindStringSubmatch(strings.TrimSpace(param))
 	if len(match) != 2 {
 		return 0, false
 	}
@@ -110,6 +122,18 @@ func openAIResponsesRejectedNamespaceIndex(param string) (int, bool) {
 		return index, true
 	}
 	return 0, false
+}
+
+func removeOpenAIResponsesRejectedStatusAtIndex(body []byte, index int) ([]byte, string, bool, error) {
+	statusPath := fmt.Sprintf("input.%d.status", index)
+	if !gjson.GetBytes(body, statusPath).Exists() {
+		return nil, "", false, nil
+	}
+	retryBody, err := sjson.DeleteBytes(body, statusPath)
+	if err != nil {
+		return nil, "", false, fmt.Errorf("delete rejected status at input[%d]: %w", index, err)
+	}
+	return retryBody, "indexed status parameter rejection", true, nil
 }
 
 func removeOpenAIResponsesRejectedNamespaceAtIndex(body []byte, index int) ([]byte, string, bool, error) {

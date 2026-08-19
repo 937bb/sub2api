@@ -126,10 +126,10 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	if shouldForwardOpenAIResponsesViaRawChatCompletions(account) {
 		return s.forwardResponsesViaRawChatCompletions(ctx, c, account, body)
 	}
-	if account.Platform == PlatformOpenAI && account.Type == AccountTypeAPIKey {
-		sanitizedBody, changed, sanitizeErr := sanitizeOpenAIResponsesInputItemIDs(body)
+	if account.Platform == PlatformOpenAI {
+		sanitizedBody, changed, sanitizeErr := sanitizeOpenAIResponsesInputItems(body)
 		if sanitizeErr != nil {
-			return nil, fmt.Errorf("sanitize OpenAI Responses input item IDs: %w", sanitizeErr)
+			return nil, fmt.Errorf("sanitize OpenAI Responses input items: %w", sanitizeErr)
 		}
 		if changed {
 			body = sanitizedBody

@@ -35,8 +35,8 @@ func TestOpenAIGatewayService_APIKeyPassthrough_StripsInvalidInputItemIDs(t *tes
 		"model":"gpt-5.6-sol",
 		"stream":false,
 		"input":[
-			{"type":"message","id":"item_bad_message","role":"assistant","content":[{"type":"output_text","text":"hello"}]},
-			{"type":"function_call","id":"item_bad_call","call_id":"call_123","name":"exec_command","arguments":"{}"},
+			{"type":"message","id":"item_bad_message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"hello"}]},
+			{"type":"function_call","id":"item_bad_call","call_id":"call_123","name":"exec_command","arguments":"{}","status":"completed"},
 			{"type":"message","id":"msg_valid","role":"user","content":[{"type":"input_text","text":"continue"}]},
 			{"type":"function_call","id":"fc_valid","call_id":"call_456","name":"apply_patch","arguments":"{}"},
 			{"type":"function_call_output","id":"fco_bad*output","call_id":"call_123","output":"done"},
@@ -54,8 +54,10 @@ func TestOpenAIGatewayService_APIKeyPassthrough_StripsInvalidInputItemIDs(t *tes
 
 	forwarded := upstream.lastBody
 	require.False(t, gjson.GetBytes(forwarded, "input.0.id").Exists())
+	require.False(t, gjson.GetBytes(forwarded, "input.0.status").Exists())
 	require.Equal(t, "hello", gjson.GetBytes(forwarded, "input.0.content.0.text").String())
 	require.False(t, gjson.GetBytes(forwarded, "input.1.id").Exists())
+	require.False(t, gjson.GetBytes(forwarded, "input.1.status").Exists())
 	require.Equal(t, "call_123", gjson.GetBytes(forwarded, "input.1.call_id").String())
 	require.Equal(t, "exec_command", gjson.GetBytes(forwarded, "input.1.name").String())
 	require.Equal(t, "{}", gjson.GetBytes(forwarded, "input.1.arguments").String())
@@ -143,7 +145,7 @@ func TestShouldStripOpenAIResponsesInputItemID_Reasoning(t *testing.T) {
 	}
 }
 
-func TestSanitizeOpenAIResponsesInputItemIDs_AllocationGrowthIsLinear(t *testing.T) {
+func TestSanitizeOpenAIResponsesInputItems_AllocationGrowthIsLinear(t *testing.T) {
 	makeBody := func(itemCount int) []byte {
 		items := make([]string, itemCount)
 		for i := range items {
@@ -155,7 +157,7 @@ func TestSanitizeOpenAIResponsesInputItemIDs_AllocationGrowthIsLinear(t *testing
 		runtime.GC()
 		var before, after runtime.MemStats
 		runtime.ReadMemStats(&before)
-		sanitized, changed, err := sanitizeOpenAIResponsesInputItemIDs(body)
+		sanitized, changed, err := sanitizeOpenAIResponsesInputItems(body)
 		runtime.ReadMemStats(&after)
 		require.NoError(t, err)
 		require.True(t, changed)

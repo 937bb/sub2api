@@ -58,7 +58,10 @@ func isValidOpenAIResponsesItemID(id string) bool {
 	return true
 }
 
-func sanitizeOpenAIResponsesInputItemIDs(body []byte) ([]byte, bool, error) {
+// sanitizeOpenAIResponsesInputItems removes replay metadata that is valid in
+// response.output items but rejected when the same item is sent back through
+// request.input. It preserves the item's semantic payload and pairing fields.
+func sanitizeOpenAIResponsesInputItems(body []byte) ([]byte, bool, error) {
 	input := gjson.GetBytes(body, "input")
 	if !input.IsArray() {
 		return body, false, nil
@@ -80,6 +83,16 @@ func sanitizeOpenAIResponsesInputItemIDs(body []byte) ([]byte, bool, error) {
 				itemBody, sanitizeErr = sjson.DeleteBytes(itemBody, "id")
 				if sanitizeErr != nil {
 					sanitizeErr = fmt.Errorf("delete input.%d.id: %w", currentIndex, sanitizeErr)
+					return false
+				}
+				changed = true
+			}
+			// status describes server-side output lifecycle (in_progress,
+			// completed, and so on). It is not accepted on replayed input items.
+			if item.Get("status").Exists() {
+				itemBody, sanitizeErr = sjson.DeleteBytes(itemBody, "status")
+				if sanitizeErr != nil {
+					sanitizeErr = fmt.Errorf("delete input.%d.status: %w", currentIndex, sanitizeErr)
 					return false
 				}
 				changed = true

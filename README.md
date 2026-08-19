@@ -20,6 +20,7 @@ English | [中文](README_CN.md) | [日本語](README_JA.md)
 
 ## 937sub2b Update Log
 
+- `0.1.177.8`: Remove response-only `status` fields from replayed Responses input items before the first upstream attempt across OpenAI OAuth/API-key and HTTP/WS paths, with an indexed 400-retry fallback that strips only the rejected status field.
 - `0.1.177.7`: Sanitize replayed Responses item IDs before forwarding: strip IDs containing characters outside letters/numbers/underscore/dash, enforce `ctc` IDs for `custom_tool_call`, preserve valid IDs and all `call_id` pairing fields, and cover both OpenAI OAuth and API-key paths.
 - `0.1.177.6`: Bound OpenAI OAuth 429 amplification: quota/reset responses no longer retry the same account, unknown transient 429s use one account-wide half-open probe without clearing shared rate-limit state, a request may try at most one different account after its first OAuth 429, and concurrent 429 state/snapshot persistence is coalesced per account.
 - `0.1.177.5`: Preserve real Codex user turns as `role: user` (including mixed `input_text` + `input_image` content), keep only system/instruction messages as `developer`, and short-circuit deterministic upstream HTTP 400 errors before account cooldown/failover so clients receive the original `type`/`code`/`param` instead of a false pool-exhaustion 503.
