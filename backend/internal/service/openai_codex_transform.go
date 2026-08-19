@@ -277,9 +277,6 @@ func applyCodexOAuthTransformWithOptions(reqBody map[string]any, opts codexOAuth
 			input = normalizedInput
 			result.Modified = true
 		}
-		if normalizeCodexUserMessagesAsDeveloper(input) {
-			result.Modified = true
-		}
 		if normalizedInput, modified := normalizeCodexMessageContentText(input); modified {
 			input = normalizedInput
 			result.Modified = true
@@ -298,7 +295,7 @@ func applyCodexOAuthTransformWithOptions(reqBody map[string]any, opts codexOAuth
 			reqBody["input"] = []any{
 				map[string]any{
 					"type":    "message",
-					"role":    "developer",
+					"role":    "user",
 					"content": inputStr,
 				},
 			}
@@ -309,23 +306,6 @@ func applyCodexOAuthTransformWithOptions(reqBody map[string]any, opts codexOAuth
 	}
 
 	return result
-}
-
-// normalizeCodexUserMessagesAsDeveloper aligns every user-authored message
-// sent to the ChatGPT internal Codex endpoint with the developer role expected
-// by the customized Codex request shape. Items without a user role and all
-// other roles retain their original semantics.
-func normalizeCodexUserMessagesAsDeveloper(input []any) bool {
-	modified := false
-	for _, item := range input {
-		message, ok := item.(map[string]any)
-		if !ok || !strings.EqualFold(strings.TrimSpace(firstNonEmptyString(message["role"])), "user") {
-			continue
-		}
-		message["role"] = "developer"
-		modified = true
-	}
-	return modified
 }
 
 func normalizeCodexToolChoice(reqBody map[string]any) bool {

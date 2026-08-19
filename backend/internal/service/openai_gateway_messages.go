@@ -180,13 +180,10 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		if err := json.Unmarshal(responsesBody, &reqBody); err != nil {
 			return nil, fmt.Errorf("unmarshal for codex transform: %w", err)
 		}
-		// Snapshot actual instruction messages before user turns are normalized
-		// to developer. Re-scanning afterward would incorrectly fold user text
-		// (and the compatibility guard) into the forced instructions template.
+		// Snapshot actual instruction messages before adding the compatibility
+		// guard so the guard is not duplicated into the forced instructions template.
 		promptLikeInstructions := extractPromptLikeInstructionsFromInput(reqBody)
-		// Insert the compatibility guard while the actual user turn still has
-		// role:user, so it remains between leading developer instructions and
-		// the user turn after the Codex role normalization below.
+		// Insert the developer compatibility guard before the first real user turn.
 		if shouldAutoInjectPromptCacheKeyForCompat(upstreamModel) {
 			appendOpenAICompatClaudeCodeTodoGuardToRequestBody(reqBody)
 		}

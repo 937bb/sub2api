@@ -1404,16 +1404,23 @@ func TestApplyCodexOAuthTransform_StringInputConvertedToArray(t *testing.T) {
 	msg, ok := input[0].(map[string]any)
 	require.True(t, ok)
 	require.Equal(t, "message", msg["type"])
-	require.Equal(t, "developer", msg["role"])
+	require.Equal(t, "user", msg["role"])
 	require.Equal(t, "Hello, world!", msg["content"])
 }
 
-func TestApplyCodexOAuthTransform_UserMessagesBecomeDeveloper(t *testing.T) {
+func TestApplyCodexOAuthTransform_UserMessagesKeepUserRole(t *testing.T) {
 	reqBody := map[string]any{
 		"model": "gpt-5.4",
 		"input": []any{
 			map[string]any{"type": "message", "role": "user", "content": "first"},
-			map[string]any{"type": "message", "role": "USER", "content": "second"},
+			map[string]any{
+				"type": "message",
+				"role": "user",
+				"content": []any{
+					map[string]any{"type": "input_text", "text": "second"},
+					map[string]any{"type": "input_image", "image_url": "https://example.com/image.png"},
+				},
+			},
 			map[string]any{"type": "message", "role": "assistant", "content": "answer"},
 			map[string]any{"type": "function_call_output", "call_id": "call_1", "output": "ok"},
 		},
@@ -1425,8 +1432,9 @@ func TestApplyCodexOAuthTransform_UserMessagesBecomeDeveloper(t *testing.T) {
 	input, ok := reqBody["input"].([]any)
 	require.True(t, ok)
 	require.Len(t, input, 4)
-	require.Equal(t, "developer", input[0].(map[string]any)["role"])
-	require.Equal(t, "developer", input[1].(map[string]any)["role"])
+	require.Equal(t, "user", input[0].(map[string]any)["role"])
+	require.Equal(t, "user", input[1].(map[string]any)["role"])
+	require.Equal(t, "input_image", input[1].(map[string]any)["content"].([]any)[1].(map[string]any)["type"])
 	require.Equal(t, "assistant", input[2].(map[string]any)["role"])
 	require.NotContains(t, input[3].(map[string]any), "role")
 }
@@ -1714,7 +1722,7 @@ func TestApplyCodexOAuthTransform_ExtractsSystemMessages(t *testing.T) {
 	require.Equal(t, "You are a coding assistant.", system["content"])
 	user, ok := input[1].(map[string]any)
 	require.True(t, ok)
-	require.Equal(t, "developer", user["role"])
+	require.Equal(t, "user", user["role"])
 	require.Equal(t, "You are a coding assistant.", reqBody["instructions"])
 }
 
@@ -1753,7 +1761,7 @@ func TestApplyCodexOAuthTransform_JsonObjectKeepsJsonInstructionInInput(t *testi
 	require.Contains(t, developer["content"], "JSON")
 	user, ok := input[1].(map[string]any)
 	require.True(t, ok)
-	require.Equal(t, "developer", user["role"])
+	require.Equal(t, "user", user["role"])
 }
 
 func TestIsInstructionsEmpty(t *testing.T) {

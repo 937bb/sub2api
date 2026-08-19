@@ -463,6 +463,29 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 		return nil, fmt.Errorf("upstream error: %d (passthrough rule matched) message=%s", resp.StatusCode, upstreamMsg)
 	}
 
+	// A deterministic 400 belongs to the request, not to the selected account.
+	// Stop before custom account error policies: a broad 400/temp-unschedulable
+	// rule would otherwise remove every account for the same invalid body and the
+	// scheduler would finally replace the useful 400 with a misleading 503.
+	if isOpenAIDeterministicClientError(resp.StatusCode) {
+		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+			Platform:           account.Platform,
+			AccountID:          account.ID,
+			AccountName:        account.Name,
+			UpstreamStatusCode: resp.StatusCode,
+			UpstreamRequestID:  resp.Header.Get("x-request-id"),
+			Kind:               "http_error",
+			Message:            upstreamMsg,
+			Detail:             upstreamDetail,
+		})
+		MarkResponseCommitted(c)
+		writeOpenAIUpstreamClientError(c, resp.StatusCode, body, upstreamMsg)
+		if upstreamMsg == "" {
+			return nil, fmt.Errorf("upstream error: %d", resp.StatusCode)
+		}
+		return nil, fmt.Errorf("upstream error: %d message=%s", resp.StatusCode, upstreamMsg)
+	}
+
 	// Check custom error codes
 	if !account.ShouldHandleErrorCode(resp.StatusCode) {
 		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
@@ -521,24 +544,6 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 	}
 
 	MarkResponseCommitted(c)
-
-	// 上游 400 是确定性的请求错误：同一份请求体换账号、重试多少次都会失败。归一成
-	// 502 upstream_error 会让下游网关把它当成可重试的上游故障反复重放（#5479 实测
-	// 30 个失败请求被放大成 60 次上游调用），同时抹掉客户端定位问题所需的 code/param。
-	//
-	// 走到这里说明 shouldFailoverOpenAIUpstreamResponse 已判定该 400 不可 failover，
-	// 即 server_is_overloaded / at capacity 这类可重试的 400 不会到达此处。
-	//
-	// 兄弟路径早已这么做：handleCompatErrorResponse（ChatCompletions / Anthropic）
-	// 回真实状态码 + invalid_request_error + 真实 message；/v1/images 还额外透传
-	// code/param。原生 Responses 是唯一漏掉的一条。
-	if isOpenAIDeterministicClientError(resp.StatusCode) {
-		writeOpenAIUpstreamClientError(c, resp.StatusCode, body, upstreamMsg)
-		if upstreamMsg == "" {
-			return nil, fmt.Errorf("upstream error: %d", resp.StatusCode)
-		}
-		return nil, fmt.Errorf("upstream error: %d message=%s", resp.StatusCode, upstreamMsg)
-	}
 
 	// Return appropriate error response
 	var errType, errMsg string
@@ -662,6 +667,24 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 			return nil, fmt.Errorf("upstream error: %d (passthrough rule matched)", resp.StatusCode)
 		}
 		return nil, fmt.Errorf("upstream error: %d (passthrough rule matched) message=%s", resp.StatusCode, upstreamMsg)
+	}
+
+	// Do not let account-level 400 rules turn a deterministic client error into
+	// failover and, after the pool is exhausted, an unrelated 503.
+	if isOpenAIDeterministicClientError(resp.StatusCode) {
+		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+			Platform:           account.Platform,
+			AccountID:          account.ID,
+			AccountName:        account.Name,
+			UpstreamStatusCode: resp.StatusCode,
+			UpstreamRequestID:  resp.Header.Get("x-request-id"),
+			Kind:               "http_error",
+			Message:            upstreamMsg,
+			Detail:             upstreamDetail,
+		})
+		MarkResponseCommitted(c)
+		writeError(c, resp.StatusCode, "invalid_request_error", upstreamMsg)
+		return nil, fmt.Errorf("upstream error: %d %s", resp.StatusCode, upstreamMsg)
 	}
 
 	// Check custom error codes — if the account does not handle this status,

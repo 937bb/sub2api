@@ -20,7 +20,8 @@ English | [中文](README_CN.md) | [日本語](README_JA.md)
 
 ## 937sub2b Update Log
 
-- `0.1.177.4`: Normalize every user-authored message sent through the OpenAI OAuth/Codex upstream path to `role: developer` across Responses, Chat Completions compatibility, and Anthropic Messages compatibility while preserving assistant/tool items, todo-guard ordering, and forced-instructions boundaries.
+- `0.1.177.5`: Preserve real Codex user turns as `role: user` (including mixed `input_text` + `input_image` content), keep only system/instruction messages as `developer`, and short-circuit deterministic upstream HTTP 400 errors before account cooldown/failover so clients receive the original `type`/`code`/`param` instead of a false pool-exhaustion 503.
+- `0.1.177.4`: Normalize every user-authored message sent through the OpenAI OAuth/Codex upstream path to `role: developer` across Responses, Chat Completions compatibility, and Anthropic Messages compatibility while preserving assistant/tool items, todo-guard ordering, and forced-instructions boundaries. Superseded by `0.1.177.5` because developer messages cannot contain `input_image` parts.
 - `0.1.177.3`: Keep concentrated Pro sessions and movable `previous_response_id` chains on their bound account under both advanced weighted and legacy scheduling; use the account hard concurrency limit and return its `WaitPlan` when full instead of switching accounts and losing upstream prompt-cache locality.
 - `0.1.177.2`: Adopt official-version-plus-branch-suffix numbering (`0.1.177` official baseline, `.2` for 937sub2b); expose quota-bypass WS turn preprocessing, concentrated concurrency, and bounded same-account 429 handling in group settings; place new sessions with a concentrated soft limit and 15% automatic sticky reserve, while existing sessions keep their bound account through the hard limit and wait there when full.
 
