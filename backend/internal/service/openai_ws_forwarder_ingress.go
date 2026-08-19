@@ -217,6 +217,17 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				nil,
 			)
 		}
+		sanitized, changed, sanitizeErr := sanitizeOpenAIResponsesInputItemStatuses(normalized)
+		if sanitizeErr != nil {
+			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(
+				coderws.StatusPolicyViolation,
+				"invalid websocket request payload",
+				sanitizeErr,
+			)
+		}
+		if changed {
+			normalized = sanitized
+		}
 		if hooks != nil && (hooks.MaxReasoningEffort != "" || len(hooks.ReasoningEffortMappings) > 0) {
 			if capped, changed := ApplyOpenAIReasoningEffortPolicy(normalized, hooks.MaxReasoningEffort, hooks.ReasoningEffortMappings); changed {
 				normalized = capped

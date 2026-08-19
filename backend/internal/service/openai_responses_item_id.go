@@ -62,6 +62,17 @@ func isValidOpenAIResponsesItemID(id string) bool {
 // response.output items but rejected when the same item is sent back through
 // request.input. It preserves the item's semantic payload and pairing fields.
 func sanitizeOpenAIResponsesInputItems(body []byte) ([]byte, bool, error) {
+	return sanitizeOpenAIResponsesInputItemsWithIDPolicy(body, true)
+}
+
+// sanitizeOpenAIResponsesInputItemStatuses is used by native WebSocket ingress.
+// That path must follow the same input/output status contract as HTTP while
+// preserving client item IDs verbatim.
+func sanitizeOpenAIResponsesInputItemStatuses(body []byte) ([]byte, bool, error) {
+	return sanitizeOpenAIResponsesInputItemsWithIDPolicy(body, false)
+}
+
+func sanitizeOpenAIResponsesInputItemsWithIDPolicy(body []byte, stripInvalidIDs bool) ([]byte, bool, error) {
 	input := gjson.GetBytes(body, "input")
 	if !input.IsArray() {
 		return body, false, nil
@@ -78,7 +89,7 @@ func sanitizeOpenAIResponsesInputItems(body []byte) ([]byte, bool, error) {
 		if item.IsObject() {
 			itemType := item.Get("type")
 			id := item.Get("id")
-			if itemType.Type == gjson.String && id.Type == gjson.String &&
+			if stripInvalidIDs && itemType.Type == gjson.String && id.Type == gjson.String &&
 				shouldStripOpenAIResponsesInputItemID(itemType.String(), id.String()) {
 				itemBody, sanitizeErr = sjson.DeleteBytes(itemBody, "id")
 				if sanitizeErr != nil {

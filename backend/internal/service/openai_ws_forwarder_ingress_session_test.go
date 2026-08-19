@@ -212,7 +212,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_KeepLeaseAcrossT
 		return message
 	}
 
-	writeMessage(`{"type":"response.create","model":"gpt-5.1","stream":false}`)
+	writeMessage(`{"type":"response.create","model":"gpt-5.1","stream":false,"input":[{"type":"message","id":"msg_ws_keep","role":"assistant","status":"completed","content":[{"type":"output_text","text":"hello"}]}]}`)
 	firstTurnImageEvent := readMessage()
 	require.Equal(t, "response.output_item.done", gjson.GetBytes(firstTurnImageEvent, "type").String())
 	require.Equal(t, "completed", gjson.GetBytes(firstTurnImageEvent, "item.status").String())
@@ -221,7 +221,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_KeepLeaseAcrossT
 	require.Equal(t, "response.completed", gjson.GetBytes(firstTurnEvent, "type").String())
 	require.Equal(t, "resp_ingress_turn_1", gjson.GetBytes(firstTurnEvent, "response.id").String())
 
-	writeMessage(`{"type":"response.create","model":"gpt-5.1","stream":false,"previous_response_id":"resp_ingress_turn_1"}`)
+	writeMessage(`{"type":"response.create","model":"gpt-5.1","stream":false,"previous_response_id":"resp_ingress_turn_1","input":[{"type":"function_call","id":"fc_ws_keep","call_id":"call_ws_keep","name":"exec_command","arguments":"{}","status":"completed"},{"type":"function_call_output","call_id":"call_ws_keep","output":"ok","status":"completed"}]}`)
 	secondTurnEvent := readMessage()
 	require.Equal(t, "response.completed", gjson.GetBytes(secondTurnEvent, "type").String())
 	require.Equal(t, "resp_ingress_turn_2", gjson.GetBytes(secondTurnEvent, "response.id").String())
@@ -241,6 +241,15 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_KeepLeaseAcrossT
 	require.Equal(t, int64(1), metrics.AcquireTotal, "同一 ingress 会话多 turn 应只获取一次上游 lease")
 	require.Equal(t, 1, captureDialer.DialCount(), "同一 ingress 会话应保持同一上游连接")
 	require.Len(t, captureConn.writes, 2, "应向同一上游连接发送两轮 response.create")
+	firstWrite := requestToJSONString(captureConn.writes[0])
+	require.False(t, gjson.Get(firstWrite, "input.0.status").Exists())
+	require.Equal(t, "msg_ws_keep", gjson.Get(firstWrite, "input.0.id").String(), "WS status 清洗不得改写 item id")
+	secondWrite := requestToJSONString(captureConn.writes[1])
+	require.False(t, gjson.Get(secondWrite, "input.0.status").Exists())
+	require.False(t, gjson.Get(secondWrite, "input.1.status").Exists())
+	require.Equal(t, "fc_ws_keep", gjson.Get(secondWrite, "input.0.id").String(), "WS status 清洗不得改写 tool item id")
+	require.Equal(t, gjson.Get(secondWrite, "input.0.call_id").String(), gjson.Get(secondWrite, "input.1.call_id").String(), "WS status 清洗不得破坏工具配对")
+	require.Equal(t, "ok", gjson.Get(secondWrite, "input.1.output").String())
 }
 
 func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_LeaseLossSendsRetryClose(t *testing.T) {
