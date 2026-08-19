@@ -20,6 +20,7 @@ English | [中文](README_CN.md) | [日本語](README_JA.md)
 
 ## 937sub2b Update Log
 
+- `0.1.177.6`: Bound OpenAI OAuth 429 amplification: quota/reset responses no longer retry the same account, unknown transient 429s use one account-wide half-open probe without clearing shared rate-limit state, a request may try at most one different account after its first OAuth 429, and concurrent 429 state/snapshot persistence is coalesced per account.
 - `0.1.177.5`: Preserve real Codex user turns as `role: user` (including mixed `input_text` + `input_image` content), keep only system/instruction messages as `developer`, and short-circuit deterministic upstream HTTP 400 errors before account cooldown/failover so clients receive the original `type`/`code`/`param` instead of a false pool-exhaustion 503.
 - `0.1.177.4`: Normalize every user-authored message sent through the OpenAI OAuth/Codex upstream path to `role: developer` across Responses, Chat Completions compatibility, and Anthropic Messages compatibility while preserving assistant/tool items, todo-guard ordering, and forced-instructions boundaries. Superseded by `0.1.177.5` because developer messages cannot contain `input_image` parts.
 - `0.1.177.3`: Keep concentrated Pro sessions and movable `previous_response_id` chains on their bound account under both advanced weighted and legacy scheduling; use the account hard concurrency limit and return its `WaitPlan` when full instead of switching accounts and losing upstream prompt-cache locality.

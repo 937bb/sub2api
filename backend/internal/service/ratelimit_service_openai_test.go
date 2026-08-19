@@ -5,6 +5,8 @@ package service
 import (
 	"context"
 	"net/http"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -155,6 +157,36 @@ type openAI429SnapshotRepo struct {
 	bulkUpdatedPayload AccountBulkUpdate
 }
 
+type openAI429CoalescingRepo struct {
+	mockAccountRepoForGemini
+	setCalls      atomic.Int64
+	extendCalls   atomic.Int64
+	snapshotCalls atomic.Int64
+	resetMu       sync.Mutex
+	lastResetAt   time.Time
+}
+
+func (r *openAI429CoalescingRepo) SetRateLimited(_ context.Context, _ int64, resetAt time.Time) error {
+	r.setCalls.Add(1)
+	r.resetMu.Lock()
+	r.lastResetAt = resetAt
+	r.resetMu.Unlock()
+	return nil
+}
+
+func (r *openAI429CoalescingRepo) SetRateLimitedIfLater(_ context.Context, _ int64, resetAt time.Time) error {
+	r.extendCalls.Add(1)
+	r.resetMu.Lock()
+	r.lastResetAt = resetAt
+	r.resetMu.Unlock()
+	return nil
+}
+
+func (r *openAI429CoalescingRepo) UpdateExtra(_ context.Context, _ int64, _ map[string]any) error {
+	r.snapshotCalls.Add(1)
+	return nil
+}
+
 func (r *openAI429SnapshotRepo) SetRateLimited(_ context.Context, id int64, _ time.Time) error {
 	r.rateLimitedID = id
 	return nil
@@ -198,6 +230,42 @@ func TestHandle429_OpenAIPersistsCodexSnapshotImmediately(t *testing.T) {
 	if got := repo.updatedExtra["codex_7d_used_percent"]; got != 100.0 {
 		t.Fatalf("codex_7d_used_percent = %v, want 100", got)
 	}
+}
+
+func TestHandle429_OpenAICoalescesConcurrentPersistence(t *testing.T) {
+	repo := &openAI429CoalescingRepo{}
+	svc := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	account := &Account{ID: 9123, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	before := time.Now()
+	headers := http.Header{
+		"X-Codex-Primary-Used-Percent":        []string{"100"},
+		"X-Codex-Primary-Reset-After-Seconds": []string{"3600"},
+		"X-Codex-Primary-Window-Minutes":      []string{"300"},
+	}
+
+	var wg sync.WaitGroup
+	for range 64 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			svc.handle429(context.Background(), account, headers, nil)
+		}()
+	}
+	wg.Wait()
+
+	require.Zero(t, repo.setCalls.Load(), "production repository should use atomic extend semantics")
+	require.Equal(t, int64(1), repo.extendCalls.Load(), "same account/reset bucket must persist once")
+	require.Equal(t, int64(1), repo.snapshotCalls.Load(), "429 usage snapshots must be throttled per account")
+	repo.resetMu.Lock()
+	persistedResetAt := repo.lastResetAt
+	repo.resetMu.Unlock()
+	require.False(t, persistedResetAt.Before(before.Add(time.Hour)))
+	require.False(t, persistedResetAt.After(ceilTime(time.Now().Add(time.Hour), openAI429PersistBucket)))
+
+	persisted, err := svc.setRateLimited(context.Background(), account, persistedResetAt.Add(openAI429PersistBucket))
+	require.NoError(t, err)
+	require.True(t, persisted)
+	require.Equal(t, int64(2), repo.extendCalls.Load(), "a later reset bucket must extend persistence")
 }
 
 func TestHandle429_OpenAISyncsObservedPlanType(t *testing.T) {

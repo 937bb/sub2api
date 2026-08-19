@@ -121,7 +121,8 @@ func (s *RateLimitService) RecordOpenAIOAuthUpstreamOutcome(ctx context.Context,
 	}
 
 	resetAt := now.Add(time.Duration(policy.BlockSeconds) * time.Second)
-	if err := s.accountRepo.SetRateLimited(ctx, account.ID, resetAt); err != nil {
+	persisted, err := s.setRateLimited(ctx, account, resetAt)
+	if err != nil {
 		s.openAIOAuth429DynamicMu.Lock()
 		if current := s.openAIOAuth429DynamicStat[account.ID]; current == stat {
 			stat.limiting = false
@@ -136,8 +137,10 @@ func (s *RateLimitService) RecordOpenAIOAuthUpstreamOutcome(ctx context.Context,
 	}
 	s.openAIOAuth429DynamicMu.Unlock()
 	s.notifyAccountSchedulingBlocked(account, resetAt, "openai_oauth_429_dynamic")
-	slog.Info("openai_oauth_429_dynamic_rate_limited", "account_id", account.ID, "reset_at", resetAt,
-		"window_seconds", policy.WindowSeconds, "samples", total, "count_429", count429, "ratio", ratio)
+	if persisted {
+		slog.Info("openai_oauth_429_dynamic_rate_limited", "account_id", account.ID, "reset_at", resetAt,
+			"window_seconds", policy.WindowSeconds, "samples", total, "count_429", count429, "ratio", ratio)
+	}
 }
 
 func openAIOAuth429UsageWindowReached(used5h, used7d *float64, createdAt, now time.Time, policy *OpenAIOAuth429DynamicPolicy) bool {

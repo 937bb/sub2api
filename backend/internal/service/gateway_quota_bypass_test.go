@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -74,8 +76,65 @@ func TestConfigureOpenAIQuotaBypass429Retry(t *testing.T) {
 	require.True(t, bypass.RetryableOnSameAccount)
 	require.Equal(t, openAIQuotaBypassSameAccountRetries, bypass.SameAccountRetryLimit)
 	require.Equal(t, openAIQuotaBypassSameAccountRetries, bypass.ResolveSameAccountRetryLimit(0))
-	require.True(t, bypass.ClearRateLimitBeforeRetry)
-	require.False(t, bypass.RateLimitObservedBefore.IsZero())
+	require.False(t, bypass.ClearRateLimitBeforeRetry)
+	require.True(t, bypass.RateLimitObservedBefore.IsZero())
+
+	concurrent := svc.configureOpenAIQuotaBypass429Retry(c, account, &UpstreamFailoverError{
+		StatusCode: http.StatusTooManyRequests,
+	}, true)
+	require.False(t, concurrent.RetryableOnSameAccount, "only one request may own the account-wide probe")
+	require.Zero(t, concurrent.SameAccountRetryLimit)
+}
+
+func TestConfigureOpenAIQuotaBypass429RetrySkipsTerminalQuotaSignals(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tests := []struct {
+		name    string
+		body    string
+		headers http.Header
+	}{
+		{name: "usage limit", body: `{"error":{"type":"usage_limit_reached","message":"The usage limit has been reached","resets_in_seconds":3600}}`},
+		{name: "explicit retry after", body: `{"error":{"type":"rate_limit_error","code":"rate_limit_exceeded","message":"slow down"}}`, headers: http.Header{"Retry-After": []string{"5"}}},
+		{name: "codex reset window", body: `{"error":{"type":"rate_limit_error","code":"rate_limit_exceeded"}}`, headers: http.Header{
+			"X-Codex-Primary-Used-Percent":        []string{"100"},
+			"X-Codex-Primary-Reset-After-Seconds": []string{"18000"},
+		}},
+	}
+	for i, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			markOpenAIQuotaBypassApplied(c, 1)
+			account := &Account{ID: int64(100 + i), Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+			failoverErr := (&OpenAIGatewayService{}).configureOpenAIQuotaBypass429Retry(c, account, &UpstreamFailoverError{
+				StatusCode:      http.StatusTooManyRequests,
+				ResponseBody:    []byte(tt.body),
+				ResponseHeaders: tt.headers,
+			}, true)
+			require.False(t, failoverErr.RetryableOnSameAccount)
+			require.Zero(t, failoverErr.SameAccountRetryLimit)
+			require.False(t, failoverErr.ClearRateLimitBeforeRetry)
+		})
+	}
+}
+
+func TestOpenAIQuotaBypass429ProbeIsAccountWide(t *testing.T) {
+	svc := &OpenAIGatewayService{}
+	now := time.Now()
+	var acquired atomic.Int64
+	var wg sync.WaitGroup
+	for range 64 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if svc.tryAcquireOpenAIQuotaBypass429Probe(501, now) {
+				acquired.Add(1)
+			}
+		}()
+	}
+	wg.Wait()
+	require.Equal(t, int64(1), acquired.Load())
+	require.True(t, svc.tryAcquireOpenAIQuotaBypass429Probe(502, now), "different accounts have independent probes")
+	require.True(t, svc.tryAcquireOpenAIQuotaBypass429Probe(501, now.Add(openAIQuotaBypass429ProbeLease)), "expired probe can be reacquired")
 }
 
 func TestPrepareOpenAIQuotaBypassSameAccountRetryClearsRuntimeBlock(t *testing.T) {
@@ -421,7 +480,7 @@ func TestApplyOpenAIQuotaBypassForRequest_RealToolOutputIsNativeBypass(t *testin
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
-	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth, Extra: map[string]any{"quota_bypass_enabled": true}}
+	account := &Account{ID: 45, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Extra: map[string]any{"quota_bypass_enabled": true}}
 	body := []byte(`{"model":"gpt-5.6-sol","input":[{"type":"function_call","call_id":"call_real"},{"type":"function_call_output","call_id":"call_real","output":"ok"}]}`)
 
 	forwarded := applyOpenAIQuotaBypassForRequest(c, account, body, 1)

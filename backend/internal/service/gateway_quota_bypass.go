@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -23,7 +24,8 @@ const (
 	openAIQuotaBypassInjectPairsContextKey = "openai_quota_bypass_inject_pairs"
 	openAIQuotaBypassResponseHeader        = "X-Sub2API-Quota-Bypass"
 	openAIQuotaBypassPairsResponseHeader   = "X-Sub2API-Quota-Bypass-Pairs"
-	openAIQuotaBypassSameAccountRetries    = 3
+	openAIQuotaBypassSameAccountRetries    = 1
+	openAIQuotaBypass429ProbeLease         = 5 * time.Second
 )
 
 type openAIQuotaBypassRequestContextKey struct{}
@@ -276,9 +278,9 @@ func openAIQuotaBypassEffectivePayload(payload []byte) bool {
 	return ClassifyOpenAIQuotaBypassRequest(payload) == OpenAIQuotaBypassRequestNativeToolOutput
 }
 
-// configureOpenAIQuotaBypass429Retry converts the manual "recover state and
-// retry" workflow into a bounded request-local retry. The final failed attempt
-// remains rate-limited so normal account failover still applies.
+// configureOpenAIQuotaBypass429Retry gives only unknown/transient 429s one
+// account-wide half-open probe. Quota-exhausted responses are never retried on
+// the same account, and the shared rate-limit state is never cleared here.
 func (s *OpenAIGatewayService) configureOpenAIQuotaBypass429Retry(
 	c *gin.Context,
 	account *Account,
@@ -297,24 +299,85 @@ func (s *OpenAIGatewayService) configureOpenAIQuotaBypass429RetryEnabled(
 	account *Account,
 	failoverErr *UpstreamFailoverError,
 	enabled bool,
-	clearRateLimitBeforeRetry bool,
+	_ bool,
 ) *UpstreamFailoverError {
 	if !enabled || failoverErr == nil || failoverErr.StatusCode != http.StatusTooManyRequests ||
 		account == nil || account.Platform != PlatformOpenAI || !account.IsOAuth() {
 		return failoverErr
 	}
+	// A quota/reset signal is deterministic for this account until its stated
+	// boundary. Retrying it in-place only repeats the same 429 and amplifies load.
+	if isOpenAIQuotaBypassTerminal429(failoverErr) {
+		failoverErr.RetryableOnSameAccount = false
+		failoverErr.SameAccountRetryLimit = 0
+		failoverErr.ClearRateLimitBeforeRetry = false
+		return failoverErr
+	}
+
+	// Unknown/transient 429s get one account-wide half-open probe. Concurrent
+	// requests observe the lease and skip the probe, preventing every request
+	// from clearing shared state and retrying the same cooling account.
+	if s == nil || !s.tryAcquireOpenAIQuotaBypass429Probe(account.ID, time.Now()) {
+		failoverErr.RetryableOnSameAccount = false
+		failoverErr.SameAccountRetryLimit = 0
+		failoverErr.ClearRateLimitBeforeRetry = false
+		return failoverErr
+	}
 	failoverErr.RetryableOnSameAccount = true
 	failoverErr.SameAccountRetryLimit = openAIQuotaBypassSameAccountRetries
-	failoverErr.ClearRateLimitBeforeRetry = clearRateLimitBeforeRetry
-	if clearRateLimitBeforeRetry {
-		failoverErr.RateLimitObservedBefore = time.Now().UTC()
-		if s != nil {
-			if rawGeneration, ok := s.openaiAccountRuntimeBlockGeneration.Load(account.ID); ok {
-				failoverErr.RuntimeBlockGeneration, _ = rawGeneration.(uint64)
-			}
+	// Keep the account's persisted/runtime 429 block in place while the current
+	// request performs its direct retry. Reopening scheduling here caused the
+	// account to flap back into the pool and created a thundering herd.
+	failoverErr.ClearRateLimitBeforeRetry = false
+	return failoverErr
+}
+
+func isOpenAIQuotaBypassTerminal429(failoverErr *UpstreamFailoverError) bool {
+	if failoverErr == nil || failoverErr.StatusCode != http.StatusTooManyRequests {
+		return false
+	}
+	body := failoverErr.ResponseBody
+	for _, path := range []string{
+		"error.type", "error.code", "response.error.type", "response.error.code",
+	} {
+		switch strings.ToLower(strings.TrimSpace(gjson.GetBytes(body, path).String())) {
+		case "usage_limit_reached", "quota_exhausted":
+			return true
 		}
 	}
-	return failoverErr
+	if parseOpenAIRateLimitResetTime(body) != nil || calculateOpenAI429ResetTime(failoverErr.ResponseHeaders) != nil {
+		return true
+	}
+	if failoverErr.ResponseHeaders != nil && strings.TrimSpace(failoverErr.ResponseHeaders.Get("Retry-After")) != "" {
+		return true
+	}
+	message := strings.ToLower(strings.TrimSpace(extractUpstreamErrorMessage(body)))
+	for _, marker := range []string{"usage limit", "quota exhausted", "limit has been reached"} {
+		if strings.Contains(message, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *OpenAIGatewayService) tryAcquireOpenAIQuotaBypass429Probe(accountID int64, now time.Time) bool {
+	if s == nil || accountID <= 0 {
+		return false
+	}
+	leaseUntil := now.Add(openAIQuotaBypass429ProbeLease)
+	for {
+		current, loaded := s.openaiQuotaBypass429ProbeUntil.LoadOrStore(accountID, leaseUntil)
+		if !loaded {
+			return true
+		}
+		currentUntil, ok := current.(time.Time)
+		if ok && now.Before(currentUntil) {
+			return false
+		}
+		if s.openaiQuotaBypass429ProbeUntil.CompareAndSwap(accountID, current, leaseUntil) {
+			return true
+		}
+	}
 }
 
 // PrepareOpenAIQuotaBypassSameAccountRetry clears only the 429 state written by

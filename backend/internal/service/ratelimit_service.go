@@ -30,6 +30,8 @@ type RateLimitService struct {
 	settingService            *SettingService
 	tokenCacheInvalidator     TokenCacheInvalidator
 	runtimeBlocker            AccountRuntimeBlocker
+	openAI429PersistStates    sync.Map
+	openAI429SnapshotThrottle *accountWriteThrottle
 	openAIOAuth429DynamicMu   sync.Mutex
 	openAIOAuth429DynamicStat map[int64]*openAIOAuth429DynamicWindow
 	usageCacheMu              sync.RWMutex
@@ -67,7 +69,17 @@ const geminiPrecheckCacheTTL = time.Minute
 const (
 	defaultRateLimit429CooldownSeconds = 5
 	maxRateLimit429CooldownSeconds     = 7200
+	openAI429PersistBucket             = 5 * time.Second
 )
+
+type openAI429PersistState struct {
+	mu          sync.Mutex
+	resetBucket time.Time
+}
+
+type openAI429ExtendingRepository interface {
+	SetRateLimitedIfLater(ctx context.Context, id int64, resetAt time.Time) error
+}
 
 const (
 	openAIImageRateLimitDefaultCooldown = time.Minute
@@ -90,6 +102,7 @@ func NewRateLimitService(accountRepo AccountRepository, usageRepo UsageLogReposi
 		cfg:                       cfg,
 		geminiQuotaService:        geminiQuotaService,
 		tempUnschedCache:          tempUnschedCache,
+		openAI429SnapshotThrottle: newAccountWriteThrottle(openAICodexSnapshotPersistMinInterval),
 		usageCache:                make(map[int64]*geminiUsageCacheEntry),
 		openAIOAuth429DynamicStat: make(map[int64]*openAIOAuth429DynamicWindow),
 	}
@@ -1075,11 +1088,14 @@ func (s *RateLimitService) handle429(ctx context.Context, account *Account, head
 		}
 		if resetAt := s.calculateOpenAI429ResetTime(headers); resetAt != nil {
 			s.notifyAccountSchedulingBlocked(account, *resetAt, "429")
-			if err := s.accountRepo.SetRateLimited(ctx, account.ID, *resetAt); err != nil {
+			persisted, err := s.setRateLimited(ctx, account, *resetAt)
+			if err != nil {
 				slog.Warn("rate_limit_set_failed", "account_id", account.ID, "error", err)
 				return
 			}
-			slog.Info("openai_account_rate_limited", "account_id", account.ID, "reset_at", *resetAt)
+			if persisted {
+				slog.Info("openai_account_rate_limited", "account_id", account.ID, "reset_at", *resetAt)
+			}
 			return
 		}
 	}
@@ -1087,7 +1103,7 @@ func (s *RateLimitService) handle429(ctx context.Context, account *Account, head
 	// 2. Anthropic 平台：尝试解析 per-window 头（5h / 7d），选择实际触发的窗口
 	if result := calculateAnthropic429ResetTime(headers); result != nil {
 		s.notifyAccountSchedulingBlocked(account, result.resetAt, "429")
-		if err := s.accountRepo.SetRateLimited(ctx, account.ID, result.resetAt); err != nil {
+		if _, err := s.setRateLimited(ctx, account, result.resetAt); err != nil {
 			slog.Warn("rate_limit_set_failed", "account_id", account.ID, "error", err)
 			return
 		}
@@ -1117,11 +1133,14 @@ func (s *RateLimitService) handle429(ctx context.Context, account *Account, head
 			if resetAt := parseOpenAIRateLimitResetTime(responseBody); resetAt != nil {
 				resetTime := time.Unix(*resetAt, 0)
 				s.notifyAccountSchedulingBlocked(account, resetTime, "429")
-				if err := s.accountRepo.SetRateLimited(ctx, account.ID, resetTime); err != nil {
+				persisted, err := s.setRateLimited(ctx, account, resetTime)
+				if err != nil {
 					slog.Warn("rate_limit_set_failed", "account_id", account.ID, "error", err)
 					return
 				}
-				slog.Info("account_rate_limited", "account_id", account.ID, "platform", account.Platform, "reset_at", resetTime, "reset_in", time.Until(resetTime).Truncate(time.Second))
+				if persisted {
+					slog.Info("account_rate_limited", "account_id", account.ID, "platform", account.Platform, "reset_at", resetTime, "reset_in", time.Until(resetTime).Truncate(time.Second))
+				}
 				return
 			}
 		case PlatformGemini, PlatformAntigravity:
@@ -1129,7 +1148,7 @@ func (s *RateLimitService) handle429(ctx context.Context, account *Account, head
 			if resetAt := ParseGeminiRateLimitResetTime(responseBody); resetAt != nil {
 				resetTime := time.Unix(*resetAt, 0)
 				s.notifyAccountSchedulingBlocked(account, resetTime, "429")
-				if err := s.accountRepo.SetRateLimited(ctx, account.ID, resetTime); err != nil {
+				if _, err := s.setRateLimited(ctx, account, resetTime); err != nil {
 					slog.Warn("rate_limit_set_failed", "account_id", account.ID, "error", err)
 					return
 				}
@@ -1168,7 +1187,7 @@ func (s *RateLimitService) handle429(ctx context.Context, account *Account, head
 
 	// 标记限流状态
 	s.notifyAccountSchedulingBlocked(account, resetAt, "429")
-	if err := s.accountRepo.SetRateLimited(ctx, account.ID, resetAt); err != nil {
+	if _, err := s.setRateLimited(ctx, account, resetAt); err != nil {
 		slog.Warn("rate_limit_set_failed", "account_id", account.ID, "error", err)
 		return
 	}
@@ -1183,6 +1202,51 @@ func (s *RateLimitService) handle429(ctx context.Context, account *Account, head
 	slog.Info("account_rate_limited", "account_id", account.ID, "reset_at", resetAt)
 }
 
+// setRateLimited collapses concurrent OpenAI OAuth 429 persistence into one
+// write per account/reset bucket. Runtime blocking is still applied by the
+// caller for every response, while DB, outbox, and scheduler snapshot work is
+// performed only when the effective reset boundary advances.
+func (s *RateLimitService) setRateLimited(ctx context.Context, account *Account, resetAt time.Time) (bool, error) {
+	if s == nil || s.accountRepo == nil || account == nil || account.ID <= 0 {
+		return false, nil
+	}
+	if account.Platform != PlatformOpenAI || !account.IsOpenAIOAuthLike() {
+		err := s.accountRepo.SetRateLimited(ctx, account.ID, resetAt)
+		return err == nil, err
+	}
+
+	resetBucket := ceilTime(resetAt, openAI429PersistBucket)
+	rawState, _ := s.openAI429PersistStates.LoadOrStore(account.ID, &openAI429PersistState{})
+	state := rawState.(*openAI429PersistState)
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if !resetBucket.After(state.resetBucket) {
+		return false, nil
+	}
+
+	var err error
+	if extendingRepo, ok := s.accountRepo.(openAI429ExtendingRepository); ok {
+		err = extendingRepo.SetRateLimitedIfLater(ctx, account.ID, resetAt)
+	} else {
+		err = s.accountRepo.SetRateLimited(ctx, account.ID, resetAt)
+	}
+	if err == nil {
+		state.resetBucket = resetBucket
+	}
+	return err == nil, err
+}
+
+func ceilTime(value time.Time, interval time.Duration) time.Time {
+	if value.IsZero() || interval <= 0 {
+		return value
+	}
+	truncated := value.Truncate(interval)
+	if truncated.Before(value) {
+		return truncated.Add(interval)
+	}
+	return truncated
+}
+
 func (s *RateLimitService) apply429FallbackRateLimit(ctx context.Context, account *Account, reason string) {
 	cooldown, enabled := s.get429FallbackCooldown(ctx, account)
 	if !enabled {
@@ -1191,10 +1255,14 @@ func (s *RateLimitService) apply429FallbackRateLimit(ctx context.Context, accoun
 	}
 
 	resetAt := time.Now().Add(cooldown)
-	slog.Warn("rate_limit_429_fallback_used", "account_id", account.ID, "platform", account.Platform, "reason", reason, "using_default", cooldown.String())
 	s.notifyAccountSchedulingBlocked(account, resetAt, "429_fallback")
-	if err := s.accountRepo.SetRateLimited(ctx, account.ID, resetAt); err != nil {
+	persisted, err := s.setRateLimited(ctx, account, resetAt)
+	if err != nil {
 		slog.Warn("rate_limit_set_failed", "account_id", account.ID, "error", err)
+		return
+	}
+	if persisted {
+		slog.Warn("rate_limit_429_fallback_used", "account_id", account.ID, "platform", account.Platform, "reason", reason, "using_default", cooldown.String())
 	}
 }
 
@@ -1248,12 +1316,12 @@ func calculateOpenAI429ResetTime(headers http.Header) *time.Time {
 	// 优先使用被触发限制的重置时间
 	if is7dExhausted && normalized.Reset7dSeconds != nil {
 		resetAt := now.Add(time.Duration(*normalized.Reset7dSeconds) * time.Second)
-		slog.Info("openai_429_7d_limit_exhausted", "reset_after_seconds", *normalized.Reset7dSeconds, "reset_at", resetAt)
+		slog.Debug("openai_429_7d_limit_exhausted", "reset_after_seconds", *normalized.Reset7dSeconds, "reset_at", resetAt)
 		return &resetAt
 	}
 	if is5hExhausted && normalized.Reset5hSeconds != nil {
 		resetAt := now.Add(time.Duration(*normalized.Reset5hSeconds) * time.Second)
-		slog.Info("openai_429_5h_limit_exhausted", "reset_after_seconds", *normalized.Reset5hSeconds, "reset_at", resetAt)
+		slog.Debug("openai_429_5h_limit_exhausted", "reset_after_seconds", *normalized.Reset5hSeconds, "reset_at", resetAt)
 		return &resetAt
 	}
 
@@ -1267,7 +1335,7 @@ func calculateOpenAI429ResetTime(headers http.Header) *time.Time {
 	}
 	if maxResetSecs > 0 {
 		resetAt := now.Add(time.Duration(maxResetSecs) * time.Second)
-		slog.Info("openai_429_using_max_reset", "max_reset_seconds", maxResetSecs, "reset_at", resetAt)
+		slog.Debug("openai_429_using_max_reset", "max_reset_seconds", maxResetSecs, "reset_at", resetAt)
 		return &resetAt
 	}
 
@@ -1582,7 +1650,11 @@ func (s *RateLimitService) persistOpenAICodexSnapshot(ctx context.Context, accou
 	if snapshot == nil {
 		return
 	}
-	updates := buildCodexUsageExtraUpdates(snapshot, time.Now())
+	now := time.Now()
+	if s.openAI429SnapshotThrottle != nil && !s.openAI429SnapshotThrottle.Allow(account.ID, now) {
+		return
+	}
+	updates := buildCodexUsageExtraUpdates(snapshot, now)
 	if len(updates) == 0 {
 		return
 	}
