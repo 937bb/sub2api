@@ -9,21 +9,53 @@ import (
 )
 
 // Invalid replayed IDs are removed rather than rewritten because a fabricated
-// msg/fc ID may point at a different upstream object.
+// item ID may point at a different upstream object. call_id is intentionally
+// untouched: it carries tool-call/output pairing and has separate validation.
 func shouldStripOpenAIResponsesInputItemID(itemType, id string) bool {
 	if id == "" {
 		return false
 	}
-	if itemType == "message" {
-		return !strings.HasPrefix(id, "msg")
+	// item_reference.id is the reference itself rather than optional replay
+	// metadata. Removing it would turn one precise validation error into a
+	// missing-reference error and silently lose the requested continuation.
+	if itemType == "item_reference" {
+		return false
 	}
-	if itemType == "reasoning" {
-		return !strings.HasPrefix(id, "rs")
+	if !isValidOpenAIResponsesItemID(id) {
+		return true
 	}
-	if isCodexToolCallInputType(itemType) {
-		return !strings.HasPrefix(id, "fc")
+
+	requiredPrefix := ""
+	switch itemType {
+	case "message":
+		requiredPrefix = "msg"
+	case "reasoning":
+		requiredPrefix = "rs"
+	case "custom_tool_call":
+		// ChatGPT Codex validates custom tool-call item IDs separately from
+		// function calls: fc_* is rejected with "Expected ... begins with ctc".
+		requiredPrefix = "ctc"
+	default:
+		if isCodexFunctionCallInputType(itemType) {
+			requiredPrefix = "fc"
+		}
+	}
+	if requiredPrefix != "" {
+		return !strings.HasPrefix(id, requiredPrefix)
 	}
 	return false
+}
+
+func isValidOpenAIResponsesItemID(id string) bool {
+	for i := 0; i < len(id); i++ {
+		c := id[i]
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+			(c >= '0' && c <= '9') || c == '_' || c == '-' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func sanitizeOpenAIResponsesInputItemIDs(body []byte) ([]byte, bool, error) {

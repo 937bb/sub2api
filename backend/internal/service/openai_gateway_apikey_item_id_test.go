@@ -39,7 +39,10 @@ func TestOpenAIGatewayService_APIKeyPassthrough_StripsInvalidInputItemIDs(t *tes
 			{"type":"function_call","id":"item_bad_call","call_id":"call_123","name":"exec_command","arguments":"{}"},
 			{"type":"message","id":"msg_valid","role":"user","content":[{"type":"input_text","text":"continue"}]},
 			{"type":"function_call","id":"fc_valid","call_id":"call_456","name":"apply_patch","arguments":"{}"},
-			{"type":"function_call_output","id":"item_output","call_id":"call_123","output":"done"},
+			{"type":"function_call_output","id":"fco_bad*output","call_id":"call_123","output":"done"},
+			{"type":"function_call_output","id":"fco_valid-output","call_id":"call_456","output":"done"},
+			{"type":"custom_tool_call","id":"fc_wrong_prefix","call_id":"call_custom_1","name":"apply_patch","input":"patch"},
+			{"type":"custom_tool_call","id":"ctc_valid","call_id":"call_custom_2","name":"apply_patch","input":"patch"},
 			{"type":"web_search_call","id":"item_unconstrained"}
 		]
 	}`)
@@ -58,9 +61,13 @@ func TestOpenAIGatewayService_APIKeyPassthrough_StripsInvalidInputItemIDs(t *tes
 	require.Equal(t, "{}", gjson.GetBytes(forwarded, "input.1.arguments").String())
 	require.Equal(t, "msg_valid", gjson.GetBytes(forwarded, "input.2.id").String())
 	require.Equal(t, "fc_valid", gjson.GetBytes(forwarded, "input.3.id").String())
-	require.Equal(t, "item_output", gjson.GetBytes(forwarded, "input.4.id").String())
+	require.False(t, gjson.GetBytes(forwarded, "input.4.id").Exists())
 	require.Equal(t, "call_123", gjson.GetBytes(forwarded, "input.4.call_id").String())
-	require.Equal(t, "item_unconstrained", gjson.GetBytes(forwarded, "input.5.id").String())
+	require.Equal(t, "fco_valid-output", gjson.GetBytes(forwarded, "input.5.id").String())
+	require.False(t, gjson.GetBytes(forwarded, "input.6.id").Exists())
+	require.Equal(t, "call_custom_1", gjson.GetBytes(forwarded, "input.6.call_id").String())
+	require.Equal(t, "ctc_valid", gjson.GetBytes(forwarded, "input.7.id").String())
+	require.Equal(t, "item_unconstrained", gjson.GetBytes(forwarded, "input.8.id").String())
 }
 
 // TestOpenAIGatewayService_APIKeyPassthrough_StripsInvalidReasoningItemIDs
@@ -120,6 +127,13 @@ func TestShouldStripOpenAIResponsesInputItemID_Reasoning(t *testing.T) {
 		{"message item id", "message", "item_x", true},
 		{"function_call fc id", "function_call", "fc_abc", false},
 		{"function_call item id", "function_call", "item_x", true},
+		{"custom tool ctc id", "custom_tool_call", "ctc_abc", false},
+		{"custom tool fc id", "custom_tool_call", "fc_abc", true},
+		{"reported custom tool fc id", "custom_tool_call", "fc_0caed27fded15f2b016a85103c2eec87d080920111d9e6b61c", true},
+		{"output valid charset", "function_call_output", "fco_abc-123", false},
+		{"output invalid character", "function_call_output", "fco_abc*123", true},
+		{"reported output invalid characters", "function_call_output", "fco_01a0181a-6317-76a1-af8e-141****0015d", true},
+		{"item reference remains intact", "item_reference", "fc_abc*123", false},
 		{"unconstrained type", "web_search_call", "ws_001", false},
 	}
 	for _, tc := range cases {

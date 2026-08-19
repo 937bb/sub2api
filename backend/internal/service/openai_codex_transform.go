@@ -1522,8 +1522,9 @@ func isCodexToolCallItemType(typ string) bool {
 	}
 }
 
-// isCodexToolCallInputType 仅匹配 call-input 类型（不含 output），这些类型的
-// id 必须以 "fc" 开头，上游会校验 "Expected an ID that begins with 'fc'."。
+// isCodexToolCallInputType matches call-input types (not outputs). Individual
+// item ID prefix contracts are handled by shouldStripOpenAIResponsesInputItemID;
+// custom_tool_call requires ctc rather than fc.
 func isCodexToolCallInputType(typ string) bool {
 	switch typ {
 	case "function_call",
@@ -1531,6 +1532,19 @@ func isCodexToolCallInputType(typ string) bool {
 		"local_shell_call",
 		"tool_search_call",
 		"custom_tool_call",
+		"mcp_tool_call":
+		return true
+	default:
+		return false
+	}
+}
+
+func isCodexFunctionCallInputType(typ string) bool {
+	switch typ {
+	case "function_call",
+		"tool_call",
+		"local_shell_call",
+		"tool_search_call",
 		"mcp_tool_call":
 		return true
 	default:
