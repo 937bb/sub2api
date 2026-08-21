@@ -109,17 +109,17 @@ func TestOpenAIWSHandshakeCompatibilitySeparatesDelegationLineage(t *testing.T) 
 		"X-Codex-Parent-Thread-Id": []string{"thread-parent-a"},
 		"X-Openai-Subagent":        []string{"review"},
 	}
-	baseKey := normalizeOpenAIWSHandshakeCompatibility(base)
+	baseKey := normalizeOpenAIWSHandshakeCompatibility(nil, base)
 
 	differentParent := base.Clone()
 	differentParent.Set(openAICodexParentThreadIDHeader, "thread-parent-b")
-	require.NotEqual(t, baseKey, normalizeOpenAIWSHandshakeCompatibility(differentParent))
+	require.NotEqual(t, baseKey, normalizeOpenAIWSHandshakeCompatibility(nil, differentParent))
 
 	differentSubagent := base.Clone()
 	differentSubagent.Set(openAICodexSubagentHeader, "memory")
-	require.NotEqual(t, baseKey, normalizeOpenAIWSHandshakeCompatibility(differentSubagent))
+	require.NotEqual(t, baseKey, normalizeOpenAIWSHandshakeCompatibility(nil, differentSubagent))
 
 	unrelated := base.Clone()
 	unrelated.Set("Accept-Language", "zh-CN")
-	require.Equal(t, baseKey, normalizeOpenAIWSHandshakeCompatibility(unrelated))
+	require.Equal(t, baseKey, normalizeOpenAIWSHandshakeCompatibility(nil, unrelated))
 }

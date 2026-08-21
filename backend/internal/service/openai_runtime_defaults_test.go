@@ -79,7 +79,10 @@ func TestCodexFingerprintRuntimeDefaultCoversOAuthLike(t *testing.T) {
 	publishOpenAIRuntimeDefaults(true, false)
 	require.Nil(t, svc.resolveCodexFingerprintIDsForRequest(context.Background(), setupToken, http.Header{}))
 
-	setupToken.Extra = map[string]any{codexFingerprintModeExtraKey: string(codexFingerprintFull)}
+	setupToken.Extra = map[string]any{
+		codexFingerprintModeExtraKey: string(codexFingerprintFull),
+		codexFingerprintSeedExtraKey: testCodexFingerprintSeed,
+	}
 	ids = svc.resolveCodexFingerprintIDsForRequest(context.Background(), setupToken, http.Header{})
 	require.NotNil(t, ids)
 	require.Equal(t, codexFingerprintFull, ids.mode)

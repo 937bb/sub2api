@@ -68,7 +68,7 @@ func openAIQuotaBypassWindowSize(topK int) int {
 func newOpenAIQuotaBypassPoolKey(groupID *int64, platform string, priority int) openAIQuotaBypassPoolKey {
 	key := openAIQuotaBypassPoolKey{
 		ungrouped: groupID == nil,
-		platform:  normalizeOpenAICompatiblePlatform(platform),
+		platform:  NormalizeOpenAICompatiblePlatform(platform),
 		priority:  priority,
 	}
 	if groupID != nil {

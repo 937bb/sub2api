@@ -61,6 +61,13 @@ func (s *OpenAIGatewayService) withOpenAICodexInstallationID(ctx context.Context
 	if existing, ok := canonicalOpenAICodexInstallationID(account.GetOpenAIDeviceID()); ok {
 		return cloneAccountWithOpenAICodexInstallationID(account, existing)
 	}
+	if mode := account.GetCodexFingerprintMode(); mode != codexFingerprintOff {
+		if _, ok := codexFingerprintSeed(account.Extra); ok {
+			// Fingerprint convergence derives installation_id from its managed
+			// seed. Do not inject a request-local device ID that would override it.
+			return account
+		}
+	}
 
 	installationID := uuid.NewString()
 	shouldPersist := true
