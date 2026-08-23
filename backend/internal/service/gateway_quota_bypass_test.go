@@ -35,6 +35,10 @@ func requireQuotaBypassSuffix(t *testing.T, body []byte) {
 	if functionCall.Get("call_id").String() != functionOutput.Get("call_id").String() {
 		t.Fatal("synthetic function call IDs do not match")
 	}
+	output := functionOutput.Get("output").String()
+	if !strings.Contains(output, "Process exited with code 0") {
+		t.Fatalf("synthetic function output does not report success: %q", output)
+	}
 }
 
 func requireQuotaBypassPairs(t *testing.T, body []byte, originalItems, pairs int) {
@@ -493,13 +497,17 @@ func TestApplyOpenAIQuotaBypassForRequest_RealToolOutputIsNativeBypass(t *testin
 	require.True(t, failoverErr.RetryableOnSameAccount)
 }
 
-func TestInjectFunctionCallOutputSuffix_AddsInputWhenResponseCreateOmitsIt(t *testing.T) {
-	body := []byte(`{"type":"response.create","model":"gpt-5.6-sol","stream":true}`)
+func TestInjectFunctionCallOutputSuffix_SkipsConversationBackedResponseCreate(t *testing.T) {
+	for _, body := range [][]byte{
+		[]byte(`{"type":"response.create","model":"gpt-5.6-sol","stream":true}`),
+		[]byte(`{"type":"response.create","model":"gpt-5.6-sol","input":null}`),
+		[]byte(`{"type":"response.create","model":"gpt-5.6-sol","input":[]}`),
+	} {
+		injected, ok := InjectFunctionCallOutputSuffix(body)
 
-	injected, ok := InjectFunctionCallOutputSuffix(body)
-
-	require.True(t, ok)
-	requireQuotaBypassPairs(t, injected, 0, 1)
+		require.False(t, ok)
+		require.Equal(t, body, injected)
+	}
 }
 
 func TestClassifyOpenAIQuotaBypassRequest(t *testing.T) {
@@ -509,7 +517,9 @@ func TestClassifyOpenAIQuotaBypassRequest(t *testing.T) {
 		want OpenAIQuotaBypassRequestMode
 	}{
 		{name: "text", body: `{"input":"hello"}`, want: OpenAIQuotaBypassRequestInjectable},
-		{name: "missing input websocket turn", body: `{"type":"response.create"}`, want: OpenAIQuotaBypassRequestInjectable},
+		{name: "missing input websocket turn", body: `{"type":"response.create"}`, want: OpenAIQuotaBypassRequestUnavailable},
+		{name: "null input websocket turn", body: `{"type":"response.create","input":null}`, want: OpenAIQuotaBypassRequestUnavailable},
+		{name: "empty input websocket turn", body: `{"type":"response.create","input":[]}`, want: OpenAIQuotaBypassRequestUnavailable},
 		{name: "native tool output", body: `{"input":[{"type":"function_call_output","call_id":"call_real"}]}`, want: OpenAIQuotaBypassRequestNativeToolOutput},
 		{name: "compaction", body: `{"input":[{"type":"compaction_trigger"}]}`, want: OpenAIQuotaBypassRequestUnavailable},
 		{name: "invalid input object", body: `{"input":{"type":"message"}}`, want: OpenAIQuotaBypassRequestUnavailable},
@@ -573,6 +583,21 @@ func TestApplyOpenAIWSQuotaBypass_SkipsCompactionTrigger(t *testing.T) {
 	forwarded := applyOpenAIWSQuotaBypass(body, hooks)
 	require.Equal(t, body, forwarded)
 	require.Zero(t, applied)
+}
+
+func TestApplyOpenAIWSQuotaBypass_SkipsConversationBackedTurn(t *testing.T) {
+	body := []byte(`{"type":"response.create","model":"gpt-5.6-sol"}`)
+	applied := 0
+	hooks := &OpenAIWSIngressHooks{
+		QuotaBypassEnabled:   true,
+		OnQuotaBypassApplied: func() { applied++ },
+	}
+
+	forwarded := applyOpenAIWSQuotaBypass(body, hooks)
+
+	require.Equal(t, body, forwarded)
+	require.Zero(t, applied)
+	require.False(t, gjson.GetBytes(forwarded, "input").Exists())
 }
 
 func TestApplyOpenAIWSQuotaBypass_RealToolOutputReportsNativeBypass(t *testing.T) {
