@@ -36,8 +36,8 @@ func requireQuotaBypassSuffix(t *testing.T, body []byte) {
 		t.Fatal("synthetic function call IDs do not match")
 	}
 	output := functionOutput.Get("output").String()
-	if !strings.Contains(output, "Process exited with code 0") {
-		t.Fatalf("synthetic function output does not report success: %q", output)
+	if output != quotaBypassCallOutput {
+		t.Fatalf("synthetic function output = %q, want %q", output, quotaBypassCallOutput)
 	}
 }
 
@@ -173,11 +173,11 @@ func TestPrepareOpenAIQuotaBypassSameAccountRetryPreservesNewerRuntimeBlock(t *t
 	require.True(t, svc.isOpenAIAccountRuntimeBlocked(account))
 }
 
-// The injected turn must look like a real Codex shell call, not a constant.
-// A fixed call_id shared by every request this proxy sends is a trivial
-// upstream fingerprint, and "_sys"/"[continue]" advertise the turn as synthetic.
-func TestInjectFunctionCallOutputSuffix_LooksLikeRealToolCall(t *testing.T) {
-	base := []byte(`{"model":"gpt-5.4","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}]}`)
+// The synthetic history pair must not claim to be one of the client's real
+// tools. A name collision makes Codex associate the no-op history with its
+// local executor and can corrupt parameters on the next actual tool call.
+func TestInjectFunctionCallOutputSuffix_UsesNonCollidingToolName(t *testing.T) {
+	base := []byte(`{"model":"gpt-5.4","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}],"tools":[{"type":"function","name":"shell"},{"type":"function","name":"apply_patch"}]}`)
 
 	first, ok := InjectFunctionCallOutputSuffix(base)
 	if !ok {
@@ -188,15 +188,14 @@ func TestInjectFunctionCallOutputSuffix_LooksLikeRealToolCall(t *testing.T) {
 	items := gjson.GetBytes(first, "input").Array()
 	call := items[len(items)-2]
 
-	if got := call.Get("name").String(); got != "shell" {
-		t.Fatalf("tool name = %q, want shell", got)
-	}
+	firstName := call.Get("name").String()
+	require.Regexp(t, `^fn_[0-9a-f]{16}$`, firstName)
+	require.NotEqual(t, "shell", firstName)
+	require.NotEqual(t, "apply_patch", firstName)
 	if !gjson.Valid(call.Get("arguments").String()) {
 		t.Fatalf("arguments must be a JSON document, got %q", call.Get("arguments").String())
 	}
-	if cmd := gjson.Get(call.Get("arguments").String(), "command").Array(); len(cmd) == 0 {
-		t.Fatal("shell arguments must carry a command argv")
-	}
+	require.JSONEq(t, `{}`, call.Get("arguments").String())
 
 	for _, forbidden := range []string{"fc_syn_00", "call_syn_00", "_sys", "[continue]"} {
 		if bytes.Contains(first, []byte(forbidden)) {
@@ -211,10 +210,12 @@ func TestInjectFunctionCallOutputSuffix_LooksLikeRealToolCall(t *testing.T) {
 	}
 	firstID := call.Get("call_id").String()
 	secondItems := gjson.GetBytes(second, "input").Array()
-	secondID := secondItems[len(secondItems)-2].Get("call_id").String()
+	secondCall := secondItems[len(secondItems)-2]
+	secondID := secondCall.Get("call_id").String()
 	if firstID == "" || firstID == secondID {
 		t.Fatalf("call_id must be unique per request, got %q twice", firstID)
 	}
+	require.NotEqual(t, firstName, secondCall.Get("name").String())
 }
 
 func TestInjectFunctionCallOutputSuffixN_AppendsConfiguredPairs(t *testing.T) {
@@ -497,7 +498,7 @@ func TestApplyOpenAIQuotaBypassForRequest_RealToolOutputIsNativeBypass(t *testin
 	require.True(t, failoverErr.RetryableOnSameAccount)
 }
 
-func TestInjectFunctionCallOutputSuffix_SkipsConversationBackedResponseCreate(t *testing.T) {
+func TestInjectFunctionCallOutputSuffix_PreservesBypassForInputlessResponseCreate(t *testing.T) {
 	for _, body := range [][]byte{
 		[]byte(`{"type":"response.create","model":"gpt-5.6-sol","stream":true}`),
 		[]byte(`{"type":"response.create","model":"gpt-5.6-sol","input":null}`),
@@ -505,8 +506,8 @@ func TestInjectFunctionCallOutputSuffix_SkipsConversationBackedResponseCreate(t 
 	} {
 		injected, ok := InjectFunctionCallOutputSuffix(body)
 
-		require.False(t, ok)
-		require.Equal(t, body, injected)
+		require.True(t, ok)
+		requireQuotaBypassPairs(t, injected, 0, 1)
 	}
 }
 
@@ -517,9 +518,11 @@ func TestClassifyOpenAIQuotaBypassRequest(t *testing.T) {
 		want OpenAIQuotaBypassRequestMode
 	}{
 		{name: "text", body: `{"input":"hello"}`, want: OpenAIQuotaBypassRequestInjectable},
-		{name: "missing input websocket turn", body: `{"type":"response.create"}`, want: OpenAIQuotaBypassRequestUnavailable},
-		{name: "null input websocket turn", body: `{"type":"response.create","input":null}`, want: OpenAIQuotaBypassRequestUnavailable},
-		{name: "empty input websocket turn", body: `{"type":"response.create","input":[]}`, want: OpenAIQuotaBypassRequestUnavailable},
+		{name: "missing input websocket turn", body: `{"type":"response.create"}`, want: OpenAIQuotaBypassRequestInjectable},
+		{name: "null input websocket turn", body: `{"type":"response.create","input":null}`, want: OpenAIQuotaBypassRequestInjectable},
+		{name: "empty input websocket turn", body: `{"type":"response.create","input":[]}`, want: OpenAIQuotaBypassRequestInjectable},
+		{name: "conversation item frame", body: `{"type":"conversation.item.create","item":{"type":"message"}}`, want: OpenAIQuotaBypassRequestUnavailable},
+		{name: "session update frame", body: `{"type":"session.update","session":{}}`, want: OpenAIQuotaBypassRequestUnavailable},
 		{name: "native tool output", body: `{"input":[{"type":"function_call_output","call_id":"call_real"}]}`, want: OpenAIQuotaBypassRequestNativeToolOutput},
 		{name: "compaction", body: `{"input":[{"type":"compaction_trigger"}]}`, want: OpenAIQuotaBypassRequestUnavailable},
 		{name: "invalid input object", body: `{"input":{"type":"message"}}`, want: OpenAIQuotaBypassRequestUnavailable},
@@ -529,6 +532,14 @@ func TestClassifyOpenAIQuotaBypassRequest(t *testing.T) {
 			require.Equal(t, tt.want, ClassifyOpenAIQuotaBypassRequest([]byte(tt.body)))
 		})
 	}
+}
+
+func TestWithOpenAIQuotaBypassRequestBody_KeepsSchedulingForWSControlFrame(t *testing.T) {
+	controlCtx := WithOpenAIQuotaBypassRequestBody(context.Background(), []byte(`{"type":"conversation.item.create","item":{"type":"message"}}`))
+	require.False(t, openAIQuotaBypassRequestUnavailable(controlCtx))
+
+	compactionCtx := WithOpenAIQuotaBypassRequestBody(context.Background(), []byte(`{"type":"response.create","input":[{"type":"compaction_trigger"}]}`))
+	require.True(t, openAIQuotaBypassRequestUnavailable(compactionCtx))
 }
 
 func TestInjectFunctionCallOutputSuffix_IsIdempotentForSyntheticPair(t *testing.T) {
@@ -585,19 +596,33 @@ func TestApplyOpenAIWSQuotaBypass_SkipsCompactionTrigger(t *testing.T) {
 	require.Zero(t, applied)
 }
 
-func TestApplyOpenAIWSQuotaBypass_SkipsConversationBackedTurn(t *testing.T) {
+func TestApplyOpenAIWSQuotaBypass_InjectsConversationBackedTurn(t *testing.T) {
 	body := []byte(`{"type":"response.create","model":"gpt-5.6-sol"}`)
 	applied := 0
+	pairs := 0
 	hooks := &OpenAIWSIngressHooks{
 		QuotaBypassEnabled:   true,
 		OnQuotaBypassApplied: func() { applied++ },
+		OnQuotaBypassAppliedWithPairs: func(value int) {
+			pairs = value
+		},
 	}
 
 	forwarded := applyOpenAIWSQuotaBypass(body, hooks)
 
+	require.NotEqual(t, body, forwarded)
+	require.Equal(t, 1, applied)
+	require.Equal(t, 1, pairs)
+	requireQuotaBypassPairs(t, forwarded, 0, 1)
+}
+
+func TestApplyOpenAIWSQuotaBypass_SkipsNonResponseFrames(t *testing.T) {
+	body := []byte(`{"type":"conversation.item.create","item":{"type":"message","role":"user","content":[{"type":"input_text","text":"run tests"}]}}`)
+	hooks := &OpenAIWSIngressHooks{QuotaBypassEnabled: true}
+
+	forwarded := applyOpenAIWSQuotaBypass(body, hooks)
+
 	require.Equal(t, body, forwarded)
-	require.Zero(t, applied)
-	require.False(t, gjson.GetBytes(forwarded, "input").Exists())
 }
 
 func TestApplyOpenAIWSQuotaBypass_RealToolOutputReportsNativeBypass(t *testing.T) {
