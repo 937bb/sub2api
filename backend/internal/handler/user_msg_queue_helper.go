@@ -119,9 +119,11 @@ func (h *UserMsgQueueHelper) waitForLockWithPing(
 				responseheaders.SetSSEStreamingHeaders(c)
 				*streamStarted = true
 			}
-			if _, err := fmt.Fprint(c.Writer, string(h.pingFormat)); err != nil {
+			written, err := fmt.Fprint(c.Writer, string(h.pingFormat))
+			if err != nil {
 				return nil, err
 			}
+			recordGatewayStreamHeartbeat(c, written)
 			flusher.Flush()
 
 		case <-timer.C:
@@ -221,9 +223,11 @@ func (h *UserMsgQueueHelper) ThrottleWithPing(
 				responseheaders.SetSSEStreamingHeaders(c)
 				*streamStarted = true
 			}
-			if _, err := fmt.Fprint(c.Writer, string(h.pingFormat)); err != nil {
+			written, err := fmt.Fprint(c.Writer, string(h.pingFormat))
+			if err != nil {
 				return err
 			}
+			recordGatewayStreamHeartbeat(c, written)
 			flusher.Flush()
 		case <-timer.C:
 			return nil
