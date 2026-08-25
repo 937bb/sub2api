@@ -151,6 +151,7 @@ type SettingService struct {
 	openAIQuotaAutoPauseSettingsSF     singleflight.Group
 	openAIOAuth429DynamicSettingsCache atomic.Value // *cachedOpenAIOAuth429DynamicSettings
 	openAIOAuth429DynamicSettingsSF    singleflight.Group
+	openAIAPIKeyHealthBreakerCache     atomic.Value // *cachedOpenAIAPIKeyHealthBreakerSettings
 
 	channelMonitorRuntimeListenersMu sync.Mutex
 	channelMonitorRuntimeListeners   []func()

@@ -9,6 +9,28 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type runtimeDefaultsSettingRepoStub struct {
+	SettingRepository
+	values map[string]string
+}
+
+func (s *runtimeDefaultsSettingRepoStub) GetValue(_ context.Context, key string) (string, error) {
+	if value, ok := s.values[key]; ok {
+		return value, nil
+	}
+	return "", ErrSettingNotFound
+}
+
+func (s *runtimeDefaultsSettingRepoStub) GetMultiple(_ context.Context, keys []string) (map[string]string, error) {
+	values := make(map[string]string, len(keys))
+	for _, key := range keys {
+		if value, ok := s.values[key]; ok {
+			values[key] = value
+		}
+	}
+	return values, nil
+}
+
 func resetOpenAIRuntimeDefaultsForTest() {
 	openAIRuntimeDefaultsSF.Forget("openai_runtime_defaults")
 	openAIRuntimeDefaultsCache.Store(nil)
@@ -18,7 +40,7 @@ func TestOpenAIRuntimeDefaultsMissingAndStoredValues(t *testing.T) {
 	defer publishOpenAIRuntimeDefaults(true, true)
 
 	resetOpenAIRuntimeDefaultsForTest()
-	repo := &settingRepoStub{values: map[string]string{}}
+	repo := &runtimeDefaultsSettingRepoStub{values: map[string]string{}}
 	settings := NewSettingService(repo, &config.Config{})
 	wsEnabled, fingerprintFull := settings.GetOpenAIRuntimeDefaults(context.Background())
 	require.True(t, wsEnabled)
