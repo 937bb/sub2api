@@ -24,20 +24,31 @@ func requireQuotaBypassSuffix(t *testing.T, body []byte) {
 	if len(input) < 2 {
 		t.Fatalf("input length = %d, want at least 2", len(input))
 	}
-	functionCall := input[len(input)-2]
-	functionOutput := input[len(input)-1]
-	if got := functionCall.Get("type").String(); got != "function_call" {
-		t.Fatalf("penultimate input type = %q, want function_call", got)
+	customCall := input[len(input)-2]
+	customOutput := input[len(input)-1]
+	if got := customCall.Get("type").String(); got != "custom_tool_call" {
+		t.Fatalf("penultimate input type = %q, want custom_tool_call", got)
 	}
-	if got := functionOutput.Get("type").String(); got != "function_call_output" {
-		t.Fatalf("last input type = %q, want function_call_output", got)
+	if got := customOutput.Get("type").String(); got != "custom_tool_call_output" {
+		t.Fatalf("last input type = %q, want custom_tool_call_output", got)
 	}
-	if functionCall.Get("call_id").String() != functionOutput.Get("call_id").String() {
-		t.Fatal("synthetic function call IDs do not match")
+	if customCall.Get("call_id").String() != customOutput.Get("call_id").String() {
+		t.Fatal("synthetic custom tool call IDs do not match")
 	}
-	output := functionOutput.Get("output").String()
-	if output != quotaBypassCallOutput {
-		t.Fatalf("synthetic function output = %q, want %q", output, quotaBypassCallOutput)
+	if got := customCall.Get("name").String(); got != quotaBypassCustomToolName {
+		t.Fatalf("synthetic custom tool name = %q, want %q", got, quotaBypassCustomToolName)
+	}
+	if got := customCall.Get("input").String(); got != quotaBypassCustomToolInput {
+		t.Fatalf("synthetic custom tool input = %q, want %q", got, quotaBypassCustomToolInput)
+	}
+	if customCall.Get("id").Exists() {
+		t.Fatal("synthetic custom tool call must not include an item id")
+	}
+	if got := customOutput.Get("output.0.type").String(); got != "input_text" {
+		t.Fatalf("synthetic custom tool output type = %q, want input_text", got)
+	}
+	if got := customOutput.Get("output.0.text").String(); got != quotaBypassCustomToolOutput {
+		t.Fatalf("synthetic custom tool output = %q, want %q", got, quotaBypassCustomToolOutput)
 	}
 }
 
@@ -49,8 +60,8 @@ func requireQuotaBypassPairs(t *testing.T, body []byte, originalItems, pairs int
 	for i := 0; i < pairs; i++ {
 		call := input[originalItems+i*2]
 		output := input[originalItems+i*2+1]
-		require.Equal(t, "function_call", call.Get("type").String())
-		require.Equal(t, "function_call_output", output.Get("type").String())
+		require.Equal(t, "custom_tool_call", call.Get("type").String())
+		require.Equal(t, "custom_tool_call_output", output.Get("type").String())
 		callID := call.Get("call_id").String()
 		require.NotEmpty(t, callID)
 		require.Equal(t, callID, output.Get("call_id").String())
@@ -173,10 +184,7 @@ func TestPrepareOpenAIQuotaBypassSameAccountRetryPreservesNewerRuntimeBlock(t *t
 	require.True(t, svc.isOpenAIAccountRuntimeBlocked(account))
 }
 
-// The synthetic history pair must not claim to be one of the client's real
-// tools. A name collision makes Codex associate the no-op history with its
-// local executor and can corrupt parameters on the next actual tool call.
-func TestInjectFunctionCallOutputSuffix_UsesNonCollidingToolName(t *testing.T) {
+func TestInjectFunctionCallOutputSuffix_UsesCodexCustomToolProtocol(t *testing.T) {
 	base := []byte(`{"model":"gpt-5.4","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}],"tools":[{"type":"function","name":"shell"},{"type":"function","name":"apply_patch"}]}`)
 
 	first, ok := InjectFunctionCallOutputSuffix(base)
@@ -188,14 +196,10 @@ func TestInjectFunctionCallOutputSuffix_UsesNonCollidingToolName(t *testing.T) {
 	items := gjson.GetBytes(first, "input").Array()
 	call := items[len(items)-2]
 
-	firstName := call.Get("name").String()
-	require.Regexp(t, `^fn_[0-9a-f]{16}$`, firstName)
-	require.NotEqual(t, "shell", firstName)
-	require.NotEqual(t, "apply_patch", firstName)
-	if !gjson.Valid(call.Get("arguments").String()) {
-		t.Fatalf("arguments must be a JSON document, got %q", call.Get("arguments").String())
-	}
-	require.JSONEq(t, `{}`, call.Get("arguments").String())
+	require.Equal(t, quotaBypassCustomToolName, call.Get("name").String())
+	require.Equal(t, quotaBypassCustomToolInput, call.Get("input").String())
+	require.False(t, call.Get("id").Exists())
+	require.False(t, call.Get("arguments").Exists())
 
 	for _, forbidden := range []string{"fc_syn_00", "call_syn_00", "_sys", "[continue]"} {
 		if bytes.Contains(first, []byte(forbidden)) {
@@ -215,7 +219,7 @@ func TestInjectFunctionCallOutputSuffix_UsesNonCollidingToolName(t *testing.T) {
 	if firstID == "" || firstID == secondID {
 		t.Fatalf("call_id must be unique per request, got %q twice", firstID)
 	}
-	require.NotEqual(t, firstName, secondCall.Get("name").String())
+	require.Equal(t, quotaBypassCustomToolName, secondCall.Get("name").String())
 }
 
 func TestInjectFunctionCallOutputSuffixN_AppendsConfiguredPairs(t *testing.T) {
@@ -356,8 +360,8 @@ func TestAttachedGroupQuotaBypassInjectsDirectRequest(t *testing.T) {
 	if len(input) != 3 {
 		t.Fatalf("injected input length = %d, want 3", len(input))
 	}
-	if got := input[2].Get("type").String(); got != "function_call_output" {
-		t.Fatalf("last input type = %q, want function_call_output", got)
+	if got := input[2].Get("type").String(); got != "custom_tool_call_output" {
+		t.Fatalf("last input type = %q, want custom_tool_call_output", got)
 	}
 }
 
@@ -481,6 +485,14 @@ func TestInjectFunctionCallOutputSuffix_RealToolOutputAlreadyBypassesQuotaStage(
 	}
 }
 
+func TestInjectFunctionCallOutputSuffix_RealCustomToolOutputAlreadyBypassesQuotaStage(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.6-sol","input":[{"type":"message","role":"user","content":"run tests"},{"type":"custom_tool_call","call_id":"call_real","name":"exec","input":"echo ok"},{"type":"custom_tool_call_output","call_id":"call_real","output":[{"type":"input_text","text":"ok"}]}]}`)
+
+	injected, ok := InjectFunctionCallOutputSuffix(body)
+	require.False(t, ok)
+	require.Equal(t, body, injected)
+}
+
 func TestApplyOpenAIQuotaBypassForRequest_RealToolOutputIsNativeBypass(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
@@ -524,6 +536,7 @@ func TestClassifyOpenAIQuotaBypassRequest(t *testing.T) {
 		{name: "conversation item frame", body: `{"type":"conversation.item.create","item":{"type":"message"}}`, want: OpenAIQuotaBypassRequestUnavailable},
 		{name: "session update frame", body: `{"type":"session.update","session":{}}`, want: OpenAIQuotaBypassRequestUnavailable},
 		{name: "native tool output", body: `{"input":[{"type":"function_call_output","call_id":"call_real"}]}`, want: OpenAIQuotaBypassRequestNativeToolOutput},
+		{name: "native custom tool output", body: `{"input":[{"type":"custom_tool_call_output","call_id":"call_real"}]}`, want: OpenAIQuotaBypassRequestNativeToolOutput},
 		{name: "compaction", body: `{"input":[{"type":"compaction_trigger"}]}`, want: OpenAIQuotaBypassRequestUnavailable},
 		{name: "invalid input object", body: `{"input":{"type":"message"}}`, want: OpenAIQuotaBypassRequestUnavailable},
 	}

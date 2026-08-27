@@ -232,7 +232,7 @@ func TestQuotaBypassEligible_FullProductionScenario(t *testing.T) {
 
 // TestQuotaBypassEligible_FullInjectionChain proves the COMPLETE production
 // chain: cache round-trip → eligibility → InjectFunctionCallOutputSuffix fires
-// → request body is actually modified with synthetic function_call items.
+// → request body is actually modified with synthetic custom-tool items.
 func TestQuotaBypassEligible_FullInjectionChain(t *testing.T) {
 	svc := NewAPIKeyService(nil, nil, nil, nil, nil, nil, &config.Config{})
 	groupID := int64(42)
@@ -270,8 +270,8 @@ func TestQuotaBypassEligible_FullInjectionChain(t *testing.T) {
 	require.NoError(t, json.Unmarshal(inputArr, &parsed))
 	var items []map[string]interface{}
 	require.NoError(t, json.Unmarshal(parsed["input"], &items))
-	require.Len(t, items, 3, "input array should have 3 items: original + function_call + function_call_output")
+	require.Len(t, items, 3, "input array should have 3 items: original + custom_tool_call + custom_tool_call_output")
 	require.Equal(t, "message", items[0]["type"])
-	require.Equal(t, "function_call", items[1]["type"])
-	require.Equal(t, "function_call_output", items[2]["type"])
+	require.Equal(t, "custom_tool_call", items[1]["type"])
+	require.Equal(t, "custom_tool_call_output", items[2]["type"])
 }

@@ -130,8 +130,8 @@ func TestQuotaBypassWebSocketInjectsEveryTurn(t *testing.T) {
 			assertBypassSuffix := func(payload []byte, turn int) {
 				input := gjson.GetBytes(payload, "input").Array()
 				require.Len(t, input, 3, "turn %d must contain exactly one bypass pair", turn)
-				require.Equal(t, "function_call", input[1].Get("type").String())
-				require.Equal(t, "function_call_output", input[2].Get("type").String())
+				require.Equal(t, "custom_tool_call", input[1].Get("type").String())
+				require.Equal(t, "custom_tool_call_output", input[2].Get("type").String())
 			}
 			writeTurn := func(turn int, payload string) {
 				writeCtx, cancelWrite := context.WithTimeout(context.Background(), 3*time.Second)

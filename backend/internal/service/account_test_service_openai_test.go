@@ -548,8 +548,8 @@ func TestAccountTestService_OpenAIQuotaBypass403SetsPermanentError(t *testing.T)
 	require.Len(t, upstream.requests, 1)
 	body, readErr := io.ReadAll(upstream.requests[0].Body)
 	require.NoError(t, readErr)
-	require.Equal(t, "function_call", gjson.GetBytes(body, "input.1.type").String())
-	require.Equal(t, "function_call_output", gjson.GetBytes(body, "input.2.type").String())
+	require.Equal(t, "custom_tool_call", gjson.GetBytes(body, "input.1.type").String())
+	require.Equal(t, "custom_tool_call_output", gjson.GetBytes(body, "input.2.type").String())
 }
 
 func TestAccountTestService_ReadOnlyOpenAI403DoesNotChangeStatus(t *testing.T) {

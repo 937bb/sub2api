@@ -134,8 +134,8 @@ func TestAccountHandler_ManualTestsPreserveExisting429State(t *testing.T) {
 			require.Equal(t, &resetAt, repo.account.RateLimitResetAt)
 			input := gjson.GetBytes(upstream.requestBody, "input").Array()
 			require.GreaterOrEqual(t, len(input), 2)
-			require.Equal(t, "function_call", input[len(input)-2].Get("type").String())
-			require.Equal(t, "function_call_output", input[len(input)-1].Get("type").String())
+			require.Equal(t, "custom_tool_call", input[len(input)-2].Get("type").String())
+			require.Equal(t, "custom_tool_call_output", input[len(input)-1].Get("type").String())
 		})
 	}
 }
