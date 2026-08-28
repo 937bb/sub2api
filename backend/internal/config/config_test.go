@@ -661,6 +661,25 @@ func TestLoadOpenAIResponseHeaderTimeoutFromEnv(t *testing.T) {
 	require.Equal(t, 1800, cfg.Gateway.OpenAIResponseHeaderTimeout)
 }
 
+func TestLoadOpenAIChatGPTIPv6RelayFromEnv(t *testing.T) {
+	resetViperWithJWTSecret(t)
+	t.Setenv("GATEWAY_OPENAI_CHATGPT_IPV6_ONLY", "true")
+	t.Setenv("GATEWAY_OPENAI_CHATGPT_IPV6_RELAY_ADDR", "127.0.0.1:24443")
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.True(t, cfg.Gateway.OpenAIChatGPTIPv6Only)
+	require.Equal(t, "127.0.0.1:24443", cfg.Gateway.OpenAIChatGPTIPv6RelayAddr)
+}
+
+func TestLoadOpenAIChatGPTIPv6RelayRequiresAddress(t *testing.T) {
+	resetViperWithJWTSecret(t)
+	t.Setenv("GATEWAY_OPENAI_CHATGPT_IPV6_ONLY", "true")
+
+	_, err := Load()
+	require.ErrorContains(t, err, "gateway.openai_chatgpt_ipv6_relay_addr is required")
+}
+
 func TestLoadImageNonstreamKeepaliveFromEnv(t *testing.T) {
 	resetViperWithJWTSecret(t)
 	t.Setenv("GATEWAY_IMAGE_NONSTREAM_KEEPALIVE_INTERVAL", "15")

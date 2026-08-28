@@ -310,6 +310,10 @@ gateway:
   # Use this to avoid compact failures when newer models are not yet supported by the compact endpoint.
   # 当 compact 端点暂未支持更新模型时，可通过这里降级规避失败。
   openai_compact_model: "gpt-5.4"
+  # Route only direct chatgpt.com:443 traffic through the optional local IPv6 relay.
+  # Accounts with an explicit proxy and other upstream hosts are unaffected.
+  openai_chatgpt_ipv6_only: false
+  openai_chatgpt_ipv6_relay_addr: "127.0.0.1:24443"
   # ChatGPT Frameless Live 单会话硬上限（秒）。
   live:
     max_session_duration_seconds: 3600

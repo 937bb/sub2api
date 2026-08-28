@@ -1,0 +1,17 @@
+services:
+  chatgpt-ipv6-relay:
+    build:
+      context: ../..
+      dockerfile: deploy/chatgpt-ipv6-relay/Dockerfile
+    image: sub2api-chatgpt-ipv6-relay:latest
+    container_name: sub2api-chatgpt-ipv6-relay
+    restart: unless-stopped
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      - RELAY_IPV6_PREFIX=${RELAY_IPV6_PREFIX:-}
+      - RELAY_LISTEN_ADDR=${RELAY_LISTEN_ADDR:-127.0.0.1:24443}
+      - RELAY_HEALTH_ADDR=${RELAY_HEALTH_ADDR:-127.0.0.1:24444}

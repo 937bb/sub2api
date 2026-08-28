@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"net"
 	"net/textproto"
 	"net/url"
 	"os"
@@ -1002,6 +1003,11 @@ type GatewayConfig struct {
 	// OpenAICompactModel: /responses/compact 上游使用的模型。
 	// compact 端点支持模型滞后于普通 /responses 时，可用该配置降级规避上游错误。
 	OpenAICompactModel string `mapstructure:"openai_compact_model"`
+	// OpenAIChatGPTIPv6Only routes direct chatgpt.com:443 traffic through a local
+	// TCP relay that selects an IPv6 source address. Accounts with a proxy are unaffected.
+	OpenAIChatGPTIPv6Only bool `mapstructure:"openai_chatgpt_ipv6_only"`
+	// OpenAIChatGPTIPv6RelayAddr is the local TCP relay address, for example 127.0.0.1:24443.
+	OpenAIChatGPTIPv6RelayAddr string `mapstructure:"openai_chatgpt_ipv6_relay_addr"`
 	// OpenAIWS: OpenAI Responses WebSocket 配置（默认开启，可按需回滚到 HTTP）
 	OpenAIWS GatewayOpenAIWSConfig `mapstructure:"openai_ws"`
 	// Live: ChatGPT Frameless Live 会话配置。
@@ -2372,6 +2378,8 @@ func setDefaults() {
 	viper.SetDefault("gateway.codex_image_generation_bridge_enabled", false)
 	viper.SetDefault("gateway.openai_passthrough_allow_timeout_headers", false)
 	viper.SetDefault("gateway.openai_compact_model", "gpt-5.4")
+	viper.SetDefault("gateway.openai_chatgpt_ipv6_only", false)
+	viper.SetDefault("gateway.openai_chatgpt_ipv6_relay_addr", "")
 	viper.SetDefault("gateway.live.max_session_duration_seconds", 3600)
 	// OpenAI Responses WebSocket（默认开启；可通过 force_http 紧急回滚）
 	viper.SetDefault("gateway.openai_ws.enabled", true)
@@ -3284,6 +3292,15 @@ func (c *Config) Validate() error {
 	}
 	if c.Gateway.OpenAIResponseHeaderTimeout < 0 {
 		return fmt.Errorf("gateway.openai_response_header_timeout must be non-negative")
+	}
+	c.Gateway.OpenAIChatGPTIPv6RelayAddr = strings.TrimSpace(c.Gateway.OpenAIChatGPTIPv6RelayAddr)
+	if c.Gateway.OpenAIChatGPTIPv6Only {
+		if c.Gateway.OpenAIChatGPTIPv6RelayAddr == "" {
+			return fmt.Errorf("gateway.openai_chatgpt_ipv6_relay_addr is required when gateway.openai_chatgpt_ipv6_only is enabled")
+		}
+		if _, _, err := net.SplitHostPort(c.Gateway.OpenAIChatGPTIPv6RelayAddr); err != nil {
+			return fmt.Errorf("gateway.openai_chatgpt_ipv6_relay_addr must be a valid host:port: %w", err)
+		}
 	}
 	if c.Gateway.GrokResponseHeaderTimeout < 0 || c.Gateway.GrokResponseHeaderTimeout > 1800 {
 		return fmt.Errorf("gateway.grok_response_header_timeout must be between 0-1800 seconds")

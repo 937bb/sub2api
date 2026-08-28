@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/chatgptrelay"
 	"github.com/stretchr/testify/require"
 )
 
@@ -72,4 +74,48 @@ func TestUpstreamDialerRespectsContextCancellation(t *testing.T) {
 		_ = conn.Close()
 	}
 	require.Error(t, err, "已取消的 context 必须立即中止拨号")
+}
+
+func TestBuildUpstreamTransportRoutesDirectChatGPTThroughRelay(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer func() { require.NoError(t, listener.Close()) }()
+
+	accepted := make(chan struct{}, 1)
+	go func() {
+		conn, acceptErr := listener.Accept()
+		if acceptErr == nil {
+			accepted <- struct{}{}
+			_ = conn.Close()
+		}
+	}()
+
+	transport, err := buildUpstreamTransportWithRelay(
+		defaultPoolSettings(nil),
+		nil,
+		upstreamProtocolModeDefault,
+		chatgptrelay.Settings{Enabled: true, RelayAddr: listener.Addr().String()},
+	)
+	require.NoError(t, err)
+	conn, err := transport.DialContext(context.Background(), "tcp", "chatgpt.com:443")
+	require.NoError(t, err)
+	require.NoError(t, conn.Close())
+
+	select {
+	case <-accepted:
+	case <-time.After(time.Second):
+		t.Fatal("chatgpt.com dial did not reach the relay")
+	}
+}
+
+func TestChatGPTIPv6RelaySettingsDisabledForProxyAccount(t *testing.T) {
+	svc := &httpUpstreamService{cfg: &config.Config{Gateway: config.GatewayConfig{
+		OpenAIChatGPTIPv6Only:      true,
+		OpenAIChatGPTIPv6RelayAddr: "127.0.0.1:24443",
+	}}}
+	proxyURL, err := url.Parse("http://127.0.0.1:1080")
+	require.NoError(t, err)
+
+	require.True(t, svc.chatGPTIPv6RelaySettings(nil).Enabled)
+	require.False(t, svc.chatGPTIPv6RelaySettings(proxyURL).Enabled)
 }

@@ -295,7 +295,7 @@ func (s *OpenAIGatewayService) getOpenAIWSPassthroughDialer() openAIWSClientDial
 	}
 	s.openaiWSPassthroughDialerOnce.Do(func() {
 		if s.openaiWSPassthroughDialer == nil {
-			s.openaiWSPassthroughDialer = newDefaultOpenAIWSClientDialer(ResolveOpenAIWSUpstreamReadLimitBytes(s.cfg))
+			s.openaiWSPassthroughDialer = newConfiguredOpenAIWSClientDialer(s.cfg, ResolveOpenAIWSUpstreamReadLimitBytes(s.cfg))
 		}
 	})
 	return s.openaiWSPassthroughDialer

@@ -642,7 +642,7 @@ type openAIWSConnPool struct {
 func newOpenAIWSConnPool(cfg *config.Config) *openAIWSConnPool {
 	pool := &openAIWSConnPool{
 		cfg:          cfg,
-		clientDialer: newDefaultOpenAIWSClientDialer(ResolveOpenAIWSUpstreamReadLimitBytes(cfg)),
+		clientDialer: newConfiguredOpenAIWSClientDialer(cfg, ResolveOpenAIWSUpstreamReadLimitBytes(cfg)),
 		workerStopCh: make(chan struct{}),
 	}
 	pool.startBackgroundWorkers()

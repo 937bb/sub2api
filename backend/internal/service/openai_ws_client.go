@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -12,6 +13,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/chatgptrelay"
 	openaiwsv2 "github.com/Wei-Shaw/sub2api/internal/service/openai_ws_v2"
 	coderws "github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
@@ -56,6 +59,10 @@ type openAIWSTransportMetricsDialer interface {
 }
 
 func newDefaultOpenAIWSClientDialer(readLimitBytes ...int64) openAIWSClientDialer {
+	return newConfiguredOpenAIWSClientDialer(nil, readLimitBytes...)
+}
+
+func newConfiguredOpenAIWSClientDialer(cfg *config.Config, readLimitBytes ...int64) openAIWSClientDialer {
 	upstreamReadLimitBytes := openAIWSUpstreamReadLimitBytesDefault
 	if len(readLimitBytes) > 0 && readLimitBytes[0] > 0 {
 		upstreamReadLimitBytes = readLimitBytes[0]
@@ -63,13 +70,26 @@ func newDefaultOpenAIWSClientDialer(readLimitBytes ...int64) openAIWSClientDiale
 	if upstreamReadLimitBytes > openAIWSUpstreamReadLimitBytesMax {
 		upstreamReadLimitBytes = openAIWSUpstreamReadLimitBytesMax
 	}
-	return &coderOpenAIWSClientDialer{
+	dialer := &coderOpenAIWSClientDialer{
 		proxyClients:           make(map[string]*openAIWSProxyClientEntry),
 		upstreamReadLimitBytes: upstreamReadLimitBytes,
 	}
+	if cfg != nil && cfg.Gateway.OpenAIChatGPTIPv6Only {
+		baseDialer := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
+		transport := &http.Transport{
+			DialContext: chatgptrelay.Wrap(baseDialer.DialContext, chatgptrelay.Settings{
+				Enabled:   true,
+				RelayAddr: cfg.Gateway.OpenAIChatGPTIPv6RelayAddr,
+			}),
+			TLSHandshakeTimeout: 10 * time.Second,
+		}
+		dialer.directClient = &http.Client{Transport: transport}
+	}
+	return dialer
 }
 
 type coderOpenAIWSClientDialer struct {
+	directClient           *http.Client
 	proxyMu                sync.Mutex
 	proxyClients           map[string]*openAIWSProxyClientEntry
 	proxyHits              atomic.Int64
@@ -118,6 +138,9 @@ func (d *coderOpenAIWSClientDialer) Dial(
 	opts := &coderws.DialOptions{
 		HTTPHeader:      cloneHeader(headers),
 		CompressionMode: coderws.CompressionContextTakeover,
+	}
+	if d.directClient != nil {
+		opts.HTTPClient = d.directClient
 	}
 	if proxy := strings.TrimSpace(proxyURL); proxy != "" {
 		proxyClient, err := d.proxyHTTPClient(proxy)

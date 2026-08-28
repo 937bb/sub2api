@@ -27,6 +27,7 @@ import (
 	"golang.org/x/net/http2"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/chatgptrelay"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyurl"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyutil"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/servertiming"
@@ -659,7 +660,8 @@ func (s *httpUpstreamService) getClientEntry(proxyURL string, accountID int64, a
 	// 构建缓存键（根据隔离策略不同）
 	cacheKey := buildCacheKey(isolation, proxyKey, accountID, protocolMode)
 	// 构建连接池配置键（用于检测配置变更）
-	poolKey := buildPoolKey(settings, protocolMode)
+	relaySettings := s.chatGPTIPv6RelaySettings(parsedProxy)
+	poolKey := buildPoolKey(settings, protocolMode) + relayPoolKey(relaySettings)
 
 	now := time.Now()
 	nowUnix := now.UnixNano()
@@ -702,7 +704,7 @@ func (s *httpUpstreamService) getClientEntry(proxyURL string, accountID int64, a
 	}
 
 	// 缓存未命中或需要重建，创建新客户端
-	transport, err := buildUpstreamTransport(settings, parsedProxy, protocolMode)
+	transport, err := buildUpstreamTransportWithRelay(settings, parsedProxy, protocolMode, relaySettings)
 	if err != nil {
 		s.mu.Unlock()
 		return nil, fmt.Errorf("build transport: %w", err)
@@ -932,6 +934,23 @@ func buildPoolKey(settings poolSettings, protocolMode string) string {
 		return base
 	}
 	return base + "|proto:" + protocolMode
+}
+
+func (s *httpUpstreamService) chatGPTIPv6RelaySettings(proxyURL *url.URL) chatgptrelay.Settings {
+	if s == nil || s.cfg == nil || proxyURL != nil {
+		return chatgptrelay.Settings{}
+	}
+	return chatgptrelay.Settings{
+		Enabled:   s.cfg.Gateway.OpenAIChatGPTIPv6Only,
+		RelayAddr: s.cfg.Gateway.OpenAIChatGPTIPv6RelayAddr,
+	}
+}
+
+func relayPoolKey(settings chatgptrelay.Settings) string {
+	if !settings.Enabled {
+		return ""
+	}
+	return "|chatgpt_ipv6_relay:" + strings.TrimSpace(settings.RelayAddr)
 }
 
 // buildCacheKey 构建客户端缓存键
@@ -1307,8 +1326,16 @@ func newUpstreamDialer() *net.Dialer {
 //   - IdleConnTimeout: 空闲连接超时（超时后关闭）
 //   - ResponseHeaderTimeout: 等待响应头超时（不影响流式传输）
 func buildUpstreamTransport(settings poolSettings, proxyURL *url.URL, protocolMode string) (*http.Transport, error) {
+	return buildUpstreamTransportWithRelay(settings, proxyURL, protocolMode, chatgptrelay.Settings{})
+}
+
+func buildUpstreamTransportWithRelay(settings poolSettings, proxyURL *url.URL, protocolMode string, relaySettings chatgptrelay.Settings) (*http.Transport, error) {
+	dialContext := newUpstreamDialer().DialContext
+	if proxyURL == nil {
+		dialContext = chatgptrelay.Wrap(dialContext, relaySettings)
+	}
 	transport := &http.Transport{
-		DialContext:           newUpstreamDialer().DialContext,
+		DialContext:           dialContext,
 		TLSHandshakeTimeout:   defaultUpstreamTLSHandshakeTimeout,
 		MaxIdleConns:          settings.maxIdleConns,
 		MaxIdleConnsPerHost:   settings.maxIdleConnsPerHost,

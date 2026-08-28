@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	coderws "github.com/coder/websocket"
 	"github.com/stretchr/testify/require"
 )
@@ -145,6 +147,40 @@ func TestCoderOpenAIWSClientDialer_ProxyTransportTLSHandshakeTimeout(t *testing.
 	require.True(t, ok)
 	require.NotNil(t, transport)
 	require.Equal(t, 10*time.Second, transport.TLSHandshakeTimeout)
+}
+
+func TestConfiguredOpenAIWSClientDialerRoutesDirectChatGPTThroughRelay(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer func() { require.NoError(t, listener.Close()) }()
+
+	accepted := make(chan struct{}, 1)
+	go func() {
+		conn, acceptErr := listener.Accept()
+		if acceptErr == nil {
+			accepted <- struct{}{}
+			_ = conn.Close()
+		}
+	}()
+
+	dialer := newConfiguredOpenAIWSClientDialer(&config.Config{Gateway: config.GatewayConfig{
+		OpenAIChatGPTIPv6Only:      true,
+		OpenAIChatGPTIPv6RelayAddr: listener.Addr().String(),
+	}})
+	impl, ok := dialer.(*coderOpenAIWSClientDialer)
+	require.True(t, ok)
+	require.NotNil(t, impl.directClient)
+	transport, ok := impl.directClient.Transport.(*http.Transport)
+	require.True(t, ok)
+
+	conn, err := transport.DialContext(context.Background(), "tcp", "chatgpt.com:443")
+	require.NoError(t, err)
+	require.NoError(t, conn.Close())
+	select {
+	case <-accepted:
+	case <-time.After(time.Second):
+		t.Fatal("direct websocket transport did not reach the relay")
+	}
 }
 
 func TestCoderOpenAIWSClientConn_DoesNotSupportIdlePingWithoutReader(t *testing.T) {
