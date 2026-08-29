@@ -209,6 +209,12 @@ func TestOpenAIWSFallbackCooling(t *testing.T) {
 	require.False(t, svc.isOpenAIWSFallbackCooling(1))
 	svc.markOpenAIWSFallbackCooling(1, "payload_too_large_preflight")
 	require.False(t, svc.isOpenAIWSFallbackCooling(1))
+	svc.markOpenAIWSFallbackCooling(1, "read_event")
+	require.False(t, svc.isOpenAIWSFallbackCooling(1), "transient read failures must not suppress the next WS request")
+
+	svc.markOpenAIWSFallbackCooling(1, "handshake_forbidden")
+	require.True(t, svc.isOpenAIWSFallbackCooling(1))
+	svc.clearOpenAIWSFallbackCooling(1)
 
 	svc.markOpenAIWSFallbackCooling(2, "x")
 	time.Sleep(1200 * time.Millisecond)

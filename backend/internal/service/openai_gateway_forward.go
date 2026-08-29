@@ -921,6 +921,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			break
 		}
 		if wsErr == nil {
+			s.clearOpenAIWSFallbackCooling(account.ID)
 			firstTokenMs := int64(0)
 			hasFirstTokenMs := wsResult != nil && wsResult.FirstTokenMs != nil
 			if hasFirstTokenMs {

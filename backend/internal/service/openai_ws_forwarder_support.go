@@ -803,6 +803,33 @@ func (s *OpenAIGatewayService) openAIWSFallbackCooldown() time.Duration {
 	return time.Duration(seconds) * time.Second
 }
 
+// openAIWSFallbackCooldownForReason returns a cooldown only for failures that
+// identify a stable account capability/authentication problem. Transport and
+// stream failures are retried on the next request so a healthy account is not
+// needlessly forced onto HTTP for the whole global cooldown window.
+func (s *OpenAIGatewayService) openAIWSFallbackCooldownForReason(reason string) time.Duration {
+	base := s.openAIWSFallbackCooldown()
+	if base <= 0 {
+		return 0
+	}
+	switch strings.TrimPrefix(strings.TrimSpace(reason), "prewarm_") {
+	case "handshake_forbidden", "handshake_unauthorized", "auth_failed":
+		// A stable 401/403 is normally an account eligibility problem. Keep the
+		// account on HTTP long enough to stop a busy pool from redialing it.
+		if base < 10*time.Minute {
+			return 10 * time.Minute
+		}
+		return base
+	case "upgrade_required", "ws_unsupported":
+		if base < 5*time.Minute {
+			return 5 * time.Minute
+		}
+		return base
+	default:
+		return 0
+	}
+}
+
 func (s *OpenAIGatewayService) isOpenAIWSFallbackCooling(accountID int64) bool {
 	if s == nil || accountID <= 0 {
 		return false
@@ -831,11 +858,7 @@ func (s *OpenAIGatewayService) markOpenAIWSFallbackCooling(accountID int64, reas
 	if s == nil || accountID <= 0 {
 		return
 	}
-	baseReason := strings.TrimPrefix(strings.TrimSpace(reason), "prewarm_")
-	if baseReason == "message_too_big" || baseReason == "payload_too_large_preflight" {
-		return
-	}
-	cooldown := s.openAIWSFallbackCooldown()
+	cooldown := s.openAIWSFallbackCooldownForReason(reason)
 	if cooldown <= 0 {
 		return
 	}
