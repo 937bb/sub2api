@@ -95,14 +95,20 @@ func openAIQuotaBypassRequestUnavailable(ctx context.Context) bool {
 
 // IsQuotaBypassEligible reports whether an account qualifies for Codex quota
 // bypass injection through an account override, the request group, or any group
-// attached to the scheduled account. Eligibility is intentionally independent
-// of plan_type, so Plus, Team, Pro and other OpenAI OAuth plans behave alike.
+// attached to the scheduled account. Personal access token accounts are
+// implicitly eligible because they are imported as OAuth accounts and do not
+// carry the optional group metadata used by the web importer. API key accounts
+// remain excluded. Eligibility is intentionally independent of plan_type, so
+// Plus, Team, Pro and other OpenAI OAuth plans behave alike.
 // Eligibility is additive: an account-level true value or any enabled group is
 // sufficient. A stored false value means only that the account-level switch is
 // off; it must not disable bypass inherited from a request or attached group.
 func IsQuotaBypassEligible(account *Account, group *Group) bool {
 	if account == nil || account.Platform != PlatformOpenAI || !account.IsOAuth() {
 		return false
+	}
+	if isOpenAIPersonalAccessToken(account) {
+		return true
 	}
 	if account.Extra != nil {
 		if v, ok := account.Extra["quota_bypass_enabled"].(bool); ok && v {
@@ -129,6 +135,20 @@ func IsQuotaBypassEligible(account *Account, group *Group) bool {
 // via its own Extra flag or any of its attached Groups.
 func IsAccountQuotaBypassEligible(account *Account) bool {
 	return IsQuotaBypassEligible(account, nil)
+}
+
+// isOpenAIPersonalAccessToken recognizes the credential markers emitted by
+// the Codex PAT importer. Older imports used the camel-case auth_mode value,
+// while newer imports also persist the normalized openai_auth_mode and source
+// marker. Keep all forms here so old accounts are upgraded without a rewrite.
+func isOpenAIPersonalAccessToken(account *Account) bool {
+	if account == nil || account.Platform != PlatformOpenAI || !account.IsOAuth() {
+		return false
+	}
+	if account.IsOpenAIPersonalAccessToken() {
+		return true
+	}
+	return strings.EqualFold(strings.TrimSpace(account.getExtraString("import_source")), "codex_personal_access_token")
 }
 
 // IsAccountQuotaBypassConcentrated reports whether an account explicitly opts

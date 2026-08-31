@@ -708,6 +708,28 @@ func TestIsAccountQuotaBypassEligible(t *testing.T) {
 			false,
 		},
 		{
+			"personal access token without group metadata",
+			&Account{
+				Platform: PlatformOpenAI,
+				Type:     AccountTypeOAuth,
+				Credentials: map[string]any{
+					"auth_mode": "personalAccessToken",
+				},
+			},
+			true,
+		},
+		{
+			"legacy personal access token import marker",
+			&Account{
+				Platform: PlatformOpenAI,
+				Type:     AccountTypeOAuth,
+				Extra: map[string]any{
+					"import_source": "codex_personal_access_token",
+				},
+			},
+			true,
+		},
+		{
 			"via Groups field (DB path)",
 			&Account{
 				Platform: PlatformOpenAI,
