@@ -5792,8 +5792,8 @@ func TestDefaultOpenAIAccountScheduler_IsAccountTransportCompatible_Branches(t *
 			"openai_oauth_responses_websockets_v2_mode": OpenAIWSIngressModeOff,
 		},
 	}
-	require.False(t, scheduler.isAccountTransportCompatible(context.Background(), subscriptionAccount, OpenAIUpstreamTransportResponsesWebsocketV2))
-	require.False(t, scheduler.isAccountTransportCompatible(context.Background(), subscriptionAccount, OpenAIUpstreamTransportResponsesWebsocketV2Ingress))
+	require.True(t, scheduler.isAccountTransportCompatible(context.Background(), subscriptionAccount, OpenAIUpstreamTransportResponsesWebsocketV2))
+	require.True(t, scheduler.isAccountTransportCompatible(context.Background(), subscriptionAccount, OpenAIUpstreamTransportResponsesWebsocketV2Ingress))
 }
 
 func int64PtrForTest(v int64) *int64 {

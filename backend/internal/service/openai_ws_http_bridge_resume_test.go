@@ -148,10 +148,10 @@ func TestOpenAIWSHTTPBridgeLaterTurn429RetriesCurrentTurnOnReplacementAccount(t 
 		toolCorrector:    NewCodexToolCorrector(),
 	}
 	account := &Account{
-		ID: 129, Name: "limited", Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+		ID: 129, Name: "limited", Platform: PlatformOpenAI, Type: AccountTypeAPIKey,
 		Status: StatusActive, Schedulable: true, Concurrency: 1,
-		Extra:       map[string]any{"openai_oauth_responses_websockets_v2_mode": OpenAIWSIngressModeHTTPBridge},
-		Credentials: map[string]any{"chatgpt_account_id": "account-a", "chatgpt_user_id": "user-a"},
+		Extra:       map[string]any{"openai_apikey_responses_websockets_v2_mode": OpenAIWSIngressModeHTTPBridge},
+		Credentials: map[string]any{"api_key": "sk-test", "chatgpt_account_id": "account-a", "chatgpt_user_id": "user-a"},
 	}
 	nextAccount := *account
 	nextAccount.ID = 130
