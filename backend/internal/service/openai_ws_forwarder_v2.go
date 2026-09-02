@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/gin-gonic/gin"
@@ -371,6 +372,10 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	var firstTokenMs *int
 	responseID := ""
 	var finalResponse []byte
+	responseOutputAccumulator := apicompat.NewBufferedResponseAccumulator()
+	responseDoneItems := newResponsesStreamOutputItems()
+	responseImageOutputs := make([]json.RawMessage, 0, 1)
+	responseImageSeen := make(map[string]struct{})
 	wroteDownstream := false
 	needModelReplace := originalModel != mappedModel
 	var mappedModelBytes []byte
@@ -605,6 +610,27 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 			parseOpenAIWSResponseUsageFromCompletedEvent(message, usage)
 		}
 		imageCounter.AddSSEData(message)
+		responseDoneItems.Observe(message)
+		if imageOutput, ok := extractImageGenerationOutputFromSSEData(message, responseImageSeen); ok {
+			responseImageOutputs = append(responseImageOutputs, imageOutput)
+		}
+		if responsesStreamEventMayContributeToOutput(eventType) {
+			var event apicompat.ResponsesStreamEvent
+			if err := json.Unmarshal(message, &event); err == nil {
+				responseOutputAccumulator.ProcessEvent(&event)
+			}
+		}
+		if isTerminalEvent {
+			if normalized, changed := normalizeResponsesStreamingTerminalOutput(
+				message,
+				responseOutputAccumulator,
+				responseDoneItems,
+				responseImageOutputs,
+			); changed {
+				message = normalized
+				_, _, responseField = parseOpenAIWSEventEnvelope(message)
+			}
+		}
 
 		if eventType == "response.failed" {
 			if hit, code, msg := detectOpenAICyberPolicy(message); hit {
