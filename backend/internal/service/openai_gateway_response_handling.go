@@ -1686,6 +1686,9 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 		if compactErr := newOpenAICompactFallbackSignal(c, terminalPayload, msg); compactErr != nil {
 			return nil, compactErr
 		}
+		if failoverErr := s.nonStreamingTerminalFailureFailover(c, resp, account, false, terminalType, terminalPayload, msg, mappedModel); failoverErr != nil {
+			return nil, failoverErr
+		}
 		if s.openAITransientErrorRetryEnabled(c) && isOpenAITransientCapacityError(msg, terminalPayload) {
 			return nil, s.newOpenAIStreamFailoverError(
 				c,

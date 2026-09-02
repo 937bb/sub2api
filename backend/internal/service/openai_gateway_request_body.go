@@ -1642,6 +1642,14 @@ func shouldForceOpenAIPriorityTier(apiKey *APIKey) bool {
 	return apiKey != nil && apiKey.OpenAIForcePriorityTier
 }
 
+func openAIGroupForcesFast(ctx context.Context, account *Account) bool {
+	if ctx == nil || account == nil || account.Platform != PlatformOpenAI {
+		return false
+	}
+	group, _ := ctx.Value(ctxkey.Group).(*Group)
+	return IsGroupContextValid(group) && groupSupportsOpenAIFast(group.Platform) && group.ForceOpenAIFast
+}
+
 // forceOpenAIPriorityTierInBody applies the API-key override before the admin
 // fast policy, so the policy can still filter or block the forced tier.
 func forceOpenAIPriorityTierInBody(apiKey *APIKey, account *Account, body []byte) ([]byte, error) {

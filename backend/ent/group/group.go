@@ -756,6 +756,11 @@ func ByMaxReasoningEffort(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldMaxReasoningEffort, opts...).ToFunc()
 }
 
+// ByMaxReasoningEffortOverLimit orders the results by the max_reasoning_effort_over_limit field.
+func ByMaxReasoningEffortOverLimit(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldMaxReasoningEffortOverLimit, opts...).ToFunc()
+}
+
 // ByQuotaBypassEnabled orders the results by the quota_bypass_enabled field.
 func ByQuotaBypassEnabled(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldQuotaBypassEnabled, opts...).ToFunc()

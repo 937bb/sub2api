@@ -2717,14 +2717,15 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		// passthrough 没有 BeforeTurn 时，AfterTurn 回退到 TurnStarted 的所属 turn 时刻。
 		var turnPricing openAIWSTurnPricing
 		hooks := &service.OpenAIWSIngressHooks{
-			ClientLifecycleContext:  clientLifecycleCtx,
-			InitialRequestModel:     reqModel,
-			InitialTurnStartedAt:    firstTurnStartedAt,
-			MaxReasoningEffort:      maxReasoningEffort,
-			ReasoningEffortMappings: reasoningEffortMappings,
-			QuotaBypassEnabled:      quotaBypassEnabled,
-			QuotaBypassInjectPairs:  quotaBypassInjectPairs,
-			OnQuotaBypassApplied:    func() { quotaBypassApplied.Store(true) },
+			ClientLifecycleContext:      clientLifecycleCtx,
+			InitialRequestModel:         reqModel,
+			InitialTurnStartedAt:        firstTurnStartedAt,
+			MaxReasoningEffort:          maxReasoningEffort,
+			MaxReasoningEffortOverLimit: maxReasoningEffortOverLimit,
+			ReasoningEffortMappings:     reasoningEffortMappings,
+			QuotaBypassEnabled:          quotaBypassEnabled,
+			QuotaBypassInjectPairs:      quotaBypassInjectPairs,
+			OnQuotaBypassApplied:        func() { quotaBypassApplied.Store(true) },
 			OnQuotaBypassAppliedWithPairs: func(pairs int) {
 				quotaBypassAppliedPairs.Store(int32(pairs))
 			},
@@ -4180,6 +4181,7 @@ func (h *OpenAIGatewayHandler) recordCyberPolicyIfMarkedWithQuota(c *gin.Context
 				QuotaBypassInjectPairs: quotaBypassInjectPairs,
 				RequestPayloadHash:     requestPayloadHash,
 				APIKeyService:          apiKeySvc,
+				NativeCompactionV2:     nativeCompactionV2,
 				ChannelUsageFields:     channelFields,
 			})
 		}

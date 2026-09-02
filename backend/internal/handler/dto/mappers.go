@@ -149,6 +149,8 @@ func GroupFromServiceAdmin(g *service.Group) *AdminGroup {
 	}
 	out := &AdminGroup{
 		Group:                            groupFromServiceBase(g),
+		ForceOpenAIFast:                  g.ForceOpenAIFast,
+		FreeOpenAIFast:                   g.FreeOpenAIFast,
 		ProfitControlEnabled:             g.ProfitControlEnabled,
 		ProfitMinMargin:                  g.ProfitMinMargin,
 		ProfitSafetyBuffer:               g.ProfitSafetyBuffer,
@@ -225,6 +227,7 @@ func groupFromServiceBase(g *service.Group) Group {
 		RequirePrivacySet:                        g.RequirePrivacySet,
 		RPMLimit:                                 g.RPMLimit,
 		MaxReasoningEffort:                       g.MaxReasoningEffort,
+		MaxReasoningEffortOverLimit:              g.MaxReasoningEffortOverLimit,
 		ReasoningEffortMappings:                  g.ReasoningEffortMappings,
 		QuotaBypassEnabled:                       g.QuotaBypassEnabled,
 		QuotaBypassConcentratedSchedulingEnabled: g.QuotaBypassConcentratedSchedulingEnabled,
@@ -719,19 +722,20 @@ func UsageLogFromServiceAdmin(l *service.UsageLog) *AdminUsageLog {
 	usageLog := usageLogFromServiceUser(l)
 	usageLog.UpstreamEndpoint = l.UpstreamEndpoint
 	return &AdminUsageLog{
-		UsageLog:               usageLog,
-		QuotaBypassApplied:     l.QuotaBypassApplied,
-		QuotaBypassInjectPairs: l.QuotaBypassInjectPairs,
-		UpstreamModel:          l.UpstreamModel,
-		UpstreamResponseModel:  l.UpstreamResponseModel,
-		UpstreamModelMismatch:  l.UpstreamModelMismatch,
-		ChannelID:              l.ChannelID,
-		ModelMappingChain:      l.ModelMappingChain,
-		BillingTier:            l.BillingTier,
-		AccountRateMultiplier:  l.AccountRateMultiplier,
-		AccountStatsCost:       l.AccountStatsCost,
-		IPAddress:              l.IPAddress,
-		Account:                AccountSummaryFromService(l.Account),
+		UsageLog:                usageLog,
+		QuotaBypassApplied:      l.QuotaBypassApplied,
+		QuotaBypassInjectPairs:  l.QuotaBypassInjectPairs,
+		UpstreamModel:           l.UpstreamModel,
+		UpstreamReasoningEffort: adminUpstreamReasoningEffort(l),
+		UpstreamResponseModel:   l.UpstreamResponseModel,
+		UpstreamModelMismatch:   l.UpstreamModelMismatch,
+		ChannelID:               l.ChannelID,
+		ModelMappingChain:       l.ModelMappingChain,
+		BillingTier:             l.BillingTier,
+		AccountRateMultiplier:   l.AccountRateMultiplier,
+		AccountStatsCost:        l.AccountStatsCost,
+		IPAddress:               l.IPAddress,
+		Account:                 AccountSummaryFromService(l.Account),
 	}
 }
 

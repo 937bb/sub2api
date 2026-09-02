@@ -22212,6 +22212,8 @@ type GroupMutation struct {
 	addsort_order                                *int
 	allow_messages_dispatch                      *bool
 	allow_live                                   *bool
+	force_openai_fast                            *bool
+	free_openai_fast                             *bool
 	require_oauth_only                           *bool
 	require_privacy_set                          *bool
 	default_mapped_model                         *string
@@ -22225,6 +22227,7 @@ type GroupMutation struct {
 	rpm_limit                                    *int
 	addrpm_limit                                 *int
 	max_reasoning_effort                         *string
+	max_reasoning_effort_over_limit              *string
 	reasoning_effort_mappings                    *[]domain.ReasoningEffortMapping
 	appendreasoning_effort_mappings              []domain.ReasoningEffortMapping
 	quota_bypass_enabled                         *bool
@@ -26178,7 +26181,7 @@ func (m *GroupMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *GroupMutation) Fields() []string {
-	fields := make([]string, 0, 68)
+	fields := make([]string, 0, 71)
 	if m.created_at != nil {
 		fields = append(fields, group.FieldCreatedAt)
 	}
