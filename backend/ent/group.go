@@ -122,6 +122,10 @@ type Group struct {
 	AllowMessagesDispatch bool `json:"allow_messages_dispatch,omitempty"`
 	// 是否允许此 OpenAI 分组访问 Live 接口
 	AllowLive bool `json:"allow_live,omitempty"`
+	// 是否强制此 OpenAI/Composite 分组请求使用 service_tier=priority
+	ForceOpenaiFast bool `json:"force_openai_fast,omitempty"`
+	// 是否让此 OpenAI/Composite 分组的 Fast 请求按 Standard 价格计费
+	FreeOpenaiFast bool `json:"free_openai_fast,omitempty"`
 	// 仅允许非 apikey 类型账号关联到此分组
 	RequireOauthOnly bool `json:"require_oauth_only,omitempty"`
 	// 调度时仅允许 privacy 已成功设置的账号
@@ -144,6 +148,8 @@ type Group struct {
 	RpmLimit int `json:"rpm_limit,omitempty"`
 	// OpenAI reasoning effort 上限；可选 minimal/low/medium/high/xhigh/max
 	MaxReasoningEffort string `json:"max_reasoning_effort,omitempty"`
+	// 超过推理强度上限时的访问控制：downgrade 自动降档，deny 拒绝访问
+	MaxReasoningEffortOverLimit string `json:"max_reasoning_effort_over_limit,omitempty"`
 	// OpenAI reasoning effort 自定义精确映射；先映射再应用上限
 	ReasoningEffortMappings []domain.ReasoningEffortMapping `json:"reasoning_effort_mappings,omitempty"`
 	// 是否为该分组下的账号启用 Codex 超额绕过
@@ -270,7 +276,7 @@ func (*Group) scanValues(columns []string) ([]any, error) {
 			values[i] = new(sql.NullFloat64)
 		case group.FieldID, group.FieldDefaultValidityDays, group.FieldFallbackGroupID, group.FieldFallbackGroupIDOnInvalidRequest, group.FieldSortOrder, group.FieldOpenaiTransientErrorRetryCount, group.FieldRpmLimit:
 			values[i] = new(sql.NullInt64)
-		case group.FieldName, group.FieldDescription, group.FieldPeakStart, group.FieldPeakEnd, group.FieldStatus, group.FieldDuplicateOperationID, group.FieldPlatform, group.FieldSubscriptionType, group.FieldDefaultMappedModel, group.FieldMaxReasoningEffort:
+		case group.FieldName, group.FieldDescription, group.FieldPeakStart, group.FieldPeakEnd, group.FieldStatus, group.FieldDuplicateOperationID, group.FieldPlatform, group.FieldSubscriptionType, group.FieldDefaultMappedModel, group.FieldMaxReasoningEffort, group.FieldMaxReasoningEffortOverLimit:
 			values[i] = new(sql.NullString)
 		case group.FieldCreatedAt, group.FieldUpdatedAt, group.FieldDeletedAt:
 			values[i] = new(sql.NullTime)
@@ -628,6 +634,18 @@ func (_m *Group) assignValues(columns []string, values []any) error {
 			} else if value.Valid {
 				_m.AllowLive = value.Bool
 			}
+		case group.FieldForceOpenaiFast:
+			if value, ok := values[i].(*sql.NullBool); !ok {
+				return fmt.Errorf("unexpected type %T for field force_openai_fast", values[i])
+			} else if value.Valid {
+				_m.ForceOpenaiFast = value.Bool
+			}
+		case group.FieldFreeOpenaiFast:
+			if value, ok := values[i].(*sql.NullBool); !ok {
+				return fmt.Errorf("unexpected type %T for field free_openai_fast", values[i])
+			} else if value.Valid {
+				_m.FreeOpenaiFast = value.Bool
+			}
 		case group.FieldRequireOauthOnly:
 			if value, ok := values[i].(*sql.NullBool); !ok {
 				return fmt.Errorf("unexpected type %T for field require_oauth_only", values[i])
@@ -699,6 +717,12 @@ func (_m *Group) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field max_reasoning_effort", values[i])
 			} else if value.Valid {
 				_m.MaxReasoningEffort = value.String
+			}
+		case group.FieldMaxReasoningEffortOverLimit:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field max_reasoning_effort_over_limit", values[i])
+			} else if value.Valid {
+				_m.MaxReasoningEffortOverLimit = value.String
 			}
 		case group.FieldReasoningEffortMappings:
 			if value, ok := values[i].(*[]byte); !ok {
@@ -1005,6 +1029,12 @@ func (_m *Group) String() string {
 	builder.WriteString("allow_live=")
 	builder.WriteString(fmt.Sprintf("%v", _m.AllowLive))
 	builder.WriteString(", ")
+	builder.WriteString("force_openai_fast=")
+	builder.WriteString(fmt.Sprintf("%v", _m.ForceOpenaiFast))
+	builder.WriteString(", ")
+	builder.WriteString("free_openai_fast=")
+	builder.WriteString(fmt.Sprintf("%v", _m.FreeOpenaiFast))
+	builder.WriteString(", ")
 	builder.WriteString("require_oauth_only=")
 	builder.WriteString(fmt.Sprintf("%v", _m.RequireOauthOnly))
 	builder.WriteString(", ")
@@ -1037,6 +1067,9 @@ func (_m *Group) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("max_reasoning_effort=")
 	builder.WriteString(_m.MaxReasoningEffort)
+	builder.WriteString(", ")
+	builder.WriteString("max_reasoning_effort_over_limit=")
+	builder.WriteString(_m.MaxReasoningEffortOverLimit)
 	builder.WriteString(", ")
 	builder.WriteString("reasoning_effort_mappings=")
 	builder.WriteString(fmt.Sprintf("%v", _m.ReasoningEffortMappings))

@@ -127,6 +127,7 @@ func (r *usageLogRepository) ListWithFilters(ctx context.Context, params paginat
 	}
 	conditions, args = appendUsageLogModelWhereCondition(conditions, args, filters.Model, filters.ModelFilterSource)
 	conditions, args = appendRequestTypeOrStreamWhereCondition(conditions, args, filters.RequestType, filters.Stream)
+	conditions, args = appendNativeCompactionV2WhereCondition(conditions, args, filters.NativeCompactionV2, "")
 	if filters.BillingType != nil {
 		conditions = append(conditions, fmt.Sprintf("billing_type = $%d", len(args)+1))
 		args = append(args, int16(*filters.BillingType))
@@ -493,6 +494,7 @@ func scanUsageLog(scanner interface{ Scan(...any) error }) (*service.UsageLog, e
 		videoDurationSeconds      sql.NullInt64
 		serviceTier               sql.NullString
 		reasoningEffort           sql.NullString
+		requestedReasoningEffort  sql.NullString
 		inboundEndpoint           sql.NullString
 		upstreamEndpoint          sql.NullString
 		cacheTTLOverridden        bool
@@ -558,6 +560,7 @@ func scanUsageLog(scanner interface{ Scan(...any) error }) (*service.UsageLog, e
 		&videoDurationSeconds,
 		&serviceTier,
 		&reasoningEffort,
+		&requestedReasoningEffort,
 		&inboundEndpoint,
 		&upstreamEndpoint,
 		&cacheTTLOverridden,
@@ -602,6 +605,7 @@ func scanUsageLog(scanner interface{ Scan(...any) error }) (*service.UsageLog, e
 		AccountRateMultiplier:     nullFloat64Ptr(accountRateMultiplier),
 		BillingType:               int8(billingType),
 		RequestType:               service.RequestTypeFromInt16(requestTypeRaw),
+		NativeCompactionV2:        nativeCompactionV2,
 		ImageCount:                imageCount,
 		VideoCount:                videoCount,
 		CacheTTLOverridden:        cacheTTLOverridden,
@@ -666,6 +670,9 @@ func scanUsageLog(scanner interface{ Scan(...any) error }) (*service.UsageLog, e
 	}
 	if reasoningEffort.Valid {
 		log.ReasoningEffort = &reasoningEffort.String
+	}
+	if requestedReasoningEffort.Valid {
+		log.RequestedReasoningEffort = &requestedReasoningEffort.String
 	}
 	if inboundEndpoint.Valid {
 		log.InboundEndpoint = &inboundEndpoint.String
