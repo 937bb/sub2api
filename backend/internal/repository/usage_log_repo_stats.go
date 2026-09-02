@@ -695,6 +695,9 @@ func (r *usageLogRepository) GetStatsWithFilters(ctx context.Context, filters Us
 		args = append(args, *filters.EndTime)
 	}
 
+	// Aggregate paths once and derive the rollups from that compact result.
+	// PostgreSQL 18.0 can terminate a backend process for the equivalent
+	// GROUPING SETS query, which forces the entire database into crash recovery.
 	query := fmt.Sprintf(`
 		WITH scoped AS (
 			SELECT
@@ -710,28 +713,89 @@ func (r *usageLogRepository) GetStatsWithFilters(ctx context.Context, filters Us
 				duration_ms
 			FROM usage_logs
 			%s
+		),
+		path_stats AS MATERIALIZED (
+			SELECT
+				inbound_endpoint,
+				upstream_endpoint,
+				COUNT(*) AS requests,
+				COALESCE(SUM(input_tokens), 0) AS input_tokens,
+				COALESCE(SUM(output_tokens), 0) AS output_tokens,
+				COALESCE(SUM(cache_creation_tokens), 0) AS cache_creation_tokens,
+				COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
+				COALESCE(SUM(total_cost), 0) AS cost,
+				COALESCE(SUM(actual_cost), 0) AS actual_cost,
+				COALESCE(SUM(account_cost), 0) AS account_cost,
+				COALESCE(SUM(duration_ms), 0) AS duration_sum,
+				COUNT(duration_ms) AS duration_count
+			FROM scoped
+			GROUP BY inbound_endpoint, upstream_endpoint
 		)
 		SELECT
-			GROUPING(inbound_endpoint) AS inbound_grouped,
-			GROUPING(upstream_endpoint) AS upstream_grouped,
-			inbound_endpoint,
-			upstream_endpoint,
-			COUNT(*) AS requests,
+			1 AS inbound_grouped,
+			1 AS upstream_grouped,
+			NULL::text AS inbound_endpoint,
+			NULL::text AS upstream_endpoint,
+			COALESCE(SUM(requests), 0) AS requests,
 			COALESCE(SUM(input_tokens), 0) AS input_tokens,
 			COALESCE(SUM(output_tokens), 0) AS output_tokens,
 			COALESCE(SUM(cache_creation_tokens), 0) AS cache_creation_tokens,
 			COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
-			COALESCE(SUM(total_cost), 0) AS cost,
+			COALESCE(SUM(cost), 0) AS cost,
 			COALESCE(SUM(actual_cost), 0) AS actual_cost,
 			COALESCE(SUM(account_cost), 0) AS account_cost,
-			COALESCE(AVG(duration_ms), 0) AS avg_duration_ms
-		FROM scoped
-		GROUP BY GROUPING SETS (
-			(),
-			(inbound_endpoint),
-			(upstream_endpoint),
-			(inbound_endpoint, upstream_endpoint)
-		)
+			COALESCE(SUM(duration_sum)::double precision / NULLIF(SUM(duration_count), 0), 0) AS avg_duration_ms
+		FROM path_stats
+		UNION ALL
+		SELECT
+			0,
+			1,
+			inbound_endpoint,
+			NULL::text,
+			SUM(requests),
+			SUM(input_tokens),
+			SUM(output_tokens),
+			SUM(cache_creation_tokens),
+			SUM(cache_read_tokens),
+			SUM(cost),
+			SUM(actual_cost),
+			SUM(account_cost),
+			COALESCE(SUM(duration_sum)::double precision / NULLIF(SUM(duration_count), 0), 0)
+		FROM path_stats
+		GROUP BY inbound_endpoint
+		UNION ALL
+		SELECT
+			1,
+			0,
+			NULL::text,
+			upstream_endpoint,
+			SUM(requests),
+			SUM(input_tokens),
+			SUM(output_tokens),
+			SUM(cache_creation_tokens),
+			SUM(cache_read_tokens),
+			SUM(cost),
+			SUM(actual_cost),
+			SUM(account_cost),
+			COALESCE(SUM(duration_sum)::double precision / NULLIF(SUM(duration_count), 0), 0)
+		FROM path_stats
+		GROUP BY upstream_endpoint
+		UNION ALL
+		SELECT
+			0,
+			0,
+			inbound_endpoint,
+			upstream_endpoint,
+			requests,
+			input_tokens,
+			output_tokens,
+			cache_creation_tokens,
+			cache_read_tokens,
+			cost,
+			actual_cost,
+			account_cost,
+			COALESCE(duration_sum::double precision / NULLIF(duration_count, 0), 0)
+		FROM path_stats
 	`, buildWhere(conditions))
 
 	stats := &UsageStats{}
