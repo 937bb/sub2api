@@ -116,7 +116,7 @@ func (APIKey) Fields() []ent.Field {
 			Nillable().
 			Comment("Start time of the current 7d rate limit window"),
 
-		// ========== OpenAI request overrides ==========
+		// OpenAI request override used by the 937sub2b quota-bypass path.
 		field.Bool("openai_force_priority_tier").
 			Default(false).
 			Comment("Force OpenAI gateway requests to use service_tier=priority for this key"),

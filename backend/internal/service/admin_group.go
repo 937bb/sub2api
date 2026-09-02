@@ -295,6 +295,10 @@ func groupSupportsOAuthOnlyFilter(platform string) bool {
 		platform == PlatformComposite
 }
 
+func groupSupportsOpenAIFast(platform string) bool {
+	return platform == PlatformOpenAI || platform == PlatformComposite
+}
+
 func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupInput) (*Group, error) {
 	if input.RateMultiplier <= 0 {
 		return nil, errors.New("rate_multiplier must be > 0")
@@ -505,6 +509,8 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		SupportedModelScopes:                     input.SupportedModelScopes,
 		AllowMessagesDispatch:                    input.AllowMessagesDispatch,
 		AllowLive:                                input.AllowLive,
+		ForceOpenAIFast:                          groupSupportsOpenAIFast(platform) && input.ForceOpenAIFast,
+		FreeOpenAIFast:                           groupSupportsOpenAIFast(platform) && input.FreeOpenAIFast,
 		RequireOAuthOnly:                         input.RequireOAuthOnly,
 		RequirePrivacySet:                        input.RequirePrivacySet,
 		DefaultMappedModel:                       input.DefaultMappedModel,
@@ -515,6 +521,7 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		ModelsListConfig:                         normalizeGroupModelsListConfig(input.ModelsListConfig),
 		RPMLimit:                                 input.RPMLimit,
 		MaxReasoningEffort:                       maxReasoningEffort,
+		MaxReasoningEffortOverLimit:              input.MaxReasoningEffortOverLimit,
 		ReasoningEffortMappings:                  reasoningEffortMappings,
 		QuotaBypassEnabled:                       input.QuotaBypassEnabled,
 		QuotaBypassConcentratedSchedulingEnabled: input.QuotaBypassConcentratedSchedulingEnabled,
@@ -870,6 +877,12 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	if input.AllowLive != nil {
 		group.AllowLive = *input.AllowLive
 	}
+	if input.ForceOpenAIFast != nil {
+		group.ForceOpenAIFast = *input.ForceOpenAIFast
+	}
+	if input.FreeOpenAIFast != nil {
+		group.FreeOpenAIFast = *input.FreeOpenAIFast
+	}
 	if input.RequireOAuthOnly != nil {
 		group.RequireOAuthOnly = *input.RequireOAuthOnly
 	}
@@ -908,6 +921,9 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 		}
 		group.MaxReasoningEffort = maxReasoningEffort
 	}
+	if input.MaxReasoningEffortOverLimit != nil {
+		group.MaxReasoningEffortOverLimit = NormalizeMaxReasoningEffortOverLimit(*input.MaxReasoningEffortOverLimit)
+	}
 	if input.ReasoningEffortMappings != nil {
 		reasoningEffortMappings, err := NormalizeReasoningEffortMappings(group.Platform, *input.ReasoningEffortMappings)
 		if err != nil {
@@ -924,6 +940,8 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	sanitizeGroupMessagesDispatchFields(group)
 	if group.Platform != PlatformOpenAI && group.Platform != PlatformComposite {
 		group.AllowLive = false
+		group.ForceOpenAIFast = false
+		group.FreeOpenAIFast = false
 		group.OpenAIModelMappingEnabled = false
 		group.OpenAIModelMapping = map[string]string{}
 		group.OpenAITransientErrorRetryEnabled = false

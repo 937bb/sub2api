@@ -1595,6 +1595,7 @@ func (s *OpenAIGatewayService) handleOpenAIStreamTerminalAccountSideEffects(
 	payload []byte,
 	message string,
 	headers http.Header,
+	canonicalModel ...string,
 ) (int, bool) {
 	statusCode := openAIStreamFailureStatus(payload, message)
 	semanticStatus := openAIStreamFailedEventSemanticStatus(payload, message)
@@ -1741,6 +1742,56 @@ func (s *OpenAIGatewayService) newOpenAIStreamFailoverError(
 	// only typed access/capacity failures need the original payload downstream.
 	failoverErr.ResponseBody = body
 	return s.configureOpenAIQuotaBypass429Retry(c, account, failoverErr, false)
+}
+
+// newOpenAIStreamFailoverErrorWithModel preserves the official helper's
+// canonical-model call shape for callers that need it. The existing failover
+// constructor already performs the same account-state, attribution, and
+// quota-bypass handling, so the model is currently only a compatibility hint.
+func (s *OpenAIGatewayService) newOpenAIStreamFailoverErrorWithModel(
+	c *gin.Context,
+	account *Account,
+	passthrough bool,
+	upstreamRequestID string,
+	payload []byte,
+	message string,
+	canonicalModel string,
+	responseHeaders ...http.Header,
+) *UpstreamFailoverError {
+	return s.newOpenAIStreamFailoverError(c, account, passthrough, upstreamRequestID, payload, message, responseHeaders...)
+}
+
+// nonStreamingTerminalFailureFailover applies the streaming terminal-event
+// classifier to an SSE response received for a stream=false request. The body
+// is fully buffered before this helper is called, so a typed failover error is
+// safe to retry while no downstream bytes have been committed.
+func (s *OpenAIGatewayService) nonStreamingTerminalFailureFailover(
+	c *gin.Context,
+	resp *http.Response,
+	account *Account,
+	passthrough bool,
+	terminalType string,
+	payload []byte,
+	message string,
+	canonicalModel ...string,
+) *UpstreamFailoverError {
+	if account == nil || IsResponseCommitted(c) {
+		return nil
+	}
+	shouldFailover := openAIStreamFailedEventShouldFailover(payload, message)
+	if terminalType == "error" {
+		shouldFailover = openAIStreamErrorEventShouldFailover(payload, message)
+	}
+	if !shouldFailover {
+		return nil
+	}
+	var headers http.Header
+	upstreamRequestID := ""
+	if resp != nil {
+		headers = resp.Header
+		upstreamRequestID = strings.TrimSpace(resp.Header.Get("x-request-id"))
+	}
+	return s.newOpenAIStreamFailoverErrorWithModel(c, account, passthrough, upstreamRequestID, payload, message, firstNonEmpty(canonicalModel...), headers)
 }
 
 func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
