@@ -1375,6 +1375,19 @@ func (p *openAIWSConnPool) cleanupAccountLocked(ap *openAIWSAccountPool, now tim
 				delete(ap.pinnedConns, id)
 			}
 			evicted = append(evicted, conn)
+			continue
+		}
+		// coder/websocket cannot safely be pinged while the pool has no reader.
+		// Close such idle connections before the upstream keepalive deadline so
+		// the next request dials a fresh socket instead of failing after payload
+		// delivery with a stale keepalive timeout.
+		if conn.ws != nil && !conn.isLeased() && !conn.supportsIdlePingWithoutReader() &&
+			conn.idleDuration(now) >= openAIWSConnHealthCheckIdle {
+			delete(ap.conns, id)
+			if len(ap.pinnedConns) > 0 {
+				delete(ap.pinnedConns, id)
+			}
+			evicted = append(evicted, conn)
 		}
 	}
 

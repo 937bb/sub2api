@@ -44,6 +44,24 @@ func TestOpenAIWSConnPool_CleanupStaleAndTrimIdle(t *testing.T) {
 	require.NotNil(t, ap.conns["idle_new"], "newer idle should be kept")
 }
 
+func TestOpenAIWSConnPool_CleanupClosesIdleConnectionsWithoutSafePing(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIWS.MaxIdlePerAccount = 4
+	pool := newOpenAIWSConnPool(cfg)
+	accountID := int64(11)
+	ap := pool.getOrCreateAccountPool(accountID)
+
+	conn := newOpenAIWSConn("idle_no_ping", accountID, &openAIWSIdlePingUnsupportedConn{}, nil)
+	conn.lastUsedNano.Store(time.Now().Add(-openAIWSConnHealthCheckIdle - time.Second).UnixNano())
+	ap.conns[conn.id] = conn
+
+	evicted := pool.cleanupAccountLocked(ap, time.Now(), pool.maxConnsHardCap())
+	closeOpenAIWSConns(evicted)
+
+	require.Len(t, evicted, 1)
+	require.Nil(t, ap.conns[conn.id], "idle coder/websocket connections must be rotated before the upstream keepalive timeout")
+}
+
 func TestOpenAIWSConnPool_NextConnIDFormat(t *testing.T) {
 	pool := newOpenAIWSConnPool(&config.Config{})
 	id1 := pool.nextConnID(42)

@@ -2826,9 +2826,8 @@ func (s *OpenAIGatewayService) isOpenAIAccountTransportCompatible(ctx context.Co
 		if s.cfg == nil || !s.cfg.Gateway.OpenAIWS.ModeRouterV2Enabled {
 			return s.resolveOpenAIWSProtocolDecision(ctx, account).Transport == OpenAIUpstreamTransportResponsesWebsocketV2
 		}
-		// The mode router chooses the concrete ingress pool, but the system
-		// default and explicit account overrides still decide whether WS is
-		// eligible at all.
+		// The mode router chooses the concrete ingress pool after subscription
+		// accounts have been normalized away from legacy HTTP-only modes.
 		mode := resolveOpenAIWSRoutingMode(account, s.cfg.Gateway.OpenAIWS.IngressModeDefault)
 		if mode == OpenAIWSIngressModeHTTPBridge {
 			return true

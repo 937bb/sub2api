@@ -54,7 +54,7 @@ func TestOpenAIRuntimeDefaultsMissingAndStoredValues(t *testing.T) {
 	require.False(t, fingerprintFull)
 }
 
-func TestOpenAIWSRuntimeDefaultAndAccountOverride(t *testing.T) {
+func TestOpenAIWSRuntimeDefaultCannotDisableSubscriptionWebSocket(t *testing.T) {
 	defer publishOpenAIRuntimeDefaults(true, true)
 	cfg := &config.Config{}
 	cfg.Gateway.OpenAIWS.Enabled = true
@@ -66,8 +66,8 @@ func TestOpenAIWSRuntimeDefaultAndAccountOverride(t *testing.T) {
 
 	publishOpenAIRuntimeDefaults(false, true)
 	decision := svc.resolveOpenAIWSProtocolDecision(context.Background(), account)
-	require.Equal(t, OpenAIUpstreamTransportHTTPSSE, decision.Transport)
-	require.Equal(t, "system_default_disabled", decision.Reason)
+	require.Equal(t, OpenAIUpstreamTransportResponsesWebsocketV2, decision.Transport)
+	require.Equal(t, "ws_v2_enabled", decision.Reason)
 
 	account.Extra = map[string]any{"openai_oauth_responses_websockets_v2_mode": OpenAIWSIngressModeCtxPool}
 	decision = svc.resolveOpenAIWSProtocolDecision(context.Background(), account)
@@ -76,13 +76,13 @@ func TestOpenAIWSRuntimeDefaultAndAccountOverride(t *testing.T) {
 	publishOpenAIRuntimeDefaults(true, true)
 	account.Extra["openai_oauth_responses_websockets_v2_mode"] = OpenAIWSIngressModeOff
 	decision = svc.resolveOpenAIWSProtocolDecision(context.Background(), account)
-	require.Equal(t, OpenAIUpstreamTransportHTTPSSE, decision.Transport)
-	require.Equal(t, "account_mode_off", decision.Reason)
+	require.Equal(t, OpenAIUpstreamTransportResponsesWebsocketV2, decision.Transport)
+	require.Equal(t, "ws_v2_enabled", decision.Reason)
 
 	cfg.Gateway.OpenAIWS.ModeRouterV2Enabled = true
 	account.Extra = nil
 	publishOpenAIRuntimeDefaults(false, true)
-	require.False(t, svc.isOpenAIAccountTransportCompatible(context.Background(), account, OpenAIUpstreamTransportResponsesWebsocketV2Ingress))
+	require.True(t, svc.isOpenAIAccountTransportCompatible(context.Background(), account, OpenAIUpstreamTransportResponsesWebsocketV2Ingress))
 
 	account.Extra = map[string]any{"openai_oauth_responses_websockets_v2_mode": OpenAIWSIngressModeCtxPool}
 	require.True(t, svc.isOpenAIAccountTransportCompatible(context.Background(), account, OpenAIUpstreamTransportResponsesWebsocketV2Ingress))

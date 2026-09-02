@@ -39,38 +39,30 @@ func NewOpenAIWSProtocolResolver(cfg *config.Config) OpenAIWSProtocolResolver {
 	return &defaultOpenAIWSProtocolResolver{cfg: cfg}
 }
 
-// resolveOpenAIWSRoutingMode keeps ChatGPT subscription credentials on WS.
-// API key accounts remain opt-in because compatible upstreams may not expose
-// the Responses WebSocket endpoint.
+// resolveOpenAIWSRoutingMode keeps ChatGPT subscription credentials on WS even
+// when legacy account metadata explicitly disabled WS or selected HTTP bridge.
 func resolveOpenAIWSRoutingMode(account *Account, defaultMode string) string {
 	if account == nil {
 		return OpenAIWSIngressModeOff
 	}
-	return account.ResolveOpenAIResponsesWebSocketV2Mode(defaultMode)
+	mode := account.ResolveOpenAIResponsesWebSocketV2Mode(defaultMode)
+	if !account.IsOpenAIOAuthLike() {
+		return mode
+	}
+	switch mode {
+	case OpenAIWSIngressModeCtxPool, OpenAIWSIngressModePassthrough,
+		OpenAIWSIngressModeShared, OpenAIWSIngressModeDedicated:
+		return mode
+	default:
+		return OpenAIWSIngressModeCtxPool
+	}
 }
 
-// resolveOpenAIWSProtocolDecision applies the runtime system default without
-// weakening config-level hard gates or account-level explicit overrides.
-func (s *OpenAIGatewayService) resolveOpenAIWSProtocolDecision(ctx context.Context, account *Account) OpenAIWSProtocolDecision {
-	decision := s.getOpenAIWSProtocolResolver().Resolve(account)
-	if account == nil || !account.IsOpenAIOAuthLike() || account.IsOpenAIWSForceHTTPEnabled() {
-		return decision
-	}
-	if mode, explicit := account.resolveOpenAIResponsesWebSocketV2Override(); explicit {
-		switch mode {
-		case OpenAIWSIngressModeOff:
-			return openAIWSHTTPDecision("account_mode_off")
-		case OpenAIWSIngressModeHTTPBridge:
-			return openAIWSHTTPDecision("account_mode_http_bridge")
-		default:
-			return decision
-		}
-	}
-	oauthWSDefaultEnabled, _ := s.openAIRuntimeDefaults(ctx)
-	if !oauthWSDefaultEnabled {
-		return openAIWSHTTPDecision("system_default_disabled")
-	}
-	return decision
+// resolveOpenAIWSProtocolDecision deliberately ignores legacy per-account and
+// runtime defaults. OpenAI subscription credentials always prefer WS while the
+// config-level emergency gates remain available.
+func (s *OpenAIGatewayService) resolveOpenAIWSProtocolDecision(_ context.Context, account *Account) OpenAIWSProtocolDecision {
+	return s.getOpenAIWSProtocolResolver().Resolve(account)
 }
 
 func (r *defaultOpenAIWSProtocolResolver) Resolve(account *Account) OpenAIWSProtocolDecision {
@@ -80,7 +72,7 @@ func (r *defaultOpenAIWSProtocolResolver) Resolve(account *Account) OpenAIWSProt
 	if !account.IsOpenAI() {
 		return openAIWSHTTPDecision("platform_not_openai")
 	}
-	if account.IsOpenAIWSForceHTTPEnabled() {
+	if account.IsOpenAIWSForceHTTPEnabled() && account.IsOpenAIApiKey() {
 		return openAIWSHTTPDecision("account_force_http")
 	}
 	if r == nil || r.cfg == nil {
@@ -95,9 +87,8 @@ func (r *defaultOpenAIWSProtocolResolver) Resolve(account *Account) OpenAIWSProt
 		return openAIWSHTTPDecision("global_disabled")
 	}
 	if account.IsOpenAIOAuthLike() {
-		if !wsCfg.OAuthEnabled {
-			return openAIWSHTTPDecision("oauth_disabled")
-		}
+		// Subscription credentials, including PAT, always prefer WS. Legacy
+		// OAuthEnabled and account-level switches are intentionally ignored.
 	} else if account.IsOpenAIApiKey() {
 		if !wsCfg.APIKeyEnabled {
 			return openAIWSHTTPDecision("apikey_disabled")
@@ -105,30 +96,16 @@ func (r *defaultOpenAIWSProtocolResolver) Resolve(account *Account) OpenAIWSProt
 	} else {
 		return openAIWSHTTPDecision("unknown_auth_type")
 	}
-	if account.IsOpenAIOAuthLike() {
-		if mode, explicit := account.resolveOpenAIResponsesWebSocketV2Override(); explicit {
-			switch mode {
-			case OpenAIWSIngressModeOff:
-				return openAIWSHTTPDecision("account_mode_off")
-			case OpenAIWSIngressModeHTTPBridge:
-				return openAIWSHTTPDecision("account_mode_http_bridge")
-			}
-		}
-	}
 	if wsCfg.ModeRouterV2Enabled {
 		mode := resolveOpenAIWSRoutingMode(account, wsCfg.IngressModeDefault)
 		switch mode {
-		case OpenAIWSIngressModeOff:
-			return openAIWSHTTPDecision("account_mode_off")
 		case OpenAIWSIngressModeCtxPool, OpenAIWSIngressModePassthrough:
 			// continue
-		case OpenAIWSIngressModeHTTPBridge:
-			return openAIWSHTTPDecision("ws_v2_mode_http_bridge")
 		case OpenAIWSIngressModeShared, OpenAIWSIngressModeDedicated:
 			// 历史值兼容：按 ctx_pool 处理。
 			mode = OpenAIWSIngressModeCtxPool
 		default:
-			return openAIWSHTTPDecision("account_mode_off")
+			return openAIWSHTTPDecision("account_mode_invalid")
 		}
 		if account.Concurrency <= 0 {
 			return openAIWSHTTPDecision("account_concurrency_invalid")
@@ -147,7 +124,7 @@ func (r *defaultOpenAIWSProtocolResolver) Resolve(account *Account) OpenAIWSProt
 		}
 		return openAIWSHTTPDecision("feature_disabled")
 	}
-	if !account.IsOpenAIOAuthLike() && !account.IsOpenAIResponsesWebSocketV2Enabled() {
+	if account.IsOpenAIApiKey() && !account.IsOpenAIResponsesWebSocketV2Enabled() {
 		return openAIWSHTTPDecision("account_disabled")
 	}
 	if wsCfg.ResponsesWebsocketsV2 {
