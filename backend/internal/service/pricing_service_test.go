@@ -566,26 +566,22 @@ func TestGetModelPricing_OpenAICompactAliasUsesStaticFallback(t *testing.T) {
 	require.InDelta(t, 1.5e-5, got.OutputCostPerToken, 1e-12)
 }
 
-func TestPricingService_Gemini36FlashThinkingTiersUseBasePricing(t *testing.T) {
-	basePricing := &LiteLLMModelPricing{
-		InputCostPerToken:       1.5e-6,
-		OutputCostPerToken:      7.5e-6,
-		CacheReadInputTokenCost: 0.15e-6,
+func TestPricingService_GeminiFlashThinkingTiersUseMatchingBasePricing(t *testing.T) {
+	pricingByBase := map[string]*LiteLLMModelPricing{
+		"gemini-3.5-flash": {InputCostPerToken: 1.5e-6, OutputCostPerToken: 9e-6},
+		"gemini-3.6-flash": {InputCostPerToken: 1.5e-6, OutputCostPerToken: 7.5e-6},
+		"gemini-3.7-flash": {InputCostPerToken: 0.75e-6, OutputCostPerToken: 3.75e-6},
+		"gemini-3.8-flash": {InputCostPerToken: 0.75e-6, OutputCostPerToken: 3.75e-6},
 	}
-	svc := &PricingService{pricingData: map[string]*LiteLLMModelPricing{
-		"gemini-3.6-flash": basePricing,
-	}}
+	svc := &PricingService{pricingData: pricingByBase}
 
-	for _, model := range []string{
-		"gemini-3.6-flash",
-		"gemini-3.6-flash-high",
-		"gemini-3.6-flash-low",
-		"gemini-3.6-flash-medium",
-		"gemini-3.6-flash-tiered",
-	} {
-		t.Run(model, func(t *testing.T) {
-			require.Same(t, basePricing, svc.GetModelPricing(model))
-		})
+	for baseModel, basePricing := range pricingByBase {
+		for _, suffix := range []string{"", "-high", "-low", "-extra-low", "-medium", "-tiered"} {
+			model := baseModel + suffix
+			t.Run(model, func(t *testing.T) {
+				require.Same(t, basePricing, svc.GetModelPricing(model))
+			})
+		}
 	}
 }
 
