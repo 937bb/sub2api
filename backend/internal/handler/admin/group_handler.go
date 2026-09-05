@@ -157,6 +157,7 @@ type CreateGroupRequest struct {
 	OpenAITransientErrorRetryEnabled bool                                      `json:"openai_transient_error_retry_enabled"`
 	MessagesDispatchModelConfig      service.OpenAIMessagesDispatchModelConfig `json:"messages_dispatch_model_config"`
 	ModelsListConfig                 service.GroupModelsListConfig             `json:"models_list_config"`
+	CodexModelsManifestConfig        service.GroupCodexModelsManifestConfig    `json:"codex_models_manifest_config"`
 	// 分组 RPM 上限（0 = 不限制）
 	RPMLimit int `json:"rpm_limit"`
 	// OpenAI/Codex 请求推理强度上限，空字符串表示不限制。
@@ -237,6 +238,7 @@ type UpdateGroupRequest struct {
 	OpenAITransientErrorRetryEnabled *bool                                      `json:"openai_transient_error_retry_enabled"`
 	MessagesDispatchModelConfig      *service.OpenAIMessagesDispatchModelConfig `json:"messages_dispatch_model_config"`
 	ModelsListConfig                 *service.GroupModelsListConfig             `json:"models_list_config"`
+	CodexModelsManifestConfig        *service.GroupCodexModelsManifestConfig    `json:"codex_models_manifest_config"`
 	// 分组 RPM 上限（0 = 不限制）；nil 表示未提供不改动
 	RPMLimit *int `json:"rpm_limit"`
 	// OpenAI/Codex 请求推理强度上限；空字符串清除，nil 不修改。
@@ -582,6 +584,7 @@ func (h *GroupHandler) Create(c *gin.Context) {
 		OpenAITransientErrorRetryEnabled:         req.OpenAITransientErrorRetryEnabled,
 		MessagesDispatchModelConfig:              req.MessagesDispatchModelConfig,
 		ModelsListConfig:                         req.ModelsListConfig,
+		CodexModelsManifestConfig:                req.CodexModelsManifestConfig,
 		RPMLimit:                                 req.RPMLimit,
 		MaxReasoningEffort:                       req.MaxReasoningEffort,
 		MaxReasoningEffortOverLimit:              req.MaxReasoningEffortOverLimit,
@@ -719,6 +722,7 @@ func (h *GroupHandler) Update(c *gin.Context) {
 		OpenAITransientErrorRetryEnabled:         req.OpenAITransientErrorRetryEnabled,
 		MessagesDispatchModelConfig:              req.MessagesDispatchModelConfig,
 		ModelsListConfig:                         req.ModelsListConfig,
+		CodexModelsManifestConfig:                req.CodexModelsManifestConfig,
 		RPMLimit:                                 req.RPMLimit,
 		MaxReasoningEffort:                       req.MaxReasoningEffort,
 		MaxReasoningEffortOverLimit:              req.MaxReasoningEffortOverLimit,

@@ -1223,44 +1223,48 @@ func init() {
 	groupDescModelsListConfig := groupFields[58].Descriptor()
 	// group.DefaultModelsListConfig holds the default value on creation for the models_list_config field.
 	group.DefaultModelsListConfig = groupDescModelsListConfig.Default.(domain.GroupModelsListConfig)
+	// groupDescCodexModelsManifestConfig is the schema descriptor for codex_models_manifest_config field.
+	groupDescCodexModelsManifestConfig := groupFields[59].Descriptor()
+	// group.DefaultCodexModelsManifestConfig holds the default value on creation for the codex_models_manifest_config field.
+	group.DefaultCodexModelsManifestConfig = groupDescCodexModelsManifestConfig.Default.(domain.GroupCodexModelsManifestConfig)
 	// groupDescRpmLimit is the schema descriptor for rpm_limit field.
-	groupDescRpmLimit := groupFields[59].Descriptor()
+	groupDescRpmLimit := groupFields[60].Descriptor()
 	// group.DefaultRpmLimit holds the default value on creation for the rpm_limit field.
 	group.DefaultRpmLimit = groupDescRpmLimit.Default.(int)
 	// groupDescMaxReasoningEffort is the schema descriptor for max_reasoning_effort field.
-	groupDescMaxReasoningEffort := groupFields[60].Descriptor()
+	groupDescMaxReasoningEffort := groupFields[61].Descriptor()
 	// group.DefaultMaxReasoningEffort holds the default value on creation for the max_reasoning_effort field.
 	group.DefaultMaxReasoningEffort = groupDescMaxReasoningEffort.Default.(string)
 	// group.MaxReasoningEffortValidator is a validator for the "max_reasoning_effort" field. It is called by the builders before save.
 	group.MaxReasoningEffortValidator = groupDescMaxReasoningEffort.Validators[0].(func(string) error)
 	// groupDescMaxReasoningEffortOverLimit is the schema descriptor for max_reasoning_effort_over_limit field.
-	groupDescMaxReasoningEffortOverLimit := groupFields[61].Descriptor()
+	groupDescMaxReasoningEffortOverLimit := groupFields[62].Descriptor()
 	// group.DefaultMaxReasoningEffortOverLimit holds the default value on creation for the max_reasoning_effort_over_limit field.
 	group.DefaultMaxReasoningEffortOverLimit = groupDescMaxReasoningEffortOverLimit.Default.(string)
 	// group.MaxReasoningEffortOverLimitValidator is a validator for the "max_reasoning_effort_over_limit" field. It is called by the builders before save.
 	group.MaxReasoningEffortOverLimitValidator = groupDescMaxReasoningEffortOverLimit.Validators[0].(func(string) error)
 	// groupDescReasoningEffortMappings is the schema descriptor for reasoning_effort_mappings field.
-	groupDescReasoningEffortMappings := groupFields[62].Descriptor()
+	groupDescReasoningEffortMappings := groupFields[63].Descriptor()
 	// group.DefaultReasoningEffortMappings holds the default value on creation for the reasoning_effort_mappings field.
 	group.DefaultReasoningEffortMappings = groupDescReasoningEffortMappings.Default.([]domain.ReasoningEffortMapping)
 	// groupDescQuotaBypassEnabled is the schema descriptor for quota_bypass_enabled field.
-	groupDescQuotaBypassEnabled := groupFields[63].Descriptor()
+	groupDescQuotaBypassEnabled := groupFields[64].Descriptor()
 	// group.DefaultQuotaBypassEnabled holds the default value on creation for the quota_bypass_enabled field.
 	group.DefaultQuotaBypassEnabled = groupDescQuotaBypassEnabled.Default.(bool)
 	// groupDescQuotaBypassConcentratedSchedulingEnabled is the schema descriptor for quota_bypass_concentrated_scheduling_enabled field.
-	groupDescQuotaBypassConcentratedSchedulingEnabled := groupFields[64].Descriptor()
+	groupDescQuotaBypassConcentratedSchedulingEnabled := groupFields[65].Descriptor()
 	// group.DefaultQuotaBypassConcentratedSchedulingEnabled holds the default value on creation for the quota_bypass_concentrated_scheduling_enabled field.
 	group.DefaultQuotaBypassConcentratedSchedulingEnabled = groupDescQuotaBypassConcentratedSchedulingEnabled.Default.(bool)
 	// groupDescProfitControlEnabled is the schema descriptor for profit_control_enabled field.
-	groupDescProfitControlEnabled := groupFields[65].Descriptor()
+	groupDescProfitControlEnabled := groupFields[66].Descriptor()
 	// group.DefaultProfitControlEnabled holds the default value on creation for the profit_control_enabled field.
 	group.DefaultProfitControlEnabled = groupDescProfitControlEnabled.Default.(bool)
 	// groupDescProfitMinMargin is the schema descriptor for profit_min_margin field.
-	groupDescProfitMinMargin := groupFields[66].Descriptor()
+	groupDescProfitMinMargin := groupFields[67].Descriptor()
 	// group.DefaultProfitMinMargin holds the default value on creation for the profit_min_margin field.
 	group.DefaultProfitMinMargin = groupDescProfitMinMargin.Default.(float64)
 	// groupDescProfitSafetyBuffer is the schema descriptor for profit_safety_buffer field.
-	groupDescProfitSafetyBuffer := groupFields[67].Descriptor()
+	groupDescProfitSafetyBuffer := groupFields[68].Descriptor()
 	// group.DefaultProfitSafetyBuffer holds the default value on creation for the profit_safety_buffer field.
 	group.DefaultProfitSafetyBuffer = groupDescProfitSafetyBuffer.Default.(float64)
 	idempotencyrecordMixin := schema.IdempotencyRecord{}.Mixin()
