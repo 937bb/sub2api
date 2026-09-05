@@ -27,6 +27,7 @@ func newPassthroughKeepaliveTestContext(t *testing.T) (*gin.Context, *httptest.R
 	// 刻意【不】调用 MarkOpenAICompactClientStream：普通 /v1/responses 透传不带
 	// compact 标记，这正是它此前拿不到心跳的原因。
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	c.Request.Header.Set("X-Forwarded-For", "203.0.113.10")
 	return c, rec
 }
 
