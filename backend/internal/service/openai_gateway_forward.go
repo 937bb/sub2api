@@ -645,7 +645,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	}
 
 	rawTier := requestView.ServiceTier
-	if account.Platform == PlatformOpenAI && (shouldForceOpenAIPriorityTier(apiKey) || openAIGroupForcesFast(ctx, account)) {
+	if openAIGroupForcesFast(ctx, account) || (account.Platform == PlatformOpenAI && shouldForceOpenAIPriorityTier(apiKey)) {
 		rawTier = OpenAIFastTierPriority
 		if requestView.ServiceTier != OpenAIFastTierPriority {
 			markPatchSet("service_tier", OpenAIFastTierPriority)

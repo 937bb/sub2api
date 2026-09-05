@@ -571,6 +571,7 @@ func TestPricingService_GeminiFlashThinkingTiersUseMatchingBasePricing(t *testin
 		"gemini-3.5-flash": {InputCostPerToken: 1.5e-6, OutputCostPerToken: 9e-6},
 		"gemini-3.6-flash": {InputCostPerToken: 1.5e-6, OutputCostPerToken: 7.5e-6},
 		"gemini-3.7-flash": {InputCostPerToken: 0.75e-6, OutputCostPerToken: 3.75e-6},
+		"gemini-3.8-flash": {InputCostPerToken: 0.75e-6, OutputCostPerToken: 3.75e-6},
 	}
 	svc := &PricingService{pricingData: pricingByBase}
 

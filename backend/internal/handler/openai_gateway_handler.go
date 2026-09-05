@@ -4150,8 +4150,9 @@ func (h *OpenAIGatewayHandler) recordCyberPolicyIfMarkedWithQuota(c *gin.Context
 		userAgent = c.GetHeader("User-Agent")
 		clientIPStr = strings.TrimSpace(ip.GetClientIP(c))
 	}
-	// 提前拍成标量，避免在下方 goroutine 内访问 gin.Context。
+	// Snapshot scalars before the goroutine to avoid accessing gin.Context concurrently.
 	sessionID := service.ExtractClientSessionID(c)
+	nativeCompactionV2 := service.IsOpenAINativeCompactionV2(c)
 	apiKeyPrefix := ""
 	if apiKey != nil {
 		apiKeyPrefix = keyPrefix(apiKey.Key, 8)
@@ -4221,6 +4222,7 @@ func (h *OpenAIGatewayHandler) recordCyberPolicyIfMarkedWithQuota(c *gin.Context
 				QuotaBypassInjectPairs: quotaBypassInjectPairs,
 				RequestPayloadHash:     requestPayloadHash,
 				APIKeyService:          apiKeySvc,
+				NativeCompactionV2:     nativeCompactionV2,
 				ChannelUsageFields:     channelFields,
 			})
 		}

@@ -266,6 +266,29 @@ func TestPrepareUsageLogInsert_ArgCountMatchesTypes(t *testing.T) {
 	require.Len(t, prepared.args, len(usageLogInsertArgTypes))
 }
 
+func TestPrepareUsageLogInsert_PersistsNativeCompactionV2WithoutChangingRequestType(t *testing.T) {
+	log := &service.UsageLog{
+		UserID:             1,
+		APIKeyID:           2,
+		AccountID:          3,
+		RequestID:          "req-native-compaction-v2",
+		Model:              "gpt-5",
+		RequestedModel:     "gpt-5",
+		RequestType:        service.RequestTypeStream,
+		NativeCompactionV2: true,
+		CreatedAt:          time.Date(2025, 1, 5, 13, 0, 0, 0, time.UTC),
+	}
+
+	prepared := prepareUsageLogInsert(log)
+
+	require.Len(t, prepared.args, len(usageLogInsertArgTypes))
+	require.Equal(t, "boolean", usageLogInsertArgTypes[len(usageLogInsertArgTypes)-4])
+	require.Equal(t, true, prepared.args[len(prepared.args)-4])
+	require.Equal(t, int16(service.RequestTypeStream), prepared.args[30])
+	require.Equal(t, service.RequestTypeStream, log.RequestType)
+	require.True(t, log.Stream)
+	require.False(t, log.OpenAIWSMode)
+}
 func TestPrepareUsageLogInsert_PersistsImageSizeMetadata(t *testing.T) {
 	imageSize := "4K"
 	inputSize := "1024x1024"
@@ -465,6 +488,73 @@ func TestUsageLogRepositoryGetUsageTrendWithUsageFiltersRequestedModelSource(t *
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestUsageLogRepositoryUsageAggregatesFilterNativeCompactionV2(t *testing.T) {
+	start := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	end := start.Add(24 * time.Hour)
+	nativeCompactionV2 := true
+	filters := usagestats.UsageLogFilters{NativeCompactionV2: &nativeCompactionV2}
+
+	t.Run("stats", func(t *testing.T) {
+		db, mock := newSQLMock(t)
+		repo := &usageLogRepository{sql: db}
+		mock.ExpectQuery("(?s)FROM usage_logs\\s+WHERE native_compaction_v2 = \\$1.*path_stats AS MATERIALIZED.*GROUP BY inbound_endpoint, upstream_endpoint.*UNION ALL").
+			WithArgs(true).
+			WillReturnRows(sqlmock.NewRows([]string{
+				"inbound_grouped", "upstream_grouped", "inbound_endpoint", "upstream_endpoint",
+				"requests", "input_tokens", "output_tokens", "cache_creation_tokens", "cache_read_tokens",
+				"cost", "actual_cost", "account_cost", "avg_duration_ms",
+			}))
+
+		_, err := repo.GetStatsWithFilters(context.Background(), filters)
+		require.NoError(t, err)
+		require.NoError(t, mock.ExpectationsWereMet())
+	})
+
+	t.Run("trend bypasses preaggregate", func(t *testing.T) {
+		db, mock := newSQLMock(t)
+		repo := &usageLogRepository{sql: db}
+		mock.ExpectQuery("(?s)FROM usage_logs.*AND native_compaction_v2 = \\$3").
+			WithArgs(start, end, true).
+			WillReturnRows(sqlmock.NewRows([]string{"date", "requests", "input_tokens", "output_tokens", "cache_creation_tokens", "cache_read_tokens", "total_tokens", "cost", "actual_cost"}))
+
+		_, err := repo.GetUsageTrendWithUsageFilters(context.Background(), start, end, "day", filters)
+		require.NoError(t, err)
+		require.NoError(t, mock.ExpectationsWereMet())
+	})
+
+	t.Run("model", func(t *testing.T) {
+		db, mock := newSQLMock(t)
+		repo := &usageLogRepository{sql: db}
+		mock.ExpectQuery("(?s)FROM usage_logs.*AND native_compaction_v2 = \\$3").
+			WithArgs(start, end, true).
+			WillReturnRows(sqlmock.NewRows([]string{
+				"model", "requests", "input_tokens", "output_tokens", "cache_creation_tokens",
+				"cache_read_tokens", "total_tokens", "cost", "actual_cost", "account_cost",
+			}))
+
+		_, err := repo.GetModelStatsWithUsageFiltersBySource(context.Background(), start, end, filters, usagestats.ModelSourceRequested)
+		require.NoError(t, err)
+		require.NoError(t, mock.ExpectationsWereMet())
+	})
+
+	t.Run("group", func(t *testing.T) {
+		db, mock := newSQLMock(t)
+		repo := &usageLogRepository{sql: db}
+		mock.ExpectQuery("(?s)FROM usage_logs ul.*AND ul.native_compaction_v2 = \\$3").
+			WithArgs(start, end, true).
+			WillReturnRows(sqlmock.NewRows([]string{"group_id", "group_name", "requests", "total_tokens", "cost", "actual_cost", "account_cost"}))
+
+		_, err := repo.GetGroupStatsWithUsageFilters(context.Background(), start, end, filters)
+		require.NoError(t, err)
+		require.NoError(t, mock.ExpectationsWereMet())
+	})
+}
+
+func TestShouldUsePreaggregatedTrendRejectsNativeCompactionV2Filter(t *testing.T) {
+	nativeCompactionV2 := true
+	require.True(t, shouldUsePreaggregatedTrend("day", 0, 0, 0, 0, "", nil, nil, nil, "", nil, nil))
+	require.False(t, shouldUsePreaggregatedTrend("day", 0, 0, 0, 0, "", nil, nil, nil, "", nil, &nativeCompactionV2))
+}
 func TestUsageLogRepositoryGetModelStatsWithFiltersRequestTypePriority(t *testing.T) {
 	db, mock := newSQLMock(t)
 	repo := &usageLogRepository{sql: db}
@@ -515,7 +605,7 @@ func TestUsageLogRepositoryGetStatsWithFiltersRequestedModelSource(t *testing.T)
 		ModelFilterSource: usagestats.ModelSourceRequested,
 	}
 
-	mock.ExpectQuery("(?s)FROM usage_logs\\s+WHERE COALESCE\\(NULLIF\\(TRIM\\(requested_model\\), ''\\), model\\) = \\$1.*GROUP BY GROUPING SETS").
+	mock.ExpectQuery("(?s)FROM usage_logs\\s+WHERE COALESCE\\(NULLIF\\(TRIM\\(requested_model\\), ''\\), model\\) = \\$1.*path_stats AS MATERIALIZED.*GROUP BY inbound_endpoint, upstream_endpoint.*UNION ALL").
 		WithArgs("gpt-5").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"inbound_grouped",
@@ -556,7 +646,7 @@ func TestUsageLogRepositoryGetStatsWithFiltersRequestTypePriority(t *testing.T) 
 		Stream:      &stream,
 	}
 
-	mock.ExpectQuery("(?s)FROM usage_logs\\s+WHERE \\(request_type = \\$1 OR \\(request_type = 0 AND stream = FALSE AND openai_ws_mode = FALSE\\)\\).*GROUP BY GROUPING SETS").
+	mock.ExpectQuery("(?s)FROM usage_logs\\s+WHERE \\(request_type = \\$1 OR \\(request_type = 0 AND stream = FALSE AND openai_ws_mode = FALSE\\)\\).*path_stats AS MATERIALIZED.*GROUP BY inbound_endpoint, upstream_endpoint.*UNION ALL").
 		WithArgs(requestType).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"inbound_grouped",
@@ -693,7 +783,7 @@ func TestUsageLogRepositoryGetStatsWithFiltersAlwaysReturnsAccountCost(t *testin
 	// No AccountID filter set - TotalAccountCost should still be returned
 	filters := usagestats.UsageLogFilters{}
 
-	mock.ExpectQuery("(?s)FROM usage_logs.*GROUP BY GROUPING SETS").
+	mock.ExpectQuery("(?s)FROM usage_logs.*path_stats AS MATERIALIZED.*GROUP BY inbound_endpoint, upstream_endpoint.*UNION ALL").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"inbound_grouped", "upstream_grouped", "inbound_endpoint", "upstream_endpoint",
 			"requests", "input_tokens", "output_tokens", "cache_creation_tokens", "cache_read_tokens",
@@ -1000,7 +1090,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullFloat64{}, // account_stats_cost
 			sql.NullString{},  // upstream_request_id
 			sql.NullString{},  // session_id
-			false,             // native_compaction_v2
+			true,              // native_compaction_v2
 			false,             // quota_bypass_applied
 			0,                 // quota_bypass_inject_pairs
 			now,

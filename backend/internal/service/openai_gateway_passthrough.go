@@ -1825,7 +1825,11 @@ func (s *OpenAIGatewayService) nonStreamingTerminalFailureFailover(
 	if account == nil || IsResponseCommitted(c) {
 		return nil
 	}
-	if account.IsOpenAIOAuthLike() && isOpenAITransientCapacityError(message, payload) && !s.openAITransientErrorRetryEnabled(c) {
+	oauthCapacityRetry := account.IsOpenAIOAuthLike() && isOpenAITransientCapacityError(message, payload)
+	if oauthCapacityRetry && !s.openAITransientErrorRetryEnabled(c) {
+		return nil
+	}
+	if !account.IsPoolMode() && !oauthCapacityRetry {
 		return nil
 	}
 	shouldFailover := openAIStreamFailedEventShouldFailover(payload, message)
@@ -2447,7 +2451,7 @@ func (s *OpenAIGatewayService) handlePassthroughSSEToJSON(resp *http.Response, c
 		if compactErr := newOpenAICompactFallbackSignal(c, terminalPayload, msg); compactErr != nil {
 			return nil, compactErr
 		}
-		if failoverErr := s.nonStreamingTerminalFailureFailover(c, resp, account, true, terminalType, terminalPayload, msg); failoverErr != nil {
+		if failoverErr := s.nonStreamingTerminalFailureFailover(c, resp, account, true, terminalType, terminalPayload, msg, mappedModel); failoverErr != nil {
 			return nil, failoverErr
 		}
 		return nil, s.writeOpenAINonStreamingProtocolError(resp, c, msg)

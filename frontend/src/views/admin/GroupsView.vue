@@ -6318,8 +6318,16 @@ const handleCreateGroup = async () => {
       createForm.video_model_prices,
     );
     // 构建请求数据，包含模型路由配置
-    const requestData = {
-      ...createGroupForm,
+		const requestData = {
+			...createGroupForm,
+			force_openai_fast: normalizeGroupOpenAIFast(
+        createForm.platform,
+        createForm.force_openai_fast,
+      ),
+      free_openai_fast: normalizeGroupOpenAIFast(
+        createForm.platform,
+				createForm.free_openai_fast,
+			),
       openai_model_mapping_enabled:
         createForm.platform === "openai" &&
         createForm.openai_model_mapping_enabled,
@@ -6645,8 +6653,16 @@ const handleUpdateGroup = async () => {
   submitting.value = true;
   try {
     // 转换 fallback_group_id: null -> 0 (后端使用 0 表示清除)
-    const payload = {
-      ...editForm,
+		const payload = {
+			...editForm,
+			force_openai_fast: normalizeGroupOpenAIFast(
+        editForm.platform,
+        editForm.force_openai_fast,
+      ),
+      free_openai_fast: normalizeGroupOpenAIFast(
+        editForm.platform,
+				editForm.free_openai_fast,
+			),
       openai_model_mapping_enabled:
         editForm.platform === "openai" &&
         editForm.openai_model_mapping_enabled,

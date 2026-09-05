@@ -172,6 +172,57 @@ func TestOpenAIGatewayService_Forward_WSv2_SuccessAndBindSticky(t *testing.T) {
 	require.Equal(t, "resp_new_1", gjson.GetBytes(responseBody, "id").String())
 }
 
+func TestOpenAIGatewayService_Forward_WSv2_NonStreamingReconstructsEmptyTerminalOutput(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", nil)
+	c.Request.Header.Set("User-Agent", "unit-test-agent/1.0")
+
+	cfg := newOpenAIWSV2TestConfig()
+	cfg.Security.URLAllowlist.Enabled = false
+	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
+	cfg.Gateway.OpenAIWS.MinIdlePerAccount = 0
+
+	captureConn := &openAIWSCaptureConn{events: [][]byte{
+		[]byte(`{"type":"response.created","response":{"id":"resp_reconstructed","model":"gpt-5.6-sol","status":"in_progress","output":[]}}`),
+		[]byte(`{"type":"response.output_text.delta","output_index":0,"content_index":0,"delta":"8","item_id":"msg_reconstructed"}`),
+		[]byte(`{"type":"response.output_item.done","output_index":0,"item":{"id":"msg_reconstructed","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"8"}]}}`),
+		[]byte(`{"type":"response.completed","response":{"id":"resp_reconstructed","model":"gpt-5.6-sol","status":"completed","output":[],"usage":{"input_tokens":12,"output_tokens":5,"total_tokens":17}}}`),
+	}}
+	pool := newOpenAIWSConnPool(cfg)
+	pool.setClientDialerForTest(&openAIWSCaptureDialer{conn: captureConn})
+
+	svc := &OpenAIGatewayService{
+		cfg:              cfg,
+		httpUpstream:     &httpUpstreamRecorder{},
+		cache:            &stubGatewayCache{},
+		openaiWSResolver: NewOpenAIWSProtocolResolver(cfg),
+		toolCorrector:    NewCodexToolCorrector(),
+		openaiWSPool:     pool,
+	}
+	account := &Account{
+		ID:          901,
+		Name:        "openai-ws-empty-terminal-output",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Credentials: map[string]any{"api_key": "sk-test"},
+		Extra:       map[string]any{"responses_websockets_v2_enabled": true},
+	}
+
+	result, err := svc.Forward(context.Background(), c, account, []byte(`{"model":"gpt-5.6-sol","stream":false,"input":"Calculate 3 + 5"}`))
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, "resp_reconstructed", result.RequestID)
+	require.Equal(t, 12, result.Usage.InputTokens)
+	require.Equal(t, 5, result.Usage.OutputTokens)
+	require.Equal(t, "8", gjson.GetBytes(rec.Body.Bytes(), "output.0.content.0.text").String())
+}
+
 func TestOpenAIGatewayService_Forward_WSv2_UsesPatchedBodyAfterValidationDecode(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
