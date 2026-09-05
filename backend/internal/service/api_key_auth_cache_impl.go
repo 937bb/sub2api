@@ -14,7 +14,7 @@ import (
 	"github.com/dgraph-io/ristretto"
 )
 
-const apiKeyAuthSnapshotVersion = 23 // v23: group codex_models_manifest_config field
+const apiKeyAuthSnapshotVersion = 23 // v23 combines time billing and official group cache fields.
 
 type apiKeyAuthCacheConfig struct {
 	l1Size        int

@@ -514,7 +514,7 @@ func TestUsageLogRepositoryUsageAggregatesFilterNativeCompactionV2(t *testing.T)
 	t.Run("stats", func(t *testing.T) {
 		db, mock := newSQLMock(t)
 		repo := &usageLogRepository{sql: db}
-		mock.ExpectQuery("(?s)FROM usage_logs\\s+WHERE native_compaction_v2 = \\$1.*GROUP BY GROUPING SETS").
+		mock.ExpectQuery("(?s)FROM usage_logs\\s+WHERE native_compaction_v2 = \\$1.*path_stats AS MATERIALIZED.*GROUP BY inbound_endpoint, upstream_endpoint.*UNION ALL").
 			WithArgs(true).
 			WillReturnRows(sqlmock.NewRows([]string{
 				"inbound_grouped", "upstream_grouped", "inbound_endpoint", "upstream_endpoint",
@@ -623,7 +623,7 @@ func TestUsageLogRepositoryGetStatsWithFiltersRequestedModelSource(t *testing.T)
 		ModelFilterSource: usagestats.ModelSourceRequested,
 	}
 
-	mock.ExpectQuery("(?s)FROM usage_logs\\s+WHERE COALESCE\\(NULLIF\\(TRIM\\(requested_model\\), ''\\), model\\) = \\$1.*GROUP BY GROUPING SETS").
+	mock.ExpectQuery("(?s)FROM usage_logs\\s+WHERE COALESCE\\(NULLIF\\(TRIM\\(requested_model\\), ''\\), model\\) = \\$1.*path_stats AS MATERIALIZED.*GROUP BY inbound_endpoint, upstream_endpoint.*UNION ALL").
 		WithArgs("gpt-5").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"inbound_grouped",
@@ -664,7 +664,7 @@ func TestUsageLogRepositoryGetStatsWithFiltersRequestTypePriority(t *testing.T) 
 		Stream:      &stream,
 	}
 
-	mock.ExpectQuery("(?s)FROM usage_logs\\s+WHERE \\(request_type = \\$1 OR \\(request_type = 0 AND stream = FALSE AND openai_ws_mode = FALSE\\)\\).*GROUP BY GROUPING SETS").
+	mock.ExpectQuery("(?s)FROM usage_logs\\s+WHERE \\(request_type = \\$1 OR \\(request_type = 0 AND stream = FALSE AND openai_ws_mode = FALSE\\)\\).*path_stats AS MATERIALIZED.*GROUP BY inbound_endpoint, upstream_endpoint.*UNION ALL").
 		WithArgs(requestType).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"inbound_grouped",
@@ -801,7 +801,7 @@ func TestUsageLogRepositoryGetStatsWithFiltersAlwaysReturnsAccountCost(t *testin
 	// No AccountID filter set - TotalAccountCost should still be returned
 	filters := usagestats.UsageLogFilters{}
 
-	mock.ExpectQuery("(?s)FROM usage_logs.*GROUP BY GROUPING SETS").
+	mock.ExpectQuery("(?s)FROM usage_logs.*path_stats AS MATERIALIZED.*GROUP BY inbound_endpoint, upstream_endpoint.*UNION ALL").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"inbound_grouped", "upstream_grouped", "inbound_endpoint", "upstream_endpoint",
 			"requests", "input_tokens", "output_tokens", "cache_creation_tokens", "cache_read_tokens",
