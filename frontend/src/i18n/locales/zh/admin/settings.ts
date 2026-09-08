@@ -1,5 +1,14 @@
 export default {
     settings: {
+      oauthUpstreamRetry: {
+        title: 'OpenAI OAuth HTTP 自动重试',
+        enabled: '自动重试',
+        maxRetries: '额外重试次数（0-10）',
+        statusCodes: '拦截的 HTTP 错误码',
+        invalidRetries: '额外重试次数必须为 0 至 10 的整数。',
+        invalidCodes: '请输入 400 至 599 的 HTTP 错误码，使用逗号分隔。',
+        reload: '重新加载',
+      },
       title: '系统设置',
       description: '管理注册、邮箱验证、默认值和 SMTP 设置',
       tabs: {

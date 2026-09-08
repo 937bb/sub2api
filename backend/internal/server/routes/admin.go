@@ -556,6 +556,8 @@ func registerSettingsRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	adminSettings := admin.Group("/settings")
 	{
 		adminSettings.GET("", h.Admin.Setting.GetSettings)
+		adminSettings.GET("/oauth-upstream-retry", h.Admin.Setting.GetOAuthRetrySettings)
+		adminSettings.PUT("/oauth-upstream-retry", h.Admin.Setting.UpdateOAuthRetrySettings)
 		adminSettings.PUT("", h.Admin.Setting.UpdateSettings)
 		adminSettings.POST("/test-smtp", h.Admin.Setting.TestSMTPConnection)
 		adminSettings.POST("/send-test-email", h.Admin.Setting.SendTestEmail)
