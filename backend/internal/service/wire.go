@@ -268,6 +268,7 @@ func ProvideAccountTestService(
 		tlsFPProfileService,
 	)
 	service.agentIdentityWS = openAIGatewayService
+	service.SetOpenAIGatewayService(openAIGatewayService)
 	service.SetSettingService(settingService)
 	if openAIGatewayService != nil {
 		service.SetConcurrencyService(openAIGatewayService.concurrencyService)
