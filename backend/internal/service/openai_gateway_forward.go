@@ -19,6 +19,10 @@ import (
 
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
+	return s.forwardWithOAuthMappedRetry(ctx, c, account, body)
+}
+
+func (s *OpenAIGatewayService) forwardOnce(ctx context.Context, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
 	beginUpstreamResponseModelObservation(c)
 	account = s.withOpenAICodexInstallationID(ctx, account)
 	clearGrokResponsesClientToolMapping(c)
@@ -797,6 +801,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			hasPreviousResponseID,
 		)
 		maxAttempts := 2
+		if oauthMappedRetryActive(c) {
+			maxAttempts = 1
+		}
 		wsAttempts := 0
 		var wsResult *OpenAIForwardResult
 		var wsErr error

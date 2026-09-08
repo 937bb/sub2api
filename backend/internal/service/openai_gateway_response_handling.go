@@ -563,6 +563,11 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 					}
 				}
 				if !outputStarted {
+					if !cyberHit && s.shouldRetryOAuthMappedStream(c, account, dataBytes, failedMessage) {
+						sawFailedEvent = true
+						streamEarlyErr = s.newOAuthMappedStreamError(c, account, dataBytes, failedMessage, resp.Header)
+						return
+					}
 					shouldFailover := false
 					if !cyberHit {
 						if eventType == "error" {

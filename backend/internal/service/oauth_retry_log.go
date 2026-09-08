@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/google/uuid"
@@ -27,8 +28,12 @@ func withOAuthRetryLogContext(upstream, downstream context.Context, accountID in
 // Only identifiers and retry decisions are logged, never bodies, tokens or headers.
 func slogOAuthRetry(r *http.Request, event string, status, retry, max int, reason string) {
 	meta, _ := r.Context().Value(oauthRetryLogContextKey{}).(oauthRetryLogContext)
+	source := "http"
+	if strings.HasPrefix(reason, "mapped_") || reason == "forward_finished" || reason == "response_already_written" || reason == "billable_result_present" {
+		source = "mapped_forward"
+	}
 	slog.Info("oauth retry event", "component", "oauth_retry", "event", event,
-		"status", status, "retry", retry, "max_retries", max, "source", "http", "reason", reason,
+		"status", status, "retry", retry, "max_retries", max, "source", source, "reason", reason,
 		"request_id", meta.RequestID, "account_id", meta.AccountID, "platform", PlatformOpenAI,
 		"retry_id", meta.RetryID)
 }

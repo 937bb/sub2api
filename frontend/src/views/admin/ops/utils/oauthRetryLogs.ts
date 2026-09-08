@@ -29,6 +29,11 @@ const eventLabels: Record<string, string> = {
 }
 
 const reasonLabels: Record<string, string> = {
+  mapped_status: '命中系统最终错误码，重新转发完整请求',
+  mapped_status_exhausted: '系统错误码重试次数耗尽',
+  forward_finished: '转发结束，请结合最终请求状态核对',
+  response_already_written: '已向客户端输出，不重发',
+  billable_result_present: '已有可计费结果，不重发',
   configured_status: '命中配置的错误状态码',
   status_exhausted: '命中错误状态码，重试次数已耗尽',
   context_cancelled: '请求上下文已取消',

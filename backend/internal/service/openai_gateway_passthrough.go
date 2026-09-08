@@ -2186,6 +2186,9 @@ streamLoop:
 					}
 				}
 				if !outputStarted {
+					if !cyberHit && s.shouldRetryOAuthMappedStream(c, account, dataBytes, failedMessage) {
+						return resultWithUsage(), s.newOAuthMappedStreamError(c, account, dataBytes, failedMessage, resp.Header)
+					}
 					shouldFailover := false
 					if !cyberHit {
 						if eventType == "error" {
