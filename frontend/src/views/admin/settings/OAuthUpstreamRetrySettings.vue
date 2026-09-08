@@ -1,8 +1,11 @@
 <template>
-  <section class="space-y-4 border-t border-gray-200 pt-6 dark:border-dark-600" aria-labelledby="oauth-upstream-retry-title">
-    <h3 id="oauth-upstream-retry-title" class="text-lg font-medium text-gray-900 dark:text-gray-100">
+  <section class="card" aria-labelledby="oauth-upstream-retry-title">
+    <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
+    <h2 id="oauth-upstream-retry-title" class="text-lg font-semibold text-gray-900 dark:text-white">
       {{ t('admin.settings.oauthUpstreamRetry.title') }}
-    </h3>
+    </h2>
+    </div>
+    <div class="space-y-4 p-6">
     <div v-if="loading" role="status" class="text-sm text-gray-500">{{ t('common.loading') }}</div>
     <div v-else-if="loadError" role="alert" class="space-y-3">
       <p class="text-sm text-red-600">{{ loadError }}</p>
@@ -28,6 +31,7 @@
         {{ saving ? t('common.saving') : t('common.save') }}
       </button>
     </fieldset>
+    </div>
   </section>
 </template>
 

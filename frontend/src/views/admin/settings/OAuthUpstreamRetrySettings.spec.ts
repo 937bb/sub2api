@@ -16,7 +16,10 @@ beforeEach(() => {
 
 it('loads and saves settings with numeric error codes', async () => {
  const wrapper=mount(Component)
+ expect(wrapper.classes()).toContain('card')
+ expect(wrapper.get('#oauth-upstream-retry-title').element.tagName).toBe('H2')
  await flushPromises()
+ expect(wrapper.get('fieldset').element.parentElement?.classList.contains('p-6')).toBe(true)
  await wrapper.get('#oauth-upstream-retry-count').setValue(2)
  await wrapper.get('#oauth-upstream-retry-codes').setValue('502, 503, 502')
  await wrapper.findAll('button').at(-1)!.trigger('click')

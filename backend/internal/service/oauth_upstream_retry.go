@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -19,7 +18,13 @@ func retryOAuthHTTP(ctx context.Context, request *http.Request, settings OAuthRe
 	current := request
 	for attempt := 0; ; attempt++ {
 		resp, err := send(current)
-		if err != nil || resp == nil || !settings.Enabled {
+		if err != nil {
+			if settings.Enabled {
+				slogOAuthRetry(request, "transport_error", 0, attempt, settings.MaxRetries, "transport")
+			}
+			return resp, err, false
+		}
+		if resp == nil || !settings.Enabled {
 			return resp, err, false
 		}
 		matched := false
@@ -30,13 +35,22 @@ func retryOAuthHTTP(ctx context.Context, request *http.Request, settings OAuthRe
 			}
 		}
 		if !matched {
+			if attempt > 0 {
+				slogOAuthRetry(request, "response_received", resp.StatusCode, attempt, settings.MaxRetries, "status_not_configured")
+			}
 			return resp, nil, false
 		}
-		if attempt >= settings.MaxRetries || request.GetBody == nil {
+		if attempt >= settings.MaxRetries {
+			slogOAuthRetry(request, "exhausted", resp.StatusCode, attempt, settings.MaxRetries, "status_exhausted")
+			return resp, nil, true
+		}
+		if request.GetBody == nil {
+			slogOAuthRetry(request, "skipped", resp.StatusCode, attempt, settings.MaxRetries, "body_not_replayable")
 			return resp, nil, true
 		}
 		replay, err := request.GetBody()
 		if err != nil {
+			slogOAuthRetry(request, "skipped", resp.StatusCode, attempt, settings.MaxRetries, "body_replay_failed")
 			return resp, nil, true
 		}
 		timer := time.NewTimer(oauthRetryDelay(attempt, resp.Header.Get("Retry-After"), time.Now()))
@@ -44,13 +58,14 @@ func retryOAuthHTTP(ctx context.Context, request *http.Request, settings OAuthRe
 		case <-ctx.Done():
 			timer.Stop()
 			replay.Close()
+			slogOAuthRetry(request, "cancelled", resp.StatusCode, attempt, settings.MaxRetries, "context_cancelled")
 			return resp, nil, true
 		case <-timer.C:
 		}
 		if resp.Body != nil {
 			resp.Body.Close()
 		}
-		slog.Info("oauth upstream HTTP retry", "retry", attempt+1, "max_retries", settings.MaxRetries, "status", resp.StatusCode)
+		slogOAuthRetry(request, "retry", resp.StatusCode, attempt+1, settings.MaxRetries, "configured_status")
 		current = request.Clone(request.Context())
 		current.Body = replay
 	}
@@ -90,6 +105,7 @@ func (s *OpenAIGatewayService) doOAuthResponsesUpstream(c *gin.Context, request 
 		return resp, err, false
 	}
 	upstreamCtx, cancel := context.WithCancel(request.Context())
+	upstreamCtx = withOAuthRetryLogContext(upstreamCtx, c.Request.Context(), account.ID)
 	stop := context.AfterFunc(c.Request.Context(), cancel)
 	cleanup := func() { stop(); cancel() }
 	resp, sendErr, exhausted := retryOAuthHTTP(c.Request.Context(), request.Clone(upstreamCtx), settings, send)
