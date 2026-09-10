@@ -711,6 +711,18 @@ readLoop:
 
 		if eventType == "error" || eventType == "response.failed" {
 			markOpenAICyberPolicyEvent(c, message, http.StatusOK, usage)
+			// Match HTTP/SSE capacity recovery before committing any output.
+			// A plain WS error bypasses the handler's bounded failover loop;
+			// response.failed must not be treated as a completed request either.
+			// Retire the socket because another failure frame may follow.
+			if !wroteDownstream && !clientDisconnected && account.IsOpenAIOAuthLike() &&
+				isOpenAIRequestScopedCapacityShed("", message) {
+				lease.MarkBroken()
+				_, _, errorMessage := parseOpenAIWSErrorEventFields(message)
+				return nil, s.newOpenAIStreamFailoverError(
+					c, account, false, responseID, message, errorMessage, lease.HandshakeHeaders(),
+				)
+			}
 		}
 
 		if eventType == "error" {
