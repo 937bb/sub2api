@@ -913,6 +913,10 @@ func (s *OpenAIGatewayService) forwardOnce(ctx context.Context, c *gin.Context, 
 			if wsErr == nil {
 				break
 			}
+			if oauthMappedRetryActive(c) && wsResult != nil {
+				// Preserve observed WS work for the mapped retry owner's no-replay guard.
+				break
+			}
 			if c != nil && c.Writer != nil && c.Writer.Written() {
 				break
 			}
@@ -1022,6 +1026,13 @@ func (s *OpenAIGatewayService) forwardOnce(ctx context.Context, c *gin.Context, 
 				wsResult.BillingModel = imageBillingModel
 			}
 			return wsResult, nil
+		}
+		if oauthMappedRetryActive(c) && wsResult != nil {
+			wsResult.UpstreamModel = upstreamModel
+			if wsResult.BillingModel == "" {
+				wsResult.BillingModel = billingModel
+			}
+			return wsResult, wsErr
 		}
 		reason, _ := classifyOpenAIWSReconnectReason(wsErr)
 		if shouldFallbackOpenAIWSToHTTP(reason) && (c == nil || c.Writer == nil || !c.Writer.Written()) {

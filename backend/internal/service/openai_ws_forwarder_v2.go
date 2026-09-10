@@ -377,6 +377,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	responseImageOutputs := make([]json.RawMessage, 0, 1)
 	responseImageSeen := make(map[string]struct{})
 	wroteDownstream := false
+	mappedRetryOutputObserved := false
 	needModelReplace := originalModel != mappedModel
 	var mappedModelBytes []byte
 	if needModelReplace && mappedModel != "" {
@@ -681,6 +682,9 @@ readLoop:
 		if openAIWSMessageShouldParseUsage(eventType, message) {
 			parseOpenAIWSResponseUsageFromCompletedEvent(message, usage)
 		}
+		if !mappedRetryOutputObserved && oauthMappedRetryActive(c) {
+			mappedRetryOutputObserved = openAIWSMappedRetryOutputObserved(eventType, message) || openAIUsageHasTokens(usage)
+		}
 		imageCounter.AddSSEData(message)
 		responseDoneItems.Observe(message)
 		if imageOutput, ok := extractImageGenerationOutputFromSSEData(message, responseImageSeen); ok {
@@ -706,6 +710,18 @@ readLoop:
 
 		if eventType == "error" || eventType == "response.failed" {
 			markOpenAICyberPolicyEvent(c, message, http.StatusOK, usage)
+			if retryErr := s.newOpenAIWSMappedRetryError(ctx, c, account, lease.HandshakeHeaders(), message,
+				wroteDownstream || clientDisconnected || mappedRetryOutputObserved); retryErr != nil {
+				if eventType == "error" {
+					s.handleOpenAIWSErrorEventTransientFailure(ctx, account, mappedModel, lease.HandshakeHeaders(), message)
+				} else {
+					s.handleOpenAIWSTerminalTransientFailure(ctx, account, mappedModel, lease.HandshakeHeaders(), message)
+				}
+				// The retry owner discards this attempt. Neither buffered metadata
+				// nor error frames may escape, and the failed WS cannot be reused.
+				lease.MarkBroken()
+				return nil, retryErr
+			}
 		}
 
 		if eventType == "error" {
@@ -757,7 +773,7 @@ readLoop:
 			}
 			// error 事件后连接不再可复用，避免回池后污染下一请求。
 			lease.MarkBroken()
-			if !wroteDownstream && canFallback {
+			if !wroteDownstream && canFallback && (!oauthMappedRetryActive(c) || !mappedRetryOutputObserved) {
 				return nil, wrapOpenAIWSFallback(fallbackReason, errors.New(errMsg))
 			}
 			statusCode := openAIWSErrorHTTPStatusFromRaw(errCodeRaw, errTypeRaw)
@@ -810,7 +826,13 @@ readLoop:
 					},
 				})
 			}
-			return nil, fmt.Errorf("openai ws error event: %s", errMsg)
+			err := fmt.Errorf("openai ws error event: %s", errMsg)
+			if oauthMappedRetryActive(c) && mappedRetryOutputObserved {
+				// A non-streaming error response may be staged by the retry writer.
+				// Preserve observed work so the owner cannot replay it as plain 502.
+				return resultWithUsage(), err
+			}
+			return nil, err
 		}
 
 		if reqStream {

@@ -3431,6 +3431,14 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 	// 记录原始上游状态码，以便 ops 错误日志捕获真实的上游错误
 	upstreamMsg := service.ExtractUpstreamErrorMessage(responseBody)
 	service.SetOpsUpstreamError(c, statusCode, upstreamMsg, "")
+	if failoverErr.Reason == service.OpenAIWSMappedRetryReason && strings.TrimSpace(failoverErr.ClientMessage) != "" {
+		status := failoverErr.ClientStatusCode
+		if status < 400 || status > 599 {
+			status = http.StatusBadGateway
+		}
+		h.handleStreamingAwareError(c, status, "upstream_error", failoverErr.ClientMessage, streamStarted)
+		return
+	}
 	if statusCode == http.StatusServiceUnavailable && failoverErr.RequestScopedTransient {
 		h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "upstream_error", "Upstream service overloaded, please retry later", streamStarted)
 		return
