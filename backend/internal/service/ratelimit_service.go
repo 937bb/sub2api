@@ -1436,20 +1436,8 @@ func calculateOpenAI429ResetTime(headers http.Header) *time.Time {
 		return &resetAt
 	}
 
-	// 都未达到100%但收到429，使用较长的重置时间
-	var maxResetSecs int
-	if normalized.Reset7dSeconds != nil && *normalized.Reset7dSeconds > maxResetSecs {
-		maxResetSecs = *normalized.Reset7dSeconds
-	}
-	if normalized.Reset5hSeconds != nil && *normalized.Reset5hSeconds > maxResetSecs {
-		maxResetSecs = *normalized.Reset5hSeconds
-	}
-	if maxResetSecs > 0 {
-		resetAt := now.Add(time.Duration(maxResetSecs) * time.Second)
-		slog.Debug("openai_429_using_max_reset", "max_reset_seconds", maxResetSecs, "reset_at", resetAt)
-		return &resetAt
-	}
-
+	// A reset-after header describes the window, not exhausted quota, when
+	// usage is below 100%. Let transient 429s use the configured fallback.
 	return nil
 }
 
