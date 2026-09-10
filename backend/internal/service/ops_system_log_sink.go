@@ -176,6 +176,9 @@ func (s *OpsSystemLogSink) shouldIndex(event *logger.LogEvent) bool {
 			component = fc
 		}
 	}
+	if component == "oauth_retry" && level == "info" {
+		return true
+	}
 	if strings.Contains(component, "http.access") {
 		return s.persistAccessLogs.Load()
 	}

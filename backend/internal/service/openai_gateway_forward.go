@@ -19,6 +19,10 @@ import (
 
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
+	return s.forwardWithOAuthMappedRetry(ctx, c, account, body)
+}
+
+func (s *OpenAIGatewayService) forwardOnce(ctx context.Context, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
 	beginUpstreamResponseModelObservation(c)
 	account = s.withOpenAICodexInstallationID(ctx, account)
 	clearGrokResponsesClientToolMapping(c)
@@ -804,6 +808,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			hasPreviousResponseID,
 		)
 		maxAttempts := 2
+		if oauthMappedRetryActive(c) {
+			maxAttempts = 1
+		}
 		wsAttempts := 0
 		var wsResult *OpenAIForwardResult
 		var wsErr error
@@ -1084,7 +1091,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 
 		// Send request
 		upstreamStart := time.Now()
-		resp, err := s.doOpenAIUpstream(upstreamReq, proxyURL, account)
+		resp, err, oauthRetryExhausted := s.doOAuthResponsesUpstream(c, upstreamReq, proxyURL, account)
 		SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 		if headerGuard != nil && headerGuard.stopHeaderWait() {
 			if resp != nil && resp.Body != nil {
@@ -1125,6 +1132,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			resp.Body = &openAIRequestContextReadCloser{ReadCloser: resp.Body, cleanup: headerGuard.close}
 		}
 
+		if oauthRetryExhausted {
+			return nil, writeOAuthRetryExhausted(c, resp)
+		}
 		// Handle error response
 		if resp.StatusCode >= 400 {
 			respBody := s.readUpstreamErrorBody(resp)

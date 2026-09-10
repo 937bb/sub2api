@@ -96,6 +96,15 @@
       <!-- Alert Events -->
       <OpsAlertEventsCard v-if="opsEnabled && showAlertEvents && !(loading && !hasLoadedOnce)" />
 
+      <OpsOAuthRetryCard
+        v-if="opsEnabled && !(loading && !hasLoadedOnce)"
+        :time-range="timeRange"
+        :custom-start-time="customStartTime"
+        :custom-end-time="customEndTime"
+        :platform-filter="platform"
+        :refresh-token="dashboardRefreshToken"
+      />
+
       <!-- System Logs -->
       <OpsSystemLogTable
         v-if="opsEnabled && !(loading && !hasLoadedOnce)"
@@ -170,6 +179,7 @@ import OpsSwitchRateTrendChart from './components/OpsSwitchRateTrendChart.vue'
 import OpsAlertEventsCard from './components/OpsAlertEventsCard.vue'
 import OpsOpenAITokenStatsCard from './components/OpsOpenAITokenStatsCard.vue'
 import OpsSystemLogTable from './components/OpsSystemLogTable.vue'
+import OpsOAuthRetryCard from './components/OpsOAuthRetryCard.vue'
 import OpsRequestDetailsModal, { type OpsRequestDetailsPreset } from './components/OpsRequestDetailsModal.vue'
 import OpsSettingsDialog from './components/OpsSettingsDialog.vue'
 import OpsAlertRulesCard from './components/OpsAlertRulesCard.vue'

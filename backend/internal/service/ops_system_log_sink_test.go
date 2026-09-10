@@ -69,6 +69,11 @@ func TestOpsSystemLogSink_ShouldIndex(t *testing.T) {
 			want: true,
 		},
 		{
+			name:  "oauth retry info",
+			event: &logger.LogEvent{Level: "info", Fields: map[string]any{"component": "oauth_retry"}},
+			want:  true,
+		},
+		{
 			name:  "plain info",
 			event: &logger.LogEvent{Level: "info", Component: "app"},
 			want:  false,

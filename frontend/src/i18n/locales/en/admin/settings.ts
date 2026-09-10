@@ -1,5 +1,14 @@
 export default {
     settings: {
+      oauthUpstreamRetry: {
+        title: 'OpenAI OAuth HTTP Retry',
+        enabled: 'Automatic retry',
+        maxRetries: 'Additional retries (0-10)',
+        statusCodes: 'Intercepted HTTP status codes',
+        invalidRetries: 'Additional retries must be an integer between 0 and 10.',
+        invalidCodes: 'Enter HTTP status codes from 400 to 599, separated by commas.',
+        reload: 'Reload',
+      },
       title: 'System Settings',
       description: 'Manage registration, email verification, default values, and SMTP settings',
       tabs: {
