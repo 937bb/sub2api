@@ -64,6 +64,11 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	)
 
 	payload := s.buildOpenAIWSCreatePayload(reqBody, account)
+	// Codex carries Lite mode on each response.create frame, not on the
+	// WebSocket upgrade. Preserve the HTTP mode alongside its normalized body.
+	if c != nil && account.IsOpenAI() && isOpenAIResponsesLiteHeader(c.GetHeader(responsesLiteHeader)) {
+		setOpenAIWSClientMetadata(payload, responsesLiteWSMetadataKey, "true")
+	}
 	payloadStrategy, removedKeys := applyOpenAIWSRetryPayloadStrategy(payload, attempt)
 	turnState := ""
 	turnMetadata := ""

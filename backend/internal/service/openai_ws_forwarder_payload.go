@@ -231,28 +231,38 @@ func (s *OpenAIGatewayService) buildOpenAIWSCreatePayload(reqBody map[string]any
 }
 
 func setOpenAIWSTurnMetadata(payload map[string]any, turnMetadata string) {
+	setOpenAIWSClientMetadata(payload, openAIWSTurnMetadataHeader, turnMetadata)
+}
+
+func setOpenAIWSClientMetadata(payload map[string]any, key, value string) {
 	if len(payload) == 0 {
 		return
 	}
-	metadata := strings.TrimSpace(turnMetadata)
+	metadata := strings.TrimSpace(value)
 	if metadata == "" {
 		return
 	}
 
 	switch existing := payload["client_metadata"].(type) {
 	case map[string]any:
-		existing[openAIWSTurnMetadataHeader] = metadata
-		payload["client_metadata"] = existing
+		// Create payloads initially share nested maps with the canonical body.
+		// Keep per-request WS flags out of HTTP fallback and later requests.
+		next := make(map[string]any, len(existing)+1)
+		for k, v := range existing {
+			next[k] = v
+		}
+		next[key] = metadata
+		payload["client_metadata"] = next
 	case map[string]string:
 		next := make(map[string]any, len(existing)+1)
 		for k, v := range existing {
 			next[k] = v
 		}
-		next[openAIWSTurnMetadataHeader] = metadata
+		next[key] = metadata
 		payload["client_metadata"] = next
 	default:
 		payload["client_metadata"] = map[string]any{
-			openAIWSTurnMetadataHeader: metadata,
+			key: metadata,
 		}
 	}
 }
