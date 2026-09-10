@@ -57,6 +57,50 @@ func TestOpsTerminalCancellationAfterHiddenRetry(t *testing.T) {
 	}
 }
 
+func TestOpsWire499UsesTerminalMarkerWithoutReplacingExplicitError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, ignore := range []bool{false, true} {
+		for _, explicit := range []bool{false, true} {
+			t.Run(fmt.Sprintf("ignore_%v_explicit_%v", ignore, explicit), func(t *testing.T) {
+				setupOpsErrorLogTestQueue(t, 4)
+				ops := service.NewOpsService(nil, &terminalOutcomeSettingsRepo{ignoreCanceled: ignore}, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+				router := gin.New()
+				router.Use(OpsErrorLoggerMiddleware(ops))
+				router.POST("/v1/responses", func(c *gin.Context) {
+					c.Set(service.OpsUpstreamErrorsKey, []*service.OpsUpstreamErrorEvent{{UpstreamStatusCode: 502, Message: "hidden retry failure"}})
+					ctx, cancel := context.WithCancel(c.Request.Context())
+					cancel()
+					c.Request = c.Request.WithContext(ctx)
+					service.MarkOpenAIForwardTerminalFailure(c, &service.OpenAIForwardResult{OpenAIWSMode: true, ClientDisconnect: true}, context.Canceled)
+					if explicit {
+						c.Data(499, "application/json", []byte(`{"error":{"type":"upstream_error","message":"explicit upstream failure"}}`))
+					} else {
+						c.Status(499)
+						c.Writer.WriteHeaderNow()
+					}
+				})
+				rec := httptest.NewRecorder()
+				router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/responses", nil))
+				require.Equal(t, 499, rec.Code)
+				if ignore && !explicit {
+					require.Zero(t, OpsErrorLogQueueLength())
+					return
+				}
+				require.EqualValues(t, 1, OpsErrorLogQueueLength())
+				entry := (<-opsErrorLogQueue).entry
+				require.Equal(t, 499, entry.StatusCode)
+				if explicit {
+					require.Equal(t, "explicit upstream failure", entry.ErrorMessage)
+					require.Equal(t, "provider", entry.ErrorOwner)
+				} else {
+					require.Contains(t, entry.ErrorMessage, "context canceled")
+					require.Equal(t, "client", entry.ErrorOwner)
+				}
+			})
+		}
+	}
+}
+
 func TestSelectionChannelRestrictionIsLocalModelError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())

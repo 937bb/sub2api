@@ -182,7 +182,7 @@ func TestForwardWSMappedRetryRespectsSettingsAndCancellation(t *testing.T) {
 		cancel   bool
 	}{
 		{"disabled", OAuthRetrySettings{Enabled: false, MaxRetries: 2, StatusCodes: []int{502}}, false},
-		{"unmatched", OAuthRetrySettings{Enabled: true, MaxRetries: 2, StatusCodes: []int{503}}, false},
+		{"unmatched", OAuthRetrySettings{Enabled: true, MaxRetries: 2, StatusCodes: []int{504}}, false},
 		{"cancelled", OAuthRetrySettings{Enabled: true, MaxRetries: 2, StatusCodes: []int{502}}, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

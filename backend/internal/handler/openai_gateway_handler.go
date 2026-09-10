@@ -833,7 +833,9 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 				// end with a typed terminal event so strict clients do not report an
 				// unexplained disconnect.
 				if !openAIForwardErrorAlreadyCommunicated(c, writerSizeBeforeForward, err) {
-					h.ensureForwardErrorResponse(c, streamStarted)
+					if !h.ensureOpenAIStreamReadErrorResponse(c, err, streamStarted) {
+						h.ensureForwardErrorResponse(c, streamStarted)
+					}
 				}
 			} else {
 				var failoverErr *service.UpstreamFailoverError
@@ -923,7 +925,10 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 				upstreamErrorAlreadyCommunicated := openAIForwardErrorAlreadyCommunicated(c, writerSizeBeforeForward, err)
 				wroteFallback := false
 				if !upstreamErrorAlreadyCommunicated {
-					wroteFallback = h.ensureForwardErrorResponse(c, streamStarted)
+					wroteFallback = h.ensureOpenAIStreamReadErrorResponse(c, err, streamStarted)
+					if !wroteFallback {
+						wroteFallback = h.ensureForwardErrorResponse(c, streamStarted)
+					}
 				}
 				fields := []zap.Field{
 					zap.Int64("account_id", account.ID),
@@ -1627,14 +1632,48 @@ func (h *OpenAIGatewayHandler) validateFunctionCallOutputRequest(c *gin.Context,
 }
 
 func normalizeCodexDelegationBootstrap(body []byte) ([]byte, bool) {
-	// 已有任务通过 send_message_to_thread 唤醒时会携带 previous_response_id；
-	// 完整历史回放还会带有已配对的调用项。delegation 仍是客户端注入的用户输入，
-	// 不属于这些历史调用的结果，因此允许它与可明确配对的历史上下文共存。
+	// Only the exceptional delegation envelope needs full duplicate-key and
+	// context validation. Escaped Unicode may encode any part of its marker.
+	if !bytes.Contains(body, []byte("codex_delegation")) && !bytes.Contains(body, []byte(`\u`)) {
+		return body, false
+	}
+	if !hasCodexBootstrapTool(body, "create_thread", "send_message_to_thread") {
+		return body, false
+	}
+	// Delegation remains client-injected input even when an existing thread
+	// includes previous_response_id and paired historical calls. Preserve those
+	// unambiguous anchors while normalizing only the delegation envelope.
 	return normalizeCodexCallOutputBootstrap(body, isCodexDelegationCandidate, true)
 }
 
 func normalizeCodexAutomationBootstrap(body []byte) ([]byte, bool) {
+	// Ordinary requests, including large image/history payloads, cannot be an
+	// automation bootstrap without one of these required envelope markers.
+	if !bytes.Contains(body, []byte("Automation ID:")) &&
+		!bytes.Contains(body, []byte("automation_id")) && !bytes.Contains(body, []byte(`\u`)) {
+		return body, false
+	}
+	if !hasCodexBootstrapTool(body, "automation_update") {
+		return body, false
+	}
 	return normalizeCodexCallOutputBootstrap(body, isCodexAutomationCandidate, false)
+}
+
+// Project only the small tool names, not the full input or output values.
+// GJSON decodes escaped property names and values; any candidate still goes
+// through the original complete validation before a payload can be changed.
+func hasCodexBootstrapTool(body []byte, names ...string) bool {
+	found := false
+	gjson.GetBytes(body, `input.#(type=="function_call_output")#.name`).ForEach(func(_, value gjson.Result) bool {
+		for _, name := range names {
+			if value.Type == gjson.String && value.String() == name {
+				found = true
+				return false
+			}
+		}
+		return true
+	})
+	return found
 }
 
 func normalizeCodexCallOutputBootstrap(body []byte, isCandidate func(map[string]any) bool, allowHistoricalContext bool) ([]byte, bool) {
@@ -3543,6 +3582,9 @@ func (h *OpenAIGatewayHandler) handleStreamingAwareErrorWithCode(
 	if service.StopOpenAICompactSSEKeepaliveCommitted(c) {
 		streamStarted = true
 	}
+	if service.OpenAIStreamHeartbeatPresent(c) {
+		streamStarted = true
+	}
 	if streamStarted {
 		if countTowardsSLA {
 			service.MarkOpsStreamFailure(c, errType, code, message, status)
@@ -3591,6 +3633,10 @@ func (h *OpenAIGatewayHandler) handleStreamingAwareErrorWithCode(
 func (h *OpenAIGatewayHandler) ensureOpenAIStreamReadErrorResponse(c *gin.Context, err error, streamStarted bool) bool {
 	code, message, ok := service.OpenAIUpstreamStreamReadErrorDetails(err)
 	if !ok || c == nil || c.Writer == nil || service.IsResponseCommitted(c) {
+		return false
+	}
+	if c.Request != nil && errors.Is(c.Request.Context().Err(), context.Canceled) {
+		failoverClientGone(c)
 		return false
 	}
 	if c.Writer.Written() {
@@ -3727,7 +3773,7 @@ func openAIFirstOutputFailoverExhausted(failoverErr *service.UpstreamFailoverErr
 func (h *OpenAIGatewayHandler) errorResponse(c *gin.Context, status int, errType, message string) {
 	// body-signal compact 心跳可能已把响应头提交为 200：JSON 错误体会与已
 	// 提交的 SSE 流交错，必须降级为 response.failed 终止事件（#3887）。
-	if service.StopOpenAICompactSSEKeepaliveCommitted(c) {
+	if service.StopOpenAICompactSSEKeepaliveCommitted(c) || service.OpenAIStreamHeartbeatPresent(c) {
 		service.MarkOpsStreamError(c, errType, message, status)
 		if writeResponsesFailedSSE(c, errType, "", message) {
 			return

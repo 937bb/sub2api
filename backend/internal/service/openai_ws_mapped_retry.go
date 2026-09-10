@@ -64,7 +64,7 @@ func (s *OpenAIGatewayService) newOpenAIWSMappedRetryError(
 ) *UpstreamFailoverError {
 	if s == nil || account == nil || account.Platform != PlatformOpenAI || account.Type != AccountTypeOAuth ||
 		c == nil || c.Request == nil || c.Writer == nil || !oauthMappedRetryActive(c) || outputObserved ||
-		c.Writer.Written() || IsResponseCommitted(c) || (ctx != nil && ctx.Err() != nil) || c.Request.Context().Err() != nil ||
+		OpenAIStreamHasCommittedOutput(c) || IsResponseCommitted(c) || (ctx != nil && ctx.Err() != nil) || c.Request.Context().Err() != nil ||
 		GetOpsCyberPolicy(c) != nil || c.GetBool(OpsClientBusinessLimitedKey) {
 		return nil
 	}

@@ -53,7 +53,7 @@ func openAIWSMappedTransportCanReconnect(reason string) bool {
 // Reserve the last available attempt for HTTP. If the budget is already empty,
 // retain the existing single protocol fallback; forceHTTP prevents repetition.
 func (s *OpenAIGatewayService) prepareOpenAIWSMappedTransportRetry(ctx context.Context, c *gin.Context, account *Account, reason string, wsErr error) (error, bool) {
-	if account == nil || c == nil || c.Request == nil || c.Writer == nil || c.Writer.Written() ||
+	if account == nil || c == nil || c.Request == nil || c.Writer == nil || OpenAIStreamHasCommittedOutput(c) ||
 		IsResponseCommitted(c) || (ctx != nil && ctx.Err() != nil) || c.Request.Context().Err() != nil ||
 		GetOpsCyberPolicy(c) != nil || c.GetBool(OpsClientBusinessLimitedKey) {
 		return nil, false

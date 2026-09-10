@@ -264,7 +264,16 @@ func (s *SettingService) GetAntigravityUserAgentVersion(ctx context.Context) str
 // GetOpenAICodexUserAgent 返回 OpenAI Codex 上游请求使用的 User-Agent。
 // 后台设置优先；为空时回退到内置默认值。
 func (s *SettingService) GetOpenAICodexUserAgent(ctx context.Context) string {
-	fallback := DefaultOpenAICodexUserAgent
+	if configured := s.GetOpenAICodexUserAgentOverride(ctx); configured != "" {
+		return configured
+	}
+	return DefaultOpenAICodexUserAgent
+}
+
+// GetOpenAICodexUserAgentOverride returns only the explicit panel setting.
+// Cache the raw value, including an empty override, without a hot-path DB read.
+func (s *SettingService) GetOpenAICodexUserAgentOverride(ctx context.Context) string {
+	const fallback = ""
 	if s == nil || s.settingRepo == nil {
 		return fallback
 	}
@@ -295,9 +304,6 @@ func (s *SettingService) GetOpenAICodexUserAgent(ctx context.Context) string {
 			return fallback, nil
 		}
 		ua := strings.TrimSpace(value)
-		if ua == "" {
-			ua = fallback
-		}
 		s.openAICodexUACache.Store(&cachedOpenAICodexUserAgent{
 			value:     ua,
 			expiresAt: time.Now().Add(openAICodexUserAgentCacheTTL).UnixNano(),

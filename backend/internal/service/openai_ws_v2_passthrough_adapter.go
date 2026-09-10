@@ -885,6 +885,8 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	if buildHdrErr != nil {
 		return fmt.Errorf("build ws headers: %w", buildHdrErr)
 	}
+	applyCodexNormalizedRequestIdentityHeaders(c, account, headers, firstClientMessage)
+	applyStagedCodexFingerprintHeaders(c, account, headers)
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
 		proxyURL = account.Proxy.URL()

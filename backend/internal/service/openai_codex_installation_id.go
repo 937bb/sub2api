@@ -61,12 +61,10 @@ func (s *OpenAIGatewayService) withOpenAICodexInstallationID(ctx context.Context
 	if existing, ok := canonicalOpenAICodexInstallationID(account.GetOpenAIDeviceID()); ok {
 		return cloneAccountWithOpenAICodexInstallationID(account, existing)
 	}
-	if mode := account.GetCodexFingerprintMode(); mode != codexFingerprintOff {
-		if _, ok := codexFingerprintSeed(account.Extra); ok {
-			// Fingerprint convergence derives installation_id from its managed
-			// seed. Do not inject a request-local device ID that would override it.
-			return account
-		}
+	if seed, ok := codexFingerprintSeed(account.Extra); ok {
+		// Use the same stable ID even when session convergence is disabled by
+		// the runtime setting. No token, account row or managed seed is changed.
+		return cloneAccountWithOpenAICodexInstallationID(account, resolveConvergedInstallationID(account, seed))
 	}
 
 	installationID := uuid.NewString()

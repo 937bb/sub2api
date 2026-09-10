@@ -64,6 +64,11 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	)
 
 	payload := s.buildOpenAIWSCreatePayload(reqBody, account)
+	// Codex carries Lite mode on each response.create frame, not on the
+	// WebSocket upgrade. Preserve the HTTP mode alongside its normalized body.
+	if c != nil && account.IsOpenAI() && isOpenAIResponsesLiteHeader(c.GetHeader(responsesLiteHeader)) {
+		setOpenAIWSClientMetadata(payload, responsesLiteWSMetadataKey, "true")
+	}
 	payloadStrategy, removedKeys := applyOpenAIWSRetryPayloadStrategy(payload, attempt)
 	turnState := ""
 	turnMetadata := ""
@@ -71,7 +76,10 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		turnState = strings.TrimSpace(c.GetHeader(openAIWSTurnStateHeader))
 		turnMetadata = strings.TrimSpace(c.GetHeader(openAIWSTurnMetadataHeader))
 	}
-	setOpenAIWSTurnMetadata(payload, turnMetadata)
+	scopedTurnMetadata := map[string]any{openAIWSTurnMetadataHeader: turnMetadata}
+	applyCodexAccountIdentityEmbeddedMetadata(scopedTurnMetadata, codexAccountIdentitySource(c, account), getAPIKeyIDFromContext(c))
+	scopedMetadata, _ := scopedTurnMetadata[openAIWSTurnMetadataHeader].(string)
+	setOpenAIWSTurnMetadata(payload, scopedMetadata)
 	applyStagedCodexFingerprintClientMetadata(c, account, payload)
 	previousResponseID := openAIWSPayloadString(payload, "previous_response_id")
 	previousResponseIDKind := ClassifyOpenAIPreviousResponseIDKind(previousResponseID)
@@ -178,6 +186,8 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	if buildHdrErr != nil {
 		return nil, fmt.Errorf("build ws headers: %w", buildHdrErr)
 	}
+	applyCodexNormalizedRequestIdentityHeadersMap(c, account, wsHeaders, payload)
+	applyStagedCodexFingerprintHeaders(c, account, wsHeaders)
 	logOpenAIWSModeDebug(
 		"acquire_start account_id=%d account_type=%s transport=%s preferred_conn_id=%s has_previous_response_id=%v session_hash=%s has_turn_state=%v turn_state_len=%d has_turn_metadata=%v turn_metadata_len=%d store_disabled=%v store_disabled_conn_mode=%s retry_last_reason=%s force_new_conn=%v header_user_agent=%s header_openai_beta=%s header_originator=%s header_accept_language=%s header_session_id=%s header_conversation_id=%s session_id_source=%s conversation_id_source=%s has_prompt_cache_key=%v has_chatgpt_account_id=%v has_authorization=%v has_session_id=%v has_conversation_id=%v proxy_enabled=%v",
 		account.ID,
@@ -527,6 +537,38 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 			)
 		}
 	}
+	// A WS message can take minutes to arrive during reasoning. Commit only an
+	// SSE comment during that gap; it is transport activity, not model output.
+	// In particular this must not flush buffered lifecycle events or set
+	// wroteDownstream/mappedRetryOutputObserved and disable safe retry/failover.
+	var heartbeatTicker *time.Ticker
+	var heartbeatTicks <-chan time.Time
+	heartbeatInterval := time.Duration(0)
+	if reqStream && s.cfg != nil && s.cfg.Gateway.StreamKeepaliveInterval > 0 {
+		heartbeatInterval = time.Duration(s.cfg.Gateway.StreamKeepaliveInterval) * time.Second
+		heartbeatTicker = time.NewTicker(heartbeatInterval)
+		heartbeatTicks = heartbeatTicker.C
+		defer heartbeatTicker.Stop()
+	}
+	emitHeartbeat := func() bool {
+		markClientRequestCanceled()
+		if clientDisconnected {
+			return false
+		}
+		if flusher == nil {
+			return true
+		}
+		n, writeErr := c.Writer.Write([]byte(":\n\n"))
+		recordOpenAIStreamHeartbeatBytes(c, n)
+		if writeErr != nil {
+			markClientDisconnected("downstream_heartbeat_write_error")
+			return false
+		}
+		flusher.Flush()
+		pendingFlushEvents = 0
+		lastFlushAt = time.Now()
+		return true
+	}
 
 	// Keep per-read timeouts unchanged for connected clients. Once a client
 	// disconnects, use the same timeout as a bounded total drain budget.
@@ -553,7 +595,13 @@ readLoop:
 					currentReadTimeout = remaining
 				}
 			}
-			message, readErr = lease.ReadMessageWithContextTimeout(upstreamReadCtx, currentReadTimeout)
+			currentHeartbeatTicks := heartbeatTicks
+			if clientDisconnected {
+				// A previously started usage drain keeps its existing bounded
+				// deadline and never tries to write another downstream heartbeat.
+				currentHeartbeatTicks = nil
+			}
+			message, readErr = readOpenAIWSMessageWithHeartbeat(upstreamReadCtx, lease, currentReadTimeout, currentHeartbeatTicks, emitHeartbeat)
 			if readErr == nil {
 				if documents, repaired := splitOpenAIConcatenatedJSONDocuments(message); repaired {
 					logOpenAIWSModeInfo(
@@ -584,7 +632,7 @@ readLoop:
 				wroteDownstream,
 			)
 			if !wroteDownstream {
-				if oauthMappedRetryActive(c) && mappedRetryOutputObserved {
+				if mappedRetryOutputObserved {
 					return resultWithUsage(), errors.New("upstream websocket returned malformed Responses event JSON after observed output")
 				}
 				return nil, wrapOpenAIWSFallback("invalid_event_json", errors.New("upstream websocket returned malformed Responses event JSON"))
@@ -626,13 +674,13 @@ readLoop:
 				break
 			}
 			if !wroteDownstream {
-				if oauthMappedRetryActive(c) && mappedRetryOutputObserved {
-					return resultWithUsage(), fmt.Errorf("openai ws read event after observed output: %w", readErr)
+				if mappedRetryOutputObserved {
+					return resultWithUsage(), newOpenAIUpstreamWSStreamReadError(readErr)
 				}
 				return nil, wrapOpenAIWSFallback(fallbackReason, readErr)
 			}
 			setOpsUpstreamError(c, 0, sanitizeUpstreamErrorMessage(readErr.Error()), "")
-			return nil, fmt.Errorf("openai ws read event: %w", readErr)
+			return resultWithUsage(), newOpenAIUpstreamWSStreamReadError(readErr)
 		}
 		if normalized, changed := normalizeCompletedImageGenerationStatus(message); changed {
 			message = normalized
@@ -693,7 +741,9 @@ readLoop:
 		if openAIWSMessageShouldParseUsage(eventType, message) {
 			parseOpenAIWSResponseUsageFromCompletedEvent(message, usage)
 		}
-		if !mappedRetryOutputObserved && oauthMappedRetryActive(c) {
+		// Both mapped retries and capacity failover must stop once upstream
+		// work exists, including output buffered for a non-streaming client.
+		if !mappedRetryOutputObserved {
 			mappedRetryOutputObserved = openAIWSMappedRetryOutputObserved(eventType, message) || openAIUsageHasTokens(usage)
 		}
 		imageCounter.AddSSEData(message)
@@ -732,6 +782,23 @@ readLoop:
 				// nor error frames may escape, and the failed WS cannot be reused.
 				lease.MarkBroken()
 				return nil, retryErr
+			}
+			// Let the mapped retry owner consume its configured budget first.
+			// Otherwise match HTTP/SSE capacity recovery before any output or
+			// usage is observed, even if no bytes have reached the client yet.
+			// A plain WS error bypasses the handler's bounded failover loop;
+			// response.failed must not be treated as a completed request either.
+			// Retire the socket because another failure frame may follow.
+			if !wroteDownstream && !clientDisconnected && !mappedRetryOutputObserved &&
+				(ctx == nil || ctx.Err() == nil) &&
+				(c == nil || c.Request == nil || c.Request.Context().Err() == nil) &&
+				account.IsOpenAIOAuthLike() &&
+				isOpenAIRequestScopedCapacityShed("", message) {
+				lease.MarkBroken()
+				_, _, errorMessage := parseOpenAIWSErrorEventFields(message)
+				return nil, s.newOpenAIStreamFailoverError(
+					c, account, false, responseID, message, errorMessage, lease.HandshakeHeaders(),
+				)
 			}
 		}
 
@@ -784,7 +851,7 @@ readLoop:
 			}
 			// error 事件后连接不再可复用，避免回池后污染下一请求。
 			lease.MarkBroken()
-			if !wroteDownstream && canFallback && (!oauthMappedRetryActive(c) || !mappedRetryOutputObserved) {
+			if !wroteDownstream && canFallback && !mappedRetryOutputObserved {
 				return nil, wrapOpenAIWSFallback(fallbackReason, errors.New(errMsg))
 			}
 			statusCode := openAIWSErrorHTTPStatusFromRaw(errCodeRaw, errTypeRaw)
@@ -838,7 +905,7 @@ readLoop:
 				})
 			}
 			err := fmt.Errorf("openai ws error event: %s", errMsg)
-			if oauthMappedRetryActive(c) && mappedRetryOutputObserved {
+			if mappedRetryOutputObserved {
 				// A non-streaming error response may be staged by the retry writer.
 				// Preserve observed work so the owner cannot replay it as plain 502.
 				return resultWithUsage(), err
@@ -907,7 +974,7 @@ readLoop:
 				wroteDownstream,
 			)
 			if !wroteDownstream {
-				if oauthMappedRetryActive(c) && mappedRetryOutputObserved {
+				if mappedRetryOutputObserved {
 					return resultWithUsage(), errors.New("ws finished without final response after observed output")
 				}
 				return nil, wrapOpenAIWSFallback("missing_final_response", errors.New("no terminal response payload"))

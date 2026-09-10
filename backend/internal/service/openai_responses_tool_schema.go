@@ -92,10 +92,11 @@ func sanitizeOpenAIResponsesToolParameterTypes(body []byte) ([]byte, bool, error
 }
 
 func openAIResponsesBodyMayContainRegexLookaround(body []byte) bool {
-	// An opening parenthesis may be literal or encoded as JSON's canonical
-	// Unicode escape. Other lookaround characters may themselves be escaped, so
-	// the full decoded pattern is checked only after scoped parsing.
-	return bytes.Contains(body, []byte("(")) || bytes.Contains(body, []byte(`\u0028`))
+	// Every lookaround starts with "(?". Either character may be Unicode-
+	// escaped; unrelated Unicode and ordinary parentheses need no extra pass.
+	return bytes.Contains(body, []byte("(?")) || bytes.Contains(body, []byte(`\u0028`)) ||
+		(bytes.Contains(body, []byte("(")) &&
+			(bytes.Contains(body, []byte(`\u003f`)) || bytes.Contains(body, []byte(`\u003F`))))
 }
 
 func hasRegexLookaround(pattern string) bool {
