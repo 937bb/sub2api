@@ -801,9 +801,6 @@ func (s *OpenAIGatewayService) forwardOnce(ctx context.Context, c *gin.Context, 
 			hasPreviousResponseID,
 		)
 		maxAttempts := 2
-		if oauthMappedRetryActive(c) {
-			maxAttempts = 1
-		}
 		wsAttempts := 0
 		var wsResult *OpenAIForwardResult
 		var wsErr error
@@ -929,7 +926,8 @@ func (s *OpenAIGatewayService) forwardOnce(ctx context.Context, c *gin.Context, 
 			if reason == "invalid_encrypted_content" && recoverInvalidEncryptedContent(attempt) {
 				continue
 			}
-			if retryable && attempt < maxAttempts {
+			// Keep protocol-specific payload recovery above independent of the mapped retry budget.
+			if retryable && attempt < maxAttempts && !oauthMappedRetryActive(c) {
 				backoff := time.Duration(0)
 				if retryBudget > 0 && time.Since(retryStartedAt)+backoff > retryBudget {
 					s.recordOpenAIWSRetryExhausted()
