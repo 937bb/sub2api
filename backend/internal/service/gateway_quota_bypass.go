@@ -43,30 +43,59 @@ const (
 // upstream quota stage without an extra synthetic pair. Compaction requests
 // cannot be modified because compaction_trigger must remain the final item.
 func ClassifyOpenAIQuotaBypassRequest(body []byte) OpenAIQuotaBypassRequestMode {
-	if !gjson.ValidBytes(body) || HasCompactionTriggerInInput(body) {
-		return OpenAIQuotaBypassRequestUnavailable
+	mode, _ := classifyOpenAIQuotaBypassRequest(body)
+	return mode
+}
+
+type openAIQuotaBypassInput struct {
+	value         gjson.Result
+	count         int
+	lastType      string
+	hasCompaction bool
+}
+
+// inspectOpenAIQuotaBypassInput borrows an immutable view for this call only.
+// Iterating the array avoids both GetBytes' full Raw copy and Array's slice.
+func inspectOpenAIQuotaBypassInput(body []byte) openAIQuotaBypassInput {
+	input := openAIQuotaBypassInput{value: gjson.Get(openAIWSPayloadStringView(body), "input")}
+	if input.value.IsArray() {
+		input.value.ForEach(func(_, item gjson.Result) bool {
+			input.count++
+			input.lastType = item.Get("type").String()
+			input.hasCompaction = input.hasCompaction || input.lastType == "compaction_trigger"
+			return true
+		})
+	}
+	return input
+}
+
+func classifyOpenAIQuotaBypassRequest(body []byte) (OpenAIQuotaBypassRequestMode, openAIQuotaBypassInput) {
+	if !gjson.ValidBytes(body) {
+		return OpenAIQuotaBypassRequestUnavailable, openAIQuotaBypassInput{}
+	}
+	input := inspectOpenAIQuotaBypassInput(body)
+	if input.hasCompaction {
+		return OpenAIQuotaBypassRequestUnavailable, input
 	}
 	// Responses WebSocket control and conversation-item frames are not create
 	// requests and must remain byte-for-byte unchanged. HTTP request bodies do
 	// not carry a top-level event type, so an empty type remains eligible.
 	if eventType := strings.TrimSpace(gjson.GetBytes(body, "type").String()); eventType != "" && eventType != "response.create" {
-		return OpenAIQuotaBypassRequestUnavailable
+		return OpenAIQuotaBypassRequestUnavailable, input
 	}
-	input := gjson.GetBytes(body, "input")
-	if !input.Exists() || input.Type == gjson.Null {
-		return OpenAIQuotaBypassRequestInjectable
+	if !input.value.Exists() || input.value.Type == gjson.Null {
+		return OpenAIQuotaBypassRequestInjectable, input
 	}
-	if input.Type == gjson.String {
-		return OpenAIQuotaBypassRequestInjectable
+	if input.value.Type == gjson.String {
+		return OpenAIQuotaBypassRequestInjectable, input
 	}
-	if !input.IsArray() {
-		return OpenAIQuotaBypassRequestUnavailable
+	if !input.value.IsArray() {
+		return OpenAIQuotaBypassRequestUnavailable, input
 	}
-	items := input.Array()
-	if len(items) > 0 && isOpenAIQuotaBypassToolOutputType(items[len(items)-1].Get("type").String()) {
-		return OpenAIQuotaBypassRequestNativeToolOutput
+	if input.count > 0 && isOpenAIQuotaBypassToolOutputType(input.lastType) {
+		return OpenAIQuotaBypassRequestNativeToolOutput, input
 	}
-	return OpenAIQuotaBypassRequestInjectable
+	return OpenAIQuotaBypassRequestInjectable, input
 }
 
 // WithOpenAIQuotaBypassRequestBody carries request capability into account
@@ -256,7 +285,8 @@ func applyOpenAIQuotaBypassForRequest(c *gin.Context, account *Account, body []b
 	if c != nil && c.Request != nil && openAIQuotaBypassRequestUnavailable(c.Request.Context()) {
 		return body
 	}
-	switch ClassifyOpenAIQuotaBypassRequest(body) {
+	mode, input := classifyOpenAIQuotaBypassRequest(body)
+	switch mode {
 	case OpenAIQuotaBypassRequestUnavailable:
 		return body
 	case OpenAIQuotaBypassRequestNativeToolOutput:
@@ -270,7 +300,8 @@ func applyOpenAIQuotaBypassForRequest(c *gin.Context, account *Account, body []b
 	// Injection is the complete quota-bypass behavior. Never propagate this
 	// decision into response handling: upstream 401/403/429 and all other
 	// failures must follow the same account-state path as an ordinary request.
-	if injected, ok := InjectOpenAIQuotaBypassForRequest(c, body, pairs); ok {
+	if injected, ok := injectFunctionCallOutputSuffixN(body, 1, input); ok {
+		markOpenAIQuotaBypassApplied(c, 1)
 		return injected
 	}
 	return body
@@ -280,7 +311,8 @@ func applyOpenAIWSQuotaBypass(payload []byte, hooks *OpenAIWSIngressHooks) []byt
 	if hooks == nil || !hooks.QuotaBypassEnabled {
 		return payload
 	}
-	switch ClassifyOpenAIQuotaBypassRequest(payload) {
+	mode, input := classifyOpenAIQuotaBypassRequest(payload)
+	switch mode {
 	case OpenAIQuotaBypassRequestUnavailable:
 		return payload
 	case OpenAIQuotaBypassRequestNativeToolOutput:
@@ -292,7 +324,7 @@ func applyOpenAIWSQuotaBypass(payload []byte, hooks *OpenAIWSIngressHooks) []byt
 		}
 		return payload
 	}
-	injected, applied := InjectFunctionCallOutputSuffix(payload)
+	injected, applied := injectFunctionCallOutputSuffixN(payload, 1, input)
 	if applied {
 		if hooks.OnQuotaBypassApplied != nil {
 			hooks.OnQuotaBypassApplied()
@@ -477,11 +509,15 @@ func InjectFunctionCallOutputSuffix(body []byte) ([]byte, bool) {
 // InjectFunctionCallOutputSuffixN is retained for deterministic payload tests.
 // Production always passes one; pairs is clamped to the test helper's bounds.
 func InjectFunctionCallOutputSuffixN(body []byte, pairs int) ([]byte, bool) {
+	return injectFunctionCallOutputSuffixN(body, pairs, inspectOpenAIQuotaBypassInput(body))
+}
+
+func injectFunctionCallOutputSuffixN(body []byte, pairs int, input openAIQuotaBypassInput) ([]byte, bool) {
 	// Remote compaction has a strict terminal-item contract: compaction_trigger
 	// must remain the final input item. Synthetic tool turns also depend on their
 	// custom_tool_call_output being the suffix, so the two protocols cannot safely
 	// share one request. Keep compact payloads byte-for-byte unchanged.
-	if HasCompactionTriggerInInput(body) {
+	if input.hasCompaction {
 		return body, false
 	}
 	if pairs < 1 {
@@ -490,14 +526,15 @@ func InjectFunctionCallOutputSuffixN(body []byte, pairs int) ([]byte, bool) {
 	if pairs > quotaBypassMaxInjectPairs {
 		pairs = quotaBypassMaxInjectPairs
 	}
-	inputArr := gjson.GetBytes(body, "input")
+	inputArr := input.value
 	if !inputArr.Exists() || inputArr.Type == gjson.Null {
 		var err error
 		body, err = sjson.SetRawBytes(body, "input", []byte("[]"))
 		if err != nil {
 			return body, false
 		}
-		inputArr = gjson.GetBytes(body, "input")
+		input = inspectOpenAIQuotaBypassInput(body)
+		inputArr = input.value
 	}
 	if inputArr.Type == gjson.String {
 		message, err := json.Marshal([]map[string]any{{
@@ -515,19 +552,26 @@ func InjectFunctionCallOutputSuffixN(body []byte, pairs int) ([]byte, bool) {
 		if err != nil {
 			return body, false
 		}
-		inputArr = gjson.GetBytes(body, "input")
+		input = inspectOpenAIQuotaBypassInput(body)
+		inputArr = input.value
 	}
 	if !inputArr.IsArray() {
 		return body, false
 	}
-	items := inputArr.Array()
 	// A real function or custom-tool output already passes the same upstream
 	// quota stage, so adding another synthetic call would only perturb a valid
 	// continuation and can interfere with the client's next tool invocation.
-	if len(items) > 0 && isOpenAIQuotaBypassToolOutputType(items[len(items)-1].Get("type").String()) {
+	if input.count > 0 && isOpenAIQuotaBypassToolOutputType(input.lastType) {
 		return body, false
 	}
-	idx := len(items)
+	closeIndex := inputArr.Index + len(inputArr.Raw) - 1
+	if inputArr.Index <= 0 || closeIndex >= len(body) || closeIndex <= inputArr.Index || body[closeIndex] != ']' {
+		return body, false
+	}
+	// Build the small suffix separately, then copy the original body once.
+	// Repeated SetRawBytes calls used to scan and copy the complete input twice
+	// per pair. Existing JSON values and numeric spellings remain untouched.
+	suffix := make([]byte, 0, pairs*384)
 	for i := 0; i < pairs; i++ {
 		callID := newQuotaBypassCallID()
 
@@ -552,17 +596,18 @@ func InjectFunctionCallOutputSuffixN(body []byte, pairs int) ([]byte, bool) {
 			return body, false
 		}
 
-		body, err = sjson.SetRawBytes(body, "input."+strconv.Itoa(idx), call)
-		if err != nil {
-			return body, false
+		if input.count > 0 || i > 0 {
+			suffix = append(suffix, ',')
 		}
-		body, err = sjson.SetRawBytes(body, "input."+strconv.Itoa(idx+1), output)
-		if err != nil {
-			return body, false
-		}
-		idx += 2
+		suffix = append(suffix, call...)
+		suffix = append(suffix, ',')
+		suffix = append(suffix, output...)
 	}
-	return body, true
+	injected := make([]byte, 0, len(body)+len(suffix))
+	injected = append(injected, body[:closeIndex]...)
+	injected = append(injected, suffix...)
+	injected = append(injected, body[closeIndex:]...)
+	return injected, true
 }
 
 // quotaBypassMaxInjectPairs bounds the diagnostic multi-pair helper. Production

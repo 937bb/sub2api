@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"net/http"
 	"strings"
 
@@ -166,7 +167,12 @@ func HasCompactionTriggerInInput(body []byte) bool {
 	if len(body) == 0 {
 		return false
 	}
-	input := gjson.GetBytes(body, "input")
+	// A literal or Unicode-escaped marker is necessary. The common path can
+	// avoid copying and parsing an entire image or conversation history.
+	if !bytes.Contains(body, []byte("compaction_trigger")) && !bytes.Contains(body, []byte(`\u`)) {
+		return false
+	}
+	input := gjson.Get(openAIWSPayloadStringView(body), "input")
 	if !input.IsArray() {
 		return false
 	}

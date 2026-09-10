@@ -1,11 +1,13 @@
 package service
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
+	"github.com/tidwall/gjson"
 )
 
 // normalizeOpenAIResponsesLegacyIngress accepts the Chat Completions-shaped
@@ -13,6 +15,16 @@ import (
 // always authoritative because this path has no separate full-replay attempt.
 func normalizeOpenAIResponsesLegacyIngress(body []byte) ([]byte, bool, error) {
 	if len(body) == 0 {
+		return body, false, nil
+	}
+	// Decode only when a legacy top-level field might exist. Keep validation
+	// and the existing decoder errors for malformed or non-object payloads.
+	trimmed := bytes.TrimSpace(body)
+	mayContainLegacy := bytes.Contains(body, []byte(`"messages"`)) ||
+		bytes.Contains(body, []byte(`"prompt"`)) ||
+		bytes.Contains(body, []byte(`"commands"`)) || bytes.Contains(body, []byte(`\u`))
+	if len(trimmed) > 0 && trimmed[0] == '{' &&
+		(!mayContainLegacy || !openAIResponsesHasLegacyIngressFields(body)) && json.Valid(body) {
 		return body, false, nil
 	}
 
@@ -71,6 +83,21 @@ func normalizeOpenAIResponsesLegacyIngress(body []byte) ([]byte, bool, error) {
 		return body, false, fmt.Errorf("serialize legacy Responses ingress: %w", err)
 	}
 	return normalized, true, nil
+}
+
+func openAIResponsesHasLegacyIngressFields(body []byte) bool {
+	found := false
+	// The borrowed input and its fields never escape this read-only inspection.
+	gjson.Parse(openAIWSPayloadStringView(body)).ForEach(func(key, value gjson.Result) bool {
+		switch key.String() {
+		case "messages", "commands":
+			found = true
+		case "prompt":
+			found = value.Type == gjson.String
+		}
+		return !found
+	})
+	return found
 }
 
 type convertedLegacyResponsesMessages struct {
