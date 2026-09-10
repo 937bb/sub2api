@@ -712,7 +712,7 @@ readLoop:
 			s.handleOpenAIWSErrorEventTransientFailure(ctx, account, mappedModel, lease.HandshakeHeaders(), message)
 			errCodeRaw, errTypeRaw, errMsgRaw := parseOpenAIWSErrorEventFields(message)
 			s.persistOpenAIWSRateLimitSignal(ctx, account, lease.HandshakeHeaders(), message, errCodeRaw, errTypeRaw, errMsgRaw, mappedModel)
-			errMsg := strings.TrimSpace(errMsgRaw)
+			errMsg := sanitizeUpstreamErrorMessage(strings.TrimSpace(errMsgRaw))
 			if errMsg == "" {
 				errMsg = "Upstream websocket error"
 			}
@@ -761,10 +761,46 @@ readLoop:
 				return nil, wrapOpenAIWSFallback(fallbackReason, errors.New(errMsg))
 			}
 			statusCode := openAIWSErrorHTTPStatusFromRaw(errCodeRaw, errTypeRaw)
-			setOpsUpstreamError(c, statusCode, errMsg, "")
+			detail := ""
+			if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
+				maxBytes := s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes
+				if maxBytes <= 0 {
+					maxBytes = 2048
+				}
+				detail = truncateString(string(message), maxBytes)
+			}
+			setOpsUpstreamError(c, statusCode, errMsg, detail)
+			proxyID, proxyName := opsUpstreamWSProxyAttribution(account)
+			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+				ProxyID:              proxyID,
+				ProxyName:            proxyName,
+				Platform:             account.Platform,
+				AccountID:            account.ID,
+				AccountName:          account.Name,
+				UpstreamStatusCode:   statusCode,
+				UpstreamRequestID:    lease.HandshakeHeaders().Get("x-request-id"),
+				Kind:                 "ws_error",
+				Message:              errMsg,
+				Detail:               detail,
+				UpstreamResponseBody: detail,
+			})
 			if reqStream && !clientDisconnected {
 				flushBufferedStreamEvents("error_event")
 				emitStreamMessage(message, true)
+				if !clientDisconnected {
+					// This path terminates on the bare WS error. Close the Responses
+					// protocol here with this attempt's message, instead of letting the
+					// HTTP handler append its generic failure after the real error.
+					markOpenAIWSClientVisibleFailure(c, "error", message)
+					failedEvent := buildOpenAIResponseFailedEvent(responseID, originalModel, message, errMsg)
+					if sanitized, changed := sanitizeOpenAICapacityShedErrorCodeForClient(failedEvent); changed {
+						failedEvent = sanitized
+					}
+					emitStreamMessage(failedEvent, true)
+					if !clientDisconnected {
+						MarkResponseCommitted(c)
+					}
+				}
 			}
 			if !reqStream {
 				c.JSON(statusCode, gin.H{

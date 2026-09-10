@@ -1034,7 +1034,7 @@ func (state *opsCaptureWriterState) finalizeResponseCapture() {
 	}
 	if state.terminalFound {
 		if parsed, ok := parseOpsSSEFailure(state.probe); ok {
-			state.terminalError = parsed
+			state.terminalError = preserveOpsSSEFailureMessage(state.terminalError, parsed)
 		}
 		return
 	}
@@ -1922,15 +1922,41 @@ func parseOpsSSEFailure(body []byte) (parsedOpsError, bool) {
 			}
 		}
 		if eventType == "response.failed" {
+			if errorCandidate != nil {
+				parsed = preserveOpsSSEFailureMessage(*errorCandidate, parsed)
+			}
 			return parsed, true
 		}
 		candidate := parsed
+		if errorCandidate != nil {
+			candidate = preserveOpsSSEFailureMessage(*errorCandidate, candidate)
+		}
 		errorCandidate = &candidate
 	}
 	if errorCandidate != nil {
 		return *errorCandidate, true
 	}
 	return parsedOpsError{}, false
+}
+
+// A gateway-generated terminal frame can follow an upstream error event. Keep
+// the upstream explanation when the terminal message is only a fallback, while
+// retaining the terminal frame's status/type/code and any explicit custom text.
+func preserveOpsSSEFailureMessage(previous, current parsedOpsError) parsedOpsError {
+	if isGenericOpsSSEFailureMessage(current.Message) && !isGenericOpsSSEFailureMessage(previous.Message) {
+		current.Message = previous.Message
+	}
+	return current
+}
+
+func isGenericOpsSSEFailureMessage(message string) bool {
+	switch strings.ToLower(strings.TrimSpace(message)) {
+	case "", "upstream request failed", "upstream request failed after retries",
+		"upstream gateway error", "upstream service temporarily unavailable", "upstream stream failed":
+		return true
+	default:
+		return false
+	}
 }
 
 func opsSSEErrorObject(event map[string]any) map[string]any {
