@@ -25,6 +25,22 @@ remain unchanged for absent, string-valued, and interface-valued metadata maps.
 This repairs an explicit protocol contract. It is not evidence that Lite
 increases quota or fixes upstream capacity/rate limiting.
 
+## Live release validation
+
+The 0.2.4.5 candidate passed its health/version checks and all 416 static asset
+checks. Default Go tests, vet, changed-code lint (including diagnostics), and the
+embedded Linux build passed. The candidate was not activated: live gateway
+probes were blocked by 429, overload errors, a server error, and a timeout.
+
+A separate opt-in live test exercises the real `forwardOpenAIWSV2` bridge with
+an isolated pool, fixed source IPv6, explicit Lite HTTP header, and function
+invocation/result continuation. It bypasses group scheduling, persistent writes,
+automatic retries, and HTTP fallback. On 2026-09-10 at 15:15 UTC, account 60476
+returned `usage_limit_reached`; account 60482 failed the WS upgrade with HTTP 403.
+Neither reached tool execution. The process completing its diagnostic run does
+not count as successful tool validation. These results do not establish a
+completion improvement, and production remains 0.2.4.4.
+
 ## Additional controlled comparisons
 
 The opt-in diagnostic uses the production request builders and authorized
@@ -111,6 +127,7 @@ directory `sub2api-protocol-experiment-20260910.nskMsp`:
 - `protocol-http-1789050087921606386.jsonl`
 - `protocol-ws-1789050800669169052.jsonl`
 - `protocol-http-1789050926236745152.jsonl`
+- `protocol-ws-1789053308620470593.jsonl` (direct Lite bridge validation)
 
 No credentials or account snapshots are included in these reports. The
 diagnostic is guarded by the `codexdiagnostic` build tag and an explicit runtime
