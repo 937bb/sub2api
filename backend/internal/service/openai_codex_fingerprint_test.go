@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 const testCodexFingerprintSeed = "11111111-1111-4111-8111-111111111111"
@@ -406,7 +407,8 @@ func TestCodexFingerprintSynthesizesMissingTurnMetadata(t *testing.T) {
 
 	var headerMeta map[string]any
 	require.NoError(t, json.Unmarshal([]byte(h.Get("x-codex-turn-metadata")), &headerMeta))
-	clientMetadata := body["client_metadata"].(map[string]any)
+	clientMetadata, ok := body["client_metadata"].(map[string]any)
+	require.True(t, ok)
 	embedded, ok := clientMetadata["x-codex-turn-metadata"].(string)
 	require.True(t, ok)
 	var bodyMeta map[string]any
@@ -932,6 +934,65 @@ func TestApplyStagedCodexFingerprintHeaders_SkipsNonOAuthAccount(t *testing.T) {
 	apiKeyAccount := &Account{ID: 1004, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
 	applyStagedCodexFingerprintHeaders(c, apiKeyAccount, h)
 	assert.Empty(t, h.Get("x-codex-installation-id"), "stale 收敛 ID 不得应用到非 OAuth 账号")
+}
+
+func TestApplyCodexFingerprintToWebSocketPayloadStagesPerTurnIDs(t *testing.T) {
+	svc := &OpenAIGatewayService{}
+	account := newTestOAuthAccount(1101, map[string]any{codexFingerprintModeExtraKey: "full"})
+	c := newFingerprintStageTestContext(t)
+	c.Request.Header.Set("session-id", "client-session")
+
+	body := []byte(`{"type":"response.create","model":"gpt-5.6","prompt_cache_key":"client-session","client_metadata":{"session_id":"client-session"}}`)
+	first, err := svc.applyCodexFingerprintToWebSocketPayload(context.Background(), c, account, body)
+	require.NoError(t, err)
+	firstIDs := stagedCodexFingerprintIDs(c, account)
+	require.NotNil(t, firstIDs)
+
+	second, err := svc.applyCodexFingerprintToWebSocketPayload(context.Background(), c, account, body)
+	require.NoError(t, err)
+	secondIDs := stagedCodexFingerprintIDs(c, account)
+	require.NotNil(t, secondIDs)
+	require.Equal(t, firstIDs.installationID, secondIDs.installationID)
+	require.Equal(t, firstIDs.sessionID, secondIDs.sessionID)
+	require.Equal(t, firstIDs.threadID, secondIDs.threadID)
+	require.NotEqual(t, firstIDs.turnID, secondIDs.turnID)
+	require.NotEqual(t, first, second, "each response.create must get a fresh turn ID")
+
+	var decoded map[string]any
+	require.NoError(t, json.Unmarshal(second, &decoded))
+	metadata, ok := decoded["client_metadata"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, secondIDs.installationID, metadata["x-codex-installation-id"])
+	require.Equal(t, secondIDs.sessionID, metadata["session_id"])
+	require.Equal(t, secondIDs.threadID, metadata["thread_id"])
+	require.Equal(t, secondIDs.turnID, metadata["turn_id"])
+	require.Equal(t, secondIDs.sessionID, decoded["prompt_cache_key"])
+
+	stagedHeaders := make(http.Header)
+	applyStagedCodexFingerprintHeaders(c, account, stagedHeaders)
+	require.Equal(t, secondIDs.installationID, stagedHeaders.Get("x-codex-installation-id"))
+	require.Equal(t, secondIDs.turnID, gjson.Get(stagedHeaders.Get("x-codex-turn-metadata"), "turn_id").String())
+}
+
+func TestApplyStagedCodexFingerprintAllowsCredentialShadowSource(t *testing.T) {
+	c := newFingerprintStageTestContext(t)
+	parent := newTestOAuthAccount(1201, map[string]any{codexFingerprintModeExtraKey: "session"})
+	parentID := parent.ID
+	shadow := &Account{ID: 1202, ParentAccountID: &parentID, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	c.Set(codexAccountIdentitySourceContextKey, parent)
+
+	ids := resolveCodexFingerprintIDsFromRequest(parent, c.Request.Header)
+	require.NotNil(t, ids)
+	stageCodexFingerprintIDs(c, ids)
+
+	headers := make(http.Header)
+	applyStagedCodexFingerprintHeaders(c, shadow, headers)
+	require.Equal(t, ids.installationID, headers.Get("x-codex-installation-id"))
+	require.Equal(t, ids.sessionID, headers.Get("session-id"))
+
+	otherParentID := int64(1203)
+	otherShadow := &Account{ID: 1204, ParentAccountID: &otherParentID, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	require.Nil(t, stagedCodexFingerprintIDs(c, otherShadow), "a stale source cannot supply another shadow's fingerprint")
 }
 
 func TestBuildUpstreamRequestOpenAIPassthrough_AppliesStagedFingerprint(t *testing.T) {

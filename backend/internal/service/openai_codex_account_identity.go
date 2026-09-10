@@ -17,6 +17,45 @@ const codexAccountIdentityNamespaceVersion = "v1"
 
 const codexAccountIdentitySourceContextKey = "openai_codex_account_identity_source"
 
+var codexAccountMemberIdentityKeys = [...]string{
+	"chatgpt_user_id",
+	"chatgpt_member_id",
+	"chatgpt_membership_id",
+	"member_id",
+	"membership_id",
+}
+
+var codexAccountEmailIdentityKeys = [...]string{
+	"email",
+	"chatgpt_email",
+	"user_email",
+	"account_email",
+}
+
+func codexAccountMemberIdentity(account *Account) string {
+	if account == nil {
+		return ""
+	}
+	for _, key := range codexAccountMemberIdentityKeys {
+		if value := strings.TrimSpace(account.GetCredential(key)); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func codexAccountEmailIdentity(account *Account) string {
+	if account == nil {
+		return ""
+	}
+	for _, key := range codexAccountEmailIdentityKeys {
+		if value := strings.ToLower(strings.TrimSpace(account.GetCredential(key))); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
 // prepareCodexAccountIdentitySource resolves credential shadows once per selected
 // attempt. The handler reuses gin.Context across failover attempts, so every entry
 // point overwrites the staged source before projecting outbound identity.
@@ -57,10 +96,19 @@ func codexAccountIdentityNamespace(account *Account) string {
 		return ""
 	}
 	if upstreamAccountID := strings.TrimSpace(account.GetChatGPTAccountID()); upstreamAccountID != "" {
-		if upstreamUserID := strings.TrimSpace(account.GetCredential("chatgpt_user_id")); upstreamUserID != "" {
-			return "chatgpt:" + upstreamAccountID + ":user:" + upstreamUserID
+		if member := codexAccountMemberIdentity(account); member != "" {
+			return "chatgpt:" + upstreamAccountID + ":member:" + member
+		}
+		if email := codexAccountEmailIdentity(account); email != "" {
+			return "chatgpt:" + upstreamAccountID + ":email:" + email
 		}
 		return "chatgpt:" + upstreamAccountID
+	}
+	if member := codexAccountMemberIdentity(account); member != "" {
+		return "member:" + member
+	}
+	if email := codexAccountEmailIdentity(account); email != "" {
+		return "email:" + email
 	}
 	if seed, ok := codexFingerprintSeed(account.Extra); ok {
 		return "seed:" + seed

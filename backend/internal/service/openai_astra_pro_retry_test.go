@@ -60,15 +60,16 @@ func TestOpenAIGatewayService_OAuthAstraProModeRejectionPassesThrough(t *testing
 }
 
 // TestOpenAIGatewayService_OAuthAstraProModeKeptAcrossRejectedFieldRetry reuses
-// the existing OAuth rejected-field retry fixture (input[0].status is rejected,
+// the existing OAuth rejected-field retry fixture (a cache marker is rejected,
 // stripped, then replayed to success) to confirm Astra pro+max reasoning is kept
 // across every in-service retry: each captured Codex URL request body still
 // carries reasoning.mode=pro and reasoning.effort=max with model=gpt-6-astra,
-// and only the second attempt drops the rejected status field.
+// and only the second attempt drops the rejected cache marker. Known input
+// status fields are already removed before forwarding by this branch.
 func TestOpenAIGatewayService_OAuthAstraProModeKeptAcrossRejectedFieldRetry(t *testing.T) {
-	body := []byte(`{"model":"gpt-6-astra","stream":true,"instructions":"test","reasoning":{"mode":"pro","effort":"max"},"input":[{"type":"message","role":"user","status":"completed","content":"hello"}]}`)
+	body := []byte(`{"model":"gpt-6-astra","stream":true,"instructions":"test","reasoning":{"mode":"pro","effort":"max"},"input":[{"type":"message","role":"user","status":"completed","prompt_cache_breakpoint":true,"content":"hello"}]}`)
 	upstream := &httpUpstreamRecorder{responses: []*http.Response{
-		newOpenAIRejectedFieldTestResponse(http.StatusBadRequest, `{"error":{"code":"unknown_parameter","message":"Unknown parameter: 'input[0].status'.","param":"input[0].status"}}`),
+		newOpenAIRejectedFieldTestResponse(http.StatusBadRequest, `{"error":{"code":"invalid_parameter","message":"input[0].prompt_cache_breakpoint is not supported on this model","param":"input[0].prompt_cache_breakpoint"}}`),
 		newOpenAIRejectedFieldTestResponse(http.StatusOK, "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_ok\",\"output\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\ndata: [DONE]\n\n"),
 	}}
 	upstream.responses[1].Header.Set("Content-Type", "text/event-stream")
@@ -87,6 +88,8 @@ func TestOpenAIGatewayService_OAuthAstraProModeKeptAcrossRejectedFieldRetry(t *t
 		require.Equal(t, "pro", gjson.GetBytes(sent, "reasoning.mode").String(), "attempt %d reasoning.mode", i)
 		require.Equal(t, "max", gjson.GetBytes(sent, "reasoning.effort").String(), "attempt %d reasoning.effort", i)
 	}
-	require.Equal(t, "completed", gjson.GetBytes(upstream.bodies[0], "input.0.status").String())
+	require.True(t, gjson.GetBytes(upstream.bodies[0], "input.0.prompt_cache_breakpoint").Bool())
+	require.False(t, gjson.GetBytes(upstream.bodies[1], "input.0.prompt_cache_breakpoint").Exists())
+	require.False(t, gjson.GetBytes(upstream.bodies[0], "input.0.status").Exists())
 	require.False(t, gjson.GetBytes(upstream.bodies[1], "input.0.status").Exists())
 }

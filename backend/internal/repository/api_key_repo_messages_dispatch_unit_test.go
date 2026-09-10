@@ -11,14 +11,17 @@ import (
 
 func TestGroupEntityToService_PreservesMessagesDispatchModelConfig(t *testing.T) {
 	group := &dbent.Group{
-		ID:                    1,
-		Name:                  "openai-dispatch",
-		Platform:              service.PlatformOpenAI,
-		Status:                service.StatusActive,
-		SubscriptionType:      service.SubscriptionTypeStandard,
-		RateMultiplier:        1,
-		AllowMessagesDispatch: true,
-		DefaultMappedModel:    "gpt-5.4",
+		ID:                          1,
+		Name:                        "openai-dispatch",
+		Platform:                    service.PlatformOpenAI,
+		Status:                      service.StatusActive,
+		SubscriptionType:            service.SubscriptionTypeStandard,
+		RateMultiplier:              1,
+		AllowMessagesDispatch:       true,
+		DefaultMappedModel:          "gpt-5.4",
+		ForceOpenaiFast:             true,
+		FreeOpenaiFast:              true,
+		MaxReasoningEffortOverLimit: service.ReasoningEffortOverLimitDeny,
 		VideoModelPrices: map[string]map[string]float64{
 			service.VideoPriceFamilyGrokImagineVideo15: {service.VideoBillingResolution720P: 0.14},
 		},
@@ -36,6 +39,9 @@ func TestGroupEntityToService_PreservesMessagesDispatchModelConfig(t *testing.T)
 	require.NotNil(t, got)
 	require.Equal(t, group.MessagesDispatchModelConfig, got.MessagesDispatchModelConfig)
 	require.Equal(t, group.VideoModelPrices, got.VideoModelPrices)
+	require.True(t, got.ForceOpenAIFast)
+	require.True(t, got.FreeOpenAIFast)
+	require.Equal(t, group.MaxReasoningEffortOverLimit, got.MaxReasoningEffortOverLimit)
 }
 
 func TestAPIKeyRepository_GetByKeyForAuth_PreservesMessagesDispatchModelConfig_SQLite(t *testing.T) {

@@ -162,7 +162,7 @@ func GroupFromServiceAdmin(g *service.Group) *AdminGroup {
 		OpenAIModelMapping:               service.CloneOpenAIModelMapping(g.OpenAIModelMapping),
 		OpenAITransientErrorRetryEnabled: g.OpenAITransientErrorRetryEnabled,
 		MessagesDispatchModelConfig:      g.MessagesDispatchModelConfig,
-		ModelsListConfig:                 g.ModelsListConfig,
+		ModelAllowlist:                   service.DomainGroupModelAllowlist(g.ModelAllowlist),
 		CodexModelsManifestConfig:        g.CodexModelsManifestConfig,
 		SupportedModelScopes:             g.SupportedModelScopes,
 		AccountCount:                     g.AccountCount,

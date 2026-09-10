@@ -1299,10 +1299,17 @@ func (a *Account) IsOpenAIOAuthLike() bool {
 	return a != nil && a.IsOpenAI() && (a.Type == AccountTypeOAuth || a.Type == AccountTypeSetupToken)
 }
 
-// UsesOpenAICodexProtocol preserves legacy OpenAI gateway OAuth routing for
-// accounts whose platform is implicit, while adding OpenAI SetupToken.
+// UsesOpenAICodexProtocol recognizes OpenAI OAuth-like credentials and keeps
+// the legacy empty-platform rows compatible. OAuth rows belonging to another
+// provider must never enter the Codex protocol path.
 func (a *Account) UsesOpenAICodexProtocol() bool {
-	return a != nil && (a.Type == AccountTypeOAuth || a.IsOpenAIOAuthLike())
+	if a == nil {
+		return false
+	}
+	if a.IsOpenAIOAuthLike() {
+		return true
+	}
+	return a.Platform == "" && (a.Type == AccountTypeOAuth || a.Type == AccountTypeSetupToken)
 }
 
 func (a *Account) IsOpenAIChatGPTSubscription() bool {

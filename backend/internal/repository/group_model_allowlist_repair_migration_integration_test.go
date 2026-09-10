@@ -13,9 +13,8 @@ import (
 
 const groupModelAllowlistRepairMigration = "236_group_model_allowlist_repair.sql"
 
-// 236 是可重放的修复迁移：235 的重命名一旦被记账就不会重跑，数据库若回到旧结构
-// （手工改回列名、按旧结构部分恢复）应用仍能启动，但所有关联 groups 的查询都会
-// 报 column groups.model_allowlist does not exist（issue #6780）。
+// Migration 236 repairs legacy schemas even when migration 235 was recorded
+// before a partial restore brought back the old column (issue #6780).
 func TestMigration236RenamesLegacyModelsListConfigColumn(t *testing.T) {
 	tx := testTx(t)
 	ctx := context.Background()
@@ -32,14 +31,14 @@ RETURNING id
 
 	applyGroupModelAllowlistRepair(ctx, t, tx)
 
-	// 重命名保留原数据，且新列恢复 NOT NULL DEFAULT '{}' 的形状。
+	// The rename preserves data and restores NOT NULL DEFAULT '{}'.
 	var allowlist string
 	require.NoError(t, tx.QueryRowContext(ctx,
 		"SELECT model_allowlist::text FROM groups WHERE id = $1", groupID).Scan(&allowlist))
 	require.JSONEq(t, `{"enabled":true,"models":["claude-sonnet-5"]}`, allowlist)
 	requireModelAllowlistColumnShape(ctx, t, tx)
 
-	// 可重放：重复执行不报错也不改变结果。
+	// Replaying the migration preserves the result.
 	applyGroupModelAllowlistRepair(ctx, t, tx)
 	require.NoError(t, tx.QueryRowContext(ctx,
 		"SELECT model_allowlist::text FROM groups WHERE id = $1", groupID).Scan(&allowlist))
@@ -54,7 +53,7 @@ func TestMigration236BackfillsWhenBothColumnsExist(t *testing.T) {
 		"ALTER TABLE groups ADD COLUMN models_list_config JSONB NOT NULL DEFAULT '{}'::jsonb")
 	require.NoError(t, err)
 
-	// 新列仍是默认空值：旧列里的配置应该被补回来。
+	// An empty new column should be backfilled from the legacy column.
 	var staleID int64
 	require.NoError(t, tx.QueryRowContext(ctx, `
 INSERT INTO groups (name, platform, rate_multiplier, status, model_allowlist, models_list_config)
@@ -62,7 +61,7 @@ VALUES ('migration-236-backfill', 'anthropic', 1, 'active', '{}'::jsonb, '{"enab
 RETURNING id
 `).Scan(&staleID))
 
-	// 新列已有配置：不能被旧列覆盖。
+	// An existing new configuration must not be overwritten by legacy data.
 	var currentID int64
 	require.NoError(t, tx.QueryRowContext(ctx, `
 INSERT INTO groups (name, platform, rate_multiplier, status, model_allowlist, models_list_config)

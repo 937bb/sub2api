@@ -71,6 +71,14 @@ func TestCodexAccountIdentityNamespaceUsesStableCredentialSource(t *testing.T) {
 	require.Equal(t, codexAccountIdentityNamespace(firstUser), codexAccountIdentityNamespace(sameUser))
 	require.NotEqual(t, codexAccountIdentityNamespace(firstUser), codexAccountIdentityNamespace(secondUser))
 
+	firstEmail := &Account{ID: 23, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"chatgpt_account_id": "team-account", "email": "Member@Example.com"}}
+	secondEmail := &Account{ID: 24, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"chatgpt_account_id": "team-account", "email": "other@example.com"}}
+	require.Equal(t, "chatgpt:team-account:email:member@example.com", codexAccountIdentityNamespace(firstEmail))
+	require.NotEqual(t, codexAccountIdentityNamespace(firstEmail), codexAccountIdentityNamespace(secondEmail))
+
+	memberFallback := &Account{ID: 25, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"member_id": "member-25"}}
+	require.Equal(t, "member:member-25", codexAccountIdentityNamespace(memberFallback))
+
 	seed := "11111111-1111-4111-8111-111111111111"
 	seeded := &Account{ID: 11, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Extra: map[string]any{codexFingerprintSeedExtraKey: seed}}
 	require.Equal(t, "seed:"+seed, codexAccountIdentityNamespace(seeded))

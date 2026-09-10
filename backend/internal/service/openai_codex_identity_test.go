@@ -277,6 +277,26 @@ func TestEnforceCodexIdentityHeaders_EnforcementDisabledThirdPartyFallback(t *te
 	require.Equal(t, codexCLIVersion, h.Get("version"))
 }
 
+func TestEnforceCodexIdentityHeaders_EnforcementDisabledKeepsAccountUA(t *testing.T) {
+	account := &Account{ID: 203, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	accountUA := codexAccountUserAgent(account)
+	require.NotEmpty(t, accountUA)
+
+	SetCodexIdentityEnforcementEnabled(false)
+	t.Cleanup(func() { SetCodexIdentityEnforcementEnabled(true) })
+
+	h := make(http.Header)
+	h.Set("originator", openai.CodexDefaultOriginator)
+	h.Set("user-agent", "codex-tui/0.145.2 (Mac OS X 14.0; arm64) iTerm")
+	h.Set("version", "0.145.2")
+
+	enforceCodexIdentityHeadersWithUA(h, accountUA)
+
+	require.Equal(t, resolveCodexOutboundIdentity(accountUA).userAgent, h.Get("user-agent"))
+	require.Equal(t, openai.CodexDefaultOriginator, h.Get("originator"))
+	require.Equal(t, codexCLIVersion, h.Get("version"))
+}
+
 // 收口必须幂等：透传等路径可能先后多次经过收口。
 func TestEnforceCodexIdentityHeadersIsIdempotent(t *testing.T) {
 	h := make(http.Header)
@@ -321,6 +341,101 @@ func TestBuildCodexCLIUserAgent(t *testing.T) {
 	// 非法版本号必须回退到内置 UA，不能拼出畸形身份。
 	require.Equal(t, codexCLIUserAgent, buildCodexCLIUserAgent("bogus version"))
 	require.Equal(t, codexCLIUserAgent, buildCodexCLIUserAgent(""))
+}
+
+func TestCodexAccountUserAgentIsStableAndCredentialScoped(t *testing.T) {
+	account := &Account{
+		ID:       101,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Extra:    map[string]any{codexFingerprintSeedExtraKey: testCodexFingerprintSeed},
+	}
+	first := codexAccountUserAgent(account)
+	require.NotEmpty(t, first)
+	require.NotEqual(t, codexCLIUserAgent, first)
+	require.Equal(t, first, codexAccountUserAgent(account))
+
+	seen := map[string]struct{}{first: {}}
+	for id := int64(102); id < 150; id++ {
+		other := &Account{
+			ID:       id,
+			Platform: PlatformOpenAI,
+			Type:     AccountTypeOAuth,
+		}
+		seen[codexAccountUserAgent(other)] = struct{}{}
+	}
+	require.Greater(t, len(seen), 1, "different credential namespaces must not all emit one static UA")
+
+	originator, pairedUA, ok := openai.PairCodexClientIdentity(first)
+	require.True(t, ok)
+	require.Equal(t, openai.CodexDefaultOriginator, originator)
+	require.Equal(t, first, pairedUA)
+}
+
+func TestCodexAccountUserAgentHonorsExplicitOverride(t *testing.T) {
+	account := &Account{
+		ID:       201,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"user_agent": "codex_vscode/0.150.0 (Ubuntu 22.4.0; x86_64) vscode",
+		},
+	}
+	require.Equal(t, account.GetOpenAIUserAgent(), codexAccountUserAgent(account))
+}
+
+func TestCodexAccountUserAgentUsesPersistentSeedAcrossTokenRotation(t *testing.T) {
+	base := &Account{
+		ID:       202,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"refresh_token":      "refresh-token-before",
+			"chatgpt_account_id": "team-account",
+			"chatgpt_user_id":    "member-before",
+		},
+		Extra: map[string]any{codexFingerprintSeedExtraKey: testCodexFingerprintSeed},
+	}
+	changed := &Account{
+		ID:       base.ID,
+		Platform: base.Platform,
+		Type:     base.Type,
+		Credentials: map[string]any{
+			"refresh_token":      "refresh-token-after",
+			"chatgpt_account_id": "team-account",
+			"chatgpt_user_id":    "member-before",
+		},
+		Extra: map[string]any{codexFingerprintSeedExtraKey: testCodexFingerprintSeed},
+	}
+
+	require.Equal(t, codexAccountUserAgent(base), codexAccountUserAgent(changed))
+
+	rotatedSeed := &Account{
+		ID:       base.ID,
+		Platform: base.Platform,
+		Type:     base.Type,
+		Extra:    map[string]any{codexFingerprintSeedExtraKey: "22222222-2222-4222-8222-222222222222"},
+	}
+	require.NotEqual(t, codexAccountUserAgent(base), codexAccountUserAgent(rotatedSeed))
+}
+
+func TestCodexAccountUserAgentDoesNotApplyToAPIKey(t *testing.T) {
+	account := &Account{ID: 301, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+	require.Empty(t, codexAccountUserAgent(account))
+}
+
+func TestCodexAccountUserAgentSupportsLegacyImplicitOpenAIAccount(t *testing.T) {
+	account := &Account{
+		ID:   302,
+		Type: AccountTypeOAuth,
+		Credentials: map[string]any{
+			"chatgpt_account_id": "legacy-chatgpt-account",
+		},
+	}
+
+	ua := codexAccountUserAgent(account)
+	require.NotEmpty(t, ua)
+	require.NotEqual(t, codexCLIUserAgent, ua)
 }
 
 func TestCodexCanonicalUserAgentFollowsResolver(t *testing.T) {
