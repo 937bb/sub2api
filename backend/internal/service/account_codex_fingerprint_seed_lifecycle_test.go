@@ -37,6 +37,30 @@ func TestAdminCreateAccountStripsUserSeedAndCreatesFreshSeedWhenEnabled(t *testi
 	require.Equal(t, "session", created.Extra[codexFingerprintModeExtraKey])
 }
 
+func TestBuildAccountForCreateMintsSeedForImplicitDefaultFull(t *testing.T) {
+	account, err := buildAccountForCreate(&CreateAccountInput{
+		Name:     "implicit-full-codex-oauth",
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+	}, nil)
+
+	require.NoError(t, err)
+	requireValidCodexFingerprintSeed(t, account.Extra)
+}
+
+func TestBuildAccountForCreateDoesNotMintSeedWhenExplicitlyOff(t *testing.T) {
+	account, err := buildAccountForCreate(&CreateAccountInput{
+		Name:     "off-codex-oauth",
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Extra:    map[string]any{codexFingerprintModeExtraKey: "off"},
+	}, map[string]any{codexFingerprintModeExtraKey: "off"})
+
+	require.NoError(t, err)
+	_, ok := codexFingerprintSeed(account.Extra)
+	require.False(t, ok)
+}
+
 func TestAdminUpdateAccountPreservesExistingSeedAndStripsUserSeed(t *testing.T) {
 	accountID := int64(201)
 	repo := &upstreamBillingProbeAccountRepo{accounts: map[int64]*Account{

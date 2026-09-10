@@ -41,7 +41,14 @@ func stagedCodexFingerprintIDs(c *gin.Context, account *Account) *codexFingerpri
 		return nil
 	}
 	ids, ok := value.(*codexFingerprintIDs)
-	if !ok || ids == nil || ids.accountID != account.ID {
+	if !ok || ids == nil {
+		return nil
+	}
+	// Shadow accounts use the parent credential as the fingerprint source. Accept
+	// either row ID so staged headers remain usable without leaking across a
+	// scheduler failover attempt.
+	source := codexAccountIdentitySource(c, account)
+	if ids.accountID != account.ID && (!account.IsShadow() || source == nil || source.ID != *account.ParentAccountID || ids.accountID != source.ID) {
 		return nil
 	}
 	return ids
@@ -167,7 +174,10 @@ func codexFingerprintDerivationSeed(account *Account) (string, bool) {
 
 func prepareCodexFingerprintExtraForCreate(platform, accountType string, extra map[string]any) map[string]any {
 	prepared := stripCodexFingerprintSeed(extra)
-	if platform != PlatformOpenAI || (accountType != AccountTypeOAuth && accountType != AccountTypeSetupToken) || !codexFingerprintModeRequiresSeed(codexFingerprintModeFromExtra(prepared)) {
+	if platform != PlatformOpenAI || (accountType != AccountTypeOAuth && accountType != AccountTypeSetupToken) {
+		return prepared
+	}
+	if rawMode, ok := prepared[codexFingerprintModeExtraKey].(string); ok && strings.TrimSpace(rawMode) == string(codexFingerprintOff) {
 		return prepared
 	}
 	if prepared == nil {
@@ -189,12 +199,13 @@ func prepareCodexFingerprintExtraForUpdate(account *Account, extra map[string]an
 		prepared[codexFingerprintSeedExtraKey] = seed
 		return prepared
 	}
-	if codexFingerprintModeRequiresSeed(codexFingerprintModeFromExtra(prepared)) {
-		if prepared == nil {
-			prepared = make(map[string]any, 1)
-		}
-		prepared[codexFingerprintSeedExtraKey] = newCodexFingerprintSeed()
+	if rawMode, ok := prepared[codexFingerprintModeExtraKey].(string); ok && strings.TrimSpace(rawMode) == string(codexFingerprintOff) {
+		return prepared
 	}
+	if prepared == nil {
+		prepared = make(map[string]any, 1)
+	}
+	prepared[codexFingerprintSeedExtraKey] = newCodexFingerprintSeed()
 	return prepared
 }
 
@@ -395,6 +406,37 @@ func resolveCodexFingerprintIDsFromRequestWithDefault(account *Account, clientHe
 func (s *OpenAIGatewayService) resolveCodexFingerprintIDsForRequest(ctx context.Context, account *Account, clientHeaders http.Header) *codexFingerprintIDs {
 	_, defaultFull := s.openAIRuntimeDefaults(ctx)
 	return resolveCodexFingerprintIDsFromRequestWithDefault(account, clientHeaders, defaultFull)
+}
+
+// applyCodexFingerprintToWebSocketPayload creates one account-scoped ID set for
+// a response.create frame, rewrites its raw client metadata, and stages the same
+// set for the next upstream handshake. Keeping this operation shared prevents
+// native WS and passthrough WS from drifting apart.
+func (s *OpenAIGatewayService) applyCodexFingerprintToWebSocketPayload(
+	ctx context.Context,
+	c *gin.Context,
+	account *Account,
+	body []byte,
+) ([]byte, error) {
+	if account == nil {
+		stageCodexFingerprintIDs(c, nil)
+		return body, nil
+	}
+	source := codexAccountIdentitySource(c, account)
+	var clientHeaders http.Header
+	if c != nil && c.Request != nil {
+		clientHeaders = c.Request.Header
+	}
+	ids := s.resolveCodexFingerprintIDsForRequest(ctx, source, clientHeaders)
+	stageCodexFingerprintIDs(c, ids)
+	if ids == nil {
+		return body, nil
+	}
+	updated, _, err := applyCodexFingerprintClientMetadataRaw(body, ids)
+	if err != nil {
+		return body, err
+	}
+	return updated, nil
 }
 
 // applyCodexFingerprintHeaders 按预计算的收敛 ID 改写出站 HTTP 头中的设备指纹。

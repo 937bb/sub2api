@@ -200,7 +200,7 @@ type AdminGroup struct {
 	OpenAIModelMapping               map[string]string                        `json:"openai_model_mapping"`
 	OpenAITransientErrorRetryEnabled bool                                     `json:"openai_transient_error_retry_enabled"`
 	MessagesDispatchModelConfig      domain.OpenAIMessagesDispatchModelConfig `json:"messages_dispatch_model_config"`
-	ModelsListConfig                 domain.GroupModelsListConfig             `json:"models_list_config"`
+	ModelAllowlist                   domain.GroupModelAllowlist               `json:"model_allowlist"`
 	CodexModelsManifestConfig        domain.GroupCodexModelsManifestConfig    `json:"codex_models_manifest_config"`
 
 	// 支持的模型系列（仅 antigravity 平台使用）

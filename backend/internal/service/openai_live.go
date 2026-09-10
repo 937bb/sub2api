@@ -199,7 +199,7 @@ func (s *OpenAIGatewayService) CreateLiveCall(
 		selection.ReleaseFunc()
 		if createErr != nil {
 			s.releaseLiveLease(account.ID, identity.UserID, identity.APIKeyID, leaseID)
-			if !s.shouldFailoverLiveCreateError(createErr) {
+			if !s.shouldFailoverLiveCreateError(account, createErr) {
 				return nil, createErr
 			}
 			excluded[account.ID] = struct{}{}
@@ -245,13 +245,13 @@ func (s *OpenAIGatewayService) CreateLiveCall(
 	return nil, ErrLiveUnavailable
 }
 
-func (s *OpenAIGatewayService) shouldFailoverLiveCreateError(err error) bool {
+func (s *OpenAIGatewayService) shouldFailoverLiveCreateError(account *Account, err error) bool {
 	var upstreamErr *UpstreamFailoverError
 	if !errors.As(err, &upstreamErr) {
 		// 凭证读取和网络传输错误都可能只影响当前账号或代理。
 		return true
 	}
-	return s.shouldFailoverOpenAIUpstreamResponse(
+	return s.shouldFailoverOpenAIUpstreamResponse(account,
 		upstreamErr.StatusCode,
 		"",
 		upstreamErr.ResponseBody,
@@ -302,7 +302,7 @@ func (s *OpenAIGatewayService) createUpstreamLiveCall(
 	upstreamReq.Header.Set("Content-Type", "application/json")
 	upstreamReq.Header.Set("Accept", "application/sdp")
 	upstreamReq.Header.Set(liveAttestationHeader, attestation)
-	applyLiveUpstreamIdentityHeaders(upstreamReq.Header)
+	applyLiveUpstreamIdentityHeadersForAccount(upstreamReq.Header, account)
 
 	resp, err := s.doOpenAIUpstream(upstreamReq, resolveAccountProxyURL(account), account)
 	if err != nil {
@@ -400,9 +400,13 @@ func liveCallIDFromLocation(location string) (string, error) {
 }
 
 func applyLiveUpstreamIdentityHeaders(headers http.Header) {
+	applyLiveUpstreamIdentityHeadersForAccount(headers, nil)
+}
+
+func applyLiveUpstreamIdentityHeadersForAccount(headers http.Header, account *Account) {
 	headers.Set("OpenAI-Alpha", "quicksilver=v2")
 	ensureCodexIdentityHeaders(headers)
-	enforceCodexIdentityHeaders(headers)
+	enforceCodexIdentityHeadersWithUA(headers, codexAccountUserAgent(account))
 	if strings.TrimSpace(headers.Get("session-id")) == "" {
 		headers.Set("session-id", uuid.NewString())
 	}
@@ -434,7 +438,7 @@ func (s *OpenAIGatewayService) liveSidebandHeaders(
 		return nil, err
 	}
 	headers.Set(liveAttestationHeader, attestation)
-	applyLiveUpstreamIdentityHeaders(headers)
+	applyLiveUpstreamIdentityHeadersForAccount(headers, account)
 	return headers, nil
 }
 

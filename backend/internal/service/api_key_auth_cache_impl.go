@@ -14,8 +14,7 @@ import (
 	"github.com/dgraph-io/ristretto"
 )
 
-// v23 adds the group Codex models manifest configuration.
-const apiKeyAuthSnapshotVersion = 23
+const apiKeyAuthSnapshotVersion = 24 // v24: group model_allowlist field (renamed from models_list_config, enforcing semantics)
 
 type apiKeyAuthCacheConfig struct {
 	l1Size        int
@@ -426,7 +425,7 @@ func (s *APIKeyService) snapshotFromAPIKey(ctx context.Context, apiKey *APIKey) 
 			OpenAIModelMapping:                       CloneOpenAIModelMapping(apiKey.Group.OpenAIModelMapping),
 			OpenAITransientErrorRetryEnabled:         apiKey.Group.OpenAITransientErrorRetryEnabled,
 			MessagesDispatchModelConfig:              apiKey.Group.MessagesDispatchModelConfig,
-			ModelsListConfig:                         apiKey.Group.ModelsListConfig,
+			ModelAllowlist:                           apiKey.Group.ModelAllowlist,
 			CodexModelsManifestConfig:                apiKey.Group.CodexModelsManifestConfig,
 			RPMLimit:                                 apiKey.Group.RPMLimit,
 			MaxReasoningEffort:                       apiKey.Group.MaxReasoningEffort,
@@ -533,7 +532,7 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 			OpenAIModelMapping:                       CloneOpenAIModelMapping(snapshot.Group.OpenAIModelMapping),
 			OpenAITransientErrorRetryEnabled:         snapshot.Group.OpenAITransientErrorRetryEnabled,
 			MessagesDispatchModelConfig:              snapshot.Group.MessagesDispatchModelConfig,
-			ModelsListConfig:                         snapshot.Group.ModelsListConfig,
+			ModelAllowlist:                           snapshot.Group.ModelAllowlist,
 			CodexModelsManifestConfig:                snapshot.Group.CodexModelsManifestConfig,
 			RPMLimit:                                 snapshot.Group.RPMLimit,
 			MaxReasoningEffort:                       snapshot.Group.MaxReasoningEffort,

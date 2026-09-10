@@ -112,7 +112,7 @@ type APIKeyAuthGroupSnapshot struct {
 	OpenAIModelMapping               map[string]string                 `json:"openai_model_mapping,omitempty"`
 	OpenAITransientErrorRetryEnabled bool                              `json:"openai_transient_error_retry_enabled"`
 	MessagesDispatchModelConfig      OpenAIMessagesDispatchModelConfig `json:"messages_dispatch_model_config,omitempty"`
-	ModelsListConfig                 GroupModelsListConfig             `json:"models_list_config,omitempty"`
+	ModelAllowlist                   GroupModelAllowlist               `json:"model_allowlist,omitempty"`
 	CodexModelsManifestConfig        GroupCodexModelsManifestConfig    `json:"codex_models_manifest_config,omitempty"`
 
 	// RPMLimit 分组级每分钟请求数上限（0 = 不限制）；用于 billing_cache_service.checkRPM 级联判断。

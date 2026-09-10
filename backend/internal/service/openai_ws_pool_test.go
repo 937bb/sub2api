@@ -74,6 +74,35 @@ func TestOpenAIWSConnPool_NextConnIDFormat(t *testing.T) {
 	require.Equal(t, "oa_ws_42_2", id2)
 }
 
+func TestOpenAIWSHandshakeCompatibilityScopesCodexIdentityOnly(t *testing.T) {
+	apiKeyAccount := &Account{ID: 43, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+	apiHeaders := http.Header{"User-Agent": {"client-a/1.0"}}
+	apiHeadersChanged := http.Header{"User-Agent": {"client-b/1.0"}}
+	require.Equal(t,
+		normalizeOpenAIWSHandshakeCompatibility(apiKeyAccount, apiHeaders),
+		normalizeOpenAIWSHandshakeCompatibility(apiKeyAccount, apiHeadersChanged),
+		"ordinary API-key handshakes must not split the pool on inbound UA",
+	)
+
+	oauthAccount := &Account{
+		ID:       44,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+	}
+	oauthHeaders := http.Header{
+		"User-Agent": {"codex-tui/0.148.0 (Ubuntu 22.4.0; x86_64) screen"},
+		"Originator": {"codex-tui"},
+		"Version":    {"0.148.0"},
+	}
+	oauthHeadersChanged := oauthHeaders.Clone()
+	oauthHeadersChanged.Set("User-Agent", "codex-tui/0.148.0 (Mac OS X 14.0; arm64) iTerm")
+	require.NotEqual(t,
+		normalizeOpenAIWSHandshakeCompatibility(oauthAccount, oauthHeaders),
+		normalizeOpenAIWSHandshakeCompatibility(oauthAccount, oauthHeadersChanged),
+		"Codex handshakes with different account identities must not reuse a socket",
+	)
+}
+
 func TestOpenAIWSConnPool_AcquireCleanupInterval(t *testing.T) {
 	require.Equal(t, 3*time.Second, openAIWSAcquireCleanupInterval)
 	require.Less(t, openAIWSAcquireCleanupInterval, openAIWSBackgroundSweepTicker)

@@ -57,13 +57,13 @@ func retryOAuthHTTP(ctx context.Context, request *http.Request, settings OAuthRe
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			replay.Close()
+			_ = replay.Close()
 			slogOAuthRetry(request, "cancelled", resp.StatusCode, attempt, settings.MaxRetries, "context_cancelled")
 			return resp, nil, true
 		case <-timer.C:
 		}
 		if resp.Body != nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 		}
 		slogOAuthRetry(request, "retry", resp.StatusCode, attempt+1, settings.MaxRetries, "configured_status")
 		current = request.Clone(request.Context())
@@ -127,7 +127,7 @@ func writeOAuthRetryExhausted(c *gin.Context, resp *http.Response) error {
 	if resp.Body == nil {
 		resp.Body = http.NoBody
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	setOpsUpstreamError(c, resp.StatusCode, "OAuth upstream retries exhausted", "")
 	for name, values := range responseheaders.FilterHeaders(resp.Header, nil) {
 		c.Writer.Header()[name] = append([]string(nil), values...)

@@ -81,6 +81,9 @@ type openAIWSAcquireRequest struct {
 
 type openAIWSHandshakeCompatibilityKey struct {
 	betaFeatures        string
+	codexUserAgent      string
+	codexOriginator     string
+	codexVersion        string
 	parentThreadID      string
 	subagent            string
 	codexInstallationID string
@@ -2052,6 +2055,15 @@ func normalizeOpenAIWSHandshakeCompatibility(account *Account, headers http.Head
 		betaFeatures:   normalizeOpenAIWSBetaFeatures(headers),
 		parentThreadID: strings.TrimSpace(headers.Get(openAICodexParentThreadIDHeader)),
 		subagent:       strings.TrimSpace(headers.Get(openAICodexSubagentHeader)),
+	}
+	// The handshake identity is part of connection compatibility only for a
+	// Codex handshake. Ordinary API-key clients may legitimately send different
+	// User-Agent values while sharing one upstream pool; splitting those sockets
+	// would reduce reuse without changing the upstream contract.
+	if (account != nil && account.UsesOpenAICodexProtocol()) || strings.TrimSpace(headers.Get("originator")) != "" {
+		key.codexUserAgent = strings.TrimSpace(headers.Get("user-agent"))
+		key.codexOriginator = strings.TrimSpace(headers.Get("originator"))
+		key.codexVersion = strings.TrimSpace(headers.Get("version"))
 	}
 	mode := activeCodexFingerprintMode(account)
 	if mode == codexFingerprintOff {
