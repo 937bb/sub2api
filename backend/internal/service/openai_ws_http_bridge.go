@@ -503,6 +503,8 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		if buildErr != nil {
 			return nil, buildErr
 		}
+		applyCodexNormalizedRequestIdentityHeaders(c, account, upstreamReq.Header, requestBody)
+		applyStagedCodexFingerprintHeaders(c, account, upstreamReq.Header)
 		if account.Platform != PlatformGrok && isOpenAIResponsesLiteWebSocketPayload(payload) {
 			upstreamReq.Header.Set(responsesLiteHeader, "true")
 		}

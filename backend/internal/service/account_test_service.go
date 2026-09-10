@@ -17,6 +17,7 @@ import (
 	_ "image/png"
 	"io"
 	"log"
+	"maps"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -70,6 +71,8 @@ type TestEvent struct {
 type AccountTestOptions struct {
 	ImageDataURL string
 	AudioDataURL string
+	// CodexUserAgent applies only to this diagnostic's account snapshot.
+	CodexUserAgent string
 }
 
 func firstAccountTestOptions(opts []AccountTestOptions) AccountTestOptions {
@@ -395,6 +398,19 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 	account, err := s.accountRepo.GetByID(ctx, accountID)
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Account not found")
+	}
+	if userAgent := strings.TrimSpace(testOpts.CodexUserAgent); userAgent != "" {
+		_, _, valid := openai.PairCodexClientIdentity(userAgent)
+		if !account.IsOpenAIOAuthLike() || !valid || len(userAgent) > 512 || strings.ContainsAny(userAgent, "\r\n") {
+			return s.sendErrorAndEnd(c, "Invalid Codex User-Agent override for this account test")
+		}
+		snapshot := *account
+		snapshot.Credentials = maps.Clone(account.Credentials)
+		if snapshot.Credentials == nil {
+			snapshot.Credentials = make(map[string]any)
+		}
+		snapshot.Credentials["user_agent"] = userAgent
+		account = &snapshot
 	}
 
 	// Synthetic UI load-test accounts exercise the real SSE parsing and modal

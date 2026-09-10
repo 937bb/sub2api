@@ -787,6 +787,9 @@ func ProvideSettingService(settingRepo SettingRepository, groupRepo GroupReposit
 	SetCodexCanonicalUserAgentResolver(func() string {
 		return svc.GetOpenAICodexCanonicalUserAgent(context.Background())
 	})
+	SetCodexConfiguredUserAgentResolver(func() string {
+		return svc.GetOpenAICodexUserAgentOverride(context.Background())
+	})
 	return svc
 }
 

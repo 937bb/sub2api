@@ -824,6 +824,8 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	if buildHdrErr != nil {
 		return fmt.Errorf("build ws headers: %w", buildHdrErr)
 	}
+	applyCodexNormalizedRequestIdentityHeaders(c, account, wsHeaders, firstPayload.payloadRaw)
+	applyStagedCodexFingerprintHeaders(c, account, wsHeaders)
 	baseAcquireReq := openAIWSAcquireRequest{
 		Account: account,
 		WSURL:   wsURL,
@@ -1924,6 +1926,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			}
 		}
 		// A reconnect without a prompt cache key still needs this turn's IDs.
+		applyCodexNormalizedRequestIdentityHeaders(c, account, baseAcquireReq.Headers, nextPayload.payloadRaw)
 		applyStagedCodexFingerprintHeaders(c, account, baseAcquireReq.Headers)
 		setOpenAICodexRoutingHint(baseAcquireReq.Headers, account, nextRoutingFields[0].String(), nextRoutingFields[1].String())
 		if nextPayload.previousResponseID != "" {

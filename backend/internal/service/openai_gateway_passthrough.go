@@ -390,6 +390,8 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		if buildErr != nil {
 			return nil, buildErr
 		}
+		applyCodexNormalizedRequestIdentityHeaders(c, account, upstreamReq.Header, body)
+		applyStagedCodexFingerprintHeaders(c, account, upstreamReq.Header)
 
 		upstreamStart := time.Now()
 		var oauthRetryExhausted bool

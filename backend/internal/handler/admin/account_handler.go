@@ -1247,8 +1247,9 @@ type TestAccountRequest struct {
 	Mode    string `json:"mode"`
 	// Optional media for Grok (and future) real generation tests.
 	// ImageDataURL / AudioDataURL are data:<mime>;base64,... payloads.
-	ImageDataURL string `json:"image_data_url"`
-	AudioDataURL string `json:"audio_data_url"`
+	ImageDataURL   string `json:"image_data_url"`
+	AudioDataURL   string `json:"audio_data_url"`
+	CodexUserAgent string `json:"codex_user_agent"`
 }
 
 type SyncFromCRSRequest struct {
@@ -1279,8 +1280,9 @@ func (h *AccountHandler) Test(c *gin.Context) {
 	_ = c.ShouldBindJSON(&req)
 
 	opts := service.AccountTestOptions{
-		ImageDataURL: req.ImageDataURL,
-		AudioDataURL: req.AudioDataURL,
+		ImageDataURL:   req.ImageDataURL,
+		AudioDataURL:   req.AudioDataURL,
+		CodexUserAgent: req.CodexUserAgent,
 	}
 
 	// Manual tests are diagnostic only and must not mutate account state.

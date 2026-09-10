@@ -134,8 +134,7 @@ func isolateOpenAIUpstreamSessionID(apiKeyID int64, account *Account, raw string
 	if namespace == "" {
 		return isolateOpenAISessionID(apiKeyID, raw)
 	}
-	sum := sha256.Sum256([]byte(fmt.Sprintf("u%d:a%s:%s", apiKeyID, namespace, raw)))
-	return fmt.Sprintf("%x", sum[:8])
+	return scopeCodexAccountIdentityValue(account, apiKeyID, "session", raw)
 }
 
 func scopeCodexAccountIdentityValue(account *Account, apiKeyID int64, kind, raw string) string {
@@ -143,6 +142,13 @@ func scopeCodexAccountIdentityValue(account *Account, apiKeyID int64, kind, raw 
 	namespace := codexAccountIdentityNamespace(account)
 	if raw == "" || namespace == "" {
 		return raw
+	}
+	// The stored device ID is already account-scoped. Hashing it again makes
+	// body metadata disagree with the final HTTP/WS installation header.
+	if kind == "installation" {
+		if deviceID := account.GetOpenAIDeviceID(); deviceID != "" {
+			return deviceID
+		}
 	}
 	return deriveStableUUIDv4(fmt.Sprintf(
 		"sub2api:codex-account-identity:%s:user:%d:account:%s:kind:%s:value:%s",
@@ -319,5 +325,74 @@ func applyCodexAccountIdentityHeaders(headers http.Header, account *Account, api
 				headers.Set(openAIWSTurnMetadataHeader, string(rebuilt))
 			}
 		}
+	}
+}
+
+// applyCodexNormalizedRequestIdentityHeaders projects already-normalized body
+// metadata onto the transport. It must run after body scoping/convergence and
+// header construction; never hash these values again. The raw client headers
+// remain untouched for retries, scheduling and another account's failover.
+func applyCodexNormalizedRequestIdentityHeaders(c *gin.Context, account *Account, headers http.Header, body []byte) {
+	source := codexAccountIdentitySource(c, account)
+	if headers == nil || codexAccountIdentityNamespace(source) == "" {
+		return
+	}
+	metadata := gjson.GetBytes(body, "client_metadata")
+	cacheKey := ""
+	if metadata.Get("session_id").String() == "" && resolveOpenAIWSSessionHeaders(c, "").SessionID == "" {
+		cacheKey = gjson.GetBytes(body, "prompt_cache_key").String()
+	}
+	applyCodexNormalizedIdentityMetadata(c, source, headers, metadata, cacheKey)
+}
+
+func applyCodexNormalizedRequestIdentityHeadersMap(c *gin.Context, account *Account, headers http.Header, body map[string]any) {
+	source := codexAccountIdentitySource(c, account)
+	if headers == nil || codexAccountIdentityNamespace(source) == "" {
+		return
+	}
+	// Serialize only metadata, never the potentially multi-megabyte input.
+	metadata, err := json.Marshal(body["client_metadata"])
+	if err != nil {
+		return
+	}
+	cacheKey, _ := body["prompt_cache_key"].(string)
+	applyCodexNormalizedIdentityMetadata(c, source, headers, gjson.ParseBytes(metadata), cacheKey)
+}
+
+func applyCodexNormalizedIdentityMetadata(c *gin.Context, source *Account, headers http.Header, metadata gjson.Result, cacheKey string) {
+	sessionID := strings.TrimSpace(metadata.Get("session_id").String())
+	if sessionID == "" {
+		// A cache key may be the only identity supplied by an API-compatible
+		// client. At this point the body key is already credential-scoped.
+		if resolveOpenAIWSSessionHeaders(c, "").SessionID == "" {
+			sessionID = strings.TrimSpace(cacheKey)
+		}
+	}
+	if sessionID == "" {
+		sessionID = strings.TrimSpace(headers.Get("session-id"))
+	}
+	if sessionID == "" {
+		sessionID = strings.TrimSpace(headers.Get("session_id"))
+	}
+	if sessionID != "" {
+		headers.Set("session-id", sessionID)
+		headers.Set("session_id", sessionID)
+		// Preserve an explicit conversation ID. Only update the compatibility
+		// alias that a builder synthesized from the same session/cache key.
+		if (c == nil || strings.TrimSpace(c.GetHeader("conversation_id")) == "") && headers.Get("conversation_id") != "" {
+			headers.Set("conversation_id", sessionID)
+		}
+	}
+	for _, projection := range [...]struct{ field, header string }{
+		{"thread_id", "thread-id"},
+		{"x-codex-window-id", "x-codex-window-id"},
+		{"x-codex-installation-id", "x-codex-installation-id"},
+	} {
+		if value := strings.TrimSpace(metadata.Get(projection.field).String()); value != "" {
+			headers.Set(projection.header, value)
+		}
+	}
+	if deviceID := source.GetOpenAIDeviceID(); deviceID != "" {
+		headers.Set("x-codex-installation-id", deviceID)
 	}
 }

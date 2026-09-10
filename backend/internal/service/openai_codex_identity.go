@@ -72,6 +72,9 @@ func codexAccountUserAgent(account *Account) string {
 	if configured := strings.TrimSpace(account.GetOpenAIUserAgent()); configured != "" {
 		return configured
 	}
+	if configured := codexConfiguredUserAgent(); configured != "" {
+		return configured
+	}
 
 	seed := codexAccountUserAgentSeed(account)
 	if seed == "" {
@@ -162,9 +165,28 @@ func SetCodexIdentityEnforcementEnabled(enabled bool) {
 type codexCanonicalUserAgentResolver func() string
 
 var (
-	codexCanonicalUAMu       sync.RWMutex
-	codexCanonicalUAResolver codexCanonicalUserAgentResolver
+	codexCanonicalUAMu        sync.RWMutex
+	codexCanonicalUAResolver  codexCanonicalUserAgentResolver
+	codexConfiguredUAResolver func() string
 )
+
+// SetCodexConfiguredUserAgentResolver supplies the explicit panel override.
+// An empty value must stay empty so the per-account fallback remains available.
+func SetCodexConfiguredUserAgentResolver(resolver func() string) {
+	codexCanonicalUAMu.Lock()
+	defer codexCanonicalUAMu.Unlock()
+	codexConfiguredUAResolver = resolver
+}
+
+func codexConfiguredUserAgent() string {
+	codexCanonicalUAMu.RLock()
+	resolver := codexConfiguredUAResolver
+	codexCanonicalUAMu.RUnlock()
+	if resolver != nil {
+		return strings.TrimSpace(resolver())
+	}
+	return ""
+}
 
 // SetCodexCanonicalUserAgentResolver 注入规范 User-Agent 解析器。
 // 未注入或解析结果非法时回退到编译期常量 codexCLIUserAgent。

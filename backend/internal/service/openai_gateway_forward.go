@@ -1083,6 +1083,9 @@ func (s *OpenAIGatewayService) forwardOnce(ctx context.Context, c *gin.Context, 
 			return nil, err
 		}
 
+		applyCodexNormalizedRequestIdentityHeaders(c, account, upstreamReq.Header, body)
+		applyStagedCodexFingerprintHeaders(c, account, upstreamReq.Header)
+
 		// Get proxy URL
 		proxyURL := ""
 		if account.ProxyID != nil && account.Proxy != nil {
@@ -1505,11 +1508,15 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 		} else {
 			req.Header.Set("accept", "text/event-stream")
 		}
-		if promptCacheKey != "" {
-			isolated := isolateOpenAIUpstreamSessionID(apiKeyID, codexAccountIdentitySource(c, account), promptCacheKey)
+		if session := resolveOpenAIWSSessionHeaders(c, promptCacheKey); session.SessionID != "" {
+			isolated := isolateOpenAIUpstreamSessionID(apiKeyID, codexAccountIdentitySource(c, account), session.SessionID)
 			req.Header.Set("session_id", isolated)
 			if !compatMessagesBridge || clientConversationID != "" {
-				req.Header.Set("conversation_id", isolated)
+				if clientConversationID != "" {
+					req.Header.Set("conversation_id", isolateOpenAIUpstreamSessionID(apiKeyID, codexAccountIdentitySource(c, account), clientConversationID))
+				} else {
+					req.Header.Set("conversation_id", isolated)
+				}
 			}
 		}
 	} else if isOpenAIResponsesCompactPath(c) {
