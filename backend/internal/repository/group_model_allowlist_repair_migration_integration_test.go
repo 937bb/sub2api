@@ -19,7 +19,11 @@ func TestMigration236RenamesLegacyModelsListConfigColumn(t *testing.T) {
 	tx := testTx(t)
 	ctx := context.Background()
 
-	_, err := tx.ExecContext(ctx, "ALTER TABLE groups RENAME COLUMN model_allowlist TO models_list_config")
+	// The compatibility repair keeps both columns on fresh branch databases.
+	// Recreate the legacy-only schema this migration test is meant to repair.
+	_, err := tx.ExecContext(ctx, "ALTER TABLE groups DROP COLUMN IF EXISTS models_list_config")
+	require.NoError(t, err)
+	_, err = tx.ExecContext(ctx, "ALTER TABLE groups RENAME COLUMN model_allowlist TO models_list_config")
 	require.NoError(t, err)
 
 	var groupID int64
@@ -50,7 +54,7 @@ func TestMigration236BackfillsWhenBothColumnsExist(t *testing.T) {
 	ctx := context.Background()
 
 	_, err := tx.ExecContext(ctx,
-		"ALTER TABLE groups ADD COLUMN models_list_config JSONB NOT NULL DEFAULT '{}'::jsonb")
+		"ALTER TABLE groups ADD COLUMN IF NOT EXISTS models_list_config JSONB NOT NULL DEFAULT '{}'::jsonb")
 	require.NoError(t, err)
 
 	// An empty new column should be backfilled from the legacy column.
