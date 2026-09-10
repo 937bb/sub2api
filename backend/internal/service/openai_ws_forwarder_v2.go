@@ -157,6 +157,11 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	storeDisabledConnMode := s.openAIWSStoreDisabledConnMode()
 	forceNewConnByPolicy := shouldForceNewConnOnStoreDisabled(storeDisabledConnMode, lastFailureReason)
 	forceNewConn := forceNewConnByPolicy && storeDisabled && previousResponseID == "" && sessionHash != "" && preferredConnID == ""
+	if retryState := oauthMappedWSTransportState(c, account.ID); retryState != nil && retryState.forceNewConn && previousResponseID == "" {
+		// Recover a stale transport using a fresh WS without disabling ordinary
+		// pool reuse or overriding response-bound continuation affinity.
+		forceNewConn = true
+	}
 	wsHeaders, sessionResolution, buildHdrErr := s.buildOpenAIWSHeaders(
 		ctx,
 		c,
@@ -579,6 +584,9 @@ readLoop:
 				wroteDownstream,
 			)
 			if !wroteDownstream {
+				if oauthMappedRetryActive(c) && mappedRetryOutputObserved {
+					return resultWithUsage(), errors.New("upstream websocket returned malformed Responses event JSON after observed output")
+				}
 				return nil, wrapOpenAIWSFallback("invalid_event_json", errors.New("upstream websocket returned malformed Responses event JSON"))
 			}
 			return nil, errors.New("upstream websocket returned malformed Responses event JSON after downstream output")
@@ -618,6 +626,9 @@ readLoop:
 				break
 			}
 			if !wroteDownstream {
+				if oauthMappedRetryActive(c) && mappedRetryOutputObserved {
+					return resultWithUsage(), fmt.Errorf("openai ws read event after observed output: %w", readErr)
+				}
 				return nil, wrapOpenAIWSFallback(fallbackReason, readErr)
 			}
 			setOpsUpstreamError(c, 0, sanitizeUpstreamErrorMessage(readErr.Error()), "")
@@ -896,6 +907,9 @@ readLoop:
 				wroteDownstream,
 			)
 			if !wroteDownstream {
+				if oauthMappedRetryActive(c) && mappedRetryOutputObserved {
+					return resultWithUsage(), errors.New("ws finished without final response after observed output")
+				}
 				return nil, wrapOpenAIWSFallback("missing_final_response", errors.New("no terminal response payload"))
 			}
 			return nil, errors.New("ws finished without final response")

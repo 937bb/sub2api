@@ -30,6 +30,16 @@ func (s *OpenAIGatewayService) forwardWithOAuthMappedRetry(ctx context.Context, 
 func runOAuthMappedRetry(ctx context.Context, c *gin.Context, accountID int64, body []byte, settings OAuthRetrySettings, forward func([]byte) (*OpenAIForwardResult, error)) (*OpenAIForwardResult, error) {
 	originalWriter := c.Writer
 	defer func() { c.Writer = originalWriter; c.Set(oauthMappedRetryKey, false) }()
+	wsRetryState := &oauthMappedWSTransportRetryState{accountID: accountID, settings: settings}
+	previousWSRetryState, hadWSRetryState := c.Get(oauthMappedWSTransportRetryStateKey)
+	c.Set(oauthMappedWSTransportRetryStateKey, wsRetryState)
+	defer func() {
+		if hadWSRetryState {
+			c.Set(oauthMappedWSTransportRetryStateKey, previousWSRetryState)
+		} else {
+			delete(c.Keys, oauthMappedWSTransportRetryStateKey)
+		}
+	}()
 	keys := make(map[string]any, len(c.Keys))
 	for _, k := range []string{ResponseCommittedKey, OpsStreamErrorKey, OpsStreamErrorsKey, OpsSkipPassthroughKey} {
 		if v, ok := c.Get(k); ok {
@@ -55,6 +65,7 @@ func runOAuthMappedRetry(ctx context.Context, c *gin.Context, accountID int64, b
 	canonical := append([]byte(nil), body...)
 	logRequest := c.Request.Clone(withOAuthRetryLogContext(ctx, c.Request.Context(), accountID))
 	for attempt := 0; ; attempt++ {
+		wsRetryState.attempt = attempt
 		c.Set(oauthMappedRetryKey, true)
 		c.Set("oauth_mapped_retry_settings", settings)
 		writer := &oauthRetryWriter{ResponseWriter: originalWriter}

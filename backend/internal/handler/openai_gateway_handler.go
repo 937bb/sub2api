@@ -647,7 +647,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 					return
 				}
 				cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, reqModel, reqModel, requestPlatform)
-				cls = classifySelectionFailureError(err, cls)
+				cls = classifySelectionFailureErrorFromGin(c, err, cls)
 				if !cls.ModelNotFound {
 					markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
 				}
@@ -762,7 +762,8 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		// #5148 对齐：错误返回携带的部分 result（流中断前上游已计量的 usage）照常
 		// 入账；failover 错误恒定 result=nil，不会重复计费。
 		submitResponsesUsage := func(res *service.OpenAIForwardResult) {
-			if res == nil {
+			service.MarkOpenAIForwardTerminalFailure(c, res, err)
+			if !service.ShouldRecordOpenAIUsage(res, err, service.GetOpsCyberPolicy(c) != nil) {
 				return
 			}
 			userAgent := c.GetHeader("User-Agent")
@@ -1358,7 +1359,8 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		// usage 照常入账，避免上游已产生消耗的请求完全漏记（#5148，对齐 anthropic
 		// 网关同名修复）。failover 错误恒定 result=nil，不会重复计费。
 		submitMessagesUsage := func(res *service.OpenAIForwardResult) {
-			if res == nil {
+			service.MarkOpenAIForwardTerminalFailure(c, res, err)
+			if !service.ShouldRecordOpenAIUsage(res, err, service.GetOpsCyberPolicy(c) != nil) {
 				return
 			}
 			userAgent := c.GetHeader("User-Agent")
@@ -2971,6 +2973,10 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				if result == nil {
 					return
 				}
+				service.MarkOpenAIForwardTerminalFailure(c, result, turnErr)
+				if !service.ShouldRecordOpenAIUsage(result, turnErr, service.GetOpsCyberPolicy(c) != nil) {
+					return
+				}
 				result.BillingModel = openAIWSTurnBillingModel(result, turnMapping, turnRequestedModel, turnUpstreamModel)
 				reqLog.Debug("openai.websocket_turn_billing",
 					zap.Int("turn", turn),
@@ -3382,7 +3388,7 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 		h.handleStreamingAwareError(c, status, "upstream_error", message, streamStarted)
 		return
 	}
-	if failoverErr.IsOpenAICapacityShed() && strings.TrimSpace(failoverErr.ClientMessage) != "" {
+	if failoverErr.Reason != service.OpenAIWSMappedRetryReason && failoverErr.IsOpenAICapacityShed() && strings.TrimSpace(failoverErr.ClientMessage) != "" {
 		status := failoverErr.ClientStatusCode
 		if status <= 0 {
 			status = http.StatusServiceUnavailable
@@ -3406,9 +3412,10 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 
 	// 先检查透传规则
 	if h.errorPassthroughService != nil && len(responseBody) > 0 {
-		if rule := h.errorPassthroughService.MatchRule("openai", statusCode, responseBody); rule != nil {
+		ruleStatusCode := service.OpenAIWSMappedRetryPassthroughStatus(failoverErr)
+		if rule := h.errorPassthroughService.MatchRule("openai", ruleStatusCode, responseBody); rule != nil {
 			// 确定响应状态码
-			respCode := statusCode
+			respCode := ruleStatusCode
 			if !rule.PassthroughCode && rule.ResponseCode != nil {
 				respCode = *rule.ResponseCode
 			}

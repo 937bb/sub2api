@@ -115,6 +115,12 @@ func (s *OpenAIGatewayService) forwardOnce(ctx context.Context, c *gin.Context, 
 		GetOpenAIClientTransport(c),
 		httpIngressUpstreamWSEnabled,
 	)
+	if retryState := oauthMappedWSTransportState(c, account.ID); retryState != nil && retryState.forceHTTP {
+		wsDecision.Transport = OpenAIUpstreamTransportHTTPSSE
+		wsDecision.Reason = "ws_transport_fallback:" + retryState.fallbackReason
+		c.Set("openai_ws_fallback_to_http", true)
+		c.Set("openai_ws_fallback_reason", retryState.fallbackReason)
+	}
 	if wsDecision.Transport == OpenAIUpstreamTransportResponsesWebsocketV2 && s.isOpenAIWSFallbackCooling(account.ID) {
 		wsDecision.Transport = OpenAIUpstreamTransportHTTPSSE
 		wsDecision.Reason = "fallback_cooling"
@@ -1034,8 +1040,14 @@ func (s *OpenAIGatewayService) forwardOnce(ctx context.Context, c *gin.Context, 
 			}
 			return wsResult, wsErr
 		}
+		if (ctx != nil && ctx.Err() != nil) || (c != nil && c.Request != nil && c.Request.Context().Err() != nil) {
+			return nil, wsErr
+		}
 		reason, _ := classifyOpenAIWSReconnectReason(wsErr)
 		if shouldFallbackOpenAIWSToHTTP(reason) && (c == nil || c.Writer == nil || !c.Writer.Written()) {
+			if retryErr, scheduled := s.prepareOpenAIWSMappedTransportRetry(ctx, c, account, reason, wsErr); scheduled {
+				return nil, retryErr
+			}
 			s.markOpenAIWSFallbackCooling(account.ID, reason)
 			if c != nil {
 				c.Set("openai_ws_fallback_to_http", true)

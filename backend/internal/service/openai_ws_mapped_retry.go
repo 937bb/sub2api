@@ -16,6 +16,19 @@ import (
 // HTTP ingress mapped-retry budget. It must not enter WS reconnect/fallback.
 const OpenAIWSMappedRetryReason GatewayFailureReason = "oauth_ws_preoutput_mapped_retry"
 
+// OpenAIWSMappedRetryPassthroughStatus keeps rule matching consistent with the
+// pre-output WS interceptor. The client-facing mapped status can differ from
+// the upstream event's semantic status (for example, overload maps 503 to 502).
+func OpenAIWSMappedRetryPassthroughStatus(failoverErr *UpstreamFailoverError) int {
+	if failoverErr == nil {
+		return 0
+	}
+	if failoverErr.Reason != OpenAIWSMappedRetryReason {
+		return failoverErr.StatusCode
+	}
+	return openAIStreamFailedEventSemanticStatus(failoverErr.ResponseBody, failoverErr.ClientMessage)
+}
+
 // openAIWSMappedRetryOutputObserved is deliberately conservative about tool
 // and output items, even when the streaming writer has buffered them. Metadata
 // such as response.created alone does not make an attempt billable or visible.
