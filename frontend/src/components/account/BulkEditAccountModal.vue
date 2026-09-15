@@ -848,6 +848,43 @@
         </div>
       </div>
 
+      <!-- OpenAI OAuth WS mode -->
+      <div v-if="allOpenAIOAuth" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+        <div class="mb-3 flex items-center justify-between">
+          <label
+            id="bulk-edit-openai-ws-mode-label"
+            class="input-label mb-0"
+            for="bulk-edit-openai-ws-mode-enabled"
+          >
+            {{ t('admin.accounts.openai.wsMode') }}
+          </label>
+          <input
+            v-model="enableOpenAIWSMode"
+            id="bulk-edit-openai-ws-mode-enabled"
+            type="checkbox"
+            aria-controls="bulk-edit-openai-ws-mode"
+            class="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+          />
+        </div>
+        <div
+          id="bulk-edit-openai-ws-mode"
+          :class="!enableOpenAIWSMode && 'pointer-events-none opacity-50'"
+        >
+          <p class="mb-3 text-xs text-gray-500 dark:text-gray-400">
+            {{ t('admin.accounts.openai.wsModeDesc') }}
+          </p>
+          <p v-if="openAIWSModeHintKey" class="mb-3 text-xs text-gray-500 dark:text-gray-400">
+            {{ t(openAIWSModeHintKey) }}
+          </p>
+          <Select
+            v-model="openaiOAuthResponsesWebSocketV2Mode"
+            data-testid="bulk-edit-openai-ws-mode-select"
+            :options="openAIWSModeOptions"
+            aria-labelledby="bulk-edit-openai-ws-mode-label"
+          />
+        </div>
+      </div>
+
       <!-- OpenAI OAuth Codex CLI only -->
       <div v-if="allOpenAIOAuth" class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="mb-3 flex items-center justify-between">
@@ -1089,43 +1126,6 @@
         </div>
       </div>
 
-      <!-- OpenAI OAuth WS mode -->
-      <div v-if="allOpenAIOAuth" class="border-t border-gray-200 pt-4 dark:border-dark-600">
-        <div class="mb-3 flex items-center justify-between">
-          <label
-            id="bulk-edit-openai-ws-mode-label"
-            class="input-label mb-0"
-            for="bulk-edit-openai-ws-mode-enabled"
-          >
-            {{ t('admin.accounts.openai.wsMode') }}
-          </label>
-          <input
-            v-model="enableOpenAIWSMode"
-            id="bulk-edit-openai-ws-mode-enabled"
-            type="checkbox"
-            aria-controls="bulk-edit-openai-ws-mode"
-            class="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-          />
-        </div>
-        <div
-          id="bulk-edit-openai-ws-mode"
-          :class="!enableOpenAIWSMode && 'pointer-events-none opacity-50'"
-        >
-          <p class="mb-3 text-xs text-gray-500 dark:text-gray-400">
-            {{ t('admin.accounts.openai.wsModeDesc') }}
-          </p>
-          <p class="mb-3 text-xs text-gray-500 dark:text-gray-400">
-            {{ t(openAIWSModeConcurrencyHintKey) }}
-          </p>
-          <Select
-            v-model="openaiOAuthResponsesWebSocketV2Mode"
-            data-testid="bulk-edit-openai-ws-mode-select"
-            :options="openAIWSModeOptions"
-            aria-labelledby="bulk-edit-openai-ws-mode-label"
-          />
-        </div>
-      </div>
-
       <!-- OpenAI API Key WS mode -->
       <div v-if="allOpenAIAPIKey" class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="mb-3 flex items-center justify-between">
@@ -1151,8 +1151,8 @@
           <p class="mb-3 text-xs text-gray-500 dark:text-gray-400">
             {{ t('admin.accounts.openai.wsModeDesc') }}
           </p>
-          <p class="mb-3 text-xs text-gray-500 dark:text-gray-400">
-            {{ t(openAIAPIKeyWSModeConcurrencyHintKey) }}
+          <p v-if="openAIAPIKeyWSModeHintKey" class="mb-3 text-xs text-gray-500 dark:text-gray-400">
+            {{ t(openAIAPIKeyWSModeHintKey) }}
           </p>
           <Select
             v-model="openaiAPIKeyResponsesWebSocketV2Mode"
@@ -1513,7 +1513,7 @@ import {
   OPENAI_WS_MODE_PASSTHROUGH,
   OPENAI_WS_MODE_HTTP_BRIDGE,
   isOpenAIWSModeEnabled,
-  resolveOpenAIWSModeConcurrencyHintKey
+  resolveOpenAIWSModeHintKey
 } from '@/utils/openaiWsMode'
 import type { OpenAIWSMode } from '@/utils/openaiWsMode'
 interface Props {
@@ -1824,11 +1824,11 @@ const toggleOpenAIEndpointCapability = (
     capability
   ])
 }
-const openAIWSModeConcurrencyHintKey = computed(() =>
-  resolveOpenAIWSModeConcurrencyHintKey(openaiOAuthResponsesWebSocketV2Mode.value)
+const openAIWSModeHintKey = computed(() =>
+  resolveOpenAIWSModeHintKey(openaiOAuthResponsesWebSocketV2Mode.value)
 )
-const openAIAPIKeyWSModeConcurrencyHintKey = computed(() =>
-  resolveOpenAIWSModeConcurrencyHintKey(openaiAPIKeyResponsesWebSocketV2Mode.value)
+const openAIAPIKeyWSModeHintKey = computed(() =>
+  resolveOpenAIWSModeHintKey(openaiAPIKeyResponsesWebSocketV2Mode.value)
 )
 
 // Model mapping helpers

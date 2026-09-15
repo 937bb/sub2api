@@ -102,12 +102,12 @@ func sanitizeOpenAIResponsesInputItemStatuses(body []byte) ([]byte, bool, error)
 }
 
 func sanitizeOpenAIResponsesInputItemsWithIDPolicy(body []byte, stripInvalidIDs bool) ([]byte, bool, error) {
-	input := gjson.GetBytes(body, "input")
+	input := parseRawJSONView(body).Get("input")
 	if !input.IsArray() {
 		return body, false, nil
 	}
 
-	items := make([][]byte, 0)
+	items := make([]string, 0)
 	changed := false
 	var sanitizeErr error
 	index := 0
@@ -145,7 +145,7 @@ func sanitizeOpenAIResponsesInputItemsWithIDPolicy(body []byte, stripInvalidIDs 
 				changed = true
 			}
 		}
-		items = append(items, itemBody)
+		items = append(items, string(itemBody))
 		return true
 	})
 	if sanitizeErr != nil {
@@ -154,20 +154,5 @@ func sanitizeOpenAIResponsesInputItemsWithIDPolicy(body []byte, stripInvalidIDs 
 	if !changed {
 		return body, false, nil
 	}
-
-	rebuiltInput := make([]byte, 0, len(input.Raw))
-	rebuiltInput = append(rebuiltInput, '[')
-	for i, item := range items {
-		if i > 0 {
-			rebuiltInput = append(rebuiltInput, ',')
-		}
-		rebuiltInput = append(rebuiltInput, item...)
-	}
-	rebuiltInput = append(rebuiltInput, ']')
-
-	sanitized, err := sjson.SetRawBytes(body, "input", rebuiltInput)
-	if err != nil {
-		return nil, false, fmt.Errorf("replace sanitized input: %w", err)
-	}
-	return sanitized, true, nil
+	return replaceOpenAIRawInput(body, input, items), true, nil
 }

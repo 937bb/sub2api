@@ -61,7 +61,7 @@ func TestCodexOutboundFollowupImageIdentity(t *testing.T) {
 				svc := newOpenAIImagesTestService(upstream)
 				parsed, err := svc.ParseOpenAIImagesRequest(c, body)
 				require.NoError(t, err)
-				_, err = svc.ForwardImages(context.Background(), c, account, body, parsed, "")
+				_, err = svc.ForwardImages(withOpenAIImagesForceResponses(context.Background()), c, account, body, parsed, "")
 				require.NoError(t, err)
 				require.NotNil(t, upstream.lastReq)
 				h := upstream.lastReq.Header

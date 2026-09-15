@@ -1,7 +1,6 @@
 package service
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -17,15 +16,21 @@ func normalizeOpenAIResponsesLegacyIngress(body []byte) ([]byte, bool, error) {
 	if len(body) == 0 {
 		return body, false, nil
 	}
-	// Decode only when a legacy top-level field might exist. Keep validation
-	// and the existing decoder errors for malformed or non-object payloads.
-	trimmed := bytes.TrimSpace(body)
-	mayContainLegacy := bytes.Contains(body, []byte(`"messages"`)) ||
-		bytes.Contains(body, []byte(`"prompt"`)) ||
-		bytes.Contains(body, []byte(`"commands"`)) || bytes.Contains(body, []byte(`\u`))
-	if len(trimmed) > 0 && trimmed[0] == '{' &&
-		(!mayContainLegacy || !openAIResponsesHasLegacyIngressFields(body)) && json.Valid(body) {
-		return body, false, nil
+	// Native requests can contain large image data URLs. Decode the full object
+	// only when a legacy top-level field needs compatibility handling.
+	view := parseRawJSONView(body)
+	if view.IsObject() && gjson.ValidBytes(body) {
+		hasLegacyField := false
+		view.ForEach(func(key, _ gjson.Result) bool {
+			switch key.Str {
+			case "messages", "prompt", "commands":
+				hasLegacyField = true
+			}
+			return !hasLegacyField
+		})
+		if !hasLegacyField {
+			return body, false, nil
+		}
 	}
 
 	var request map[string]any

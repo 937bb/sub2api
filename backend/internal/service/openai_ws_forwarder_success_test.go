@@ -1468,7 +1468,9 @@ func TestOpenAIGatewayService_Forward_WSv2_TurnStateAndMetadataReplayOnReconnect
 	require.NoError(t, err)
 	require.NotNil(t, result1)
 
-	sessionHash := svc.GenerateSessionHash(c1, reqBody)
+	// 会话级状态按执行作用域取键（显式 session_id 也在其中），不再是原会话哈希。
+	sessionHash, _ := resolveOpenAIWSExecutionScope(c1, reqBody, getAPIKeyIDFromContext(c1))
+	require.NotEmpty(t, sessionHash)
 	store := svc.getOpenAIWSStateStore()
 	turnState, ok := store.GetSessionTurnState(0, sessionHash)
 	require.True(t, ok)
@@ -1984,6 +1986,7 @@ func TestOpenAIGatewayService_Forward_WSv2ReadTimeoutAppliesPerRead(t *testing.T
 type openAIWSCaptureDialer struct {
 	mu          sync.Mutex
 	conn        *openAIWSCaptureConn
+	connFactory func() *openAIWSCaptureConn
 	lastHeaders http.Header
 	handshake   http.Header
 	dialCount   int
@@ -2002,8 +2005,12 @@ func (d *openAIWSCaptureDialer) Dial(
 	d.lastHeaders = cloneHeader(headers)
 	d.dialCount++
 	respHeaders := cloneHeader(d.handshake)
+	conn := d.conn
+	if d.connFactory != nil {
+		conn = d.connFactory()
+	}
 	d.mu.Unlock()
-	return d.conn, 0, respHeaders, nil
+	return conn, 0, respHeaders, nil
 }
 
 func (d *openAIWSCaptureDialer) DialCount() int {
