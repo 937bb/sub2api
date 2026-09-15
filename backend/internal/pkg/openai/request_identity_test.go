@@ -84,3 +84,8 @@ func TestPairCodexClientIdentity(t *testing.T) {
 		})
 	}
 }
+
+func TestCodexDefaultOriginatorMatchesOfficialCodexRSDefault(t *testing.T) {
+	require.Equal(t, "codex_cli_rs", CodexCLIOriginator)
+	require.Equal(t, CodexCLIOriginator, CodexDefaultOriginator)
+}

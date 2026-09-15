@@ -343,7 +343,7 @@ func TestBuildCodexCLIUserAgent(t *testing.T) {
 	require.Equal(t, codexCLIUserAgent, buildCodexCLIUserAgent(""))
 }
 
-func TestCodexAccountUserAgentIsStableAndCredentialScoped(t *testing.T) {
+func TestCodexAccountUserAgentUsesCanonicalOfficialIdentity(t *testing.T) {
 	account := &Account{
 		ID:       101,
 		Platform: PlatformOpenAI,
@@ -351,20 +351,17 @@ func TestCodexAccountUserAgentIsStableAndCredentialScoped(t *testing.T) {
 		Extra:    map[string]any{codexFingerprintSeedExtraKey: testCodexFingerprintSeed},
 	}
 	first := codexAccountUserAgent(account)
-	require.NotEmpty(t, first)
-	require.NotEqual(t, codexCLIUserAgent, first)
+	require.Equal(t, codexCLIUserAgent, first)
 	require.Equal(t, first, codexAccountUserAgent(account))
 
-	seen := map[string]struct{}{first: {}}
 	for id := int64(102); id < 150; id++ {
 		other := &Account{
 			ID:       id,
 			Platform: PlatformOpenAI,
 			Type:     AccountTypeOAuth,
 		}
-		seen[codexAccountUserAgent(other)] = struct{}{}
+		require.Equal(t, first, codexAccountUserAgent(other), "accounts must not invent different OS profiles")
 	}
-	require.Greater(t, len(seen), 1, "different credential namespaces must not all emit one static UA")
 
 	originator, pairedUA, ok := openai.PairCodexClientIdentity(first)
 	require.True(t, ok)
@@ -384,7 +381,7 @@ func TestCodexAccountUserAgentHonorsExplicitOverride(t *testing.T) {
 	require.Equal(t, account.GetOpenAIUserAgent(), codexAccountUserAgent(account))
 }
 
-func TestCodexAccountUserAgentUsesPersistentSeedAcrossTokenRotation(t *testing.T) {
+func TestCodexAccountFingerprintSeedDoesNotChangeOfficialUserAgent(t *testing.T) {
 	base := &Account{
 		ID:       202,
 		Platform: PlatformOpenAI,
@@ -416,7 +413,7 @@ func TestCodexAccountUserAgentUsesPersistentSeedAcrossTokenRotation(t *testing.T
 		Type:     base.Type,
 		Extra:    map[string]any{codexFingerprintSeedExtraKey: "22222222-2222-4222-8222-222222222222"},
 	}
-	require.NotEqual(t, codexAccountUserAgent(base), codexAccountUserAgent(rotatedSeed))
+	require.Equal(t, codexAccountUserAgent(base), codexAccountUserAgent(rotatedSeed))
 }
 
 func TestCodexAccountUserAgentDoesNotApplyToAPIKey(t *testing.T) {
@@ -434,8 +431,7 @@ func TestCodexAccountUserAgentSupportsLegacyImplicitOpenAIAccount(t *testing.T) 
 	}
 
 	ua := codexAccountUserAgent(account)
-	require.NotEmpty(t, ua)
-	require.NotEqual(t, codexCLIUserAgent, ua)
+	require.Equal(t, codexCLIUserAgent, ua)
 }
 
 func TestCodexCanonicalUserAgentFollowsResolver(t *testing.T) {

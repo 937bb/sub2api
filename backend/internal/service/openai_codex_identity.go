@@ -1,12 +1,8 @@
 package service
 
 import (
-	"crypto/sha256"
-	"encoding/binary"
-	"encoding/hex"
 	"net/http"
 	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -24,22 +20,6 @@ const codexClientVersionMaxLen = 64
 
 // codexClientVersionPattern 允许 0.146.0 与 0.147.0-alpha.4 两类官方形态。
 var codexClientVersionPattern = regexp.MustCompile(`^[0-9]+(\.[0-9]+){1,3}(-[0-9A-Za-z.]+)?$`)
-
-// codexAccountEnvironmentProfiles contains known Codex client environment
-// shapes. The selected profile is stable per account seed, so one account keeps
-// a coherent identity while different accounts do not all emit the source
-// project's default Ubuntu suffix.
-var codexAccountEnvironmentProfiles = [...]string{
-	" (Ubuntu 22.4.0; x86_64) screen",
-	" (Ubuntu 24.04; x86_64) xterm-256color",
-	" (Ubuntu 24.04; x86_64) screen",
-	" (Ubuntu 24.04; x86_64) WindowsTerminal",
-	" (Mac OS X 14.0; arm64) iTerm",
-	" (Mac OS X 15.1.0; arm64) iTerm.app",
-	" (Mac OS X 14.0; x86_64) Terminal",
-	" (Windows 10.0.19045; x86_64) unknown",
-	" (Windows 11.0.26100; x86_64) WindowsTerminal",
-}
 
 // NormalizeCodexClientVersion 校验并归一化 Codex 客户端版本号，非法值返回空串。
 // 该值会被拼进出站 User-Agent 与 version 头，必须拒绝任意字节，避免管理员误填或
@@ -61,10 +41,11 @@ func buildCodexCLIUserAgent(version string) string {
 	return openai.CodexDefaultOriginator + "/" + version + codexCLIUserAgentSuffix
 }
 
-// codexAccountUserAgent returns a stable, credential-scoped environment UA.
-// Explicit account configuration remains the highest-priority override. The
-// generated profile changes only the environment suffix; originator and the
-// version declaration are paired by resolveCodexOutboundIdentity.
+// codexAccountUserAgent returns the Codex client UA used by an OAuth-like
+// account. Explicit account and panel settings keep their priority. Without an
+// override, all accounts use the canonical UA built from Codex's official
+// default originator and current engine version. Account isolation belongs in
+// installation/session/thread identifiers, not in invented OS profiles.
 func codexAccountUserAgent(account *Account) string {
 	if !isCodexAccountIdentityCandidate(account) {
 		return ""
@@ -76,54 +57,7 @@ func codexAccountUserAgent(account *Account) string {
 		return configured
 	}
 
-	seed := codexAccountUserAgentSeed(account)
-	if seed == "" {
-		return ""
-	}
-	digest := sha256.Sum256([]byte("sub2api:codex-environment-ua:v1:" + seed))
-	profile := codexAccountEnvironmentProfiles[binary.BigEndian.Uint64(digest[:8])%uint64(len(codexAccountEnvironmentProfiles))]
-	version := codexClientVersionFromUA(codexCanonicalUserAgent())
-	return openai.CodexDefaultOriginator + "/" + version + profile
-}
-
-// codexAccountUserAgentSeed returns a stable credential-scoped seed for the
-// environment portion of the Codex identity. The persisted fingerprint seed
-// is preferred so token rotation cannot rotate an existing account's UA.
-func codexAccountUserAgentSeed(account *Account) string {
-	if !isCodexAccountIdentityCandidate(account) {
-		return ""
-	}
-	if seed, ok := codexFingerprintSeed(account.Extra); ok {
-		return "fingerprint-seed:" + seed
-	}
-	if upstreamAccountID := strings.TrimSpace(account.GetCredential("chatgpt_account_id")); upstreamAccountID != "" {
-		if member := codexAccountMemberIdentity(account); member != "" {
-			return "chatgpt-account:" + upstreamAccountID + ":member:" + member
-		}
-		if email := codexAccountEmailIdentity(account); email != "" {
-			return "chatgpt-account:" + upstreamAccountID + ":email:" + email
-		}
-		return "chatgpt-account:" + upstreamAccountID
-	}
-	if member := codexAccountMemberIdentity(account); member != "" {
-		return "member:" + member
-	}
-	if email := codexAccountEmailIdentity(account); email != "" {
-		return "email:" + email
-	}
-	if account.ParentAccountID != nil && *account.ParentAccountID > 0 {
-		return "parent-account:" + strconv.FormatInt(*account.ParentAccountID, 10)
-	}
-	if account.ID > 0 {
-		return "account-row:" + strconv.FormatInt(account.ID, 10)
-	}
-	if refreshToken := strings.TrimSpace(account.GetCredential("refresh_token")); refreshToken != "" {
-		return "refresh-token:" + codexAccountUserAgentSecretDigest(refreshToken)
-	}
-	if accessToken := strings.TrimSpace(account.GetCredential("access_token")); accessToken != "" {
-		return "access-token:" + codexAccountUserAgentSecretDigest(accessToken)
-	}
-	return ""
+	return codexCanonicalUserAgent()
 }
 
 // isCodexAccountIdentityCandidate recognizes OpenAI OAuth-like accounts,
@@ -135,11 +69,6 @@ func isCodexAccountIdentityCandidate(account *Account) bool {
 		return false
 	}
 	return account.Platform == "" || account.IsOpenAIOAuthLike()
-}
-
-func codexAccountUserAgentSecretDigest(secret string) string {
-	digest := sha256.Sum256([]byte("sub2api:codex-environment-ua-secret:v1:" + secret))
-	return hex.EncodeToString(digest[:16])
 }
 
 // codexIdentityEnforcement 控制 enforceCodexIdentityHeaders 是否强制统一出站身份，

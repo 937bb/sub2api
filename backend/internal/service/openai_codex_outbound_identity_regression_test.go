@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -52,7 +53,7 @@ func TestCodexPanelEnvironmentOverrideReachesAccountTransports(t *testing.T) {
 	require.Empty(t, codexAccountUserAgent(&Account{Type: AccountTypeAPIKey, Platform: PlatformOpenAI}))
 }
 
-func TestCodexEmptyPanelOverrideKeepsGeneratedAccountEnvironment(t *testing.T) {
+func TestCodexEmptyPanelOverrideUsesCanonicalOfficialEnvironment(t *testing.T) {
 	settings := NewSettingService(&codexVersionSettingRepoStub{values: map[string]string{}}, nil)
 	require.Empty(t, settings.GetOpenAICodexUserAgentOverride(context.Background()))
 	require.Equal(t, DefaultOpenAICodexUserAgent, settings.GetOpenAICodexUserAgent(context.Background()))
@@ -60,8 +61,7 @@ func TestCodexEmptyPanelOverrideKeepsGeneratedAccountEnvironment(t *testing.T) {
 	t.Cleanup(func() { SetCodexConfiguredUserAgentResolver(nil) })
 	account := &Account{ID: 70, Platform: PlatformOpenAI, Type: AccountTypeOAuth,
 		Extra: map[string]any{codexFingerprintSeedExtraKey: testCodexFingerprintSeed}}
-	require.NotEmpty(t, codexAccountUserAgent(account))
-	require.NotEqual(t, DefaultOpenAICodexUserAgent, codexAccountUserAgent(account))
+	require.Equal(t, DefaultOpenAICodexUserAgent, codexAccountUserAgent(account))
 }
 
 func TestCodexNormalizedIdentityMatchesAcrossBodyHTTPPassthroughAndWS(t *testing.T) {
@@ -91,6 +91,9 @@ func TestCodexNormalizedIdentityMatchesAcrossBodyHTTPPassthroughAndWS(t *testing
 				require.NoError(t, err)
 				for _, headers := range []http.Header{regular.Header, passthrough.Header, ws} {
 					applyCodexNormalizedRequestIdentityHeaders(c, account, headers, normalized)
+					require.Equal(t, CodexCanonicalUserAgent(), headers.Get("User-Agent"))
+					require.Equal(t, openai.CodexDefaultOriginator, headers.Get("originator"))
+					require.Equal(t, CodexCanonicalClientVersion(), headers.Get("version"))
 					require.Equal(t, gjson.GetBytes(normalized, "client_metadata.session_id").String(), headers.Get("session-id"))
 					require.Equal(t, headers.Get("session-id"), headers.Get("session_id"))
 					require.Equal(t, gjson.GetBytes(normalized, "client_metadata.thread_id").String(), headers.Get("thread-id"))
@@ -181,6 +184,9 @@ func TestCodexForwardTransportIdentityParityModes(t *testing.T) {
 				require.Equal(t, gjson.GetBytes(sent, "client_metadata.session_id").String(), headers.Get("session-id"))
 				require.Equal(t, codexClientTimezone, gjson.GetBytes(sent, "client_metadata.timezone").String())
 				require.Equal(t, codexClientAcceptLanguage, headers.Get("Accept-Language"))
+				require.Equal(t, CodexCanonicalUserAgent(), headers.Get("User-Agent"))
+				require.Equal(t, openai.CodexDefaultOriginator, headers.Get("originator"))
+				require.Equal(t, CodexCanonicalClientVersion(), headers.Get("version"))
 				require.Equal(t, headers.Get("session-id"), headers.Get("session_id"))
 				require.Equal(t, gjson.GetBytes(sent, "client_metadata.x-codex-installation-id").String(), headers.Get("x-codex-installation-id"))
 				if useWS {

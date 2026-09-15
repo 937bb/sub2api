@@ -1595,7 +1595,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 
 // codexIdentityOverrideUA returns the account-scoped Codex UA used by the
 // shared identity sink. ForceCodexCLI still overrides an explicit account UA,
-// while accounts without one keep their stable generated environment profile.
+// while accounts without one use the canonical official client profile.
 func (s *OpenAIGatewayService) codexIdentityOverrideUA(account *Account) string {
 	if s != nil && s.cfg != nil && s.cfg.Gateway.ForceCodexCLI {
 		if account != nil && strings.TrimSpace(account.GetOpenAIUserAgent()) != "" {
