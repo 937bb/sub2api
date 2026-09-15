@@ -25,7 +25,7 @@ func copyOpenAICodexDelegationHeaders(
 	isCodexClient bool,
 	dst http.Header,
 ) {
-	if c == nil || c.Request == nil || account == nil || !account.IsOpenAIOAuth() || !isCodexClient || dst == nil {
+	if c == nil || c.Request == nil || account == nil || !account.IsOpenAIOAuthLike() || !isCodexClient || dst == nil {
 		return
 	}
 

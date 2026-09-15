@@ -76,53 +76,37 @@ func normalizeCodexEnvironmentContextStandalone(text string) string {
 	return out.String()
 }
 
-// normalizeCodexEnvironmentContext also accepts surrounding harness text. Codex
-// emits the XML fragment inside a larger user-context section in some clients;
-// only complete, valid environment_context elements are changed.
+// Recognize the desktop AGENTS envelope, keeping its instruction body opaque.
+// Arbitrary prose and fenced examples are not environment envelopes.
 func normalizeCodexEnvironmentContext(text string) string {
 	if strings.HasPrefix(strings.TrimSpace(text), "<environment_context>") {
 		return normalizeCodexEnvironmentContextStandalone(text)
 	}
-	const open = "<environment_context>"
-	const close = "</environment_context>"
-	if !strings.Contains(text, open) || !strings.Contains(text, close) {
+	trimmed := strings.TrimSpace(text)
+	if !strings.HasPrefix(trimmed, "# AGENTS.md instructions for ") {
 		return text
 	}
-	var out strings.Builder
-	previous := 0
-	changed := false
-	for search := 0; ; {
-		start := strings.Index(text[search:], open)
-		if start < 0 {
-			break
-		}
-		start += search
-		end := strings.Index(text[start+len(open):], close)
-		if end < 0 {
-			return text
-		}
-		end += start + len(open) + len(close)
-		fragment := text[start:end]
-		next := normalizeCodexEnvironmentContextStandalone(fragment)
-		if next != fragment {
-			out.WriteString(text[previous:start])
-			out.WriteString(next)
-			previous = end
-			changed = true
-		}
-		search = end
-	}
-	if !changed {
+	headingEnd := strings.IndexByte(trimmed, '\n')
+	if headingEnd < 0 || !strings.HasPrefix(strings.TrimSpace(trimmed[headingEnd:]), "<INSTRUCTIONS>") {
 		return text
 	}
-	out.WriteString(text[previous:])
-	return out.String()
+	end := strings.LastIndex(text, "</INSTRUCTIONS>")
+	if end < 0 {
+		return text
+	}
+	end += len("</INSTRUCTIONS>")
+	tail := text[end:]
+	next := normalizeCodexEnvironmentContextStandalone(tail)
+	if next == tail {
+		return text
+	}
+	return text[:end] + next
 }
 
 // Splice only changed JSON strings in one pass; retain opaque items, numeric
 // precision and image bytes without decoding or re-encoding the full request.
 func applyCodexEnvironmentContextRaw(body []byte) ([]byte, bool) {
-	if !bytes.Contains(body, []byte("environment_context")) {
+	if !bytes.Contains(body, []byte("environment_context")) && !bytes.Contains(body, []byte(`\u`)) {
 		return body, false
 	}
 	var edits []codexTextEdit

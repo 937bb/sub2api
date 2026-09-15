@@ -120,6 +120,14 @@ func applyCodexClientEnvironmentHeaders(headers http.Header, account *Account) {
 		headers.Set("version", identity.version)
 	}
 	if raw := headers.Get(openAIWSTurnMetadataHeader); raw != "" {
+		// Codex keeps the unbounded tool inventory in body metadata only.
+		// Preserve actual tool declarations and all other metadata fields.
+		if gjson.Valid(raw) && gjson.Parse(raw).IsObject() && gjson.Get(raw, "tool_namespaces_info").Exists() {
+			if next, err := sjson.Delete(raw, "tool_namespaces_info"); err == nil {
+				raw = next
+				headers.Set(openAIWSTurnMetadataHeader, raw)
+			}
+		}
 		if next, changed := normalizeCodexClientEnvironmentJSON(raw, 0); changed {
 			headers.Set(openAIWSTurnMetadataHeader, next)
 		}

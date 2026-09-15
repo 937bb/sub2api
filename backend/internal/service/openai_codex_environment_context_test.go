@@ -29,6 +29,7 @@ func TestCodexEnvironmentContextXML(t *testing.T) {
 		require.Equal(t, want, normalizeCodexEnvironmentContext(want))
 	}
 	for _, original := range []string{
+		"Explain " + codexEnvironmentFixture,
 		"```xml\n" + codexEnvironmentFixture + "\n```",
 		codexEnvironmentFixture + " please explain this example",
 		"<environment_context><cwd>/repo</cwd></environment_context>",
@@ -41,7 +42,6 @@ func TestCodexEnvironmentContextXML(t *testing.T) {
 	} {
 		require.Equal(t, original, normalizeCodexEnvironmentContext(original))
 	}
-	require.Contains(t, normalizeCodexEnvironmentContext("Explain "+codexEnvironmentFixture), codexClientTimezone)
 }
 
 func TestCodexEnvironmentContextRawMapParityAndOpaqueItems(t *testing.T) {
