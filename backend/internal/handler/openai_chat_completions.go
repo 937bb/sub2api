@@ -191,7 +191,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 			)
 			if len(failedAccountIDs) == 0 {
 				cls := classifyOpenAICompatibleNoAccountErrorFromGin(c, h.gatewayService, apiKey, reqModel, reqModel)
-				cls = classifySelectionFailureError(err, cls)
+				cls = classifySelectionFailureErrorFromGin(c, err, cls)
 				if !cls.ModelNotFound {
 					markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
 				}
@@ -270,7 +270,8 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		// #5148 对齐：错误返回携带的部分 result（流中断前上游已计量的 usage）照常
 		// 入账；failover 错误恒定 result=nil，不会重复计费。
 		submitChatUsage := func(res *service.OpenAIForwardResult) {
-			if res == nil {
+			service.MarkOpenAIForwardTerminalFailure(c, res, err)
+			if !service.ShouldRecordOpenAIUsage(res, err, service.GetOpsCyberPolicy(c) != nil) {
 				return
 			}
 			stampOpenAIRequestedReasoningEffort(res, c)

@@ -1034,7 +1034,7 @@ func (state *opsCaptureWriterState) finalizeResponseCapture() {
 	}
 	if state.terminalFound {
 		if parsed, ok := parseOpsSSEFailure(state.probe); ok {
-			state.terminalError = parsed
+			state.terminalError = preserveOpsSSEFailureMessage(state.terminalError, parsed)
 		}
 		return
 	}
@@ -1116,6 +1116,13 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 			if terminal, ok := w.capturedTerminalError(); ok {
 				parsed = terminal
 			}
+		}
+		// A local disconnect can commit 499 without a body. Its terminal marker
+		// still owns the final outcome, including cancellation filtering; hidden
+		// failures from earlier attempts must not replace it with an empty error.
+		if status == 499 && len(bytes.TrimSpace(body)) == 0 && !parsed.StreamFailure && len(service.GetOpsStreamErrors(c)) > 0 {
+			logOpsStreamError(c, ops, status)
+			return
 		}
 		if status < 400 {
 			if parsed.StreamFailure {
@@ -1922,15 +1929,41 @@ func parseOpsSSEFailure(body []byte) (parsedOpsError, bool) {
 			}
 		}
 		if eventType == "response.failed" {
+			if errorCandidate != nil {
+				parsed = preserveOpsSSEFailureMessage(*errorCandidate, parsed)
+			}
 			return parsed, true
 		}
 		candidate := parsed
+		if errorCandidate != nil {
+			candidate = preserveOpsSSEFailureMessage(*errorCandidate, candidate)
+		}
 		errorCandidate = &candidate
 	}
 	if errorCandidate != nil {
 		return *errorCandidate, true
 	}
 	return parsedOpsError{}, false
+}
+
+// A gateway-generated terminal frame can follow an upstream error event. Keep
+// the upstream explanation when the terminal message is only a fallback, while
+// retaining the terminal frame's status/type/code and any explicit custom text.
+func preserveOpsSSEFailureMessage(previous, current parsedOpsError) parsedOpsError {
+	if isGenericOpsSSEFailureMessage(current.Message) && !isGenericOpsSSEFailureMessage(previous.Message) {
+		current.Message = previous.Message
+	}
+	return current
+}
+
+func isGenericOpsSSEFailureMessage(message string) bool {
+	switch strings.ToLower(strings.TrimSpace(message)) {
+	case "", "upstream request failed", "upstream request failed after retries",
+		"upstream gateway error", "upstream service temporarily unavailable", "upstream stream failed":
+		return true
+	default:
+		return false
+	}
 }
 
 func opsSSEErrorObject(event map[string]any) map[string]any {
@@ -2185,6 +2218,9 @@ func classifyOpsSeverity(errType string, status int) string {
 }
 
 func classifyOpsErrorLog(c *gin.Context, errType, message, code string, status int) (phase string, isBusinessLimited bool, errorOwner string, errorSource string) {
+	if status == 499 && (errType == "client_disconnected" || code == "client_disconnected") {
+		return "request", false, "client", "client_request"
+	}
 	phase = classifyOpsPhase(errType, message, code)
 	routingCapacityLimited := isOpsRoutingCapacityLimited(c)
 	clientBusinessLimited := service.HasOpsClientBusinessLimited(c)

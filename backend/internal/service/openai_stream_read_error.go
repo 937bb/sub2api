@@ -12,6 +12,7 @@ const (
 	// when an upstream HTTP/2 response stream is reset after the request started.
 	OpenAIUpstreamHTTP2StreamErrorCode = "upstream_http2_stream_error"
 	OpenAIUpstreamStreamReadErrorCode  = "upstream_stream_read_error"
+	OpenAIUpstreamWSStreamErrorCode    = "upstream_websocket_stream_error"
 	// OpenAIUpstreamStreamTruncatedCode is returned when an upstream SSE stream
 	// closes *cleanly* before delivering any terminal signal. A clean EOF carries
 	// no transport error, so without this classification a truncated generation is
@@ -41,6 +42,14 @@ func newOpenAIUpstreamStreamReadError(err error) error {
 		cause:         err,
 		clientCode:    code,
 		clientMessage: message,
+	}
+}
+
+func newOpenAIUpstreamWSStreamReadError(err error) error {
+	return &openAIUpstreamStreamReadError{
+		cause:         err,
+		clientCode:    OpenAIUpstreamWSStreamErrorCode,
+		clientMessage: "Upstream WebSocket stream ended before completion",
 	}
 }
 

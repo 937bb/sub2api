@@ -1822,6 +1822,10 @@ func extractOpenAISSEErrorMessage(payload []byte) string {
 }
 
 func buildOpenAIResponseFailedSSE(responseID, model string, source []byte, fallbackMessage string) string {
+	return "event: response.failed\ndata: " + string(buildOpenAIResponseFailedEvent(responseID, model, source, fallbackMessage)) + "\n\n"
+}
+
+func buildOpenAIResponseFailedEvent(responseID, model string, source []byte, fallbackMessage string) []byte {
 	responseID = strings.TrimSpace(responseID)
 	if responseID == "" {
 		responseID = "resp_" + strings.ReplaceAll(uuid.NewString(), "-", "")
@@ -1839,7 +1843,7 @@ func buildOpenAIResponseFailedSSE(responseID, model string, source []byte, fallb
 	}
 	message := extractOpenAISSEErrorMessage(source)
 	if message == "" {
-		message = strings.TrimSpace(fallbackMessage)
+		message = sanitizeUpstreamErrorMessage(strings.TrimSpace(fallbackMessage))
 	}
 	if message == "" {
 		message = "Upstream response failed"
@@ -1849,11 +1853,12 @@ func buildOpenAIResponseFailedSSE(responseID, model string, source []byte, fallb
 		errorBody["type"] = errorType
 	}
 	response := gin.H{
-		"id":     responseID,
-		"object": "response",
-		"status": "failed",
-		"output": []any{},
-		"error":  errorBody,
+		"id":         responseID,
+		"object":     "response",
+		"created_at": time.Now().Unix(),
+		"status":     "failed",
+		"output":     []any{},
+		"error":      errorBody,
 	}
 	if model = strings.TrimSpace(model); model != "" {
 		response["model"] = model
@@ -1866,7 +1871,7 @@ func buildOpenAIResponseFailedSSE(responseID, model string, source []byte, fallb
 		// All values above are JSON primitives, so this is only a defensive fallback.
 		payload = []byte(`{"type":"response.failed","response":{"status":"failed","output":[],"error":{"code":"upstream_error","message":"Upstream response failed"}}}`)
 	}
-	return "event: response.failed\ndata: " + string(payload) + "\n\n"
+	return payload
 }
 
 func sanitizeOpenAIResponseFailedEventForClient(payload []byte, eventType string, clientOutputStarted bool) ([]byte, bool) {

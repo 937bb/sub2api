@@ -912,7 +912,7 @@ func (s *OpenAIGatewayService) selectAccountForModelWithExclusions(ctx context.C
 	selected, compactBlocked, filterStats := s.selectBestAccount(ctx, groupID, platform, accounts, requestedModel, excludedIDs, requireCompact, requiredCapability, preferLowUpstreamRate)
 
 	if selected == nil {
-		return nil, noAvailableOpenAISelectionError(requestedModel, compactBlocked, filterStats.summary(""))
+		return nil, filterStats.noAvailableError(requestedModel, compactBlocked, "")
 	}
 
 	hydrated, err := s.hydrateSelectedAccount(ctx, selected)
@@ -1304,7 +1304,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		if !cfg.LoadBatchEnabled {
 			return selectWithoutLoadBatch()
 		}
-		return nil, noAvailableOpenAISelectionError(requestedModel, false, filterStats.summary(""))
+		return nil, filterStats.noAvailableError(requestedModel, false, "")
 	}
 	hasQuotaBypassCandidates := false
 	for _, candidate := range candidates {

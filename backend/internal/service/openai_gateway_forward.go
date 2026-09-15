@@ -115,6 +115,12 @@ func (s *OpenAIGatewayService) forwardOnce(ctx context.Context, c *gin.Context, 
 		GetOpenAIClientTransport(c),
 		httpIngressUpstreamWSEnabled,
 	)
+	if retryState := oauthMappedWSTransportState(c, account.ID); retryState != nil && retryState.forceHTTP {
+		wsDecision.Transport = OpenAIUpstreamTransportHTTPSSE
+		wsDecision.Reason = "ws_transport_fallback:" + retryState.fallbackReason
+		c.Set("openai_ws_fallback_to_http", true)
+		c.Set("openai_ws_fallback_reason", retryState.fallbackReason)
+	}
 	if wsDecision.Transport == OpenAIUpstreamTransportResponsesWebsocketV2 && s.isOpenAIWSFallbackCooling(account.ID) {
 		wsDecision.Transport = OpenAIUpstreamTransportHTTPSSE
 		wsDecision.Reason = "fallback_cooling"
@@ -804,9 +810,6 @@ func (s *OpenAIGatewayService) forwardOnce(ctx context.Context, c *gin.Context, 
 			hasPreviousResponseID,
 		)
 		maxAttempts := 2
-		if oauthMappedRetryActive(c) {
-			maxAttempts = 1
-		}
 		wsAttempts := 0
 		var wsResult *OpenAIForwardResult
 		var wsErr error
@@ -912,7 +915,11 @@ func (s *OpenAIGatewayService) forwardOnce(ctx context.Context, c *gin.Context, 
 			if wsErr == nil {
 				break
 			}
-			if c != nil && c.Writer != nil && c.Writer.Written() {
+			if oauthMappedRetryActive(c) && wsResult != nil {
+				// Preserve observed WS work for the mapped retry owner's no-replay guard.
+				break
+			}
+			if OpenAIStreamHasCommittedOutput(c) {
 				break
 			}
 			var taskRecoveredErr *agentIdentityTaskRecoveredError
@@ -932,7 +939,8 @@ func (s *OpenAIGatewayService) forwardOnce(ctx context.Context, c *gin.Context, 
 			if reason == "invalid_encrypted_content" && recoverInvalidEncryptedContent(attempt) {
 				continue
 			}
-			if retryable && attempt < maxAttempts {
+			// Keep protocol-specific payload recovery above independent of the mapped retry budget.
+			if retryable && attempt < maxAttempts && !oauthMappedRetryActive(c) {
 				backoff := time.Duration(0)
 				if retryBudget > 0 && time.Since(retryStartedAt)+backoff > retryBudget {
 					s.recordOpenAIWSRetryExhausted()
@@ -1021,8 +1029,21 @@ func (s *OpenAIGatewayService) forwardOnce(ctx context.Context, c *gin.Context, 
 			}
 			return wsResult, nil
 		}
+		if oauthMappedRetryActive(c) && wsResult != nil {
+			wsResult.UpstreamModel = upstreamModel
+			if wsResult.BillingModel == "" {
+				wsResult.BillingModel = billingModel
+			}
+			return wsResult, wsErr
+		}
+		if (ctx != nil && ctx.Err() != nil) || (c != nil && c.Request != nil && c.Request.Context().Err() != nil) {
+			return nil, wsErr
+		}
 		reason, _ := classifyOpenAIWSReconnectReason(wsErr)
-		if shouldFallbackOpenAIWSToHTTP(reason) && (c == nil || c.Writer == nil || !c.Writer.Written()) {
+		if shouldFallbackOpenAIWSToHTTP(reason) && !OpenAIStreamHasCommittedOutput(c) {
+			if retryErr, scheduled := s.prepareOpenAIWSMappedTransportRetry(ctx, c, account, reason, wsErr); scheduled {
+				return nil, retryErr
+			}
 			s.markOpenAIWSFallbackCooling(account.ID, reason)
 			if c != nil {
 				c.Set("openai_ws_fallback_to_http", true)

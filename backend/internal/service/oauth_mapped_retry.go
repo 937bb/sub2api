@@ -15,34 +15,101 @@ const oauthMappedRetryKey = "oauth_mapped_retry_active"
 func oauthMappedRetryActive(c *gin.Context) bool { return c != nil && c.GetBool(oauthMappedRetryKey) }
 
 func (s *OpenAIGatewayService) forwardWithOAuthMappedRetry(ctx context.Context, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
-	if account == nil || account.Platform != PlatformOpenAI || account.Type != AccountTypeOAuth || c == nil || c.Request == nil || c.Writer.Written() || IsResponseCommitted(c) || oauthMappedRetryActive(c) {
-		return s.forwardOnce(ctx, c, account, body)
+	if account == nil || account.Platform != PlatformOpenAI || account.Type != AccountTypeOAuth || c == nil || c.Request == nil || OpenAIStreamHasCommittedOutput(c) || IsResponseCommitted(c) || oauthMappedRetryActive(c) {
+		return s.forwardOnceWithHeartbeatErrorResponse(ctx, c, account, body)
 	}
 	settings, err := s.settingService.GetOAuthRetrySettings(ctx)
 	if err != nil || !settings.Enabled {
-		return s.forwardOnce(ctx, c, account, body)
+		return s.forwardOnceWithHeartbeatErrorResponse(ctx, c, account, body)
 	}
 	return runOAuthMappedRetry(ctx, c, account.ID, body, settings, func(attemptBody []byte) (*OpenAIForwardResult, error) {
 		return s.forwardOnce(ctx, c, account, attemptBody)
 	})
 }
 
-func runOAuthMappedRetry(ctx context.Context, c *gin.Context, accountID int64, body []byte, settings OAuthRetrySettings, forward func([]byte) (*OpenAIForwardResult, error)) (*OpenAIForwardResult, error) {
+// The protocol guard also applies when mapped retry is disabled or the account
+// is not OAuth. It adds no retries, and leaves ordinary HTTP errors untouched
+// until a transport heartbeat has already committed an SSE response.
+func (s *OpenAIGatewayService) forwardOnceWithHeartbeatErrorResponse(ctx context.Context, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
+	if c == nil || c.Writer == nil || oauthMappedRetryActive(c) {
+		return s.forwardOnce(ctx, c, account, body)
+	}
 	originalWriter := c.Writer
-	defer func() { c.Writer = originalWriter; c.Set(oauthMappedRetryKey, false) }()
-	keys := make(map[string]any, len(c.Keys))
+	writer := &oauthRetryWriter{ResponseWriter: originalWriter, context: c, onlyAfterHeartbeat: true}
+	restoreResponse := snapshotOAuthRetryResponse(c, originalWriter)
+	c.Writer = writer
+	defer func() { c.Writer = originalWriter }()
+	result, forwardErr := s.forwardOnce(ctx, c, account, body)
+	var failover *UpstreamFailoverError
+	if writer.staged && result == nil && !openAIStreamWriterHasCommittedOutput(c, originalWriter) &&
+		(ctx == nil || ctx.Err() == nil) && (c.Request == nil || c.Request.Context().Err() == nil) &&
+		errors.As(forwardErr, &failover) && failover.ShouldRetryNextAccount() {
+		restoreResponse()
+		return result, forwardErr
+	}
+	if err := writer.commit(); err != nil && forwardErr == nil {
+		forwardErr = err
+	}
+	return result, forwardErr
+}
+
+func snapshotOAuthRetryResponse(c *gin.Context, originalWriter gin.ResponseWriter) func() {
+	keys := make(map[string]any, 4)
 	for _, k := range []string{ResponseCommittedKey, OpsStreamErrorKey, OpsStreamErrorsKey, OpsSkipPassthroughKey} {
 		if v, ok := c.Get(k); ok {
 			keys[k] = v
 		}
 	}
-	headers := originalWriter.Header().Clone()
+	headers := snapshotOAuthRetryHeaders(originalWriter)
+	return func() {
+		for k := range originalWriter.Header() {
+			delete(originalWriter.Header(), k)
+		}
+		for k, v := range headers {
+			originalWriter.Header()[k] = append([]string(nil), v...)
+		}
+		for _, k := range []string{ResponseCommittedKey, OpsStreamErrorKey, OpsStreamErrorsKey, OpsSkipPassthroughKey} {
+			if v, ok := keys[k]; ok {
+				c.Set(k, v)
+			} else {
+				delete(c.Keys, k)
+			}
+		}
+	}
+}
+
+func snapshotOAuthRetryHeaders(writer gin.ResponseWriter) http.Header {
+	if compact, ok := writer.(*openAICompactKeepaliveWriter); ok && compact.k != nil {
+		// Header() on this wrapper transfers response ownership and stops its
+		// existing keepalive. A retry snapshot is read-only and must not do that.
+		compact.k.mu.Lock()
+		defer compact.k.mu.Unlock()
+		return compact.ResponseWriter.Header().Clone()
+	}
+	return writer.Header().Clone()
+}
+
+func runOAuthMappedRetry(ctx context.Context, c *gin.Context, accountID int64, body []byte, settings OAuthRetrySettings, forward func([]byte) (*OpenAIForwardResult, error)) (*OpenAIForwardResult, error) {
+	originalWriter := c.Writer
+	defer func() { c.Writer = originalWriter; c.Set(oauthMappedRetryKey, false) }()
+	wsRetryState := &oauthMappedWSTransportRetryState{accountID: accountID, settings: settings}
+	previousWSRetryState, hadWSRetryState := c.Get(oauthMappedWSTransportRetryStateKey)
+	c.Set(oauthMappedWSTransportRetryStateKey, wsRetryState)
+	defer func() {
+		if hadWSRetryState {
+			c.Set(oauthMappedWSTransportRetryStateKey, previousWSRetryState)
+		} else {
+			delete(c.Keys, oauthMappedWSTransportRetryStateKey)
+		}
+	}()
+	restoreResponse := snapshotOAuthRetryResponse(c, originalWriter)
 	canonical := append([]byte(nil), body...)
 	logRequest := c.Request.Clone(withOAuthRetryLogContext(ctx, c.Request.Context(), accountID))
 	for attempt := 0; ; attempt++ {
+		wsRetryState.attempt = attempt
 		c.Set(oauthMappedRetryKey, true)
 		c.Set("oauth_mapped_retry_settings", settings)
-		writer := &oauthRetryWriter{ResponseWriter: originalWriter}
+		writer := &oauthRetryWriter{ResponseWriter: originalWriter, context: c}
 		c.Writer = writer
 		result, forwardErr := forward(append([]byte(nil), canonical...))
 		status := oauthMappedFailureStatus(writer, forwardErr)
@@ -62,7 +129,7 @@ func runOAuthMappedRetry(ctx context.Context, c *gin.Context, accountID int64, b
 			}
 			return result, forwardErr
 		}
-		if originalWriter.Written() || result != nil || GetOpsCyberPolicy(c) != nil || c.GetBool(OpsClientBusinessLimitedKey) || ctx.Err() != nil || c.Request.Context().Err() != nil {
+		if openAIStreamWriterHasCommittedOutput(c, originalWriter) || result != nil || GetOpsCyberPolicy(c) != nil || c.GetBool(OpsClientBusinessLimitedKey) || ctx.Err() != nil || c.Request.Context().Err() != nil {
 			reason := "response_already_written"
 			if result != nil {
 				reason = "billable_result_present"
@@ -74,17 +141,28 @@ func runOAuthMappedRetry(ctx context.Context, c *gin.Context, accountID int64, b
 			_ = writer.commit()
 			return result, forwardErr
 		}
+		var failover *UpstreamFailoverError
+		if errors.As(forwardErr, &failover) &&
+			(failover.IsCredentialFailure() || !failover.ShouldRetryNextAccount() || !failover.RetryableOnSameAccount || failover.StatusCode == http.StatusTooManyRequests) {
+			// Account failures and bounded 429 probes retain the scheduler's policy.
+			slogOAuthRetry(logRequest, "skipped", status, attempt, settings.MaxRetries, "account_retry_policy")
+			if failover.ShouldRetryNextAccount() {
+				restoreResponse()
+			} else {
+				_ = writer.commit()
+			}
+			return result, forwardErr
+		}
 		if attempt >= settings.MaxRetries {
 			slogOAuthRetry(logRequest, "exhausted", status, attempt, settings.MaxRetries, "mapped_status_exhausted")
-			if err := writer.commit(); err != nil {
-				return nil, err
-			}
-			var failover *UpstreamFailoverError
-			if errors.As(forwardErr, &failover) {
+			if failover != nil {
 				copied := *failover
-				copied.NextAccountAction = NextAccountStop
 				copied.RetryableOnSameAccount = false
 				forwardErr = &copied
+				// Keep the response uncommitted so a healthy account can still run.
+				restoreResponse()
+			} else if err := writer.commit(); err != nil {
+				return nil, err
 			}
 			if forwardErr == nil {
 				forwardErr = fmt.Errorf("oauth mapped retry exhausted: HTTP %d", status)
@@ -105,19 +183,7 @@ func runOAuthMappedRetry(ctx context.Context, c *gin.Context, accountID int64, b
 		}
 		slogOAuthRetry(logRequest, "retry", status, attempt+1, settings.MaxRetries, "mapped_status")
 		// Discard only the failed attempt's uncommitted response and request-local markers.
-		for k := range originalWriter.Header() {
-			delete(originalWriter.Header(), k)
-		}
-		for k, v := range headers {
-			originalWriter.Header()[k] = append([]string(nil), v...)
-		}
-		for _, k := range []string{ResponseCommittedKey, OpsStreamErrorKey, OpsStreamErrorsKey, OpsSkipPassthroughKey} {
-			if v, ok := keys[k]; ok {
-				c.Set(k, v)
-			} else {
-				delete(c.Keys, k)
-			}
-		}
+		restoreResponse()
 		SetOpenAIQuotaBypassEnabled(c, c.GetBool(openAIQuotaBypassEnabledContextKey))
 	}
 }
@@ -149,11 +215,15 @@ func oauthMappedFailureStatus(w *oauthRetryWriter, err error) int {
 
 func (s *OpenAIGatewayService) newOAuthMappedStreamError(c *gin.Context, account *Account, payload []byte, message string, headers http.Header) error {
 	s.recordOpenAIStreamUpstreamError(c, account, c.GetBool("openai_passthrough"), headers.Get("x-request-id"), "failover", payload, message)
-	return &UpstreamFailoverError{StatusCode: http.StatusBadGateway, ResponseBody: openAIStreamFailedEventPassthroughBody(payload, message), ResponseHeaders: headers.Clone()}
+	return &UpstreamFailoverError{StatusCode: http.StatusBadGateway, ResponseBody: openAIStreamFailedEventPassthroughBody(payload, message), ResponseHeaders: headers.Clone(), RetryableOnSameAccount: true}
 }
 
 func (s *OpenAIGatewayService) shouldRetryOAuthMappedStream(c *gin.Context, account *Account, payload []byte, message string) bool {
 	if !oauthMappedRetryActive(c) {
+		return false
+	}
+	// Preserve typed credential handling and its account-health side effects.
+	if isOpenAIUpstreamAccessStateError(message, payload) {
 		return false
 	}
 	v, _ := c.Get("oauth_mapped_retry_settings")

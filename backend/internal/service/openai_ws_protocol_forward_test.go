@@ -922,6 +922,15 @@ func TestOpenAIGatewayService_Forward_WSv2StreamEarlyCloseFallbackHTTP(t *testin
 }
 
 func TestOpenAIGatewayService_Forward_WSv2RetryOnceThenFallbackHTTP(t *testing.T) {
+	testOpenAIWSRetryThenFallbackHTTP(t, false)
+}
+
+func TestOpenAIGatewayService_Forward_WSv2MappedRetryDoesNotNestGenericReconnect(t *testing.T) {
+	testOpenAIWSRetryThenFallbackHTTP(t, true)
+}
+
+func testOpenAIWSRetryThenFallbackHTTP(t *testing.T, mappedRetry bool) {
+	t.Helper()
 	gin.SetMode(gin.TestMode)
 
 	var wsAttempts atomic.Int32
@@ -996,11 +1005,15 @@ func TestOpenAIGatewayService_Forward_WSv2RetryOnceThenFallbackHTTP(t *testing.T
 	}
 
 	body := []byte(`{"model":"gpt-5.3-codex","stream":true,"input":[{"type":"input_text","text":"hello"}]}`)
-	result, err := svc.Forward(context.Background(), c, account, body)
+	result, err := forwardOpenAIWSWithMappedRetryForTest(c, svc, account, body, mappedRetry)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.NotNil(t, upstream.lastReq)
-	require.Equal(t, int32(2), wsAttempts.Load())
+	expectedAttempts := int32(2)
+	if mappedRetry {
+		expectedAttempts = 1
+	}
+	require.Equal(t, expectedAttempts, wsAttempts.Load())
 }
 
 func TestOpenAIGatewayService_Forward_WSv2PolicyViolationFastFallbackHTTP(t *testing.T) {
@@ -1169,6 +1182,15 @@ func TestOpenAIGatewayService_Forward_WSv2ConnectionLimitReachedRetryThenFallbac
 }
 
 func TestOpenAIGatewayService_Forward_WSv2PreviousResponseNotFoundRecoversByDroppingPreviousResponseID(t *testing.T) {
+	testOpenAIWSPreviousResponseRecovery(t, false)
+}
+
+func TestOpenAIGatewayService_Forward_WSv2MappedRetryPreservesPreviousResponseRecovery(t *testing.T) {
+	testOpenAIWSPreviousResponseRecovery(t, true)
+}
+
+func testOpenAIWSPreviousResponseRecovery(t *testing.T, mappedRetry bool) {
+	t.Helper()
 	gin.SetMode(gin.TestMode)
 
 	var wsAttempts atomic.Int32
@@ -1268,7 +1290,7 @@ func TestOpenAIGatewayService_Forward_WSv2PreviousResponseNotFoundRecoversByDrop
 	}
 
 	body := []byte(`{"model":"gpt-5.3-codex","stream":false,"previous_response_id":"resp_prev_missing","input":[{"type":"input_text","text":"hello"}]}`)
-	result, err := svc.Forward(context.Background(), c, account, body)
+	result, err := forwardOpenAIWSWithMappedRetryForTest(c, svc, account, body, mappedRetry)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.Equal(t, "resp_ws_prev_recover_ok", result.RequestID)
@@ -1579,6 +1601,15 @@ func TestOpenAIGatewayService_Forward_WSv2PreviousResponseNotFoundOnlyRecoversOn
 }
 
 func TestOpenAIGatewayService_Forward_WSv2InvalidEncryptedContentRecoversOnce(t *testing.T) {
+	testOpenAIWSInvalidEncryptedContentRecovery(t, false)
+}
+
+func TestOpenAIGatewayService_Forward_WSv2MappedRetryPreservesInvalidEncryptedContentRecovery(t *testing.T) {
+	testOpenAIWSInvalidEncryptedContentRecovery(t, true)
+}
+
+func testOpenAIWSInvalidEncryptedContentRecovery(t *testing.T, mappedRetry bool) {
+	t.Helper()
 	gin.SetMode(gin.TestMode)
 
 	var wsAttempts atomic.Int32
@@ -1678,7 +1709,7 @@ func TestOpenAIGatewayService_Forward_WSv2InvalidEncryptedContentRecoversOnce(t 
 	}
 
 	body := []byte(`{"model":"gpt-5.3-codex","stream":false,"previous_response_id":"resp_prev_encrypted","input":[{"type":"reasoning","encrypted_content":"gAAA"},{"type":"compaction","encrypted_content":"cAAA"},{"type":"input_text","text":"hello"}]}`)
-	result, err := svc.Forward(context.Background(), c, account, body)
+	result, err := forwardOpenAIWSWithMappedRetryForTest(c, svc, account, body, mappedRetry)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.Equal(t, "resp_ws_invalid_encrypted_content_recover_ok", result.RequestID)
@@ -1697,6 +1728,19 @@ func TestOpenAIGatewayService_Forward_WSv2InvalidEncryptedContentRecoversOnce(t 
 	require.False(t, gjson.GetBytes(requests[1], "previous_response_id").Exists(), "恢复重试应移除 previous_response_id")
 	require.False(t, gjson.GetBytes(requests[1], `input.0.encrypted_content`).Exists(), "恢复重试应移除 encrypted reasoning item")
 	require.Equal(t, "input_text", gjson.GetBytes(requests[1], `input.0.type`).String())
+}
+
+func forwardOpenAIWSWithMappedRetryForTest(c *gin.Context, svc *OpenAIGatewayService, account *Account, body []byte, enabled bool) (*OpenAIForwardResult, error) {
+	forward := func(attemptBody []byte) (*OpenAIForwardResult, error) {
+		return svc.Forward(context.Background(), c, account, attemptBody)
+	}
+	if !enabled {
+		return forward(body)
+	}
+	// API-key accounts target the local WS server; exercise the actual OAuth wrapper explicitly.
+	return runOAuthMappedRetry(context.Background(), c, account.ID, body, OAuthRetrySettings{
+		Enabled: true, MaxRetries: 1, StatusCodes: []int{http.StatusBadGateway, http.StatusServiceUnavailable},
+	}, forward)
 }
 
 func TestOpenAIGatewayService_Forward_WSv2InvalidEncryptedContentSkipsRecoveryWithoutReasoningItem(t *testing.T) {

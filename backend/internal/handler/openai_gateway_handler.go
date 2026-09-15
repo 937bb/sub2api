@@ -647,7 +647,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 					return
 				}
 				cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, reqModel, reqModel, requestPlatform)
-				cls = classifySelectionFailureError(err, cls)
+				cls = classifySelectionFailureErrorFromGin(c, err, cls)
 				if !cls.ModelNotFound {
 					markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
 				}
@@ -762,7 +762,8 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		// #5148 对齐：错误返回携带的部分 result（流中断前上游已计量的 usage）照常
 		// 入账；failover 错误恒定 result=nil，不会重复计费。
 		submitResponsesUsage := func(res *service.OpenAIForwardResult) {
-			if res == nil {
+			service.MarkOpenAIForwardTerminalFailure(c, res, err)
+			if !service.ShouldRecordOpenAIUsage(res, err, service.GetOpsCyberPolicy(c) != nil) {
 				return
 			}
 			userAgent := c.GetHeader("User-Agent")
@@ -832,7 +833,9 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 				// end with a typed terminal event so strict clients do not report an
 				// unexplained disconnect.
 				if !openAIForwardErrorAlreadyCommunicated(c, writerSizeBeforeForward, err) {
-					h.ensureForwardErrorResponse(c, streamStarted)
+					if !h.ensureOpenAIStreamReadErrorResponse(c, err, streamStarted) {
+						h.ensureForwardErrorResponse(c, streamStarted)
+					}
 				}
 			} else {
 				var failoverErr *service.UpstreamFailoverError
@@ -922,7 +925,10 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 				upstreamErrorAlreadyCommunicated := openAIForwardErrorAlreadyCommunicated(c, writerSizeBeforeForward, err)
 				wroteFallback := false
 				if !upstreamErrorAlreadyCommunicated {
-					wroteFallback = h.ensureForwardErrorResponse(c, streamStarted)
+					wroteFallback = h.ensureOpenAIStreamReadErrorResponse(c, err, streamStarted)
+					if !wroteFallback {
+						wroteFallback = h.ensureForwardErrorResponse(c, streamStarted)
+					}
 				}
 				fields := []zap.Field{
 					zap.Int64("account_id", account.ID),
@@ -1358,7 +1364,8 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		// usage 照常入账，避免上游已产生消耗的请求完全漏记（#5148，对齐 anthropic
 		// 网关同名修复）。failover 错误恒定 result=nil，不会重复计费。
 		submitMessagesUsage := func(res *service.OpenAIForwardResult) {
-			if res == nil {
+			service.MarkOpenAIForwardTerminalFailure(c, res, err)
+			if !service.ShouldRecordOpenAIUsage(res, err, service.GetOpsCyberPolicy(c) != nil) {
 				return
 			}
 			userAgent := c.GetHeader("User-Agent")
@@ -3005,6 +3012,10 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				if result == nil {
 					return
 				}
+				service.MarkOpenAIForwardTerminalFailure(c, result, turnErr)
+				if !service.ShouldRecordOpenAIUsage(result, turnErr, service.GetOpsCyberPolicy(c) != nil) {
+					return
+				}
 				result.BillingModel = openAIWSTurnBillingModel(result, turnMapping, turnRequestedModel, turnUpstreamModel)
 				reqLog.Debug("openai.websocket_turn_billing",
 					zap.Int("turn", turn),
@@ -3416,7 +3427,7 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 		h.handleStreamingAwareError(c, status, "upstream_error", message, streamStarted)
 		return
 	}
-	if failoverErr.IsOpenAICapacityShed() && strings.TrimSpace(failoverErr.ClientMessage) != "" {
+	if failoverErr.Reason != service.OpenAIWSMappedRetryReason && failoverErr.IsOpenAICapacityShed() && strings.TrimSpace(failoverErr.ClientMessage) != "" {
 		status := failoverErr.ClientStatusCode
 		if status <= 0 {
 			status = http.StatusServiceUnavailable
@@ -3440,9 +3451,10 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 
 	// 先检查透传规则
 	if h.errorPassthroughService != nil && len(responseBody) > 0 {
-		if rule := h.errorPassthroughService.MatchRule("openai", statusCode, responseBody); rule != nil {
+		ruleStatusCode := service.OpenAIWSMappedRetryPassthroughStatus(failoverErr)
+		if rule := h.errorPassthroughService.MatchRule("openai", ruleStatusCode, responseBody); rule != nil {
 			// 确定响应状态码
-			respCode := statusCode
+			respCode := ruleStatusCode
 			if !rule.PassthroughCode && rule.ResponseCode != nil {
 				respCode = *rule.ResponseCode
 			}
@@ -3465,6 +3477,14 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 	// 记录原始上游状态码，以便 ops 错误日志捕获真实的上游错误
 	upstreamMsg := service.ExtractUpstreamErrorMessage(responseBody)
 	service.SetOpsUpstreamError(c, statusCode, upstreamMsg, "")
+	if failoverErr.Reason == service.OpenAIWSMappedRetryReason && strings.TrimSpace(failoverErr.ClientMessage) != "" {
+		status := failoverErr.ClientStatusCode
+		if status < 400 || status > 599 {
+			status = http.StatusBadGateway
+		}
+		h.handleStreamingAwareError(c, status, "upstream_error", failoverErr.ClientMessage, streamStarted)
+		return
+	}
 	if statusCode == http.StatusServiceUnavailable && failoverErr.RequestScopedTransient {
 		h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "upstream_error", "Upstream service overloaded, please retry later", streamStarted)
 		return
@@ -3562,6 +3582,9 @@ func (h *OpenAIGatewayHandler) handleStreamingAwareErrorWithCode(
 	if service.StopOpenAICompactSSEKeepaliveCommitted(c) {
 		streamStarted = true
 	}
+	if service.OpenAIStreamHeartbeatPresent(c) {
+		streamStarted = true
+	}
 	if streamStarted {
 		if countTowardsSLA {
 			service.MarkOpsStreamFailure(c, errType, code, message, status)
@@ -3610,6 +3633,10 @@ func (h *OpenAIGatewayHandler) handleStreamingAwareErrorWithCode(
 func (h *OpenAIGatewayHandler) ensureOpenAIStreamReadErrorResponse(c *gin.Context, err error, streamStarted bool) bool {
 	code, message, ok := service.OpenAIUpstreamStreamReadErrorDetails(err)
 	if !ok || c == nil || c.Writer == nil || service.IsResponseCommitted(c) {
+		return false
+	}
+	if c.Request != nil && errors.Is(c.Request.Context().Err(), context.Canceled) {
+		failoverClientGone(c)
 		return false
 	}
 	if c.Writer.Written() {
@@ -3746,7 +3773,7 @@ func openAIFirstOutputFailoverExhausted(failoverErr *service.UpstreamFailoverErr
 func (h *OpenAIGatewayHandler) errorResponse(c *gin.Context, status int, errType, message string) {
 	// body-signal compact 心跳可能已把响应头提交为 200：JSON 错误体会与已
 	// 提交的 SSE 流交错，必须降级为 response.failed 终止事件（#3887）。
-	if service.StopOpenAICompactSSEKeepaliveCommitted(c) {
+	if service.StopOpenAICompactSSEKeepaliveCommitted(c) || service.OpenAIStreamHeartbeatPresent(c) {
 		service.MarkOpsStreamError(c, errType, message, status)
 		if writeResponsesFailedSSE(c, errType, "", message) {
 			return

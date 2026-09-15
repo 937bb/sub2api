@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -36,8 +37,8 @@ type noAccountErrorClassification struct {
 
 var selectionModelRateLimitedPattern = regexp.MustCompile(`(?:model_rate_limited|rate_limited)=(\d+)`)
 
-// classifySelectionFailureError preserves the scheduler's compact reason when
-// every model-capable account is temporarily rate limited.
+// classifySelectionFailureError preserves typed channel configuration failures
+// and the scheduler's compact reason for temporary rate limits.
 func classifySelectionFailureError(err error, fallback noAccountErrorClassification) noAccountErrorClassification {
 	if err == nil {
 		return fallback
@@ -59,6 +60,14 @@ func classifySelectionFailureError(err error, fallback noAccountErrorClassificat
 	if fallback.ModelNotFound {
 		return fallback
 	}
+	if errors.Is(err, service.ErrOpenAIChannelModelRestricted) {
+		return noAccountErrorClassification{
+			Status:        http.StatusNotFound,
+			ErrType:       "model_not_found",
+			Message:       "The requested model is not available under this group's channel model restrictions",
+			ModelNotFound: true,
+		}
+	}
 	match := selectionModelRateLimitedPattern.FindStringSubmatch(strings.ToLower(err.Error()))
 	if len(match) != 2 {
 		return fallback
@@ -72,6 +81,14 @@ func classifySelectionFailureError(err error, fallback noAccountErrorClassificat
 		ErrType: "rate_limit_error",
 		Message: "All available accounts are currently rate-limited. Please retry later.",
 	}
+}
+
+func classifySelectionFailureErrorFromGin(c *gin.Context, err error, fallback noAccountErrorClassification) noAccountErrorClassification {
+	classification := classifySelectionFailureError(err, fallback)
+	if classification.ModelNotFound {
+		service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalModelConfiguration)
+	}
+	return classification
 }
 
 // classifyNoAccountError decides between 404 model_not_found and 503

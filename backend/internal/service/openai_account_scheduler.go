@@ -1802,7 +1802,7 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 		}
 	}
 	if len(filtered) == 0 {
-		return nil, 0, 0, 0, noAvailableOpenAISelectionError(req.RequestedModel, false, filterStats.summary(""))
+		return nil, 0, 0, 0, filterStats.noAvailableError(req.RequestedModel, false, "")
 	}
 
 	loadMap := map[int64]*AccountLoadInfo{}
