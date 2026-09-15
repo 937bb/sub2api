@@ -53,6 +53,7 @@ func disableOpenAITraining(ctx context.Context, clientFactory PrivacyClientFacto
 
 	resp, err := client.R().
 		SetContext(ctx).
+		SetHeader("Accept-Language", codexClientAcceptLanguage).
 		SetHeader("Authorization", "Bearer "+accessToken).
 		SetHeader("Origin", "https://chatgpt.com").
 		SetHeader("Referer", "https://chatgpt.com/").
@@ -123,6 +124,7 @@ func fetchChatGPTAccountInfo(ctx context.Context, clientFactory PrivacyClientFac
 	var result map[string]any
 	resp, err := client.R().
 		SetContext(ctx).
+		SetHeader("Accept-Language", codexClientAcceptLanguage).
 		SetHeader("Authorization", "Bearer "+accessToken).
 		SetHeader("Origin", "https://chatgpt.com").
 		SetHeader("Referer", "https://chatgpt.com/").
@@ -239,6 +241,7 @@ func fetchChatGPTSubscriptionExpiresAt(ctx context.Context, clientFactory Privac
 	}
 	resp, err := client.R().
 		SetContext(ctx).
+		SetHeader("Accept-Language", codexClientAcceptLanguage).
 		SetHeader("Authorization", "Bearer "+accessToken).
 		SetHeader("Origin", "https://chatgpt.com").
 		SetHeader("Referer", "https://chatgpt.com/").

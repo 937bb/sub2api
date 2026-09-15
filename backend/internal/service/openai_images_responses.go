@@ -1816,6 +1816,16 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 		return nil, err
 	}
 	responsesBody = applyOpenAIQuotaBypassForRequest(c, account, responsesBody, ResolveOpenAIQuotaBypassInjectPairs(s.cfg))
+	// Keep image-generation OAuth requests in the same account-scoped fingerprint
+	// namespace as regular Responses requests.
+	stageCodexFingerprintIDs(c, nil)
+	if fpIDs := s.resolveCodexIsolatedFingerprintForRequest(ctx, c, codexAccountIdentitySource(c, account), responsesBody); fpIDs != nil {
+		responsesBody, _, err = applyCodexFingerprintClientMetadataRaw(responsesBody, fpIDs)
+		if err != nil {
+			return nil, err
+		}
+		stageCodexFingerprintIDs(c, fpIDs)
+	}
 	upstreamCtx = withOpenAIImagesSelfBuiltRequest(upstreamCtx)
 	upstreamReq, err := s.buildUpstreamRequest(upstreamCtx, c, account, responsesBody, token, true, parsed.StickySessionSeed(), false)
 	if err != nil {

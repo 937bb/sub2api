@@ -18,7 +18,7 @@ type codexTextEdit struct {
 // Codex renders this as a contextual user fragment. Only rewrite complete
 // environment fragments, never quoted examples, arbitrary prose or tool data.
 // Source: openai/codex core/src/context/world_state/environment.rs.
-func normalizeCodexEnvironmentContext(text string) string {
+func normalizeCodexEnvironmentContextStandalone(text string) string {
 	if !strings.Contains(text, "<timezone>") || !strings.HasPrefix(strings.TrimSpace(text), "<environment_context>") {
 		return text
 	}
@@ -71,6 +71,49 @@ func normalizeCodexEnvironmentContext(text string) string {
 		out.WriteString(text[previous:edit.start])
 		out.WriteString(edit.value)
 		previous = edit.end
+	}
+	out.WriteString(text[previous:])
+	return out.String()
+}
+
+// normalizeCodexEnvironmentContext also accepts surrounding harness text. Codex
+// emits the XML fragment inside a larger user-context section in some clients;
+// only complete, valid environment_context elements are changed.
+func normalizeCodexEnvironmentContext(text string) string {
+	if strings.HasPrefix(strings.TrimSpace(text), "<environment_context>") {
+		return normalizeCodexEnvironmentContextStandalone(text)
+	}
+	const open = "<environment_context>"
+	const close = "</environment_context>"
+	if !strings.Contains(text, open) || !strings.Contains(text, close) {
+		return text
+	}
+	var out strings.Builder
+	previous := 0
+	changed := false
+	for search := 0; ; {
+		start := strings.Index(text[search:], open)
+		if start < 0 {
+			break
+		}
+		start += search
+		end := strings.Index(text[start+len(open):], close)
+		if end < 0 {
+			return text
+		}
+		end += start + len(open) + len(close)
+		fragment := text[start:end]
+		next := normalizeCodexEnvironmentContextStandalone(fragment)
+		if next != fragment {
+			out.WriteString(text[previous:start])
+			out.WriteString(next)
+			previous = end
+			changed = true
+		}
+		search = end
+	}
+	if !changed {
+		return text
 	}
 	out.WriteString(text[previous:])
 	return out.String()
