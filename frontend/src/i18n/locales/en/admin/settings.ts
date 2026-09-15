@@ -538,8 +538,8 @@ export default {
         openaiCodexVersionSyncedValue: 'Currently synced: {version}',
         openaiOAuthWSDefault: 'Use WS by default for OpenAI subscription accounts',
         openaiOAuthWSDefaultHint: 'Enabled by default. OAuth, PAT, and Setup Token accounts inherit WSv2 unless overridden per account or blocked by a server configuration hard gate. API key accounts are unaffected.',
-        openaiCodexFingerprintDefaultFull: 'Default Codex fingerprint to full convergence',
-        openaiCodexFingerprintDefaultFullHint: 'Enabled by default. Subscription accounts without an explicit fingerprint mode inherit full; explicit off, device, session, or full remains authoritative.',
+        openaiCodexFingerprintDefaultFull: 'Enable full Codex identity isolation by default',
+        openaiCodexFingerprintDefaultFullHint: 'Enabled by default. Subscription accounts without an explicit mode inherit full: stable device identity with forwarded sessions and threads isolated by API key and conversation. Explicit off, device, session, or full remains authoritative.',
         codexHardeningTitle: "Codex Settings",
         codexClientRestrictionTitle: "Codex client restriction",
         codexHardeningDesc:

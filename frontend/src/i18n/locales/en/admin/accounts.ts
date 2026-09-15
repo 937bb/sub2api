@@ -640,12 +640,12 @@ export default {
         codexCLIOnlyAppServerDesc:
           "Effective only when the switch above is on. When enabled, this account also allows third-party clients that embed the Codex engine over the app-server protocol (e.g. Claude Code's codex plugin); they still pass the global engine-fingerprint gate. OR-combined with the global app-server toggle.",
         codexFingerprintMode: 'Codex fingerprint convergence',
-        codexFingerprintModeDesc: 'When multiple users share one subscription account, converge device/session identifiers to account-level stable values. The account inherits the system default unless it explicitly selects a mode.',
+        codexFingerprintModeDesc: 'Keep the account device identity stable. In session/full forwarding, isolate sessions and threads by API key and conversation. Without a conversation ID, reuse identity only within the current request or WS connection. Inherits the system default.',
         codexFingerprintInherit: 'Inherit system default',
-        codexFingerprintOff: 'Off (passthrough)',
+        codexFingerprintOff: 'Off (account isolation retained)',
         codexFingerprintDevice: 'Device only',
-        codexFingerprintSession: 'Device + Session',
-        codexFingerprintFull: 'Full convergence',
+        codexFingerprintSession: 'Device + conversation isolation',
+        codexFingerprintFull: 'Full identity isolation',
         codexImageTool: 'Codex image bridge policy',
         codexImageToolDesc:
           'Controls the hosted image_generation bridge and client-declared image tools on Codex /responses text requests. Hosted auto-injection applies only to non-Responses Lite requests. Account policy takes precedence over channel and global settings; standalone image-generation endpoints are unaffected.',

@@ -139,51 +139,56 @@ func TestCodexCacheOnlyIdentityIsNotHashedTwice(t *testing.T) {
 	require.Equal(t, original, headers)
 }
 
-func TestCodexForwardTransportIdentityParityWithoutSessionConvergence(t *testing.T) {
+func TestCodexForwardTransportIdentityParityModes(t *testing.T) {
 	for _, useWS := range []bool{false, true} {
-		t.Run(map[bool]string{false: "http", true: "ws"}[useWS], func(t *testing.T) {
-			cfg := &config.Config{}
-			cfg.Gateway.OpenAIWS.Enabled = useWS
-			cfg.Gateway.OpenAIWS.OAuthEnabled = useWS
-			cfg.Gateway.OpenAIWS.ResponsesWebsocketsV2 = useWS
-			cfg.Gateway.OpenAIWS.MaxConnsPerAccount = 1
-			cfg.Gateway.OpenAIWS.MaxIdlePerAccount = 1
-			capture := &openAIWSCaptureConn{events: [][]byte{[]byte(`{"type":"response.completed","response":{"id":"resp_identity","model":"gpt-5.5","usage":{"input_tokens":2,"output_tokens":1}}}`)}}
-			dialer := &openAIWSCaptureDialer{conn: capture}
-			pool := newOpenAIWSConnPool(cfg)
-			pool.setClientDialerForTest(dialer)
-			upstream := &httpUpstreamRecorder{responses: []*http.Response{openAICompatSSECompletedResponse("resp_identity", "gpt-5.5")}}
-			svc := &OpenAIGatewayService{cfg: cfg, httpUpstream: upstream, cache: &stubGatewayCache{},
-				openaiWSResolver: NewOpenAIWSProtocolResolver(cfg), toolCorrector: NewCodexToolCorrector(), openaiWSPool: pool}
-			account := &Account{ID: 77, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1,
-				Credentials: map[string]any{"access_token": "test-token", "chatgpt_account_id": "upstream-77"},
-				Extra: map[string]any{codexFingerprintModeExtraKey: "off", codexFingerprintSeedExtraKey: testCodexFingerprintSeed,
-					openAICodexInstallationIDExtraKey: "550e8400-e29b-41d4-a716-446655440000", "responses_websockets_v2_enabled": useWS}}
-			c, _ := gin.CreateTestContext(httptest.NewRecorder())
-			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
-			c.Request.Header.Set("session-id", "client-session")
-			c.Request.Header.Set("x-codex-turn-metadata", `{"installation_id":"client-installation","session_id":"client-session","thread_id":"client-thread"}`)
-			body := []byte(`{"model":"gpt-5.5","stream":true,"prompt_cache_key":"client-session","client_metadata":{"session_id":"client-session","thread_id":"client-thread"},"input":[{"role":"user","content":"hi"}]}`)
-			result, err := svc.Forward(context.Background(), c, account, body)
-			require.NoError(t, err)
-			require.NotNil(t, result)
-			var headers http.Header
-			var sent []byte
-			if useWS {
-				headers = dialer.lastHeaders
-				sent = []byte(requestToJSONString(capture.lastWrite))
-			} else {
-				require.Len(t, upstream.requests, 1)
-				headers, sent = upstream.requests[0].Header, upstream.bodies[0]
-			}
-			require.Equal(t, gjson.GetBytes(sent, "client_metadata.session_id").String(), headers.Get("session-id"))
-			require.Equal(t, headers.Get("session-id"), headers.Get("session_id"))
-			require.Equal(t, gjson.GetBytes(sent, "client_metadata.x-codex-installation-id").String(), headers.Get("x-codex-installation-id"))
-			if useWS {
-				metadata := gjson.GetBytes(sent, "client_metadata.x-codex-turn-metadata").String()
-				require.Equal(t, headers.Get("session-id"), gjson.Get(metadata, "session_id").String())
-				require.Equal(t, headers.Get("x-codex-installation-id"), gjson.Get(metadata, "installation_id").String())
-			}
-		})
+		for _, mode := range []string{"off", "device", "session", "full"} {
+			t.Run(map[bool]string{false: "http", true: "ws"}[useWS]+"/"+mode, func(t *testing.T) {
+				cfg := &config.Config{}
+				cfg.Gateway.OpenAIWS.Enabled = useWS
+				cfg.Gateway.OpenAIWS.OAuthEnabled = useWS
+				cfg.Gateway.OpenAIWS.ResponsesWebsocketsV2 = useWS
+				cfg.Gateway.OpenAIWS.MaxConnsPerAccount = 1
+				cfg.Gateway.OpenAIWS.MaxIdlePerAccount = 1
+				capture := &openAIWSCaptureConn{events: [][]byte{[]byte(`{"type":"response.completed","response":{"id":"resp_identity","model":"gpt-5.5","usage":{"input_tokens":2,"output_tokens":1}}}`)}}
+				dialer := &openAIWSCaptureDialer{conn: capture}
+				pool := newOpenAIWSConnPool(cfg)
+				pool.setClientDialerForTest(dialer)
+				upstream := &httpUpstreamRecorder{responses: []*http.Response{openAICompatSSECompletedResponse("resp_identity", "gpt-5.5")}}
+				svc := &OpenAIGatewayService{cfg: cfg, httpUpstream: upstream, cache: &stubGatewayCache{},
+					openaiWSResolver: NewOpenAIWSProtocolResolver(cfg), toolCorrector: NewCodexToolCorrector(), openaiWSPool: pool}
+				account := &Account{ID: 77, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1,
+					Credentials: map[string]any{"access_token": "test-token", "chatgpt_account_id": "upstream-77"},
+					Extra: map[string]any{codexFingerprintModeExtraKey: mode, codexFingerprintSeedExtraKey: testCodexFingerprintSeed,
+						openAICodexInstallationIDExtraKey: "550e8400-e29b-41d4-a716-446655440000", "responses_websockets_v2_enabled": useWS}}
+				c, _ := gin.CreateTestContext(httptest.NewRecorder())
+				c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+				c.Request.Header.Set("session-id", "client-session")
+				c.Request.Header.Set("Accept-Language", "zh-CN")
+				c.Request.Header.Set("x-codex-turn-metadata", `{"installation_id":"client-installation","session_id":"client-session","thread_id":"client-thread"}`)
+				body := []byte(`{"model":"gpt-5.5","stream":true,"prompt_cache_key":"client-session","client_metadata":{"session_id":"client-session","thread_id":"client-thread","timezone":"Asia/Shanghai"},"input":[{"role":"user","content":"hi"}]}`)
+				result, err := svc.Forward(context.Background(), c, account, body)
+				require.NoError(t, err)
+				require.NotNil(t, result)
+				var headers http.Header
+				var sent []byte
+				if useWS {
+					headers = dialer.lastHeaders
+					sent = []byte(requestToJSONString(capture.lastWrite))
+				} else {
+					require.Len(t, upstream.requests, 1)
+					headers, sent = upstream.requests[0].Header, upstream.bodies[0]
+				}
+				require.Equal(t, gjson.GetBytes(sent, "client_metadata.session_id").String(), headers.Get("session-id"))
+				require.Equal(t, codexClientTimezone, gjson.GetBytes(sent, "client_metadata.timezone").String())
+				require.Equal(t, codexClientAcceptLanguage, headers.Get("Accept-Language"))
+				require.Equal(t, headers.Get("session-id"), headers.Get("session_id"))
+				require.Equal(t, gjson.GetBytes(sent, "client_metadata.x-codex-installation-id").String(), headers.Get("x-codex-installation-id"))
+				if useWS {
+					metadata := gjson.GetBytes(sent, "client_metadata.x-codex-turn-metadata").String()
+					require.Equal(t, headers.Get("session-id"), gjson.Get(metadata, "session_id").String())
+					require.Equal(t, headers.Get("x-codex-installation-id"), gjson.Get(metadata, "installation_id").String())
+				}
+			})
+		}
 	}
 }

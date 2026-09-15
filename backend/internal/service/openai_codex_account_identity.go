@@ -217,14 +217,14 @@ func applyCodexAccountIdentityEmbeddedMetadata(values map[string]any, account *A
 }
 
 func applyCodexAccountIdentityClientMetadataMap(requestBody map[string]any, account *Account, apiKeyID int64) bool {
+	changed := applyCodexClientEnvironmentMap(requestBody, account)
 	if requestBody == nil || codexAccountIdentityNamespace(account) == "" {
-		return false
+		return changed
 	}
-	changed := false
 	clientMetadata, _ := requestBody["client_metadata"].(map[string]any)
 	originalBodySessionID := ""
 	if clientMetadata != nil {
-		originalBodySessionID, _ = clientMetadata["session_id"].(string)
+		originalBodySessionID, _ = codexMapMetadataConversation(clientMetadata)
 		if applyCodexAccountIdentityFields(clientMetadata, account, apiKeyID) {
 			changed = true
 		}
@@ -250,8 +250,12 @@ func applyCodexAccountIdentityClientMetadataMap(requestBody map[string]any, acco
 // subobjects with gjson/sjson. The passthrough hot path never unmarshals the
 // potentially multi-megabyte request body.
 func applyCodexAccountIdentityClientMetadataRaw(body []byte, account *Account, apiKeyID int64) ([]byte, bool, error) {
+	body, environmentChanged, err := applyCodexClientEnvironmentRaw(body, account)
+	if err != nil {
+		return body, false, err
+	}
 	if len(body) == 0 || codexAccountIdentityNamespace(account) == "" {
-		return body, false, nil
+		return body, environmentChanged, nil
 	}
 	root := gjson.ParseBytes(body)
 	if !root.IsObject() {
@@ -259,14 +263,14 @@ func applyCodexAccountIdentityClientMetadataRaw(body []byte, account *Account, a
 	}
 
 	next := body
-	changed := false
+	changed := environmentChanged
 	originalBodySessionID := ""
 	if cm := gjson.GetBytes(body, "client_metadata"); cm.IsObject() {
 		clientMetadata := map[string]any{}
 		if err := json.Unmarshal([]byte(cm.Raw), &clientMetadata); err != nil {
 			return body, false, fmt.Errorf("decode client_metadata for account identity: %w", err)
 		}
-		originalBodySessionID, _ = clientMetadata["session_id"].(string)
+		originalBodySessionID, _ = codexMapMetadataConversation(clientMetadata)
 		metadataChanged := applyCodexAccountIdentityFields(clientMetadata, account, apiKeyID)
 		if applyCodexAccountIdentityEmbeddedMetadata(clientMetadata, account, apiKeyID) {
 			metadataChanged = true
@@ -304,6 +308,7 @@ func applyCodexAccountIdentityClientMetadataRaw(body []byte, account *Account, a
 }
 
 func applyCodexAccountIdentityHeaders(headers http.Header, account *Account, apiKeyID int64) {
+	defer applyCodexClientEnvironmentHeaders(headers, account)
 	if headers == nil || codexAccountIdentityNamespace(account) == "" {
 		return
 	}
@@ -334,6 +339,7 @@ func applyCodexAccountIdentityHeaders(headers http.Header, account *Account, api
 // remain untouched for retries, scheduling and another account's failover.
 func applyCodexNormalizedRequestIdentityHeaders(c *gin.Context, account *Account, headers http.Header, body []byte) {
 	source := codexAccountIdentitySource(c, account)
+	defer applyCodexClientEnvironmentHeaders(headers, source)
 	if headers == nil || codexAccountIdentityNamespace(source) == "" {
 		return
 	}
@@ -347,6 +353,7 @@ func applyCodexNormalizedRequestIdentityHeaders(c *gin.Context, account *Account
 
 func applyCodexNormalizedRequestIdentityHeadersMap(c *gin.Context, account *Account, headers http.Header, body map[string]any) {
 	source := codexAccountIdentitySource(c, account)
+	defer applyCodexClientEnvironmentHeaders(headers, source)
 	if headers == nil || codexAccountIdentityNamespace(source) == "" {
 		return
 	}

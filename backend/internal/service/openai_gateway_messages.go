@@ -237,7 +237,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		}
 		applyCodexClientMetadata(reqBody, account)
 		applyCodexAccountIdentityClientMetadataMap(reqBody, codexAccountIdentitySource(c, account), apiKeyID)
-		fpIDs := s.resolveCodexFingerprintIDsForRequest(ctx, codexAccountIdentitySource(c, account), c.Request.Header)
+		fpIDs := s.resolveCodexIsolatedFingerprintForRequest(ctx, c, codexAccountIdentitySource(c, account), reqBody, promptCacheKey)
 		applyCodexFingerprintClientMetadata(reqBody, fpIDs)
 		stageCodexFingerprintIDs(c, fpIDs)
 		delete(reqBody, "prompt_cache_key")

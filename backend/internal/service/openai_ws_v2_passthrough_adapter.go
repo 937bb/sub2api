@@ -1141,15 +1141,6 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					return payload, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", forceErr)
 				}
 				payload = forcedPayload
-				fingerprintedPayload, fingerprintErr := s.applyCodexFingerprintToWebSocketPayload(ctx, c, account, payload)
-				if fingerprintErr != nil {
-					return payload, nil, NewOpenAIWSClientCloseError(
-						coderws.StatusPolicyViolation,
-						"invalid websocket fingerprint metadata",
-						fingerprintErr,
-					)
-				}
-				payload = fingerprintedPayload
 			}
 			out, blocked, policyErr := s.applyOpenAIFastPolicyToWSResponseCreate(ctx, account, model, payload)
 			// 多轮 passthrough usage：仅在成功（non-block / non-err）
@@ -1168,6 +1159,12 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			//     service_tier 时按 default 处理，billing 应如实反映。
 			if policyErr == nil && blocked == nil && isResponseCreate {
 				out = applyOpenAIWSQuotaBypass(out, hooks)
+				// Only accepted frames may advance the connection's conversation.
+				fingerprintedPayload, fingerprintErr := s.applyCodexFingerprintToWebSocketPayload(ctx, c, account, out)
+				if fingerprintErr != nil {
+					return out, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket fingerprint metadata", fingerprintErr)
+				}
+				out = fingerprintedPayload
 				quotaBypassEffective.Store(hooks != nil && hooks.QuotaBypassEnabled && openAIQuotaBypassEffectivePayload(out))
 				usageMeta.updateFromResponseCreate(out, model, requestModelForThisFrame)
 				_, actualModel := usageMeta.turnModels(requestModelForThisFrame)

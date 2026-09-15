@@ -554,11 +554,7 @@ func (s *OpenAIGatewayService) forwardOnce(ctx context.Context, c *gin.Context, 
 		// 指纹收敛：一次性解析收敛 ID，请求体和出站头共享同一份 IDs（保证 turn_id 等随机字段一致）。
 		// fingerprintIDs 在此处解析，后续 buildUpstreamRequest 中使用同一份。
 		if !isCompactRequest {
-			var clientHeaders http.Header
-			if c != nil && c.Request != nil {
-				clientHeaders = c.Request.Header
-			}
-			fpIDs := s.resolveCodexFingerprintIDsForRequest(ctx, codexAccountIdentitySource(c, account), clientHeaders)
+			fpIDs := s.resolveCodexIsolatedFingerprintForRequest(ctx, c, codexAccountIdentitySource(c, account), decoded)
 			if fpIDs != nil {
 				if applyCodexFingerprintClientMetadata(decoded, fpIDs) {
 					markDecodedModified()
@@ -1408,6 +1404,11 @@ func shouldForwardOpenAIResponsesViaRawChatCompletions(account *Account) bool {
 }
 
 func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Context, account *Account, body []byte, token string, isStream bool, promptCacheKey string, isCodexCLI bool) (*http.Request, error) {
+	var environmentErr error
+	body, _, environmentErr = applyCodexClientEnvironmentRaw(body, account)
+	if environmentErr != nil {
+		return nil, environmentErr
+	}
 	// Determine target URL based on account type
 	var targetURL string
 	switch account.Type {

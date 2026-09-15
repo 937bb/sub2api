@@ -283,7 +283,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 		}
 		applyCodexClientMetadata(reqBody, account)
 		applyCodexAccountIdentityClientMetadataMap(reqBody, codexAccountIdentitySource(c, account), getAPIKeyIDFromContext(c))
-		fpIDs := s.resolveCodexFingerprintIDsForRequest(ctx, codexAccountIdentitySource(c, account), c.Request.Header)
+		fpIDs := s.resolveCodexIsolatedFingerprintForRequest(ctx, c, codexAccountIdentitySource(c, account), reqBody)
 		applyCodexFingerprintClientMetadata(reqBody, fpIDs)
 		stageCodexFingerprintIDs(c, fpIDs)
 		responsesBody, err = json.Marshal(reqBody)

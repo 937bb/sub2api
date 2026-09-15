@@ -153,6 +153,11 @@ func openAICompatSessionResponseKey(c *gin.Context, account *Account, promptCach
 	if c != nil {
 		apiKeyID = getAPIKeyIDFromContext(c)
 	}
+	if ids := stagedCodexFingerprintIDs(c, account); ids != nil && ids.sessionID != "" {
+		// Cache prefixes can be shared by unrelated chats. Bind opaque turn
+		// state to the actual outbound conversation, not just that prefix.
+		return strings.Join([]string{"conversation-v1", strconv.FormatInt(account.ID, 10), strconv.FormatInt(apiKeyID, 10), ids.sessionID, ids.threadID, key}, "\x00")
+	}
 	return strings.Join([]string{
 		strconv.FormatInt(account.ID, 10),
 		strconv.FormatInt(apiKeyID, 10),

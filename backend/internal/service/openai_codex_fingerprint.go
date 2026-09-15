@@ -65,25 +65,20 @@ func applyStagedCodexFingerprintClientMetadata(c *gin.Context, account *Account,
 	return applyCodexFingerprintClientMetadata(reqBody, stagedCodexFingerprintIDs(c, account))
 }
 
-// codexFingerprintMode 控制 OAuth 账号出站请求的设备指纹收敛强度。
-// 多人共享同一 OAuth 账号时，每个用户的 Codex 客户端会携带各自不同的
-// installation_id / session_id / thread_id，上游据此判定设备数和会话数。
-// 收敛模式将这些标识改写为账号级恒定值，减少上游可见的设备/会话指纹。
+// codexFingerprintMode preserves the stored configuration enum. Forwarding
+// resolves session/full via resolveCodexIsolatedFingerprintForRequest so stable
+// account devices never collapse unrelated tenants or conversations.
 type codexFingerprintMode string
 
 const (
-	// codexFingerprintOff 不做任何收敛，原样透传客户端标识。
-	// 管理员显式选择 off 时使用；未配置时默认采用完全收敛。
+	// Off disables convergence; credential/tenant namespace isolation remains.
 	codexFingerprintOff codexFingerprintMode = "off"
-	// codexFingerprintDevice 仅收敛 installation_id 为账号级恒定值。
-	// 上游看到 1 台设备 + 多会话（每用户各自的 session）。
+	// Device makes only installation identity stable per account.
 	codexFingerprintDevice codexFingerprintMode = "device"
-	// codexFingerprintSession 收敛 installation_id + session_id，
-	// thread_id 按客户端原始 session-id 确定性派生（每个真实 Codex 会话一个独立线程）。
-	// 上游看到 1 台设备 + 1 会话 + N 线程，最接近正常用户 spawn 子代理的模式。
+	// Session forwarding keeps tenant-scoped conversations and threads distinct.
 	codexFingerprintSession codexFingerprintMode = "session"
-	// codexFingerprintFull 收敛所有标识：installation_id + session_id + thread_id。
-	// 上游看到 1 台设备 + 1 会话 + 1 线程，最激进。
+	// Full retains its serialized value, with conversation isolation enforced
+	// at the forwarding boundary rather than account-wide thread convergence.
 	codexFingerprintFull codexFingerprintMode = "full"
 )
 
@@ -420,22 +415,27 @@ func (s *OpenAIGatewayService) applyCodexFingerprintToWebSocketPayload(
 ) ([]byte, error) {
 	if account == nil {
 		stageCodexFingerprintIDs(c, nil)
+		stageCodexWSConversation(c, nil, nil)
 		return body, nil
 	}
 	source := codexAccountIdentitySource(c, account)
-	var clientHeaders http.Header
-	if c != nil && c.Request != nil {
-		clientHeaders = c.Request.Header
+	ids := s.resolveCodexIsolatedFingerprintForRequest(ctx, c, source, body)
+	inheritCodexWSConversation(c, source, body, ids)
+	body, err := inheritCodexWSHeaderMetadata(c, source, body)
+	if err != nil {
+		return body, err
 	}
-	ids := s.resolveCodexFingerprintIDsForRequest(ctx, source, clientHeaders)
-	stageCodexFingerprintIDs(c, ids)
 	if ids == nil {
+		stageCodexFingerprintIDs(c, nil)
+		stageCodexWSConversation(c, source, nil)
 		return body, nil
 	}
 	updated, _, err := applyCodexFingerprintClientMetadataRaw(body, ids)
 	if err != nil {
 		return body, err
 	}
+	stageCodexFingerprintIDs(c, ids)
+	stageCodexWSConversation(c, source, ids)
 	return updated, nil
 }
 
@@ -519,6 +519,7 @@ func applyCodexFingerprintToClientMetadataMap(existing map[string]any, ids *code
 
 	if ids.installationID != "" {
 		existing["x-codex-installation-id"] = ids.installationID
+		synchronizeCodexMetadataAliases(existing, map[string]any{"installation_id": ids.installationID})
 		modified = true
 	}
 
@@ -534,6 +535,10 @@ func applyCodexFingerprintToClientMetadataMap(existing map[string]any, ids *code
 	existing["thread_id"] = ids.threadID
 	existing["turn_id"] = ids.turnID
 	existing["x-codex-window-id"] = ids.windowID
+	synchronizeCodexMetadataAliases(existing, map[string]any{
+		"session_id": ids.sessionID, "thread_id": ids.threadID,
+		"turn_id": ids.turnID, "window_id": ids.windowID,
+	})
 
 	rewriteClientMetadataEmbeddedTurnMetadata(existing, map[string]any{
 		"installation_id":         ids.installationID,
@@ -554,14 +559,7 @@ func captureCodexFingerprintOriginalBodySessionID(ids *codexFingerprintIDs, clie
 	if clientMetadata == nil {
 		return
 	}
-	switch metadata := clientMetadata.(type) {
-	case map[string]any:
-		if sessionID, ok := metadata["session_id"].(string); ok {
-			ids.originalBodySessionID = strings.TrimSpace(sessionID)
-		}
-	case map[string]string:
-		ids.originalBodySessionID = strings.TrimSpace(metadata["session_id"])
-	}
+	ids.originalBodySessionID, _ = codexMapMetadataConversation(clientMetadata)
 }
 
 func captureCodexFingerprintOriginalBodySessionIDRaw(ids *codexFingerprintIDs, value gjson.Result) {
@@ -620,10 +618,10 @@ func applyCodexFingerprintClientMetadataRaw(body []byte, ids *codexFingerprintID
 
 	existing := map[string]any{}
 	if cm := gjson.GetBytes(body, "client_metadata"); cm.IsObject() {
-		captureCodexFingerprintOriginalBodySessionIDRaw(ids, gjson.GetBytes(body, "client_metadata.session_id"))
 		if err := json.Unmarshal([]byte(cm.Raw), &existing); err != nil {
 			return body, false, fmt.Errorf("decode client_metadata for fingerprint: %w", err)
 		}
+		captureCodexFingerprintOriginalBodySessionID(ids, existing)
 	} else {
 		captureCodexFingerprintOriginalBodySessionIDRaw(ids, gjson.Result{})
 	}
@@ -675,6 +673,7 @@ func mergeCodexTurnMetadata(raw string, fields map[string]any) (string, bool) {
 	if metadata == nil {
 		metadata = make(map[string]any, len(fields))
 	}
+	synchronizeCodexMetadataAliases(metadata, fields)
 	for k, v := range fields {
 		metadata[k] = v
 	}
