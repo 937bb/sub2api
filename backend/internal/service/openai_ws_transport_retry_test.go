@@ -26,6 +26,9 @@ func wsTransportHTTPStreamFailure() *http.Response {
 
 func TestForwardWSTransportRecoveryStaysWSAndPreservesReuse(t *testing.T) {
 	svc, account, c, rec, dialer := newWSMappedRetryFixture(t, OAuthRetrySettings{Enabled: true, MaxRetries: 5, StatusCodes: []int{502}}, [][]byte{[]byte(`{"type":"codex.rate_limits"}`), []byte(`{"type":"codex.response.metadata"}`)}, wsRetrySuccessfulEvents())
+	// Reuse is within one identified conversation. Separate anonymous HTTP
+	// requests intentionally receive different conversation identities.
+	c.Request.Header.Set("Session_id", "transport-recovery-conversation")
 	result, err := svc.Forward(context.Background(), c, account, []byte(`{"model":"gpt-5.6-sol","stream":true,"input":"hello"}`))
 	require.NoError(t, err)
 	require.NotNil(t, result)

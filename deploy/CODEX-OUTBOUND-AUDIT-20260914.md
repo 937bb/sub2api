@@ -2,6 +2,8 @@
 
 Historical pre-repair findings: see `CODEX-CONVERSATION-ISOLATION-20260915.md`
 for the subsequent forwarding/session and marker-recognition fixes.
+See `CODEX-OUTBOUND-REVIEW-20260915.md` for the final source synchronization,
+Pacific environment policy, and remaining limitations.
 
 ## Boundary
 

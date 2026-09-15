@@ -44,15 +44,41 @@ func TestCodexClientEnvironmentAccountBoundaries(t *testing.T) {
 		require.NoError(t, err)
 		require.False(t, changed)
 		require.Equal(t, body, next)
-		headers := http.Header{"Accept-Language": {"zh-CN"}}
+		headers := http.Header{"Accept-Language": {"zh-CN"}, "User-Agent": {"Sub2API/1.0"}}
 		applyCodexClientEnvironmentHeaders(headers, account)
 		require.Equal(t, "zh-CN", headers.Get("Accept-Language"))
+		require.Equal(t, "Sub2API/1.0", headers.Get("User-Agent"))
 	}
 	for _, body := range []string{`{}`, `{"client_metadata":null}`, `{"client_metadata":"opaque"}`, `{"client_metadata":{"timezone":12,"other":"Asia/Shanghai"}}`} {
 		next, changed, err := applyCodexClientEnvironmentRaw([]byte(body), &Account{Platform: PlatformOpenAI, Type: AccountTypeSetupToken})
 		require.NoError(t, err)
 		require.False(t, changed)
 		require.Equal(t, body, string(next))
+	}
+}
+
+func TestCodexClientEnvironmentMessagesBridgeNeutralUA(t *testing.T) {
+	for _, kind := range []string{AccountTypeOAuth, AccountTypeSetupToken} {
+		for _, ua := range []string{"Sub2API/0.2.4", "sub2api/0.2.4", "SuB2aPi/0.2.4"} {
+			for _, configured := range []bool{false, true} {
+				account := &Account{ID: 77, Platform: PlatformOpenAI, Type: kind,
+					Credentials: map[string]any{"chatgpt_account_id": "test-account"}}
+				if configured {
+					account.Credentials["user_agent"] = ua
+				}
+				c, _ := gin.CreateTestContext(httptest.NewRecorder())
+				c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+				c.Request.Header.Set("User-Agent", ua)
+				setOpenAICompatMessagesBridgeContext(c, true)
+				svc := &OpenAIGatewayService{}
+				req, err := svc.buildUpstreamRequest(context.Background(), c, account, []byte(`{"model":"gpt-5.5","input":[]}`), "dummy-token", true, "", false)
+				require.NoError(t, err)
+				require.Equal(t, "api-client/0.2.4", req.Header.Get("User-Agent"))
+				require.Empty(t, req.Header.Get("originator"))
+				require.Empty(t, req.Header.Get("OpenAI-Beta"))
+				require.Equal(t, ua, c.GetHeader("User-Agent"))
+			}
+		}
 	}
 }
 

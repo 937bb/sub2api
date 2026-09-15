@@ -28,3 +28,10 @@ guarantee the absence of upstream rate limits, errors, or proxy identification.
 Validation covers raw payload preservation, metadata numeric precision,
 idempotency, OAuth/PAT versus API-key boundaries, compact/passthrough paths,
 malformed optional metadata, daylight-saving offsets, and quota-query language.
+
+The subsequent `0.2.4.8` source update also applies the header boundary after
+final UA overrides and to model-list, Live, and account-test requests. Alpha
+search retains its endpoint-specific contract. A case-insensitive proxy product
+token in the UA becomes `api-client`; the remaining UA structure and the
+Messages bridge's deliberately absent originator remain intact. Identity
+rewrites now preserve large integer and decimal metadata values as well.

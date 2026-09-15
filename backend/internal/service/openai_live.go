@@ -407,6 +407,7 @@ func applyLiveUpstreamIdentityHeadersForAccount(headers http.Header, account *Ac
 	headers.Set("OpenAI-Alpha", "quicksilver=v2")
 	ensureCodexIdentityHeaders(headers)
 	enforceCodexIdentityHeadersWithUA(headers, codexAccountUserAgent(account))
+	applyCodexClientEnvironmentHeaders(headers, account)
 	if strings.TrimSpace(headers.Get("session-id")) == "" {
 		headers.Set("session-id", uuid.NewString())
 	}

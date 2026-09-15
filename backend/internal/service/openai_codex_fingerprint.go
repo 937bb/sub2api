@@ -618,7 +618,7 @@ func applyCodexFingerprintClientMetadataRaw(body []byte, ids *codexFingerprintID
 
 	existing := map[string]any{}
 	if cm := gjson.GetBytes(body, "client_metadata"); cm.IsObject() {
-		if err := json.Unmarshal([]byte(cm.Raw), &existing); err != nil {
+		if err := decodeOpenAIJSONUseNumber([]byte(cm.Raw), &existing); err != nil {
 			return body, false, fmt.Errorf("decode client_metadata for fingerprint: %w", err)
 		}
 		captureCodexFingerprintOriginalBodySessionID(ids, existing)
@@ -668,7 +668,9 @@ func mergeCodexTurnMetadata(raw string, fields map[string]any) (string, bool) {
 	var metadata map[string]any
 	trimmed := strings.TrimSpace(raw)
 	if trimmed != "" {
-		_ = json.Unmarshal([]byte(trimmed), &metadata)
+		if err := decodeOpenAIJSONUseNumber([]byte(trimmed), &metadata); err != nil {
+			metadata = nil
+		}
 	}
 	if metadata == nil {
 		metadata = make(map[string]any, len(fields))

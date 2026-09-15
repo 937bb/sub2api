@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 
 	"github.com/tidwall/gjson"
@@ -14,6 +15,8 @@ import (
 const codexClientTimezone = "America/Los_Angeles"
 const codexClientLocale = "en-US"
 const codexClientAcceptLanguage = "en-US,en;q=0.9"
+
+var codexProxyProductLabel = regexp.MustCompile(`(?i)sub2api`)
 
 // Normalize optional client environment metadata, not message text or routing
 // hints. An IANA zone describes daylight saving without a fixed UTC offset.
@@ -104,6 +107,11 @@ func applyCodexClientEnvironmentHeaders(headers http.Header, account *Account) {
 		return
 	}
 	headers.Set("Accept-Language", codexClientAcceptLanguage)
+	// Remove only the proxy product label. Keep the client protocol identity,
+	// version, and the compatibility route's deliberately absent originator.
+	if ua := headers.Get("User-Agent"); codexProxyProductLabel.MatchString(ua) {
+		headers.Set("User-Agent", codexProxyProductLabel.ReplaceAllString(ua, "api-client"))
+	}
 	if raw := headers.Get(openAIWSTurnMetadataHeader); raw != "" {
 		if next, changed := normalizeCodexClientEnvironmentJSON(raw, 0); changed {
 			headers.Set(openAIWSTurnMetadataHeader, next)
