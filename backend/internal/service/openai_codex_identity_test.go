@@ -165,7 +165,7 @@ func TestEnforceCodexIdentityHeadersWithAccountOverrideUA(t *testing.T) {
 	// 陈旧覆写 UA 同样跟随自动同步到的新版本，无需管理员重新编辑那条 UA。
 	t.Run("陈旧覆写 UA 跟随同步版本", func(t *testing.T) {
 		SetCodexCanonicalUserAgentResolver(func() string {
-			return "codex_cli_rs/0.200.1" + codexCLIUserAgentSuffix
+			return "codex_cli_rs/0.200.1" + codexCLIUserAgentEnvironment
 		})
 		t.Cleanup(func() { SetCodexCanonicalUserAgentResolver(nil) })
 
@@ -337,7 +337,10 @@ func TestNormalizeCodexClientVersion(t *testing.T) {
 }
 
 func TestBuildCodexCLIUserAgent(t *testing.T) {
-	require.Equal(t, openai.CodexDefaultOriginator+"/0.200.1"+codexCLIUserAgentSuffix, buildCodexCLIUserAgent("0.200.1"))
+	require.Equal(t,
+		"codex-tui/0.200.1 (Ubuntu 24.04; x86_64) xterm-256color (codex-tui; 0.200.1)",
+		buildCodexCLIUserAgent("0.200.1"),
+	)
 	// 非法版本号必须回退到内置 UA，不能拼出畸形身份。
 	require.Equal(t, codexCLIUserAgent, buildCodexCLIUserAgent("bogus version"))
 	require.Equal(t, codexCLIUserAgent, buildCodexCLIUserAgent(""))
@@ -436,19 +439,72 @@ func TestCodexAccountUserAgentSupportsLegacyImplicitOpenAIAccount(t *testing.T) 
 
 func TestCodexCanonicalUserAgentFollowsResolver(t *testing.T) {
 	SetCodexCanonicalUserAgentResolver(func() string {
-		return "codex_cli_rs/0.200.1" + codexCLIUserAgentSuffix
+		return "codex_cli_rs/0.200.1" + codexCLIUserAgentEnvironment
 	})
 	t.Cleanup(func() { SetCodexCanonicalUserAgentResolver(nil) })
 
-	require.Equal(t, "codex_cli_rs/0.200.1"+codexCLIUserAgentSuffix, CodexCanonicalUserAgent())
+	require.Equal(t, "codex_cli_rs/0.200.1"+codexCLIUserAgentEnvironment, CodexCanonicalUserAgent())
 	require.Equal(t, "0.200.1", CodexCanonicalClientVersion())
 
 	h := make(http.Header)
 	ApplyCodexCanonicalAuthIdentity(h)
 	require.Equal(t, "codex_cli_rs", h.Get("originator"))
-	require.Equal(t, "codex_cli_rs/0.200.1"+codexCLIUserAgentSuffix, h.Get("user-agent"))
+	require.Equal(t, "codex_cli_rs/0.200.1"+codexCLIUserAgentEnvironment, h.Get("user-agent"))
 	// 凭据面不发 version 头（真实客户端在 auth.openai.com 只带 originator + UA）。
 	require.Empty(t, h.Get("version"))
+}
+
+func TestNormalizeCodexResponsesTransportHeadersMatchesOfficialTUI(t *testing.T) {
+	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	req, err := http.NewRequest(http.MethodPost, chatgptCodexURL, nil)
+	require.NoError(t, err)
+	req.Header.Set("User-Agent", "Mozilla/5.0")
+	req.Header.Set("Originator", "third-party")
+	req.Header.Set("Version", "0.2.4")
+	req.Header.Set("OpenAI-Beta", "responses=experimental, keep=this")
+	req.Header.Set("Accept-Language", "zh-CN")
+	req.Header.Set("Session_ID", "session-1")
+	req.Header.Set("Conversation_ID", "conversation-1")
+	req.Header.Set("Thread-ID", "thread-1")
+
+	normalizeCodexResponsesTransportHeaders(req, account)
+
+	require.Equal(t, codexCLIUserAgent, req.Header.Get("User-Agent"))
+	require.Equal(t, openai.CodexTUIOriginator, req.Header.Get("Originator"))
+	require.Equal(t, "session-1", req.Header.Get("Session-ID"))
+	require.Equal(t, "thread-1", req.Header.Get("Thread-ID"))
+	require.Equal(t, "thread-1", req.Header.Get("X-Client-Request-ID"))
+	require.Equal(t, "keep=this", req.Header.Get("OpenAI-Beta"))
+	require.Empty(t, req.Header.Get("Session_ID"))
+	require.Empty(t, req.Header.Get("Conversation_ID"))
+	require.Empty(t, req.Header.Get("Version"))
+	require.Empty(t, req.Header.Get("Accept-Language"))
+}
+
+func TestNormalizeCodexResponsesTransportHeadersDoesNotTouchPlatformAPI(t *testing.T) {
+	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	req, err := http.NewRequest(http.MethodPost, openaiPlatformAPIURL, nil)
+	require.NoError(t, err)
+	req.Header.Set("User-Agent", "downstream/1.0")
+	req.Header.Set("Version", "custom")
+
+	normalizeCodexResponsesTransportHeaders(req, account)
+
+	require.Equal(t, "downstream/1.0", req.Header.Get("User-Agent"))
+	require.Equal(t, "custom", req.Header.Get("Version"))
+}
+
+func TestNormalizeCodexResponsesTransportHeadersDoesNotTouchAPIKey(t *testing.T) {
+	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+	req, err := http.NewRequest(http.MethodPost, chatgptCodexURL, nil)
+	require.NoError(t, err)
+	req.Header.Set("User-Agent", "downstream/1.0")
+	req.Header.Set("Session_ID", "downstream-session")
+
+	normalizeCodexResponsesTransportHeaders(req, account)
+
+	require.Equal(t, "downstream/1.0", req.Header.Get("User-Agent"))
+	require.Equal(t, "downstream-session", req.Header.Get("Session_ID"))
 }
 
 func TestCodexCanonicalUserAgentFallsBackWithoutResolver(t *testing.T) {

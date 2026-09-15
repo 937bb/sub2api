@@ -183,16 +183,22 @@ func TestCodexForwardTransportIdentityParityModes(t *testing.T) {
 				}
 				require.Equal(t, gjson.GetBytes(sent, "client_metadata.session_id").String(), headers.Get("session-id"))
 				require.Equal(t, codexClientTimezone, gjson.GetBytes(sent, "client_metadata.timezone").String())
-				require.Equal(t, codexClientAcceptLanguage, headers.Get("Accept-Language"))
 				require.Equal(t, CodexCanonicalUserAgent(), headers.Get("User-Agent"))
 				require.Equal(t, openai.CodexDefaultOriginator, headers.Get("originator"))
-				require.Equal(t, CodexCanonicalClientVersion(), headers.Get("version"))
-				require.Equal(t, headers.Get("session-id"), headers.Get("session_id"))
 				require.Equal(t, gjson.GetBytes(sent, "client_metadata.x-codex-installation-id").String(), headers.Get("x-codex-installation-id"))
 				if useWS {
+					require.Equal(t, codexClientAcceptLanguage, headers.Get("Accept-Language"))
+					require.Equal(t, CodexCanonicalClientVersion(), headers.Get("version"))
+					require.Equal(t, headers.Get("session-id"), headers.Get("session_id"))
 					metadata := gjson.GetBytes(sent, "client_metadata.x-codex-turn-metadata").String()
 					require.Equal(t, headers.Get("session-id"), gjson.Get(metadata, "session_id").String())
 					require.Equal(t, headers.Get("x-codex-installation-id"), gjson.Get(metadata, "installation_id").String())
+				} else {
+					require.Empty(t, headers.Get("Accept-Language"))
+					require.Empty(t, headers.Get("version"))
+					require.Empty(t, headers.Get("session_id"))
+					require.Empty(t, headers.Get("conversation_id"))
+					require.Equal(t, headers.Get("thread-id"), headers.Get("x-client-request-id"))
 				}
 			})
 		}

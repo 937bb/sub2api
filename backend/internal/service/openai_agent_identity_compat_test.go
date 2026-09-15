@@ -483,9 +483,10 @@ func TestOpenAIAgentIdentityChatRecoveryKeepsAutoDerivedSessionIsolationStable(t
 	secondKey := gjson.GetBytes(upstream.bodies[1], "prompt_cache_key").String()
 	require.NotEmpty(t, firstKey)
 	require.Equal(t, firstKey, secondKey)
-	require.Equal(t, gjson.GetBytes(upstream.bodies[0], "client_metadata.session_id").String(), upstream.requests[0].Header.Get("session_id"))
-	require.NotEmpty(t, upstream.requests[0].Header.Get("session_id"))
-	require.Equal(t, upstream.requests[0].Header.Get("session_id"), upstream.requests[1].Header.Get("session_id"))
+	require.Equal(t, gjson.GetBytes(upstream.bodies[0], "client_metadata.session_id").String(), upstream.requests[0].Header.Get("session-id"))
+	require.NotEmpty(t, upstream.requests[0].Header.Get("session-id"))
+	require.Equal(t, upstream.requests[0].Header.Get("session-id"), upstream.requests[1].Header.Get("session-id"))
+	require.Empty(t, upstream.requests[0].Header.Get("session_id"))
 }
 
 func decodeAgentAssertionTask(t *testing.T, header string) string {

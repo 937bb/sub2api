@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/stretchr/testify/require"
 )
 
@@ -335,7 +334,7 @@ func TestGetOpenAICodexCanonicalUserAgentBuildsFromVersion(t *testing.T) {
 	}}, nil)
 
 	require.Equal(t,
-		openai.CodexDefaultOriginator+"/0.200.1"+codexCLIUserAgentSuffix,
+		buildCodexCLIUserAgent("0.200.1"),
 		svc.GetOpenAICodexCanonicalUserAgent(context.Background()),
 	)
 }

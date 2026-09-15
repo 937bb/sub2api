@@ -247,14 +247,19 @@ func canonicalizeCodexOriginator(name string) string {
 // CodexCLIOriginator is codex-rs default_client.rs DEFAULT_ORIGINATOR.
 const CodexCLIOriginator = "codex_cli_rs"
 
-// CodexDefaultOriginator is the official codex-rs default originator. TUI,
-// VSCode and desktop values remain recognized as explicit client overrides.
-const CodexDefaultOriginator = CodexCLIOriginator
+// CodexTUIOriginator is the official interactive Codex client name passed by
+// codex-tui to app-server during initialize. App-server uses this value for
+// both the originator header and the User-Agent prefix.
+const CodexTUIOriginator = "codex-tui"
 
-// CodexUserAgentVersion 提取 Codex UA 的完整版本段，即 `{client}/{version} (...` 中的 version。
-// 与 ParseCodexEngineVersion 的区别：后者只取三段数字用于引擎版本比较（会丢掉 -alpha.4
-// 之类的预发布后缀），本函数保留原样，因为出站 version 头必须与 UA 版本段逐字一致。
-// 取不到（非 Codex 形态 UA）时返回空串。
+// CodexDefaultOriginator is the client surface emitted by an interactive
+// Codex terminal session. CodexCLIOriginator remains recognized for headless
+// engine and daemon requests, but it is not the TUI fingerprint.
+const CodexDefaultOriginator = CodexTUIOriginator
+
+// CodexUserAgentVersion extracts the complete version segment from a Codex UA.
+// Unlike ParseCodexEngineVersion, it preserves prerelease suffixes such as
+// -alpha.4 so outbound requests can reuse the exact account-level version.
 func CodexUserAgentVersion(userAgent string) string {
 	ua := strings.TrimSpace(userAgent)
 	slash := strings.IndexByte(ua, '/')
@@ -268,14 +273,10 @@ func CodexUserAgentVersion(userAgent string) string {
 	return strings.TrimSpace(rest)
 }
 
-// SetCodexUserAgentVersion 用 version 重建 Codex 形态 UA 中的版本声明，其余部分
-// （客户端名、OS / 架构 / 终端指纹）原样保留；UA 不是 `{client}/{version}` 形态时返回空串，
-// 由调用方决定整体回退。
-//
-// 尾部官方客户端标识组 `(name; version)` 与首段是同一个版本声明的两个出口
-// （CODEX_INTERNAL_ORIGINATOR_OVERRIDE 场景，如 `cccc/0.142.0 ... (codex-tui; 0.142.0)`），
-// 必须一并更新，否则会拼出首段声明新版本、尾部仍是旧版本的自相矛盾身份。
-// 仅在括号组确为官方客户端标识时才改写，避免误伤 OS 组（如 `(Ubuntu 22.4.0; x86_64)`）。
+// SetCodexUserAgentVersion rebuilds the version declaration in a Codex-shaped
+// UA while preserving its client, OS, architecture, and terminal fields.
+// It also updates the official clientInfo trailer `(name; version)` because
+// both declarations originate from the same bundled client release.
 func SetCodexUserAgentVersion(userAgent, version string) string {
 	ua := strings.TrimSpace(userAgent)
 	version = strings.TrimSpace(version)

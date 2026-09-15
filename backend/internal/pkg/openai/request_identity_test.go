@@ -85,7 +85,8 @@ func TestPairCodexClientIdentity(t *testing.T) {
 	}
 }
 
-func TestCodexDefaultOriginatorMatchesOfficialCodexRSDefault(t *testing.T) {
+func TestCodexOriginatorsMatchOfficialClientSurfaces(t *testing.T) {
 	require.Equal(t, "codex_cli_rs", CodexCLIOriginator)
-	require.Equal(t, CodexCLIOriginator, CodexDefaultOriginator)
+	require.Equal(t, "codex-tui", CodexTUIOriginator)
+	require.Equal(t, CodexTUIOriginator, CodexDefaultOriginator)
 }

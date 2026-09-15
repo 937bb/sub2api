@@ -70,9 +70,10 @@ func TestCodexOutboundFollowupImageIdentity(t *testing.T) {
 				metadata := gjson.GetBytes(upstream.lastBody, "client_metadata")
 				require.NotEmpty(t, h.Get("x-codex-installation-id"))
 				require.Equal(t, metadata.Get("x-codex-installation-id").String(), h.Get("x-codex-installation-id"))
-				require.Equal(t, metadata.Get("session_id").String(), h.Get("session_id"))
+				require.Equal(t, metadata.Get("session_id").String(), h.Get("session-id"))
 				require.Equal(t, "draw a cat", gjson.GetBytes(upstream.lastBody, "input.0.content.0.text").String())
-				sessions = append(sessions, h.Get("session_id"))
+				require.Empty(t, h.Get("session_id"))
+				sessions = append(sessions, h.Get("session-id"))
 				installations = append(installations, h.Get("x-codex-installation-id"))
 			}
 			require.Equal(t, sessions[0], sessions[1])

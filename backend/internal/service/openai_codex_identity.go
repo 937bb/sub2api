@@ -32,13 +32,82 @@ func NormalizeCodexClientVersion(version string) string {
 	return version
 }
 
-// buildCodexCLIUserAgent 按版本号拼出规范 Codex TUI User-Agent。
-// UA 形态只在 codexCLIUserAgentSuffix 一处定义，避免多处拼装漂移。
+// buildCodexCLIUserAgent builds the official interactive Codex TUI User-Agent.
+// app-server writes clientInfo into the final parenthesized suffix, so both
+// version declarations must be rebuilt from the same release.
 func buildCodexCLIUserAgent(version string) string {
 	if version = NormalizeCodexClientVersion(version); version == "" {
 		return codexCLIUserAgent
 	}
-	return openai.CodexDefaultOriginator + "/" + version + codexCLIUserAgentSuffix
+	return openai.CodexDefaultOriginator + "/" + version + codexCLIUserAgentEnvironment + " (" + openai.CodexDefaultOriginator + "; " + version + ")"
+}
+
+// normalizeCodexResponsesTransportHeaders is the final HTTP wire boundary for
+// ChatGPT Codex Responses requests. Builders may keep accepting historical
+// downstream aliases, but none of those aliases should reach the upstream.
+//
+// Official codex-rs 0.154.0 sends session-id, thread-id and
+// x-client-request-id. It does not send the historical session_id,
+// conversation_id, version or responses=experimental headers on ordinary HTTP
+// Responses requests.
+func normalizeCodexResponsesTransportHeaders(req *http.Request, account *Account) {
+	if req == nil || req.URL == nil || account == nil || !account.UsesOpenAICodexProtocol() {
+		return
+	}
+	if !strings.EqualFold(req.URL.Hostname(), "chatgpt.com") || !strings.HasPrefix(req.URL.Path, "/backend-api/codex/responses") {
+		return
+	}
+
+	// ensureCodexIdentityHeaders still supports legacy synthetic probes and adds
+	// responses=experimental. Preserve only the caller's beta negotiations so
+	// that helper cannot reintroduce the obsolete token at the wire boundary.
+	requestedBeta := append([]string(nil), req.Header.Values("OpenAI-Beta")...)
+	ensureCodexIdentityHeaders(req.Header)
+	req.Header.Del("OpenAI-Beta")
+	for _, value := range requestedBeta {
+		req.Header.Add("OpenAI-Beta", value)
+	}
+	enforceCodexIdentityHeadersWithUA(req.Header, codexAccountUserAgent(account))
+
+	sessionID := firstNonEmptyCodexHeader(req.Header, "session-id", "session_id")
+	threadID := firstNonEmptyCodexHeader(req.Header, "thread-id", "x-client-request-id")
+	if threadID == "" {
+		threadID = codexThreadIDFromWindowHeader(req.Header.Get("x-codex-window-id"))
+	}
+	if sessionID != "" {
+		req.Header.Set("session-id", sessionID)
+	}
+	if threadID != "" {
+		req.Header.Set("thread-id", threadID)
+		req.Header.Set("x-client-request-id", threadID)
+	}
+
+	req.Header.Del("session_id")
+	req.Header.Del("conversation_id")
+	req.Header.Del("version")
+	req.Header.Del("accept-language")
+	stripOpenAILegacyResponsesBeta(req.Header)
+}
+
+func firstNonEmptyCodexHeader(headers http.Header, names ...string) string {
+	for _, name := range names {
+		if value := strings.TrimSpace(headers.Get(name)); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func codexThreadIDFromWindowHeader(windowID string) string {
+	windowID = strings.TrimSpace(windowID)
+	threadID, generation, ok := strings.Cut(windowID, ":")
+	if !ok || generation == "" {
+		return ""
+	}
+	if _, err := uuid.Parse(threadID); err != nil {
+		return ""
+	}
+	return threadID
 }
 
 // codexAccountUserAgent returns the Codex client UA used by an OAuth-like
