@@ -1679,48 +1679,11 @@ type openAISelectionFilterStats struct {
 	reasons map[string]int
 }
 
-const openAISelectionFilterReasonDuplicateUpstreamIdentity = "duplicate_upstream_identity"
-
 func (s *openAISelectionFilterStats) exclude(reason string) {
 	if s.reasons == nil {
 		s.reasons = make(map[string]int, 4)
 	}
 	s.reasons[reason]++
-}
-
-// deduplicateOpenAICodexAccountCandidates prevents duplicate local rows from
-// multiplying the effective concurrency of one upstream OAuth identity.
-// Team members remain independent because their identity namespaces differ.
-func deduplicateOpenAICodexAccountCandidates(accounts []*Account) ([]*Account, int) {
-	if len(accounts) < 2 {
-		return accounts, 0
-	}
-
-	result := make([]*Account, 0, len(accounts))
-	identityIndexes := make(map[string]int, len(accounts))
-	duplicates := 0
-	for _, account := range accounts {
-		namespace := codexAccountIdentityNamespace(account)
-		if namespace == "" {
-			result = append(result, account)
-			continue
-		}
-
-		index, exists := identityIndexes[namespace]
-		if !exists {
-			identityIndexes[namespace] = len(result)
-			result = append(result, account)
-			continue
-		}
-
-		duplicates++
-		current := result[index]
-		if current == nil || account.Priority < current.Priority ||
-			(account.Priority == current.Priority && account.ID < current.ID) {
-			result[index] = account
-		}
-	}
-	return result, duplicates
 }
 
 // summary renders deterministic exclusion statistics for scheduling error
@@ -1837,11 +1800,6 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 			continue
 		}
 		filtered = append(filtered, account)
-	}
-	var duplicateCount int
-	filtered, duplicateCount = deduplicateOpenAICodexAccountCandidates(filtered)
-	for range duplicateCount {
-		filterStats.exclude(openAISelectionFilterReasonDuplicateUpstreamIdentity)
 	}
 	if len(filtered) == 0 {
 		return nil, 0, 0, 0, filterStats.noAvailableError(req.RequestedModel, false, "")
