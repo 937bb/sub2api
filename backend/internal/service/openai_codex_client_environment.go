@@ -36,7 +36,7 @@ func normalizeCodexClientEnvironment(metadata map[string]any, depth int) bool {
 			replacement = "US"
 		case "client_name", "app_name", "sdk_name":
 			if text, ok := value.(string); ok && strings.Contains(strings.ToLower(text), "sub2api") {
-				replacement = "api-client"
+				replacement = resolveCodexOutboundIdentity("").originator
 			}
 		case "environment", "client_environment", "runtime_environment":
 			if nested, ok := value.(map[string]any); ok && normalizeCodexClientEnvironment(nested, depth+1) {
@@ -79,27 +79,29 @@ func applyCodexClientEnvironmentRaw(body []byte, account *Account) ([]byte, bool
 	if account == nil || !account.IsOpenAIOAuthLike() {
 		return body, false, nil
 	}
+	body, environmentChanged := applyCodexEnvironmentContextRaw(body)
 	metadata := gjson.GetBytes(body, "client_metadata")
 	if !metadata.IsObject() {
-		return body, false, nil
+		return body, environmentChanged, nil
 	}
 	normalized, changed := normalizeCodexClientEnvironmentJSON(metadata.Raw, 0)
 	if !changed {
-		return body, false, nil
+		return body, environmentChanged, nil
 	}
 	next, err := sjson.SetRawBytes(body, "client_metadata", []byte(normalized))
 	if err != nil {
 		return body, false, fmt.Errorf("normalize Codex client environment: %w", err)
 	}
-	return next, !bytes.Equal(body, next), nil
+	return next, environmentChanged || !bytes.Equal(body, next), nil
 }
 
 func applyCodexClientEnvironmentMap(body map[string]any, account *Account) bool {
 	if account == nil || !account.IsOpenAIOAuthLike() {
 		return false
 	}
+	changed := applyCodexEnvironmentContextMap(body)
 	metadata, _ := body["client_metadata"].(map[string]any)
-	return normalizeCodexClientEnvironment(metadata, 0)
+	return normalizeCodexClientEnvironment(metadata, 0) || changed
 }
 
 func applyCodexClientEnvironmentHeaders(headers http.Header, account *Account) {
@@ -107,10 +109,15 @@ func applyCodexClientEnvironmentHeaders(headers http.Header, account *Account) {
 		return
 	}
 	headers.Set("Accept-Language", codexClientAcceptLanguage)
-	// Remove only the proxy product label. Keep the client protocol identity,
-	// version, and the compatibility route's deliberately absent originator.
+	// Use the paired Codex identity, not the proxy's application version as
+	// a Codex version. Preserve the bridge's deliberately absent originator.
 	if ua := headers.Get("User-Agent"); codexProxyProductLabel.MatchString(ua) {
-		headers.Set("User-Agent", codexProxyProductLabel.ReplaceAllString(ua, "api-client"))
+		identity := resolveCodexOutboundIdentity(codexAccountUserAgent(account))
+		headers.Set("User-Agent", codexProxyProductLabel.ReplaceAllString(identity.userAgent, identity.originator))
+		if headers.Get("originator") != "" {
+			headers.Set("originator", identity.originator)
+		}
+		headers.Set("version", identity.version)
 	}
 	if raw := headers.Get(openAIWSTurnMetadataHeader); raw != "" {
 		if next, changed := normalizeCodexClientEnvironmentJSON(raw, 0); changed {

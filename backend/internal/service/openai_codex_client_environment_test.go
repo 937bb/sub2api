@@ -27,7 +27,7 @@ func TestCodexClientEnvironmentRawPreservesPayload(t *testing.T) {
 	require.Equal(t, codexClientTimezone, gjson.GetBytes(next, "client_metadata.environment.timeZone").String())
 	require.Equal(t, codexClientLocale, gjson.GetBytes(next, "client_metadata.locale").String())
 	require.Equal(t, "US", gjson.GetBytes(next, "client_metadata.country_code").String())
-	require.Equal(t, "api-client", gjson.GetBytes(next, "client_metadata.client_name").String())
+	require.Equal(t, resolveCodexOutboundIdentity("").originator, gjson.GetBytes(next, "client_metadata.client_name").String())
 	embedded := gjson.Parse(gjson.GetBytes(next, "client_metadata.x-codex-turn-metadata").String())
 	require.Equal(t, codexClientTimezone, embedded.Get("timezone").String())
 	require.Equal(t, "keep-thread", embedded.Get("thread_id").String())
@@ -73,12 +73,37 @@ func TestCodexClientEnvironmentMessagesBridgeNeutralUA(t *testing.T) {
 				svc := &OpenAIGatewayService{}
 				req, err := svc.buildUpstreamRequest(context.Background(), c, account, []byte(`{"model":"gpt-5.5","input":[]}`), "dummy-token", true, "", false)
 				require.NoError(t, err)
-				require.Equal(t, "api-client/0.2.4", req.Header.Get("User-Agent"))
+				identity := resolveCodexOutboundIdentity(codexAccountUserAgent(account))
+				require.Equal(t, identity.userAgent, req.Header.Get("User-Agent"))
+				require.Equal(t, identity.version, req.Header.Get("version"))
+				require.NotContains(t, req.Header.Get("User-Agent"), "/0.2.4")
 				require.Empty(t, req.Header.Get("originator"))
 				require.Empty(t, req.Header.Get("OpenAI-Beta"))
 				require.Equal(t, ua, c.GetHeader("User-Agent"))
 			}
 		}
+	}
+}
+
+func TestCodexClientEnvironmentProxyIdentityUsesCodexPair(t *testing.T) {
+	account := &Account{ID: 77, Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+		Credentials: map[string]any{"chatgpt_account_id": "test-account"}}
+	identity := resolveCodexOutboundIdentity(codexAccountUserAgent(account))
+	headers := make(http.Header)
+	headers.Set("User-Agent", "Sub2API/0.2.4")
+	headers.Set("originator", "Sub2API")
+	headers.Set("version", "0.2.4")
+	applyCodexClientEnvironmentHeaders(headers, account)
+	require.Equal(t, identity.userAgent, headers.Get("User-Agent"))
+	require.Equal(t, identity.originator, headers.Get("originator"))
+	require.Equal(t, identity.version, headers.Get("version"))
+	require.NotEqual(t, "0.2.4", headers.Get("version"))
+	for _, key := range []string{"client_name", "app_name", "sdk_name"} {
+		metadata := map[string]any{key: "SuB2API/0.2.4", "unrelated": "Sub2API"}
+		require.True(t, normalizeCodexClientEnvironment(metadata, 0))
+		require.Equal(t, resolveCodexOutboundIdentity("").originator, metadata[key])
+		require.Equal(t, "Sub2API", metadata["unrelated"])
+		require.False(t, normalizeCodexClientEnvironment(metadata, 0))
 	}
 }
 
