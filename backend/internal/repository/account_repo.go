@@ -506,6 +506,10 @@ func (r *accountRepository) updateLockedAccount(
 		return nil, err
 	}
 	account.Extra = extra
+	if err := preserveLockedAccountProtection(ctx, client, account); err != nil {
+		return nil, err
+	}
+	extra = normalizeJSONMap(account.Extra)
 
 	schedulable := account.Schedulable
 	if account.Status == service.StatusError {
@@ -2679,6 +2683,7 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 	if service.ShouldEnsureCodexFingerprintSeedForExtraUpdates(updates) {
 		extraExpression = ensureCodexFingerprintSeedSQL(extraExpression)
 	}
+	extraExpression = preserveProtectionExtraSQL(ctx, extraExpression)
 	result, err := client.ExecContext(
 		ctx,
 		"UPDATE accounts SET extra = "+extraExpression+", updated_at = NOW() WHERE id = $2 AND deleted_at IS NULL",
@@ -2927,6 +2932,7 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 
 	idx := 1
 	ollamaProxyIdentityChanged := ""
+	concurrencyExpression := ""
 	if updates.Name != nil {
 		setClauses = append(setClauses, "name = $"+itoa(idx))
 		args = append(args, *updates.Name)
@@ -2946,7 +2952,8 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 		}
 	}
 	if updates.Concurrency != nil {
-		setClauses = append(setClauses, "concurrency = $"+itoa(idx))
+		concurrencyExpression = protectedConcurrencySQL("$" + itoa(idx) + "::integer")
+		setClauses = append(setClauses, "concurrency = "+concurrencyExpression)
 		args = append(args, *updates.Concurrency)
 		idx++
 	}
@@ -3008,7 +3015,7 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 				" AND "+ollamaCloudBaseURLMatchesSQL(credentialPlaceholder+"::jsonb ->> 'base_url'")+")")
 	}
 
-	if len(updates.Extra) > 0 || len(ollamaGroupIdentityChanges) > 0 || ollamaProxyIdentityChanged != "" || updates.EnsureCodexFingerprintSeed {
+	if len(updates.Extra) > 0 || len(ollamaGroupIdentityChanges) > 0 || ollamaProxyIdentityChanged != "" || updates.EnsureCodexFingerprintSeed || updates.Concurrency != nil {
 		extraExpression := "COALESCE(extra, '{}'::jsonb)"
 		if len(updates.Extra) > 0 {
 			payload, err := json.Marshal(updates.Extra)
@@ -3049,6 +3056,10 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 		}
 		if updates.EnsureCodexFingerprintSeed {
 			extraExpression = ensureCodexFingerprintSeedSQL(extraExpression)
+		}
+		extraExpression = preserveProtectionExtraSQL(ctx, extraExpression)
+		if concurrencyExpression != "" {
+			extraExpression = "CASE WHEN " + accountProtectionEnabledSQL + " THEN jsonb_set((" + extraExpression + "), '{anti_degrade,max_concurrency}', to_jsonb((" + concurrencyExpression + ")::integer), true) ELSE (" + extraExpression + ") END"
 		}
 		setClauses = append(setClauses, "extra = "+extraExpression)
 	}

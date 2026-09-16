@@ -1174,6 +1174,9 @@ export interface OllamaCloudUsageSettings {
 }
 
 export interface Account {
+	anti_degradation?: boolean
+	protection_scope?: 'codex_v3' | 'generic_v1' | 'legacy' | 'disabled'
+	protection_mode?: string
   id: number
   name: string
   notes?: string | null

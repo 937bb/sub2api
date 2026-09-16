@@ -4,6 +4,7 @@
  */
 
 import { apiClient } from '../client'
+import { DEFAULT_ANTI_DEGRADE_MODE } from '@/utils/accountProtection'
 import type {
   Account,
   AccountListItem,
@@ -385,6 +386,73 @@ export async function getUsage(id: number, source?: 'passive' | 'active', force?
 export interface BatchAccountUsageResponse {
   usage: Record<string, AccountUsageInfo>
   errors: Record<string, string>
+}
+
+export type AntiDegradeMode =
+  | 'mode1'
+  | 'mode2'
+  | 'legacy'
+  | 'native_baseline'
+  | 'minimal_compat'
+  | 'session_standard'
+  | 'tls_node24'
+  | 'low_concurrency'
+
+export interface AntiDegradeStrategyProfile {
+  id: AntiDegradeMode
+  name: string
+  description: string
+  category: string
+  identity_mode: string
+  tls_profile: string
+  max_concurrency: number
+  risk: string
+  apply_supported: boolean
+  requires_openai_oauth?: boolean
+  diagnostic_only?: boolean
+}
+
+export interface AntiDegradePreview {
+  runtime?: {
+    strategy: string
+    identity_mode: string
+    configured_tls: string
+    effective_tls: string
+    tls_reason?: string
+    concurrency: number
+    proxy_mode: string
+    integrity_mode?: 'off' | 'observe' | 'enforce'
+  }
+  account_id: number
+  enabled: boolean
+  eligible: boolean
+  active_mode?: AntiDegradeMode | ''
+  policy_version?: number
+  identity_ready?: boolean
+  tls_profile?: string
+  issues?: string[]
+  reason?: string
+  changes: Array<{ key: string; from?: unknown; to: unknown; note?: string }>
+}
+
+export async function previewAntiDegrade(id: number, mode: AntiDegradeMode = DEFAULT_ANTI_DEGRADE_MODE): Promise<AntiDegradePreview> {
+  const { data } = await apiClient.get<AntiDegradePreview>(`/admin/accounts/${id}/anti-degrade`, { params: { mode } })
+  return data
+}
+
+export async function listAntiDegradeStrategies(): Promise<AntiDegradeStrategyProfile[]> {
+  const { data } = await apiClient.get<{ strategies: AntiDegradeStrategyProfile[] }>('/admin/accounts/anti-degrade/strategies')
+  return data.strategies || []
+}
+
+export async function applyAntiDegrade(id: number, mode: AntiDegradeMode = DEFAULT_ANTI_DEGRADE_MODE): Promise<Account> {
+  const { data } = await apiClient.post<Account>(`/admin/accounts/${id}/anti-degrade/apply`, null, { params: { mode } })
+  return data
+}
+
+export async function revertAntiDegrade(id: number): Promise<Account> {
+  const { data } = await apiClient.post<Account>(`/admin/accounts/${id}/anti-degrade/revert`, { confirm_disable: true })
+  return data
 }
 
 export async function getBatchUsage(accountIds: number[], force?: boolean): Promise<BatchAccountUsageResponse> {
@@ -1089,6 +1157,10 @@ export const accountsAPI = {
   applyOAuthCredentials,
   getStats,
   clearError,
+  previewAntiDegrade,
+  listAntiDegradeStrategies,
+  applyAntiDegrade,
+  revertAntiDegrade,
   getUsage,
   getBatchUsage,
   getTodayStats,

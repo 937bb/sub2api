@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/model"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
@@ -33,6 +34,7 @@ type TLSFingerprintProfileCache interface {
 type TLSFingerprintProfileService struct {
 	repo  TLSFingerprintProfileRepository
 	cache TLSFingerprintProfileCache
+	cfg   *config.Config
 
 	// 本地 ID→Profile 映射缓存，用于 DoWithTLS 热路径快速查找
 	localCache map[int64]*model.TLSFingerprintProfile
@@ -66,6 +68,16 @@ func NewTLSFingerprintProfileService(
 		})
 	}
 
+	return svc
+}
+
+func ProvideTLSFingerprintProfileService(
+	repo TLSFingerprintProfileRepository,
+	cache TLSFingerprintProfileCache,
+	cfg *config.Config,
+) *TLSFingerprintProfileService {
+	svc := NewTLSFingerprintProfileService(repo, cache)
+	svc.cfg = cfg
 	return svc
 }
 
@@ -177,6 +189,14 @@ func (s *TLSFingerprintProfileService) getRandomProfile() *tlsfingerprint.Profil
 func (s *TLSFingerprintProfileService) ResolveTLSProfile(account *Account) *tlsfingerprint.Profile {
 	if account == nil || !account.IsTLSFingerprintEnabled() {
 		return nil
+	}
+	if s != nil && s.cfg != nil && !s.cfg.Gateway.TLSFingerprint.Enabled {
+		return nil
+	}
+	if name, ok := account.Extra["tls_fingerprint_builtin"].(string); ok {
+		if profile := tlsfingerprint.BuiltinProfile(name); profile != nil {
+			return profile
+		}
 	}
 	id := account.GetTLSFingerprintProfileID()
 	if id > 0 {

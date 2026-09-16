@@ -19,6 +19,7 @@ import (
 
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
+	stageMode1Request(c, account, body)
 	return s.forwardWithOAuthMappedRetry(ctx, c, account, body)
 }
 
@@ -1453,6 +1454,9 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 	body, _, environmentErr = applyCodexClientEnvironmentRaw(body, account)
 	if environmentErr != nil {
 		return nil, environmentErr
+	}
+	if err := validateMode1StagedRequest(c, account, body); err != nil {
+		return nil, err
 	}
 	// Determine target URL based on account type
 	var targetURL string

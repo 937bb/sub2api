@@ -625,6 +625,9 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 	if environmentErr != nil {
 		return nil, environmentErr
 	}
+	if err := validateMode1StagedRequest(c, account, body); err != nil {
+		return nil, err
+	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, bytes.NewReader(body))
 	if err != nil {
