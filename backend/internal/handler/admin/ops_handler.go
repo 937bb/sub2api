@@ -72,6 +72,104 @@ func NewOpsHandler(opsService *service.OpsService) *OpsHandler {
 	return &OpsHandler{opsService: opsService}
 }
 
+// ListCodexTurnStates returns the persisted Turn-State history without raw values.
+func (h *OpsHandler) ListCodexTurnStates(c *gin.Context) {
+	if h.opsService == nil {
+		response.Error(c, http.StatusServiceUnavailable, "Ops service not available")
+		return
+	}
+	page, pageSize := response.ParsePagination(c)
+	filter := &service.OpenAICodexTurnStateFilter{
+		Status:   strings.ToLower(strings.TrimSpace(c.DefaultQuery("status", "active"))),
+		Page:     page,
+		PageSize: pageSize,
+	}
+	if filter.Status != "active" && filter.Status != "expired" && filter.Status != "all" {
+		response.BadRequest(c, "Invalid status")
+		return
+	}
+	if rawAccountID := strings.TrimSpace(c.Query("account_id")); rawAccountID != "" {
+		accountID, err := strconv.ParseInt(rawAccountID, 10, 64)
+		if err != nil || accountID <= 0 {
+			response.BadRequest(c, "Invalid account_id")
+			return
+		}
+		filter.AccountID = &accountID
+	}
+	result, err := h.opsService.ListOpenAICodexTurnStates(c.Request.Context(), filter)
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, "Failed to list Codex turn states")
+		return
+	}
+	response.Paginated(c, result.Items, result.Total, result.Page, result.PageSize)
+}
+
+// GetCodexTurnStateSummary returns counts and the currently selected value metadata.
+func (h *OpsHandler) GetCodexTurnStateSummary(c *gin.Context) {
+	if h.opsService == nil {
+		response.Error(c, http.StatusServiceUnavailable, "Ops service not available")
+		return
+	}
+	summary, err := h.opsService.GetOpenAICodexTurnStateSummary(c.Request.Context())
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, "Failed to load Codex turn-state summary")
+		return
+	}
+	response.Success(c, summary)
+}
+
+type codexTurnStateBatchRequest struct {
+	Values []string `json:"values" binding:"required"`
+}
+
+type codexTurnStateDeleteRequest struct {
+	IDs []int64 `json:"ids" binding:"required"`
+}
+
+func (h *OpsHandler) AddCodexTurnStates(c *gin.Context) {
+	if h.opsService == nil {
+		response.Error(c, http.StatusServiceUnavailable, "Ops service not available")
+		return
+	}
+	var req codexTurnStateBatchRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request")
+		return
+	}
+	if len(req.Values) > 500 {
+		response.BadRequest(c, "At most 500 values can be added at once")
+		return
+	}
+	added, err := h.opsService.AddOpenAICodexTurnStates(c.Request.Context(), req.Values)
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	response.Success(c, gin.H{"added": added})
+}
+
+func (h *OpsHandler) DeleteCodexTurnStates(c *gin.Context) {
+	if h.opsService == nil {
+		response.Error(c, http.StatusServiceUnavailable, "Ops service not available")
+		return
+	}
+	var req codexTurnStateDeleteRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request")
+		return
+	}
+	if len(req.IDs) > 500 {
+		response.BadRequest(c, "At most 500 values can be deleted at once")
+		return
+	}
+	deleted, err := h.opsService.DeleteOpenAICodexTurnStates(c.Request.Context(), req.IDs)
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	response.Success(c, gin.H{"deleted": deleted})
+}
+
 // GetErrorLogs lists ops error logs.
 // applyOpsErrorSortParams reads sort_by/sort_order query params into the filter.
 // Column whitelist and order normalization live in the repository; unknown

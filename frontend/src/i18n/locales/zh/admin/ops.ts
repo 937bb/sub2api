@@ -2,6 +2,38 @@ export default {
     ops: {
       title: '运维监控',
       description: '运维监控与排障',
+      turnState: {
+        title: 'Codex Turn-State 状态池',
+        description: '全局最长有效值与 30 分钟复用状态',
+        longestLength: '当前最长长度',
+        remaining: '剩余有效期',
+        activeCount: '有效值',
+        expiredCount: '已过期',
+        active: '有效',
+        expired: '已过期',
+        all: '全部',
+        add: '添加状态值',
+        addTitle: '批量添加 Turn-State',
+        addHint: '每行一个值，自动去重；新值从添加时起有效 30 分钟。',
+        addPlaceholder: '每行粘贴一个 X-Codex-Turn-State 值',
+        addSuccess: '已添加 {count} 个状态值',
+        addFailed: '添加状态值失败',
+        deleteSelected: '删除选中项（{count}）',
+        deleteTitle: '删除 Turn-State',
+        deleteConfirm: '确定删除 {count} 个状态值？运行时池会立即同步移除。',
+        deleteSuccess: '已删除 {count} 个状态值',
+        deleteFailed: '删除状态值失败',
+        loadFailed: '加载 Codex 状态池失败',
+        columns: {
+          state: '状态值',
+          length: '长度',
+          source: '来源账号',
+          session: '会话哈希',
+          lastSeen: '最后获取',
+          expiresAt: '到期时间',
+          status: '状态'
+        }
+      },
       // Dashboard
       systemHealth: '系统健康',
       overview: '概览',

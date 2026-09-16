@@ -76,6 +76,57 @@ export interface OpsPercentiles {
   max_ms?: number | null
 }
 
+export type CodexTurnStateStatus = 'active' | 'expired' | 'all'
+
+export interface CodexTurnStateRecord {
+  id: number
+  state_hash: string
+  masked_value: string
+  value_length: number
+  source_account_id?: number | null
+  source_account_name?: string
+  source_session_hash?: string
+  source_transport: 'http' | 'ws' | 'passthrough' | string
+  first_seen_at: string
+  last_seen_at: string
+  expires_at: string
+  active: boolean
+}
+
+export interface CodexTurnStateSummary {
+  active_count: number
+  expired_count: number
+  longest_active?: CodexTurnStateRecord | null
+  reuse_ttl_seconds: number
+}
+
+export interface CodexTurnStateListParams {
+  page?: number
+  page_size?: number
+  status?: CodexTurnStateStatus
+  account_id?: number
+}
+
+export async function listCodexTurnStates(params: CodexTurnStateListParams): Promise<PaginatedResponse<CodexTurnStateRecord>> {
+  const { data } = await apiClient.get<PaginatedResponse<CodexTurnStateRecord>>('/admin/ops/codex-turn-states', { params })
+  return data
+}
+
+export async function getCodexTurnStateSummary(): Promise<CodexTurnStateSummary> {
+  const { data } = await apiClient.get<CodexTurnStateSummary>('/admin/ops/codex-turn-states/summary')
+  return data
+}
+
+export async function addCodexTurnStates(values: string[]): Promise<{ added: number }> {
+  const { data } = await apiClient.post<{ added: number }>('/admin/ops/codex-turn-states', { values })
+  return data
+}
+
+export async function deleteCodexTurnStates(ids: number[]): Promise<{ deleted: number }> {
+  const { data } = await apiClient.delete<{ deleted: number }>('/admin/ops/codex-turn-states', { data: { ids } })
+  return data
+}
+
 export interface OpsThroughputTrendPoint {
   bucket_start: string
   request_count: number
@@ -1308,6 +1359,10 @@ async function updateMetricThresholds(thresholds: OpsMetricThresholds): Promise<
 }
 
 export const opsAPI = {
+  listCodexTurnStates,
+  getCodexTurnStateSummary,
+  addCodexTurnStates,
+  deleteCodexTurnStates,
   getDashboardSnapshotV2,
   getDashboardOverview,
   getThroughputTrend,

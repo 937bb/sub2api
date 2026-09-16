@@ -457,11 +457,10 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			resp.Body = newGrokResponsesClientToolStreamBody(resp.Body, mapping, maxLineSize)
 		}
 
-		// x-codex-turn-state 溯源：下游回传由 writeOpenAIPassthroughResponseHeaders
-		// 在各 handler 的写头点强制放行，铸造账号在此统一记录，供出站守卫剥离
-		// failover 换号后的跨账号回带（openai_codex_turn_state.go）。
-		if extractOpenAICodexTurnState(resp.Header) != "" {
-			s.noteOpenAICodexTurnStateProvenance(c, account)
+		// Persist the state before streaming starts so every passthrough response
+		// contributes to the global selection pool.
+		if turnState := extractOpenAICodexTurnState(resp.Header); turnState != "" {
+			s.observeOpenAICodexTurnState(c, account, turnState, "passthrough")
 		}
 
 		if reqStream {

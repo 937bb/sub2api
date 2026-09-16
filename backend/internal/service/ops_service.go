@@ -138,9 +138,131 @@ func NewOpsService(
 		antigravityGatewayService: antigravityGatewayService,
 		systemLogSink:             systemLogSink,
 	}
+	if openAIGatewayService != nil {
+		if turnStateRepo, ok := opsRepo.(OpenAICodexTurnStateStore); ok {
+			openAIGatewayService.setOpenAICodexTurnStateRepository(turnStateRepo)
+		}
+	}
 	svc.initRuntimeSettings(context.Background())
 	svc.applyRuntimeLogConfigOnStartup(context.Background())
 	return svc
+}
+
+func (s *OpsService) ListOpenAICodexTurnStates(ctx context.Context, filter *OpenAICodexTurnStateFilter) (*OpenAICodexTurnStateList, error) {
+	repo, ok := s.opsRepo.(OpenAICodexTurnStateAdminRepository)
+	if !ok {
+		return nil, errors.New("Codex turn-state repository is unavailable")
+	}
+	result, err := repo.ListOpenAICodexTurnStates(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	for _, record := range result.Items {
+		redactOpenAICodexTurnStateRecord(record)
+	}
+	return result, nil
+}
+
+func (s *OpsService) GetOpenAICodexTurnStateSummary(ctx context.Context) (*OpenAICodexTurnStateSummary, error) {
+	repo, ok := s.opsRepo.(OpenAICodexTurnStateAdminRepository)
+	if !ok {
+		return nil, errors.New("Codex turn-state repository is unavailable")
+	}
+	summary, err := repo.GetOpenAICodexTurnStateSummary(ctx, time.Now())
+	if err != nil {
+		return nil, err
+	}
+	if summary.LongestActive != nil {
+		redactOpenAICodexTurnStateRecord(summary.LongestActive)
+	}
+	summary.ReuseTTLSeconds = int64(openAICodexTurnStateTTL / time.Second)
+	return summary, nil
+}
+
+func (s *OpsService) AddOpenAICodexTurnStates(ctx context.Context, values []string) (int, error) {
+	repo, ok := s.opsRepo.(OpenAICodexTurnStateAdminRepository)
+	if !ok {
+		return 0, errors.New("Codex turn-state repository is unavailable")
+	}
+	now := time.Now()
+	unique := make(map[string]*OpenAICodexTurnStateRecord, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if !isValidOpenAICodexTurnState(value) {
+			return 0, errors.New("Codex turn-state contains invalid header characters")
+		}
+		hash := hashOpenAICodexTurnState(value)
+		unique[hash] = &OpenAICodexTurnStateRecord{
+			StateValue:      value,
+			StateHash:       hash,
+			ValueLength:     len(value),
+			SourceTransport: "manual",
+			FirstSeenAt:     now,
+			LastSeenAt:      now,
+			ExpiresAt:       now.Add(openAICodexTurnStateTTL),
+			Active:          true,
+		}
+	}
+	if len(unique) == 0 {
+		return 0, errors.New("no non-empty Codex turn-state values")
+	}
+	records := make([]*OpenAICodexTurnStateRecord, 0, len(unique))
+	for _, record := range unique {
+		records = append(records, record)
+	}
+	if err := repo.BatchUpsertOpenAICodexTurnStates(ctx, records); err != nil {
+		return 0, err
+	}
+	if s.openAIGatewayService != nil {
+		pool := s.openAIGatewayService.getOpenAICodexTurnStatePool()
+		pool.mu.Lock()
+		for _, record := range records {
+			pool.mergeLocked(record)
+		}
+		pool.mu.Unlock()
+	}
+	return len(records), nil
+}
+
+func (s *OpsService) DeleteOpenAICodexTurnStates(ctx context.Context, ids []int64) (int, error) {
+	repo, ok := s.opsRepo.(OpenAICodexTurnStateAdminRepository)
+	if !ok {
+		return 0, errors.New("Codex turn-state repository is unavailable")
+	}
+	unique := make(map[int64]struct{}, len(ids))
+	normalized := make([]int64, 0, len(ids))
+	for _, id := range ids {
+		if id <= 0 {
+			continue
+		}
+		if _, exists := unique[id]; exists {
+			continue
+		}
+		unique[id] = struct{}{}
+		normalized = append(normalized, id)
+	}
+	if len(normalized) == 0 {
+		return 0, errors.New("no valid Codex turn-state ids")
+	}
+	hashes, err := repo.DeleteOpenAICodexTurnStates(ctx, normalized)
+	if err != nil {
+		return 0, err
+	}
+	if s.openAIGatewayService != nil {
+		s.openAIGatewayService.getOpenAICodexTurnStatePool().removeHashes(hashes)
+	}
+	return len(hashes), nil
+}
+
+func redactOpenAICodexTurnStateRecord(record *OpenAICodexTurnStateRecord) {
+	if record == nil {
+		return
+	}
+	record.MaskedValue = maskOpenAICodexTurnState(record.StateValue)
+	record.StateValue = ""
 }
 
 func (s *OpsService) RequireMonitoringEnabled(ctx context.Context) error {

@@ -145,7 +145,6 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_KeepLeaseAcrossT
 			"responses_websockets_v2_enabled": true,
 		},
 	}
-
 	serverErrCh := make(chan error, 1)
 	turnTerminalCh := make(chan string, 2)
 	hooks := &OpenAIWSIngressHooks{
@@ -549,7 +548,6 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_FollowupCreateCa
 			"responses_websockets_v2_enabled": true,
 		},
 	}
-
 	serverErrCh := make(chan error, 1)
 	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := coderws.Accept(w, r, &coderws.AcceptOptions{
@@ -1307,6 +1305,8 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_PassthroughHeade
 			"openai_oauth_responses_websockets_v2_mode": OpenAIWSIngressModePassthrough,
 		},
 	}
+	accountID := account.ID
+	svc.getOpenAICodexTurnStatePool().observe("turn-state-1", &accountID, "", "ws")
 
 	serverErrCh := make(chan error, 1)
 	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

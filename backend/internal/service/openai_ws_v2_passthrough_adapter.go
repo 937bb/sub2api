@@ -948,6 +948,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		statusCode,
 		openAIWSHeaderValueForLog(handshakeHeaders, "x-request-id"),
 	)
+	if handshakeTurnState := strings.TrimSpace(handshakeHeaders.Get(openAIWSTurnStateHeader)); handshakeTurnState != "" {
+		s.observeOpenAICodexTurnState(c, account, handshakeTurnState, "ws")
+	}
 
 	upstreamFrameConn, ok := upstreamConn.(openaiwsv2.FrameConn)
 	if !ok {

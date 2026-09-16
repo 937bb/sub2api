@@ -91,6 +91,9 @@ func (s *OpenAIGatewayService) ForwardResponsesInputTokens(
 		return fmt.Errorf("responses input_tokens: upstream request failed: %s", safeErr)
 	}
 	defer func() { _ = resp.Body.Close() }()
+	if turnState := extractOpenAICodexTurnState(resp.Header); turnState != "" {
+		s.observeOpenAICodexTurnState(c, account, turnState, "http")
+	}
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -331,6 +334,9 @@ func (s *OpenAIGatewayService) ForwardCountTokensAsAnthropic(
 		return fmt.Errorf("openai input_tokens upstream request failed: %s", safeErr)
 	}
 	defer func() { _ = resp.Body.Close() }()
+	if turnState := extractOpenAICodexTurnState(resp.Header); turnState != "" {
+		s.observeOpenAICodexTurnState(c, account, turnState, "http")
+	}
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -476,6 +482,7 @@ func (s *OpenAIGatewayService) buildInputTokensUpstreamRequest(
 
 	// 账号级请求头覆写（仅 openai api_key 账号启用时生效；OAuth 路径 no-op）
 	account.ApplyHeaderOverrides(req.Header)
+	s.guardOpenAICodexTurnStateEcho(c, account, req.Header)
 
 	return req, nil
 }

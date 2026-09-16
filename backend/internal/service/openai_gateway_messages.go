@@ -401,6 +401,8 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	if compatTurnState != "" && upstreamReq.Header.Get("x-codex-turn-state") == "" {
 		upstreamReq.Header.Set("x-codex-turn-state", compatTurnState)
 	}
+	// The global pool has final authority after compatibility-session fallback.
+	s.guardOpenAICodexTurnStateEcho(c, account, upstreamReq.Header)
 
 	// 7. Send request
 	proxyURL := ""
@@ -506,9 +508,12 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		s.updateGrokUsageFromResponse(withGrokTeamRateLimitModel(ctx, upstreamModel), account, resp.Header, resp.StatusCode)
 	}
 
-	if account.UsesOpenAICodexProtocol() && promptCacheKey != "" {
+	if account.UsesOpenAICodexProtocol() {
 		if turnState := strings.TrimSpace(resp.Header.Get("x-codex-turn-state")); turnState != "" {
-			s.bindOpenAICompatSessionTurnState(ctx, c, account, promptCacheKey, turnState)
+			s.observeOpenAICodexTurnState(c, account, turnState, "http")
+			if promptCacheKey != "" {
+				s.bindOpenAICompatSessionTurnState(ctx, c, account, promptCacheKey, turnState)
+			}
 		}
 	}
 

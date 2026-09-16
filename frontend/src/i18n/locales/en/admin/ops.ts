@@ -2,6 +2,38 @@ export default {
     ops: {
       title: 'Ops Monitoring',
       description: 'Operational monitoring and troubleshooting',
+      turnState: {
+        title: 'Codex Turn-State Pool',
+        description: 'Global longest active value with a 30-minute reuse window',
+        longestLength: 'Longest length',
+        remaining: 'Time remaining',
+        activeCount: 'Active values',
+        expiredCount: 'Expired values',
+        active: 'Active',
+        expired: 'Expired',
+        all: 'All',
+        add: 'Add states',
+        addTitle: 'Add Turn-State values',
+        addHint: 'Enter one value per line. Duplicates are removed and each value remains active for 30 minutes.',
+        addPlaceholder: 'Paste one X-Codex-Turn-State value per line',
+        addSuccess: 'Added {count} state values',
+        addFailed: 'Failed to add state values',
+        deleteSelected: 'Delete selected ({count})',
+        deleteTitle: 'Delete Turn-State values',
+        deleteConfirm: 'Delete {count} state values? They will be removed from the runtime pool immediately.',
+        deleteSuccess: 'Deleted {count} state values',
+        deleteFailed: 'Failed to delete state values',
+        loadFailed: 'Failed to load the Codex state pool',
+        columns: {
+          state: 'State value',
+          length: 'Length',
+          source: 'Source account',
+          session: 'Session hash',
+          lastSeen: 'Last seen',
+          expiresAt: 'Expires at',
+          status: 'Status'
+        }
+      },
       // Dashboard
       systemHealth: 'System Health',
       overview: 'Overview',
