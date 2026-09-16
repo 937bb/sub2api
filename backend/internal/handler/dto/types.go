@@ -227,6 +227,8 @@ type Account struct {
 	Extra                   map[string]any                 `json:"extra"`
 	OllamaCloudUsage        *service.OllamaCloudUsageState `json:"ollama_cloud_usage,omitempty"`
 	ProxyID                 *int64                         `json:"proxy_id"`
+	CodexProxyIDs           []int64                        `json:"codex_proxy_ids,omitempty"`
+	CodexProxies            []*AccountProxyEndpoint        `json:"codex_proxies,omitempty"`
 	ProxyFallbackOriginID   *int64                         `json:"proxy_fallback_origin_id"`
 	ProxyFallbackOriginName *string                        `json:"proxy_fallback_origin_name,omitempty"`
 	Concurrency             int                            `json:"concurrency"`
@@ -351,20 +353,22 @@ type AccountListItem struct {
 	Extra             map[string]any                 `json:"extra,omitempty"`
 	OllamaCloudUsage  *service.OllamaCloudUsageState `json:"ollama_cloud_usage,omitempty"`
 
-	ProxyID                 *int64     `json:"proxy_id"`
-	ProxyFallbackOriginID   *int64     `json:"proxy_fallback_origin_id"`
-	ProxyFallbackOriginName *string    `json:"proxy_fallback_origin_name,omitempty"`
-	Concurrency             int        `json:"concurrency"`
-	LoadFactor              *int       `json:"load_factor,omitempty"`
-	Priority                int        `json:"priority"`
-	RateMultiplier          float64    `json:"rate_multiplier"`
-	Status                  string     `json:"status"`
-	ErrorMessage            string     `json:"error_message"`
-	LastUsedAt              *time.Time `json:"last_used_at"`
-	ExpiresAt               *int64     `json:"expires_at"`
-	AutoPauseOnExpired      bool       `json:"auto_pause_on_expired"`
-	CreatedAt               time.Time  `json:"created_at"`
-	UpdatedAt               time.Time  `json:"updated_at"`
+	ProxyID                 *int64                  `json:"proxy_id"`
+	CodexProxyIDs           []int64                 `json:"codex_proxy_ids,omitempty"`
+	CodexProxies            []*AccountProxyEndpoint `json:"codex_proxies,omitempty"`
+	ProxyFallbackOriginID   *int64                  `json:"proxy_fallback_origin_id"`
+	ProxyFallbackOriginName *string                 `json:"proxy_fallback_origin_name,omitempty"`
+	Concurrency             int                     `json:"concurrency"`
+	LoadFactor              *int                    `json:"load_factor,omitempty"`
+	Priority                int                     `json:"priority"`
+	RateMultiplier          float64                 `json:"rate_multiplier"`
+	Status                  string                  `json:"status"`
+	ErrorMessage            string                  `json:"error_message"`
+	LastUsedAt              *time.Time              `json:"last_used_at"`
+	ExpiresAt               *int64                  `json:"expires_at"`
+	AutoPauseOnExpired      bool                    `json:"auto_pause_on_expired"`
+	CreatedAt               time.Time               `json:"created_at"`
+	UpdatedAt               time.Time               `json:"updated_at"`
 
 	Schedulable bool `json:"schedulable"`
 
@@ -456,6 +460,17 @@ type Proxy struct {
 	FallbackMode   string     `json:"fallback_mode"`
 	BackupProxyID  *int64     `json:"backup_proxy_id"`
 	ExpiryWarnDays int        `json:"expiry_warn_days"`
+}
+
+// AccountProxyEndpoint is safe to return inside account responses. It omits
+// proxy authentication fields while exposing the configured egress endpoint.
+type AccountProxyEndpoint struct {
+	ID       int64  `json:"id"`
+	Name     string `json:"name"`
+	Protocol string `json:"protocol"`
+	Host     string `json:"host"`
+	Port     int    `json:"port"`
+	Status   string `json:"status"`
 }
 
 type ProxyWithAccountCount struct {

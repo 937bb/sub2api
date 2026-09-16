@@ -33,8 +33,9 @@ func TestProxyUpdateInvalidatesBoundProbeSnapshotsAndEnqueuesOutboxAtomically(t 
 	mock.ExpectQuery(`(?s)UPDATE accounts.*- 'upstream_billing_probe'.*- 'ollama_cloud_usage_snapshot'.*type = 'apikey'.*extra \? 'upstream_billing_probe'.*platform IN \('openai', 'anthropic', 'kimi', 'zhipu', 'deepseek', 'minimax'\).*extra \? 'ollama_cloud_usage_snapshot'.*RETURNING id`).
 		WithArgs(int64(9)).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(17)).AddRow(int64(18)))
+	expectCodexProxyBoundAccounts(mock, 9, 18, 19)
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO scheduler_outbox (event_type, account_id, group_id, payload)")).
-		WithArgs(service.SchedulerOutboxEventAccountBulkChanged, nil, nil, accountIDsPayloadMatcher{want: []int64{17, 18}}).
+		WithArgs(service.SchedulerOutboxEventAccountBulkChanged, nil, nil, accountIDsPayloadMatcher{want: []int64{17, 18, 19}}).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 
@@ -73,6 +74,7 @@ func TestProxyUpdateRollsBackWhenProbeInvalidationOutboxFails(t *testing.T) {
 	mock.ExpectQuery(`(?s)UPDATE accounts.*- 'upstream_billing_probe'.*- 'ollama_cloud_usage_snapshot'.*type = 'apikey'.*extra \? 'upstream_billing_probe'.*platform IN \('openai', 'anthropic', 'kimi', 'zhipu', 'deepseek', 'minimax'\).*extra \? 'ollama_cloud_usage_snapshot'.*RETURNING id`).
 		WithArgs(int64(9)).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(17)))
+	expectCodexProxyBoundAccounts(mock, 9)
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO scheduler_outbox (event_type, account_id, group_id, payload)")).
 		WillReturnError(errors.New("outbox failed"))
 	mock.ExpectRollback()
@@ -100,6 +102,10 @@ func TestProxyUpdateSkipsProbeInvalidationForNonIdentityChange(t *testing.T) {
 			AddRow("http", "same.example", 8080, "", "", service.StatusActive))
 	mock.ExpectExec(`(?s)UPDATE "proxies" SET`).WillReturnResult(sqlmock.NewResult(0, 1))
 	expectProxyUpdateReload(mock, 9, "same.example", "", "")
+	expectCodexProxyBoundAccounts(mock, 9, 23)
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO scheduler_outbox (event_type, account_id, group_id, payload)")).
+		WithArgs(service.SchedulerOutboxEventAccountBulkChanged, nil, nil, accountIDsPayloadMatcher{want: []int64{23}}).
+		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 
 	repo := newProxyRepositoryWithSQL(client, db)
@@ -109,6 +115,16 @@ func TestProxyUpdateSkipsProbeInvalidationForNonIdentityChange(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func expectCodexProxyBoundAccounts(mock sqlmock.Sqlmock, proxyID int64, accountIDs ...int64) {
+	rows := sqlmock.NewRows([]string{"account_id"})
+	for _, accountID := range accountIDs {
+		rows.AddRow(accountID)
+	}
+	mock.ExpectQuery(`(?s)SELECT binding.account_id.*FROM account_codex_proxies AS binding.*WHERE binding.proxy_id = \$1`).
+		WithArgs(proxyID).
+		WillReturnRows(rows)
 }
 
 func expectProxyUpdateReload(mock sqlmock.Sqlmock, id int64, host, username, password string) {

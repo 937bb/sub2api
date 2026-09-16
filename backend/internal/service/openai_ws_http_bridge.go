@@ -533,10 +533,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	}
 	SetOpsUpstreamModel(c, actualModel)
 
-	proxyURL := ""
-	if account.ProxyID != nil && account.Proxy != nil {
-		proxyURL = account.Proxy.URL()
-	}
+	proxyURL := account.SelectOpenAIOutboundProxyURL()
 	if c != nil {
 		c.Set("openai_passthrough", true)
 		c.Set("openai_ws_http_bridge", true)

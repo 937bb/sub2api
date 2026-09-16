@@ -1651,6 +1651,12 @@
         <ProxySelector v-model="form.proxy_id" :proxies="proxies" />
       </div>
 
+      <div v-if="!isSparkShadow && account.platform === 'openai' && (account.type === 'oauth' || account.type === 'setup-token')">
+        <label class="input-label">{{ t('admin.accounts.codexProxyPool') }}</label>
+        <ProxyMultiSelector v-model="form.codex_proxy_ids" :proxies="proxies" :max="5" />
+        <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.codexProxyPoolHint') }}</p>
+      </div>
+
       <UpstreamRequestIdHeaderField
         v-model="upstreamRequestIdHeader"
         :platform="account.platform"
@@ -3078,6 +3084,7 @@ import UpstreamRequestIdHeaderField from '@/components/account/UpstreamRequestId
 import Toggle from '@/components/common/Toggle.vue'
 import Icon from '@/components/icons/Icon.vue'
 import ProxySelector from '@/components/common/ProxySelector.vue'
+import ProxyMultiSelector from '@/components/common/ProxyMultiSelector.vue'
 import ProxyAdBanner from '@/components/common/ProxyAdBanner.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
@@ -3878,6 +3885,7 @@ const form = reactive({
   name: '',
   notes: '',
   proxy_id: null as number | null,
+  codex_proxy_ids: [] as number[],
   concurrency: 1,
   load_factor: null as number | null,
   priority: 1,
@@ -3986,6 +3994,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   form.name = newAccount.name
   form.notes = newAccount.notes || ''
   form.proxy_id = newAccount.proxy_id
+  form.codex_proxy_ids = [...(newAccount.codex_proxy_ids || [])]
   form.concurrency = newAccount.concurrency
   form.load_factor = newAccount.load_factor ?? null
   form.priority = newAccount.priority

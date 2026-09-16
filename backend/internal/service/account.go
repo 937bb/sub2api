@@ -6,6 +6,7 @@ import (
 	"errors"
 	"hash/fnv"
 	"log/slog"
+	"math/rand/v2"
 	"net/url"
 	"reflect"
 	"sort"
@@ -62,6 +63,8 @@ type Account struct {
 	QuotaDimension  string // 用量维度："" / "global" / "spark"
 
 	Proxy         *Proxy
+	CodexProxies  []*Proxy
+	CodexProxyIDs []int64
 	AccountGroups []AccountGroup
 	GroupIDs      []int64
 	Groups        []*Group
@@ -82,6 +85,63 @@ type Account struct {
 	headerOverrideCacheRawPtr         uintptr
 	headerOverrideCacheRawLen         int
 	headerOverrideCacheRawSig         uint64
+}
+
+const MaxCodexProxiesPerAccount = 5
+
+// SelectOpenAIOutboundProxy chooses one configured egress proxy for a single
+// Codex upstream request. API-key and non-OpenAI accounts retain the legacy
+// proxy_id behavior. A WebSocket caller must invoke this once per connection.
+func (a *Account) SelectOpenAIOutboundProxy() *Proxy {
+	if a != nil && a.IsOpenAIOAuthLike() {
+		now := time.Now()
+		var selected *Proxy
+		eligible := 0
+		for _, proxy := range a.CodexProxies {
+			if proxy != nil && proxy.IsActive() && !proxy.IsExpired(now) {
+				eligible++
+				if rand.IntN(eligible) == 0 {
+					selected = proxy
+				}
+			}
+		}
+		if selected != nil {
+			return selected
+		}
+	}
+	if a == nil {
+		return nil
+	}
+	return a.Proxy
+}
+
+func (a *Account) SelectOpenAIOutboundProxyURL() string {
+	if proxy := a.SelectOpenAIOutboundProxy(); proxy != nil {
+		return proxy.URL()
+	}
+	return ""
+}
+
+func (a *Account) HasOpenAIOutboundProxy() bool {
+	if a == nil {
+		return false
+	}
+	if a.hasActiveCodexProxy(time.Now()) {
+		return true
+	}
+	return a.Proxy != nil
+}
+
+func (a *Account) hasActiveCodexProxy(now time.Time) bool {
+	if a == nil || !a.IsOpenAIOAuthLike() {
+		return false
+	}
+	for _, proxy := range a.CodexProxies {
+		if proxy != nil && proxy.IsActive() && !proxy.IsExpired(now) {
+			return true
+		}
+	}
+	return false
 }
 
 type OpenAIEndpointCapability string

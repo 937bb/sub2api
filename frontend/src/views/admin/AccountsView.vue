@@ -328,13 +328,23 @@
           </template>
           <template #cell-proxy="{ row }">
             <div class="flex flex-col gap-1">
+              <div v-if="row.codex_proxies?.length" class="flex max-w-64 flex-wrap gap-1">
+                <span
+                  v-for="proxy in row.codex_proxies"
+                  :key="proxy.id"
+                  class="inline-flex max-w-full items-center rounded bg-emerald-50 px-1.5 py-0.5 font-mono text-xs text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"
+                  :title="`${proxy.name} (${proxy.protocol})`"
+                >
+                  {{ proxy.host }}:{{ proxy.port }}
+                </span>
+              </div>
               <div v-if="row.proxy" class="flex items-center gap-2">
                 <span class="text-sm text-gray-700 dark:text-gray-300">{{ row.proxy.name }}</span>
                 <span v-if="row.proxy.country_code" class="text-xs text-gray-500 dark:text-gray-400">
                   ({{ row.proxy.country_code }})
                 </span>
               </div>
-              <span v-else class="text-sm text-gray-400 dark:text-dark-500">-</span>
+              <span v-else-if="!row.codex_proxies?.length" class="text-sm text-gray-400 dark:text-dark-500">-</span>
               <div v-if="row.proxy && row.proxy.expires_at" class="flex items-center gap-2 text-xs">
                 <span class="text-gray-600 dark:text-gray-300">{{ formatDateTime(row.proxy.expires_at) }}</span>
                 <span :class="proxyExpiryBadge(row.proxy)">{{ proxyExpiryText(row.proxy) }}</span>
@@ -642,11 +652,11 @@ const accountToolsDropdownStyle = computed(() => ({
   width: `${accountToolsDropdownPosition.width}px`
 }))
 const hiddenColumns = reactive<Set<string>>(new Set())
-const DEFAULT_HIDDEN_COLUMNS = ['today_stats', 'proxy', 'notes', 'scheduler_score', 'rate_multiplier']
+const DEFAULT_HIDDEN_COLUMNS = ['today_stats', 'notes', 'scheduler_score', 'rate_multiplier']
 const HIDDEN_COLUMNS_KEY = 'account-hidden-columns'
-// One-time migration: hide scheduler score for existing admins too, because showing it opt-ins to heavy backend scoring.
+// One-time migrations keep expensive score data hidden and expose Codex egress endpoints.
 const HIDDEN_COLUMNS_VERSION_KEY = 'account-hidden-columns-version'
-const HIDDEN_COLUMNS_CURRENT_VERSION = 'scheduler-score-hidden-by-default'
+const HIDDEN_COLUMNS_CURRENT_VERSION = 'codex-proxy-visible-v2'
 
 // Sorting settings
 const ACCOUNT_SORT_STORAGE_KEY = 'account-table-sort'
@@ -953,9 +963,10 @@ const loadSavedColumns = () => {
       parsed.forEach(key => {
         hiddenColumns.add(key)
       })
-      // Older saved column layouts may have scheduler_score visible; migrate them to the new safe default once.
+      // Migrate existing saved layouts once so bound proxy endpoints are visible immediately.
       if (localStorage.getItem(HIDDEN_COLUMNS_VERSION_KEY) !== HIDDEN_COLUMNS_CURRENT_VERSION) {
         hiddenColumns.add('scheduler_score')
+        hiddenColumns.delete('proxy')
         localStorage.setItem(HIDDEN_COLUMNS_KEY, JSON.stringify([...hiddenColumns]))
         localStorage.setItem(HIDDEN_COLUMNS_VERSION_KEY, HIDDEN_COLUMNS_CURRENT_VERSION)
       }

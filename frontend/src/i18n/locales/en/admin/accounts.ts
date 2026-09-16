@@ -1000,6 +1000,8 @@ export default {
       expired: 'Expired',
       proxy: 'Proxy',
       noProxy: 'No Proxy',
+      codexProxyPool: 'Codex Random Egress Proxies',
+      codexProxyPoolHint: 'Select up to five proxies. Each upstream request picks one active egress; a WebSocket connection keeps its selected proxy.',
       concurrency: 'Concurrency',
       loadFactor: 'Load Factor',
       loadFactorHint: 'Higher load factor increases scheduling frequency',

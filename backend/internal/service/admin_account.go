@@ -430,17 +430,18 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 	delete(accountExtra, OllamaCloudUsageSnapshotExtraKey)
 	accountExtra = prepareCodexFingerprintExtraForCreate(input.Platform, input.Type, accountExtra)
 	account := &Account{
-		Name:        input.Name,
-		Notes:       normalizeAccountNotes(input.Notes),
-		Platform:    input.Platform,
-		Type:        input.Type,
-		Credentials: input.Credentials,
-		Extra:       accountExtra,
-		ProxyID:     input.ProxyID,
-		Concurrency: normalizeAccountConcurrency(input.Platform, input.Type, input.Concurrency),
-		Priority:    input.Priority,
-		Status:      StatusActive,
-		Schedulable: true,
+		Name:          input.Name,
+		Notes:         normalizeAccountNotes(input.Notes),
+		Platform:      input.Platform,
+		Type:          input.Type,
+		Credentials:   input.Credentials,
+		Extra:         accountExtra,
+		ProxyID:       input.ProxyID,
+		CodexProxyIDs: append([]int64(nil), input.CodexProxyIDs...),
+		Concurrency:   normalizeAccountConcurrency(input.Platform, input.Type, input.Concurrency),
+		Priority:      input.Priority,
+		Status:        StatusActive,
+		Schedulable:   true,
 	}
 	if input.ProbeEnabled != nil && *input.ProbeEnabled {
 		if !isUpstreamBillingProbeAccount(account) {
@@ -483,7 +484,68 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 	return account, nil
 }
 
+func normalizeCodexProxyIDs(platform, accountType string, proxyIDs []int64) ([]int64, error) {
+	if len(proxyIDs) == 0 {
+		return nil, nil
+	}
+	if platform != PlatformOpenAI || (accountType != AccountTypeOAuth && accountType != AccountTypeSetupToken) {
+		return nil, infraerrors.BadRequest("CODEX_PROXY_POOL_ACCOUNT_INVALID", "Codex proxy pools are only available for OpenAI OAuth/setup-token accounts")
+	}
+	unique := make([]int64, 0, len(proxyIDs))
+	seen := make(map[int64]struct{}, len(proxyIDs))
+	for _, proxyID := range proxyIDs {
+		if proxyID <= 0 {
+			return nil, infraerrors.BadRequest("CODEX_PROXY_POOL_PROXY_INVALID", "Codex proxy IDs must be positive")
+		}
+		if _, exists := seen[proxyID]; exists {
+			continue
+		}
+		seen[proxyID] = struct{}{}
+		unique = append(unique, proxyID)
+	}
+	if len(unique) > MaxCodexProxiesPerAccount {
+		return nil, infraerrors.BadRequest("CODEX_PROXY_POOL_TOO_LARGE", fmt.Sprintf("Codex proxy pool supports at most %d proxies", MaxCodexProxiesPerAccount))
+	}
+	return unique, nil
+}
+
+func (s *adminServiceImpl) setCodexProxyIDs(ctx context.Context, accountID int64, proxyIDs []int64) error {
+	repo, ok := s.accountRepo.(AccountCodexProxyRepository)
+	if !ok {
+		return errors.New("Codex proxy repository is not configured")
+	}
+	return repo.SetCodexProxyIDs(ctx, accountID, proxyIDs)
+}
+
+func (s *adminServiceImpl) validateCodexProxies(ctx context.Context, proxyIDs []int64) error {
+	if len(proxyIDs) == 0 {
+		return nil
+	}
+	if s.proxyRepo == nil {
+		return errors.New("proxy repository is not configured")
+	}
+	now := time.Now()
+	for _, proxyID := range proxyIDs {
+		proxy, err := s.proxyRepo.GetByID(ctx, proxyID)
+		if err != nil || proxy == nil {
+			return infraerrors.BadRequest("CODEX_PROXY_NOT_FOUND", fmt.Sprintf("Codex proxy %d does not exist", proxyID))
+		}
+		if !proxy.IsActive() || proxy.IsExpired(now) {
+			return infraerrors.BadRequest("CODEX_PROXY_UNAVAILABLE", fmt.Sprintf("Codex proxy %d must be active and not expired", proxyID))
+		}
+	}
+	return nil
+}
+
 func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccountInput) (*Account, error) {
+	codexProxyIDs, err := normalizeCodexProxyIDs(input.Platform, input.Type, input.CodexProxyIDs)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.validateCodexProxies(ctx, codexProxyIDs); err != nil {
+		return nil, err
+	}
+	input.CodexProxyIDs = codexProxyIDs
 	accountExtra, err := normalizeOpenAILongContextBillingExtra(input.Platform, input.Extra)
 	if err != nil {
 		return nil, err
@@ -567,6 +629,19 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 	}
 	account.GroupIDs = append([]int64(nil), groupIDs...)
 	account.AccountGroups = groups
+	if len(codexProxyIDs) > 0 {
+		if err := s.setCodexProxyIDs(ctx, account.ID, codexProxyIDs); err != nil {
+			if delErr := s.accountRepo.Delete(context.WithoutCancel(ctx), account.ID); delErr != nil {
+				slog.Error("create_account_codex_proxy_rollback_failed", "account_id", account.ID, "delete_err", delErr)
+			}
+			return nil, fmt.Errorf("bind Codex proxies: %w", err)
+		}
+		reloaded, reloadErr := s.accountRepo.GetByID(ctx, account.ID)
+		if reloadErr != nil {
+			return nil, reloadErr
+		}
+		account = reloaded
+	}
 
 	// OAuth 账号：创建后异步设置隐私。
 	// 使用 Ensure（幂等）而非 Force：新建账号 Extra 为空时效果相同，但更安全。
@@ -660,6 +735,20 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	}
 	if input.Type != "" {
 		account.Type = input.Type
+	}
+	var codexProxyIDsToPersist *[]int64
+	if input.CodexProxyIDs != nil {
+		if account.IsCredentialShadow() {
+			return nil, infraerrors.BadRequest("SPARK_SHADOW_PROXY_INHERITED", "spark shadow Codex proxies are inherited from the parent account")
+		}
+		normalized, normalizeErr := normalizeCodexProxyIDs(account.Platform, account.Type, *input.CodexProxyIDs)
+		if normalizeErr != nil {
+			return nil, normalizeErr
+		}
+		codexProxyIDsToPersist = &normalized
+	} else if !account.IsOpenAIOAuthLike() && len(account.CodexProxyIDs) > 0 {
+		empty := []int64{}
+		codexProxyIDsToPersist = &empty
 	}
 	if input.Notes != nil {
 		account.Notes = normalizeAccountNotes(input.Notes)
@@ -870,6 +959,11 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 			}
 		}
 	}
+	if codexProxyIDsToPersist != nil {
+		if err := s.validateCodexProxies(ctx, *codexProxyIDsToPersist); err != nil {
+			return nil, err
+		}
+	}
 
 	billingSettingsAppliedAtomically := false
 	updater := s.accountBillingRepo
@@ -906,6 +1000,22 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 			}
 			if err := s.accountRepo.UpdateExtra(ctx, account.ID, settings); err != nil {
 				return nil, err
+			}
+		}
+	}
+	if codexProxyIDsToPersist != nil {
+		if err := s.setCodexProxyIDs(ctx, account.ID, *codexProxyIDsToPersist); err != nil {
+			return nil, fmt.Errorf("update Codex proxies: %w", err)
+		}
+		if !account.IsCredentialShadow() {
+			shadows, shadowErr := s.accountRepo.ListShadowsByParent(ctx, account.ID)
+			if shadowErr != nil {
+				return nil, shadowErr
+			}
+			for _, shadow := range shadows {
+				if err := s.setCodexProxyIDs(ctx, shadow.ID, *codexProxyIDsToPersist); err != nil {
+					return nil, fmt.Errorf("update spark shadow %d Codex proxies: %w", shadow.ID, err)
+				}
 			}
 		}
 	}
@@ -1483,6 +1593,16 @@ func (s *adminServiceImpl) CreateShadow(ctx context.Context, parentID int64, opt
 			return nil, fmt.Errorf("bind groups for spark shadow: %w", err)
 		}
 		shadow.GroupIDs = groupIDs
+	}
+	if len(parent.CodexProxyIDs) > 0 {
+		if err := s.setCodexProxyIDs(ctx, shadow.ID, parent.CodexProxyIDs); err != nil {
+			if delErr := s.accountRepo.Delete(context.WithoutCancel(ctx), shadow.ID); delErr != nil {
+				slog.Error("spark_shadow_codex_proxy_rollback_failed", "shadow_id", shadow.ID, "delete_err", delErr)
+			}
+			return nil, fmt.Errorf("bind inherited Codex proxies: %w", err)
+		}
+		shadow.CodexProxyIDs = append([]int64(nil), parent.CodexProxyIDs...)
+		shadow.CodexProxies = append([]*Proxy(nil), parent.CodexProxies...)
 	}
 
 	return shadow, nil

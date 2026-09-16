@@ -257,6 +257,8 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 		Extra:                   extra,
 		OllamaCloudUsage:        ollamaCloudUsage,
 		ProxyID:                 a.ProxyID,
+		CodexProxyIDs:           append([]int64(nil), a.CodexProxyIDs...),
+		CodexProxies:            ProxiesFromService(a.CodexProxies),
 		ProxyFallbackOriginID:   a.ProxyFallbackOriginID,
 		ProxyFallbackOriginName: a.ProxyFallbackOriginName,
 		Concurrency:             a.Concurrency,
@@ -490,7 +492,8 @@ func AccountListItemFromAccount(a *Account) *AccountListItem {
 		QuotaNotifyTotalThreshold: a.QuotaNotifyTotalThreshold, ParentAccountID: a.ParentAccountID,
 		QuotaDimension: a.QuotaDimension, ParentEmail: a.ParentEmail, ParentPlanType: a.ParentPlanType,
 		ParentPrivacyMode: a.ParentPrivacyMode, ParentSubscriptionExpiresAt: a.ParentSubscriptionExpiresAt,
-		ParentChatGPTAccountID: a.ParentChatGPTAccountID, Proxy: a.Proxy, GroupIDs: a.GroupIDs,
+		ParentChatGPTAccountID: a.ParentChatGPTAccountID, Proxy: a.Proxy,
+		CodexProxyIDs: a.CodexProxyIDs, CodexProxies: a.CodexProxies, GroupIDs: a.GroupIDs,
 	}
 }
 
@@ -535,6 +538,22 @@ func ProxyFromService(p *service.Proxy) *Proxy {
 		BackupProxyID:  p.BackupProxyID,
 		ExpiryWarnDays: p.ExpiryWarnDays,
 	}
+}
+
+func ProxiesFromService(proxies []*service.Proxy) []*AccountProxyEndpoint {
+	if len(proxies) == 0 {
+		return nil
+	}
+	out := make([]*AccountProxyEndpoint, 0, len(proxies))
+	for _, proxy := range proxies {
+		if proxy != nil {
+			out = append(out, &AccountProxyEndpoint{
+				ID: proxy.ID, Name: proxy.Name, Protocol: proxy.Protocol,
+				Host: proxy.Host, Port: proxy.Port, Status: proxy.Status,
+			})
+		}
+	}
+	return out
 }
 
 func ProxyWithAccountCountFromService(p *service.ProxyWithAccountCount) *ProxyWithAccountCount {

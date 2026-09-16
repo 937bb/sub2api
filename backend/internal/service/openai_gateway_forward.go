@@ -1125,10 +1125,7 @@ func (s *OpenAIGatewayService) forwardOnce(ctx context.Context, c *gin.Context, 
 		applyStagedCodexFingerprintHeaders(c, account, upstreamReq.Header)
 
 		// Get proxy URL
-		proxyURL := ""
-		if account.ProxyID != nil && account.Proxy != nil {
-			proxyURL = account.Proxy.URL()
-		}
+		proxyURL := account.SelectOpenAIOutboundProxyURL()
 
 		// Send request
 		upstreamStart := time.Now()

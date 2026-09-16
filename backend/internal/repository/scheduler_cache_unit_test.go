@@ -128,6 +128,26 @@ func TestSchedulerCacheSetAccountClearsUnencodablePayload(t *testing.T) {
 	require.Nil(t, cached)
 }
 
+func TestSchedulerCachePreservesCodexProxyPool(t *testing.T) {
+	cache := newSchedulerCacheUnit(t)
+	ctx := context.Background()
+	account := service.Account{
+		ID: 71, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth,
+		CodexProxyIDs: []int64{11, 12},
+		CodexProxies: []*service.Proxy{
+			{ID: 11, Protocol: "http", Host: "192.0.2.11", Port: 8080, Username: "u1", Password: "p1", Status: service.StatusActive},
+			{ID: 12, Protocol: "socks5", Host: "192.0.2.12", Port: 1080, Username: "u2", Password: "p2", Status: service.StatusActive},
+		},
+	}
+
+	require.NoError(t, cache.SetAccount(ctx, &account))
+	got, err := cache.GetAccount(ctx, account.ID)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, account.CodexProxyIDs, got.CodexProxyIDs)
+	require.Equal(t, account.CodexProxies, got.CodexProxies)
+}
+
 func TestSchedulerCacheUpdateLastUsedClearsUnencodablePayload(t *testing.T) {
 	ctx := context.Background()
 	cache := newSchedulerCacheUnit(t)

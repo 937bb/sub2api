@@ -843,12 +843,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		HeadersFactory: func(factoryCtx context.Context, headers http.Header) (http.Header, error) {
 			return s.refreshOpenAIAgentIdentityHeaders(factoryCtx, account, headers)
 		},
-		ProxyURL: func() string {
-			if account.ProxyID != nil && account.Proxy != nil {
-				return account.Proxy.URL()
-			}
-			return ""
-		}(),
+		ProxyURL:     account.SelectOpenAIOutboundProxyURL(),
 		ForceNewConn: false,
 	}
 	pool := s.getOpenAIWSConnPool()
@@ -951,7 +946,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				forcePreferredConn,
 				wsHost,
 				wsPath,
-				account.ProxyID != nil && account.Proxy != nil,
+				account.HasOpenAIOutboundProxy(),
 			)
 			var dialErr *openAIWSDialError
 			if errors.As(acquireErr, &dialErr) && dialErr != nil && dialErr.StatusCode == http.StatusTooManyRequests {

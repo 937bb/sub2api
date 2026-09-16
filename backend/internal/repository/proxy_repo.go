@@ -184,13 +184,18 @@ func updateProxyAndInvalidateProbeSnapshots(ctx context.Context, client *dbent.C
 	if err != nil {
 		return nil, err
 	}
-	if currentIdentity == proxyProbeIdentityFromService(proxyIn) {
-		return updated, nil
+	accountIDs := make([]int64, 0)
+	if currentIdentity != proxyProbeIdentityFromService(proxyIn) {
+		accountIDs, err = invalidateProxyProbeSnapshots(ctx, client, proxyIn.ID)
+		if err != nil {
+			return nil, err
+		}
 	}
-	accountIDs, err := invalidateProxyProbeSnapshots(ctx, client, proxyIn.ID)
+	codexAccountIDs, err := listCodexProxyBoundAccountIDs(ctx, client, proxyIn.ID)
 	if err != nil {
 		return nil, err
 	}
+	accountIDs = append(accountIDs, codexAccountIDs...)
 	if err := enqueueProxyProbeAccountChanges(ctx, client, accountIDs); err != nil {
 		return nil, err
 	}
@@ -244,6 +249,33 @@ func invalidateProxyProbeSnapshots(ctx context.Context, exec sqlExecutor, proxyI
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
+	accountIDs := make([]int64, 0)
+	for rows.Next() {
+		var accountID int64
+		if err := rows.Scan(&accountID); err != nil {
+			return nil, err
+		}
+		accountIDs = append(accountIDs, accountID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return accountIDs, nil
+}
+
+func listCodexProxyBoundAccountIDs(ctx context.Context, exec sqlExecutor, proxyID int64) ([]int64, error) {
+	rows, err := exec.QueryContext(ctx, `
+		SELECT binding.account_id
+		FROM account_codex_proxies AS binding
+		JOIN accounts AS account ON account.id = binding.account_id
+		WHERE binding.proxy_id = $1 AND account.deleted_at IS NULL
+		ORDER BY binding.account_id
+	`, proxyID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
 	accountIDs := make([]int64, 0)
 	for rows.Next() {
 		var accountID int64
@@ -472,7 +504,19 @@ func (r *proxyRepository) ExistsByHostPortAuth(ctx context.Context, host string,
 // CountAccountsByProxyID returns the number of accounts using a specific proxy
 func (r *proxyRepository) CountAccountsByProxyID(ctx context.Context, proxyID int64) (int64, error) {
 	var count int64
-	if err := scanSingleRow(ctx, r.sql, "SELECT COUNT(*) FROM accounts WHERE proxy_id = $1 AND deleted_at IS NULL", []any{proxyID}, &count); err != nil {
+	if err := scanSingleRow(ctx, r.sql, `
+		SELECT COUNT(*)
+		FROM (
+			SELECT id AS account_id
+			FROM accounts
+			WHERE proxy_id = $1 AND deleted_at IS NULL
+			UNION
+			SELECT binding.account_id
+			FROM account_codex_proxies AS binding
+			JOIN accounts AS account ON account.id = binding.account_id
+			WHERE binding.proxy_id = $1 AND account.deleted_at IS NULL
+		) AS bound_accounts
+	`, []any{proxyID}, &count); err != nil {
 		return 0, err
 	}
 	return count, nil
@@ -481,8 +525,15 @@ func (r *proxyRepository) CountAccountsByProxyID(ctx context.Context, proxyID in
 func (r *proxyRepository) ListAccountSummariesByProxyID(ctx context.Context, proxyID int64) ([]service.ProxyAccountSummary, error) {
 	rows, err := r.sql.QueryContext(ctx, `
 		SELECT id, name, platform, type, notes
-		FROM accounts
-		WHERE proxy_id = $1 AND deleted_at IS NULL
+		FROM accounts AS account
+		WHERE account.deleted_at IS NULL
+		  AND (
+			account.proxy_id = $1
+			OR EXISTS (
+				SELECT 1 FROM account_codex_proxies AS binding
+				WHERE binding.account_id = account.id AND binding.proxy_id = $1
+			)
+		  )
 		ORDER BY id DESC
 	`, proxyID)
 	if err != nil {
@@ -522,7 +573,20 @@ func (r *proxyRepository) ListAccountSummariesByProxyID(ctx context.Context, pro
 
 // GetAccountCountsForProxies returns a map of proxy ID to account count for all proxies
 func (r *proxyRepository) GetAccountCountsForProxies(ctx context.Context) (counts map[int64]int64, err error) {
-	rows, err := r.sql.QueryContext(ctx, "SELECT proxy_id, COUNT(*) AS count FROM accounts WHERE proxy_id IS NOT NULL AND deleted_at IS NULL GROUP BY proxy_id")
+	rows, err := r.sql.QueryContext(ctx, `
+		SELECT proxy_id, COUNT(DISTINCT account_id) AS count
+		FROM (
+			SELECT proxy_id, id AS account_id
+			FROM accounts
+			WHERE proxy_id IS NOT NULL AND deleted_at IS NULL
+			UNION ALL
+			SELECT binding.proxy_id, binding.account_id
+			FROM account_codex_proxies AS binding
+			JOIN accounts AS account ON account.id = binding.account_id
+			WHERE account.deleted_at IS NULL
+		) AS proxy_accounts
+		GROUP BY proxy_id
+	`)
 	if err != nil {
 		return nil, err
 	}
@@ -733,6 +797,11 @@ func (r *proxyRepository) sweepOneExpiredProxyOnExec(ctx context.Context, exec s
 		if err != nil {
 			return nil, err
 		}
+		codexAccountIDs, err := listCodexProxyBoundAccountIDs(ctx, exec, proxyID)
+		if err != nil {
+			return nil, err
+		}
+		accountIDs = append(accountIDs, codexAccountIDs...)
 		if err := enqueueProxyProbeAccountChanges(ctx, exec, accountIDs); err != nil {
 			return nil, err
 		}
@@ -788,6 +857,11 @@ func (r *proxyRepository) sweepOneExpiredProxyOnExec(ctx context.Context, exec s
 	if err := rows.Close(); err != nil {
 		return nil, err
 	}
+	codexAccountIDs, err := listCodexProxyBoundAccountIDs(ctx, exec, proxyID)
+	if err != nil {
+		return nil, err
+	}
+	accountIDs = append(accountIDs, codexAccountIDs...)
 	return accountIDs, nil
 }
 

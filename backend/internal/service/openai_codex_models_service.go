@@ -1706,10 +1706,7 @@ func (s *OpenAIGatewayService) FetchCodexModelsManifest(ctx context.Context, acc
 	headers.Set("Version", headerVersion)
 	applyCodexClientEnvironmentHeaders(headers, credAccount)
 
-	proxyURL := ""
-	if account.ProxyID != nil && account.Proxy != nil {
-		proxyURL = account.Proxy.URL()
-	}
+	proxyURL := account.SelectOpenAIOutboundProxyURL()
 
 	request := openAIModelsRequest{
 		url:                 requestURL.String(),

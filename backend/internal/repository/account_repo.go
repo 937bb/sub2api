@@ -15,6 +15,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -311,40 +312,19 @@ func (r *accountRepository) GetByIDs(ctx context.Context, ids []int64) ([]*servi
 		return []*service.Account{}, nil
 	}
 
-	accountIDs := make([]int64, 0, len(entAccounts))
 	entByID := make(map[int64]*dbent.Account, len(entAccounts))
 	for _, acc := range entAccounts {
 		entByID[acc.ID] = acc
-		accountIDs = append(accountIDs, acc.ID)
 	}
 
-	groupsByAccount, groupIDsByAccount, accountGroupsByAccount, err := r.loadAccountGroups(ctx, accountIDs)
+	converted, err := r.accountsToService(ctx, entAccounts)
 	if err != nil {
 		return nil, err
 	}
 
-	outByID := make(map[int64]*service.Account, len(entAccounts))
-	for _, entAcc := range entAccounts {
-		out := accountEntityToService(entAcc)
-		if out == nil {
-			continue
-		}
-
-		// Prefer the preloaded proxy edge when available.
-		if entAcc.Edges.Proxy != nil {
-			out.Proxy = proxyEntityToService(entAcc.Edges.Proxy)
-		}
-
-		if groups, ok := groupsByAccount[entAcc.ID]; ok {
-			out.Groups = groups
-		}
-		if groupIDs, ok := groupIDsByAccount[entAcc.ID]; ok {
-			out.GroupIDs = groupIDs
-		}
-		if ags, ok := accountGroupsByAccount[entAcc.ID]; ok {
-			out.AccountGroups = ags
-		}
-		outByID[entAcc.ID] = out
+	outByID := make(map[int64]*service.Account, len(converted))
+	for i := range converted {
+		outByID[converted[i].ID] = &converted[i]
 	}
 
 	// Preserve input order (first occurrence), and ignore missing IDs.
@@ -3232,9 +3212,13 @@ func (r *accountRepository) accountsToService(ctx context.Context, accounts []*d
 	}
 
 	accountIDs := make([]int64, 0, len(accounts))
+	codexAccountIDs := make([]int64, 0, len(accounts))
 	proxyIDs := make([]int64, 0, len(accounts))
 	for _, acc := range accounts {
 		accountIDs = append(accountIDs, acc.ID)
+		if acc.Platform == service.PlatformOpenAI && (acc.Type == service.AccountTypeOAuth || acc.Type == service.AccountTypeSetupToken) {
+			codexAccountIDs = append(codexAccountIDs, acc.ID)
+		}
 		if acc.ProxyID != nil {
 			proxyIDs = append(proxyIDs, *acc.ProxyID)
 		}
@@ -3242,6 +3226,11 @@ func (r *accountRepository) accountsToService(ctx context.Context, accounts []*d
 			proxyIDs = append(proxyIDs, *acc.ProxyFallbackOriginID)
 		}
 	}
+	codexProxyIDsByAccount, codexProxyIDs, err := r.loadCodexProxyBindings(ctx, codexAccountIDs)
+	if err != nil {
+		return nil, err
+	}
+	proxyIDs = append(proxyIDs, codexProxyIDs...)
 
 	proxyMap, err := r.loadProxies(ctx, proxyIDs)
 	if err != nil {
@@ -3261,6 +3250,15 @@ func (r *accountRepository) accountsToService(ctx context.Context, accounts []*d
 		if acc.ProxyID != nil {
 			if proxy, ok := proxyMap[*acc.ProxyID]; ok {
 				out.Proxy = proxy
+			}
+		}
+		if boundIDs := codexProxyIDsByAccount[acc.ID]; len(boundIDs) > 0 {
+			out.CodexProxyIDs = append([]int64(nil), boundIDs...)
+			out.CodexProxies = make([]*service.Proxy, 0, len(boundIDs))
+			for _, proxyID := range boundIDs {
+				if proxy, ok := proxyMap[proxyID]; ok && proxy != nil {
+					out.CodexProxies = append(out.CodexProxies, proxy)
+				}
 			}
 		}
 		out.ProxyFallbackOriginID = acc.ProxyFallbackOriginID
@@ -3283,6 +3281,145 @@ func (r *accountRepository) accountsToService(ctx context.Context, accounts []*d
 	}
 
 	return outAccounts, nil
+}
+
+func (r *accountRepository) loadCodexProxyBindings(ctx context.Context, accountIDs []int64) (map[int64][]int64, []int64, error) {
+	bindings := make(map[int64][]int64)
+	accountIDs = uniquePositiveInt64s(accountIDs)
+	if len(accountIDs) == 0 || r.sql == nil {
+		return bindings, nil, nil
+	}
+
+	rows, err := r.sql.QueryContext(ctx, `
+		SELECT account_id, proxy_id
+		FROM account_codex_proxies
+		WHERE account_id = ANY($1)
+		ORDER BY account_id, position
+	`, pq.Array(accountIDs))
+	if err != nil {
+		return nil, nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	allProxyIDs := make([]int64, 0)
+	for rows.Next() {
+		var accountID, proxyID int64
+		if err := rows.Scan(&accountID, &proxyID); err != nil {
+			return nil, nil, err
+		}
+		bindings[accountID] = append(bindings[accountID], proxyID)
+		allProxyIDs = append(allProxyIDs, proxyID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, err
+	}
+	return bindings, allProxyIDs, nil
+}
+
+// SetCodexProxyIDs replaces the complete request-egress pool for one account.
+// The transaction also emits a scheduler event so Redis snapshots cannot keep
+// serving the previous binding set.
+func (r *accountRepository) SetCodexProxyIDs(ctx context.Context, accountID int64, proxyIDs []int64) error {
+	proxyIDs = uniquePositiveInt64s(proxyIDs)
+	if len(proxyIDs) > service.MaxCodexProxiesPerAccount {
+		return fmt.Errorf("codex proxy pool supports at most %d proxies", service.MaxCodexProxiesPerAccount)
+	}
+
+	baseCtx := ctx
+	contextTx := dbent.TxFromContext(ctx)
+	client := r.client
+	var tx *dbent.Tx
+	if contextTx != nil {
+		client = contextTx.Client()
+	} else {
+		var err error
+		tx, err = r.client.Tx(ctx)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = tx.Rollback() }()
+		ctx = dbent.NewTxContext(ctx, tx)
+		client = tx.Client()
+	}
+
+	rows, err := client.QueryContext(ctx, `
+		SELECT platform, type
+		FROM accounts
+		WHERE id = $1 AND deleted_at IS NULL
+		FOR UPDATE
+	`, accountID)
+	if err != nil {
+		return err
+	}
+	var platform, accountType string
+	if rows.Next() {
+		err = rows.Scan(&platform, &accountType)
+	} else if rows.Err() != nil {
+		err = rows.Err()
+	} else {
+		err = service.ErrAccountNotFound
+	}
+	_ = rows.Close()
+	if err != nil {
+		return err
+	}
+	if len(proxyIDs) > 0 && (platform != service.PlatformOpenAI || (accountType != service.AccountTypeOAuth && accountType != service.AccountTypeSetupToken)) {
+		return errors.New("codex proxy pool is only available for OpenAI OAuth/setup-token accounts")
+	}
+
+	if len(proxyIDs) > 0 {
+		var activeCount int
+		countRows, queryErr := client.QueryContext(ctx, `
+			SELECT COUNT(*)
+			FROM proxies
+			WHERE id = ANY($1)
+			  AND deleted_at IS NULL
+			  AND status = $2
+			  AND (expires_at IS NULL OR expires_at > NOW())
+		`, pq.Array(proxyIDs), service.StatusActive)
+		if queryErr != nil {
+			return queryErr
+		}
+		if countRows.Next() {
+			queryErr = countRows.Scan(&activeCount)
+		} else if countRows.Err() != nil {
+			queryErr = countRows.Err()
+		} else {
+			queryErr = errors.New("failed to validate codex proxies")
+		}
+		_ = countRows.Close()
+		if queryErr != nil {
+			return queryErr
+		}
+		if activeCount != len(proxyIDs) {
+			return errors.New("all codex proxies must exist, be active, and not be expired")
+		}
+	}
+
+	if _, err := client.ExecContext(ctx, "DELETE FROM account_codex_proxies WHERE account_id = $1", accountID); err != nil {
+		return err
+	}
+	for index, proxyID := range proxyIDs {
+		if _, err := client.ExecContext(ctx, `
+			INSERT INTO account_codex_proxies (account_id, proxy_id, position)
+			VALUES ($1, $2, $3)
+		`, accountID, proxyID, index+1); err != nil {
+			return err
+		}
+	}
+	if _, err := client.ExecContext(ctx, "UPDATE accounts SET updated_at = NOW() WHERE id = $1", accountID); err != nil {
+		return err
+	}
+	if err := enqueueSchedulerOutbox(ctx, client, service.SchedulerOutboxEventAccountChanged, &accountID, nil, nil); err != nil {
+		return err
+	}
+	if tx != nil {
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+		r.syncSchedulerAccountSnapshot(baseCtx, accountID)
+	}
+	return nil
 }
 
 func tempUnschedulablePredicate() dbpredicate.Account {

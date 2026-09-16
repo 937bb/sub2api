@@ -145,6 +145,12 @@ type AccountBillingSettingsRepository interface {
 	) error
 }
 
+// AccountCodexProxyRepository manages the request-egress proxy pool attached
+// to OpenAI Codex OAuth/setup-token accounts.
+type AccountCodexProxyRepository interface {
+	SetCodexProxyIDs(ctx context.Context, accountID int64, proxyIDs []int64) error
+}
+
 // AdminAccountRepository makes the account-duplication write capability an explicit
 // construction dependency without forcing read-only gateway test doubles to implement it.
 type AdminAccountRepository interface {

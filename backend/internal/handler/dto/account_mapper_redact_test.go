@@ -100,3 +100,27 @@ func TestAccountFromServiceShallow_NilCredentialsOmitsStatus(t *testing.T) {
 	require.Nil(t, got.Credentials)
 	require.Nil(t, got.CredentialsStatus)
 }
+
+func TestAccountFromServiceShallow_CodexProxyEndpointsOmitCredentials(t *testing.T) {
+	src := &service.Account{
+		ID:            7,
+		Platform:      service.PlatformOpenAI,
+		Type:          service.AccountTypeOAuth,
+		CodexProxyIDs: []int64{11},
+		CodexProxies: []*service.Proxy{{
+			ID: 11, Name: "egress", Protocol: "http", Host: "192.0.2.10", Port: 8080,
+			Username: "proxy-user", Password: "proxy-password", Status: service.StatusActive,
+		}},
+	}
+
+	got := AccountFromServiceShallow(src)
+	require.Equal(t, []int64{11}, got.CodexProxyIDs)
+	require.Len(t, got.CodexProxies, 1)
+	require.Equal(t, "192.0.2.10", got.CodexProxies[0].Host)
+	require.Equal(t, 8080, got.CodexProxies[0].Port)
+
+	raw, err := json.Marshal(got)
+	require.NoError(t, err)
+	require.NotContains(t, string(raw), "proxy-user")
+	require.NotContains(t, string(raw), "proxy-password")
+}

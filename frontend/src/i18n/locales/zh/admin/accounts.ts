@@ -1070,6 +1070,8 @@ export default {
       expired: '已过期',
       proxy: '代理',
       noProxy: '无代理',
+      codexProxyPool: 'Codex 随机出口代理',
+      codexProxyPoolHint: '最多选择 5 个代理。每个上游请求随机选择一个可用出口；单条 WebSocket 连接内保持不变。',
       concurrency: '并发数',
       loadFactor: '负载因子',
       loadFactorHint: '提高负载因子可以提高对账号的调度频率',

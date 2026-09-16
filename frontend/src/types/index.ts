@@ -1210,6 +1210,8 @@ export interface Account {
     }
   } & Record<string, unknown>)
   proxy_id: number | null
+  codex_proxy_ids?: number[]
+  codex_proxies?: AccountProxyEndpoint[]
   proxy_fallback_origin_id?: number | null
   proxy_fallback_origin_name?: string | null
   concurrency: number
@@ -1310,6 +1312,15 @@ export interface Account {
   parent_privacy_mode?: string
   parent_subscription_expires_at?: string
   parent_chatgpt_account_id?: string
+}
+
+export interface AccountProxyEndpoint {
+  id: number
+  name: string
+  protocol: ProxyProtocol
+  host: string
+  port: number
+  status: string
 }
 
 // The admin account list may return this compact shape when lite=1. Detail
@@ -1496,6 +1507,7 @@ export interface CreateAccountRequest {
   credentials: Record<string, unknown>
   extra?: Record<string, unknown>
   proxy_id?: number | null
+  codex_proxy_ids?: number[]
   concurrency?: number
   load_factor?: number | null
   priority?: number
@@ -1514,6 +1526,7 @@ export interface UpdateAccountRequest {
   credentials?: Record<string, unknown>
   extra?: Record<string, unknown>
   proxy_id?: number | null
+  codex_proxy_ids?: number[]
   concurrency?: number
   load_factor?: number | null
   priority?: number
@@ -1643,6 +1656,7 @@ export interface CodexSessionImportRequest {
   notes?: string | null
   group_ids?: number[]
   proxy_id?: number | null
+  codex_proxy_ids?: number[]
   concurrency?: number
   priority?: number
   rate_multiplier?: number
@@ -1662,6 +1676,7 @@ export interface OpenAICodexPATCreateRequest {
   notes?: string | null
   group_ids?: number[]
   proxy_id?: number | null
+  codex_proxy_ids?: number[]
   concurrency?: number
   priority?: number
   rate_multiplier?: number

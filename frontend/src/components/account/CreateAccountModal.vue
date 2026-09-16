@@ -3006,6 +3006,12 @@
         <ProxySelector v-model="form.proxy_id" :proxies="proxies" />
       </div>
 
+      <div v-if="form.platform === 'openai' && (form.type === 'oauth' || form.type === 'setup-token')">
+        <label class="input-label">{{ t('admin.accounts.codexProxyPool') }}</label>
+        <ProxyMultiSelector v-model="form.codex_proxy_ids" :proxies="proxies" :max="5" />
+        <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.codexProxyPoolHint') }}</p>
+      </div>
+
       <UpstreamRequestIdHeaderField
         v-model="upstreamRequestIdHeader"
         :platform="form.platform"
@@ -3930,6 +3936,7 @@ import UpstreamRequestIdHeaderField from '@/components/account/UpstreamRequestId
 import PlatformIcon from '@/components/common/PlatformIcon.vue'
 import Icon from '@/components/icons/Icon.vue'
 import ProxySelector from '@/components/common/ProxySelector.vue'
+import ProxyMultiSelector from '@/components/common/ProxyMultiSelector.vue'
 import ProxyAdBanner from '@/components/common/ProxyAdBanner.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
@@ -4723,6 +4730,7 @@ const form = reactive({
   type: 'oauth' as AccountType, // Will be 'oauth', 'setup-token', or 'apikey'
   credentials: {} as Record<string, unknown>,
   proxy_id: null as number | null,
+  codex_proxy_ids: [] as number[],
   concurrency: 10,
   load_factor: null as number | null,
   priority: 1,
@@ -5196,13 +5204,18 @@ const openMixedChannelDialog = (opts: {
 }
 
 const withAntigravityConfirmFlag = (payload: CreateAccountRequest): CreateAccountRequest => {
+  const cloned = { ...payload }
+  if (payload.platform === 'openai' && (payload.type === 'oauth' || payload.type === 'setup-token')) {
+    cloned.codex_proxy_ids = [...form.codex_proxy_ids]
+  } else {
+    delete cloned.codex_proxy_ids
+  }
   if (needsMixedChannelCheck(payload.platform) && antigravityMixedChannelConfirmed.value) {
     return {
-      ...payload,
+      ...cloned,
       confirm_mixed_channel_risk: true
     }
   }
-  const cloned = { ...payload }
   delete cloned.confirm_mixed_channel_risk
   return cloned
 }
@@ -5300,6 +5313,7 @@ const resetForm = () => {
   form.type = 'oauth'
   form.credentials = {}
   form.proxy_id = null
+  form.codex_proxy_ids = []
   form.concurrency = 10
   form.load_factor = null
   form.priority = 1
@@ -6328,7 +6342,7 @@ const handleOpenAIExchange = async (authCode: string) => {
     }
 
     if (shouldCreateOpenAI) {
-      await adminAPI.accounts.create({
+      await adminAPI.accounts.create(withAntigravityConfirmFlag({
         name: form.name,
         notes: form.notes,
         platform: 'openai',
@@ -6343,7 +6357,7 @@ const handleOpenAIExchange = async (authCode: string) => {
         group_ids: form.group_ids,
         expires_at: form.expires_at,
         auto_pause_on_expired: autoPauseOnExpired.value
-      })
+      }))
       appStore.showSuccess(t('admin.accounts.accountCreated'))
     }
 
@@ -6441,6 +6455,7 @@ const handleOpenAIImportCodexSession = async (content: string) => {
       name: form.name,
       notes: form.notes || null,
       proxy_id: form.proxy_id,
+      codex_proxy_ids: [...form.codex_proxy_ids],
       concurrency: form.concurrency,
       load_factor: form.load_factor ?? undefined,
       priority: form.priority,
@@ -6519,6 +6534,7 @@ const handleOpenAIImportCodexPAT = async (accessToken: string) => {
       name: form.name,
       notes: form.notes || null,
       proxy_id: form.proxy_id,
+      codex_proxy_ids: [...form.codex_proxy_ids],
       concurrency: form.concurrency,
       load_factor: form.load_factor ?? undefined,
       priority: form.priority,
@@ -6609,7 +6625,7 @@ const handleOpenAIBatchRT = async (refreshTokenInput: string, clientId?: string)
         const accountName = refreshTokens.length > 1 ? `${baseName} #${i + 1}` : baseName
 
         if (shouldCreateOpenAI) {
-          await adminAPI.accounts.create({
+          await adminAPI.accounts.create(withAntigravityConfirmFlag({
             name: accountName,
             notes: form.notes,
             platform: 'openai',
@@ -6624,7 +6640,7 @@ const handleOpenAIBatchRT = async (refreshTokenInput: string, clientId?: string)
             group_ids: form.group_ids,
             expires_at: form.expires_at,
             auto_pause_on_expired: autoPauseOnExpired.value
-          })
+          }))
         }
 
         successCount++
@@ -7097,6 +7113,7 @@ const handleCookieAuth = async (sessionKey: string) => {
           credentials,
           extra: withUpstreamRequestIdHeader(extra),
           proxy_id: form.proxy_id,
+          codex_proxy_ids: [...form.codex_proxy_ids],
           concurrency: form.concurrency,
           load_factor: form.load_factor ?? undefined,
           priority: form.priority,
