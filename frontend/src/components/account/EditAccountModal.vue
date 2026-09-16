@@ -1651,8 +1651,16 @@
         <ProxySelector v-model="form.proxy_id" :proxies="proxies" />
       </div>
 
-      <div v-if="!isSparkShadow && account.platform === 'openai' && (account.type === 'oauth' || account.type === 'setup-token')">
-        <label class="input-label">{{ t('admin.accounts.codexProxyPool') }}</label>
+      <div
+        v-if="!isSparkShadow && account.platform === 'openai' && (account.type === 'oauth' || account.type === 'setup-token')"
+        ref="codexProxyPoolSection"
+        class="rounded border border-primary-200 bg-primary-50/60 p-3 dark:border-primary-800 dark:bg-primary-900/10"
+      >
+        <div class="mb-2 flex items-center gap-2">
+          <Icon name="globe" size="sm" class="text-primary-600 dark:text-primary-400" />
+          <label class="input-label mb-0">{{ t('admin.accounts.codexProxyPool') }}</label>
+          <span class="ml-auto font-mono text-xs text-primary-600 dark:text-primary-400">{{ form.codex_proxy_ids.length }}/5</span>
+        </div>
         <ProxyMultiSelector v-model="form.codex_proxy_ids" :proxies="proxies" :max="5" />
         <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.codexProxyPoolHint') }}</p>
       </div>
@@ -3157,6 +3165,7 @@ interface Props {
   account: Account | null
   proxies: Proxy[]
   groups: AdminGroup[]
+  focusCodexProxyPool?: boolean
 }
 
 const props = defineProps<Props>()
@@ -3168,6 +3177,7 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const appStore = useAppStore()
 const browserTimeZone = getBrowserTimeZone()
+const codexProxyPoolSection = ref<HTMLElement | null>(null)
 
 const selectableGroups = computed(() => {
   const groups = new Map<number, Group>(props.groups.map(group => [group.id, group]))
@@ -4423,14 +4433,19 @@ async function loadTLSProfiles() {
 }
 
 watch(
-  [() => props.show, () => props.account],
-  ([show, newAccount], [wasShow, previousAccount]) => {
+  [() => props.show, () => props.account, () => props.focusCodexProxyPool],
+  async ([show, newAccount, focusProxyPool], [wasShow, previousAccount]) => {
     if (!show || !newAccount) {
       return
     }
     if (!wasShow || newAccount !== previousAccount) {
       syncFormFromAccount(newAccount)
       loadTLSProfiles()
+    }
+    if (focusProxyPool) {
+      await nextTick()
+      codexProxyPoolSection.value?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      codexProxyPoolSection.value?.querySelector<HTMLInputElement>('input[type="text"]')?.focus()
     }
   },
   { immediate: true }

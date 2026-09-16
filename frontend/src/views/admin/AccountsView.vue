@@ -328,6 +328,16 @@
           </template>
           <template #cell-proxy="{ row }">
             <div class="flex flex-col gap-1">
+              <button
+                v-if="row.platform === 'openai' && (row.type === 'oauth' || row.type === 'setup-token') && !row.parent_account_id"
+                type="button"
+                class="inline-flex w-fit items-center gap-1.5 rounded border border-primary-200 bg-primary-50 px-2 py-1 text-xs font-medium text-primary-700 transition-colors hover:border-primary-300 hover:bg-primary-100 dark:border-primary-800 dark:bg-primary-900/20 dark:text-primary-300 dark:hover:bg-primary-900/40"
+                @click="handleEdit(row, true)"
+              >
+                <Icon name="globe" size="xs" />
+                <span>{{ t('admin.accounts.configureCodexProxyPool') }}</span>
+                <span class="font-mono">{{ row.codex_proxies?.length || 0 }}/5</span>
+              </button>
               <div v-if="row.codex_proxies?.length" class="flex max-w-64 flex-wrap gap-1">
                 <span
                   v-for="proxy in row.codex_proxies"
@@ -461,7 +471,15 @@
       <template #pagination><Pagination v-if="pagination.total > 0" :page="pagination.page" :total="pagination.total" :page-size="pagination.page_size" @update:page="handlePageChange" @update:pageSize="handlePageSizeChange" /></template>
     </TablePageLayout>
     <CreateAccountModal :show="showCreate" :proxies="proxies" :groups="groups" @close="showCreate = false" @created="reload" />
-    <EditAccountModal :show="showEdit" :account="edAcc" :proxies="proxies" :groups="groups" @close="showEdit = false" @updated="handleAccountUpdated" />
+    <EditAccountModal
+      :show="showEdit"
+      :account="edAcc"
+      :proxies="proxies"
+      :groups="groups"
+      :focus-codex-proxy-pool="focusCodexProxyPool"
+      @close="closeEditModal"
+      @updated="handleAccountUpdated"
+    />
     <ReAuthAccountModal :show="showReAuth" :account="reAuthAcc" @close="closeReAuthModal" @reauthorized="handleAccountUpdated" />
     <AccountTestModal :show="showTest" :account="testingAcc" @close="closeTestModal" />
     <AccountStatsModal :show="showStats" :account="statsAcc" @close="closeStatsModal" />
@@ -599,6 +617,7 @@ const selTypes = computed<AccountType[]>(() => {
 })
 const showCreate = ref(false)
 const showEdit = ref(false)
+const focusCodexProxyPool = ref(false)
 const showSync = ref(false)
 const showImportData = ref(false)
 const showExportDataDialog = ref(false)
@@ -1847,11 +1866,16 @@ const loadAccountDetails = async (account: Pick<AccountListItem, 'id'>): Promise
   }
 }
 
-const handleEdit = async (a: AccountListItem) => {
+const handleEdit = async (a: AccountListItem, focusProxyPool = false) => {
   const account = await loadAccountDetails(a)
   if (!account) return
+  focusCodexProxyPool.value = focusProxyPool
   edAcc.value = account
   showEdit.value = true
+}
+const closeEditModal = () => {
+  showEdit.value = false
+  focusCodexProxyPool.value = false
 }
 const openMenu = (a: Account, e: MouseEvent) => {
   menu.acc = a

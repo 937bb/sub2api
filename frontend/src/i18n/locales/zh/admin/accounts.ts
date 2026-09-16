@@ -1071,6 +1071,7 @@ export default {
       proxy: '代理',
       noProxy: '无代理',
       codexProxyPool: 'Codex 随机出口代理',
+      configureCodexProxyPool: '配置多 IP',
       codexProxyPoolHint: '最多选择 5 个代理。每个上游请求随机选择一个可用出口；单条 WebSocket 连接内保持不变。',
       concurrency: '并发数',
       loadFactor: '负载因子',

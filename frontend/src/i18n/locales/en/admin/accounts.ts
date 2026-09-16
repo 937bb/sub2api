@@ -1001,6 +1001,7 @@ export default {
       proxy: 'Proxy',
       noProxy: 'No Proxy',
       codexProxyPool: 'Codex Random Egress Proxies',
+      configureCodexProxyPool: 'Configure Egress IPs',
       codexProxyPoolHint: 'Select up to five proxies. Each upstream request picks one active egress; a WebSocket connection keeps its selected proxy.',
       concurrency: 'Concurrency',
       loadFactor: 'Load Factor',
