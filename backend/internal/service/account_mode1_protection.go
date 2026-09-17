@@ -179,7 +179,7 @@ func previewMode1(a *Account) AntiDegradePreview {
 	if isMode1ProtectionEnabled(a) && out.PolicyVersion == mode1PolicyVersion {
 		out.Issues = mode1ConfigurationIssues(a)
 		if len(out.Issues) == 0 {
-			out.Reason = "已启用兼容保护 v3：稳定设备身份、会话隔离、并发上限和请求完整性检查；不保证上游模型质量"
+			out.Reason = "已启用兼容保护 v3：稳定设备身份、会话隔离、并发上限和观察式请求完整性检查；不保证上游模型质量"
 		} else {
 			out.Reason = "配置异常，请还原后重新配置"
 		}

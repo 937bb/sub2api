@@ -8,7 +8,7 @@
           <span :class="statusClass" class="rounded px-2 py-0.5 text-xs font-medium">{{ statusLabel }}</span>
         </div>
         <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-          显式启用账号级身份、传输模板与请求语义检查；不会改变账号代理池或降低现有并发。
+          显式启用账号级身份、传输模板与观察式请求语义检查；不会改变账号代理池或降低现有并发。
         </p>
       </div>
       <button v-if="enabled" type="button" class="btn btn-secondary btn-sm" :disabled="busy" @click="confirmRevert = true">

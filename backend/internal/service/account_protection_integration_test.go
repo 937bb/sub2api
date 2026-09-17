@@ -48,10 +48,24 @@ func TestMode1ProtectionPreservesConcurrencyAndCodexProxyPool(t *testing.T) {
 	require.Equal(t, 100, updated.Concurrency)
 	require.Equal(t, []int64{11, 12, 13, 14, 15}, updated.CodexProxyIDs)
 	require.Equal(t, string(AntiDegradeMode1), updated.ProtectionMode())
-	require.Equal(t, "enforce", updated.RequestIntegrityMode())
+	require.Equal(t, "observe", updated.RequestIntegrityMode())
 	require.Equal(t, codexFingerprintDevice, updated.GetCodexFingerprintMode())
 	require.False(t, updated.IsTLSFingerprintEnabled())
 	require.Equal(t, "pool", ResolveProtectionRuntime(updated, nil, nil).ProxyMode)
+}
+
+func TestMode1ProtectionKeepsExplicitIntegrityEnforcement(t *testing.T) {
+	account := &Account{
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Extra: map[string]any{
+			requestIntegrityModeKey: "enforce",
+			AntiDegradeMarkerExtraKey: map[string]any{
+				"enabled": true, "mode": string(AntiDegradeMode1), "policy_version": mode1PolicyVersion,
+			},
+		},
+	}
+	require.Equal(t, "enforce", account.RequestIntegrityMode())
 }
 
 func TestMode1IntegrityRejectsLostToolSemantics(t *testing.T) {

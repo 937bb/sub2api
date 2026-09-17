@@ -88,3 +88,21 @@ func TestMode1GuardRejectsInvalidJSON(t *testing.T) {
 		require.Error(t, validateMode1RequestIntegrity([]byte(`{}`), []byte(raw)), raw)
 	}
 }
+
+func TestMode1ObservesInvalidEncryptedLineageStripWithoutBlocking(t *testing.T) {
+	account := mode1IntegrityTestAccount()
+	original := []byte(`{"model":"gpt-5.5","input":[{"type":"reasoning","id":"rs_old","encrypted_content":"invalid-lineage"}]}`)
+	var forwarded map[string]any
+	require.NoError(t, json.Unmarshal(original, &forwarded))
+	require.Equal(t, 1, stripOpenAIInvalidEncryptedContentItems(forwarded, map[string]struct{}{
+		openAIEncryptedContentDigest("invalid-lineage"): {},
+	}))
+	forwardedRaw, err := json.Marshal(forwarded)
+	require.NoError(t, err)
+
+	require.Equal(t, "observe", account.RequestIntegrityMode())
+	require.NoError(t, checkAccountRequestIntegrity(nil, account, original, forwardedRaw))
+
+	account.Extra[requestIntegrityModeKey] = "enforce"
+	require.ErrorContains(t, checkAccountRequestIntegrity(nil, account, original, forwardedRaw), "input")
+}

@@ -8,8 +8,10 @@ import (
 
 const requestIntegrityModeKey = "request_integrity_mode"
 
-// Identity/TLS and request integrity are independent controls. Existing mode1
-// supplies the default; an administrator can explicitly turn the check off.
+// Identity/TLS and request integrity are independent controls. Mode1 observes
+// transformations by default because the gateway intentionally removes
+// invalid encrypted lineage and other upstream-incompatible replay metadata.
+// Administrators can explicitly opt into enforcement for diagnostics.
 func (a *Account) RequestIntegrityMode() string {
 	if a == nil || a.Platform != PlatformOpenAI {
 		return "off"
@@ -21,7 +23,7 @@ func (a *Account) RequestIntegrityMode() string {
 		}
 	}
 	if isMode1ProtectionEnabled(a) {
-		return "enforce"
+		return "observe"
 	}
 	if isOpenAIOAuthLike(a) && a.AntiDegradationEnabled() {
 		return "observe"
