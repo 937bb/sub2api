@@ -161,11 +161,16 @@ func TestBuildOpenAIWSHeadersNamespacesCodexIdentityByOAuthAccount(t *testing.T)
 	first := build(account11)
 	firstAgain := build(account11)
 	second := build(account19)
-	for _, header := range []string{"session_id", "x-codex-installation-id", "thread-id", "x-codex-window-id", "x-client-request-id"} {
+	for _, header := range []string{"session-id", "x-codex-installation-id", "thread-id", "x-codex-window-id", "x-client-request-id"} {
 		require.NotEmpty(t, first.Get(header), header)
 		require.Equal(t, first.Get(header), firstAgain.Get(header), header)
 		require.NotEqual(t, first.Get(header), second.Get(header), header)
 	}
+	require.Empty(t, first.Get("session_id"))
+	require.Empty(t, first.Get("conversation_id"))
+	require.Empty(t, first.Get("version"))
+	require.Empty(t, first.Get("Accept-Language"))
+	require.Equal(t, first.Get("thread-id"), first.Get("x-client-request-id"))
 
 	httpRequest, err := service.buildUpstreamRequest(
 		context.Background(), c, account11,
@@ -173,7 +178,8 @@ func TestBuildOpenAIWSHeadersNamespacesCodexIdentityByOAuthAccount(t *testing.T)
 		"token", true, "client-session", true,
 	)
 	require.NoError(t, err)
-	require.Equal(t, httpRequest.Header.Get("session_id"), first.Get("session_id"), "HTTP and WS must derive the same identity from the raw client key")
+	normalizeCodexResponsesTransportHeaders(httpRequest, account11)
+	require.Equal(t, httpRequest.Header.Get("session-id"), first.Get("session-id"), "HTTP and WS must derive the same identity from the raw client key")
 }
 
 func TestBuildUpstreamRequestNamespacesCodexIdentityByOAuthAccount(t *testing.T) {

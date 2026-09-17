@@ -909,16 +909,19 @@ func TestOpenAIWSConnPool_AcquireReusesSameStableIdentityWithDifferentTurnMetada
 
 func TestOpenAIWSConnPool_AcquireDoesNotReuseDifferentStableIdentity(t *testing.T) {
 	for _, tt := range []struct {
-		name   string
-		header string
-		value  string
+		name          string
+		header        string
+		value         string
+		expectNewDial bool
 	}{
-		{name: "installation", header: "x-codex-installation-id", value: "install-b"},
-		{name: "session hyphen", header: "session-id", value: "session-hyphen-b"},
-		{name: "session underscore", header: "session_id", value: "session-underscore-b"},
-		{name: "thread", header: "thread-id", value: "thread-b"},
-		{name: "client request", header: "x-client-request-id", value: "client-request-b"},
-		{name: "window", header: "x-codex-window-id", value: "window-b"},
+		{name: "installation", header: "x-codex-installation-id", value: "install-b", expectNewDial: true},
+		{name: "session hyphen", header: "session-id", value: "session-hyphen-b", expectNewDial: true},
+		// Deprecated underscore aliases do not participate in the official wire identity.
+		{name: "session underscore", header: "session_id", value: "session-underscore-b", expectNewDial: false},
+		{name: "thread", header: "thread-id", value: "thread-b", expectNewDial: true},
+		// Codex derives x-client-request-id from thread-id at the wire boundary.
+		{name: "client request", header: "x-client-request-id", value: "client-request-b", expectNewDial: false},
+		{name: "window", header: "x-codex-window-id", value: "window-b", expectNewDial: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &config.Config{}
@@ -948,10 +951,18 @@ func TestOpenAIWSConnPool_AcquireDoesNotReuseDifferentStableIdentity(t *testing.
 				Headers: nextHeaders,
 			})
 			require.NoError(t, err)
-			require.False(t, second.Reused())
-			require.NotEqual(t, firstConnID, second.ConnID())
+			require.Equal(t, !tt.expectNewDial, second.Reused())
+			if tt.expectNewDial {
+				require.NotEqual(t, firstConnID, second.ConnID())
+			} else {
+				require.Equal(t, firstConnID, second.ConnID())
+			}
 			second.Release()
-			require.Equal(t, 2, dialer.DialCount())
+			if tt.expectNewDial {
+				require.Equal(t, 2, dialer.DialCount())
+			} else {
+				require.Equal(t, 1, dialer.DialCount())
+			}
 		})
 	}
 }

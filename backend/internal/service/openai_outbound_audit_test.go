@@ -33,11 +33,16 @@ func TestOutboundAudit_HeaderBoundary(t *testing.T) {
 			require.NoError(t, err)
 			ws, _, err := svc.buildOpenAIWSHeaders(context.Background(), c, account, "dummy-token", OpenAIWSProtocolDecision{}, true, "", "", "", "gpt-5.5", "")
 			require.NoError(t, err)
+			normalizeCodexResponsesTransportHeaders(regular, account)
+			normalizeCodexResponsesTransportHeaders(passthrough, account)
 			for _, headers := range []http.Header{regular.Header, passthrough.Header, ws} {
 				for _, key := range blocked {
 					require.Empty(t, headers.Get(key), key)
 				}
-				require.Equal(t, codexClientAcceptLanguage, headers.Get("Accept-Language"))
+				require.Empty(t, headers.Get("Accept-Language"))
+				require.Empty(t, headers.Get("version"))
+				require.Empty(t, headers.Get("session_id"))
+				require.Empty(t, headers.Get("conversation_id"))
 			}
 		})
 	}

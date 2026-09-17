@@ -507,6 +507,45 @@ func TestNormalizeCodexResponsesTransportHeadersDoesNotTouchAPIKey(t *testing.T)
 	require.Equal(t, "downstream-session", req.Header.Get("Session_ID"))
 }
 
+func TestNormalizeCodexWebSocketTransportHeadersMatchesOfficialTUI(t *testing.T) {
+	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	headers := make(http.Header)
+	headers.Set("User-Agent", codexCLIUserAgent)
+	headers.Set("Originator", openai.CodexTUIOriginator)
+	headers.Set("Version", codexCLIVersion)
+	headers.Set("Accept-Language", codexClientAcceptLanguage)
+	headers.Set("Session_ID", "session-1")
+	headers.Set("Conversation_ID", "thread-1")
+	headers.Set("OpenAI-Beta", openAIWSBetaV2Value)
+
+	normalizeCodexWebSocketTransportHeaders(headers, account)
+
+	require.Equal(t, codexCLIUserAgent, headers.Get("User-Agent"))
+	require.Equal(t, openai.CodexTUIOriginator, headers.Get("Originator"))
+	require.Equal(t, "session-1", headers.Get("Session-ID"))
+	require.Equal(t, "thread-1", headers.Get("Thread-ID"))
+	require.Equal(t, "thread-1", headers.Get("X-Client-Request-ID"))
+	require.Equal(t, openAIWSBetaV2Value, headers.Get("OpenAI-Beta"))
+	require.Empty(t, headers.Get("Session_ID"))
+	require.Empty(t, headers.Get("Conversation_ID"))
+	require.Empty(t, headers.Get("Version"))
+	require.Empty(t, headers.Get("Accept-Language"))
+}
+
+func TestNormalizeCodexWebSocketTransportHeadersDoesNotTouchAPIKey(t *testing.T) {
+	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+	headers := make(http.Header)
+	headers.Set("Session_ID", "session-1")
+	headers.Set("Conversation_ID", "conversation-1")
+	headers.Set("Version", "custom")
+
+	normalizeCodexWebSocketTransportHeaders(headers, account)
+
+	require.Equal(t, "session-1", headers.Get("Session_ID"))
+	require.Equal(t, "conversation-1", headers.Get("Conversation_ID"))
+	require.Equal(t, "custom", headers.Get("Version"))
+}
+
 func TestCodexCanonicalUserAgentFallsBackWithoutResolver(t *testing.T) {
 	SetCodexCanonicalUserAgentResolver(nil)
 

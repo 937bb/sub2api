@@ -1116,7 +1116,9 @@ func (p *openAIWSConnPool) Acquire(ctx context.Context, req openAIWSAcquireReque
 		p.metrics.acquireTotal.Add(1)
 	}
 	queueWait := &openAIWSAcquireQueueWait{}
-	lease, err := p.acquire(ctx, cloneOpenAIWSAcquireRequest(req), 0, queueWait)
+	normalizedReq := cloneOpenAIWSAcquireRequest(req)
+	normalizeCodexWebSocketTransportHeaders(normalizedReq.Headers, normalizedReq.Account)
+	lease, err := p.acquire(ctx, normalizedReq, 0, queueWait)
 	if lease != nil && queueWait.rewoken {
 		// 广播重选经 tryAcquire 拿令牌，不像排队分支那样在取得令牌后检查取消，
 		// 这里补上复查：上下文已取消就归还令牌并按取消返回。
@@ -2144,6 +2146,10 @@ func (p *openAIWSConnPool) dialConn(ctx context.Context, req openAIWSAcquireRequ
 			return nil, err
 		}
 	}
+	// HeadersFactory can refresh credentials and identity immediately before
+	// dialing. Normalize once more at the actual wire boundary so no legacy
+	// aliases can be reintroduced after pool compatibility was calculated.
+	normalizeCodexWebSocketTransportHeaders(headers, req.Account)
 	conn, status, handshakeHeaders, err := p.clientDialer.Dial(ctx, req.WSURL, headers, req.ProxyURL)
 	if err != nil {
 		var handshakeErr *openAIWSHandshakeError

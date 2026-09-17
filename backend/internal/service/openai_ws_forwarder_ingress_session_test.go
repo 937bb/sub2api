@@ -1388,7 +1388,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_PassthroughHeade
 
 	fingerprintIDs := resolveCodexFingerprintIDsFromRequest(account, nil)
 	require.NotNil(t, fingerprintIDs)
-	wantSession := captureDialer.lastHeaders.Get("session_id")
+	wantSession := captureDialer.lastHeaders.Get("session-id")
 	require.NotEmpty(t, wantSession)
 	require.NotEqual(t, fingerprintIDs.sessionID, wantSession, "anonymous connections must not share the account-wide session")
 	require.Equal(t, "turn-state-1", captureDialer.lastHeaders.Get(openAIWSTurnStateHeader))

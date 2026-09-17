@@ -89,6 +89,37 @@ func normalizeCodexResponsesTransportHeaders(req *http.Request, account *Account
 	stripOpenAILegacyResponsesBeta(req.Header)
 }
 
+// normalizeCodexWebSocketTransportHeaders applies the same official identity
+// vocabulary used by codex-rs to a ChatGPT Responses websocket handshake.
+// Builders may use underscore aliases internally for compatibility and
+// isolation, but those aliases are not part of the current Codex wire shape.
+func normalizeCodexWebSocketTransportHeaders(headers http.Header, account *Account) {
+	if headers == nil || account == nil || !account.UsesOpenAICodexProtocol() {
+		return
+	}
+
+	sessionID := firstNonEmptyCodexHeader(headers, "session-id", "session_id")
+	threadID := firstNonEmptyCodexHeader(headers, "thread-id", "x-client-request-id", "conversation_id")
+	if sessionID == "" {
+		sessionID = threadID
+	}
+	if threadID == "" {
+		threadID = sessionID
+	}
+	if sessionID != "" {
+		headers.Set("session-id", sessionID)
+	}
+	if threadID != "" {
+		headers.Set("thread-id", threadID)
+		headers.Set("x-client-request-id", threadID)
+	}
+
+	headers.Del("session_id")
+	headers.Del("conversation_id")
+	headers.Del("version")
+	headers.Del("accept-language")
+}
+
 func firstNonEmptyCodexHeader(headers http.Header, names ...string) string {
 	for _, name := range names {
 		if value := strings.TrimSpace(headers.Get(name)); value != "" {
