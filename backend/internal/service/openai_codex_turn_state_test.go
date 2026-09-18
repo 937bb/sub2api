@@ -132,7 +132,7 @@ func TestOpenAICodexTurnStatePool_CleanupRemovesExpiredNonSelectedEntries(t *tes
 	require.NotNil(t, pool.entries[hashOpenAICodexTurnState("the-longest-value")])
 }
 
-func TestGuardOpenAICodexTurnStateEcho_UsesOnlySameAccount292State(t *testing.T) {
+func TestGuardOpenAICodexTurnStateEcho_PrefersSameSession292State(t *testing.T) {
 	svc := &OpenAIGatewayService{}
 	c, _ := newTurnStateTestContext(t, 7, "sess-account")
 	source := &Account{ID: 42, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
@@ -146,34 +146,45 @@ func TestGuardOpenAICodexTurnStateEcho_UsesOnlySameAccount292State(t *testing.T)
 	svc.guardOpenAICodexTurnStateEcho(c, target, h)
 	require.Equal(t, targetState, h.Get("X-Codex-Turn-State"))
 	require.NotEqual(t, sourceState, h.Get("X-Codex-Turn-State"))
+	require.Equal(t, openAICodexTurnStateReuseScopeSession, c.GetString(openAICodexTurnStateReuseScopeContextKey))
 }
 
-func TestGuardOpenAICodexTurnStateEcho_RequiresOwn292State(t *testing.T) {
+func TestGuardOpenAICodexTurnStateEcho_FallsBackFromGlobalToAccountToSession(t *testing.T) {
 	svc := &OpenAIGatewayService{}
 	pool := svc.getOpenAICodexTurnStatePool()
 	sourceContext, _ := newTurnStateTestContext(t, 7, "sess-source")
 	targetContext, _ := newTurnStateTestContext(t, 7, "sess-target")
 	sourceID := int64(42)
-	pool.observe(strings.Repeat("a", openAICodexPreferredTurnStateLength), &sourceID, openAICodexTurnStateSessionHash(sourceContext), "http")
+	globalState := strings.Repeat("a", openAICodexPreferredTurnStateLength)
+	pool.observe(globalState, &sourceID, openAICodexTurnStateSessionHash(sourceContext), "http")
 	h := http.Header{"X-Codex-Turn-State": []string{"client-value"}}
 
 	svc.guardOpenAICodexTurnStateEcho(targetContext, &Account{ID: 43, Platform: PlatformOpenAI, Type: AccountTypeOAuth}, h)
-	require.Empty(t, h.Get("X-Codex-Turn-State"))
+	require.Equal(t, globalState, h.Get("X-Codex-Turn-State"))
+	require.Equal(t, openAICodexTurnStateReuseScopeGlobal, targetContext.GetString(openAICodexTurnStateReuseScopeContextKey))
 
 	targetID := int64(43)
-	targetSessionHash := openAICodexTurnStateSessionHash(targetContext)
+	otherTargetContext, _ := newTurnStateTestContext(t, 7, "sess-target-other")
 	nonPreferred := strings.Repeat("c", openAICodexPreferredTurnStateLength+40)
-	pool.observe(nonPreferred, &targetID, targetSessionHash, "http")
+	pool.observe(nonPreferred, &targetID, openAICodexTurnStateSessionHash(otherTargetContext), "http")
 	svc.guardOpenAICodexTurnStateEcho(targetContext, &Account{ID: 43, Platform: PlatformOpenAI, Type: AccountTypeOAuth}, h)
-	require.Empty(t, h.Get("X-Codex-Turn-State"))
+	require.Equal(t, globalState, h.Get("X-Codex-Turn-State"), "non-292 states must never become fallbacks")
 
-	targetState := strings.Repeat("b", openAICodexPreferredTurnStateLength)
-	pool.observe(targetState, &targetID, targetSessionHash, "http")
+	accountState := strings.Repeat("b", openAICodexPreferredTurnStateLength)
+	pool.observe(accountState, &targetID, openAICodexTurnStateSessionHash(otherTargetContext), "http")
 	svc.guardOpenAICodexTurnStateEcho(targetContext, &Account{ID: 43, Platform: PlatformOpenAI, Type: AccountTypeOAuth}, h)
-	require.Equal(t, targetState, h.Get("X-Codex-Turn-State"))
+	require.Equal(t, accountState, h.Get("X-Codex-Turn-State"))
+	require.Equal(t, openAICodexTurnStateReuseScopeAccount, targetContext.GetString(openAICodexTurnStateReuseScopeContextKey))
+
+	targetSessionHash := openAICodexTurnStateSessionHash(targetContext)
+	sessionState := strings.Repeat("d", openAICodexPreferredTurnStateLength)
+	pool.observe(sessionState, &targetID, targetSessionHash, "http")
+	svc.guardOpenAICodexTurnStateEcho(targetContext, &Account{ID: 43, Platform: PlatformOpenAI, Type: AccountTypeOAuth}, h)
+	require.Equal(t, sessionState, h.Get("X-Codex-Turn-State"))
+	require.Equal(t, openAICodexTurnStateReuseScopeSession, targetContext.GetString(openAICodexTurnStateReuseScopeContextKey))
 }
 
-func TestGuardOpenAICodexTurnStateEcho_DoesNotCrossSessions(t *testing.T) {
+func TestGuardOpenAICodexTurnStateEcho_FallsBackAcrossSessionsWithinAccount(t *testing.T) {
 	svc := &OpenAIGatewayService{}
 	account := &Account{ID: 43, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
 	sourceContext, _ := newTurnStateTestContext(t, 7, "shared-client-session")
@@ -187,13 +198,31 @@ func TestGuardOpenAICodexTurnStateEcho_DoesNotCrossSessions(t *testing.T) {
 	targetHeader := http.Header{"X-Codex-Turn-State": []string{"client-value"}}
 	targetHeader.Set("session-id", "upstream-session-target")
 	svc.guardOpenAICodexTurnStateEcho(targetContext, account, targetHeader)
-	require.Empty(t, targetHeader.Get(openAICodexTurnStateHeader))
+	require.Equal(t, state, targetHeader.Get(openAICodexTurnStateHeader))
+	require.Equal(t, openAICodexTurnStateReuseScopeAccount, targetContext.GetString(openAICodexTurnStateReuseScopeContextKey))
 
 	matchingContext, _ := newTurnStateTestContext(t, 7, "another-client-session")
 	matchingHeader := http.Header{}
 	matchingHeader.Set("session-id", "upstream-session-source")
 	svc.guardOpenAICodexTurnStateEcho(matchingContext, account, matchingHeader)
 	require.Equal(t, state, matchingHeader.Get(openAICodexTurnStateHeader))
+	require.Equal(t, openAICodexTurnStateReuseScopeSession, matchingContext.GetString(openAICodexTurnStateReuseScopeContextKey))
+}
+
+func TestGuardOpenAICodexTurnStateEcho_FallsBackWithoutSessionID(t *testing.T) {
+	svc := &OpenAIGatewayService{}
+	pool := svc.getOpenAICodexTurnStatePool()
+	accountID := int64(43)
+	state := testOpenAICodexPreferredTurnState("account-without-session")
+	pool.observe(state, &accountID, "other-session", "http")
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	h := http.Header{"X-Codex-Turn-State": []string{"client-value"}}
+
+	svc.guardOpenAICodexTurnStateEcho(c, &Account{ID: accountID, Platform: PlatformOpenAI, Type: AccountTypeOAuth}, h)
+
+	require.Equal(t, state, h.Get(openAICodexTurnStateHeader))
+	require.Equal(t, openAICodexTurnStateReuseScopeAccount, c.GetString(openAICodexTurnStateReuseScopeContextKey))
 }
 
 func TestGuardOpenAICodexTurnStateEcho_APIKeyUnaffected(t *testing.T) {
@@ -272,6 +301,36 @@ func TestOpenAICodexTurnStatePool_Session292UsesNewestAndFallsBackAfterExpiry(t 
 	selected, ok = pool.preferredForSession(accountID, sessionHash)
 	require.True(t, ok)
 	require.Equal(t, older, selected)
+}
+
+func TestOpenAICodexTurnStatePool_AccountAndGlobal292UseNewestAndIgnoreOtherLengths(t *testing.T) {
+	pool := newOpenAICodexTurnStatePool()
+	now := time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)
+	pool.now = func() time.Time { return now }
+	accountID := int64(42)
+	otherAccountID := int64(43)
+	accountState := testOpenAICodexPreferredTurnState("account")
+	globalState := testOpenAICodexPreferredTurnState("global")
+	pool.observe(accountState, &accountID, "session-a", "http")
+	now = now.Add(time.Second)
+	pool.observe(strings.Repeat("x", openAICodexPreferredTurnStateLength+40), &accountID, "session-b", "http")
+	now = now.Add(time.Second)
+	pool.observe(globalState, &otherAccountID, "session-c", "http")
+
+	selected, ok := pool.preferredForAccount(accountID)
+	require.True(t, ok)
+	require.Equal(t, accountState, selected)
+	selected, ok = pool.preferredAcrossAccounts()
+	require.True(t, ok)
+	require.Equal(t, globalState, selected)
+
+	pool.mu.Lock()
+	pool.entries[hashOpenAICodexTurnState(globalState)].ExpiresAt = now.Add(-time.Second)
+	pool.preferredGlobal.ExpiresAt = now.Add(-time.Second)
+	pool.mu.Unlock()
+	selected, ok = pool.preferredAcrossAccounts()
+	require.True(t, ok)
+	require.Equal(t, accountState, selected)
 }
 
 func TestOpenAICodexTurnState_UsesCredentialOwnerForShadowAccount(t *testing.T) {

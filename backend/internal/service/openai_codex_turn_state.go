@@ -15,6 +15,14 @@ const openAICodexPreferredTurnStateLength = 292
 
 const openAICodexTurnStateSessionHashContextKey = "openai_codex_turn_state_session_hash"
 
+const openAICodexTurnStateReuseScopeContextKey = "openai_codex_turn_state_reuse_scope"
+
+const (
+	openAICodexTurnStateReuseScopeSession = "session"
+	openAICodexTurnStateReuseScopeAccount = "account"
+	openAICodexTurnStateReuseScopeGlobal  = "global"
+)
+
 func openAICodexTurnStateSeed(c *gin.Context) string {
 	if c == nil || c.Request == nil {
 		return ""
@@ -118,9 +126,9 @@ func (s *OpenAIGatewayService) observeOpenAICodexTurnState(c *gin.Context, accou
 	s.getOpenAICodexTurnStatePool().observe(state, &accountID, sessionHash, transport)
 }
 
-// guardOpenAICodexTurnStateEcho uses only an unexpired 292-byte state observed
-// from the same credential owner and client session. API-key accounts keep
-// their original header.
+// guardOpenAICodexTurnStateEcho prefers an unexpired 292-byte state from the
+// same credential owner and client session, then falls back to the same owner
+// and finally the global pool. API-key accounts keep their original header.
 func (s *OpenAIGatewayService) guardOpenAICodexTurnStateEcho(c *gin.Context, account *Account, h http.Header) {
 	if s == nil || h == nil || account == nil || !account.UsesOpenAICodexProtocol() {
 		return
@@ -131,14 +139,28 @@ func (s *OpenAIGatewayService) guardOpenAICodexTurnStateEcho(c *gin.Context, acc
 		return
 	}
 	sessionHash := stageOpenAICodexTurnStateSessionHash(c, h)
-	if sessionHash == "" {
-		h.Del(openAICodexTurnStateHeader)
+	pool := s.getOpenAICodexTurnStatePool()
+	if sessionHash != "" {
+		if state, ok := pool.preferredForSession(owner.ID, sessionHash); ok {
+			setOpenAICodexTurnStateReuse(c, h, state, openAICodexTurnStateReuseScopeSession)
+			return
+		}
+	}
+	if state, ok := pool.preferredForAccount(owner.ID); ok {
+		setOpenAICodexTurnStateReuse(c, h, state, openAICodexTurnStateReuseScopeAccount)
 		return
 	}
-	if state, ok := s.getOpenAICodexTurnStatePool().preferredForSession(owner.ID, sessionHash); ok {
-		h.Set(openAICodexTurnStateHeader, state)
-	} else {
-		h.Del(openAICodexTurnStateHeader)
+	if state, ok := pool.preferredAcrossAccounts(); ok {
+		setOpenAICodexTurnStateReuse(c, h, state, openAICodexTurnStateReuseScopeGlobal)
+		return
+	}
+	h.Del(openAICodexTurnStateHeader)
+}
+
+func setOpenAICodexTurnStateReuse(c *gin.Context, h http.Header, state, scope string) {
+	h.Set(openAICodexTurnStateHeader, state)
+	if c != nil {
+		c.Set(openAICodexTurnStateReuseScopeContextKey, scope)
 	}
 }
 

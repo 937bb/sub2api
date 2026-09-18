@@ -81,6 +81,8 @@ type openAICodexTurnStatePool struct {
 	entries            map[string]*OpenAICodexTurnStateRecord
 	accounts           map[int64]time.Time
 	preferredBySession map[openAICodexTurnStateSessionKey]*OpenAICodexTurnStateRecord
+	preferredByAccount map[int64]*OpenAICodexTurnStateRecord
+	preferredGlobal    *OpenAICodexTurnStateRecord
 	selected           *OpenAICodexTurnStateRecord
 	repo               OpenAICodexTurnStateStore
 	queue              chan *OpenAICodexTurnStateRecord
@@ -95,6 +97,7 @@ func newOpenAICodexTurnStatePool() *openAICodexTurnStatePool {
 		entries:            make(map[string]*OpenAICodexTurnStateRecord),
 		accounts:           make(map[int64]time.Time),
 		preferredBySession: make(map[openAICodexTurnStateSessionKey]*OpenAICodexTurnStateRecord),
+		preferredByAccount: make(map[int64]*OpenAICodexTurnStateRecord),
 		queue:              make(chan *OpenAICodexTurnStateRecord, openAICodexTurnStatePersistQueue),
 		now:                time.Now,
 	}
@@ -218,6 +221,58 @@ func (p *openAICodexTurnStatePool) preferredForSession(accountID int64, sessionH
 	return value, value != ""
 }
 
+func (p *openAICodexTurnStatePool) preferredForAccount(accountID int64) (string, bool) {
+	if p == nil || accountID <= 0 {
+		return "", false
+	}
+	now := p.now()
+	p.mu.RLock()
+	selected := p.preferredByAccount[accountID]
+	if p.isPreferredAccountRecordLocked(selected, accountID, now) {
+		value := selected.StateValue
+		p.mu.RUnlock()
+		return value, true
+	}
+	p.mu.RUnlock()
+
+	p.mu.Lock()
+	p.selectPreferredForAccountLocked(accountID, now)
+	selected = p.preferredByAccount[accountID]
+	if selected == nil {
+		p.mu.Unlock()
+		return "", false
+	}
+	value := selected.StateValue
+	p.mu.Unlock()
+	return value, value != ""
+}
+
+func (p *openAICodexTurnStatePool) preferredAcrossAccounts() (string, bool) {
+	if p == nil {
+		return "", false
+	}
+	now := p.now()
+	p.mu.RLock()
+	selected := p.preferredGlobal
+	if p.isPreferredGlobalRecordLocked(selected, now) {
+		value := selected.StateValue
+		p.mu.RUnlock()
+		return value, true
+	}
+	p.mu.RUnlock()
+
+	p.mu.Lock()
+	p.selectPreferredGlobalLocked(now)
+	selected = p.preferredGlobal
+	if selected == nil {
+		p.mu.Unlock()
+		return "", false
+	}
+	value := selected.StateValue
+	p.mu.Unlock()
+	return value, value != ""
+}
+
 func (p *openAICodexTurnStatePool) hasSampledAccount(accountID int64) bool {
 	if p == nil || accountID <= 0 {
 		return false
@@ -257,6 +312,7 @@ func (p *openAICodexTurnStatePool) mergeLocked(record *OpenAICodexTurnStateRecor
 	}
 	copyRecord := cloneOpenAICodexTurnStateRecord(record)
 	p.entries[record.StateHash] = copyRecord
+	now := p.now()
 	if copyRecord.SourceAccountID != nil && *copyRecord.SourceAccountID > 0 {
 		accountID := *copyRecord.SourceAccountID
 		if current := p.accounts[accountID]; copyRecord.ExpiresAt.After(current) {
@@ -264,10 +320,20 @@ func (p *openAICodexTurnStatePool) mergeLocked(record *OpenAICodexTurnStateRecor
 		}
 		if key, ok := newOpenAICodexTurnStateSessionKey(accountID, copyRecord.SourceSessionHash); ok && copyRecord.ValueLength == openAICodexPreferredTurnStateLength {
 			current := p.preferredBySession[key]
-			if !p.isPreferredSessionRecordLocked(current, key, p.now()) || openAICodexTurnStateNewestFirst(copyRecord, current) {
+			if !p.isPreferredSessionRecordLocked(current, key, now) || openAICodexTurnStateNewestFirst(copyRecord, current) {
 				p.preferredBySession[key] = copyRecord
 			}
 		}
+		if copyRecord.ValueLength == openAICodexPreferredTurnStateLength {
+			current := p.preferredByAccount[accountID]
+			if !p.isPreferredAccountRecordLocked(current, accountID, now) || openAICodexTurnStateNewestFirst(copyRecord, current) {
+				p.preferredByAccount[accountID] = copyRecord
+			}
+		}
+	}
+	if copyRecord.ValueLength == openAICodexPreferredTurnStateLength && copyRecord.ExpiresAt.After(now) &&
+		(!p.isPreferredGlobalRecordLocked(p.preferredGlobal, now) || openAICodexTurnStateNewestFirst(copyRecord, p.preferredGlobal)) {
+		p.preferredGlobal = copyRecord
 	}
 	if p.selected == nil {
 		p.selected = copyRecord
@@ -281,18 +347,34 @@ func (p *openAICodexTurnStatePool) mergeLocked(record *OpenAICodexTurnStateRecor
 func (p *openAICodexTurnStatePool) rebuildAccountsLocked() {
 	p.accounts = make(map[int64]time.Time)
 	p.preferredBySession = make(map[openAICodexTurnStateSessionKey]*OpenAICodexTurnStateRecord)
+	p.preferredByAccount = make(map[int64]*OpenAICodexTurnStateRecord)
+	p.preferredGlobal = nil
+	now := p.now()
 	for _, record := range p.entries {
+		if record == nil || !record.ExpiresAt.After(now) {
+			continue
+		}
 		if record != nil && record.SourceAccountID != nil && *record.SourceAccountID > 0 {
 			accountID := *record.SourceAccountID
 			if current := p.accounts[accountID]; record.ExpiresAt.After(current) {
 				p.accounts[accountID] = record.ExpiresAt
 			}
-			if key, ok := newOpenAICodexTurnStateSessionKey(accountID, record.SourceSessionHash); ok && record.ValueLength == openAICodexPreferredTurnStateLength && record.ExpiresAt.After(p.now()) {
+			if key, ok := newOpenAICodexTurnStateSessionKey(accountID, record.SourceSessionHash); ok && record.ValueLength == openAICodexPreferredTurnStateLength {
 				current := p.preferredBySession[key]
 				if current == nil || openAICodexTurnStateNewestFirst(record, current) {
 					p.preferredBySession[key] = record
 				}
 			}
+			if record.ValueLength == openAICodexPreferredTurnStateLength {
+				current := p.preferredByAccount[accountID]
+				if current == nil || openAICodexTurnStateNewestFirst(record, current) {
+					p.preferredByAccount[accountID] = record
+				}
+			}
+		}
+		if record.ValueLength == openAICodexPreferredTurnStateLength &&
+			(p.preferredGlobal == nil || openAICodexTurnStateNewestFirst(record, p.preferredGlobal)) {
+			p.preferredGlobal = record
 		}
 	}
 }
@@ -323,6 +405,50 @@ func (p *openAICodexTurnStatePool) selectPreferredForSessionLocked(key openAICod
 		current := p.preferredBySession[key]
 		if current == nil || openAICodexTurnStateNewestFirst(record, current) {
 			p.preferredBySession[key] = record
+		}
+	}
+}
+
+func (p *openAICodexTurnStatePool) isPreferredAccountRecordLocked(record *OpenAICodexTurnStateRecord, accountID int64, now time.Time) bool {
+	if record == nil || record.StateValue == "" || record.ValueLength != openAICodexPreferredTurnStateLength || !record.ExpiresAt.After(now) {
+		return false
+	}
+	if record.SourceAccountID == nil || *record.SourceAccountID != accountID {
+		return false
+	}
+	current := p.entries[record.StateHash]
+	return current != nil && current.SourceAccountID != nil && *current.SourceAccountID == accountID && current.StateHash == record.StateHash
+}
+
+func (p *openAICodexTurnStatePool) selectPreferredForAccountLocked(accountID int64, now time.Time) {
+	delete(p.preferredByAccount, accountID)
+	for _, record := range p.entries {
+		if record == nil || record.ValueLength != openAICodexPreferredTurnStateLength || !record.ExpiresAt.After(now) || record.SourceAccountID == nil || *record.SourceAccountID != accountID {
+			continue
+		}
+		current := p.preferredByAccount[accountID]
+		if current == nil || openAICodexTurnStateNewestFirst(record, current) {
+			p.preferredByAccount[accountID] = record
+		}
+	}
+}
+
+func (p *openAICodexTurnStatePool) isPreferredGlobalRecordLocked(record *OpenAICodexTurnStateRecord, now time.Time) bool {
+	if record == nil || record.StateValue == "" || record.ValueLength != openAICodexPreferredTurnStateLength || !record.ExpiresAt.After(now) {
+		return false
+	}
+	current := p.entries[record.StateHash]
+	return current != nil && current.StateHash == record.StateHash
+}
+
+func (p *openAICodexTurnStatePool) selectPreferredGlobalLocked(now time.Time) {
+	p.preferredGlobal = nil
+	for _, record := range p.entries {
+		if record == nil || record.ValueLength != openAICodexPreferredTurnStateLength || !record.ExpiresAt.After(now) {
+			continue
+		}
+		if p.preferredGlobal == nil || openAICodexTurnStateNewestFirst(record, p.preferredGlobal) {
+			p.preferredGlobal = record
 		}
 	}
 }
