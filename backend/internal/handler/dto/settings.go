@@ -219,6 +219,9 @@ type SystemSettings struct {
 	OpenAICodexVersionAutoSyncEnabled        bool   `json:"openai_codex_version_auto_sync_enabled"`
 	OpenAIOAuthWSDefaultEnabled              bool   `json:"openai_oauth_ws_default_enabled"`
 	OpenAICodexFingerprintDefaultFullEnabled bool   `json:"openai_codex_fingerprint_default_full_enabled"`
+	OpenAICodexTicketEnabled                 bool   `json:"openai_codex_ticket_enabled"`
+	OpenAICodexTicketHarvestProxyURL         string `json:"openai_codex_ticket_harvest_proxy_url"`
+	OpenAICodexTicketHarvestProxyConfigured  bool   `json:"openai_codex_ticket_harvest_proxy_configured"`
 
 	// codex_cli_only 加固
 	MinCodexVersion                      string `json:"min_codex_version"`

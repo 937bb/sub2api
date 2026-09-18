@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
@@ -24,6 +25,11 @@ const openAICodexTurnStateModelContextKey = "openai_codex_turn_state_model"
 const openAICodexTurnStateReuseScopeContextKey = "openai_codex_turn_state_reuse_scope"
 
 const openAICodexTurnStateReuseScopeAccountModel = "account_model"
+
+type openAICodexTurnStateOrigin struct {
+	accountID int64
+	expiresAt time.Time
+}
 
 func openAICodexTurnStateSeed(c *gin.Context) string {
 	if c == nil || c.Request == nil {
@@ -96,6 +102,7 @@ func (s *OpenAIGatewayService) relayOpenAICodexTurnState(c *gin.Context, account
 	}
 	c.Writer.Header().Set(canonical, state)
 	s.observeOpenAICodexTurnState(c, account, state, "http")
+	s.noteOpenAICodexTurnStateProvenance(c, account)
 }
 
 func stageOpenAICodexTurnState(dst *http.Header, upstream http.Header) {
@@ -125,6 +132,7 @@ func (s *OpenAIGatewayService) noteStagedOpenAICodexTurnStateCommitted(c *gin.Co
 		return
 	}
 	s.observeOpenAICodexTurnState(c, account, state, "http")
+	s.noteOpenAICodexTurnStateProvenance(c, account)
 }
 
 func extractOpenAICodexTurnState(upstream http.Header) string {
@@ -148,14 +156,16 @@ func (s *OpenAIGatewayService) observeOpenAICodexTurnState(c *gin.Context, accou
 	s.getOpenAICodexTurnStatePool().observe(state, &accountID, sessionHash, model, transport)
 }
 
-// guardOpenAICodexTurnStateEcho only replaces a 312-byte state with an
-// unexpired reusable state minted for the same credential owner and model.
+// guardOpenAICodexTurnStateEcho removes a state known to belong to another
+// credential owner, then replaces a 312-byte state with the best unexpired
+// state minted for the same credential owner and model.
 func (s *OpenAIGatewayService) guardOpenAICodexTurnStateEcho(c *gin.Context, account *Account, h http.Header, model string) {
 	if s == nil || h == nil || account == nil || !account.UsesOpenAICodexProtocol() {
 		return
 	}
 	model = stageOpenAICodexTurnStateModel(c, model)
 	stageOpenAICodexTurnStateSessionHash(c, h)
+	s.stripForeignOpenAICodexTurnState(c, account, h)
 	incoming := strings.TrimSpace(h.Get(openAICodexTurnStateHeader))
 	if len(incoming) != 312 {
 		return
@@ -167,6 +177,62 @@ func (s *OpenAIGatewayService) guardOpenAICodexTurnStateEcho(c *gin.Context, acc
 	if state, ok := s.getOpenAICodexTurnStatePool().preferredForBucket(owner.ID, model); ok {
 		setOpenAICodexTurnStateReuse(c, h, state, openAICodexTurnStateReuseScopeAccountModel)
 	}
+}
+
+func (s *OpenAIGatewayService) noteOpenAICodexTurnStateProvenance(c *gin.Context, account *Account) {
+	if s == nil || account == nil {
+		return
+	}
+	owner := codexAccountIdentitySource(c, account)
+	if owner == nil || owner.ID <= 0 {
+		return
+	}
+	seed := openAICodexTurnStateSeed(c)
+	if seed == "" {
+		return
+	}
+	s.openaiCodexTurnStateOrigins.Store(seed, openAICodexTurnStateOrigin{
+		accountID: owner.ID,
+		expiresAt: time.Now().Add(s.openAIWSSessionStickyTTL()),
+	})
+	s.sweepOpenAICodexTurnStateOrigins()
+}
+
+func (s *OpenAIGatewayService) stripForeignOpenAICodexTurnState(c *gin.Context, account *Account, h http.Header) {
+	if strings.TrimSpace(h.Get(openAICodexTurnStateHeader)) == "" {
+		return
+	}
+	seed := openAICodexTurnStateSeed(c)
+	if seed == "" {
+		return
+	}
+	raw, ok := s.openaiCodexTurnStateOrigins.Load(seed)
+	if !ok {
+		return
+	}
+	origin, ok := raw.(openAICodexTurnStateOrigin)
+	if !ok || (!origin.expiresAt.IsZero() && time.Now().After(origin.expiresAt)) {
+		s.openaiCodexTurnStateOrigins.Delete(seed)
+		return
+	}
+	owner := codexAccountIdentitySource(c, account)
+	if owner != nil && owner.ID > 0 && origin.accountID != owner.ID {
+		h.Del(openAICodexTurnStateHeader)
+	}
+}
+
+func (s *OpenAIGatewayService) sweepOpenAICodexTurnStateOrigins() {
+	if s.openaiCodexTurnStateWrites.Add(1)%256 != 0 {
+		return
+	}
+	now := time.Now()
+	s.openaiCodexTurnStateOrigins.Range(func(key, value any) bool {
+		origin, ok := value.(openAICodexTurnStateOrigin)
+		if !ok || (!origin.expiresAt.IsZero() && now.After(origin.expiresAt)) {
+			s.openaiCodexTurnStateOrigins.Delete(key)
+		}
+		return true
+	})
 }
 
 func isReusableOpenAICodexTurnStateLength(length int) bool {

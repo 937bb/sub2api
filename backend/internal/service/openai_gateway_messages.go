@@ -404,6 +404,9 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	// The credential owner's preferred state has final authority after the
 	// compatibility-session fallback.
 	s.guardOpenAICodexTurnStateEcho(c, account, upstreamReq.Header, upstreamModel)
+	if err := s.applyOpenAICodexTicket(ctx, account, upstreamModel, upstreamReq.Header); err != nil {
+		return nil, err
+	}
 
 	// 7. Send request
 	proxyURL := account.SelectOpenAIOutboundProxyURL()
