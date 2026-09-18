@@ -292,8 +292,8 @@ func (s *openAICodexTurnStateScanner) runJob(ctx context.Context, job openAICode
 	if proxy != nil && proxy.Source == "state" {
 		s.updateProxyHealth(ctx, proxy, result)
 	}
-	modelMatches := openAICodexTurnStateModelsMatch(upstreamModel, result.officialModel)
-	if isReusableOpenAICodexTurnStateLength(result.stateLength) && result.stateValue != "" && modelMatches {
+	failure := openAICodexTurnStateScanFailure(upstreamModel, result)
+	if failure == "" {
 		accountID := account.ID
 		s.gateway.getOpenAICodexTurnStatePool().observe(result.stateValue, &accountID, hashOpenAICodexTurnState(result.sessionID), upstreamModel, "scanner")
 		doneAt := time.Now()
@@ -304,18 +304,38 @@ func (s *openAICodexTurnStateScanner) runJob(ctx context.Context, job openAICode
 		scan.NextAttemptAt = &next
 	} else {
 		scan.Status = "retry_wait"
-		scan.LastError = result.errorMessage
-		if !modelMatches {
-			scan.LastError = fmt.Sprintf("upstream model mismatch: requested %s, received %s", upstreamModel, result.officialModel)
-		} else if scan.LastError == "" {
-			scan.LastError = fmt.Sprintf("received turn-state length %d, expected 292 or 332", result.stateLength)
-		}
+		scan.LastError = failure
 		next := time.Now().Add(openAICodexTurnStateRetryDelay(scan.AttemptCount))
 		scan.NextAttemptAt = &next
 	}
 	if err := s.repo.UpsertOpenAICodexTurnStateScan(ctx, scan); err != nil {
 		log.WithError(err).WithFields(log.Fields{"account_id": account.ID, "model": upstreamModel}).Warn("failed to persist Codex turn-state scan")
 	}
+}
+
+func openAICodexTurnStateScanFailure(requested string, result openAICodexTurnStateHarvestResult) string {
+	if message := strings.TrimSpace(result.errorMessage); message != "" {
+		return message
+	}
+	if !result.upstreamOK {
+		return "upstream request failed"
+	}
+	if result.statusCode < http.StatusOK || result.statusCode >= http.StatusMultipleChoices {
+		return fmt.Sprintf("upstream returned HTTP %d", result.statusCode)
+	}
+	if result.stateValue == "" {
+		return "upstream response did not include x-codex-turn-state"
+	}
+	if !isReusableOpenAICodexTurnStateLength(result.stateLength) {
+		return fmt.Sprintf("received turn-state length %d, expected 292 or 332", result.stateLength)
+	}
+	if strings.TrimSpace(result.officialModel) == "" {
+		return "upstream response did not declare an official model"
+	}
+	if !openAICodexTurnStateModelsMatch(requested, result.officialModel) {
+		return fmt.Sprintf("upstream model mismatch: requested %s, received %s", requested, result.officialModel)
+	}
+	return ""
 }
 
 func openAICodexTurnStateRetryDelay(attempt int) time.Duration {
@@ -407,7 +427,7 @@ func (s *OpenAIGatewayService) harvestOpenAICodexTurnState(ctx context.Context, 
 	sessionID := scopeCodexAccountIdentityValue(account, 0, "session", uuid.NewString())
 	result.sessionID = sessionID
 	threadID := scopeCodexAccountIdentityValue(account, 0, "thread", uuid.NewString())
-	body := []byte(fmt.Sprintf(`{"model":%s,"stream":true,"store":false,"max_output_tokens":1,"input":[{"role":"user","content":[{"type":"input_text","text":"1"}]}],"client_metadata":{"session_id":%s,"thread_id":%s}}`,
+	body := []byte(fmt.Sprintf(`{"model":%s,"stream":true,"store":false,"input":[{"role":"user","content":[{"type":"input_text","text":"1"}]}],"client_metadata":{"session_id":%s,"thread_id":%s}}`,
 		strconv.Quote(model), strconv.Quote(sessionID), strconv.Quote(threadID)))
 	body, _, err = applyCodexClientEnvironmentRaw(body, account)
 	if err != nil {
@@ -419,7 +439,8 @@ func (s *OpenAIGatewayService) harvestOpenAICodexTurnState(ctx context.Context, 
 		result.errorMessage = truncateString(err.Error(), openAICodexTurnStateScanMaxErrorBytes)
 		return result
 	}
-	req = req.WithContext(WithHTTPUpstreamProfile(req.Context(), HTTPUpstreamProfileOpenAI))
+	req = req.WithContext(WithHTTPUpstreamProfile(req.Context(), HTTPUpstreamProfileOpenAIHarvest))
+	req.Close = true
 	req.Host = "chatgpt.com"
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
@@ -439,7 +460,10 @@ func (s *OpenAIGatewayService) harvestOpenAICodexTurnState(ctx context.Context, 
 	applyCodexClientEnvironmentHeaders(req.Header, account)
 	setOpenAICodexRoutingHintFromBody(req.Header, account, body)
 
-	resp, err := s.doOpenAIUpstream(req, proxyURL, account)
+	// Scanner probes must use the selected proxy and a no-reuse transport. Routing
+	// through the business plugin can ignore the probe proxy and collapse every
+	// attempt back onto the account's normal connection pool.
+	resp, err := s.httpUpstream.Do(req, proxyURL, account.ID, account.Mode1EffectiveConcurrency())
 	if err != nil {
 		result.errorMessage = truncateString(err.Error(), openAICodexTurnStateScanMaxErrorBytes)
 		return result

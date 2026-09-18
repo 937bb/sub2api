@@ -111,6 +111,29 @@ func TestOpenAICodexTurnStateModelsMatchRejectsMismatch(t *testing.T) {
 	require.False(t, openAICodexTurnStateModelsMatch("gpt-5.5", "gpt-5.6-luna"))
 }
 
+func TestOpenAICodexTurnStateScanFailurePreservesUpstreamError(t *testing.T) {
+	result := openAICodexTurnStateHarvestResult{errorMessage: "proxy connect failed"}
+	require.Equal(t, "proxy connect failed", openAICodexTurnStateScanFailure("gpt-5.5", result))
+}
+
+func TestOpenAICodexTurnStateScanFailureValidatesSuccessfulProbe(t *testing.T) {
+	state := strings.Repeat("a", openAICodexTurnStateLength332)
+	result := openAICodexTurnStateHarvestResult{
+		stateValue:    state,
+		stateLength:   len(state),
+		officialModel: "gpt-5.5",
+		upstreamOK:    true,
+		statusCode:    200,
+	}
+	require.Empty(t, openAICodexTurnStateScanFailure("gpt-5.5", result))
+
+	result.officialModel = ""
+	require.Equal(t, "upstream response did not declare an official model", openAICodexTurnStateScanFailure("gpt-5.5", result))
+
+	result.officialModel = "gpt-5.6-luna"
+	require.Equal(t, "upstream model mismatch: requested gpt-5.5, received gpt-5.6-luna", openAICodexTurnStateScanFailure("gpt-5.5", result))
+}
+
 func TestReadOpenAICodexTurnStateOfficialModelFromSSE(t *testing.T) {
 	body := strings.NewReader("event: response.created\n" +
 		`data: {"type":"response.created","response":{"id":"resp_1","model":"gpt-5.5"}}` + "\n\n" +
