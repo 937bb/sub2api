@@ -325,6 +325,13 @@ async function loadAccounts() {
   accountPagination.page_size = result.page_size
   accountPagination.total = result.total
 }
+async function loadAccountRow(accountId: number, model: string) {
+  const result = await opsAPI.listCodexTurnStateAccounts({ page: 1, page_size: 200, account_ids: String(accountId) })
+  const updated = result.items.find(item => item.account_id === accountId && item.model === model)
+  if (!updated) return
+  const key = `${accountId}:${model}`
+  accounts.value = accounts.value.map(item => item.row_key === key ? { ...updated, row_key: key } : item)
+}
 async function loadProxies() { proxies.value = await opsAPI.listCodexTurnStateProxies() }
 async function loadHistory() {
   const result = await opsAPI.listCodexTurnStates({ page: historyPagination.page, page_size: historyPagination.page_size, status: historyStatus.value })
@@ -354,7 +361,8 @@ async function scanAccount(row: CodexTurnStateAccountStatus) {
   try {
     const result = await opsAPI.scanCodexTurnState(row.account_id, row.model)
     appStore.showSuccess(result.queued ? t('admin.ops.turnState.scanQueued') : t('admin.ops.turnState.scanAlreadyQueued'))
-    window.setTimeout(refresh, 800)
+    await new Promise(resolve => window.setTimeout(resolve, 800))
+    await Promise.all([loadAccountRow(row.account_id, row.model), loadSummary()])
   } catch (error: any) { appStore.showError(error?.response?.data?.detail || t('admin.ops.turnState.scanFailed')) }
   finally { scanningKeys.delete(key) }
 }

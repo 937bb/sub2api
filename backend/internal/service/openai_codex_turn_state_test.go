@@ -62,9 +62,6 @@ func expireOpenAICodexTurnState(pool *openAICodexTurnStatePool, value string, ex
 			record.ExpiresAt = expiresAt
 		}
 	}
-	if pool.selected != nil && pool.selected.StateValue == value {
-		pool.selected.ExpiresAt = expiresAt
-	}
 }
 
 func TestOpenAICodexTurnStateSeed(t *testing.T) {
@@ -91,9 +88,17 @@ func TestRelayOpenAICodexTurnState_StoresOAuthState(t *testing.T) {
 	svc.relayOpenAICodexTurnState(c, account, upstream)
 
 	require.Equal(t, state, c.Writer.Header().Get("X-Codex-Turn-State"))
-	selected, ok := svc.getOpenAICodexTurnStatePool().longestActive()
-	require.True(t, ok)
-	require.Equal(t, state, selected)
+	pool := svc.getOpenAICodexTurnStatePool()
+	pool.mu.RLock()
+	require.Len(t, pool.entries, 1)
+	for _, record := range pool.entries {
+		require.Equal(t, state, record.StateValue)
+		require.Equal(t, account.ID, *record.SourceAccountID)
+		require.Equal(t, "gpt-5.6-codex", record.SourceModel)
+	}
+	pool.mu.RUnlock()
+	_, reusable := pool.preferredForBucket(account.ID, "gpt-5.6-codex")
+	require.False(t, reusable)
 }
 
 func TestStageOpenAICodexTurnState_StoresOnlyAfterCommit(t *testing.T) {
@@ -106,49 +111,15 @@ func TestStageOpenAICodexTurnState_StoresOnlyAfterCommit(t *testing.T) {
 	var staged http.Header
 	stageOpenAICodexTurnState(&staged, http.Header{"X-Codex-Turn-State": []string{state}})
 
-	_, ok := svc.getOpenAICodexTurnStatePool().longestActive()
+	_, ok := svc.getOpenAICodexTurnStatePool().preferredForBucket(account.ID, "gpt-5.6-codex")
 	require.False(t, ok)
 	svc.noteStagedOpenAICodexTurnStateCommitted(c, account, staged)
-	selected, ok := svc.getOpenAICodexTurnStatePool().longestActive()
+	selected, ok := svc.getOpenAICodexTurnStatePool().preferredForBucket(account.ID, "gpt-5.6-codex")
 	require.True(t, ok)
 	require.Equal(t, state, selected)
 
 	stageOpenAICodexTurnState(&staged, http.Header{})
 	require.Empty(t, staged.Get("X-Codex-Turn-State"))
-}
-
-func TestOpenAICodexTurnStatePool_SelectsLongestAndFallsBackAfterExpiry(t *testing.T) {
-	pool := newOpenAICodexTurnStatePool()
-	now := time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)
-	pool.now = func() time.Time { return now }
-	short := testOpenAICodexTurnState(292, now, 'a')
-	longest := testOpenAICodexTurnState(356, now, 'b')
-	pool.observe(short, nil, "", "", "http")
-	pool.observe(longest, nil, "", "", "ws")
-
-	selected, ok := pool.longestActive()
-	require.True(t, ok)
-	require.Equal(t, longest, selected)
-
-	expireOpenAICodexTurnState(pool, longest, now.Add(-time.Second))
-	selected, ok = pool.longestActive()
-	require.True(t, ok)
-	require.Equal(t, short, selected)
-}
-
-func TestOpenAICodexTurnStatePool_EqualLengthUsesNewest(t *testing.T) {
-	pool := newOpenAICodexTurnStatePool()
-	now := time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)
-	pool.now = func() time.Time { return now }
-	first := testOpenAICodexTurnState(292, now, 'a')
-	pool.observe(first, nil, "", "", "http")
-	now = now.Add(time.Second)
-	later := testOpenAICodexTurnState(292, now, 'b')
-	pool.observe(later, nil, "", "", "http")
-
-	selected, ok := pool.longestActive()
-	require.True(t, ok)
-	require.Equal(t, later, selected)
 }
 
 func TestOpenAICodexTurnStatePool_CleanupRemovesExpiredEntries(t *testing.T) {

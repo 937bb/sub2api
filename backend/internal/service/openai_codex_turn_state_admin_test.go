@@ -65,9 +65,8 @@ func TestOpsServiceAddOpenAICodexTurnStates_DeduplicatesAndUpdatesPool(t *testin
 	require.Equal(t, 2, added)
 	require.Len(t, repo.batchRecords, 2)
 
-	selected, ok := gateway.getOpenAICodexTurnStatePool().longestActive()
-	require.True(t, ok)
-	require.Equal(t, longest, selected)
+	_, reusable := gateway.getOpenAICodexTurnStatePool().preferredForBucket(77, "gpt-5.5")
+	require.False(t, reusable)
 	require.False(t, gateway.getOpenAICodexTurnStatePool().hasSampledAccount(77))
 	for _, record := range repo.batchRecords {
 		require.Equal(t, "manual", record.SourceTransport)
@@ -104,9 +103,10 @@ func TestOpsServiceDeleteOpenAICodexTurnStates_EvictsRuntimeSelection(t *testing
 	require.Equal(t, 1, deleted)
 	require.Equal(t, []int64{7}, repo.deleteIDs)
 
-	selected, ok := pool.longestActive()
-	require.True(t, ok)
-	require.Equal(t, fallback, selected)
+	require.Len(t, pool.entries, 1)
+	for _, record := range pool.entries {
+		require.Equal(t, fallback, record.StateValue)
+	}
 }
 
 func TestOpsServiceCodexTurnStateReads_RedactRawValues(t *testing.T) {

@@ -87,7 +87,6 @@ type openAICodexTurnStatePool struct {
 	entries           map[string]*OpenAICodexTurnStateRecord
 	accounts          map[int64]time.Time
 	preferredByBucket map[openAICodexTurnStateBucketKey]*OpenAICodexTurnStateRecord
-	selected          *OpenAICodexTurnStateRecord
 	repo              OpenAICodexTurnStateStore
 	queue             chan *OpenAICodexTurnStateRecord
 	worker            sync.Once
@@ -163,7 +162,7 @@ func (p *openAICodexTurnStatePool) observe(value string, accountID *int64, sessi
 	p.mu.Lock()
 	p.mergeLocked(record)
 	if p.observed.Add(1)%openAICodexTurnStateSweepEvery == 0 {
-		p.selectLongestLocked(now)
+		p.pruneExpiredLocked(now)
 		p.rebuildAccountsLocked()
 	}
 	repoReady := p.repo != nil
@@ -179,32 +178,6 @@ func (p *openAICodexTurnStatePool) observe(value string, accountID *int64, sessi
 			log.WithField("dropped_total", dropped).Warn("Codex turn-state persistence queue is full")
 		}
 	}
-}
-
-func (p *openAICodexTurnStatePool) longestActive() (string, bool) {
-	if p == nil {
-		return "", false
-	}
-	now := p.now()
-	p.mu.RLock()
-	selected := p.selected
-	if selected != nil && selected.ExpiresAt.After(now) && selected.StateValue != "" {
-		value := selected.StateValue
-		p.mu.RUnlock()
-		return value, true
-	}
-	p.mu.RUnlock()
-
-	p.mu.Lock()
-	p.selectLongestLocked(now)
-	selected = p.selected
-	if selected == nil {
-		p.mu.Unlock()
-		return "", false
-	}
-	value := selected.StateValue
-	p.mu.Unlock()
-	return value, value != ""
 }
 
 func (p *openAICodexTurnStatePool) preferredForBucket(accountID int64, model string) (string, bool) {
@@ -285,7 +258,6 @@ func (p *openAICodexTurnStatePool) removeHashes(hashes []string) {
 		}
 	}
 	p.rebuildAccountsLocked()
-	p.selectLongestLocked(p.now())
 	p.mu.Unlock()
 }
 
@@ -322,13 +294,6 @@ func (p *openAICodexTurnStatePool) mergeLocked(record *OpenAICodexTurnStateRecor
 				p.preferredByBucket[key] = copyRecord
 			}
 		}
-	}
-	if p.selected == nil {
-		p.selected = copyRecord
-	} else if !p.selected.ExpiresAt.After(p.now()) {
-		p.selectLongestLocked(p.now())
-	} else if openAICodexTurnStateRanksBefore(copyRecord, p.selected) {
-		p.selected = copyRecord
 	}
 }
 
@@ -382,15 +347,10 @@ func (p *openAICodexTurnStatePool) selectPreferredForBucketLocked(key openAICode
 	}
 }
 
-func (p *openAICodexTurnStatePool) selectLongestLocked(now time.Time) {
-	p.selected = nil
+func (p *openAICodexTurnStatePool) pruneExpiredLocked(now time.Time) {
 	for hash, record := range p.entries {
 		if record == nil || !record.ExpiresAt.After(now) {
 			delete(p.entries, hash)
-			continue
-		}
-		if p.selected == nil || openAICodexTurnStateRanksBefore(record, p.selected) {
-			p.selected = record
 		}
 	}
 }
@@ -421,7 +381,7 @@ func (p *openAICodexTurnStatePool) cleanupExpired(now time.Time) {
 		return
 	}
 	p.mu.Lock()
-	p.selectLongestLocked(now)
+	p.pruneExpiredLocked(now)
 	p.rebuildAccountsLocked()
 	repo := p.repo
 	p.mu.Unlock()

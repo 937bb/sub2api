@@ -427,7 +427,7 @@ func (s *OpenAIGatewayService) harvestOpenAICodexTurnState(ctx context.Context, 
 	sessionID := scopeCodexAccountIdentityValue(account, 0, "session", uuid.NewString())
 	result.sessionID = sessionID
 	threadID := scopeCodexAccountIdentityValue(account, 0, "thread", uuid.NewString())
-	body := []byte(fmt.Sprintf(`{"model":%s,"stream":true,"store":false,"input":[{"role":"user","content":[{"type":"input_text","text":"1"}]}],"client_metadata":{"session_id":%s,"thread_id":%s}}`,
+	body := []byte(fmt.Sprintf(`{"model":%s,"stream":true,"store":false,"instructions":"Reply with exactly: pong","input":[{"role":"user","content":[{"type":"input_text","text":"ping"}]}],"client_metadata":{"session_id":%s,"thread_id":%s}}`,
 		strconv.Quote(model), strconv.Quote(sessionID), strconv.Quote(threadID)))
 	body, _, err = applyCodexClientEnvironmentRaw(body, account)
 	if err != nil {
