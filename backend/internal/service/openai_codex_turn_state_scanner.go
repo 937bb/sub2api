@@ -25,6 +25,7 @@ const (
 	openAICodexTurnStateScanQueueSize     = 256
 	openAICodexTurnStateScanSweepInterval = 30 * time.Second
 	openAICodexTurnStateScanRefreshBefore = 5 * time.Minute
+	openAICodexTurnStateActiveUsageWindow = time.Hour
 	openAICodexTurnStateScanMaxErrorBytes = 240
 )
 
@@ -158,20 +159,20 @@ func (s *openAICodexTurnStateScanner) finish(key openAICodexTurnStateBucketKey) 
 }
 
 func (s *openAICodexTurnStateScanner) enqueueSweep(ctx context.Context) {
-	accounts, err := s.accountRepo.ListAllWithFilters(ctx, PlatformOpenAI, "", StatusActive, "", 0, "")
+	now := time.Now()
+	accounts, err := s.listRecentlyUsedAccounts(ctx, now)
 	if err != nil {
 		log.WithError(err).Warn("failed to list Codex turn-state scan accounts")
 		return
 	}
-	for i := range accounts {
-		account := &accounts[i]
-		if account.ParentAccountID != nil || !account.IsOpenAIOAuthLike() {
+	usedSince := now.Add(-openAICodexTurnStateActiveUsageWindow)
+	for _, account := range accounts {
+		models, observedErr := s.repo.ListObservedOpenAICodexTurnStateModels(ctx, account.ID, usedSince)
+		if observedErr != nil {
 			continue
 		}
-		models := []string{defaultOpenAICodexTurnStateScanModel}
-		observed, observedErr := s.repo.ListObservedOpenAICodexTurnStateModels(ctx, account.ID)
-		if observedErr == nil {
-			models = append(models, observed...)
+		if len(models) == 0 {
+			models = []string{defaultOpenAICodexTurnStateScanModel}
 		}
 		seen := make(map[string]struct{}, len(models))
 		for _, model := range models {
@@ -195,6 +196,42 @@ func (s *openAICodexTurnStateScanner) enqueueSweep(ctx context.Context) {
 	}
 }
 
+func (s *openAICodexTurnStateScanner) listRecentlyUsedAccounts(ctx context.Context, now time.Time) ([]*Account, error) {
+	ids, err := s.repo.ListRecentlyUsedOpenAICodexAccountIDs(ctx, now.Add(-openAICodexTurnStateActiveUsageWindow))
+	if err != nil {
+		return nil, err
+	}
+	accounts := make([]*Account, 0, len(ids))
+	for _, id := range ids {
+		account, accountErr := s.accountRepo.GetByID(ctx, id)
+		if accountErr != nil {
+			return nil, fmt.Errorf("load recently used Codex account %d: %w", id, accountErr)
+		}
+		if isRecentlyUsedOpenAICodexAccount(account, now) {
+			accounts = append(accounts, account)
+		}
+	}
+	return accounts, nil
+}
+
+func isRecentlyUsedOpenAICodexAccount(account *Account, now time.Time) bool {
+	if account == nil || account.ParentAccountID != nil || !account.IsOpenAIOAuthLike() ||
+		account.Status != StatusActive || !account.Schedulable || account.LastUsedAt == nil ||
+		account.LastUsedAt.Before(now.Add(-openAICodexTurnStateActiveUsageWindow)) {
+		return false
+	}
+	if account.ExpiresAt != nil && !account.ExpiresAt.After(now) {
+		return false
+	}
+	if account.TempUnschedulableUntil != nil && account.TempUnschedulableUntil.After(now) {
+		return false
+	}
+	if account.OverloadUntil != nil && account.OverloadUntil.After(now) {
+		return false
+	}
+	return account.RateLimitResetAt == nil || !account.RateLimitResetAt.After(now)
+}
+
 func (s *openAICodexTurnStateScanner) runWorker(ctx context.Context) {
 	for {
 		select {
@@ -210,7 +247,7 @@ func (s *openAICodexTurnStateScanner) runWorker(ctx context.Context) {
 
 func (s *openAICodexTurnStateScanner) runJob(ctx context.Context, job openAICodexTurnStateScanJob) {
 	account, err := s.accountRepo.GetByID(ctx, job.accountID)
-	if err != nil || account == nil || account.ParentAccountID != nil || !account.IsOpenAIOAuthLike() {
+	if err != nil || !isRecentlyUsedOpenAICodexAccount(account, time.Now()) {
 		return
 	}
 	upstreamModel := openAICodexTurnStateUpstreamModel(account, job.model)
@@ -620,20 +657,20 @@ func (s *OpsService) EnqueueAllOpenAICodexTurnStateScans(ctx context.Context) (i
 	if s == nil || s.codexTurnStateScanner == nil {
 		return 0, errors.New("Codex turn-state scanner is unavailable")
 	}
-	accounts, err := s.accountRepo.ListAllWithFilters(ctx, PlatformOpenAI, "", StatusActive, "", 0, "")
+	now := time.Now()
+	accounts, err := s.codexTurnStateScanner.listRecentlyUsedAccounts(ctx, now)
 	if err != nil {
 		return 0, err
 	}
+	usedSince := now.Add(-openAICodexTurnStateActiveUsageWindow)
 	queued := 0
-	for i := range accounts {
-		account := &accounts[i]
-		if account.ParentAccountID != nil || !account.IsOpenAIOAuthLike() {
+	for _, account := range accounts {
+		models, observedErr := s.codexTurnStateScanner.repo.ListObservedOpenAICodexTurnStateModels(ctx, account.ID, usedSince)
+		if observedErr != nil {
 			continue
 		}
-		models := []string{defaultOpenAICodexTurnStateScanModel}
-		observed, observedErr := s.codexTurnStateScanner.repo.ListObservedOpenAICodexTurnStateModels(ctx, account.ID)
-		if observedErr == nil {
-			models = append(models, observed...)
+		if len(models) == 0 {
+			models = []string{defaultOpenAICodexTurnStateScanModel}
 		}
 		seen := make(map[string]struct{}, len(models))
 		for _, model := range models {

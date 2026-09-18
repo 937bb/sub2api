@@ -47,6 +47,47 @@ func TestOpenAICodexTurnStateRetryDelayCapsAtFiveMinutes(t *testing.T) {
 	require.Equal(t, 5*time.Minute, openAICodexTurnStateRetryDelay(100))
 }
 
+func TestIsRecentlyUsedOpenAICodexAccount(t *testing.T) {
+	now := time.Date(2026, 9, 18, 18, 0, 0, 0, time.UTC)
+	recent := now.Add(-30 * time.Minute)
+	old := now.Add(-openAICodexTurnStateActiveUsageWindow - time.Second)
+	future := now.Add(time.Minute)
+	past := now.Add(-time.Minute)
+	parentID := int64(1)
+
+	base := Account{
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+		LastUsedAt:  &recent,
+	}
+	require.True(t, isRecentlyUsedOpenAICodexAccount(&base, now))
+
+	cases := []struct {
+		name   string
+		mutate func(*Account)
+	}{
+		{name: "never used", mutate: func(account *Account) { account.LastUsedAt = nil }},
+		{name: "used outside window", mutate: func(account *Account) { account.LastUsedAt = &old }},
+		{name: "disabled", mutate: func(account *Account) { account.Status = StatusDisabled }},
+		{name: "unschedulable", mutate: func(account *Account) { account.Schedulable = false }},
+		{name: "child account", mutate: func(account *Account) { account.ParentAccountID = &parentID }},
+		{name: "api key", mutate: func(account *Account) { account.Type = AccountTypeAPIKey }},
+		{name: "expired", mutate: func(account *Account) { account.ExpiresAt = &past }},
+		{name: "temporarily unavailable", mutate: func(account *Account) { account.TempUnschedulableUntil = &future }},
+		{name: "overloaded", mutate: func(account *Account) { account.OverloadUntil = &future }},
+		{name: "rate limited", mutate: func(account *Account) { account.RateLimitResetAt = &future }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			account := base
+			tc.mutate(&account)
+			require.False(t, isRecentlyUsedOpenAICodexAccount(&account, now))
+		})
+	}
+}
+
 func TestOpenAICodexTurnStateScannerDeduplicatesAccountModelJobs(t *testing.T) {
 	scanner := &openAICodexTurnStateScanner{
 		queue:    make(chan openAICodexTurnStateScanJob, 4),

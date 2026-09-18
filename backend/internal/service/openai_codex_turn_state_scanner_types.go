@@ -84,7 +84,8 @@ type OpenAICodexTurnStateScannerRepository interface {
 	UpdateOpenAICodexTurnStateProxyHealth(ctx context.Context, proxy *OpenAICodexTurnStateProxy) error
 	UpsertOpenAICodexTurnStateScan(ctx context.Context, scan *OpenAICodexTurnStateScan) error
 	GetOpenAICodexTurnStateScan(ctx context.Context, accountID int64, model string) (*OpenAICodexTurnStateScan, error)
+	ListRecentlyUsedOpenAICodexAccountIDs(ctx context.Context, usedSince time.Time) ([]int64, error)
 	ListOpenAICodexTurnStateAccountStatuses(ctx context.Context, accountIDs []int64, page, pageSize int) (*OpenAICodexTurnStateAccountStatusList, error)
 	GetOpenAICodexTurnStateOperationsSummary(ctx context.Context) (*OpenAICodexTurnStateOperationsSummary, error)
-	ListObservedOpenAICodexTurnStateModels(ctx context.Context, accountID int64) ([]string, error)
+	ListObservedOpenAICodexTurnStateModels(ctx context.Context, accountID int64, usedSince time.Time) ([]string, error)
 }

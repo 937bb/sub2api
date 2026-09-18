@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/lib/pq"
@@ -187,6 +188,33 @@ FROM codex_turn_state_scans WHERE account_id = $1 AND model = $2`, accountID, st
 	return item, err
 }
 
+func (r *opsRepository) ListRecentlyUsedOpenAICodexAccountIDs(ctx context.Context, usedSince time.Time) ([]int64, error) {
+	rows, err := r.db.QueryContext(ctx, `
+SELECT id
+FROM accounts
+WHERE deleted_at IS NULL AND parent_account_id IS NULL
+  AND platform = 'openai' AND type IN ('oauth', 'setup-token')
+  AND status = 'active' AND schedulable IS TRUE AND last_used_at >= $1
+  AND (expires_at IS NULL OR expires_at > NOW())
+  AND (temp_unschedulable_until IS NULL OR temp_unschedulable_until <= NOW())
+  AND (overload_until IS NULL OR overload_until <= NOW())
+  AND (rate_limit_reset_at IS NULL OR rate_limit_reset_at <= NOW())
+ORDER BY last_used_at DESC, id ASC`, usedSince)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	ids := make([]int64, 0)
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 func codexTurnStateAccountStatusCTE() string {
 	return `
 WITH eligible_accounts AS (
@@ -194,18 +222,27 @@ WITH eligible_accounts AS (
   FROM accounts
   WHERE deleted_at IS NULL AND parent_account_id IS NULL AND platform = 'openai'
     AND type IN ('oauth', 'setup-token')
+    AND status = 'active' AND schedulable IS TRUE AND last_used_at >= $1
+    AND (expires_at IS NULL OR expires_at > NOW())
+    AND (temp_unschedulable_until IS NULL OR temp_unschedulable_until <= NOW())
+    AND (overload_until IS NULL OR overload_until <= NOW())
+    AND (rate_limit_reset_at IS NULL OR rate_limit_reset_at <= NOW())
 ), account_models AS (
-  SELECT id AS account_id, 'gpt-5.5'::varchar AS model FROM eligible_accounts
+  SELECT u.account_id, LOWER(BTRIM(COALESCE(NULLIF(u.upstream_model, ''), u.model))) AS model
+  FROM usage_logs u
+  JOIN eligible_accounts a ON a.id = u.account_id
+  WHERE u.created_at >= $1 AND BTRIM(COALESCE(NULLIF(u.upstream_model, ''), u.model)) <> ''
+  GROUP BY u.account_id, LOWER(BTRIM(COALESCE(NULLIF(u.upstream_model, ''), u.model)))
   UNION
   SELECT c.source_account_id, c.source_model
   FROM codex_turn_states c
   JOIN eligible_accounts a ON a.id = c.source_account_id
-  WHERE c.source_model <> ''
+  WHERE c.source_model <> '' AND c.last_seen_at >= $1
   UNION
   SELECT sc.account_id, sc.model
   FROM codex_turn_state_scans sc
   JOIN eligible_accounts a ON a.id = sc.account_id
-  WHERE sc.model <> ''
+  WHERE sc.model <> '' AND sc.updated_at >= $1
 ), status_rows AS (
   SELECT a.id AS account_id, a.name AS account_name, a.type AS account_type, a.plan_type,
          am.model,
@@ -249,9 +286,10 @@ func (r *opsRepository) ListOpenAICodexTurnStateAccountStatuses(ctx context.Cont
 		ids = pq.Array(accountIDs)
 	}
 	cte := codexTurnStateAccountStatusCTE()
+	usedSince := time.Now().Add(-time.Hour)
 	var total int64
 	if err := r.db.QueryRowContext(ctx, cte+`
-SELECT COUNT(*) FROM status_rows WHERE ($1::bigint[] IS NULL OR account_id = ANY($1))`, ids).Scan(&total); err != nil {
+SELECT COUNT(*) FROM status_rows WHERE ($2::bigint[] IS NULL OR account_id = ANY($2))`, usedSince, ids).Scan(&total); err != nil {
 		return nil, err
 	}
 	rows, err := r.db.QueryContext(ctx, cte+`
@@ -259,9 +297,9 @@ SELECT account_id, account_name, account_type, plan_type, model, effective_statu
        COALESCE(state_length, 0), issued_at, expires_at, last_attempt_at, last_success_at,
        attempt_count, last_proxy_id, COALESCE(last_proxy_url, ''), last_error
 FROM status_rows
-WHERE ($1::bigint[] IS NULL OR account_id = ANY($1))
+WHERE ($2::bigint[] IS NULL OR account_id = ANY($2))
 ORDER BY account_name ASC, account_id ASC, model ASC
-LIMIT $2 OFFSET $3`, ids, pageSize, (page-1)*pageSize)
+LIMIT $3 OFFSET $4`, usedSince, ids, pageSize, (page-1)*pageSize)
 	if err != nil {
 		return nil, err
 	}
@@ -292,6 +330,11 @@ WITH eligible AS (
   SELECT id FROM accounts
   WHERE deleted_at IS NULL AND parent_account_id IS NULL AND platform = 'openai'
     AND type IN ('oauth', 'setup-token')
+    AND status = 'active' AND schedulable IS TRUE AND last_used_at >= $1
+    AND (expires_at IS NULL OR expires_at > NOW())
+    AND (temp_unschedulable_until IS NULL OR temp_unschedulable_until <= NOW())
+    AND (overload_until IS NULL OR overload_until <= NOW())
+    AND (rate_limit_reset_at IS NULL OR rate_limit_reset_at <= NOW())
 ), ready AS (
   SELECT DISTINCT source_account_id FROM codex_turn_states
   WHERE value_length IN (292, 332) AND expires_at > NOW() AND source_account_id IS NOT NULL
@@ -299,37 +342,38 @@ WITH eligible AS (
 SELECT (SELECT COUNT(*) FROM eligible),
        (SELECT COUNT(*) FROM eligible e JOIN ready r ON r.source_account_id = e.id),
        (SELECT COUNT(*) FROM eligible e LEFT JOIN ready r ON r.source_account_id = e.id WHERE r.source_account_id IS NULL),
-       (SELECT COUNT(*) FROM codex_turn_state_scans WHERE status IN ('pending', 'running')),
+       (SELECT COUNT(*) FROM codex_turn_state_scans sc JOIN eligible e ON e.id = sc.account_id WHERE sc.status IN ('pending', 'running')),
        (SELECT COUNT(*) FROM codex_turn_state_proxies WHERE enabled = TRUE),
        (SELECT COUNT(*) FROM codex_turn_state_proxies WHERE enabled = TRUE AND health_status = 'healthy'),
        (SELECT COUNT(*) FROM proxies WHERE deleted_at IS NULL AND status = 'active'
           AND (expires_at IS NULL OR expires_at > NOW())),
-       (SELECT MAX(last_attempt_at) FROM codex_turn_state_scans)`).Scan(
+       (SELECT MAX(sc.last_attempt_at) FROM codex_turn_state_scans sc JOIN eligible e ON e.id = sc.account_id)`,
+		time.Now().Add(-time.Hour)).Scan(
 		&summary.OAuthAccounts, &summary.ReadyAccounts, &summary.MissingAccounts,
 		&summary.RunningJobs, &summary.EnabledProxies, &summary.HealthyProxies, &summary.SharedProxies, &summary.LastScanAt,
 	)
 	return summary, err
 }
 
-func (r *opsRepository) ListObservedOpenAICodexTurnStateModels(ctx context.Context, accountID int64) ([]string, error) {
+func (r *opsRepository) ListObservedOpenAICodexTurnStateModels(ctx context.Context, accountID int64, usedSince time.Time) ([]string, error) {
 	rows, err := r.db.QueryContext(ctx, `
 SELECT model
 FROM (
   SELECT LOWER(BTRIM(source_model)) AS model, MAX(last_seen_at) AS seen_at
   FROM codex_turn_states
-  WHERE source_account_id = $1 AND BTRIM(source_model) <> ''
+  WHERE source_account_id = $1 AND BTRIM(source_model) <> '' AND last_seen_at >= $2
   GROUP BY LOWER(BTRIM(source_model))
   UNION ALL
   SELECT LOWER(BTRIM(COALESCE(NULLIF(upstream_model, ''), model))) AS model,
          MAX(created_at) AS seen_at
   FROM usage_logs
   WHERE account_id = $1 AND BTRIM(COALESCE(NULLIF(upstream_model, ''), model)) <> ''
-    AND created_at >= NOW() - INTERVAL '30 days'
+    AND created_at >= $2
   GROUP BY LOWER(BTRIM(COALESCE(NULLIF(upstream_model, ''), model)))
 ) observed
 GROUP BY model
 ORDER BY MAX(seen_at) DESC
-LIMIT 12`, accountID)
+LIMIT 12`, accountID, usedSince)
 	if err != nil {
 		return nil, err
 	}

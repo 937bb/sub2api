@@ -10,7 +10,7 @@ export default {
         all: '全部',
         tabs: { accounts: '账号状态', proxies: '扫描代理', history: 'State 历史' },
         metrics: {
-          oauthAccounts: 'OAuth 账号',
+          oauthAccounts: '近 1 小时在用账号',
           readyAccounts: '已有 292/332',
           missingAccounts: '缺失账号',
           runningJobs: '扫描任务',
@@ -18,9 +18,9 @@ export default {
           healthyProxies: '健康代理',
           sharedProxies: '复用代理'
         },
-        accountHint: '正常业务流量优先采集；后台仅补扫缺失或即将过期的账号/模型，不影响账号调度状态。',
+        accountHint: '仅展示并补扫最近 1 小时实际使用且当前可调度的账号/模型；历史和停用账号不会进入扫描队列。',
         proxyHint: 'State 扫描会合并使用这里的专用代理和代理管理中的有效代理；不会修改账号绑定关系或业务代理状态。',
-        scanAll: '扫描缺失账号',
+        scanAll: '扫描在用账号',
         scanNow: '立即扫描',
         scanQueued: '扫描任务已加入队列',
         scanAlreadyQueued: '该账号和模型已在扫描队列中',

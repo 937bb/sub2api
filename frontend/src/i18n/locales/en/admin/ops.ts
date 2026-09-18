@@ -10,13 +10,13 @@ export default {
         all: 'All',
         tabs: { accounts: 'Account states', proxies: 'Scan proxies', history: 'State history' },
         metrics: {
-          oauthAccounts: 'OAuth accounts', readyAccounts: '292/332 ready', missingAccounts: 'Missing',
+          oauthAccounts: 'Used in the last hour', readyAccounts: '292/332 ready', missingAccounts: 'Missing',
           runningJobs: 'Scan jobs', enabledProxies: 'Enabled proxies', healthyProxies: 'Healthy proxies',
           sharedProxies: 'Reused proxies'
         },
-        accountHint: 'Business traffic remains the primary collector. Background jobs only fill missing or expiring account/model states and never change account scheduling status.',
+        accountHint: 'Only schedulable account/model pairs used in the last hour are shown and scanned. Historical and disabled accounts are excluded.',
         proxyHint: 'State scans combine this dedicated pool with active proxies from Proxy Management without changing account bindings or business proxy health.',
-        scanAll: 'Scan missing accounts',
+        scanAll: 'Scan in-use accounts',
         scanNow: 'Scan now',
         scanQueued: 'Scan queued',
         scanAlreadyQueued: 'This account/model is already queued',
