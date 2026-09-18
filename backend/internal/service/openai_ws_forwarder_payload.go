@@ -197,7 +197,7 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 	setOpenAICodexRoutingHint(headers, account, routingModel, routingServiceTier)
 	applyCodexClientEnvironmentHeaders(headers, codexAccountIdentitySource(c, account))
 	normalizeCodexWebSocketTransportHeaders(headers, codexAccountIdentitySource(c, account))
-	s.guardOpenAICodexTurnStateEcho(c, account, headers)
+	s.guardOpenAICodexTurnStateEcho(c, account, headers, routingModel)
 	logOpenAIRoutingDiagnostics(
 		ctx,
 		account,

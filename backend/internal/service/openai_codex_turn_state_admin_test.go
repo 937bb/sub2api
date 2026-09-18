@@ -51,11 +51,14 @@ func TestOpsServiceAddOpenAICodexTurnStates_DeduplicatesAndUpdatesPool(t *testin
 	repo := newTurnStateAdminRepoMock()
 	gateway := &OpenAIGatewayService{}
 	svc := &OpsService{opsRepo: repo, openAIGatewayService: gateway}
+	issuedAt := time.Now().UTC().Truncate(time.Second)
+	short := testOpenAICodexTurnState(292, issuedAt, 'a')
+	longest := testOpenAICodexTurnState(312, issuedAt, 'b')
 
 	added, err := svc.AddOpenAICodexTurnStates(context.Background(), []string{
-		" short ",
-		"the-longest-manual-value",
-		"short",
+		" " + short + " ",
+		longest,
+		short,
 		"",
 	})
 	require.NoError(t, err)
@@ -64,12 +67,13 @@ func TestOpsServiceAddOpenAICodexTurnStates_DeduplicatesAndUpdatesPool(t *testin
 
 	selected, ok := gateway.getOpenAICodexTurnStatePool().longestActive()
 	require.True(t, ok)
-	require.Equal(t, "the-longest-manual-value", selected)
+	require.Equal(t, longest, selected)
 	require.False(t, gateway.getOpenAICodexTurnStatePool().hasSampledAccount(77))
 	for _, record := range repo.batchRecords {
 		require.Equal(t, "manual", record.SourceTransport)
 		require.Nil(t, record.SourceAccountID)
-		require.WithinDuration(t, record.LastSeenAt.Add(openAICodexTurnStateTTL), record.ExpiresAt, time.Millisecond)
+		require.Equal(t, issuedAt, record.IssuedAt)
+		require.Equal(t, issuedAt.Add(openAICodexTurnStateTTL), record.ExpiresAt)
 	}
 }
 
@@ -88,9 +92,12 @@ func TestOpsServiceDeleteOpenAICodexTurnStates_EvictsRuntimeSelection(t *testing
 	gateway := &OpenAIGatewayService{}
 	svc := &OpsService{opsRepo: repo, openAIGatewayService: gateway}
 	pool := gateway.getOpenAICodexTurnStatePool()
-	pool.observe("fallback", nil, "", "http")
-	pool.observe("the-longest-value", nil, "", "http")
-	repo.deleteHashes = []string{hashOpenAICodexTurnState("the-longest-value")}
+	issuedAt := time.Now().UTC().Truncate(time.Second)
+	fallback := testOpenAICodexTurnState(292, issuedAt, 'a')
+	longest := testOpenAICodexTurnState(312, issuedAt, 'b')
+	pool.observe(fallback, nil, "", "", "http")
+	pool.observe(longest, nil, "", "", "http")
+	repo.deleteHashes = []string{hashOpenAICodexTurnState(longest)}
 
 	deleted, err := svc.DeleteOpenAICodexTurnStates(context.Background(), []int64{0, 7, 7, -1})
 	require.NoError(t, err)
@@ -99,7 +106,7 @@ func TestOpsServiceDeleteOpenAICodexTurnStates_EvictsRuntimeSelection(t *testing
 
 	selected, ok := pool.longestActive()
 	require.True(t, ok)
-	require.Equal(t, "fallback", selected)
+	require.Equal(t, fallback, selected)
 }
 
 func TestOpsServiceCodexTurnStateReads_RedactRawValues(t *testing.T) {

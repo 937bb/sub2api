@@ -1390,7 +1390,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_PassthroughHeade
 	wantSession := captureDialer.lastHeaders.Get("session-id")
 	require.NotEmpty(t, wantSession)
 	require.NotEqual(t, fingerprintIDs.sessionID, wantSession, "anonymous connections must not share the account-wide session")
-	require.Empty(t, captureDialer.lastHeaders.Get(openAIWSTurnStateHeader), "unscoped client state must not be reused")
+	require.Equal(t, turnState, captureDialer.lastHeaders.Get(openAIWSTurnStateHeader), "non-312 client state must remain unchanged")
 	require.Len(t, upstreamConn.writes, 1)
 	forwarded := requestToJSONString(upstreamConn.writes[0])
 	require.Equal(t, wantSession, gjson.Get(forwarded, "client_metadata.session_id").String())

@@ -14,14 +14,16 @@ import (
 const upsertOpenAICodexTurnStateSQL = `
 INSERT INTO codex_turn_states (
   state_value, state_hash, value_length, source_account_id, source_session_hash,
-  source_transport, first_seen_at, last_seen_at, expires_at
-) VALUES ($1,$2,$3,$4,NULLIF($5,''),$6,$7,$8,$9)
-ON CONFLICT (state_hash) DO UPDATE SET
+  source_model, source_transport, issued_at, first_seen_at, last_seen_at, expires_at
+) VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,''),$7,$8,$9,$10,$11)
+ON CONFLICT (source_account_id, source_model, state_hash) DO UPDATE SET
   state_value = EXCLUDED.state_value,
   value_length = EXCLUDED.value_length,
   source_account_id = EXCLUDED.source_account_id,
   source_session_hash = EXCLUDED.source_session_hash,
+  source_model = EXCLUDED.source_model,
   source_transport = EXCLUDED.source_transport,
+  issued_at = EXCLUDED.issued_at,
   last_seen_at = EXCLUDED.last_seen_at,
   expires_at = EXCLUDED.expires_at
 WHERE EXCLUDED.last_seen_at >= codex_turn_states.last_seen_at`
@@ -39,7 +41,9 @@ func (r *opsRepository) UpsertOpenAICodexTurnState(ctx context.Context, record *
 		record.ValueLength,
 		record.SourceAccountID,
 		record.SourceSessionHash,
+		record.SourceModel,
 		record.SourceTransport,
+		nullableOpenAICodexTurnStateTime(record.IssuedAt),
 		record.FirstSeenAt,
 		record.LastSeenAt,
 		record.ExpiresAt,
@@ -69,7 +73,9 @@ func (r *opsRepository) BatchUpsertOpenAICodexTurnStates(ctx context.Context, re
 			record.ValueLength,
 			record.SourceAccountID,
 			record.SourceSessionHash,
+			record.SourceModel,
 			record.SourceTransport,
+			nullableOpenAICodexTurnStateTime(record.IssuedAt),
 			record.FirstSeenAt,
 			record.LastSeenAt,
 			record.ExpiresAt,
@@ -109,6 +115,13 @@ RETURNING state_hash`, pq.Array(ids))
 	return hashes, nil
 }
 
+func nullableOpenAICodexTurnStateTime(value time.Time) any {
+	if value.IsZero() {
+		return nil
+	}
+	return value
+}
+
 func (r *opsRepository) DeleteOpenAICodexTurnStatesExpiredBefore(ctx context.Context, cutoff time.Time) error {
 	if r == nil || r.db == nil {
 		return fmt.Errorf("nil ops repository")
@@ -123,7 +136,8 @@ func (r *opsRepository) LoadActiveOpenAICodexTurnStates(ctx context.Context, now
 	}
 	rows, err := r.db.QueryContext(ctx, `
 SELECT id, state_value, state_hash, value_length, source_account_id,
-       COALESCE(source_session_hash, ''), source_transport,
+       COALESCE(source_session_hash, ''), COALESCE(source_model, ''), source_transport,
+       COALESCE(issued_at, 'epoch'::timestamptz),
        first_seen_at, last_seen_at, expires_at
 FROM codex_turn_states
 WHERE expires_at > $1
@@ -147,7 +161,9 @@ ORDER BY value_length DESC, last_seen_at DESC, id DESC`, now)
 			&record.ValueLength,
 			&record.SourceAccountID,
 			&record.SourceSessionHash,
+			&record.SourceModel,
 			&record.SourceTransport,
+			&record.IssuedAt,
 			&record.FirstSeenAt,
 			&record.LastSeenAt,
 			&record.ExpiresAt,
@@ -177,7 +193,8 @@ func (r *opsRepository) ListOpenAICodexTurnStates(ctx context.Context, filter *s
 	args = append(args, filter.PageSize, (filter.Page-1)*filter.PageSize)
 	query := fmt.Sprintf(`
 SELECT c.id, c.state_value, c.state_hash, c.value_length, c.source_account_id,
-       COALESCE(a.name, ''), COALESCE(c.source_session_hash, ''), c.source_transport,
+       COALESCE(a.name, ''), COALESCE(c.source_session_hash, ''), COALESCE(c.source_model, ''), c.source_transport,
+       COALESCE(c.issued_at, 'epoch'::timestamptz),
        c.first_seen_at, c.last_seen_at, c.expires_at, (c.expires_at > NOW())
 FROM codex_turn_states c
 LEFT JOIN accounts a ON a.id = c.source_account_id
@@ -201,7 +218,9 @@ LIMIT $%d OFFSET $%d`, where, len(args)-1, len(args))
 			&record.SourceAccountID,
 			&record.SourceAccountName,
 			&record.SourceSessionHash,
+			&record.SourceModel,
 			&record.SourceTransport,
+			&record.IssuedAt,
 			&record.FirstSeenAt,
 			&record.LastSeenAt,
 			&record.ExpiresAt,
@@ -221,7 +240,7 @@ func (r *opsRepository) GetOpenAICodexTurnStateSummary(ctx context.Context, now 
 	if r == nil || r.db == nil {
 		return nil, fmt.Errorf("nil ops repository")
 	}
-	summary := &service.OpenAICodexTurnStateSummary{ReuseTTLSeconds: int64((30 * time.Minute) / time.Second)}
+	summary := &service.OpenAICodexTurnStateSummary{ReuseTTLSeconds: int64(time.Hour / time.Second)}
 	if err := r.db.QueryRowContext(ctx, `
 SELECT COUNT(*) FILTER (WHERE expires_at > $1),
        COUNT(*) FILTER (WHERE expires_at <= $1)
@@ -232,7 +251,8 @@ FROM codex_turn_states`, now).Scan(&summary.ActiveCount, &summary.ExpiredCount);
 	record := &service.OpenAICodexTurnStateRecord{}
 	err := r.db.QueryRowContext(ctx, `
 SELECT c.id, c.state_value, c.state_hash, c.value_length, c.source_account_id,
-       COALESCE(a.name, ''), COALESCE(c.source_session_hash, ''), c.source_transport,
+       COALESCE(a.name, ''), COALESCE(c.source_session_hash, ''), COALESCE(c.source_model, ''), c.source_transport,
+       COALESCE(c.issued_at, 'epoch'::timestamptz),
        c.first_seen_at, c.last_seen_at, c.expires_at
 FROM codex_turn_states c
 LEFT JOIN accounts a ON a.id = c.source_account_id
@@ -246,7 +266,9 @@ LIMIT 1`, now).Scan(
 		&record.SourceAccountID,
 		&record.SourceAccountName,
 		&record.SourceSessionHash,
+		&record.SourceModel,
 		&record.SourceTransport,
+		&record.IssuedAt,
 		&record.FirstSeenAt,
 		&record.LastSeenAt,
 		&record.ExpiresAt,

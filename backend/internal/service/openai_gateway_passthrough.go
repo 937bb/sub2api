@@ -751,7 +751,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 	applyCodexClientEnvironmentHeaders(req.Header, codexAccountIdentitySource(c, account))
 	// Resolve turn-state after session/fingerprint normalization so the lookup
 	// is scoped to the exact logical upstream session.
-	s.guardOpenAICodexTurnStateEcho(c, account, req.Header)
+	s.guardOpenAICodexTurnStateEcho(c, account, req.Header, openAICodexTurnStateModelFromBody(body))
 	logOpenAIRoutingDiagnosticsFromBody(ctx, account, "http_passthrough", req.Header, body, "not_applicable")
 
 	return req, nil

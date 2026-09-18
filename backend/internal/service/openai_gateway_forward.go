@@ -1616,7 +1616,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 	// Apply turn-state only after the final upstream session identity is known.
 	// This prevents a state minted for one logical session from crossing into
 	// another session that happens to use the same OAuth credential.
-	s.guardOpenAICodexTurnStateEcho(c, account, req.Header)
+	s.guardOpenAICodexTurnStateEcho(c, account, req.Header, openAICodexTurnStateModelFromBody(body))
 	logOpenAIRoutingDiagnosticsFromBody(ctx, account, "http", req.Header, body, "not_applicable")
 
 	return req, nil

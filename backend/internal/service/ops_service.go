@@ -195,15 +195,21 @@ func (s *OpsService) AddOpenAICodexTurnStates(ctx context.Context, values []stri
 			return 0, errors.New("Codex turn-state contains invalid header characters")
 		}
 		hash := hashOpenAICodexTurnState(value)
+		issuedAt, issuedOK := parseOpenAICodexTurnStateIssuedAt(value)
+		expiresAt := now
+		if issuedOK && !issuedAt.After(now) {
+			expiresAt = issuedAt.Add(openAICodexTurnStateTTL)
+		}
 		unique[hash] = &OpenAICodexTurnStateRecord{
 			StateValue:      value,
 			StateHash:       hash,
 			ValueLength:     len(value),
 			SourceTransport: "manual",
+			IssuedAt:        issuedAt,
 			FirstSeenAt:     now,
 			LastSeenAt:      now,
-			ExpiresAt:       now.Add(openAICodexTurnStateTTL),
-			Active:          true,
+			ExpiresAt:       expiresAt,
+			Active:          expiresAt.After(now),
 		}
 	}
 	if len(unique) == 0 {

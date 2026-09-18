@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
 )
 
 const openAICodexTurnStateHeader = "x-codex-turn-state"
@@ -15,13 +16,11 @@ const openAICodexPreferredTurnStateLength = 292
 
 const openAICodexTurnStateSessionHashContextKey = "openai_codex_turn_state_session_hash"
 
+const openAICodexTurnStateModelContextKey = "openai_codex_turn_state_model"
+
 const openAICodexTurnStateReuseScopeContextKey = "openai_codex_turn_state_reuse_scope"
 
-const (
-	openAICodexTurnStateReuseScopeSession = "session"
-	openAICodexTurnStateReuseScopeAccount = "account"
-	openAICodexTurnStateReuseScopeGlobal  = "global"
-)
+const openAICodexTurnStateReuseScopeAccountModel = "account_model"
 
 func openAICodexTurnStateSeed(c *gin.Context) string {
 	if c == nil || c.Request == nil {
@@ -61,6 +60,25 @@ func stageOpenAICodexTurnStateSessionHash(c *gin.Context, h http.Header) string 
 		c.Set(openAICodexTurnStateSessionHashContextKey, sessionHash)
 	}
 	return sessionHash
+}
+
+func stageOpenAICodexTurnStateModel(c *gin.Context, model string) string {
+	model = normalizeOpenAICodexTurnStateModel(model)
+	if c != nil {
+		c.Set(openAICodexTurnStateModelContextKey, model)
+	}
+	return model
+}
+
+func openAICodexTurnStateModel(c *gin.Context) string {
+	if c == nil {
+		return ""
+	}
+	return normalizeOpenAICodexTurnStateModel(c.GetString(openAICodexTurnStateModelContextKey))
+}
+
+func openAICodexTurnStateModelFromBody(body []byte) string {
+	return normalizeOpenAICodexTurnStateModel(gjson.GetBytes(body, "model").String())
 }
 
 func (s *OpenAIGatewayService) relayOpenAICodexTurnState(c *gin.Context, account *Account, upstream http.Header) {
@@ -123,38 +141,29 @@ func (s *OpenAIGatewayService) observeOpenAICodexTurnState(c *gin.Context, accou
 	}
 	accountID := owner.ID
 	sessionHash := openAICodexTurnStateSessionHash(c)
-	s.getOpenAICodexTurnStatePool().observe(state, &accountID, sessionHash, transport)
+	model := openAICodexTurnStateModel(c)
+	s.getOpenAICodexTurnStatePool().observe(state, &accountID, sessionHash, model, transport)
 }
 
-// guardOpenAICodexTurnStateEcho prefers an unexpired 292-byte state from the
-// same credential owner and client session, then falls back to the same owner
-// and finally the global pool. API-key accounts keep their original header.
-func (s *OpenAIGatewayService) guardOpenAICodexTurnStateEcho(c *gin.Context, account *Account, h http.Header) {
+// guardOpenAICodexTurnStateEcho only replaces a 312-byte state with an
+// unexpired 292-byte state minted for the same credential owner and model.
+func (s *OpenAIGatewayService) guardOpenAICodexTurnStateEcho(c *gin.Context, account *Account, h http.Header, model string) {
 	if s == nil || h == nil || account == nil || !account.UsesOpenAICodexProtocol() {
 		return
 	}
+	model = stageOpenAICodexTurnStateModel(c, model)
+	stageOpenAICodexTurnStateSessionHash(c, h)
+	incoming := strings.TrimSpace(h.Get(openAICodexTurnStateHeader))
+	if len(incoming) != 312 {
+		return
+	}
 	owner := codexAccountIdentitySource(c, account)
-	if owner == nil {
-		h.Del(openAICodexTurnStateHeader)
+	if owner == nil || owner.ID <= 0 || model == "" {
 		return
 	}
-	sessionHash := stageOpenAICodexTurnStateSessionHash(c, h)
-	pool := s.getOpenAICodexTurnStatePool()
-	if sessionHash != "" {
-		if state, ok := pool.preferredForSession(owner.ID, sessionHash); ok {
-			setOpenAICodexTurnStateReuse(c, h, state, openAICodexTurnStateReuseScopeSession)
-			return
-		}
+	if state, ok := s.getOpenAICodexTurnStatePool().preferredForBucket(owner.ID, model); ok {
+		setOpenAICodexTurnStateReuse(c, h, state, openAICodexTurnStateReuseScopeAccountModel)
 	}
-	if state, ok := pool.preferredForAccount(owner.ID); ok {
-		setOpenAICodexTurnStateReuse(c, h, state, openAICodexTurnStateReuseScopeAccount)
-		return
-	}
-	if state, ok := pool.preferredAcrossAccounts(); ok {
-		setOpenAICodexTurnStateReuse(c, h, state, openAICodexTurnStateReuseScopeGlobal)
-		return
-	}
-	h.Del(openAICodexTurnStateHeader)
 }
 
 func setOpenAICodexTurnStateReuse(c *gin.Context, h http.Header, state, scope string) {

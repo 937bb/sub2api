@@ -71,6 +71,7 @@
           </template>
           <template #cell-source="{ row }">
             <div class="text-sm text-gray-700 dark:text-gray-200">{{ row.source_account_name || `#${row.source_account_id ?? '-'}` }}</div>
+            <div v-if="row.source_model" class="mt-1 font-mono text-xs text-gray-500 dark:text-dark-300">{{ row.source_model }}</div>
             <div class="mt-1 text-xs uppercase text-gray-400">{{ row.source_transport }}</div>
           </template>
           <template #cell-session="{ row }">
