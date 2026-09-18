@@ -14,7 +14,6 @@ func TestCodexTurnStateAccountModelScopeMigration(t *testing.T) {
 	sql := strings.Join(strings.Fields(string(content)), " ")
 	require.Contains(t, sql, "ADD COLUMN IF NOT EXISTS source_model VARCHAR(255) NOT NULL DEFAULT ''")
 	require.Contains(t, sql, "ADD COLUMN IF NOT EXISTS issued_at TIMESTAMPTZ")
-	require.Contains(t, sql, "DROP CONSTRAINT IF EXISTS codex_turn_states_state_hash_key")
-	require.Contains(t, sql, "ON codex_turn_states (source_account_id, source_model, state_hash) NULLS NOT DISTINCT")
 	require.Contains(t, sql, "idx_codex_turn_states_account_model_active")
+	require.NotContains(t, sql, "DROP CONSTRAINT")
 }

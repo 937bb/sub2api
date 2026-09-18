@@ -16,7 +16,7 @@ INSERT INTO codex_turn_states (
   state_value, state_hash, value_length, source_account_id, source_session_hash,
   source_model, source_transport, issued_at, first_seen_at, last_seen_at, expires_at
 ) VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,''),$7,$8,$9,$10,$11)
-ON CONFLICT (source_account_id, source_model, state_hash) DO UPDATE SET
+ON CONFLICT (state_hash) DO UPDATE SET
   state_value = EXCLUDED.state_value,
   value_length = EXCLUDED.value_length,
   source_account_id = EXCLUDED.source_account_id,
