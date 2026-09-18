@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	ippkg "github.com/Wei-Shaw/sub2api/internal/pkg/ip"
+
 	"github.com/alicebob/miniredis/v2"
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
@@ -38,6 +40,45 @@ func TestSuccessfulRateLimiterGroupsIPv6By64(t *testing.T) {
 	require.Equal(t, http.StatusCreated, performSuccessfulRateLimitRequest(router, "[2001:db8:1:2::1]:1001", "success").Code)
 	require.Equal(t, http.StatusTooManyRequests, performSuccessfulRateLimitRequest(router, "[2001:db8:1:2::ffff]:1002", "success").Code)
 	require.Equal(t, http.StatusCreated, performSuccessfulRateLimitRequest(router, "[2001:db8:1:3::1]:1003", "success").Code)
+}
+
+func TestSuccessfulRateLimiterHonorsForwardedIPSnapshot(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	mini := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mini.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+
+	limiter := NewRateLimiter(rdb)
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		ippkg.SetForwardedIPSettings(c, true, nil)
+		c.Next()
+	})
+	router.POST("/register",
+		limiter.LimitSuccessfulWithOptions("register-success", 1, time.Hour, RateLimitOptions{
+			FailureMode: RateLimitFailClose,
+		}),
+		func(c *gin.Context) {
+			MarkSuccessfulRateLimit(c)
+			c.Status(http.StatusCreated)
+		},
+	)
+
+	send := func(xff string) int {
+		req := httptest.NewRequest(http.MethodPost, "/register", nil)
+		req.RemoteAddr = "127.0.0.1:5678"
+		req.Header.Set("X-Forwarded-For", xff)
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, req)
+		return recorder.Code
+	}
+
+	require.Equal(t, http.StatusCreated, send("198.51.100.1"))
+	require.Equal(t, http.StatusCreated, send("198.51.100.2"))
+	require.Equal(t, http.StatusTooManyRequests, send("198.51.100.1"))
+	require.True(t, mini.Exists("rate_limit:register-success:198.51.100.1"))
+	require.True(t, mini.Exists("rate_limit:register-success:198.51.100.2"))
+	require.False(t, mini.Exists("rate_limit:register-success:127.0.0.1"))
 }
 
 func TestSuccessfulRateLimiterFailsClosedForInvalidIP(t *testing.T) {

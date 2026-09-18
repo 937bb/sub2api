@@ -221,7 +221,7 @@ func (r *RateLimiter) LimitWithOptions(key string, limit int, window time.Durati
 // invalid requests permanently exhaust a shared NAT address's long window.
 func (r *RateLimiter) LimitSuccessfulWithOptions(key string, limit int, window time.Duration, opts RateLimitOptions) gin.HandlerFunc {
 	return r.limitSuccessfulByIdentity(key, limit, window, opts, func(c *gin.Context) string {
-		return ippkg.AbuseIdentity(c.ClientIP())
+		return ippkg.AbuseIdentity(clientIPForRateLimit(c))
 	})
 }
 
