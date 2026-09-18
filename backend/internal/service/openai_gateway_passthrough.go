@@ -454,8 +454,8 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			resp.Body = newGrokResponsesClientToolStreamBody(resp.Body, mapping, maxLineSize)
 		}
 
-		// Persist the state before streaming starts so every passthrough response
-		// contributes to the global selection pool.
+		// Persist the state before streaming starts so the credential owner can
+		// reuse its own preferred state on subsequent requests.
 		if turnState := extractOpenAICodexTurnState(resp.Header); turnState != "" {
 			s.observeOpenAICodexTurnState(c, account, turnState, "passthrough")
 		}
@@ -654,10 +654,6 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 	}
 	copyOpenAICodexDelegationHeaders(c, account, isCodexClient, req.Header)
 
-	// 客户端回带的 x-codex-turn-state 若已知由其他账号铸造（failover 换号），
-	// 剥离后再出站（openai_codex_turn_state.go）。
-	s.guardOpenAICodexTurnStateEcho(c, account, req.Header)
-
 	// 覆盖入站鉴权残留，并注入上游认证
 	req.Header.Del("authorization")
 	req.Header.Del("x-api-key")
@@ -753,6 +749,9 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 	applyOpenAICodexBetaFeatures(c, account, req.Header)
 	setOpenAICodexRoutingHintFromBody(req.Header, account, body)
 	applyCodexClientEnvironmentHeaders(req.Header, codexAccountIdentitySource(c, account))
+	// Resolve turn-state after session/fingerprint normalization so the lookup
+	// is scoped to the exact logical upstream session.
+	s.guardOpenAICodexTurnStateEcho(c, account, req.Header)
 	logOpenAIRoutingDiagnosticsFromBody(ctx, account, "http_passthrough", req.Header, body, "not_applicable")
 
 	return req, nil

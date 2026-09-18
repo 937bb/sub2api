@@ -1305,8 +1305,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_PassthroughHeade
 			"openai_oauth_responses_websockets_v2_mode": OpenAIWSIngressModePassthrough,
 		},
 	}
-	accountID := account.ID
-	svc.getOpenAICodexTurnStatePool().observe("turn-state-1", &accountID, "", "ws")
+	turnState := testOpenAICodexPreferredTurnState("turn-state-1")
 
 	serverErrCh := make(chan error, 1)
 	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1326,7 +1325,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_PassthroughHeade
 		req := r.Clone(r.Context())
 		req.Header = req.Header.Clone()
 		req.Header.Set("User-Agent", "codex_cli_rs/0.98.0")
-		req.Header.Set(openAIWSTurnStateHeader, "turn-state-1")
+		req.Header.Set(openAIWSTurnStateHeader, turnState)
 		req.Header.Set(openAIWSTurnMetadataHeader, "turn-meta-1")
 		ginCtx.Request = req
 
@@ -1391,7 +1390,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_PassthroughHeade
 	wantSession := captureDialer.lastHeaders.Get("session-id")
 	require.NotEmpty(t, wantSession)
 	require.NotEqual(t, fingerprintIDs.sessionID, wantSession, "anonymous connections must not share the account-wide session")
-	require.Equal(t, "turn-state-1", captureDialer.lastHeaders.Get(openAIWSTurnStateHeader))
+	require.Empty(t, captureDialer.lastHeaders.Get(openAIWSTurnStateHeader), "unscoped client state must not be reused")
 	require.Len(t, upstreamConn.writes, 1)
 	forwarded := requestToJSONString(upstreamConn.writes[0])
 	require.Equal(t, wantSession, gjson.Get(forwarded, "client_metadata.session_id").String())

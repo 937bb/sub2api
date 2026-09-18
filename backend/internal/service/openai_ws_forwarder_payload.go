@@ -140,16 +140,6 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 			headers.Set("conversation_id", sessionResolution.ConversationID)
 		}
 	}
-	if account != nil && account.UsesOpenAICodexProtocol() {
-		pool := s.getOpenAICodexTurnStatePool()
-		if !pool.hasSampledAccount(account.ID) {
-			turnState = ""
-		} else if pooledState, ok := pool.longestActive(); ok {
-			turnState = pooledState
-		} else {
-			turnState = ""
-		}
-	}
 	if state := strings.TrimSpace(turnState); state != "" {
 		headers.Set(openAIWSTurnStateHeader, state)
 	}
@@ -207,6 +197,7 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 	setOpenAICodexRoutingHint(headers, account, routingModel, routingServiceTier)
 	applyCodexClientEnvironmentHeaders(headers, codexAccountIdentitySource(c, account))
 	normalizeCodexWebSocketTransportHeaders(headers, codexAccountIdentitySource(c, account))
+	s.guardOpenAICodexTurnStateEcho(c, account, headers)
 	logOpenAIRoutingDiagnostics(
 		ctx,
 		account,

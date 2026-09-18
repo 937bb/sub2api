@@ -182,7 +182,8 @@ func TestOpenAISetupTokenMessagesUsesCodexBridgeAndTurnState(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	firstResp := openAICompatSSECompletedResponse("resp_setup_first", "gpt-5.4")
-	firstResp.Header.Set("x-codex-turn-state", "turn_state_setup")
+	turnState := testOpenAICodexPreferredTurnState("turn_state_setup")
+	firstResp.Header.Set("x-codex-turn-state", turnState)
 	upstream := &httpUpstreamRecorder{responses: []*http.Response{
 		firstResp,
 		openAICompatSSECompletedResponse("resp_setup_second", "gpt-5.4"),
@@ -230,7 +231,7 @@ func TestOpenAISetupTokenMessagesUsesCodexBridgeAndTurnState(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, secondResult)
 	require.True(t, isOpenAICompatMessagesBridgeContext(secondCtx))
-	require.Equal(t, "turn_state_setup", upstream.requests[1].Header.Get("x-codex-turn-state"))
+	require.Equal(t, turnState, upstream.requests[1].Header.Get("x-codex-turn-state"))
 	require.Equal(t, gjson.GetBytes(upstream.bodies[1], "client_metadata.session_id").String(), upstream.requests[1].Header.Get("session-id"))
 	require.Equal(t, upstream.requests[0].Header.Get("session-id"), upstream.requests[1].Header.Get("session-id"))
 	require.Empty(t, upstream.requests[1].Header.Get("session_id"))

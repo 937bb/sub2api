@@ -401,7 +401,8 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	if compatTurnState != "" && upstreamReq.Header.Get("x-codex-turn-state") == "" {
 		upstreamReq.Header.Set("x-codex-turn-state", compatTurnState)
 	}
-	// The global pool has final authority after compatibility-session fallback.
+	// The credential owner's preferred state has final authority after the
+	// compatibility-session fallback.
 	s.guardOpenAICodexTurnStateEcho(c, account, upstreamReq.Header)
 
 	// 7. Send request

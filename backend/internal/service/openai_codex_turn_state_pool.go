@@ -71,25 +71,32 @@ type OpenAICodexTurnStateAdminRepository interface {
 	GetOpenAICodexTurnStateSummary(ctx context.Context, now time.Time) (*OpenAICodexTurnStateSummary, error)
 }
 
+type openAICodexTurnStateSessionKey struct {
+	accountID   int64
+	sessionHash string
+}
+
 type openAICodexTurnStatePool struct {
-	mu       sync.RWMutex
-	entries  map[string]*OpenAICodexTurnStateRecord
-	accounts map[int64]time.Time
-	selected *OpenAICodexTurnStateRecord
-	repo     OpenAICodexTurnStateStore
-	queue    chan *OpenAICodexTurnStateRecord
-	worker   sync.Once
-	dropped  atomic.Uint64
-	observed atomic.Uint64
-	now      func() time.Time
+	mu                 sync.RWMutex
+	entries            map[string]*OpenAICodexTurnStateRecord
+	accounts           map[int64]time.Time
+	preferredBySession map[openAICodexTurnStateSessionKey]*OpenAICodexTurnStateRecord
+	selected           *OpenAICodexTurnStateRecord
+	repo               OpenAICodexTurnStateStore
+	queue              chan *OpenAICodexTurnStateRecord
+	worker             sync.Once
+	dropped            atomic.Uint64
+	observed           atomic.Uint64
+	now                func() time.Time
 }
 
 func newOpenAICodexTurnStatePool() *openAICodexTurnStatePool {
 	return &openAICodexTurnStatePool{
-		entries:  make(map[string]*OpenAICodexTurnStateRecord),
-		accounts: make(map[int64]time.Time),
-		queue:    make(chan *OpenAICodexTurnStateRecord, openAICodexTurnStatePersistQueue),
-		now:      time.Now,
+		entries:            make(map[string]*OpenAICodexTurnStateRecord),
+		accounts:           make(map[int64]time.Time),
+		preferredBySession: make(map[openAICodexTurnStateSessionKey]*OpenAICodexTurnStateRecord),
+		queue:              make(chan *OpenAICodexTurnStateRecord, openAICodexTurnStatePersistQueue),
+		now:                time.Now,
 	}
 }
 
@@ -184,6 +191,33 @@ func (p *openAICodexTurnStatePool) longestActive() (string, bool) {
 	return value, value != ""
 }
 
+func (p *openAICodexTurnStatePool) preferredForSession(accountID int64, sessionHash string) (string, bool) {
+	key, ok := newOpenAICodexTurnStateSessionKey(accountID, sessionHash)
+	if p == nil || !ok {
+		return "", false
+	}
+	now := p.now()
+	p.mu.RLock()
+	selected := p.preferredBySession[key]
+	if p.isPreferredSessionRecordLocked(selected, key, now) {
+		value := selected.StateValue
+		p.mu.RUnlock()
+		return value, true
+	}
+	p.mu.RUnlock()
+
+	p.mu.Lock()
+	p.selectPreferredForSessionLocked(key, now)
+	selected = p.preferredBySession[key]
+	if selected == nil {
+		p.mu.Unlock()
+		return "", false
+	}
+	value := selected.StateValue
+	p.mu.Unlock()
+	return value, value != ""
+}
+
 func (p *openAICodexTurnStatePool) hasSampledAccount(accountID int64) bool {
 	if p == nil || accountID <= 0 {
 		return false
@@ -228,6 +262,12 @@ func (p *openAICodexTurnStatePool) mergeLocked(record *OpenAICodexTurnStateRecor
 		if current := p.accounts[accountID]; copyRecord.ExpiresAt.After(current) {
 			p.accounts[accountID] = copyRecord.ExpiresAt
 		}
+		if key, ok := newOpenAICodexTurnStateSessionKey(accountID, copyRecord.SourceSessionHash); ok && copyRecord.ValueLength == openAICodexPreferredTurnStateLength {
+			current := p.preferredBySession[key]
+			if !p.isPreferredSessionRecordLocked(current, key, p.now()) || openAICodexTurnStateNewestFirst(copyRecord, current) {
+				p.preferredBySession[key] = copyRecord
+			}
+		}
 	}
 	if p.selected == nil {
 		p.selected = copyRecord
@@ -240,12 +280,49 @@ func (p *openAICodexTurnStatePool) mergeLocked(record *OpenAICodexTurnStateRecor
 
 func (p *openAICodexTurnStatePool) rebuildAccountsLocked() {
 	p.accounts = make(map[int64]time.Time)
+	p.preferredBySession = make(map[openAICodexTurnStateSessionKey]*OpenAICodexTurnStateRecord)
 	for _, record := range p.entries {
 		if record != nil && record.SourceAccountID != nil && *record.SourceAccountID > 0 {
 			accountID := *record.SourceAccountID
 			if current := p.accounts[accountID]; record.ExpiresAt.After(current) {
 				p.accounts[accountID] = record.ExpiresAt
 			}
+			if key, ok := newOpenAICodexTurnStateSessionKey(accountID, record.SourceSessionHash); ok && record.ValueLength == openAICodexPreferredTurnStateLength && record.ExpiresAt.After(p.now()) {
+				current := p.preferredBySession[key]
+				if current == nil || openAICodexTurnStateNewestFirst(record, current) {
+					p.preferredBySession[key] = record
+				}
+			}
+		}
+	}
+}
+
+func newOpenAICodexTurnStateSessionKey(accountID int64, sessionHash string) (openAICodexTurnStateSessionKey, bool) {
+	sessionHash = strings.TrimSpace(sessionHash)
+	key := openAICodexTurnStateSessionKey{accountID: accountID, sessionHash: sessionHash}
+	return key, accountID > 0 && sessionHash != ""
+}
+
+func (p *openAICodexTurnStatePool) isPreferredSessionRecordLocked(record *OpenAICodexTurnStateRecord, key openAICodexTurnStateSessionKey, now time.Time) bool {
+	if record == nil || record.StateValue == "" || record.ValueLength != openAICodexPreferredTurnStateLength || !record.ExpiresAt.After(now) {
+		return false
+	}
+	if record.SourceAccountID == nil || *record.SourceAccountID != key.accountID || record.SourceSessionHash != key.sessionHash {
+		return false
+	}
+	current := p.entries[record.StateHash]
+	return current != nil && current.SourceAccountID != nil && *current.SourceAccountID == key.accountID && current.SourceSessionHash == key.sessionHash && current.StateHash == record.StateHash
+}
+
+func (p *openAICodexTurnStatePool) selectPreferredForSessionLocked(key openAICodexTurnStateSessionKey, now time.Time) {
+	delete(p.preferredBySession, key)
+	for _, record := range p.entries {
+		if record == nil || record.ValueLength != openAICodexPreferredTurnStateLength || !record.ExpiresAt.After(now) || record.SourceAccountID == nil || *record.SourceAccountID != key.accountID || record.SourceSessionHash != key.sessionHash {
+			continue
+		}
+		current := p.preferredBySession[key]
+		if current == nil || openAICodexTurnStateNewestFirst(record, current) {
+			p.preferredBySession[key] = record
 		}
 	}
 }
@@ -309,6 +386,13 @@ func openAICodexTurnStateRanksBefore(left, right *OpenAICodexTurnStateRecord) bo
 	if left.ValueLength != right.ValueLength {
 		return left.ValueLength > right.ValueLength
 	}
+	if !left.LastSeenAt.Equal(right.LastSeenAt) {
+		return left.LastSeenAt.After(right.LastSeenAt)
+	}
+	return left.StateHash > right.StateHash
+}
+
+func openAICodexTurnStateNewestFirst(left, right *OpenAICodexTurnStateRecord) bool {
 	if !left.LastSeenAt.Equal(right.LastSeenAt) {
 		return left.LastSeenAt.After(right.LastSeenAt)
 	}

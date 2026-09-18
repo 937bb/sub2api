@@ -11,6 +11,10 @@ import (
 
 const openAICodexTurnStateHeader = "x-codex-turn-state"
 
+const openAICodexPreferredTurnStateLength = 292
+
+const openAICodexTurnStateSessionHashContextKey = "openai_codex_turn_state_session_hash"
+
 func openAICodexTurnStateSeed(c *gin.Context) string {
 	if c == nil || c.Request == nil {
 		return ""
@@ -20,6 +24,35 @@ func openAICodexTurnStateSeed(c *gin.Context) string {
 		return ""
 	}
 	return strconv.FormatInt(getAPIKeyIDFromContext(c), 10) + "\x00" + sessionID
+}
+
+func openAICodexTurnStateSessionHash(c *gin.Context) string {
+	if c != nil {
+		if staged := strings.TrimSpace(c.GetString(openAICodexTurnStateSessionHashContextKey)); staged != "" {
+			return staged
+		}
+	}
+	seed := openAICodexTurnStateSeed(c)
+	if seed == "" {
+		return ""
+	}
+	return hashOpenAICodexTurnState(seed)
+}
+
+func stageOpenAICodexTurnStateSessionHash(c *gin.Context, h http.Header) string {
+	sessionID := ""
+	if h != nil {
+		sessionID = firstNonEmptyCodexHeader(h, "session-id", "session_id", "conversation_id")
+	}
+	if sessionID == "" {
+		return openAICodexTurnStateSessionHash(c)
+	}
+	seed := strconv.FormatInt(getAPIKeyIDFromContext(c), 10) + "\x00" + sessionID
+	sessionHash := hashOpenAICodexTurnState(seed)
+	if c != nil {
+		c.Set(openAICodexTurnStateSessionHashContextKey, sessionHash)
+	}
+	return sessionHash
 }
 
 func (s *OpenAIGatewayService) relayOpenAICodexTurnState(c *gin.Context, account *Account, upstream http.Header) {
@@ -76,26 +109,33 @@ func (s *OpenAIGatewayService) observeOpenAICodexTurnState(c *gin.Context, accou
 	if s == nil || account == nil || !account.UsesOpenAICodexProtocol() {
 		return
 	}
-	accountID := account.ID
-	sessionHash := ""
-	if seed := openAICodexTurnStateSeed(c); seed != "" {
-		sessionHash = hashOpenAICodexTurnState(seed)
+	owner := codexAccountIdentitySource(c, account)
+	if owner == nil || owner.ID <= 0 {
+		return
 	}
+	accountID := owner.ID
+	sessionHash := openAICodexTurnStateSessionHash(c)
 	s.getOpenAICodexTurnStatePool().observe(state, &accountID, sessionHash, transport)
 }
 
-// guardOpenAICodexTurnStateEcho replaces any client value with the longest
-// unexpired state observed globally. API-key accounts keep their original header.
-func (s *OpenAIGatewayService) guardOpenAICodexTurnStateEcho(_ *gin.Context, account *Account, h http.Header) {
+// guardOpenAICodexTurnStateEcho uses only an unexpired 292-byte state observed
+// from the same credential owner and client session. API-key accounts keep
+// their original header.
+func (s *OpenAIGatewayService) guardOpenAICodexTurnStateEcho(c *gin.Context, account *Account, h http.Header) {
 	if s == nil || h == nil || account == nil || !account.UsesOpenAICodexProtocol() {
 		return
 	}
-	pool := s.getOpenAICodexTurnStatePool()
-	if !pool.hasSampledAccount(account.ID) {
+	owner := codexAccountIdentitySource(c, account)
+	if owner == nil {
 		h.Del(openAICodexTurnStateHeader)
 		return
 	}
-	if state, ok := pool.longestActive(); ok {
+	sessionHash := stageOpenAICodexTurnStateSessionHash(c, h)
+	if sessionHash == "" {
+		h.Del(openAICodexTurnStateHeader)
+		return
+	}
+	if state, ok := s.getOpenAICodexTurnStatePool().preferredForSession(owner.ID, sessionHash); ok {
 		h.Set(openAICodexTurnStateHeader, state)
 	} else {
 		h.Del(openAICodexTurnStateHeader)
