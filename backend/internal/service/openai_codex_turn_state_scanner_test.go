@@ -129,7 +129,7 @@ func TestOpenAICodexTurnStateScannerTargetsConfiguredModels(t *testing.T) {
 	}
 
 	require.Equal(t, []string{"gpt-6-astra", "gpt-5.6-sol"}, scanner.targetModels())
-	require.Equal(t, 2, scanner.enqueueAccount(42, true))
+	require.Equal(t, 2, scanner.enqueueModels(42, scanner.targetModels(), true))
 
 	first := <-scanner.queue
 	second := <-scanner.queue
@@ -139,6 +139,13 @@ func TestOpenAICodexTurnStateScannerTargetsConfiguredModels(t *testing.T) {
 	require.Equal(t, int64(42), second.accountID)
 	require.Equal(t, "gpt-5.6-sol", second.model)
 	require.True(t, second.force)
+}
+
+func TestObservedOpenAICodexTurnStateModelsExcludeNonConversationModels(t *testing.T) {
+	require.True(t, isObservedOpenAICodexTurnStateModel("gpt-5.5"))
+	require.True(t, isObservedOpenAICodexTurnStateModel(" GPT-6-ASTRA "))
+	require.False(t, isObservedOpenAICodexTurnStateModel("gpt-image-2-auto"))
+	require.False(t, isObservedOpenAICodexTurnStateModel("codex-auto-review"))
 }
 
 func TestOpenAICodexTurnStateModelsMatchRejectsMismatch(t *testing.T) {

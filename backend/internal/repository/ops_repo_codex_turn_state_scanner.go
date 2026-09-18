@@ -237,6 +237,24 @@ WITH eligible_accounts AS (
   SELECT a.id AS account_id, tm.model
   FROM eligible_accounts a
   CROSS JOIN target_models tm
+  UNION
+  SELECT u.account_id, LOWER(BTRIM(COALESCE(NULLIF(u.upstream_model, ''), u.model))) AS model
+  FROM usage_logs u
+  JOIN eligible_accounts a ON a.id = u.account_id
+  WHERE u.created_at >= $1
+    AND (LOWER(BTRIM(COALESCE(NULLIF(u.upstream_model, ''), u.model))) LIKE 'gpt-5%'
+      OR LOWER(BTRIM(COALESCE(NULLIF(u.upstream_model, ''), u.model))) LIKE 'gpt-6%')
+  GROUP BY u.account_id, LOWER(BTRIM(COALESCE(NULLIF(u.upstream_model, ''), u.model)))
+  UNION
+  SELECT c.source_account_id, c.source_model
+  FROM codex_turn_states c
+  JOIN eligible_accounts a ON a.id = c.source_account_id
+  WHERE c.last_seen_at >= $1 AND (c.source_model LIKE 'gpt-5%' OR c.source_model LIKE 'gpt-6%')
+  UNION
+  SELECT sc.account_id, sc.model
+  FROM codex_turn_state_scans sc
+  JOIN eligible_accounts a ON a.id = sc.account_id
+  WHERE sc.updated_at >= $1 AND (sc.model LIKE 'gpt-5%' OR sc.model LIKE 'gpt-6%')
 ), status_rows AS (
   SELECT a.id AS account_id, a.name AS account_name, a.type AS account_type, a.plan_type,
          am.model,
@@ -334,14 +352,33 @@ WITH eligible AS (
   SELECT DISTINCT LOWER(BTRIM(value)) AS model
   FROM UNNEST($2::text[]) AS value
   WHERE BTRIM(value) <> ''
-), model_slots AS (
+), account_models AS (
   SELECT e.id AS account_id, tm.model
   FROM eligible e CROSS JOIN target_models tm
+  UNION
+  SELECT u.account_id, LOWER(BTRIM(COALESCE(NULLIF(u.upstream_model, ''), u.model))) AS model
+  FROM usage_logs u
+  JOIN eligible e ON e.id = u.account_id
+  WHERE u.created_at >= $1
+    AND (LOWER(BTRIM(COALESCE(NULLIF(u.upstream_model, ''), u.model))) LIKE 'gpt-5%'
+      OR LOWER(BTRIM(COALESCE(NULLIF(u.upstream_model, ''), u.model))) LIKE 'gpt-6%')
+  GROUP BY u.account_id, LOWER(BTRIM(COALESCE(NULLIF(u.upstream_model, ''), u.model)))
+  UNION
+  SELECT c.source_account_id, c.source_model
+  FROM codex_turn_states c
+  JOIN eligible e ON e.id = c.source_account_id
+  WHERE c.last_seen_at >= $1 AND (c.source_model LIKE 'gpt-5%' OR c.source_model LIKE 'gpt-6%')
+  UNION
+  SELECT sc.account_id, sc.model
+  FROM codex_turn_state_scans sc
+  JOIN eligible e ON e.id = sc.account_id
+  WHERE sc.updated_at >= $1 AND (sc.model LIKE 'gpt-5%' OR sc.model LIKE 'gpt-6%')
+), model_slots AS (
+  SELECT account_id, model FROM account_models
 ), ready_slots AS (
   SELECT DISTINCT c.source_account_id AS account_id, c.source_model AS model
   FROM codex_turn_states c
-  JOIN eligible e ON e.id = c.source_account_id
-  JOIN target_models tm ON tm.model = c.source_model
+  JOIN model_slots ms ON ms.account_id = c.source_account_id AND ms.model = c.source_model
   WHERE c.value_length IN (292, 332) AND c.expires_at > NOW()
 ), account_readiness AS (
   SELECT ms.account_id,
@@ -355,7 +392,8 @@ SELECT (SELECT COUNT(*) FROM eligible),
        (SELECT COUNT(*) FROM account_readiness WHERE target_count > 0 AND ready_count = target_count),
        (SELECT COUNT(*) FROM account_readiness WHERE ready_count < target_count),
        (SELECT COUNT(*) FROM ready_slots),
-       (SELECT COUNT(*) FROM codex_turn_state_scans sc JOIN eligible e ON e.id = sc.account_id JOIN target_models tm ON tm.model = sc.model WHERE sc.status IN ('pending', 'running')),
+       (SELECT COUNT(*) FROM model_slots),
+       (SELECT COUNT(*) FROM codex_turn_state_scans sc JOIN model_slots ms ON ms.account_id = sc.account_id AND ms.model = sc.model WHERE sc.status IN ('pending', 'running')),
        (SELECT COUNT(*) FROM codex_turn_state_proxies WHERE enabled = TRUE),
        (SELECT COUNT(*) FROM codex_turn_state_proxies WHERE enabled = TRUE AND health_status = 'healthy'),
        (SELECT COUNT(*) FROM proxies WHERE deleted_at IS NULL AND status = 'active'
@@ -363,7 +401,7 @@ SELECT (SELECT COUNT(*) FROM eligible),
        (SELECT MAX(sc.last_attempt_at) FROM codex_turn_state_scans sc JOIN eligible e ON e.id = sc.account_id)`,
 		time.Now().Add(-time.Hour), pq.Array(targetModels)).Scan(
 		&summary.OAuthAccounts, &summary.ReadyAccounts, &summary.MissingAccounts,
-		&summary.ReadyModelSlots, &summary.RunningJobs, &summary.EnabledProxies, &summary.HealthyProxies, &summary.SharedProxies, &summary.LastScanAt,
+		&summary.ReadyModelSlots, &summary.TotalModelSlots, &summary.RunningJobs, &summary.EnabledProxies, &summary.HealthyProxies, &summary.SharedProxies, &summary.LastScanAt,
 	)
 	return summary, err
 }

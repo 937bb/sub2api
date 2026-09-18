@@ -17,6 +17,10 @@ func TestCodexTurnStateAccountStatusCTEUsesRecentSchedulableAccountsAndModels(t 
 	require.Contains(t, query, "$2::bigint[] IS NULL OR id = ANY($2)")
 	require.Contains(t, query, "UNNEST($3::text[])")
 	require.Contains(t, query, "CROSS JOIN target_models")
+	require.Contains(t, query, "u.created_at >= $1")
+	require.Contains(t, query, "c.last_seen_at >= $1")
+	require.Contains(t, query, "sc.updated_at >= $1")
+	require.Contains(t, query, "LIKE 'gpt-5%'")
 	require.NotContains(t, query, "SELECT a.id, 'gpt-5.5'")
 }
 

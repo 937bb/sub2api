@@ -38,7 +38,7 @@ export default {
         addProxy: '添加代理',
         addProxyTitle: '批量添加 State 扫描代理',
         addProxyHint: '每行一个代理。支持 http/https/socks5 URL，也支持 host:port:user:password。凭据保存后不会返回浏览器。',
-        addProxyPlaceholder: 'http://user:password@host:port',
+        addProxyPlaceholder: "http://user:password{'@'}host:port",
         addProxySuccess: '已保存 {count} 个代理',
         addProxyFailed: '添加代理失败',
         proxyUpdateFailed: '更新代理失败',

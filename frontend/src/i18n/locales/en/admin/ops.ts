@@ -34,7 +34,7 @@ export default {
         addProxy: 'Add proxies',
         addProxyTitle: 'Add State scan proxies',
         addProxyHint: 'One proxy per line. Supports http/https/socks5 URLs and host:port:user:password. Saved credentials are never returned to the browser.',
-        addProxyPlaceholder: 'http://user:password@host:port',
+        addProxyPlaceholder: "http://user:password{'@'}host:port",
         addProxySuccess: 'Saved {count} proxies',
         addProxyFailed: 'Failed to add proxies',
         proxyUpdateFailed: 'Failed to update proxy',

@@ -1148,6 +1148,7 @@ const {
 
 const codexStatesByAccountID = reactive(new Map<number, CodexTurnStateAccountStatus[]>())
 const codexAccountScanKey = '__all_target_models__'
+const codexStateRefreshing = ref(false)
 const { isScanning: isCodexStateScanning, run: runCodexStateScan } = useCodexStateScanState()
 
 const codexStatesForAccount = (accountID: number) => codexStatesByAccountID.get(accountID) || []
@@ -1157,6 +1158,7 @@ const setCodexStatesForAccount = (accountID: number, states: CodexTurnStateAccou
 }
 
 const refreshCodexStateStatuses = async () => {
+  if (codexStateRefreshing.value) return
   const ids = accounts.value
     .filter(account => account.platform === 'openai' && (account.type === 'oauth' || account.type === 'setup-token'))
     .map(account => account.id)
@@ -1164,6 +1166,7 @@ const refreshCodexStateStatuses = async () => {
     codexStatesByAccountID.clear()
     return
   }
+  codexStateRefreshing.value = true
   try {
     const result = await opsAPI.listCodexTurnStateAccounts({ page: 1, page_size: 1000, account_ids: ids.join(',') })
     const next = new Map<number, CodexTurnStateAccountStatus[]>()
@@ -1176,6 +1179,8 @@ const refreshCodexStateStatuses = async () => {
     for (const [accountID, items] of next) setCodexStatesForAccount(accountID, items)
   } catch (error) {
     console.error('Failed to load Codex State status:', error)
+  } finally {
+    codexStateRefreshing.value = false
   }
 }
 
@@ -1203,6 +1208,11 @@ const scanCodexStateForAccount = async (accountID: number) => {
     }
   })
 }
+
+useIntervalFn(() => {
+  if (document.hidden || loading.value) return
+  void refreshCodexStateStatuses()
+}, 15_000)
 
 const {
   selectedSet,
