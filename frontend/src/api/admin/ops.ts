@@ -133,6 +133,9 @@ export interface CodexTurnStateOperationsSummary {
   oauth_accounts: number
   ready_accounts: number
   missing_accounts: number
+  target_models: number
+  ready_model_slots: number
+  total_model_slots: number
   running_jobs: number
   enabled_proxies: number
   healthy_proxies: number
@@ -186,6 +189,11 @@ export async function deleteCodexTurnStateProxy(id: number): Promise<{ deleted: 
 
 export async function scanCodexTurnState(accountId: number, model: string): Promise<{ queued: boolean }> {
   const { data } = await apiClient.post<{ queued: boolean }>('/admin/ops/codex-turn-states/scan', { account_id: accountId, model })
+  return data
+}
+
+export async function scanCodexTurnStateAccount(accountId: number): Promise<{ queued: number; models: string[] }> {
+  const { data } = await apiClient.post<{ queued: number; models: string[] }>('/admin/ops/codex-turn-states/scan-account', { account_id: accountId })
   return data
 }
 
@@ -1457,6 +1465,7 @@ export const opsAPI = {
   setCodexTurnStateProxyEnabled,
   deleteCodexTurnStateProxy,
   scanCodexTurnState,
+  scanCodexTurnStateAccount,
   scanAllCodexTurnStates,
   getDashboardSnapshotV2,
   getDashboardOverview,

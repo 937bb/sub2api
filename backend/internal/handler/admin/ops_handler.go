@@ -310,6 +310,20 @@ func (h *OpsHandler) ScanCodexTurnState(c *gin.Context) {
 	response.Success(c, gin.H{"queued": true})
 }
 
+func (h *OpsHandler) ScanCodexTurnStateAccount(c *gin.Context) {
+	if h.opsService == nil {
+		response.Error(c, http.StatusServiceUnavailable, "Ops service not available")
+		return
+	}
+	var req codexTurnStateScanRequest
+	if err := c.ShouldBindJSON(&req); err != nil || req.AccountID <= 0 {
+		response.BadRequest(c, "Invalid scan request")
+		return
+	}
+	queued, models := h.opsService.EnqueueOpenAICodexTurnStateAccountScans(req.AccountID)
+	response.Success(c, gin.H{"queued": queued, "models": models})
+}
+
 func (h *OpsHandler) ScanAllCodexTurnStates(c *gin.Context) {
 	if h.opsService == nil {
 		response.Error(c, http.StatusServiceUnavailable, "Ops service not available")

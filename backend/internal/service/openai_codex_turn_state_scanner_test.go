@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/stretchr/testify/require"
 )
 
@@ -88,6 +89,19 @@ func TestIsRecentlyUsedOpenAICodexAccount(t *testing.T) {
 	}
 }
 
+func TestManualCodexTurnStateScanAllowsUnusedEligibleAccount(t *testing.T) {
+	now := time.Date(2026, 9, 18, 18, 0, 0, 0, time.UTC)
+	account := &Account{
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+
+	require.True(t, isEligibleOpenAICodexTurnStateAccount(account, now))
+	require.False(t, isRecentlyUsedOpenAICodexAccount(account, now))
+}
+
 func TestOpenAICodexTurnStateScannerDeduplicatesAccountModelJobs(t *testing.T) {
 	scanner := &openAICodexTurnStateScanner{
 		queue:    make(chan openAICodexTurnStateScanJob, 4),
@@ -103,6 +117,28 @@ func TestOpenAICodexTurnStateScannerDeduplicatesAccountModelJobs(t *testing.T) {
 	require.True(t, ok)
 	scanner.finish(key)
 	require.True(t, scanner.Enqueue(42, "gpt-5.5", false))
+}
+
+func TestOpenAICodexTurnStateScannerTargetsConfiguredModels(t *testing.T) {
+	gateway := &OpenAIGatewayService{cfg: &config.Config{}}
+	gateway.cfg.Gateway.OpenAICodexTicket.Models = []string{" GPT-6-ASTRA ", "gpt-5.6-sol", "gpt-6-astra", ""}
+	scanner := &openAICodexTurnStateScanner{
+		gateway:  gateway,
+		queue:    make(chan openAICodexTurnStateScanJob, 4),
+		inFlight: make(map[openAICodexTurnStateBucketKey]struct{}),
+	}
+
+	require.Equal(t, []string{"gpt-6-astra", "gpt-5.6-sol"}, scanner.targetModels())
+	require.Equal(t, 2, scanner.enqueueAccount(42, true))
+
+	first := <-scanner.queue
+	second := <-scanner.queue
+	require.Equal(t, int64(42), first.accountID)
+	require.Equal(t, "gpt-6-astra", first.model)
+	require.True(t, first.force)
+	require.Equal(t, int64(42), second.accountID)
+	require.Equal(t, "gpt-5.6-sol", second.model)
+	require.True(t, second.force)
 }
 
 func TestOpenAICodexTurnStateModelsMatchRejectsMismatch(t *testing.T) {

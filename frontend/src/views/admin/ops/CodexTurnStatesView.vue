@@ -32,12 +32,12 @@
             </div>
           </div>
 
-          <div class="grid overflow-hidden rounded-lg border border-gray-200 bg-white grid-cols-2 sm:grid-cols-4 xl:grid-cols-7 dark:border-dark-700 dark:bg-dark-900">
+          <div class="grid overflow-hidden rounded-lg border border-gray-200 bg-white grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 dark:border-dark-700 dark:bg-dark-900">
             <div
               v-for="metric in metrics"
               :key="metric.label"
               :class="[
-                'relative min-w-0 border-b border-r border-gray-100 px-4 py-3 last:border-r-0 sm:[&:nth-child(4n)]:border-r-0 xl:border-b-0 xl:[&:nth-child(4n)]:border-r xl:[&:nth-child(7n)]:border-r-0 dark:border-dark-700/70',
+                'relative min-w-0 border-b border-r border-gray-100 px-4 py-3 last:border-r-0 sm:[&:nth-child(4n)]:border-r-0 xl:border-b-0 xl:[&:nth-child(4n)]:border-r xl:[&:nth-child(8n)]:border-r-0 dark:border-dark-700/70',
                 metric.accentClass
               ]"
             >
@@ -336,6 +336,7 @@ const metrics = computed(() => [
   { label: t('admin.ops.turnState.metrics.oauthAccounts'), value: summary.value?.oauth_accounts ?? 0, valueClass: 'text-gray-900 dark:text-white', accentClass: 'border-t-2 border-t-gray-500' },
   { label: t('admin.ops.turnState.metrics.readyAccounts'), value: summary.value?.ready_accounts ?? 0, valueClass: 'text-emerald-600 dark:text-emerald-400', accentClass: 'border-t-2 border-t-emerald-500' },
   { label: t('admin.ops.turnState.metrics.missingAccounts'), value: summary.value?.missing_accounts ?? 0, valueClass: 'text-amber-600 dark:text-amber-400', accentClass: 'border-t-2 border-t-amber-500' },
+  { label: t('admin.ops.turnState.metrics.readyModelSlots'), value: `${summary.value?.ready_model_slots ?? 0}/${summary.value?.total_model_slots ?? 0}`, valueClass: 'text-cyan-600 dark:text-cyan-400', accentClass: 'border-t-2 border-t-cyan-500' },
   { label: t('admin.ops.turnState.metrics.runningJobs'), value: summary.value?.running_jobs ?? 0, valueClass: 'text-blue-600 dark:text-blue-400', accentClass: 'border-t-2 border-t-blue-500' },
   { label: t('admin.ops.turnState.metrics.enabledProxies'), value: summary.value?.enabled_proxies ?? 0, valueClass: 'text-gray-900 dark:text-white', accentClass: 'border-t-2 border-t-gray-500' },
   { label: t('admin.ops.turnState.metrics.healthyProxies'), value: summary.value?.healthy_proxies ?? 0, valueClass: 'text-emerald-600 dark:text-emerald-400', accentClass: 'border-t-2 border-t-emerald-500' },
@@ -407,9 +408,10 @@ async function loadAccounts() {
 async function loadAccountRow(accountId: number, model: string) {
   const result = await opsAPI.listCodexTurnStateAccounts({ page: 1, page_size: 200, account_ids: String(accountId) })
   const updated = result.items.find(item => item.account_id === accountId && item.model === model)
-  if (!updated) return
+  if (!updated) return undefined
   const key = `${accountId}:${model}`
   accounts.value = accounts.value.map(item => item.row_key === key ? { ...updated, row_key: key } : item)
+  return updated
 }
 async function loadProxies() { proxies.value = await opsAPI.listCodexTurnStateProxies() }
 async function loadHistory() {
@@ -440,8 +442,15 @@ async function scanAccount(row: CodexTurnStateAccountStatus) {
   try {
     const result = await opsAPI.scanCodexTurnState(row.account_id, row.model)
     appStore.showSuccess(result.queued ? t('admin.ops.turnState.scanQueued') : t('admin.ops.turnState.scanAlreadyQueued'))
-    await new Promise(resolve => window.setTimeout(resolve, 800))
-    await Promise.all([loadAccountRow(row.account_id, row.model), loadSummary()])
+    if (result.queued) {
+      accounts.value = accounts.value.map(item => item.row_key === key ? { ...item, status: 'pending' } : item)
+    }
+    for (let attempt = 0; attempt < 20; attempt++) {
+      await new Promise(resolve => window.setTimeout(resolve, 1000))
+      const updated = await loadAccountRow(row.account_id, row.model)
+      if (updated && updated.status !== 'pending' && updated.status !== 'running') break
+    }
+    await loadSummary()
   } catch (error: any) { appStore.showError(error?.response?.data?.detail || t('admin.ops.turnState.scanFailed')) }
   finally { scanningKeys.delete(key) }
 }

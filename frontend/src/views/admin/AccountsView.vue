@@ -286,23 +286,20 @@
           <template #cell-codex_state="{ row }">
             <div
               v-if="row.platform === 'openai' && (row.type === 'oauth' || row.type === 'setup-token')"
-              class="flex min-w-[156px] items-center justify-between gap-2"
+              class="grid min-h-[60px] min-w-[296px] grid-cols-[minmax(0,1fr)_32px] items-center gap-2 rounded-md border border-gray-200 bg-gray-50/70 px-2.5 py-2 dark:border-dark-700 dark:bg-dark-800/70"
+              :data-test="`codex-state-${row.id}`"
             >
-              <CodexStateStatus
-                :status="codexStateByAccountID.get(row.id)?.status"
-                :state-length="codexStateByAccountID.get(row.id)?.state_length"
-                :model="codexStateByAccountID.get(row.id)?.model"
-                compact
-              />
+              <CodexAccountStateSummary :states="codexStatesForAccount(row.id)" />
               <button
                 type="button"
-                class="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-gray-200 text-gray-500 transition-colors hover:border-primary-300 hover:bg-primary-50 hover:text-primary-700 disabled:cursor-wait disabled:opacity-60 dark:border-dark-600 dark:text-dark-300 dark:hover:border-primary-700 dark:hover:bg-primary-950/40 dark:hover:text-primary-300"
-                :disabled="codexStateScanning.has(row.id)"
-                :title="codexStateScanning.has(row.id) ? t('admin.ops.turnState.status.running') : t('admin.ops.turnState.scanNow')"
-                :aria-label="codexStateScanning.has(row.id) ? t('admin.ops.turnState.status.running') : t('admin.ops.turnState.scanNow')"
-                @click="scanCodexStateForAccount(row.id)"
+                class="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-500 shadow-sm transition-colors hover:border-primary-300 hover:bg-primary-50 hover:text-primary-700 disabled:cursor-wait disabled:opacity-60 dark:border-dark-600 dark:bg-dark-900 dark:text-dark-300 dark:hover:border-primary-700 dark:hover:bg-primary-950/40 dark:hover:text-primary-300"
+                :disabled="isCodexStateScanning(row.id, codexAccountScanKey)"
+                :title="isCodexStateScanning(row.id, codexAccountScanKey) ? t('admin.ops.turnState.status.running') : t('admin.ops.turnState.scanAccount')"
+                :aria-label="isCodexStateScanning(row.id, codexAccountScanKey) ? t('admin.ops.turnState.status.running') : t('admin.ops.turnState.scanAccount')"
+                :data-test="`scan-codex-state-${row.id}`"
+                @click.stop="scanCodexStateForAccount(row.id)"
               >
-                <Icon name="refresh" size="sm" :class="codexStateScanning.has(row.id) ? 'animate-spin' : ''" />
+                <Icon name="refresh" size="sm" :class="isCodexStateScanning(row.id, codexAccountScanKey) ? 'animate-spin' : ''" />
               </button>
             </div>
             <span v-else class="text-sm text-gray-400">-</span>
@@ -546,6 +543,7 @@ import { useAuthStore } from '@/stores/auth'
 import { adminAPI } from '@/api/admin'
 import { opsAPI, type CodexTurnStateAccountStatus } from '@/api/admin/ops'
 import { useTableLoader } from '@/composables/useTableLoader'
+import { useCodexStateScanState } from '@/composables/useCodexStateScanState'
 import { useSwipeSelect, type SwipeSelectVirtualContext } from '@/composables/useSwipeSelect'
 import { useTableSelection } from '@/composables/useTableSelection'
 import { useStepUp, isStepUpBlocked, isStepUpCancelled, stepUpBlockReason } from '@/composables/useStepUp'
@@ -572,7 +570,7 @@ import AccountUsageCell from '@/components/account/AccountUsageCell.vue'
 import AccountTodayStatsCell from '@/components/account/AccountTodayStatsCell.vue'
 import AccountGroupsCell from '@/components/account/AccountGroupsCell.vue'
 import AccountCapacityCell from '@/components/account/AccountCapacityCell.vue'
-import CodexStateStatus from '@/components/account/CodexStateStatus.vue'
+import CodexAccountStateSummary from '@/components/account/CodexAccountStateSummary.vue'
 import UpstreamBillingRateCell from '@/components/account/UpstreamBillingRateCell.vue'
 import PlatformTypeBadge from '@/components/common/PlatformTypeBadge.vue'
 import Icon from '@/components/icons/Icon.vue'
@@ -1148,38 +1146,62 @@ const {
   }
 })
 
-const codexStateByAccountID = reactive(new Map<number, CodexTurnStateAccountStatus>())
-const codexStateScanning = reactive(new Set<number>())
+const codexStatesByAccountID = reactive(new Map<number, CodexTurnStateAccountStatus[]>())
+const codexAccountScanKey = '__all_target_models__'
+const { isScanning: isCodexStateScanning, run: runCodexStateScan } = useCodexStateScanState()
+
+const codexStatesForAccount = (accountID: number) => codexStatesByAccountID.get(accountID) || []
+
+const setCodexStatesForAccount = (accountID: number, states: CodexTurnStateAccountStatus[]) => {
+  codexStatesByAccountID.set(accountID, [...states].sort((left, right) => left.model.localeCompare(right.model)))
+}
 
 const refreshCodexStateStatuses = async () => {
   const ids = accounts.value
     .filter(account => account.platform === 'openai' && (account.type === 'oauth' || account.type === 'setup-token'))
     .map(account => account.id)
-  codexStateByAccountID.clear()
-  if (ids.length === 0) return
+  if (ids.length === 0) {
+    codexStatesByAccountID.clear()
+    return
+  }
   try {
-    const result = await opsAPI.listCodexTurnStateAccounts({ page: 1, page_size: Math.min(ids.length * 4, 200), account_ids: ids.join(',') })
+    const result = await opsAPI.listCodexTurnStateAccounts({ page: 1, page_size: 1000, account_ids: ids.join(',') })
+    const next = new Map<number, CodexTurnStateAccountStatus[]>()
     for (const item of result.items) {
-      const current = codexStateByAccountID.get(item.account_id)
-      if (!current || item.model === 'gpt-5.5') codexStateByAccountID.set(item.account_id, item)
+      const items = next.get(item.account_id) || []
+      items.push(item)
+      next.set(item.account_id, items)
     }
+    codexStatesByAccountID.clear()
+    for (const [accountID, items] of next) setCodexStatesForAccount(accountID, items)
   } catch (error) {
     console.error('Failed to load Codex State status:', error)
   }
 }
 
+const refreshCodexStateStatus = async (accountID: number) => {
+  const result = await opsAPI.listCodexTurnStateAccounts({ page: 1, page_size: 200, account_ids: String(accountID) })
+  const states = result.items.filter(item => item.account_id === accountID)
+  setCodexStatesForAccount(accountID, states)
+  return states
+}
+
 const scanCodexStateForAccount = async (accountID: number) => {
-  codexStateScanning.add(accountID)
-  try {
-    await opsAPI.scanCodexTurnState(accountID, codexStateByAccountID.get(accountID)?.model || 'gpt-5.5')
-    const current = codexStateByAccountID.get(accountID)
-    if (current) current.status = 'pending'
-    window.setTimeout(refreshCodexStateStatuses, 1000)
-  } catch (error) {
-    appStore.showError(extractApiErrorMessage(error, t('admin.ops.turnState.scanFailed')))
-  } finally {
-    codexStateScanning.delete(accountID)
-  }
+  await runCodexStateScan(accountID, codexAccountScanKey, async () => {
+    try {
+      const result = await opsAPI.scanCodexTurnStateAccount(accountID)
+      if (result.queued > 0) {
+        setCodexStatesForAccount(accountID, codexStatesForAccount(accountID).map(state => ({ ...state, status: 'pending' })))
+      }
+      for (let attempt = 0; attempt < 20; attempt++) {
+        await new Promise(resolve => window.setTimeout(resolve, 1000))
+        const updated = await refreshCodexStateStatus(accountID)
+        if (updated.length > 0 && updated.every(state => state.status !== 'pending' && state.status !== 'running')) break
+      }
+    } catch (error) {
+      appStore.showError(extractApiErrorMessage(error, t('admin.ops.turnState.scanFailed')))
+    }
+  })
 }
 
 const {

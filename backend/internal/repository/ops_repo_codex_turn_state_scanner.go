@@ -222,27 +222,21 @@ WITH eligible_accounts AS (
   FROM accounts
   WHERE deleted_at IS NULL AND parent_account_id IS NULL AND platform = 'openai'
     AND type IN ('oauth', 'setup-token')
-    AND status = 'active' AND schedulable IS TRUE AND last_used_at >= $1
+    AND status = 'active' AND schedulable IS TRUE
+    AND ($2::bigint[] IS NOT NULL OR last_used_at >= $1)
+    AND ($2::bigint[] IS NULL OR id = ANY($2))
     AND (expires_at IS NULL OR expires_at > NOW())
     AND (temp_unschedulable_until IS NULL OR temp_unschedulable_until <= NOW())
     AND (overload_until IS NULL OR overload_until <= NOW())
     AND (rate_limit_reset_at IS NULL OR rate_limit_reset_at <= NOW())
+), target_models AS (
+  SELECT DISTINCT LOWER(BTRIM(value)) AS model
+  FROM UNNEST($3::text[]) AS value
+  WHERE BTRIM(value) <> ''
 ), account_models AS (
-  SELECT u.account_id, LOWER(BTRIM(COALESCE(NULLIF(u.upstream_model, ''), u.model))) AS model
-  FROM usage_logs u
-  JOIN eligible_accounts a ON a.id = u.account_id
-  WHERE u.created_at >= $1 AND BTRIM(COALESCE(NULLIF(u.upstream_model, ''), u.model)) <> ''
-  GROUP BY u.account_id, LOWER(BTRIM(COALESCE(NULLIF(u.upstream_model, ''), u.model)))
-  UNION
-  SELECT c.source_account_id, c.source_model
-  FROM codex_turn_states c
-  JOIN eligible_accounts a ON a.id = c.source_account_id
-  WHERE c.source_model <> '' AND c.last_seen_at >= $1
-  UNION
-  SELECT sc.account_id, sc.model
-  FROM codex_turn_state_scans sc
-  JOIN eligible_accounts a ON a.id = sc.account_id
-  WHERE sc.model <> '' AND sc.updated_at >= $1
+  SELECT a.id AS account_id, tm.model
+  FROM eligible_accounts a
+  CROSS JOIN target_models tm
 ), status_rows AS (
   SELECT a.id AS account_id, a.name AS account_name, a.type AS account_type, a.plan_type,
          am.model,
@@ -271,25 +265,26 @@ WITH eligible_accounts AS (
 `
 }
 
-func (r *opsRepository) ListOpenAICodexTurnStateAccountStatuses(ctx context.Context, accountIDs []int64, page, pageSize int) (*service.OpenAICodexTurnStateAccountStatusList, error) {
+func (r *opsRepository) ListOpenAICodexTurnStateAccountStatuses(ctx context.Context, accountIDs []int64, targetModels []string, page, pageSize int) (*service.OpenAICodexTurnStateAccountStatusList, error) {
 	if page < 1 {
 		page = 1
 	}
 	if pageSize < 1 {
 		pageSize = 20
 	}
-	if pageSize > 200 {
-		pageSize = 200
+	if pageSize > 1000 {
+		pageSize = 1000
 	}
 	var ids any
 	if len(accountIDs) > 0 {
 		ids = pq.Array(accountIDs)
 	}
+	models := pq.Array(targetModels)
 	cte := codexTurnStateAccountStatusCTE()
 	usedSince := time.Now().Add(-time.Hour)
 	var total int64
 	if err := r.db.QueryRowContext(ctx, cte+`
-SELECT COUNT(*) FROM status_rows WHERE ($2::bigint[] IS NULL OR account_id = ANY($2))`, usedSince, ids).Scan(&total); err != nil {
+SELECT COUNT(*) FROM status_rows WHERE ($2::bigint[] IS NULL OR account_id = ANY($2))`, usedSince, ids, models).Scan(&total); err != nil {
 		return nil, err
 	}
 	rows, err := r.db.QueryContext(ctx, cte+`
@@ -299,7 +294,7 @@ SELECT account_id, account_name, account_type, plan_type, model, effective_statu
 FROM status_rows
 WHERE ($2::bigint[] IS NULL OR account_id = ANY($2))
 ORDER BY account_name ASC, account_id ASC, model ASC
-LIMIT $3 OFFSET $4`, usedSince, ids, pageSize, (page-1)*pageSize)
+LIMIT $4 OFFSET $5`, usedSince, ids, models, pageSize, (page-1)*pageSize)
 	if err != nil {
 		return nil, err
 	}
@@ -323,7 +318,7 @@ LIMIT $3 OFFSET $4`, usedSince, ids, pageSize, (page-1)*pageSize)
 	return &service.OpenAICodexTurnStateAccountStatusList{Items: items, Total: total, Page: page, PageSize: pageSize}, nil
 }
 
-func (r *opsRepository) GetOpenAICodexTurnStateOperationsSummary(ctx context.Context) (*service.OpenAICodexTurnStateOperationsSummary, error) {
+func (r *opsRepository) GetOpenAICodexTurnStateOperationsSummary(ctx context.Context, targetModels []string) (*service.OpenAICodexTurnStateOperationsSummary, error) {
 	summary := &service.OpenAICodexTurnStateOperationsSummary{}
 	err := r.db.QueryRowContext(ctx, `
 WITH eligible AS (
@@ -335,22 +330,40 @@ WITH eligible AS (
     AND (temp_unschedulable_until IS NULL OR temp_unschedulable_until <= NOW())
     AND (overload_until IS NULL OR overload_until <= NOW())
     AND (rate_limit_reset_at IS NULL OR rate_limit_reset_at <= NOW())
-), ready AS (
-  SELECT DISTINCT source_account_id FROM codex_turn_states
-  WHERE value_length IN (292, 332) AND expires_at > NOW() AND source_account_id IS NOT NULL
+), target_models AS (
+  SELECT DISTINCT LOWER(BTRIM(value)) AS model
+  FROM UNNEST($2::text[]) AS value
+  WHERE BTRIM(value) <> ''
+), model_slots AS (
+  SELECT e.id AS account_id, tm.model
+  FROM eligible e CROSS JOIN target_models tm
+), ready_slots AS (
+  SELECT DISTINCT c.source_account_id AS account_id, c.source_model AS model
+  FROM codex_turn_states c
+  JOIN eligible e ON e.id = c.source_account_id
+  JOIN target_models tm ON tm.model = c.source_model
+  WHERE c.value_length IN (292, 332) AND c.expires_at > NOW()
+), account_readiness AS (
+  SELECT ms.account_id,
+         COUNT(*) AS target_count,
+         COUNT(rs.account_id) AS ready_count
+  FROM model_slots ms
+  LEFT JOIN ready_slots rs ON rs.account_id = ms.account_id AND rs.model = ms.model
+  GROUP BY ms.account_id
 )
 SELECT (SELECT COUNT(*) FROM eligible),
-       (SELECT COUNT(*) FROM eligible e JOIN ready r ON r.source_account_id = e.id),
-       (SELECT COUNT(*) FROM eligible e LEFT JOIN ready r ON r.source_account_id = e.id WHERE r.source_account_id IS NULL),
-       (SELECT COUNT(*) FROM codex_turn_state_scans sc JOIN eligible e ON e.id = sc.account_id WHERE sc.status IN ('pending', 'running')),
+       (SELECT COUNT(*) FROM account_readiness WHERE target_count > 0 AND ready_count = target_count),
+       (SELECT COUNT(*) FROM account_readiness WHERE ready_count < target_count),
+       (SELECT COUNT(*) FROM ready_slots),
+       (SELECT COUNT(*) FROM codex_turn_state_scans sc JOIN eligible e ON e.id = sc.account_id JOIN target_models tm ON tm.model = sc.model WHERE sc.status IN ('pending', 'running')),
        (SELECT COUNT(*) FROM codex_turn_state_proxies WHERE enabled = TRUE),
        (SELECT COUNT(*) FROM codex_turn_state_proxies WHERE enabled = TRUE AND health_status = 'healthy'),
        (SELECT COUNT(*) FROM proxies WHERE deleted_at IS NULL AND status = 'active'
           AND (expires_at IS NULL OR expires_at > NOW())),
        (SELECT MAX(sc.last_attempt_at) FROM codex_turn_state_scans sc JOIN eligible e ON e.id = sc.account_id)`,
-		time.Now().Add(-time.Hour)).Scan(
+		time.Now().Add(-time.Hour), pq.Array(targetModels)).Scan(
 		&summary.OAuthAccounts, &summary.ReadyAccounts, &summary.MissingAccounts,
-		&summary.RunningJobs, &summary.EnabledProxies, &summary.HealthyProxies, &summary.SharedProxies, &summary.LastScanAt,
+		&summary.ReadyModelSlots, &summary.RunningJobs, &summary.EnabledProxies, &summary.HealthyProxies, &summary.SharedProxies, &summary.LastScanAt,
 	)
 	return summary, err
 }

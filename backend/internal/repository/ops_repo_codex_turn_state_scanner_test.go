@@ -12,11 +12,12 @@ import (
 
 func TestCodexTurnStateAccountStatusCTEUsesRecentSchedulableAccountsAndModels(t *testing.T) {
 	query := codexTurnStateAccountStatusCTE()
-	require.Contains(t, query, "status = 'active' AND schedulable IS TRUE AND last_used_at >= $1")
-	require.Contains(t, query, "u.created_at >= $1")
-	require.Contains(t, query, "c.last_seen_at >= $1")
-	require.Contains(t, query, "sc.updated_at >= $1")
-	require.NotContains(t, query, "SELECT id AS account_id, 'gpt-5.5'")
+	require.Contains(t, query, "status = 'active' AND schedulable IS TRUE")
+	require.Contains(t, query, "$2::bigint[] IS NOT NULL OR last_used_at >= $1")
+	require.Contains(t, query, "$2::bigint[] IS NULL OR id = ANY($2)")
+	require.Contains(t, query, "UNNEST($3::text[])")
+	require.Contains(t, query, "CROSS JOIN target_models")
+	require.NotContains(t, query, "SELECT a.id, 'gpt-5.5'")
 }
 
 func TestListRecentlyUsedOpenAICodexAccountIDs(t *testing.T) {

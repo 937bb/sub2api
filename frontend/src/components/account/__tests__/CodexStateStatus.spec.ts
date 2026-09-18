@@ -35,7 +35,7 @@ describe('CodexStateStatus', () => {
 
     expect(wrapper.text()).toContain('Scanning')
     expect(wrapper.find('.animate-pulse').exists()).toBe(true)
-    expect(wrapper.find('.h-5.w-5').exists()).toBe(true)
+    expect(wrapper.find('.h-6.w-6').exists()).toBe(true)
   })
 
   it('hides detail metadata when requested', () => {
