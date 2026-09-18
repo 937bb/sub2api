@@ -25,6 +25,7 @@ export default {
         scanQueued: '扫描任务已加入队列',
         scanAlreadyQueued: '该账号和模型已在扫描队列中',
         scanAllQueued: '已加入 {count} 个扫描任务',
+        lastScan: '最近扫描',
         scanFailed: '提交扫描任务失败',
         attempts: '尝试 {count} 次',
         direct: '直连',

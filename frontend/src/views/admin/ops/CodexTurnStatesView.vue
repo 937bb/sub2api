@@ -2,47 +2,66 @@
   <AppLayout>
     <TablePageLayout>
       <template #actions>
-        <div class="space-y-4">
-          <div class="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h1 class="text-xl font-semibold text-gray-900 dark:text-white">{{ t('admin.ops.turnState.title') }}</h1>
-              <p class="mt-1 text-sm text-gray-500 dark:text-dark-400">{{ t('admin.ops.turnState.description') }}</p>
+        <div class="space-y-5">
+          <div class="flex flex-wrap items-start justify-between gap-4">
+            <div class="flex min-w-0 items-start gap-3">
+              <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-gray-900 text-white shadow-sm dark:bg-white dark:text-gray-900">
+                <Icon name="database" size="md" />
+              </div>
+              <div class="min-w-0">
+                <h1 class="text-xl font-semibold text-gray-900 dark:text-white">{{ t('admin.ops.turnState.title') }}</h1>
+                <p class="mt-1 text-sm text-gray-500 dark:text-dark-400">{{ t('admin.ops.turnState.description') }}</p>
+              </div>
             </div>
             <div class="flex items-center gap-2">
-              <button class="btn btn-secondary" :disabled="loading" :title="t('common.refresh')" @click="refresh">
+              <div v-if="summary?.last_scan_at" class="hidden items-center gap-1.5 text-xs text-gray-400 xl:flex">
+                <Icon name="clock" size="xs" />
+                <span>{{ t('admin.ops.turnState.lastScan') }} {{ formatDateTime(summary.last_scan_at) }}</span>
+              </div>
+              <button class="btn btn-secondary btn-icon" :disabled="loading" :title="t('common.refresh')" :aria-label="t('common.refresh')" @click="refresh">
                 <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
               </button>
               <button v-if="activeTab === 'accounts'" class="btn btn-primary" :disabled="scanningAll" @click="scanAll">
-                <Icon name="play" size="md" class="mr-1" />
+                <Icon name="play" size="sm" class="mr-1.5" />
                 {{ t('admin.ops.turnState.scanAll') }}
               </button>
               <button v-if="activeTab === 'proxies'" class="btn btn-primary" @click="showProxyDialog = true">
-                <Icon name="plus" size="md" class="mr-1" />
+                <Icon name="plus" size="sm" class="mr-1.5" />
                 {{ t('admin.ops.turnState.addProxy') }}
               </button>
             </div>
           </div>
 
-          <div class="grid grid-cols-2 gap-3 lg:grid-cols-7">
-            <div v-for="metric in metrics" :key="metric.label" class="rounded-lg border border-gray-200 bg-white p-3 dark:border-dark-700 dark:bg-dark-800">
-              <div class="text-xs font-medium text-gray-500 dark:text-dark-400">{{ metric.label }}</div>
-              <div :class="['mt-1 text-xl font-semibold', metric.className]">{{ metric.value }}</div>
+          <div class="grid overflow-hidden rounded-lg border border-gray-200 bg-white grid-cols-2 sm:grid-cols-4 xl:grid-cols-7 dark:border-dark-700 dark:bg-dark-900">
+            <div
+              v-for="metric in metrics"
+              :key="metric.label"
+              :class="[
+                'relative min-w-0 border-b border-r border-gray-100 px-4 py-3 last:border-r-0 sm:[&:nth-child(4n)]:border-r-0 xl:border-b-0 xl:[&:nth-child(4n)]:border-r xl:[&:nth-child(7n)]:border-r-0 dark:border-dark-700/70',
+                metric.accentClass
+              ]"
+            >
+              <div :class="['text-2xl font-semibold tabular-nums leading-none', metric.valueClass]">{{ metric.value }}</div>
+              <div class="mt-1.5 truncate text-xs font-medium text-gray-500 dark:text-dark-400" :title="metric.label">{{ metric.label }}</div>
             </div>
           </div>
 
-          <div class="inline-flex rounded-md border border-gray-200 bg-gray-50 p-1 dark:border-dark-700 dark:bg-dark-900">
+          <div class="flex border-b border-gray-200 dark:border-dark-700" role="tablist">
             <button
               v-for="tab in tabs"
               :key="tab.value"
               type="button"
+              role="tab"
+              :aria-selected="activeTab === tab.value"
               :class="[
-                'rounded px-3 py-1.5 text-sm font-medium transition-colors',
+                '-mb-px inline-flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-medium transition-colors',
                 activeTab === tab.value
-                  ? 'bg-white text-gray-900 shadow-sm dark:bg-dark-700 dark:text-white'
-                  : 'text-gray-500 hover:text-gray-800 dark:text-dark-300 dark:hover:text-white'
+                  ? 'border-primary-500 text-primary-700 dark:border-primary-400 dark:text-primary-300'
+                  : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-800 dark:text-dark-400 dark:hover:border-dark-500 dark:hover:text-white'
               ]"
               @click="setTab(tab.value)"
             >
+              <Icon :name="tab.icon" size="sm" />
               {{ tab.label }}
             </button>
           </div>
@@ -57,66 +76,112 @@
             {{ t('admin.ops.turnState.deleteSelected', { count: selectedHistoryIDs.length }) }}
           </button>
         </div>
-        <div v-else class="text-sm text-gray-500 dark:text-dark-400">
-          {{ activeTab === 'accounts' ? t('admin.ops.turnState.accountHint') : t('admin.ops.turnState.proxyHint') }}
+        <div v-else class="flex min-h-9 items-center gap-2 text-sm text-gray-500 dark:text-dark-400">
+          <Icon name="infoCircle" size="sm" class="shrink-0 text-gray-400" />
+          <span>{{ activeTab === 'accounts' ? t('admin.ops.turnState.accountHint') : t('admin.ops.turnState.proxyHint') }}</span>
         </div>
       </template>
 
       <template #table>
         <DataTable v-if="activeTab === 'accounts'" :columns="accountColumns" :data="accounts" :loading="loading" row-key="row_key">
           <template #cell-account="{ row }">
-            <div>
-              <div class="font-medium text-gray-900 dark:text-white">{{ row.account_name }}</div>
-              <div class="mt-0.5 text-xs text-gray-500">#{{ row.account_id }} · {{ row.account_type }}<span v-if="row.plan_type"> · {{ row.plan_type }}</span></div>
+            <div class="flex min-w-[220px] items-center gap-3">
+              <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-gray-100 text-xs font-semibold uppercase text-gray-600 dark:bg-dark-700 dark:text-dark-200">
+                {{ accountInitial(row.account_name) }}
+              </div>
+              <div class="min-w-0">
+                <div class="max-w-56 truncate font-medium text-gray-900 dark:text-white" :title="row.account_name">{{ row.account_name }}</div>
+                <div class="mt-0.5 flex items-center gap-1.5 text-xs text-gray-500 dark:text-dark-400">
+                  <span class="font-mono">#{{ row.account_id }}</span>
+                  <span aria-hidden="true">/</span>
+                  <span>{{ row.account_type }}</span>
+                  <span v-if="row.plan_type" class="font-medium uppercase text-gray-600 dark:text-dark-300">{{ row.plan_type }}</span>
+                </div>
+              </div>
             </div>
           </template>
-          <template #cell-model="{ value }"><span class="font-mono text-xs">{{ value }}</span></template>
+          <template #cell-model="{ value }"><span class="inline-flex rounded bg-gray-100 px-2 py-1 font-mono text-xs text-gray-700 dark:bg-dark-700 dark:text-dark-200">{{ value }}</span></template>
           <template #cell-state="{ row }">
-            <span :class="['badge', stateBadgeClass(row.status)]">{{ stateStatusLabel(row.status) }}</span>
-            <span v-if="row.state_length" class="ml-2 font-mono text-xs text-gray-500">{{ row.state_length }}</span>
+            <CodexStateStatus :status="row.status" :state-length="row.state_length" :show-details="true" />
           </template>
           <template #cell-expires_at="{ row }">
-            <div v-if="row.expires_at" class="whitespace-nowrap text-sm text-gray-600 dark:text-gray-300">
-              {{ formatDateTime(row.expires_at) }}
-              <div class="text-xs text-gray-400">{{ expiryCountdown(row.expires_at) }}</div>
+            <div v-if="row.expires_at" class="flex items-center gap-2 whitespace-nowrap">
+              <Icon name="clock" size="sm" class="shrink-0 text-gray-400" />
+              <div>
+                <div class="text-xs text-gray-600 dark:text-gray-300">{{ formatDateTime(row.expires_at) }}</div>
+                <div class="mt-0.5 font-mono text-[11px] text-gray-400">{{ expiryCountdown(row.expires_at) }}</div>
+              </div>
             </div>
             <span v-else class="text-gray-400">-</span>
           </template>
           <template #cell-scan="{ row }">
-            <div class="text-xs text-gray-600 dark:text-gray-300">{{ t('admin.ops.turnState.attempts', { count: row.attempt_count }) }}</div>
-            <div v-if="row.last_attempt_at" class="mt-1 whitespace-nowrap text-xs text-gray-400">{{ formatDateTime(row.last_attempt_at) }}</div>
-            <div v-if="row.last_error" class="mt-1 max-w-72 truncate text-xs text-red-500" :title="row.last_error">{{ row.last_error }}</div>
+            <div class="min-w-[130px] text-xs">
+              <div class="font-medium tabular-nums text-gray-600 dark:text-gray-300">{{ t('admin.ops.turnState.attempts', { count: row.attempt_count }) }}</div>
+              <div v-if="row.last_attempt_at" class="mt-1 whitespace-nowrap text-gray-400">{{ formatDateTime(row.last_attempt_at) }}</div>
+              <div v-if="row.last_error" class="mt-1 max-w-64 truncate text-red-500" :title="row.last_error">{{ row.last_error }}</div>
+            </div>
           </template>
           <template #cell-proxy="{ row }">
-            <span v-if="row.last_proxy_masked" class="font-mono text-xs text-gray-600 dark:text-gray-300">{{ row.last_proxy_masked }}</span>
-            <span v-else class="text-xs text-gray-400">{{ t('admin.ops.turnState.direct') }}</span>
+            <div class="flex items-center gap-2">
+              <Icon name="globe" size="sm" class="shrink-0 text-gray-400" />
+              <span v-if="row.last_proxy_masked" class="max-w-52 truncate font-mono text-xs text-gray-600 dark:text-gray-300" :title="row.last_proxy_masked">{{ row.last_proxy_masked }}</span>
+              <span v-else class="text-xs text-gray-400">{{ t('admin.ops.turnState.direct') }}</span>
+            </div>
           </template>
           <template #cell-actions="{ row }">
-            <button class="btn btn-secondary px-2 py-1 text-xs" :disabled="scanningKeys.has(accountModelKey(row))" @click="scanAccount(row)">
-              <Icon name="refresh" size="xs" :class="scanningKeys.has(accountModelKey(row)) ? 'mr-1 animate-spin' : 'mr-1'" />
-              {{ t('admin.ops.turnState.scanNow') }}
+            <button
+              class="flex h-8 w-8 items-center justify-center rounded-md border border-gray-200 text-gray-500 transition-colors hover:border-primary-300 hover:bg-primary-50 hover:text-primary-700 disabled:cursor-wait disabled:opacity-60 dark:border-dark-600 dark:text-dark-300 dark:hover:border-primary-700 dark:hover:bg-primary-950/40 dark:hover:text-primary-300"
+              :disabled="scanningKeys.has(accountModelKey(row))"
+              :title="t('admin.ops.turnState.scanNow')"
+              :aria-label="t('admin.ops.turnState.scanNow')"
+              @click="scanAccount(row)"
+            >
+              <Icon name="refresh" size="sm" :class="scanningKeys.has(accountModelKey(row)) ? 'animate-spin' : ''" />
             </button>
           </template>
         </DataTable>
 
         <DataTable v-else-if="activeTab === 'proxies'" :columns="proxyColumns" :data="proxies" :loading="loading" row-key="id">
           <template #cell-proxy="{ row }">
-            <div class="font-medium text-gray-900 dark:text-white">{{ row.name }}</div>
-            <div class="mt-1 font-mono text-xs text-gray-500">{{ row.masked_url }}</div>
+            <div class="flex min-w-[260px] items-center gap-3">
+              <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-cyan-50 text-cyan-700 dark:bg-cyan-950/50 dark:text-cyan-300">
+                <Icon name="globe" size="sm" />
+              </div>
+              <div class="min-w-0">
+                <div class="truncate font-medium text-gray-900 dark:text-white" :title="row.name">{{ row.name }}</div>
+                <div class="mt-0.5 max-w-80 truncate font-mono text-xs text-gray-500" :title="row.masked_url">{{ row.masked_url }}</div>
+              </div>
+            </div>
           </template>
           <template #cell-enabled="{ row }">
-            <input type="checkbox" class="h-4 w-4 rounded border-gray-300 text-primary-600" :checked="row.enabled" @change="toggleProxy(row, ($event.target as HTMLInputElement).checked)" />
+            <button
+              type="button"
+              role="switch"
+              :aria-checked="row.enabled"
+              :class="[
+                'relative inline-flex h-5 w-9 shrink-0 rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500/40',
+                row.enabled ? 'bg-primary-500' : 'bg-gray-200 dark:bg-dark-600'
+              ]"
+              @click="toggleProxy(row, !row.enabled)"
+            >
+              <span :class="['pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform', row.enabled ? 'translate-x-4' : 'translate-x-0']" />
+            </button>
           </template>
           <template #cell-health_status="{ row }">
-            <span :class="['badge', proxyHealthClass(row.health_status)]">{{ proxyHealthLabel(row.health_status) }}</span>
-            <div v-if="row.consecutive_failures" class="mt-1 text-xs text-red-500">{{ t('admin.ops.turnState.failures', { count: row.consecutive_failures }) }}</div>
+            <div class="flex items-center gap-2">
+              <span :class="['h-2 w-2 shrink-0 rounded-full', proxyHealthDotClass(row.health_status)]" />
+              <div>
+                <div :class="['text-sm font-medium', proxyHealthTextClass(row.health_status)]">{{ proxyHealthLabel(row.health_status) }}</div>
+                <div v-if="row.consecutive_failures" class="mt-0.5 text-xs text-red-500">{{ t('admin.ops.turnState.failures', { count: row.consecutive_failures }) }}</div>
+              </div>
+            </div>
           </template>
           <template #cell-last_checked_at="{ row }">
             <span v-if="row.last_checked_at" class="whitespace-nowrap text-sm text-gray-600 dark:text-gray-300">{{ formatDateTime(row.last_checked_at) }}</span>
             <span v-else class="text-gray-400">-</span>
           </template>
           <template #cell-actions="{ row }">
-            <button class="rounded p-2 text-gray-500 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20" :title="t('common.delete')" @click="deleteProxy(row)">
+            <button class="flex h-8 w-8 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40" :title="t('common.delete')" :aria-label="t('common.delete')" @click="deleteProxy(row)">
               <Icon name="trash" size="sm" />
             </button>
           </template>
@@ -133,18 +198,34 @@
           @update:selectedKeys="selectedHistoryIDs = $event.map(Number)"
         >
           <template #cell-state="{ row }">
-            <div class="font-mono text-sm text-gray-900 dark:text-white">{{ row.masked_value }}</div>
-            <div class="mt-1 max-w-56 truncate font-mono text-xs text-gray-400" :title="row.state_hash">{{ row.state_hash }}</div>
+            <div class="min-w-[210px]">
+              <div class="flex items-center gap-2">
+                <span :class="['h-2 w-2 shrink-0 rounded-full', row.active ? 'bg-emerald-500' : 'bg-gray-400']" />
+                <span class="font-mono text-sm font-medium text-gray-900 dark:text-white">{{ row.masked_value }}</span>
+              </div>
+              <div class="mt-1 max-w-64 truncate pl-4 font-mono text-[11px] text-gray-400" :title="row.state_hash">{{ row.state_hash }}</div>
+            </div>
           </template>
           <template #cell-source="{ row }">
-            <div class="text-sm text-gray-700 dark:text-gray-200">{{ row.source_account_name || `#${row.source_account_id ?? '-'}` }}</div>
-            <div class="mt-1 font-mono text-xs text-gray-500">{{ row.source_model || '-' }}</div>
+            <div class="min-w-[180px]">
+              <div class="max-w-56 truncate text-sm font-medium text-gray-700 dark:text-gray-200" :title="row.source_account_name">{{ row.source_account_name || `#${row.source_account_id ?? '-'}` }}</div>
+              <div class="mt-1 flex items-center gap-1.5 font-mono text-xs text-gray-500">
+                <span>#{{ row.source_account_id ?? '-' }}</span>
+                <span aria-hidden="true">/</span>
+                <span>{{ row.source_model || '-' }}</span>
+              </div>
+            </div>
           </template>
           <template #cell-last_seen_at="{ value }"><span class="whitespace-nowrap text-sm">{{ formatDateTime(value) }}</span></template>
           <template #cell-expires_at="{ value }"><span class="whitespace-nowrap text-sm">{{ formatDateTime(value) }}</span></template>
-          <template #cell-active="{ value }"><span :class="['badge', value ? 'badge-success' : 'badge-gray']">{{ value ? t('admin.ops.turnState.active') : t('admin.ops.turnState.expired') }}</span></template>
+          <template #cell-active="{ value }">
+            <span :class="['inline-flex items-center gap-2 text-sm font-medium', value ? 'text-emerald-700 dark:text-emerald-300' : 'text-gray-500 dark:text-dark-400']">
+              <span :class="['h-2 w-2 rounded-full', value ? 'bg-emerald-500' : 'bg-gray-400']" />
+              {{ value ? t('admin.ops.turnState.active') : t('admin.ops.turnState.expired') }}
+            </span>
+          </template>
           <template #cell-actions="{ row }">
-            <button class="rounded p-2 text-gray-500 hover:bg-red-50 hover:text-red-600" :title="t('common.delete')" @click="requestHistoryDelete([row.id])"><Icon name="trash" size="sm" /></button>
+            <button class="flex h-8 w-8 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40" :title="t('common.delete')" :aria-label="t('common.delete')" @click="requestHistoryDelete([row.id])"><Icon name="trash" size="sm" /></button>
           </template>
         </DataTable>
       </template>
@@ -203,6 +284,7 @@ import DataTable from '@/components/common/DataTable.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import Select from '@/components/common/Select.vue'
 import Icon from '@/components/icons/Icon.vue'
+import CodexStateStatus from '@/components/account/CodexStateStatus.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import { useAppStore } from '@/stores/app'
@@ -211,7 +293,6 @@ import { formatDateTime } from '@/utils/format'
 import {
   opsAPI,
   type CodexTurnStateAccountStatus,
-  type CodexTurnStateAccountStatusValue,
   type CodexTurnStateOperationsSummary,
   type CodexTurnStateProxy,
   type CodexTurnStateRecord,
@@ -246,19 +327,19 @@ const showProxyDialog = ref(false)
 const proxyValues = ref('')
 
 const tabs = computed(() => [
-  { value: 'accounts' as Tab, label: t('admin.ops.turnState.tabs.accounts') },
-  { value: 'proxies' as Tab, label: t('admin.ops.turnState.tabs.proxies') },
-  { value: 'history' as Tab, label: t('admin.ops.turnState.tabs.history') }
+  { value: 'accounts' as Tab, label: t('admin.ops.turnState.tabs.accounts'), icon: 'users' as const },
+  { value: 'proxies' as Tab, label: t('admin.ops.turnState.tabs.proxies'), icon: 'globe' as const },
+  { value: 'history' as Tab, label: t('admin.ops.turnState.tabs.history'), icon: 'database' as const }
 ])
 
 const metrics = computed(() => [
-  { label: t('admin.ops.turnState.metrics.oauthAccounts'), value: summary.value?.oauth_accounts ?? 0, className: 'text-gray-900 dark:text-white' },
-  { label: t('admin.ops.turnState.metrics.readyAccounts'), value: summary.value?.ready_accounts ?? 0, className: 'text-emerald-600 dark:text-emerald-400' },
-  { label: t('admin.ops.turnState.metrics.missingAccounts'), value: summary.value?.missing_accounts ?? 0, className: 'text-amber-600 dark:text-amber-400' },
-  { label: t('admin.ops.turnState.metrics.runningJobs'), value: summary.value?.running_jobs ?? 0, className: 'text-blue-600 dark:text-blue-400' },
-  { label: t('admin.ops.turnState.metrics.enabledProxies'), value: summary.value?.enabled_proxies ?? 0, className: 'text-gray-900 dark:text-white' },
-  { label: t('admin.ops.turnState.metrics.healthyProxies'), value: summary.value?.healthy_proxies ?? 0, className: 'text-emerald-600 dark:text-emerald-400' },
-  { label: t('admin.ops.turnState.metrics.sharedProxies'), value: summary.value?.shared_proxies ?? 0, className: 'text-cyan-600 dark:text-cyan-400' }
+  { label: t('admin.ops.turnState.metrics.oauthAccounts'), value: summary.value?.oauth_accounts ?? 0, valueClass: 'text-gray-900 dark:text-white', accentClass: 'border-t-2 border-t-gray-500' },
+  { label: t('admin.ops.turnState.metrics.readyAccounts'), value: summary.value?.ready_accounts ?? 0, valueClass: 'text-emerald-600 dark:text-emerald-400', accentClass: 'border-t-2 border-t-emerald-500' },
+  { label: t('admin.ops.turnState.metrics.missingAccounts'), value: summary.value?.missing_accounts ?? 0, valueClass: 'text-amber-600 dark:text-amber-400', accentClass: 'border-t-2 border-t-amber-500' },
+  { label: t('admin.ops.turnState.metrics.runningJobs'), value: summary.value?.running_jobs ?? 0, valueClass: 'text-blue-600 dark:text-blue-400', accentClass: 'border-t-2 border-t-blue-500' },
+  { label: t('admin.ops.turnState.metrics.enabledProxies'), value: summary.value?.enabled_proxies ?? 0, valueClass: 'text-gray-900 dark:text-white', accentClass: 'border-t-2 border-t-gray-500' },
+  { label: t('admin.ops.turnState.metrics.healthyProxies'), value: summary.value?.healthy_proxies ?? 0, valueClass: 'text-emerald-600 dark:text-emerald-400', accentClass: 'border-t-2 border-t-emerald-500' },
+  { label: t('admin.ops.turnState.metrics.sharedProxies'), value: summary.value?.shared_proxies ?? 0, valueClass: 'text-cyan-600 dark:text-cyan-400', accentClass: 'border-t-2 border-t-cyan-500' }
 ])
 
 const accountColumns = computed<Column[]>(() => [
@@ -298,19 +379,17 @@ const historyStatusOptions = computed(() => [
 const parsedProxyValues = computed(() => Array.from(new Set(proxyValues.value.split(/\r?\n/).map(value => value.trim()).filter(Boolean))))
 
 function accountModelKey(row: CodexTurnStateAccountStatus) { return `${row.account_id}:${row.model}` }
-function stateStatusLabel(status: CodexTurnStateAccountStatusValue) { return t(`admin.ops.turnState.status.${status}`) }
-function stateBadgeClass(status: CodexTurnStateAccountStatusValue) {
-  if (status === 'ready') return 'badge-success'
-  if (status === 'running' || status === 'pending') return 'badge-info'
-  if (status === 'expiring' || status === 'retry_wait') return 'badge-warning'
-  if (status === 'failed') return 'badge-danger'
-  return 'badge-gray'
-}
+function accountInitial(name: string) { return Array.from(name.trim())[0] || '#' }
 function proxyHealthLabel(status: string) { return t(`admin.ops.turnState.proxyHealth.${status}`, status) }
-function proxyHealthClass(status: string) {
-  if (status === 'healthy') return 'badge-success'
-  if (status === 'unhealthy') return 'badge-danger'
-  return 'badge-gray'
+function proxyHealthDotClass(status: string) {
+  if (status === 'healthy') return 'bg-emerald-500'
+  if (status === 'unhealthy') return 'bg-red-500'
+  return 'bg-gray-400'
+}
+function proxyHealthTextClass(status: string) {
+  if (status === 'healthy') return 'text-emerald-700 dark:text-emerald-300'
+  if (status === 'unhealthy') return 'text-red-700 dark:text-red-300'
+  return 'text-gray-600 dark:text-gray-300'
 }
 function expiryCountdown(value: string) {
   const seconds = Math.max(0, Math.floor((new Date(value).getTime() - now.value) / 1000))

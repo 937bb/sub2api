@@ -284,17 +284,25 @@
             </div>
           </template>
           <template #cell-codex_state="{ row }">
-            <div v-if="row.platform === 'openai' && (row.type === 'oauth' || row.type === 'setup-token')" class="flex flex-col items-start gap-1">
-              <span :class="['badge', codexStateBadgeClass(codexStateByAccountID.get(row.id)?.status)]">
-                {{ codexStateLabel(codexStateByAccountID.get(row.id)?.status) }}
-              </span>
+            <div
+              v-if="row.platform === 'openai' && (row.type === 'oauth' || row.type === 'setup-token')"
+              class="flex min-w-[156px] items-center justify-between gap-2"
+            >
+              <CodexStateStatus
+                :status="codexStateByAccountID.get(row.id)?.status"
+                :state-length="codexStateByAccountID.get(row.id)?.state_length"
+                :model="codexStateByAccountID.get(row.id)?.model"
+                compact
+              />
               <button
                 type="button"
-                class="text-xs font-medium text-primary-600 hover:text-primary-700 dark:text-primary-400"
+                class="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-gray-200 text-gray-500 transition-colors hover:border-primary-300 hover:bg-primary-50 hover:text-primary-700 disabled:cursor-wait disabled:opacity-60 dark:border-dark-600 dark:text-dark-300 dark:hover:border-primary-700 dark:hover:bg-primary-950/40 dark:hover:text-primary-300"
                 :disabled="codexStateScanning.has(row.id)"
+                :title="codexStateScanning.has(row.id) ? t('admin.ops.turnState.status.running') : t('admin.ops.turnState.scanNow')"
+                :aria-label="codexStateScanning.has(row.id) ? t('admin.ops.turnState.status.running') : t('admin.ops.turnState.scanNow')"
                 @click="scanCodexStateForAccount(row.id)"
               >
-                {{ codexStateScanning.has(row.id) ? t('admin.ops.turnState.status.running') : t('admin.ops.turnState.scanNow') }}
+                <Icon name="refresh" size="sm" :class="codexStateScanning.has(row.id) ? 'animate-spin' : ''" />
               </button>
             </div>
             <span v-else class="text-sm text-gray-400">-</span>
@@ -536,7 +544,7 @@ import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { adminAPI } from '@/api/admin'
-import { opsAPI, type CodexTurnStateAccountStatus, type CodexTurnStateAccountStatusValue } from '@/api/admin/ops'
+import { opsAPI, type CodexTurnStateAccountStatus } from '@/api/admin/ops'
 import { useTableLoader } from '@/composables/useTableLoader'
 import { useSwipeSelect, type SwipeSelectVirtualContext } from '@/composables/useSwipeSelect'
 import { useTableSelection } from '@/composables/useTableSelection'
@@ -564,6 +572,7 @@ import AccountUsageCell from '@/components/account/AccountUsageCell.vue'
 import AccountTodayStatsCell from '@/components/account/AccountTodayStatsCell.vue'
 import AccountGroupsCell from '@/components/account/AccountGroupsCell.vue'
 import AccountCapacityCell from '@/components/account/AccountCapacityCell.vue'
+import CodexStateStatus from '@/components/account/CodexStateStatus.vue'
 import UpstreamBillingRateCell from '@/components/account/UpstreamBillingRateCell.vue'
 import PlatformTypeBadge from '@/components/common/PlatformTypeBadge.vue'
 import Icon from '@/components/icons/Icon.vue'
@@ -1157,17 +1166,6 @@ const refreshCodexStateStatuses = async () => {
   } catch (error) {
     console.error('Failed to load Codex State status:', error)
   }
-}
-
-const codexStateLabel = (status?: CodexTurnStateAccountStatusValue) =>
-  t(`admin.ops.turnState.status.${status || 'missing'}`)
-
-const codexStateBadgeClass = (status?: CodexTurnStateAccountStatusValue) => {
-  if (status === 'ready') return 'badge-success'
-  if (status === 'running' || status === 'pending') return 'badge-info'
-  if (status === 'expiring' || status === 'retry_wait') return 'badge-warning'
-  if (status === 'failed') return 'badge-danger'
-  return 'badge-gray'
 }
 
 const scanCodexStateForAccount = async (accountID: number) => {

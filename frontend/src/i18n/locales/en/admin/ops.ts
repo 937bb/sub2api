@@ -21,6 +21,7 @@ export default {
         scanQueued: 'Scan queued',
         scanAlreadyQueued: 'This account/model is already queued',
         scanAllQueued: 'Queued {count} scans',
+        lastScan: 'Last scan',
         scanFailed: 'Failed to queue scan',
         attempts: '{count} attempts',
         direct: 'Direct',

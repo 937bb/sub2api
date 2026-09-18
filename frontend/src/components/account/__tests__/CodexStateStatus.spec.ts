@@ -1,0 +1,46 @@
+import { describe, expect, it, vi } from 'vitest'
+import { mount } from '@vue/test-utils'
+import CodexStateStatus from '../CodexStateStatus.vue'
+
+const labels: Record<string, string> = {
+  'admin.ops.turnState.status.ready': '292/332 Ready',
+  'admin.ops.turnState.status.running': 'Scanning',
+  'admin.ops.turnState.status.missing': 'Missing'
+}
+
+vi.mock('vue-i18n', () => ({
+  useI18n: () => ({
+    t: (key: string) => labels[key] || key
+  })
+}))
+
+function render(props: Record<string, unknown>) {
+  return mount(CodexStateStatus, {
+    props
+  })
+}
+
+describe('CodexStateStatus', () => {
+  it('shows a ready state with its length and model', () => {
+    const wrapper = render({ status: 'ready', stateLength: 332, model: 'gpt-5.6-sol' })
+
+    expect(wrapper.text()).toContain('292/332 Ready')
+    expect(wrapper.text()).toContain('332')
+    expect(wrapper.text()).toContain('gpt-5.6-sol')
+    expect(wrapper.find('.bg-emerald-500').exists()).toBe(true)
+  })
+
+  it('animates active scans and keeps compact details readable', () => {
+    const wrapper = render({ status: 'running', compact: true, stateLength: 292 })
+
+    expect(wrapper.text()).toContain('Scanning')
+    expect(wrapper.find('.animate-pulse').exists()).toBe(true)
+    expect(wrapper.find('.h-5.w-5').exists()).toBe(true)
+  })
+
+  it('hides detail metadata when requested', () => {
+    const wrapper = render({ status: 'missing', stateLength: 332, model: 'gpt-5.6-terra', showDetails: false })
+
+    expect(wrapper.text()).toBe('Missing')
+  })
+})
