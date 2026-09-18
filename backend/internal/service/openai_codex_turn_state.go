@@ -12,7 +12,10 @@ import (
 
 const openAICodexTurnStateHeader = "x-codex-turn-state"
 
-const openAICodexPreferredTurnStateLength = 292
+const (
+	openAICodexTurnStateLength292 = 292
+	openAICodexTurnStateLength332 = 332
+)
 
 const openAICodexTurnStateSessionHashContextKey = "openai_codex_turn_state_session_hash"
 
@@ -146,7 +149,7 @@ func (s *OpenAIGatewayService) observeOpenAICodexTurnState(c *gin.Context, accou
 }
 
 // guardOpenAICodexTurnStateEcho only replaces a 312-byte state with an
-// unexpired 292-byte state minted for the same credential owner and model.
+// unexpired reusable state minted for the same credential owner and model.
 func (s *OpenAIGatewayService) guardOpenAICodexTurnStateEcho(c *gin.Context, account *Account, h http.Header, model string) {
 	if s == nil || h == nil || account == nil || !account.UsesOpenAICodexProtocol() {
 		return
@@ -164,6 +167,10 @@ func (s *OpenAIGatewayService) guardOpenAICodexTurnStateEcho(c *gin.Context, acc
 	if state, ok := s.getOpenAICodexTurnStatePool().preferredForBucket(owner.ID, model); ok {
 		setOpenAICodexTurnStateReuse(c, h, state, openAICodexTurnStateReuseScopeAccountModel)
 	}
+}
+
+func isReusableOpenAICodexTurnStateLength(length int) bool {
+	return length == openAICodexTurnStateLength292 || length == openAICodexTurnStateLength332
 }
 
 func setOpenAICodexTurnStateReuse(c *gin.Context, h http.Header, state, scope string) {

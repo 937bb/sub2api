@@ -223,6 +223,7 @@ export default {
         name: 'Name',
         id: 'Account ID',
         platformType: 'Platform/Type',
+        codexState: 'Codex State',
         platform: 'Platform',
         type: 'Type',
         capacity: 'Capacity',

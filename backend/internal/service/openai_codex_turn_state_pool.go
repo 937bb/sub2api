@@ -234,6 +234,33 @@ func (p *openAICodexTurnStatePool) preferredForBucket(accountID int64, model str
 	return value, value != ""
 }
 
+func (p *openAICodexTurnStatePool) preferredExpiryForBucket(accountID int64, model string) (time.Time, bool) {
+	key, ok := newOpenAICodexTurnStateBucketKey(accountID, model)
+	if p == nil || !ok {
+		return time.Time{}, false
+	}
+	now := p.now()
+	p.mu.RLock()
+	selected := p.preferredByBucket[key]
+	if p.isPreferredBucketRecordLocked(selected, key, now) {
+		expiresAt := selected.ExpiresAt
+		p.mu.RUnlock()
+		return expiresAt, true
+	}
+	p.mu.RUnlock()
+
+	p.mu.Lock()
+	p.selectPreferredForBucketLocked(key, now)
+	selected = p.preferredByBucket[key]
+	if selected == nil {
+		p.mu.Unlock()
+		return time.Time{}, false
+	}
+	expiresAt := selected.ExpiresAt
+	p.mu.Unlock()
+	return expiresAt, true
+}
+
 func (p *openAICodexTurnStatePool) hasSampledAccount(accountID int64) bool {
 	if p == nil || accountID <= 0 {
 		return false
@@ -291,7 +318,7 @@ func (p *openAICodexTurnStatePool) mergeLocked(record *OpenAICodexTurnStateRecor
 		}
 		if key, ok := newOpenAICodexTurnStateBucketKey(accountID, copyRecord.SourceModel); ok && isReusableOpenAICodexTurnStateRecord(copyRecord, key, now) {
 			current := p.preferredByBucket[key]
-			if !p.isPreferredBucketRecordLocked(current, key, now) || openAICodexTurnStateNewestFirst(copyRecord, current) {
+			if !p.isPreferredBucketRecordLocked(current, key, now) || openAICodexTurnStateRanksBefore(copyRecord, current) {
 				p.preferredByBucket[key] = copyRecord
 			}
 		}
@@ -320,7 +347,7 @@ func (p *openAICodexTurnStatePool) rebuildAccountsLocked() {
 			}
 			if key, ok := newOpenAICodexTurnStateBucketKey(accountID, record.SourceModel); ok && isReusableOpenAICodexTurnStateRecord(record, key, now) {
 				current := p.preferredByBucket[key]
-				if current == nil || openAICodexTurnStateNewestFirst(record, current) {
+				if current == nil || openAICodexTurnStateRanksBefore(record, current) {
 					p.preferredByBucket[key] = record
 				}
 			}
@@ -349,7 +376,7 @@ func (p *openAICodexTurnStatePool) selectPreferredForBucketLocked(key openAICode
 			continue
 		}
 		current := p.preferredByBucket[key]
-		if current == nil || openAICodexTurnStateNewestFirst(record, current) {
+		if current == nil || openAICodexTurnStateRanksBefore(record, current) {
 			p.preferredByBucket[key] = record
 		}
 	}
@@ -420,13 +447,6 @@ func openAICodexTurnStateRanksBefore(left, right *OpenAICodexTurnStateRecord) bo
 	return left.StateHash > right.StateHash
 }
 
-func openAICodexTurnStateNewestFirst(left, right *OpenAICodexTurnStateRecord) bool {
-	if !left.LastSeenAt.Equal(right.LastSeenAt) {
-		return left.LastSeenAt.After(right.LastSeenAt)
-	}
-	return left.StateHash > right.StateHash
-}
-
 func hashOpenAICodexTurnState(value string) string {
 	sum := sha256.Sum256([]byte(value))
 	return hex.EncodeToString(sum[:])
@@ -472,7 +492,7 @@ func parseOpenAICodexTurnStateIssuedAt(value string) (time.Time, bool) {
 }
 
 func isReusableOpenAICodexTurnStateRecord(record *OpenAICodexTurnStateRecord, key openAICodexTurnStateBucketKey, now time.Time) bool {
-	if record == nil || record.StateValue == "" || record.ValueLength != openAICodexPreferredTurnStateLength {
+	if record == nil || record.StateValue == "" || !isReusableOpenAICodexTurnStateLength(record.ValueLength) {
 		return false
 	}
 	if record.SourceAccountID == nil || *record.SourceAccountID != key.accountID || normalizeOpenAICodexTurnStateModel(record.SourceModel) != key.model {

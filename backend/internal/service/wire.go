@@ -750,6 +750,7 @@ func ProvideOpsService(
 	svc.authCacheInvalidationWorker = authCacheInvalidationWorker
 	svc.apiKeyService = apiKeyService
 	svc.StartRuntimeSettingsRefresh(context.Background())
+	svc.StartOpenAICodexTurnStateScanner(context.Background())
 	return svc
 }
 

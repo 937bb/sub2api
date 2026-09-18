@@ -126,6 +126,19 @@ type codexTurnStateDeleteRequest struct {
 	IDs []int64 `json:"ids" binding:"required"`
 }
 
+type codexTurnStateProxyBatchRequest struct {
+	Values []string `json:"values" binding:"required"`
+}
+
+type codexTurnStateProxyEnabledRequest struct {
+	Enabled bool `json:"enabled"`
+}
+
+type codexTurnStateScanRequest struct {
+	AccountID int64  `json:"account_id"`
+	Model     string `json:"model"`
+}
+
 func (h *OpsHandler) AddCodexTurnStates(c *gin.Context) {
 	if h.opsService == nil {
 		response.Error(c, http.StatusServiceUnavailable, "Ops service not available")
@@ -168,6 +181,146 @@ func (h *OpsHandler) DeleteCodexTurnStates(c *gin.Context) {
 		return
 	}
 	response.Success(c, gin.H{"deleted": deleted})
+}
+
+func (h *OpsHandler) ListCodexTurnStateAccounts(c *gin.Context) {
+	if h.opsService == nil {
+		response.Error(c, http.StatusServiceUnavailable, "Ops service not available")
+		return
+	}
+	page, pageSize := response.ParsePagination(c)
+	accountIDs := make([]int64, 0)
+	for _, raw := range strings.Split(c.Query("account_ids"), ",") {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		id, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || id <= 0 {
+			response.BadRequest(c, "Invalid account_ids")
+			return
+		}
+		accountIDs = append(accountIDs, id)
+	}
+	result, err := h.opsService.ListOpenAICodexTurnStateAccountStatuses(c.Request.Context(), accountIDs, page, pageSize)
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, "Failed to list Codex turn-state accounts")
+		return
+	}
+	response.Paginated(c, result.Items, result.Total, result.Page, result.PageSize)
+}
+
+func (h *OpsHandler) GetCodexTurnStateOperationsSummary(c *gin.Context) {
+	if h.opsService == nil {
+		response.Error(c, http.StatusServiceUnavailable, "Ops service not available")
+		return
+	}
+	result, err := h.opsService.GetOpenAICodexTurnStateOperationsSummary(c.Request.Context())
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, "Failed to load Codex turn-state operations summary")
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *OpsHandler) ListCodexTurnStateProxies(c *gin.Context) {
+	if h.opsService == nil {
+		response.Error(c, http.StatusServiceUnavailable, "Ops service not available")
+		return
+	}
+	items, err := h.opsService.ListOpenAICodexTurnStateProxies(c.Request.Context())
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, "Failed to list Codex turn-state proxies")
+		return
+	}
+	response.Success(c, items)
+}
+
+func (h *OpsHandler) AddCodexTurnStateProxies(c *gin.Context) {
+	if h.opsService == nil {
+		response.Error(c, http.StatusServiceUnavailable, "Ops service not available")
+		return
+	}
+	var req codexTurnStateProxyBatchRequest
+	if err := c.ShouldBindJSON(&req); err != nil || len(req.Values) == 0 || len(req.Values) > 500 {
+		response.BadRequest(c, "Invalid proxy list")
+		return
+	}
+	added, err := h.opsService.AddOpenAICodexTurnStateProxies(c.Request.Context(), req.Values)
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	response.Success(c, gin.H{"added": added})
+}
+
+func (h *OpsHandler) SetCodexTurnStateProxyEnabled(c *gin.Context) {
+	if h.opsService == nil {
+		response.Error(c, http.StatusServiceUnavailable, "Ops service not available")
+		return
+	}
+	id, err := strconv.ParseInt(strings.TrimSpace(c.Param("id")), 10, 64)
+	if err != nil || id <= 0 {
+		response.BadRequest(c, "Invalid proxy id")
+		return
+	}
+	var req codexTurnStateProxyEnabledRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request")
+		return
+	}
+	if err := h.opsService.SetOpenAICodexTurnStateProxyEnabled(c.Request.Context(), id, req.Enabled); err != nil {
+		response.Error(c, http.StatusBadRequest, "Failed to update Codex turn-state proxy")
+		return
+	}
+	response.Success(c, gin.H{"updated": true})
+}
+
+func (h *OpsHandler) DeleteCodexTurnStateProxy(c *gin.Context) {
+	if h.opsService == nil {
+		response.Error(c, http.StatusServiceUnavailable, "Ops service not available")
+		return
+	}
+	id, err := strconv.ParseInt(strings.TrimSpace(c.Param("id")), 10, 64)
+	if err != nil || id <= 0 {
+		response.BadRequest(c, "Invalid proxy id")
+		return
+	}
+	if err := h.opsService.DeleteOpenAICodexTurnStateProxy(c.Request.Context(), id); err != nil {
+		response.Error(c, http.StatusBadRequest, "Failed to delete Codex turn-state proxy")
+		return
+	}
+	response.Success(c, gin.H{"deleted": true})
+}
+
+func (h *OpsHandler) ScanCodexTurnState(c *gin.Context) {
+	if h.opsService == nil {
+		response.Error(c, http.StatusServiceUnavailable, "Ops service not available")
+		return
+	}
+	var req codexTurnStateScanRequest
+	if err := c.ShouldBindJSON(&req); err != nil || req.AccountID <= 0 {
+		response.BadRequest(c, "Invalid scan request")
+		return
+	}
+	if !h.opsService.EnqueueOpenAICodexTurnStateScan(req.AccountID, req.Model) {
+		response.Success(c, gin.H{"queued": false})
+		return
+	}
+	response.Success(c, gin.H{"queued": true})
+}
+
+func (h *OpsHandler) ScanAllCodexTurnStates(c *gin.Context) {
+	if h.opsService == nil {
+		response.Error(c, http.StatusServiceUnavailable, "Ops service not available")
+		return
+	}
+	queued, err := h.opsService.EnqueueAllOpenAICodexTurnStateScans(c.Request.Context())
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, "Failed to queue Codex turn-state scans")
+		return
+	}
+	response.Success(c, gin.H{"queued": queued})
 }
 
 // GetErrorLogs lists ops error logs.

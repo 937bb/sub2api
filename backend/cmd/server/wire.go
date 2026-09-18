@@ -176,6 +176,12 @@ func provideCleanup(
 				}
 				return nil
 			}},
+			{"OpenAICodexTurnStateScanner", func() error {
+				if opsService != nil {
+					opsService.StopOpenAICodexTurnStateScanner()
+				}
+				return nil
+			}},
 			{"PromptAuditService", func() error {
 				if promptAudit != nil {
 					return promptAudit.Shutdown(ctx)

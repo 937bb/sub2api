@@ -283,6 +283,22 @@
               </div>
             </div>
           </template>
+          <template #cell-codex_state="{ row }">
+            <div v-if="row.platform === 'openai' && (row.type === 'oauth' || row.type === 'setup-token')" class="flex flex-col items-start gap-1">
+              <span :class="['badge', codexStateBadgeClass(codexStateByAccountID.get(row.id)?.status)]">
+                {{ codexStateLabel(codexStateByAccountID.get(row.id)?.status) }}
+              </span>
+              <button
+                type="button"
+                class="text-xs font-medium text-primary-600 hover:text-primary-700 dark:text-primary-400"
+                :disabled="codexStateScanning.has(row.id)"
+                @click="scanCodexStateForAccount(row.id)"
+              >
+                {{ codexStateScanning.has(row.id) ? t('admin.ops.turnState.status.running') : t('admin.ops.turnState.scanNow') }}
+              </button>
+            </div>
+            <span v-else class="text-sm text-gray-400">-</span>
+          </template>
           <template #cell-capacity="{ row }">
             <AccountCapacityCell :account="row" />
           </template>
@@ -520,6 +536,7 @@ import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { adminAPI } from '@/api/admin'
+import { opsAPI, type CodexTurnStateAccountStatus, type CodexTurnStateAccountStatusValue } from '@/api/admin/ops'
 import { useTableLoader } from '@/composables/useTableLoader'
 import { useSwipeSelect, type SwipeSelectVirtualContext } from '@/composables/useSwipeSelect'
 import { useTableSelection } from '@/composables/useTableSelection'
@@ -1122,6 +1139,51 @@ const {
   }
 })
 
+const codexStateByAccountID = reactive(new Map<number, CodexTurnStateAccountStatus>())
+const codexStateScanning = reactive(new Set<number>())
+
+const refreshCodexStateStatuses = async () => {
+  const ids = accounts.value
+    .filter(account => account.platform === 'openai' && (account.type === 'oauth' || account.type === 'setup-token'))
+    .map(account => account.id)
+  codexStateByAccountID.clear()
+  if (ids.length === 0) return
+  try {
+    const result = await opsAPI.listCodexTurnStateAccounts({ page: 1, page_size: Math.min(ids.length * 4, 200), account_ids: ids.join(',') })
+    for (const item of result.items) {
+      const current = codexStateByAccountID.get(item.account_id)
+      if (!current || item.model === 'gpt-5.5') codexStateByAccountID.set(item.account_id, item)
+    }
+  } catch (error) {
+    console.error('Failed to load Codex State status:', error)
+  }
+}
+
+const codexStateLabel = (status?: CodexTurnStateAccountStatusValue) =>
+  t(`admin.ops.turnState.status.${status || 'missing'}`)
+
+const codexStateBadgeClass = (status?: CodexTurnStateAccountStatusValue) => {
+  if (status === 'ready') return 'badge-success'
+  if (status === 'running' || status === 'pending') return 'badge-info'
+  if (status === 'expiring' || status === 'retry_wait') return 'badge-warning'
+  if (status === 'failed') return 'badge-danger'
+  return 'badge-gray'
+}
+
+const scanCodexStateForAccount = async (accountID: number) => {
+  codexStateScanning.add(accountID)
+  try {
+    await opsAPI.scanCodexTurnState(accountID, codexStateByAccountID.get(accountID)?.model || 'gpt-5.5')
+    const current = codexStateByAccountID.get(accountID)
+    if (current) current.status = 'pending'
+    window.setTimeout(refreshCodexStateStatuses, 1000)
+  } catch (error) {
+    appStore.showError(extractApiErrorMessage(error, t('admin.ops.turnState.scanFailed')))
+  } finally {
+    codexStateScanning.delete(accountID)
+  }
+}
+
 const {
   selectedSet,
   selectedIds: selIds,
@@ -1191,6 +1253,7 @@ const load = async (options: AccountLoadOptions = {}) => {
   pendingTodayStatsRefresh.value = false
   requestParams.lite = '1'
   await baseLoad()
+  await refreshCodexStateStatuses()
   if (options.refreshTodayStats !== false) await refreshTodayStatsBatch()
 }
 
@@ -1200,6 +1263,7 @@ const reload = async () => {
   resetAutoRefreshCache()
   pendingTodayStatsRefresh.value = false
   await baseReload()
+  await refreshCodexStateStatuses()
   await refreshTodayStatsBatch()
 }
 
@@ -1815,6 +1879,7 @@ const allColumns = computed(() => {
     { key: 'name', label: t('admin.accounts.columns.name'), sortable: true },
     { key: 'id', label: t('admin.accounts.columns.id'), sortable: true },
     { key: 'platform_type', label: t('admin.accounts.columns.platformType'), sortable: false },
+    { key: 'codex_state', label: t('admin.accounts.columns.codexState'), sortable: false },
     { key: 'capacity', label: t('admin.accounts.columns.capacity'), sortable: false },
     { key: 'status', label: t('admin.accounts.columns.status'), sortable: true },
     { key: 'schedulable', label: t('admin.accounts.columns.schedulable'), sortable: true },

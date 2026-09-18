@@ -84,6 +84,8 @@ type OpsService struct {
 	runtimeRefreshSuccess        atomic.Uint64
 	runtimeRefreshFailure        atomic.Uint64
 	runtimeRefreshLastFailureLog atomic.Int64
+
+	codexTurnStateScanner *openAICodexTurnStateScanner
 }
 
 // CleanupReloader 由 OpsCleanupService 实现。
@@ -141,6 +143,9 @@ func NewOpsService(
 	if openAIGatewayService != nil {
 		if turnStateRepo, ok := opsRepo.(OpenAICodexTurnStateStore); ok {
 			openAIGatewayService.setOpenAICodexTurnStateRepository(turnStateRepo)
+		}
+		if scannerRepo, ok := opsRepo.(OpenAICodexTurnStateScannerRepository); ok {
+			svc.codexTurnStateScanner = newOpenAICodexTurnStateScanner(scannerRepo, accountRepo, openAIGatewayService)
 		}
 	}
 	svc.initRuntimeSettings(context.Background())

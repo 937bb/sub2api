@@ -96,3 +96,10 @@ func TestUpsertOpenAICodexTurnStatePersistsAccountModelAndIssuedAt(t *testing.T)
 	require.NoError(t, repo.UpsertOpenAICodexTurnState(context.Background(), record))
 	require.NoError(t, mock.ExpectationsWereMet())
 }
+
+func TestUpsertOpenAICodexTurnStateDoesNotMoveStateAcrossAccountModelScope(t *testing.T) {
+	require.Contains(t, upsertOpenAICodexTurnStateSQL,
+		"EXCLUDED.source_account_id IS NOT DISTINCT FROM codex_turn_states.source_account_id")
+	require.Contains(t, upsertOpenAICodexTurnStateSQL,
+		"EXCLUDED.source_model IS NOT DISTINCT FROM codex_turn_states.source_model")
+}

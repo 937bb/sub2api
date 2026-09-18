@@ -26,7 +26,9 @@ ON CONFLICT (state_hash) DO UPDATE SET
   issued_at = EXCLUDED.issued_at,
   last_seen_at = EXCLUDED.last_seen_at,
   expires_at = EXCLUDED.expires_at
-WHERE EXCLUDED.last_seen_at >= codex_turn_states.last_seen_at`
+WHERE EXCLUDED.last_seen_at >= codex_turn_states.last_seen_at
+  AND EXCLUDED.source_account_id IS NOT DISTINCT FROM codex_turn_states.source_account_id
+  AND EXCLUDED.source_model IS NOT DISTINCT FROM codex_turn_states.source_model`
 
 func (r *opsRepository) UpsertOpenAICodexTurnState(ctx context.Context, record *service.OpenAICodexTurnStateRecord) error {
 	if r == nil || r.db == nil {

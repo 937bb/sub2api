@@ -51,7 +51,7 @@ func testOpenAICodexTurnState(length int, issuedAt time.Time, marker byte) strin
 
 func testOpenAICodexPreferredTurnState(seed string) string {
 	marker := sha256.Sum256([]byte(seed))
-	return testOpenAICodexTurnState(openAICodexPreferredTurnStateLength, time.Now().UTC().Truncate(time.Second), marker[0])
+	return testOpenAICodexTurnState(openAICodexTurnStateLength332, time.Now().UTC().Truncate(time.Second), marker[0])
 }
 
 func expireOpenAICodexTurnState(pool *openAICodexTurnStatePool, value string, expiresAt time.Time) {
@@ -240,6 +240,36 @@ func TestOpenAICodexTurnStatePool_KeepsSameStateSeparatedByAccount(t *testing.T)
 	require.Equal(t, state, second)
 }
 
+func TestOpenAICodexTurnStatePool_Prefers332AndFallsBackTo292(t *testing.T) {
+	now := time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)
+	pool := newOpenAICodexTurnStatePool()
+	pool.now = func() time.Time { return now }
+	accountID := int64(42)
+	model := "gpt-5.6-codex"
+	state332 := testOpenAICodexTurnState(332, now, 'a')
+	state292 := testOpenAICodexTurnState(292, now.Add(time.Second), 'b')
+
+	pool.observe(state332, &accountID, "state-332", model, "http")
+	now = now.Add(time.Second)
+	pool.observe(state292, &accountID, "state-292", model, "http")
+
+	selected, ok := pool.preferredForBucket(accountID, model)
+	require.True(t, ok)
+	require.Equal(t, state332, selected)
+
+	expireOpenAICodexTurnState(pool, state332, now.Add(-time.Second))
+	selected, ok = pool.preferredForBucket(accountID, model)
+	require.True(t, ok)
+	require.Equal(t, state292, selected)
+}
+
+func TestReusableOpenAICodexTurnStateLengths(t *testing.T) {
+	require.True(t, isReusableOpenAICodexTurnStateLength(292))
+	require.True(t, isReusableOpenAICodexTurnStateLength(332))
+	require.False(t, isReusableOpenAICodexTurnStateLength(312))
+	require.False(t, isReusableOpenAICodexTurnStateLength(356))
+}
+
 func TestGuardOpenAICodexTurnStateEcho_PreservesNon312Inputs(t *testing.T) {
 	now := time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)
 	svc := &OpenAIGatewayService{}
@@ -322,7 +352,7 @@ func TestOpenAICodexTurnStatePool_UsesFernetIssuedAtForExpiry(t *testing.T) {
 	require.False(t, ok)
 }
 
-func TestBuildOpenAIWSHeaders_UsesSameAccountModel292State(t *testing.T) {
+func TestBuildOpenAIWSHeaders_UsesSameAccountModelReusableState(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	svc := &OpenAIGatewayService{}
 	pool := svc.getOpenAICodexTurnStatePool()

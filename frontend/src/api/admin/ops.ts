@@ -109,6 +109,91 @@ export interface CodexTurnStateListParams {
   account_id?: number
 }
 
+export type CodexTurnStateAccountStatusValue = 'ready' | 'expiring' | 'pending' | 'running' | 'retry_wait' | 'failed' | 'disabled' | 'missing'
+
+export interface CodexTurnStateAccountStatus {
+  account_id: number
+  account_name: string
+  account_type: string
+  plan_type?: string
+  model: string
+  status: CodexTurnStateAccountStatusValue
+  state_length: number
+  issued_at?: string
+  expires_at?: string
+  last_attempt_at?: string
+  last_success_at?: string
+  attempt_count: number
+  last_proxy_id?: number
+  last_proxy_masked?: string
+  last_error?: string
+}
+
+export interface CodexTurnStateOperationsSummary {
+  oauth_accounts: number
+  ready_accounts: number
+  missing_accounts: number
+  running_jobs: number
+  enabled_proxies: number
+  healthy_proxies: number
+  shared_proxies: number
+  last_scan_at?: string
+}
+
+export interface CodexTurnStateProxy {
+  id: number
+  name: string
+  masked_url: string
+  enabled: boolean
+  health_status: 'unknown' | 'healthy' | 'unhealthy' | string
+  consecutive_failures: number
+  last_checked_at?: string
+  last_success_at?: string
+  last_error?: string
+  created_at: string
+  updated_at: string
+}
+
+export async function listCodexTurnStateAccounts(params: { page?: number; page_size?: number; account_ids?: string }): Promise<PaginatedResponse<CodexTurnStateAccountStatus>> {
+  const { data } = await apiClient.get<PaginatedResponse<CodexTurnStateAccountStatus>>('/admin/ops/codex-turn-states/accounts', { params })
+  return data
+}
+
+export async function getCodexTurnStateOperationsSummary(): Promise<CodexTurnStateOperationsSummary> {
+  const { data } = await apiClient.get<CodexTurnStateOperationsSummary>('/admin/ops/codex-turn-states/operations-summary')
+  return data
+}
+
+export async function listCodexTurnStateProxies(): Promise<CodexTurnStateProxy[]> {
+  const { data } = await apiClient.get<CodexTurnStateProxy[]>('/admin/ops/codex-turn-states/proxies')
+  return data
+}
+
+export async function addCodexTurnStateProxies(values: string[]): Promise<{ added: number }> {
+  const { data } = await apiClient.post<{ added: number }>('/admin/ops/codex-turn-states/proxies', { values })
+  return data
+}
+
+export async function setCodexTurnStateProxyEnabled(id: number, enabled: boolean): Promise<{ updated: boolean }> {
+  const { data } = await apiClient.put<{ updated: boolean }>(`/admin/ops/codex-turn-states/proxies/${id}/enabled`, { enabled })
+  return data
+}
+
+export async function deleteCodexTurnStateProxy(id: number): Promise<{ deleted: boolean }> {
+  const { data } = await apiClient.delete<{ deleted: boolean }>(`/admin/ops/codex-turn-states/proxies/${id}`)
+  return data
+}
+
+export async function scanCodexTurnState(accountId: number, model: string): Promise<{ queued: boolean }> {
+  const { data } = await apiClient.post<{ queued: boolean }>('/admin/ops/codex-turn-states/scan', { account_id: accountId, model })
+  return data
+}
+
+export async function scanAllCodexTurnStates(): Promise<{ queued: number }> {
+  const { data } = await apiClient.post<{ queued: number }>('/admin/ops/codex-turn-states/scan-all')
+  return data
+}
+
 export async function listCodexTurnStates(params: CodexTurnStateListParams): Promise<PaginatedResponse<CodexTurnStateRecord>> {
   const { data } = await apiClient.get<PaginatedResponse<CodexTurnStateRecord>>('/admin/ops/codex-turn-states', { params })
   return data
@@ -1365,6 +1450,14 @@ export const opsAPI = {
   getCodexTurnStateSummary,
   addCodexTurnStates,
   deleteCodexTurnStates,
+  listCodexTurnStateAccounts,
+  getCodexTurnStateOperationsSummary,
+  listCodexTurnStateProxies,
+  addCodexTurnStateProxies,
+  setCodexTurnStateProxyEnabled,
+  deleteCodexTurnStateProxy,
+  scanCodexTurnState,
+  scanAllCodexTurnStates,
   getDashboardSnapshotV2,
   getDashboardOverview,
   getThroughputTrend,
