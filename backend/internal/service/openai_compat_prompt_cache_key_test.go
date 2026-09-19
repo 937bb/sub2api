@@ -2,10 +2,13 @@ package service
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
 
@@ -109,6 +112,50 @@ func TestDeriveCompatPromptCacheKey_UsesResolvedSparkFamily(t *testing.T) {
 	k2 := deriveCompatPromptCacheKey(req, " openai/gpt-5.3-codex-spark ")
 	require.NotEmpty(t, k1)
 	require.Equal(t, k1, k2, "resolved spark family should derive a stable compat cache key")
+}
+
+func TestDeriveOMPResponsesPromptCacheKeyStableAcrossTurns(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	ctx.Request.Header.Set("User-Agent", "omp/18.2.6")
+
+	first := []byte(`{"model":"gpt-6-astra","instructions":"Work carefully.","tools":[{"type":"function","name":"shell"}],"input":[{"role":"user","content":[{"type":"input_text","text":"Inspect the repository"}]}]}`)
+	second := []byte(`{"model":"gpt-6-astra","instructions":"Work carefully.","tools":[{"type":"function","name":"shell"}],"input":[{"role":"user","content":[{"type":"input_text","text":"Inspect the repository"}]},{"role":"assistant","content":[{"type":"output_text","text":"Done"}]},{"role":"user","content":[{"type":"input_text","text":"Run the tests"}]}]}`)
+
+	firstKey := deriveOMPResponsesPromptCacheKey(ctx, first, "gpt-6-astra")
+	secondKey := deriveOMPResponsesPromptCacheKey(ctx, second, "gpt-6-astra")
+	require.NotEmpty(t, firstKey)
+	require.Equal(t, firstKey, secondKey)
+	require.True(t, strings.HasPrefix(firstKey, ompResponsesPromptCacheKeyPrefix))
+}
+
+func TestDeriveOMPResponsesPromptCacheKeyUsesBodySession(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	ctx.Request.Header.Set("User-Agent", "omp/18.2.5")
+
+	first := []byte(`{"model":"gpt-5.6-sol","client_metadata":{"session_id":"omp-session"},"input":"first"}`)
+	second := []byte(`{"model":"gpt-5.6-sol","client_metadata":{"session_id":"omp-session"},"input":"different payload"}`)
+	firstKey := deriveOMPResponsesPromptCacheKey(ctx, first, "gpt-5.6-sol")
+	require.NotEmpty(t, firstKey)
+	require.Equal(t, firstKey, deriveOMPResponsesPromptCacheKey(ctx, second, "gpt-5.6-sol"))
+}
+
+func TestDeriveOMPResponsesPromptCacheKeyPreservesExplicitAndOtherClients(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := []byte(`{"model":"gpt-6-astra","input":"hello"}`)
+
+	other, _ := gin.CreateTestContext(httptest.NewRecorder())
+	other.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	other.Request.Header.Set("User-Agent", "pi/0.50.0")
+	require.Empty(t, deriveOMPResponsesPromptCacheKey(other, body, "gpt-6-astra"))
+
+	omp, _ := gin.CreateTestContext(httptest.NewRecorder())
+	omp.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	omp.Request.Header.Set("User-Agent", "omp/18.2.6")
+	require.Empty(t, deriveOMPResponsesPromptCacheKey(omp, []byte(`{"model":"gpt-6-astra","prompt_cache_key":"client-key","input":"hello"}`), "gpt-6-astra"))
 }
 
 func TestDeriveAnthropicCompatPromptCacheKey_StableAcrossLaterTurns(t *testing.T) {

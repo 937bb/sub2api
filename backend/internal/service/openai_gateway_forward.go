@@ -532,6 +532,13 @@ func (s *OpenAIGatewayService) forwardOnce(ctx context.Context, c *gin.Context, 
 		if decodeErr != nil {
 			return nil, decodeErr
 		}
+		if !isCompactRequest && strings.TrimSpace(clientPromptCacheKey) == "" {
+			if ompPromptCacheKey := deriveOMPResponsesPromptCacheKey(c, body, upstreamModel); ompPromptCacheKey != "" {
+				decoded["prompt_cache_key"] = ompPromptCacheKey
+				clientPromptCacheKey = ompPromptCacheKey
+				markDecodedModified()
+			}
+		}
 		omitPromotedSystemMessages := !strings.EqualFold(
 			strings.TrimSpace(gjson.GetBytes(body, "text.format.type").String()),
 			"json_object",

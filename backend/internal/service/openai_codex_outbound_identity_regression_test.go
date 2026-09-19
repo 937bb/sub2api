@@ -150,6 +150,54 @@ func TestCodexCacheOnlyIdentityIsNotHashedTwice(t *testing.T) {
 	require.Equal(t, original, headers)
 }
 
+func TestForwardOMPResponsesInjectsStablePromptCacheIdentity(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	upstream := &httpUpstreamRecorder{responses: []*http.Response{
+		openAICompatSSECompletedResponse("resp_omp_first", "gpt-6-astra"),
+		openAICompatSSECompletedResponse("resp_omp_second", "gpt-6-astra"),
+	}}
+	svc := &OpenAIGatewayService{
+		cfg:          &config.Config{Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}}},
+		httpUpstream: upstream,
+		cache:        &stubGatewayCache{},
+	}
+	account := &Account{
+		ID:          77,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"access_token":       "test-token",
+			"chatgpt_account_id": "upstream-77",
+		},
+		Extra: map[string]any{codexFingerprintModeExtraKey: "off"},
+	}
+	bodies := [][]byte{
+		[]byte(`{"model":"gpt-6-astra","stream":true,"instructions":"Work carefully.","tools":[{"type":"function","name":"shell","description":"Run a command","parameters":{"type":"object"}}],"input":[{"role":"user","content":[{"type":"input_text","text":"Inspect the repository"}]}]}`),
+		[]byte(`{"model":"gpt-6-astra","stream":true,"instructions":"Work carefully.","tools":[{"type":"function","name":"shell","description":"Run a command","parameters":{"type":"object"}}],"input":[{"role":"user","content":[{"type":"input_text","text":"Inspect the repository"}]},{"role":"assistant","content":[{"type":"output_text","text":"Done"}]},{"role":"user","content":[{"type":"input_text","text":"Run the tests"}]}]}`),
+	}
+
+	for _, body := range bodies {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+		c.Request.Header.Set("User-Agent", "omp/18.2.6")
+		c.Set("api_key", &APIKey{ID: 1652})
+		result, err := svc.Forward(context.Background(), c, account, body)
+		require.NoError(t, err)
+		require.NotNil(t, result)
+	}
+
+	require.Len(t, upstream.bodies, 2)
+	firstKey := gjson.GetBytes(upstream.bodies[0], "prompt_cache_key").String()
+	secondKey := gjson.GetBytes(upstream.bodies[1], "prompt_cache_key").String()
+	require.NotEmpty(t, firstKey)
+	require.Equal(t, firstKey, secondKey)
+	require.Equal(t, firstKey, upstream.requests[0].Header.Get("session-id"))
+	require.Equal(t, upstream.requests[0].Header.Get("session-id"), upstream.requests[1].Header.Get("session-id"))
+	_, err := uuid.Parse(firstKey)
+	require.NoError(t, err, "OAuth account scoping should keep the upstream cache identity UUID-shaped")
+}
+
 func TestCodexForwardTransportIdentityParityModes(t *testing.T) {
 	for _, useWS := range []bool{false, true} {
 		for _, mode := range []string{"off", "device", "session", "full"} {
