@@ -10,10 +10,10 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -57,7 +57,6 @@ type openAICodexTurnStateScanner struct {
 	inFlight map[openAICodexTurnStateBucketKey]struct{}
 	cancel   context.CancelFunc
 	done     chan struct{}
-	proxySeq atomic.Uint64
 }
 
 func newOpenAICodexTurnStateScanner(repo OpenAICodexTurnStateScannerRepository, accountRepo AccountRepository, gateway *OpenAIGatewayService) *openAICodexTurnStateScanner {
@@ -344,7 +343,7 @@ func (s *openAICodexTurnStateScanner) runJob(ctx context.Context, job openAICode
 	scan.NextAttemptAt = nil
 	_ = s.repo.UpsertOpenAICodexTurnStateScan(ctx, scan)
 
-	proxy := s.selectProxy(ctx)
+	proxy := s.selectProxy(ctx, account.ID, upstreamModel, scan.AttemptCount)
 	proxyURL := ""
 	if proxy != nil {
 		proxyURL = proxy.ProxyURL
@@ -423,7 +422,7 @@ func openAICodexTurnStateRetryDelay(attempt int) time.Duration {
 	return delay
 }
 
-func (s *openAICodexTurnStateScanner) selectProxy(ctx context.Context) *OpenAICodexTurnStateProxy {
+func (s *openAICodexTurnStateScanner) selectProxy(ctx context.Context, accountID int64, model string, attempt int) *OpenAICodexTurnStateProxy {
 	dedicated, dedicatedErr := s.repo.ListOpenAICodexTurnStateProxies(ctx, true)
 	shared, sharedErr := s.repo.ListReusableOpenAICodexTurnStateProxies(ctx)
 	if dedicatedErr != nil && sharedErr != nil {
@@ -433,8 +432,47 @@ func (s *openAICodexTurnStateScanner) selectProxy(ctx context.Context) *OpenAICo
 	if len(proxies) == 0 {
 		return nil
 	}
-	index := int(s.proxySeq.Add(1)-1) % len(proxies)
+	sortOpenAICodexTurnStateScanProxies(proxies)
+	index := openAICodexTurnStateProxyIndex(accountID, model, attempt, len(proxies))
 	return proxies[index]
+}
+
+func sortOpenAICodexTurnStateScanProxies(proxies []*OpenAICodexTurnStateProxy) {
+	sort.SliceStable(proxies, func(left, right int) bool {
+		leftProxy, rightProxy := proxies[left], proxies[right]
+		if leftProxy.Source != rightProxy.Source {
+			return leftProxy.Source == "state"
+		}
+		leftID, rightID := leftProxy.SourceID, rightProxy.SourceID
+		if leftID == 0 {
+			leftID = leftProxy.ID
+		}
+		if rightID == 0 {
+			rightID = rightProxy.ID
+		}
+		if leftID != rightID {
+			return leftID < rightID
+		}
+		return leftProxy.ProxyURL < rightProxy.ProxyURL
+	})
+}
+
+func openAICodexTurnStateProxyIndex(accountID int64, model string, attempt, proxyCount int) int {
+	if proxyCount <= 1 {
+		return 0
+	}
+	if attempt < 1 {
+		attempt = 1
+	}
+
+	// Give each account/model a stable starting point, then advance one proxy
+	// for every persisted attempt so concurrent jobs cannot pin it to one IP.
+	seed := uint64(accountID) ^ 14695981039346656037
+	for index := 0; index < len(model); index++ {
+		seed ^= uint64(model[index])
+		seed *= 1099511628211
+	}
+	return int((seed + uint64(attempt-1)) % uint64(proxyCount))
 }
 
 func mergeOpenAICodexTurnStateScanProxies(groups ...[]*OpenAICodexTurnStateProxy) []*OpenAICodexTurnStateProxy {

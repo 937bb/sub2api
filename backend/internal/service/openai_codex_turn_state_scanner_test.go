@@ -41,6 +41,46 @@ func TestMergeOpenAICodexTurnStateScanProxiesDeduplicatesAndCopies(t *testing.T)
 	require.Equal(t, "http://user:pass@proxy.example:8080", dedicated.ProxyURL)
 }
 
+func TestOpenAICodexTurnStateProxyIndexRotatesPerAccountModelAttempt(t *testing.T) {
+	const proxyCount = 10
+
+	for _, model := range []string{"gpt-5.5", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-6-astra"} {
+		seen := make(map[int]struct{}, proxyCount)
+		for attempt := 1; attempt <= proxyCount; attempt++ {
+			index := openAICodexTurnStateProxyIndex(62742, model, attempt, proxyCount)
+			require.GreaterOrEqual(t, index, 0)
+			require.Less(t, index, proxyCount)
+			require.NotContains(t, seen, index, "model %s reused a proxy before completing a full rotation", model)
+			seen[index] = struct{}{}
+		}
+		require.Len(t, seen, proxyCount)
+	}
+
+	require.Equal(t,
+		openAICodexTurnStateProxyIndex(62742, "gpt-5.5", 1, proxyCount),
+		openAICodexTurnStateProxyIndex(62742, "gpt-5.5", proxyCount+1, proxyCount),
+	)
+	require.Equal(t, 0, openAICodexTurnStateProxyIndex(62742, "gpt-5.5", 1, 0))
+}
+
+func TestSortOpenAICodexTurnStateScanProxiesUsesStableIdentity(t *testing.T) {
+	proxies := []*OpenAICodexTurnStateProxy{
+		{Source: "shared", SourceID: 2, ProxyURL: "http://shared-2.example"},
+		{ID: 8, Source: "state", SourceID: 8, ProxyURL: "http://state-8.example"},
+		{ID: 3, Source: "state", SourceID: 3, ProxyURL: "http://state-3.example"},
+		{Source: "shared", SourceID: 1, ProxyURL: "http://shared-1.example"},
+	}
+
+	sortOpenAICodexTurnStateScanProxies(proxies)
+
+	require.Equal(t, []string{
+		"http://state-3.example",
+		"http://state-8.example",
+		"http://shared-1.example",
+		"http://shared-2.example",
+	}, []string{proxies[0].ProxyURL, proxies[1].ProxyURL, proxies[2].ProxyURL, proxies[3].ProxyURL})
+}
+
 func TestOpenAICodexTurnStateRetryDelayCapsAtFiveMinutes(t *testing.T) {
 	require.Equal(t, 5*time.Second, openAICodexTurnStateRetryDelay(1))
 	require.Equal(t, 10*time.Second, openAICodexTurnStateRetryDelay(2))
