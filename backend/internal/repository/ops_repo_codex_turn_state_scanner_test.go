@@ -30,6 +30,13 @@ func TestCodexTurnStateAccountStatusCTEIncludesExplicitUnavailableAccounts(t *te
 	require.Regexp(t, `(?s)AND \(\s*\$2::bigint\[\] IS NOT NULL\s*OR \(\s*status = 'active'`, query)
 }
 
+func TestCodexTurnStateAccountStatusCTESelectsNewestExpiryWithinAccountAndModel(t *testing.T) {
+	query := codexTurnStateAccountStatusCTE()
+	require.Contains(t, query, "c.source_account_id = a.id AND c.source_model = am.model")
+	require.Contains(t, query, "c.value_length IN (292, 332) AND c.expires_at > NOW()")
+	require.Contains(t, query, "ORDER BY c.value_length DESC, c.expires_at DESC, c.last_seen_at DESC, c.id DESC LIMIT 1")
+}
+
 func TestListRecentlyUsedOpenAICodexAccountIDs(t *testing.T) {
 	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
 	require.NoError(t, err)

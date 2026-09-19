@@ -1,6 +1,7 @@
 package service
 
 import (
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -223,11 +224,12 @@ func TestOpenAICodexTurnStateModelsMatchRejectsMismatch(t *testing.T) {
 
 func TestOpenAICodexTurnStateScanFailurePreservesUpstreamError(t *testing.T) {
 	result := openAICodexTurnStateHarvestResult{errorMessage: "proxy connect failed"}
-	require.Equal(t, "proxy connect failed", openAICodexTurnStateScanFailure("gpt-5.5", result))
+	require.Equal(t, "proxy connect failed", openAICodexTurnStateScanFailure("gpt-5.5", result, time.Now()))
 }
 
 func TestOpenAICodexTurnStateScanFailureValidatesSuccessfulProbe(t *testing.T) {
-	state := strings.Repeat("a", openAICodexTurnStateLength332)
+	now := time.Now().UTC().Truncate(time.Second)
+	state := testOpenAICodexTurnState(openAICodexTurnStateLength332, now, 's')
 	result := openAICodexTurnStateHarvestResult{
 		stateValue:    state,
 		stateLength:   len(state),
@@ -235,13 +237,45 @@ func TestOpenAICodexTurnStateScanFailureValidatesSuccessfulProbe(t *testing.T) {
 		upstreamOK:    true,
 		statusCode:    200,
 	}
-	require.Empty(t, openAICodexTurnStateScanFailure("gpt-5.5", result))
+	require.Empty(t, openAICodexTurnStateScanFailure("gpt-5.5", result, now))
 
 	result.officialModel = ""
-	require.Equal(t, "upstream response did not declare an official model", openAICodexTurnStateScanFailure("gpt-5.5", result))
+	require.Equal(t, "upstream response did not declare an official model", openAICodexTurnStateScanFailure("gpt-5.5", result, now))
 
 	result.officialModel = "gpt-5.6-luna"
-	require.Equal(t, "upstream model mismatch: requested gpt-5.5, received gpt-5.6-luna", openAICodexTurnStateScanFailure("gpt-5.5", result))
+	require.Equal(t, "upstream model mismatch: requested gpt-5.5, received gpt-5.6-luna", openAICodexTurnStateScanFailure("gpt-5.5", result, now))
+}
+
+func TestOpenAICodexTurnStateScanFailureValidatesExpiry(t *testing.T) {
+	now := time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name  string
+		state string
+		error string
+	}{
+		{name: "fresh 332", state: testOpenAICodexTurnState(332, now, 'a')},
+		{name: "fresh 292", state: testOpenAICodexTurnState(292, now, 'b')},
+		{name: "older but usable", state: testOpenAICodexTurnState(332, now.Add(-40*time.Minute), 'c')},
+		{name: "malformed", state: strings.Repeat("a", 332), error: "invalid issuance timestamp"},
+		{name: "future", state: testOpenAICodexTurnState(332, now.Add(time.Second), 'd'), error: "future issuance timestamp"},
+		{name: "expired", state: testOpenAICodexTurnState(332, now.Add(-time.Hour-time.Second), 'e'), error: "already expired"},
+		{name: "at expiry", state: testOpenAICodexTurnState(332, now.Add(-time.Hour), 'f'), error: "already expired"},
+		{name: "expiring", state: testOpenAICodexTurnState(332, now.Add(-56*time.Minute), 'g'), error: "refresh is still required"},
+		{name: "at refresh boundary", state: testOpenAICodexTurnState(332, now.Add(-45*time.Minute), 'h'), error: "refresh is still required"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			failure := openAICodexTurnStateScanFailure("gpt-5.5", openAICodexTurnStateHarvestResult{
+				stateValue: tt.state, stateLength: len(tt.state), officialModel: "gpt-5.5",
+				upstreamOK: true, statusCode: http.StatusOK,
+			}, now)
+			if tt.error == "" {
+				require.Empty(t, failure)
+			} else {
+				require.Contains(t, failure, tt.error)
+			}
+		})
+	}
 }
 
 func TestReadOpenAICodexTurnStateOfficialModelFromSSE(t *testing.T) {

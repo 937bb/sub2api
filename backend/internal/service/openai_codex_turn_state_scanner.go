@@ -235,8 +235,7 @@ func (s *openAICodexTurnStateScanner) stateNeedsRefresh(accountID int64, model s
 	if s == nil || s.gateway == nil {
 		return true
 	}
-	expiresAt, ok := s.gateway.getOpenAICodexTurnStatePool().preferredExpiryForBucket(accountID, model)
-	return !ok || !expiresAt.After(now.Add(openAICodexTurnStateScanRefreshBefore))
+	return !s.gateway.getOpenAICodexTurnStatePool().hasReusableStateBeyond(accountID, model, now.Add(openAICodexTurnStateScanRefreshBefore))
 }
 
 func (s *openAICodexTurnStateScanner) enqueueAccount(ctx context.Context, account *Account, force bool, usedSince time.Time) (int, []string) {
@@ -261,7 +260,10 @@ func (s *openAICodexTurnStateScanner) enqueueSweep(ctx context.Context) {
 				continue
 			}
 			scan, scanErr := s.repo.GetOpenAICodexTurnStateScan(ctx, account.ID, model)
-			if scanErr != nil || (scan != nil && scan.NextAttemptAt != nil && scan.NextAttemptAt.After(time.Now())) {
+			// The pool's expiry is authoritative. A previous success may have
+			// scheduled from capture time, or its state may no longer be available.
+			// Keep failure backoff, but never let a stale ready row delay refresh.
+			if scanErr != nil || (scan != nil && scan.Status != "ready" && scan.NextAttemptAt != nil && scan.NextAttemptAt.After(time.Now())) {
 				continue
 			}
 			s.Enqueue(account.ID, model, false)
@@ -336,10 +338,8 @@ func (s *openAICodexTurnStateScanner) runJob(ctx context.Context, job openAICode
 	if upstreamModel == "" {
 		return
 	}
-	if !job.force {
-		if expiresAt, ok := s.gateway.getOpenAICodexTurnStatePool().preferredExpiryForBucket(account.ID, upstreamModel); ok && expiresAt.After(time.Now().Add(openAICodexTurnStateScanRefreshBefore)) {
-			return
-		}
+	if !job.force && !s.stateNeedsRefresh(account.ID, upstreamModel, now) {
+		return
 	}
 
 	previous, _ := s.repo.GetOpenAICodexTurnStateScan(ctx, account.ID, upstreamModel)
@@ -374,20 +374,22 @@ func (s *openAICodexTurnStateScanner) runJob(ctx context.Context, job openAICode
 	if proxy != nil && proxy.Source == "state" {
 		s.updateProxyHealth(ctx, proxy, result)
 	}
-	failure := openAICodexTurnStateScanFailure(upstreamModel, result)
+	doneAt := time.Now()
+	failure := openAICodexTurnStateScanFailure(upstreamModel, result, doneAt)
 	if failure == "" {
 		accountID := account.ID
 		s.gateway.getOpenAICodexTurnStatePool().observe(result.stateValue, &accountID, hashOpenAICodexTurnState(result.sessionID), upstreamModel, "scanner")
-		doneAt := time.Now()
 		scan.Status = "ready"
 		scan.LastSuccessAt = &doneAt
 		scan.LastError = ""
-		next := doneAt.Add(openAICodexTurnStateTTL - openAICodexTurnStateScanRefreshBefore)
+		// Receiving the same state again does not renew its issuance timestamp.
+		issuedAt, _ := parseOpenAICodexTurnStateIssuedAt(result.stateValue)
+		next := issuedAt.Add(openAICodexTurnStateTTL - openAICodexTurnStateScanRefreshBefore)
 		scan.NextAttemptAt = &next
 	} else {
 		scan.Status = "retry_wait"
 		scan.LastError = failure
-		next := time.Now().Add(openAICodexTurnStateRetryDelay(scan.AttemptCount))
+		next := doneAt.Add(openAICodexTurnStateRetryDelay(scan.AttemptCount))
 		scan.NextAttemptAt = &next
 	}
 	if err := s.repo.UpsertOpenAICodexTurnStateScan(ctx, scan); err != nil {
@@ -395,7 +397,7 @@ func (s *openAICodexTurnStateScanner) runJob(ctx context.Context, job openAICode
 	}
 }
 
-func openAICodexTurnStateScanFailure(requested string, result openAICodexTurnStateHarvestResult) string {
+func openAICodexTurnStateScanFailure(requested string, result openAICodexTurnStateHarvestResult, now time.Time) string {
 	if message := strings.TrimSpace(result.errorMessage); message != "" {
 		return message
 	}
@@ -416,6 +418,20 @@ func openAICodexTurnStateScanFailure(requested string, result openAICodexTurnSta
 	}
 	if !openAICodexTurnStateModelsMatch(requested, result.officialModel) {
 		return fmt.Sprintf("upstream model mismatch: requested %s, received %s", requested, result.officialModel)
+	}
+	issuedAt, ok := parseOpenAICodexTurnStateIssuedAt(result.stateValue)
+	if !ok || issuedAt.IsZero() {
+		return "received turn-state with an invalid issuance timestamp"
+	}
+	if issuedAt.After(now) {
+		return "received turn-state with a future issuance timestamp"
+	}
+	expiresAt := issuedAt.Add(openAICodexTurnStateTTL)
+	if !expiresAt.After(now) {
+		return "received turn-state is already expired"
+	}
+	if !expiresAt.After(now.Add(openAICodexTurnStateScanRefreshBefore)) {
+		return "received turn-state expires within the refresh window; refresh is still required"
 	}
 	return ""
 }

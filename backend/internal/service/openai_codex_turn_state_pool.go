@@ -234,6 +234,26 @@ func (p *openAICodexTurnStatePool) preferredExpiryForBucket(accountID int64, mod
 	return expiresAt, true
 }
 
+func (p *openAICodexTurnStatePool) hasReusableStateBeyond(accountID int64, model string, deadline time.Time) bool {
+	key, ok := newOpenAICodexTurnStateBucketKey(accountID, model)
+	if p == nil || !ok {
+		return false
+	}
+	now := p.now()
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	selected := p.preferredByBucket[key]
+	if p.isPreferredBucketRecordLocked(selected, key, now) && selected.ExpiresAt.After(deadline) {
+		return true
+	}
+	for _, record := range p.entries {
+		if isReusableOpenAICodexTurnStateRecord(record, key, now) && record.ExpiresAt.After(deadline) {
+			return true
+		}
+	}
+	return false
+}
+
 func (p *openAICodexTurnStatePool) hasSampledAccount(accountID int64) bool {
 	if p == nil || accountID <= 0 {
 		return false
@@ -400,6 +420,9 @@ func (p *openAICodexTurnStatePool) cleanupExpired(now time.Time) {
 func openAICodexTurnStateRanksBefore(left, right *OpenAICodexTurnStateRecord) bool {
 	if left.ValueLength != right.ValueLength {
 		return left.ValueLength > right.ValueLength
+	}
+	if !left.ExpiresAt.Equal(right.ExpiresAt) {
+		return left.ExpiresAt.After(right.ExpiresAt)
 	}
 	if !left.LastSeenAt.Equal(right.LastSeenAt) {
 		return left.LastSeenAt.After(right.LastSeenAt)

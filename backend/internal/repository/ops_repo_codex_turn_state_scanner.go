@@ -279,7 +279,7 @@ WITH eligible_accounts AS (
     FROM codex_turn_states c
     WHERE c.source_account_id = a.id AND c.source_model = am.model
       AND c.value_length IN (292, 332) AND c.expires_at > NOW()
-    ORDER BY c.value_length DESC, c.last_seen_at DESC, c.id DESC LIMIT 1
+    ORDER BY c.value_length DESC, c.expires_at DESC, c.last_seen_at DESC, c.id DESC LIMIT 1
   ) ls ON TRUE
   LEFT JOIN codex_turn_state_scans sc ON sc.account_id = a.id AND sc.model = am.model
   LEFT JOIN codex_turn_state_proxies p ON p.id = sc.last_proxy_id
