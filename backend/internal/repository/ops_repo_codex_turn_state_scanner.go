@@ -222,13 +222,17 @@ WITH eligible_accounts AS (
   FROM accounts
   WHERE deleted_at IS NULL AND parent_account_id IS NULL AND platform = 'openai'
     AND type IN ('oauth', 'setup-token')
-    AND status = 'active' AND schedulable IS TRUE
-    AND ($2::bigint[] IS NOT NULL OR last_used_at >= $1)
     AND ($2::bigint[] IS NULL OR id = ANY($2))
-    AND (expires_at IS NULL OR expires_at > NOW())
-    AND (temp_unschedulable_until IS NULL OR temp_unschedulable_until <= NOW())
-    AND (overload_until IS NULL OR overload_until <= NOW())
-    AND (rate_limit_reset_at IS NULL OR rate_limit_reset_at <= NOW())
+    AND (
+      $2::bigint[] IS NOT NULL
+      OR (
+        status = 'active' AND schedulable IS TRUE AND last_used_at >= $1
+        AND (expires_at IS NULL OR expires_at > NOW())
+        AND (temp_unschedulable_until IS NULL OR temp_unschedulable_until <= NOW())
+        AND (overload_until IS NULL OR overload_until <= NOW())
+        AND (rate_limit_reset_at IS NULL OR rate_limit_reset_at <= NOW())
+      )
+    )
 ), target_models AS (
   SELECT DISTINCT LOWER(BTRIM(value)) AS model
   FROM UNNEST($3::text[]) AS value

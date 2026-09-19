@@ -14,6 +14,7 @@ const {
   getAllProxies,
   getAllGroups,
   refreshCredentials,
+  listCodexTurnStateAccounts,
   showError,
   showWarning
 } = vi.hoisted(() => ({
@@ -25,8 +26,18 @@ const {
   getAllProxies: vi.fn(),
   getAllGroups: vi.fn(),
   refreshCredentials: vi.fn(),
+  listCodexTurnStateAccounts: vi.fn(),
   showError: vi.fn(),
   showWarning: vi.fn()
+}))
+
+vi.mock('@/api/admin/ops', () => ({
+  opsAPI: {
+    listCodexTurnStateAccounts,
+    scanCodexTurnStateAccount: vi.fn(),
+    scanCodexTurnState: vi.fn(),
+    scanAllCodexTurnStates: vi.fn()
+  }
 }))
 
 vi.mock('@/api/admin', () => ({
@@ -67,6 +78,7 @@ const DataTableStub = defineComponent({
     <div>
       <div v-for="row in data" :key="row.id" :data-account-name="row.name">
         <slot name="cell-groups" :row="row" />
+        <slot name="cell-codex_state" :row="row" />
         <slot name="cell-actions" :row="row" />
       </div>
     </div>
@@ -167,6 +179,21 @@ describe('admin AccountsView lite account list', () => {
     getAllProxies.mockReset().mockResolvedValue([])
     getAllGroups.mockReset().mockResolvedValue([{ id: 7, name: 'codex', platform: 'openai' }])
     refreshCredentials.mockReset()
+    listCodexTurnStateAccounts.mockReset().mockResolvedValue({
+      items: [{
+        account_id: 42,
+        account_name: 'compact row',
+        account_type: 'oauth',
+        model: 'gpt-6-astra',
+        status: 'ready',
+        state_length: 332,
+        attempt_count: 1
+      }],
+      total: 1,
+      page: 1,
+      page_size: 1000,
+      pages: 1
+    })
     showError.mockReset()
     showWarning.mockReset()
   })
@@ -194,6 +221,16 @@ describe('admin AccountsView lite account list', () => {
     await flushPromises()
 
     expect(wrapper.get('[data-test="account-groups"]').text()).toBe('codex')
+    wrapper.unmount()
+  })
+
+  it('loads Codex State automatically when the account rows arrive', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(listCodexTurnStateAccounts).toHaveBeenCalledWith({ page: 1, page_size: 1000, account_ids: '42' })
+    expect(wrapper.get('[data-test="codex-model-state-gpt-6-astra"]').text()).toContain('332')
+    expect(wrapper.get('[data-test="codex-state-42"]').classes()).not.toContain('border')
     wrapper.unmount()
   })
 

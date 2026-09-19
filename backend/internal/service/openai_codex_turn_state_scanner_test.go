@@ -181,6 +181,32 @@ func TestOpenAICodexTurnStateScannerTargetsConfiguredModels(t *testing.T) {
 	require.True(t, second.force)
 }
 
+func TestOpenAICodexTurnStateScannerOnlyQueuesMissingOrExpiringStates(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	accountID := int64(42)
+	gateway := &OpenAIGatewayService{}
+	pool := gateway.getOpenAICodexTurnStatePool()
+	pool.now = func() time.Time { return now }
+	pool.observe(testOpenAICodexTurnState(openAICodexTurnStateLength332, now.Add(-10*time.Minute), 'r'), &accountID, "ready-session", "gpt-6-astra", "scanner")
+	pool.observe(testOpenAICodexTurnState(openAICodexTurnStateLength292, now.Add(-56*time.Minute), 'e'), &accountID, "expiring-session", "gpt-5.6-sol", "scanner")
+
+	scanner := &openAICodexTurnStateScanner{
+		gateway:  gateway,
+		queue:    make(chan openAICodexTurnStateScanJob, 4),
+		inFlight: make(map[openAICodexTurnStateBucketKey]struct{}),
+	}
+
+	queued := scanner.enqueueModels(accountID, []string{"gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra"}, false)
+	require.Equal(t, 2, queued)
+
+	first := <-scanner.queue
+	second := <-scanner.queue
+	require.Equal(t, "gpt-5.6-sol", first.model)
+	require.Equal(t, "gpt-5.6-terra", second.model)
+	require.False(t, first.force)
+	require.False(t, second.force)
+}
+
 func TestObservedOpenAICodexTurnStateModelsExcludeNonConversationModels(t *testing.T) {
 	require.True(t, isObservedOpenAICodexTurnStateModel("gpt-5.5"))
 	require.True(t, isObservedOpenAICodexTurnStateModel(" GPT-6-ASTRA "))

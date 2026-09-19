@@ -220,11 +220,22 @@ func (s *openAICodexTurnStateScanner) modelsForAccount(ctx context.Context, acco
 func (s *openAICodexTurnStateScanner) enqueueModels(accountID int64, models []string, force bool) int {
 	queued := 0
 	for _, model := range models {
+		if !force && !s.stateNeedsRefresh(accountID, model, time.Now()) {
+			continue
+		}
 		if s.Enqueue(accountID, model, force) {
 			queued++
 		}
 	}
 	return queued
+}
+
+func (s *openAICodexTurnStateScanner) stateNeedsRefresh(accountID int64, model string, now time.Time) bool {
+	if s == nil || s.gateway == nil {
+		return true
+	}
+	expiresAt, ok := s.gateway.getOpenAICodexTurnStatePool().preferredExpiryForBucket(accountID, model)
+	return !ok || !expiresAt.After(now.Add(openAICodexTurnStateScanRefreshBefore))
 }
 
 func (s *openAICodexTurnStateScanner) enqueueAccount(ctx context.Context, account *Account, force bool, usedSince time.Time) (int, []string) {
@@ -245,7 +256,7 @@ func (s *openAICodexTurnStateScanner) enqueueSweep(ctx context.Context) {
 	usedSince := now.Add(-openAICodexTurnStateActiveUsageWindow)
 	for _, account := range accounts {
 		for _, model := range s.modelsForAccount(ctx, account, usedSince) {
-			if expiresAt, ok := s.gateway.getOpenAICodexTurnStatePool().preferredExpiryForBucket(account.ID, model); ok && expiresAt.After(time.Now().Add(openAICodexTurnStateScanRefreshBefore)) {
+			if !s.stateNeedsRefresh(account.ID, model, time.Now()) {
 				continue
 			}
 			scan, scanErr := s.repo.GetOpenAICodexTurnStateScan(ctx, account.ID, model)
@@ -794,7 +805,7 @@ func (s *OpsService) EnqueueOpenAICodexTurnStateScan(accountID int64, model stri
 	if strings.TrimSpace(model) == "" {
 		model = defaultOpenAICodexTurnStateScanModel
 	}
-	return s.codexTurnStateScanner.Enqueue(accountID, model, true)
+	return s.codexTurnStateScanner.enqueueModels(accountID, []string{model}, false) > 0
 }
 
 func (s *OpsService) EnqueueOpenAICodexTurnStateAccountScans(ctx context.Context, accountID int64) (int, []string, error) {
@@ -808,7 +819,7 @@ func (s *OpsService) EnqueueOpenAICodexTurnStateAccountScans(ctx context.Context
 	if !isEligibleOpenAICodexTurnStateAccount(account, time.Now()) {
 		return 0, nil, errors.New("Codex account is not eligible for scanning")
 	}
-	queued, models := s.codexTurnStateScanner.enqueueAccount(ctx, account, true, time.Now().Add(-openAICodexTurnStateActiveUsageWindow))
+	queued, models := s.codexTurnStateScanner.enqueueAccount(ctx, account, false, time.Now().Add(-openAICodexTurnStateActiveUsageWindow))
 	return queued, models, nil
 }
 
@@ -824,7 +835,7 @@ func (s *OpsService) EnqueueAllOpenAICodexTurnStateScans(ctx context.Context) (i
 	queued := 0
 	usedSince := now.Add(-openAICodexTurnStateActiveUsageWindow)
 	for _, account := range accounts {
-		accountQueued, _ := s.codexTurnStateScanner.enqueueAccount(ctx, account, true, usedSince)
+		accountQueued, _ := s.codexTurnStateScanner.enqueueAccount(ctx, account, false, usedSince)
 		queued += accountQueued
 	}
 	return queued, nil

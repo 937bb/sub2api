@@ -286,13 +286,13 @@
           <template #cell-codex_state="{ row }">
             <div
               v-if="row.platform === 'openai' && (row.type === 'oauth' || row.type === 'setup-token')"
-              class="grid min-w-[176px] max-w-[210px] grid-cols-[minmax(0,1fr)_24px] items-start gap-1.5 rounded border border-gray-200 bg-gray-50/70 px-2 py-1.5 dark:border-dark-700 dark:bg-dark-800/70"
+              class="grid min-w-[176px] max-w-[210px] grid-cols-[minmax(0,1fr)_20px] items-start gap-1.5 py-1"
               :data-test="`codex-state-${row.id}`"
             >
               <CodexAccountStateSummary :states="codexStatesForAccount(row.id)" />
               <button
                 type="button"
-                class="flex h-6 w-6 shrink-0 items-center justify-center rounded border border-gray-200 bg-white text-gray-500 transition-colors hover:border-primary-300 hover:bg-primary-50 hover:text-primary-700 disabled:cursor-wait disabled:opacity-60 dark:border-dark-600 dark:bg-dark-900 dark:text-dark-300 dark:hover:border-primary-700 dark:hover:bg-primary-950/40 dark:hover:text-primary-300"
+                class="flex h-5 w-5 shrink-0 items-center justify-center rounded text-gray-400 transition-colors hover:bg-gray-100 hover:text-primary-700 disabled:cursor-wait disabled:opacity-60 dark:text-dark-400 dark:hover:bg-dark-700 dark:hover:text-primary-300"
                 :disabled="isCodexStateScanning(row.id, codexAccountScanKey)"
                 :title="isCodexStateScanning(row.id, codexAccountScanKey) ? t('admin.ops.turnState.status.running') : t('admin.ops.turnState.scanAccount')"
                 :aria-label="isCodexStateScanning(row.id, codexAccountScanKey) ? t('admin.ops.turnState.status.running') : t('admin.ops.turnState.scanAccount')"
@@ -1148,7 +1148,7 @@ const {
 
 const codexStatesByAccountID = reactive(new Map<number, CodexTurnStateAccountStatus[]>())
 const codexAccountScanKey = '__all_target_models__'
-const codexStateRefreshing = ref(false)
+let codexStateStatusRequestVersion = 0
 const { isScanning: isCodexStateScanning, run: runCodexStateScan } = useCodexStateScanState()
 
 const codexStatesForAccount = (accountID: number) => codexStatesByAccountID.get(accountID) || []
@@ -1158,17 +1158,17 @@ const setCodexStatesForAccount = (accountID: number, states: CodexTurnStateAccou
 }
 
 const refreshCodexStateStatuses = async () => {
-  if (codexStateRefreshing.value) return
   const ids = accounts.value
     .filter(account => account.platform === 'openai' && (account.type === 'oauth' || account.type === 'setup-token'))
     .map(account => account.id)
+  const requestVersion = ++codexStateStatusRequestVersion
   if (ids.length === 0) {
     codexStatesByAccountID.clear()
     return
   }
-  codexStateRefreshing.value = true
   try {
     const result = await opsAPI.listCodexTurnStateAccounts({ page: 1, page_size: 1000, account_ids: ids.join(',') })
+    if (requestVersion !== codexStateStatusRequestVersion) return
     const next = new Map<number, CodexTurnStateAccountStatus[]>()
     for (const item of result.items) {
       const items = next.get(item.account_id) || []
@@ -1179,8 +1179,6 @@ const refreshCodexStateStatuses = async () => {
     for (const [accountID, items] of next) setCodexStatesForAccount(accountID, items)
   } catch (error) {
     console.error('Failed to load Codex State status:', error)
-  } finally {
-    codexStateRefreshing.value = false
   }
 }
 
@@ -1212,7 +1210,16 @@ const scanCodexStateForAccount = async (accountID: number) => {
 useIntervalFn(() => {
   if (document.hidden || loading.value) return
   void refreshCodexStateStatuses()
-}, 15_000)
+}, 60_000)
+
+const visibleCodexAccountIDs = computed(() => accounts.value
+  .filter(account => account.platform === 'openai' && (account.type === 'oauth' || account.type === 'setup-token'))
+  .map(account => account.id)
+  .join(','))
+
+watch(visibleCodexAccountIDs, () => {
+  void refreshCodexStateStatuses()
+}, { flush: 'post', immediate: true })
 
 const {
   selectedSet,
@@ -1283,7 +1290,6 @@ const load = async (options: AccountLoadOptions = {}) => {
   pendingTodayStatsRefresh.value = false
   requestParams.lite = '1'
   await baseLoad()
-  await refreshCodexStateStatuses()
   if (options.refreshTodayStats !== false) await refreshTodayStatsBatch()
 }
 
@@ -1293,7 +1299,6 @@ const reload = async () => {
   resetAutoRefreshCache()
   pendingTodayStatsRefresh.value = false
   await baseReload()
-  await refreshCodexStateStatuses()
   await refreshTodayStatsBatch()
 }
 
