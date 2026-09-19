@@ -6,20 +6,22 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/tidwall/gjson"
 )
 
 const codexCacheOnlyHTTPIdentityContextKey = "codex_cache_only_http_identity"
 
 type codexCacheOnlyHTTPIdentity struct {
-	accountID int64
-	apiKeyID  int64
-	namespace string
+	accountID      int64
+	apiKeyID       int64
+	namespace      string
+	cacheRoutingID string
 }
 
-// A prompt-cache key may be shared by unrelated conversations. It must not
-// become a session identifier, nor cause a new upstream session on every HTTP
-// request. Native WebSocket connections retain their connection-local identity.
+// A prompt-cache key may be shared by unrelated conversations. It may supply
+// the HTTP cache-affinity header, but never conversation metadata or execution
+// state. Native WebSocket connections retain their connection-local identity.
 func stageCodexCacheOnlyHTTPIdentity(c *gin.Context, account *Account, body any, explicitCompatSession ...string) bool {
 	if c == nil {
 		return false
@@ -59,9 +61,18 @@ func stageCodexCacheOnlyHTTPIdentity(c *gin.Context, account *Account, body any,
 		strings.TrimSpace(c.GetHeader("x-codex-window-id")) != "" {
 		return false
 	}
-	c.Set(codexCacheOnlyHTTPIdentityContextKey, codexCacheOnlyHTTPIdentity{
+	identity := codexCacheOnlyHTTPIdentity{
 		accountID: account.ID, apiKeyID: getAPIKeyIDFromContext(c), namespace: codexAccountIdentityNamespace(account),
-	})
+	}
+	// The caller has already scoped the body to this credential and API key.
+	// Legacy accounts without a namespace retain the raw PCK; never promote
+	// that unscoped value to an upstream routing header.
+	if identity.namespace != "" && identity.apiKeyID > 0 {
+		if parsed, err := uuid.Parse(cacheKey); err == nil && parsed.Version() == 4 && parsed.String() == cacheKey {
+			identity.cacheRoutingID = cacheKey
+		}
+	}
+	c.Set(codexCacheOnlyHTTPIdentityContextKey, identity)
 	return true
 }
 
@@ -94,6 +105,30 @@ func omitCodexCacheOnlyHTTPConversationHeaders(c *gin.Context, account *Account,
 	for _, name := range [...]string{"session-id", "session_id", "conversation_id", "thread-id", "x-client-request-id", "x-codex-window-id"} {
 		headers.Del(name)
 	}
+}
+
+// Codex uses the HTTP session-id header for prompt-cache affinity, separately
+// from actual conversation metadata. Apply it only at the HTTP send boundary:
+// shared builders and WS normalization would otherwise derive a shared thread.
+func applyCodexCacheOnlyHTTPRoutingHeaders(c *gin.Context, account *Account, request *http.Request) {
+	if request == nil || request.URL == nil || request.Method != http.MethodPost ||
+		(request.URL.Scheme != "https" && request.URL.Scheme != "http") ||
+		!strings.EqualFold(request.URL.Hostname(), "chatgpt.com") ||
+		strings.TrimRight(request.URL.Path, "/") != "/backend-api/codex/responses" ||
+		strings.EqualFold(strings.TrimSpace(request.Header.Get("Upgrade")), "websocket") ||
+		!isCodexCacheOnlyHTTPIdentity(c, account) {
+		return
+	}
+	value, _ := c.Get(codexCacheOnlyHTTPIdentityContextKey)
+	identity, ok := value.(codexCacheOnlyHTTPIdentity)
+	if !ok || identity.cacheRoutingID == "" {
+		return
+	}
+	if request.Header == nil {
+		request.Header = make(http.Header)
+	}
+	omitCodexCacheOnlyHTTPConversationHeaders(c, account, request.Header)
+	request.Header.Set("session-id", identity.cacheRoutingID)
 }
 
 // HTTP-to-WS adaptation may need an execution key for retries and connection

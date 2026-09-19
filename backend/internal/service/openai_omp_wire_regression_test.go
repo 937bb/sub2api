@@ -59,7 +59,8 @@ func TestOMPRecordedResponsesKeepCacheWithoutInventingConversations(t *testing.T
 							require.Empty(t, gjson.Get(gjson.GetBytes(body, "client_metadata.x-codex-turn-metadata").String(), field).String(), field)
 							require.Empty(t, gjson.Get(upstream.requests[i].Header.Get("x-codex-turn-metadata"), field).String(), field)
 						}
-						for _, header := range []string{"session-id", "session_id", "thread-id", "conversation_id"} {
+						require.Equal(t, gjson.GetBytes(body, "prompt_cache_key").String(), upstream.requests[i].Header.Get("session-id"))
+						for _, header := range []string{"session_id", "thread-id", "conversation_id", "x-client-request-id"} {
 							require.Empty(t, upstream.requests[i].Header.Get(header), header)
 						}
 					}

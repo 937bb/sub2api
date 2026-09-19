@@ -91,7 +91,10 @@ func oauthRetryDelay(attempt int, retryAfter string, now time.Time) time.Duratio
 }
 
 func (s *OpenAIGatewayService) doOAuthResponsesUpstream(c *gin.Context, request *http.Request, proxyURL string, account *Account) (*http.Response, error, bool) {
-	send := func(r *http.Request) (*http.Response, error) { return s.doOpenAIUpstream(r, proxyURL, account) }
+	send := func(r *http.Request) (*http.Response, error) {
+		applyCodexCacheOnlyHTTPRoutingHeaders(c, account, r)
+		return s.doOpenAIUpstream(r, proxyURL, account)
+	}
 	if oauthMappedRetryActive(c) {
 		resp, err := send(request)
 		return resp, err, false

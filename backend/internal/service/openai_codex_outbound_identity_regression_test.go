@@ -194,8 +194,10 @@ func TestForwardOMPResponsesInjectsStablePromptCacheIdentity(t *testing.T) {
 	secondKey := gjson.GetBytes(upstream.bodies[1], "prompt_cache_key").String()
 	require.NotEmpty(t, firstKey)
 	require.Equal(t, firstKey, secondKey)
-	require.Empty(t, upstream.requests[0].Header.Get("session-id"))
-	require.Empty(t, upstream.requests[1].Header.Get("session-id"))
+	require.Equal(t, firstKey, upstream.requests[0].Header.Get("session-id"))
+	require.Equal(t, secondKey, upstream.requests[1].Header.Get("session-id"))
+	require.Empty(t, upstream.requests[0].Header.Get("thread-id"))
+	require.Empty(t, upstream.requests[1].Header.Get("thread-id"))
 	_, err := uuid.Parse(firstKey)
 	require.NoError(t, err, "OAuth account scoping should keep the upstream cache identity UUID-shaped")
 }

@@ -164,7 +164,13 @@ func (s *OpenAIGatewayService) guardOpenAICodexTurnStateEcho(c *gin.Context, acc
 		return
 	}
 	model = stageOpenAICodexTurnStateModel(c, model)
-	stageOpenAICodexTurnStateSessionHash(c, h)
+	if requestScope := codexCacheOnlyHTTPExecutionScope(c, account); requestScope != "" {
+		// Cache affinity is not a conversation. This must also hold if a caller
+		// reapplies the guard after the final HTTP routing header was installed.
+		c.Set(openAICodexTurnStateSessionHashContextKey, requestScope)
+	} else {
+		stageOpenAICodexTurnStateSessionHash(c, h)
+	}
 	s.stripForeignOpenAICodexTurnState(c, account, h)
 	owner := codexAccountIdentitySource(c, account)
 	if owner == nil || owner.ID <= 0 || model == "" {

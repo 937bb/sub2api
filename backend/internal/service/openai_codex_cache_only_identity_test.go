@@ -3,7 +3,10 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -122,6 +125,166 @@ func TestCodexCacheOnlyHTTPIdentity_InternalScopeDoesNotShareCacheState(t *testi
 	require.NotEqual(t, scope, codexCacheOnlyHTTPExecutionScope(c, &otherAccount))
 	require.False(t, stageCodexCacheOnlyHTTPIdentity(c, account, []byte(`{"client_metadata":{"session_id":"real-chat"}}`)))
 	require.False(t, isCodexCacheOnlyHTTPIdentity(c, account), "a new attempt cannot inherit the prior marker")
+}
+
+func TestCodexCacheOnlyHTTPIdentity_FinalHTTPRoutingIsStableAndTenantScoped(t *testing.T) {
+	for _, mode := range []struct {
+		accountType string
+		passthrough bool
+	}{{AccountTypeOAuth, false}, {AccountTypeOAuth, true}, {AccountTypeSetupToken, false}, {AccountTypeSetupToken, true}} {
+		t.Run(mode.accountType+"/"+map[bool]string{false: "normal", true: "passthrough"}[mode.passthrough], func(t *testing.T) {
+			upstream := &httpUpstreamRecorder{}
+			svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream, cache: &stubGatewayCache{}}
+			body := []byte(`{"model":"gpt-5.5","stream":true,"store":false,"prompt_cache_key":"shared-prefix","input":"hello"}`)
+			first := conversationTestAccount(mode.accountType, "session")
+			second := conversationTestAccount(mode.accountType, "session")
+			second.ID++
+			second.Credentials["chatgpt_account_id"] = "another-upstream-account"
+			for _, account := range []*Account{first, second} {
+				account.Credentials["access_token"] = "test-token"
+				account.Extra["openai_oauth_passthrough"] = mode.passthrough
+			}
+			for _, tc := range []struct {
+				account *Account
+				keyID   int64
+			}{{first, 91}, {first, 91}, {first, 92}, {second, 91}} {
+				upstream.responses = append(upstream.responses, openAICompatSSECompletedResponse("resp_cache_only", "gpt-5.5"))
+				_, err := svc.Forward(context.Background(), conversationTestContext(tc.keyID, ""), tc.account, body)
+				require.NoError(t, err)
+			}
+			require.Len(t, upstream.requests, 4)
+			for i, request := range upstream.requests {
+				require.Equal(t, gjson.GetBytes(upstream.bodies[i], "prompt_cache_key").String(), request.Header.Get("session-id"))
+				require.Empty(t, request.Header.Get("thread-id"))
+				require.Empty(t, request.Header.Get("x-client-request-id"))
+				require.Empty(t, gjson.GetBytes(upstream.bodies[i], "client_metadata.session_id").String())
+			}
+			require.Equal(t, upstream.requests[0].Header.Get("session-id"), upstream.requests[1].Header.Get("session-id"))
+			require.NotEqual(t, upstream.requests[0].Header.Get("session-id"), upstream.requests[2].Header.Get("session-id"))
+			require.NotEqual(t, upstream.requests[0].Header.Get("session-id"), upstream.requests[3].Header.Get("session-id"))
+		})
+	}
+}
+
+func TestCodexCacheOnlyHTTPIdentity_RetriesKeepFinalHTTPRouting(t *testing.T) {
+	for _, mapped := range []bool{false, true} {
+		t.Run(map[bool]string{false: "http_retry", true: "mapped_retry"}[mapped], func(t *testing.T) {
+			upstream := &httpUpstreamRecorder{responses: []*http.Response{
+				{StatusCode: http.StatusServiceUnavailable, Header: make(http.Header), Body: http.NoBody},
+				openAICompatSSECompletedResponse("resp_cache_retry", "gpt-5.5"),
+			}}
+			svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream, cache: &stubGatewayCache{},
+				settingService: &SettingService{settingRepo: &gatewayTTLSettingRepo{}, cfg: &config.Config{}, oauthRetryCache: &cachedOAuthRetrySettings{
+					settings: OAuthRetrySettings{Enabled: true, MaxRetries: 1, StatusCodes: []int{503}}, expires: time.Now().Add(time.Minute),
+				}}}
+			account := conversationTestAccount(AccountTypeOAuth, "session")
+			account.Credentials["access_token"] = "test-token"
+			c := conversationTestContext(91, "")
+			body := []byte(`{"model":"gpt-5.5","stream":true,"store":false,"prompt_cache_key":"shared-prefix","input":"hello"}`)
+			if mapped {
+				upstream.responses[0] = &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}},
+					Body: io.NopCloser(strings.NewReader("event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"upstream_error\",\"message\":\"Upstream request failed\"}}}\n\n"))}
+				svc.settingService.oauthRetryCache.settings.StatusCodes = []int{502}
+				_, err := svc.Forward(context.Background(), c, account, body)
+				require.NoError(t, err)
+			} else {
+				scoped, _, err := applyCodexAccountIdentityClientMetadataRaw(body, account, 91)
+				require.NoError(t, err)
+				require.True(t, stageCodexCacheOnlyHTTPIdentity(c, account, scoped))
+				request, err := svc.buildUpstreamRequest(context.Background(), c, account, scoped, "test-token", true, "shared-prefix", false)
+				require.NoError(t, err)
+				response, err, exhausted := svc.doOAuthResponsesUpstream(c, request, "", account)
+				require.NoError(t, err)
+				require.False(t, exhausted)
+				require.NoError(t, response.Body.Close())
+			}
+			require.Len(t, upstream.requests, 2)
+			expected := scopeCodexAccountIdentityValue(account, 91, "prompt-cache", "shared-prefix")
+			for i, request := range upstream.requests {
+				require.Equal(t, expected, request.Header.Get("session-id"))
+				require.Equal(t, expected, gjson.GetBytes(upstream.bodies[i], "prompt_cache_key").String())
+				require.Empty(t, request.Header.Get("thread-id"))
+			}
+		})
+	}
+}
+
+func TestCodexCacheOnlyHTTPIdentity_FinalHTTPRoutingRequiresSafeMarker(t *testing.T) {
+	for _, reason := range []string{"unstaged", "raw_key", "no_namespace", "no_api_key", "changed_api_key", "changed_account", "compact", "other_host", "websocket", "api_key"} {
+		t.Run(reason, func(t *testing.T) {
+			account := conversationTestAccount(AccountTypeOAuth, "session")
+			c := conversationTestContext(91, "")
+			request := httptest.NewRequest(http.MethodPost, "https://chatgpt.com/backend-api/codex/responses", nil)
+			body := map[string]any{"prompt_cache_key": "shared-prefix"}
+			if reason == "no_namespace" {
+				account.Credentials, account.Extra = nil, nil
+			}
+			applyCodexAccountIdentityClientMetadataMap(body, account, 91)
+			if reason == "raw_key" {
+				body["prompt_cache_key"] = "unscoped-raw-key"
+			}
+			if reason == "no_api_key" {
+				c.Set("api_key", &APIKey{})
+			}
+			if reason != "unstaged" {
+				require.True(t, stageCodexCacheOnlyHTTPIdentity(c, account, body))
+			}
+			switch reason {
+			case "changed_api_key":
+				c.Set("api_key", &APIKey{ID: 92})
+			case "changed_account":
+				account.ID++
+			case "compact":
+				request.URL.Path += "/compact"
+			case "other_host":
+				request.URL.Host = "api.openai.com"
+			case "websocket":
+				request.Header.Set("Upgrade", "websocket")
+			case "api_key":
+				account.Type = AccountTypeAPIKey
+			}
+			applyCodexCacheOnlyHTTPRoutingHeaders(c, account, request)
+			require.Empty(t, request.Header.Get("session-id"))
+		})
+	}
+}
+
+func TestCodexCacheOnlyHTTPIdentity_TurnStateGuardDoesNotPromoteCacheRouting(t *testing.T) {
+	account := conversationTestAccount(AccountTypeOAuth, "session")
+	svc := &OpenAIGatewayService{}
+	body := map[string]any{"prompt_cache_key": "shared-prefix"}
+	applyCodexAccountIdentityClientMetadataMap(body, account, 91)
+	var scopes []string
+	for i := range 2 {
+		c := conversationTestContext(91, "")
+		require.True(t, stageCodexCacheOnlyHTTPIdentity(c, account, body))
+		request := httptest.NewRequest(http.MethodPost, "https://chatgpt.com/backend-api/codex/responses", nil)
+		svc.guardOpenAICodexTurnStateEcho(c, account, request.Header, "gpt-5.5")
+		requestScope := openAICodexTurnStateSessionHash(c)
+		require.Equal(t, codexCacheOnlyHTTPExecutionScope(c, account), requestScope)
+		applyCodexCacheOnlyHTTPRoutingHeaders(c, account, request)
+		normalizeCodexResponsesTransportHeaders(request, account)
+		require.Equal(t, body["prompt_cache_key"], request.Header.Get("session-id"))
+		// A later guard must not interpret the cache-affinity header as a real
+		// conversation, even if send/guard ordering is refactored in the future.
+		svc.guardOpenAICodexTurnStateEcho(c, account, request.Header, "gpt-5.5")
+		require.Equal(t, requestScope, openAICodexTurnStateSessionHash(c))
+		require.Empty(t, request.Header.Get("thread-id"))
+		scopes = append(scopes, requestScope)
+		svc.observeOpenAICodexTurnState(c, account, testOpenAICodexTurnState(312, time.Now(), byte('a'+i)), "http")
+	}
+	require.NotEqual(t, scopes[0], scopes[1], "same PCK cannot merge response provenance between HTTP requests")
+	pool := svc.getOpenAICodexTurnStatePool()
+	pool.mu.RLock()
+	defer pool.mu.RUnlock()
+	require.Len(t, pool.entries, 2)
+	observedScopes := make(map[string]bool)
+	for _, record := range pool.entries {
+		observedScopes[record.SourceSessionHash] = true
+	}
+	for _, scope := range scopes {
+		require.True(t, observedScopes[scope])
+	}
 }
 
 func TestCodexCacheOnlyHTTPIdentity_SharedCacheKeepsExplicitChatsSeparate(t *testing.T) {
