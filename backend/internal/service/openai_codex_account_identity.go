@@ -367,6 +367,8 @@ func applyCodexNormalizedRequestIdentityHeadersMap(c *gin.Context, account *Acco
 }
 
 func applyCodexNormalizedIdentityMetadata(c *gin.Context, source *Account, headers http.Header, metadata gjson.Result, cacheKey string) {
+	cacheKey = codexCacheOnlyHTTPPromptCacheSession(c, source, cacheKey)
+	defer omitCodexCacheOnlyHTTPConversationHeaders(c, source, headers)
 	sessionID := strings.TrimSpace(metadata.Get("session_id").String())
 	if sessionID == "" {
 		// A cache key may be the only identity supplied by an API-compatible

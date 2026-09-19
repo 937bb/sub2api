@@ -155,6 +155,11 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	if executionScope = strings.TrimSpace(executionScope); executionScope != "" {
 		sessionHash = executionScope
 	}
+	if requestScope := codexCacheOnlyHTTPExecutionScope(c, account); requestScope != "" {
+		// Cache affinity is not a conversation binding. Keep retries local to
+		// this HTTP request without loading another request's WS turn state.
+		sessionHash = requestScope
+	}
 	if turnState == "" && stateStore != nil && sessionHash != "" {
 		if savedTurnState, ok := stateStore.GetSessionTurnState(groupID, sessionHash); ok {
 			turnState = savedTurnState

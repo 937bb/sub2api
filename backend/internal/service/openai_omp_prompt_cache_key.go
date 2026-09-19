@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 const (
@@ -13,10 +14,31 @@ const (
 	ompResponsesPromptCacheKeyPrefix = "compat_omp_"
 )
 
-// deriveOMPResponsesPromptCacheKey supplies the stable cache-routing identity
-// that OMP's native Responses requests omit. Explicit client cache keys always
-// win; this fallback is deliberately limited to OMP so unrelated Responses
-// clients keep their existing wire behavior.
+// applyOMPResponsesPromptCacheKey runs before request transformations and route
+// splitting. Modern OMP sends its own key; only missing-key compatibility uses
+// this fallback, with the same source payload on normal and passthrough paths.
+func applyOMPResponsesPromptCacheKey(c *gin.Context, account *Account, body []byte) ([]byte, error) {
+	if account == nil || !account.UsesOpenAICodexProtocol() || isOpenAIResponsesCompactPath(c) || !isOMPClient(c) {
+		return body, nil
+	}
+	model := account.GetMappedModel(gjson.GetBytes(body, "model").String())
+	if mapped, ok := openAIGroupMappedModel(c); ok {
+		model = mapped
+	}
+	key := deriveOMPResponsesPromptCacheKey(c, body, model)
+	if key == "" {
+		return body, nil
+	}
+	next, err := sjson.SetBytes(body, "prompt_cache_key", key)
+	if err != nil {
+		return nil, fmt.Errorf("set OMP Responses cache key: %w", err)
+	}
+	return next, nil
+}
+
+// deriveOMPResponsesPromptCacheKey handles OMP requests whose explicit cache
+// key was omitted. Existing keys always win, including those intentionally
+// shared across separate conversations. Other clients keep their wire behavior.
 func deriveOMPResponsesPromptCacheKey(c *gin.Context, body []byte, upstreamModel string) string {
 	if !isOMPClient(c) || len(body) == 0 || !shouldAutoInjectPromptCacheKeyForCompat(upstreamModel) {
 		return ""

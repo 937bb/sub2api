@@ -18,12 +18,21 @@ const codexAnonymousConversationContextKey = "codex_anonymous_conversation"
 // body. Device identity remains stable, but session/full modes must never merge
 // separate conversations or tenants into one upstream session/thread.
 func (s *OpenAIGatewayService) resolveCodexIsolatedFingerprintForRequest(ctx context.Context, c *gin.Context, account *Account, body any, explicitCompatSession ...string) *codexFingerprintIDs {
+	cacheOnlyHTTP := stageCodexCacheOnlyHTTPIdentity(c, account, body, explicitCompatSession...)
 	var headers http.Header
 	if c != nil && c.Request != nil {
 		headers = c.Request.Header
 	}
 	ids := s.resolveCodexFingerprintIDsForRequest(ctx, account, headers)
 	if ids == nil || ids.mode == codexFingerprintDevice {
+		return ids
+	}
+	if cacheOnlyHTTP {
+		// Retain the stable device without inventing conversation state for a
+		// client that supplied only an independent prompt-cache routing key.
+		ids.mode = codexFingerprintDevice
+		ids.sessionID, ids.threadID, ids.turnID, ids.windowID = "", "", "", ""
+		ids.turnStartedAtUnixMs = 0
 		return ids
 	}
 	apiKeyID := getAPIKeyIDFromContext(c)

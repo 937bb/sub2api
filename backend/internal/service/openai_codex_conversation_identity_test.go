@@ -101,8 +101,11 @@ func TestCodexConversationIdentity_NoConversationNeverUsesSharedCache(t *testing
 	a := svc.resolveCodexIsolatedFingerprintForRequest(context.Background(), c, account, body)
 	retry := svc.resolveCodexIsolatedFingerprintForRequest(context.Background(), c, account, body)
 	otherRequest := svc.resolveCodexIsolatedFingerprintForRequest(context.Background(), conversationTestContext(1, ""), account, body)
-	require.Equal(t, a.sessionID, retry.sessionID)
-	require.NotEqual(t, a.sessionID, otherRequest.sessionID)
+	for _, ids := range []*codexFingerprintIDs{a, retry, otherRequest} {
+		require.Equal(t, codexFingerprintDevice, ids.mode)
+		require.Empty(t, ids.sessionID)
+		require.Empty(t, ids.threadID)
+	}
 	next, _, err := applyCodexFingerprintClientMetadataRaw(body, a)
 	require.NoError(t, err)
 	require.Equal(t, "shared-prefix-cache", gjson.GetBytes(next, "prompt_cache_key").String())

@@ -34,6 +34,11 @@ func (s *OpenAIGatewayService) forwardOnce(ctx context.Context, c *gin.Context, 
 		return nil, err
 	}
 	startTime := time.Now()
+	cacheBody, cacheErr := applyOMPResponsesPromptCacheKey(c, account, body)
+	if cacheErr != nil {
+		return nil, cacheErr
+	}
+	body = cacheBody
 	body = applyOpenAIQuotaBypassForRequest(c, account, body, ResolveOpenAIQuotaBypassInjectPairs(s.cfg))
 	filteredBody, filterErr := filterOpenAIResponsesNoneReasoningEffortForAccount(account, body)
 	if filterErr != nil {
@@ -531,13 +536,6 @@ func (s *OpenAIGatewayService) forwardOnce(ctx context.Context, c *gin.Context, 
 		decoded, decodeErr := ensureReqBody()
 		if decodeErr != nil {
 			return nil, decodeErr
-		}
-		if !isCompactRequest && strings.TrimSpace(clientPromptCacheKey) == "" {
-			if ompPromptCacheKey := deriveOMPResponsesPromptCacheKey(c, body, upstreamModel); ompPromptCacheKey != "" {
-				decoded["prompt_cache_key"] = ompPromptCacheKey
-				clientPromptCacheKey = ompPromptCacheKey
-				markDecodedModified()
-			}
 		}
 		omitPromotedSystemMessages := !strings.EqualFold(
 			strings.TrimSpace(gjson.GetBytes(body, "text.format.type").String()),
@@ -1568,7 +1566,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 		} else {
 			req.Header.Set("accept", "text/event-stream")
 		}
-		if session := resolveOpenAIWSSessionHeaders(c, promptCacheKey); session.SessionID != "" {
+		if session := resolveOpenAIWSSessionHeaders(c, codexCacheOnlyHTTPPromptCacheSession(c, account, promptCacheKey)); session.SessionID != "" {
 			isolated := isolateOpenAIUpstreamSessionID(apiKeyID, codexAccountIdentitySource(c, account), session.SessionID)
 			req.Header.Set("session_id", isolated)
 			if !compatMessagesBridge || clientConversationID != "" {

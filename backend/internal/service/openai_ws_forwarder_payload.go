@@ -94,7 +94,7 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 		headers.Set("authorization", "Bearer "+token)
 	}
 
-	sessionResolution := resolveOpenAIWSSessionHeaders(c, promptCacheKey)
+	sessionResolution := resolveOpenAIWSSessionHeaders(c, codexCacheOnlyHTTPPromptCacheSession(c, account, promptCacheKey))
 	if c != nil && c.Request != nil {
 		if v := strings.TrimSpace(c.Request.Header.Get("accept-language")); v != "" {
 			headers.Set("accept-language", v)

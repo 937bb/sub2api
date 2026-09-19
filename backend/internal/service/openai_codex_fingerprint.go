@@ -59,6 +59,7 @@ func stagedCodexFingerprintIDs(c *gin.Context, account *Account) *codexFingerpri
 // snapshot 的 OAuth 账号可读取，避免 stale context 跨账号 failover 泄漏。
 func applyStagedCodexFingerprintHeaders(c *gin.Context, account *Account, h http.Header) {
 	applyCodexFingerprintHeaders(h, stagedCodexFingerprintIDs(c, account))
+	omitCodexCacheOnlyHTTPConversationHeaders(c, account, h)
 }
 
 func applyStagedCodexFingerprintClientMetadata(c *gin.Context, account *Account, reqBody map[string]any) bool {
