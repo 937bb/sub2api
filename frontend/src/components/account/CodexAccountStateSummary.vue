@@ -1,35 +1,35 @@
 <template>
   <div class="min-w-0" data-test="codex-account-state-summary">
-    <div class="mb-1.5 flex min-w-0 items-center justify-between gap-2">
-      <div class="flex min-w-0 items-center gap-1.5">
-        <span :class="['h-2 w-2 shrink-0 rounded-full', summaryTone.dot, summaryTone.pulse ? 'animate-pulse' : '']" />
-        <span :class="['truncate text-xs font-semibold', summaryTone.text]">
+    <div class="mb-1 flex min-w-0 items-center justify-between gap-1.5">
+      <div class="flex min-w-0 items-center gap-1">
+        <span :class="['h-1.5 w-1.5 shrink-0 rounded-full', summaryTone.dot, summaryTone.pulse ? 'animate-pulse' : '']" />
+        <span :class="['truncate text-[10px] font-semibold leading-4', summaryTone.text]">
           {{ t('admin.ops.turnState.readyProgress', { ready: readyCount, total: states.length }) }}
         </span>
       </div>
-      <span v-if="failedCount" class="shrink-0 text-[10px] font-medium text-red-600 dark:text-red-400">
+      <span v-if="failedCount" class="shrink-0 text-[9px] font-medium leading-4 text-red-600 dark:text-red-400">
         {{ t('admin.ops.turnState.failedCount', { count: failedCount }) }}
       </span>
     </div>
 
-    <div v-if="states.length" class="flex min-w-0 flex-wrap gap-1">
-      <span
+    <div v-if="states.length" class="flex min-w-0 flex-col gap-0.5">
+      <div
         v-for="state in states"
         :key="state.model"
         :class="[
-          'inline-flex h-6 min-w-0 max-w-full items-center gap-1 rounded border px-1.5 text-[10px] font-medium leading-none',
-          chipTone(state.status)
+          'grid min-w-0 grid-cols-[6px_minmax(0,1fr)_auto] items-center gap-1 text-[10px] font-medium leading-4',
+          textTone(state.status)
         ]"
         :title="stateTitle(state)"
         :data-test="`codex-model-state-${state.model}`"
+        :data-status="state.status"
       >
         <span :class="['h-1.5 w-1.5 shrink-0 rounded-full', dotTone(state.status)]" />
-        <span class="max-w-24 truncate font-mono">{{ compactModel(state.model) }}</span>
-        <span v-if="state.state_length" class="shrink-0 font-mono font-bold tabular-nums">{{ state.state_length }}</span>
-        <span v-else class="shrink-0">{{ compactStatus(state.status) }}</span>
-      </span>
+        <span class="truncate font-mono">{{ compactModel(state.model) }}</span>
+        <span class="shrink-0 whitespace-nowrap text-right font-mono tabular-nums">{{ stateValue(state) }}</span>
+      </div>
     </div>
-    <div v-else class="text-[11px] text-gray-400 dark:text-dark-400">
+    <div v-else class="text-[10px] leading-4 text-red-500 dark:text-red-400">
       {{ t('admin.ops.turnState.noTargetModels') }}
     </div>
   </div>
@@ -78,17 +78,23 @@ function compactStatus(status: CodexTurnStateAccountStatusValue) {
 function dotTone(status: CodexTurnStateAccountStatusValue) {
   if (status === 'ready') return 'bg-emerald-500'
   if (status === 'running' || status === 'pending') return 'bg-blue-500 animate-pulse'
-  if (status === 'expiring' || status === 'retry_wait') return 'bg-amber-500'
-  if (status === 'failed') return 'bg-red-500'
+  if (status === 'expiring') return 'bg-amber-500'
+  if (status === 'missing' || status === 'retry_wait' || status === 'failed') return 'bg-red-500'
   return 'bg-gray-400'
 }
 
-function chipTone(status: CodexTurnStateAccountStatusValue) {
-  if (status === 'ready') return 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300'
-  if (status === 'running' || status === 'pending') return 'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-300'
-  if (status === 'expiring' || status === 'retry_wait') return 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300'
-  if (status === 'failed') return 'border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300'
-  return 'border-gray-200 bg-white text-gray-500 dark:border-dark-600 dark:bg-dark-900 dark:text-dark-300'
+function textTone(status: CodexTurnStateAccountStatusValue) {
+  if (status === 'ready') return 'text-emerald-700 dark:text-emerald-300'
+  if (status === 'running' || status === 'pending') return 'text-blue-700 dark:text-blue-300'
+  if (status === 'expiring') return 'text-amber-700 dark:text-amber-300'
+  if (status === 'missing' || status === 'retry_wait' || status === 'failed') return 'text-red-600 dark:text-red-400'
+  return 'text-gray-500 dark:text-dark-300'
+}
+
+function stateValue(state: CodexTurnStateAccountStatus) {
+  if (state.status === 'ready' && state.state_length) return String(state.state_length)
+  const status = compactStatus(state.status)
+  return state.state_length ? `${state.state_length} · ${status}` : status
 }
 
 function stateTitle(state: CodexTurnStateAccountStatus) {

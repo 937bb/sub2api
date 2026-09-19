@@ -27,22 +27,28 @@ function state(model: string, status: CodexTurnStateAccountStatus['status'], len
 }
 
 describe('CodexAccountStateSummary', () => {
-  it('shows every target model and only counts ready rows', () => {
+  it('shows every target model as a compact vertical row and only counts ready rows', () => {
     const wrapper = mount(CodexAccountStateSummary, {
       props: {
         states: [
           state('gpt-6-astra', 'ready', 332),
-          state('gpt-5.6-sol', 'retry_wait')
+          state('gpt-5.6-sol', 'expiring', 292),
+          state('gpt-5.6-terra', 'retry_wait')
         ]
       }
     })
 
-    expect(wrapper.text()).toContain('1/2 models ready')
+    expect(wrapper.text()).toContain('1/3 models ready')
     expect(wrapper.text()).toContain('6 astra')
     expect(wrapper.text()).toContain('332')
     expect(wrapper.text()).toContain('5.6 sol')
+    expect(wrapper.text()).toContain('292 · expiring')
+    expect(wrapper.text()).toContain('5.6 terra')
     expect(wrapper.text()).toContain('1 failed')
-    expect(wrapper.findAll('[data-test^="codex-model-state-"]')).toHaveLength(2)
+    expect(wrapper.findAll('[data-test^="codex-model-state-"]')).toHaveLength(3)
+    expect(wrapper.get('[data-status="ready"]').classes()).toContain('text-emerald-700')
+    expect(wrapper.get('[data-status="expiring"]').classes()).toContain('text-amber-700')
+    expect(wrapper.get('[data-status="retry_wait"]').classes()).toContain('text-red-600')
   })
 
   it('does not mark an account ready when one target model is missing', () => {
@@ -51,7 +57,8 @@ describe('CodexAccountStateSummary', () => {
     })
 
     expect(wrapper.text()).toContain('1/2 models ready')
-    expect(wrapper.find('.bg-emerald-500').exists()).toBe(true)
-    expect(wrapper.find('.bg-amber-500').exists()).toBe(true)
+    expect(wrapper.get('[data-status="ready"]').classes()).toContain('text-emerald-700')
+    expect(wrapper.get('[data-status="missing"]').classes()).toContain('text-red-600')
+    expect(wrapper.get('[data-status="missing"]').text()).toContain('missing')
   })
 })
