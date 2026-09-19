@@ -81,11 +81,12 @@ func TestSortOpenAICodexTurnStateScanProxiesUsesStableIdentity(t *testing.T) {
 	}, []string{proxies[0].ProxyURL, proxies[1].ProxyURL, proxies[2].ProxyURL, proxies[3].ProxyURL})
 }
 
-func TestOpenAICodexTurnStateRetryDelayCapsAtFiveMinutes(t *testing.T) {
+func TestOpenAICodexTurnStateRetryDelayCapsAtThirtySeconds(t *testing.T) {
 	require.Equal(t, 5*time.Second, openAICodexTurnStateRetryDelay(1))
 	require.Equal(t, 10*time.Second, openAICodexTurnStateRetryDelay(2))
-	require.Equal(t, 5*time.Minute, openAICodexTurnStateRetryDelay(7))
-	require.Equal(t, 5*time.Minute, openAICodexTurnStateRetryDelay(100))
+	require.Equal(t, 30*time.Second, openAICodexTurnStateRetryDelay(4))
+	require.Equal(t, 30*time.Second, openAICodexTurnStateRetryDelay(7))
+	require.Equal(t, 30*time.Second, openAICodexTurnStateRetryDelay(100))
 }
 
 func TestIsRecentlyUsedOpenAICodexAccount(t *testing.T) {

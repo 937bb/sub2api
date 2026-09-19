@@ -24,7 +24,8 @@ const (
 	openAICodexTurnStateScanWorkers       = 4
 	openAICodexTurnStateScanQueueSize     = 256
 	openAICodexTurnStateScanSweepInterval = 30 * time.Second
-	openAICodexTurnStateScanRefreshBefore = 5 * time.Minute
+	openAICodexTurnStateScanRefreshBefore = 15 * time.Minute
+	openAICodexTurnStateScanRetryMax      = 30 * time.Second
 	openAICodexTurnStateActiveUsageWindow = time.Hour
 	openAICodexTurnStateScanMaxErrorBytes = 240
 )
@@ -424,11 +425,11 @@ func openAICodexTurnStateRetryDelay(attempt int) time.Duration {
 		attempt = 1
 	}
 	delay := 5 * time.Second
-	for i := 1; i < attempt && delay < 5*time.Minute; i++ {
+	for i := 1; i < attempt && delay < openAICodexTurnStateScanRetryMax; i++ {
 		delay *= 2
 	}
-	if delay > 5*time.Minute {
-		return 5 * time.Minute
+	if delay > openAICodexTurnStateScanRetryMax {
+		return openAICodexTurnStateScanRetryMax
 	}
 	return delay
 }
