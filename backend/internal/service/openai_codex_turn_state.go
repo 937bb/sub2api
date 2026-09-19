@@ -157,8 +157,8 @@ func (s *OpenAIGatewayService) observeOpenAICodexTurnState(c *gin.Context, accou
 }
 
 // guardOpenAICodexTurnStateEcho removes a state known to belong to another
-// credential owner, then replaces a 312-byte state with the best unexpired
-// state minted for the same credential owner and model.
+// credential owner, then applies the best unexpired state minted for the same
+// credential owner and model regardless of the incoming state value.
 func (s *OpenAIGatewayService) guardOpenAICodexTurnStateEcho(c *gin.Context, account *Account, h http.Header, model string) {
 	if s == nil || h == nil || account == nil || !account.UsesOpenAICodexProtocol() {
 		return
@@ -166,10 +166,6 @@ func (s *OpenAIGatewayService) guardOpenAICodexTurnStateEcho(c *gin.Context, acc
 	model = stageOpenAICodexTurnStateModel(c, model)
 	stageOpenAICodexTurnStateSessionHash(c, h)
 	s.stripForeignOpenAICodexTurnState(c, account, h)
-	incoming := strings.TrimSpace(h.Get(openAICodexTurnStateHeader))
-	if len(incoming) != 312 {
-		return
-	}
 	owner := codexAccountIdentitySource(c, account)
 	if owner == nil || owner.ID <= 0 || model == "" {
 		return

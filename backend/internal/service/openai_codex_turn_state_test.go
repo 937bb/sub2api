@@ -142,7 +142,7 @@ func TestOpenAICodexTurnStatePool_CleanupRemovesExpiredEntries(t *testing.T) {
 	}
 }
 
-func TestGuardOpenAICodexTurnStateEcho_OnlyReplaces312ForSameAccountAndModel(t *testing.T) {
+func TestGuardOpenAICodexTurnStateEcho_ReplacesForSameAccountAndModel(t *testing.T) {
 	now := time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)
 	svc := &OpenAIGatewayService{}
 	pool := svc.getOpenAICodexTurnStatePool()
@@ -241,30 +241,38 @@ func TestReusableOpenAICodexTurnStateLengths(t *testing.T) {
 	require.False(t, isReusableOpenAICodexTurnStateLength(356))
 }
 
-func TestGuardOpenAICodexTurnStateEcho_PreservesNon312Inputs(t *testing.T) {
+func TestGuardOpenAICodexTurnStateEcho_ReplacesAllInputLengthsAndMissing(t *testing.T) {
 	now := time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)
 	svc := &OpenAIGatewayService{}
 	pool := svc.getOpenAICodexTurnStatePool()
 	pool.now = func() time.Time { return now }
 	accountID := int64(43)
 	model := "gpt-5.6-codex"
-	pool.observe(testOpenAICodexTurnState(292, now, 'a'), &accountID, "source", model, "http")
+	preferred := testOpenAICodexTurnState(332, now, 'a')
+	pool.observe(preferred, &accountID, "source", model, "http")
 	account := &Account{ID: accountID, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
 
-	for _, length := range []int{292, 332, 356} {
-		t.Run(http.StatusText(length), func(t *testing.T) {
+	cases := []struct {
+		name     string
+		incoming string
+	}{
+		{name: "missing"},
+		{name: "292", incoming: testOpenAICodexTurnState(292, now, 'b')},
+		{name: "312", incoming: testOpenAICodexTurnState(312, now, 'c')},
+		{name: "332", incoming: testOpenAICodexTurnState(332, now, 'd')},
+		{name: "356", incoming: testOpenAICodexTurnState(356, now, 'e')},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
 			c, _ := newTurnStateTestContext(t, 7, "target")
-			incoming := testOpenAICodexTurnState(length, now, byte(length))
-			h := http.Header{"X-Codex-Turn-State": []string{incoming}}
+			h := http.Header{}
+			if testCase.incoming != "" {
+				h.Set(openAICodexTurnStateHeader, testCase.incoming)
+			}
 			svc.guardOpenAICodexTurnStateEcho(c, account, h, model)
-			require.Equal(t, incoming, h.Get(openAICodexTurnStateHeader))
+			require.Equal(t, preferred, h.Get(openAICodexTurnStateHeader))
 		})
 	}
-
-	c, _ := newTurnStateTestContext(t, 7, "target-empty")
-	h := http.Header{}
-	svc.guardOpenAICodexTurnStateEcho(c, account, h, model)
-	require.Empty(t, h.Get(openAICodexTurnStateHeader))
 }
 
 func TestGuardOpenAICodexTurnStateEcho_NoTemplatePreserves312(t *testing.T) {
@@ -331,7 +339,6 @@ func TestBuildOpenAIWSHeaders_UsesSameAccountModelReusableState(t *testing.T) {
 	accountID := int64(43)
 	model := "gpt-5.6-codex"
 	accountState := testOpenAICodexTurnState(292, now, 'a')
-	incoming := testOpenAICodexTurnState(312, now, 'b')
 	pool.observe(accountState, &accountID, "source-session", model, "http")
 	c, _ := newTurnStateTestContext(t, 7, "sess-ws")
 	account := &Account{
@@ -344,7 +351,7 @@ func TestBuildOpenAIWSHeaders_UsesSameAccountModelReusableState(t *testing.T) {
 	headers, _, err := svc.buildOpenAIWSHeaders(
 		context.Background(), c, account, "token",
 		OpenAIWSProtocolDecision{Transport: OpenAIUpstreamTransportResponsesWebsocketV2},
-		true, incoming, "", "", model, "",
+		true, "", "", "", model, "",
 	)
 	require.NoError(t, err)
 	require.Equal(t, accountState, headers.Get(openAIWSTurnStateHeader))
