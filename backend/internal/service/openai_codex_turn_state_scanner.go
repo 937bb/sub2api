@@ -23,6 +23,8 @@ import (
 const (
 	openAICodexTurnStateScanWorkers       = 4
 	openAICodexTurnStateScanQueueSize     = 256
+	openAICodexTurnStateScanFanoutLimit   = 3
+	openAICodexTurnStateScanLeaseDuration = 90 * time.Second
 	openAICodexTurnStateScanSweepInterval = 30 * time.Second
 	openAICodexTurnStateScanRefreshBefore = 15 * time.Minute
 	openAICodexTurnStateScanRetryMax      = 30 * time.Second
@@ -235,7 +237,9 @@ func (s *openAICodexTurnStateScanner) stateNeedsRefresh(accountID int64, model s
 	if s == nil || s.gateway == nil {
 		return true
 	}
-	return !s.gateway.getOpenAICodexTurnStatePool().hasReusableStateBeyond(accountID, model, now.Add(openAICodexTurnStateScanRefreshBefore))
+	// A 292 is a valid fallback, but it is not the scanner's terminal target.
+	// Only a sufficiently fresh 332 can suppress an upgrade/refresh job.
+	return !s.gateway.getOpenAICodexTurnStatePool().hasReusableStateOfLengthBeyond(accountID, model, openAICodexTurnStateLength332, now.Add(openAICodexTurnStateScanRefreshBefore))
 }
 
 func (s *openAICodexTurnStateScanner) enqueueAccount(ctx context.Context, account *Account, force bool, usedSince time.Time) (int, []string) {
@@ -256,14 +260,24 @@ func (s *openAICodexTurnStateScanner) enqueueSweep(ctx context.Context) {
 	usedSince := now.Add(-openAICodexTurnStateActiveUsageWindow)
 	for _, account := range accounts {
 		for _, model := range s.modelsForAccount(ctx, account, usedSince) {
-			if !s.stateNeedsRefresh(account.ID, model, time.Now()) {
+			// A healthy 332 is the terminal target for this bucket. A healthy
+			// 292 remains a fallback and must still be allowed to enter the
+			// scheduled upgrade probe path below.
+			pool := s.gateway.getOpenAICodexTurnStatePool()
+			if pool.hasReusableStateOfLengthBeyond(account.ID, model, openAICodexTurnStateLength332, time.Now().Add(openAICodexTurnStateScanRefreshBefore)) {
 				continue
 			}
 			scan, scanErr := s.repo.GetOpenAICodexTurnStateScan(ctx, account.ID, model)
-			// The pool's expiry is authoritative. A previous success may have
-			// scheduled from capture time, or its state may no longer be available.
-			// Keep failure backoff, but never let a stale ready row delay refresh.
-			if scanErr != nil || (scan != nil && scan.Status != "ready" && scan.NextAttemptAt != nil && scan.NextAttemptAt.After(time.Now())) {
+			if scanErr != nil {
+				continue
+			}
+			// A fresh 292 is a usable fallback, but it is not the target state.
+			// Honour its persisted cooldown before trying to upgrade it to 332;
+			// a missing/expired state still bypasses a stale ready deadline.
+			now := time.Now()
+			hasFresh292 := pool.hasReusableStateOfLengthBeyond(account.ID, model, openAICodexTurnStateLength292, now.Add(openAICodexTurnStateScanRefreshBefore))
+			if scan != nil && scan.NextAttemptAt != nil && scan.NextAttemptAt.After(now) &&
+				(scan.Status != "ready" || hasFresh292) {
 				continue
 			}
 			s.Enqueue(account.ID, model, false)
@@ -338,11 +352,41 @@ func (s *openAICodexTurnStateScanner) runJob(ctx context.Context, job openAICode
 	if upstreamModel == "" {
 		return
 	}
-	if !job.force && !s.stateNeedsRefresh(account.ID, upstreamModel, now) {
-		return
+	previous, _ := s.repo.GetOpenAICodexTurnStateScan(ctx, account.ID, upstreamModel)
+	pool := s.gateway.getOpenAICodexTurnStatePool()
+	if !job.force {
+		if pool.hasReusableStateOfLengthBeyond(account.ID, upstreamModel, openAICodexTurnStateLength332, now.Add(openAICodexTurnStateScanRefreshBefore)) {
+			return
+		}
+		// Do not turn every 30-second sweep into a probe storm while a 292
+		// fallback is still fresh. Once its scheduled cooldown elapses, the
+		// next sweep may fan out and look for a 332 upgrade.
+		if pool.hasReusableStateOfLengthBeyond(account.ID, upstreamModel, openAICodexTurnStateLength292, now.Add(openAICodexTurnStateScanRefreshBefore)) &&
+			previous != nil && previous.NextAttemptAt != nil && previous.NextAttemptAt.After(now) {
+			return
+		}
+	}
+	leaseRepo, hasLease := s.repo.(OpenAICodexTurnStateScanLeaseRepository)
+	leaseID := ""
+	if hasLease {
+		leaseID = uuid.NewString()
+		claimed, claimErr := leaseRepo.ClaimOpenAICodexTurnStateScan(ctx, account.ID, upstreamModel, leaseID, time.Now().Add(openAICodexTurnStateScanLeaseDuration))
+		if claimErr != nil {
+			log.WithError(claimErr).WithFields(log.Fields{"account_id": account.ID, "model": upstreamModel}).Warn("failed to claim Codex turn-state scan lease")
+			return
+		}
+		if !claimed {
+			return
+		}
+		defer func() {
+			releaseCtx, releaseCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer releaseCancel()
+			if releaseErr := leaseRepo.ReleaseOpenAICodexTurnStateScan(releaseCtx, account.ID, upstreamModel, leaseID); releaseErr != nil {
+				log.WithError(releaseErr).WithFields(log.Fields{"account_id": account.ID, "model": upstreamModel}).Warn("failed to release Codex turn-state scan lease")
+			}
+		}()
 	}
 
-	previous, _ := s.repo.GetOpenAICodexTurnStateScan(ctx, account.ID, upstreamModel)
 	scan := &OpenAICodexTurnStateScan{AccountID: account.ID, Model: upstreamModel, Status: "running"}
 	if previous != nil {
 		*scan = *previous
@@ -353,32 +397,23 @@ func (s *openAICodexTurnStateScanner) runJob(ctx context.Context, job openAICode
 	scan.LastAttemptAt = &attemptAt
 	scan.LastError = ""
 	scan.NextAttemptAt = nil
-	_ = s.repo.UpsertOpenAICodexTurnStateScan(ctx, scan)
 
-	proxy := s.selectProxy(ctx, account.ID, upstreamModel, scan.AttemptCount)
-	proxyURL := ""
+	proxies := s.selectProxies(ctx, account.ID, upstreamModel, scan.AttemptCount, openAICodexTurnStateScanFanoutLimit)
+	results := s.probeWithBoundedFanout(ctx, account, upstreamModel, proxies, scan.AttemptCount > 1 || pool.hasReusableStateOfLengthBeyond(account.ID, upstreamModel, openAICodexTurnStateLength292, now))
+	result, proxy := chooseOpenAICodexTurnStateResult(upstreamModel, results)
 	if proxy != nil {
-		proxyURL = proxy.ProxyURL
 		scan.LastProxyURL = maskOpenAICodexTurnStateProxyURL(proxy.ProxyURL)
 		if proxy.Source == "state" && proxy.ID > 0 {
-			scan.LastProxyID = &proxy.ID
-		} else {
-			scan.LastProxyID = nil
+			proxyID := proxy.ID
+			scan.LastProxyID = &proxyID
 		}
-	} else {
-		scan.LastProxyID = nil
-		scan.LastProxyURL = ""
 	}
-	result := s.gateway.harvestOpenAICodexTurnState(ctx, account, upstreamModel, proxyURL)
 	scan.LastStateLength = result.stateLength
-	if proxy != nil && proxy.Source == "state" {
-		s.updateProxyHealth(ctx, proxy, result)
-	}
 	doneAt := time.Now()
 	failure := openAICodexTurnStateScanFailure(upstreamModel, result, doneAt)
 	if failure == "" {
 		accountID := account.ID
-		s.gateway.getOpenAICodexTurnStatePool().observe(result.stateValue, &accountID, hashOpenAICodexTurnState(result.sessionID), upstreamModel, "scanner")
+		pool.observe(result.stateValue, &accountID, hashOpenAICodexTurnState(result.sessionID), upstreamModel, "scanner")
 		scan.Status = "ready"
 		scan.LastSuccessAt = &doneAt
 		scan.LastError = ""
@@ -395,6 +430,110 @@ func (s *openAICodexTurnStateScanner) runJob(ctx context.Context, job openAICode
 	if err := s.repo.UpsertOpenAICodexTurnStateScan(ctx, scan); err != nil {
 		log.WithError(err).WithFields(log.Fields{"account_id": account.ID, "model": upstreamModel}).Warn("failed to persist Codex turn-state scan")
 	}
+}
+
+type openAICodexTurnStateProbe struct {
+	proxy  *OpenAICodexTurnStateProxy
+	result openAICodexTurnStateHarvestResult
+}
+
+// probeWithBoundedFanout performs one probe first so an invalid OAuth token
+// cannot fan out across every proxy. A retry or an existing state may then use
+// at most three distinct proxies, with the first valid 332 cancelling the rest.
+func (s *openAICodexTurnStateScanner) probeWithBoundedFanout(ctx context.Context, account *Account, model string, proxies []*OpenAICodexTurnStateProxy, allowFanout bool) []openAICodexTurnStateProbe {
+	if len(proxies) == 0 {
+		return []openAICodexTurnStateProbe{{result: s.gateway.harvestOpenAICodexTurnState(ctx, account, model, "")}}
+	}
+	first := proxies[0]
+	firstResult := s.gateway.harvestOpenAICodexTurnState(ctx, account, model, first.ProxyURL)
+	s.updateProxyHealth(ctx, first, firstResult)
+	probes := []openAICodexTurnStateProbe{{proxy: first, result: firstResult}}
+	firstFailure := openAICodexTurnStateScanFailure(model, firstResult, time.Now())
+	// A valid 292 is a fallback, but the scanner is also responsible for
+	// upgrading an active bucket to 332. Keep probing in that case. A valid
+	// 332 is already the best reusable result, so it ends the fan-out early.
+	if !allowFanout || isOpenAICodexTurnStateAuthFailure(firstResult) ||
+		(firstFailure == "" && firstResult.stateLength >= openAICodexTurnStateLength332) {
+		return probes
+	}
+	remaining := proxies[1:]
+	if len(remaining) > openAICodexTurnStateScanFanoutLimit-1 {
+		remaining = remaining[:openAICodexTurnStateScanFanoutLimit-1]
+	}
+	probeCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	results := make(chan openAICodexTurnStateProbe, len(remaining))
+	var wait sync.WaitGroup
+	for _, proxy := range remaining {
+		proxy := proxy
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			result := s.gateway.harvestOpenAICodexTurnState(probeCtx, account, model, proxy.ProxyURL)
+			s.updateProxyHealth(ctx, proxy, result)
+			select {
+			case results <- openAICodexTurnStateProbe{proxy: proxy, result: result}:
+			case <-ctx.Done():
+			}
+		}()
+	}
+	go func() {
+		wait.Wait()
+		close(results)
+	}()
+	for probe := range results {
+		probes = append(probes, probe)
+		if openAICodexTurnStateScanFailure(model, probe.result, time.Now()) == "" &&
+			probe.result.stateLength >= openAICodexTurnStateLength332 {
+			// A valid 332 is the target result. Cancel in-flight probes while
+			// still draining their bounded result channel to avoid goroutine leaks.
+			cancel()
+		}
+	}
+	return probes
+}
+
+func isOpenAICodexTurnStateAuthFailure(result openAICodexTurnStateHarvestResult) bool {
+	if result.statusCode == http.StatusUnauthorized {
+		return true
+	}
+	message := strings.ToLower(result.errorMessage)
+	return strings.Contains(message, "token revoked") || strings.Contains(message, "invalidated oauth token") || strings.Contains(message, "invalid api key")
+}
+
+func chooseOpenAICodexTurnStateResult(model string, probes []openAICodexTurnStateProbe) (openAICodexTurnStateHarvestResult, *OpenAICodexTurnStateProxy) {
+	var best openAICodexTurnStateProbe
+	var bestFailure openAICodexTurnStateProbe
+	bestValid := false
+	bestFailureSet := false
+	now := time.Now()
+	for _, probe := range probes {
+		if !bestFailureSet || probe.result.stateLength > bestFailure.result.stateLength {
+			bestFailure, bestFailureSet = probe, true
+		}
+		if openAICodexTurnStateScanFailure(model, probe.result, now) != "" {
+			continue
+		}
+		if !bestValid || openAICodexTurnStateProbeRanksBefore(probe, best) {
+			best, bestValid = probe, true
+		}
+	}
+	if !bestValid {
+		if bestFailureSet {
+			return bestFailure.result, bestFailure.proxy
+		}
+		return openAICodexTurnStateHarvestResult{}, nil
+	}
+	return best.result, best.proxy
+}
+
+func openAICodexTurnStateProbeRanksBefore(left, right openAICodexTurnStateProbe) bool {
+	if left.result.stateLength != right.result.stateLength {
+		return left.result.stateLength > right.result.stateLength
+	}
+	leftIssued, _ := parseOpenAICodexTurnStateIssuedAt(left.result.stateValue)
+	rightIssued, _ := parseOpenAICodexTurnStateIssuedAt(right.result.stateValue)
+	return leftIssued.After(rightIssued)
 }
 
 func openAICodexTurnStateScanFailure(requested string, result openAICodexTurnStateHarvestResult, now time.Time) string {
@@ -451,6 +590,17 @@ func openAICodexTurnStateRetryDelay(attempt int) time.Duration {
 }
 
 func (s *openAICodexTurnStateScanner) selectProxy(ctx context.Context, accountID int64, model string, attempt int) *OpenAICodexTurnStateProxy {
+	proxies := s.selectProxies(ctx, accountID, model, attempt, 1)
+	if len(proxies) == 0 {
+		return nil
+	}
+	return proxies[0]
+}
+
+func (s *openAICodexTurnStateScanner) selectProxies(ctx context.Context, accountID int64, model string, attempt, limit int) []*OpenAICodexTurnStateProxy {
+	if limit <= 0 {
+		return nil
+	}
 	dedicated, dedicatedErr := s.repo.ListOpenAICodexTurnStateProxies(ctx, true)
 	shared, sharedErr := s.repo.ListReusableOpenAICodexTurnStateProxies(ctx)
 	if dedicatedErr != nil && sharedErr != nil {
@@ -461,8 +611,15 @@ func (s *openAICodexTurnStateScanner) selectProxy(ctx context.Context, accountID
 		return nil
 	}
 	sortOpenAICodexTurnStateScanProxies(proxies)
-	index := openAICodexTurnStateProxyIndex(accountID, model, attempt, len(proxies))
-	return proxies[index]
+	start := openAICodexTurnStateProxyIndex(accountID, model, attempt, len(proxies))
+	if limit > len(proxies) {
+		limit = len(proxies)
+	}
+	selected := make([]*OpenAICodexTurnStateProxy, 0, limit)
+	for offset := 0; offset < len(proxies) && len(selected) < limit; offset++ {
+		selected = append(selected, proxies[(start+offset)%len(proxies)])
+	}
+	return selected
 }
 
 func sortOpenAICodexTurnStateScanProxies(proxies []*OpenAICodexTurnStateProxy) {

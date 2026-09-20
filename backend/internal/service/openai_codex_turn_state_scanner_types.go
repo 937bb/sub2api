@@ -92,3 +92,12 @@ type OpenAICodexTurnStateScannerRepository interface {
 	GetOpenAICodexTurnStateOperationsSummary(ctx context.Context, targetModels []string) (*OpenAICodexTurnStateOperationsSummary, error)
 	ListObservedOpenAICodexTurnStateModels(ctx context.Context, accountID int64, usedSince time.Time) ([]string, error)
 }
+
+// OpenAICodexTurnStateScanLeaseRepository coordinates scan jobs across
+// multiple service instances sharing the same database. It is optional so
+// in-memory and test repositories can continue to implement the scanner
+// repository without persistence-specific lease methods.
+type OpenAICodexTurnStateScanLeaseRepository interface {
+	ClaimOpenAICodexTurnStateScan(ctx context.Context, accountID int64, model, leaseID string, leaseUntil time.Time) (bool, error)
+	ReleaseOpenAICodexTurnStateScan(ctx context.Context, accountID int64, model, leaseID string) error
+}

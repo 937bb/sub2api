@@ -224,7 +224,7 @@ func TestOpenAICodexTurnStateRefreshSweepUsesPoolExpiryAndPreservesRetryBackoff(
 	}
 }
 
-func TestOpenAICodexTurnStateRefreshUsesHealthyBackupBeforeProbingAgain(t *testing.T) {
+func TestOpenAICodexTurnStateRefreshProbesFor332WithHealthy292Fallback(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	const model = "gpt-6-astra"
 	accountID := int64(41)
@@ -247,7 +247,9 @@ func TestOpenAICodexTurnStateRefreshUsesHealthyBackupBeforeProbingAgain(t *testi
 	scanner.runJob(context.Background(), openAICodexTurnStateScanJob{accountID: accountID, model: model})
 	scanner.enqueueSweep(context.Background())
 
-	require.Zero(t, calls, "a healthy 292 backup avoids probing while the preferred 332 is expiring")
+	require.Equal(t, 1, calls, "a healthy 292 fallback still needs an upgrade probe for 332")
 	require.Empty(t, scanner.queue)
-	require.Empty(t, repo.scans)
+	scan := repo.scans[openAICodexTurnStateBucketKey{accountID: accountID, model: model}]
+	require.NotNil(t, scan)
+	require.Equal(t, "retry_wait", scan.Status)
 }

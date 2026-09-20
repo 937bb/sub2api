@@ -18,3 +18,13 @@ func TestCodexTurnStateScannerMigration(t *testing.T) {
 	require.Contains(t, sql, "last_proxy_url TEXT NOT NULL DEFAULT ''")
 	require.Contains(t, sql, "REFERENCES accounts(id) ON DELETE CASCADE")
 }
+
+func TestCodexTurnStateScannerLeaseMigration(t *testing.T) {
+	content, err := FS.ReadFile("243_codex_turn_state_scan_lease.sql")
+	require.NoError(t, err)
+
+	sql := strings.Join(strings.Fields(string(content)), " ")
+	require.Contains(t, sql, "ADD COLUMN IF NOT EXISTS lease_id TEXT")
+	require.Contains(t, sql, "ADD COLUMN IF NOT EXISTS lease_until TIMESTAMPTZ")
+	require.Contains(t, sql, "idx_codex_turn_state_scans_lease")
+}

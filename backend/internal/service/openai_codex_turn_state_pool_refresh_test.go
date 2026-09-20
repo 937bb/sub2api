@@ -78,3 +78,17 @@ func TestOpenAICodexTurnStatePool_RefreshUsesHealthyFallbackWithinBucket(t *test
 	now = now.Add(40 * time.Minute)
 	require.False(t, pool.hasReusableStateBeyond(accountID, model, now.Add(15*time.Minute)))
 }
+
+func TestOpenAICodexTurnStatePool_292FallbackDoesNotSatisfy332Upgrade(t *testing.T) {
+	now := time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)
+	p := newOpenAICodexTurnStatePool()
+	p.now = func() time.Time { return now }
+	accountID := int64(42)
+	model := "gpt-5.5"
+	state292 := testOpenAICodexTurnState(openAICodexTurnStateLength292, now.Add(-5*time.Minute), 'a')
+	p.observe(state292, &accountID, "fallback", model, "scanner")
+	deadline := now.Add(openAICodexTurnStateScanRefreshBefore)
+
+	require.True(t, p.hasReusableStateOfLengthBeyond(accountID, model, openAICodexTurnStateLength292, deadline))
+	require.False(t, p.hasReusableStateOfLengthBeyond(accountID, model, openAICodexTurnStateLength332, deadline))
+}

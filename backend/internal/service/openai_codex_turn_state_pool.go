@@ -235,6 +235,14 @@ func (p *openAICodexTurnStatePool) preferredExpiryForBucket(accountID int64, mod
 }
 
 func (p *openAICodexTurnStatePool) hasReusableStateBeyond(accountID int64, model string, deadline time.Time) bool {
+	return p.hasReusableStateOfLengthBeyond(accountID, model, openAICodexTurnStateLength292, deadline)
+}
+
+// hasReusableStateOfLengthBeyond reports whether this account/model has a
+// reusable state whose value length is at least minLength and whose signed
+// lifetime extends beyond deadline. States are deliberately scoped by both
+// account and model; a state observed on another bucket is never a fallback.
+func (p *openAICodexTurnStatePool) hasReusableStateOfLengthBeyond(accountID int64, model string, minLength int, deadline time.Time) bool {
 	key, ok := newOpenAICodexTurnStateBucketKey(accountID, model)
 	if p == nil || !ok {
 		return false
@@ -243,11 +251,11 @@ func (p *openAICodexTurnStatePool) hasReusableStateBeyond(accountID int64, model
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	selected := p.preferredByBucket[key]
-	if p.isPreferredBucketRecordLocked(selected, key, now) && selected.ExpiresAt.After(deadline) {
+	if p.isPreferredBucketRecordLocked(selected, key, now) && selected.ValueLength >= minLength && selected.ExpiresAt.After(deadline) {
 		return true
 	}
 	for _, record := range p.entries {
-		if isReusableOpenAICodexTurnStateRecord(record, key, now) && record.ExpiresAt.After(deadline) {
+		if isReusableOpenAICodexTurnStateRecord(record, key, now) && record.ValueLength >= minLength && record.ExpiresAt.After(deadline) {
 			return true
 		}
 	}

@@ -278,6 +278,73 @@ func TestOpenAICodexTurnStateScanFailureValidatesExpiry(t *testing.T) {
 	}
 }
 
+func TestChooseOpenAICodexTurnStateResultPrefers332Over292(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	state292 := testOpenAICodexTurnState(openAICodexTurnStateLength292, now, 'a')
+	state332 := testOpenAICodexTurnState(openAICodexTurnStateLength332, now.Add(-time.Minute), 'b')
+	proxies := []*OpenAICodexTurnStateProxy{
+		{ID: 1, Source: "state", ProxyURL: "http://proxy-1.example"},
+		{ID: 2, Source: "state", ProxyURL: "http://proxy-2.example"},
+	}
+	result, proxy := chooseOpenAICodexTurnStateResult("gpt-5.5", []openAICodexTurnStateProbe{
+		{proxy: proxies[0], result: openAICodexTurnStateHarvestResult{
+			stateValue: state292, stateLength: len(state292), officialModel: "gpt-5.5", upstreamOK: true, statusCode: http.StatusOK,
+		}},
+		{proxy: proxies[1], result: openAICodexTurnStateHarvestResult{
+			stateValue: state332, stateLength: len(state332), officialModel: "gpt-5.5", upstreamOK: true, statusCode: http.StatusOK,
+		}},
+	})
+
+	require.Equal(t, state332, result.stateValue)
+	require.Same(t, proxies[1], proxy)
+}
+
+func TestChooseOpenAICodexTurnStateResultDoesNotTreatInvalid332AsSuccess(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	state292 := testOpenAICodexTurnState(openAICodexTurnStateLength292, now, 'a')
+	invalid332 := strings.Repeat("x", openAICodexTurnStateLength332)
+	result, proxy := chooseOpenAICodexTurnStateResult("gpt-5.5", []openAICodexTurnStateProbe{
+		{proxy: &OpenAICodexTurnStateProxy{ID: 1}, result: openAICodexTurnStateHarvestResult{
+			stateValue: state292, stateLength: len(state292), officialModel: "gpt-5.5", upstreamOK: true, statusCode: http.StatusOK,
+		}},
+		{proxy: &OpenAICodexTurnStateProxy{ID: 2}, result: openAICodexTurnStateHarvestResult{
+			stateValue: invalid332, stateLength: len(invalid332), officialModel: "gpt-5.5", upstreamOK: true, statusCode: http.StatusOK,
+		}},
+	})
+
+	require.Equal(t, state292, result.stateValue)
+	require.Equal(t, int64(1), proxy.ID)
+}
+
+func TestIsOpenAICodexTurnStateAuthFailureStopsFanout(t *testing.T) {
+	for _, result := range []openAICodexTurnStateHarvestResult{
+		{statusCode: http.StatusUnauthorized},
+		{errorMessage: "token revoked by upstream"},
+		{errorMessage: "invalidated OAuth token"},
+		{errorMessage: "invalid API key"},
+	} {
+		require.True(t, isOpenAICodexTurnStateAuthFailure(result), "%+v", result)
+	}
+	require.False(t, isOpenAICodexTurnStateAuthFailure(openAICodexTurnStateHarvestResult{
+		statusCode:   http.StatusTooManyRequests,
+		errorMessage: "rate limited",
+	}))
+}
+
+func TestOpenAICodexTurnStateProbeRanksByIssuedAtWithinLength(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	earlier := openAICodexTurnStateProbe{result: openAICodexTurnStateHarvestResult{
+		stateValue:  testOpenAICodexTurnState(openAICodexTurnStateLength332, now.Add(-time.Minute), 'a'),
+		stateLength: openAICodexTurnStateLength332,
+	}}
+	later := openAICodexTurnStateProbe{result: openAICodexTurnStateHarvestResult{
+		stateValue:  testOpenAICodexTurnState(openAICodexTurnStateLength332, now, 'b'),
+		stateLength: openAICodexTurnStateLength332,
+	}}
+	require.True(t, openAICodexTurnStateProbeRanksBefore(later, earlier))
+	require.False(t, openAICodexTurnStateProbeRanksBefore(earlier, later))
+}
+
 func TestReadOpenAICodexTurnStateOfficialModelFromSSE(t *testing.T) {
 	body := strings.NewReader("event: response.created\n" +
 		`data: {"type":"response.created","response":{"id":"resp_1","model":"gpt-5.5"}}` + "\n\n" +

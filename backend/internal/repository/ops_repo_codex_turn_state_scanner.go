@@ -172,6 +172,48 @@ ON CONFLICT (account_id, model) DO UPDATE SET
 	return err
 }
 
+// ClaimOpenAICodexTurnStateScan atomically claims an account/model scan row.
+// This is intentionally separate from the scan status: a ready or retrying
+// row can still be leased while it is being refreshed, and a lease owner is
+// the only instance allowed to release it.
+func (r *opsRepository) ClaimOpenAICodexTurnStateScan(ctx context.Context, accountID int64, model, leaseID string, leaseUntil time.Time) (bool, error) {
+	if accountID <= 0 || strings.TrimSpace(model) == "" || strings.TrimSpace(leaseID) == "" || leaseUntil.IsZero() {
+		return false, fmt.Errorf("invalid Codex turn-state scan lease")
+	}
+	var claimedAccountID int64
+	err := r.db.QueryRowContext(ctx, `
+INSERT INTO codex_turn_state_scans (account_id, model, status, lease_id, lease_until)
+VALUES ($1, LOWER(BTRIM($2)), 'pending', $3, $4)
+ON CONFLICT (account_id, model) DO UPDATE SET
+  lease_id = EXCLUDED.lease_id,
+  lease_until = EXCLUDED.lease_until,
+  updated_at = NOW()
+WHERE codex_turn_state_scans.lease_id IS NULL
+   OR codex_turn_state_scans.lease_until IS NULL
+   OR codex_turn_state_scans.lease_until <= NOW()
+   OR codex_turn_state_scans.lease_id = EXCLUDED.lease_id
+RETURNING account_id`, accountID, model, strings.TrimSpace(leaseID), leaseUntil).Scan(&claimedAccountID)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return claimedAccountID == accountID, nil
+}
+
+func (r *opsRepository) ReleaseOpenAICodexTurnStateScan(ctx context.Context, accountID int64, model, leaseID string) error {
+	if accountID <= 0 || strings.TrimSpace(model) == "" || strings.TrimSpace(leaseID) == "" {
+		return fmt.Errorf("invalid Codex turn-state scan lease")
+	}
+	_, err := r.db.ExecContext(ctx, `
+UPDATE codex_turn_state_scans
+SET lease_id = NULL, lease_until = NULL, updated_at = NOW()
+WHERE account_id = $1 AND model = LOWER(BTRIM($2)) AND lease_id = $3`,
+		accountID, model, strings.TrimSpace(leaseID))
+	return err
+}
+
 func (r *opsRepository) GetOpenAICodexTurnStateScan(ctx context.Context, accountID int64, model string) (*service.OpenAICodexTurnStateScan, error) {
 	item := &service.OpenAICodexTurnStateScan{}
 	err := r.db.QueryRowContext(ctx, `
