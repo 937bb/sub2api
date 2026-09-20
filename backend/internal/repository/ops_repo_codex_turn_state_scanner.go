@@ -151,11 +151,16 @@ func (r *opsRepository) UpsertOpenAICodexTurnStateScan(ctx context.Context, scan
 	if scan == nil || scan.AccountID <= 0 || strings.TrimSpace(scan.Model) == "" {
 		return fmt.Errorf("invalid Codex turn-state scan")
 	}
-	_, err := r.db.ExecContext(ctx, `
+	result, err := r.db.ExecContext(ctx, `
 INSERT INTO codex_turn_state_scans (
   account_id, model, status, attempt_count, last_proxy_id, last_proxy_url, last_state_length,
   last_error, last_attempt_at, last_success_at, next_attempt_at
-) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+) SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11
+WHERE $12 = '' OR EXISTS (
+  SELECT 1 FROM codex_turn_state_scans owned
+  WHERE owned.account_id = $1 AND owned.model = $2
+    AND owned.lease_id = $12 AND owned.lease_until > NOW()
+)
 ON CONFLICT (account_id, model) DO UPDATE SET
   status = EXCLUDED.status,
   attempt_count = EXCLUDED.attempt_count,
@@ -166,10 +171,23 @@ ON CONFLICT (account_id, model) DO UPDATE SET
   last_attempt_at = EXCLUDED.last_attempt_at,
   last_success_at = EXCLUDED.last_success_at,
   next_attempt_at = EXCLUDED.next_attempt_at,
-  updated_at = NOW()`, scan.AccountID, strings.ToLower(strings.TrimSpace(scan.Model)), scan.Status,
+  updated_at = NOW()
+WHERE ($12 <> '' AND codex_turn_state_scans.lease_id = $12 AND codex_turn_state_scans.lease_until > NOW())
+   OR ($12 = '' AND (codex_turn_state_scans.lease_id IS NULL
+       OR codex_turn_state_scans.lease_until IS NULL OR codex_turn_state_scans.lease_until <= NOW()))`, scan.AccountID, strings.ToLower(strings.TrimSpace(scan.Model)), scan.Status,
 		scan.AttemptCount, scan.LastProxyID, scan.LastProxyURL, scan.LastStateLength, scan.LastError,
-		scan.LastAttemptAt, scan.LastSuccessAt, scan.NextAttemptAt)
-	return err
+		scan.LastAttemptAt, scan.LastSuccessAt, scan.NextAttemptAt, strings.TrimSpace(scan.LeaseID))
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return fmt.Errorf("codex turn-state scan lease lost or held by another worker")
+	}
+	return nil
 }
 
 // ClaimOpenAICodexTurnStateScan atomically claims an account/model scan row.
@@ -320,8 +338,9 @@ WITH eligible_accounts AS (
     SELECT value_length, issued_at, expires_at
     FROM codex_turn_states c
     WHERE c.source_account_id = a.id AND c.source_model = am.model
-      AND c.value_length IN (292, 332) AND c.expires_at > NOW()
-    ORDER BY c.value_length DESC, c.expires_at DESC, c.last_seen_at DESC, c.id DESC LIMIT 1
+      AND c.value_length = ANY($4::integer[]) AND c.expires_at > NOW()
+      AND c.issued_at <= NOW() AND c.issued_at + INTERVAL '1 hour' > NOW()
+    ORDER BY array_position($4::integer[], c.value_length), c.expires_at DESC, c.last_seen_at DESC, c.state_hash DESC LIMIT 1
   ) ls ON TRUE
   LEFT JOIN codex_turn_state_scans sc ON sc.account_id = a.id AND sc.model = am.model
   LEFT JOIN codex_turn_state_proxies p ON p.id = sc.last_proxy_id
@@ -329,7 +348,7 @@ WITH eligible_accounts AS (
 `
 }
 
-func (r *opsRepository) ListOpenAICodexTurnStateAccountStatuses(ctx context.Context, accountIDs []int64, targetModels []string, page, pageSize int) (*service.OpenAICodexTurnStateAccountStatusList, error) {
+func (r *opsRepository) ListOpenAICodexTurnStateAccountStatuses(ctx context.Context, accountIDs []int64, targetModels []string, targetLengths []int, page, pageSize int) (*service.OpenAICodexTurnStateAccountStatusList, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -344,11 +363,12 @@ func (r *opsRepository) ListOpenAICodexTurnStateAccountStatuses(ctx context.Cont
 		ids = pq.Array(accountIDs)
 	}
 	models := pq.Array(targetModels)
+	lengths := pq.Array(targetLengths)
 	cte := codexTurnStateAccountStatusCTE()
 	usedSince := time.Now().Add(-time.Hour)
 	var total int64
 	if err := r.db.QueryRowContext(ctx, cte+`
-SELECT COUNT(*) FROM status_rows WHERE ($2::bigint[] IS NULL OR account_id = ANY($2))`, usedSince, ids, models).Scan(&total); err != nil {
+SELECT COUNT(*) FROM status_rows WHERE ($2::bigint[] IS NULL OR account_id = ANY($2))`, usedSince, ids, models, lengths).Scan(&total); err != nil {
 		return nil, err
 	}
 	rows, err := r.db.QueryContext(ctx, cte+`
@@ -358,7 +378,7 @@ SELECT account_id, account_name, account_type, plan_type, model, effective_statu
 FROM status_rows
 WHERE ($2::bigint[] IS NULL OR account_id = ANY($2))
 ORDER BY account_name ASC, account_id ASC, model ASC
-LIMIT $4 OFFSET $5`, usedSince, ids, models, pageSize, (page-1)*pageSize)
+LIMIT $5 OFFSET $6`, usedSince, ids, models, lengths, pageSize, (page-1)*pageSize)
 	if err != nil {
 		return nil, err
 	}
@@ -382,7 +402,7 @@ LIMIT $4 OFFSET $5`, usedSince, ids, models, pageSize, (page-1)*pageSize)
 	return &service.OpenAICodexTurnStateAccountStatusList{Items: items, Total: total, Page: page, PageSize: pageSize}, nil
 }
 
-func (r *opsRepository) GetOpenAICodexTurnStateOperationsSummary(ctx context.Context, targetModels []string) (*service.OpenAICodexTurnStateOperationsSummary, error) {
+func (r *opsRepository) GetOpenAICodexTurnStateOperationsSummary(ctx context.Context, targetModels []string, targetLengths []int) (*service.OpenAICodexTurnStateOperationsSummary, error) {
 	summary := &service.OpenAICodexTurnStateOperationsSummary{}
 	err := r.db.QueryRowContext(ctx, `
 WITH eligible AS (
@@ -422,10 +442,16 @@ WITH eligible AS (
 ), model_slots AS (
   SELECT account_id, model FROM account_models
 ), ready_slots AS (
-  SELECT DISTINCT c.source_account_id AS account_id, c.source_model AS model
-  FROM codex_turn_states c
-  JOIN model_slots ms ON ms.account_id = c.source_account_id AND ms.model = c.source_model
-  WHERE c.value_length IN (292, 332) AND c.expires_at > NOW()
+  SELECT ms.account_id, ms.model
+  FROM model_slots ms
+  JOIN LATERAL (
+    SELECT c.expires_at
+    FROM codex_turn_states c
+    WHERE c.source_account_id = ms.account_id AND c.source_model = ms.model
+      AND c.value_length = ANY($3::integer[]) AND c.expires_at > NOW()
+      AND c.issued_at <= NOW() AND c.issued_at + INTERVAL '1 hour' > NOW()
+    ORDER BY array_position($3::integer[], c.value_length), c.expires_at DESC, c.last_seen_at DESC, c.state_hash DESC LIMIT 1
+  ) selected ON selected.expires_at > NOW() + INTERVAL '5 minutes'
 ), account_readiness AS (
   SELECT ms.account_id,
          COUNT(*) AS target_count,
@@ -445,7 +471,7 @@ SELECT (SELECT COUNT(*) FROM eligible),
        (SELECT COUNT(*) FROM proxies WHERE deleted_at IS NULL AND status = 'active'
           AND (expires_at IS NULL OR expires_at > NOW())),
        (SELECT MAX(sc.last_attempt_at) FROM codex_turn_state_scans sc JOIN eligible e ON e.id = sc.account_id)`,
-		time.Now().Add(-time.Hour), pq.Array(targetModels)).Scan(
+		time.Now().Add(-time.Hour), pq.Array(targetModels), pq.Array(targetLengths)).Scan(
 		&summary.OAuthAccounts, &summary.ReadyAccounts, &summary.MissingAccounts,
 		&summary.ReadyModelSlots, &summary.TotalModelSlots, &summary.RunningJobs, &summary.EnabledProxies, &summary.HealthyProxies, &summary.SharedProxies, &summary.LastScanAt,
 	)

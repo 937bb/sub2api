@@ -144,6 +144,8 @@ func TestOpenAICodexTurnStateRefreshRejectsOldResultThenAcceptsFreshResult(t *te
 			require.Equal(t, oldRecord.LastSeenAt, replayedRecord.LastSeenAt)
 
 			responseState = freshState
+			backoffElapsed := time.Now().Add(-time.Second)
+			repo.scans[openAICodexTurnStateBucketKey{accountID: accountID, model: model}].NextAttemptAt = &backoffElapsed
 			scanner.runJob(context.Background(), job)
 
 			ready, err := repo.GetOpenAICodexTurnStateScan(context.Background(), accountID, model)
@@ -224,7 +226,7 @@ func TestOpenAICodexTurnStateRefreshSweepUsesPoolExpiryAndPreservesRetryBackoff(
 	}
 }
 
-func TestOpenAICodexTurnStateRefreshProbesFor332WithHealthy292Fallback(t *testing.T) {
+func TestOpenAICodexTurnStateRefreshKeepsHealthy292FallbackUntilRefreshWindow(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	const model = "gpt-6-astra"
 	accountID := int64(41)
@@ -247,9 +249,8 @@ func TestOpenAICodexTurnStateRefreshProbesFor332WithHealthy292Fallback(t *testin
 	scanner.runJob(context.Background(), openAICodexTurnStateScanJob{accountID: accountID, model: model})
 	scanner.enqueueSweep(context.Background())
 
-	require.Equal(t, 1, calls, "a healthy 292 fallback still needs an upgrade probe for 332")
+	require.Zero(t, calls, "a usable configured fallback must not trigger repeated acquisition")
 	require.Empty(t, scanner.queue)
 	scan := repo.scans[openAICodexTurnStateBucketKey{accountID: accountID, model: model}]
-	require.NotNil(t, scan)
-	require.Equal(t, "retry_wait", scan.Status)
+	require.Nil(t, scan)
 }

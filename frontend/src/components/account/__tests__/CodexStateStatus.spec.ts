@@ -3,7 +3,7 @@ import { mount } from '@vue/test-utils'
 import CodexStateStatus from '../CodexStateStatus.vue'
 
 const labels: Record<string, string> = {
-  'admin.ops.turnState.status.ready': '292/332 Ready',
+  'admin.ops.turnState.status.ready': 'Target State ready',
   'admin.ops.turnState.status.running': 'Scanning',
   'admin.ops.turnState.status.missing': 'Missing'
 }
@@ -24,7 +24,7 @@ describe('CodexStateStatus', () => {
   it('shows a ready state with its length and model', () => {
     const wrapper = render({ status: 'ready', stateLength: 332, model: 'gpt-5.6-sol' })
 
-    expect(wrapper.text()).toContain('292/332 Ready')
+    expect(wrapper.text()).toContain('Target State ready')
     expect(wrapper.text()).toContain('332')
     expect(wrapper.text()).toContain('gpt-5.6-sol')
     expect(wrapper.find('.bg-emerald-500').exists()).toBe(true)

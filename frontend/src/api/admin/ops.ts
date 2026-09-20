@@ -157,6 +157,23 @@ export interface CodexTurnStateProxy {
   updated_at: string
 }
 
+export interface CodexTurnStateScanSettings {
+  target_lengths: number[]
+  parallel_probes: number
+  dynamic_proxy_enabled: boolean
+  dynamic_proxy_url: string
+}
+
+export async function getCodexTurnStateScanSettings(): Promise<CodexTurnStateScanSettings> {
+  const { data } = await apiClient.get<CodexTurnStateScanSettings>('/admin/ops/codex-turn-states/scan-settings')
+  return data
+}
+
+export async function updateCodexTurnStateScanSettings(settings: CodexTurnStateScanSettings): Promise<CodexTurnStateScanSettings> {
+  const { data } = await apiClient.put<CodexTurnStateScanSettings>('/admin/ops/codex-turn-states/scan-settings', settings)
+  return data
+}
+
 export async function listCodexTurnStateAccounts(params: { page?: number; page_size?: number; account_ids?: string }): Promise<PaginatedResponse<CodexTurnStateAccountStatus>> {
   const { data } = await apiClient.get<PaginatedResponse<CodexTurnStateAccountStatus>>('/admin/ops/codex-turn-states/accounts', { params })
   return data
@@ -1460,6 +1477,8 @@ export const opsAPI = {
   deleteCodexTurnStates,
   listCodexTurnStateAccounts,
   getCodexTurnStateOperationsSummary,
+  getCodexTurnStateScanSettings,
+  updateCodexTurnStateScanSettings,
   listCodexTurnStateProxies,
   addCodexTurnStateProxies,
   setCodexTurnStateProxyEnabled,

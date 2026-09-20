@@ -29,6 +29,9 @@
                 <Icon name="plus" size="sm" class="mr-1.5" />
                 {{ t('admin.ops.turnState.addProxy') }}
               </button>
+              <button v-if="activeTab === 'proxies'" class="btn btn-secondary" @click="showScanSettingsDialog = true">
+                {{ t('admin.ops.turnState.scanSettings.title') }}
+              </button>
             </div>
           </div>
 
@@ -262,6 +265,8 @@
       </template>
     </BaseDialog>
 
+    <CodexScanSettingsDialog :show="showScanSettingsDialog" @close="showScanSettingsDialog = false" @saved="refresh" />
+
     <ConfirmDialog
       :show="showHistoryDeleteDialog"
       :title="t('admin.ops.turnState.deleteTitle')"
@@ -287,6 +292,7 @@ import Icon from '@/components/icons/Icon.vue'
 import CodexStateStatus from '@/components/account/CodexStateStatus.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
+import CodexScanSettingsDialog from './components/CodexScanSettingsDialog.vue'
 import { useAppStore } from '@/stores/app'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { formatDateTime } from '@/utils/format'
@@ -324,6 +330,7 @@ const selectedHistoryIDs = ref<number[]>([])
 const showHistoryDeleteDialog = ref(false)
 const pendingHistoryDeleteIDs = ref<number[]>([])
 const showProxyDialog = ref(false)
+const showScanSettingsDialog = ref(false)
 const proxyValues = ref('')
 
 const tabs = computed(() => [
@@ -438,6 +445,7 @@ function handleHistoryStatusChange() { historyPagination.page = 1; loadHistory()
 
 async function scanAccount(row: CodexTurnStateAccountStatus) {
   const key = accountModelKey(row)
+  if (scanningKeys.has(key)) return
   scanningKeys.add(key)
   try {
     const result = await opsAPI.scanCodexTurnState(row.account_id, row.model)

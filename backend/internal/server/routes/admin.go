@@ -197,6 +197,8 @@ func registerOpsRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		ops.DELETE("/codex-turn-states", h.Admin.Ops.DeleteCodexTurnStates)
 		ops.GET("/codex-turn-states/accounts", h.Admin.Ops.ListCodexTurnStateAccounts)
 		ops.GET("/codex-turn-states/operations-summary", h.Admin.Ops.GetCodexTurnStateOperationsSummary)
+		ops.GET("/codex-turn-states/scan-settings", h.Admin.Ops.GetCodexTurnStateScanSettings)
+		ops.PUT("/codex-turn-states/scan-settings", h.Admin.Ops.UpdateCodexTurnStateScanSettings)
 		ops.GET("/codex-turn-states/proxies", h.Admin.Ops.ListCodexTurnStateProxies)
 		ops.POST("/codex-turn-states/proxies", h.Admin.Ops.AddCodexTurnStateProxies)
 		ops.PUT("/codex-turn-states/proxies/:id/enabled", h.Admin.Ops.SetCodexTurnStateProxyEnabled)

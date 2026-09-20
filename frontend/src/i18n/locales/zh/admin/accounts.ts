@@ -747,11 +747,11 @@ export default {
         codexFingerprintDevice: '仅设备',
         codexFingerprintSession: '设备+会话隔离',
         codexFingerprintFull: '完整身份隔离（full）',
-        codexTurnTicket: 'Codex 292 门票',
+        codexTurnTicket: 'Codex State',
         codexTurnTicketDesc: '显示已配置模型的门票状态。仅在启用缺票拦截时，没有有效门票的模型才会暂停调度。',
         codexTurnTicketMissing: '暂无有效门票，仍允许请求',
         codexTurnTicketReady: '剩余 {time}',
-        codexTurnTicketPaused: '未打到 292，该模型已暂停',
+        codexTurnTicketPaused: '无有效目标 State，该模型已暂停',
         codexImageTool: 'Codex 图片桥接策略',
         codexImageToolDesc:
           '统一控制 Codex /responses 文本请求的 hosted image_generation 桥接和客户端图片工具声明。hosted 工具自动注入仅适用于非 Responses Lite 请求；账号级策略优先于渠道和全局配置，不影响独立图片生成接口。',

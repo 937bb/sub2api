@@ -223,6 +223,32 @@ func (h *OpsHandler) GetCodexTurnStateOperationsSummary(c *gin.Context) {
 	response.Success(c, result)
 }
 
+func (h *OpsHandler) GetCodexTurnStateScanSettings(c *gin.Context) {
+	if h.opsService == nil {
+		response.Error(c, http.StatusServiceUnavailable, "Ops service not available")
+		return
+	}
+	response.Success(c, h.opsService.GetOpenAICodexTurnStateScanSettings())
+}
+
+func (h *OpsHandler) UpdateCodexTurnStateScanSettings(c *gin.Context) {
+	if h.opsService == nil {
+		response.Error(c, http.StatusServiceUnavailable, "Ops service not available")
+		return
+	}
+	var request service.OpenAICodexTurnStateScanSettings
+	if err := c.ShouldBindJSON(&request); err != nil {
+		response.BadRequest(c, "Invalid scan settings")
+		return
+	}
+	settings, err := h.opsService.UpdateOpenAICodexTurnStateScanSettings(c.Request.Context(), &request)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, settings)
+}
+
 func (h *OpsHandler) ListCodexTurnStateProxies(c *gin.Context) {
 	if h.opsService == nil {
 		response.Error(c, http.StatusServiceUnavailable, "Ops service not available")

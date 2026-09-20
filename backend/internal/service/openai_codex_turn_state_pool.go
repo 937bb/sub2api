@@ -6,7 +6,9 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
+	"fmt"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -69,6 +71,12 @@ type OpenAICodexTurnStateStore interface {
 	LoadActiveOpenAICodexTurnStates(ctx context.Context, now time.Time) ([]*OpenAICodexTurnStateRecord, error)
 }
 
+// OpenAICodexTurnStateBucketStore is an optional cold-path synchronization
+// interface for workers sharing a database but keeping separate memory pools.
+type OpenAICodexTurnStateBucketStore interface {
+	LoadPreferredOpenAICodexTurnState(ctx context.Context, accountID int64, model string, targetLengths []int, now time.Time) (*OpenAICodexTurnStateRecord, error)
+}
+
 type OpenAICodexTurnStateAdminRepository interface {
 	OpenAICodexTurnStateStore
 	BatchUpsertOpenAICodexTurnStates(ctx context.Context, records []*OpenAICodexTurnStateRecord) error
@@ -87,6 +95,7 @@ type openAICodexTurnStatePool struct {
 	entries           map[string]*OpenAICodexTurnStateRecord
 	accounts          map[int64]time.Time
 	preferredByBucket map[openAICodexTurnStateBucketKey]*OpenAICodexTurnStateRecord
+	targetLengths     []int
 	repo              OpenAICodexTurnStateStore
 	queue             chan *OpenAICodexTurnStateRecord
 	worker            sync.Once
@@ -100,9 +109,40 @@ func newOpenAICodexTurnStatePool() *openAICodexTurnStatePool {
 		entries:           make(map[string]*OpenAICodexTurnStateRecord),
 		accounts:          make(map[int64]time.Time),
 		preferredByBucket: make(map[openAICodexTurnStateBucketKey]*OpenAICodexTurnStateRecord),
+		targetLengths:     defaultOpenAICodexTurnStateScanSettings().TargetLengths,
 		queue:             make(chan *OpenAICodexTurnStateRecord, openAICodexTurnStatePersistQueue),
 		now:               time.Now,
 	}
+}
+
+func (p *openAICodexTurnStatePool) setTargetLengths(lengths []int) {
+	if p == nil || len(lengths) == 0 {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if slices.Equal(p.targetLengths, lengths) {
+		return
+	}
+	p.targetLengths = slices.Clone(lengths)
+	p.rebuildAccountsLocked()
+}
+
+func (p *openAICodexTurnStatePool) lengthRankLocked(length int) int {
+	if len(p.targetLengths) == 0 {
+		return defaultOpenAICodexTurnStateScanSettings().lengthRank(length)
+	}
+	if index := slices.Index(p.targetLengths, length); index >= 0 {
+		return index
+	}
+	return len(p.targetLengths)
+}
+
+func (p *openAICodexTurnStatePool) acceptsLengthLocked(length int) bool {
+	if len(p.targetLengths) == 0 {
+		return isReusableOpenAICodexTurnStateLength(length)
+	}
+	return p.lengthRankLocked(length) < len(p.targetLengths)
 }
 
 func (p *openAICodexTurnStatePool) setRepository(ctx context.Context, repo OpenAICodexTurnStateStore) {
@@ -127,36 +167,55 @@ func (p *openAICodexTurnStatePool) setRepository(ctx context.Context, repo OpenA
 	p.worker.Do(func() { go p.runPersistenceWorker() })
 }
 
+// refreshBucket imports a persisted state without recording another observation
+// or extending its lifetime. A missing row leaves unflushed local records intact.
+func (p *openAICodexTurnStatePool) refreshBucket(ctx context.Context, accountID int64, model string) error {
+	key, validKey := newOpenAICodexTurnStateBucketKey(accountID, model)
+	if p == nil || !validKey {
+		return nil
+	}
+	p.mu.RLock()
+	repo, supported := p.repo.(OpenAICodexTurnStateBucketStore)
+	targetLengths := slices.Clone(p.targetLengths)
+	p.mu.RUnlock()
+	if !supported {
+		return nil
+	}
+	if len(targetLengths) == 0 {
+		targetLengths = defaultOpenAICodexTurnStateScanSettings().TargetLengths
+	}
+	record, err := repo.LoadPreferredOpenAICodexTurnState(ctx, key.accountID, key.model, targetLengths, p.now())
+	if err != nil {
+		return fmt.Errorf("load persisted Codex turn-state bucket: %w", err)
+	}
+	if record == nil {
+		return nil
+	}
+	if record.SourceAccountID == nil || *record.SourceAccountID != key.accountID || normalizeOpenAICodexTurnStateModel(record.SourceModel) != key.model {
+		return fmt.Errorf("persisted Codex turn-state account/model scope mismatch")
+	}
+	issuedAt, issuedOK := parseOpenAICodexTurnStateIssuedAt(record.StateValue)
+	if !isValidOpenAICodexTurnState(record.StateValue) || record.ValueLength != len(record.StateValue) ||
+		record.StateHash != hashOpenAICodexTurnState(record.StateValue) || !issuedOK || !issuedAt.Equal(record.IssuedAt) {
+		return fmt.Errorf("persisted Codex turn-state metadata mismatch")
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	// Settings and time may change during the query. Recheck before merging.
+	if p.isReusableRecordLocked(record, key, p.now()) {
+		p.mergeLocked(record)
+	}
+	return nil
+}
+
 func (p *openAICodexTurnStatePool) observe(value string, accountID *int64, sessionHash, model, transport string) {
 	if p == nil {
 		return
 	}
-	value = strings.TrimSpace(value)
-	if !isValidOpenAICodexTurnState(value) {
-		return
-	}
 	now := p.now()
-	issuedAt, issuedOK := parseOpenAICodexTurnStateIssuedAt(value)
-	if issuedOK && issuedAt.After(now) {
+	record := newObservedOpenAICodexTurnStateRecord(value, accountID, sessionHash, model, transport, now)
+	if record == nil {
 		return
-	}
-	expiresAt := now
-	if issuedOK && !issuedAt.After(now) {
-		expiresAt = issuedAt.Add(openAICodexTurnStateTTL)
-	}
-	record := &OpenAICodexTurnStateRecord{
-		StateValue:        value,
-		StateHash:         hashOpenAICodexTurnState(value),
-		ValueLength:       len(value),
-		SourceAccountID:   cloneInt64Pointer(accountID),
-		SourceSessionHash: sessionHash,
-		SourceModel:       normalizeOpenAICodexTurnStateModel(model),
-		SourceTransport:   normalizeOpenAICodexTurnStateTransport(transport),
-		IssuedAt:          issuedAt,
-		FirstSeenAt:       now,
-		LastSeenAt:        now,
-		ExpiresAt:         expiresAt,
-		Active:            expiresAt.After(now),
 	}
 
 	p.mu.Lock()
@@ -177,6 +236,64 @@ func (p *openAICodexTurnStatePool) observe(value string, accountID *int64, sessi
 		if dropped := p.dropped.Add(1); dropped == 1 || dropped%128 == 0 {
 			log.WithField("dropped_total", dropped).Warn("Codex turn-state persistence queue is full")
 		}
+	}
+}
+
+// observeDurably publishes a scan result only after it is visible to other
+// instances. It never uses the asynchronous observation queue.
+func (p *openAICodexTurnStatePool) observeDurably(ctx context.Context, value string, accountID int64, sessionHash, model, transport string) error {
+	key, validKey := newOpenAICodexTurnStateBucketKey(accountID, model)
+	if p == nil || !validKey {
+		return fmt.Errorf("invalid Codex turn-state observation bucket")
+	}
+	record := newObservedOpenAICodexTurnStateRecord(value, &accountID, sessionHash, key.model, transport, p.now())
+	p.mu.RLock()
+	repo := p.repo
+	usable := p.isReusableRecordLocked(record, key, p.now())
+	p.mu.RUnlock()
+	if !usable {
+		return fmt.Errorf("codex turn-state observation is not reusable under current settings")
+	}
+	if repo != nil {
+		if err := repo.UpsertOpenAICodexTurnState(ctx, record); err != nil {
+			return fmt.Errorf("persist Codex turn-state observation: %w", err)
+		}
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if !p.isReusableRecordLocked(record, key, p.now()) {
+		return fmt.Errorf("codex turn-state observation expired or settings changed during persistence")
+	}
+	p.mergeLocked(record)
+	return nil
+}
+
+func newObservedOpenAICodexTurnStateRecord(value string, accountID *int64, sessionHash, model, transport string, now time.Time) *OpenAICodexTurnStateRecord {
+	value = strings.TrimSpace(value)
+	if !isValidOpenAICodexTurnState(value) {
+		return nil
+	}
+	issuedAt, issuedOK := parseOpenAICodexTurnStateIssuedAt(value)
+	if issuedOK && issuedAt.After(now) {
+		return nil
+	}
+	expiresAt := now
+	if issuedOK && !issuedAt.After(now) {
+		expiresAt = issuedAt.Add(openAICodexTurnStateTTL)
+	}
+	return &OpenAICodexTurnStateRecord{
+		StateValue:        value,
+		StateHash:         hashOpenAICodexTurnState(value),
+		ValueLength:       len(value),
+		SourceAccountID:   cloneInt64Pointer(accountID),
+		SourceSessionHash: sessionHash,
+		SourceModel:       normalizeOpenAICodexTurnStateModel(model),
+		SourceTransport:   normalizeOpenAICodexTurnStateTransport(transport),
+		IssuedAt:          issuedAt,
+		FirstSeenAt:       now,
+		LastSeenAt:        now,
+		ExpiresAt:         expiresAt,
+		Active:            expiresAt.After(now),
 	}
 }
 
@@ -235,7 +352,7 @@ func (p *openAICodexTurnStatePool) preferredExpiryForBucket(accountID int64, mod
 }
 
 func (p *openAICodexTurnStatePool) hasReusableStateBeyond(accountID int64, model string, deadline time.Time) bool {
-	return p.hasReusableStateOfLengthBeyond(accountID, model, openAICodexTurnStateLength292, deadline)
+	return p.hasReusableStateOfLengthBeyond(accountID, model, 0, deadline)
 }
 
 // hasReusableStateOfLengthBeyond reports whether this account/model has a
@@ -255,7 +372,7 @@ func (p *openAICodexTurnStatePool) hasReusableStateOfLengthBeyond(accountID int6
 		return true
 	}
 	for _, record := range p.entries {
-		if isReusableOpenAICodexTurnStateRecord(record, key, now) && record.ValueLength >= minLength && record.ExpiresAt.After(deadline) {
+		if p.isReusableRecordLocked(record, key, now) && record.ValueLength >= minLength && record.ExpiresAt.After(deadline) {
 			return true
 		}
 	}
@@ -301,7 +418,10 @@ func (p *openAICodexTurnStatePool) mergeLocked(record *OpenAICodexTurnStateRecor
 	}
 	record.SourceModel = normalizeOpenAICodexTurnStateModel(record.SourceModel)
 	if !record.IssuedAt.IsZero() {
-		record.ExpiresAt = record.IssuedAt.Add(openAICodexTurnStateTTL)
+		issuedExpiry := record.IssuedAt.Add(openAICodexTurnStateTTL)
+		if record.ExpiresAt.IsZero() || record.ExpiresAt.After(issuedExpiry) {
+			record.ExpiresAt = issuedExpiry
+		}
 	}
 	entryKey := openAICodexTurnStateEntryKey(record)
 	existing := p.entries[entryKey]
@@ -316,9 +436,9 @@ func (p *openAICodexTurnStatePool) mergeLocked(record *OpenAICodexTurnStateRecor
 		if current := p.accounts[accountID]; copyRecord.ExpiresAt.After(current) {
 			p.accounts[accountID] = copyRecord.ExpiresAt
 		}
-		if key, ok := newOpenAICodexTurnStateBucketKey(accountID, copyRecord.SourceModel); ok && isReusableOpenAICodexTurnStateRecord(copyRecord, key, now) {
+		if key, ok := newOpenAICodexTurnStateBucketKey(accountID, copyRecord.SourceModel); ok && p.isReusableRecordLocked(copyRecord, key, now) {
 			current := p.preferredByBucket[key]
-			if !p.isPreferredBucketRecordLocked(current, key, now) || openAICodexTurnStateRanksBefore(copyRecord, current) {
+			if !p.isPreferredBucketRecordLocked(current, key, now) || p.ranksBeforeLocked(copyRecord, current) {
 				p.preferredByBucket[key] = copyRecord
 			}
 		}
@@ -338,9 +458,9 @@ func (p *openAICodexTurnStatePool) rebuildAccountsLocked() {
 			if current := p.accounts[accountID]; record.ExpiresAt.After(current) {
 				p.accounts[accountID] = record.ExpiresAt
 			}
-			if key, ok := newOpenAICodexTurnStateBucketKey(accountID, record.SourceModel); ok && isReusableOpenAICodexTurnStateRecord(record, key, now) {
+			if key, ok := newOpenAICodexTurnStateBucketKey(accountID, record.SourceModel); ok && p.isReusableRecordLocked(record, key, now) {
 				current := p.preferredByBucket[key]
-				if current == nil || openAICodexTurnStateRanksBefore(record, current) {
+				if current == nil || p.ranksBeforeLocked(record, current) {
 					p.preferredByBucket[key] = record
 				}
 			}
@@ -355,21 +475,21 @@ func newOpenAICodexTurnStateBucketKey(accountID int64, model string) (openAICode
 }
 
 func (p *openAICodexTurnStatePool) isPreferredBucketRecordLocked(record *OpenAICodexTurnStateRecord, key openAICodexTurnStateBucketKey, now time.Time) bool {
-	if !isReusableOpenAICodexTurnStateRecord(record, key, now) {
+	if !p.isReusableRecordLocked(record, key, now) {
 		return false
 	}
 	current := p.entries[openAICodexTurnStateEntryKey(record)]
-	return current != nil && current.StateHash == record.StateHash && isReusableOpenAICodexTurnStateRecord(current, key, now)
+	return current != nil && current.StateHash == record.StateHash && p.isReusableRecordLocked(current, key, now)
 }
 
 func (p *openAICodexTurnStatePool) selectPreferredForBucketLocked(key openAICodexTurnStateBucketKey, now time.Time) {
 	delete(p.preferredByBucket, key)
 	for _, record := range p.entries {
-		if !isReusableOpenAICodexTurnStateRecord(record, key, now) {
+		if !p.isReusableRecordLocked(record, key, now) {
 			continue
 		}
 		current := p.preferredByBucket[key]
-		if current == nil || openAICodexTurnStateRanksBefore(record, current) {
+		if current == nil || p.ranksBeforeLocked(record, current) {
 			p.preferredByBucket[key] = record
 		}
 	}
@@ -425,9 +545,9 @@ func (p *openAICodexTurnStatePool) cleanupExpired(now time.Time) {
 	}
 }
 
-func openAICodexTurnStateRanksBefore(left, right *OpenAICodexTurnStateRecord) bool {
+func (p *openAICodexTurnStatePool) ranksBeforeLocked(left, right *OpenAICodexTurnStateRecord) bool {
 	if left.ValueLength != right.ValueLength {
-		return left.ValueLength > right.ValueLength
+		return p.lengthRankLocked(left.ValueLength) < p.lengthRankLocked(right.ValueLength)
 	}
 	if !left.ExpiresAt.Equal(right.ExpiresAt) {
 		return left.ExpiresAt.After(right.ExpiresAt)
@@ -482,8 +602,8 @@ func parseOpenAICodexTurnStateIssuedAt(value string) (time.Time, bool) {
 	return time.Unix(int64(seconds), 0).UTC(), true
 }
 
-func isReusableOpenAICodexTurnStateRecord(record *OpenAICodexTurnStateRecord, key openAICodexTurnStateBucketKey, now time.Time) bool {
-	if record == nil || record.StateValue == "" || !isReusableOpenAICodexTurnStateLength(record.ValueLength) {
+func (p *openAICodexTurnStatePool) isReusableRecordLocked(record *OpenAICodexTurnStateRecord, key openAICodexTurnStateBucketKey, now time.Time) bool {
+	if record == nil || record.StateValue == "" || !p.acceptsLengthLocked(record.ValueLength) {
 		return false
 	}
 	if record.SourceAccountID == nil || *record.SourceAccountID != key.accountID || normalizeOpenAICodexTurnStateModel(record.SourceModel) != key.model {

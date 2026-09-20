@@ -37,7 +37,7 @@ func (r *opsRepository) UpsertOpenAICodexTurnState(ctx context.Context, record *
 	if record == nil || strings.TrimSpace(record.StateValue) == "" || strings.TrimSpace(record.StateHash) == "" {
 		return fmt.Errorf("invalid Codex turn-state record")
 	}
-	_, err := r.db.ExecContext(ctx, upsertOpenAICodexTurnStateSQL,
+	result, err := r.db.ExecContext(ctx, upsertOpenAICodexTurnStateSQL,
 		record.StateValue,
 		record.StateHash,
 		record.ValueLength,
@@ -50,7 +50,34 @@ func (r *opsRepository) UpsertOpenAICodexTurnState(ctx context.Context, record *
 		record.LastSeenAt,
 		record.ExpiresAt,
 	)
-	return err
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		// A delayed observation can lose to a newer one from the same bucket.
+		// Treat that as durable only after confirming the existing row's scope
+		// and lifetime. A hash collision across buckets must remain an error.
+		var alreadyStored bool
+		if err := r.db.QueryRowContext(ctx, `
+SELECT EXISTS (
+  SELECT 1 FROM codex_turn_states
+  WHERE state_hash = $1 AND source_account_id IS NOT DISTINCT FROM $2::bigint
+    AND source_model IS NOT DISTINCT FROM NULLIF($3::text, '')
+    AND state_value = $4 AND value_length = $5 AND last_seen_at >= $6
+    AND issued_at IS NOT DISTINCT FROM $7::timestamptz AND expires_at >= $8
+)`, record.StateHash, record.SourceAccountID, record.SourceModel, record.StateValue,
+			record.ValueLength, record.LastSeenAt, nullableOpenAICodexTurnStateTime(record.IssuedAt), record.ExpiresAt).Scan(&alreadyStored); err != nil {
+			return fmt.Errorf("verify persisted Codex turn-state: %w", err)
+		}
+		if !alreadyStored {
+			return fmt.Errorf("codex turn-state was not persisted because a conflicting record exists")
+		}
+	}
+	return nil
 }
 
 func (r *opsRepository) BatchUpsertOpenAICodexTurnStates(ctx context.Context, records []*service.OpenAICodexTurnStateRecord) error {
@@ -179,6 +206,39 @@ ORDER BY value_length DESC, last_seen_at DESC, id DESC`, now)
 		return nil, err
 	}
 	return records, nil
+}
+
+func (r *opsRepository) LoadPreferredOpenAICodexTurnState(ctx context.Context, accountID int64, model string, targetLengths []int, now time.Time) (*service.OpenAICodexTurnStateRecord, error) {
+	if r == nil || r.db == nil {
+		return nil, fmt.Errorf("nil ops repository")
+	}
+	model = strings.ToLower(strings.TrimSpace(model))
+	if accountID <= 0 || model == "" || len(targetLengths) == 0 {
+		return nil, fmt.Errorf("invalid Codex turn-state bucket")
+	}
+	record := &service.OpenAICodexTurnStateRecord{}
+	err := r.db.QueryRowContext(ctx, `
+SELECT id, state_value, state_hash, value_length, source_account_id,
+       COALESCE(source_session_hash, ''), source_model, source_transport,
+       issued_at, first_seen_at, last_seen_at, expires_at
+FROM codex_turn_states
+WHERE source_account_id = $1 AND source_model = $2
+  AND value_length = ANY($3::integer[]) AND expires_at > $4
+  AND issued_at <= $4 AND issued_at + INTERVAL '1 hour' > $4
+ORDER BY array_position($3::integer[], value_length), expires_at DESC, last_seen_at DESC, state_hash DESC
+LIMIT 1`, accountID, model, pq.Array(targetLengths), now).Scan(
+		&record.ID, &record.StateValue, &record.StateHash, &record.ValueLength, &record.SourceAccountID,
+		&record.SourceSessionHash, &record.SourceModel, &record.SourceTransport,
+		&record.IssuedAt, &record.FirstSeenAt, &record.LastSeenAt, &record.ExpiresAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	record.Active = true
+	return record, nil
 }
 
 func (r *opsRepository) ListOpenAICodexTurnStates(ctx context.Context, filter *service.OpenAICodexTurnStateFilter) (*service.OpenAICodexTurnStateList, error) {

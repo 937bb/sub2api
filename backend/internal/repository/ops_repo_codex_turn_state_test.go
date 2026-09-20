@@ -103,3 +103,61 @@ func TestUpsertOpenAICodexTurnStateDoesNotMoveStateAcrossAccountModelScope(t *te
 	require.Contains(t, upsertOpenAICodexTurnStateSQL,
 		"EXCLUDED.source_model IS NOT DISTINCT FROM codex_turn_states.source_model")
 }
+
+func TestLoadPreferredOpenAICodexTurnStateUsesBucketAndConfiguredOrder(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+	now := time.Now().UTC().Truncate(time.Second)
+	issuedAt := now.Add(-10 * time.Minute)
+	query := `(?s)SELECT id, state_value.*WHERE source_account_id = \$1 AND source_model = \$2.*value_length = ANY\(\$3::integer\[\]\) AND expires_at > \$4.*issued_at <= \$4 AND issued_at \+ INTERVAL '1 hour' > \$4.*ORDER BY array_position\(\$3::integer\[\], value_length\).*LIMIT 1`
+	columns := []string{"id", "state_value", "state_hash", "value_length", "source_account_id", "source_session_hash", "source_model", "source_transport", "issued_at", "first_seen_at", "last_seen_at", "expires_at"}
+	mock.ExpectQuery(query).
+		WithArgs(int64(42), "gpt-5.5", "{356,292}", now).
+		WillReturnRows(sqlmock.NewRows(columns).AddRow(3, "state", "hash", 356, 42, "session", "gpt-5.5", "http", issuedAt, issuedAt, now, issuedAt.Add(time.Hour)))
+	repo := &opsRepository{db: db}
+	record, err := repo.LoadPreferredOpenAICodexTurnState(context.Background(), 42, " GPT-5.5 ", []int{356, 292}, now)
+	require.NoError(t, err)
+	require.Equal(t, int64(42), *record.SourceAccountID)
+	require.Equal(t, "gpt-5.5", record.SourceModel)
+	require.Equal(t, issuedAt.Add(time.Hour), record.ExpiresAt)
+	mock.ExpectQuery(query).
+		WithArgs(int64(84), "gpt-5.5", "{356,292}", now).
+		WillReturnRows(sqlmock.NewRows(columns))
+	record, err = repo.LoadPreferredOpenAICodexTurnState(context.Background(), 84, "gpt-5.5", []int{356, 292}, now)
+	require.NoError(t, err)
+	require.Nil(t, record)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestUpsertOpenAICodexTurnStateConflictsRequireSamePersistedBucket(t *testing.T) {
+	for _, alreadyStored := range []bool{true, false} {
+		name := "foreign_or_incompatible_row"
+		if alreadyStored {
+			name = "same_bucket_newer_row"
+		}
+		t.Run(name, func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			require.NoError(t, err)
+			defer func() { _ = db.Close() }()
+			now := time.Now().UTC().Truncate(time.Second)
+			accountID := int64(42)
+			record := &service.OpenAICodexTurnStateRecord{
+				StateValue: "state", StateHash: "hash", ValueLength: 332,
+				SourceAccountID: &accountID, SourceModel: "gpt-5.5", SourceTransport: "http",
+				IssuedAt: now, FirstSeenAt: now, LastSeenAt: now, ExpiresAt: now.Add(time.Hour),
+			}
+			mock.ExpectExec(regexp.QuoteMeta(upsertOpenAICodexTurnStateSQL)).WillReturnResult(sqlmock.NewResult(0, 0))
+			mock.ExpectQuery(`(?s)SELECT EXISTS.*state_hash = \$1 AND source_account_id IS NOT DISTINCT FROM \$2::bigint.*source_model IS NOT DISTINCT FROM NULLIF\(\$3::text, ''\).*last_seen_at >= \$6.*issued_at IS NOT DISTINCT FROM \$7::timestamptz AND expires_at >= \$8`).
+				WithArgs("hash", accountID, "gpt-5.5", "state", 332, now, now, now.Add(time.Hour)).
+				WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(alreadyStored))
+			err = (&opsRepository{db: db}).UpsertOpenAICodexTurnState(context.Background(), record)
+			if alreadyStored {
+				require.NoError(t, err)
+			} else {
+				require.ErrorContains(t, err, "conflicting record")
+			}
+			require.NoError(t, mock.ExpectationsWereMet())
+		})
+	}
+}

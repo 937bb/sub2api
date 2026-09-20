@@ -85,7 +85,8 @@ type OpsService struct {
 	runtimeRefreshFailure        atomic.Uint64
 	runtimeRefreshLastFailureLog atomic.Int64
 
-	codexTurnStateScanner *openAICodexTurnStateScanner
+	codexTurnStateScanner      *openAICodexTurnStateScanner
+	codexTurnStateScanSettings atomic.Pointer[OpenAICodexTurnStateScanSettings]
 }
 
 // CleanupReloader 由 OpsCleanupService 实现。
@@ -312,6 +313,7 @@ func (s *OpsService) initRuntimeSettings(ctx context.Context) {
 	}
 	defaults := defaultOpsAdvancedSettingsForConfig(s.cfg)
 	s.runtimeSettings.Store(&opsRuntimeSettingsSnapshot{monitoringEnabled: true, advanced: *defaults})
+	s.applyOpenAICodexTurnStateScanSettings(defaultOpenAICodexTurnStateScanSettings())
 	_ = s.RefreshRuntimeSettings(ctx)
 }
 
@@ -332,6 +334,7 @@ func (s *OpsService) RefreshRuntimeSettings(ctx context.Context) error {
 		SettingKeyOpsMonitoringEnabled,
 		SettingKeyOpsAdvancedSettings,
 		SettingKeyOpsRuntimeLogConfig,
+		SettingKeyOpenAICodexTurnStateScanSettings,
 	})
 	if err != nil {
 		return err
@@ -348,6 +351,18 @@ func (s *OpsService) RefreshRuntimeSettings(ctx context.Context) error {
 		}
 	}
 	normalizeOpsAdvancedSettings(advanced)
+	scanSettings := defaultOpenAICodexTurnStateScanSettings()
+	if raw := values[SettingKeyOpenAICodexTurnStateScanSettings]; strings.TrimSpace(raw) != "" {
+		if err := json.Unmarshal([]byte(raw), scanSettings); err != nil {
+			return err
+		}
+		validated, err := validateOpenAICodexTurnStateScanSettings(scanSettings)
+		if err != nil {
+			return err
+		}
+		scanSettings = validated
+	}
+	s.applyOpenAICodexTurnStateScanSettings(scanSettings)
 
 	s.runtimeSettings.Store(&opsRuntimeSettingsSnapshot{monitoringEnabled: monitoringEnabled, advanced: *advanced})
 	if s.systemLogSink != nil {

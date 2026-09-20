@@ -4,7 +4,7 @@ export default {
       description: '运维监控与排障',
       turnState: {
         title: 'Codex State 管理',
-        description: '按账号和模型采集、刷新并复用账号自己的 292/332 State',
+        description: '按账号和模型采集、刷新并复用账号自己的目标 State',
         active: '有效',
         expired: '已过期',
         all: '全部',
@@ -20,7 +20,24 @@ export default {
           sharedProxies: '复用代理'
         },
         accountHint: '按配置的目标模型逐项展示；后台仅自动补扫最近 1 小时实际使用且当前可调度的账号，历史和停用账号不会进入扫描队列。',
-        proxyHint: 'State 扫描会合并使用这里的专用代理和代理管理中的有效代理；不会修改账号绑定关系或业务代理状态。',
+        proxyHint: '未开启动态代理时，扫描合并使用专用代理与代理管理中的有效代理；开启后只使用动态源，获取失败会等待重试。不会修改账号绑定关系或业务代理状态。',
+        scanSettings: {
+          title: '扫描配置',
+          scope: '仅调整 State 采集；不修改业务请求的代理或账号绑定。State 仍按账号和模型独立保存、复用。',
+          lengths: '目标长度（按优先级排序）',
+          lengthsHint: '从左到右优先，使用逗号分隔，例如 332, 292。长度只是本地筛选条件，不保证模型质量。',
+          parallel: '单任务并发出口',
+          parallelHint: '每个账号和模型最多同时使用 1–5 个不同出口；有效 State 临期后才自动刷新。',
+          dynamicEnabled: '使用动态扫描代理',
+          providerUrl: '代理提取接口（HTTPS）',
+          providerHint: 'Rand 不保证来自不同国家，也不保证获取目标长度。提取后仅使用已验证、去重的可用出口扫描；不会加入业务代理池。轮转网关的国家和出口 IP 仅为预检时观测，State 请求的新连接可能更换出口，不能保证覆盖 5 个国家。',
+          invalidLengths: '请按优先级填写 1–16 个不重复的整数，每个长度为 64–4096。',
+          invalidParallel: '并发出口必须为 1–5 的整数。',
+          invalidUrl: '请填写不超过 2048 字符的 HTTPS 接口地址，不支持用户名、密码或 # 片段。',
+          loadFailed: '扫描配置读取失败；保留当前输入，请重试后再保存。',
+          saveFailed: '扫描配置保存失败，当前输入已保留。',
+          saved: '扫描配置已保存'
+        },
         scanAll: '扫描在用账号',
         scanNow: '立即扫描',
         scanAccount: '扫描该账号的全部目标模型',
@@ -52,7 +69,7 @@ export default {
         deleteFailed: '删除状态值失败',
         loadFailed: '加载 Codex 状态池失败',
         status: {
-          ready: '292/332 就绪', expiring: '即将过期', pending: '等待扫描', running: '扫描中',
+          ready: '目标 State 就绪', expiring: '即将过期', pending: '等待扫描', running: '扫描中',
           retry_wait: '等待重试', failed: '扫描失败', disabled: '已停用', missing: '缺失'
         },
         proxyHealth: { unknown: '未检测', healthy: '健康', unhealthy: '异常' },

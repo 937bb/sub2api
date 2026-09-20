@@ -14,6 +14,8 @@ type OpenAICodexTurnStateProxy struct {
 	Name                string     `json:"name"`
 	ProxyURL            string     `json:"-"`
 	MaskedURL           string     `json:"masked_url"`
+	Country             string     `json:"country,omitempty"`
+	ExitIP              string     `json:"exit_ip,omitempty"`
 	Enabled             bool       `json:"enabled"`
 	HealthStatus        string     `json:"health_status"`
 	ConsecutiveFailures int        `json:"consecutive_failures"`
@@ -25,6 +27,7 @@ type OpenAICodexTurnStateProxy struct {
 }
 
 type OpenAICodexTurnStateScan struct {
+	LeaseID         string     `json:"-"`
 	AccountID       int64      `json:"account_id"`
 	Model           string     `json:"model"`
 	Status          string     `json:"status"`
@@ -88,8 +91,8 @@ type OpenAICodexTurnStateScannerRepository interface {
 	UpsertOpenAICodexTurnStateScan(ctx context.Context, scan *OpenAICodexTurnStateScan) error
 	GetOpenAICodexTurnStateScan(ctx context.Context, accountID int64, model string) (*OpenAICodexTurnStateScan, error)
 	ListRecentlyUsedOpenAICodexAccountIDs(ctx context.Context, usedSince time.Time) ([]int64, error)
-	ListOpenAICodexTurnStateAccountStatuses(ctx context.Context, accountIDs []int64, targetModels []string, page, pageSize int) (*OpenAICodexTurnStateAccountStatusList, error)
-	GetOpenAICodexTurnStateOperationsSummary(ctx context.Context, targetModels []string) (*OpenAICodexTurnStateOperationsSummary, error)
+	ListOpenAICodexTurnStateAccountStatuses(ctx context.Context, accountIDs []int64, targetModels []string, targetLengths []int, page, pageSize int) (*OpenAICodexTurnStateAccountStatusList, error)
+	GetOpenAICodexTurnStateOperationsSummary(ctx context.Context, targetModels []string, targetLengths []int) (*OpenAICodexTurnStateOperationsSummary, error)
 	ListObservedOpenAICodexTurnStateModels(ctx context.Context, accountID int64, usedSince time.Time) ([]string, error)
 }
 

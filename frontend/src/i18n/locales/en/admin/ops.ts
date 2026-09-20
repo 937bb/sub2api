@@ -4,7 +4,7 @@ export default {
       description: 'Operational monitoring and troubleshooting',
       turnState: {
         title: 'Codex State Management',
-        description: 'Acquire, refresh, and reuse each account/model\'s own 292/332 State',
+        description: 'Acquire, refresh, and reuse each account/model\'s own target State',
         active: 'Active',
         expired: 'Expired',
         all: 'All',
@@ -16,7 +16,24 @@ export default {
           sharedProxies: 'Reused proxies'
         },
         accountHint: 'Every configured target model is shown. Background scans only include schedulable accounts used in the last hour; historical and disabled accounts are excluded.',
-        proxyHint: 'State scans combine this dedicated pool with active proxies from Proxy Management without changing account bindings or business proxy health.',
+        proxyHint: 'With dynamic proxies off, scans combine this dedicated pool with active proxies from Proxy Management. When enabled, only the dynamic source is used; acquisition failures wait for a retry. Account bindings and business proxy health stay unchanged.',
+        scanSettings: {
+          title: 'Scan settings',
+          scope: 'Only changes State acquisition, not business proxies or account bindings. State remains isolated by account and model.',
+          lengths: 'Target lengths in priority order',
+          lengthsHint: 'Highest priority first, separated by commas, e.g. 332, 292. Length is a local selection rule, not a guarantee of model quality.',
+          parallel: 'Concurrent exits per task',
+          parallelHint: 'Use up to 1–5 different exits at once for each account/model. Automatically refresh usable State only when nearing expiry.',
+          dynamicEnabled: 'Use dynamic scan proxies',
+          providerUrl: 'Proxy provider endpoint (HTTPS)',
+          providerHint: 'Rand does not guarantee distinct countries or a target length. Only verified, deduplicated exits are used for scans; these are not added to the business proxy pool. A rotating gateway’s country and exit IP are observations from the preflight check; a new State connection may use a different exit, so five countries cannot be guaranteed.',
+          invalidLengths: 'Enter 1–16 unique integers between 64 and 4096, in priority order.',
+          invalidParallel: 'Concurrent exits must be an integer from 1 to 5.',
+          invalidUrl: 'Enter an HTTPS endpoint of at most 2048 characters, without a username, password, or # fragment.',
+          loadFailed: 'Could not load scan settings. Current input is preserved; retry before saving.',
+          saveFailed: 'Could not save scan settings. Your input has been preserved.',
+          saved: 'Scan settings saved'
+        },
         scanAll: 'Scan in-use accounts',
         scanNow: 'Scan now',
         scanAccount: 'Scan all target models for this account',
@@ -48,7 +65,7 @@ export default {
         deleteFailed: 'Failed to delete state values',
         loadFailed: 'Failed to load the Codex state pool',
         status: {
-          ready: '292/332 Ready', expiring: 'Expiring', pending: 'Pending', running: 'Scanning',
+          ready: 'Target State ready', expiring: 'Expiring', pending: 'Pending', running: 'Scanning',
           retry_wait: 'Retry wait', failed: 'Failed', disabled: 'Disabled', missing: 'Missing'
         },
         proxyHealth: { unknown: 'Unchecked', healthy: 'Healthy', unhealthy: 'Unhealthy' },
