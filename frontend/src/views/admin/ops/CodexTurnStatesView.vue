@@ -29,7 +29,7 @@
                 <Icon name="plus" size="sm" class="mr-1.5" />
                 {{ t('admin.ops.turnState.addProxy') }}
               </button>
-              <button v-if="activeTab === 'proxies'" class="btn btn-secondary" @click="showScanSettingsDialog = true">
+              <button class="btn btn-secondary" data-test="state-scan-settings" @click="openScanSettings()">
                 {{ t('admin.ops.turnState.scanSettings.title') }}
               </button>
             </div>
@@ -105,7 +105,7 @@
           </template>
           <template #cell-model="{ value }"><span class="inline-flex rounded bg-gray-100 px-2 py-1 font-mono text-xs text-gray-700 dark:bg-dark-700 dark:text-dark-200">{{ value }}</span></template>
           <template #cell-state="{ row }">
-            <CodexStateStatus :status="row.status" :state-length="row.state_length" :show-details="true" />
+            <CodexStateStatus :status="row.status" :state-length="row.state_length" :target-lengths="row.target_lengths" :show-details="true" />
           </template>
           <template #cell-expires_at="{ row }">
             <div v-if="row.expires_at" class="flex items-center gap-2 whitespace-nowrap">
@@ -132,6 +132,7 @@
             </div>
           </template>
           <template #cell-actions="{ row }">
+            <div class="flex items-center gap-2">
             <button
               class="flex h-8 w-8 items-center justify-center rounded-md border border-gray-200 text-gray-500 transition-colors hover:border-primary-300 hover:bg-primary-50 hover:text-primary-700 disabled:cursor-wait disabled:opacity-60 dark:border-dark-600 dark:text-dark-300 dark:hover:border-primary-700 dark:hover:bg-primary-950/40 dark:hover:text-primary-300"
               :disabled="scanningKeys.has(accountModelKey(row))"
@@ -141,6 +142,8 @@
             >
               <Icon name="refresh" size="sm" :class="scanningKeys.has(accountModelKey(row)) ? 'animate-spin' : ''" />
             </button>
+            <button type="button" class="whitespace-nowrap text-xs text-primary-600 hover:text-primary-700 dark:text-primary-400" data-test="edit-state-target" @click="openScanSettings(row)">{{ t('admin.ops.turnState.editTarget') }}</button>
+            </div>
           </template>
         </DataTable>
 
@@ -265,7 +268,7 @@
       </template>
     </BaseDialog>
 
-    <CodexScanSettingsDialog :show="showScanSettingsDialog" @close="showScanSettingsDialog = false" @saved="refresh" />
+    <CodexScanSettingsDialog :show="showScanSettingsDialog" :selection="selectedStateRule" @close="showScanSettingsDialog = false" @saved="refresh" />
 
     <ConfirmDialog
       :show="showHistoryDeleteDialog"
@@ -302,6 +305,7 @@ import {
   type CodexTurnStateOperationsSummary,
   type CodexTurnStateProxy,
   type CodexTurnStateRecord,
+  type CodexTurnStateLengthRule,
   type CodexTurnStateStatus
 } from '@/api/admin/ops'
 import type { Column } from '@/components/common/types'
@@ -331,7 +335,13 @@ const showHistoryDeleteDialog = ref(false)
 const pendingHistoryDeleteIDs = ref<number[]>([])
 const showProxyDialog = ref(false)
 const showScanSettingsDialog = ref(false)
+const selectedStateRule = ref<CodexTurnStateLengthRule | null>(null)
 const proxyValues = ref('')
+
+function openScanSettings(row?: CodexTurnStateAccountStatus) {
+  selectedStateRule.value = row ? { plan_type: row.plan_type || '*', model: row.model, target_lengths: row.target_lengths ?? [] } : null
+  showScanSettingsDialog.value = true
+}
 
 const tabs = computed(() => [
   { value: 'accounts' as Tab, label: t('admin.ops.turnState.tabs.accounts'), icon: 'users' as const },

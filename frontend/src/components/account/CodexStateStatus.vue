@@ -38,6 +38,7 @@
     <div v-if="showDetails" class="mt-0.5 min-w-0 text-[11px] leading-4 text-gray-400 dark:text-dark-400">
       <span v-if="model" class="block max-w-36 truncate font-mono" :title="model">{{ model }}</span>
       <span v-else class="block">State</span>
+      <span v-if="targetLengths.length" class="block font-mono" data-test="codex-state-target">{{ t('admin.ops.turnState.targetLengths', { lengths: targetLengths.join(' / ') }) }}</span>
     </div>
   </div>
 </template>
@@ -50,12 +51,14 @@ import type { CodexTurnStateAccountStatusValue } from '@/api/admin/ops'
 const props = withDefaults(defineProps<{
   status?: CodexTurnStateAccountStatusValue
   stateLength?: number
+  targetLengths?: number[]
   model?: string
   compact?: boolean
   showDetails?: boolean
 }>(), {
   status: 'missing',
   stateLength: 0,
+  targetLengths: () => [],
   model: '',
   compact: false,
   showDetails: true

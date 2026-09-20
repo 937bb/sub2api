@@ -104,6 +104,7 @@ function stateTitle(state: CodexTurnStateAccountStatus) {
     t('admin.ops.turnState.attempts', { count: state.attempt_count })
   ]
   if (state.state_length) lines.push(`State ${state.state_length}`)
+  if (state.target_lengths?.length) lines.push(t('admin.ops.turnState.targetLengths', { lengths: state.target_lengths.join(' / ') }))
   if (state.last_attempt_at) lines.push(`${t('admin.ops.turnState.lastScan')}: ${new Date(state.last_attempt_at).toLocaleString()}`)
   if (state.last_error) lines.push(state.last_error)
   return lines.join('\n')

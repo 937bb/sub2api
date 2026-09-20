@@ -257,6 +257,7 @@ func (s *openAICodexTurnStateScanner) enqueueAccount(ctx context.Context, accoun
 	if account == nil {
 		return 0, nil
 	}
+	s.gateway.getOpenAICodexTurnStatePool().setAccountPlan(account.ID, OpenAICodexStatePlanType(account))
 	models := s.modelsForAccount(ctx, account, usedSince)
 	return s.enqueueModels(account.ID, models, force), models
 }
@@ -270,6 +271,7 @@ func (s *openAICodexTurnStateScanner) enqueueSweep(ctx context.Context) {
 	}
 	usedSince := now.Add(-openAICodexTurnStateActiveUsageWindow)
 	for _, account := range accounts {
+		s.gateway.getOpenAICodexTurnStatePool().setAccountPlan(account.ID, OpenAICodexStatePlanType(account))
 		for _, model := range s.modelsForAccount(ctx, account, usedSince) {
 			if !s.stateNeedsRefresh(account.ID, model, now) {
 				continue
@@ -356,6 +358,7 @@ func (s *openAICodexTurnStateScanner) runJob(ctx context.Context, job openAICode
 		return
 	}
 	pool := s.gateway.getOpenAICodexTurnStatePool()
+	pool.setAccountPlan(account.ID, OpenAICodexStatePlanType(account))
 	if !job.force && !s.stateNeedsRefresh(account.ID, upstreamModel, now) {
 		return
 	}
@@ -418,7 +421,7 @@ func (s *openAICodexTurnStateScanner) runJob(ctx context.Context, job openAICode
 		return
 	}
 
-	settings := s.scanSettings()
+	settings := s.scanSettings().forAccountModel(account, upstreamModel)
 	proxies, proxyErr := s.scanProxies(ctx, account.ID, upstreamModel, scan.AttemptCount, settings)
 	var results []openAICodexTurnStateProbe
 	if proxyErr != nil {
@@ -428,7 +431,7 @@ func (s *openAICodexTurnStateScanner) runJob(ctx context.Context, job openAICode
 	}
 	// A setting can change during a job. Do not mark a result reusable under
 	// a policy which has already been replaced by the administrator.
-	settings = s.scanSettings()
+	settings = s.scanSettings().forAccountModel(account, upstreamModel)
 	result, proxy := chooseOpenAICodexTurnStateResult(upstreamModel, results, settings)
 	scan.LastProxyID = nil
 	scan.LastProxyURL = ""
@@ -498,7 +501,7 @@ func (s *openAICodexTurnStateScanner) probeWithBoundedFanout(ctx context.Context
 		return []openAICodexTurnStateProbe{{result: probeFunc(ctx, account, model, "")}}
 	}
 	if settings == nil {
-		settings = s.scanSettings()
+		settings = s.scanSettings().forAccountModel(account, model)
 	}
 	limit := min(max(settings.ParallelProbes, 1), openAICodexTurnStateScanFanoutLimit)
 	proxies = mergeOpenAICodexTurnStateScanProxies(proxies)
@@ -1038,7 +1041,7 @@ func (s *OpsService) ListOpenAICodexTurnStateAccountStatuses(ctx context.Context
 		page = 1
 		pageSize = 1000
 	}
-	result, err := repo.ListOpenAICodexTurnStateAccountStatuses(ctx, accountIDs, targetModels, s.GetOpenAICodexTurnStateScanSettings().TargetLengths, page, pageSize)
+	result, err := repo.ListOpenAICodexTurnStateAccountStatuses(ctx, accountIDs, targetModels, s.GetOpenAICodexTurnStateScanSettings(), page, pageSize)
 	if err != nil {
 		return nil, err
 	}
@@ -1054,7 +1057,7 @@ func (s *OpsService) GetOpenAICodexTurnStateOperationsSummary(ctx context.Contex
 		return nil, err
 	}
 	targetModels := s.codexTurnStateScanner.targetModels()
-	result, err := repo.GetOpenAICodexTurnStateOperationsSummary(ctx, targetModels, s.GetOpenAICodexTurnStateScanSettings().TargetLengths)
+	result, err := repo.GetOpenAICodexTurnStateOperationsSummary(ctx, targetModels, s.GetOpenAICodexTurnStateScanSettings())
 	if err != nil {
 		return nil, err
 	}
@@ -1069,7 +1072,9 @@ func (s *OpsService) EnqueueOpenAICodexTurnStateScan(accountID int64, model stri
 	if strings.TrimSpace(model) == "" {
 		model = defaultOpenAICodexTurnStateScanModel
 	}
-	return s.codexTurnStateScanner.enqueueModels(accountID, []string{model}, false) > 0
+	// The worker loads current credential metadata before checking the policy.
+	// A cold pool may not know this account's subscription tier yet.
+	return s.codexTurnStateScanner.Enqueue(accountID, model, false)
 }
 
 func (s *OpsService) EnqueueOpenAICodexTurnStateAccountScans(ctx context.Context, accountID int64) (int, []string, error) {

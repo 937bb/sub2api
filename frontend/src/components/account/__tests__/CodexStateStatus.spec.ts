@@ -10,7 +10,7 @@ const labels: Record<string, string> = {
 
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({
-    t: (key: string) => labels[key] || key
+    t: (key: string, params?: { lengths?: string }) => key === 'admin.ops.turnState.targetLengths' ? `Target ${params?.lengths}` : labels[key] || key
   })
 }))
 
@@ -36,6 +36,12 @@ describe('CodexStateStatus', () => {
     expect(wrapper.text()).toContain('Scanning')
     expect(wrapper.find('.animate-pulse').exists()).toBe(true)
     expect(wrapper.find('.h-6.w-6').exists()).toBe(true)
+  })
+
+  it('distinguishes the observed state length from the effective target rule', () => {
+    const wrapper = render({ status: 'missing', stateLength: 292, targetLengths: [286, 273] })
+    expect(wrapper.text()).toContain('292')
+    expect(wrapper.get('[data-test="codex-state-target"]').text()).toBe('Target 286 / 273')
   })
 
   it('hides detail metadata when requested', () => {

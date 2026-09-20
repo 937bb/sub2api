@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -93,9 +94,11 @@ type openAICodexTurnStateBucketKey struct {
 type openAICodexTurnStatePool struct {
 	mu                sync.RWMutex
 	entries           map[string]*OpenAICodexTurnStateRecord
+	entriesByBucket   map[openAICodexTurnStateBucketKey]map[string]*OpenAICodexTurnStateRecord
 	accounts          map[int64]time.Time
+	accountPlans      map[int64]string
 	preferredByBucket map[openAICodexTurnStateBucketKey]*OpenAICodexTurnStateRecord
-	targetLengths     []int
+	scanSettings      *OpenAICodexTurnStateScanSettings
 	repo              OpenAICodexTurnStateStore
 	queue             chan *OpenAICodexTurnStateRecord
 	worker            sync.Once
@@ -107,9 +110,11 @@ type openAICodexTurnStatePool struct {
 func newOpenAICodexTurnStatePool() *openAICodexTurnStatePool {
 	return &openAICodexTurnStatePool{
 		entries:           make(map[string]*OpenAICodexTurnStateRecord),
+		entriesByBucket:   make(map[openAICodexTurnStateBucketKey]map[string]*OpenAICodexTurnStateRecord),
 		accounts:          make(map[int64]time.Time),
+		accountPlans:      make(map[int64]string),
 		preferredByBucket: make(map[openAICodexTurnStateBucketKey]*OpenAICodexTurnStateRecord),
-		targetLengths:     defaultOpenAICodexTurnStateScanSettings().TargetLengths,
+		scanSettings:      defaultOpenAICodexTurnStateScanSettings(),
 		queue:             make(chan *OpenAICodexTurnStateRecord, openAICodexTurnStatePersistQueue),
 		now:               time.Now,
 	}
@@ -119,30 +124,52 @@ func (p *openAICodexTurnStatePool) setTargetLengths(lengths []int) {
 	if p == nil || len(lengths) == 0 {
 		return
 	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if slices.Equal(p.targetLengths, lengths) {
+	p.setScanSettings(&OpenAICodexTurnStateScanSettings{TargetLengths: slices.Clone(lengths)})
+}
+
+func (p *openAICodexTurnStatePool) setScanSettings(settings *OpenAICodexTurnStateScanSettings) {
+	if p == nil {
 		return
 	}
-	p.targetLengths = slices.Clone(lengths)
+	next := settings.clone()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if reflect.DeepEqual(p.scanSettings, next) {
+		return
+	}
+	p.scanSettings = next
 	p.rebuildAccountsLocked()
 }
 
-func (p *openAICodexTurnStatePool) lengthRankLocked(length int) int {
-	if len(p.targetLengths) == 0 {
-		return defaultOpenAICodexTurnStateScanSettings().lengthRank(length)
+// setAccountPlan registers the credential owner's subscription without touching
+// persistent storage. Repeated requests with an unchanged plan take only a read lock.
+func (p *openAICodexTurnStatePool) setAccountPlan(accountID int64, planType string) {
+	if p == nil || accountID <= 0 {
+		return
 	}
-	if index := slices.Index(p.targetLengths, length); index >= 0 {
-		return index
+	planType = NormalizeOpenAICodexStatePlanType(planType)
+	p.mu.RLock()
+	current := p.accountPlans[accountID]
+	p.mu.RUnlock()
+	if current == planType {
+		return
 	}
-	return len(p.targetLengths)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.accountPlans[accountID] == planType {
+		return
+	}
+	p.accountPlans[accountID] = planType
+	now := p.now()
+	for key := range p.entriesByBucket {
+		if key.accountID == accountID {
+			p.selectPreferredForBucketLocked(key, now)
+		}
+	}
 }
 
-func (p *openAICodexTurnStatePool) acceptsLengthLocked(length int) bool {
-	if len(p.targetLengths) == 0 {
-		return isReusableOpenAICodexTurnStateLength(length)
-	}
-	return p.lengthRankLocked(length) < len(p.targetLengths)
+func (p *openAICodexTurnStatePool) targetLengthsForBucketLocked(key openAICodexTurnStateBucketKey) []int {
+	return p.scanSettings.TargetLengthsFor(p.accountPlans[key.accountID], key.model)
 }
 
 func (p *openAICodexTurnStatePool) setRepository(ctx context.Context, repo OpenAICodexTurnStateStore) {
@@ -176,13 +203,13 @@ func (p *openAICodexTurnStatePool) refreshBucket(ctx context.Context, accountID 
 	}
 	p.mu.RLock()
 	repo, supported := p.repo.(OpenAICodexTurnStateBucketStore)
-	targetLengths := slices.Clone(p.targetLengths)
+	targetLengths := slices.Clone(p.targetLengthsForBucketLocked(key))
 	p.mu.RUnlock()
 	if !supported {
 		return nil
 	}
 	if len(targetLengths) == 0 {
-		targetLengths = defaultOpenAICodexTurnStateScanSettings().TargetLengths
+		return fmt.Errorf("no configured Codex turn-state lengths for account/model bucket")
 	}
 	record, err := repo.LoadPreferredOpenAICodexTurnState(ctx, key.accountID, key.model, targetLengths, p.now())
 	if err != nil {
@@ -371,7 +398,7 @@ func (p *openAICodexTurnStatePool) hasReusableStateOfLengthBeyond(accountID int6
 	if p.isPreferredBucketRecordLocked(selected, key, now) && selected.ValueLength >= minLength && selected.ExpiresAt.After(deadline) {
 		return true
 	}
-	for _, record := range p.entries {
+	for _, record := range p.entriesByBucket[key] {
 		if p.isReusableRecordLocked(record, key, now) && record.ValueLength >= minLength && record.ExpiresAt.After(deadline) {
 			return true
 		}
@@ -436,7 +463,14 @@ func (p *openAICodexTurnStatePool) mergeLocked(record *OpenAICodexTurnStateRecor
 		if current := p.accounts[accountID]; copyRecord.ExpiresAt.After(current) {
 			p.accounts[accountID] = copyRecord.ExpiresAt
 		}
-		if key, ok := newOpenAICodexTurnStateBucketKey(accountID, copyRecord.SourceModel); ok && p.isReusableRecordLocked(copyRecord, key, now) {
+		if key, ok := newOpenAICodexTurnStateBucketKey(accountID, copyRecord.SourceModel); ok {
+			if p.entriesByBucket[key] == nil {
+				p.entriesByBucket[key] = make(map[string]*OpenAICodexTurnStateRecord)
+			}
+			p.entriesByBucket[key][entryKey] = copyRecord
+			if !p.isReusableRecordLocked(copyRecord, key, now) {
+				return
+			}
 			current := p.preferredByBucket[key]
 			if !p.isPreferredBucketRecordLocked(current, key, now) || p.ranksBeforeLocked(copyRecord, current) {
 				p.preferredByBucket[key] = copyRecord
@@ -448,8 +482,9 @@ func (p *openAICodexTurnStatePool) mergeLocked(record *OpenAICodexTurnStateRecor
 func (p *openAICodexTurnStatePool) rebuildAccountsLocked() {
 	p.accounts = make(map[int64]time.Time)
 	p.preferredByBucket = make(map[openAICodexTurnStateBucketKey]*OpenAICodexTurnStateRecord)
+	p.entriesByBucket = make(map[openAICodexTurnStateBucketKey]map[string]*OpenAICodexTurnStateRecord)
 	now := p.now()
-	for _, record := range p.entries {
+	for entryKey, record := range p.entries {
 		if record == nil || !record.ExpiresAt.After(now) {
 			continue
 		}
@@ -458,7 +493,14 @@ func (p *openAICodexTurnStatePool) rebuildAccountsLocked() {
 			if current := p.accounts[accountID]; record.ExpiresAt.After(current) {
 				p.accounts[accountID] = record.ExpiresAt
 			}
-			if key, ok := newOpenAICodexTurnStateBucketKey(accountID, record.SourceModel); ok && p.isReusableRecordLocked(record, key, now) {
+			if key, ok := newOpenAICodexTurnStateBucketKey(accountID, record.SourceModel); ok {
+				if p.entriesByBucket[key] == nil {
+					p.entriesByBucket[key] = make(map[string]*OpenAICodexTurnStateRecord)
+				}
+				p.entriesByBucket[key][entryKey] = record
+				if !p.isReusableRecordLocked(record, key, now) {
+					continue
+				}
 				current := p.preferredByBucket[key]
 				if current == nil || p.ranksBeforeLocked(record, current) {
 					p.preferredByBucket[key] = record
@@ -484,7 +526,7 @@ func (p *openAICodexTurnStatePool) isPreferredBucketRecordLocked(record *OpenAIC
 
 func (p *openAICodexTurnStatePool) selectPreferredForBucketLocked(key openAICodexTurnStateBucketKey, now time.Time) {
 	delete(p.preferredByBucket, key)
-	for _, record := range p.entries {
+	for _, record := range p.entriesByBucket[key] {
 		if !p.isReusableRecordLocked(record, key, now) {
 			continue
 		}
@@ -547,7 +589,12 @@ func (p *openAICodexTurnStatePool) cleanupExpired(now time.Time) {
 
 func (p *openAICodexTurnStatePool) ranksBeforeLocked(left, right *OpenAICodexTurnStateRecord) bool {
 	if left.ValueLength != right.ValueLength {
-		return p.lengthRankLocked(left.ValueLength) < p.lengthRankLocked(right.ValueLength)
+		key := openAICodexTurnStateBucketKey{model: left.SourceModel}
+		if left.SourceAccountID != nil {
+			key.accountID = *left.SourceAccountID
+		}
+		lengths := p.targetLengthsForBucketLocked(key)
+		return slices.Index(lengths, left.ValueLength) < slices.Index(lengths, right.ValueLength)
 	}
 	if !left.ExpiresAt.Equal(right.ExpiresAt) {
 		return left.ExpiresAt.After(right.ExpiresAt)
@@ -590,8 +637,25 @@ func normalizeOpenAICodexTurnStateModel(value string) string {
 }
 
 func parseOpenAICodexTurnStateIssuedAt(value string) (time.Time, bool) {
-	encoded := strings.TrimRight(strings.TrimSpace(value), "=")
+	value = strings.TrimSpace(value)
+	encoded := strings.TrimRight(value, "=")
+	if len(encoded) < 12 || len(value)-len(encoded) > 2 || strings.IndexFunc(encoded, func(r rune) bool {
+		switch {
+		case r >= 'A' && r <= 'Z', r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '-', r == '_':
+			return false
+		default:
+			return true
+		}
+	}) >= 0 {
+		return time.Time{}, false
+	}
 	raw, err := base64.RawURLEncoding.DecodeString(encoded)
+	if err != nil {
+		// The suffix is opaque and a configured length need not form a complete
+		// Base64 block. Reading only the version/timestamp prefix neither
+		// authenticates nor renews a state.
+		raw, err = base64.RawURLEncoding.DecodeString(encoded[:12])
+	}
 	if err != nil || len(raw) < 9 || raw[0] != 0x80 {
 		return time.Time{}, false
 	}
@@ -603,7 +667,7 @@ func parseOpenAICodexTurnStateIssuedAt(value string) (time.Time, bool) {
 }
 
 func (p *openAICodexTurnStatePool) isReusableRecordLocked(record *OpenAICodexTurnStateRecord, key openAICodexTurnStateBucketKey, now time.Time) bool {
-	if record == nil || record.StateValue == "" || !p.acceptsLengthLocked(record.ValueLength) {
+	if record == nil || record.StateValue == "" || !slices.Contains(p.targetLengthsForBucketLocked(key), record.ValueLength) {
 		return false
 	}
 	if record.SourceAccountID == nil || *record.SourceAccountID != key.accountID || normalizeOpenAICodexTurnStateModel(record.SourceModel) != key.model {

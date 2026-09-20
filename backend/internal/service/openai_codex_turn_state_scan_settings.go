@@ -18,15 +18,98 @@ const defaultOpenAICodexTurnStateDynamicProxyURL = "https://api.cliproxy.io/whit
 // OpenAICodexTurnStateScanSettings configures state acquisition only. TargetLengths
 // is an ordered local preference, not an assertion about upstream token semantics.
 type OpenAICodexTurnStateScanSettings struct {
-	TargetLengths       []int  `json:"target_lengths"`
-	ParallelProbes      int    `json:"parallel_probes"`
-	DynamicProxyEnabled bool   `json:"dynamic_proxy_enabled"`
-	DynamicProxyURL     string `json:"dynamic_proxy_url"`
+	TargetLengths       []int                            `json:"target_lengths"`
+	Rules               []OpenAICodexTurnStateLengthRule `json:"rules"`
+	ParallelProbes      int                              `json:"parallel_probes"`
+	DynamicProxyEnabled bool                             `json:"dynamic_proxy_enabled"`
+	DynamicProxyURL     string                           `json:"dynamic_proxy_url"`
+}
+
+// OpenAICodexTurnStateLengthRule scopes ordered preferences to a plan/model.
+type OpenAICodexTurnStateLengthRule struct {
+	PlanType      string `json:"plan_type"`
+	Model         string `json:"model"`
+	TargetLengths []int  `json:"target_lengths"`
+}
+
+func defaultOpenAICodexTurnStateLengthRules() []OpenAICodexTurnStateLengthRule {
+	return []OpenAICodexTurnStateLengthRule{
+		{PlanType: "pro", Model: "*", TargetLengths: []int{292}},
+		{PlanType: "team", Model: "gpt-5.6-terra", TargetLengths: []int{286}},
+		{PlanType: "team", Model: "gpt-6-astra", TargetLengths: []int{273}},
+	}
+}
+
+// NormalizeOpenAICodexStatePlanType uses credential values, never account names.
+func NormalizeOpenAICodexStatePlanType(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	switch value {
+	case "pro", "pro5x", "pro20x", "pro_5x", "pro_20x", "pro-5x", "pro-20x", "prolite", "pro_lite", "pro-lite", "chatgpt_pro", "chatgptpro":
+		return "pro"
+	case "team", "business", "chatgpt_team", "self_serve_business", "self_serve_business_usage_based", "self_serve_business_prolite", "selfservebusinessprolite":
+		return "team"
+	default:
+		return value
+	}
+}
+
+func OpenAICodexStatePlanType(account *Account) string {
+	if account != nil {
+		for _, key := range []string{"plan_type", "chatgpt_plan_type", "subscription_plan"} {
+			if value := strings.TrimSpace(account.GetCredential(key)); value != "" {
+				return NormalizeOpenAICodexStatePlanType(value)
+			}
+		}
+		// Imported Team credentials can omit the plan while retaining an
+		// explicit workspace verification. Never infer the tier from its name.
+		verified, _ := account.Extra["team_oauth_verified"].(bool)
+		workspace, _ := account.Extra["team_oauth_verified_workspace_id"].(string)
+		workspace = strings.TrimSpace(workspace)
+		if verified && workspace != "" && workspace == strings.TrimSpace(account.GetCredential("chatgpt_account_id")) {
+			return "team"
+		}
+	}
+	return ""
+}
+
+// TargetLengthsFor returns a read-only view, with exact plan/model rules first.
+func (s *OpenAICodexTurnStateScanSettings) TargetLengthsFor(plan, model string) []int {
+	if s == nil {
+		s = defaultOpenAICodexTurnStateScanSettings()
+	}
+	plan = NormalizeOpenAICodexStatePlanType(plan)
+	model = normalizeOpenAICodexTurnStateModel(model)
+	best := -1
+	lengths := s.TargetLengths
+	for _, rule := range s.Rules {
+		if rule.PlanType != "*" && rule.PlanType != plan || rule.Model != "*" && rule.Model != model {
+			continue
+		}
+		rank := 0
+		if rule.PlanType != "*" {
+			rank += 2
+		}
+		if rule.Model != "*" {
+			rank++
+		}
+		if rank > best {
+			best, lengths = rank, rule.TargetLengths
+		}
+	}
+	return lengths
+}
+
+func (s *OpenAICodexTurnStateScanSettings) forAccountModel(account *Account, model string) *OpenAICodexTurnStateScanSettings {
+	resolved := s.clone()
+	resolved.TargetLengths = slices.Clone(s.TargetLengthsFor(OpenAICodexStatePlanType(account), model))
+	resolved.Rules = nil
+	return resolved
 }
 
 func defaultOpenAICodexTurnStateScanSettings() *OpenAICodexTurnStateScanSettings {
 	return &OpenAICodexTurnStateScanSettings{
 		TargetLengths:   []int{332, 292},
+		Rules:           defaultOpenAICodexTurnStateLengthRules(),
 		ParallelProbes:  5,
 		DynamicProxyURL: defaultOpenAICodexTurnStateDynamicProxyURL,
 	}
@@ -38,6 +121,10 @@ func (s *OpenAICodexTurnStateScanSettings) clone() *OpenAICodexTurnStateScanSett
 	}
 	copySettings := *s
 	copySettings.TargetLengths = slices.Clone(s.TargetLengths)
+	copySettings.Rules = slices.Clone(s.Rules)
+	for i := range copySettings.Rules {
+		copySettings.Rules[i].TargetLengths = slices.Clone(s.Rules[i].TargetLengths)
+	}
 	return &copySettings
 }
 
@@ -70,6 +157,34 @@ func validateOpenAICodexTurnStateScanSettings(settings *OpenAICodexTurnStateScan
 		return nil, infraerrors.BadRequest("CODEX_STATE_SCAN_SETTINGS_INVALID", "target_lengths must contain 1 to 16 ordered lengths")
 	}
 	next := settings.clone()
+	if next.Rules == nil {
+		next.Rules = defaultOpenAICodexTurnStateLengthRules()
+	}
+	if len(next.Rules) > 128 {
+		return nil, infraerrors.BadRequest("CODEX_STATE_SCAN_SETTINGS_INVALID", "rules must contain at most 128 entries")
+	}
+	ruleKeys := make(map[string]struct{}, len(next.Rules))
+	for i := range next.Rules {
+		rule := &next.Rules[i]
+		rule.PlanType = NormalizeOpenAICodexStatePlanType(rule.PlanType)
+		rule.Model = normalizeOpenAICodexTurnStateModel(rule.Model)
+		switch rule.PlanType {
+		case "*", "pro", "team", "plus", "free", "enterprise":
+		default:
+			return nil, infraerrors.BadRequest("CODEX_STATE_SCAN_SETTINGS_INVALID", "rule plan_type must be *, pro, team, plus, free, or enterprise")
+		}
+		if rule.Model == "" || len(rule.Model) > 200 || strings.ContainsAny(rule.Model, "\x00\r\n\t ") || (strings.Contains(rule.Model, "*") && rule.Model != "*") {
+			return nil, infraerrors.BadRequest("CODEX_STATE_SCAN_SETTINGS_INVALID", "rule model must be an upstream model name or *")
+		}
+		key := rule.PlanType + "\x00" + rule.Model
+		if _, exists := ruleKeys[key]; exists {
+			return nil, infraerrors.BadRequest("CODEX_STATE_SCAN_SETTINGS_INVALID", "duplicate plan/model rules are not allowed")
+		}
+		ruleKeys[key] = struct{}{}
+		if err := validateOpenAICodexTurnStateRuleLengths(rule.TargetLengths); err != nil {
+			return nil, err
+		}
+	}
 	seen := make(map[int]struct{}, len(next.TargetLengths))
 	for _, length := range next.TargetLengths {
 		if length < 64 || length > 4096 {
@@ -94,6 +209,23 @@ func validateOpenAICodexTurnStateScanSettings(settings *OpenAICodexTurnStateScan
 	return next, nil
 }
 
+func validateOpenAICodexTurnStateRuleLengths(lengths []int) error {
+	if len(lengths) < 1 || len(lengths) > 16 {
+		return infraerrors.BadRequest("CODEX_STATE_SCAN_SETTINGS_INVALID", "rule target_lengths must contain 1 to 16 ordered lengths")
+	}
+	seen := make(map[int]struct{}, len(lengths))
+	for _, length := range lengths {
+		if length < 64 || length > 4096 {
+			return infraerrors.BadRequest("CODEX_STATE_SCAN_SETTINGS_INVALID", "target lengths must be between 64 and 4096")
+		}
+		if _, exists := seen[length]; exists {
+			return infraerrors.BadRequest("CODEX_STATE_SCAN_SETTINGS_INVALID", "target lengths must not contain duplicates")
+		}
+		seen[length] = struct{}{}
+	}
+	return nil
+}
+
 // GetOpenAICodexTurnStateScanSettings returns a detached snapshot, so callers
 // cannot mutate the settings concurrently used by request routing and scanning.
 func (s *OpsService) GetOpenAICodexTurnStateScanSettings() *OpenAICodexTurnStateScanSettings {
@@ -106,7 +238,7 @@ func (s *OpsService) GetOpenAICodexTurnStateScanSettings() *OpenAICodexTurnState
 func (s *OpsService) applyOpenAICodexTurnStateScanSettings(settings *OpenAICodexTurnStateScanSettings) {
 	settings = settings.clone()
 	if s.openAIGatewayService != nil {
-		s.openAIGatewayService.getOpenAICodexTurnStatePool().setTargetLengths(settings.TargetLengths)
+		s.openAIGatewayService.getOpenAICodexTurnStatePool().setScanSettings(settings)
 	}
 	if s.codexTurnStateScanner != nil {
 		s.codexTurnStateScanner.settings.Store(settings)

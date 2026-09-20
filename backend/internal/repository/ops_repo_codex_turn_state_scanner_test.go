@@ -34,9 +34,9 @@ func TestCodexTurnStateAccountStatusCTEIncludesExplicitUnavailableAccounts(t *te
 func TestCodexTurnStateAccountStatusCTESelectsNewestExpiryWithinAccountAndModel(t *testing.T) {
 	query := codexTurnStateAccountStatusCTE()
 	require.Contains(t, query, "c.source_account_id = a.id AND c.source_model = am.model")
-	require.Contains(t, query, "c.value_length = ANY($4::integer[]) AND c.expires_at > NOW()")
+	require.Contains(t, query, "c.value_length = ANY(am.target_lengths) AND c.expires_at > NOW()")
 	require.Contains(t, query, "c.issued_at <= NOW() AND c.issued_at + INTERVAL '1 hour' > NOW()")
-	require.Contains(t, query, "ORDER BY array_position($4::integer[], c.value_length), c.expires_at DESC, c.last_seen_at DESC, c.state_hash DESC LIMIT 1")
+	require.Contains(t, query, "ORDER BY array_position(am.target_lengths, c.value_length), c.expires_at DESC, c.last_seen_at DESC, c.state_hash DESC LIMIT 1")
 }
 
 func TestCodexTurnStateScanUpsertRejectsLostLease(t *testing.T) {
@@ -58,19 +58,26 @@ func TestCodexTurnStateStatusQueriesBindConfiguredLengths(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
-	mock.ExpectQuery(`(?s)WITH eligible_accounts.*array_position\(\$4::integer\[\], c.value_length\).*SELECT COUNT`).
-		WithArgs(sqlmock.AnyArg(), "{42}", `{"gpt-5.5"}`, "{356,292}").
+	settings := &service.OpenAICodexTurnStateScanSettings{
+		TargetLengths:   []int{356, 292},
+		Rules:           []service.OpenAICodexTurnStateLengthRule{{PlanType: "pro", Model: "*", TargetLengths: []int{292}}},
+		DynamicProxyURL: "https://example.com/private-proxy-source",
+	}
+	policy := `{"target_lengths":[356,292],"rules":[{"plan_type":"pro","model":"*","target_lengths":[292]}]}`
+	mock.ExpectQuery(`(?s)WITH eligible_accounts.*array_position\(am.target_lengths, c.value_length\).*SELECT COUNT`).
+		WithArgs(sqlmock.AnyArg(), "{42}", `{"gpt-5.5"}`, policy).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 	mock.ExpectQuery(`(?s)WITH eligible_accounts.*LIMIT \$5 OFFSET \$6`).
-		WithArgs(sqlmock.AnyArg(), "{42}", `{"gpt-5.5"}`, "{356,292}", 20, 0).
-		WillReturnRows(sqlmock.NewRows([]string{"account_id", "account_name", "account_type", "plan_type", "model", "effective_status", "state_length", "issued_at", "expires_at", "last_attempt_at", "last_success_at", "attempt_count", "last_proxy_id", "last_proxy_url", "last_error"}))
+		WithArgs(sqlmock.AnyArg(), "{42}", `{"gpt-5.5"}`, policy, 20, 0).
+		WillReturnRows(sqlmock.NewRows([]string{"account_id", "account_name", "account_type", "plan_type", "model", "target_lengths", "effective_status", "state_length", "issued_at", "expires_at", "last_attempt_at", "last_success_at", "attempt_count", "last_proxy_id", "last_proxy_url", "last_error"}).AddRow(42, "test", "oauth", "pro", "gpt-5.5", "{292}", "missing", 0, nil, nil, nil, nil, 0, nil, "", ""))
 	repo := &opsRepository{db: db}
-	_, err = repo.ListOpenAICodexTurnStateAccountStatuses(context.Background(), []int64{42}, []string{"gpt-5.5"}, []int{356, 292}, 1, 20)
+	result, err := repo.ListOpenAICodexTurnStateAccountStatuses(context.Background(), []int64{42}, []string{"gpt-5.5"}, settings, 1, 20)
 	require.NoError(t, err)
-	mock.ExpectQuery(`(?s)WITH eligible.*c.value_length = ANY\(\$3::integer\[\]\).*array_position\(\$3::integer\[\], c.value_length\).*selected.expires_at > NOW\(\) \+ INTERVAL '5 minutes'`).
-		WithArgs(sqlmock.AnyArg(), `{"gpt-5.5"}`, "{356,292}").
+	require.Equal(t, []int{292}, result.Items[0].TargetLengths)
+	mock.ExpectQuery(`(?s)WITH eligible_accounts.*c.value_length = ANY\(am.target_lengths\).*array_position\(am.target_lengths, c.value_length\).*COUNT\(\*\) FILTER \(WHERE effective_status = 'ready'\)`).
+		WithArgs(sqlmock.AnyArg(), nil, `{"gpt-5.5"}`, policy).
 		WillReturnRows(sqlmock.NewRows([]string{"oauth_accounts", "ready_accounts", "missing_accounts", "ready_model_slots", "total_model_slots", "running_jobs", "enabled_proxies", "healthy_proxies", "shared_proxies", "last_scan_at"}).AddRow(1, 0, 1, 0, 1, 0, 0, 0, 0, nil))
-	_, err = repo.GetOpenAICodexTurnStateOperationsSummary(context.Background(), []string{"gpt-5.5"}, []int{356, 292})
+	_, err = repo.GetOpenAICodexTurnStateOperationsSummary(context.Background(), []string{"gpt-5.5"}, settings)
 	require.NoError(t, err)
 	require.NoError(t, mock.ExpectationsWereMet())
 }

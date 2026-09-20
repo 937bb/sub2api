@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/url"
@@ -279,8 +280,23 @@ ORDER BY last_used_at DESC, id ASC`, usedSince)
 func codexTurnStateAccountStatusCTE() string {
 	return `
 WITH eligible_accounts AS (
-  SELECT id, name, type, COALESCE(credentials->>'plan_type', '') AS plan_type
+  SELECT id, name, type,
+         CASE
+           WHEN raw_plan.value IN ('pro', 'pro5x', 'pro20x', 'pro_5x', 'pro_20x', 'pro-5x', 'pro-20x',
+                                   'pro_lite', 'pro-lite', 'prolite', 'chatgpt_pro', 'chatgptpro') THEN 'pro'
+           WHEN raw_plan.value IN ('team', 'business', 'chatgpt_team', 'self_serve_business', 'self_serve_business_usage_based',
+                                   'self_serve_business_prolite', 'selfservebusinessprolite') THEN 'team'
+           WHEN raw_plan.value = '' AND extra->'team_oauth_verified' = 'true'::jsonb
+             AND COALESCE(BTRIM(extra->>'team_oauth_verified_workspace_id'), '') <> ''
+             AND BTRIM(extra->>'team_oauth_verified_workspace_id') = BTRIM(credentials->>'chatgpt_account_id') THEN 'team'
+           ELSE raw_plan.value
+         END AS plan_type
   FROM accounts
+  CROSS JOIN LATERAL (
+    SELECT LOWER(BTRIM(COALESCE(NULLIF(BTRIM(credentials->>'plan_type'), ''),
+                               NULLIF(BTRIM(credentials->>'chatgpt_plan_type'), ''),
+                               NULLIF(BTRIM(credentials->>'subscription_plan'), ''), ''))) AS value
+  ) raw_plan
   WHERE deleted_at IS NULL AND parent_account_id IS NULL AND platform = 'openai'
     AND type IN ('oauth', 'setup-token')
     AND ($2::bigint[] IS NULL OR id = ANY($2))
@@ -294,6 +310,14 @@ WITH eligible_accounts AS (
         AND (rate_limit_reset_at IS NULL OR rate_limit_reset_at <= NOW())
       )
     )
+), scan_policy AS (
+  SELECT $4::jsonb AS value
+), scan_rules AS (
+  SELECT rule->>'plan_type' AS plan_type, rule->>'model' AS model,
+         ARRAY(SELECT value::integer FROM jsonb_array_elements_text(rule->'target_lengths')) AS target_lengths,
+         position
+  FROM scan_policy
+  CROSS JOIN LATERAL jsonb_array_elements(COALESCE(NULLIF(value->'rules', 'null'::jsonb), '[]'::jsonb)) WITH ORDINALITY AS rules(rule, position)
 ), target_models AS (
   SELECT DISTINCT LOWER(BTRIM(value)) AS model
   FROM UNNEST($3::text[]) AS value
@@ -320,9 +344,23 @@ WITH eligible_accounts AS (
   FROM codex_turn_state_scans sc
   JOIN eligible_accounts a ON a.id = sc.account_id
   WHERE sc.updated_at >= $1 AND (sc.model LIKE 'gpt-5%' OR sc.model LIKE 'gpt-6%')
+), account_targets AS (
+  SELECT am.account_id, am.model,
+         COALESCE(matched.target_lengths,
+                  ARRAY(SELECT value::integer FROM jsonb_array_elements_text(policy.value->'target_lengths'))) AS target_lengths
+  FROM account_models am
+  JOIN eligible_accounts a ON a.id = am.account_id
+  CROSS JOIN scan_policy policy
+  LEFT JOIN LATERAL (
+    SELECT rules.target_lengths
+    FROM scan_rules rules
+    WHERE rules.plan_type IN (a.plan_type, '*') AND rules.model IN (am.model, '*')
+    ORDER BY (rules.plan_type <> '*') DESC, (rules.model <> '*') DESC, rules.position
+    LIMIT 1
+  ) matched ON TRUE
 ), status_rows AS (
   SELECT a.id AS account_id, a.name AS account_name, a.type AS account_type, a.plan_type,
-         am.model,
+         am.model, am.target_lengths,
          ls.value_length AS state_length, ls.issued_at, ls.expires_at,
          sc.status AS scan_status, COALESCE(sc.attempt_count, 0) AS attempt_count,
          sc.last_proxy_id, sc.last_attempt_at, sc.last_success_at, COALESCE(sc.last_error, '') AS last_error,
@@ -334,14 +372,14 @@ WITH eligible_accounts AS (
            ELSE 'missing'
          END AS effective_status
   FROM eligible_accounts a
-  JOIN account_models am ON am.account_id = a.id
+  JOIN account_targets am ON am.account_id = a.id
   LEFT JOIN LATERAL (
     SELECT value_length, issued_at, expires_at
     FROM codex_turn_states c
     WHERE c.source_account_id = a.id AND c.source_model = am.model
-      AND c.value_length = ANY($4::integer[]) AND c.expires_at > NOW()
+      AND c.value_length = ANY(am.target_lengths) AND c.expires_at > NOW()
       AND c.issued_at <= NOW() AND c.issued_at + INTERVAL '1 hour' > NOW()
-    ORDER BY array_position($4::integer[], c.value_length), c.expires_at DESC, c.last_seen_at DESC, c.state_hash DESC LIMIT 1
+    ORDER BY array_position(am.target_lengths, c.value_length), c.expires_at DESC, c.last_seen_at DESC, c.state_hash DESC LIMIT 1
   ) ls ON TRUE
   LEFT JOIN codex_turn_state_scans sc ON sc.account_id = a.id AND sc.model = am.model
   LEFT JOIN codex_turn_state_proxies p ON p.id = sc.last_proxy_id
@@ -349,7 +387,22 @@ WITH eligible_accounts AS (
 `
 }
 
-func (r *opsRepository) ListOpenAICodexTurnStateAccountStatuses(ctx context.Context, accountIDs []int64, targetModels []string, targetLengths []int, page, pageSize int) (*service.OpenAICodexTurnStateAccountStatusList, error) {
+func codexTurnStatePolicyJSON(settings *service.OpenAICodexTurnStateScanSettings) (string, error) {
+	if settings == nil {
+		settings = (*service.OpsService)(nil).GetOpenAICodexTurnStateScanSettings()
+	}
+	policy := struct {
+		TargetLengths []int                                    `json:"target_lengths"`
+		Rules         []service.OpenAICodexTurnStateLengthRule `json:"rules"`
+	}{TargetLengths: settings.TargetLengths, Rules: settings.Rules}
+	encoded, err := json.Marshal(policy)
+	if err != nil {
+		return "", fmt.Errorf("encode Codex state policy: %w", err)
+	}
+	return string(encoded), nil
+}
+
+func (r *opsRepository) ListOpenAICodexTurnStateAccountStatuses(ctx context.Context, accountIDs []int64, targetModels []string, settings *service.OpenAICodexTurnStateScanSettings, page, pageSize int) (*service.OpenAICodexTurnStateAccountStatusList, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -364,22 +417,25 @@ func (r *opsRepository) ListOpenAICodexTurnStateAccountStatuses(ctx context.Cont
 		ids = pq.Array(accountIDs)
 	}
 	models := pq.Array(targetModels)
-	lengths := pq.Array(targetLengths)
+	policy, err := codexTurnStatePolicyJSON(settings)
+	if err != nil {
+		return nil, err
+	}
 	cte := codexTurnStateAccountStatusCTE()
 	usedSince := time.Now().Add(-time.Hour)
 	var total int64
 	if err := r.db.QueryRowContext(ctx, cte+`
-SELECT COUNT(*) FROM status_rows WHERE ($2::bigint[] IS NULL OR account_id = ANY($2))`, usedSince, ids, models, lengths).Scan(&total); err != nil {
+SELECT COUNT(*) FROM status_rows WHERE ($2::bigint[] IS NULL OR account_id = ANY($2))`, usedSince, ids, models, policy).Scan(&total); err != nil {
 		return nil, err
 	}
 	rows, err := r.db.QueryContext(ctx, cte+`
-SELECT account_id, account_name, account_type, plan_type, model, effective_status,
+SELECT account_id, account_name, account_type, plan_type, model, target_lengths, effective_status,
        COALESCE(state_length, 0), issued_at, expires_at, last_attempt_at, last_success_at,
        attempt_count, last_proxy_id, COALESCE(last_proxy_url, ''), last_error
 FROM status_rows
 WHERE ($2::bigint[] IS NULL OR account_id = ANY($2))
 ORDER BY account_name ASC, account_id ASC, model ASC
-LIMIT $5 OFFSET $6`, usedSince, ids, models, lengths, pageSize, (page-1)*pageSize)
+LIMIT $5 OFFSET $6`, usedSince, ids, models, policy, pageSize, (page-1)*pageSize)
 	if err != nil {
 		return nil, err
 	}
@@ -387,13 +443,18 @@ LIMIT $5 OFFSET $6`, usedSince, ids, models, lengths, pageSize, (page-1)*pageSiz
 	items := make([]*service.OpenAICodexTurnStateAccountStatus, 0, pageSize)
 	for rows.Next() {
 		item := &service.OpenAICodexTurnStateAccountStatus{}
+		var targetLengths pq.Int64Array
 		if err := rows.Scan(
 			&item.AccountID, &item.AccountName, &item.AccountType, &item.PlanType,
-			&item.Model, &item.Status, &item.StateLength, &item.IssuedAt, &item.ExpiresAt,
+			&item.Model, &targetLengths, &item.Status, &item.StateLength, &item.IssuedAt, &item.ExpiresAt,
 			&item.LastAttemptAt, &item.LastSuccessAt, &item.AttemptCount, &item.LastProxyID,
 			&item.LastProxyMasked, &item.LastError,
 		); err != nil {
 			return nil, err
+		}
+		item.TargetLengths = make([]int, len(targetLengths))
+		for i, length := range targetLengths {
+			item.TargetLengths[i] = int(length)
 		}
 		items = append(items, item)
 	}
@@ -403,76 +464,31 @@ LIMIT $5 OFFSET $6`, usedSince, ids, models, lengths, pageSize, (page-1)*pageSiz
 	return &service.OpenAICodexTurnStateAccountStatusList{Items: items, Total: total, Page: page, PageSize: pageSize}, nil
 }
 
-func (r *opsRepository) GetOpenAICodexTurnStateOperationsSummary(ctx context.Context, targetModels []string, targetLengths []int) (*service.OpenAICodexTurnStateOperationsSummary, error) {
+func (r *opsRepository) GetOpenAICodexTurnStateOperationsSummary(ctx context.Context, targetModels []string, settings *service.OpenAICodexTurnStateScanSettings) (*service.OpenAICodexTurnStateOperationsSummary, error) {
 	summary := &service.OpenAICodexTurnStateOperationsSummary{}
-	err := r.db.QueryRowContext(ctx, `
-WITH eligible AS (
-  SELECT id FROM accounts
-  WHERE deleted_at IS NULL AND parent_account_id IS NULL AND platform = 'openai'
-    AND type IN ('oauth', 'setup-token')
-    AND status = 'active' AND schedulable IS TRUE AND last_used_at >= $1
-    AND (expires_at IS NULL OR expires_at > NOW())
-    AND (temp_unschedulable_until IS NULL OR temp_unschedulable_until <= NOW())
-    AND (overload_until IS NULL OR overload_until <= NOW())
-    AND (rate_limit_reset_at IS NULL OR rate_limit_reset_at <= NOW())
-), target_models AS (
-  SELECT DISTINCT LOWER(BTRIM(value)) AS model
-  FROM UNNEST($2::text[]) AS value
-  WHERE BTRIM(value) <> ''
-), account_models AS (
-  SELECT e.id AS account_id, tm.model
-  FROM eligible e CROSS JOIN target_models tm
-  UNION
-  SELECT u.account_id, LOWER(BTRIM(COALESCE(NULLIF(u.upstream_model, ''), u.model))) AS model
-  FROM usage_logs u
-  JOIN eligible e ON e.id = u.account_id
-  WHERE u.created_at >= $1
-    AND (LOWER(BTRIM(COALESCE(NULLIF(u.upstream_model, ''), u.model))) LIKE 'gpt-5%'
-      OR LOWER(BTRIM(COALESCE(NULLIF(u.upstream_model, ''), u.model))) LIKE 'gpt-6%')
-  GROUP BY u.account_id, LOWER(BTRIM(COALESCE(NULLIF(u.upstream_model, ''), u.model)))
-  UNION
-  SELECT c.source_account_id, c.source_model
-  FROM codex_turn_states c
-  JOIN eligible e ON e.id = c.source_account_id
-  WHERE c.last_seen_at >= $1 AND (c.source_model LIKE 'gpt-5%' OR c.source_model LIKE 'gpt-6%')
-  UNION
-  SELECT sc.account_id, sc.model
-  FROM codex_turn_state_scans sc
-  JOIN eligible e ON e.id = sc.account_id
-  WHERE sc.updated_at >= $1 AND (sc.model LIKE 'gpt-5%' OR sc.model LIKE 'gpt-6%')
-), model_slots AS (
-  SELECT account_id, model FROM account_models
-), ready_slots AS (
-  SELECT ms.account_id, ms.model
-  FROM model_slots ms
-  JOIN LATERAL (
-    SELECT c.expires_at
-    FROM codex_turn_states c
-    WHERE c.source_account_id = ms.account_id AND c.source_model = ms.model
-      AND c.value_length = ANY($3::integer[]) AND c.expires_at > NOW()
-      AND c.issued_at <= NOW() AND c.issued_at + INTERVAL '1 hour' > NOW()
-    ORDER BY array_position($3::integer[], c.value_length), c.expires_at DESC, c.last_seen_at DESC, c.state_hash DESC LIMIT 1
-  ) selected ON selected.expires_at > NOW() + INTERVAL '5 minutes'
-), account_readiness AS (
-  SELECT ms.account_id,
+	policy, err := codexTurnStatePolicyJSON(settings)
+	if err != nil {
+		return nil, err
+	}
+	err = r.db.QueryRowContext(ctx, codexTurnStateAccountStatusCTE()+`, account_readiness AS (
+  SELECT account_id,
          COUNT(*) AS target_count,
-         COUNT(rs.account_id) AS ready_count
-  FROM model_slots ms
-  LEFT JOIN ready_slots rs ON rs.account_id = ms.account_id AND rs.model = ms.model
-  GROUP BY ms.account_id
+         COUNT(*) FILTER (WHERE effective_status = 'ready') AS ready_count
+  FROM status_rows
+  GROUP BY account_id
 )
-SELECT (SELECT COUNT(*) FROM eligible),
+SELECT (SELECT COUNT(*) FROM eligible_accounts),
        (SELECT COUNT(*) FROM account_readiness WHERE target_count > 0 AND ready_count = target_count),
        (SELECT COUNT(*) FROM account_readiness WHERE ready_count < target_count),
-       (SELECT COUNT(*) FROM ready_slots),
-       (SELECT COUNT(*) FROM model_slots),
-       (SELECT COUNT(*) FROM codex_turn_state_scans sc JOIN model_slots ms ON ms.account_id = sc.account_id AND ms.model = sc.model WHERE sc.status IN ('pending', 'running')),
+       (SELECT COUNT(*) FROM status_rows WHERE effective_status = 'ready'),
+       (SELECT COUNT(*) FROM status_rows),
+       (SELECT COUNT(*) FROM status_rows WHERE scan_status IN ('pending', 'running')),
        (SELECT COUNT(*) FROM codex_turn_state_proxies WHERE enabled = TRUE),
        (SELECT COUNT(*) FROM codex_turn_state_proxies WHERE enabled = TRUE AND health_status = 'healthy'),
        (SELECT COUNT(*) FROM proxies WHERE deleted_at IS NULL AND status = 'active'
           AND (expires_at IS NULL OR expires_at > NOW())),
-       (SELECT MAX(sc.last_attempt_at) FROM codex_turn_state_scans sc JOIN eligible e ON e.id = sc.account_id)`,
-		time.Now().Add(-time.Hour), pq.Array(targetModels), pq.Array(targetLengths)).Scan(
+       (SELECT MAX(sc.last_attempt_at) FROM codex_turn_state_scans sc JOIN eligible_accounts e ON e.id = sc.account_id)`,
+		time.Now().Add(-time.Hour), nil, pq.Array(targetModels), policy).Scan(
 		&summary.OAuthAccounts, &summary.ReadyAccounts, &summary.MissingAccounts,
 		&summary.ReadyModelSlots, &summary.TotalModelSlots, &summary.RunningJobs, &summary.EnabledProxies, &summary.HealthyProxies, &summary.SharedProxies, &summary.LastScanAt,
 	)

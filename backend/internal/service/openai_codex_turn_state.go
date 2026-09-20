@@ -153,7 +153,9 @@ func (s *OpenAIGatewayService) observeOpenAICodexTurnState(c *gin.Context, accou
 	accountID := owner.ID
 	sessionHash := openAICodexTurnStateSessionHash(c)
 	model := openAICodexTurnStateModel(c)
-	s.getOpenAICodexTurnStatePool().observe(state, &accountID, sessionHash, model, transport)
+	pool := s.getOpenAICodexTurnStatePool()
+	pool.setAccountPlan(accountID, OpenAICodexStatePlanType(owner))
+	pool.observe(state, &accountID, sessionHash, model, transport)
 }
 
 // guardOpenAICodexTurnStateEcho removes a state known to belong to another
@@ -176,7 +178,9 @@ func (s *OpenAIGatewayService) guardOpenAICodexTurnStateEcho(c *gin.Context, acc
 	if owner == nil || owner.ID <= 0 || model == "" {
 		return
 	}
-	if state, ok := s.getOpenAICodexTurnStatePool().preferredForBucket(owner.ID, model); ok {
+	pool := s.getOpenAICodexTurnStatePool()
+	pool.setAccountPlan(owner.ID, OpenAICodexStatePlanType(owner))
+	if state, ok := pool.preferredForBucket(owner.ID, model); ok {
 		setOpenAICodexTurnStateReuse(c, h, state, openAICodexTurnStateReuseScopeAccountModel)
 	}
 }

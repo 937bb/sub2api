@@ -119,6 +119,7 @@ export interface CodexTurnStateAccountStatus {
   model: string
   status: CodexTurnStateAccountStatusValue
   state_length: number
+  target_lengths: number[]
   issued_at?: string
   expires_at?: string
   last_attempt_at?: string
@@ -157,8 +158,15 @@ export interface CodexTurnStateProxy {
   updated_at: string
 }
 
+export interface CodexTurnStateLengthRule {
+  plan_type: string
+  model: string
+  target_lengths: number[]
+}
+
 export interface CodexTurnStateScanSettings {
   target_lengths: number[]
+  rules: CodexTurnStateLengthRule[]
   parallel_probes: number
   dynamic_proxy_enabled: boolean
   dynamic_proxy_url: string

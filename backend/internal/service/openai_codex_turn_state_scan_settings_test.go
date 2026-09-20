@@ -2,13 +2,155 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/stretchr/testify/require"
 )
+
+func TestOpenAICodexTurnStatePlanModelSettings(t *testing.T) {
+	settings := defaultOpenAICodexTurnStateScanSettings()
+	for _, tc := range []struct {
+		plan, model string
+		lengths     []int
+	}{
+		{"pro", "gpt-6-astra", []int{292}},
+		{" Pro20x ", "gpt-5.6-terra", []int{292}},
+		{"prolite", "gpt-5.6-terra", []int{292}},
+		{"chatgpt_pro", "gpt-6-astra", []int{292}},
+		{"team", "gpt-5.6-terra", []int{286}},
+		{"self_serve_business_usage_based", " GPT-6-ASTRA ", []int{273}},
+		{"self_serve_business_prolite", "gpt-5.6-terra", []int{286}},
+		{"team", "gpt-5.5", []int{332, 292}},
+		{"", "gpt-6-astra", []int{332, 292}},
+	} {
+		require.Equal(t, tc.lengths, settings.TargetLengthsFor(tc.plan, tc.model))
+	}
+	settings.Rules = append(settings.Rules,
+		OpenAICodexTurnStateLengthRule{PlanType: "*", Model: "*", TargetLengths: []int{300}},
+		OpenAICodexTurnStateLengthRule{PlanType: "*", Model: "gpt-6-astra", TargetLengths: []int{301}},
+		OpenAICodexTurnStateLengthRule{PlanType: "pro", Model: "gpt-6-astra", TargetLengths: []int{302}},
+	)
+	require.Equal(t, []int{302}, settings.TargetLengthsFor("pro", "gpt-6-astra"))
+	require.Equal(t, []int{292}, settings.TargetLengthsFor("pro", "gpt-5.5"))
+	require.Equal(t, []int{301}, settings.TargetLengthsFor("plus", "gpt-6-astra"))
+	require.Equal(t, []int{300}, settings.TargetLengthsFor("plus", "gpt-5.5"))
+	cloned := settings.clone()
+	cloned.Rules[0].TargetLengths[0] = 999
+	require.Equal(t, 292, settings.Rules[0].TargetLengths[0])
+	account := &Account{Credentials: map[string]any{"plan_type": " ", "chatgpt_plan_type": "business", "subscription_plan": "pro"}}
+	require.Equal(t, "team", OpenAICodexStatePlanType(account))
+	require.Equal(t, []int{273}, settings.forAccountModel(account, "gpt-6-astra").TargetLengths)
+	imported := &Account{Credentials: map[string]any{"chatgpt_account_id": "workspace-1"}, Extra: map[string]any{"team_oauth_verified": true, "team_oauth_verified_workspace_id": "workspace-1"}}
+	require.Equal(t, "team", OpenAICodexStatePlanType(imported))
+	imported.Extra["team_oauth_verified_workspace_id"] = "workspace-2"
+	require.Empty(t, OpenAICodexStatePlanType(imported), "a different workspace must not establish a Team tier")
+	imported.Extra["team_oauth_verified_workspace_id"] = "workspace-1"
+	imported.Credentials["plan_type"] = "prolite"
+	require.Equal(t, "pro", OpenAICodexStatePlanType(imported), "explicit credentials outrank the import fallback")
+}
+
+func TestOpenAICodexTurnStateRuleSettingsValidationAndLegacyDefaults(t *testing.T) {
+	for name, rule := range map[string]OpenAICodexTurnStateLengthRule{
+		"unknown plan":      {PlanType: "maybe-pro", Model: "*", TargetLengths: []int{292}},
+		"blank model":       {PlanType: "pro", TargetLengths: []int{292}},
+		"partial wildcard":  {PlanType: "pro", Model: "gpt-*", TargetLengths: []int{292}},
+		"missing lengths":   {PlanType: "pro", Model: "*"},
+		"duplicate lengths": {PlanType: "team", Model: "*", TargetLengths: []int{273, 273}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := defaultOpenAICodexTurnStateScanSettings()
+			s.Rules = []OpenAICodexTurnStateLengthRule{rule}
+			_, err := validateOpenAICodexTurnStateScanSettings(s)
+			require.Error(t, err)
+		})
+	}
+	s := defaultOpenAICodexTurnStateScanSettings()
+	s.Rules = append(s.Rules, OpenAICodexTurnStateLengthRule{PlanType: "Pro20x", Model: "*", TargetLengths: []int{332}})
+	_, err := validateOpenAICodexTurnStateScanSettings(s)
+	require.ErrorContains(t, err, "duplicate")
+	legacy := &OpenAICodexTurnStateScanSettings{}
+	require.NoError(t, json.Unmarshal([]byte(`{"target_lengths":[332,292],"parallel_probes":5}`), legacy))
+	validated, err := validateOpenAICodexTurnStateScanSettings(legacy)
+	require.NoError(t, err)
+	require.Equal(t, []int{292}, validated.TargetLengthsFor("pro", "gpt-5.5"))
+	legacy.Rules = []OpenAICodexTurnStateLengthRule{}
+	validated, err = validateOpenAICodexTurnStateScanSettings(legacy)
+	require.NoError(t, err)
+	require.Empty(t, validated.Rules)
+	require.Equal(t, []int{332, 292}, validated.TargetLengthsFor("pro", "gpt-5.5"))
+}
+
+func TestOpenAICodexTurnStateScannerUsesPlanModelRules(t *testing.T) {
+	for _, tc := range []struct {
+		plan, model string
+		length      int
+		ready       bool
+	}{
+		{"pro", "gpt-6-astra", 292, true}, {"pro", "gpt-6-astra", 332, false},
+		{"prolite", "gpt-6-astra", 292, true},
+		{"team", "gpt-5.6-terra", 286, true}, {"team", "gpt-5.6-terra", 292, false},
+		{"team", "gpt-6-astra", 273, true}, {"team", "gpt-6-astra", 286, false},
+	} {
+		t.Run(tc.plan+tc.model+time.Duration(tc.length).String(), func(t *testing.T) {
+			now := time.Now().UTC().Truncate(time.Second)
+			account := turnStateRefreshAccount(41, now)
+			account.Credentials["plan_type"] = tc.plan
+			repo := &turnStateRefreshScanRepo{scans: make(map[openAICodexTurnStateBucketKey]*OpenAICodexTurnStateScan)}
+			gateway := ticketTestService(t, config.OpenAICodexTicketConfig{Models: []string{tc.model}}, nil)
+			scanner := newOpenAICodexTurnStateScanner(repo, &turnStateRefreshAccountRepo{accounts: map[int64]*Account{41: account}}, gateway)
+			calls := 0
+			scanner.probe = func(context.Context, *Account, string, string) openAICodexTurnStateHarvestResult {
+				calls++
+				result := stateConcurrencyResult(292, tc.model)
+				result.stateLength = tc.length
+				result.stateValue = testScopedOpenAICodexTurnState(tc.length, now, 'p')
+				return result
+			}
+			scanner.runJob(context.Background(), openAICodexTurnStateScanJob{accountID: 41, model: tc.model})
+			scan := repo.scans[openAICodexTurnStateBucketKey{accountID: 41, model: tc.model}]
+			require.NotNil(t, scan)
+			if tc.ready {
+				require.Equal(t, "ready", scan.Status)
+				_, ok := gateway.getOpenAICodexTurnStatePool().preferredForBucket(41, tc.model)
+				require.True(t, ok)
+				scanner.runJob(context.Background(), openAICodexTurnStateScanJob{accountID: 41, model: tc.model})
+				require.Equal(t, 1, calls, "valid scoped state must suppress reacquisition")
+			} else {
+				require.Equal(t, "retry_wait", scan.Status)
+			}
+		})
+	}
+}
+
+func TestOpenAICodexTurnStateManualScanLoadsPlanBeforeSkipping(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	account := turnStateRefreshAccount(41, now)
+	account.Credentials["plan_type"] = "pro"
+	model := "gpt-6-astra"
+	repo := &turnStateRefreshScanRepo{scans: make(map[openAICodexTurnStateBucketKey]*OpenAICodexTurnStateScan)}
+	gateway := ticketTestService(t, config.OpenAICodexTicketConfig{Models: []string{model}}, nil)
+	pool := gateway.getOpenAICodexTurnStatePool()
+	pool.observe(testOpenAICodexTurnState(332, now, 'x'), &account.ID, "session", model, "http")
+	scanner := newOpenAICodexTurnStateScanner(repo, &turnStateRefreshAccountRepo{accounts: map[int64]*Account{41: account}}, gateway)
+	calls := 0
+	scanner.probe = func(context.Context, *Account, string, string) openAICodexTurnStateHarvestResult {
+		calls++
+		return stateConcurrencyResult(292, model)
+	}
+	svc := &OpsService{codexTurnStateScanner: scanner}
+	require.True(t, svc.EnqueueOpenAICodexTurnStateScan(41, model))
+	require.False(t, svc.EnqueueOpenAICodexTurnStateScan(41, model), "same account/model must remain deduplicated")
+	scanner.runJob(context.Background(), <-scanner.queue)
+	require.Equal(t, 1, calls, "Pro must replace 332 even when its plan was unknown at enqueue time")
+	selected, ok := pool.preferredForBucket(41, model)
+	require.True(t, ok)
+	require.Len(t, selected, 292)
+}
 
 func TestOpenAICodexTurnStateScanSettingsValidation(t *testing.T) {
 	defaults := defaultOpenAICodexTurnStateScanSettings()

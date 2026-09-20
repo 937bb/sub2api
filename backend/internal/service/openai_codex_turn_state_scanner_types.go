@@ -50,6 +50,7 @@ type OpenAICodexTurnStateAccountStatus struct {
 	Model           string     `json:"model"`
 	Status          string     `json:"status"`
 	StateLength     int        `json:"state_length"`
+	TargetLengths   []int      `json:"target_lengths"`
 	IssuedAt        *time.Time `json:"issued_at,omitempty"`
 	ExpiresAt       *time.Time `json:"expires_at,omitempty"`
 	LastAttemptAt   *time.Time `json:"last_attempt_at,omitempty"`
@@ -91,8 +92,8 @@ type OpenAICodexTurnStateScannerRepository interface {
 	UpsertOpenAICodexTurnStateScan(ctx context.Context, scan *OpenAICodexTurnStateScan) error
 	GetOpenAICodexTurnStateScan(ctx context.Context, accountID int64, model string) (*OpenAICodexTurnStateScan, error)
 	ListRecentlyUsedOpenAICodexAccountIDs(ctx context.Context, usedSince time.Time) ([]int64, error)
-	ListOpenAICodexTurnStateAccountStatuses(ctx context.Context, accountIDs []int64, targetModels []string, targetLengths []int, page, pageSize int) (*OpenAICodexTurnStateAccountStatusList, error)
-	GetOpenAICodexTurnStateOperationsSummary(ctx context.Context, targetModels []string, targetLengths []int) (*OpenAICodexTurnStateOperationsSummary, error)
+	ListOpenAICodexTurnStateAccountStatuses(ctx context.Context, accountIDs []int64, targetModels []string, settings *OpenAICodexTurnStateScanSettings, page, pageSize int) (*OpenAICodexTurnStateAccountStatusList, error)
+	GetOpenAICodexTurnStateOperationsSummary(ctx context.Context, targetModels []string, settings *OpenAICodexTurnStateScanSettings) (*OpenAICodexTurnStateOperationsSummary, error)
 	ListObservedOpenAICodexTurnStateModels(ctx context.Context, accountID int64, usedSince time.Time) ([]string, error)
 }
 
