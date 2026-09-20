@@ -22,9 +22,8 @@ vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 const settings: CodexTurnStateScanSettings = {
   target_lengths: [332, 292],
   rules: [
-    { plan_type: 'pro', model: '*', target_lengths: [292] },
-    { plan_type: 'team', model: 'gpt-5.6-terra', target_lengths: [286] },
-    { plan_type: 'team', model: 'gpt-6-astra', target_lengths: [273] }
+    { plan_type: 'pro', model: '*', target_lengths: [332, 292] },
+    { plan_type: 'team', model: '*', target_lengths: [332, 292] }
   ],
   parallel_probes: 5,
   dynamic_proxy_enabled: false,
@@ -65,20 +64,20 @@ describe('CodexScanSettingsDialog', () => {
   })
 
   it('edits plan/model lengths while preserving other rules and scan configuration', async () => {
-    const wrapper = render({ plan_type: 'team', model: 'gpt-5.6-terra', target_lengths: [286] })
+    const wrapper = render({ plan_type: 'team', model: 'gpt-5.6-terra', target_lengths: [332, 292] })
     await flushPromises()
     expect(wrapper.findAll('[data-test="state-rule"]')).toHaveLength(3)
     expect(wrapper.get('[data-test="rule-scope"]').text()).toContain('selectedScope')
-    await wrapper.findAll('[data-test="rule-lengths"]')[1].setValue('286, 292')
+    await wrapper.findAll('[data-test="rule-lengths"]')[0].setValue('286, 292')
     await wrapper.get('form').trigger('submit')
     await flushPromises()
-    expect(updateSettings).toHaveBeenCalledWith({ ...settings, rules: [settings.rules[0], { ...settings.rules[1], target_lengths: [286, 292] }, settings.rules[2]] })
+    expect(updateSettings).toHaveBeenCalledWith({ ...settings, rules: [{ plan_type: 'team', model: 'gpt-5.6-terra', target_lengths: [286, 292] }, ...settings.rules] })
   })
 
   it('creates an exact rule for a selected model without changing the inherited plan rule', async () => {
     const wrapper = render({ plan_type: 'pro', model: 'GPT-6-ASTRA', target_lengths: [292] })
     await flushPromises()
-    expect(wrapper.findAll('[data-test="state-rule"]')).toHaveLength(4)
+    expect(wrapper.findAll('[data-test="state-rule"]')).toHaveLength(3)
     expect(wrapper.findAll<HTMLInputElement>('[data-test="rule-model"]')[0].element.value).toBe('gpt-6-astra')
     await wrapper.findAll('[data-test="rule-lengths"]')[0].setValue('273')
     await wrapper.get('form').trigger('submit')
@@ -90,7 +89,7 @@ describe('CodexScanSettingsDialog', () => {
     const wrapper = render()
     await flushPromises()
     await wrapper.get('[data-test="add-state-rule"]').trigger('click')
-    const row = wrapper.findAll('[data-test="state-rule"]')[3]
+    const row = wrapper.findAll('[data-test="state-rule"]')[2]
     await row.get('[data-test="rule-model"]').setValue(' GPT-6-ASTRA ')
     await row.get('[data-test="rule-lengths"]').setValue('273，292')
     await wrapper.get('form').trigger('submit')
@@ -102,9 +101,9 @@ describe('CodexScanSettingsDialog', () => {
     const wrapper = render()
     await flushPromises()
     await wrapper.get('[data-test="add-state-rule"]').trigger('click')
-    const row = wrapper.findAll('[data-test="state-rule"]')[3]
+    const row = wrapper.findAll('[data-test="state-rule"]')[2]
     await row.get('[data-test="rule-plan"]').setValue('team')
-    await row.get('[data-test="rule-model"]').setValue(' GPT-6-ASTRA ')
+    await row.get('[data-test="rule-model"]').setValue(' * ')
     await wrapper.get('form').trigger('submit')
     expect(updateSettings).not.toHaveBeenCalled()
     expect(wrapper.get('[role="alert"]').text()).toContain('duplicateRule')
@@ -125,7 +124,7 @@ describe('CodexScanSettingsDialog', () => {
     await wrapper.findAll('[data-test="delete-state-rule"]')[1].trigger('click')
     await wrapper.get('form').trigger('submit')
     await flushPromises()
-    expect(updateSettings).toHaveBeenCalledWith({ ...settings, rules: [settings.rules[0], settings.rules[2]] })
+    expect(updateSettings).toHaveBeenCalledWith({ ...settings, rules: [settings.rules[0]] })
   })
 
   it.each(['', '63', '4097', '332,332', '332, 292.5', 'invalid', Array.from({ length: 17 }, (_, index) => 64 + index).join(',')])('rejects invalid lengths %s before writing', async value => {

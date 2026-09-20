@@ -17,6 +17,15 @@ export default {
         },
         accountHint: 'Every configured target model is shown. Background scans only include schedulable accounts used in the last hour; historical and disabled accounts are excluded.',
         proxyHint: 'With dynamic proxies off, scans combine this dedicated pool with active proxies from Proxy Management. When enabled, only the dynamic source is used; acquisition failures wait for a retry. Account bindings and business proxy health stay unchanged.',
+        rulesPanel: {
+          title: 'Edit State rules',
+          hint: 'Choose an account plan, model and accepted State lengths here. Model * matches all. Rules apply to accounts with the same plan/model; State tokens remain private to each account.',
+          plan: 'Account type (plan)',
+          values: 'State target values',
+          defaultValues: 'Default when no rule matches',
+          save: 'Save State rules',
+          priorityHint: 'Comma-separated, highest priority first. Specific models override *.'
+        },
         scanSettings: {
           title: 'State rules / Scan settings',
           scope: 'Set accepted State lengths for acquisition and reuse by plan and model, without editing State tokens. Each account/model retains its own State.',

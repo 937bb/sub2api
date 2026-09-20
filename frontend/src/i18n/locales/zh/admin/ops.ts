@@ -21,6 +21,15 @@ export default {
         },
         accountHint: '按配置的目标模型逐项展示；后台仅自动补扫最近 1 小时实际使用且当前可调度的账号，历史和停用账号不会进入扫描队列。',
         proxyHint: '未开启动态代理时，扫描合并使用专用代理与代理管理中的有效代理；开启后只使用动态源，获取失败会等待重试。不会修改账号绑定关系或业务代理状态。',
+        rulesPanel: {
+          title: '手动配置 State 规则',
+          hint: '直接选择账号套餐、填写模型和 State 目标长度。模型 * 表示全部；规则适用于同套餐、同模型的账号，State 内容仍各账号独立。',
+          plan: '账号类型（套餐）',
+          values: 'State 目标值',
+          defaultValues: '未匹配规则时的默认值',
+          save: '保存 State 规则',
+          priorityHint: '逗号分隔，从左到右优先；具体模型优先于 *。'
+        },
         scanSettings: {
           title: 'State 规则 / 扫描配置',
           scope: '设置各套餐、模型允许采集和复用的 State 长度，不编辑 State 原文。每个账号、每个模型仍独立保存自己的 State。',

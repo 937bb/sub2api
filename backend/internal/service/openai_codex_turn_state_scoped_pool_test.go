@@ -92,6 +92,29 @@ func TestOpenAICodexTurnStateScopedPoolAppliesPlanAndModelPolicy(t *testing.T) {
 	require.False(t, found)
 }
 
+func TestOpenAICodexTurnStateScopedPoolRestoredDefaultsPrefer332AndRetain292Fallback(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	pool := newOpenAICodexTurnStatePool()
+	pool.now = func() time.Time { return now }
+	for index, plan := range []string{"pro", "team"} {
+		accountID := int64(index + 11)
+		pool.setAccountPlan(accountID, plan)
+		for _, model := range []string{"gpt-5.6-terra", "gpt-6-astra"} {
+			primary := testScopedOpenAICodexTurnState(332, now.Add(-time.Minute), byte(accountID))
+			fallback := testScopedOpenAICodexTurnState(292, now, byte(accountID))
+			pool.observe(primary, &accountID, "session", model, "http")
+			pool.observe(fallback, &accountID, "session", model, "http")
+			selected, ok := pool.preferredForBucket(accountID, model)
+			require.True(t, ok)
+			require.Equal(t, primary, selected)
+			pool.removeHashes([]string{hashOpenAICodexTurnState(primary)})
+			selected, ok = pool.preferredForBucket(accountID, model)
+			require.True(t, ok)
+			require.Equal(t, fallback, selected)
+		}
+	}
+}
+
 func TestOpenAICodexTurnStateScopedPoolUpdatesPolicyAndPlanWithoutCrossAccountReuse(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	pool := newOpenAICodexTurnStatePool()

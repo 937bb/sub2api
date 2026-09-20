@@ -13,7 +13,7 @@ import (
 )
 
 func TestOpenAICodexTurnStatePlanModelSettings(t *testing.T) {
-	settings := defaultOpenAICodexTurnStateScanSettings()
+	settings := scopedTurnStatePoolSettings(t)
 	for _, tc := range []struct {
 		plan, model string
 		lengths     []int
@@ -54,6 +54,24 @@ func TestOpenAICodexTurnStatePlanModelSettings(t *testing.T) {
 	require.Equal(t, "pro", OpenAICodexStatePlanType(imported), "explicit credentials outrank the import fallback")
 }
 
+func TestOpenAICodexTurnStateDefaultsRestore332Then292ForAllProAndTeamModels(t *testing.T) {
+	settings := defaultOpenAICodexTurnStateScanSettings()
+	require.Equal(t, []OpenAICodexTurnStateLengthRule{
+		{PlanType: "pro", Model: "*", TargetLengths: []int{332, 292}},
+		{PlanType: "team", Model: "*", TargetLengths: []int{332, 292}},
+	}, settings.Rules)
+	for _, plan := range []string{"pro", "pro20x", "prolite", "team", "business", "self_serve_business_prolite"} {
+		for _, model := range []string{"gpt-5.6-terra", "gpt-6-astra", "gpt-5.5"} {
+			lengths := settings.TargetLengthsFor(plan, model)
+			require.Equal(t, []int{332, 292}, lengths, "plan %s model %s", plan, model)
+		}
+	}
+	settings.Rules = append(settings.Rules, OpenAICodexTurnStateLengthRule{PlanType: "team", Model: "gpt-6-astra", TargetLengths: []int{273}})
+	require.Equal(t, []int{273}, settings.TargetLengthsFor("team", "gpt-6-astra"), "manual per-model overrides must remain supported")
+	require.Equal(t, []int{332, 292}, settings.TargetLengthsFor("team", "gpt-5.6-terra"))
+	require.Equal(t, []int{332, 292}, settings.TargetLengthsFor("pro", "gpt-6-astra"))
+}
+
 func TestOpenAICodexTurnStateRuleSettingsValidationAndLegacyDefaults(t *testing.T) {
 	for name, rule := range map[string]OpenAICodexTurnStateLengthRule{
 		"unknown plan":      {PlanType: "maybe-pro", Model: "*", TargetLengths: []int{292}},
@@ -77,7 +95,7 @@ func TestOpenAICodexTurnStateRuleSettingsValidationAndLegacyDefaults(t *testing.
 	require.NoError(t, json.Unmarshal([]byte(`{"target_lengths":[332,292],"parallel_probes":5}`), legacy))
 	validated, err := validateOpenAICodexTurnStateScanSettings(legacy)
 	require.NoError(t, err)
-	require.Equal(t, []int{292}, validated.TargetLengthsFor("pro", "gpt-5.5"))
+	require.Equal(t, []int{332, 292}, validated.TargetLengthsFor("pro", "gpt-5.5"))
 	legacy.Rules = []OpenAICodexTurnStateLengthRule{}
 	validated, err = validateOpenAICodexTurnStateScanSettings(legacy)
 	require.NoError(t, err)
@@ -103,6 +121,9 @@ func TestOpenAICodexTurnStateScannerUsesPlanModelRules(t *testing.T) {
 			repo := &turnStateRefreshScanRepo{scans: make(map[openAICodexTurnStateBucketKey]*OpenAICodexTurnStateScan)}
 			gateway := ticketTestService(t, config.OpenAICodexTicketConfig{Models: []string{tc.model}}, nil)
 			scanner := newOpenAICodexTurnStateScanner(repo, &turnStateRefreshAccountRepo{accounts: map[int64]*Account{41: account}}, gateway)
+			settings := scopedTurnStatePoolSettings(t)
+			scanner.settings.Store(settings)
+			gateway.getOpenAICodexTurnStatePool().setScanSettings(settings)
 			calls := 0
 			scanner.probe = func(context.Context, *Account, string, string) openAICodexTurnStateHarvestResult {
 				calls++
@@ -135,8 +156,11 @@ func TestOpenAICodexTurnStateManualScanLoadsPlanBeforeSkipping(t *testing.T) {
 	repo := &turnStateRefreshScanRepo{scans: make(map[openAICodexTurnStateBucketKey]*OpenAICodexTurnStateScan)}
 	gateway := ticketTestService(t, config.OpenAICodexTicketConfig{Models: []string{model}}, nil)
 	pool := gateway.getOpenAICodexTurnStatePool()
+	settings := scopedTurnStatePoolSettings(t)
+	pool.setScanSettings(settings)
 	pool.observe(testOpenAICodexTurnState(332, now, 'x'), &account.ID, "session", model, "http")
 	scanner := newOpenAICodexTurnStateScanner(repo, &turnStateRefreshAccountRepo{accounts: map[int64]*Account{41: account}}, gateway)
+	scanner.settings.Store(settings)
 	calls := 0
 	scanner.probe = func(context.Context, *Account, string, string) openAICodexTurnStateHarvestResult {
 		calls++

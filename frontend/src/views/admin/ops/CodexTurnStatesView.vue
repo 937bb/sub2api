@@ -1,6 +1,6 @@
 <template>
   <AppLayout>
-    <TablePageLayout>
+    <TablePageLayout class="codex-state-layout">
       <template #actions>
         <div class="space-y-5">
           <div class="flex flex-wrap items-start justify-between gap-4">
@@ -13,7 +13,7 @@
                 <p class="mt-1 text-sm text-gray-500 dark:text-dark-400">{{ t('admin.ops.turnState.description') }}</p>
               </div>
             </div>
-            <div class="flex items-center gap-2">
+            <div class="flex flex-wrap items-center gap-2">
               <div v-if="summary?.last_scan_at" class="hidden items-center gap-1.5 text-xs text-gray-400 xl:flex">
                 <Icon name="clock" size="xs" />
                 <span>{{ t('admin.ops.turnState.lastScan') }} {{ formatDateTime(summary.last_scan_at) }}</span>
@@ -34,6 +34,8 @@
               </button>
             </div>
           </div>
+
+          <CodexStateRulesPanel ref="stateRulesPanel" @saved="refresh" />
 
           <div class="grid overflow-hidden rounded-lg border border-gray-200 bg-white grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 dark:border-dark-700 dark:bg-dark-900">
             <div
@@ -142,7 +144,7 @@
             >
               <Icon name="refresh" size="sm" :class="scanningKeys.has(accountModelKey(row)) ? 'animate-spin' : ''" />
             </button>
-            <button type="button" class="whitespace-nowrap text-xs text-primary-600 hover:text-primary-700 dark:text-primary-400" data-test="edit-state-target" @click="openScanSettings(row)">{{ t('admin.ops.turnState.editTarget') }}</button>
+            <button type="button" class="whitespace-nowrap text-xs text-primary-600 hover:text-primary-700 dark:text-primary-400" data-test="edit-state-target" @click="editStateRule(row)">{{ t('admin.ops.turnState.editTarget') }}</button>
             </div>
           </template>
         </DataTable>
@@ -268,7 +270,7 @@
       </template>
     </BaseDialog>
 
-    <CodexScanSettingsDialog :show="showScanSettingsDialog" :selection="selectedStateRule" @close="showScanSettingsDialog = false" @saved="refresh" />
+    <CodexScanSettingsDialog :show="showScanSettingsDialog" @close="showScanSettingsDialog = false" @saved="onScanSettingsSaved" />
 
     <ConfirmDialog
       :show="showHistoryDeleteDialog"
@@ -296,6 +298,7 @@ import CodexStateStatus from '@/components/account/CodexStateStatus.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import CodexScanSettingsDialog from './components/CodexScanSettingsDialog.vue'
+import CodexStateRulesPanel from './components/CodexStateRulesPanel.vue'
 import { useAppStore } from '@/stores/app'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { formatDateTime } from '@/utils/format'
@@ -305,7 +308,6 @@ import {
   type CodexTurnStateOperationsSummary,
   type CodexTurnStateProxy,
   type CodexTurnStateRecord,
-  type CodexTurnStateLengthRule,
   type CodexTurnStateStatus
 } from '@/api/admin/ops'
 import type { Column } from '@/components/common/types'
@@ -335,13 +337,16 @@ const showHistoryDeleteDialog = ref(false)
 const pendingHistoryDeleteIDs = ref<number[]>([])
 const showProxyDialog = ref(false)
 const showScanSettingsDialog = ref(false)
-const selectedStateRule = ref<CodexTurnStateLengthRule | null>(null)
+const stateRulesPanel = ref<InstanceType<typeof CodexStateRulesPanel> | null>(null)
 const proxyValues = ref('')
 
-function openScanSettings(row?: CodexTurnStateAccountStatus) {
-  selectedStateRule.value = row ? { plan_type: row.plan_type || '*', model: row.model, target_lengths: row.target_lengths ?? [] } : null
+function openScanSettings() {
   showScanSettingsDialog.value = true
 }
+function editStateRule(row: CodexTurnStateAccountStatus) {
+  void stateRulesPanel.value?.editRule({ plan_type: row.plan_type || '*', model: row.model, target_lengths: row.target_lengths ?? [] })
+}
+function onScanSettingsSaved() { void stateRulesPanel.value?.load(); void refresh() }
 
 const tabs = computed(() => [
   { value: 'accounts' as Tab, label: t('admin.ops.turnState.tabs.accounts'), icon: 'users' as const },
@@ -523,3 +528,23 @@ onMounted(() => {
 })
 onUnmounted(() => { if (clock !== null) window.clearInterval(clock) })
 </script>
+
+<style scoped>
+.codex-state-layout {
+  height: auto;
+  min-height: calc(100vh - 128px);
+}
+.codex-state-layout :deep(.layout-section-scrollable) {
+  flex: none;
+  min-height: 320px;
+}
+.codex-state-layout :deep(.table-scroll-container) {
+  max-height: 65vh;
+  min-height: 320px;
+}
+@media (max-width: 1023px) {
+  .codex-state-layout :deep(.table-scroll-container) {
+    max-height: none;
+  }
+}
+</style>

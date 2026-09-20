@@ -3,8 +3,8 @@ import { flushPromises, mount } from '@vue/test-utils'
 import CodexTurnStatesView from '../../CodexTurnStatesView.vue'
 import type { CodexTurnStateAccountStatus } from '@/api/admin/ops'
 
-const { listAccounts, scanAccount, listProxies, listHistory, getSummary } = vi.hoisted(() => ({
-  listAccounts: vi.fn(), scanAccount: vi.fn(), listProxies: vi.fn(), listHistory: vi.fn(), getSummary: vi.fn()
+const { listAccounts, scanAccount, listProxies, listHistory, getSummary, getSettings } = vi.hoisted(() => ({
+  listAccounts: vi.fn(), scanAccount: vi.fn(), listProxies: vi.fn(), listHistory: vi.fn(), getSummary: vi.fn(), getSettings: vi.fn()
 }))
 
 vi.mock('@/api/admin/ops', () => ({ opsAPI: {
@@ -12,7 +12,8 @@ vi.mock('@/api/admin/ops', () => ({ opsAPI: {
   scanCodexTurnState: scanAccount,
   listCodexTurnStateProxies: listProxies,
   listCodexTurnStates: listHistory,
-  getCodexTurnStateOperationsSummary: getSummary
+  getCodexTurnStateOperationsSummary: getSummary,
+  getCodexTurnStateScanSettings: getSettings
 } }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showSuccess: vi.fn(), showError: vi.fn() }) }))
 vi.mock('@/components/layout/AppLayout.vue', () => ({ default: { template: '<main><slot /></main>' } }))
@@ -45,6 +46,7 @@ describe('CodexTurnStatesView rules', () => {
     listProxies.mockResolvedValue([])
     listHistory.mockResolvedValue(page([]))
     scanAccount.mockResolvedValue({ queued: true })
+    getSettings.mockResolvedValue({ target_lengths: [332, 292], rules: [{ plan_type: 'pro', model: '*', target_lengths: [332, 292] }, { plan_type: 'team', model: '*', target_lengths: [332, 292] }], parallel_probes: 5, dynamic_proxy_enabled: false, dynamic_proxy_url: '' })
   })
   afterEach(() => { vi.useRealTimers() })
 
@@ -53,8 +55,10 @@ describe('CodexTurnStatesView rules', () => {
     await flushPromises()
     expect(wrapper.get('[data-account="1"]').text()).toContain('286')
     await wrapper.get('[data-account="1"] [data-test="edit-state-target"]').trigger('click')
-    expect(wrapper.get('[data-test="settings-dialog"]').text()).toContain('gpt-5.6-terra')
-    expect(wrapper.get('[data-test="settings-dialog"]').text()).toContain('286')
+    await flushPromises()
+    expect(wrapper.find('[data-test="settings-dialog"]').exists()).toBe(false)
+    expect(wrapper.findAll<HTMLInputElement>('[data-test="inline-rule-model"]')[0].element.value).toBe('gpt-5.6-terra')
+    expect(wrapper.findAll<HTMLInputElement>('[data-test="inline-rule-lengths"]')[0].element.value).toBe('286')
     expect(scanAccount).not.toHaveBeenCalled()
     wrapper.unmount()
   })
@@ -66,6 +70,7 @@ describe('CodexTurnStatesView rules', () => {
       await tab.trigger('click')
       await flushPromises()
       expect(wrapper.get('[data-test="state-scan-settings"]').exists()).toBe(true)
+      expect(wrapper.get('[data-test="state-rules-panel"]').exists()).toBe(true)
     }
     wrapper.unmount()
   })
