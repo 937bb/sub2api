@@ -155,8 +155,9 @@ func (r *opsRepository) UpsertOpenAICodexTurnStateScan(ctx context.Context, scan
 INSERT INTO codex_turn_state_scans (
   account_id, model, status, attempt_count, last_proxy_id, last_proxy_url, last_state_length,
   last_error, last_attempt_at, last_success_at, next_attempt_at
-) SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11
-WHERE $12 = '' OR EXISTS (
+) SELECT $1::bigint,$2::varchar(255),$3::varchar(20),$4::integer,$5::bigint,
+         $6::text,$7::integer,$8::text,$9::timestamptz,$10::timestamptz,$11::timestamptz
+WHERE $12::text = '' OR EXISTS (
   SELECT 1 FROM codex_turn_state_scans owned
   WHERE owned.account_id = $1 AND owned.model = $2
     AND owned.lease_id = $12 AND owned.lease_until > NOW()

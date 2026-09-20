@@ -35,6 +35,10 @@ State values never move between accounts or models.
 
 - Run affected service, repository, handler, routing and migration tests.
 - Run the state concurrency/race tests, Go vet and an embedded backend build.
+- Set `SUB2API_STATE_TEST_DSN` to an isolated PostgreSQL database and run
+  `go test ./internal/repository -run '^TestCodexTurnStateScanPostgresBinding$'`.
+  This checks real parameter inference and lease fencing using temporary tables;
+  mocks cannot detect PostgreSQL's VARCHAR/TEXT inference conflicts.
 - Run frontend i18n, type checking, tests, lint and production build.
 - Start the new image on a separate port and verify health, login HTML, actual
   JS/CSS assets, admin settings persistence and a bounded API request.
