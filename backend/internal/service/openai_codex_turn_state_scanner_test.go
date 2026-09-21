@@ -4,13 +4,31 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"net/netip"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/chatgptrelay"
 	"github.com/stretchr/testify/require"
 )
+
+func TestRandomOpenAICodexRouteIPv6sAreUniqueAndInsidePrefix(t *testing.T) {
+	prefix := netip.MustParsePrefix("2a02:ae02:1a:2c00::/64")
+	values, err := randomOpenAICodexRouteIPv6s(prefix, 5)
+	require.NoError(t, err)
+	require.Len(t, values, 5)
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		addr := netip.MustParseAddr(value)
+		require.True(t, prefix.Contains(addr))
+		require.NotEqual(t, prefix.Addr(), addr)
+		_, exists := seen[value]
+		require.False(t, exists)
+		seen[value] = struct{}{}
+	}
+}
 
 type codexTurnStateHarvestCaptureUpstream struct {
 	HTTPUpstream
@@ -464,4 +482,25 @@ func TestHarvestOpenAICodexTurnStateReturnsSecondVerifiedState(t *testing.T) {
 	require.NotEmpty(t, result.sessionID)
 	require.Equal(t, result.sessionID, upstream.requests[0].Header.Get("session-id"))
 	require.Equal(t, result.sessionID, upstream.requests[1].Header.Get("session-id"))
+}
+
+func TestHarvestOpenAICodexTurnStateKeepsIPv6AcrossReplay(t *testing.T) {
+	now := time.Now().UTC().Add(-time.Minute).Truncate(time.Second)
+	firstState := testOpenAICodexTurnState(332, now, 'a')
+	secondState := testOpenAICodexTurnState(332, now, 'b')
+	upstream := &codexTurnStateHarvestCaptureUpstream{responses: []*http.Response{
+		codexTurnStateHarvestResponse(firstState, "gpt-6-astra"),
+		codexTurnStateHarvestResponse(secondState, "gpt-6-astra"),
+	}}
+	svc := ticketTestService(t, config.OpenAICodexTicketConfig{}, upstream)
+	ctx := chatgptrelay.WithSourceIPv6(context.Background(), "2a02:ae02:1a:2c00::1234")
+
+	result := svc.harvestOpenAICodexTurnState(ctx, ticketTestAccount(42), "gpt-6-astra", "")
+
+	require.Empty(t, result.errorMessage)
+	require.Equal(t, "2a02:ae02:1a:2c00::1234", result.routeIPv6)
+	require.Len(t, upstream.requests, 2)
+	for _, request := range upstream.requests {
+		require.Equal(t, result.routeIPv6, chatgptrelay.SourceIPv6FromContext(request.Context()))
+	}
 }

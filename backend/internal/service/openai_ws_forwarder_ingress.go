@@ -845,6 +845,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	}
 	applyCodexNormalizedRequestIdentityHeaders(c, account, wsHeaders, firstPayload.payloadRaw)
 	applyStagedCodexFingerprintHeaders(c, account, wsHeaders)
+	proxyURL, routeIPv6 := s.openAICodexTurnStateRoute(account, wsHeaders, account.SelectOpenAIOutboundProxyURL())
 	baseAcquireReq := openAIWSAcquireRequest{
 		Account: account,
 		WSURL:   wsURL,
@@ -852,7 +853,8 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		HeadersFactory: func(factoryCtx context.Context, headers http.Header) (http.Header, error) {
 			return s.refreshOpenAIAgentIdentityHeaders(factoryCtx, account, headers)
 		},
-		ProxyURL:     s.openAICodexTurnStateRouteProxyURL(account, wsHeaders, account.SelectOpenAIOutboundProxyURL()),
+		ProxyURL:     proxyURL,
+		SourceIPv6:   routeIPv6,
 		ForceNewConn: false,
 	}
 	pool := s.getOpenAIWSConnPool()

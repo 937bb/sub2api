@@ -1,13 +1,42 @@
 package chatgptrelay
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"errors"
+	"io"
 	"net"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
+
+func TestSourceIPv6PrefaceRoundTrip(t *testing.T) {
+	var payload bytes.Buffer
+	require.NoError(t, WriteSourceIPv6Preface(&payload, "2a02:ae02:1a:2c00::1234"))
+	payload.WriteString("tls-client-hello")
+
+	reader := bufio.NewReader(&payload)
+	addr, found, err := ReadSourceIPv6Preface(reader)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, "2a02:ae02:1a:2c00::1234", addr.String())
+	remainder, err := io.ReadAll(reader)
+	require.NoError(t, err)
+	require.Equal(t, "tls-client-hello", string(remainder))
+}
+
+func TestSourceIPv6PrefaceLeavesLegacyTLSBuffered(t *testing.T) {
+	legacy := []byte{0x16, 0x03, 0x01, 0x00, 0x20, 0x01, 0x02, 0x03}
+	reader := bufio.NewReader(bytes.NewReader(legacy))
+	_, found, err := ReadSourceIPv6Preface(reader)
+	require.NoError(t, err)
+	require.False(t, found)
+	remainder, err := io.ReadAll(reader)
+	require.NoError(t, err)
+	require.Equal(t, legacy, remainder)
+}
 
 func TestWrapRedirectsOnlyChatGPTTLS(t *testing.T) {
 	var gotNetwork string

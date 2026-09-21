@@ -238,6 +238,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	acquireCtx, acquireCancel := context.WithTimeout(ctx, s.openAIWSAcquireTimeout())
 	defer acquireCancel()
 
+	proxyURL, routeIPv6 := s.openAICodexTurnStateRoute(account, wsHeaders, account.SelectOpenAIOutboundProxyURL())
 	lease, err := s.getOpenAIWSConnPool().Acquire(acquireCtx, openAIWSAcquireRequest{
 		Account: account,
 		WSURL:   wsURL,
@@ -247,7 +248,8 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		},
 		PreferredConnID: preferredConnID,
 		ForceNewConn:    forceNewConn,
-		ProxyURL:        s.openAICodexTurnStateRouteProxyURL(account, wsHeaders, account.SelectOpenAIOutboundProxyURL()),
+		ProxyURL:        proxyURL,
+		SourceIPv6:      routeIPv6,
 	})
 	if err != nil {
 		var agentDialErr *openAIWSDialError

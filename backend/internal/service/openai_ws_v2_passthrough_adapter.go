@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/chatgptrelay"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	openaiwsv2 "github.com/Wei-Shaw/sub2api/internal/service/openai_ws_v2"
@@ -887,7 +888,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	}
 	applyCodexNormalizedRequestIdentityHeaders(c, account, headers, firstClientMessage)
 	applyStagedCodexFingerprintHeaders(c, account, headers)
-	proxyURL := s.openAICodexTurnStateRouteProxyURL(account, headers, account.SelectOpenAIOutboundProxyURL())
+	proxyURL, routeIPv6 := s.openAICodexTurnStateRoute(account, headers, account.SelectOpenAIOutboundProxyURL())
 
 	dialer := s.getOpenAIWSPassthroughDialer()
 	if dialer == nil {
@@ -904,6 +905,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			return fmt.Errorf("refresh ws authentication headers: %w", err)
 		}
 		dialCtx, cancelDial := context.WithTimeout(ctx, s.openAIWSDialTimeout())
+		if routeIPv6 != "" {
+			dialCtx = chatgptrelay.WithSourceIPv6(dialCtx, routeIPv6)
+		}
 		upstreamConn, statusCode, handshakeHeaders, err = dialer.Dial(dialCtx, wsURL, headers, proxyURL)
 		cancelDial()
 		if err == nil {

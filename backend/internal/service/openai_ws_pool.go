@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/chatgptrelay"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -76,6 +77,7 @@ type openAIWSAcquireRequest struct {
 	// lastAcquire or delayed prewarm state.
 	HeadersFactory  func(context.Context, http.Header) (http.Header, error)
 	ProxyURL        string
+	SourceIPv6      string
 	PreferredConnID string
 	// ForceNewConn: 强制本次获取新连接（避免复用导致连接内续链状态互相污染）。
 	ForceNewConn bool
@@ -85,6 +87,7 @@ type openAIWSAcquireRequest struct {
 
 type openAIWSHandshakeCompatibilityKey struct {
 	proxyURL            string
+	sourceIPv6          string
 	betaFeatures        string
 	codexUserAgent      string
 	codexOriginator     string
@@ -1155,6 +1158,7 @@ retryAcquire:
 	accountID := req.Account.ID
 	compatibility := normalizeOpenAIWSHandshakeCompatibility(req.Account, req.Headers)
 	compatibility.proxyURL = stringsTrim(req.ProxyURL)
+	compatibility.sourceIPv6 = normalizeOpenAICodexRouteIPv6(req.SourceIPv6)
 	routingAffinity := normalizeOpenAIWSRoutingAffinity(req.Headers)
 	effectiveMaxConns := p.effectiveMaxConnsByAccount(req.Account)
 	if effectiveMaxConns <= 0 {
@@ -2152,7 +2156,11 @@ func (p *openAIWSConnPool) dialConn(ctx context.Context, req openAIWSAcquireRequ
 	// dialing. Normalize once more at the actual wire boundary so no legacy
 	// aliases can be reintroduced after pool compatibility was calculated.
 	normalizeCodexWebSocketTransportHeaders(headers, req.Account)
-	conn, status, handshakeHeaders, err := p.clientDialer.Dial(ctx, req.WSURL, headers, req.ProxyURL)
+	dialCtx := ctx
+	if sourceIPv6 := normalizeOpenAICodexRouteIPv6(req.SourceIPv6); sourceIPv6 != "" {
+		dialCtx = chatgptrelay.WithSourceIPv6(dialCtx, sourceIPv6)
+	}
+	conn, status, handshakeHeaders, err := p.clientDialer.Dial(dialCtx, req.WSURL, headers, req.ProxyURL)
 	if err != nil {
 		var handshakeErr *openAIWSHandshakeError
 		var responseBody []byte
@@ -2180,6 +2188,7 @@ func (p *openAIWSConnPool) dialConn(ctx context.Context, req openAIWSAcquireRequ
 	pooledConn.onPeerClosed.Store(&evict)
 	pooledConn.handshakeCompatibility = normalizeOpenAIWSHandshakeCompatibility(req.Account, req.Headers)
 	pooledConn.handshakeCompatibility.proxyURL = stringsTrim(req.ProxyURL)
+	pooledConn.handshakeCompatibility.sourceIPv6 = normalizeOpenAICodexRouteIPv6(req.SourceIPv6)
 	pooledConn.routingAffinity = normalizeOpenAIWSRoutingAffinity(req.Headers)
 	return pooledConn, nil
 }
@@ -2345,6 +2354,7 @@ func cloneOpenAIWSAcquireRequest(req openAIWSAcquireRequest) openAIWSAcquireRequ
 	copied.Headers = cloneHeader(req.Headers)
 	copied.WSURL = stringsTrim(req.WSURL)
 	copied.ProxyURL = stringsTrim(req.ProxyURL)
+	copied.SourceIPv6 = normalizeOpenAICodexRouteIPv6(req.SourceIPv6)
 	copied.PreferredConnID = stringsTrim(req.PreferredConnID)
 	return copied
 }
@@ -2360,6 +2370,7 @@ func cloneOpenAIWSAcquireRequestPtr(req *openAIWSAcquireRequest) *openAIWSAcquir
 func sameOpenAIWSPrewarmTarget(a, b openAIWSAcquireRequest) bool {
 	return stringsTrim(a.WSURL) == stringsTrim(b.WSURL) &&
 		stringsTrim(a.ProxyURL) == stringsTrim(b.ProxyURL) &&
+		normalizeOpenAICodexRouteIPv6(a.SourceIPv6) == normalizeOpenAICodexRouteIPv6(b.SourceIPv6) &&
 		normalizeOpenAIWSHandshakeCompatibility(a.Account, a.Headers) == normalizeOpenAIWSHandshakeCompatibility(b.Account, b.Headers)
 }
 

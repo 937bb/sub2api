@@ -4,11 +4,13 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"sort"
 	"strconv"
@@ -19,6 +21,8 @@ import (
 
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/chatgptrelay"
 )
 
 const (
@@ -49,6 +53,7 @@ type openAICodexTurnStateHarvestResult struct {
 	upstreamOK    bool
 	statusCode    int
 	errorMessage  string
+	routeIPv6     string
 }
 
 type openAICodexTurnStateScanner struct {
@@ -434,12 +439,21 @@ func (s *openAICodexTurnStateScanner) runJob(ctx context.Context, job openAICode
 	}
 
 	settings := s.scanSettings().forAccountModel(account, upstreamModel)
-	proxies, proxyErr := s.scanProxies(ctx, account.ID, upstreamModel, scan.AttemptCount, settings)
 	var results []openAICodexTurnStateProbe
-	if proxyErr != nil {
-		results = []openAICodexTurnStateProbe{{result: openAICodexTurnStateHarvestResult{errorMessage: proxyErr.Error()}}}
+	if prefix, bindingEnabled := s.gateway.openAIChatGPTIPv6BindingPrefix(); bindingEnabled {
+		routeIPv6s, routeErr := randomOpenAICodexRouteIPv6s(prefix, min(max(settings.ParallelProbes, 1), openAICodexTurnStateScanFanoutLimit))
+		if routeErr != nil {
+			results = []openAICodexTurnStateProbe{{result: openAICodexTurnStateHarvestResult{errorMessage: routeErr.Error()}}}
+		} else {
+			results = s.probeWithIPv6Fanout(ctx, account, upstreamModel, routeIPv6s, settings)
+		}
 	} else {
-		results = s.probeWithBoundedFanout(ctx, account, upstreamModel, proxies, settings)
+		proxies, proxyErr := s.scanProxies(ctx, account.ID, upstreamModel, scan.AttemptCount, settings)
+		if proxyErr != nil {
+			results = []openAICodexTurnStateProbe{{result: openAICodexTurnStateHarvestResult{errorMessage: proxyErr.Error()}}}
+		} else {
+			results = s.probeWithBoundedFanout(ctx, account, upstreamModel, proxies, settings)
+		}
 	}
 	// A setting can change during a job. Do not mark a result reusable under
 	// a policy which has already been replaced by the administrator.
@@ -480,7 +494,7 @@ func (s *openAICodexTurnStateScanner) runJob(ctx context.Context, job openAICode
 		return
 	}
 	if failure == "" {
-		ticket := openAICodexTurnStateRouteTicketForProxy(result.sessionID, proxy)
+		ticket := openAICodexTurnStateRouteTicketForProxy(result.sessionID, proxy, result.routeIPv6)
 		if err := pool.observeDurably(persistCtx, result.stateValue, account.ID, hashOpenAICodexTurnState(result.sessionID), upstreamModel, "scanner", ticket); err != nil {
 			log.WithError(err).WithFields(log.Fields{"account_id": account.ID, "model": upstreamModel}).Warn("failed to persist acquired Codex turn-state")
 			scan.Status = "retry_wait"
@@ -498,8 +512,11 @@ func (s *openAICodexTurnStateScanner) runJob(ctx context.Context, job openAICode
 	}
 }
 
-func openAICodexTurnStateRouteTicketForProxy(sessionID string, proxy *OpenAICodexTurnStateProxy) openAICodexTurnStateRouteTicket {
+func openAICodexTurnStateRouteTicketForProxy(sessionID string, proxy *OpenAICodexTurnStateProxy, routeIPv6 ...string) openAICodexTurnStateRouteTicket {
 	ticket := openAICodexTurnStateRouteTicket{SessionID: sessionID}
+	if len(routeIPv6) > 0 {
+		ticket.RouteIPv6 = normalizeOpenAICodexRouteIPv6(routeIPv6[0])
+	}
 	if proxy == nil {
 		return ticket
 	}
@@ -520,15 +537,16 @@ type openAICodexTurnStateProbe struct {
 	result openAICodexTurnStateHarvestResult
 }
 
+type openAICodexTurnStateProbeTarget struct {
+	proxy     *OpenAICodexTurnStateProxy
+	routeIPv6 string
+}
+
 // probeWithBoundedFanout starts the bounded batch immediately. Results are
 // checked for the requested model and freshness before cancelling siblings.
 func (s *openAICodexTurnStateScanner) probeWithBoundedFanout(ctx context.Context, account *Account, model string, proxies []*OpenAICodexTurnStateProxy, settings *OpenAICodexTurnStateScanSettings) []openAICodexTurnStateProbe {
-	probeFunc := s.probe
-	if probeFunc == nil {
-		probeFunc = s.gateway.harvestOpenAICodexTurnState
-	}
 	if len(proxies) == 0 {
-		return []openAICodexTurnStateProbe{{result: probeFunc(ctx, account, model, "")}}
+		return s.probeTargetsWithBoundedFanout(ctx, account, model, []openAICodexTurnStateProbeTarget{{}}, settings)
 	}
 	if settings == nil {
 		settings = s.scanSettings().forAccountModel(account, model)
@@ -538,22 +556,56 @@ func (s *openAICodexTurnStateScanner) probeWithBoundedFanout(ctx context.Context
 	if len(proxies) > limit {
 		proxies = proxies[:limit]
 	}
+	targets := make([]openAICodexTurnStateProbeTarget, 0, len(proxies))
+	for _, proxy := range proxies {
+		targets = append(targets, openAICodexTurnStateProbeTarget{proxy: proxy})
+	}
+	return s.probeTargetsWithBoundedFanout(ctx, account, model, targets, settings)
+}
+
+func (s *openAICodexTurnStateScanner) probeWithIPv6Fanout(ctx context.Context, account *Account, model string, routeIPv6s []string, settings *OpenAICodexTurnStateScanSettings) []openAICodexTurnStateProbe {
+	targets := make([]openAICodexTurnStateProbeTarget, 0, len(routeIPv6s))
+	for _, routeIPv6 := range routeIPv6s {
+		targets = append(targets, openAICodexTurnStateProbeTarget{routeIPv6: routeIPv6})
+	}
+	return s.probeTargetsWithBoundedFanout(ctx, account, model, targets, settings)
+}
+
+func (s *openAICodexTurnStateScanner) probeTargetsWithBoundedFanout(ctx context.Context, account *Account, model string, targets []openAICodexTurnStateProbeTarget, settings *OpenAICodexTurnStateScanSettings) []openAICodexTurnStateProbe {
+	probeFunc := s.probe
+	if probeFunc == nil {
+		probeFunc = s.gateway.harvestOpenAICodexTurnState
+	}
+	if len(targets) == 0 {
+		return nil
+	}
 	probeCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	results := make(chan openAICodexTurnStateProbe, len(proxies))
-	probes := make([]openAICodexTurnStateProbe, 0, len(proxies))
+	results := make(chan openAICodexTurnStateProbe, len(targets))
+	probes := make([]openAICodexTurnStateProbe, 0, len(targets))
 	var wait sync.WaitGroup
-	for _, proxy := range proxies {
-		proxy := proxy
+	for _, target := range targets {
+		target := target
 		wait.Add(1)
 		go func() {
 			defer wait.Done()
-			result := probeFunc(probeCtx, account, model, proxy.ProxyURL)
+			targetCtx := probeCtx
+			proxyURL := ""
+			if target.proxy != nil {
+				proxyURL = target.proxy.ProxyURL
+			}
+			if target.routeIPv6 != "" {
+				targetCtx = chatgptrelay.WithSourceIPv6(targetCtx, target.routeIPv6)
+			}
+			result := probeFunc(targetCtx, account, model, proxyURL)
+			if result.routeIPv6 == "" {
+				result.routeIPv6 = normalizeOpenAICodexRouteIPv6(target.routeIPv6)
+			}
 			// A sibling winner or shutdown is not a failed proxy health check.
 			if probeCtx.Err() == nil {
-				s.updateProxyHealth(ctx, proxy, result)
+				s.updateProxyHealth(ctx, target.proxy, result)
 			}
-			results <- openAICodexTurnStateProbe{proxy: proxy, result: result}
+			results <- openAICodexTurnStateProbe{proxy: target.proxy, result: result}
 		}()
 	}
 	go func() {
@@ -568,6 +620,48 @@ func (s *openAICodexTurnStateScanner) probeWithBoundedFanout(ctx context.Context
 		}
 	}
 	return probes
+}
+
+func (s *OpenAIGatewayService) openAIChatGPTIPv6BindingPrefix() (netip.Prefix, bool) {
+	if s == nil || s.cfg == nil || !s.cfg.Gateway.OpenAIChatGPTIPv6Only {
+		return netip.Prefix{}, false
+	}
+	prefix, err := netip.ParsePrefix(strings.TrimSpace(s.cfg.Gateway.OpenAIChatGPTIPv6Prefix))
+	if err != nil || !prefix.Addr().Is6() || prefix.Addr().Is4In6() || prefix.Bits() != 64 {
+		return netip.Prefix{}, false
+	}
+	return prefix.Masked(), true
+}
+
+func randomOpenAICodexRouteIPv6s(prefix netip.Prefix, count int) ([]string, error) {
+	prefix = prefix.Masked()
+	if !prefix.Addr().Is6() || prefix.Addr().Is4In6() || prefix.Bits() != 64 {
+		return nil, fmt.Errorf("Codex route prefix must be an IPv6 /64")
+	}
+	if count < 1 {
+		count = 1
+	}
+	result := make([]string, 0, count)
+	seen := make(map[netip.Addr]struct{}, count)
+	base := prefix.Addr().As16()
+	for len(result) < count {
+		var host [8]byte
+		if _, err := rand.Read(host[:]); err != nil {
+			return nil, fmt.Errorf("generate Codex route IPv6: %w", err)
+		}
+		raw := base
+		copy(raw[8:], host[:])
+		addr := netip.AddrFrom16(raw)
+		if addr == prefix.Addr() {
+			continue
+		}
+		if _, exists := seen[addr]; exists {
+			continue
+		}
+		seen[addr] = struct{}{}
+		result = append(result, addr.String())
+	}
+	return result, nil
 }
 
 func isOpenAICodexTurnStateAuthFailure(result openAICodexTurnStateHarvestResult) bool {
@@ -825,7 +919,7 @@ func (s *openAICodexTurnStateScanner) updateProxyHealth(ctx context.Context, pro
 }
 
 func (s *OpenAIGatewayService) harvestOpenAICodexTurnState(ctx context.Context, account *Account, model, proxyURL string) openAICodexTurnStateHarvestResult {
-	result := openAICodexTurnStateHarvestResult{}
+	result := openAICodexTurnStateHarvestResult{routeIPv6: chatgptrelay.SourceIPv6FromContext(ctx)}
 	if s == nil || account == nil || !account.IsOpenAIOAuthLike() {
 		result.errorMessage = "account does not use the Codex OAuth protocol"
 		return result
@@ -883,7 +977,7 @@ func openAICodexTurnStateReplayFailure(requested string, result openAICodexTurnS
 }
 
 func (s *OpenAIGatewayService) requestOpenAICodexTurnState(ctx context.Context, account *Account, token, model, proxyURL, sessionID, state string) openAICodexTurnStateHarvestResult {
-	result := openAICodexTurnStateHarvestResult{upstreamModel: model, sessionID: sessionID}
+	result := openAICodexTurnStateHarvestResult{upstreamModel: model, sessionID: sessionID, routeIPv6: chatgptrelay.SourceIPv6FromContext(ctx)}
 	threadID := scopeCodexAccountIdentityValue(account, 0, "thread", uuid.NewString())
 	body := []byte(fmt.Sprintf(`{"model":%s,"stream":true,"store":false,"instructions":"Reply with exactly: pong","input":[{"role":"user","content":[{"type":"input_text","text":"ping"}]}],"client_metadata":{"session_id":%s,"thread_id":%s}}`,
 		strconv.Quote(model), strconv.Quote(sessionID), strconv.Quote(threadID)))

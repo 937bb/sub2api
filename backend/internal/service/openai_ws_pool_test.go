@@ -2737,3 +2737,18 @@ func TestOpenAIWSConnPool_SnapshotTransportMetrics(t *testing.T) {
 	require.Equal(t, int64(2), snapshot.ProxyClientCacheMisses)
 	require.InDelta(t, 1.0/3.0, snapshot.TransportReuseRatio, 0.0001)
 }
+
+func TestSameOpenAIWSPrewarmTargetSeparatesRouteIPv6(t *testing.T) {
+	account := &Account{ID: 42, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	base := openAIWSAcquireRequest{
+		Account:    account,
+		WSURL:      "wss://chatgpt.com/backend-api/codex/responses",
+		Headers:    http.Header{"originator": []string{"codex_cli_rs"}},
+		SourceIPv6: "2a02:ae02:1a:2c00::1",
+	}
+	other := cloneOpenAIWSAcquireRequest(base)
+	other.SourceIPv6 = "2a02:ae02:1a:2c00::2"
+
+	require.False(t, sameOpenAIWSPrewarmTarget(base, other))
+	require.True(t, sameOpenAIWSPrewarmTarget(base, cloneOpenAIWSAcquireRequest(base)))
+}

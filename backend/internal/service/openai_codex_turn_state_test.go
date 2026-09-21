@@ -336,6 +336,30 @@ func TestOpenAICodexTurnStateRouteProxyRequiresExactActiveOwnerTicket(t *testing
 	require.Equal(t, "http://fallback.example:8080", svc.openAICodexTurnStateRouteProxyURL(oauth, header, "http://fallback.example:8080"))
 }
 
+func TestOpenAICodexTurnStateRouteIPv6OverridesFallbackProxy(t *testing.T) {
+	now := time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)
+	svc := &OpenAIGatewayService{}
+	pool := svc.getOpenAICodexTurnStatePool()
+	pool.now = func() time.Time { return now }
+	accountID := int64(42)
+	state := testOpenAICodexTurnState(332, now, 'v')
+	require.NoError(t, pool.observeDurably(
+		context.Background(), state, accountID, "session-hash", "gpt-6-astra", "scanner",
+		openAICodexTurnStateRouteTicket{
+			SessionID: "harvest-session",
+			ProxyURL:  "http://must-not-win.example:8080",
+			RouteIPv6: "2a02:ae02:1a:2c00::1234",
+		},
+	))
+	header := http.Header{}
+	header.Set(openAICodexTurnStateHeader, state)
+	account := &Account{ID: accountID, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+
+	proxyURL, routeIPv6 := svc.openAICodexTurnStateRoute(account, header, "http://fallback.example:8080")
+	require.Empty(t, proxyURL)
+	require.Equal(t, "2a02:ae02:1a:2c00::1234", routeIPv6)
+}
+
 func TestOpenAICodexTurnStateObserveDurablyRejectsInvalidStateWithoutPanic(t *testing.T) {
 	pool := newOpenAICodexTurnStatePool()
 	require.Error(t, pool.observeDurably(

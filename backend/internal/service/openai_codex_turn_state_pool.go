@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math"
+	"net/netip"
 	"reflect"
 	"slices"
 	"strconv"
@@ -41,6 +42,7 @@ type OpenAICodexTurnStateRecord struct {
 	SourceProxyID     *int64    `json:"source_proxy_id,omitempty"`
 	SourceProxyURL    string    `json:"-"`
 	SourceExitIP      string    `json:"source_exit_ip,omitempty"`
+	RouteIPv6         string    `json:"route_ipv6,omitempty"`
 	SourceModel       string    `json:"source_model,omitempty"`
 	SourceTransport   string    `json:"source_transport"`
 	IssuedAt          time.Time `json:"issued_at,omitempty"`
@@ -76,6 +78,7 @@ type openAICodexTurnStateRouteTicket struct {
 	ProxyID   *int64
 	ProxyURL  string
 	ExitIP    string
+	RouteIPv6 string
 }
 
 type OpenAICodexTurnStateStore interface {
@@ -299,6 +302,7 @@ func (p *openAICodexTurnStatePool) observeDurably(ctx context.Context, value str
 		record.SourceProxyID = cloneInt64Pointer(ticket[0].ProxyID)
 		record.SourceProxyURL = strings.TrimSpace(ticket[0].ProxyURL)
 		record.SourceExitIP = strings.TrimSpace(ticket[0].ExitIP)
+		record.RouteIPv6 = strings.TrimSpace(ticket[0].RouteIPv6)
 	}
 	p.mu.RLock()
 	repo := p.repo
@@ -386,12 +390,17 @@ func (p *openAICodexTurnStatePool) preferredRecordForBucket(accountID int64, mod
 }
 
 func (p *openAICodexTurnStatePool) routeProxyForState(accountID int64, state string) (string, bool) {
+	proxyURL, _, ok := p.routeForState(accountID, state)
+	return proxyURL, ok && proxyURL != ""
+}
+
+func (p *openAICodexTurnStatePool) routeForState(accountID int64, state string) (string, string, bool) {
 	if p == nil || accountID <= 0 {
-		return "", false
+		return "", "", false
 	}
 	state = strings.TrimSpace(state)
 	if state == "" {
-		return "", false
+		return "", "", false
 	}
 	now := p.now()
 	p.mu.RLock()
@@ -404,12 +413,23 @@ func (p *openAICodexTurnStatePool) routeProxyForState(accountID int64, state str
 			if record.StateValue != state || !p.isReusableRecordLocked(record, key, now) {
 				continue
 			}
+			if routeIPv6 := normalizeOpenAICodexRouteIPv6(record.RouteIPv6); routeIPv6 != "" {
+				return "", routeIPv6, true
+			}
 			if proxyURL := strings.TrimSpace(record.SourceProxyURL); proxyURL != "" {
-				return proxyURL, true
+				return proxyURL, "", true
 			}
 		}
 	}
-	return "", false
+	return "", "", false
+}
+
+func normalizeOpenAICodexRouteIPv6(value string) string {
+	addr, err := netip.ParseAddr(strings.TrimSpace(value))
+	if err != nil || !addr.Is6() || addr.Is4In6() || addr.IsUnspecified() {
+		return ""
+	}
+	return addr.String()
 }
 
 func (p *openAICodexTurnStatePool) preferredExpiryForBucket(accountID int64, model string) (time.Time, bool) {

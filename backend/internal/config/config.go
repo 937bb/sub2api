@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"math"
 	"net"
+	"net/netip"
 	"net/textproto"
 	"net/url"
 	"os"
@@ -1010,6 +1011,9 @@ type GatewayConfig struct {
 	OpenAIChatGPTIPv6Only bool `mapstructure:"openai_chatgpt_ipv6_only"`
 	// OpenAIChatGPTIPv6RelayAddr is the local TCP relay address, for example 127.0.0.1:24443.
 	OpenAIChatGPTIPv6RelayAddr string `mapstructure:"openai_chatgpt_ipv6_relay_addr"`
+	// OpenAIChatGPTIPv6Prefix enables account/model/state route binding when set
+	// to the same routed /64 used by the local relay.
+	OpenAIChatGPTIPv6Prefix string `mapstructure:"openai_chatgpt_ipv6_prefix"`
 	// OpenAICodexTicket: ChatGPT OAuth 账号按 (账号, 模型) 捕获 292 长度
 	// x-codex-turn-state，并在住宅 IP 业务请求中注入该头。默认关闭。
 	OpenAICodexTicket OpenAICodexTicketConfig `mapstructure:"openai_codex_ticket"`
@@ -2408,6 +2412,7 @@ func setDefaults() {
 	viper.SetDefault("gateway.openai_compact_model", "gpt-5.5")
 	viper.SetDefault("gateway.openai_chatgpt_ipv6_only", false)
 	viper.SetDefault("gateway.openai_chatgpt_ipv6_relay_addr", "")
+	viper.SetDefault("gateway.openai_chatgpt_ipv6_prefix", "")
 	viper.SetDefault("gateway.openai_codex_ticket.enabled", false)
 	viper.SetDefault("gateway.openai_codex_ticket.target_length", 292)
 	viper.SetDefault("gateway.openai_codex_ticket.ttl_seconds", 3600)
@@ -3331,6 +3336,7 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("gateway.openai_response_header_timeout must be non-negative")
 	}
 	c.Gateway.OpenAIChatGPTIPv6RelayAddr = strings.TrimSpace(c.Gateway.OpenAIChatGPTIPv6RelayAddr)
+	c.Gateway.OpenAIChatGPTIPv6Prefix = strings.TrimSpace(c.Gateway.OpenAIChatGPTIPv6Prefix)
 	if c.Gateway.OpenAIChatGPTIPv6Only {
 		if c.Gateway.OpenAIChatGPTIPv6RelayAddr == "" {
 			return fmt.Errorf("gateway.openai_chatgpt_ipv6_relay_addr is required when gateway.openai_chatgpt_ipv6_only is enabled")
@@ -3338,6 +3344,15 @@ func (c *Config) Validate() error {
 		if _, _, err := net.SplitHostPort(c.Gateway.OpenAIChatGPTIPv6RelayAddr); err != nil {
 			return fmt.Errorf("gateway.openai_chatgpt_ipv6_relay_addr must be a valid host:port: %w", err)
 		}
+		if c.Gateway.OpenAIChatGPTIPv6Prefix != "" {
+			prefix, err := netip.ParsePrefix(c.Gateway.OpenAIChatGPTIPv6Prefix)
+			if err != nil || !prefix.Addr().Is6() || prefix.Addr().Is4In6() || prefix.Bits() != 64 {
+				return fmt.Errorf("gateway.openai_chatgpt_ipv6_prefix must be a valid IPv6 /64")
+			}
+			c.Gateway.OpenAIChatGPTIPv6Prefix = prefix.Masked().String()
+		}
+	} else if c.Gateway.OpenAIChatGPTIPv6Prefix != "" {
+		return fmt.Errorf("gateway.openai_chatgpt_ipv6_only must be enabled when gateway.openai_chatgpt_ipv6_prefix is configured")
 	}
 	if c.Gateway.GrokResponseHeaderTimeout < 0 || c.Gateway.GrokResponseHeaderTimeout > 1800 {
 		return fmt.Errorf("gateway.grok_response_header_timeout must be between 0-1800 seconds")

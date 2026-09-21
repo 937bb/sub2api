@@ -678,6 +678,23 @@ func (s *HTTPUpstreamSuite) TestOpenAIProfileTLSFingerprintDoesNotInheritGeneric
 	require.Equal(s.T(), time.Duration(0), transport.ResponseHeaderTimeout, "OpenAI TLS path should not inherit generic header timeout")
 }
 
+func (s *HTTPUpstreamSuite) TestOpenAIRouteIPv6UsesIndependentConnectionPools() {
+	s.cfg.Gateway = config.GatewayConfig{
+		OpenAIChatGPTIPv6Only:      true,
+		OpenAIChatGPTIPv6RelayAddr: "127.0.0.1:24443",
+	}
+	svc := s.newService()
+	first, err := svc.getClientEntryForRoute("", 42, 5, service.HTTPUpstreamProfileOpenAI, false, false, "2a02:ae02:1a:2c00::1")
+	require.NoError(s.T(), err)
+	second, err := svc.getClientEntryForRoute("", 42, 5, service.HTTPUpstreamProfileOpenAI, false, false, "2a02:ae02:1a:2c00::2")
+	require.NoError(s.T(), err)
+	firstAgain, err := svc.getClientEntryForRoute("", 42, 5, service.HTTPUpstreamProfileOpenAI, false, false, "2a02:ae02:1a:2c00::1")
+	require.NoError(s.T(), err)
+
+	require.NotSame(s.T(), first, second)
+	require.Same(s.T(), first, firstAgain)
+}
+
 func (s *HTTPUpstreamSuite) TestOpenAIProfileHTTP2DisabledUsesHTTP1Transport() {
 	s.cfg.Gateway = config.GatewayConfig{
 		OpenAIHTTP2: config.GatewayOpenAIHTTP2Config{Enabled: false},

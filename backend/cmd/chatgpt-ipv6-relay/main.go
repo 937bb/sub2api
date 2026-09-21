@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"crypto/rand"
 	"encoding/json"
@@ -18,13 +19,16 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/chatgptrelay"
 )
 
 const (
-	defaultListenAddr  = "127.0.0.1:24443"
-	defaultHealthAddr  = "127.0.0.1:24444"
-	defaultTargetAddr  = "chatgpt.com:443"
-	defaultDialTimeout = 10 * time.Second
+	defaultListenAddr     = "127.0.0.1:24443"
+	defaultHealthAddr     = "127.0.0.1:24444"
+	defaultTargetAddr     = "chatgpt.com:443"
+	defaultDialTimeout    = 10 * time.Second
+	defaultPrefaceTimeout = 5 * time.Second
 )
 
 type relayConfig struct {
@@ -169,8 +173,22 @@ func (s *relayServer) handleConn(downstream net.Conn) {
 	}()
 	defer s.stats.active.Add(-1)
 
-	sourceAddr, err := randomIPv6(s.cfg.Prefix, rand.Reader)
+	reader := bufio.NewReader(downstream)
+	_ = downstream.SetReadDeadline(time.Now().Add(defaultPrefaceTimeout))
+	sourceAddr, requested, err := chatgptrelay.ReadSourceIPv6Preface(reader)
+	_ = downstream.SetReadDeadline(time.Time{})
 	if err != nil {
+		s.stats.failed.Add(1)
+		slog.Warn("read source IPv6 preface", "error", err)
+		return
+	}
+	if requested {
+		if !validRequestedSourceIPv6(s.cfg.Prefix, sourceAddr) {
+			s.stats.failed.Add(1)
+			slog.Warn("rejected source IPv6 outside relay prefix", "source_ipv6", sourceAddr.String())
+			return
+		}
+	} else if sourceAddr, err = randomIPv6(s.cfg.Prefix, rand.Reader); err != nil {
 		s.stats.failed.Add(1)
 		slog.Error("generate source address", "error", err)
 		return
@@ -196,13 +214,13 @@ func (s *relayServer) handleConn(downstream net.Conn) {
 		}
 	}()
 
-	proxyBidirectional(downstream, upstream)
+	proxyBidirectional(downstream, reader, upstream)
 }
 
-func proxyBidirectional(left, right net.Conn) {
+func proxyBidirectional(left net.Conn, leftReader io.Reader, right net.Conn) {
 	var wg sync.WaitGroup
 	wg.Add(2)
-	copyConn := func(dst, src net.Conn) {
+	copyConn := func(dst net.Conn, src io.Reader) {
 		defer wg.Done()
 		_, _ = io.Copy(dst, src)
 		if tcp, ok := dst.(*net.TCPConn); ok {
@@ -210,8 +228,14 @@ func proxyBidirectional(left, right net.Conn) {
 		}
 	}
 	go copyConn(left, right)
-	go copyConn(right, left)
+	go copyConn(right, leftReader)
 	wg.Wait()
+}
+
+func validRequestedSourceIPv6(prefix netip.Prefix, addr netip.Addr) bool {
+	prefix = prefix.Masked()
+	return prefix.Bits() == 64 && prefix.Addr().Is6() && !prefix.Addr().Is4In6() &&
+		addr.Is6() && !addr.Is4In6() && prefix.Contains(addr) && addr != prefix.Addr()
 }
 
 func randomIPv6(prefix netip.Prefix, reader io.Reader) (netip.Addr, error) {

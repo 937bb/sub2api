@@ -20,3 +20,12 @@ func TestRandomIPv6RejectsNon64Prefix(t *testing.T) {
 	_, err := randomIPv6(netip.MustParsePrefix("2a02:ae02:1a:2c00::/56"), bytes.NewReader(make([]byte, 8)))
 	require.Error(t, err)
 }
+
+func TestValidRequestedSourceIPv6RejectsOutsidePrefixAndNetworkAddress(t *testing.T) {
+	prefix := netip.MustParsePrefix("2a02:ae02:1a:2c00::/64")
+
+	require.True(t, validRequestedSourceIPv6(prefix, netip.MustParseAddr("2a02:ae02:1a:2c00::1234")))
+	require.False(t, validRequestedSourceIPv6(prefix, netip.MustParseAddr("2a02:ae02:1a:2c01::1234")))
+	require.False(t, validRequestedSourceIPv6(prefix, netip.MustParseAddr("2a02:ae02:1a:2c00::")))
+	require.False(t, validRequestedSourceIPv6(prefix, netip.MustParseAddr("192.0.2.1")))
+}

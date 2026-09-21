@@ -237,6 +237,7 @@
                 <span aria-hidden="true">/</span>
                 <span>{{ row.source_model || '-' }}</span>
               </div>
+              <div v-if="row.route_ipv6" class="mt-1 max-w-64 truncate font-mono text-[11px] text-cyan-600 dark:text-cyan-400" :title="row.route_ipv6">IPv6 {{ row.route_ipv6 }}</div>
             </div>
           </template>
           <template #cell-last_seen_at="{ value }"><span class="whitespace-nowrap text-sm">{{ formatDateTime(value) }}</span></template>

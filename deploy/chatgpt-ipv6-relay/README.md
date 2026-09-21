@@ -1,8 +1,11 @@
 # ChatGPT IPv6 Relay
 
 This optional TCP relay routes only direct `chatgpt.com:443` connections over
-random source addresses from a server-routed IPv6 `/64`. TLS is passed through
-unchanged, so Sub2API still validates the original ChatGPT certificate and SNI.
+source addresses from a server-routed IPv6 `/64`. New Sub2API instances can
+request a fixed source address for an account/model/turn-state route ticket;
+legacy clients continue receiving a random address per TCP connection. TLS is
+passed through unchanged, so Sub2API still validates the original ChatGPT
+certificate and SNI.
 
 ## Requirements
 
@@ -27,7 +30,11 @@ Then enable the Sub2API route:
 ```bash
 GATEWAY_OPENAI_CHATGPT_IPV6_ONLY=true
 GATEWAY_OPENAI_CHATGPT_IPV6_RELAY_ADDR=127.0.0.1:24443
+GATEWAY_OPENAI_CHATGPT_IPV6_PREFIX=2a02:ae02:1a:2c00::/64
 ```
 
-Accounts with an explicit HTTP, HTTPS, or SOCKS proxy continue to use that
-proxy. `api.openai.com` and all non-ChatGPT hosts bypass this relay.
+Without a scanner-verified route ticket, accounts with an explicit HTTP,
+HTTPS, or SOCKS proxy continue to use that proxy. A verified turn-state with a
+bound IPv6 takes precedence over the account proxy so its HTTP and WebSocket
+connections keep the same server IPv6 for the state lifetime. `api.openai.com`
+and all non-ChatGPT hosts bypass this relay.

@@ -192,18 +192,28 @@ func (s *OpenAIGatewayService) guardOpenAICodexTurnStateEcho(c *gin.Context, acc
 }
 
 func (s *OpenAIGatewayService) openAICodexTurnStateRouteProxyURL(account *Account, h http.Header, fallback string) string {
+	proxyURL, _ := s.openAICodexTurnStateRoute(account, h, fallback)
+	return proxyURL
+}
+
+func (s *OpenAIGatewayService) openAICodexTurnStateRoute(account *Account, h http.Header, fallback string) (string, string) {
 	if s == nil || account == nil || h == nil || !account.UsesOpenAICodexProtocol() {
-		return fallback
+		return fallback, ""
 	}
 	accountID := account.ID
 	if account.ParentAccountID != nil && *account.ParentAccountID > 0 {
 		accountID = *account.ParentAccountID
 	}
 	state := strings.TrimSpace(h.Get(openAICodexTurnStateHeader))
-	if proxyURL, ok := s.getOpenAICodexTurnStatePool().routeProxyForState(accountID, state); ok {
-		return proxyURL
+	if proxyURL, routeIPv6, ok := s.getOpenAICodexTurnStatePool().routeForState(accountID, state); ok {
+		if routeIPv6 != "" {
+			return "", routeIPv6
+		}
+		if proxyURL != "" {
+			return proxyURL, ""
+		}
 	}
-	return fallback
+	return fallback, ""
 }
 
 func (s *OpenAIGatewayService) noteOpenAICodexTurnStateProvenance(c *gin.Context, account *Account) {

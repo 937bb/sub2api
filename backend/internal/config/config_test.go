@@ -665,11 +665,23 @@ func TestLoadOpenAIChatGPTIPv6RelayFromEnv(t *testing.T) {
 	resetViperWithJWTSecret(t)
 	t.Setenv("GATEWAY_OPENAI_CHATGPT_IPV6_ONLY", "true")
 	t.Setenv("GATEWAY_OPENAI_CHATGPT_IPV6_RELAY_ADDR", "127.0.0.1:24443")
+	t.Setenv("GATEWAY_OPENAI_CHATGPT_IPV6_PREFIX", "2a02:ae02:1a:2c00:ffff::/64")
 
 	cfg, err := Load()
 	require.NoError(t, err)
 	require.True(t, cfg.Gateway.OpenAIChatGPTIPv6Only)
 	require.Equal(t, "127.0.0.1:24443", cfg.Gateway.OpenAIChatGPTIPv6RelayAddr)
+	require.Equal(t, "2a02:ae02:1a:2c00::/64", cfg.Gateway.OpenAIChatGPTIPv6Prefix)
+}
+
+func TestLoadOpenAIChatGPTIPv6BindingRejectsNon64Prefix(t *testing.T) {
+	resetViperWithJWTSecret(t)
+	t.Setenv("GATEWAY_OPENAI_CHATGPT_IPV6_ONLY", "true")
+	t.Setenv("GATEWAY_OPENAI_CHATGPT_IPV6_RELAY_ADDR", "127.0.0.1:24443")
+	t.Setenv("GATEWAY_OPENAI_CHATGPT_IPV6_PREFIX", "2a02:ae02:1a::/48")
+
+	_, err := Load()
+	require.ErrorContains(t, err, "gateway.openai_chatgpt_ipv6_prefix must be a valid IPv6 /64")
 }
 
 func TestLoadOpenAIChatGPTIPv6RelayRequiresAddress(t *testing.T) {

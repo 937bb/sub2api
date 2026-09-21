@@ -86,6 +86,7 @@ export interface CodexTurnStateRecord {
   source_account_id?: number | null
   source_account_name?: string
   source_session_hash?: string
+  route_ipv6?: string
   source_model?: string
   source_transport: 'http' | 'ws' | 'passthrough' | string
   issued_at?: string

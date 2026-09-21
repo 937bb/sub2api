@@ -1,6 +1,10 @@
 package service
 
-import "net/http"
+import (
+	"net/http"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/chatgptrelay"
+)
 
 func (s *OpenAIGatewayService) SetPluginManager(manager *PluginManager) {
 	s.pluginManager = manager
@@ -11,7 +15,11 @@ func (s *OpenAIGatewayService) SetPluginManager(manager *PluginManager) {
 // and billing remain in the core pipeline.
 func (s *OpenAIGatewayService) doOpenAIUpstream(request *http.Request, proxyURL string, account *Account) (*http.Response, error) {
 	normalizeCodexResponsesTransportHeaders(request, account)
-	proxyURL = s.openAICodexTurnStateRouteProxyURL(account, request.Header, proxyURL)
+	var routeIPv6 string
+	proxyURL, routeIPv6 = s.openAICodexTurnStateRoute(account, request.Header, proxyURL)
+	if routeIPv6 != "" {
+		request = request.WithContext(chatgptrelay.WithSourceIPv6(request.Context(), routeIPv6))
+	}
 	profile, err := resolveMode1TLSProfile(account)
 	if err != nil {
 		return nil, err
@@ -39,7 +47,11 @@ func (s *AccountTestService) doOpenAIAccountTestUpstream(
 ) (*http.Response, error) {
 	normalizeCodexResponsesTransportHeaders(request, account)
 	if s.openaiGatewayService != nil {
-		proxyURL = s.openaiGatewayService.openAICodexTurnStateRouteProxyURL(account, request.Header, proxyURL)
+		var routeIPv6 string
+		proxyURL, routeIPv6 = s.openaiGatewayService.openAICodexTurnStateRoute(account, request.Header, proxyURL)
+		if routeIPv6 != "" {
+			request = request.WithContext(chatgptrelay.WithSourceIPv6(request.Context(), routeIPv6))
+		}
 	}
 	profile, err := resolveMode1TLSProfile(account)
 	if err != nil {

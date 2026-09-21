@@ -13,8 +13,9 @@ type DialContext func(ctx context.Context, network, address string) (net.Conn, e
 
 // Settings controls the optional local TCP relay used for direct ChatGPT traffic.
 type Settings struct {
-	Enabled   bool
-	RelayAddr string
+	Enabled    bool
+	RelayAddr  string
+	SourceIPv6 string
 }
 
 // Wrap redirects only direct chatgpt.com:443 TCP dials to the configured relay.
@@ -25,7 +26,19 @@ func Wrap(base DialContext, settings Settings) DialContext {
 	relayAddr := strings.TrimSpace(settings.RelayAddr)
 	return func(ctx context.Context, network, address string) (net.Conn, error) {
 		if IsTarget(network, address) {
-			return base(ctx, network, relayAddr)
+			sourceIPv6 := strings.TrimSpace(settings.SourceIPv6)
+			if sourceIPv6 == "" {
+				sourceIPv6 = SourceIPv6FromContext(ctx)
+			}
+			conn, err := base(ctx, network, relayAddr)
+			if err != nil || sourceIPv6 == "" {
+				return conn, err
+			}
+			if err := WriteSourceIPv6Preface(conn, sourceIPv6); err != nil {
+				_ = conn.Close()
+				return nil, err
+			}
+			return conn, nil
 		}
 		return base(ctx, network, address)
 	}
