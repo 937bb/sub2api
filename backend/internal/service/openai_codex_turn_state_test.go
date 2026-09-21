@@ -360,6 +360,35 @@ func TestOpenAICodexTurnStateRouteIPv6OverridesFallbackProxy(t *testing.T) {
 	require.Equal(t, "2a02:ae02:1a:2c00::1234", routeIPv6)
 }
 
+func TestDoOpenAIUpstreamUsesDynamicRouteBoundToState(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	upstream := &codexTurnStateHarvestCaptureUpstream{responses: []*http.Response{{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{},
+		Body:       http.NoBody,
+	}}}
+	svc := ticketTestService(t, config.OpenAICodexTicketConfig{}, upstream)
+	pool := svc.getOpenAICodexTurnStatePool()
+	pool.now = func() time.Time { return now }
+	account := ticketTestAccount(42)
+	state := testOpenAICodexTurnState(openAICodexTurnStateLength332, now, 'r')
+	require.NoError(t, pool.observeDurably(
+		context.Background(), state, account.ID, "session-hash", "gpt-6-astra", "scanner",
+		openAICodexTurnStateRouteTicket{
+			SessionID: "harvest-session",
+			ProxyURL:  "http://dynamic.example:8080",
+			ExpiresAt: now.Add(openAICodexDynamicRouteTTL),
+		},
+	))
+
+	req := httptest.NewRequest(http.MethodPost, chatgptCodexURL, nil)
+	req.Header.Set(openAICodexTurnStateHeader, state)
+	resp, err := svc.doOpenAIUpstream(req, "http://fallback.example:8080", account)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Equal(t, []string{"http://dynamic.example:8080"}, upstream.proxies)
+}
+
 func TestOpenAICodexTurnStateObserveDurablyRejectsInvalidStateWithoutPanic(t *testing.T) {
 	pool := newOpenAICodexTurnStatePool()
 	require.Error(t, pool.observeDurably(

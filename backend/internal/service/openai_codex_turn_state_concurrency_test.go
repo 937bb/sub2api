@@ -259,3 +259,32 @@ func TestCodexStateHarvestTransportCanDialBatchWithoutChangingAccountLimit(t *te
 	require.True(t, upstream.close)
 	require.Equal(t, before, account.Mode1EffectiveConcurrency())
 }
+
+func TestCodexStateWorkspaceLockSerializesTeamMembers(t *testing.T) {
+	scanner := &openAICodexTurnStateScanner{}
+	first := ticketTestAccount(41)
+	second := ticketTestAccount(42)
+	first.Credentials["chatgpt_account_id"] = "workspace-1"
+	second.Credentials["chatgpt_account_id"] = "workspace-1"
+
+	unlockFirst := scanner.lockWorkspace(first)
+	acquiredSecond := make(chan func(), 1)
+	go func() {
+		acquiredSecond <- scanner.lockWorkspace(second)
+	}()
+
+	select {
+	case unlockSecond := <-acquiredSecond:
+		unlockSecond()
+		t.Fatal("a second Team member acquired the same workspace lock")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	unlockFirst()
+	select {
+	case unlockSecond := <-acquiredSecond:
+		unlockSecond()
+	case <-time.After(time.Second):
+		t.Fatal("the second Team member did not acquire the released workspace lock")
+	}
+}

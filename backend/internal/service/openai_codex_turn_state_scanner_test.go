@@ -47,7 +47,9 @@ func (u *codexTurnStateHarvestCaptureUpstream) Do(req *http.Request, proxyURL st
 
 func codexTurnStateHarvestResponse(state, model string) *http.Response {
 	header := http.Header{}
-	header.Set(openAICodexTurnStateHeader, state)
+	if state != "" {
+		header.Set(openAICodexTurnStateHeader, state)
+	}
 	header.Set("OpenAI-Model", model)
 	return &http.Response{StatusCode: http.StatusOK, Header: header, Body: io.NopCloser(strings.NewReader(""))}
 }
@@ -124,12 +126,12 @@ func TestSortOpenAICodexTurnStateScanProxiesUsesStableIdentity(t *testing.T) {
 	}, []string{proxies[0].ProxyURL, proxies[1].ProxyURL, proxies[2].ProxyURL, proxies[3].ProxyURL})
 }
 
-func TestOpenAICodexTurnStateRetryDelayCapsAtThirtySeconds(t *testing.T) {
+func TestOpenAICodexTurnStateRetryDelayCapsAtFiveMinutes(t *testing.T) {
 	require.Equal(t, 5*time.Second, openAICodexTurnStateRetryDelay(1))
 	require.Equal(t, 10*time.Second, openAICodexTurnStateRetryDelay(2))
-	require.Equal(t, 30*time.Second, openAICodexTurnStateRetryDelay(4))
-	require.Equal(t, 30*time.Second, openAICodexTurnStateRetryDelay(7))
-	require.Equal(t, 30*time.Second, openAICodexTurnStateRetryDelay(100))
+	require.Equal(t, 40*time.Second, openAICodexTurnStateRetryDelay(4))
+	require.Equal(t, 5*time.Minute, openAICodexTurnStateRetryDelay(7))
+	require.Equal(t, 5*time.Minute, openAICodexTurnStateRetryDelay(100))
 }
 
 func TestIsRecentlyUsedOpenAICodexAccount(t *testing.T) {
@@ -223,6 +225,16 @@ func TestStrictRouteBindingStillRejectsIneligibleDemandJob(t *testing.T) {
 	} {
 		require.False(t, shouldRunOpenAICodexTurnStateScanJob(account, job, settings, now))
 	}
+}
+
+func TestOpenAICodexTurnStateDynamicProxyTakesPrecedenceOverIPv6(t *testing.T) {
+	settings := defaultOpenAICodexTurnStateScanSettings()
+	settings.DynamicProxyEnabled = true
+	require.Equal(t, openAICodexTurnStateScanRouteDynamicProxy, selectOpenAICodexTurnStateScanRoute(settings, true))
+
+	settings.DynamicProxyEnabled = false
+	require.Equal(t, openAICodexTurnStateScanRouteIPv6, selectOpenAICodexTurnStateScanRoute(settings, true))
+	require.Equal(t, openAICodexTurnStateScanRouteProxy, selectOpenAICodexTurnStateScanRoute(settings, false))
 }
 
 func TestOpenAICodexTurnStateScannerDeduplicatesAccountModelJobs(t *testing.T) {
@@ -460,7 +472,7 @@ func TestOpenAICodexTurnStateScannerPersistsActualSessionAndModelScope(t *testin
 	require.False(t, otherModel)
 }
 
-func TestOpenAICodexTurnStateRouteTicketBindsOnlyExplicitStaticProxy(t *testing.T) {
+func TestOpenAICodexTurnStateRouteTicketBindsVerifiedDynamicOrExplicitStaticProxy(t *testing.T) {
 	for _, testCase := range []struct {
 		name      string
 		proxy     *OpenAICodexTurnStateProxy
@@ -468,7 +480,7 @@ func TestOpenAICodexTurnStateRouteTicketBindsOnlyExplicitStaticProxy(t *testing.
 		wantID    bool
 	}{
 		{name: "direct"},
-		{name: "dynamic", proxy: &OpenAICodexTurnStateProxy{Source: "dynamic", ProxyURL: "http://dynamic.example:8080"}},
+		{name: "dynamic", proxy: &OpenAICodexTurnStateProxy{Source: "dynamic", ProxyURL: "http://dynamic.example:8080"}, wantProxy: "http://dynamic.example:8080"},
 		{name: "shared", proxy: &OpenAICodexTurnStateProxy{Source: "shared", SourceID: 7, ProxyURL: "http://shared.example:8080"}},
 		{name: "scan only", proxy: &OpenAICodexTurnStateProxy{ID: 8, Source: "state", ProxyURL: "http://scan.example:8080"}, wantID: true},
 		{name: "static binding", proxy: &OpenAICodexTurnStateProxy{ID: 9, Source: "state", ProxyURL: "http://static.example:8080", RouteBindingEnabled: true}, wantProxy: "http://static.example:8080", wantID: true},
@@ -478,8 +490,38 @@ func TestOpenAICodexTurnStateRouteTicketBindsOnlyExplicitStaticProxy(t *testing.
 			require.Equal(t, "harvest-session", ticket.SessionID)
 			require.Equal(t, testCase.wantProxy, ticket.ProxyURL)
 			require.Equal(t, testCase.wantID, ticket.ProxyID != nil)
+			if testCase.name == "dynamic" {
+				require.WithinDuration(t, time.Now().Add(openAICodexDynamicRouteTTL), ticket.ExpiresAt, time.Second)
+			} else {
+				require.True(t, ticket.ExpiresAt.IsZero())
+			}
 		})
 	}
+}
+
+func TestOpenAICodexTurnStateDynamicRouteCapsRecordLifetime(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	pool := newOpenAICodexTurnStatePool()
+	pool.now = func() time.Time { return now }
+	accountID := int64(42)
+	state := testOpenAICodexTurnState(openAICodexTurnStateLength332, now, 'd')
+	routeExpiry := now.Add(openAICodexDynamicRouteTTL)
+
+	require.NoError(t, pool.observeDurably(
+		context.Background(), state, accountID, "session-hash", "gpt-6-astra", "scanner",
+		openAICodexTurnStateRouteTicket{
+			SessionID: "harvest-session",
+			ProxyURL:  "http://dynamic.example:8080",
+			ExpiresAt: routeExpiry,
+		},
+	))
+	record, ok := pool.preferredRecordForBucket(accountID, "gpt-6-astra")
+	require.True(t, ok)
+	require.Equal(t, routeExpiry, record.ExpiresAt)
+
+	now = routeExpiry.Add(time.Second)
+	_, ok = pool.preferredRecordForBucket(accountID, "gpt-6-astra")
+	require.False(t, ok)
 }
 
 func TestHarvestOpenAICodexTurnStateRejectsReplayDowngrade(t *testing.T) {
@@ -521,6 +563,26 @@ func TestHarvestOpenAICodexTurnStateReturnsSecondVerifiedState(t *testing.T) {
 	require.NotEmpty(t, result.sessionID)
 	require.Equal(t, result.sessionID, upstream.requests[0].Header.Get("session-id"))
 	require.Equal(t, result.sessionID, upstream.requests[1].Header.Get("session-id"))
+}
+
+func TestHarvestOpenAICodexTurnStateAcceptsReplayModelConfirmationWithoutNewState(t *testing.T) {
+	now := time.Now().UTC().Add(-time.Minute).Truncate(time.Second)
+	firstState := testOpenAICodexTurnState(332, now, 'a')
+	upstream := &codexTurnStateHarvestCaptureUpstream{responses: []*http.Response{
+		codexTurnStateHarvestResponse(firstState, "gpt-6-astra"),
+		codexTurnStateHarvestResponse("", "gpt-6-astra"),
+	}}
+	svc := ticketTestService(t, config.OpenAICodexTicketConfig{}, upstream)
+
+	result := svc.harvestOpenAICodexTurnState(context.Background(), ticketTestAccount(42), "gpt-6-astra", "http://proxy.example:8080")
+
+	require.Empty(t, result.errorMessage)
+	require.Equal(t, firstState, result.stateValue)
+	require.Equal(t, "gpt-6-astra", result.officialModel)
+	require.NotEmpty(t, result.sessionID)
+	require.Equal(t, result.sessionID, upstream.requests[0].Header.Get("session-id"))
+	require.Equal(t, result.sessionID, upstream.requests[1].Header.Get("session-id"))
+	require.Equal(t, firstState, upstream.requests[1].Header.Get(openAICodexTurnStateHeader))
 }
 
 func TestHarvestOpenAICodexTurnStateKeepsIPv6AcrossReplay(t *testing.T) {

@@ -33,7 +33,9 @@ const (
 	openAICodexTurnStateScanJobTimeout    = 75 * time.Second
 	openAICodexTurnStateScanSweepInterval = 30 * time.Second
 	openAICodexTurnStateScanRefreshBefore = 15 * time.Minute
-	openAICodexTurnStateScanRetryMax      = 30 * time.Second
+	openAICodexTurnStateScanRetryMax      = 5 * time.Minute
+	openAICodexDynamicRouteTTL            = 4 * time.Minute
+	openAICodexDynamicRouteRefreshBefore  = time.Minute
 	openAICodexTurnStateActiveUsageWindow = time.Hour
 	openAICodexTurnStateScanMaxErrorBytes = 240
 )
@@ -56,6 +58,14 @@ type openAICodexTurnStateHarvestResult struct {
 	routeIPv6     string
 }
 
+type openAICodexTurnStateScanRoute uint8
+
+const (
+	openAICodexTurnStateScanRouteProxy openAICodexTurnStateScanRoute = iota
+	openAICodexTurnStateScanRouteIPv6
+	openAICodexTurnStateScanRouteDynamicProxy
+)
+
 type openAICodexTurnStateScanner struct {
 	repo        OpenAICodexTurnStateScannerRepository
 	accountRepo AccountRepository
@@ -67,8 +77,11 @@ type openAICodexTurnStateScanner struct {
 
 	mu       sync.Mutex
 	inFlight map[openAICodexTurnStateBucketKey]struct{}
-	cancel   context.CancelFunc
-	done     chan struct{}
+	// workspaceLocks prevent different local OAuth members of one Team
+	// workspace from probing several models at the same time.
+	workspaceLocks sync.Map
+	cancel         context.CancelFunc
+	done           chan struct{}
 }
 
 func (s *openAICodexTurnStateScanner) scanSettings() *OpenAICodexTurnStateScanSettings {
@@ -255,7 +268,47 @@ func (s *openAICodexTurnStateScanner) stateNeedsRefresh(accountID int64, model s
 	if s == nil || s.gateway == nil {
 		return true
 	}
-	return !s.gateway.getOpenAICodexTurnStatePool().hasReusableStateBeyond(accountID, model, now.Add(openAICodexTurnStateScanRefreshBefore))
+	pool := s.gateway.getOpenAICodexTurnStatePool()
+	if record, ok := pool.preferredRecordForBucket(accountID, model); ok && isOpenAICodexDynamicRouteRecord(record) {
+		return !record.ExpiresAt.After(now.Add(openAICodexDynamicRouteRefreshBefore))
+	}
+	return !pool.hasReusableStateBeyond(accountID, model, now.Add(openAICodexTurnStateScanRefreshBefore))
+}
+
+func isOpenAICodexDynamicRouteRecord(record *OpenAICodexTurnStateRecord) bool {
+	return record != nil && strings.TrimSpace(record.SourceProxyURL) != "" && record.SourceProxyID == nil &&
+		normalizeOpenAICodexRouteIPv6(record.RouteIPv6) == ""
+}
+
+func openAICodexTurnStateWorkspaceKey(account *Account) string {
+	if account == nil {
+		return ""
+	}
+	if workspaceID := strings.TrimSpace(account.GetChatGPTAccountID()); workspaceID != "" {
+		return "workspace:" + workspaceID
+	}
+	return "account:" + strconv.FormatInt(account.ID, 10)
+}
+
+func (s *openAICodexTurnStateScanner) lockWorkspace(account *Account) func() {
+	if s == nil {
+		return func() {}
+	}
+	key := openAICodexTurnStateWorkspaceKey(account)
+	lock, _ := s.workspaceLocks.LoadOrStore(key, &sync.Mutex{})
+	workspaceLock := lock.(*sync.Mutex)
+	workspaceLock.Lock()
+	return workspaceLock.Unlock
+}
+
+func selectOpenAICodexTurnStateScanRoute(settings *OpenAICodexTurnStateScanSettings, ipv6BindingEnabled bool) openAICodexTurnStateScanRoute {
+	if settings != nil && settings.DynamicProxyEnabled {
+		return openAICodexTurnStateScanRouteDynamicProxy
+	}
+	if ipv6BindingEnabled {
+		return openAICodexTurnStateScanRouteIPv6
+	}
+	return openAICodexTurnStateScanRouteProxy
 }
 
 func (s *openAICodexTurnStateScanner) enqueueAccount(ctx context.Context, account *Account, force bool, usedSince time.Time) (int, []string) {
@@ -402,6 +455,8 @@ func (s *openAICodexTurnStateScanner) runJob(ctx context.Context, job openAICode
 	if upstreamModel == "" {
 		return
 	}
+	unlockWorkspace := s.lockWorkspace(account)
+	defer unlockWorkspace()
 	pool := s.gateway.getOpenAICodexTurnStatePool()
 	pool.setAccountPlan(account.ID, plan)
 	if !job.force && !s.stateNeedsRefresh(account.ID, upstreamModel, now) {
@@ -468,14 +523,23 @@ func (s *openAICodexTurnStateScanner) runJob(ctx context.Context, job openAICode
 
 	settings := s.scanSettings().forAccountModel(account, upstreamModel)
 	var results []openAICodexTurnStateProbe
-	if prefix, bindingEnabled := s.gateway.openAIChatGPTIPv6BindingPrefix(); bindingEnabled {
+	prefix, ipv6BindingEnabled := s.gateway.openAIChatGPTIPv6BindingPrefix()
+	switch selectOpenAICodexTurnStateScanRoute(settings, ipv6BindingEnabled) {
+	case openAICodexTurnStateScanRouteDynamicProxy:
+		proxies, proxyErr := s.scanProxies(ctx, account.ID, upstreamModel, scan.AttemptCount, settings)
+		if proxyErr != nil {
+			results = []openAICodexTurnStateProbe{{result: openAICodexTurnStateHarvestResult{errorMessage: proxyErr.Error()}}}
+		} else {
+			results = s.probeWithBoundedFanout(ctx, account, upstreamModel, proxies, settings)
+		}
+	case openAICodexTurnStateScanRouteIPv6:
 		routeIPv6s, routeErr := randomOpenAICodexRouteIPv6s(prefix, min(max(settings.ParallelProbes, 1), openAICodexTurnStateScanFanoutLimit))
 		if routeErr != nil {
 			results = []openAICodexTurnStateProbe{{result: openAICodexTurnStateHarvestResult{errorMessage: routeErr.Error()}}}
 		} else {
 			results = s.probeWithIPv6Fanout(ctx, account, upstreamModel, routeIPv6s, settings)
 		}
-	} else {
+	default:
 		proxies, proxyErr := s.scanProxies(ctx, account.ID, upstreamModel, scan.AttemptCount, settings)
 		if proxyErr != nil {
 			results = []openAICodexTurnStateProbe{{result: openAICodexTurnStateHarvestResult{errorMessage: proxyErr.Error()}}}
@@ -506,6 +570,9 @@ func (s *openAICodexTurnStateScanner) runJob(ctx context.Context, job openAICode
 		// Receiving the same state again does not renew its issuance timestamp.
 		issuedAt, _ := parseOpenAICodexTurnStateIssuedAt(result.stateValue)
 		next := issuedAt.Add(openAICodexTurnStateTTL - openAICodexTurnStateScanRefreshBefore)
+		if proxy != nil && proxy.Source == "dynamic" {
+			next = doneAt.Add(openAICodexDynamicRouteTTL - openAICodexDynamicRouteRefreshBefore)
+		}
 		scan.NextAttemptAt = &next
 	} else {
 		scan.Status = "retry_wait"
@@ -549,6 +616,14 @@ func openAICodexTurnStateRouteTicketForProxy(sessionID string, proxy *OpenAICode
 		return ticket
 	}
 	ticket.ExitIP = proxy.ExitIP
+	if proxy.Source == "dynamic" {
+		// A model-confirmed state is only useful while requests retain the exact
+		// rotating-proxy session that minted it. Dynamic credentials are short
+		// lived, so persist the route and expire it before the provider rotates.
+		ticket.ProxyURL = proxy.ProxyURL
+		ticket.ExpiresAt = time.Now().Add(openAICodexDynamicRouteTTL)
+		return ticket
+	}
 	if proxy.Source != "state" || proxy.ID <= 0 {
 		return ticket
 	}
@@ -970,13 +1045,25 @@ func (s *OpenAIGatewayService) harvestOpenAICodexTurnState(ctx context.Context, 
 	// with the same credential, harvest session, and egress. Only the state from
 	// a second response that still declares the requested model is publishable.
 	verified := s.requestOpenAICodexTurnState(ctx, account, token, model, proxyURL, sessionID, result.stateValue)
-	if verified.errorMessage != "" || verified.statusCode < http.StatusOK || verified.statusCode >= http.StatusMultipleChoices ||
-		verified.stateValue == "" || !openAICodexTurnStateModelsMatch(model, verified.officialModel) {
+	replayConfirmedWithoutRefresh := verified.stateValue == "" &&
+		strings.Contains(verified.errorMessage, "x-codex-turn-state") &&
+		openAICodexTurnStateModelsMatch(model, verified.officialModel)
+	if (verified.errorMessage != "" && !replayConfirmedWithoutRefresh) ||
+		verified.statusCode < http.StatusOK || verified.statusCode >= http.StatusMultipleChoices ||
+		!openAICodexTurnStateModelsMatch(model, verified.officialModel) {
 		reason := openAICodexTurnStateReplayFailure(model, verified)
 		if strings.TrimSpace(reason) == "" {
 			reason = "upstream did not preserve the requested model"
 		}
 		result.errorMessage = truncateString("route ticket replay verification failed: "+reason, openAICodexTurnStateScanMaxErrorBytes)
+		return result
+	}
+	if verified.stateValue == "" {
+		// Some Team Codex turns confirm the requested model on replay but do not
+		// mint a replacement state when the previous state is supplied. The replay
+		// still proves the state/session/egress tuple keeps the requested route, so
+		// publish the original signed state instead of treating the missing refresh
+		// header as a downgrade.
 		return result
 	}
 	return verified

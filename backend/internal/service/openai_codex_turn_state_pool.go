@@ -79,6 +79,7 @@ type openAICodexTurnStateRouteTicket struct {
 	ProxyURL  string
 	ExitIP    string
 	RouteIPv6 string
+	ExpiresAt time.Time
 }
 
 type OpenAICodexTurnStateStore interface {
@@ -312,6 +313,10 @@ func (p *openAICodexTurnStatePool) observeDurably(ctx context.Context, value str
 		record.SourceProxyURL = strings.TrimSpace(ticket[0].ProxyURL)
 		record.SourceExitIP = strings.TrimSpace(ticket[0].ExitIP)
 		record.RouteIPv6 = strings.TrimSpace(ticket[0].RouteIPv6)
+		if routeExpiry := ticket[0].ExpiresAt; !routeExpiry.IsZero() && routeExpiry.Before(record.ExpiresAt) {
+			record.ExpiresAt = routeExpiry
+			record.Active = routeExpiry.After(p.now())
+		}
 	}
 	p.mu.RLock()
 	repo := p.repo
