@@ -114,9 +114,8 @@ func TestStageOpenAICodexTurnState_StoresOnlyAfterCommit(t *testing.T) {
 	_, ok := svc.getOpenAICodexTurnStatePool().preferredForBucket(account.ID, "gpt-5.6-codex")
 	require.False(t, ok)
 	svc.noteStagedOpenAICodexTurnStateCommitted(c, account, staged)
-	selected, ok := svc.getOpenAICodexTurnStatePool().preferredForBucket(account.ID, "gpt-5.6-codex")
-	require.True(t, ok)
-	require.Equal(t, state, selected)
+	_, ok = svc.getOpenAICodexTurnStatePool().preferredForBucket(account.ID, "gpt-5.6-codex")
+	require.False(t, ok, "ordinary business responses are observations, not verified route tickets")
 
 	stageOpenAICodexTurnState(&staged, http.Header{})
 	require.Empty(t, staged.Get("X-Codex-Turn-State"))
@@ -142,7 +141,7 @@ func TestOpenAICodexTurnStatePool_CleanupRemovesExpiredEntries(t *testing.T) {
 	}
 }
 
-func TestGuardOpenAICodexTurnStateEcho_ReplacesForSameAccountAndModel(t *testing.T) {
+func TestGuardOpenAICodexTurnStateEcho_PreservesClientState(t *testing.T) {
 	now := time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)
 	svc := &OpenAIGatewayService{}
 	pool := svc.getOpenAICodexTurnStatePool()
@@ -152,17 +151,17 @@ func TestGuardOpenAICodexTurnStateEcho_ReplacesForSameAccountAndModel(t *testing
 	model := "gpt-5.6-codex"
 	preferred := testOpenAICodexTurnState(292, now, 'a')
 	otherAccount := testOpenAICodexTurnState(292, now, 'b')
-	pool.observe(preferred, &accountID, "source-session", model, "http")
-	pool.observe(otherAccount, &otherAccountID, "source-session", model, "http")
+	pool.observe(preferred, &accountID, "source-session", model, "scanner")
+	pool.observe(otherAccount, &otherAccountID, "source-session", model, "scanner")
 
 	c, _ := newTurnStateTestContext(t, 7, "target-session")
 	incoming := testOpenAICodexTurnState(312, now, 'c')
 	h := http.Header{"X-Codex-Turn-State": []string{incoming}}
 	svc.guardOpenAICodexTurnStateEcho(c, &Account{ID: accountID, Platform: PlatformOpenAI, Type: AccountTypeOAuth}, h, model)
 
-	require.Equal(t, preferred, h.Get(openAICodexTurnStateHeader))
+	require.Equal(t, incoming, h.Get(openAICodexTurnStateHeader))
 	require.NotEqual(t, otherAccount, h.Get(openAICodexTurnStateHeader))
-	require.Equal(t, openAICodexTurnStateReuseScopeAccountModel, c.GetString(openAICodexTurnStateReuseScopeContextKey))
+	require.Empty(t, c.GetString(openAICodexTurnStateReuseScopeContextKey))
 }
 
 func TestGuardOpenAICodexTurnStateEcho_DoesNotCrossAccountOrModel(t *testing.T) {
@@ -172,7 +171,7 @@ func TestGuardOpenAICodexTurnStateEcho_DoesNotCrossAccountOrModel(t *testing.T) 
 	pool.now = func() time.Time { return now }
 	sourceID := int64(42)
 	state := testOpenAICodexTurnState(292, now, 'a')
-	pool.observe(state, &sourceID, "source-session", "gpt-5.6-codex", "http")
+	pool.observe(state, &sourceID, "source-session", "gpt-5.6-codex", "scanner")
 	incoming := testOpenAICodexTurnState(312, now, 'b')
 
 	t.Run("other_account", func(t *testing.T) {
@@ -199,8 +198,8 @@ func TestOpenAICodexTurnStatePool_KeepsSameStateSeparatedByAccount(t *testing.T)
 	model := "gpt-5.6-codex"
 	state := testOpenAICodexTurnState(292, now, 'a')
 
-	pool.observe(state, &firstID, "first", model, "http")
-	pool.observe(state, &secondID, "second", model, "http")
+	pool.observe(state, &firstID, "first", model, "scanner")
+	pool.observe(state, &secondID, "second", model, "scanner")
 
 	require.Len(t, pool.entries, 2)
 	first, firstOK := pool.preferredForBucket(firstID, model)
@@ -220,9 +219,9 @@ func TestOpenAICodexTurnStatePool_Prefers332AndFallsBackTo292(t *testing.T) {
 	state332 := testOpenAICodexTurnState(332, now, 'a')
 	state292 := testOpenAICodexTurnState(292, now.Add(time.Second), 'b')
 
-	pool.observe(state332, &accountID, "state-332", model, "http")
+	pool.observe(state332, &accountID, "state-332", model, "scanner")
 	now = now.Add(time.Second)
-	pool.observe(state292, &accountID, "state-292", model, "http")
+	pool.observe(state292, &accountID, "state-292", model, "scanner")
 
 	selected, ok := pool.preferredForBucket(accountID, model)
 	require.True(t, ok)
@@ -241,7 +240,7 @@ func TestReusableOpenAICodexTurnStateLengths(t *testing.T) {
 	require.False(t, isReusableOpenAICodexTurnStateLength(356))
 }
 
-func TestGuardOpenAICodexTurnStateEcho_ReplacesAllInputLengthsAndMissing(t *testing.T) {
+func TestGuardOpenAICodexTurnStateEcho_InjectsOnlyWhenClientStateMissing(t *testing.T) {
 	now := time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)
 	svc := &OpenAIGatewayService{}
 	pool := svc.getOpenAICodexTurnStatePool()
@@ -249,7 +248,7 @@ func TestGuardOpenAICodexTurnStateEcho_ReplacesAllInputLengthsAndMissing(t *test
 	accountID := int64(43)
 	model := "gpt-5.6-codex"
 	preferred := testOpenAICodexTurnState(332, now, 'a')
-	pool.observe(preferred, &accountID, "source", model, "http")
+	pool.observe(preferred, &accountID, "source", model, "scanner")
 	account := &Account{ID: accountID, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
 
 	cases := []struct {
@@ -270,7 +269,13 @@ func TestGuardOpenAICodexTurnStateEcho_ReplacesAllInputLengthsAndMissing(t *test
 				h.Set(openAICodexTurnStateHeader, testCase.incoming)
 			}
 			svc.guardOpenAICodexTurnStateEcho(c, account, h, model)
-			require.Equal(t, preferred, h.Get(openAICodexTurnStateHeader))
+			if testCase.incoming == "" {
+				require.Equal(t, preferred, h.Get(openAICodexTurnStateHeader))
+				require.Equal(t, "source", h.Get("session-id"))
+				require.Empty(t, h.Get("session_id"))
+			} else {
+				require.Equal(t, testCase.incoming, h.Get(openAICodexTurnStateHeader))
+			}
 		})
 	}
 }
@@ -299,6 +304,46 @@ func TestGuardOpenAICodexTurnStateEcho_APIKeyUnaffected(t *testing.T) {
 	require.Equal(t, incoming, h.Get(openAICodexTurnStateHeader))
 }
 
+func TestOpenAICodexTurnStateRouteProxyRequiresExactActiveOwnerTicket(t *testing.T) {
+	now := time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)
+	svc := &OpenAIGatewayService{}
+	pool := svc.getOpenAICodexTurnStatePool()
+	pool.now = func() time.Time { return now }
+	accountID := int64(42)
+	state := testOpenAICodexTurnState(332, now, 'p')
+	require.NoError(t, pool.observeDurably(
+		context.Background(), state, accountID, "session-hash", "gpt-6-astra", "scanner",
+		openAICodexTurnStateRouteTicket{SessionID: "harvest-session", ProxyURL: "http://ticket-proxy.example:8080"},
+	))
+
+	header := http.Header{}
+	header.Set(openAICodexTurnStateHeader, state)
+	oauth := &Account{ID: accountID, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	proxyURL := svc.openAICodexTurnStateRouteProxyURL(oauth, header, "http://fallback.example:8080")
+	require.Equal(t, "http://ticket-proxy.example:8080", proxyURL)
+
+	otherAccount := &Account{ID: accountID + 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	require.Equal(t, "http://fallback.example:8080", svc.openAICodexTurnStateRouteProxyURL(otherAccount, header, "http://fallback.example:8080"))
+	require.Equal(t, "http://fallback.example:8080", svc.openAICodexTurnStateRouteProxyURL(
+		&Account{ID: accountID, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}, header, "http://fallback.example:8080",
+	))
+
+	parentID := accountID
+	shadow := &Account{ID: 99, ParentAccountID: &parentID, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	require.Equal(t, "http://ticket-proxy.example:8080", svc.openAICodexTurnStateRouteProxyURL(shadow, header, "http://fallback.example:8080"))
+
+	now = now.Add(openAICodexTurnStateTTL + time.Second)
+	require.Equal(t, "http://fallback.example:8080", svc.openAICodexTurnStateRouteProxyURL(oauth, header, "http://fallback.example:8080"))
+}
+
+func TestOpenAICodexTurnStateObserveDurablyRejectsInvalidStateWithoutPanic(t *testing.T) {
+	pool := newOpenAICodexTurnStatePool()
+	require.Error(t, pool.observeDurably(
+		context.Background(), "invalid\nstate", 42, "session-hash", "gpt-6-astra", "scanner",
+		openAICodexTurnStateRouteTicket{SessionID: "harvest-session", ProxyURL: "http://proxy.example:8080"},
+	))
+}
+
 func TestOpenAICodexTurnStatePool_UsesFernetIssuedAtForExpiry(t *testing.T) {
 	pool := newOpenAICodexTurnStatePool()
 	now := time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)
@@ -309,9 +354,9 @@ func TestOpenAICodexTurnStatePool_UsesFernetIssuedAtForExpiry(t *testing.T) {
 	expired := testOpenAICodexTurnState(292, now.Add(-time.Hour), 'a')
 	future := testOpenAICodexTurnState(292, now.Add(time.Second), 'b')
 	active := testOpenAICodexTurnState(292, now.Add(-30*time.Minute), 'c')
-	pool.observe(expired, &accountID, "expired", model, "http")
-	pool.observe(future, &accountID, "future", model, "http")
-	pool.observe(active, &accountID, "active", model, "http")
+	pool.observe(expired, &accountID, "expired", model, "scanner")
+	pool.observe(future, &accountID, "future", model, "scanner")
+	pool.observe(active, &accountID, "active", model, "scanner")
 
 	selected, ok := pool.preferredForBucket(accountID, model)
 	require.True(t, ok)
@@ -331,6 +376,10 @@ func TestOpenAICodexTurnStatePool_UsesFernetIssuedAtForExpiry(t *testing.T) {
 	require.False(t, ok)
 }
 
+func TestNormalizeOpenAICodexTurnStateTransportPreservesScanner(t *testing.T) {
+	require.Equal(t, "scanner", normalizeOpenAICodexTurnStateTransport(" scanner "))
+}
+
 func TestBuildOpenAIWSHeaders_UsesSameAccountModelReusableState(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	svc := &OpenAIGatewayService{}
@@ -339,7 +388,7 @@ func TestBuildOpenAIWSHeaders_UsesSameAccountModelReusableState(t *testing.T) {
 	accountID := int64(43)
 	model := "gpt-5.6-codex"
 	accountState := testOpenAICodexTurnState(292, now, 'a')
-	pool.observe(accountState, &accountID, "source-session", model, "http")
+	pool.observe(accountState, &accountID, "source-session", model, "scanner")
 	c, _ := newTurnStateTestContext(t, 7, "sess-ws")
 	account := &Account{
 		ID:          accountID,
@@ -370,10 +419,9 @@ func TestOpenAICodexTurnState_UsesCredentialOwnerForShadowAccount(t *testing.T) 
 	model := "gpt-5.6-codex"
 	stageOpenAICodexTurnStateModel(c, model)
 	state := testOpenAICodexTurnState(292, now, 's')
-	svc.observeOpenAICodexTurnState(c, shadow, state, "http")
+	pool.observe(state, &parent.ID, "source-session", model, "scanner")
 
-	incoming := testOpenAICodexTurnState(312, now, 'i')
-	h := http.Header{"X-Codex-Turn-State": []string{incoming}}
+	h := http.Header{}
 	svc.guardOpenAICodexTurnStateEcho(c, shadow, h, model)
 
 	require.Equal(t, state, h.Get(openAICodexTurnStateHeader))

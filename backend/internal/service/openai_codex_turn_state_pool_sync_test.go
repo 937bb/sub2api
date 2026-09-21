@@ -54,7 +54,7 @@ func TestOpenAICodexTurnStatePoolSyncAvoidsDuplicateScanAcrossInstances(t *testi
 	require.True(t, scanner.stateNeedsRefresh(accountID, "gpt-5.5", now))
 	issuedAt := now.Add(-10 * time.Minute)
 	state := testOpenAICodexTurnState(356, issuedAt, 'a')
-	require.NoError(t, first.observeDurably(context.Background(), state, accountID, "session", "gpt-5.5", "http"))
+	require.NoError(t, first.observeDurably(context.Background(), state, accountID, "session", "gpt-5.5", "scanner", openAICodexTurnStateRouteTicket{SessionID: "session"}))
 	require.Equal(t, 1, repo.writeCalls)
 	require.Empty(t, first.queue)
 	_, ok := second.preferredForBucket(accountID, "gpt-5.5")
@@ -73,7 +73,7 @@ func TestOpenAICodexTurnStatePoolSyncAvoidsDuplicateScanAcrossInstances(t *testi
 	require.Empty(t, second.queue)
 
 	now = now.Add(5 * time.Minute)
-	require.NoError(t, first.observeDurably(context.Background(), state, accountID, "session", "gpt-5.5", "http"))
+	require.NoError(t, first.observeDurably(context.Background(), state, accountID, "session", "gpt-5.5", "scanner", openAICodexTurnStateRouteTicket{SessionID: "session"}))
 	require.NoError(t, second.refreshBucket(context.Background(), accountID, "gpt-5.5"))
 	expiresAt, ok = second.preferredExpiryForBucket(accountID, "gpt-5.5")
 	require.True(t, ok)
@@ -90,14 +90,14 @@ func TestOpenAICodexTurnStatePoolDurableFailureDoesNotPublish(t *testing.T) {
 	pool := newOpenAICodexTurnStatePool()
 	pool.repo = repo
 	state := testOpenAICodexTurnState(332, now, 'a')
-	err := pool.observeDurably(context.Background(), state, 42, "session", "gpt-5.5", "http")
+	err := pool.observeDurably(context.Background(), state, 42, "session", "gpt-5.5", "scanner", openAICodexTurnStateRouteTicket{SessionID: "session"})
 	require.ErrorContains(t, err, "database unavailable")
 	require.Empty(t, pool.entries)
 	require.Empty(t, pool.queue)
 	require.Nil(t, repo.record)
 
 	pool.repo = nil
-	require.NoError(t, pool.observeDurably(context.Background(), state, 42, "session", "gpt-5.5", "http"))
+	require.NoError(t, pool.observeDurably(context.Background(), state, 42, "session", "gpt-5.5", "scanner", openAICodexTurnStateRouteTicket{SessionID: "session"}))
 	_, ok := pool.preferredForBucket(42, "gpt-5.5")
 	require.True(t, ok)
 }
@@ -107,7 +107,7 @@ func TestOpenAICodexTurnStatePoolRefreshPreservesLocalStateOnEmptyAndError(t *te
 	pool := newOpenAICodexTurnStatePool()
 	accountID := int64(42)
 	state := testOpenAICodexTurnState(332, now, 'a')
-	pool.observe(state, &accountID, "session", "gpt-5.5", "http")
+	pool.observe(state, &accountID, "session", "gpt-5.5", "scanner")
 	repo := &turnStateBucketSyncRepo{}
 	pool.repo = repo
 	require.NoError(t, pool.refreshBucket(context.Background(), accountID, "gpt-5.5"))
@@ -125,7 +125,8 @@ func TestOpenAICodexTurnStatePoolRefreshRejectsForeignAndCorruptRecords(t *testi
 	now := time.Now().UTC().Truncate(time.Second)
 	accountID := int64(42)
 	state := testOpenAICodexTurnState(332, now, 'a')
-	valid := newObservedOpenAICodexTurnStateRecord(state, &accountID, "session", "gpt-5.5", "http", now)
+	valid := newObservedOpenAICodexTurnStateRecord(state, &accountID, "session", "gpt-5.5", "scanner", now)
+	valid.SourceSessionID = "session"
 	for name, mutate := range map[string]func(*OpenAICodexTurnStateRecord){
 		"account":   func(r *OpenAICodexTurnStateRecord) { foreign := int64(84); r.SourceAccountID = &foreign },
 		"model":     func(r *OpenAICodexTurnStateRecord) { r.SourceModel = "gpt-6-astra" },

@@ -26,6 +26,7 @@ func stateConcurrencyResult(length int, model string) openAICodexTurnStateHarves
 	return openAICodexTurnStateHarvestResult{
 		stateValue:  testOpenAICodexTurnState(length, time.Now().UTC().Add(-time.Minute), 'p'),
 		stateLength: length, officialModel: model, upstreamOK: true, statusCode: http.StatusOK,
+		sessionID: "codex:ts:test-harvest-session",
 	}
 }
 

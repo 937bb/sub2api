@@ -480,7 +480,16 @@ func (s *openAICodexTurnStateScanner) runJob(ctx context.Context, job openAICode
 		return
 	}
 	if failure == "" {
-		if err := pool.observeDurably(persistCtx, result.stateValue, account.ID, hashOpenAICodexTurnState(result.sessionID), upstreamModel, "scanner"); err != nil {
+		ticket := openAICodexTurnStateRouteTicket{SessionID: result.sessionID}
+		if proxy != nil {
+			ticket.ProxyURL = proxy.ProxyURL
+			ticket.ExitIP = proxy.ExitIP
+			if proxy.Source == "state" && proxy.ID > 0 {
+				proxyID := proxy.ID
+				ticket.ProxyID = &proxyID
+			}
+		}
+		if err := pool.observeDurably(persistCtx, result.stateValue, account.ID, hashOpenAICodexTurnState(result.sessionID), upstreamModel, "scanner", ticket); err != nil {
 			log.WithError(err).WithFields(log.Fields{"account_id": account.ID, "model": upstreamModel}).Warn("failed to persist acquired Codex turn-state")
 			scan.Status = "retry_wait"
 			scan.LastError = "acquired state could not be persisted; retry is required"
@@ -819,13 +828,57 @@ func (s *OpenAIGatewayService) harvestOpenAICodexTurnState(ctx context.Context, 
 		return result
 	}
 	model = openAICodexTurnStateUpstreamModel(account, model)
-	result.upstreamModel = model
 	sessionID := scopeCodexAccountIdentityValue(account, 0, "session", uuid.NewString())
-	result.sessionID = sessionID
+	result = s.requestOpenAICodexTurnState(ctx, account, token, model, proxyURL, sessionID, "")
+	if result.errorMessage != "" || result.statusCode < http.StatusOK || result.statusCode >= http.StatusMultipleChoices ||
+		result.stateValue == "" || !openAICodexTurnStateModelsMatch(model, result.officialModel) {
+		return result
+	}
+
+	// A length alone is not a route guarantee. Replay the freshly minted state
+	// with the same credential, harvest session, and egress. Only the state from
+	// a second response that still declares the requested model is publishable.
+	verified := s.requestOpenAICodexTurnState(ctx, account, token, model, proxyURL, sessionID, result.stateValue)
+	if verified.errorMessage != "" || verified.statusCode < http.StatusOK || verified.statusCode >= http.StatusMultipleChoices ||
+		verified.stateValue == "" || !openAICodexTurnStateModelsMatch(model, verified.officialModel) {
+		reason := openAICodexTurnStateReplayFailure(model, verified)
+		if strings.TrimSpace(reason) == "" {
+			reason = "upstream did not preserve the requested model"
+		}
+		result.errorMessage = truncateString("route ticket replay verification failed: "+reason, openAICodexTurnStateScanMaxErrorBytes)
+		return result
+	}
+	return verified
+}
+
+func openAICodexTurnStateReplayFailure(requested string, result openAICodexTurnStateHarvestResult) string {
+	if message := strings.TrimSpace(result.errorMessage); message != "" {
+		return message
+	}
+	if !result.upstreamOK {
+		return "upstream request failed"
+	}
+	if result.statusCode < http.StatusOK || result.statusCode >= http.StatusMultipleChoices {
+		return fmt.Sprintf("upstream returned HTTP %d", result.statusCode)
+	}
+	if result.stateValue == "" {
+		return "upstream response did not include x-codex-turn-state"
+	}
+	if strings.TrimSpace(result.officialModel) == "" {
+		return "upstream response did not declare an official model"
+	}
+	if !openAICodexTurnStateModelsMatch(requested, result.officialModel) {
+		return fmt.Sprintf("upstream model mismatch: requested %s, received %s", requested, result.officialModel)
+	}
+	return ""
+}
+
+func (s *OpenAIGatewayService) requestOpenAICodexTurnState(ctx context.Context, account *Account, token, model, proxyURL, sessionID, state string) openAICodexTurnStateHarvestResult {
+	result := openAICodexTurnStateHarvestResult{upstreamModel: model, sessionID: sessionID}
 	threadID := scopeCodexAccountIdentityValue(account, 0, "thread", uuid.NewString())
 	body := []byte(fmt.Sprintf(`{"model":%s,"stream":true,"store":false,"instructions":"Reply with exactly: pong","input":[{"role":"user","content":[{"type":"input_text","text":"ping"}]}],"client_metadata":{"session_id":%s,"thread_id":%s}}`,
 		strconv.Quote(model), strconv.Quote(sessionID), strconv.Quote(threadID)))
-	body, _, err = applyCodexClientEnvironmentRaw(body, account)
+	body, _, err := applyCodexClientEnvironmentRaw(body, account)
 	if err != nil {
 		result.errorMessage = truncateString(err.Error(), openAICodexTurnStateScanMaxErrorBytes)
 		return result
@@ -844,6 +897,9 @@ func (s *OpenAIGatewayService) harvestOpenAICodexTurnState(ctx context.Context, 
 	req.Header.Set("session-id", sessionID)
 	req.Header.Set("thread-id", threadID)
 	req.Header.Set("x-client-request-id", threadID)
+	if state = strings.TrimSpace(state); state != "" {
+		req.Header.Set(openAICodexTurnStateHeader, state)
+	}
 	if err := resolveAndSetOpenAIChatGPTAccountHeaders(ctx, s.accountRepo, req.Header, account); err != nil {
 		result.errorMessage = truncateString(err.Error(), openAICodexTurnStateScanMaxErrorBytes)
 		return result
@@ -875,9 +931,9 @@ func (s *OpenAIGatewayService) harvestOpenAICodexTurnState(ctx context.Context, 
 	result.upstreamOK = true
 	result.statusCode = resp.StatusCode
 	result.officialModel = firstNonEmptyCodexHeader(resp.Header, "OpenAI-Model", "openai-model")
-	state := extractOpenAICodexTurnState(resp.Header)
-	result.stateValue = state
-	result.stateLength = len(state)
+	responseState := extractOpenAICodexTurnState(resp.Header)
+	result.stateValue = responseState
+	result.stateLength = len(responseState)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		message := strings.TrimSpace(extractUpstreamErrorMessage(raw))
@@ -890,7 +946,7 @@ func (s *OpenAIGatewayService) harvestOpenAICodexTurnState(ctx context.Context, 
 	if result.officialModel == "" {
 		result.officialModel = readOpenAICodexTurnStateOfficialModel(resp.Body)
 	}
-	if state == "" {
+	if responseState == "" {
 		result.errorMessage = "upstream response did not include x-codex-turn-state"
 	} else if result.officialModel == "" {
 		result.errorMessage = "upstream response did not declare an official model"

@@ -158,9 +158,10 @@ func (s *OpenAIGatewayService) observeOpenAICodexTurnState(c *gin.Context, accou
 	pool.observe(state, &accountID, sessionHash, model, transport)
 }
 
-// guardOpenAICodexTurnStateEcho removes a state known to belong to another
-// credential owner, then applies the best unexpired state minted for the same
-// credential owner and model regardless of the incoming state value.
+// guardOpenAICodexTurnStateEcho preserves a client's same-turn state, but when
+// the gateway starts a turn without one it applies a model-confirmed route
+// ticket minted for this credential. The state and its harvest session are a
+// pair; replaying only the state lets upstream re-evaluate the route.
 func (s *OpenAIGatewayService) guardOpenAICodexTurnStateEcho(c *gin.Context, account *Account, h http.Header, model string) {
 	if s == nil || h == nil || account == nil || !account.UsesOpenAICodexProtocol() {
 		return
@@ -174,15 +175,35 @@ func (s *OpenAIGatewayService) guardOpenAICodexTurnStateEcho(c *gin.Context, acc
 		stageOpenAICodexTurnStateSessionHash(c, h)
 	}
 	s.stripForeignOpenAICodexTurnState(c, account, h)
+	if strings.TrimSpace(h.Get(openAICodexTurnStateHeader)) != "" &&
+		(c == nil || c.GetString(openAICodexTurnStateReuseScopeContextKey) != openAICodexTurnStateReuseScopeAccountModel) {
+		return
+	}
 	owner := codexAccountIdentitySource(c, account)
 	if owner == nil || owner.ID <= 0 || model == "" {
 		return
 	}
 	pool := s.getOpenAICodexTurnStatePool()
 	pool.setAccountPlan(owner.ID, OpenAICodexStatePlanType(owner))
-	if state, ok := pool.preferredForBucket(owner.ID, model); ok {
-		setOpenAICodexTurnStateReuse(c, h, state, openAICodexTurnStateReuseScopeAccountModel)
+	if ticket, ok := pool.preferredRecordForBucket(owner.ID, model); ok {
+		setOpenAICodexTurnStateReuse(c, h, ticket.StateValue, openAICodexTurnStateReuseScopeAccountModel)
+		h.Set("session-id", ticket.SourceSessionID)
 	}
+}
+
+func (s *OpenAIGatewayService) openAICodexTurnStateRouteProxyURL(account *Account, h http.Header, fallback string) string {
+	if s == nil || account == nil || h == nil || !account.UsesOpenAICodexProtocol() {
+		return fallback
+	}
+	accountID := account.ID
+	if account.ParentAccountID != nil && *account.ParentAccountID > 0 {
+		accountID = *account.ParentAccountID
+	}
+	state := strings.TrimSpace(h.Get(openAICodexTurnStateHeader))
+	if proxyURL, ok := s.getOpenAICodexTurnStatePool().routeProxyForState(accountID, state); ok {
+		return proxyURL
+	}
+	return fallback
 }
 
 func (s *OpenAIGatewayService) noteOpenAICodexTurnStateProvenance(c *gin.Context, account *Account) {

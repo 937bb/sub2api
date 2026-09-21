@@ -37,6 +37,10 @@ type OpenAICodexTurnStateRecord struct {
 	SourceAccountID   *int64    `json:"source_account_id"`
 	SourceAccountName string    `json:"source_account_name,omitempty"`
 	SourceSessionHash string    `json:"source_session_hash,omitempty"`
+	SourceSessionID   string    `json:"-"`
+	SourceProxyID     *int64    `json:"source_proxy_id,omitempty"`
+	SourceProxyURL    string    `json:"-"`
+	SourceExitIP      string    `json:"source_exit_ip,omitempty"`
 	SourceModel       string    `json:"source_model,omitempty"`
 	SourceTransport   string    `json:"source_transport"`
 	IssuedAt          time.Time `json:"issued_at,omitempty"`
@@ -65,6 +69,13 @@ type OpenAICodexTurnStateFilter struct {
 	AccountID *int64
 	Page      int
 	PageSize  int
+}
+
+type openAICodexTurnStateRouteTicket struct {
+	SessionID string
+	ProxyID   *int64
+	ProxyURL  string
+	ExitIP    string
 }
 
 type OpenAICodexTurnStateStore interface {
@@ -244,6 +255,12 @@ func (p *openAICodexTurnStatePool) observe(value string, accountID *int64, sessi
 	if record == nil {
 		return
 	}
+	// Scanner observations are already model-confirmed. Direct scanner callers
+	// (primarily tests and local probes) pass the actual session as sessionHash;
+	// the durable production path below overwrites this with its explicit ticket.
+	if record.SourceTransport == "scanner" {
+		record.SourceSessionID = strings.TrimSpace(sessionHash)
+	}
 
 	p.mu.Lock()
 	p.mergeLocked(record)
@@ -268,12 +285,21 @@ func (p *openAICodexTurnStatePool) observe(value string, accountID *int64, sessi
 
 // observeDurably publishes a scan result only after it is visible to other
 // instances. It never uses the asynchronous observation queue.
-func (p *openAICodexTurnStatePool) observeDurably(ctx context.Context, value string, accountID int64, sessionHash, model, transport string) error {
+func (p *openAICodexTurnStatePool) observeDurably(ctx context.Context, value string, accountID int64, sessionHash, model, transport string, ticket ...openAICodexTurnStateRouteTicket) error {
 	key, validKey := newOpenAICodexTurnStateBucketKey(accountID, model)
 	if p == nil || !validKey {
 		return fmt.Errorf("invalid Codex turn-state observation bucket")
 	}
 	record := newObservedOpenAICodexTurnStateRecord(value, &accountID, sessionHash, key.model, transport, p.now())
+	if record == nil {
+		return fmt.Errorf("invalid Codex turn-state observation")
+	}
+	if len(ticket) > 0 {
+		record.SourceSessionID = strings.TrimSpace(ticket[0].SessionID)
+		record.SourceProxyID = cloneInt64Pointer(ticket[0].ProxyID)
+		record.SourceProxyURL = strings.TrimSpace(ticket[0].ProxyURL)
+		record.SourceExitIP = strings.TrimSpace(ticket[0].ExitIP)
+	}
 	p.mu.RLock()
 	repo := p.repo
 	usable := p.isReusableRecordLocked(record, key, p.now())
@@ -325,17 +351,25 @@ func newObservedOpenAICodexTurnStateRecord(value string, accountID *int64, sessi
 }
 
 func (p *openAICodexTurnStatePool) preferredForBucket(accountID int64, model string) (string, bool) {
+	record, ok := p.preferredRecordForBucket(accountID, model)
+	if !ok {
+		return "", false
+	}
+	return record.StateValue, true
+}
+
+func (p *openAICodexTurnStatePool) preferredRecordForBucket(accountID int64, model string) (*OpenAICodexTurnStateRecord, bool) {
 	key, ok := newOpenAICodexTurnStateBucketKey(accountID, model)
 	if p == nil || !ok {
-		return "", false
+		return nil, false
 	}
 	now := p.now()
 	p.mu.RLock()
 	selected := p.preferredByBucket[key]
 	if p.isPreferredBucketRecordLocked(selected, key, now) {
-		value := selected.StateValue
+		record := cloneOpenAICodexTurnStateRecord(selected)
 		p.mu.RUnlock()
-		return value, true
+		return record, true
 	}
 	p.mu.RUnlock()
 
@@ -344,11 +378,38 @@ func (p *openAICodexTurnStatePool) preferredForBucket(accountID int64, model str
 	selected = p.preferredByBucket[key]
 	if selected == nil {
 		p.mu.Unlock()
+		return nil, false
+	}
+	record := cloneOpenAICodexTurnStateRecord(selected)
+	p.mu.Unlock()
+	return record, record.StateValue != ""
+}
+
+func (p *openAICodexTurnStatePool) routeProxyForState(accountID int64, state string) (string, bool) {
+	if p == nil || accountID <= 0 {
 		return "", false
 	}
-	value := selected.StateValue
-	p.mu.Unlock()
-	return value, value != ""
+	state = strings.TrimSpace(state)
+	if state == "" {
+		return "", false
+	}
+	now := p.now()
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	for key, records := range p.entriesByBucket {
+		if key.accountID != accountID {
+			continue
+		}
+		for _, record := range records {
+			if record.StateValue != state || !p.isReusableRecordLocked(record, key, now) {
+				continue
+			}
+			if proxyURL := strings.TrimSpace(record.SourceProxyURL); proxyURL != "" {
+				return proxyURL, true
+			}
+		}
+	}
+	return "", false
 }
 
 func (p *openAICodexTurnStatePool) preferredExpiryForBucket(accountID int64, model string) (time.Time, bool) {
@@ -627,6 +688,8 @@ func normalizeOpenAICodexTurnStateTransport(value string) string {
 		return "ws"
 	case "passthrough":
 		return "passthrough"
+	case "scanner":
+		return "scanner"
 	default:
 		return "http"
 	}
@@ -673,6 +736,13 @@ func (p *openAICodexTurnStatePool) isReusableRecordLocked(record *OpenAICodexTur
 	if record.SourceAccountID == nil || *record.SourceAccountID != key.accountID || normalizeOpenAICodexTurnStateModel(record.SourceModel) != key.model {
 		return false
 	}
+	// A reusable route ticket is the pair minted by a scanner request whose
+	// response explicitly declared the requested model. Business responses are
+	// still recorded for diagnostics, but their state alone is not proof that
+	// the request avoided an upstream model downgrade.
+	if normalizeOpenAICodexTurnStateTransport(record.SourceTransport) != "scanner" || strings.TrimSpace(record.SourceSessionID) == "" {
+		return false
+	}
 	if record.IssuedAt.IsZero() || record.IssuedAt.After(now) || !record.IssuedAt.Add(openAICodexTurnStateTTL).After(now) {
 		return false
 	}
@@ -700,5 +770,6 @@ func cloneOpenAICodexTurnStateRecord(record *OpenAICodexTurnStateRecord) *OpenAI
 	}
 	copyRecord := *record
 	copyRecord.SourceAccountID = cloneInt64Pointer(record.SourceAccountID)
+	copyRecord.SourceProxyID = cloneInt64Pointer(record.SourceProxyID)
 	return &copyRecord
 }

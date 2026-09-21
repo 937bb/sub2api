@@ -6,10 +6,12 @@ func (s *OpenAIGatewayService) SetPluginManager(manager *PluginManager) {
 	s.pluginManager = manager
 }
 
-// doOpenAIUpstream 只在 OpenAI OAuth 能力绑定已启用时把真实请求交给插件。
-// 插件返回标准 http.Response，响应解析、错误映射、SSE 和计费仍由现有核心链处理。
+// doOpenAIUpstream delegates live requests to a plugin only when the OpenAI
+// OAuth capability binding is enabled. Response parsing, error mapping, SSE,
+// and billing remain in the core pipeline.
 func (s *OpenAIGatewayService) doOpenAIUpstream(request *http.Request, proxyURL string, account *Account) (*http.Response, error) {
 	normalizeCodexResponsesTransportHeaders(request, account)
+	proxyURL = s.openAICodexTurnStateRouteProxyURL(account, request.Header, proxyURL)
 	profile, err := resolveMode1TLSProfile(account)
 	if err != nil {
 		return nil, err
@@ -26,8 +28,9 @@ func (s *OpenAIGatewayService) doOpenAIUpstream(request *http.Request, proxyURL 
 	return s.httpUpstream.Do(request, proxyURL, account.ID, account.Mode1EffectiveConcurrency())
 }
 
-// doOpenAIAccountTestUpstream 让 OpenAI OAuth 账号测试与真实转发使用同一插件路径。
-// API Key 和未命中插件的账号保持各自原有的 HTTPUpstream 行为。
+// doOpenAIAccountTestUpstream keeps OAuth account tests on the same plugin
+// path as live forwarding. API keys and accounts without a plugin binding keep
+// their existing HTTPUpstream behavior.
 func (s *AccountTestService) doOpenAIAccountTestUpstream(
 	request *http.Request,
 	proxyURL string,
@@ -35,6 +38,9 @@ func (s *AccountTestService) doOpenAIAccountTestUpstream(
 	useTLSFallback bool,
 ) (*http.Response, error) {
 	normalizeCodexResponsesTransportHeaders(request, account)
+	if s.openaiGatewayService != nil {
+		proxyURL = s.openaiGatewayService.openAICodexTurnStateRouteProxyURL(account, request.Header, proxyURL)
+	}
 	profile, err := resolveMode1TLSProfile(account)
 	if err != nil {
 		return nil, err

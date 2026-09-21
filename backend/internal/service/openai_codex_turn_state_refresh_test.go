@@ -131,7 +131,7 @@ func TestOpenAICodexTurnStateRefreshRejectsOldResultThenAcceptsFreshResult(t *te
 
 			retried, err := repo.GetOpenAICodexTurnStateScan(context.Background(), accountID, model)
 			require.NoError(t, err)
-			require.Equal(t, 1, calls)
+			require.Equal(t, 2, calls)
 			require.Equal(t, "retry_wait", retried.Status)
 			require.Equal(t, 2, retried.AttemptCount)
 			require.NotEmpty(t, retried.LastError)
@@ -150,7 +150,7 @@ func TestOpenAICodexTurnStateRefreshRejectsOldResultThenAcceptsFreshResult(t *te
 
 			ready, err := repo.GetOpenAICodexTurnStateScan(context.Background(), accountID, model)
 			require.NoError(t, err)
-			require.Equal(t, 2, calls)
+			require.Equal(t, 4, calls)
 			require.Equal(t, "ready", ready.Status)
 			require.Equal(t, 3, ready.AttemptCount)
 			require.Empty(t, ready.LastError)
@@ -174,7 +174,7 @@ func TestOpenAICodexTurnStateRefreshRejectsOldResultThenAcceptsFreshResult(t *te
 			require.Len(t, repo.scans, 1, "refreshing one bucket must not change another account or model's scan status")
 
 			scanner.runJob(context.Background(), job)
-			require.Equal(t, 2, calls, "a state with sufficient remaining lifetime must not trigger another probe")
+			require.Equal(t, 4, calls, "a state with sufficient remaining lifetime must not trigger another probe")
 		})
 	}
 }

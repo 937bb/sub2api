@@ -1,6 +1,8 @@
 package service
 
 import (
+	"context"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -9,6 +11,28 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/stretchr/testify/require"
 )
+
+type codexTurnStateHarvestCaptureUpstream struct {
+	HTTPUpstream
+	responses []*http.Response
+	requests  []*http.Request
+	proxies   []string
+}
+
+func (u *codexTurnStateHarvestCaptureUpstream) Do(req *http.Request, proxyURL string, _ int64, _ int) (*http.Response, error) {
+	u.requests = append(u.requests, req)
+	u.proxies = append(u.proxies, proxyURL)
+	response := u.responses[0]
+	u.responses = u.responses[1:]
+	return response, nil
+}
+
+func codexTurnStateHarvestResponse(state, model string) *http.Response {
+	header := http.Header{}
+	header.Set(openAICodexTurnStateHeader, state)
+	header.Set("OpenAI-Model", model)
+	return &http.Response{StatusCode: http.StatusOK, Header: header, Body: io.NopCloser(strings.NewReader(""))}
+}
 
 func TestNormalizeOpenAICodexTurnStateProxyURLAndMask(t *testing.T) {
 	normalized, err := normalizeOpenAICodexTurnStateProxyURL("proxy.example:8443:scanner:secret")
@@ -377,4 +401,45 @@ func TestOpenAICodexTurnStateScannerPersistsActualSessionAndModelScope(t *testin
 
 	_, otherModel := pool.preferredForBucket(accountID, "gpt-5.6-luna")
 	require.False(t, otherModel)
+}
+
+func TestHarvestOpenAICodexTurnStateRejectsReplayDowngrade(t *testing.T) {
+	now := time.Now().UTC().Add(-time.Minute).Truncate(time.Second)
+	firstState := testOpenAICodexTurnState(332, now, 'a')
+	secondState := testOpenAICodexTurnState(332, now, 'b')
+	upstream := &codexTurnStateHarvestCaptureUpstream{responses: []*http.Response{
+		codexTurnStateHarvestResponse(firstState, "gpt-6-astra"),
+		codexTurnStateHarvestResponse(secondState, "gpt-5.6-luna"),
+	}}
+	svc := ticketTestService(t, config.OpenAICodexTicketConfig{}, upstream)
+
+	result := svc.harvestOpenAICodexTurnState(context.Background(), ticketTestAccount(42), "gpt-6-astra", "http://proxy.example:8080")
+
+	require.Contains(t, result.errorMessage, "route ticket replay verification failed")
+	require.Contains(t, result.errorMessage, "received gpt-5.6-luna")
+	require.Len(t, upstream.requests, 2)
+	require.Equal(t, firstState, upstream.requests[1].Header.Get(openAICodexTurnStateHeader))
+	require.NotEmpty(t, upstream.requests[0].Header.Get("session-id"))
+	require.Equal(t, upstream.requests[0].Header.Get("session-id"), upstream.requests[1].Header.Get("session-id"))
+	require.Equal(t, []string{"http://proxy.example:8080", "http://proxy.example:8080"}, upstream.proxies)
+}
+
+func TestHarvestOpenAICodexTurnStateReturnsSecondVerifiedState(t *testing.T) {
+	now := time.Now().UTC().Add(-time.Minute).Truncate(time.Second)
+	firstState := testOpenAICodexTurnState(332, now, 'a')
+	secondState := testOpenAICodexTurnState(332, now, 'b')
+	upstream := &codexTurnStateHarvestCaptureUpstream{responses: []*http.Response{
+		codexTurnStateHarvestResponse(firstState, "gpt-6-astra"),
+		codexTurnStateHarvestResponse(secondState, "gpt-6-astra"),
+	}}
+	svc := ticketTestService(t, config.OpenAICodexTicketConfig{}, upstream)
+
+	result := svc.harvestOpenAICodexTurnState(context.Background(), ticketTestAccount(42), "gpt-6-astra", "http://proxy.example:8080")
+
+	require.Empty(t, result.errorMessage)
+	require.Equal(t, secondState, result.stateValue)
+	require.Equal(t, "gpt-6-astra", result.officialModel)
+	require.NotEmpty(t, result.sessionID)
+	require.Equal(t, result.sessionID, upstream.requests[0].Header.Get("session-id"))
+	require.Equal(t, result.sessionID, upstream.requests[1].Header.Get("session-id"))
 }

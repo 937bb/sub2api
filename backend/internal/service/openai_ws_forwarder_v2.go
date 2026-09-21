@@ -247,7 +247,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		},
 		PreferredConnID: preferredConnID,
 		ForceNewConn:    forceNewConn,
-		ProxyURL:        account.SelectOpenAIOutboundProxyURL(),
+		ProxyURL:        s.openAICodexTurnStateRouteProxyURL(account, wsHeaders, account.SelectOpenAIOutboundProxyURL()),
 	})
 	if err != nil {
 		var agentDialErr *openAIWSDialError

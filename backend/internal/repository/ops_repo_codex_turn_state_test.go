@@ -69,8 +69,9 @@ func TestUpsertOpenAICodexTurnStatePersistsAccountModelAndIssuedAt(t *testing.T)
 		ValueLength:       292,
 		SourceAccountID:   &accountID,
 		SourceSessionHash: "session",
+		SourceSessionID:   "harvest-session",
 		SourceModel:       "gpt-5.6-codex",
-		SourceTransport:   "http",
+		SourceTransport:   "scanner",
 		IssuedAt:          issuedAt,
 		FirstSeenAt:       issuedAt.Add(time.Minute),
 		LastSeenAt:        issuedAt.Add(2 * time.Minute),
@@ -83,6 +84,10 @@ func TestUpsertOpenAICodexTurnStatePersistsAccountModelAndIssuedAt(t *testing.T)
 			record.ValueLength,
 			record.SourceAccountID,
 			record.SourceSessionHash,
+			record.SourceSessionID,
+			record.SourceProxyID,
+			record.SourceProxyURL,
+			record.SourceExitIP,
 			record.SourceModel,
 			record.SourceTransport,
 			record.IssuedAt,
@@ -110,11 +115,11 @@ func TestLoadPreferredOpenAICodexTurnStateUsesBucketAndConfiguredOrder(t *testin
 	defer func() { _ = db.Close() }()
 	now := time.Now().UTC().Truncate(time.Second)
 	issuedAt := now.Add(-10 * time.Minute)
-	query := `(?s)SELECT id, state_value.*WHERE source_account_id = \$1 AND source_model = \$2.*value_length = ANY\(\$3::integer\[\]\) AND expires_at > \$4.*issued_at <= \$4 AND issued_at \+ INTERVAL '1 hour' > \$4.*ORDER BY array_position\(\$3::integer\[\], value_length\).*LIMIT 1`
-	columns := []string{"id", "state_value", "state_hash", "value_length", "source_account_id", "source_session_hash", "source_model", "source_transport", "issued_at", "first_seen_at", "last_seen_at", "expires_at"}
+	query := `(?s)SELECT id, state_value.*WHERE source_account_id = \$1 AND source_model = \$2.*value_length = ANY\(\$3::integer\[\]\) AND expires_at > \$4.*issued_at <= \$4 AND issued_at \+ INTERVAL '1 hour' > \$4.*source_transport = 'scanner' AND source_session_id IS NOT NULL.*ORDER BY array_position\(\$3::integer\[\], value_length\).*LIMIT 1`
+	columns := []string{"id", "state_value", "state_hash", "value_length", "source_account_id", "source_session_hash", "source_session_id", "source_proxy_id", "source_proxy_url", "source_exit_ip", "source_model", "source_transport", "issued_at", "first_seen_at", "last_seen_at", "expires_at"}
 	mock.ExpectQuery(query).
 		WithArgs(int64(42), "gpt-5.5", "{356,292}", now).
-		WillReturnRows(sqlmock.NewRows(columns).AddRow(3, "state", "hash", 356, 42, "session", "gpt-5.5", "http", issuedAt, issuedAt, now, issuedAt.Add(time.Hour)))
+		WillReturnRows(sqlmock.NewRows(columns).AddRow(3, "state", "hash", 356, 42, "session", "harvest-session", nil, "http://proxy.example:8080", "8.8.8.8", "gpt-5.5", "scanner", issuedAt, issuedAt, now, issuedAt.Add(time.Hour)))
 	repo := &opsRepository{db: db}
 	record, err := repo.LoadPreferredOpenAICodexTurnState(context.Background(), 42, " GPT-5.5 ", []int{356, 292}, now)
 	require.NoError(t, err)

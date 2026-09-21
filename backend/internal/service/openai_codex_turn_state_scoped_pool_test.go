@@ -65,7 +65,7 @@ func TestOpenAICodexTurnStateScopedPoolAppliesPlanAndModelPolicy(t *testing.T) {
 	for _, accountID := range []int64{proID, teamID, unknownID} {
 		for _, model := range []string{"gpt-5.6-terra", "gpt-6-astra"} {
 			for _, length := range []int{332, 292, 286, 273} {
-				pool.observe(testScopedOpenAICodexTurnState(length, now, byte(accountID)), &accountID, "session", model, "http")
+				pool.observe(testScopedOpenAICodexTurnState(length, now, byte(accountID)), &accountID, "session", model, "scanner")
 			}
 		}
 	}
@@ -102,8 +102,8 @@ func TestOpenAICodexTurnStateScopedPoolRestoredDefaultsPrefer332AndRetain292Fall
 		for _, model := range []string{"gpt-5.6-terra", "gpt-6-astra"} {
 			primary := testScopedOpenAICodexTurnState(332, now.Add(-time.Minute), byte(accountID))
 			fallback := testScopedOpenAICodexTurnState(292, now, byte(accountID))
-			pool.observe(primary, &accountID, "session", model, "http")
-			pool.observe(fallback, &accountID, "session", model, "http")
+			pool.observe(primary, &accountID, "session", model, "scanner")
+			pool.observe(fallback, &accountID, "session", model, "scanner")
 			selected, ok := pool.preferredForBucket(accountID, model)
 			require.True(t, ok)
 			require.Equal(t, primary, selected)
@@ -125,7 +125,7 @@ func TestOpenAICodexTurnStateScopedPoolUpdatesPolicyAndPlanWithoutCrossAccountRe
 	for _, accountID := range []int64{firstID, secondID} {
 		pool.setAccountPlan(accountID, "pro")
 		for _, length := range []int{292, 286, 332} {
-			pool.observe(testScopedOpenAICodexTurnState(length, now, byte(accountID)), &accountID, "session", "gpt-5.6-terra", "http")
+			pool.observe(testScopedOpenAICodexTurnState(length, now, byte(accountID)), &accountID, "session", "gpt-5.6-terra", "scanner")
 		}
 	}
 	pool.setAccountPlan(firstID, "team")
@@ -162,15 +162,17 @@ func TestOpenAICodexTurnStateScopedPoolBucketSyncUsesScopedTargets(t *testing.T)
 	accountID := int64(11)
 	pool.setAccountPlan(accountID, "team")
 	state := testScopedOpenAICodexTurnState(286, now, 't')
-	repo := &turnStateBucketSyncRepo{record: newObservedOpenAICodexTurnStateRecord(state, &accountID, "session", "gpt-5.6-terra", "http", now)}
+	record := newObservedOpenAICodexTurnStateRecord(state, &accountID, "session", "gpt-5.6-terra", "scanner", now)
+	record.SourceSessionID = "session"
+	repo := &turnStateBucketSyncRepo{record: record}
 	pool.repo = repo
 	require.NoError(t, pool.refreshBucket(context.Background(), accountID, "gpt-5.6-terra"))
 	require.Equal(t, []int{286}, repo.targetLengths)
 	selected, ok := pool.preferredForBucket(accountID, "gpt-5.6-terra")
 	require.True(t, ok)
 	require.Equal(t, state, selected)
-	require.NoError(t, pool.observeDurably(context.Background(), state, accountID, "session", "gpt-5.6-terra", "http"))
-	require.ErrorContains(t, pool.observeDurably(context.Background(), testScopedOpenAICodexTurnState(292, now, 'p'), accountID, "session", "gpt-5.6-terra", "http"), "not reusable")
+	require.NoError(t, pool.observeDurably(context.Background(), state, accountID, "session", "gpt-5.6-terra", "scanner", openAICodexTurnStateRouteTicket{SessionID: "session"}))
+	require.ErrorContains(t, pool.observeDurably(context.Background(), testScopedOpenAICodexTurnState(292, now, 'p'), accountID, "session", "gpt-5.6-terra", "scanner", openAICodexTurnStateRouteTicket{SessionID: "session"}), "not reusable")
 	require.Equal(t, 1, repo.writeCalls)
 }
 
@@ -192,8 +194,8 @@ func TestOpenAICodexTurnStateScopedPoolBucketIndexDropsRemovedAndExpiredValues(t
 	pool.setAccountPlan(accountID, "team")
 	first := testScopedOpenAICodexTurnState(286, now, 'a')
 	second := testScopedOpenAICodexTurnState(286, now, 'b')
-	pool.observe(first, &accountID, "session", "gpt-5.6-terra", "http")
-	pool.observe(second, &accountID, "session", "gpt-5.6-terra", "http")
+	pool.observe(first, &accountID, "session", "gpt-5.6-terra", "scanner")
+	pool.observe(second, &accountID, "session", "gpt-5.6-terra", "scanner")
 	pool.removeHashes([]string{hashOpenAICodexTurnState(first)})
 	selected, ok := pool.preferredForBucket(accountID, "gpt-5.6-terra")
 	require.True(t, ok)
@@ -217,7 +219,7 @@ func TestGuardOpenAICodexTurnStateScopedPoolUsesCredentialOwnersPlan(t *testing.
 	owner := &Account{ID: 11, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"plan_type": "team"}}
 	shadow := &Account{ID: 22, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"plan_type": "pro"}}
 	for _, length := range []int{286, 292, 332} {
-		pool.observe(testScopedOpenAICodexTurnState(length, now, 't'), &owner.ID, "session", "gpt-5.6-terra", "http")
+		pool.observe(testScopedOpenAICodexTurnState(length, now, 't'), &owner.ID, "session", "gpt-5.6-terra", "scanner")
 	}
 	c, _ := newTurnStateTestContext(t, 7, "target-session")
 	c.Set(codexAccountIdentitySourceContextKey, owner)

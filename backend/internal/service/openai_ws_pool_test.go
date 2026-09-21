@@ -844,6 +844,43 @@ func TestOpenAIWSConnPool_AcquireReusesOnlyMatchingBetaFeatures(t *testing.T) {
 	require.Equal(t, 2, dialer.DialCount())
 }
 
+func TestOpenAIWSConnPool_AcquireReusesOnlyMatchingProxy(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIWS.MaxConnsPerAccount = 2
+	cfg.Gateway.OpenAIWS.MinIdlePerAccount = 0
+	cfg.Gateway.OpenAIWS.MaxIdlePerAccount = 2
+
+	pool := newOpenAIWSConnPool(cfg)
+	dialer := &openAIWSCountingDialer{}
+	pool.setClientDialerForTest(dialer)
+	account := &Account{ID: 129, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	request := openAIWSAcquireRequest{
+		Account:  account,
+		WSURL:    "wss://example.com/v1/responses",
+		ProxyURL: "http://proxy-a.example:8080",
+	}
+
+	first, err := pool.Acquire(context.Background(), request)
+	require.NoError(t, err)
+	firstConnID := first.ConnID()
+	first.Release()
+
+	request.ProxyURL = "http://proxy-b.example:8080"
+	second, err := pool.Acquire(context.Background(), request)
+	require.NoError(t, err)
+	require.False(t, second.Reused())
+	require.NotEqual(t, firstConnID, second.ConnID())
+	secondConnID := second.ConnID()
+	second.Release()
+
+	third, err := pool.Acquire(context.Background(), request)
+	require.NoError(t, err)
+	require.True(t, third.Reused())
+	require.Equal(t, secondConnID, third.ConnID())
+	third.Release()
+	require.Equal(t, 2, dialer.DialCount())
+}
+
 func activeCodexFingerprintPoolAccountForTest(id int64) *Account {
 	return &Account{
 		ID:       id,

@@ -201,7 +201,7 @@ func TestOpenAICodexTurnStateManualScanLoadsPlanBeforeSkipping(t *testing.T) {
 	pool := gateway.getOpenAICodexTurnStatePool()
 	settings := scopedTurnStatePoolSettings(t)
 	pool.setScanSettings(settings)
-	pool.observe(testOpenAICodexTurnState(332, now, 'x'), &account.ID, "session", model, "http")
+	pool.observe(testOpenAICodexTurnState(332, now, 'x'), &account.ID, "session", model, "scanner")
 	scanner := newOpenAICodexTurnStateScanner(repo, &turnStateRefreshAccountRepo{accounts: map[int64]*Account{41: account}}, gateway)
 	scanner.settings.Store(settings)
 	calls := 0
@@ -270,8 +270,8 @@ func TestOpenAICodexTurnStateScanSettingsPersistBeforePublishAndRefresh(t *testi
 	pool := gateway.getOpenAICodexTurnStatePool()
 	state332 := testOpenAICodexTurnState(332, now, 'a')
 	state292 := testOpenAICodexTurnState(292, now, 'b')
-	pool.observe(state332, &accountID, "session1", "gpt-5.5", "http")
-	pool.observe(state292, &accountID, "session2", "gpt-5.5", "http")
+	pool.observe(state332, &accountID, "session1", "gpt-5.5", "scanner")
+	pool.observe(state292, &accountID, "session2", "gpt-5.5", "scanner")
 
 	next := svc.GetOpenAICodexTurnStateScanSettings()
 	next.TargetLengths = []int{292, 356}
@@ -322,10 +322,10 @@ func TestOpenAICodexTurnStateConfiguredPolicyKeepsAccountModelAndExpiryIsolation
 	state356 := testOpenAICodexTurnState(356, now.Add(-time.Minute), 'a')
 	state292 := testOpenAICodexTurnState(292, now.Add(-time.Minute), 'b')
 	otherState := testOpenAICodexTurnState(356, now, 'c')
-	pool.observe(state356, &accountID, "session1", "gpt-5.5", "http")
-	pool.observe(state292, &accountID, "session2", "gpt-5.5", "http")
-	pool.observe(otherState, &otherAccountID, "session3", "gpt-5.5", "http")
-	pool.observe(otherState, &accountID, "session4", "gpt-6-astra", "http")
+	pool.observe(state356, &accountID, "session1", "gpt-5.5", "scanner")
+	pool.observe(state292, &accountID, "session2", "gpt-5.5", "scanner")
+	pool.observe(otherState, &otherAccountID, "session3", "gpt-5.5", "scanner")
+	pool.observe(otherState, &accountID, "session4", "gpt-6-astra", "scanner")
 	pool.setTargetLengths([]int{356, 292})
 
 	c, _ := newTurnStateTestContext(t, 7, "client-session")

@@ -887,7 +887,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	}
 	applyCodexNormalizedRequestIdentityHeaders(c, account, headers, firstClientMessage)
 	applyStagedCodexFingerprintHeaders(c, account, headers)
-	proxyURL := account.SelectOpenAIOutboundProxyURL()
+	proxyURL := s.openAICodexTurnStateRouteProxyURL(account, headers, account.SelectOpenAIOutboundProxyURL())
 
 	dialer := s.getOpenAIWSPassthroughDialer()
 	if dialer == nil {
