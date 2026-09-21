@@ -313,6 +313,7 @@ func (s *OpenAIGatewayService) hasRequiredOpenAICodexTurnState(account *Account,
 	if account.ParentAccountID != nil && *account.ParentAccountID > 0 {
 		accountID = *account.ParentAccountID
 	}
+	pool.setAccountPlan(accountID, OpenAICodexStatePlanType(account))
 	if pool.hasReusableStateBeyond(accountID, model, time.Now()) {
 		return true
 	}

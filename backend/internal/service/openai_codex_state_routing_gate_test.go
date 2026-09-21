@@ -70,3 +70,25 @@ func TestRequiredOpenAICodexTurnStateCanBeDisabledAtRuntime(t *testing.T) {
 	require.True(t, gateway.hasRequiredOpenAICodexTurnState(account, "gpt-6-astra"))
 	require.False(t, queued)
 }
+
+func TestRequiredOpenAICodexTurnStateUsesAccountPlanOnFirstRoutingCheck(t *testing.T) {
+	const model = "gpt-5.6-terra"
+	accountID := int64(41)
+	account := &Account{
+		ID:          accountID,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Credentials: map[string]any{"plan_type": "team"},
+		Extra:       map[string]any{openAICodexStateRoutingRequiredExtraKey: true},
+	}
+	gateway := &OpenAIGatewayService{}
+	settings := defaultOpenAICodexTurnStateScanSettings()
+	settings.Rules = []OpenAICodexTurnStateLengthRule{
+		{PlanType: "team", Model: model, TargetLengths: []int{286}},
+	}
+	gateway.getOpenAICodexTurnStatePool().setScanSettings(settings)
+	state := testScopedOpenAICodexTurnState(286, time.Now().UTC().Add(-time.Minute), 't')
+	gateway.getOpenAICodexTurnStatePool().observe(state, &accountID, "session", model, "scanner")
+
+	require.True(t, gateway.hasRequiredOpenAICodexTurnState(account, model))
+}
