@@ -36,7 +36,19 @@ func TestCodexTurnStateAccountStatusCTESelectsNewestExpiryWithinAccountAndModel(
 	require.Contains(t, query, "c.source_account_id = a.id AND c.source_model = am.model")
 	require.Contains(t, query, "c.value_length = ANY(am.target_lengths) AND c.expires_at > NOW()")
 	require.Contains(t, query, "c.issued_at <= NOW() AND c.issued_at + INTERVAL '1 hour' > NOW()")
+	require.Contains(t, query, "NOT am.require_route_binding")
+	require.Contains(t, query, "COALESCE(c.route_ipv6, '') <> '' OR COALESCE(c.source_proxy_url, '') <> ''")
 	require.Contains(t, query, "ORDER BY array_position(am.target_lengths, c.value_length), c.expires_at DESC, c.last_seen_at DESC, c.state_hash DESC LIMIT 1")
+}
+
+func TestCodexTurnStatePolicyJSONIncludesStrictRouteBinding(t *testing.T) {
+	required := true
+	policy, err := codexTurnStatePolicyJSON(&service.OpenAICodexTurnStateScanSettings{
+		TargetLengths:       []int{332, 292},
+		RequireRouteBinding: &required,
+	})
+	require.NoError(t, err)
+	require.JSONEq(t, `{"target_lengths":[332,292],"rules":null,"require_route_binding":true}`, policy)
 }
 
 func TestCodexTurnStateScanUpsertRejectsLostLease(t *testing.T) {

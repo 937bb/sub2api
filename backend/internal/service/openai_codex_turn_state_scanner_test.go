@@ -186,6 +186,45 @@ func TestManualCodexTurnStateScanAllowsUnusedEligibleAccount(t *testing.T) {
 	require.False(t, isRecentlyUsedOpenAICodexAccount(account, now))
 }
 
+func TestStrictRouteBindingRunsDemandJobForDormantLegacyAccount(t *testing.T) {
+	now := time.Date(2026, 9, 21, 9, 0, 0, 0, time.UTC)
+	lastUsedAt := now.Add(-openAICodexTurnStateActiveUsageWindow - time.Minute)
+	account := &Account{
+		ID:          42,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+		LastUsedAt:  &lastUsedAt,
+	}
+	job := openAICodexTurnStateScanJob{accountID: account.ID, model: "gpt-6-astra"}
+
+	legacy := defaultOpenAICodexTurnStateScanSettings()
+	require.False(t, shouldRunOpenAICodexTurnStateScanJob(account, job, legacy, now))
+
+	requireRouteBinding := true
+	strict := legacy.clone()
+	strict.RequireRouteBinding = &requireRouteBinding
+	require.True(t, shouldRunOpenAICodexTurnStateScanJob(account, job, strict, now))
+	require.False(t, isRecentlyUsedOpenAICodexAccount(account, now), "periodic sweep must still exclude the dormant account")
+}
+
+func TestStrictRouteBindingStillRejectsIneligibleDemandJob(t *testing.T) {
+	now := time.Date(2026, 9, 21, 9, 0, 0, 0, time.UTC)
+	requireRouteBinding := true
+	settings := defaultOpenAICodexTurnStateScanSettings()
+	settings.RequireRouteBinding = &requireRouteBinding
+	job := openAICodexTurnStateScanJob{accountID: 42, model: "gpt-6-astra"}
+
+	for _, account := range []*Account{
+		{ID: 42, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true},
+		{ID: 42, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusDisabled, Schedulable: true},
+		{ID: 42, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: false},
+	} {
+		require.False(t, shouldRunOpenAICodexTurnStateScanJob(account, job, settings, now))
+	}
+}
+
 func TestOpenAICodexTurnStateScannerDeduplicatesAccountModelJobs(t *testing.T) {
 	scanner := &openAICodexTurnStateScanner{
 		queue:    make(chan openAICodexTurnStateScanJob, 4),

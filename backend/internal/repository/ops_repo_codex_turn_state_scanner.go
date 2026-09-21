@@ -390,7 +390,8 @@ WITH eligible_accounts AS (
 ), account_targets AS (
   SELECT am.account_id, am.model,
          COALESCE(matched.target_lengths,
-                  ARRAY(SELECT value::integer FROM jsonb_array_elements_text(policy.value->'target_lengths'))) AS target_lengths
+                  ARRAY(SELECT value::integer FROM jsonb_array_elements_text(policy.value->'target_lengths'))) AS target_lengths,
+         COALESCE((policy.value->>'require_route_binding')::boolean, FALSE) AS require_route_binding
   FROM account_models am
   JOIN eligible_accounts a ON a.id = am.account_id
   CROSS JOIN scan_policy policy
@@ -422,6 +423,8 @@ WITH eligible_accounts AS (
     WHERE c.source_account_id = a.id AND c.source_model = am.model
       AND c.value_length = ANY(am.target_lengths) AND c.expires_at > NOW()
       AND c.issued_at <= NOW() AND c.issued_at + INTERVAL '1 hour' > NOW()
+      AND (NOT am.require_route_binding
+        OR COALESCE(c.route_ipv6, '') <> '' OR COALESCE(c.source_proxy_url, '') <> '')
     ORDER BY array_position(am.target_lengths, c.value_length), c.expires_at DESC, c.last_seen_at DESC, c.state_hash DESC LIMIT 1
   ) ls ON TRUE
   LEFT JOIN codex_turn_state_scans sc ON sc.account_id = a.id AND sc.model = am.model
@@ -435,9 +438,10 @@ func codexTurnStatePolicyJSON(settings *service.OpenAICodexTurnStateScanSettings
 		settings = (*service.OpsService)(nil).GetOpenAICodexTurnStateScanSettings()
 	}
 	policy := struct {
-		TargetLengths []int                                    `json:"target_lengths"`
-		Rules         []service.OpenAICodexTurnStateLengthRule `json:"rules"`
-	}{TargetLengths: settings.TargetLengths, Rules: settings.Rules}
+		TargetLengths       []int                                    `json:"target_lengths"`
+		Rules               []service.OpenAICodexTurnStateLengthRule `json:"rules"`
+		RequireRouteBinding bool                                     `json:"require_route_binding,omitempty"`
+	}{TargetLengths: settings.TargetLengths, Rules: settings.Rules, RequireRouteBinding: settings.IsRouteBindingRequired()}
 	encoded, err := json.Marshal(policy)
 	if err != nil {
 		return "", fmt.Errorf("encode Codex state policy: %w", err)

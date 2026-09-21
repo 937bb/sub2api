@@ -363,6 +363,18 @@ func isEligibleOpenAICodexTurnStateAccount(account *Account, now time.Time) bool
 	return account.RateLimitResetAt == nil || !account.RateLimitResetAt.After(now)
 }
 
+func shouldRunOpenAICodexTurnStateScanJob(account *Account, job openAICodexTurnStateScanJob, settings *OpenAICodexTurnStateScanSettings, now time.Time) bool {
+	if !isEligibleOpenAICodexTurnStateAccount(account, now) {
+		return false
+	}
+	if job.force || isRecentlyUsedOpenAICodexAccount(account, now) || account.RequiresOpenAICodexStateRouting() {
+		return true
+	}
+	// A strict route-binding miss is enqueued by the live request path. The
+	// periodic sweep filters dormant accounts before enqueueing them.
+	return settings.IsRouteBindingRequired()
+}
+
 func (s *openAICodexTurnStateScanner) runWorker(ctx context.Context) {
 	for {
 		select {
@@ -379,8 +391,7 @@ func (s *openAICodexTurnStateScanner) runWorker(ctx context.Context) {
 func (s *openAICodexTurnStateScanner) runJob(ctx context.Context, job openAICodexTurnStateScanJob) {
 	account, err := s.accountRepo.GetByID(ctx, job.accountID)
 	now := time.Now()
-	if err != nil || !isEligibleOpenAICodexTurnStateAccount(account, now) ||
-		(!job.force && !isRecentlyUsedOpenAICodexAccount(account, now) && !account.RequiresOpenAICodexStateRouting()) {
+	if err != nil || !shouldRunOpenAICodexTurnStateScanJob(account, job, s.scanSettings(), now) {
 		return
 	}
 	plan := OpenAICodexStatePlanType(account)

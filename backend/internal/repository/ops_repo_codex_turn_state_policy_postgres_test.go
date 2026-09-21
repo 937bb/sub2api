@@ -40,7 +40,7 @@ CREATE TEMP TABLE codex_turn_states (
   state_hash TEXT PRIMARY KEY, source_account_id BIGINT NOT NULL, source_model TEXT NOT NULL,
   value_length INT NOT NULL, issued_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   expires_at TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '30 minutes',
-  last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), route_ipv6 TEXT, source_proxy_url TEXT
 );
 CREATE TEMP TABLE codex_turn_state_scans (
   account_id BIGINT NOT NULL, model TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
