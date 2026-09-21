@@ -22,6 +22,21 @@
     <p v-if="modelValue && disabledPlans.length" class="mt-2 border-l-2 border-amber-400 pl-2 text-[11px] leading-relaxed text-amber-700 dark:text-amber-300" role="status" data-test="state-routing-guard-warning">
       {{ t('admin.ops.turnState.scanSettings.routingGuardScanWarning', { plans: disabledPlansLabel }) }}
     </p>
+    <div class="mt-3 flex items-start justify-between gap-4 border-t border-gray-100 pt-3 dark:border-dark-700">
+      <div class="min-w-0">
+        <h3 class="text-xs font-semibold text-gray-800 dark:text-dark-100">{{ t('admin.ops.turnState.scanSettings.routeBinding') }}</h3>
+        <p class="mt-1 text-[11px] leading-relaxed text-gray-500 dark:text-dark-400">{{ t('admin.ops.turnState.scanSettings.routeBindingHint') }}</p>
+      </div>
+      <Toggle
+        :model-value="routeBindingRequired"
+        :aria-label="t('admin.ops.turnState.scanSettings.routeBinding')"
+        data-test="state-route-binding-toggle"
+        @update:model-value="emit('update:routeBindingRequired', $event)"
+      />
+    </div>
+    <p :class="['mt-2 text-[11px] font-medium', routeBindingRequired ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-500 dark:text-dark-400']" data-test="state-route-binding-status">
+      {{ t(routeBindingRequired ? 'admin.ops.turnState.scanSettings.routeBindingEnabled' : 'admin.ops.turnState.scanSettings.routeBindingDisabled') }}
+    </p>
   </section>
 </template>
 
@@ -32,10 +47,12 @@ import Toggle from '@/components/common/Toggle.vue'
 
 const props = defineProps<{
   modelValue: boolean
+  routeBindingRequired: boolean
   planScanEnabled: Record<string, boolean>
 }>()
 const emit = defineEmits<{
   (event: 'update:modelValue', value: boolean): void
+  (event: 'update:routeBindingRequired', value: boolean): void
 }>()
 const { t } = useI18n()
 const plans = ['pro', 'team', 'plus', 'free', 'enterprise']

@@ -772,6 +772,9 @@ func (p *openAICodexTurnStatePool) isReusableRecordLocked(record *OpenAICodexTur
 	if normalizeOpenAICodexTurnStateTransport(record.SourceTransport) != "scanner" || strings.TrimSpace(record.SourceSessionID) == "" {
 		return false
 	}
+	if p.scanSettings.IsRouteBindingRequired() && normalizeOpenAICodexRouteIPv6(record.RouteIPv6) == "" && strings.TrimSpace(record.SourceProxyURL) == "" {
+		return false
+	}
 	if record.IssuedAt.IsZero() || record.IssuedAt.After(now) || !record.IssuedAt.Add(openAICodexTurnStateTTL).After(now) {
 		return false
 	}

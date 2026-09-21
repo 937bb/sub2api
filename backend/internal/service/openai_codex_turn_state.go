@@ -175,19 +175,24 @@ func (s *OpenAIGatewayService) guardOpenAICodexTurnStateEcho(c *gin.Context, acc
 		stageOpenAICodexTurnStateSessionHash(c, h)
 	}
 	s.stripForeignOpenAICodexTurnState(c, account, h)
-	if strings.TrimSpace(h.Get(openAICodexTurnStateHeader)) != "" &&
-		(c == nil || c.GetString(openAICodexTurnStateReuseScopeContextKey) != openAICodexTurnStateReuseScopeAccountModel) {
-		return
-	}
 	owner := codexAccountIdentitySource(c, account)
 	if owner == nil || owner.ID <= 0 || model == "" {
 		return
 	}
 	pool := s.getOpenAICodexTurnStatePool()
 	pool.setAccountPlan(owner.ID, OpenAICodexStatePlanType(owner))
+	// Strict route binding treats the scanner State, session, and acquisition
+	// exit as one account/model ticket. Never let a client-carried State bypass
+	// that ticket and silently fall back to another egress.
+	if !pool.scanSettings.IsRouteBindingRequired() && strings.TrimSpace(h.Get(openAICodexTurnStateHeader)) != "" &&
+		(c == nil || c.GetString(openAICodexTurnStateReuseScopeContextKey) != openAICodexTurnStateReuseScopeAccountModel) {
+		return
+	}
 	if ticket, ok := pool.preferredRecordForBucket(owner.ID, model); ok {
 		setOpenAICodexTurnStateReuse(c, h, ticket.StateValue, openAICodexTurnStateReuseScopeAccountModel)
 		h.Set("session-id", ticket.SourceSessionID)
+	} else if pool.scanSettings.IsRouteBindingRequired() {
+		h.Del(openAICodexTurnStateHeader)
 	}
 }
 
@@ -298,10 +303,13 @@ func (s *OpenAIGatewayService) setOpenAICodexTurnStateScanEnqueuer(enqueue func(
 }
 
 func (s *OpenAIGatewayService) hasRequiredOpenAICodexTurnState(account *Account, model string) bool {
-	if account == nil || !account.RequiresOpenAICodexStateRouting() {
+	if account == nil || !account.IsOpenAIOAuthLike() {
 		return true
 	}
 	pool := s.getOpenAICodexTurnStatePool()
+	if !account.RequiresOpenAICodexStateRouting() && !pool.scanSettings.IsRouteBindingRequired() {
+		return true
+	}
 	if !pool.isStateRequiredBeforeRouting() {
 		return true
 	}

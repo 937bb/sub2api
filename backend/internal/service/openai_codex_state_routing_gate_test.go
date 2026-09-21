@@ -35,7 +35,7 @@ func TestRequiredOpenAICodexTurnStateBlocksPerModelAndQueuesScan(t *testing.T) {
 	require.False(t, gateway.hasRequiredOpenAICodexTurnState(account, "gpt-5.5"), "state must remain scoped to one model")
 }
 
-func TestRequiredOpenAICodexTurnStateDoesNotGateAPIKeyOrLegacyAccount(t *testing.T) {
+func TestRequiredOpenAICodexTurnStateDoesNotGateAPIKeyOrLegacyAccountByDefault(t *testing.T) {
 	gateway := &OpenAIGatewayService{}
 	apiKey := &Account{
 		ID:       41,
@@ -47,6 +47,17 @@ func TestRequiredOpenAICodexTurnStateDoesNotGateAPIKeyOrLegacyAccount(t *testing
 
 	require.True(t, gateway.hasRequiredOpenAICodexTurnState(apiKey, "gpt-6-astra"))
 	require.True(t, gateway.hasRequiredOpenAICodexTurnState(legacyOAuth, "gpt-6-astra"))
+}
+
+func TestRequiredOpenAICodexTurnStateStrictRouteBindingGatesLegacyOAuthAccounts(t *testing.T) {
+	gateway := &OpenAIGatewayService{}
+	settings := defaultOpenAICodexTurnStateScanSettings()
+	requireRouteBinding := true
+	settings.RequireRouteBinding = &requireRouteBinding
+	gateway.getOpenAICodexTurnStatePool().setScanSettings(settings)
+	legacyOAuth := &Account{ID: 42, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+
+	require.False(t, gateway.hasRequiredOpenAICodexTurnState(legacyOAuth, "gpt-6-astra"))
 }
 
 func TestRequiredOpenAICodexTurnStateCanBeDisabledAtRuntime(t *testing.T) {

@@ -115,6 +115,67 @@ func TestOpenAICodexTurnStateScopedPoolRestoredDefaultsPrefer332AndRetain292Fall
 	}
 }
 
+func TestOpenAICodexTurnStatePoolCanRequireAcquisitionRouteBinding(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	pool := newOpenAICodexTurnStatePool()
+	pool.now = func() time.Time { return now }
+	accountID := int64(11)
+	const model = "gpt-5.6-terra"
+	pool.setAccountPlan(accountID, "pro")
+	unbound := testScopedOpenAICodexTurnState(332, now.Add(-time.Minute), 'u')
+	require.NoError(t, pool.observeDurably(context.Background(), unbound, accountID, "session", model, "scanner", openAICodexTurnStateRouteTicket{SessionID: "session"}))
+	_, ok := pool.preferredForBucket(accountID, model)
+	require.True(t, ok)
+
+	settings := defaultOpenAICodexTurnStateScanSettings()
+	requireRouteBinding := true
+	settings.RequireRouteBinding = &requireRouteBinding
+	pool.setScanSettings(settings)
+	_, ok = pool.preferredForBucket(accountID, model)
+	require.False(t, ok, "an unbound legacy ticket must not remain reusable")
+
+	bound := testScopedOpenAICodexTurnState(332, now.Add(-time.Minute), 'b')
+	require.NoError(t, pool.observeDurably(context.Background(), bound, accountID, "session", model, "scanner", openAICodexTurnStateRouteTicket{
+		SessionID: "session",
+		RouteIPv6: "2a02:ae02:1a:2c00::1234",
+	}))
+	selected, ok := pool.preferredRecordForBucket(accountID, model)
+	require.True(t, ok)
+	require.Equal(t, bound, selected.StateValue)
+	require.Equal(t, "2a02:ae02:1a:2c00::1234", selected.RouteIPv6)
+}
+
+func TestOpenAICodexTurnStateStrictRouteBindingOverridesClientStateWithAccountModelTicket(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	svc := &OpenAIGatewayService{}
+	pool := svc.getOpenAICodexTurnStatePool()
+	pool.now = func() time.Time { return now }
+	settings := defaultOpenAICodexTurnStateScanSettings()
+	requireRouteBinding := true
+	settings.RequireRouteBinding = &requireRouteBinding
+	pool.setScanSettings(settings)
+
+	accountID := int64(12)
+	const model = "gpt-6-astra"
+	account := &Account{ID: accountID, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	ticketState := testScopedOpenAICodexTurnState(332, now.Add(-time.Minute), 't')
+	require.NoError(t, pool.observeDurably(context.Background(), ticketState, accountID, "ticket-session-hash", model, "scanner", openAICodexTurnStateRouteTicket{
+		SessionID: "ticket-session",
+		RouteIPv6: "2a02:ae02:1a:2c00::5678",
+	}))
+
+	c, _ := newTurnStateTestContext(t, 7, "client-session")
+	headers := http.Header{}
+	headers.Set(openAICodexTurnStateHeader, testScopedOpenAICodexTurnState(332, now.Add(-time.Minute), 'c'))
+	svc.guardOpenAICodexTurnStateEcho(c, account, headers, model)
+
+	require.Equal(t, ticketState, headers.Get(openAICodexTurnStateHeader))
+	require.Equal(t, "ticket-session", headers.Get("session-id"))
+	proxyURL, routeIPv6 := svc.openAICodexTurnStateRoute(account, headers, "http://fallback.example:8080")
+	require.Empty(t, proxyURL)
+	require.Equal(t, "2a02:ae02:1a:2c00::5678", routeIPv6)
+}
+
 func TestOpenAICodexTurnStateScopedPoolUpdatesPolicyAndPlanWithoutCrossAccountReuse(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	pool := newOpenAICodexTurnStatePool()

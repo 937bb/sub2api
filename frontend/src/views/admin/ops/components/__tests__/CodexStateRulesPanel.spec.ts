@@ -12,6 +12,7 @@ const settings: CodexTurnStateScanSettings = {
   rules: [{ plan_type: 'pro', model: '*', target_lengths: [332, 292] }, { plan_type: 'team', model: '*', target_lengths: [332, 292] }],
   plan_scan_enabled: { pro: true, team: true, plus: true, free: true, enterprise: true },
   require_state_before_routing: true,
+  require_route_binding: false,
   parallel_probes: 5, dynamic_proxy_enabled: true, dynamic_proxy_url: 'https://proxy.example/api'
 }
 describe('CodexStateRulesPanel', () => {
@@ -54,6 +55,15 @@ describe('CodexStateRulesPanel', () => {
     await wrapper.get('form').trigger('submit')
     await flushPromises()
     expect(updateSettings).toHaveBeenCalledWith({ ...settings, require_state_before_routing: false })
+  })
+  it('shows and persists strict State acquisition exit binding', async () => {
+    const wrapper = mount(CodexStateRulesPanel)
+    await flushPromises()
+    expect(wrapper.get('[data-test="state-route-binding-status"]').text()).toContain('routeBindingDisabled')
+    await wrapper.get('[data-test="state-route-binding-toggle"]').trigger('click')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(updateSettings).toHaveBeenCalledWith({ ...settings, require_route_binding: true })
   })
   it('adds a normalized model rule and deletes the selected row only', async () => {
     const wrapper = mount(CodexStateRulesPanel)

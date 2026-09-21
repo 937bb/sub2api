@@ -14,7 +14,7 @@
         <button type="button" class="btn btn-secondary shrink-0" :disabled="loading" @click="load">{{ t('common.refresh') }}</button>
       </div>
       <fieldset :disabled="loading || saving || !loaded" class="space-y-4 disabled:opacity-60">
-        <CodexStateRoutingGuard v-model="requireStateBeforeRouting" :plan-scan-enabled="planScanEnabled" />
+        <CodexStateRoutingGuard v-model="requireStateBeforeRouting" v-model:route-binding-required="requireRouteBinding" :plan-scan-enabled="planScanEnabled" />
         <CodexPlanScanSwitches v-model="planScanEnabled" />
         <div>
           <label for="codex-scan-lengths" class="mb-1 block font-medium text-gray-700 dark:text-dark-200">{{ t('admin.ops.turnState.scanSettings.lengths') }}</label>
@@ -101,6 +101,7 @@ const plans = ['*', 'pro', 'team', 'plus', 'free', 'enterprise']
 const switchablePlans = plans.filter(plan => plan !== '*')
 const planScanEnabled = ref<Record<string, boolean>>(Object.fromEntries(switchablePlans.map(plan => [plan, true])))
 const requireStateBeforeRouting = ref(true)
+const requireRouteBinding = ref(false)
 const rules = ref<Array<{ key: number; plan_type: string; model: string; lengthsText: string }>>([])
 const selectedRuleKey = ref<number | null>(null)
 let nextRuleKey = 0
@@ -140,6 +141,7 @@ function applySettings(settings: CodexTurnStateScanSettings) {
   lengthsText.value = settings.target_lengths.join(', ')
   planScanEnabled.value = Object.fromEntries(switchablePlans.map(plan => [plan, settings.plan_scan_enabled?.[plan] ?? true]))
   requireStateBeforeRouting.value = settings.require_state_before_routing ?? true
+  requireRouteBinding.value = settings.require_route_binding ?? false
   parallelProbes.value = settings.parallel_probes
   dynamicProxyEnabled.value = settings.dynamic_proxy_enabled
   dynamicProxyUrl.value = settings.dynamic_proxy_url
@@ -190,6 +192,7 @@ async function save() {
       rules: normalizedRules.value,
       plan_scan_enabled: { ...planScanEnabled.value },
       require_state_before_routing: requireStateBeforeRouting.value,
+      require_route_binding: requireRouteBinding.value,
       parallel_probes: Number(parallelProbes.value),
       dynamic_proxy_enabled: dynamicProxyEnabled.value,
       dynamic_proxy_url: dynamicProxyUrl.value.trim()

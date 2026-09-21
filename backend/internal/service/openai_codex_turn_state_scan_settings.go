@@ -23,6 +23,7 @@ type OpenAICodexTurnStateScanSettings struct {
 	Rules                     []OpenAICodexTurnStateLengthRule `json:"rules"`
 	PlanScanEnabled           map[string]bool                  `json:"plan_scan_enabled"`
 	RequireStateBeforeRouting *bool                            `json:"require_state_before_routing"`
+	RequireRouteBinding       *bool                            `json:"require_route_binding"`
 	ParallelProbes            int                              `json:"parallel_probes"`
 	DynamicProxyEnabled       bool                             `json:"dynamic_proxy_enabled"`
 	DynamicProxyURL           string                           `json:"dynamic_proxy_url"`
@@ -132,6 +133,12 @@ func (s *OpenAICodexTurnStateScanSettings) IsStateRequiredBeforeRouting() bool {
 	return s == nil || s.RequireStateBeforeRouting == nil || *s.RequireStateBeforeRouting
 }
 
+// IsRouteBindingRequired reports whether a reusable scanner ticket must retain
+// the same IPv6 or explicitly bound proxy used to acquire it.
+func (s *OpenAICodexTurnStateScanSettings) IsRouteBindingRequired() bool {
+	return s != nil && s.RequireRouteBinding != nil && *s.RequireRouteBinding
+}
+
 func (s *OpenAICodexTurnStateScanSettings) forAccountModel(account *Account, model string) *OpenAICodexTurnStateScanSettings {
 	resolved := s.clone()
 	resolved.TargetLengths = slices.Clone(s.TargetLengthsFor(OpenAICodexStatePlanType(account), model))
@@ -141,11 +148,13 @@ func (s *OpenAICodexTurnStateScanSettings) forAccountModel(account *Account, mod
 
 func defaultOpenAICodexTurnStateScanSettings() *OpenAICodexTurnStateScanSettings {
 	requireStateBeforeRouting := true
+	requireRouteBinding := false
 	return &OpenAICodexTurnStateScanSettings{
 		TargetLengths:             []int{332, 292},
 		Rules:                     defaultOpenAICodexTurnStateLengthRules(),
 		PlanScanEnabled:           defaultOpenAICodexTurnStatePlanScanEnabled(),
 		RequireStateBeforeRouting: &requireStateBeforeRouting,
+		RequireRouteBinding:       &requireRouteBinding,
 		ParallelProbes:            5,
 		DynamicProxyURL:           defaultOpenAICodexTurnStateDynamicProxyURL,
 	}
@@ -159,6 +168,10 @@ func (s *OpenAICodexTurnStateScanSettings) clone() *OpenAICodexTurnStateScanSett
 	if s.RequireStateBeforeRouting != nil {
 		requireStateBeforeRouting := *s.RequireStateBeforeRouting
 		copySettings.RequireStateBeforeRouting = &requireStateBeforeRouting
+	}
+	if s.RequireRouteBinding != nil {
+		requireRouteBinding := *s.RequireRouteBinding
+		copySettings.RequireRouteBinding = &requireRouteBinding
 	}
 	copySettings.TargetLengths = slices.Clone(s.TargetLengths)
 	copySettings.Rules = slices.Clone(s.Rules)
@@ -204,6 +217,10 @@ func validateOpenAICodexTurnStateScanSettings(settings *OpenAICodexTurnStateScan
 	if next.RequireStateBeforeRouting == nil {
 		requireStateBeforeRouting := true
 		next.RequireStateBeforeRouting = &requireStateBeforeRouting
+	}
+	if next.RequireRouteBinding == nil {
+		requireRouteBinding := false
+		next.RequireRouteBinding = &requireRouteBinding
 	}
 	if next.PlanScanEnabled == nil {
 		next.PlanScanEnabled = defaultOpenAICodexTurnStatePlanScanEnabled()

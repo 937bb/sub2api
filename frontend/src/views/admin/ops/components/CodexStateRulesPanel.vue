@@ -8,7 +8,7 @@
     </div>
     <form class="mt-3 space-y-3" @submit.prevent="save">
       <fieldset :disabled="loading || saving || !loaded" class="max-h-80 min-w-0 space-y-2 overflow-y-auto pr-1 disabled:opacity-60">
-        <CodexStateRoutingGuard v-model="requireStateBeforeRouting" :plan-scan-enabled="planScanEnabled" class="max-w-4xl" />
+        <CodexStateRoutingGuard v-model="requireStateBeforeRouting" v-model:route-binding-required="requireRouteBinding" :plan-scan-enabled="planScanEnabled" class="max-w-4xl" />
         <CodexPlanScanSwitches v-model="planScanEnabled" class="max-w-4xl" test-prefix="inline-plan-scan-" />
         <p v-if="selectedRule" class="max-w-4xl break-words text-xs leading-relaxed text-primary-700 dark:text-primary-300" data-test="inline-rule-scope">{{ t('admin.ops.turnState.scanSettings.selectedScope', { plan: selectedRule.plan_type === '*' ? t('common.all') : selectedRule.plan_type.toUpperCase(), model: selectedRule.model }) }}</p>
         <div v-if="!rules.length" class="text-xs text-gray-400">{{ loading ? t('common.loading') : t('admin.ops.turnState.scanSettings.noRules') }}</div>
@@ -70,6 +70,7 @@ const plans = ['*', 'pro', 'team', 'plus', 'free', 'enterprise']
 const switchablePlans = plans.filter(plan => plan !== '*')
 const planScanEnabled = ref<Record<string, boolean>>(Object.fromEntries(switchablePlans.map(plan => [plan, true])))
 const requireStateBeforeRouting = ref(true)
+const requireRouteBinding = ref(false)
 let nextKey = 0
 const modelSuggestions = computed(() => [...new Set(['*', 'gpt-5.6-terra', 'gpt-6-astra', ...rules.value.map(rule => rule.model.trim().toLowerCase()).filter(Boolean)])])
 const parseLengths = (value: string) => value.trim().split(/[\s,，]+/).filter(Boolean).map(Number)
@@ -94,6 +95,7 @@ function apply(settings: CodexTurnStateScanSettings) {
   lengthsText.value = settings.target_lengths.join(', ')
   planScanEnabled.value = Object.fromEntries(switchablePlans.map(plan => [plan, settings.plan_scan_enabled?.[plan] ?? true]))
   requireStateBeforeRouting.value = settings.require_state_before_routing ?? true
+  requireRouteBinding.value = settings.require_route_binding ?? false
   rules.value = (settings.rules ?? []).map(rule => ({ key: nextKey++, plan_type: rule.plan_type, model: rule.model, lengthsText: rule.target_lengths.join(', ') }))
   selectedRuleKey.value = null
 }
@@ -134,7 +136,7 @@ async function save() {
   saving.value = true
   try {
     const latest = await opsAPI.getCodexTurnStateScanSettings()
-    const result = await opsAPI.updateCodexTurnStateScanSettings({ ...latest, target_lengths: [...targetLengths.value], rules: normalizedRules.value, plan_scan_enabled: { ...planScanEnabled.value }, require_state_before_routing: requireStateBeforeRouting.value })
+    const result = await opsAPI.updateCodexTurnStateScanSettings({ ...latest, target_lengths: [...targetLengths.value], rules: normalizedRules.value, plan_scan_enabled: { ...planScanEnabled.value }, require_state_before_routing: requireStateBeforeRouting.value, require_route_binding: requireRouteBinding.value })
     apply(result)
     appStore.showSuccess(t('admin.ops.turnState.scanSettings.saved'))
     emit('saved', result)

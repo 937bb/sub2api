@@ -57,6 +57,7 @@ func TestOpenAICodexTurnStatePlanModelSettings(t *testing.T) {
 func TestOpenAICodexTurnStateDefaultsRestore332Then292ForAllProAndTeamModels(t *testing.T) {
 	settings := defaultOpenAICodexTurnStateScanSettings()
 	require.True(t, settings.IsStateRequiredBeforeRouting())
+	require.False(t, settings.IsRouteBindingRequired())
 	for _, plan := range []string{"pro", "team", "plus", "free", "enterprise"} {
 		require.True(t, settings.IsPlanScanEnabled(plan))
 	}
@@ -139,6 +140,7 @@ func TestOpenAICodexTurnStateRuleSettingsValidationAndLegacyDefaults(t *testing.
 	validated, err := validateOpenAICodexTurnStateScanSettings(legacy)
 	require.NoError(t, err)
 	require.True(t, validated.IsStateRequiredBeforeRouting(), "legacy settings must enable the routing guard")
+	require.False(t, validated.IsRouteBindingRequired(), "legacy settings must preserve unbound State compatibility")
 	require.Equal(t, []int{332, 292}, validated.TargetLengthsFor("pro", "gpt-5.5"))
 	require.True(t, validated.IsPlanScanEnabled("pro"), "legacy settings must keep scanning enabled")
 	legacy.Rules = []OpenAICodexTurnStateLengthRule{}
