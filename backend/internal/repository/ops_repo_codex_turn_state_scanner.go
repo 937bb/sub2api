@@ -52,7 +52,7 @@ func (r *opsRepository) ListOpenAICodexTurnStateProxies(ctx context.Context, ena
 		where = "WHERE enabled = TRUE"
 	}
 	rows, err := r.db.QueryContext(ctx, `
-SELECT id, name, proxy_url, enabled, health_status, consecutive_failures,
+SELECT id, name, proxy_url, enabled, route_binding_enabled, health_status, consecutive_failures,
        last_checked_at, last_success_at, last_error, created_at, updated_at
 FROM codex_turn_state_proxies `+where+`
 ORDER BY enabled DESC, COALESCE(last_success_at, 'epoch'::timestamptz) ASC, id ASC`)
@@ -65,7 +65,7 @@ ORDER BY enabled DESC, COALESCE(last_success_at, 'epoch'::timestamptz) ASC, id A
 	for rows.Next() {
 		item := &service.OpenAICodexTurnStateProxy{}
 		if err := rows.Scan(
-			&item.ID, &item.Name, &item.ProxyURL, &item.Enabled, &item.HealthStatus,
+			&item.ID, &item.Name, &item.ProxyURL, &item.Enabled, &item.RouteBindingEnabled, &item.HealthStatus,
 			&item.ConsecutiveFailures, &item.LastCheckedAt, &item.LastSuccessAt,
 			&item.LastError, &item.CreatedAt, &item.UpdatedAt,
 		); err != nil {
@@ -119,6 +119,21 @@ UPDATE codex_turn_state_proxies SET enabled = $2, updated_at = NOW() WHERE id = 
 		return err
 	}
 	if affected, _ := result.RowsAffected(); affected == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+func (r *opsRepository) SetOpenAICodexTurnStateProxyRouteBinding(ctx context.Context, id int64, enabled bool) error {
+	result, err := r.db.ExecContext(ctx, `
+UPDATE codex_turn_state_proxies
+SET route_binding_enabled = $2, updated_at = NOW()
+WHERE id = $1`, id, enabled)
+	if err != nil {
+		return err
+	}
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
 		return sql.ErrNoRows
 	}
 	return nil

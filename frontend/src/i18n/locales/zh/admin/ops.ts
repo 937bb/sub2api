@@ -21,6 +21,7 @@ export default {
         },
         accountHint: '按配置的目标模型逐项展示；后台仅自动补扫最近 1 小时实际使用且当前可调度的账号，历史和停用账号不会进入扫描队列。',
         proxyHint: '未开启动态代理时，扫描合并使用专用代理与代理管理中的有效代理；开启后只使用动态源，获取失败会等待重试。不会修改账号绑定关系或业务代理状态。',
+        routeBindingHint: '默认关闭。仅对稳定静态代理开启；验证成功的 State 后续业务请求才会复用该出口。',
         rulesPanel: {
           title: '手动配置 State 规则',
           hint: '直接选择账号套餐、填写模型和 State 目标长度。模型 * 表示全部；规则适用于同套餐、同模型的账号，State 内容仍各账号独立。',
@@ -112,6 +113,7 @@ export default {
           scan: '扫描记录',
           proxy: '扫描出口',
           enabled: '启用',
+          routeBinding: '绑定出口',
           health: '健康状态',
           lastChecked: '最后检测'
         }

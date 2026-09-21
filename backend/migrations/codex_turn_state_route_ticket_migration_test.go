@@ -17,4 +17,6 @@ func TestCodexTurnStateRouteTicketMigration(t *testing.T) {
 	}
 	require.Contains(t, sql, "source_transport = 'scanner'")
 	require.Contains(t, sql, "source_session_id is not null")
+	require.Contains(t, sql, "add column if not exists route_binding_enabled")
+	require.Contains(t, sql, "default false")
 }

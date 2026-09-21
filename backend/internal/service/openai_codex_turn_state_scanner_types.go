@@ -17,6 +17,7 @@ type OpenAICodexTurnStateProxy struct {
 	Country             string     `json:"country,omitempty"`
 	ExitIP              string     `json:"exit_ip,omitempty"`
 	Enabled             bool       `json:"enabled"`
+	RouteBindingEnabled bool       `json:"route_binding_enabled"`
 	HealthStatus        string     `json:"health_status"`
 	ConsecutiveFailures int        `json:"consecutive_failures"`
 	LastCheckedAt       *time.Time `json:"last_checked_at,omitempty"`
@@ -87,6 +88,7 @@ type OpenAICodexTurnStateScannerRepository interface {
 	ListReusableOpenAICodexTurnStateProxies(ctx context.Context) ([]*OpenAICodexTurnStateProxy, error)
 	CreateOpenAICodexTurnStateProxies(ctx context.Context, proxies []*OpenAICodexTurnStateProxy) (int, error)
 	SetOpenAICodexTurnStateProxyEnabled(ctx context.Context, id int64, enabled bool) error
+	SetOpenAICodexTurnStateProxyRouteBinding(ctx context.Context, id int64, enabled bool) error
 	DeleteOpenAICodexTurnStateProxy(ctx context.Context, id int64) error
 	UpdateOpenAICodexTurnStateProxyHealth(ctx context.Context, proxy *OpenAICodexTurnStateProxy) error
 	UpsertOpenAICodexTurnStateScan(ctx context.Context, scan *OpenAICodexTurnStateScan) error

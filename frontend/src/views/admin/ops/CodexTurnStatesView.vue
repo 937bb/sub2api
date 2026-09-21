@@ -175,6 +175,21 @@
               <span :class="['pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform', row.enabled ? 'translate-x-4' : 'translate-x-0']" />
             </button>
           </template>
+          <template #cell-route_binding_enabled="{ row }">
+            <button
+              type="button"
+              role="switch"
+              :aria-checked="row.route_binding_enabled"
+              :title="t('admin.ops.turnState.routeBindingHint')"
+              :class="[
+                'relative inline-flex h-5 w-9 shrink-0 rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500/40',
+                row.route_binding_enabled ? 'bg-emerald-500' : 'bg-gray-200 dark:bg-dark-600'
+              ]"
+              @click="toggleRouteBinding(row, !row.route_binding_enabled)"
+            >
+              <span :class="['pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform', row.route_binding_enabled ? 'translate-x-4' : 'translate-x-0']" />
+            </button>
+          </template>
           <template #cell-health_status="{ row }">
             <div class="flex items-center gap-2">
               <span :class="['h-2 w-2 shrink-0 rounded-full', proxyHealthDotClass(row.health_status)]" />
@@ -378,6 +393,7 @@ const accountColumns = computed<Column[]>(() => [
 const proxyColumns = computed<Column[]>(() => [
   { key: 'proxy', label: t('admin.ops.turnState.columns.proxy') },
   { key: 'enabled', label: t('admin.ops.turnState.columns.enabled') },
+  { key: 'route_binding_enabled', label: t('admin.ops.turnState.columns.routeBinding') },
   { key: 'health_status', label: t('admin.ops.turnState.columns.health') },
   { key: 'last_checked_at', label: t('admin.ops.turnState.columns.lastChecked') },
   { key: 'actions', label: t('common.actions') }
@@ -501,6 +517,10 @@ async function addProxies() {
 }
 async function toggleProxy(proxy: CodexTurnStateProxy, enabled: boolean) {
   try { await opsAPI.setCodexTurnStateProxyEnabled(proxy.id, enabled); proxy.enabled = enabled; await loadSummary() }
+  catch (error: any) { appStore.showError(error?.response?.data?.detail || t('admin.ops.turnState.proxyUpdateFailed')); await loadProxies() }
+}
+async function toggleRouteBinding(proxy: CodexTurnStateProxy, enabled: boolean) {
+  try { await opsAPI.setCodexTurnStateProxyRouteBinding(proxy.id, enabled); proxy.route_binding_enabled = enabled }
   catch (error: any) { appStore.showError(error?.response?.data?.detail || t('admin.ops.turnState.proxyUpdateFailed')); await loadProxies() }
 }
 async function deleteProxy(proxy: CodexTurnStateProxy) {

@@ -17,6 +17,7 @@ export default {
         },
         accountHint: 'Every configured target model is shown. Background scans only include schedulable accounts used in the last hour; historical and disabled accounts are excluded.',
         proxyHint: 'With dynamic proxies off, scans combine this dedicated pool with active proxies from Proxy Management. When enabled, only the dynamic source is used; acquisition failures wait for a retry. Account bindings and business proxy health stay unchanged.',
+        routeBindingHint: 'Off by default. Enable only for a stable static proxy; verified State requests may then reuse this exact business egress.',
         rulesPanel: {
           title: 'Edit State rules',
           hint: 'Choose an account plan, model and accepted State lengths here. Model * matches all. Rules apply to accounts with the same plan/model; State tokens remain private to each account.',
@@ -108,6 +109,7 @@ export default {
           scan: 'Scan activity',
           proxy: 'Scan egress',
           enabled: 'Enabled',
+          routeBinding: 'Bind egress',
           health: 'Health',
           lastChecked: 'Last checked'
         }

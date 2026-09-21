@@ -403,6 +403,28 @@ func TestOpenAICodexTurnStateScannerPersistsActualSessionAndModelScope(t *testin
 	require.False(t, otherModel)
 }
 
+func TestOpenAICodexTurnStateRouteTicketBindsOnlyExplicitStaticProxy(t *testing.T) {
+	for _, testCase := range []struct {
+		name      string
+		proxy     *OpenAICodexTurnStateProxy
+		wantProxy string
+		wantID    bool
+	}{
+		{name: "direct"},
+		{name: "dynamic", proxy: &OpenAICodexTurnStateProxy{Source: "dynamic", ProxyURL: "http://dynamic.example:8080"}},
+		{name: "shared", proxy: &OpenAICodexTurnStateProxy{Source: "shared", SourceID: 7, ProxyURL: "http://shared.example:8080"}},
+		{name: "scan only", proxy: &OpenAICodexTurnStateProxy{ID: 8, Source: "state", ProxyURL: "http://scan.example:8080"}, wantID: true},
+		{name: "static binding", proxy: &OpenAICodexTurnStateProxy{ID: 9, Source: "state", ProxyURL: "http://static.example:8080", RouteBindingEnabled: true}, wantProxy: "http://static.example:8080", wantID: true},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			ticket := openAICodexTurnStateRouteTicketForProxy("harvest-session", testCase.proxy)
+			require.Equal(t, "harvest-session", ticket.SessionID)
+			require.Equal(t, testCase.wantProxy, ticket.ProxyURL)
+			require.Equal(t, testCase.wantID, ticket.ProxyID != nil)
+		})
+	}
+}
+
 func TestHarvestOpenAICodexTurnStateRejectsReplayDowngrade(t *testing.T) {
 	now := time.Now().UTC().Add(-time.Minute).Truncate(time.Second)
 	firstState := testOpenAICodexTurnState(332, now, 'a')

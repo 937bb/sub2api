@@ -149,6 +149,7 @@ export interface CodexTurnStateProxy {
   name: string
   masked_url: string
   enabled: boolean
+  route_binding_enabled: boolean
   health_status: 'unknown' | 'healthy' | 'unhealthy' | string
   consecutive_failures: number
   last_checked_at?: string
@@ -205,6 +206,11 @@ export async function addCodexTurnStateProxies(values: string[]): Promise<{ adde
 
 export async function setCodexTurnStateProxyEnabled(id: number, enabled: boolean): Promise<{ updated: boolean }> {
   const { data } = await apiClient.put<{ updated: boolean }>(`/admin/ops/codex-turn-states/proxies/${id}/enabled`, { enabled })
+  return data
+}
+
+export async function setCodexTurnStateProxyRouteBinding(id: number, enabled: boolean): Promise<{ updated: boolean }> {
+  const { data } = await apiClient.put<{ updated: boolean }>(`/admin/ops/codex-turn-states/proxies/${id}/route-binding`, { enabled })
   return data
 }
 
@@ -1491,6 +1497,7 @@ export const opsAPI = {
   listCodexTurnStateProxies,
   addCodexTurnStateProxies,
   setCodexTurnStateProxyEnabled,
+  setCodexTurnStateProxyRouteBinding,
   deleteCodexTurnStateProxy,
   scanCodexTurnState,
   scanCodexTurnStateAccount,

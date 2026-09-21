@@ -480,15 +480,7 @@ func (s *openAICodexTurnStateScanner) runJob(ctx context.Context, job openAICode
 		return
 	}
 	if failure == "" {
-		ticket := openAICodexTurnStateRouteTicket{SessionID: result.sessionID}
-		if proxy != nil {
-			ticket.ProxyURL = proxy.ProxyURL
-			ticket.ExitIP = proxy.ExitIP
-			if proxy.Source == "state" && proxy.ID > 0 {
-				proxyID := proxy.ID
-				ticket.ProxyID = &proxyID
-			}
-		}
+		ticket := openAICodexTurnStateRouteTicketForProxy(result.sessionID, proxy)
 		if err := pool.observeDurably(persistCtx, result.stateValue, account.ID, hashOpenAICodexTurnState(result.sessionID), upstreamModel, "scanner", ticket); err != nil {
 			log.WithError(err).WithFields(log.Fields{"account_id": account.ID, "model": upstreamModel}).Warn("failed to persist acquired Codex turn-state")
 			scan.Status = "retry_wait"
@@ -504,6 +496,23 @@ func (s *openAICodexTurnStateScanner) runJob(ctx context.Context, job openAICode
 			}
 		}
 	}
+}
+
+func openAICodexTurnStateRouteTicketForProxy(sessionID string, proxy *OpenAICodexTurnStateProxy) openAICodexTurnStateRouteTicket {
+	ticket := openAICodexTurnStateRouteTicket{SessionID: sessionID}
+	if proxy == nil {
+		return ticket
+	}
+	ticket.ExitIP = proxy.ExitIP
+	if proxy.Source != "state" || proxy.ID <= 0 {
+		return ticket
+	}
+	proxyID := proxy.ID
+	ticket.ProxyID = &proxyID
+	if proxy.RouteBindingEnabled {
+		ticket.ProxyURL = proxy.ProxyURL
+	}
+	return ticket
 }
 
 type openAICodexTurnStateProbe struct {
@@ -1089,6 +1098,14 @@ func (s *OpsService) SetOpenAICodexTurnStateProxyEnabled(ctx context.Context, id
 		return err
 	}
 	return repo.SetOpenAICodexTurnStateProxyEnabled(ctx, id, enabled)
+}
+
+func (s *OpsService) SetOpenAICodexTurnStateProxyRouteBinding(ctx context.Context, id int64, enabled bool) error {
+	repo, err := s.codexTurnStateScannerRepository()
+	if err != nil {
+		return err
+	}
+	return repo.SetOpenAICodexTurnStateProxyRouteBinding(ctx, id, enabled)
 }
 
 func (s *OpsService) DeleteOpenAICodexTurnStateProxy(ctx context.Context, id int64) error {

@@ -302,6 +302,28 @@ func (h *OpsHandler) SetCodexTurnStateProxyEnabled(c *gin.Context) {
 	response.Success(c, gin.H{"updated": true})
 }
 
+func (h *OpsHandler) SetCodexTurnStateProxyRouteBinding(c *gin.Context) {
+	if h.opsService == nil {
+		response.Error(c, http.StatusServiceUnavailable, "Ops service not available")
+		return
+	}
+	id, err := strconv.ParseInt(strings.TrimSpace(c.Param("id")), 10, 64)
+	if err != nil || id <= 0 {
+		response.BadRequest(c, "Invalid proxy id")
+		return
+	}
+	var req codexTurnStateProxyEnabledRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request")
+		return
+	}
+	if err := h.opsService.SetOpenAICodexTurnStateProxyRouteBinding(c.Request.Context(), id, req.Enabled); err != nil {
+		response.Error(c, http.StatusBadRequest, "Failed to update Codex route binding")
+		return
+	}
+	response.Success(c, gin.H{"updated": true})
+}
+
 func (h *OpsHandler) DeleteCodexTurnStateProxy(c *gin.Context) {
 	if h.opsService == nil {
 		response.Error(c, http.StatusServiceUnavailable, "Ops service not available")
