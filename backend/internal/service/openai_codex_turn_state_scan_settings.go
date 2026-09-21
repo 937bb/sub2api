@@ -39,7 +39,7 @@ type OpenAICodexTurnStateLengthRule struct {
 func defaultOpenAICodexTurnStateLengthRules() []OpenAICodexTurnStateLengthRule {
 	return []OpenAICodexTurnStateLengthRule{
 		{PlanType: "pro", Model: "*", TargetLengths: []int{332, 292}},
-		{PlanType: "team", Model: "*", TargetLengths: []int{332, 292}},
+		{PlanType: "team", Model: "*", TargetLengths: []int{356, 332, 292}},
 	}
 }
 

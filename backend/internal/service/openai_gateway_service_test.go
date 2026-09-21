@@ -884,6 +884,46 @@ func TestOpenAISelectAccountWithLoadAwareness_FiltersUnschedulable(t *testing.T)
 	}
 }
 
+func TestOpenAISelectAccountWithLoadAwarenessBlocksCodexOAuthWithoutState(t *testing.T) {
+	groupID := int64(1)
+	oauth := Account{
+		ID:          1,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    0,
+		Extra:       map[string]any{openAICodexStateRoutingRequiredExtraKey: true},
+	}
+	apiKey := Account{
+		ID:          2,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    1,
+	}
+	svc := &OpenAIGatewayService{
+		accountRepo:        stubOpenAIAccountRepo{accounts: []Account{oauth, apiKey}},
+		concurrencyService: NewConcurrencyService(stubConcurrencyCache{}),
+	}
+	settings := defaultOpenAICodexTurnStateScanSettings()
+	requireRouteBinding := true
+	settings.RequireRouteBinding = &requireRouteBinding
+	svc.getOpenAICodexTurnStatePool().setScanSettings(settings)
+
+	selection, err := svc.SelectAccountWithLoadAwareness(context.Background(), &groupID, "", "gpt-6-astra", nil)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.Account)
+	require.Equal(t, apiKey.ID, selection.Account.ID)
+	if selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
+	}
+}
+
 func TestOpenAISelectAccountWithLoadAwareness_ImageRateLimitSkipsOnlyImageRequests(t *testing.T) {
 	future := time.Now().Add(10 * time.Minute).Format(time.RFC3339)
 	groupID := int64(1)

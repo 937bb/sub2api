@@ -1815,6 +1815,9 @@ func (s *OpenAIGatewayService) resolveFreshSchedulableOpenAIAccountBeforeProfit(
 	if s.isOpenAIAccountRequestRuntimeBlocked(fresh, requestedModel, requireCompact) {
 		return nil
 	}
+	if !s.hasRequiredOpenAICodexTurnState(fresh, requestedModel) {
+		return nil
+	}
 	if s.isOpenAIAccountBlockedBySchedulingThreshold(ctx, fresh) {
 		return nil
 	}
@@ -1870,6 +1873,9 @@ func (s *OpenAIGatewayService) recheckSelectedOpenAIAccountFromDBBeforeProfit(ct
 		if s.isOpenAIProxyStreamQuarantined(ctx, account) {
 			return nil
 		}
+		if !s.hasRequiredOpenAICodexTurnState(account, requestedModel) {
+			return nil
+		}
 		return account
 	}
 
@@ -1890,6 +1896,9 @@ func (s *OpenAIGatewayService) recheckSelectedOpenAIAccountFromDBBeforeProfit(ct
 		return nil
 	}
 	if s.isOpenAIAccountRequestRuntimeBlocked(latest, requestedModel, requireCompact) {
+		return nil
+	}
+	if !s.hasRequiredOpenAICodexTurnState(latest, requestedModel) {
 		return nil
 	}
 	if s.isOpenAIAccountBlockedBySchedulingThreshold(ctx, latest) {

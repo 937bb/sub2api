@@ -54,7 +54,7 @@ func TestOpenAICodexTurnStatePlanModelSettings(t *testing.T) {
 	require.Equal(t, "pro", OpenAICodexStatePlanType(imported), "explicit credentials outrank the import fallback")
 }
 
-func TestOpenAICodexTurnStateDefaultsRestore332Then292ForAllProAndTeamModels(t *testing.T) {
+func TestOpenAICodexTurnStateDefaultsUseTeam356Then332Then292(t *testing.T) {
 	settings := defaultOpenAICodexTurnStateScanSettings()
 	require.True(t, settings.IsStateRequiredBeforeRouting())
 	require.False(t, settings.IsRouteBindingRequired())
@@ -63,17 +63,23 @@ func TestOpenAICodexTurnStateDefaultsRestore332Then292ForAllProAndTeamModels(t *
 	}
 	require.Equal(t, []OpenAICodexTurnStateLengthRule{
 		{PlanType: "pro", Model: "*", TargetLengths: []int{332, 292}},
-		{PlanType: "team", Model: "*", TargetLengths: []int{332, 292}},
+		{PlanType: "team", Model: "*", TargetLengths: []int{356, 332, 292}},
 	}, settings.Rules)
-	for _, plan := range []string{"pro", "pro20x", "prolite", "team", "business", "self_serve_business_prolite"} {
+	for _, plan := range []string{"pro", "pro20x", "prolite"} {
 		for _, model := range []string{"gpt-5.6-terra", "gpt-6-astra", "gpt-5.5"} {
 			lengths := settings.TargetLengthsFor(plan, model)
 			require.Equal(t, []int{332, 292}, lengths, "plan %s model %s", plan, model)
 		}
 	}
+	for _, plan := range []string{"team", "business", "self_serve_business_prolite"} {
+		for _, model := range []string{"gpt-5.6-terra", "gpt-6-astra", "gpt-5.5"} {
+			lengths := settings.TargetLengthsFor(plan, model)
+			require.Equal(t, []int{356, 332, 292}, lengths, "plan %s model %s", plan, model)
+		}
+	}
 	settings.Rules = append(settings.Rules, OpenAICodexTurnStateLengthRule{PlanType: "team", Model: "gpt-6-astra", TargetLengths: []int{273}})
 	require.Equal(t, []int{273}, settings.TargetLengthsFor("team", "gpt-6-astra"), "manual per-model overrides must remain supported")
-	require.Equal(t, []int{332, 292}, settings.TargetLengthsFor("team", "gpt-5.6-terra"))
+	require.Equal(t, []int{356, 332, 292}, settings.TargetLengthsFor("team", "gpt-5.6-terra"))
 	require.Equal(t, []int{332, 292}, settings.TargetLengthsFor("pro", "gpt-6-astra"))
 }
 
