@@ -10,6 +10,7 @@ vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 const settings: CodexTurnStateScanSettings = {
   target_lengths: [332, 292],
   rules: [{ plan_type: 'pro', model: '*', target_lengths: [332, 292] }, { plan_type: 'team', model: '*', target_lengths: [332, 292] }],
+  plan_scan_enabled: { pro: true, team: true, plus: true, free: true, enterprise: true },
   parallel_probes: 5, dynamic_proxy_enabled: true, dynamic_proxy_url: 'https://proxy.example/api'
 }
 describe('CodexStateRulesPanel', () => {
@@ -35,6 +36,14 @@ describe('CodexStateRulesPanel', () => {
     await flushPromises()
     expect(updateSettings).toHaveBeenCalledWith({ ...settings, parallel_probes: 3, dynamic_proxy_url: 'https://new-proxy.example/api', dynamic_proxy_enabled: false, rules: [settings.rules[0], { ...settings.rules[1], target_lengths: [286, 292] }] })
     expect(wrapper.emitted('saved')).toHaveLength(1)
+  })
+  it('can disable Pro scanning independently of its State length rule', async () => {
+    const wrapper = mount(CodexStateRulesPanel)
+    await flushPromises()
+    await wrapper.get('[data-test="inline-plan-scan-pro"]').trigger('click')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(updateSettings).toHaveBeenCalledWith({ ...settings, plan_scan_enabled: { ...settings.plan_scan_enabled, pro: false } })
   })
   it('adds a normalized model rule and deletes the selected row only', async () => {
     const wrapper = mount(CodexStateRulesPanel)

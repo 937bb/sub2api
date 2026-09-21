@@ -56,6 +56,9 @@ func TestOpenAICodexTurnStatePlanModelSettings(t *testing.T) {
 
 func TestOpenAICodexTurnStateDefaultsRestore332Then292ForAllProAndTeamModels(t *testing.T) {
 	settings := defaultOpenAICodexTurnStateScanSettings()
+	for _, plan := range []string{"pro", "team", "plus", "free", "enterprise"} {
+		require.True(t, settings.IsPlanScanEnabled(plan))
+	}
 	require.Equal(t, []OpenAICodexTurnStateLengthRule{
 		{PlanType: "pro", Model: "*", TargetLengths: []int{332, 292}},
 		{PlanType: "team", Model: "*", TargetLengths: []int{332, 292}},
@@ -70,6 +73,41 @@ func TestOpenAICodexTurnStateDefaultsRestore332Then292ForAllProAndTeamModels(t *
 	require.Equal(t, []int{273}, settings.TargetLengthsFor("team", "gpt-6-astra"), "manual per-model overrides must remain supported")
 	require.Equal(t, []int{332, 292}, settings.TargetLengthsFor("team", "gpt-5.6-terra"))
 	require.Equal(t, []int{332, 292}, settings.TargetLengthsFor("pro", "gpt-6-astra"))
+}
+
+func TestOpenAICodexTurnStatePlanScanSwitchStopsOnlyAcquisition(t *testing.T) {
+	settings := defaultOpenAICodexTurnStateScanSettings()
+	settings.PlanScanEnabled["pro"] = false
+	require.False(t, settings.IsPlanScanEnabled("pro20x"))
+	require.True(t, settings.IsPlanScanEnabled("team"))
+	require.True(t, settings.IsPlanScanEnabled("new-plan"), "unknown plans remain enabled until explicitly supported")
+
+	now := time.Now().UTC().Truncate(time.Second)
+	account := turnStateRefreshAccount(41, now)
+	account.Credentials["plan_type"] = "pro"
+	model := "gpt-6-astra"
+	repo := &turnStateRefreshScanRepo{scans: make(map[openAICodexTurnStateBucketKey]*OpenAICodexTurnStateScan)}
+	gateway := ticketTestService(t, config.OpenAICodexTicketConfig{Models: []string{model}}, nil)
+	pool := gateway.getOpenAICodexTurnStatePool()
+	pool.setScanSettings(settings)
+	scanner := newOpenAICodexTurnStateScanner(repo, &turnStateRefreshAccountRepo{accounts: map[int64]*Account{41: account}}, gateway)
+	scanner.settings.Store(settings)
+	called := false
+	scanner.probe = func(context.Context, *Account, string, string) openAICodexTurnStateHarvestResult {
+		called = true
+		return stateConcurrencyResult(292, model)
+	}
+	svc := &OpsService{codexTurnStateScanner: scanner}
+	require.False(t, svc.EnqueueOpenAICodexTurnStateScan(context.Background(), account.ID, model))
+	require.Empty(t, scanner.queue)
+	scanner.runJob(context.Background(), openAICodexTurnStateScanJob{accountID: account.ID, model: model, force: true})
+	require.False(t, called)
+	require.Empty(t, repo.scans, "disabling a plan must not create scan records")
+
+	account.Credentials["plan_type"] = "team"
+	require.True(t, svc.EnqueueOpenAICodexTurnStateScan(context.Background(), account.ID, model))
+	scanner.runJob(context.Background(), <-scanner.queue)
+	require.True(t, called, "disabling Pro must not stop Team acquisition")
 }
 
 func TestOpenAICodexTurnStateRuleSettingsValidationAndLegacyDefaults(t *testing.T) {
@@ -91,11 +129,16 @@ func TestOpenAICodexTurnStateRuleSettingsValidationAndLegacyDefaults(t *testing.
 	s.Rules = append(s.Rules, OpenAICodexTurnStateLengthRule{PlanType: "Pro20x", Model: "*", TargetLengths: []int{332}})
 	_, err := validateOpenAICodexTurnStateScanSettings(s)
 	require.ErrorContains(t, err, "duplicate")
+	s = defaultOpenAICodexTurnStateScanSettings()
+	s.PlanScanEnabled["pro20x"] = false
+	_, err = validateOpenAICodexTurnStateScanSettings(s)
+	require.ErrorContains(t, err, "duplicate normalized plans")
 	legacy := &OpenAICodexTurnStateScanSettings{}
 	require.NoError(t, json.Unmarshal([]byte(`{"target_lengths":[332,292],"parallel_probes":5}`), legacy))
 	validated, err := validateOpenAICodexTurnStateScanSettings(legacy)
 	require.NoError(t, err)
 	require.Equal(t, []int{332, 292}, validated.TargetLengthsFor("pro", "gpt-5.5"))
+	require.True(t, validated.IsPlanScanEnabled("pro"), "legacy settings must keep scanning enabled")
 	legacy.Rules = []OpenAICodexTurnStateLengthRule{}
 	validated, err = validateOpenAICodexTurnStateScanSettings(legacy)
 	require.NoError(t, err)
@@ -167,8 +210,8 @@ func TestOpenAICodexTurnStateManualScanLoadsPlanBeforeSkipping(t *testing.T) {
 		return stateConcurrencyResult(292, model)
 	}
 	svc := &OpsService{codexTurnStateScanner: scanner}
-	require.True(t, svc.EnqueueOpenAICodexTurnStateScan(41, model))
-	require.False(t, svc.EnqueueOpenAICodexTurnStateScan(41, model), "same account/model must remain deduplicated")
+	require.True(t, svc.EnqueueOpenAICodexTurnStateScan(context.Background(), 41, model))
+	require.False(t, svc.EnqueueOpenAICodexTurnStateScan(context.Background(), 41, model), "same account/model must remain deduplicated")
 	scanner.runJob(context.Background(), <-scanner.queue)
 	require.Equal(t, 1, calls, "Pro must replace 332 even when its plan was unknown at enqueue time")
 	selected, ok := pool.preferredForBucket(41, model)

@@ -20,6 +20,7 @@ const defaultOpenAICodexTurnStateDynamicProxyURL = "https://api.cliproxy.io/whit
 type OpenAICodexTurnStateScanSettings struct {
 	TargetLengths       []int                            `json:"target_lengths"`
 	Rules               []OpenAICodexTurnStateLengthRule `json:"rules"`
+	PlanScanEnabled     map[string]bool                  `json:"plan_scan_enabled"`
 	ParallelProbes      int                              `json:"parallel_probes"`
 	DynamicProxyEnabled bool                             `json:"dynamic_proxy_enabled"`
 	DynamicProxyURL     string                           `json:"dynamic_proxy_url"`
@@ -36,6 +37,16 @@ func defaultOpenAICodexTurnStateLengthRules() []OpenAICodexTurnStateLengthRule {
 	return []OpenAICodexTurnStateLengthRule{
 		{PlanType: "pro", Model: "*", TargetLengths: []int{332, 292}},
 		{PlanType: "team", Model: "*", TargetLengths: []int{332, 292}},
+	}
+}
+
+func defaultOpenAICodexTurnStatePlanScanEnabled() map[string]bool {
+	return map[string]bool{
+		"pro":        true,
+		"team":       true,
+		"plus":       true,
+		"free":       true,
+		"enterprise": true,
 	}
 }
 
@@ -98,6 +109,21 @@ func (s *OpenAICodexTurnStateScanSettings) TargetLengthsFor(plan, model string) 
 	return lengths
 }
 
+// IsPlanScanEnabled controls acquisition only. It never disables normal
+// account routing or reuse of a state that was acquired earlier.
+func (s *OpenAICodexTurnStateScanSettings) IsPlanScanEnabled(plan string) bool {
+	if s == nil {
+		return true
+	}
+	plan = NormalizeOpenAICodexStatePlanType(plan)
+	if enabled, ok := s.PlanScanEnabled[plan]; ok {
+		return enabled
+	}
+	// Unknown or newly introduced plan types remain enabled for backwards
+	// compatibility. Administrators can explicitly disable known plans.
+	return true
+}
+
 func (s *OpenAICodexTurnStateScanSettings) forAccountModel(account *Account, model string) *OpenAICodexTurnStateScanSettings {
 	resolved := s.clone()
 	resolved.TargetLengths = slices.Clone(s.TargetLengthsFor(OpenAICodexStatePlanType(account), model))
@@ -109,6 +135,7 @@ func defaultOpenAICodexTurnStateScanSettings() *OpenAICodexTurnStateScanSettings
 	return &OpenAICodexTurnStateScanSettings{
 		TargetLengths:   []int{332, 292},
 		Rules:           defaultOpenAICodexTurnStateLengthRules(),
+		PlanScanEnabled: defaultOpenAICodexTurnStatePlanScanEnabled(),
 		ParallelProbes:  5,
 		DynamicProxyURL: defaultOpenAICodexTurnStateDynamicProxyURL,
 	}
@@ -121,6 +148,10 @@ func (s *OpenAICodexTurnStateScanSettings) clone() *OpenAICodexTurnStateScanSett
 	copySettings := *s
 	copySettings.TargetLengths = slices.Clone(s.TargetLengths)
 	copySettings.Rules = slices.Clone(s.Rules)
+	copySettings.PlanScanEnabled = make(map[string]bool, len(s.PlanScanEnabled))
+	for plan, enabled := range s.PlanScanEnabled {
+		copySettings.PlanScanEnabled[plan] = enabled
+	}
 	for i := range copySettings.Rules {
 		copySettings.Rules[i].TargetLengths = slices.Clone(s.Rules[i].TargetLengths)
 	}
@@ -156,6 +187,29 @@ func validateOpenAICodexTurnStateScanSettings(settings *OpenAICodexTurnStateScan
 		return nil, infraerrors.BadRequest("CODEX_STATE_SCAN_SETTINGS_INVALID", "target_lengths must contain 1 to 16 ordered lengths")
 	}
 	next := settings.clone()
+	if next.PlanScanEnabled == nil {
+		next.PlanScanEnabled = defaultOpenAICodexTurnStatePlanScanEnabled()
+	} else {
+		normalizedPlanScanEnabled := make(map[string]bool, len(next.PlanScanEnabled)+5)
+		for plan, enabled := range next.PlanScanEnabled {
+			plan = NormalizeOpenAICodexStatePlanType(plan)
+			switch plan {
+			case "pro", "team", "plus", "free", "enterprise":
+			default:
+				return nil, infraerrors.BadRequest("CODEX_STATE_SCAN_SETTINGS_INVALID", "plan_scan_enabled contains an unsupported plan")
+			}
+			if _, exists := normalizedPlanScanEnabled[plan]; exists {
+				return nil, infraerrors.BadRequest("CODEX_STATE_SCAN_SETTINGS_INVALID", "plan_scan_enabled contains duplicate normalized plans")
+			}
+			normalizedPlanScanEnabled[plan] = enabled
+		}
+		for plan, enabled := range defaultOpenAICodexTurnStatePlanScanEnabled() {
+			if _, exists := normalizedPlanScanEnabled[plan]; !exists {
+				normalizedPlanScanEnabled[plan] = enabled
+			}
+		}
+		next.PlanScanEnabled = normalizedPlanScanEnabled
+	}
 	if next.Rules == nil {
 		next.Rules = defaultOpenAICodexTurnStateLengthRules()
 	}

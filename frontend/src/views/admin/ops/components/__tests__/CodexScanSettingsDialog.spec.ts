@@ -25,6 +25,7 @@ const settings: CodexTurnStateScanSettings = {
     { plan_type: 'pro', model: '*', target_lengths: [332, 292] },
     { plan_type: 'team', model: '*', target_lengths: [332, 292] }
   ],
+  plan_scan_enabled: { pro: true, team: true, plus: true, free: true, enterprise: true },
   parallel_probes: 5,
   dynamic_proxy_enabled: false,
   dynamic_proxy_url: 'https://api.cliproxy.io/white/api?region=Rand&num=1&format=n&type=txt'
@@ -53,7 +54,7 @@ describe('CodexScanSettingsDialog', () => {
     await flushPromises()
     await wrapper.get('#codex-scan-lengths').setValue('292， 356, 332')
     await wrapper.get('#codex-scan-parallel').setValue('3')
-    await wrapper.get('input[type="checkbox"]').setValue(true)
+    await wrapper.get('[data-test="dynamic-proxy-enabled"]').setValue(true)
     await wrapper.get('form').trigger('submit')
     await flushPromises()
 
@@ -61,6 +62,15 @@ describe('CodexScanSettingsDialog', () => {
     expect(updateSettings).toHaveBeenCalledWith({ ...settings, target_lengths: [292, 356, 332], parallel_probes: 3, dynamic_proxy_enabled: true })
     expect(wrapper.emitted('saved')).toHaveLength(1)
     expect(wrapper.emitted('close')).toHaveLength(1)
+  })
+
+  it('saves independent plan scan switches', async () => {
+    const wrapper = render()
+    await flushPromises()
+    await wrapper.get('[data-test="plan-scan-pro"]').trigger('click')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(updateSettings).toHaveBeenCalledWith({ ...settings, plan_scan_enabled: { ...settings.plan_scan_enabled, pro: false } })
   })
 
   it('edits plan/model lengths while preserving other rules and scan configuration', async () => {
@@ -178,7 +188,7 @@ describe('CodexScanSettingsDialog', () => {
     await wrapper.get('form').trigger('submit')
     expect(updateSettings).not.toHaveBeenCalled()
     await wrapper.get('#codex-scan-parallel').setValue('4')
-    await wrapper.get('input[type="checkbox"]').setValue(true)
+    await wrapper.get('[data-test="dynamic-proxy-enabled"]').setValue(true)
     for (const value of ['http://proxy.example/api', 'https://user:pass@proxy.example/api', 'https://proxy.example/api#part', 'https://proxy.example/api#', `https://proxy.example/${'a'.repeat(2048)}`, 'invalid']) {
       await wrapper.get('#codex-scan-provider').setValue(value)
       await wrapper.get('form').trigger('submit')

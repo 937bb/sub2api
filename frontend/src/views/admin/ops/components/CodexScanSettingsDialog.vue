@@ -14,6 +14,7 @@
         <button type="button" class="btn btn-secondary shrink-0" :disabled="loading" @click="load">{{ t('common.refresh') }}</button>
       </div>
       <fieldset :disabled="loading || saving || !loaded" class="space-y-4 disabled:opacity-60">
+        <CodexPlanScanSwitches v-model="planScanEnabled" />
         <div>
           <label for="codex-scan-lengths" class="mb-1 block font-medium text-gray-700 dark:text-dark-200">{{ t('admin.ops.turnState.scanSettings.lengths') }}</label>
           <input id="codex-scan-lengths" v-model="lengthsText" class="input font-mono text-sm" autocomplete="off" placeholder="332, 292" aria-describedby="codex-scan-lengths-help" />
@@ -54,7 +55,7 @@
           <p class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ t('admin.ops.turnState.scanSettings.parallelHint') }}</p>
         </div>
         <label class="flex items-center gap-2 font-medium text-gray-700 dark:text-dark-200">
-          <input v-model="dynamicProxyEnabled" type="checkbox" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
+          <input v-model="dynamicProxyEnabled" type="checkbox" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500" data-test="dynamic-proxy-enabled" />
           {{ t('admin.ops.turnState.scanSettings.dynamicEnabled') }}
         </label>
         <div v-if="dynamicProxyEnabled">
@@ -80,6 +81,7 @@ import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import { opsAPI, type CodexTurnStateScanSettings, type CodexTurnStateLengthRule } from '@/api/admin/ops'
 import { useAppStore } from '@/stores/app'
+import CodexPlanScanSwitches from './CodexPlanScanSwitches.vue'
 
 const props = defineProps<{ show: boolean; selection?: CodexTurnStateLengthRule | null }>()
 const emit = defineEmits<{ close: []; saved: [settings: CodexTurnStateScanSettings] }>()
@@ -94,6 +96,8 @@ const parallelProbes = ref<number | string>(5)
 const dynamicProxyEnabled = ref(false)
 const dynamicProxyUrl = ref('')
 const plans = ['*', 'pro', 'team', 'plus', 'free', 'enterprise']
+const switchablePlans = plans.filter(plan => plan !== '*')
+const planScanEnabled = ref<Record<string, boolean>>(Object.fromEntries(switchablePlans.map(plan => [plan, true])))
 const rules = ref<Array<{ key: number; plan_type: string; model: string; lengthsText: string }>>([])
 const selectedRuleKey = ref<number | null>(null)
 let nextRuleKey = 0
@@ -131,6 +135,7 @@ const validationError = computed(() => {
 
 function applySettings(settings: CodexTurnStateScanSettings) {
   lengthsText.value = settings.target_lengths.join(', ')
+  planScanEnabled.value = Object.fromEntries(switchablePlans.map(plan => [plan, settings.plan_scan_enabled?.[plan] ?? true]))
   parallelProbes.value = settings.parallel_probes
   dynamicProxyEnabled.value = settings.dynamic_proxy_enabled
   dynamicProxyUrl.value = settings.dynamic_proxy_url
@@ -179,6 +184,7 @@ async function save() {
     const settings = await opsAPI.updateCodexTurnStateScanSettings({
       target_lengths: [...targetLengths.value],
       rules: normalizedRules.value,
+      plan_scan_enabled: { ...planScanEnabled.value },
       parallel_probes: Number(parallelProbes.value),
       dynamic_proxy_enabled: dynamicProxyEnabled.value,
       dynamic_proxy_url: dynamicProxyUrl.value.trim()

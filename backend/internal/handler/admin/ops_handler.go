@@ -329,7 +329,7 @@ func (h *OpsHandler) ScanCodexTurnState(c *gin.Context) {
 		response.BadRequest(c, "Invalid scan request")
 		return
 	}
-	if !h.opsService.EnqueueOpenAICodexTurnStateScan(req.AccountID, req.Model) {
+	if !h.opsService.EnqueueOpenAICodexTurnStateScan(c.Request.Context(), req.AccountID, req.Model) {
 		response.Success(c, gin.H{"queued": false})
 		return
 	}

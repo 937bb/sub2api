@@ -257,7 +257,11 @@ func (s *openAICodexTurnStateScanner) enqueueAccount(ctx context.Context, accoun
 	if account == nil {
 		return 0, nil
 	}
-	s.gateway.getOpenAICodexTurnStatePool().setAccountPlan(account.ID, OpenAICodexStatePlanType(account))
+	plan := OpenAICodexStatePlanType(account)
+	s.gateway.getOpenAICodexTurnStatePool().setAccountPlan(account.ID, plan)
+	if !s.scanSettings().IsPlanScanEnabled(plan) {
+		return 0, nil
+	}
 	models := s.modelsForAccount(ctx, account, usedSince)
 	return s.enqueueModels(account.ID, models, force), models
 }
@@ -271,7 +275,11 @@ func (s *openAICodexTurnStateScanner) enqueueSweep(ctx context.Context) {
 	}
 	usedSince := now.Add(-openAICodexTurnStateActiveUsageWindow)
 	for _, account := range accounts {
-		s.gateway.getOpenAICodexTurnStatePool().setAccountPlan(account.ID, OpenAICodexStatePlanType(account))
+		plan := OpenAICodexStatePlanType(account)
+		s.gateway.getOpenAICodexTurnStatePool().setAccountPlan(account.ID, plan)
+		if !s.scanSettings().IsPlanScanEnabled(plan) {
+			continue
+		}
 		for _, model := range s.modelsForAccount(ctx, account, usedSince) {
 			if !s.stateNeedsRefresh(account.ID, model, now) {
 				continue
@@ -353,12 +361,16 @@ func (s *openAICodexTurnStateScanner) runJob(ctx context.Context, job openAICode
 		(!job.force && !isRecentlyUsedOpenAICodexAccount(account, now)) {
 		return
 	}
+	plan := OpenAICodexStatePlanType(account)
+	if !s.scanSettings().IsPlanScanEnabled(plan) {
+		return
+	}
 	upstreamModel := openAICodexTurnStateUpstreamModel(account, job.model)
 	if upstreamModel == "" {
 		return
 	}
 	pool := s.gateway.getOpenAICodexTurnStatePool()
-	pool.setAccountPlan(account.ID, OpenAICodexStatePlanType(account))
+	pool.setAccountPlan(account.ID, plan)
 	if !job.force && !s.stateNeedsRefresh(account.ID, upstreamModel, now) {
 		return
 	}
@@ -1065,15 +1077,22 @@ func (s *OpsService) GetOpenAICodexTurnStateOperationsSummary(ctx context.Contex
 	return result, nil
 }
 
-func (s *OpsService) EnqueueOpenAICodexTurnStateScan(accountID int64, model string) bool {
+func (s *OpsService) EnqueueOpenAICodexTurnStateScan(ctx context.Context, accountID int64, model string) bool {
 	if s == nil || s.codexTurnStateScanner == nil {
 		return false
 	}
 	if strings.TrimSpace(model) == "" {
 		model = defaultOpenAICodexTurnStateScanModel
 	}
-	// The worker loads current credential metadata before checking the policy.
-	// A cold pool may not know this account's subscription tier yet.
+	// Check the current account tier before enqueueing so a disabled plan does
+	// not leave a misleading job in the queue. The worker repeats this check
+	// after loading the account to cover settings changes while queued.
+	if scanner := s.codexTurnStateScanner; scanner.accountRepo != nil {
+		account, err := scanner.accountRepo.GetByID(ctx, accountID)
+		if err != nil || !scanner.scanSettings().IsPlanScanEnabled(OpenAICodexStatePlanType(account)) {
+			return false
+		}
+	}
 	return s.codexTurnStateScanner.Enqueue(accountID, model, false)
 }
 

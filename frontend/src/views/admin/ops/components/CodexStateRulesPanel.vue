@@ -8,6 +8,7 @@
     </div>
     <form class="mt-3 space-y-3" @submit.prevent="save">
       <fieldset :disabled="loading || saving || !loaded" class="max-h-80 min-w-0 space-y-2 overflow-y-auto pr-1 disabled:opacity-60">
+        <CodexPlanScanSwitches v-model="planScanEnabled" class="max-w-4xl" test-prefix="inline-plan-scan-" />
         <p v-if="selectedRule" class="max-w-4xl break-words text-xs leading-relaxed text-primary-700 dark:text-primary-300" data-test="inline-rule-scope">{{ t('admin.ops.turnState.scanSettings.selectedScope', { plan: selectedRule.plan_type === '*' ? t('common.all') : selectedRule.plan_type.toUpperCase(), model: selectedRule.model }) }}</p>
         <div v-if="!rules.length" class="text-xs text-gray-400">{{ loading ? t('common.loading') : t('admin.ops.turnState.scanSettings.noRules') }}</div>
         <div v-for="(rule, index) in rules" :key="rule.key" :class="['grid min-w-0 max-w-4xl grid-cols-2 items-end gap-2 rounded-md p-2 sm:grid-cols-[148px_minmax(0,1fr)_180px_48px]', selectedRule?.key === rule.key ? 'bg-primary-50 dark:bg-primary-950/30' : 'bg-gray-50 dark:bg-dark-800']" data-test="inline-state-rule">
@@ -48,6 +49,7 @@ import { computed, nextTick, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { opsAPI, type CodexTurnStateLengthRule, type CodexTurnStateScanSettings } from '@/api/admin/ops'
 import { useAppStore } from '@/stores/app'
+import CodexPlanScanSwitches from './CodexPlanScanSwitches.vue'
 
 interface RuleRow { key: number; plan_type: string; model: string; lengthsText: string }
 const emit = defineEmits<{ saved: [settings: CodexTurnStateScanSettings] }>()
@@ -63,6 +65,8 @@ const rules = ref<RuleRow[]>([])
 const selectedRuleKey = ref<number | null>(null)
 const selectedRule = computed(() => rules.value.find(rule => rule.key === selectedRuleKey.value))
 const plans = ['*', 'pro', 'team', 'plus', 'free', 'enterprise']
+const switchablePlans = plans.filter(plan => plan !== '*')
+const planScanEnabled = ref<Record<string, boolean>>(Object.fromEntries(switchablePlans.map(plan => [plan, true])))
 let nextKey = 0
 const modelSuggestions = computed(() => [...new Set(['*', 'gpt-5.6-terra', 'gpt-6-astra', ...rules.value.map(rule => rule.model.trim().toLowerCase()).filter(Boolean)])])
 const parseLengths = (value: string) => value.trim().split(/[\s,，]+/).filter(Boolean).map(Number)
@@ -85,6 +89,7 @@ const validationError = computed(() => {
 
 function apply(settings: CodexTurnStateScanSettings) {
   lengthsText.value = settings.target_lengths.join(', ')
+  planScanEnabled.value = Object.fromEntries(switchablePlans.map(plan => [plan, settings.plan_scan_enabled?.[plan] ?? true]))
   rules.value = (settings.rules ?? []).map(rule => ({ key: nextKey++, plan_type: rule.plan_type, model: rule.model, lengthsText: rule.target_lengths.join(', ') }))
   selectedRuleKey.value = null
 }
@@ -125,7 +130,7 @@ async function save() {
   saving.value = true
   try {
     const latest = await opsAPI.getCodexTurnStateScanSettings()
-    const result = await opsAPI.updateCodexTurnStateScanSettings({ ...latest, target_lengths: [...targetLengths.value], rules: normalizedRules.value })
+    const result = await opsAPI.updateCodexTurnStateScanSettings({ ...latest, target_lengths: [...targetLengths.value], rules: normalizedRules.value, plan_scan_enabled: { ...planScanEnabled.value } })
     apply(result)
     appStore.showSuccess(t('admin.ops.turnState.scanSettings.saved'))
     emit('saved', result)
