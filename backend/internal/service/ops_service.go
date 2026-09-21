@@ -147,6 +147,11 @@ func NewOpsService(
 		}
 		if scannerRepo, ok := opsRepo.(OpenAICodexTurnStateScannerRepository); ok {
 			svc.codexTurnStateScanner = newOpenAICodexTurnStateScanner(scannerRepo, accountRepo, openAIGatewayService)
+			if svc.codexTurnStateScanner != nil {
+				openAIGatewayService.setOpenAICodexTurnStateScanEnqueuer(func(accountID int64, model string) bool {
+					return svc.codexTurnStateScanner.Enqueue(accountID, model, false)
+				})
+			}
 		}
 	}
 	svc.initRuntimeSettings(context.Background())

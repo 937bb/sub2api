@@ -15,6 +15,7 @@ import (
 type turnStateRefreshScanRepo struct {
 	OpenAICodexTurnStateScannerRepository
 	accountIDs []int64
+	pendingIDs []int64
 	scans      map[openAICodexTurnStateBucketKey]*OpenAICodexTurnStateScan
 }
 
@@ -45,6 +46,10 @@ func (r *turnStateRefreshScanRepo) ListRecentlyUsedOpenAICodexAccountIDs(context
 	return r.accountIDs, nil
 }
 
+func (r *turnStateRefreshScanRepo) ListPendingOpenAICodexTurnStateAccountIDs(context.Context) ([]int64, error) {
+	return r.pendingIDs, nil
+}
+
 func (r *turnStateRefreshScanRepo) ListObservedOpenAICodexTurnStateModels(context.Context, int64, time.Time) ([]string, error) {
 	return nil, nil
 }
@@ -56,6 +61,16 @@ type turnStateRefreshAccountRepo struct {
 
 func (r *turnStateRefreshAccountRepo) GetByID(_ context.Context, accountID int64) (*Account, error) {
 	return r.accounts[accountID], nil
+}
+
+func (r *turnStateRefreshAccountRepo) GetByIDs(_ context.Context, accountIDs []int64) ([]*Account, error) {
+	accounts := make([]*Account, 0, len(accountIDs))
+	for _, accountID := range accountIDs {
+		if account := r.accounts[accountID]; account != nil {
+			accounts = append(accounts, account)
+		}
+	}
+	return accounts, nil
 }
 
 func turnStateRefreshAccount(accountID int64, now time.Time) *Account {
@@ -253,4 +268,24 @@ func TestOpenAICodexTurnStateRefreshKeepsHealthy292FallbackUntilRefreshWindow(t 
 	require.Empty(t, scanner.queue)
 	scan := repo.scans[openAICodexTurnStateBucketKey{accountID: accountID, model: model}]
 	require.Nil(t, scan)
+}
+
+func TestOpenAICodexTurnStateSweepQueuesNewPendingAccountWithoutUsage(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	const model = "gpt-6-astra"
+	const accountID int64 = 41
+	account := turnStateRefreshAccount(accountID, now)
+	account.LastUsedAt = nil
+	account.Extra = map[string]any{openAICodexStateRoutingRequiredExtraKey: true}
+	repo := &turnStateRefreshScanRepo{
+		pendingIDs: []int64{accountID},
+		scans:      make(map[openAICodexTurnStateBucketKey]*OpenAICodexTurnStateScan),
+	}
+	gateway := ticketTestService(t, config.OpenAICodexTicketConfig{Models: []string{model}}, nil)
+	scanner := newOpenAICodexTurnStateScanner(repo, &turnStateRefreshAccountRepo{accounts: map[int64]*Account{accountID: account}}, gateway)
+
+	scanner.enqueueSweep(context.Background())
+
+	require.Len(t, scanner.queue, 1)
+	require.Equal(t, openAICodexTurnStateScanJob{accountID: accountID, model: model}, <-scanner.queue)
 }

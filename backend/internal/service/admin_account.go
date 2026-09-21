@@ -430,6 +430,14 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 	delete(accountExtra, OllamaCloudUsageAutoRefreshExtraKey)
 	delete(accountExtra, OllamaCloudUsageSnapshotExtraKey)
 	accountExtra = prepareCodexFingerprintExtraForCreate(input.Platform, input.Type, accountExtra)
+	if input.Platform == PlatformOpenAI && (input.Type == AccountTypeOAuth || input.Type == AccountTypeSetupToken) {
+		if accountExtra == nil {
+			accountExtra = make(map[string]any)
+		}
+		accountExtra[openAICodexStateRoutingRequiredExtraKey] = true
+	} else if accountExtra != nil {
+		delete(accountExtra, openAICodexStateRoutingRequiredExtraKey)
+	}
 	account := &Account{
 		Name:          input.Name,
 		Notes:         normalizeAccountNotes(input.Notes),
@@ -702,6 +710,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	}
 	previousProbeIdentity := upstreamBillingProbeIdentity(account)
 	previousOllamaUsageIdentity := ollamaCloudUsageIdentity(account)
+	stateRoutingRequired := account.RequiresOpenAICodexStateRouting()
 	// 安全/身份不变量(影子账号):通用更新路径被 edit/re-auth/refresh/batch 共用,
 	// 必须在此守住,否则仅在创建时的保证可被这些路径绕过。
 	if account.IsCredentialShadow() {
@@ -842,6 +851,14 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	)
 	if input.Extra == nil {
 		account.Extra = prepareCodexFingerprintExtraForUpdate(account, account.Extra)
+	}
+	if stateRoutingRequired && account.IsOpenAIOAuthLike() {
+		if account.Extra == nil {
+			account.Extra = make(map[string]any)
+		}
+		account.Extra[openAICodexStateRoutingRequiredExtraKey] = true
+	} else if account.Extra != nil {
+		delete(account.Extra, openAICodexStateRoutingRequiredExtraKey)
 	}
 	if requestedRateSyncEnabledUpdate != nil && *requestedRateSyncEnabledUpdate {
 		if requestedProbeEnabledUpdate != nil && !*requestedProbeEnabledUpdate {

@@ -290,6 +290,34 @@ func (s *OpenAIGatewayService) setOpenAICodexTurnStateRepository(repo OpenAICode
 	s.getOpenAICodexTurnStatePool().setRepository(context.Background(), repo)
 }
 
+func (s *OpenAIGatewayService) setOpenAICodexTurnStateScanEnqueuer(enqueue func(int64, string) bool) {
+	if s == nil {
+		return
+	}
+	s.openaiCodexTurnStateScanEnqueuer = enqueue
+}
+
+func (s *OpenAIGatewayService) hasRequiredOpenAICodexTurnState(account *Account, model string) bool {
+	if account == nil || !account.RequiresOpenAICodexStateRouting() {
+		return true
+	}
+	model = openAICodexTurnStateUpstreamModel(account, model)
+	if model == "" {
+		return false
+	}
+	accountID := account.ID
+	if account.ParentAccountID != nil && *account.ParentAccountID > 0 {
+		accountID = *account.ParentAccountID
+	}
+	if s.getOpenAICodexTurnStatePool().hasReusableStateBeyond(accountID, model, time.Now()) {
+		return true
+	}
+	if s.openaiCodexTurnStateScanEnqueuer != nil {
+		s.openaiCodexTurnStateScanEnqueuer(accountID, model)
+	}
+	return false
+}
+
 func (s *OpenAIGatewayService) getOpenAICodexTurnStatePool() *openAICodexTurnStatePool {
 	if s == nil {
 		return nil

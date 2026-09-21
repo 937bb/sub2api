@@ -292,6 +292,34 @@ ORDER BY last_used_at DESC, id ASC`, usedSince)
 	return ids, rows.Err()
 }
 
+func (r *opsRepository) ListPendingOpenAICodexTurnStateAccountIDs(ctx context.Context) ([]int64, error) {
+	rows, err := r.db.QueryContext(ctx, `
+SELECT id
+FROM accounts
+WHERE deleted_at IS NULL AND parent_account_id IS NULL
+  AND platform = 'openai' AND type IN ('oauth', 'setup-token')
+  AND status = 'active' AND schedulable IS TRUE
+  AND extra @> '{"openai_codex_state_routing_required":true}'::jsonb
+  AND (expires_at IS NULL OR expires_at > NOW())
+  AND (temp_unschedulable_until IS NULL OR temp_unschedulable_until <= NOW())
+  AND (overload_until IS NULL OR overload_until <= NOW())
+  AND (rate_limit_reset_at IS NULL OR rate_limit_reset_at <= NOW())
+ORDER BY id ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	ids := make([]int64, 0)
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 func codexTurnStateAccountStatusCTE() string {
 	return `
 WITH eligible_accounts AS (

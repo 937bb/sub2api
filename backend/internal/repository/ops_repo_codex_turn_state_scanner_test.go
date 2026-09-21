@@ -98,3 +98,18 @@ func TestListRecentlyUsedOpenAICodexAccountIDs(t *testing.T) {
 	require.Equal(t, []int64{42, 84}, ids)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
+
+func TestListPendingOpenAICodexTurnStateAccountIDs(t *testing.T) {
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT id\nFROM accounts") + ".*" + regexp.QuoteMeta("extra @> '{\"openai_codex_state_routing_required\":true}'::jsonb")).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(42)).AddRow(int64(84)))
+
+	repo := &opsRepository{db: db}
+	ids, err := repo.ListPendingOpenAICodexTurnStateAccountIDs(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, []int64{42, 84}, ids)
+	require.NoError(t, mock.ExpectationsWereMet())
+}

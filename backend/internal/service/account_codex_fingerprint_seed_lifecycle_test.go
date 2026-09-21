@@ -48,6 +48,29 @@ func TestBuildAccountForCreateMintsSeedForImplicitDefaultFull(t *testing.T) {
 	requireValidCodexFingerprintSeed(t, account.Extra)
 }
 
+func TestBuildAccountForCreateRequiresStateRoutingOnlyForOpenAIOAuthLike(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		platform string
+		typeName string
+		want     bool
+	}{
+		{name: "oauth", platform: PlatformOpenAI, typeName: AccountTypeOAuth, want: true},
+		{name: "setup token", platform: PlatformOpenAI, typeName: AccountTypeSetupToken, want: true},
+		{name: "api key", platform: PlatformOpenAI, typeName: AccountTypeAPIKey},
+		{name: "other provider", platform: PlatformAnthropic, typeName: AccountTypeOAuth},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			account, err := buildAccountForCreate(&CreateAccountInput{
+				Name: tc.name, Platform: tc.platform, Type: tc.typeName,
+			}, map[string]any{openAICodexStateRoutingRequiredExtraKey: !tc.want})
+
+			require.NoError(t, err)
+			require.Equal(t, tc.want, account.RequiresOpenAICodexStateRouting())
+		})
+	}
+}
+
 func TestBuildAccountForCreateDoesNotMintSeedWhenExplicitlyOff(t *testing.T) {
 	account, err := buildAccountForCreate(&CreateAccountInput{
 		Name:     "off-codex-oauth",
@@ -89,6 +112,27 @@ func TestAdminUpdateAccountPreservesExistingSeedAndStripsUserSeed(t *testing.T) 
 	require.NoError(t, err)
 	require.Equal(t, testCodexFingerprintSeed, requireValidCodexFingerprintSeed(t, updated.Extra))
 	require.Equal(t, "full", updated.Extra[codexFingerprintModeExtraKey])
+	require.Equal(t, "value", updated.Extra["custom"])
+}
+
+func TestAdminUpdateAccountPreservesSystemManagedStateRoutingGate(t *testing.T) {
+	accountID := int64(211)
+	repo := &upstreamBillingProbeAccountRepo{accounts: map[int64]*Account{
+		accountID: {
+			ID:       accountID,
+			Platform: PlatformOpenAI,
+			Type:     AccountTypeOAuth,
+			Status:   StatusActive,
+			Extra:    map[string]any{openAICodexStateRoutingRequiredExtraKey: true},
+		},
+	}}
+
+	updated, err := (&adminServiceImpl{accountRepo: repo}).UpdateAccount(context.Background(), accountID, &UpdateAccountInput{
+		Extra: map[string]any{"custom": "value", openAICodexStateRoutingRequiredExtraKey: false},
+	})
+
+	require.NoError(t, err)
+	require.True(t, updated.RequiresOpenAICodexStateRouting())
 	require.Equal(t, "value", updated.Extra["custom"])
 }
 

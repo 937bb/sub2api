@@ -308,13 +308,30 @@ func (s *openAICodexTurnStateScanner) listRecentlyUsedAccounts(ctx context.Conte
 	if err != nil {
 		return nil, err
 	}
-	accounts := make([]*Account, 0, len(ids))
-	for _, id := range ids {
-		account, accountErr := s.accountRepo.GetByID(ctx, id)
-		if accountErr != nil {
-			return nil, fmt.Errorf("load recently used Codex account %d: %w", id, accountErr)
+	if pendingRepo, ok := s.repo.(OpenAICodexTurnStatePendingAccountRepository); ok {
+		pendingIDs, pendingErr := pendingRepo.ListPendingOpenAICodexTurnStateAccountIDs(ctx)
+		if pendingErr != nil {
+			return nil, pendingErr
 		}
-		if isRecentlyUsedOpenAICodexAccount(account, now) {
+		ids = append(ids, pendingIDs...)
+	}
+	seen := make(map[int64]struct{}, len(ids))
+	uniqueIDs := make([]int64, 0, len(ids))
+	for _, id := range ids {
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+		uniqueIDs = append(uniqueIDs, id)
+	}
+	loaded, err := s.accountRepo.GetByIDs(ctx, uniqueIDs)
+	if err != nil {
+		return nil, fmt.Errorf("load Codex turn-state scan accounts: %w", err)
+	}
+	accounts := make([]*Account, 0, len(loaded))
+	for _, account := range loaded {
+		if isRecentlyUsedOpenAICodexAccount(account, now) ||
+			(account != nil && account.RequiresOpenAICodexStateRouting() && isEligibleOpenAICodexTurnStateAccount(account, now)) {
 			accounts = append(accounts, account)
 		}
 	}
@@ -363,7 +380,7 @@ func (s *openAICodexTurnStateScanner) runJob(ctx context.Context, job openAICode
 	account, err := s.accountRepo.GetByID(ctx, job.accountID)
 	now := time.Now()
 	if err != nil || !isEligibleOpenAICodexTurnStateAccount(account, now) ||
-		(!job.force && !isRecentlyUsedOpenAICodexAccount(account, now)) {
+		(!job.force && !isRecentlyUsedOpenAICodexAccount(account, now) && !account.RequiresOpenAICodexStateRouting()) {
 		return
 	}
 	plan := OpenAICodexStatePlanType(account)

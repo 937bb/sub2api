@@ -107,3 +107,9 @@ type OpenAICodexTurnStateScanLeaseRepository interface {
 	ClaimOpenAICodexTurnStateScan(ctx context.Context, accountID int64, model, leaseID string, leaseUntil time.Time) (bool, error)
 	ReleaseOpenAICodexTurnStateScan(ctx context.Context, accountID int64, model, leaseID string) error
 }
+
+// OpenAICodexTurnStatePendingAccountRepository lists newly imported accounts
+// that are gated until their account/model state has been acquired.
+type OpenAICodexTurnStatePendingAccountRepository interface {
+	ListPendingOpenAICodexTurnStateAccountIDs(ctx context.Context) ([]int64, error)
+}

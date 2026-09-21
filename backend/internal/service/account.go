@@ -89,6 +89,20 @@ type Account struct {
 
 const MaxCodexProxiesPerAccount = 5
 
+const openAICodexStateRoutingRequiredExtraKey = "openai_codex_state_routing_required"
+
+// RequiresOpenAICodexStateRouting reports whether this account must have a
+// reusable account/model state before it can receive Codex traffic. The marker
+// is applied to newly imported OAuth-like accounts; legacy accounts retain
+// their existing scheduling behavior.
+func (a *Account) RequiresOpenAICodexStateRouting() bool {
+	if a == nil || !a.IsOpenAIOAuthLike() || a.Extra == nil {
+		return false
+	}
+	required, ok := a.Extra[openAICodexStateRoutingRequiredExtraKey].(bool)
+	return ok && required
+}
+
 // SelectOpenAIOutboundProxy chooses one configured egress proxy for a single
 // Codex upstream request. API-key and non-OpenAI accounts retain the legacy
 // proxy_id behavior. A WebSocket caller must invoke this once per connection.
