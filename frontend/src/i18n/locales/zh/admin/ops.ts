@@ -19,7 +19,7 @@ export default {
           healthyProxies: '健康代理',
           sharedProxies: '复用代理'
         },
-        accountHint: '按配置的目标模型逐项展示；后台仅自动补扫最近 1 小时实际使用且当前可调度的账号，历史和停用账号不会进入扫描队列。',
+        accountHint: '按配置的目标模型逐项展示；后台自动补扫近 1 小时在用账号，以及等待 State 放行的新账号。历史普通账号和停用账号不会进入扫描队列。',
         proxyHint: '未开启动态代理时，扫描合并使用专用代理与代理管理中的有效代理；开启后只使用动态源，获取失败会等待重试。不会修改账号绑定关系或业务代理状态。',
         routeBindingHint: '默认关闭。仅对稳定静态代理开启；验证成功的 State 后续业务请求才会复用该出口。',
         rulesPanel: {
@@ -32,7 +32,7 @@ export default {
           priorityHint: '逗号分隔，从左到右优先；具体模型优先于 *。'
         },
         scanSettings: {
-          title: 'State 规则 / 扫描配置',
+          title: 'State 调度 / 规则 / 扫描配置',
           scope: '设置各套餐、模型允许采集和复用的 State 长度，不编辑 State 原文。每个账号、每个模型仍独立保存自己的 State。',
           lengths: '默认目标长度（按优先级排序）',
           lengthsHint: '从左到右优先，使用逗号分隔，例如 332, 292。长度只是本地筛选条件，不保证模型质量。',
@@ -52,6 +52,11 @@ export default {
           planSwitchesHint: '关闭某套餐后，不再为该套餐自动或手动获取、刷新 State；账号正常请求及已有 State 复用不受影响。删除规则不会关闭扫描。',
           scanEnabled: '扫描开启',
           scanDisabled: '已停扫',
+          routingGuard: '新账号 State 调度保护',
+          routingGuardHint: '仅作用于新导入的 OpenAI OAuth/setup-token 账号。每个账号、每个模型必须有自己的有效 State 才能接收请求；API Key 和历史账号不受影响。State 失效后重新暂停，扫描成功自动恢复。',
+          routingGuardEnabled: '保护已开启：缺少有效 State 的新账号不会进入并发池。',
+          routingGuardDisabled: '保护已关闭：新账号即使没有 State 也可被调度。',
+          routingGuardScanWarning: '{plans} 已停止扫描；这些套餐的新账号若没有有效 State 将一直等待，已有 State 到期后也会暂停。',
           parallel: '单任务并发出口',
           parallelHint: '每个账号和模型最多同时使用 1–5 个不同出口；有效 State 临期后才自动刷新。',
           dynamicEnabled: '使用动态扫描代理',

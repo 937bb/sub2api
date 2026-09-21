@@ -15,15 +15,17 @@ const SettingKeyOpenAICodexTurnStateScanSettings = "openai_codex_turn_state_scan
 
 const defaultOpenAICodexTurnStateDynamicProxyURL = "https://api.cliproxy.io/white/api?region=Rand&num=1&format=n&type=txt"
 
-// OpenAICodexTurnStateScanSettings configures state acquisition only. TargetLengths
-// is an ordered local preference, not an assertion about upstream token semantics.
+// OpenAICodexTurnStateScanSettings configures state acquisition and the routing
+// guard for newly imported OAuth credentials. TargetLengths is an ordered local
+// preference, not an assertion about upstream token semantics.
 type OpenAICodexTurnStateScanSettings struct {
-	TargetLengths       []int                            `json:"target_lengths"`
-	Rules               []OpenAICodexTurnStateLengthRule `json:"rules"`
-	PlanScanEnabled     map[string]bool                  `json:"plan_scan_enabled"`
-	ParallelProbes      int                              `json:"parallel_probes"`
-	DynamicProxyEnabled bool                             `json:"dynamic_proxy_enabled"`
-	DynamicProxyURL     string                           `json:"dynamic_proxy_url"`
+	TargetLengths             []int                            `json:"target_lengths"`
+	Rules                     []OpenAICodexTurnStateLengthRule `json:"rules"`
+	PlanScanEnabled           map[string]bool                  `json:"plan_scan_enabled"`
+	RequireStateBeforeRouting *bool                            `json:"require_state_before_routing"`
+	ParallelProbes            int                              `json:"parallel_probes"`
+	DynamicProxyEnabled       bool                             `json:"dynamic_proxy_enabled"`
+	DynamicProxyURL           string                           `json:"dynamic_proxy_url"`
 }
 
 // OpenAICodexTurnStateLengthRule scopes ordered preferences to a plan/model.
@@ -124,6 +126,12 @@ func (s *OpenAICodexTurnStateScanSettings) IsPlanScanEnabled(plan string) bool {
 	return true
 }
 
+// IsStateRequiredBeforeRouting defaults to true so settings saved before the
+// routing guard existed retain the safer behavior when loaded or updated.
+func (s *OpenAICodexTurnStateScanSettings) IsStateRequiredBeforeRouting() bool {
+	return s == nil || s.RequireStateBeforeRouting == nil || *s.RequireStateBeforeRouting
+}
+
 func (s *OpenAICodexTurnStateScanSettings) forAccountModel(account *Account, model string) *OpenAICodexTurnStateScanSettings {
 	resolved := s.clone()
 	resolved.TargetLengths = slices.Clone(s.TargetLengthsFor(OpenAICodexStatePlanType(account), model))
@@ -132,12 +140,14 @@ func (s *OpenAICodexTurnStateScanSettings) forAccountModel(account *Account, mod
 }
 
 func defaultOpenAICodexTurnStateScanSettings() *OpenAICodexTurnStateScanSettings {
+	requireStateBeforeRouting := true
 	return &OpenAICodexTurnStateScanSettings{
-		TargetLengths:   []int{332, 292},
-		Rules:           defaultOpenAICodexTurnStateLengthRules(),
-		PlanScanEnabled: defaultOpenAICodexTurnStatePlanScanEnabled(),
-		ParallelProbes:  5,
-		DynamicProxyURL: defaultOpenAICodexTurnStateDynamicProxyURL,
+		TargetLengths:             []int{332, 292},
+		Rules:                     defaultOpenAICodexTurnStateLengthRules(),
+		PlanScanEnabled:           defaultOpenAICodexTurnStatePlanScanEnabled(),
+		RequireStateBeforeRouting: &requireStateBeforeRouting,
+		ParallelProbes:            5,
+		DynamicProxyURL:           defaultOpenAICodexTurnStateDynamicProxyURL,
 	}
 }
 
@@ -146,6 +156,10 @@ func (s *OpenAICodexTurnStateScanSettings) clone() *OpenAICodexTurnStateScanSett
 		return defaultOpenAICodexTurnStateScanSettings()
 	}
 	copySettings := *s
+	if s.RequireStateBeforeRouting != nil {
+		requireStateBeforeRouting := *s.RequireStateBeforeRouting
+		copySettings.RequireStateBeforeRouting = &requireStateBeforeRouting
+	}
 	copySettings.TargetLengths = slices.Clone(s.TargetLengths)
 	copySettings.Rules = slices.Clone(s.Rules)
 	copySettings.PlanScanEnabled = make(map[string]bool, len(s.PlanScanEnabled))
@@ -187,6 +201,10 @@ func validateOpenAICodexTurnStateScanSettings(settings *OpenAICodexTurnStateScan
 		return nil, infraerrors.BadRequest("CODEX_STATE_SCAN_SETTINGS_INVALID", "target_lengths must contain 1 to 16 ordered lengths")
 	}
 	next := settings.clone()
+	if next.RequireStateBeforeRouting == nil {
+		requireStateBeforeRouting := true
+		next.RequireStateBeforeRouting = &requireStateBeforeRouting
+	}
 	if next.PlanScanEnabled == nil {
 		next.PlanScanEnabled = defaultOpenAICodexTurnStatePlanScanEnabled()
 	} else {

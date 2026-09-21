@@ -301,6 +301,10 @@ func (s *OpenAIGatewayService) hasRequiredOpenAICodexTurnState(account *Account,
 	if account == nil || !account.RequiresOpenAICodexStateRouting() {
 		return true
 	}
+	pool := s.getOpenAICodexTurnStatePool()
+	if !pool.isStateRequiredBeforeRouting() {
+		return true
+	}
 	model = openAICodexTurnStateUpstreamModel(account, model)
 	if model == "" {
 		return false
@@ -309,7 +313,7 @@ func (s *OpenAIGatewayService) hasRequiredOpenAICodexTurnState(account *Account,
 	if account.ParentAccountID != nil && *account.ParentAccountID > 0 {
 		accountID = *account.ParentAccountID
 	}
-	if s.getOpenAICodexTurnStatePool().hasReusableStateBeyond(accountID, model, time.Now()) {
+	if pool.hasReusableStateBeyond(accountID, model, time.Now()) {
 		return true
 	}
 	if s.openaiCodexTurnStateScanEnqueuer != nil {

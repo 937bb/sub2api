@@ -170,6 +170,7 @@ export interface CodexTurnStateScanSettings {
   target_lengths: number[]
   rules: CodexTurnStateLengthRule[]
   plan_scan_enabled?: Record<string, boolean>
+  require_state_before_routing: boolean
   parallel_probes: number
   dynamic_proxy_enabled: boolean
   dynamic_proxy_url: string

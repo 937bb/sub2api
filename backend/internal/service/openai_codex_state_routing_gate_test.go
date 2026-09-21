@@ -48,3 +48,25 @@ func TestRequiredOpenAICodexTurnStateDoesNotGateAPIKeyOrLegacyAccount(t *testing
 	require.True(t, gateway.hasRequiredOpenAICodexTurnState(apiKey, "gpt-6-astra"))
 	require.True(t, gateway.hasRequiredOpenAICodexTurnState(legacyOAuth, "gpt-6-astra"))
 }
+
+func TestRequiredOpenAICodexTurnStateCanBeDisabledAtRuntime(t *testing.T) {
+	account := &Account{
+		ID:       41,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Extra:    map[string]any{openAICodexStateRoutingRequiredExtraKey: true},
+	}
+	gateway := &OpenAIGatewayService{}
+	queued := false
+	gateway.setOpenAICodexTurnStateScanEnqueuer(func(int64, string) bool {
+		queued = true
+		return true
+	})
+	settings := defaultOpenAICodexTurnStateScanSettings()
+	requireStateBeforeRouting := false
+	settings.RequireStateBeforeRouting = &requireStateBeforeRouting
+	gateway.getOpenAICodexTurnStatePool().setScanSettings(settings)
+
+	require.True(t, gateway.hasRequiredOpenAICodexTurnState(account, "gpt-6-astra"))
+	require.False(t, queued)
+}

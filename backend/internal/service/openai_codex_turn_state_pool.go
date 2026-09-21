@@ -155,6 +155,15 @@ func (p *openAICodexTurnStatePool) setScanSettings(settings *OpenAICodexTurnStat
 	p.rebuildAccountsLocked()
 }
 
+func (p *openAICodexTurnStatePool) isStateRequiredBeforeRouting() bool {
+	if p == nil {
+		return true
+	}
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.scanSettings.IsStateRequiredBeforeRouting()
+}
+
 // setAccountPlan registers the credential owner's subscription without touching
 // persistent storage. Repeated requests with an unchanged plan take only a read lock.
 func (p *openAICodexTurnStatePool) setAccountPlan(accountID int64, planType string) {

@@ -15,7 +15,7 @@ export default {
           runningJobs: 'Scan jobs', enabledProxies: 'Enabled proxies', healthyProxies: 'Healthy proxies',
           sharedProxies: 'Reused proxies'
         },
-        accountHint: 'Every configured target model is shown. Background scans only include schedulable accounts used in the last hour; historical and disabled accounts are excluded.',
+        accountHint: 'Every configured target model is shown. Background scans include accounts used in the last hour and new accounts waiting for State-based release. Ordinary historical and disabled accounts are excluded.',
         proxyHint: 'With dynamic proxies off, scans combine this dedicated pool with active proxies from Proxy Management. When enabled, only the dynamic source is used; acquisition failures wait for a retry. Account bindings and business proxy health stay unchanged.',
         routeBindingHint: 'Off by default. Enable only for a stable static proxy; verified State requests may then reuse this exact business egress.',
         rulesPanel: {
@@ -28,7 +28,7 @@ export default {
           priorityHint: 'Comma-separated, highest priority first. Specific models override *.'
         },
         scanSettings: {
-          title: 'State rules / Scan settings',
+          title: 'State routing / Rules / Scan settings',
           scope: 'Set accepted State lengths for acquisition and reuse by plan and model, without editing State tokens. Each account/model retains its own State.',
           lengths: 'Default target lengths in priority order',
           lengthsHint: 'Highest priority first, separated by commas, e.g. 332, 292. Length is a local selection rule, not a guarantee of model quality.',
@@ -48,6 +48,11 @@ export default {
           planSwitchesHint: 'Turning off a plan stops automatic and manual State acquisition and refresh for that plan. Normal requests and reuse of existing State remain unchanged. Deleting a rule does not turn scanning off.',
           scanEnabled: 'Scanning on',
           scanDisabled: 'Scanning off',
+          routingGuard: 'New-account State routing guard',
+          routingGuardHint: 'Applies only to newly imported OpenAI OAuth/setup-token accounts. Each account and model needs its own usable State before receiving requests. API keys and legacy accounts are unaffected. Expired State pauses routing again; a successful scan resumes it automatically.',
+          routingGuardEnabled: 'Guard enabled: new accounts without usable State stay outside the concurrency pool.',
+          routingGuardDisabled: 'Guard disabled: new accounts may be routed without State.',
+          routingGuardScanWarning: 'Scanning is off for {plans}. New accounts in these plans will wait indefinitely without usable State, and routing pauses again when existing State expires.',
           parallel: 'Concurrent exits per task',
           parallelHint: 'Use up to 1–5 different exits at once for each account/model. Automatically refresh usable State only when nearing expiry.',
           dynamicEnabled: 'Use dynamic scan proxies',

@@ -11,6 +11,7 @@ const settings: CodexTurnStateScanSettings = {
   target_lengths: [332, 292],
   rules: [{ plan_type: 'pro', model: '*', target_lengths: [332, 292] }, { plan_type: 'team', model: '*', target_lengths: [332, 292] }],
   plan_scan_enabled: { pro: true, team: true, plus: true, free: true, enterprise: true },
+  require_state_before_routing: true,
   parallel_probes: 5, dynamic_proxy_enabled: true, dynamic_proxy_url: 'https://proxy.example/api'
 }
 describe('CodexStateRulesPanel', () => {
@@ -44,6 +45,15 @@ describe('CodexStateRulesPanel', () => {
     await wrapper.get('form').trigger('submit')
     await flushPromises()
     expect(updateSettings).toHaveBeenCalledWith({ ...settings, plan_scan_enabled: { ...settings.plan_scan_enabled, pro: false } })
+  })
+  it('shows and persists the new-account routing guard', async () => {
+    const wrapper = mount(CodexStateRulesPanel)
+    await flushPromises()
+    expect(wrapper.get('[data-test="state-routing-guard-status"]').text()).toContain('routingGuardEnabled')
+    await wrapper.get('[data-test="state-routing-guard-toggle"]').trigger('click')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(updateSettings).toHaveBeenCalledWith({ ...settings, require_state_before_routing: false })
   })
   it('adds a normalized model rule and deletes the selected row only', async () => {
     const wrapper = mount(CodexStateRulesPanel)

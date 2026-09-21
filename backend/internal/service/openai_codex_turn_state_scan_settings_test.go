@@ -56,6 +56,7 @@ func TestOpenAICodexTurnStatePlanModelSettings(t *testing.T) {
 
 func TestOpenAICodexTurnStateDefaultsRestore332Then292ForAllProAndTeamModels(t *testing.T) {
 	settings := defaultOpenAICodexTurnStateScanSettings()
+	require.True(t, settings.IsStateRequiredBeforeRouting())
 	for _, plan := range []string{"pro", "team", "plus", "free", "enterprise"} {
 		require.True(t, settings.IsPlanScanEnabled(plan))
 	}
@@ -137,6 +138,7 @@ func TestOpenAICodexTurnStateRuleSettingsValidationAndLegacyDefaults(t *testing.
 	require.NoError(t, json.Unmarshal([]byte(`{"target_lengths":[332,292],"parallel_probes":5}`), legacy))
 	validated, err := validateOpenAICodexTurnStateScanSettings(legacy)
 	require.NoError(t, err)
+	require.True(t, validated.IsStateRequiredBeforeRouting(), "legacy settings must enable the routing guard")
 	require.Equal(t, []int{332, 292}, validated.TargetLengthsFor("pro", "gpt-5.5"))
 	require.True(t, validated.IsPlanScanEnabled("pro"), "legacy settings must keep scanning enabled")
 	legacy.Rules = []OpenAICodexTurnStateLengthRule{}
@@ -226,6 +228,7 @@ func TestOpenAICodexTurnStateScanSettingsValidation(t *testing.T) {
 	require.Equal(t, []int{332, 292}, validated.TargetLengths)
 	require.Equal(t, 5, validated.ParallelProbes)
 	require.False(t, validated.DynamicProxyEnabled)
+	require.True(t, validated.IsStateRequiredBeforeRouting())
 
 	for name, mutate := range map[string]func(*OpenAICodexTurnStateScanSettings){
 		"empty lengths":       func(s *OpenAICodexTurnStateScanSettings) { s.TargetLengths = nil },
@@ -257,6 +260,12 @@ func TestOpenAICodexTurnStateScanSettingsValidation(t *testing.T) {
 	require.True(t, validated.acceptsLength(356))
 	require.False(t, validated.acceptsLength(312))
 	require.Less(t, validated.lengthRank(356), validated.lengthRank(332))
+
+	requireStateBeforeRouting := false
+	custom.RequireStateBeforeRouting = &requireStateBeforeRouting
+	validated, err = validateOpenAICodexTurnStateScanSettings(custom)
+	require.NoError(t, err)
+	require.False(t, validated.IsStateRequiredBeforeRouting())
 }
 
 func TestOpenAICodexTurnStateScanSettingsPersistBeforePublishAndRefresh(t *testing.T) {

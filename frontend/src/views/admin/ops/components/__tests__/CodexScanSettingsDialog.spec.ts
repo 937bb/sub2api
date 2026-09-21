@@ -26,6 +26,7 @@ const settings: CodexTurnStateScanSettings = {
     { plan_type: 'team', model: '*', target_lengths: [332, 292] }
   ],
   plan_scan_enabled: { pro: true, team: true, plus: true, free: true, enterprise: true },
+  require_state_before_routing: true,
   parallel_probes: 5,
   dynamic_proxy_enabled: false,
   dynamic_proxy_url: 'https://api.cliproxy.io/white/api?region=Rand&num=1&format=n&type=txt'
@@ -71,6 +72,22 @@ describe('CodexScanSettingsDialog', () => {
     await wrapper.get('form').trigger('submit')
     await flushPromises()
     expect(updateSettings).toHaveBeenCalledWith({ ...settings, plan_scan_enabled: { ...settings.plan_scan_enabled, pro: false } })
+  })
+
+  it('saves the new-account routing guard and warns when a required plan cannot scan', async () => {
+    const wrapper = render()
+    await flushPromises()
+    await wrapper.get('[data-test="plan-scan-pro"]').trigger('click')
+    expect(wrapper.get('[data-test="state-routing-guard-warning"]').text()).toContain('routingGuardScanWarning')
+    await wrapper.get('[data-test="state-routing-guard-toggle"]').trigger('click')
+    expect(wrapper.find('[data-test="state-routing-guard-warning"]').exists()).toBe(false)
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(updateSettings).toHaveBeenCalledWith({
+      ...settings,
+      plan_scan_enabled: { ...settings.plan_scan_enabled, pro: false },
+      require_state_before_routing: false
+    })
   })
 
   it('edits plan/model lengths while preserving other rules and scan configuration', async () => {
