@@ -232,11 +232,7 @@ func openAIProxyStreamCircuitProxyID(account *Account) (int64, bool) {
 	if account == nil || account.Platform != PlatformOpenAI || account.ProxyID == nil || *account.ProxyID <= 0 {
 		return 0, false
 	}
-	// A pooled Codex request may use any bound proxy, while this legacy circuit
-	// only knows the account's fallback proxy ID. Do not quarantine the entire
-	// account under the wrong key. If the pool has no eligible proxy, forwarding
-	// falls back to proxy_id and the circuit remains applicable.
-	if account.hasActiveCodexProxy(time.Now()) {
+	if account.IsOpenAIOAuthLike() {
 		return 0, false
 	}
 	return *account.ProxyID, true

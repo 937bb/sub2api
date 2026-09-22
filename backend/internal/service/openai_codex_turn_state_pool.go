@@ -429,11 +429,6 @@ func (p *openAICodexTurnStatePool) preferredRecordForBucket(accountID int64, mod
 	return record, record.StateValue != ""
 }
 
-func (p *openAICodexTurnStatePool) routeProxyForState(accountID int64, state string) (string, bool) {
-	proxyURL, _, ok := p.routeForState(accountID, state)
-	return proxyURL, ok && proxyURL != ""
-}
-
 func (p *openAICodexTurnStatePool) routeForState(accountID int64, state string) (string, string, bool) {
 	if p == nil || accountID <= 0 {
 		return "", "", false
@@ -456,8 +451,10 @@ func (p *openAICodexTurnStatePool) routeForState(accountID int64, state string) 
 			if routeIPv6 := normalizeOpenAICodexRouteIPv6(record.RouteIPv6); routeIPv6 != "" {
 				return "", routeIPv6, true
 			}
-			if proxyURL := strings.TrimSpace(record.SourceProxyURL); proxyURL != "" {
-				return proxyURL, "", true
+			if record.SourceProxyID != nil && *record.SourceProxyID > 0 {
+				if proxyURL := strings.TrimSpace(record.SourceProxyURL); proxyURL != "" {
+					return proxyURL, "", true
+				}
 			}
 		}
 	}
@@ -827,7 +824,7 @@ func parseOpenAICodexTurnStateIssuedAt(value string) (time.Time, bool) {
 
 func (p *openAICodexTurnStatePool) isReusableRecordLocked(record *OpenAICodexTurnStateRecord, key openAICodexTurnStateBucketKey, now time.Time) bool {
 	if record == nil || record.StateValue == "" || record.ValueLength != len(record.StateValue) ||
-		!p.scanSettings.acceptsLength(record.ValueLength) {
+		!p.scanSettings.acceptsLengthFor(p.accountPlans[key.accountID], key.model, record.ValueLength) {
 		return false
 	}
 	if record.SourceAccountID == nil || *record.SourceAccountID != key.accountID || normalizeOpenAICodexTurnStateModel(record.SourceModel) != key.model {
@@ -845,8 +842,11 @@ func (p *openAICodexTurnStatePool) isReusableRecordLocked(record *OpenAICodexTur
 			return false
 		}
 	}
-	if p.scanSettings.IsRouteBindingRequired() && normalizeOpenAICodexRouteIPv6(record.RouteIPv6) == "" && strings.TrimSpace(record.SourceProxyURL) == "" {
-		return false
+	if p.scanSettings.IsRouteBindingRequired() {
+		managedProxyBound := record.SourceProxyID != nil && *record.SourceProxyID > 0 && strings.TrimSpace(record.SourceProxyURL) != ""
+		if normalizeOpenAICodexRouteIPv6(record.RouteIPv6) == "" && !managedProxyBound {
+			return false
+		}
 	}
 	if record.IssuedAt.IsZero() || record.IssuedAt.After(now) || !record.IssuedAt.Add(openAICodexTurnStateTTL).After(now) {
 		return false

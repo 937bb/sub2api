@@ -34,11 +34,12 @@ func TestCodexTurnStateAccountStatusCTEIncludesExplicitUnavailableAccounts(t *te
 func TestCodexTurnStateAccountStatusCTESelectsNewestExpiryWithinAccountAndModel(t *testing.T) {
 	query := codexTurnStateAccountStatusCTE()
 	require.Contains(t, query, "c.source_account_id = a.id AND c.source_model = am.model")
-	require.Contains(t, query, "c.value_length BETWEEN 64 AND 4096 AND c.expires_at > NOW()")
+	require.Contains(t, query, "c.value_length = ANY(am.target_lengths) AND c.expires_at > NOW()")
 	require.Contains(t, query, "c.issued_at <= NOW() AND c.issued_at + INTERVAL '4 minutes' > NOW()")
 	require.Contains(t, query, "NOT am.require_route_binding")
-	require.Contains(t, query, "COALESCE(c.route_ipv6, '') <> '' OR COALESCE(c.source_proxy_url, '') <> ''")
-	require.Contains(t, query, "ORDER BY COALESCE(array_position(am.target_lengths, c.value_length), cardinality(am.target_lengths) + 1)")
+	require.Contains(t, query, "NOT am.require_route_binding OR COALESCE(c.route_ipv6, '') <> ''")
+	require.Contains(t, query, "c.source_proxy_id IS NOT NULL AND COALESCE(c.source_proxy_url, '') <> ''")
+	require.Contains(t, query, "ORDER BY array_position(am.target_lengths, c.value_length)")
 }
 
 func TestCodexTurnStatePolicyJSONIncludesStrictRouteBinding(t *testing.T) {
@@ -76,7 +77,7 @@ func TestCodexTurnStateStatusQueriesBindConfiguredLengths(t *testing.T) {
 		DynamicProxyURL: "https://example.com/private-proxy-source",
 	}
 	policy := `{"target_lengths":[356,292],"rules":[{"plan_type":"pro","model":"*","target_lengths":[292]}]}`
-	mock.ExpectQuery(`(?s)WITH eligible_accounts.*COALESCE\(array_position\(am.target_lengths, c.value_length\), cardinality\(am.target_lengths\) \+ 1\).*SELECT COUNT`).
+	mock.ExpectQuery(`(?s)WITH eligible_accounts.*c.value_length = ANY\(am.target_lengths\).*ORDER BY array_position\(am.target_lengths, c.value_length\).*SELECT COUNT`).
 		WithArgs(sqlmock.AnyArg(), "{42}", `{"gpt-5.5"}`, policy).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 	mock.ExpectQuery(`(?s)WITH eligible_accounts.*LIMIT \$5 OFFSET \$6`).
@@ -86,7 +87,7 @@ func TestCodexTurnStateStatusQueriesBindConfiguredLengths(t *testing.T) {
 	result, err := repo.ListOpenAICodexTurnStateAccountStatuses(context.Background(), []int64{42}, []string{"gpt-5.5"}, settings, 1, 20)
 	require.NoError(t, err)
 	require.Equal(t, []int{292}, result.Items[0].TargetLengths)
-	mock.ExpectQuery(`(?s)WITH eligible_accounts.*c.value_length BETWEEN 64 AND 4096.*COALESCE\(array_position\(am.target_lengths, c.value_length\), cardinality\(am.target_lengths\) \+ 1\).*COUNT\(\*\) FILTER \(WHERE effective_status = 'ready'\)`).
+	mock.ExpectQuery(`(?s)WITH eligible_accounts.*c.value_length = ANY\(am.target_lengths\).*ORDER BY array_position\(am.target_lengths, c.value_length\).*COUNT\(\*\) FILTER \(WHERE effective_status = 'ready'\)`).
 		WithArgs(sqlmock.AnyArg(), nil, `{"gpt-5.5"}`, policy).
 		WillReturnRows(sqlmock.NewRows([]string{"oauth_accounts", "ready_accounts", "missing_accounts", "ready_model_slots", "total_model_slots", "running_jobs", "enabled_proxies", "healthy_proxies", "shared_proxies", "last_scan_at"}).AddRow(1, 0, 1, 0, 1, 0, 0, 0, 0, nil))
 	_, err = repo.GetOpenAICodexTurnStateOperationsSummary(context.Background(), []string{"gpt-5.5"}, settings)

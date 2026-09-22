@@ -2,37 +2,26 @@ package service
 
 import (
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 )
 
-func TestSelectOpenAIOutboundProxyOAuthUsesActivePool(t *testing.T) {
-	expiredAt := time.Now().Add(-time.Minute)
+func TestSelectOpenAIOutboundProxyOAuthStaysDirect(t *testing.T) {
 	legacy := &Proxy{ID: 1, Status: StatusActive, Protocol: "http", Host: "legacy.example", Port: 8001}
 	first := &Proxy{ID: 2, Status: StatusActive, Protocol: "http", Host: "first.example", Port: 8002}
-	second := &Proxy{ID: 3, Status: StatusActive, Protocol: "http", Host: "second.example", Port: 8003}
-	inactive := &Proxy{ID: 4, Status: "inactive", Protocol: "http", Host: "inactive.example", Port: 8004}
-	expired := &Proxy{ID: 5, Status: StatusActive, Protocol: "http", Host: "expired.example", Port: 8005, ExpiresAt: &expiredAt}
 	account := &Account{
 		Platform:     PlatformOpenAI,
 		Type:         AccountTypeOAuth,
 		Proxy:        legacy,
-		CodexProxies: []*Proxy{first, inactive, second, expired, nil},
+		CodexProxies: []*Proxy{first},
 	}
 
-	seen := map[int64]bool{}
-	for range 256 {
-		selected := account.SelectOpenAIOutboundProxy()
-		require.NotNil(t, selected)
-		require.Contains(t, []int64{first.ID, second.ID}, selected.ID)
-		seen[selected.ID] = true
-	}
-	require.True(t, seen[first.ID])
-	require.True(t, seen[second.ID])
+	require.Nil(t, account.SelectOpenAIOutboundProxy())
+	require.Empty(t, account.SelectOpenAIOutboundProxyURL())
+	require.False(t, account.HasOpenAIOutboundProxy())
 }
 
-func TestSelectOpenAIOutboundProxyOAuthFallsBackToLegacyProxy(t *testing.T) {
+func TestSelectOpenAIOutboundProxySetupTokenStaysDirect(t *testing.T) {
 	legacy := &Proxy{ID: 1, Status: StatusActive, Protocol: "http", Host: "legacy.example", Port: 8001}
 	account := &Account{
 		Platform:     PlatformOpenAI,
@@ -41,7 +30,14 @@ func TestSelectOpenAIOutboundProxyOAuthFallsBackToLegacyProxy(t *testing.T) {
 		CodexProxies: []*Proxy{{ID: 2, Status: "inactive"}},
 	}
 
-	require.Same(t, legacy, account.SelectOpenAIOutboundProxy())
+	require.Nil(t, account.SelectOpenAIOutboundProxy())
+}
+
+func TestSelectOpenAIOutboundProxyLegacyCodexStaysDirect(t *testing.T) {
+	legacy := &Proxy{ID: 1, Status: StatusActive, Protocol: "http", Host: "legacy.example", Port: 8001}
+	account := &Account{Type: AccountTypeOAuth, Proxy: legacy}
+
+	require.Nil(t, account.SelectOpenAIOutboundProxy())
 }
 
 func TestSelectOpenAIOutboundProxyAPIKeyRetainsLegacyBehavior(t *testing.T) {
@@ -86,7 +82,7 @@ func TestOpenAIProxyStreamCircuitSkipsActiveCodexPool(t *testing.T) {
 	require.False(t, ok)
 }
 
-func TestOpenAIProxyStreamCircuitUsesFallbackWhenCodexPoolUnavailable(t *testing.T) {
+func TestOpenAIProxyStreamCircuitSkipsOAuthFallbackProxy(t *testing.T) {
 	legacyID := int64(1)
 	account := &Account{
 		Platform: PlatformOpenAI,
@@ -97,7 +93,6 @@ func TestOpenAIProxyStreamCircuitUsesFallbackWhenCodexPoolUnavailable(t *testing
 		},
 	}
 
-	proxyID, ok := openAIProxyStreamCircuitProxyID(account)
-	require.True(t, ok)
-	require.Equal(t, legacyID, proxyID)
+	_, ok := openAIProxyStreamCircuitProxyID(account)
+	require.False(t, ok)
 }

@@ -266,12 +266,12 @@ SELECT id, state_value, state_hash, value_length, source_account_id,
        issued_at, first_seen_at, last_seen_at, expires_at
 FROM codex_turn_states
 WHERE source_account_id = $1 AND source_model = $2
-  AND value_length BETWEEN $5 AND $6 AND expires_at > $4
-	  AND issued_at <= $4 AND issued_at + INTERVAL '4 minutes' > $4
+  AND value_length = ANY($3::integer[]) AND expires_at > $4
+  AND issued_at <= $4 AND issued_at + INTERVAL '4 minutes' > $4
   AND source_transport = 'scanner' AND source_session_id IS NOT NULL
-ORDER BY COALESCE(array_position($3::integer[], value_length), cardinality($3::integer[]) + 1),
+ORDER BY array_position($3::integer[], value_length),
          expires_at DESC, last_seen_at DESC, state_hash DESC
-LIMIT 1`, accountID, model, pq.Array(targetLengths), now, 64, 4096).Scan(
+LIMIT 1`, accountID, model, pq.Array(targetLengths), now).Scan(
 		&record.ID, &record.StateValue, &record.StateHash, &record.ValueLength, &record.SourceAccountID,
 		&record.SourceSessionHash, &record.SourceSessionID, &record.SourceProxyID,
 		&record.SourceProxyURL, &record.SourceExitIP, &record.RouteIPv6, &record.RouteCookie, &record.SourceModel, &record.SourceTransport,

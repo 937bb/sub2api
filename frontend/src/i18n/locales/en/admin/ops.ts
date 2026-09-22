@@ -31,7 +31,7 @@ export default {
           title: 'State routing / Rules / Scan settings',
           scope: 'Set accepted State lengths for acquisition and reuse by plan and model, without editing State tokens. Each account/model retains its own State.',
           lengths: 'Default target lengths in priority order',
-          lengthsHint: 'Highest priority first, separated by commas, e.g. 332, 292. Length is a local selection rule, not a guarantee of model quality.',
+          lengthsHint: 'Strict allowlist in priority order, separated by commas, e.g. 332, 292. Other lengths are rejected and never reused.',
           rules: 'Plan / model rules',
           rulesHint: 'Priority: plan + model > plan + all models > all plans + model > all plans + all models > default lengths. Use * for all models. Lengths are ordered by priority. Deleting a rule falls back to the next matching rule.',
           selectedScope: 'Editing {plan} / {model}: this applies to every account with the same plan/model, not only this account. State tokens are never shared across accounts.',

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"hash/fnv"
 	"log/slog"
-	"math/rand/v2"
 	"net/url"
 	"reflect"
 	"sort"
@@ -103,27 +102,16 @@ func (a *Account) RequiresOpenAICodexStateRouting() bool {
 	return ok && required
 }
 
-// SelectOpenAIOutboundProxy chooses one configured egress proxy for a single
-// Codex upstream request. API-key and non-OpenAI accounts retain the legacy
-// proxy_id behavior. A WebSocket caller must invoke this once per connection.
+// SelectOpenAIOutboundProxy returns the proxy used for an OpenAI business
+// request. OAuth-like Codex traffic stays on direct or locally bound IPv6
+// egress unless a verified turn-state ticket explicitly binds a managed scan
+// route later in the request pipeline. Configured account proxies remain stored
+// for credential maintenance but are not selected here.
 func (a *Account) SelectOpenAIOutboundProxy() *Proxy {
-	if a != nil && a.IsOpenAIOAuthLike() {
-		now := time.Now()
-		var selected *Proxy
-		eligible := 0
-		for _, proxy := range a.CodexProxies {
-			if proxy != nil && proxy.IsActive() && !proxy.IsExpired(now) {
-				eligible++
-				if rand.IntN(eligible) == 0 {
-					selected = proxy
-				}
-			}
-		}
-		if selected != nil {
-			return selected
-		}
-	}
 	if a == nil {
+		return nil
+	}
+	if a.UsesOpenAICodexProtocol() {
 		return nil
 	}
 	return a.Proxy
@@ -137,25 +125,7 @@ func (a *Account) SelectOpenAIOutboundProxyURL() string {
 }
 
 func (a *Account) HasOpenAIOutboundProxy() bool {
-	if a == nil {
-		return false
-	}
-	if a.hasActiveCodexProxy(time.Now()) {
-		return true
-	}
-	return a.Proxy != nil
-}
-
-func (a *Account) hasActiveCodexProxy(now time.Time) bool {
-	if a == nil || !a.IsOpenAIOAuthLike() {
-		return false
-	}
-	for _, proxy := range a.CodexProxies {
-		if proxy != nil && proxy.IsActive() && !proxy.IsExpired(now) {
-			return true
-		}
-	}
-	return false
+	return a.SelectOpenAIOutboundProxy() != nil
 }
 
 type OpenAIEndpointCapability string

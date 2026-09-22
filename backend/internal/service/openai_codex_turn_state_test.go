@@ -331,7 +331,7 @@ func TestGuardOpenAICodexTurnStateEcho_APIKeyUnaffected(t *testing.T) {
 	require.Equal(t, incoming, h.Get(openAICodexTurnStateHeader))
 }
 
-func TestOpenAICodexTurnStateRouteProxyRequiresExactActiveOwnerTicket(t *testing.T) {
+func TestOpenAICodexTurnStateScannerProxyNeverOverridesBusinessEgress(t *testing.T) {
 	now := time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)
 	svc := &OpenAIGatewayService{}
 	pool := svc.getOpenAICodexTurnStatePool()
@@ -347,7 +347,7 @@ func TestOpenAICodexTurnStateRouteProxyRequiresExactActiveOwnerTicket(t *testing
 	header.Set(openAICodexTurnStateHeader, state)
 	oauth := &Account{ID: accountID, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
 	proxyURL := svc.openAICodexTurnStateRouteProxyURL(oauth, header, "http://fallback.example:8080")
-	require.Equal(t, "http://ticket-proxy.example:8080", proxyURL)
+	require.Equal(t, "http://fallback.example:8080", proxyURL)
 
 	otherAccount := &Account{ID: accountID + 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
 	require.Equal(t, "http://fallback.example:8080", svc.openAICodexTurnStateRouteProxyURL(otherAccount, header, "http://fallback.example:8080"))
@@ -357,10 +357,33 @@ func TestOpenAICodexTurnStateRouteProxyRequiresExactActiveOwnerTicket(t *testing
 
 	parentID := accountID
 	shadow := &Account{ID: 99, ParentAccountID: &parentID, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
-	require.Equal(t, "http://ticket-proxy.example:8080", svc.openAICodexTurnStateRouteProxyURL(shadow, header, "http://fallback.example:8080"))
+	require.Equal(t, "http://fallback.example:8080", svc.openAICodexTurnStateRouteProxyURL(shadow, header, "http://fallback.example:8080"))
 
 	now = now.Add(openAICodexTurnStateTTL + time.Second)
 	require.Equal(t, "http://fallback.example:8080", svc.openAICodexTurnStateRouteProxyURL(oauth, header, "http://fallback.example:8080"))
+}
+
+func TestOpenAICodexTurnStateManagedAirportBindingOverridesBusinessEgress(t *testing.T) {
+	now := time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)
+	svc := &OpenAIGatewayService{}
+	pool := svc.getOpenAICodexTurnStatePool()
+	pool.now = func() time.Time { return now }
+	accountID := int64(42)
+	proxyID := int64(9)
+	state := testOpenAICodexTurnState(332, now, 'm')
+	require.NoError(t, pool.observeDurably(
+		context.Background(), state, accountID, "session-hash", "gpt-6-astra", "scanner",
+		openAICodexTurnStateRouteTicket{
+			SessionID: "harvest-session",
+			ProxyID:   &proxyID,
+			ProxyURL:  "http://airport-node.example:8080",
+		},
+	))
+
+	header := http.Header{}
+	header.Set(openAICodexTurnStateHeader, state)
+	account := &Account{ID: accountID, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	require.Equal(t, "http://airport-node.example:8080", svc.openAICodexTurnStateRouteProxyURL(account, header, ""))
 }
 
 func TestOpenAICodexTurnStateRouteIPv6OverridesFallbackProxy(t *testing.T) {
@@ -387,7 +410,7 @@ func TestOpenAICodexTurnStateRouteIPv6OverridesFallbackProxy(t *testing.T) {
 	require.Equal(t, "2a02:ae02:1a:2c00::1234", routeIPv6)
 }
 
-func TestDoOpenAIUpstreamUsesDynamicRouteBoundToState(t *testing.T) {
+func TestDoOpenAIUpstreamKeepsDynamicScannerOffBusinessEgress(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	upstream := &codexTurnStateHarvestCaptureUpstream{responses: []*http.Response{{
 		StatusCode: http.StatusOK,
@@ -413,7 +436,7 @@ func TestDoOpenAIUpstreamUsesDynamicRouteBoundToState(t *testing.T) {
 	resp, err := svc.doOpenAIUpstream(req, "http://fallback.example:8080", account)
 	require.NoError(t, err)
 	require.NotNil(t, resp)
-	require.Equal(t, []string{"http://dynamic.example:8080"}, upstream.proxies)
+	require.Equal(t, []string{"http://fallback.example:8080"}, upstream.proxies)
 }
 
 func TestOpenAICodexTurnStateObserveDurablyRejectsInvalidStateWithoutPanic(t *testing.T) {
@@ -516,7 +539,7 @@ func TestOpenAICodexTurnStateRouteMismatchInvalidatesOnlyUsedTicketAndForcesScan
 	svc := &OpenAIGatewayService{}
 	pool := svc.getOpenAICodexTurnStatePool()
 	pool.now = func() time.Time { return now }
-	state := testOpenAICodexTurnState(356, now.Add(-time.Minute), 'a')
+	state := testOpenAICodexTurnState(332, now.Add(-time.Minute), 'a')
 	pool.observe(state, &accountID, "harvest-session", model, "scanner")
 
 	c, _ := newTurnStateTestContext(t, 7, "client-session")
@@ -546,7 +569,7 @@ func TestOpenAICodexTurnStateSafetyBufferingInvalidatesUsedTicketAndForcesScan(t
 	svc := &OpenAIGatewayService{}
 	pool := svc.getOpenAICodexTurnStatePool()
 	pool.now = func() time.Time { return now }
-	state := testOpenAICodexTurnState(356, now.Add(-time.Minute), 'a')
+	state := testOpenAICodexTurnState(332, now.Add(-time.Minute), 'a')
 	pool.observe(state, &accountID, "harvest-session", model, "scanner")
 
 	c, _ := newTurnStateTestContext(t, 7, "client-session")
@@ -580,7 +603,7 @@ func TestOpenAICodexTurnStateLateMismatchInvalidatesOnlyOldTicket(t *testing.T) 
 	svc := &OpenAIGatewayService{}
 	pool := svc.getOpenAICodexTurnStatePool()
 	pool.now = func() time.Time { return now }
-	oldState := testOpenAICodexTurnState(356, now.Add(-2*time.Minute), 'a')
+	oldState := testOpenAICodexTurnState(332, now.Add(-2*time.Minute), 'a')
 	pool.observe(oldState, &accountID, "old-session", model, "scanner")
 
 	c, _ := newTurnStateTestContext(t, 7, "client-session")
@@ -589,7 +612,7 @@ func TestOpenAICodexTurnStateLateMismatchInvalidatesOnlyOldTicket(t *testing.T) 
 	require.Equal(t, oldState, h.Get(openAICodexTurnStateHeader))
 
 	now = now.Add(time.Second)
-	newState := testOpenAICodexTurnState(356, now.Add(-time.Minute), 'b')
+	newState := testOpenAICodexTurnState(332, now.Add(-time.Minute), 'b')
 	pool.observe(newState, &accountID, "new-session", model, "scanner")
 	queued := false
 	svc.setOpenAICodexTurnStateScanEnqueuer(func(int64, string, bool) bool {

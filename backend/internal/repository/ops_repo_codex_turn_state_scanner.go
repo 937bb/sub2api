@@ -416,16 +416,16 @@ WITH eligible_accounts AS (
            ELSE 'missing'
          END AS effective_status
   FROM eligible_accounts a
-  JOIN account_targets am ON am.account_id = a.id
-  LEFT JOIN LATERAL (
-    SELECT value_length, issued_at, expires_at
+	  JOIN account_targets am ON am.account_id = a.id
+	  LEFT JOIN LATERAL (
+	    SELECT value_length, issued_at, expires_at
     FROM codex_turn_states c
     WHERE c.source_account_id = a.id AND c.source_model = am.model
-      AND c.value_length BETWEEN 64 AND 4096 AND c.expires_at > NOW()
+      AND c.value_length = ANY(am.target_lengths) AND c.expires_at > NOW()
 	      AND c.issued_at <= NOW() AND c.issued_at + INTERVAL '4 minutes' > NOW()
-      AND (NOT am.require_route_binding
-        OR COALESCE(c.route_ipv6, '') <> '' OR COALESCE(c.source_proxy_url, '') <> '')
-    ORDER BY COALESCE(array_position(am.target_lengths, c.value_length), cardinality(am.target_lengths) + 1),
+	      AND (NOT am.require_route_binding OR COALESCE(c.route_ipv6, '') <> ''
+	        OR (c.source_proxy_id IS NOT NULL AND COALESCE(c.source_proxy_url, '') <> ''))
+    ORDER BY array_position(am.target_lengths, c.value_length),
              c.expires_at DESC, c.last_seen_at DESC, c.state_hash DESC LIMIT 1
   ) ls ON TRUE
   LEFT JOIN codex_turn_state_scans sc ON sc.account_id = a.id AND sc.model = am.model

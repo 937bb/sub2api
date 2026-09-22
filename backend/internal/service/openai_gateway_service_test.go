@@ -1948,9 +1948,9 @@ func TestOpenAIStreamingPostOutputDisconnectQuarantinesSharedProxyWithoutSameStr
 	proxyID := int64(4698)
 	account := &Account{
 		ID:       469801,
-		Name:     "oauth-on-shared-proxy",
+		Name:     "apikey-on-shared-proxy",
 		Platform: PlatformOpenAI,
-		Type:     AccountTypeOAuth,
+		Type:     AccountTypeAPIKey,
 		ProxyID:  &proxyID,
 	}
 	svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{

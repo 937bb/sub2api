@@ -720,6 +720,8 @@ func openAICodexTurnStateRouteTicketForProxy(sessionID string, proxy *OpenAICode
 	proxyID := proxy.ID
 	ticket.ProxyID = &proxyID
 	if proxy.RouteBindingEnabled {
+		// Managed airport nodes may explicitly bind a ticket to the same egress.
+		// Dynamic metered proxies return above and can never reach this branch.
 		ticket.ProxyURL = proxy.ProxyURL
 	}
 	return ticket

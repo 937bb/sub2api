@@ -92,7 +92,7 @@ func TestOpenAICodexTurnStateScopedPoolAppliesPlanAndModelPolicy(t *testing.T) {
 	require.False(t, found)
 }
 
-func TestOpenAICodexTurnStateScopedPoolRestoredDefaultsPrefer332AndRetain292Fallback(t *testing.T) {
+func TestOpenAICodexTurnStateScopedPoolDefaultsKeep292FallbackOnlyForPro(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	pool := newOpenAICodexTurnStatePool()
 	pool.now = func() time.Time { return now }
@@ -109,8 +109,12 @@ func TestOpenAICodexTurnStateScopedPoolRestoredDefaultsPrefer332AndRetain292Fall
 			require.Equal(t, primary, selected)
 			pool.removeHashes([]string{hashOpenAICodexTurnState(primary)})
 			selected, ok = pool.preferredForBucket(accountID, model)
-			require.True(t, ok)
-			require.Equal(t, fallback, selected)
+			if plan == "pro" {
+				require.True(t, ok)
+				require.Equal(t, fallback, selected)
+			} else {
+				require.False(t, ok, "Team must never reuse a non-332 state")
+			}
 		}
 	}
 }
@@ -134,6 +138,12 @@ func TestOpenAICodexTurnStatePoolCanRequireAcquisitionRouteBinding(t *testing.T)
 	_, ok = pool.preferredForBucket(accountID, model)
 	require.False(t, ok, "an unbound legacy ticket must not remain reusable")
 
+	proxyBound := testScopedOpenAICodexTurnState(332, now.Add(-time.Minute), 'p')
+	require.ErrorContains(t, pool.observeDurably(context.Background(), proxyBound, accountID, "session", model, "scanner", openAICodexTurnStateRouteTicket{
+		SessionID: "session",
+		ProxyURL:  "http://scanner.example:8080",
+	}), "not reusable", "scanner proxies must never satisfy strict business route binding")
+
 	bound := testScopedOpenAICodexTurnState(332, now.Add(-time.Minute), 'b')
 	require.NoError(t, pool.observeDurably(context.Background(), bound, accountID, "session", model, "scanner", openAICodexTurnStateRouteTicket{
 		SessionID: "session",
@@ -143,6 +153,31 @@ func TestOpenAICodexTurnStatePoolCanRequireAcquisitionRouteBinding(t *testing.T)
 	require.True(t, ok)
 	require.Equal(t, bound, selected.StateValue)
 	require.Equal(t, "2a02:ae02:1a:2c00::1234", selected.RouteIPv6)
+}
+
+func TestOpenAICodexTurnStatePoolStrictBindingAcceptsManagedAirportOnly(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	pool := newOpenAICodexTurnStatePool()
+	pool.now = func() time.Time { return now }
+	settings := defaultOpenAICodexTurnStateScanSettings()
+	requireRouteBinding := true
+	settings.RequireRouteBinding = &requireRouteBinding
+	pool.setScanSettings(settings)
+
+	accountID := int64(11)
+	const model = "gpt-6-astra"
+	proxyID := int64(9)
+	state := testScopedOpenAICodexTurnState(332, now.Add(-time.Minute), 'm')
+	require.NoError(t, pool.observeDurably(context.Background(), state, accountID, "session", model, "scanner", openAICodexTurnStateRouteTicket{
+		SessionID: "session",
+		ProxyID:   &proxyID,
+		ProxyURL:  "http://airport-node.example:8080",
+	}))
+
+	selected, ok := pool.preferredRecordForBucket(accountID, model)
+	require.True(t, ok)
+	require.Equal(t, proxyID, *selected.SourceProxyID)
+	require.Equal(t, "http://airport-node.example:8080", selected.SourceProxyURL)
 }
 
 func TestOpenAICodexTurnStateStrictRouteBindingOverridesClientStateWithAccountModelTicket(t *testing.T) {
@@ -233,8 +268,8 @@ func TestOpenAICodexTurnStateScopedPoolBucketSyncUsesScopedTargets(t *testing.T)
 	require.True(t, ok)
 	require.Equal(t, state, selected)
 	require.NoError(t, pool.observeDurably(context.Background(), state, accountID, "session", "gpt-5.6-terra", "scanner", openAICodexTurnStateRouteTicket{SessionID: "session"}))
-	require.NoError(t, pool.observeDurably(context.Background(), testScopedOpenAICodexTurnState(292, now, 'p'), accountID, "session", "gpt-5.6-terra", "scanner", openAICodexTurnStateRouteTicket{SessionID: "session"}))
-	require.Equal(t, 2, repo.writeCalls)
+	require.Error(t, pool.observeDurably(context.Background(), testScopedOpenAICodexTurnState(292, now, 'p'), accountID, "session", "gpt-5.6-terra", "scanner", openAICodexTurnStateRouteTicket{SessionID: "session"}))
+	require.Equal(t, 1, repo.writeCalls)
 }
 
 func TestOpenAICodexTurnStateScopedPoolBucketSyncNeverFallsBackForEmptyPolicy(t *testing.T) {

@@ -26,8 +26,8 @@ const (
 )
 
 // OpenAICodexTurnStateScanSettings configures state acquisition and the routing
-// guard for newly imported OAuth credentials. TargetLengths is an ordered local
-// preference, not an assertion about upstream token semantics.
+// guard for newly imported OAuth credentials. TargetLengths is an ordered
+// allowlist; values outside the resolved plan/model policy are never reusable.
 type OpenAICodexTurnStateScanSettings struct {
 	TargetLengths             []int                            `json:"target_lengths"`
 	Rules                     []OpenAICodexTurnStateLengthRule `json:"rules"`
@@ -50,7 +50,7 @@ type OpenAICodexTurnStateLengthRule struct {
 func defaultOpenAICodexTurnStateLengthRules() []OpenAICodexTurnStateLengthRule {
 	return []OpenAICodexTurnStateLengthRule{
 		{PlanType: "pro", Model: "*", TargetLengths: []int{332, 292}},
-		{PlanType: "team", Model: "*", TargetLengths: []int{356, 332, 292}},
+		{PlanType: "team", Model: "*", TargetLengths: []int{332}},
 	}
 }
 
@@ -219,7 +219,17 @@ func (s *OpenAICodexTurnStateScanSettings) lengthRank(length int) int {
 }
 
 func (s *OpenAICodexTurnStateScanSettings) acceptsLength(length int) bool {
-	return length >= openAICodexTurnStateMinLength && length <= openAICodexTurnStateMaxLength
+	if s == nil {
+		s = defaultOpenAICodexTurnStateScanSettings()
+	}
+	return slices.Contains(s.TargetLengths, length)
+}
+
+func (s *OpenAICodexTurnStateScanSettings) acceptsLengthFor(plan, model string, length int) bool {
+	if s == nil {
+		s = defaultOpenAICodexTurnStateScanSettings()
+	}
+	return slices.Contains(s.TargetLengthsFor(plan, model), length)
 }
 
 func (s *OpenAICodexTurnStateScanSettings) primaryLength() int {

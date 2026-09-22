@@ -54,7 +54,7 @@ func TestOpenAICodexTurnStatePlanModelSettings(t *testing.T) {
 	require.Equal(t, "pro", OpenAICodexStatePlanType(imported), "explicit credentials outrank the import fallback")
 }
 
-func TestOpenAICodexTurnStateDefaultsUseTeam356Then332Then292(t *testing.T) {
+func TestOpenAICodexTurnStateDefaultsRequireTeam332(t *testing.T) {
 	settings := defaultOpenAICodexTurnStateScanSettings()
 	require.True(t, settings.IsStateRequiredBeforeRouting())
 	require.False(t, settings.IsRouteBindingRequired())
@@ -63,7 +63,7 @@ func TestOpenAICodexTurnStateDefaultsUseTeam356Then332Then292(t *testing.T) {
 	}
 	require.Equal(t, []OpenAICodexTurnStateLengthRule{
 		{PlanType: "pro", Model: "*", TargetLengths: []int{332, 292}},
-		{PlanType: "team", Model: "*", TargetLengths: []int{356, 332, 292}},
+		{PlanType: "team", Model: "*", TargetLengths: []int{332}},
 	}, settings.Rules)
 	for _, plan := range []string{"pro", "pro20x", "prolite"} {
 		for _, model := range []string{"gpt-5.6-terra", "gpt-6-astra", "gpt-5.5"} {
@@ -74,12 +74,12 @@ func TestOpenAICodexTurnStateDefaultsUseTeam356Then332Then292(t *testing.T) {
 	for _, plan := range []string{"team", "business", "self_serve_business_prolite"} {
 		for _, model := range []string{"gpt-5.6-terra", "gpt-6-astra", "gpt-5.5"} {
 			lengths := settings.TargetLengthsFor(plan, model)
-			require.Equal(t, []int{356, 332, 292}, lengths, "plan %s model %s", plan, model)
+			require.Equal(t, []int{332}, lengths, "plan %s model %s", plan, model)
 		}
 	}
 	settings.Rules = append(settings.Rules, OpenAICodexTurnStateLengthRule{PlanType: "team", Model: "gpt-6-astra", TargetLengths: []int{273}})
 	require.Equal(t, []int{273}, settings.TargetLengthsFor("team", "gpt-6-astra"), "manual per-model overrides must remain supported")
-	require.Equal(t, []int{356, 332, 292}, settings.TargetLengthsFor("team", "gpt-5.6-terra"))
+	require.Equal(t, []int{332}, settings.TargetLengthsFor("team", "gpt-5.6-terra"))
 	require.Equal(t, []int{332, 292}, settings.TargetLengthsFor("pro", "gpt-6-astra"))
 }
 
@@ -162,10 +162,10 @@ func TestOpenAICodexTurnStateScannerUsesPlanModelRules(t *testing.T) {
 		length      int
 		ready       bool
 	}{
-		{"pro", "gpt-6-astra", 292, true}, {"pro", "gpt-6-astra", 332, true},
+		{"pro", "gpt-6-astra", 292, true}, {"pro", "gpt-6-astra", 332, false},
 		{"prolite", "gpt-6-astra", 292, true},
-		{"team", "gpt-5.6-terra", 286, true}, {"team", "gpt-5.6-terra", 292, true},
-		{"team", "gpt-6-astra", 273, true}, {"team", "gpt-6-astra", 286, true},
+		{"team", "gpt-5.6-terra", 286, true}, {"team", "gpt-5.6-terra", 292, false},
+		{"team", "gpt-6-astra", 273, true}, {"team", "gpt-6-astra", 286, false},
 	} {
 		t.Run(tc.plan+tc.model+time.Duration(tc.length).String(), func(t *testing.T) {
 			now := time.Now().UTC().Truncate(time.Second)
@@ -268,7 +268,7 @@ func TestOpenAICodexTurnStateScanSettingsValidation(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 292, validated.primaryLength())
 	require.True(t, validated.acceptsLength(356))
-	require.True(t, validated.acceptsLength(312), "configured lengths rank valid states; they do not define validity")
+	require.False(t, validated.acceptsLength(312), "configured lengths are a strict allowlist")
 	require.False(t, validated.acceptsLength(63))
 	require.False(t, validated.acceptsLength(4097))
 	require.Less(t, validated.lengthRank(356), validated.lengthRank(332))
@@ -364,9 +364,8 @@ func TestOpenAICodexTurnStateConfiguredPolicyKeepsAccountModelAndExpiryIsolation
 	require.True(t, ok)
 	require.Equal(t, state292, selected)
 	pool.setTargetLengths([]int{332})
-	selected, ok = pool.preferredForBucket(accountID, "gpt-5.5")
-	require.True(t, ok, "a replay-verified state remains valid when its length is not a configured preference")
-	require.NotEmpty(t, selected)
+	_, ok = pool.preferredForBucket(accountID, "gpt-5.5")
+	require.False(t, ok, "a state outside the configured allowlist must not remain reusable")
 	pool.setTargetLengths([]int{356})
 	now = now.Add(time.Hour)
 	_, ok = pool.preferredForBucket(accountID, "gpt-5.5")

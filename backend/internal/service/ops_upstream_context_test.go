@@ -136,6 +136,16 @@ func TestOpsUpstreamProxyFieldAccessors(t *testing.T) {
 			wantName: opsProxyNameDirect,
 		},
 		{
+			name: "OpenAI OAuth account proxy is credential-only",
+			account: &Account{
+				Platform: PlatformOpenAI,
+				Type:     AccountTypeOAuth,
+				ProxyID:  &boundID,
+				Proxy:    &Proxy{ID: boundID, Name: "credential-proxy"},
+			},
+			wantName: opsProxyNameDirect,
+		},
+		{
 			name:     "configured proxy was not hydrated and transport is direct",
 			account:  &Account{ProxyID: &backupID},
 			wantName: opsProxyNameDirect,

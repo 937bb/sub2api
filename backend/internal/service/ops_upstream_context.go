@@ -489,14 +489,24 @@ func opsUpstreamProxyAttribution(account *Account) (*int64, string) {
 	if account == nil {
 		return nil, opsProxyNameUnknown
 	}
-	if account.ProxyID == nil || account.Proxy == nil {
+	if account.IsOpenAI() && account.UsesOpenAICodexProtocol() {
 		return nil, opsProxyNameDirect
 	}
-	if account.Proxy.ID <= 0 {
+	if account.ProxyID == nil {
+		return nil, opsProxyNameDirect
+	}
+	proxy := account.Proxy
+	if account.IsOpenAI() {
+		proxy = account.SelectOpenAIOutboundProxy()
+	}
+	if proxy == nil {
+		return nil, opsProxyNameDirect
+	}
+	if proxy.ID <= 0 {
 		return nil, opsProxyNameUnknown
 	}
-	proxyID := account.Proxy.ID
-	name := strings.TrimSpace(account.Proxy.Name)
+	proxyID := proxy.ID
+	name := strings.TrimSpace(proxy.Name)
 	if name == "" {
 		name = opsProxyNameUnnamed
 	}
