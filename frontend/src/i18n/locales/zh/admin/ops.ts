@@ -63,6 +63,17 @@ export default {
           routeBindingDisabled: '出口绑定已关闭：无出口票据的 State 仍可复用，并回退到账号默认出口。',
           parallel: '单任务并发出口',
           parallelHint: '每个账号和模型最多同时使用 1–5 个不同出口；有效 State 临期后才自动刷新。',
+          routeMode: '扫描出口模式',
+          routeManagedProxy: '机场专用代理',
+          routeIpv6: '服务器 /64 IPv6',
+          routeDynamicProxy: '动态代理（仅兼容）',
+          routeAuto: '自动（旧配置兼容）',
+          routeHint: {
+            managed_proxy: '只使用“扫描代理”页中启用的专用代理；未单独开启出口绑定时仅用于扫描，业务请求仍走账号默认出口。',
+            ipv6: '使用服务器已路由的 /64 地址扫描，并将每张票据固定到获取时的 IPv6。',
+            dynamic_proxy: '使用动态提取接口。临时节点可能断流并产生流量费，不适合承载业务请求。',
+            auto: '保留旧行为：动态代理开启时优先动态代理，否则优先 IPv6，再回退到代理池。'
+          },
           dynamicEnabled: '使用动态扫描代理',
           providerUrl: '代理提取接口（HTTPS）',
           providerHint: 'Rand 不保证来自不同国家，也不保证获取目标长度。提取后仅使用已验证、去重的可用出口扫描；不会加入业务代理池。轮转网关的国家和出口 IP 仅为预检时观测，State 请求的新连接可能更换出口，不能保证覆盖 5 个国家。',

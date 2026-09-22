@@ -235,6 +235,7 @@ func TestOpenAICodexTurnStateScanSettingsValidation(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []int{332, 292}, validated.TargetLengths)
 	require.Equal(t, 5, validated.ParallelProbes)
+	require.Equal(t, OpenAICodexTurnStateScanRouteAuto, validated.ScanRouteMode)
 	require.False(t, validated.DynamicProxyEnabled)
 	require.True(t, validated.IsStateRequiredBeforeRouting())
 
@@ -246,6 +247,7 @@ func TestOpenAICodexTurnStateScanSettingsValidation(t *testing.T) {
 		"too many lengths":    func(s *OpenAICodexTurnStateScanSettings) { s.TargetLengths = make([]int, 17) },
 		"no probes":           func(s *OpenAICodexTurnStateScanSettings) { s.ParallelProbes = 0 },
 		"unbounded probes":    func(s *OpenAICodexTurnStateScanSettings) { s.ParallelProbes = 6 },
+		"unknown scan route":  func(s *OpenAICodexTurnStateScanSettings) { s.ScanRouteMode = "airport_magic" },
 		"insecure URL":        func(s *OpenAICodexTurnStateScanSettings) { s.DynamicProxyURL = "http://example.com/proxies" },
 		"URL credentials":     func(s *OpenAICodexTurnStateScanSettings) { s.DynamicProxyURL = "https://user:pass@example.com/proxies" },
 		"URL fragment":        func(s *OpenAICodexTurnStateScanSettings) { s.DynamicProxyURL = "https://example.com/proxies#key" },

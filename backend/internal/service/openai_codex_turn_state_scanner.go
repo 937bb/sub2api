@@ -76,6 +76,7 @@ type openAICodexTurnStateScanRoute uint8
 
 const (
 	openAICodexTurnStateScanRouteProxy openAICodexTurnStateScanRoute = iota
+	openAICodexTurnStateScanRouteManagedProxy
 	openAICodexTurnStateScanRouteIPv6
 	openAICodexTurnStateScanRouteDynamicProxy
 )
@@ -326,6 +327,16 @@ func (s *openAICodexTurnStateScanner) lockWorkspace(account *Account) func() {
 }
 
 func selectOpenAICodexTurnStateScanRoute(settings *OpenAICodexTurnStateScanSettings, ipv6BindingEnabled bool) openAICodexTurnStateScanRoute {
+	if settings != nil {
+		switch settings.normalizedScanRouteMode() {
+		case OpenAICodexTurnStateScanRouteManagedProxy:
+			return openAICodexTurnStateScanRouteManagedProxy
+		case OpenAICodexTurnStateScanRouteIPv6:
+			return openAICodexTurnStateScanRouteIPv6
+		case OpenAICodexTurnStateScanRouteDynamicProxy:
+			return openAICodexTurnStateScanRouteDynamicProxy
+		}
+	}
 	if settings != nil && settings.DynamicProxyEnabled {
 		return openAICodexTurnStateScanRouteDynamicProxy
 	}
@@ -567,27 +578,36 @@ func (s *openAICodexTurnStateScanner) runJob(ctx context.Context, job openAICode
 	prefix, ipv6BindingEnabled := s.gateway.openAIChatGPTIPv6BindingPrefix()
 	if !reusedBoundRoute || !hasInventory {
 		switch selectOpenAICodexTurnStateScanRoute(settings, ipv6BindingEnabled) {
+		case openAICodexTurnStateScanRouteManagedProxy:
+			proxies, proxyErr := s.selectManagedProxies(ctx, account.ID, upstreamModel, scan.AttemptCount, min(max(settings.ParallelProbes, 1), openAICodexTurnStateScanFanoutLimit))
+			if proxyErr != nil {
+				results = append(results, openAICodexTurnStateProbe{result: openAICodexTurnStateHarvestResult{errorMessage: proxyErr.Error()}})
+			} else {
+				results = append(results, s.probeWithBoundedFanout(ctx, account, upstreamModel, proxies, settings)...)
+			}
 		case openAICodexTurnStateScanRouteDynamicProxy:
-			proxies, proxyErr := s.scanProxies(ctx, account.ID, upstreamModel, scan.AttemptCount, settings)
+			proxies, proxyErr := s.dynamicScanProxies(ctx, account.ID, upstreamModel, scan.AttemptCount, settings)
 			if proxyErr != nil {
 				results = append(results, openAICodexTurnStateProbe{result: openAICodexTurnStateHarvestResult{errorMessage: proxyErr.Error()}})
 			} else {
 				results = append(results, s.probeWithBoundedFanout(ctx, account, upstreamModel, proxies, settings)...)
 			}
 		case openAICodexTurnStateScanRouteIPv6:
-			routeIPv6s, routeErr := randomOpenAICodexRouteIPv6s(prefix, min(max(settings.ParallelProbes, 1), openAICodexTurnStateScanFanoutLimit))
+			var routeIPv6s []string
+			var routeErr error
+			if !ipv6BindingEnabled {
+				routeErr = errors.New("IPv6 scan route is selected but a routed /64 binding is unavailable")
+			} else {
+				routeIPv6s, routeErr = randomOpenAICodexRouteIPv6s(prefix, min(max(settings.ParallelProbes, 1), openAICodexTurnStateScanFanoutLimit))
+			}
 			if routeErr != nil {
 				results = append(results, openAICodexTurnStateProbe{result: openAICodexTurnStateHarvestResult{errorMessage: routeErr.Error()}})
 			} else {
 				results = append(results, s.probeWithIPv6Fanout(ctx, account, upstreamModel, routeIPv6s, settings)...)
 			}
 		default:
-			proxies, proxyErr := s.scanProxies(ctx, account.ID, upstreamModel, scan.AttemptCount, settings)
-			if proxyErr != nil {
-				results = append(results, openAICodexTurnStateProbe{result: openAICodexTurnStateHarvestResult{errorMessage: proxyErr.Error()}})
-			} else {
-				results = append(results, s.probeWithBoundedFanout(ctx, account, upstreamModel, proxies, settings)...)
-			}
+			proxies := s.selectProxies(ctx, account.ID, upstreamModel, scan.AttemptCount, min(max(settings.ParallelProbes, 1), openAICodexTurnStateScanFanoutLimit))
+			results = append(results, s.probeWithBoundedFanout(ctx, account, upstreamModel, proxies, settings)...)
 		}
 	}
 	// A setting can change during a job. Do not mark a result reusable under
@@ -687,10 +707,10 @@ func openAICodexTurnStateRouteTicketForProxy(sessionID string, proxy *OpenAICode
 	}
 	ticket.ExitIP = proxy.ExitIP
 	if proxy.Source == "dynamic" {
-		// A model-confirmed state is only useful while requests retain the exact
-		// rotating-proxy session that minted it. Dynamic credentials are short
-		// lived, so persist the route and expire it before the provider rotates.
-		ticket.ProxyURL = proxy.ProxyURL
+		// Dynamic proxies are acquisition-only. Persist the observed exit for
+		// diagnostics, but never turn a metered and unstable scan route into the
+		// business request egress. The State/session/cookie tuple remains reusable
+		// through the account's normal outbound route for this short lifetime.
 		ticket.ExpiresAt = time.Now().Add(openAICodexDynamicRouteTTL)
 		return ticket
 	}
@@ -1023,11 +1043,8 @@ func (s *openAICodexTurnStateScanner) selectProxy(ctx context.Context, accountID
 	return proxies[0]
 }
 
-func (s *openAICodexTurnStateScanner) scanProxies(ctx context.Context, accountID int64, model string, attempt int, settings *OpenAICodexTurnStateScanSettings) ([]*OpenAICodexTurnStateProxy, error) {
+func (s *openAICodexTurnStateScanner) dynamicScanProxies(ctx context.Context, accountID int64, model string, attempt int, settings *OpenAICodexTurnStateScanSettings) ([]*OpenAICodexTurnStateProxy, error) {
 	limit := min(max(settings.ParallelProbes, 1), openAICodexTurnStateScanFanoutLimit)
-	if !settings.DynamicProxyEnabled {
-		return s.selectProxies(ctx, accountID, model, attempt, limit), nil
-	}
 	proxies, summary, err := fetchOpenAICodexTurnStateDynamicProxies(ctx, settings.DynamicProxyURL, limit)
 	log.WithFields(log.Fields{
 		"account_id": accountID, "model": model, "attempt": attempt,
@@ -1044,6 +1061,21 @@ func (s *openAICodexTurnStateScanner) scanProxies(ctx context.Context, accountID
 	return proxies, nil
 }
 
+func (s *openAICodexTurnStateScanner) selectManagedProxies(ctx context.Context, accountID int64, model string, attempt, limit int) ([]*OpenAICodexTurnStateProxy, error) {
+	if limit <= 0 {
+		return nil, errors.New("managed State proxy scan requires at least one probe")
+	}
+	proxies, err := s.repo.ListOpenAICodexTurnStateProxies(ctx, true)
+	if err != nil {
+		return nil, fmt.Errorf("list managed Codex State proxies: %w", err)
+	}
+	proxies = selectOpenAICodexTurnStateProxyWindow(proxies, accountID, model, attempt, limit)
+	if len(proxies) == 0 {
+		return nil, errors.New("managed State proxy scan selected but no enabled dedicated proxy is available")
+	}
+	return proxies, nil
+}
+
 func (s *openAICodexTurnStateScanner) selectProxies(ctx context.Context, accountID int64, model string, attempt, limit int) []*OpenAICodexTurnStateProxy {
 	if limit <= 0 {
 		return nil
@@ -1054,7 +1086,12 @@ func (s *openAICodexTurnStateScanner) selectProxies(ctx context.Context, account
 		return nil
 	}
 	proxies := mergeOpenAICodexTurnStateScanProxies(dedicated, shared)
-	if len(proxies) == 0 {
+	return selectOpenAICodexTurnStateProxyWindow(proxies, accountID, model, attempt, limit)
+}
+
+func selectOpenAICodexTurnStateProxyWindow(proxies []*OpenAICodexTurnStateProxy, accountID int64, model string, attempt, limit int) []*OpenAICodexTurnStateProxy {
+	proxies = mergeOpenAICodexTurnStateScanProxies(proxies)
+	if len(proxies) == 0 || limit <= 0 {
 		return nil
 	}
 	sortOpenAICodexTurnStateScanProxies(proxies)

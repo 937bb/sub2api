@@ -29,6 +29,7 @@ const settings: CodexTurnStateScanSettings = {
   require_state_before_routing: true,
   require_route_binding: false,
   parallel_probes: 5,
+  scan_route_mode: 'auto',
   dynamic_proxy_enabled: false,
   dynamic_proxy_url: 'https://api.cliproxy.io/white/api?region=Rand&num=1&format=n&type=txt'
 }
@@ -99,6 +100,15 @@ describe('CodexScanSettingsDialog', () => {
     await wrapper.get('form').trigger('submit')
     await flushPromises()
     expect(updateSettings).toHaveBeenCalledWith({ ...settings, require_route_binding: true })
+  })
+
+  it('selects dedicated airport proxies without enabling the dynamic provider', async () => {
+    const wrapper = render()
+    await flushPromises()
+    await wrapper.get('[data-test="scan-route-mode"]').setValue('managed_proxy')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(updateSettings).toHaveBeenCalledWith({ ...settings, scan_route_mode: 'managed_proxy' })
   })
 
   it('edits plan/model lengths while preserving other rules and scan configuration', async () => {

@@ -55,11 +55,21 @@
           <input id="codex-scan-parallel" v-model.number="parallelProbes" type="number" min="1" max="5" step="1" class="input w-24 text-sm" />
           <p class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ t('admin.ops.turnState.scanSettings.parallelHint') }}</p>
         </div>
-        <label class="flex items-center gap-2 font-medium text-gray-700 dark:text-dark-200">
+        <div>
+          <label for="codex-scan-route" class="mb-1 block font-medium text-gray-700 dark:text-dark-200">{{ t('admin.ops.turnState.scanSettings.routeMode') }}</label>
+          <select id="codex-scan-route" v-model="scanRouteMode" class="input text-sm" data-test="scan-route-mode">
+            <option value="managed_proxy">{{ t('admin.ops.turnState.scanSettings.routeManagedProxy') }}</option>
+            <option value="ipv6">{{ t('admin.ops.turnState.scanSettings.routeIpv6') }}</option>
+            <option value="dynamic_proxy">{{ t('admin.ops.turnState.scanSettings.routeDynamicProxy') }}</option>
+            <option value="auto">{{ t('admin.ops.turnState.scanSettings.routeAuto') }}</option>
+          </select>
+          <p class="mt-1 text-xs leading-relaxed text-gray-500 dark:text-dark-400">{{ t(`admin.ops.turnState.scanSettings.routeHint.${scanRouteMode}`) }}</p>
+        </div>
+        <label v-if="scanRouteMode === 'auto'" class="flex items-center gap-2 font-medium text-gray-700 dark:text-dark-200">
           <input v-model="dynamicProxyEnabled" type="checkbox" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500" data-test="dynamic-proxy-enabled" />
           {{ t('admin.ops.turnState.scanSettings.dynamicEnabled') }}
         </label>
-        <div v-if="dynamicProxyEnabled">
+        <div v-if="scanRouteMode === 'dynamic_proxy' || (scanRouteMode === 'auto' && dynamicProxyEnabled)">
           <label for="codex-scan-provider" class="mb-1 block font-medium text-gray-700 dark:text-dark-200">{{ t('admin.ops.turnState.scanSettings.providerUrl') }}</label>
           <input id="codex-scan-provider" v-model="dynamicProxyUrl" type="url" class="input font-mono text-xs" autocomplete="off" spellcheck="false" />
           <p class="mt-1 text-xs leading-relaxed text-gray-500 dark:text-dark-400">{{ t('admin.ops.turnState.scanSettings.providerHint') }}</p>
@@ -95,6 +105,7 @@ const loadError = ref(false)
 const saving = ref(false)
 const lengthsText = ref('')
 const parallelProbes = ref<number | string>(5)
+const scanRouteMode = ref<CodexTurnStateScanSettings['scan_route_mode']>('auto')
 const dynamicProxyEnabled = ref(false)
 const dynamicProxyUrl = ref('')
 const plans = ['*', 'pro', 'team', 'plus', 'free', 'enterprise']
@@ -127,7 +138,7 @@ const validationError = computed(() => {
   if (!Number.isInteger(parallelProbes.value) || Number(parallelProbes.value) < 1 || Number(parallelProbes.value) > 5) {
     return t('admin.ops.turnState.scanSettings.invalidParallel')
   }
-  if (dynamicProxyEnabled.value || dynamicProxyUrl.value.trim()) {
+  if (scanRouteMode.value === 'dynamic_proxy' || dynamicProxyEnabled.value || dynamicProxyUrl.value.trim()) {
     try {
       const value = dynamicProxyUrl.value.trim()
       const url = new URL(value)
@@ -143,6 +154,7 @@ function applySettings(settings: CodexTurnStateScanSettings) {
   requireStateBeforeRouting.value = settings.require_state_before_routing ?? true
   requireRouteBinding.value = settings.require_route_binding ?? false
   parallelProbes.value = settings.parallel_probes
+  scanRouteMode.value = settings.scan_route_mode ?? 'auto'
   dynamicProxyEnabled.value = settings.dynamic_proxy_enabled
   dynamicProxyUrl.value = settings.dynamic_proxy_url
   rules.value = (settings.rules ?? []).map(rule => ({ key: nextRuleKey++, plan_type: rule.plan_type, model: rule.model, lengthsText: rule.target_lengths.join(', ') }))
@@ -194,6 +206,7 @@ async function save() {
       require_state_before_routing: requireStateBeforeRouting.value,
       require_route_binding: requireRouteBinding.value,
       parallel_probes: Number(parallelProbes.value),
+      scan_route_mode: scanRouteMode.value,
       dynamic_proxy_enabled: dynamicProxyEnabled.value,
       dynamic_proxy_url: dynamicProxyUrl.value.trim()
     })

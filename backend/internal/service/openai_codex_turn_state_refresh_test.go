@@ -18,6 +18,8 @@ type turnStateRefreshScanRepo struct {
 	accountIDs []int64
 	pendingIDs []int64
 	scans      map[openAICodexTurnStateBucketKey]*OpenAICodexTurnStateScan
+	dedicated  []*OpenAICodexTurnStateProxy
+	shared     []*OpenAICodexTurnStateProxy
 }
 
 func (r *turnStateRefreshScanRepo) GetOpenAICodexTurnStateScan(_ context.Context, accountID int64, model string) (*OpenAICodexTurnStateScan, error) {
@@ -36,11 +38,11 @@ func (r *turnStateRefreshScanRepo) UpsertOpenAICodexTurnStateScan(_ context.Cont
 }
 
 func (r *turnStateRefreshScanRepo) ListOpenAICodexTurnStateProxies(context.Context, bool) ([]*OpenAICodexTurnStateProxy, error) {
-	return nil, nil
+	return r.dedicated, nil
 }
 
 func (r *turnStateRefreshScanRepo) ListReusableOpenAICodexTurnStateProxies(context.Context) ([]*OpenAICodexTurnStateProxy, error) {
-	return nil, nil
+	return r.shared, nil
 }
 
 func (r *turnStateRefreshScanRepo) ListRecentlyUsedOpenAICodexAccountIDs(context.Context, time.Time) ([]int64, error) {

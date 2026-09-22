@@ -18,6 +18,11 @@ const defaultOpenAICodexTurnStateDynamicProxyURL = "https://api.cliproxy.io/whit
 const (
 	openAICodexTurnStateMinLength = 64
 	openAICodexTurnStateMaxLength = 4096
+
+	OpenAICodexTurnStateScanRouteAuto         = "auto"
+	OpenAICodexTurnStateScanRouteManagedProxy = "managed_proxy"
+	OpenAICodexTurnStateScanRouteIPv6         = "ipv6"
+	OpenAICodexTurnStateScanRouteDynamicProxy = "dynamic_proxy"
 )
 
 // OpenAICodexTurnStateScanSettings configures state acquisition and the routing
@@ -30,6 +35,7 @@ type OpenAICodexTurnStateScanSettings struct {
 	RequireStateBeforeRouting *bool                            `json:"require_state_before_routing"`
 	RequireRouteBinding       *bool                            `json:"require_route_binding"`
 	ParallelProbes            int                              `json:"parallel_probes"`
+	ScanRouteMode             string                           `json:"scan_route_mode"`
 	DynamicProxyEnabled       bool                             `json:"dynamic_proxy_enabled"`
 	DynamicProxyURL           string                           `json:"dynamic_proxy_url"`
 }
@@ -144,6 +150,17 @@ func (s *OpenAICodexTurnStateScanSettings) IsRouteBindingRequired() bool {
 	return s != nil && s.RequireRouteBinding != nil && *s.RequireRouteBinding
 }
 
+func (s *OpenAICodexTurnStateScanSettings) normalizedScanRouteMode() string {
+	if s == nil {
+		return OpenAICodexTurnStateScanRouteAuto
+	}
+	mode := strings.ToLower(strings.TrimSpace(s.ScanRouteMode))
+	if mode == "" {
+		return OpenAICodexTurnStateScanRouteAuto
+	}
+	return mode
+}
+
 func (s *OpenAICodexTurnStateScanSettings) forAccountModel(account *Account, model string) *OpenAICodexTurnStateScanSettings {
 	resolved := s.clone()
 	resolved.TargetLengths = slices.Clone(s.TargetLengthsFor(OpenAICodexStatePlanType(account), model))
@@ -161,6 +178,7 @@ func defaultOpenAICodexTurnStateScanSettings() *OpenAICodexTurnStateScanSettings
 		RequireStateBeforeRouting: &requireStateBeforeRouting,
 		RequireRouteBinding:       &requireRouteBinding,
 		ParallelProbes:            5,
+		ScanRouteMode:             OpenAICodexTurnStateScanRouteAuto,
 		DynamicProxyURL:           defaultOpenAICodexTurnStateDynamicProxyURL,
 	}
 }
@@ -287,6 +305,15 @@ func validateOpenAICodexTurnStateScanSettings(settings *OpenAICodexTurnStateScan
 	}
 	if next.ParallelProbes < 1 || next.ParallelProbes > 5 {
 		return nil, infraerrors.BadRequest("CODEX_STATE_SCAN_SETTINGS_INVALID", "parallel_probes must be between 1 and 5")
+	}
+	next.ScanRouteMode = next.normalizedScanRouteMode()
+	switch next.ScanRouteMode {
+	case OpenAICodexTurnStateScanRouteAuto,
+		OpenAICodexTurnStateScanRouteManagedProxy,
+		OpenAICodexTurnStateScanRouteIPv6,
+		OpenAICodexTurnStateScanRouteDynamicProxy:
+	default:
+		return nil, infraerrors.BadRequest("CODEX_STATE_SCAN_SETTINGS_INVALID", "scan_route_mode must be auto, managed_proxy, ipv6, or dynamic_proxy")
 	}
 	next.DynamicProxyURL = strings.TrimSpace(next.DynamicProxyURL)
 	if next.DynamicProxyURL == "" && !next.DynamicProxyEnabled {

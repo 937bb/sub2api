@@ -227,14 +227,35 @@ func TestStrictRouteBindingStillRejectsIneligibleDemandJob(t *testing.T) {
 	}
 }
 
-func TestOpenAICodexTurnStateDynamicProxyTakesPrecedenceOverIPv6(t *testing.T) {
+func TestOpenAICodexTurnStateScanRouteModes(t *testing.T) {
 	settings := defaultOpenAICodexTurnStateScanSettings()
 	settings.DynamicProxyEnabled = true
 	require.Equal(t, openAICodexTurnStateScanRouteDynamicProxy, selectOpenAICodexTurnStateScanRoute(settings, true))
 
+	settings.ScanRouteMode = OpenAICodexTurnStateScanRouteManagedProxy
+	require.Equal(t, openAICodexTurnStateScanRouteManagedProxy, selectOpenAICodexTurnStateScanRoute(settings, true))
+	settings.ScanRouteMode = OpenAICodexTurnStateScanRouteIPv6
+	require.Equal(t, openAICodexTurnStateScanRouteIPv6, selectOpenAICodexTurnStateScanRoute(settings, false))
+	settings.ScanRouteMode = OpenAICodexTurnStateScanRouteDynamicProxy
+	require.Equal(t, openAICodexTurnStateScanRouteDynamicProxy, selectOpenAICodexTurnStateScanRoute(settings, false))
+
+	settings.ScanRouteMode = OpenAICodexTurnStateScanRouteAuto
 	settings.DynamicProxyEnabled = false
 	require.Equal(t, openAICodexTurnStateScanRouteIPv6, selectOpenAICodexTurnStateScanRoute(settings, true))
 	require.Equal(t, openAICodexTurnStateScanRouteProxy, selectOpenAICodexTurnStateScanRoute(settings, false))
+}
+
+func TestOpenAICodexTurnStateManagedProxyModeExcludesSharedProxies(t *testing.T) {
+	repo := &turnStateRefreshScanRepo{
+		dedicated: []*OpenAICodexTurnStateProxy{{ID: 7, Source: "state", ProxyURL: "http://127.0.0.1:17891", Enabled: true}},
+		shared:    []*OpenAICodexTurnStateProxy{{ID: 9, Source: "shared", ProxyURL: "http://account-proxy.example:8080", Enabled: true}},
+	}
+	scanner := &openAICodexTurnStateScanner{repo: repo}
+	selected, err := scanner.selectManagedProxies(context.Background(), 42, "gpt-6-astra", 1, 5)
+	require.NoError(t, err)
+	require.Len(t, selected, 1)
+	require.Equal(t, int64(7), selected[0].ID)
+	require.Equal(t, "state", selected[0].Source)
 }
 
 func TestOpenAICodexTurnStateScannerDeduplicatesAccountModelJobs(t *testing.T) {
@@ -477,7 +498,7 @@ func TestOpenAICodexTurnStateScannerPersistsActualSessionAndModelScope(t *testin
 	require.False(t, otherModel)
 }
 
-func TestOpenAICodexTurnStateRouteTicketBindsVerifiedDynamicOrExplicitStaticProxy(t *testing.T) {
+func TestOpenAICodexTurnStateRouteTicketKeepsScannersOffBusinessEgress(t *testing.T) {
 	for _, testCase := range []struct {
 		name      string
 		proxy     *OpenAICodexTurnStateProxy
@@ -485,7 +506,7 @@ func TestOpenAICodexTurnStateRouteTicketBindsVerifiedDynamicOrExplicitStaticProx
 		wantID    bool
 	}{
 		{name: "direct"},
-		{name: "dynamic", proxy: &OpenAICodexTurnStateProxy{Source: "dynamic", ProxyURL: "http://dynamic.example:8080"}, wantProxy: "http://dynamic.example:8080"},
+		{name: "dynamic scan only", proxy: &OpenAICodexTurnStateProxy{Source: "dynamic", ProxyURL: "http://dynamic.example:8080", ExitIP: "203.0.113.10"}},
 		{name: "shared", proxy: &OpenAICodexTurnStateProxy{Source: "shared", SourceID: 7, ProxyURL: "http://shared.example:8080"}},
 		{name: "scan only", proxy: &OpenAICodexTurnStateProxy{ID: 8, Source: "state", ProxyURL: "http://scan.example:8080"}, wantID: true},
 		{name: "static binding", proxy: &OpenAICodexTurnStateProxy{ID: 9, Source: "state", ProxyURL: "http://static.example:8080", RouteBindingEnabled: true}, wantProxy: "http://static.example:8080", wantID: true},
@@ -495,8 +516,9 @@ func TestOpenAICodexTurnStateRouteTicketBindsVerifiedDynamicOrExplicitStaticProx
 			require.Equal(t, "harvest-session", ticket.SessionID)
 			require.Equal(t, testCase.wantProxy, ticket.ProxyURL)
 			require.Equal(t, testCase.wantID, ticket.ProxyID != nil)
-			if testCase.name == "dynamic" {
+			if testCase.name == "dynamic scan only" {
 				require.WithinDuration(t, time.Now().Add(openAICodexDynamicRouteTTL), ticket.ExpiresAt, time.Second)
+				require.Equal(t, "203.0.113.10", ticket.ExitIP)
 			} else {
 				require.True(t, ticket.ExpiresAt.IsZero())
 			}

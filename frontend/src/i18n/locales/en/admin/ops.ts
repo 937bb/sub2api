@@ -59,6 +59,17 @@ export default {
           routeBindingDisabled: 'Exit binding disabled: unbound State may be reused with the account default exit.',
           parallel: 'Concurrent exits per task',
           parallelHint: 'Use up to 1–5 different exits at once for each account/model. Automatically refresh usable State only when nearing expiry.',
+          routeMode: 'Scan egress mode',
+          routeManagedProxy: 'Dedicated airport proxies',
+          routeIpv6: 'Server /64 IPv6',
+          routeDynamicProxy: 'Dynamic proxies (compatibility)',
+          routeAuto: 'Automatic (legacy compatibility)',
+          routeHint: {
+            managed_proxy: 'Use only enabled entries from Scan Proxies. These routes are scan-only unless exit binding is explicitly enabled; otherwise business requests use the account default egress.',
+            ipv6: 'Acquire through the routed server /64 and pin each ticket to the IPv6 address that acquired it.',
+            dynamic_proxy: 'Use the dynamic provider endpoint. Ephemeral nodes can reset streams and incur traffic charges, so they are unsuitable for business traffic.',
+            auto: 'Preserve legacy behavior: dynamic proxies first when enabled, otherwise IPv6, then the combined proxy pool.'
+          },
           dynamicEnabled: 'Use dynamic scan proxies',
           providerUrl: 'Proxy provider endpoint (HTTPS)',
           providerHint: 'Rand does not guarantee distinct countries or a target length. Only verified, deduplicated exits are used for scans; these are not added to the business proxy pool. A rotating gateway’s country and exit IP are observations from the preflight check; a new State connection may use a different exit, so five countries cannot be guaranteed.',

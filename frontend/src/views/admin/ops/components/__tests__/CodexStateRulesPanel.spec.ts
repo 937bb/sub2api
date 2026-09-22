@@ -13,7 +13,7 @@ const settings: CodexTurnStateScanSettings = {
   plan_scan_enabled: { pro: true, team: true, plus: true, free: true, enterprise: true },
   require_state_before_routing: true,
   require_route_binding: false,
-  parallel_probes: 5, dynamic_proxy_enabled: true, dynamic_proxy_url: 'https://proxy.example/api'
+  parallel_probes: 5, scan_route_mode: 'auto', dynamic_proxy_enabled: true, dynamic_proxy_url: 'https://proxy.example/api'
 }
 describe('CodexStateRulesPanel', () => {
   beforeEach(() => {
