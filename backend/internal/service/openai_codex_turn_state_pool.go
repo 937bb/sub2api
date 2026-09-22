@@ -95,6 +95,12 @@ type OpenAICodexTurnStateBucketStore interface {
 	LoadPreferredOpenAICodexTurnState(ctx context.Context, accountID int64, model string, targetLengths []int, now time.Time) (*OpenAICodexTurnStateRecord, error)
 }
 
+// OpenAICodexTurnStateInvalidationStore durably expires individual route
+// tickets without invalidating healthy backups in the same account/model bucket.
+type OpenAICodexTurnStateInvalidationStore interface {
+	ExpireOpenAICodexTurnStates(ctx context.Context, accountID int64, model string, stateHashes []string, expiredAt time.Time) error
+}
+
 type OpenAICodexTurnStateAdminRepository interface {
 	OpenAICodexTurnStateStore
 	BatchUpsertOpenAICodexTurnStates(ctx context.Context, records []*OpenAICodexTurnStateRecord) error
@@ -115,7 +121,7 @@ type openAICodexTurnStatePool struct {
 	accounts           map[int64]time.Time
 	accountPlans       map[int64]string
 	preferredByBucket  map[openAICodexTurnStateBucketKey]*OpenAICodexTurnStateRecord
-	invalidatedBuckets map[openAICodexTurnStateBucketKey]time.Time
+	invalidatedTickets map[openAICodexTurnStateBucketKey]map[string]time.Time
 	scanSettings       *OpenAICodexTurnStateScanSettings
 	repo               OpenAICodexTurnStateStore
 	queue              chan *OpenAICodexTurnStateRecord
@@ -132,7 +138,7 @@ func newOpenAICodexTurnStatePool() *openAICodexTurnStatePool {
 		accounts:           make(map[int64]time.Time),
 		accountPlans:       make(map[int64]string),
 		preferredByBucket:  make(map[openAICodexTurnStateBucketKey]*OpenAICodexTurnStateRecord),
-		invalidatedBuckets: make(map[openAICodexTurnStateBucketKey]time.Time),
+		invalidatedTickets: make(map[openAICodexTurnStateBucketKey]map[string]time.Time),
 		scanSettings:       defaultOpenAICodexTurnStateScanSettings(),
 		queue:              make(chan *OpenAICodexTurnStateRecord, openAICodexTurnStatePersistQueue),
 		now:                time.Now,
@@ -497,6 +503,23 @@ func (p *openAICodexTurnStatePool) hasReusableStateBeyond(accountID int64, model
 	return p.hasReusableStateOfLengthBeyond(accountID, model, 0, deadline)
 }
 
+func (p *openAICodexTurnStatePool) reusableStateCountBeyond(accountID int64, model string, deadline time.Time) int {
+	key, ok := newOpenAICodexTurnStateBucketKey(accountID, model)
+	if p == nil || !ok {
+		return 0
+	}
+	now := p.now()
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	count := 0
+	for _, record := range p.entriesByBucket[key] {
+		if p.isReusableRecordLocked(record, key, now) && record.ExpiresAt.After(deadline) {
+			count++
+		}
+	}
+	return count
+}
+
 // hasReusableStateOfLengthBeyond reports whether this account/model has a
 // reusable state whose value length is at least minLength and whose signed
 // lifetime extends beyond deadline. States are deliberately scoped by both
@@ -658,6 +681,16 @@ func (p *openAICodexTurnStatePool) pruneExpiredLocked(now time.Time) {
 			delete(p.entries, hash)
 		}
 	}
+	for key, tickets := range p.invalidatedTickets {
+		for stateHash, invalidatedAt := range tickets {
+			if !invalidatedAt.Add(openAICodexTurnStateTTL).After(now) {
+				delete(tickets, stateHash)
+			}
+		}
+		if len(tickets) == 0 {
+			delete(p.invalidatedTickets, key)
+		}
+	}
 }
 
 func (p *openAICodexTurnStatePool) runPersistenceWorker() {
@@ -807,8 +840,10 @@ func (p *openAICodexTurnStatePool) isReusableRecordLocked(record *OpenAICodexTur
 	if normalizeOpenAICodexTurnStateTransport(record.SourceTransport) != "scanner" || strings.TrimSpace(record.SourceSessionID) == "" {
 		return false
 	}
-	if invalidatedAt, invalidated := p.invalidatedBuckets[key]; invalidated && !record.LastSeenAt.After(invalidatedAt) {
-		return false
+	if tickets := p.invalidatedTickets[key]; tickets != nil {
+		if invalidatedAt, invalidated := tickets[record.StateHash]; invalidated && !record.LastSeenAt.After(invalidatedAt) {
+			return false
+		}
 	}
 	if p.scanSettings.IsRouteBindingRequired() && normalizeOpenAICodexRouteIPv6(record.RouteIPv6) == "" && strings.TrimSpace(record.SourceProxyURL) == "" {
 		return false
@@ -820,30 +855,99 @@ func (p *openAICodexTurnStatePool) isReusableRecordLocked(record *OpenAICodexTur
 }
 
 // invalidateRouteOutcome rejects only the route ticket actually used by a
-// downgraded request. A late response from an older ticket cannot invalidate a
-// replacement acquired while that request was still in flight.
-func (p *openAICodexTurnStatePool) invalidateRouteOutcome(accountID int64, model, stateHash string) bool {
+// downgraded request. A late response from an older ticket can remove that old
+// ticket, but cannot invalidate the replacement selected in the meantime.
+func (p *openAICodexTurnStatePool) invalidateRouteOutcome(ctx context.Context, accountID int64, model, stateHash string) (bool, error) {
 	key, ok := newOpenAICodexTurnStateBucketKey(accountID, model)
 	if p == nil || !ok {
-		return false
+		return false, nil
 	}
 	stateHash = strings.TrimSpace(stateHash)
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	current := p.preferredByBucket[key]
-	if stateHash != "" {
-		if current == nil || current.StateHash != stateHash {
-			return false
-		}
-	} else if current != nil {
-		return false
+	if stateHash == "" {
+		return false, nil
 	}
 	now := p.now()
-	if previous := p.invalidatedBuckets[key]; !previous.IsZero() && now.Sub(previous) < time.Second {
+	p.mu.Lock()
+	removed := p.removeTicketLocked(key, stateHash, now)
+	repo := p.repo
+	p.mu.Unlock()
+	if !removed {
+		return false, nil
+	}
+	if store, supported := repo.(OpenAICodexTurnStateInvalidationStore); supported {
+		if err := store.ExpireOpenAICodexTurnStates(ctx, key.accountID, key.model, []string{stateHash}, now); err != nil {
+			return true, fmt.Errorf("expire degraded Codex route ticket: %w", err)
+		}
+	}
+	return true, nil
+}
+
+func (p *openAICodexTurnStatePool) trimBucketInventory(ctx context.Context, accountID int64, model string, limit int) error {
+	key, ok := newOpenAICodexTurnStateBucketKey(accountID, model)
+	if p == nil || !ok || limit < 1 {
+		return nil
+	}
+	now := p.now()
+	p.mu.Lock()
+	records := make([]*OpenAICodexTurnStateRecord, 0, len(p.entriesByBucket[key]))
+	for _, record := range p.entriesByBucket[key] {
+		if p.isReusableRecordLocked(record, key, now) {
+			records = append(records, record)
+		}
+	}
+	slices.SortStableFunc(records, func(left, right *OpenAICodexTurnStateRecord) int {
+		switch {
+		case p.ranksBeforeLocked(left, right):
+			return -1
+		case p.ranksBeforeLocked(right, left):
+			return 1
+		default:
+			return 0
+		}
+	})
+	removed := make([]string, 0, max(len(records)-limit, 0))
+	for _, record := range records[min(limit, len(records)):] {
+		if p.removeTicketLocked(key, record.StateHash, now) {
+			removed = append(removed, record.StateHash)
+		}
+	}
+	repo := p.repo
+	p.mu.Unlock()
+	if len(removed) == 0 {
+		return nil
+	}
+	if store, supported := repo.(OpenAICodexTurnStateInvalidationStore); supported {
+		if err := store.ExpireOpenAICodexTurnStates(ctx, key.accountID, key.model, removed, now); err != nil {
+			return fmt.Errorf("expire excess Codex route tickets: %w", err)
+		}
+	}
+	return nil
+}
+
+func (p *openAICodexTurnStatePool) removeTicketLocked(key openAICodexTurnStateBucketKey, stateHash string, invalidatedAt time.Time) bool {
+	records := p.entriesByBucket[key]
+	removed := false
+	for entryKey, record := range records {
+		if record == nil || record.StateHash != stateHash {
+			continue
+		}
+		delete(records, entryKey)
+		delete(p.entries, entryKey)
+		removed = true
+	}
+	if !removed {
 		return false
 	}
-	p.invalidatedBuckets[key] = now
-	delete(p.preferredByBucket, key)
+	if p.invalidatedTickets[key] == nil {
+		p.invalidatedTickets[key] = make(map[string]time.Time)
+	}
+	p.invalidatedTickets[key][stateHash] = invalidatedAt
+	if len(records) == 0 {
+		delete(p.entriesByBucket, key)
+	}
+	if current := p.preferredByBucket[key]; current != nil && current.StateHash == stateHash {
+		p.selectPreferredForBucketLocked(key, invalidatedAt)
+	}
 	return true
 }
 

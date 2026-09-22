@@ -294,7 +294,7 @@ func TestOpenAICodexTurnStateRefreshPrefersBoundCookieRouteBeforeFallback(t *tes
 		firstSucceeds bool
 		wantCalls     int
 	}{
-		{name: "bound route renews ticket", firstSucceeds: true, wantCalls: 1},
+		{name: "bound route renews ticket and replenishes backups", firstSucceeds: true, wantCalls: 2},
 		{name: "bound route failure falls back", firstSucceeds: false, wantCalls: 2},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -335,10 +335,8 @@ func TestOpenAICodexTurnStateRefreshPrefersBoundCookieRouteBeforeFallback(t *tes
 			require.Len(t, refreshRoutes, testCase.wantCalls)
 			require.Equal(t, openAICodexTurnStateRefreshRoute{sessionID: "old-session", routeCookie: "__cflb=old-route"}, refreshRoutes[0])
 			require.Equal(t, "2a02:ae02:1a:2c00::1234", routeIPv6s[0])
-			if !testCase.firstSucceeds {
-				require.Empty(t, refreshRoutes[1])
-				require.Empty(t, routeIPv6s[1])
-			}
+			require.Empty(t, refreshRoutes[1])
+			require.Empty(t, routeIPv6s[1])
 			record, ok := pool.preferredRecordForBucket(accountID, model)
 			require.True(t, ok)
 			require.Equal(t, "__cflb=renewed-route", record.RouteCookie)

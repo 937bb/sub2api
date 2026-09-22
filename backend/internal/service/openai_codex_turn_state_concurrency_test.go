@@ -85,12 +85,11 @@ func TestCodexStateFanoutStartsFirstBatchConcurrentlyAndDeduplicates(t *testing.
 	require.Zero(t, active.Load())
 }
 
-func TestCodexStateFanoutCancelsSiblingsOnConfiguredPrimary(t *testing.T) {
+func TestCodexStateFanoutCollectsBackupsAfterConfiguredPrimary(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	started := make(chan string, 5)
 	release := make(chan struct{})
-	var cancelled atomic.Int32
 	proxies := stateConcurrencyProxies(5)
 	settings := defaultOpenAICodexTurnStateScanSettings()
 	settings.TargetLengths = []int{292, 332}
@@ -99,15 +98,12 @@ func TestCodexStateFanoutCancelsSiblingsOnConfiguredPrimary(t *testing.T) {
 		select {
 		case <-release:
 		case <-ctx.Done():
-			cancelled.Add(1)
 			return openAICodexTurnStateHarvestResult{errorMessage: "cancelled"}
 		}
 		if proxy == proxies[0].ProxyURL {
 			return stateConcurrencyResult(292, model)
 		}
-		<-ctx.Done()
-		cancelled.Add(1)
-		return openAICodexTurnStateHarvestResult{errorMessage: "cancelled"}
+		return stateConcurrencyResult(332, model)
 	}}
 	done := make(chan []openAICodexTurnStateProbe, 1)
 	go func() {
@@ -119,10 +115,62 @@ func TestCodexStateFanoutCancelsSiblingsOnConfiguredPrimary(t *testing.T) {
 	case results := <-done:
 		result, _ := chooseOpenAICodexTurnStateResult("gpt-6-astra", results, settings)
 		require.Equal(t, 292, result.stateLength)
-		require.Equal(t, int32(4), cancelled.Load())
+		require.Len(t, results, 5)
 	case <-ctx.Done():
 		t.Fatal("primary result did not cancel pending probes")
 	}
+}
+
+func TestCodexStateVerifiedProbeInventoryKeepsUniqueSuccessfulTickets(t *testing.T) {
+	now := time.Now().UTC().Add(-time.Minute).Truncate(time.Second)
+	settings := defaultOpenAICodexTurnStateScanSettings()
+	settings.TargetLengths = []int{332, 292}
+	probes := make([]openAICodexTurnStateProbe, 0, 7)
+	for i := range 6 {
+		state := testOpenAICodexTurnState(332, now.Add(time.Duration(i)*time.Second), byte('a'+i))
+		probes = append(probes, openAICodexTurnStateProbe{
+			proxy: &OpenAICodexTurnStateProxy{Source: "dynamic", ProxyURL: fmt.Sprintf("http://proxy-%d.example:8080", i)},
+			result: openAICodexTurnStateHarvestResult{
+				stateValue: state, stateLength: len(state), officialModel: "gpt-6-astra",
+				upstreamOK: true, statusCode: http.StatusOK, sessionID: fmt.Sprintf("session-%d", i),
+			},
+		})
+	}
+	probes = append(probes, probes[0])
+
+	selected := verifiedOpenAICodexTurnStateProbes("gpt-6-astra", probes, settings, 5)
+
+	require.Len(t, selected, 5)
+	seen := make(map[string]struct{}, len(selected))
+	for _, probe := range selected {
+		hash := hashOpenAICodexTurnState(probe.result.stateValue)
+		require.NotContains(t, seen, hash)
+		seen[hash] = struct{}{}
+	}
+}
+
+func TestCodexStatePersistsAndBoundsVerifiedBackupInventory(t *testing.T) {
+	now := time.Now().UTC().Add(-time.Minute).Truncate(time.Second)
+	settings := defaultOpenAICodexTurnStateScanSettings()
+	pool := newOpenAICodexTurnStatePool()
+	accountID := int64(42)
+	probes := make([]openAICodexTurnStateProbe, 0, 6)
+	for i := range 6 {
+		state := testOpenAICodexTurnState(332, now.Add(time.Duration(i)*time.Second), byte('a'+i))
+		probes = append(probes, openAICodexTurnStateProbe{
+			proxy: &OpenAICodexTurnStateProxy{Source: "dynamic", ProxyURL: fmt.Sprintf("http://proxy-%d.example:8080", i)},
+			result: openAICodexTurnStateHarvestResult{
+				stateValue: state, stateLength: len(state), officialModel: "gpt-6-astra",
+				upstreamOK: true, statusCode: http.StatusOK, sessionID: fmt.Sprintf("session-%d", i),
+			},
+		})
+	}
+
+	persisted, err := persistOpenAICodexTurnStateProbes(context.Background(), pool, accountID, "gpt-6-astra", probes, settings)
+
+	require.NoError(t, err)
+	require.Equal(t, 5, persisted)
+	require.Equal(t, 5, pool.reusableStateCountBeyond(accountID, "gpt-6-astra", time.Now()))
 }
 
 func TestCodexStateFanoutDoesNotAcceptWrongModelOrExpiredPrimary(t *testing.T) {

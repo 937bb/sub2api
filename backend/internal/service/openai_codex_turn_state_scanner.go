@@ -29,6 +29,7 @@ const (
 	openAICodexTurnStateScanWorkers       = 4
 	openAICodexTurnStateScanQueueSize     = 256
 	openAICodexTurnStateScanFanoutLimit   = 5
+	openAICodexTurnStateInventoryLimit    = 5
 	openAICodexTurnStateScanLeaseDuration = 90 * time.Second
 	openAICodexTurnStateScanJobTimeout    = 75 * time.Second
 	openAICodexTurnStateScanSweepInterval = 30 * time.Second
@@ -547,19 +548,24 @@ func (s *openAICodexTurnStateScanner) runJob(ctx context.Context, job openAICode
 	settings := s.scanSettings().forAccountModel(account, upstreamModel)
 	var results []openAICodexTurnStateProbe
 	reusedBoundRoute := false
-	if current, ok := pool.preferredRecordForBucket(account.ID, upstreamModel); ok && current.RouteCookie != "" {
-		target := openAICodexTurnStateProbeTarget{
-			proxy:        openAICodexTurnStateProxyForRecord(current),
-			routeIPv6:    current.RouteIPv6,
-			refreshRoute: openAICodexTurnStateRefreshRoute{sessionID: current.SourceSessionID, routeCookie: current.RouteCookie},
-		}
-		results = s.probeTargetsWithBoundedFanout(ctx, account, upstreamModel, []openAICodexTurnStateProbeTarget{target}, settings)
-		if len(results) == 1 && openAICodexTurnStateScanFailure(upstreamModel, results[0].result, time.Now(), settings) == "" {
-			reusedBoundRoute = true
+	desiredInventory := min(max(settings.ParallelProbes, 1), openAICodexTurnStateInventoryLimit)
+	hasInventory := pool.reusableStateCountBeyond(account.ID, upstreamModel, time.Now().Add(openAICodexTurnStateScanRefreshBefore)) >= desiredInventory
+	if !job.force {
+		current, ok := pool.preferredRecordForBucket(account.ID, upstreamModel)
+		if ok && current.RouteCookie != "" {
+			target := openAICodexTurnStateProbeTarget{
+				proxy:        openAICodexTurnStateProxyForRecord(current),
+				routeIPv6:    current.RouteIPv6,
+				refreshRoute: openAICodexTurnStateRefreshRoute{sessionID: current.SourceSessionID, routeCookie: current.RouteCookie},
+			}
+			results = s.probeTargetsWithBoundedFanout(ctx, account, upstreamModel, []openAICodexTurnStateProbeTarget{target}, settings)
+			if len(results) == 1 && openAICodexTurnStateScanFailure(upstreamModel, results[0].result, time.Now(), settings) == "" {
+				reusedBoundRoute = true
+			}
 		}
 	}
 	prefix, ipv6BindingEnabled := s.gateway.openAIChatGPTIPv6BindingPrefix()
-	if !reusedBoundRoute {
+	if !reusedBoundRoute || !hasInventory {
 		switch selectOpenAICodexTurnStateScanRoute(settings, ipv6BindingEnabled) {
 		case openAICodexTurnStateScanRouteDynamicProxy:
 			proxies, proxyErr := s.scanProxies(ctx, account.ID, upstreamModel, scan.AttemptCount, settings)
@@ -627,10 +633,11 @@ func (s *openAICodexTurnStateScanner) runJob(ctx context.Context, job openAICode
 		return
 	}
 	if failure == "" {
-		ticket := openAICodexTurnStateRouteTicketForProxy(result.sessionID, proxy, result.routeIPv6)
-		ticket.RouteCookie = result.routeCookie
-		if err := pool.observeDurably(persistCtx, result.stateValue, account.ID, hashOpenAICodexTurnState(result.sessionID), upstreamModel, "scanner", ticket); err != nil {
-			log.WithError(err).WithFields(log.Fields{"account_id": account.ID, "model": upstreamModel}).Warn("failed to persist acquired Codex turn-state")
+		persisted, persistErr := persistOpenAICodexTurnStateProbes(persistCtx, pool, account.ID, upstreamModel, results, settings)
+		if persistErr != nil {
+			log.WithError(persistErr).WithFields(log.Fields{"account_id": account.ID, "model": upstreamModel, "persisted": persisted}).Warn("failed to persist one or more acquired Codex turn-states")
+		}
+		if persisted == 0 {
 			scan.Status = "retry_wait"
 			scan.LastError = "acquired state could not be persisted; retry is required"
 			scan.LastSuccessAt = nil
@@ -644,6 +651,30 @@ func (s *openAICodexTurnStateScanner) runJob(ctx context.Context, job openAICode
 			}
 		}
 	}
+}
+
+func persistOpenAICodexTurnStateProbes(ctx context.Context, pool *openAICodexTurnStatePool, accountID int64, model string, probes []openAICodexTurnStateProbe, settings *OpenAICodexTurnStateScanSettings) (int, error) {
+	if pool == nil {
+		return 0, fmt.Errorf("nil Codex turn-state pool")
+	}
+	selected := verifiedOpenAICodexTurnStateProbes(model, probes, settings, openAICodexTurnStateInventoryLimit)
+	persisted := 0
+	errs := make([]error, 0)
+	for _, probe := range selected {
+		ticket := openAICodexTurnStateRouteTicketForProxy(probe.result.sessionID, probe.proxy, probe.result.routeIPv6)
+		ticket.RouteCookie = probe.result.routeCookie
+		if err := pool.observeDurably(ctx, probe.result.stateValue, accountID, hashOpenAICodexTurnState(probe.result.sessionID), model, "scanner", ticket); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		persisted++
+	}
+	if persisted > 0 {
+		if err := pool.trimBucketInventory(ctx, accountID, model, openAICodexTurnStateInventoryLimit); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return persisted, errors.Join(errs...)
 }
 
 func openAICodexTurnStateRouteTicketForProxy(sessionID string, proxy *OpenAICodexTurnStateProxy, routeIPv6 ...string) openAICodexTurnStateRouteTicket {
@@ -702,8 +733,9 @@ type openAICodexTurnStateProbeTarget struct {
 	refreshRoute openAICodexTurnStateRefreshRoute
 }
 
-// probeWithBoundedFanout starts the bounded batch immediately. Results are
-// checked for the requested model and freshness before cancelling siblings.
+// probeWithBoundedFanout starts the bounded batch immediately. Every verified
+// success is collected as backup inventory; only an account-wide auth failure
+// cancels sibling probes.
 func (s *openAICodexTurnStateScanner) probeWithBoundedFanout(ctx context.Context, account *Account, model string, proxies []*OpenAICodexTurnStateProxy, settings *OpenAICodexTurnStateScanSettings) []openAICodexTurnStateProbe {
 	if len(proxies) == 0 {
 		return s.probeTargetsWithBoundedFanout(ctx, account, model, []openAICodexTurnStateProbeTarget{{}}, settings)
@@ -777,8 +809,7 @@ func (s *openAICodexTurnStateScanner) probeTargetsWithBoundedFanout(ctx context.
 	}()
 	for probe := range results {
 		probes = append(probes, probe)
-		if isOpenAICodexTurnStateAuthFailure(probe.result) ||
-			(openAICodexTurnStateScanFailure(model, probe.result, time.Now(), settings) == "" && probe.result.stateLength == settings.primaryLength()) {
+		if isOpenAICodexTurnStateAuthFailure(probe.result) {
 			cancel()
 		}
 	}
@@ -861,6 +892,36 @@ func chooseOpenAICodexTurnStateResult(model string, probes []openAICodexTurnStat
 		return openAICodexTurnStateHarvestResult{}, nil
 	}
 	return best.result, best.proxy
+}
+
+func verifiedOpenAICodexTurnStateProbes(model string, probes []openAICodexTurnStateProbe, settings *OpenAICodexTurnStateScanSettings, limit int) []openAICodexTurnStateProbe {
+	if settings == nil {
+		settings = defaultOpenAICodexTurnStateScanSettings()
+	}
+	if limit < 1 {
+		return nil
+	}
+	now := time.Now()
+	valid := make([]openAICodexTurnStateProbe, 0, min(len(probes), limit))
+	seen := make(map[string]struct{}, len(probes))
+	for _, probe := range probes {
+		if openAICodexTurnStateScanFailure(model, probe.result, now, settings) != "" {
+			continue
+		}
+		stateHash := hashOpenAICodexTurnState(probe.result.stateValue)
+		if _, exists := seen[stateHash]; exists {
+			continue
+		}
+		seen[stateHash] = struct{}{}
+		valid = append(valid, probe)
+	}
+	sort.SliceStable(valid, func(i, j int) bool {
+		return openAICodexTurnStateProbeRanksBefore(valid[i], valid[j], settings)
+	})
+	if len(valid) > limit {
+		valid = valid[:limit]
+	}
+	return valid
 }
 
 func openAICodexTurnStateProbeRanksBefore(left, right openAICodexTurnStateProbe, policy ...*OpenAICodexTurnStateScanSettings) bool {

@@ -56,6 +56,21 @@ func TestDeleteOpenAICodexTurnStatesExpiredBefore(t *testing.T) {
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestExpireOpenAICodexTurnStatesScopesInvalidationToExactTickets(t *testing.T) {
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	expiredAt := time.Date(2026, 9, 22, 12, 0, 0, 0, time.UTC)
+	mock.ExpectExec(`(?s)UPDATE codex_turn_states.*SET expires_at = LEAST\(expires_at, \$4\).*WHERE source_account_id = \$1 AND source_model = \$2 AND state_hash = ANY\(\$3\)`).
+		WithArgs(int64(42), "gpt-6-astra", `{"bad-a","bad-b"}`, expiredAt).
+		WillReturnResult(sqlmock.NewResult(0, 2))
+
+	repo := &opsRepository{db: db}
+	require.NoError(t, repo.ExpireOpenAICodexTurnStates(context.Background(), 42, " GPT-6-ASTRA ", []string{"bad-a", "bad-b"}, expiredAt))
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
 func TestUpsertOpenAICodexTurnStatePersistsAccountModelAndIssuedAt(t *testing.T) {
 	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
 	require.NoError(t, err)

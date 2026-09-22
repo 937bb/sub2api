@@ -358,7 +358,16 @@ func (s *OpenAIGatewayService) handleOpenAICodexTurnStateRouteOutcome(c *gin.Con
 	}
 	fasterModel := normalizeOpenAICodexTurnStateModel(result.UpstreamHeaders.Get("x-codex-safety-buffering-faster-model"))
 	safetyBuffered := fasterModel != "" && openAICodexTurnStateModelsMatch(fasterModel, actualModel)
-	if !s.getOpenAICodexTurnStatePool().invalidateRouteOutcome(outcome.accountID, outcome.model, outcome.stateHash) {
+	invalidated, err := s.getOpenAICodexTurnStatePool().invalidateRouteOutcome(context.WithoutCancel(c.Request.Context()), outcome.accountID, outcome.model, outcome.stateHash)
+	if err != nil {
+		logger.L().Error("openai_codex_state_route_invalidation_failed",
+			zap.Int64("account_id", outcome.accountID),
+			zap.String("requested_model", outcome.model),
+			zap.String("state_hash", outcome.stateHash),
+			zap.Error(err),
+		)
+	}
+	if !invalidated {
 		return
 	}
 	logger.L().Warn("openai_codex_state_route_model_mismatch",

@@ -573,7 +573,7 @@ func TestOpenAICodexTurnStateSafetyBufferingInvalidatesUsedTicketAndForcesScan(t
 	require.False(t, reusable)
 }
 
-func TestOpenAICodexTurnStateLateMismatchCannotInvalidateReplacement(t *testing.T) {
+func TestOpenAICodexTurnStateLateMismatchInvalidatesOnlyOldTicket(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	accountID := int64(42)
 	const model = "gpt-6-astra"
@@ -598,10 +598,58 @@ func TestOpenAICodexTurnStateLateMismatchCannotInvalidateReplacement(t *testing.
 	})
 	svc.handleOpenAICodexTurnStateRouteOutcome(c, &OpenAIForwardResult{UpstreamResponseModel: "gpt-5.6-luna"})
 
-	require.False(t, queued)
+	require.True(t, queued)
 	preferred, reusable := pool.preferredForBucket(accountID, model)
 	require.True(t, reusable)
 	require.Equal(t, newState, preferred)
+	key, ok := newOpenAICodexTurnStateBucketKey(accountID, model)
+	require.True(t, ok)
+	pool.mu.RLock()
+	_, oldStillPresent := pool.entriesByBucket[key][openAICodexTurnStateEntryKey(newObservedOpenAICodexTurnStateRecord(oldState, &accountID, "old-session", model, "scanner", now))]
+	pool.mu.RUnlock()
+	require.False(t, oldStillPresent)
+}
+
+type recordingOpenAICodexTurnStateInvalidationStore struct {
+	OpenAICodexTurnStateStore
+	accountID int64
+	model     string
+	hashes    []string
+}
+
+func (r *recordingOpenAICodexTurnStateInvalidationStore) ExpireOpenAICodexTurnStates(_ context.Context, accountID int64, model string, hashes []string, _ time.Time) error {
+	r.accountID = accountID
+	r.model = model
+	r.hashes = append([]string(nil), hashes...)
+	return nil
+}
+
+func TestOpenAICodexTurnStateMismatchRotatesToBackupAndExpiresOnlyUsedTicket(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	accountID := int64(42)
+	const model = "gpt-6-astra"
+	pool := newOpenAICodexTurnStatePool()
+	pool.now = func() time.Time { return now }
+	backup := testOpenAICodexTurnState(332, now.Add(-2*time.Minute), 'a')
+	used := testOpenAICodexTurnState(332, now.Add(-time.Minute), 'b')
+	require.NoError(t, pool.observeDurably(context.Background(), backup, accountID, "backup", model, "scanner", openAICodexTurnStateRouteTicket{SessionID: "backup"}))
+	require.NoError(t, pool.observeDurably(context.Background(), used, accountID, "used", model, "scanner", openAICodexTurnStateRouteTicket{SessionID: "used"}))
+	recordingStore := &recordingOpenAICodexTurnStateInvalidationStore{}
+	pool.repo = recordingStore
+
+	invalidated, err := pool.invalidateRouteOutcome(context.Background(), accountID, model, hashOpenAICodexTurnState(used))
+
+	require.NoError(t, err)
+	require.True(t, invalidated)
+	selected, ok := pool.preferredForBucket(accountID, model)
+	require.True(t, ok)
+	require.Equal(t, backup, selected)
+	require.Equal(t, accountID, recordingStore.accountID)
+	require.Equal(t, model, recordingStore.model)
+	require.Equal(t, []string{hashOpenAICodexTurnState(used)}, recordingStore.hashes)
+	invalidated, err = pool.invalidateRouteOutcome(context.Background(), accountID, model, hashOpenAICodexTurnState(used))
+	require.NoError(t, err)
+	require.False(t, invalidated)
 }
 
 func TestWriteOpenAIPassthroughResponseHeaders_RelaysAndClearsTurnState(t *testing.T) {

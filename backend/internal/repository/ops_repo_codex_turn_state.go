@@ -178,6 +178,22 @@ func (r *opsRepository) DeleteOpenAICodexTurnStatesExpiredBefore(ctx context.Con
 	return err
 }
 
+func (r *opsRepository) ExpireOpenAICodexTurnStates(ctx context.Context, accountID int64, model string, stateHashes []string, expiredAt time.Time) error {
+	if r == nil || r.db == nil {
+		return fmt.Errorf("nil ops repository")
+	}
+	model = strings.ToLower(strings.TrimSpace(model))
+	if accountID <= 0 || model == "" || len(stateHashes) == 0 {
+		return nil
+	}
+	_, err := r.db.ExecContext(ctx, `
+UPDATE codex_turn_states
+SET expires_at = LEAST(expires_at, $4)
+WHERE source_account_id = $1 AND source_model = $2 AND state_hash = ANY($3)`,
+		accountID, model, pq.Array(stateHashes), expiredAt)
+	return err
+}
+
 func (r *opsRepository) LoadActiveOpenAICodexTurnStates(ctx context.Context, now time.Time) ([]*service.OpenAICodexTurnStateRecord, error) {
 	if r == nil || r.db == nil {
 		return nil, fmt.Errorf("nil ops repository")
