@@ -61,6 +61,30 @@ func TestRequiredOpenAICodexTurnStateStrictRouteBindingGatesLegacyOAuthAccounts(
 	require.False(t, gateway.hasRequiredOpenAICodexTurnState(legacyOAuth, "gpt-6-astra"))
 }
 
+func TestRequiredOpenAICodexTurnStateDisabledPlanBypassesStrictGate(t *testing.T) {
+	gateway := &OpenAIGatewayService{}
+	settings := defaultOpenAICodexTurnStateScanSettings()
+	requireRouteBinding := true
+	settings.RequireRouteBinding = &requireRouteBinding
+	settings.PlanScanEnabled["pro"] = false
+	gateway.getOpenAICodexTurnStatePool().setScanSettings(settings)
+	account := &Account{
+		ID:          42,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Credentials: map[string]any{"plan_type": "pro"},
+		Extra:       map[string]any{openAICodexStateRoutingRequiredExtraKey: true},
+	}
+	queued := false
+	gateway.setOpenAICodexTurnStateScanEnqueuer(func(int64, string, bool) bool {
+		queued = true
+		return true
+	})
+
+	require.True(t, gateway.hasRequiredOpenAICodexTurnState(account, "gpt-6-astra"))
+	require.False(t, queued)
+}
+
 func TestRequiredOpenAICodexTurnStateCanBeDisabledAtRuntime(t *testing.T) {
 	account := &Account{
 		ID:       41,

@@ -169,6 +169,24 @@ func (p *openAICodexTurnStatePool) isStateRequiredBeforeRouting() bool {
 	return p.scanSettings.IsStateRequiredBeforeRouting()
 }
 
+func (p *openAICodexTurnStatePool) isPlanScanEnabled(plan string) bool {
+	if p == nil {
+		return true
+	}
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.scanSettings.IsPlanScanEnabled(plan)
+}
+
+func (p *openAICodexTurnStatePool) isRouteBindingRequired() bool {
+	if p == nil {
+		return false
+	}
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.scanSettings.IsRouteBindingRequired()
+}
+
 // setAccountPlan registers the credential owner's subscription without touching
 // persistent storage. Repeated requests with an unchanged plan take only a read lock.
 func (p *openAICodexTurnStatePool) setAccountPlan(accountID int64, planType string) {

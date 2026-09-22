@@ -195,7 +195,8 @@ func (s *OpenAIGatewayService) guardOpenAICodexTurnStateEcho(c *gin.Context, acc
 	// Strict route binding treats the scanner State, session, and acquisition
 	// exit as one account/model ticket. Never let a client-carried State bypass
 	// that ticket and silently fall back to another egress.
-	if !pool.scanSettings.IsRouteBindingRequired() && strings.TrimSpace(h.Get(openAICodexTurnStateHeader)) != "" &&
+	requireRouteBinding := pool.isRouteBindingRequired()
+	if !requireRouteBinding && strings.TrimSpace(h.Get(openAICodexTurnStateHeader)) != "" &&
 		(c == nil || c.GetString(openAICodexTurnStateReuseScopeContextKey) != openAICodexTurnStateReuseScopeAccountModel) {
 		s.applyOpenAICodexInfrastructureCookies(h)
 		return
@@ -207,7 +208,7 @@ func (s *OpenAIGatewayService) guardOpenAICodexTurnStateEcho(c *gin.Context, acc
 			h.Set("Cookie", ticket.RouteCookie)
 		}
 		stageOpenAICodexTurnStateRouteOutcome(c, owner.ID, model, ticket.StateHash)
-	} else if pool.scanSettings.IsRouteBindingRequired() {
+	} else if requireRouteBinding {
 		h.Del(openAICodexTurnStateHeader)
 	}
 	s.applyOpenAICodexInfrastructureCookies(h)
@@ -377,7 +378,14 @@ func (s *OpenAIGatewayService) hasRequiredOpenAICodexTurnState(account *Account,
 		return true
 	}
 	pool := s.getOpenAICodexTurnStatePool()
-	if !account.RequiresOpenAICodexStateRouting() && !pool.scanSettings.IsRouteBindingRequired() {
+	plan := OpenAICodexStatePlanType(account)
+	// Disabling acquisition for a plan also opts that plan out of the ticket
+	// gate. Otherwise a disabled plan could never acquire the ticket required
+	// to become schedulable.
+	if !pool.isPlanScanEnabled(plan) {
+		return true
+	}
+	if !account.RequiresOpenAICodexStateRouting() && !pool.isRouteBindingRequired() {
 		return true
 	}
 	if !pool.isStateRequiredBeforeRouting() {
@@ -391,7 +399,7 @@ func (s *OpenAIGatewayService) hasRequiredOpenAICodexTurnState(account *Account,
 	if account.ParentAccountID != nil && *account.ParentAccountID > 0 {
 		accountID = *account.ParentAccountID
 	}
-	pool.setAccountPlan(accountID, OpenAICodexStatePlanType(account))
+	pool.setAccountPlan(accountID, plan)
 	if pool.hasReusableStateBeyond(accountID, model, time.Now()) {
 		return true
 	}
