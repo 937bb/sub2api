@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/netip"
@@ -106,6 +107,30 @@ func TestOpenAICodexTurnStateProxyIndexRotatesPerAccountModelAttempt(t *testing.
 		openAICodexTurnStateProxyIndex(62742, "gpt-5.5", proxyCount+1, proxyCount),
 	)
 	require.Equal(t, 0, openAICodexTurnStateProxyIndex(62742, "gpt-5.5", 1, 0))
+}
+
+func TestOpenAICodexTurnStateProxyWindowAdvancesByFanout(t *testing.T) {
+	proxies := make([]*OpenAICodexTurnStateProxy, 15)
+	for index := range proxies {
+		id := int64(index + 1)
+		proxies[index] = &OpenAICodexTurnStateProxy{
+			ID:       id,
+			Source:   "state",
+			SourceID: id,
+			ProxyURL: fmt.Sprintf("http://127.0.0.1:%d", 17890+id),
+		}
+	}
+
+	seen := make(map[int64]struct{}, len(proxies))
+	for attempt := 1; attempt <= 3; attempt++ {
+		selected := selectOpenAICodexTurnStateProxyWindow(proxies, 62742, "gpt-6-astra", attempt, 5)
+		require.Len(t, selected, 5)
+		for _, proxy := range selected {
+			require.NotContains(t, seen, proxy.ID, "attempt %d reused an exit before covering the pool", attempt)
+			seen[proxy.ID] = struct{}{}
+		}
+	}
+	require.Len(t, seen, len(proxies))
 }
 
 func TestSortOpenAICodexTurnStateScanProxiesUsesStableIdentity(t *testing.T) {

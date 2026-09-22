@@ -1095,10 +1095,17 @@ func selectOpenAICodexTurnStateProxyWindow(proxies []*OpenAICodexTurnStateProxy,
 		return nil
 	}
 	sortOpenAICodexTurnStateScanProxies(proxies)
-	start := openAICodexTurnStateProxyIndex(accountID, model, attempt, len(proxies))
 	if limit > len(proxies) {
 		limit = len(proxies)
 	}
+	if attempt < 1 {
+		attempt = 1
+	}
+	// Advance by one complete fan-out window per attempt. Advancing by a
+	// single proxy made adjacent retries reuse all but one exit, so a pool of
+	// 15 proxies with five probes needed 11 attempts instead of three.
+	base := openAICodexTurnStateProxyIndex(accountID, model, 1, len(proxies))
+	start := (base + (attempt-1)*limit) % len(proxies)
 	selected := make([]*OpenAICodexTurnStateProxy, 0, limit)
 	for offset := 0; offset < len(proxies) && len(selected) < limit; offset++ {
 		selected = append(selected, proxies[(start+offset)%len(proxies)])
