@@ -91,7 +91,7 @@ func TestCodexLiteBridgeLiveDiagnostic(t *testing.T) {
 			applyCodexAccountIdentityClientMetadataMap(request, account, 0)
 			applyCodexFingerprintClientMetadata(request, ids)
 			recovered := false
-			forwarded, err := svc.forwardOpenAIWSV2(ctx, c, account, request, session, account.GetCredential("access_token"),
+			forwarded, err := svc.forwardOpenAIWSV2(ctx, c, account, request, session, session, account.GetCredential("access_token"),
 				OpenAIWSProtocolDecision{Transport: OpenAIUpstreamTransportResponsesWebsocketV2}, true, true,
 				input.Models[0], input.Models[0], time.Now(), 1, "", &recovered)
 			cancel()

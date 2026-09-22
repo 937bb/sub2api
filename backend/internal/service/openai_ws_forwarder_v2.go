@@ -252,6 +252,9 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		SourceIPv6:      routeIPv6,
 	})
 	if err != nil {
+		if account.UsesOpenAICodexProtocol() {
+			s.captureOpenAICodexInfrastructureCookiesFromWSError(err)
+		}
 		var agentDialErr *openAIWSDialError
 		if s.isAgentIdentityAccount(ctx, account) && errors.As(err, &agentDialErr) && isAgentIdentityTaskInvalidWSDialError(agentDialErr) && agentTaskRecoveryTried != nil && !*agentTaskRecoveryTried {
 			*agentTaskRecoveryTried = true
@@ -288,6 +291,9 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 			s.persistOpenAIWSRateLimitSignal(ctx, account, dialErr.ResponseHeaders, nil, "rate_limit_exceeded", "rate_limit_error", strings.TrimSpace(err.Error()), mappedModel)
 		}
 		return nil, wrapOpenAIWSFallback(classifyOpenAIWSAcquireError(err), err)
+	}
+	if account.UsesOpenAICodexProtocol() {
+		s.captureOpenAICodexInfrastructureCookies(lease.HandshakeHeaders())
 	}
 	// cleanExit 标记正常终端事件退出，此时上游不会再发送帧，连接可安全归还复用。
 	// 所有异常路径（读写错误、error 事件等）已在各自分支中提前调用 MarkBroken，

@@ -14,9 +14,9 @@ import (
 const upsertOpenAICodexTurnStateSQL = `
 INSERT INTO codex_turn_states (
   state_value, state_hash, value_length, source_account_id, source_session_hash,
-  source_session_id, source_proxy_id, source_proxy_url, source_exit_ip, route_ipv6,
-  source_model, source_transport, issued_at, first_seen_at, last_seen_at, expires_at
-) VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,''),$7,NULLIF($8,''),NULLIF($9,''),NULLIF($10,''),NULLIF($11,''),$12,$13,$14,$15,$16)
+	  source_session_id, source_proxy_id, source_proxy_url, source_exit_ip, route_ipv6, route_cookie,
+	  source_model, source_transport, issued_at, first_seen_at, last_seen_at, expires_at
+	) VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,''),$7,NULLIF($8,''),NULLIF($9,''),NULLIF($10,''),NULLIF($11,''),NULLIF($12,''),$13,$14,$15,$16,$17)
 ON CONFLICT (state_hash) DO UPDATE SET
   state_value = EXCLUDED.state_value,
   value_length = EXCLUDED.value_length,
@@ -26,7 +26,8 @@ ON CONFLICT (state_hash) DO UPDATE SET
   source_proxy_id = EXCLUDED.source_proxy_id,
   source_proxy_url = EXCLUDED.source_proxy_url,
   source_exit_ip = EXCLUDED.source_exit_ip,
-  route_ipv6 = EXCLUDED.route_ipv6,
+	  route_ipv6 = EXCLUDED.route_ipv6,
+	  route_cookie = EXCLUDED.route_cookie,
   source_model = EXCLUDED.source_model,
   source_transport = EXCLUDED.source_transport,
   issued_at = EXCLUDED.issued_at,
@@ -54,6 +55,7 @@ func (r *opsRepository) UpsertOpenAICodexTurnState(ctx context.Context, record *
 		record.SourceProxyURL,
 		record.SourceExitIP,
 		record.RouteIPv6,
+		record.RouteCookie,
 		record.SourceModel,
 		record.SourceTransport,
 		nullableOpenAICodexTurnStateTime(record.IssuedAt),
@@ -118,6 +120,7 @@ func (r *opsRepository) BatchUpsertOpenAICodexTurnStates(ctx context.Context, re
 			record.SourceProxyURL,
 			record.SourceExitIP,
 			record.RouteIPv6,
+			record.RouteCookie,
 			record.SourceModel,
 			record.SourceTransport,
 			nullableOpenAICodexTurnStateTime(record.IssuedAt),
@@ -182,7 +185,7 @@ func (r *opsRepository) LoadActiveOpenAICodexTurnStates(ctx context.Context, now
 	rows, err := r.db.QueryContext(ctx, `
 SELECT id, state_value, state_hash, value_length, source_account_id,
        COALESCE(source_session_hash, ''), COALESCE(source_session_id, ''), source_proxy_id,
-	       COALESCE(source_proxy_url, ''), COALESCE(source_exit_ip, ''), COALESCE(route_ipv6, ''), COALESCE(source_model, ''), source_transport,
+	       COALESCE(source_proxy_url, ''), COALESCE(source_exit_ip, ''), COALESCE(route_ipv6, ''), COALESCE(route_cookie, ''), COALESCE(source_model, ''), source_transport,
        COALESCE(issued_at, 'epoch'::timestamptz),
        first_seen_at, last_seen_at, expires_at
 FROM codex_turn_states
@@ -212,6 +215,7 @@ ORDER BY value_length DESC, last_seen_at DESC, id DESC`, now)
 			&record.SourceProxyURL,
 			&record.SourceExitIP,
 			&record.RouteIPv6,
+			&record.RouteCookie,
 			&record.SourceModel,
 			&record.SourceTransport,
 			&record.IssuedAt,
@@ -242,18 +246,19 @@ func (r *opsRepository) LoadPreferredOpenAICodexTurnState(ctx context.Context, a
 	err := r.db.QueryRowContext(ctx, `
 SELECT id, state_value, state_hash, value_length, source_account_id,
        COALESCE(source_session_hash, ''), COALESCE(source_session_id, ''), source_proxy_id,
-	       COALESCE(source_proxy_url, ''), COALESCE(source_exit_ip, ''), COALESCE(route_ipv6, ''), source_model, source_transport,
+	       COALESCE(source_proxy_url, ''), COALESCE(source_exit_ip, ''), COALESCE(route_ipv6, ''), COALESCE(route_cookie, ''), source_model, source_transport,
        issued_at, first_seen_at, last_seen_at, expires_at
 FROM codex_turn_states
 WHERE source_account_id = $1 AND source_model = $2
-  AND value_length = ANY($3::integer[]) AND expires_at > $4
-  AND issued_at <= $4 AND issued_at + INTERVAL '1 hour' > $4
+  AND value_length BETWEEN $5 AND $6 AND expires_at > $4
+	  AND issued_at <= $4 AND issued_at + INTERVAL '4 minutes' > $4
   AND source_transport = 'scanner' AND source_session_id IS NOT NULL
-ORDER BY array_position($3::integer[], value_length), expires_at DESC, last_seen_at DESC, state_hash DESC
-LIMIT 1`, accountID, model, pq.Array(targetLengths), now).Scan(
+ORDER BY COALESCE(array_position($3::integer[], value_length), cardinality($3::integer[]) + 1),
+         expires_at DESC, last_seen_at DESC, state_hash DESC
+LIMIT 1`, accountID, model, pq.Array(targetLengths), now, 64, 4096).Scan(
 		&record.ID, &record.StateValue, &record.StateHash, &record.ValueLength, &record.SourceAccountID,
 		&record.SourceSessionHash, &record.SourceSessionID, &record.SourceProxyID,
-		&record.SourceProxyURL, &record.SourceExitIP, &record.RouteIPv6, &record.SourceModel, &record.SourceTransport,
+		&record.SourceProxyURL, &record.SourceExitIP, &record.RouteIPv6, &record.RouteCookie, &record.SourceModel, &record.SourceTransport,
 		&record.IssuedAt, &record.FirstSeenAt, &record.LastSeenAt, &record.ExpiresAt,
 	)
 	if err == sql.ErrNoRows {
@@ -281,7 +286,7 @@ func (r *opsRepository) ListOpenAICodexTurnStates(ctx context.Context, filter *s
 	query := fmt.Sprintf(`
 SELECT c.id, c.state_value, c.state_hash, c.value_length, c.source_account_id,
        COALESCE(a.name, ''), COALESCE(c.source_session_hash, ''), COALESCE(c.source_session_id, ''), c.source_proxy_id,
-	       COALESCE(c.source_proxy_url, ''), COALESCE(c.source_exit_ip, ''), COALESCE(c.route_ipv6, ''), COALESCE(c.source_model, ''), c.source_transport,
+	       COALESCE(c.source_proxy_url, ''), COALESCE(c.source_exit_ip, ''), COALESCE(c.route_ipv6, ''), COALESCE(c.route_cookie, ''), COALESCE(c.source_model, ''), c.source_transport,
        COALESCE(c.issued_at, 'epoch'::timestamptz),
        c.first_seen_at, c.last_seen_at, c.expires_at, (c.expires_at > NOW())
 FROM codex_turn_states c
@@ -311,6 +316,7 @@ LIMIT $%d OFFSET $%d`, where, len(args)-1, len(args))
 			&record.SourceProxyURL,
 			&record.SourceExitIP,
 			&record.RouteIPv6,
+			&record.RouteCookie,
 			&record.SourceModel,
 			&record.SourceTransport,
 			&record.IssuedAt,
@@ -333,7 +339,7 @@ func (r *opsRepository) GetOpenAICodexTurnStateSummary(ctx context.Context, now 
 	if r == nil || r.db == nil {
 		return nil, fmt.Errorf("nil ops repository")
 	}
-	summary := &service.OpenAICodexTurnStateSummary{ReuseTTLSeconds: int64(time.Hour / time.Second)}
+	summary := &service.OpenAICodexTurnStateSummary{ReuseTTLSeconds: int64((240 * time.Second) / time.Second)}
 	if err := r.db.QueryRowContext(ctx, `
 SELECT COUNT(*) FILTER (WHERE expires_at > $1),
        COUNT(*) FILTER (WHERE expires_at <= $1)
@@ -345,7 +351,7 @@ FROM codex_turn_states`, now).Scan(&summary.ActiveCount, &summary.ExpiredCount);
 	err := r.db.QueryRowContext(ctx, `
 SELECT c.id, c.state_value, c.state_hash, c.value_length, c.source_account_id,
        COALESCE(a.name, ''), COALESCE(c.source_session_hash, ''), COALESCE(c.source_session_id, ''), c.source_proxy_id,
-	       COALESCE(c.source_proxy_url, ''), COALESCE(c.source_exit_ip, ''), COALESCE(c.route_ipv6, ''), COALESCE(c.source_model, ''), c.source_transport,
+	       COALESCE(c.source_proxy_url, ''), COALESCE(c.source_exit_ip, ''), COALESCE(c.route_ipv6, ''), COALESCE(c.route_cookie, ''), COALESCE(c.source_model, ''), c.source_transport,
        COALESCE(c.issued_at, 'epoch'::timestamptz),
        c.first_seen_at, c.last_seen_at, c.expires_at
 FROM codex_turn_states c
@@ -365,6 +371,7 @@ LIMIT 1`, now).Scan(
 		&record.SourceProxyURL,
 		&record.SourceExitIP,
 		&record.RouteIPv6,
+		&record.RouteCookie,
 		&record.SourceModel,
 		&record.SourceTransport,
 		&record.IssuedAt,

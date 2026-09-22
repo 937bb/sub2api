@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/chatgptrelay"
 	"github.com/stretchr/testify/require"
 )
 
@@ -100,10 +101,10 @@ func TestOpenAICodexTurnStateRefreshRejectsOldResultThenAcceptsFreshResult(t *te
 		length int
 		age    time.Duration
 	}{
-		{name: "expiring 332", length: openAICodexTurnStateLength332, age: 50 * time.Minute},
-		{name: "expired 332", length: openAICodexTurnStateLength332, age: 70 * time.Minute},
-		{name: "expiring 292", length: openAICodexTurnStateLength292, age: 50 * time.Minute},
-		{name: "expired 292", length: openAICodexTurnStateLength292, age: 70 * time.Minute},
+		{name: "expiring 332", length: openAICodexTurnStateLength332, age: 210 * time.Second},
+		{name: "expired 332", length: openAICodexTurnStateLength332, age: 5 * time.Minute},
+		{name: "expiring 292", length: openAICodexTurnStateLength292, age: 210 * time.Second},
+		{name: "expired 292", length: openAICodexTurnStateLength292, age: 5 * time.Minute},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			now := time.Now().UTC().Truncate(time.Second)
@@ -113,7 +114,7 @@ func TestOpenAICodexTurnStateRefreshRejectsOldResultThenAcceptsFreshResult(t *te
 			account := turnStateRefreshAccount(accountID, now)
 			oldIssuedAt := now.Add(-tc.age)
 			oldState := testOpenAICodexTurnState(tc.length, oldIssuedAt, 'o')
-			freshIssuedAt := now.Add(-20 * time.Minute)
+			freshIssuedAt := now.Add(-30 * time.Second)
 			freshState := testOpenAICodexTurnState(tc.length, freshIssuedAt, 'n')
 			responseState := oldState
 			calls := 0
@@ -129,8 +130,8 @@ func TestOpenAICodexTurnStateRefreshRejectsOldResultThenAcceptsFreshResult(t *te
 			pool.now = func() time.Time { return now }
 			pool.observe(oldState, &accountID, "old-session", model, "scanner")
 			oldRecord := turnStateRefreshRecord(t, pool, accountID, model, oldState)
-			otherAccountState := testOpenAICodexTurnState(tc.length, now.Add(-5*time.Minute), 'a')
-			otherModelState := testOpenAICodexTurnState(tc.length, now.Add(-5*time.Minute), 'm')
+			otherAccountState := testOpenAICodexTurnState(tc.length, now.Add(-time.Minute), 'a')
+			otherModelState := testOpenAICodexTurnState(tc.length, now.Add(-time.Minute), 'm')
 			pool.observe(otherAccountState, &otherAccountID, "other-account-session", model, "scanner")
 			pool.observe(otherModelState, &accountID, "other-model-session", otherModel, "scanner")
 			lastSuccess := oldIssuedAt
@@ -203,11 +204,11 @@ func TestOpenAICodexTurnStateRefreshSweepUsesPoolExpiryAndPreservesRetryBackoff(
 		wantQueued bool
 	}{
 		{name: "missing state ignores stale ready deadline", status: "ready", nextOffset: 40 * time.Minute, wantQueued: true},
-		{name: "expiring state ignores stale ready deadline", status: "ready", stateAge: 50 * time.Minute, nextOffset: 40 * time.Minute, wantQueued: true},
-		{name: "expired state ignores stale ready deadline", status: "ready", stateAge: 70 * time.Minute, nextOffset: 40 * time.Minute, wantQueued: true},
-		{name: "usable state skips overdue scan", status: "ready", stateAge: 10 * time.Minute, nextOffset: -time.Minute},
+		{name: "expiring state ignores stale ready deadline", status: "ready", stateAge: 210 * time.Second, nextOffset: 40 * time.Minute, wantQueued: true},
+		{name: "expired state ignores stale ready deadline", status: "ready", stateAge: 5 * time.Minute, nextOffset: 40 * time.Minute, wantQueued: true},
+		{name: "usable state skips overdue scan", status: "ready", stateAge: time.Minute, nextOffset: -time.Minute},
 		{name: "missing state respects retry backoff", status: "retry_wait", nextOffset: time.Minute},
-		{name: "expiring state respects retry backoff", status: "retry_wait", stateAge: 50 * time.Minute, nextOffset: time.Minute},
+		{name: "expiring state respects retry backoff", status: "retry_wait", stateAge: 210 * time.Second, nextOffset: time.Minute},
 		{name: "expired retry backoff queues missing state", status: "retry_wait", nextOffset: -time.Minute, wantQueued: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -253,8 +254,8 @@ func TestOpenAICodexTurnStateRefreshKeepsHealthy292FallbackUntilRefreshWindow(t 
 	}}
 	gateway := ticketTestService(t, config.OpenAICodexTicketConfig{Models: []string{model}}, upstream)
 	pool := gateway.getOpenAICodexTurnStatePool()
-	pool.observe(testOpenAICodexTurnState(openAICodexTurnStateLength332, now.Add(-50*time.Minute), 'a'), &accountID, "older-session", model, "scanner")
-	pool.observe(testOpenAICodexTurnState(openAICodexTurnStateLength292, now.Add(-10*time.Minute), 'b'), &accountID, "newer-session", model, "scanner")
+	pool.observe(testOpenAICodexTurnState(openAICodexTurnStateLength332, now.Add(-210*time.Second), 'a'), &accountID, "older-session", model, "scanner")
+	pool.observe(testOpenAICodexTurnState(openAICodexTurnStateLength292, now.Add(-time.Minute), 'b'), &accountID, "newer-session", model, "scanner")
 	repo := &turnStateRefreshScanRepo{
 		accountIDs: []int64{accountID},
 		scans:      make(map[openAICodexTurnStateBucketKey]*OpenAICodexTurnStateScan),
@@ -268,6 +269,64 @@ func TestOpenAICodexTurnStateRefreshKeepsHealthy292FallbackUntilRefreshWindow(t 
 	require.Empty(t, scanner.queue)
 	scan := repo.scans[openAICodexTurnStateBucketKey{accountID: accountID, model: model}]
 	require.Nil(t, scan)
+}
+
+func TestOpenAICodexTurnStateRefreshPrefersBoundCookieRouteBeforeFallback(t *testing.T) {
+	for _, testCase := range []struct {
+		name          string
+		firstSucceeds bool
+		wantCalls     int
+	}{
+		{name: "bound route renews ticket", firstSucceeds: true, wantCalls: 1},
+		{name: "bound route failure falls back", firstSucceeds: false, wantCalls: 2},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			now := time.Now().UTC().Truncate(time.Second)
+			const model = "gpt-6-astra"
+			const accountID int64 = 41
+			account := turnStateRefreshAccount(accountID, now)
+			gateway := ticketTestService(t, config.OpenAICodexTicketConfig{Models: []string{model}}, nil)
+			pool := gateway.getOpenAICodexTurnStatePool()
+			pool.now = func() time.Time { return now }
+			oldState := testOpenAICodexTurnState(openAICodexTurnStateLength332, now.Add(-210*time.Second), 'o')
+			require.NoError(t, pool.observeDurably(
+				context.Background(), oldState, accountID, "old-session-hash", model, "scanner",
+				openAICodexTurnStateRouteTicket{
+					SessionID:   "old-session",
+					RouteIPv6:   "2a02:ae02:1a:2c00::1234",
+					RouteCookie: "__cflb=old-route",
+				},
+			))
+			repo := &turnStateRefreshScanRepo{scans: make(map[openAICodexTurnStateBucketKey]*OpenAICodexTurnStateScan)}
+			scanner := newOpenAICodexTurnStateScanner(repo, &turnStateRefreshAccountRepo{accounts: map[int64]*Account{accountID: account}}, gateway)
+			var refreshRoutes []openAICodexTurnStateRefreshRoute
+			var routeIPv6s []string
+			scanner.probe = func(ctx context.Context, _ *Account, requestedModel, _ string) openAICodexTurnStateHarvestResult {
+				refresh, _ := ctx.Value(openAICodexTurnStateRefreshRouteContextKey{}).(openAICodexTurnStateRefreshRoute)
+				refreshRoutes = append(refreshRoutes, refresh)
+				routeIPv6s = append(routeIPv6s, chatgptrelay.SourceIPv6FromContext(ctx))
+				if len(refreshRoutes) == 1 && !testCase.firstSucceeds {
+					return openAICodexTurnStateHarvestResult{errorMessage: "bound route failed"}
+				}
+				result := stateConcurrencyResult(openAICodexTurnStateLength332, requestedModel)
+				result.routeCookie = "__cflb=renewed-route"
+				return result
+			}
+
+			scanner.runJob(context.Background(), openAICodexTurnStateScanJob{accountID: accountID, model: model})
+
+			require.Len(t, refreshRoutes, testCase.wantCalls)
+			require.Equal(t, openAICodexTurnStateRefreshRoute{sessionID: "old-session", routeCookie: "__cflb=old-route"}, refreshRoutes[0])
+			require.Equal(t, "2a02:ae02:1a:2c00::1234", routeIPv6s[0])
+			if !testCase.firstSucceeds {
+				require.Empty(t, refreshRoutes[1])
+				require.Empty(t, routeIPv6s[1])
+			}
+			record, ok := pool.preferredRecordForBucket(accountID, model)
+			require.True(t, ok)
+			require.Equal(t, "__cflb=renewed-route", record.RouteCookie)
+		})
+	}
 }
 
 func TestOpenAICodexTurnStateSweepQueuesNewPendingAccountWithoutUsage(t *testing.T) {

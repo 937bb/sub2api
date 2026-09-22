@@ -162,10 +162,10 @@ func TestOpenAICodexTurnStateScannerUsesPlanModelRules(t *testing.T) {
 		length      int
 		ready       bool
 	}{
-		{"pro", "gpt-6-astra", 292, true}, {"pro", "gpt-6-astra", 332, false},
+		{"pro", "gpt-6-astra", 292, true}, {"pro", "gpt-6-astra", 332, true},
 		{"prolite", "gpt-6-astra", 292, true},
-		{"team", "gpt-5.6-terra", 286, true}, {"team", "gpt-5.6-terra", 292, false},
-		{"team", "gpt-6-astra", 273, true}, {"team", "gpt-6-astra", 286, false},
+		{"team", "gpt-5.6-terra", 286, true}, {"team", "gpt-5.6-terra", 292, true},
+		{"team", "gpt-6-astra", 273, true}, {"team", "gpt-6-astra", 286, true},
 	} {
 		t.Run(tc.plan+tc.model+time.Duration(tc.length).String(), func(t *testing.T) {
 			now := time.Now().UTC().Truncate(time.Second)
@@ -266,7 +266,9 @@ func TestOpenAICodexTurnStateScanSettingsValidation(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 292, validated.primaryLength())
 	require.True(t, validated.acceptsLength(356))
-	require.False(t, validated.acceptsLength(312))
+	require.True(t, validated.acceptsLength(312), "configured lengths rank valid states; they do not define validity")
+	require.False(t, validated.acceptsLength(63))
+	require.False(t, validated.acceptsLength(4097))
 	require.Less(t, validated.lengthRank(356), validated.lengthRank(332))
 
 	requireStateBeforeRouting := false
@@ -353,15 +355,16 @@ func TestOpenAICodexTurnStateConfiguredPolicyKeepsAccountModelAndExpiryIsolation
 	require.False(t, ok)
 	_, ok = pool.preferredForBucket(99, "gpt-5.5")
 	require.False(t, ok)
-	require.True(t, pool.hasReusableStateBeyond(accountID, "gpt-5.5", now.Add(15*time.Minute)))
+	require.True(t, pool.hasReusableStateBeyond(accountID, "gpt-5.5", now.Add(time.Minute)))
 
 	pool.setTargetLengths([]int{292, 356})
 	selected, ok := pool.preferredForBucket(accountID, "gpt-5.5")
 	require.True(t, ok)
 	require.Equal(t, state292, selected)
 	pool.setTargetLengths([]int{332})
-	_, ok = pool.preferredForBucket(accountID, "gpt-5.5")
-	require.False(t, ok)
+	selected, ok = pool.preferredForBucket(accountID, "gpt-5.5")
+	require.True(t, ok, "a replay-verified state remains valid when its length is not a configured preference")
+	require.NotEmpty(t, selected)
 	pool.setTargetLengths([]int{356})
 	now = now.Add(time.Hour)
 	_, ok = pool.preferredForBucket(accountID, "gpt-5.5")

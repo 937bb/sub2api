@@ -84,7 +84,7 @@ func TestOpenAICodexTurnStateScopedPoolAppliesPlanAndModelPolicy(t *testing.T) {
 		state, ok := pool.preferredForBucket(tc.accountID, tc.model)
 		require.True(t, ok, "account %d, model %s", tc.accountID, tc.model)
 		require.Len(t, state, tc.wantLength)
-		require.True(t, pool.hasReusableStateBeyond(tc.accountID, tc.model, now.Add(5*time.Minute)))
+		require.True(t, pool.hasReusableStateBeyond(tc.accountID, tc.model, now.Add(time.Minute)))
 	}
 	_, found := pool.preferredForBucket(44, "gpt-6-astra")
 	require.False(t, found)
@@ -233,8 +233,8 @@ func TestOpenAICodexTurnStateScopedPoolBucketSyncUsesScopedTargets(t *testing.T)
 	require.True(t, ok)
 	require.Equal(t, state, selected)
 	require.NoError(t, pool.observeDurably(context.Background(), state, accountID, "session", "gpt-5.6-terra", "scanner", openAICodexTurnStateRouteTicket{SessionID: "session"}))
-	require.ErrorContains(t, pool.observeDurably(context.Background(), testScopedOpenAICodexTurnState(292, now, 'p'), accountID, "session", "gpt-5.6-terra", "scanner", openAICodexTurnStateRouteTicket{SessionID: "session"}), "not reusable")
-	require.Equal(t, 1, repo.writeCalls)
+	require.NoError(t, pool.observeDurably(context.Background(), testScopedOpenAICodexTurnState(292, now, 'p'), accountID, "session", "gpt-5.6-terra", "scanner", openAICodexTurnStateRouteTicket{SessionID: "session"}))
+	require.Equal(t, 2, repo.writeCalls)
 }
 
 func TestOpenAICodexTurnStateScopedPoolBucketSyncNeverFallsBackForEmptyPolicy(t *testing.T) {
@@ -242,8 +242,8 @@ func TestOpenAICodexTurnStateScopedPoolBucketSyncNeverFallsBackForEmptyPolicy(t 
 	pool.setScanSettings(&OpenAICodexTurnStateScanSettings{})
 	repo := &turnStateBucketSyncRepo{}
 	pool.repo = repo
-	require.ErrorContains(t, pool.refreshBucket(context.Background(), 11, "gpt-5.6-terra"), "no configured")
-	require.Zero(t, repo.readCalls)
+	require.NoError(t, pool.refreshBucket(context.Background(), 11, "gpt-5.6-terra"))
+	require.Equal(t, 1, repo.readCalls)
 }
 
 func TestOpenAICodexTurnStateScopedPoolBucketIndexDropsRemovedAndExpiredValues(t *testing.T) {

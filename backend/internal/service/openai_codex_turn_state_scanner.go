@@ -32,8 +32,9 @@ const (
 	openAICodexTurnStateScanLeaseDuration = 90 * time.Second
 	openAICodexTurnStateScanJobTimeout    = 75 * time.Second
 	openAICodexTurnStateScanSweepInterval = 30 * time.Second
-	openAICodexTurnStateScanRefreshBefore = 15 * time.Minute
+	openAICodexTurnStateScanRefreshBefore = time.Minute
 	openAICodexTurnStateScanRetryMax      = 5 * time.Minute
+	openAICodexTurnStateSafetyRetryDelay  = 15 * time.Minute
 	openAICodexDynamicRouteTTL            = 4 * time.Minute
 	openAICodexDynamicRouteRefreshBefore  = time.Minute
 	openAICodexTurnStateActiveUsageWindow = time.Hour
@@ -56,7 +57,16 @@ type openAICodexTurnStateHarvestResult struct {
 	statusCode    int
 	errorMessage  string
 	routeIPv6     string
+	routeCookie   string
+	safetyFaster  string
 }
+
+type openAICodexTurnStateRefreshRoute struct {
+	sessionID   string
+	routeCookie string
+}
+
+type openAICodexTurnStateRefreshRouteContextKey struct{}
 
 type openAICodexTurnStateScanRoute uint8
 
@@ -523,28 +533,42 @@ func (s *openAICodexTurnStateScanner) runJob(ctx context.Context, job openAICode
 
 	settings := s.scanSettings().forAccountModel(account, upstreamModel)
 	var results []openAICodexTurnStateProbe
+	reusedBoundRoute := false
+	if current, ok := pool.preferredRecordForBucket(account.ID, upstreamModel); ok && current.RouteCookie != "" {
+		target := openAICodexTurnStateProbeTarget{
+			proxy:        openAICodexTurnStateProxyForRecord(current),
+			routeIPv6:    current.RouteIPv6,
+			refreshRoute: openAICodexTurnStateRefreshRoute{sessionID: current.SourceSessionID, routeCookie: current.RouteCookie},
+		}
+		results = s.probeTargetsWithBoundedFanout(ctx, account, upstreamModel, []openAICodexTurnStateProbeTarget{target}, settings)
+		if len(results) == 1 && openAICodexTurnStateScanFailure(upstreamModel, results[0].result, time.Now(), settings) == "" {
+			reusedBoundRoute = true
+		}
+	}
 	prefix, ipv6BindingEnabled := s.gateway.openAIChatGPTIPv6BindingPrefix()
-	switch selectOpenAICodexTurnStateScanRoute(settings, ipv6BindingEnabled) {
-	case openAICodexTurnStateScanRouteDynamicProxy:
-		proxies, proxyErr := s.scanProxies(ctx, account.ID, upstreamModel, scan.AttemptCount, settings)
-		if proxyErr != nil {
-			results = []openAICodexTurnStateProbe{{result: openAICodexTurnStateHarvestResult{errorMessage: proxyErr.Error()}}}
-		} else {
-			results = s.probeWithBoundedFanout(ctx, account, upstreamModel, proxies, settings)
-		}
-	case openAICodexTurnStateScanRouteIPv6:
-		routeIPv6s, routeErr := randomOpenAICodexRouteIPv6s(prefix, min(max(settings.ParallelProbes, 1), openAICodexTurnStateScanFanoutLimit))
-		if routeErr != nil {
-			results = []openAICodexTurnStateProbe{{result: openAICodexTurnStateHarvestResult{errorMessage: routeErr.Error()}}}
-		} else {
-			results = s.probeWithIPv6Fanout(ctx, account, upstreamModel, routeIPv6s, settings)
-		}
-	default:
-		proxies, proxyErr := s.scanProxies(ctx, account.ID, upstreamModel, scan.AttemptCount, settings)
-		if proxyErr != nil {
-			results = []openAICodexTurnStateProbe{{result: openAICodexTurnStateHarvestResult{errorMessage: proxyErr.Error()}}}
-		} else {
-			results = s.probeWithBoundedFanout(ctx, account, upstreamModel, proxies, settings)
+	if !reusedBoundRoute {
+		switch selectOpenAICodexTurnStateScanRoute(settings, ipv6BindingEnabled) {
+		case openAICodexTurnStateScanRouteDynamicProxy:
+			proxies, proxyErr := s.scanProxies(ctx, account.ID, upstreamModel, scan.AttemptCount, settings)
+			if proxyErr != nil {
+				results = append(results, openAICodexTurnStateProbe{result: openAICodexTurnStateHarvestResult{errorMessage: proxyErr.Error()}})
+			} else {
+				results = append(results, s.probeWithBoundedFanout(ctx, account, upstreamModel, proxies, settings)...)
+			}
+		case openAICodexTurnStateScanRouteIPv6:
+			routeIPv6s, routeErr := randomOpenAICodexRouteIPv6s(prefix, min(max(settings.ParallelProbes, 1), openAICodexTurnStateScanFanoutLimit))
+			if routeErr != nil {
+				results = append(results, openAICodexTurnStateProbe{result: openAICodexTurnStateHarvestResult{errorMessage: routeErr.Error()}})
+			} else {
+				results = append(results, s.probeWithIPv6Fanout(ctx, account, upstreamModel, routeIPv6s, settings)...)
+			}
+		default:
+			proxies, proxyErr := s.scanProxies(ctx, account.ID, upstreamModel, scan.AttemptCount, settings)
+			if proxyErr != nil {
+				results = append(results, openAICodexTurnStateProbe{result: openAICodexTurnStateHarvestResult{errorMessage: proxyErr.Error()}})
+			} else {
+				results = append(results, s.probeWithBoundedFanout(ctx, account, upstreamModel, proxies, settings)...)
+			}
 		}
 	}
 	// A setting can change during a job. Do not mark a result reusable under
@@ -577,7 +601,8 @@ func (s *openAICodexTurnStateScanner) runJob(ctx context.Context, job openAICode
 	} else {
 		scan.Status = "retry_wait"
 		scan.LastError = failure
-		next := doneAt.Add(openAICodexTurnStateRetryDelay(scan.AttemptCount))
+		retryDelay := openAICodexTurnStateResultRetryDelay(upstreamModel, result, scan.AttemptCount)
+		next := doneAt.Add(retryDelay)
 		scan.NextAttemptAt = &next
 	}
 	// Persist even after an acquisition deadline, while the fenced lease is
@@ -590,6 +615,7 @@ func (s *openAICodexTurnStateScanner) runJob(ctx context.Context, job openAICode
 	}
 	if failure == "" {
 		ticket := openAICodexTurnStateRouteTicketForProxy(result.sessionID, proxy, result.routeIPv6)
+		ticket.RouteCookie = result.routeCookie
 		if err := pool.observeDurably(persistCtx, result.stateValue, account.ID, hashOpenAICodexTurnState(result.sessionID), upstreamModel, "scanner", ticket); err != nil {
 			log.WithError(err).WithFields(log.Fields{"account_id": account.ID, "model": upstreamModel}).Warn("failed to persist acquired Codex turn-state")
 			scan.Status = "retry_wait"
@@ -635,14 +661,32 @@ func openAICodexTurnStateRouteTicketForProxy(sessionID string, proxy *OpenAICode
 	return ticket
 }
 
+func openAICodexTurnStateProxyForRecord(record *OpenAICodexTurnStateRecord) *OpenAICodexTurnStateProxy {
+	if record == nil || strings.TrimSpace(record.SourceProxyURL) == "" {
+		return nil
+	}
+	proxy := &OpenAICodexTurnStateProxy{
+		Source:              "dynamic",
+		ProxyURL:            record.SourceProxyURL,
+		ExitIP:              record.SourceExitIP,
+		RouteBindingEnabled: true,
+	}
+	if record.SourceProxyID != nil && *record.SourceProxyID > 0 {
+		proxy.ID = *record.SourceProxyID
+		proxy.Source = "state"
+	}
+	return proxy
+}
+
 type openAICodexTurnStateProbe struct {
 	proxy  *OpenAICodexTurnStateProxy
 	result openAICodexTurnStateHarvestResult
 }
 
 type openAICodexTurnStateProbeTarget struct {
-	proxy     *OpenAICodexTurnStateProxy
-	routeIPv6 string
+	proxy        *OpenAICodexTurnStateProxy
+	routeIPv6    string
+	refreshRoute openAICodexTurnStateRefreshRoute
 }
 
 // probeWithBoundedFanout starts the bounded batch immediately. Results are
@@ -699,6 +743,9 @@ func (s *openAICodexTurnStateScanner) probeTargetsWithBoundedFanout(ctx context.
 			}
 			if target.routeIPv6 != "" {
 				targetCtx = chatgptrelay.WithSourceIPv6(targetCtx, target.routeIPv6)
+			}
+			if target.refreshRoute.sessionID != "" || target.refreshRoute.routeCookie != "" {
+				targetCtx = context.WithValue(targetCtx, openAICodexTurnStateRefreshRouteContextKey{}, target.refreshRoute)
 			}
 			result := probeFunc(targetCtx, account, model, proxyURL)
 			if result.routeIPv6 == "" {
@@ -806,7 +853,11 @@ func chooseOpenAICodexTurnStateResult(model string, probes []openAICodexTurnStat
 func openAICodexTurnStateProbeRanksBefore(left, right openAICodexTurnStateProbe, policy ...*OpenAICodexTurnStateScanSettings) bool {
 	settings := openAICodexTurnStateProbePolicy(policy)
 	if left.result.stateLength != right.result.stateLength {
-		return settings.lengthRank(left.result.stateLength) < settings.lengthRank(right.result.stateLength)
+		leftRank := settings.lengthRank(left.result.stateLength)
+		rightRank := settings.lengthRank(right.result.stateLength)
+		if leftRank != rightRank {
+			return leftRank < rightRank
+		}
 	}
 	leftIssued, _ := parseOpenAICodexTurnStateIssuedAt(left.result.stateValue)
 	rightIssued, _ := parseOpenAICodexTurnStateIssuedAt(right.result.stateValue)
@@ -818,6 +869,12 @@ func openAICodexTurnStateProbePolicy(policy []*OpenAICodexTurnStateScanSettings)
 		return policy[0]
 	}
 	return defaultOpenAICodexTurnStateScanSettings()
+}
+
+func isOpenAICodexTurnStateSafetyBuffered(requested string, result openAICodexTurnStateHarvestResult) bool {
+	return result.safetyFaster != "" &&
+		openAICodexTurnStateModelsMatch(result.safetyFaster, result.officialModel) &&
+		!openAICodexTurnStateModelsMatch(requested, result.officialModel)
 }
 
 func openAICodexTurnStateScanFailure(requested string, result openAICodexTurnStateHarvestResult, now time.Time, policy ...*OpenAICodexTurnStateScanSettings) string {
@@ -839,6 +896,9 @@ func openAICodexTurnStateScanFailure(requested string, result openAICodexTurnSta
 	}
 	if strings.TrimSpace(result.officialModel) == "" {
 		return "upstream response did not declare an official model"
+	}
+	if isOpenAICodexTurnStateSafetyBuffered(requested, result) {
+		return fmt.Sprintf("upstream safety-buffering routed %s to %s", requested, result.officialModel)
 	}
 	if !openAICodexTurnStateModelsMatch(requested, result.officialModel) {
 		return fmt.Sprintf("upstream model mismatch: requested %s, received %s", requested, result.officialModel)
@@ -872,6 +932,13 @@ func openAICodexTurnStateRetryDelay(attempt int) time.Duration {
 		return openAICodexTurnStateScanRetryMax
 	}
 	return delay
+}
+
+func openAICodexTurnStateResultRetryDelay(requested string, result openAICodexTurnStateHarvestResult, attempt int) time.Duration {
+	if isOpenAICodexTurnStateSafetyBuffered(requested, result) {
+		return openAICodexTurnStateSafetyRetryDelay
+	}
+	return openAICodexTurnStateRetryDelay(attempt)
 }
 
 func (s *openAICodexTurnStateScanner) selectProxy(ctx context.Context, accountID int64, model string, attempt int) *OpenAICodexTurnStateProxy {
@@ -1035,7 +1102,14 @@ func (s *OpenAIGatewayService) harvestOpenAICodexTurnState(ctx context.Context, 
 	}
 	model = openAICodexTurnStateUpstreamModel(account, model)
 	sessionID := scopeCodexAccountIdentityValue(account, 0, "session", uuid.NewString())
-	result = s.requestOpenAICodexTurnState(ctx, account, token, model, proxyURL, sessionID, "")
+	routeCookie := ""
+	if refresh, ok := ctx.Value(openAICodexTurnStateRefreshRouteContextKey{}).(openAICodexTurnStateRefreshRoute); ok {
+		if stagedSessionID := strings.TrimSpace(refresh.sessionID); stagedSessionID != "" {
+			sessionID = stagedSessionID
+		}
+		routeCookie = normalizeOpenAICodexAffinityCookieHeader(refresh.routeCookie)
+	}
+	result = s.requestOpenAICodexTurnState(ctx, account, token, model, proxyURL, sessionID, "", routeCookie)
 	if result.errorMessage != "" || result.statusCode < http.StatusOK || result.statusCode >= http.StatusMultipleChoices ||
 		result.stateValue == "" || !openAICodexTurnStateModelsMatch(model, result.officialModel) {
 		return result
@@ -1044,7 +1118,7 @@ func (s *OpenAIGatewayService) harvestOpenAICodexTurnState(ctx context.Context, 
 	// A length alone is not a route guarantee. Replay the freshly minted state
 	// with the same credential, harvest session, and egress. Only the state from
 	// a second response that still declares the requested model is publishable.
-	verified := s.requestOpenAICodexTurnState(ctx, account, token, model, proxyURL, sessionID, result.stateValue)
+	verified := s.requestOpenAICodexTurnState(ctx, account, token, model, proxyURL, sessionID, result.stateValue, result.routeCookie)
 	replayConfirmedWithoutRefresh := verified.stateValue == "" &&
 		strings.Contains(verified.errorMessage, "x-codex-turn-state") &&
 		openAICodexTurnStateModelsMatch(model, verified.officialModel)
@@ -1064,6 +1138,7 @@ func (s *OpenAIGatewayService) harvestOpenAICodexTurnState(ctx context.Context, 
 		// still proves the state/session/egress tuple keeps the requested route, so
 		// publish the original signed state instead of treating the missing refresh
 		// header as a downgrade.
+		result.routeCookie = verified.routeCookie
 		return result
 	}
 	return verified
@@ -1091,7 +1166,7 @@ func openAICodexTurnStateReplayFailure(requested string, result openAICodexTurnS
 	return ""
 }
 
-func (s *OpenAIGatewayService) requestOpenAICodexTurnState(ctx context.Context, account *Account, token, model, proxyURL, sessionID, state string) openAICodexTurnStateHarvestResult {
+func (s *OpenAIGatewayService) requestOpenAICodexTurnState(ctx context.Context, account *Account, token, model, proxyURL, sessionID, state, routeCookie string) openAICodexTurnStateHarvestResult {
 	result := openAICodexTurnStateHarvestResult{upstreamModel: model, sessionID: sessionID, routeIPv6: chatgptrelay.SourceIPv6FromContext(ctx)}
 	threadID := scopeCodexAccountIdentityValue(account, 0, "thread", uuid.NewString())
 	body := []byte(fmt.Sprintf(`{"model":%s,"stream":true,"store":false,"instructions":"Reply with exactly: pong","input":[{"role":"user","content":[{"type":"input_text","text":"ping"}]}],"client_metadata":{"session_id":%s,"thread_id":%s}}`,
@@ -1118,6 +1193,10 @@ func (s *OpenAIGatewayService) requestOpenAICodexTurnState(ctx context.Context, 
 	if state = strings.TrimSpace(state); state != "" {
 		req.Header.Set(openAICodexTurnStateHeader, state)
 	}
+	if routeCookie = normalizeOpenAICodexAffinityCookieHeader(routeCookie); routeCookie != "" {
+		req.Header.Set("Cookie", routeCookie)
+	}
+	s.applyOpenAICodexInfrastructureCookies(req.Header)
 	if err := resolveAndSetOpenAIChatGPTAccountHeaders(ctx, s.accountRepo, req.Header, account); err != nil {
 		result.errorMessage = truncateString(err.Error(), openAICodexTurnStateScanMaxErrorBytes)
 		return result
@@ -1146,8 +1225,11 @@ func (s *OpenAIGatewayService) requestOpenAICodexTurnState(ctx context.Context, 
 		return result
 	}
 	defer func() { _ = resp.Body.Close() }()
+	s.captureOpenAICodexInfrastructureCookies(resp.Header)
 	result.upstreamOK = true
 	result.statusCode = resp.StatusCode
+	result.routeCookie = mergeOpenAICodexAffinityCookies(routeCookie, resp.Cookies())
+	result.safetyFaster = normalizeOpenAICodexTurnStateModel(resp.Header.Get("x-codex-safety-buffering-faster-model"))
 	result.officialModel = firstNonEmptyCodexHeader(resp.Header, "OpenAI-Model", "openai-model")
 	responseState := extractOpenAICodexTurnState(resp.Header)
 	result.stateValue = responseState
@@ -1170,6 +1252,76 @@ func (s *OpenAIGatewayService) requestOpenAICodexTurnState(ctx context.Context, 
 		result.errorMessage = "upstream response did not declare an official model"
 	}
 	return result
+}
+
+var openAICodexAffinityCookieNames = []string{
+	"__cflb",
+	"__oailb",
+	"__cf_bm",
+	"__cfruid",
+	"__cfseq",
+	"__cfwaitingroom",
+	"_cfuvid",
+	"cf_clearance",
+	"cf_ob_info",
+	"cf_use_ob",
+}
+
+func isOpenAICodexAffinityCookieName(name string) bool {
+	for _, allowed := range openAICodexAffinityCookieNames {
+		if name == allowed {
+			return true
+		}
+	}
+	return strings.HasPrefix(name, "cf_chl_")
+}
+
+func normalizeOpenAICodexAffinityCookieHeader(value string) string {
+	return mergeOpenAICodexAffinityCookies(value, nil)
+}
+
+func mergeOpenAICodexAffinityCookies(existing string, updates []*http.Cookie) string {
+	values := make(map[string]string, len(openAICodexAffinityCookieNames))
+	if strings.TrimSpace(existing) != "" {
+		request := &http.Request{Header: http.Header{"Cookie": []string{existing}}}
+		for _, cookie := range request.Cookies() {
+			if isOpenAICodexAffinityCookieName(cookie.Name) && cookie.Valid() == nil {
+				values[cookie.Name] = cookie.Value
+			}
+		}
+	}
+	now := time.Now()
+	for _, cookie := range updates {
+		if cookie == nil {
+			continue
+		}
+		if !isOpenAICodexAffinityCookieName(cookie.Name) {
+			continue
+		}
+		if cookie.MaxAge < 0 || (!cookie.Expires.IsZero() && !cookie.Expires.After(now)) {
+			delete(values, cookie.Name)
+			continue
+		}
+		if cookie.Valid() == nil {
+			values[cookie.Name] = cookie.Value
+		}
+	}
+	parts := make([]string, 0, len(values))
+	for _, name := range openAICodexAffinityCookieNames {
+		if value, ok := values[name]; ok {
+			parts = append(parts, (&http.Cookie{Name: name, Value: value}).String())
+			delete(values, name)
+		}
+	}
+	extraNames := make([]string, 0, len(values))
+	for name := range values {
+		extraNames = append(extraNames, name)
+	}
+	sort.Strings(extraNames)
+	for _, name := range extraNames {
+		parts = append(parts, (&http.Cookie{Name: name, Value: values[name]}).String())
+	}
+	return strings.Join(parts, "; ")
 }
 
 func readOpenAICodexTurnStateOfficialModel(body io.Reader) string {
@@ -1375,7 +1527,7 @@ func (s *OpsService) EnqueueOpenAICodexTurnStateScan(ctx context.Context, accoun
 			return false
 		}
 	}
-	return s.codexTurnStateScanner.Enqueue(accountID, model, false)
+	return s.codexTurnStateScanner.Enqueue(accountID, model, true)
 }
 
 func (s *OpsService) EnqueueOpenAICodexTurnStateAccountScans(ctx context.Context, accountID int64) (int, []string, error) {

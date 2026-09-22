@@ -18,13 +18,15 @@ import (
 )
 
 // Forward forwards request to OpenAI API
-func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
+func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (result *OpenAIForwardResult, err error) {
 	stageMode1Request(c, account, body)
+	defer func() { s.handleOpenAICodexTurnStateRouteOutcome(c, result) }()
 	return s.forwardWithOAuthMappedRetry(ctx, c, account, body)
 }
 
 func (s *OpenAIGatewayService) forwardOnce(ctx context.Context, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
 	beginUpstreamResponseModelObservation(c)
+	resetOpenAICodexTurnStateRouteOutcome(c)
 	account = s.withOpenAICodexInstallationID(ctx, account)
 	clearGrokResponsesClientToolMapping(c)
 	clearOpenAIResponsesClientToolMapping(c)
@@ -1171,6 +1173,9 @@ func (s *OpenAIGatewayService) forwardOnce(ctx context.Context, c *gin.Context, 
 				errors.New("OpenAI HTTP upstream returned an empty response"),
 				false,
 			)
+		}
+		if account.UsesOpenAICodexProtocol() {
+			s.captureOpenAICodexInfrastructureCookies(resp.Header)
 		}
 		if headerGuard != nil {
 			resp.Body = &openAIRequestContextReadCloser{ReadCloser: resp.Body, cleanup: headerGuard.close}

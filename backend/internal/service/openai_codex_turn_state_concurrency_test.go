@@ -211,6 +211,25 @@ func TestCodexStateSelectionRespectsConfiguredOrderInsteadOfNumericLength(t *tes
 	require.Equal(t, 356, result.stateLength)
 }
 
+func TestCodexStateSelectionUsesFreshnessForUnconfiguredValidLengths(t *testing.T) {
+	settings := defaultOpenAICodexTurnStateScanSettings()
+	settings.TargetLengths = []int{332, 292}
+	older := time.Now().UTC().Add(-2 * time.Minute)
+	newer := older.Add(time.Minute)
+	probes := []openAICodexTurnStateProbe{
+		{result: openAICodexTurnStateHarvestResult{
+			stateValue: testOpenAICodexTurnState(312, older, 'a'), stateLength: 312,
+			officialModel: "gpt-6-astra", upstreamOK: true, statusCode: http.StatusOK,
+		}},
+		{result: openAICodexTurnStateHarvestResult{
+			stateValue: testOpenAICodexTurnState(308, newer, 'b'), stateLength: 308,
+			officialModel: "gpt-6-astra", upstreamOK: true, statusCode: http.StatusOK,
+		}},
+	}
+	result, _ := chooseOpenAICodexTurnStateResult("gpt-6-astra", probes, settings)
+	require.Equal(t, 308, result.stateLength)
+}
+
 func TestCodexStateRotatingGatewayKeepsIndependentlyVerifiedExits(t *testing.T) {
 	proxies := []*OpenAICodexTurnStateProxy{
 		{Source: "dynamic", ProxyURL: "http://gateway.example:8080", ExitIP: "8.8.8.1"},

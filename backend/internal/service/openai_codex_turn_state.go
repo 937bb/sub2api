@@ -7,8 +7,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
+	"go.uber.org/zap"
 )
 
 const openAICodexTurnStateHeader = "x-codex-turn-state"
@@ -25,6 +27,14 @@ const openAICodexTurnStateModelContextKey = "openai_codex_turn_state_model"
 const openAICodexTurnStateReuseScopeContextKey = "openai_codex_turn_state_reuse_scope"
 
 const openAICodexTurnStateReuseScopeAccountModel = "account_model"
+
+const openAICodexTurnStateRouteOutcomeContextKey = "openai_codex_turn_state_route_outcome"
+
+type openAICodexTurnStateRouteOutcome struct {
+	accountID int64
+	model     string
+	stateHash string
+}
 
 type openAICodexTurnStateOrigin struct {
 	accountID int64
@@ -177,6 +187,7 @@ func (s *OpenAIGatewayService) guardOpenAICodexTurnStateEcho(c *gin.Context, acc
 	s.stripForeignOpenAICodexTurnState(c, account, h)
 	owner := codexAccountIdentitySource(c, account)
 	if owner == nil || owner.ID <= 0 || model == "" {
+		s.applyOpenAICodexInfrastructureCookies(h)
 		return
 	}
 	pool := s.getOpenAICodexTurnStatePool()
@@ -186,14 +197,20 @@ func (s *OpenAIGatewayService) guardOpenAICodexTurnStateEcho(c *gin.Context, acc
 	// that ticket and silently fall back to another egress.
 	if !pool.scanSettings.IsRouteBindingRequired() && strings.TrimSpace(h.Get(openAICodexTurnStateHeader)) != "" &&
 		(c == nil || c.GetString(openAICodexTurnStateReuseScopeContextKey) != openAICodexTurnStateReuseScopeAccountModel) {
+		s.applyOpenAICodexInfrastructureCookies(h)
 		return
 	}
 	if ticket, ok := pool.preferredRecordForBucket(owner.ID, model); ok {
 		setOpenAICodexTurnStateReuse(c, h, ticket.StateValue, openAICodexTurnStateReuseScopeAccountModel)
 		h.Set("session-id", ticket.SourceSessionID)
+		if ticket.RouteCookie != "" {
+			h.Set("Cookie", ticket.RouteCookie)
+		}
+		stageOpenAICodexTurnStateRouteOutcome(c, owner.ID, model, ticket.StateHash)
 	} else if pool.scanSettings.IsRouteBindingRequired() {
 		h.Del(openAICodexTurnStateHeader)
 	}
+	s.applyOpenAICodexInfrastructureCookies(h)
 }
 
 func (s *OpenAIGatewayService) openAICodexTurnStateRouteProxyURL(account *Account, h http.Header, fallback string) string {
@@ -295,11 +312,70 @@ func (s *OpenAIGatewayService) setOpenAICodexTurnStateRepository(repo OpenAICode
 	s.getOpenAICodexTurnStatePool().setRepository(context.Background(), repo)
 }
 
-func (s *OpenAIGatewayService) setOpenAICodexTurnStateScanEnqueuer(enqueue func(int64, string) bool) {
+func (s *OpenAIGatewayService) setOpenAICodexTurnStateScanEnqueuer(enqueue func(int64, string, bool) bool) {
 	if s == nil {
 		return
 	}
 	s.openaiCodexTurnStateScanEnqueuer = enqueue
+}
+
+func resetOpenAICodexTurnStateRouteOutcome(c *gin.Context) {
+	if c != nil {
+		c.Set(openAICodexTurnStateRouteOutcomeContextKey, openAICodexTurnStateRouteOutcome{})
+	}
+}
+
+func stageOpenAICodexTurnStateRouteOutcome(c *gin.Context, accountID int64, model, stateHash string) {
+	if c == nil || accountID <= 0 {
+		return
+	}
+	model = normalizeOpenAICodexTurnStateModel(model)
+	stateHash = strings.TrimSpace(stateHash)
+	if model == "" || stateHash == "" {
+		return
+	}
+	c.Set(openAICodexTurnStateRouteOutcomeContextKey, openAICodexTurnStateRouteOutcome{
+		accountID: accountID,
+		model:     model,
+		stateHash: stateHash,
+	})
+}
+
+func (s *OpenAIGatewayService) handleOpenAICodexTurnStateRouteOutcome(c *gin.Context, result *OpenAIForwardResult) {
+	if s == nil || c == nil || result == nil {
+		return
+	}
+	raw, exists := c.Get(openAICodexTurnStateRouteOutcomeContextKey)
+	if !exists {
+		return
+	}
+	outcome, ok := raw.(openAICodexTurnStateRouteOutcome)
+	actualModel := normalizeOpenAICodexTurnStateModel(result.UpstreamResponseModel)
+	if !ok || outcome.accountID <= 0 || outcome.model == "" || outcome.stateHash == "" || actualModel == "" ||
+		openAICodexTurnStateModelsMatch(outcome.model, actualModel) {
+		return
+	}
+	if fasterModel := normalizeOpenAICodexTurnStateModel(result.UpstreamHeaders.Get("x-codex-safety-buffering-faster-model")); fasterModel != "" && openAICodexTurnStateModelsMatch(fasterModel, actualModel) {
+		logger.L().Debug("openai_codex_state_route_safety_buffered",
+			zap.Int64("account_id", outcome.accountID),
+			zap.String("requested_model", outcome.model),
+			zap.String("response_model", actualModel),
+			zap.String("state_hash", outcome.stateHash),
+		)
+		return
+	}
+	if !s.getOpenAICodexTurnStatePool().invalidateRouteOutcome(outcome.accountID, outcome.model, outcome.stateHash) {
+		return
+	}
+	logger.L().Warn("openai_codex_state_route_model_mismatch",
+		zap.Int64("account_id", outcome.accountID),
+		zap.String("requested_model", outcome.model),
+		zap.String("response_model", actualModel),
+		zap.String("state_hash", outcome.stateHash),
+	)
+	if s.openaiCodexTurnStateScanEnqueuer != nil {
+		s.openaiCodexTurnStateScanEnqueuer(outcome.accountID, outcome.model, true)
+	}
 }
 
 func (s *OpenAIGatewayService) hasRequiredOpenAICodexTurnState(account *Account, model string) bool {
@@ -326,7 +402,7 @@ func (s *OpenAIGatewayService) hasRequiredOpenAICodexTurnState(account *Account,
 		return true
 	}
 	if s.openaiCodexTurnStateScanEnqueuer != nil {
-		s.openaiCodexTurnStateScanEnqueuer(accountID, model)
+		s.openaiCodexTurnStateScanEnqueuer(accountID, model, false)
 	}
 	return false
 }

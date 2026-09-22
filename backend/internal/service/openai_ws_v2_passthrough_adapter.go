@@ -910,6 +910,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		}
 		upstreamConn, statusCode, handshakeHeaders, err = dialer.Dial(dialCtx, wsURL, headers, proxyURL)
 		cancelDial()
+		if account.UsesOpenAICodexProtocol() {
+			s.captureOpenAICodexInfrastructureCookies(handshakeHeaders)
+		}
 		if err == nil {
 			break
 		}

@@ -15,6 +15,11 @@ const SettingKeyOpenAICodexTurnStateScanSettings = "openai_codex_turn_state_scan
 
 const defaultOpenAICodexTurnStateDynamicProxyURL = "https://api.cliproxy.io/white/api?region=Rand&num=1&format=n&type=txt"
 
+const (
+	openAICodexTurnStateMinLength = 64
+	openAICodexTurnStateMaxLength = 4096
+)
+
 // OpenAICodexTurnStateScanSettings configures state acquisition and the routing
 // guard for newly imported OAuth credentials. TargetLengths is an ordered local
 // preference, not an assertion about upstream token semantics.
@@ -196,10 +201,7 @@ func (s *OpenAICodexTurnStateScanSettings) lengthRank(length int) int {
 }
 
 func (s *OpenAICodexTurnStateScanSettings) acceptsLength(length int) bool {
-	if s == nil {
-		return defaultOpenAICodexTurnStateScanSettings().acceptsLength(length)
-	}
-	return s.lengthRank(length) < len(s.TargetLengths)
+	return length >= openAICodexTurnStateMinLength && length <= openAICodexTurnStateMaxLength
 }
 
 func (s *OpenAICodexTurnStateScanSettings) primaryLength() int {
@@ -275,7 +277,7 @@ func validateOpenAICodexTurnStateScanSettings(settings *OpenAICodexTurnStateScan
 	}
 	seen := make(map[int]struct{}, len(next.TargetLengths))
 	for _, length := range next.TargetLengths {
-		if length < 64 || length > 4096 {
+		if length < openAICodexTurnStateMinLength || length > openAICodexTurnStateMaxLength {
 			return nil, infraerrors.BadRequest("CODEX_STATE_SCAN_SETTINGS_INVALID", "target lengths must be between 64 and 4096")
 		}
 		if _, exists := seen[length]; exists {
@@ -303,7 +305,7 @@ func validateOpenAICodexTurnStateRuleLengths(lengths []int) error {
 	}
 	seen := make(map[int]struct{}, len(lengths))
 	for _, length := range lengths {
-		if length < 64 || length > 4096 {
+		if length < openAICodexTurnStateMinLength || length > openAICodexTurnStateMaxLength {
 			return infraerrors.BadRequest("CODEX_STATE_SCAN_SETTINGS_INVALID", "target lengths must be between 64 and 4096")
 		}
 		if _, exists := seen[length]; exists {

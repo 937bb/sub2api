@@ -282,8 +282,8 @@ func TestOpenAICodexTurnStateScannerOnlyQueuesMissingOrExpiringStates(t *testing
 	gateway := &OpenAIGatewayService{}
 	pool := gateway.getOpenAICodexTurnStatePool()
 	pool.now = func() time.Time { return now }
-	pool.observe(testOpenAICodexTurnState(openAICodexTurnStateLength332, now.Add(-10*time.Minute), 'r'), &accountID, "ready-session", "gpt-6-astra", "scanner")
-	pool.observe(testOpenAICodexTurnState(openAICodexTurnStateLength292, now.Add(-56*time.Minute), 'e'), &accountID, "expiring-session", "gpt-5.6-sol", "scanner")
+	pool.observe(testOpenAICodexTurnState(openAICodexTurnStateLength332, now.Add(-time.Minute), 'r'), &accountID, "ready-session", "gpt-6-astra", "scanner")
+	pool.observe(testOpenAICodexTurnState(openAICodexTurnStateLength292, now.Add(-210*time.Second), 'e'), &accountID, "expiring-session", "gpt-5.6-sol", "scanner")
 
 	scanner := &openAICodexTurnStateScanner{
 		gateway:  gateway,
@@ -337,6 +337,11 @@ func TestOpenAICodexTurnStateScanFailureValidatesSuccessfulProbe(t *testing.T) {
 
 	result.officialModel = "gpt-5.6-luna"
 	require.Equal(t, "upstream model mismatch: requested gpt-5.5, received gpt-5.6-luna", openAICodexTurnStateScanFailure("gpt-5.5", result, now))
+
+	result.safetyFaster = "gpt-5.6-luna"
+	require.True(t, isOpenAICodexTurnStateSafetyBuffered("gpt-5.5", result))
+	require.Equal(t, "upstream safety-buffering routed gpt-5.5 to gpt-5.6-luna", openAICodexTurnStateScanFailure("gpt-5.5", result, now))
+	require.Equal(t, openAICodexTurnStateSafetyRetryDelay, openAICodexTurnStateResultRetryDelay("gpt-5.5", result, 1))
 }
 
 func TestOpenAICodexTurnStateScanFailureValidatesExpiry(t *testing.T) {
@@ -348,13 +353,13 @@ func TestOpenAICodexTurnStateScanFailureValidatesExpiry(t *testing.T) {
 	}{
 		{name: "fresh 332", state: testOpenAICodexTurnState(332, now, 'a')},
 		{name: "fresh 292", state: testOpenAICodexTurnState(292, now, 'b')},
-		{name: "older but usable", state: testOpenAICodexTurnState(332, now.Add(-40*time.Minute), 'c')},
+		{name: "older but usable", state: testOpenAICodexTurnState(332, now.Add(-2*time.Minute), 'c')},
 		{name: "malformed", state: strings.Repeat("a", 332), error: "invalid issuance timestamp"},
 		{name: "future", state: testOpenAICodexTurnState(332, now.Add(time.Second), 'd'), error: "future issuance timestamp"},
-		{name: "expired", state: testOpenAICodexTurnState(332, now.Add(-time.Hour-time.Second), 'e'), error: "already expired"},
-		{name: "at expiry", state: testOpenAICodexTurnState(332, now.Add(-time.Hour), 'f'), error: "already expired"},
-		{name: "expiring", state: testOpenAICodexTurnState(332, now.Add(-56*time.Minute), 'g'), error: "refresh is still required"},
-		{name: "at refresh boundary", state: testOpenAICodexTurnState(332, now.Add(-45*time.Minute), 'h'), error: "refresh is still required"},
+		{name: "expired", state: testOpenAICodexTurnState(332, now.Add(-4*time.Minute-time.Second), 'e'), error: "already expired"},
+		{name: "at expiry", state: testOpenAICodexTurnState(332, now.Add(-4*time.Minute), 'f'), error: "already expired"},
+		{name: "expiring", state: testOpenAICodexTurnState(332, now.Add(-3*time.Minute-30*time.Second), 'g'), error: "refresh is still required"},
+		{name: "at refresh boundary", state: testOpenAICodexTurnState(332, now.Add(-3*time.Minute), 'h'), error: "refresh is still required"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -563,6 +568,33 @@ func TestHarvestOpenAICodexTurnStateReturnsSecondVerifiedState(t *testing.T) {
 	require.NotEmpty(t, result.sessionID)
 	require.Equal(t, result.sessionID, upstream.requests[0].Header.Get("session-id"))
 	require.Equal(t, result.sessionID, upstream.requests[1].Header.Get("session-id"))
+}
+
+func TestHarvestOpenAICodexTurnStateCarriesOnlyAffinityCookiesIntoReplay(t *testing.T) {
+	now := time.Now().UTC().Add(-time.Minute).Truncate(time.Second)
+	firstState := testOpenAICodexTurnState(332, now, 'a')
+	secondState := testOpenAICodexTurnState(332, now, 'b')
+	first := codexTurnStateHarvestResponse(firstState, "gpt-6-astra")
+	first.Header.Add("Set-Cookie", "__cflb=route-a; Path=/; Secure; HttpOnly")
+	first.Header.Add("Set-Cookie", "unrelated=must-not-replay; Path=/")
+	second := codexTurnStateHarvestResponse(secondState, "gpt-6-astra")
+	second.Header.Add("Set-Cookie", "__oailb=route-b; Path=/; Secure; HttpOnly")
+	upstream := &codexTurnStateHarvestCaptureUpstream{responses: []*http.Response{first, second}}
+	svc := ticketTestService(t, config.OpenAICodexTicketConfig{}, upstream)
+
+	result := svc.harvestOpenAICodexTurnState(context.Background(), ticketTestAccount(42), "gpt-6-astra", "")
+
+	require.Empty(t, result.errorMessage)
+	require.Equal(t, "__cflb=route-a", upstream.requests[1].Header.Get("Cookie"))
+	require.Equal(t, "__cflb=route-a; __oailb=route-b", result.routeCookie)
+	require.NotContains(t, result.routeCookie, "unrelated")
+}
+
+func TestNormalizeOpenAICodexAffinityCookieHeaderDropsForeignCookies(t *testing.T) {
+	require.Equal(t, "__cflb=a; __oailb=b; __cf_bm=c",
+		normalizeOpenAICodexAffinityCookieHeader("foreign=x; __oailb=b; __cf_bm=c; __cflb=a"))
+	require.Equal(t, "cf_clearance=d; cf_chl_rc_i=e",
+		normalizeOpenAICodexAffinityCookieHeader("foreign=x; cf_chl_rc_i=e; cf_clearance=d"))
 }
 
 func TestHarvestOpenAICodexTurnStateAcceptsReplayModelConfirmationWithoutNewState(t *testing.T) {

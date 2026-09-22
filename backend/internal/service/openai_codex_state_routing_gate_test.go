@@ -19,9 +19,10 @@ func TestRequiredOpenAICodexTurnStateBlocksPerModelAndQueuesScan(t *testing.T) {
 	gateway := &OpenAIGatewayService{}
 	queuedAccountID := int64(0)
 	queuedModel := ""
-	gateway.setOpenAICodexTurnStateScanEnqueuer(func(accountID int64, model string) bool {
+	gateway.setOpenAICodexTurnStateScanEnqueuer(func(accountID int64, model string, force bool) bool {
 		queuedAccountID = accountID
 		queuedModel = model
+		require.False(t, force)
 		return true
 	})
 
@@ -69,7 +70,7 @@ func TestRequiredOpenAICodexTurnStateCanBeDisabledAtRuntime(t *testing.T) {
 	}
 	gateway := &OpenAIGatewayService{}
 	queued := false
-	gateway.setOpenAICodexTurnStateScanEnqueuer(func(int64, string) bool {
+	gateway.setOpenAICodexTurnStateScanEnqueuer(func(int64, string, bool) bool {
 		queued = true
 		return true
 	})

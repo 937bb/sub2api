@@ -164,6 +164,33 @@ func TestGuardOpenAICodexTurnStateEcho_PreservesClientState(t *testing.T) {
 	require.Empty(t, c.GetString(openAICodexTurnStateReuseScopeContextKey))
 }
 
+func TestGuardOpenAICodexTurnStateEchoInjectsVerifiedSessionAndAffinityCookie(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	svc := &OpenAIGatewayService{}
+	pool := svc.getOpenAICodexTurnStatePool()
+	pool.now = func() time.Time { return now }
+	accountID := int64(43)
+	const model = "gpt-6-astra"
+	state := testOpenAICodexTurnState(332, now, 'a')
+	require.NoError(t, pool.observeDurably(
+		context.Background(), state, accountID, "session-hash", model, "scanner",
+		openAICodexTurnStateRouteTicket{
+			SessionID:   "verified-session",
+			RouteCookie: "foreign=drop; __oailb=route-b; __cflb=route-a",
+		},
+	))
+
+	c, _ := newTurnStateTestContext(t, 7, "client-session")
+	headers := http.Header{"Cookie": []string{"client-secret=must-not-forward"}}
+	svc.guardOpenAICodexTurnStateEcho(c, &Account{ID: accountID, Platform: PlatformOpenAI, Type: AccountTypeOAuth}, headers, model)
+
+	require.Equal(t, state, headers.Get(openAICodexTurnStateHeader))
+	require.Equal(t, "verified-session", headers.Get("session-id"))
+	require.Equal(t, "__cflb=route-a; __oailb=route-b", headers.Get("Cookie"))
+	require.NotContains(t, headers.Get("Cookie"), "client-secret")
+	require.NotContains(t, headers.Get("Cookie"), "foreign")
+}
+
 func TestGuardOpenAICodexTurnStateEcho_DoesNotCrossAccountOrModel(t *testing.T) {
 	now := time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)
 	svc := &OpenAIGatewayService{}
@@ -404,9 +431,9 @@ func TestOpenAICodexTurnStatePool_UsesFernetIssuedAtForExpiry(t *testing.T) {
 	accountID := int64(42)
 	model := "gpt-5.6-codex"
 
-	expired := testOpenAICodexTurnState(292, now.Add(-time.Hour), 'a')
+	expired := testOpenAICodexTurnState(292, now.Add(-5*time.Minute), 'a')
 	future := testOpenAICodexTurnState(292, now.Add(time.Second), 'b')
-	active := testOpenAICodexTurnState(292, now.Add(-30*time.Minute), 'c')
+	active := testOpenAICodexTurnState(292, now.Add(-time.Minute), 'c')
 	pool.observe(expired, &accountID, "expired", model, "scanner")
 	pool.observe(future, &accountID, "future", model, "scanner")
 	pool.observe(active, &accountID, "active", model, "scanner")
@@ -417,14 +444,14 @@ func TestOpenAICodexTurnStatePool_UsesFernetIssuedAtForExpiry(t *testing.T) {
 
 	issuedAt, ok := parseOpenAICodexTurnStateIssuedAt(active)
 	require.True(t, ok)
-	require.Equal(t, now.Add(-30*time.Minute), issuedAt)
+	require.Equal(t, now.Add(-time.Minute), issuedAt)
 	for _, record := range pool.entries {
 		if record.StateValue == active {
-			require.Equal(t, issuedAt.Add(time.Hour), record.ExpiresAt)
+			require.Equal(t, issuedAt.Add(openAICodexTurnStateTTL), record.ExpiresAt)
 		}
 	}
 
-	now = issuedAt.Add(time.Hour)
+	now = issuedAt.Add(openAICodexTurnStateTTL)
 	_, ok = pool.preferredForBucket(accountID, model)
 	require.False(t, ok)
 }
@@ -480,6 +507,102 @@ func TestOpenAICodexTurnState_UsesCredentialOwnerForShadowAccount(t *testing.T) 
 	require.Equal(t, state, h.Get(openAICodexTurnStateHeader))
 	_, shadowOwnsState := pool.preferredForBucket(shadow.ID, model)
 	require.False(t, shadowOwnsState)
+}
+
+func TestOpenAICodexTurnStateRouteMismatchInvalidatesOnlyUsedTicketAndForcesScan(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	accountID := int64(42)
+	const model = "gpt-6-astra"
+	svc := &OpenAIGatewayService{}
+	pool := svc.getOpenAICodexTurnStatePool()
+	pool.now = func() time.Time { return now }
+	state := testOpenAICodexTurnState(356, now.Add(-time.Minute), 'a')
+	pool.observe(state, &accountID, "harvest-session", model, "scanner")
+
+	c, _ := newTurnStateTestContext(t, 7, "client-session")
+	h := http.Header{}
+	svc.guardOpenAICodexTurnStateEcho(c, &Account{ID: accountID, Platform: PlatformOpenAI, Type: AccountTypeOAuth}, h, model)
+	require.Equal(t, state, h.Get(openAICodexTurnStateHeader))
+
+	queued := false
+	svc.setOpenAICodexTurnStateScanEnqueuer(func(gotAccountID int64, gotModel string, force bool) bool {
+		require.Equal(t, accountID, gotAccountID)
+		require.Equal(t, model, gotModel)
+		require.True(t, force)
+		queued = true
+		return true
+	})
+	svc.handleOpenAICodexTurnStateRouteOutcome(c, &OpenAIForwardResult{UpstreamResponseModel: "gpt-5.6-luna"})
+
+	require.True(t, queued)
+	_, reusable := pool.preferredForBucket(accountID, model)
+	require.False(t, reusable)
+}
+
+func TestOpenAICodexTurnStateSafetyBufferingKeepsTicketAndDoesNotScan(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	accountID := int64(42)
+	const model = "gpt-6-astra"
+	svc := &OpenAIGatewayService{}
+	pool := svc.getOpenAICodexTurnStatePool()
+	pool.now = func() time.Time { return now }
+	state := testOpenAICodexTurnState(356, now.Add(-time.Minute), 'a')
+	pool.observe(state, &accountID, "harvest-session", model, "scanner")
+
+	c, _ := newTurnStateTestContext(t, 7, "client-session")
+	h := http.Header{}
+	svc.guardOpenAICodexTurnStateEcho(c, &Account{ID: accountID, Platform: PlatformOpenAI, Type: AccountTypeOAuth}, h, model)
+	require.Equal(t, state, h.Get(openAICodexTurnStateHeader))
+
+	queued := false
+	svc.setOpenAICodexTurnStateScanEnqueuer(func(int64, string, bool) bool {
+		queued = true
+		return true
+	})
+	result := &OpenAIForwardResult{
+		UpstreamResponseModel: "gpt-5.6-luna",
+		UpstreamHeaders: http.Header{
+			"X-Codex-Safety-Buffering-Enabled":      []string{"true"},
+			"X-Codex-Safety-Buffering-Faster-Model": []string{"gpt-5.6-luna"},
+		},
+	}
+	svc.handleOpenAICodexTurnStateRouteOutcome(c, result)
+
+	require.False(t, queued)
+	preferred, reusable := pool.preferredForBucket(accountID, model)
+	require.True(t, reusable)
+	require.Equal(t, state, preferred)
+}
+
+func TestOpenAICodexTurnStateLateMismatchCannotInvalidateReplacement(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	accountID := int64(42)
+	const model = "gpt-6-astra"
+	svc := &OpenAIGatewayService{}
+	pool := svc.getOpenAICodexTurnStatePool()
+	pool.now = func() time.Time { return now }
+	oldState := testOpenAICodexTurnState(356, now.Add(-2*time.Minute), 'a')
+	pool.observe(oldState, &accountID, "old-session", model, "scanner")
+
+	c, _ := newTurnStateTestContext(t, 7, "client-session")
+	h := http.Header{}
+	svc.guardOpenAICodexTurnStateEcho(c, &Account{ID: accountID, Platform: PlatformOpenAI, Type: AccountTypeOAuth}, h, model)
+	require.Equal(t, oldState, h.Get(openAICodexTurnStateHeader))
+
+	now = now.Add(time.Second)
+	newState := testOpenAICodexTurnState(356, now.Add(-time.Minute), 'b')
+	pool.observe(newState, &accountID, "new-session", model, "scanner")
+	queued := false
+	svc.setOpenAICodexTurnStateScanEnqueuer(func(int64, string, bool) bool {
+		queued = true
+		return true
+	})
+	svc.handleOpenAICodexTurnStateRouteOutcome(c, &OpenAIForwardResult{UpstreamResponseModel: "gpt-5.6-luna"})
+
+	require.False(t, queued)
+	preferred, reusable := pool.preferredForBucket(accountID, model)
+	require.True(t, reusable)
+	require.Equal(t, newState, preferred)
 }
 
 func TestWriteOpenAIPassthroughResponseHeaders_RelaysAndClearsTurnState(t *testing.T) {

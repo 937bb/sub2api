@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"encoding/json"
 	"errors"
@@ -14,8 +15,11 @@ import (
 	"maps"
 	"net"
 	"net/http"
+	"net/http/cookiejar"
 	"net/http/httptest"
+	"net/url"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -47,19 +51,38 @@ func TestCodexHeaderLiveDiagnostic(t *testing.T) {
 		Version          string
 		Relay            string
 		SourceIPv6       string
+		SourceIPv6s      []string
 		Rounds           int
 		DefaultFull      bool
 		InspectModels    bool
 		FreshConnections bool
+		FreshSessions    bool
+		CookieMode       string
+		SharedCookieJar  bool
 	}
 	if err := json.NewDecoder(io.LimitReader(os.Stdin, 1<<20)).Decode(&input); err != nil {
 		t.Fatal("invalid diagnostic input")
 	}
-	if len(input.Accounts) == 0 || len(input.Accounts) > 3 || len(input.Models) == 0 || len(input.Models) > 2 || input.Rounds < 1 || input.Rounds > 3 || NormalizeCodexClientVersion(input.Version) == "" {
+	if len(input.Accounts) == 0 || len(input.Accounts) > 3 || len(input.Models) == 0 || len(input.Models) > 2 || input.Rounds < 1 || input.Rounds > 8 || NormalizeCodexClientVersion(input.Version) == "" || len(input.SourceIPv6s) > 16 {
 		t.Fatal("invalid diagnostic bounds")
+	}
+	if len(input.SourceIPv6s) > 0 && strings.TrimSpace(input.Relay) == "" {
+		t.Fatal("source IPv6 rotation requires the relay")
+	}
+	for _, source := range input.SourceIPv6s {
+		address := net.ParseIP(strings.TrimSpace(source))
+		if address == nil || address.To4() != nil {
+			t.Fatal("invalid rotating source IPv6")
+		}
 	}
 	if len(input.Transports) == 0 || len(input.Transports) > 2 {
 		t.Fatal("choose HTTP and/or WS")
+	}
+	if input.CookieMode == "" {
+		input.CookieMode = "off"
+	}
+	if input.CookieMode != "off" && input.CookieMode != "affinity" && input.CookieMode != "all" {
+		t.Fatal("unsupported cookie mode")
 	}
 	for _, transport := range input.Transports {
 		if transport != "http" && transport != "ws" {
@@ -110,8 +133,15 @@ func TestCodexHeaderLiveDiagnostic(t *testing.T) {
 	}()
 	clients := make(map[int64]*http.Client)
 	http1Clients := make(map[int64]*http.Client)
+	httpTransports := make(map[int64]*http.Transport)
+	http1Transports := make(map[int64]*http.Transport)
 	sessions := make(map[int64]string)
 	retryAfter := make(map[int64]time.Time)
+	var sharedJar http.CookieJar
+	if input.SharedCookieJar {
+		sharedJar = codexDiagnosticCookieJar(t, input.CookieMode)
+	}
+	sourceIndex := 0
 	for _, account := range input.Accounts {
 		if account == nil || !account.IsOpenAIOAuthLike() || account.GetCredential("access_token") == "" || account.ProxyID != nil {
 			t.Fatal("diagnostic requires direct OAuth/PAT account snapshots")
@@ -123,10 +153,16 @@ func TestCodexHeaderLiveDiagnostic(t *testing.T) {
 			transport.DialContext = fixedSourceTransport.DialContext
 		}
 		t.Cleanup(transport.CloseIdleConnections)
-		clients[account.ID] = &http.Client{Transport: transport}
+		jar := sharedJar
+		if !input.SharedCookieJar {
+			jar = codexDiagnosticCookieJar(t, input.CookieMode)
+		}
+		clients[account.ID] = &http.Client{Transport: transport, Jar: jar}
+		httpTransports[account.ID] = transport
 		http1Transport := codexDiagnosticHTTP1Transport(transport)
 		t.Cleanup(http1Transport.CloseIdleConnections)
-		http1Clients[account.ID] = &http.Client{Transport: http1Transport}
+		http1Clients[account.ID] = &http.Client{Transport: http1Transport, Jar: jar}
+		http1Transports[account.ID] = http1Transport
 		sessions[account.ID] = uuid.NewString()
 		if input.InspectModels {
 			codexDiagnosticModels(t, clients[account.ID], svc, account, input.Version)
@@ -159,9 +195,18 @@ func TestCodexHeaderLiveDiagnostic(t *testing.T) {
 							account = &snapshot
 						}
 						ctx, cancel := context.WithTimeout(context.Background(), 35*time.Second)
+						sourceIPv6 := strings.TrimSpace(input.SourceIPv6)
+						if len(input.SourceIPv6s) > 0 {
+							sourceIPv6 = strings.TrimSpace(input.SourceIPv6s[sourceIndex%len(input.SourceIPv6s)])
+							sourceIndex++
+							ctx = chatgptrelay.WithSourceIPv6(ctx, sourceIPv6)
+						}
 						c, _ := gin.CreateTestContext(httptest.NewRecorder())
 						c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
 						session := sessions[account.ID]
+						if input.FreshSessions {
+							session = uuid.NewString()
+						}
 						c.Request.Header.Set("session-id", session)
 						c.Request.Header.Set("thread-id", session)
 						payload := createOpenAITestPayload(model, true)
@@ -193,6 +238,9 @@ func TestCodexHeaderLiveDiagnostic(t *testing.T) {
 						applyCodexNormalizedRequestIdentityHeaders(c, account, req.Header, body)
 						applyStagedCodexFingerprintHeaders(c, account, req.Header)
 						codexDiagnosticVariant(req.Header, variant, input.Version)
+						if transport == "ws" {
+							codexDiagnosticApplyJarCookies(req, clients[account.ID].Jar)
+						}
 						if variant == "lite_compatible" && transport == "http" {
 							req.Header.Set(responsesLiteHeader, "true")
 						}
@@ -210,8 +258,13 @@ func TestCodexHeaderLiveDiagnostic(t *testing.T) {
 						observation := map[string]any{"round": round + 1, "account_id": account.ID, "model": model, "transport": transport, "variant": variant,
 							"user_agent": req.Header.Get("User-Agent"), "version": req.Header.Get("version"), "originator": req.Header.Get("originator"),
 							"beta": req.Header.Get("OpenAI-Beta"), "features": req.Header.Get("x-codex-beta-features"), "success": false}
-						observation["fixed_egress"] = input.SourceIPv6 != ""
+						observation["fixed_egress"] = sourceIPv6 != ""
+						observation["source_ipv6"] = sourceIPv6
 						observation["fresh_connection_policy"] = input.FreshConnections
+						observation["cookie_mode"] = input.CookieMode
+						if client := clients[account.ID]; client != nil && client.Jar != nil {
+							observation["sent_cookies"] = codexDiagnosticCookieSummary(client.Jar.Cookies(req.URL))
+						}
 						observation["routing_hint"] = req.Header.Get(openAICodexRoutingHintHeader)
 						started := time.Now()
 						if transport == "http" {
@@ -224,6 +277,10 @@ func TestCodexHeaderLiveDiagnostic(t *testing.T) {
 							if err == nil {
 								observation["http_status"] = response.StatusCode
 								observation["http_protocol"] = response.Proto
+								observation["set_cookies"] = codexDiagnosticCookieSummary(response.Cookies())
+								observation["cf_ray"] = response.Header.Get("Cf-Ray")
+								observation["proxy_wasm"] = response.Header.Get("X-Openai-Proxy-Wasm")
+								codexDiagnosticRoutingHeaders(response.Header, observation)
 								if response.StatusCode != http.StatusOK {
 									raw, _ := io.ReadAll(io.LimitReader(response.Body, 8192))
 									codexDiagnosticHTTPError(response.Header, raw, observation)
@@ -238,6 +295,13 @@ func TestCodexHeaderLiveDiagnostic(t *testing.T) {
 									err = scanner.Err()
 								}
 								_ = response.Body.Close()
+								if input.FreshConnections {
+									if variant == "http_h1" {
+										http1Transports[account.ID].CloseIdleConnections()
+									} else {
+										httpTransports[account.ID].CloseIdleConnections()
+									}
+								}
 							}
 						} else {
 							key := fmt.Sprintf("%d/%s/%s", account.ID, model, variant)
@@ -306,6 +370,305 @@ func TestCodexHeaderLiveDiagnostic(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+type codexRouteAffinityDiagnosticResult struct {
+	state       string
+	routeCookie string
+	observation map[string]any
+}
+
+// TestCodexRouteAffinityLiveDiagnostic compares State, affinity Cookie, and
+// session identity on fresh HTTP connections. It is operational-only and never
+// prints raw credentials, State, or Cookie values.
+func TestCodexRouteAffinityLiveDiagnostic(t *testing.T) {
+	if os.Getenv("CODEX_ROUTE_AFFINITY_DIAGNOSTIC") != "1" {
+		t.Skip("live route-affinity diagnostic requires explicit enablement")
+	}
+	var input struct {
+		Accounts    []*Account
+		Model       string
+		Version     string
+		Relay       string
+		SourceIPv6s []string
+		WaitSeconds int
+	}
+	if err := json.NewDecoder(io.LimitReader(os.Stdin, 1<<20)).Decode(&input); err != nil {
+		t.Fatal("invalid route-affinity diagnostic input")
+	}
+	if len(input.Accounts) != 1 || input.Accounts[0] == nil || !input.Accounts[0].IsOpenAIOAuthLike() ||
+		input.Accounts[0].GetCredential("access_token") == "" || input.Accounts[0].ProxyID != nil ||
+		normalizeOpenAICodexTurnStateModel(input.Model) == "" || NormalizeCodexClientVersion(input.Version) == "" ||
+		input.WaitSeconds < 0 || input.WaitSeconds > 300 || len(input.SourceIPv6s) > 8 {
+		t.Fatal("invalid route-affinity diagnostic bounds")
+	}
+	if len(input.SourceIPv6s) > 0 && strings.TrimSpace(input.Relay) == "" {
+		t.Fatal("source IPv6 rotation requires the relay")
+	}
+	for _, source := range input.SourceIPv6s {
+		address := net.ParseIP(strings.TrimSpace(source))
+		if address == nil || address.To4() != nil {
+			t.Fatal("invalid diagnostic source IPv6")
+		}
+	}
+	SetCodexCanonicalUserAgentResolver(func() string { return buildCodexCLIUserAgent(input.Version) })
+	t.Cleanup(func() { SetCodexCanonicalUserAgentResolver(nil) })
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIChatGPTIPv6Only = strings.TrimSpace(input.Relay) != ""
+	cfg.Gateway.OpenAIChatGPTIPv6RelayAddr = strings.TrimSpace(input.Relay)
+	svc := &OpenAIGatewayService{cfg: cfg}
+	account := input.Accounts[0]
+	baseSession := uuid.NewString()
+	sourceIndex := 0
+	nextSource := func() string {
+		if len(input.SourceIPv6s) == 0 {
+			return ""
+		}
+		source := input.SourceIPv6s[sourceIndex%len(input.SourceIPv6s)]
+		sourceIndex++
+		return source
+	}
+
+	seed := runCodexRouteAffinityDiagnosticRequest(t, svc, account, input.Model, baseSession, "", "", nextSource(), input.Relay, "seed")
+	printCodexRouteAffinityDiagnostic(account, seed.observation)
+	if seed.state == "" {
+		t.Fatal("seed response did not return x-codex-turn-state")
+	}
+	variants := []struct {
+		name        string
+		state       string
+		cookie      string
+		sameSession bool
+	}{
+		{name: "state_cookie_session", state: seed.state, cookie: seed.routeCookie, sameSession: true},
+		{name: "state_session", state: seed.state, sameSession: true},
+		{name: "cookie_session", cookie: seed.routeCookie, sameSession: true},
+		{name: "session_only", sameSession: true},
+		{name: "state_cookie_new_session", state: seed.state, cookie: seed.routeCookie},
+		{name: "cookie_new_session", cookie: seed.routeCookie},
+		{name: "neither_new_session"},
+	}
+	for _, variant := range variants {
+		sessionID := uuid.NewString()
+		if variant.sameSession {
+			sessionID = baseSession
+		}
+		result := runCodexRouteAffinityDiagnosticRequest(t, svc, account, input.Model, sessionID, variant.state, variant.cookie, nextSource(), input.Relay, variant.name)
+		printCodexRouteAffinityDiagnostic(account, result.observation)
+	}
+	if input.WaitSeconds == 0 {
+		return
+	}
+	waiting, _ := json.Marshal(map[string]any{"phase": "waiting", "seconds": input.WaitSeconds})
+	fmt.Println(string(waiting))
+	timer := time.NewTimer(time.Duration(input.WaitSeconds) * time.Second)
+	defer timer.Stop()
+	<-timer.C
+	for _, variant := range []struct {
+		name   string
+		state  string
+		cookie string
+	}{
+		{name: "post_wait_state_cookie", state: seed.state, cookie: seed.routeCookie},
+		{name: "post_wait_state", state: seed.state},
+		{name: "post_wait_cookie", cookie: seed.routeCookie},
+		{name: "post_wait_neither"},
+	} {
+		result := runCodexRouteAffinityDiagnosticRequest(t, svc, account, input.Model, baseSession, variant.state, variant.cookie, nextSource(), input.Relay, variant.name)
+		printCodexRouteAffinityDiagnostic(account, result.observation)
+	}
+}
+
+func runCodexRouteAffinityDiagnosticRequest(t *testing.T, svc *OpenAIGatewayService, account *Account, model, sessionID, state, routeCookie, sourceIPv6, relay, phase string) codexRouteAffinityDiagnosticResult {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
+	defer cancel()
+	if sourceIPv6 != "" {
+		ctx = chatgptrelay.WithSourceIPv6(ctx, sourceIPv6)
+	}
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	c.Request.Header.Set("session-id", sessionID)
+	c.Request.Header.Set("thread-id", sessionID)
+	payload := createOpenAITestPayload(model, true)
+	payload["input"] = []map[string]any{{"role": "user", "content": []map[string]any{{"type": "input_text", "text": "Reply exactly OK."}}}}
+	payload["prompt_cache_key"] = sessionID
+	payload["client_metadata"] = map[string]any{"session_id": sessionID, "thread_id": sessionID}
+	applyCodexClientMetadata(payload, account)
+	applyCodexAccountIdentityClientMetadataMap(payload, account, 0)
+	ids := resolveCodexFingerprintIDsFromRequestWithDefault(account, c.Request.Header, false)
+	applyCodexFingerprintClientMetadata(payload, ids)
+	stageCodexFingerprintIDs(c, ids)
+	body, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal("could not encode route-affinity payload")
+	}
+	req, err := svc.buildUpstreamRequest(ctx, c, account, body, account.GetCredential("access_token"), true, sessionID, true)
+	if err != nil {
+		t.Fatal("could not build route-affinity request")
+	}
+	applyCodexNormalizedRequestIdentityHeaders(c, account, req.Header, body)
+	applyStagedCodexFingerprintHeaders(c, account, req.Header)
+	if state != "" {
+		req.Header.Set(openAICodexTurnStateHeader, state)
+	}
+	if routeCookie = normalizeOpenAICodexAffinityCookieHeader(routeCookie); routeCookie != "" {
+		req.Header.Set("Cookie", routeCookie)
+	}
+	dialer := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
+	transport := &http.Transport{
+		ForceAttemptHTTP2:   true,
+		TLSHandshakeTimeout: 10 * time.Second,
+		DialContext: chatgptrelay.Wrap(dialer.DialContext, chatgptrelay.Settings{
+			Enabled:   strings.TrimSpace(relay) != "",
+			RelayAddr: strings.TrimSpace(relay),
+		}),
+	}
+	defer transport.CloseIdleConnections()
+	observation := map[string]any{
+		"phase": phase, "account_id": account.ID, "requested_model": model,
+		"sent_state": state != "", "sent_cookie": routeCookie != "", "source_ipv6": sourceIPv6,
+		"session_hash": shortCodexDiagnosticHash(sessionID), "success": false,
+	}
+	started := time.Now()
+	response, err := (&http.Client{Transport: transport}).Do(req)
+	if err != nil {
+		observation["transport_error"] = strings.ReplaceAll(err.Error(), account.GetCredential("access_token"), "[REDACTED]")
+		observation["duration_ms"] = time.Since(started).Milliseconds()
+		return codexRouteAffinityDiagnosticResult{observation: observation}
+	}
+	defer func() { _ = response.Body.Close() }()
+	observation["http_status"] = response.StatusCode
+	observation["http_protocol"] = response.Proto
+	observation["official_model_header"] = firstNonEmptyCodexHeader(response.Header, "OpenAI-Model", "openai-model")
+	observation["cf_ray"] = response.Header.Get("Cf-Ray")
+	responseState := extractOpenAICodexTurnState(response.Header)
+	if responseState != "" {
+		observation["response_state_length"] = len(responseState)
+		observation["response_state_hash"] = shortCodexDiagnosticHash(responseState)
+	}
+	responseCookie := mergeOpenAICodexAffinityCookies(routeCookie, response.Cookies())
+	observation["set_cookies"] = codexDiagnosticCookieSummary(response.Cookies())
+	observation["affinity_cookie_hash"] = shortCodexDiagnosticHash(responseCookie)
+	if response.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(io.LimitReader(response.Body, 8192))
+		codexDiagnosticHTTPError(response.Header, raw, observation)
+	} else {
+		scanner := bufio.NewScanner(response.Body)
+		scanner.Buffer(make([]byte, 4096), 2<<20)
+		for scanner.Scan() {
+			if raw, ok := bytes.CutPrefix(scanner.Bytes(), []byte("data:")); ok && codexDiagnosticEvent(raw, started, observation) {
+				break
+			}
+		}
+		if scanErr := scanner.Err(); scanErr != nil {
+			observation["stream_error"] = scanErr.Error()
+		}
+	}
+	observation["duration_ms"] = time.Since(started).Milliseconds()
+	return codexRouteAffinityDiagnosticResult{state: responseState, routeCookie: responseCookie, observation: observation}
+}
+
+func printCodexRouteAffinityDiagnostic(account *Account, observation map[string]any) {
+	encoded, _ := json.Marshal(observation)
+	fmt.Println(strings.ReplaceAll(string(encoded), account.GetCredential("access_token"), "[REDACTED]"))
+}
+
+func shortCodexDiagnosticHash(value string) string {
+	if value == "" {
+		return ""
+	}
+	digest := sha256.Sum256([]byte(value))
+	return fmt.Sprintf("%x", digest[:6])
+}
+
+type codexDiagnosticFilteringJar struct {
+	base    http.CookieJar
+	allowed map[string]struct{}
+}
+
+func codexDiagnosticCookieJar(t *testing.T, mode string) http.CookieJar {
+	t.Helper()
+	if mode == "off" {
+		return nil
+	}
+	base, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatal("could not initialize diagnostic cookie jar")
+	}
+	if mode == "all" {
+		return base
+	}
+	return &codexDiagnosticFilteringJar{base: base, allowed: map[string]struct{}{
+		"__cf_bm":         {},
+		"__cflb":          {},
+		"__cfruid":        {},
+		"__cfseq":         {},
+		"__cfwaitingroom": {},
+		"__oailb":         {},
+		"_cfuvid":         {},
+		"cf_clearance":    {},
+		"cf_ob_info":      {},
+		"cf_use_ob":       {},
+	}}
+}
+
+func (j *codexDiagnosticFilteringJar) SetCookies(u *url.URL, cookies []*http.Cookie) {
+	filtered := make([]*http.Cookie, 0, len(cookies))
+	for _, cookie := range cookies {
+		if _, ok := j.allowed[cookie.Name]; ok || strings.HasPrefix(cookie.Name, "cf_chl_") {
+			filtered = append(filtered, cookie)
+		}
+	}
+	j.base.SetCookies(u, filtered)
+}
+
+func (j *codexDiagnosticFilteringJar) Cookies(u *url.URL) []*http.Cookie {
+	return j.base.Cookies(u)
+}
+
+func codexDiagnosticApplyJarCookies(req *http.Request, jar http.CookieJar) {
+	if req == nil || req.URL == nil || jar == nil {
+		return
+	}
+	req.Header.Del("Cookie")
+	for _, cookie := range jar.Cookies(req.URL) {
+		req.AddCookie(cookie)
+	}
+}
+
+func codexDiagnosticCookieSummary(cookies []*http.Cookie) []string {
+	summary := make([]string, 0, len(cookies))
+	for _, cookie := range cookies {
+		if cookie == nil {
+			continue
+		}
+		digest := sha256.Sum256([]byte(cookie.Value))
+		summary = append(summary, fmt.Sprintf("%s:%x", cookie.Name, digest[:4]))
+	}
+	slices.Sort(summary)
+	return summary
+}
+
+func codexDiagnosticRoutingHeaders(headers http.Header, observation map[string]any) {
+	for _, name := range []string{
+		"x-codex-active-limit",
+		"x-codex-plan-type",
+		"x-codex-primary-over-secondary-limit-percent",
+		"x-codex-primary-used-percent",
+		"x-codex-safety-buffering-enabled",
+		"x-codex-safety-buffering-faster-model",
+		"x-codex-secondary-used-percent",
+	} {
+		if value := strings.TrimSpace(headers.Get(name)); value != "" {
+			observation[name] = value
+		}
+	}
+	if state := strings.TrimSpace(headers.Get(openAICodexTurnStateHeader)); state != "" {
+		digest := sha256.Sum256([]byte(state))
+		observation["response_state_length"] = len(state)
+		observation["response_state_hash"] = fmt.Sprintf("%x", digest[:6])
 	}
 }
 
@@ -468,7 +831,7 @@ func codexDiagnosticModels(t *testing.T, client *http.Client, svc *OpenAIGateway
 			models := []map[string]any{}
 			for _, model := range gjson.GetBytes(body, "models").Array() {
 				row := map[string]any{}
-				for _, field := range []string{"slug", "supported_in_api", "visibility", "use_responses_lite", "supports_parallel_tool_calls", "prefer_websockets"} {
+				for _, field := range []string{"slug", "supported_in_api", "visibility", "use_responses_lite", "supports_parallel_tool_calls", "prefer_websockets", "safety_buffering"} {
 					if value := model.Get(field); value.Exists() {
 						row[field] = value.Value()
 					}
@@ -488,6 +851,16 @@ func codexDiagnosticModels(t *testing.T, client *http.Client, svc *OpenAIGateway
 
 func codexDiagnosticEvent(raw []byte, started time.Time, result map[string]any) bool {
 	typeName := gjson.GetBytes(raw, "type").String()
+	if typeName == "response.metadata" && gjson.GetBytes(raw, "metadata.type").String() == "safety_buffering" {
+		result["safety_buffering_use_cases"] = gjson.GetBytes(raw, "metadata.use_cases").Value()
+		result["safety_buffering_reasons"] = gjson.GetBytes(raw, "metadata.reasons").Value()
+		result["safety_buffering_retry_model"] = firstValidTrimmedGJSONString(raw, "metadata.retry_model", "metadata.faster_model")
+	}
+	if typeName == "response.created" && gjson.GetBytes(raw, "response.safety_buffering").Exists() {
+		result["safety_buffering_use_cases"] = gjson.GetBytes(raw, "response.safety_buffering.use_cases").Value()
+		result["safety_buffering_reasons"] = gjson.GetBytes(raw, "response.safety_buffering.reasons").Value()
+		result["safety_buffering_retry_model"] = firstValidTrimmedGJSONString(raw, "response.safety_buffering.retry_model", "response.safety_buffering.faster_model")
+	}
 	if typeName == "response.output_text.delta" {
 		if _, exists := result["first_text_ms"]; !exists {
 			result["first_text_ms"] = time.Since(started).Milliseconds()

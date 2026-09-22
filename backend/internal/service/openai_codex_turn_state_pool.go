@@ -22,7 +22,7 @@ import (
 )
 
 const (
-	openAICodexTurnStateTTL          = time.Hour
+	openAICodexTurnStateTTL          = 240 * time.Second
 	openAICodexTurnStatePersistQueue = 1024
 	openAICodexTurnStateSweepEvery   = 256
 	openAICodexTurnStateCleanupEvery = 5 * time.Minute
@@ -43,6 +43,7 @@ type OpenAICodexTurnStateRecord struct {
 	SourceProxyURL    string    `json:"-"`
 	SourceExitIP      string    `json:"source_exit_ip,omitempty"`
 	RouteIPv6         string    `json:"route_ipv6,omitempty"`
+	RouteCookie       string    `json:"-"`
 	SourceModel       string    `json:"source_model,omitempty"`
 	SourceTransport   string    `json:"source_transport"`
 	IssuedAt          time.Time `json:"issued_at,omitempty"`
@@ -74,12 +75,13 @@ type OpenAICodexTurnStateFilter struct {
 }
 
 type openAICodexTurnStateRouteTicket struct {
-	SessionID string
-	ProxyID   *int64
-	ProxyURL  string
-	ExitIP    string
-	RouteIPv6 string
-	ExpiresAt time.Time
+	SessionID   string
+	ProxyID     *int64
+	ProxyURL    string
+	ExitIP      string
+	RouteIPv6   string
+	RouteCookie string
+	ExpiresAt   time.Time
 }
 
 type OpenAICodexTurnStateStore interface {
@@ -107,31 +109,33 @@ type openAICodexTurnStateBucketKey struct {
 }
 
 type openAICodexTurnStatePool struct {
-	mu                sync.RWMutex
-	entries           map[string]*OpenAICodexTurnStateRecord
-	entriesByBucket   map[openAICodexTurnStateBucketKey]map[string]*OpenAICodexTurnStateRecord
-	accounts          map[int64]time.Time
-	accountPlans      map[int64]string
-	preferredByBucket map[openAICodexTurnStateBucketKey]*OpenAICodexTurnStateRecord
-	scanSettings      *OpenAICodexTurnStateScanSettings
-	repo              OpenAICodexTurnStateStore
-	queue             chan *OpenAICodexTurnStateRecord
-	worker            sync.Once
-	dropped           atomic.Uint64
-	observed          atomic.Uint64
-	now               func() time.Time
+	mu                 sync.RWMutex
+	entries            map[string]*OpenAICodexTurnStateRecord
+	entriesByBucket    map[openAICodexTurnStateBucketKey]map[string]*OpenAICodexTurnStateRecord
+	accounts           map[int64]time.Time
+	accountPlans       map[int64]string
+	preferredByBucket  map[openAICodexTurnStateBucketKey]*OpenAICodexTurnStateRecord
+	invalidatedBuckets map[openAICodexTurnStateBucketKey]time.Time
+	scanSettings       *OpenAICodexTurnStateScanSettings
+	repo               OpenAICodexTurnStateStore
+	queue              chan *OpenAICodexTurnStateRecord
+	worker             sync.Once
+	dropped            atomic.Uint64
+	observed           atomic.Uint64
+	now                func() time.Time
 }
 
 func newOpenAICodexTurnStatePool() *openAICodexTurnStatePool {
 	return &openAICodexTurnStatePool{
-		entries:           make(map[string]*OpenAICodexTurnStateRecord),
-		entriesByBucket:   make(map[openAICodexTurnStateBucketKey]map[string]*OpenAICodexTurnStateRecord),
-		accounts:          make(map[int64]time.Time),
-		accountPlans:      make(map[int64]string),
-		preferredByBucket: make(map[openAICodexTurnStateBucketKey]*OpenAICodexTurnStateRecord),
-		scanSettings:      defaultOpenAICodexTurnStateScanSettings(),
-		queue:             make(chan *OpenAICodexTurnStateRecord, openAICodexTurnStatePersistQueue),
-		now:               time.Now,
+		entries:            make(map[string]*OpenAICodexTurnStateRecord),
+		entriesByBucket:    make(map[openAICodexTurnStateBucketKey]map[string]*OpenAICodexTurnStateRecord),
+		accounts:           make(map[int64]time.Time),
+		accountPlans:       make(map[int64]string),
+		preferredByBucket:  make(map[openAICodexTurnStateBucketKey]*OpenAICodexTurnStateRecord),
+		invalidatedBuckets: make(map[openAICodexTurnStateBucketKey]time.Time),
+		scanSettings:       defaultOpenAICodexTurnStateScanSettings(),
+		queue:              make(chan *OpenAICodexTurnStateRecord, openAICodexTurnStatePersistQueue),
+		now:                time.Now,
 	}
 }
 
@@ -232,9 +236,6 @@ func (p *openAICodexTurnStatePool) refreshBucket(ctx context.Context, accountID 
 	if !supported {
 		return nil
 	}
-	if len(targetLengths) == 0 {
-		return fmt.Errorf("no configured Codex turn-state lengths for account/model bucket")
-	}
 	record, err := repo.LoadPreferredOpenAICodexTurnState(ctx, key.accountID, key.model, targetLengths, p.now())
 	if err != nil {
 		return fmt.Errorf("load persisted Codex turn-state bucket: %w", err)
@@ -313,6 +314,7 @@ func (p *openAICodexTurnStatePool) observeDurably(ctx context.Context, value str
 		record.SourceProxyURL = strings.TrimSpace(ticket[0].ProxyURL)
 		record.SourceExitIP = strings.TrimSpace(ticket[0].ExitIP)
 		record.RouteIPv6 = strings.TrimSpace(ticket[0].RouteIPv6)
+		record.RouteCookie = normalizeOpenAICodexAffinityCookieHeader(ticket[0].RouteCookie)
 		if routeExpiry := ticket[0].ExpiresAt; !routeExpiry.IsZero() && routeExpiry.Before(record.ExpiresAt) {
 			record.ExpiresAt = routeExpiry
 			record.Active = routeExpiry.After(p.now())
@@ -689,7 +691,16 @@ func (p *openAICodexTurnStatePool) ranksBeforeLocked(left, right *OpenAICodexTur
 			key.accountID = *left.SourceAccountID
 		}
 		lengths := p.targetLengthsForBucketLocked(key)
-		return slices.Index(lengths, left.ValueLength) < slices.Index(lengths, right.ValueLength)
+		leftRank, rightRank := slices.Index(lengths, left.ValueLength), slices.Index(lengths, right.ValueLength)
+		if leftRank < 0 {
+			leftRank = len(lengths)
+		}
+		if rightRank < 0 {
+			rightRank = len(lengths)
+		}
+		if leftRank != rightRank {
+			return leftRank < rightRank
+		}
 	}
 	if !left.ExpiresAt.Equal(right.ExpiresAt) {
 		return left.ExpiresAt.After(right.ExpiresAt)
@@ -764,7 +775,8 @@ func parseOpenAICodexTurnStateIssuedAt(value string) (time.Time, bool) {
 }
 
 func (p *openAICodexTurnStatePool) isReusableRecordLocked(record *OpenAICodexTurnStateRecord, key openAICodexTurnStateBucketKey, now time.Time) bool {
-	if record == nil || record.StateValue == "" || !slices.Contains(p.targetLengthsForBucketLocked(key), record.ValueLength) {
+	if record == nil || record.StateValue == "" || record.ValueLength != len(record.StateValue) ||
+		!p.scanSettings.acceptsLength(record.ValueLength) {
 		return false
 	}
 	if record.SourceAccountID == nil || *record.SourceAccountID != key.accountID || normalizeOpenAICodexTurnStateModel(record.SourceModel) != key.model {
@@ -777,6 +789,9 @@ func (p *openAICodexTurnStatePool) isReusableRecordLocked(record *OpenAICodexTur
 	if normalizeOpenAICodexTurnStateTransport(record.SourceTransport) != "scanner" || strings.TrimSpace(record.SourceSessionID) == "" {
 		return false
 	}
+	if invalidatedAt, invalidated := p.invalidatedBuckets[key]; invalidated && !record.LastSeenAt.After(invalidatedAt) {
+		return false
+	}
 	if p.scanSettings.IsRouteBindingRequired() && normalizeOpenAICodexRouteIPv6(record.RouteIPv6) == "" && strings.TrimSpace(record.SourceProxyURL) == "" {
 		return false
 	}
@@ -784,6 +799,34 @@ func (p *openAICodexTurnStatePool) isReusableRecordLocked(record *OpenAICodexTur
 		return false
 	}
 	return record.ExpiresAt.After(now)
+}
+
+// invalidateRouteOutcome rejects only the route ticket actually used by a
+// downgraded request. A late response from an older ticket cannot invalidate a
+// replacement acquired while that request was still in flight.
+func (p *openAICodexTurnStatePool) invalidateRouteOutcome(accountID int64, model, stateHash string) bool {
+	key, ok := newOpenAICodexTurnStateBucketKey(accountID, model)
+	if p == nil || !ok {
+		return false
+	}
+	stateHash = strings.TrimSpace(stateHash)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	current := p.preferredByBucket[key]
+	if stateHash != "" {
+		if current == nil || current.StateHash != stateHash {
+			return false
+		}
+	} else if current != nil {
+		return false
+	}
+	now := p.now()
+	if previous := p.invalidatedBuckets[key]; !previous.IsZero() && now.Sub(previous) < time.Second {
+		return false
+	}
+	p.invalidatedBuckets[key] = now
+	delete(p.preferredByBucket, key)
+	return true
 }
 
 func openAICodexTurnStateEntryKey(record *OpenAICodexTurnStateRecord) string {
