@@ -33,12 +33,15 @@ const (
 	openAICodexTurnStateScanJobTimeout    = 75 * time.Second
 	openAICodexTurnStateScanSweepInterval = 30 * time.Second
 	openAICodexTurnStateScanRefreshBefore = time.Minute
-	openAICodexTurnStateScanRetryMax      = 5 * time.Minute
-	openAICodexTurnStateSafetyRetryDelay  = 15 * time.Minute
-	openAICodexDynamicRouteTTL            = 4 * time.Minute
-	openAICodexDynamicRouteRefreshBefore  = time.Minute
-	openAICodexTurnStateActiveUsageWindow = time.Hour
-	openAICodexTurnStateScanMaxErrorBytes = 240
+	// Route affinity has been observed to decay before the signed state expires.
+	// Renew proactively without shortening the lifetime of the current ticket.
+	openAICodexTurnStateProactiveRefreshAfter = 90 * time.Second
+	openAICodexTurnStateScanRetryMax          = 5 * time.Minute
+	openAICodexTurnStateSafetyRetryDelay      = 30 * time.Second
+	openAICodexDynamicRouteTTL                = 4 * time.Minute
+	openAICodexDynamicRouteRefreshBefore      = time.Minute
+	openAICodexTurnStateActiveUsageWindow     = time.Hour
+	openAICodexTurnStateScanMaxErrorBytes     = 240
 )
 
 type openAICodexTurnStateScanJob struct {
@@ -279,10 +282,20 @@ func (s *openAICodexTurnStateScanner) stateNeedsRefresh(accountID int64, model s
 		return true
 	}
 	pool := s.gateway.getOpenAICodexTurnStatePool()
-	if record, ok := pool.preferredRecordForBucket(accountID, model); ok && isOpenAICodexDynamicRouteRecord(record) {
+	record, ok := pool.preferredRecordForBucket(accountID, model)
+	if ok && isOpenAICodexDynamicRouteRecord(record) {
 		return !record.ExpiresAt.After(now.Add(openAICodexDynamicRouteRefreshBefore))
 	}
-	return !pool.hasReusableStateBeyond(accountID, model, now.Add(openAICodexTurnStateScanRefreshBefore))
+	if !pool.hasReusableStateBeyond(accountID, model, now.Add(openAICodexTurnStateScanRefreshBefore)) {
+		return true
+	}
+	// A healthier fallback already covers the bucket when the preferred
+	// higher-ranked ticket is near expiry. Let selection roll over naturally
+	// instead of probing solely to preserve the older rank.
+	if ok && !record.ExpiresAt.After(now.Add(openAICodexTurnStateScanRefreshBefore)) {
+		return false
+	}
+	return ok && !record.IssuedAt.IsZero() && now.After(record.IssuedAt.Add(openAICodexTurnStateProactiveRefreshAfter))
 }
 
 func isOpenAICodexDynamicRouteRecord(record *OpenAICodexTurnStateRecord) bool {
@@ -593,7 +606,7 @@ func (s *openAICodexTurnStateScanner) runJob(ctx context.Context, job openAICode
 		scan.LastError = ""
 		// Receiving the same state again does not renew its issuance timestamp.
 		issuedAt, _ := parseOpenAICodexTurnStateIssuedAt(result.stateValue)
-		next := issuedAt.Add(openAICodexTurnStateTTL - openAICodexTurnStateScanRefreshBefore)
+		next := issuedAt.Add(openAICodexTurnStateProactiveRefreshAfter)
 		if proxy != nil && proxy.Source == "dynamic" {
 			next = doneAt.Add(openAICodexDynamicRouteTTL - openAICodexDynamicRouteRefreshBefore)
 		}

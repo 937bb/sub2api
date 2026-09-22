@@ -173,7 +173,7 @@ func TestOpenAICodexTurnStateRefreshRejectsOldResultThenAcceptsFreshResult(t *te
 			require.NotNil(t, ready.LastSuccessAt)
 			require.True(t, ready.LastSuccessAt.After(lastSuccess))
 			require.NotNil(t, ready.NextAttemptAt)
-			require.Equal(t, freshIssuedAt.Add(openAICodexTurnStateTTL-openAICodexTurnStateScanRefreshBefore), ready.NextAttemptAt.UTC())
+			require.Equal(t, freshIssuedAt.Add(openAICodexTurnStateProactiveRefreshAfter), ready.NextAttemptAt.UTC())
 			selected, ok := pool.preferredForBucket(accountID, model)
 			require.True(t, ok)
 			require.Equal(t, freshState, selected)
@@ -269,6 +269,23 @@ func TestOpenAICodexTurnStateRefreshKeepsHealthy292FallbackUntilRefreshWindow(t 
 	require.Empty(t, scanner.queue)
 	scan := repo.scans[openAICodexTurnStateBucketKey{accountID: accountID, model: model}]
 	require.Nil(t, scan)
+}
+
+func TestOpenAICodexTurnStateProactiveRefreshKeepsCurrentTicketReusable(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	const model = "gpt-6-astra"
+	accountID := int64(41)
+	gateway := ticketTestService(t, config.OpenAICodexTicketConfig{Models: []string{model}}, nil)
+	pool := gateway.getOpenAICodexTurnStatePool()
+	pool.now = func() time.Time { return now }
+	state := testOpenAICodexTurnState(openAICodexTurnStateLength332, now.Add(-91*time.Second), 'p')
+	pool.observe(state, &accountID, "session", model, "scanner")
+	scanner := &openAICodexTurnStateScanner{gateway: gateway}
+
+	require.True(t, scanner.stateNeedsRefresh(accountID, model, now))
+	selected, reusable := pool.preferredForBucket(accountID, model)
+	require.True(t, reusable)
+	require.Equal(t, state, selected)
 }
 
 func TestOpenAICodexTurnStateRefreshPrefersBoundCookieRouteBeforeFallback(t *testing.T) {

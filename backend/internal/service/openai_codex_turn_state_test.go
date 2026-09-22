@@ -539,7 +539,7 @@ func TestOpenAICodexTurnStateRouteMismatchInvalidatesOnlyUsedTicketAndForcesScan
 	require.False(t, reusable)
 }
 
-func TestOpenAICodexTurnStateSafetyBufferingKeepsTicketAndDoesNotScan(t *testing.T) {
+func TestOpenAICodexTurnStateSafetyBufferingInvalidatesUsedTicketAndForcesScan(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	accountID := int64(42)
 	const model = "gpt-6-astra"
@@ -568,10 +568,9 @@ func TestOpenAICodexTurnStateSafetyBufferingKeepsTicketAndDoesNotScan(t *testing
 	}
 	svc.handleOpenAICodexTurnStateRouteOutcome(c, result)
 
-	require.False(t, queued)
-	preferred, reusable := pool.preferredForBucket(accountID, model)
-	require.True(t, reusable)
-	require.Equal(t, state, preferred)
+	require.True(t, queued)
+	_, reusable := pool.preferredForBucket(accountID, model)
+	require.False(t, reusable)
 }
 
 func TestOpenAICodexTurnStateLateMismatchCannotInvalidateReplacement(t *testing.T) {

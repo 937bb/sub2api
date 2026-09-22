@@ -355,15 +355,8 @@ func (s *OpenAIGatewayService) handleOpenAICodexTurnStateRouteOutcome(c *gin.Con
 		openAICodexTurnStateModelsMatch(outcome.model, actualModel) {
 		return
 	}
-	if fasterModel := normalizeOpenAICodexTurnStateModel(result.UpstreamHeaders.Get("x-codex-safety-buffering-faster-model")); fasterModel != "" && openAICodexTurnStateModelsMatch(fasterModel, actualModel) {
-		logger.L().Debug("openai_codex_state_route_safety_buffered",
-			zap.Int64("account_id", outcome.accountID),
-			zap.String("requested_model", outcome.model),
-			zap.String("response_model", actualModel),
-			zap.String("state_hash", outcome.stateHash),
-		)
-		return
-	}
+	fasterModel := normalizeOpenAICodexTurnStateModel(result.UpstreamHeaders.Get("x-codex-safety-buffering-faster-model"))
+	safetyBuffered := fasterModel != "" && openAICodexTurnStateModelsMatch(fasterModel, actualModel)
 	if !s.getOpenAICodexTurnStatePool().invalidateRouteOutcome(outcome.accountID, outcome.model, outcome.stateHash) {
 		return
 	}
@@ -372,6 +365,7 @@ func (s *OpenAIGatewayService) handleOpenAICodexTurnStateRouteOutcome(c *gin.Con
 		zap.String("requested_model", outcome.model),
 		zap.String("response_model", actualModel),
 		zap.String("state_hash", outcome.stateHash),
+		zap.Bool("safety_buffered", safetyBuffered),
 	)
 	if s.openaiCodexTurnStateScanEnqueuer != nil {
 		s.openaiCodexTurnStateScanEnqueuer(outcome.accountID, outcome.model, true)
