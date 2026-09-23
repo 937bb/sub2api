@@ -70,6 +70,10 @@ type usageLogBestEffortWriter interface {
 	CreateBestEffort(ctx context.Context, log *UsageLog) error
 }
 
+type authorizedSubscriptionUsageRepository interface {
+	IncrementUsageForAuthorizedDailyWindow(ctx context.Context, id int64, costUSD float64, authorizedDailyWindowStart *time.Time) (bool, error)
+}
+
 // postUsageBillingParams 统一扣费所需的参数
 type postUsageBillingParams struct {
 	Cost                  *CostBreakdown
@@ -142,7 +146,24 @@ func postUsageBilling(ctx context.Context, p *postUsageBillingParams, deps *bill
 		// Subscription usage tracked by ActualCost so group rate multiplier
 		// consumes the quota at the expected speed.
 		if cost.ActualCost > 0 {
-			if err := deps.userSubRepo.IncrementUsage(billingCtx, p.Subscription.ID, cost.ActualCost); err != nil {
+			var err error
+			if guardedRepo, ok := deps.userSubRepo.(authorizedSubscriptionUsageRepository); ok {
+				var dailyApplied bool
+				dailyApplied, err = guardedRepo.IncrementUsageForAuthorizedDailyWindow(
+					billingCtx,
+					p.Subscription.ID,
+					cost.ActualCost,
+					p.Subscription.DailyWindowStart,
+				)
+				if err == nil && p.Subscription.DailyWindowStart != nil && !dailyApplied && p.User != nil && deps.billingCacheService != nil {
+					if invalidateErr := deps.billingCacheService.InvalidateSubscription(billingCtx, p.User.ID, p.Subscription.GroupID); invalidateErr != nil {
+						slog.Warn("invalidate subscription cache after stale daily settlement failed", "subscription_id", p.Subscription.ID, "error", invalidateErr)
+					}
+				}
+			} else {
+				err = deps.userSubRepo.IncrementUsage(billingCtx, p.Subscription.ID, cost.ActualCost)
+			}
+			if err != nil {
 				slog.Error("increment subscription usage failed", "subscription_id", p.Subscription.ID, "error", err)
 			}
 		}
@@ -312,6 +333,7 @@ func buildUsageBillingCommand(requestID string, usageLog *UsageLog, p *postUsage
 	// on "> 0" still correctly skip free subscriptions (RateMultiplier == 0).
 	if p.IsSubscriptionBill && p.Subscription != nil && p.Cost.TotalCost > 0 {
 		cmd.SubscriptionID = &p.Subscription.ID
+		cmd.AuthorizedDailyWindowStart = cloneTimePtr(p.Subscription.DailyWindowStart)
 		cmd.SubscriptionCost = p.Cost.ActualCost
 	} else if p.Cost.ActualCost > 0 {
 		cmd.BalanceCost = p.Cost.ActualCost
@@ -371,9 +393,7 @@ func finalizePostUsageBilling(ctx context.Context, p *postUsageBillingParams, de
 	}
 
 	if p.IsSubscriptionBill {
-		if p.Cost.ActualCost > 0 && p.User != nil && p.APIKey != nil && p.APIKey.GroupID != nil {
-			deps.billingCacheService.QueueUpdateSubscriptionUsage(p.User.ID, *p.APIKey.GroupID, p.Cost.ActualCost)
-		}
+		syncSubscriptionCacheAfterBilling(ctx, p, deps, result)
 	} else if p.Cost.ActualCost > 0 && p.User != nil {
 		syncBalanceCacheAfterDeduction(ctx, p, deps, result)
 	}
@@ -422,6 +442,19 @@ func finalizePostUsageBilling(ctx context.Context, p *postUsageBillingParams, de
 	// no dependency on the request context or upstream connection.
 	go notifyBalanceLow(p, deps, result)
 	go notifyAccountQuota(p, deps, result)
+}
+
+func syncSubscriptionCacheAfterBilling(ctx context.Context, p *postUsageBillingParams, deps *billingDeps, result *UsageBillingApplyResult) {
+	if p == nil || p.Cost == nil || p.Cost.ActualCost <= 0 || p.User == nil || p.APIKey == nil || p.APIKey.GroupID == nil || p.Subscription == nil || deps == nil || deps.billingCacheService == nil {
+		return
+	}
+	if result != nil && result.SubscriptionDailyUsageGuarded && !result.SubscriptionDailyUsageApplied {
+		if err := deps.billingCacheService.InvalidateSubscription(ctx, p.User.ID, *p.APIKey.GroupID); err != nil {
+			slog.Warn("invalidate subscription cache after stale daily settlement failed", "subscription_id", p.Subscription.ID, "error", err)
+		}
+		return
+	}
+	deps.billingCacheService.QueueUpdateSubscriptionUsage(p.User.ID, *p.APIKey.GroupID, p.Cost.ActualCost)
 }
 
 func syncBalanceCacheAfterDeduction(ctx context.Context, p *postUsageBillingParams, deps *billingDeps, result *UsageBillingApplyResult) {

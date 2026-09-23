@@ -1,7 +1,12 @@
 package handler
 
 import (
+	"context"
+	"log/slog"
+	"strconv"
+
 	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -185,4 +190,82 @@ func (h *SubscriptionHandler) GetSummary(c *gin.Context) {
 	}
 
 	response.Success(c, summary)
+}
+
+// GetDailyQuotaAdvancePreview returns the authoritative values shown before a
+// user confirms the 24-hour validity exchange.
+// GET /api/v1/subscriptions/:id/advance-daily-quota-preview
+func (h *SubscriptionHandler) GetDailyQuotaAdvancePreview(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not found in context")
+		return
+	}
+
+	subscriptionID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || subscriptionID <= 0 {
+		response.BadRequest(c, "Invalid subscription ID")
+		return
+	}
+
+	preview, err := h.subscriptionService.GetDailyQuotaAdvancePreview(c.Request.Context(), subject.UserID, subscriptionID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, preview)
+}
+
+// AdvanceDailyQuota consumes 24 hours of validity to make the next daily quota
+// available immediately.
+// POST /api/v1/subscriptions/:id/advance-daily-quota
+func (h *SubscriptionHandler) AdvanceDailyQuota(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not found in context")
+		return
+	}
+
+	subscriptionID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || subscriptionID <= 0 {
+		response.BadRequest(c, "Invalid subscription ID")
+		return
+	}
+
+	payload := struct {
+		SubscriptionID int64 `json:"subscription_id"`
+	}{SubscriptionID: subscriptionID}
+	idempotencyKey := c.GetHeader("Idempotency-Key")
+	result, err := executeUserIdempotent(c, "user.subscriptions.advance_daily_quota", payload, service.DefaultWriteIdempotencyTTL(), func(ctx context.Context) (any, error) {
+		sub, execErr := h.subscriptionService.AdvanceDailyQuota(ctx, subject.UserID, subscriptionID, idempotencyKey)
+		if execErr != nil {
+			return nil, execErr
+		}
+		return dto.UserSubscriptionFromService(sub), nil
+	})
+	if err != nil {
+		reason := infraerrors.Reason(err)
+		if reason == infraerrors.Reason(service.ErrIdempotencyInProgress) || reason == infraerrors.Reason(service.ErrIdempotencyStoreUnavail) {
+			recovered, recoverErr := h.subscriptionService.RecoverDailyQuotaAdvance(c.Request.Context(), subject.UserID, subscriptionID, idempotencyKey)
+			if recoverErr != nil {
+				slog.Warn("daily_quota_advance_recovery_failed", "user_id", subject.UserID, "subscription_id", subscriptionID, "reason", reason, "error", recoverErr)
+			} else if recovered != nil {
+				c.Header("X-Idempotency-Recovered", "true")
+				response.Success(c, dto.UserSubscriptionFromService(recovered))
+				return
+			}
+		}
+		if reason == infraerrors.Reason(service.ErrIdempotencyStoreUnavail) {
+			service.RecordIdempotencyStoreUnavailable(c.FullPath(), "user.subscriptions.advance_daily_quota", "handler_fail_close")
+		}
+		if retryAfter := service.RetryAfterSecondsFromError(err); retryAfter > 0 {
+			c.Header("Retry-After", strconv.Itoa(retryAfter))
+		}
+		response.ErrorFrom(c, err)
+		return
+	}
+	if result != nil && result.Replayed {
+		c.Header("X-Idempotency-Replayed", "true")
+	}
+	response.Success(c, result.Data)
 }

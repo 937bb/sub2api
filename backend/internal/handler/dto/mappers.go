@@ -894,6 +894,9 @@ func userSubscriptionFromServiceBase(sub *service.UserSubscription) UserSubscrip
 		DailyWindowStart:   sub.DailyWindowStart,
 		WeeklyWindowStart:  sub.WeeklyWindowStart,
 		MonthlyWindowStart: sub.MonthlyWindowStart,
+		DailyResetsAt:      subscriptionResetBeforeExpiry(sub.DailyResetTime(), sub.ExpiresAt),
+		WeeklyResetsAt:     subscriptionResetBeforeExpiry(sub.WeeklyResetTime(), sub.ExpiresAt),
+		MonthlyResetsAt:    subscriptionResetBeforeExpiry(sub.MonthlyResetTime(), sub.ExpiresAt),
 		DailyUsageUSD:      sub.DailyUsageUSD,
 		WeeklyUsageUSD:     sub.WeeklyUsageUSD,
 		MonthlyUsageUSD:    sub.MonthlyUsageUSD,
@@ -903,6 +906,14 @@ func userSubscriptionFromServiceBase(sub *service.UserSubscription) UserSubscrip
 		User:               UserFromServiceShallow(sub.User),
 		Group:              GroupFromServiceShallow(sub.Group),
 	}
+}
+
+func subscriptionResetBeforeExpiry(resetAt *time.Time, expiresAt time.Time) *time.Time {
+	if resetAt == nil || !resetAt.Before(expiresAt) {
+		return nil
+	}
+	reset := *resetAt
+	return &reset
 }
 
 func BulkAssignResultFromService(r *service.BulkAssignResult) *BulkAssignResult {

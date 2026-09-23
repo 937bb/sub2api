@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"testing"
 	"time"
@@ -9,7 +10,6 @@ import (
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
 	"github.com/dgraph-io/ristretto"
 	"github.com/stretchr/testify/require"
 )
@@ -183,17 +183,20 @@ func (userSubRepoNoop) BatchUpdateExpiredStatus(context.Context) (int64, error) 
 type subscriptionUserSubRepoStub struct {
 	userSubRepoNoop
 
-	nextID      int64
-	byID        map[int64]*UserSubscription
-	byUserGroup map[string]*UserSubscription
-	createCalls int
+	nextID        int64
+	byID          map[int64]*UserSubscription
+	byUserGroup   map[string]*UserSubscription
+	dailyAdvances map[string]*DailyQuotaAdvanceLedger
+	createCalls   int
+	updateCalls   int
 }
 
 func newSubscriptionUserSubRepoStub() *subscriptionUserSubRepoStub {
 	return &subscriptionUserSubRepoStub{
-		nextID:      1,
-		byID:        make(map[int64]*UserSubscription),
-		byUserGroup: make(map[string]*UserSubscription),
+		nextID:        1,
+		byID:          make(map[int64]*UserSubscription),
+		byUserGroup:   make(map[string]*UserSubscription),
+		dailyAdvances: make(map[string]*DailyQuotaAdvanceLedger),
 	}
 }
 
@@ -265,6 +268,7 @@ func (s *subscriptionUserSubRepoStub) Update(_ context.Context, sub *UserSubscri
 	if existing == nil {
 		return ErrSubscriptionNotFound
 	}
+	s.updateCalls++
 	oldKey := s.key(existing.UserID, existing.GroupID)
 	cp := *sub
 	s.byID[cp.ID] = &cp
@@ -272,6 +276,38 @@ func (s *subscriptionUserSubRepoStub) Update(_ context.Context, sub *UserSubscri
 		delete(s.byUserGroup, oldKey)
 	}
 	s.byUserGroup[s.key(cp.UserID, cp.GroupID)] = &cp
+	return nil
+}
+
+func (s *subscriptionUserSubRepoStub) dailyAdvanceKey(userID int64, keyHash string) string {
+	return strconvFormatInt(userID) + ":" + keyHash
+}
+
+func (s *subscriptionUserSubRepoStub) GetDailyQuotaAdvance(_ context.Context, userID int64, keyHash string) (*DailyQuotaAdvanceLedger, error) {
+	record := s.dailyAdvances[s.dailyAdvanceKey(userID, keyHash)]
+	if record == nil || record.ResponseSnapshot == "" {
+		return nil, nil
+	}
+	copyRecord := *record
+	return &copyRecord, nil
+}
+
+func (s *subscriptionUserSubRepoStub) ClaimDailyQuotaAdvance(_ context.Context, record *DailyQuotaAdvanceLedger) (bool, error) {
+	key := s.dailyAdvanceKey(record.UserID, record.IdempotencyKeyHash)
+	if _, exists := s.dailyAdvances[key]; exists {
+		return false, nil
+	}
+	copyRecord := *record
+	s.dailyAdvances[key] = &copyRecord
+	return true, nil
+}
+
+func (s *subscriptionUserSubRepoStub) CompleteDailyQuotaAdvance(_ context.Context, userID int64, keyHash, responseSnapshot string) error {
+	record := s.dailyAdvances[s.dailyAdvanceKey(userID, keyHash)]
+	if record == nil {
+		return errors.New("daily quota advance claim not found")
+	}
+	record.ResponseSnapshot = responseSnapshot
 	return nil
 }
 
@@ -303,6 +339,38 @@ func TestAssignSubscriptionReuseWhenSemanticsMatch(t *testing.T) {
 	require.Equal(t, 0, subRepo.createCalls, "reuse should not create new subscription")
 	require.Equal(t, start, sub.StartsAt)
 	require.Equal(t, start.AddDate(0, 0, 30), sub.ExpiresAt)
+}
+
+func TestAssignSubscriptionReuseWhenStrictDurationCrossesDST(t *testing.T) {
+	location, err := time.LoadLocation("America/Los_Angeles")
+	require.NoError(t, err)
+	start := time.Date(2026, time.March, 8, 0, 30, 0, 0, location)
+	groupRepo := &subscriptionGroupRepoStub{
+		group: &Group{ID: 1, SubscriptionType: SubscriptionTypeSubscription},
+	}
+	subRepo := newSubscriptionUserSubRepoStub()
+	subRepo.seed(&UserSubscription{
+		ID:        16,
+		UserID:    1006,
+		GroupID:   1,
+		StartsAt:  start,
+		ExpiresAt: addSubscriptionDays(start, 1),
+		Status:    SubscriptionStatusActive,
+		Notes:     "dst",
+	})
+
+	svc := NewSubscriptionService(groupRepo, subRepo, nil, nil, nil)
+	sub, err := svc.AssignSubscription(context.Background(), &AssignSubscriptionInput{
+		UserID:       1006,
+		GroupID:      1,
+		ValidityDays: 1,
+		Notes:        "dst",
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, int64(16), sub.ID)
+	require.Equal(t, 24*time.Hour, sub.ExpiresAt.Sub(sub.StartsAt))
+	require.Equal(t, 0, subRepo.createCalls)
 }
 
 func TestAssignSubscriptionDoesNotReactivateFutureSuspendedSubscription(t *testing.T) {
@@ -425,7 +493,7 @@ func TestAssignSubscriptionRenewsExpiredSemanticMatch(t *testing.T) {
 	require.False(t, sub.StartsAt.Before(before))
 	require.False(t, sub.StartsAt.After(after))
 	require.Equal(t, sub.StartsAt.AddDate(0, 0, 30), sub.ExpiresAt)
-	require.Equal(t, timezone.StartOfDay(sub.StartsAt), *sub.DailyWindowStart, "续期后日窗口应锚定当天 0 点")
+	require.Equal(t, sub.StartsAt, *sub.DailyWindowStart, "续期后日窗口应从续期时刻开始")
 	require.Equal(t, sub.StartsAt, *sub.WeeklyWindowStart)
 	require.Equal(t, sub.StartsAt, *sub.MonthlyWindowStart)
 	require.Zero(t, sub.DailyUsageUSD)

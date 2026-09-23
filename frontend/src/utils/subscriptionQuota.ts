@@ -27,6 +27,66 @@ export function isOneTimeDailyQuota(
   return expiresAt <= startsAt + ONE_DAY_MS
 }
 
+export function advancedDailyQuotaExpiry(
+  subscription: Pick<UserSubscription, 'expires_at'>
+): Date | null {
+  if (!subscription.expires_at) return null
+  const expiresAt = new Date(subscription.expires_at).getTime()
+  if (!Number.isFinite(expiresAt)) return null
+  return new Date(expiresAt - ONE_DAY_MS)
+}
+
+export function canPreviewDailyQuotaAdvance(
+  subscription: UserSubscription,
+  now: Date = new Date()
+): boolean {
+  const dailyLimit = subscription.group?.daily_limit_usd
+  const nowTime = now.getTime()
+  const expiresAt = subscription.expires_at
+    ? new Date(subscription.expires_at).getTime()
+    : Number.NaN
+  const dailyResetAt = subscription.daily_resets_at
+    ? new Date(subscription.daily_resets_at).getTime()
+    : subscription.daily_window_start
+      ? new Date(subscription.daily_window_start).getTime() + ONE_DAY_MS
+      : Number.NaN
+  if (
+    subscription.status !== 'active' ||
+    !Number.isFinite(nowTime) ||
+    !Number.isFinite(expiresAt) ||
+    expiresAt <= nowTime + ONE_DAY_MS ||
+    !dailyLimit ||
+    dailyLimit <= 0 ||
+    isOneTimeDailyQuota(subscription) ||
+    (Number.isFinite(dailyResetAt) && dailyResetAt <= nowTime) ||
+    subscription.daily_usage_usd < dailyLimit
+  ) {
+    return false
+  }
+
+  return true
+}
+
+export function canAdvanceDailyQuota(
+  subscription: UserSubscription,
+  now: Date = new Date()
+): boolean {
+  if (!canPreviewDailyQuotaAdvance(subscription, now)) return false
+
+  const dailyLimit = subscription.group!.daily_limit_usd!
+
+  const weeklyLimit = subscription.group?.weekly_limit_usd
+  if (weeklyLimit && weeklyLimit > 0 && weeklyLimit - subscription.weekly_usage_usd < dailyLimit) {
+    return false
+  }
+  const monthlyLimit = subscription.group?.monthly_limit_usd
+  return !(
+    monthlyLimit &&
+    monthlyLimit > 0 &&
+    monthlyLimit - subscription.monthly_usage_usd < dailyLimit
+  )
+}
+
 export function getRemainingDurationParts(
   targetAt: Date | string,
   now: Date = new Date()
@@ -39,7 +99,7 @@ export function getRemainingDurationParts(
   const diffMs = targetTime - nowTime
   if (diffMs <= 0) return null
 
-  const totalMinutes = Math.floor(diffMs / (1000 * 60))
+  const totalMinutes = Math.max(1, Math.ceil(diffMs / (1000 * 60)))
   const days = Math.floor(totalMinutes / (24 * 60))
   const hours = Math.floor((totalMinutes % (24 * 60)) / 60)
   const minutes = totalMinutes % 60

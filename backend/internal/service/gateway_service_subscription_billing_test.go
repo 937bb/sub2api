@@ -4,6 +4,7 @@ package service
 
 import (
 	"testing"
+	"time"
 )
 
 // TestBuildUsageBillingCommand_SubscriptionAppliesRateMultiplier locks in the fix
@@ -81,5 +82,31 @@ func TestBuildUsageBillingCommand_SubscriptionAppliesRateMultiplier(t *testing.T
 				t.Errorf("BalanceCost = %v, want %v", cmd.BalanceCost, tt.wantBalance)
 			}
 		})
+	}
+}
+
+func TestBuildUsageBillingCommand_CapturesAuthorizedDailyWindow(t *testing.T) {
+	groupID := int64(7)
+	window := time.Date(2026, 9, 23, 10, 0, 0, 0, time.UTC)
+	p := &postUsageBillingParams{
+		Cost:               &CostBreakdown{TotalCost: 1, ActualCost: 1},
+		User:               &User{ID: 1},
+		APIKey:             &APIKey{ID: 2, GroupID: &groupID},
+		Account:            &Account{ID: 3},
+		Subscription:       &UserSubscription{ID: 42, DailyWindowStart: &window},
+		IsSubscriptionBill: true,
+	}
+
+	cmd := buildUsageBillingCommand("req-window", nil, p)
+
+	if cmd == nil || cmd.AuthorizedDailyWindowStart == nil {
+		t.Fatal("authorized daily window was not captured")
+	}
+	if !cmd.AuthorizedDailyWindowStart.Equal(window) {
+		t.Fatalf("AuthorizedDailyWindowStart = %v, want %v", *cmd.AuthorizedDailyWindowStart, window)
+	}
+	window = window.Add(time.Hour)
+	if cmd.AuthorizedDailyWindowStart.Equal(window) {
+		t.Fatal("billing command retained the mutable subscription pointer")
 	}
 }

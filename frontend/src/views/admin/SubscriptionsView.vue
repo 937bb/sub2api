@@ -873,6 +873,8 @@ import { GROUP_PLATFORM_OPTIONS } from '@/constants/platforms'
 
 const { t } = useI18n()
 const appStore = useAppStore()
+const now = ref(new Date())
+let clockTimer: ReturnType<typeof setInterval> | undefined
 
 interface GroupOption {
   value: number
@@ -1407,7 +1409,7 @@ const handleExtendSubscription = async () => {
   if (extendingSubscription.value.expires_at) {
     const expiresAt = new Date(extendingSubscription.value.expires_at)
     const newExpiresAt = new Date(expiresAt.getTime() + extendForm.days * 24 * 60 * 60 * 1000)
-    if (newExpiresAt <= new Date()) {
+    if (newExpiresAt <= now.value) {
       appStore.showError(t('admin.subscriptions.adjustWouldExpire'))
       return
     }
@@ -1494,15 +1496,15 @@ const confirmResetQuota = async () => {
 
 // Helper functions
 const getDaysRemaining = (expiresAt: string): number | null => {
-  const now = new Date()
+  const currentNow = now.value
   const expires = new Date(expiresAt)
-  const diff = expires.getTime() - now.getTime()
+  const diff = expires.getTime() - currentNow.getTime()
   if (diff < 0) return null
   return Math.ceil(diff / (1000 * 60 * 60 * 24))
 }
 
 const formatRemainingExpiry = (expiresAt: string): string | null => {
-  const duration = getRemainingExpiryDuration(expiresAt)
+  const duration = getRemainingExpiryDuration(expiresAt, now.value)
   if (!duration) return null
   if (duration.unit === 'days') {
     return t('admin.subscriptions.daysRemaining', { days: duration.days })
@@ -1563,7 +1565,7 @@ const formatQuotaEndDuration = (parts: RemainingDurationParts): string => {
 
 const formatDailyUsageWindow = (subscription: UserSubscription): string => {
   if (isOneTimeDailyQuota(subscription) && subscription.expires_at) {
-    const parts = getRemainingDurationParts(subscription.expires_at)
+    const parts = getRemainingDurationParts(subscription.expires_at, now.value)
     return parts ? formatQuotaEndDuration(parts) : t('admin.subscriptions.windowNotActive')
   }
 
@@ -1575,8 +1577,6 @@ const formatResetTime = (windowStart: string | null, period: 'daily' | 'weekly' 
   if (!windowStart) return t('admin.subscriptions.windowNotActive')
 
   const start = new Date(windowStart)
-  const now = new Date()
-
   // Calculate reset time based on period
   let resetTime: Date
   switch (period) {
@@ -1591,7 +1591,7 @@ const formatResetTime = (windowStart: string | null, period: 'daily' | 'weekly' 
       break
   }
 
-  const parts = getRemainingDurationParts(resetTime, now)
+  const parts = getRemainingDurationParts(resetTime, now.value)
 
   return parts ? formatResetDuration(parts) : t('admin.subscriptions.windowNotActive')
 }
@@ -1607,6 +1607,9 @@ const handleClickOutside = (event: MouseEvent) => {
 }
 
 onMounted(() => {
+  clockTimer = setInterval(() => {
+    now.value = new Date()
+  }, 1000)
   loadUserColumnMode()
   loadSavedColumns()
   loadSubscriptions()
@@ -1615,6 +1618,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  if (clockTimer) clearInterval(clockTimer)
   document.removeEventListener('click', handleClickOutside)
   if (filterUserSearchTimeout) {
     clearTimeout(filterUserSearchTimeout)

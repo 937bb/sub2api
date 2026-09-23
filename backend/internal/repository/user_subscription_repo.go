@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
@@ -13,6 +14,107 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
+
+func (r *userSubscriptionRepository) GetDailyQuotaAdvance(ctx context.Context, userID int64, keyHash string) (*service.DailyQuotaAdvanceLedger, error) {
+	const query = `
+		SELECT user_id, subscription_id, idempotency_key_hash, response_snapshot::text, expires_at
+		FROM subscription_daily_quota_advances
+		WHERE user_id = $1
+			AND idempotency_key_hash = $2
+			AND expires_at > CURRENT_TIMESTAMP
+			AND response_snapshot IS NOT NULL
+	`
+	client := clientFromContext(ctx, r.client)
+	rows, err := client.QueryContext(ctx, query, userID, keyHash)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+		return nil, nil
+	}
+	record := &service.DailyQuotaAdvanceLedger{}
+	if err := rows.Scan(
+		&record.UserID,
+		&record.SubscriptionID,
+		&record.IdempotencyKeyHash,
+		&record.ResponseSnapshot,
+		&record.ExpiresAt,
+	); err != nil {
+		return nil, err
+	}
+	return record, nil
+}
+
+func (r *userSubscriptionRepository) ClaimDailyQuotaAdvance(ctx context.Context, record *service.DailyQuotaAdvanceLedger) (bool, error) {
+	if record == nil {
+		return false, service.ErrSubscriptionNilInput
+	}
+	const query = `
+		INSERT INTO subscription_daily_quota_advances (
+			user_id, subscription_id, idempotency_key_hash, expires_at
+		)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (user_id, idempotency_key_hash) DO UPDATE
+		SET subscription_id = EXCLUDED.subscription_id,
+			response_snapshot = NULL,
+			expires_at = EXCLUDED.expires_at,
+			updated_at = CURRENT_TIMESTAMP
+		WHERE subscription_daily_quota_advances.expires_at <= CURRENT_TIMESTAMP
+		RETURNING id
+	`
+	client := clientFromContext(ctx, r.client)
+	rows, err := client.QueryContext(ctx, query,
+		record.UserID,
+		record.SubscriptionID,
+		record.IdempotencyKeyHash,
+		record.ExpiresAt,
+	)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return false, err
+		}
+		return false, nil
+	}
+	var id int64
+	if err := rows.Scan(&id); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (r *userSubscriptionRepository) CompleteDailyQuotaAdvance(ctx context.Context, userID int64, keyHash, responseSnapshot string) error {
+	const query = `
+		UPDATE subscription_daily_quota_advances
+		SET response_snapshot = $3::jsonb,
+			updated_at = CURRENT_TIMESTAMP
+		WHERE user_id = $1
+			AND idempotency_key_hash = $2
+			AND response_snapshot IS NULL
+	`
+	client := clientFromContext(ctx, r.client)
+	result, err := client.ExecContext(ctx, query, userID, keyHash, responseSnapshot)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected != 1 {
+		return errors.New("daily quota advance ledger claim was not completed")
+	}
+	return nil
+}
 
 type userSubscriptionRepository struct {
 	client *dbent.Client
@@ -469,10 +571,21 @@ func (r *userSubscriptionRepository) translateConditionalWindowReset(ctx context
 // 限额检查已在请求前由 BillingCacheService.CheckBillingEligibility 完成，
 // 此处仅负责记录实际消费，确保消费数据的完整性。
 func (r *userSubscriptionRepository) IncrementUsage(ctx context.Context, id int64, costUSD float64) error {
+	_, err := r.IncrementUsageForAuthorizedDailyWindow(ctx, id, costUSD, nil)
+	return err
+}
+
+// IncrementUsageForAuthorizedDailyWindow always settles weekly/monthly usage,
+// but only settles daily usage when the persisted window is still the one that
+// authorized the request. A nil window preserves the legacy behavior.
+func (r *userSubscriptionRepository) IncrementUsageForAuthorizedDailyWindow(ctx context.Context, id int64, costUSD float64, authorizedDailyWindowStart *time.Time) (bool, error) {
 	const updateSQL = `
 		UPDATE user_subscriptions us
 		SET
-			daily_usage_usd = us.daily_usage_usd + $1,
+			daily_usage_usd = us.daily_usage_usd + CASE
+				WHEN $3::timestamptz IS NULL OR us.daily_window_start = $3 THEN $1
+				ELSE 0
+			END,
 			weekly_usage_usd = us.weekly_usage_usd + $1,
 			monthly_usage_usd = us.monthly_usage_usd + $1,
 			updated_at = NOW()
@@ -481,25 +594,27 @@ func (r *userSubscriptionRepository) IncrementUsage(ctx context.Context, id int6
 			AND us.deleted_at IS NULL
 			AND us.group_id = g.id
 			AND g.deleted_at IS NULL
+		RETURNING ($3::timestamptz IS NULL OR us.daily_window_start = $3)
 	`
 
 	client := clientFromContext(ctx, r.client)
-	result, err := client.ExecContext(ctx, updateSQL, costUSD, id)
+	rows, err := client.QueryContext(ctx, updateSQL, costUSD, id, authorizedDailyWindowStart)
 	if err != nil {
-		return err
+		return false, err
 	}
+	defer func() { _ = rows.Close() }()
 
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return err
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return false, err
+		}
+		return false, service.ErrSubscriptionNotFound
 	}
-
-	if affected > 0 {
-		return nil
+	var dailyApplied bool
+	if err := rows.Scan(&dailyApplied); err != nil {
+		return false, err
 	}
-
-	// affected == 0：订阅不存在或已删除
-	return service.ErrSubscriptionNotFound
+	return dailyApplied, nil
 }
 
 func (r *userSubscriptionRepository) BatchUpdateExpiredStatus(ctx context.Context) (int64, error) {

@@ -104,20 +104,25 @@ func TestUsageBillingRepositoryApply_DeduplicatesSubscriptionBilling(t *testing.
 		UserID:  user.ID,
 		GroupID: group.ID,
 	})
+	authorizedWindow := time.Now().UTC().Truncate(time.Microsecond)
+	require.NoError(t, client.UserSubscription.UpdateOneID(subscription.ID).SetDailyWindowStart(authorizedWindow).Exec(ctx))
 
 	requestID := uuid.NewString()
 	cmd := &service.UsageBillingCommand{
-		RequestID:        requestID,
-		APIKeyID:         apiKey.ID,
-		UserID:           user.ID,
-		AccountID:        0,
-		SubscriptionID:   &subscription.ID,
-		SubscriptionCost: 2.5,
+		RequestID:                  requestID,
+		APIKeyID:                   apiKey.ID,
+		UserID:                     user.ID,
+		AccountID:                  0,
+		SubscriptionID:             &subscription.ID,
+		AuthorizedDailyWindowStart: &authorizedWindow,
+		SubscriptionCost:           2.5,
 	}
 
 	result1, err := repo.Apply(ctx, cmd)
 	require.NoError(t, err)
 	require.True(t, result1.Applied)
+	require.True(t, result1.SubscriptionDailyUsageGuarded)
+	require.True(t, result1.SubscriptionDailyUsageApplied)
 
 	result2, err := repo.Apply(ctx, cmd)
 	require.NoError(t, err)
@@ -126,6 +131,91 @@ func TestUsageBillingRepositoryApply_DeduplicatesSubscriptionBilling(t *testing.
 	var dailyUsage float64
 	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT daily_usage_usd FROM user_subscriptions WHERE id = $1", subscription.ID).Scan(&dailyUsage))
 	require.InDelta(t, 2.5, dailyUsage, 0.000001)
+}
+
+func TestUsageBillingRepositoryApply_LegacySubscriptionBillingChargesAllPeriods(t *testing.T) {
+	ctx := context.Background()
+	client := testEntClient(t)
+	repo := NewUsageBillingRepository(client, integrationDB)
+
+	user := mustCreateUser(t, client, &service.User{
+		Email: fmt.Sprintf("usage-billing-legacy-user-%d@example.com", time.Now().UnixNano()), PasswordHash: "hash",
+	})
+	group := mustCreateGroup(t, client, &service.Group{
+		Name: "usage-billing-legacy-group-" + uuid.NewString(), Platform: service.PlatformAnthropic,
+		SubscriptionType: service.SubscriptionTypeSubscription,
+	})
+	apiKey := mustCreateApiKey(t, client, &service.APIKey{
+		UserID: user.ID, GroupID: &group.ID, Key: "sk-usage-billing-legacy-" + uuid.NewString(), Name: "billing-legacy",
+	})
+	subscription := mustCreateSubscription(t, client, &service.UserSubscription{
+		UserID: user.ID, GroupID: group.ID,
+		DailyUsageUSD: 1, WeeklyUsageUSD: 2, MonthlyUsageUSD: 3,
+	})
+
+	result, err := repo.Apply(ctx, &service.UsageBillingCommand{
+		RequestID: uuid.NewString(), APIKeyID: apiKey.ID, UserID: user.ID,
+		SubscriptionID: &subscription.ID, SubscriptionCost: 2.5,
+	})
+	require.NoError(t, err)
+	require.True(t, result.Applied)
+	require.False(t, result.SubscriptionDailyUsageGuarded)
+	require.True(t, result.SubscriptionDailyUsageApplied)
+
+	var dailyUsage, weeklyUsage, monthlyUsage float64
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `
+		SELECT daily_usage_usd, weekly_usage_usd, monthly_usage_usd
+		FROM user_subscriptions WHERE id = $1
+	`, subscription.ID).Scan(&dailyUsage, &weeklyUsage, &monthlyUsage))
+	require.InDelta(t, 3.5, dailyUsage, 0.000001)
+	require.InDelta(t, 4.5, weeklyUsage, 0.000001)
+	require.InDelta(t, 5.5, monthlyUsage, 0.000001)
+}
+
+func TestUsageBillingRepositoryApply_ChangedDailyWindowSkipsOnlyDailyUsage(t *testing.T) {
+	ctx := context.Background()
+	client := testEntClient(t)
+	repo := NewUsageBillingRepository(client, integrationDB)
+
+	user := mustCreateUser(t, client, &service.User{
+		Email:        fmt.Sprintf("usage-billing-window-user-%d@example.com", time.Now().UnixNano()),
+		PasswordHash: "hash",
+	})
+	group := mustCreateGroup(t, client, &service.Group{
+		Name:             "usage-billing-window-group-" + uuid.NewString(),
+		Platform:         service.PlatformAnthropic,
+		SubscriptionType: service.SubscriptionTypeSubscription,
+	})
+	apiKey := mustCreateApiKey(t, client, &service.APIKey{
+		UserID: user.ID, GroupID: &group.ID,
+		Key: "sk-usage-billing-window-" + uuid.NewString(), Name: "billing-window",
+	})
+	subscription := mustCreateSubscription(t, client, &service.UserSubscription{
+		UserID: user.ID, GroupID: group.ID,
+		DailyUsageUSD: 1, WeeklyUsageUSD: 2, MonthlyUsageUSD: 3,
+	})
+	authorizedWindow := time.Now().UTC().Add(-time.Hour).Truncate(time.Microsecond)
+	currentWindow := authorizedWindow.Add(30 * time.Minute)
+	require.NoError(t, client.UserSubscription.UpdateOneID(subscription.ID).SetDailyWindowStart(currentWindow).Exec(ctx))
+
+	result, err := repo.Apply(ctx, &service.UsageBillingCommand{
+		RequestID: uuid.NewString(), APIKeyID: apiKey.ID, UserID: user.ID,
+		SubscriptionID: &subscription.ID, AuthorizedDailyWindowStart: &authorizedWindow,
+		SubscriptionCost: 2.5,
+	})
+	require.NoError(t, err)
+	require.True(t, result.Applied)
+	require.True(t, result.SubscriptionDailyUsageGuarded)
+	require.False(t, result.SubscriptionDailyUsageApplied)
+
+	var dailyUsage, weeklyUsage, monthlyUsage float64
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `
+		SELECT daily_usage_usd, weekly_usage_usd, monthly_usage_usd
+		FROM user_subscriptions WHERE id = $1
+	`, subscription.ID).Scan(&dailyUsage, &weeklyUsage, &monthlyUsage))
+	require.InDelta(t, 1.0, dailyUsage, 0.000001)
+	require.InDelta(t, 4.5, weeklyUsage, 0.000001)
+	require.InDelta(t, 5.5, monthlyUsage, 0.000001)
 }
 
 func TestUsageBillingRepositoryApply_RequestFingerprintConflict(t *testing.T) {

@@ -2,8 +2,10 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"math/rand/v2"
 	"strconv"
 	"strings"
@@ -13,8 +15,8 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
 	"github.com/dgraph-io/ristretto"
+	"github.com/sirupsen/logrus"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -40,6 +42,14 @@ var (
 	ErrMonthlyLimitExceeded        = infraerrors.TooManyRequests("MONTHLY_LIMIT_EXCEEDED", "monthly usage limit exceeded")
 	ErrSubscriptionNilInput        = infraerrors.BadRequest("SUBSCRIPTION_NIL_INPUT", "subscription input cannot be nil")
 	ErrAdjustWouldExpire           = infraerrors.BadRequest("ADJUST_WOULD_EXPIRE", "adjustment would result in expired subscription (remaining days must be > 0)")
+	ErrDailyQuotaNotExhausted      = infraerrors.Conflict("DAILY_QUOTA_NOT_EXHAUSTED", "daily quota has not been exhausted")
+	ErrDailyQuotaAlreadyReset      = infraerrors.Conflict("DAILY_QUOTA_ALREADY_RESET", "daily quota has already reset for the current day")
+	ErrDailyQuotaNotConfigured     = infraerrors.BadRequest("DAILY_QUOTA_NOT_CONFIGURED", "subscription group has no daily quota")
+	ErrDailyQuotaAdvanceOneTime    = infraerrors.BadRequest("DAILY_QUOTA_ADVANCE_ONE_TIME", "one-day subscriptions already provide a single quota for their full term")
+	ErrDailyQuotaAdvanceTerm       = infraerrors.BadRequest("DAILY_QUOTA_ADVANCE_TERM", "subscription must have more than 24 hours remaining")
+	ErrDailyQuotaAdvancePeriod     = infraerrors.Conflict("DAILY_QUOTA_ADVANCE_PERIOD_LIMIT", "weekly or monthly quota is exhausted")
+	ErrDailyQuotaAdvanceWeekly     = infraerrors.Conflict("DAILY_QUOTA_ADVANCE_WEEKLY_LIMIT", "weekly remaining quota is less than one daily quota")
+	ErrDailyQuotaAdvanceMonthly    = infraerrors.Conflict("DAILY_QUOTA_ADVANCE_MONTHLY_LIMIT", "monthly remaining quota is less than one daily quota")
 )
 
 // SubscriptionService 订阅服务
@@ -312,9 +322,9 @@ func (s *SubscriptionService) updateExistingSubscriptionTerm(
 			isExpired = existingSub.Status == SubscriptionStatusExpired ||
 				(existingSub.Status != SubscriptionStatusSuspended && !existingSub.ExpiresAt.After(now))
 		}
-		newExpiresAt := existingSub.ExpiresAt.AddDate(0, 0, validityDays)
+		newExpiresAt := addSubscriptionDays(existingSub.ExpiresAt, validityDays)
 		if isExpired {
-			newExpiresAt = now.AddDate(0, 0, validityDays)
+			newExpiresAt = addSubscriptionDays(now, validityDays)
 		}
 		if newExpiresAt.After(MaxExpiresAt) {
 			newExpiresAt = MaxExpiresAt
@@ -381,8 +391,8 @@ func (s *SubscriptionService) withSubscriptionUpdateTx(ctx context.Context, fn f
 
 func renewedSubscriptionTerm(existingSub *UserSubscription, notes string, startsAt, expiresAt time.Time) *UserSubscription {
 	renewed := *existingSub
-	// 日窗口按日历日对齐（0 点刷新）；周/月窗口按订阅期限对齐（锚点为新周期起点）。
-	dailyWindowStart := timezone.StartOfDay(startsAt)
+	// All subscription windows start at the exact renewal instant.
+	dailyWindowStart := startsAt
 	periodicWindowStart := startsAt
 	renewed.StartsAt = startsAt
 	renewed.ExpiresAt = expiresAt
@@ -417,8 +427,8 @@ func (s *SubscriptionService) createSubscription(ctx context.Context, input *Ass
 		validityDays = MaxValidityDays
 	}
 
-	now := time.Now()
-	expiresAt := now.AddDate(0, 0, validityDays)
+	now := s.now()
+	expiresAt := addSubscriptionDays(now, validityDays)
 	if expiresAt.After(MaxExpiresAt) {
 		expiresAt = MaxExpiresAt
 	}
@@ -568,7 +578,7 @@ func detectAssignSemanticConflict(existing *UserSubscription, input *AssignSubsc
 
 	normalizedDays := normalizeAssignValidityDays(input.ValidityDays)
 	if !existing.StartsAt.IsZero() {
-		expectedExpiresAt := existing.StartsAt.AddDate(0, 0, normalizedDays)
+		expectedExpiresAt := addSubscriptionDays(existing.StartsAt, normalizedDays)
 		if expectedExpiresAt.After(MaxExpiresAt) {
 			expectedExpiresAt = MaxExpiresAt
 		}
@@ -661,7 +671,7 @@ func (s *SubscriptionService) ExtendSubscription(ctx context.Context, subscripti
 			return ErrSubscriptionNotFound
 		}
 
-		// 限制调整天数范围
+		// Clamp the adjustment to the supported validity range.
 		if days > MaxValidityDays {
 			days = MaxValidityDays
 		}
@@ -675,26 +685,24 @@ func (s *SubscriptionService) ExtendSubscription(ctx context.Context, subscripti
 		}
 		isExpired := !sub.ExpiresAt.After(now)
 
-		// 如果订阅已过期，不允许负向调整
+		// An expired subscription cannot be shortened further.
 		if isExpired && days < 0 {
 			return infraerrors.BadRequest("CANNOT_SHORTEN_EXPIRED", "cannot shorten an expired subscription")
 		}
 
-		// 计算新的过期时间
+		// Subscription days are exact 24-hour periods, including across DST.
 		var newExpiresAt time.Time
 		if isExpired {
-			// 已过期：从当前时间开始增加天数
-			newExpiresAt = now.AddDate(0, 0, days)
+			newExpiresAt = addSubscriptionDays(now, days)
 		} else {
-			// 未过期：从原过期时间增加/减少天数
-			newExpiresAt = sub.ExpiresAt.AddDate(0, 0, days)
+			newExpiresAt = addSubscriptionDays(sub.ExpiresAt, days)
 		}
 
 		if newExpiresAt.After(MaxExpiresAt) {
 			newExpiresAt = MaxExpiresAt
 		}
 
-		// 检查新的过期时间必须大于当前时间
+		// The adjusted subscription must remain valid.
 		if !newExpiresAt.After(now) {
 			return ErrAdjustWouldExpire
 		}
@@ -702,8 +710,6 @@ func (s *SubscriptionService) ExtendSubscription(ctx context.Context, subscripti
 		if err := s.userSubRepo.ExtendExpiry(txCtx, subscriptionID, newExpiresAt); err != nil {
 			return err
 		}
-
-		// 如果订阅已过期，恢复为active状态
 		if sub.Status == SubscriptionStatusExpired {
 			if err := s.userSubRepo.UpdateStatus(txCtx, subscriptionID, SubscriptionStatusActive); err != nil {
 				return err
@@ -833,19 +839,24 @@ func normalizeExpiredWindows(subs []UserSubscription) {
 func normalizeExpiredWindowsAt(subs []UserSubscription, now time.Time) {
 	for i := range subs {
 		sub := &subs[i]
-		// 日窗口过期：清零展示数据
-		if sub.canAutomaticallyResetDailyAt(now) {
+		// Advance the in-memory view to the latest rolling window.
+		if sub.ExpiresAt.After(now) {
+			if windowStart, ok := sub.automaticDailyWindowStartAt(now); ok {
+				sub.DailyWindowStart = &windowStart
+				sub.DailyUsageUSD = 0
+			}
+		} else if sub.canAutomaticallyResetDailyAt(now) {
 			sub.DailyWindowStart = nil
 			sub.DailyUsageUSD = 0
 		}
-		// 周窗口过期：清零展示数据
-		if sub.canAutomaticallyResetWeeklyAt(now) {
-			sub.WeeklyWindowStart = nil
+		// Advance expired periodic windows in the response snapshot so clients can
+		// display the next authoritative reset time without waiting for a write path.
+		if windowStart, ok := sub.automaticWindowStartAt(sub.WeeklyWindowStart, 7*24*time.Hour, now); ok {
+			sub.WeeklyWindowStart = &windowStart
 			sub.WeeklyUsageUSD = 0
 		}
-		// 月窗口过期：清零展示数据
-		if sub.canAutomaticallyResetMonthlyAt(now) {
-			sub.MonthlyWindowStart = nil
+		if windowStart, ok := sub.automaticWindowStartAt(sub.MonthlyWindowStart, 30*24*time.Hour, now); ok {
+			sub.MonthlyWindowStart = &windowStart
 			sub.MonthlyUsageUSD = 0
 		}
 	}
@@ -878,9 +889,8 @@ func (s *SubscriptionService) checkAndActivateWindowAt(ctx context.Context, sub 
 		return nil
 	}
 
-	// 日窗口锚定当天 0 点（日历日语义）；周/月窗口锚定首次使用时刻（期限对齐语义，
-	// 锚点不得早于 StartsAt，否则最后一个不完整周期会重复发放额度，见 issue #5051）。
-	return s.userSubRepo.ActivateWindows(ctx, sub.ID, timezone.StartOfDay(now), now)
+	// All windows use the exact activation instant as their initial anchor.
+	return s.userSubRepo.ActivateWindows(ctx, sub.ID, now, now)
 }
 
 // AdminResetQuota manually resets the daily, weekly, and/or monthly usage windows.
@@ -893,9 +903,7 @@ func (s *SubscriptionService) AdminResetQuota(ctx context.Context, subscriptionI
 		return nil, err
 	}
 	now := s.now()
-	// 日窗口锚点取当天 0 点：手动重置只清空用量，不改变“每天 0 点刷新”的节奏。
-	// 周/月窗口保持锚定重置时刻（期限对齐滚动窗口语义）。
-	if err := s.userSubRepo.ResetUsageWindows(ctx, sub.ID, resetDaily, resetWeekly, resetMonthly, timezone.StartOfDay(now), now); err != nil {
+	if err := s.userSubRepo.ResetUsageWindows(ctx, sub.ID, resetDaily, resetWeekly, resetMonthly, now, now); err != nil {
 		return nil, err
 	}
 	// Invalidate L1 ristretto cache. Ristretto's Del() is asynchronous by design,
@@ -909,12 +917,424 @@ func (s *SubscriptionService) AdminResetQuota(ctx context.Context, subscriptionI
 	return s.userSubRepo.GetByID(ctx, subscriptionID)
 }
 
+const (
+	dailyQuotaAdvanceBlockInactive            = "subscription_inactive"
+	dailyQuotaAdvanceBlockOneTime             = "one_time_subscription"
+	dailyQuotaAdvanceBlockTerm                = "insufficient_term"
+	dailyQuotaAdvanceBlockNoDailyLimit        = "daily_quota_not_configured"
+	dailyQuotaAdvanceBlockDailyReset          = "daily_quota_already_reset"
+	dailyQuotaAdvanceBlockDailyNotExhausted   = "daily_quota_not_exhausted"
+	dailyQuotaAdvanceBlockWeeklyInsufficient  = "weekly_quota_insufficient"
+	dailyQuotaAdvanceBlockMonthlyInsufficient = "monthly_quota_insufficient"
+	dailyQuotaComparisonEpsilon               = 1e-9
+)
+
+type DailyQuotaAdvancePreview struct {
+	SubscriptionID      int64      `json:"subscription_id"`
+	CanAdvance          bool       `json:"can_advance"`
+	DailyLimitUSD       float64    `json:"daily_limit_usd"`
+	DailyUsageUSD       float64    `json:"daily_usage_usd"`
+	DailyRemainingUSD   float64    `json:"daily_remaining_usd"`
+	DailyResetsAt       *time.Time `json:"daily_resets_at"`
+	WeeklyLimitUSD      *float64   `json:"weekly_limit_usd"`
+	WeeklyUsageUSD      float64    `json:"weekly_usage_usd"`
+	WeeklyRemainingUSD  *float64   `json:"weekly_remaining_usd"`
+	WeeklyResetsAt      *time.Time `json:"weekly_resets_at"`
+	MonthlyLimitUSD     *float64   `json:"monthly_limit_usd"`
+	MonthlyUsageUSD     float64    `json:"monthly_usage_usd"`
+	MonthlyRemainingUSD *float64   `json:"monthly_remaining_usd"`
+	MonthlyResetsAt     *time.Time `json:"monthly_resets_at"`
+	RecoverableUSD      float64    `json:"recoverable_usd"`
+	DeductHours         int        `json:"deduct_hours"`
+	CurrentExpiresAt    time.Time  `json:"current_expires_at"`
+	ExpiresAtAfter      time.Time  `json:"expires_at_after"`
+	Blockers            []string   `json:"blockers"`
+}
+
+func (s *SubscriptionService) GetDailyQuotaAdvancePreview(ctx context.Context, userID, subscriptionID int64) (*DailyQuotaAdvancePreview, error) {
+	sub, err := s.userSubRepo.GetByID(ctx, subscriptionID)
+	if err != nil {
+		return nil, err
+	}
+	if sub.UserID != userID {
+		return nil, ErrSubscriptionNotFound
+	}
+
+	group := sub.Group
+	if group == nil {
+		group, err = s.groupRepo.GetByID(ctx, sub.GroupID)
+		if err != nil {
+			return nil, fmt.Errorf("get subscription group: %w", err)
+		}
+	}
+
+	copySub := *sub
+	return buildDailyQuotaAdvancePreview(&copySub, group, s.now()), nil
+}
+
+func buildDailyQuotaAdvancePreview(sub *UserSubscription, group *Group, now time.Time) *DailyQuotaAdvancePreview {
+	preview := &DailyQuotaAdvancePreview{
+		SubscriptionID:   sub.ID,
+		DeductHours:      int(subscriptionDayDuration / time.Hour),
+		CurrentExpiresAt: sub.ExpiresAt,
+		ExpiresAtAfter:   sub.ExpiresAt.Add(-subscriptionDayDuration),
+		Blockers:         make([]string, 0, 4),
+	}
+
+	dailyReset := normalizeDailyQuotaAdvanceWindows(sub, now)
+	preview.DailyUsageUSD = sub.DailyUsageUSD
+	preview.WeeklyUsageUSD = sub.WeeklyUsageUSD
+	preview.MonthlyUsageUSD = sub.MonthlyUsageUSD
+	preview.DailyResetsAt = effectiveQuotaResetTime(sub.DailyResetTime(), sub.ExpiresAt)
+	preview.WeeklyResetsAt = effectiveQuotaResetTime(sub.WeeklyResetTime(), sub.ExpiresAt)
+	preview.MonthlyResetsAt = effectiveQuotaResetTime(sub.MonthlyResetTime(), sub.ExpiresAt)
+
+	if sub.Status != SubscriptionStatusActive || !sub.ExpiresAt.After(now) {
+		preview.Blockers = append(preview.Blockers, dailyQuotaAdvanceBlockInactive)
+	}
+	if sub.HasOneTimeDailyQuota() {
+		preview.Blockers = append(preview.Blockers, dailyQuotaAdvanceBlockOneTime)
+	}
+	if !sub.ExpiresAt.After(now.Add(subscriptionDayDuration)) {
+		preview.Blockers = append(preview.Blockers, dailyQuotaAdvanceBlockTerm)
+	}
+	if group == nil || !group.HasDailyLimit() {
+		preview.Blockers = append(preview.Blockers, dailyQuotaAdvanceBlockNoDailyLimit)
+		return preview
+	}
+
+	preview.DailyLimitUSD = *group.DailyLimitUSD
+	preview.DailyRemainingUSD = quotaRemaining(*group.DailyLimitUSD, sub.DailyUsageUSD)
+	preview.RecoverableUSD = preview.DailyLimitUSD
+	if dailyReset {
+		preview.Blockers = append(preview.Blockers, dailyQuotaAdvanceBlockDailyReset)
+	} else if sub.DailyUsageUSD+dailyQuotaComparisonEpsilon < *group.DailyLimitUSD {
+		preview.Blockers = append(preview.Blockers, dailyQuotaAdvanceBlockDailyNotExhausted)
+	}
+
+	if group.HasWeeklyLimit() {
+		limit := *group.WeeklyLimitUSD
+		remaining := quotaRemaining(limit, sub.WeeklyUsageUSD)
+		preview.WeeklyLimitUSD = &limit
+		preview.WeeklyRemainingUSD = &remaining
+		preview.RecoverableUSD = math.Min(preview.RecoverableUSD, remaining)
+		if remaining+dailyQuotaComparisonEpsilon < preview.DailyLimitUSD {
+			preview.Blockers = append(preview.Blockers, dailyQuotaAdvanceBlockWeeklyInsufficient)
+		}
+	}
+	if group.HasMonthlyLimit() {
+		limit := *group.MonthlyLimitUSD
+		remaining := quotaRemaining(limit, sub.MonthlyUsageUSD)
+		preview.MonthlyLimitUSD = &limit
+		preview.MonthlyRemainingUSD = &remaining
+		preview.RecoverableUSD = math.Min(preview.RecoverableUSD, remaining)
+		if remaining+dailyQuotaComparisonEpsilon < preview.DailyLimitUSD {
+			preview.Blockers = append(preview.Blockers, dailyQuotaAdvanceBlockMonthlyInsufficient)
+		}
+	}
+
+	preview.CanAdvance = len(preview.Blockers) == 0
+	return preview
+}
+
+func normalizeDailyQuotaAdvanceWindows(sub *UserSubscription, now time.Time) bool {
+	dailyReset := false
+	if windowStart, ok := sub.automaticDailyWindowStartAt(now); ok {
+		sub.DailyWindowStart = &windowStart
+		sub.DailyUsageUSD = 0
+		dailyReset = true
+	}
+	if windowStart, ok := sub.automaticWindowStartAt(sub.WeeklyWindowStart, 7*24*time.Hour, now); ok {
+		sub.WeeklyWindowStart = &windowStart
+		sub.WeeklyUsageUSD = 0
+	}
+	if windowStart, ok := sub.automaticWindowStartAt(sub.MonthlyWindowStart, 30*24*time.Hour, now); ok {
+		sub.MonthlyWindowStart = &windowStart
+		sub.MonthlyUsageUSD = 0
+	}
+	return dailyReset
+}
+
+func effectiveQuotaResetTime(resetAt *time.Time, expiresAt time.Time) *time.Time {
+	if resetAt == nil || !resetAt.Before(expiresAt) {
+		return nil
+	}
+	reset := *resetAt
+	return &reset
+}
+
+func quotaRemaining(limit, usage float64) float64 {
+	return math.Max(0, limit-usage)
+}
+
+func dailyQuotaAdvanceError(preview *DailyQuotaAdvancePreview) error {
+	for _, blocker := range preview.Blockers {
+		switch blocker {
+		case dailyQuotaAdvanceBlockInactive:
+			return ErrSubscriptionExpired
+		case dailyQuotaAdvanceBlockOneTime:
+			return ErrDailyQuotaAdvanceOneTime
+		case dailyQuotaAdvanceBlockTerm:
+			return ErrDailyQuotaAdvanceTerm
+		case dailyQuotaAdvanceBlockNoDailyLimit:
+			return ErrDailyQuotaNotConfigured
+		case dailyQuotaAdvanceBlockDailyReset:
+			return ErrDailyQuotaAlreadyReset
+		case dailyQuotaAdvanceBlockDailyNotExhausted:
+			return ErrDailyQuotaNotExhausted
+		case dailyQuotaAdvanceBlockWeeklyInsufficient:
+			return ErrDailyQuotaAdvanceWeekly
+		case dailyQuotaAdvanceBlockMonthlyInsufficient:
+			return ErrDailyQuotaAdvanceMonthly
+		}
+	}
+	return nil
+}
+
+type dailyQuotaAdvanceSnapshot struct {
+	ID                 int64      `json:"id"`
+	UserID             int64      `json:"user_id"`
+	GroupID            int64      `json:"group_id"`
+	StartsAt           time.Time  `json:"starts_at"`
+	ExpiresAt          time.Time  `json:"expires_at"`
+	Status             string     `json:"status"`
+	DailyWindowStart   *time.Time `json:"daily_window_start"`
+	WeeklyWindowStart  *time.Time `json:"weekly_window_start"`
+	MonthlyWindowStart *time.Time `json:"monthly_window_start"`
+	DailyUsageUSD      float64    `json:"daily_usage_usd"`
+	WeeklyUsageUSD     float64    `json:"weekly_usage_usd"`
+	MonthlyUsageUSD    float64    `json:"monthly_usage_usd"`
+	CreatedAt          time.Time  `json:"created_at"`
+	UpdatedAt          time.Time  `json:"updated_at"`
+	DeletedAt          *time.Time `json:"deleted_at"`
+}
+
+func newDailyQuotaAdvanceSnapshot(sub *UserSubscription) dailyQuotaAdvanceSnapshot {
+	return dailyQuotaAdvanceSnapshot{
+		ID:                 sub.ID,
+		UserID:             sub.UserID,
+		GroupID:            sub.GroupID,
+		StartsAt:           sub.StartsAt,
+		ExpiresAt:          sub.ExpiresAt,
+		Status:             sub.Status,
+		DailyWindowStart:   cloneTimePtr(sub.DailyWindowStart),
+		WeeklyWindowStart:  cloneTimePtr(sub.WeeklyWindowStart),
+		MonthlyWindowStart: cloneTimePtr(sub.MonthlyWindowStart),
+		DailyUsageUSD:      sub.DailyUsageUSD,
+		WeeklyUsageUSD:     sub.WeeklyUsageUSD,
+		MonthlyUsageUSD:    sub.MonthlyUsageUSD,
+		CreatedAt:          sub.CreatedAt,
+		UpdatedAt:          sub.UpdatedAt,
+		DeletedAt:          cloneTimePtr(sub.DeletedAt),
+	}
+}
+
+func (snapshot dailyQuotaAdvanceSnapshot) subscription() *UserSubscription {
+	return &UserSubscription{
+		ID:                 snapshot.ID,
+		UserID:             snapshot.UserID,
+		GroupID:            snapshot.GroupID,
+		StartsAt:           snapshot.StartsAt,
+		ExpiresAt:          snapshot.ExpiresAt,
+		Status:             snapshot.Status,
+		DailyWindowStart:   cloneTimePtr(snapshot.DailyWindowStart),
+		WeeklyWindowStart:  cloneTimePtr(snapshot.WeeklyWindowStart),
+		MonthlyWindowStart: cloneTimePtr(snapshot.MonthlyWindowStart),
+		DailyUsageUSD:      snapshot.DailyUsageUSD,
+		WeeklyUsageUSD:     snapshot.WeeklyUsageUSD,
+		MonthlyUsageUSD:    snapshot.MonthlyUsageUSD,
+		CreatedAt:          snapshot.CreatedAt,
+		UpdatedAt:          snapshot.UpdatedAt,
+		DeletedAt:          cloneTimePtr(snapshot.DeletedAt),
+	}
+}
+
+func (s *SubscriptionService) dailyQuotaAdvanceLedgerRepository() (DailyQuotaAdvanceLedgerRepository, error) {
+	repo, ok := s.userSubRepo.(DailyQuotaAdvanceLedgerRepository)
+	if !ok || repo == nil {
+		return nil, ErrIdempotencyStoreUnavail
+	}
+	return repo, nil
+}
+
+func (s *SubscriptionService) loadDailyQuotaAdvance(
+	ctx context.Context,
+	repo DailyQuotaAdvanceLedgerRepository,
+	userID, subscriptionID int64,
+	keyHash string,
+) (*UserSubscription, bool, error) {
+	record, err := repo.GetDailyQuotaAdvance(ctx, userID, keyHash)
+	if err != nil {
+		return nil, false, ErrIdempotencyStoreUnavail.WithCause(err)
+	}
+	if record == nil {
+		return nil, false, nil
+	}
+	if record.SubscriptionID != subscriptionID {
+		return nil, false, ErrIdempotencyKeyConflict
+	}
+
+	var snapshot dailyQuotaAdvanceSnapshot
+	if err := json.Unmarshal([]byte(record.ResponseSnapshot), &snapshot); err != nil {
+		return nil, false, ErrIdempotencyStoreUnavail.WithCause(err)
+	}
+	if snapshot.ID != subscriptionID || snapshot.UserID != userID {
+		return nil, false, ErrIdempotencyKeyConflict
+	}
+
+	sub := snapshot.subscription()
+	if current, currentErr := s.userSubRepo.GetByID(ctx, subscriptionID); currentErr == nil && current != nil {
+		sub.User = current.User
+		sub.Group = current.Group
+		sub.AssignedByUser = current.AssignedByUser
+	}
+	if sub.Group == nil && s.groupRepo != nil {
+		group, groupErr := s.groupRepo.GetByID(ctx, sub.GroupID)
+		if groupErr == nil {
+			sub.Group = group
+		}
+	}
+	return sub, true, nil
+}
+
+// RecoverDailyQuotaAdvance returns the committed operation result when the
+// outer idempotency coordinator could not persist its success response.
+func (s *SubscriptionService) RecoverDailyQuotaAdvance(ctx context.Context, userID, subscriptionID int64, idempotencyKey string) (*UserSubscription, error) {
+	key, err := NormalizeIdempotencyKey(idempotencyKey)
+	if err != nil {
+		return nil, err
+	}
+	if key == "" {
+		return nil, ErrIdempotencyKeyRequired
+	}
+	repo, err := s.dailyQuotaAdvanceLedgerRepository()
+	if err != nil {
+		return nil, err
+	}
+	sub, found, err := s.loadDailyQuotaAdvance(ctx, repo, userID, subscriptionID, HashIdempotencyKey(key))
+	if err != nil || !found {
+		return nil, err
+	}
+	return sub, nil
+}
+
+// AdvanceDailyQuota exchanges 24 hours of validity for one complete daily
+// quota. Weekly and monthly usage are preserved and must each have enough
+// remaining capacity for the full daily quota.
+func (s *SubscriptionService) AdvanceDailyQuota(ctx context.Context, userID, subscriptionID int64, idempotencyKey string) (*UserSubscription, error) {
+	key, err := NormalizeIdempotencyKey(idempotencyKey)
+	if err != nil {
+		return nil, err
+	}
+	if key == "" {
+		return nil, ErrIdempotencyKeyRequired
+	}
+	ledgerRepo, err := s.dailyQuotaAdvanceLedgerRepository()
+	if err != nil {
+		return nil, err
+	}
+	keyHash := HashIdempotencyKey(key)
+	if replay, found, loadErr := s.loadDailyQuotaAdvance(ctx, ledgerRepo, userID, subscriptionID, keyHash); loadErr != nil {
+		return nil, loadErr
+	} else if found {
+		return replay, nil
+	}
+
+	var updated *UserSubscription
+	mutated := false
+	err = s.withSubscriptionUpdateTx(ctx, func(txCtx context.Context) error {
+		sub, err := s.userSubRepo.GetByIDForUpdate(txCtx, subscriptionID)
+		if err != nil {
+			return err
+		}
+		if sub.UserID != userID {
+			return ErrSubscriptionNotFound
+		}
+		if replay, found, loadErr := s.loadDailyQuotaAdvance(txCtx, ledgerRepo, userID, subscriptionID, keyHash); loadErr != nil {
+			return loadErr
+		} else if found {
+			updated = replay
+			return nil
+		}
+		if sub.Status == SubscriptionStatusSuspended {
+			return ErrSubscriptionSuspended
+		}
+
+		group, err := s.groupRepo.GetByID(txCtx, sub.GroupID)
+		if err != nil {
+			return fmt.Errorf("get subscription group: %w", err)
+		}
+		now := s.now()
+		preview := buildDailyQuotaAdvancePreview(sub, group, now)
+		if err := dailyQuotaAdvanceError(preview); err != nil {
+			return err
+		}
+		claimed, err := ledgerRepo.ClaimDailyQuotaAdvance(txCtx, &DailyQuotaAdvanceLedger{
+			UserID:             userID,
+			SubscriptionID:     subscriptionID,
+			IdempotencyKeyHash: keyHash,
+			ExpiresAt:          now.Add(DefaultWriteIdempotencyTTL()),
+		})
+		if err != nil {
+			return ErrIdempotencyStoreUnavail.WithCause(err)
+		}
+		if !claimed {
+			if replay, found, loadErr := s.loadDailyQuotaAdvance(txCtx, ledgerRepo, userID, subscriptionID, keyHash); loadErr != nil {
+				return loadErr
+			} else if found {
+				updated = replay
+				return nil
+			}
+			return ErrIdempotencyInProgress
+		}
+
+		nextWindow := now
+		sub.DailyUsageUSD = 0
+		sub.DailyWindowStart = &nextWindow
+		sub.ExpiresAt = preview.ExpiresAtAfter
+		if err := s.userSubRepo.Update(txCtx, sub); err != nil {
+			return fmt.Errorf("advance daily subscription quota: %w", err)
+		}
+
+		updated, err = s.userSubRepo.GetByID(txCtx, subscriptionID)
+		if err != nil {
+			return fmt.Errorf("reload advanced daily subscription quota: %w", err)
+		}
+		if updated.Group == nil {
+			updated.Group = group
+		}
+		snapshot, err := json.Marshal(newDailyQuotaAdvanceSnapshot(updated))
+		if err != nil {
+			return ErrIdempotencyStoreUnavail.WithCause(err)
+		}
+		if err := ledgerRepo.CompleteDailyQuotaAdvance(txCtx, userID, keyHash, string(snapshot)); err != nil {
+			return ErrIdempotencyStoreUnavail.WithCause(err)
+		}
+		mutated = true
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	if mutated {
+		if err := s.invalidateSubscriptionCaches(userID, updated.GroupID); err != nil {
+			logrus.WithError(err).WithFields(logrus.Fields{
+				"user_id":         userID,
+				"subscription_id": subscriptionID,
+				"group_id":        updated.GroupID,
+			}).Error("Failed to invalidate caches after daily quota advance")
+		}
+	}
+	return updated, nil
+}
+
 // CheckAndResetWindows 检查并重置过期的窗口
 func (s *SubscriptionService) CheckAndResetWindows(ctx context.Context, sub *UserSubscription) error {
 	now := s.now()
 	needsInvalidateCache := false
 
-	// 日窗口重置（每天 0 点刷新，按日历日对齐）
+	// Daily windows reset after each rolling 24-hour period.
 	if windowStart, ok := sub.automaticDailyWindowStartAt(now); ok {
 		expectedWindowStart := sub.DailyWindowStart
 		if err := s.userSubRepo.ResetDailyUsage(ctx, sub.ID, expectedWindowStart, windowStart); err != nil {
@@ -1130,6 +1550,10 @@ func (s *SubscriptionService) GetSubscriptionProgress(ctx context.Context, subsc
 			return nil, err
 		}
 	}
+
+	normalized := []UserSubscription{*sub}
+	normalizeExpiredWindowsAt(normalized, time.Now())
+	sub = &normalized[0]
 
 	return s.calculateProgress(sub, group), nil
 }

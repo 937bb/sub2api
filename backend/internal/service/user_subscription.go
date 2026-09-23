@@ -2,11 +2,19 @@ package service
 
 import (
 	"time"
-
-	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
 )
 
 const subscriptionDayDuration = 24 * time.Hour
+
+func addSubscriptionDays(t time.Time, days int) time.Time {
+	calendarTarget := t.AddDate(0, 0, days)
+	exactDuration := time.Duration(days) * subscriptionDayDuration
+	correction := exactDuration - calendarTarget.Sub(t)
+	if correction == 0 {
+		return calendarTarget
+	}
+	return calendarTarget.Add(correction)
+}
 
 type UserSubscription struct {
 	ID      int64
@@ -71,7 +79,7 @@ func (s *UserSubscription) HasOneTimeDailyQuota() bool {
 	if s == nil || s.StartsAt.IsZero() || s.ExpiresAt.IsZero() {
 		return false
 	}
-	return !s.ExpiresAt.After(s.StartsAt.AddDate(0, 0, 1))
+	return !s.ExpiresAt.After(s.StartsAt.Add(subscriptionDayDuration))
 }
 
 func (s *UserSubscription) NeedsDailyReset() bool {
@@ -110,22 +118,22 @@ func (s *UserSubscription) canAutomaticallyResetDailyAt(now time.Time) bool {
 	return ok
 }
 
-// automaticDailyWindowStartAt 计算日窗口按“配置时区日历日”对齐后的当前窗口起点。
-// 日额度固定在每天 0 点刷新（与周/月的期限对齐滚动窗口语义不同），因此只要持久化
-// 的窗口起点落在更早的日历日，就允许推进到今天 0 点。手动重置、激活等写入的任何
-// 非 0 点锚点都会在下一个 0 点被拉回日历日边界，不会永久漂移刷新时刻。
+// automaticDailyWindowStartAt returns the latest rolling 24-hour window start.
 func (s *UserSubscription) automaticDailyWindowStartAt(now time.Time) (time.Time, bool) {
-	if s.DailyWindowStart == nil {
+	if s.DailyWindowStart == nil || s.HasOneTimeDailyQuota() {
 		return time.Time{}, false
 	}
-	if s.HasOneTimeDailyQuota() {
+
+	windowStart := *s.DailyWindowStart
+	if now.Before(windowStart.Add(subscriptionDayDuration)) {
 		return time.Time{}, false
 	}
-	today := timezone.StartOfDay(now)
-	if !today.After(timezone.StartOfDay(*s.DailyWindowStart)) {
-		return time.Time{}, false
+
+	periods := int64(now.Sub(windowStart) / subscriptionDayDuration)
+	if periods < 1 {
+		periods = 1
 	}
-	return today, true
+	return windowStart.Add(time.Duration(periods) * subscriptionDayDuration), true
 }
 
 func (s *UserSubscription) canAutomaticallyResetWeeklyAt(now time.Time) bool {
@@ -144,7 +152,7 @@ func (s *UserSubscription) canAutomaticallyResetMonthlyAt(now time.Time) bool {
 // 自动推进（automaticWindowStartAt）与对外展示的重置时间（WeeklyResetTime/
 // MonthlyResetTime）必须共用这一修正，否则仪表盘显示的重置时间会早于窗口实际
 // 滚动的时间。
-// 日窗口按日历日对齐（automaticDailyWindowStartAt），不走这里。
+// Daily windows use rolling 24-hour periods and do not use this legacy-anchor repair.
 func (s *UserSubscription) windowResetAnchor(previous time.Time) time.Time {
 	legacyAnchor := startOfDay(s.StartsAt)
 	if legacyAnchor.Before(s.StartsAt) && previous.Equal(legacyAnchor) {
@@ -183,8 +191,7 @@ func (s *UserSubscription) DailyResetTime() *time.Time {
 		t := s.ExpiresAt
 		return &t
 	}
-	// 日窗口按日历日对齐：下次刷新固定在窗口起点所在日的次日 0 点。
-	t := timezone.StartOfDay(*s.DailyWindowStart).AddDate(0, 0, 1)
+	t := s.DailyWindowStart.Add(subscriptionDayDuration)
 	return &t
 }
 

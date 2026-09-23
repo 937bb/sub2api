@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"strings"
+	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
@@ -173,9 +174,12 @@ func (r *usageBillingRepository) applyBatchImageBalanceHold(
 
 func (r *usageBillingRepository) applyUsageBillingEffects(ctx context.Context, tx *sql.Tx, cmd *service.UsageBillingCommand, result *service.UsageBillingApplyResult) error {
 	if cmd.SubscriptionCost > 0 && cmd.SubscriptionID != nil {
-		if err := incrementUsageBillingSubscription(ctx, tx, *cmd.SubscriptionID, cmd.SubscriptionCost); err != nil {
+		dailyApplied, err := incrementUsageBillingSubscription(ctx, tx, *cmd.SubscriptionID, cmd.SubscriptionCost, cmd.AuthorizedDailyWindowStart)
+		if err != nil {
 			return err
 		}
+		result.SubscriptionDailyUsageGuarded = cmd.AuthorizedDailyWindowStart != nil
+		result.SubscriptionDailyUsageApplied = dailyApplied
 	}
 
 	if cmd.BalanceCost > 0 {
@@ -212,11 +216,14 @@ func (r *usageBillingRepository) applyUsageBillingEffects(ctx context.Context, t
 	return nil
 }
 
-func incrementUsageBillingSubscription(ctx context.Context, tx *sql.Tx, subscriptionID int64, costUSD float64) error {
+func incrementUsageBillingSubscription(ctx context.Context, tx *sql.Tx, subscriptionID int64, costUSD float64, authorizedDailyWindowStart *time.Time) (bool, error) {
 	const updateSQL = `
 		UPDATE user_subscriptions us
 		SET
-			daily_usage_usd = us.daily_usage_usd + $1,
+			daily_usage_usd = us.daily_usage_usd + CASE
+				WHEN $3::timestamptz IS NULL OR us.daily_window_start = $3 THEN $1
+				ELSE 0
+			END,
 			weekly_usage_usd = us.weekly_usage_usd + $1,
 			monthly_usage_usd = us.monthly_usage_usd + $1,
 			updated_at = NOW()
@@ -225,19 +232,17 @@ func incrementUsageBillingSubscription(ctx context.Context, tx *sql.Tx, subscrip
 			AND us.deleted_at IS NULL
 			AND us.group_id = g.id
 			AND g.deleted_at IS NULL
+		RETURNING ($3::timestamptz IS NULL OR us.daily_window_start = $3)
 	`
-	res, err := tx.ExecContext(ctx, updateSQL, costUSD, subscriptionID)
+	var dailyApplied bool
+	err := tx.QueryRowContext(ctx, updateSQL, costUSD, subscriptionID, authorizedDailyWindowStart).Scan(&dailyApplied)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, service.ErrSubscriptionNotFound
+	}
 	if err != nil {
-		return err
+		return false, err
 	}
-	affected, err := res.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if affected > 0 {
-		return nil
-	}
-	return service.ErrSubscriptionNotFound
+	return dailyApplied, nil
 }
 
 func deductUsageBillingBalance(ctx context.Context, tx *sql.Tx, userID int64, amount float64) (float64, bool, error) {

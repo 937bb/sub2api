@@ -66,6 +66,24 @@ func TestCalculateProgress_DailyUsage(t *testing.T) {
 	assert.Equal(t, dailyStart, progress.Daily.WindowStart)
 }
 
+func TestCalculateProgress_DailyResetUsesRollingWindowStart(t *testing.T) {
+	svc := newTestSubscriptionService()
+	startsAt := time.Date(2026, 7, 31, 16, 49, 0, 0, time.UTC)
+	dailyStart := startsAt
+	sub := &UserSubscription{
+		ID:               1,
+		StartsAt:         startsAt,
+		ExpiresAt:        startsAt.Add(10 * 24 * time.Hour),
+		DailyWindowStart: ptrTime(dailyStart),
+	}
+	group := &Group{Name: "Pro", DailyLimitUSD: ptrFloat64(10)}
+
+	progress := svc.calculateProgress(sub, group)
+
+	require.NotNil(t, progress.Daily)
+	assert.Equal(t, startsAt.Add(24*time.Hour), progress.Daily.ResetsAt)
+}
+
 func TestCalculateProgress_DailyCardUsesExpiryAsDailyResetTime(t *testing.T) {
 	svc := newTestSubscriptionService()
 	startsAt := time.Now().Add(-12 * time.Hour)

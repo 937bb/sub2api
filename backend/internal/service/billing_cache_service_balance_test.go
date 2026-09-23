@@ -126,3 +126,45 @@ func TestSyncBalanceCacheAfterDeduction_QueuesDeductWhenBalanceStillEligible(t *
 		return cache.deductCalls.Load() == 1
 	}, 2*time.Second, 10*time.Millisecond)
 }
+
+func TestSyncSubscriptionCacheAfterBilling_InvalidatesWhenAuthorizedWindowChanged(t *testing.T) {
+	cache := &billingCacheWorkerStub{}
+	svc := NewBillingCacheService(cache, nil, nil, nil, nil, nil, &config.Config{}, nil)
+	t.Cleanup(svc.Stop)
+	groupID := int64(9)
+
+	syncSubscriptionCacheAfterBilling(context.Background(), &postUsageBillingParams{
+		Cost:         &CostBreakdown{ActualCost: 1.25},
+		User:         &User{ID: 7},
+		APIKey:       &APIKey{GroupID: &groupID},
+		Subscription: &UserSubscription{ID: 71, GroupID: groupID},
+	}, &billingDeps{billingCacheService: svc}, &UsageBillingApplyResult{
+		SubscriptionDailyUsageGuarded: true,
+		SubscriptionDailyUsageApplied: false,
+	})
+
+	require.Equal(t, int64(1), atomic.LoadInt64(&cache.subscriptionInvalidations))
+	require.Equal(t, int64(0), atomic.LoadInt64(&cache.subscriptionUpdates))
+}
+
+func TestSyncSubscriptionCacheAfterBilling_QueuesMatchingWindowUsage(t *testing.T) {
+	cache := &billingCacheWorkerStub{}
+	svc := NewBillingCacheService(cache, nil, nil, nil, nil, nil, &config.Config{}, nil)
+	t.Cleanup(svc.Stop)
+	groupID := int64(9)
+
+	syncSubscriptionCacheAfterBilling(context.Background(), &postUsageBillingParams{
+		Cost:         &CostBreakdown{ActualCost: 1.25},
+		User:         &User{ID: 7},
+		APIKey:       &APIKey{GroupID: &groupID},
+		Subscription: &UserSubscription{ID: 71, GroupID: groupID},
+	}, &billingDeps{billingCacheService: svc}, &UsageBillingApplyResult{
+		SubscriptionDailyUsageGuarded: true,
+		SubscriptionDailyUsageApplied: true,
+	})
+
+	require.Eventually(t, func() bool {
+		return atomic.LoadInt64(&cache.subscriptionUpdates) == 1
+	}, 2*time.Second, 10*time.Millisecond)
+	require.Equal(t, int64(0), atomic.LoadInt64(&cache.subscriptionInvalidations))
+}

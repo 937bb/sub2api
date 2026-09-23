@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
 	"github.com/stretchr/testify/require"
 )
 
@@ -51,7 +50,7 @@ func TestDelayedFirstUseAnchorsMonthlyWindowAtActivation(t *testing.T) {
 	require.NoError(t, svc.CheckAndActivateWindow(context.Background(), sub))
 
 	require.Equal(t, activatedAt, repo.periodicStart)
-	require.Equal(t, timezone.StartOfDay(activatedAt), repo.dailyStart)
+	require.Equal(t, activatedAt, repo.dailyStart)
 	monthlyWindowStart := repo.periodicStart
 	resetAt, ok := sub.automaticWindowStartAt(&monthlyWindowStart, 30*24*time.Hour, activatedAt.Add(30*24*time.Hour))
 	require.True(t, ok)
@@ -148,7 +147,8 @@ func TestNormalizeExpiredWindowsResetsMonthlyUsageWithPartialFinalPeriod(t *test
 	normalizeExpiredWindowsAt(subs, now)
 
 	require.Zero(t, subs[0].MonthlyUsageUSD)
-	require.Nil(t, subs[0].MonthlyWindowStart)
+	require.NotNil(t, subs[0].MonthlyWindowStart)
+	require.Equal(t, startsAt.Add(30*24*time.Hour), *subs[0].MonthlyWindowStart)
 }
 
 func TestValidateAndCheckLimitsKeepsLegacyMonthlyUsageBeforeExpiry(t *testing.T) {

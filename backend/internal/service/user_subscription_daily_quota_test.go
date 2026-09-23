@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
 	"github.com/stretchr/testify/require"
 )
 
@@ -59,7 +58,7 @@ func TestAssignOrExtendSubscription_ExpiredDailyCardStartsNewOneTimeQuota(t *tes
 	require.True(t, renewed.StartsAt.After(oldStart), "重新购买过期订阅时应重置当前周期 StartsAt")
 	require.False(t, renewed.ExpiresAt.After(renewed.StartsAt.AddDate(0, 0, 1)))
 	require.NotNil(t, renewed.DailyWindowStart)
-	require.Equal(t, timezone.StartOfDay(renewed.StartsAt), *renewed.DailyWindowStart, "续期后日窗口应锚定当天 0 点")
+	require.Equal(t, renewed.StartsAt, *renewed.DailyWindowStart, "续期后日窗口应从续期时刻开始")
 	require.Equal(t, 0.0, renewed.DailyUsageUSD)
 	require.Equal(t, 0.0, renewed.WeeklyUsageUSD)
 	require.Equal(t, 0.0, renewed.MonthlyUsageUSD)
@@ -97,7 +96,7 @@ func TestAssignOrExtendSubscription_ExpiredSubscriptionAppendsMatchingNotes(t *t
 
 func TestUserSubscriptionNeedsDailyReset_DailyCardKeepsOneTimeQuota(t *testing.T) {
 	start := time.Date(2026, 5, 18, 12, 0, 0, 0, time.UTC)
-	dailyWindowStart := time.Date(2026, 5, 18, 0, 0, 0, 0, time.UTC)
+	dailyWindowStart := start
 	sub := &UserSubscription{
 		StartsAt:         start,
 		ExpiresAt:        start.Add(24 * time.Hour),
@@ -106,7 +105,7 @@ func TestUserSubscriptionNeedsDailyReset_DailyCardKeepsOneTimeQuota(t *testing.T
 	}
 
 	require.True(t, sub.HasOneTimeDailyQuota())
-	require.False(t, sub.NeedsDailyResetAt(dailyWindowStart.Add(25*time.Hour)), "日卡应作为一次性配额，跨 0 点后不再刷新日额度")
+	require.False(t, sub.NeedsDailyResetAt(dailyWindowStart.Add(25*time.Hour)), "日卡应作为一次性配额，跨滚动窗口后不再刷新日额度")
 }
 
 func TestUserSubscriptionNeedsDailyReset_MultiDaySubscriptionStillRefreshes(t *testing.T) {
@@ -119,7 +118,8 @@ func TestUserSubscriptionNeedsDailyReset_MultiDaySubscriptionStillRefreshes(t *t
 	}
 
 	require.False(t, sub.HasOneTimeDailyQuota())
-	require.True(t, sub.NeedsDailyResetAt(dailyWindowStart.Add(24*time.Hour)), "多日订阅仍应按 24 小时日窗口刷新")
+	require.False(t, sub.NeedsDailyResetAt(dailyWindowStart.Add(24*time.Hour-time.Nanosecond)))
+	require.True(t, sub.NeedsDailyResetAt(dailyWindowStart.Add(24*time.Hour)), "多日订阅应在窗口开始后满 24 小时刷新")
 }
 
 func TestUserSubscriptionDailyResetTime_DailyCardReturnsExpiry(t *testing.T) {
@@ -184,7 +184,7 @@ func TestCheckAndResetWindows_MultiDaySubscriptionStillResetsDailyUsage(t *testi
 	require.Equal(t, 0.0, sub.DailyUsageUSD)
 }
 
-func TestValidateAndCheckLimits_DailyCardDoesNotAllowSecondQuotaAfterMidnight(t *testing.T) {
+func TestValidateAndCheckLimits_DailyCardDoesNotAllowSecondQuotaAfterRollingWindow(t *testing.T) {
 	start := time.Now().Add(-23 * time.Hour)
 	dailyWindowStart := time.Now().Add(-25 * time.Hour)
 	dailyLimit := 10.0
@@ -206,4 +206,48 @@ func TestValidateAndCheckLimits_DailyCardDoesNotAllowSecondQuotaAfterMidnight(t 
 	require.False(t, needsMaintenance, "日卡跨过日窗口后不应触发 daily reset 维护")
 	require.True(t, errors.Is(err, ErrDailyLimitExceeded))
 	require.Equal(t, dailyLimit+0.01, sub.DailyUsageUSD, "热路径不应清零日卡已用额度")
+}
+
+func TestAddSubscriptionDaysUsesExact24HourPeriodsAcrossDST(t *testing.T) {
+	location, err := time.LoadLocation("America/Los_Angeles")
+	require.NoError(t, err)
+
+	tests := []struct {
+		name         string
+		start        time.Time
+		days         int
+		wantDuration time.Duration
+	}{
+		{
+			name:         "add across spring forward",
+			start:        time.Date(2026, time.March, 8, 0, 30, 0, 0, location),
+			days:         1,
+			wantDuration: 24 * time.Hour,
+		},
+		{
+			name:         "add across fall back",
+			start:        time.Date(2026, time.November, 1, 0, 30, 0, 0, location),
+			days:         1,
+			wantDuration: 24 * time.Hour,
+		},
+		{
+			name:         "subtract across spring forward",
+			start:        time.Date(2026, time.March, 9, 0, 30, 0, 0, location),
+			days:         -1,
+			wantDuration: -24 * time.Hour,
+		},
+		{
+			name:         "subtract across fall back",
+			start:        time.Date(2026, time.November, 2, 0, 30, 0, 0, location),
+			days:         -1,
+			wantDuration: -24 * time.Hour,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := addSubscriptionDays(tt.start, tt.days)
+			require.Equal(t, tt.wantDuration, got.Sub(tt.start))
+		})
+	}
 }

@@ -138,6 +138,8 @@ func RegisterUserRoutes(
 			subscriptions.GET("/active", h.Subscription.GetActive)
 			subscriptions.GET("/progress", h.Subscription.GetProgress)
 			subscriptions.GET("/summary", h.Subscription.GetSummary)
+			subscriptions.GET("/:id/advance-daily-quota-preview", h.Subscription.GetDailyQuotaAdvancePreview)
+			subscriptions.POST("/:id/advance-daily-quota", h.Subscription.AdvanceDailyQuota)
 		}
 
 		// 渠道监控（用户只读）
