@@ -22233,6 +22233,7 @@ type GroupMutation struct {
 	appendreasoning_effort_mappings              []domain.ReasoningEffortMapping
 	quota_bypass_enabled                         *bool
 	quota_bypass_concentrated_scheduling_enabled *bool
+	openai_upstream_mode                         *string
 	profit_control_enabled                       *bool
 	profit_min_margin                            *float64
 	addprofit_min_margin                         *float64
@@ -25712,6 +25713,42 @@ func (m *GroupMutation) ResetQuotaBypassConcentratedSchedulingEnabled() {
 	m.quota_bypass_concentrated_scheduling_enabled = nil
 }
 
+// SetOpenaiUpstreamMode sets the "openai_upstream_mode" field.
+func (m *GroupMutation) SetOpenaiUpstreamMode(s string) {
+	m.openai_upstream_mode = &s
+}
+
+// OpenaiUpstreamMode returns the value of the "openai_upstream_mode" field in the mutation.
+func (m *GroupMutation) OpenaiUpstreamMode() (r string, exists bool) {
+	v := m.openai_upstream_mode
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldOpenaiUpstreamMode returns the old "openai_upstream_mode" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldOpenaiUpstreamMode(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldOpenaiUpstreamMode is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldOpenaiUpstreamMode requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldOpenaiUpstreamMode: %w", err)
+	}
+	return oldValue.OpenaiUpstreamMode, nil
+}
+
+// ResetOpenaiUpstreamMode resets all changes to the "openai_upstream_mode" field.
+func (m *GroupMutation) ResetOpenaiUpstreamMode() {
+	m.openai_upstream_mode = nil
+}
+
 // SetProfitControlEnabled sets the "profit_control_enabled" field.
 func (m *GroupMutation) SetProfitControlEnabled(b bool) {
 	m.profit_control_enabled = &b
@@ -26218,7 +26255,7 @@ func (m *GroupMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *GroupMutation) Fields() []string {
-	fields := make([]string, 0, 72)
+	fields := make([]string, 0, 73)
 	if m.created_at != nil {
 		fields = append(fields, group.FieldCreatedAt)
 	}
@@ -26426,6 +26463,9 @@ func (m *GroupMutation) Fields() []string {
 	if m.quota_bypass_concentrated_scheduling_enabled != nil {
 		fields = append(fields, group.FieldQuotaBypassConcentratedSchedulingEnabled)
 	}
+	if m.openai_upstream_mode != nil {
+		fields = append(fields, group.FieldOpenaiUpstreamMode)
+	}
 	if m.profit_control_enabled != nil {
 		fields = append(fields, group.FieldProfitControlEnabled)
 	}
@@ -26581,6 +26621,8 @@ func (m *GroupMutation) Field(name string) (ent.Value, bool) {
 		return m.QuotaBypassEnabled()
 	case group.FieldQuotaBypassConcentratedSchedulingEnabled:
 		return m.QuotaBypassConcentratedSchedulingEnabled()
+	case group.FieldOpenaiUpstreamMode:
+		return m.OpenaiUpstreamMode()
 	case group.FieldProfitControlEnabled:
 		return m.ProfitControlEnabled()
 	case group.FieldProfitMinMargin:
@@ -26734,6 +26776,8 @@ func (m *GroupMutation) OldField(ctx context.Context, name string) (ent.Value, e
 		return m.OldQuotaBypassEnabled(ctx)
 	case group.FieldQuotaBypassConcentratedSchedulingEnabled:
 		return m.OldQuotaBypassConcentratedSchedulingEnabled(ctx)
+	case group.FieldOpenaiUpstreamMode:
+		return m.OldOpenaiUpstreamMode(ctx)
 	case group.FieldProfitControlEnabled:
 		return m.OldProfitControlEnabled(ctx)
 	case group.FieldProfitMinMargin:
@@ -27231,6 +27275,13 @@ func (m *GroupMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetQuotaBypassConcentratedSchedulingEnabled(v)
+		return nil
+	case group.FieldOpenaiUpstreamMode:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetOpenaiUpstreamMode(v)
 		return nil
 	case group.FieldProfitControlEnabled:
 		v, ok := value.(bool)
@@ -27982,6 +28033,9 @@ func (m *GroupMutation) ResetField(name string) error {
 		return nil
 	case group.FieldQuotaBypassConcentratedSchedulingEnabled:
 		m.ResetQuotaBypassConcentratedSchedulingEnabled()
+		return nil
+	case group.FieldOpenaiUpstreamMode:
+		m.ResetOpenaiUpstreamMode()
 		return nil
 	case group.FieldProfitControlEnabled:
 		m.ResetProfitControlEnabled()

@@ -231,6 +231,7 @@ func groupFromServiceBase(g *service.Group) Group {
 		ReasoningEffortMappings:                  g.ReasoningEffortMappings,
 		QuotaBypassEnabled:                       g.QuotaBypassEnabled,
 		QuotaBypassConcentratedSchedulingEnabled: g.QuotaBypassConcentratedSchedulingEnabled,
+		OpenAIUpstreamMode:                       service.NormalizeOpenAIUpstreamMode(g.OpenAIUpstreamMode),
 		CreatedAt:                                g.CreatedAt,
 		UpdatedAt:                                g.UpdatedAt,
 	}

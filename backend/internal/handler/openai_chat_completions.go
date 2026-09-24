@@ -248,6 +248,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 				}
 			}()
 			service.SetOpenAIQuotaBypassEnabled(c, service.IsQuotaBypassEligible(account, apiKey.Group))
+			service.SetOpenAIUpstreamMode(c, service.OpenAIUpstreamModeForGroup(apiKey.Group))
 			return h.gatewayService.ForwardAsChatCompletions(c.Request.Context(), c, account, forwardBody, promptCacheKey, "")
 		}()
 		var cyberBlockBodyChat []byte

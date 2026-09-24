@@ -355,6 +355,11 @@ func QuotaBypassConcentratedSchedulingEnabled(v bool) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldQuotaBypassConcentratedSchedulingEnabled, v))
 }
 
+// OpenaiUpstreamMode applies equality check predicate on the "openai_upstream_mode" field. It's identical to OpenaiUpstreamModeEQ.
+func OpenaiUpstreamMode(v string) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldOpenaiUpstreamMode, v))
+}
+
 // ProfitControlEnabled applies equality check predicate on the "profit_control_enabled" field. It's identical to ProfitControlEnabledEQ.
 func ProfitControlEnabled(v bool) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldProfitControlEnabled, v))
@@ -2663,6 +2668,71 @@ func QuotaBypassConcentratedSchedulingEnabledEQ(v bool) predicate.Group {
 // QuotaBypassConcentratedSchedulingEnabledNEQ applies the NEQ predicate on the "quota_bypass_concentrated_scheduling_enabled" field.
 func QuotaBypassConcentratedSchedulingEnabledNEQ(v bool) predicate.Group {
 	return predicate.Group(sql.FieldNEQ(FieldQuotaBypassConcentratedSchedulingEnabled, v))
+}
+
+// OpenaiUpstreamModeEQ applies the EQ predicate on the "openai_upstream_mode" field.
+func OpenaiUpstreamModeEQ(v string) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldOpenaiUpstreamMode, v))
+}
+
+// OpenaiUpstreamModeNEQ applies the NEQ predicate on the "openai_upstream_mode" field.
+func OpenaiUpstreamModeNEQ(v string) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldOpenaiUpstreamMode, v))
+}
+
+// OpenaiUpstreamModeIn applies the In predicate on the "openai_upstream_mode" field.
+func OpenaiUpstreamModeIn(vs ...string) predicate.Group {
+	return predicate.Group(sql.FieldIn(FieldOpenaiUpstreamMode, vs...))
+}
+
+// OpenaiUpstreamModeNotIn applies the NotIn predicate on the "openai_upstream_mode" field.
+func OpenaiUpstreamModeNotIn(vs ...string) predicate.Group {
+	return predicate.Group(sql.FieldNotIn(FieldOpenaiUpstreamMode, vs...))
+}
+
+// OpenaiUpstreamModeGT applies the GT predicate on the "openai_upstream_mode" field.
+func OpenaiUpstreamModeGT(v string) predicate.Group {
+	return predicate.Group(sql.FieldGT(FieldOpenaiUpstreamMode, v))
+}
+
+// OpenaiUpstreamModeGTE applies the GTE predicate on the "openai_upstream_mode" field.
+func OpenaiUpstreamModeGTE(v string) predicate.Group {
+	return predicate.Group(sql.FieldGTE(FieldOpenaiUpstreamMode, v))
+}
+
+// OpenaiUpstreamModeLT applies the LT predicate on the "openai_upstream_mode" field.
+func OpenaiUpstreamModeLT(v string) predicate.Group {
+	return predicate.Group(sql.FieldLT(FieldOpenaiUpstreamMode, v))
+}
+
+// OpenaiUpstreamModeLTE applies the LTE predicate on the "openai_upstream_mode" field.
+func OpenaiUpstreamModeLTE(v string) predicate.Group {
+	return predicate.Group(sql.FieldLTE(FieldOpenaiUpstreamMode, v))
+}
+
+// OpenaiUpstreamModeContains applies the Contains predicate on the "openai_upstream_mode" field.
+func OpenaiUpstreamModeContains(v string) predicate.Group {
+	return predicate.Group(sql.FieldContains(FieldOpenaiUpstreamMode, v))
+}
+
+// OpenaiUpstreamModeHasPrefix applies the HasPrefix predicate on the "openai_upstream_mode" field.
+func OpenaiUpstreamModeHasPrefix(v string) predicate.Group {
+	return predicate.Group(sql.FieldHasPrefix(FieldOpenaiUpstreamMode, v))
+}
+
+// OpenaiUpstreamModeHasSuffix applies the HasSuffix predicate on the "openai_upstream_mode" field.
+func OpenaiUpstreamModeHasSuffix(v string) predicate.Group {
+	return predicate.Group(sql.FieldHasSuffix(FieldOpenaiUpstreamMode, v))
+}
+
+// OpenaiUpstreamModeEqualFold applies the EqualFold predicate on the "openai_upstream_mode" field.
+func OpenaiUpstreamModeEqualFold(v string) predicate.Group {
+	return predicate.Group(sql.FieldEqualFold(FieldOpenaiUpstreamMode, v))
+}
+
+// OpenaiUpstreamModeContainsFold applies the ContainsFold predicate on the "openai_upstream_mode" field.
+func OpenaiUpstreamModeContainsFold(v string) predicate.Group {
+	return predicate.Group(sql.FieldContainsFold(FieldOpenaiUpstreamMode, v))
 }
 
 // ProfitControlEnabledEQ applies the EQ predicate on the "profit_control_enabled" field.

@@ -164,7 +164,8 @@ type Group struct {
 	// QuotaBypassEnabled applies to eligible OpenAI OAuth accounts regardless of subscription plan.
 	QuotaBypassEnabled bool `json:"quota_bypass_enabled"`
 	// QuotaBypassConcentratedSchedulingEnabled enables request-group-scoped fill-first scheduling.
-	QuotaBypassConcentratedSchedulingEnabled bool `json:"quota_bypass_concentrated_scheduling_enabled"`
+	QuotaBypassConcentratedSchedulingEnabled bool   `json:"quota_bypass_concentrated_scheduling_enabled"`
+	OpenAIUpstreamMode                       string `json:"openai_upstream_mode"`
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`

@@ -124,10 +124,10 @@ func TestOpenAISetupTokenWSCompatibility(t *testing.T) {
 	}
 	svc := &OpenAIGatewayService{cfg: &config.Config{}}
 
-	wsURL, err := svc.buildOpenAIResponsesWSURL(account)
+	wsURL, err := svc.buildOpenAIResponsesWSURL(nil, account)
 	require.NoError(t, err)
 	require.Equal(t, "wss://chatgpt.com/backend-api/codex/responses", wsURL)
-	foreignURL, err := svc.buildOpenAIResponsesWSURL(&Account{Platform: PlatformGrok, Type: AccountTypeSetupToken})
+	foreignURL, err := svc.buildOpenAIResponsesWSURL(nil, &Account{Platform: PlatformGrok, Type: AccountTypeSetupToken})
 	require.NoError(t, err)
 	require.Equal(t, "wss://api.openai.com/v1/responses", foreignURL)
 

@@ -1255,16 +1255,22 @@ func init() {
 	groupDescQuotaBypassConcentratedSchedulingEnabled := groupFields[65].Descriptor()
 	// group.DefaultQuotaBypassConcentratedSchedulingEnabled holds the default value on creation for the quota_bypass_concentrated_scheduling_enabled field.
 	group.DefaultQuotaBypassConcentratedSchedulingEnabled = groupDescQuotaBypassConcentratedSchedulingEnabled.Default.(bool)
+	// groupDescOpenaiUpstreamMode is the schema descriptor for openai_upstream_mode field.
+	groupDescOpenaiUpstreamMode := groupFields[66].Descriptor()
+	// group.DefaultOpenaiUpstreamMode holds the default value on creation for the openai_upstream_mode field.
+	group.DefaultOpenaiUpstreamMode = groupDescOpenaiUpstreamMode.Default.(string)
+	// group.OpenaiUpstreamModeValidator is a validator for the "openai_upstream_mode" field. It is called by the builders before save.
+	group.OpenaiUpstreamModeValidator = groupDescOpenaiUpstreamMode.Validators[0].(func(string) error)
 	// groupDescProfitControlEnabled is the schema descriptor for profit_control_enabled field.
-	groupDescProfitControlEnabled := groupFields[66].Descriptor()
+	groupDescProfitControlEnabled := groupFields[67].Descriptor()
 	// group.DefaultProfitControlEnabled holds the default value on creation for the profit_control_enabled field.
 	group.DefaultProfitControlEnabled = groupDescProfitControlEnabled.Default.(bool)
 	// groupDescProfitMinMargin is the schema descriptor for profit_min_margin field.
-	groupDescProfitMinMargin := groupFields[67].Descriptor()
+	groupDescProfitMinMargin := groupFields[68].Descriptor()
 	// group.DefaultProfitMinMargin holds the default value on creation for the profit_min_margin field.
 	group.DefaultProfitMinMargin = groupDescProfitMinMargin.Default.(float64)
 	// groupDescProfitSafetyBuffer is the schema descriptor for profit_safety_buffer field.
-	groupDescProfitSafetyBuffer := groupFields[68].Descriptor()
+	groupDescProfitSafetyBuffer := groupFields[69].Descriptor()
 	// group.DefaultProfitSafetyBuffer holds the default value on creation for the profit_safety_buffer field.
 	group.DefaultProfitSafetyBuffer = groupDescProfitSafetyBuffer.Default.(float64)
 	idempotencyrecordMixin := schema.IdempotencyRecord{}.Mixin()

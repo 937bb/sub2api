@@ -42,7 +42,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	account = s.withOpenAICodexInstallationID(ctx, account)
 	responseModelObserver := &upstreamResponseModelObserver{}
 
-	wsURL, err := s.buildOpenAIResponsesWSURL(account)
+	wsURL, err := s.buildOpenAIResponsesWSURL(c, account)
 	if err != nil {
 		return nil, wrapOpenAIWSFallback("build_ws_url", err)
 	}
@@ -64,10 +64,11 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		wsPath,
 	)
 
-	payload := s.buildOpenAIWSCreatePayload(reqBody, account)
+	payload := s.buildOpenAIWSCreatePayloadForRequest(c, reqBody, account)
+	wordUpstream := isOpenAIWordUpstream(c, account)
 	// Codex carries Lite mode on each response.create frame, not on the
 	// WebSocket upgrade. Preserve the HTTP mode alongside its normalized body.
-	if c != nil && account.IsOpenAI() && isOpenAIResponsesLiteHeader(c.GetHeader(responsesLiteHeader)) {
+	if !wordUpstream && c != nil && account.IsOpenAI() && isOpenAIResponsesLiteHeader(c.GetHeader(responsesLiteHeader)) {
 		setOpenAIWSClientMetadata(payload, responsesLiteWSMetadataKey, "true")
 	}
 	payloadStrategy, removedKeys := applyOpenAIWSRetryPayloadStrategy(payload, attempt)
@@ -77,11 +78,13 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		turnState = strings.TrimSpace(c.GetHeader(openAIWSTurnStateHeader))
 		turnMetadata = strings.TrimSpace(c.GetHeader(openAIWSTurnMetadataHeader))
 	}
-	scopedTurnMetadata := map[string]any{openAIWSTurnMetadataHeader: turnMetadata}
-	applyCodexAccountIdentityEmbeddedMetadata(scopedTurnMetadata, codexAccountIdentitySource(c, account), getAPIKeyIDFromContext(c))
-	scopedMetadata, _ := scopedTurnMetadata[openAIWSTurnMetadataHeader].(string)
-	setOpenAIWSTurnMetadata(payload, scopedMetadata)
-	applyStagedCodexFingerprintClientMetadata(c, account, payload)
+	if !wordUpstream {
+		scopedTurnMetadata := map[string]any{openAIWSTurnMetadataHeader: turnMetadata}
+		applyCodexAccountIdentityEmbeddedMetadata(scopedTurnMetadata, codexAccountIdentitySource(c, account), getAPIKeyIDFromContext(c))
+		scopedMetadata, _ := scopedTurnMetadata[openAIWSTurnMetadataHeader].(string)
+		setOpenAIWSTurnMetadata(payload, scopedMetadata)
+		applyStagedCodexFingerprintClientMetadata(c, account, payload)
+	}
 	if err := validateMode1StagedRequest(c, account, payloadAsJSONBytes(payload)); err != nil {
 		return nil, err
 	}

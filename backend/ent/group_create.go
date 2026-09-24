@@ -940,6 +940,20 @@ func (_c *GroupCreate) SetNillableQuotaBypassConcentratedSchedulingEnabled(v *bo
 	return _c
 }
 
+// SetOpenaiUpstreamMode sets the "openai_upstream_mode" field.
+func (_c *GroupCreate) SetOpenaiUpstreamMode(v string) *GroupCreate {
+	_c.mutation.SetOpenaiUpstreamMode(v)
+	return _c
+}
+
+// SetNillableOpenaiUpstreamMode sets the "openai_upstream_mode" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableOpenaiUpstreamMode(v *string) *GroupCreate {
+	if v != nil {
+		_c.SetOpenaiUpstreamMode(*v)
+	}
+	return _c
+}
+
 // SetProfitControlEnabled sets the "profit_control_enabled" field.
 func (_c *GroupCreate) SetProfitControlEnabled(v bool) *GroupCreate {
 	_c.mutation.SetProfitControlEnabled(v)
@@ -1299,6 +1313,10 @@ func (_c *GroupCreate) defaults() error {
 		v := group.DefaultQuotaBypassConcentratedSchedulingEnabled
 		_c.mutation.SetQuotaBypassConcentratedSchedulingEnabled(v)
 	}
+	if _, ok := _c.mutation.OpenaiUpstreamMode(); !ok {
+		v := group.DefaultOpenaiUpstreamMode
+		_c.mutation.SetOpenaiUpstreamMode(v)
+	}
 	if _, ok := _c.mutation.ProfitControlEnabled(); !ok {
 		v := group.DefaultProfitControlEnabled
 		_c.mutation.SetProfitControlEnabled(v)
@@ -1531,6 +1549,14 @@ func (_c *GroupCreate) check() error {
 	}
 	if _, ok := _c.mutation.QuotaBypassConcentratedSchedulingEnabled(); !ok {
 		return &ValidationError{Name: "quota_bypass_concentrated_scheduling_enabled", err: errors.New(`ent: missing required field "Group.quota_bypass_concentrated_scheduling_enabled"`)}
+	}
+	if _, ok := _c.mutation.OpenaiUpstreamMode(); !ok {
+		return &ValidationError{Name: "openai_upstream_mode", err: errors.New(`ent: missing required field "Group.openai_upstream_mode"`)}
+	}
+	if v, ok := _c.mutation.OpenaiUpstreamMode(); ok {
+		if err := group.OpenaiUpstreamModeValidator(v); err != nil {
+			return &ValidationError{Name: "openai_upstream_mode", err: fmt.Errorf(`ent: validator failed for field "Group.openai_upstream_mode": %w`, err)}
+		}
 	}
 	if _, ok := _c.mutation.ProfitControlEnabled(); !ok {
 		return &ValidationError{Name: "profit_control_enabled", err: errors.New(`ent: missing required field "Group.profit_control_enabled"`)}
@@ -1843,6 +1869,10 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.QuotaBypassConcentratedSchedulingEnabled(); ok {
 		_spec.SetField(group.FieldQuotaBypassConcentratedSchedulingEnabled, field.TypeBool, value)
 		_node.QuotaBypassConcentratedSchedulingEnabled = value
+	}
+	if value, ok := _c.mutation.OpenaiUpstreamMode(); ok {
+		_spec.SetField(group.FieldOpenaiUpstreamMode, field.TypeString, value)
+		_node.OpenaiUpstreamMode = value
 	}
 	if value, ok := _c.mutation.ProfitControlEnabled(); ok {
 		_spec.SetField(group.FieldProfitControlEnabled, field.TypeBool, value)
@@ -3095,6 +3125,18 @@ func (u *GroupUpsert) SetQuotaBypassConcentratedSchedulingEnabled(v bool) *Group
 // UpdateQuotaBypassConcentratedSchedulingEnabled sets the "quota_bypass_concentrated_scheduling_enabled" field to the value that was provided on create.
 func (u *GroupUpsert) UpdateQuotaBypassConcentratedSchedulingEnabled() *GroupUpsert {
 	u.SetExcluded(group.FieldQuotaBypassConcentratedSchedulingEnabled)
+	return u
+}
+
+// SetOpenaiUpstreamMode sets the "openai_upstream_mode" field.
+func (u *GroupUpsert) SetOpenaiUpstreamMode(v string) *GroupUpsert {
+	u.Set(group.FieldOpenaiUpstreamMode, v)
+	return u
+}
+
+// UpdateOpenaiUpstreamMode sets the "openai_upstream_mode" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateOpenaiUpstreamMode() *GroupUpsert {
+	u.SetExcluded(group.FieldOpenaiUpstreamMode)
 	return u
 }
 
@@ -4458,6 +4500,20 @@ func (u *GroupUpsertOne) SetQuotaBypassConcentratedSchedulingEnabled(v bool) *Gr
 func (u *GroupUpsertOne) UpdateQuotaBypassConcentratedSchedulingEnabled() *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateQuotaBypassConcentratedSchedulingEnabled()
+	})
+}
+
+// SetOpenaiUpstreamMode sets the "openai_upstream_mode" field.
+func (u *GroupUpsertOne) SetOpenaiUpstreamMode(v string) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetOpenaiUpstreamMode(v)
+	})
+}
+
+// UpdateOpenaiUpstreamMode sets the "openai_upstream_mode" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateOpenaiUpstreamMode() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateOpenaiUpstreamMode()
 	})
 }
 
@@ -5995,6 +6051,20 @@ func (u *GroupUpsertBulk) SetQuotaBypassConcentratedSchedulingEnabled(v bool) *G
 func (u *GroupUpsertBulk) UpdateQuotaBypassConcentratedSchedulingEnabled() *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateQuotaBypassConcentratedSchedulingEnabled()
+	})
+}
+
+// SetOpenaiUpstreamMode sets the "openai_upstream_mode" field.
+func (u *GroupUpsertBulk) SetOpenaiUpstreamMode(v string) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetOpenaiUpstreamMode(v)
+	})
+}
+
+// UpdateOpenaiUpstreamMode sets the "openai_upstream_mode" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateOpenaiUpstreamMode() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateOpenaiUpstreamMode()
 	})
 }
 

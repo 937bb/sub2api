@@ -310,6 +310,8 @@ type CreateGroupInput struct {
 	QuotaBypassEnabled bool
 	// QuotaBypassConcentratedSchedulingEnabled 是否启用超额绕过集中调度
 	QuotaBypassConcentratedSchedulingEnabled bool
+	// OpenAIUpstreamMode selects codex or word for OpenAI OAuth requests.
+	OpenAIUpstreamMode string
 	// 分组利润控制（五个 token 平台分组可启用；margin/buffer 为小数，nil 按 0 处理）
 	ProfitControlEnabled bool
 	ProfitMinMargin      *float64
@@ -397,6 +399,8 @@ type UpdateGroupInput struct {
 	QuotaBypassEnabled *bool
 	// QuotaBypassConcentratedSchedulingEnabled nil 表示不修改
 	QuotaBypassConcentratedSchedulingEnabled *bool
+	// OpenAIUpstreamMode nil 表示不修改；支持 codex/word。
+	OpenAIUpstreamMode *string
 	// 分组利润控制（nil 表示不修改；margin/buffer 为小数）
 	ProfitControlEnabled *bool
 	ProfitMinMargin      *float64

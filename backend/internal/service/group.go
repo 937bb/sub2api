@@ -15,6 +15,20 @@ type OpenAIMessagesDispatchModelConfig = domain.OpenAIMessagesDispatchModelConfi
 type GroupCodexModelsManifestConfig = domain.GroupCodexModelsManifestConfig
 type ReasoningEffortMapping = domain.ReasoningEffortMapping
 
+const (
+	OpenAIUpstreamModeCodex = "codex"
+	OpenAIUpstreamModeWord  = "word"
+)
+
+func NormalizeOpenAIUpstreamMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case OpenAIUpstreamModeWord:
+		return OpenAIUpstreamModeWord
+	default:
+		return OpenAIUpstreamModeCodex
+	}
+}
+
 type Group struct {
 	ID             int64
 	Name           string
@@ -130,6 +144,8 @@ type Group struct {
 	QuotaBypassEnabled bool
 	// QuotaBypassConcentratedSchedulingEnabled enables Bypass-first fill-first scheduling for this request group.
 	QuotaBypassConcentratedSchedulingEnabled bool
+	// OpenAIUpstreamMode selects the OAuth Responses upstream for this request group.
+	OpenAIUpstreamMode string
 	// 分组利润控制（五个 token 计费平台可启用）。
 	// 调度准入条件：账号倍率 U 满足 U <= D*(1-margin-buffer)，
 	// D 为请求用户当刻有效下游倍率（用户覆盖 ?? 分组默认，再乘高峰因子）。

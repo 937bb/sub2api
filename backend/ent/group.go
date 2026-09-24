@@ -158,6 +158,8 @@ type Group struct {
 	QuotaBypassEnabled bool `json:"quota_bypass_enabled,omitempty"`
 	// 是否对该分组启用 Codex 超额绕过集中调度
 	QuotaBypassConcentratedSchedulingEnabled bool `json:"quota_bypass_concentrated_scheduling_enabled,omitempty"`
+	// OpenAI OAuth upstream mode: codex or word
+	OpenaiUpstreamMode string `json:"openai_upstream_mode,omitempty"`
 	// 是否启用利润控制：调度时仅允许账号计费倍率满足毛利率要求的账号进入候选池
 	ProfitControlEnabled bool `json:"profit_control_enabled,omitempty"`
 	// 最低毛利率，小数（0.30=30%）；账号准入条件为 U <= D*(1-margin-buffer)
@@ -278,7 +280,7 @@ func (*Group) scanValues(columns []string) ([]any, error) {
 			values[i] = new(sql.NullFloat64)
 		case group.FieldID, group.FieldDefaultValidityDays, group.FieldFallbackGroupID, group.FieldFallbackGroupIDOnInvalidRequest, group.FieldSortOrder, group.FieldOpenaiTransientErrorRetryCount, group.FieldRpmLimit:
 			values[i] = new(sql.NullInt64)
-		case group.FieldName, group.FieldDescription, group.FieldPeakStart, group.FieldPeakEnd, group.FieldStatus, group.FieldDuplicateOperationID, group.FieldPlatform, group.FieldSubscriptionType, group.FieldDefaultMappedModel, group.FieldMaxReasoningEffort, group.FieldMaxReasoningEffortOverLimit:
+		case group.FieldName, group.FieldDescription, group.FieldPeakStart, group.FieldPeakEnd, group.FieldStatus, group.FieldDuplicateOperationID, group.FieldPlatform, group.FieldSubscriptionType, group.FieldDefaultMappedModel, group.FieldMaxReasoningEffort, group.FieldMaxReasoningEffortOverLimit, group.FieldOpenaiUpstreamMode:
 			values[i] = new(sql.NullString)
 		case group.FieldCreatedAt, group.FieldUpdatedAt, group.FieldDeletedAt:
 			values[i] = new(sql.NullTime)
@@ -754,6 +756,12 @@ func (_m *Group) assignValues(columns []string, values []any) error {
 			} else if value.Valid {
 				_m.QuotaBypassConcentratedSchedulingEnabled = value.Bool
 			}
+		case group.FieldOpenaiUpstreamMode:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field openai_upstream_mode", values[i])
+			} else if value.Valid {
+				_m.OpenaiUpstreamMode = value.String
+			}
 		case group.FieldProfitControlEnabled:
 			if value, ok := values[i].(*sql.NullBool); !ok {
 				return fmt.Errorf("unexpected type %T for field profit_control_enabled", values[i])
@@ -1092,6 +1100,9 @@ func (_m *Group) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("quota_bypass_concentrated_scheduling_enabled=")
 	builder.WriteString(fmt.Sprintf("%v", _m.QuotaBypassConcentratedSchedulingEnabled))
+	builder.WriteString(", ")
+	builder.WriteString("openai_upstream_mode=")
+	builder.WriteString(_m.OpenaiUpstreamMode)
 	builder.WriteString(", ")
 	builder.WriteString("profit_control_enabled=")
 	builder.WriteString(fmt.Sprintf("%v", _m.ProfitControlEnabled))

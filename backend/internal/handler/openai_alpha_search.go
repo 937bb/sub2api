@@ -183,6 +183,7 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 				defer accountRelease()
 			}
 			service.SetOpenAIQuotaBypassEnabled(c, service.IsQuotaBypassEligible(account, apiKey.Group))
+			service.SetOpenAIUpstreamMode(c, service.OpenAIUpstreamModeForGroup(apiKey.Group))
 			return h.gatewayService.ForwardAlphaSearch(c.Request.Context(), c, account, forwardBody)
 		}()
 		service.SetOpsLatencyMs(c, service.OpsResponseLatencyMsKey, time.Since(forwardStart).Milliseconds())

@@ -612,10 +612,12 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		ReasoningEffortMappings:                  reasoningEffortMappings,
 		QuotaBypassEnabled:                       input.QuotaBypassEnabled,
 		QuotaBypassConcentratedSchedulingEnabled: input.QuotaBypassConcentratedSchedulingEnabled,
+		OpenAIUpstreamMode:                       NormalizeOpenAIUpstreamMode(input.OpenAIUpstreamMode),
 	}
 	sanitizeGroupMessagesDispatchFields(group)
 	if group.Platform != PlatformOpenAI && group.Platform != PlatformComposite {
 		group.AllowLive = false
+		group.OpenAIUpstreamMode = OpenAIUpstreamModeCodex
 		group.OpenAIModelMappingEnabled = false
 		group.OpenAIModelMapping = map[string]string{}
 		group.OpenAITransientErrorRetryEnabled = false
@@ -1044,9 +1046,13 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	if input.QuotaBypassConcentratedSchedulingEnabled != nil {
 		group.QuotaBypassConcentratedSchedulingEnabled = *input.QuotaBypassConcentratedSchedulingEnabled
 	}
+	if input.OpenAIUpstreamMode != nil {
+		group.OpenAIUpstreamMode = NormalizeOpenAIUpstreamMode(*input.OpenAIUpstreamMode)
+	}
 	sanitizeGroupMessagesDispatchFields(group)
 	if group.Platform != PlatformOpenAI && group.Platform != PlatformComposite {
 		group.AllowLive = false
+		group.OpenAIUpstreamMode = OpenAIUpstreamModeCodex
 		group.ForceOpenAIFast = false
 		group.FreeOpenAIFast = false
 		group.OpenAIModelMappingEnabled = false

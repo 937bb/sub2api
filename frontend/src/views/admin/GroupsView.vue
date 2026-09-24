@@ -647,6 +647,24 @@
           v-model:over-limit="createForm.max_reasoning_effort_over_limit"
           v-model:mappings="createForm.reasoning_effort_mappings"
         />
+        <div v-if="createForm.platform === 'openai'" class="form-group">
+          <label class="input-label">{{ t("admin.groups.openaiUpstreamMode.title") }}</label>
+          <div class="inline-flex rounded-md border border-gray-300 p-0.5 dark:border-gray-600">
+            <button
+              v-for="mode in openAIUpstreamModes"
+              :key="mode"
+              type="button"
+              class="rounded px-3 py-1.5 text-sm font-medium transition-colors"
+              :class="createForm.openai_upstream_mode === mode
+                ? 'bg-indigo-600 text-white shadow-sm'
+                : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'"
+              @click="createForm.openai_upstream_mode = mode"
+            >
+              {{ t(`admin.groups.openaiUpstreamMode.${mode}`) }}
+            </button>
+          </div>
+          <p class="input-hint">{{ t("admin.groups.openaiUpstreamMode.hint") }}</p>
+        </div>
         <div
           v-if="createForm.platform === 'openai'"
           class="flex flex-wrap items-center gap-x-5 gap-y-2"
@@ -2298,6 +2316,25 @@
             data-tour="group-form-platform"
           />
           <p class="input-hint">{{ t("admin.groups.platformNotEditable") }}</p>
+        </div>
+
+        <div v-if="editForm.platform === 'openai'" class="form-group">
+          <label class="input-label">{{ t("admin.groups.openaiUpstreamMode.title") }}</label>
+          <div class="inline-flex rounded-md border border-gray-300 p-0.5 dark:border-gray-600">
+            <button
+              v-for="mode in openAIUpstreamModes"
+              :key="mode"
+              type="button"
+              class="rounded px-3 py-1.5 text-sm font-medium transition-colors"
+              :class="editForm.openai_upstream_mode === mode
+                ? 'bg-indigo-600 text-white shadow-sm'
+                : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'"
+              @click="editForm.openai_upstream_mode = mode"
+            >
+              {{ t(`admin.groups.openaiUpstreamMode.${mode}`) }}
+            </button>
+          </div>
+          <p class="input-hint">{{ t("admin.groups.openaiUpstreamMode.hint") }}</p>
         </div>
         <template v-if="!authStore.isSimpleMode">
         <!-- 从分组复制账号（编辑时） -->
@@ -5220,6 +5257,8 @@ const submitEditAllowlistCustomEntry = () => {
   }
 };
 
+const openAIUpstreamModes = ["codex", "word"] as const;
+
 const createForm = reactive({
   name: "",
   description: "",
@@ -5298,6 +5337,7 @@ const createForm = reactive({
   reasoning_effort_mappings: [] as ReasoningEffortMappingRow[],
   quota_bypass_enabled: false,
   quota_bypass_concentrated_scheduling_enabled: false,
+  openai_upstream_mode: "codex" as "codex" | "word",
 });
 
 // 简单账号类型（用于模型路由选择）
@@ -5669,6 +5709,7 @@ const editForm = reactive({
   reasoning_effort_mappings: [] as ReasoningEffortMappingRow[],
   quota_bypass_enabled: false,
   quota_bypass_concentrated_scheduling_enabled: false,
+  openai_upstream_mode: "codex" as "codex" | "word",
 });
 
 type ImagePricingFormState = {
@@ -6117,6 +6158,7 @@ const closeCreateModal = () => {
   createForm.reasoning_effort_mappings = [];
   createForm.quota_bypass_enabled = false;
   createForm.quota_bypass_concentrated_scheduling_enabled = false;
+  createForm.openai_upstream_mode = "codex";
   createReasoningEffortPolicyRef.value?.resetValidation();
   resetModelAllowlistState(createModelAllowlistState);
   createModelRoutingRules.value = [];
@@ -6438,6 +6480,7 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.quota_bypass_enabled = group.quota_bypass_enabled ?? false;
   editForm.quota_bypass_concentrated_scheduling_enabled =
     group.quota_bypass_concentrated_scheduling_enabled ?? false;
+  editForm.openai_upstream_mode = group.openai_upstream_mode ?? "codex";
   normalizeQuotaBypassScheduling(editForm);
   resetModelAllowlistState(editModelAllowlistState, group.model_allowlist);
   // Resolve saved manifest account names asynchronously, falling back to IDs.
@@ -6482,6 +6525,7 @@ const closeEditModal = () => {
   editForm.reasoning_effort_mappings = [];
   editForm.quota_bypass_enabled = false;
   editForm.quota_bypass_concentrated_scheduling_enabled = false;
+  editForm.openai_upstream_mode = "codex";
   editReasoningEffortPolicyRef.value?.resetValidation();
   editModelRoutingRules.value = [];
   editForm.copy_accounts_from_group_ids = [];
@@ -7008,6 +7052,9 @@ watch(
       createForm.quota_bypass_enabled = false;
       normalizeQuotaBypassScheduling(createForm);
     }
+    if (newVal !== "openai") {
+      createForm.openai_upstream_mode = "codex";
+    }
     if (!isProfitControlPlatform(newVal)) {
       createForm.profit_control_enabled = false;
       createForm.profit_min_margin_percent = 0;
@@ -7066,6 +7113,9 @@ watch(
       editForm.allow_live = false;
       editForm.quota_bypass_enabled = false;
       normalizeQuotaBypassScheduling(editForm);
+    }
+    if (newVal !== "openai") {
+      editForm.openai_upstream_mode = "codex";
     }
     if (!isProfitControlPlatform(newVal)) {
       editForm.profit_control_enabled = false;

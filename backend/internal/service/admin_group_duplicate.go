@@ -164,6 +164,7 @@ func cloneGroupForDuplicate(source *Group, operationID string) *Group {
 		ReasoningEffortMappings:                  append([]ReasoningEffortMapping(nil), source.ReasoningEffortMappings...),
 		QuotaBypassEnabled:                       source.QuotaBypassEnabled,
 		QuotaBypassConcentratedSchedulingEnabled: source.QuotaBypassConcentratedSchedulingEnabled,
+		OpenAIUpstreamMode:                       NormalizeOpenAIUpstreamMode(source.OpenAIUpstreamMode),
 	}
 }
 

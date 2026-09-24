@@ -310,6 +310,10 @@ func (Group) Fields() []ent.Field {
 		field.Bool("quota_bypass_concentrated_scheduling_enabled").
 			Default(false).
 			Comment("是否对该分组启用 Codex 超额绕过集中调度"),
+		field.String("openai_upstream_mode").
+			MaxLen(20).
+			Default("codex").
+			Comment("OpenAI OAuth upstream mode: codex or word"),
 
 		// 分组利润控制（migration 192/193）：openai/anthropic/gemini/grok/antigravity
 		// 的 token 分组可启用，composite 分组不能直接启用。

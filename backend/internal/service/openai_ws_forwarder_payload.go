@@ -26,11 +26,14 @@ func validateOpenAIWSBearerToken(account *Account, token string) error {
 	return nil
 }
 
-func (s *OpenAIGatewayService) buildOpenAIResponsesWSURL(account *Account) (string, error) {
+func (s *OpenAIGatewayService) buildOpenAIResponsesWSURL(c *gin.Context, account *Account) (string, error) {
 	if account == nil {
 		return "", errors.New("account is nil")
 	}
 	var targetURL string
+	if isOpenAIWordUpstream(c, account) {
+		return buildOpenAIWordResponsesWSURL()
+	}
 	switch account.Type {
 	case AccountTypeOAuth:
 		targetURL = chatgptCodexURL
@@ -201,6 +204,7 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 	applyCodexClientEnvironmentHeaders(headers, codexAccountIdentitySource(c, account))
 	normalizeCodexWebSocketTransportHeaders(headers, codexAccountIdentitySource(c, account))
 	s.guardOpenAICodexTurnStateEcho(c, account, headers, routingModel)
+	applyOpenAIWordWSHeaders(c, account, token, headers)
 	logOpenAIRoutingDiagnostics(
 		ctx,
 		account,
@@ -215,6 +219,10 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 }
 
 func (s *OpenAIGatewayService) buildOpenAIWSCreatePayload(reqBody map[string]any, account *Account) map[string]any {
+	return s.buildOpenAIWSCreatePayloadForRequest(nil, reqBody, account)
+}
+
+func (s *OpenAIGatewayService) buildOpenAIWSCreatePayloadForRequest(c *gin.Context, reqBody map[string]any, account *Account) map[string]any {
 	// OpenAI WS Mode 协议：response.create 字段与 HTTP /responses 基本一致。
 	// 保留 stream 字段（与 Codex CLI 一致），仅移除 background。
 	payload := make(map[string]any, len(reqBody)+1)
@@ -233,6 +241,9 @@ func (s *OpenAIGatewayService) buildOpenAIWSCreatePayload(reqBody map[string]any
 		payload["store"] = false
 	}
 	applyCodexClientMetadata(payload, account)
+	if isOpenAIWordUpstream(c, account) {
+		applyOpenAIWordCreatePayload(payload)
+	}
 	return payload
 }
 

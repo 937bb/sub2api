@@ -154,6 +154,8 @@ const (
 	FieldQuotaBypassEnabled = "quota_bypass_enabled"
 	// FieldQuotaBypassConcentratedSchedulingEnabled holds the string denoting the quota_bypass_concentrated_scheduling_enabled field in the database.
 	FieldQuotaBypassConcentratedSchedulingEnabled = "quota_bypass_concentrated_scheduling_enabled"
+	// FieldOpenaiUpstreamMode holds the string denoting the openai_upstream_mode field in the database.
+	FieldOpenaiUpstreamMode = "openai_upstream_mode"
 	// FieldProfitControlEnabled holds the string denoting the profit_control_enabled field in the database.
 	FieldProfitControlEnabled = "profit_control_enabled"
 	// FieldProfitMinMargin holds the string denoting the profit_min_margin field in the database.
@@ -304,6 +306,7 @@ var Columns = []string{
 	FieldReasoningEffortMappings,
 	FieldQuotaBypassEnabled,
 	FieldQuotaBypassConcentratedSchedulingEnabled,
+	FieldOpenaiUpstreamMode,
 	FieldProfitControlEnabled,
 	FieldProfitMinMargin,
 	FieldProfitSafetyBuffer,
@@ -460,6 +463,10 @@ var (
 	DefaultQuotaBypassEnabled bool
 	// DefaultQuotaBypassConcentratedSchedulingEnabled holds the default value on creation for the "quota_bypass_concentrated_scheduling_enabled" field.
 	DefaultQuotaBypassConcentratedSchedulingEnabled bool
+	// DefaultOpenaiUpstreamMode holds the default value on creation for the "openai_upstream_mode" field.
+	DefaultOpenaiUpstreamMode string
+	// OpenaiUpstreamModeValidator is a validator for the "openai_upstream_mode" field. It is called by the builders before save.
+	OpenaiUpstreamModeValidator func(string) error
 	// DefaultProfitControlEnabled holds the default value on creation for the "profit_control_enabled" field.
 	DefaultProfitControlEnabled bool
 	// DefaultProfitMinMargin holds the default value on creation for the "profit_min_margin" field.
@@ -774,6 +781,11 @@ func ByQuotaBypassEnabled(opts ...sql.OrderTermOption) OrderOption {
 // ByQuotaBypassConcentratedSchedulingEnabled orders the results by the quota_bypass_concentrated_scheduling_enabled field.
 func ByQuotaBypassConcentratedSchedulingEnabled(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldQuotaBypassConcentratedSchedulingEnabled, opts...).ToFunc()
+}
+
+// ByOpenaiUpstreamMode orders the results by the openai_upstream_mode field.
+func ByOpenaiUpstreamMode(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldOpenaiUpstreamMode, opts...).ToFunc()
 }
 
 // ByProfitControlEnabled orders the results by the profit_control_enabled field.

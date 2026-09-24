@@ -152,8 +152,10 @@ func (d *coderOpenAIWSClientDialer) Dial(
 	}
 
 	wrapped := &coderOpenAIWSClientConn{}
+	dialHeaders, subprotocols := extractOpenAIWSSubprotocols(headers)
 	opts := &coderws.DialOptions{
-		HTTPHeader:      cloneHeader(headers),
+		HTTPHeader:      dialHeaders,
+		Subprotocols:    subprotocols,
 		CompressionMode: coderws.CompressionContextTakeover,
 		OnPingReceived: func(context.Context, []byte) bool {
 			wrapped.upstreamPings.Add(1)
@@ -195,6 +197,25 @@ func (d *coderOpenAIWSClientDialer) Dial(
 	}
 	wrapped.conn = conn
 	return wrapped, 0, respHeaders, nil
+}
+
+func extractOpenAIWSSubprotocols(headers http.Header) (http.Header, []string) {
+	cleaned := cloneHeader(headers)
+	protocols := make([]string, 0, 2)
+	for name, values := range cleaned {
+		if !strings.EqualFold(strings.TrimSpace(name), "Sec-WebSocket-Protocol") {
+			continue
+		}
+		delete(cleaned, name)
+		for _, value := range values {
+			for _, protocol := range strings.Split(value, ",") {
+				if protocol = strings.TrimSpace(protocol); protocol != "" {
+					protocols = append(protocols, protocol)
+				}
+			}
+		}
+	}
+	return cleaned, protocols
 }
 
 func (d *coderOpenAIWSClientDialer) proxyHTTPClient(proxy string) (*http.Client, error) {

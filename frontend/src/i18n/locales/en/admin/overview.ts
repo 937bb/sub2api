@@ -1240,6 +1240,12 @@ export default {
         concentrationInactive: 'Concurrency concentration: standard',
         retry429: 'Bounded same-account 429 retries'
       },
+      openaiUpstreamMode: {
+        title: 'OpenAI upstream mode',
+        codex: 'Codex',
+        word: 'Word',
+        hint: 'Codex uses the standard ChatGPT Codex endpoint; Word uses the Basispoints WebSocket endpoint. Only OpenAI OAuth/PAT accounts are affected; API-key accounts keep their existing route.'
+      },
       copyAccounts: {
         title: 'Copy Accounts from Groups',
         tooltip: 'Select one or more groups of the same platform. After creation, all accounts from these groups will be automatically bound to the new group (deduplicated).',

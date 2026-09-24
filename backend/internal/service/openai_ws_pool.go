@@ -88,6 +88,7 @@ type openAIWSAcquireRequest struct {
 type openAIWSHandshakeCompatibilityKey struct {
 	proxyURL            string
 	sourceIPv6          string
+	subprotocols        string
 	betaFeatures        string
 	codexUserAgent      string
 	codexOriginator     string
@@ -2401,6 +2402,7 @@ func normalizeOpenAIWSBetaFeatures(headers http.Header) string {
 
 func normalizeOpenAIWSHandshakeCompatibility(account *Account, headers http.Header) openAIWSHandshakeCompatibilityKey {
 	key := openAIWSHandshakeCompatibilityKey{
+		subprotocols:   normalizeOpenAIWSSubprotocolsForCompatibility(headers),
 		betaFeatures:   normalizeOpenAIWSBetaFeatures(headers),
 		parentThreadID: strings.TrimSpace(headers.Get(openAICodexParentThreadIDHeader)),
 		subagent:       strings.TrimSpace(headers.Get(openAICodexSubagentHeader)),
@@ -2428,6 +2430,16 @@ func normalizeOpenAIWSHandshakeCompatibility(account *Account, headers http.Head
 	key.clientRequestID = normalizeOpenAIWSStableIdentityHeader(headers, "x-client-request-id")
 	key.codexWindowID = normalizeOpenAIWSStableIdentityHeader(headers, "x-codex-window-id")
 	return key
+}
+
+func normalizeOpenAIWSSubprotocolsForCompatibility(headers http.Header) string {
+	_, protocols := extractOpenAIWSSubprotocols(headers)
+	for i, protocol := range protocols {
+		if strings.HasPrefix(protocol, "openai-bearer.") {
+			protocols[i] = "openai-bearer"
+		}
+	}
+	return strings.Join(protocols, ",")
 }
 
 func activeCodexFingerprintMode(account *Account) codexFingerprintMode {

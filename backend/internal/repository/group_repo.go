@@ -153,6 +153,7 @@ func createGroupRecord(ctx context.Context, client *dbent.Client, groupIn *servi
 		SetReasoningEffortMappings(groupIn.ReasoningEffortMappings).
 		SetQuotaBypassEnabled(groupIn.QuotaBypassEnabled).
 		SetQuotaBypassConcentratedSchedulingEnabled(groupIn.QuotaBypassConcentratedSchedulingEnabled).
+		SetOpenaiUpstreamMode(service.NormalizeOpenAIUpstreamMode(groupIn.OpenAIUpstreamMode)).
 		SetPeakRateEnabled(groupIn.PeakRateEnabled).
 		SetPeakStart(groupIn.PeakStart).
 		SetPeakEnd(groupIn.PeakEnd).
@@ -338,6 +339,7 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 		SetReasoningEffortMappings(groupIn.ReasoningEffortMappings).
 		SetQuotaBypassEnabled(groupIn.QuotaBypassEnabled).
 		SetQuotaBypassConcentratedSchedulingEnabled(groupIn.QuotaBypassConcentratedSchedulingEnabled).
+		SetOpenaiUpstreamMode(service.NormalizeOpenAIUpstreamMode(groupIn.OpenAIUpstreamMode)).
 		SetPeakRateEnabled(groupIn.PeakRateEnabled).
 		SetPeakStart(groupIn.PeakStart).
 		SetPeakEnd(groupIn.PeakEnd).

@@ -742,6 +742,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			}()
 			quotaBypassEnabled := service.IsQuotaBypassEligible(account, apiKey.Group)
 			service.SetOpenAIQuotaBypassEnabled(c, quotaBypassEnabled)
+			service.SetOpenAIUpstreamMode(c, service.OpenAIUpstreamModeForGroup(apiKey.Group))
 			return h.gatewayService.Forward(c.Request.Context(), c, account, attemptBody)
 		}()
 		var cyberBlockBodyHTTP []byte
@@ -1343,6 +1344,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 				}
 			}()
 			service.SetOpenAIQuotaBypassEnabled(c, service.IsQuotaBypassEligible(account, apiKey.Group))
+			service.SetOpenAIUpstreamMode(c, service.OpenAIUpstreamModeForGroup(apiKey.Group))
 			return h.gatewayService.ForwardAsAnthropic(c.Request.Context(), c, account, forwardBody, promptCacheKey, defaultMappedModel)
 		}()
 		var cyberBlockBodyMsg []byte
@@ -2321,6 +2323,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		h.errorResponse(c, http.StatusUnauthorized, "authentication_error", "Invalid API key")
 		return
 	}
+	service.SetOpenAIUpstreamMode(c, service.OpenAIUpstreamModeForGroup(apiKey.Group))
 	subject, ok := middleware2.GetAuthSubjectFromContext(c)
 	if !ok {
 		h.errorResponse(c, http.StatusInternalServerError, "api_error", "User context not found")
@@ -2826,6 +2829,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		var quotaBypassApplied atomic.Bool
 		var quotaBypassAppliedPairs atomic.Int32
 		service.SetOpenAIQuotaBypassEnabled(c, quotaBypassEnabled)
+		service.SetOpenAIUpstreamMode(c, service.OpenAIUpstreamModeForGroup(apiKey.Group))
 		ctx = c.Request.Context()
 		var turnStartsMu sync.Mutex
 		turnStarts := make(map[int]time.Time, 4)

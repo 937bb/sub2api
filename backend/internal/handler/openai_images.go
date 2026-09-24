@@ -249,6 +249,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 				}
 			}()
 			service.SetOpenAIQuotaBypassEnabled(c, service.IsQuotaBypassEligible(account, apiKey.Group))
+			service.SetOpenAIUpstreamMode(c, service.OpenAIUpstreamModeForGroup(apiKey.Group))
 			return h.gatewayService.ForwardImages(requestCtx, c, account, body, parsed, channelMapping.MappedModel)
 		}()
 		forwardDurationMs := time.Since(forwardStart).Milliseconds()

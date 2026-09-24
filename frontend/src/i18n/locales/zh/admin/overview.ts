@@ -1238,6 +1238,12 @@ export default {
         concentrationInactive: '并发集中：普通调度',
         retry429: '429 同账号有限重试'
       },
+      openaiUpstreamMode: {
+        title: 'OpenAI 上游模式',
+        codex: 'Codex',
+        word: 'Word',
+        hint: 'Codex 使用标准 ChatGPT Codex 端点；Word 使用 Basispoints WebSocket 端点。仅影响 OpenAI OAuth/PAT 账号，API Key 账号保持原路径。'
+      },
       copyAccounts: {
         title: '从分组复制账号',
         tooltip: '选择一个或多个相同平台的分组，创建后会自动将这些分组的所有账号绑定到新分组（去重）。',
