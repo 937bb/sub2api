@@ -648,7 +648,7 @@
           v-model:mappings="createForm.reasoning_effort_mappings"
         />
         <div v-if="createForm.platform === 'openai'" class="form-group">
-          <label class="input-label">{{ t("admin.groups.openaiUpstreamMode.title") }}</label>
+          <label class="input-label">OpenAI 上游模式</label>
           <div class="inline-flex rounded-md border border-gray-300 p-0.5 dark:border-gray-600">
             <button
               v-for="mode in openAIUpstreamModes"
@@ -660,7 +660,7 @@
                 : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'"
               @click="createForm.openai_upstream_mode = mode"
             >
-              {{ t(`admin.groups.openaiUpstreamMode.${mode}`) }}
+              {{ mode === "word" ? "Word" : "Codex" }}
             </button>
           </div>
           <p class="input-hint">{{ t("admin.groups.openaiUpstreamMode.hint") }}</p>
@@ -2319,7 +2319,7 @@
         </div>
 
         <div v-if="editForm.platform === 'openai'" class="form-group">
-          <label class="input-label">{{ t("admin.groups.openaiUpstreamMode.title") }}</label>
+          <label class="input-label">OpenAI 上游模式</label>
           <div class="inline-flex rounded-md border border-gray-300 p-0.5 dark:border-gray-600">
             <button
               v-for="mode in openAIUpstreamModes"
@@ -2331,7 +2331,7 @@
                 : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'"
               @click="editForm.openai_upstream_mode = mode"
             >
-              {{ t(`admin.groups.openaiUpstreamMode.${mode}`) }}
+              {{ mode === "word" ? "Word" : "Codex" }}
             </button>
           </div>
           <p class="input-hint">{{ t("admin.groups.openaiUpstreamMode.hint") }}</p>
