@@ -217,15 +217,17 @@ func (r *usageBillingRepository) applyUsageBillingEffects(ctx context.Context, t
 }
 
 func incrementUsageBillingSubscription(ctx context.Context, tx *sql.Tx, subscriptionID int64, costUSD float64, authorizedDailyWindowStart *time.Time) (bool, error) {
+	// Cast the shared amount parameter explicitly. The CASE expression otherwise
+	// infers $1 as integer from ELSE 0 before considering the NUMERIC columns.
 	const updateSQL = `
 		UPDATE user_subscriptions us
 		SET
 			daily_usage_usd = us.daily_usage_usd + CASE
-				WHEN $3::timestamptz IS NULL OR us.daily_window_start = $3 THEN $1
-				ELSE 0
+				WHEN $3::timestamptz IS NULL OR us.daily_window_start = $3 THEN $1::numeric
+				ELSE 0::numeric
 			END,
-			weekly_usage_usd = us.weekly_usage_usd + $1,
-			monthly_usage_usd = us.monthly_usage_usd + $1,
+			weekly_usage_usd = us.weekly_usage_usd + $1::numeric,
+			monthly_usage_usd = us.monthly_usage_usd + $1::numeric,
 			updated_at = NOW()
 		FROM groups g
 		WHERE us.id = $2

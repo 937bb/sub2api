@@ -21,7 +21,7 @@ const (
 	captureBatchImageHoldSQL    = `(?s)UPDATE users\s+SET balance = balance\s+\+ CASE WHEN \$1 > \$2 THEN \$1 - \$2 ELSE 0 END\s+- CASE WHEN \$2 > \$1 THEN \$2 - \$1 ELSE 0 END,\s+frozen_balance = COALESCE\(frozen_balance, 0\) - \$1,\s+updated_at = NOW\(\)\s+WHERE id = \$3 AND deleted_at IS NULL AND COALESCE\(frozen_balance, 0\) >= \$1\s+RETURNING balance, frozen_balance`
 	releaseBatchImageHoldSQL    = `(?s)UPDATE users\s+SET balance = balance \+ \$1,\s+frozen_balance = COALESCE\(frozen_balance, 0\) - \$1,\s+updated_at = NOW\(\)\s+WHERE id = \$2 AND deleted_at IS NULL AND COALESCE\(frozen_balance, 0\) >= \$1\s+RETURNING balance, frozen_balance`
 	userExistsForBillingSQL     = `(?s)SELECT 1\s+FROM users\s+WHERE id = \$1 AND deleted_at IS NULL`
-	subscriptionUsageUpdateSQL  = `(?s)UPDATE user_subscriptions us\s+SET\s+daily_usage_usd = us.daily_usage_usd \+ CASE.*weekly_usage_usd = us.weekly_usage_usd \+ \$1,\s+monthly_usage_usd = us.monthly_usage_usd \+ \$1,.*RETURNING \(\$3::timestamptz IS NULL OR us.daily_window_start = \$3\)`
+	subscriptionUsageUpdateSQL  = `(?s)UPDATE user_subscriptions us\s+SET\s+daily_usage_usd = us.daily_usage_usd \+ CASE.*THEN \$1::numeric\s+ELSE 0::numeric\s+END,\s+weekly_usage_usd = us.weekly_usage_usd \+ \$1::numeric,\s+monthly_usage_usd = us.monthly_usage_usd \+ \$1::numeric,.*RETURNING \(\$3::timestamptz IS NULL OR us.daily_window_start = \$3\)`
 )
 
 func TestIncrementUsageBillingSubscription_MatchingWindowChargesAllPeriods(t *testing.T) {
