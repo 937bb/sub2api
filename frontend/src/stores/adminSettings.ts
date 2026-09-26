@@ -4,6 +4,7 @@ import { adminAPI } from '@/api'
 import type { CustomMenuItem } from '@/types'
 
 export const useAdminSettingsStore = defineStore('adminSettings', () => {
+  const requestCaptureEnabled = ref(false)
   const loaded = ref(false)
   const loading = ref(false)
 
@@ -51,7 +52,14 @@ export const useAdminSettingsStore = defineStore('adminSettings', () => {
   const paymentEnabled = ref(readCachedBool('payment_enabled_cached', false))
   const customMenuItems = ref<CustomMenuItem[]>([])
 
+  let pendingFetch: Promise<void> | null = null
   async function fetch(force = false): Promise<void> {
+    if (pendingFetch) return pendingFetch
+    pendingFetch = fetchSettings(force)
+    try { await pendingFetch } finally { pendingFetch = null }
+  }
+
+  async function fetchSettings(force = false): Promise<void> {
     if (loaded.value && !force) return
     if (loading.value) return
 
@@ -61,6 +69,7 @@ export const useAdminSettingsStore = defineStore('adminSettings', () => {
         adminAPI.settings.getSettings(),
         adminAPI.payment.getConfig()
       ])
+      requestCaptureEnabled.value = settings.request_capture_enabled === true
       opsMonitoringEnabled.value = settings.ops_monitoring_enabled ?? true
       writeCachedBool('ops_monitoring_enabled_cached', opsMonitoringEnabled.value)
 
@@ -78,7 +87,6 @@ export const useAdminSettingsStore = defineStore('adminSettings', () => {
       loaded.value = true
     } catch (err) {
       // Keep cached/default value: do not "flip" the UI based on a transient fetch failure.
-      loaded.value = true
       console.error('[adminSettings] Failed to fetch settings:', err)
     } finally {
       loading.value = false
@@ -133,7 +141,11 @@ export const useAdminSettingsStore = defineStore('adminSettings', () => {
     initializeEventListeners()
   }
 
+  function setRequestCaptureEnabledLocal(value: boolean) { requestCaptureEnabled.value = value }
+
   return {
+    requestCaptureEnabled,
+    setRequestCaptureEnabledLocal,
     loaded,
     loading,
     opsMonitoringEnabled,

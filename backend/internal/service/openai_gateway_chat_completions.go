@@ -71,6 +71,16 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	defaultMappedModel string,
 	compatPromptCacheTenantIsolated bool,
 ) (*OpenAIForwardResult, error) {
+	latest, admissionErr := s.admitOpenAITurn(
+		context.WithoutCancel(ctx),
+		c,
+		account,
+		gjson.GetBytes(body, "model").String(),
+	)
+	if admissionErr != nil {
+		return nil, admissionErr
+	}
+	account = latest
 	rememberOpenCodeInboundBody(c, body)
 	beginUpstreamResponseModelObservation(c)
 	ClearActualOpenAIUpstreamEndpoint(c)
@@ -266,6 +276,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	} else {
 		// Normal path: convert Chat Completions → Responses.
 		// ChatCompletionsToResponses always sets Stream=true (upstream always streams).
+		chatReq.Model = upstreamModel
 		responsesReq, err = apicompat.ChatCompletionsToResponses(&chatReq)
 		if err != nil {
 			return nil, fmt.Errorf("convert chat completions to responses: %w", err)
@@ -320,7 +331,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 		} else if promptCacheKey != "" {
 			reqBody["prompt_cache_key"] = promptCacheKey
 		}
-		applyCodexAccountIdentityClientMetadataMap(reqBody, codexAccountIdentitySource(c, account), getAPIKeyIDFromContext(c))
+		s.applyCodexAccountIdentityOrHarvestPinMap(ctx, account, codexAccountIdentitySource(c, account), getAPIKeyIDFromContext(c), upstreamModel, reqBody)
 		responsesBody, err = json.Marshal(reqBody)
 		if err != nil {
 			return nil, fmt.Errorf("remarshal after codex transform: %w", err)
@@ -347,6 +358,10 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	}
 
 	// 4b. Apply OpenAI fast policy (may filter service_tier or block the request).
+	responsesBody, _, err = normalizeGPT6ResponsesSampling(responsesBody, upstreamModel)
+	if err != nil {
+		return nil, err
+	}
 	updatedBody, policyErr := s.applyOpenAIFastPolicyToBody(ctx, account, upstreamModel, responsesBody)
 	if policyErr != nil {
 		var blocked *OpenAIFastBlockedError
@@ -379,12 +394,16 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	}
 
 	if promptCacheKey != "" {
-		apiKeyID := getAPIKeyIDFromContext(c)
-		sessionKey := promptCacheKey
-		if !compatPromptCacheTenantIsolated {
-			sessionKey = isolateOpenAIUpstreamSessionID(apiKeyID, codexAccountIdentitySource(c, account), promptCacheKey)
+		if session := s.harvestPinnedSessionForModel(ctx, account, upstreamModel); session != "" {
+			upstreamReq.Header.Set("session_id", session)
+		} else {
+			apiKeyID := getAPIKeyIDFromContext(c)
+			sessionKey := promptCacheKey
+			if !compatPromptCacheTenantIsolated {
+				sessionKey = isolateOpenAIUpstreamSessionID(apiKeyID, codexAccountIdentitySource(c, account), promptCacheKey)
+			}
+			upstreamReq.Header.Set("session_id", generateSessionUUID(sessionKey))
 		}
-		upstreamReq.Header.Set("session_id", generateSessionUUID(sessionKey))
 	}
 
 	// 7. Send request
