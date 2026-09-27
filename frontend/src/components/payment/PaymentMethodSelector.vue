@@ -45,7 +45,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { METHOD_ORDER, isBuiltInAlipayMethod, isBuiltInWxpayMethod } from './providerConfig'
+import { METHOD_ORDER, isBuiltInAlipayMethod, isBuiltInWxpayMethod, isUSDTMethod } from './providerConfig'
 import alipayIcon from '@/assets/icons/alipay.svg'
 import wxpayIcon from '@/assets/icons/wxpay.svg'
 import stripeIcon from '@/assets/icons/stripe.svg'
@@ -95,6 +95,7 @@ function methodIcon(type: string): string {
 }
 
 function methodLabel(method: PaymentMethodOption): string {
+  if (isUSDTMethod(method.type)) return t(`payment.methods.${method.type}`)
   return method.display_name || t(`payment.methods.${method.type}`, method.type)
 }
 
@@ -103,6 +104,7 @@ function methodSelectedClass(type: string): string {
   if (isBuiltInWxpayMethod(type)) return 'border-[#09BB07] bg-green-50 text-gray-900 shadow-sm dark:bg-green-950 dark:text-gray-100'
   if (type === 'stripe') return 'border-[#676BE5] bg-indigo-50 text-gray-900 shadow-sm dark:bg-indigo-950 dark:text-gray-100'
   if (type === 'airwallex') return 'border-[#FF6B3D] bg-orange-50 text-gray-900 shadow-sm dark:border-[#FF8E3C] dark:bg-orange-950 dark:text-gray-100'
+  if (isUSDTMethod(type)) return 'border-emerald-500 bg-emerald-50 text-gray-900 shadow-sm dark:bg-emerald-950 dark:text-gray-100'
   return 'border-primary-500 bg-primary-50 text-gray-900 shadow-sm dark:bg-primary-950 dark:text-gray-100'
 }
 </script>

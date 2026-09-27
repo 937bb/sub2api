@@ -114,7 +114,15 @@ func (s *PaymentResumeService) ensureSigningKey() error {
 }
 
 func NormalizeVisibleMethod(method string) string {
-	return payment.GetBasePaymentType(strings.TrimSpace(method))
+	method = strings.TrimSpace(method)
+	// USDT networks are separate checkout methods even though they share the
+	// same Epusdt provider. Collapsing them loses the chain before order routing.
+	switch method {
+	case payment.TypeUSDTTron, payment.TypeUSDTBEP20:
+		return method
+	default:
+		return payment.GetBasePaymentType(method)
+	}
 }
 
 func NormalizeVisibleMethods(methods []string) []string {

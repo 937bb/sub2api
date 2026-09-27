@@ -2,8 +2,11 @@ import { describe, expect, it } from 'vitest'
 import {
   PAYMENT_CURRENCY_OPTIONS,
   PROVIDER_CONFIG_FIELDS,
+  PROVIDER_SUPPORTED_TYPES,
+  WEBHOOK_PATHS,
   isBuiltInAlipayMethod,
   isBuiltInWxpayMethod,
+  isUSDTMethod,
   parseEasyPayCustomMethods,
   serializeEasyPayCustomMethods,
 } from '@/components/payment/providerConfig'
@@ -58,6 +61,20 @@ describe('PROVIDER_CONFIG_FIELDS.stripe', () => {
   })
 })
 
+describe('PROVIDER_CONFIG_FIELDS.epusdt', () => {
+  it('exposes only the two requested USDT networks', () => {
+    expect(PROVIDER_SUPPORTED_TYPES.epusdt).toEqual(['usdt_tron', 'usdt_bep20'])
+  })
+
+  it('keeps the GMPay secret sensitive and uses the local gateway by default', () => {
+    expect(findField('epusdt', 'secret')?.sensitive).toBe(true)
+    expect(findField('epusdt', 'apiBase')?.defaultValue).toBe('http://127.0.0.1:8000')
+    expect(WEBHOOK_PATHS.epusdt).toBe('/api/v1/payment/webhook/epusdt')
+    expect(findField('epusdt', 'managementUrl')?.defaultValue).toBe('https://epusdt.cmsnav.com/addresses')
+    expect(findField('epusdt', 'managementUrl')?.optional).toBe(true)
+  })
+})
+
 describe('EasyPay custom methods config', () => {
   it('parses customMethods from the JSON string stored in provider config', () => {
     expect(parseEasyPayCustomMethods(
@@ -91,5 +108,12 @@ describe('built-in payment method helpers', () => {
     expect(isBuiltInWxpayMethod('wxpay')).toBe(true)
     expect(isBuiltInWxpayMethod('wxpay_direct')).toBe(true)
     expect(isBuiltInWxpayMethod('card_wxpay')).toBe(false)
+  })
+
+  it('only treats the two Epusdt chains as USDT methods', () => {
+    expect(isUSDTMethod('usdt_tron')).toBe(true)
+    expect(isUSDTMethod('usdt_bep20')).toBe(true)
+    expect(isUSDTMethod('usdt')).toBe(false)
+    expect(isUSDTMethod('alipay')).toBe(false)
   })
 })

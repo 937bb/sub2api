@@ -58,7 +58,13 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	if _, err := s.prepareCodexAccountIdentitySource(ctx, c, account); err != nil {
 		return nil, err
 	}
+	clearCodexCacheOnlyHTTPIdentity(c)
 	startTime := time.Now()
+	cacheBody, cacheErr := applyOMPResponsesPromptCacheKey(c, account, body)
+	if cacheErr != nil {
+		return nil, cacheErr
+	}
+	body = cacheBody
 	// 固定渠道映射后的请求级 canonical body；账号 normalize/strip 不得改写跨 failover hint。
 	canonicalImageIntentBody := body
 
@@ -614,11 +620,16 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		// 指纹收敛：一次性解析收敛 ID，请求体和出站头共享同一份 IDs（保证 turn_id 等随机字段一致）。
 		// fingerprintIDs 在此处解析，后续 buildUpstreamRequest 中使用同一份。
 		if !isCompactRequest && !harvestPins {
-			var clientHeaders http.Header
-			if c != nil && c.Request != nil {
-				clientHeaders = c.Request.Header
+			var fpIDs *codexFingerprintIDs
+			if wsDecision.Transport == OpenAIUpstreamTransportResponsesWebsocketV2 {
+				var clientHeaders http.Header
+				if c != nil && c.Request != nil {
+					clientHeaders = c.Request.Header
+				}
+				fpIDs = resolveCodexFingerprintIDsFromRequest(account, clientHeaders)
+			} else {
+				fpIDs = resolveCodexCacheAwareFingerprintIDs(c, account, decoded)
 			}
-			fpIDs := resolveCodexFingerprintIDsFromRequest(account, clientHeaders)
 			if fpIDs != nil {
 				if applyCodexFingerprintClientMetadata(decoded, fpIDs) {
 					markDecodedModified()
@@ -1155,6 +1166,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			}
 			return nil, err
 		}
+		applyCodexCacheOnlyHTTPRoutingHeaders(c, account, upstreamReq)
 		upstreamStart := time.Now()
 		resp, err := s.doOpenAIUpstream(upstreamReq, proxyURL, account)
 		SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
@@ -1741,7 +1753,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 		}
 		if harvestSession != "" {
 			req.Header.Set("session_id", harvestSession)
-		} else if promptCacheKey != "" {
+		} else if promptCacheKey = codexCacheOnlyHTTPPromptCacheSession(c, account, promptCacheKey); promptCacheKey != "" {
 			isolated := isolateOpenAIUpstreamSessionID(apiKeyID, codexAccountIdentitySource(c, account), promptCacheKey)
 			req.Header.Set("session_id", isolated)
 			if !compatMessagesBridge || clientConversationID != "" {

@@ -188,6 +188,25 @@ func TestBuildPaymentOrderProviderSnapshot_IncludesProviderCurrency(t *testing.T
 	require.Equal(t, "acct-78", airwallexSnapshot["merchant_id"])
 }
 
+func TestBuildPaymentOrderProviderSnapshotIncludesEpusdtAssetAndExcludesSecret(t *testing.T) {
+	t.Parallel()
+
+	snapshot := buildPaymentOrderProviderSnapshot(&payment.InstanceSelection{
+		InstanceID:  "93",
+		ProviderKey: payment.TypeEpusdt,
+		Config: map[string]string{
+			"pid":    "1000",
+			"secret": "do-not-copy",
+		},
+	}, CreateOrderRequest{PaymentType: payment.TypeUSDTBEP20})
+
+	require.Equal(t, "1000", snapshot["merchant_id"])
+	require.Equal(t, "CNY", snapshot["currency"])
+	require.Equal(t, "USDT", snapshot["token"])
+	require.Equal(t, "binance", snapshot["network"])
+	require.NotContains(t, snapshot, "secret")
+}
+
 func valueOrEmpty(v *string) string {
 	if v == nil {
 		return ""

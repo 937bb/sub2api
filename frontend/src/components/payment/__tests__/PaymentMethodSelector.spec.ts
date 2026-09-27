@@ -4,7 +4,10 @@ import PaymentMethodSelector from '@/components/payment/PaymentMethodSelector.vu
 
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({
-    t: (key: string, fallback?: string) => fallback ?? key,
+    t: (key: string, fallback?: string) => ({
+      'payment.methods.usdt_tron': 'TRON',
+      'payment.methods.usdt_bep20': 'BEP20',
+    }[key] ?? fallback ?? key),
   }),
 }))
 
@@ -59,5 +62,25 @@ describe('PaymentMethodSelector', () => {
     const button = wrapper.get('button')
     expect(button.classes()).toContain('border-primary-500')
     expect(button.classes()).not.toContain('border-[#02A9F1]')
+  })
+
+  it('shows TRON and BEP20 in the fixed order without exposing internal method names', () => {
+    const wrapper = mount(PaymentMethodSelector, {
+      props: {
+        selected: 'usdt_tron',
+        methods: [
+          { type: 'usdt_bep20', display_name: 'usdt_bep20', fee_rate: 0, available: true },
+          { type: 'usdt_tron', display_name: 'usdt_tron', fee_rate: 0, available: true },
+        ],
+      },
+    })
+
+    expect(wrapper.findAll('[data-testid="payment-method-label"]').map(label => label.text())).toEqual([
+      'TRON',
+      'BEP20',
+    ])
+    expect(wrapper.text()).not.toContain('usdt_tron')
+    expect(wrapper.text()).not.toContain('usdt_bep20')
+    expect(wrapper.text()).not.toContain('payment.fee')
   })
 })

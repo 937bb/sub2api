@@ -98,6 +98,10 @@ type CreateOrderResponse struct {
 	OutTradeNo                    string                          `json:"out_trade_no,omitempty"`
 	PayURL                        string                          `json:"pay_url,omitempty"`
 	QRCode                        string                          `json:"qr_code,omitempty"`
+	PaymentAddress                string                          `json:"payment_address,omitempty"`
+	PaymentTokenAmount            string                          `json:"payment_token_amount,omitempty"`
+	PaymentToken                  string                          `json:"payment_token,omitempty"`
+	PaymentNetwork                string                          `json:"payment_network,omitempty"`
 	ClientSecret                  string                          `json:"client_secret,omitempty"`
 	IntentID                      string                          `json:"intent_id,omitempty"`
 	Currency                      string                          `json:"currency,omitempty"`

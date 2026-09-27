@@ -25,6 +25,8 @@ docs/
 
 # OS files
 .DS_Store
+._*
+**/._*
 Thumbs.db
 
 # Build artifacts
@@ -49,7 +51,8 @@ coverage/
 .env.*
 !.env.example
 
-# 本地闭源插件目录可能包含发布签名私钥，绝不能进入 Docker 构建上下文。
+# Local closed-source plugins may contain release-signing private keys and
+# must never enter the Docker build context.
 /plugins/
 
 # Local config

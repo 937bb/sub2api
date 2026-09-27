@@ -18,6 +18,8 @@ type paymentOrderProviderSnapshot struct {
 	MerchantAppID      string
 	MerchantID         string
 	Currency           string
+	Token              string
+	Network            string
 }
 
 func psOrderProviderSnapshot(order *dbent.PaymentOrder) *paymentOrderProviderSnapshot {
@@ -33,6 +35,8 @@ func psOrderProviderSnapshot(order *dbent.PaymentOrder) *paymentOrderProviderSna
 		MerchantAppID:      psSnapshotStringValue(order.ProviderSnapshot["merchant_app_id"]),
 		MerchantID:         psSnapshotStringValue(order.ProviderSnapshot["merchant_id"]),
 		Currency:           psSnapshotStringValue(order.ProviderSnapshot["currency"]),
+		Token:              psSnapshotStringValue(order.ProviderSnapshot["token"]),
+		Network:            psSnapshotStringValue(order.ProviderSnapshot["network"]),
 	}
 	if snapshot.SchemaVersion == 0 &&
 		snapshot.ProviderInstanceID == "" &&
@@ -40,7 +44,9 @@ func psOrderProviderSnapshot(order *dbent.PaymentOrder) *paymentOrderProviderSna
 		snapshot.PaymentMode == "" &&
 		snapshot.MerchantAppID == "" &&
 		snapshot.MerchantID == "" &&
-		snapshot.Currency == "" {
+		snapshot.Currency == "" &&
+		snapshot.Token == "" &&
+		snapshot.Network == "" {
 		return nil
 	}
 	return snapshot
@@ -219,6 +225,40 @@ func validateProviderSnapshotMetadata(order *dbent.PaymentOrder, providerKey str
 		}
 		if actual := strings.TrimSpace(metadata["status"]); actual != "" && !strings.EqualFold(actual, "SUCCEEDED") {
 			return fmt.Errorf("airwallex status mismatch: expected SUCCEEDED, got %s", actual)
+		}
+	case payment.TypeEpusdt:
+		if expected := strings.TrimSpace(snapshot.MerchantID); expected != "" {
+			actual := strings.TrimSpace(metadata["pid"])
+			if actual == "" {
+				return fmt.Errorf("epusdt notification missing pid")
+			}
+			if actual != expected {
+				return fmt.Errorf("epusdt pid mismatch: expected %s, got %s", expected, actual)
+			}
+		}
+		if expected := strings.TrimSpace(snapshot.Currency); expected != "" {
+			actual := strings.ToUpper(strings.TrimSpace(metadata["currency"]))
+			if actual == "" {
+				return fmt.Errorf("epusdt notification missing currency")
+			}
+			if !strings.EqualFold(expected, actual) {
+				return fmt.Errorf("epusdt currency mismatch: expected %s, got %s", expected, actual)
+			}
+		}
+		if expected := strings.ToUpper(strings.TrimSpace(snapshot.Token)); expected != "" {
+			actual := strings.ToUpper(strings.TrimSpace(metadata["token"]))
+			if actual != expected {
+				return fmt.Errorf("epusdt token mismatch: expected %s, got %s", expected, actual)
+			}
+		}
+		if expected := strings.ToLower(strings.TrimSpace(snapshot.Network)); expected != "" {
+			actual := strings.ToLower(strings.TrimSpace(metadata["network"]))
+			if actual != expected {
+				return fmt.Errorf("epusdt network mismatch: expected %s, got %s", expected, actual)
+			}
+		}
+		if status := strings.TrimSpace(metadata["status"]); status != strconv.Itoa(2) {
+			return fmt.Errorf("epusdt status mismatch: expected 2, got %s", status)
 		}
 	}
 

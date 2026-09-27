@@ -35,6 +35,10 @@ export interface PaymentRecoverySnapshot {
   orderId: number
   amount: number
   qrCode: string
+  paymentAddress?: string
+  paymentTokenAmount?: string
+  paymentToken?: string
+  paymentNetwork?: string
   expiresAt: string
   paymentType: string
   payUrl: string
@@ -154,7 +158,11 @@ export function decidePaymentLaunch(
   const baseState = createPaymentRecoverySnapshot({
     orderId: result.order_id,
     amount: result.amount,
-    qrCode: result.qr_code || '',
+    qrCode: result.payment_address || result.qr_code || '',
+    paymentAddress: result.payment_address || '',
+    paymentTokenAmount: result.payment_token_amount || '',
+    paymentToken: result.payment_token || '',
+    paymentNetwork: result.payment_network || '',
     expiresAt: result.expires_at || '',
     paymentType: visibleMethod,
     payUrl: result.pay_url || '',
@@ -283,6 +291,10 @@ export function readPaymentRecoverySnapshot(
       typeof parsed.orderId !== 'number'
       || typeof parsed.amount !== 'number'
       || typeof parsed.qrCode !== 'string'
+      || (parsed.paymentAddress != null && typeof parsed.paymentAddress !== 'string')
+      || (parsed.paymentTokenAmount != null && typeof parsed.paymentTokenAmount !== 'string')
+      || (parsed.paymentToken != null && typeof parsed.paymentToken !== 'string')
+      || (parsed.paymentNetwork != null && typeof parsed.paymentNetwork !== 'string')
       || typeof parsed.expiresAt !== 'string'
       || typeof parsed.paymentType !== 'string'
       || typeof parsed.payUrl !== 'string'
@@ -314,6 +326,10 @@ export function readPaymentRecoverySnapshot(
       orderId: parsed.orderId,
       amount: parsed.amount,
       qrCode: parsed.qrCode,
+      paymentAddress: parsed.paymentAddress || '',
+      paymentTokenAmount: parsed.paymentTokenAmount || '',
+      paymentToken: parsed.paymentToken || '',
+      paymentNetwork: parsed.paymentNetwork || '',
       expiresAt: parsed.expiresAt,
       paymentType: parsed.paymentType,
       payUrl: parsed.payUrl,

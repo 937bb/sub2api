@@ -65,16 +65,20 @@ function mountDialog(options: { editing?: ProviderInstance | null } = {}) {
         { value: 'wxpay', label: 'WeChat Pay' },
         { value: 'stripe', label: 'Stripe' },
         { value: 'airwallex', label: 'Airwallex' },
+        { value: 'epusdt', label: 'Epusdt' },
       ],
       enabledKeyOptions: [
         { value: 'easypay', label: 'EasyPay' },
         { value: 'alipay', label: 'Alipay' },
         { value: 'wxpay', label: 'WeChat Pay' },
         { value: 'airwallex', label: 'Airwallex' },
+        { value: 'epusdt', label: 'Epusdt' },
       ],
       allPaymentTypes: [
         { value: 'alipay', label: 'Alipay' },
         { value: 'wxpay', label: 'WeChat Pay' },
+        { value: 'usdt_tron', label: 'USDT - TRON (TRC20)' },
+        { value: 'usdt_bep20', label: 'USDT - BNB Smart Chain (BEP20)' },
       ],
       redirectLabel: 'Redirect',
     },
@@ -118,6 +122,32 @@ describe('PaymentProviderDialog callback URLs', () => {
     expect(payload.config.notifyUrl).toBe(expectedNotify + '/api/v1/payment/webhook/easypay')
     expect(payload.config.returnUrl).toBe(expectedReturn + '/payment/result')
     wrapper.unmount()
+  })
+})
+
+describe('PaymentProviderDialog Epusdt safety', () => {
+  it('builds the Epusdt callback and forces refunds off', async () => {
+    const provider = providerFactory({
+      provider_key: 'epusdt',
+      name: 'Epusdt',
+      config: { pid: '1000', apiBase: 'http://127.0.0.1:8000' },
+      supported_types: ['usdt_tron', 'usdt_bep20'],
+      refund_enabled: true,
+      allow_user_refund: true,
+    })
+    const wrapper = mountDialog({ editing: provider })
+    ;(wrapper.vm as unknown as { loadProvider: (provider: ProviderInstance) => void }).loadProvider(provider)
+    await nextTick()
+    await wrapper.find('form').trigger('submit')
+
+    const payload = wrapper.emitted('save')?.[0]?.[0] as {
+      refund_enabled: boolean
+      allow_user_refund: boolean
+      config: Record<string, string>
+    }
+    expect(payload.refund_enabled).toBe(false)
+    expect(payload.allow_user_refund).toBe(false)
+    expect(payload.config.notifyUrl).toBe(`${window.location.origin}/api/v1/payment/webhook/epusdt`)
   })
 })
 

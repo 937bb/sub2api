@@ -11,6 +11,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
 )
 
 const (
@@ -26,8 +27,9 @@ type excelBPSImageSettingsReader interface {
 }
 
 // This budget accounts for request bodies and their processing copies, not RSS.
-// Reserve before any body-reading middleware and hold until the request ends,
-// including upstream streaming and scheduler waits. Never queue large bodies.
+// Reserve before any body-reading middleware. Image requests hold the reservation
+// until completion; text-only requests release it immediately after classification.
+// Never queue large bodies.
 type bpsImageAdmissionBudget struct {
 	mu          sync.Mutex
 	bytes       int64
@@ -126,9 +128,10 @@ func (b *bpsImageBudgetedBody) Read(p []byte) (int, error) {
 }
 
 // ExcelBPSImageAdmission must be shared across the gateway route aliases.
-// Account selection occurs after reading JSON, so enabling image relay applies
-// this guard to OpenAI/Composite Responses, Chat and Messages HTTP requests,
-// including text-only requests. Disabled relay leaves existing limits intact.
+// Account selection occurs after reading JSON, so the middleware temporarily
+// reserves ingress capacity while it reads a possible image request. Text-only
+// requests release that reservation before scheduling or upstream streaming.
+// Disabled relay leaves existing limits intact.
 func ExcelBPSImageAdmission(settings excelBPSImageSettingsReader, configuredMax int64) gin.HandlerFunc {
 	budget := &bpsImageAdmissionBudget{}
 	return func(c *gin.Context) {
@@ -197,40 +200,100 @@ func ExcelBPSImageAdmission(settings excelBPSImageSettingsReader, configuredMax 
 		}
 		defer reservation.release()
 		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, readLimit)
-		if length <= 0 || compressed {
-			if !compressed {
-				c.Request.Body = &bpsImageBudgetedBody{ReadCloser: c.Request.Body, reservation: reservation, maxBody: maxBody}
-			}
-			body, err := httputil.ReadRequestBodyWithPreallocLimit(c.Request, maxBody)
-			_ = c.Request.Body.Close()
-			if err != nil {
-				switch {
-				case errors.Is(err, errBPSImageRequestBusy):
-					bpsImageAdmissionError(c, http.StatusServiceUnavailable, "basispoints_image_request_busy", "Image relay request capacity is busy; retry later")
-				default:
-					var maxErr *http.MaxBytesError
-					if errors.As(err, &maxErr) {
-						bpsImageAdmissionError(c, http.StatusRequestEntityTooLarge, "basispoints_image_body_too_large", "Request body exceeds the image relay ingress limit")
-					} else {
-						c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": "Failed to read request body"}})
-					}
+		if length <= 0 && !compressed {
+			c.Request.Body = &bpsImageBudgetedBody{ReadCloser: c.Request.Body, reservation: reservation, maxBody: maxBody}
+		}
+		body, err := httputil.ReadRequestBodyWithPreallocLimit(c.Request, maxBody)
+		_ = c.Request.Body.Close()
+		if err != nil {
+			switch {
+			case errors.Is(err, errBPSImageRequestBusy):
+				bpsImageAdmissionError(c, http.StatusServiceUnavailable, "basispoints_image_request_busy", "Image relay request capacity is busy; retry later")
+			default:
+				var maxErr *http.MaxBytesError
+				if errors.As(err, &maxErr) {
+					bpsImageAdmissionError(c, http.StatusRequestEntityTooLarge, "basispoints_image_body_too_large", "Request body exceeds the image relay ingress limit")
+				} else {
+					c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": "Failed to read request body"}})
 				}
-				return
 			}
-			actual := int64(len(body))
-			if actual > maxBody {
-				bpsImageAdmissionError(c, http.StatusRequestEntityTooLarge, "basispoints_image_body_too_large", "Request body exceeds the image relay ingress limit")
-				return
-			}
-			if actual < bpsImageMinBodyBytes {
-				actual = bpsImageMinBodyBytes
-			}
-			reservation.resize(actual * bpsImageBodyMultiplier)
-			c.Request.Body = httputil.NewPrereadBody(body)
-			c.Request.ContentLength = int64(len(body))
+			return
+		}
+		actual := int64(len(body))
+		if actual > maxBody {
+			bpsImageAdmissionError(c, http.StatusRequestEntityTooLarge, "basispoints_image_body_too_large", "Request body exceeds the image relay ingress limit")
+			return
+		}
+		accounted = actual
+		if accounted < bpsImageMinBodyBytes {
+			accounted = bpsImageMinBodyBytes
+		}
+		reservation.resize(accounted * bpsImageBodyMultiplier)
+		c.Request.Body = httputil.NewPrereadBody(body)
+		c.Request.ContentLength = int64(len(body))
+		if !bpsRequestContainsInlineImage(body) {
+			reservation.release()
 		}
 		c.Next()
 	}
+}
+
+func bpsRequestContainsInlineImage(body []byte) bool {
+	if len(body) == 0 {
+		return false
+	}
+	root := gjson.ParseBytes(body)
+	return bpsJSONContainsInlineImage(root.Get("input")) || bpsJSONContainsInlineImage(root.Get("messages"))
+}
+
+func bpsJSONContainsInlineImage(value gjson.Result) bool {
+	if !value.Exists() {
+		return false
+	}
+	if value.IsArray() {
+		found := false
+		value.ForEach(func(_, item gjson.Result) bool {
+			found = bpsJSONContainsInlineImage(item)
+			return !found
+		})
+		return found
+	}
+	if !value.IsObject() {
+		return false
+	}
+
+	kind := strings.ToLower(strings.TrimSpace(value.Get("type").String()))
+	switch kind {
+	case "input_image", "image_url":
+		if bpsIsInlineImageURL(value.Get("image_url")) || bpsIsInlineImageURL(value.Get("image_url.url")) {
+			return true
+		}
+	case "image":
+		if bpsIsInlineImageURL(value.Get("url")) || bpsIsInlineImageURL(value.Get("image_url")) || bpsIsInlineImageURL(value.Get("image_url.url")) {
+			return true
+		}
+		source := value.Get("source")
+		if strings.EqualFold(strings.TrimSpace(source.Get("type").String()), "base64") &&
+			strings.HasPrefix(strings.ToLower(strings.TrimSpace(source.Get("media_type").String())), "image/") &&
+			strings.TrimSpace(source.Get("data").String()) != "" {
+			return true
+		}
+	}
+
+	found := false
+	value.ForEach(func(_, child gjson.Result) bool {
+		found = bpsJSONContainsInlineImage(child)
+		return !found
+	})
+	return found
+}
+
+func bpsIsInlineImageURL(value gjson.Result) bool {
+	if value.Type != gjson.String {
+		return false
+	}
+	raw := strings.TrimSpace(value.String())
+	return len(raw) >= len("data:image/") && strings.EqualFold(raw[:len("data:image/")], "data:image/")
 }
 
 func bpsImageAdmissionRoute(c *gin.Context) bool {

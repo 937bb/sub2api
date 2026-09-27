@@ -18,6 +18,9 @@ const (
 	TypeLink         PaymentType = "link"
 	TypeEasyPay      PaymentType = "easypay"
 	TypeAirwallex    PaymentType = "airwallex"
+	TypeEpusdt       PaymentType = "epusdt"
+	TypeUSDTTron     PaymentType = "usdt_tron"
+	TypeUSDTBEP20    PaymentType = "usdt_bep20"
 )
 
 // Order status constants shared across payment and service layers.
@@ -86,6 +89,8 @@ func GetBasePaymentType(t string) string {
 		return TypeEasyPay
 	case t == TypeAirwallex:
 		return TypeAirwallex
+	case t == TypeEpusdt || t == TypeUSDTTron || t == TypeUSDTBEP20:
+		return TypeEpusdt
 	case t == TypeStripe || t == TypeCard || t == TypeLink:
 		return TypeStripe
 	case len(t) >= len(TypeAlipay) && t[:len(TypeAlipay)] == TypeAlipay:
@@ -145,17 +150,40 @@ type WechatJSAPIPayload struct {
 
 // CreatePaymentResponse is returned after successfully initiating a payment.
 type CreatePaymentResponse struct {
-	TradeNo      string                  // Third-party transaction ID
-	PayURL       string                  // H5 payment URL (alipay/wxpay)
-	QRCode       string                  // QR code content for scanning
-	ClientSecret string                  // Stripe PaymentIntent 客户端密钥
-	IntentID     string                  // 前端 SDK 需要的服务商支付意图 ID
-	Currency     string                  // 服务商支付币种
-	CountryCode  string                  // 服务商收银台国家/地区代码
-	PaymentEnv   string                  // 服务商前端环境标识
-	ResultType   CreatePaymentResultType // Typed result contract for frontend flows
-	OAuth        *WechatOAuthInfo        // WeChat OAuth bootstrap payload when required
-	JSAPI        *WechatJSAPIPayload     // WeChat JSAPI invocation payload when ready
+	TradeNo            string                  // Third-party transaction ID
+	PayURL             string                  // H5 payment URL (alipay/wxpay)
+	QRCode             string                  // QR code content for scanning
+	PaymentAddress     string                  // On-chain destination address
+	PaymentTokenAmount string                  // Exact token amount expected by the provider
+	PaymentToken       string                  // On-chain token symbol
+	PaymentNetwork     string                  // On-chain network identifier
+	ClientSecret       string                  // Stripe PaymentIntent client secret
+	IntentID           string                  // Provider payment-intent ID required by the frontend SDK
+	Currency           string                  // Provider payment currency
+	CountryCode        string                  // Provider checkout country or region code
+	PaymentEnv         string                  // Provider frontend environment identifier
+	ResultType         CreatePaymentResultType // Typed result contract for frontend flows
+	OAuth              *WechatOAuthInfo        // WeChat OAuth bootstrap payload when required
+	JSAPI              *WechatJSAPIPayload     // WeChat JSAPI invocation payload when ready
+}
+
+// USDTQuoteRequest describes a CNY amount to quote for a supported USDT network.
+type USDTQuoteRequest struct {
+	Amount      string
+	PaymentType string
+}
+
+// USDTQuoteResponse contains a fresh CNY-to-USDT quote from the payment gateway.
+type USDTQuoteResponse struct {
+	Currency        string  `json:"currency"`
+	Token           string  `json:"token"`
+	Network         string  `json:"network"`
+	Amount          float64 `json:"amount"`
+	Rate            float64 `json:"rate"`
+	QuotedAmount    float64 `json:"quoted_amount"`
+	AmountPrecision int     `json:"amount_precision"`
+	RateSource      string  `json:"rate_source"`
+	RateQuoteAt     int64   `json:"rate_quote_at"`
 }
 
 // QueryOrderResponse describes the payment status from the upstream provider.
@@ -226,6 +254,12 @@ type Provider interface {
 	VerifyNotification(ctx context.Context, rawBody string, headers map[string]string) (*PaymentNotification, error)
 	// Refund requests a refund from the upstream provider.
 	Refund(ctx context.Context, req RefundRequest) (*RefundResponse, error)
+}
+
+// USDTQuoteProvider extends Provider with live CNY-to-USDT quoting.
+type USDTQuoteProvider interface {
+	Provider
+	QuoteUSDT(ctx context.Context, req USDTQuoteRequest) (*USDTQuoteResponse, error)
 }
 
 // RefundQueryProvider extends Provider with refund status querying.

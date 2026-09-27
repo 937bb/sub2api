@@ -56,19 +56,15 @@ func bpsImageTestRouter(settings bpsImageTestSettings, next gin.HandlerFunc) *gi
 	return r
 }
 
-func TestExcelBPSImageAdmission200ConcurrentRequests(t *testing.T) {
+func TestExcelBPSImageAdmission200ConcurrentInlineImageRequests(t *testing.T) {
+	const body = `{"model":"gpt-6-astra","input":[{"role":"user","content":[{"type":"input_image","image_url":"data:image/png;base64,AAAA"}]}]}`
 	for _, tt := range []struct {
 		name     string
-		length   int64
-		encoding string
 		allowed  int
 		settings bpsImageTestSettings
 	}{
-		{"default small", 1024, "", 128, bpsImageTestSettings{enabled: true}},
-		{"default large", 32 << 20, "", 4, bpsImageTestSettings{enabled: true}},
-		{"scaled small", 1024, "", 128, bpsImageTestSettings{enabled: true, maxRequests: 128, budgetMiB: 512}},
-		{"scaled large", 32 << 20, "", 4, bpsImageTestSettings{enabled: true, maxRequests: 128, budgetMiB: 512}},
-		{"larger configured budget", 32 << 20, "", 8, bpsImageTestSettings{enabled: true, maxRequests: 128, budgetMiB: 2048}},
+		{"default", 128, bpsImageTestSettings{enabled: true}},
+		{"configured", 4, bpsImageTestSettings{enabled: true, maxRequests: 4, budgetMiB: 512}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			var reads atomic.Int32
@@ -104,9 +100,8 @@ func TestExcelBPSImageAdmission200ConcurrentRequests(t *testing.T) {
 					defer wg.Done()
 					<-start
 					req := httptest.NewRequest(http.MethodPost, paths[i%len(paths)], nil)
-					req.ContentLength = tt.length
-					req.Header.Set("Content-Encoding", tt.encoding)
-					req.Body = &bpsImageCountingBody{reads: &reads, reader: strings.NewReader("test")}
+					req.ContentLength = int64(len(body))
+					req.Body = &bpsImageCountingBody{reads: &reads, reader: strings.NewReader(body)}
 					w := httptest.NewRecorder()
 					r.ServeHTTP(w, req)
 					results <- w
@@ -132,7 +127,7 @@ func TestExcelBPSImageAdmission200ConcurrentRequests(t *testing.T) {
 				}
 			}
 			require.Equal(t, int32(tt.allowed), peak.Load())
-			require.Equal(t, int32(tt.allowed*2), reads.Load(), "only admitted bodies may be read")
+			require.Equal(t, int32(tt.allowed*2), reads.Load(), "only admitted network bodies may be read")
 			once.Do(func() { close(release) })
 			for i := 0; i < tt.allowed; i++ {
 				select {
@@ -147,6 +142,69 @@ func TestExcelBPSImageAdmission200ConcurrentRequests(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, "/responses", strings.NewReader("next"))
 			r.ServeHTTP(w, req)
 			require.Equal(t, http.StatusNoContent, w.Code, "completed requests must release their budget")
+		})
+	}
+}
+
+func TestExcelBPSImageAdmissionTextDoesNotHoldImageCapacity(t *testing.T) {
+	const textBody = `{"model":"gpt-6-astra","input":"hello"}`
+	const imageBody = `{"model":"gpt-6-astra","input":[{"role":"user","content":[{"type":"input_image","image_url":"data:image/png;base64,AAAA"}]}]}`
+	entered := make(chan struct{}, 1)
+	release := make(chan struct{})
+	var once sync.Once
+	t.Cleanup(func() { once.Do(func() { close(release) }) })
+	r := bpsImageTestRouter(bpsImageTestSettings{enabled: true, maxRequests: 1, budgetMiB: 512}, func(c *gin.Context) {
+		if c.GetHeader("Hold") == "true" {
+			entered <- struct{}{}
+			<-release
+		}
+		c.Status(http.StatusNoContent)
+	})
+
+	first := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(textBody))
+	first.Header.Set("Hold", "true")
+	firstResult := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		recorder := httptest.NewRecorder()
+		r.ServeHTTP(recorder, first)
+		firstResult <- recorder
+	}()
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("text request did not reach handler")
+	}
+
+	second := httptest.NewRecorder()
+	r.ServeHTTP(second, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(imageBody)))
+	require.Equal(t, http.StatusNoContent, second.Code, second.Body.String())
+
+	once.Do(func() { close(release) })
+	select {
+	case result := <-firstResult:
+		require.Equal(t, http.StatusNoContent, result.Code)
+	case <-time.After(5 * time.Second):
+		t.Fatal("text request did not finish")
+	}
+}
+
+func TestBPSRequestContainsInlineImage(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		body string
+		want bool
+	}{
+		{"responses", `{"input":[{"content":[{"type":"input_image","image_url":"data:image/png;base64,AAAA"}]}]}`, true},
+		{"responses output", `{"input":[{"type":"function_call_output","output":[{"type":"input_image","image_url":"DATA:IMAGE/PNG;base64,AAAA"}]}]}`, true},
+		{"chat completions", `{"messages":[{"content":[{"type":"image_url","image_url":{"url":"data:image/jpeg;base64,AAAA"}}]}]}`, true},
+		{"anthropic messages", `{"messages":[{"content":[{"type":"image","source":{"type":"base64","media_type":"image/webp","data":"AAAA"}}]}]}`, true},
+		{"https image", `{"input":[{"content":[{"type":"input_image","image_url":"https://images.example/a.png"}]}]}`, false},
+		{"literal text", `{"input":[{"content":[{"type":"input_text","text":"literal data:image/png;base64, only"}]}]}`, false},
+		{"empty base64", `{"messages":[{"content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":""}}]}]}`, false},
+		{"invalid", `not json`, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, bpsRequestContainsInlineImage([]byte(tt.body)))
 		})
 	}
 }
@@ -226,6 +284,7 @@ func TestExcelBPSImageAdmissionSmallBodyDoesNotHoldWorstCaseBudget(t *testing.T)
 }
 
 func TestExcelBPSImageAdmissionConfiguredLimits(t *testing.T) {
+	const imageBody = `{"model":"gpt-6-astra","input":[{"role":"user","content":[{"type":"input_image","image_url":"data:image/png;base64,AAAA"}]}]}`
 	settings := bpsImageTestSettings{enabled: true, bodyLimitMiB: 1, budgetMiB: 512, maxRequests: 1}
 	entered := make(chan struct{}, 1)
 	release := make(chan struct{})
@@ -238,7 +297,7 @@ func TestExcelBPSImageAdmissionConfiguredLimits(t *testing.T) {
 		}
 		c.Status(http.StatusNoContent)
 	})
-	first := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader("small"))
+	first := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(imageBody))
 	first.Header.Set("Hold", "true")
 	firstResult := make(chan *httptest.ResponseRecorder, 1)
 	go func() {
@@ -252,7 +311,7 @@ func TestExcelBPSImageAdmissionConfiguredLimits(t *testing.T) {
 		t.Fatal("first request did not reach handler")
 	}
 	second := httptest.NewRecorder()
-	r.ServeHTTP(second, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader("small")))
+	r.ServeHTTP(second, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(imageBody)))
 	require.Equal(t, http.StatusServiceUnavailable, second.Code)
 	require.Contains(t, second.Body.String(), "basispoints_image_request_busy")
 	once.Do(func() { close(release) })
@@ -354,6 +413,7 @@ func TestExcelBPSImageAdmissionUnknownBodyStopsBeforeBudgetOverflow(t *testing.T
 }
 
 func TestExcelBPSImageAdmissionReleasesAfterCancellation(t *testing.T) {
+	const imageBody = `{"model":"gpt-6-astra","input":[{"role":"user","content":[{"type":"input_image","image_url":"data:image/png;base64,AAAA"}]}]}`
 	entered := make(chan struct{})
 	done := make(chan struct{})
 	r := bpsImageTestRouter(bpsImageTestSettings{enabled: true}, func(c *gin.Context) {
@@ -365,8 +425,7 @@ func TestExcelBPSImageAdmissionReleasesAfterCancellation(t *testing.T) {
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	req := httptest.NewRequest(http.MethodPost, "/responses", nil).WithContext(ctx)
-	req.ContentLength = -1
+	req := httptest.NewRequest(http.MethodPost, "/responses", strings.NewReader(imageBody)).WithContext(ctx)
 	req.Header.Set("Hold", "true")
 	go func() {
 		r.ServeHTTP(httptest.NewRecorder(), req)

@@ -1,0 +1,172 @@
+[
+  {
+    "name": "normal_first",
+    "headers": {
+      "Accept": "text/event-stream",
+      "Content-Type": "application/json",
+      "User-Agent": "omp/18.2.6"
+    },
+    "body": {
+      "model": "gpt-6-astra",
+      "input": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "input_text",
+              "text": "<system-reminder>\nToday: 2026-09-19; current working directory: '/workspace/test'. Do not repeat this information in your reply.\n</system-reminder>"
+            },
+            {
+              "type": "input_text",
+              "text": "Hello, please remember the word alpha."
+            }
+          ]
+        }
+      ],
+      "instructions": "You are a local mock test assistant.",
+      "stream": true,
+      "prompt_cache_key": "01a0b9d7-09d7-7693-bfd3-daf8056b0713",
+      "store": false,
+      "max_output_tokens": 512,
+      "tools": []
+    }
+  },
+  {
+    "name": "normal_continued",
+    "headers": {
+      "Accept": "text/event-stream",
+      "Content-Type": "application/json",
+      "User-Agent": "omp/18.2.6"
+    },
+    "body": {
+      "model": "gpt-6-astra",
+      "input": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "input_text",
+              "text": "<system-reminder>\nToday: 2026-09-19; current working directory: '/workspace/test'. Do not repeat this information in your reply.\n</system-reminder>"
+            },
+            {
+              "type": "input_text",
+              "text": "Hello, please remember the word alpha."
+            }
+          ]
+        },
+        {
+          "type": "message",
+          "role": "assistant",
+          "content": [
+            {
+              "type": "output_text",
+              "text": "Mock answer 1.",
+              "annotations": []
+            }
+          ],
+          "status": "completed"
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "input_text",
+              "text": "What word did I ask you to remember?"
+            }
+          ]
+        }
+      ],
+      "instructions": "You are a local mock test assistant.",
+      "stream": true,
+      "prompt_cache_key": "01a0b9d7-09d7-7693-bfd3-daf8056b0713",
+      "store": false,
+      "max_output_tokens": 512,
+      "tools": []
+    }
+  },
+  {
+    "name": "explicit_first",
+    "headers": {
+      "Accept": "text/event-stream",
+      "Content-Type": "application/json",
+      "User-Agent": "omp/18.2.6"
+    },
+    "body": {
+      "model": "gpt-6-astra",
+      "input": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "input_text",
+              "text": "<system-reminder>\nToday: 2026-09-19; current working directory: '/workspace/test'. Do not repeat this information in your reply.\n</system-reminder>"
+            },
+            {
+              "type": "input_text",
+              "text": "A separate conversation with explicit identities."
+            }
+          ]
+        }
+      ],
+      "instructions": "You are a local mock test assistant.",
+      "stream": true,
+      "prompt_cache_key": "cache-key-independent-xyz",
+      "store": false,
+      "max_output_tokens": 512,
+      "tools": []
+    }
+  },
+  {
+    "name": "explicit_second",
+    "headers": {
+      "Accept": "text/event-stream",
+      "Content-Type": "application/json",
+      "User-Agent": "omp/18.2.6"
+    },
+    "body": {
+      "model": "gpt-6-astra",
+      "input": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "input_text",
+              "text": "<system-reminder>\nToday: 2026-09-19; current working directory: '/workspace/test'. Do not repeat this information in your reply.\n</system-reminder>"
+            },
+            {
+              "type": "input_text",
+              "text": "A separate conversation with explicit identities."
+            }
+          ]
+        },
+        {
+          "type": "message",
+          "role": "assistant",
+          "content": [
+            {
+              "type": "output_text",
+              "text": "Mock answer 3.",
+              "annotations": []
+            }
+          ],
+          "status": "completed"
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "input_text",
+              "text": "Continue the explicit conversation."
+            }
+          ]
+        }
+      ],
+      "instructions": "You are a local mock test assistant.",
+      "stream": true,
+      "prompt_cache_key": "cache-key-independent-xyz",
+      "store": false,
+      "max_output_tokens": 512,
+      "tools": []
+    }
+  }
+]

@@ -24,7 +24,7 @@
                 <span class="text-gray-500 dark:text-gray-400">{{ t('payment.orders.amount') }}</span>
                 <span class="font-medium text-gray-900 dark:text-white">{{ creditedAmountSymbol }}{{ paidOrder.amount.toFixed(2) }}</span>
               </div>
-              <div class="flex justify-between">
+              <div v-if="!isUSDT" class="flex justify-between">
                 <span class="text-gray-500 dark:text-gray-400">{{ t('payment.orders.payAmount') }}</span>
                 <span class="font-medium text-gray-900 dark:text-white">{{ formatGatewayAmount(paidOrder.pay_amount, paidOrder.currency) }}</span>
               </div>
@@ -170,10 +170,35 @@
       <div class="card p-6">
         <div class="flex flex-col items-center space-y-4">
           <p class="text-lg font-semibold text-gray-900 dark:text-white">{{ scanTitle }}</p>
+          <div v-if="isUSDT" data-test="usdt-payment-details" class="w-full space-y-2 border-y border-gray-100 py-3 text-sm dark:border-dark-600">
+            <div class="flex items-start justify-between gap-4">
+              <span class="text-gray-500 dark:text-gray-400">{{ t('payment.usdtNetwork') }}</span>
+              <span class="font-semibold text-gray-900 dark:text-white">{{ paymentNetworkLabel }}</span>
+            </div>
+            <div class="flex items-start justify-between gap-4">
+              <span class="text-gray-500 dark:text-gray-400">{{ t('payment.usdtExactAmount') }}</span>
+              <span class="font-semibold tabular-nums text-gray-900 dark:text-white">{{ paymentTokenAmount }} {{ paymentToken }}</span>
+            </div>
+            <div class="space-y-1.5">
+              <span class="text-gray-500 dark:text-gray-400">{{ t('payment.usdtAddress') }}</span>
+              <div class="flex items-start gap-2">
+                <code data-test="usdt-payment-address" class="min-w-0 flex-1 break-all rounded bg-gray-50 px-2 py-1.5 text-xs text-gray-900 dark:bg-dark-800 dark:text-white">{{ paymentAddress }}</code>
+                <button
+                  type="button"
+                  class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded border border-gray-200 text-gray-500 hover:text-primary-600 dark:border-dark-600 dark:text-gray-400 dark:hover:text-primary-400"
+                  :title="t('payment.usdtCopyAddress')"
+                  :aria-label="t('payment.usdtCopyAddress')"
+                  @click="copyPaymentAddress"
+                >
+                  <Icon name="copy" size="sm" />
+                </button>
+              </div>
+            </div>
+          </div>
           <div :class="['relative rounded-lg border-2 p-4', qrBorderClass]">
             <canvas ref="qrCanvas" class="mx-auto"></canvas>
             <!-- Brand logo overlay -->
-            <div class="pointer-events-none absolute inset-0 flex items-center justify-center">
+            <div v-if="!isUSDT" class="pointer-events-none absolute inset-0 flex items-center justify-center">
               <span :class="['rounded-full p-2 shadow ring-2 ring-white', qrLogoBgClass]">
                 <img :src="qrLogoIcon" alt="" class="h-5 w-5 brightness-0 invert" />
               </span>
@@ -243,6 +268,10 @@ const props = defineProps<{
   amount?: number
   payAmount?: number
   qrCode: string
+  paymentAddress?: string
+  paymentTokenAmount?: string
+  paymentToken?: string
+  paymentNetwork?: string
   expiresAt: string
   paymentType: string
   payUrl?: string
@@ -293,6 +322,7 @@ const VERIFY_RETRY_MAX_ATTEMPTS = 6
 
 const isAlipay = computed(() => isBuiltInAlipayMethod(props.paymentType))
 const isWxpay = computed(() => isBuiltInWxpayMethod(props.paymentType))
+const isUSDT = computed(() => props.paymentType === 'usdt_tron' || props.paymentType === 'usdt_bep20')
 const isMobileAlipayDeepLink = computed(() => props.mobileAlipayDeepLink === true && isAlipay.value && !!qrUrl.value)
 const showQRCode = computed(() => !!qrUrl.value && (!isMobileAlipayDeepLink.value || deepLinkFallbackVisible.value))
 
@@ -315,12 +345,14 @@ const qrLogoIcon = computed(() => {
 })
 
 const scanTitle = computed(() => {
+  if (isUSDT.value) return t('payment.qr.scanUSDT', { network: paymentNetworkLabel.value })
   if (isAlipay.value) return t('payment.qr.scanAlipay')
   if (isWxpay.value) return t('payment.qr.scanWxpay')
   return t('payment.qr.scanToPay')
 })
 
 const scanHint = computed(() => {
+  if (isUSDT.value) return t('payment.qr.usdtScanHint', { network: paymentNetworkLabel.value })
   if (isAlipay.value) return t('payment.qr.scanAlipayHint')
   if (isWxpay.value) return t('payment.qr.scanWxpayHint')
   return ''
@@ -334,6 +366,22 @@ const countdownDisplay = computed(() => {
 
 const displayPaymentAmount = computed(() => formatGatewayAmount(props.payAmount || props.amount || 0))
 const displayOrderNumber = computed(() => props.outTradeNo || `#${props.orderId}`)
+const paymentAddress = computed(() => {
+  const address = String(props.paymentAddress || props.qrCode || '').trim()
+  if (!isUSDT.value) return address
+  if (props.paymentType === 'usdt_tron') {
+    return /^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(address) ? address : ''
+  }
+  return /^0x[0-9a-fA-F]{40}$/.test(address) ? address : ''
+})
+const paymentTokenAmount = computed(() => String(props.paymentTokenAmount || '').trim())
+const paymentToken = computed(() => String(props.paymentToken || 'USDT').trim().toUpperCase())
+const paymentNetworkLabel = computed(() => {
+  const network = String(props.paymentNetwork || '').trim().toLowerCase()
+  if (network === 'tron' || props.paymentType === 'usdt_tron') return 'TRON'
+  if (network === 'binance' || network === 'bsc' || props.paymentType === 'usdt_bep20') return 'BEP20'
+  return network.toUpperCase()
+})
 
 function formatGatewayAmount(value: number, currency?: string | null): string {
   return formatPaymentAmount(value, currency || paymentCurrency.value, localeCode.value)
@@ -349,6 +397,16 @@ function reopenPopup() {
     if (!win || win.closed) {
       window.location.href = props.payUrl
     }
+  }
+}
+
+async function copyPaymentAddress() {
+  if (!paymentAddress.value) return
+  try {
+    await navigator.clipboard.writeText(paymentAddress.value)
+    appStore.showSuccess(t('common.copied'))
+  } catch {
+    appStore.showError(t('common.copyFailed'))
   }
 }
 
@@ -476,7 +534,7 @@ function cleanup() {
 }
 
 // Initialize on mount
-qrUrl.value = props.qrCode
+qrUrl.value = isUSDT.value ? paymentAddress.value : props.qrCode
 verifyAttempts = 0
 lastVerifyAt = 0
 let seconds = 30 * 60

@@ -189,6 +189,28 @@ describe('decidePaymentLaunch', () => {
     expect(decision.paymentState.qrCode).toBe('https://pay.example.com/qr/session')
   })
 
+  it('uses the on-chain address as the USDT QR payload and recovery value', () => {
+    const address = '0x1dafac91abe2ee53b2d2023b8225b4c293a4f884'
+    const decision = decidePaymentLaunch(createOrderResult({
+      pay_url: 'https://epusdt.example.test/pay/checkout-counter/trade-101',
+      qr_code: 'https://epusdt.example.test/pay/checkout-counter/trade-101',
+      payment_address: address,
+      payment_token_amount: '74.492930',
+      payment_token: 'USDT',
+      payment_network: 'binance',
+    }), {
+      visibleMethod: 'usdt_bep20',
+      orderType: 'balance',
+      isMobile: false,
+    })
+
+    expect(decision.kind).toBe('qr_waiting')
+    expect(decision.paymentState.qrCode).toBe(address)
+    expect(decision.recovery.paymentAddress).toBe(address)
+    expect(decision.recovery.paymentTokenAmount).toBe('74.492930')
+    expect(decision.recovery.paymentNetwork).toBe('binance')
+  })
+
   it('returns wechat oauth launch when backend requires in-app authorization', () => {
     const decision = decidePaymentLaunch(createOrderResult({
       result_type: 'oauth_required',

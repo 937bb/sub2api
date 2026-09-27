@@ -207,11 +207,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			// 手术，透传热路径禁全量 Unmarshal），出站头改写由请求构造器读取
 			// context 中的同一份 IDs 完成（turn_id 等随机字段两侧必须一致）。
 			if !isOpenAIResponsesCompactPath(c) {
-				var clientHeaders http.Header
-				if c != nil && c.Request != nil {
-					clientHeaders = c.Request.Header
-				}
-				fpIDs := resolveCodexFingerprintIDsFromRequest(account, clientHeaders)
+				fpIDs := resolveCodexCacheAwareFingerprintIDs(c, account, body)
 				if fpIDs != nil {
 					fpBody, fpChanged, fpErr := applyCodexFingerprintClientMetadataRaw(body, fpIDs)
 					if fpErr != nil {
@@ -398,6 +394,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		if err := s.applyOpenAICodexTicket(ctx, account, actualModel, upstreamReq.Header); err != nil {
 			return nil, err
 		}
+		applyCodexCacheOnlyHTTPRoutingHeaders(c, account, upstreamReq)
 		upstreamStart := time.Now()
 		resp, err = s.doOpenAIUpstream(upstreamReq, proxyURL, account)
 		SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
@@ -715,7 +712,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 		// experiment. Passthrough may receive it from an older client, so remove
 		// only that token while preserving any independent beta negotiation.
 		stripOpenAILegacyResponsesBeta(req.Header)
-		promptCacheKey := strings.TrimSpace(gjson.GetBytes(body, "prompt_cache_key").String())
+		promptCacheKey := codexCacheOnlyHTTPPromptCacheSession(c, account, strings.TrimSpace(gjson.GetBytes(body, "prompt_cache_key").String()))
 		req.Host = "chatgpt.com"
 		if err := resolveAndSetOpenAIChatGPTAccountHeaders(ctx, s.accountRepo, req.Header, account); err != nil {
 			return nil, fmt.Errorf("resolve chatgpt account headers: %w", err)

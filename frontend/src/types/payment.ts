@@ -19,7 +19,7 @@ export type OrderStatus =
   | 'REFUNDED'
   | 'REFUND_FAILED'
 
-export type PaymentType = 'alipay' | 'wxpay' | 'alipay_direct' | 'wxpay_direct' | 'stripe' | 'easypay' | 'airwallex'
+export type PaymentType = 'alipay' | 'wxpay' | 'alipay_direct' | 'wxpay_direct' | 'stripe' | 'easypay' | 'airwallex' | 'usdt_tron' | 'usdt_bep20'
 
 export type OrderType = 'balance' | 'subscription'
 
@@ -203,6 +203,10 @@ export interface CreateOrderResult {
   amount: number
   pay_url?: string
   qr_code?: string
+  payment_address?: string
+  payment_token_amount?: string
+  payment_token?: string
+  payment_network?: string
   client_secret?: string
   intent_id?: string
   currency?: string
@@ -220,6 +224,18 @@ export interface CreateOrderResult {
   oauth?: WechatOAuthInfo
   jsapi?: WechatJSAPIPayload
   jsapi_payload?: WechatJSAPIPayload
+}
+
+export interface USDTQuote {
+  currency: 'CNY'
+  token: 'USDT'
+  network: 'tron' | 'binance'
+  amount: number
+  rate: number
+  quoted_amount: number
+  amount_precision: number
+  rate_source: string
+  rate_quote_at: number
 }
 
 export type CurrencyAmounts = Record<string, number>

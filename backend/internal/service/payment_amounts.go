@@ -16,8 +16,8 @@ func normalizeBalanceRechargeMultiplier(multiplier float64) float64 {
 	return multiplier
 }
 
-// normalizeSubscriptionUSDToCNYRate 将非法值归一为 0（换算关闭）。
-// 与余额倍率不同，0 是合法状态：表示订阅保持 price 直付的存量行为。
+// normalizeSubscriptionUSDToCNYRate normalizes invalid values to zero, which
+// keeps subscription price conversion disabled for existing deployments.
 func normalizeSubscriptionUSDToCNYRate(rate float64) float64 {
 	if math.IsNaN(rate) || math.IsInf(rate, 0) || rate < 0 {
 		return 0
@@ -30,6 +30,15 @@ func calculateCreditedBalance(paymentAmount, multiplier float64) float64 {
 		Mul(decimal.NewFromFloat(normalizeBalanceRechargeMultiplier(multiplier))).
 		Round(2).
 		InexactFloat64()
+}
+
+func calculateOrderCreditedBalance(paymentAmount, multiplier float64, paymentType string) float64 {
+	switch paymentType {
+	case payment.TypeUSDTTron, payment.TypeUSDTBEP20:
+		return calculateCreditedBalance(paymentAmount, 1)
+	default:
+		return calculateCreditedBalance(paymentAmount, multiplier)
+	}
 }
 
 func calculateGatewayRefundAmount(orderAmount, payAmount, refundAmount float64, currency string) float64 {

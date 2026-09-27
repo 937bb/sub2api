@@ -261,6 +261,12 @@ func TestIsSensitiveProviderConfigField(t *testing.T) {
 		{payment.TypeAirwallex, "accountId", false},
 		{payment.TypeAirwallex, "currency", false},
 
+		// Epusdt
+		{payment.TypeEpusdt, "secret", true},
+		{payment.TypeEpusdt, "Secret", true},
+		{payment.TypeEpusdt, "pid", false},
+		{payment.TypeEpusdt, "apiBase", false},
+
 		// Unknown provider: never sensitive
 		{"unknown", "secretKey", false},
 	}
@@ -274,6 +280,55 @@ func TestIsSensitiveProviderConfigField(t *testing.T) {
 			assert.Equal(t, tc.wantSen, got, "isSensitiveProviderConfigField(%q, %q)", tc.providerKey, tc.field)
 		})
 	}
+}
+
+func TestDecryptAndMaskConfigOmitsEpusdtSecret(t *testing.T) {
+	t.Parallel()
+
+	svc := &PaymentConfigService{encryptionKey: []byte("0123456789abcdef0123456789abcdef")}
+	encrypted, err := svc.encryptConfig(validEpusdtProviderConfig(t))
+	require.NoError(t, err)
+
+	masked, err := svc.decryptAndMaskConfig(payment.TypeEpusdt, encrypted)
+	require.NoError(t, err)
+	require.NotContains(t, masked, "secret")
+	require.Equal(t, "1000", masked["pid"])
+	require.Equal(t, "http://127.0.0.1:8000", masked["apiBase"])
+}
+
+func TestEpusdtProviderRejectsRefundEnablement(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	client := newPaymentConfigServiceTestClient(t)
+	svc := &PaymentConfigService{
+		entClient:     client,
+		encryptionKey: []byte("0123456789abcdef0123456789abcdef"),
+	}
+
+	created, err := svc.CreateProviderInstance(ctx, CreateProviderInstanceRequest{
+		ProviderKey:    payment.TypeEpusdt,
+		Name:           "Epusdt",
+		Config:         validEpusdtProviderConfig(t),
+		SupportedTypes: []string{payment.TypeUSDTTron, payment.TypeUSDTBEP20},
+		RefundEnabled:  true,
+	})
+	require.Nil(t, created)
+	require.ErrorContains(t, err, "refunds cannot be enabled")
+
+	created, err = svc.CreateProviderInstance(ctx, CreateProviderInstanceRequest{
+		ProviderKey:    payment.TypeEpusdt,
+		Name:           "Epusdt",
+		Config:         validEpusdtProviderConfig(t),
+		SupportedTypes: []string{payment.TypeUSDTTron, payment.TypeUSDTBEP20},
+	})
+	require.NoError(t, err)
+
+	updated, err := svc.UpdateProviderInstance(ctx, created.ID, UpdateProviderInstanceRequest{
+		AllowUserRefund: boolPtrValue(true),
+	})
+	require.Nil(t, updated)
+	require.ErrorContains(t, err, "refunds cannot be enabled")
 }
 
 func TestJoinTypes(t *testing.T) {
@@ -550,6 +605,15 @@ func TestUpdateProviderInstanceRejectsProtectedConfigChangesWhilePendingOrders(t
 			fieldName:     "webhookSecret",
 			wantValue:     "whsec-test",
 		},
+		{
+			name:          "epusdt pid",
+			providerKey:   payment.TypeEpusdt,
+			createConfig:  validEpusdtProviderConfig,
+			supportedType: []string{payment.TypeUSDTTron, payment.TypeUSDTBEP20},
+			updateConfig:  map[string]string{"pid": "pid-updated"},
+			fieldName:     "pid",
+			wantValue:     "1000",
+		},
 	}
 
 	for _, tc := range tests {
@@ -737,6 +801,8 @@ func providerPendingOrderPaymentType(providerKey string) string {
 		return payment.TypeAirwallex
 	case payment.TypeStripe:
 		return payment.TypeStripe
+	case payment.TypeEpusdt:
+		return payment.TypeUSDTTron
 	default:
 		return payment.TypeAlipay
 	}
@@ -790,6 +856,17 @@ func validAirwallexProviderConfig(t *testing.T) map[string]string {
 		"apiBase":       "https://api-demo.airwallex.com/api/v1",
 		"accountId":     "acct-test",
 		"currency":      "CNY",
+	}
+}
+
+func validEpusdtProviderConfig(t *testing.T) map[string]string {
+	t.Helper()
+
+	return map[string]string{
+		"pid":       "1000",
+		"secret":    "epusdt-secret-test",
+		"apiBase":   "http://127.0.0.1:8000",
+		"notifyUrl": "https://merchant.example.com/api/v1/payment/webhook/epusdt",
 	}
 }
 

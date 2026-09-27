@@ -4,6 +4,7 @@ import PaymentView from '../PaymentView.vue'
 import { PAYMENT_RECOVERY_STORAGE_KEY } from '@/components/payment/paymentFlow'
 import { formatPaymentAmount } from '@/components/payment/currency'
 import AmountInput from '@/components/payment/AmountInput.vue'
+import PaymentMethodSelector from '@/components/payment/PaymentMethodSelector.vue'
 import SubscriptionPlanCard from '@/components/payment/SubscriptionPlanCard.vue'
 import en from '@/i18n/locales/en'
 import zh from '@/i18n/locales/zh'
@@ -24,6 +25,7 @@ const showError = vi.hoisted(() => vi.fn())
 const showInfo = vi.hoisted(() => vi.fn())
 const showWarning = vi.hoisted(() => vi.fn())
 const getCheckoutInfo = vi.hoisted(() => vi.fn())
+const getUSDTQuote = vi.hoisted(() => vi.fn())
 const bridgeInvoke = vi.hoisted(() => vi.fn())
 const translate = vi.hoisted(() => vi.fn((key: string) => key))
 // Public settings live in a reactive holder so tests can flip feature flags after mount
@@ -99,6 +101,7 @@ vi.mock('@/stores', async () => {
 vi.mock('@/api/payment', () => ({
   paymentAPI: {
     getCheckoutInfo,
+    getUSDTQuote,
   },
 }))
 
@@ -411,6 +414,99 @@ describe('PaymentView recharge rate preview', () => {
   })
 })
 
+describe('PaymentView USDT checkout summary', () => {
+  it('uses the original recharge amount and hides fee totals for TRON and BEP20', async () => {
+    vi.useFakeTimers()
+    translate.mockClear()
+    routeState.path = '/purchase'
+    routeState.query = {}
+    routerReplace.mockReset().mockResolvedValue(undefined)
+    routerPush.mockReset().mockResolvedValue(undefined)
+    createOrder.mockReset()
+    refreshUser.mockReset()
+    fetchActiveSubscriptions.mockReset().mockResolvedValue(undefined)
+    showError.mockReset()
+    appStoreState.setPublicSettings(undefined)
+    window.localStorage.clear()
+
+    const method = checkoutInfoFixture().data.methods.wxpay
+    getCheckoutInfo.mockReset().mockResolvedValue(checkoutInfoFixture({
+      balance_recharge_multiplier: 0.14,
+      recharge_fee_rate: 1.6,
+      methods: {
+        alipay: { ...method, fee_rate: 1.6, currency: 'CNY' },
+        usdt_tron: { ...method, fee_rate: 1.6, currency: 'CNY' },
+        usdt_bep20: { ...method, fee_rate: 1.6, currency: 'CNY' },
+      },
+    }))
+    getUSDTQuote.mockReset().mockImplementation((quoteAmount: number, paymentType: string) => Promise.resolve({
+      data: {
+        currency: 'CNY',
+        token: 'USDT',
+        network: paymentType === 'usdt_tron' ? 'tron' : 'binance',
+        amount: quoteAmount,
+        rate: 0.14898586,
+        quoted_amount: 74.492930,
+        amount_precision: 6,
+        rate_source: 'https://api.coingecko.com/api/v3/simple/price',
+        rate_quote_at: Math.floor(Date.now() / 1000),
+      },
+    }))
+
+    const wrapper = shallowMount(PaymentView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          Teleport: true,
+          Transition: false,
+        },
+      },
+    })
+    await flushPromises()
+    await flushPromises()
+
+    const selector = wrapper.getComponent(PaymentMethodSelector)
+    const methods = selector.props('methods') as Array<{ type: string; fee_rate: number }>
+    expect(methods.find(item => item.type === 'alipay')?.fee_rate).toBe(1.6)
+    expect(methods.find(item => item.type === 'usdt_tron')?.fee_rate).toBe(0)
+    expect(methods.find(item => item.type === 'usdt_bep20')?.fee_rate).toBe(0)
+
+    wrapper.getComponent(AmountInput).vm.$emit('update:modelValue', 500)
+    selector.vm.$emit('select', 'usdt_tron')
+    await vi.advanceTimersByTimeAsync(350)
+    await flushPromises()
+
+    let text = wrapper.text()
+    expect(getUSDTQuote).toHaveBeenCalledWith(500, 'usdt_tron')
+    expect(text).toContain('payment.amountLabel')
+    expect(text).toContain('payment.usdtEstimatedAmount')
+    expect(text).toContain('74.492930 USDT')
+    expect(text).toContain('1 CNY ≈ 0.14898586 USDT')
+    expect(text).toContain('TRON')
+    expect(text).toContain('payment.usdtLiveRateHint')
+    expect(text).not.toContain('payment.paymentAmount')
+    expect(text).not.toContain('payment.fee')
+    expect(text).not.toContain('payment.actualPay')
+    expect(text).toContain(formatPaymentAmount(500, 'CNY'))
+    expect(text).not.toContain(formatPaymentAmount(508, 'CNY'))
+    expect(text).toContain('payment.creditedBalance')
+    expect(text).toContain('$500.00')
+    expect(text).not.toContain('$70.00')
+    expect(text).not.toContain('payment.rechargeRatePreview')
+
+    selector.vm.$emit('select', 'usdt_bep20')
+    await vi.advanceTimersByTimeAsync(350)
+    await flushPromises()
+    text = wrapper.text()
+    expect(getUSDTQuote).toHaveBeenLastCalledWith(500, 'usdt_bep20')
+    expect(text).toContain('BEP20')
+    expect(text).toContain('74.492930 USDT')
+
+    wrapper.unmount()
+    vi.useRealTimers()
+  })
+})
+
 describe('PaymentView subscription confirmation amounts', () => {
   it('shows converted CNY pay amount using the subscription rate, not the balance multiplier', async () => {
     const wrapper = await mountSubscriptionConfirm({
@@ -434,13 +530,13 @@ describe('PaymentView subscription confirmation amounts', () => {
     expect(text).toContain(convertedPrice)
     expect(text).toContain(convertedOriginalPrice)
     expect(text).not.toContain(formatPaymentAmount(9.99, 'CNY'))
-    // 换算必须使用订阅汇率（×7.15），而不是余额倍率（÷0.14 = 71.36）
+    // Use the subscription rate (x7.15), not the balance multiplier (/0.14 = 71.36).
     expect(text).not.toContain(formatPaymentAmount(71.36, 'CNY'))
     expect(wrapper.findAll('button').some(button => button.text().includes(convertedPrice))).toBe(true)
   })
 
   it('keeps plan price when the subscription rate is not configured or payment currency is not CNY', async () => {
-    // opt-in 回归锁：即使余额倍率已配置，未配置订阅汇率时 CNY 订阅仍按 price 直付
+    // Keep direct CNY pricing when the opt-in subscription rate is disabled.
     const cnyWrapper = await mountSubscriptionConfirm({
       checkout: {
         balance_recharge_multiplier: 0.14,

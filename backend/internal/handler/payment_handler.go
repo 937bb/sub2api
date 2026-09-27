@@ -109,6 +109,7 @@ func (h *PaymentHandler) GetCheckoutInfo(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
+	applyPaymentMethodFeeRates(limitsResp.Methods, cfg.RechargeFeeRate)
 	alipayMobilePrecreateDeepLink := false
 	if cfg.AlipayMobilePrecreateDeepLink {
 		alipayMobilePrecreateDeepLink, err = h.configService.UsesOfficialAlipayVisibleMethod(ctx)
@@ -223,7 +224,35 @@ func (h *PaymentHandler) GetLimits(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
+	cfg, err := h.configService.GetPaymentConfig(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	applyPaymentMethodFeeRates(resp.Methods, cfg.RechargeFeeRate)
 	response.Success(c, resp)
+}
+
+// GetUSDTQuote returns a live CNY-to-USDT estimate without creating an order.
+func (h *PaymentHandler) GetUSDTQuote(c *gin.Context) {
+	amount, err := strconv.ParseFloat(strings.TrimSpace(c.Query("amount")), 64)
+	if err != nil {
+		response.ErrorFrom(c, infraerrors.BadRequest("INVALID_USDT_QUOTE_AMOUNT", "invalid USDT quote amount"))
+		return
+	}
+	quote, err := h.paymentService.GetUSDTQuote(c.Request.Context(), amount, c.Query("payment_type"))
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, quote)
+}
+
+func applyPaymentMethodFeeRates(methods map[string]service.MethodLimits, configuredRate float64) {
+	for paymentType, limits := range methods {
+		limits.FeeRate = service.EffectiveRechargeFeeRate(paymentType, configuredRate)
+		methods[paymentType] = limits
+	}
 }
 
 // CreateOrderRequest is the request body for creating a payment order.
