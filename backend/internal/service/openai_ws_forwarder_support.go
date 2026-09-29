@@ -400,12 +400,16 @@ func replaceOpenAIWSMessageModel(message []byte, fromModel, toModel string) []by
 	if strings.TrimSpace(fromModel) == "" || strings.TrimSpace(toModel) == "" || fromModel == toModel {
 		return message
 	}
-	if !bytes.Contains(message, []byte(`"model"`)) || !bytes.Contains(message, []byte(fromModel)) {
+	if !bytes.Contains(message, []byte(`"model"`)) {
 		return message
 	}
 	modelValues := gjson.GetManyBytes(message, "model", "response.model")
-	replaceModel := modelValues[0].Exists() && modelValues[0].Str == fromModel
-	replaceResponseModel := modelValues[1].Exists() && modelValues[1].Str == fromModel
+	// A mapped request must expose only the client-facing model. Upstreams may
+	// return a dated build or provider alias instead of the exact mapped name.
+	// The raw payload is observed before this helper runs, so admin auditing
+	// still retains the actual upstream declaration.
+	replaceModel := modelValues[0].Type == gjson.String
+	replaceResponseModel := modelValues[1].Type == gjson.String
 	if !replaceModel && !replaceResponseModel {
 		return message
 	}

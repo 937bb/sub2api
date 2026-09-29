@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -163,6 +164,33 @@ func TestHandleStreamingResponse_CacheTokens(t *testing.T) {
 	require.Equal(t, 15, result.usage.OutputTokens)
 	require.Equal(t, 20, result.usage.CacheCreationInputTokens)
 	require.Equal(t, 30, result.usage.CacheReadInputTokens)
+}
+
+func TestHandleStreamingResponse_HidesMappedModelAlias(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	svc := newMinimalGatewayService()
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	body := "data: {\"type\":\"message_start\",\"message\":{\"model\":\"claude-sonnet-4-20260929\",\"usage\":{\"input_tokens\":1}}}\n\n" +
+		"data: [DONE]\n\n"
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{},
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+
+	_, err := svc.handleStreamingResponse(
+		context.Background(), resp, c, &Account{ID: 1}, time.Now(),
+		"public-claude", "claude-sonnet-4", false,
+	)
+
+	require.NoError(t, err)
+	require.Contains(t, rec.Body.String(), `"model":"public-claude"`)
+	require.NotContains(t, rec.Body.String(), "claude-sonnet-4-20260929")
+	require.Equal(t, "claude-sonnet-4-20260929", observedUpstreamResponseModel(c))
 }
 
 func TestHandleStreamingResponse_EmptyStream(t *testing.T) {
