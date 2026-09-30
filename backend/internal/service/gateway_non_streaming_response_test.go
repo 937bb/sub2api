@@ -124,6 +124,35 @@ func TestHandleNonStreamingResponse_HidesMappedModelAlias(t *testing.T) {
 	require.Equal(t, "claude-sonnet-4-20260929", observedUpstreamResponseModel(c))
 }
 
+func TestHandleNonStreamingResponse_ExposesMappedModelWhenPrivacyDisabled(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cacheHideMappedUpstreamModelForTest(t, false)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	body := []byte(`{"id":"msg_1","type":"message","model":"claude-sonnet-4-20260929","usage":{"input_tokens":12,"output_tokens":7}}`)
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(bytes.NewReader(body)),
+	}
+	svc := &GatewayService{
+		cfg:              &config.Config{},
+		rateLimitService: &RateLimitService{},
+		settingService:   NewSettingService(&gatewayTTLSettingRepo{}, &config.Config{}),
+	}
+
+	_, err := svc.handleNonStreamingResponse(
+		context.Background(), resp, c, &Account{ID: 1},
+		"public-claude", "claude-sonnet-4",
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, "claude-sonnet-4-20260929", gjson.Get(rec.Body.String(), "model").String())
+	require.Equal(t, "claude-sonnet-4-20260929", observedUpstreamResponseModel(c))
+}
+
 func TestHandleNonStreamingResponseAnthropicAPIKeyPassthrough_NonJSON2xxTriggersFailover(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()

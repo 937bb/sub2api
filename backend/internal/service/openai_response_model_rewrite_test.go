@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -90,5 +91,46 @@ func TestMappedResponseModelForwarding(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestRawChatCompletionsMappedModelPrivacySwitch(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, tc := range []struct {
+		name   string
+		hidden bool
+		want   string
+	}{
+		{name: "hidden", hidden: true, want: "public-model"},
+		{name: "exposed", hidden: false, want: "upstream-model"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cacheHideMappedUpstreamModelForTest(t, tc.hidden)
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+			body := "data: {\"id\":\"chatcmpl_1\",\"object\":\"chat.completion.chunk\",\"model\":\"upstream-model\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"}}]}\n\n" +
+				"data: {\"id\":\"chatcmpl_1\",\"object\":\"chat.completion.chunk\",\"model\":\"upstream-model\",\"choices\":[],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2}}\n\n" +
+				"data: [DONE]\n\n"
+			resp := &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+				Body:       io.NopCloser(strings.NewReader(body)),
+			}
+			svc := &OpenAIGatewayService{
+				cfg:            &config.Config{},
+				settingService: NewSettingService(&gatewayTTLSettingRepo{}, &config.Config{}),
+			}
+
+			result, err := svc.streamRawChatCompletions(
+				c, resp, &Account{ID: 1}, "public-model", "public-model", "upstream-model",
+				nil, nil, time.Now(), 2,
+			)
+
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.Contains(t, rec.Body.String(), `"model":"`+tc.want+`"`)
+			require.Equal(t, "upstream-model", observedUpstreamResponseModel(c))
+		})
 	}
 }

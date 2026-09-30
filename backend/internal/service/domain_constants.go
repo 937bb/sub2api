@@ -673,6 +673,9 @@ const (
 	SettingKeyBackendModeEnabled = "backend_mode_enabled"
 
 	// Gateway Forwarding Behavior
+	// SettingKeyHideMappedUpstreamModel controls whether protocol responses expose
+	// the upstream model selected by account/channel mappings. It defaults to true.
+	SettingKeyHideMappedUpstreamModel = "hide_mapped_upstream_model"
 	// SettingKeyOpenAITTFTMode 控制 first_token_ms 的统计口径。
 	SettingKeyOpenAITTFTMode = "openai_ttft_mode"
 	OpenAITTFTModeSemantic   = "semantic"

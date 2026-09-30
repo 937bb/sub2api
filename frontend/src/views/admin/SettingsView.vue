@@ -5529,7 +5529,23 @@
                   </p>
                 </div>
 
-              <!-- OpenAI Responses 首 token 统计 -->
+              <!-- Mapped upstream model visibility -->
+              <div class="flex items-center justify-between border-b border-gray-100 pb-5 dark:border-dark-700 md:col-span-2">
+                <div>
+                  <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    {{ t("admin.settings.gatewayForwarding.hideMappedUpstreamModel") }}
+                  </label>
+                  <p class="mt-0.5 max-w-3xl text-xs text-gray-500 dark:text-gray-400">
+                    {{ t("admin.settings.gatewayForwarding.hideMappedUpstreamModelHint") }}
+                  </p>
+                </div>
+                <Toggle
+                  v-model="form.hide_mapped_upstream_model"
+                  data-testid="hide-mapped-upstream-model-toggle"
+                />
+              </div>
+
+              <!-- OpenAI Responses first-token accounting -->
               <div class="border-b border-gray-100 pb-5 dark:border-dark-700 md:col-span-2">
                 <label
                   for="openai-ttft-mode"
@@ -10341,6 +10357,7 @@ const form = reactive<SettingsForm>({
   openai_advanced_scheduler_weight_previous_response: "",
   openai_advanced_scheduler_weight_session_sticky: "",
   // Gateway forwarding behavior
+  hide_mapped_upstream_model: true,
   openai_ttft_mode: "semantic",
   enable_fingerprint_unification: true,
   enable_metadata_passthrough: false,
@@ -12091,6 +12108,7 @@ async function saveSettings() {
       min_claude_code_version: form.min_claude_code_version,
       max_claude_code_version: form.max_claude_code_version,
       allow_ungrouped_key_scheduling: form.allow_ungrouped_key_scheduling,
+      hide_mapped_upstream_model: form.hide_mapped_upstream_model,
       openai_ttft_mode:
         form.openai_ttft_mode === "visible" ? "visible" : "semantic",
       enable_fingerprint_unification: form.enable_fingerprint_unification,

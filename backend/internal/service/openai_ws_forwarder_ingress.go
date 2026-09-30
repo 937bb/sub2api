@@ -1140,7 +1140,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			if mappedModel == "" {
 				mappedModel = normalizeOpenAIModelForUpstream(account, account.GetMappedModel(originalModel))
 			}
-			needModelReplace = mappedModel != "" && mappedModel != originalModel
+			needModelReplace = mappedModel != "" && mappedModel != originalModel && shouldHideMappedUpstreamModel(ctx, s.settingService)
 		}
 		for {
 			upstreamMessage, readErr := lease.ReadMessageWithContextTimeout(ctx, s.openAIWSReadTimeout())

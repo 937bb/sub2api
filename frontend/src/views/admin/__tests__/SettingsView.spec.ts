@@ -754,6 +754,38 @@ describe("admin SettingsView payment visible method controls", () => {
     wrapper.unmount();
   });
 
+  it("defaults mapped upstream model privacy on and saves the administrator toggle", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+    await openGatewayTab(wrapper);
+
+    const toggle = wrapper.get('[data-testid="hide-mapped-upstream-model-toggle"]');
+    expect((toggle.element as HTMLInputElement).checked).toBe(true);
+
+    await toggle.setValue(false);
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+
+    expect(updateSettings.mock.calls[0]?.[0]).toMatchObject({
+      hide_mapped_upstream_model: false,
+    });
+    wrapper.unmount();
+  });
+
+  it("loads a disabled mapped upstream model privacy setting", async () => {
+    getSettings.mockResolvedValueOnce({
+      ...baseSettingsResponse,
+      hide_mapped_upstream_model: false,
+    });
+    const wrapper = mountView();
+    await flushPromises();
+    await openGatewayTab(wrapper);
+
+    const toggle = wrapper.get('[data-testid="hide-mapped-upstream-model-toggle"]');
+    expect((toggle.element as HTMLInputElement).checked).toBe(false);
+    wrapper.unmount();
+  });
+
   it("saves Excel BPS image relay from the feature switches tab", async () => {
     const wrapper = mountView();
     await flushPromises();

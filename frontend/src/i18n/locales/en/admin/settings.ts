@@ -541,6 +541,8 @@ export default {
         grokBaseURLModeUSEast1: 'Regional API (us-east-1)',
         grokBaseURLModeUSWest2: 'Regional API (us-west-2)',
         grokBaseURLModeEUWest1: 'Regional API (eu-west-1)',
+        hideMappedUpstreamModel: 'Hide mapped upstream model',
+        hideMappedUpstreamModelHint: 'When enabled, downstream responses keep the client-requested public model name. The actual upstream model remains visible only in administrator usage and audit records. Disabling may expose the upstream model name.',
         openaiTTFTMode: 'OpenAI Responses first-token metric',
         openaiTTFTModeSemantic: 'Legacy-compatible (semantic event)',
         openaiTTFTModeVisible: 'Actual visible output',

@@ -247,6 +247,7 @@ type UpdateSettingsRequest struct {
 	BackendModeEnabled bool `json:"backend_mode_enabled"`
 
 	// Gateway forwarding behavior
+	HideMappedUpstreamModel                bool      `json:"hide_mapped_upstream_model"`
 	OpenAITTFTMode                         *string   `json:"openai_ttft_mode"`
 	EnableFingerprintUnification           *bool     `json:"enable_fingerprint_unification"`
 	EnableMetadataPassthrough              *bool     `json:"enable_metadata_passthrough"`
@@ -1740,6 +1741,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		MaxClaudeCodeVersion:                   req.MaxClaudeCodeVersion,
 		AllowUngroupedKeyScheduling:            req.AllowUngroupedKeyScheduling,
 		BackendModeEnabled:                     req.BackendModeEnabled,
+		HideMappedUpstreamModel:                req.HideMappedUpstreamModel,
 		RequestCaptureEnabled: func() bool {
 			if req.RequestCaptureEnabled != nil {
 				return *req.RequestCaptureEnabled
@@ -2565,6 +2567,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		MaxClaudeCodeVersion:                                   updatedSettings.MaxClaudeCodeVersion,
 		AllowUngroupedKeyScheduling:                            updatedSettings.AllowUngroupedKeyScheduling,
 		BackendModeEnabled:                                     updatedSettings.BackendModeEnabled,
+		HideMappedUpstreamModel:                                updatedSettings.HideMappedUpstreamModel,
 		EnableFingerprintUnification:                           updatedSettings.EnableFingerprintUnification,
 		EnableMetadataPassthrough:                              updatedSettings.EnableMetadataPassthrough,
 		EnableCCHSigning:                                       updatedSettings.EnableCCHSigning,

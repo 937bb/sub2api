@@ -534,6 +534,8 @@ export default {
         grokBaseURLModeUSEast1: '区域 API（us-east-1）',
         grokBaseURLModeUSWest2: '区域 API（us-west-2）',
         grokBaseURLModeEUWest1: '区域 API（eu-west-1）',
+        hideMappedUpstreamModel: '隐藏映射后的上游模型',
+        hideMappedUpstreamModelHint: '开启后，下游响应中的 model 始终显示用户请求的公开模型名；真实上游模型仍仅在管理员用量与审计记录中可见。关闭后，下游可能看到上游返回的实际模型名。',
         openaiTTFTMode: 'OpenAI Responses 首 token 统计口径',
         openaiTTFTModeSemantic: '历史兼容（语义事件）',
         openaiTTFTModeVisible: '真实可见输出',

@@ -193,6 +193,34 @@ func TestHandleStreamingResponse_HidesMappedModelAlias(t *testing.T) {
 	require.Equal(t, "claude-sonnet-4-20260929", observedUpstreamResponseModel(c))
 }
 
+func TestHandleStreamingResponse_ExposesMappedModelWhenPrivacyDisabled(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cacheHideMappedUpstreamModelForTest(t, false)
+	svc := newMinimalGatewayService()
+	svc.settingService = NewSettingService(&gatewayTTLSettingRepo{}, &config.Config{})
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	body := "data: {\"type\":\"message_start\",\"message\":{\"model\":\"claude-sonnet-4-20260929\",\"usage\":{\"input_tokens\":1}}}\n\n" +
+		"data: [DONE]\n\n"
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{},
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+
+	_, err := svc.handleStreamingResponse(
+		context.Background(), resp, c, &Account{ID: 1}, time.Now(),
+		"public-claude", "claude-sonnet-4", false,
+	)
+
+	require.NoError(t, err)
+	require.Contains(t, rec.Body.String(), `"model":"claude-sonnet-4-20260929"`)
+	require.NotContains(t, rec.Body.String(), `"model":"public-claude"`)
+	require.Equal(t, "claude-sonnet-4-20260929", observedUpstreamResponseModel(c))
+}
+
 func TestHandleStreamingResponse_EmptyStream(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	svc := newMinimalGatewayService()

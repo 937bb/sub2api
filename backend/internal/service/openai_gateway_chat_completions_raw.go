@@ -315,6 +315,7 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 	pendingLines := make([]string, 0, 8)
 	refusalDetector := newOpenAIChatSilentRefusalDetector(requestBodyLen)
 	var terminal openAIRawStreamTerminalState
+	hideMappedModel := shouldHideMappedUpstreamModel(c.Request.Context(), s.settingService)
 
 	writeLine := func(line string) {
 		if clientDisconnected {
@@ -369,7 +370,9 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 		line = applyOllamaCloudRawChatCompletionsSSELine(account, line)
 		line = stripEmptyChatToolCallIdentityFromSSELine(line)
 
-		line = s.replaceModelInSSELine(line, upstreamModel, originalModel)
+		if hideMappedModel {
+			line = s.replaceModelInSSELine(line, upstreamModel, originalModel)
+		}
 		writeLine(line)
 		if line == "" {
 			if !clientDisconnected && clientOutputStarted {
@@ -540,7 +543,13 @@ func (s *OpenAIGatewayService) bufferRawChatCompletions(
 		return nil, newGrokMissingUsageFailoverError(c, account, upstreamRequestID)
 	}
 	respBody = applyOllamaCloudRawChatCompletionsResponse(account, respBody)
-	respBody = s.replaceModelInResponseBody(respBody, upstreamModel, originalModel)
+	requestCtx := context.Background()
+	if c != nil && c.Request != nil {
+		requestCtx = c.Request.Context()
+	}
+	if shouldHideMappedUpstreamModel(requestCtx, s.settingService) {
+		respBody = s.replaceModelInResponseBody(respBody, upstreamModel, originalModel)
+	}
 
 	if s.responseHeaderFilter != nil {
 		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)

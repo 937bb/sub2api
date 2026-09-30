@@ -667,7 +667,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	mappedModel := actualModel
 	needModelReplace := false
 	if originalModel != "" {
-		needModelReplace = mappedModel != "" && mappedModel != originalModel
+		needModelReplace = mappedModel != "" && mappedModel != originalModel && shouldHideMappedUpstreamModel(ctx, s.settingService)
 	}
 
 	resultWithUsage := func() *OpenAIForwardResult {
