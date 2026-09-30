@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildQualityRulePatch, qualityBPSError, qualityBPSForm, type QualityRuleDraft } from '../qualityRulePatch'
+import { buildQualityRulePatch, qualityBPSError, qualityBPSForm, qualityBPSPayload, type QualityRuleDraft } from '../qualityRulePatch'
 import type { QualityBPSPolicy, ScheduledTestPlan } from '@/types'
 
 const draft = (): QualityRuleDraft => ({
@@ -19,7 +19,7 @@ const bps = (): QualityBPSPolicy => ({
   failure_threshold: 2, usage_percent: 0, require_all: false, all_models: false, models: ['gpt-6-astra'],
   omit_unsupported_tools: true, ignore_images: false, ignore_encrypted_content: true, auto_disable_on_403: false,
   auto_move_on_403: false, target_group_id: -1, session_proxy: false, proxy_source: 'mihomo', cache_creation_as_input: false,
-  pass_threshold: 2, hold_on_usage: true,
+  pass_threshold: 2, hold_on_usage: true, recovery_interval_minutes: 60,
 })
 const probePlan = () => {
   const rule = plan(), config = rule.pelican_config!
@@ -126,6 +126,17 @@ describe('quality rule partial updates', () => {
     expect(() => buildQualityRulePatch(probePlan(), input, ['action'])).toThrow('qualityOps.bpsTriggerRequired')
   })
 
+  it('converts explicit BPS candy observations without retaining automatic BPS or restoration', () => {
+    const rule = probePlan()
+    rule.pelican_config!.quality = { ...rule.pelican_config!.quality!, action: 'enable_bps', auto_restore: true, bps: bps() }
+    const input = draft(); input.pelican_config.test_channel = 'bps'
+    const patch = buildQualityRulePatch(rule, input, ['test', 'restore'])
+    expect(patch.pelican_config).toMatchObject({ question_kind: 'candy', test_channel: 'bps', prompt: 'New question',
+      quality: { action: 'observe_only', auto_restore: false, remove_group_ids: [], expected_answer: '42', judge: input.pelican_config.quality.judge } })
+    expect(patch.pelican_config!.quality).not.toHaveProperty('bps')
+    expect(rule.pelican_config!.quality!.action).toBe('enable_bps')
+  })
+
   it('reports the first invalid BPS setting', () => {
     expect(qualityBPSError(bps())).toBe('')
     expect(qualityBPSError({ ...bps(), failure_threshold: 0, usage_percent: 80 })).toBe('')
@@ -141,5 +152,20 @@ describe('quality rule partial updates', () => {
     expect(qualityBPSError({ ...bps(), pass_threshold: 1 })).toBe('')
     expect(qualityBPSError({ ...bps(), pass_threshold: 100 })).toBe('')
     for (const pass_threshold of [0, 101, 1.5, Number.NaN]) expect(qualityBPSError({ ...bps(), pass_threshold })).toBe('qualityOps.bpsPassCountInvalid')
+  })
+})
+
+describe('BPS recovery interval in quality rules', () => {
+  it('defaults legacy rules to 60 minutes and persists custom intervals', () => {
+    expect(qualityBPSForm({}).recovery_interval_minutes).toBe(60)
+    expect(qualityBPSPayload({ ...bps(), recovery_interval_minutes: undefined }).recovery_interval_minutes).toBe(60)
+    for (const minutes of [1, 30, 360, 10080]) {
+      const form = qualityBPSForm({ ...bps(), recovery_interval_minutes: minutes })
+      expect(qualityBPSError(form)).toBe('')
+      expect(qualityBPSPayload(form).recovery_interval_minutes).toBe(minutes)
+    }
+  })
+  it.each([0, -1, 1.5, 10081, NaN, Infinity])('rejects invalid interval %s', (minutes) => {
+    expect(qualityBPSError({ ...bps(), recovery_interval_minutes: minutes })).toBe('admin.accounts.openai.excelBPS403RecoveryIntervalInvalid')
   })
 })

@@ -5,6 +5,14 @@ export default {
   refresh: '刷新',
   create: '新建分组测试',
   loadError: '加载鹈鹕测智失败',
+  cost: {
+    today: '今日 {amount}',
+    total: '总计 {amount}',
+    column: '测试消耗 (USD)',
+    unknown: '未记录',
+    partial: '{amount} (部分)',
+    hint: '按上游实际返回的 token 用量、模型美元定价和账号成本倍率计算, 不扣用户余额. 今日按服务器时区统计. 总计包含该分组全部测试计划, 不受历史清理或删除计划影响. 仅累计升级后已记录的成本; 未返回用量或缺少定价时标为未记录, 部分表示仍有未计入的调用.',
+  },
   accountNote: '账号级的鹈鹕定时测试（账号管理 → 更多 → 鹈鹕测智）仍可用来排查单个账号，但结果不再发布到用户展示页。',
   showcase: {
     title: '用户展示',
@@ -93,7 +101,7 @@ export default {
   },
   history: {
     title: '测试记录',
-    hint: '保留最近 7 天、每个测试最多 100 条，可以看到每次落到了哪个账号。',
+    hint: '保留最近 7 天, 每个测试最多 100 条. 支持翻页、跳页和调整每页条数.',
     empty: '还没有测试记录。',
     time: '时间',
     group: '分组',
@@ -105,7 +113,6 @@ export default {
     failed: '失败',
     view: '查看作品',
     tried: '先试过：{accounts}',
-    loadMore: '加载更多',
     loading: '加载中…',
     previewTitle: '{group} · {model}',
     previewLoading: '作品加载中…',
