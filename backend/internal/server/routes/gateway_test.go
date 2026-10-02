@@ -76,6 +76,54 @@ func TestGatewayRoutesOpenAIResponsesCompactPathIsRegistered(t *testing.T) {
 	}
 }
 
+func TestGatewayResponsesAliasesRejectMissingAPIKeyBeforeHandler(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	cfg := &config.Config{Gateway: config.GatewayConfig{MaxBodySize: 1024 * 1024, TextMaxBodySize: 1024 * 1024}}
+	RegisterGatewayRoutes(
+		router,
+		&handler.Handlers{
+			Gateway:       &handler.GatewayHandler{},
+			OpenAIGateway: &handler.OpenAIGatewayHandler{},
+			AsyncImage:    handler.NewAsyncImageHandler(nil, nil),
+		},
+		servermiddleware.APIKeyAuthMiddleware(func(c *gin.Context) {
+			servermiddleware.AbortWithError(c, http.StatusUnauthorized, "API_KEY_REQUIRED", "API key is required")
+		}),
+		nil, nil, nil, nil, nil, cfg,
+	)
+
+	for _, tc := range []struct {
+		method string
+		path   string
+		body   string
+	}{
+		{http.MethodPost, "/v1/responses", `{"model":"gpt-5.1","previous_response_id":"resp_untrusted"}`},
+		{http.MethodPost, "/responses", `{"model":"gpt-5.1","previous_response_id":"resp_untrusted"}`},
+		{http.MethodPost, "/backend-api/codex/responses", `{"model":"gpt-5.1","previous_response_id":"resp_untrusted"}`},
+		{http.MethodGet, "/v1/responses", ""},
+		{http.MethodGet, "/responses", ""},
+		{http.MethodGet, "/backend-api/codex/responses", ""},
+	} {
+		req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
+		if tc.body != "" {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		if tc.method == http.MethodGet {
+			req.Header.Set("Connection", "Upgrade")
+			req.Header.Set("Upgrade", "websocket")
+			req.Header.Set("Sec-WebSocket-Version", "13")
+			req.Header.Set("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
+		}
+		w := httptest.NewRecorder()
+
+		router.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusUnauthorized, w.Code, "%s %s", tc.method, tc.path)
+		require.Contains(t, w.Body.String(), "API_KEY_REQUIRED", "%s %s", tc.method, tc.path)
+	}
+}
+
 func TestGatewayRoutesOpenAIAlphaSearchPathsAreRegistered(t *testing.T) {
 	router := newGatewayRoutesTestRouter()
 	registered := make(map[string]bool)

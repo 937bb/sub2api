@@ -91,20 +91,23 @@ func newOpenAIWSPassthroughHandlerHarnessWithOptions(t *testing.T, upstreamURL s
 		acquireUserSlotFn:    func(context.Context, int64, int, string) (bool, error) { return true, nil },
 		acquireAccountSlotFn: func(context.Context, int64, int, string) (bool, error) { return true, nil },
 	}
-	h := &OpenAIGatewayHandler{
-		gatewayService:           gatewaySvc,
-		billingCacheService:      billingCacheSvc,
-		apiKeyService:            &service.APIKeyService{},
-		contentModerationService: moderationSvc,
-		concurrencyHelper:        NewConcurrencyHelper(service.NewConcurrencyService(concurrencyCache), SSEPingFormatNone, time.Second),
-	}
-
 	apiKey := &service.APIKey{
 		ID:      1851,
+		UserID:  1751,
 		Name:    "ws-cyber-key",
 		Key:     "sk-handler-cyber-test",
 		GroupID: &groupID,
+		Status:  service.StatusAPIKeyActive,
 		User:    &service.User{ID: 1751, Status: service.StatusActive},
+		Group:   &service.Group{ID: groupID, Platform: service.PlatformOpenAI, Status: service.StatusActive},
+	}
+	keyRepo := &openAIWSSessionAPIKeyRepo{current: apiKey}
+	h := &OpenAIGatewayHandler{
+		gatewayService:           gatewaySvc,
+		billingCacheService:      billingCacheSvc,
+		apiKeyService:            service.NewAPIKeyService(keyRepo, nil, nil, nil, nil, nil, cfg),
+		contentModerationService: moderationSvc,
+		concurrencyHelper:        NewConcurrencyHelper(service.NewConcurrencyService(concurrencyCache), SSEPingFormatNone, time.Second),
 	}
 	handlerDone := make(chan struct{}, 4)
 	router := gin.New()

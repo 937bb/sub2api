@@ -80,6 +80,56 @@ func TestUsageBillingRepositoryApply_DeduplicatesBalanceBilling(t *testing.T) {
 	require.Equal(t, 1, dedupCount)
 }
 
+func TestUsageBillingRepositoryApply_BillsRequestAdmittedBeforeAPIKeyDeletion(t *testing.T) {
+	ctx := context.Background()
+	client := testEntClient(t)
+	repo := NewUsageBillingRepository(client, integrationDB)
+	apiKeyRepo := NewAPIKeyRepository(client, integrationDB)
+
+	user := mustCreateUser(t, client, &service.User{
+		Email:        fmt.Sprintf("usage-billing-deleted-key-%d@example.com", time.Now().UnixNano()),
+		PasswordHash: "hash",
+		Balance:      100,
+	})
+	apiKey := mustCreateApiKey(t, client, &service.APIKey{
+		UserID:      user.ID,
+		Key:         "sk-usage-billing-deleted-" + uuid.NewString(),
+		Name:        "billing-deleted",
+		Quota:       10,
+		RateLimit5h: 10,
+	})
+
+	// Simulate deletion after authentication/upstream dispatch but before the
+	// detached usage worker commits the completed request.
+	require.NoError(t, apiKeyRepo.DeleteWithAudit(ctx, apiKey.ID))
+
+	result, err := repo.Apply(ctx, &service.UsageBillingCommand{
+		RequestID:           uuid.NewString(),
+		APIKeyID:            apiKey.ID,
+		UserID:              user.ID,
+		BalanceCost:         1.5,
+		APIKeyQuotaCost:     1.5,
+		APIKeyRateLimitCost: 1.5,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.True(t, result.Applied)
+
+	var balance float64
+	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT balance FROM users WHERE id = $1", user.ID).Scan(&balance))
+	require.InDelta(t, 98.5, balance, 0.000001)
+
+	var quotaUsed, usage5h float64
+	var deleted bool
+	require.NoError(t, integrationDB.QueryRowContext(ctx,
+		"SELECT quota_used, usage_5h, deleted_at IS NOT NULL FROM api_keys WHERE id = $1",
+		apiKey.ID,
+	).Scan(&quotaUsed, &usage5h, &deleted))
+	require.True(t, deleted)
+	require.InDelta(t, 1.5, quotaUsed, 0.000001)
+	require.InDelta(t, 1.5, usage5h, 0.000001)
+}
+
 func TestUsageBillingRepositoryApply_DeduplicatesSubscriptionBilling(t *testing.T) {
 	ctx := context.Background()
 	client := testEntClient(t)

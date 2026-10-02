@@ -1940,9 +1940,10 @@ func newOpenAIWSHandlerTestServer(t *testing.T, h *OpenAIGatewayHandler, subject
 }
 
 type openAIResponsesWSUsageLogCase struct {
-	simpleModeRejectAtRead int64
-	closeReason            string
-	firstPayload           string
+	simpleModeRejectAtRead  int64
+	deleteKeyAfterFirstTurn bool
+	closeReason             string
+	firstPayload            string
 	// midPayload 在首个 turn 完成后发送（如 session.update），上游桩会为它
 	// 回一个 response.completed，客户端按普通事件读取。
 	midPayload                string
@@ -2634,19 +2635,22 @@ func TestOpenAIResponsesWebSocket_FailoverOnUpstreamUsageLimitEvent(t *testing.T
 			return true, nil
 		},
 	}
+	apiKey := &service.APIKey{
+		ID:      1802,
+		UserID:  1702,
+		Key:     "sk-ws-rate-limited-client",
+		GroupID: &groupID,
+		Status:  service.StatusAPIKeyActive,
+		User:    &service.User{ID: 1702, Status: service.StatusActive},
+		Group:   &service.Group{ID: groupID, Platform: service.PlatformOpenAI, Status: service.StatusActive},
+	}
+	keyRepo := &openAIWSSessionAPIKeyRepo{current: apiKey}
 	h := &OpenAIGatewayHandler{
 		gatewayService:      gatewaySvc,
 		billingCacheService: billingCacheSvc,
-		apiKeyService:       &service.APIKeyService{},
+		apiKeyService:       service.NewAPIKeyService(keyRepo, nil, nil, nil, nil, nil, cfg),
 		concurrencyHelper:   NewConcurrencyHelper(service.NewConcurrencyService(cache), SSEPingFormatNone, time.Second),
 		maxAccountSwitches:  3,
-	}
-
-	apiKey := &service.APIKey{
-		ID:      1802,
-		GroupID: &groupID,
-		User:    &service.User{ID: 1702, Status: service.StatusActive},
-		Group:   &service.Group{ID: groupID, Platform: service.PlatformOpenAI, Status: service.StatusActive},
 	}
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
@@ -2823,19 +2827,22 @@ func TestOpenAIResponsesWebSocket_FirstOutputTimeoutWithoutDownstreamReusesClien
 			return true, nil
 		},
 	}
+	apiKey := &service.APIKey{
+		ID:      1812,
+		UserID:  1712,
+		Key:     "sk-ws-failover-client",
+		GroupID: &groupID,
+		Status:  service.StatusAPIKeyActive,
+		User:    &service.User{ID: 1712, Status: service.StatusActive},
+		Group:   &service.Group{ID: groupID, Platform: service.PlatformOpenAI, Status: service.StatusActive},
+	}
+	keyRepo := &openAIWSSessionAPIKeyRepo{current: apiKey}
 	h := &OpenAIGatewayHandler{
 		gatewayService:      gatewaySvc,
 		billingCacheService: billingCacheSvc,
-		apiKeyService:       &service.APIKeyService{},
+		apiKeyService:       service.NewAPIKeyService(keyRepo, nil, nil, nil, nil, nil, cfg),
 		concurrencyHelper:   NewConcurrencyHelper(service.NewConcurrencyService(cache), SSEPingFormatNone, time.Second),
 		maxAccountSwitches:  3,
-	}
-
-	apiKey := &service.APIKey{
-		ID:      1812,
-		GroupID: &groupID,
-		User:    &service.User{ID: 1712, Status: service.StatusActive},
-		Group:   &service.Group{ID: groupID, Platform: service.PlatformOpenAI, Status: service.StatusActive},
 	}
 	handlerDone := make(chan struct{})
 	router := gin.New()
@@ -2966,6 +2973,24 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 	defer upstreamServer.Close()
 
 	groupID := int64(4201)
+	apiKeyGroup := &service.Group{ID: groupID, Platform: service.PlatformOpenAI, Status: service.StatusActive}
+	if tc.group != nil {
+		groupCopy := *tc.group
+		groupCopy.Status = service.StatusActive
+		apiKeyGroup = &groupCopy
+	}
+	apiKey := &service.APIKey{
+		ID:      1801,
+		UserID:  1701,
+		Key:     "sk-ws-client-session",
+		GroupID: &groupID,
+		Status:  service.StatusAPIKeyActive,
+		User:    &service.User{ID: 1701, Status: service.StatusActive},
+		Group:   apiKeyGroup,
+	}
+	if tc.simpleModeRejectAtRead > 0 {
+		apiKey.RateLimit5h = 1
+	}
 	account := service.Account{
 		ID:          9901,
 		Name:        "openai-ws-passthrough-usage-e2e",
@@ -3019,10 +3044,10 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 		}, nil, nil, nil, nil)
 	}
 
-	var keyRepo service.APIKeyRepository
+	keyRepo := &openAIWSSessionAPIKeyRepo{current: apiKey}
 	if tc.simpleModeRejectAtRead > 0 {
 		cfg.SimpleModeKeyRateLimitEnabled = true
-		keyRepo = &simpleModeWSRateLimitRepo{rejectAt: tc.simpleModeRejectAtRead}
+		keyRepo.rejectAt = tc.simpleModeRejectAtRead
 	}
 	billingCacheSvc := service.NewBillingCacheService(nil, nil, nil, keyRepo, nil, nil, cfg, nil)
 	t.Cleanup(billingCacheSvc.Stop)
@@ -3064,20 +3089,8 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 		cfg:                 cfg,
 		gatewayService:      gatewaySvc,
 		billingCacheService: billingCacheSvc,
-		apiKeyService:       &service.APIKeyService{},
+		apiKeyService:       service.NewAPIKeyService(keyRepo, nil, nil, nil, nil, nil, cfg),
 		concurrencyHelper:   NewConcurrencyHelper(service.NewConcurrencyService(cache), SSEPingFormatNone, time.Second),
-	}
-
-	apiKey := &service.APIKey{
-		ID:      1801,
-		GroupID: &groupID,
-		User:    &service.User{ID: 1701, Status: service.StatusActive},
-	}
-	if tc.simpleModeRejectAtRead > 0 {
-		apiKey.RateLimit5h = 1
-	}
-	if tc.group != nil {
-		apiKey.Group = tc.group
 	}
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
@@ -3137,6 +3150,9 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 		clientEvents = append(clientEvents, append([]byte(nil), event...))
 	}
 	readCompleted()
+	if tc.deleteKeyAfterFirstTurn {
+		keyRepo.deleted.Store(true)
+	}
 	if tc.midPayload != "" {
 		writeCtx, cancelWrite = context.WithTimeout(context.Background(), 3*time.Second)
 		err = clientConn.Write(writeCtx, coderws.MessageText, []byte(tc.midPayload))
@@ -3163,6 +3179,37 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 			}
 			require.Contains(t, closeErr.Reason, reason)
 			_ = clientConn.CloseNow()
+			if tc.deleteKeyAfterFirstTurn {
+				var firstUpstreamPayload []byte
+				select {
+				case firstUpstreamPayload = <-upstreamPayloadCh:
+				case <-time.After(3 * time.Second):
+					t.Fatal("first WebSocket turn did not reach upstream")
+				}
+				var firstUsage *service.UsageLog
+				select {
+				case firstUsage = <-usageRepo.created:
+				case <-time.After(3 * time.Second):
+					t.Fatal("first WebSocket turn did not produce usage")
+				}
+				select {
+				case <-upstreamPayloadCh:
+					t.Fatal("deleted API key allowed a second upstream WebSocket request")
+				case <-time.After(200 * time.Millisecond):
+				}
+				select {
+				case <-usageRepo.created:
+					t.Fatal("rejected WebSocket turn unexpectedly produced usage")
+				case <-time.After(200 * time.Millisecond):
+				}
+				return openAIResponsesWSUsageLogResult{
+					log:                  firstUsage,
+					logs:                 []*service.UsageLog{firstUsage},
+					upstreamFirstPayload: firstUpstreamPayload,
+					upstreamPayloads:     [][]byte{firstUpstreamPayload},
+					clientEvents:         clientEvents,
+				}
+			}
 			return openAIResponsesWSUsageLogResult{}
 		}
 		readCompleted()
@@ -3275,15 +3322,33 @@ data: {"type":"response.failed","error":{"message":"This content was flagged"}}
 	})
 }
 
-// The loader simulates window usage reaching its limit while a connection is
-// waiting for its first account or between completed WebSocket turns.
-type simpleModeWSRateLimitRepo struct {
+// The repository is authoritative for long-lived session revalidation and can
+// also simulate simple-mode window usage reaching its limit.
+type openAIWSSessionAPIKeyRepo struct {
 	service.APIKeyRepository
+	current  *service.APIKey
+	deleted  atomic.Bool
 	reads    atomic.Int64
 	rejectAt int64
 }
 
-func (r *simpleModeWSRateLimitRepo) GetRateLimitData(context.Context, int64) (*service.APIKeyRateLimitData, error) {
+func (r *openAIWSSessionAPIKeyRepo) GetByID(context.Context, int64) (*service.APIKey, error) {
+	if r.deleted.Load() || r.current == nil {
+		return nil, service.ErrAPIKeyNotFound
+	}
+	current := *r.current
+	if r.current.User != nil {
+		user := *r.current.User
+		current.User = &user
+	}
+	if r.current.Group != nil {
+		group := *r.current.Group
+		current.Group = &group
+	}
+	return &current, nil
+}
+
+func (r *openAIWSSessionAPIKeyRepo) GetRateLimitData(context.Context, int64) (*service.APIKeyRateLimitData, error) {
 	now := time.Now()
 	usage := 0.0
 	if r.reads.Add(1) >= r.rejectAt {
@@ -3291,6 +3356,24 @@ func (r *simpleModeWSRateLimitRepo) GetRateLimitData(context.Context, int64) (*s
 	}
 	return &service.APIKeyRateLimitData{Usage5h: usage, Window5hStart: &now}, nil
 }
+
+func TestOpenAIResponsesWebSocketRejectsDeletedKeyBeforeNextTurn(t *testing.T) {
+	for _, mode := range []string{service.OpenAIWSIngressModePassthrough, service.OpenAIWSIngressModeCtxPool} {
+		t.Run(mode, func(t *testing.T) {
+			got := runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
+				firstPayload:            `{"type":"response.create","model":"gpt-5.1"}`,
+				secondPayload:           `{"type":"response.create","model":"gpt-5.1","previous_response_id":"resp_usage_e2e_1"}`,
+				ingressMode:             mode,
+				deleteKeyAfterFirstTurn: true,
+				secondTurnCloseExpected: true,
+				closeReason:             "API key is no longer valid",
+			})
+			require.Len(t, got.logs, 1)
+			require.Len(t, got.upstreamPayloads, 1)
+		})
+	}
+}
+
 func TestOpenAIResponsesWebSocketSimpleModeRechecksKeyWindows(t *testing.T) {
 	for _, mode := range []string{service.OpenAIWSIngressModePassthrough, service.OpenAIWSIngressModeCtxPool} {
 		t.Run(mode+"/after-account-selection", func(t *testing.T) {

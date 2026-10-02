@@ -2716,15 +2716,29 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		return
 	}
 
-	// A WebSocket may outlive a key's remaining spending window. Recheck
-	// after acquiring turn slots, including the first account-selection wait.
-	// Restrict this extra check to the opt-in mode so standard-mode RPM checks
-	// are not charged a second time for the same request.
-	checkSimpleModeTurnBilling := func() error {
-		if h.cfg == nil || h.cfg.RunMode != config.RunModeSimple || !h.cfg.SimpleModeKeyRateLimitEnabled {
+	// A WebSocket may outlive the downstream key that authenticated its HTTP
+	// upgrade. Reload the key from the database before every logical turn so a
+	// deleted, disabled, expired, exhausted, or rebound key cannot keep using an
+	// already-open connection. This deliberately bypasses authentication caches.
+	revalidateWSSessionKey := func() (*service.APIKey, error) {
+		current, err := h.apiKeyService.RevalidateSessionKey(ctx, apiKey)
+		if err != nil {
+			return nil, service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "API key is no longer valid; reconnect", err)
+		}
+		return current, nil
+	}
+	// The initial standard-mode billing check above already accounts for the
+	// first logical request (including RPM). Every subsequent turn is a separate
+	// request and must pass billing admission again. Simple mode retains its
+	// opt-in key-window enforcement for both the first and later turns.
+	checkWSTurnBilling := func(turn int, current *service.APIKey) error {
+		if turn <= 1 && (h.cfg == nil || h.cfg.RunMode != config.RunModeSimple || !h.cfg.SimpleModeKeyRateLimitEnabled) {
 			return nil
 		}
-		if err := h.billingCacheService.CheckBillingEligibility(ctx, apiKey.User, apiKey, apiKey.Group, subscription, service.QuotaPlatform(ctx, apiKey)); err != nil {
+		if current == nil {
+			current = apiKey
+		}
+		if err := h.billingCacheService.CheckBillingEligibility(ctx, current.User, current, current.Group, subscription, service.QuotaPlatform(ctx, current)); err != nil {
 			return service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "billing check failed", err)
 		}
 		return nil
@@ -3006,8 +3020,14 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		// turn 级定价：首轮回退到 TurnStarted 的所属 turn 时刻；后续 turn 由
 		// BeforeTurn 重新冻结 pricingAt 并按最新门复核当前账号。
 		var turnPricing openAIWSTurnPricing
-		// Passthrough ingress does not invoke BeforeTurn for the first frame.
-		if err := checkSimpleModeTurnBilling(); err != nil {
+		// Passthrough ingress does not invoke BeforeTurn for the first frame, so
+		// perform the database-authoritative key check here as well.
+		currentSessionKey, errRevalidate := revalidateWSSessionKey()
+		if errRevalidate != nil {
+			closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "API key is no longer valid; reconnect")
+			return
+		}
+		if err := checkWSTurnBilling(1, currentSessionKey); err != nil {
 			closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "billing check failed")
 			return
 		}
@@ -3098,9 +3118,22 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				return mapping.MappedModel, nil
 			},
 			BeforeTurn: func(turn int) error {
+				turnAPIKey := apiKey
 				// turn==1 的会话屏蔽已由握手层检查覆盖；连接内 flag 只拦截后续 turn。
 				if cyberBlockedThisConn {
 					return newOpenAIWSLocalAdmissionCloseError(cyberSessionBlockedClientMsg)
+				}
+				if turn > 1 {
+					currentSessionKey, errRevalidate := revalidateWSSessionKey()
+					if errRevalidate != nil {
+						reqLog.Info("openai.websocket_api_key_revalidation_failed",
+							zap.Int("turn", turn),
+							zap.Int64("api_key_id", apiKey.ID),
+							zap.Error(errRevalidate),
+						)
+						return errRevalidate
+					}
+					turnAPIKey = currentSessionKey
 				}
 				// MapRequestModel 已在当前 turn 的 payload 解析阶段完成。这里
 				// 再用最终出站模型做一次权威资格终检，确保账号被禁用、移组、
@@ -3169,7 +3202,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				}
 				currentUserRelease = wrapReleaseOnDone(ctx, userReleaseFunc)
 				currentAccountRelease = wrapReleaseOnDone(ctx, accountReleaseFunc)
-				return checkSimpleModeTurnBilling()
+				return checkWSTurnBilling(turn, turnAPIKey)
 			},
 			AfterTurn: func(turn int, result *service.OpenAIForwardResult, turnErr error) {
 				turnStart := getTurnStart(turn)

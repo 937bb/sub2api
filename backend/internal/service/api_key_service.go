@@ -31,6 +31,7 @@ var (
 	ErrAPIKeyInvalidChars   = infraerrors.BadRequest("API_KEY_INVALID_CHARS", "api key can only contain letters, numbers, underscores, and hyphens")
 	ErrAPIKeyRateLimited    = infraerrors.TooManyRequests("API_KEY_RATE_LIMITED", "too many failed attempts, please try again later")
 	ErrAPIKeyAuthOverloaded = infraerrors.ServiceUnavailable("API_KEY_AUTH_OVERLOADED", "api key authentication is temporarily overloaded")
+	ErrAPIKeySessionInvalid = infraerrors.Unauthorized("API_KEY_SESSION_INVALID", "api key session is no longer valid")
 	ErrInvalidIPPattern     = infraerrors.BadRequest("INVALID_IP_PATTERN", "invalid IP or CIDR pattern")
 	// ErrAPIKeyExpired        = infraerrors.Forbidden("API_KEY_EXPIRED", "api key has expired")
 	ErrAPIKeyExpired = infraerrors.Forbidden("API_KEY_EXPIRED", "api key 已过期")
@@ -698,6 +699,47 @@ func (s *APIKeyService) GetByID(ctx context.Context, id int64) (*APIKey, error) 
 		apiKey.CurrentConcurrency = s.currentConcurrencyForAPIKey(ctx, apiKey.ID)
 	}
 	return apiKey, nil
+}
+
+// RevalidateSessionKey reloads the credential from the database before a new
+// turn on a long-lived connection. Authentication caches are intentionally not
+// used here: deleting or disabling a key must stop an already-open session
+// before its next upstream request.
+func (s *APIKeyService) RevalidateSessionKey(ctx context.Context, bound *APIKey) (*APIKey, error) {
+	if s == nil || s.apiKeyRepo == nil || bound == nil || bound.ID <= 0 || bound.UserID <= 0 {
+		return nil, ErrAPIKeySessionInvalid
+	}
+
+	current, err := s.apiKeyRepo.GetByID(ctx, bound.ID)
+	if err != nil {
+		return nil, fmt.Errorf("revalidate api key session: %w", err)
+	}
+	if current == nil || current.ID != bound.ID || current.UserID != bound.UserID ||
+		!sameAPIKeySessionGroup(current.GroupID, bound.GroupID) ||
+		(bound.Key != "" && current.Key != "" && current.Key != bound.Key) {
+		return nil, ErrAPIKeySessionInvalid
+	}
+	if !current.IsActive() || current.IsExpired() || current.IsQuotaExhausted() {
+		return nil, ErrAPIKeySessionInvalid
+	}
+	if current.User == nil || current.User.ID != bound.UserID || !current.User.IsActive() {
+		return nil, ErrAPIKeySessionInvalid
+	}
+	if current.GroupID != nil {
+		if current.Group == nil || current.Group.ID != *current.GroupID || !current.Group.IsActive() {
+			return nil, ErrAPIKeySessionInvalid
+		}
+	}
+
+	s.compileAPIKeyIPRules(current)
+	return current, nil
+}
+
+func sameAPIKeySessionGroup(a, b *int64) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
 }
 
 // GetByKey 根据Key字符串获取API Key（用于认证）
