@@ -384,14 +384,18 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			proxyURL = account.Proxy.URL()
 		}
 
+		upstreamBody, _, prepareErr := prepareOpenAIUpstreamResponsesBody(c, account, body, reqStream)
+		if prepareErr != nil {
+			return nil, prepareErr
+		}
 		upstreamCtx, releaseUpstreamCtx := openAIPassthroughContext(ctx, account)
-		upstreamReq, buildErr := s.buildUpstreamRequestOpenAIPassthrough(upstreamCtx, c, account, body, token)
+		upstreamReq, buildErr := s.buildUpstreamRequestOpenAIPassthrough(upstreamCtx, c, account, upstreamBody, token)
 		releaseUpstreamCtx()
 		if buildErr != nil {
 			return nil, buildErr
 		}
 
-		if err := s.applyOpenAICodexTicket(ctx, account, actualModel, upstreamReq.Header); err != nil {
+		if err := s.applyOpenAICodexTicket(ctx, account, extractOpenAICodexTicketModel(upstreamBody), upstreamReq.Header); err != nil {
 			return nil, err
 		}
 		applyCodexCacheOnlyHTTPRoutingHeaders(c, account, upstreamReq)
@@ -660,7 +664,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 			targetURL = buildOpenAIResponsesURLForPlatform(account.Platform, validatedURL)
 		}
 	}
-	targetURL = appendOpenAIResponsesRequestPathSuffix(targetURL, openAIResponsesRequestPathSuffix(c))
+	targetURL = appendOpenAIResponsesRequestPathSuffix(targetURL, openAIResponsesUpstreamRequestPathSuffix(c, account))
 
 	// DeepSeek / Kimi 原生 Responses 端点为无状态实现（见 normalizeDeepSeekResponsesRequestBody）。
 	body = normalizeDeepSeekResponsesRequestBody(account, body)
@@ -722,7 +726,11 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 		clientSessionID := strings.TrimSpace(req.Header.Get("session_id"))
 		clientConversationID := strings.TrimSpace(req.Header.Get("conversation_id"))
 		if isOpenAIResponsesCompactPath(c) {
-			req.Header.Set("accept", "application/json")
+			if isOpenAILegacyCompactNativeV2Bridge(c, account) {
+				req.Header.Set("accept", "text/event-stream")
+			} else {
+				req.Header.Set("accept", "application/json")
+			}
 			if req.Header.Get("version") == "" {
 				req.Header.Set("version", CodexCanonicalClientVersion())
 			}

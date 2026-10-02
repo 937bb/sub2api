@@ -1141,6 +1141,10 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 
 		// Build upstream request
+		upstreamBody, upstreamStream, prepareErr := prepareOpenAIUpstreamResponsesBody(c, account, body, reqStream)
+		if prepareErr != nil {
+			return nil, prepareErr
+		}
 		upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
 		var headerGuard *openAIFirstOutputHeaderGuard
 		if firstOutputTimeout > 0 {
@@ -1148,7 +1152,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 				upstreamCtx, releaseUpstreamCtx, startTime.Add(firstOutputTimeout),
 			)
 		}
-		upstreamReq, err := s.buildUpstreamRequest(upstreamCtx, c, account, body, token, reqStream, promptCacheKey, isCodexCLI)
+		upstreamReq, err := s.buildUpstreamRequest(upstreamCtx, c, account, upstreamBody, token, upstreamStream, promptCacheKey, isCodexCLI)
 		if headerGuard == nil {
 			releaseUpstreamCtx()
 		}
@@ -1166,7 +1170,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 
 		// Send request
-		if err := s.applyOpenAICodexTicket(ctx, account, extractOpenAICodexTicketModel(body), upstreamReq.Header); err != nil {
+		if err := s.applyOpenAICodexTicket(ctx, account, extractOpenAICodexTicketModel(upstreamBody), upstreamReq.Header); err != nil {
 			if headerGuard != nil {
 				headerGuard.close()
 			}
@@ -1682,7 +1686,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 	default:
 		targetURL = openaiPlatformAPIURL
 	}
-	targetURL = appendOpenAIResponsesRequestPathSuffix(targetURL, openAIResponsesRequestPathSuffix(c))
+	targetURL = appendOpenAIResponsesRequestPathSuffix(targetURL, openAIResponsesUpstreamRequestPathSuffix(c, account))
 
 	// DeepSeek / Kimi 原生 Responses 端点为无状态实现：强制 store=false、清除
 	// previous_response_id，避免携带状态字段被上游拒绝。
@@ -1747,7 +1751,11 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 		apiKeyID := getAPIKeyIDFromContext(c)
 		harvestSession := s.harvestPinnedSessionForModel(ctx, account, extractOpenAICodexTicketModel(body))
 		if isOpenAIResponsesCompactPath(c) {
-			req.Header.Set("accept", "application/json")
+			if isOpenAILegacyCompactNativeV2Bridge(c, account) {
+				req.Header.Set("accept", "text/event-stream")
+			} else {
+				req.Header.Set("accept", "application/json")
+			}
 			if req.Header.Get("version") == "" {
 				req.Header.Set("version", CodexCanonicalClientVersion())
 			}

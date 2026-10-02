@@ -782,7 +782,7 @@ func TestOpenAIGatewayService_OAuthPassthrough_FlattenEnabledNamespaceCollisionR
 	require.Contains(t, gjson.Get(rec.Body.String(), "error.message").String(), "conflicts with a top-level tool")
 }
 
-func TestOpenAIGatewayService_OAuthPassthrough_CompactUsesJSONAndKeepsNonStreaming(t *testing.T) {
+func TestOpenAIGatewayService_OAuthPassthrough_CompactBridgesNativeV2AndKeepsClientNonStreaming(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
@@ -828,12 +828,14 @@ func TestOpenAIGatewayService_OAuthPassthrough_CompactUsesJSONAndKeepsNonStreami
 	require.NotNil(t, result)
 	require.False(t, result.Stream)
 
-	require.False(t, gjson.GetBytes(upstream.lastBody, "store").Exists())
-	require.False(t, gjson.GetBytes(upstream.lastBody, "stream").Exists())
+	require.False(t, gjson.GetBytes(upstream.lastBody, "store").Bool())
+	require.True(t, gjson.GetBytes(upstream.lastBody, "stream").Bool())
+	require.True(t, HasCompactionTriggerInInput(upstream.lastBody))
 	require.Equal(t, "gpt-5.1-compact", gjson.GetBytes(upstream.lastBody, "model").String())
 	require.Equal(t, "compact me", gjson.GetBytes(upstream.lastBody, "input.0.text").String())
 	require.Equal(t, "local-test-instructions", strings.TrimSpace(gjson.GetBytes(upstream.lastBody, "instructions").String()))
-	require.Equal(t, "application/json", upstream.lastReq.Header.Get("Accept"))
+	require.Equal(t, "text/event-stream", upstream.lastReq.Header.Get("Accept"))
+	require.Equal(t, "/backend-api/codex/responses", upstream.lastReq.URL.Path)
 	require.Equal(t, codexCLIVersion, upstream.lastReq.Header.Get("Version"))
 	require.NotEmpty(t, upstream.lastReq.Header.Get("Session_Id"))
 	require.Equal(t, "chatgpt.com", upstream.lastReq.Host)
@@ -925,10 +927,10 @@ func TestOpenAIGatewayService_OAuthPassthrough_CodexMissingInstructionsGetsDefau
 			require.NoError(t, err)
 			require.NotNil(t, result)
 			require.NotNil(t, upstream.lastReq)
-			if stream {
-				require.True(t, gjson.GetBytes(upstream.lastBody, "stream").Bool())
-			} else {
-				require.False(t, gjson.GetBytes(upstream.lastBody, "stream").Exists())
+			require.True(t, gjson.GetBytes(upstream.lastBody, "stream").Bool())
+			if !stream {
+				require.True(t, HasCompactionTriggerInInput(upstream.lastBody))
+				require.Equal(t, "/backend-api/codex/responses", upstream.lastReq.URL.Path)
 			}
 			require.Equal(t, strings.TrimSpace(defaultCodexSynthInstructions("gpt-5.1-codex-max")), strings.TrimSpace(gjson.GetBytes(upstream.lastBody, "instructions").String()))
 		})

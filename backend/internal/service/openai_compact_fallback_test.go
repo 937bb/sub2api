@@ -73,16 +73,23 @@ func TestResolveOpenAICompactFallbackModelPrefersAccountMapping(t *testing.T) {
 	require.Equal(t, "global-compact", svc.resolveOpenAICompactFallbackModel(account, "unmapped-model"))
 }
 
-func TestOpenAIGatewayForwardUsesGlobalCompactModelOnInitialLegacyRequest(t *testing.T) {
+func TestOpenAIGatewayForwardBridgesLegacyCompactToNativeV2(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	body := []byte(`{"model":"gpt-5.5","stream":false,"instructions":"compact-test","input":[]}`)
-	c := newOpenAICompactFallbackTestContext(t, "/v1/responses/compact")
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/compact", nil)
 	c.Request.Body = io.NopCloser(bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusOK,
-		Header:     http.Header{"Content-Type": []string{"application/json"}},
-		Body:       io.NopCloser(strings.NewReader(`{"id":"resp_compact","status":"completed","model":"global-compact","output":[],"usage":{"input_tokens":1,"output_tokens":1}}`)),
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body: io.NopCloser(strings.NewReader(
+			"event: response.output_item.done\n" +
+				`data: {"type":"response.output_item.done","output_index":0,"item":{"type":"compaction","encrypted_content":"cipher"}}` + "\n\n" +
+				"event: response.completed\n" +
+				`data: {"type":"response.completed","response":{"id":"resp_compact","status":"completed","model":"global-compact","output":[{"type":"compaction","encrypted_content":"cipher"}],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}` + "\n\n",
+		)),
 	}}
 	svc := &OpenAIGatewayService{
 		cfg:          &config.Config{Gateway: config.GatewayConfig{OpenAICompactModel: "global-compact"}},
@@ -100,7 +107,15 @@ func TestOpenAIGatewayForwardUsesGlobalCompactModelOnInitialLegacyRequest(t *tes
 	require.NotNil(t, result)
 	require.Len(t, upstream.bodies, 1)
 	require.Equal(t, "global-compact", gjson.GetBytes(upstream.bodies[0], "model").String())
-	require.Contains(t, upstream.requests[0].URL.Path, "/compact")
+	require.Equal(t, "/backend-api/codex/responses", upstream.requests[0].URL.Path)
+	require.True(t, gjson.GetBytes(upstream.bodies[0], "stream").Bool())
+	require.False(t, gjson.GetBytes(upstream.bodies[0], "store").Bool())
+	require.True(t, HasCompactionTriggerInInput(upstream.bodies[0]))
+	require.Equal(t, "text/event-stream", upstream.requests[0].Header.Get("Accept"))
+	require.Contains(t, upstream.requests[0].Header.Get("x-codex-beta-features"), "remote_compaction_v2")
+	require.Equal(t, "resp_compact", gjson.Get(recorder.Body.String(), "id").String())
+	require.Equal(t, "compaction", gjson.Get(recorder.Body.String(), "output.0.type").String())
+	require.NotContains(t, recorder.Body.String(), "event: response.completed")
 }
 
 func TestPrepareOpenAICompactFallbackRetryLegacyPathAndSingleAttemptGuard(t *testing.T) {
