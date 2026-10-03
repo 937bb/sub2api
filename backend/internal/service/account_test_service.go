@@ -504,9 +504,7 @@ func (s *AccountTestService) testPrismBrowserConnection(c *gin.Context, account 
 func (s *AccountTestService) testModelRoutedAccountConnection(c *gin.Context, account *Account, modelID string, prompt string) error {
 	testModelID := strings.TrimSpace(modelID)
 	if testModelID == "" {
-		if profile := account.providerProfile(); profile != nil {
-			testModelID = profile.DefaultTestModel
-		}
+		testModelID = account.providerDefaultTestModel()
 	}
 	if testModelID == "" {
 		testModelID = openai.DefaultTestModel
@@ -546,6 +544,9 @@ func (s *AccountTestService) testModelRoutedResponsesConnection(c *gin.Context, 
 
 func (s *AccountTestService) testCNProviderChatCompletionsConnection(c *gin.Context, account *Account, modelID string, prompt string) error {
 	testModelID := strings.TrimSpace(modelID)
+	if testModelID == "" {
+		testModelID = account.providerDefaultTestModel()
+	}
 	if testModelID == "" {
 		testModelID = openai.DefaultTestModel
 	}

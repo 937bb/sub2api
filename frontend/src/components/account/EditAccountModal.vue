@@ -172,7 +172,7 @@
               ]"
               @click="editAccountMode = mode"
             >
-              {{ mode }}
+              {{ providerModeLabel(mode, t) }}
             </button>
           </div>
         </div>
@@ -3393,6 +3393,7 @@ import {
   isMultiProtocolApiKeyPlatform,
   parseOpenCodeGoProtocolRules,
   providerAccountModes,
+  providerModeLabel,
   providerNativeProtocols,
   providerRoutesByModel,
   resolveProviderAccountMode,
