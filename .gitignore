@@ -182,6 +182,9 @@ issues/
 **/credential-operations.key
 **/.credential-key-*
 !docs/credential-encryption.md
+!docs/new-api-upstream-probe.md
+!docs/account-ops-notifications.md
+!docs/screenshots/account-ops-monitoring/
 !docs/screenshots/credential-encryption/
 !docs/screenshots/pelican-showcase-api-ui/
 !docs/screenshots/smart-ops-capture-harvest/
