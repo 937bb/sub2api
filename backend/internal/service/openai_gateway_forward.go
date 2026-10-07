@@ -15,6 +15,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/requestmodel"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/requesttiming"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
@@ -45,6 +46,10 @@ func prismBrowserResponsesURL(baseURL string) string {
 
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (result *OpenAIForwardResult, resultErr error) {
+	if err := requestmodel.ValidateJSONSelectors(body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "code": "ambiguous_model", "message": err.Error()}})
+		return nil, err
+	}
 	if astraSchedulingAppliesToRequest(s.cfg.AstraRouting(ctx), account, gjson.GetBytes(body, "model").String(), getOpenAIGroupIDFromContext(c)) {
 		if err := s.checkAstraSchedulingRoute(ctx, account); err != nil {
 			return nil, err
