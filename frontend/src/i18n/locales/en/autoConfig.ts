@@ -1,4 +1,12 @@
 export default {
+  quality: {
+  "title": "Initial quality operations rule",
+  "hint": "Copy an existing quality rule to new OAuth accounts on the selected platform. Leave empty to skip.",
+  "none": "Do not create a quality rule",
+  "saved": "Saved quality rule copy",
+  "loadFailed": "Could not load quality rules. The saved configuration is preserved.",
+  "copyHint": "Copies models, schedule, actions and enabled state. The saved copy is independent of its source. Existing accounts, reauthorization and manual edits are unaffected."
+},
   "title": "Auto Configuration",
   "description": "Manage BPS defaults, model pricing, new OAuth account initialization and concurrency upgrades.",
   "modelBilling": {
@@ -32,6 +40,7 @@ export default {
   "priority": "Priority",
   "load_factor": "Load factor",
   "concurrency": "Initial concurrency",
+  "cost_multiplier": "Cost multiplier",
   "groups": "Initial groups",
   "noGroups": "No active matching groups. Create one in group management first.",
   "loadHint": "Lower priority values run first. Load factor controls scheduling frequency independently of concurrency limits and billing multipliers.",
