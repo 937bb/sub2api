@@ -785,7 +785,10 @@ func lockAndMergeAccountProbeExtra(
 		if err == nil {
 			err = bindingRows.Err()
 		}
-		bindingRows.Close()
+		closeErr := bindingRows.Close()
+		if err == nil {
+			err = closeErr
+		}
 		if err != nil {
 			return nil, err
 		}
