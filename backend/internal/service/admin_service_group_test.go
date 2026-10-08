@@ -1184,7 +1184,7 @@ func TestAdminService_CreateGroup_InvalidPeakRateReturnsBadRequest(t *testing.T)
 		SubscriptionType: SubscriptionTypeSubscription,
 		PeakRateEnabled:  true,
 		PeakStart:        "20:00",
-		PeakEnd:          "08:30",
+		PeakEnd:          "20:00",
 	})
 
 	require.ErrorContains(t, err, "peak_end")
@@ -1199,8 +1199,10 @@ func TestAdminService_UpdateGroup_PeakRateValidation(t *testing.T) {
 		input   UpdateGroupInput
 		wantErr bool
 	}{
-		{"cross-day window", UpdateGroupInput{PeakStart: ptrString("20:00"), PeakEnd: ptrString("08:30")}, true},
-		{"partial update invalidates window", UpdateGroupInput{PeakEnd: ptrString("08:30")}, true},
+		{"cross-day window", UpdateGroupInput{PeakStart: ptrString("20:00"), PeakEnd: ptrString("08:30")}, false},
+		{"partial update creates cross-day window", UpdateGroupInput{PeakEnd: ptrString("08:30")}, false},
+		{"equal window endpoints", UpdateGroupInput{PeakStart: ptrString("20:00"), PeakEnd: ptrString("20:00")}, true},
+		{"partial update invalidates window", UpdateGroupInput{PeakEnd: ptrString("14:00")}, true},
 		{"partial update keeps valid window", UpdateGroupInput{PeakEnd: ptrString("19:00")}, false},
 	}
 	for _, tt := range tests {
@@ -1228,7 +1230,7 @@ func TestAdminService_UpdateGroup_PeakRateValidation(t *testing.T) {
 			} else {
 				require.NoError(t, err)
 				require.NotNil(t, repo.updated)
-				require.Equal(t, "19:00", repo.updated.PeakEnd)
+				require.Equal(t, *tt.input.PeakEnd, repo.updated.PeakEnd)
 			}
 		})
 	}

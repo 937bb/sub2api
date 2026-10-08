@@ -158,7 +158,7 @@ func TestOpenAIGatewayHandlerResponses_AstraProFirst403SecondSucceeds(t *testing
 }
 
 // both OAuth accounts 403: exhausted keeps every wire body pro+max/model, is not 200,
-// and surfaces the existing-policy 502 upstream_error (unchanged 403-masking policy).
+// and surfaces the C-side 502 api_error without exposing upstream routing details.
 func TestOpenAIGatewayHandlerResponses_AstraProBoth403NoDowngrade(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -173,7 +173,7 @@ func TestOpenAIGatewayHandlerResponses_AstraProBoth403NoDowngrade(t *testing.T) 
 	assertAstraProAccountSwitch(t, accountIDs)
 	require.NotEqual(t, http.StatusOK, rec.Code, "all-403 must never surface a 200 to the client")
 	require.Equal(t, http.StatusBadGateway, rec.Code)
-	require.Equal(t, "upstream_error", gjson.GetBytes(rec.Body.Bytes(), "error.type").String())
+	require.Equal(t, "api_error", gjson.GetBytes(rec.Body.Bytes(), "error.type").String())
 }
 
 // passthrough -> non-passthrough drops only the encrypted *input* reasoning item;
