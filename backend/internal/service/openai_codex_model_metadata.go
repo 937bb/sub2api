@@ -59,6 +59,13 @@ func accountCodexToolCapabilities(account *Account, modelID string) map[string]j
 	if account == nil {
 		return capabilities
 	}
+	if account.IsOpenAISiwc() {
+		capabilities["use_responses_lite"] = json.RawMessage("false")
+		capabilities["tool_mode"] = json.RawMessage("null")
+		capabilities["multi_agent_version"] = json.RawMessage("null")
+		capabilities["multi_agent_reasoning_effort"] = json.RawMessage("null")
+		return capabilities
+	}
 	if metadata, ok := account.GetUpstreamModelMetadata(modelID); ok {
 		applyCodexToolCapabilities(capabilities, metadata.CodexToolCapabilities, true)
 	}

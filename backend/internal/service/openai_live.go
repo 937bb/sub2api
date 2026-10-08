@@ -515,6 +515,9 @@ func (s *OpenAIGatewayService) createUpstreamLiveCall(
 	request *LiveCallRequest,
 	attestation string,
 ) (*LiveCallCreated, error) {
+	if account.IsOpenAISiwc() {
+		return nil, errors.New("SIWC Live calls are unsupported")
+	}
 	token, _, err := s.GetAccessToken(ctx, account)
 	if err != nil {
 		logLiveCreateStageFailure(ctx, account.ID, "access_token", err)
@@ -669,6 +672,9 @@ func (s *OpenAIGatewayService) liveSidebandHeaders(
 	account *Account,
 	record *LiveCallRecord,
 ) (http.Header, error) {
+	if account.IsOpenAISiwc() {
+		return nil, errors.New("SIWC Live sideband is unsupported")
+	}
 	token, _, err := s.GetAccessToken(ctx, account)
 	if err != nil {
 		return nil, err

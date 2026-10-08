@@ -859,6 +859,12 @@ func (s *AccountTestService) testBedrockAccountConnection(c *gin.Context, ctx co
 func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account *Account, modelID string, prompt string, mode string) error {
 	ctx := c.Request.Context()
 	mode = normalizeAccountTestMode(mode)
+	if account.IsOpenAISiwc() {
+		if mode == AccountTestModeCompact || mode == AccountTestModeBPSTools || isOpenAIImageModel(modelID) {
+			return s.sendErrorAndEnd(c, "SIWC supports ordinary Responses account tests only")
+		}
+		return s.testSIWCAccountConnection(c, account, modelID, prompt)
+	}
 
 	// Excel/BPS accounts must use the same gateway path as user Responses
 	// requests. The legacy account-test probe hard-codes ChatGPT Codex and

@@ -23,6 +23,17 @@ func (s *OpenAIGatewayService) FetchOpenAIModelsList(ctx context.Context, accoun
 	if err != nil {
 		return nil, fmt.Errorf("resolve model list credentials: %w", err)
 	}
+	if credentialAccount.IsOpenAISiwc() {
+		models, err := s.fetchSIWCModels(ctx, credentialAccount)
+		if err != nil {
+			return nil, err
+		}
+		body, err := siwcModelsBody(models)
+		if err != nil {
+			return nil, invalidOpenAIModelsList(err)
+		}
+		return &OpenAIModelsResponse{Body: body, ETag: codexModelsManifestBodyETag(body)}, nil
+	}
 	if credentialAccount.IsOpenAIOAuth() {
 		clientVersion := CodexCanonicalClientVersion()
 		if s.settingService != nil {

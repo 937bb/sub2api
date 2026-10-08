@@ -573,12 +573,26 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 	if err := s.ValidateAccountGroupBindings(ctx, groupIDs); err != nil {
 		return nil, err
 	}
-	if err := s.accountRepo.Create(ctx, account); err != nil {
+	if account.IsOpenAISiwc() {
+		creator, ok := s.accountRepo.(interface {
+			CreateWithAccountGroups(context.Context, *Account, []AccountGroup) error
+		})
+		if !ok {
+			return nil, errors.New("SIWC atomic account creation unavailable")
+		}
+		groups := make([]AccountGroup, 0, len(groupIDs))
+		for _, id := range groupIDs {
+			groups = append(groups, AccountGroup{GroupID: id, Priority: account.Priority})
+		}
+		if err := creator.CreateWithAccountGroups(ctx, account, groups); err != nil {
+			return nil, err
+		}
+	} else if err := s.accountRepo.Create(ctx, account); err != nil {
 		return nil, err
 	}
 
-	// 绑定分组
-	if len(groupIDs) > 0 {
+	// SIWC creation already committed its group bindings atomically.
+	if !account.IsOpenAISiwc() && len(groupIDs) > 0 {
 		if err := s.accountRepo.BindGroups(ctx, account.ID, groupIDs); err != nil {
 			return nil, err
 		}
@@ -623,6 +637,9 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	}
 	account, err := s.accountRepo.GetByID(ctx, id)
 	if err != nil {
+		return nil, err
+	}
+	if err := preserveSIWCAdminCredentials(account, input); err != nil {
 		return nil, err
 	}
 	if account.Platform == PlatformTypeSafe && input.Type != "" && input.Type != AccountTypeAPIKey {
@@ -1165,7 +1182,17 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	// 影子账号绝不持有凭据:批量更新携带凭据时,目标中不得含影子(外审 G5,与单账号
 	// UpdateAccount 守卫对齐)。覆盖显式 IDs 与 filter 解析出的 IDs(此处 AccountIDs 已解析完成)。
 	if len(input.Credentials) > 0 {
+		if mode, _ := input.Credentials["auth_mode"].(string); strings.EqualFold(mode, "siwc") {
+			return nil, siwcBadRequest(errors.New("SIWC authorization cannot be replaced in bulk"))
+		}
 		for _, acc := range cachedTargets {
+			if acc.IsOpenAISiwc() {
+				for _, key := range siwcManagedCredentialKeys {
+					if _, supplied := input.Credentials[key]; supplied {
+						return nil, siwcBadRequest(errors.New("SIWC authorization cannot be replaced in bulk"))
+					}
+				}
+			}
 			if acc != nil && acc.IsCredentialShadow() {
 				return nil, infraerrors.Newf(http.StatusBadRequest, "SPARK_SHADOW_NO_CREDENTIALS",
 					"spark shadow account %d cannot hold credentials; manage credentials on the parent account", acc.ID)
@@ -1522,9 +1549,9 @@ func (s *adminServiceImpl) CreateShadow(ctx context.Context, parentID int64, opt
 	if err != nil {
 		return nil, fmt.Errorf("get parent account: %w", err)
 	}
-	if !parent.IsOpenAIOAuth() {
+	if !parent.IsOpenAIOAuth() || parent.IsOpenAISiwc() {
 		return nil, infraerrors.New(http.StatusBadRequest, "SPARK_SHADOW_INVALID_PARENT",
-			"spark shadow requires an OpenAI OAuth parent account")
+			"spark shadow requires an OpenAI Codex OAuth parent account")
 	}
 	// G6:母账号本身不能是影子,否则会建出二级影子——resolveCredentialAccount 只解一层,
 	// 会解析到无凭据的一级影子,进入坏调度/上游失败。
@@ -1821,6 +1848,9 @@ func (s *adminServiceImpl) ResetAccountQuota(ctx context.Context, id int64) erro
 // EnsureOpenAIPrivacy 检查 OpenAI OAuth 账号是否已设置 privacy_mode，
 // 未设置则调用 disableOpenAITraining 并持久化到 Extra，返回设置的 mode 值。
 func (s *adminServiceImpl) EnsureOpenAIPrivacy(ctx context.Context, account *Account) string {
+	if account == nil || account.IsOpenAISiwc() {
+		return ""
+	}
 	// 影子账号不持凭据，隐私设置由母账号管理，直接跳过。
 	if account.IsCredentialShadow() {
 		return ""
@@ -1858,6 +1888,9 @@ func (s *adminServiceImpl) EnsureOpenAIPrivacy(ctx context.Context, account *Acc
 
 // ForceOpenAIPrivacy 强制重新设置 OpenAI OAuth 账号隐私，无论当前状态。
 func (s *adminServiceImpl) ForceOpenAIPrivacy(ctx context.Context, account *Account) string {
+	if account == nil || account.IsOpenAISiwc() {
+		return ""
+	}
 	// 影子账号不持凭据,隐私由母账号管理,直接跳过(与 EnsureOpenAIPrivacy 一致——外审第4轮)。
 	if account.IsCredentialShadow() {
 		return ""

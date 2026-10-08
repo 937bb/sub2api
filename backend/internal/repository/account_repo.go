@@ -560,6 +560,15 @@ func (r *accountRepository) updateLockedAccount(
 		return nil, err
 	}
 	account.Extra = extra
+	if account.IsOpenAISiwc() {
+		// The row is already locked. Preserve the grant and directory that may
+		// have rotated after the admin form read its snapshot.
+		current, err := client.Account.Query().Where(dbaccount.IDEQ(account.ID)).Only(ctx)
+		if err != nil {
+			return nil, err
+		}
+		account.Credentials = service.PreserveSIWCManagedCredentials(account.Credentials, current.Credentials)
+	}
 
 	schedulable := account.Schedulable
 	if account.Status == service.StatusError {

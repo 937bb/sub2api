@@ -716,6 +716,12 @@ func (s *AccountUsageService) getOpenAIUsage(ctx context.Context, account *Accou
 	if account == nil {
 		return usage, nil
 	}
+	if account.IsOpenAISiwc() {
+		usage.Source = "passive"
+		usage.ErrorCode = "siwc_quota_unsupported"
+		usage.Error = "SIWC remote subscription quota is not supported"
+		return usage, nil
+	}
 
 	applyExtraToUsage(usage, account.Extra, now)
 
@@ -773,7 +779,7 @@ func (s *AccountUsageService) getOpenAIUsage(ctx context.Context, account *Accou
 }
 
 func shouldRefreshOpenAICodexSnapshot(account *Account, usage *UsageInfo, now time.Time) bool {
-	if account == nil {
+	if account == nil || account.IsOpenAISiwc() {
 		return false
 	}
 	if usage == nil {
@@ -789,7 +795,7 @@ func shouldRefreshOpenAICodexSnapshot(account *Account, usage *UsageInfo, now ti
 }
 
 func isOpenAICodexSnapshotStale(account *Account, now time.Time) bool {
-	if account == nil || !account.IsOpenAIOAuth() {
+	if account == nil || !account.IsOpenAIOAuth() || account.IsOpenAISiwc() {
 		return false
 	}
 	// 普通账号的 codex 刷新走 probe(/responses 头),要求 WSv2;但 spark 影子走 QueryUsage
@@ -830,6 +836,9 @@ func (s *AccountUsageService) shouldProbeOpenAICodexSnapshot(accountID int64, no
 }
 
 func (s *AccountUsageService) probeOpenAICodexSnapshot(ctx context.Context, account *Account) (map[string]any, error) {
+	if account.IsOpenAISiwc() {
+		return nil, fmt.Errorf("SIWC remote subscription quota is not supported")
+	}
 	if account == nil || !account.IsOAuth() {
 		return nil, nil
 	}

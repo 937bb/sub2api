@@ -148,7 +148,11 @@ func (s *OpenAIGatewayService) doOpenAIProxyAttempt(req *http.Request, account *
 			return markOpenAIResponseEgress(resp, req, target.proxyID), err
 		}
 	}
-	resp, err = s.httpUpstream.Do(req, target.url, account.ID, account.Concurrency)
+	if account.IsOpenAISiwc() {
+		resp, err = s.doSIWCHTTP(req, target.url)
+	} else {
+		resp, err = s.httpUpstream.Do(req, target.url, account.ID, account.Concurrency)
+	}
 	return markOpenAIResponseEgress(resp, req, target.proxyID), err
 }
 

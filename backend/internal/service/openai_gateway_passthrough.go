@@ -643,6 +643,9 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 	token string,
 ) (*http.Request, error) {
 	defer requesttiming.Observe(ctx, "build_upstream_request")()
+	if account.IsOpenAISiwc() {
+		return buildSIWCResponsesRequest(ctx, c, account, body, token)
+	}
 	targetURL := openaiPlatformAPIURL
 	switch account.Type {
 	case AccountTypeOAuth:

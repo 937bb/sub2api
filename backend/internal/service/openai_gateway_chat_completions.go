@@ -400,7 +400,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 		return nil, fmt.Errorf("build upstream request: %w", err)
 	}
 
-	if promptCacheKey != "" {
+	if promptCacheKey != "" && !account.IsOpenAISiwc() {
 		if session := s.harvestPinnedSessionForModel(ctx, account, upstreamModel); session != "" {
 			upstreamReq.Header.Set("session_id", session)
 		} else {
@@ -487,9 +487,9 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 		}
 	}
 
-	// Extract and save Codex usage snapshot from response headers (for OAuth accounts).
-	// 排除 spark 影子:其 codex_* 仅由 QueryUsage(/wham/usage bengalfox)更新(外审第7轮 P1)。
-	if handleErr == nil && account.Type == AccountTypeOAuth && !account.IsShadow() {
+	// Only ordinary OAuth accounts accept Codex quota headers. Spark shadows
+	// update their isolated quota through QueryUsage, and SIWC has no Codex quota.
+	if handleErr == nil && account.Type == AccountTypeOAuth && !account.IsOpenAISiwc() && !account.IsShadow() {
 		if snapshot := ParseCodexRateLimitHeaders(resp.Header); snapshot != nil {
 			s.updateCodexUsageSnapshot(ctx, account.ID, snapshot)
 		}

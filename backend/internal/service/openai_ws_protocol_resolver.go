@@ -36,6 +36,9 @@ func NewOpenAIWSProtocolResolver(cfg *config.Config) OpenAIWSProtocolResolver {
 }
 
 func (r *defaultOpenAIWSProtocolResolver) Resolve(account *Account) OpenAIWSProtocolDecision {
+	if account.IsOpenAISiwc() {
+		return openAIWSHTTPDecision("siwc_http_only")
+	}
 	if account == nil {
 		return openAIWSHTTPDecision("account_missing")
 	}

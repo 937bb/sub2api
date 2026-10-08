@@ -13,6 +13,16 @@ func persistAccountCredentials(ctx context.Context, repo AccountRepository, acco
 	if repo == nil || account == nil {
 		return nil
 	}
+	if account.IsOpenAISiwc() {
+		updates := openAISiwcCredentials(siwcCredentialFromAccount(&Account{Credentials: credentials}))
+		updates["_token_version"] = credentials["_token_version"]
+		current, _, err := persistSIWCCredentials(ctx, repo, account, updates)
+		if err != nil {
+			return err
+		}
+		account.Credentials = shallowCopyMap(current.Credentials)
+		return nil
+	}
 
 	// 安全不变量:spark 影子账号恒不持凭据(凭据透传母账号)。这是凭据写入的唯一汇聚点
 	// (token 刷新 / 订阅补全 / CRS 创建后刷新等全部经此),在此对影子早返 no-op 是

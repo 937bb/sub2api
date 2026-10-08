@@ -62,7 +62,11 @@ func (s *OpenAIGatewayService) ForwardResponsesInputTokens(
 	}
 
 	if shouldEstimateOpenAIInputTokensLocally(account) {
-		writeOpenAIResponsesInputTokensFallback(c, account, prepared, 0, "custom_relay")
+		reason := "custom_relay"
+		if account.IsOpenAISiwc() {
+			reason = "siwc_unsupported"
+		}
+		writeOpenAIResponsesInputTokensFallback(c, account, prepared, 0, reason)
 		return nil
 	}
 
@@ -150,7 +154,7 @@ func prepareNativeOpenAIInputTokensCountRequest(body []byte, account *Account) (
 }
 
 func shouldEstimateOpenAIInputTokensLocally(account *Account) bool {
-	if account == nil || account.IsGrok() || account.IsCNProvider() || account.Type == AccountTypeUpstream {
+	if account == nil || account.IsOpenAISiwc() || account.IsGrok() || account.IsCNProvider() || account.Type == AccountTypeUpstream {
 		return true
 	}
 	if account.Type != AccountTypeAPIKey {
@@ -264,20 +268,15 @@ func (s *OpenAIGatewayService) ForwardCountTokensAsAnthropic(
 		return fmt.Errorf("count_tokens: missing account")
 	}
 
-	// 国产供应商与 OpenCode（全部协议，含 anthropic）：一律本地估算，不发上游请求。
-	// 依据（2026-08 核实）：三家的 Anthropic 兼容层均未提供
-	// /v1/messages/count_tokens——DeepSeek 官方 anthropic_api 文档无此端点
-	// （且注明 anthropic-version 头被忽略），聚合网关 OpenModel 明确标注
-	// count_tokens 为 "Anthropic only"，Kimi/智谱亦无任何文档承诺。转发上游
-	// 只会常态 404，且错误还会流入账号处置逻辑误伤整账号调度；Claude Code
-	// 高频调用此端点，本地 tiktoken 估算是与 Grok 一致的既有方案。
-	if account.IsCNProvider() || account.IsOpenCodeGo() {
+	// Providers without a supported token-counting endpoint use local estimation.
+	// This keeps preflight requests from acquiring credentials or affecting health.
+	if account.IsCNProvider() || account.IsOpenCodeGo() || account.IsOpenAISiwc() {
 		estimated, err := estimateAnthropicCountTokensLocally(body)
 		if err != nil {
 			writeAnthropicCountTokensError(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
-			return fmt.Errorf("count_tokens: estimate cn provider input tokens: %w", err)
+			return fmt.Errorf("count_tokens: estimate local input tokens: %w", err)
 		}
-		logger.L().Debug("openai count_tokens: cn provider local estimate",
+		logger.L().Debug("openai count_tokens: unsupported provider local estimate",
 			zap.Int64("account_id", account.ID),
 			zap.Int("estimated_input_tokens", estimated),
 		)
@@ -433,6 +432,9 @@ func (s *OpenAIGatewayService) buildInputTokensUpstreamRequest(
 	body []byte,
 	token string,
 ) (*http.Request, error) {
+	if account.IsOpenAISiwc() {
+		return nil, fmt.Errorf("SIWC token counting uses local estimation")
+	}
 	targetURL := openaiPlatformAPIInputTokensURL
 	if account.Type == AccountTypeAPIKey {
 		if baseURL := account.GetOpenAIBaseURL(); strings.TrimSpace(baseURL) != "" {

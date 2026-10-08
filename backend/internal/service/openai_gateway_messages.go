@@ -144,7 +144,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		compatPromptCacheInjected = promptCacheKey != ""
 	}
 	compatReplayTrimmed := false
-	compatReplayGuardEnabled := shouldAutoInjectPromptCacheKeyForCompat(upstreamModel)
+	compatReplayGuardEnabled := !account.IsOpenAISiwc() && shouldAutoInjectPromptCacheKeyForCompat(upstreamModel)
 	compatContinuationEnabled := openAICompatContinuationEnabled(account, upstreamModel)
 	previousResponseID := ""
 	if compatContinuationEnabled {
@@ -382,7 +382,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 
 	// Override session_id with a deterministic UUID derived from the isolated
 	// session key, ensuring different API keys produce different upstream sessions.
-	if account.Platform != PlatformGrok && promptCacheKey != "" {
+	if account.Platform != PlatformGrok && !account.IsOpenAISiwc() && promptCacheKey != "" {
 		if session := s.harvestPinnedSessionForModel(ctx, account, upstreamModel); session != "" {
 			upstreamReq.Header.Set("session_id", session)
 			upstreamReq.Header.Del("conversation_id")
@@ -566,9 +566,9 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		}
 	}
 
-	// Extract and save Codex usage snapshot from response headers (for OAuth accounts).
-	// 排除 spark 影子:其 codex_* 仅由 QueryUsage(/wham/usage bengalfox)更新(外审第7轮 P1)。
-	if handleErr == nil && account.Type == AccountTypeOAuth && !account.IsShadow() && account.Platform != PlatformGrok {
+	// Only ordinary OAuth accounts accept Codex quota headers. Spark shadows
+	// update their isolated quota through QueryUsage, and SIWC has no Codex quota.
+	if handleErr == nil && account.Type == AccountTypeOAuth && !account.IsOpenAISiwc() && !account.IsShadow() && account.Platform != PlatformGrok {
 		if snapshot := ParseCodexRateLimitHeaders(resp.Header); snapshot != nil {
 			s.updateCodexUsageSnapshot(ctx, account.ID, snapshot)
 		}

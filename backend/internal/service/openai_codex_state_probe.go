@@ -302,6 +302,8 @@ func openAICodexStateProbeUnsupportedReason(account *Account, requestedModel str
 	switch {
 	case account == nil:
 		return "账号不存在"
+	case account.IsOpenAISiwc():
+		return "SIWC 账号使用公共 Responses API，不支持 Codex 门票探针"
 	case !account.IsOpenAIOAuthLike():
 		return "探针只适用于 OpenAI ChatGPT 订阅（OAuth）账号"
 	case account.IsSyntheticUITest():
@@ -321,6 +323,9 @@ func openAICodexStateProbeUnsupportedReason(account *Account, requestedModel str
 // 「续接回新票 = 降智」这条判据只在这种完整请求（门票长度 780）上实测验证过，
 // lite 形态（292/332 长度的票）上没有验证。每发用新的 session_id，也与验证时一致。
 func (s *OpenAIGatewayService) fireOpenAICodexStateShot(ctx context.Context, account *Account, token, model, proxy, turnState, cookie string) (openAICodexStateShot, error) {
+	if account.IsOpenAISiwc() {
+		return openAICodexStateShot{}, fmt.Errorf("SIWC accounts do not support Codex state probes")
+	}
 
 	headers := make(http.Header)
 	headers.Set("Authorization", "Bearer "+token)

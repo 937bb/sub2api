@@ -33,6 +33,10 @@ func isOpenAILegacyCompactNativeV2Bridge(c *gin.Context, account *Account) bool 
 // request path and the caller-visible stream flag stay unchanged so legacy
 // clients continue receiving their unary JSON response.
 func prepareOpenAIUpstreamResponsesBody(c *gin.Context, account *Account, body []byte, stream bool) ([]byte, bool, error) {
+	if account.IsOpenAISiwc() {
+		normalized, err := normalizeSIWCResponsesBody(body)
+		return normalized, true, err
+	}
 	if !shouldBridgeOpenAILegacyCompactToNativeV2(c, account) {
 		return body, stream, nil
 	}

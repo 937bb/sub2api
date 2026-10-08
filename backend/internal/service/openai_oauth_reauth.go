@@ -349,7 +349,7 @@ func (s *OpenAIOAuthReauthService) accountFor(ctx context.Context, accountID int
 		return nil, infraerrors.New(http.StatusNotFound, "OPENAI_REAUTH_ACCOUNT_NOT_FOUND", "account not found")
 	}
 	if account.Platform != PlatformOpenAI || account.Type != AccountTypeOAuth || account.IsCredentialShadow() ||
-		account.IsOpenAIPersonalAccessToken() || account.IsOpenAIAgentIdentity() {
+		account.IsOpenAIPersonalAccessToken() || account.IsOpenAIAgentIdentity() || account.IsOpenAISiwc() {
 		return nil, infraerrors.New(http.StatusBadRequest, "OPENAI_REAUTH_ACCOUNT_INVALID", "only an OpenAI OAuth parent account can be re-authenticated")
 	}
 	return account, nil

@@ -454,6 +454,7 @@ var ErrNoAvailableCompactAccounts = errors.New("no available accounts support /r
 
 // OpenAIGatewayService handles OpenAI API gateway operations
 type OpenAIGatewayService struct {
+	siwcTransport           http.RoundTripper
 	stopAstraSetup          func()
 	codexWSAnchors          codexWSAnchorStore
 	priorityScheduling      prioritySchedulingState

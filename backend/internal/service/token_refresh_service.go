@@ -986,6 +986,11 @@ func (s *TokenRefreshService) refreshWithRetryWithRateGate(
 
 		// 不可重试错误（invalid_grant/invalid_client 等）直接标记 error 状态并返回
 		if isNonRetryableRefreshError(err) {
+			// The failed SIWC grant may already have been replaced by reauthorization.
+			// Do not quarantine the account without a conditional failure mutation.
+			if account.IsOpenAISiwc() {
+				return err
+			}
 			errorMsg := "Token refresh failed (non-retryable): " + logredact.RedactText(err.Error())
 			isGrokOAuth := account.IsGrokOAuth()
 			if !isGrokOAuth {
@@ -1082,6 +1087,11 @@ func (s *TokenRefreshService) refreshWithRetryWithRateGate(
 		"max_retries", maxRetries,
 		"error", logredact.RedactText(lastErr.Error()),
 	)
+	// SIWC reauthorization can finish while an old refresh attempt is in flight.
+	// Keep that newer grant eligible instead of writing a cooldown by account ID.
+	if account.IsOpenAISiwc() {
+		return lastErr
+	}
 
 	// 设置临时不可调度 10 分钟（不标记 error，保持 status=active 让下个刷新周期能继续尝试）
 	until := time.Now().Add(tokenRefreshTempUnschedDuration)
@@ -1475,7 +1485,7 @@ func isNonRetryableRefreshError(err error) bool {
 // ensureOpenAIPrivacy 检查 OpenAI OAuth 账号是否已设置 privacy_mode，
 // 未设置则调用 disableOpenAITraining 并持久化结果到 Extra。
 func (s *TokenRefreshService) ensureOpenAIPrivacy(ctx context.Context, account *Account) {
-	if account.Platform != PlatformOpenAI || account.Type != AccountTypeOAuth {
+	if account == nil || account.IsOpenAISiwc() || account.Platform != PlatformOpenAI || account.Type != AccountTypeOAuth {
 		return
 	}
 	if s.privacyClientFactory == nil {

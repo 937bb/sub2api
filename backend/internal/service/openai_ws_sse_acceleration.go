@@ -15,6 +15,9 @@ const openAIOAuthWSSSEAccelerationReason = "oauth_http_sse_acceleration"
 // IsOpenAIOAuthWSSSEAccelerationEnabled is deliberately opt-in and limited to
 // ordinary OAuth accounts. Other credentials and adapters keep their transport.
 func (a *Account) IsOpenAIOAuthWSSSEAccelerationEnabled() bool {
+	if a.IsOpenAISiwc() {
+		return false
+	}
 	if a == nil || a.Platform != PlatformOpenAI || a.Type != AccountTypeOAuth ||
 		a.IsShadow() || a.IsOpenAIAgentIdentity() || a.IsOpenAIPersonalAccessToken() {
 		return false

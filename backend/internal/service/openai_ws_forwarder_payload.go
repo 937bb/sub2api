@@ -27,6 +27,9 @@ func validateOpenAIWSBearerToken(account *Account, token string) error {
 }
 
 func (s *OpenAIGatewayService) buildOpenAIResponsesWSURL(account *Account) (string, error) {
+	if account.IsOpenAISiwc() {
+		return "", errors.New("SIWC supports HTTP Responses only")
+	}
 	if account == nil {
 		return "", errors.New("account is nil")
 	}

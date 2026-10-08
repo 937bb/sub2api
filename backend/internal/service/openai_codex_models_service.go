@@ -1273,7 +1273,7 @@ func codexExplicitModelMappingClaims(account Account, modelID string) bool {
 }
 
 func accountCodexModelSupportsImageInput(account *Account, upstreamModel string) bool {
-	if account == nil {
+	if account == nil || account.IsOpenAISiwc() {
 		return false
 	}
 	switch account.Platform {
@@ -1317,7 +1317,7 @@ func accountCodexModelSupportsImageInput(account *Account, upstreamModel string)
 }
 
 func isOfficialOpenAICodexAccount(account *Account) bool {
-	if account == nil || account.Platform != PlatformOpenAI {
+	if account == nil || account.Platform != PlatformOpenAI || account.IsOpenAISiwc() {
 		return false
 	}
 	if account.IsOpenAIOAuth() {
@@ -1691,6 +1691,9 @@ func (s *OpenAIGatewayService) FetchCodexModelsManifest(ctx context.Context, acc
 	if account == nil {
 		return nil, infraerrors.New(http.StatusInternalServerError, "OPENAI_CODEX_MODELS_ACCOUNT_REQUIRED", "account is required")
 	}
+	if account.IsOpenAISiwc() {
+		return nil, infraerrors.New(http.StatusBadRequest, "OPENAI_SIWC_CODEX_MANIFEST_UNSUPPORTED", "SIWC accounts expose the public models endpoint, not the Codex manifest")
+	}
 	credAccount, err := resolveCredentialAccount(ctx, s.accountRepo, account)
 	if err != nil {
 		return nil, infraerrors.Newf(http.StatusInternalServerError, "OPENAI_CODEX_MODELS_CREDENTIALS_FAILED", "resolve credential account: %v", err)
@@ -1840,7 +1843,7 @@ func (s *OpenAIGatewayService) handleCodexModelsManifestAccountAuthError(ctx con
 	if s == nil || account == nil || err == nil {
 		return
 	}
-	if credAccount == nil || !credAccount.IsOpenAIOAuth() || credAccount.IsOpenAIAgentIdentity() {
+	if credAccount == nil || !credAccount.IsOpenAIOAuth() || credAccount.IsOpenAIAgentIdentity() || credAccount.IsOpenAISiwc() {
 		return
 	}
 	var upstreamErr *codexModelsManifestUpstreamError

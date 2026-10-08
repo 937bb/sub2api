@@ -884,7 +884,7 @@ func (s *AccountTokenGuardService) listAccounts(ctx context.Context, cfg Account
 	seen := map[int64]bool{}
 	out := make([]Account, 0, 32)
 	appendAccount := func(account Account) {
-		if seen[account.ID] || managed[account.ID] || !account.IsOAuth() || account.Platform != PlatformOpenAI || account.IsShadow() ||
+		if seen[account.ID] || managed[account.ID] || !account.IsOAuth() || account.Platform != PlatformOpenAI || account.IsShadow() || account.IsOpenAISiwc() ||
 			(account.Status != StatusActive && account.Status != StatusError) {
 			return
 		}
@@ -1144,6 +1144,10 @@ func findGuardReloginAccount(cfg AccountTokenGuardConfig, accountName string) (A
 
 // probe 用账号当前的 access_token 调测活接口。
 func (s *AccountTokenGuardService) probe(ctx context.Context, cfg AccountTokenGuardConfig, account *Account) AccountTokenGuardProbeResult {
+	if account.IsOpenAISiwc() {
+		diagnostic := AccountTokenGuardDiagnostic{Code: "siwc_probe_unsupported"}
+		return AccountTokenGuardProbeResult{State: AccountTokenGuardProbeTransient, Detail: formatGuardDiagnostic(diagnostic), Diagnostic: diagnostic}
+	}
 	// A probe provider's own 429, 401 or outage must not prevent recovery
 	// when a business request already established that this token was revoked.
 	if guardAccountHasAuthFailure(account) {

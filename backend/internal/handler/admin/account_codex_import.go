@@ -510,6 +510,10 @@ func normalizeCodexImportEntry(entry codexImportEntry) (*codexImportAccount, err
 	case string:
 		item.AccessToken = strings.TrimSpace(raw)
 	case map[string]any:
+		if strings.EqualFold(firstCodexString(raw, []string{"auth_mode"}, []string{"authMode"}, []string{"credentials", "auth_mode"}), "siwc") ||
+			strings.HasPrefix(firstCodexString(raw, []string{"client_id"}, []string{"credentials", "client_id"}), "oaiapp_") {
+			return nil, errors.New("SIWC credentials require the dedicated SIWC authorization flow, not Codex import")
+		}
 		if agentIdentity, ok := firstCodexMap(raw, []string{"agent_identity"}, []string{"agentIdentity"}); ok || strings.EqualFold(firstCodexString(raw, []string{"auth_mode"}, []string{"authMode"}), service.OpenAIAuthModeAgentIdentity) {
 			if !ok {
 				agentIdentity = raw

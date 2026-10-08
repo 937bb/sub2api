@@ -131,6 +131,11 @@ func (s *adminServiceImpl) ApplyOAuthAutoConfig(ctx context.Context, input *Crea
 		return ErrAccountNilInput
 	}
 	input.InitialQualityPlan = nil
+	// SIWC groups and capabilities must be explicitly selected after its own
+	// authorization; Codex defaults must not publish a new grant to customers.
+	if (&Account{Platform: input.Platform, Type: input.Type, Credentials: input.Credentials}).IsOpenAISiwc() {
+		return nil
+	}
 	// Imported/user-supplied markers must not fabricate automatic-configuration history.
 	input.Extra = maps.Clone(input.Extra)
 	delete(input.Extra, "auto_config_initial_revision")

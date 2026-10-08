@@ -302,7 +302,7 @@ func (s *OpenAIGatewayService) latestOpenAITurnAccountForGroup(
 		return nil, denyOpenAITurn("account_ineligible")
 	}
 	if authoritativeRead && latest.IsShadow() && (parent == nil || parent.IsShadow() ||
-		!parent.IsOpenAIOAuth() || !parent.IsCredentialUsableForShadow()) {
+		!parent.IsOpenAIOAuth() || parent.IsOpenAISiwc() || !parent.IsCredentialUsableForShadow()) {
 		return nil, denyOpenAITurn("credential_parent_ineligible")
 	}
 	// Simple mode deliberately schedules across the whole platform and does

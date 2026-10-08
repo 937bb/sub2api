@@ -276,6 +276,22 @@ func (h *OpenAIOAuthHandler) RefreshAccountToken(c *gin.Context) {
 
 	// Build new credentials from token info
 	newCredentials := h.openaiOAuthService.BuildAccountCredentials(tokenInfo)
+	if account.IsOpenAISiwc() {
+		writer, ok := h.adminService.(interface {
+			SaveSIWCCredentials(context.Context, *service.Account, map[string]any) (*service.Account, error)
+		})
+		if !ok {
+			response.BadRequest(c, "SIWC persistence unavailable")
+			return
+		}
+		updated, err := writer.SaveSIWCCredentials(c.Request.Context(), account, newCredentials)
+		if err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+		response.Success(c, dto.AccountForObserver(c.Request.Context(), dto.AccountFromService(updated)))
+		return
+	}
 
 	// Preserve non-token settings from existing credentials
 	for k, v := range account.Credentials {

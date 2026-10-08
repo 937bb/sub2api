@@ -133,6 +133,7 @@ deploy/docker-compose.override.yml
 .gocache/
 vite.config.js
 docs/*
+!docs/SIWC_INTEGRATION_CN.md
 !docs/openai-ws-sse-acceleration.md
 !docs/openai-outbound-identity.md
 !docs/PAYMENT.md

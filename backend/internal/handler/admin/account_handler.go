@@ -47,11 +47,16 @@ func NewOAuthHandler(oauthService *service.OAuthService) *OAuthHandler {
 	}
 }
 
+type openAIAccountTokenRefresher interface {
+	RefreshAccountToken(context.Context, *service.Account) (*service.OpenAITokenInfo, error)
+	BuildAccountCredentials(*service.OpenAITokenInfo) map[string]any
+}
+
 // AccountHandler handles admin account management
 type AccountHandler struct {
 	adminService            service.AdminService
 	oauthService            *service.OAuthService
-	openaiOAuthService      *service.OpenAIOAuthService
+	openaiOAuthService      openAIAccountTokenRefresher
 	geminiOAuthService      *service.GeminiOAuthService
 	antigravityOAuthService *service.AntigravityOAuthService
 	grokOAuthService        service.GrokOAuthTokenService
@@ -1536,17 +1541,36 @@ func (h *AccountHandler) refreshSingleAccount(ctx context.Context, account *serv
 			"cannot refresh spark shadow account; its credentials are managed by the parent account")
 	}
 
+	var siwcWriter interface {
+		SaveSIWCCredentials(context.Context, *service.Account, map[string]any) (*service.Account, error)
+	}
+	if account.IsOpenAISiwc() {
+		var ok bool
+		siwcWriter, ok = h.adminService.(interface {
+			SaveSIWCCredentials(context.Context, *service.Account, map[string]any) (*service.Account, error)
+		})
+		if !ok {
+			return nil, "", infraerrors.BadRequest("SIWC_PERSISTENCE_UNAVAILABLE", "SIWC credential persistence unavailable")
+		}
+	}
+
 	var newCredentials map[string]any
 
 	if account.IsOpenAI() {
 		tokenInfo, err := h.openaiOAuthService.RefreshAccountToken(ctx, account)
 		if err != nil {
-			// 刷新失败但 access_token 可能仍有效，尝试设置隐私
-			h.adminService.EnsureOpenAIPrivacy(ctx, account)
+			// SIWC grants must never enter ChatGPT privacy enrichment.
+			if !account.IsOpenAISiwc() {
+				h.adminService.EnsureOpenAIPrivacy(ctx, account)
+			}
 			return nil, "", err
 		}
 
 		newCredentials = h.openaiOAuthService.BuildAccountCredentials(tokenInfo)
+		if siwcWriter != nil {
+			updated, err := siwcWriter.SaveSIWCCredentials(ctx, account, newCredentials)
+			return updated, "", err
+		}
 		for k, v := range account.Credentials {
 			if _, exists := newCredentials[k]; !exists {
 				newCredentials[k] = v

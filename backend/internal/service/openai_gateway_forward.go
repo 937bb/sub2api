@@ -26,6 +26,9 @@ func accountUsesPrismBrowser(account *Account, cfg *config.Config) bool {
 }
 
 func accountHasPrismBrowser(account *Account) bool {
+	if account.IsOpenAISiwc() {
+		return false
+	}
 	if account == nil || account.Platform != PlatformOpenAI || account.Type != AccountTypeOAuth || account.IsShadow() {
 		return false
 	}
@@ -72,6 +75,18 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		return nil, markOpenAIInitialAdmissionError(admissionErr)
 	}
 	account = latest
+	if account.IsOpenAISiwc() {
+		// Validate before generic OAuth transforms can remove stateful fields.
+		if _, err := normalizeSIWCResponsesBody(body); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": err.Error()}})
+			return nil, err
+		}
+		if isOpenAIResponsesCompactPath(c) {
+			err := errors.New("SIWC compact endpoint is unsupported; send complete input history")
+			c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": err.Error()}})
+			return nil, err
+		}
+	}
 	beginUpstreamResponseModelObservation(c)
 	ClearActualOpenAIUpstreamEndpoint(c)
 	// A failed account attempt must not leave a bypass reason on a later BPS response.
@@ -1196,6 +1211,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		// Build upstream request
 		upstreamBody, upstreamStream, prepareErr := prepareOpenAIUpstreamResponsesBody(c, account, body, reqStream)
 		if prepareErr != nil {
+			if account.IsOpenAISiwc() {
+				c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": prepareErr.Error()}})
+			}
 			return nil, prepareErr
 		}
 		upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
@@ -1708,6 +1726,9 @@ func shouldAdaptDeepSeekResponsesClientTools(account *Account, body []byte, comp
 }
 
 func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Context, account *Account, body []byte, token string, isStream bool, promptCacheKey string, isCodexCLI bool) (*http.Request, error) {
+	if account.IsOpenAISiwc() {
+		return buildSIWCResponsesRequest(ctx, c, account, body, token)
+	}
 	defer requesttiming.Observe(ctx, "build_upstream_request")()
 	// Determine target URL based on account type
 	var targetURL string

@@ -1,0 +1,57 @@
+# 937sub2b SIWC 接入说明
+
+本功能基于定制版 `d07453b28`，为 OpenAI 账号增加独立的 SIWC 授权与请求通道，无需数据库迁移。C → B 的 `127.0.0.1:6064`、现有客户 API key、分组、订阅和计费配置保持原值。部署版本与验证结果以对应发布记录为准。
+
+## 参考与证据范围
+
+协议参考来自用户提供的 `FenJue-Windows` Python 源码和 `siwc.so` 静态分析。前者提供独立授权与公共 API 路由；后者提供自动刷新与 Responses 字段适配的参考。没有加载或执行原始 so。
+
+协议兼容性仍需真实 SIWC 授权验证。2026-10-08 使用指定线上账号的现有 Codex OAuth token 调用公共 Responses，收到 HTTP 401，错误为 `Missing scopes: api.responses.write`；token 尚未过期，未产生模型回答。该结果证明这份旧授权不能直接复用，不能证明 SIWC 新授权、模型调用、质量或上游扣费已经验证通过。上游是否开放、账号是否取得共享权限，必须以实际授权和模型目录为准。
+
+## 管理页使用
+
+1. 账号管理 → **ChatGPT SIWC**。
+2. 选择服务端代理、并发和明确需要绑定的 OpenAI 分组；不选分组则保存为未绑定账号，忽略普通 OAuth 全局自动分组策略。
+3. 生成并打开授权链接，由用户在 OpenAI 域名下登录并同意授权。
+4. 浏览器跳转到 `http://127.0.0.1:1455/auth/callback?...` 后，将完整地址粘贴回管理页。没有本机回调监听器时浏览器显示无法连接，这是手动回填方式的预期行为。
+5. 在十分钟内保存。服务端校验 state、PKCE、ID token 签名、issuer、audience、azp、nonce、subject 和共享 scope，再读取可用模型并原子创建账号及分组关系。
+
+重新授权使用账号菜单中的原入口，自动切换到 SIWC 流程，沿用原 host ID、client ID 和服务端代理，并要求 subject 一致。仅更新授权和可用模型目录；账号 ID、名称、倍率、分组、自定义模型映射保持原值。原本停用或错误状态的账号不会被自动启用，请检查后使用已有恢复状态功能。
+
+授权会话暂存在 B 端内存，重启或超过十分钟需重新生成链接。多副本部署时，生成链接与回填必须路由至同一进程。浏览器仅存储非密钥的 host UUID；AT、RT 和 ID token 不放入浏览器存储，重新授权链接也不携带存储中的 ID token。审计记录会隐藏完整回调地址。
+
+## 请求与计费
+
+账号仍为 OpenAI OAuth 类型，以 `credentials.auth_mode=siwc` 区分：
+
+账号列表中的 `OpenAI · SIWC` 与后端分流使用同一个授权标识。仅已通过 SIWC 授权流程保存的 OpenAI OAuth 账号使用公共 Responses；原 OAuth 账号（包括没有 `auth_mode` 字段的老账号）继续使用 `https://chatgpt.com/backend-api/codex/responses`。名称、备注、客户端请求头不参与授权类型判断；API Key 账号保持原有官方或自定义上游。两类 OAuth 可以同时存在，按每次选中的账号分流，不需要批量迁移老账号。普通编辑不能把原 OAuth 直接改成 SIWC。
+
+| 路径 | SIWC 行为 |
+| --- | --- |
+| Responses | 固定 POST `https://api.openai.com/v1/responses` |
+| Chat Completions / Messages | 经过现有兼容转换，再使用上述 Responses 路径 |
+| token count | 使用已有本地估算，不向未经验证的上游端点发请求 |
+| Compact、Live、AlphaSearch、Codex WebSocket、BPS、Prism、Shadow | 不用于 SIWC |
+| Codex 额度查询、隐私设置、token guard、自动重登 | 排除 SIWC，避免 token 发错端点 |
+
+保留 `developer` 与原始指令，将 `system` 就地转换为 `developer`；保留完整消息历史和推理密文，按参考协议重排 function/custom tools，强制上游 `store=false`、SSE 流式。非流式客户由现有兼容层汇总响应。非空 `previous_response_id` / `conversation`、item reference 和 compaction trigger 明确拒绝，不静默丢失状态。
+
+不引入草稿、评价、重写等额外模型调用，也不缓冲完整回答后伪装流式。请求继续经过现有鉴权、调度、并发准入、模型映射、usage 解析与账务链；测试验证 input/output/cache token 进入原有结果结构。公共 API 返回的实际服务档位可以降低计费档位，普通 Codex 原行为保持不变。
+
+实际出网时再次检查模型属于该授权的目录，并严格限制推理 URL。客户 Cookie、Authorization 和 Codex 身份头不会透传。SIWC 代理不可用时直接失败，不静默切换出口。
+
+## 身份与网络指纹
+
+`ext_agent_host_id` 是客户端保存的实例 UUID；`oaiapp_...` 是授权签发的应用 client ID；subject 标识用户；token 连接授权与推理。这些是同一授权链上的身份信息，不等于同一网络指纹。
+
+浏览器授权使用用户浏览器自己的 UA、TLS 和网络出口。token/JWKS/models 与推理使用服务端配置的代理、标准 Go 连接池和 `Sub2API-SIWC/1.0` UA。不同服务器/域名的 TLS 会话仍然不同。Responses 不伪造 host-ID 请求头，不复制浏览器 CF Cookie，也不保证所有流量拥有相同 IP/TLS 指纹。
+
+## 持久化与回归
+
+无需数据库 schema 迁移。凭据沿用现有账号 JSON 存储。自动刷新遵守 `earliest_refresh_at`，保留上游省略的 RT/scope，校验刷新后的身份。JWKS 在消耗授权码/RT 前获取，避免验证服务临时故障发生在旋转之后。
+
+模型目录更新只原子修改 `siwc_models`；刷新/重新授权使用身份、旧 AT/RT 与代理条件更新，只合并授权字段并原子写调度失效事件。普通编辑在数据库行锁下保留最新凭据，防止旧表单覆盖新 token。旧刷新请求的失败不覆盖新授权状态。
+
+本地验证包含：OAuth 签名与错误授权、回调过期/重复字段、重授权身份绑定、并发回填与保存重试、目录清空、凭据 CAS、后台隔离、Responses/Chat/Messages 的完整历史和 usage、真正提前输出的 SSE、重复 model 拒绝、计费档位、前端授权表单、中英文资源、普通 OAuth 回归。构建、类型检查、定向 race 测试、go vet 与仅本次差异的 golangci-lint 用于交付验收。
+
+上线前仍需使用取得 SIWC 权限的测试账号做端到端授权、工具续接、实际 usage/账务和质量对照。此次本地测试不能证明线上可用、首字延迟改善或“百分百不降智”。

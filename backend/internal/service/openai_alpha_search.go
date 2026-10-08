@@ -30,6 +30,9 @@ func (s *OpenAIGatewayService) ForwardAlphaSearch(ctx context.Context, c *gin.Co
 	if s == nil || c == nil || account == nil {
 		return nil, fmt.Errorf("service, context, and account are required")
 	}
+	if account.IsOpenAISiwc() {
+		return nil, fmt.Errorf("SIWC standalone alpha search is unsupported")
+	}
 	if _, err := s.prepareCodexAccountIdentitySource(ctx, c, account); err != nil {
 		return nil, err
 	}
@@ -689,6 +692,9 @@ func collectOpenAIAlphaSearchURLCitations(value any, results *[]any, seen map[st
 func (s *OpenAIGatewayService) openAIAlphaSearchURL(account *Account) (string, error) {
 	if account == nil {
 		return "", fmt.Errorf("account is required")
+	}
+	if account.IsOpenAISiwc() {
+		return "", fmt.Errorf("SIWC standalone alpha search is unsupported")
 	}
 	switch account.Type {
 	case AccountTypeOAuth, AccountTypeSetupToken:

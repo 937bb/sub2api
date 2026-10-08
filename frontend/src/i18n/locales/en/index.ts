@@ -16,8 +16,10 @@ import misc from './misc'
 import requestTiming from './requestTiming'
 
 import autoConfig from './autoConfig'
+import siwc from './siwc'
 
 export default {
+  siwc,
   autoConfig,
   priorityScheduling,
   qualityOps,

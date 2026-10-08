@@ -143,7 +143,7 @@ func (p *OpenAITokenProvider) GetAccessToken(ctx context.Context, account *Accou
 	cacheKey := OpenAITokenCacheKey(account)
 
 	// 1) Try cache first.
-	if p.tokenCache != nil {
+	if p.tokenCache != nil && !account.IsOpenAISiwc() {
 		if token, err := p.tokenCache.GetAccessToken(ctx, cacheKey); err == nil && strings.TrimSpace(token) != "" {
 			slog.Debug("openai_token_cache_hit", "account_id", account.ID)
 			return token, nil
@@ -157,6 +157,9 @@ func (p *OpenAITokenProvider) GetAccessToken(ctx context.Context, account *Accou
 	// 2) Refresh if needed (pre-expiry skew).
 	expiresAt := account.GetCredentialAsTime("expires_at")
 	needsRefresh := !account.IsOpenAIPersonalAccessToken() && (expiresAt == nil || time.Until(*expiresAt) <= openAITokenRefreshSkew)
+	if account.IsOpenAISiwc() && siwcCredentialFromAccount(account).EarliestRefreshAt > time.Now().Unix() {
+		needsRefresh = false
+	}
 	if needsRefresh && strings.TrimSpace(account.GetOpenAIRefreshToken()) == "" {
 		if expiresAt != nil && !time.Now().Before(*expiresAt) {
 			const reason = "openai access_token expired and refresh_token is missing"
@@ -182,7 +185,7 @@ func (p *OpenAITokenProvider) GetAccessToken(ctx context.Context, account *Accou
 			p.metrics.refreshFailure.Add(1)
 			refreshFailed = true
 		} else if result.LockHeld {
-			if p.refreshPolicy.OnLockHeld == ProviderLockHeldWaitForCache {
+			if p.refreshPolicy.OnLockHeld == ProviderLockHeldWaitForCache && !account.IsOpenAISiwc() {
 				p.metrics.lockContention.Add(1)
 				p.metrics.touchNow()
 				token, waitErr := p.waitForTokenAfterLockRace(ctx, cacheKey)
@@ -228,12 +231,15 @@ func (p *OpenAITokenProvider) GetAccessToken(ctx context.Context, account *Accou
 	}
 
 	accessToken := account.GetCredential("access_token")
+	if account.IsOpenAISiwc() && (expiresAt == nil || !time.Now().Before(*expiresAt)) {
+		return "", errors.New("SIWC access token expired; refresh or reauthorize the account")
+	}
 	if strings.TrimSpace(accessToken) == "" {
 		return "", errors.New("access_token not found in credentials")
 	}
 
 	// 3) Populate cache with TTL.
-	if p.tokenCache != nil {
+	if p.tokenCache != nil && !account.IsOpenAISiwc() {
 		latestAccount, isStale := CheckTokenVersion(ctx, account, p.accountRepo)
 		if isStale && latestAccount != nil {
 			slog.Debug("openai_token_version_stale_use_latest", "account_id", account.ID)
@@ -277,7 +283,7 @@ func (p *OpenAITokenProvider) GetAccessToken(ctx context.Context, account *Accou
 // 必须主动剔除以避免账号被持续选中导致用户端反复 502。
 // 使用 background context 是因为请求 context 可能很快结束。
 func (p *OpenAITokenProvider) disableAccountMissingRefreshToken(account *Account, reason string) {
-	if p == nil || p.accountRepo == nil || account == nil {
+	if p == nil || p.accountRepo == nil || account == nil || account.IsOpenAISiwc() {
 		return
 	}
 	if p.runtimeBlocker != nil {

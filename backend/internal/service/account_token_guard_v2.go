@@ -428,7 +428,7 @@ func (s *AccountTokenGuardV2Service) runProbe(ctx context.Context, record Accoun
 		CooldownUntil: record.CooldownUntil,
 	}
 	account, err := s.accounts.GetAccount(ctx, record.AccountID)
-	if err != nil || account == nil || account.Platform != PlatformOpenAI || account.Type != AccountTypeOAuth || account.IsCredentialShadow() || account.IsOpenAIPersonalAccessToken() || account.IsOpenAIAgentIdentity() {
+	if err != nil || account == nil || account.Platform != PlatformOpenAI || account.Type != AccountTypeOAuth || account.IsCredentialShadow() || account.IsOpenAIPersonalAccessToken() || account.IsOpenAIAgentIdentity() || account.IsOpenAISiwc() {
 		completion.ProbeDetail = "account is no longer an eligible OpenAI OAuth parent account"
 		completion.BlockedReason = completion.ProbeDetail
 		s.completeProbe(ctx, record.AccountID, completion)
@@ -475,6 +475,9 @@ func (s *AccountTokenGuardV2Service) completeProbe(ctx context.Context, accountI
 }
 
 func (s *AccountTokenGuardV2Service) probeAccount(ctx context.Context, account *Account) (string, string) {
+	if account.IsOpenAISiwc() {
+		return AccountTokenGuardV2ProbeTransient, "SIWC accounts do not support Codex credential inspection"
+	}
 	if strings.TrimSpace(account.GetCredential("access_token")) == "" {
 		return AccountTokenGuardV2ProbeAuth, "account has no access token"
 	}
