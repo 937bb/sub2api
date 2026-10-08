@@ -1,5 +1,6 @@
 import priorityScheduling from './priorityScheduling'
 import qualityOps from './qualityOps'
+import controlledExperiments from './controlledExperiments'
 import accountOps from './accountOps'
 import tokenGuard from './tokenGuard'
 import pelicanTests from './pelicanTests'
@@ -22,6 +23,7 @@ export default {
   autoConfig,
   priorityScheduling,
   qualityOps,
+  controlledExperiments,
   accountOps,
   tokenGuard,
   pelicanTests,
