@@ -28,7 +28,7 @@
           <textarea v-model="callback" class="input mt-1 font-mono text-xs" rows="3" autocomplete="off" :spellcheck="false" :disabled="busy" />
         </label>
         <button type="submit" class="btn btn-primary" :disabled="busy || !callback.trim()">{{ t('siwc.save') }}</button>
-        <button type="button" class="btn btn-secondary ml-2" :disabled="busy" @click="restart">{{ t('siwc.restart') }}</button>
+        <button type="button" class="btn btn-secondary ml-2" :disabled="busy" @click="retryAuthorization">{{ t('siwc.restart') }}</button>
       </template>
       <p v-if="error" role="alert" class="text-sm text-red-600">{{ error }}</p>
     </form>
@@ -84,6 +84,14 @@ async function start() {
     if (!props.account) {
       try { localStorage.setItem('sub2api-siwc-host-id', authorization.value.host_id) } catch { /* Credentials remain server-side. */ }
     }
+  } catch (cause) { failure(cause) } finally { busy.value = false }
+}
+async function retryAuthorization() {
+  if (!authorization.value || busy.value) return
+  busy.value = true; error.value = ''
+  try {
+    authorization.value = await startSIWCAuthorization(proxyId.value, undefined, props.account?.id, authorization.value.session_id)
+    callback.value = ''
   } catch (cause) { failure(cause) } finally { busy.value = false }
 }
 async function finish() {

@@ -48,6 +48,7 @@ type Session struct {
 	ClientID    string
 	Subject     string
 	IDTokenHint string
+	LoginHint   string
 	CreatedAt   time.Time
 }
 
@@ -109,6 +110,9 @@ func (s *Session) AuthorizationURL() string {
 		p.Set("agent_name_hint", "Sub2API")
 	} else if s.IDTokenHint != "" {
 		p.Set("id_token_hint", s.IDTokenHint)
+	}
+	if s.ClientID != "dynamic_agent_client" && s.LoginHint != "" {
+		p.Set("login_hint", s.LoginHint)
 	}
 	return AuthorizeURL + "?" + p.Encode()
 }

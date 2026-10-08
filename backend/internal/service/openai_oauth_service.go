@@ -21,6 +21,7 @@ type OpenAIOAuthService struct {
 	privacyClientFactory PrivacyClientFactory // 用于调用 chatgpt.com/backend-api（ImpersonateChrome）
 	siwcMu               sync.Mutex
 	siwcSessions         map[string]*openAISiwcSession
+	siwcStateDir         string
 }
 
 // NewOpenAIOAuthService creates a new OpenAI OAuth service

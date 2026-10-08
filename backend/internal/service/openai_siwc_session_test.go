@@ -55,6 +55,8 @@ func TestSIWCReauthBindsOriginalIdentityAndPreservesAdminCredentials(t *testing.
 	account.Credentials["client_id"] = "oaiapp_original"
 	account.Credentials["subject"] = "original"
 	account.Credentials["ext_agent_host_id"] = "urn:uuid:12121212-1212-4212-8212-121212121212"
+	account.Credentials["id_token"] = "retained-identity-hint"
+	account.Credentials["email"] = "selected@example.test"
 	result, err := service.GenerateSIWCReauthURL(context.Background(), account)
 	require.NoError(t, err)
 	u, err := url.Parse(result.AuthURL)
@@ -62,7 +64,9 @@ func TestSIWCReauthBindsOriginalIdentityAndPreservesAdminCredentials(t *testing.
 	require.Equal(t, "oaiapp_original", u.Query().Get("client_id"))
 	require.Equal(t, account.GetCredential("ext_agent_host_id"), u.Query().Get("ext_agent_host_id"))
 	require.Equal(t, "original", service.siwcSessions[result.SessionID].protocol.Subject)
-	require.Empty(t, u.Query().Get("id_token_hint"))
+	require.Equal(t, "retained-identity-hint", u.Query().Get("id_token_hint"))
+	require.Equal(t, "selected@example.test", u.Query().Get("login_hint"))
+	require.Empty(t, u.Query().Get("agent_name_hint"))
 	update := &UpdateAccountInput{Credentials: map[string]any{"model_mapping": map[string]any{"alias": "gpt-6-astra"}}}
 	require.NoError(t, preserveSIWCAdminCredentials(account, update))
 	require.Equal(t, "siwc", update.Credentials["auth_mode"])
@@ -76,11 +80,39 @@ func TestSIWCReauthBindsOriginalIdentityAndPreservesAdminCredentials(t *testing.
 	require.False(t, refresher.NeedsRefresh(account, 2*time.Hour))
 }
 
+func TestSIWCRegistrationResumesAfterServiceRestart(t *testing.T) {
+	dir := t.TempDir()
+	service := &OpenAIOAuthService{siwcStateDir: dir}
+	t.Cleanup(service.Stop)
+	first, err := service.GenerateSIWCAuthURL(context.Background(), nil, "")
+	require.NoError(t, err)
+	registration, err := siwc.LoadRegistration(dir, first.SessionID)
+	require.NoError(t, err)
+	registration.ClientID = "oaiapp_issued_before_exchange"
+	require.NoError(t, siwc.SaveRegistration(dir, first.SessionID, *registration))
+	restarted := &OpenAIOAuthService{siwcStateDir: dir}
+	t.Cleanup(restarted.Stop)
+	second, err := restarted.GenerateSIWCAuthURL(context.Background(), nil, "", first.SessionID)
+	require.NoError(t, err)
+	u, err := url.Parse(second.AuthURL)
+	require.NoError(t, err)
+	require.Equal(t, registration.ClientID, u.Query().Get("client_id"))
+	require.Equal(t, first.HostID, second.HostID)
+	require.NotEqual(t, first.SessionID, second.SessionID)
+	require.NotEqual(t, service.siwcSessions[first.SessionID].protocol.State, u.Query().Get("state"))
+	require.Empty(t, u.Query().Get("agent_name_hint"))
+	third, err := restarted.GenerateSIWCAuthURL(context.Background(), nil, "")
+	require.NoError(t, err)
+	require.Equal(t, first.HostID, third.HostID, "browser clearing must not change runtime identity")
+}
+
 func TestSIWCCallbackAuditRedaction(t *testing.T) {
 	redacted := RedactAuditBody([]byte(`{"callback_url":"http://127.0.0.1:1455/auth/callback?code=secret-code&state=private-state","session_id":"session-visible"}`), "application/json")
 	require.NotContains(t, redacted, "secret-code")
 	require.NotContains(t, redacted, "private-state")
 	require.Contains(t, redacted, "session-visible")
+	redacted = RedactAuditBody([]byte(`{"auth_url":"https://auth.openai.com/api/accounts/authorize?id_token_hint=identity-secret"}`), "application/json")
+	require.NotContains(t, redacted, "identity-secret")
 }
 
 func TestSIWCAdminEditPreservesRotatedCredentialSnapshot(t *testing.T) {

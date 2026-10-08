@@ -1472,6 +1472,9 @@ var openAIStreamErrorStatusPaths = []string{
 }
 
 func openAIStreamFailedEventSemanticStatus(payload []byte, message string) int {
+	if status := siwcErrorStatus(payload); status != 0 {
+		return status
+	}
 	if isOpenAIContextWindowError(message, payload) {
 		return http.StatusBadRequest
 	}
@@ -1509,6 +1512,9 @@ func openAIStreamFailedEventSemanticStatus(payload []byte, message string) int {
 func openAIStreamFailureStatus(payload []byte, message string) int {
 	if len(bytes.TrimSpace(payload)) == 0 || !gjson.ValidBytes(payload) {
 		return http.StatusBadGateway
+	}
+	if status := siwcErrorStatus(payload); status != 0 {
+		return status
 	}
 	semanticStatus := openAIStreamFailedEventSemanticStatus(payload, message)
 	switch semanticStatus {
@@ -1629,6 +1635,9 @@ func applyOpenAIStreamFailedErrorPassthroughRule(
 }
 
 func openAIStreamFailedEventShouldFailover(payload []byte, message string) bool {
+	if status := siwcErrorStatus(payload); status != 0 {
+		return status == http.StatusTooManyRequests || status == http.StatusServiceUnavailable
+	}
 	if hit, _, _ := detectOpenAICyberPolicy(payload); hit {
 		return false
 	}
@@ -1681,6 +1690,9 @@ func openAIStreamFailedEventShouldFailover(payload []byte, message string) bool 
 }
 
 func openAIStreamErrorEventShouldFailover(payload []byte, message string) bool {
+	if status := siwcErrorStatus(payload); status != 0 {
+		return status == http.StatusTooManyRequests || status == http.StatusServiceUnavailable
+	}
 	if hit, _, _ := detectOpenAICyberPolicy(payload); hit {
 		return false
 	}
@@ -1756,6 +1768,9 @@ func (s *OpenAIGatewayService) handleOpenAIStreamTerminalAccountSideEffects(
 
 func openAIStreamFailedEventRetryableOnSameAccount(account *Account, payload []byte, message string) bool {
 	if account == nil {
+		return false
+	}
+	if siwcErrorStatus(payload) == http.StatusTooManyRequests {
 		return false
 	}
 	// 容量降载是请求级信号，不是账号级故障：上游只是让本次请求稍后再试。

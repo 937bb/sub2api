@@ -113,6 +113,15 @@ func (s *OpenAIGatewayService) handleOpenAIAccountUpstreamError(ctx context.Cont
 	}
 	stateCtx, cancel := openAIAccountStateContext(ctx)
 	defer cancel()
+	if account.IsOpenAISiwc() && siwcErrorStatus(responseBody) == http.StatusTooManyRequests {
+		if s != nil {
+			s.BlockAccountScheduling(account, time.Now().Add(siwcUsageLimitCooldown), siwcUsageLimitCode)
+			if s.rateLimitService != nil {
+				s.rateLimitService.handleSIWCUsageLimit(stateCtx, account)
+			}
+		}
+		return true
+	}
 	if s != nil {
 		stateCtx = s.rateLimitService.observeAccountOps(stateCtx, account, statusCode, headers, responseBody)
 	}

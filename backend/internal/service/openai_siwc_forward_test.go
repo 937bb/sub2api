@@ -48,6 +48,7 @@ func TestSIWCForwardRetainsUsageModelAndStatelessHistory(t *testing.T) {
 				require.Equal(t, "keep role text", gjson.GetBytes(sent, "input.0.content").String())
 				require.Equal(t, "keep developer", gjson.GetBytes(sent, "input.1.content").String())
 				require.Equal(t, "lookup", gjson.GetBytes(sent, `input.#(type=="additional_tools").tools.0.name`).String())
+				require.Equal(t, "developer", gjson.GetBytes(sent, `input.#(type=="additional_tools").role`).String())
 				require.True(t, gjson.GetBytes(sent, "stream").Bool())
 				return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(siwcForwardSSE))}, nil
 			})
@@ -167,6 +168,7 @@ func TestSIWCRequestPreservesRolesToolsAndIdentityIsolation(t *testing.T) {
 	require.Equal(t, "keep developer text", gjson.GetBytes(encoded, "input.1.content").String())
 	require.Equal(t, "opaque", gjson.GetBytes(encoded, "input.3.encrypted_content").String())
 	require.Equal(t, "additional_tools", gjson.GetBytes(encoded, "input.4.type").String())
+	require.Equal(t, "developer", gjson.GetBytes(encoded, "input.4.role").String())
 	require.Equal(t, "namespace", gjson.GetBytes(encoded, "tools.0.type").String())
 	require.True(t, gjson.GetBytes(encoded, "stream").Bool())
 	require.False(t, gjson.GetBytes(encoded, "store").Bool())

@@ -89,6 +89,16 @@ func normalizeSIWCResponsesBody(body []byte) ([]byte, error) {
 		if item["role"] == "system" {
 			item["role"] = "developer"
 		}
+		if item["type"] == "additional_tools" && item["role"] == nil {
+			item["role"] = "developer"
+		}
+		// Stateless message history does not require provider-specific message
+		// IDs. Keep tool call IDs and reasoning IDs/opaque content untouched.
+		if item["type"] == "message" || (item["type"] == nil && item["role"] != nil) {
+			if id, ok := item["id"].(string); ok && !strings.HasPrefix(id, "msg_") {
+				delete(item, "id")
+			}
+		}
 	}
 	if raw, exists := payload["tools"]; exists && raw != nil {
 		tools, ok := raw.([]any)
@@ -123,7 +133,7 @@ func normalizeSIWCResponsesBody(body []byte) ([]byte, error) {
 			}
 		}
 		if len(additional) > 0 {
-			items = append(items, map[string]any{"type": "additional_tools", "tools": additional})
+			items = append(items, map[string]any{"type": "additional_tools", "role": "developer", "tools": additional})
 		}
 		delete(payload, "tools")
 		if len(top) > 0 {

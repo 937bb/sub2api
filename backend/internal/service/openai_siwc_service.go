@@ -133,21 +133,36 @@ func siwcBadRequest(err error) error {
 	return infraerrors.New(http.StatusBadRequest, "OPENAI_SIWC_FAILED", err.Error())
 }
 
-func (s *OpenAIOAuthService) GenerateSIWCAuthURL(ctx context.Context, proxyID *int64, hostID string) (*OpenAIAuthURLResult, error) {
-	return s.generateSIWCAuthURL(ctx, proxyID, hostID, nil)
+func (s *OpenAIOAuthService) GenerateSIWCAuthURL(ctx context.Context, proxyID *int64, hostID string, resumeSession ...string) (*OpenAIAuthURLResult, error) {
+	var registration *siwc.Registration
+	if len(resumeSession) > 0 && resumeSession[0] != "" {
+		var err error
+		registration, err = siwc.LoadRegistration(s.siwcStateDir, resumeSession[0])
+		if err != nil || registration.AccountID != 0 {
+			return nil, siwcBadRequest(errors.New("SIWC registration cannot be resumed"))
+		}
+		proxyID, hostID = registration.ProxyID, registration.HostID
+	}
+	return s.generateSIWCAuthURL(ctx, proxyID, hostID, nil, registration)
 }
 
 func (s *OpenAIOAuthService) GenerateSIWCReauthURL(ctx context.Context, account *Account) (*OpenAIAuthURLResult, error) {
 	if !account.IsOpenAISiwc() {
 		return nil, siwcBadRequest(errors.New("SIWC account required"))
 	}
-	return s.generateSIWCAuthURL(ctx, account.ProxyID, account.GetCredential("ext_agent_host_id"), account)
+	return s.generateSIWCAuthURL(ctx, account.ProxyID, account.GetCredential("ext_agent_host_id"), account, nil)
 }
 
-func (s *OpenAIOAuthService) generateSIWCAuthURL(ctx context.Context, proxyID *int64, hostID string, account *Account) (*OpenAIAuthURLResult, error) {
+func (s *OpenAIOAuthService) generateSIWCAuthURL(ctx context.Context, proxyID *int64, hostID string, account *Account, registration *siwc.Registration) (*OpenAIAuthURLResult, error) {
 	proxyURL, err := s.siwcProxy(ctx, proxyID)
 	if err != nil {
 		return nil, siwcBadRequest(err)
+	}
+	if (account == nil && registration == nil) || hostID == "" {
+		hostID, err = siwc.StableHostID(s.siwcStateDir, hostID)
+		if err != nil {
+			return nil, siwcBadRequest(err)
+		}
 	}
 	protocol, err := siwc.NewSession(hostID)
 	if err != nil {
@@ -156,10 +171,13 @@ func (s *OpenAIOAuthService) generateSIWCAuthURL(ctx context.Context, proxyID *i
 	var accountID int64
 	if account != nil {
 		protocol.ClientID, protocol.Subject = account.GetCredential("client_id"), account.GetCredential("subject")
+		protocol.IDTokenHint, protocol.LoginHint = account.GetCredential("id_token"), account.GetCredential("email")
 		if protocol.ClientID == "" || protocol.Subject == "" {
 			return nil, siwcBadRequest(errors.New("SIWC identity incomplete"))
 		}
 		accountID = account.ID
+	} else if registration != nil {
+		protocol.ClientID = registration.ClientID
 	}
 	id, err := openai.GenerateSessionID()
 	if err != nil {
@@ -177,6 +195,10 @@ func (s *OpenAIOAuthService) generateSIWCAuthURL(ctx context.Context, proxyID *i
 	}
 	if len(s.siwcSessions) >= 256 {
 		return nil, siwcBadRequest(errors.New("too many pending SIWC authorizations"))
+	}
+	if err := siwc.SaveRegistration(s.siwcStateDir, id, siwc.Registration{ClientID: protocol.ClientID,
+		HostID: protocol.HostID, AccountID: accountID, ProxyID: proxyID, CreatedAt: time.Now()}); err != nil {
+		return nil, siwcBadRequest(errors.New("cannot persist SIWC registration"))
 	}
 	flow := &openAISiwcSession{protocol: protocol, proxyID: proxyID, proxyURL: proxyURL, accountID: accountID}
 	s.siwcSessions[id] = flow
@@ -216,6 +238,12 @@ func (s *OpenAIOAuthService) CompleteSIWC(ctx context.Context, id, callback stri
 	if flow.credential == nil {
 		if flow.claimed {
 			return nil, siwcBadRequest(errors.New("SIWC code already submitted; start a new authorization"))
+		}
+		// Retain the issued registration before consuming a one-time code. A
+		// fresh attempt can then reuse it after an exchange failure or restart.
+		if err := siwc.SaveRegistration(s.siwcStateDir, id, siwc.Registration{ClientID: clientID,
+			HostID: flow.protocol.HostID, AccountID: accountID, ProxyID: flow.proxyID, CreatedAt: time.Now()}); err != nil {
+			return nil, siwcBadRequest(errors.New("cannot persist issued SIWC registration"))
 		}
 		flow.claimed = true
 		flow.credential, err = client.Exchange(ctx, flow.protocol, code, clientID)

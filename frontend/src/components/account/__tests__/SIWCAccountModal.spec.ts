@@ -21,6 +21,18 @@ beforeEach(() => {
 })
 
 describe('SIWC authorization form', () => {
+	 it('restarts using the issued registration without persisting tokens or URLs', async () => {
+	   const wrapper = form()
+	   await wrapper.get('button').trigger('click')
+	   await flushPromises()
+	   await wrapper.get('textarea').setValue('failed-callback')
+	   const retry = wrapper.findAll('button').find(button => button.text() === 'siwc.restart')!
+	   await retry.trigger('click')
+	   await flushPromises()
+	   expect(startSIWCAuthorization).toHaveBeenLastCalledWith(null, undefined, undefined, authorization.session_id)
+	   expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe('')
+	   expect(localStorage.length).toBe(1)
+	 })
   it('uses the chosen server proxy, persists only host identity and sends the complete callback', async () => {
     const wrapper = form()
     await wrapper.get('select').setValue('1')

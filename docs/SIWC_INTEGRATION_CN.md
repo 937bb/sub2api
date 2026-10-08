@@ -18,7 +18,9 @@
 
 重新授权使用账号菜单中的原入口，自动切换到 SIWC 流程，沿用原 host ID、client ID 和服务端代理，并要求 subject 一致。仅更新授权和可用模型目录；账号 ID、名称、倍率、分组、自定义模型映射保持原值。原本停用或错误状态的账号不会被自动启用，请检查后使用已有恢复状态功能。
 
-授权会话暂存在 B 端内存，重启或超过十分钟需重新生成链接。多副本部署时，生成链接与回填必须路由至同一进程。浏览器仅存储非密钥的 host UUID；AT、RT 和 ID token 不放入浏览器存储，重新授权链接也不携带存储中的 ID token。审计记录会隐藏完整回调地址。
+授权会话暂存在 B 端内存，重启或超过十分钟需重新生成链接。多副本部署时，生成链接与回填必须路由至同一进程。运行目录 `siwc/host-id` 持久化稳定 host UUID，首次可沿用浏览器此前保存的 UUID；已建账号重新授权始终保留其原 host ID。首次授权在消费 code 前保存不含 token 的 issued client 注册记录；24 小时内点击「重新开始」会携带原会话标识，沿用该 client 并生成新的 state、nonce 和 PKCE。
+
+AT、RT 和 ID token 不放入浏览器持久化存储。重新授权链接只发往官方 authorize 端点，使用已保存的 ID token hint 和 email hint，仍校验新 ID token 的身份。授权 URL 响应设置 no-store，审计记录隐藏完整授权和回调地址。
 
 ## 请求与计费
 
@@ -38,7 +40,9 @@
 | Compact、Live、AlphaSearch、Codex WebSocket、BPS、Prism、Shadow | 不用于 SIWC |
 | Codex 额度查询、隐私设置、token guard、自动重登 | 排除 SIWC，避免 token 发错端点 |
 
-保留 `developer` 与原始指令，将 `system` 就地转换为 `developer`；保留完整消息历史和推理密文，按参考协议重排 function/custom tools，强制上游 `store=false`、SSE 流式。非流式客户由现有兼容层汇总响应。非空 `previous_response_id` / `conversation`、item reference 和 compaction trigger 明确拒绝，不静默丢失状态。
+保留 `developer` 与原始指令，将 `system` 就地转换为 `developer`；保留完整消息历史和推理密文，function/custom tools 转入具有 `role=developer` 的 additional_tools。无状态历史消息移除不兼容的非 msg_ 消息 ID；工具 call_id、工具结果关联和 reasoning ID 不改。强制上游 `store=false`、SSE 流式。非流式客户由现有兼容层汇总响应。非空 `previous_response_id` / `conversation`、item reference 和 compaction trigger 明确拒绝，不静默丢失状态。
+
+结构化 `subscription_sharing_usage_limit_exceeded` 按 429 记录和返回；该 SIWC 授权暂停派发 60 秒，避免同一失败请求反复重试。60 秒是本地冷却，不是官方额度 reset；不据此声称整个套餐耗尽。`subscription_sharing_usage_unavailable` 按 503 处理。已输出内容的流保留终止错误，不重新播放请求。应用限额仍需在 ChatGPT Settings → Usage 核对。
 
 不引入草稿、评价、重写等额外模型调用，也不缓冲完整回答后伪装流式。请求继续经过现有鉴权、调度、并发准入、模型映射、usage 解析与账务链；测试验证 input/output/cache token 进入原有结果结构。公共 API 返回的实际服务档位可以降低计费档位，普通 Codex 原行为保持不变。
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"os"
+	"path/filepath"
 	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
@@ -116,6 +117,14 @@ func ProvideOpenAIOAuthService(
 ) *OpenAIOAuthService {
 	svc := NewOpenAIOAuthService(proxyRepo, oauthClient)
 	svc.SetPrivacyClientFactory(privacyClientFactory)
+	dataDir := os.Getenv("DATA_DIR")
+	if dataDir == "" {
+		dataDir = "."
+		if info, err := os.Stat("/app/data"); err == nil && info.IsDir() {
+			dataDir = "/app/data"
+		}
+	}
+	svc.siwcStateDir = filepath.Join(dataDir, "siwc")
 	return svc
 }
 

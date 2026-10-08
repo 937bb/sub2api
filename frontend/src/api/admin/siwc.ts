@@ -7,9 +7,9 @@ export interface SIWCAuthorization {
   host_id: string
 }
 
-export async function startSIWCAuthorization(proxyId: number | null, hostId?: string, accountId?: number) {
+export async function startSIWCAuthorization(proxyId: number | null, hostId?: string, accountId?: number, resumeSessionId?: string) {
   const { data } = await apiClient.post<SIWCAuthorization>('/admin/openai/siwc/auth-url', {
-    proxy_id: proxyId, host_id: hostId, account_id: accountId
+    proxy_id: proxyId, host_id: hostId, account_id: accountId, resume_session_id: resumeSessionId
   })
   return data
 }

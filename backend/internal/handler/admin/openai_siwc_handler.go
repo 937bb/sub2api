@@ -44,10 +44,14 @@ func (h *OpenAIOAuthHandler) RepairLegacySIWC(c *gin.Context) {
 }
 
 func (h *OpenAIOAuthHandler) GenerateSIWCAuthURL(c *gin.Context) {
+	// Reauthorization URLs may contain an ID-token hint for the official issuer.
+	c.Header("Cache-Control", "no-store")
+	c.Header("Pragma", "no-cache")
 	var input struct {
-		ProxyID   *int64 `json:"proxy_id"`
-		HostID    string `json:"host_id"`
-		AccountID int64  `json:"account_id" binding:"min=0"`
+		ProxyID         *int64 `json:"proxy_id"`
+		HostID          string `json:"host_id"`
+		AccountID       int64  `json:"account_id" binding:"min=0"`
+		ResumeSessionID string `json:"resume_session_id" binding:"max=256"`
 	}
 	if c.ShouldBindJSON(&input) != nil {
 		response.BadRequest(c, "Invalid SIWC authorization request")
@@ -63,7 +67,7 @@ func (h *OpenAIOAuthHandler) GenerateSIWCAuthURL(c *gin.Context) {
 		}
 		result, err = h.openaiOAuthService.GenerateSIWCReauthURL(c.Request.Context(), account)
 	} else {
-		result, err = h.openaiOAuthService.GenerateSIWCAuthURL(c.Request.Context(), input.ProxyID, input.HostID)
+		result, err = h.openaiOAuthService.GenerateSIWCAuthURL(c.Request.Context(), input.ProxyID, input.HostID, input.ResumeSessionID)
 	}
 	if err != nil {
 		response.ErrorFrom(c, err)
