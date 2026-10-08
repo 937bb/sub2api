@@ -30,7 +30,50 @@ type openAISiwcSession struct {
 }
 
 func (a *Account) IsOpenAISiwc() bool {
-	return a != nil && a.Platform == PlatformOpenAI && a.Type == AccountTypeOAuth && strings.EqualFold(a.GetCredential("auth_mode"), siwc.AuthMode)
+	if a == nil || a.Platform != PlatformOpenAI || a.Type != AccountTypeOAuth {
+		return false
+	}
+	protocol, _ := a.Extra["auth_protocol"].(string)
+	// Legacy imports only stored a display label or issued client ID. Detect
+	// these to fail closed instead of sending sharing tokens to Codex.
+	return strings.EqualFold(a.GetCredential("auth_mode"), siwc.AuthMode) ||
+		strings.EqualFold(protocol, siwc.AuthMode) || strings.HasPrefix(a.GetCredential("client_id"), "oaiapp_")
+}
+
+func validateSIWCCreation(account *Account) error {
+	if account.IsOpenAISiwc() && (account.GetCredential("auth_mode") != siwc.AuthMode ||
+		account.GetCredential("subject") == "" || !siwc.HasSharingScopes(account.GetCredential("granted_scope"))) {
+		return siwcBadRequest(errors.New("Use OpenAI OAuth > SIWC authorization; a SIWC label alone is not an authorization"))
+	}
+	return nil
+}
+
+func (s *OpenAIOAuthService) RecoverLegacySIWC(ctx context.Context, account *Account) (map[string]any, error) {
+	if !account.IsOpenAISiwc() || strings.EqualFold(account.GetCredential("auth_mode"), siwc.AuthMode) {
+		return nil, siwcBadRequest(errors.New("SIWC legacy account required"))
+	}
+	proxyURL, err := s.siwcProxy(ctx, account.ProxyID)
+	if err != nil {
+		return nil, err
+	}
+	client, err := newSIWCClient(proxyURL)
+	if err != nil {
+		return nil, err
+	}
+	credential, err := client.RecoverLegacy(ctx, siwcCredentialFromAccount(account))
+	if err != nil {
+		return nil, siwcBadRequest(err)
+	}
+	credentials := openAISiwcCredentials(*credential)
+	credentials["siwc_models"] = []string{}
+	if credential.ExpiresAt > time.Now().Unix() {
+		models, err := client.Models(ctx, credential.AccessToken)
+		if err != nil {
+			return nil, siwcBadRequest(err)
+		}
+		credentials["siwc_models"] = models
+	}
+	return credentials, nil
 }
 
 // SIWC is an independent OAuth grant; its token must never reach Codex endpoints.

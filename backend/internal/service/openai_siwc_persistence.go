@@ -35,7 +35,12 @@ func PreserveSIWCManagedCredentials(incoming, current map[string]any) map[string
 
 func preserveSIWCAdminCredentials(account *Account, input *UpdateAccountInput) error {
 	if !account.IsOpenAISiwc() {
-		if mode, _ := input.Credentials["auth_mode"].(string); strings.EqualFold(mode, "siwc") {
+		candidate := *account
+		candidate.Credentials = MergePreservingSensitiveCreds(account.Credentials, input.Credentials)
+		if input.Extra != nil {
+			candidate.Extra = input.Extra
+		}
+		if candidate.IsOpenAISiwc() {
 			return infraerrors.New(http.StatusBadRequest, "SIWC_AUTHORIZATION_REQUIRED", "Create SIWC accounts through the dedicated authorization flow")
 		}
 		return nil
@@ -60,6 +65,28 @@ func preserveSIWCAdminCredentials(account *Account, input *UpdateAccountInput) e
 	return nil
 }
 
+// SaveLegacySIWCCredentials changes only verified authorization metadata.
+func (s *adminServiceImpl) SaveLegacySIWCCredentials(ctx context.Context, expected *Account, credentials map[string]any) (*Account, error) {
+	if !expected.IsOpenAISiwc() || strings.EqualFold(expected.GetCredential("auth_mode"), "siwc") {
+		return nil, errors.New("SIWC legacy account required")
+	}
+	updater, ok := s.accountRepo.(interface {
+		RepairLegacyOpenAISiwc(context.Context, *Account, map[string]any) (bool, error)
+	})
+	if !ok {
+		return nil, errors.New("SIWC legacy repair persistence unavailable")
+	}
+	credentials["_token_version"] = time.Now().UnixMilli()
+	applied, err := updater.RepairLegacyOpenAISiwc(ctx, expected, credentials)
+	if err != nil {
+		return nil, err
+	}
+	if !applied {
+		return nil, errors.New("SIWC account changed during repair; retry")
+	}
+	return s.accountRepo.GetByID(ctx, expected.ID)
+}
+
 func persistSIWCCredentials(ctx context.Context, repo AccountRepository, expected *Account, credentials map[string]any) (*Account, bool, error) {
 	updater, ok := repo.(openAISiwcCredentialsUpdater)
 	if !ok {
@@ -79,6 +106,11 @@ func (s *adminServiceImpl) SaveSIWCCredentials(ctx context.Context, expected *Ac
 		return nil, errors.New("SIWC account required")
 	}
 	for _, key := range []string{"auth_mode", "subject", "client_id", "ext_agent_host_id"} {
+		// Legacy imports did not retain a host ID. A verified reauthorization
+		// may bind its new session host while preserving subject and client.
+		if key == "ext_agent_host_id" && expected.GetCredential(key) == "" {
+			continue
+		}
 		if credentials[key] != expected.GetCredential(key) {
 			return nil, errors.New("SIWC authorization identity mismatch")
 		}

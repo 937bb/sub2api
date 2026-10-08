@@ -341,6 +341,23 @@ func (c *Client) signingKeys(ctx context.Context) ([]jwk, error) {
 }
 
 func (c *Client) verifyIdentity(raw, clientID string, keys []jwk) (jwt.MapClaims, error) {
+	claims, err := verifySignedToken(raw, keys, jwt.WithIssuer(Issuer), jwt.WithAudience(clientID), jwt.WithExpirationRequired(), jwt.WithIssuedAt())
+	if err != nil {
+		return nil, err
+	}
+	audience, err := claims.GetAudience()
+	if err != nil {
+		return nil, errors.New("invalid SIWC audience")
+	}
+	azp, hasAZP := claims["azp"]
+	if (hasAZP && azp != clientID) || (len(audience) > 1 && azp != clientID) {
+		return nil, errors.New("SIWC authorized-party mismatch")
+	}
+	return claims, nil
+}
+
+func verifySignedToken(raw string, keys []jwk, options ...jwt.ParserOption) (jwt.MapClaims, error) {
+	options = append(options, jwt.WithValidMethods([]string{"RS256", "ES256"}))
 	token, err := jwt.Parse(raw, func(token *jwt.Token) (any, error) {
 		kid, _ := token.Header["kid"].(string)
 		var selected []jwk
@@ -363,21 +380,13 @@ func (c *Client) verifyIdentity(raw, clientID string, keys []jwk) (jwt.MapClaims
 			return nil, errors.New("invalid signing key")
 		}
 		return selected[0].publicKey(token.Method.Alg())
-	}, jwt.WithValidMethods([]string{"RS256", "ES256"}), jwt.WithIssuer(Issuer), jwt.WithAudience(clientID), jwt.WithExpirationRequired(), jwt.WithIssuedAt())
+	}, options...)
 	if err != nil || token == nil || !token.Valid {
 		return nil, errors.New("SIWC ID token verification failed")
 	}
 	claims, ok := token.Claims.(jwt.MapClaims)
 	if !ok || claims["iat"] == nil {
 		return nil, errors.New("SIWC ID token issued-at missing")
-	}
-	audience, err := claims.GetAudience()
-	if err != nil {
-		return nil, errors.New("invalid SIWC audience")
-	}
-	azp, hasAZP := claims["azp"]
-	if (hasAZP && azp != clientID) || (len(audience) > 1 && azp != clientID) {
-		return nil, errors.New("SIWC authorized-party mismatch")
 	}
 	return claims, nil
 }

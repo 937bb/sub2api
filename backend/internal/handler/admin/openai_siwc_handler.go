@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
@@ -10,6 +11,37 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 )
+
+func (h *OpenAIOAuthHandler) RepairLegacySIWC(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		response.BadRequest(c, "Invalid account ID")
+		return
+	}
+	account, err := h.adminService.GetAccount(c.Request.Context(), id)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	credentials, err := h.openaiOAuthService.RecoverLegacySIWC(c.Request.Context(), account)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	writer, ok := h.adminService.(interface {
+		SaveLegacySIWCCredentials(context.Context, *service.Account, map[string]any) (*service.Account, error)
+	})
+	if !ok {
+		response.BadRequest(c, "SIWC repair unavailable")
+		return
+	}
+	account, err = writer.SaveLegacySIWCCredentials(c.Request.Context(), account, credentials)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, dto.AccountForObserver(c.Request.Context(), dto.AccountFromService(account)))
+}
 
 func (h *OpenAIOAuthHandler) GenerateSIWCAuthURL(c *gin.Context) {
 	var input struct {

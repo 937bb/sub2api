@@ -2966,7 +2966,14 @@ func (h *AccountHandler) GetAvailableModels(c *gin.Context) {
 			if models, fetchErr := h.accountTestService.FetchOpenAIAccountModels(c.Request.Context(), account); fetchErr == nil {
 				response.Success(c, models)
 				return
+			} else if account.IsOpenAISiwc() {
+				response.ErrorFrom(c, fetchErr)
+				return
 			}
+		}
+		if account.IsOpenAISiwc() {
+			response.BadRequest(c, "SIWC model catalog unavailable; repair or reauthorize the account")
+			return
 		}
 		// OpenAI 自动透传会绕过常规模型改写，测试/模型列表也应回落到默认模型集。
 		if account.IsOpenAIPassthroughEnabled() {

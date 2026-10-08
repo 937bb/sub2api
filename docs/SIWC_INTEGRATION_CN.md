@@ -24,7 +24,11 @@
 
 账号仍为 OpenAI OAuth 类型，以 `credentials.auth_mode=siwc` 区分：
 
-账号列表中的 `OpenAI · SIWC` 与后端分流使用同一个授权标识。仅已通过 SIWC 授权流程保存的 OpenAI OAuth 账号使用公共 Responses；原 OAuth 账号（包括没有 `auth_mode` 字段的老账号）继续使用 `https://chatgpt.com/backend-api/codex/responses`。名称、备注、客户端请求头不参与授权类型判断；API Key 账号保持原有官方或自定义上游。两类 OAuth 可以同时存在，按每次选中的账号分流，不需要批量迁移老账号。普通编辑不能把原 OAuth 直接改成 SIWC。
+账号列表中的 `OpenAI · SIWC` 与后端分流使用授权标识。已通过 SIWC 授权流程保存的 OpenAI OAuth 账号使用公共 Responses；原 OAuth 账号继续使用 `https://chatgpt.com/backend-api/codex/responses`。兼容旧导入中的 `extra.auth_protocol=siwc` 和 `oaiapp_` client ID：这些账号不会再落入 Codex 路径，但必须修复授权元数据后才能请求。名称、备注、客户端请求头不参与判断；API Key 账号保持原有官方或自定义上游。普通编辑不能把原 OAuth 直接改成 SIWC，仅添加标签的新建请求会被拒绝。
+
+管理员可调用 `POST /api/v1/admin/openai/siwc/accounts/:id/repair` 修复旧 SIWC 导入。服务端先验证原 access token 的 JWKS 签名、issuer、resource audience、client ID、subject、scope 和时间字段，再以完整旧凭据及代理为条件原子补齐元数据。过期 AT 仅用于证明历史身份，修复不延长其有效期，也不旋转 RT；随后通过已有刷新入口更新，再获取模型目录。账号状态、分组、价格与映射不自动改动。未保存的原 host ID 不会被伪造；后续同一 subject/client 的重新授权可以绑定新会话 host。
+
+2026-10-08 对指定 SIWC 账号的目录逐项直连实测，以下 7 个模型均返回 HTTP 200、完整 `response.completed` 及 `OK`：`gpt-5.6-luna`、`gpt-5.6-sol`、`gpt-5.6-terra`、`gpt-6-astra`、`gpt-6-luna`、`gpt-6-sol`、`gpt-6.1-sol`，单次约 1.5–2.6 秒。这是该账号当时的授权范围，不代表所有 OpenAI 模型或所有账号；`gpt-5.5`、`codex-auto-review` 不在该目录。目录获取失败时管理页不回退展示普通 Codex 的默认全模型。
 
 | 路径 | SIWC 行为 |
 | --- | --- |

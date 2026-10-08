@@ -513,6 +513,7 @@ func registerOpenAIOAuthRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		openai.POST("/generate-auth-url", h.Admin.OpenAIOAuth.GenerateAuthURL)
 		openai.POST("/siwc/auth-url", h.Admin.OpenAIOAuth.GenerateSIWCAuthURL)
 		openai.POST("/siwc/accounts", h.Admin.OpenAIOAuth.CreateAccountFromSIWC)
+		openai.POST("/siwc/accounts/:id/repair", h.Admin.OpenAIOAuth.RepairLegacySIWC)
 		openai.POST("/exchange-code", h.Admin.OpenAIOAuth.ExchangeCode)
 		openai.POST("/refresh-token", h.Admin.OpenAIOAuth.RefreshToken)
 		openai.POST("/accounts/:id/refresh", h.Admin.OpenAIOAuth.RefreshAccountToken)

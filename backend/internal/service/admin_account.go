@@ -567,6 +567,9 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 	if err != nil {
 		return nil, err
 	}
+	if err := validateSIWCCreation(account); err != nil {
+		return nil, err
+	}
 	if err := s.validateExcelBPS403GroupSettings(ctx, account); err != nil {
 		return nil, err
 	}
