@@ -9,6 +9,7 @@ import common from './common'
 import dashboard from './dashboard'
 import channelMonitorV2 from './channelMonitorV2'
 import channelMonitorV3 from './channelMonitorV3'
+import supportTickets from './supportTickets'
 import batchImage from './batchImage'
 import admin from './admin'
 import misc from './misc'
@@ -31,6 +32,7 @@ export default {
   ...dashboard,
   ...channelMonitorV2,
   ...channelMonitorV3,
+  ...supportTickets,
   ...batchImage,
   admin,
   ...misc,

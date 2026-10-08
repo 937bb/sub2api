@@ -11,6 +11,11 @@ FRONTEND_CRITICAL_VITEST := \
 	src/features/channel-monitor-v3/__tests__/monitorV3.spec.ts \
 	src/features/channel-monitor-v3/__tests__/StatusPage.spec.ts \
 	src/features/channel-monitor-v3/__tests__/V3SettingsPanel.spec.ts \
+	src/features/support-tickets/__tests__/supportTickets.spec.ts \
+	src/features/support-tickets/__tests__/TicketComponents.spec.ts \
+	src/views/user/__tests__/SupportTicketsViews.spec.ts \
+	src/views/admin/__tests__/SupportTicketsAdmin.spec.ts \
+	src/stores/__tests__/supportTickets.spec.ts \
 	src/views/admin/__tests__/ChannelMonitorView.modeSwitch.spec.ts \
 	src/views/admin/__tests__/AccountQualityView.spec.ts \
 	src/views/admin/__tests__/AccountsView.bulkEdit.spec.ts \
