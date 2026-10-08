@@ -13,6 +13,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/siwc"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 func (a *Account) supportsSIWCUpstreamModel(model string) bool {
@@ -147,7 +148,7 @@ func normalizeSIWCResponsesBody(body []byte) ([]byte, error) {
 	return marshalOpenAIUpstreamJSON(payload)
 }
 
-func buildSIWCResponsesRequest(ctx context.Context, c *gin.Context, account *Account, body []byte, token string) (*http.Request, error) {
+func buildSIWCResponsesRequest(ctx context.Context, c *gin.Context, account *Account, body []byte, token, promptCacheKey string) (*http.Request, error) {
 	if !account.IsOpenAISiwc() {
 		return nil, errors.New("SIWC account authorization required")
 	}
@@ -163,6 +164,21 @@ func buildSIWCResponsesRequest(ctx context.Context, c *gin.Context, account *Acc
 	}
 	if !account.supportsSIWCUpstreamModel(gjson.GetBytes(normalized, "model").String()) {
 		return nil, errors.New("model is not in the SIWC account catalog")
+	}
+	// Compatibility converters carry session keys separately from the body.
+	// SIWC uses the JSON cache key, never Codex session/conversation headers.
+	// Scope once at the outbound boundary without mutating the retry source;
+	// refreshed tokens must not change this stable tenant/grant namespace.
+	cacheKey := strings.TrimSpace(gjson.GetBytes(normalized, "prompt_cache_key").String())
+	if cacheKey == "" {
+		cacheKey = strings.TrimSpace(promptCacheKey)
+	}
+	if cacheKey != "" {
+		seed := fmt.Sprintf("siwc:%s:%s:%s", account.GetCredential("subject"), account.GetCredential("client_id"), cacheKey)
+		normalized, err = sjson.SetBytes(normalized, "prompt_cache_key", isolateOpenAISessionID(getAPIKeyIDFromContext(c), seed))
+		if err != nil {
+			return nil, fmt.Errorf("set SIWC prompt cache key: %w", err)
+		}
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, siwc.ResponsesURL, bytes.NewReader(normalized))
 	if err != nil {

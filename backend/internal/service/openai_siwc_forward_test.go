@@ -152,7 +152,7 @@ func TestSIWCRequestPreservesRolesToolsAndIdentityIsolation(t *testing.T) {
 		c.Request.Header.Set(header, "customer-private-value")
 	}
 	body := []byte(`{"model":"gpt-6-astra","instructions":"original","input":[{"role":"system","content":"keep system text"},{"role":"developer","content":"keep developer text"},{"role":"user","content":"hi"},{"type":"reasoning","encrypted_content":"opaque","summary":[]}],"tools":[{"type":"function","name":"lookup","parameters":{}},{"type":"namespace","name":"functions","tools":[{"type":"custom","name":"patch"}]},{"type":"web_search"}],"stream":false,"store":true,"temperature":0.3}`)
-	req, err := buildSIWCResponsesRequest(context.Background(), c, siwcFixtureAccount(), body, "upstream-token")
+	req, err := buildSIWCResponsesRequest(context.Background(), c, siwcFixtureAccount(), body, "upstream-token", "")
 	require.NoError(t, err)
 	require.Equal(t, siwc.ResponsesURL, req.URL.String())
 	require.Equal(t, siwc.UserAgent, req.UserAgent())

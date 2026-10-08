@@ -761,6 +761,10 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			markPatchDelete("max_completion_tokens")
 		}
 		for _, unsupportedField := range []string{"prompt_cache_retention", "safety_identifier", "prompt_cache_options"} {
+			// SIWC accepts modern cache options independently of the client UA.
+			if unsupportedField == "prompt_cache_options" && account.IsOpenAISiwc() {
+				continue
+			}
 			if gjson.GetBytes(body, unsupportedField).Exists() {
 				markPatchDelete(unsupportedField)
 			}
@@ -1727,7 +1731,7 @@ func shouldAdaptDeepSeekResponsesClientTools(account *Account, body []byte, comp
 
 func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Context, account *Account, body []byte, token string, isStream bool, promptCacheKey string, isCodexCLI bool) (*http.Request, error) {
 	if account.IsOpenAISiwc() {
-		return buildSIWCResponsesRequest(ctx, c, account, body, token)
+		return buildSIWCResponsesRequest(ctx, c, account, body, token, promptCacheKey)
 	}
 	defer requesttiming.Observe(ctx, "build_upstream_request")()
 	// Determine target URL based on account type

@@ -103,7 +103,7 @@ func TestSIWCBuilderRejectsOtherAccountGrants(t *testing.T) {
 	otherPlatform.Platform = PlatformAnthropic
 	for _, account := range []*Account{nil, legacy, apiKey, otherPlatform} {
 		body := []byte(`{"model":"gpt-6-astra","input":"hello"}`)
-		req, err := buildSIWCResponsesRequest(context.Background(), newOpenAIRejectedFieldTestContext(body), account, body, "must-not-send")
+		req, err := buildSIWCResponsesRequest(context.Background(), newOpenAIRejectedFieldTestContext(body), account, body, "must-not-send", "")
 		require.ErrorContains(t, err, "SIWC account authorization required")
 		require.Nil(t, req)
 	}

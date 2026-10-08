@@ -48,6 +48,14 @@ AT、RT 和 ID token 不放入浏览器持久化存储。重新授权链接只�
 
 实际出网时再次检查模型属于该授权的目录，并严格限制推理 URL。客户 Cookie、Authorization 和 Codex 身份头不会透传。SIWC 代理不可用时直接失败，不静默切换出口。
 
+## Prompt cache
+
+SIWC Responses 保留客户提供的 `prompt_cache_options` 和内容中的 `prompt_cache_breakpoint`，不再因为客户端不是 Codex CLI 就过滤缓存选项。仍移除官方明确不支持的旧字段 `prompt_cache_retention`；不自动添加 TTL、显式断点或缓存选项。
+
+Chat Completions / Messages 兼容转换得到的会话缓存键在 SIWC 出网前写入 JSON 的 `prompt_cache_key`，不转成 Codex 的 `session_id` / `conversation_id` 请求头。原生 Responses 或 Responses 形状兼容请求已有的非空 body key 优先于转换链路的备用 key。所有 SIWC 路径统一按下游 API key ID、SIWC subject 和 client ID 派生稳定标识；同一授权刷新 token 不改变标识，不同租户或授权使用不同标识。仅修改新建出站 body，重试不在原始请求上重复哈希。
+
+这会一次性改变此前原样透传的 SIWC 缓存标签，部署后的首次请求可能需要预热。缓存命中由上游决定：输入前缀、模型、工具定义、断点、有效期和最小可缓存长度仍需满足官方要求。现代模型的 `prompt_cache_key` 用于缓存计量分隔，并非提升路由命中的必需字段；补齐该字段不能保证命中率提升。已缓存 token 继续从上游 usage 读取，不伪造命中或修改账务规则。
+
 ## 身份与网络指纹
 
 `ext_agent_host_id` 是客户端保存的实例 UUID；`oaiapp_...` 是授权签发的应用 client ID；subject 标识用户；token 连接授权与推理。这些是同一授权链上的身份信息，不等于同一网络指纹。

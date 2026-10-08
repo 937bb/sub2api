@@ -35,6 +35,10 @@ func TestSIWCCompatibilityForwardPreservesHistoryAndUsage(t *testing.T) {
 				}
 				payload := map[string]any{"model": "gpt-6-astra", "messages": messages, "stream": stream, "max_tokens": 32}
 				path := "/v1/chat/completions"
+				if protocol == "chat" {
+					payload["prompt_cache_options"] = map[string]any{"mode": "explicit", "ttl": "30m"}
+					messages[1]["content"] = []any{map[string]any{"type": "text", "text": "history-message-00", "prompt_cache_breakpoint": map[string]any{"mode": "explicit"}}}
+				}
 				if protocol == "messages" {
 					path = "/v1/messages"
 					payload["system"] = "caller system instructions"
@@ -60,6 +64,11 @@ func TestSIWCCompatibilityForwardPreservesHistoryAndUsage(t *testing.T) {
 					upstreamBody, err := io.ReadAll(req.Body)
 					require.NoError(t, err)
 					require.Equal(t, "gpt-6-astra", gjson.GetBytes(upstreamBody, "model").String())
+					require.NotEmpty(t, gjson.GetBytes(upstreamBody, "prompt_cache_key").String())
+					if protocol == "chat" {
+						require.JSONEq(t, `{"mode":"explicit","ttl":"30m"}`, gjson.GetBytes(upstreamBody, "prompt_cache_options").Raw)
+						require.JSONEq(t, `{"mode":"explicit"}`, gjson.GetBytes(upstreamBody, `input.#(role=="user").content.0.prompt_cache_breakpoint`).Raw)
+					}
 					require.True(t, gjson.GetBytes(upstreamBody, "stream").Bool())
 					require.False(t, gjson.GetBytes(upstreamBody, "store").Bool())
 					require.False(t, gjson.GetBytes(upstreamBody, "previous_response_id").Exists())
