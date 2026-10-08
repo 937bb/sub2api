@@ -36,8 +36,8 @@ func TestSIWCBackgroundIsolation(t *testing.T) {
 	usageService := &AccountUsageService{}
 	usage, err := usageService.getUsageForAccount(ctx, account, true)
 	require.NoError(t, err)
-	require.Equal(t, "passive", usage.Source)
-	require.Equal(t, "siwc_quota_unsupported", usage.ErrorCode)
+	require.Equal(t, "active", usage.Source)
+	require.Equal(t, "siwc_quota_web_token_required", usage.ErrorCode)
 	require.Nil(t, usage.FiveHour)
 	require.Nil(t, usage.SevenDay)
 	require.False(t, shouldRefreshOpenAICodexSnapshot(account, nil, time.Now()))

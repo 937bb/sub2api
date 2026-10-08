@@ -1,10 +1,12 @@
 package service
 
-// SensitiveCredentialKeys 列出 Account.Credentials JSON map 中绝不允许返回到前端的子键。
-// dto 层做响应脱敏、service 层做更新合并都引用此清单——新增凭证类型时务必同步。
+// SensitiveCredentialKeys is shared by response redaction and credential updates.
+// These fields must never be returned to the frontend.
 var SensitiveCredentialKeys = []string{
 	// OAuth
 	"access_token", "refresh_token", "id_token", "agent_private_key",
+	// A separate web token is used only for SIWC subscription quota reads.
+	"siwc_quota_access_token",
 	// API Key 类
 	"api_key", "session_key", "cookie",
 	// Grok Web SSO / password (must never persist or echo after Build OAuth)

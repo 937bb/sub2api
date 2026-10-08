@@ -1,4 +1,33 @@
 export default {
+  quota: {
+    webToken: 'Quota query: ChatGPT web AT',
+    webTokenHelp: 'Optional. Use the same account’s ChatGPT web accessToken to read plan usage only. SIWC inference credentials are preserved. Replace the web token manually when it expires.',
+    keepToken: 'Configured; leave empty to keep',
+    enterToken: 'Paste the web accessToken without the Bearer prefix',
+    removeToken: 'Remove quota query AT',
+    remaining: 'Remaining plan usage',
+    recentStats: 'Last {window} usage',
+    currentWindowStats: 'Current {window} window usage',
+    statsSince: 'Local records since {time}',
+    localStatsFailed: 'Local usage statistics are temporarily unavailable. Refresh later.',
+    unknown: 'Quota not yet available',
+    updatedAt: 'Queried at {time}',
+    refresh: 'Query quota',
+    website: 'ChatGPT usage',
+    websiteHelp: 'Sign in to the account shown in this row',
+    planOnly: 'Account plan limits only. Check app weekly limits on ChatGPT.',
+    errors: {
+      siwc_quota_web_token_required: 'Configure this account’s ChatGPT web AT in Edit account.',
+      siwc_quota_identity_missing: 'Reauthorize SIWC to obtain the verified account email.',
+      siwc_quota_unavailable: 'Quota query failed. Try again later.',
+      siwc_quota_proxy_unavailable: 'The configured account proxy is unavailable.',
+      siwc_quota_web_token_invalid: 'The web AT expired or was rejected. Replace it in Edit account.',
+      siwc_quota_web_forbidden: 'The web quota query was denied. Check usage on ChatGPT.',
+      siwc_quota_query_limited: 'Quota queries are temporarily rate limited. Try again later.',
+      siwc_quota_invalid_response: 'The upstream returned no valid quota windows.',
+      siwc_quota_account_mismatch: 'The web AT email does not match the SIWC account. Quota was not displayed.'
+    }
+  },
   title: 'Add ChatGPT SIWC account',
   accountTypeDescription: 'ChatGPT token-sharing authorization',
   description: 'Use a separate ChatGPT token-sharing grant. Availability depends on the granted scopes and account model catalog.',

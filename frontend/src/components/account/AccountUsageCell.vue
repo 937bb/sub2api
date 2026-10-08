@@ -116,6 +116,45 @@
       </div>
     </template>
 
+    <!-- SIWC uses a separate web grant for read-only subscription quota. -->
+    <template v-else-if="isSIWCAccount(account)">
+      <div class="space-y-1" data-testid="siwc-quota">
+        <div class="text-[10px] text-gray-500">{{ t('siwc.quota.remaining') }}</div>
+        <div v-for="window in siwcUsageWindows" :key="window.label" :data-testid="`siwc-usage-${window.label}`">
+          <template v-if="window.local">
+            <div class="mb-0.5 text-[9px] text-gray-500" :title="t('siwc.quota.statsSince', { time: new Date(window.local.start_at).toLocaleString() })">
+              {{ t(window.local.rolling ? 'siwc.quota.recentStats' : 'siwc.quota.currentWindowStats', { window: window.label }) }}
+            </div>
+            <UsageWindowStats :window-stats="window.local.stats" :show-empty="true" />
+          </template>
+          <UsageProgressBar
+            v-if="window.quota" :label="window.label" :color="window.color" :remaining-capacity="true"
+            :utilization="Math.max(0, 100 - window.quota.utilization)" :resets-at="window.quota.resets_at"
+          />
+        </div>
+        <div v-if="usageInfo?.local_usage_error" class="text-[10px] text-amber-600 dark:text-amber-400">
+          {{ t('siwc.quota.localStatsFailed') }}
+        </div>
+        <div v-if="loading || activeQueryLoading" class="text-[10px] text-gray-400">{{ t('common.loading') }}</div>
+        <div v-else-if="error || usageInfo?.error_code" class="max-w-[240px] text-[10px] text-amber-600 dark:text-amber-400">
+          {{ siwcQuotaError }}
+        </div>
+        <div v-else-if="!hasOpenAIUsageFallback" class="text-[10px] text-gray-400">{{ t('siwc.quota.unknown') }}</div>
+        <div v-if="usageInfo?.updated_at" class="text-[9px] text-gray-400">
+          {{ t('siwc.quota.updatedAt', { time: new Date(usageInfo.updated_at).toLocaleString() }) }}
+        </div>
+        <div class="flex items-center gap-2 text-[10px]">
+          <button type="button" class="text-blue-600 disabled:opacity-50" :disabled="loading || activeQueryLoading" @click="loadActiveUsage">
+            {{ t('siwc.quota.refresh') }}
+          </button>
+          <a href="https://chatgpt.com/settings/usage" target="_blank" rel="noopener noreferrer" class="text-blue-600" :title="t('siwc.quota.websiteHelp')">
+            {{ t('siwc.quota.website') }}
+          </a>
+        </div>
+        <div class="max-w-[240px] text-[9px] text-gray-400">{{ t('siwc.quota.planOnly') }}</div>
+      </div>
+    </template>
+
     <!-- OpenAI Codex accounts: ticket status; usage querying remains OAuth-only. -->
     <template v-else-if="account.platform === 'openai' && (account.type === 'oauth' || account.type === 'setup-token')">
       <div v-if="codexTurnTickets.length" class="mb-1 space-y-0.5">
@@ -679,9 +718,11 @@ import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
 import type { Account, AccountUsageInfo, GeminiCredentials, WindowStats } from '@/types'
 import { buildOpenAIUsageRefreshKey } from '@/utils/accountUsageRefresh'
+import { isSIWCAccount } from '@/utils/siwc'
 import { enqueueUsageRequest } from '@/utils/usageLoadQueue'
 import { formatCompactNumber } from '@/utils/format'
 import UsageProgressBar from './UsageProgressBar.vue'
+import UsageWindowStats from './UsageWindowStats.vue'
 import AccountQuotaInfo from './AccountQuotaInfo.vue'
 import OpenAIQuotaResetCell from './OpenAIQuotaResetCell.vue'
 import GrokQuotaProbeCell from './GrokQuotaProbeCell.vue'
@@ -814,6 +855,19 @@ const hasOpenAIUsageFallback = computed(() => {
   if (props.account.platform !== 'openai' || props.account.type !== 'oauth') return false
   return !!usageInfo.value?.five_hour || !!usageInfo.value?.seven_day
 })
+
+const siwcQuotaError = computed(() => {
+  const code = usageInfo.value?.error_code
+  const known = ['siwc_quota_web_token_required', 'siwc_quota_identity_missing', 'siwc_quota_unavailable',
+    'siwc_quota_proxy_unavailable', 'siwc_quota_web_token_invalid', 'siwc_quota_web_forbidden',
+    'siwc_quota_query_limited', 'siwc_quota_invalid_response', 'siwc_quota_account_mismatch']
+  return t(`siwc.quota.errors.${code && known.includes(code) ? code : 'siwc_quota_unavailable'}`)
+})
+
+const siwcUsageWindows = computed(() => [
+  { label: '5h', color: 'indigo' as const, quota: usageInfo.value?.five_hour, local: usageInfo.value?.local_five_hour },
+  { label: '7d', color: 'emerald' as const, quota: usageInfo.value?.seven_day, local: usageInfo.value?.local_seven_day }
+])
 
 const codexTurnTickets = computed(() => props.account.codex_turn_tickets ?? [])
 
@@ -1516,9 +1570,12 @@ const attachVisibilityObserver = () => {
 
 const loadActiveUsage = async () => {
   activeQueryLoading.value = true
+  error.value = null
   try {
     usageInfo.value = await adminAPI.accounts.getUsage(props.account.id, 'active', true)
+    _usageCache.set(props.account.id, { data: usageInfo.value, ts: Date.now() })
   } catch (e: any) {
+    error.value = t('admin.accounts.usageError')
     console.error('Failed to load active usage:', e)
   } finally {
     activeQueryLoading.value = false
@@ -1692,7 +1749,8 @@ watch(openAIUsageRefreshKey, (nextKey, prevKey) => {
   if (props.account.platform !== 'openai' || props.account.type !== 'oauth') return
 
   if (isBatchManaged.value) {
-    requestParentBatchUsage({ force: true })
+    // Traffic updates last_used_at frequently; SIWC web queries retain their cache.
+    requestParentBatchUsage({ force: !isSIWCAccount(props.account) })
     return
   }
 

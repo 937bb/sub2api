@@ -1,4 +1,33 @@
 export default {
+  quota: {
+    webToken: '额度查询：ChatGPT 网页 AT',
+    webTokenHelp: '可选。填写同一账号登录 ChatGPT 网页后的 accessToken，仅用于读取套餐额度。不会替换 SIWC 推理凭据；过期后需手动更换。',
+    keepToken: '已配置，留空保持原值',
+    enterToken: '粘贴网页 accessToken，不含 Bearer 前缀',
+    removeToken: '移除额度查询 AT',
+    remaining: '套餐剩余额度',
+    recentStats: '近 {window} 用量',
+    currentWindowStats: '本 {window} 窗口用量',
+    statsSince: '本地记录，统计起点：{time}',
+    localStatsFailed: '本地用量统计暂时无法读取，请稍后刷新。',
+    unknown: '尚未取得额度',
+    updatedAt: '查询于 {time}',
+    refresh: '查询额度',
+    website: '官网用量',
+    websiteHelp: '请登录此行账号后查看',
+    planOnly: '显示账号套餐总额度；应用周限额请在官网查看。',
+    errors: {
+      siwc_quota_web_token_required: '请在编辑账号中配置同账号的 ChatGPT 网页 AT。',
+      siwc_quota_identity_missing: '请重新授权 SIWC，补全已验证的账号邮箱。',
+      siwc_quota_unavailable: '额度查询失败，请稍后重试。',
+      siwc_quota_proxy_unavailable: '账号配置的代理不可用。',
+      siwc_quota_web_token_invalid: '网页 AT 已过期或被拒绝，请在编辑账号中更换。',
+      siwc_quota_web_forbidden: '上游拒绝了网页额度查询，请在官网核对。',
+      siwc_quota_query_limited: '额度查询暂时被限频，请稍后重试。',
+      siwc_quota_invalid_response: '上游未返回有效的额度窗口。',
+      siwc_quota_account_mismatch: '网页 AT 与 SIWC 账号邮箱不一致，未显示额度。'
+    }
+  },
   title: '添加 ChatGPT SIWC 账号',
   accountTypeDescription: 'ChatGPT 用量共享授权',
   description: '使用独立的 ChatGPT 用量共享授权。是否可用取决于该账号获得的权限和模型列表。',

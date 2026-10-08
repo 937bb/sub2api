@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import AccountUsageCell from '../AccountUsageCell.vue'
-import type { Account } from '@/types'
+import type { Account, LocalUsageWindow } from '@/types'
 
 const { getUsage } = vi.hoisted(() => ({
   getUsage: vi.fn()
@@ -51,6 +51,14 @@ function makeAccount(overrides: Partial<Account>): Account {
     session_window_end: null,
     session_window_status: null,
     ...overrides,
+  }
+}
+
+function makeSIWCLocalUsage(rolling = true): LocalUsageWindow {
+  return {
+    start_at: '2026-10-08T05:00:00Z',
+    rolling,
+    stats: { requests: 150, tokens: 4565559, cost: 18.178916, standard_cost: 18.178916, user_cost: 1.70135049 }
   }
 }
 
@@ -128,6 +136,97 @@ describe('AccountUsageCell', () => {
         dispatchEvent: vi.fn(),
       }))
     })
+  })
+
+  it('shows SIWC remaining quota and queries through the usage endpoint', async () => {
+    const fiveReset = new Date(Date.now() + 8580000).toISOString()
+    getUsage.mockResolvedValue({ source: 'active', updated_at: new Date().toISOString(),
+      five_hour: { utilization: 98, resets_at: fiveReset },
+      seven_day: { utilization: 15, resets_at: fiveReset },
+      local_five_hour: makeSIWCLocalUsage(false), local_seven_day: makeSIWCLocalUsage(false) })
+    const wrapper = mount(AccountUsageCell, {
+      props: { account: makeAccount({ id: 9781, platform: 'openai', type: 'oauth', credentials: { auth_mode: 'siwc' } }) },
+      global: { stubs: { OpenAIQuotaResetCell: { template: '<div data-test="quota-reset" />' }, AccountQuotaInfo: true } }
+    })
+    await flushPromises()
+    expect(wrapper.text()).toContain('2%')
+    expect(wrapper.text()).toContain('85%')
+    expect(wrapper.text()).toContain('siwc.quota.remaining')
+    for (const label of ['5h', '7d']) {
+      const window = wrapper.get(`[data-testid="siwc-usage-${label}"]`)
+      expect(window.text()).toContain('siwc.quota.currentWindowStats')
+      expect(window.text()).toContain('150 req')
+      expect(window.text()).toContain('4.6M')
+      expect(window.text()).toContain('A $18.18')
+      expect(window.text()).toContain('U $1.70')
+    }
+    expect(wrapper.find('[data-test="quota-reset"]').exists()).toBe(false)
+    expect(wrapper.get('a').attributes('href')).toBe('https://chatgpt.com/settings/usage')
+    await wrapper.get('[data-testid="siwc-quota"] button').trigger('click')
+    await flushPromises()
+    expect(getUsage).toHaveBeenLastCalledWith(9781, 'active', true)
+    wrapper.unmount()
+  })
+
+  it.each(['siwc_quota_web_token_required', 'siwc_quota_web_token_invalid', 'siwc_quota_account_mismatch'])(
+    'preserves local accounting on SIWC quota error %s without a fabricated percentage', async (code) => {
+      getUsage.mockResolvedValue({ error_code: code, five_hour: null, seven_day: null,
+        local_five_hour: makeSIWCLocalUsage(), local_seven_day: makeSIWCLocalUsage() })
+      const wrapper = mount(AccountUsageCell, {
+        props: { account: makeAccount({ id: 9782 + code.length, platform: 'openai', type: 'oauth', credentials: { auth_mode: 'siwc' } }) },
+        global: { stubs: { OpenAIQuotaResetCell: true, AccountQuotaInfo: true } }
+      })
+      await flushPromises()
+      expect(wrapper.text()).toContain(`siwc.quota.errors.${code}`)
+      expect(wrapper.text()).not.toContain('%')
+      for (const label of ['5h', '7d']) {
+        const window = wrapper.get(`[data-testid="siwc-usage-${label}"]`)
+        expect(window.text()).toContain('siwc.quota.recentStats')
+        expect(window.text()).toContain('150 req')
+        expect(window.text()).toContain('4.6M')
+        expect(window.text()).toContain('A $18.18')
+        expect(window.text()).toContain('U $1.70')
+      }
+      wrapper.unmount()
+    }
+  )
+
+  it('preserves the readable local window on partial accounting failure without showing false zeroes', async () => {
+    getUsage.mockResolvedValue({
+      error_code: 'siwc_quota_web_token_required', local_usage_error: 'local_usage_unavailable',
+      local_seven_day: makeSIWCLocalUsage()
+    })
+    const wrapper = mount(AccountUsageCell, {
+      props: { account: makeAccount({ id: 9881, platform: 'openai', type: 'oauth', credentials: { auth_mode: 'siwc' } }) }
+    })
+    await flushPromises()
+    expect(wrapper.text()).toContain('siwc.quota.localStatsFailed')
+    expect(wrapper.get('[data-testid="siwc-usage-5h"]').text()).not.toContain('req')
+    expect(wrapper.get('[data-testid="siwc-usage-7d"]').text()).toContain('U $1.70')
+    expect(wrapper.text()).not.toContain('A $0.00')
+    expect(wrapper.text()).not.toContain('U $0.00')
+    wrapper.unmount()
+  })
+
+  it('shows a genuine empty local accounting window received through the batch endpoint', async () => {
+    const wrapper = mount(AccountUsageCell, {
+      props: {
+        account: makeAccount({ id: 9882, platform: 'openai', type: 'oauth', credentials: { auth_mode: 'siwc' } }),
+        requestBatchedUsage: vi.fn(),
+        batchedUsage: {
+          error_code: 'siwc_quota_web_token_required',
+          local_five_hour: { ...makeSIWCLocalUsage(), stats: { requests: 0, tokens: 0, cost: 0, user_cost: 0 } }
+        }
+      }
+    })
+    await flushPromises()
+    const window = wrapper.get('[data-testid="siwc-usage-5h"]')
+    expect(window.text()).toContain('0 req')
+    expect(window.text()).toContain('A $0.00')
+    expect(window.text()).toContain('U $0.00')
+    expect(wrapper.text()).not.toContain('%')
+    expect(getUsage).not.toHaveBeenCalled()
+    wrapper.unmount()
   })
 
   it.each(['oauth', 'setup-token'] as const)('renders Codex ticket status for OpenAI %s accounts', async (type) => {
