@@ -17,7 +17,6 @@
             @create="showCreate = true"
           >
             <template #after>
-              <button v-if="authStore.isAdmin" type="button" class="btn btn-secondary" @click="siwcAccount = null; showSIWC = true">ChatGPT SIWC</button>
               <!-- Auto Refresh Dropdown -->
               <div class="relative" ref="autoRefreshDropdownRef">
                 <button

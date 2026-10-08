@@ -1,23 +1,23 @@
 <template>
-  <BaseDialog :show="show" :title="t(account ? 'siwc.reauthTitle' : 'siwc.title')" @close="close">
+  <component :is="embedded ? 'div' : BaseDialog" :show="show" :title="embedded ? undefined : t(account ? 'siwc.reauthTitle' : 'siwc.title')" @close="close">
     <form class="space-y-4" @submit.prevent="finish">
       <p class="text-sm text-gray-600 dark:text-gray-300">{{ t('siwc.description') }}</p>
-      <label v-if="!account" class="block">{{ t('siwc.name') }}
+      <label v-if="!account && !embedded" class="block">{{ t('siwc.name') }}
         <input v-model="name" class="input mt-1" autocomplete="off" :disabled="busy" />
       </label>
-      <label v-if="!account" class="block">{{ t('siwc.proxy') }}
+      <label v-if="!account && !embedded" class="block">{{ t('siwc.proxy') }}
         <select v-model="proxyId" class="input mt-1" :disabled="busy || !!authorization">
           <option :value="null">{{ t('siwc.direct') }}</option>
           <option v-for="proxy in proxies" :key="proxy.id" :value="proxy.id">{{ proxy.name }}</option>
         </select>
       </label>
-      <label v-if="!account" class="block">{{ t('siwc.groups') }}
+      <label v-if="!account && !embedded" class="block">{{ t('siwc.groups') }}
         <select v-model="groupIds" multiple class="input mt-1" :disabled="busy">
           <option v-for="group in groups.filter(g => g.platform === 'openai')" :key="group.id" :value="group.id">{{ group.name }}</option>
         </select>
       </label>
       <p class="text-xs text-gray-500">{{ t(account ? 'siwc.reauthHelp' : 'siwc.unbound') }}</p>
-      <label v-if="!account" class="block">{{ t('siwc.concurrency') }}
+      <label v-if="!account && !embedded" class="block">{{ t('siwc.concurrency') }}
         <input v-model.number="concurrency" type="number" min="1" max="100" required class="input mt-1" :disabled="busy" />
       </label>
       <button v-if="!authorization" type="button" class="btn btn-primary" :disabled="busy" @click="start">{{ t('siwc.start') }}</button>
@@ -32,7 +32,7 @@
       </template>
       <p v-if="error" role="alert" class="text-sm text-red-600">{{ error }}</p>
     </form>
-  </BaseDialog>
+  </component>
 </template>
 
 <script setup lang="ts">
@@ -43,12 +43,13 @@ import { startSIWCAuthorization, createSIWCAccount, type SIWCAuthorization } fro
 
 const props = defineProps<{
   show: boolean
+  embedded?: boolean
   account?: { id: number } | null
   proxies: { id: number; name: string }[]
   groups: { id: number; name: string; platform: string }[]
   initialValues?: { name: string; proxy_id: number | null; group_ids: number[]; concurrency: number }
 }>()
-const emit = defineEmits<{ close: []; created: [] }>()
+const emit = defineEmits<{ close: []; created: []; busy: [value: boolean] }>()
 const { t } = useI18n()
 const name = ref('')
 const proxyId = ref<number | null>(null)
@@ -58,6 +59,7 @@ const authorization = ref<SIWCAuthorization>()
 const callback = ref('')
 const error = ref('')
 const busy = ref(false)
+watch(busy, value => emit('busy', value), { flush: 'sync' })
 
 function restart() { authorization.value = undefined; callback.value = ''; error.value = '' }
 function close() { if (!busy.value) { restart(); emit('close') } }
