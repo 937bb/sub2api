@@ -80,6 +80,7 @@ interface Props {
   platform: AccountPlatform
   type: AccountType
   authMode?: string
+  authProtocol?: string
   planType?: string
   privacyMode?: string
   subscriptionExpiresAt?: string
@@ -93,9 +94,14 @@ const normalizedAuthMode = computed(() =>
   (props.authMode || '').trim().toLowerCase().replace(/[\s_-]+/g, '')
 )
 
+const normalizedAuthProtocol = computed(() =>
+  (props.authProtocol || '').trim().toLowerCase().replace(/[\s_-]+/g, '')
+)
+
 const typeLabel = computed(() => {
   if (props.platform === 'openai' && props.type === 'oauth') {
     if (normalizedAuthMode.value === 'siwc') return 'SIWC'
+    if (normalizedAuthProtocol.value === 'siwc') return 'SIWC'
     if (normalizedAuthMode.value === 'agentidentity') return 'Agent Identity'
     if (normalizedAuthMode.value === 'personalaccesstoken') return 'PAT'
   }
