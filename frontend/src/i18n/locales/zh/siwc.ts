@@ -1,5 +1,6 @@
 export default {
   title: '添加 ChatGPT SIWC 账号',
+  accountTypeDescription: 'ChatGPT 用量共享授权',
   description: '使用独立的 ChatGPT 用量共享授权。是否可用取决于该账号获得的权限和模型列表。',
   reauthTitle: '重新授权 ChatGPT SIWC',
   reauthHelp: '沿用原账号的应用身份与服务端代理，只允许原用户重新授权；保留分组、倍率、名称和模型映射。账号若已被停用，授权后请检查状态并手动恢复。',

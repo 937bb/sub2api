@@ -1,6 +1,6 @@
 <template>
   <BaseDialog
-    :show="show"
+    :show="show && !showSIWC"
     :title="t('admin.accounts.createAccount')"
     width="wide"
     @close="handleClose"
@@ -377,7 +377,7 @@
       <!-- Account Type Selection (OpenAI) -->
       <div v-if="form.platform === 'openai'">
         <label class="input-label">{{ t('admin.accounts.accountType') }}</label>
-        <div class="mt-2 grid grid-cols-3 gap-3" data-tour="account-form-type">
+        <div class="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-4" data-tour="account-form-type">
           <button
             type="button"
             @click="accountCategory = 'oauth-based'; openaiTwoFA = false"
@@ -401,6 +401,22 @@
             <div>
               <span class="block text-sm font-medium text-gray-900 dark:text-white">OAuth</span>
               <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.types.chatgptOauth') }}</span>
+            </div>
+          </button>
+
+          <button
+            v-if="authStore.isAdmin"
+            type="button"
+            data-testid="openai-siwc"
+            class="flex items-center gap-3 rounded-lg border-2 border-gray-200 p-3 text-left transition-all hover:border-green-300 dark:border-dark-600 dark:hover:border-green-700"
+            @click="showSIWC = true"
+          >
+            <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gray-100 text-gray-500 dark:bg-dark-600 dark:text-gray-400">
+              <Icon name="link" size="sm" />
+            </div>
+            <div>
+              <span class="block text-sm font-medium text-gray-900 dark:text-white">SIWC</span>
+              <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('siwc.accountTypeDescription') }}</span>
             </div>
           </button>
 
@@ -3638,6 +3654,16 @@
     </template>
   </BaseDialog>
 
+  <SIWCAccountModal
+    v-if="show && showSIWC"
+    :show="true"
+    :proxies="proxies"
+    :groups="groups"
+    :initial-values="form"
+    @close="showSIWC = false"
+    @created="handleSIWCCreated"
+  />
+
   <!-- Gemini Help Dialog -->
   <BaseDialog
     :show="showGeminiHelpDialog"
@@ -3914,6 +3940,7 @@ import type {
   OpenAIEndpointCapability
 } from '@/types'
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import SIWCAccountModal from '@/components/account/SIWCAccountModal.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Select from '@/components/common/Select.vue'
 import HelpTooltip from '@/components/common/HelpTooltip.vue'
@@ -4079,6 +4106,7 @@ interface Props {
 }
 
 const props = defineProps<Props>()
+const showSIWC = ref(false)
 const emit = defineEmits<{
   close: []
   created: []
@@ -4795,6 +4823,7 @@ const canExchangeCode = computed(() => {
 watch(
   () => props.show,
   (newVal) => {
+    showSIWC.value = false
     if (newVal) {
       // Load TLS fingerprint profiles
       adminAPI.tlsFingerprintProfiles.list()
@@ -5444,6 +5473,12 @@ const handleClose = () => {
   if (twoFABusy.value) return
   antigravityMixedChannelConfirmed.value = false
   clearMixedChannelDialog()
+  emit('close')
+}
+
+const handleSIWCCreated = () => {
+  showSIWC.value = false
+  emit('created')
   emit('close')
 }
 

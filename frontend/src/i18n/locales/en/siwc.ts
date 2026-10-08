@@ -1,5 +1,6 @@
 export default {
   title: 'Add ChatGPT SIWC account',
+  accountTypeDescription: 'ChatGPT token-sharing authorization',
   description: 'Use a separate ChatGPT token-sharing grant. Availability depends on the granted scopes and account model catalog.',
   reauthTitle: 'Reauthorize ChatGPT SIWC',
   reauthHelp: 'Reuse the original application identity and server proxy. Only the original subject can authorize again. Groups, rates, name and model mappings are retained. If disabled, review and recover the account state after authorization.',

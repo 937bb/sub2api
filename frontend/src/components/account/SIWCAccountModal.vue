@@ -41,7 +41,13 @@ import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import { startSIWCAuthorization, createSIWCAccount, type SIWCAuthorization } from '@/api/admin/siwc'
 
-const props = defineProps<{ show: boolean; account?: { id: number } | null; proxies: { id: number; name: string }[]; groups: { id: number; name: string; platform: string }[] }>()
+const props = defineProps<{
+  show: boolean
+  account?: { id: number } | null
+  proxies: { id: number; name: string }[]
+  groups: { id: number; name: string; platform: string }[]
+  initialValues?: { name: string; proxy_id: number | null; group_ids: number[]; concurrency: number }
+}>()
 const emit = defineEmits<{ close: []; created: [] }>()
 const { t } = useI18n()
 const name = ref('')
@@ -55,7 +61,14 @@ const busy = ref(false)
 
 function restart() { authorization.value = undefined; callback.value = ''; error.value = '' }
 function close() { if (!busy.value) { restart(); emit('close') } }
-watch(() => props.show, () => { restart(); name.value = ''; proxyId.value = null; groupIds.value = []; concurrency.value = 1 })
+watch(() => props.show, () => {
+  restart()
+  const initial = props.account ? undefined : props.initialValues
+  name.value = initial?.name ?? ''
+  proxyId.value = initial?.proxy_id ?? null
+  groupIds.value = initial?.group_ids.filter(id => props.groups.some(group => group.id === id && group.platform === 'openai')) ?? []
+  concurrency.value = initial?.concurrency ?? 1
+}, { immediate: true })
 function failure(cause: unknown) {
   const data = (cause as { response?: { data?: { message?: string } } })?.response?.data
   error.value = data?.message || t('siwc.failed')
