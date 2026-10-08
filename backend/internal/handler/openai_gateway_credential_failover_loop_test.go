@@ -933,12 +933,14 @@ func newGrokCredentialFailoverHandler(t *testing.T, mode string) (*OpenAIGateway
 		acquireUserSlotFn:    func(context.Context, int64, int, string) (bool, error) { return true, nil },
 		acquireAccountSlotFn: func(context.Context, int64, int, string) (bool, error) { return true, nil },
 	}
-	h := NewOpenAIGatewayHandler(gateway, service.NewConcurrencyService(cache), billingCache, &service.APIKeyService{}, nil, nil, nil, nil, cfg)
 	apiKey := &service.APIKey{
-		ID: 902, GroupID: &groupID,
+		ID: 902, UserID: 903, GroupID: &groupID, Status: service.StatusAPIKeyActive,
 		User:  &service.User{ID: 903, Status: service.StatusActive},
 		Group: &service.Group{ID: groupID, Platform: service.PlatformGrok, Status: service.StatusActive, AllowImageGeneration: true},
 	}
+	keyRepo := &openAIWSSessionAPIKeyRepo{current: apiKey}
+	keyService := service.NewAPIKeyService(keyRepo, nil, nil, nil, nil, nil, cfg)
+	h := NewOpenAIGatewayHandler(gateway, service.NewConcurrencyService(cache), billingCache, keyService, nil, nil, nil, nil, cfg)
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
 		c.Set(string(middleware.ContextKeyAPIKey), apiKey)
