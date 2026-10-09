@@ -96,6 +96,9 @@ func prepareWithInheritedCatalog(raw []byte, scope string, replay *ReplayCache, 
 	if err := decode(raw, &source); err != nil || source == nil {
 		return nil, nil, fmt.Errorf("invalid Basispoints request JSON")
 	}
+	if err := validateNewAgentMessage(source["input"]); err != nil {
+		return nil, nil, err
+	}
 	model := strings.TrimSpace(text(source["model"]))
 	if model == "" {
 		return nil, nil, fmt.Errorf("basispoints requires a model")
