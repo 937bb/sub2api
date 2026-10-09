@@ -543,6 +543,9 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 			c.Set("excel_bps_upstream_attempt", c.GetInt("excel_bps_upstream_attempt")+1)
 			// Do not re-enter proxy acquisition or transport retries after sending.
 			resp, err = s.httpUpstream.Do(retryReq, proxyURL, account.ID, account.Concurrency)
+			if err == nil {
+				s.guardExcelBPSProgress(requestCtx, resp)
+			}
 			s.rateLimitService.observeQualityResponse(retryReq.Context(), account, resp, err)
 			SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(sent).Milliseconds())
 			if err != nil {
@@ -640,6 +643,9 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 			return nil, err
 		}
 		repairResp, err := s.httpUpstream.Do(repairReq, proxyURL, account.ID, account.Concurrency)
+		if err == nil {
+			s.guardExcelBPSProgress(repairCtx, repairResp)
+		}
 		s.rateLimitService.observeQualityResponse(repairReq.Context(), account, repairResp, err)
 		if err != nil {
 			if repairCtx.Err() != nil {
@@ -679,6 +685,9 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 			return nil, errors.New("controlled experiment disables BPS correction submissions")
 		}
 		repaired, err := s.httpUpstream.Do(retry, proxyURL, account.ID, account.Concurrency)
+		if err == nil {
+			s.guardExcelBPSProgress(repairCtx, repaired)
+		}
 		s.rateLimitService.observeQualityResponse(retry.Context(), account, repaired, err)
 		if err != nil {
 			return nil, fmt.Errorf("excel BPS tool correction transport failed")
