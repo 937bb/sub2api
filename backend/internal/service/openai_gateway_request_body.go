@@ -1464,14 +1464,17 @@ func normalizeOpenAIResponsesCompatibilityBodyWithOptions(body []byte, account *
 	if account == nil || !account.IsOpenAI() {
 		return body, false, nil
 	}
-	normalized := body
-	changed := false
+	normalized, changed, err := normalizeOpenAIResponsesInputArguments(body)
+	if err != nil {
+		return body, false, err
+	}
 	if account.IsOpenAIOAuthLike() {
-		var err error
-		normalized, changed, err = normalizeOpenAIResponsesLegacyIngress(body)
+		var legacyChanged bool
+		normalized, legacyChanged, err = normalizeOpenAIResponsesLegacyIngress(normalized)
 		if err != nil {
 			return body, false, err
 		}
+		changed = changed || legacyChanged
 	}
 	if next, normalizedReasoningContent, err := normalizeOpenAIResponsesReasoningContentReplay(normalized); err != nil {
 		return body, false, err

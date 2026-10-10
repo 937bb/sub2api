@@ -99,6 +99,11 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "code": "ambiguous_model", "message": err.Error()}})
 		return nil, err
 	}
+	if normalized, changed, err := normalizeOpenAIResponsesInputArguments(body); err != nil {
+		return nil, err
+	} else if changed {
+		body = normalized
+	}
 	if astraSchedulingAppliesToRequest(s.cfg.AstraRouting(ctx), account, gjson.GetBytes(body, "model").String(), getOpenAIGroupIDFromContext(c)) {
 		if err := s.checkAstraSchedulingRoute(ctx, account); err != nil {
 			return nil, err
