@@ -28,9 +28,9 @@ type excelBPSImageSettingsReader interface {
 }
 
 // This budget accounts for request bodies and their processing copies, not RSS.
-// Reserve before any body-reading middleware. Image requests hold the reservation
-// until completion; text-only requests release it immediately after classification.
-// Never queue large bodies.
+// Reading and in-flight images use separate bounded pools. A saturated image
+// pool must not reject text requests before their bodies can be classified.
+// Never queue large bodies. Each pool is bounded by the configured budget.
 type bpsImageAdmissionBudget struct {
 	mu          sync.Mutex
 	bytes       int64
@@ -130,11 +130,12 @@ func (b *bpsImageBudgetedBody) Read(p []byte) (int, error) {
 
 // ExcelBPSImageAdmission must be shared across the gateway route aliases.
 // Account selection occurs after reading JSON, so the middleware temporarily
-// reserves ingress capacity while it reads a possible image request. Text-only
-// requests release that reservation before scheduling or upstream streaming.
+// reserves ingress capacity while it reads a possible image request. Only inline
+// image requests reserve image capacity during scheduling and upstream streaming.
 // Disabled relay leaves existing limits intact.
 func ExcelBPSImageAdmission(settings excelBPSImageSettingsReader, configuredMax int64) gin.HandlerFunc {
-	budget := &bpsImageAdmissionBudget{}
+	ingressBudget := &bpsImageAdmissionBudget{}
+	imageBudget := &bpsImageAdmissionBudget{}
 	return func(c *gin.Context) {
 		if settings == nil || !bpsImageAdmissionRoute(c) {
 			c.Next()
@@ -164,7 +165,8 @@ func ExcelBPSImageAdmission(settings excelBPSImageSettingsReader, configuredMax 
 		if maxRequests == 0 {
 			maxRequests = service.DefaultExcelBPSImageMaxRequests
 		}
-		budget.configure(int64(budgetMiB)<<20, maxRequests)
+		ingressBudget.configure(int64(budgetMiB)<<20, maxRequests)
+		imageBudget.configure(int64(budgetMiB)<<20, maxRequests)
 		maxBody := int64(bodyLimitMiB) << 20
 		if maxBody > bpsImageMaxBodyBytes {
 			maxBody = bpsImageMaxBodyBytes
@@ -194,9 +196,9 @@ func ExcelBPSImageAdmission(settings excelBPSImageSettingsReader, configuredMax 
 		if accounted < bpsImageMinBodyBytes {
 			accounted = bpsImageMinBodyBytes
 		}
-		reservation, acquired := budget.acquire(accounted * bpsImageBodyMultiplier)
+		reservation, acquired := ingressBudget.acquire(accounted * bpsImageBodyMultiplier)
 		if !acquired {
-			bpsImageAdmissionError(c, http.StatusServiceUnavailable, "basispoints_image_request_busy", "Image relay request capacity is busy; retry later")
+			bpsImageAdmissionError(c, http.StatusServiceUnavailable, "request_body_capacity_busy", "Request body processing capacity is busy; retry later")
 			return
 		}
 		defer reservation.release()
@@ -209,7 +211,7 @@ func ExcelBPSImageAdmission(settings excelBPSImageSettingsReader, configuredMax 
 		if err != nil {
 			switch {
 			case errors.Is(err, errBPSImageRequestBusy):
-				bpsImageAdmissionError(c, http.StatusServiceUnavailable, "basispoints_image_request_busy", "Image relay request capacity is busy; retry later")
+				bpsImageAdmissionError(c, http.StatusServiceUnavailable, "request_body_capacity_busy", "Request body processing capacity is busy; retry later")
 			default:
 				var maxErr *http.MaxBytesError
 				if errors.As(err, &maxErr) {
@@ -229,12 +231,17 @@ func ExcelBPSImageAdmission(settings excelBPSImageSettingsReader, configuredMax 
 		if accounted < bpsImageMinBodyBytes {
 			accounted = bpsImageMinBodyBytes
 		}
-		reservation.resize(accounted * bpsImageBodyMultiplier)
 		c.Request.Body = httputil.NewPrereadBody(body)
 		c.Request.ContentLength = int64(len(body))
-		if !bpsRequestContainsInlineImage(body) {
-			reservation.release()
+		if bpsRequestContainsInlineImage(body) {
+			imageReservation, acquired := imageBudget.acquire(accounted * bpsImageBodyMultiplier)
+			if !acquired {
+				bpsImageAdmissionError(c, http.StatusServiceUnavailable, "basispoints_image_request_busy", "Image relay request capacity is busy; retry later")
+				return
+			}
+			defer imageReservation.release()
 		}
+		reservation.release()
 		c.Next()
 	}
 }
