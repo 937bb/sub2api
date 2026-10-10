@@ -154,7 +154,7 @@ func prepareNativeOpenAIInputTokensCountRequest(body []byte, account *Account) (
 }
 
 func shouldEstimateOpenAIInputTokensLocally(account *Account) bool {
-	if account == nil || account.IsOpenAISiwc() || account.IsGrok() || account.IsCNProvider() || account.Type == AccountTypeUpstream {
+	if account == nil || account.IsOpenAISiwc() || account.IsGrok() || account.RoutesProtocolByInbound() || account.Type == AccountTypeUpstream {
 		return true
 	}
 	if account.Type != AccountTypeAPIKey {
@@ -270,7 +270,7 @@ func (s *OpenAIGatewayService) ForwardCountTokensAsAnthropic(
 
 	// Providers without a supported token-counting endpoint use local estimation.
 	// This keeps preflight requests from acquiring credentials or affecting health.
-	if account.IsCNProvider() || account.IsOpenCodeGo() || account.IsOpenAISiwc() {
+	if account.IsMultiProtocolAPIKey() || account.IsOpenAISiwc() {
 		estimated, err := estimateAnthropicCountTokensLocally(body)
 		if err != nil {
 			writeAnthropicCountTokensError(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")

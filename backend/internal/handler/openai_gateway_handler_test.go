@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	pkghttputil "github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
@@ -1961,6 +1962,12 @@ type openAIResponsesWSUsageLogCase struct {
 	afterFirstUpstreamRequest func(channelSvc *service.ChannelService) error
 	// group 覆盖 apiKey.Group（分组级模型白名单测试用）；nil 保持原有无分组行为。
 	group *service.Group
+	// apiKeyService 非 nil 时模拟 API Key 认证中间件：连接认证快照经它按
+	// apiKeyCredential 取得，并把其分组放入请求 ctx；handler 也使用它。
+	apiKeyService    *service.APIKeyService
+	apiKeyCredential string
+	// accountRateMultiplier 覆盖账号倍率（利润门测试用）。
+	accountRateMultiplier *float64
 	// firstFrameCloseExpected：首帧即被拒（连接被 1008 关闭），不期待任何响应帧。
 	firstFrameCloseExpected bool
 	// secondTurnCloseExpected：第二个 turn 被拒（连接被 1008 关闭）。
@@ -3033,6 +3040,7 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 	if tc.accountPlatform != "" {
 		account.Platform = tc.accountPlatform
 	}
+	account.RateMultiplier = tc.accountRateMultiplier
 	if strings.TrimSpace(tc.ingressMode) != "" {
 		account.Extra["openai_apikey_responses_websockets_v2_mode"] = tc.ingressMode
 	}
@@ -3127,6 +3135,12 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 		apiKeyService:       service.NewAPIKeyService(keyRepo, nil, nil, nil, nil, nil, cfg),
 		concurrencyHelper:   NewConcurrencyHelper(service.NewConcurrencyService(cache), SSEPingFormatNone, time.Second),
 	}
+	if tc.apiKeyService != nil {
+		h.apiKeyService = tc.apiKeyService
+		authKey, err := tc.apiKeyService.GetByKey(context.Background(), tc.apiKeyCredential)
+		require.NoError(t, err)
+		apiKey = authKey
+	}
 	router := gin.New()
 	if tc.authSetup != nil {
 		h.apiKeyService = tc.authSetup(apiKey, cfg)
@@ -3135,6 +3149,9 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 		router.Use(func(c *gin.Context) {
 			c.Set(string(middleware.ContextKeyAPIKey), apiKey)
 			c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: apiKey.User.ID, Concurrency: 1})
+			if tc.apiKeyService != nil && apiKey.Group != nil {
+				c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ctxkey.Group, apiKey.Group))
+			}
 			c.Next()
 		})
 	}
@@ -3424,6 +3441,13 @@ func (r *openAIWSSessionAPIKeyRepo) GetByID(context.Context, int64) (*service.AP
 		current.Group = &group
 	}
 	return &current, nil
+}
+
+func (r *openAIWSSessionAPIKeyRepo) GetByKeyForAuth(ctx context.Context, key string) (*service.APIKey, error) {
+	if r.current == nil || r.current.Key != key {
+		return nil, service.ErrAPIKeyNotFound
+	}
+	return r.GetByID(ctx, r.current.ID)
 }
 
 func (r *openAIWSSessionAPIKeyRepo) GetRateLimitData(context.Context, int64) (*service.APIKeyRateLimitData, error) {

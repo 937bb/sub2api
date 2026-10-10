@@ -37,6 +37,24 @@ func archive(t *testing.T, entries []*tar.Header, content []string) []byte {
 	return data.Bytes()
 }
 
+func TestCustomDistributionUsesMatchingUpstreamRuntime(t *testing.T) {
+	for input, expected := range map[string]string{
+		"v2.10.3-937sub2b":                  "2.10.3",
+		"2.10.3-937sub":                     "2.10.3",
+		"v2.10.3-937sub2b-payment-security": "2.10.3",
+		"v2.10.3":                           "2.10.3",
+		"2.10.4-rc.1":                       "2.10.4-rc.1",
+		"2.10.4-unknown":                    "2.10.4-unknown",
+		"dev":                               "dev",
+	} {
+		t.Run(input, func(t *testing.T) {
+			m := New(t.TempDir(), input, "http://127.0.0.1:8080", "synthetic")
+			defer m.Stop()
+			require.Equal(t, expected, m.version)
+		})
+	}
+}
+
 func TestExtractRejectsEscapesAndLinks(t *testing.T) {
 	for _, h := range []*tar.Header{
 		{Name: "../escape", Typeflag: tar.TypeReg, Size: 1},
@@ -105,7 +123,7 @@ func TestPrepareVerifiesDigestBeforeExecutingAndReusesCache(t *testing.T) {
 
 func TestStopCancelsPreparationAndCannotRestart(t *testing.T) {
 	if runtime.GOOS != "linux" {
-		t.Skip("Linux runtime")
+		t.Skip("Linux runtime preparation")
 	}
 	m := New(t.TempDir(), "1.2.3", "http://127.0.0.1:4040", strings.Repeat("x", 64))
 	entered := make(chan struct{})
