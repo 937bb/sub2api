@@ -32,7 +32,7 @@ func TestQualityActionsRestoreOwnershipAndStaleRuns(t *testing.T) {
 			plan, err := svc.CreatePlan(ctx, &service.ScheduledTestPlan{AccountID: account, ModelID: "gpt-test", CronExpression: "*/30 * * * *", Enabled: true, MaxResults: 100, PelicanConfig: &service.PelicanTestConfig{QuestionKind: "candy", Prompt: "test", ReasoningEffort: "high", ParallelCount: 1, Quality: &service.QualityPolicy{ExpectedAnswer: "42", Action: action, RemoveGroupIDs: []int64{group}, AutoRestore: true}}})
 			require.NoError(t, err)
 			_, err = svc.CreatePlan(ctx, &service.ScheduledTestPlan{AccountID: account, ModelID: plan.ModelID, CronExpression: plan.CronExpression, Enabled: true, PelicanConfig: plan.PelicanConfig})
-			require.Error(t, err, "one owner per account")
+			require.Error(t, err, "one quarantine owner per account")
 			listed, err := plans.ListQualityPlans(ctx)
 			require.NoError(t, err)
 			require.NotEmpty(t, listed)
@@ -45,6 +45,11 @@ func TestQualityActionsRestoreOwnershipAndStaleRuns(t *testing.T) {
 			plan, err = plans.GetByID(ctx, plan.ID)
 			require.NoError(t, err)
 			now := time.Now().Truncate(time.Microsecond)
+			// The database and test host clocks may differ slightly. Test a due plan
+			// using its saved due time instead of depending on clock synchronization.
+			if plan.NextRunAt != nil && plan.NextRunAt.After(now) {
+				now = *plan.NextRunAt
+			}
 			until := now.Add(15 * time.Minute)
 			ok, err := plans.ClaimPelican(ctx, plan, now, until, now.Add(30*time.Minute))
 			require.NoError(t, err)

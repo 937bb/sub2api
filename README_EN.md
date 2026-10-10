@@ -4,7 +4,7 @@
 
 # Sub2API
 
-[![Go](https://img.shields.io/badge/Go-1.27.0-00ADD8.svg)](https://golang.org/)
+[![Go](https://img.shields.io/badge/Go-1.27.2-00ADD8.svg)](https://golang.org/)
 [![Vue](https://img.shields.io/badge/Vue-3.4+-4FC08D.svg)](https://vuejs.org/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15+-336791.svg)](https://www.postgresql.org/)
 [![Redis](https://img.shields.io/badge/Redis-7+-DC382D.svg)](https://redis.io/)
@@ -51,7 +51,7 @@ Sub2API is an AI API gateway platform designed to distribute and manage API quot
 
 | Component | Technology |
 |-----------|------------|
-| Backend | Go 1.27.0, Gin, Ent |
+| Backend | Go 1.27.2, Gin, Ent |
 | Frontend | Vue 3.4+, Vite 5+, TailwindCSS |
 | Database | PostgreSQL 15+ |
 | Cache/Queue | Redis 7+ |
@@ -205,8 +205,9 @@ JWT_SECRET=your_jwt_secret_here
 TOTP_ENCRYPTION_KEY=your_totp_key_here
 
 # Optional: Admin account
-ADMIN_EMAIL=admin@example.com
-ADMIN_PASSWORD=your_admin_password
+# Leave empty to generate a random login email and password on first startup.
+ADMIN_EMAIL=
+ADMIN_PASSWORD=
 
 # Optional: Custom port
 SERVER_PORT=8080
@@ -255,9 +256,9 @@ docker compose -f docker-compose.local.yml logs -f sub2api
 
 Open `http://YOUR_SERVER_IP:8080` in your browser.
 
-If admin password was auto-generated, find it in logs:
+If the admin email (login username) or password was auto-generated, find them in logs:
 ```bash
-docker compose -f docker-compose.local.yml logs sub2api | grep "admin password"
+docker compose -f docker-compose.local.yml logs sub2api | grep "Generated admin"
 ```
 
 #### Upgrade

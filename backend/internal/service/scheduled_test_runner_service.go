@@ -21,10 +21,17 @@ type ScheduledTestRunnerService struct {
 	cfg            *config.Config
 	judgeQuality   func(context.Context, int64, *PelicanTestConfig, string) *QualityJudgment
 	runPelican     func(context.Context, int64, string, *PelicanTestConfig) (*ScheduledTestResult, error)
+	// groupTests runs the Pelican group tests on the same tick; nil disables them.
+	groupTests   *PelicanGroupTestService
+	candyMonitor *ChannelMonitorV2CandyService
 
-	cron      *cron.Cron
-	startOnce sync.Once
-	stopOnce  sync.Once
+	qualityTrigger *quality5xxTrigger
+	triggerCancel  context.CancelFunc
+	triggerWG      sync.WaitGroup
+	planSlots      chan struct{}
+	cron           *cron.Cron
+	startOnce      sync.Once
+	stopOnce       sync.Once
 }
 
 // NewScheduledTestRunnerService creates a new runner.
@@ -37,6 +44,7 @@ func NewScheduledTestRunnerService(
 ) *ScheduledTestRunnerService {
 	return &ScheduledTestRunnerService{
 		planRepo:       planRepo,
+		planSlots:      make(chan struct{}, scheduledTestDefaultMaxWorkers),
 		scheduledSvc:   scheduledSvc,
 		accountTestSvc: accountTestSvc,
 		rateLimitSvc:   rateLimitSvc,
@@ -51,6 +59,7 @@ func (s *ScheduledTestRunnerService) Start() {
 		return
 	}
 	s.startOnce.Do(func() {
+		s.startQualityTriggers()
 		loc := time.Local
 		if s.cfg != nil {
 			if parsed, err := time.LoadLocation(s.cfg.Timezone); err == nil && parsed != nil {
@@ -76,6 +85,13 @@ func (s *ScheduledTestRunnerService) Stop() {
 		return
 	}
 	s.stopOnce.Do(func() {
+		if s.qualityTrigger != nil && s.qualityTrigger.queue != nil {
+			defer func() { _ = s.qualityTrigger.queue.Close() }()
+		}
+		if s.triggerCancel != nil {
+			s.triggerCancel()
+			s.triggerWG.Wait()
+		}
 		if s.cron != nil {
 			ctx := s.cron.Stop()
 			select {
@@ -98,7 +114,22 @@ func (s *ScheduledTestRunnerService) runScheduled() {
 	if err := s.scheduledSvc.resultRepo.PruneExpiredPelican(ctx, now.Add(-7*24*time.Hour)); err != nil {
 		logger.LegacyPrintf("service.scheduled_test_runner", "pelican history cleanup failed: %v", err)
 	}
-	s.scheduledSvc.showcase.Cleanup(ctx, now)
+	s.groupTests.Cleanup(ctx, now)
+	// Group tests run beside the account plans rather than after them.
+	var groupRuns sync.WaitGroup
+	groupRuns.Add(2)
+	go func() { defer groupRuns.Done(); s.candyMonitor.RunDue(ctx, now) }()
+	go func() {
+		defer groupRuns.Done()
+		s.groupTests.RunDue(ctx, now)
+	}()
+	defer groupRuns.Wait()
+	// Group rules cover accounts that started matching since the last tick.
+	if created, err := s.scheduledSvc.SyncQualityTemplates(ctx); err != nil {
+		logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] quality template sync error: %v", err)
+	} else if created > 0 {
+		logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] quality templates added %d rules", created)
+	}
 	plans, err := s.planRepo.ListDue(ctx, now)
 	if err != nil {
 		logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] ListDue error: %v", err)
@@ -126,7 +157,16 @@ func (s *ScheduledTestRunnerService) runScheduled() {
 	wg.Wait()
 }
 
-func (s *ScheduledTestRunnerService) runOnePlan(ctx context.Context, plan *ScheduledTestPlan) {
+func (s *ScheduledTestRunnerService) runOnePlan(ctx context.Context, plan *ScheduledTestPlan) (completed bool) {
+	if s.planSlots != nil {
+		select {
+		case s.planSlots <- struct{}{}:
+			defer func() { <-s.planSlots }()
+		case <-ctx.Done():
+			return false
+		}
+	}
+	ctx = context.WithValue(ctx, qualityProbeContextKey{}, true)
 	// Background plans do not run under the HTTP recovery middleware.
 	defer func() {
 		if recover() != nil {
@@ -134,13 +174,12 @@ func (s *ScheduledTestRunnerService) runOnePlan(ctx context.Context, plan *Sched
 		}
 	}()
 	if plan.PelicanConfig != nil {
-		s.runPelicanPlan(ctx, plan)
-		return
+		return s.runPelicanPlan(ctx, plan)
 	}
 	result, err := s.accountTestSvc.RunTestBackground(ctx, plan.AccountID, plan.ModelID)
 	if err != nil {
 		logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] plan=%d RunTestBackground error: %v", plan.ID, err)
-		return
+		return false
 	}
 
 	if err := s.scheduledSvc.SaveResult(ctx, plan.ID, plan.MaxResults, result); err != nil {
@@ -155,12 +194,13 @@ func (s *ScheduledTestRunnerService) runOnePlan(ctx context.Context, plan *Sched
 	nextRun, err := computeNextRun(plan.CronExpression, time.Now())
 	if err != nil {
 		logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] plan=%d computeNextRun error: %v", plan.ID, err)
-		return
+		return false
 	}
 
 	if err := s.planRepo.UpdateAfterRun(ctx, plan.ID, time.Now(), nextRun); err != nil {
 		logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] plan=%d UpdateAfterRun error: %v", plan.ID, err)
 	}
+	return true
 }
 
 // tryRecoverAccount attempts to recover an account from recoverable runtime state.

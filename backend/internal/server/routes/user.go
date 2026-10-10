@@ -81,6 +81,8 @@ func RegisterUserRoutes(
 		keys := authenticated.Group("/keys")
 		{
 			keys.GET("", h.APIKey.List)
+			// 必须在动态 /:id 路由之前注册，避免被参数路由吞掉。
+			keys.GET("/concurrency", h.APIKey.GetConcurrencyQueue)
 			keys.GET("/:id", h.APIKey.GetByID)
 			keys.POST("", h.APIKey.Create)
 			keys.PUT("/:id", h.APIKey.Update)
@@ -124,6 +126,18 @@ func RegisterUserRoutes(
 		{
 			announcements.GET("", h.Announcement.List)
 			announcements.POST("/:id/read", h.Announcement.MarkRead)
+		}
+
+		// 网站工单（关闭时 service 返回 SUPPORT_TICKET_DISABLED）
+		tickets := authenticated.Group("/support-tickets")
+		{
+			tickets.GET("", h.SupportTicket.List)
+			tickets.POST("", h.SupportTicket.Create)
+			tickets.GET("/summary", h.SupportTicket.Summary)
+			tickets.GET("/:id", h.SupportTicket.Get)
+			tickets.POST("/:id/messages", h.SupportTicket.Reply)
+			tickets.POST("/:id/close", h.SupportTicket.Close)
+			tickets.POST("/:id/reopen", h.SupportTicket.Reopen)
 		}
 
 		// 卡密兑换
@@ -178,6 +192,14 @@ func RegisterUserRoutes(
 				FailureMode: basemiddleware.RateLimitFailClose,
 			}), h.Growth.Checkin)
 			growth.GET("/leaderboard", h.Growth.GetLeaderboard)
+		}
+		// V3 component status page requires feature on + mode=v3.
+		monitorV3 := authenticated.Group("/channel-monitor-v3")
+		monitorV3.Use(panelRateLimiter.Heavy())
+		monitorV3.Use(channelMonitorModeV3Guard(settingService))
+		{
+			monitorV3.GET("/status", h.ChannelMonitorV3.Status)
+			monitorV3.GET("/incidents", h.ChannelMonitorV3.Incidents)
 		}
 	}
 }

@@ -33,6 +33,9 @@ type SystemSettings struct {
 	OpenAICodexTicketFailClosed         bool                            `json:"openai_codex_ticket_fail_closed"`
 	OpenAICodexTicketStrategy           string                          `json:"openai_codex_ticket_strategy"`
 	RegistrationEnabled                 bool                            `json:"registration_enabled"`
+	PrismBrowserEnabled                 bool                            `json:"prism_browser_enabled"`
+	PrismBrowserBaseURL                 string                          `json:"prism_browser_base_url"`
+	PrismBrowserAPIKeyConfigured        bool                            `json:"prism_browser_api_key_configured"`
 	EmailVerifyEnabled                  bool                            `json:"email_verify_enabled"`
 	RegistrationEmailSuffixWhitelist    []string                        `json:"registration_email_suffix_whitelist"`
 	RegistrationEmailDomainQuotaEnabled bool                            `json:"registration_email_domain_quota_enabled"`
@@ -288,11 +291,15 @@ type SystemSettings struct {
 	PaymentBalanceRechargeMultiplier float64  `json:"payment_balance_recharge_multiplier"`
 	PaymentSubscriptionUSDToCNYRate  float64  `json:"payment_subscription_usd_to_cny_rate"`
 	PaymentRechargeFeeRate           float64  `json:"payment_recharge_fee_rate"`
-	PaymentLoadBalanceStrat          string   `json:"payment_load_balance_strategy"`
-	PaymentProductNamePrefix         string   `json:"payment_product_name_prefix"`
-	PaymentProductNameSuffix         string   `json:"payment_product_name_suffix"`
-	PaymentHelpImageURL              string   `json:"payment_help_image_url"`
-	PaymentHelpText                  string   `json:"payment_help_text"`
+	// 充值赠送阶梯与活动文案
+	PaymentRechargeBonusTiers  []RechargeBonusTier `json:"payment_recharge_bonus_tiers"`
+	PaymentRechargeBonusMode   string              `json:"payment_recharge_bonus_mode"`
+	PaymentRechargeBonusNotice string              `json:"payment_recharge_bonus_notice"`
+	PaymentLoadBalanceStrat    string              `json:"payment_load_balance_strategy"`
+	PaymentProductNamePrefix   string              `json:"payment_product_name_prefix"`
+	PaymentProductNameSuffix   string              `json:"payment_product_name_suffix"`
+	PaymentHelpImageURL        string              `json:"payment_help_image_url"`
+	PaymentHelpText            string              `json:"payment_help_text"`
 
 	// Cancel rate limit
 	PaymentCancelRateLimitEnabled bool   `json:"payment_cancel_rate_limit_enabled"`
@@ -315,6 +322,7 @@ type SystemSettings struct {
 	AccountQuotaNotifyEmails        []NotifyEmailEntry `json:"account_quota_notify_emails"`
 
 	// Channel Monitor feature switch
+	ExcelBPSEnabled                      bool   `json:"excel_bps_enabled"`
 	ChannelMonitorEnabled                bool   `json:"channel_monitor_enabled"`
 	ChannelMonitorMode                   string `json:"channel_monitor_mode"`
 	ChannelMonitorDefaultIntervalSeconds int    `json:"channel_monitor_default_interval_seconds"`
@@ -344,13 +352,18 @@ type SystemSettings struct {
 	ModelPlazaDescription   string `json:"model_plaza_description"`
 	PluginManagementEnabled bool   `json:"plugin_management_enabled"`
 
+	// Support tickets ("网站工单") switch + form config
+	SupportTicketEnabled bool                        `json:"support_ticket_enabled"`
+	SupportTicket        service.SupportTicketConfig `json:"support_ticket_config"`
+
 	// 风控中心功能开关
 	RiskControlEnabled bool `json:"risk_control_enabled"`
 
 	// cyber 会话屏蔽开关 + TTL
-	CyberSessionBlockEnabled          bool `json:"cyber_session_block_enabled"`
-	CyberSessionBlockTTLSeconds       int  `json:"cyber_session_block_ttl_seconds"`
-	CyberSessionIdentityStrictEnabled bool `json:"cyber_session_identity_strict_enabled"`
+	CyberSessionBlockEnabled          bool   `json:"cyber_session_block_enabled"`
+	CyberSessionBlockTTLSeconds       int    `json:"cyber_session_block_ttl_seconds"`
+	CyberSessionIdentityStrictEnabled bool   `json:"cyber_session_identity_strict_enabled"`
+	CyberPolicyUserAllowlist          string `json:"cyber_policy_user_allowlist"`
 
 	// Affiliate (邀请返利) feature switch
 	AffiliateEnabled bool `json:"affiliate_enabled"`
@@ -365,23 +378,26 @@ type SystemSettings struct {
 	AccountSchedulingThresholds map[string]int `json:"account_scheduling_thresholds,omitempty"`
 
 	// 允许终端用户在用量页查看自己的失败请求
-	AllowUserViewErrorRequests  bool   `json:"allow_user_view_error_requests"`
-	UsageShowLongContextBadge   bool   `json:"usage_show_long_context_badge"`
-	RequestCaptureEnabled       bool   `json:"request_capture_enabled"`
-	RequestCaptureQuotaMiB      int64  `json:"request_capture_quota_mib"`
-	RequestCaptureRetentionDays int    `json:"request_capture_retention_days"`
-	ExcelBPSImageMode           string `json:"excel_bps_image_mode"`
-	ExcelBPSImageRelayEnabled   bool   `json:"excel_bps_image_relay_enabled"`
-	ExcelBPSImageBaseURL        string `json:"excel_bps_image_base_url"`
-	ExcelBPSImageBodyLimitMiB   int    `json:"excel_bps_image_body_limit_mib"`
-	ExcelBPSImageBudgetMiB      int    `json:"excel_bps_image_budget_mib"`
-	ExcelBPSImageMaxRequests    int    `json:"excel_bps_image_max_requests"`
-	ExcelBPSImageMaxImageMiB    int    `json:"excel_bps_image_max_image_mib"`
-	ExcelBPSImageMaxImages      int    `json:"excel_bps_image_max_images"`
-	ExcelBPSImageMaxTotalMiB    int    `json:"excel_bps_image_max_total_mib"`
-	ExcelBPSImageStorageMiB     int    `json:"excel_bps_image_storage_mib"`
-	ExcelBPSImageStorageEntries int    `json:"excel_bps_image_storage_entries"`
-	ExcelBPSImageTTLMinutes     int    `json:"excel_bps_image_ttl_minutes"`
+	AllowUserViewErrorRequests    bool   `json:"allow_user_view_error_requests"`
+	UsageShowLongContextBadge     bool   `json:"usage_show_long_context_badge"`
+	RequestCaptureEnabled         bool   `json:"request_capture_enabled"`
+	RequestCaptureQuotaMiB        int64  `json:"request_capture_quota_mib"`
+	RequestCaptureRetentionDays   int    `json:"request_capture_retention_days"`
+	ExcelBPSImageMode             string `json:"excel_bps_image_mode"`
+	ExcelBPSImageRelayEnabled     bool   `json:"excel_bps_image_relay_enabled"`
+	ExcelBPSImageBaseURL          string `json:"excel_bps_image_base_url"`
+	ExcelBPSImageBodyLimitMiB     int    `json:"excel_bps_image_body_limit_mib"`
+	ExcelBPSImageBudgetMiB        int    `json:"excel_bps_image_budget_mib"`
+	ExcelBPSImageMaxRequests      int    `json:"excel_bps_image_max_requests"`
+	ExcelBPSImageMaxImageMiB      int    `json:"excel_bps_image_max_image_mib"`
+	ExcelBPSImageMaxImages        int    `json:"excel_bps_image_max_images"`
+	ExcelBPSImageLimitPolicy      string `json:"excel_bps_image_limit_policy"`
+	ExcelBPSImageWarningRemaining int    `json:"excel_bps_image_warning_remaining"`
+	ExcelBPSImageCompactReserve   int    `json:"excel_bps_image_compact_reserve"`
+	ExcelBPSImageMaxTotalMiB      int    `json:"excel_bps_image_max_total_mib"`
+	ExcelBPSImageStorageMiB       int    `json:"excel_bps_image_storage_mib"`
+	ExcelBPSImageStorageEntries   int    `json:"excel_bps_image_storage_entries"`
+	ExcelBPSImageTTLMinutes       int    `json:"excel_bps_image_ttl_minutes"`
 }
 
 type DefaultSubscriptionSetting struct {
@@ -455,6 +471,9 @@ type PublicSettings struct {
 	BalanceLowNotifyThreshold   float64 `json:"balance_low_notify_threshold"`
 	BalanceLowNotifyRechargeURL string  `json:"balance_low_notify_recharge_url"`
 
+	ExcelBPSEnabled     bool `json:"excel_bps_enabled"`
+	PrismBrowserEnabled bool `json:"prism_browser_enabled"`
+
 	ChannelMonitorEnabled                bool   `json:"channel_monitor_enabled"`
 	ChannelMonitorMode                   string `json:"channel_monitor_mode"`
 	ChannelMonitorDefaultIntervalSeconds int    `json:"channel_monitor_default_interval_seconds"`
@@ -470,6 +489,8 @@ type PublicSettings struct {
 	ModelPlazaEnabled       bool `json:"model_plaza_enabled"`
 	ModelPlazaRequireAuth   bool `json:"model_plaza_require_auth"`
 	PluginManagementEnabled bool `json:"plugin_management_enabled"`
+
+	SupportTicketEnabled bool `json:"support_ticket_enabled"`
 
 	AffiliateEnabled bool `json:"affiliate_enabled"`
 

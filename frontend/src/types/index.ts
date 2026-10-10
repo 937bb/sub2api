@@ -210,6 +210,8 @@ export interface LoginAgreementDocument {
 }
 
 export interface PublicSettings {
+  excel_bps_enabled?: boolean
+  prism_browser_enabled?: boolean
   registration_enabled: boolean
   email_verify_enabled: boolean
   force_email_on_third_party_signup: boolean
@@ -269,7 +271,7 @@ export interface PublicSettings {
   balance_low_notify_threshold: number
   channel_monitor_enabled: boolean
   /** Exclusive mode: v1 active probes or v2 passive aggregation. Default v2. */
-  channel_monitor_mode?: 'v1' | 'v2'
+  channel_monitor_mode?: 'v1' | 'v2' | 'v3'
   channel_monitor_default_interval_seconds: number
   /** When true, user monitor hides RPM/TPM so scale cannot be reverse-estimated. */
   channel_monitor_hide_throughput?: boolean
@@ -287,6 +289,8 @@ export interface PublicSettings {
   model_plaza_enabled: boolean
   model_plaza_require_auth: boolean
   plugin_management_enabled: boolean
+  /** Opt-in support tickets (sidebar「网站工单」for users and admins). */
+  support_ticket_enabled?: boolean
   service_quota_enabled: boolean
   affiliate_enabled: boolean
   allow_user_view_error_requests?: boolean
@@ -544,7 +548,11 @@ export interface PaginationConfig {
 
 // ==================== API Key & Group Types ====================
 
-export type GroupPlatform = 'anthropic' | 'openai' | 'gemini' | 'antigravity' | 'grok' | 'kimi' | 'zhipu' | 'deepseek' | 'minimax' | 'opencode_go' | 'composite'
+/**
+ * 分组平台：具体平台或 composite。具体平台以平台清单（constants/platformCatalog）
+ * 为准，后端新登记的平台是 KnownAccountPlatform 之外的字符串。
+ */
+export type GroupPlatform = AccountPlatform | 'composite'
 
 export type VideoModelPrices = Record<string, Record<string, number>>
 
@@ -765,6 +773,7 @@ export interface ApiKey {
   created_at: string
   updated_at: string
   current_concurrency: number
+  concurrency_limit: number // 0 = no additional key limit
   group?: Group
   rate_limit_5h: number
   rate_limit_1d: number
@@ -780,8 +789,21 @@ export interface ApiKey {
   reset_7d_at: string | null
 }
 
+export interface ApiKeyConcurrencySnapshot {
+  queue_policy: {
+    max_waiting: number
+    timeout_seconds: number
+  }
+  items: Array<{
+    id: number
+    current_concurrency: number
+    current_waiting: number
+  }>
+}
+
 export interface CreateApiKeyRequest {
   name: string
+  concurrency_limit?: number // 0 = no additional key limit
   group_id?: number | null
   custom_key?: string // Optional custom API Key
   ip_whitelist?: string[]
@@ -795,6 +817,7 @@ export interface CreateApiKeyRequest {
 
 export interface UpdateApiKeyRequest {
   name?: string
+  concurrency_limit?: number // Omitted = no change, 0 = no additional key limit
   group_id?: number | null
   status?: 'active' | 'inactive'
   ip_whitelist?: string[]
@@ -944,7 +967,13 @@ export interface UpdateGroupRequest {
 
 // ==================== Account & Proxy Types ====================
 
-export type AccountPlatform = 'anthropic' | 'openai' | 'gemini' | 'antigravity' | 'grok' | 'kimi' | 'zhipu' | 'deepseek' | 'minimax' | 'opencode_go'
+/** 前端内置专属界面（图标、配色、表单等）的平台。 */
+export type KnownAccountPlatform = 'anthropic' | 'openai' | 'gemini' | 'antigravity' | 'grok' | 'kimi' | 'zhipu' | 'deepseek' | 'minimax' | 'opencode_go' | 'typesafe' | 'command_code' | 'cline'
+/**
+ * 账号平台：内置平台，或后端平台清单中新登记的平台（任意字符串）。
+ * `string & {}` 保留内置平台的字面量补全。
+ */
+export type AccountPlatform = KnownAccountPlatform | (string & {})
 export type AccountType = 'oauth' | 'setup-token' | 'apikey' | 'upstream' | 'bedrock' | 'service_account'
 export type OAuthAddMethod = 'oauth' | 'setup-token'
 export type ProxyProtocol = 'http' | 'https' | 'socks5' | 'socks5h'
@@ -955,6 +984,8 @@ export interface ClaudeModel {
   type: string
   display_name: string
   created_at: string
+  supported_reasoning_levels?: string[]
+  default_reasoning_level?: string
 }
 
 export interface Proxy {
@@ -1075,23 +1106,65 @@ export interface TempUnschedulableStatus {
 }
 
 export interface UpstreamBillingData {
-  object: 'sub2api.key_billing'
+  object: 'sub2api.key_billing' | 'new_api.group_billing'
   schema_version: 1
-  billing_scope: 'token'
-  group_rate_multiplier: number
+  billing_scope: 'token' | 'group'
+  provider?: 'new_api'
+  group?: string
+  token_id?: number
+  group_rate_multiplier?: number
   user_rate_multiplier?: number
-  resolved_rate_multiplier: number
-  peak_rate_enabled: boolean
+  resolved_rate_multiplier?: number
+  peak_rate_enabled?: boolean
   peak_start?: string
   peak_end?: string
   peak_rate_multiplier?: number
   applied_peak_multiplier?: number
-  effective_rate_multiplier: number
+  effective_rate_multiplier?: number
   timezone?: string
   observed_at: string
 }
 
 export type UpstreamBillingProbeStatus = 'ok' | 'unsupported' | 'failed'
+
+// A spending window reported by the upstream /v1/usage endpoint: subscription
+// limits use daily/weekly/monthly, key rate limits use 5h/1d/7d.
+export interface UpstreamBalanceWindow {
+  window: string
+  limit: number
+  used?: number
+  reset_at?: string
+}
+
+// Sanitized balance fields of the upstream /v1/usage response.
+export interface UpstreamBalanceData {
+  source?: 'new_api'
+  is_valid: boolean
+  mode?: 'unrestricted' | 'quota_limited'
+  key_status?: string
+  plan_name?: string
+  unit?: string
+  // Wallet balance, the smallest subscription headroom, or the key quota
+  // headroom, depending on how the upstream bills the key.
+  remaining?: number
+  wallet_balance?: number
+  // Subscription without any spending limit.
+  unlimited?: boolean
+  quota_limit?: number
+  quota_used?: number
+  expires_at?: string
+  windows?: UpstreamBalanceWindow[]
+}
+
+export interface UpstreamBalanceSnapshot {
+  status: UpstreamBillingProbeStatus
+  data?: UpstreamBalanceData
+  received_at?: string
+  fresh_until?: string
+  last_attempt_at: string
+  http_status?: number
+  last_error?: string
+}
 
 export interface UpstreamBillingProbeSnapshot {
   status: UpstreamBillingProbeStatus
@@ -1106,6 +1179,41 @@ export interface UpstreamBillingProbeSnapshot {
   // Value this probe wrote into the account rate multiplier; absent when the
   // probe did not sync a rate.
   synced_rate_multiplier?: number
+  // Upstream balance read by the same probe; its status is independent of the
+  // rate status above.
+  balance?: UpstreamBalanceSnapshot
+}
+
+export interface NewAPIUpstreamConfig {
+  account_id: number
+  site_url: string
+  configured: boolean
+  user_id?: number
+  encryption_key_configured: boolean
+  accounts: Array<{ account_id: number; name: string; configured_user_id?: number }>
+}
+
+export interface NewAPIUpstreamConfigRequest {
+  user_id: number
+  access_token?: string
+  account_ids: number[]
+  token_selections?: Record<string, number>
+}
+
+export interface NewAPIUpstreamPreview {
+  site_url: string
+  user_id: number
+  wallet: { amount: number; unit: 'USD' }
+  accounts: Array<{
+    account_id: number
+    name: string
+    matched: boolean
+    token_id?: number
+    group?: string
+    rate?: number
+    error?: string
+    token_options: Array<{ token_id: number; name: string; group: string; masked_key: string }>
+  }>
 }
 
 export interface UpstreamBillingProbeSettings {
@@ -1120,6 +1228,7 @@ export interface UpstreamBillingProbeResult {
 }
 
 export interface UpstreamBillingRateSnapshotItem {
+  cost_multiplier?: number
   account_id: number
   snapshot?: UpstreamBillingProbeSnapshot | null
 }
@@ -1249,6 +1358,7 @@ export interface Account {
   extra?: (CodexUsageSnapshot & OpenAICompactState & {
     model_rate_limits?: Record<string, { rate_limited_at: string; rate_limit_reset_at: string }>
     antigravity_credits_overages?: Record<string, { activated_at: string; active_until: string }>
+    upstream_billing_provider?: 'new_api'
     upstream_billing_probe_enabled?: boolean
     upstream_billing_rate_sync_enabled?: boolean
     upstream_billing_probe?: UpstreamBillingProbeSnapshot
@@ -1366,6 +1476,8 @@ export interface Account {
   current_window_cost?: number | null // 当前窗口费用
   active_sessions?: number | null // 当前活跃会话数
   current_rpm?: number | null // 当前分钟 RPM 计数
+  rpm_paused?: boolean
+  rpm_reset_at?: number | null
 
   // 影子账号关系（spark 维度影子）
   parent_account_id?: number | null
@@ -2513,21 +2625,50 @@ export interface QualityJudgment {
   group_id?: number
   model_id?: string
 }
+// 「降智开 BPS」规则：何时开（连续降智次数 / 用量百分比，0 = 不按该条件）和开成什么样（与账号 BPS 选项一一对应）。
+export interface QualityBPSPolicy {
+  failure_threshold: number
+  usage_percent: number
+  require_all: boolean
+  all_models: boolean
+  models: string[]
+  omit_unsupported_tools: boolean
+  ignore_encrypted_content: boolean
+  auto_disable_on_403: boolean
+  auto_recover_on_403?: boolean
+  recovery_interval_minutes?: number
+  auto_move_on_403: boolean
+  target_group_id: number
+  session_proxy: boolean
+  proxy_source: 'mihomo' | 'ip_pool' | ''
+  cache_creation_as_input: boolean
+  // 规则开了 auto_restore 时：连续满血几轮才关 BPS；按用量开启时用量仍高是否先不关。
+  pass_threshold: number
+  hold_on_usage: boolean
+}
 export interface QualityPolicy {
   judge?: QualityJudgeConfig
   expected_answer: string
-  action: 'remove_groups' | 'disable_scheduling'
+  action: 'remove_groups' | 'remove_models' | 'disable_scheduling' | 'enable_bps' | 'observe_only'
   remove_group_ids: number[]
+  remove_models?: string[]
+  recovery_concurrency?: number
   auto_restore: boolean
+  bps?: QualityBPSPolicy
 }
 
 export interface PelicanTestConfig {
+  quality_model_outcomes?: Record<string, 'passed' | 'failed' | 'inconclusive' | 'skipped'>
+  quality_model_actions?: Record<string, string>
+  trigger_source?: string
   quality?: QualityPolicy
   question_kind?: 'candy' | 'pelican' | 'state_probe'
+  test_channel?: 'account' | 'bps'
   prompt: string
   reasoning_effort: string
   parallel_count: number
   model_id?: string
+  model_ids?: string[]
 }
 
 export interface ScheduledTestPlan {

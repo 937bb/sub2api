@@ -4,12 +4,16 @@
  */
 
 import { apiClient } from "../client";
+import { listPlatformIds } from "@/constants/platformCatalog";
 import type {
+  AccountPlatform,
   CustomEndpoint,
   CustomMenuItem,
   LoginAgreementDocument,
   NotifyEmailEntry,
 } from "@/types";
+import type { RechargeBonusTier } from "@/utils/rechargeBonus";
+import type { SupportTicketConfig } from "@/api/supportTickets";
 
 export interface DefaultSubscriptionSetting {
   group_id: number;
@@ -17,7 +21,8 @@ export interface DefaultSubscriptionSetting {
 }
 
 // ── 平台限额类型 ──────────────────────────────────────────────────
-export type PlatformType = "anthropic" | "openai" | "gemini" | "antigravity" | "grok"
+/** 可设置默认限额的平台：平台清单中的全部具体平台（与后端 AllowedQuotaPlatforms 同源）。 */
+export type PlatformType = AccountPlatform
 export type QuotaWindowType = "daily" | "weekly" | "monthly"
 
 /** 单平台三档限额；null = 不限制，undefined = 未填（等价 null） */
@@ -30,7 +35,6 @@ export interface PlatformQuotaLimits {
 /** 全平台默认限额 map（key = PlatformType） */
 export type DefaultPlatformQuotasMap = Partial<Record<PlatformType, PlatformQuotaLimits>>
 
-const PLATFORMS: PlatformType[] = ["anthropic", "openai", "gemini", "antigravity", "grok"]
 
 export type SchedulingThresholdPlatformType =
   | "openai"
@@ -40,11 +44,12 @@ export type SchedulingThresholdPlatformType =
   | "zhipu"
   | "minimax"
   | "opencode_go"
+  | "command_code"
 
 export type AccountSchedulingThresholdsMap = Record<SchedulingThresholdPlatformType, number>
 
 // 与后端 AllowedSchedulingThresholdPlatforms 保持一致（deepseek 为余额型，
-// 走余额检测而非用量阈值；minimax Coding/Token Plan 与 OpenCode GO 有滚动窗口）。
+// 走余额检测而非用量阈值；minimax Coding/Token Plan、OpenCode GO 与 Command Code 有滚动窗口）。
 export const SCHEDULING_THRESHOLD_PLATFORMS: SchedulingThresholdPlatformType[] = [
   "openai",
   "anthropic",
@@ -53,6 +58,7 @@ export const SCHEDULING_THRESHOLD_PLATFORMS: SchedulingThresholdPlatformType[] =
   "zhipu",
   "minimax",
   "opencode_go",
+  "command_code",
 ]
 
 export function normalizeAccountSchedulingThresholdsMap(
@@ -74,10 +80,10 @@ export function sanitizeAccountSchedulingThresholdsMap(
   return normalizeAccountSchedulingThresholdsMap(input)
 }
 
-/** 归一化为全 4 平台 × 3 窗口（缺失填 null），供模板非空绑定 */
+/** 归一化为全部平台 × 3 窗口（缺失填 null），供模板非空绑定 */
 export function normalizePlatformQuotasMap(input?: DefaultPlatformQuotasMap | null): DefaultPlatformQuotasMap {
   const result: DefaultPlatformQuotasMap = {}
-  for (const p of PLATFORMS) {
+  for (const p of listPlatformIds()) {
     const src = input?.[p]
     result[p] = {
       daily:   typeof src?.daily === "number" ? src.daily : null,
@@ -88,11 +94,11 @@ export function normalizePlatformQuotasMap(input?: DefaultPlatformQuotasMap | nu
   return result
 }
 
-/** 提交前清洗：非有限数/负数/空字符串 → null（保留 0 = 显式禁用），返回全 4 平台嵌套 map */
+/** 提交前清洗：非有限数/负数/空字符串 → null（保留 0 = 显式禁用），返回全部平台嵌套 map */
 export function sanitizePlatformQuotasMap(input?: DefaultPlatformQuotasMap | null): DefaultPlatformQuotasMap {
   const clean = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : null)
   const result: DefaultPlatformQuotasMap = {}
-  for (const p of PLATFORMS) {
+  for (const p of listPlatformIds()) {
     const src = input?.[p]
     result[p] = { daily: clean(src?.daily), weekly: clean(src?.weekly), monthly: clean(src?.monthly) }
   }
@@ -141,16 +147,6 @@ export interface WeChatConnectModeOption {
   value: WeChatConnectMode;
   labelZh: string;
   labelEn: string;
-}
-
-/** Limits of the user-facing Pelican gallery; kept per group, independent of test history. */
-export interface PelicanShowcaseConfig {
-  group_ids: number[];
-  /** Newest snapshots kept per group (1–100). */
-  max_items: number;
-  /** When on, snapshots older than retention_days (1–90) are removed. */
-  auto_cleanup: boolean;
-  retention_days: number;
 }
 
 const AUTH_SOURCE_TYPES: AuthSourceType[] = [
@@ -408,6 +404,10 @@ export function deriveWeChatConnectStoredMode(
  * System settings interface
  */
 export interface SystemSettings {
+	excel_bps_enabled: boolean;
+	prism_browser_enabled: boolean;
+	prism_browser_base_url: string;
+	prism_browser_api_key_configured: boolean;
   // Registration settings
   registration_enabled: boolean;
   email_verify_enabled: boolean;
@@ -675,6 +675,7 @@ export interface SystemSettings {
   risk_control_enabled: boolean;
 
   // Cyber session block
+  cyber_policy_user_allowlist: string;
   cyber_session_block_enabled: boolean;
   cyber_session_block_ttl_seconds: number;
   cyber_session_identity_strict_enabled: boolean;
@@ -689,6 +690,9 @@ export interface SystemSettings {
   payment_balance_recharge_multiplier: number;
   payment_subscription_usd_to_cny_rate: number;
   payment_recharge_fee_rate: number;
+  payment_recharge_bonus_tiers?: RechargeBonusTier[];
+  payment_recharge_bonus_mode?: string;
+  payment_recharge_bonus_notice?: string;
   payment_load_balance_strategy: string;
   payment_product_name_prefix: string;
   payment_product_name_suffix: string;
@@ -744,7 +748,7 @@ export interface SystemSettings {
 
   // Channel Monitor feature switch
   channel_monitor_enabled: boolean;
-  channel_monitor_mode?: 'v1' | 'v2';
+  channel_monitor_mode?: 'v1' | 'v2' | 'v3';
   channel_monitor_default_interval_seconds: number;
   channel_monitor_hide_throughput?: boolean;
   channel_monitor_show_quota?: boolean;
@@ -753,9 +757,7 @@ export interface SystemSettings {
   // Available Channels feature switch
   available_channels_enabled: boolean;
 
-  // Pelican showcase: user gallery of scheduled Pelican HTML results
-  pelican_showcase_enabled?: boolean;
-  pelican_showcase_config?: PelicanShowcaseConfig;
+  // The Pelican showcase settings are edited on the Smart Ops page (api/admin/pelicanTests).
 
   // Subscription feature switch (user sidebar "My Subscriptions" entry)
   subscription_enabled: boolean;
@@ -765,6 +767,10 @@ export interface SystemSettings {
   model_plaza_require_auth: boolean;
   model_plaza_description: string;
   plugin_management_enabled: boolean;
+
+  // Support tickets (网站工单) switch + form config
+  support_ticket_enabled: boolean;
+  support_ticket_config: SupportTicketConfig;
 
   // Affiliate (邀请返利) feature switch
   affiliate_enabled: boolean;
@@ -786,6 +792,10 @@ export interface SystemSettings {
   excel_bps_image_max_requests: number;
   excel_bps_image_max_image_mib: number;
   excel_bps_image_max_images: number;
+  excel_bps_image_limit_policy: "off" | "auto_compact" | "warn";
+  excel_bps_image_warning_remaining: number;
+  excel_bps_image_compact_reserve: number;
+
   excel_bps_image_max_total_mib: number;
   excel_bps_image_storage_mib: number;
   excel_bps_image_storage_entries: number;
@@ -793,6 +803,10 @@ export interface SystemSettings {
 }
 
 export interface UpdateSettingsRequest {
+	excel_bps_enabled?: boolean;
+	prism_browser_enabled?: boolean;
+	prism_browser_base_url?: string;
+	prism_browser_api_key?: string;
   registration_enabled?: boolean;
   email_verify_enabled?: boolean;
   registration_email_suffix_whitelist?: string[];
@@ -1024,6 +1038,7 @@ export interface UpdateSettingsRequest {
   risk_control_enabled?: boolean;
 
   // Cyber session block
+  cyber_policy_user_allowlist?: string;
   cyber_session_block_enabled?: boolean;
   cyber_session_block_ttl_seconds?: number;
   cyber_session_identity_strict_enabled?: boolean;
@@ -1038,6 +1053,9 @@ export interface UpdateSettingsRequest {
   payment_balance_recharge_multiplier?: number;
   payment_subscription_usd_to_cny_rate?: number;
   payment_recharge_fee_rate?: number;
+  payment_recharge_bonus_tiers?: RechargeBonusTier[];
+  payment_recharge_bonus_mode?: string;
+  payment_recharge_bonus_notice?: string;
   payment_load_balance_strategy?: string;
   payment_product_name_prefix?: string;
   payment_product_name_suffix?: string;
@@ -1081,7 +1099,7 @@ export interface UpdateSettingsRequest {
 
   // Channel Monitor feature switch
   channel_monitor_enabled?: boolean;
-  channel_monitor_mode?: 'v1' | 'v2';
+  channel_monitor_mode?: 'v1' | 'v2' | 'v3';
   channel_monitor_default_interval_seconds?: number;
   channel_monitor_hide_throughput?: boolean;
   channel_monitor_show_quota?: boolean;
@@ -1089,10 +1107,6 @@ export interface UpdateSettingsRequest {
 
   // Available Channels feature switch
   available_channels_enabled?: boolean;
-
-  // Pelican showcase switch + gallery limits
-  pelican_showcase_enabled?: boolean;
-  pelican_showcase_config?: PelicanShowcaseConfig;
 
   // Subscription feature switch
   subscription_enabled?: boolean;
@@ -1102,6 +1116,10 @@ export interface UpdateSettingsRequest {
   model_plaza_require_auth?: boolean;
   model_plaza_description?: string;
   plugin_management_enabled?: boolean;
+
+  // Support tickets (网站工单) switch + form config
+  support_ticket_enabled?: boolean;
+  support_ticket_config?: SupportTicketConfig;
 
   // Affiliate (邀请返利) feature switch
   affiliate_enabled?: boolean;
@@ -1122,6 +1140,10 @@ export interface UpdateSettingsRequest {
   excel_bps_image_max_requests?: number;
   excel_bps_image_max_image_mib?: number;
   excel_bps_image_max_images?: number;
+  excel_bps_image_limit_policy?: "off" | "auto_compact" | "warn";
+  excel_bps_image_warning_remaining?: number;
+  excel_bps_image_compact_reserve?: number;
+
   excel_bps_image_max_total_mib?: number;
   excel_bps_image_storage_mib?: number;
   excel_bps_image_storage_entries?: number;

@@ -1,12 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import IQTestModal from '../IQTestModal.vue'
+import TestModelSelect from '../TestModelSelect.vue'
 
-const { probeOpenAICodexState } = vi.hoisted(() => ({ probeOpenAICodexState: vi.fn() }))
+const { probeOpenAICodexState, getAvailableModels, getModelReasoning } = vi.hoisted(() => ({
+  probeOpenAICodexState: vi.fn(), getAvailableModels: vi.fn(), getModelReasoning: vi.fn()
+}))
 
 vi.mock('@/api/admin/accounts', async () => {
   const actual = await vi.importActual<typeof import('@/api/admin/accounts')>('@/api/admin/accounts')
-  return { ...actual, probeOpenAICodexState }
+  return { ...actual, probeOpenAICodexState, getAvailableModels, getModelReasoning }
+})
+
+beforeEach(() => {
+  getAvailableModels.mockReset().mockResolvedValue([])
+  getModelReasoning.mockReset().mockResolvedValue({ supported_reasoning_levels: ['low', 'medium', 'high'], default_reasoning_level: 'medium' })
 })
 
 vi.mock('vue-i18n', async () => {
@@ -76,6 +84,45 @@ describe('IQTestModal', () => {
     vi.restoreAllMocks()
   })
 
+  it('keeps all eight configured model IDs when discovery only returns six', async () => {
+    const ids = ['codex-auto-review', 'gpt-5.5', 'gpt-5.6', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-6-astra', 'gpt-6-sol', 'gpt-6.1-sol']
+    getAvailableModels.mockResolvedValue(ids.filter(id => !['gpt-5.6-terra', 'gpt-6.1-sol'].includes(id))
+      .map(id => ({ id, display_name: id.toUpperCase() })))
+    const wrapper = mountModal({ credentials: { model_mapping: { ...Object.fromEntries(ids.map(id => [id, id])), 'custom-*': 'upstream-target' } } })
+    await flushPromises()
+    const picker = wrapper.getComponent(TestModelSelect)
+    expect(picker.props('options').map(option => option.value).sort()).toEqual([...ids].sort())
+    expect(picker.props('options').map(option => option.label)).not.toContain('upstream-target')
+    picker.vm.$emit('update:modelValue', 'gpt-6.1-sol')
+    await flushPromises()
+    await (wrapper.vm as any).startTest()
+    expect(JSON.parse((global.fetch as any).mock.calls[0][1].body).model_id).toBe('gpt-6.1-sol')
+    wrapper.unmount()
+  })
+
+  it('submits a manually entered model without discovery overwriting it', async () => {
+    let finishDiscovery!: (models: Array<{ id: string }>) => void
+    getAvailableModels.mockReturnValue(new Promise(resolve => { finishDiscovery = resolve }))
+    const wrapper = mountModal()
+    await wrapper.get('[data-testid="model-input-toggle"]').trigger('click')
+    await wrapper.get('[data-testid="manual-model-input"]').setValue('gpt-6.1-sol')
+    finishDiscovery([{ id: 'gpt-5.5' }])
+    await flushPromises()
+    expect((wrapper.get('[data-testid="manual-model-input"]').element as HTMLInputElement).value).toBe('gpt-6.1-sol')
+    await (wrapper.vm as any).startTest()
+    expect(JSON.parse((global.fetch as any).mock.calls[0][1].body).model_id).toBe('gpt-6.1-sol')
+    expect(getModelReasoning).toHaveBeenLastCalledWith(42, 'gpt-6.1-sol')
+    wrapper.unmount()
+  })
+
+  it('retains configured choices when discovery fails', async () => {
+    getAvailableModels.mockRejectedValue(new Error('discovery unavailable'))
+    const wrapper = mountModal({ credentials: { model_mapping: { 'gpt-6.1-sol': 'gpt-6.1-sol' } } })
+    await flushPromises()
+    expect(wrapper.getComponent(TestModelSelect).props('options')).toEqual([{ value: 'gpt-6.1-sol', label: 'gpt-6.1-sol' }])
+    wrapper.unmount()
+  })
+
   it('uses the dedicated endpoint and sends identical settings to parallel runs', async () => {
     const wrapper = mountModal()
     ;(wrapper.vm as any).selectQuestion('pelican')
@@ -94,6 +141,7 @@ describe('IQTestModal', () => {
       })
       expect(body.prompt).toContain('SVG 绘制一个鹈鹕骑自行车的 2D 动画')
       expect(body.prompt).toContain('直接返回独立 HTML')
+      expect(body.prompt).not.toContain('不要有任何限制')
     }
 
     const frames = wrapper.findAll('iframe')
@@ -102,6 +150,18 @@ describe('IQTestModal', () => {
     expect(frames[0].attributes('srcdoc')).toContain('<svg></svg>')
     expect(wrapper.text()).toContain('admin.accounts.pelicanTest.success')
     expect(localStorage.getItem('sub2api-pelican-test:42')).toContain('gpt-6-astra')
+  })
+
+  it('starts Claude accounts on a Claude model and other accounts on the OpenAI default', async () => {
+    const wrapper = mountModal({ platform: 'anthropic', name: 'Claude account' })
+    await (wrapper.vm as any).startTest()
+    await flushPromises()
+
+    const body = JSON.parse((global.fetch as any).mock.calls[0][1].body)
+    expect(body.model_id).toBe('claude-opus-5-5')
+
+    await wrapper.setProps({ account: { id: 43, name: 'Astra account', platform: 'openai', type: 'oauth', status: 'active' } as any })
+    expect((wrapper.vm as any).modelId).toBe('gpt-6-astra')
   })
 
   it('keeps non-HTML output visible but marks it as failed', async () => {

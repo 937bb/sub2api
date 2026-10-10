@@ -15,9 +15,7 @@ vi.mock('@/stores/app', () => ({
 }))
 
 vi.mock('@/stores/auth', () => ({
-  useAuthStore: () => ({
-    isObserver: false
-  })
+  useAuthStore: () => ({ isObserver: false })
 }))
 
 vi.mock('@/api/admin', () => ({

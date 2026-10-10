@@ -9,6 +9,7 @@ This directory contains files for deploying Sub2API on Linux servers and Apple-s
 | **Docker Compose** | Quick setup, all-in-one | Not needed (auto-setup) |
 | **Apple container** | Native local stack on macOS 26 | Not needed (auto-setup) |
 | **Binary Install** | Production servers, systemd | Web-based wizard |
+| **[Kubernetes / K3s](kubernetes/README.md)** | Request replicas with a shared primary | Pre-provisioned config / Secrets |
 
 ## Files
 
@@ -82,8 +83,8 @@ docker compose -f docker-compose.local.yml up -d
 # View logs
 docker compose -f docker-compose.local.yml logs -f sub2api
 
-# If admin password was auto-generated, find it in logs:
-docker compose -f docker-compose.local.yml logs sub2api | grep "admin password"
+# If admin email/password were auto-generated, find them in logs:
+docker compose -f docker-compose.local.yml logs sub2api | grep "Generated admin"
 
 # Access Web UI
 # http://localhost:8080
@@ -115,7 +116,7 @@ mkdir -p data postgres_data redis_data
 # Start all services using local directory version
 docker compose -f docker-compose.local.yml up -d
 
-# View logs (check for auto-generated admin password)
+# View logs (check for auto-generated admin email and password)
 docker compose -f docker-compose.local.yml logs -f sub2api
 
 # Access Web UI
@@ -139,14 +140,14 @@ When using Docker Compose with `AUTO_SETUP=true`:
    - Connects to PostgreSQL and Redis
    - Applies database migrations (SQL files in `backend/migrations/*.sql`) and records them in `schema_migrations`
    - Generates JWT secret (if not provided)
-   - Creates admin account (password auto-generated if not provided)
+   - Creates admin account (email and password auto-generated if not provided; a provided password must be 8-72 bytes)
    - Writes config.yaml
 
 2. No manual Setup Wizard needed - just configure `.env` and start
 
-3. If `ADMIN_PASSWORD` is not set, check logs for the generated password:
+3. If `ADMIN_EMAIL` / `ADMIN_PASSWORD` are not set, check logs for the generated admin email (login username) and password:
    ```bash
-   docker compose logs sub2api | grep "admin password"
+   docker compose logs sub2api | grep "Generated admin"
    ```
 
 ### Startup and Database Recovery
@@ -260,14 +261,16 @@ docker compose down -v
 | `JWT_SECRET` | **Recommended** | *(auto-generated)* | JWT secret (fixed for persistent sessions) |
 | `TOTP_ENCRYPTION_KEY` | **Recommended** | *(auto-generated)* | TOTP encryption key (fixed for persistent 2FA) |
 | `SERVER_PORT` | No | `8080` | Server port |
-| `ADMIN_EMAIL` | No | `admin@sub2api.local` | Admin email |
-| `ADMIN_PASSWORD` | No | *(auto-generated)* | Admin password |
+| `ADMIN_EMAIL` | No | *(auto-generated)* | Admin email (login username) |
+| `ADMIN_PASSWORD` | No | *(auto-generated)* | Admin password (8-72 bytes) |
 | `TZ` | No | `Asia/Shanghai` | Timezone |
 | `UPDATE_GITHUB_TOKEN` | No | *(empty)* | Token for `api.github.com` release checks only; asset downloads remain anonymous. |
 | `GEMINI_OAUTH_CLIENT_ID` | No | *(builtin)* | Google OAuth client ID (Gemini OAuth). Leave empty to use the built-in Gemini CLI client. |
 | `GEMINI_OAUTH_CLIENT_SECRET` | No | *(builtin)* | Google OAuth client secret (Gemini OAuth). Leave empty to use the built-in Gemini CLI client. |
 | `GEMINI_OAUTH_SCOPES` | No | *(default)* | OAuth scopes (Gemini OAuth) |
 | `GEMINI_QUOTA_POLICY` | No | *(empty)* | JSON overrides for Gemini local quota simulation (Code Assist only). |
+| `GATEWAY_API_KEY_QUEUE_MAX_WAITING` | No | `5` | Extra waiting requests per API key with `concurrency_limit>0`; `0` disables key queueing and restores immediate `429`. Read at process start; recreate the container after changing. |
+| `GATEWAY_API_KEY_QUEUE_TIMEOUT_SECONDS` | No | `30` | Per-request wait budget in seconds for key capacity; must be a positive integer. Read at process start; recreate the container after changing. |
 
 See `.env.example` for all available options.
 

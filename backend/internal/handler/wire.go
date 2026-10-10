@@ -21,6 +21,7 @@ func ProvideAdminHandlers(
 	backupHandler *admin.BackupHandler,
 	oauthHandler *admin.OAuthHandler,
 	openaiOAuthHandler *admin.OpenAIOAuthHandler,
+	openaiOAuthReauthHandler *admin.OpenAIOAuthReauthHandler,
 	geminiOAuthHandler *admin.GeminiOAuthHandler,
 	antigravityOAuthHandler *admin.AntigravityOAuthHandler,
 	grokOAuthHandler *admin.GrokOAuthHandler,
@@ -39,8 +40,11 @@ func ProvideAdminHandlers(
 	pluginHandler *admin.PluginHandler,
 	apiKeyHandler *admin.AdminAPIKeyHandler,
 	scheduledTestHandler *admin.ScheduledTestHandler,
+	pelicanGroupTestHandler *admin.PelicanGroupTestHandler,
+	controlledExperimentHandler *admin.ControlledExperimentHandler,
 	accountOpsHandler *admin.AccountOpsHandler,
 	accountTokenGuardHandler *admin.AccountTokenGuardHandler,
+	accountTokenGuardV2Handler *admin.AccountTokenGuardV2Handler,
 	channelHandler *admin.ChannelHandler,
 	channelMonitorHandler *admin.ChannelMonitorHandler,
 	channelMonitorTemplateHandler *admin.ChannelMonitorRequestTemplateHandler,
@@ -75,6 +79,7 @@ func ProvideAdminHandlers(
 		Backup:                 backupHandler,
 		OAuth:                  oauthHandler,
 		OpenAIOAuth:            openaiOAuthHandler,
+		OpenAIOAuthReauth:      openaiOAuthReauthHandler,
 		GeminiOAuth:            geminiOAuthHandler,
 		AntigravityOAuth:       antigravityOAuthHandler,
 		GrokOAuth:              grokOAuthHandler,
@@ -94,7 +99,10 @@ func ProvideAdminHandlers(
 		APIKey:                 apiKeyHandler,
 		AccountOps:             accountOpsHandler,
 		AccountTokenGuard:      accountTokenGuardHandler,
+		AccountTokenGuardV2:    accountTokenGuardV2Handler,
 		ScheduledTest:          scheduledTestHandler,
+		PelicanGroupTest:       pelicanGroupTestHandler,
+		ControlledExperiment:   controlledExperimentHandler,
 		Channel:                channelHandler,
 		ChannelMonitor:         channelMonitorHandler,
 		ChannelMonitorTemplate: channelMonitorTemplateHandler,
@@ -146,10 +154,12 @@ func ProvideOpenAIGatewayHandler(
 	grokQuotaService *service.GrokQuotaService,
 	cfg *config.Config,
 	coordinator *securityaudit.Coordinator,
+	compositeResolver *service.CompositeRouteResolver,
 ) *OpenAIGatewayHandler {
 	gatewayService.SetPluginManager(pluginManager)
 	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, apiKeyService,
 		usageRecordWorkerPool, errorPassthroughService, contentModerationService, opsService, cfg)
+	h.compositeResolver = compositeResolver
 	h.securityAuditCoordinator = coordinator
 	h.grokMediaEligibilityProber = grokQuotaService
 	return h
@@ -166,9 +176,12 @@ func ProvideBatchImageHandler(
 	return h
 }
 
-// ProvideSystemHandler creates admin.SystemHandler with UpdateService
-func ProvideSystemHandler(updateService *service.UpdateService, lockService *service.SystemOperationLockService) *admin.SystemHandler {
-	return admin.NewSystemHandler(updateService, lockService)
+// ProvideSystemHandler creates admin.SystemHandler with UpdateService and the
+// Mihomo node checks backed by the admin proxy diagnostics.
+func ProvideSystemHandler(updateService *service.UpdateService, lockService *service.SystemOperationLockService, adminService service.AdminService) *admin.SystemHandler {
+	h := admin.NewSystemHandler(updateService, lockService)
+	h.SetMihomoNodeChecker(adminService)
+	return h
 }
 
 // ProvideSettingHandler creates SettingHandler with version from BuildInfo
@@ -198,6 +211,7 @@ func ProvideHandlers(
 	announcementHandler *AnnouncementHandler,
 	channelMonitorUserHandler *ChannelMonitorUserHandler,
 	channelMonitorV2Handler *ChannelMonitorV2Handler,
+	channelMonitorV3Handler *ChannelMonitorV3Handler,
 	adminHandlers *AdminHandlers,
 	gatewayHandler *GatewayHandler,
 	openaiGatewayHandler *OpenAIGatewayHandler,
@@ -208,6 +222,7 @@ func ProvideHandlers(
 	paymentWebhookHandler *PaymentWebhookHandler,
 	availableChannelHandler *AvailableChannelHandler,
 	pelicanShowcaseHandler *PelicanShowcaseHandler,
+	supportTicketHandler *SupportTicketHandler,
 	modelPlazaHandler *ModelPlazaHandler,
 	asyncImageHandler *AsyncImageHandler,
 	batchImageHandler *BatchImageHandler,
@@ -226,6 +241,7 @@ func ProvideHandlers(
 		Announcement:     announcementHandler,
 		ChannelMonitor:   channelMonitorUserHandler,
 		ChannelMonitorV2: channelMonitorV2Handler,
+		ChannelMonitorV3: channelMonitorV3Handler,
 		Admin:            adminHandlers,
 		Gateway:          gatewayHandler,
 		OpenAIGateway:    openaiGatewayHandler,
@@ -236,6 +252,7 @@ func ProvideHandlers(
 		PaymentWebhook:   paymentWebhookHandler,
 		AvailableChannel: availableChannelHandler,
 		PelicanShowcase:  pelicanShowcaseHandler,
+		SupportTicket:    supportTicketHandler,
 		ModelPlaza:       modelPlazaHandler,
 		AsyncImage:       asyncImageHandler,
 		BatchImage:       batchImageHandler,
@@ -255,6 +272,7 @@ var ProviderSet = wire.NewSet(
 	NewAnnouncementHandler,
 	NewChannelMonitorUserHandler,
 	NewChannelMonitorV2Handler,
+	NewChannelMonitorV3Handler,
 	ProvideGatewayHandler,
 	ProvideOpenAIGatewayHandler,
 	NewTotpHandler,
@@ -264,6 +282,7 @@ var ProviderSet = wire.NewSet(
 	NewPaymentWebhookHandler,
 	NewAvailableChannelHandler,
 	NewPelicanShowcaseHandler,
+	NewSupportTicketHandler,
 	NewModelPlazaHandler,
 	NewAsyncImageHandler,
 	ProvideBatchImageHandler,
@@ -279,6 +298,7 @@ var ProviderSet = wire.NewSet(
 	admin.NewBackupHandler,
 	admin.NewOAuthHandler,
 	admin.NewOpenAIOAuthHandler,
+	admin.NewOpenAIOAuthReauthHandler,
 	admin.NewGeminiOAuthHandler,
 	admin.NewAntigravityOAuthHandler,
 	admin.NewGrokOAuthHandler,
@@ -297,8 +317,11 @@ var ProviderSet = wire.NewSet(
 	admin.NewPluginHandler,
 	admin.NewAdminAPIKeyHandler,
 	admin.NewScheduledTestHandler,
+	admin.NewPelicanGroupTestHandler,
+	admin.NewControlledExperimentHandler,
 	admin.NewAccountOpsHandler,
 	admin.NewAccountTokenGuardHandler,
+	admin.NewAccountTokenGuardV2Handler,
 	admin.NewChannelHandler,
 	admin.NewChannelMonitorHandler,
 	admin.NewChannelMonitorRequestTemplateHandler,

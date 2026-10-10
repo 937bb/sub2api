@@ -144,6 +144,18 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	if settings.ExcelBPSImageTTLMinutes == 0 {
 		settings.ExcelBPSImageTTLMinutes = imageRelay.Limits.TTLMinutes
 	}
+	if settings.ExcelBPSImageLimitPolicy == "" {
+		settings.ExcelBPSImageLimitPolicy = "off"
+	}
+	if settings.ExcelBPSImageWarningRemaining == 0 {
+		settings.ExcelBPSImageWarningRemaining = 8
+	}
+	if settings.ExcelBPSImageCompactReserve == 0 {
+		settings.ExcelBPSImageCompactReserve = 3
+	}
+	if err := validateExcelBPSImagePolicy(settings.ExcelBPSImageLimitPolicy, settings.ExcelBPSImageWarningRemaining, settings.ExcelBPSImageCompactReserve, settings.ExcelBPSImageMaxImages); err != nil {
+		return nil, infraerrors.BadRequest("INVALID_EXCEL_BPS_IMAGE_POLICY", err.Error())
+	}
 	if err := settings.imageRelayLimits().Validate(); err != nil {
 		return nil, infraerrors.BadRequest("INVALID_EXCEL_BPS_IMAGE_LIMITS", err.Error())
 	}
@@ -462,6 +474,7 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	}
 
 	// Channel monitor feature switch
+	updates[SettingKeyExcelBPSEnabled] = strconv.FormatBool(settings.ExcelBPSEnabled)
 	updates[SettingKeyChannelMonitorEnabled] = strconv.FormatBool(settings.ChannelMonitorEnabled)
 	updates[SettingKeyChannelMonitorMode] = normalizeChannelMonitorMode(settings.ChannelMonitorMode)
 	if v := clampChannelMonitorInterval(settings.ChannelMonitorDefaultIntervalSeconds); v > 0 {
@@ -470,6 +483,15 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyChannelMonitorHideThroughput] = strconv.FormatBool(settings.ChannelMonitorHideThroughput)
 	updates[SettingKeyChannelMonitorShowQuota] = strconv.FormatBool(settings.ChannelMonitorShowQuota)
 	updates[SettingKeyChannelMonitorHideUserRanking] = strconv.FormatBool(settings.ChannelMonitorHideUserRanking)
+	updates[SettingKeyPrismBrowserEnabled] = strconv.FormatBool(settings.PrismBrowserEnabled)
+	baseURL := strings.TrimSpace(settings.PrismBrowserBaseURL)
+	if baseURL == "" {
+		baseURL = "http://127.0.0.1:8319/v1"
+	}
+	updates[SettingKeyPrismBrowserBaseURL] = baseURL
+	if strings.TrimSpace(settings.PrismBrowserAPIKey) != "" {
+		updates[SettingKeyPrismBrowserAPIKey] = strings.TrimSpace(settings.PrismBrowserAPIKey)
+	}
 
 	// Grok model mapping policy
 	if v := strings.TrimSpace(settings.GrokDefaultTextModel); v != "" {
@@ -489,9 +511,6 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	if showcaseErr != nil {
 		return nil, infraerrors.BadRequest("INVALID_PELICAN_SHOWCASE", showcaseErr.Error())
 	}
-	if err := s.validateAddedPelicanShowcaseGroups(ctx, showcase.GroupIDs); err != nil {
-		return nil, err
-	}
 	showcaseJSON, _ := json.Marshal(showcase)
 	updates[SettingKeyPelicanShowcaseConfig] = string(showcaseJSON)
 
@@ -504,6 +523,15 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyModelPlazaDescription] = settings.ModelPlazaDescription
 	updates[SettingKeyPluginManagementEnabled] = strconv.FormatBool(settings.PluginManagementEnabled)
 
+	// Support tickets switch + form config
+	updates[SettingKeySupportTicketEnabled] = strconv.FormatBool(settings.SupportTicketEnabled)
+	ticketConfig, ticketConfigErr := NormalizeSupportTicketConfig(settings.SupportTicket)
+	if ticketConfigErr != nil {
+		return nil, infraerrors.BadRequest("INVALID_SUPPORT_TICKET_CONFIG", ticketConfigErr.Error())
+	}
+	ticketConfigJSON, _ := json.Marshal(ticketConfig)
+	updates[SettingKeySupportTicketConfig] = string(ticketConfigJSON)
+
 	// Affiliate (邀请返利) feature switch
 	updates[SettingKeyAffiliateEnabled] = strconv.FormatBool(settings.AffiliateEnabled)
 
@@ -512,6 +540,10 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 
 	// cyber 会话屏蔽开关 + TTL
 	updates[SettingKeyCyberSessionBlockEnabled] = strconv.FormatBool(settings.CyberSessionBlockEnabled)
+	if _, err := ParseCyberPolicyUserAllowlist(settings.CyberPolicyUserAllowlist); err != nil {
+		return nil, err
+	}
+	updates[SettingKeyCyberPolicyUserAllowlist] = settings.CyberPolicyUserAllowlist
 	if settings.CyberSessionBlockTTLSeconds > 0 {
 		updates[SettingKeyCyberSessionBlockTTLSeconds] = strconv.Itoa(settings.CyberSessionBlockTTLSeconds)
 	}
@@ -673,6 +705,9 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyExcelBPSImageBudgetMiB] = strconv.Itoa(settings.ExcelBPSImageBudgetMiB)
 	updates[SettingKeyExcelBPSImageMaxRequests] = strconv.Itoa(settings.ExcelBPSImageMaxRequests)
 	updates[SettingKeyExcelBPSImageMaxImageMiB] = strconv.Itoa(settings.ExcelBPSImageMaxImageMiB)
+	updates[SettingKeyExcelBPSImageLimitPolicy] = settings.ExcelBPSImageLimitPolicy
+	updates[SettingKeyExcelBPSImageWarningRemaining] = strconv.Itoa(settings.ExcelBPSImageWarningRemaining)
+	updates[SettingKeyExcelBPSImageCompactReserve] = strconv.Itoa(settings.ExcelBPSImageCompactReserve)
 	updates[SettingKeyExcelBPSImageMaxImages] = strconv.Itoa(settings.ExcelBPSImageMaxImages)
 	updates[SettingKeyExcelBPSImageMaxTotalMiB] = strconv.Itoa(settings.ExcelBPSImageMaxTotalMiB)
 	updates[SettingKeyExcelBPSImageStorageMiB] = strconv.Itoa(settings.ExcelBPSImageStorageMiB)
@@ -930,9 +965,12 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 	s.codexRestrictionPolicySF.Forget("codex_restriction_policy")
 	s.codexRestrictionPolicyCache.Store(&cachedCodexRestrictionPolicy{expiresAt: 0})
 	// Cyber 会话屏蔽与严格身份门控必须在后台保存后立即生效，不能继续
-	// 使用最长 60 秒的旧开关快照。
+	// 使用最长 60 秒的旧开关快照。保留刚保存成功的白名单，下一次 DB 刷新失败时沿用。
 	s.cyberSessionBlockRuntimeSF.Forget("cyber_session_block_runtime")
-	s.cyberSessionBlockRuntimeCache.Store(&cachedCyberSessionBlockRuntime{expiresAt: 0})
+	s.cyberSessionBlockRuntimeMu.Lock()
+	allowlistedUsers, _ := ParseCyberPolicyUserAllowlist(settings.CyberPolicyUserAllowlist)
+	s.cyberSessionBlockRuntimeCache.Store(&cachedCyberSessionBlockRuntime{allowlistedUsers: allowlistedUsers})
+	s.cyberSessionBlockRuntimeMu.Unlock()
 	if s.requestCapture != nil {
 		s.requestCapture.ApplyConfig(settings.requestCaptureConfig())
 	}

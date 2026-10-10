@@ -91,6 +91,13 @@ func TestForwardAsAnthropic_ForceChatCompletionsPreservesFinalModelReasoningEffo
 			mapped:     "gpt-5.6-luna",
 			wantEffort: "medium",
 		},
+		{
+			name:       "disabled thinking overrides max",
+			model:      "gpt-5.6-luna",
+			mapped:     "gpt-5.6-luna",
+			effortJSON: `,"output_config":{"effort":"max"},"thinking":{"type":"disabled"}`,
+			wantEffort: "none",
+		},
 	}
 
 	for _, tt := range tests {
@@ -475,9 +482,11 @@ func TestForwardAsAnthropic_ResponsesSupportedAccountStillUsesResponsesEndpoint(
 	require.NotNil(t, result.ReasoningEffort)
 	require.Equal(t, "medium", *result.ReasoningEffort)
 	require.False(t, gjson.GetBytes(upstream.lastBody, "messages").Exists())
-	require.Equal(t, "third-party-client/1.0.0", upstream.lastReq.Header.Get("User-Agent"))
-	require.Equal(t, "opencode", upstream.lastReq.Header.Get("originator"))
-	require.Empty(t, upstream.lastReq.Header.Get("version"))
+	identity := resolveCodexOutboundIdentity("")
+	require.Equal(t, identity.userAgent, upstream.lastReq.Header.Get("User-Agent"))
+	require.Equal(t, identity.originator, upstream.lastReq.Header.Get("originator"))
+	require.Equal(t, identity.version, upstream.lastReq.Header.Get("version"))
+	require.Equal(t, "third-party-client/1.0.0", c.GetHeader("User-Agent"))
 	require.Empty(t, upstream.lastReq.Header.Get("OpenAI-Beta"))
 	require.Equal(t, "ok", gjson.Get(rec.Body.String(), "content.0.text").String())
 }

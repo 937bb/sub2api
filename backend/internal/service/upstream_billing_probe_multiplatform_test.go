@@ -17,6 +17,7 @@ func TestUpstreamBillingProbeIdentityCoversAllAPIKeyPlatforms(t *testing.T) {
 	for _, platform := range []string{
 		PlatformOpenAI, PlatformGrok, PlatformAnthropic, PlatformGemini, PlatformAntigravity,
 		PlatformKimi, PlatformZhipu, PlatformDeepseek, PlatformMiniMax, PlatformOpenCodeGo,
+		PlatformTypeSafe,
 	} {
 		require.True(t, IsUpstreamBillingProbeIdentity(platform, AccountTypeAPIKey), platform)
 		require.True(t, isUpstreamBillingProbeAccount(&Account{Platform: platform, Type: AccountTypeAPIKey}), platform)
@@ -107,10 +108,14 @@ func TestUpstreamBillingProbeGrokAccountPersistsSnapshot(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, UpstreamBillingProbeStatusOK, snapshot.Status)
 	require.Equal(t, 0.02, snapshot.Data["resolved_rate_multiplier"])
-	require.Equal(t, "https://relay.example/v1/sub2api/billing", upstream.lastReq.URL.String())
-	require.Equal(t, "Bearer sk-grok-relay", upstream.lastReq.Header.Get("Authorization"))
-	// 非 OpenAI 平台探测使用默认传输画像。
-	require.Equal(t, HTTPUpstreamProfileDefault, HTTPUpstreamProfileFromContext(upstream.lastReq.Context()))
+	require.Len(t, upstream.requests, 2)
+	require.Equal(t, "https://relay.example/v1/sub2api/billing", upstream.requests[0].URL.String())
+	require.Equal(t, "/v1/usage", upstream.requests[1].URL.Path)
+	for _, req := range upstream.requests {
+		require.Equal(t, "Bearer sk-grok-relay", req.Header.Get("Authorization"))
+		// 非 OpenAI 平台探测使用默认传输画像。
+		require.Equal(t, HTTPUpstreamProfileDefault, HTTPUpstreamProfileFromContext(req.Context()))
+	}
 
 	persisted := decodeUpstreamBillingProbeSnapshot(account.Extra)
 	require.NotNil(t, persisted)
@@ -174,6 +179,8 @@ func TestUpstreamBillingProbeOfficialAPIBaseURLIsUnsupportedWithoutRequest(t *te
 		{PlatformDeepseek, "https://api.deepseek.com/anthropic"},
 		{PlatformOpenCodeGo, "https://opencode.ai/zen/go/v1"},
 		{PlatformOpenCodeGo, "https://opencode.ai/zen/go"},
+		{PlatformTypeSafe, "https://api.typesafe.ai"},
+		{PlatformTypeSafe, "https://api.typesafe.ai/v1"},
 	}
 	for i, tc := range cases {
 		account := &Account{
@@ -217,6 +224,7 @@ func TestUpstreamBillingProbeOfficialAPIHostMatchingIsNormalized(t *testing.T) {
 	require.True(t, upstreamBillingProbeTargetIsOfficialAPI("https://api.deepseek.com/anthropic"))
 	require.True(t, upstreamBillingProbeTargetIsOfficialAPI("https://opencode.ai/zen/go/v1"))
 	require.True(t, upstreamBillingProbeTargetIsOfficialAPI("https://opencode.ai/zen/go"))
+	require.True(t, upstreamBillingProbeTargetIsOfficialAPI("https://api.typesafe.ai"))
 	// 相似但不同的注册域不拦：中转完全可能叫 *-x.ai 之外的任何名字。
 	require.False(t, upstreamBillingProbeTargetIsOfficialAPI("https://relay.example/v1"))
 	require.False(t, upstreamBillingProbeTargetIsOfficialAPI("https://notx.ai"))
@@ -228,6 +236,7 @@ func TestUpstreamBillingProbeOfficialAPIHostMatchingIsNormalized(t *testing.T) {
 	require.False(t, upstreamBillingProbeTargetIsOfficialAPI("https://notmoonshot.cn/v1"))
 	require.False(t, upstreamBillingProbeTargetIsOfficialAPI("https://moonshot.cn.evil.example/v1"))
 	require.False(t, upstreamBillingProbeTargetIsOfficialAPI("https://kimi.example/v1"))
+	require.False(t, upstreamBillingProbeTargetIsOfficialAPI("https://nottypesafe.ai"))
 	require.False(t, upstreamBillingProbeTargetIsOfficialAPI("https://notbigmodel.cn"))
 	require.False(t, upstreamBillingProbeTargetIsOfficialAPI("https://deepseek.example.com"))
 }
@@ -275,4 +284,17 @@ func TestUpstreamBillingProbeSetAccountEnabledAcceptsGrokAPIKey(t *testing.T) {
 
 	err := svc.SetAccountEnabled(context.Background(), grokOAuth.ID, true)
 	require.ErrorIs(t, err, ErrUpstreamBillingProbeAccountInvalid)
+}
+
+func TestBuildAccountForCreateAcceptsTypeSafeAPIKeyWithProbeEnabled(t *testing.T) {
+	enabled := true
+	account, err := buildAccountForCreate(&CreateAccountInput{
+		Name:         "typesafe",
+		Platform:     PlatformTypeSafe,
+		Type:         AccountTypeAPIKey,
+		Credentials:  map[string]any{"api_key": "ts-key", "base_url": "https://api.typesafe.ai"},
+		ProbeEnabled: &enabled,
+	}, map[string]any{})
+	require.NoError(t, err)
+	require.Equal(t, true, account.Extra[UpstreamBillingProbeEnabledExtraKey])
 }

@@ -183,6 +183,7 @@ type SystemSettings struct {
 	AdminRechargeRebateEnabled        bool
 	DefaultUserRPMLimit               int
 	DefaultSubscriptions              []DefaultSubscriptionSetting
+	CyberPolicyUserAllowlist          string
 
 	// Model fallback configuration
 	EnableModelFallback      bool   `json:"enable_model_fallback"`
@@ -201,6 +202,8 @@ type SystemSettings struct {
 	OpsQueryModeDefault          string
 	OpsMetricsIntervalSeconds    int
 
+	ExcelBPSEnabled bool `json:"excel_bps_enabled"`
+
 	// Channel Monitor feature
 	ChannelMonitorEnabled                bool   `json:"channel_monitor_enabled"`
 	ChannelMonitorMode                   string `json:"channel_monitor_mode"`
@@ -208,6 +211,10 @@ type SystemSettings struct {
 	ChannelMonitorHideThroughput         bool   `json:"channel_monitor_hide_throughput"`
 	ChannelMonitorShowQuota              bool   `json:"channel_monitor_show_quota"`
 	ChannelMonitorHideUserRanking        bool   `json:"channel_monitor_hide_user_ranking"`
+	PrismBrowserEnabled                  bool   `json:"prism_browser_enabled"`
+	PrismBrowserBaseURL                  string `json:"prism_browser_base_url"`
+	PrismBrowserAPIKeyConfigured         bool   `json:"prism_browser_api_key_configured"`
+	PrismBrowserAPIKey                   string `json:"-"`
 
 	// Grok model mapping policy (admin settings; empty mapping falls back to these).
 	GrokDefaultTextModel           string `json:"grok_default_text_model"`
@@ -232,6 +239,10 @@ type SystemSettings struct {
 	ModelPlazaRequireAuth   bool   `json:"model_plaza_require_auth"`
 	ModelPlazaDescription   string `json:"model_plaza_description"`
 	PluginManagementEnabled bool   `json:"plugin_management_enabled"`
+
+	// Support tickets ("网站工单") switch + form config
+	SupportTicketEnabled bool                `json:"support_ticket_enabled"`
+	SupportTicket        SupportTicketConfig `json:"support_ticket_config"`
 
 	// Claude Code version check
 	MinClaudeCodeVersion string
@@ -335,19 +346,22 @@ type SystemSettings struct {
 	RequestCaptureQuotaMiB      int64
 	RequestCaptureRetentionDays int
 	// 使用详情中长上下文计费 x2 徽标的展示开关（默认开启）
-	ExcelBPSImageMode           string
-	UsageShowLongContextBadge   bool
-	ExcelBPSImageRelayEnabled   bool
-	ExcelBPSImageBaseURL        string
-	ExcelBPSImageBodyLimitMiB   int
-	ExcelBPSImageBudgetMiB      int
-	ExcelBPSImageMaxRequests    int
-	ExcelBPSImageMaxImageMiB    int
-	ExcelBPSImageMaxImages      int
-	ExcelBPSImageMaxTotalMiB    int
-	ExcelBPSImageStorageMiB     int
-	ExcelBPSImageStorageEntries int
-	ExcelBPSImageTTLMinutes     int
+	ExcelBPSImageMode             string
+	UsageShowLongContextBadge     bool
+	ExcelBPSImageRelayEnabled     bool
+	ExcelBPSImageBaseURL          string
+	ExcelBPSImageBodyLimitMiB     int
+	ExcelBPSImageBudgetMiB        int
+	ExcelBPSImageMaxRequests      int
+	ExcelBPSImageMaxImageMiB      int
+	ExcelBPSImageMaxImages        int
+	ExcelBPSImageLimitPolicy      string
+	ExcelBPSImageWarningRemaining int
+	ExcelBPSImageCompactReserve   int
+	ExcelBPSImageMaxTotalMiB      int
+	ExcelBPSImageStorageMiB       int
+	ExcelBPSImageStorageEntries   int
+	ExcelBPSImageTTLMinutes       int
 }
 
 type DefaultSubscriptionSetting struct {
@@ -417,6 +431,10 @@ type PublicSettings struct {
 	BalanceLowNotifyThreshold   float64
 	BalanceLowNotifyRechargeURL string
 
+	// Protocol feature switches, exposed so account editors follow global controls.
+	ExcelBPSEnabled     bool `json:"excel_bps_enabled"`
+	PrismBrowserEnabled bool `json:"prism_browser_enabled"`
+
 	// Channel Monitor feature
 	ChannelMonitorEnabled                bool   `json:"channel_monitor_enabled"`
 	ChannelMonitorMode                   string `json:"channel_monitor_mode"`
@@ -443,6 +461,9 @@ type PublicSettings struct {
 	ModelPlazaEnabled       bool `json:"model_plaza_enabled"`
 	ModelPlazaRequireAuth   bool `json:"model_plaza_require_auth"`
 	PluginManagementEnabled bool `json:"plugin_management_enabled"`
+
+	// Support tickets ("网站工单") feature switch
+	SupportTicketEnabled bool `json:"support_ticket_enabled"`
 
 	// Affiliate (邀请返利) feature toggle
 	AffiliateEnabled bool `json:"affiliate_enabled"`

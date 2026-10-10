@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"reflect"
@@ -15,6 +16,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/Wei-Shaw/sub2api/internal/service/basispoints"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
@@ -22,10 +24,14 @@ import (
 
 // UpdateSettingsRequest 更新设置请求
 type UpdateSettingsRequest struct {
+	ExcelBPSEnabled                 *bool                            `json:"excel_bps_enabled"`
 	OpenAICodexTicketHarvestScope   *service.CodexTicketHarvestScope `json:"openai_codex_ticket_harvest_scope"`
 	OpenAICodexTicketStrictResponse *bool                            `json:"openai_codex_ticket_strict_response"`
 	OpenAICodexTicketFailClosed     *bool                            `json:"openai_codex_ticket_fail_closed"`
 	OpenAICodexTicketStrategy       *string                          `json:"openai_codex_ticket_strategy"`
+	PrismBrowserEnabled             bool                             `json:"prism_browser_enabled"`
+	PrismBrowserBaseURL             string                           `json:"prism_browser_base_url"`
+	PrismBrowserAPIKey              string                           `json:"prism_browser_api_key"`
 	// 注册设置
 	RegistrationEnabled                 bool                         `json:"registration_enabled"`
 	EmailVerifyEnabled                  bool                         `json:"email_verify_enabled"`
@@ -320,11 +326,15 @@ type UpdateSettingsRequest struct {
 	PaymentBalanceRechargeMultiplier *float64 `json:"payment_balance_recharge_multiplier"`
 	PaymentSubscriptionUSDToCNYRate  *float64 `json:"payment_subscription_usd_to_cny_rate"`
 	PaymentRechargeFeeRate           *float64 `json:"payment_recharge_fee_rate"`
-	PaymentLoadBalanceStrat          *string  `json:"payment_load_balance_strategy"`
-	PaymentProductNamePrefix         *string  `json:"payment_product_name_prefix"`
-	PaymentProductNameSuffix         *string  `json:"payment_product_name_suffix"`
-	PaymentHelpImageURL              *string  `json:"payment_help_image_url"`
-	PaymentHelpText                  *string  `json:"payment_help_text"`
+	// nil 表示不更新；空数组表示清空阶梯
+	PaymentRechargeBonusTiers  *[]dto.RechargeBonusTier `json:"payment_recharge_bonus_tiers"`
+	PaymentRechargeBonusMode   *string                  `json:"payment_recharge_bonus_mode"`
+	PaymentRechargeBonusNotice *string                  `json:"payment_recharge_bonus_notice"`
+	PaymentLoadBalanceStrat    *string                  `json:"payment_load_balance_strategy"`
+	PaymentProductNamePrefix   *string                  `json:"payment_product_name_prefix"`
+	PaymentProductNameSuffix   *string                  `json:"payment_product_name_suffix"`
+	PaymentHelpImageURL        *string                  `json:"payment_help_image_url"`
+	PaymentHelpText            *string                  `json:"payment_help_text"`
 
 	// Cancel rate limit
 	PaymentCancelRateLimitEnabled *bool   `json:"payment_cancel_rate_limit_enabled"`
@@ -369,6 +379,10 @@ type UpdateSettingsRequest struct {
 	// Plugin management menu visibility switch; plugin runtime is unaffected.
 	PluginManagementEnabled *bool `json:"plugin_management_enabled"`
 
+	// Support tickets switch + form config
+	SupportTicketEnabled *bool                        `json:"support_ticket_enabled"`
+	SupportTicket        *service.SupportTicketConfig `json:"support_ticket_config"`
+
 	// Affiliate (邀请返利) feature switch
 	AffiliateEnabled *bool `json:"affiliate_enabled"`
 
@@ -376,9 +390,10 @@ type UpdateSettingsRequest struct {
 	RiskControlEnabled *bool `json:"risk_control_enabled"`
 
 	// cyber 会话屏蔽开关 + TTL
-	CyberSessionBlockEnabled          *bool `json:"cyber_session_block_enabled"`
-	CyberSessionBlockTTLSeconds       *int  `json:"cyber_session_block_ttl_seconds"`
-	CyberSessionIdentityStrictEnabled *bool `json:"cyber_session_identity_strict_enabled"`
+	CyberSessionBlockEnabled          *bool   `json:"cyber_session_block_enabled"`
+	CyberSessionBlockTTLSeconds       *int    `json:"cyber_session_block_ttl_seconds"`
+	CyberSessionIdentityStrictEnabled *bool   `json:"cyber_session_identity_strict_enabled"`
+	CyberPolicyUserAllowlist          *string `json:"cyber_policy_user_allowlist"`
 
 	// OpenAI fast/flex policy (optional, only updated when provided)
 	OpenAIFastPolicySettings *dto.OpenAIFastPolicySettings `json:"openai_fast_policy_settings,omitempty"`
@@ -398,23 +413,26 @@ type UpdateSettingsRequest struct {
 	AuthSourceGooglePlatformQuotas   map[string]*service.DefaultPlatformQuotaSetting `json:"auth_source_default_google_platform_quotas"`
 	AuthSourceDingTalkPlatformQuotas map[string]*service.DefaultPlatformQuotaSetting `json:"auth_source_default_dingtalk_platform_quotas"`
 
-	AllowUserViewErrorRequests  *bool   `json:"allow_user_view_error_requests"`
-	UsageShowLongContextBadge   *bool   `json:"usage_show_long_context_badge"`
-	RequestCaptureEnabled       *bool   `json:"request_capture_enabled"`
-	RequestCaptureQuotaMiB      *int64  `json:"request_capture_quota_mib"`
-	RequestCaptureRetentionDays *int    `json:"request_capture_retention_days"`
-	ExcelBPSImageMode           *string `json:"excel_bps_image_mode"`
-	ExcelBPSImageRelayEnabled   *bool   `json:"excel_bps_image_relay_enabled"`
-	ExcelBPSImageBaseURL        *string `json:"excel_bps_image_base_url"`
-	ExcelBPSImageBodyLimitMiB   *int    `json:"excel_bps_image_body_limit_mib"`
-	ExcelBPSImageBudgetMiB      *int    `json:"excel_bps_image_budget_mib"`
-	ExcelBPSImageMaxRequests    *int    `json:"excel_bps_image_max_requests"`
-	ExcelBPSImageMaxImageMiB    *int    `json:"excel_bps_image_max_image_mib"`
-	ExcelBPSImageMaxImages      *int    `json:"excel_bps_image_max_images"`
-	ExcelBPSImageMaxTotalMiB    *int    `json:"excel_bps_image_max_total_mib"`
-	ExcelBPSImageStorageMiB     *int    `json:"excel_bps_image_storage_mib"`
-	ExcelBPSImageStorageEntries *int    `json:"excel_bps_image_storage_entries"`
-	ExcelBPSImageTTLMinutes     *int    `json:"excel_bps_image_ttl_minutes"`
+	AllowUserViewErrorRequests    *bool   `json:"allow_user_view_error_requests"`
+	UsageShowLongContextBadge     *bool   `json:"usage_show_long_context_badge"`
+	RequestCaptureEnabled         *bool   `json:"request_capture_enabled"`
+	RequestCaptureQuotaMiB        *int64  `json:"request_capture_quota_mib"`
+	RequestCaptureRetentionDays   *int    `json:"request_capture_retention_days"`
+	ExcelBPSImageMode             *string `json:"excel_bps_image_mode"`
+	ExcelBPSImageRelayEnabled     *bool   `json:"excel_bps_image_relay_enabled"`
+	ExcelBPSImageBaseURL          *string `json:"excel_bps_image_base_url"`
+	ExcelBPSImageBodyLimitMiB     *int    `json:"excel_bps_image_body_limit_mib"`
+	ExcelBPSImageBudgetMiB        *int    `json:"excel_bps_image_budget_mib"`
+	ExcelBPSImageMaxRequests      *int    `json:"excel_bps_image_max_requests"`
+	ExcelBPSImageMaxImageMiB      *int    `json:"excel_bps_image_max_image_mib"`
+	ExcelBPSImageMaxImages        *int    `json:"excel_bps_image_max_images"`
+	ExcelBPSImageLimitPolicy      *string `json:"excel_bps_image_limit_policy"`
+	ExcelBPSImageWarningRemaining *int    `json:"excel_bps_image_warning_remaining"`
+	ExcelBPSImageCompactReserve   *int    `json:"excel_bps_image_compact_reserve"`
+	ExcelBPSImageMaxTotalMiB      *int    `json:"excel_bps_image_max_total_mib"`
+	ExcelBPSImageStorageMiB       *int    `json:"excel_bps_image_storage_mib"`
+	ExcelBPSImageStorageEntries   *int    `json:"excel_bps_image_storage_entries"`
+	ExcelBPSImageTTLMinutes       *int    `json:"excel_bps_image_ttl_minutes"`
 }
 
 // UpdateSettings 更新系统设置
@@ -529,6 +547,25 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		response.BadRequest(c, "harvest scope mode is required")
 		return
 	}
+	if req.PrismBrowserEnabled {
+		if strings.TrimSpace(req.PrismBrowserBaseURL) == "" {
+			response.BadRequest(c, "prism browser base URL is required when enabled")
+			return
+		}
+		if strings.TrimSpace(req.PrismBrowserAPIKey) != "" && len(strings.TrimSpace(req.PrismBrowserAPIKey)) < 32 {
+			response.BadRequest(c, "prism browser API key must contain at least 32 characters")
+			return
+		}
+		current, err := h.settingService.GetAllSettings(c.Request.Context())
+		if err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+		if len(strings.TrimSpace(req.PrismBrowserAPIKey)) < 32 && len(strings.TrimSpace(current.PrismBrowserAPIKey)) < 32 {
+			response.BadRequest(c, "configure a Prism browser API key with at least 32 characters before enabling")
+			return
+		}
+	}
 	if req.RequestCaptureQuotaMiB != nil && (*req.RequestCaptureQuotaMiB < 1 || *req.RequestCaptureQuotaMiB > (1<<63-1)/(1<<20)) {
 		response.BadRequest(c, "Capture quota must be positive MiB within int64 range")
 		return
@@ -537,40 +574,44 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		response.BadRequest(c, "Capture retention must be 1-30 days")
 		return
 	}
-	if req.ExcelBPSImageMaxImageMiB != nil && (*req.ExcelBPSImageMaxImageMiB < 1 || *req.ExcelBPSImageMaxImageMiB > 128) {
-		response.BadRequest(c, "Image relay max_image_mib must be 1-128")
+	if req.ExcelBPSImageMaxImageMiB != nil && (*req.ExcelBPSImageMaxImageMiB < 1 || *req.ExcelBPSImageMaxImageMiB > basispoints.MaxRelayImageMiB) {
+		response.BadRequest(c, fmt.Sprintf("Image relay max_image_mib must be 1-%d", basispoints.MaxRelayImageMiB))
 		return
 	}
-	if req.ExcelBPSImageMaxImages != nil && (*req.ExcelBPSImageMaxImages < 1 || *req.ExcelBPSImageMaxImages > 4096) {
-		response.BadRequest(c, "Image relay max_images must be 1-4096")
+	if (req.ExcelBPSImageWarningRemaining != nil && (*req.ExcelBPSImageWarningRemaining < 1 || *req.ExcelBPSImageWarningRemaining > basispoints.MaxRelayImages)) || (req.ExcelBPSImageCompactReserve != nil && (*req.ExcelBPSImageCompactReserve < 1 || *req.ExcelBPSImageCompactReserve > basispoints.MaxRelayImages)) {
+		response.BadRequest(c, fmt.Sprintf("Image policy margins must be 1-%d", basispoints.MaxRelayImages))
 		return
 	}
-	if req.ExcelBPSImageMaxTotalMiB != nil && (*req.ExcelBPSImageMaxTotalMiB < 1 || *req.ExcelBPSImageMaxTotalMiB > 128) {
-		response.BadRequest(c, "Image relay max_total_mib must be 1-128")
+	if req.ExcelBPSImageMaxImages != nil && (*req.ExcelBPSImageMaxImages < 1 || *req.ExcelBPSImageMaxImages > basispoints.MaxRelayImages) {
+		response.BadRequest(c, fmt.Sprintf("Image relay max_images must be 1-%d", basispoints.MaxRelayImages))
 		return
 	}
-	if req.ExcelBPSImageStorageMiB != nil && (*req.ExcelBPSImageStorageMiB < 1 || *req.ExcelBPSImageStorageMiB > 16384) {
-		response.BadRequest(c, "Image relay storage_mib must be 1-16384")
+	if req.ExcelBPSImageMaxTotalMiB != nil && (*req.ExcelBPSImageMaxTotalMiB < 1 || *req.ExcelBPSImageMaxTotalMiB > basispoints.MaxRelayRequestMiB) {
+		response.BadRequest(c, fmt.Sprintf("Image relay max_total_mib must be 1-%d", basispoints.MaxRelayRequestMiB))
 		return
 	}
-	if req.ExcelBPSImageStorageEntries != nil && (*req.ExcelBPSImageStorageEntries < 1 || *req.ExcelBPSImageStorageEntries > 65536) {
-		response.BadRequest(c, "Image relay storage_entries must be 1-65536")
+	if req.ExcelBPSImageStorageMiB != nil && (*req.ExcelBPSImageStorageMiB < 1 || *req.ExcelBPSImageStorageMiB > basispoints.MaxRelayStorageMiB) {
+		response.BadRequest(c, fmt.Sprintf("Image relay storage_mib must be 1-%d", basispoints.MaxRelayStorageMiB))
 		return
 	}
-	if req.ExcelBPSImageTTLMinutes != nil && (*req.ExcelBPSImageTTLMinutes < 1 || *req.ExcelBPSImageTTLMinutes > 1440) {
-		response.BadRequest(c, "Image relay ttl_minutes must be 1-1440")
+	if req.ExcelBPSImageStorageEntries != nil && (*req.ExcelBPSImageStorageEntries < 1 || *req.ExcelBPSImageStorageEntries > basispoints.MaxRelayStorageEntries) {
+		response.BadRequest(c, fmt.Sprintf("Image relay storage_entries must be 1-%d", basispoints.MaxRelayStorageEntries))
 		return
 	}
-	if req.ExcelBPSImageBodyLimitMiB != nil && (*req.ExcelBPSImageBodyLimitMiB < 1 || *req.ExcelBPSImageBodyLimitMiB > 128) {
-		response.BadRequest(c, "Image request body limit must be 1-128 MiB")
+	if req.ExcelBPSImageTTLMinutes != nil && (*req.ExcelBPSImageTTLMinutes < 1 || *req.ExcelBPSImageTTLMinutes > basispoints.MaxRelayTTLMinutes) {
+		response.BadRequest(c, fmt.Sprintf("Image relay ttl_minutes must be 1-%d", basispoints.MaxRelayTTLMinutes))
 		return
 	}
-	if req.ExcelBPSImageBudgetMiB != nil && (*req.ExcelBPSImageBudgetMiB < 512 || *req.ExcelBPSImageBudgetMiB > 2048) {
-		response.BadRequest(c, "Image request budget must be 512-2048 MiB")
+	if req.ExcelBPSImageBodyLimitMiB != nil && (*req.ExcelBPSImageBodyLimitMiB < 1 || *req.ExcelBPSImageBodyLimitMiB > basispoints.MaxImageBodyMiB) {
+		response.BadRequest(c, fmt.Sprintf("Image request body limit must be 1-%d MiB", basispoints.MaxImageBodyMiB))
 		return
 	}
-	if req.ExcelBPSImageMaxRequests != nil && (*req.ExcelBPSImageMaxRequests < 1 || *req.ExcelBPSImageMaxRequests > 512) {
-		response.BadRequest(c, "Image concurrent requests must be 1-512")
+	if req.ExcelBPSImageBudgetMiB != nil && (*req.ExcelBPSImageBudgetMiB < basispoints.MinImageBudgetMiB || *req.ExcelBPSImageBudgetMiB > basispoints.MaxImageBudgetMiB) {
+		response.BadRequest(c, fmt.Sprintf("Image request budget must be %d-%d MiB", basispoints.MinImageBudgetMiB, basispoints.MaxImageBudgetMiB))
+		return
+	}
+	if req.ExcelBPSImageMaxRequests != nil && (*req.ExcelBPSImageMaxRequests < 1 || *req.ExcelBPSImageMaxRequests > basispoints.MaxImageRequests) {
+		response.BadRequest(c, fmt.Sprintf("Image concurrent requests must be 1-%d", basispoints.MaxImageRequests))
 		return
 	}
 	auditReq := settingsAuditRequest(req)
@@ -1580,6 +1621,13 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		}
 	}
 
+	if req.CyberPolicyUserAllowlist != nil {
+		if _, err := service.ParseCyberPolicyUserAllowlist(*req.CyberPolicyUserAllowlist); err != nil {
+			response.BadRequest(c, err.Error())
+			return
+		}
+	}
+
 	// cyber 会话屏蔽 TTL 校验：提供时必须 > 0
 	if req.CyberSessionBlockTTLSeconds != nil && *req.CyberSessionBlockTTLSeconds <= 0 {
 		response.BadRequest(c, "cyber_session_block_ttl_seconds must be > 0")
@@ -1592,6 +1640,9 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		AccountSchedulingThresholds: req.AccountSchedulingThresholds,
 
 		RegistrationEnabled:                 req.RegistrationEnabled,
+		PrismBrowserEnabled:                 req.PrismBrowserEnabled,
+		PrismBrowserBaseURL:                 req.PrismBrowserBaseURL,
+		PrismBrowserAPIKey:                  req.PrismBrowserAPIKey,
 		EmailVerifyEnabled:                  req.EmailVerifyEnabled,
 		RegistrationEmailSuffixWhitelist:    req.RegistrationEmailSuffixWhitelist,
 		RegistrationEmailDomainQuotaEnabled: registrationEmailDomainQuotaEnabled,
@@ -1793,6 +1844,24 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 				return *req.ExcelBPSImageMaxImageMiB
 			}
 			return previousSettings.ExcelBPSImageMaxImageMiB
+		}(),
+		ExcelBPSImageLimitPolicy: func() string {
+			if req.ExcelBPSImageLimitPolicy != nil {
+				return *req.ExcelBPSImageLimitPolicy
+			}
+			return previousSettings.ExcelBPSImageLimitPolicy
+		}(),
+		ExcelBPSImageWarningRemaining: func() int {
+			if req.ExcelBPSImageWarningRemaining != nil {
+				return *req.ExcelBPSImageWarningRemaining
+			}
+			return previousSettings.ExcelBPSImageWarningRemaining
+		}(),
+		ExcelBPSImageCompactReserve: func() int {
+			if req.ExcelBPSImageCompactReserve != nil {
+				return *req.ExcelBPSImageCompactReserve
+			}
+			return previousSettings.ExcelBPSImageCompactReserve
 		}(),
 		ExcelBPSImageMaxImages: func() int {
 			if req.ExcelBPSImageMaxImages != nil {
@@ -2131,6 +2200,12 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.AccountQuotaNotifyEmails
 		}(),
+		ExcelBPSEnabled: func() bool {
+			if req.ExcelBPSEnabled != nil {
+				return *req.ExcelBPSEnabled
+			}
+			return previousSettings.ExcelBPSEnabled
+		}(),
 		ChannelMonitorEnabled: func() bool {
 			if req.ChannelMonitorEnabled != nil {
 				return *req.ChannelMonitorEnabled
@@ -2233,6 +2308,18 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.PluginManagementEnabled
 		}(),
+		SupportTicketEnabled: func() bool {
+			if req.SupportTicketEnabled != nil {
+				return *req.SupportTicketEnabled
+			}
+			return previousSettings.SupportTicketEnabled
+		}(),
+		SupportTicket: func() service.SupportTicketConfig {
+			if req.SupportTicket != nil {
+				return *req.SupportTicket
+			}
+			return previousSettings.SupportTicket
+		}(),
 		AffiliateEnabled: func() bool {
 			if req.AffiliateEnabled != nil {
 				return *req.AffiliateEnabled
@@ -2244,6 +2331,12 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 				return *req.RiskControlEnabled
 			}
 			return previousSettings.RiskControlEnabled
+		}(),
+		CyberPolicyUserAllowlist: func() string {
+			if req.CyberPolicyUserAllowlist != nil {
+				return *req.CyberPolicyUserAllowlist
+			}
+			return previousSettings.CyberPolicyUserAllowlist
 		}(),
 		CyberSessionBlockEnabled: func() bool {
 			if req.CyberSessionBlockEnabled != nil {
@@ -2357,6 +2450,9 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			BalanceRechargeMultiplier:     req.PaymentBalanceRechargeMultiplier,
 			SubscriptionUSDToCNYRate:      req.PaymentSubscriptionUSDToCNYRate,
 			RechargeFeeRate:               req.PaymentRechargeFeeRate,
+			RechargeBonusTiers:            rechargeBonusTiersFromDTO(req.PaymentRechargeBonusTiers),
+			RechargeBonusMode:             req.PaymentRechargeBonusMode,
+			RechargeBonusNotice:           req.PaymentRechargeBonusNotice,
 			LoadBalanceStrategy:           req.PaymentLoadBalanceStrat,
 			ProductNamePrefix:             req.PaymentProductNamePrefix,
 			ProductNameSuffix:             req.PaymentProductNameSuffix,
@@ -2414,6 +2510,9 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 
 	payload := dto.SystemSettings{
 		RegistrationEnabled:                                    updatedSettings.RegistrationEnabled,
+		PrismBrowserEnabled:                                    updatedSettings.PrismBrowserEnabled,
+		PrismBrowserBaseURL:                                    updatedSettings.PrismBrowserBaseURL,
+		PrismBrowserAPIKeyConfigured:                           updatedSettings.PrismBrowserAPIKeyConfigured,
 		EmailVerifyEnabled:                                     updatedSettings.EmailVerifyEnabled,
 		RegistrationEmailSuffixWhitelist:                       updatedSettings.RegistrationEmailSuffixWhitelist,
 		RegistrationEmailDomainQuotaEnabled:                    updatedSettings.RegistrationEmailDomainQuotaEnabled,
@@ -2645,6 +2744,9 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		PaymentBalanceRechargeMultiplier:                       updatedPaymentCfg.BalanceRechargeMultiplier,
 		PaymentSubscriptionUSDToCNYRate:                        updatedPaymentCfg.SubscriptionUSDToCNYRate,
 		PaymentRechargeFeeRate:                                 updatedPaymentCfg.RechargeFeeRate,
+		PaymentRechargeBonusTiers:                              rechargeBonusTiersToDTO(updatedPaymentCfg.RechargeBonusTiers),
+		PaymentRechargeBonusMode:                               rechargeBonusModeToDTO(updatedPaymentCfg.RechargeBonusMode),
+		PaymentRechargeBonusNotice:                             updatedPaymentCfg.RechargeBonusNotice,
 		PaymentLoadBalanceStrat:                                updatedPaymentCfg.LoadBalanceStrategy,
 		PaymentProductNamePrefix:                               updatedPaymentCfg.ProductNamePrefix,
 		PaymentProductNameSuffix:                               updatedPaymentCfg.ProductNameSuffix,
@@ -2659,6 +2761,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		PaymentAlipayMobilePrecreateDeepLink:                   updatedPaymentCfg.AlipayMobilePrecreateDeepLink,
 
 		ChannelMonitorEnabled:                updatedSettings.ChannelMonitorEnabled,
+		ExcelBPSEnabled:                      updatedSettings.ExcelBPSEnabled,
 		ChannelMonitorMode:                   updatedSettings.ChannelMonitorMode,
 		ChannelMonitorDefaultIntervalSeconds: updatedSettings.ChannelMonitorDefaultIntervalSeconds,
 		ChannelMonitorHideThroughput:         updatedSettings.ChannelMonitorHideThroughput,
@@ -2679,6 +2782,9 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		ModelPlazaDescription:   updatedSettings.ModelPlazaDescription,
 		PluginManagementEnabled: updatedSettings.PluginManagementEnabled,
 
+		SupportTicketEnabled: updatedSettings.SupportTicketEnabled,
+		SupportTicket:        updatedSettings.SupportTicket,
+
 		AffiliateEnabled: updatedSettings.AffiliateEnabled,
 
 		RiskControlEnabled:                updatedSettings.RiskControlEnabled,
@@ -2695,15 +2801,20 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		ExcelBPSImageRelayEnabled:         updatedSettings.ExcelBPSImageRelayEnabled,
 		ExcelBPSImageMaxImageMiB:          updatedSettings.ExcelBPSImageMaxImageMiB,
 		ExcelBPSImageMaxImages:            updatedSettings.ExcelBPSImageMaxImages,
-		ExcelBPSImageMaxTotalMiB:          updatedSettings.ExcelBPSImageMaxTotalMiB,
-		ExcelBPSImageStorageMiB:           updatedSettings.ExcelBPSImageStorageMiB,
-		ExcelBPSImageStorageEntries:       updatedSettings.ExcelBPSImageStorageEntries,
-		ExcelBPSImageTTLMinutes:           updatedSettings.ExcelBPSImageTTLMinutes,
+		ExcelBPSImageLimitPolicy:          updatedSettings.ExcelBPSImageLimitPolicy,
+		ExcelBPSImageWarningRemaining:     updatedSettings.ExcelBPSImageWarningRemaining,
+		ExcelBPSImageCompactReserve:       updatedSettings.ExcelBPSImageCompactReserve,
+
+		ExcelBPSImageMaxTotalMiB:    updatedSettings.ExcelBPSImageMaxTotalMiB,
+		ExcelBPSImageStorageMiB:     updatedSettings.ExcelBPSImageStorageMiB,
+		ExcelBPSImageStorageEntries: updatedSettings.ExcelBPSImageStorageEntries,
+		ExcelBPSImageTTLMinutes:     updatedSettings.ExcelBPSImageTTLMinutes,
 
 		ExcelBPSImageBaseURL:      updatedSettings.ExcelBPSImageBaseURL,
 		ExcelBPSImageBodyLimitMiB: updatedSettings.ExcelBPSImageBodyLimitMiB,
 		ExcelBPSImageBudgetMiB:    updatedSettings.ExcelBPSImageBudgetMiB,
 		ExcelBPSImageMaxRequests:  updatedSettings.ExcelBPSImageMaxRequests,
+		CyberPolicyUserAllowlist:  updatedSettings.CyberPolicyUserAllowlist,
 	}
 	if fastPolicy, err := h.settingService.GetOpenAIFastPolicySettings(c.Request.Context()); err != nil {
 		slog.Error("openai_fast_policy_settings_get_failed", "error", err)
@@ -2740,6 +2851,7 @@ func hasPaymentFields(req UpdateSettingsRequest) bool {
 		req.PaymentEnabledTypes != nil || req.PaymentBalanceDisabled != nil ||
 		req.PaymentBalanceRechargeMultiplier != nil || req.PaymentSubscriptionUSDToCNYRate != nil ||
 		req.PaymentRechargeFeeRate != nil ||
+		req.PaymentRechargeBonusTiers != nil || req.PaymentRechargeBonusMode != nil || req.PaymentRechargeBonusNotice != nil ||
 		req.PaymentLoadBalanceStrat != nil || req.PaymentProductNamePrefix != nil ||
 		req.PaymentProductNameSuffix != nil || req.PaymentHelpImageURL != nil ||
 		req.PaymentHelpText != nil || req.PaymentCancelRateLimitEnabled != nil ||

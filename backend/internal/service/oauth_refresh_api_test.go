@@ -105,14 +105,15 @@ func (r *refreshAPIAccountRepo) UpdateGrokOAuthCredentialsIfUnchanged(
 
 // refreshAPIExecutorStub implements OAuthRefreshExecutor for tests.
 type refreshAPIExecutorStub struct {
-	needsRefresh  bool
-	cannotRefresh bool
-	credentials   map[string]any
-	err           error
-	refreshCalls  int
-	canRefresh    func(*Account) bool
-	onRefresh     func()
-	delay         time.Duration
+	needsRefresh        bool
+	cannotRefresh       bool
+	credentials         map[string]any
+	err                 error
+	refreshCalls        int
+	canRefresh          func(*Account) bool
+	onRefresh           func()
+	delay               time.Duration
+	waitForCancellation bool
 }
 
 func (e *refreshAPIExecutorStub) CanRefresh(account *Account) bool {
@@ -129,8 +130,11 @@ func (e *refreshAPIExecutorStub) NeedsRefresh(_ *Account, _ time.Duration) bool 
 	return e.needsRefresh
 }
 
-func (e *refreshAPIExecutorStub) Refresh(_ context.Context, _ *Account) (map[string]any, error) {
+func (e *refreshAPIExecutorStub) Refresh(ctx context.Context, _ *Account) (map[string]any, error) {
 	e.refreshCalls++
+	if e.waitForCancellation {
+		<-ctx.Done()
+	}
 	if e.delay > 0 {
 		time.Sleep(e.delay)
 	}
@@ -637,9 +641,9 @@ func TestRefreshIfNeeded_LateSuccessAfterDeadlineDoesNotPersist(t *testing.T) {
 	account := &Account{ID: 85, Platform: PlatformGrok, Type: AccountTypeOAuth, Status: StatusActive}
 	repo := &refreshAPIAccountRepo{account: account}
 	executor := &refreshAPIExecutorStub{
-		needsRefresh: true,
-		credentials:  map[string]any{"access_token": "late-token"},
-		delay:        30 * time.Millisecond,
+		needsRefresh:        true,
+		credentials:         map[string]any{"access_token": "late-token"},
+		waitForCancellation: true,
 	}
 	api := NewOAuthRefreshAPI(repo, nil)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)

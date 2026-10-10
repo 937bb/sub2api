@@ -51,7 +51,7 @@
             <div
               class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
             >
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+              <h2 id="settings-section-admin-api-key" tabindex="-1" class="text-lg font-semibold text-gray-900 dark:text-white">
                 {{ t("admin.settings.adminApiKey.title") }}
               </h2>
               <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
@@ -203,12 +203,30 @@
 
         <!-- Tab: Gateway -->
         <div v-show="activeTab === 'gateway'" class="space-y-6">
+          <ServerlessSettings v-if="activeTab === 'gateway'" />
+          <div class="card" data-testid="prism-browser-settings">
+            <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
+              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Prism 浏览器桥</h2>
+              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">账号可单独选择 Prism 模型范围。</p>
+            </div>
+            <div class="space-y-4 p-6">
+              <label class="block">
+                <span class="mb-1 block text-sm text-gray-600 dark:text-gray-300">适配器 Base URL</span>
+                <input v-model="form.prism_browser_base_url" class="input w-full" placeholder="http://127.0.0.1:8319/v1" />
+              </label>
+              <label class="block">
+                <span class="mb-1 block text-sm text-gray-600 dark:text-gray-300">桥接 API Key（留空保持原值）</span>
+                <input v-model="form.prism_browser_api_key" type="password" autocomplete="new-password" class="input w-full" />
+              </label>
+              <p v-if="form.prism_browser_enabled && !form.prism_browser_api_key_configured" class="text-sm text-amber-600">启用前必须配置至少 32 个字符的适配器密钥。</p>
+            </div>
+          </div>
           <!-- Overload Cooldown (529) Settings -->
           <div class="card">
             <div
               class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
             >
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+              <h2 id="settings-section-overload-cooldown" tabindex="-1" class="text-lg font-semibold text-gray-900 dark:text-white">
                 {{ t("admin.settings.overloadCooldown.title") }}
               </h2>
               <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
@@ -309,7 +327,7 @@
             <div
               class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
             >
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+              <h2 id="settings-section-rate-limit429cooldown" tabindex="-1" class="text-lg font-semibold text-gray-900 dark:text-white">
                 {{ t("admin.settings.rateLimit429Cooldown.title") }}
               </h2>
               <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
@@ -416,7 +434,7 @@
             <div
               class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
             >
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+              <h2 id="settings-section-stream-timeout" tabindex="-1" class="text-lg font-semibold text-gray-900 dark:text-white">
                 {{ t("admin.settings.streamTimeout.title") }}
               </h2>
               <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
@@ -596,7 +614,7 @@
             <div
               class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
             >
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+              <h2 id="settings-section-rectifier" tabindex="-1" class="text-lg font-semibold text-gray-900 dark:text-white">
                 {{ t("admin.settings.rectifier.title") }}
               </h2>
               <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
@@ -795,7 +813,7 @@
             <div
               class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
             >
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+              <h2 id="settings-section-beta-policy" tabindex="-1" class="text-lg font-semibold text-gray-900 dark:text-white">
                 {{ t("admin.settings.betaPolicy.title") }}
               </h2>
               <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
@@ -1074,7 +1092,7 @@
             <div
               class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
             >
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+              <h2 id="settings-section-openai-fast-policy" tabindex="-1" class="text-lg font-semibold text-gray-900 dark:text-white">
                 {{ t("admin.settings.openaiFastPolicy.title") }}
               </h2>
               <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
@@ -1428,7 +1446,7 @@
             <div
               class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
             >
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+              <h2 id="settings-section-registration" tabindex="-1" class="text-lg font-semibold text-gray-900 dark:text-white">
                 {{ t("admin.settings.registration.title") }}
               </h2>
               <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
@@ -1760,7 +1778,7 @@
             <div
               class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
             >
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+              <h2 id="settings-section-api-key-acl" tabindex="-1" class="text-lg font-semibold text-gray-900 dark:text-white">
                 {{ t("admin.settings.apiKeyAcl.title") }}
               </h2>
               <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
@@ -1853,7 +1871,7 @@
                   size="md"
                   class="text-primary-500"
                 />
-                <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+                <h2 id="settings-section-panel-rate-limit" tabindex="-1" class="text-lg font-semibold text-gray-900 dark:text-white">
                   {{ t("admin.settings.panelRateLimit.title") }}
                 </h2>
               </div>
@@ -2038,7 +2056,7 @@
             <div
               class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
             >
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+              <h2 id="settings-section-captcha" tabindex="-1" class="text-lg font-semibold text-gray-900 dark:text-white">
                 {{ t("admin.settings.captcha.title") }}
               </h2>
               <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
@@ -2442,7 +2460,7 @@
             <div
               class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
             >
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+              <h2 id="settings-section-linuxdo" tabindex="-1" class="text-lg font-semibold text-gray-900 dark:text-white">
                 {{ t("admin.settings.linuxdo.title") }}
               </h2>
               <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
@@ -2560,7 +2578,7 @@
             <div
               class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
             >
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+              <h2 id="settings-section-email-oauth" tabindex="-1" class="text-lg font-semibold text-gray-900 dark:text-white">
                 {{ localText("邮箱快捷登录", "Email OAuth Sign-in") }}
               </h2>
               <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
@@ -2786,7 +2804,7 @@
             <div
               class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
             >
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+              <h2 id="settings-section-wechat-connect" tabindex="-1" class="text-lg font-semibold text-gray-900 dark:text-white">
                 {{ t("admin.settings.wechatConnect.title") }}
               </h2>
               <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
@@ -3128,7 +3146,7 @@
             <div
               class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
             >
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+              <h2 id="settings-section-dingtalk" tabindex="-1" class="text-lg font-semibold text-gray-900 dark:text-white">
                 {{ t("admin.settings.dingtalk.title") }}
               </h2>
               <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
@@ -3416,7 +3434,7 @@
             <div
               class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
             >
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+              <h2 id="settings-section-oidc" tabindex="-1" class="text-lg font-semibold text-gray-900 dark:text-white">
                 {{ t("admin.settings.oidc.title") }}
               </h2>
               <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
@@ -3829,7 +3847,7 @@
             <div
               class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
             >
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+              <h2 id="settings-section-defaults" tabindex="-1" class="text-lg font-semibold text-gray-900 dark:text-white">
                 {{ t("admin.settings.defaults.title") }}
               </h2>
               <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
@@ -4055,7 +4073,7 @@
                       </tr>
                     </thead>
                     <tbody class="space-y-2">
-                      <tr v-for="p in (['anthropic', 'openai', 'gemini', 'antigravity', 'grok'] as const)" :key="p" class="align-top">
+                      <tr v-for="p in platformQuotaRows(form.default_platform_quotas)" :key="p" class="align-top">
                         <td class="pr-4 py-1">
                           <span class="font-mono text-xs text-gray-700 dark:text-gray-300">{{ p }}</span>
                         </td>
@@ -4102,7 +4120,7 @@
             <div
               class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
             >
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+              <h2 id="settings-section-auth-source-defaults" tabindex="-1" class="text-lg font-semibold text-gray-900 dark:text-white">
                 {{ t("admin.settings.authSourceDefaults.title") }}
               </h2>
               <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
@@ -4390,7 +4408,7 @@
                             </tr>
                           </thead>
                           <tbody>
-                            <tr v-for="p in (['anthropic', 'openai', 'gemini', 'antigravity', 'grok'] as const)" :key="`${authSource.source}-pq-${p}`" class="align-top">
+                            <tr v-for="p in platformQuotaRows(authSourceDefaults[authSource.source].platform_quotas)" :key="`${authSource.source}-pq-${p}`" class="align-top">
                               <td class="pr-4 py-1">
                                 <span class="font-mono text-xs text-gray-700 dark:text-gray-300">{{ p }}</span>
                               </td>
@@ -4445,7 +4463,7 @@
             <div
               class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
             >
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+              <h2 id="settings-section-claude-code" tabindex="-1" class="text-lg font-semibold text-gray-900 dark:text-white">
                 {{ t("admin.settings.claudeCode.title") }}
               </h2>
               <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
@@ -4497,7 +4515,7 @@
             <div
               class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
             >
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+              <h2 id="settings-section-gateway-forwarding-codex-hardening-title" tabindex="-1" class="text-lg font-semibold text-gray-900 dark:text-white">
                 {{ t("admin.settings.gatewayForwarding.codexHardeningTitle") }}
               </h2>
             </div>
@@ -4923,7 +4941,7 @@
             <div
               class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
             >
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+              <h2 id="settings-section-upstream-billing-probe" tabindex="-1" class="text-lg font-semibold text-gray-900 dark:text-white">
                 {{ t("admin.settings.upstreamBillingProbe.title") }}
               </h2>
               <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
@@ -5007,7 +5025,7 @@
           <!-- Ollama Cloud Usage Settings -->
           <div class="card" data-testid="ollama-cloud-usage-global-settings">
             <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+              <h2 id="settings-section-ollama-cloud-usage" tabindex="-1" class="text-lg font-semibold text-gray-900 dark:text-white">
                 {{ t("admin.settings.ollamaCloudUsage.title") }}
               </h2>
               <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
@@ -5091,7 +5109,7 @@
           <!-- OpenCode Go Usage Settings -->
           <div class="card" data-testid="opencode-go-usage-global-settings">
             <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+              <h2 id="settings-section-opencode-go-usage" tabindex="-1" class="text-lg font-semibold text-gray-900 dark:text-white">
                 {{ t("admin.settings.opencodeGoUsage.title") }}
               </h2>
               <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
@@ -5177,7 +5195,7 @@
             <div
               class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
             >
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+              <h2 id="settings-section-scheduling" tabindex="-1" class="text-lg font-semibold text-gray-900 dark:text-white">
                 {{ t("admin.settings.scheduling.title") }}
               </h2>
               <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
@@ -5456,7 +5474,7 @@
             <div
               class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
             >
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+              <h2 id="settings-section-gateway-forwarding" tabindex="-1" class="text-lg font-semibold text-gray-900 dark:text-white">
                 {{ t("admin.settings.gatewayForwarding.title") }}
               </h2>
               <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
@@ -6100,7 +6118,7 @@
             <div
               class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
             >
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+              <h2 id="settings-section-web-search-emulation" tabindex="-1" class="text-lg font-semibold text-gray-900 dark:text-white">
                 {{ t("admin.settings.webSearchEmulation.title") }}
               </h2>
               <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
@@ -6534,7 +6552,7 @@
         <!-- Usage Records Settings -->
         <div class="card">
           <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
-            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+            <h2 id="settings-section-usage-records" tabindex="-1" class="text-lg font-semibold text-gray-900 dark:text-white">
               {{ t('admin.settings.usageRecords.title') }}
             </h2>
             <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
@@ -6585,7 +6603,7 @@
             <div
               class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
             >
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+              <h2 id="settings-section-site" tabindex="-1" class="text-lg font-semibold text-gray-900 dark:text-white">
                 {{ t("admin.settings.site.title") }}
               </h2>
               <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
@@ -6952,7 +6970,7 @@
             <div
               class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
             >
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+              <h2 id="settings-section-custom-menu" tabindex="-1" class="text-lg font-semibold text-gray-900 dark:text-white">
                 {{ t("admin.settings.customMenu.title") }}
               </h2>
               <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
@@ -7157,7 +7175,7 @@
 	            <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
 	              <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
 	                <div>
-	                  <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+	                  <h2 id="settings-section-login-agreement" tabindex="-1" class="text-lg font-semibold text-gray-900 dark:text-white">
 	                    {{ localText("登录条款确认", "Login agreement") }}
 	                  </h2>
 	                  <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
@@ -7353,11 +7371,27 @@
         </div>
         <!-- /Tab: Login Agreement -->
 
-	        <!-- Tab: Features (功能开关) -->
+        <!-- Tab: Features (功能开关) -->
         <div v-show="activeTab === 'features'" class="space-y-6">
+        <div class="card" data-testid="protocol-feature-switches">
+          <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">协议功能</h2>
+            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">关闭后立即停止使用对应协议，并隐藏账号编辑中的相关选项。</p>
+          </div>
+          <div class="space-y-5 p-6">
+            <div class="flex items-center justify-between gap-4">
+              <span class="font-medium text-gray-900 dark:text-white">Excel / BPS 协议</span>
+              <Toggle v-model="form.excel_bps_enabled" />
+            </div>
+            <div class="flex items-center justify-between gap-4">
+              <span class="font-medium text-gray-900 dark:text-white">Prism 浏览器桥</span>
+              <Toggle v-model="form.prism_browser_enabled" />
+            </div>
+          </div>
+        </div>
         <div class="card" data-testid="request-capture-settings">
           <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
-            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('admin.requestCapture.title') }}</h2>
+            <h2 id="settings-section-request-capture" tabindex="-1" class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('admin.requestCapture.title') }}</h2>
             <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ t('admin.requestCapture.description') }}</p>
           </div>
           <div class="space-y-5 p-6">
@@ -7375,7 +7409,7 @@
         </div>
         <div class="card" data-testid="excel-bps-image-settings">
           <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
-            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+            <h2 id="settings-section-features-excel-bps-images" tabindex="-1" class="text-lg font-semibold text-gray-900 dark:text-white">
               {{ t('admin.settings.features.excelBpsImages.title') }}
             </h2>
             <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
@@ -7419,28 +7453,42 @@
                   {{ t('admin.settings.features.excelBpsImages.baseUrlHint') }}
                 </p>
               </div>
+              <div class="mt-5 space-y-3" data-testid="bps-image-policy">
+                <label class="input-label" for="bps-image-limit-policy">{{ t('admin.settings.features.excelBpsImages.policyTitle') }}</label>
+                <select id="bps-image-limit-policy" v-model="form.excel_bps_image_limit_policy" class="input">
+                  <option value="off">{{ t('admin.settings.features.excelBpsImages.policyOff') }}</option>
+                  <option value="auto_compact">{{ t('admin.settings.features.excelBpsImages.policyAuto') }}</option>
+                  <option value="warn">{{ t('admin.settings.features.excelBpsImages.policyWarn') }}</option>
+                </select>
+                <p class="text-xs text-gray-500">{{ t('admin.settings.features.excelBpsImages.policyHint') }}</p>
+                <div v-if="form.excel_bps_image_limit_policy === 'warn'" class="grid gap-4 sm:grid-cols-2">
+                  <label class="space-y-1"><span class="input-label">{{ t('admin.settings.features.excelBpsImages.policyWarning') }}</span><input id="bps-image-warning-remaining" v-model.number="form.excel_bps_image_warning_remaining" class="input" type="number" min="1" :max="excelBPSImageLimits.images" required /></label>
+                  <label class="space-y-1"><span class="input-label">{{ t('admin.settings.features.excelBpsImages.policyReserve') }}</span><input id="bps-image-compact-reserve" v-model.number="form.excel_bps_image_compact_reserve" class="input" type="number" min="1" :max="excelBPSImageLimits.images" required /></label>
+                  <p class="text-xs text-gray-500 sm:col-span-2">{{ t('admin.settings.features.excelBpsImages.policyMarginsHint') }}</p>
+                </div>
+              </div>
               <h4 class="mt-6 input-label">{{ t('admin.settings.features.excelBpsImages.requestLimitsTitle') }}</h4>
               <div class="mt-5 grid gap-4 sm:grid-cols-4">
                 <div class="space-y-1">
                   <label for="excel-bps-image-body-limit" class="input-label">{{ t('admin.settings.features.excelBpsImages.bodyLimit') }}</label>
-                  <input id="excel-bps-image-body-limit" v-model.number="form.excel_bps_image_body_limit_mib" class="input" type="number" min="1" max="128" step="1" required />
+                  <input id="excel-bps-image-body-limit" v-model.number="form.excel_bps_image_body_limit_mib" class="input" type="number" min="1" :max="excelBPSImageLimits.bodyMiB" step="1" required />
                 </div>
                 <div class="space-y-1">
                   <label for="excel-bps-image-budget" class="input-label">{{ t('admin.settings.features.excelBpsImages.budget') }}</label>
-                  <input id="excel-bps-image-budget" v-model.number="form.excel_bps_image_budget_mib" class="input" type="number" min="512" max="2048" step="1" required />
+                  <input id="excel-bps-image-budget" v-model.number="form.excel_bps_image_budget_mib" class="input" type="number" :min="excelBPSImageLimits.minBudgetMiB" :max="excelBPSImageLimits.budgetMiB" step="1" required />
                 </div>
                 <div class="space-y-1">
                   <label for="excel-bps-image-max-requests" class="input-label">{{ t('admin.settings.features.excelBpsImages.maxRequests') }}</label>
-                  <input id="excel-bps-image-max-requests" v-model.number="form.excel_bps_image_max_requests" class="input" type="number" min="1" max="512" step="1" required />
+                  <input id="excel-bps-image-max-requests" v-model.number="form.excel_bps_image_max_requests" class="input" type="number" min="1" :max="excelBPSImageLimits.requests" step="1" required />
                 </div>
                 <div class="space-y-1">
                   <label for="excel-bps-image-max-images" class="input-label">{{ t('admin.settings.features.excelBpsImages.maxImages') }}</label>
-                  <input id="excel-bps-image-max-images" v-model.number="form.excel_bps_image_max_images" class="input" type="number" min="1" max="4096" step="1" required />
-                  <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.excelBpsImages.limitRange', { max: 4096 }) }}</p>
+                  <input id="excel-bps-image-max-images" v-model.number="form.excel_bps_image_max_images" class="input" type="number" min="1" :max="excelBPSImageLimits.images" step="1" required />
+                  <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.excelBpsImages.limitRange', { max: excelBPSImageLimits.images }) }}</p>
                 </div>
               </div>
               <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
-                {{ t('admin.settings.features.excelBpsImages.budgetHint') }}
+                {{ t('admin.settings.features.excelBpsImages.budgetHint', excelBPSImageLimits) }}
               </p>
               <p v-if="form.excel_bps_image_mode === 'native'" class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
                 {{ t('admin.settings.features.excelBpsImages.nativeRetentionHint', { maxImages: form.excel_bps_image_max_images }) }}
@@ -7450,28 +7498,28 @@
                 <div class="mt-3 grid gap-4 sm:grid-cols-3">
                   <div class="space-y-1">
                     <label for="excel-bps-image-max-image-mib" class="input-label">{{ t('admin.settings.features.excelBpsImages.maxImageMiB') }}</label>
-                    <input id="excel-bps-image-max-image-mib" v-model.number="form.excel_bps_image_max_image_mib" class="input" type="number" min="1" max="128" step="1" required />
-                    <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.excelBpsImages.limitRange', { max: 128 }) }}</p>
+                    <input id="excel-bps-image-max-image-mib" v-model.number="form.excel_bps_image_max_image_mib" class="input" type="number" min="1" :max="excelBPSImageLimits.imageMiB" step="1" required />
+                    <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.excelBpsImages.limitRange', { max: excelBPSImageLimits.imageMiB }) }}</p>
                   </div>
                   <div class="space-y-1">
                     <label for="excel-bps-image-max-total-mib" class="input-label">{{ t('admin.settings.features.excelBpsImages.maxTotalMiB') }}</label>
-                    <input id="excel-bps-image-max-total-mib" v-model.number="form.excel_bps_image_max_total_mib" class="input" type="number" min="1" max="128" step="1" required />
-                    <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.excelBpsImages.limitRange', { max: 128 }) }}</p>
+                    <input id="excel-bps-image-max-total-mib" v-model.number="form.excel_bps_image_max_total_mib" class="input" type="number" min="1" :max="excelBPSImageLimits.totalMiB" step="1" required />
+                    <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.excelBpsImages.limitRange', { max: excelBPSImageLimits.totalMiB }) }}</p>
                   </div>
                   <div class="space-y-1">
                     <label for="excel-bps-image-storage-mib" class="input-label">{{ t('admin.settings.features.excelBpsImages.storageMiB') }}</label>
-                    <input id="excel-bps-image-storage-mib" v-model.number="form.excel_bps_image_storage_mib" class="input" type="number" min="1" max="16384" step="1" required />
-                    <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.excelBpsImages.limitRange', { max: 16384 }) }}</p>
+                    <input id="excel-bps-image-storage-mib" v-model.number="form.excel_bps_image_storage_mib" class="input" type="number" min="1" :max="excelBPSImageLimits.storageMiB" step="1" required />
+                    <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.excelBpsImages.limitRange', { max: excelBPSImageLimits.storageMiB }) }}</p>
                   </div>
                   <div class="space-y-1">
                     <label for="excel-bps-image-storage-entries" class="input-label">{{ t('admin.settings.features.excelBpsImages.storageEntries') }}</label>
-                    <input id="excel-bps-image-storage-entries" v-model.number="form.excel_bps_image_storage_entries" class="input" type="number" min="1" max="65536" step="1" required />
-                    <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.excelBpsImages.limitRange', { max: 65536 }) }}</p>
+                    <input id="excel-bps-image-storage-entries" v-model.number="form.excel_bps_image_storage_entries" class="input" type="number" min="1" :max="excelBPSImageLimits.storageEntries" step="1" required />
+                    <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.excelBpsImages.limitRange', { max: excelBPSImageLimits.storageEntries }) }}</p>
                   </div>
                   <div class="space-y-1">
                     <label for="excel-bps-image-ttl-minutes" class="input-label">{{ t('admin.settings.features.excelBpsImages.ttlMinutes') }}</label>
-                    <input id="excel-bps-image-ttl-minutes" v-model.number="form.excel_bps_image_ttl_minutes" class="input" type="number" min="1" max="1440" step="1" required />
-                    <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.excelBpsImages.limitRange', { max: 1440 }) }}</p>
+                    <input id="excel-bps-image-ttl-minutes" v-model.number="form.excel_bps_image_ttl_minutes" class="input" type="number" min="1" :max="excelBPSImageLimits.ttlMinutes" step="1" required />
+                    <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.excelBpsImages.limitRange', { max: excelBPSImageLimits.ttlMinutes }) }}</p>
                   </div>
                 </div>
                 <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
@@ -7484,7 +7532,7 @@
 
         <div class="card">
           <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
-            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+            <h2 id="settings-section-features-channel-monitor" tabindex="-1" class="text-lg font-semibold text-gray-900 dark:text-white">
               {{ t('admin.settings.features.channelMonitor.title') }}
             </h2>
             <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
@@ -7518,38 +7566,25 @@
                 <label class="input-label">
                   {{ t('admin.settings.features.channelMonitor.mode') }}
                 </label>
-                <div class="mt-1.5 inline-flex w-full max-w-md rounded-lg border border-gray-200 bg-gray-50 p-1 dark:border-dark-600 dark:bg-dark-900/40">
+                <div class="mt-1.5 inline-flex w-full max-w-xl rounded-lg border border-gray-200 bg-gray-50 p-1 dark:border-dark-600 dark:bg-dark-900/40">
                   <button
+                    v-for="mode in channelMonitorModes"
+                    :key="mode"
                     type="button"
                     class="inline-flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition"
                     :class="
-                      form.channel_monitor_mode === 'v2'
+                      form.channel_monitor_mode === mode
                         ? 'bg-white text-primary-700 shadow-sm dark:bg-dark-800 dark:text-primary-300'
                         : 'text-gray-600 hover:text-gray-900 dark:text-dark-300 dark:hover:text-white'
                     "
-                    @click="form.channel_monitor_mode = 'v2'"
+                    :data-testid="`settings-monitor-mode-${mode}`"
+                    @click="form.channel_monitor_mode = mode"
                   >
-                    {{ t('admin.settings.features.channelMonitor.modeV2') }}
-                  </button>
-                  <button
-                    type="button"
-                    class="inline-flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition"
-                    :class="
-                      form.channel_monitor_mode === 'v1'
-                        ? 'bg-white text-primary-700 shadow-sm dark:bg-dark-800 dark:text-primary-300'
-                        : 'text-gray-600 hover:text-gray-900 dark:text-dark-300 dark:hover:text-white'
-                    "
-                    @click="form.channel_monitor_mode = 'v1'"
-                  >
-                    {{ t('admin.settings.features.channelMonitor.modeV1') }}
+                    {{ t(`admin.settings.features.channelMonitor.mode${mode.toUpperCase()}`) }}
                   </button>
                 </div>
                 <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
-                  {{
-                    form.channel_monitor_mode === 'v1'
-                      ? t('admin.settings.features.channelMonitor.modeV1Hint')
-                      : t('admin.settings.features.channelMonitor.modeV2Hint')
-                  }}
+                  {{ t(`admin.settings.features.channelMonitor.mode${(form.channel_monitor_mode || 'v1').toUpperCase()}Hint`) }}
                 </p>
                 <p class="mt-1 text-xs text-gray-400 dark:text-gray-500">
                   {{ t('admin.settings.features.channelMonitor.modeHint') }}
@@ -7615,7 +7650,7 @@
 
         <div class="card">
           <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
-            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+            <h2 id="settings-section-features-available-channels" tabindex="-1" class="text-lg font-semibold text-gray-900 dark:text-white">
               {{ t('admin.settings.features.availableChannels.title') }}
             </h2>
             <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
@@ -7646,17 +7681,28 @@
           </div>
         </div>
 
-        <PelicanShowcaseSettings
-          v-model:enabled="form.pelican_showcase_enabled"
-          v-model:config="form.pelican_showcase_config"
-          :groups="pelicanShowcaseGroups"
-          :groups-loaded="pelicanShowcaseGroupsLoaded"
-          :groups-load-failed="pelicanShowcaseGroupsLoadFailed"
-        />
+        <!-- The Pelican showcase is configured with its group tests under Smart Ops. -->
+        <div class="card" data-testid="pelican-showcase-moved">
+          <div class="px-6 py-4">
+            <h2 id="settings-section-features-pelican-showcase" tabindex="-1" class="text-lg font-semibold text-gray-900 dark:text-white">
+              {{ t('admin.settings.features.pelicanShowcase.title') }}
+            </h2>
+            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+              {{ t('admin.settings.features.pelicanShowcase.movedHint') }}
+              <router-link
+                to="/admin/pelican-tests"
+                class="ml-1 inline-flex items-center gap-1 text-primary-600 hover:underline dark:text-primary-400"
+              >
+                {{ t('admin.settings.features.pelicanShowcase.movedLink') }}
+                <span aria-hidden="true">→</span>
+              </router-link>
+            </p>
+          </div>
+        </div>
 
         <div class="card">
           <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
-            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+            <h2 id="settings-section-features-model-plaza" tabindex="-1" class="text-lg font-semibold text-gray-900 dark:text-white">
               {{ t('admin.settings.features.modelPlaza.title') }}
             </h2>
             <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
@@ -7706,7 +7752,7 @@
 
         <div class="card">
           <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
-            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+            <h2 id="settings-section-features-site-billing-mode" tabindex="-1" class="text-lg font-semibold text-gray-900 dark:text-white">
               {{ t('admin.settings.features.siteBillingMode.title') }}
             </h2>
             <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
@@ -7736,7 +7782,7 @@
 
         <div class="card">
           <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
-            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+            <h2 id="settings-section-features-plugin-management" tabindex="-1" class="text-lg font-semibold text-gray-900 dark:text-white">
               {{ t('admin.settings.features.pluginManagement.title') }}
             </h2>
             <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
@@ -7758,9 +7804,114 @@
           </div>
         </div>
 
+        <div class="card" data-testid="support-ticket-settings">
+          <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
+            <h2 id="settings-section-features-support-tickets" tabindex="-1" class="text-lg font-semibold text-gray-900 dark:text-white">
+              {{ t('admin.settings.features.supportTickets.title') }}
+            </h2>
+            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+              {{ t('admin.settings.features.supportTickets.description') }}
+            </p>
+            <p v-if="form.support_ticket_enabled" class="mt-1.5 text-xs">
+              <router-link
+                to="/admin/support-tickets"
+                class="inline-flex items-center gap-1 text-primary-600 hover:underline dark:text-primary-400"
+              >
+                {{ t('admin.settings.features.supportTickets.openPage') }}
+                <span aria-hidden="true">→</span>
+              </router-link>
+            </p>
+          </div>
+          <div class="space-y-5 p-6">
+            <div class="flex items-center justify-between gap-4">
+              <div>
+                <label for="support-ticket-enabled" class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {{ t('admin.settings.features.supportTickets.enabled') }}
+                </label>
+                <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                  {{ t('admin.settings.features.supportTickets.enabledHint') }}
+                </p>
+              </div>
+              <Toggle id="support-ticket-enabled" v-model="form.support_ticket_enabled" />
+            </div>
+            <template v-if="form.support_ticket_enabled">
+              <div>
+                <span class="input-label">{{ t('admin.settings.features.supportTickets.categories') }}</span>
+                <div class="space-y-2" data-testid="support-ticket-categories">
+                  <div class="grid gap-2 sm:grid-cols-2">
+                    <div
+                      v-for="(category, index) in form.support_ticket_config.categories"
+                      :key="index"
+                      class="flex items-center gap-2"
+                    >
+                      <input
+                        v-model="form.support_ticket_config.categories[index]"
+                        class="input flex-1"
+                        :maxlength="SUPPORT_TICKET_CATEGORY_MAX"
+                        :placeholder="t('admin.settings.features.supportTickets.categoryPlaceholder')"
+                        :aria-label="category || t('admin.settings.features.supportTickets.categoryPlaceholder')"
+                      />
+                      <button
+                        type="button"
+                        class="btn btn-secondary px-2"
+                        :aria-label="t('admin.settings.features.supportTickets.removeCategory')"
+                        @click="form.support_ticket_config.categories.splice(index, 1)"
+                      >
+                        <Icon name="x" size="xs" class="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+                  <button
+                    v-if="form.support_ticket_config.categories.length < SUPPORT_TICKET_MAX_CATEGORIES"
+                    type="button"
+                    class="btn btn-secondary btn-sm"
+                    data-testid="support-ticket-add-category"
+                    @click="form.support_ticket_config.categories.push('')"
+                  >
+                    + {{ t('admin.settings.features.supportTickets.addCategory') }}
+                  </button>
+                </div>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  {{ t('admin.settings.features.supportTickets.categoriesHint', { max: SUPPORT_TICKET_MAX_CATEGORIES, length: SUPPORT_TICKET_CATEGORY_MAX }) }}
+                </p>
+              </div>
+              <div class="space-y-1">
+                <label for="support-ticket-max-open" class="input-label">{{ t('admin.settings.features.supportTickets.maxOpen') }}</label>
+                <input
+                  id="support-ticket-max-open"
+                  v-model.number="form.support_ticket_config.max_open_per_user"
+                  class="input w-40"
+                  type="number"
+                  min="1"
+                  :max="SUPPORT_TICKET_MAX_OPEN_LIMIT"
+                  step="1"
+                  required
+                />
+                <p class="text-xs text-gray-500 dark:text-gray-400">
+                  {{ t('admin.settings.features.supportTickets.maxOpenHint', { max: SUPPORT_TICKET_MAX_OPEN_LIMIT }) }}
+                </p>
+              </div>
+              <div class="space-y-1">
+                <label for="support-ticket-notice" class="input-label">{{ t('admin.settings.features.supportTickets.notice') }}</label>
+                <textarea
+                  id="support-ticket-notice"
+                  v-model="form.support_ticket_config.notice"
+                  rows="3"
+                  class="input"
+                  :maxlength="SUPPORT_TICKET_NOTICE_MAX"
+                  :placeholder="t('admin.settings.features.supportTickets.noticePlaceholder')"
+                ></textarea>
+                <p class="text-xs text-gray-500 dark:text-gray-400">
+                  {{ t('admin.settings.features.supportTickets.noticeHint', { max: SUPPORT_TICKET_NOTICE_MAX }) }}
+                </p>
+              </div>
+            </template>
+          </div>
+        </div>
+
         <div class="card">
           <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
-            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+            <h2 id="settings-section-features-risk-control" tabindex="-1" class="text-lg font-semibold text-gray-900 dark:text-white">
               {{ t('admin.settings.features.riskControl.title') }}
             </h2>
             <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
@@ -7787,6 +7938,18 @@
                 </p>
               </div>
               <Toggle v-model="form.risk_control_enabled" />
+            </div>
+
+            <div>
+              <label class="input-label">
+                {{ t('admin.settings.features.riskControl.riskControlUserAllowlist') }}
+              </label>
+              <OpenAIFastPolicyUserSelector
+                v-model="riskControlAllowlistedUserIds"
+              />
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                {{ t('admin.settings.features.riskControl.riskControlUserAllowlistHint') }}
+              </p>
             </div>
 
             <div class="flex items-center justify-between">
@@ -7836,7 +7999,7 @@
         <!-- Affiliate (邀请返利) feature card -->
         <div class="card">
           <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
-            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+            <h2 id="settings-section-features-affiliate" tabindex="-1" class="text-lg font-semibold text-gray-900 dark:text-white">
               {{ t('admin.settings.features.affiliate.title') }}
             </h2>
             <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
@@ -8255,7 +8418,7 @@
             <div
               class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
             >
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+              <h2 id="settings-section-payment" tabindex="-1" class="text-lg font-semibold text-gray-900 dark:text-white">
                 {{ t("admin.settings.payment.title") }}
               </h2>
               <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
@@ -8781,6 +8944,14 @@
             </div>
           </div>
 
+          <!-- 充值优惠阶梯（独立卡片，与服务商管理同级） -->
+          <RechargeBonusTierEditor
+            v-if="form.payment_enabled"
+            v-model="form.payment_recharge_bonus_tiers"
+            v-model:mode="form.payment_recharge_bonus_mode"
+            v-model:notice="form.payment_recharge_bonus_notice"
+          />
+
           <!-- Provider Management -->
           <PaymentProviderList
             v-if="form.payment_enabled"
@@ -8828,7 +8999,7 @@
               class="flex items-center justify-between border-b border-gray-100 px-6 py-4 dark:border-dark-700"
             >
               <div>
-                <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+                <h2 id="settings-section-smtp" tabindex="-1" class="text-lg font-semibold text-gray-900 dark:text-white">
                   {{ t("admin.settings.smtp.title") }}
                 </h2>
                 <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
@@ -8990,7 +9161,7 @@
             <div
               class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
             >
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+              <h2 id="settings-section-test-email" tabindex="-1" class="text-lg font-semibold text-gray-900 dark:text-white">
                 {{ t("admin.settings.testEmail.title") }}
               </h2>
               <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
@@ -9300,8 +9471,12 @@
 </template>
 
 <script setup lang="ts">
+import { excelBPSImageLimits } from "@/utils/excelBPSImageLimits";
 import { ref, reactive, computed, onMounted, watch } from "vue";
+import { listPlatformIds } from "@/constants/platformCatalog";
 import { useI18n } from "vue-i18n";
+import { useSettingsNavigation } from "@/composables/useSettingsNavigation";
+import type { SettingsTab } from "@/utils/settingsSearch";
 import { adminAPI } from "@/api";
 import {
   appendAuthSourceDefaultsToUpdateRequest,
@@ -9324,7 +9499,6 @@ import type {
   DefaultSubscriptionSetting,
   DefaultPlatformQuotasMap,
   OpenAIFastPolicyRule,
-  PelicanShowcaseConfig,
   WeChatConnectMode,
   WebSearchEmulationConfig,
   WebSearchProviderConfig,
@@ -9339,6 +9513,12 @@ import type {
 import type { ProviderInstance } from "@/types/payment";
 import AppLayout from "@/components/layout/AppLayout.vue";
 import Icon from "@/components/icons/Icon.vue";
+import {
+  SUPPORT_TICKET_CATEGORY_MAX,
+  SUPPORT_TICKET_MAX_CATEGORIES,
+  SUPPORT_TICKET_MAX_OPEN_LIMIT,
+  SUPPORT_TICKET_NOTICE_MAX,
+} from "@/api/supportTickets";
 import Select, { type SelectOption } from "@/components/common/Select.vue";
 import {
   SITE_BILLING_MODES,
@@ -9356,14 +9536,18 @@ import Toggle from "@/components/common/Toggle.vue";
 import ProxySelector from "@/components/common/ProxySelector.vue";
 import ImageUpload from "@/components/common/ImageUpload.vue";
 import BackupSettings from "@/views/admin/BackupView.vue";
+import ServerlessSettings from "@/components/settings/ServerlessSettings.vue";
 import EmailTemplateEditor from "@/views/admin/settings/EmailTemplateEditor.vue";
+import RechargeBonusTierEditor from "@/components/admin/settings/RechargeBonusTierEditor.vue";
+import {
+  normalizeRechargeBonusMode,
+  normalizeRechargeBonusTiers,
+  sanitizeRechargeBonusTiersForSubmit,
+  type RechargeBonusMode,
+  type RechargeBonusTierDraft,
+} from "@/utils/rechargeBonus";
 import OpenAIFastPolicyUserSelector from "@/views/admin/settings/OpenAIFastPolicyUserSelector.vue";
 import MihomoProxySelector from "@/views/admin/settings/MihomoProxySelector.vue";
-import PelicanShowcaseSettings from "@/views/admin/settings/PelicanShowcaseSettings.vue";
-import {
-  defaultPelicanShowcaseConfig,
-  sanitizePelicanShowcaseConfig,
-} from "@/views/admin/settings/pelicanShowcase";
 import { useClipboard } from "@/composables/useClipboard";
 import {
   useStepUp,
@@ -9413,17 +9597,9 @@ const paymentMethodsHref = computed(() =>
     : "https://github.com/Wei-Shaw/sub2api/blob/main/docs/PAYMENT.md#supported-payment-methods",
 );
 
-type SettingsTab =
-  | "general"
-  | "agreement"
-  | "features"
-  | "security"
-  | "users"
-  | "gateway"
-  | "payment"
-  | "email"
-  | "backup";
-const activeTab = ref<SettingsTab>("general");
+const loading = ref(true);
+const loadFailed = ref(false);
+const { activeTab, selectSettingsTab } = useSettingsNavigation(loading, loadFailed);
 const settingsTabs = [
   { key: "general" as SettingsTab, icon: "home" as const },
   { key: "agreement" as SettingsTab, icon: "document" as const },
@@ -9444,10 +9620,6 @@ const settingsTabKeyboardActions = {
   Home: "first",
   End: "last",
 } as const;
-
-function selectSettingsTab(tab: SettingsTab): void {
-  activeTab.value = tab;
-}
 
 function focusSettingsTab(tab: SettingsTab): void {
   window.requestAnimationFrame(() => {
@@ -9488,8 +9660,6 @@ function handleSettingsTabKeydown(event: KeyboardEvent, tab: SettingsTab): void 
 
 const { copyToClipboard } = useClipboard();
 
-const loading = ref(true);
-const loadFailed = ref(false);
 const saving = ref(false);
 const testingSmtp = ref(false);
 const sendingTestEmail = ref(false);
@@ -9509,9 +9679,6 @@ const newAdminApiKey = ref("");
 const subscriptionGroups = ref<AdminGroup[]>([]);
 const codexHarvestGroups = ref<AdminGroup[]>([]);
 const codexHarvestGroupsLoadFailed = ref(false);
-const pelicanShowcaseGroups = ref<AdminGroup[]>([]);
-const pelicanShowcaseGroupsLoaded = ref(false);
-const pelicanShowcaseGroupsLoadFailed = ref(false);
 const codexHarvestGroupChoices = computed(() => {
   const known = new Set(codexHarvestGroups.value.map(group => group.id));
   return [
@@ -10059,8 +10226,6 @@ type SettingsForm = Omit<
   channel_monitor_hide_throughput: boolean;
   channel_monitor_show_quota: boolean;
   channel_monitor_hide_user_ranking: boolean;
-  pelican_showcase_enabled: boolean;
-  pelican_showcase_config: PelicanShowcaseConfig;
   smtp_password: string;
   turnstile_secret_key: string;
   tencent_captcha_app_secret_key: string;
@@ -10096,14 +10261,34 @@ type SettingsForm = Omit<
   openai_advanced_scheduler_weight_upstream_cost: string;
   openai_advanced_scheduler_weight_previous_response: string;
   openai_advanced_scheduler_weight_session_sticky: string;
-  // 系统全局平台限额 map；form 内始终归一化为全 4 平台对象（模板非空绑定依赖此不变量）
+  // 充值赠送阶梯编辑态：允许留空的行，提交时清洗为 RechargeBonusTier[]
+  payment_recharge_bonus_tiers: RechargeBonusTierDraft[];
+  payment_recharge_bonus_mode: RechargeBonusMode;
+  payment_recharge_bonus_notice: string;
+  // 系统全局平台限额 map；form 内始终归一化为全部平台对象（模板非空绑定依赖此不变量）
   default_platform_quotas: DefaultPlatformQuotasMap;
   account_scheduling_thresholds: ReturnType<typeof normalizeAccountSchedulingThresholdsMap>;
+  prism_browser_api_key: string;
 };
 
 const schedulingThresholdPlatforms = SCHEDULING_THRESHOLD_PLATFORMS;
 
+// The stored monitor mode; the save payload omits an unchanged mode so a switch
+// made on the monitor page is not overwritten by this page's older copy.
+let loadedChannelMonitorMode: 'v1' | 'v2' | 'v3' = 'v1'
+const channelMonitorModes = ['v1', 'v2', 'v3'] as const
+// 平台限额表格的行：平台清单顺序中、已在归一化 map 里的平台（清单晚于设置加载时
+// 不渲染尚未归一化的平台，保持模板非空绑定）。
+function platformQuotaRows(map: DefaultPlatformQuotasMap | undefined): string[] {
+  return listPlatformIds().filter((platform) => !!map?.[platform]);
+}
+
 const form = reactive<SettingsForm>({
+  excel_bps_enabled: true,
+  prism_browser_enabled: false,
+  prism_browser_base_url: "http://127.0.0.1:8319/v1",
+  prism_browser_api_key_configured: false,
+  prism_browser_api_key: "",
   registration_enabled: true,
   email_verify_enabled: false,
   registration_email_suffix_whitelist: [],
@@ -10148,6 +10333,7 @@ const form = reactive<SettingsForm>({
   hide_ccs_import_button: false,
   payment_enabled: false,
   risk_control_enabled: false,
+  cyber_policy_user_allowlist: "",
   cyber_session_block_enabled: false,
   cyber_session_block_ttl_seconds: 3600,
   cyber_session_identity_strict_enabled: false,
@@ -10160,6 +10346,9 @@ const form = reactive<SettingsForm>({
   payment_balance_recharge_multiplier: 1,
   payment_subscription_usd_to_cny_rate: 0,
   payment_recharge_fee_rate: 0,
+  payment_recharge_bonus_tiers: [],
+  payment_recharge_bonus_mode: "bonus",
+  payment_recharge_bonus_notice: "",
   payment_enabled_types: [],
   payment_help_image_url: "",
   payment_help_text: "",
@@ -10385,16 +10574,13 @@ const form = reactive<SettingsForm>({
   account_quota_notify_emails: [] as NotifyEmailEntry[],
   // Channel Monitor feature switch
   channel_monitor_enabled: true,
-  channel_monitor_mode: 'v1' as 'v1' | 'v2',
+  channel_monitor_mode: 'v1' as 'v1' | 'v2' | 'v3',
   channel_monitor_default_interval_seconds: 60,
   channel_monitor_hide_throughput: false,
   channel_monitor_show_quota: false,
   channel_monitor_hide_user_ranking: false,
   // Available Channels feature switch
   available_channels_enabled: false,
-  // Pelican showcase switch + gallery limits (defaults match the backend)
-  pelican_showcase_enabled: false,
-  pelican_showcase_config: defaultPelicanShowcaseConfig(),
   // Subscription feature switch (user sidebar "My Subscriptions" entry)
   subscription_enabled: true,
   // Model Plaza feature switches + description
@@ -10403,6 +10589,9 @@ const form = reactive<SettingsForm>({
   model_plaza_description: '',
   // Plugin management menu visibility; plugin runtime is unaffected.
   plugin_management_enabled: false,
+  // Support tickets (网站工单) switch + form config
+  support_ticket_enabled: false,
+  support_ticket_config: { categories: [] as string[], max_open_per_user: 5, notice: '' },
   // Affiliate (邀请返利) feature switch
   affiliate_enabled: false,
   // Allow user view error requests
@@ -10412,14 +10601,17 @@ const form = reactive<SettingsForm>({
   request_capture_enabled: false,
   request_capture_quota_mib: 1024,
   request_capture_retention_days: 7,
-  excel_bps_image_mode: 'relay' as 'relay' | 'native',
-  excel_bps_image_relay_enabled: false,
+  excel_bps_image_mode: 'native' as 'relay' | 'native',
+  excel_bps_image_relay_enabled: true,
   excel_bps_image_base_url: '',
   excel_bps_image_body_limit_mib: 64,
   excel_bps_image_budget_mib: 1024,
   excel_bps_image_max_requests: 128,
   excel_bps_image_max_image_mib: 20,
   excel_bps_image_max_images: 20,
+  excel_bps_image_limit_policy: "off" as "off" | "auto_compact" | "warn",
+  excel_bps_image_warning_remaining: 8,
+  excel_bps_image_compact_reserve: 3,
   excel_bps_image_max_total_mib: 32,
   excel_bps_image_storage_mib: 1024,
   excel_bps_image_storage_entries: 512,
@@ -10437,6 +10629,19 @@ function applyCaptchaSelection(provider: CaptchaProviderSelection | null): void 
   form.tencent_captcha_enabled = provider === "tencent";
   form.aliyun_captcha_enabled = provider === "aliyun";
 }
+
+// Keep the settings API representation as user IDs; the selector displays emails.
+const riskControlAllowlistedUserIds = computed<number[]>({
+  get: () => Array.from(new Set(
+    form.cyber_policy_user_allowlist
+      .split(/[,\s]+/)
+      .map(Number)
+      .filter((id) => Number.isSafeInteger(id) && id > 0),
+  )),
+  set: (ids) => {
+    form.cyber_policy_user_allowlist = ids.join(",");
+  },
+});
 
 const captchaMasterEnabled = computed({
   get: () =>
@@ -11474,7 +11679,10 @@ async function loadSettings() {
     form.login_agreement_mode =
       settings.login_agreement_mode === "checkbox" ? "checkbox" : "modal";
     form.channel_monitor_mode =
-      settings.channel_monitor_mode === "v2" ? "v2" : "v1";
+      settings.channel_monitor_mode === "v2" || settings.channel_monitor_mode === "v3"
+        ? settings.channel_monitor_mode
+        : "v1";
+    loadedChannelMonitorMode = form.channel_monitor_mode;
     form.channel_monitor_hide_throughput = Boolean(
       settings.channel_monitor_hide_throughput
     );
@@ -11484,6 +11692,11 @@ async function loadSettings() {
     form.channel_monitor_hide_user_ranking = Boolean(
       settings.channel_monitor_hide_user_ranking
     );
+    form.excel_bps_enabled = settings.excel_bps_enabled !== false;
+    form.prism_browser_enabled = Boolean(settings.prism_browser_enabled);
+    form.prism_browser_base_url = settings.prism_browser_base_url || "http://127.0.0.1:8319/v1";
+    form.prism_browser_api_key_configured = Boolean(settings.prism_browser_api_key_configured);
+    form.prism_browser_api_key = "";
     form.login_agreement_updated_at =
       settings.login_agreement_updated_at || "2026-03-31";
     form.login_agreement_documents =
@@ -11496,6 +11709,13 @@ async function loadSettings() {
           }))
         : defaultLoginAgreementDocuments();
     Object.assign(authSourceDefaults, buildAuthSourceDefaultsState(settings));
+    form.payment_recharge_bonus_tiers = normalizeRechargeBonusTiers(
+      settings.payment_recharge_bonus_tiers,
+    );
+    form.payment_recharge_bonus_mode = normalizeRechargeBonusMode(
+      settings.payment_recharge_bonus_mode,
+    );
+    form.payment_recharge_bonus_notice = settings.payment_recharge_bonus_notice || "";
     form.default_platform_quotas = normalizePlatformQuotasMap(settings.default_platform_quotas);
     form.account_scheduling_thresholds = normalizeAccountSchedulingThresholdsMap(
       settings.account_scheduling_thresholds,
@@ -11621,9 +11841,6 @@ async function loadSubscriptionGroups() {
     const groups = await adminAPI.groups.getAll();
     codexHarvestGroups.value = groups.filter(group => group.platform === 'openai');
     codexHarvestGroupsLoadFailed.value = false;
-    pelicanShowcaseGroups.value = groups.filter((group) => group.status === "active");
-    pelicanShowcaseGroupsLoaded.value = true;
-    pelicanShowcaseGroupsLoadFailed.value = false;
     subscriptionGroups.value = groups.filter(
       (group) =>
         group.subscription_type === "subscription" && group.status === "active",
@@ -11632,9 +11849,6 @@ async function loadSubscriptionGroups() {
     subscriptionGroups.value = [];
     codexHarvestGroups.value = [];
     codexHarvestGroupsLoadFailed.value = true;
-    pelicanShowcaseGroups.value = [];
-    pelicanShowcaseGroupsLoaded.value = false;
-    pelicanShowcaseGroupsLoadFailed.value = true;
   }
 }
 
@@ -11740,20 +11954,23 @@ async function saveSettings() {
       }
     }
     if (
-      !Number.isInteger(form.excel_bps_image_body_limit_mib) || form.excel_bps_image_body_limit_mib < 1 || form.excel_bps_image_body_limit_mib > 128 ||
-      !Number.isInteger(form.excel_bps_image_budget_mib) || form.excel_bps_image_budget_mib < 512 || form.excel_bps_image_budget_mib > 2048 || form.excel_bps_image_budget_mib < form.excel_bps_image_body_limit_mib * 8 ||
-      !Number.isInteger(form.excel_bps_image_max_requests) || form.excel_bps_image_max_requests < 1 || form.excel_bps_image_max_requests > 512
+      !Number.isInteger(form.excel_bps_image_body_limit_mib) || form.excel_bps_image_body_limit_mib < 1 || form.excel_bps_image_body_limit_mib > excelBPSImageLimits.bodyMiB ||
+      !Number.isInteger(form.excel_bps_image_budget_mib) || form.excel_bps_image_budget_mib < excelBPSImageLimits.minBudgetMiB || form.excel_bps_image_budget_mib > excelBPSImageLimits.budgetMiB || form.excel_bps_image_budget_mib < form.excel_bps_image_body_limit_mib * 8 ||
+      !Number.isInteger(form.excel_bps_image_max_requests) || form.excel_bps_image_max_requests < 1 || form.excel_bps_image_max_requests > excelBPSImageLimits.requests
     ) {
-      appStore.showError(t('admin.settings.features.excelBpsImages.invalidCapacity'));
+      appStore.showError(t('admin.settings.features.excelBpsImages.invalidCapacity', excelBPSImageLimits));
       return;
     }
     if (
-      !Number.isInteger(form.excel_bps_image_max_image_mib) || form.excel_bps_image_max_image_mib < 1 || form.excel_bps_image_max_image_mib > 128 ||
-      !Number.isInteger(form.excel_bps_image_max_images) || form.excel_bps_image_max_images < 1 || form.excel_bps_image_max_images > 4096 ||
-      !Number.isInteger(form.excel_bps_image_max_total_mib) || form.excel_bps_image_max_total_mib < 1 || form.excel_bps_image_max_total_mib > 128 ||
-      !Number.isInteger(form.excel_bps_image_storage_mib) || form.excel_bps_image_storage_mib < 1 || form.excel_bps_image_storage_mib > 16384 ||
-      !Number.isInteger(form.excel_bps_image_storage_entries) || form.excel_bps_image_storage_entries < 1 || form.excel_bps_image_storage_entries > 65536 ||
-      !Number.isInteger(form.excel_bps_image_ttl_minutes) || form.excel_bps_image_ttl_minutes < 1 || form.excel_bps_image_ttl_minutes > 1440 ||
+      !Number.isInteger(form.excel_bps_image_max_image_mib) || form.excel_bps_image_max_image_mib < 1 || form.excel_bps_image_max_image_mib > excelBPSImageLimits.imageMiB ||
+      !Number.isInteger(form.excel_bps_image_warning_remaining) || form.excel_bps_image_warning_remaining < 1 || form.excel_bps_image_warning_remaining > excelBPSImageLimits.images ||
+      !Number.isInteger(form.excel_bps_image_compact_reserve) || form.excel_bps_image_compact_reserve < 1 || form.excel_bps_image_compact_reserve > excelBPSImageLimits.images ||
+      (form.excel_bps_image_limit_policy === 'warn' && (!Number.isInteger(form.excel_bps_image_warning_remaining) || !Number.isInteger(form.excel_bps_image_compact_reserve) || form.excel_bps_image_compact_reserve < 1 || form.excel_bps_image_compact_reserve >= form.excel_bps_image_warning_remaining || form.excel_bps_image_warning_remaining >= form.excel_bps_image_max_images)) ||
+      !Number.isInteger(form.excel_bps_image_max_images) || form.excel_bps_image_max_images < 1 || form.excel_bps_image_max_images > excelBPSImageLimits.images ||
+      !Number.isInteger(form.excel_bps_image_max_total_mib) || form.excel_bps_image_max_total_mib < 1 || form.excel_bps_image_max_total_mib > excelBPSImageLimits.totalMiB ||
+      !Number.isInteger(form.excel_bps_image_storage_mib) || form.excel_bps_image_storage_mib < 1 || form.excel_bps_image_storage_mib > excelBPSImageLimits.storageMiB ||
+      !Number.isInteger(form.excel_bps_image_storage_entries) || form.excel_bps_image_storage_entries < 1 || form.excel_bps_image_storage_entries > excelBPSImageLimits.storageEntries ||
+      !Number.isInteger(form.excel_bps_image_ttl_minutes) || form.excel_bps_image_ttl_minutes < 1 || form.excel_bps_image_ttl_minutes > excelBPSImageLimits.ttlMinutes ||
       form.excel_bps_image_max_total_mib < form.excel_bps_image_max_image_mib ||
       form.excel_bps_image_storage_mib < form.excel_bps_image_max_total_mib ||
       form.excel_bps_image_storage_entries < form.excel_bps_image_max_images
@@ -11918,6 +12135,10 @@ async function saveSettings() {
     }
 
     const payload: UpdateSettingsRequest = {
+      prism_browser_enabled: form.prism_browser_enabled,
+      excel_bps_enabled: form.excel_bps_enabled,
+      prism_browser_base_url: form.prism_browser_base_url,
+      ...(form.prism_browser_api_key ? { prism_browser_api_key: form.prism_browser_api_key } : {}),
       registration_enabled: form.registration_enabled,
       email_verify_enabled: form.email_verify_enabled,
       registration_email_suffix_whitelist:
@@ -12156,6 +12377,7 @@ async function saveSettings() {
       // Payment configuration
       payment_enabled: form.payment_enabled,
       risk_control_enabled: form.risk_control_enabled,
+      cyber_policy_user_allowlist: form.cyber_policy_user_allowlist,
       cyber_session_block_enabled: form.cyber_session_block_enabled,
       cyber_session_block_ttl_seconds:
         Number(form.cyber_session_block_ttl_seconds) || 3600,
@@ -12173,6 +12395,11 @@ async function saveSettings() {
       payment_subscription_usd_to_cny_rate:
         Number(form.payment_subscription_usd_to_cny_rate) || 0,
       payment_recharge_fee_rate: Number(form.payment_recharge_fee_rate) || 0,
+      payment_recharge_bonus_tiers: sanitizeRechargeBonusTiersForSubmit(
+        form.payment_recharge_bonus_tiers,
+      ),
+      payment_recharge_bonus_mode: form.payment_recharge_bonus_mode,
+      payment_recharge_bonus_notice: form.payment_recharge_bonus_notice,
       payment_enabled_types: form.payment_enabled_types,
       payment_load_balance_strategy: form.payment_load_balance_strategy,
       payment_product_name_prefix: form.payment_product_name_prefix,
@@ -12235,7 +12462,9 @@ async function saveSettings() {
       ).filter((e) => e.email.trim() !== ""),
       // Channel Monitor feature switch
       channel_monitor_enabled: form.channel_monitor_enabled,
-      channel_monitor_mode: form.channel_monitor_mode === 'v1' ? 'v1' : 'v2',
+      // Sent only when changed here: the monitor page can switch the mode on its own.
+      channel_monitor_mode:
+        form.channel_monitor_mode === loadedChannelMonitorMode ? undefined : form.channel_monitor_mode,
       channel_monitor_default_interval_seconds:
         Number(form.channel_monitor_default_interval_seconds) || 60,
       channel_monitor_hide_throughput: Boolean(form.channel_monitor_hide_throughput),
@@ -12243,9 +12472,6 @@ async function saveSettings() {
       channel_monitor_hide_user_ranking: Boolean(form.channel_monitor_hide_user_ranking),
       // Available Channels feature switch
       available_channels_enabled: form.available_channels_enabled,
-      // Pelican showcase switch + gallery limits
-      pelican_showcase_enabled: form.pelican_showcase_enabled,
-      pelican_showcase_config: sanitizePelicanShowcaseConfig(form.pelican_showcase_config),
       // Subscription feature switch
       subscription_enabled: form.subscription_enabled,
       // Model Plaza feature switches + description
@@ -12253,6 +12479,13 @@ async function saveSettings() {
       model_plaza_require_auth: form.model_plaza_require_auth,
       model_plaza_description: form.model_plaza_description,
       plugin_management_enabled: form.plugin_management_enabled,
+      // Support tickets: blank category rows are dropped; the server trims and deduplicates.
+      support_ticket_enabled: form.support_ticket_enabled,
+      support_ticket_config: {
+        categories: form.support_ticket_config.categories.map((category) => category.trim()).filter(Boolean),
+        max_open_per_user: Number(form.support_ticket_config.max_open_per_user) || 5,
+        notice: form.support_ticket_config.notice,
+      },
       // Affiliate (邀请返利) feature switch
       affiliate_enabled: form.affiliate_enabled,
       allow_user_view_error_requests: form.allow_user_view_error_requests,
@@ -12268,6 +12501,10 @@ async function saveSettings() {
       excel_bps_image_max_requests: form.excel_bps_image_max_requests,
       excel_bps_image_max_image_mib: form.excel_bps_image_max_image_mib,
       excel_bps_image_max_images: form.excel_bps_image_max_images,
+      excel_bps_image_limit_policy: form.excel_bps_image_limit_policy,
+      excel_bps_image_warning_remaining: form.excel_bps_image_warning_remaining,
+      excel_bps_image_compact_reserve: form.excel_bps_image_compact_reserve,
+
       excel_bps_image_max_total_mib: form.excel_bps_image_max_total_mib,
       excel_bps_image_storage_mib: form.excel_bps_image_storage_mib,
       excel_bps_image_storage_entries: form.excel_bps_image_storage_entries,
@@ -12325,6 +12562,7 @@ async function saveSettings() {
       form.openai_oauth_scheduling_rate_multiplier = null;
     }
     Object.assign(authSourceDefaults, buildAuthSourceDefaultsState(updated));
+    loadedChannelMonitorMode = form.channel_monitor_mode || 'v1';
     form.default_platform_quotas = normalizePlatformQuotasMap(updated.default_platform_quotas);
     form.account_scheduling_thresholds = normalizeAccountSchedulingThresholdsMap(
       updated.account_scheduling_thresholds,
@@ -13772,6 +14010,15 @@ watch(
 </script>
 
 <style scoped>
+h2[id^="settings-section-"] {
+  scroll-margin-top: 6rem;
+}
+h2[id^="settings-section-"]:target {
+  outline: 2px solid var(--color-primary-500, #6366f1);
+  outline-offset: 6px;
+  border-radius: 2px;
+}
+
 .default-sub-group-select :deep(.select-trigger) {
   @apply h-[42px];
 }

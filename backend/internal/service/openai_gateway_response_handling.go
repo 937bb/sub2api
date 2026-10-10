@@ -253,9 +253,11 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	sawBareError := false
 	sawResponseFailed := false
 	terminalEventType := ""
+	terminalSuccessful := false
 	responsesSemanticOutputSeen := false
 	capacityFailoverSuppressedLogged := false
 	failedMessage := ""
+	var grokScopedFailure error
 	clientOutputStarted := false
 	codexFailureTerminal := account != nil && account.IsOpenAIOAuthLike()
 	upstreamRequestID := strings.TrimSpace(resp.Header.Get("x-request-id"))
@@ -413,9 +415,15 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			return resultWithUsage(), fmt.Errorf("stream usage incomplete: missing terminal event")
 		}
 		if sawFailedEvent {
+			if grokScopedFailure != nil {
+				return resultWithUsage(), grokScopedFailure
+			}
 			return resultWithUsage(), fmt.Errorf("upstream response failed: %s", failedMessage)
 		}
 		logOpenAISuccessMissingUsage(ctx, c, account, resp, usage, terminalEventType, clientDisconnected)
+		if terminalSuccessful && !clientDisconnected && account != nil {
+			MarkOpsStreamCompleted(c, account.ID)
+		}
 		return resultWithUsage(), nil
 	}
 	handleScanErr := func(scanErr error) (*openaiStreamingResult, error, bool) {
@@ -509,6 +517,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			// 初始上游 data 的 type 只解析一次：原始值保持终止事件的精确匹配，规范化值供后续分支复用。
 			if openAIStreamEventIsTerminalWithType(data, eventType) {
 				sawTerminalEvent = true
+				terminalSuccessful = IsSuccessfulStreamTerminal(dataBytes)
 				terminalEventType = eventType
 				if strings.TrimSpace(data) == "[DONE]" {
 					terminalEventType = "[DONE]"
@@ -537,6 +546,13 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				failedMessage = extractOpenAISSEErrorMessage(dataBytes)
 				if failedMessage == "" {
 					failedMessage = "Upstream response failed"
+				}
+				if account != nil && account.IsGrok() {
+					status := openAIStreamFailureStatus(dataBytes, failedMessage)
+					if isGrokContentPolicyRejection(http.StatusForbidden, dataBytes) {
+						status = http.StatusForbidden
+					}
+					grokScopedFailure = grokRequestScopedResponseError(account, status, dataBytes, failedMessage)
 				}
 				// response.failed 自带上游已消耗的 usage（input token 通常已扣）；必须先解析
 				// 再打 cyber 标记，否则 mark 记到的是解析前的 0，导致流式 cyber 按 0 token 计费
@@ -585,6 +601,9 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 						} else {
 							shouldFailover = openAIStreamFailedEventShouldFailover(dataBytes, failedMessage)
 						}
+					}
+					if account != nil && account.IsGrok() && isGrokContentPolicyRejection(http.StatusForbidden, dataBytes) {
+						shouldFailover = false
 					}
 					if shouldFailover {
 						sawFailedEvent = true
@@ -691,8 +710,12 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			// OpenAI Responses streams that terminate with an empty
 			// response.completed (no output, no usage, no error, nothing sent
 			// to the client) are silent upstream refusals: fail over instead of
-			// recording a successful 0/0 usage turn (issue #5009).
-			if account != nil && account.Platform == PlatformOpenAI &&
+			// recording a successful 0/0 usage turn (issue #5009). Grok
+			// subscriptions behind vendor gateways show the same silent-refusal
+			// shape on /v1/responses (forwardGrokResponses reaches this same
+			// handler), so cover PlatformGrok too — the passthrough-path guard
+			// is already unconditional.
+			if account != nil && (account.Platform == PlatformOpenAI || account.Platform == PlatformGrok) &&
 				(eventType == "response.completed" || eventType == "response.done") &&
 				!sawFailedEvent && !responsesSemanticOutputSeen && !clientOutputStarted &&
 				openAIResponsesCompletedEventIsEmpty(dataBytes, usage) {
@@ -910,6 +933,9 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 
 		case <-intervalCh:
 			if failureDelivered {
+				if grokScopedFailure != nil {
+					return resultWithUsage(), grokScopedFailure
+				}
 				return resultWithUsage(), fmt.Errorf("upstream response failed: %s", failedMessage)
 			}
 			lastRead := time.Unix(0, atomic.LoadInt64(&lastReadAt))
@@ -1722,6 +1748,10 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 		msg := extractOpenAISSEErrorMessage(terminalPayload)
 		if msg == "" {
 			msg = "Upstream compact response failed"
+		}
+		if account != nil && account.IsGrok() && isGrokContentPolicyRejection(http.StatusForbidden, terminalPayload) {
+			_ = s.writeOpenAINonStreamingProtocolError(resp, c, msg)
+			return nil, &grokContentPolicyError{message: msg}
 		}
 		if compactErr := newOpenAICompactFallbackSignal(c, terminalPayload, msg); compactErr != nil {
 			return nil, compactErr

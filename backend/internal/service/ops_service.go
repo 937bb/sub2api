@@ -43,9 +43,10 @@ type OpsRuntimeSettingsRefreshHealth struct {
 
 // OpsService provides ingestion and query APIs for the Ops monitoring module.
 type OpsService struct {
-	opsRepo     OpsRepository
-	settingRepo SettingRepository
-	cfg         *config.Config
+	autoConfigObserver func(AccountConcurrencyResult)
+	opsRepo            OpsRepository
+	settingRepo        SettingRepository
+	cfg                *config.Config
 
 	accountRepo AccountRepository
 	userRepo    UserRepository
@@ -510,6 +511,10 @@ func (s *OpsService) prepareErrorLogInput(ctx context.Context, entry *OpsInsertE
 		}
 		break
 	}
+
+	// Normalize responsibility after final upstream/credential attribution is
+	// known, for both middleware and direct/batched producers.
+	NormalizeOpsClientRejection(entry)
 
 	// Sanitize + truncate error_body to avoid storing sensitive data.
 	if strings.TrimSpace(entry.ErrorBody) != "" {

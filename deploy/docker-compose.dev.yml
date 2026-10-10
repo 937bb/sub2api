@@ -43,7 +43,7 @@ services:
       - REDIS_USERNAME=${REDIS_USERNAME:-}
       - REDIS_PASSWORD=${REDIS_PASSWORD:-}
       - REDIS_DB=${REDIS_DB:-0}
-      - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@sub2api.local}
+      - ADMIN_EMAIL=${ADMIN_EMAIL:-}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
       - JWT_SECRET=${JWT_SECRET:-}
       - SETUP_MIGRATION_TIMEOUT_SECONDS=${SETUP_MIGRATION_TIMEOUT_SECONDS:-0}
@@ -97,6 +97,9 @@ services:
       - GATEWAY_IMAGE_CONCURRENCY_OVERFLOW_MODE=${GATEWAY_IMAGE_CONCURRENCY_OVERFLOW_MODE:-reject}
       - GATEWAY_IMAGE_CONCURRENCY_WAIT_TIMEOUT_SECONDS=${GATEWAY_IMAGE_CONCURRENCY_WAIT_TIMEOUT_SECONDS:-30}
       - GATEWAY_IMAGE_CONCURRENCY_MAX_WAITING_REQUESTS=${GATEWAY_IMAGE_CONCURRENCY_MAX_WAITING_REQUESTS:-100}
+      # API Key 并发等待队列（启动时读取；值必须出现在容器环境中，仅 .env 插值不够）
+      - GATEWAY_API_KEY_QUEUE_MAX_WAITING=${GATEWAY_API_KEY_QUEUE_MAX_WAITING:-5}
+      - GATEWAY_API_KEY_QUEUE_TIMEOUT_SECONDS=${GATEWAY_API_KEY_QUEUE_TIMEOUT_SECONDS:-30}
       - BATCH_IMAGE_ENABLED=${BATCH_IMAGE_ENABLED:-true}
       - BATCH_IMAGE_QUEUE_ENABLED=${BATCH_IMAGE_QUEUE_ENABLED:-true}
       - BATCH_IMAGE_VERTEX_ENABLED=${BATCH_IMAGE_VERTEX_ENABLED:-true}
@@ -147,17 +150,17 @@ services:
     restart: unless-stopped
     volumes:
       - ./redis_data:/data:Z
-    # The command is one quoted script for the inner `sh -c`. Compose keeps
-    # the newlines inside the quoted string, so every line needs a trailing
-    # `\` — without it, `redis-server` on the first line runs with no flags
-    # at all, and the --save/--appendonly/--appendfsync lines are never read.
-    command: >
-        sh -c '
-          redis-server \
-          --save 60 1 \
-          --appendonly yes \
-          --appendfsync everysec \
-          ${REDIS_PASSWORD:+--requirepass "$REDIS_PASSWORD"}'
+    command:
+      - redis-server
+      - --save
+      - "60"
+      - "1"
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+      - --requirepass
+      - ${REDIS_PASSWORD:-}
     environment:
       - TZ=${TZ:-Asia/Shanghai}
       - REDISCLI_AUTH=${REDIS_PASSWORD:-}

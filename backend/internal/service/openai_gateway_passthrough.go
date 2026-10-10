@@ -227,7 +227,10 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	}
 	if account != nil && account.IsOpenAI() && !account.IsCopilotSDKEnabled() {
 		responsesLite := isOpenAIResponsesLiteHeader(c.GetHeader(responsesLiteHeader)) || isOpenAIResponsesLiteWebSocketPayload(body)
-		normalizedBody, normalized, normalizeErr := normalizeOpenAIResponsesWebSocketCompatibilityBody(body, account, responsesLite)
+		normalizedBody, normalized, normalizeErr := normalizeOpenAIResponsesCompatibilityBodyWithOptions(body, account, openAIResponsesCompatibilityOptions{
+			ResponsesLite: responsesLite,
+			Compact:       isOpenAIResponsesCompactPath(c),
+		})
 		if normalizeErr != nil {
 			return nil, fmt.Errorf("normalize passthrough Responses compatibility: %w", normalizeErr)
 		}
@@ -295,7 +298,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		attemptImageIntentInvalidated,
 		IsImageGenerationIntent,
 	)
-	if imageIntent && !GroupAllowsImageGeneration(apiKeyGroup(apiKey)) {
+	if imageIntent && !GroupAllowsImageGenerationLatest(c.Request.Context(), apiKeyGroup(apiKey)) {
 		MarkOpsClientBusinessLimited(c, OpsClientBusinessLimitedReasonLocalFeatureGate)
 		c.JSON(http.StatusForbidden, gin.H{
 			"error": gin.H{
@@ -784,6 +787,8 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 	if req.Header.Get("content-type") == "" {
 		req.Header.Set("content-type", "application/json")
 	}
+
+	applyOpenAIAPIKeyIdentityHeaders(req.Header, account, s.codexIdentityOverrideUA(account))
 
 	// 官方 OpenCode / Command Code 上游收敛为规范客户端 UA：客户端透传的编程库
 	// UA 会命中其前置 Cloudflare bot 拦截（CF 1010/403），并被计入账号 403 strike。
@@ -1706,6 +1711,17 @@ func (s *OpenAIGatewayService) handleOpenAIStreamTerminalAccountSideEffects(
 	canonicalModel ...string,
 ) (int, bool) {
 	statusCode := openAIStreamFailureStatus(payload, message)
+	if account != nil && account.IsGrok() {
+		if isGrokContentPolicyRejection(http.StatusForbidden, payload) {
+			return http.StatusForbidden, false
+		}
+		ctx := context.Background()
+		if c != nil && c.Request != nil {
+			ctx = c.Request.Context()
+		}
+		s.handleGrokAccountUpstreamError(withGrokTeamRateLimitModel(ctx, firstNonEmpty(canonicalModel...)), account, statusCode, nil, payload)
+		return statusCode, false
+	}
 	switch statusCode {
 	case http.StatusForbidden:
 		if !openAIStream403AccountFailure(payload, message) {
@@ -1767,6 +1783,11 @@ func (s *OpenAIGatewayService) recordOpenAIStreamUpstreamError(
 	}
 	statusCode := openAIStreamFailureStatus(payload, message)
 	detail := ""
+	ctx := context.Background()
+	if c != nil && c.Request != nil {
+		ctx = c.Request.Context()
+	}
+	s.rateLimitService.observeQualityStatus(ctx, account, statusCode)
 	if len(payload) > 0 && s != nil && s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
 		maxBytes := s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes
 		if maxBytes <= 0 {
@@ -1850,6 +1871,7 @@ func (s *OpenAIGatewayService) newOpenAIStreamFailoverErrorWithModel(
 		classificationHeaders = nil
 	}
 	failoverErr := s.newOpenAIAccountFailoverErrorWithClassificationHeaders(account, statusCode, headers, classificationHeaders, payload, message, shouldDisable, retryableOnSameAccount)
+	failoverErr = failoverErr.WithGrokForbiddenPolicy(account)
 	if failoverErr.IsCredentialFailure() || failoverErr.RequestScopedTransient {
 		return failoverErr
 	}
@@ -1901,6 +1923,9 @@ func (s *OpenAIGatewayService) nonStreamingTerminalFailureFailover(
 	canonicalModel ...string,
 ) *UpstreamFailoverError {
 	if account == nil || IsResponseCommitted(c) {
+		return nil
+	}
+	if account.IsGrok() && isGrokContentPolicyRejection(http.StatusForbidden, payload) {
 		return nil
 	}
 	shouldFailover := openAIStreamFailedEventShouldFailover(payload, message)
@@ -1988,6 +2013,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithImage(
 	sawBareError := false
 	sawResponseFailed := false
 	terminalEventType := ""
+	terminalSuccessful := false
 	semanticOutputSeen := false
 	capacityFailoverSuppressedLogged := false
 	failedMessage := ""
@@ -2280,6 +2306,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithImage(
 			}
 			if openAIStreamEventIsTerminalWithType(trimmedData, eventType) {
 				sawTerminalEvent = true
+				terminalSuccessful = IsSuccessfulStreamTerminal(dataBytes)
 				if trimmedData != "[DONE]" {
 					terminalEventType = eventType
 				}
@@ -2439,6 +2466,9 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithImage(
 		s.clearOpenAIProxyStreamDisconnect(account, resp)
 	}
 	logOpenAISuccessMissingUsage(ctx, c, account, resp, usage, terminalEventType, clientDisconnected)
+	if terminalSuccessful && !clientDisconnected && account != nil {
+		MarkOpsStreamCompleted(c, account.ID)
+	}
 
 	return resultWithUsage(), nil
 }
@@ -2548,7 +2578,11 @@ func (s *OpenAIGatewayService) handlePassthroughSSEToJSON(resp *http.Response, c
 		if failoverErr := s.nonStreamingTerminalFailureFailover(c, resp, account, true, terminalType, terminalPayload, msg, mappedModel); failoverErr != nil {
 			return nil, failoverErr
 		}
-		return nil, s.writeOpenAINonStreamingProtocolError(resp, c, msg)
+		writeErr := s.writeOpenAINonStreamingProtocolError(resp, c, msg)
+		if account != nil && account.IsGrok() && isGrokContentPolicyRejection(http.StatusForbidden, terminalPayload) {
+			return nil, &grokContentPolicyError{message: msg}
+		}
+		return nil, writeErr
 	}
 	finalResponse, ok := extractCodexFinalResponse(bodyText)
 
