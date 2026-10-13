@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -37,6 +38,7 @@ type bpsImageAdmissionBudget struct {
 	requests    int
 	limitBytes  int64
 	maxRequests int
+	observed    bpsImageCapacityCounters
 }
 
 type bpsImageReservation struct {
@@ -46,15 +48,26 @@ type bpsImageReservation struct {
 }
 
 func (b *bpsImageAdmissionBudget) acquire(weight int64) (*bpsImageReservation, bool) {
+	reservation, _ := b.acquireObserved(weight)
+	return reservation, reservation != nil
+}
+
+func (b *bpsImageAdmissionBudget) acquireObserved(weight int64) (*bpsImageReservation, *bpsImageCapacityObservation) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	limitBytes, maxRequests := b.limits()
-	if b.requests >= maxRequests || weight > limitBytes-b.bytes {
-		return nil, false
+	if b.requests >= maxRequests {
+		b.observed.requestsRejected++
+		return nil, b.observeLocked(weight, "requests", time.Now())
+	}
+	if weight > limitBytes-b.bytes {
+		b.observed.bytesRejected++
+		return nil, b.observeLocked(weight, "bytes", time.Now())
 	}
 	b.bytes += weight
 	b.requests++
-	return &bpsImageReservation{budget: b, weight: weight}, true
+	b.observed.admitted++
+	return &bpsImageReservation{budget: b, weight: weight}, b.observeLocked(weight, "admitted", time.Now())
 }
 
 func (b *bpsImageAdmissionBudget) limits() (int64, int) {
@@ -196,8 +209,9 @@ func ExcelBPSImageAdmission(settings excelBPSImageSettingsReader, configuredMax 
 		if accounted < bpsImageMinBodyBytes {
 			accounted = bpsImageMinBodyBytes
 		}
-		reservation, acquired := ingressBudget.acquire(accounted * bpsImageBodyMultiplier)
-		if !acquired {
+		reservation, observation := ingressBudget.acquireObserved(accounted * bpsImageBodyMultiplier)
+		logBPSImageCapacity(c, "ingress", observation)
+		if reservation == nil {
 			bpsImageAdmissionError(c, http.StatusServiceUnavailable, "request_body_capacity_busy", "Request body processing capacity is busy; retry later")
 			return
 		}
@@ -234,8 +248,9 @@ func ExcelBPSImageAdmission(settings excelBPSImageSettingsReader, configuredMax 
 		c.Request.Body = httputil.NewPrereadBody(body)
 		c.Request.ContentLength = int64(len(body))
 		if bpsRequestContainsInlineImage(body) {
-			imageReservation, acquired := imageBudget.acquire(accounted * bpsImageBodyMultiplier)
-			if !acquired {
+			imageReservation, observation := imageBudget.acquireObserved(accounted * bpsImageBodyMultiplier)
+			logBPSImageCapacity(c, "image", observation)
+			if imageReservation == nil {
 				bpsImageAdmissionError(c, http.StatusServiceUnavailable, "basispoints_image_request_busy", "Image relay request capacity is busy; retry later")
 				return
 			}
