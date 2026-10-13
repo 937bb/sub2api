@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/httpclient"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/upstreamroute"
@@ -60,7 +61,7 @@ func (t *regionalUpstreamTransport) RoundTrip(req *http.Request) (*http.Response
 		atomic.StoreInt64(&entry.lastUsed, time.Now().UnixNano())
 	}
 	start := time.Now()
-	resp, err := entry.client.Transport.RoundTrip(req)
+	resp, err := httpclient.RoundTripFresh(entry.client.Transport, req)
 	if region != "" {
 		status := 0
 		if resp != nil {

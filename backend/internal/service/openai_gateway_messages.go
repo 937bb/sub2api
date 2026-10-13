@@ -33,6 +33,12 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	promptCacheKey string,
 	defaultMappedModel string,
 ) (*OpenAIForwardResult, error) {
+	return s.retryOpenAIProcessing(ctx, account, func(attemptCtx context.Context) (*OpenAIForwardResult, error) {
+		return s.forwardAsAnthropicAttempt(attemptCtx, c, account, body, promptCacheKey, defaultMappedModel)
+	})
+}
+
+func (s *OpenAIGatewayService) forwardAsAnthropicAttempt(ctx context.Context, c *gin.Context, account *Account, body []byte, promptCacheKey, defaultMappedModel string) (*OpenAIForwardResult, error) {
 	latest, admissionErr := s.admitOpenAITurn(
 		context.WithoutCancel(ctx),
 		c,

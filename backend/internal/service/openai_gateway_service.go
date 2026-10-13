@@ -859,6 +859,7 @@ func classifyOpenAIWSReconnectReason(err error) (string, bool) {
 
 	switch baseReason {
 	case "read_event",
+		openAIProcessingRetryReason,
 		"write_request",
 		"write",
 		"acquire_timeout",

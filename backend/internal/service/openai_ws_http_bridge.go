@@ -421,6 +421,16 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	turn int,
 	writeClientMessage func([]byte) error,
 ) (*OpenAIForwardResult, error) {
+	return s.retryOpenAIProcessing(ctx, account, func(attemptCtx context.Context) (*OpenAIForwardResult, error) {
+		return s.proxyOpenAIWSHTTPBridgeTurnAttempt(attemptCtx, c, account, token, payload, payloadBytes, originalModel, imageBillingModel, imageSizeTier, imageInputSize, grokCacheIdentity, turn, writeClientMessage)
+	})
+}
+
+func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurnAttempt(
+	ctx context.Context, c *gin.Context, account *Account, token string, payload []byte,
+	payloadBytes int, originalModel, imageBillingModel, imageSizeTier, imageInputSize, grokCacheIdentity string,
+	turn int, writeClientMessage func([]byte) error,
+) (*OpenAIForwardResult, error) {
 	if s == nil {
 		return nil, errors.New("service is nil")
 	}
@@ -805,6 +815,9 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			parseOpenAIWSResponseUsageFromCompletedEvent(upstreamMessage, &usage)
 		}
 		if eventType == "error" || eventType == "response.failed" {
+			if officialOpenAIResponses && !clientDisconnected && !wroteDownstream && openAIAccountRetryFailure(account, upstreamMessage) {
+				return nil, newOpenAIProcessingFailover(resp.Header, upstreamMessage)
+			}
 			markOpenAICyberPolicyEvent(c, upstreamMessage, http.StatusOK, &usage)
 		}
 		imageCounter.AddSSEData(upstreamMessage)

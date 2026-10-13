@@ -30,6 +30,7 @@ import (
 	"golang.org/x/net/http2"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/httpclient"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyurl"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyutil"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/servertiming"
@@ -453,7 +454,7 @@ func httpClientWithGrokAccessDeniedFallback(client *http.Client) *http.Client {
 }
 
 func (t *grokAccessDeniedFallbackTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	resp, err := t.base.RoundTrip(req)
+	resp, err := httpclient.RoundTripFresh(t.base, req)
 	if err != nil || !isGrokCLIAccessDeniedFallbackCandidate(req, resp) {
 		return resp, err
 	}

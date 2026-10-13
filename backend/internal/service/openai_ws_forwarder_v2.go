@@ -164,6 +164,10 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	storeDisabledConnMode := s.openAIWSStoreDisabledConnMode()
 	forceNewConnByPolicy := shouldForceNewConnOnStoreDisabled(storeDisabledConnMode, lastFailureReason)
 	forceNewConn := forceNewConnByPolicy && storeDisabled && previousResponseID == "" && sessionHash != "" && preferredConnID == ""
+	if lastFailureReason != "" && previousResponseID == "" && codexWSAnchorFromContext(ctx) == nil {
+		forceNewConn = true
+		preferredConnID = ""
+	}
 	wsHeaders, sessionResolution, buildHdrErr := s.buildOpenAIWSHeaders(
 		ctx,
 		c,
@@ -539,6 +543,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	responseID := ""
 	var finalResponse []byte
 	wroteDownstream := false
+	processingReplaySafe := true
 	needModelReplace := originalModel != mappedModel && shouldHideMappedUpstreamModel(ctx, s.settingService)
 	bufferedStreamEvents := make([][]byte, 0, 4)
 	flushEarlyEvents := reqStream && decision.Reason == openAIOAuthWSSSEAccelerationReason
@@ -779,6 +784,9 @@ readLoop:
 		if eventType == "" {
 			continue
 		}
+		if eventType != "response.created" && eventType != "response.in_progress" && eventType != "error" && eventType != "response.failed" {
+			processingReplaySafe = false
+		}
 		responseModelObserver.ObserveOpenAI(message, eventType)
 		eventCount++
 		if firstEventType == "" {
@@ -832,6 +840,13 @@ readLoop:
 		}
 		imageCounter.AddSSEData(message)
 
+		if (eventType == "error" || eventType == "response.failed") && !wroteDownstream &&
+			processingReplaySafe && firstTokenMs == nil && previousResponseID == "" && anchor == nil &&
+			lastFailureReason != openAIProcessingRetryReason && !isControlledExperiment(ctx) &&
+			openAIAccountRetryFailure(account, message) && claimOpenAIProcessingRetry(ctx) {
+			lease.MarkBroken()
+			return nil, wrapOpenAIWSFallback(openAIProcessingRetryReason, errors.New("upstream processing failed before output"))
+		}
 		if eventType == "error" || eventType == "response.failed" {
 			markOpenAICyberPolicyEvent(c, message, http.StatusOK, usage)
 		}
@@ -845,6 +860,9 @@ readLoop:
 				errMsg = "Upstream websocket error"
 			}
 			fallbackReason, canFallback := classifyOpenAIWSErrorEventFromRaw(errCodeRaw, errTypeRaw, errMsgRaw)
+			if openAIProcessingRetryUsed(ctx) && openAIAccountRetryFailure(account, message) {
+				canFallback = false
+			}
 			errCode, errType, errMessage := summarizeOpenAIWSErrorEventFieldsFromRaw(errCodeRaw, errTypeRaw, errMsgRaw)
 			logOpenAIWSModeInfo(
 				"error_event account_id=%d conn_id=%s idx=%d fallback_reason=%s can_fallback=%v err_code=%s err_type=%s err_message=%s",

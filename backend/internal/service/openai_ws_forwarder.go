@@ -172,7 +172,7 @@ func isOpenAIWSIngressTurnRetryable(err error) bool {
 		return false
 	}
 	switch turnErr.stage {
-	case "write_upstream", "read_upstream":
+	case "write_upstream", "read_upstream", openAIProcessingRetryReason:
 		return true
 	default:
 		return false

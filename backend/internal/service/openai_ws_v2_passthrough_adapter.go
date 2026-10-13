@@ -968,6 +968,10 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		_ = upstreamConn.Close()
 	}()
 	handshakeBinding := s.bindOpenAIWSHandshake(account, gjson.GetBytes(firstClientMessage, "model").String(), headers)
+	var currentHandshake atomic.Pointer[http.Header]
+	initialHandshake := handshakeHeaders.Clone()
+	currentHandshake.Store(&initialHandshake)
+	connectionHeaders := func() http.Header { return *currentHandshake.Load() }
 	logOpenAIWSV2Passthrough(
 		"relay_dial_ok account_id=%d status_code=%d upstream_request_id=%s",
 		account.ID,
@@ -981,6 +985,50 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	}
 	if capture := requestcapture.FromContext(ctx); capture != nil {
 		upstreamFrameConn = &captureUpstreamFrameConn{FrameConn: upstreamFrameConn, capture: capture, account: account.ID}
+	}
+	if !isControlledExperiment(ctx) {
+		retryConn := &openAIProcessingRetryFrameConn{inner: upstreamFrameConn, allowTemporary: openAIAccountAllowsTransientRetry(account)}
+		retryConn.reconnect = func(retryCtx context.Context, payload []byte) (openaiwsv2.FrameConn, error) {
+			model := gjson.GetBytes(payload, "model").String()
+			latest, admissionErr := s.admitOpenAITurn(retryCtx, c, account, model)
+			if admissionErr != nil {
+				return nil, admissionErr
+			}
+			if bindingErr := s.checkOpenAIWSBinding(latest, model, handshakeBinding); bindingErr != nil {
+				return nil, bindingErr
+			}
+			if rpmErr := s.acquireOpenAIRPMForSend(retryCtx, latest); rpmErr != nil {
+				return nil, rpmErr
+			}
+			retryHeaders := headers.Clone()
+			if ticketErr := s.applyOpenAICodexTicket(retryCtx, latest, model, retryHeaders, "websocket"); ticketErr != nil {
+				return nil, ticketErr
+			}
+			retryHeaders, refreshErr := s.refreshOpenAIAgentIdentityHeaders(retryCtx, latest, retryHeaders)
+			if refreshErr != nil {
+				return nil, refreshErr
+			}
+			dialCtx, cancel := context.WithTimeout(upstreamroute.WithAccountID(retryCtx, account.ID), s.openAIWSDialTimeout())
+			fresh, _, freshHeaders, dialErr := dialer.Dial(dialCtx, wsURL, retryHeaders, proxyURL)
+			cancel()
+			if dialErr != nil {
+				return nil, dialErr
+			}
+			frame, ok := fresh.(openaiwsv2.FrameConn)
+			if !ok {
+				_ = fresh.Close()
+				return nil, errors.New("replacement websocket does not support frame relay")
+			}
+			freshSnapshot := freshHeaders.Clone()
+			currentHandshake.Store(&freshSnapshot)
+			if capture := requestcapture.FromContext(retryCtx); capture != nil {
+				frame = &captureUpstreamFrameConn{FrameConn: frame, capture: capture, account: account.ID}
+			}
+			logOpenAIWSV2Passthrough("processing_error_reconnect account_id=%d transport=ws retry=1", account.ID)
+			return frame, nil
+		}
+		upstreamFrameConn = retryConn
+		defer func() { _ = retryConn.Close() }()
 	}
 	relayUpstreamFrameConn := &openAIWSPassthroughFirstOutputFrameConn{
 		inner:             upstreamFrameConn,
@@ -1388,7 +1436,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					Stream:                        true,
 					OpenAIWSMode:                  true,
 					UpstreamTerminalEvent:         normalizeOpenAIWSTerminalEvent(turn.TerminalEventType),
-					ResponseHeaders:               cloneHeader(handshakeHeaders),
+					ResponseHeaders:               cloneHeader(connectionHeaders()),
 					Duration:                      turn.Duration,
 					FirstTokenMs:                  turn.FirstTokenMs,
 				}
@@ -1453,7 +1501,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				errCodeRaw, errTypeRaw, errMsgRaw := parseOpenAIWSErrorEventFields(payload)
 				isPreOutputRateLimit := eventType == "error" && !wroteDownstream && isOpenAIWSRateLimitError(errCodeRaw, errTypeRaw, errMsgRaw)
 				if (eventType == "error" || eventType == "response.failed") && !failureAccountSideEffectsApplied && !isPreOutputRateLimit {
-					failureAccountSideEffectsApplied = s.handleOpenAIWSFailureAccountSideEffects(ctx, account, *activePolicyModel.Load(), handshakeHeaders, payload)
+					failureAccountSideEffectsApplied = s.handleOpenAIWSFailureAccountSideEffects(ctx, account, *activePolicyModel.Load(), connectionHeaders(), payload)
 				}
 				if eventType != "error" {
 					return nil
@@ -1461,7 +1509,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				if wroteDownstream || !isOpenAIWSRateLimitError(errCodeRaw, errTypeRaw, errMsgRaw) {
 					return nil
 				}
-				s.persistOpenAIWSRateLimitSignal(ctx, account, handshakeHeaders, payload, errCodeRaw, errTypeRaw, errMsgRaw, *activePolicyModel.Load())
+				s.persistOpenAIWSRateLimitSignal(ctx, account, connectionHeaders(), payload, errCodeRaw, errTypeRaw, errMsgRaw, *activePolicyModel.Load())
 				logOpenAIWSV2Passthrough(
 					"relay_rate_limit_failover account_id=%d err_code=%s err_type=%s err_message=%s",
 					account.ID,
@@ -1476,7 +1524,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 						errors.New("later passthrough turn was rate limited before output"),
 					)
 				}
-				return s.newOpenAIWSRateLimitFailoverError(account, handshakeHeaders, payload, errMsgRaw)
+				return s.newOpenAIWSRateLimitFailoverError(account, connectionHeaders(), payload, errMsgRaw)
 			},
 			OnTrace: func(event openaiwsv2.RelayTraceEvent) {
 				logOpenAIWSV2Passthrough(
@@ -1526,7 +1574,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		Stream:                        true,
 		OpenAIWSMode:                  true,
 		UpstreamTerminalEvent:         normalizeOpenAIWSTerminalEvent(relayResult.TerminalEventType),
-		ResponseHeaders:               cloneHeader(handshakeHeaders),
+		ResponseHeaders:               cloneHeader(connectionHeaders()),
 		Duration:                      relayResult.Duration,
 		FirstTokenMs:                  relayResult.FirstTokenMs,
 	}
@@ -1582,7 +1630,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			deadline.reasoningEffort,
 			deadline.timeout,
 			"websocket_first_semantic_output",
-			handshakeHeaders,
+			connectionHeaders(),
 		)
 		if turnCount == 0 && !relayExit.WroteDownstream {
 			relayErr = failoverErr

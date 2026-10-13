@@ -1864,6 +1864,18 @@ func (s *OpenAIGatewayService) newOpenAIStreamFailoverErrorWithModel(
 	responseHeaders ...http.Header,
 ) *UpstreamFailoverError {
 	message = sanitizeUpstreamErrorMessage(strings.TrimSpace(message))
+	if account != nil && account.Platform == PlatformOpenAI &&
+		(openAIAccountRetryFailure(account, payload) || (openAIAccountAllowsTransientRetry(account) && len(payload) == 0 && openAIRetryStreamDisconnect(message))) {
+		var headers http.Header
+		if len(responseHeaders) > 0 {
+			headers = responseHeaders[0]
+		}
+		failure := newOpenAIProcessingFailover(headers, payload)
+		if failure.ClientMessage == "" {
+			failure.ClientMessage = message
+		}
+		return failure
+	}
 	if message == "" {
 		message = "OpenAI stream disconnected before completion"
 	}

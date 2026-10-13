@@ -1628,6 +1628,9 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 	if err != nil {
 		return nil, err
 	}
+	if account != nil && account.Platform == PlatformOpenAI && openAIAccountRetryFailure(account, body) {
+		return nil, newOpenAIProcessingFailover(resp.Header, body)
+	}
 	observer := upstreamResponseModelObserverFromContext(c)
 	if observer == nil {
 		observer = beginUpstreamResponseModelObservation(c)

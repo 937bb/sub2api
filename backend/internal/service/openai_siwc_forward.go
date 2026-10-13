@@ -43,7 +43,11 @@ func (s *OpenAIGatewayService) doSIWCHTTP(request *http.Request, proxyURL string
 	if request == nil || request.URL == nil || request.Method != http.MethodPost || request.URL.String() != siwc.ResponsesURL {
 		return nil, errors.New("unsupported SIWC inference endpoint")
 	}
-	client, err := httpclient.GetClient(httpclient.Options{ProxyURL: proxyURL})
+	getClient := httpclient.GetClient
+	if httpclient.RequiresFreshConnection(request.Context()) {
+		getClient = httpclient.NewFreshClient
+	}
+	client, err := getClient(httpclient.Options{ProxyURL: proxyURL})
 	if err != nil {
 		return nil, err
 	}
@@ -52,6 +56,7 @@ func (s *OpenAIGatewayService) doSIWCHTTP(request *http.Request, proxyURL string
 		isolated.Transport = s.siwcTransport
 	}
 	isolated.Timeout = 0
+	isolated.Transport = httpclient.FreshTransport{Base: isolated.Transport}
 	isolated.Jar = nil
 	isolated.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	return isolated.Do(request)

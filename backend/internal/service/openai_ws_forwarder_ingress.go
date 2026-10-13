@@ -1659,6 +1659,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	}
 
 	var rejectedFieldRetryState *openAIResponsesRejectedFieldRetryState
+	processingRetryTried := false
 	sendAndRelay := func(turn int, lease *openAIWSConnLease, payload []byte, payloadBytes int, originalModel string, imageBillingModel string, imageSizeTier string, imageInputSize string, requestedReasoningEffort *string) (*OpenAIForwardResult, error) {
 		responseModelObserver := &upstreamResponseModelObserver{}
 		if lease == nil {
@@ -1762,6 +1763,14 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			}
 			if openAIWSMessageShouldParseUsage(eventType, upstreamMessage) {
 				parseOpenAIWSResponseUsageFromCompletedEvent(upstreamMessage, &usage)
+			}
+			if (eventType == "error" || eventType == "response.failed") && !wroteDownstream &&
+				!processingRetryTried && turnPreviousResponseID == "" && !isControlledExperiment(ctx) &&
+				openAIAccountRetryFailure(account, upstreamMessage) {
+				processingRetryTried = true
+				lease.MarkBroken()
+				return nil, wrapOpenAIWSIngressTurnError(openAIProcessingRetryReason,
+					errors.New("upstream processing failed before output"), false)
 			}
 			if eventType == "error" || eventType == "response.failed" {
 				markOpenAICyberPolicyEvent(c, upstreamMessage, http.StatusOK, &usage)
@@ -2620,6 +2629,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			return finalErr
 		}
 		turnRetry = 0
+		processingRetryTried = false
 		turnPrevRecoveryTried = false
 		lastTurnFinishedAt = time.Now()
 		lastTurnClean = true

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/httpclient"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
@@ -95,6 +96,12 @@ func prismBrowserResponsesURL(baseURL string) string {
 
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (result *OpenAIForwardResult, resultErr error) {
+	return s.retryOpenAIProcessing(ctx, account, func(attemptCtx context.Context) (*OpenAIForwardResult, error) {
+		return s.forwardAttempt(attemptCtx, c, account, body)
+	})
+}
+
+func (s *OpenAIGatewayService) forwardAttempt(ctx context.Context, c *gin.Context, account *Account, body []byte) (result *OpenAIForwardResult, resultErr error) {
 	if err := requestmodel.ValidateJSONSelectors(body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "code": "ambiguous_model", "message": err.Error()}})
 		return nil, err
@@ -273,6 +280,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	wsDecision := s.getOpenAIWSProtocolResolver().Resolve(account)
 	// HTTP SSE may opt into the native WS pool on ordinary OAuth accounts.
 	wsDecision = s.resolveOpenAIHTTPWSSSEDecision(c, account, body, wsDecision)
+	if httpclient.RequiresFreshConnection(ctx) && codexWSAnchorFromContext(ctx) == nil {
+		wsDecision = openAIWSHTTPDecision("preoutput_retry_fresh_http")
+	}
 	accelerateHTTPSSE := wsDecision.Reason == openAIOAuthWSSSEAccelerationReason
 	anchorCtx, anchorFinish, anchorErr := s.prepareCodexWSAnchor(ctx, c, account, body)
 	if anchorErr != nil {
@@ -1111,7 +1121,13 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			if c != nil && c.Writer != nil && c.Writer.Written() {
 				break
 			}
-			if accelerateHTTPSSE {
+			// A failed fresh replay must not start another reconnect sequence.
+			if wsLastFailureReason == openAIProcessingRetryReason {
+				break
+			}
+			var processingErr *openAIWSFallbackError
+			processingRetry := errors.As(wsErr, &processingErr) && processingErr.Reason == openAIProcessingRetryReason
+			if accelerateHTTPSSE && !processingRetry {
 				break
 			}
 			var taskRecoveredErr *agentIdentityTaskRecoveredError
@@ -1226,7 +1242,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			return nil, wsErr
 		}
 		fallbackReason := ""
-		if accelerateHTTPSSE && !isControlledExperiment(ctx) {
+		if accelerateHTTPSSE && !isControlledExperiment(ctx) && !openAIProcessingRetryUsed(ctx) {
 			fallbackReason = openAIWSSSEFallbackReason(ctx, c, wsErr)
 		}
 		if fallbackReason == "" {
