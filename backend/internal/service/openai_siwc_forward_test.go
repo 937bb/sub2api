@@ -260,6 +260,50 @@ func TestPrepareSIWCLowersAndRestoresClientTools(t *testing.T) {
 	require.Equal(t, "client", gjson.GetBytes(restored, "item.execution").String())
 }
 
+func TestSIWCForwardLowersUnsupportedClientHistoryAndRestoresProtocol(t *testing.T) {
+	body := []byte(`{"model":"gpt-6-astra","stream":true,"tools":[{"type":"tool_search"}],"input":[
+{"type":"tool_search_call","id":"tsc_old","call_id":"call_old_search","arguments":{"query":"repository"}},
+{"type":"tool_search_output","call_id":"call_old_search","tools":[{"type":"namespace","name":"github"}]},
+{"type":"computer_call","id":"computer_old","call_id":"call_computer","status":"completed","action":{"type":"screenshot"}},
+{"type":"computer_call_output","call_id":"call_computer","output":{"type":"computer_screenshot","image_url":"data:image/png;base64,AQID"}},
+{"role":"user","content":"continue"}]}`)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(string(body)))
+
+	service := newOpenAIRejectedFieldTestService(nil)
+	service.siwcTransport = siwcCatalogRoundTripper(func(req *http.Request) (*http.Response, error) {
+		sent, err := io.ReadAll(req.Body)
+		require.NoError(t, err)
+		require.NotContains(t, string(sent), `"type":"tool_search_call"`)
+		require.NotContains(t, string(sent), `"type":"tool_search_output"`)
+		require.NotContains(t, string(sent), `"type":"computer_call"`)
+		require.NotContains(t, string(sent), `"type":"computer_call_output"`)
+		require.Equal(t, "function_call", gjson.GetBytes(sent, "input.1.type").String())
+		require.Equal(t, "function_call_output", gjson.GetBytes(sent, "input.2.type").String())
+		require.Equal(t, "function_call", gjson.GetBytes(sent, "input.3.type").String())
+		require.Equal(t, "function_call_output", gjson.GetBytes(sent, "input.4.type").String())
+		require.Equal(t, "input_image", gjson.GetBytes(sent, "input.5.content.0.type").String())
+
+		sse := strings.Join([]string{
+			`event: response.output_item.added
+data: {"type":"response.output_item.added","sequence_number":0,"output_index":0,"item":{"type":"function_call","id":"fc_search","call_id":"call_search","name":"tool_search","status":"in_progress"}}`,
+			`event: response.output_item.done
+data: {"type":"response.output_item.done","sequence_number":1,"output_index":0,"item":{"type":"function_call","id":"fc_search","call_id":"call_search","name":"tool_search","arguments":"{\"query\":\"github\"}","status":"completed"}}`,
+			`event: response.completed
+data: {"type":"response.completed","sequence_number":2,"response":{"id":"resp-siwc-tools","model":"gpt-6-astra","status":"completed","output":[{"type":"function_call","id":"fc_search","call_id":"call_search","name":"tool_search","arguments":"{\"query\":\"github\"}"}],"usage":{"input_tokens":10,"output_tokens":2,"input_tokens_details":{"cached_tokens":4}}}}`,
+		}, "\n\n") + "\n\n"
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(sse))}, nil
+	})
+
+	result, err := service.Forward(context.Background(), c, siwcFixtureAccount(), body)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.True(t, result.Stream)
+	require.Contains(t, recorder.Body.String(), `"type":"tool_search_call"`)
+	require.Contains(t, recorder.Body.String(), `"execution":"client"`)
+}
+
 func TestSIWCDoesNotSelectCodexTransports(t *testing.T) {
 	account := siwcFixtureAccount()
 	require.True(t, account.IsOpenAIOAuth())
