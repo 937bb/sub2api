@@ -142,7 +142,22 @@ func normalizeSIWCResponsesBody(body []byte) ([]byte, error) {
 			}
 		}
 		if len(additional) > 0 {
-			items = append(items, map[string]any{"type": "additional_tools", "role": "developer", "tools": additional})
+			// Top-level tools apply to the whole history. Keep their declaration
+			// before conversation turns instead of moving it to the end each turn.
+			index := 0
+			for index < len(items) {
+				item, ok := items[index].(map[string]any)
+				if !ok {
+					return nil, errors.New("invalid SIWC input item")
+				}
+				if item["role"] != "developer" || (item["type"] != nil && item["type"] != "message") {
+					break
+				}
+				index++
+			}
+			items = append(items, nil)
+			copy(items[index+1:], items[index:])
+			items[index] = map[string]any{"type": "additional_tools", "role": "developer", "tools": additional}
 		}
 		delete(payload, "tools")
 		if len(top) > 0 {
@@ -174,16 +189,26 @@ func buildSIWCResponsesRequest(ctx context.Context, c *gin.Context, account *Acc
 		return nil, errors.New("model is not in the SIWC account catalog")
 	}
 	// Compatibility converters carry session keys separately from the body.
-	// SIWC uses the JSON cache key, never Codex session/conversation headers.
+	// Keep the caller's cache-accounting key separate from session affinity.
 	// Scope once at the outbound boundary without mutating the retry source;
 	// refreshed tokens must not change this stable tenant/grant namespace.
 	cacheKey := strings.TrimSpace(gjson.GetBytes(normalized, "prompt_cache_key").String())
 	if cacheKey == "" {
 		cacheKey = strings.TrimSpace(promptCacheKey)
 	}
+	sessionSeed := explicitOpenAIHeaderSessionID(c)
+	if sessionSeed == "" {
+		sessionSeed = cacheKey
+	}
+	if sessionSeed == "" {
+		sessionSeed = deriveOpenAIAnchoredContentSessionSeed(body)
+	}
+	isolate := func(raw string) string {
+		seed := fmt.Sprintf("siwc:%s:%s:%s", account.GetCredential("subject"), account.GetCredential("client_id"), raw)
+		return isolateOpenAISessionID(getAPIKeyIDFromContext(c), seed)
+	}
 	if cacheKey != "" {
-		seed := fmt.Sprintf("siwc:%s:%s:%s", account.GetCredential("subject"), account.GetCredential("client_id"), cacheKey)
-		normalized, err = sjson.SetBytes(normalized, "prompt_cache_key", isolateOpenAISessionID(getAPIKeyIDFromContext(c), seed))
+		normalized, err = sjson.SetBytes(normalized, "prompt_cache_key", isolate(cacheKey))
 		if err != nil {
 			return nil, fmt.Errorf("set SIWC prompt cache key: %w", err)
 		}
@@ -197,5 +222,11 @@ func buildSIWCResponsesRequest(ctx context.Context, c *gin.Context, account *Acc
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "text/event-stream")
 	req.Header.Set("User-Agent", siwc.UserAgent)
+	// SIWC's HTTP route needs session_id for repeatable cache affinity even
+	// when prompt_cache_key is present. Generate it locally; do not forward
+	// raw client identity, cookies, conversation state, or per-request IDs.
+	if sessionSeed != "" {
+		req.Header.Set("session_id", generateSessionUUID(isolate(sessionSeed)))
+	}
 	return req, nil
 }

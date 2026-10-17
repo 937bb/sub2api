@@ -29,7 +29,7 @@ func TestSIWCForwardPreservesPromptCacheControls(t *testing.T) {
 					require.JSONEq(t, `{"mode":"explicit"}`, gjson.GetBytes(sent, "input.0.content.0.prompt_cache_breakpoint").Raw)
 					require.NotEmpty(t, gjson.GetBytes(sent, "prompt_cache_key").String())
 					require.False(t, gjson.GetBytes(sent, "prompt_cache_retention").Exists())
-					require.Empty(t, req.Header.Get("session_id"))
+					require.NotEmpty(t, req.Header.Get("session_id"))
 					require.Empty(t, req.Header.Get("conversation_id"))
 					return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(siwcForwardSSE))}, nil
 				})
@@ -80,7 +80,7 @@ func TestSIWCForwardPromptCacheKeyAcrossProtocols(t *testing.T) {
 				service.siwcTransport = siwcCatalogRoundTripper(func(req *http.Request) (*http.Response, error) {
 					sent, err = io.ReadAll(req.Body)
 					require.NoError(t, err)
-					require.Empty(t, req.Header.Get("session_id"))
+					require.NotEmpty(t, req.Header.Get("session_id"))
 					require.Empty(t, req.Header.Get("conversation_id"))
 					return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(siwcForwardSSE))}, nil
 				})

@@ -58,7 +58,9 @@ func TestSIWCCompatibilityForwardPreservesHistoryAndUsage(t *testing.T) {
 					require.Equal(t, siwc.ResponsesURL, req.URL.String())
 					require.Equal(t, siwc.UserAgent, req.UserAgent())
 					require.Equal(t, "Bearer upstream-token", req.Header.Get("Authorization"))
-					for _, header := range []string{"Cookie", "Session_id", "Conversation_id", "ChatGPT-Account-ID", "Originator", "OpenAI-Beta", "X-Codex-Turn-State"} {
+					require.NotEmpty(t, req.Header.Get("session_id"))
+					require.NotEqual(t, "inbound-private-value", req.Header.Get("session_id"))
+					for _, header := range []string{"Cookie", "Conversation_id", "ChatGPT-Account-ID", "Originator", "OpenAI-Beta", "X-Codex-Turn-State"} {
 						require.Empty(t, req.Header.Get(header), header)
 					}
 					upstreamBody, err := io.ReadAll(req.Body)

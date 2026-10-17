@@ -40,7 +40,7 @@ AT、RT 和 ID token 不放入浏览器持久化存储。重新授权链接只�
 | Compact、Live、AlphaSearch、Codex WebSocket、Shadow | 不用于 SIWC |
 | Codex 额度查询、隐私设置 | 排除 SIWC，避免 token 发错端点 |
 
-保留 `developer` 与原始指令，将 `system` 就地转换为 `developer`；保留完整消息历史和推理密文，function/custom tools 转入具有 `role=developer` 的 additional_tools。无状态历史消息移除不兼容的非 msg_ 消息 ID；工具 call_id、工具结果关联和 reasoning ID 不改。强制上游 `store=false`、SSE 流式。非流式客户由现有兼容层汇总响应。非空 `previous_response_id` / `conversation`、item reference 和 compaction trigger 明确拒绝，不静默丢失状态。
+保留 `developer` 与原始指令，将 `system` 就地转换为 `developer`；保留完整消息历史和推理密文，顶层 function/custom tools 转入具有 `role=developer` 的 additional_tools，固定放在开头连续 developer 消息之后、对话历史之前，避免每轮移动工具定义破坏前缀。客户原本放在历史中的 additional_tools 不重排。无状态历史消息移除不兼容的非 msg_ 消息 ID；工具 call_id、工具结果关联和 reasoning ID 不改。强制上游 `store=false`、SSE 流式。非流式客户由现有兼容层汇总响应。非空 `previous_response_id` / `conversation`、item reference 和 compaction trigger 明确拒绝，不静默丢失状态。
 
 结构化 `subscription_sharing_usage_limit_exceeded` 按 429 记录和返回；该 SIWC 授权暂停派发 60 秒，避免同一失败请求反复重试。60 秒是本地冷却，不是官方额度 reset；不据此声称整个套餐耗尽。`subscription_sharing_usage_unavailable` 按 503 处理。已输出内容的流保留终止错误，不重新播放请求。应用限额仍需在 ChatGPT Settings → Usage 核对。
 
@@ -52,7 +52,11 @@ AT、RT 和 ID token 不放入浏览器持久化存储。重新授权链接只�
 
 SIWC Responses 保留客户提供的 `prompt_cache_options` 和内容中的 `prompt_cache_breakpoint`，不再因为客户端不是 Codex CLI 就过滤缓存选项。仍移除官方明确不支持的旧字段 `prompt_cache_retention`；不自动添加 TTL、显式断点或缓存选项。
 
-Chat Completions / Messages 兼容转换得到的会话缓存键在 SIWC 出网前写入 JSON 的 `prompt_cache_key`，不转成 Codex 的 `session_id` / `conversation_id` 请求头。原生 Responses 或 Responses 形状兼容请求已有的非空 body key 优先于转换链路的备用 key。所有 SIWC 路径统一按下游 API key ID、SIWC subject 和 client ID 派生稳定标识；同一授权刷新 token 不改变标识，不同租户或授权使用不同标识。仅修改新建出站 body，重试不在原始请求上重复哈希。
+Chat Completions / Messages 兼容转换得到的缓存键在 SIWC 出网前写入 JSON 的 `prompt_cache_key`。原生 Responses 或 Responses 形状兼容请求已有的非空 body key 优先于转换链路的备用 key。所有 SIWC 路径统一按下游 API key ID、SIWC subject 和 client ID 派生稳定标识；同一授权刷新 token 不改变标识，不同租户或授权使用不同标识。仅修改新建出站 body，重试不在原始请求上重复哈希。
+
+2026-10-17 真实 SIWC HTTP 对照确认：完全相同的请求体仅有 `prompt_cache_key` 时重复请求仍无命中；加稳定 `session_id` 后命中 10,880 / 11,045 输入 token，单独 `conversation_id` 无此效果。因此额外生成隔离后的稳定 UUID 作为 `session_id`：优先客户显式会话头，其次 body/兼容缓存键，最后使用有首条用户消息锚点的稳定内容种子。不透传原始会话头，不复制 Cookie、账号身份头、每请求 ID 或 conversation_id，也不启用 WebSocket。Responses 的内容种子只纳入开头连续的 system/developer 消息，后续 developer 更新不再改变会话归属。
+
+实际 SIWC 账号仍可能拒绝 `prompt_cache_options`，不能假设普通 API 的全部缓存控制都适用于订阅授权；网关不擅自添加该选项。上述命中率为固定合成文本的对照结果，不代表整个真实号池都可达到同样比例。
 
 这会一次性改变此前原样透传的 SIWC 缓存标签，部署后的首次请求可能需要预热。缓存命中由上游决定：输入前缀、模型、工具定义、断点、有效期和最小可缓存长度仍需满足官方要求。现代模型的 `prompt_cache_key` 用于缓存计量分隔，并非提升路由命中的必需字段；补齐该字段不能保证命中率提升。已缓存 token 继续从上游 usage 读取，不伪造命中或修改账务规则。
 
