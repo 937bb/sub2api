@@ -19,8 +19,13 @@ import (
 
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
+	clearGrokResponsesClientToolMapping(c)
+	clearOpenAIResponsesClientToolMapping(c)
+	clearOpenAIResponsesNamespaceNames(c)
+	setCodexToolNameReverse(c, nil)
 	if account.IsOpenAISiwc() {
-		if _, err := normalizeSIWCResponsesBody(body); err != nil {
+		_, err := prepareSIWCResponsesBody(c, body)
+		if err != nil {
 			var capabilityErr *siwcCapabilityError
 			if s.accountRepo != nil && errors.As(err, &capabilityErr) {
 				return nil, siwcCapabilityFailover(capabilityErr.Error())
@@ -47,10 +52,6 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		return nil, filterErr
 	}
 	body = filteredBody
-	clearGrokResponsesClientToolMapping(c)
-	clearOpenAIResponsesClientToolMapping(c)
-	clearOpenAIResponsesNamespaceNames(c)
-	setCodexToolNameReverse(c, nil)
 	if _, err := s.prepareCodexAccountIdentitySource(ctx, c, account); err != nil {
 		return nil, err
 	}

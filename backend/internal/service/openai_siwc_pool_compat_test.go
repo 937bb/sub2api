@@ -15,7 +15,6 @@ import (
 func TestSIWCUnsupportedHistoryCanSwitchWithoutDroppingContext(t *testing.T) {
 	for _, body := range []string{
 		`{"model":"gpt-6-astra","stream":true,"input":[{"role":"user","content":"summarize this history"},{"type":"compaction_trigger"}]}`,
-		`{"model":"gpt-6-astra","stream":true,"input":[{"type":"computer_call","call_id":"computer-1","action":{"type":"screenshot"}},{"type":"computer_call_output","call_id":"computer-1","output":{"type":"computer_screenshot","image_url":"https://example.com/image.png"}},{"role":"user","content":"continue"}]}`,
 		`{"model":"gpt-6-astra","stream":true,"input":[{"role":"user","content":"find a file"}],"tools":[{"type":"file_search","vector_store_ids":["vs_test"]}]}`,
 	} {
 		upstream := &httpUpstreamRecorder{resp: siwcRoutingResponse()}
@@ -90,6 +89,8 @@ func TestSIWCRequestCompatibilityKeepsSupportedHistoriesEligible(t *testing.T) {
 		`{"input":"hello"}`,
 		`{"input":[{"type":"reasoning","encrypted_content":"opaque"},{"type":"function_call_output","call_id":"call_1","output":[{"type":"input_image","image_url":"data:image/png;base64,eA=="}]}]}`,
 		`{"input":[{"type":"compaction","encrypted_content":"opaque"}],"tools":[{"type":"namespace","tools":[{"type":"custom","name":"exec"}]}]}`,
+		`{"input":[{"type":"item_reference","id":"msg_previous"},{"type":"computer_call","call_id":"computer_1","action":{"type":"screenshot"}},{"type":"computer_call_output","call_id":"computer_1","output":{"type":"computer_screenshot","image_url":"data:image/png;base64,eA=="}}]}`,
+		`{"input":[{"type":"tool_search_call","call_id":"search_1","arguments":{"query":"github"}},{"type":"tool_search_output","call_id":"search_1","tools":[]}],"tools":[{"type":"tool_search"}]}`,
 		`{"previous_response_id":null,"conversation":"","tools":[{"type":"function","name":"lookup"},{"type":"web_search"}]}`,
 	} {
 		require.False(t, siwcRequestIncompatible(WithSIWCRequestCompatibility(context.Background(), []byte(body)), siwcFixtureAccount()), body)

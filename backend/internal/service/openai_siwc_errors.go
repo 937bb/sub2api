@@ -36,7 +36,7 @@ func WithSIWCRequestCompatibility(ctx context.Context, body []byte) context.Cont
 	})
 	payload.Get("tools").ForEach(func(_, tool gjson.Result) bool {
 		switch tool.Get("type").String() {
-		case "function", "custom", "web_search", "web_search_preview":
+		case "function", "custom", "tool_search", "web_search", "web_search_preview":
 		case "namespace":
 			tool.Get("tools").ForEach(func(_, child gjson.Result) bool {
 				kind := child.Get("type").String()
@@ -53,7 +53,7 @@ func WithSIWCRequestCompatibility(ctx context.Context, body []byte) context.Cont
 
 func siwcUnsupportedInputType(kind string) bool {
 	switch kind {
-	case "item_reference", "compaction_trigger", "computer_call", "computer_call_output", "image_generation_call", "file_search_call", "code_interpreter_call", "mcp_call", "mcp_list_tools", "mcp_approval_request", "mcp_approval_response", "tool_search_call", "tool_search_output":
+	case "compaction_trigger", "image_generation_call", "file_search_call", "code_interpreter_call", "mcp_call", "mcp_list_tools", "mcp_approval_request", "mcp_approval_response":
 		return true
 	}
 	return false

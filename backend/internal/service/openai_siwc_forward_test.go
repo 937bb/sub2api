@@ -182,12 +182,82 @@ func TestSIWCRejectsAmbiguousAndStatefulRequests(t *testing.T) {
 	for _, body := range []string{
 		`{"model":"gpt-6-astra","model":"other","input":"hi"}`,
 		`{"model":"gpt-6-astra","previous_response_id":"resp-old","input":"hi"}`,
-		`{"model":"gpt-6-astra","input":[{"type":"item_reference","id":"old"}]}`,
 		`{"model":"gpt-6-astra","input":"hi","tools":[{"type":"computer_use"}]}`,
 	} {
 		_, err := normalizeSIWCResponsesBody([]byte(body))
 		require.Error(t, err)
 	}
+}
+
+func TestSIWCAdaptsComputerHistoryWithoutDroppingContext(t *testing.T) {
+	body := []byte(`{"model":"gpt-6-astra","input":[
+{"type":"computer_call","id":"computer_old","call_id":"call_computer","status":"completed","action":{"type":"screenshot"}},
+{"type":"computer_call_output","call_id":"call_computer","output":{"type":"computer_screenshot","image_url":"data:image/png;base64,AQID","detail":"high"}},
+{"role":"user","content":"continue"}]}`)
+	normalized, err := normalizeSIWCResponsesBody(body)
+	require.NoError(t, err)
+	require.Equal(t, "function_call", gjson.GetBytes(normalized, "input.0.type").String())
+	require.Equal(t, siwcComputerFunctionName, gjson.GetBytes(normalized, "input.0.name").String())
+	require.Equal(t, "call_computer", gjson.GetBytes(normalized, "input.0.call_id").String())
+	require.JSONEq(t, `{"action":{"type":"screenshot"},"status":"completed"}`, gjson.GetBytes(normalized, "input.0.arguments").String())
+	require.False(t, gjson.GetBytes(normalized, "input.0.id").Exists())
+	require.Equal(t, "function_call_output", gjson.GetBytes(normalized, "input.1.type").String())
+	require.Contains(t, gjson.GetBytes(normalized, "input.1.output").String(), "following user message")
+	require.Equal(t, "message", gjson.GetBytes(normalized, "input.2.type").String())
+	require.Equal(t, "user", gjson.GetBytes(normalized, "input.2.role").String())
+	require.Equal(t, "input_image", gjson.GetBytes(normalized, "input.2.content.0.type").String())
+	require.Equal(t, "data:image/png;base64,AQID", gjson.GetBytes(normalized, "input.2.content.0.image_url").String())
+	require.Equal(t, "high", gjson.GetBytes(normalized, "input.2.content.0.detail").String())
+	require.Equal(t, "continue", gjson.GetBytes(normalized, "input.3.content").String())
+	require.False(t, strings.Contains(string(normalized), `"computer_call"`))
+
+	again, err := normalizeSIWCResponsesBody(normalized)
+	require.NoError(t, err)
+	require.JSONEq(t, string(normalized), string(again))
+}
+
+func TestSIWCAdaptsToolSearchHistoryAndAllowsItemReferences(t *testing.T) {
+	body := []byte(`{"model":"gpt-6-astra","input":[
+{"type":"tool_search_call","id":"tsc_old","call_id":"call_search","arguments":{"query":"github"}},
+{"type":"tool_search_output","call_id":"call_search","tools":[{"type":"namespace","name":"github"}]},
+{"type":"item_reference","id":"msg_previous"}]}`)
+	normalized, err := normalizeSIWCResponsesBody(body)
+	require.NoError(t, err)
+	require.Equal(t, "function_call", gjson.GetBytes(normalized, "input.0.type").String())
+	require.Equal(t, "tool_search", gjson.GetBytes(normalized, "input.0.name").String())
+	require.JSONEq(t, `{"query":"github"}`, gjson.GetBytes(normalized, "input.0.arguments").String())
+	require.Equal(t, "function_call_output", gjson.GetBytes(normalized, "input.1.type").String())
+	require.JSONEq(t, `[{"name":"github","type":"namespace"}]`, gjson.GetBytes(normalized, "input.1.output").String())
+	require.Equal(t, "item_reference", gjson.GetBytes(normalized, "input.2.type").String())
+	require.Equal(t, "msg_previous", gjson.GetBytes(normalized, "input.2.id").String())
+}
+
+func TestPrepareSIWCLowersAndRestoresClientTools(t *testing.T) {
+	body := []byte(`{"model":"gpt-6-astra","tools":[
+{"type":"custom","name":"exec","format":{"type":"grammar"}},
+{"type":"tool_search"},
+{"type":"namespace","name":"functions","tools":[{"type":"function","name":"probe","parameters":{"type":"object"}}]}],
+"input":[{"role":"user","content":"use a tool"}]}`)
+	c := newOpenAIRejectedFieldTestContext(body)
+	prepared, err := prepareSIWCResponsesBody(c, body)
+	require.NoError(t, err)
+	require.False(t, gjson.GetBytes(prepared, "tools").Exists())
+	require.Equal(t, "additional_tools", gjson.GetBytes(prepared, "input.0.type").String())
+	require.Len(t, gjson.GetBytes(prepared, "input.0.tools").Array(), 3)
+	for _, tool := range gjson.GetBytes(prepared, "input.0.tools").Array() {
+		require.Equal(t, "function", tool.Get("type").String())
+	}
+	mapping, ok := openAIResponsesClientToolMapping(c)
+	require.True(t, ok)
+	require.True(t, mapping.CustomTools["exec"])
+	require.True(t, mapping.ToolSearch)
+	require.NotEmpty(t, mapping.NamespaceTools)
+
+	upstream := []byte(`{"type":"response.output_item.done","item":{"type":"function_call","id":"fc_search","call_id":"call_search","name":"tool_search","arguments":"{\"query\":\"github\"}"}}`)
+	restored, err := restoreOpenAIResponsesClientToolPayload(c, upstream)
+	require.NoError(t, err)
+	require.Equal(t, "tool_search_call", gjson.GetBytes(restored, "item.type").String())
+	require.Equal(t, "client", gjson.GetBytes(restored, "item.execution").String())
 }
 
 func TestSIWCDoesNotSelectCodexTransports(t *testing.T) {

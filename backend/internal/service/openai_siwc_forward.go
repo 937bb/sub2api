@@ -87,6 +87,10 @@ func normalizeSIWCResponsesBody(body []byte) ([]byte, error) {
 	if !ok || len(items) == 0 {
 		return nil, errors.New("SIWC requires nonempty input")
 	}
+	items, err := adaptSIWCInputHistory(items)
+	if err != nil {
+		return nil, err
+	}
 	for _, raw := range items {
 		item, ok := raw.(map[string]any)
 		if !ok {
@@ -193,6 +197,18 @@ func normalizeSIWCResponsesBody(body []byte) ([]byte, error) {
 	return marshalOpenAIUpstreamJSON(payload)
 }
 
+func prepareSIWCResponsesBody(c *gin.Context, body []byte) ([]byte, error) {
+	if needsOpenAIResponsesClientToolAdaptation(body) {
+		adapted, mapping, err := adaptOpenAIResponsesClientTools(body)
+		if err != nil {
+			return nil, fmt.Errorf("adapt SIWC client tools: %w", err)
+		}
+		body = adapted
+		setOpenAIResponsesClientToolMapping(c, mapping)
+	}
+	return normalizeSIWCResponsesBody(body)
+}
+
 func buildSIWCResponsesRequest(ctx context.Context, c *gin.Context, account *Account, body []byte, token, promptCacheKey string) (*http.Request, error) {
 	if !account.IsOpenAISiwc() {
 		return nil, errors.New("SIWC account authorization required")
@@ -203,7 +219,7 @@ func buildSIWCResponsesRequest(ctx context.Context, c *gin.Context, account *Acc
 	if isOpenAIResponsesCompactPath(c) {
 		return nil, errors.New("SIWC compact endpoint is unsupported; send full history to /v1/responses")
 	}
-	normalized, err := normalizeSIWCResponsesBody(body)
+	normalized, err := prepareSIWCResponsesBody(c, body)
 	if err != nil {
 		return nil, err
 	}
