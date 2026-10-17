@@ -56,6 +56,26 @@ Chat Completions / Messages 兼容转换得到的会话缓存键在 SIWC 出网�
 
 这会一次性改变此前原样透传的 SIWC 缓存标签，部署后的首次请求可能需要预热。缓存命中由上游决定：输入前缀、模型、工具定义、断点、有效期和最小可缓存长度仍需满足官方要求。现代模型的 `prompt_cache_key` 用于缓存计量分隔，并非提升路由命中的必需字段；补齐该字段不能保证命中率提升。已缓存 token 继续从上游 usage 读取，不伪造命中或修改账务规则。
 
+### 缓存创建计费与实测验收
+
+依据 2026-10-17 核对的 [OpenAI Prompt caching 文档](https://developers.openai.com/api/docs/guides/prompt-caching)，缓存创建量使用 `usage.input_tokens_details.cache_write_tokens`，缓存读取量使用 `cached_tokens`。两者均包含在 `input_tokens` 总输入中。支持独立缓存写入定价的模型使用对应价卡；不是在普通输入费上再叠加完整写入费。
+
+本分支已有的公共 usage 解析和账务链同时用于 SIWC。先从总输入扣除读取和创建 token，再分别计算三类输入费用，最后加输出费用并应用有效倍率。上游显式返回 `cache_write_tokens: 0` 时优先于兼容别名；没有任何创建字段时按 0 记录，不把全部未命中输入估算成创建量，不补收历史费用。
+
+管理员可沿用渠道模型定价中的缓存写入单价，绑定专用 SIWC 测试分组以隔离价格。自定义单价作用于真实创建量，显式零单价保持免费；它不改变上游 usage，也不代表 OpenAI 对 SIWC 订阅按相同美元价格扣款。没有新增缓存创建费开关或默认附加费。
+
+`TestSIWCCacheCreationForwardAndBilling` 从模拟上游 SSE 经过 SIWC 实际转发、Responses/Chat/Messages 转换，再进入用量记录和余额/订阅扣费命令。覆盖 Astra、6.1 Sol、流式/非流式、真实创建量、字段缺失、显式零覆盖别名、全部命中与全部写入，并验证创建 token 不重复计算。另验证渠道显式零创建单价。
+
+可在 `backend` 目录运行 `go test -race -tags=unit ./internal/service -run 'TestSIWCCacheCreation'`。公共计费测试实例使用 gateway 运行角色，避免后台采集任务与测试中替换依赖发生竞态；此设置仅用于测试，不改生产运行角色。
+
+真实账号验收须在部署本分支的隔离测试实例完成，纯官方生产实例不会因推送本分支获得 SIWC 功能：
+
+1. 用 SIWC 专用授权流程添加账号，绑定独立测试分组，确认模型来自该账号目录。
+2. 使用足够长的稳定前缀（当前官方最低要求为 1,024 个可见输入 token），保持模型、工具、缓存键及前缀不变，连续发送两次请求。可设置显式断点划定可复用前缀；不要为增加费用强制创建缓存。
+3. 记录两次 `response.completed` 的 request ID 和原始 usage，核对 `input_tokens`、`cached_tokens`、`cache_write_tokens`、`output_tokens` 与面板记录。第二次命中受上游实际状态影响，不预设必然命中。
+4. 按实际模型/渠道价卡和有效倍率核算：`(总输入−读取−创建)×输入单价 + 读取×读取单价 + 创建×创建单价 + 输出×输出单价`。若单价单位为每百万 token，先除以 1,000,000；余额和订阅各验证一次，每个请求只产生一次结算。
+5. 没有创建字段时保留原始事实，不能以缺失等同于上游没有缓存能力。测试报告只保存脱敏 usage、request ID 和计算结果，不保存 AT、RT、完整授权回调或客户正文。
+
 ## 身份与网络指纹
 
 `ext_agent_host_id` 是客户端保存的实例 UUID；`oaiapp_...` 是授权签发的应用 client ID；subject 标识用户；token 连接授权与推理。这些是同一授权链上的身份信息，不等于同一网络指纹。
