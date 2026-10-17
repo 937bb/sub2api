@@ -22,9 +22,26 @@ func TestSIWCHistoryKeepsToolCorrelationsAndOpaqueReasoning(t *testing.T) {
 	require.Equal(t, "developer", gjson.GetBytes(normalized, "input.0.role").String())
 	require.False(t, gjson.GetBytes(normalized, "input.1.id").Exists())
 	require.Equal(t, "Working", gjson.GetBytes(normalized, "input.1.content.0.text").String())
-	for _, index := range []string{"2", "3", "4", "5", "6", "7"} {
+	require.False(t, gjson.GetBytes(normalized, "input.2.id").Exists())
+	require.Equal(t, "opaque", gjson.GetBytes(normalized, "input.2.encrypted_content").String())
+	require.JSONEq(t, `[]`, gjson.GetBytes(normalized, "input.2.summary").Raw)
+	for _, index := range []string{"3", "4", "5", "6", "7"} {
 		require.JSONEq(t, gjson.GetBytes(body, "input."+index).Raw, gjson.GetBytes(normalized, "input."+index).Raw)
 	}
+	again, err := normalizeSIWCResponsesBody(normalized)
+	require.NoError(t, err)
+	require.JSONEq(t, string(normalized), string(again))
+}
+
+func TestSIWCStatelessReasoningNeverLooksUpUnstoredID(t *testing.T) {
+	body := []byte(`{"model":"gpt-6-astra","include":["web_search_call.action.sources"],"input":[{"type":"reasoning","id":"rs_unstored","call_id":"wrong","content":[{"type":"reasoning_text","text":"preserve"}]},{"role":"user","content":"continue"}]}`)
+	normalized, err := normalizeSIWCResponsesBody(body)
+	require.NoError(t, err)
+	require.False(t, gjson.GetBytes(normalized, "input.0.id").Exists())
+	require.False(t, gjson.GetBytes(normalized, "input.0.call_id").Exists())
+	require.Equal(t, "preserve", gjson.GetBytes(normalized, "input.0.content.0.text").String())
+	require.JSONEq(t, `[]`, gjson.GetBytes(normalized, "input.0.summary").Raw)
+	require.JSONEq(t, `["web_search_call.action.sources","reasoning.encrypted_content"]`, gjson.GetBytes(normalized, "include").Raw)
 	again, err := normalizeSIWCResponsesBody(normalized)
 	require.NoError(t, err)
 	require.JSONEq(t, string(normalized), string(again))

@@ -75,10 +75,10 @@ func normalizeSIWCResponsesBody(body []byte) ([]byte, error) {
 		return nil, errors.New("SIWC requires a JSON object")
 	}
 	if value, exists := payload["previous_response_id"]; exists && value != nil && value != "" {
-		return nil, errors.New("SIWC requires complete input history; previous_response_id is unsupported")
+		return nil, &siwcCapabilityError{"SIWC requires complete input history; previous_response_id is unsupported"}
 	}
 	if value, exists := payload["conversation"]; exists && value != nil && value != "" {
-		return nil, errors.New("SIWC requires complete input history; conversation is unsupported")
+		return nil, &siwcCapabilityError{"SIWC requires complete input history; conversation is unsupported"}
 	}
 	if text, ok := payload["input"].(string); ok {
 		payload["input"] = []any{map[string]any{"role": "user", "content": text}}
@@ -92,8 +92,8 @@ func normalizeSIWCResponsesBody(body []byte) ([]byte, error) {
 		if !ok {
 			return nil, errors.New("invalid SIWC input item")
 		}
-		if item["type"] == "item_reference" || item["type"] == "compaction_trigger" {
-			return nil, errors.New("SIWC requires complete stateless history")
+		if kind, _ := item["type"].(string); siwcUnsupportedInputType(kind) {
+			return nil, &siwcCapabilityError{"SIWC does not support this input item; use complete stateless history or a compatible account"}
 		}
 		if item["role"] == "system" {
 			item["role"] = "developer"
@@ -101,8 +101,17 @@ func normalizeSIWCResponsesBody(body []byte) ([]byte, error) {
 		if item["type"] == "additional_tools" && item["role"] == nil {
 			item["role"] = "developer"
 		}
+		if item["type"] == "reasoning" {
+			// store=false has no server-side rs_* lookup. Keep the reasoning
+			// payload and opaque state exactly as supplied, without a lookup ID.
+			delete(item, "id")
+			delete(item, "call_id")
+			if item["summary"] == nil {
+				item["summary"] = []any{}
+			}
+		}
 		// Stateless message history does not require provider-specific message
-		// IDs. Keep tool call IDs and reasoning IDs/opaque content untouched.
+		// IDs. Keep tool call IDs and opaque content untouched.
 		if item["type"] == "message" || (item["type"] == nil && item["role"] != nil) {
 			if id, ok := item["id"].(string); ok && !strings.HasPrefix(id, "msg_") {
 				delete(item, "id")
@@ -131,14 +140,14 @@ func normalizeSIWCResponsesBody(body []byte) ([]byte, error) {
 				for _, rawChild := range nested {
 					child, ok := rawChild.(map[string]any)
 					if !ok || (child["type"] != "function" && child["type"] != "custom") {
-						return nil, errors.New("unsupported SIWC namespace tool")
+						return nil, &siwcCapabilityError{"unsupported SIWC namespace tool"}
 					}
 				}
 				top = append(top, tool)
 			case "web_search", "web_search_preview":
 				top = append(top, tool)
 			default:
-				return nil, errors.New("unsupported SIWC hosted tool")
+				return nil, &siwcCapabilityError{"unsupported SIWC hosted tool"}
 			}
 		}
 		if len(additional) > 0 {
@@ -165,6 +174,19 @@ func normalizeSIWCResponsesBody(body []byte) ([]byte, error) {
 		}
 	}
 	payload["input"], payload["store"], payload["stream"] = items, false, true
+	include, hasInclude := payload["include"].([]any)
+	if payload["include"] != nil && !hasInclude {
+		return nil, errors.New("SIWC include must be an array")
+	}
+	hasEncrypted := false
+	for _, field := range include {
+		if field == "reasoning.encrypted_content" {
+			hasEncrypted = true
+		}
+	}
+	if !hasEncrypted {
+		payload["include"] = append(include, "reasoning.encrypted_content")
+	}
 	for _, key := range []string{"background", "conversation", "max_output_tokens", "max_completion_tokens", "max_tool_calls", "metadata", "moderation", "multi_agent", "prompt", "prompt_cache_retention", "safety_identifier", "temperature", "top_logprobs", "top_p", "truncation", "user", "previous_response_id", "stream_options"} {
 		delete(payload, key)
 	}
@@ -229,4 +251,13 @@ func buildSIWCResponsesRequest(ctx context.Context, c *gin.Context, account *Acc
 		req.Header.Set("session_id", generateSessionUUID(isolate(sessionSeed)))
 	}
 	return req, nil
+}
+
+func (s *OpenAIGatewayService) buildSIWCRequest(ctx context.Context, c *gin.Context, account *Account, body []byte, token, promptCacheKey string) (*http.Request, error) {
+	req, err := buildSIWCResponsesRequest(ctx, c, account, body, token, promptCacheKey)
+	var capabilityErr *siwcCapabilityError
+	if s.accountRepo != nil && errors.As(err, &capabilityErr) {
+		return nil, siwcCapabilityFailover(capabilityErr.Error())
+	}
+	return req, err
 }

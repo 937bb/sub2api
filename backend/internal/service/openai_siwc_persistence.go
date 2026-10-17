@@ -15,6 +15,20 @@ type openAISiwcCredentialsUpdater interface {
 	UpdateOpenAISiwcCredentials(context.Context, *Account, map[string]any) (bool, error)
 }
 
+const SIWCTerminalRefreshErrorMessage = "SIWC authorization expired or revoked; reauthorize this account"
+
+type openAISiwcRefreshFailureWriter interface {
+	SetOpenAISiwcRefreshErrorIfUnchanged(context.Context, *Account) (bool, error)
+}
+
+func quarantineSIWCRefreshFailure(ctx context.Context, repo AccountRepository, expected *Account) (bool, error) {
+	writer, ok := repo.(openAISiwcRefreshFailureWriter)
+	if !ok {
+		return false, errors.New("SIWC conditional failure persistence unavailable")
+	}
+	return writer.SetOpenAISiwcRefreshErrorIfUnchanged(ctx, expected)
+}
+
 var siwcManagedCredentialKeys = []string{"auth_mode", "issuer", "subject", "client_id", "ext_agent_host_id", "access_token", "refresh_token", "id_token", "expires_at", "earliest_refresh_at", "granted_scope", "token_type", "email", "siwc_models", "_token_version"}
 
 // PreserveSIWCManagedCredentials is also applied under the repository row lock

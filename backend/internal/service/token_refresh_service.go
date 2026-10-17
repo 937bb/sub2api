@@ -11,6 +11,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/siwc"
 	"github.com/Wei-Shaw/sub2api/internal/util/logredact"
 )
 
@@ -984,9 +985,13 @@ func (s *TokenRefreshService) refreshWithRetryWithRateGate(
 
 		// 不可重试错误（invalid_grant/invalid_client 等）直接标记 error 状态并返回
 		if isNonRetryableRefreshError(err) {
-			// The failed SIWC grant may already have been replaced by reauthorization.
-			// Do not quarantine the account without a conditional failure mutation.
+			// Compare the attempted grant atomically; a newer authorization wins.
 			if account.IsOpenAISiwc() {
+				if siwc.IsTerminalRefreshError(err) {
+					if _, persistErr := quarantineSIWCRefreshFailure(ctx, s.accountRepo, account); persistErr != nil {
+						slog.Warn("siwc_refresh_failure_persist_failed", "account_id", account.ID, "error", persistErr)
+					}
+				}
 				return err
 			}
 			errorMsg := "Token refresh failed (non-retryable): " + logredact.RedactText(err.Error())

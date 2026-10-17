@@ -16,7 +16,7 @@
 4. 浏览器跳转到 `http://127.0.0.1:1455/auth/callback?...` 后，将完整地址粘贴回管理页。没有本机回调监听器时浏览器显示无法连接，这是手动回填方式的预期行为。
 5. 在十分钟内保存。服务端校验 state、PKCE、ID token 签名、issuer、audience、azp、nonce、subject 和共享 scope，再读取可用模型并原子创建账号及分组关系。
 
-重新授权使用账号菜单中的原入口，自动切换到 SIWC 流程，沿用原 host ID、client ID 和服务端代理，并要求 subject 一致。仅更新授权和可用模型目录；账号 ID、名称、倍率、分组、自定义模型映射保持原值。原本停用或错误状态的账号不会被自动启用，请检查后使用已有恢复状态功能。
+重新授权使用账号菜单中的原入口，自动切换到 SIWC 流程，沿用原 host ID、client ID 和服务端代理，并要求 subject 一致。仅更新授权和可用模型目录；账号 ID、名称、倍率、分组、自定义模型映射保持原值。成功保存只自动清除“SIWC authorization expired or revoked; reauthorize this account”这一专用错误；手工停用、关闭调度及其他错误状态保持原值。
 
 授权会话暂存在 B 端内存，重启或超过十分钟需重新生成链接。多副本部署时，生成链接与回填必须路由至同一进程。运行目录 `siwc/host-id` 持久化稳定 host UUID，首次可沿用浏览器此前保存的 UUID；已建账号重新授权始终保留其原 host ID。首次授权在消费 code 前保存不含 token 的 issued client 注册记录；24 小时内点击「重新开始」会携带原会话标识，沿用该 client 并生成新的 state、nonce 和 PKCE。
 
@@ -40,7 +40,9 @@ AT、RT 和 ID token 不放入浏览器持久化存储。重新授权链接只�
 | Compact、Live、AlphaSearch、Codex WebSocket、Shadow | 不用于 SIWC |
 | Codex 额度查询、隐私设置 | 排除 SIWC，避免 token 发错端点 |
 
-保留 `developer` 与原始指令，将 `system` 就地转换为 `developer`；保留完整消息历史和推理密文，顶层 function/custom tools 转入具有 `role=developer` 的 additional_tools，固定放在开头连续 developer 消息之后、对话历史之前，避免每轮移动工具定义破坏前缀。客户原本放在历史中的 additional_tools 不重排。无状态历史消息移除不兼容的非 msg_ 消息 ID；工具 call_id、工具结果关联和 reasoning ID 不改。强制上游 `store=false`、SSE 流式。非流式客户由现有兼容层汇总响应。非空 `previous_response_id` / `conversation`、item reference 和 compaction trigger 明确拒绝，不静默丢失状态。
+保留 `developer` 与原始指令，将 `system` 就地转换为 `developer`；保留完整消息历史和推理密文，顶层 function/custom tools 转入具有 `role=developer` 的 additional_tools，固定放在开头连续 developer 消息之后、对话历史之前，避免每轮移动工具定义破坏前缀。客户原本放在历史中的 additional_tools 不重排。无状态历史消息移除不兼容的非 msg_ 消息 ID；工具 call_id 与工具结果关联不改。reasoning 保留内容、摘要和密文，移除需要服务端查找的 ID，并请求 `reasoning.encrypted_content`，避免 `store=false` 下查询不存在的 rs_ 项目。强制上游 `store=false`、SSE 流式，非流式客户由现有兼容层汇总响应。非空 `previous_response_id` / `conversation`、item reference、compaction trigger 和不受支持的托管工具历史在选号前排除 SIWC，保留原始请求交给符合能力的账号；不会静默删除历史。
+
+混合池的普通完整文本/工具历史可按账号授权类型分流，不能保证不同授权之间的推理密文或压缩密文可互相解密。2026-10-17 的 SIWC 独立压缩端点返回未授权，原生 compaction trigger 返回不支持；`context_management` 尚未得到完整成功验收。具体边界与参考项目对照见 [SIWC compatibility](SIWC_COMPATIBILITY.md)。
 
 结构化 `subscription_sharing_usage_limit_exceeded` 按 429 记录和返回；该 SIWC 授权暂停派发 60 秒，避免同一失败请求反复重试。60 秒是本地冷却，不是官方额度 reset；不据此声称整个套餐耗尽。`subscription_sharing_usage_unavailable` 按 503 处理。已输出内容的流保留终止错误，不重新播放请求。应用限额仍需在 ChatGPT Settings → Usage 核对。
 
@@ -90,7 +92,7 @@ Chat Completions / Messages 兼容转换得到的缓存键在 SIWC 出网前写�
 
 无需数据库 schema 迁移。凭据沿用现有账号 JSON 存储。自动刷新遵守 `earliest_refresh_at`，保留上游省略的 RT/scope，校验刷新后的身份。JWKS 在消耗授权码/RT 前获取，避免验证服务临时故障发生在旋转之后。
 
-模型目录更新只原子修改 `siwc_models`；刷新/重新授权使用身份、旧 AT/RT 与代理条件更新，只合并授权字段并原子写调度失效事件。普通编辑在数据库行锁下保留最新凭据，防止旧表单覆盖新 token。旧刷新请求的失败不覆盖新授权状态。
+模型目录更新只原子修改 `siwc_models`；刷新/重新授权使用身份、旧 AT/RT 与代理条件更新，只合并授权字段并原子写调度失效事件。普通编辑在数据库行锁下保留最新凭据，防止旧表单覆盖新 token。明确的终止刷新错误仅在失败授权仍未变化时标记需要重新授权，停止反复调度；不会删除账号或改动手工调度开关。旧刷新请求的失败不覆盖新授权状态；成功替换凭据仅清除此专用错误，保留其他错误与停用状态。
 
 本地验证包含：OAuth 签名与错误授权、回调过期/重复字段、重授权身份绑定、并发回填与保存重试、目录清空、凭据 CAS、后台隔离、Responses/Chat/Messages 的完整历史和 usage、真正提前输出的 SSE、重复 model 拒绝、计费档位、前端授权表单、中英文资源、普通 OAuth 回归。构建、类型检查、定向 race 测试、go vet 与仅本次差异的 golangci-lint 用于交付验收。
 

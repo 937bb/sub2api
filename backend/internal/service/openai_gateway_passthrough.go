@@ -587,7 +587,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 	token string,
 ) (*http.Request, error) {
 	if account.IsOpenAISiwc() {
-		return buildSIWCResponsesRequest(ctx, c, account, body, token, "")
+		return s.buildSIWCRequest(ctx, c, account, body, token, "")
 	}
 	targetURL := openaiPlatformAPIURL
 	switch account.Type {
@@ -1559,7 +1559,7 @@ func applyOpenAIStreamFailedErrorPassthroughRule(
 
 func openAIStreamFailedEventShouldFailover(payload []byte, message string) bool {
 	if status := siwcErrorStatus(payload); status != 0 {
-		return status == http.StatusTooManyRequests || status == http.StatusServiceUnavailable
+		return siwcErrorShouldFailover(payload)
 	}
 	if hit, _, _ := detectOpenAICyberPolicy(payload); hit {
 		return false
@@ -1614,7 +1614,7 @@ func openAIStreamFailedEventShouldFailover(payload []byte, message string) bool 
 
 func openAIStreamErrorEventShouldFailover(payload []byte, message string) bool {
 	if status := siwcErrorStatus(payload); status != 0 {
-		return status == http.StatusTooManyRequests || status == http.StatusServiceUnavailable
+		return siwcErrorShouldFailover(payload)
 	}
 	if hit, _, _ := detectOpenAICyberPolicy(payload); hit {
 		return false
@@ -1682,7 +1682,7 @@ func openAIStreamFailedEventRetryableOnSameAccount(account *Account, payload []b
 	if account == nil {
 		return false
 	}
-	if siwcErrorStatus(payload) == http.StatusTooManyRequests {
+	if siwcErrorStatus(payload) != 0 {
 		return false
 	}
 	// 容量降载是请求级信号，不是账号级故障：上游只是让本次请求稍后再试。

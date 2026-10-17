@@ -21,11 +21,18 @@ import (
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
 	if account.IsOpenAISiwc() {
 		if _, err := normalizeSIWCResponsesBody(body); err != nil {
+			var capabilityErr *siwcCapabilityError
+			if s.accountRepo != nil && errors.As(err, &capabilityErr) {
+				return nil, siwcCapabilityFailover(capabilityErr.Error())
+			}
 			c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": err.Error()}})
 			return nil, err
 		}
 		if isOpenAIResponsesCompactPath(c) {
 			err := errors.New("SIWC compact endpoint is unsupported; send complete input history")
+			if s.accountRepo != nil {
+				return nil, siwcCapabilityFailover(err.Error())
+			}
 			c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": err.Error()}})
 			return nil, err
 		}
@@ -1386,7 +1393,7 @@ func shouldForwardOpenAIResponsesViaRawChatCompletions(account *Account) bool {
 
 func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Context, account *Account, body []byte, token string, isStream bool, promptCacheKey string, isCodexCLI bool) (*http.Request, error) {
 	if account.IsOpenAISiwc() {
-		return buildSIWCResponsesRequest(ctx, c, account, body, token, promptCacheKey)
+		return s.buildSIWCRequest(ctx, c, account, body, token, promptCacheKey)
 	}
 	// Determine target URL based on account type
 	var targetURL string

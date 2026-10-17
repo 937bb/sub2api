@@ -54,7 +54,9 @@ func (r *accountRepository) UpdateOpenAISiwcCredentials(ctx context.Context, exp
 	}
 	result, err := r.sql.ExecContext(ctx, `
 		WITH updated AS (
-		 UPDATE accounts SET credentials = credentials || $1::jsonb, updated_at = NOW()
+		 UPDATE accounts SET credentials = credentials || $1::jsonb, updated_at = NOW(),
+		 status = CASE WHEN status = 'error' AND error_message = $10 THEN 'active' ELSE status END,
+		 error_message = CASE WHEN status = 'error' AND error_message = $10 THEN NULL ELSE error_message END
 		 WHERE id = $2 AND deleted_at IS NULL AND platform = 'openai' AND type = 'oauth'
 		 AND lower(credentials->>'auth_mode') = 'siwc'
 		 AND credentials->>'subject' = $3 AND credentials->>'client_id' = $4
@@ -65,7 +67,41 @@ func (r *accountRepository) UpdateOpenAISiwcCredentials(ctx context.Context, exp
 		 RETURNING id
 		)
 		INSERT INTO scheduler_outbox (event_type, account_id, group_id, payload)
-		SELECT $9, id, NULL, NULL FROM updated`, string(payload), expected.ID, expected.GetCredential("subject"), expected.GetCredential("client_id"), expected.GetCredential("ext_agent_host_id"), expected.GetCredential("access_token"), expected.GetCredential("refresh_token"), expected.ProxyID, service.SchedulerOutboxEventAccountChanged)
+		SELECT $9, id, NULL, NULL FROM updated`, string(payload), expected.ID, expected.GetCredential("subject"), expected.GetCredential("client_id"), expected.GetCredential("ext_agent_host_id"), expected.GetCredential("access_token"), expected.GetCredential("refresh_token"), expected.ProxyID, service.SchedulerOutboxEventAccountChanged, service.SIWCTerminalRefreshErrorMessage)
+	if err != nil {
+		return false, err
+	}
+	count, err := result.RowsAffected()
+	if err != nil || count == 0 {
+		return false, err
+	}
+	r.syncSchedulerAccountSnapshotDetached(ctx, expected.ID)
+	return true, nil
+}
+
+// Quarantine only the failed grant. Reauthorization and manual scheduling edits
+// must win races with a delayed refresh failure; no account data is deleted.
+func (r *accountRepository) SetOpenAISiwcRefreshErrorIfUnchanged(ctx context.Context, expected *service.Account) (bool, error) {
+	if r == nil || r.sql == nil || !expected.IsOpenAISiwc() {
+		return false, errors.New("SIWC credential repository unavailable")
+	}
+	result, err := r.sql.ExecContext(ctx, `
+		WITH updated AS (
+		 UPDATE accounts SET status = 'error', error_message = $1, updated_at = NOW()
+		 WHERE id = $2 AND deleted_at IS NULL AND status = 'active'
+		 AND platform = 'openai' AND type = 'oauth'
+		 AND lower(credentials->>'auth_mode') = 'siwc'
+		 AND credentials->>'subject' = $3 AND credentials->>'client_id' = $4
+		 AND credentials->>'ext_agent_host_id' = $5
+		 AND credentials->>'access_token' = $6
+		 AND COALESCE(credentials->>'refresh_token', '') = $7
+		 AND proxy_id IS NOT DISTINCT FROM $8
+		 RETURNING id
+		)
+		INSERT INTO scheduler_outbox (event_type, account_id, group_id, payload)
+		SELECT $9, id, NULL, NULL FROM updated`, service.SIWCTerminalRefreshErrorMessage, expected.ID,
+		expected.GetCredential("subject"), expected.GetCredential("client_id"), expected.GetCredential("ext_agent_host_id"),
+		expected.GetCredential("access_token"), expected.GetCredential("refresh_token"), expected.ProxyID, service.SchedulerOutboxEventAccountChanged)
 	if err != nil {
 		return false, err
 	}

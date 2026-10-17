@@ -202,8 +202,8 @@ func (c *Client) json(ctx context.Context, endpoint string, form url.Values, bea
 		}
 		if endpoint == TokenURL && json.Unmarshal(data, &failure) == nil {
 			switch failure.Error {
-			case "invalid_grant", "invalid_client", "invalid_scope", "unauthorized_client":
-				return fmt.Errorf("SIWC authorization failed: %s", failure.Error)
+			case "invalid_grant", "invalid_refresh_token", "token_expired", "refresh_token_expired", "refresh_token_invalidated", "refresh_token_reused", "invalid_client", "invalid_scope", "unauthorized_client":
+				return &AuthorizationError{Code: failure.Error}
 			}
 		}
 		return fmt.Errorf("SIWC authorization endpoint returned HTTP %d", resp.StatusCode)

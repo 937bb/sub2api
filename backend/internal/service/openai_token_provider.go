@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/siwc"
 )
 
 const (
@@ -179,8 +181,23 @@ func (p *OpenAITokenProvider) GetAccessToken(ctx context.Context, account *Accou
 		p.metrics.refreshRequests.Add(1)
 		p.metrics.touchNow()
 
-		result, err := p.refreshAPI.RefreshIfNeeded(ctx, account, p.executor, openAITokenRefreshSkew)
+		refreshCtx := ctx
+		if account.IsOpenAISiwc() {
+			refreshCtx = withOAuthRefreshRequestPath(ctx)
+		}
+		result, err := p.refreshAPI.RefreshIfNeeded(refreshCtx, account, p.executor, openAITokenRefreshSkew)
 		if err != nil {
+			if account.IsOpenAISiwc() && siwc.IsTerminalRefreshError(err) {
+				if result != nil && result.Account != nil {
+					if _, persistErr := quarantineSIWCRefreshFailure(ctx, p.accountRepo, result.Account); persistErr != nil {
+						slog.Warn("siwc_refresh_failure_persist_failed", "account_id", account.ID, "error", persistErr)
+					}
+				}
+				return "", err
+			}
+			if account.IsOpenAISiwc() && (errors.Is(err, errOAuthRefreshAccountStateChanged) || errors.Is(err, errOAuthRefreshAccountRereadFailed)) {
+				return "", err
+			}
 			if p.refreshPolicy.OnRefreshError == ProviderRefreshErrorReturn {
 				return "", err
 			}
@@ -188,6 +205,13 @@ func (p *OpenAITokenProvider) GetAccessToken(ctx context.Context, account *Accou
 			p.metrics.refreshFailure.Add(1)
 			refreshFailed = true
 		} else if result.LockHeld {
+			if account.IsOpenAISiwc() && p.accountRepo != nil {
+				current, readErr := p.accountRepo.GetByID(ctx, account.ID)
+				if readErr != nil || current == nil || !current.IsActive() || !current.IsOpenAISiwc() {
+					return "", errors.New("SIWC authorization changed during refresh")
+				}
+				account, expiresAt = current, current.GetCredentialAsTime("expires_at")
+			}
 			if p.refreshPolicy.OnLockHeld == ProviderLockHeldWaitForCache && !account.IsOpenAISiwc() {
 				p.metrics.lockContention.Add(1)
 				p.metrics.touchNow()

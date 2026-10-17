@@ -336,7 +336,7 @@ func newOpenAIUpstreamFailoverError(
 		RetryableOnSameAccount: retryableOnSameAccount || requestScopedCapacity,
 		RequestScopedTransient: requestScopedCapacity,
 	}
-	if status := siwcErrorStatus(responseBody); status == http.StatusTooManyRequests || status == http.StatusServiceUnavailable {
+	if status := siwcErrorStatus(responseBody); status != 0 && siwcErrorShouldFailover(responseBody) {
 		failoverErr.StatusCode = status
 		failoverErr.ClientStatusCode = status
 		failoverErr.RetryableOnSameAccount = false
@@ -346,6 +346,9 @@ func newOpenAIUpstreamFailoverError(
 		failoverErr.ClientMessage = "Upstream shared usage is temporarily unavailable. Please try again later."
 		if status == http.StatusTooManyRequests {
 			failoverErr.ClientMessage = "Upstream shared usage limit reached. Please try again later or contact the administrator."
+		}
+		if status == http.StatusUnauthorized || status == http.StatusForbidden {
+			failoverErr.ClientMessage = "Upstream ChatGPT plan authorization is unavailable. Contact the administrator."
 		}
 		return failoverErr
 	}

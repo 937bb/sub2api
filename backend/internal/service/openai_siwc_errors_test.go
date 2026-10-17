@@ -30,6 +30,11 @@ func TestSIWCSharingErrorsPreserveSemanticStatus(t *testing.T) {
 	for code, status := range map[string]int{
 		siwcUsageLimitCode:                            429,
 		"subscription_sharing_usage_unavailable":      503,
+		"subscription_sharing_user_unavailable":       503,
+		"subscription_sharing_invalid_user":           401,
+		"subscription_sharing_user_not_eligible":      403,
+		"chatpass_v2_scope_not_authorized":            403,
+		"chatpass_v2_invalid_authorization_context":   403,
 		"subscription_sharing_unsupported_capability": 400,
 		"subscription_sharing_route_not_supported":    403,
 	} {
@@ -46,8 +51,9 @@ func TestSIWCSharingErrorsPreserveSemanticStatus(t *testing.T) {
 				body, err := json.Marshal(event)
 				require.NoError(t, err)
 				require.Equal(t, status, openAIStreamFailureStatus(body, "Please try again later."))
-				require.Equal(t, status == 429 || status == 503, openAIStreamFailedEventShouldFailover(body, "Please try again later."))
-				require.Equal(t, status == 429 || status == 503, openAIStreamErrorEventShouldFailover(body, "Please try again later."))
+				wantFailover := status == 429 || status == 503 || status == 401 || code == "subscription_sharing_user_not_eligible"
+				require.Equal(t, wantFailover, openAIStreamFailedEventShouldFailover(body, "Please try again later."))
+				require.Equal(t, wantFailover, openAIStreamErrorEventShouldFailover(body, "Please try again later."))
 				if status == 429 || status == 503 {
 					failure := newOpenAIUpstreamFailoverError(502, nil, body, "", true)
 					require.Equal(t, status, failure.ClientStatusCode)

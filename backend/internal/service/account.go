@@ -990,6 +990,11 @@ func (a *Account) OpenAICompactSupportKnown() (supported bool, known bool) {
 	if a == nil || !a.IsOpenAI() {
 		return false, false
 	}
+	// This capability governs the standalone endpoint, which SIWC grants do
+	// not authorize. Never override that boundary with a local force-on flag.
+	if a.IsOpenAISiwc() {
+		return false, true
+	}
 
 	switch a.GetOpenAICompactMode() {
 	case OpenAICompactModeForceOn:
