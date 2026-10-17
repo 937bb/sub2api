@@ -293,7 +293,18 @@ func (api *OAuthRefreshAPI) RefreshIfNeeded(
 	// 5. 设置版本号 + 更新 DB
 	if newCredentials != nil {
 		newCredentials["_token_version"] = time.Now().UnixMilli()
-		if freshAccount.IsGrokOAuth() {
+		if freshAccount.IsOpenAISiwc() {
+			updates := openAISiwcCredentials(siwcCredentialFromAccount(&Account{Credentials: newCredentials}))
+			updates["_token_version"] = newCredentials["_token_version"]
+			current, applied, persistErr := persistSIWCCredentials(ctx, api.accountRepo, attemptedAccount, updates)
+			if persistErr != nil {
+				return nil, &providerCycleContainmentRefreshError{err: errors.New("SIWC refresh succeeded but credential persistence failed")}
+			}
+			if !applied {
+				return &OAuthRefreshResult{Account: current}, nil
+			}
+			freshAccount = current
+		} else if freshAccount.IsGrokOAuth() {
 			conditionalRepo, ok := api.accountRepo.(GrokOAuthRefreshSuccessRepository)
 			if !ok {
 				return nil, &providerConfigurationRefreshError{

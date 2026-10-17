@@ -117,6 +117,8 @@ const (
 
 // UsageCache 封装账户使用量相关的缓存
 type UsageCache struct {
+	siwcQuotaCache    sync.Map           // account ID -> *siwcQuotaCacheEntry
+	siwcQuotaFlight   singleflight.Group // Coalesce read-only web quota queries.
 	apiCache          sync.Map           // accountID -> *apiUsageCache
 	windowStatsCache  sync.Map           // accountID -> *windowStatsCache
 	antigravityCache  sync.Map           // accountID -> *antigravityUsageCache
@@ -154,6 +156,13 @@ type UsageProgress struct {
 	LimitRequests    int64        `json:"limit_requests,omitempty"`
 }
 
+// LocalUsageWindow keeps recorded usage independent from remote quota availability.
+type LocalUsageWindow struct {
+	StartAt time.Time    `json:"start_at"`
+	Rolling bool         `json:"rolling"`
+	Stats   *WindowStats `json:"stats"`
+}
+
 // AntigravityModelQuota Antigravity 单个模型的配额信息
 type AntigravityModelQuota struct {
 	Utilization int    `json:"utilization"` // 使用率 0-100
@@ -181,18 +190,21 @@ type AICredit struct {
 
 // UsageInfo 账号使用量信息
 type UsageInfo struct {
-	Source             string         `json:"source,omitempty"`               // "passive" or "active"
-	UpdatedAt          *time.Time     `json:"updated_at,omitempty"`           // 更新时间
-	FiveHour           *UsageProgress `json:"five_hour"`                      // 5小时窗口
-	SevenDay           *UsageProgress `json:"seven_day,omitempty"`            // 7天窗口
-	SevenDaySonnet     *UsageProgress `json:"seven_day_sonnet,omitempty"`     // 7天Sonnet窗口
-	SevenDayFable      *UsageProgress `json:"seven_day_fable,omitempty"`      // 7天Fable窗口（响应头 7d_oi）
-	GeminiSharedDaily  *UsageProgress `json:"gemini_shared_daily,omitempty"`  // Gemini shared pool RPD (Google One / Code Assist)
-	GeminiProDaily     *UsageProgress `json:"gemini_pro_daily,omitempty"`     // Gemini Pro 日配额
-	GeminiFlashDaily   *UsageProgress `json:"gemini_flash_daily,omitempty"`   // Gemini Flash 日配额
-	GeminiSharedMinute *UsageProgress `json:"gemini_shared_minute,omitempty"` // Gemini shared pool RPM (Google One / Code Assist)
-	GeminiProMinute    *UsageProgress `json:"gemini_pro_minute,omitempty"`    // Gemini Pro RPM
-	GeminiFlashMinute  *UsageProgress `json:"gemini_flash_minute,omitempty"`  // Gemini Flash RPM
+	LocalFiveHour      *LocalUsageWindow `json:"local_five_hour,omitempty"`
+	LocalSevenDay      *LocalUsageWindow `json:"local_seven_day,omitempty"`
+	LocalUsageError    string            `json:"local_usage_error,omitempty"`
+	Source             string            `json:"source,omitempty"`               // "passive" or "active"
+	UpdatedAt          *time.Time        `json:"updated_at,omitempty"`           // 更新时间
+	FiveHour           *UsageProgress    `json:"five_hour"`                      // 5小时窗口
+	SevenDay           *UsageProgress    `json:"seven_day,omitempty"`            // 7天窗口
+	SevenDaySonnet     *UsageProgress    `json:"seven_day_sonnet,omitempty"`     // 7天Sonnet窗口
+	SevenDayFable      *UsageProgress    `json:"seven_day_fable,omitempty"`      // 7天Fable窗口（响应头 7d_oi）
+	GeminiSharedDaily  *UsageProgress    `json:"gemini_shared_daily,omitempty"`  // Gemini shared pool RPD (Google One / Code Assist)
+	GeminiProDaily     *UsageProgress    `json:"gemini_pro_daily,omitempty"`     // Gemini Pro 日配额
+	GeminiFlashDaily   *UsageProgress    `json:"gemini_flash_daily,omitempty"`   // Gemini Flash 日配额
+	GeminiSharedMinute *UsageProgress    `json:"gemini_shared_minute,omitempty"` // Gemini shared pool RPM (Google One / Code Assist)
+	GeminiProMinute    *UsageProgress    `json:"gemini_pro_minute,omitempty"`    // Gemini Pro RPM
+	GeminiFlashMinute  *UsageProgress    `json:"gemini_flash_minute,omitempty"`  // Gemini Flash RPM
 
 	// Antigravity 多模型配额
 	AntigravityQuota map[string]*AntigravityModelQuota `json:"antigravity_quota,omitempty"`
@@ -713,6 +725,11 @@ func (s *AccountUsageService) getOpenAIUsage(ctx context.Context, account *Accou
 	if account == nil {
 		return usage, nil
 	}
+	if account.IsOpenAISiwc() {
+		usage = s.getSIWCUsage(ctx, account, force)
+		s.attachSIWCLocalUsage(ctx, account.ID, usage, time.Now())
+		return usage, nil
+	}
 
 	applyExtraToUsage(usage, account.Extra, now)
 
@@ -770,7 +787,7 @@ func (s *AccountUsageService) getOpenAIUsage(ctx context.Context, account *Accou
 }
 
 func shouldRefreshOpenAICodexSnapshot(account *Account, usage *UsageInfo, now time.Time) bool {
-	if account == nil {
+	if account == nil || account.IsOpenAISiwc() {
 		return false
 	}
 	if usage == nil {
@@ -786,7 +803,7 @@ func shouldRefreshOpenAICodexSnapshot(account *Account, usage *UsageInfo, now ti
 }
 
 func isOpenAICodexSnapshotStale(account *Account, now time.Time) bool {
-	if account == nil || !account.IsOpenAIOAuth() {
+	if account == nil || !account.IsOpenAIOAuth() || account.IsOpenAISiwc() {
 		return false
 	}
 	// 普通账号的 codex 刷新走 probe(/responses 头),要求 WSv2;但 spark 影子走 QueryUsage
@@ -827,6 +844,9 @@ func (s *AccountUsageService) shouldProbeOpenAICodexSnapshot(accountID int64, no
 }
 
 func (s *AccountUsageService) probeOpenAICodexSnapshot(ctx context.Context, account *Account) (map[string]any, error) {
+	if account.IsOpenAISiwc() {
+		return nil, fmt.Errorf("SIWC remote subscription quota is not supported")
+	}
 	if account == nil || !account.IsOAuth() {
 		return nil, nil
 	}

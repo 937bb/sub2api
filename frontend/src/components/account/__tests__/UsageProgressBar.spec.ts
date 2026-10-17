@@ -22,6 +22,22 @@ describe('UsageProgressBar', () => {
     vi.useRealTimers()
   })
 
+  it('retains local request, token, account and user billing badges with estimated total cost', () => {
+    const wrapper = mount(UsageProgressBar, {
+      props: {
+        label: '5h', utilization: 98, color: 'indigo', estimatedTotalCost: 20,
+        windowStats: { requests: 150, tokens: 4565559, cost: 18.178916, user_cost: 1.70135049 }
+      }
+    })
+    expect(wrapper.text()).toContain('150 req')
+    expect(wrapper.text()).toContain('4.6M')
+    expect(wrapper.text()).toContain('A $18.18')
+    expect(wrapper.text()).toContain('U $1.70')
+    expect(wrapper.get('[data-test="estimated-total-cost"]').text()).toContain('admin.accounts.usageWindow.estimatedTotalCost')
+    expect(wrapper.text()).toContain('98%')
+    wrapper.unmount()
+  })
+
   it('showNowWhenIdle=true 且利用率为 0 但有未来 resetsAt 时显示倒计时', () => {
     const wrapper = mount(UsageProgressBar, {
       props: {

@@ -3767,7 +3767,7 @@
         :add-method="form.platform === 'anthropic' ? addMethod : 'oauth'"
         :auth-url="currentAuthUrl"
         :session-id="currentSessionId"
-        :loading="currentOAuthLoading"
+        :loading="currentOAuthLoading || siwcBusy"
         :error="currentOAuthError"
         :show-help="form.platform === 'anthropic'"
         :show-proxy-warning="form.platform !== 'openai' && form.platform !== 'grok' && !!form.proxy_id"
@@ -3783,6 +3783,7 @@
         :show-sso-option="form.platform === 'grok'"
         :show-email-password-option="false"
         :show-manual-option="true"
+        :show-siwc-option="form.platform === 'openai'"
         :initial-input-method="'manual'"
         :platform="form.platform"
         :show-project-id="geminiOAuthType === 'code_assist'"
@@ -3795,7 +3796,20 @@
         @import-codex-pat="handleOpenAIImportCodexPAT"
         @import-sso="handleGrokImportSSO"
         @authorize-password="handleGrokAuthorizePassword"
-      />
+      >
+        <template #siwc>
+          <SIWCAccountModal
+            v-if="isSIWCInputMethod"
+            :show="true"
+            embedded
+            :proxies="proxies"
+            :groups="groups"
+            :initial-values="form"
+            @busy="siwcBusy = $event"
+            @created="handleSIWCCreated"
+          />
+        </template>
+      </OAuthAuthorizationFlow>
 
     </div>
 
@@ -3841,7 +3855,7 @@
         </button>
       </div>
       <div v-else class="flex justify-between gap-3">
-        <button type="button" class="btn btn-secondary" @click="goBackToBasicInfo">
+        <button type="button" class="btn btn-secondary" :disabled="siwcBusy" @click="goBackToBasicInfo">
           {{ t('common.back') }}
         </button>
         <button
@@ -4150,6 +4164,7 @@ import type {
   TempUnschedulableScope
 } from '@/types'
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import SIWCAccountModal from '@/components/account/SIWCAccountModal.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Select from '@/components/common/Select.vue'
 import HelpTooltip from '@/components/common/HelpTooltip.vue'
@@ -4318,6 +4333,7 @@ interface Props {
 }
 
 const props = defineProps<Props>()
+const siwcBusy = ref(false)
 const emit = defineEmits<{
   close: []
   created: []
@@ -5052,6 +5068,8 @@ const isManualInputMethod = computed(() => {
   return oauthFlowRef.value?.inputMethod === 'manual'
 })
 
+const isSIWCInputMethod = computed(() => form.platform === 'openai' && oauthFlowRef.value?.inputMethod === 'siwc')
+
 const expiresAtInput = computed({
   get: () => formatDateTimeLocal(form.expires_at),
   set: (value: string) => {
@@ -5729,8 +5747,14 @@ const resetForm = () => {
 }
 
 const handleClose = () => {
+  if (siwcBusy.value) return
   antigravityMixedChannelConfirmed.value = false
   clearMixedChannelDialog()
+  emit('close')
+}
+
+const handleSIWCCreated = () => {
+  emit('created')
   emit('close')
 }
 

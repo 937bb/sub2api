@@ -336,6 +336,19 @@ func newOpenAIUpstreamFailoverError(
 		RetryableOnSameAccount: retryableOnSameAccount || requestScopedCapacity,
 		RequestScopedTransient: requestScopedCapacity,
 	}
+	if status := siwcErrorStatus(responseBody); status == http.StatusTooManyRequests || status == http.StatusServiceUnavailable {
+		failoverErr.StatusCode = status
+		failoverErr.ClientStatusCode = status
+		failoverErr.RetryableOnSameAccount = false
+		failoverErr.RequestScopedTransient = false
+		failoverErr.Scope = GatewayFailureScopeAccount
+		failoverErr.NextAccountAction = NextAccountRetry
+		failoverErr.ClientMessage = "Upstream shared usage is temporarily unavailable. Please try again later."
+		if status == http.StatusTooManyRequests {
+			failoverErr.ClientMessage = "Upstream shared usage limit reached. Please try again later or contact the administrator."
+		}
+		return failoverErr
+	}
 	if isOpenAIRequestBodyTooLargeError(statusCode, upstreamMsg, responseBody) {
 		failoverErr.RetryableOnSameAccount = false
 		failoverErr.RequestScopedTransient = false

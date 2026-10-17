@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent } from 'vue'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import {
   BUILTIN_PLATFORM_CATALOG,
   resetPlatformCatalog,
@@ -330,6 +330,42 @@ function mountModal(account = buildAccount(), renderGroupSelector = false) {
 }
 
 describe('EditAccountModal', () => {
+  it('stores a separate SIWC quota web token and keeps it out of the input on reopen', async () => {
+    const account = { ...buildAccount(), type: 'oauth', credentials: { auth_mode: 'siwc', email: 'owner@example.com' },
+      credentials_status: { has_siwc_quota_access_token: true } }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    const wrapper = mountModal(account)
+    await flushPromises()
+    const input = wrapper.get<HTMLInputElement>('[data-testid="siwc-quota-web-token"]')
+    expect(input.element.type).toBe('password')
+    expect(input.element.value).toBe('')
+    await input.setValue(' web-quota-token ')
+    await wrapper.get('#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    const credentials = updateAccountMock.mock.calls[0]?.[1]?.credentials
+    expect(credentials.siwc_quota_access_token).toBe('web-quota-token')
+    expect(credentials).not.toHaveProperty('access_token')
+    expect(credentials).not.toHaveProperty('refresh_token')
+    expect(input.element.value).toBe('')
+    wrapper.unmount()
+  })
+
+  it('preserves the quota token on an unrelated edit and supports explicit removal', async () => {
+    const account = { ...buildAccount(), type: 'oauth', credentials: { auth_mode: 'siwc' },
+      credentials_status: { has_siwc_quota_access_token: true } }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    const wrapper = mountModal(account)
+    await flushPromises()
+    await wrapper.get('#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials).not.toHaveProperty('siwc_quota_access_token')
+    await wrapper.get('[data-testid="siwc-quota-clear-token"]').setValue(true)
+    await wrapper.get('#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock.mock.calls[1]?.[1]?.credentials.siwc_quota_access_token).toBeNull()
+    wrapper.unmount()
+  })
+
   beforeEach(() => {
     authIsSimpleMode.value = true
   })

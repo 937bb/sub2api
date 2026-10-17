@@ -95,6 +95,7 @@ const normalizedAuthMode = computed(() =>
 
 const typeLabel = computed(() => {
   if (props.platform === 'openai' && props.type === 'oauth') {
+    if (normalizedAuthMode.value === 'siwc') return 'SIWC'
     if (normalizedAuthMode.value === 'agentidentity') return 'Agent Identity'
     if (normalizedAuthMode.value === 'personalaccesstoken') return 'PAT'
   }
@@ -118,8 +119,8 @@ const normalizedPlanType = computed(() => normalizePlanType(props.planType))
 
 const planLabel = computed(() => {
   if (!normalizedPlanType.value) return ''
-  // ChatGPT 档位命名（Pro 100 / Pro 200 / Pro 500、Business / Business Premium）只适用于
-  // OpenAI：Antigravity 与 Grok 各自的 pro/team 沿用下面的通用标签。
+  // ChatGPT tier names apply only to OpenAI; Antigravity and Grok retain
+  // their platform-specific pro/team labels below.
   if (props.platform === 'openai') {
     const label = openAIPlanTypeLabel(props.planType)
     if (label) return label
@@ -297,7 +298,7 @@ const expiresLabel = computed(() => {
 // Privacy badge — shows different states for OpenAI/Antigravity OAuth privacy setting
 const privacyBadge = computed(() => {
   if (props.type !== 'oauth' || !props.privacyMode) return null
-  // 支持 OpenAI 和 Antigravity 平台
+  // Support OpenAI and Antigravity platforms.
   if (props.platform !== 'openai' && props.platform !== 'antigravity') return null
 
   const shieldCheck = 'M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z'

@@ -19,6 +19,17 @@ import (
 
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
+	if account.IsOpenAISiwc() {
+		if _, err := normalizeSIWCResponsesBody(body); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": err.Error()}})
+			return nil, err
+		}
+		if isOpenAIResponsesCompactPath(c) {
+			err := errors.New("SIWC compact endpoint is unsupported; send complete input history")
+			c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": err.Error()}})
+			return nil, err
+		}
+	}
 	beginUpstreamResponseModelObservation(c)
 	ClearActualOpenAIUpstreamEndpoint(c)
 	if shouldForwardOpenAIResponsesViaRawChatCompletions(account) {
@@ -619,6 +630,10 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			markPatchDelete("max_completion_tokens")
 		}
 		for _, unsupportedField := range []string{"prompt_cache_retention", "safety_identifier", "prompt_cache_options"} {
+			// SIWC accepts modern cache options independently of the client UA.
+			if unsupportedField == "prompt_cache_options" && account.IsOpenAISiwc() {
+				continue
+			}
 			if gjson.GetBytes(body, unsupportedField).Exists() {
 				markPatchDelete(unsupportedField)
 			}
@@ -1370,6 +1385,9 @@ func shouldForwardOpenAIResponsesViaRawChatCompletions(account *Account) bool {
 }
 
 func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Context, account *Account, body []byte, token string, isStream bool, promptCacheKey string, isCodexCLI bool) (*http.Request, error) {
+	if account.IsOpenAISiwc() {
+		return buildSIWCResponsesRequest(ctx, c, account, body, token, promptCacheKey)
+	}
 	// Determine target URL based on account type
 	var targetURL string
 	switch account.Type {

@@ -230,6 +230,10 @@ func (s *AccountTestService) SyncUpstreamModelCatalog(ctx context.Context, accou
 		)
 	}
 	catalog := &UpstreamModelCatalog{Models: models, Metadata: make(map[string]UpstreamModelMetadata)}
+	if account.IsOpenAISiwc() {
+		// SIWC discovery supplies entitlement IDs, not Codex capabilities.
+		return catalog, nil
+	}
 	if len(body) > 0 {
 		_, directMetadata, parseErr := extractUpstreamModelCatalog(body, account != nil && account.IsGrok())
 		if parseErr == nil {
@@ -740,6 +744,17 @@ func (s *AccountTestService) fetchUpstreamModelList(ctx context.Context, account
 	if account == nil {
 		return nil, nil, newUpstreamModelSyncConfigError("Account is required", nil)
 	}
+	if account.IsOpenAISiwc() {
+		if s.openaiGatewayService == nil {
+			return nil, nil, newUpstreamModelSyncConfigError("SIWC gateway service is not configured", nil)
+		}
+		models, err := s.openaiGatewayService.fetchSIWCModels(ctx, account)
+		if err != nil {
+			return nil, nil, newUpstreamModelSyncUpstreamError("Failed to request SIWC model list", err)
+		}
+		body, err := siwcModelsBody(models)
+		return models, body, err
+	}
 
 	if account.Platform == PlatformAntigravity && account.Type != AccountTypeAPIKey {
 		return s.fetchAntigravityOAuthUpstreamModels(ctx, account)
@@ -1115,6 +1130,9 @@ func (s *AccountTestService) buildAntigravityAPIKeyModelsRequest(ctx context.Con
 }
 
 func (s *AccountTestService) buildOpenAIUpstreamModelsRequest(ctx context.Context, account *Account) (*http.Request, error) {
+	if account.IsOpenAISiwc() {
+		return nil, newUpstreamModelSyncUnsupportedError("SIWC model discovery requires its dedicated public API client", nil)
+	}
 	if account.IsOpenAIOAuth() {
 		return s.buildOpenAIOAuthUpstreamModelsRequest(ctx, account)
 	}
@@ -1164,7 +1182,7 @@ func (s *AccountTestService) buildOpenAIOAuthUpstreamModelsRequest(ctx context.C
 	if err != nil {
 		return nil, newUpstreamModelSyncConfigError("Failed to resolve OpenAI account credentials", err)
 	}
-	if !credentialAccount.IsOpenAIOAuth() {
+	if !credentialAccount.IsOpenAIOAuth() || credentialAccount.IsOpenAISiwc() {
 		return nil, newUpstreamModelSyncUnsupportedError(
 			fmt.Sprintf("Unsupported OpenAI account type for upstream model sync: %s", credentialAccount.Type), nil,
 		)

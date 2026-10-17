@@ -914,6 +914,9 @@ func resolveRequestedModelInMapping(mapping map[string]string, requestedModel st
 // （isDeepseekServableModel）——未知模型名透传上游只会得到 404/400，并误触发
 // per-(账号,模型) 30 分钟冷却；带 [1m] 上下文后缀的写法先归一化再比对。
 func (a *Account) IsModelSupported(requestedModel string) bool {
+	if a.IsOpenAISiwc() && !a.supportsSIWCUpstreamModel(a.GetMappedModel(requestedModel)) {
+		return false
+	}
 	return supportsOpenAIRequestModel(a, requestedModel, false)
 }
 
@@ -927,6 +930,9 @@ func (a *Account) isModelMappingSupported(requestedModel string) bool {
 	}
 	mapping := a.GetModelMapping()
 	if len(mapping) == 0 {
+		if a.IsOpenAISiwc() {
+			return true
+		}
 		if a.IsOpenAIOAuth() {
 			return isOpenAIOAuthServableModel(requestedModel)
 		}
@@ -1407,13 +1413,13 @@ func (a *Account) IsOpenAIOAuth() bool {
 // inference protocol. Setup tokens share that forwarding contract but do not
 // participate in the refreshable OAuth credential lifecycle.
 func (a *Account) IsOpenAIOAuthLike() bool {
-	return a != nil && a.IsOpenAI() && (a.Type == AccountTypeOAuth || a.Type == AccountTypeSetupToken)
+	return a != nil && !a.IsOpenAISiwc() && a.IsOpenAI() && (a.Type == AccountTypeOAuth || a.Type == AccountTypeSetupToken)
 }
 
 // UsesOpenAICodexProtocol preserves legacy OpenAI gateway OAuth routing for
 // accounts whose platform is implicit, while adding OpenAI SetupToken.
 func (a *Account) UsesOpenAICodexProtocol() bool {
-	return a != nil && (a.Type == AccountTypeOAuth || a.IsOpenAIOAuthLike())
+	return a != nil && !a.IsOpenAISiwc() && (a.Type == AccountTypeOAuth || a.IsOpenAIOAuthLike())
 }
 
 func (a *Account) IsOpenAIChatGPTSubscription() bool {
@@ -1880,6 +1886,9 @@ func (a *Account) SupportsOpenAIEndpointCapability(capability OpenAIEndpointCapa
 			return false
 		}
 	}
+	if a.IsOpenAISiwc() && capability != OpenAIEndpointCapabilityResponses && capability != OpenAIEndpointCapabilityChatCompletions {
+		return false
+	}
 	switch capability {
 	case OpenAIEndpointCapabilityChatCompletions:
 	case OpenAIEndpointCapabilityLive:
@@ -2123,6 +2132,9 @@ func (a *Account) IsOveragesEnabled() bool {
 // 兼容字段：accounts.extra.openai_oauth_passthrough（历史 OAuth 开关）。
 // 字段缺失或类型不正确时，按 false（关闭）处理。
 func (a *Account) IsOpenAIPassthroughEnabled() bool {
+	if a.IsOpenAISiwc() {
+		return false
+	}
 	if a == nil || !a.IsOpenAI() || a.Extra == nil {
 		return false
 	}
@@ -2149,6 +2161,9 @@ func (a *Account) IsOpenAIPassthroughEnabled() bool {
 // 1. 按账号类型读取分类型字段
 // 2. 分类型字段缺失时，回退兼容字段
 func (a *Account) IsOpenAIResponsesWebSocketV2Enabled() bool {
+	if a.IsOpenAISiwc() {
+		return false
+	}
 	if a == nil || !a.IsOpenAI() || a.Extra == nil {
 		return false
 	}
@@ -2217,6 +2232,9 @@ func normalizeOpenAIWSIngressDefaultMode(mode string) string {
 // 3. 兼容 enabled 旧字段（bool）
 // 4. defaultMode（非法时回退 ctx_pool）
 func (a *Account) ResolveOpenAIResponsesWebSocketV2Mode(defaultMode string) string {
+	if a.IsOpenAISiwc() {
+		return OpenAIWSIngressModeOff
+	}
 	resolvedDefault := normalizeOpenAIWSIngressDefaultMode(defaultMode)
 	if a == nil || !a.IsOpenAI() {
 		return OpenAIWSIngressModeOff
@@ -2287,6 +2305,9 @@ func (a *Account) ResolveOpenAIResponsesWebSocketV2Mode(defaultMode string) stri
 // IsOpenAIWSForceHTTPEnabled 返回账号级"强制 HTTP"开关。
 // 字段：accounts.extra.openai_ws_force_http。
 func (a *Account) IsOpenAIWSForceHTTPEnabled() bool {
+	if a.IsOpenAISiwc() {
+		return true
+	}
 	if a == nil || !a.IsOpenAI() || a.Extra == nil {
 		return false
 	}
