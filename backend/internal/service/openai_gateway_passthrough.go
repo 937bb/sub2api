@@ -28,11 +28,7 @@ import (
 const openAIResponsesClientToolMappingContextKey = "openai_responses_client_tool_mapping"
 
 func isStrictOpenAIAPIKeyPassthrough(account *Account) bool {
-	if account == nil || !account.IsOpenAIApiKey() || !account.IsOpenAIPassthroughEnabled() {
-		return false
-	}
-	baseURL := strings.TrimSpace(account.GetOpenAIBaseURL())
-	return isOfficialOpenAIModelsBaseURL(baseURL) || isAzureOpenAIEndpoint(baseURL)
+	return account != nil && account.IsOpenAIApiKey() && account.IsOpenAIPassthroughEnabled()
 }
 
 func hasOpenAIResponsesClientToolMapping(mapping apicompat.ResponsesClientToolMapping) bool {

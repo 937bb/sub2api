@@ -1286,63 +1286,46 @@ func TestOpenAIGatewayService_OAuthPassthrough_UpstreamErrorIncludesPassthroughF
 	require.Equal(t, "http_error", arr[len(arr)-1].Kind)
 }
 
-func TestOpenAIGatewayService_APIKeyPassthrough_RebuildsUpstreamErrors(t *testing.T) {
+func TestOpenAIGatewayService_StrictCustomAPIKeyPassthroughPreservesUpstreamErrors(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	tests := []struct {
-		name           string
-		statusCode     int
-		contentType    string
-		responseBody   string
-		retryAfter     string
-		wantStatus     int
-		wantMessage    string
-		wantRetryAfter string
+		name         string
+		statusCode   int
+		contentType  string
+		responseBody string
+		retryAfter   string
 	}{
 		{
-			name:           "upstream forbidden is reported as gateway failure",
-			statusCode:     http.StatusForbidden,
-			contentType:    "text/html; charset=UTF-8",
-			responseBody:   `<!DOCTYPE html><title>secret-upstream.example denied the request</title>`,
-			retryAfter:     "17",
-			wantStatus:     http.StatusBadGateway,
-			wantMessage:    "Upstream access denied",
-			wantRetryAfter: "17",
+			name:         "upstream forbidden",
+			statusCode:   http.StatusForbidden,
+			contentType:  "text/html; charset=UTF-8",
+			responseBody: `<!DOCTYPE html><title>secret-upstream.example denied the request</title>`,
+			retryAfter:   "17",
 		},
 		{
-			name:         "upstream unauthorized is reported as gateway failure",
+			name:         "upstream unauthorized",
 			statusCode:   http.StatusUnauthorized,
 			contentType:  "application/json",
 			responseBody: `{"error":{"message":"invalid secret-upstream.example token","type":"authentication_error","code":"invalid_api_key","param":"api_key"},"rate_limit":{"remaining":0}}`,
-			wantStatus:   http.StatusBadGateway,
-			wantMessage:  "Upstream authentication failed",
 		},
-		// 瞬时 5xx（500/502/503/504/520-524）对 API-key 账号已改走多账号
-		// failover（见 APIKeyPassthrough_Transient5xxTriggersFailover），此处
-		// 改用非瞬时 5xx 状态码，继续覆盖净化重建路径。
 		{
 			name:         "html 5xx",
 			statusCode:   530,
 			contentType:  "text/html; charset=UTF-8",
 			responseBody: `<!DOCTYPE html><title>secret-upstream.example | 530: Origin DNS error</title>`,
-			wantStatus:   530,
-			wantMessage:  "Upstream service temporarily unavailable",
 		},
 		{
 			name:         "structured 5xx",
 			statusCode:   http.StatusNotImplemented,
 			contentType:  "application/json",
 			responseBody: `{"error":{"message":"secret-upstream.example internal failure"}}`,
-			wantStatus:   http.StatusNotImplemented,
-			wantMessage:  "Upstream service temporarily unavailable",
 		},
 		{
 			name:         "unstructured 4xx",
 			statusCode:   http.StatusBadRequest,
 			contentType:  "text/plain",
 			responseBody: `proxy secret-upstream.example rejected the request`,
-			wantStatus:   http.StatusBadRequest,
-			wantMessage:  "Upstream request failed",
 		},
 		{
 			name:         "malicious valid json 4xx",
@@ -1350,8 +1333,6 @@ func TestOpenAIGatewayService_APIKeyPassthrough_RebuildsUpstreamErrors(t *testin
 			contentType:  "application/json",
 			responseBody: `{"error":{"message":"secret-upstream.example invalid parameter","type":"invalid_request_error","code":"upstream_secret_code","param":"private_field","internal_token":"sk-upstream-secret"},"rate_limit":{"remaining":0,"reset":"internal-window"},"debug":{"admin":"root"},"redirect":"https://secret-upstream.example/admin"}`,
 			retryAfter:   "not-a-valid-delay",
-			wantStatus:   http.StatusBadRequest,
-			wantMessage:  "Upstream request failed",
 		},
 	}
 
@@ -1400,39 +1381,25 @@ func TestOpenAIGatewayService_APIKeyPassthrough_RebuildsUpstreamErrors(t *testin
 			_, err := svc.Forward(context.Background(), c, account, requestBody)
 
 			require.Error(t, err)
-			require.Equal(t, tt.wantStatus, rec.Code)
+			require.Equal(t, tt.statusCode, rec.Code)
 			opsValue, ok := c.Get(OpsUpstreamErrorsKey)
 			require.True(t, ok)
 			opsEvents, ok := opsValue.([]*OpsUpstreamErrorEvent)
 			require.True(t, ok)
 			require.NotEmpty(t, opsEvents)
 			require.Equal(t, tt.statusCode, opsEvents[len(opsEvents)-1].UpstreamStatusCode)
-			require.Contains(t, rec.Header().Get("Content-Type"), "application/json")
-			require.Equal(t, tt.wantRetryAfter, rec.Header().Get("Retry-After"))
-			for _, key := range []string{
-				"Location",
-				"Server",
-				"Set-Cookie",
-				"WWW-Authenticate",
-				"X-Admin-Debug",
-				"X-Codex-Primary-Used-Percent",
-				"X-Request-Id",
-			} {
-				require.Empty(t, rec.Header().Values(key), "sensitive upstream header %s must be dropped", key)
-			}
-			require.Equal(t, "upstream_error", gjson.Get(rec.Body.String(), "error.type").String())
-			require.Equal(t, tt.wantMessage, gjson.Get(rec.Body.String(), "error.message").String())
-			require.False(t, gjson.Get(rec.Body.String(), "error.code").Exists())
-			require.False(t, gjson.Get(rec.Body.String(), "error.param").Exists())
-			require.False(t, gjson.Get(rec.Body.String(), "rate_limit").Exists())
-			require.NotContains(t, rec.Body.String(), "secret-upstream.example")
-			require.NotContains(t, rec.Body.String(), "sk-upstream-secret")
+			require.Equal(t, tt.contentType, rec.Header().Get("Content-Type"))
+			require.Equal(t, tt.retryAfter, rec.Header().Get("Retry-After"))
+			require.Equal(t, tt.responseBody, rec.Body.String())
+			require.Equal(t, "https://secret-upstream.example/admin", rec.Header().Get("Location"))
+			require.Equal(t, "internal-route=secret-upstream.example", rec.Header().Get("X-Admin-Debug"))
+			require.Empty(t, rec.Header().Values("Set-Cookie"))
 			require.NotContains(t, err.Error(), "secret-upstream.example")
 		})
 	}
 }
 
-func TestOpenAIGatewayService_StrictAPIKeyPassthroughPreservesUpstreamErrors(t *testing.T) {
+func TestOpenAIGatewayService_StrictNewAPIKeyPassthroughPreservesUpstreamErrors(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
@@ -1456,13 +1423,13 @@ func TestOpenAIGatewayService_StrictAPIKeyPassthroughPreservesUpstreamErrors(t *
 	}
 	account := &Account{
 		ID:          125,
-		Name:        "official-openai",
+		Name:        "newapi-openai",
 		Platform:    PlatformOpenAI,
 		Type:        AccountTypeAPIKey,
 		Concurrency: 1,
 		Credentials: map[string]any{
 			"api_key":  "sk-test",
-			"base_url": "https://api.openai.com",
+			"base_url": "https://newapi.example.com/v1",
 		},
 		Extra:       map[string]any{"openai_passthrough": true},
 		Status:      StatusActive,
@@ -1509,7 +1476,7 @@ func TestWriteOpenAIPassthroughErrorHeaders_StrictRetryAfter(t *testing.T) {
 	}
 }
 
-func TestOpenAIGatewayService_APIKeyPassthrough_CompactErrorBeforeKeepaliveIsSingleJSON(t *testing.T) {
+func TestOpenAIGatewayService_OAuthPassthrough_CompactErrorBeforeKeepaliveIsSingleJSON(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -1527,8 +1494,8 @@ func TestOpenAIGatewayService_APIKeyPassthrough_CompactErrorBeforeKeepaliveIsSin
 		}},
 	}
 	account := &Account{
-		ID: 125, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Concurrency: 1,
-		Credentials: map[string]any{"api_key": "sk-test", "base_url": "https://secret-upstream.example"},
+		ID: 125, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1,
+		Credentials: map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-acc"},
 		Extra:       map[string]any{"openai_passthrough": true}, Status: StatusActive, Schedulable: true,
 	}
 
@@ -1543,7 +1510,7 @@ func TestOpenAIGatewayService_APIKeyPassthrough_CompactErrorBeforeKeepaliveIsSin
 	require.NotContains(t, rec.Body.String(), "secret-upstream.example")
 }
 
-func TestOpenAIGatewayService_APIKeyPassthrough_CompactErrorAfterKeepaliveIsFailedSSE(t *testing.T) {
+func TestOpenAIGatewayService_OAuthPassthrough_CompactErrorAfterKeepaliveIsFailedSSE(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -1562,8 +1529,8 @@ func TestOpenAIGatewayService_APIKeyPassthrough_CompactErrorAfterKeepaliveIsFail
 		}},
 	}
 	account := &Account{
-		ID: 126, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Concurrency: 1,
-		Credentials: map[string]any{"api_key": "sk-test", "base_url": "https://secret-upstream.example"},
+		ID: 126, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1,
+		Credentials: map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-acc"},
 		Extra:       map[string]any{"openai_passthrough": true}, Status: StatusActive, Schedulable: true,
 	}
 
@@ -2579,7 +2546,77 @@ func TestOpenAIGatewayService_OAuthPassthrough_StreamClientDisconnectStillCollec
 	require.Equal(t, 3, result.Usage.CacheReadInputTokens)
 }
 
-func TestOpenAIGatewayService_APIKeyPassthrough_PreservesBodyAndUsesResponsesEndpoint(t *testing.T) {
+func TestIsStrictOpenAIAPIKeyPassthrough(t *testing.T) {
+	tests := []struct {
+		name    string
+		account *Account
+		want    bool
+	}{
+		{name: "nil account"},
+		{
+			name: "official OpenAI API key with passthrough",
+			account: &Account{
+				Platform: PlatformOpenAI,
+				Type:     AccountTypeAPIKey,
+				Credentials: map[string]any{
+					"base_url": "https://api.openai.com",
+				},
+				Extra: map[string]any{"openai_passthrough": true},
+			},
+			want: true,
+		},
+		{
+			name: "NewAPI API key with passthrough",
+			account: &Account{
+				Platform: PlatformOpenAI,
+				Type:     AccountTypeAPIKey,
+				Credentials: map[string]any{
+					"base_url": "https://newapi.example.com/v1",
+				},
+				Extra: map[string]any{"openai_passthrough": true},
+			},
+			want: true,
+		},
+		{
+			name: "custom API key without passthrough",
+			account: &Account{
+				Platform: PlatformOpenAI,
+				Type:     AccountTypeAPIKey,
+				Credentials: map[string]any{
+					"base_url": "https://newapi.example.com/v1",
+				},
+				Extra: map[string]any{"openai_passthrough": false},
+			},
+		},
+		{
+			name: "OAuth with passthrough",
+			account: &Account{
+				Platform: PlatformOpenAI,
+				Type:     AccountTypeOAuth,
+				Extra:    map[string]any{"openai_passthrough": true},
+			},
+		},
+		{
+			name: "SIWC with passthrough field",
+			account: &Account{
+				Platform: PlatformOpenAI,
+				Type:     AccountTypeSetupToken,
+				Credentials: map[string]any{
+					"auth_mode": "siwc",
+				},
+				Extra: map[string]any{"openai_passthrough": true, "auth_mode": "siwc"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, isStrictOpenAIAPIKeyPassthrough(tt.account))
+		})
+	}
+}
+
+func TestOpenAIGatewayService_NewAPIKeyPassthrough_PreservesBodyAndUsesResponsesEndpoint(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
@@ -2620,13 +2657,13 @@ func TestOpenAIGatewayService_APIKeyPassthrough_PreservesBodyAndUsesResponsesEnd
 
 	account := &Account{
 		ID:          456,
-		Name:        "apikey-acc",
+		Name:        "newapi-apikey-acc",
 		Platform:    PlatformOpenAI,
 		Type:        AccountTypeAPIKey,
 		Concurrency: 1,
 		Credentials: map[string]any{
 			"api_key":       "sk-api-key",
-			"base_url":      "https://api.openai.com",
+			"base_url":      "https://newapi.example.com/v1",
 			"model_mapping": map[string]any{"gpt-5.2": "gpt-5.2-account"},
 		},
 		Extra:          map[string]any{"openai_passthrough": true},
@@ -2643,7 +2680,7 @@ func TestOpenAIGatewayService_APIKeyPassthrough_PreservesBodyAndUsesResponsesEnd
 	require.NotNil(t, upstream.lastReq)
 	require.Equal(t, originalBody, upstream.lastBody)
 	require.False(t, gjson.GetBytes(upstream.lastBody, "instructions").Exists())
-	require.Equal(t, "https://api.openai.com/v1/responses", upstream.lastReq.URL.String())
+	require.Equal(t, "https://newapi.example.com/v1/responses", upstream.lastReq.URL.String())
 	require.Equal(t, "Bearer sk-api-key", upstream.lastReq.Header.Get("Authorization"))
 	require.Equal(t, "curl/8.0", upstream.lastReq.Header.Get("User-Agent"))
 	require.Equal(t, "remote_compaction_v2", upstream.lastReq.Header.Get("x-codex-beta-features"))
