@@ -241,7 +241,7 @@ func TestOpenAIGatewayServiceForward_AccountPolicyStripsImageNamespaceTools(t *t
 				},
 			}
 			svc := newOpenAIImageGenerationControlTestService(upstream)
-			c, _ := newOpenAIImageGenerationControlTestContext(false, "codex_cli_rs/0.144.1")
+			c, _ := newOpenAIImageGenerationControlTestContext(tt.passthrough, "codex_cli_rs/0.144.1")
 			SetOpenAIClientTransport(c, OpenAIClientTransportHTTP)
 			account := newOpenAIImageGenerationControlTestAccount()
 			account.Extra = map[string]any{
@@ -270,10 +270,13 @@ func TestOpenAIGatewayServiceForward_AccountPolicyStripsImageNamespaceTools(t *t
 			require.NotNil(t, upstream.lastReq)
 			var forwarded map[string]any
 			require.NoError(t, json.Unmarshal(upstream.lastBody, &forwarded))
-			require.False(t, hasOpenAIImageGenerationTool(forwarded))
+			require.Equal(t, tt.passthrough, hasOpenAIImageGenerationTool(forwarded))
 			require.Equal(t, "auto", forwarded["tool_choice"])
 			require.True(t, gjson.GetBytes(upstream.lastBody, `tools.#(name=="shell")`).Exists())
 			require.True(t, gjson.GetBytes(upstream.lastBody, `tools.#(name=="code_tools")`).Exists())
+			if tt.passthrough {
+				require.Equal(t, body, upstream.lastBody, "strict passthrough must not apply the managed image-tool strip policy")
+			}
 			require.Equal(t, "write code", gjson.GetBytes(upstream.lastBody, "input.0.content.0.text").String())
 			cached, known := getOpenAIImageIntentHint(c)
 			require.True(t, known)

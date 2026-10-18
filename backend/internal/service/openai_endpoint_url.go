@@ -31,6 +31,35 @@ func buildOpenAIResponsesInputTokensURL(base string) string {
 	return buildOpenAIEndpointURL(base, "/v1/responses/input_tokens")
 }
 
+func isAzureOpenAIEndpoint(raw string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(strings.TrimSpace(parsed.Hostname()))
+	return strings.HasSuffix(host, ".openai.azure.com") ||
+		strings.HasSuffix(host, ".services.ai.azure.com") ||
+		strings.HasSuffix(host, ".cognitiveservices.azure.com")
+}
+
+func buildAzureOpenAIResponsesURL(base string) string {
+	normalized := strings.TrimSpace(base)
+	parsed, err := url.Parse(normalized)
+	if err != nil {
+		return buildOpenAIEndpointURL(base, "/v1/responses")
+	}
+
+	path := strings.TrimRight(parsed.Path, "/")
+	lowerPath := strings.ToLower(path)
+	if strings.Contains(lowerPath, "/openai/deployments/") && !strings.HasSuffix(lowerPath, "/responses") {
+		parsed.Path = path + "/responses"
+		parsed.RawPath = ""
+		parsed.Fragment = ""
+		return parsed.String()
+	}
+	return buildOpenAIEndpointURL(base, "/v1/responses")
+}
+
 func openAIBaseURLHasVersionSuffix(raw string) bool {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {

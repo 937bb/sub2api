@@ -57,6 +57,9 @@ func buildOpenAIResponsesURL(base string) string {
 // 供应商 profile 声明了 ResponsesPath 时按其拼接（如 DeepSeek 为无 /v1 前缀的
 // /responses）；其余平台维持 /v1/responses。
 func buildOpenAIResponsesURLForPlatform(platform string, base string) string {
+	if isAzureOpenAIEndpoint(base) {
+		return buildAzureOpenAIResponsesURL(base)
+	}
 	if profile := LookupProviderProfile(platform); profile != nil && profile.ResponsesPath != "" {
 		return buildOpenAIEndpointURL(base, profile.ResponsesPath)
 	}

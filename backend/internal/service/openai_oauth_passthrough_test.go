@@ -1432,6 +1432,52 @@ func TestOpenAIGatewayService_APIKeyPassthrough_RebuildsUpstreamErrors(t *testin
 	}
 }
 
+func TestOpenAIGatewayService_StrictAPIKeyPassthroughPreservesUpstreamErrors(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
+
+	responseBody := []byte(`{"error":{"message":"invalid signed payload","type":"invalid_request_error","code":"signature_mismatch","param":"input"},"response_signature":"opaque-error-signature"}`)
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusBadRequest,
+		Header: http.Header{
+			"Content-Type":             []string{"application/json"},
+			"Set-Cookie":               []string{"must-not-leak=1"},
+			"X-Ms-Error-Code":          []string{"SignatureMismatch"},
+			"X-OpenAI-Error-Signature": []string{"opaque-header-signature"},
+		},
+		Body: io.NopCloser(bytes.NewReader(responseBody)),
+	}}
+	svc := &OpenAIGatewayService{
+		cfg:          &config.Config{Gateway: config.GatewayConfig{ForceCodexCLI: false}},
+		httpUpstream: upstream,
+	}
+	account := &Account{
+		ID:          125,
+		Name:        "official-openai",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key":  "sk-test",
+			"base_url": "https://api.openai.com",
+		},
+		Extra:       map[string]any{"openai_passthrough": true},
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+
+	_, err := svc.Forward(context.Background(), c, account, []byte(`{"model":"gpt-5.2","stream":false,"input":"hello"}`))
+	require.Error(t, err)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Equal(t, responseBody, rec.Body.Bytes())
+	require.Equal(t, "SignatureMismatch", rec.Header().Get("X-Ms-Error-Code"))
+	require.Equal(t, "opaque-header-signature", rec.Header().Get("X-OpenAI-Error-Signature"))
+	require.Empty(t, rec.Header().Get("Set-Cookie"))
+}
+
 func TestWriteOpenAIPassthroughErrorHeaders_StrictRetryAfter(t *testing.T) {
 	now := time.Now().UTC()
 	tests := []struct {
@@ -2541,15 +2587,29 @@ func TestOpenAIGatewayService_APIKeyPassthrough_PreservesBodyAndUsesResponsesEnd
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
 	c.Request.Header.Set("User-Agent", "curl/8.0")
 	c.Request.Header.Set("X-Test", "keep")
+	c.Request.Header.Set("X-Stainless-Lang", "go")
+	c.Request.Header.Set("X-Stainless-Package-Version", "3.1.4")
+	c.Request.Header.Set("OpenAI-Organization", "org_passthrough")
+	c.Request.Header.Set("OpenAI-Project", "proj_passthrough")
+	c.Request.Header.Set("Traceparent", "00-0123456789abcdef0123456789abcdef-0123456789abcdef-01")
+	c.Request.Header.Set("Cookie", "must-not-leak=1")
+	c.Request.Header.Set("X-Forwarded-For", "203.0.113.9")
 	c.Request.Header.Set("x-codex-beta-features", "remote_compaction_v2")
 	c.Request.Header.Set("X-Codex-Window-ID", "window-passthrough")
 	c.Request.Header.Set("X-Codex-Installation-ID", "installation-passthrough")
 
-	originalBody := []byte(`{"model":"gpt-5.2","stream":false,"service_tier":"flex","max_output_tokens":128,"input":[{"type":"text","text":"hi"}]}`)
+	originalBody := []byte("{\n  \"model\": \"gpt-5.2\",\n  \"stream\": false,\n  \"store\": false,\n  \"service_tier\": \"flex\",\n  \"parallel_tool_calls\": true,\n  \"request_signature\": \"opaque-request-signature\",\n  \"tools\": [{\"type\":\"function\",\"name\":\"probe\",\"parameters\":{\"type\":null,\"x-signature\":\"schema-signature\"}}],\n  \"input\": [{\"type\":\"reasoning\",\"id\":\"rs_signed\",\"call_id\":\"signed-call\",\"summary\":null,\"encrypted_content\":\"opaque-encrypted\",\"content\":[{\"type\":\"reasoning_text\",\"text\":\"keep\",\"signature\":\"reasoning-signature\"}]}]\n}")
+	responseBody := []byte("{\n  \"id\": \"resp_strict_passthrough\",\n  \"output\": [],\n  \"response_signature\": \"opaque-response-signature\",\n  \"usage\": {\"input_tokens\":1,\"output_tokens\":1,\"input_tokens_details\":{\"cached_tokens\":0}}\n}")
 	resp := &http.Response{
 		StatusCode: http.StatusOK,
-		Header:     http.Header{"Content-Type": []string{"application/json"}, "x-request-id": []string{"rid"}},
-		Body:       io.NopCloser(strings.NewReader(`{"output":[],"usage":{"input_tokens":1,"output_tokens":1,"input_tokens_details":{"cached_tokens":0}}}`)),
+		Header: http.Header{
+			"Content-Type":                []string{"application/json"},
+			"Set-Cookie":                  []string{"must-not-leak=1"},
+			"X-Ms-Region":                 []string{"eastus2"},
+			"X-OpenAI-Response-Signature": []string{"opaque-header-signature"},
+			"x-request-id":                []string{"rid"},
+		},
+		Body: io.NopCloser(bytes.NewReader(responseBody)),
 	}
 	upstream := &httpUpstreamRecorder{resp: resp}
 
@@ -2589,7 +2649,68 @@ func TestOpenAIGatewayService_APIKeyPassthrough_PreservesBodyAndUsesResponsesEnd
 	require.Equal(t, "remote_compaction_v2", upstream.lastReq.Header.Get("x-codex-beta-features"))
 	require.Equal(t, "window-passthrough", upstream.lastReq.Header.Get("X-Codex-Window-ID"))
 	require.Equal(t, "installation-passthrough", upstream.lastReq.Header.Get("X-Codex-Installation-ID"))
-	require.Empty(t, upstream.lastReq.Header.Get("X-Test"))
+	require.Equal(t, "keep", upstream.lastReq.Header.Get("X-Test"))
+	require.Equal(t, "go", upstream.lastReq.Header.Get("X-Stainless-Lang"))
+	require.Equal(t, "3.1.4", upstream.lastReq.Header.Get("X-Stainless-Package-Version"))
+	require.Equal(t, "org_passthrough", upstream.lastReq.Header.Get("OpenAI-Organization"))
+	require.Equal(t, "proj_passthrough", upstream.lastReq.Header.Get("OpenAI-Project"))
+	require.Equal(t, "00-0123456789abcdef0123456789abcdef-0123456789abcdef-01", upstream.lastReq.Header.Get("Traceparent"))
+	require.Empty(t, upstream.lastReq.Header.Get("Cookie"))
+	require.Empty(t, upstream.lastReq.Header.Get("X-Forwarded-For"))
+	require.Equal(t, responseBody, rec.Body.Bytes())
+	require.Equal(t, "eastus2", rec.Header().Get("X-Ms-Region"))
+	require.Equal(t, "opaque-header-signature", rec.Header().Get("X-OpenAI-Response-Signature"))
+	require.Empty(t, rec.Header().Get("Set-Cookie"))
+}
+
+func TestOpenAIBuildUpstreamRequestStrictPassthroughUsesAzureAPIKeyAuth(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
+	c.Request.Header.Set("Authorization", "Bearer downstream-key")
+	c.Request.Header.Set("Api-Key", "downstream-azure-key")
+	c.Request.Header.Set("X-Stainless-Lang", "python")
+
+	svc := &OpenAIGatewayService{cfg: &config.Config{
+		Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}},
+	}}
+	tests := []struct {
+		name    string
+		baseURL string
+		wantURL string
+	}{
+		{
+			name:    "modern v1 endpoint",
+			baseURL: "https://resource.openai.azure.com/openai/v1?api-version=2025-04-01-preview",
+			wantURL: "https://resource.openai.azure.com/openai/v1/responses?api-version=2025-04-01-preview",
+		},
+		{
+			name:    "legacy deployment endpoint",
+			baseURL: "https://resource.openai.azure.com/openai/deployments/deployment-name?api-version=2025-04-01-preview",
+			wantURL: "https://resource.openai.azure.com/openai/deployments/deployment-name/responses?api-version=2025-04-01-preview",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			account := &Account{
+				Platform: PlatformOpenAI,
+				Type:     AccountTypeAPIKey,
+				Credentials: map[string]any{
+					"base_url": tt.baseURL,
+				},
+				Extra: map[string]any{"openai_passthrough": true},
+			}
+
+			req, err := svc.buildUpstreamRequestOpenAIPassthrough(c.Request.Context(), c, account, []byte(`{"model":"deployment-name"}`), "upstream-azure-key")
+			require.NoError(t, err)
+			require.Equal(t, tt.wantURL, req.URL.String())
+			require.Equal(t, "upstream-azure-key", req.Header.Get("Api-Key"))
+			require.Empty(t, req.Header.Get("Authorization"))
+			require.Equal(t, "python", req.Header.Get("X-Stainless-Lang"))
+		})
+	}
 }
 
 func TestOpenAIGatewayService_OAuthPassthrough_WarnOnTimeoutHeadersForStream(t *testing.T) {

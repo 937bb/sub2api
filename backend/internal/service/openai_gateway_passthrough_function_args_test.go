@@ -71,6 +71,43 @@ func TestHandleStreamingResponsePassthroughDeduplicatesFunctionCallArguments(t *
 	requireJSONArgument(t, gjson.Get(completed, "response.output.1.arguments").String())
 }
 
+func TestHandleStreamingResponseStrictAPIKeyPassthroughPreservesSSEPayload(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	duplicatedArgs := `{"cmd":"echo hi"}{"cmd":"echo hi"}`
+	completed := completedWithFunctionCallsJSON(duplicatedArgs, duplicatedArgs)
+	upstreamBody := passthroughSSEData(completed) + "data: [DONE]\n\n"
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header: http.Header{
+			"Content-Type":              []string{"text/event-stream"},
+			"X-OpenAI-Stream-Signature": []string{"stream-signature"},
+		},
+		Body: io.NopCloser(strings.NewReader(upstreamBody)),
+	}
+	account := &Account{
+		ID:       1,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"base_url": "https://api.openai.com",
+		},
+		Extra: map[string]any{"openai_passthrough": true},
+	}
+
+	result, err := (&OpenAIGatewayService{}).handleStreamingResponsePassthrough(
+		context.Background(), resp, c, account, time.Now(), "gpt-5.4", "gpt-5.4",
+	)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Contains(t, rec.Body.String(), completed)
+	require.Equal(t, "stream-signature", rec.Header().Get("X-OpenAI-Stream-Signature"))
+}
+
 func TestForwardResponsesChatCompletionsFallbackKeepsFunctionArgumentsSingle(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

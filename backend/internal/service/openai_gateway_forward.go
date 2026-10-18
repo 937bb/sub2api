@@ -23,6 +23,12 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	clearOpenAIResponsesClientToolMapping(c)
 	clearOpenAIResponsesNamespaceNames(c)
 	setCodexToolNameReverse(c, nil)
+	passthroughEnabled := account.IsOpenAIPassthroughEnabled()
+	strictAPIKeyPassthrough := isStrictOpenAIAPIKeyPassthrough(account)
+	rawClientBody := body
+	if strictAPIKeyPassthrough {
+		rawClientBody = append([]byte(nil), body...)
+	}
 	if account.IsOpenAISiwc() {
 		_, err := prepareSIWCResponsesBody(c, body)
 		if err != nil {
@@ -77,27 +83,27 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		return nil, errors.New("codex_cli_only restriction: only codex official clients are allowed")
 	}
 
-	normalizedBody, normalized, err := normalizeOpenAICodexCompactReasoningEffortForAccount(c, account, body)
-	if err != nil {
-		return nil, err
-	}
-	if normalized {
-		body = normalizedBody
-	}
-	legacyIngressBody, legacyIngressChanged, legacyIngressErr := normalizeOpenAIResponsesLegacyIngressWithConfig(s.cfg, body)
-	if legacyIngressErr != nil {
-		return nil, legacyIngressErr
-	}
-	if legacyIngressChanged {
-		body = legacyIngressBody
-	}
-	// 在分流到 passthrough / Codex transform / 原生 ChatCompletions 之前统一修正
-	// 显式为 null 的工具 Schema type，否则 upstream 的 400 会被归一成可重试的 502，
-	// 同一份坏定义在账号池里反复重放。
-	if sanitizedToolBody, toolSchemaSanitized, toolSchemaErr := sanitizeOpenAIResponsesToolSchemasForPlatform(body, account.Platform); toolSchemaErr != nil {
-		return nil, toolSchemaErr
-	} else if toolSchemaSanitized {
-		body = sanitizedToolBody
+	var err error
+	if !strictAPIKeyPassthrough {
+		normalizedBody, normalized, err := normalizeOpenAICodexCompactReasoningEffortForAccount(c, account, body)
+		if err != nil {
+			return nil, err
+		}
+		if normalized {
+			body = normalizedBody
+		}
+		legacyIngressBody, legacyIngressChanged, legacyIngressErr := normalizeOpenAIResponsesLegacyIngressWithConfig(s.cfg, body)
+		if legacyIngressErr != nil {
+			return nil, legacyIngressErr
+		}
+		if legacyIngressChanged {
+			body = legacyIngressBody
+		}
+		if sanitizedToolBody, toolSchemaSanitized, toolSchemaErr := sanitizeOpenAIResponsesToolSchemasForPlatform(body, account.Platform); toolSchemaErr != nil {
+			return nil, toolSchemaErr
+		} else if toolSchemaSanitized {
+			body = sanitizedToolBody
+		}
 	}
 	if account.IsOpenAIOAuthLike() {
 		reasoningBody, reasoningChanged, reasoningErr := normalizeOpenAIResponsesReasoningMode(body, account.GetMappedModel(gjson.GetBytes(body, "model").String()))
@@ -109,7 +115,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 	}
 	responsesLite := account.IsOpenAI() && isOpenAIResponsesLiteHeader(c.GetHeader(responsesLiteHeader))
-	if responsesLite {
+	if responsesLite && !strictAPIKeyPassthrough {
 		liteBody, changed, liteErr := normalizeOpenAIResponsesLitePayloadForAccount(body, account)
 		if liteErr != nil {
 			param := "tools"
@@ -130,9 +136,8 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	wsDecision := s.getOpenAIWSProtocolResolver().Resolve(account)
 	// 仅允许 WS 入站请求走 WS 上游，避免出现 HTTP -> WS 协议混用。
 	wsDecision = resolveOpenAIWSDecisionByClientTransport(wsDecision, GetOpenAIClientTransport(c))
-	passthroughEnabled := account.IsOpenAIPassthroughEnabled()
 	compactPath := isOpenAIResponsesCompactPath(c)
-	if shouldFlattenOpenAIResponsesNamespaces(account, wsDecision.Transport, passthroughEnabled, compactPath) {
+	if !strictAPIKeyPassthrough && shouldFlattenOpenAIResponsesNamespaces(account, wsDecision.Transport, passthroughEnabled, compactPath) {
 		body, err = flattenOpenAIResponsesNamespaces(c, body)
 		if err != nil {
 			setOpsUpstreamError(c, http.StatusBadRequest, err.Error(), "")
@@ -142,7 +147,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			return nil, err
 		}
 	}
-	if shouldStripOpenAIResponsesInputNamespaces(account, wsDecision.Transport, passthroughEnabled) {
+	if !strictAPIKeyPassthrough && shouldStripOpenAIResponsesInputNamespaces(account, wsDecision.Transport, passthroughEnabled) {
 		keepToolCallNamespaces := shouldKeepOpenAIResponsesToolCallNamespaces(
 			account, wsDecision.Transport, passthroughEnabled, compactPath, body,
 		)
@@ -178,7 +183,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		return s.forwardGrokResponses(ctx, c, account, body, originalModel, reqStream, startTime)
 	}
 
-	if account.IsOpenAIApiKey() {
+	if account.IsOpenAIApiKey() && !strictAPIKeyPassthrough {
 		if normalized, changed, normalizeErr := normalizeOpenAIParallelToolCallsWithoutTools(body, responsesLite); normalizeErr != nil {
 			return nil, normalizeErr
 		} else if changed {
@@ -202,17 +207,19 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	if account.IsOpenCodeGo() && IsOpenCodeUnsupportedModel(routingModel) {
 		return nil, writeOpenCodeUnsupportedModelError(c, false, routingModel)
 	}
-	switch s.resolveUpstreamProtocolFor(ctx, account, APIProtocolResponses, routingModel) {
-	case APIProtocolAnthropic:
-		// Responses 客户端 × Anthropic 上游：转成 Anthropic 请求走原生端点。不能落到
-		// raw-CC 分支——其 URL 构造会把 anthropic base 当 CC base 用。
-		// 账号映射未命中时以去除首尾空白的请求模型兜底，计费名与上游模型名一致。
-		return s.forwardResponsesViaNativeAnthropic(ctx, c, account, body, reqModel)
-	case APIProtocolChatCompletions:
-		return s.forwardResponsesViaRawChatCompletions(ctx, c, account, body, startTime)
+	if !strictAPIKeyPassthrough {
+		switch s.resolveUpstreamProtocolFor(ctx, account, APIProtocolResponses, routingModel) {
+		case APIProtocolAnthropic:
+			// Responses 客户端 × Anthropic 上游：转成 Anthropic 请求走原生端点。不能落到
+			// raw-CC 分支——其 URL 构造会把 anthropic base 当 CC base 用。
+			// 账号映射未命中时以去除首尾空白的请求模型兜底，计费名与上游模型名一致。
+			return s.forwardResponsesViaNativeAnthropic(ctx, c, account, body, reqModel)
+		case APIProtocolChatCompletions:
+			return s.forwardResponsesViaRawChatCompletions(ctx, c, account, body, startTime)
+		}
 	}
 	SetActualOpenAIUpstreamEndpoint(c, openAIResponsesUpstreamEndpoint)
-	if account.IsOpenAI() && (account.IsOpenAIApiKey() || account.IsOpenAIOAuthLike()) {
+	if !strictAPIKeyPassthrough && account.IsOpenAI() && (account.IsOpenAIApiKey() || account.IsOpenAIOAuthLike()) {
 		normalizedReasoningBody, reasoningChanged, reasoningErr := normalizeOpenAIResponsesReasoningContentReplay(body)
 		if reasoningErr != nil {
 			return nil, fmt.Errorf("normalize OpenAI Responses reasoning content replay: %w", reasoningErr)
@@ -275,7 +282,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	}
 	if passthroughEnabled {
 		attemptImageIntentInvalidated := false
-		if isCodexCLI && codexImageGenerationExplicitToolPolicy == codexImageGenerationExplicitToolPolicyStrip {
+		if !strictAPIKeyPassthrough && isCodexCLI && codexImageGenerationExplicitToolPolicy == codexImageGenerationExplicitToolPolicyStrip {
 			strippedBody, changed, stripErr := stripOpenAIImageGenerationToolsFromRawPayload(body)
 			if stripErr != nil {
 				return nil, stripErr
@@ -286,6 +293,13 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 				attemptImageIntentInvalidated = true
 				logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Stripped /responses image_generation tool for Codex client by account policy")
 			}
+		}
+		if strictAPIKeyPassthrough {
+			body = rawClientBody
+			originalBody = rawClientBody
+			canonicalImageIntentBody = rawClientBody
+			rawView := newOpenAIRequestView(rawClientBody)
+			reqModel, reqStream = rawView.Model, rawView.Stream
 		}
 		// 透传分支只需要轻量提取字段，避免热路径全量 Unmarshal。
 		mappedModel := account.GetMappedModel(reqModel)
