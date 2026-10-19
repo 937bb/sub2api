@@ -10,6 +10,36 @@ export interface ModerationEngineMeta {
 }
 export type KeywordBlockingMode = 'keyword_only' | 'keyword_and_api' | 'api_only'
 export type ContentModerationModelFilterType = 'all' | 'include' | 'exclude'
+export type DistillationMonitorMode = 'off' | 'observe' | 'enforce'
+
+export interface DistillationMonitorConfig {
+  enabled: boolean
+  mode: DistillationMonitorMode
+  group_ids: number[]
+  window_minutes: number
+  min_requests: number
+  min_output_tokens: number
+  observe_threshold: number
+  risk_threshold: number
+  consecutive_windows: number
+  min_evidence_classes: number
+  feature_retention_days: number
+  assessment_retention_days: number
+}
+
+export interface DistillationMonitorRuntimeStatus {
+  enabled: boolean
+  mode: DistillationMonitorMode
+  queue_length: number
+  queue_size: number
+  enqueued: number
+  dropped: number
+  processed: number
+  errors: number
+  last_run_at?: string
+  last_flagged: number
+  last_disabled: number
+}
 
 export interface ContentModerationModelFilter {
   type: ContentModerationModelFilterType
@@ -51,6 +81,7 @@ export interface ContentModerationConfig {
   keyword_blocking_mode: KeywordBlockingMode
   model_filter: ContentModerationModelFilter
   cyber_policy_exclude_from_ban_count: boolean
+  distillation_monitor: DistillationMonitorConfig
 }
 
 export type ContentModerationAPIKeyStatusValue = 'unknown' | 'ok' | 'error' | 'frozen'
@@ -136,6 +167,7 @@ export interface UpdateContentModerationConfig {
   keyword_blocking_mode?: KeywordBlockingMode
   model_filter?: ContentModerationModelFilter
   cyber_policy_exclude_from_ban_count?: boolean
+  distillation_monitor?: DistillationMonitorConfig
 }
 
 export interface ContentModerationRuntimeStatus {
@@ -169,6 +201,7 @@ export interface ContentModerationRuntimeStatus {
   last_cleanup_at?: string
   last_cleanup_deleted_hit: number
   last_cleanup_deleted_non_hit: number
+  distillation: DistillationMonitorRuntimeStatus
 }
 
 export interface ContentModerationAPIKeyLoad {

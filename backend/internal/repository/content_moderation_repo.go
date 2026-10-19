@@ -10,6 +10,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/lib/pq"
 )
 
 type contentModerationRepository struct {
@@ -213,6 +214,8 @@ WHERE user_id = $1
   AND action <> 'hash_block'
   AND mode <> 'cyber_log_only'
   AND mode <> 'risk_control_log_only'
+  AND mode <> 'distillation_observe'
+  AND mode <> 'distillation_enforce'
   AND ($3::bool IS FALSE OR action <> 'cyber_policy')
   AND created_at >= $2
   AND created_at > COALESCE((SELECT at FROM last_auto_ban), '-infinity'::timestamptz)
@@ -221,6 +224,234 @@ WHERE user_id = $1
 		return 0, fmt.Errorf("count user content moderation flagged logs: %w", err)
 	}
 	return count, nil
+}
+
+func (r *contentModerationRepository) CreateDistillationRequestFeature(ctx context.Context, feature service.DistillationRequestFeature) error {
+	_, err := r.db.ExecContext(ctx, `
+INSERT INTO distillation_request_features (
+    request_id, user_id, api_key_id, group_id, model, prompt_simhash,
+    prompt_length, message_count, explicit_signal, created_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+`, feature.RequestID, feature.UserID, feature.APIKeyID, feature.GroupID, feature.Model,
+		feature.PromptSimHash, feature.PromptLength, feature.MessageCount, feature.ExplicitSignal, feature.CreatedAt)
+	if err != nil {
+		return fmt.Errorf("insert distillation request feature: %w", err)
+	}
+	return nil
+}
+
+func (r *contentModerationRepository) ListDistillationCandidates(ctx context.Context, groupIDs []int64, start, end time.Time, minRequests int, minOutputTokens int64) ([]service.DistillationCandidate, error) {
+	if len(groupIDs) == 0 {
+		return []service.DistillationCandidate{}, nil
+	}
+	rows, err := r.db.QueryContext(ctx, `
+WITH usage_window AS (
+    SELECT
+        ul.user_id,
+        ul.group_id,
+        COUNT(*)::INT AS request_count,
+        COALESCE(SUM(ul.input_tokens), 0)::BIGINT AS input_tokens,
+        COALESCE(SUM(ul.output_tokens), 0)::BIGINT AS output_tokens,
+        COALESCE(SUM(ul.cache_read_tokens), 0)::BIGINT AS cache_read_tokens,
+        COUNT(*) FILTER (
+            WHERE ul.request_type = 1
+               OR (ul.request_type = 0 AND ul.stream = FALSE AND ul.openai_ws_mode = FALSE)
+        )::INT AS non_stream_count,
+        COUNT(*) FILTER (WHERE NULLIF(BTRIM(ul.session_id), '') IS NULL)::INT AS missing_sessions,
+        COUNT(DISTINCT NULLIF(BTRIM(ul.session_id), ''))::INT AS distinct_sessions,
+        COUNT(DISTINCT ul.api_key_id)::INT AS distinct_api_keys,
+        COUNT(DISTINCT NULLIF(BTRIM(ul.ip_address), ''))::INT AS distinct_ips,
+        COUNT(DISTINCT NULLIF(BTRIM(ul.user_agent), ''))::INT AS distinct_user_agents,
+        COALESCE(MODE() WITHIN GROUP (
+            ORDER BY COALESCE(NULLIF(BTRIM(ul.requested_model), ''), NULLIF(BTRIM(ul.model), ''), '')
+        ), '') AS dominant_model,
+        MIN(ul.created_at) AS first_request_at,
+        MAX(ul.created_at) AS last_request_at
+    FROM usage_logs ul
+    WHERE ul.group_id = ANY($1)
+      AND ul.created_at >= $2
+      AND ul.created_at < $3
+      AND ul.output_tokens > 0
+    GROUP BY ul.user_id, ul.group_id
+    HAVING COUNT(*) >= $4 AND COALESCE(SUM(ul.output_tokens), 0) >= $5
+), feature_window AS (
+    SELECT
+        user_id,
+        group_id,
+        COUNT(*) FILTER (WHERE explicit_signal = TRUE)::INT AS explicit_signals
+    FROM distillation_request_features
+    WHERE group_id = ANY($1)
+      AND created_at >= $2
+      AND created_at < $3
+    GROUP BY user_id, group_id
+)
+SELECT
+    w.user_id,
+    COALESCE(u.email, ''),
+    w.group_id,
+    COALESCE(g.name, ''),
+    w.dominant_model,
+    w.request_count,
+    w.input_tokens,
+    w.output_tokens,
+    w.cache_read_tokens,
+    w.non_stream_count,
+    w.missing_sessions,
+    w.distinct_sessions,
+    w.distinct_api_keys,
+    w.distinct_ips,
+    w.distinct_user_agents,
+    COALESCE(f.explicit_signals, 0),
+    w.first_request_at,
+    w.last_request_at
+FROM usage_window w
+LEFT JOIN feature_window f ON f.user_id = w.user_id AND f.group_id = w.group_id
+LEFT JOIN users u ON u.id = w.user_id
+LEFT JOIN groups g ON g.id = w.group_id
+ORDER BY w.output_tokens DESC, w.request_count DESC
+`, pq.Array(groupIDs), start, end, minRequests, minOutputTokens)
+	if err != nil {
+		return nil, fmt.Errorf("list distillation candidates: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	items := make([]service.DistillationCandidate, 0)
+	for rows.Next() {
+		var item service.DistillationCandidate
+		if err := rows.Scan(
+			&item.UserID, &item.UserEmail, &item.GroupID, &item.GroupName, &item.DominantModel,
+			&item.RequestCount, &item.InputTokens, &item.OutputTokens, &item.CacheReadTokens,
+			&item.NonStreamCount, &item.MissingSessions, &item.DistinctSessions,
+			&item.DistinctAPIKeys, &item.DistinctIPs, &item.DistinctUserAgents,
+			&item.ExplicitSignals, &item.FirstRequestAt, &item.LastRequestAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan distillation candidate: %w", err)
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate distillation candidates: %w", err)
+	}
+	return items, nil
+}
+
+func (r *contentModerationRepository) ListDistillationPromptSimHashes(ctx context.Context, userID, groupID int64, start, end time.Time, limit int) ([]int64, error) {
+	if limit <= 0 {
+		return []int64{}, nil
+	}
+	rows, err := r.db.QueryContext(ctx, `
+SELECT prompt_simhash
+FROM distillation_request_features
+WHERE user_id = $1
+  AND group_id = $2
+  AND created_at >= $3
+  AND created_at < $4
+  AND prompt_simhash <> 0
+ORDER BY created_at DESC
+LIMIT $5
+`, userID, groupID, start, end, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list distillation prompt hashes: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	hashes := make([]int64, 0)
+	for rows.Next() {
+		var hash int64
+		if err := rows.Scan(&hash); err != nil {
+			return nil, fmt.Errorf("scan distillation prompt hash: %w", err)
+		}
+		hashes = append(hashes, hash)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate distillation prompt hashes: %w", err)
+	}
+	return hashes, nil
+}
+
+func (r *contentModerationRepository) CreateDistillationAssessment(ctx context.Context, assessment service.DistillationAssessment) (bool, error) {
+	metrics, err := json.Marshal(assessment.Metrics)
+	if err != nil {
+		return false, fmt.Errorf("marshal distillation assessment metrics: %w", err)
+	}
+	var id int64
+	err = r.db.QueryRowContext(ctx, `
+INSERT INTO distillation_assessments (
+    user_id, group_id, window_start, window_end, score, evidence_classes,
+    mode, metrics, auto_disabled
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9)
+ON CONFLICT (user_id, group_id, window_start) DO NOTHING
+RETURNING id
+`, assessment.UserID, assessment.GroupID, assessment.WindowStart, assessment.WindowEnd,
+		assessment.Score, assessment.EvidenceClasses, assessment.Mode, string(metrics), assessment.AutoDisabled).Scan(&id)
+	if err == nil {
+		return true, nil
+	}
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	return false, fmt.Errorf("insert distillation assessment: %w", err)
+}
+
+func (r *contentModerationRepository) CountConsecutiveDistillationAssessments(ctx context.Context, userID, groupID int64, windowEnd time.Time, window time.Duration, threshold, minEvidenceClasses, required int) (int, error) {
+	if required <= 0 || window <= 0 {
+		return 0, nil
+	}
+	rows, err := r.db.QueryContext(ctx, `
+SELECT window_end
+FROM distillation_assessments
+WHERE user_id = $1
+  AND group_id = $2
+  AND window_end <= $3
+  AND score >= $4
+  AND evidence_classes >= $5
+  AND mode = 'enforce'
+ORDER BY window_end DESC
+LIMIT $6
+`, userID, groupID, windowEnd, threshold, minEvidenceClasses, required)
+	if err != nil {
+		return 0, fmt.Errorf("list consecutive distillation assessments: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	count := 0
+	expected := windowEnd
+	for rows.Next() {
+		var actual time.Time
+		if err := rows.Scan(&actual); err != nil {
+			return 0, fmt.Errorf("scan consecutive distillation assessment: %w", err)
+		}
+		if !actual.Equal(expected) {
+			break
+		}
+		count++
+		expected = expected.Add(-window)
+	}
+	if err := rows.Err(); err != nil {
+		return 0, fmt.Errorf("iterate consecutive distillation assessments: %w", err)
+	}
+	return count, nil
+}
+
+func (r *contentModerationRepository) MarkDistillationAssessmentDisabled(ctx context.Context, userID, groupID int64, windowStart time.Time) error {
+	_, err := r.db.ExecContext(ctx, `
+UPDATE distillation_assessments
+SET auto_disabled = TRUE
+WHERE user_id = $1 AND group_id = $2 AND window_start = $3
+`, userID, groupID, windowStart)
+	if err != nil {
+		return fmt.Errorf("mark distillation assessment disabled: %w", err)
+	}
+	return nil
+}
+
+func (r *contentModerationRepository) CleanupDistillationMonitor(ctx context.Context, featuresBefore, assessmentsBefore time.Time) error {
+	if _, err := r.db.ExecContext(ctx, `DELETE FROM distillation_request_features WHERE created_at < $1`, featuresBefore); err != nil {
+		return fmt.Errorf("delete expired distillation request features: %w", err)
+	}
+	if _, err := r.db.ExecContext(ctx, `DELETE FROM distillation_assessments WHERE created_at < $1`, assessmentsBefore); err != nil {
+		return fmt.Errorf("delete expired distillation assessments: %w", err)
+	}
+	return nil
 }
 
 func (r *contentModerationRepository) UpdateLogEmailSent(ctx context.Context, id int64, sent bool) error {

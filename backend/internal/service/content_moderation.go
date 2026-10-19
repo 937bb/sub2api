@@ -174,7 +174,8 @@ type ContentModerationConfig struct {
 	// CyberPolicyExcludeFromBanCount 为 true 时，cyber_policy 命中不参与自动封号计数：
 	// 当次不判定封号，且历史 cyber 行在 CountFlaggedByUserSince 中被排除。
 	// 默认 false（计入，与历史行为一致；旧配置 JSON 无此字段时反序列化为 false）。
-	CyberPolicyExcludeFromBanCount bool `json:"cyber_policy_exclude_from_ban_count"`
+	CyberPolicyExcludeFromBanCount bool                      `json:"cyber_policy_exclude_from_ban_count"`
+	DistillationMonitor            DistillationMonitorConfig `json:"distillation_monitor"`
 }
 
 type ContentModerationConfigView struct {
@@ -212,6 +213,7 @@ type ContentModerationConfigView struct {
 	KeywordBlockingMode            string                                  `json:"keyword_blocking_mode"`
 	ModelFilter                    ContentModerationModelFilter            `json:"model_filter"`
 	CyberPolicyExcludeFromBanCount bool                                    `json:"cyber_policy_exclude_from_ban_count"`
+	DistillationMonitor            DistillationMonitorConfig               `json:"distillation_monitor"`
 }
 
 type ContentModerationAPIKeyStatus struct {
@@ -309,6 +311,7 @@ type UpdateContentModerationConfigInput struct {
 	KeywordBlockingMode            *string                       `json:"keyword_blocking_mode"`
 	ModelFilter                    *ContentModerationModelFilter `json:"model_filter"`
 	CyberPolicyExcludeFromBanCount *bool                         `json:"cyber_policy_exclude_from_ban_count"`
+	DistillationMonitor            *DistillationMonitorConfig    `json:"distillation_monitor"`
 }
 
 type ContentModerationModelFilter struct {
@@ -445,36 +448,37 @@ type ContentModerationCleanupResult struct {
 }
 
 type ContentModerationRuntimeStatus struct {
-	Engine                       string                          `json:"engine"`
-	Enabled                      bool                            `json:"enabled"`
-	RiskControlEnabled           bool                            `json:"risk_control_enabled"`
-	Mode                         string                          `json:"mode"`
-	WorkerCount                  int                             `json:"worker_count"`
-	MaxWorkers                   int                             `json:"max_workers"`
-	ActiveWorkers                int                             `json:"active_workers"`
-	IdleWorkers                  int                             `json:"idle_workers"`
-	QueueSize                    int                             `json:"queue_size"`
-	QueueLength                  int                             `json:"queue_length"`
-	QueueUsagePercent            float64                         `json:"queue_usage_percent"`
-	Enqueued                     int64                           `json:"enqueued"`
-	Dropped                      int64                           `json:"dropped"`
-	Processed                    int64                           `json:"processed"`
-	Errors                       int64                           `json:"errors"`
-	PreBlockActive               int                             `json:"pre_block_active"`
-	PreBlockChecked              int64                           `json:"pre_block_checked"`
-	PreBlockAllowed              int64                           `json:"pre_block_allowed"`
-	PreBlockBlocked              int64                           `json:"pre_block_blocked"`
-	PreBlockErrors               int64                           `json:"pre_block_errors"`
-	PreBlockAvgLatencyMS         int64                           `json:"pre_block_avg_latency_ms"`
-	PreBlockAPIKeyActive         int64                           `json:"pre_block_api_key_active"`
-	PreBlockAPIKeyAvailableCount int64                           `json:"pre_block_api_key_available_count"`
-	PreBlockAPIKeyTotalCalls     int64                           `json:"pre_block_api_key_total_calls"`
-	PreBlockAPIKeyLoads          []ContentModerationAPIKeyLoad   `json:"pre_block_api_key_loads"`
-	APIKeyStatuses               []ContentModerationAPIKeyStatus `json:"api_key_statuses"`
-	FlaggedHashCount             int64                           `json:"flagged_hash_count"`
-	LastCleanupAt                *time.Time                      `json:"last_cleanup_at,omitempty"`
-	LastCleanupDeletedHit        int64                           `json:"last_cleanup_deleted_hit"`
-	LastCleanupDeletedNonHit     int64                           `json:"last_cleanup_deleted_non_hit"`
+	Engine                       string                           `json:"engine"`
+	Enabled                      bool                             `json:"enabled"`
+	RiskControlEnabled           bool                             `json:"risk_control_enabled"`
+	Mode                         string                           `json:"mode"`
+	WorkerCount                  int                              `json:"worker_count"`
+	MaxWorkers                   int                              `json:"max_workers"`
+	ActiveWorkers                int                              `json:"active_workers"`
+	IdleWorkers                  int                              `json:"idle_workers"`
+	QueueSize                    int                              `json:"queue_size"`
+	QueueLength                  int                              `json:"queue_length"`
+	QueueUsagePercent            float64                          `json:"queue_usage_percent"`
+	Enqueued                     int64                            `json:"enqueued"`
+	Dropped                      int64                            `json:"dropped"`
+	Processed                    int64                            `json:"processed"`
+	Errors                       int64                            `json:"errors"`
+	PreBlockActive               int                              `json:"pre_block_active"`
+	PreBlockChecked              int64                            `json:"pre_block_checked"`
+	PreBlockAllowed              int64                            `json:"pre_block_allowed"`
+	PreBlockBlocked              int64                            `json:"pre_block_blocked"`
+	PreBlockErrors               int64                            `json:"pre_block_errors"`
+	PreBlockAvgLatencyMS         int64                            `json:"pre_block_avg_latency_ms"`
+	PreBlockAPIKeyActive         int64                            `json:"pre_block_api_key_active"`
+	PreBlockAPIKeyAvailableCount int64                            `json:"pre_block_api_key_available_count"`
+	PreBlockAPIKeyTotalCalls     int64                            `json:"pre_block_api_key_total_calls"`
+	PreBlockAPIKeyLoads          []ContentModerationAPIKeyLoad    `json:"pre_block_api_key_loads"`
+	APIKeyStatuses               []ContentModerationAPIKeyStatus  `json:"api_key_statuses"`
+	FlaggedHashCount             int64                            `json:"flagged_hash_count"`
+	LastCleanupAt                *time.Time                       `json:"last_cleanup_at,omitempty"`
+	LastCleanupDeletedHit        int64                            `json:"last_cleanup_deleted_hit"`
+	LastCleanupDeletedNonHit     int64                            `json:"last_cleanup_deleted_non_hit"`
+	Distillation                 DistillationMonitorRuntimeStatus `json:"distillation"`
 }
 
 type ContentModerationUnbanUserResult struct {
@@ -544,6 +548,14 @@ type ContentModerationService struct {
 	runtimeRefreshRetryAt    atomic.Int64
 	keyHealthMu              sync.Mutex
 	keyHealth                map[string]*contentModerationKeyHealth
+	distillationQueue        chan DistillationRequestFeature
+	distillationEnqueued     atomic.Int64
+	distillationDropped      atomic.Int64
+	distillationProcessed    atomic.Int64
+	distillationErrors       atomic.Int64
+	distillationLastRunUnix  atomic.Int64
+	distillationLastFlagged  atomic.Int64
+	distillationLastDisabled atomic.Int64
 }
 
 type contentModerationRuntimeSnapshot struct {
@@ -606,6 +618,7 @@ func NewContentModerationService(
 		httpClient:           servertiming.InstrumentClient(nil),
 		workerCount:          maxContentModerationWorkerCount,
 		asyncQueue:           make(chan contentModerationTask, maxContentModerationQueueSize),
+		distillationQueue:    make(chan DistillationRequestFeature, defaultDistillationQueueSize),
 		keyHealth:            make(map[string]*contentModerationKeyHealth),
 	}
 	if settingRepo != nil && repo != nil {
@@ -613,6 +626,8 @@ func NewContentModerationService(
 			go svc.worker(i)
 		}
 		go svc.cleanupWorker()
+		go svc.distillationCaptureWorker()
+		go svc.distillationEvaluationWorker()
 	}
 	return svc
 }
@@ -698,6 +713,9 @@ func (s *ContentModerationService) UpdateConfig(ctx context.Context, input Updat
 	}
 	if input.CyberPolicyExcludeFromBanCount != nil {
 		cfg.CyberPolicyExcludeFromBanCount = *input.CyberPolicyExcludeFromBanCount
+	}
+	if input.DistillationMonitor != nil {
+		cfg.DistillationMonitor = *input.DistillationMonitor
 	}
 	// Legacy flat updates target the selected engine; explicit profiles preserve both drafts.
 	if err := s.updateEngineProfile(ctx, cfg, cfg.Engine, UpdateContentModerationEngineInput{
@@ -842,6 +860,9 @@ func (s *ContentModerationService) Check(ctx context.Context, input ContentModer
 			"protocol", input.Protocol,
 			"error", err)
 		return allow, nil
+	}
+	if runtimeSnapshot.riskControlEnabled && runtimeSnapshot.config != nil && runtimeSnapshot.config.DistillationMonitor.includesGroup(input.GroupID) {
+		s.enqueueDistillationRequest(input)
 	}
 	if !runtimeSnapshot.riskControlEnabled {
 		slog.Info("content_moderation.skip_feature_disabled",
@@ -1478,6 +1499,7 @@ func (s *ContentModerationService) GetStatus(ctx context.Context) (*ContentModer
 		LastCleanupAt:                lastCleanupAt,
 		LastCleanupDeletedHit:        s.lastCleanupDeletedHit.Load(),
 		LastCleanupDeletedNonHit:     s.lastCleanupDeletedNonHit.Load(),
+		Distillation:                 s.distillationRuntimeStatus(cfg.DistillationMonitor),
 	}, nil
 }
 
@@ -1720,10 +1742,23 @@ func (s *ContentModerationService) validateConfig(ctx context.Context, cfg *Cont
 	if cfg.ModelFilter.Type != ContentModerationModelFilterAll && len(cfg.ModelFilter.Models) == 0 {
 		return infraerrors.BadRequest("INVALID_CONTENT_MODERATION_MODEL_FILTER", "指定或排除模型时至少需要配置 1 个模型")
 	}
+	if err := cfg.DistillationMonitor.validate(); err != nil {
+		return infraerrors.BadRequest("INVALID_DISTILLATION_MONITOR_CONFIG", err.Error())
+	}
 	if !cfg.AllGroups && len(cfg.GroupIDs) > 0 && s.groupRepo != nil {
 		for _, groupID := range cfg.GroupIDs {
 			if _, err := s.groupRepo.GetByIDLite(ctx, groupID); err != nil {
 				return infraerrors.BadRequest("INVALID_CONTENT_MODERATION_GROUP", fmt.Sprintf("审计分组不存在: %d", groupID))
+			}
+		}
+	}
+	if cfg.DistillationMonitor.Enabled && len(cfg.DistillationMonitor.GroupIDs) == 0 {
+		return infraerrors.BadRequest("DISTILLATION_MONITOR_GROUP_REQUIRED", "蒸馏监测至少需要选择一个分组")
+	}
+	if s.groupRepo != nil {
+		for _, groupID := range cfg.DistillationMonitor.GroupIDs {
+			if _, err := s.groupRepo.GetByIDLite(ctx, groupID); err != nil {
+				return infraerrors.BadRequest("INVALID_DISTILLATION_MONITOR_GROUP", fmt.Sprintf("蒸馏监测分组不存在: %d", groupID))
 			}
 		}
 	}
@@ -2167,6 +2202,7 @@ func defaultContentModerationConfig() *ContentModerationConfig {
 			Models: []string{},
 		},
 		CyberPolicyExcludeFromBanCount: false,
+		DistillationMonitor:            defaultDistillationMonitorConfig(),
 	}
 }
 
@@ -2187,6 +2223,7 @@ func cloneContentModerationConfig(cfg *ContentModerationConfig) *ContentModerati
 		Type:   cfg.ModelFilter.Type,
 		Models: append([]string(nil), cfg.ModelFilter.Models...),
 	}
+	clone.DistillationMonitor = cloneDistillationMonitorConfig(cfg.DistillationMonitor)
 	return &clone
 }
 
@@ -2272,6 +2309,7 @@ func (cfg *ContentModerationConfig) normalize() {
 	cfg.BlockedKeywords = normalizeBlockedKeywords(cfg.BlockedKeywords)
 	cfg.KeywordBlockingMode = normalizeKeywordBlockingMode(cfg.KeywordBlockingMode)
 	cfg.ModelFilter = normalizeContentModerationModelFilter(cfg.ModelFilter)
+	cfg.DistillationMonitor.normalize()
 }
 
 func (cfg *ContentModerationConfig) includesGroup(groupID *int64) bool {
@@ -2504,6 +2542,7 @@ func (s *ContentModerationService) configView(cfg *ContentModerationConfig) *Con
 		KeywordBlockingMode:            cfg.KeywordBlockingMode,
 		ModelFilter:                    cloneContentModerationModelFilter(cfg.ModelFilter),
 		CyberPolicyExcludeFromBanCount: cfg.CyberPolicyExcludeFromBanCount,
+		DistillationMonitor:            cloneDistillationMonitorConfig(cfg.DistillationMonitor),
 	}
 }
 

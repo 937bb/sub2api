@@ -1048,6 +1048,92 @@
             </div>
           </div>
 
+          <div v-else-if="activeSettingsTab === 'distillation'" class="space-y-5">
+            <div class="flex items-center justify-between gap-4 border-b border-gray-100 pb-4 dark:border-dark-700">
+              <div>
+                <label class="input-label mb-0">{{ t('admin.riskControl.distillationEnabled') }}</label>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.distillationEnabledHint') }}</p>
+              </div>
+              <Toggle v-model="configForm.distillation_monitor.enabled" />
+            </div>
+
+            <div class="grid grid-cols-1 gap-5 lg:grid-cols-2">
+              <div>
+                <label class="input-label">{{ t('admin.riskControl.distillationMode') }}</label>
+                <Select v-model="configForm.distillation_monitor.mode" :options="distillationModeOptions" />
+              </div>
+              <div>
+                <label class="input-label">{{ t('admin.riskControl.distillationWindowMinutes') }}</label>
+                <input v-model.number="configForm.distillation_monitor.window_minutes" type="number" min="5" max="60" class="input" />
+              </div>
+              <div>
+                <label class="input-label">{{ t('admin.riskControl.distillationMinRequests') }}</label>
+                <input v-model.number="configForm.distillation_monitor.min_requests" type="number" min="10" max="1000000" class="input" />
+              </div>
+              <div>
+                <label class="input-label">{{ t('admin.riskControl.distillationMinOutputTokens') }}</label>
+                <input v-model.number="configForm.distillation_monitor.min_output_tokens" type="number" min="1000" max="10000000000" class="input" />
+              </div>
+              <div>
+                <label class="input-label">{{ t('admin.riskControl.distillationObserveThreshold') }}</label>
+                <input v-model.number="configForm.distillation_monitor.observe_threshold" type="number" min="1" max="100" class="input" />
+              </div>
+              <div>
+                <label class="input-label">{{ t('admin.riskControl.distillationRiskThreshold') }}</label>
+                <input v-model.number="configForm.distillation_monitor.risk_threshold" type="number" min="1" max="100" class="input" />
+              </div>
+              <div>
+                <label class="input-label">{{ t('admin.riskControl.distillationConsecutiveWindows') }}</label>
+                <input v-model.number="configForm.distillation_monitor.consecutive_windows" type="number" min="1" max="12" class="input" />
+              </div>
+              <div>
+                <label class="input-label">{{ t('admin.riskControl.distillationMinEvidenceClasses') }}</label>
+                <input v-model.number="configForm.distillation_monitor.min_evidence_classes" type="number" min="2" max="5" class="input" />
+              </div>
+            </div>
+
+            <div>
+              <div class="mb-2 flex items-center justify-between gap-3">
+                <label class="input-label mb-0">{{ t('admin.riskControl.distillationGroups') }}</label>
+                <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.distillationSelectedGroups', { count: configForm.distillation_monitor.group_ids.length }) }}</span>
+              </div>
+              <div class="grid max-h-56 grid-cols-1 gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
+                <button
+                  v-for="group in groups"
+                  :key="`distillation-${group.id}`"
+                  type="button"
+                  class="flex items-center justify-between gap-3 rounded-md border px-3 py-2 text-left text-sm transition-colors"
+                  :class="isDistillationGroupSelected(group.id)
+                    ? 'border-primary-300 bg-primary-50 text-primary-900 dark:border-primary-700 dark:bg-primary-900/20 dark:text-primary-100'
+                    : 'border-gray-100 text-gray-700 hover:bg-gray-50 dark:border-dark-700 dark:text-gray-200 dark:hover:bg-dark-700/60'"
+                  @click="toggleDistillationGroup(group.id)"
+                >
+                  <span class="min-w-0 truncate">{{ group.name }}</span>
+                  <Icon v-if="isDistillationGroupSelected(group.id)" name="check" size="xs" class="flex-shrink-0" />
+                </button>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <div class="rounded-md bg-gray-50 p-3 dark:bg-dark-700/50">
+                <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.distillationQueue') }}</p>
+                <p class="mt-1 font-semibold text-gray-900 dark:text-white">{{ status?.distillation?.queue_length ?? 0 }} / {{ status?.distillation?.queue_size ?? 0 }}</p>
+              </div>
+              <div class="rounded-md bg-gray-50 p-3 dark:bg-dark-700/50">
+                <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.distillationProcessed') }}</p>
+                <p class="mt-1 font-semibold text-gray-900 dark:text-white">{{ formatNumber(status?.distillation?.processed ?? 0) }}</p>
+              </div>
+              <div class="rounded-md bg-amber-50 p-3 dark:bg-amber-900/10">
+                <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.distillationLastFlagged') }}</p>
+                <p class="mt-1 font-semibold text-amber-700 dark:text-amber-300">{{ formatNumber(status?.distillation?.last_flagged ?? 0) }}</p>
+              </div>
+              <div class="rounded-md bg-rose-50 p-3 dark:bg-rose-900/10">
+                <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.distillationLastDisabled') }}</p>
+                <p class="mt-1 font-semibold text-rose-700 dark:text-rose-300">{{ formatNumber(status?.distillation?.last_disabled ?? 0) }}</p>
+              </div>
+            </div>
+          </div>
+
           <div v-else class="grid grid-cols-1 gap-5 lg:grid-cols-2">
             <div>
               <label class="input-label">{{ t('admin.riskControl.hitRetentionDays') }}</label>
@@ -1167,6 +1253,8 @@ import type {
   ContentModerationModelFilterType,
   ContentModerationRuntimeStatus,
   ContentModerationTestAuditResult,
+  DistillationMonitorConfig,
+  DistillationMonitorMode,
   KeywordBlockingMode,
   ModerationMode,
   ModerationEngine,
@@ -1178,7 +1266,7 @@ import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { formatDateTime as formatDateTimeValue } from '@/utils/format'
 
-type SettingsTab = 'basic' | 'scope' | 'runtime' | 'response' | 'riskThresholds' | 'retention' | 'keywords'
+type SettingsTab = 'basic' | 'scope' | 'runtime' | 'response' | 'riskThresholds' | 'retention' | 'keywords' | 'distillation'
 type WorkerSlotState = 'active' | 'idle' | 'disabled'
 type APIKeysWriteMode = 'append' | 'replace'
 type OverviewIcon = 'shield' | 'key' | 'users' | 'document'
@@ -1224,6 +1312,20 @@ const riskThresholdDefaults: Record<string, number> = {
   'violence/graphic': 95,
 }
 const riskThresholdCategories = Object.keys(riskThresholdDefaults)
+const defaultDistillationMonitor = (): DistillationMonitorConfig => ({
+  enabled: false,
+  mode: 'observe',
+  group_ids: [],
+  window_minutes: 15,
+  min_requests: 100,
+  min_output_tokens: 300000,
+  observe_threshold: 60,
+  risk_threshold: 85,
+  consecutive_windows: 3,
+  min_evidence_classes: 3,
+  feature_retention_days: 7,
+  assessment_retention_days: 180,
+})
 
 const { t } = useI18n()
 const appStore = useAppStore()
@@ -1294,6 +1396,7 @@ const configForm = reactive({
   keyword_blocking_mode: 'keyword_and_api' as KeywordBlockingMode,
   model_filter_type: 'all' as ContentModerationModelFilterType,
   model_filter_models: [] as string[],
+  distillation_monitor: defaultDistillationMonitor(),
 })
 
 const engineFields = ['base_url', 'model', 'proxy_id', 'api_keys_text', 'api_key_configured', 'api_key_masked', 'api_key_count', 'api_key_masks', 'api_key_statuses', 'api_keys_mode', 'clear_api_key', 'timeout_ms', 'retry_count', 'thresholds'] as const
@@ -1366,7 +1469,14 @@ const settingsTabs = computed<Array<{ id: SettingsTab; label: string }>>(() => [
   { id: 'response', label: t('admin.riskControl.tabs.response') },
   { id: 'riskThresholds', label: t('admin.riskControl.tabs.riskThresholds') },
   { id: 'keywords', label: t('admin.riskControl.tabs.keywords') },
+  { id: 'distillation', label: t('admin.riskControl.tabs.distillation') },
   { id: 'retention', label: t('admin.riskControl.tabs.retention') },
+])
+
+const distillationModeOptions = computed<SelectOption[]>(() => [
+  { value: 'observe', label: t('admin.riskControl.distillationModeObserve') },
+  { value: 'enforce', label: t('admin.riskControl.distillationModeEnforce') },
+  { value: 'off', label: t('admin.riskControl.distillationModeOff') },
 ])
 
 const modeOptions = computed<SelectOption[]>(() => [
@@ -1822,6 +1932,7 @@ function applyConfig(config: ContentModerationConfig) {
   const modelFilter = normalizeModelFilter(config.model_filter)
   configForm.model_filter_type = modelFilter.type
   configForm.model_filter_models = modelFilter.models
+  configForm.distillation_monitor = normalizeDistillationMonitor(config.distillation_monitor)
   engineDrafts.value = {
     openai: engineDraftFromConfig(config.engine_configs?.openai ?? (savedEngine.value === 'openai' ? config : undefined), 'openai'),
     typesafe: engineDraftFromConfig(config.engine_configs?.typesafe ?? (savedEngine.value === 'typesafe' ? config : undefined), 'typesafe'),
@@ -1883,6 +1994,15 @@ async function saveConfig() {
       appStore.showError(t('admin.riskControl.modelFilterModelsRequired'))
       return
     }
+    const distillationMonitorPayload = normalizeDistillationMonitor(configForm.distillation_monitor)
+    if (distillationMonitorPayload.enabled && distillationMonitorPayload.group_ids.length === 0) {
+      appStore.showError(t('admin.riskControl.distillationGroupsRequired'))
+      return
+    }
+    if (distillationMonitorPayload.observe_threshold > distillationMonitorPayload.risk_threshold) {
+      appStore.showError(t('admin.riskControl.distillationThresholdOrderInvalid'))
+      return
+    }
     const payload: UpdateContentModerationConfig = {
       engine: configForm.engine,
       enabled: configForm.enabled,
@@ -1914,6 +2034,7 @@ async function saveConfig() {
       blocked_keywords: blockedKeywordList.value,
       keyword_blocking_mode: configForm.keyword_blocking_mode,
       model_filter: modelFilterPayload,
+      distillation_monitor: distillationMonitorPayload,
     }
     const keys = parseApiKeys(configForm.api_keys_text)
     if (!payload.clear_api_key && configForm.api_keys_mode === 'replace' && keys.length === 0) {
@@ -2213,6 +2334,38 @@ function toggleGroup(groupID: number) {
 
 function isGroupSelected(groupID: number): boolean {
   return configForm.group_ids.includes(groupID)
+}
+
+function toggleDistillationGroup(groupID: number) {
+  const index = configForm.distillation_monitor.group_ids.indexOf(groupID)
+  if (index >= 0) {
+    configForm.distillation_monitor.group_ids.splice(index, 1)
+  } else {
+    configForm.distillation_monitor.group_ids.push(groupID)
+  }
+}
+
+function isDistillationGroupSelected(groupID: number): boolean {
+  return configForm.distillation_monitor.group_ids.includes(groupID)
+}
+
+function normalizeDistillationMonitor(value?: Partial<DistillationMonitorConfig>): DistillationMonitorConfig {
+  const defaults = defaultDistillationMonitor()
+  const mode: DistillationMonitorMode = value?.mode === 'enforce' || value?.mode === 'off' ? value.mode : 'observe'
+  return {
+    enabled: value?.enabled ?? defaults.enabled,
+    mode,
+    group_ids: Array.isArray(value?.group_ids) ? [...new Set(value.group_ids.filter(id => Number.isInteger(id) && id > 0))] : [],
+    window_minutes: Number(value?.window_minutes) || defaults.window_minutes,
+    min_requests: Number(value?.min_requests) || defaults.min_requests,
+    min_output_tokens: Number(value?.min_output_tokens) || defaults.min_output_tokens,
+    observe_threshold: Number(value?.observe_threshold) || defaults.observe_threshold,
+    risk_threshold: Number(value?.risk_threshold) || defaults.risk_threshold,
+    consecutive_windows: Number(value?.consecutive_windows) || defaults.consecutive_windows,
+    min_evidence_classes: Number(value?.min_evidence_classes) || defaults.min_evidence_classes,
+    feature_retention_days: Number(value?.feature_retention_days) || defaults.feature_retention_days,
+    assessment_retention_days: Number(value?.assessment_retention_days) || defaults.assessment_retention_days,
+  }
 }
 
 function modeLabel(mode: ModerationMode): string {

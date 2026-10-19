@@ -117,3 +117,41 @@ func TestContentModerationRepositoryCountFlaggedByUserSince_ExcludesCyberLogOnly
 	require.Zero(t, count)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
+
+func TestContentModerationRepositoryCountFlaggedByUserSince_ExcludesDistillationLogs(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+	repo := NewContentModerationRepository(db)
+	since := time.Now().Add(-time.Hour)
+	mock.ExpectQuery(regexp.QuoteMeta("AND mode <> 'distillation_observe'\n  AND mode <> 'distillation_enforce'")).
+		WithArgs(int64(12), since, false).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+
+	count, err := repo.CountFlaggedByUserSince(context.Background(), 12, since, false)
+
+	require.NoError(t, err)
+	require.Zero(t, count)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestContentModerationRepositoryCountsOnlyAdjacentEnforceAssessments(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+	repo := NewContentModerationRepository(db).(service.DistillationMonitorRepository)
+	window := 15 * time.Minute
+	windowEnd := time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)
+	mock.ExpectQuery("SELECT window_end[\\s\\S]*mode = 'enforce'").
+		WithArgs(int64(7), int64(8), windowEnd, 85, 3, 3).
+		WillReturnRows(sqlmock.NewRows([]string{"window_end"}).
+			AddRow(windowEnd).
+			AddRow(windowEnd.Add(-window)).
+			AddRow(windowEnd.Add(-3 * window)))
+
+	count, err := repo.CountConsecutiveDistillationAssessments(context.Background(), 7, 8, windowEnd, window, 85, 3, 3)
+
+	require.NoError(t, err)
+	require.Equal(t, 2, count)
+	require.NoError(t, mock.ExpectationsWereMet())
+}

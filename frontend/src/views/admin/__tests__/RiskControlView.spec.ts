@@ -113,6 +113,21 @@ const baseConfig = (): ContentModerationConfig => ({
     type: 'all',
     models: [],
   },
+  cyber_policy_exclude_from_ban_count: false,
+  distillation_monitor: {
+    enabled: false,
+    mode: 'observe',
+    group_ids: [],
+    window_minutes: 15,
+    min_requests: 100,
+    min_output_tokens: 300000,
+    observe_threshold: 60,
+    risk_threshold: 85,
+    consecutive_windows: 3,
+    min_evidence_classes: 3,
+    feature_retention_days: 7,
+    assessment_retention_days: 180,
+  },
 })
 
 const runtimeStatus = () => ({
@@ -144,6 +159,18 @@ const runtimeStatus = () => ({
   flagged_hash_count: 0,
   last_cleanup_deleted_hit: 0,
   last_cleanup_deleted_non_hit: 0,
+  distillation: {
+    enabled: false,
+    mode: 'observe',
+    queue_length: 0,
+    queue_size: 8192,
+    enqueued: 0,
+    dropped: 0,
+    processed: 0,
+    errors: 0,
+    last_flagged: 0,
+    last_disabled: 0,
+  },
 })
 
 const AppLayoutStub = { template: '<div><slot /></div>' }
@@ -367,6 +394,42 @@ describe('admin RiskControlView', () => {
         type: 'include',
         models: ['gpt-5.5', 'gpt-5.4'],
       },
+    }))
+    expect(showError).not.toHaveBeenCalled()
+  })
+
+  it('saves the selected distillation monitoring groups', async () => {
+    getGroups.mockResolvedValue([{ id: 27, name: 'Protected Pool', platform: 'openai' }])
+    const wrapper = mount(RiskControlView, {
+      global: {
+        stubs: {
+          AppLayout: AppLayoutStub,
+          BaseDialog: BaseDialogStub,
+          Icon: true,
+          Select: true,
+          Toggle: true,
+          Pagination: true,
+          ModelWhitelistSelector: ModelWhitelistSelectorStub,
+          ProxySelector: true,
+        },
+      },
+    })
+
+    await flushPromises()
+    await findButtonByText(wrapper, 'admin.riskControl.openSettings').trigger('click')
+    await findButtonByText(wrapper, 'admin.riskControl.tabs.distillation').trigger('click')
+    await findButtonByText(wrapper, 'Protected Pool').trigger('click')
+    await findButtonByText(wrapper, 'admin.riskControl.saveConfig').trigger('click')
+    await flushPromises()
+
+    expect(updateConfig).toHaveBeenCalledWith(expect.objectContaining({
+      distillation_monitor: expect.objectContaining({
+        enabled: false,
+        mode: 'observe',
+        group_ids: [27],
+        risk_threshold: 85,
+        min_evidence_classes: 3,
+      }),
     }))
     expect(showError).not.toHaveBeenCalled()
   })
