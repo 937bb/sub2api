@@ -436,6 +436,7 @@ type ContentModerationLogFilter struct {
 	Result     string
 	GroupID    *int64
 	Endpoint   string
+	Provider   string
 	Search     string
 	From       *time.Time
 	To         *time.Time
@@ -861,7 +862,7 @@ func (s *ContentModerationService) Check(ctx context.Context, input ContentModer
 			"error", err)
 		return allow, nil
 	}
-	if runtimeSnapshot.riskControlEnabled && runtimeSnapshot.config != nil && runtimeSnapshot.config.DistillationMonitor.includesGroup(input.GroupID) {
+	if runtimeSnapshot.config != nil && runtimeSnapshot.config.DistillationMonitor.includesGroup(input.GroupID) {
 		s.enqueueDistillationRequest(input)
 	}
 	if !runtimeSnapshot.riskControlEnabled {

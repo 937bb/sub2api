@@ -519,6 +519,9 @@ func buildContentModerationLogWhere(filter service.ContentModerationLogFilter) (
 	if endpoint := strings.TrimSpace(filter.Endpoint); endpoint != "" {
 		add("l.endpoint = $%d", endpoint)
 	}
+	if provider := strings.TrimSpace(filter.Provider); provider != "" {
+		add("l.provider = $%d", provider)
+	}
 	if search := strings.TrimSpace(filter.Search); search != "" {
 		like := "%" + search + "%"
 		args = append(args, like, like, like, like, like)

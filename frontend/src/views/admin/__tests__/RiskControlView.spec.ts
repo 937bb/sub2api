@@ -398,8 +398,7 @@ describe('admin RiskControlView', () => {
     expect(showError).not.toHaveBeenCalled()
   })
 
-  it('saves the selected distillation monitoring groups', async () => {
-    getGroups.mockResolvedValue([{ id: 27, name: 'Protected Pool', platform: 'openai' }])
+  it('does not expose or overwrite the independent distillation config', async () => {
     const wrapper = mount(RiskControlView, {
       global: {
         stubs: {
@@ -417,20 +416,12 @@ describe('admin RiskControlView', () => {
 
     await flushPromises()
     await findButtonByText(wrapper, 'admin.riskControl.openSettings').trigger('click')
-    await findButtonByText(wrapper, 'admin.riskControl.tabs.distillation').trigger('click')
-    await findButtonByText(wrapper, 'Protected Pool').trigger('click')
+    expect(wrapper.text()).not.toContain('admin.riskControl.tabs.distillation')
     await findButtonByText(wrapper, 'admin.riskControl.saveConfig').trigger('click')
     await flushPromises()
 
-    expect(updateConfig).toHaveBeenCalledWith(expect.objectContaining({
-      distillation_monitor: expect.objectContaining({
-        enabled: false,
-        mode: 'observe',
-        group_ids: [27],
-        risk_threshold: 85,
-        min_evidence_classes: 3,
-      }),
-    }))
+    expect(updateConfig).toHaveBeenCalledOnce()
+    expect(updateConfig.mock.calls[0][0]).not.toHaveProperty('distillation_monitor')
     expect(showError).not.toHaveBeenCalled()
   })
 

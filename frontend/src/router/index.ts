@@ -598,6 +598,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/distillation-monitor',
+    name: 'AdminDistillationMonitor',
+    component: () => import('@/views/admin/DistillationMonitorView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Distillation Monitor',
+      titleKey: 'admin.distillationMonitor.title',
+      descriptionKey: 'admin.distillationMonitor.description'
+    }
+  },
+  {
     path: '/admin/risk-control',
     name: 'AdminRiskControl',
     component: () => import('@/views/admin/RiskControlView.vue'),

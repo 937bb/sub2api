@@ -176,6 +176,7 @@ func (h *ContentModerationHandler) ListLogs(c *gin.Context) {
 		},
 		Result:   c.Query("result"),
 		Endpoint: c.Query("endpoint"),
+		Provider: c.Query("provider"),
 		Search:   c.Query("search"),
 	}
 	if raw := strings.TrimSpace(c.Query("group_id")); raw != "" {

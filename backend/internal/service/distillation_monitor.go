@@ -284,7 +284,7 @@ func (s *ContentModerationService) runDistillationEvaluation(now time.Time) {
 	ctx, cancel := context.WithTimeout(context.Background(), distillationEvaluationTimeout)
 	defer cancel()
 	snapshot, err := s.loadRuntimeSnapshot(ctx)
-	if err != nil || snapshot == nil || !snapshot.riskControlEnabled || snapshot.config == nil {
+	if err != nil || snapshot == nil || snapshot.config == nil {
 		if err != nil {
 			s.distillationErrors.Add(1)
 		}

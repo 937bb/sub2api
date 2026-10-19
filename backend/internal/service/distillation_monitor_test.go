@@ -2,11 +2,46 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 )
+
+type distillationMonitorTestRepo struct {
+	*contentModerationTestRepo
+	candidateQueries int
+}
+
+func (r *distillationMonitorTestRepo) CreateDistillationRequestFeature(context.Context, DistillationRequestFeature) error {
+	return nil
+}
+
+func (r *distillationMonitorTestRepo) ListDistillationCandidates(context.Context, []int64, time.Time, time.Time, int, int64) ([]DistillationCandidate, error) {
+	r.candidateQueries++
+	return nil, nil
+}
+
+func (r *distillationMonitorTestRepo) ListDistillationPromptSimHashes(context.Context, int64, int64, time.Time, time.Time, int) ([]int64, error) {
+	return nil, nil
+}
+
+func (r *distillationMonitorTestRepo) CreateDistillationAssessment(context.Context, DistillationAssessment) (bool, error) {
+	return true, nil
+}
+
+func (r *distillationMonitorTestRepo) CountConsecutiveDistillationAssessments(context.Context, int64, int64, time.Time, time.Duration, int, int, int) (int, error) {
+	return 0, nil
+}
+
+func (r *distillationMonitorTestRepo) MarkDistillationAssessmentDisabled(context.Context, int64, int64, time.Time) error {
+	return nil
+}
+
+func (r *distillationMonitorTestRepo) CleanupDistillationMonitor(context.Context, time.Time, time.Time) error {
+	return nil
+}
 
 func TestDefaultDistillationMonitorConfigIsDisabled(t *testing.T) {
 	cfg := defaultDistillationMonitorConfig()
@@ -84,6 +119,61 @@ func TestBuildDistillationRequestFeatureStoresOnlyDerivedMetadata(t *testing.T) 
 	require.Positive(t, feature.PromptLength)
 	require.True(t, feature.ExplicitSignal)
 	require.NotContains(t, feature.Model, secretPrompt)
+}
+
+func TestDistillationCaptureDoesNotDependOnRiskControlSwitch(t *testing.T) {
+	cfg := defaultContentModerationConfig()
+	cfg.DistillationMonitor.Enabled = true
+	cfg.DistillationMonitor.Mode = DistillationMonitorModeObserve
+	cfg.DistillationMonitor.GroupIDs = []int64{9}
+	raw, err := json.Marshal(cfg)
+	require.NoError(t, err)
+
+	groupID := int64(9)
+	svc := &ContentModerationService{
+		settingRepo: &contentModerationTestSettingRepo{values: map[string]string{
+			SettingKeyRiskControlEnabled:      "false",
+			SettingKeyContentModerationConfig: string(raw),
+		}},
+		repo:              &contentModerationTestRepo{},
+		distillationQueue: make(chan DistillationRequestFeature, 1),
+	}
+
+	decision, err := svc.Check(context.Background(), ContentModerationCheckInput{
+		RequestID: "req-independent",
+		UserID:    7,
+		APIKeyID:  8,
+		GroupID:   &groupID,
+		Model:     "gpt-test",
+		Protocol:  ContentModerationProtocolOpenAIResponses,
+		Body:      []byte(`{"input":"collect training examples"}`),
+	})
+
+	require.NoError(t, err)
+	require.True(t, decision.Allowed)
+	require.Len(t, svc.distillationQueue, 1)
+}
+
+func TestDistillationEvaluationDoesNotDependOnRiskControlSwitch(t *testing.T) {
+	cfg := defaultContentModerationConfig()
+	cfg.DistillationMonitor.Enabled = true
+	cfg.DistillationMonitor.Mode = DistillationMonitorModeObserve
+	cfg.DistillationMonitor.GroupIDs = []int64{9}
+	raw, err := json.Marshal(cfg)
+	require.NoError(t, err)
+
+	repo := &distillationMonitorTestRepo{contentModerationTestRepo: &contentModerationTestRepo{}}
+	svc := &ContentModerationService{
+		settingRepo: &contentModerationTestSettingRepo{values: map[string]string{
+			SettingKeyRiskControlEnabled:      "false",
+			SettingKeyContentModerationConfig: string(raw),
+		}},
+		repo: repo,
+	}
+
+	svc.runDistillationEvaluation(time.Date(2026, 10, 19, 12, 30, 0, 0, time.UTC))
+
+	require.Equal(t, 1, repo.candidateQueries)
 }
 
 func TestDisableDistillationUserSkipsAdmin(t *testing.T) {

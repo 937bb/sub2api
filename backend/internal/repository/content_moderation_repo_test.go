@@ -67,6 +67,13 @@ func TestBuildContentModerationLogWhere_BlockedIncludesAllBlockActions(t *testin
 	require.NotContains(t, sql, "l.action = 'block'")
 }
 
+func TestBuildContentModerationLogWhere_FiltersProvider(t *testing.T) {
+	where, args := buildContentModerationLogWhere(service.ContentModerationLogFilter{Provider: "distillation_monitor"})
+
+	require.Contains(t, strings.Join(where, " AND "), "l.provider = $1")
+	require.Equal(t, []any{"distillation_monitor"}, args)
+}
+
 func TestContentModerationRepositoryCountFlaggedByUserSince_ExcludesHashBlock(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)

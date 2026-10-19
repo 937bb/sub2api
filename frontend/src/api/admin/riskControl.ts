@@ -260,6 +260,7 @@ export interface ListContentModerationLogsParams {
   result?: string
   group_id?: number
   endpoint?: string
+  provider?: string
   search?: string
   from?: string
   to?: string
