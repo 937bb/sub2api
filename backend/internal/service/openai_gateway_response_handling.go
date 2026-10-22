@@ -929,7 +929,15 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				return resultWithUsage(), fmt.Errorf("stream usage incomplete after timeout")
 			}
 			logger.LegacyPrintf("service.openai_gateway", "Stream data interval timeout: account=%d model=%s interval=%s", account.ID, originalModel, streamInterval)
-			// 处理流超时，可能标记账户为临时不可调度或错误状态
+			if account != nil && account.Platform == PlatformOpenAI &&
+				!openAIStreamClientOutputStarted(c, clientOutputStarted) && !eventShouldFlush {
+				_ = resp.Body.Close()
+				return resultWithUsage(), s.newOpenAIFirstOutputTimeoutError(
+					ctx, c, account, opsUpstreamProxyID(account), opsUpstreamProxyName(account),
+					startTime, originalModel, reasoningEffort,
+					streamInterval, "stream_idle_before_semantic_output", resp.Header,
+				)
+			}
 			if s.rateLimitService != nil {
 				s.rateLimitService.HandleStreamTimeout(ctx, account, originalModel)
 			}

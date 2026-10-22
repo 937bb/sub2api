@@ -851,7 +851,7 @@ func shouldFailoverOpenAIPassthroughResponse(account *Account, statusCode int, r
 	if openAIStreamFailedEventErrorCode(responseBody) == "invalid_encrypted_content" {
 		return false
 	}
-	if hit, _, _ := detectOpenAICyberPolicy(responseBody); hit {
+	if hit, _, _ := detectOpenAIHTTPCyberPolicy(statusCode, responseBody); hit {
 		return false
 	}
 	if isOpenAIContextWindowError("", responseBody) {
@@ -867,7 +867,7 @@ func shouldFailoverOpenAIPassthroughResponse(account *Account, statusCode int, r
 		return true
 	}
 	switch statusCode {
-	case http.StatusTooManyRequests, 529:
+	case http.StatusRequestTimeout, http.StatusTooManyRequests, 529:
 		return true
 	}
 	if account == nil || account.Type != AccountTypeAPIKey {
@@ -1039,7 +1039,7 @@ func (s *OpenAIGatewayService) handleErrorResponsePassthrough(
 	// cyber_policy 仍按原始 body 打内部标记，供 handler 事后写风控/邮件；面向客户端的
 	// 错误体在下方统一重建。cyber 是上游网络安全策略拦截，不冷却账号，
 	// 故下方跳过 handleOpenAIAccountUpstreamError（避免自定义 temp-unschedulable 规则误冷却）。
-	cyberHit, cyberCode, cyberMsg := detectOpenAICyberPolicy(body)
+	cyberHit, cyberCode, cyberMsg := detectOpenAIHTTPCyberPolicy(resp.StatusCode, body)
 	if cyberHit {
 		MarkOpsCyberPolicy(c, CyberPolicyMark{
 			Code:           cyberCode,
@@ -1090,6 +1090,15 @@ func (s *OpenAIGatewayService) handleErrorResponsePassthrough(
 		}
 		c.Data(resp.StatusCode, contentType, responseBody)
 		return fmt.Errorf("upstream error: %d (strict passthrough)", resp.StatusCode)
+	}
+	if cyberHit {
+		writeOpenAIPassthroughResponseHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
+		contentType := strings.TrimSpace(resp.Header.Get("Content-Type"))
+		if contentType == "" {
+			contentType = "application/json"
+		}
+		c.Data(resp.StatusCode, contentType, body)
+		return fmt.Errorf("openai cyber_policy: %s", cyberMsg)
 	}
 	// context-window 超限是确定性请求失败（shouldFailoverOpenAIPassthroughResponse
 	// 已保证不切号），其文案对客户端可操作（如触发自动压缩）；在净化信封内保留

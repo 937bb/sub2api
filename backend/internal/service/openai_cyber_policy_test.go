@@ -1,6 +1,7 @@
 package service
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"testing"
 
@@ -85,4 +86,16 @@ func TestDetectOpenAICyberPolicy(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDetectOpenAIHTTPCyberPolicyLegacyForbiddenMessage(t *testing.T) {
+	payload := []byte(`{"error":{"type":"invalid_request_error","message":"This content was flagged for possible cybersecurity risk. If this seems wrong, try rephrasing your request."}}`)
+
+	hit, code, message := detectOpenAIHTTPCyberPolicy(http.StatusForbidden, payload)
+	require.True(t, hit)
+	require.Equal(t, "cyber_policy", code)
+	require.Contains(t, message, "possible cybersecurity risk")
+
+	hit, _, _ = detectOpenAIHTTPCyberPolicy(http.StatusBadRequest, payload)
+	require.False(t, hit, "the message fallback must be limited to upstream HTTP 403")
 }

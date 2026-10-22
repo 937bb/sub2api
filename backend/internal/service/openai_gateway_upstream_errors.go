@@ -243,7 +243,7 @@ func isOpenAIContextWindowError(upstreamMsg string, upstreamBody []byte) bool {
 
 func (s *OpenAIGatewayService) shouldFailoverUpstreamError(statusCode int) bool {
 	switch statusCode {
-	case 401, 402, 403, 405, 429, 529:
+	case 401, 402, 403, 405, 408, 429, 529:
 		return true
 	default:
 		return statusCode >= 500
@@ -254,7 +254,7 @@ func (s *OpenAIGatewayService) shouldFailoverOpenAIUpstreamResponse(account *Acc
 	// cyber_policy is request-scoped even when an intermediary wraps the
 	// provider response in a retryable 5xx status. Never punish or rotate the
 	// selected credential for it.
-	if hit, _, _ := detectOpenAICyberPolicy(upstreamBody); hit {
+	if hit, _, _ := detectOpenAIHTTPCyberPolicy(statusCode, upstreamBody); hit {
 		return false
 	}
 	if isOpenAIContextWindowError(upstreamMsg, upstreamBody) {
@@ -545,7 +545,7 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 	// cyber_policy 硬阻断：透传上游原始错误体给客户端（不重包成通用 502），不冷却账号。
 	// 当前请求恒透传（需求1）；标记供 handler 事后写风控/邮件。400 cyber 不可 failover
 	// （shouldFailoverUpstreamError(400)=false），故走到此处即可安全早返回。
-	if hit, code, cyberMsg := detectOpenAICyberPolicy(body); hit {
+	if hit, code, cyberMsg := detectOpenAIHTTPCyberPolicy(resp.StatusCode, body); hit {
 		MarkOpsCyberPolicy(c, CyberPolicyMark{
 			Code:           code,
 			Message:        cyberMsg,
@@ -797,7 +797,7 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 	// 不原样透传 responses 格式的 cyber body（否则对下游格式不合法）。cyber 是上游网络
 	// 安全策略拦截，不冷却账号，故标记后直接以兼容格式回写错误并返回，跳过下方
 	// handleOpenAIAccountUpstreamError（避免自定义 temp-unschedulable 规则误冷却）。
-	if hit, code, cyberMsg := detectOpenAICyberPolicy(body); hit {
+	if hit, code, cyberMsg := detectOpenAIHTTPCyberPolicy(resp.StatusCode, body); hit {
 		MarkOpsCyberPolicy(c, CyberPolicyMark{
 			Code:           code,
 			Message:        cyberMsg,
