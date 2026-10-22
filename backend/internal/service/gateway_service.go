@@ -691,23 +691,24 @@ type GatewayFailureReason string
 // trigger account failover. Additive metadata keeps existing composite literals
 // source-compatible and preserves their legacy retry-next-account behavior.
 type UpstreamFailoverError struct {
-	StatusCode               int
-	ResponseBody             []byte        // 上游响应体，用于错误透传规则匹配
-	ResponseHeaders          http.Header   // 上游响应头，用于透传 cf-ray/cf-mitigated/content-type 等诊断信息
-	ForceCacheBilling        bool          // Antigravity 粘性会话切换时设为 true
-	RetryableOnSameAccount   bool          // 临时性错误（如 Google 间歇性 400、空响应），应在同一账号上重试 N 次再切换
-	SameAccountRetryDelay    time.Duration // 同账号重试的最小间隔；零值使用 handler 默认值
-	SameAccountRetryDeadline time.Time     // 同账号重试截止时间；零值表示仅受 retryLimit 限制
-	SameAccountRetryMax      int           // 可选的错误级同账号重试上限，低于 handler 默认预算时优先采用
-	RequestScopedTransient   bool          // 故障因素与账号无关（如上游按客户端身份/模型容量降载）：可同账号重试，但不得据此对账号做临时封禁
-	SafeToFailoverAfterWrite bool          // 仅写出 SSE 注释等非语义字节时，仍可在同一客户端流中切换账号
-	BoundUpstreamPassthrough bool          // 绑定显式缓存的请求在上游网关账号上收到的 429 / 5xx：反映持有缓存的上游账号状态，原样回写不走错误映射
-	Stage                    GatewayFailureStage
-	Scope                    GatewayFailureScope
-	Reason                   GatewayFailureReason
-	NextAccountAction        NextAccountAction
-	ClientStatusCode         int
-	ClientMessage            string
+	StatusCode                    int
+	ResponseBody                  []byte        // Upstream body used to match error passthrough rules.
+	ResponseHeaders               http.Header   // Upstream diagnostic headers, including cf-ray, cf-mitigated and content-type.
+	ForceCacheBilling             bool          // Enable cache billing when switching Antigravity sticky sessions.
+	RetryableOnSameAccount        bool          // Retry transient errors on the same account before switching.
+	SameAccountRetryDelay         time.Duration // Minimum retry interval; zero uses the handler default.
+	SameAccountRetryDeadline      time.Time     // Retry deadline; zero leaves only the retry-count limit.
+	SameAccountRetryMax           int           // Optional retry limit capped by the handler budget.
+	RequestScopedTransient        bool          // Request-level capacity failures must not temporarily disable the account.
+	SafeToFailoverAfterWrite      bool          // Allow failover after writing only nonsemantic SSE comments.
+	BoundUpstreamPassthrough      bool          // Preserve errors from the upstream account holding an explicit cache binding.
+	StrictOpenAIAPIKeyPassthrough bool          // Preserve structured HTTP/SSE errors from API-key upstreams after failover is exhausted.
+	Stage                         GatewayFailureStage
+	Scope                         GatewayFailureScope
+	Reason                        GatewayFailureReason
+	NextAccountAction             NextAccountAction
+	ClientStatusCode              int
+	ClientMessage                 string
 }
 
 func (e *UpstreamFailoverError) Error() string {

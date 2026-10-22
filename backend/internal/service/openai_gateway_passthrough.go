@@ -848,6 +848,9 @@ func stripOpenAILegacyResponsesBeta(headers http.Header) {
 }
 
 func shouldFailoverOpenAIPassthroughResponse(account *Account, statusCode int, responseBody []byte) bool {
+	if openAIStreamFailedEventErrorCode(responseBody) == "invalid_encrypted_content" {
+		return false
+	}
 	if hit, _, _ := detectOpenAICyberPolicy(responseBody); hit {
 		return false
 	}
@@ -994,7 +997,7 @@ func (s *OpenAIGatewayService) handleFailoverErrorResponsePassthrough(
 		Detail:               upstreamDetail,
 		UpstreamResponseBody: upstreamDetail,
 	})
-	return s.newOpenAIAccountFailoverError(
+	failoverErr := s.newOpenAIAccountFailoverError(
 		account,
 		resp.StatusCode,
 		resp.Header,
@@ -1003,6 +1006,22 @@ func (s *OpenAIGatewayService) handleFailoverErrorResponsePassthrough(
 		shouldDisable,
 		!shouldDisable && account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode),
 	)
+	preserveStrictOpenAIAPIKeyFailoverError(account, failoverErr, body)
+	return failoverErr
+}
+
+// preserveStrictOpenAIAPIKeyFailoverError retains provider error fields without
+// overriding credential protection or request-scoped capacity recovery.
+func preserveStrictOpenAIAPIKeyFailoverError(account *Account, failoverErr *UpstreamFailoverError, body []byte) bool {
+	if failoverErr == nil || !isStrictOpenAIAPIKeyPassthrough(account) ||
+		failoverErr.IsCredentialFailure() || failoverErr.RequestScopedTransient ||
+		(failoverErr.StatusCode != http.StatusBadRequest && failoverErr.StatusCode != http.StatusTooManyRequests) ||
+		!gjson.ValidBytes(body) || !gjson.GetBytes(body, "error").IsObject() {
+		return false
+	}
+	failoverErr.ResponseBody = body
+	failoverErr.StrictOpenAIAPIKeyPassthrough = true
+	return true
 }
 
 func (s *OpenAIGatewayService) handleErrorResponsePassthrough(
@@ -1496,7 +1515,9 @@ func openAIStreamFailedEventSemanticStatus(payload []byte, message string) int {
 		}
 	}
 	switch {
-	case strings.Contains(combined, "rate_limit"):
+	case code == "invalid_encrypted_content":
+		return http.StatusBadRequest
+	case strings.Contains(combined, "rate_limit") || code == "too_many_requests" || errType == "too_many_requests":
 		return http.StatusTooManyRequests
 	case strings.Contains(errType, "invalid_request"):
 		return http.StatusBadRequest
@@ -1522,6 +1543,10 @@ func openAIStreamFailureStatus(payload []byte, message string) int {
 	}
 	semanticStatus := openAIStreamFailedEventSemanticStatus(payload, message)
 	switch semanticStatus {
+	case http.StatusBadRequest:
+		if openAIStreamFailedEventErrorCode(payload) == "invalid_encrypted_content" {
+			return semanticStatus
+		}
 	case http.StatusUnauthorized, http.StatusForbidden, http.StatusTooManyRequests, 529:
 		return semanticStatus
 	case http.StatusServiceUnavailable:
@@ -1596,8 +1621,8 @@ func openAIStreamFailedEventPassthroughBody(payload []byte, failedMessage string
 	if code := strings.TrimSpace(gjson.Get(responseError.Raw, "code").String()); code != "" {
 		errorPayload["code"] = code
 	}
-	if param := strings.TrimSpace(gjson.Get(responseError.Raw, "param").String()); param != "" {
-		errorPayload["param"] = param
+	if param := gjson.Get(responseError.Raw, "param"); param.Exists() {
+		errorPayload["param"] = param.Value()
 	}
 	message := strings.TrimSpace(gjson.Get(responseError.Raw, "message").String())
 	if message == "" {
@@ -1639,6 +1664,9 @@ func applyOpenAIStreamFailedErrorPassthroughRule(
 }
 
 func openAIStreamFailedEventShouldFailover(payload []byte, message string) bool {
+	if openAIStreamFailedEventErrorCode(payload) == "invalid_encrypted_content" {
+		return false
+	}
 	if status := siwcErrorStatus(payload); status != 0 {
 		return siwcErrorShouldFailover(payload)
 	}
@@ -1678,6 +1706,7 @@ func openAIStreamFailedEventShouldFailover(payload []byte, message string) bool 
 	}
 	nonRetryableMarkers := []string{
 		"invalid_request",
+		"invalid_encrypted_content",
 		"content_policy",
 		"policy",
 		"safety",
@@ -1694,6 +1723,9 @@ func openAIStreamFailedEventShouldFailover(payload []byte, message string) bool 
 }
 
 func openAIStreamErrorEventShouldFailover(payload []byte, message string) bool {
+	if openAIStreamFailedEventErrorCode(payload) == "invalid_encrypted_content" {
+		return false
+	}
 	if status := siwcErrorStatus(payload); status != 0 {
 		return siwcErrorShouldFailover(payload)
 	}
@@ -1880,6 +1912,9 @@ func (s *OpenAIGatewayService) newOpenAIStreamFailoverErrorWithModel(
 	}
 	failoverErr := s.newOpenAIAccountFailoverErrorWithClassificationHeaders(account, statusCode, headers, classificationHeaders, payload, message, shouldDisable, retryableOnSameAccount)
 	if failoverErr.IsCredentialFailure() || failoverErr.RequestScopedTransient {
+		return failoverErr
+	}
+	if passthrough && preserveStrictOpenAIAPIKeyFailoverError(account, failoverErr, openAIStreamFailedEventPassthroughBody(payload, message)) {
 		return failoverErr
 	}
 	// Preserve the existing generic envelope for unclassified stream failures;

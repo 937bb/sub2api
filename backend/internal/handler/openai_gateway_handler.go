@@ -3585,6 +3585,56 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 	}
 	statusCode := failoverErr.StatusCode
 	responseBody := failoverErr.ResponseBody
+	if failoverErr.StrictOpenAIAPIKeyPassthrough && len(responseBody) > 0 {
+		upstreamMsg := service.SanitizeUpstreamErrorMessage(service.ExtractUpstreamErrorMessage(responseBody))
+		service.SetOpsUpstreamError(c, statusCode, upstreamMsg, "")
+		errType := strings.TrimSpace(gjson.GetBytes(responseBody, "error.type").String())
+		if errType == "" {
+			errType = "upstream_error"
+			if statusCode == http.StatusBadRequest {
+				errType = "invalid_request_error"
+			} else if statusCode == http.StatusTooManyRequests {
+				errType = "rate_limit_error"
+			}
+		}
+		if service.StopOpenAICompactSSEKeepaliveCommitted(c) {
+			streamStarted = true
+		}
+		errorPayload := gin.H{"type": errType, "message": upstreamMsg}
+		for _, field := range []string{"code", "param"} {
+			if value := gjson.GetBytes(responseBody, "error."+field); value.Exists() {
+				errorPayload[field] = value.Value()
+			}
+		}
+		if !streamStarted {
+			c.Header("Content-Type", "application/json; charset=utf-8")
+			c.JSON(statusCode, gin.H{"error": errorPayload})
+			return
+		}
+		code := strings.TrimSpace(gjson.GetBytes(responseBody, "error.code").String())
+		service.MarkOpsStreamError(c, errType, upstreamMsg, statusCode)
+		if inboundIsResponses(c) {
+			upstreamError := responsesFailedError{
+				Type: errType, Code: mapResponsesErrorCode(errType, code), Message: upstreamMsg,
+			}
+			if param := gjson.GetBytes(responseBody, "error.param"); param.Exists() {
+				upstreamError.Param = json.RawMessage(param.Raw)
+			}
+			writeResponsesFailedSSEWithError(c, upstreamError)
+			return
+		}
+		payload, err := json.Marshal(gin.H{"error": errorPayload})
+		if err != nil {
+			_ = c.Error(err)
+			return
+		}
+		if _, err := fmt.Fprintf(c.Writer, "event: error\ndata: %s\n\n", payload); err != nil {
+			_ = c.Error(err)
+			return
+		}
+		c.Writer.Flush()
+		return
+	}
 	if statusCode == http.StatusBadRequest && service.IsOpenAICompatibleModelNotFound400(responseBody) && !streamStarted {
 		upstreamMsg := service.SanitizeUpstreamErrorMessage(service.ExtractUpstreamErrorMessage(responseBody))
 		service.SetOpsUpstreamError(c, statusCode, upstreamMsg, "")

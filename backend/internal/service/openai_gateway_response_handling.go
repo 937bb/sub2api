@@ -1865,6 +1865,12 @@ func buildOpenAIResponseFailedSSE(responseID, model string, createdAt int64, sou
 	if errorType != "" {
 		errorBody["type"] = errorType
 	}
+	for _, path := range []string{"error.param", "response.error.param"} {
+		if param := gjson.GetBytes(source, path); param.Exists() {
+			errorBody["param"] = param.Value()
+			break
+		}
+	}
 	if createdAt <= 0 {
 		createdAt = time.Now().Unix()
 	}
