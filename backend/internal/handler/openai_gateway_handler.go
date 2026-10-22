@@ -3743,9 +3743,10 @@ func (h *OpenAIGatewayHandler) mapUpstreamError(statusCode int) (int, string, st
 		return http.StatusServiceUnavailable, "upstream_error", "Upstream service overloaded, please retry later"
 	case http.StatusRequestTimeout, http.StatusGatewayTimeout:
 		return http.StatusServiceUnavailable, "upstream_error", "Upstream request timed out, please retry later"
-	case 500, 502, 503:
-		return http.StatusBadGateway, "upstream_error", "Upstream service temporarily unavailable"
 	default:
+		if statusCode >= http.StatusInternalServerError && statusCode <= 599 {
+			return http.StatusServiceUnavailable, "upstream_error", "Upstream service temporarily unavailable, please retry later"
+		}
 		return http.StatusBadGateway, "upstream_error", "Upstream request failed"
 	}
 }

@@ -2282,9 +2282,31 @@ func TestOpenAIResponses_APIKeyPassthroughPool5xxRetriesThenExhaustsMaxSwitches(
 	h.Responses(c)
 
 	require.Equal(t, []int64{9910, 9910, 9911}, upstream.calls())
-	require.Equal(t, http.StatusBadGateway, rec.Code)
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
 	require.Equal(t, "upstream_error", gjson.GetBytes(rec.Body.Bytes(), "error.type").String())
-	require.Equal(t, "Upstream service temporarily unavailable", gjson.GetBytes(rec.Body.Bytes(), "error.message").String())
+	require.Equal(t, "Upstream service temporarily unavailable, please retry later", gjson.GetBytes(rec.Body.Bytes(), "error.message").String())
+}
+
+func TestOpenAIMapUpstreamTransientFailuresToServiceUnavailable(t *testing.T) {
+	h := &OpenAIGatewayHandler{}
+	for _, statusCode := range []int{
+		http.StatusInternalServerError,
+		http.StatusBadGateway,
+		http.StatusServiceUnavailable,
+		http.StatusGatewayTimeout,
+		520,
+		521,
+		522,
+		523,
+		524,
+	} {
+		t.Run(fmt.Sprintf("status_%d", statusCode), func(t *testing.T) {
+			status, errType, message := h.mapUpstreamError(statusCode)
+			require.Equal(t, http.StatusServiceUnavailable, status)
+			require.Equal(t, "upstream_error", errType)
+			require.Contains(t, message, "retry later")
+		})
+	}
 }
 
 func TestOpenAIResponses_APIKeyPassthroughPoolAuthFailureRetriesThenSwitchesToHealthyAccount(t *testing.T) {
