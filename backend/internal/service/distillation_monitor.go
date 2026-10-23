@@ -11,6 +11,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/tidwall/gjson"
 )
 
@@ -214,11 +215,34 @@ type DistillationAssessment struct {
 	AutoDisabled    bool
 }
 
+type DistillationAssessmentRecord struct {
+	ID              int64          `json:"id"`
+	UserID          int64          `json:"user_id"`
+	UserEmail       string         `json:"user_email"`
+	UserStatus      string         `json:"user_status"`
+	GroupID         int64          `json:"group_id"`
+	GroupName       string         `json:"group_name"`
+	DominantModel   string         `json:"dominant_model"`
+	WindowStart     time.Time      `json:"window_start"`
+	WindowEnd       time.Time      `json:"window_end"`
+	Score           int            `json:"score"`
+	EvidenceClasses int            `json:"evidence_classes"`
+	Mode            string         `json:"mode"`
+	Metrics         map[string]any `json:"metrics"`
+	AutoDisabled    bool           `json:"auto_disabled"`
+	CreatedAt       time.Time      `json:"created_at"`
+}
+
+type DistillationAssessmentFilter struct {
+	Pagination pagination.PaginationParams
+}
+
 type DistillationMonitorRepository interface {
 	CreateDistillationRequestFeature(ctx context.Context, feature DistillationRequestFeature) error
 	ListDistillationCandidates(ctx context.Context, groupIDs []int64, start, end time.Time, minRequests int, minOutputTokens int64) ([]DistillationCandidate, error)
 	ListDistillationPromptSimHashes(ctx context.Context, userID, groupID int64, start, end time.Time, limit int) ([]int64, error)
 	CreateDistillationAssessment(ctx context.Context, assessment DistillationAssessment) (bool, error)
+	ListDistillationAssessments(ctx context.Context, filter DistillationAssessmentFilter) ([]DistillationAssessmentRecord, *pagination.PaginationResult, error)
 	CountConsecutiveDistillationAssessments(ctx context.Context, userID, groupID int64, windowEnd time.Time, window time.Duration, threshold, minEvidenceClasses, required int) (int, error)
 	MarkDistillationAssessmentDisabled(ctx context.Context, userID, groupID int64, windowStart time.Time) error
 	CleanupDistillationMonitor(ctx context.Context, featuresBefore, assessmentsBefore time.Time) error
@@ -232,6 +256,7 @@ type distillationScore struct {
 	Session         int
 	Template        int
 	Fanout          int
+	Batch           int
 	TemplateRatio   float64
 }
 
@@ -398,7 +423,7 @@ func (s *ContentModerationService) persistDistillationRiskLog(ctx context.Contex
 		HighestCategory: "model_distillation", HighestScore: float64(score.Total) / 100,
 		MatchedKeyword: matchedKeyword,
 		CategoryScores: map[string]float64{
-			"volume": float64(score.Volume) / 25, "automation": float64(score.Automation) / 20,
+			"volume": float64(score.Volume) / 25, "automation": float64(score.Automation) / 30,
 			"session_independence": float64(score.Session) / 20, "template_batch": float64(score.Template) / 25,
 			"identity_fanout": float64(score.Fanout) / 10,
 		},
@@ -429,6 +454,24 @@ func (s *ContentModerationService) distillationRuntimeStatus(cfg DistillationMon
 	return status
 }
 
+func (s *ContentModerationService) ListDistillationAssessments(ctx context.Context, filter DistillationAssessmentFilter) ([]DistillationAssessmentRecord, *pagination.PaginationResult, error) {
+	repo, ok := s.repo.(DistillationMonitorRepository)
+	if !ok {
+		return nil, nil, fmt.Errorf("distillation monitor repository unavailable")
+	}
+	if filter.Pagination.Page <= 0 {
+		filter.Pagination.Page = 1
+	}
+	if filter.Pagination.PageSize <= 0 {
+		filter.Pagination.PageSize = 20
+	}
+	if filter.Pagination.PageSize > 100 {
+		filter.Pagination.PageSize = 100
+	}
+	filter.Pagination.SortOrder = pagination.SortOrderDesc
+	return repo.ListDistillationAssessments(ctx, filter)
+}
+
 func buildDistillationRequestFeature(input ContentModerationCheckInput) DistillationRequestFeature {
 	text, messageCount := distillationRequestText(input.Protocol, input.Body)
 	return DistillationRequestFeature{
@@ -444,6 +487,9 @@ func distillationRequestText(protocol string, body []byte) (string, int) {
 		return "", 0
 	}
 	text := ExtractContentModerationInput(protocol, body).Text
+	if protocol == ContentModerationProtocolOpenAIResponses {
+		text = distillationResponsesText(gjson.ParseBytes(body), text)
+	}
 	if len(text) > distillationFeatureTextLimit {
 		text = text[:distillationFeatureTextLimit]
 		for !utf8.ValidString(text) {
@@ -454,6 +500,71 @@ func distillationRequestText(protocol string, body []byte) (string, int) {
 	messageCount := maxDistillationInt(distillationItemCount(root.Get("messages")), distillationItemCount(root.Get("input")))
 	messageCount = maxDistillationInt(messageCount, distillationItemCount(root.Get("contents")))
 	return text, messageCount
+}
+
+func distillationResponsesText(root gjson.Result, fallback string) string {
+	parts := make([]string, 0, 32)
+	remaining := distillationFeatureTextLimit
+	collectDistillationResponseValue(root.Get("input"), &parts, &remaining, 0)
+	appendDistillationResponseText(&parts, root.Get("instructions").String(), &remaining)
+	if len(parts) == 0 {
+		return fallback
+	}
+	return normalizeContentModerationText(strings.Join(parts, "\n"))
+}
+
+func appendDistillationResponseText(parts *[]string, value string, remaining *int) {
+	value = strings.TrimSpace(value)
+	if value == "" || strings.HasPrefix(value, "data:image/") || *remaining <= 0 {
+		return
+	}
+	if len(value) > *remaining {
+		value = value[:*remaining]
+		for !utf8.ValidString(value) {
+			value = value[:len(value)-1]
+		}
+	}
+	if value == "" {
+		return
+	}
+	*parts = append(*parts, value)
+	*remaining -= len(value)
+}
+
+func collectDistillationResponseValue(value gjson.Result, parts *[]string, remaining *int, depth int) {
+	if !value.Exists() || depth > 12 || *remaining <= 0 {
+		return
+	}
+	switch {
+	case value.Type == gjson.String:
+		appendDistillationResponseText(parts, value.String(), remaining)
+	case value.IsArray():
+		items := value.Array()
+		for index := len(items) - 1; index >= 0 && *remaining > 0; index-- {
+			collectDistillationResponseValue(items[index], parts, remaining, depth+1)
+		}
+	case value.IsObject():
+		typeName := strings.ToLower(strings.TrimSpace(value.Get("type").String()))
+		role := strings.ToLower(strings.TrimSpace(value.Get("role").String()))
+		if typeName == "" && role == "" && depth > 0 {
+			value.ForEach(func(_, child gjson.Result) bool {
+				collectDistillationResponseValue(child, parts, remaining, depth+1)
+				return *remaining > 0
+			})
+			return
+		}
+		allowed := role == "user" || role == "developer" || role == "system"
+		switch typeName {
+		case "input_text", "text", "message", "function_call", "function_call_output", "custom_tool_call", "custom_tool_call_output", "computer_call_output":
+			allowed = true
+		}
+		if !allowed && depth > 0 {
+			return
+		}
+		for _, key := range []string{"content", "text", "arguments", "input", "output", "summary"} {
+			collectDistillationResponseValue(value.Get(key), parts, remaining, depth+1)
+		}
+	}
 }
 
 func distillationItemCount(value gjson.Result) int {
@@ -594,6 +705,12 @@ func scoreDistillationCandidate(candidate DistillationCandidate, hashes []int64,
 		result.Session += 6
 	}
 
+	nonStreamRatio := ratio(candidate.NonStreamCount, candidate.RequestCount)
+	if requestRatio >= 10 && outputRatio >= 2 && nonStreamRatio >= 0.75 && missingSessionRatio >= 0.75 {
+		result.Batch = 10
+		result.Automation += result.Batch
+	}
+
 	result.TemplateRatio = maxDistillationSimilarityRatio(hashes)
 	switch {
 	case result.TemplateRatio >= 0.8:
@@ -668,13 +785,14 @@ func maxDistillationSimilarityRatio(values []int64) float64 {
 
 func distillationMetrics(candidate DistillationCandidate, score distillationScore) map[string]any {
 	return map[string]any{
-		"requests": candidate.RequestCount, "input_tokens": candidate.InputTokens, "output_tokens": candidate.OutputTokens,
+		"dominant_model": candidate.DominantModel,
+		"requests":       candidate.RequestCount, "input_tokens": candidate.InputTokens, "output_tokens": candidate.OutputTokens,
 		"cache_read_tokens": candidate.CacheReadTokens, "non_stream_ratio": ratio(candidate.NonStreamCount, candidate.RequestCount),
 		"missing_session_ratio": ratio(candidate.MissingSessions, candidate.RequestCount), "distinct_sessions": candidate.DistinctSessions,
 		"distinct_api_keys": candidate.DistinctAPIKeys, "distinct_ips": candidate.DistinctIPs, "distinct_user_agents": candidate.DistinctUserAgents,
 		"explicit_signals": candidate.ExplicitSignals, "template_similarity": score.TemplateRatio,
 		"score_volume": score.Volume, "score_automation": score.Automation, "score_session": score.Session,
-		"score_template": score.Template, "score_fanout": score.Fanout,
+		"score_template": score.Template, "score_fanout": score.Fanout, "score_batch": score.Batch,
 	}
 }
 

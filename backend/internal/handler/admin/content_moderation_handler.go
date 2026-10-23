@@ -214,6 +214,22 @@ func (h *ContentModerationHandler) ListLogs(c *gin.Context) {
 	response.Paginated(c, items, pageResult.Total, pageResult.Page, pageResult.PageSize)
 }
 
+func (h *ContentModerationHandler) ListDistillationAssessments(c *gin.Context) {
+	page, pageSize := response.ParsePagination(c)
+	items, pageResult, err := h.service.ListDistillationAssessments(c.Request.Context(), service.DistillationAssessmentFilter{
+		Pagination: pagination.PaginationParams{
+			Page:      page,
+			PageSize:  pageSize,
+			SortOrder: pagination.SortOrderDesc,
+		},
+	})
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Paginated(c, items, pageResult.Total, pageResult.Page, pageResult.PageSize)
+}
+
 func (h *ContentModerationHandler) UnbanUser(c *gin.Context) {
 	userID, err := strconv.ParseInt(strings.TrimSpace(c.Param("user_id")), 10, 64)
 	if err != nil || userID <= 0 {

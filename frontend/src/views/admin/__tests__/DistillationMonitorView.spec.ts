@@ -4,11 +4,11 @@ import { flushPromises, mount } from '@vue/test-utils'
 import DistillationMonitorView from '../DistillationMonitorView.vue'
 import type { ContentModerationConfig, UpdateContentModerationConfig } from '@/api/admin/riskControl'
 
-const { getConfig, updateConfig, getStatus, listLogs, getGroups, showError, showSuccess } = vi.hoisted(() => ({
+const { getConfig, updateConfig, getStatus, listDistillationAssessments, getGroups, showError, showSuccess } = vi.hoisted(() => ({
   getConfig: vi.fn(),
   updateConfig: vi.fn(),
   getStatus: vi.fn(),
-  listLogs: vi.fn(),
+  listDistillationAssessments: vi.fn(),
   getGroups: vi.fn(),
   showError: vi.fn(),
   showSuccess: vi.fn(),
@@ -16,7 +16,7 @@ const { getConfig, updateConfig, getStatus, listLogs, getGroups, showError, show
 
 vi.mock('@/api/admin', () => ({
   adminAPI: {
-    riskControl: { getConfig, updateConfig, getStatus, listLogs },
+    riskControl: { getConfig, updateConfig, getStatus, listDistillationAssessments },
     groups: { getAll: getGroups },
   },
 }))
@@ -132,7 +132,7 @@ describe('admin DistillationMonitorView', () => {
     getConfig.mockResolvedValue(config())
     getStatus.mockResolvedValue(status())
     getGroups.mockResolvedValue([{ id: 27, name: 'Protected Pool', platform: 'openai' }])
-    listLogs.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20, pages: 1 })
+    listDistillationAssessments.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20, pages: 1 })
     updateConfig.mockImplementation(async (payload: UpdateContentModerationConfig) => ({ ...config(), ...payload }))
   })
 
@@ -150,7 +150,7 @@ describe('admin DistillationMonitorView', () => {
     })
 
     await flushPromises()
-    expect(listLogs).toHaveBeenCalledWith(expect.objectContaining({ provider: 'distillation_monitor' }))
+    expect(listDistillationAssessments).toHaveBeenCalledWith(expect.objectContaining({ page: 1, page_size: 20 }))
     const buttons = wrapper.findAll('button')
     const groupButton = buttons.find(button => button.text().includes('Protected Pool'))
     expect(groupButton).toBeDefined()

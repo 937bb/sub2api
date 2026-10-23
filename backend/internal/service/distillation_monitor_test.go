@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/stretchr/testify/require"
 )
 
@@ -29,6 +30,10 @@ func (r *distillationMonitorTestRepo) ListDistillationPromptSimHashes(context.Co
 
 func (r *distillationMonitorTestRepo) CreateDistillationAssessment(context.Context, DistillationAssessment) (bool, error) {
 	return true, nil
+}
+
+func (r *distillationMonitorTestRepo) ListDistillationAssessments(context.Context, DistillationAssessmentFilter) ([]DistillationAssessmentRecord, *pagination.PaginationResult, error) {
+	return nil, &pagination.PaginationResult{}, nil
 }
 
 func (r *distillationMonitorTestRepo) CountConsecutiveDistillationAssessments(context.Context, int64, int64, time.Time, time.Duration, int, int, int) (int, error) {
@@ -119,6 +124,52 @@ func TestBuildDistillationRequestFeatureStoresOnlyDerivedMetadata(t *testing.T) 
 	require.Positive(t, feature.PromptLength)
 	require.True(t, feature.ExplicitSignal)
 	require.NotContains(t, feature.Model, secretPrompt)
+}
+
+func TestBuildDistillationRequestFeatureExtractsResponsesToolOutput(t *testing.T) {
+	body := []byte(`{"input":[
+		{"role":"user","content":[{"type":"input_text","text":"prepare batch sample"}]},
+		{"type":"function_call","name":"probe","arguments":"{\"topic\":\"algebra\"}"},
+		{"type":"function_call_output","output":{"result":"synthetic training row"}}
+	]}`)
+	feature := buildDistillationRequestFeature(ContentModerationCheckInput{
+		RequestID: "req-tool-output",
+		UserID:    7,
+		APIKeyID:  8,
+		GroupID:   int64Pointer(9),
+		Model:     "gpt-test",
+		Protocol:  ContentModerationProtocolOpenAIResponses,
+		Body:      body,
+	})
+	text, _ := distillationRequestText(ContentModerationProtocolOpenAIResponses, body)
+
+	require.NotZero(t, feature.PromptSimHash)
+	require.Greater(t, feature.PromptLength, len("prepare batch sample"))
+	require.Equal(t, 3, feature.MessageCount)
+	require.Contains(t, text, "synthetic training row")
+}
+
+func TestScoreDistillationCandidateFlagsHighVolumeBatchExtraction(t *testing.T) {
+	cfg := defaultDistillationMonitorConfig()
+	now := time.Now()
+	candidate := DistillationCandidate{
+		RequestCount:       5_605,
+		InputTokens:        4_000_000,
+		OutputTokens:       1_077_688,
+		NonStreamCount:     5_060,
+		MissingSessions:    5_220,
+		DistinctAPIKeys:    1,
+		DistinctIPs:        1,
+		DistinctUserAgents: 1,
+		FirstRequestAt:     now,
+		LastRequestAt:      now.Add(14 * time.Minute),
+	}
+
+	score := scoreDistillationCandidate(candidate, nil, cfg, 15*time.Minute)
+
+	require.Equal(t, 10, score.Batch)
+	require.GreaterOrEqual(t, score.Total, cfg.ObserveThreshold)
+	require.Less(t, score.Total, cfg.RiskThreshold)
 }
 
 func TestDistillationCaptureDoesNotDependOnRiskControlSwitch(t *testing.T) {

@@ -41,6 +41,54 @@ export interface DistillationMonitorRuntimeStatus {
   last_disabled: number
 }
 
+export interface DistillationAssessmentMetrics {
+  dominant_model?: string
+  requests?: number
+  input_tokens?: number
+  output_tokens?: number
+  cache_read_tokens?: number
+  non_stream_ratio?: number
+  missing_session_ratio?: number
+  distinct_sessions?: number
+  distinct_api_keys?: number
+  distinct_ips?: number
+  distinct_user_agents?: number
+  explicit_signals?: number
+  template_similarity?: number
+  score_volume?: number
+  score_automation?: number
+  score_session?: number
+  score_template?: number
+  score_fanout?: number
+  score_batch?: number
+}
+
+export interface DistillationAssessment {
+  id: number
+  user_id: number
+  user_email: string
+  user_status: string
+  group_id: number
+  group_name: string
+  dominant_model: string
+  window_start: string
+  window_end: string
+  score: number
+  evidence_classes: number
+  mode: DistillationMonitorMode
+  metrics: DistillationAssessmentMetrics
+  auto_disabled: boolean
+  created_at: string
+}
+
+export interface DistillationAssessmentsResponse {
+  items: DistillationAssessment[]
+  total: number
+  page: number
+  page_size: number
+  pages: number
+}
+
 export interface ContentModerationModelFilter {
   type: ContentModerationModelFilterType
   models: string[]
@@ -321,6 +369,16 @@ export async function listLogs(
   return data
 }
 
+export async function listDistillationAssessments(
+  params: Pick<ListContentModerationLogsParams, 'page' | 'page_size'> = {}
+): Promise<DistillationAssessmentsResponse> {
+  const { data } = await apiClient.get<DistillationAssessmentsResponse>(
+    '/admin/risk-control/distillation/assessments',
+    { params }
+  )
+  return data
+}
+
 export async function unbanUser(userID: number): Promise<ContentModerationUnbanUserResponse> {
   const { data } = await apiClient.post<ContentModerationUnbanUserResponse>(
     `/admin/risk-control/users/${userID}/unban`
@@ -346,6 +404,7 @@ export const riskControlAPI = {
   getStatus,
   testAPIKeys,
   listLogs,
+  listDistillationAssessments,
   unbanUser,
   deleteFlaggedHash,
   clearFlaggedHashes,

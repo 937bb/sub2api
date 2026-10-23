@@ -153,11 +153,17 @@
                       <div>{{ row.user_email || '-' }}</div>
                       <div v-if="row.user_id" class="text-xs text-gray-400">UID {{ row.user_id }}</div>
                     </td>
-                    <td class="whitespace-nowrap px-5 py-4 font-mono text-sm text-gray-700 dark:text-gray-300">{{ row.model || '-' }}</td>
-                    <td class="whitespace-nowrap px-5 py-4 text-sm font-semibold text-amber-700 dark:text-amber-300">{{ formatScore(row.highest_score) }}</td>
+                    <td class="whitespace-nowrap px-5 py-4 font-mono text-sm text-gray-700 dark:text-gray-300">
+                      <div>{{ row.dominant_model || '-' }}</div>
+                      <div class="text-xs text-gray-400">{{ formatNumber(row.metrics?.requests ?? 0) }} req / {{ formatNumber(row.metrics?.output_tokens ?? 0) }} out</div>
+                    </td>
+                    <td class="whitespace-nowrap px-5 py-4 text-sm font-semibold" :class="assessmentStyle(row).scoreClass">
+                      <div>{{ formatScore(row.score) }}</div>
+                      <div class="text-xs font-normal text-gray-400">{{ row.evidence_classes }} {{ t('admin.distillationMonitor.evidenceClasses') }}</div>
+                    </td>
                     <td class="whitespace-nowrap px-5 py-4">
-                      <span class="inline-flex rounded-md px-2 py-1 text-xs font-medium" :class="row.auto_banned ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'">
-                        {{ row.auto_banned ? t('admin.distillationMonitor.actionDisabled') : t('admin.distillationMonitor.actionFlagged') }}
+                      <span class="inline-flex rounded-md px-2 py-1 text-xs font-medium" :class="assessmentStyle(row).badgeClass">
+                        {{ assessmentStyle(row).label }}
                       </span>
                     </td>
                   </tr>
@@ -190,7 +196,7 @@ import Select from '@/components/common/Select.vue'
 import Toggle from '@/components/common/Toggle.vue'
 import { adminAPI } from '@/api/admin'
 import type {
-  ContentModerationLog,
+  DistillationAssessment,
   DistillationMonitorConfig,
   DistillationMonitorMode,
   DistillationMonitorRuntimeStatus,
@@ -223,7 +229,7 @@ const refreshing = ref(false)
 const logsLoading = ref(false)
 const groupSearch = ref('')
 const groups = ref<AdminGroup[]>([])
-const logs = ref<ContentModerationLog[]>([])
+const logs = ref<DistillationAssessment[]>([])
 const runtime = ref<DistillationMonitorRuntimeStatus | null>(null)
 const form = reactive<DistillationMonitorConfig>(defaultConfig())
 const pagination = reactive({ page: 1, page_size: 20, total: 0 })
@@ -311,8 +317,7 @@ async function refreshRuntime(showError = true) {
 async function loadLogs() {
   logsLoading.value = true
   try {
-    const result = await adminAPI.riskControl.listLogs({
-      provider: 'distillation_monitor',
+    const result = await adminAPI.riskControl.listDistillationAssessments({
       page: pagination.page,
       page_size: pagination.page_size,
     })
@@ -380,7 +385,36 @@ function formatDateTime(value: string): string {
 }
 
 function formatScore(value: number): string {
-  return `${Math.round(Math.max(0, value) * 100)} / 100`
+  return `${Math.round(Math.max(0, value))} / 100`
+}
+
+function assessmentStyle(row: DistillationAssessment) {
+  if (row.auto_disabled) {
+    return {
+      label: t('admin.distillationMonitor.actionDisabled'),
+      badgeClass: 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300',
+      scoreClass: 'text-rose-700 dark:text-rose-300',
+    }
+  }
+  if (row.score >= form.risk_threshold && row.evidence_classes >= form.min_evidence_classes) {
+    return {
+      label: t('admin.distillationMonitor.actionHighRisk'),
+      badgeClass: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300',
+      scoreClass: 'text-orange-700 dark:text-orange-300',
+    }
+  }
+  if (row.score >= form.observe_threshold) {
+    return {
+      label: t('admin.distillationMonitor.actionFlagged'),
+      badgeClass: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300',
+      scoreClass: 'text-amber-700 dark:text-amber-300',
+    }
+  }
+  return {
+    label: t('admin.distillationMonitor.actionEvaluated'),
+    badgeClass: 'bg-gray-100 text-gray-600 dark:bg-dark-700 dark:text-gray-300',
+    scoreClass: 'text-gray-700 dark:text-gray-300',
+  }
 }
 
 onMounted(() => {

@@ -261,7 +261,12 @@ WITH usage_window AS (
         COUNT(DISTINCT NULLIF(BTRIM(ul.session_id), ''))::INT AS distinct_sessions,
         COUNT(DISTINCT ul.api_key_id)::INT AS distinct_api_keys,
         COUNT(DISTINCT NULLIF(BTRIM(ul.ip_address), ''))::INT AS distinct_ips,
-        COUNT(DISTINCT NULLIF(BTRIM(ul.user_agent), ''))::INT AS distinct_user_agents,
+        COUNT(DISTINCT NULLIF(BTRIM(REGEXP_REPLACE(
+            ul.user_agent,
+            '[[:space:]]+s2a-route/[^[:space:]]+.*$',
+            '',
+            'i'
+        )), ''))::INT AS distinct_user_agents,
         COALESCE(MODE() WITHIN GROUP (
             ORDER BY COALESCE(NULLIF(BTRIM(ul.requested_model), ''), NULLIF(BTRIM(ul.model), ''), '')
         ), '') AS dominant_model,
@@ -390,6 +395,72 @@ RETURNING id
 		return false, nil
 	}
 	return false, fmt.Errorf("insert distillation assessment: %w", err)
+}
+
+func (r *contentModerationRepository) ListDistillationAssessments(ctx context.Context, filter service.DistillationAssessmentFilter) ([]service.DistillationAssessmentRecord, *pagination.PaginationResult, error) {
+	params := filter.Pagination
+	if params.Page <= 0 {
+		params.Page = 1
+	}
+	if params.PageSize <= 0 {
+		params.PageSize = 20
+	}
+	if params.PageSize > 100 {
+		params.PageSize = 100
+	}
+	var total int64
+	if err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM distillation_assessments`).Scan(&total); err != nil {
+		return nil, nil, fmt.Errorf("count distillation assessments: %w", err)
+	}
+	rows, err := r.db.QueryContext(ctx, `
+SELECT
+    da.id,
+    da.user_id,
+    COALESCE(u.email, ''),
+    COALESCE(u.status, ''),
+    da.group_id,
+    COALESCE(g.name, ''),
+    COALESCE(da.metrics->>'dominant_model', ''),
+    da.window_start,
+    da.window_end,
+    da.score,
+    da.evidence_classes,
+    da.mode,
+    da.metrics,
+    da.auto_disabled,
+    da.created_at
+FROM distillation_assessments da
+LEFT JOIN users u ON u.id = da.user_id
+LEFT JOIN groups g ON g.id = da.group_id
+ORDER BY da.created_at DESC, da.id DESC
+LIMIT $1 OFFSET $2
+`, params.Limit(), params.Offset())
+	if err != nil {
+		return nil, nil, fmt.Errorf("list distillation assessments: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	items := make([]service.DistillationAssessmentRecord, 0)
+	for rows.Next() {
+		var item service.DistillationAssessmentRecord
+		var metricsRaw []byte
+		if err := rows.Scan(
+			&item.ID, &item.UserID, &item.UserEmail, &item.UserStatus,
+			&item.GroupID, &item.GroupName, &item.DominantModel,
+			&item.WindowStart, &item.WindowEnd, &item.Score, &item.EvidenceClasses,
+			&item.Mode, &metricsRaw, &item.AutoDisabled, &item.CreatedAt,
+		); err != nil {
+			return nil, nil, fmt.Errorf("scan distillation assessment: %w", err)
+		}
+		item.Metrics = map[string]any{}
+		if err := json.Unmarshal(metricsRaw, &item.Metrics); err != nil {
+			return nil, nil, fmt.Errorf("decode distillation assessment metrics: %w", err)
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, fmt.Errorf("iterate distillation assessments: %w", err)
+	}
+	return items, paginationResultFromTotal(total, params), nil
 }
 
 func (r *contentModerationRepository) CountConsecutiveDistillationAssessments(ctx context.Context, userID, groupID int64, windowEnd time.Time, window time.Duration, threshold, minEvidenceClasses, required int) (int, error) {
