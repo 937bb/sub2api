@@ -482,6 +482,40 @@ describe('admin UsageView request ID column visibility', () => {
     vi.useRealTimers()
   })
 
+  it('always keeps the row actions column visible', async () => {
+    vi.mocked(localStorage.getItem).mockImplementation((key: string) =>
+      key === 'usage-hidden-columns' ? JSON.stringify(['actions']) : null,
+    )
+    const wrapper = mount(UsageView, {
+      global: {
+        stubs: {
+          AppLayout: AppLayoutStub,
+          UsageStatsCards: true,
+          UsageFilters: UsageFiltersStub,
+          UsageTable: UsageTableStub,
+          UsageExportProgress: true,
+          UsageCleanupDialog: true,
+          UserBalanceHistoryModal: true,
+          AuditLogModal: true,
+          Pagination: true,
+          Select: true,
+          DateRangePicker: true,
+          Icon: true,
+          TokenUsageTrend: true,
+          ModelDistributionChart: true,
+          GroupDistributionChart: true,
+          EndpointDistributionChart: true,
+          UserTokenRanking: true,
+        },
+      },
+    })
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.findComponent(UsageTableStub).props('columns')).toEqual(
+      expect.arrayContaining([expect.objectContaining({ key: 'actions' })]),
+    )
+  })
+
   it('keeps request ID hidden by default and allows enabling it from column settings', async () => {
     const wrapper = mount(UsageView, {
       global: {

@@ -327,10 +327,27 @@
           <span v-else class="text-sm text-gray-400 dark:text-gray-500">-</span>
         </template>
 
+        <template #cell-actions="{ row }">
+          <button
+            type="button"
+            data-testid="usage-view-detail"
+            class="inline-flex items-center gap-1.5 whitespace-nowrap rounded px-2 py-1 text-xs font-medium text-primary-600 transition-colors hover:bg-primary-50 hover:text-primary-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/30 dark:text-primary-400 dark:hover:bg-primary-900/30 dark:hover:text-primary-300"
+            @click="openDetail(row)"
+          >
+            <Icon name="eye" size="sm" />
+            {{ t('admin.usage.detail.view') }}
+          </button>
+        </template>
+
         <template #empty><EmptyState :message="t('usage.noRecords')" /></template>
       </DataTable>
     </div>
   </div>
+
+  <UsageDetailDialog
+    v-model:show="detailVisible"
+    :log="selectedDetailLog"
+  />
 
   <!-- Token Tooltip Portal -->
   <Teleport to="body">
@@ -606,6 +623,7 @@ import DataTable from '@/components/common/DataTable.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import IpGeoCell from '@/components/common/IpGeoCell.vue'
 import Icon from '@/components/icons/Icon.vue'
+import UsageDetailDialog from './UsageDetailDialog.vue'
 import { fetchBatch, getEntry } from '@/utils/ipGeoLookup'
 import type { AdminUsageLog } from '@/types'
 import type { Column } from '@/components/common/types'
@@ -640,6 +658,8 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const appStore = useAppStore()
 const copiedRequestId = ref<string | null>(null)
+const detailVisible = ref(false)
+const selectedDetailLog = ref<AdminUsageLog | null>(null)
 const showAccountBilling = props.showAccountBilling
 const showUpstreamEndpoint = props.showUpstreamEndpoint
 const ipGeoBatchLoading = ref(false)
@@ -711,6 +731,11 @@ const copyIdentifier = async (value: string, copiedMessage: string) => {
 const copyRequestId = (requestId: string) => copyIdentifier(requestId, t('admin.usage.requestIdCopied'))
 const copyUpstreamRequestId = (upstreamRequestId: string) =>
   copyIdentifier(upstreamRequestId, t('admin.usage.upstreamRequestIdCopied'))
+
+const openDetail = (row: AdminUsageLog) => {
+  selectedDetailLog.value = row
+  detailVisible.value = true
+}
 
 // Tooltip state - cost
 const tooltipVisible = ref(false)
