@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestUpstreamRequestIDFromHeaders_UnconfiguredAccountRecordsNothing(t *testing.T) {
+func TestUpstreamRequestIDFromHeaders_UsesStandardFallbackOrder(t *testing.T) {
 	h := http.Header{}
 	h.Set("X-Client-Request-ID", "sub2api-client")
 	h.Set("X-Request-ID", "sub2api-local")
@@ -17,22 +17,22 @@ func TestUpstreamRequestIDFromHeaders_UnconfiguredAccountRecordsNothing(t *testi
 	h.Set("xai-request-id", "xai-1")
 	h.Set("x-goog-request-id", "goog-1")
 
-	require.Equal(t, "", UpstreamRequestIDFromHeaders(nil, h))
+	require.Equal(t, "sub2api-local", UpstreamRequestIDFromHeaders(nil, h))
 	for _, platform := range []string{PlatformAnthropic, PlatformOpenAI, PlatformGemini, PlatformAntigravity, PlatformGrok} {
-		require.Equal(t, "", UpstreamRequestIDFromHeaders(&Account{Platform: platform}, h), platform)
+		require.Equal(t, "sub2api-local", UpstreamRequestIDFromHeaders(&Account{Platform: platform}, h), platform)
 	}
 	blank := &Account{Platform: PlatformOpenAI, Extra: map[string]any{AccountExtraUpstreamRequestIDHeader: "   "}}
-	require.Equal(t, "", UpstreamRequestIDFromHeaders(blank, h))
+	require.Equal(t, "sub2api-local", UpstreamRequestIDFromHeaders(blank, h))
 }
 
-func TestUpstreamRequestIDFromHeaders_ReadsOnlyConfiguredHeader(t *testing.T) {
+func TestUpstreamRequestIDFromHeaders_ConfiguredHeaderTakesPriority(t *testing.T) {
 	account := &Account{
 		Platform: PlatformOpenAI,
 		Extra:    map[string]any{AccountExtraUpstreamRequestIDHeader: " x-oneapi-request-id "},
 	}
 	h := http.Header{}
 	h.Set("X-Request-ID", "passthrough-from-real-upstream")
-	require.Equal(t, "", UpstreamRequestIDFromHeaders(account, h))
+	require.Equal(t, "passthrough-from-real-upstream", UpstreamRequestIDFromHeaders(account, h))
 
 	h.Set("X-Oneapi-Request-Id", " oneapi-2 ")
 	require.Equal(t, "oneapi-2", UpstreamRequestIDFromHeaders(account, h))
@@ -50,12 +50,19 @@ func TestUsageUpstreamRequestIDPtr(t *testing.T) {
 	h.Set("X-Request-ID", strings.Repeat("a", 200))
 	require.Nil(t, usageUpstreamRequestIDPtr(account, h, true))
 	require.Nil(t, usageUpstreamRequestIDPtr(account, http.Header{}, false))
-	require.Nil(t, usageUpstreamRequestIDPtr(nil, h, false))
-	require.Nil(t, usageUpstreamRequestIDPtr(&Account{}, h, false))
+	require.NotNil(t, usageUpstreamRequestIDPtr(nil, h, false))
+	require.NotNil(t, usageUpstreamRequestIDPtr(&Account{}, h, false))
 
 	got := usageUpstreamRequestIDPtr(account, h, false)
 	require.NotNil(t, got)
 	require.Len(t, *got, maxUsageUpstreamRequestIDLen)
+}
+
+func TestUsageTraceIDPtrTrimsAndTruncates(t *testing.T) {
+	require.Nil(t, usageTraceIDPtr("   "))
+	got := usageTraceIDPtr("  " + strings.Repeat("r", 200) + "  ")
+	require.NotNil(t, got)
+	require.Len(t, *got, maxUsageTraceIDLen)
 }
 
 func TestValidateUpstreamRequestIDHeaderExtra(t *testing.T) {

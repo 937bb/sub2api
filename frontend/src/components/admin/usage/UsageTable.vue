@@ -294,6 +294,26 @@
           <span v-else class="text-sm text-gray-400 dark:text-gray-500">-</span>
         </template>
 
+        <template #cell-response_trace="{ row }">
+          <div v-if="row.upstream_response_id || row.previous_response_id" class="max-w-[240px] space-y-1 text-xs">
+            <div v-if="row.upstream_response_id" class="flex items-center gap-1.5">
+              <span class="shrink-0 text-gray-400">{{ t('admin.usage.responseIdShort') }}</span>
+              <span class="truncate font-mono text-gray-600 dark:text-gray-300" :title="row.upstream_response_id">{{ row.upstream_response_id }}</span>
+              <button type="button" class="shrink-0 rounded p-0.5 text-gray-400 hover:bg-gray-100 dark:hover:bg-dark-700" @click="copyIdentifier(row.upstream_response_id, t('admin.usage.traceIdCopied'))">
+                <Icon :name="copiedRequestId === row.upstream_response_id ? 'check' : 'copy'" size="sm" class="h-3.5 w-3.5" />
+              </button>
+            </div>
+            <div v-if="row.previous_response_id" class="flex items-center gap-1.5">
+              <span class="shrink-0 text-gray-400">{{ t('admin.usage.previousIdShort') }}</span>
+              <span class="truncate font-mono text-gray-600 dark:text-gray-300" :title="row.previous_response_id">{{ row.previous_response_id }}</span>
+              <button type="button" class="shrink-0 rounded p-0.5 text-gray-400 hover:bg-gray-100 dark:hover:bg-dark-700" @click="copyIdentifier(row.previous_response_id, t('admin.usage.traceIdCopied'))">
+                <Icon :name="copiedRequestId === row.previous_response_id ? 'check' : 'copy'" size="sm" class="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
+          <span v-else class="text-sm text-gray-400 dark:text-gray-500">-</span>
+        </template>
+
         <template #cell-user_agent="{ row }">
           <span v-if="row.user_agent" class="text-sm text-gray-600 dark:text-gray-400 block max-w-[320px] truncate" :title="row.user_agent">{{ formatUserAgent(row.user_agent) }}</span>
           <span v-else class="text-sm text-gray-400 dark:text-gray-500">-</span>

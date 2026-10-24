@@ -329,6 +329,32 @@ func TestUsageLogFromService_PreservesHistoricalMissingImageSize(t *testing.T) {
 	require.NotContains(t, string(body), `"image_size":"2K"`)
 }
 
+func TestUsageLogFromService_TraceIDsAreAdminOnly(t *testing.T) {
+	t.Parallel()
+
+	upstreamRequestID := "req_upstream"
+	upstreamResponseID := "resp_current"
+	previousResponseID := "resp_previous"
+	log := &service.UsageLog{
+		RequestID:          "req_client",
+		Model:              "gpt-6.1-sol",
+		UpstreamRequestID:  &upstreamRequestID,
+		UpstreamResponseID: &upstreamResponseID,
+		PreviousResponseID: &previousResponseID,
+	}
+
+	userJSON, err := json.Marshal(UsageLogFromService(log))
+	require.NoError(t, err)
+	require.NotContains(t, string(userJSON), "upstream_request_id")
+	require.NotContains(t, string(userJSON), "upstream_response_id")
+	require.NotContains(t, string(userJSON), "previous_response_id")
+
+	adminDTO := UsageLogFromServiceAdmin(log)
+	require.Equal(t, upstreamRequestID, *adminDTO.UpstreamRequestID)
+	require.Equal(t, upstreamResponseID, *adminDTO.UpstreamResponseID)
+	require.Equal(t, previousResponseID, *adminDTO.PreviousResponseID)
+}
+
 func f64Ptr(value float64) *float64 {
 	return &value
 }

@@ -694,6 +694,10 @@ type AdminUsageLog struct {
 	ModelMappingChain *string `json:"model_mapping_chain,omitempty"`
 	// UpstreamRequestID 是直接上游声明的请求标识，仅管理端可见。
 	UpstreamRequestID *string `json:"upstream_request_id,omitempty"`
+	// UpstreamResponseID is the response identifier from the upstream body or stream.
+	UpstreamResponseID *string `json:"upstream_response_id,omitempty"`
+	// PreviousResponseID is the original continuation identifier for this turn.
+	PreviousResponseID *string `json:"previous_response_id,omitempty"`
 	// BillingTier 计费层级标签（per_request/image 模式）
 	BillingTier *string `json:"billing_tier,omitempty"`
 
