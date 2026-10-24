@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -1041,6 +1042,35 @@ func TestOpenAIGatewayServiceRecordUsage_PrefersClientRequestIDOverUpstreamReque
 	require.Equal(t, "client:openai-client-stable-123", billingRepo.lastCmd.RequestID)
 	require.NotNil(t, usageRepo.lastLog)
 	require.Equal(t, "client:openai-client-stable-123", usageRepo.lastLog.RequestID)
+}
+
+func TestOpenAIGatewayServiceRecordUsage_PersistsResponseTraceIDs(t *testing.T) {
+	usageRepo := &openAIRecordUsageLogRepoStub{}
+	billingRepo := &openAIRecordUsageBillingRepoStub{result: &UsageBillingApplyResult{Applied: true}}
+	svc := newOpenAIRecordUsageServiceWithBillingRepoForTest(usageRepo, billingRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{}, nil)
+
+	err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
+		Result: &OpenAIForwardResult{
+			RequestID:  "req_local",
+			ResponseID: "resp_current",
+			UpstreamHeaders: http.Header{
+				"X-Request-Id": []string{"req_upstream"},
+			},
+			Usage:    OpenAIUsage{InputTokens: 8, OutputTokens: 4},
+			Model:    "gpt-6.1-sol",
+			Duration: time.Second,
+		},
+		PreviousResponseID: "resp_previous",
+		APIKey:             &APIKey{ID: 10051},
+		User:               &User{ID: 20051},
+		Account:            &Account{ID: 30051},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, usageRepo.lastLog)
+	require.Equal(t, "req_upstream", *usageRepo.lastLog.UpstreamRequestID)
+	require.Equal(t, "resp_current", *usageRepo.lastLog.UpstreamResponseID)
+	require.Equal(t, "resp_previous", *usageRepo.lastLog.PreviousResponseID)
 }
 
 func TestOpenAIGatewayServiceRecordUsage_WSModePrefersUpstreamRequestIDOverClientRequestID(t *testing.T) {

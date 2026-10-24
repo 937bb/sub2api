@@ -1141,6 +1141,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 					APIKeyService:      h.apiKeyService,
 					QuotaPlatform:      quotaPlatform,
 					SessionID:          sessionID,
+					PreviousResponseID: previousResponseID,
 					ChannelUsageFields: clientRequestedUsageFields(c, channelMapping, reqModel, res.UpstreamModel),
 					PricingAt:          pricingAt,
 					CyberBlocked:       cyberBlocked,
@@ -3307,6 +3308,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		var requestPayloadHash string
 		var turnStartsMu sync.Mutex
 		turnStarts := make(map[int]time.Time, 4)
+		turnPreviousResponseIDs := map[int]string{1: previousResponseID}
 		recordTurnStart := func(turn int, startedAt time.Time) {
 			if turn <= 0 || startedAt.IsZero() {
 				return
@@ -3321,6 +3323,24 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			delete(turnStarts, turn)
 			turnStartsMu.Unlock()
 			return startedAt
+		}
+		recordTurnPreviousResponseID := func(turn int, payload []byte) {
+			if turn <= 0 {
+				return
+			}
+			value := strings.TrimSpace(gjson.GetBytes(payload, "previous_response_id").String())
+			turnStartsMu.Lock()
+			if _, recorded := turnPreviousResponseIDs[turn]; !recorded || value != "" {
+				turnPreviousResponseIDs[turn] = value
+			}
+			turnStartsMu.Unlock()
+		}
+		getTurnPreviousResponseID := func(turn int) string {
+			turnStartsMu.Lock()
+			value := turnPreviousResponseIDs[turn]
+			delete(turnPreviousResponseIDs, turn)
+			turnStartsMu.Unlock()
+			return value
 		}
 		// Passthrough rejects overlapping response.create frames, so one immutable
 		// turn-tagged slot preserves the exact mapping used for the in-flight request.
@@ -3378,6 +3398,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				return nil
 			},
 			BeforeRequest: func(turn int, payload []byte, originalModel string) error {
+				recordTurnPreviousResponseID(turn, payload)
 				c.Set(securityAuditWSTurnContextKey, turn)
 				service.BeginOpsStreamTurn(c, turn)
 				// 连接级 cyber session gate 也在 BeforeRequest 先执行，使 native 与
@@ -3545,6 +3566,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			},
 			AfterTurn: func(turn int, result *service.OpenAIForwardResult, turnErr error) {
 				turnStart := getTurnStart(turn)
+				turnPreviousResponseID := getTurnPreviousResponseID(turn)
 				cyberTurnContext := takeCyberTurnBody(turn)
 				cyberBlockBody := cyberTurnContext.body
 				// 每次 attempt 都清 cyber mark；failover 链结束前保留 recorded guard，
@@ -3642,6 +3664,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 						APIKeyService:      h.apiKeyService,
 						QuotaPlatform:      quotaPlatform,
 						SessionID:          sessionID,
+						PreviousResponseID: turnPreviousResponseID,
 						ChannelUsageFields: turnUsageFields,
 						PricingAt:          turnRecordPricingAt,
 						CyberBlocked:       cyberBlocked,
