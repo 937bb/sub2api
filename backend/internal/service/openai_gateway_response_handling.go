@@ -1747,7 +1747,7 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 		if failoverErr := s.nonStreamingTerminalFailureFailover(c, resp, account, false, terminalType, terminalPayload, msg, mappedModel); failoverErr != nil {
 			return nil, failoverErr
 		}
-		return nil, s.writeOpenAINonStreamingProtocolError(resp, c, msg)
+		return nil, s.writeOpenAINonStreamingProtocolError(resp, c, terminalPayload, msg)
 	}
 	finalResponse, ok := extractCodexFinalResponse(bodyText)
 
@@ -1975,26 +1975,57 @@ func sanitizeOpenAIResponseFailedEventForClient(payload []byte, eventType string
 	return updated, !bytes.Equal(updated, payload)
 }
 
-func (s *OpenAIGatewayService) writeOpenAINonStreamingProtocolError(resp *http.Response, c *gin.Context, message string) error {
+func (s *OpenAIGatewayService) writeOpenAINonStreamingProtocolError(resp *http.Response, c *gin.Context, payload []byte, message string) error {
 	message = sanitizeUpstreamErrorMessage(strings.TrimSpace(message))
 	if message == "" {
 		message = "Upstream returned an invalid non-streaming response"
 	}
-	setOpsUpstreamError(c, http.StatusBadGateway, message, "")
+	status := openAIStreamFailedEventSemanticStatus(payload, message)
+	// This path historically represents an upstream protocol failure. Narrowly
+	// preserve request-originated 400s, but do not mislabel capacity and other
+	// service failures merely because an upstream used invalid_request_error as
+	// its envelope type.
+	if status != http.StatusBadRequest || isOpenAIUpstreamCapacityShedEvent(payload) || openAIStreamFailedEventShouldFailover(payload, message) {
+		status = http.StatusBadGateway
+	}
+	errType := strings.TrimSpace(gjson.GetBytes(payload, "response.error.type").String())
+	if errType == "" {
+		errType = strings.TrimSpace(gjson.GetBytes(payload, "error.type").String())
+	}
+	code := strings.TrimSpace(gjson.GetBytes(payload, "response.error.code").String())
+	if code == "" {
+		code = strings.TrimSpace(gjson.GetBytes(payload, "error.code").String())
+	}
+	if errType == "" {
+		errType = "upstream_error"
+	}
+	if code == "" && status == http.StatusBadGateway {
+		code = "upstream_error"
+	}
+	setOpsUpstreamError(c, status, message, "")
 	// body-signal compact 心跳可能已把响应头提交为 200，此时只能以
 	// response.failed 终止事件回传错误，不能再写 JSON+状态码。
 	if openAICompactClientWantsStream(c) && StopOpenAICompactSSEKeepaliveCommitted(c) {
-		writeOpenAICompactSSEFailureMessage(c, http.StatusBadGateway, "upstream_error", message)
+		streamCode := code
+		if streamCode == "" {
+			streamCode = errType
+		}
+		writeOpenAICompactSSEFailureMessage(c, status, streamCode, message)
 		return fmt.Errorf("non-streaming openai protocol error: %s", message)
 	}
 	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 	c.Writer.Header().Set("Content-Type", "application/json; charset=utf-8")
-	c.JSON(http.StatusBadGateway, gin.H{
-		"error": gin.H{
-			"type":    "upstream_error",
-			"message": message,
-		},
-	})
+	errorBody := gin.H{"type": errType, "message": message}
+	if code != "" {
+		errorBody["code"] = code
+	}
+	for _, path := range []string{"response.error.param", "error.param"} {
+		if param := gjson.GetBytes(payload, path); param.Exists() {
+			errorBody["param"] = param.Value()
+			break
+		}
+	}
+	c.JSON(status, gin.H{"error": errorBody})
 	return fmt.Errorf("non-streaming openai protocol error: %s", message)
 }
 

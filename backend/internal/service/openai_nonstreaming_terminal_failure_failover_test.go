@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 )
@@ -105,27 +106,40 @@ func TestNonStreamingSSEToJSON_UnclassifiedFailedEventFailsOver(t *testing.T) {
 	require.Empty(t, rec.Body.String())
 }
 
-// 「response.failed 必须回写协议错误」这一契约没有丢：明确不可重试的错误仍写 502。
+// 「response.failed 必须回写协议错误」这一契约没有丢：明确的客户端错误保留 400，
+// 无法分类的上游终止错误仍写 502。
 func TestNonStreamingSSEToJSON_NonRetryableFailedEventStillWritesProtocolError(t *testing.T) {
 	cases := []struct {
-		name    string
-		data    string
-		wantMsg string
+		name       string
+		data       string
+		wantMsg    string
+		wantStatus int
+		wantType   string
+		wantCode   string
 	}{
 		{
-			name:    "invalid_request",
-			data:    `{"type":"response.failed","error":{"type":"invalid_request_error","code":"invalid_request","message":"unknown parameter foo"}}`,
-			wantMsg: "unknown parameter foo",
+			name:       "invalid_request",
+			data:       `{"type":"response.failed","error":{"type":"invalid_request_error","code":"invalid_request","param":"text.format","message":"unknown parameter foo"}}`,
+			wantMsg:    "unknown parameter foo",
+			wantStatus: http.StatusBadRequest,
+			wantType:   "invalid_request_error",
+			wantCode:   "invalid_request",
 		},
 		{
-			name:    "context_window",
-			data:    `{"type":"response.failed","response":{"id":"resp_failed","status":"failed","output":[],"error":{"code":"upstream_error","message":"input exceeds the context window"}}}`,
-			wantMsg: "input exceeds the context window",
+			name:       "context_window",
+			data:       `{"type":"response.failed","response":{"id":"resp_failed","status":"failed","output":[],"error":{"code":"upstream_error","message":"input exceeds the context window"}}}`,
+			wantMsg:    "input exceeds the context window",
+			wantStatus: http.StatusBadRequest,
+			wantType:   "upstream_error",
+			wantCode:   "upstream_error",
 		},
 		{
-			name:    "content_policy",
-			data:    `{"type":"response.failed","error":{"type":"content_policy_violation","message":"blocked by our content policy"}}`,
-			wantMsg: "blocked by our content policy",
+			name:       "content_policy",
+			data:       `{"type":"response.failed","error":{"type":"content_policy_violation","message":"blocked by our content policy"}}`,
+			wantMsg:    "blocked by our content policy",
+			wantStatus: http.StatusBadGateway,
+			wantType:   "content_policy_violation",
+			wantCode:   "upstream_error",
 		},
 	}
 
@@ -141,8 +155,13 @@ func TestNonStreamingSSEToJSON_NonRetryableFailedEventStillWritesProtocolError(t
 			require.Error(t, err)
 			var failoverErr *UpstreamFailoverError
 			require.False(t, errors.As(err, &failoverErr), "不可重试的上游错误不得换号")
-			require.Equal(t, http.StatusBadGateway, rec.Code)
+			require.Equal(t, tc.wantStatus, rec.Code)
 			require.Contains(t, rec.Body.String(), tc.wantMsg)
+			require.Equal(t, tc.wantType, gjson.Get(rec.Body.String(), "error.type").String())
+			require.Equal(t, tc.wantCode, gjson.Get(rec.Body.String(), "error.code").String())
+			if tc.name == "invalid_request" {
+				require.Equal(t, "text.format", gjson.Get(rec.Body.String(), "error.param").String())
+			}
 			require.Contains(t, rec.Header().Get("Content-Type"), "application/json")
 		})
 	}

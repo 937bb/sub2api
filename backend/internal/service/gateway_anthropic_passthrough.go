@@ -8,6 +8,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -32,6 +33,85 @@ type anthropicPassthroughForwardInput struct {
 	OriginalModel string
 	RequestStream bool
 	StartTime     time.Time
+}
+
+const (
+	anthropicCompatToolUseID = "tool_use_id"
+	anthropicCompatThinking  = "adaptive_thinking"
+)
+
+func rewriteAnthropicPassthroughCompatibility(body, errorBody []byte, toolUseIDApplied, thinkingApplied bool) ([]byte, string, bool) {
+	message := strings.ToLower(strings.TrimSpace(extractUpstreamErrorMessage(errorBody)))
+	if !toolUseIDApplied && strings.Contains(message, "tool call id starts with") && strings.Contains(message, "toolu_") {
+		if rewritten, changed := rewriteAnthropicHistoricalToolUseIDs(body); changed {
+			return rewritten, anthropicCompatToolUseID, true
+		}
+	}
+	if !thinkingApplied && strings.Contains(message, "thinking.enabled is not supported") && strings.Contains(message, "thinking.adaptive") {
+		if rewritten, changed := rewriteAnthropicAdaptiveThinking(body); changed {
+			return rewritten, anthropicCompatThinking, true
+		}
+	}
+	return body, "", false
+}
+
+func rewriteAnthropicHistoricalToolUseIDs(body []byte) ([]byte, bool) {
+	if len(body) == 0 || !gjson.ValidBytes(body) {
+		return body, false
+	}
+	updated := body
+	changed := false
+	messages := gjson.GetBytes(body, "messages").Array()
+	for messageIndex, message := range messages {
+		for contentIndex, block := range message.Get("content").Array() {
+			var field string
+			switch block.Get("type").String() {
+			case "tool_use":
+				field = "id"
+			case "tool_result":
+				field = "tool_use_id"
+			default:
+				continue
+			}
+			oldID := strings.TrimSpace(block.Get(field).String())
+			if !strings.HasPrefix(oldID, "call_") {
+				continue
+			}
+			sum := sha256.Sum256([]byte(oldID))
+			newID := fmt.Sprintf("toolu_%x", sum[:12])
+			path := fmt.Sprintf("messages.%d.content.%d.%s", messageIndex, contentIndex, field)
+			next, err := sjson.SetBytes(updated, path, newID)
+			if err != nil {
+				return body, false
+			}
+			updated = next
+			changed = true
+		}
+	}
+	return updated, changed
+}
+
+func rewriteAnthropicAdaptiveThinking(body []byte) ([]byte, bool) {
+	if len(body) == 0 || !gjson.ValidBytes(body) || !strings.EqualFold(strings.TrimSpace(gjson.GetBytes(body, "thinking.type").String()), "enabled") {
+		return body, false
+	}
+	updated, err := sjson.SetBytes(body, "thinking.type", "adaptive")
+	if err != nil {
+		return body, false
+	}
+	if gjson.GetBytes(updated, "thinking.budget_tokens").Exists() {
+		updated, err = sjson.DeleteBytes(updated, "thinking.budget_tokens")
+		if err != nil {
+			return body, false
+		}
+	}
+	if NormalizeClaudeOutputEffort(gjson.GetBytes(updated, "output_config.effort").String()) == nil {
+		updated, err = sjson.SetBytes(updated, "output_config.effort", "high")
+		if err != nil {
+			return body, false
+		}
+	}
+	return updated, true
 }
 
 func (s *GatewayService) forwardAnthropicAPIKeyPassthrough(
@@ -94,6 +174,8 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 
 	var resp *http.Response
 	retryStart := time.Now()
+	compatToolUseIDApplied := false
+	compatThinkingApplied := false
 	for attempt := 1; attempt <= maxRetryAttempts; attempt++ {
 		upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, input.RequestStream)
 		upstreamReq, wireBody, err := s.buildUpstreamRequestAnthropicAPIKeyPassthrough(upstreamCtx, c, account, input.Body, token)
@@ -118,6 +200,53 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 				UpstreamURL: safeUpstreamURL(upstreamReq.URL.String()),
 				Passthrough: true,
 			})
+		}
+
+		// Some Anthropic-compatible gateways reject legacy Claude/OpenAI history
+		// shapes that official and older endpoints accepted. Only rewrite after the
+		// upstream returns the exact compatibility error, and apply each rewrite at
+		// most once so an invalid request cannot enter a retry loop.
+		if resp.StatusCode == http.StatusBadRequest && resp.Body != nil {
+			respBody, readErr := s.readUpstreamErrorBody(resp)
+			_ = resp.Body.Close()
+			resp.Body = io.NopCloser(bytes.NewReader(respBody))
+			if readErr == nil {
+				if rewritten, compatibility, changed := rewriteAnthropicPassthroughCompatibility(
+					input.Body,
+					respBody,
+					compatToolUseIDApplied,
+					compatThinkingApplied,
+				); changed && attempt < maxRetryAttempts {
+					switch compatibility {
+					case anthropicCompatToolUseID:
+						compatToolUseIDApplied = true
+					case anthropicCompatThinking:
+						compatThinkingApplied = true
+					}
+					input.Body = rewritten
+					if input.Parsed != nil {
+						if err := input.Parsed.ReplaceBody(rewritten); err != nil {
+							return nil, err
+						}
+					}
+					appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+						ProxyID:            opsUpstreamProxyID(account),
+						ProxyName:          opsUpstreamProxyName(account),
+						Platform:           account.Platform,
+						AccountID:          account.ID,
+						AccountName:        account.Name,
+						UpstreamStatusCode: resp.StatusCode,
+						UpstreamRequestID:  resp.Header.Get("x-request-id"),
+						UpstreamURL:        safeUpstreamURL(upstreamReq.URL.String()),
+						Passthrough:        true,
+						Kind:               "compat_retry",
+						Message:            extractUpstreamErrorMessage(respBody),
+						Detail:             compatibility,
+					})
+					logger.LegacyPrintf("service.gateway", "Anthropic passthrough account %d: compatibility retry %s after upstream 400", account.ID, compatibility)
+					continue
+				}
+			}
 		}
 
 		// 透传分支禁止 400 请求体降级重试（该重试会改写请求体）
