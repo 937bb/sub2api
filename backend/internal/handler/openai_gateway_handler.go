@@ -30,6 +30,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 	"go.uber.org/zap"
 )
 
@@ -3612,41 +3613,28 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 		upstreamMsg := service.SanitizeUpstreamErrorMessage(service.ExtractUpstreamErrorMessage(responseBody))
 		service.SetOpsUpstreamError(c, statusCode, upstreamMsg, "")
 		errType := strings.TrimSpace(gjson.GetBytes(responseBody, "error.type").String())
-		if errType == "" {
-			errType = "upstream_error"
-			if statusCode == http.StatusBadRequest {
-				errType = "invalid_request_error"
-			} else if statusCode == http.StatusTooManyRequests {
-				errType = "rate_limit_error"
-			}
-		}
 		if service.StopOpenAICompactSSEKeepaliveCommitted(c) {
 			streamStarted = true
 		}
-		errorPayload := gin.H{"type": errType, "message": upstreamMsg}
-		for _, field := range []string{"code", "param"} {
-			if value := gjson.GetBytes(responseBody, "error."+field); value.Exists() {
-				errorPayload[field] = value.Value()
-			}
-		}
+		responseBody, errorObject, errType := normalizeStrictOpenAIErrorResponse(responseBody, statusCode, errType, upstreamMsg)
 		if !streamStarted {
-			c.Header("Content-Type", "application/json; charset=utf-8")
-			c.JSON(statusCode, gin.H{"error": errorPayload})
+			contentType := strings.TrimSpace(failoverErr.ResponseHeaders.Get("Content-Type"))
+			if !strings.Contains(strings.ToLower(contentType), "json") {
+				contentType = "application/json; charset=utf-8"
+			}
+			c.Header("Content-Type", contentType)
+			c.Data(statusCode, contentType, responseBody)
 			return
 		}
-		code := strings.TrimSpace(gjson.GetBytes(responseBody, "error.code").String())
 		service.MarkOpsStreamError(c, errType, upstreamMsg, statusCode)
 		if inboundIsResponses(c) {
-			upstreamError := responsesFailedError{
-				Type: errType, Code: mapResponsesErrorCode(errType, code), Message: upstreamMsg,
+			if !gjson.GetBytes(errorObject, "code").Exists() {
+				errorObject, _ = sjson.SetBytes(errorObject, "code", mapResponsesErrorCode(errType, ""))
 			}
-			if param := gjson.GetBytes(responseBody, "error.param"); param.Exists() {
-				upstreamError.Param = json.RawMessage(param.Raw)
-			}
-			writeResponsesFailedSSEWithError(c, upstreamError)
+			writeResponsesFailedSSEWithRawError(c, json.RawMessage(errorObject))
 			return
 		}
-		payload, err := json.Marshal(gin.H{"error": errorPayload})
+		payload, err := json.Marshal(gin.H{"error": json.RawMessage(errorObject)})
 		if err != nil {
 			_ = c.Error(err)
 			return
@@ -3701,6 +3689,34 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 	// 使用默认的错误映射
 	status, errType, errMsg := h.mapUpstreamError(statusCode)
 	h.handleStreamingAwareError(c, status, errType, errMsg, streamStarted)
+}
+
+func normalizeStrictOpenAIErrorResponse(responseBody []byte, statusCode int, errType, message string) ([]byte, []byte, string) {
+	errType = strings.TrimSpace(errType)
+	if errType == "" {
+		errType = "upstream_error"
+		if statusCode == http.StatusBadRequest {
+			errType = "invalid_request_error"
+		} else if statusCode == http.StatusTooManyRequests {
+			errType = "rate_limit_error"
+		} else if statusCode == http.StatusUnauthorized {
+			errType = "authentication_error"
+		} else if statusCode == http.StatusForbidden {
+			errType = "permission_error"
+		}
+	}
+	normalized := responseBody
+	if strings.TrimSpace(gjson.GetBytes(normalized, "error.type").String()) == "" {
+		if updated, err := sjson.SetBytes(normalized, "error.type", errType); err == nil {
+			normalized = updated
+		}
+	}
+	if !gjson.GetBytes(normalized, "error.message").Exists() && strings.TrimSpace(message) != "" {
+		if updated, err := sjson.SetBytes(normalized, "error.message", message); err == nil {
+			normalized = updated
+		}
+	}
+	return normalized, []byte(gjson.GetBytes(normalized, "error").Raw), errType
 }
 
 func credentialFailoverClientResponse(failoverErr *service.UpstreamFailoverError) (int, string) {

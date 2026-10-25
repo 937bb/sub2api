@@ -25,13 +25,13 @@ type responsesFailedError struct {
 // CreatedAt 不带 omitempty：严格客户端把它当必填字段，缺失会以
 // `missing field 'created_at'` 反序列化失败——那正是本文件要避免的"客户端读不懂终止事件"。
 type responsesFailedBody struct {
-	ID        string               `json:"id"`
-	Object    string               `json:"object"`
-	CreatedAt int64                `json:"created_at"`
-	Model     string               `json:"model,omitempty"`
-	Status    string               `json:"status"`
-	Output    []any                `json:"output"`
-	Error     responsesFailedError `json:"error"`
+	ID        string `json:"id"`
+	Object    string `json:"object"`
+	CreatedAt int64  `json:"created_at"`
+	Model     string `json:"model,omitempty"`
+	Status    string `json:"status"`
+	Output    []any  `json:"output"`
+	Error     any    `json:"error"`
 }
 
 // responsesFailedEvent 是写入 SSE data 行的顶层结构。
@@ -69,6 +69,19 @@ func writeResponsesFailedSSE(c *gin.Context, errType, code, message string) bool
 // writeResponsesFailedSSEWithError preserves structured upstream error fields
 // while supplying the complete terminal envelope required by strict clients.
 func writeResponsesFailedSSEWithError(c *gin.Context, upstreamError responsesFailedError) bool {
+	return writeResponsesFailedSSEWithErrorValue(c, upstreamError)
+}
+
+// writeResponsesFailedSSEWithRawError keeps provider-specific fields such as
+// Azure innererror and headers while retaining the Responses terminal envelope.
+func writeResponsesFailedSSEWithRawError(c *gin.Context, upstreamError json.RawMessage) bool {
+	if !json.Valid(upstreamError) {
+		return false
+	}
+	return writeResponsesFailedSSEWithErrorValue(c, upstreamError)
+}
+
+func writeResponsesFailedSSEWithErrorValue(c *gin.Context, upstreamError any) bool {
 	flusher, ok := c.Writer.(http.Flusher)
 	if !ok {
 		return false

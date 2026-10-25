@@ -1006,22 +1006,42 @@ func (s *OpenAIGatewayService) handleFailoverErrorResponsePassthrough(
 		shouldDisable,
 		!shouldDisable && account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode),
 	)
-	preserveStrictOpenAIAPIKeyFailoverError(account, failoverErr, body)
+	preserveStrictOpenAIAPIKeyHTTPFailoverError(account, failoverErr, body)
 	return failoverErr
 }
 
 // preserveStrictOpenAIAPIKeyFailoverError retains provider error fields without
-// overriding credential protection or request-scoped capacity recovery.
+// overriding OAuth credential protection or request-scoped capacity recovery.
 func preserveStrictOpenAIAPIKeyFailoverError(account *Account, failoverErr *UpstreamFailoverError, body []byte) bool {
+	return preserveStrictOpenAIAPIKeyFailoverErrorForTransport(account, failoverErr, body, false)
+}
+
+func preserveStrictOpenAIAPIKeyHTTPFailoverError(account *Account, failoverErr *UpstreamFailoverError, body []byte) bool {
+	return preserveStrictOpenAIAPIKeyFailoverErrorForTransport(account, failoverErr, body, true)
+}
+
+func preserveStrictOpenAIAPIKeyFailoverErrorForTransport(account *Account, failoverErr *UpstreamFailoverError, body []byte, allowHTTPAuthStatus bool) bool {
 	if failoverErr == nil || !isStrictOpenAIAPIKeyPassthrough(account) ||
 		failoverErr.IsCredentialFailure() || failoverErr.RequestScopedTransient ||
-		(failoverErr.StatusCode != http.StatusBadRequest && failoverErr.StatusCode != http.StatusTooManyRequests) ||
+		!isStrictOpenAIAPIKeyPassthroughErrorStatus(failoverErr.StatusCode, allowHTTPAuthStatus) ||
 		!gjson.ValidBytes(body) || !gjson.GetBytes(body, "error").IsObject() {
 		return false
 	}
 	failoverErr.ResponseBody = body
 	failoverErr.StrictOpenAIAPIKeyPassthrough = true
 	return true
+}
+
+func isStrictOpenAIAPIKeyPassthroughErrorStatus(statusCode int, allowHTTPAuthStatus bool) bool {
+	switch statusCode {
+	case http.StatusBadRequest,
+		http.StatusTooManyRequests:
+		return true
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return allowHTTPAuthStatus
+	default:
+		return false
+	}
 }
 
 func (s *OpenAIGatewayService) handleErrorResponsePassthrough(

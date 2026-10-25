@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -233,6 +234,20 @@ func TestStrictOpenAIAPIKeyHTTPEncryptedErrorDoesNotUsePoolRetry(t *testing.T) {
 	body := []byte(`{"error":{"code":"invalid_encrypted_content","type":"invalid_request_error","message":"The encrypted content could not be verified.","param":""}}`)
 
 	require.False(t, shouldFailoverOpenAIPassthroughResponse(account, http.StatusBadRequest, body))
+}
+
+func TestStrictOpenAIAPIKeyHTTPAuthErrorIsPreservedAfterFailover(t *testing.T) {
+	for _, statusCode := range []int{http.StatusUnauthorized, http.StatusForbidden} {
+		t.Run(http.StatusText(statusCode), func(t *testing.T) {
+			account := strictOpenAIAPIKeyPassthroughTestAccount()
+			body := []byte(`{"error":{"type":"authentication_error","code":"InvalidAuthenticationToken","message":"Azure rejected the upstream key","param":null,"innererror":{"code":"ExpiredAuthenticationToken"},"status":` + strconv.Itoa(statusCode) + `},"request_id":"az-request-1"}`)
+			failoverErr := newOpenAIUpstreamFailoverError(statusCode, http.Header{"Content-Type": {"application/json"}}, body, "Azure rejected the upstream key", false)
+
+			require.True(t, preserveStrictOpenAIAPIKeyHTTPFailoverError(account, failoverErr, body))
+			require.True(t, failoverErr.StrictOpenAIAPIKeyPassthrough)
+			require.JSONEq(t, string(body), string(failoverErr.ResponseBody))
+		})
+	}
 }
 
 func TestStrictOpenAIAPIKeyStreamCredentialErrorsKeepManagedEnvelope(t *testing.T) {
