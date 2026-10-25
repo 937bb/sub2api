@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -228,4 +229,50 @@ func TestBuildUpstreamRequestNamespacesCodexIdentityByOAuthAccount(t *testing.T)
 	require.GreaterOrEqual(t, checked, 5, "test must exercise the real outbound identity surface")
 	require.Empty(t, first.Get("session_id"))
 	require.Empty(t, first.Get("conversation_id"))
+}
+
+func TestBuildUpstreamRequestNamespacesCodexIdentityByAPIKey(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	svc := &OpenAIGatewayService{}
+	body := []byte(`{"model":"gpt-6.1-sol","stream":true,"prompt_cache_key":"shared-client-session"}`)
+	account := &Account{
+		ID:        11,
+		Platform:  PlatformOpenAI,
+		Type:      AccountTypeOAuth,
+		CreatedAt: time.Date(2026, time.October, 1, 0, 0, 0, 0, time.UTC),
+		Credentials: map[string]any{
+			"chatgpt_account_id": "shared-upstream-account",
+		},
+	}
+
+	build := func(apiKeyID int64) http.Header {
+		t.Helper()
+		recorder := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(recorder)
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+		c.Set("api_key", &APIKey{ID: apiKeyID})
+		c.Request.Header.Set("session-id", "shared-client-session")
+		c.Request.Header.Set("thread-id", "shared-client-thread")
+		c.Request.Header.Set("x-client-request-id", "shared-client-thread")
+
+		req, err := svc.buildUpstreamRequest(
+			context.Background(), c, account, body, "oauth-token", true, "shared-client-session", true,
+		)
+		require.NoError(t, err)
+		return req.Header
+	}
+
+	key77 := build(77)
+	key77Again := build(77)
+	key88 := build(88)
+
+	for _, header := range []string{"Session-Id", "Thread-Id", "X-Client-Request-Id"} {
+		require.NotEmpty(t, key77.Get(header), header)
+		require.Equal(t, key77.Get(header), key77Again.Get(header), "same API key must retain stable identity: %s", header)
+		require.NotEqual(t, key77.Get(header), key88.Get(header), "different API keys must receive isolated identity: %s", header)
+	}
+	require.Equal(t, key77.Get("Thread-Id"), key77.Get("X-Client-Request-Id"))
+	require.Equal(t, key88.Get("Thread-Id"), key88.Get("X-Client-Request-Id"))
+	require.Empty(t, key77.Get("session_id"))
+	require.Empty(t, key77.Get("conversation_id"))
 }
