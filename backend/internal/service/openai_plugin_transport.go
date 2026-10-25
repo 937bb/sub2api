@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 )
 
@@ -19,6 +20,11 @@ func (s *OpenAIGatewayService) doOpenAIUpstream(request *http.Request, proxyURL 
 		return s.doSIWCHTTP(request, proxyURL)
 	}
 	if s.pluginManager != nil {
+		if s.pluginManager.ShouldRouteOpenAIOAuth(account) {
+			if err := CompressOpenAICodexHTTPRequest(request); err != nil {
+				return nil, fmt.Errorf("compress codex HTTP request: %w", err)
+			}
+		}
 		response, handled, err := s.pluginManager.RoundTripOpenAIOAuth(request.Context(), request, proxyURL, account)
 		if handled {
 			return response, err

@@ -244,7 +244,8 @@ func resolveConvergedSessionID(seed string) string {
 	if seed == "" {
 		return ""
 	}
-	return deriveStableUUIDv4("sub2api:codex-session-id:v2:" + seed)
+	stableSeed := "sub2api:codex-session-id:v3:" + seed
+	return deriveStableCodexUUIDv7(stableSeed, codexIdentityUnixMilli(nil, stableSeed))
 }
 
 // resolveConvergedThreadID 按客户端原始 session-id 确定性派生 thread_id。
@@ -254,7 +255,8 @@ func resolveConvergedThreadID(seed, clientSessionID string) string {
 	if seed == "" || clientSessionID == "" {
 		return ""
 	}
-	return deriveStableUUIDv4("sub2api:codex-thread-id:v2:" + seed + ":" + clientSessionID)
+	stableSeed := "sub2api:codex-thread-id:v3:" + seed + ":" + clientSessionID
+	return deriveStableCodexUUIDv7(stableSeed, codexIdentityUnixMilli(nil, stableSeed))
 }
 
 // codexFingerprintIDs 收敛后的完整 ID 集合。

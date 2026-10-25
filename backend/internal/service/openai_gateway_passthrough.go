@@ -156,6 +156,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	}
 
 	if account != nil && account.UsesOpenAICodexProtocol() {
+		stageCodexOriginalPromptCacheKey(c, gjson.GetBytes(body, "prompt_cache_key").String())
 		if rejectReason := detectOpenAIPassthroughInstructionsRejectReason(reqModel, body); rejectReason != "" {
 			rejectMsg := "OpenAI codex passthrough requires a non-empty instructions field"
 			MarkOpsClientBusinessLimited(c, OpsClientBusinessLimitedReasonLocalPolicyDenied)
@@ -690,6 +691,13 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 		// only that token while preserving any independent beta negotiation.
 		stripOpenAILegacyResponsesBeta(req.Header)
 		promptCacheKey := strings.TrimSpace(gjson.GetBytes(body, "prompt_cache_key").String())
+		if c != nil {
+			if staged, exists := c.Get(codexOriginalPromptCacheKey); exists {
+				if original, ok := staged.(string); ok {
+					promptCacheKey = strings.TrimSpace(original)
+				}
+			}
+		}
 		req.Host = "chatgpt.com"
 		if err := resolveAndSetOpenAIChatGPTAccountHeaders(ctx, s.accountRepo, req.Header, account); err != nil {
 			return nil, fmt.Errorf("resolve chatgpt account headers: %w", err)
@@ -749,6 +757,9 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 	// 会话隔离之后、终态身份收口之前）。
 	if !strictAPIKeyPassthrough {
 		applyStagedCodexFingerprintHeaders(c, account, req.Header)
+	}
+	if account.UsesOpenAICodexProtocol() {
+		applyCodexNativeSessionHeaders(req.Header, body)
 	}
 	// 终态收口：透传路径的 OAuth 与非透传完全一致，同样强制统一出站身份
 	// （User-Agent / originator / version 同源自洽），客户端自报身份不会到达上游。
