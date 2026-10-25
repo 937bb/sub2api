@@ -113,6 +113,30 @@ func filterOpenAIResponsesNoneReasoningEffortForAccount(account *Account, body [
 	return out, nil
 }
 
+func hasOpenAIResponsesStandaloneInput(body []byte) bool {
+	for _, path := range []string{"input", "prompt", "conversation"} {
+		value := gjson.GetBytes(body, path)
+		if !value.Exists() || value.Type == gjson.Null {
+			continue
+		}
+		switch {
+		case value.Type == gjson.String:
+			if strings.TrimSpace(value.String()) != "" {
+				return true
+			}
+		case value.IsArray():
+			if len(value.Array()) > 0 {
+				return true
+			}
+		case value.IsObject():
+			if len(value.Map()) > 0 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func deleteOpenAIResponsesNoneReasoningEffortFromObject(account *Account, body map[string]any) {
 	if body == nil || shouldPreserveOpenAIResponsesNoneReasoningEffort(account) {
 		return
@@ -427,6 +451,41 @@ func trimOpenAIEncryptedReasoningItems(reqBody map[string]any) bool {
 	default:
 		return false
 	}
+}
+
+// dropOpenAIRejectedItemReferences removes only amsg_* item_reference entries
+// explicitly named by an invalid_encrypted_content response. It refuses to
+// create an empty input so the retry loop cannot emit a guaranteed-invalid
+// request after removing the sole continuation anchor.
+func dropOpenAIRejectedItemReferences(reqBody map[string]any, errorBody []byte) bool {
+	if len(reqBody) == 0 || len(errorBody) == 0 {
+		return false
+	}
+	input, ok := reqBody["input"].([]any)
+	if !ok || len(input) == 0 {
+		return false
+	}
+
+	filtered := make([]any, 0, len(input))
+	removed := false
+	for _, raw := range input {
+		item, itemOK := raw.(map[string]any)
+		if !itemOK || strings.TrimSpace(stringValue(item["type"])) != "item_reference" {
+			filtered = append(filtered, raw)
+			continue
+		}
+		id := strings.TrimSpace(stringValue(item["id"]))
+		if !strings.HasPrefix(id, "amsg_") || !bytes.Contains(errorBody, []byte(id)) {
+			filtered = append(filtered, raw)
+			continue
+		}
+		removed = true
+	}
+	if !removed || len(filtered) == 0 {
+		return false
+	}
+	reqBody["input"] = filtered
+	return true
 }
 
 func sanitizeEncryptedReasoningInputItem(item any) (next any, changed bool, keep bool) {

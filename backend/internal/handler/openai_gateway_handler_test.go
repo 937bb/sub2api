@@ -972,7 +972,7 @@ func TestOpenAIResponses_RejectsHTTPContinuationOwnedByAnotherUser(t *testing.T)
 	require.Contains(t, w.Body.String(), "previous_response_id is not available for this user")
 }
 
-func TestOpenAIResponses_RejectsUnownedHTTPContinuation(t *testing.T) {
+func TestOpenAIResponses_AllowsHTTPContinuationWithExpiredOwnerBinding(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	w := httptest.NewRecorder()
@@ -989,8 +989,7 @@ func TestOpenAIResponses_RejectsUnownedHTTPContinuation(t *testing.T) {
 	h := newOpenAIHandlerForPreviousResponseIDValidation(t, nil)
 	h.Responses(c)
 
-	require.Equal(t, http.StatusBadRequest, w.Code)
-	require.Contains(t, w.Body.String(), "previous_response_id is not available for this user")
+	require.NotContains(t, w.Body.String(), "previous_response_id is not available for this user")
 }
 
 func TestOpenAIResponses_FunctionCallOutputHTTPGuidanceDoesNotSuggestPreviousResponseReuse(t *testing.T) {

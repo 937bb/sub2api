@@ -586,7 +586,7 @@ func TestOpenAIGatewayService_BindHTTPResponseAccount(t *testing.T) {
 
 	owned, err = svc.ValidateOpenAIHTTPResponseOwner(context.Background(), groupID, "resp_unknown", 601, 501)
 	require.NoError(t, err)
-	require.False(t, owned)
+	require.True(t, owned, "missing affinity metadata must not reject a valid upstream continuation")
 }
 
 func TestOpenAIGatewayService_BindHTTPResponseAccount_DetachesCanceledRequestContext(t *testing.T) {

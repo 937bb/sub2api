@@ -348,6 +348,56 @@ func TestFilterOpenAIResponsesNoneReasoningEffortForAccount_APIKeyAutomaticPasst
 	require.JSONEq(t, string(body), string(got))
 }
 
+func TestHasOpenAIResponsesStandaloneInput(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+		want bool
+	}{
+		{name: "previous only", body: `{"previous_response_id":"resp_1"}`, want: false},
+		{name: "empty input", body: `{"input":[],"previous_response_id":"resp_1"}`, want: false},
+		{name: "string input", body: `{"input":"continue","previous_response_id":"resp_1"}`, want: true},
+		{name: "array input", body: `{"input":[{"role":"user","content":"continue"}],"previous_response_id":"resp_1"}`, want: true},
+		{name: "prompt", body: `{"prompt":{"id":"pmpt_1"},"previous_response_id":"resp_1"}`, want: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, hasOpenAIResponsesStandaloneInput([]byte(tc.body)))
+		})
+	}
+}
+
+func TestDropOpenAIRejectedItemReferences(t *testing.T) {
+	t.Run("drops only named amsg reference", func(t *testing.T) {
+		request := map[string]any{"input": []any{
+			map[string]any{"type": "item_reference", "id": "amsg_stale"},
+			map[string]any{"type": "item_reference", "id": "amsg_keep"},
+			map[string]any{"type": "message", "role": "user", "content": "continue"},
+		}}
+		changed := dropOpenAIRejectedItemReferences(request, []byte(`{"error":{"code":"invalid_encrypted_content","message":"The encrypted content for item amsg_stale could not be verified"}}`))
+		require.True(t, changed)
+		input := request["input"].([]any)
+		require.Len(t, input, 2)
+		require.Equal(t, "amsg_keep", input[0].(map[string]any)["id"])
+	})
+
+	t.Run("does not create empty input", func(t *testing.T) {
+		request := map[string]any{"input": []any{map[string]any{"type": "item_reference", "id": "amsg_only"}}}
+		changed := dropOpenAIRejectedItemReferences(request, []byte(`{"error":{"code":"invalid_encrypted_content","message":"invalid amsg_only"}}`))
+		require.False(t, changed)
+		require.Len(t, request["input"], 1)
+	})
+
+	t.Run("ignores unmentioned references", func(t *testing.T) {
+		request := map[string]any{"input": []any{
+			map[string]any{"type": "item_reference", "id": "amsg_keep"},
+			map[string]any{"type": "message", "content": "continue"},
+		}}
+		changed := dropOpenAIRejectedItemReferences(request, []byte(`{"error":{"code":"invalid_encrypted_content","message":"invalid amsg_other"}}`))
+		require.False(t, changed)
+		require.Len(t, request["input"], 2)
+	})
+}
+
 // Lite 工具迁移到 input[].additional_tools 后，仍应按有工具请求处理。
 func TestNormalizeOpenAIParallelToolCallsWithoutTools_KeepsResponsesLiteAdditionalTools(t *testing.T) {
 	liteBody := []byte(`{"input":[{"type":"message","role":"user","content":"hi"},{"type":"additional_tools","tools":[{"type":"function","name":"spawn_agent"}]}],"parallel_tool_calls":false}`)
