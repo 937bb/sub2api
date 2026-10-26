@@ -246,9 +246,10 @@ func appendOpenAIEncryptedAgentItemDigestsFromItem(item gjson.Result, digests *[
 	}
 }
 
-// collectOpenAIRejectedAgentItemDigestsRaw records only the amsg_* item IDs
-// explicitly named by the upstream error. These synthetic digests let later
-// turns remove the same stale reference before their first upstream attempt.
+// collectOpenAIRejectedAgentItemDigestsRaw records all account-bound amsg_*
+// items after the upstream explicitly rejects one ID from the same request.
+// The upstream reports only the first invalid item, so retaining sibling IDs
+// would otherwise cause another terminal failure after the bounded retry.
 func collectOpenAIRejectedAgentItemDigestsRaw(payload, errorBody []byte) []string {
 	if len(payload) == 0 || len(errorBody) == 0 {
 		return nil
@@ -257,24 +258,36 @@ func collectOpenAIRejectedAgentItemDigestsRaw(payload, errorBody []byte) []strin
 	if !input.Exists() {
 		return nil
 	}
-	var digests []string
-	appendItem := func(item gjson.Result) {
+	rejected := false
+	checkRejected := func(item gjson.Result) {
 		if !openAIEncryptedAgentItemType(item.Get("type").String()) {
 			return
 		}
 		id := strings.TrimSpace(item.Get("id").String())
-		if !strings.HasPrefix(id, "amsg_") || !strings.Contains(string(errorBody), id) {
-			return
+		if strings.HasPrefix(id, "amsg_") && strings.Contains(string(errorBody), id) {
+			rejected = true
 		}
-		appendOpenAIEncryptedAgentItemDigestsFromItem(item, &digests)
 	}
 	if input.IsArray() {
 		input.ForEach(func(_, item gjson.Result) bool {
-			appendItem(item)
+			checkRejected(item)
 			return true
 		})
 	} else if input.IsObject() {
-		appendItem(input)
+		checkRejected(input)
+	}
+	if !rejected {
+		return nil
+	}
+
+	var digests []string
+	if input.IsArray() {
+		input.ForEach(func(_, item gjson.Result) bool {
+			appendOpenAIEncryptedAgentItemDigestsFromItem(item, &digests)
+			return true
+		})
+	} else if input.IsObject() {
+		appendOpenAIEncryptedAgentItemDigestsFromItem(input, &digests)
 	}
 	return digests
 }

@@ -169,6 +169,8 @@ func TestCollectOpenAIRejectedAgentItemDigestsRaw(t *testing.T) {
 	require.Equal(t, []string{
 		openAIEncryptedAgentItemDigest("amsg_stale"),
 		openAIEncryptedContentDigest("stale-cipher"),
+		openAIEncryptedAgentItemDigest("amsg_keep"),
+		openAIEncryptedContentDigest("valid-cipher"),
 	}, collectOpenAIRejectedAgentItemDigestsRaw(payload, errorBody))
 }
 

@@ -367,7 +367,7 @@ func TestHasOpenAIResponsesStandaloneInput(t *testing.T) {
 }
 
 func TestDropOpenAIRejectedAgentItems(t *testing.T) {
-	t.Run("drops only named amsg reference", func(t *testing.T) {
+	t.Run("drops the rejected agent lineage", func(t *testing.T) {
 		request := map[string]any{"input": []any{
 			map[string]any{"type": "item_reference", "id": "amsg_stale"},
 			map[string]any{"type": "item_reference", "id": "amsg_keep"},
@@ -376,8 +376,8 @@ func TestDropOpenAIRejectedAgentItems(t *testing.T) {
 		changed := dropOpenAIRejectedAgentItems(request, []byte(`{"error":{"code":"invalid_encrypted_content","message":"The encrypted content for item amsg_stale could not be verified"}}`))
 		require.True(t, changed)
 		input := request["input"].([]any)
-		require.Len(t, input, 2)
-		require.Equal(t, "amsg_keep", input[0].(map[string]any)["id"])
+		require.Len(t, input, 1)
+		require.Equal(t, "message", input[0].(map[string]any)["type"])
 	})
 
 	t.Run("does not create empty input", func(t *testing.T) {
@@ -397,7 +397,7 @@ func TestDropOpenAIRejectedAgentItems(t *testing.T) {
 		require.Len(t, request["input"], 2)
 	})
 
-	t.Run("drops only named agent message", func(t *testing.T) {
+	t.Run("drops sibling agent messages after one is rejected", func(t *testing.T) {
 		request := map[string]any{"input": []any{
 			map[string]any{"type": "agent_message", "id": "amsg_stale", "content": []any{
 				map[string]any{"type": "encrypted_content", "encrypted_content": "cipher"},
@@ -410,8 +410,8 @@ func TestDropOpenAIRejectedAgentItems(t *testing.T) {
 		changed := dropOpenAIRejectedAgentItems(request, []byte(`{"error":{"code":"invalid_encrypted_content","message":"The encrypted content for item amsg_stale could not be verified"}}`))
 		require.True(t, changed)
 		input := request["input"].([]any)
-		require.Len(t, input, 2)
-		require.Equal(t, "amsg_keep", input[0].(map[string]any)["id"])
+		require.Len(t, input, 1)
+		require.Equal(t, "message", input[0].(map[string]any)["type"])
 	})
 }
 

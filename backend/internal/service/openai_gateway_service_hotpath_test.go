@@ -701,19 +701,17 @@ func TestOpenAIGatewayService_Forward_HTTPRetryRecoveryDropsNamedAgentMessageAnd
 	require.NotNil(t, first)
 	require.Len(t, upstream.bodies, 2)
 	require.Equal(t, int64(3), gjson.GetBytes(upstream.bodies[0], "input.#").Int())
-	require.Equal(t, int64(2), gjson.GetBytes(upstream.bodies[1], "input.#").Int())
-	require.Equal(t, "amsg_keep", gjson.GetBytes(upstream.bodies[1], "input.0.id").String())
-	require.Equal(t, "agent-valid", gjson.GetBytes(upstream.bodies[1], "input.0.content.1.encrypted_content").String())
-	require.Equal(t, "9007199254740993", gjson.GetBytes(upstream.bodies[1], "input.1.content.0.nonce").Raw)
+	require.Equal(t, int64(1), gjson.GetBytes(upstream.bodies[1], "input.#").Int())
+	require.Equal(t, "message", gjson.GetBytes(upstream.bodies[1], "input.0.type").String())
+	require.Equal(t, "9007199254740993", gjson.GetBytes(upstream.bodies[1], "input.0.content.0.nonce").Raw)
 
 	second, err := svc.Forward(context.Background(), newContext(), account, body)
 	require.NoError(t, err)
 	require.NotNil(t, second)
 	require.Len(t, upstream.bodies, 3, "lineage should sanitize the next turn before its first upstream request")
-	require.Equal(t, int64(2), gjson.GetBytes(upstream.bodies[2], "input.#").Int())
-	require.Equal(t, "amsg_keep", gjson.GetBytes(upstream.bodies[2], "input.0.id").String())
-	require.Equal(t, "agent-valid", gjson.GetBytes(upstream.bodies[2], "input.0.content.1.encrypted_content").String())
-	require.Equal(t, "message", gjson.GetBytes(upstream.bodies[2], "input.1.type").String())
+	require.Equal(t, int64(1), gjson.GetBytes(upstream.bodies[2], "input.#").Int())
+	require.Equal(t, "message", gjson.GetBytes(upstream.bodies[2], "input.0.type").String())
+	require.Equal(t, "continue", gjson.GetBytes(upstream.bodies[2], "input.0.content.0.text").String())
 }
 
 func TestOpenAIGatewayService_Forward_StreamInvalidEncryptedToolOutputRetriesBeforeWrite(t *testing.T) {

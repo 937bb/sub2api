@@ -453,16 +453,33 @@ func trimOpenAIEncryptedReasoningItems(reqBody map[string]any) bool {
 	}
 }
 
-// dropOpenAIRejectedAgentItems removes only amsg_* item_reference or
-// agent_message entries explicitly named by an invalid_encrypted_content
-// response. It refuses to create an empty input so the retry loop cannot emit
-// a guaranteed-invalid request after removing the sole continuation anchor.
+// dropOpenAIRejectedAgentItems removes amsg_* item_reference and agent_message
+// entries after the upstream explicitly rejects one of those IDs. Agent IDs
+// and their ciphertext are account-bound, while the upstream reports only the
+// first invalid item per attempt. Removing the whole rejected lineage prevents
+// a one-error-per-item retry chain. The function refuses to create empty input.
 func dropOpenAIRejectedAgentItems(reqBody map[string]any, errorBody []byte) bool {
 	if len(reqBody) == 0 || len(errorBody) == 0 {
 		return false
 	}
 	input, ok := reqBody["input"].([]any)
 	if !ok || len(input) == 0 {
+		return false
+	}
+
+	rejected := false
+	for _, raw := range input {
+		item, itemOK := raw.(map[string]any)
+		if !itemOK || !openAIEncryptedAgentItemType(stringValue(item["type"])) {
+			continue
+		}
+		id := strings.TrimSpace(stringValue(item["id"]))
+		if strings.HasPrefix(id, "amsg_") && bytes.Contains(errorBody, []byte(id)) {
+			rejected = true
+			break
+		}
+	}
+	if !rejected {
 		return false
 	}
 
@@ -475,7 +492,7 @@ func dropOpenAIRejectedAgentItems(reqBody map[string]any, errorBody []byte) bool
 			continue
 		}
 		id := strings.TrimSpace(stringValue(item["id"]))
-		if !strings.HasPrefix(id, "amsg_") || !bytes.Contains(errorBody, []byte(id)) {
+		if !strings.HasPrefix(id, "amsg_") {
 			filtered = append(filtered, raw)
 			continue
 		}

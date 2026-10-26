@@ -299,8 +299,9 @@ func TestOpenAIGatewayService_Forward_HTTPIngressRetriesRejectedItemReferenceOnc
 	require.NotNil(t, result)
 	require.Equal(t, 2, upstream.callCount)
 	require.Equal(t, int64(3), gjson.GetBytes(upstream.bodies[0], "input.#").Int())
-	require.Equal(t, int64(2), gjson.GetBytes(upstream.bodies[1], "input.#").Int())
-	require.Equal(t, "amsg_keep", gjson.GetBytes(upstream.bodies[1], "input.0.id").String())
+	require.Equal(t, int64(1), gjson.GetBytes(upstream.bodies[1], "input.#").Int())
+	require.Equal(t, "message", gjson.GetBytes(upstream.bodies[1], "input.0.type").String())
+	require.Equal(t, "continue", gjson.GetBytes(upstream.bodies[1], "input.0.content").String())
 }
 
 func TestOpenAIGatewayService_Forward_HTTPIngressDoesNotRetrySoleRejectedItemReference(t *testing.T) {

@@ -164,10 +164,9 @@ func TestOpenAIGatewayService_OAuthPassthrough_InvalidEncryptedAgentMessageRetri
 	require.NotNil(t, result)
 	require.Len(t, upstream.bodies, 2)
 	require.Equal(t, int64(3), gjson.GetBytes(upstream.bodies[0], "input.#").Int())
-	require.Equal(t, int64(2), gjson.GetBytes(upstream.bodies[1], "input.#").Int())
-	require.Equal(t, "amsg_passthrough_keep", gjson.GetBytes(upstream.bodies[1], "input.0.id").String())
-	require.Equal(t, "passthrough-valid", gjson.GetBytes(upstream.bodies[1], "input.0.content.0.encrypted_content").String())
-	require.Equal(t, "message", gjson.GetBytes(upstream.bodies[1], "input.1.type").String())
+	require.Equal(t, int64(1), gjson.GetBytes(upstream.bodies[1], "input.#").Int())
+	require.Equal(t, "message", gjson.GetBytes(upstream.bodies[1], "input.0.type").String())
+	require.Equal(t, "continue", gjson.GetBytes(upstream.bodies[1], "input.0.content.0.text").String())
 }
 
 func TestOpenAIGatewayService_ResponsesUnknownModelDoesNotFallbackToGPT54(t *testing.T) {
