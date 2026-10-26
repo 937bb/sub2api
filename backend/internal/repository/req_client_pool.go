@@ -9,6 +9,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyurl"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/servertiming"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 
 	"github.com/imroc/req/v3"
 )
@@ -16,9 +17,10 @@ import (
 // reqClientOptions 定义 req 客户端的构建参数
 type reqClientOptions struct {
 	ProxyURL    string        // 代理 URL（支持 http/https/socks5）
-	Timeout     time.Duration // 请求超时时间
-	Impersonate bool          // 是否模拟浏览器指纹（当前为 Firefox，Chrome 伪装会被 chatgpt.com 的 Cloudflare 质询）
-	ForceHTTP2  bool          // 是否强制使用 HTTP/2
+	Timeout     time.Duration // Request timeout.
+	Impersonate bool          // Emulate Firefox; Chrome currently triggers a chatgpt.com Cloudflare challenge.
+	ForceHTTP2  bool          // Force HTTP/2.
+	CodexMacOS  bool          // Use the captured Codex Desktop macOS TLS/HTTP1 profile.
 }
 
 // sharedReqClients 存储按配置参数缓存的 req 客户端实例
@@ -57,11 +59,25 @@ func getSharedReqClient(opts reqClientOptions) (*req.Client, error) {
 		// 在同一出口 IP 下稳定通过，故改用 Firefox 指纹。
 		client = client.ImpersonateFirefox()
 	}
-	trimmed, _, err := proxyurl.Parse(opts.ProxyURL)
+	trimmed, parsedProxy, err := proxyurl.Parse(opts.ProxyURL)
 	if err != nil {
 		return nil, err
 	}
-	if trimmed != "" {
+	if opts.CodexMacOS {
+		settings := defaultPoolSettings(nil)
+		settings.responseHeaderTimeout = opts.Timeout
+		transport, transportErr := buildUpstreamTransportWithTLSFingerprint(
+			settings,
+			parsedProxy,
+			tlsfingerprint.CodexDesktopMacOSProfile(),
+		)
+		if transportErr != nil {
+			return nil, transportErr
+		}
+		client.GetTransport().WrapRoundTripFunc(func(http.RoundTripper) req.HttpRoundTripFunc {
+			return transport.RoundTrip
+		})
+	} else if trimmed != "" {
 		client.SetProxyURL(trimmed)
 	}
 	client = instrumentReqClient(client)
@@ -85,11 +101,12 @@ func instrumentReqClient(client *req.Client) *req.Client {
 }
 
 func buildReqClientKey(opts reqClientOptions) string {
-	return fmt.Sprintf("%s|%s|%t|%t",
+	return fmt.Sprintf("%s|%s|%t|%t|%t",
 		strings.TrimSpace(opts.ProxyURL),
 		opts.Timeout.String(),
 		opts.Impersonate,
 		opts.ForceHTTP2,
+		opts.CodexMacOS,
 	)
 }
 

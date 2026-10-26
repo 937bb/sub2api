@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 )
 
 func (s *OpenAIGatewayService) SetPluginManager(manager *PluginManager) {
@@ -30,6 +32,15 @@ func (s *OpenAIGatewayService) doOpenAIUpstream(request *http.Request, proxyURL 
 			return response, err
 		}
 	}
+	if CodexMacOSFingerprintEnabled() && account != nil && account.IsOpenAIOAuthLike() {
+		return s.httpUpstream.DoWithTLS(
+			request,
+			proxyURL,
+			account.ID,
+			account.Concurrency,
+			tlsfingerprint.CodexDesktopMacOSProfile(),
+		)
+	}
 	return s.httpUpstream.Do(request, proxyURL, account.ID, account.Concurrency)
 }
 
@@ -46,6 +57,15 @@ func (s *AccountTestService) doOpenAIAccountTestUpstream(
 		if handled {
 			return response, err
 		}
+	}
+	if CodexMacOSFingerprintEnabled() && account != nil && account.IsOpenAIOAuthLike() {
+		return s.httpUpstream.DoWithTLS(
+			request,
+			proxyURL,
+			account.ID,
+			account.Concurrency,
+			tlsfingerprint.CodexDesktopMacOSProfile(),
+		)
 	}
 	if useTLSFallback {
 		return s.httpUpstream.DoWithTLS(

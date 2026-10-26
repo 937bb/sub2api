@@ -283,6 +283,13 @@ gateway:
   #
   # 默认 false（即归一化开启）；仅当上游调整分桶、使归一化反而落入降载桶时才置 true。
   disable_codex_originator_normalization: false
+  # OpenAI OAuth defaults to the captured Codex Desktop macOS arm64 profile:
+  # matching User-Agent/originator, TLS ClientHello, and HTTP/1.1. This does
+  # not affect SIWC, API-key, Azure, NewAPI, or other upstream providers.
+  # Set true to roll back to the legacy Linux TUI identity and Go transport.
+  disable_codex_macos_fingerprint: false
+  codex_macos_version: "26.6.2"
+  codex_desktop_build: "26.1013.40934"
   # Enable Codex image-generation bridge injection for /openai/v1/responses.
   # 是否为 Codex /responses 请求自动注入 image_generation 工具与桥接指令。
   #

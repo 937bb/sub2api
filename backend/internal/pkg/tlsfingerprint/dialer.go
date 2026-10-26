@@ -5,12 +5,14 @@ package tlsfingerprint
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
 	"encoding/base64"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 
 	utls "github.com/refraction-networking/utls"
 	"golang.org/x/net/proxy"
@@ -30,6 +32,33 @@ type Profile struct {
 	KeyShareGroups      []uint16 // Empty uses [X25519]
 	PSKModes            []uint16 // Empty uses [psk_dhe_ke]
 	Extensions          []uint16 // Extension type IDs in order; empty uses default Node.js 24.x order
+	TLSVersionMin       uint16   // Zero uses TLS 1.0 for legacy profile compatibility
+	TLSVersionMax       uint16   // Zero uses TLS 1.3 for legacy profile compatibility
+}
+
+// CodexDesktopMacOSProfile returns the ClientHello captured from Codex Desktop
+// 26.1013.40934 on macOS 26.6.2 arm64. The profile intentionally has no ALPN
+// extension: the native client negotiates TLS 1.2 and sends Responses over
+// HTTP/1.1.
+func CodexDesktopMacOSProfile() *Profile {
+	return &Profile{
+		Name: "Codex Desktop macOS arm64",
+		CipherSuites: []uint16{
+			0x00ff,
+			0xc02c, 0xc02b, 0xc024, 0xc023, 0xc00a, 0xc009, 0xc008,
+			0xc030, 0xc02f, 0xc028, 0xc027, 0xc014, 0xc013, 0xc012,
+			0x009d, 0x009c, 0x003d, 0x003c, 0x0035, 0x002f, 0x000a,
+		},
+		Curves:       []uint16{23, 24, 25},
+		PointFormats: []uint16{0},
+		SignatureAlgorithms: []uint16{
+			0x0401, 0x0201, 0x0501, 0x0601,
+			0x0403, 0x0203, 0x0503, 0x0603,
+		},
+		Extensions:    []uint16{0, 10, 11, 13, 5, 18, 23},
+		TLSVersionMin: utls.VersionTLS10,
+		TLSVersionMax: utls.VersionTLS12,
+	}
 }
 
 // Dialer creates TLS connections with custom fingerprints.
@@ -204,6 +233,17 @@ func (d *HTTPProxyDialer) DialTLSContext(ctx context.Context, network, addr stri
 		return nil, fmt.Errorf("connect to proxy: %w", err)
 	}
 	slog.Debug("tls_fingerprint_http_proxy_connected", "proxy_addr", proxyAddr)
+	if strings.EqualFold(d.proxyURL.Scheme, "https") {
+		proxyTLS := tls.Client(conn, &tls.Config{
+			MinVersion: tls.VersionTLS12,
+			ServerName: d.proxyURL.Hostname(),
+		})
+		if err := proxyTLS.HandshakeContext(ctx); err != nil {
+			_ = conn.Close()
+			return nil, fmt.Errorf("TLS handshake with HTTPS proxy: %w", err)
+		}
+		conn = proxyTLS
+	}
 
 	// Step 2: Send CONNECT request to establish tunnel
 	req := &http.Request{
@@ -379,6 +419,16 @@ func buildClientHelloSpecFromProfile(profile *Profile) *utls.ClientHelloSpec {
 	}
 
 	enableGREASE := profile != nil && profile.EnableGREASE
+	tlsVersionMin := uint16(utls.VersionTLS10)
+	tlsVersionMax := uint16(utls.VersionTLS13)
+	if profile != nil {
+		if profile.TLSVersionMin != 0 {
+			tlsVersionMin = profile.TLSVersionMin
+		}
+		if profile.TLSVersionMax != 0 {
+			tlsVersionMax = profile.TLSVersionMax
+		}
+	}
 
 	// Build key shares
 	keyShares := make([]utls.KeyShare, len(keyShareGroups))
@@ -451,8 +501,8 @@ func buildClientHelloSpecFromProfile(profile *Profile) *utls.ClientHelloSpec {
 		CipherSuites:       cipherSuites,
 		CompressionMethods: []uint8{0}, // null compression only (standard)
 		Extensions:         extensions,
-		TLSVersMax:         utls.VersionTLS13,
-		TLSVersMin:         utls.VersionTLS10,
+		TLSVersMax:         tlsVersionMax,
+		TLSVersMin:         tlsVersionMin,
 	}
 }
 

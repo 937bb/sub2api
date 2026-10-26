@@ -18,8 +18,57 @@ const codexUpstreamMinVersion = "0.144.0"
 // codexClientVersionMaxLen 官方版本号均为短 ASCII 串，远低于此上限。
 const codexClientVersionMaxLen = 64
 
+const (
+	codexDesktopOriginator       = "Codex Desktop"
+	codexDesktopMacOSVersion     = "26.6.2"
+	codexDesktopApplicationBuild = "26.1013.40934"
+)
+
 // codexClientVersionPattern 允许 0.146.0 与 0.147.0-alpha.4 两类官方形态。
 var codexClientVersionPattern = regexp.MustCompile(`^[0-9]+(\.[0-9]+){1,3}(-[0-9A-Za-z.]+)?$`)
+
+var codexDesktopBuildPattern = regexp.MustCompile(`^[0-9]+(\.[0-9]+){1,4}$`)
+
+type codexMacOSFingerprintConfig struct {
+	enabled      bool
+	macOSVersion string
+	desktopBuild string
+}
+
+var codexMacOSFingerprint = func() *atomic.Pointer[codexMacOSFingerprintConfig] {
+	value := &atomic.Pointer[codexMacOSFingerprintConfig]{}
+	value.Store(&codexMacOSFingerprintConfig{
+		macOSVersion: codexDesktopMacOSVersion,
+		desktopBuild: codexDesktopApplicationBuild,
+	})
+	return value
+}()
+
+// SetCodexMacOSFingerprintConfig publishes the process-wide OpenAI OAuth
+// transport identity. It is called once from server bootstrap and remains
+// separately switchable from general identity enforcement for fast rollback.
+func SetCodexMacOSFingerprintConfig(enabled bool, macOSVersion, desktopBuild string) {
+	macOSVersion = strings.TrimSpace(macOSVersion)
+	if !codexDesktopBuildPattern.MatchString(macOSVersion) {
+		macOSVersion = codexDesktopMacOSVersion
+	}
+	desktopBuild = strings.TrimSpace(desktopBuild)
+	if !codexDesktopBuildPattern.MatchString(desktopBuild) {
+		desktopBuild = codexDesktopApplicationBuild
+	}
+	codexMacOSFingerprint.Store(&codexMacOSFingerprintConfig{
+		enabled:      enabled,
+		macOSVersion: macOSVersion,
+		desktopBuild: desktopBuild,
+	})
+}
+
+// CodexMacOSFingerprintEnabled reports whether OpenAI OAuth should use the
+// captured Codex Desktop macOS transport profile.
+func CodexMacOSFingerprintEnabled() bool {
+	config := codexMacOSFingerprint.Load()
+	return config != nil && config.enabled
+}
 
 // NormalizeCodexClientVersion 校验并归一化 Codex 客户端版本号，非法值返回空串。
 // 该值会被拼进出站 User-Agent 与 version 头，必须拒绝任意字节，避免管理员误填或
@@ -39,6 +88,20 @@ func buildCodexCLIUserAgent(version string) string {
 		return codexCLIUserAgent
 	}
 	return openai.CodexDefaultOriginator + "/" + version + codexCLIUserAgentSuffix
+}
+
+func buildCodexDesktopUserAgent(version string) string {
+	if version = NormalizeCodexClientVersion(version); version == "" {
+		version = codexCLIVersion
+	}
+	config := codexMacOSFingerprint.Load()
+	macOSVersion := codexDesktopMacOSVersion
+	desktopBuild := codexDesktopApplicationBuild
+	if config != nil {
+		macOSVersion = config.macOSVersion
+		desktopBuild = config.desktopBuild
+	}
+	return codexDesktopOriginator + "/" + version + " (Mac OS " + macOSVersion + "; arm64) dumb (codex_desktop; " + desktopBuild + ")"
 }
 
 // codexIdentityEnforcement 控制 enforceCodexIdentityHeaders 是否强制统一出站身份，
@@ -109,7 +172,7 @@ func CodexCanonicalClientVersion() string {
 }
 
 // codexCanonicalUserAgent 返回出站规范 User-Agent。
-func codexCanonicalUserAgent() string {
+func configuredCodexUserAgent() string {
 	codexCanonicalUAMu.RLock()
 	resolver := codexCanonicalUAResolver
 	codexCanonicalUAMu.RUnlock()
@@ -119,6 +182,14 @@ func codexCanonicalUserAgent() string {
 		}
 	}
 	return codexCLIUserAgent
+}
+
+func codexCanonicalUserAgent() string {
+	configured := configuredCodexUserAgent()
+	if CodexMacOSFingerprintEnabled() {
+		return buildCodexDesktopUserAgent(codexClientVersionFromUA(configured))
+	}
+	return configured
 }
 
 // codexOutboundIdentity 出站身份三元组，三者必须同源自洽：
@@ -141,6 +212,12 @@ func resolveCodexOutboundIdentity(candidateUA string) codexOutboundIdentity {
 	canonical := codexCanonicalUserAgent()
 	if _, _, ok := openai.PairCodexClientIdentity(canonical); !ok {
 		canonical = codexCLIUserAgent
+	}
+	// A transport-level Desktop profile must remain internally consistent.
+	// Account overrides belong to the legacy TUI mode and cannot be mixed with
+	// a macOS ClientHello and Desktop originator.
+	if CodexMacOSFingerprintEnabled() {
+		candidateUA = ""
 	}
 	ua := candidateUA
 	if strings.TrimSpace(ua) == "" {
@@ -184,7 +261,9 @@ func ensureCodexIdentityHeaders(h http.Header) {
 	if strings.TrimSpace(h.Get("originator")) == "" {
 		h.Set("originator", identity.originator)
 	}
-	if strings.TrimSpace(h.Get("version")) == "" {
+	if CodexMacOSFingerprintEnabled() {
+		h.Del("version")
+	} else if strings.TrimSpace(h.Get("version")) == "" {
 		h.Set("version", identity.version)
 	}
 	h.Set("OpenAI-Beta", "responses=experimental")
@@ -195,7 +274,22 @@ func applyOpenAICodexProbeHeaders(h http.Header) {
 	if h == nil {
 		return
 	}
-	ensureCodexIdentityHeaders(h)
+	// API-key probes are not OpenAI OAuth traffic and must retain the legacy
+	// TUI identity even when the OAuth-only macOS profile is active.
+	configured := configuredCodexUserAgent()
+	originator, userAgent, ok := openai.PairCodexClientIdentity(configured)
+	if !ok {
+		originator = openai.CodexDefaultOriginator
+		userAgent = codexCLIUserAgent
+	}
+	version := codexClientVersionFromUA(configured)
+	if rebuilt := openai.SetCodexUserAgentVersion(userAgent, version); rebuilt != "" {
+		userAgent = rebuilt
+	}
+	h.Set("user-agent", userAgent)
+	h.Set("originator", originator)
+	h.Set("version", version)
+	h.Set("OpenAI-Beta", "responses=experimental")
 	h.Set("X-Codex-Window-ID", uuid.NewString())
 }
 
@@ -223,14 +317,18 @@ func enforceCodexIdentityHeadersWithUA(h http.Header, overrideUA string) {
 	if h == nil || h.Get("originator") == "" {
 		return
 	}
-	if !codexIdentityEnforcement.Load() {
+	if !codexIdentityEnforcement.Load() && !CodexMacOSFingerprintEnabled() {
 		pairCodexIdentityHeaders(h)
 		return
 	}
 	identity := resolveCodexOutboundIdentity(overrideUA)
 	h.Set("user-agent", identity.userAgent)
 	h.Set("originator", identity.originator)
-	h.Set("version", identity.version)
+	if CodexMacOSFingerprintEnabled() {
+		h.Del("version")
+	} else {
+		h.Set("version", identity.version)
+	}
 }
 
 // pairCodexIdentityHeaders 是关闭强制统一后的兜底收口：保留客户端真实身份，

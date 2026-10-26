@@ -48,6 +48,12 @@ func (r *defaultOpenAIWSProtocolResolver) Resolve(account *Account) OpenAIWSProt
 	if account.IsOpenAIWSForceHTTPEnabled() {
 		return openAIWSHTTPDecision("account_force_http")
 	}
+	if account.IsOpenAIOAuthLike() && CodexMacOSFingerprintEnabled() {
+		// The captured Codex Desktop profile is HTTP/1.1 without ALPN. Keep OAuth
+		// on HTTP/SSE so its transport cannot silently diverge to a Go WebSocket
+		// handshake while advertising the Desktop identity.
+		return openAIWSHTTPDecision("oauth_macos_fingerprint_http_only")
+	}
 	if r == nil || r.cfg == nil {
 		return openAIWSHTTPDecision("config_missing")
 	}
