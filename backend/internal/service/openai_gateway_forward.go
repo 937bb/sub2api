@@ -1094,6 +1094,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			return false, "", decodeErr
 		}
 		invalidDigests := collectOpenAIEncryptedContentDigestsRaw(lineageEntryBody)
+		invalidDigests = append(invalidDigests, collectOpenAIRejectedAgentItemDigestsRaw(lineageEntryBody, upstreamBody)...)
 		changed, recovery := recoverOpenAIInvalidEncryptedContentRequest(decoded, upstreamBody)
 		if !changed {
 			return false, "", nil

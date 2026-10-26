@@ -366,14 +366,14 @@ func TestHasOpenAIResponsesStandaloneInput(t *testing.T) {
 	}
 }
 
-func TestDropOpenAIRejectedItemReferences(t *testing.T) {
+func TestDropOpenAIRejectedAgentItems(t *testing.T) {
 	t.Run("drops only named amsg reference", func(t *testing.T) {
 		request := map[string]any{"input": []any{
 			map[string]any{"type": "item_reference", "id": "amsg_stale"},
 			map[string]any{"type": "item_reference", "id": "amsg_keep"},
 			map[string]any{"type": "message", "role": "user", "content": "continue"},
 		}}
-		changed := dropOpenAIRejectedItemReferences(request, []byte(`{"error":{"code":"invalid_encrypted_content","message":"The encrypted content for item amsg_stale could not be verified"}}`))
+		changed := dropOpenAIRejectedAgentItems(request, []byte(`{"error":{"code":"invalid_encrypted_content","message":"The encrypted content for item amsg_stale could not be verified"}}`))
 		require.True(t, changed)
 		input := request["input"].([]any)
 		require.Len(t, input, 2)
@@ -382,7 +382,7 @@ func TestDropOpenAIRejectedItemReferences(t *testing.T) {
 
 	t.Run("does not create empty input", func(t *testing.T) {
 		request := map[string]any{"input": []any{map[string]any{"type": "item_reference", "id": "amsg_only"}}}
-		changed := dropOpenAIRejectedItemReferences(request, []byte(`{"error":{"code":"invalid_encrypted_content","message":"invalid amsg_only"}}`))
+		changed := dropOpenAIRejectedAgentItems(request, []byte(`{"error":{"code":"invalid_encrypted_content","message":"invalid amsg_only"}}`))
 		require.False(t, changed)
 		require.Len(t, request["input"], 1)
 	})
@@ -392,9 +392,26 @@ func TestDropOpenAIRejectedItemReferences(t *testing.T) {
 			map[string]any{"type": "item_reference", "id": "amsg_keep"},
 			map[string]any{"type": "message", "content": "continue"},
 		}}
-		changed := dropOpenAIRejectedItemReferences(request, []byte(`{"error":{"code":"invalid_encrypted_content","message":"invalid amsg_other"}}`))
+		changed := dropOpenAIRejectedAgentItems(request, []byte(`{"error":{"code":"invalid_encrypted_content","message":"invalid amsg_other"}}`))
 		require.False(t, changed)
 		require.Len(t, request["input"], 2)
+	})
+
+	t.Run("drops only named agent message", func(t *testing.T) {
+		request := map[string]any{"input": []any{
+			map[string]any{"type": "agent_message", "id": "amsg_stale", "content": []any{
+				map[string]any{"type": "encrypted_content", "encrypted_content": "cipher"},
+			}},
+			map[string]any{"type": "agent_message", "id": "amsg_keep", "content": []any{
+				map[string]any{"type": "input_text", "text": "keep"},
+			}},
+			map[string]any{"type": "message", "role": "user", "content": "continue"},
+		}}
+		changed := dropOpenAIRejectedAgentItems(request, []byte(`{"error":{"code":"invalid_encrypted_content","message":"The encrypted content for item amsg_stale could not be verified"}}`))
+		require.True(t, changed)
+		input := request["input"].([]any)
+		require.Len(t, input, 2)
+		require.Equal(t, "amsg_keep", input[0].(map[string]any)["id"])
 	})
 }
 

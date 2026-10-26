@@ -659,6 +659,63 @@ func TestOpenAIGatewayService_Forward_HTTPRetryRecoveryReplacesEncryptedToolOutp
 	require.Equal(t, openAIEncryptedToolOutputOmitted, gjson.GetBytes(lineageBody, "input.2.output.text").String())
 }
 
+func TestOpenAIGatewayService_Forward_HTTPRetryRecoveryDropsNamedAgentMessageAndLineage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	response := func(status int, body string) *http.Response {
+		return &http.Response{
+			StatusCode: status,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(body)),
+		}
+	}
+	upstream := &httpUpstreamRecorder{responses: []*http.Response{
+		response(http.StatusBadRequest, `{"error":{"code":"invalid_encrypted_content","type":"invalid_request_error","message":"The encrypted content for item amsg_stale could not be verified. Reason: encrypted content hydration failed: Encrypted content could not be decrypted or parsed."}}`),
+		response(http.StatusOK, `{"id":"resp_recovered","usage":{"input_tokens":1,"output_tokens":2}}`),
+		response(http.StatusOK, `{"id":"resp_lineage","usage":{"input_tokens":1,"output_tokens":2}}`),
+	}}
+	cfg := &config.Config{}
+	cfg.Security.URLAllowlist.Enabled = false
+	svc := &OpenAIGatewayService{cfg: cfg, httpUpstream: upstream}
+	account := &Account{
+		ID: 10, Name: "openai-apikey", Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Concurrency: 1,
+		Credentials: map[string]any{"api_key": "sk-test", "base_url": "https://example.com"},
+		Extra:       map[string]any{"use_responses_api": true},
+	}
+	newContext := func() *gin.Context {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", nil)
+		SetOpenAIClientTransport(c, OpenAIClientTransportHTTP)
+		return c
+	}
+	body := []byte(`{
+		"model":"gpt-6.1-sol","stream":false,"prompt_cache_key":"amsg-hydration-session",
+		"input":[
+			{"type":"agent_message","id":"amsg_stale","content":[{"type":"output_text","text":"old"},{"type":"encrypted_content","encrypted_content":"agent-stale"}]},
+			{"type":"agent_message","id":"amsg_keep","content":[{"type":"output_text","text":"valid"},{"type":"encrypted_content","encrypted_content":"agent-valid"}]},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue","nonce":9007199254740993}]}
+		]
+	}`)
+
+	first, err := svc.Forward(context.Background(), newContext(), account, body)
+	require.NoError(t, err)
+	require.NotNil(t, first)
+	require.Len(t, upstream.bodies, 2)
+	require.Equal(t, int64(3), gjson.GetBytes(upstream.bodies[0], "input.#").Int())
+	require.Equal(t, int64(2), gjson.GetBytes(upstream.bodies[1], "input.#").Int())
+	require.Equal(t, "amsg_keep", gjson.GetBytes(upstream.bodies[1], "input.0.id").String())
+	require.Equal(t, "agent-valid", gjson.GetBytes(upstream.bodies[1], "input.0.content.1.encrypted_content").String())
+	require.Equal(t, "9007199254740993", gjson.GetBytes(upstream.bodies[1], "input.1.content.0.nonce").Raw)
+
+	second, err := svc.Forward(context.Background(), newContext(), account, body)
+	require.NoError(t, err)
+	require.NotNil(t, second)
+	require.Len(t, upstream.bodies, 3, "lineage should sanitize the next turn before its first upstream request")
+	require.Equal(t, int64(2), gjson.GetBytes(upstream.bodies[2], "input.#").Int())
+	require.Equal(t, "amsg_keep", gjson.GetBytes(upstream.bodies[2], "input.0.id").String())
+	require.Equal(t, "agent-valid", gjson.GetBytes(upstream.bodies[2], "input.0.content.1.encrypted_content").String())
+	require.Equal(t, "message", gjson.GetBytes(upstream.bodies[2], "input.1.type").String())
+}
+
 func TestOpenAIGatewayService_Forward_StreamInvalidEncryptedToolOutputRetriesBeforeWrite(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	failed := "event: response.failed\n" +

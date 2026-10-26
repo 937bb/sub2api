@@ -121,6 +121,55 @@ func TestOpenAIGatewayService_OAuthPassthrough_StreamInvalidEncryptedToolOutputR
 	require.NotContains(t, rec.Body.String(), "resp_failed")
 }
 
+func TestOpenAIGatewayService_OAuthPassthrough_InvalidEncryptedAgentMessageRetriesOnce(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	response := func(status int, body string) *http.Response {
+		return &http.Response{
+			StatusCode: status,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(body)),
+		}
+	}
+	upstream := &httpUpstreamRecorder{responses: []*http.Response{
+		response(http.StatusBadRequest, `{"error":{"code":"invalid_encrypted_content","type":"invalid_request_error","message":"The encrypted content for item amsg_passthrough_stale could not be verified. Reason: encrypted content hydration failed: Encrypted content could not be decrypted or parsed."}}`),
+		{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body: io.NopCloser(strings.NewReader("event: response.completed\n" +
+				`data: {"type":"response.completed","response":{"id":"resp_recovered","status":"completed","output":[],"usage":{"input_tokens":1,"output_tokens":2,"total_tokens":3}}}` + "\n\n")),
+		},
+	}}
+	svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+	account := &Account{
+		ID: 9125, Name: "oauth-passthrough", Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1,
+		Credentials: map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-acc"},
+		Extra:       map[string]any{"openai_passthrough": true}, Status: StatusActive, Schedulable: true, RateMultiplier: f64p(1),
+	}
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.163.0")
+	SetOpenAIClientTransport(c, OpenAIClientTransportHTTP)
+	body := []byte(`{
+		"model":"gpt-6.1-sol","stream":false,"instructions":"test","prompt_cache_key":"passthrough-amsg-session",
+		"input":[
+			{"type":"agent_message","id":"amsg_passthrough_stale","content":[{"type":"encrypted_content","encrypted_content":"passthrough-stale"}]},
+			{"type":"agent_message","id":"amsg_passthrough_keep","content":[{"type":"encrypted_content","encrypted_content":"passthrough-valid"}]},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
+		]
+	}`)
+
+	result, err := svc.Forward(context.Background(), c, account, body)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Len(t, upstream.bodies, 2)
+	require.Equal(t, int64(3), gjson.GetBytes(upstream.bodies[0], "input.#").Int())
+	require.Equal(t, int64(2), gjson.GetBytes(upstream.bodies[1], "input.#").Int())
+	require.Equal(t, "amsg_passthrough_keep", gjson.GetBytes(upstream.bodies[1], "input.0.id").String())
+	require.Equal(t, "passthrough-valid", gjson.GetBytes(upstream.bodies[1], "input.0.content.0.encrypted_content").String())
+	require.Equal(t, "message", gjson.GetBytes(upstream.bodies[1], "input.1.type").String())
+}
+
 func TestOpenAIGatewayService_ResponsesUnknownModelDoesNotFallbackToGPT54(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

@@ -49,8 +49,8 @@ func recoverOpenAIInvalidEncryptedContentRequest(reqBody map[string]any, upstrea
 		return false, ""
 	}
 	actions := make([]string, 0, 3)
-	if len(upstreamBody) > 0 && dropOpenAIRejectedItemReferences(reqBody, upstreamBody) {
-		actions = append(actions, "rejected_item_reference")
+	if len(upstreamBody) > 0 && dropOpenAIRejectedAgentItems(reqBody, upstreamBody) {
+		actions = append(actions, "rejected_agent_item")
 	}
 	if trimOpenAIEncryptedReasoningItems(reqBody) {
 		actions = append(actions, "encrypted_reasoning")

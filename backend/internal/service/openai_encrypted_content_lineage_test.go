@@ -17,6 +17,7 @@ func TestCollectOpenAIEncryptedContentDigestsRaw(t *testing.T) {
 		{"type":"compaction","encrypted_content":"cipher-b"},
 		{"type":"function_call_output","call_id":"call_1","output":[{"type":"input_text","text":"keep"},{"type":"encrypted_content","encrypted_content":"cipher-c"}]},
 		{"type":"custom_tool_call_output","call_id":"call_2","output":{"encrypted_content":"cipher-d"}},
+		{"type":"agent_message","id":"amsg_stale","content":[{"type":"input_text","text":"header"},{"type":"encrypted_content","encrypted_content":"cipher-e"}]},
 		{"type":"input_text","text":"hello"},
 		{"type":"reasoning"},
 		{"type":"message","encrypted_content":"cipher-alien"}
@@ -125,6 +126,50 @@ func TestStripOpenAIInvalidEncryptedContentItems(t *testing.T) {
 		require.Equal(t, "call_2", customOutput["call_id"])
 		require.Equal(t, openAIEncryptedToolOutputOmitted, customOutput["output"].(map[string]any)["text"])
 	})
+
+	t.Run("agent_message_with_matching_ciphertext_is_removed", func(t *testing.T) {
+		t.Parallel()
+		reqBody := map[string]any{
+			"input": []any{
+				map[string]any{"type": "agent_message", "id": "amsg_stale", "content": []any{
+					map[string]any{"type": "input_text", "text": "header"},
+					map[string]any{"type": "encrypted_content", "encrypted_content": "stale-cipher"},
+				}},
+				map[string]any{"type": "agent_message", "id": "amsg_fresh", "content": []any{
+					map[string]any{"type": "encrypted_content", "encrypted_content": "fresh-cipher"},
+				}},
+				map[string]any{"type": "message", "role": "user", "content": "continue"},
+			},
+		}
+		stripped := stripOpenAIInvalidEncryptedContentItems(reqBody, invalid)
+		require.Equal(t, 1, stripped)
+		input := reqBody["input"].([]any)
+		require.Len(t, input, 2)
+		require.Equal(t, "amsg_fresh", input[0].(map[string]any)["id"])
+	})
+
+	t.Run("named_agent_reference_digest_is_removed", func(t *testing.T) {
+		t.Parallel()
+		reqBody := map[string]any{"input": []any{
+			map[string]any{"type": "item_reference", "id": "amsg_stale"},
+			map[string]any{"type": "message", "role": "user", "content": "continue"},
+		}}
+		referenceInvalid := map[string]struct{}{openAIEncryptedAgentItemDigest("amsg_stale"): {}}
+		require.Equal(t, 1, stripOpenAIInvalidEncryptedContentItems(reqBody, referenceInvalid))
+		input := reqBody["input"].([]any)
+		require.Len(t, input, 1)
+		require.Equal(t, "message", input[0].(map[string]any)["type"])
+	})
+}
+
+func TestCollectOpenAIRejectedAgentItemDigestsRaw(t *testing.T) {
+	t.Parallel()
+	payload := []byte(`{"input":[{"type":"agent_message","id":"amsg_stale","content":[{"type":"encrypted_content","encrypted_content":"stale-cipher"}]},{"type":"agent_message","id":"amsg_keep","content":[{"type":"encrypted_content","encrypted_content":"valid-cipher"}]},{"type":"item_reference","id":"msg_other"}]}`)
+	errorBody := []byte(`{"error":{"code":"invalid_encrypted_content","message":"The encrypted content for item amsg_stale could not be verified"}}`)
+	require.Equal(t, []string{
+		openAIEncryptedAgentItemDigest("amsg_stale"),
+		openAIEncryptedContentDigest("stale-cipher"),
+	}, collectOpenAIRejectedAgentItemDigestsRaw(payload, errorBody))
 }
 
 func TestStripOpenAIInvalidEncryptedContentFromReplayItems(t *testing.T) {

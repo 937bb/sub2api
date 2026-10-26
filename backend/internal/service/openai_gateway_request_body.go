@@ -453,11 +453,11 @@ func trimOpenAIEncryptedReasoningItems(reqBody map[string]any) bool {
 	}
 }
 
-// dropOpenAIRejectedItemReferences removes only amsg_* item_reference entries
-// explicitly named by an invalid_encrypted_content response. It refuses to
-// create an empty input so the retry loop cannot emit a guaranteed-invalid
-// request after removing the sole continuation anchor.
-func dropOpenAIRejectedItemReferences(reqBody map[string]any, errorBody []byte) bool {
+// dropOpenAIRejectedAgentItems removes only amsg_* item_reference or
+// agent_message entries explicitly named by an invalid_encrypted_content
+// response. It refuses to create an empty input so the retry loop cannot emit
+// a guaranteed-invalid request after removing the sole continuation anchor.
+func dropOpenAIRejectedAgentItems(reqBody map[string]any, errorBody []byte) bool {
 	if len(reqBody) == 0 || len(errorBody) == 0 {
 		return false
 	}
@@ -470,7 +470,7 @@ func dropOpenAIRejectedItemReferences(reqBody map[string]any, errorBody []byte) 
 	removed := false
 	for _, raw := range input {
 		item, itemOK := raw.(map[string]any)
-		if !itemOK || strings.TrimSpace(stringValue(item["type"])) != "item_reference" {
+		if !itemOK || !openAIEncryptedAgentItemType(stringValue(item["type"])) {
 			filtered = append(filtered, raw)
 			continue
 		}
