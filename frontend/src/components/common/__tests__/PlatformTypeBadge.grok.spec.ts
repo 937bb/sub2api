@@ -95,15 +95,20 @@ describe('PlatformTypeBadge Grok plans', () => {
 })
 
 describe('PlatformTypeBadge OpenAI authentication modes', () => {
-  it('distinguishes Agent Identity, PAT, and OAuth accounts', async () => {
+  it('distinguishes SIWC, Agent Identity, PAT, and OAuth accounts', async () => {
     const wrapper = mount(PlatformTypeBadge, {
       props: {
         platform: 'openai',
         type: 'oauth',
         authMode: 'agentIdentity',
+        authProtocol: 'siwc',
       },
     })
 
+    expect(wrapper.text()).toContain('SIWC')
+    expect(wrapper.text()).not.toContain('Agent Identity')
+
+    await wrapper.setProps({ authProtocol: undefined })
     expect(wrapper.text()).toContain('Agent Identity')
 
     await wrapper.setProps({ authMode: 'personalAccessToken' })
