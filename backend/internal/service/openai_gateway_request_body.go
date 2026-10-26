@@ -1492,6 +1492,105 @@ func normalizeOpenAIResponseFormatSchemasBody(body []byte) ([]byte, bool, error)
 	return normalized, true, nil
 }
 
+const openAIJSONObjectInstructionMessage = `{"type":"message","role":"developer","content":[{"type":"input_text","text":"Return the response as JSON."}]}`
+
+func openAIInputTextContainsJSON(text string) bool {
+	return strings.Contains(strings.ToLower(text), "json")
+}
+
+func openAIInputMessageContainsJSON(item gjson.Result) bool {
+	if !item.IsObject() {
+		return false
+	}
+	itemType := strings.TrimSpace(item.Get("type").String())
+	role := strings.TrimSpace(item.Get("role").String())
+	if !strings.EqualFold(itemType, "message") && role == "" {
+		return false
+	}
+
+	content := item.Get("content")
+	if content.Type == gjson.String {
+		return openAIInputTextContainsJSON(content.String())
+	}
+	if content.IsObject() {
+		return openAIInputTextContainsJSON(content.Get("text").String())
+	}
+	if !content.IsArray() {
+		return false
+	}
+	for _, part := range content.Array() {
+		if part.IsObject() && openAIInputTextContainsJSON(part.Get("text").String()) {
+			return true
+		}
+	}
+	return false
+}
+
+// ensureOpenAIJSONObjectInputInstruction satisfies the upstream json_object
+// precondition without changing strict passthrough payloads. Only actual input
+// message text is considered; tool definitions and arguments do not qualify.
+func ensureOpenAIJSONObjectInputInstruction(body []byte) ([]byte, bool, error) {
+	if len(body) == 0 || !strings.EqualFold(
+		strings.TrimSpace(gjson.GetBytes(body, "text.format.type").String()),
+		"json_object",
+	) {
+		return body, false, nil
+	}
+
+	input := gjson.GetBytes(body, "input")
+	if input.Type == gjson.String && openAIInputTextContainsJSON(input.String()) {
+		return body, false, nil
+	}
+	if input.IsObject() && openAIInputMessageContainsJSON(input) {
+		return body, false, nil
+	}
+	if input.IsArray() {
+		for _, item := range input.Array() {
+			if openAIInputMessageContainsJSON(item) {
+				return body, false, nil
+			}
+		}
+	}
+
+	var replacement []byte
+	switch {
+	case input.Type == gjson.String:
+		userMessage, err := json.Marshal(map[string]any{
+			"type": "message",
+			"role": "user",
+			"content": []any{map[string]any{
+				"type": "input_text",
+				"text": input.String(),
+			}},
+		})
+		if err != nil {
+			return body, false, fmt.Errorf("serialize json_object input message: %w", err)
+		}
+		replacement = []byte("[" + openAIJSONObjectInstructionMessage + "," + string(userMessage) + "]")
+	case input.IsArray():
+		rawInput := strings.TrimSpace(input.Raw)
+		if len(rawInput) < 2 {
+			return body, false, nil
+		}
+		inner := strings.TrimSpace(rawInput[1 : len(rawInput)-1])
+		if inner == "" {
+			replacement = []byte("[" + openAIJSONObjectInstructionMessage + "]")
+		} else {
+			replacement = []byte("[" + openAIJSONObjectInstructionMessage + "," + inner + "]")
+		}
+	case input.IsObject():
+		replacement = []byte("[" + openAIJSONObjectInstructionMessage + "," + input.Raw + "]")
+	default:
+		return body, false, nil
+	}
+
+	normalized, err := sjson.SetRawBytes(body, "input", replacement)
+	if err != nil {
+		return body, false, fmt.Errorf("set json_object input instruction: %w", err)
+	}
+	return normalized, true, nil
+}
+
 func normalizeOpenAIResponsesWebSocketCompatibilityBody(body []byte, account *Account, responsesLite bool) ([]byte, bool, error) {
 	return normalizeOpenAIResponsesCompatibilityBodyWithOptions(body, account, openAIResponsesCompatibilityOptions{ResponsesLite: responsesLite})
 }
@@ -1639,6 +1738,12 @@ func normalizeOpenAIResponsesCompatibilityBodyWithOptions(body []byte, account *
 			normalized = schemaBody
 			changed = true
 		}
+	}
+	if jsonBody, jsonChanged, err := ensureOpenAIJSONObjectInputInstruction(normalized); err != nil {
+		return body, false, err
+	} else if jsonChanged {
+		normalized = jsonBody
+		changed = true
 	}
 	// Keep this last: earlier compatibility passes may filter or rebuild input.
 	// Remote compaction v2 requires one trigger as the final input item.

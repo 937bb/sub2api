@@ -771,6 +771,15 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			requestView = newOpenAIRequestView(body)
 		}
 	}
+	if !strictAPIKeyPassthrough {
+		if normalizedBody, changed, normalizeErr := ensureOpenAIJSONObjectInputInstruction(body); normalizeErr != nil {
+			return nil, fmt.Errorf("normalize json_object input instruction: %w", normalizeErr)
+		} else if changed {
+			body = normalizedBody
+			requestView = newOpenAIRequestView(body)
+			reqBody = nil
+		}
+	}
 	// Run after orphan-output filtering and all request-map rebuilds so a
 	// compaction trigger cannot remain ahead of surviving history items.
 	if normalizedBody, changed, normalizeErr := NormalizeCompactionTriggerInputOrder(body); normalizeErr != nil {
