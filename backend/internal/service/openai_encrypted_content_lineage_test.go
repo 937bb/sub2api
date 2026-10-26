@@ -15,6 +15,8 @@ func TestCollectOpenAIEncryptedContentDigestsRaw(t *testing.T) {
 	digests := collectOpenAIEncryptedContentDigestsRaw([]byte(`{"input":[
 		{"type":"reasoning","encrypted_content":"cipher-a"},
 		{"type":"compaction","encrypted_content":"cipher-b"},
+		{"type":"function_call_output","call_id":"call_1","output":[{"type":"input_text","text":"keep"},{"type":"encrypted_content","encrypted_content":"cipher-c"}]},
+		{"type":"custom_tool_call_output","call_id":"call_2","output":{"encrypted_content":"cipher-d"}},
 		{"type":"input_text","text":"hello"},
 		{"type":"reasoning"},
 		{"type":"message","encrypted_content":"cipher-alien"}
@@ -23,6 +25,8 @@ func TestCollectOpenAIEncryptedContentDigestsRaw(t *testing.T) {
 	require.Equal(t, []string{
 		openAIEncryptedContentDigest("cipher-a"),
 		openAIEncryptedContentDigest("cipher-b"),
+		openAIEncryptedContentDigest("cipher-c"),
+		openAIEncryptedContentDigest("cipher-d"),
 	}, digests)
 
 	require.Nil(t, collectOpenAIEncryptedContentDigestsRaw([]byte(`{"model":"gpt-5"}`)))
@@ -86,6 +90,41 @@ func TestStripOpenAIInvalidEncryptedContentItems(t *testing.T) {
 		}
 		require.Zero(t, stripOpenAIInvalidEncryptedContentItems(reqBody, invalid))
 	})
+
+	t.Run("tool_outputs_replace_only_matching_ciphertext", func(t *testing.T) {
+		t.Parallel()
+		reqBody := map[string]any{
+			"input": []any{
+				map[string]any{
+					"type": "function_call_output", "call_id": "call_1",
+					"output": []any{
+						map[string]any{"type": "input_text", "text": "keep", "nonce": json.Number("9007199254740993")},
+						map[string]any{"type": "encrypted_content", "encrypted_content": "stale-cipher"},
+						map[string]any{"type": "input_image", "image_url": "data:image/png;base64,AA=="},
+						map[string]any{"type": "encrypted_content", "encrypted_content": "fresh-cipher"},
+					},
+				},
+				map[string]any{
+					"type": "custom_tool_call_output", "call_id": "call_2",
+					"output": map[string]any{"encrypted_content": "stale-cipher"},
+				},
+			},
+		}
+		stripped := stripOpenAIInvalidEncryptedContentItems(reqBody, invalid)
+		require.Equal(t, 2, stripped)
+		input := reqBody["input"].([]any)
+		functionOutput := input[0].(map[string]any)
+		require.Equal(t, "call_1", functionOutput["call_id"])
+		parts := functionOutput["output"].([]any)
+		require.Equal(t, "keep", parts[0].(map[string]any)["text"])
+		require.Equal(t, json.Number("9007199254740993"), parts[0].(map[string]any)["nonce"])
+		require.Equal(t, openAIEncryptedToolOutputOmitted, parts[1].(map[string]any)["text"])
+		require.Equal(t, "data:image/png;base64,AA==", parts[2].(map[string]any)["image_url"])
+		require.Equal(t, "fresh-cipher", parts[3].(map[string]any)["encrypted_content"])
+		customOutput := input[1].(map[string]any)
+		require.Equal(t, "call_2", customOutput["call_id"])
+		require.Equal(t, openAIEncryptedToolOutputOmitted, customOutput["output"].(map[string]any)["text"])
+	})
 }
 
 func TestStripOpenAIInvalidEncryptedContentFromReplayItems(t *testing.T) {
@@ -121,6 +160,20 @@ func TestStripOpenAIInvalidEncryptedContentFromReplayItems(t *testing.T) {
 		next, stripped := stripOpenAIInvalidEncryptedContentFromReplayItems(items, invalid)
 		require.Zero(t, stripped)
 		require.Same(t, &items[0][0], &next[0][0])
+	})
+
+	t.Run("rewrites_nested_tool_output_ciphertext", func(t *testing.T) {
+		t.Parallel()
+		items := []json.RawMessage{
+			json.RawMessage(`{"type":"function_call_output","call_id":"call_1","output":[{"type":"input_text","text":"keep"},{"type":"encrypted_content","encrypted_content":"stale-cipher"}]}`),
+		}
+		next, stripped := stripOpenAIInvalidEncryptedContentFromReplayItems(items, invalid)
+		require.Equal(t, 1, stripped)
+		require.Len(t, next, 1)
+		require.Contains(t, string(next[0]), openAIEncryptedToolOutputOmitted)
+		require.Contains(t, string(next[0]), `"call_id":"call_1"`)
+		require.Contains(t, string(next[0]), `"text":"keep"`)
+		require.NotContains(t, string(next[0]), "stale-cipher")
 	})
 }
 
