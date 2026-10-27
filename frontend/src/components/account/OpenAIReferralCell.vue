@@ -30,11 +30,11 @@
       :close-on-escape="!sending"
       @close="closeDialog"
     >
-      <form :id="formID" class="workbench-editor-form space-y-4" @submit.prevent="sendInvite">
+      <form :id="formID" class="workbench-editor-form space-y-4 console-form" @submit.prevent="sendInvite">
         <p class="text-sm text-gray-600 dark:text-gray-300">
           {{ t('admin.accounts.openaiReferral.fromAccount') }} <strong>{{ account.name }}</strong>
         </p>
-        <div class="flex items-center justify-between rounded-lg bg-slate-50 p-3 text-sm dark:bg-slate-900/20">
+        <div class="flex items-center justify-between rounded-lg bg-slate-50 p-3 text-sm dark:bg-slate-900/20 console-note">
           <div>
             <p class="font-medium text-slate-800 dark:text-slate-300">{{ programLabel }}</p>
             <p class="mt-1 text-gray-600 dark:text-gray-300">{{ t('admin.accounts.openaiReferral.available') }} {{ countDisplay }}</p>
@@ -53,7 +53,7 @@
         <p v-if="fresh && (!eligibility?.should_show || count === null || count <= 0)" class="text-sm text-amber-700 dark:text-amber-400">
           {{ t('admin.accounts.openaiReferral.unavailable') }}
         </p>
-        <div class="workbench-field-row ">
+        <div class="workbench-field-row console-field">
           <label :for="emailID" class="input-label">{{ t('admin.accounts.openaiReferral.email') }}</label>
           <input
             :id="emailID"

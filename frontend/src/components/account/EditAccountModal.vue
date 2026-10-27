@@ -5,17 +5,19 @@
     width="wide"
     @close="handleClose"
   >
+    <template #navigation><DialogSectionLinks :sections="['console.formIdentity', 'console.formConnection', 'console.formScheduling', 'console.formProtocol']" /></template>
     <form
       v-if="account"
       id="edit-account-form"
       @submit.prevent="handleSubmit"
-      class="workbench-editor-form space-y-5"
+      class="workbench-editor-form space-y-5 console-form"
     >
-      <div class="workbench-field-row ">
+      <DialogSection :title="t('console.formIdentity')">
+<div class="workbench-field-row console-field">
         <label class="input-label">{{ t('common.name') }}</label>
         <input v-model="form.name" type="text" required class="input" data-tour="edit-account-form-name" />
       </div>
-      <div class="workbench-field-row ">
+      <div class="workbench-field-row console-field">
         <label class="input-label">{{ t('admin.accounts.notes') }}</label>
         <textarea
           v-model="form.notes"
@@ -25,8 +27,10 @@
         ></textarea>
         <p class="input-hint">{{ t('admin.accounts.notesHint') }}</p>
       </div>
+</DialogSection>
 
-      <div v-if="isSIWCAccount(account)" class="workbench-field-row rounded-lg border border-gray-200 p-3 dark:border-dark-600">
+      <DialogSection :title="t('console.formConnection')">
+<div v-if="isSIWCAccount(account)" class="workbench-field-row rounded-lg border border-gray-200 p-3 dark:border-dark-600 console-field">
         <label for="siwc-quota-web-token" class="input-label">{{ t('siwc.quota.webToken') }}</label>
         <input
           id="siwc-quota-web-token" v-model="siwcQuotaWebToken" type="password"
@@ -43,7 +47,7 @@
 
       <!-- API Key fields (only for apikey type) -->
       <div v-if="account.type === 'apikey'" class="space-y-4">
-        <div v-if="!isCNApiKeyAccount || editApiProtocol !== 'adaptive'">
+        <div class="console-field" v-if="!isCNApiKeyAccount || editApiProtocol !== 'adaptive'">
           <label class="input-label">{{ t('admin.accounts.baseUrl') }}</label>
           <input
             v-model="editBaseUrl"
@@ -80,7 +84,7 @@
         <div v-else>
           <label class="input-label">{{ t('admin.accounts.cnProviders.apiProtocol.endpoints') }}</label>
           <div class="mt-2 space-y-3">
-            <div v-for="item in editAdaptiveProtocolOptions" :key="item.value">
+            <div class="console-field" v-for="item in editAdaptiveProtocolOptions" :key="item.value">
               <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
                 {{ t(`admin.accounts.cnProviders.apiProtocol.${item.labelKey}`) }}
               </label>
@@ -94,7 +98,7 @@
         <!-- OpenCode Zen vs GO -->
         <div v-if="isCNApiKeyAccount && account.platform === 'opencode_go'">
           <label class="input-label">{{ t('admin.accounts.cnProviders.accountMode.title') }}</label>
-          <div class="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div class="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2 console-choice-group">
             <button
               type="button"
               @click="editOpenCodeAccountMode = 'zen'"
@@ -229,18 +233,18 @@
             </HelpTooltip>
           </div>
           <div class="mt-2 grid gap-4 sm:grid-cols-2">
-            <div>
+            <div class="console-field">
               <label class="input-label">{{ t('admin.accounts.cnProviders.zhipuTeam.organization') }}</label>
               <input v-model="editZhipuOrganization" type="text" class="input" :placeholder="t('admin.accounts.cnProviders.zhipuTeam.organizationPlaceholder')" />
             </div>
-            <div>
+            <div class="console-field">
               <label class="input-label">{{ t('admin.accounts.cnProviders.zhipuTeam.project') }}</label>
               <input v-model="editZhipuProject" type="text" class="input" :placeholder="t('admin.accounts.cnProviders.zhipuTeam.projectPlaceholder')" />
             </div>
           </div>
           <p class="input-hint mt-2">{{ t('admin.accounts.cnProviders.zhipuTeam.hint') }}</p>
         </div>
-        <div>
+        <div class="console-field">
           <label class="input-label">{{ t('admin.accounts.apiKey') }}</label>
           <input
             v-model="editApiKey"
@@ -346,7 +350,7 @@
 
             <!-- Mapping Mode -->
             <div v-else>
-              <div class="mb-3 rounded-lg bg-primary-50 p-3 dark:bg-primary-900/20">
+              <div class="mb-3 rounded-lg bg-primary-50 p-3 dark:bg-primary-900/20 console-note">
                 <p class="text-xs text-primary-700 dark:text-primary-400">
                   <svg
                     class="mr-1 inline h-4 w-4"
@@ -417,7 +421,7 @@
             <button
               type="button"
               @click="addModelMapping"
-              class="mb-3 w-full rounded-lg border-2 border-dashed border-gray-300 px-4 py-2 text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-700 dark:border-dark-500 dark:text-gray-400 dark:hover:border-dark-400 dark:hover:text-gray-300"
+              class="mb-3 w-full rounded-lg border border-dashed border-gray-300 px-4 py-2 text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-700 dark:border-dark-500 dark:text-gray-400 dark:hover:border-dark-400 dark:hover:text-gray-300 btn btn-secondary"
             >
               <svg
                 class="mr-1 inline h-4 w-4"
@@ -476,13 +480,13 @@
               />
             </button>
           </div>
-          <div v-if="poolModeEnabled" class="rounded-lg bg-blue-50 p-3 dark:bg-blue-900/20">
+          <div v-if="poolModeEnabled" class="rounded-lg bg-blue-50 p-3 dark:bg-blue-900/20 console-note">
             <p class="text-xs text-blue-700 dark:text-blue-400">
               <Icon name="exclamationCircle" size="sm" class="mr-1 inline" :stroke-width="2" />
               {{ t('admin.accounts.poolModeInfo') }}
             </p>
           </div>
-          <div v-if="poolModeEnabled" class="mt-3">
+          <div v-if="poolModeEnabled" class="mt-3 console-field">
             <label class="input-label">{{ t('admin.accounts.poolModeRetryCount') }}</label>
             <input
               v-model.number="poolModeRetryCount"
@@ -501,7 +505,7 @@
               }}
             </p>
           </div>
-          <div v-if="poolModeEnabled" class="mt-3">
+          <div v-if="poolModeEnabled" class="mt-3 console-field">
             <label class="input-label">{{ t('admin.accounts.poolModeRetryStatusCodes') }}</label>
             <input
               v-model="poolModeRetryStatusCodesInput"
@@ -521,7 +525,7 @@
           class="border-t border-gray-200 pt-4 dark:border-dark-600"
           data-testid="explicit-cache-upstream-section"
         >
-          <div class="flex items-center justify-between gap-4">
+          <div class="flex items-center justify-between gap-4 console-switch-row">
             <div>
               <label class="input-label mb-0">{{ t('admin.accounts.explicitCacheUpstream') }}</label>
               <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
@@ -534,13 +538,13 @@
               :aria-label="t('admin.accounts.explicitCacheUpstream')"
             />
           </div>
-          <div v-if="explicitCacheUpstreamEnabled" class="mt-3 rounded-lg bg-blue-50 p-3 dark:bg-blue-900/20">
+          <div v-if="explicitCacheUpstreamEnabled" class="mt-3 rounded-lg bg-blue-50 p-3 dark:bg-blue-900/20 console-note">
             <p class="text-xs text-blue-700 dark:text-blue-400">
               <Icon name="exclamationCircle" size="sm" class="mr-1 inline" :stroke-width="2" />
               {{ t('admin.accounts.explicitCacheUpstreamInfo') }}
             </p>
           </div>
-          <div v-if="explicitCacheUpstreamEnabled" class="mt-3">
+          <div v-if="explicitCacheUpstreamEnabled" class="mt-3 console-field">
             <label class="input-label">{{ t('admin.accounts.explicitCacheUpstreamMaxTTL') }}</label>
             <input
               v-model="explicitCacheUpstreamMaxTTL"
@@ -662,7 +666,7 @@
         v-if="account.platform === 'grok' && account.type === 'oauth'"
         class="workbench-field-row border-t border-gray-200 pt-4 dark:border-dark-600"
       >
-        <div class="flex items-center justify-between gap-4">
+        <div class="flex items-center justify-between gap-4 console-switch-row">
           <div class="min-w-0">
             <label class="input-label mb-0">{{ t('admin.accounts.grokClientToolCache.title') }}</label>
             <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
@@ -706,7 +710,7 @@
           <p v-else-if="grokMediaEligibilityError" class="text-xs text-red-600 dark:text-red-400">
             {{ grokMediaEligibilityError }}
           </p>
-          <div v-else-if="grokMediaEligibilityState" class="rounded-lg bg-gray-50 p-3 text-xs dark:bg-dark-700">
+          <div v-else-if="grokMediaEligibilityState" class="rounded-lg bg-gray-50 p-3 text-xs dark:bg-dark-700 console-note">
             <span class="font-medium">{{ t('admin.accounts.grokMediaEligibility.current') }}</span>
             <span class="ml-1" data-testid="grok-media-eligibility-status">
               {{ grokMediaEligibilityState.eligible ? t('admin.accounts.grokMediaEligibility.eligible') : t('admin.accounts.grokMediaEligibility.ineligible') }}
@@ -796,7 +800,7 @@
         </div>
 
         <div v-if="headerOverrideEnabled" class="space-y-3">
-          <div class="rounded-lg bg-blue-50 p-3 dark:bg-blue-900/20">
+          <div class="rounded-lg bg-blue-50 p-3 dark:bg-blue-900/20 console-note">
             <p class="text-xs text-blue-700 dark:text-blue-400">
               <Icon name="exclamationCircle" size="sm" class="mr-1 inline" :stroke-width="2" />
               {{ t('admin.accounts.headerOverride.info') }}
@@ -868,7 +872,7 @@
 
           <!-- Mapping Mode -->
           <div v-else>
-            <div class="mb-3 rounded-lg bg-primary-50 p-3 dark:bg-primary-900/20">
+            <div class="mb-3 rounded-lg bg-primary-50 p-3 dark:bg-primary-900/20 console-note">
               <p class="text-xs text-primary-700 dark:text-primary-400">
                 {{ t('admin.accounts.mapRequestModels') }}
               </p>
@@ -925,7 +929,7 @@
             <button
               type="button"
               @click="addModelMapping"
-              class="mb-3 w-full rounded-lg border-2 border-dashed border-gray-300 px-4 py-2 text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-700 dark:border-dark-500 dark:text-gray-400 dark:hover:border-dark-400 dark:hover:text-gray-300"
+              class="mb-3 w-full rounded-lg border border-dashed border-gray-300 px-4 py-2 text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-700 dark:border-dark-500 dark:text-gray-400 dark:hover:border-dark-400 dark:hover:text-gray-300 btn btn-secondary"
             >
               + {{ t('admin.accounts.addMapping') }}
             </button>
@@ -948,7 +952,7 @@
 
       <!-- Upstream fields (only for upstream type) -->
       <div v-if="account.type === 'upstream'" class="space-y-4">
-        <div>
+        <div class="console-field">
           <label class="input-label">{{ t('admin.accounts.upstream.baseUrl') }}</label>
           <input
             v-model="editBaseUrl"
@@ -958,7 +962,7 @@
           />
           <p class="input-hint">{{ t('admin.accounts.upstream.baseUrlHint') }}</p>
         </div>
-        <div>
+        <div class="console-field">
           <label class="input-label">{{ t('admin.accounts.upstream.apiKey') }}</label>
           <input
             v-model="editApiKey"
@@ -972,7 +976,7 @@
 
       <!-- Vertex Service Account -->
       <div v-if="(account.platform === 'gemini' || account.platform === 'anthropic') && account.type === 'service_account'" class="space-y-4">
-        <div v-if="isVertexAPIKeyMode">
+        <div class="console-field" v-if="isVertexAPIKeyMode">
           <label class="input-label">API Key</label>
           <input
             v-model="editVertexApiKey"
@@ -984,7 +988,7 @@
           <p class="input-hint">{{ t('admin.accounts.vertexApiKeyHint') }}</p>
         </div>
         <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <div v-if="isVertexAPIKeyMode">
+          <div class="console-field" v-if="isVertexAPIKeyMode">
             <label class="input-label">Project ID</label>
             <input
               v-model="editVertexProjectId"
@@ -995,7 +999,7 @@
             />
             <p class="input-hint">{{ t('admin.accounts.vertexApiKeyProjectIdHint') }}</p>
           </div>
-          <div v-else>
+          <div class="console-field" v-else>
             <label class="input-label">Project ID</label>
             <input
               v-model="editVertexProjectId"
@@ -1006,7 +1010,7 @@
             />
             <p class="input-hint">{{ t('admin.accounts.vertexSaJsonEditHint') }}</p>
           </div>
-          <div v-if="!isVertexAPIKeyMode || editVertexProjectId.trim()">
+          <div class="console-field" v-if="!isVertexAPIKeyMode || editVertexProjectId.trim()">
             <label class="input-label">Location</label>
             <select
               v-model="editVertexLocation"
@@ -1102,7 +1106,7 @@
 
           <!-- Mapping Mode -->
           <div v-else>
-            <div class="mb-3 rounded-lg bg-primary-50 p-3 dark:bg-primary-900/20">
+            <div class="mb-3 rounded-lg bg-primary-50 p-3 dark:bg-primary-900/20 console-note">
               <p class="text-xs text-primary-700 dark:text-primary-400">
                 <svg
                   class="mr-1 inline h-4 w-4"
@@ -1173,7 +1177,7 @@
             <button
               type="button"
               @click="addModelMapping"
-              class="mb-3 w-full rounded-lg border-2 border-dashed border-gray-300 px-4 py-2 text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-700 dark:border-dark-500 dark:text-gray-400 dark:hover:border-dark-400 dark:hover:text-gray-300"
+              class="mb-3 w-full rounded-lg border border-dashed border-gray-300 px-4 py-2 text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-700 dark:border-dark-500 dark:text-gray-400 dark:hover:border-dark-400 dark:hover:text-gray-300 btn btn-secondary"
             >
               <svg
                 class="mr-1 inline h-4 w-4"
@@ -1211,7 +1215,7 @@
       <div v-if="account.type === 'bedrock'" class="space-y-4">
         <!-- SigV4 fields -->
         <template v-if="!isBedrockAPIKeyMode">
-          <div>
+          <div class="console-field">
             <label class="input-label">{{ t('admin.accounts.bedrockAccessKeyId') }}</label>
             <input
               v-model="editBedrockAccessKeyId"
@@ -1220,7 +1224,7 @@
               placeholder="AKIA..."
             />
           </div>
-          <div>
+          <div class="console-field">
             <label class="input-label">{{ t('admin.accounts.bedrockSecretAccessKey') }}</label>
             <input
               v-model="editBedrockSecretAccessKey"
@@ -1230,7 +1234,7 @@
             />
             <p class="input-hint">{{ t('admin.accounts.bedrockSecretKeyLeaveEmpty') }}</p>
           </div>
-          <div>
+          <div class="console-field">
             <label class="input-label">{{ t('admin.accounts.bedrockSessionToken') }}</label>
             <input
               v-model="editBedrockSessionToken"
@@ -1243,7 +1247,7 @@
         </template>
 
         <!-- API Key field -->
-        <div v-if="isBedrockAPIKeyMode">
+        <div class="console-field" v-if="isBedrockAPIKeyMode">
           <label class="input-label">{{ t('admin.accounts.bedrockApiKeyInput') }}</label>
           <input
             v-model="editBedrockApiKeyValue"
@@ -1255,7 +1259,7 @@
         </div>
 
         <!-- Shared: Region -->
-        <div>
+        <div class="console-field">
           <label class="input-label">{{ t('admin.accounts.bedrockRegion') }}</label>
           <input
             v-model="editBedrockRegion"
@@ -1373,13 +1377,13 @@
               />
             </button>
           </div>
-          <div v-if="poolModeEnabled" class="rounded-lg bg-blue-50 p-3 dark:bg-blue-900/20">
+          <div v-if="poolModeEnabled" class="rounded-lg bg-blue-50 p-3 dark:bg-blue-900/20 console-note">
             <p class="text-xs text-blue-700 dark:text-blue-400">
               <Icon name="exclamationCircle" size="sm" class="mr-1 inline" :stroke-width="2" />
               {{ t('admin.accounts.poolModeInfo') }}
             </p>
           </div>
-          <div v-if="poolModeEnabled" class="mt-3">
+          <div v-if="poolModeEnabled" class="mt-3 console-field">
             <label class="input-label">{{ t('admin.accounts.poolModeRetryCount') }}</label>
             <input
               v-model.number="poolModeRetryCount"
@@ -1398,7 +1402,7 @@
               }}
             </p>
           </div>
-          <div v-if="poolModeEnabled" class="mt-3">
+          <div v-if="poolModeEnabled" class="mt-3 console-field">
             <label class="input-label">{{ t('admin.accounts.poolModeRetryStatusCodes') }}</label>
             <input
               v-model="poolModeRetryStatusCodesInput"
@@ -1415,7 +1419,7 @@
 
       <div
         v-if="account.platform === 'antigravity' && account.type === 'oauth'"
-        class="border-t border-gray-200 pt-4 dark:border-dark-600"
+        class="border-t border-gray-200 pt-4 dark:border-dark-600 console-field"
       >
         <label class="input-label">{{ t('admin.accounts.antigravityProjectIdLabel') }}</label>
         <input
@@ -1435,7 +1439,7 @@
 
         <!-- Mapping Mode Only (no toggle for Antigravity) -->
         <div>
-          <div class="mb-3 rounded-lg bg-primary-50 p-3 dark:bg-primary-900/20">
+          <div class="mb-3 rounded-lg bg-primary-50 p-3 dark:bg-primary-900/20 console-note">
             <p class="text-xs text-primary-700 dark:text-primary-400">{{ t('admin.accounts.mapRequestModels') }}</p>
           </div>
 
@@ -1444,7 +1448,7 @@
               type="button"
               @click="syncAntigravityUpstreamModels"
               :disabled="isSyncingAntigravityUpstream || !account?.id"
-              class="rounded-lg border border-emerald-200 px-3 py-1.5 text-sm text-emerald-600 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-emerald-800 dark:text-emerald-400 dark:hover:bg-emerald-900/30"
+              class="rounded-lg border border-emerald-200 px-3 py-1.5 text-sm text-emerald-600 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-emerald-800 dark:text-emerald-400 dark:hover:bg-emerald-900/30 btn"
             >
               {{ isSyncingAntigravityUpstream ? t('admin.accounts.syncUpstreamModelsLoading') : t('admin.accounts.syncUpstreamModels') }}
             </button>
@@ -1507,7 +1511,7 @@
           <button
             type="button"
             @click="addAntigravityModelMapping"
-            class="mb-3 w-full rounded-lg border-2 border-dashed border-gray-300 px-4 py-2 text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-700 dark:border-dark-500 dark:text-gray-400 dark:hover:border-dark-400 dark:hover:text-gray-300"
+            class="mb-3 w-full rounded-lg border border-dashed border-gray-300 px-4 py-2 text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-700 dark:border-dark-500 dark:text-gray-400 dark:hover:border-dark-400 dark:hover:text-gray-300 btn btn-secondary"
           >
             <svg class="mr-1 inline h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
@@ -1528,9 +1532,11 @@
           </div>
         </div>
       </div>
+</DialogSection>
 
       <!-- Temp Unschedulable Rules -->
-      <div class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4">
+      <DialogSection :title="t('console.formScheduling')">
+<div class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4">
         <div class="mb-3 flex items-center justify-between">
           <div>
             <label class="input-label mb-0">{{ t('admin.accounts.tempUnschedulable.title') }}</label>
@@ -1556,7 +1562,7 @@
         </div>
 
         <div v-if="tempUnschedEnabled" class="space-y-3">
-          <div class="rounded-lg bg-blue-50 p-3 dark:bg-blue-900/20">
+          <div class="rounded-lg bg-blue-50 p-3 dark:bg-blue-900/20 console-note">
             <p class="text-xs text-blue-700 dark:text-blue-400">
               <Icon name="exclamationTriangle" size="sm" class="mr-1 inline" :stroke-width="2" />
               {{ t('admin.accounts.tempUnschedulable.notice') }}
@@ -1569,7 +1575,7 @@
               :key="preset.label"
               type="button"
               @click="addTempUnschedRule(preset.rule)"
-              class="rounded-lg bg-gray-100 px-3 py-1.5 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-200 dark:bg-dark-600 dark:text-gray-300 dark:hover:bg-dark-500"
+              class="rounded-lg bg-gray-100 px-3 py-1.5 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-200 dark:bg-dark-600 dark:text-gray-300 dark:hover:bg-dark-500 btn"
             >
               + {{ preset.label }}
             </button>
@@ -1615,7 +1621,7 @@
               </div>
 
               <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div>
+                <div class="console-field">
                   <label class="input-label">{{ t('admin.accounts.tempUnschedulable.errorCode') }}</label>
                   <input
                     v-model.number="rule.error_code"
@@ -1626,7 +1632,7 @@
                     :placeholder="t('admin.accounts.tempUnschedulable.errorCodePlaceholder')"
                   />
                 </div>
-                <div>
+                <div class="console-field">
                   <label class="input-label">{{ t('admin.accounts.tempUnschedulable.durationMinutes') }}</label>
                   <input
                     v-model.number="rule.duration_minutes"
@@ -1674,7 +1680,7 @@
                   </div>
                   <p class="input-hint">{{ t('admin.accounts.tempUnschedulable.scopeHint') }}</p>
                 </div>
-                <div class="sm:col-span-2">
+                <div class="sm:col-span-2 console-field">
                   <label class="input-label">{{ t('admin.accounts.tempUnschedulable.keywords') }}</label>
                   <input
                     v-model="rule.keywords"
@@ -1684,7 +1690,7 @@
                   />
                   <p class="input-hint">{{ t('admin.accounts.tempUnschedulable.keywordsHint') }}</p>
                 </div>
-                <div class="sm:col-span-2">
+                <div class="sm:col-span-2 console-field">
                   <label class="input-label">{{ t('admin.accounts.tempUnschedulable.description') }}</label>
                   <input
                     v-model="rule.description"
@@ -1700,7 +1706,7 @@
           <button
             type="button"
             @click="addTempUnschedRule()"
-            class="w-full rounded-lg border-2 border-dashed border-gray-300 px-4 py-2 text-sm text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-700 dark:border-dark-500 dark:text-gray-400 dark:hover:border-dark-400 dark:hover:text-gray-300"
+            class="w-full rounded-lg border border-dashed border-gray-300 px-4 py-2 text-sm text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-700 dark:border-dark-500 dark:text-gray-400 dark:hover:border-dark-400 dark:hover:text-gray-300 btn btn-secondary"
           >
             <svg
               class="mr-1 inline h-4 w-4"
@@ -1735,7 +1741,7 @@
             class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
           />
         </div>
-        <div v-if="accountSchedulingThresholdOverrideEnabled">
+        <div class="console-field" v-if="accountSchedulingThresholdOverrideEnabled">
           <label class="input-label">{{ t('admin.accounts.accountSchedulingThresholdOverrideValue') }}</label>
           <input
             v-model.number="accountSchedulingThresholdOverrideValue"
@@ -1796,19 +1802,19 @@
       />
 
       <div class="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <div>
+        <div class="console-field">
           <label class="input-label">{{ t('admin.accounts.concurrency') }}</label>
           <input v-model.number="form.concurrency" type="number" min="1" class="input"
             @input="form.concurrency = Math.max(1, form.concurrency || 1)" />
         </div>
-        <div>
+        <div class="console-field">
           <label class="input-label">{{ t('admin.accounts.loadFactor') }}</label>
           <input v-model.number="form.load_factor" type="number" min="1"
             class="input" :placeholder="String(form.concurrency || 1)"
             @input="form.load_factor = (form.load_factor &amp;&amp; form.load_factor >= 1) ? form.load_factor : null" />
           <p class="input-hint">{{ t('admin.accounts.loadFactorHint') }}</p>
         </div>
-        <div>
+        <div class="console-field">
           <label class="input-label">{{ t('admin.accounts.priority') }}</label>
           <input
             v-model.number="form.priority"
@@ -1819,7 +1825,7 @@
           />
           <p class="input-hint">{{ t('admin.accounts.priorityHint') }}</p>
         </div>
-        <div>
+        <div class="console-field">
           <label class="input-label">{{ t('admin.accounts.billingRateMultiplier') }}</label>
           <input
             v-model.number="form.rate_multiplier"
@@ -1841,7 +1847,7 @@
           </p>
           <div
             v-if="account?.type === 'apikey'"
-            class="mt-3 flex items-center justify-between gap-3"
+            class="mt-3 flex items-center justify-between gap-3 console-switch-row"
           >
             <div class="min-w-0">
               <p class="text-xs font-medium text-gray-700 dark:text-gray-200">
@@ -1860,7 +1866,7 @@
           </div>
         </div>
       </div>
-      <div class="workbench-field-row border-t border-gray-200 pt-4 dark:border-dark-600">
+      <div class="workbench-field-row border-t border-gray-200 pt-4 dark:border-dark-600 console-field">
         <label class="input-label">{{ t('admin.accounts.expiresAt') }}</label>
         <input v-model="expiresAtInput" type="datetime-local" class="input" />
         <div class="mt-2 flex gap-2">
@@ -1876,9 +1882,11 @@
           {{ t('admin.accounts.expiresAtTimezoneHint', { timezone: browserTimeZone }) }}
         </p>
       </div>
+</DialogSection>
 
       <!-- OpenAI 自动透传开关（OAuth/API Key） -->
-      <div
+      <DialogSection :title="t('console.formProtocol')">
+<div
         v-if="account?.platform === 'openai' && (account?.type === 'oauth' || account?.type === 'setup-token' || account?.type === 'apikey')"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
@@ -1943,9 +1951,9 @@
         v-if="account?.platform === 'openai' && (account?.type === 'oauth' || account?.type === 'setup-token' || account?.type === 'apikey')"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
-        <div class="overflow-hidden rounded-lg border border-sky-100 bg-sky-50/60 shadow-sm dark:border-sky-900/50 dark:bg-sky-950/20">
+        <div class="overflow-hidden rounded-lg border border-sky-100 bg-sky-50/60 dark:border-sky-900/50 dark:bg-sky-950/20">
           <div class="flex items-start gap-3 px-4 py-3">
-            <div class="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-white text-sky-600 shadow-sm ring-1 ring-sky-100 dark:bg-dark-800 dark:text-sky-300 dark:ring-sky-900/60">
+            <div class="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-white text-sky-600 ring-1 ring-sky-100 dark:bg-dark-800 dark:text-sky-300 dark:ring-sky-900/60">
               <Icon name="sparkles" size="sm" />
             </div>
             <div class="min-w-0 flex-1">
@@ -2042,7 +2050,7 @@
         </div>
         <div
           v-if="openAITextGenerationCapabilityEnabled"
-          class="rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-600 dark:bg-dark-700 dark:text-gray-300"
+          class="rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-600 dark:bg-dark-700 dark:text-gray-300 console-note"
         >
           <span class="font-medium">{{ t(openAIResponsesStatusKey) }}</span>
         </div>
@@ -2108,7 +2116,7 @@
 
       <div
         v-if="account?.type === 'apikey'"
-        class="flex items-center justify-between gap-4 border-t border-gray-200 pt-4 dark:border-dark-600"
+        class="flex items-center justify-between gap-4 border-t border-gray-200 pt-4 dark:border-dark-600 console-switch-row"
       >
         <div>
           <label class="input-label mb-0">{{ t('admin.accounts.upstreamBilling.autoProbe') }}</label>
@@ -2136,7 +2144,7 @@
         data-testid="opencode-go-usage-settings"
       >
         <div class="flex items-start justify-between gap-4">
-          <div>
+          <div class="console-form-block">
             <h3 class="text-sm font-semibold text-gray-900 dark:text-white">
               {{ t('admin.accounts.opencodeGo.title') }}
             </h3>
@@ -2196,7 +2204,7 @@
             </button>
           </div>
 
-          <div class="flex items-center justify-between gap-4 border-t border-gray-100 pt-4 dark:border-dark-700">
+          <div class="flex items-center justify-between gap-4 border-t border-gray-100 pt-4 dark:border-dark-700 console-switch-row">
             <div>
               <label class="text-sm font-medium text-gray-900 dark:text-white">
                 {{ t('admin.accounts.opencodeGo.autoRefresh') }}
@@ -2288,7 +2296,7 @@
         v-if="account?.platform === 'anthropic' && (account?.type === 'apikey' || account?.type === 'bedrock')"
         class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4"
       >
-        <div class="mb-3">
+        <div class="mb-3 console-form-block">
           <h3 class="input-label mb-0 text-base font-semibold">{{ t('admin.accounts.quotaControl.title') }}</h3>
           <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
             {{ t('admin.accounts.quotaControl.hint') }}
@@ -2339,7 +2347,7 @@
         v-else-if="account?.type === 'apikey' || account?.type === 'bedrock'"
         class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4"
       >
-        <div class="mb-3">
+        <div class="mb-3 console-form-block">
           <h3 class="input-label mb-0 text-base font-semibold">{{ t('admin.accounts.quotaControl.title') }}</h3>
           <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
             {{ t('admin.accounts.quotaLimitHint') }}
@@ -2525,7 +2533,7 @@
             <Select v-model="openAICompactMode" :options="openAICompactModeOptions" />
           </div>
         </div>
-        <div class="rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-600 dark:bg-dark-700 dark:text-gray-300">
+        <div class="rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-600 dark:bg-dark-700 dark:text-gray-300 console-note">
           <span class="font-medium">{{ t(openAICompactStatusKey) }}</span>
           <span
             v-if="account?.extra?.openai_compact_checked_at"
@@ -2622,7 +2630,7 @@
           </div>
           <p class="input-hint">{{ t('admin.accounts.autoPauseDisabledHint') }}</p>
         </div>
-        <div>
+        <div class="console-field">
           <label class="input-label">{{ t('admin.accounts.autoPause5hThreshold') }}</label>
           <input
             v-model.number="autoPause5hThreshold"
@@ -2658,7 +2666,7 @@
           </div>
           <p class="input-hint">{{ t('admin.accounts.autoPauseDisabledHint') }}</p>
         </div>
-        <div>
+        <div class="console-field">
           <label class="input-label">{{ t('admin.accounts.autoPause7dThreshold') }}</label>
           <input
             v-model.number="autoPause7dThreshold"
@@ -2704,7 +2712,7 @@
           </button>
         </div>
         <div class="grid gap-4 sm:grid-cols-2">
-          <div>
+          <div class="console-field">
             <label class="input-label">{{ t('admin.accounts.autoResetCredit.threshold5h') }}</label>
             <input
               v-model.number="autoResetCredit5hThreshold"
@@ -2717,7 +2725,7 @@
               data-testid="auto-reset-credit-5h-threshold"
             />
           </div>
-          <div>
+          <div class="console-field">
             <label class="input-label">{{ t('admin.accounts.autoResetCredit.threshold7d') }}</label>
             <input
               v-model.number="autoResetCredit7dThreshold"
@@ -2739,7 +2747,7 @@
         v-if="account?.platform === 'anthropic' && (account?.type === 'oauth' || account?.type === 'setup-token')"
         class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4"
       >
-        <div class="mb-3">
+        <div class="mb-3 console-form-block">
           <h3 class="input-label mb-0 text-base font-semibold">{{ t('admin.accounts.quotaControl.title') }}</h3>
           <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
             {{ t('admin.accounts.quotaControl.hint') }}
@@ -2833,7 +2841,7 @@
           </div>
 
           <div v-if="sessionLimitEnabled" class="grid grid-cols-2 gap-4">
-            <div>
+            <div class="console-field">
               <label class="input-label">{{ t('admin.accounts.quotaControl.sessionLimit.maxSessions') }}</label>
               <input
                 v-model.number="maxSessions"
@@ -2890,7 +2898,7 @@
           </div>
 
           <div v-if="rpmLimitEnabled" class="space-y-4">
-            <div>
+            <div class="console-field">
               <label class="input-label">{{ t('admin.accounts.quotaControl.rpmLimit.baseRpm') }}</label>
               <input
                 v-model.number="baseRpm"
@@ -2940,7 +2948,7 @@
               </div>
             </div>
 
-            <div v-if="rpmStrategy === 'tiered'">
+            <div class="console-field" v-if="rpmStrategy === 'tiered'">
               <label class="input-label">{{ t('admin.accounts.quotaControl.rpmLimit.stickyBuffer') }}</label>
               <input
                 v-model.number="rpmStickyBuffer"
@@ -3063,11 +3071,11 @@
               />
             </button>
           </div>
-          <div v-if="cacheTTLOverrideEnabled" class="mt-3">
+          <div v-if="cacheTTLOverrideEnabled" class="mt-3 console-field">
             <label class="input-label text-xs">{{ t('admin.accounts.quotaControl.cacheTTLOverride.target') }}</label>
             <select
               v-model="cacheTTLOverrideTarget"
-              class="mt-1 block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500 dark:border-dark-500 dark:bg-dark-700 dark:text-white"
+              class="mt-1 block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500 dark:border-dark-500 dark:bg-dark-700 dark:text-white input"
             >
               <option value="5m">5m</option>
               <option value="1h">1h</option>
@@ -3115,7 +3123,7 @@
       </div>
 
       <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
-        <div>
+        <div class="console-field">
           <label class="input-label">{{ t('common.status') }}</label>
           <Select v-model="form.status" :options="statusOptions" />
         </div>
@@ -3187,6 +3195,7 @@
         :mixed-scheduling="mixedScheduling"
         data-tour="account-form-groups"
       />
+</DialogSection>
 
     </form>
 
@@ -3242,6 +3251,8 @@
 </template>
 
 <script setup lang="ts">
+import DialogSectionLinks from '@/components/common/DialogSectionLinks.vue'
+import DialogSection from '@/components/common/DialogSection.vue'
 import { ref, reactive, computed, watch, nextTick, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'

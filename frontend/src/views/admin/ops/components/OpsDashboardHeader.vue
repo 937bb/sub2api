@@ -1385,7 +1385,7 @@ function handleToolbarRefresh() {
         <div
           v-for="hb in jobHeartbeats"
           :key="hb.job_name"
-          class="rounded-xl border border-gray-100 bg-white p-4 dark:border-dark-700 dark:bg-dark-900"
+          class="rounded-lg border border-gray-100 bg-white p-4 dark:border-dark-700 dark:bg-dark-900"
         >
           <div class="flex items-center justify-between gap-3">
             <div class="truncate text-sm font-semibold text-gray-900 dark:text-white">{{ hb.job_name }}</div>
@@ -1420,7 +1420,7 @@ function handleToolbarRefresh() {
     <!-- Custom Time Range Dialog -->
     <BaseDialog :show="showCustomTimeRangeDialog" :title="t('admin.ops.timeRange.custom')" width="narrow" @close="handleCustomTimeRangeCancel">
       <div class="space-y-4">
-        <div>
+        <div class="console-field">
           <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
             {{ t('admin.ops.customTimeRange.startTime') }}
           </label>
@@ -1430,7 +1430,7 @@ function handleToolbarRefresh() {
             class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500 dark:border-dark-600 dark:bg-dark-800 dark:text-white"
           />
         </div>
-        <div>
+        <div class="console-field">
           <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
             {{ t('admin.ops.customTimeRange.endTime') }}
           </label>
@@ -1443,7 +1443,7 @@ function handleToolbarRefresh() {
         <div class="flex justify-end gap-3 pt-2">
           <button
             type="button"
-            class="rounded-lg bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200 dark:bg-dark-700 dark:text-gray-300 dark:hover:bg-dark-600"
+            class="rounded-lg bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200 dark:bg-dark-700 dark:text-gray-300 dark:hover:bg-dark-600 btn"
             @click="handleCustomTimeRangeCancel"
           >
             {{ t('common.cancel') }}

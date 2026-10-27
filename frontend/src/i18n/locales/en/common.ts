@@ -1,5 +1,13 @@
 export default {
   console: {
+    imagePreview: 'Image preview',
+    formIdentity: 'Basic information',
+    formConnection: 'Connection & authorization',
+    formScheduling: 'Scheduling & limits',
+    formProtocol: 'Protocol & advanced settings',
+    formAccess: 'Access & quota',
+    formPricing: 'Billing & subscriptions',
+    formRouting: 'Routing & models',
     usageSummary: 'Usage summary',
     advancedFilters: 'Advanced filters',
     requestsPerMinute: 'Requests per minute',
@@ -521,6 +529,7 @@ export default {
   stepUp: {
     title: 'Two-Factor Verification Required',
     hint: 'Enter the 6-digit code from your authenticator app to continue this sensitive operation.',
+    digitLabel: 'Verification code digit {digit} of 6',
     verifyFailed: 'Verification failed, please try again',
     notEnabled: 'This operation requires two-factor authentication. Please enable TOTP in your profile first.',
     adminApiKeyForbidden: 'Admin API keys cannot perform this operation. Use a two-factor verified admin session.'

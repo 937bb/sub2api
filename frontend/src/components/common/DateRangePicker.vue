@@ -21,7 +21,7 @@
     </button>
 
     <Transition name="date-picker-dropdown">
-      <div v-if="isOpen" class="date-picker-dropdown">
+      <div v-if="isOpen" class="date-picker-dropdown console-popover console-popup-panel">
         <!-- Quick presets -->
         <div class="date-picker-presets">
           <button

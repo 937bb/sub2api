@@ -41,7 +41,7 @@
           role="dialog"
           :aria-label="t('version.currentVersion')"
           tabindex="-1"
-          class="version-popover"
+          class="version-popover console-popover"
           :style="popoverStyle"
         >
           <!-- Header with refresh button -->

@@ -472,8 +472,10 @@
       width="normal"
       @close="closeModals"
     >
-      <form id="key-form" @submit.prevent="handleSubmit" class="workbench-editor-form space-y-5">
-        <div class="workbench-field-row ">
+      <template #navigation><DialogSectionLinks :sections="['console.formIdentity', 'console.formAccess']" /></template>
+      <form id="key-form" @submit.prevent="handleSubmit" class="workbench-editor-form space-y-5 console-form">
+        <DialogSection :title="t('console.formIdentity')">
+<div class="workbench-field-row console-field">
           <label class="input-label">{{ t('keys.nameLabel') }}</label>
           <input
             v-model="formData.name"
@@ -504,7 +506,7 @@
                 @change="selectCreateProvider(provider.value)"
               />
               <span
-                class="flex h-full flex-col items-center gap-2 rounded-xl border border-gray-200 bg-white px-2 py-3 text-center transition-colors peer-checked:border-primary-500 peer-checked:bg-primary-50/60 peer-checked:ring-1 peer-checked:ring-primary-500 peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-primary-500 peer-disabled:opacity-40 dark:border-dark-600 dark:bg-dark-800 dark:peer-checked:border-primary-500 dark:peer-checked:bg-primary-500/10"
+                class="flex h-full flex-col items-center gap-2 rounded-lg border border-gray-200 bg-white px-2 py-3 text-center transition-colors peer-checked:border-primary-500 peer-checked:bg-primary-50/60 peer-checked:ring-1 peer-checked:ring-primary-500 peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-primary-500 peer-disabled:opacity-40 dark:border-dark-600 dark:bg-dark-800 dark:peer-checked:border-primary-500 dark:peer-checked:bg-primary-500/10"
                 :class="provider.count > 0 && 'hover:border-primary-300 dark:hover:border-primary-700'"
               >
                 <span class="flex h-8 items-center justify-center gap-1.5" aria-hidden="true">
@@ -533,7 +535,7 @@
           </p>
         </fieldset>
 
-        <div class="workbench-field-row ">
+        <div class="workbench-field-row console-field">
           <label class="input-label" for="key-form-group">{{ t('keys.groupLabel') }}</label>
           <Select
             :key="showEditModal ? 'edit' : createProvider"
@@ -613,7 +615,7 @@
           </div>
         </div>
 
-        <div class="workbench-field-row " v-if="showEditModal">
+        <div class="workbench-field-row console-field" v-if="showEditModal">
           <label class="input-label">{{ t('keys.statusLabel') }}</label>
           <Select
             v-model="formData.status"
@@ -621,9 +623,11 @@
             :placeholder="t('keys.selectStatus')"
           />
         </div>
+</DialogSection>
 
         <!-- IP Restriction Section -->
-        <div class="workbench-field-row space-y-3">
+        <DialogSection :title="t('console.formAccess')">
+<div class="workbench-field-row space-y-3">
           <div class="flex items-center justify-between">
             <label class="input-label mb-0">{{ t('keys.ipRestriction') }}</label>
             <button
@@ -644,7 +648,7 @@
           </div>
 
           <div v-if="formData.enable_ip_restriction" class="space-y-4 pt-2">
-            <div>
+            <div class="console-field">
               <label class="input-label">{{ t('keys.ipWhitelist') }}</label>
               <textarea
                 v-model="formData.ip_whitelist"
@@ -655,7 +659,7 @@
               <p class="input-hint">{{ t('keys.ipWhitelistHint') }}</p>
             </div>
 
-            <div>
+            <div class="console-field">
               <label class="input-label">{{ t('keys.ipBlacklist') }}</label>
               <textarea
                 v-model="formData.ip_blacklist"
@@ -961,7 +965,7 @@
             </div>
 
             <!-- Date picker (always show for precise adjustment) -->
-            <div>
+            <div class="console-field">
               <label class="input-label">{{ t('keys.expirationDate') }}</label>
               <input
                 v-model="formData.expiration_date"
@@ -980,6 +984,7 @@
             </div>
           </div>
         </div>
+</DialogSection>
       </form>
       <template #footer>
         <div class="flex justify-end gap-3">
@@ -1094,7 +1099,7 @@
 	        <div class="grid grid-cols-2 gap-3">
 	          <button
 	            @click="handleCcsClientSelect('claude')"
-	            class="flex flex-col items-center gap-2 p-4 rounded-xl border-2 border-gray-200 dark:border-dark-600 hover:border-primary-500 dark:hover:border-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/20 transition-all"
+	            class="flex flex-col items-center gap-2 p-4 rounded-lg border border-gray-200 dark:border-dark-600 hover:border-primary-500 dark:hover:border-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/20 transition-all"
 	          >
 	            <Icon name="terminal" size="xl" class="text-gray-600 dark:text-gray-400" />
 	            <span class="font-medium text-gray-900 dark:text-white">{{
@@ -1106,7 +1111,7 @@
 	          </button>
 	          <button
 	            @click="handleCcsClientSelect('gemini')"
-	            class="flex flex-col items-center gap-2 p-4 rounded-xl border-2 border-gray-200 dark:border-dark-600 hover:border-primary-500 dark:hover:border-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/20 transition-all"
+	            class="flex flex-col items-center gap-2 p-4 rounded-lg border border-gray-200 dark:border-dark-600 hover:border-primary-500 dark:hover:border-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/20 transition-all"
 	          >
 	            <Icon name="sparkles" size="xl" class="text-gray-600 dark:text-gray-400" />
 	            <span class="font-medium text-gray-900 dark:text-white">{{
@@ -1132,7 +1137,7 @@
       <div
         v-if="groupSelectorKeyId !== null && dropdownPosition"
         ref="dropdownRef"
-        class="animate-in fade-in slide-in-from-top-2 fixed z-[100000020] w-max max-w-[calc(100vw-16px)] overflow-hidden rounded-xl bg-white shadow-lg ring-1 ring-black/5 duration-200 sm:min-w-[380px] dark:bg-dark-800 dark:ring-white/10"
+        class="animate-in fade-in slide-in-from-top-2 fixed z-[100000020] w-max max-w-[calc(100vw-16px)] overflow-hidden rounded-xl bg-white shadow-lg ring-1 ring-black/5 duration-200 sm:min-w-[380px] dark:bg-dark-800 dark:ring-white/10 console-popover console-popup-panel"
         style="pointer-events: auto !important;"
         :style="{
           top: dropdownPosition.top !== undefined ? dropdownPosition.top + 'px' : undefined,
@@ -1199,6 +1204,8 @@
 </template>
 
 <script setup lang="ts">
+import DialogSectionLinks from '@/components/common/DialogSectionLinks.vue'
+import DialogSection from '@/components/common/DialogSection.vue'
 	import { ref, reactive, computed, watch, onMounted, onUnmounted, type ComponentPublicInstance } from 'vue'
 	import { useI18n } from 'vue-i18n'
 	import { useAppStore } from '@/stores/app'

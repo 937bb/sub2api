@@ -178,7 +178,7 @@
 
       <div v-else-if="detail" class="space-y-5 py-2">
         <!-- Hero: action + result at a glance -->
-        <div class="rounded-2xl border border-gray-200 bg-gray-50/60 p-5 dark:border-dark-700 dark:bg-dark-900/60">
+        <div class="rounded-lg border border-gray-200 bg-gray-50/60 p-5 dark:border-dark-700 dark:bg-dark-900/60 console-note">
           <div class="flex flex-wrap items-center gap-3">
             <span :class="statusBadgeClass(detail.status_code)">
               <span class="h-1.5 w-1.5 rounded-full" :class="statusDotClass(detail.status_code)"></span>
@@ -211,7 +211,7 @@
 
         <!-- Actor / auth / source -->
         <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <div class="rounded-xl bg-gray-50 p-4 dark:bg-dark-900">
+          <div class="rounded-lg bg-gray-50 p-4 dark:bg-dark-900 console-note">
             <div class="text-xs font-bold uppercase tracking-wider text-gray-400">
               {{ t('admin.audit.columns.actor') }}
             </div>
@@ -221,7 +221,7 @@
             <div class="mt-0.5 text-xs text-gray-400">{{ detail.actor_role }}</div>
           </div>
 
-          <div class="rounded-xl bg-gray-50 p-4 dark:bg-dark-900">
+          <div class="rounded-lg bg-gray-50 p-4 dark:bg-dark-900 console-note">
             <div class="text-xs font-bold uppercase tracking-wider text-gray-400">
               {{ t('admin.audit.filters.authMethod') }}
             </div>
@@ -233,7 +233,7 @@
             </div>
           </div>
 
-          <div class="rounded-xl bg-gray-50 p-4 dark:bg-dark-900">
+          <div class="rounded-lg bg-gray-50 p-4 dark:bg-dark-900 console-note">
             <div class="text-xs font-bold uppercase tracking-wider text-gray-400">
               {{ t('admin.audit.columns.clientIp') }}
             </div>
@@ -244,29 +244,29 @@
         </div>
 
         <!-- User-Agent -->
-        <section>
+        <section class="console-form-block">
           <h4 class="mb-1.5 text-xs font-bold uppercase tracking-wider text-gray-400">
             {{ t('admin.audit.detail.userAgent') }}
           </h4>
-          <div class="break-all rounded-xl bg-gray-50 p-3 font-mono text-xs leading-relaxed text-gray-600 dark:bg-dark-900 dark:text-gray-400">
+          <div class="break-all rounded-lg bg-gray-50 p-3 font-mono text-xs leading-relaxed text-gray-600 dark:bg-dark-900 dark:text-gray-400 console-note">
             {{ detail.user_agent || '—' }}
           </div>
         </section>
 
         <!-- Request body (redacted) -->
-        <section v-if="detail.request_body">
+        <section class="console-form-block" v-if="detail.request_body">
           <h4 class="mb-1.5 text-xs font-bold uppercase tracking-wider text-gray-400">
             {{ t('admin.audit.detail.requestBody') }}
           </h4>
-          <pre class="max-h-72 overflow-auto rounded-xl bg-gray-50 p-4 font-mono text-xs leading-relaxed text-gray-600 dark:bg-dark-900 dark:text-gray-400">{{ prettyBody(detail.request_body) }}</pre>
+          <pre class="max-h-72 overflow-auto rounded-lg bg-gray-50 p-4 font-mono text-xs leading-relaxed text-gray-600 dark:bg-dark-900 dark:text-gray-400">{{ prettyBody(detail.request_body) }}</pre>
         </section>
 
         <!-- Extra -->
-        <section v-if="detail.extra && Object.keys(detail.extra).length">
+        <section class="console-form-block" v-if="detail.extra && Object.keys(detail.extra).length">
           <h4 class="mb-1.5 text-xs font-bold uppercase tracking-wider text-gray-400">
             {{ t('admin.audit.detail.extra') }}
           </h4>
-          <pre class="max-h-48 overflow-auto rounded-xl bg-gray-50 p-4 font-mono text-xs leading-relaxed text-gray-600 dark:bg-dark-900 dark:text-gray-400">{{ JSON.stringify(detail.extra, null, 2) }}</pre>
+          <pre class="max-h-48 overflow-auto rounded-lg bg-gray-50 p-4 font-mono text-xs leading-relaxed text-gray-600 dark:bg-dark-900 dark:text-gray-400">{{ JSON.stringify(detail.extra, null, 2) }}</pre>
         </section>
       </div>
     </BaseDialog>
@@ -279,11 +279,11 @@
       @close="handleCustomTimeRangeCancel"
     >
       <div class="space-y-4 py-2">
-        <div>
+        <div class="console-field">
           <label class="input-label">{{ t('admin.ops.customTimeRange.startTime') }}</label>
           <input v-model="customStartTimeInput" type="datetime-local" class="input" />
         </div>
-        <div>
+        <div class="console-field">
           <label class="input-label">{{ t('admin.ops.customTimeRange.endTime') }}</label>
           <input v-model="customEndTimeInput" type="datetime-local" class="input" />
         </div>

@@ -5,7 +5,12 @@
     width="extra-wide"
     @close="emit('update:show', false)"
   >
-    <div v-if="log" data-testid="usage-detail-dialog" class="space-y-6 text-sm">
+    <template #navigation>
+      <div class="console-detail-tabs">
+        <button v-for="tab in detailTabs" :key="tab.id" type="button" :aria-pressed="detailTab === tab.id" @click="detailTab = tab.id">{{ tab.label }}</button>
+      </div>
+    </template>
+    <div v-if="log" data-testid="usage-detail-dialog" class="console-request-detail text-sm">
       <div class="flex flex-wrap items-start justify-between gap-3 border-b border-gray-200 pb-4 dark:border-dark-700">
         <div class="min-w-0">
           <p class="text-xs font-medium uppercase text-gray-400 dark:text-gray-500">
@@ -21,11 +26,11 @@
         </div>
       </div>
 
-      <section>
+      <section v-show="detailTab === 'request'" class="console-form-block">
         <h4 class="mb-3 text-sm font-semibold text-gray-900 dark:text-white">
           {{ t('admin.usage.detail.request') }}
         </h4>
-        <dl class="grid grid-cols-1 gap-x-8 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
+        <dl class="grid grid-cols-1 gap-x-8 gap-y-3 sm:grid-cols-2 lg:grid-cols-3 console-detail-grid">
           <DetailItem :label="t('admin.usage.user')" :value="userLabel" />
           <DetailItem :label="t('usage.apiKeyFilter')" :value="log.api_key?.name || '-'" />
           <DetailItem :label="t('admin.usage.account')" :value="accountLabel" />
@@ -44,12 +49,12 @@
         </dl>
       </section>
 
-      <section class="border-t border-gray-200 pt-5 dark:border-dark-700">
+      <section v-show="detailTab === 'billing'" class="console-form-block">
         <h4 class="mb-3 text-sm font-semibold text-gray-900 dark:text-white">
           {{ t('admin.usage.detail.tokensAndBilling') }}
         </h4>
         <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <dl class="grid grid-cols-2 gap-x-6 gap-y-3">
+          <dl class="grid grid-cols-2 gap-x-6 gap-y-3 console-detail-grid">
             <DetailItem :label="t('admin.usage.inputTokens')" :value="formatNumber(log.input_tokens)" />
             <DetailItem :label="t('admin.usage.outputTokens')" :value="formatNumber(log.output_tokens)" />
             <DetailItem :label="t('admin.usage.cacheCreationTokens')" :value="formatNumber(log.cache_creation_tokens)" />
@@ -61,7 +66,7 @@
             <DetailItem :label="t('usage.totalTokens')" :value="formatNumber(totalTokens)" strong />
             <DetailItem :label="t('usage.imageCount')" :value="formatNumber(log.image_count)" />
           </dl>
-          <dl class="grid grid-cols-2 gap-x-6 gap-y-3">
+          <dl class="grid grid-cols-2 gap-x-6 gap-y-3 console-detail-grid">
             <DetailItem :label="t('admin.usage.inputCost')" :value="formatCost(log.input_cost)" />
             <DetailItem :label="t('admin.usage.outputCost')" :value="formatCost(log.output_cost)" />
             <DetailItem :label="t('admin.usage.cacheCreationCost')" :value="formatCost(log.cache_creation_cost)" />
@@ -79,11 +84,11 @@
         </div>
       </section>
 
-      <section class="border-t border-gray-200 pt-5 dark:border-dark-700">
+      <section v-show="detailTab === 'performance'" class="console-form-block">
         <h4 class="mb-3 text-sm font-semibold text-gray-900 dark:text-white">
           {{ t('admin.usage.detail.performanceAndClient') }}
         </h4>
-        <dl class="grid grid-cols-1 gap-x-8 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
+        <dl class="grid grid-cols-1 gap-x-8 gap-y-3 sm:grid-cols-2 lg:grid-cols-3 console-detail-grid">
           <DetailItem :label="t('usage.firstToken')" :value="formatDuration(log.first_token_ms)" />
           <DetailItem :label="t('usage.duration')" :value="formatDuration(log.duration_ms)" />
           <DetailItem :label="t('usage.outputTps')" :value="formatUsageOutputRate(log)" />
@@ -92,7 +97,7 @@
         </dl>
       </section>
 
-      <section class="border-t border-gray-200 pt-5 dark:border-dark-700">
+      <section v-show="detailTab === 'trace'" class="console-form-block">
         <h4 class="mb-3 text-sm font-semibold text-gray-900 dark:text-white">
           {{ t('admin.usage.detail.trace') }}
         </h4>
@@ -131,7 +136,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import DetailItem from './UsageDetailItem.vue'
@@ -155,6 +160,14 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+const detailTab = ref('request')
+const detailTabs = computed(() => [
+  { id: 'request', label: t('admin.usage.detail.request') },
+  { id: 'billing', label: t('admin.usage.detail.tokensAndBilling') },
+  { id: 'performance', label: t('admin.usage.detail.performanceAndClient') },
+  { id: 'trace', label: t('admin.usage.detail.trace') }
+])
+watch(() => props.show, (show) => { if (show) detailTab.value = 'request' })
 const appStore = useAppStore()
 const copiedValue = ref<string | null>(null)
 

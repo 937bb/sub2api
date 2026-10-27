@@ -184,10 +184,6 @@
 .console-distribution-tabs button[aria-pressed="true"] { color: var(--console-accent); background: var(--console-selected); }
 .console-distribution-workspace > .card { flex: 1; }
 .console-loading { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 16px; }
-body:has(.console-shell) .modal-overlay { backdrop-filter: none; background: rgb(19 30 48 / 32%); }
-body:has(.console-shell) .modal-content { border: 0; border-radius: 16px; background: var(--console-surface); color: var(--console-ink); box-shadow: 0 18px 60px rgb(10 24 45 / 16%); }
-body:has(.console-shell) .modal-title { font-size: 18px; }
-body:has(.console-shell) .modal-footer { background: var(--console-nav); border-radius: 0 0 16px 16px; }
 .console-auth { display: grid; grid-template-columns: minmax(320px,.85fr) minmax(0,1.15fr); min-height: 100dvh; }
 .console-auth-identity { display: flex; flex-direction: column; justify-content: space-between; padding: 48px 56px; background: var(--console-nav); color: var(--console-ink); }
 .console-auth-brand { display: flex; align-items: center; gap: 12px; font-size: 20px; font-weight: 650; }

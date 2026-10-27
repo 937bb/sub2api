@@ -351,8 +351,10 @@ describe('PaymentView help text', () => {
     expect(help.get('p').text()).toBe('First line\nSecond line')
     expect(help.find('br').exists()).toBe(false)
     await wrapper.get('img').trigger('click')
-    expect(wrapper.findAll('img')).toHaveLength(2)
-    expect(wrapper.findAll('img')[1].attributes('src')).toBe('https://example.com/help.png')
+    expect(wrapper.getComponent({ name: 'ImagePreview' }).props('src')).toBe('https://example.com/help.png')
+    wrapper.getComponent({ name: 'ImagePreview' }).vm.$emit('close')
+    await flushPromises()
+    expect(wrapper.getComponent({ name: 'ImagePreview' }).props('src')).toBe('')
   })
 
   it('keeps image-only help without an empty Markdown container', async () => {

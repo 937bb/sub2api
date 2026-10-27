@@ -53,7 +53,7 @@
         </label>
       </div>
 
-      <details class="rounded-xl border border-gray-200 px-4 py-3 dark:border-dark-700/60" data-test="more-conditions">
+      <details class="rounded-lg border border-gray-200 px-4 py-3 dark:border-dark-700/60" data-test="more-conditions">
         <summary class="cursor-pointer select-none text-xs font-medium text-gray-600 dark:text-dark-200">{{ t('admin.promptAudit.events.moreConditions') }}</summary>
         <div class="mt-3 grid gap-3 sm:grid-cols-2">
           <label class="text-xs text-gray-600 dark:text-dark-200">
@@ -75,9 +75,9 @@
         </div>
       </details>
 
-      <div v-if="preview" class="rounded-xl border border-red-200 bg-red-50/60 px-4 py-3 dark:border-red-900/60 dark:bg-red-950/20" data-test="delete-preview-result">
+      <div v-if="preview" class="rounded-lg border border-red-200 bg-red-50/60 px-4 py-3 dark:border-red-900/60 dark:bg-red-950/20" data-test="delete-preview-result">
         <p class="text-sm font-semibold text-red-700 dark:text-red-300">{{ t('admin.promptAudit.events.filterDeleteCount', { count: preview.matched_count }) }}</p>
-        <dl class="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs text-gray-600 dark:text-dark-300">
+        <dl class="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs text-gray-600 dark:text-dark-300 console-detail-grid">
           <dt>{{ t('admin.promptAudit.events.snapshotMax') }}</dt>
           <dd>{{ preview.snapshot_max_id }}</dd>
           <dt>Filter SHA-256</dt>
@@ -87,7 +87,7 @@
         </dl>
         <p class="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">{{ t('admin.promptAudit.events.filterDeleteWarning') }}</p>
       </div>
-      <p v-else class="rounded-xl border border-dashed border-gray-300 px-4 py-3 text-xs text-gray-500 dark:border-dark-600 dark:text-dark-400" data-test="delete-preview-empty">
+      <p v-else class="rounded-lg border border-dashed border-gray-300 px-4 py-3 text-xs text-gray-500 dark:border-dark-600 dark:text-dark-400" data-test="delete-preview-empty">
         {{ t('admin.promptAudit.events.filterDeleteNeedPreview') }}
       </p>
     </div>

@@ -6271,19 +6271,8 @@
           </div>
 
           <!-- Web Search Test Dialog -->
-          <div
-            v-if="wsTestDialogOpen"
-            class="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-            @click.self="wsTestDialogOpen = false"
-          >
-            <div
-              class="mx-4 w-full max-w-lg rounded-xl bg-white p-6 shadow-xl dark:bg-dark-800"
-            >
-              <h3
-                class="mb-4 text-lg font-semibold text-gray-900 dark:text-white"
-              >
-                {{ t("admin.settings.webSearchEmulation.testResultTitle") }}
-              </h3>
+          <BaseDialog v-if="wsTestDialogOpen" :show="true" :title="t('admin.settings.webSearchEmulation.testResultTitle')" width="normal" @close="wsTestDialogOpen = false">
+
               <div class="flex items-center gap-2">
                 <input
                   v-model="wsTestQuery"
@@ -6310,7 +6299,7 @@
               <!-- Test results -->
               <div
                 v-if="wsTestResult"
-                class="mt-4 max-h-80 overflow-y-auto rounded-lg bg-gray-50 p-4 dark:bg-dark-700"
+                class="mt-4 max-h-80 overflow-y-auto rounded-lg bg-gray-50 p-4 dark:bg-dark-700 console-note"
               >
                 <p
                   class="mb-2 text-sm font-medium text-gray-700 dark:text-gray-300"
@@ -6341,7 +6330,7 @@
                   </p>
                 </div>
               </div>
-              <div class="mt-4 flex justify-end">
+              <template #footer><div class="flex w-full flex-wrap items-center justify-end gap-2">
                 <button
                   type="button"
                   class="btn btn-secondary btn-sm"
@@ -6349,9 +6338,9 @@
                 >
                   {{ t("common.close") }}
                 </button>
-              </div>
-            </div>
-          </div>
+              </div></template>
+
+</BaseDialog>
 
         <!-- Usage Records Settings -->
         <div class="card">
@@ -7744,22 +7733,15 @@
         </div>
 
         <!-- Affiliate add/edit modal -->
-        <div
-          v-if="affiliateModal.open"
-          class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-          @click.self="closeAffiliateModal"
-        >
-          <div class="w-full max-w-md rounded-lg bg-white p-6 shadow-xl dark:bg-dark-900">
-            <h3 class="mb-4 text-lg font-semibold">
-              {{ affiliateModal.mode === 'add' ? t('admin.settings.features.affiliate.modal.addTitle') : t('admin.settings.features.affiliate.modal.editTitle') }}
-            </h3>
+        <BaseDialog v-if="affiliateModal.open" :show="true" :title="affiliateModal.mode === 'add' ? t('admin.settings.features.affiliate.modal.addTitle') : t('admin.settings.features.affiliate.modal.editTitle')" width="narrow" @close="closeAffiliateModal">
+
             <div class="space-y-4">
               <div v-if="affiliateModal.mode === 'add'">
                 <label class="input-label">{{ t('admin.settings.features.affiliate.modal.userLabel') }}</label>
                 <!-- Chip showing the picked user; clicking it re-opens the search -->
                 <div
                   v-if="affiliateModal.selectedUser"
-                  class="flex items-center justify-between rounded-md border border-primary-200 bg-primary-50 px-3 py-2 dark:border-primary-700/50 dark:bg-primary-900/20"
+                  class="flex items-center justify-between rounded-md border border-primary-200 bg-primary-50 px-3 py-2 dark:border-primary-700/50 dark:bg-primary-900/20 console-note"
                 >
                   <div class="text-sm">
                     <span class="font-medium text-gray-900 dark:text-white">{{ affiliateModal.selectedUser.email }}</span>
@@ -7791,7 +7773,7 @@
                       v-for="u in affiliateModal.userResults"
                       :key="u.id"
                       type="button"
-                      class="w-full px-3 py-1.5 text-left text-sm hover:bg-gray-100 dark:hover:bg-dark-800"
+                      class="w-full px-3 py-1.5 text-left text-sm hover:bg-gray-100 dark:hover:bg-dark-800 btn"
                       @click="selectAffiliateUser(u)"
                     >
                       {{ u.email }} <span class="text-xs text-gray-500">({{ u.username }})</span>
@@ -7799,7 +7781,7 @@
                   </div>
                 </template>
               </div>
-              <div v-else>
+              <div class="console-field" v-else>
                 <label class="input-label">{{ t('admin.settings.features.affiliate.modal.userLabel') }}</label>
                 <input
                   type="text"
@@ -7809,7 +7791,7 @@
                 />
               </div>
 
-              <div>
+              <div class="console-field">
                 <label class="input-label">{{ t('admin.settings.features.affiliate.modal.codeLabel') }}</label>
                 <input
                   v-model="affiliateModal.code"
@@ -7865,19 +7847,12 @@
                 </button>
               </div>
             </div>
-          </div>
-        </div>
+
+</BaseDialog>
 
         <!-- Affiliate batch rate modal -->
-        <div
-          v-if="affiliateBatchModal.open"
-          class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-          @click.self="affiliateBatchModal.open = false"
-        >
-          <div class="w-full max-w-md rounded-lg bg-white p-6 shadow-xl dark:bg-dark-900">
-            <h3 class="mb-4 text-lg font-semibold">
-              {{ t('admin.settings.features.affiliate.batchModal.title', { count: affiliateState.selected.length }) }}
-            </h3>
+        <BaseDialog v-if="affiliateBatchModal.open" :show="true" :title="t('admin.settings.features.affiliate.batchModal.title', { count: affiliateState.selected.length })" width="narrow" @close="affiliateBatchModal.open = false">
+
             <p class="mb-4 text-sm text-gray-500">
               {{ t('admin.settings.features.affiliate.batchModal.hint') }}
             </p>
@@ -7896,7 +7871,7 @@
             <p class="mt-2 text-xs text-gray-400">
               {{ t('admin.settings.features.affiliate.batchModal.clearHint') }}
             </p>
-            <div class="mt-6 flex justify-end gap-2">
+            <template #footer><div class="flex w-full flex-wrap items-center justify-end gap-2">
               <button type="button" class="btn btn-secondary" @click="affiliateBatchModal.open = false">
                 {{ t('common.cancel') }}
               </button>
@@ -7908,9 +7883,9 @@
               >
                 {{ affiliateBatchModal.saving ? t('common.saving') : t('common.save') }}
               </button>
-            </div>
-          </div>
-        </div>
+            </div></template>
+
+</BaseDialog>
 
         </div><!-- /Tab: Features -->
 
@@ -8975,6 +8950,7 @@
 </template>
 
 <script setup lang="ts">
+import BaseDialog from '@/components/common/BaseDialog.vue'
 import { ref, reactive, computed, onMounted, watch } from "vue";
 import { listPlatformIds } from "@/constants/platformCatalog";
 import { useI18n } from "vue-i18n";

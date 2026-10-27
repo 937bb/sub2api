@@ -22,7 +22,7 @@
         <Icon name="refresh" size="lg" class="animate-spin text-gray-400" />
       </div>
 
-      <div v-else-if="rules.length === 0" class="py-8 text-center">
+      <div v-else-if="rules.length === 0" class="py-8 text-center console-form-block">
         <div class="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-gray-100 dark:bg-dark-700">
           <Icon name="shield" size="lg" class="text-gray-400" />
         </div>
@@ -215,10 +215,10 @@
       width="wide"
       @close="closeFormModal"
     >
-      <form @submit.prevent="handleSubmit" class="workbench-editor-form space-y-4">
+      <form @submit.prevent="handleSubmit" class="workbench-editor-form space-y-4 console-form">
         <!-- Basic Info -->
         <div class="grid grid-cols-2 gap-4">
-          <div>
+          <div class="console-field">
             <label class="input-label">{{ t('admin.errorPassthrough.form.name') }}</label>
             <input
               v-model="form.name"
@@ -228,7 +228,7 @@
               :placeholder="t('admin.errorPassthrough.form.namePlaceholder')"
             />
           </div>
-          <div>
+          <div class="console-field">
             <label class="input-label">{{ t('admin.errorPassthrough.form.priority') }}</label>
             <input
               v-model.number="form.priority"
@@ -240,7 +240,7 @@
           </div>
         </div>
 
-        <div class="workbench-field-row">
+        <div class="workbench-field-row console-field">
           <label class="input-label">{{ t('admin.errorPassthrough.form.description') }}</label>
           <input
             v-model="form.description"
@@ -251,13 +251,13 @@
         </div>
 
         <!-- Match Conditions -->
-        <div class="rounded-lg border border-gray-200 p-3 dark:border-dark-600">
+        <div class="rounded-lg border border-gray-200 p-3 dark:border-dark-600 console-form-block">
           <h4 class="mb-2 text-sm font-medium text-gray-900 dark:text-white">
             {{ t('admin.errorPassthrough.form.matchConditions') }}
           </h4>
 
           <div class="grid grid-cols-2 gap-3">
-            <div>
+            <div class="console-field">
               <label class="input-label text-xs">{{ t('admin.errorPassthrough.form.errorCodes') }}</label>
               <input
                 v-model="errorCodesInput"
@@ -267,7 +267,7 @@
               />
               <p class="input-hint text-xs">{{ t('admin.errorPassthrough.form.errorCodesHint') }}</p>
             </div>
-            <div>
+            <div class="console-field">
               <label class="input-label text-xs">{{ t('admin.errorPassthrough.form.keywords') }}</label>
               <textarea
                 v-model="keywordsInput"
@@ -323,7 +323,7 @@
         </div>
 
         <!-- Response Behavior -->
-        <div class="rounded-lg border border-gray-200 p-3 dark:border-dark-600">
+        <div class="rounded-lg border border-gray-200 p-3 dark:border-dark-600 console-form-block">
           <h4 class="mb-2 text-sm font-medium text-gray-900 dark:text-white">
             {{ t('admin.errorPassthrough.form.responseBehavior') }}
           </h4>
@@ -340,7 +340,7 @@
                   {{ t('admin.errorPassthrough.form.passthroughCode') }}
                 </span>
               </label>
-              <div v-if="!form.passthrough_code" class="mt-2">
+              <div v-if="!form.passthrough_code" class="mt-2 console-field">
                 <label class="input-label text-xs">{{ t('admin.errorPassthrough.form.responseCode') }}</label>
                 <input
                   v-model.number="form.response_code"
@@ -363,7 +363,7 @@
                   {{ t('admin.errorPassthrough.form.passthroughBody') }}
                 </span>
               </label>
-              <div v-if="!form.passthrough_body" class="mt-2">
+              <div v-if="!form.passthrough_body" class="mt-2 console-field">
                 <label class="input-label text-xs">{{ t('admin.errorPassthrough.form.customMessage') }}</label>
                 <input
                   v-model="form.custom_message"

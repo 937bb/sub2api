@@ -23,7 +23,6 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import '@/styles/console.css'
 import { useAppStore } from '@/stores'
 import { sanitizeUrl } from '@/utils/url'
 

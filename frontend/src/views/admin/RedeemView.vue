@@ -277,21 +277,15 @@
 
     <!-- Generate Codes Dialog -->
     <Teleport to="body">
-      <div v-if="showGenerateDialog" class="fixed inset-0 z-50 flex items-center justify-center">
-        <div class="fixed inset-0 bg-black/50" @click="showGenerateDialog = false"></div>
-        <div
-          class="relative z-10 w-full max-w-md rounded-xl bg-white p-6 shadow-xl dark:bg-dark-800"
-        >
-          <h2 class="mb-4 text-lg font-semibold text-gray-900 dark:text-white">
-            {{ t('admin.redeem.generateCodesTitle') }}
-          </h2>
-          <form @submit.prevent="handleGenerateCodes" class="space-y-4">
-            <div>
+      <BaseDialog v-if="showGenerateDialog" :show="true" :title="t('admin.redeem.generateCodesTitle')" width="narrow" @close="showGenerateDialog = false">
+
+          <form id="dialog-form-10286" @submit.prevent="handleGenerateCodes" class="space-y-4 console-form">
+            <div class="console-field">
               <label class="input-label">{{ t('admin.redeem.codeType') }}</label>
               <Select v-model="generateForm.type" :options="typeOptions" />
             </div>
             <!-- 余额/并发类型：显示数值输入 -->
-            <div v-if="generateForm.type !== 'subscription' && generateForm.type !== 'invitation'">
+            <div class="console-field" v-if="generateForm.type !== 'subscription' && generateForm.type !== 'invitation'">
               <label class="input-label">
                 {{
                   generateForm.type === 'balance'
@@ -309,14 +303,14 @@
               />
             </div>
             <!-- 邀请码类型：显示提示信息 -->
-            <div v-if="generateForm.type === 'invitation'" class="rounded-lg bg-blue-50 p-3 dark:bg-blue-900/20">
+            <div v-if="generateForm.type === 'invitation'" class="rounded-lg bg-blue-50 p-3 dark:bg-blue-900/20 console-note">
               <p class="text-sm text-blue-700 dark:text-blue-300">
                 {{ t('admin.redeem.invitationHint') }}
               </p>
             </div>
             <!-- 订阅类型：显示分组选择和有效天数 -->
             <template v-if="generateForm.type === 'subscription'">
-              <div>
+              <div class="console-field">
                 <label class="input-label">{{ t('admin.redeem.selectGroup') }}</label>
                 <Select
                   v-model="generateForm.group_id"
@@ -347,7 +341,7 @@
                   </template>
                 </Select>
               </div>
-              <div>
+              <div class="console-field">
                 <label class="input-label">{{ t('admin.redeem.validityDays') }}</label>
                 <input
                   v-model.number="generateForm.validity_days"
@@ -359,16 +353,16 @@
                 />
               </div>
             </template>
-            <div>
+            <div class="console-field">
               <label class="input-label">{{ t('admin.redeem.codeExpiry') }}</label>
-              <div class="grid grid-cols-2 gap-2 sm:grid-cols-5">
+              <div class="flex flex-wrap gap-2 console-choice-group">
                 <button
                   v-for="option in redeemCodeExpiryOptions"
                   :key="option.value"
                   type="button"
                   @click="generateForm.expiry_option = option.value"
                   :class="[
-                    'rounded-lg border px-3 py-2 text-sm transition-colors',
+                    'whitespace-nowrap rounded-lg border px-3 py-2 text-sm transition-colors',
                     generateForm.expiry_option === option.value
                       ? 'border-primary-500 bg-primary-50 text-primary-700 dark:border-primary-400 dark:bg-primary-900/20 dark:text-primary-300'
                       : 'border-gray-200 text-gray-700 hover:bg-gray-50 dark:border-dark-600 dark:text-gray-300 dark:hover:bg-dark-700'
@@ -388,7 +382,7 @@
                 :placeholder="t('admin.redeem.customExpiryDays')"
               />
             </div>
-            <div>
+            <div class="console-field">
               <label class="input-label">{{ t('admin.redeem.count') }}</label>
               <input
                 v-model.number="generateForm.count"
@@ -399,38 +393,30 @@
                 class="input"
               />
             </div>
-            <div class="flex justify-end gap-3 pt-2">
+
+          </form>
+<template #footer><div class="flex justify-end gap-3 pt-2">
               <button type="button" @click="showGenerateDialog = false" class="btn btn-secondary">
                 {{ t('common.cancel') }}
               </button>
-              <button type="submit" :disabled="generating" class="btn btn-primary">
+              <button type="submit" form="dialog-form-10286" :disabled="generating" class="btn btn-primary">
                 {{ generating ? t('admin.redeem.generating') : t('admin.redeem.generate') }}
               </button>
-            </div>
-          </form>
-        </div>
-      </div>
+            </div></template>
+
+</BaseDialog>
     </Teleport>
 
     <!-- Batch Update Dialog -->
     <Teleport to="body">
-      <div
-        v-if="showBatchUpdateDialog"
-        class="fixed inset-0 z-50 flex items-center justify-center p-4"
-      >
-        <div class="fixed inset-0 bg-black/50" @click="closeBatchUpdateDialog"></div>
-        <div
-          class="relative z-10 w-full max-w-lg rounded-xl bg-white p-6 shadow-xl dark:bg-dark-800"
-        >
-          <h2 class="mb-1 text-lg font-semibold text-gray-900 dark:text-white">
-            {{ t('admin.redeem.batchUpdateTitle') }}
-          </h2>
+      <BaseDialog v-if="showBatchUpdateDialog" :show="true" :title="t('admin.redeem.batchUpdateTitle')" width="normal" @close="closeBatchUpdateDialog">
+
           <p class="mb-4 text-sm text-gray-500 dark:text-gray-400">
             {{ t('admin.redeem.selectedCount', { count: selectedCount }) }}
           </p>
 
-          <form data-test="batch-update-form" class="space-y-4" @submit.prevent="handleBatchUpdate">
-            <div class="space-y-2">
+          <form id="dialog-form-16435" data-test="batch-update-form" class="space-y-4 console-form" @submit.prevent="handleBatchUpdate">
+            <div class="space-y-2 console-field">
               <label class="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300">
                 <input
                   data-test="batch-field-status"
@@ -471,7 +457,7 @@
               </template>
             </div>
 
-            <div class="space-y-2">
+            <div class="space-y-2 console-field">
               <label class="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300">
                 <input
                   data-test="batch-field-notes"
@@ -491,7 +477,7 @@
               ></textarea>
             </div>
 
-            <div class="space-y-2">
+            <div class="space-y-2 console-field">
               <label class="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300">
                 <input
                   v-model="batchUpdateForm.update_group_id"
@@ -508,29 +494,28 @@
               />
             </div>
 
-            <div class="flex justify-end gap-3 pt-2">
+
+          </form>
+<template #footer><div class="flex justify-end gap-3 pt-2">
               <button type="button" @click="closeBatchUpdateDialog" class="btn btn-secondary">
                 {{ t('common.cancel') }}
               </button>
               <button
                 data-test="batch-update-submit"
-                type="submit"
+                type="submit" form="dialog-form-16435"
                 :disabled="batchUpdating"
                 class="btn btn-primary"
               >
                 {{ batchUpdating ? t('common.submitting') : t('admin.redeem.batchUpdate') }}
               </button>
-            </div>
-          </form>
-        </div>
-      </div>
+            </div></template>
+
+</BaseDialog>
     </Teleport>
 
     <!-- Generated Codes Result Dialog -->
     <Teleport to="body">
-      <div v-if="showResultDialog" class="fixed inset-0 z-50 flex items-center justify-center p-4">
-        <div class="fixed inset-0 bg-black/50" @click="closeResultDialog"></div>
-        <div class="relative z-10 w-full max-w-lg rounded-xl bg-white shadow-xl dark:bg-dark-800">
+      <BaseDialog v-if="showResultDialog" :show="true" :title="t('admin.redeem.generatedSuccessfully')" width="normal" @close="closeResultDialog">
           <!-- Header -->
           <div
             class="flex items-center justify-between border-b border-gray-200 px-5 py-4 dark:border-dark-600"
@@ -554,9 +539,7 @@
                 </svg>
               </div>
               <div>
-                <h2 class="text-base font-semibold text-gray-900 dark:text-white">
-                  {{ t('admin.redeem.generatedSuccessfully') }}
-                </h2>
+
                 <p class="text-sm text-gray-500 dark:text-gray-400">
                   {{ t('admin.redeem.codesCreated', { count: generatedCodes.length }) }}
                 </p>
@@ -576,13 +559,13 @@
                 readonly
                 :value="generatedCodesText"
                 :style="{ height: textareaHeight }"
-                class="w-full resize-none rounded-lg border border-gray-200 bg-gray-50 p-3 font-mono text-sm text-gray-800 focus:outline-none dark:border-dark-600 dark:bg-dark-700 dark:text-gray-200"
+                class="w-full resize-none rounded-lg border border-gray-200 bg-gray-50 p-3 font-mono text-sm text-gray-800 focus:outline-none dark:border-dark-600 dark:bg-dark-700 dark:text-gray-200 input"
               ></textarea>
             </div>
           </div>
           <!-- Footer -->
-          <div
-            class="flex justify-end gap-2 rounded-b-xl border-t border-gray-200 bg-gray-50 px-5 py-4 dark:border-dark-600 dark:bg-dark-700/50"
+          <template #footer><div
+            class="flex w-full flex-wrap items-center justify-end gap-2"
           >
             <button
               @click="copyGeneratedCodes"
@@ -606,14 +589,15 @@
               <Icon name="download" size="sm" :stroke-width="2" />
               {{ t('admin.redeem.download') }}
             </button>
-          </div>
-        </div>
-      </div>
+          </div></template>
+
+</BaseDialog>
     </Teleport>
   </AppLayout>
 </template>
 
 <script setup lang="ts">
+import BaseDialog from '@/components/common/BaseDialog.vue'
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-10-27T10:00:15Z",
+  "generatedAt": "2026-10-27T11:45:57Z",
   "title": "Design System: 937Sub B Console",
   "extensions": {
     "colorMeta": {
@@ -588,7 +588,15 @@
       },
       "label": {
         "displayName": "Primary Metadata",
-        "purpose": "12px labels and primary metadata retain readable contrast."
+        "purpose": "12px primary metadata and supporting help retain readable contrast."
+      },
+      "dialog-title": {
+        "displayName": "Dialog Title",
+        "purpose": "17px semibold title shared by centered dialogs and right-side sheets."
+      },
+      "field-label": {
+        "displayName": "Field Label",
+        "purpose": "13px medium labels above shared fields, with 7px separation from the control."
       },
       "supporting": {
         "displayName": "Supporting Metadata",
@@ -597,14 +605,14 @@
     },
     "shadows": [
       {
-        "name": "dialog",
-        "value": "0 18px 60px rgb(10 24 45 / 16%)",
-        "purpose": "Dialogs and opt-in editor sheets."
+        "name": "overlay-shadow",
+        "value": "0 16px 48px rgb(20 28 40 / 16%)",
+        "purpose": "Centered dialogs and the version popover. Right-side sheets have no panel shadow."
       },
       {
-        "name": "version-popover",
-        "value": "0 12px 48px rgb(15 23 42 / 20%)",
-        "purpose": "Viewport-constrained nonmodal version portal."
+        "name": "popup-shadow",
+        "value": "0 6px 20px rgb(20 28 40 / 12%)",
+        "purpose": "Select menus, anchored popup panels, tooltips, and toasts."
       }
     ],
     "motion": [
@@ -615,8 +623,18 @@
       },
       {
         "name": "field-state",
-        "value": "200ms",
+        "value": "150ms ease",
         "purpose": "Input and select state changes."
+      },
+      {
+        "name": "modal-transition",
+        "value": "160ms",
+        "purpose": "Shared overlay and panel transitions; sheets enter from translateX(48px)."
+      },
+      {
+        "name": "select-dropdown",
+        "value": "200ms ease",
+        "purpose": "Select menu entrance from opacity 0 and translateY(-8px)."
       },
       {
         "name": "drawer-transform",
@@ -627,6 +645,11 @@
         "name": "reduced-motion",
         "value": "0.01ms; animation-iteration-count: 1",
         "purpose": "Reduced motion on console-shell descendants; not a universal portal guarantee."
+      },
+      {
+        "name": "reduced-overlay-motion",
+        "value": "transition: none",
+        "purpose": "Reduced motion removes shared overlay, modal panel, and switch transitions."
       },
       {
         "name": "trend-chart",
@@ -644,7 +667,7 @@
         "value": "600px"
       },
       {
-        "name": "sm",
+        "name": "sm-and-overlay-mobile",
         "value": "640px"
       },
       {
@@ -676,15 +699,15 @@
       "refersTo": "button-primary",
       "description": "Shared muted blue console action; the filled action stays primary-600 in both themes.",
       "html": "<button class=\"ds-primary\">Save changes</button>",
-      "css": ".ds-primary{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:34px;border-radius:9px;padding:7px 12px;font:500 13px/20px system-ui,sans-serif;cursor:pointer;box-shadow:none;transition:background-color 150ms ease-out,color 150ms ease-out;border:0;background:#32688b;color:#fff}.ds-primary:hover{background:#2b5673}.ds-primary:focus-visible{outline:2px solid var(--console-accent,#32688b);outline-offset:3px;}.ds-primary:disabled{opacity:.5;cursor:not-allowed}"
+      "css": ".ds-primary{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:34px;border-radius:var(--control-radius,6px);padding:6px 13px;font:500 13px/20px system-ui,sans-serif;cursor:pointer;box-shadow:none;transition:background-color 150ms ease-out,color 150ms ease-out;border:0;background:#32688b;color:#fff}.ds-primary:hover:not(:disabled){background:#2b5673}.ds-primary:focus-visible{outline:2px solid var(--console-accent,#32688b);outline-offset:3px}.ds-primary:disabled{opacity:.5;cursor:not-allowed}"
     },
     {
       "name": "Secondary Button",
       "kind": "button",
       "refersTo": "button-secondary",
-      "description": "Bordered neutral action for refresh and secondary work.",
+      "description": "Neutral filled action for cancel, refresh, and secondary work across pages and portals.",
       "html": "<button class=\"ds-secondary\">Refresh</button>",
-      "css": ".ds-secondary{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:34px;border-radius:9px;padding:7px 12px;font:500 13px/20px system-ui,sans-serif;cursor:pointer;box-shadow:none;transition:background-color 150ms ease-out,color 150ms ease-out;border:1px solid var(--console-line,#e7e9ed);background:#fff;color:#374151}.ds-secondary:hover{background:#f9fafb;border-color:#d1d5db}.ds-secondary:focus-visible{outline:2px solid var(--console-accent,#32688b);outline-offset:3px;}.ds-secondary:disabled{opacity:.5;cursor:not-allowed}:host-context(.dark) .ds-secondary{background:#1e293b;color:#e5e7eb}:host-context(.dark) .ds-secondary:hover{background:#334155;border-color:#64748b}"
+      "css": ".ds-secondary{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:34px;border-radius:var(--control-radius,6px);padding:6px 13px;font:500 13px/20px system-ui,sans-serif;cursor:pointer;box-shadow:none;transition:background-color 150ms ease-out,color 150ms ease-out;border:1px solid transparent;background:var(--console-nav,#f6f7f9);color:var(--console-ink,#242931)}.ds-secondary:hover:not(:disabled){background:var(--console-line,#e7e9ed)}.ds-secondary:focus-visible{outline:2px solid var(--console-accent,#32688b);outline-offset:3px}.ds-secondary:disabled{opacity:.5;cursor:not-allowed}"
     },
     {
       "name": "Ghost Button",
@@ -692,7 +715,7 @@
       "refersTo": "button-ghost",
       "description": "Unfilled utility action with neutral hover.",
       "html": "<button class=\"ds-ghost\">Cancel</button>",
-      "css": ".ds-ghost{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:34px;border-radius:9px;padding:7px 12px;font:500 13px/20px system-ui,sans-serif;cursor:pointer;box-shadow:none;transition:background-color 150ms ease-out,color 150ms ease-out;border:0;background:transparent;color:#4b5563}.ds-ghost:hover{background:#f3f4f6}.ds-ghost:focus-visible{outline:2px solid var(--console-accent,#32688b);outline-offset:3px;}.ds-ghost:disabled{opacity:.5;cursor:not-allowed}:host-context(.dark) .ds-ghost{color:#d1d5db}:host-context(.dark) .ds-ghost:hover{background:#1e293b}"
+      "css": ".ds-ghost{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:34px;border-radius:var(--control-radius,6px);padding:6px 13px;font:500 13px/20px system-ui,sans-serif;cursor:pointer;box-shadow:none;transition:background-color 150ms ease-out,color 150ms ease-out;border:0;background:transparent;color:#4b5563}.ds-ghost:hover:not(:disabled){background:#f3f4f6}.ds-ghost:focus-visible{outline:2px solid var(--console-accent,#32688b);outline-offset:3px}.ds-ghost:disabled{opacity:.5;cursor:not-allowed}:host-context(.dark) .ds-ghost{color:#d1d5db}:host-context(.dark) .ds-ghost:hover:not(:disabled){background:#1e293b}"
     },
     {
       "name": "Danger Button",
@@ -700,15 +723,15 @@
       "refersTo": "button-danger",
       "description": "Existing destructive action semantics.",
       "html": "<button class=\"ds-danger\">Delete</button>",
-      "css": ".ds-danger{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:34px;border-radius:9px;padding:7px 12px;font:500 13px/20px system-ui,sans-serif;cursor:pointer;box-shadow:none;transition:background-color 150ms ease-out,color 150ms ease-out;border:0;background:#dc2626;color:#fff}.ds-danger:hover{background:#b91c1c}.ds-danger:focus-visible{outline:2px solid var(--console-accent,#32688b);outline-offset:3px;}.ds-danger:disabled{opacity:.5;cursor:not-allowed}"
+      "css": ".ds-danger{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:34px;border-radius:var(--control-radius,6px);padding:6px 13px;font:500 13px/20px system-ui,sans-serif;cursor:pointer;box-shadow:none;transition:background-color 150ms ease-out,color 150ms ease-out;border:0;background:#dc2626;color:#fff}.ds-danger:hover:not(:disabled){background:#b91c1c}.ds-danger:focus-visible{outline:2px solid var(--console-accent,#32688b);outline-offset:3px}.ds-danger:disabled{opacity:.5;cursor:not-allowed}"
     },
     {
-      "name": "Query Field",
+      "name": "Filled Field",
       "kind": "input",
       "refersTo": "input",
-      "description": "Compact labeled query field with themed placeholder and visible focus.",
-      "html": "<label class=\"ds-field-label\" for=\"ds-query\">Search records</label><input id=\"ds-query\" class=\"ds-field\" placeholder=\"Search groups…\" />",
-      "css": ".ds-field-label{display:block;margin-bottom:6px;font:500 12px/16px system-ui,sans-serif;color:var(--console-muted,#626b78)}.ds-field{width:100%;max-width:300px;min-height:36px;padding:8px 12px;border:1px solid var(--console-line,#e7e9ed);border-radius:9px;background:#fff;color:#111827;font:400 12px/20px system-ui,sans-serif;transition:all 200ms}.ds-field::placeholder{color:var(--console-muted,#626b78);opacity:1}.ds-field:focus{border-color:#477fa3;box-shadow:0 0 0 2px rgb(71 127 163 / 30%)}.ds-field:focus-visible{outline:2px solid var(--console-accent,#32688b);outline-offset:3px;}.ds-field:disabled{background:#f3f4f6;cursor:not-allowed}:host-context(.dark) .ds-field{background:#1e293b;color:#f3f4f6}"
+      "description": "Shared neutral field with an above-control label, associated help, and explicit focus and error states.",
+      "html": "<label class=\"ds-field-label\" for=\"ds-query\">Search records</label><input id=\"ds-query\" class=\"ds-field\" placeholder=\"Search groups…\" aria-describedby=\"ds-query-hint\" /><p class=\"ds-field-hint\" id=\"ds-query-hint\">Use the existing group name.</p>",
+      "css": ".ds-field-label{display:block;margin-bottom:7px;font:500 13px/20px system-ui,sans-serif;color:var(--console-ink,#242931)}.ds-field{max-width:300px;min-height:36px;padding:7px 11px;border:1px solid var(--console-line,#e7e9ed);border-radius:var(--control-radius,6px);background:var(--console-nav,#f6f7f9);color:var(--console-ink,#242931);font:400 13px/20px system-ui,sans-serif;box-shadow:none;caret-color:var(--console-accent,#32688b);transition:border-color 150ms ease,background-color 150ms ease}.ds-field:hover:not(:disabled){border-color:#b3bdc9}.ds-field::placeholder{color:var(--console-muted,#626b78);opacity:1}.ds-field:focus{background:var(--console-surface,#fff);border-color:var(--console-accent,#32688b);outline:2px solid var(--console-selected,#edf3f8);outline-offset:0}.ds-field:focus-visible{outline:2px solid var(--console-accent,#32688b);outline-offset:2px}.ds-field[aria-invalid=\"true\"]{border-color:#dc2626}.ds-field:disabled{opacity:.6;cursor:not-allowed}.ds-field-hint{margin:6px 0 0;font:400 12px/1.65 system-ui,sans-serif;color:var(--console-muted,#626b78)}@media(max-width:640px){.ds-field{font-size:16px}}"
     },
     {
       "name": "Sidebar Navigation",
@@ -735,31 +758,32 @@
       "css": ".ds-panel{padding:20px;border:1px solid var(--console-line,#e7e9ed);border-radius:12px;background:var(--console-surface,#fff);color:var(--console-ink,#242931);box-shadow:none;font-family:system-ui,sans-serif}.ds-panel-title{margin:0;font-size:15px;font-weight:600}.ds-panel-copy{margin:5px 0 0;font-size:12px;color:var(--console-muted,#626b78)}"
     },
     {
-      "name": "Chart Form Choices",
+      "name": "Grouped Dialog",
       "kind": "custom",
-      "refersTo": "chart-choice",
-      "description": "Pill track for bar/area choices with explicit pressed state.",
-      "html": "<div class=\"ds-choices\" role=\"group\" aria-label=\"Chart type\"><button class=\"ds-choice\" aria-pressed=\"true\">Bar chart</button><button class=\"ds-choice\" aria-pressed=\"false\">Area chart</button></div>",
-      "css": ".ds-choices{display:inline-flex;align-items:center;gap:2px;padding:3px;border-radius:20px;background:var(--console-nav,#f6f7f9)}.ds-choice{padding:5px 11px;border:1px solid transparent;border-radius:20px;background:transparent;color:var(--console-muted,#626b78);font:400 12px/18px system-ui,sans-serif;white-space:nowrap;cursor:pointer}.ds-choice:hover{color:var(--console-ink,#242931)}.ds-choice[aria-pressed=\"true\"]{border-color:var(--console-line,#e7e9ed);background:var(--console-surface,#fff);color:var(--console-ink,#242931);font-weight:600}.ds-choice:focus-visible{outline:2px solid var(--console-accent,#32688b);outline-offset:3px;}"
+      "refersTo": "dialog-normal",
+      "description": "Static BaseDialog and DialogSection preview: a proportionate panel with actual field groups and actions outside its scrolling body. Runtime focus and stacking remain in Vue.",
+      "html": "<section class=\"ds-dialog\" role=\"dialog\" aria-labelledby=\"ds-dialog-title\"><header class=\"ds-dialog-header\"><h3 id=\"ds-dialog-title\">Edit user</h3><button type=\"button\" class=\"ds-dialog-close\" aria-label=\"Close\"><svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" aria-hidden=\"true\"><path d=\"m6 6 12 12M18 6 6 18\"/></svg></button></header><div class=\"ds-dialog-body\"><section class=\"ds-dialog-section\"><h4>Identity</h4><div class=\"ds-dialog-fields\"><label class=\"ds-dialog-field\">Email<input type=\"email\" value=\"preview@example.com\" /></label><label class=\"ds-dialog-field\">Username<input value=\"Preview user\" /></label></div></section><section class=\"ds-dialog-section\"><h4>Notes</h4><label class=\"ds-dialog-field\">Internal note<textarea rows=\"2\">Synthetic preview</textarea></label></section></div><footer class=\"ds-dialog-footer\"><button type=\"button\" class=\"ds-dialog-secondary\">Cancel</button><button type=\"button\" class=\"ds-dialog-primary\">Save changes</button></footer></section>",
+      "css": ".ds-dialog{display:flex;flex-direction:column;width:100%;max-width:600px;max-height:calc(100dvh - 48px);border:0;border-radius:var(--panel-radius,10px);background:var(--console-surface,#fff);color:var(--console-ink,#242931);box-shadow:var(--overlay-shadow,0 16px 48px rgb(20 28 40 / 16%));font:400 13px/1.6 system-ui,sans-serif;font-variant-numeric:tabular-nums}.ds-dialog-header{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-shrink:0;padding:18px 24px 14px}.ds-dialog-header h3{margin:0;font-size:17px;font-weight:600;line-height:1.5;overflow-wrap:anywhere}.ds-dialog-close{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;padding:6px;border:0;border-radius:6px;background:transparent;color:var(--console-muted,#626b78);cursor:pointer}.ds-dialog-close:hover{background:var(--console-nav,#f6f7f9);color:var(--console-ink,#242931)}.ds-dialog-body{min-height:0;padding:8px 24px 24px;overflow:auto;overscroll-behavior:contain}.ds-dialog-section+.ds-dialog-section{margin-top:24px;padding-top:24px;border-top:1px solid var(--console-line,#e7e9ed)}.ds-dialog-section h4{margin:0 0 16px;font-size:14px;font-weight:600}.ds-dialog-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.ds-dialog-field{display:flex;flex-direction:column;gap:7px;min-width:0;font-size:13px;font-weight:500;line-height:20px}.ds-dialog-field input,.ds-dialog-field textarea{min-width:0;padding:7px 11px;border:1px solid var(--console-line,#e7e9ed);border-radius:var(--control-radius,6px);background:var(--console-nav,#f6f7f9);color:var(--console-ink,#242931);font:400 13px/20px system-ui,sans-serif;caret-color:var(--console-accent,#32688b);transition:border-color 150ms ease,background-color 150ms ease}.ds-dialog-field input:hover,.ds-dialog-field textarea:hover{border-color:#b3bdc9}.ds-dialog-field input:focus,.ds-dialog-field textarea:focus{background:var(--console-surface,#fff);border-color:var(--console-accent,#32688b);outline:2px solid var(--console-selected,#edf3f8);outline-offset:0}.ds-dialog-footer{display:flex;justify-content:flex-end;flex-shrink:0;gap:8px;padding:16px 24px;border-top:1px solid var(--console-line,#e7e9ed)}.ds-dialog-footer button{min-height:34px;padding:6px 13px;border:1px solid transparent;border-radius:var(--control-radius,6px);font:500 13px/20px system-ui,sans-serif;cursor:pointer;transition:background-color 150ms ease-out}.ds-dialog-secondary{background:var(--console-nav,#f6f7f9);color:var(--console-ink,#242931)}.ds-dialog-secondary:hover{background:var(--console-line,#e7e9ed)}.ds-dialog-primary{background:#32688b;color:#fff}.ds-dialog-primary:hover{background:#2b5673}.ds-dialog :is(button,input,textarea):focus-visible{outline:2px solid var(--console-accent,#32688b);outline-offset:2px}.ds-dialog :is(button,input,textarea):disabled{opacity:.5;cursor:not-allowed}@media(max-width:640px){.ds-dialog{max-height:calc(100dvh - 24px)}.ds-dialog-header{padding:16px}.ds-dialog-body{padding:4px 16px 20px}.ds-dialog-footer{padding:12px 16px;flex-wrap:wrap}.ds-dialog-fields{grid-template-columns:minmax(0,1fr)}.ds-dialog-field input,.ds-dialog-field textarea{font-size:16px}}"
     },
     {
-      "name": "Collection Table",
+      "name": "Select Menu",
       "kind": "custom",
-      "refersTo": "collection-header",
-      "description": "Compact records in a single frame, with neutral headers, tabular numbers, and integrated pagination.",
-      "html": "<section class=\"ds-table-panel\"><table class=\"ds-table\"><thead><tr><th>Model</th><th>Requests</th></tr></thead><tbody><tr><td>Local sample</td><td>120</td></tr><tr><td>Local sample 2</td><td>84</td></tr></tbody></table><footer class=\"ds-table-footer\">Synthetic preview · 2 records</footer></section>",
-      "css": ".ds-table-panel{min-width:0;overflow:auto;border:1px solid var(--console-line,#e7e9ed);border-radius:12px;background:var(--console-surface,#fff);font-family:system-ui,sans-serif}.ds-table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}.ds-table th{height:42px;padding:0 16px;background:var(--console-nav,#f6f7f9);color:var(--console-muted,#626b78);font-size:12px;font-weight:600;text-align:left;border-bottom:1px solid var(--console-line,#e7e9ed)}.ds-table td{padding:10px 16px;font-size:13px;color:var(--console-ink,#242931);border-bottom:1px solid var(--console-line,#e7e9ed)}.ds-table td:first-child{font-weight:500}.ds-table th:last-child,.ds-table td:last-child{text-align:right}.ds-table tbody tr:hover td{background:var(--console-selected,#edf3f8)}.ds-table-footer{padding:12px 16px;color:var(--console-muted,#626b78);font-size:12px}"
+      "refersTo": "select-popup",
+      "description": "Static body-portal menu preview with shared surface tokens, compact search, and selected/disabled options. Vue owns selection and keyboard behavior.",
+      "html": "<div class=\"ds-select-menu\"><label class=\"ds-select-search\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" aria-hidden=\"true\"><circle cx=\"10.5\" cy=\"10.5\" r=\"6.5\"/><path d=\"m16 16 4 4\"/></svg><input aria-label=\"Search options\" placeholder=\"Search options…\" /></label><div class=\"ds-select-options\" role=\"listbox\" aria-label=\"Groups\"><div class=\"ds-select-option\" role=\"option\" aria-selected=\"true\" tabindex=\"0\">Default group<svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" aria-hidden=\"true\"><path d=\"m5 12 4 4L19 6\"/></svg></div><div class=\"ds-select-option\" role=\"option\" aria-selected=\"false\" tabindex=\"-1\">Preview group</div><div class=\"ds-select-option\" role=\"option\" aria-selected=\"false\" aria-disabled=\"true\">Unavailable group</div></div></div>",
+      "css": ".ds-select-menu{width:260px;max-width:calc(100vw - 24px);overflow:hidden;border:0;border-radius:8px;background:var(--console-surface,#fff);color:var(--console-ink,#242931);box-shadow:var(--popup-shadow,0 6px 20px rgb(20 28 40 / 12%));font:400 13px/20px system-ui,sans-serif}.ds-select-search{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--console-line,#e7e9ed);color:var(--console-muted,#626b78)}.ds-select-search input{min-width:0;flex:1;border:0;background:transparent;color:var(--console-ink,#242931);font:400 13px/20px system-ui,sans-serif;caret-color:var(--console-accent,#32688b)}.ds-select-search input::placeholder{color:var(--console-muted,#626b78);opacity:1}.ds-select-options{max-height:320px;overflow:auto;padding:4px;scrollbar-width:thin;scrollbar-color:#aeb8c5 transparent}.ds-select-option{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:32px;padding:6px 9px;border-radius:5px;color:#374151;cursor:pointer;transition:background-color 150ms}.ds-select-option:hover{background:#f9fafb}.ds-select-option[aria-selected=\"true\"]{background:var(--console-selected,#edf3f8);color:var(--console-accent,#32688b)}.ds-select-option[aria-disabled=\"true\"]{opacity:.4;cursor:not-allowed}.ds-select-menu :is(input,[role=\"option\"]):focus-visible{outline:2px solid var(--console-accent,#32688b);outline-offset:2px}:host-context(.dark) .ds-select-option{color:#d1d5db}:host-context(.dark) .ds-select-option:hover{background:#334155}:host-context(.dark) .ds-select-option[aria-selected=\"true\"]{background:var(--console-selected,#233654);color:var(--console-accent,#9ec0d8)}"
     }
   ],
   "narrative": {
     "northStar": "The Direct-Access Console",
-    "overview": "The B console is a compact API operations workspace. Its user-pinned visual reference is New API: a white global header and sidebar, a neutral gray canvas, restrained blue actions, and readable records. Revision 7 uses flat page roots with individually framed working regions, compact query controls, and aligned metric groups. The task and its data lead the screen.\n\nConfigured branding, Chinese and English labels, stored dark theme, permissions, and existing billing distinctions remain product truth. This is the implemented visual system for the B console and shared authentication layout; deployment C and provider-owned payment flows retain their separate boundaries.",
+    "overview": "The B console is a compact API operations workspace. Its user-pinned visual reference is New API: a white global header and sidebar, a neutral gray canvas, restrained blue actions, and readable records. Revision 8 carries the same component language into modal interiors, right-side sheets, and body-mounted portals, while retaining flat page roots, compact query controls, and aligned metric groups. The task and its data lead the screen.\n\nConfigured branding, Chinese and English labels, stored dark theme, permissions, and existing billing distinctions remain product truth. New API supplies the frontend reference; Sub2API remains the backend. This is the implemented visual system for the B console and shared authentication layout; deployment C and provider-owned payment flows retain their separate boundaries.",
     "keyCharacteristics": [
       "Global workspace header with directly visible navigation categories.",
       "Muted blue actions and selection on neutral surfaces; no decorative violet category system.",
       "Flat page roots, compact collections, preserved advanced filters, and integrated pagination.",
       "Operations metric matrix, compact resources, and deliberately placed traffic analysis.",
-      "Responsive records with paired fields, optional detail, and preserved column choices."
+      "Responsive records with paired fields, optional detail, and preserved column choices.",
+      "Proportionate dialogs and sheets with grouped fields, visible actions, and themed portals."
     ],
     "rules": [
       {
@@ -784,6 +808,8 @@
       "Do keep primary queries visible, preserve collapsed advanced criteria, and show their active count.",
       "Do preserve selected columns on mobile through primary fields and the More disclosure.",
       "Do preserve labels, units, charge distinctions, permissions, feature flags, validation, and stored theme.",
+      "Do choose overlay width for its content, group related fields, keep labels above controls, and keep footer actions outside body scrolling.",
+      "Do use shared theme tokens and modal behavior for body-mounted dialogs, sheets, and portals.",
       "Do treat local preview values and screenshots as synthetic visual evidence."
     ],
     "donts": [
@@ -792,6 +818,7 @@
       "Don't turn the operations realtime metrics into a tall separate column with an empty space beneath it.",
       "Don't hide meaningful metadata through low contrast or remove advanced query dimensions to simplify the screen.",
       "Don't remove errors, input adornments, disabled behavior, or provider-owned controls for visual uniformity.",
+      "Don't restore fixed 880px sheets, per-field horizontal rules, or old shell-only styling for overlay interiors.",
       "Don't interpret this document as user acceptance, deployment evidence, or universal route and accessibility certification."
     ]
   }

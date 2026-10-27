@@ -396,38 +396,38 @@
 
           <div v-if="activeSettingsTab === 'basic'" class="space-y-5">
             <div class="grid grid-cols-1 gap-5 lg:grid-cols-2">
-              <div class="flex items-center justify-between rounded-lg border border-gray-100 p-4 dark:border-dark-700">
+              <div class="flex items-center justify-between rounded-lg border border-gray-100 p-4 dark:border-dark-700 console-switch-row">
                 <div>
                   <p class="text-sm font-medium text-gray-900 dark:text-white">{{ t('admin.riskControl.enabled') }}</p>
                   <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.enabledHint') }}</p>
                 </div>
                 <Toggle v-model="configForm.enabled" />
               </div>
-              <div>
+              <div class="console-field">
                 <label class="input-label">{{ t('admin.riskControl.mode') }}</label>
                 <Select v-model="configForm.mode" :options="modeOptions" />
                 <p class="mt-2 text-xs leading-5 text-gray-500 dark:text-gray-400">{{ modeDescription(configForm.mode) }}</p>
               </div>
-              <div>
+              <div class="console-field">
                 <label class="input-label">{{ t('admin.riskControl.engine') }}</label>
                 <Select data-test="audit-engine-select" :model-value="configForm.engine" :options="engineOptions" :disabled="apiKeyTesting || saving" @update:model-value="switchEngine" />
               </div>
               <div v-if="configForm.engine === 'typesafe'" class="lg:col-span-2 text-sm text-amber-700 dark:text-amber-300" role="status">
                 {{ t('admin.riskControl.typeSafeNotice') }}
               </div>
-              <div>
+              <div class="console-field">
                 <label class="input-label">{{ t('admin.riskControl.baseUrl') }}</label>
                 <input v-model.trim="configForm.base_url" data-test="audit-base-url" type="url" class="input" :placeholder="configForm.engine === 'typesafe' ? 'https://api.typesafe.ai' : 'https://api.openai.com'" />
               </div>
-              <div>
+              <div class="console-field">
                 <label class="input-label">{{ t('admin.riskControl.model') }}</label>
                 <input v-model.trim="configForm.model" data-test="audit-model" type="text" class="input" :placeholder="configForm.engine === 'typesafe' ? 'jev-latest' : 'omni-moderation-latest'" />
               </div>
-              <div>
+              <div class="console-field">
                 <label class="input-label">{{ t('admin.riskControl.timeoutMs') }}</label>
                 <input v-model.number="configForm.timeout_ms" type="number" min="500" max="30000" class="input" />
               </div>
-              <div>
+              <div class="console-field">
                 <label class="input-label">{{ t('admin.riskControl.retryCount') }}</label>
                 <input v-model.number="configForm.retry_count" type="number" min="0" max="5" class="input" />
               </div>
@@ -438,14 +438,14 @@
                   <span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-400">%</span>
                 </div>
               </div>
-              <div>
+              <div class="console-field">
                 <label class="input-label">{{ t('admin.riskControl.proxy') }}</label>
                 <ProxySelector v-model="configForm.proxy_id" :proxies="proxies" />
                 <p class="mt-2 text-xs leading-5 text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.proxyHint') }}</p>
               </div>
             </div>
 
-            <div class="overflow-hidden rounded-xl border border-gray-100 bg-white shadow-sm dark:border-dark-700 dark:bg-dark-800">
+            <div class="overflow-hidden rounded-lg border border-gray-100 bg-white dark:border-dark-700 dark:bg-dark-800">
               <div class="flex flex-col gap-4 border-b border-gray-100 bg-gray-50 px-4 py-4 dark:border-dark-700 dark:bg-dark-800/60 lg:flex-row lg:items-center lg:justify-between">
                 <div class="flex items-start gap-3">
                   <span class="mt-0.5 flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-primary-50 text-primary-600 dark:bg-primary-900/30 dark:text-primary-300">
@@ -491,12 +491,12 @@
 
               <div class="grid grid-cols-1 gap-4 p-4 xl:grid-cols-[minmax(0,1fr)_minmax(360px,440px)]">
                 <div class="space-y-3">
-                  <div class="flex flex-col gap-2 rounded-lg border border-gray-100 bg-gray-50 p-2 dark:border-dark-700 dark:bg-dark-900/30 sm:flex-row sm:items-center sm:justify-between">
+                  <div class="flex flex-col gap-2 rounded-lg border border-gray-100 bg-gray-50 p-2 dark:border-dark-700 dark:bg-dark-900/30 sm:flex-row sm:items-center sm:justify-between console-note">
                     <div class="text-xs leading-5 text-gray-500 dark:text-gray-400">
                       <span class="font-medium text-gray-700 dark:text-gray-200">{{ t('admin.riskControl.apiKeysWriteMode') }}</span>
                       <span class="ml-2">{{ apiKeysModeHint }}</span>
                     </div>
-                    <div class="inline-flex rounded-lg bg-white p-1 shadow-sm dark:bg-dark-800">
+                    <div class="inline-flex rounded-lg bg-white p-1 dark:bg-dark-800">
                       <button
                         type="button"
                         class="rounded-md px-3 py-1.5 text-xs font-medium transition-colors"
@@ -551,7 +551,7 @@
                       <button
                         v-if="moderationTestPrompt || moderationTestImages.length > 0 || moderationTestResult"
                         type="button"
-                        class="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-gray-500 hover:bg-white hover:text-gray-900 dark:text-gray-400 dark:hover:bg-dark-800 dark:hover:text-white"
+                        class="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-gray-500 hover:bg-white hover:text-gray-900 dark:text-gray-400 dark:hover:bg-dark-800 dark:hover:text-white btn btn-secondary"
                         @click="clearModerationTestInput"
                       >
                         <Icon name="x" size="xs" />
@@ -602,13 +602,13 @@
                   </div>
                 </div>
 
-                <div data-test="audit-key-statuses" class="rounded-lg border border-gray-100 bg-gray-50 p-3 dark:border-dark-700 dark:bg-dark-900/30">
+                <div data-test="audit-key-statuses" class="rounded-lg border border-gray-100 bg-gray-50 p-3 dark:border-dark-700 dark:bg-dark-900/30 console-note">
                   <div class="mb-3 flex items-start justify-between gap-3">
                     <div class="min-w-0">
                       <p class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.riskControl.apiKeyHealth') }}</p>
                       <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.apiKeyFreezeRule') }}</p>
                     </div>
-                    <span class="inline-flex shrink-0 items-center whitespace-nowrap rounded-full bg-white px-2 py-0.5 text-[11px] font-medium leading-5 text-gray-600 shadow-sm dark:bg-dark-800 dark:text-gray-300">
+                    <span class="inline-flex shrink-0 items-center whitespace-nowrap rounded-full bg-white px-2 py-0.5 text-[11px] font-medium leading-5 text-gray-600 dark:bg-dark-800 dark:text-gray-300">
                       {{ t('admin.riskControl.apiKeyRows', { count: apiKeyRows.length }) }}
                     </span>
                   </div>
@@ -623,7 +623,7 @@
                       <div
                         v-for="(row, index) in visibleApiKeyRows"
                         :key="apiKeyRowKey(row, index)"
-                        class="rounded-lg border bg-white p-2.5 shadow-sm dark:bg-dark-800"
+                        class="rounded-lg border bg-white p-2.5 dark:bg-dark-800"
                         :class="isStoredApiKeyPendingDelete(row) ? 'border-amber-200 opacity-70 dark:border-amber-800/60' : 'border-gray-100 dark:border-dark-700'"
                       >
                         <div class="flex items-start justify-between gap-2">
@@ -667,7 +667,7 @@
                       </span>
                       <button
                         type="button"
-                        class="inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1 font-medium text-primary-600 transition-colors hover:bg-primary-50 hover:text-primary-700 dark:text-primary-300 dark:hover:bg-primary-900/20"
+                        class="inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1 font-medium text-primary-600 transition-colors hover:bg-primary-50 hover:text-primary-700 dark:text-primary-300 dark:hover:bg-primary-900/20 btn"
                         @click="apiKeyRowsExpanded = !apiKeyRowsExpanded"
                       >
                         <Icon :name="apiKeyRowsExpanded ? 'chevronUp' : 'chevronDown'" size="xs" />
@@ -720,11 +720,11 @@
 
           <div v-else-if="activeSettingsTab === 'scope'" class="space-y-5">
             <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-              <div>
+              <div class="console-form-block">
                 <h3 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('admin.riskControl.groupScope') }}</h3>
                 <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.groupScopeHint') }}</p>
               </div>
-              <div class="inline-flex rounded-lg bg-gray-100 p-1 dark:bg-dark-700">
+              <div class="inline-flex rounded-lg bg-gray-100 p-1 dark:bg-dark-700 console-choice-group">
                 <button
                   type="button"
                   class="rounded-md px-3 py-1.5 text-sm font-medium transition-colors"
@@ -775,7 +775,7 @@
 
             <div class="space-y-4 rounded-lg border border-gray-100 p-4 dark:border-dark-700">
               <div class="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
-                <div>
+                <div class="console-form-block">
                   <h3 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('admin.riskControl.modelFilter') }}</h3>
                   <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.modelFilterHint') }}</p>
                 </div>
@@ -821,15 +821,15 @@
           </div>
 
           <div v-else-if="activeSettingsTab === 'runtime'" class="grid grid-cols-1 gap-5 lg:grid-cols-2">
-            <div>
+            <div class="console-field">
               <label class="input-label">{{ t('admin.riskControl.workerCount') }}</label>
               <input v-model.number="configForm.worker_count" type="number" min="1" max="32" class="input" />
             </div>
-            <div>
+            <div class="console-field">
               <label class="input-label">{{ t('admin.riskControl.queueSize') }}</label>
               <input v-model.number="configForm.queue_size" type="number" min="100" max="100000" class="input" />
             </div>
-            <div class="flex items-center justify-between rounded-lg border border-gray-100 p-4 dark:border-dark-700 lg:col-span-2">
+            <div class="flex items-center justify-between rounded-lg border border-gray-100 p-4 dark:border-dark-700 lg:col-span-2 console-switch-row">
               <div>
                 <p class="text-sm font-medium text-gray-900 dark:text-white">{{ t('admin.riskControl.recordNonHits') }}</p>
                 <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.recordNonHitsHint') }}</p>
@@ -837,14 +837,14 @@
               <Toggle v-model="configForm.record_non_hits" />
             </div>
             <div class="space-y-4 rounded-lg border border-gray-100 p-4 dark:border-dark-700 lg:col-span-2">
-              <div class="flex items-center justify-between gap-4">
+              <div class="flex items-center justify-between gap-4 console-switch-row">
                 <div>
                   <p class="text-sm font-medium text-gray-900 dark:text-white">{{ t('admin.riskControl.preHashCheck') }}</p>
                   <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.preHashCheckHint') }}</p>
                 </div>
                 <Toggle v-model="configForm.pre_hash_check_enabled" />
               </div>
-              <div class="rounded-lg bg-gray-50 p-3 dark:bg-dark-900/30">
+              <div class="rounded-lg bg-gray-50 p-3 dark:bg-dark-900/30 console-note">
                 <div class="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
                   <div>
                     <p class="text-sm font-medium text-gray-900 dark:text-white">
@@ -885,40 +885,40 @@
 
           <div v-else-if="activeSettingsTab === 'response'" class="space-y-5">
             <div class="grid grid-cols-1 gap-5 lg:grid-cols-2">
-              <div>
+              <div class="console-field">
                 <label class="input-label">{{ t('admin.riskControl.blockStatus') }}</label>
                 <input v-model.number="configForm.block_status" type="number" min="400" max="599" class="input" />
               </div>
-              <div>
+              <div class="console-field">
                 <label class="input-label">{{ t('admin.riskControl.blockMessage') }}</label>
                 <input v-model.trim="configForm.block_message" type="text" class="input" />
               </div>
-              <div class="flex items-center justify-between rounded-lg border border-gray-100 p-4 dark:border-dark-700">
+              <div class="flex items-center justify-between rounded-lg border border-gray-100 p-4 dark:border-dark-700 console-switch-row">
                 <div>
                   <p class="text-sm font-medium text-gray-900 dark:text-white">{{ t('admin.riskControl.emailOnHit') }}</p>
                   <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.emailOnHitHint') }}</p>
                 </div>
                 <Toggle v-model="configForm.email_on_hit" />
               </div>
-              <div class="flex items-center justify-between rounded-lg border border-gray-100 p-4 dark:border-dark-700">
+              <div class="flex items-center justify-between rounded-lg border border-gray-100 p-4 dark:border-dark-700 console-switch-row">
                 <div>
                   <p class="text-sm font-medium text-gray-900 dark:text-white">{{ t('admin.riskControl.autoBan') }}</p>
                   <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.autoBanHint') }}</p>
                 </div>
                 <Toggle v-model="configForm.auto_ban_enabled" />
               </div>
-              <div class="flex items-center justify-between rounded-lg border border-gray-100 p-4 dark:border-dark-700 lg:col-span-2">
+              <div class="flex items-center justify-between rounded-lg border border-gray-100 p-4 dark:border-dark-700 lg:col-span-2 console-switch-row">
                 <div>
                   <p class="text-sm font-medium text-gray-900 dark:text-white">{{ t('admin.riskControl.cyberPolicyExcludeBan') }}</p>
                   <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.cyberPolicyExcludeBanHint') }}</p>
                 </div>
                 <Toggle v-model="configForm.cyber_policy_exclude_from_ban_count" />
               </div>
-              <div>
+              <div class="console-field">
                 <label class="input-label">{{ t('admin.riskControl.banThreshold') }}</label>
                 <input v-model.number="configForm.ban_threshold" type="number" min="1" max="1000" class="input" />
               </div>
-              <div>
+              <div class="console-field">
                 <label class="input-label">{{ t('admin.riskControl.violationWindowHours') }}</label>
                 <input v-model.number="configForm.violation_window_hours" type="number" min="1" max="8760" class="input" />
               </div>
@@ -929,7 +929,7 @@
             <p class="text-sm font-medium">{{ engineLabel(configForm.engine) }}</p>
             <p v-if="configForm.engine === 'typesafe'" class="text-sm text-amber-700 dark:text-amber-300">{{ t('admin.riskControl.typeSafeThresholds') }}</p>
             <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-              <div>
+              <div class="console-form-block">
                 <h3 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('admin.riskControl.riskThresholds') }}</h3>
                 <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.riskThresholdsHint') }}</p>
               </div>
@@ -947,7 +947,7 @@
               <div
                 v-for="row in riskThresholdRows"
                 :key="row.category"
-                class="rounded-lg border border-gray-100 bg-gray-50 p-4 dark:border-dark-700 dark:bg-dark-900/30"
+                class="rounded-lg border border-gray-100 bg-gray-50 p-4 dark:border-dark-700 dark:bg-dark-900/30 console-note"
               >
                 <div class="flex items-start justify-between gap-3">
                   <div class="min-w-0">
@@ -958,7 +958,7 @@
                       {{ t('admin.riskControl.riskThresholdDefault', { value: formatThresholdPercent(row.defaultValue) }) }}
                     </p>
                   </div>
-                  <span class="inline-flex shrink-0 rounded-md bg-white px-2 py-1 font-mono text-xs font-medium text-gray-600 shadow-sm dark:bg-dark-800 dark:text-gray-300">
+                  <span class="inline-flex shrink-0 rounded-md bg-white px-2 py-1 font-mono text-xs font-medium text-gray-600 dark:bg-dark-800 dark:text-gray-300">
                     {{ formatThresholdPercent(row.value) }}
                   </span>
                 </div>
@@ -1049,11 +1049,11 @@
           </div>
 
           <div v-else class="grid grid-cols-1 gap-5 lg:grid-cols-2">
-            <div>
+            <div class="console-field">
               <label class="input-label">{{ t('admin.riskControl.hitRetentionDays') }}</label>
               <input v-model.number="configForm.hit_retention_days" type="number" min="1" max="3650" class="input" />
             </div>
-            <div>
+            <div class="console-field">
               <label class="input-label">{{ t('admin.riskControl.nonHitRetentionDays') }}</label>
               <input v-model.number="configForm.non_hit_retention_days" type="number" min="1" max="3" class="input" />
             </div>
@@ -1094,21 +1094,21 @@
             <template v-else>{{ ['cyber_policy', 'keyword_block', 'hash_block'].includes(inputDetailRow.action) ? '-' : t('admin.riskControl.legacyAuditSource') }}</template>
           </div>
           <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <div class="rounded-lg border border-gray-100 bg-gray-50 p-4 dark:border-dark-700 dark:bg-dark-800/70">
+            <div class="rounded-lg border border-gray-100 bg-gray-50 p-4 dark:border-dark-700 dark:bg-dark-800/70 console-note">
               <p class="text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.table.time') }}</p>
               <p class="mt-1 truncate text-sm font-semibold text-gray-900 dark:text-white">{{ formatDateTime(inputDetailRow.created_at) }}</p>
             </div>
-            <div class="rounded-lg border border-gray-100 bg-gray-50 p-4 dark:border-dark-700 dark:bg-dark-800/70">
+            <div class="rounded-lg border border-gray-100 bg-gray-50 p-4 dark:border-dark-700 dark:bg-dark-800/70 console-note">
               <p class="text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.table.user') }}</p>
               <p class="mt-1 truncate text-sm font-semibold text-gray-900 dark:text-white">{{ inputDetailRow.user_email || '-' }}</p>
             </div>
-            <div class="rounded-lg border border-gray-100 bg-gray-50 p-4 dark:border-dark-700 dark:bg-dark-800/70">
+            <div class="rounded-lg border border-gray-100 bg-gray-50 p-4 dark:border-dark-700 dark:bg-dark-800/70 console-note">
               <p class="text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.table.result') }}</p>
               <span class="mt-1 inline-flex rounded-md px-2 py-1 text-xs font-medium" :class="resultBadgeClass(inputDetailRow)">
                 {{ resultLabel(inputDetailRow) }}
               </span>
             </div>
-            <div class="rounded-lg border border-gray-100 bg-gray-50 p-4 dark:border-dark-700 dark:bg-dark-800/70">
+            <div class="rounded-lg border border-gray-100 bg-gray-50 p-4 dark:border-dark-700 dark:bg-dark-800/70 console-note">
               <p class="text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.table.highest') }}</p>
               <p class="mt-1 truncate text-sm font-semibold text-gray-900 dark:text-white">
                 {{ inputDetailRow.highest_category || '-' }} / {{ percent(inputDetailRow.highest_score) }}
@@ -1120,7 +1120,7 @@
             </div>
           </div>
 
-          <div class="rounded-xl border border-gray-100 bg-white p-4 shadow-sm dark:border-dark-700 dark:bg-dark-800">
+          <div class="rounded-lg border border-gray-100 bg-white p-4 dark:border-dark-700 dark:bg-dark-800">
             <div class="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <p class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.riskControl.inputDetailContent') }}</p>
@@ -1132,7 +1132,7 @@
                 {{ inputDetailRow.group_name }}
               </span>
             </div>
-            <pre class="mt-4 max-h-[420px] overflow-auto whitespace-pre-wrap break-words rounded-lg bg-gray-950 p-4 text-sm leading-6 text-gray-100 shadow-inner dark:bg-black/50">{{ inputDetailText }}</pre>
+            <pre class="mt-4 max-h-[420px] overflow-auto whitespace-pre-wrap break-words rounded-lg bg-gray-950 p-4 text-sm leading-6 text-gray-100 -inner dark:bg-black/50">{{ inputDetailText }}</pre>
           </div>
         </div>
 

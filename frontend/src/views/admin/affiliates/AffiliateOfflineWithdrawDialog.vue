@@ -5,12 +5,12 @@
     width="normal"
     @close="handleClose"
   >
-    <form class="workbench-editor-form space-y-4" @submit.prevent="submit">
+    <form class="workbench-editor-form space-y-4 console-form" @submit.prevent="submit">
       <div class="workbench-field-row ">
         <label class="input-label">{{ t('admin.affiliates.withdraw.user') }}</label>
         <div
           v-if="selectedUser"
-          class="flex items-center justify-between gap-3 rounded-md border border-primary-200 bg-primary-50 px-3 py-2 dark:border-primary-700/50 dark:bg-primary-900/20"
+          class="flex items-center justify-between gap-3 rounded-md border border-primary-200 bg-primary-50 px-3 py-2 dark:border-primary-700/50 dark:bg-primary-900/20 console-note"
           data-test="withdraw-selected-user"
         >
           <div class="min-w-0 truncate text-sm">
@@ -46,7 +46,7 @@
               v-for="user in userResults"
               :key="user.id"
               type="button"
-              class="w-full px-3 py-1.5 text-left text-sm text-gray-900 hover:bg-gray-100 dark:text-white dark:hover:bg-dark-800"
+              class="w-full px-3 py-1.5 text-left text-sm text-gray-900 hover:bg-gray-100 dark:text-white dark:hover:bg-dark-800 btn"
               data-test="withdraw-user-option"
               @click="selectUser(user)"
             >
@@ -59,13 +59,13 @@
 
       <div
         v-if="selectedUser"
-        class="rounded-lg border border-gray-100 bg-gray-50 p-3 dark:border-dark-700 dark:bg-dark-800"
+        class="rounded-lg border border-gray-100 bg-gray-50 p-3 dark:border-dark-700 dark:bg-dark-800 console-note"
       >
         <div class="flex items-center justify-between text-sm">
           <span class="text-gray-500 dark:text-dark-400">{{ t('admin.affiliates.withdraw.availableQuota') }}</span>
           <span
             v-if="overviewLoading"
-            class="h-4 w-4 animate-spin rounded-full border-2 border-primary-500 border-t-transparent"
+            class="h-4 w-4 animate-spin rounded-full border border-primary-500 border-t-transparent"
           ></span>
           <span v-else class="font-semibold text-gray-900 dark:text-white" data-test="withdraw-available-quota">
             ${{ formatPreciseAmount(availableQuota) }}
@@ -103,7 +103,7 @@
 
       <div
         v-if="outcomeUncertain"
-        class="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800 dark:border-blue-700/50 dark:bg-blue-900/20 dark:text-blue-300"
+        class="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800 dark:border-blue-700/50 dark:bg-blue-900/20 dark:text-blue-300 console-note"
         data-test="withdraw-uncertain-hint"
       >
         {{ t('admin.affiliates.withdraw.uncertainHint') }}

@@ -251,9 +251,9 @@ async function saveAllSettings() {
       </div>
 
       <!-- 数据采集频率 -->
-      <div class="rounded-2xl bg-gray-50 p-4 dark:bg-dark-700/50">
+      <div class="rounded-lg bg-gray-50 p-4 dark:bg-dark-700/50 console-note console-form-block">
         <h4 class="mb-3 text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.ops.settings.dataCollection') }}</h4>
-        <div>
+        <div class="console-field">
           <label class="input-label">{{ t('admin.ops.settings.evaluationInterval') }}</label>
           <input
             v-model.number="runtimeSettings.evaluation_interval_seconds"
@@ -267,11 +267,11 @@ async function saveAllSettings() {
       </div>
 
       <!-- 预警配置 -->
-      <div class="rounded-2xl bg-gray-50 p-4 dark:bg-dark-700/50">
+      <div class="rounded-lg bg-gray-50 p-4 dark:bg-dark-700/50 console-note console-form-block">
         <h4 class="mb-3 text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.ops.settings.alertConfig') }}</h4>
 
         <div class="space-y-4">
-          <div class="flex items-center justify-between">
+          <div class="flex items-center justify-between console-switch-row">
             <div>
               <label class="font-medium text-gray-900 dark:text-white">{{ t('admin.ops.settings.enableAlert') }}</label>
             </div>
@@ -307,7 +307,7 @@ async function saveAllSettings() {
             </p>
           </div>
 
-          <div v-if="emailConfig.alert.enabled">
+          <div class="console-field" v-if="emailConfig.alert.enabled">
             <label class="input-label">{{ t('admin.ops.settings.minSeverity') }}</label>
             <Select v-model="emailConfig.alert.min_severity" :options="severityOptions" />
           </div>
@@ -315,11 +315,11 @@ async function saveAllSettings() {
       </div>
 
       <!-- 评估报告配置 -->
-      <div class="rounded-2xl bg-gray-50 p-4 dark:bg-dark-700/50">
+      <div class="rounded-lg bg-gray-50 p-4 dark:bg-dark-700/50 console-note console-form-block">
         <h4 class="mb-3 text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.ops.settings.reportConfig') }}</h4>
 
         <div class="space-y-4">
-          <div class="flex items-center justify-between">
+          <div class="flex items-center justify-between console-switch-row">
             <div>
               <label class="font-medium text-gray-900 dark:text-white">{{ t('admin.ops.settings.enableReport') }}</label>
             </div>
@@ -356,14 +356,14 @@ async function saveAllSettings() {
           </div>
 
           <div v-if="emailConfig.report.enabled" class="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <div class="flex items-center justify-between">
+            <div class="flex items-center justify-between console-switch-row">
               <label class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.ops.settings.dailySummary') }}</label>
               <Toggle v-model="emailConfig.report.daily_summary_enabled" />
             </div>
             <div v-if="emailConfig.report.daily_summary_enabled">
               <input v-model="emailConfig.report.daily_summary_schedule" type="text" class="input" placeholder="0 9 * * *" />
             </div>
-            <div class="flex items-center justify-between">
+            <div class="flex items-center justify-between console-switch-row">
               <label class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.ops.settings.weeklySummary') }}</label>
               <Toggle v-model="emailConfig.report.weekly_summary_enabled" />
             </div>
@@ -375,12 +375,12 @@ async function saveAllSettings() {
       </div>
 
       <!-- 指标阈值配置 -->
-      <div class="rounded-2xl bg-gray-50 p-4 dark:bg-dark-700/50">
+      <div class="rounded-lg bg-gray-50 p-4 dark:bg-dark-700/50 console-note console-form-block">
         <h4 class="mb-3 text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.ops.settings.metricThresholds') }}</h4>
         <p class="mb-4 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.ops.settings.metricThresholdsHint') }}</p>
 
         <div class="space-y-4">
-          <div>
+          <div class="console-field">
             <label class="input-label">{{ t('admin.ops.settings.slaMinPercent') }}</label>
             <input
               v-model.number="metricThresholds.sla_percent_min"
@@ -394,7 +394,7 @@ async function saveAllSettings() {
           </div>
 
 
-          <div>
+          <div class="console-field">
             <label class="input-label">{{ t('admin.ops.settings.ttftP99MaxMs') }}</label>
             <input
               v-model.number="metricThresholds.ttft_p99_ms_max"
@@ -406,7 +406,7 @@ async function saveAllSettings() {
             <p class="mt-1 text-xs text-gray-500">{{ t('admin.ops.settings.ttftP99MaxMsHint') }}</p>
           </div>
 
-          <div>
+          <div class="console-field">
             <label class="input-label">{{ t('admin.ops.settings.requestErrorRateMaxPercent') }}</label>
             <input
               v-model.number="metricThresholds.request_error_rate_percent_max"
@@ -419,7 +419,7 @@ async function saveAllSettings() {
             <p class="mt-1 text-xs text-gray-500">{{ t('admin.ops.settings.requestErrorRateMaxPercentHint') }}</p>
           </div>
 
-          <div>
+          <div class="console-field">
             <label class="input-label">{{ t('admin.ops.settings.upstreamErrorRateMaxPercent') }}</label>
             <input
               v-model.number="metricThresholds.upstream_error_rate_percent_max"
@@ -435,7 +435,7 @@ async function saveAllSettings() {
       </div>
 
       <!-- 高级设置 -->
-      <details class="rounded-2xl bg-gray-50 dark:bg-dark-700/50">
+      <details class="rounded-lg bg-gray-50 dark:bg-dark-700/50">
         <summary class="cursor-pointer p-4 text-sm font-semibold text-gray-900 dark:text-white">
           {{ t('admin.ops.settings.advancedSettings') }}
         </summary>
@@ -444,12 +444,12 @@ async function saveAllSettings() {
           <div class="space-y-3">
             <h5 class="text-xs font-semibold text-gray-700 dark:text-gray-300">{{ t('admin.ops.settings.dataRetention') }}</h5>
 
-            <div class="flex items-center justify-between">
+            <div class="flex items-center justify-between console-switch-row">
               <label class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.ops.settings.enableCleanup') }}</label>
               <Toggle v-model="advancedSettings.data_retention.cleanup_enabled" />
             </div>
 
-            <div v-if="advancedSettings.data_retention.cleanup_enabled">
+            <div class="console-field" v-if="advancedSettings.data_retention.cleanup_enabled">
               <label class="input-label">{{ t('admin.ops.settings.cleanupSchedule') }}</label>
               <input
                 v-model="advancedSettings.data_retention.cleanup_schedule"
@@ -461,7 +461,7 @@ async function saveAllSettings() {
             </div>
 
             <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
-              <div>
+              <div class="console-field">
                 <label class="input-label">{{ t('admin.ops.settings.errorLogRetentionDays') }}</label>
                 <input
                   v-model.number="advancedSettings.data_retention.error_log_retention_days"
@@ -471,7 +471,7 @@ async function saveAllSettings() {
                   class="input"
                 />
               </div>
-              <div>
+              <div class="console-field">
                 <label class="input-label">{{ t('admin.ops.settings.minuteMetricsRetentionDays') }}</label>
                 <input
                   v-model.number="advancedSettings.data_retention.minute_metrics_retention_days"
@@ -481,7 +481,7 @@ async function saveAllSettings() {
                   class="input"
                 />
               </div>
-              <div>
+              <div class="console-field">
                 <label class="input-label">{{ t('admin.ops.settings.hourlyMetricsRetentionDays') }}</label>
                 <input
                   v-model.number="advancedSettings.data_retention.hourly_metrics_retention_days"
@@ -499,7 +499,7 @@ async function saveAllSettings() {
           <div class="space-y-3">
             <h5 class="text-xs font-semibold text-gray-700 dark:text-gray-300">{{ t('admin.ops.settings.aggregation') }}</h5>
 
-            <div class="flex items-center justify-between">
+            <div class="flex items-center justify-between console-switch-row">
               <div>
                 <label class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.ops.settings.enableAggregation') }}</label>
                 <p class="mt-1 text-xs text-gray-500">{{ t('admin.ops.settings.aggregationHint') }}</p>
@@ -514,7 +514,7 @@ async function saveAllSettings() {
             <p class="text-xs text-gray-500">{{ t('admin.ops.settings.openaiQuotaAutoPauseHint') }}</p>
 
             <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
-              <div>
+              <div class="console-field">
                 <label class="input-label">{{ t('admin.ops.settings.openaiQuotaAutoPauseDefault5h') }}</label>
                 <input
                   v-model.number="quotaAutoPause5hPercent"
@@ -526,7 +526,7 @@ async function saveAllSettings() {
                   data-testid="ops-quota-auto-pause-5h"
                 />
               </div>
-              <div>
+              <div class="console-field">
                 <label class="input-label">{{ t('admin.ops.settings.openaiQuotaAutoPauseDefault7d') }}</label>
                 <input
                   v-model.number="quotaAutoPause7dPercent"
@@ -546,7 +546,7 @@ async function saveAllSettings() {
           <div class="space-y-3">
             <h5 class="text-xs font-semibold text-gray-700 dark:text-gray-300">{{ t('admin.ops.settings.errorFiltering') }}</h5>
 
-            <div class="flex items-center justify-between">
+            <div class="flex items-center justify-between console-switch-row">
               <div>
                 <label class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.ops.settings.ignoreCountTokensErrors') }}</label>
                 <p class="mt-1 text-xs text-gray-500">
@@ -556,7 +556,7 @@ async function saveAllSettings() {
               <Toggle v-model="advancedSettings.ignore_count_tokens_errors" />
             </div>
 
-            <div class="flex items-center justify-between">
+            <div class="flex items-center justify-between console-switch-row">
               <div>
                 <label class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.ops.settings.ignoreContextCanceled') }}</label>
                 <p class="mt-1 text-xs text-gray-500">
@@ -566,7 +566,7 @@ async function saveAllSettings() {
               <Toggle v-model="advancedSettings.ignore_context_canceled" />
             </div>
 
-            <div class="flex items-center justify-between">
+            <div class="flex items-center justify-between console-switch-row">
               <div>
                 <label class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.ops.settings.ignoreNoAvailableAccounts') }}</label>
                 <p class="mt-1 text-xs text-gray-500">
@@ -576,7 +576,7 @@ async function saveAllSettings() {
               <Toggle v-model="advancedSettings.ignore_no_available_accounts" />
             </div>
 
-            <div class="flex items-center justify-between">
+            <div class="flex items-center justify-between console-switch-row">
               <div>
                 <label class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.ops.settings.ignoreInsufficientBalanceErrors') }}</label>
                 <p class="mt-1 text-xs text-gray-500">
@@ -591,7 +591,7 @@ async function saveAllSettings() {
           <div class="space-y-3">
             <h5 class="text-xs font-semibold text-gray-700 dark:text-gray-300">{{ t('admin.ops.settings.autoRefresh') }}</h5>
 
-            <div class="flex items-center justify-between">
+            <div class="flex items-center justify-between console-switch-row">
               <div>
                 <label class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.ops.settings.enableAutoRefresh') }}</label>
                 <p class="mt-1 text-xs text-gray-500">
@@ -601,7 +601,7 @@ async function saveAllSettings() {
               <Toggle v-model="advancedSettings.auto_refresh_enabled" />
             </div>
 
-            <div v-if="advancedSettings.auto_refresh_enabled">
+            <div class="console-field" v-if="advancedSettings.auto_refresh_enabled">
               <label class="input-label">{{ t('admin.ops.settings.refreshInterval') }}</label>
               <Select
                 v-model="advancedSettings.auto_refresh_interval_seconds"
@@ -618,7 +618,7 @@ async function saveAllSettings() {
           <div class="space-y-3">
             <h5 class="text-xs font-semibold text-gray-700 dark:text-gray-300">{{ t('admin.ops.settings.dashboardCards') }}</h5>
 
-            <div class="flex items-center justify-between">
+            <div class="flex items-center justify-between console-switch-row">
               <div>
                 <label class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.ops.settings.displayAlertEvents') }}</label>
                 <p class="mt-1 text-xs text-gray-500">
@@ -628,7 +628,7 @@ async function saveAllSettings() {
               <Toggle v-model="advancedSettings.display_alert_events" />
             </div>
 
-            <div class="flex items-center justify-between">
+            <div class="flex items-center justify-between console-switch-row">
               <div>
                 <label class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.ops.settings.displayOpenAITokenStats') }}</label>
                 <p class="mt-1 text-xs text-gray-500">

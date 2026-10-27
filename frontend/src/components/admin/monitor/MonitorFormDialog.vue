@@ -5,8 +5,10 @@
     width="wide"
     @close="$emit('close')"
   >
-    <form id="channel-monitor-form" @submit.prevent="handleSubmit" class="workbench-editor-form space-y-5">
-      <div class="workbench-field-row ">
+    <template #navigation><DialogSectionLinks :sections="['console.formIdentity', 'console.formConnection', 'console.formScheduling']" /></template>
+    <form id="channel-monitor-form" @submit.prevent="handleSubmit" class="workbench-editor-form space-y-5 console-form">
+      <DialogSection :title="t('console.formIdentity')">
+<div class="workbench-field-row console-field">
         <label class="input-label">{{ t('admin.channelMonitor.form.name') }} <span class="text-red-500">*</span></label>
         <input v-model="form.name" type="text" required class="input" :placeholder="t('admin.channelMonitor.form.namePlaceholder')" />
       </div>
@@ -22,7 +24,7 @@
             :data-testid="`monitor-check-mode-${opt.value}`"
             :aria-pressed="form.check_mode === opt.value"
             :disabled="opt.disabled"
-            class="rounded-lg border-2 px-3 py-2 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+            class="rounded-lg border px-3 py-2 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50"
             :class="checkModeButtonClass(opt.value)"
             @click="selectCheckMode(opt.value)"
           >
@@ -31,8 +33,10 @@
           </button>
         </div>
       </div>
+</DialogSection>
 
-      <div class="workbench-field-row ">
+      <DialogSection :title="t('console.formConnection')">
+<div class="workbench-field-row ">
         <label class="input-label">{{ t('admin.channelMonitor.form.provider') }} <span class="text-red-500">*</span></label>
         <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <button
@@ -41,7 +45,7 @@
             type="button"
             :data-testid="`monitor-provider-${opt.value}`"
             :aria-pressed="form.provider === opt.value"
-            class="flex items-center justify-center gap-2 rounded-lg border-2 px-3 py-2.5 text-sm font-medium transition-colors"
+            class="flex items-center justify-center gap-2 rounded-lg border px-3 py-2.5 text-sm font-medium transition-colors"
             :class="providerPickerClass(opt.value, form.provider === opt.value)"
             @click="selectProvider(opt.value)"
           >
@@ -78,7 +82,7 @@
         </p>
       </div>
 
-      <div v-if="form.provider === PROVIDER_OPENAI && usesProbePart" class="workbench-field-row rounded-lg border border-blue-100 bg-blue-50/50 p-3 dark:border-blue-500/20 dark:bg-blue-500/10">
+      <div v-if="form.provider === PROVIDER_OPENAI && usesProbePart" class="workbench-field-row rounded-lg border border-blue-100 bg-blue-50/50 p-3 dark:border-blue-500/20 dark:bg-blue-500/10 console-note">
         <label class="input-label">{{ t('admin.channelMonitor.form.apiMode') }}</label>
         <div class="grid gap-3 sm:grid-cols-2">
           <button
@@ -86,7 +90,7 @@
             :key="opt.value"
             type="button"
             :aria-pressed="form.api_mode === opt.value"
-            class="rounded-lg border-2 px-3 py-2 text-left transition-colors"
+            class="rounded-lg border px-3 py-2 text-left transition-colors"
             :class="apiModeButtonClass(opt.value)"
             @click="form.api_mode = opt.value"
           >
@@ -125,7 +129,7 @@
         <p v-if="editing && editing.api_key_masked" class="mt-1 text-xs text-gray-400">{{ editing.api_key_masked }}</p>
       </div>
 
-      <div class="workbench-field-row " v-if="usesProbePart">
+      <div class="workbench-field-row console-field" v-if="usesProbePart">
         <label class="input-label">{{ t('admin.channelMonitor.form.primaryModel') }} <span class="text-red-500">*</span></label>
         <input
           v-model="form.primary_model"
@@ -138,7 +142,7 @@
         />
       </div>
 
-      <div class="workbench-field-row " v-if="usesProbePart">
+      <div class="workbench-field-row console-field" v-if="usesProbePart">
         <label class="input-label">{{ t('admin.channelMonitor.form.extraModels') }}</label>
         <ModelTagInput
           :models="form.extra_models"
@@ -147,25 +151,27 @@
           @update:models="form.extra_models = $event"
         />
       </div>
+</DialogSection>
 
-      <div class="workbench-field-row ">
+      <DialogSection :title="t('console.formScheduling')">
+<div class="workbench-field-row console-field">
         <label class="input-label">{{ t('admin.channelMonitor.form.groupName') }}</label>
         <input v-model="form.group_name" type="text" class="input" :placeholder="t('admin.channelMonitor.form.groupNamePlaceholder')" />
       </div>
 
-      <div class="workbench-field-row ">
+      <div class="workbench-field-row console-field">
         <label class="input-label">{{ t('admin.channelMonitor.form.intervalSeconds') }} <span class="text-red-500">*</span></label>
         <input v-model.number="form.interval_seconds" type="number" min="15" max="3600" required class="input" />
         <p class="mt-1 text-xs text-gray-400">{{ t('admin.channelMonitor.form.intervalSecondsHint') }}</p>
       </div>
 
-      <div class="workbench-field-row ">
+      <div class="workbench-field-row console-field">
         <label class="input-label">{{ t('admin.channelMonitor.form.jitterSeconds') }}</label>
         <input v-model.number="form.jitter_seconds" type="number" min="0" :max="maxJitterSeconds" class="input" />
         <p class="mt-1 text-xs text-gray-400">{{ t('admin.channelMonitor.form.jitterSecondsHint') }}</p>
       </div>
 
-      <div class="workbench-field-row flex items-center justify-between">
+      <div class="workbench-field-row flex items-center justify-between console-switch-row">
         <label class="input-label mb-0">{{ t('admin.channelMonitor.form.enabled') }}</label>
         <Toggle v-model="form.enabled" />
       </div>
@@ -178,7 +184,7 @@
         <p class="mt-1 text-xs text-gray-400">{{ t('admin.channelMonitor.advanced.sectionHint') }}</p>
 
         <div class="mt-4 space-y-4">
-          <div>
+          <div class="console-field">
             <label class="input-label">{{ t('admin.channelMonitor.templateField.label') }}</label>
             <Select
               v-model="templateSelectValue"
@@ -200,6 +206,7 @@
           />
         </div>
       </details>
+</DialogSection>
     </form>
 
     <template #footer>
@@ -233,6 +240,8 @@
 </template>
 
 <script setup lang="ts">
+import DialogSectionLinks from '@/components/common/DialogSectionLinks.vue'
+import DialogSection from '@/components/common/DialogSection.vue'
 import { ref, reactive, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'

@@ -73,7 +73,7 @@
 
       <div
         v-if="order.refund_amount"
-        class="rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-800 dark:bg-red-900/20"
+        class="rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-800 dark:bg-red-900/20 console-form-block"
       >
         <h4 class="mb-2 text-sm font-semibold text-red-700 dark:text-red-400">
           {{ t('payment.admin.refundInfo') }}

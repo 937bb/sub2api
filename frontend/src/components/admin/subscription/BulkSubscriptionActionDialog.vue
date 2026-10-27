@@ -7,7 +7,7 @@
     :show-close-button="canClose"
     @close="handleClose"
   >
-    <form id="bulk-subscription-action-form" class="workbench-editor-form space-y-4" novalidate @submit.prevent="submit">
+    <form id="bulk-subscription-action-form" class="workbench-editor-form space-y-4 console-form" novalidate @submit.prevent="submit">
       <div>
         <p class="mb-2 text-sm font-medium text-gray-900 dark:text-gray-100">
           {{ t('admin.subscriptions.bulk.confirmTargets', { count: targets.length }) }}
@@ -26,7 +26,7 @@
       </div>
 
       <fieldset :disabled="parametersLocked" class="space-y-3 disabled:opacity-70">
-        <div v-if="currentAction === 'extend'">
+        <div class="console-field" v-if="currentAction === 'extend'">
           <label for="bulk-subscription-days" class="input-label">
             {{ t('admin.subscriptions.form.adjustDays') }}
           </label>

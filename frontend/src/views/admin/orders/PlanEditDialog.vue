@@ -1,12 +1,13 @@
 <template>
   <BaseDialog presentation="sheet" :show="show" :title="plan ? t('payment.admin.editPlan') : t('payment.admin.createPlan')" width="wide" @close="emit('close')">
-    <form id="plan-form" @submit.prevent="handleSavePlan" class="workbench-editor-form space-y-4">
-      <div class="grid grid-cols-2 gap-4">
-        <div>
+    <form id="plan-form" @submit.prevent="handleSavePlan" class="workbench-editor-form space-y-4 console-form">
+      <DialogSection :title="t('console.formIdentity')">
+<div class="grid grid-cols-2 gap-4">
+        <div class="console-field">
           <label class="input-label">{{ t('payment.admin.planName') }} <span class="text-red-500">*</span></label>
           <input v-model="planForm.name" type="text" class="input" required />
         </div>
-        <div>
+        <div class="console-field">
           <label class="input-label">{{ t('payment.admin.group') }} <span class="text-red-500">*</span></label>
           <Select v-model="planForm.group_id" :options="groupOptions" :placeholder="t('payment.admin.selectGroup')" class="w-full">
             <template #selected="{ option }">
@@ -22,7 +23,7 @@
       </div>
 
       <!-- Group Info Preview -->
-      <div v-if="selectedGroupInfo" class="rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-dark-600 dark:bg-dark-800">
+      <div v-if="selectedGroupInfo" class="rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-dark-600 dark:bg-dark-800 console-note">
         <div class="mb-2 flex items-center gap-2">
           <GroupBadge :name="selectedGroupInfo.name" :platform="selectedGroupInfo.platform" :rate-multiplier="selectedGroupInfo.rate_multiplier" />
         </div>
@@ -33,9 +34,11 @@
         </div>
       </div>
 
-      <div class="workbench-field-row "><label class="input-label">{{ t('payment.admin.planDescription') }} <span class="text-red-500">*</span></label><textarea v-model="planForm.description" rows="2" class="input" required></textarea></div>
-      <div class="grid grid-cols-2 gap-4">
-        <div>
+      <div class="workbench-field-row console-field"><label class="input-label">{{ t('payment.admin.planDescription') }} <span class="text-red-500">*</span></label><textarea v-model="planForm.description" rows="2" class="input" required></textarea></div>
+</DialogSection>
+      <DialogSection :title="t('console.formPricing')">
+<div class="grid grid-cols-2 gap-4">
+        <div class="console-field">
           <label class="input-label">{{ t('payment.admin.price') }} <span class="text-red-500">*</span></label>
           <input v-model.number="planForm.price" type="number" step="0.01" min="0.01" class="input" required />
           <p v-if="subscriptionCnyPreview" class="mt-1 text-xs font-medium text-primary-600 dark:text-primary-400">
@@ -45,21 +48,23 @@
             </span>
           </p>
         </div>
-        <div><label class="input-label">{{ t('payment.admin.originalPrice') }}</label><input v-model.number="planForm.original_price" type="number" step="0.01" min="0" class="input" /></div>
+        <div class="console-field"><label class="input-label">{{ t('payment.admin.originalPrice') }}</label><input v-model.number="planForm.original_price" type="number" step="0.01" min="0" class="input" /></div>
       </div>
       <div class="grid grid-cols-2 gap-4">
-        <div><label class="input-label">{{ t('payment.admin.validity') }} <span class="text-red-500">*</span></label><input v-model.number="planForm.validity_days" type="number" min="1" class="input" required /></div>
-        <div><label class="input-label">{{ t('payment.admin.validityUnit') }} <span class="text-red-500">*</span></label><Select v-model="planForm.validity_unit" :options="validityUnitOptions" /></div>
+        <div class="console-field"><label class="input-label">{{ t('payment.admin.validity') }} <span class="text-red-500">*</span></label><input v-model.number="planForm.validity_days" type="number" min="1" class="input" required /></div>
+        <div class="console-field"><label class="input-label">{{ t('payment.admin.validityUnit') }} <span class="text-red-500">*</span></label><Select v-model="planForm.validity_unit" :options="validityUnitOptions" /></div>
       </div>
       <div class="grid grid-cols-2 gap-4">
-        <div><label class="input-label">{{ t('payment.admin.sortOrder') }}</label><input v-model.number="planForm.sort_order" type="number" min="0" class="input" /></div>
-        <div>
+        <div class="console-field"><label class="input-label">{{ t('payment.admin.sortOrder') }}</label><input v-model.number="planForm.sort_order" type="number" min="0" class="input" /></div>
+        <div class="console-field">
           <label class="input-label">{{ t('payment.admin.currency') }}</label>
           <input v-model="planForm.currency" type="text" maxlength="3" class="input uppercase" :placeholder="t('payment.admin.currencyPlaceholder')" />
           <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('payment.admin.currencyHint') }}</p>
         </div>
       </div>
-      <div class="workbench-field-row ">
+</DialogSection>
+      <DialogSection :title="t('console.formAccess')">
+<div class="workbench-field-row console-field">
         <label class="input-label">{{ t('payment.admin.features') }}</label>
         <textarea v-model="planFeaturesText" rows="3" class="input" :placeholder="t('payment.admin.featuresPlaceholder')"></textarea>
         <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('payment.admin.featuresHint') }}</p>
@@ -80,6 +85,7 @@
           ]" />
         </button>
       </div>
+</DialogSection>
     </form>
     <template #footer>
       <div class="flex justify-end gap-3">
@@ -91,6 +97,7 @@
 </template>
 
 <script setup lang="ts">
+import DialogSection from '@/components/common/DialogSection.vue'
 import { ref, reactive, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'

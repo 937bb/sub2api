@@ -147,7 +147,7 @@
     <Teleport to="body">
       <div
         v-if="floatingTooltip.visible"
-        class="matrix-floating-tooltip"
+        class="matrix-floating-tooltip console-tooltip"
         :style="{ left: `${floatingTooltip.x}px`, top: `${floatingTooltip.y}px` }"
         role="tooltip"
       >

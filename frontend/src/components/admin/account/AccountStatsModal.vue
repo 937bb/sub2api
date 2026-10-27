@@ -9,11 +9,11 @@
       <!-- Account Info Header -->
       <div
         v-if="account"
-        class="flex items-center justify-between rounded-xl border border-primary-200 bg-gradient-to-r from-primary-50 to-primary-100 p-3 dark:border-primary-700/50 dark:from-primary-900/20 dark:to-primary-800/20"
+        class="flex items-center justify-between rounded-lg border border-primary-200 bg-primary-50 p-3 dark:border-primary-700/50"
       >
         <div class="flex items-center gap-3">
           <div
-            class="flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br from-primary-500 to-primary-600"
+            class="flex h-10 w-10 items-center justify-center rounded-lg bg-primary-500"
           >
             <Icon name="chartBar" size="md" class="text-white" />
           </div>
@@ -46,7 +46,7 @@
         <div class="grid grid-cols-2 gap-4 lg:grid-cols-4">
           <!-- 30-Day Total Cost -->
           <div
-            class="card border-emerald-200 bg-gradient-to-br from-emerald-50 to-white p-4 dark:border-emerald-800/30 dark:from-emerald-900/10 dark:to-dark-700"
+            class="card border-emerald-200 bg-emerald-50 p-4 dark:border-emerald-800/30"
           >
             <div class="mb-2 flex items-center justify-between">
               <span class="text-xs font-medium text-gray-500 dark:text-gray-400">{{
@@ -72,7 +72,7 @@
 
           <!-- 30-Day Total Requests -->
           <div
-            class="card border-blue-200 bg-gradient-to-br from-blue-50 to-white p-4 dark:border-blue-800/30 dark:from-blue-900/10 dark:to-dark-700"
+            class="card border-blue-200 bg-blue-50 p-4 dark:border-blue-800/30"
           >
             <div class="mb-2 flex items-center justify-between">
               <span class="text-xs font-medium text-gray-500 dark:text-gray-400">{{
@@ -92,7 +92,7 @@
 
           <!-- Daily Average Cost -->
           <div
-            class="card border-amber-200 bg-gradient-to-br from-amber-50 to-white p-4 dark:border-amber-800/30 dark:from-amber-900/10 dark:to-dark-700"
+            class="card border-amber-200 bg-amber-50 p-4 dark:border-amber-800/30"
           >
             <div class="mb-2 flex items-center justify-between">
               <span class="text-xs font-medium text-gray-500 dark:text-gray-400">{{
@@ -123,7 +123,7 @@
 
           <!-- Daily Average Requests -->
           <div
-            class="card border-primary-200 bg-gradient-to-br from-primary-50 to-white p-4 dark:border-primary-800/30 dark:from-primary-900/10 dark:to-dark-700"
+            class="card border-primary-200 bg-primary-50 p-4 dark:border-primary-800/30"
           >
             <div class="mb-2 flex items-center justify-between">
               <span class="text-xs font-medium text-gray-500 dark:text-gray-400">{{
@@ -393,7 +393,7 @@
         </div>
 
         <!-- Usage Trend Chart -->
-        <div class="card p-4">
+        <div class="card p-4 console-form-block">
           <h3 class="mb-4 text-sm font-semibold text-gray-900 dark:text-white">
             {{ t('admin.accounts.stats.usageTrend') }}
           </h3>
@@ -438,7 +438,7 @@
       <div class="flex justify-end">
         <button
           @click="handleClose"
-          class="rounded-lg bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-200 dark:bg-dark-600 dark:text-gray-300 dark:hover:bg-dark-500"
+          class="rounded-lg bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-200 dark:bg-dark-600 dark:text-gray-300 dark:hover:bg-dark-500 btn"
         >
           {{ t('common.close') }}
         </button>

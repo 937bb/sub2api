@@ -15,6 +15,7 @@ const mountView = () => shallowMount(ProxiesView, {
     TablePageLayout: { template: '<div><slot name="table" /></div>' },
     DataTable: { props: ['data'], template: '<div v-for="row in data" :key="row.id"><slot name="cell-actions" :row="row" /></div>' },
     BaseDialog: { props: ['show'], template: '<div v-if="show"><slot /><slot name="footer" /></div>' },
+    DialogSection: { template: '<section><slot /></section>' },
   } },
 })
 let wrapper: ReturnType<typeof mountView>

@@ -130,20 +130,13 @@
     </div>
 
     <!-- 删除确认：吊销凭据需验证当前密码，防止被窃会话静默移除 Passkey -->
-    <div v-if="deleteTarget" class="fixed inset-0 z-50 overflow-y-auto">
-      <div class="flex min-h-full items-center justify-center p-4">
-        <div class="fixed inset-0 bg-black/50 transition-opacity" @click="closeDeleteDialog"></div>
-        <div
-          class="relative w-full max-w-md transform rounded-xl bg-white p-6 shadow-xl transition-all dark:bg-dark-800"
-        >
-          <h3 class="text-lg font-semibold text-gray-900 dark:text-white">
-            {{ t('profile.passkey.deleteTitle') }}
-          </h3>
+    <BaseDialog v-if="deleteTarget" :show="true" :title="t('profile.passkey.deleteTitle')" width="narrow" @close="closeDeleteDialog">
+
           <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">
             {{ t('profile.passkey.deleteConfirm', { name: deleteTarget.name }) }}
           </p>
-          <form class="mt-4 space-y-4" @submit.prevent="confirmDelete">
-            <div>
+          <form class="mt-4 space-y-4 console-form" @submit.prevent="confirmDelete">
+            <div class="console-field">
               <label for="passkey-delete-password" class="input-label">{{
                 t('profile.currentPassword')
               }}</label>
@@ -170,13 +163,13 @@
               </button>
             </div>
           </form>
-        </div>
-      </div>
-    </div>
+
+</BaseDialog>
   </div>
 </template>
 
 <script setup lang="ts">
+import BaseDialog from '@/components/common/BaseDialog.vue'
 import { ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { passkeyAPI, type PasskeyCredentialSummary } from '@/api'

@@ -23,7 +23,7 @@
     </button>
 
     <Transition name="select-dropdown">
-      <div v-if="isOpen" class="select-dropdown">
+      <div v-if="isOpen" class="select-dropdown console-popover console-popup-panel">
         <!-- Search and Batch Test Header -->
         <div class="select-header">
           <div class="select-search">

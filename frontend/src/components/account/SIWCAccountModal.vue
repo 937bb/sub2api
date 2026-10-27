@@ -1,10 +1,13 @@
 <template>
   <component :is="embedded ? 'div' : BaseDialog" :show="show" :title="embedded ? undefined : t(account ? 'siwc.reauthTitle' : 'siwc.title')" @close="close">
-    <form class="space-y-4" @submit.prevent="finish">
+    <form class="console-form space-y-4" @submit.prevent="finish">
       <p class="text-sm text-gray-600 dark:text-gray-300">{{ t('siwc.description') }}</p>
+      <DialogSection v-if="!account && !embedded" :title="t('console.formIdentity')">
       <label v-if="!account && !embedded" class="block">{{ t('siwc.name') }}
         <input v-model="name" class="input mt-1" autocomplete="off" :disabled="busy" />
       </label>
+      </DialogSection>
+      <DialogSection :title="t('console.formConnection')">
       <label v-if="!account && !embedded" class="block">{{ t('siwc.proxy') }}
         <select v-model="proxyId" class="input mt-1" :disabled="busy || !!authorization">
           <option :value="null">{{ t('siwc.direct') }}</option>
@@ -31,6 +34,7 @@
         <button type="button" class="btn btn-secondary ml-2" :disabled="busy" @click="retryAuthorization">{{ t('siwc.restart') }}</button>
       </template>
       <p v-if="error" role="alert" class="text-sm text-red-600">{{ error }}</p>
+      </DialogSection>
     </form>
   </component>
 </template>
@@ -39,6 +43,7 @@
 import { ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import DialogSection from '@/components/common/DialogSection.vue'
 import { startSIWCAuthorization, createSIWCAccount, type SIWCAuthorization } from '@/api/admin/siwc'
 
 const props = defineProps<{

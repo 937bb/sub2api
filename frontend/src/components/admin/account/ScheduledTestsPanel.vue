@@ -23,13 +23,13 @@
       <!-- Add Plan Form -->
       <div
         v-if="showAddForm"
-        class="rounded-xl border border-primary-200 bg-primary-50/50 p-4 dark:border-primary-800 dark:bg-primary-900/20"
+        class="rounded-lg border border-primary-200 bg-primary-50/50 p-4 dark:border-primary-800 dark:bg-primary-900/20 console-note"
       >
         <div class="mb-3 text-sm font-medium text-gray-700 dark:text-gray-300">
           {{ t('admin.scheduledTests.addPlan') }}
         </div>
         <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div>
+          <div class="console-field">
             <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
               {{ t('admin.scheduledTests.model') }}
             </label>
@@ -40,7 +40,7 @@
               :searchable="modelOptions.length > 5"
             />
           </div>
-          <div>
+          <div class="console-field">
             <label class="mb-1 flex items-center gap-1 text-xs font-medium text-gray-600 dark:text-gray-400">
               {{ t('admin.scheduledTests.cronExpression') }}
               <HelpTooltip>
@@ -66,7 +66,7 @@
               :hint="t('admin.scheduledTests.cronHelp')"
             />
           </div>
-          <div>
+          <div class="console-field">
             <label class="mb-1 flex items-center gap-1 text-xs font-medium text-gray-600 dark:text-gray-400">
               {{ t('admin.scheduledTests.maxResults') }}
               <HelpTooltip>
@@ -111,14 +111,14 @@
         <div class="mt-3 flex justify-end gap-2">
           <button
             @click="showAddForm = false; resetNewPlan()"
-            class="rounded-lg bg-gray-100 px-3 py-1.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-200 dark:bg-dark-600 dark:text-gray-300 dark:hover:bg-dark-500"
+            class="rounded-lg bg-gray-100 px-3 py-1.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-200 dark:bg-dark-600 dark:text-gray-300 dark:hover:bg-dark-500 btn"
           >
             {{ t('common.cancel') }}
           </button>
           <button
             @click="handleCreate"
             :disabled="!newPlan.model_id || !newPlan.cron_expression || creating"
-            class="flex items-center gap-1.5 rounded-lg bg-primary-500 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-primary-600 disabled:cursor-not-allowed disabled:opacity-50"
+            class="flex items-center gap-1.5 rounded-lg bg-primary-500 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-primary-600 disabled:cursor-not-allowed disabled:opacity-50 btn btn-primary"
           >
             <Icon v-if="creating" name="refresh" size="sm" class="animate-spin" :stroke-width="2" />
             {{ t('common.save') }}
@@ -135,7 +135,7 @@
       <!-- Empty State -->
       <div
         v-else-if="plans.length === 0"
-        class="rounded-xl border border-dashed border-gray-300 py-10 text-center dark:border-dark-600"
+        class="rounded-lg border border-dashed border-gray-300 py-10 text-center dark:border-dark-600"
       >
         <Icon name="calendar" size="lg" class="mx-auto mb-2 text-gray-400" :stroke-width="1.5" />
         <p class="text-sm text-gray-500 dark:text-gray-400">
@@ -148,7 +148,7 @@
         <div
           v-for="plan in plans"
           :key="plan.id"
-          class="rounded-xl border border-gray-200 bg-white transition-all dark:border-dark-600 dark:bg-dark-800"
+          class="rounded-lg border border-gray-200 bg-white transition-all dark:border-dark-600 dark:bg-dark-800"
         >
           <!-- Plan Header -->
           <div
@@ -239,7 +239,7 @@
               {{ t('admin.scheduledTests.editPlan') }}
             </div>
             <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <div>
+              <div class="console-field">
                 <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
                   {{ t('admin.scheduledTests.model') }}
                 </label>
@@ -250,7 +250,7 @@
                   :searchable="modelOptions.length > 5"
                 />
               </div>
-              <div>
+              <div class="console-field">
                 <label class="mb-1 flex items-center gap-1 text-xs font-medium text-gray-600 dark:text-gray-400">
                   {{ t('admin.scheduledTests.cronExpression') }}
                   <HelpTooltip>
@@ -276,7 +276,7 @@
                   :hint="t('admin.scheduledTests.cronHelp')"
                 />
               </div>
-              <div>
+              <div class="console-field">
                 <label class="mb-1 flex items-center gap-1 text-xs font-medium text-gray-600 dark:text-gray-400">
                   {{ t('admin.scheduledTests.maxResults') }}
                   <HelpTooltip>
@@ -321,14 +321,14 @@
             <div class="mt-3 flex justify-end gap-2">
               <button
                 @click="cancelEdit"
-                class="rounded-lg bg-gray-100 px-3 py-1.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-200 dark:bg-dark-600 dark:text-gray-300 dark:hover:bg-dark-500"
+                class="rounded-lg bg-gray-100 px-3 py-1.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-200 dark:bg-dark-600 dark:text-gray-300 dark:hover:bg-dark-500 btn"
               >
                 {{ t('common.cancel') }}
               </button>
               <button
                 @click="handleEdit"
                 :disabled="!editForm.model_id || !editForm.cron_expression || updating"
-                class="flex items-center gap-1.5 rounded-lg bg-primary-500 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-primary-600 disabled:cursor-not-allowed disabled:opacity-50"
+                class="flex items-center gap-1.5 rounded-lg bg-primary-500 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-primary-600 disabled:cursor-not-allowed disabled:opacity-50 btn btn-primary"
               >
                 <Icon v-if="updating" name="refresh" size="sm" class="animate-spin" :stroke-width="2" />
                 {{ t('common.save') }}
@@ -364,7 +364,7 @@
               <div
                 v-for="result in results"
                 :key="result.id"
-                class="rounded-lg border border-gray-100 bg-gray-50 p-3 dark:border-dark-700 dark:bg-dark-900"
+                class="rounded-lg border border-gray-100 bg-gray-50 p-3 dark:border-dark-700 dark:bg-dark-900 console-note"
               >
                 <div class="flex items-center justify-between">
                   <div class="flex items-center gap-2">

@@ -175,11 +175,12 @@
         </div>
 
         <!-- Tab Content -->
-        <form id="channel-form" @submit.prevent="handleSubmit" class="workbench-editor-form flex-1 overflow-y-auto pt-4">
+        <form id="channel-form" @submit.prevent="handleSubmit" class="workbench-editor-form flex-1 overflow-y-auto pt-4 console-form">
           <!-- Basic Settings Tab -->
-          <div v-show="activeTab === 'basic'" class="space-y-5">
+          <DialogSection :title="t('console.formIdentity')">
+<div v-show="activeTab === 'basic'" class="space-y-5">
             <!-- Name -->
-            <div>
+            <div class="console-field">
               <label class="input-label">{{ t('admin.channels.form.name', 'Name') }} <span class="text-red-500">*</span></label>
               <input
                 v-model="form.name"
@@ -191,7 +192,7 @@
             </div>
 
             <!-- Description -->
-            <div>
+            <div class="console-field">
               <label class="input-label">{{ t('admin.channels.form.description', 'Description') }}</label>
               <textarea
                 v-model="form.description"
@@ -202,7 +203,7 @@
             </div>
 
             <!-- Status (edit only) -->
-            <div v-if="editingChannel">
+            <div class="console-field" v-if="editingChannel">
               <label class="input-label">{{ t('admin.channels.form.status', 'Status') }}</label>
               <Select v-model="form.status" :options="statusEditOptions" />
             </div>
@@ -223,7 +224,7 @@
             </div>
 
             <!-- Billing Basis -->
-            <div>
+            <div class="console-field">
               <label class="input-label">{{ t('admin.channels.form.billingModelSource', 'Billing Basis') }}</label>
               <Select v-model="form.billing_model_source" :options="billingModelSourceOptions" />
               <p class="mt-1 text-xs text-gray-400">
@@ -257,7 +258,7 @@
 
             <!-- Apply Pricing to Account Stats (toggle only in basic settings) -->
             <div class="border-t border-gray-200 pt-4 dark:border-dark-700">
-              <div class="flex items-center justify-between">
+              <div class="flex items-center justify-between console-switch-row">
                 <div>
                   <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
                     {{ t('admin.channels.form.applyPricingToAccountStats') }}
@@ -273,9 +274,11 @@
               </div>
             </div>
           </div>
+</DialogSection>
 
           <!-- Platform Tab Content -->
-          <div
+          <DialogSection :title="t('console.formRouting')">
+<div
             v-for="(section, sIdx) in form.platforms"
             :key="'tab-' + section.platform"
             v-show="section.enabled && activeTab === section.platform"
@@ -289,7 +292,7 @@
                   ({{ t('admin.channels.form.selectedCount', { count: section.group_ids.length }) }})
                 </span>
               </label>
-              <div class="max-h-40 overflow-auto rounded-lg border border-gray-200 bg-gray-50 p-2 dark:border-dark-600 dark:bg-dark-900">
+              <div class="max-h-40 overflow-auto rounded-lg border border-gray-200 bg-gray-50 p-2 dark:border-dark-600 dark:bg-dark-900 console-note">
                 <div v-if="groupsLoading" class="py-2 text-center text-xs text-gray-500">
                   {{ t('common.loading', 'Loading...') }}
                 </div>
@@ -329,7 +332,7 @@
 
             <!-- Web Search Emulation (Anthropic only, hidden when global disabled) -->
             <div v-if="section.platform === 'anthropic' && webSearchGlobalEnabled" class="border-t border-gray-200 pt-3 dark:border-dark-600">
-              <div class="flex items-center justify-between">
+              <div class="flex items-center justify-between console-switch-row">
                 <div>
                   <label class="text-xs font-medium text-gray-700 dark:text-gray-300">
                     {{ t('admin.channels.form.webSearchEmulation') }}
@@ -344,7 +347,7 @@
 
             <!-- Codex Image Generation Bridge (OpenAI only) -->
             <div v-if="section.platform === 'openai'" class="border-t border-gray-200 pt-3 dark:border-dark-600">
-              <div class="flex items-center justify-between gap-4">
+              <div class="flex items-center justify-between gap-4 console-switch-row">
                 <div>
                   <label class="text-xs font-medium text-gray-700 dark:text-gray-300">
                     {{ t('admin.channels.form.codexImageGenerationBridge') }}
@@ -359,7 +362,7 @@
 
             <!-- Bedrock CC Compatibility (Anthropic only) -->
             <div v-if="section.platform === 'anthropic'" class="border-t border-gray-200 pt-3 dark:border-dark-600">
-              <div class="flex items-center justify-between gap-4">
+              <div class="flex items-center justify-between gap-4 console-switch-row">
                 <div>
                   <label class="text-xs font-medium text-gray-700 dark:text-gray-300">
                     {{ t('admin.channels.form.bedrockCCCompat') }}
@@ -461,14 +464,14 @@
 
             <!-- Account Stats Pricing Rules (per-platform, always visible) -->
             <div class="mt-4 border-t border-gray-200 pt-4 dark:border-dark-700 space-y-3">
-              <div class="flex items-center justify-between">
+              <div class="flex items-center justify-between console-form-block">
                 <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300">
                   {{ t('admin.channels.form.accountStatsPricingRules') }}
                 </h4>
                 <button
                   type="button"
                   @click="addAccountStatsRule(sIdx)"
-                  class="rounded-lg border border-primary-300 px-3 py-1 text-xs font-medium text-primary-600 hover:bg-primary-50 dark:border-primary-600 dark:text-primary-400 dark:hover:bg-primary-900/20"
+                  class="rounded-lg border border-primary-300 px-3 py-1 text-xs font-medium text-primary-600 hover:bg-primary-50 dark:border-primary-600 dark:text-primary-400 dark:hover:bg-primary-900/20 btn"
                 >
                   + {{ t('admin.channels.form.addRule') }}
                 </button>
@@ -546,7 +549,7 @@
                     <!-- Search results dropdown -->
                     <div
                       v-if="showRuleAccountDropdown[`${section.platform}-${ruleIndex}`] && (ruleAccountSearchResults[`${section.platform}-${ruleIndex}`]?.length ?? 0) > 0"
-                      class="absolute z-50 mt-1 max-h-48 w-full overflow-auto rounded-lg border bg-white shadow-lg dark:border-dark-600 dark:bg-dark-800"
+                      class="absolute z-50 mt-1 max-h-48 w-full overflow-auto rounded-lg border bg-white dark:border-dark-600 dark:bg-dark-800"
                     >
                       <button
                         v-for="account in ruleAccountSearchResults[`${section.platform}-${ruleIndex}`]"
@@ -591,6 +594,7 @@
               </div>
             </div>
           </div>
+</DialogSection>
         </form>
       </div>
 
@@ -631,6 +635,7 @@
 </template>
 
 <script setup lang="ts">
+import DialogSection from '@/components/common/DialogSection.vue'
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'

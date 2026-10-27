@@ -111,7 +111,7 @@
 
     <!-- edit / create form -->
     <div v-else class="space-y-4">
-      <div>
+      <div class="console-field">
         <label class="input-label">
           {{ t('admin.channelMonitor.template.form.name') }}
           <span class="text-red-500">*</span>
@@ -135,7 +135,7 @@
             v-for="opt in providerTabs"
             :key="opt.value"
             type="button"
-            class="rounded-lg border-2 px-3 py-2 text-sm font-medium transition-colors"
+            class="rounded-lg border px-3 py-2 text-sm font-medium transition-colors"
             :class="providerPickerClass(opt.value, form.provider === opt.value)"
             @click="form.provider = opt.value"
           >
@@ -144,14 +144,14 @@
         </div>
       </div>
 
-      <div v-if="form.provider === PROVIDER_OPENAI" class="rounded-lg border border-blue-100 bg-blue-50/50 p-3 dark:border-blue-500/20 dark:bg-blue-500/10">
+      <div v-if="form.provider === PROVIDER_OPENAI" class="rounded-lg border border-blue-100 bg-blue-50/50 p-3 dark:border-blue-500/20 dark:bg-blue-500/10 console-note">
         <label class="input-label">{{ t('admin.channelMonitor.form.apiMode') }}</label>
         <div class="grid gap-3 sm:grid-cols-2">
           <button
             v-for="opt in apiModeOptions"
             :key="opt.value"
             type="button"
-            class="rounded-lg border-2 px-3 py-2 text-left transition-colors"
+            class="rounded-lg border px-3 py-2 text-left transition-colors"
             :class="apiModeButtonClass(opt.value)"
             @click="form.api_mode = opt.value"
           >
@@ -161,7 +161,7 @@
         </div>
       </div>
 
-      <div>
+      <div class="console-field">
         <label class="input-label">
           {{ t('admin.channelMonitor.template.form.description') }}
         </label>

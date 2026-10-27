@@ -284,7 +284,7 @@
     <Teleport to="body">
       <div
         v-if="openMoreJobId"
-        class="fixed z-[9999] w-44 overflow-hidden rounded-xl bg-white py-1 text-sm shadow-lg ring-1 ring-black/5 dark:bg-dark-800 dark:ring-white/10"
+        class="fixed z-[9999] w-44 overflow-hidden rounded-xl bg-white py-1 text-sm shadow-lg ring-1 ring-black/5 dark:bg-dark-800 dark:ring-white/10 console-popover console-popup-panel"
         :style="moreMenuStyle"
         @click.stop
       >
@@ -318,7 +318,7 @@
     <Teleport to="body">
       <div
         v-if="promptPopover.visible"
-        class="batch-prompt-popover fixed z-[9999] rounded-lg border border-gray-200 bg-white p-3 text-sm text-gray-800 shadow-xl ring-1 ring-black/5 dark:border-dark-700 dark:bg-dark-900 dark:text-gray-100 dark:ring-white/10"
+        class="batch-prompt-popover fixed z-[9999] rounded-lg border border-gray-200 bg-white p-3 text-sm text-gray-800 shadow-xl ring-1 ring-black/5 dark:border-dark-700 dark:bg-dark-900 dark:text-gray-100 dark:ring-white/10 console-popover console-popup-panel"
         :style="promptPopover.style"
         @mouseenter="cancelPromptPopoverClose"
         @mouseleave="schedulePromptPopoverClose"
@@ -341,7 +341,7 @@
 
     <BaseDialog :show="!!currentJob" :title="t('batchImage.detail.title')" width="extra-wide" @close="closeDetail">
       <div v-if="currentJob" class="space-y-4">
-        <div class="rounded-lg border border-gray-200 bg-gray-50/70 px-4 py-3 dark:border-dark-700 dark:bg-dark-900/40">
+        <div class="rounded-lg border border-gray-200 bg-gray-50/70 px-4 py-3 dark:border-dark-700 dark:bg-dark-900/40 console-note">
           <div class="grid gap-x-6 gap-y-3 sm:grid-cols-2 lg:grid-cols-4">
             <div class="min-w-0 text-center">
               <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('common.status') }}</p>
@@ -372,7 +372,7 @@
           </div>
         </div>
 
-        <div class="flex flex-wrap items-center justify-between gap-3">
+        <div class="flex flex-wrap items-center justify-between gap-3 console-form-block">
           <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('batchImage.detail.items') }}</h3>
           <button type="button" class="btn btn-secondary btn-sm" :disabled="refreshing || loadingItems" @click="refreshDetail">
             <Icon name="refresh" size="sm" class="mr-1.5" :class="refreshing || loadingItems ? 'animate-spin' : ''" />
@@ -436,7 +436,7 @@
                   </span>
                 </td>
                 <td class="px-3 py-2.5 text-center">
-                  <div class="mx-auto h-12 w-12 overflow-hidden rounded-md border border-gray-200 bg-gray-50 dark:border-dark-700 dark:bg-dark-800">
+                  <div class="mx-auto h-12 w-12 overflow-hidden rounded-md border border-gray-200 bg-gray-50 dark:border-dark-700 dark:bg-dark-800 console-note">
                     <button
                       v-if="itemPreviewUrls[itemPreviewKey(item)] && !previewErrorIds.has(itemPreviewKey(item))"
                       type="button"
@@ -529,7 +529,7 @@
         <div class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
           {{ t('batchImage.imagePreview.notice') }}
         </div>
-        <div class="flex min-h-[420px] items-center justify-center rounded-lg bg-gray-50 p-4 dark:bg-dark-900">
+        <div class="flex min-h-[420px] items-center justify-center rounded-lg bg-gray-50 p-4 dark:bg-dark-900 console-note">
           <img
             v-if="previewImageUrl"
             :src="previewImageUrl"
@@ -541,9 +541,9 @@
     </BaseDialog>
 
     <BaseDialog presentation="sheet" :show="showCreateModal" :title="t('batchImage.create.title')" width="wide" @close="closeCreateModal">
-      <form class="workbench-editor-form space-y-5" @submit.prevent="submitJob">
+      <form class="workbench-editor-form space-y-5 console-form" @submit.prevent="submitJob">
         <div class="grid gap-4 md:grid-cols-2">
-          <div class="md:col-span-2">
+          <div class="md:col-span-2 console-field">
             <label class="input-label">{{ t('batchImage.create.taskName') }}</label>
             <input
               v-model="form.taskName"
@@ -554,7 +554,7 @@
             />
           </div>
 
-          <div class="md:col-span-2">
+          <div class="md:col-span-2 console-field">
             <label class="input-label">API Key</label>
             <select v-model.number="form.apiKeyId" class="input" :disabled="loadingKeys">
               <option :value="0">{{ loadingKeys ? t('batchImage.create.loadingKeys') : t('batchImage.create.selectKeyPlaceholder') }}</option>
@@ -567,7 +567,7 @@
             </p>
           </div>
 
-          <div>
+          <div class="console-field">
             <label class="input-label">{{ t('batchImage.create.model') }}</label>
             <select v-model="form.model" class="input" :disabled="loadingModels || availableBatchImageModels.length === 0">
               <option v-if="loadingModels" value="">{{ batchImageText('loadingModels') }}</option>
@@ -592,7 +592,7 @@
             <p class="input-hint">{{ t('batchImage.create.imageSizeHint') }}</p>
           </div>
 
-          <div>
+          <div class="console-field">
             <label class="input-label">{{ t('batchImage.create.outputFormat') }}</label>
             <select v-model="form.responseMimeType" class="input">
               <option value="image/png">PNG</option>
@@ -618,10 +618,10 @@
             <textarea
               v-model="promptDraft"
               rows="3"
-              class="h-[76px] w-full resize-y rounded-md border border-gray-300 px-3 py-2 text-sm leading-5 outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-dark-600 dark:bg-dark-900 dark:text-gray-100 dark:focus:border-primary-500 dark:focus:ring-primary-900/40"
+              class="h-[76px] w-full resize-y rounded-md border border-gray-300 px-3 py-2 text-sm leading-5 outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:border-dark-600 dark:bg-dark-900 dark:text-gray-100 dark:focus:border-primary-500 dark:focus:ring-primary-900/40 input"
               :placeholder="t('batchImage.create.promptPlaceholder')"
             />
-            <div class="mt-2 grid gap-2 md:grid-cols-[minmax(0,1fr)_112px_132px_112px] md:items-center">
+            <div class="mt-2 grid gap-2 md:grid-cols-[minmax(0,1fr)_112px_132px_112px] md:items-center console-field">
               <input
                 v-model="customIdDraft"
                 type="text"
@@ -720,9 +720,9 @@
 
     <BaseDialog :show="showGuideModal" :title="t('batchImage.guide.title')" width="wide" @close="showGuideModal = false">
 	      <div class="space-y-5">
-	        <section class="space-y-3">
+	        <section class="space-y-3 console-form-block">
 	          <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('batchImage.guide.uiTitle') }}</h3>
-	          <div class="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm leading-6 text-gray-700 dark:border-dark-700 dark:bg-dark-900/50 dark:text-gray-200">
+	          <div class="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm leading-6 text-gray-700 dark:border-dark-700 dark:bg-dark-900/50 dark:text-gray-200 console-note">
 	            <p>{{ t('batchImage.guide.step1') }}</p>
 	            <p>{{ t('batchImage.guide.step2') }}</p>
 	            <p>{{ t('batchImage.guide.step3') }}</p>
@@ -730,14 +730,14 @@
 	          </div>
 	        </section>
 	        <section class="space-y-3">
-	          <div class="flex flex-wrap items-center justify-between gap-3">
+	          <div class="flex flex-wrap items-center justify-between gap-3 console-form-block">
 	            <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('batchImage.guide.skillTitle') }}</h3>
 	            <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('batchImage.guide.skillDesc') }}</p>
 	          </div>
 	        <textarea
 	          :value="agentInstruction"
 	          readonly
-	          class="min-h-[420px] w-full resize-y rounded-md border border-gray-200 bg-gray-50 p-4 font-mono text-sm leading-6 text-gray-800 outline-none focus:border-primary-400 focus:ring-2 focus:ring-primary-100 dark:border-dark-600 dark:bg-dark-900 dark:text-gray-100 dark:focus:border-primary-500 dark:focus:ring-primary-900/40"
+	          class="min-h-[420px] w-full resize-y rounded-md border border-gray-200 bg-gray-50 p-4 font-mono text-sm leading-6 text-gray-800 outline-none focus:border-primary-400 focus:ring-2 focus:ring-primary-100 dark:border-dark-600 dark:bg-dark-900 dark:text-gray-100 dark:focus:border-primary-500 dark:focus:ring-primary-900/40 input"
 	        />
 	        </section>
 	      </div>

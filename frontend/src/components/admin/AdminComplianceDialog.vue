@@ -49,7 +49,7 @@
         </aside>
       </div>
 
-      <div class="space-y-3">
+      <div class="space-y-3 console-field">
         <label for="admin-compliance-phrase" class="block text-sm font-semibold text-gray-900 dark:text-white">
           {{ t('adminCompliance.inputLabel') }}
         </label>

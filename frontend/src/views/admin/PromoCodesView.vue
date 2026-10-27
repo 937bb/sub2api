@@ -166,8 +166,8 @@
       width="normal"
       @close="showCreateDialog = false"
     >
-      <form id="create-promo-form" @submit.prevent="handleCreate" class="workbench-editor-form space-y-4">
-        <div class="workbench-field-row ">
+      <form id="create-promo-form" @submit.prevent="handleCreate" class="workbench-editor-form space-y-4 console-form">
+        <div class="workbench-field-row console-field">
           <label class="input-label">
             {{ t('admin.promo.code') }}
             <span class="ml-1 text-xs font-normal text-gray-400">({{ t('admin.promo.autoGenerate') }})</span>
@@ -179,7 +179,7 @@
             :placeholder="t('admin.promo.codePlaceholder')"
           />
         </div>
-        <div class="workbench-field-row ">
+        <div class="workbench-field-row console-field">
           <label class="input-label">{{ t('admin.promo.bonusAmount') }}</label>
           <input
             v-model.number="createForm.bonus_amount"
@@ -190,7 +190,7 @@
             class="input"
           />
         </div>
-        <div class="workbench-field-row ">
+        <div class="workbench-field-row console-field">
           <label class="input-label">
             {{ t('admin.promo.maxUses') }}
             <span class="ml-1 text-xs font-normal text-gray-400">({{ t('admin.promo.zeroUnlimited') }})</span>
@@ -202,7 +202,7 @@
             class="input"
           />
         </div>
-        <div class="workbench-field-row ">
+        <div class="workbench-field-row console-field">
           <label class="input-label">
             {{ t('admin.promo.expiresAt') }}
             <span class="ml-1 text-xs font-normal text-gray-400">({{ t('common.optional') }})</span>
@@ -213,7 +213,7 @@
             class="input"
           />
         </div>
-        <div class="workbench-field-row ">
+        <div class="workbench-field-row console-field">
           <label class="input-label">
             {{ t('admin.promo.notes') }}
             <span class="ml-1 text-xs font-normal text-gray-400">({{ t('common.optional') }})</span>
@@ -245,8 +245,8 @@
       width="normal"
       @close="closeEditDialog"
     >
-      <form id="edit-promo-form" @submit.prevent="handleUpdate" class="workbench-editor-form space-y-4">
-        <div class="workbench-field-row ">
+      <form id="edit-promo-form" @submit.prevent="handleUpdate" class="workbench-editor-form space-y-4 console-form">
+        <div class="workbench-field-row console-field">
           <label class="input-label">{{ t('admin.promo.code') }}</label>
           <input
             v-model="editForm.code"
@@ -254,7 +254,7 @@
             class="input font-mono uppercase"
           />
         </div>
-        <div class="workbench-field-row ">
+        <div class="workbench-field-row console-field">
           <label class="input-label">{{ t('admin.promo.bonusAmount') }}</label>
           <input
             v-model.number="editForm.bonus_amount"
@@ -265,7 +265,7 @@
             class="input"
           />
         </div>
-        <div class="workbench-field-row ">
+        <div class="workbench-field-row console-field">
           <label class="input-label">
             {{ t('admin.promo.maxUses') }}
             <span class="ml-1 text-xs font-normal text-gray-400">({{ t('admin.promo.zeroUnlimited') }})</span>
@@ -277,11 +277,11 @@
             class="input"
           />
         </div>
-        <div class="workbench-field-row ">
+        <div class="workbench-field-row console-field">
           <label class="input-label">{{ t('admin.promo.status') }}</label>
           <Select v-model="editForm.status" :options="statusOptions" />
         </div>
-        <div class="workbench-field-row ">
+        <div class="workbench-field-row console-field">
           <label class="input-label">
             {{ t('admin.promo.expiresAt') }}
             <span class="ml-1 text-xs font-normal text-gray-400">({{ t('common.optional') }})</span>
@@ -292,7 +292,7 @@
             class="input"
           />
         </div>
-        <div class="workbench-field-row ">
+        <div class="workbench-field-row console-field">
           <label class="input-label">
             {{ t('admin.promo.notes') }}
             <span class="ml-1 text-xs font-normal text-gray-400">({{ t('common.optional') }})</span>

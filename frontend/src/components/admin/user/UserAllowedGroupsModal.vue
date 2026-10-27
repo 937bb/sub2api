@@ -2,8 +2,8 @@
   <BaseDialog :show="show" :title="t('admin.users.groupConfig')" width="wide" @close="$emit('close')">
     <div v-if="user" class="space-y-6">
       <!-- 用户信息头部 -->
-      <div class="flex items-center gap-4 rounded-2xl bg-gradient-to-r from-primary-50 to-primary-100 p-5 dark:from-primary-900/30 dark:to-primary-800/20">
-        <div class="flex h-14 w-14 items-center justify-center rounded-full bg-white shadow-sm dark:bg-dark-700">
+      <div class="flex items-center gap-4 rounded-lg bg-primary-50 p-5">
+        <div class="flex h-14 w-14 items-center justify-center rounded-full bg-white dark:bg-dark-700">
           <span class="text-2xl font-semibold text-primary-600 dark:text-primary-400">{{ user.email.charAt(0).toUpperCase() }}</span>
         </div>
         <div class="flex-1">
@@ -23,8 +23,8 @@
       <div v-else class="space-y-6">
         <!-- 专属分组区域 -->
         <div v-if="exclusiveGroups.length > 0">
-          <div class="mb-3 flex items-center gap-2">
-            <div class="h-1.5 w-1.5 rounded-full bg-primary-500"></div>
+          <div class="mb-3 flex items-center gap-2 console-form-block">
+            <div class="h-1.5 w-1.5 rounded-full bg-primary-500 console-note"></div>
             <h4 class="text-sm font-semibold text-gray-700 dark:text-gray-300">{{ t('admin.users.exclusiveGroups') }}</h4>
             <span class="text-xs text-gray-400">({{ exclusiveGroupConfigs.filter(c => c.isSelected).length }}/{{ exclusiveGroupConfigs.length }})</span>
           </div>
@@ -32,7 +32,7 @@
             <div
               v-for="config in exclusiveGroupConfigs"
               :key="config.groupId"
-              class="group relative overflow-hidden rounded-xl border-2 p-4 transition-all duration-200"
+              class="group relative overflow-hidden rounded-lg border p-4 transition-all duration-200"
               :class="config.isSelected
                 ? 'border-primary-400 bg-primary-50/50 shadow-sm dark:border-primary-500 dark:bg-primary-900/20'
                 : 'border-gray-200 bg-white hover:border-gray-300 dark:border-dark-600 dark:bg-dark-800 dark:hover:border-dark-500'"
@@ -47,7 +47,7 @@
                       @change="toggleExclusiveGroup(config.groupId)"
                       class="peer sr-only"
                     />
-                    <div class="h-5 w-5 rounded-md border-2 border-gray-300 transition-all peer-checked:border-primary-500 peer-checked:bg-primary-500 dark:border-dark-500 peer-checked:dark:border-primary-500">
+                    <div class="h-5 w-5 rounded-md border border-gray-300 transition-all peer-checked:border-primary-500 peer-checked:bg-primary-500 dark:border-dark-500 peer-checked:dark:border-primary-500 console-note">
                       <svg v-if="config.isSelected" class="h-full w-full text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
                       </svg>
@@ -76,7 +76,7 @@
                 </div>
 
                 <!-- 专属倍率输入 -->
-                <div class="flex flex-shrink-0 items-center gap-3">
+                <div class="flex flex-shrink-0 items-center gap-3 console-field">
                   <label class="text-sm font-medium text-gray-600 dark:text-gray-400">{{ t('admin.users.customRate') }}</label>
                   <input
                     type="number"
@@ -95,7 +95,7 @@
 
         <!-- 公开分组区域 -->
         <div v-if="publicGroups.length > 0">
-          <div class="mb-3 flex flex-wrap items-center gap-2">
+          <div class="mb-3 flex flex-wrap items-center gap-2 console-form-block">
             <div class="h-1.5 w-1.5 rounded-full bg-green-500"></div>
             <h4 class="text-sm font-semibold text-gray-700 dark:text-gray-300">
               {{ restrictPublicGroups ? t('admin.users.publicGroupsRestricted') : t('admin.users.publicGroups') }}
@@ -116,7 +116,7 @@
             <div
               v-for="config in publicGroupConfigs"
               :key="config.groupId"
-              class="relative overflow-hidden rounded-xl border-2 border-green-200 bg-green-50/50 p-4 dark:border-green-800/50 dark:bg-green-900/10"
+              class="relative overflow-hidden rounded-lg border border-green-200 bg-green-50/50 p-4 dark:border-green-800/50 dark:bg-green-900/10"
             >
               <div class="flex items-center gap-4">
                 <!-- 未开启限制时公开分组恒可用，此处仅作展示；开启后才是真实开关 -->
@@ -126,11 +126,11 @@
                     type="checkbox"
                     :checked="config.isSelected"
                     @change="togglePublicGroup(config.groupId)"
-                    class="h-5 w-5 cursor-pointer rounded-md border-2 border-green-400 text-green-600 focus:ring-green-500 dark:border-green-600"
+                    class="h-5 w-5 cursor-pointer rounded-md border border-green-400 text-green-600 focus:ring-green-500 dark:border-green-600"
                   />
                   <div
                     v-else
-                    class="flex h-5 w-5 items-center justify-center rounded-md border-2 border-green-400 bg-green-500 dark:border-green-600 dark:bg-green-600"
+                    class="flex h-5 w-5 items-center justify-center rounded-md border border-green-400 bg-green-500 dark:border-green-600 dark:bg-green-600"
                   >
                     <svg class="h-full w-full text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
                       <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
@@ -156,7 +156,7 @@
                 </div>
 
                 <!-- 专属倍率输入 -->
-                <div class="flex flex-shrink-0 items-center gap-3">
+                <div class="flex flex-shrink-0 items-center gap-3 console-field">
                   <label class="text-sm font-medium text-gray-600 dark:text-gray-400">{{ t('admin.users.customRate') }}</label>
                   <input
                     type="number"

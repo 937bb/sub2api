@@ -10,14 +10,14 @@
     <form
       v-if="currentStep === 'input'"
       id="sync-from-crs-form"
-      class="workbench-editor-form space-y-4"
+      class="workbench-editor-form space-y-4 console-form"
       @submit.prevent="handlePreview"
     >
       <div class="text-sm text-gray-600 dark:text-dark-300">
         {{ t('admin.accounts.syncFromCrsDesc') }}
       </div>
       <div
-        class="rounded-lg bg-gray-50 p-3 text-xs text-gray-500 dark:bg-dark-700/60 dark:text-dark-400"
+        class="rounded-lg bg-gray-50 p-3 text-xs text-gray-500 dark:bg-dark-700/60 dark:text-dark-400 console-note"
       >
         {{ t('admin.accounts.crsUpdateBehaviorNote') }}
       </div>
@@ -28,7 +28,7 @@
       </div>
 
       <div class="grid grid-cols-1 gap-4">
-        <div>
+        <div class="console-field">
           <label for="crs-base-url" class="input-label">{{ t('admin.accounts.crsBaseUrl') }}</label>
           <input
             id="crs-base-url"
@@ -41,11 +41,11 @@
         </div>
 
         <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <div>
+          <div class="console-field">
             <label for="crs-username" class="input-label">{{ t('admin.accounts.crsUsername') }}</label>
             <input id="crs-username" v-model="form.username" type="text" class="input" required autocomplete="username" />
           </div>
-          <div>
+          <div class="console-field">
             <label for="crs-password" class="input-label">{{ t('admin.accounts.crsPassword') }}</label>
             <input
               id="crs-password"
@@ -74,7 +74,7 @@
       <!-- Existing accounts (read-only info) -->
       <div
         v-if="previewResult.existing_accounts.length"
-        class="rounded-lg bg-gray-50 p-3 dark:bg-dark-700/60"
+        class="rounded-lg bg-gray-50 p-3 dark:bg-dark-700/60 console-note"
       >
         <div class="mb-2 text-sm font-medium text-gray-700 dark:text-dark-300">
           {{ t('admin.accounts.crsExistingAccounts') }}
@@ -150,7 +150,7 @@
       <!-- No new accounts -->
       <div
         v-if="!previewResult.new_accounts.length"
-        class="rounded-lg bg-gray-50 p-4 text-center text-sm text-gray-500 dark:bg-dark-700/60 dark:text-dark-400"
+        class="rounded-lg bg-gray-50 p-4 text-center text-sm text-gray-500 dark:bg-dark-700/60 dark:text-dark-400 console-note"
       >
         {{ t('admin.accounts.crsNoNewAccounts') }}
         <span v-if="previewResult.existing_accounts.length">
@@ -162,7 +162,7 @@
     <!-- Step 3: Result -->
     <div v-else-if="currentStep === 'result' && result" class="space-y-4">
       <div
-        class="space-y-2 rounded-xl border border-gray-200 p-4 dark:border-dark-700"
+        class="space-y-2 rounded-lg border border-gray-200 p-4 dark:border-dark-700"
       >
         <div class="text-sm font-medium text-gray-900 dark:text-white">
           {{ t('admin.accounts.syncResult') }}
@@ -176,7 +176,7 @@
             {{ t('admin.accounts.syncErrors') }}
           </div>
           <div
-            class="mt-2 max-h-48 overflow-auto rounded-lg bg-gray-50 p-3 font-mono text-xs dark:bg-dark-800"
+            class="mt-2 max-h-48 overflow-auto rounded-lg bg-gray-50 p-3 font-mono text-xs dark:bg-dark-800 console-note"
           >
             <div v-for="(item, idx) in errorItems" :key="idx" class="whitespace-pre-wrap">
               {{ item.kind }} {{ item.crs_account_id }} — {{ item.action

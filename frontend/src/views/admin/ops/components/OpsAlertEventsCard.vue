@@ -572,7 +572,7 @@ const empty = computed(() => events.value.length === 0 && !loading.value)
       </div>
 
       <div v-else class="space-y-5">
-        <div class="rounded-xl bg-gray-50 p-4 dark:bg-dark-900">
+        <div class="rounded-lg bg-gray-50 p-4 dark:bg-dark-900 console-note">
           <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <div class="flex flex-wrap items-center gap-2">
@@ -615,15 +615,15 @@ const empty = computed(() => events.value.length === 0 && !loading.value)
         </div>
 
           <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div class="rounded-xl bg-gray-50 p-4 dark:bg-dark-900">
+            <div class="rounded-lg bg-gray-50 p-4 dark:bg-dark-900 console-note">
               <div class="text-xs font-bold uppercase tracking-wider text-gray-400">{{ t('admin.ops.alertEvents.detail.firedAt') }}</div>
               <div class="mt-1 text-sm font-medium text-gray-900 dark:text-white">{{ formatDateTime(selected.fired_at || selected.created_at) }}</div>
             </div>
-            <div class="rounded-xl bg-gray-50 p-4 dark:bg-dark-900">
+            <div class="rounded-lg bg-gray-50 p-4 dark:bg-dark-900 console-note">
               <div class="text-xs font-bold uppercase tracking-wider text-gray-400">{{ t('admin.ops.alertEvents.detail.resolvedAt') }}</div>
               <div class="mt-1 text-sm font-medium text-gray-900 dark:text-white">{{ selected.resolved_at ? formatDateTime(selected.resolved_at) : '-' }}</div>
             </div>
-            <div class="rounded-xl bg-gray-50 p-4 dark:bg-dark-900">
+            <div class="rounded-lg bg-gray-50 p-4 dark:bg-dark-900 console-note">
               <div class="text-xs font-bold uppercase tracking-wider text-gray-400">{{ t('admin.ops.alertEvents.detail.ruleId') }}</div>
               <div class="mt-1 flex flex-wrap items-center gap-2">
                 <div class="font-mono text-sm font-bold text-gray-900 dark:text-white">#{{ selected.rule_id }}</div>
@@ -643,7 +643,7 @@ const empty = computed(() => events.value.length === 0 && !loading.value)
                 </a>
               </div>
             </div>
-            <div class="rounded-xl bg-gray-50 p-4 dark:bg-dark-900">
+            <div class="rounded-lg bg-gray-50 p-4 dark:bg-dark-900 console-note">
               <div class="text-xs font-bold uppercase tracking-wider text-gray-400">{{ t('admin.ops.alertEvents.detail.dimensions') }}</div>
               <div class="mt-1 text-sm text-gray-900 dark:text-white">
                 <div v-if="getDimensionString(selected, 'platform')">platform={{ getDimensionString(selected, 'platform') }}</div>
@@ -654,7 +654,7 @@ const empty = computed(() => events.value.length === 0 && !loading.value)
           </div>
 
 
-        <div class="rounded-xl border border-gray-200 bg-white p-4 dark:border-dark-700 dark:bg-dark-800">
+        <div class="rounded-lg border border-gray-200 bg-white p-4 dark:border-dark-700 dark:bg-dark-800">
           <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
             <div>
               <div class="text-sm font-bold text-gray-900 dark:text-white">{{ t('admin.ops.alertEvents.detail.historyTitle') }}</div>

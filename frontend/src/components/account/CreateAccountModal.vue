@@ -6,6 +6,7 @@
     @close="handleClose"
   >
     <!-- Step Indicator for OAuth accounts -->
+    <template #navigation><DialogSectionLinks :sections="['console.formIdentity', 'console.formConnection', 'console.formScheduling', 'console.formProtocol']" /></template>
     <div v-if="isOAuthFlow" class="mb-6 flex items-center justify-center">
       <div class="flex items-center space-x-4">
         <div class="flex items-center">
@@ -43,9 +44,10 @@
       v-if="step === 1"
       id="create-account-form"
       @submit.prevent="handleSubmit"
-      class="workbench-editor-form space-y-5"
+      class="workbench-editor-form space-y-5 console-form"
     >
-      <div class="workbench-field-row ">
+      <DialogSection :title="t('console.formIdentity')">
+<div class="workbench-field-row console-field">
         <label class="input-label">{{ t('admin.accounts.accountName') }}</label>
         <input
           v-model="form.name"
@@ -56,7 +58,7 @@
           data-tour="account-form-name"
         />
       </div>
-      <div class="workbench-field-row ">
+      <div class="workbench-field-row console-field">
         <label class="input-label">{{ t('admin.accounts.notes') }}</label>
         <textarea
           v-model="form.notes"
@@ -66,11 +68,13 @@
         ></textarea>
         <p class="input-hint">{{ t('admin.accounts.notesHint') }}</p>
       </div>
+</DialogSection>
 
       <!-- Platform Selection - Segmented Control Style -->
-      <div class="workbench-field-row ">
+      <DialogSection :title="t('console.formConnection')">
+<div class="workbench-field-row ">
         <label class="input-label">{{ t('admin.accounts.platform') }}</label>
-        <div class="mt-2 flex flex-wrap rounded-lg bg-gray-100 p-1 dark:bg-dark-700" data-tour="account-form-platform">
+        <div class="mt-2 flex flex-wrap rounded-lg bg-gray-100 p-1 dark:bg-dark-700 console-choice-group" data-tour="account-form-platform">
           <button
             type="button"
             @click="form.platform = 'anthropic'"
@@ -175,7 +179,7 @@
           </button>
         </div>
         <!-- 国产厂商：Kimi / Zhipu GLM / DeepSeek / MiniMax -->
-        <div class="mt-2 flex flex-wrap rounded-lg bg-gray-100 p-1 dark:bg-dark-700" data-testid="platform-row-cn">
+        <div class="mt-2 flex flex-wrap rounded-lg bg-gray-100 p-1 dark:bg-dark-700 console-choice-group" data-testid="platform-row-cn">
           <button
             type="button"
             @click="selectCNPlatform('kimi')"
@@ -231,7 +235,7 @@
         </div>
 
         <!-- 多模型聚合平台：OpenCode 与平台清单中登记的其他多协议供应商 -->
-        <div class="mt-2 flex flex-wrap rounded-lg bg-gray-100 p-1 dark:bg-dark-700" data-testid="platform-row-aggregators">
+        <div class="mt-2 flex flex-wrap rounded-lg bg-gray-100 p-1 dark:bg-dark-700 console-choice-group" data-testid="platform-row-aggregators">
           <button
             type="button"
             data-testid="platform-button-opencode_go"
@@ -269,7 +273,7 @@
       <!-- Account Type Selection (Anthropic) -->
       <div class="workbench-field-row " v-if="form.platform === 'anthropic'">
         <label class="input-label">{{ t('admin.accounts.accountType') }}</label>
-        <div class="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-4" data-tour="account-form-type">
+        <div class="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-4 console-choice-group" data-tour="account-form-type">
           <button
             type="button"
             @click="accountCategory = 'oauth-based'"
@@ -399,7 +403,7 @@
       <!-- Account Type Selection (OpenAI) -->
       <div class="workbench-field-row " v-if="form.platform === 'openai'">
         <label class="input-label">{{ t('admin.accounts.accountType') }}</label>
-        <div class="mt-2 grid grid-cols-2 gap-3" data-tour="account-form-type">
+        <div class="mt-2 grid grid-cols-2 gap-3 console-choice-group" data-tour="account-form-type">
           <button
             type="button"
             @click="accountCategory = 'oauth-based'"
@@ -458,7 +462,7 @@
       <!-- Account Type Selection (Grok) -->
       <div class="workbench-field-row " v-if="form.platform === 'grok'">
         <label class="input-label">{{ t('admin.accounts.accountType') }}</label>
-        <div class="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2" data-tour="account-form-type">
+        <div class="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2 console-choice-group" data-tour="account-form-type">
           <button
             type="button"
             @click="accountCategory = 'oauth-based'"
@@ -517,7 +521,7 @@
       <!-- OpenCode Zen vs Go -->
       <div class="workbench-field-row " v-if="isOpenCodeGoPlatform">
         <label class="input-label">{{ t('admin.accounts.cnProviders.accountMode.title') }}</label>
-        <div class="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div class="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2 console-choice-group">
           <button
             type="button"
             @click="openCodeAccountMode = 'zen'"
@@ -599,7 +603,7 @@
       <!-- Account Mode Selection (Kimi / Zhipu / DeepSeek) -->
       <div class="workbench-field-row " v-if="isCNPlatform && !isOpenCodeGoPlatform">
         <label class="input-label">{{ t('admin.accounts.cnProviders.accountMode.title') }}</label>
-        <div class="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2" data-tour="account-form-mode">
+        <div class="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2 console-choice-group" data-tour="account-form-mode">
           <!-- Pay-as-you-go (token balance) -->
           <button
             type="button"
@@ -708,11 +712,11 @@
           </HelpTooltip>
         </div>
         <div class="mt-2 grid gap-4 sm:grid-cols-2">
-          <div>
+          <div class="console-field">
             <label class="input-label">{{ t('admin.accounts.cnProviders.zhipuTeam.organization') }}</label>
             <input v-model="zhipuOrganization" type="text" class="input" :placeholder="t('admin.accounts.cnProviders.zhipuTeam.organizationPlaceholder')" />
           </div>
-          <div>
+          <div class="console-field">
             <label class="input-label">{{ t('admin.accounts.cnProviders.zhipuTeam.project') }}</label>
             <input v-model="zhipuProject" type="text" class="input" :placeholder="t('admin.accounts.cnProviders.zhipuTeam.projectPlaceholder')" />
           </div>
@@ -727,7 +731,7 @@
           <button
             type="button"
             @click="showGeminiHelpDialog = true"
-            class="flex items-center gap-1 rounded px-2 py-1 text-xs text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/20"
+            class="flex items-center gap-1 rounded px-2 py-1 text-xs text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/20 btn"
           >
             <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z" />
@@ -735,7 +739,7 @@
             {{ t('admin.accounts.gemini.helpButton') }}
           </button>
         </div>
-        <div class="mt-2 grid grid-cols-3 gap-3" data-tour="account-form-type">
+        <div class="mt-2 grid grid-cols-3 gap-3 console-choice-group" data-tour="account-form-type">
           <button
             type="button"
             @click="accountCategory = 'oauth-based'"
@@ -842,7 +846,7 @@
         <div
           v-if="accountCategory === 'apikey' && isOfficialGeminiBaseUrl(apiKeyBaseUrl)"
           data-testid="gemini-apikey-note"
-          class="mt-3 rounded-lg border border-primary-200 bg-primary-50 px-3 py-2 text-xs text-primary-800 dark:border-primary-800/40 dark:bg-primary-900/20 dark:text-primary-200"
+          class="mt-3 rounded-lg border border-primary-200 bg-primary-50 px-3 py-2 text-xs text-primary-800 dark:border-primary-800/40 dark:bg-primary-900/20 dark:text-primary-200 console-note"
         >
           <p>{{ t('admin.accounts.gemini.accountType.apiKeyNote') }}</p>
           <div class="mt-2 flex flex-wrap gap-2">
@@ -867,7 +871,7 @@
         <!-- OAuth Type Selection (only show when oauth-based is selected) -->
         <div v-if="accountCategory === 'oauth-based'" class="mt-4">
           <label class="input-label">{{ t('admin.accounts.oauth.gemini.oauthTypeLabel') }}</label>
-          <div class="mt-2 grid grid-cols-2 gap-3">
+          <div class="mt-2 grid grid-cols-2 gap-3 console-choice-group">
             <!-- Google One OAuth -->
             <button
               type="button"
@@ -1061,7 +1065,7 @@
 
             <div
               v-if="!geminiAIStudioOAuthEnabled"
-              class="pointer-events-none absolute right-0 top-full z-50 mt-2 w-80 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 opacity-0 shadow-lg transition-opacity group-hover:opacity-100 dark:border-amber-700 dark:bg-amber-900/40 dark:text-amber-200"
+              class="pointer-events-none absolute right-0 top-full z-50 mt-2 w-80 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 opacity-0 transition-opacity group-hover:opacity-100 dark:border-amber-700 dark:bg-amber-900/40 dark:text-amber-200"
             >
               {{ t('admin.accounts.oauth.gemini.aiStudioNotConfiguredTip') }}
             </div>
@@ -1107,7 +1111,7 @@
       <!-- Account Type Selection (Antigravity - OAuth or Upstream) -->
       <div class="workbench-field-row " v-if="form.platform === 'antigravity'">
         <label class="input-label">{{ t('admin.accounts.accountType') }}</label>
-        <div class="mt-2 grid grid-cols-2 gap-3">
+        <div class="mt-2 grid grid-cols-2 gap-3 console-choice-group">
           <button
             type="button"
             @click="antigravityAccountType = 'oauth'"
@@ -1162,7 +1166,7 @@
         </div>
       </div>
 
-      <div class="workbench-field-row " v-if="form.platform === 'antigravity' && antigravityAccountType === 'oauth'">
+      <div class="workbench-field-row console-field" v-if="form.platform === 'antigravity' && antigravityAccountType === 'oauth'">
         <label class="input-label">{{ t('admin.accounts.antigravityProjectIdLabel') }}</label>
         <input
           v-model="antigravityProjectId"
@@ -1176,7 +1180,7 @@
 
       <!-- Upstream config (only for Antigravity upstream type) -->
       <div v-if="form.platform === 'antigravity' && antigravityAccountType === 'upstream'" class="space-y-4">
-        <div>
+        <div class="console-field">
           <label class="input-label">{{ t('admin.accounts.upstream.baseUrl') }}</label>
           <input
             v-model="upstreamBaseUrl"
@@ -1187,7 +1191,7 @@
           />
           <p class="input-hint">{{ t('admin.accounts.upstream.baseUrlHint') }}</p>
         </div>
-        <div>
+        <div class="console-field">
           <label class="input-label">{{ t('admin.accounts.upstream.apiKey') }}</label>
           <input
             v-model="upstreamApiKey"
@@ -1199,7 +1203,7 @@
           <p class="input-hint">{{ t('admin.accounts.upstream.apiKeyHint') }}</p>
         </div>
         <!-- 上游倍率自动探测：antigravity upstream 也是 API-key 账号 -->
-        <div class="flex items-center justify-between gap-4 border-t border-gray-200 pt-4 dark:border-dark-600">
+        <div class="flex items-center justify-between gap-4 border-t border-gray-200 pt-4 dark:border-dark-600 console-switch-row">
           <div>
             <label class="input-label mb-0">{{ t('admin.accounts.upstreamBilling.autoProbe') }}</label>
             <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
@@ -1242,7 +1246,7 @@
         </div>
 
         <template v-if="vertexUsesApiKey">
-          <div>
+          <div class="console-field">
             <label class="input-label">API Key</label>
             <input
               v-model="vertexApiKey"
@@ -1254,7 +1258,7 @@
             <p class="input-hint">{{ t('admin.accounts.vertexApiKeyHint') }}</p>
           </div>
           <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div>
+            <div class="console-field">
               <label class="input-label">Project ID</label>
               <input
                 v-model="vertexProjectId"
@@ -1265,7 +1269,7 @@
               />
               <p class="input-hint">{{ t('admin.accounts.vertexApiKeyProjectIdHint') }}</p>
             </div>
-            <div v-if="vertexProjectId.trim()">
+            <div class="console-field" v-if="vertexProjectId.trim()">
               <label class="input-label">Location</label>
               <select
                 v-model="vertexLocation"
@@ -1292,7 +1296,7 @@
         </template>
 
         <template v-else>
-          <div>
+          <div class="console-field">
             <label class="input-label">Service Account JSON</label>
             <input
               ref="vertexServiceAccountFileInput"
@@ -1344,7 +1348,7 @@
           </div>
 
           <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div>
+            <div class="console-field">
               <label class="input-label">Project ID</label>
               <input
                 v-model="vertexProjectId"
@@ -1354,7 +1358,7 @@
                 :placeholder="t('admin.accounts.vertexProjectIdPlaceholder')"
               />
             </div>
-            <div>
+            <div class="console-field">
               <label class="input-label">Location</label>
               <select
                 v-model="vertexLocation"
@@ -1388,7 +1392,7 @@
 
         <!-- Mapping Mode Only (no toggle for Antigravity) -->
         <div>
-          <div class="mb-3 rounded-lg bg-primary-50 p-3 dark:bg-primary-900/20">
+          <div class="mb-3 rounded-lg bg-primary-50 p-3 dark:bg-primary-900/20 console-note">
             <p class="text-xs text-primary-700 dark:text-primary-400">
               {{ t('admin.accounts.mapRequestModels') }}
             </p>
@@ -1450,7 +1454,7 @@
           <button
             type="button"
             @click="addAntigravityModelMapping"
-            class="mb-3 w-full rounded-lg border-2 border-dashed border-gray-300 px-4 py-2 text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-700 dark:border-dark-500 dark:text-gray-400 dark:hover:border-dark-400 dark:hover:text-gray-300"
+            class="mb-3 w-full rounded-lg border border-dashed border-gray-300 px-4 py-2 text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-700 dark:border-dark-500 dark:text-gray-400 dark:hover:border-dark-400 dark:hover:text-gray-300 btn btn-secondary"
           >
             <svg class="mr-1 inline h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
@@ -1501,7 +1505,7 @@
 
       <!-- API Key input (only for apikey type, excluding Antigravity which has its own fields) -->
       <div v-if="form.type === 'apikey' && form.platform !== 'antigravity'" class="space-y-4">
-        <div v-if="!isMultiProtocolPlatform || apiProtocol !== 'adaptive'">
+        <div class="console-field" v-if="!isMultiProtocolPlatform || apiProtocol !== 'adaptive'">
           <label class="input-label">{{ t('admin.accounts.baseUrl') }}</label>
           <input
             v-model="apiKeyBaseUrl"
@@ -1528,7 +1532,7 @@
         <div v-else>
           <label class="input-label">{{ t('admin.accounts.cnProviders.apiProtocol.endpoints') }}</label>
           <div class="mt-2 space-y-3">
-            <div v-for="item in cnAdaptiveProtocolOptions" :key="item.value">
+            <div class="console-field" v-for="item in cnAdaptiveProtocolOptions" :key="item.value">
               <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
                 {{ t(`admin.accounts.cnProviders.apiProtocol.${item.labelKey}`) }}
               </label>
@@ -1550,7 +1554,7 @@
           :platform="form.platform"
           :plan="currentOpenCodeOrCNMode()"
         />
-        <div>
+        <div class="console-field">
           <label class="input-label">{{ t('admin.accounts.apiKeyRequired') }}</label>
           <input
             v-model="apiKeyValue"
@@ -1564,7 +1568,7 @@
 
         <!-- 上游倍率自动探测：全部 API-key 平台可用（所在区块已限定 apikey 类型） -->
         <div
-          class="flex items-center justify-between gap-4 border-t border-gray-200 pt-4 dark:border-dark-600"
+          class="flex items-center justify-between gap-4 border-t border-gray-200 pt-4 dark:border-dark-600 console-switch-row"
         >
           <div>
             <label class="input-label mb-0">{{ t('admin.accounts.upstreamBilling.autoProbe') }}</label>
@@ -1580,7 +1584,7 @@
         </div>
 
         <!-- Gemini API Key tier selection -->
-        <div v-if="form.platform === 'gemini' && isOfficialGeminiBaseUrl(apiKeyBaseUrl)">
+        <div class="console-field" v-if="form.platform === 'gemini' && isOfficialGeminiBaseUrl(apiKeyBaseUrl)">
           <label class="input-label">{{ t('admin.accounts.gemini.tier.label') }}</label>
           <select v-model="geminiTierAIStudio" class="input" data-testid="gemini-apikey-tier">
             <option value="aistudio_free">{{ t('admin.accounts.gemini.tier.aiStudio.free') }}</option>
@@ -1676,7 +1680,7 @@
 
             <!-- Mapping Mode -->
             <div v-else>
-              <div class="mb-3 rounded-lg bg-primary-50 p-3 dark:bg-primary-900/20">
+              <div class="mb-3 rounded-lg bg-primary-50 p-3 dark:bg-primary-900/20 console-note">
                 <p class="text-xs text-primary-700 dark:text-primary-400">
                   <svg
                     class="mr-1 inline h-4 w-4"
@@ -1747,7 +1751,7 @@
             <button
               type="button"
               @click="addModelMapping"
-              class="mb-3 w-full rounded-lg border-2 border-dashed border-gray-300 px-4 py-2 text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-700 dark:border-dark-500 dark:text-gray-400 dark:hover:border-dark-400 dark:hover:text-gray-300"
+              class="mb-3 w-full rounded-lg border border-dashed border-gray-300 px-4 py-2 text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-700 dark:border-dark-500 dark:text-gray-400 dark:hover:border-dark-400 dark:hover:text-gray-300 btn btn-secondary"
             >
               <svg
                 class="mr-1 inline h-4 w-4"
@@ -1806,13 +1810,13 @@
               />
             </button>
           </div>
-          <div v-if="poolModeEnabled" class="rounded-lg bg-blue-50 p-3 dark:bg-blue-900/20">
+          <div v-if="poolModeEnabled" class="rounded-lg bg-blue-50 p-3 dark:bg-blue-900/20 console-note">
             <p class="text-xs text-blue-700 dark:text-blue-400">
               <Icon name="exclamationCircle" size="sm" class="mr-1 inline" :stroke-width="2" />
               {{ t('admin.accounts.poolModeInfo') }}
             </p>
           </div>
-          <div v-if="poolModeEnabled" class="mt-3">
+          <div v-if="poolModeEnabled" class="mt-3 console-field">
             <label class="input-label">{{ t('admin.accounts.poolModeRetryCount') }}</label>
             <input
               v-model.number="poolModeRetryCount"
@@ -1831,7 +1835,7 @@
               }}
             </p>
           </div>
-          <div v-if="poolModeEnabled" class="mt-3">
+          <div v-if="poolModeEnabled" class="mt-3 console-field">
             <label class="input-label">{{ t('admin.accounts.poolModeRetryStatusCodes') }}</label>
             <input
               v-model="poolModeRetryStatusCodesInput"
@@ -1851,7 +1855,7 @@
           class="border-t border-gray-200 pt-4 dark:border-dark-600"
           data-testid="explicit-cache-upstream-section"
         >
-          <div class="flex items-center justify-between gap-4">
+          <div class="flex items-center justify-between gap-4 console-switch-row">
             <div>
               <label class="input-label mb-0">{{ t('admin.accounts.explicitCacheUpstream') }}</label>
               <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
@@ -1864,13 +1868,13 @@
               :aria-label="t('admin.accounts.explicitCacheUpstream')"
             />
           </div>
-          <div v-if="explicitCacheUpstreamEnabled" class="mt-3 rounded-lg bg-blue-50 p-3 dark:bg-blue-900/20">
+          <div v-if="explicitCacheUpstreamEnabled" class="mt-3 rounded-lg bg-blue-50 p-3 dark:bg-blue-900/20 console-note">
             <p class="text-xs text-blue-700 dark:text-blue-400">
               <Icon name="exclamationCircle" size="sm" class="mr-1 inline" :stroke-width="2" />
               {{ t('admin.accounts.explicitCacheUpstreamInfo') }}
             </p>
           </div>
-          <div v-if="explicitCacheUpstreamEnabled" class="mt-3">
+          <div v-if="explicitCacheUpstreamEnabled" class="mt-3 console-field">
             <label class="input-label">{{ t('admin.accounts.explicitCacheUpstreamMaxTTL') }}</label>
             <input
               v-model="explicitCacheUpstreamMaxTTL"
@@ -2015,7 +2019,7 @@
           </div>
 
           <div v-if="headerOverrideEnabled" class="space-y-3">
-            <div class="rounded-lg bg-blue-50 p-3 dark:bg-blue-900/20">
+            <div class="rounded-lg bg-blue-50 p-3 dark:bg-blue-900/20 console-note">
               <p class="text-xs text-blue-700 dark:text-blue-400">
                 <Icon name="exclamationCircle" size="sm" class="mr-1 inline" :stroke-width="2" />
                 {{ t('admin.accounts.headerOverride.info') }}
@@ -2060,7 +2064,7 @@
 
         <!-- SigV4 fields -->
         <template v-if="bedrockAuthMode === 'sigv4'">
-          <div>
+          <div class="console-field">
             <label class="input-label">{{ t('admin.accounts.bedrockAccessKeyId') }}</label>
             <input
               v-model="bedrockAccessKeyId"
@@ -2070,7 +2074,7 @@
               placeholder="AKIA..."
             />
           </div>
-          <div>
+          <div class="console-field">
             <label class="input-label">{{ t('admin.accounts.bedrockSecretAccessKey') }}</label>
             <input
               v-model="bedrockSecretAccessKey"
@@ -2079,7 +2083,7 @@
               class="input font-mono"
             />
           </div>
-          <div>
+          <div class="console-field">
             <label class="input-label">{{ t('admin.accounts.bedrockSessionToken') }}</label>
             <input
               v-model="bedrockSessionToken"
@@ -2091,7 +2095,7 @@
         </template>
 
         <!-- API Key field -->
-        <div v-if="bedrockAuthMode === 'apikey'">
+        <div class="console-field" v-if="bedrockAuthMode === 'apikey'">
           <label class="input-label">{{ t('admin.accounts.bedrockApiKeyInput') }}</label>
           <input
             v-model="bedrockApiKeyValue"
@@ -2102,7 +2106,7 @@
         </div>
 
         <!-- Shared: Region -->
-        <div>
+        <div class="console-field">
           <label class="input-label">{{ t('admin.accounts.bedrockRegion') }}</label>
           <select v-model="bedrockRegion" class="input">
             <optgroup label="US">
@@ -2255,13 +2259,13 @@
               />
             </button>
           </div>
-          <div v-if="poolModeEnabled" class="rounded-lg bg-blue-50 p-3 dark:bg-blue-900/20">
+          <div v-if="poolModeEnabled" class="rounded-lg bg-blue-50 p-3 dark:bg-blue-900/20 console-note">
             <p class="text-xs text-blue-700 dark:text-blue-400">
               <Icon name="exclamationCircle" size="sm" class="mr-1 inline" :stroke-width="2" />
               {{ t('admin.accounts.poolModeInfo') }}
             </p>
           </div>
-          <div v-if="poolModeEnabled" class="mt-3">
+          <div v-if="poolModeEnabled" class="mt-3 console-field">
             <label class="input-label">{{ t('admin.accounts.poolModeRetryCount') }}</label>
             <input
               v-model.number="poolModeRetryCount"
@@ -2280,7 +2284,7 @@
               }}
             </p>
           </div>
-          <div v-if="poolModeEnabled" class="mt-3">
+          <div v-if="poolModeEnabled" class="mt-3 console-field">
             <label class="input-label">{{ t('admin.accounts.poolModeRetryStatusCodes') }}</label>
             <input
               v-model="poolModeRetryStatusCodesInput"
@@ -2300,7 +2304,7 @@
         v-if="form.platform === 'anthropic' && (form.type === 'apikey' || form.type === 'bedrock')"
         class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4"
       >
-        <div class="mb-3">
+        <div class="mb-3 console-form-block">
           <h3 class="input-label mb-0 text-base font-semibold">{{ t('admin.accounts.quotaControl.title') }}</h3>
           <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
             {{ t('admin.accounts.quotaControl.hint') }}
@@ -2352,7 +2356,7 @@
         v-else-if="form.type === 'apikey' || form.type === 'bedrock'"
         class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4"
       >
-        <div class="mb-3">
+        <div class="mb-3 console-form-block">
           <h3 class="input-label mb-0 text-base font-semibold">{{ t('admin.accounts.quotaControl.title') }}</h3>
           <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
             {{ t('admin.accounts.quotaLimitHint') }}
@@ -2470,7 +2474,7 @@
         </div>
 
         <div v-if="headerOverrideEnabled" class="space-y-3">
-          <div class="rounded-lg bg-blue-50 p-3 dark:bg-blue-900/20">
+          <div class="rounded-lg bg-blue-50 p-3 dark:bg-blue-900/20 console-note">
             <p class="text-xs text-blue-700 dark:text-blue-400">
               <Icon name="exclamationCircle" size="sm" class="mr-1 inline" :stroke-width="2" />
               {{ t('admin.accounts.headerOverride.info') }}
@@ -2483,9 +2487,11 @@
           />
         </div>
       </div>
+</DialogSection>
 
       <!-- OpenAI OAuth Model Mapping (OAuth 类型没有 apikey 容器，需要独立的模型映射区域) -->
-      <div
+      <DialogSection :title="t('console.formScheduling')">
+<div
         v-if="(form.platform === 'openai' || form.platform === 'grok') && isOAuthFlow"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
@@ -2548,7 +2554,7 @@
 
           <!-- Mapping Mode -->
           <div v-else>
-            <div class="mb-3 rounded-lg bg-primary-50 p-3 dark:bg-primary-900/20">
+            <div class="mb-3 rounded-lg bg-primary-50 p-3 dark:bg-primary-900/20 console-note">
               <p class="text-xs text-primary-700 dark:text-primary-400">
                 {{ t('admin.accounts.mapRequestModels') }}
               </p>
@@ -2605,7 +2611,7 @@
             <button
               type="button"
               @click="addModelMapping"
-              class="mb-3 w-full rounded-lg border-2 border-dashed border-gray-300 px-4 py-2 text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-700 dark:border-dark-500 dark:text-gray-400 dark:hover:border-dark-400 dark:hover:text-gray-300"
+              class="mb-3 w-full rounded-lg border border-dashed border-gray-300 px-4 py-2 text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-700 dark:border-dark-500 dark:text-gray-400 dark:hover:border-dark-400 dark:hover:text-gray-300 btn btn-secondary"
             >
               + {{ t('admin.accounts.addMapping') }}
             </button>
@@ -2653,7 +2659,7 @@
         </div>
 
         <div v-if="tempUnschedEnabled" class="space-y-3">
-          <div class="rounded-lg bg-blue-50 p-3 dark:bg-blue-900/20">
+          <div class="rounded-lg bg-blue-50 p-3 dark:bg-blue-900/20 console-note">
               <p class="text-xs text-blue-700 dark:text-blue-400">
                 <Icon name="exclamationTriangle" size="sm" class="mr-1 inline" :stroke-width="2" />
                 {{ t('admin.accounts.tempUnschedulable.notice') }}
@@ -2666,7 +2672,7 @@
               :key="preset.label"
               type="button"
               @click="addTempUnschedRule(preset.rule)"
-              class="rounded-lg bg-gray-100 px-3 py-1.5 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-200 dark:bg-dark-600 dark:text-gray-300 dark:hover:bg-dark-500"
+              class="rounded-lg bg-gray-100 px-3 py-1.5 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-200 dark:bg-dark-600 dark:text-gray-300 dark:hover:bg-dark-500 btn"
             >
               + {{ preset.label }}
             </button>
@@ -2712,7 +2718,7 @@
               </div>
 
               <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div>
+                <div class="console-field">
                   <label class="input-label">{{ t('admin.accounts.tempUnschedulable.errorCode') }}</label>
                   <input
                     v-model.number="rule.error_code"
@@ -2723,7 +2729,7 @@
                     :placeholder="t('admin.accounts.tempUnschedulable.errorCodePlaceholder')"
                   />
                 </div>
-                <div>
+                <div class="console-field">
                   <label class="input-label">{{ t('admin.accounts.tempUnschedulable.durationMinutes') }}</label>
                   <input
                     v-model.number="rule.duration_minutes"
@@ -2771,7 +2777,7 @@
                   </div>
                   <p class="input-hint">{{ t('admin.accounts.tempUnschedulable.scopeHint') }}</p>
                 </div>
-                <div class="sm:col-span-2">
+                <div class="sm:col-span-2 console-field">
                   <label class="input-label">{{ t('admin.accounts.tempUnschedulable.keywords') }}</label>
                   <input
                     v-model="rule.keywords"
@@ -2781,7 +2787,7 @@
                   />
                   <p class="input-hint">{{ t('admin.accounts.tempUnschedulable.keywordsHint') }}</p>
                 </div>
-                <div class="sm:col-span-2">
+                <div class="sm:col-span-2 console-field">
                   <label class="input-label">{{ t('admin.accounts.tempUnschedulable.description') }}</label>
                   <input
                     v-model="rule.description"
@@ -2797,7 +2803,7 @@
           <button
             type="button"
             @click="addTempUnschedRule()"
-            class="w-full rounded-lg border-2 border-dashed border-gray-300 px-4 py-2 text-sm text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-700 dark:border-dark-500 dark:text-gray-400 dark:hover:border-dark-400 dark:hover:text-gray-300"
+            class="w-full rounded-lg border border-dashed border-gray-300 px-4 py-2 text-sm text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-700 dark:border-dark-500 dark:text-gray-400 dark:hover:border-dark-400 dark:hover:text-gray-300 btn btn-secondary"
           >
             <svg
               class="mr-1 inline h-4 w-4"
@@ -2849,7 +2855,7 @@
         v-if="form.platform === 'anthropic' && accountCategory === 'oauth-based'"
         class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4"
       >
-        <div class="mb-3">
+        <div class="mb-3 console-form-block">
           <h3 class="input-label mb-0 text-base font-semibold">{{ t('admin.accounts.quotaControl.title') }}</h3>
           <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
             {{ t('admin.accounts.quotaControl.hint') }}
@@ -2943,7 +2949,7 @@
           </div>
 
           <div v-if="sessionLimitEnabled" class="grid grid-cols-2 gap-4">
-            <div>
+            <div class="console-field">
               <label class="input-label">{{ t('admin.accounts.quotaControl.sessionLimit.maxSessions') }}</label>
               <input
                 v-model.number="maxSessions"
@@ -3000,7 +3006,7 @@
           </div>
 
           <div v-if="rpmLimitEnabled" class="space-y-4">
-            <div>
+            <div class="console-field">
               <label class="input-label">{{ t('admin.accounts.quotaControl.rpmLimit.baseRpm') }}</label>
               <input
                 v-model.number="baseRpm"
@@ -3050,7 +3056,7 @@
               </div>
             </div>
 
-            <div v-if="rpmStrategy === 'tiered'">
+            <div class="console-field" v-if="rpmStrategy === 'tiered'">
               <label class="input-label">{{ t('admin.accounts.quotaControl.rpmLimit.stickyBuffer') }}</label>
               <input
                 v-model.number="rpmStickyBuffer"
@@ -3173,11 +3179,11 @@
               />
             </button>
           </div>
-          <div v-if="cacheTTLOverrideEnabled" class="mt-3">
+          <div v-if="cacheTTLOverrideEnabled" class="mt-3 console-field">
             <label class="input-label text-xs">{{ t('admin.accounts.quotaControl.cacheTTLOverride.target') }}</label>
             <select
               v-model="cacheTTLOverrideTarget"
-              class="mt-1 block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500 dark:border-dark-500 dark:bg-dark-700 dark:text-white"
+              class="mt-1 block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500 dark:border-dark-500 dark:bg-dark-700 dark:text-white input"
             >
               <option value="5m">5m</option>
               <option value="1h">1h</option>
@@ -3239,19 +3245,19 @@
       />
 
       <div class="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <div>
+        <div class="console-field">
           <label class="input-label">{{ t('admin.accounts.concurrency') }}</label>
           <input v-model.number="form.concurrency" type="number" min="1" class="input"
             @input="form.concurrency = Math.max(1, form.concurrency || 1)" />
         </div>
-        <div>
+        <div class="console-field">
           <label class="input-label">{{ t('admin.accounts.loadFactor') }}</label>
           <input v-model.number="form.load_factor" type="number" min="1"
             class="input" :placeholder="String(form.concurrency || 1)"
             @input="form.load_factor = (form.load_factor &amp;&amp; form.load_factor >= 1) ? form.load_factor : null" />
           <p class="input-hint">{{ t('admin.accounts.loadFactorHint') }}</p>
         </div>
-        <div>
+        <div class="console-field">
           <label class="input-label">{{ t('admin.accounts.priority') }}</label>
           <input
             v-model.number="form.priority"
@@ -3262,13 +3268,13 @@
           />
           <p class="input-hint">{{ t('admin.accounts.priorityHint') }}</p>
         </div>
-        <div>
+        <div class="console-field">
           <label class="input-label">{{ t('admin.accounts.billingRateMultiplier') }}</label>
           <input v-model.number="form.rate_multiplier" type="number" min="0" step="0.001" class="input" />
           <p class="input-hint">{{ t('admin.accounts.billingRateMultiplierHint') }}</p>
         </div>
       </div>
-      <div class="workbench-field-row border-t border-gray-200 pt-4 dark:border-dark-600">
+      <div class="workbench-field-row border-t border-gray-200 pt-4 dark:border-dark-600 console-field">
         <label class="input-label">{{ t('admin.accounts.expiresAt') }}</label>
         <input v-model="expiresAtInput" type="datetime-local" class="input" />
         <div class="mt-2 flex gap-2">
@@ -3284,9 +3290,11 @@
           {{ t('admin.accounts.expiresAtTimezoneHint', { timezone: browserTimeZone }) }}
         </p>
       </div>
+</DialogSection>
 
       <!-- OpenAI 自动透传开关（OAuth/API Key） -->
-      <div
+      <DialogSection :title="t('console.formProtocol')">
+<div
         v-if="form.platform === 'openai'"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
@@ -3757,6 +3765,7 @@
           data-tour="account-form-groups"
         />
       </div>
+</DialogSection>
 
     </form>
 
@@ -3904,7 +3913,7 @@
   >
     <div class="space-y-6">
       <!-- Setup Guide Section -->
-      <div>
+      <div class="console-form-block">
         <h3 class="mb-3 text-sm font-semibold text-gray-900 dark:text-white">
           {{ t('admin.accounts.gemini.setupGuide.title') }}
         </h3>
@@ -3968,7 +3977,7 @@
       </div>
 
       <!-- Quota Policy Section -->
-      <div class="border-t border-gray-200 pt-6 dark:border-dark-600">
+      <div class="border-t border-gray-200 pt-6 dark:border-dark-600 console-form-block">
         <h3 class="mb-3 text-sm font-semibold text-gray-900 dark:text-white">
           {{ t('admin.accounts.gemini.quotaPolicy.title') }}
         </h3>
@@ -4078,7 +4087,7 @@
       </div>
 
       <!-- API Key Links Section -->
-      <div class="border-t border-gray-200 pt-6 dark:border-dark-600">
+      <div class="border-t border-gray-200 pt-6 dark:border-dark-600 console-form-block">
         <h3 class="mb-3 text-sm font-semibold text-gray-900 dark:text-white">
           {{ t('admin.accounts.gemini.helpDialog.apiKeySection') }}
         </h3>
@@ -4126,6 +4135,8 @@
 </template>
 
 <script setup lang="ts">
+import DialogSectionLinks from '@/components/common/DialogSectionLinks.vue'
+import DialogSection from '@/components/common/DialogSection.vue'
 import { ref, reactive, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'

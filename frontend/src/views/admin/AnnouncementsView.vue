@@ -178,23 +178,23 @@
       width="wide"
       @close="closeEdit"
     >
-      <form id="announcement-form" @submit.prevent="handleSave" class="workbench-editor-form space-y-4">
-        <div class="workbench-field-row ">
+      <form id="announcement-form" @submit.prevent="handleSave" class="workbench-editor-form space-y-4 console-form">
+        <div class="workbench-field-row console-field">
           <label class="input-label">{{ t('admin.announcements.form.title') }}</label>
           <input v-model="form.title" type="text" class="input" required />
         </div>
 
-        <div class="workbench-field-row ">
+        <div class="workbench-field-row console-field">
           <label class="input-label">{{ t('admin.announcements.form.content') }}</label>
           <textarea v-model="form.content" rows="6" class="input" required></textarea>
         </div>
 
         <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <div>
+          <div class="console-field">
             <label class="input-label">{{ t('admin.announcements.form.status') }}</label>
             <Select v-model="form.status" :options="statusOptions" />
           </div>
-          <div>
+          <div class="console-field">
             <label class="input-label">{{ t('admin.announcements.form.notifyMode') }}</label>
             <Select v-model="form.notify_mode" :options="notifyModeOptions" />
             <p class="input-hint">{{ t('admin.announcements.form.notifyModeHint') }}</p>
@@ -202,12 +202,12 @@
         </div>
 
         <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <div>
+          <div class="console-field">
             <label class="input-label">{{ t('admin.announcements.form.startsAt') }}</label>
             <input v-model="form.starts_at_str" type="datetime-local" max="9999-12-31T23:59" class="input" />
             <p class="input-hint">{{ t('admin.announcements.form.startsAtHint') }}</p>
           </div>
-          <div>
+          <div class="console-field">
             <label class="input-label">{{ t('admin.announcements.form.endsAt') }}</label>
             <input v-model="form.ends_at_str" type="datetime-local" max="9999-12-31T23:59" class="input" />
             <p class="input-hint">{{ t('admin.announcements.form.endsAtHint') }}</p>

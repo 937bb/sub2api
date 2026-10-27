@@ -1,5 +1,13 @@
 export default {
   console: {
+    imagePreview: '图片预览',
+    formIdentity: '基本信息',
+    formConnection: '接入与授权',
+    formScheduling: '调度与限额',
+    formProtocol: '协议与高级配置',
+    formAccess: '权限与额度',
+    formPricing: '计费与订阅',
+    formRouting: '路由与模型',
     usageSummary: '用量汇总',
     advancedFilters: '高级筛选',
     requestsPerMinute: '每分钟请求数',
@@ -520,6 +528,7 @@ export default {
   stepUp: {
     title: '需要二次验证',
     hint: '请输入身份验证器应用中的 6 位验证码以继续此敏感操作。',
+    digitLabel: '验证码第 {digit} 位，共 6 位',
     verifyFailed: '验证失败，请重试',
     notEnabled: '此操作需要开启二次验证，请先在个人资料中启用 TOTP。',
     adminApiKeyForbidden: '管理 API Key 无法执行此操作，请使用已通过二次验证的管理员会话。'

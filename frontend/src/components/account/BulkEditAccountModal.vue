@@ -5,9 +5,9 @@
     width="wide"
     @close="handleClose"
   >
-    <form id="bulk-edit-account-form" class="workbench-editor-form space-y-5" @submit.prevent="() => handleSubmit()">
+    <form id="bulk-edit-account-form" class="workbench-editor-form space-y-5 console-form" @submit.prevent="() => handleSubmit()">
       <!-- Info -->
-      <div class="rounded-lg bg-blue-50 p-4 dark:bg-blue-900/20">
+      <div class="rounded-lg bg-blue-50 p-4 dark:bg-blue-900/20 console-note">
         <p class="text-sm text-blue-700 dark:text-blue-400">
           <svg class="mr-1.5 inline h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path
@@ -195,7 +195,7 @@
 
       <!-- Base URL (API Key only) -->
       <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
-        <div class="mb-3 flex items-center justify-between">
+        <div class="mb-3 flex items-center justify-between console-field">
           <label
             id="bulk-edit-base-url-label"
             class="input-label mb-0"
@@ -233,7 +233,7 @@
 
       <!-- Model restriction -->
       <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
-        <div class="mb-3 flex items-center justify-between">
+        <div class="mb-3 flex items-center justify-between console-field">
           <label
             id="bulk-edit-model-restriction-label"
             class="input-label mb-0"
@@ -322,7 +322,7 @@
 
             <!-- Whitelist Mode -->
             <div v-if="modelRestrictionMode === 'whitelist'">
-              <div class="mb-3 rounded-lg bg-blue-50 p-3 dark:bg-blue-900/20">
+              <div class="mb-3 rounded-lg bg-blue-50 p-3 dark:bg-blue-900/20 console-note">
                 <p class="text-xs text-blue-700 dark:text-blue-400">
                   <svg
                     class="mr-1 inline h-4 w-4"
@@ -357,7 +357,7 @@
 
             <!-- Mapping Mode -->
             <div v-else>
-              <div class="mb-3 rounded-lg bg-primary-50 p-3 dark:bg-primary-900/20">
+              <div class="mb-3 rounded-lg bg-primary-50 p-3 dark:bg-primary-900/20 console-note">
                 <p class="text-xs text-primary-700 dark:text-primary-400">
                   <svg
                     class="mr-1 inline h-4 w-4"
@@ -427,7 +427,7 @@
 
               <button
                 type="button"
-                class="mb-3 w-full rounded-lg border-2 border-dashed border-gray-300 px-4 py-2 text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-700 dark:border-dark-500 dark:text-gray-400 dark:hover:border-dark-400 dark:hover:text-gray-300"
+                class="mb-3 w-full rounded-lg border border-dashed border-gray-300 px-4 py-2 text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-700 dark:border-dark-500 dark:text-gray-400 dark:hover:border-dark-400 dark:hover:text-gray-300 btn btn-secondary"
                 @click="addModelMapping"
               >
                 <svg
@@ -644,7 +644,7 @@
           </button>
 
           <div v-if="headerOverrideEnabled" class="space-y-3">
-            <div class="rounded-lg bg-blue-50 p-3 dark:bg-blue-900/20">
+            <div class="rounded-lg bg-blue-50 p-3 dark:bg-blue-900/20 console-note">
               <p class="text-xs text-blue-700 dark:text-blue-400">
                 <Icon name="exclamationCircle" size="sm" class="mr-1 inline" :stroke-width="2" />
                 {{ t('admin.accounts.headerOverride.info') }}
@@ -668,7 +668,7 @@
 
       <!-- Proxy -->
       <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
-        <div class="mb-3 flex items-center justify-between">
+        <div class="mb-3 flex items-center justify-between console-field">
           <label
             id="bulk-edit-proxy-label"
             class="input-label mb-0"
@@ -696,7 +696,7 @@
       <!-- Concurrency & Priority -->
       <div class="grid grid-cols-2 gap-4 border-t border-gray-200 pt-4 dark:border-dark-600 lg:grid-cols-4">
         <div>
-          <div class="mb-3 flex items-center justify-between">
+          <div class="mb-3 flex items-center justify-between console-field">
             <label
               id="bulk-edit-concurrency-label"
               class="input-label mb-0"
@@ -725,7 +725,7 @@
           />
         </div>
         <div>
-          <div class="mb-3 flex items-center justify-between">
+          <div class="mb-3 flex items-center justify-between console-field">
             <label
               id="bulk-edit-load-factor-label"
               class="input-label mb-0"
@@ -755,7 +755,7 @@
           <p class="input-hint">{{ t('admin.accounts.loadFactorHint') }}</p>
         </div>
         <div>
-          <div class="mb-3 flex items-center justify-between">
+          <div class="mb-3 flex items-center justify-between console-field">
             <label
               id="bulk-edit-priority-label"
               class="input-label mb-0"
@@ -783,7 +783,7 @@
           />
         </div>
         <div>
-          <div class="mb-3 flex items-center justify-between">
+          <div class="mb-3 flex items-center justify-between console-field">
             <label
               id="bulk-edit-rate-multiplier-label"
               class="input-label mb-0"
@@ -824,7 +824,7 @@
 
       <!-- Status -->
       <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
-        <div class="mb-3 flex items-center justify-between">
+        <div class="mb-3 flex items-center justify-between console-field">
           <label
             id="bulk-edit-status-label"
             class="input-label mb-0"
@@ -851,7 +851,7 @@
 
       <!-- OpenAI OAuth WS mode -->
       <div v-if="allOpenAIOAuth" class="border-t border-gray-200 pt-4 dark:border-dark-600">
-        <div class="mb-3 flex items-center justify-between">
+        <div class="mb-3 flex items-center justify-between console-field">
           <label
             id="bulk-edit-openai-ws-mode-label"
             class="input-label mb-0"
@@ -888,7 +888,7 @@
 
       <!-- OpenAI OAuth Codex CLI only -->
       <div v-if="allOpenAIOAuth" class="border-t border-gray-200 pt-4 dark:border-dark-600">
-        <div class="mb-3 flex items-center justify-between">
+        <div class="mb-3 flex items-center justify-between console-field">
           <label
             id="bulk-edit-openai-codex-cli-only-label"
             class="input-label mb-0"
@@ -932,7 +932,7 @@
 
       <!-- OpenAI OAuth: Codex app-server -->
       <div v-if="allOpenAIOAuth" class="border-t border-gray-200 pt-4 dark:border-dark-600">
-        <div class="mb-3 flex items-center justify-between">
+        <div class="mb-3 flex items-center justify-between console-field">
           <label
             id="bulk-edit-openai-codex-app-server-label"
             class="input-label mb-0"
@@ -976,7 +976,7 @@
 
       <!-- Codex 指纹收敛模式（仅 OpenAI OAuth） -->
       <div v-if="allOpenAIOAuth" class="border-t border-gray-200 pt-4 dark:border-dark-600">
-        <div class="mb-3 flex items-center justify-between">
+        <div class="mb-3 flex items-center justify-between console-field">
           <label class="input-label mb-0">{{ t('admin.accounts.openai.codexFingerprintMode') }}</label>
           <input
             id="bulk-edit-openai-codex-fingerprint-mode-enabled"
@@ -1129,7 +1129,7 @@
 
       <!-- OpenAI API Key WS mode -->
       <div v-if="allOpenAIAPIKey" class="border-t border-gray-200 pt-4 dark:border-dark-600">
-        <div class="mb-3 flex items-center justify-between">
+        <div class="mb-3 flex items-center justify-between console-field">
           <label
             id="bulk-edit-openai-apikey-ws-mode-label"
             class="input-label mb-0"
@@ -1259,7 +1259,7 @@
           </div>
           <button
             type="button"
-            class="mb-3 w-full rounded-lg border-2 border-dashed border-gray-300 px-4 py-2 text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-700 dark:border-dark-500 dark:text-gray-400 dark:hover:border-dark-400 dark:hover:text-gray-300"
+            class="mb-3 w-full rounded-lg border border-dashed border-gray-300 px-4 py-2 text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-700 dark:border-dark-500 dark:text-gray-400 dark:hover:border-dark-400 dark:hover:text-gray-300 btn btn-secondary"
             data-testid="bulk-edit-openai-compact-model-mapping-add"
             @click="addOpenAICompactModelMapping"
           >
@@ -1270,7 +1270,7 @@
 
       <!-- RPM Limit (仅全部为 Anthropic OAuth/SetupToken 时显示) -->
       <div v-if="allAnthropicOAuthOrSetupToken" class="border-t border-gray-200 pt-4 dark:border-dark-600">
-        <div class="mb-3 flex items-center justify-between">
+        <div class="mb-3 flex items-center justify-between console-field">
           <label
             id="bulk-edit-rpm-limit-label"
             class="input-label mb-0"
@@ -1313,7 +1313,7 @@
           </div>
 
           <div v-if="rpmLimitEnabled" class="space-y-3">
-            <div>
+            <div class="console-field">
               <label class="input-label text-xs">{{ t('admin.accounts.quotaControl.rpmLimit.baseRpm') }}</label>
               <input
                 v-model.number="bulkBaseRpm"
@@ -1357,7 +1357,7 @@
               </div>
             </div>
 
-            <div v-if="bulkRpmStrategy === 'tiered'">
+            <div class="console-field" v-if="bulkRpmStrategy === 'tiered'">
               <label class="input-label text-xs">{{ t('admin.accounts.quotaControl.rpmLimit.stickyBuffer') }}</label>
               <input
                 v-model.number="bulkRpmStickyBuffer"
@@ -1396,7 +1396,7 @@
 
       <!-- Groups -->
       <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
-        <div class="mb-3 flex items-center justify-between">
+        <div class="mb-3 flex items-center justify-between console-field">
           <label
             id="bulk-edit-groups-label"
             class="input-label mb-0"

@@ -514,7 +514,7 @@ function cancelDelete() {
       @close="showEditor = false"
     >
       <div class="space-y-4">
-        <div v-if="!editorValidation.valid" class="rounded-xl bg-red-50 p-4 text-xs text-red-700 dark:bg-red-900/30 dark:text-red-300">
+        <div v-if="!editorValidation.valid" class="rounded-lg bg-red-50 p-4 text-xs text-red-700 dark:bg-red-900/30 dark:text-red-300">
           <div class="font-bold">{{ t('admin.ops.alertRules.validation.title') }}</div>
           <ul class="mt-1 list-disc pl-5">
             <li v-for="e in editorValidation.errors" :key="e">{{ e }}</li>
@@ -522,17 +522,17 @@ function cancelDelete() {
         </div>
 
         <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <div class="md:col-span-2">
+          <div class="md:col-span-2 console-field">
             <label class="input-label">{{ t('admin.ops.alertRules.form.name') }}</label>
             <input v-model="draft!.name" class="input" type="text" />
           </div>
 
-          <div class="md:col-span-2">
+          <div class="md:col-span-2 console-field">
             <label class="input-label">{{ t('admin.ops.alertRules.form.description') }}</label>
             <input v-model="draft!.description" class="input" type="text" />
           </div>
 
-          <div>
+          <div class="console-field">
             <label class="input-label">{{ t('admin.ops.alertRules.form.metric') }}</label>
             <Select v-model="draft!.metric_type" :options="metricOptions" />
             <div v-if="selectedMetricDefinition" class="mt-1 space-y-0.5 text-xs text-gray-500 dark:text-gray-400">
@@ -549,12 +549,12 @@ function cancelDelete() {
             </div>
           </div>
 
-          <div>
+          <div class="console-field">
             <label class="input-label">{{ t('admin.ops.alertRules.form.operator') }}</label>
             <Select v-model="draft!.operator" :options="operatorOptions" />
           </div>
 
-          <div class="md:col-span-2">
+          <div class="md:col-span-2 console-field">
             <label class="input-label">
               {{ t('admin.ops.alertRules.form.groupId') }}
               <span v-if="isGroupMetricSelected" class="ml-1 text-red-500">*</span>
@@ -571,37 +571,37 @@ function cancelDelete() {
             </p>
           </div>
 
-          <div>
+          <div class="console-field">
             <label class="input-label">{{ t('admin.ops.alertRules.form.threshold') }}</label>
             <input v-model.number="draft!.threshold" class="input" type="number" />
           </div>
 
-          <div>
+          <div class="console-field">
             <label class="input-label">{{ t('admin.ops.alertRules.form.severity') }}</label>
             <Select v-model="draft!.severity" :options="severityOptions" />
           </div>
 
-          <div>
+          <div class="console-field">
             <label class="input-label">{{ t('admin.ops.alertRules.form.window') }}</label>
             <Select v-model="draft!.window_minutes" :options="windowOptions" />
           </div>
 
-          <div>
+          <div class="console-field">
             <label class="input-label">{{ t('admin.ops.alertRules.form.sustained') }}</label>
             <input v-model.number="draft!.sustained_minutes" class="input" type="number" min="1" max="1440" />
           </div>
 
-          <div>
+          <div class="console-field">
             <label class="input-label">{{ t('admin.ops.alertRules.form.cooldown') }}</label>
             <input v-model.number="draft!.cooldown_minutes" class="input" type="number" min="0" max="1440" />
           </div>
 
-          <div class="flex items-center justify-between rounded-xl bg-gray-50 px-4 py-3 dark:bg-dark-800/50 md:col-span-2">
+          <div class="flex items-center justify-between rounded-lg bg-gray-50 px-4 py-3 dark:bg-dark-800/50 md:col-span-2">
             <span class="text-xs font-bold text-gray-700 dark:text-gray-200">{{ t('admin.ops.alertRules.form.enabled') }}</span>
             <input v-model="draft!.enabled" type="checkbox" class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
           </div>
 
-          <div class="flex items-center justify-between rounded-xl bg-gray-50 px-4 py-3 dark:bg-dark-800/50 md:col-span-2">
+          <div class="flex items-center justify-between rounded-lg bg-gray-50 px-4 py-3 dark:bg-dark-800/50 md:col-span-2">
             <span class="text-xs font-bold text-gray-700 dark:text-gray-200">{{ t('admin.ops.alertRules.form.notifyEmail') }}</span>
             <input v-model="draft!.notify_email" type="checkbox" class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
           </div>

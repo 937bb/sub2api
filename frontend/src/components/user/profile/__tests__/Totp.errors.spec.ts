@@ -27,7 +27,7 @@ describe.each([
 ])('TOTP $name errors', ({ name, component, action, fallback }) => {
   it('shows the verification-method API error before closing', async () => {
     mocks.totpAPI.getVerificationMethod.mockRejectedValue({ status: 503, message: 'Verification is temporarily unavailable' })
-    const wrapper = mount(component)
+    const wrapper = mount(component, { global: { stubs: { Teleport: true } } })
     await flushPromises()
     expect(mocks.showError).toHaveBeenCalledWith('Verification is temporarily unavailable')
     expect(wrapper.emitted('close')).toHaveLength(1)
@@ -36,7 +36,7 @@ describe.each([
   it('shows why the email verification code cannot be sent', async () => {
     mocks.totpAPI.getVerificationMethod.mockResolvedValue({ method: 'email' })
     mocks.totpAPI.sendVerifyCode.mockRejectedValue({ status: 429, message: 'Please wait before requesting another code' })
-    const wrapper = mount(component)
+    const wrapper = mount(component, { global: { stubs: { Teleport: true } } })
     await flushPromises()
     await wrapper.findAll('button').find(button => button.text() === 'profile.totp.sendCode')!.trigger('click')
     await flushPromises()
@@ -49,7 +49,7 @@ describe.each([
     [{}, fallback]
   ])('preserves the action error or localized fallback: %j', async (error, expected) => {
     action.mockRejectedValue(error)
-    const wrapper = mount(component)
+    const wrapper = mount(component, { global: { stubs: { Teleport: true } } })
     await flushPromises()
     await wrapper.get('input[type="password"]').setValue('incorrect-password')
     if (name === 'setup') await wrapper.get('.btn-primary').trigger('click')
@@ -63,7 +63,7 @@ describe.each([
 it('shows the reason a TOTP code was rejected', async () => {
   mocks.totpAPI.initiateSetup.mockResolvedValue({ secret: 'EXAMPLE', qr_code_url: '', setup_token: 'setup-token' })
   mocks.totpAPI.enable.mockRejectedValue({ status: 400, message: 'Invalid TOTP code' })
-  const wrapper = mount(TotpSetupModal)
+  const wrapper = mount(TotpSetupModal, { global: { stubs: { Teleport: true } } })
   await flushPromises()
   await wrapper.get('input[type="password"]').setValue('password')
   await wrapper.get('.btn-primary').trigger('click')

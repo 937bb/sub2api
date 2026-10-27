@@ -50,7 +50,7 @@
     <!-- Refund Dialog -->
     <BaseDialog :show="!!refundTarget" :title="t('payment.orders.requestRefund')" @close="refundTarget = null">
       <div v-if="refundTarget" class="space-y-4">
-        <div class="rounded-xl bg-gray-50 p-4 dark:bg-dark-800">
+        <div class="rounded-lg bg-gray-50 p-4 dark:bg-dark-800 console-note">
           <div class="flex justify-between text-sm">
             <span class="text-gray-500 dark:text-gray-400">{{ t('payment.orders.orderId') }}</span>
             <span class="font-mono text-gray-900 dark:text-white">#{{ refundTarget.id }}</span>
@@ -60,7 +60,7 @@
             <span class="text-gray-900 dark:text-white">${{ refundTarget.amount.toFixed(2) }}</span>
           </div>
         </div>
-        <div>
+        <div class="console-field">
           <label class="input-label">{{ t('payment.refundReason') }}</label>
           <textarea v-model="refundReason" rows="3" class="input mt-1 w-full" :placeholder="t('payment.refundReasonPlaceholder')" />
         </div>

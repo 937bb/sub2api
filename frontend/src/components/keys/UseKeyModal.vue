@@ -65,7 +65,7 @@
             </p>
           </div>
           <div
-            class="grid grid-cols-2 gap-1 rounded-lg bg-gray-100 p-1 dark:bg-dark-700"
+            class="grid grid-cols-2 gap-1 rounded-lg bg-gray-100 p-1 dark:bg-dark-700 console-choice-group"
             role="radiogroup"
             :aria-label="t('keys.useKeyModal.openai.authModeTitle')"
           >
@@ -145,7 +145,7 @@
               <Icon name="exclamationCircle" size="sm" class="flex-shrink-0" />
               {{ file.hint }}
             </p>
-            <div class="bg-gray-900 dark:bg-dark-900 rounded-xl overflow-hidden">
+            <div class="bg-gray-900 dark:bg-dark-900 rounded-lg overflow-hidden">
               <!-- Code Header -->
               <div class="flex items-center justify-between px-4 py-2 bg-gray-800 dark:bg-dark-800 border-b border-gray-700 dark:border-dark-700">
                 <span class="min-w-0 truncate text-xs text-gray-400 font-mono">{{ file.path }}</span>
@@ -178,7 +178,7 @@
           class="overflow-hidden rounded-lg border border-gray-200 bg-gray-50 dark:border-dark-700 dark:bg-dark-800/50"
         >
           <div class="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-            <div class="min-w-0">
+            <div class="min-w-0 console-form-block">
               <h3 class="text-sm font-medium text-gray-900 dark:text-white">
                 {{ t('keys.useKeyModal.codexModelCatalog.title') }}
               </h3>
@@ -244,7 +244,7 @@
         </section>
 
         <!-- Usage Note -->
-        <div v-if="showPlatformNote" class="flex items-start gap-3 p-3 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800">
+        <div v-if="showPlatformNote" class="flex items-start gap-3 p-3 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800 console-note">
           <Icon name="infoCircle" size="md" class="text-blue-500 flex-shrink-0 mt-0.5" />
           <p class="text-sm text-blue-700 dark:text-blue-300">
             {{ platformNote }}

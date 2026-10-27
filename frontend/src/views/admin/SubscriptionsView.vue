@@ -502,7 +502,7 @@
       <form
         id="assign-subscription-form"
         @submit.prevent="handleAssignSubscription"
-        class="workbench-editor-form space-y-5"
+        class="workbench-editor-form space-y-5 console-form"
       >
         <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
           <input v-model="batchAssignEnabled" type="checkbox" :disabled="submitting" @change="resetAssignUsers" />
@@ -532,7 +532,7 @@
             <!-- User Dropdown -->
             <div
               v-if="showUserDropdown && (userSearchResults.length > 0 || userSearchKeyword)"
-              class="absolute z-50 mt-1 max-h-60 w-full overflow-auto rounded-lg border border-gray-200 bg-white shadow-lg dark:border-dark-700 dark:bg-dark-800"
+              class="absolute z-50 mt-1 max-h-60 w-full overflow-auto rounded-lg border border-gray-200 bg-white dark:border-dark-700 dark:bg-dark-800"
             >
               <div
                 v-if="userSearchLoading"
@@ -552,7 +552,7 @@
                 type="button"
                 :disabled="submitting || (batchAssignEnabled && assignUsers.some((selected) => selected.id === user.id))"
                 @click="selectUser(user)"
-                class="w-full px-4 py-2 text-left text-sm hover:bg-gray-100 disabled:opacity-50 dark:hover:bg-dark-700"
+                class="w-full px-4 py-2 text-left text-sm hover:bg-gray-100 disabled:opacity-50 dark:hover:bg-dark-700 btn"
               >
                 <span class="font-medium text-gray-900 dark:text-white">{{ user.email }}</span>
                 <span class="ml-2 text-gray-500 dark:text-gray-400">#{{ user.id }}</span>
@@ -578,7 +578,7 @@
             </ul>
           </div>
         </div>
-        <div class="workbench-field-row ">
+        <div class="workbench-field-row console-field">
           <label class="input-label">{{ t('admin.subscriptions.form.group') }}</label>
           <Select
             v-model="assignForm.group_id"
@@ -609,7 +609,7 @@
           </Select>
           <p class="input-hint">{{ t('admin.subscriptions.groupHint') }}</p>
         </div>
-        <div class="workbench-field-row ">
+        <div class="workbench-field-row console-field">
           <label class="input-label">{{ t('admin.subscriptions.form.validityDays') }}</label>
           <input v-model.number="assignForm.validity_days" type="number" min="1" max="36500" step="1" :disabled="submitting" class="input" />
           <p class="input-hint">{{ t('admin.subscriptions.validityHint') }}</p>
@@ -670,9 +670,9 @@
         v-if="extendingSubscription"
         id="extend-subscription-form"
         @submit.prevent="handleExtendSubscription"
-        class="workbench-editor-form space-y-5"
+        class="workbench-editor-form space-y-5 console-form"
       >
-        <div class="rounded-lg bg-gray-50 p-4 dark:bg-dark-700">
+        <div class="rounded-lg bg-gray-50 p-4 dark:bg-dark-700 console-note">
           <p class="text-sm text-gray-600 dark:text-gray-400">
             {{ t('admin.subscriptions.adjustingFor') }}
             <span class="font-medium text-gray-900 dark:text-white">{{
@@ -763,18 +763,16 @@
     <!-- Subscription Guide Modal -->
     <teleport to="body">
       <transition name="modal">
-        <div v-if="showGuideModal" class="fixed inset-0 z-50 flex items-center justify-center p-4" @mousedown.self="showGuideModal = false">
-          <div class="fixed inset-0 bg-black/50" @click="showGuideModal = false"></div>
-          <div class="relative max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-xl bg-white p-6 shadow-2xl dark:bg-dark-800">
+        <BaseDialog v-if="showGuideModal" :show="true" :title="t('admin.subscriptions.guide.title')" width="wide" @close="showGuideModal = false">
             <button type="button" class="absolute right-4 top-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200" @click="showGuideModal = false">
               <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
             </button>
 
-            <h2 class="mb-4 text-lg font-bold text-gray-900 dark:text-white">{{ t('admin.subscriptions.guide.title') }}</h2>
+
             <p class="mb-5 text-sm text-gray-500 dark:text-gray-400">{{ t('admin.subscriptions.guide.subtitle') }}</p>
 
             <!-- Step 1 -->
-            <div class="mb-5">
+            <div class="mb-5 console-form-block">
               <h3 class="mb-2 flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-white">
                 <span class="flex h-6 w-6 items-center justify-center rounded-full bg-primary-100 text-xs font-bold text-primary-700 dark:bg-primary-900/40 dark:text-primary-300">1</span>
                 {{ t('admin.subscriptions.guide.step1.title') }}
@@ -797,7 +795,7 @@
             </div>
 
             <!-- Step 2 -->
-            <div class="mb-5">
+            <div class="mb-5 console-form-block">
               <h3 class="mb-2 flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-white">
                 <span class="flex h-6 w-6 items-center justify-center rounded-full bg-primary-100 text-xs font-bold text-primary-700 dark:bg-primary-900/40 dark:text-primary-300">2</span>
                 {{ t('admin.subscriptions.guide.step2.title') }}
@@ -810,7 +808,7 @@
             </div>
 
             <!-- Step 3 -->
-            <div class="mb-5">
+            <div class="mb-5 console-form-block">
               <h3 class="mb-2 flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-white">
                 <span class="flex h-6 w-6 items-center justify-center rounded-full bg-primary-100 text-xs font-bold text-primary-700 dark:bg-primary-900/40 dark:text-primary-300">3</span>
                 {{ t('admin.subscriptions.guide.step3.title') }}
@@ -828,15 +826,15 @@
             </div>
 
             <!-- Tip -->
-            <div class="rounded-lg bg-blue-50 p-3 text-xs text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
+            <div class="rounded-lg bg-blue-50 p-3 text-xs text-blue-700 dark:bg-blue-900/20 dark:text-blue-300 console-note">
               {{ t('admin.subscriptions.guide.tip') }}
             </div>
 
             <div class="mt-4 text-right">
               <button type="button" class="btn btn-primary btn-sm" @click="showGuideModal = false">{{ t('common.close') }}</button>
             </div>
-          </div>
-        </div>
+
+</BaseDialog>
       </transition>
     </teleport>
   </AppLayout>

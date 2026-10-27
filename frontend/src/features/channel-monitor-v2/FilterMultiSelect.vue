@@ -33,7 +33,7 @@
         <div
           v-if="isOpen"
           ref="dropdownRef"
-          class="select-dropdown-portal dropdown filter-dropdown"
+          class="select-dropdown-portal dropdown filter-dropdown console-popover"
           :class="[instanceId]"
           :style="dropdownStyle"
           role="listbox"

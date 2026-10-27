@@ -22,8 +22,6 @@
 
 <script setup lang="ts">
 import '@/styles/onboarding.css'
-import '@/styles/console.css'
-import '@/styles/workbench.css'
 import { useI18n } from 'vue-i18n'
 import { computed, onMounted } from 'vue'
 import { useAppStore } from '@/stores'

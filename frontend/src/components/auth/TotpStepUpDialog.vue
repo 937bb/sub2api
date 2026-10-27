@@ -1,22 +1,8 @@
 <template>
-  <div v-if="controller.visible.value" class="fixed inset-0 z-[60] overflow-y-auto">
-    <div class="flex min-h-full items-center justify-center p-4">
-      <div class="fixed inset-0 bg-black/50 transition-opacity" @click="handleCancel"></div>
-
-      <div class="relative w-full max-w-md transform rounded-xl bg-white p-6 shadow-xl transition-all dark:bg-dark-800">
-        <div class="mb-6 text-center">
-          <div class="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-primary-100 dark:bg-primary-900/30">
-            <svg class="h-6 w-6 text-primary-600 dark:text-primary-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
-            </svg>
-          </div>
-          <h3 class="mt-4 text-xl font-semibold text-gray-900 dark:text-white">
-            {{ t('stepUp.title') }}
-          </h3>
-          <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">
+  <BaseDialog v-if="controller.visible.value" :show="true" :title="t('stepUp.title')" width="narrow" :z-index="60" :show-close-button="!verifying" :close-on-escape="!verifying" @close="handleCancel">
+        <div class="console-otp-heading"><p :id="hintId" class="mt-1">
             {{ t('stepUp.hint') }}
-          </p>
-        </div>
+          </p></div>
 
         <div class="mb-6">
           <input
@@ -42,6 +28,8 @@
               autocomplete="off"
               class="h-12 w-10 rounded-lg border border-gray-300 text-center text-lg font-semibold focus:border-primary-500 focus:ring-primary-500 dark:border-dark-600 dark:bg-dark-700"
               :disabled="verifying"
+              :aria-label="t('stepUp.digitLabel', { digit: index + 1 })"
+              :aria-describedby="hintId"
               @input="handleCodeInput($event, index)"
               @keydown="handleKeydown($event, index)"
               @paste="handlePaste"
@@ -61,13 +49,13 @@
         >
           {{ t('common.cancel') }}
         </button>
-      </div>
-    </div>
-  </div>
+
+</BaseDialog>
 </template>
 
 <script setup lang="ts">
-import { ref, watch, nextTick } from 'vue'
+import BaseDialog from '@/components/common/BaseDialog.vue'
+import { ref, watch, nextTick, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores'
 import { totpAPI } from '@/api'
@@ -78,6 +66,7 @@ const props = defineProps<{
 }>()
 
 const { t } = useI18n()
+const hintId = `${useId()}-otp-hint`
 const appStore = useAppStore()
 
 const verifying = ref(false)

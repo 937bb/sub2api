@@ -5,11 +5,11 @@
     width="normal"
     @close="emit('cancel')"
   >
-    <form id="refund-form" @submit.prevent="handleSubmit" class="space-y-4">
+    <form id="refund-form" @submit.prevent="handleSubmit" class="space-y-4 console-form">
       <!-- Refund Request Info -->
       <div
         v-if="order?.refund_requested_at || order?.refund_request_reason"
-        class="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900/20"
+        class="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900/20 console-note"
       >
         <div class="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-300">
           <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -28,7 +28,7 @@
       </div>
 
       <!-- Order Info -->
-      <div class="rounded-lg bg-gray-50 p-3 dark:bg-dark-700">
+      <div class="rounded-lg bg-gray-50 p-3 dark:bg-dark-700 console-note">
         <div class="flex justify-between text-sm">
           <span class="text-gray-500 dark:text-gray-400">{{ t('payment.orders.orderId') }}</span>
           <span class="font-mono text-gray-900 dark:text-white">#{{ order?.id }}</span>
@@ -49,7 +49,7 @@
 
       <!-- Deduct Balance -->
       <div>
-        <div class="flex items-center gap-2">
+        <div class="flex items-center gap-2 console-field">
           <input
             id="deduct-balance"
             v-model="form.deduct_balance"
@@ -64,11 +64,11 @@
 
         <!-- User Balance Info (when deduct_balance is checked) -->
         <div v-if="form.deduct_balance && userBalance != null" class="mt-3 grid grid-cols-2 gap-3">
-          <div class="rounded-lg bg-gray-50 p-3 text-sm dark:bg-dark-700">
+          <div class="rounded-lg bg-gray-50 p-3 text-sm dark:bg-dark-700 console-note">
             <div class="text-gray-500 dark:text-gray-400">{{ t('payment.admin.userBalance') }}</div>
             <div class="mt-1 font-semibold text-gray-900 dark:text-white">{{ creditedAmountSymbol }}{{ userBalance.toFixed(2) }}</div>
           </div>
-          <div class="rounded-lg bg-gray-50 p-3 text-sm dark:bg-dark-700">
+          <div class="rounded-lg bg-gray-50 p-3 text-sm dark:bg-dark-700 console-note">
             <div class="text-gray-500 dark:text-gray-400">{{ t('payment.admin.orderAmount') }}</div>
             <div class="mt-1 font-semibold text-gray-900 dark:text-white">{{ creditedAmountSymbol }}{{ order?.amount?.toFixed(2) }}</div>
           </div>
@@ -85,7 +85,7 @@
         <!-- No deduction info -->
         <div
           v-if="!form.deduct_balance"
-          class="mt-2 rounded-lg bg-blue-50 p-3 text-sm text-blue-700 dark:bg-blue-900/20 dark:text-blue-300"
+          class="mt-2 rounded-lg bg-blue-50 p-3 text-sm text-blue-700 dark:bg-blue-900/20 dark:text-blue-300 console-note"
         >
           {{ t('payment.admin.noDeduction') }}
         </div>
@@ -112,7 +112,7 @@
       </div>
 
       <!-- Reason -->
-      <div>
+      <div class="console-field">
         <label class="input-label">{{ t('payment.admin.refundReason') }}</label>
         <textarea
           v-model="form.reason"
@@ -132,7 +132,7 @@
       </div>
 
       <!-- Force Refund -->
-      <div v-if="requireForce" class="flex items-center gap-2">
+      <div v-if="requireForce" class="flex items-center gap-2 console-field">
         <input
           id="force-refund"
           v-model="form.force"
@@ -154,7 +154,7 @@
           type="submit"
           form="refund-form"
           :disabled="submitting || form.amount <= 0 || (requireForce && !form.force)"
-          class="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 disabled:opacity-50 dark:focus:ring-offset-dark-800"
+          class="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 disabled:opacity-50 dark:focus:ring-offset-dark-800 btn btn-danger"
         >
           {{ submitting ? t('common.processing') : t('payment.admin.confirmRefund') }}
         </button>

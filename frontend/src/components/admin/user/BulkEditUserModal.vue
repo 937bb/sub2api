@@ -5,14 +5,14 @@
     width="normal"
     @close="emit('close')"
   >
-    <form id="bulk-edit-user-limits-form" class="workbench-editor-form space-y-5" @submit.prevent="handleSubmit">
+    <form id="bulk-edit-user-limits-form" class="workbench-editor-form space-y-5 console-form" @submit.prevent="handleSubmit">
       <p class="text-sm font-medium text-gray-700 dark:text-gray-300">
         {{ t('admin.users.bulkLimits.selectedCount', { count: selectedIds.length }) }}
       </p>
 
       <div class="divide-y divide-gray-200 border-y border-gray-200 dark:divide-dark-700 dark:border-dark-700">
         <div class="space-y-3 py-4">
-          <div class="flex items-center justify-between gap-4">
+          <div class="flex items-center justify-between gap-4 console-switch-row">
             <label for="bulk-concurrency" class="input-label mb-0">
               {{ t('admin.users.columns.concurrency') }}
             </label>
@@ -35,7 +35,7 @@
         </div>
 
         <div class="space-y-3 py-4">
-          <div class="flex items-center justify-between gap-4">
+          <div class="flex items-center justify-between gap-4 console-switch-row">
             <label for="bulk-rpm-limit" class="input-label mb-0">
               {{ t('admin.users.form.rpmLimit') }}
             </label>

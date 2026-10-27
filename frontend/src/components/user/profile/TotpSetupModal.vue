@@ -1,18 +1,9 @@
 <template>
-  <div class="fixed inset-0 z-50 overflow-y-auto" @click.self="$emit('close')">
-    <div class="flex min-h-full items-center justify-center p-4">
-      <div class="fixed inset-0 bg-black/50 transition-opacity" @click="$emit('close')"></div>
-
-      <div class="relative w-full max-w-md transform rounded-xl bg-white p-6 shadow-xl transition-all dark:bg-dark-800">
+  <BaseDialog :show="true" :title="t('profile.totp.setupTitle')" width="narrow" @close="$emit('close')">
         <!-- Header -->
-        <div class="mb-6 text-center">
-          <h3 class="text-xl font-semibold text-gray-900 dark:text-white">
-            {{ t('profile.totp.setupTitle') }}
-          </h3>
-          <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">
+        <div class="console-otp-heading"><p class="mt-1">
             {{ stepDescription }}
-          </p>
-        </div>
+          </p></div>
 
         <!-- Step 0: Identity Verification -->
         <div v-if="step === 0" class="space-y-6">
@@ -49,7 +40,7 @@
 
             <!-- Password verification -->
             <div v-else class="space-y-4">
-              <div>
+              <div class="console-field">
                 <label class="input-label">{{ t('profile.currentPassword') }}</label>
                 <input
                   v-model="verifyForm.password"
@@ -125,7 +116,7 @@
 
         <!-- Step 2: Verify Code -->
         <div v-if="step === 2" class="space-y-6">
-          <form @submit.prevent="handleVerify">
+          <form class="console-form" @submit.prevent="handleVerify">
             <div class="mb-6">
               <label class="input-label text-center block mb-3">
                 {{ t('profile.totp.enterCode') }}
@@ -162,12 +153,12 @@
             </div>
           </form>
         </div>
-      </div>
-    </div>
-  </div>
+
+</BaseDialog>
 </template>
 
 <script setup lang="ts">
+import BaseDialog from '@/components/common/BaseDialog.vue'
 import { ref, onMounted, onUnmounted, nextTick, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'

@@ -487,12 +487,14 @@
       width="wide"
       @close="closeCreateModal"
     >
+      <template #navigation><DialogSectionLinks :sections="['console.formIdentity', 'console.formPricing']" /></template>
       <form
         id="create-group-form"
         @submit.prevent="handleCreateGroup"
-        class="workbench-editor-form space-y-5"
+        class="workbench-editor-form space-y-5 console-form"
       >
-        <div class="workbench-field-row ">
+        <DialogSection :title="t('console.formIdentity')">
+<div class="workbench-field-row ">
           <GroupI18nField
             v-model="createForm.name"
             v-model:i18n="createForm.i18n"
@@ -514,7 +516,7 @@
             :placeholder="t('admin.groups.optionalDescription')"
           />
         </div>
-        <div>
+        <div class="console-field">
           <label class="input-label">{{
             t("admin.groups.form.platform")
           }}</label>
@@ -543,7 +545,7 @@
                 class="pointer-events-none absolute bottom-full left-0 z-50 mb-2 w-72 opacity-0 transition-all duration-200 group-hover:pointer-events-auto group-hover:opacity-100"
               >
                 <div
-                  class="rounded-lg bg-gray-900 p-3 text-white shadow-lg dark:bg-gray-800"
+                  class="rounded-lg bg-gray-900 p-3 text-white dark:bg-gray-800"
                 >
                   <p class="text-xs leading-relaxed text-gray-300">
                     {{ t("admin.groups.copyAccounts.tooltip") }}
@@ -615,8 +617,10 @@
           </select>
           <p class="input-hint">{{ t("admin.groups.copyAccounts.hint") }}</p>
         </div>
-        <template v-if="!authStore.isSimpleMode">
-        <div>
+</DialogSection>
+        <DialogSection :title="t('console.formPricing')">
+<template v-if="!authStore.isSimpleMode">
+        <div class="console-field">
           <label class="input-label">{{
             t("admin.groups.form.rateMultiplier")
           }}</label>
@@ -631,7 +635,7 @@
           />
           <p class="input-hint">{{ t("admin.groups.rateMultiplierHint") }}</p>
         </div>
-        <div>
+        <div class="console-field">
           <label class="input-label">{{ t("admin.groups.form.rpmLimit") }}</label>
           <input
             v-model.number="createForm.rpm_limit"
@@ -673,7 +677,7 @@
                 class="pointer-events-none absolute bottom-full left-0 z-50 mb-2 w-72 opacity-0 transition-all duration-200 group-hover:pointer-events-auto group-hover:opacity-100"
               >
                 <div
-                  class="rounded-lg bg-gray-900 p-3 text-white shadow-lg dark:bg-gray-800"
+                  class="rounded-lg bg-gray-900 p-3 text-white dark:bg-gray-800"
                 >
                   <p class="mb-2 text-xs font-medium">
                     {{ t("admin.groups.exclusiveTooltip.title") }}
@@ -713,7 +717,7 @@
 
         <!-- Subscription Configuration -->
         <div class="mt-4 border-t pt-4">
-          <div>
+          <div class="console-field">
             <label class="input-label">{{
               t("admin.groups.subscription.type")
             }}</label>
@@ -731,7 +735,7 @@
             v-if="createForm.subscription_type === 'subscription'"
             class="space-y-4 border-l-2 border-primary-200 pl-4 dark:border-primary-800"
           >
-            <div>
+            <div class="console-field">
               <label class="input-label">{{
                 t("admin.groups.subscription.dailyLimit")
               }}</label>
@@ -744,7 +748,7 @@
                 :placeholder="t('admin.groups.subscription.noLimit')"
               />
             </div>
-            <div>
+            <div class="console-field">
               <label class="input-label">{{
                 t("admin.groups.subscription.weeklyLimit")
               }}</label>
@@ -757,7 +761,7 @@
                 :placeholder="t('admin.groups.subscription.noLimit')"
               />
             </div>
-            <div>
+            <div class="console-field">
               <label class="input-label">{{
                 t("admin.groups.subscription.monthlyLimit")
               }}</label>
@@ -774,7 +778,7 @@
         </div>
 
         <div class="border-t pt-4">
-          <div class="mb-3 flex items-center justify-between gap-3">
+          <div class="mb-3 flex items-center justify-between gap-3 console-switch-row">
             <div>
               <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
                 {{ t("admin.groups.modelAllowlist.title") }}
@@ -787,7 +791,7 @@
           </div>
           <div
             v-if="createModelAllowlistState.enabled"
-            class="overflow-hidden rounded-lg border border-gray-200 bg-gray-50/50 dark:border-dark-600 dark:bg-dark-800/40"
+            class="overflow-hidden rounded-lg border border-gray-200 bg-gray-50/50 dark:border-dark-600 dark:bg-dark-800/40 console-note"
           >
             <div
               v-if="!createModelAllowlistLoading && createModelAllowlistState.items.length > 0"
@@ -804,14 +808,14 @@
               <div class="flex items-center gap-1.5">
                 <button
                   type="button"
-                  class="rounded px-2 py-1 font-medium text-primary-600 transition-colors hover:bg-primary-50 dark:text-primary-400 dark:hover:bg-primary-900/20"
+                  class="rounded px-2 py-1 font-medium text-primary-600 transition-colors hover:bg-primary-50 dark:text-primary-400 dark:hover:bg-primary-900/20 btn"
                   @click="selectAllModelAllowlistItems(createModelAllowlistState)"
                 >
                   {{ t("admin.groups.modelAllowlist.selectAll") }}
                 </button>
                 <button
                   type="button"
-                  class="rounded px-2 py-1 font-medium text-gray-600 transition-colors hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
+                  class="rounded px-2 py-1 font-medium text-gray-600 transition-colors hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700 btn"
                   @click="invertModelAllowlistSelection(createModelAllowlistState)"
                 >
                   {{ t("admin.groups.modelAllowlist.invertSelection") }}
@@ -878,7 +882,7 @@
                 />
                 <button
                   type="button"
-                  class="rounded bg-primary-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-primary-700"
+                  class="rounded bg-primary-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-primary-700 btn btn-primary"
                   @click="submitCreateAllowlistCustomEntry"
                 >
                   {{ t("admin.groups.modelAllowlist.addCustom") }}
@@ -927,7 +931,7 @@
           </div>
           <div
             v-if="createForm.image_rate_independent"
-            class="mb-4"
+            class="mb-4 console-field"
           >
             <label class="input-label">{{
               t(imagePricingI18nKey(createForm.platform, "imageMultiplier"))
@@ -942,7 +946,7 @@
             />
           </div>
           <div class="grid grid-cols-3 gap-3">
-            <div>
+            <div class="console-field">
               <label class="input-label">1K ($)</label>
               <input
                 v-model.number="createForm.image_price_1k"
@@ -953,7 +957,7 @@
                 :placeholder="getImagePricePlaceholder(createForm.platform, 'image_price_1k')"
               />
             </div>
-            <div>
+            <div class="console-field">
               <label class="input-label">2K ($)</label>
               <input
                 v-model.number="createForm.image_price_2k"
@@ -964,7 +968,7 @@
                 :placeholder="getImagePricePlaceholder(createForm.platform, 'image_price_2k')"
               />
             </div>
-            <div>
+            <div class="console-field">
               <label class="input-label">4K ($)</label>
               <input
                 v-model.number="createForm.image_price_4k"
@@ -979,7 +983,7 @@
           <p class="mt-3 text-xs text-gray-500 dark:text-gray-400">
             {{ t(imagePricingI18nKey(createForm.platform, "modeHint")) }}
           </p>
-          <div class="mt-2 rounded-lg bg-gray-50 p-3 text-xs text-gray-700 dark:bg-gray-800 dark:text-gray-300">
+          <div class="mt-2 rounded-lg bg-gray-50 p-3 text-xs text-gray-700 dark:bg-gray-800 dark:text-gray-300 console-note">
             <div class="mb-1 font-medium">
               {{ t(imagePricingI18nKey(createForm.platform, "finalPricePreview")) }}
             </div>
@@ -1010,7 +1014,7 @@
               v-if="createForm.allow_batch_image_generation"
               class="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2"
             >
-              <div>
+              <div class="console-field">
                 <label class="input-label">{{
                   t("admin.groups.imagePricing.batchDiscountMultiplier")
                 }}</label>
@@ -1023,7 +1027,7 @@
                   placeholder="0.5"
                 />
               </div>
-              <div>
+              <div class="console-field">
                 <label class="input-label">{{
                   t("admin.groups.imagePricing.batchHoldMultiplier")
                 }}</label>
@@ -1071,7 +1075,7 @@
           </div>
           <div
             v-if="createForm.video_rate_independent"
-            class="mb-4"
+            class="mb-4 console-field"
           >
             <label class="input-label">{{
               t(videoPricingI18nKey("videoMultiplier"))
@@ -1086,7 +1090,7 @@
             />
           </div>
           <div class="grid grid-cols-3 gap-3">
-            <div>
+            <div class="console-field">
               <label class="input-label">480p ($/s)</label>
               <input
                 v-model.number="createForm.video_price_480p"
@@ -1097,7 +1101,7 @@
                 :placeholder="getVideoPricePlaceholder(createForm.platform, 'video_price_480p')"
               />
             </div>
-            <div>
+            <div class="console-field">
               <label class="input-label">720p ($/s)</label>
               <input
                 v-model.number="createForm.video_price_720p"
@@ -1108,7 +1112,7 @@
                 :placeholder="getVideoPricePlaceholder(createForm.platform, 'video_price_720p')"
               />
             </div>
-            <div>
+            <div class="console-field">
               <label class="input-label">1080p ($/s)</label>
               <input
                 v-model.number="createForm.video_price_1080p"
@@ -1162,7 +1166,7 @@
           <p class="mt-3 text-xs text-gray-500 dark:text-gray-400">
             {{ t(videoPricingI18nKey("modeHint")) }}
           </p>
-          <div class="mt-2 rounded-lg bg-gray-50 p-3 text-xs text-gray-700 dark:bg-gray-800 dark:text-gray-300">
+          <div class="mt-2 rounded-lg bg-gray-50 p-3 text-xs text-gray-700 dark:bg-gray-800 dark:text-gray-300 console-note">
             <div class="mb-1 font-medium">
               {{ t(videoPricingI18nKey("finalPricePreview")) }}
             </div>
@@ -1193,7 +1197,7 @@
             v-if="createForm.peak_rate_enabled"
             class="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3"
           >
-            <div>
+            <div class="console-field">
               <label class="input-label">{{ t("admin.groups.peakRate.peakStart") }}</label>
               <input
                 v-model="createForm.peak_start"
@@ -1201,7 +1205,7 @@
                 class="input"
               />
             </div>
-            <div>
+            <div class="console-field">
               <label class="input-label">{{ t("admin.groups.peakRate.peakEnd") }}</label>
               <input
                 v-model="createForm.peak_end"
@@ -1209,7 +1213,7 @@
                 class="input"
               />
             </div>
-            <div>
+            <div class="console-field">
               <label class="input-label">{{ t("admin.groups.peakRate.peakMultiplier") }}</label>
               <input
                 v-model.number="createForm.peak_rate_multiplier"
@@ -1245,7 +1249,7 @@
             v-if="createForm.profit_control_enabled"
             class="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-2"
           >
-            <div>
+            <div class="console-field">
               <label class="input-label">{{ t("admin.groups.profitControl.minMargin") }}</label>
               <input
                 v-model.number="createForm.profit_min_margin_percent"
@@ -1258,7 +1262,7 @@
                 :title="t('admin.groups.profitControl.minMarginHint')"
               />
             </div>
-            <div>
+            <div class="console-field">
               <label class="input-label">{{ t("admin.groups.profitControl.safetyBuffer") }}</label>
               <input
                 v-model.number="createForm.profit_safety_buffer_percent"
@@ -1292,7 +1296,7 @@
                 class="pointer-events-none absolute bottom-full left-0 z-50 mb-2 w-72 opacity-0 transition-all duration-200 group-hover:pointer-events-auto group-hover:opacity-100"
               >
                 <div
-                  class="rounded-lg bg-gray-900 p-3 text-white shadow-lg dark:bg-gray-800"
+                  class="rounded-lg bg-gray-900 p-3 text-white dark:bg-gray-800"
                 >
                   <p class="text-xs leading-relaxed text-gray-300">
                     {{ t("admin.groups.supportedScopes.tooltip") }}
@@ -1365,7 +1369,7 @@
                 class="pointer-events-none absolute bottom-full left-0 z-50 mb-2 w-72 opacity-0 transition-all duration-200 group-hover:pointer-events-auto group-hover:opacity-100"
               >
                 <div
-                  class="rounded-lg bg-gray-900 p-3 text-white shadow-lg dark:bg-gray-800"
+                  class="rounded-lg bg-gray-900 p-3 text-white dark:bg-gray-800"
                 >
                   <p class="text-xs leading-relaxed text-gray-300">
                     {{ t("admin.groups.mcpXml.tooltip") }}
@@ -1407,7 +1411,7 @@
                 class="pointer-events-none absolute bottom-full left-0 z-50 mb-2 w-72 opacity-0 transition-all duration-200 group-hover:pointer-events-auto group-hover:opacity-100"
               >
                 <div
-                  class="rounded-lg bg-gray-900 p-3 text-white shadow-lg dark:bg-gray-800"
+                  class="rounded-lg bg-gray-900 p-3 text-white dark:bg-gray-800"
                 >
                   <p class="text-xs leading-relaxed text-gray-300">
                     {{ t("admin.groups.claudeCode.tooltip") }}
@@ -1430,7 +1434,7 @@
             </span>
           </div>
           <!-- 降级分组选择（仅当启用 claude_code_only 时显示） -->
-          <div v-if="createForm.claude_code_only" class="mt-3">
+          <div v-if="createForm.claude_code_only" class="mt-3 console-field">
             <label class="input-label">{{
               t("admin.groups.claudeCode.fallbackGroup")
             }}</label>
@@ -1448,12 +1452,12 @@
         <!-- Codex 网页搜索按次计费（仅 openai 平台） -->
         <div
           v-if="createForm.platform === 'openai'"
-          class="border-t border-gray-200 dark:border-dark-400 pt-4 mt-4"
+          class="border-t border-gray-200 dark:border-dark-400 pt-4 mt-4 console-form-block"
         >
           <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
             {{ t("admin.groups.webSearchPricing.title") }}
           </h4>
-          <div>
+          <div class="console-field">
             <label class="input-label">{{
               t("admin.groups.webSearchPricing.pricePerCall")
             }}</label>
@@ -1469,7 +1473,7 @@
               {{ t("admin.groups.webSearchPricing.pricePerCallHint") }}
             </p>
             <div
-              class="mt-2 rounded-lg bg-gray-50 p-3 text-xs text-gray-600 dark:bg-dark-700 dark:text-gray-300"
+              class="mt-2 rounded-lg bg-gray-50 p-3 text-xs text-gray-600 dark:bg-dark-700 dark:text-gray-300 console-note"
             >
               {{
                 t("admin.groups.webSearchPricing.finalPricePreview", {
@@ -1483,7 +1487,7 @@
 
         <div class="border-t border-gray-200 pt-4 mt-4 dark:border-dark-400">
           <div class="flex flex-wrap items-start justify-between gap-3">
-            <div class="min-w-0 flex-1">
+            <div class="min-w-0 flex-1 console-form-block">
               <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t("admin.groups.modelPricing.title") }}</h4>
               <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t("admin.groups.modelPricing.description") }}</p>
             </div>
@@ -1503,7 +1507,7 @@
         <!-- Grok Voice 显式定价（仅 grok 平台） -->
         <div
           v-if="createForm.platform === 'grok'"
-          class="border-t border-gray-200 dark:border-dark-400 pt-4 mt-4"
+          class="border-t border-gray-200 dark:border-dark-400 pt-4 mt-4 console-form-block"
         >
           <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
             {{ t("admin.groups.explicitPricing.title") }}
@@ -1512,7 +1516,7 @@
             {{ t("admin.groups.explicitPricing.description") }}
           </p>
           <div class="grid grid-cols-1 gap-3 md:grid-cols-3">
-            <div>
+            <div class="console-field">
               <label class="input-label">{{ t("admin.groups.explicitPricing.searchPricePer1k") }}</label>
               <input
                 v-model.number="createForm.search_price_per_1k"
@@ -1524,7 +1528,7 @@
                 data-testid="create-search-price"
               />
             </div>
-            <div>
+            <div class="console-field">
               <label class="input-label">{{ t("admin.groups.voicePricing.audioRealtimePerMin") }}</label>
               <input
                 v-model.number="createForm.audio_realtime_price_per_min"
@@ -1536,7 +1540,7 @@
                 data-testid="create-audio-realtime-price"
               />
             </div>
-            <div>
+            <div class="console-field">
               <label class="input-label">{{ t("admin.groups.voicePricing.audioTtsPerMillionChars") }}</label>
               <input
                 v-model.number="createForm.audio_tts_price_per_million_chars"
@@ -1548,7 +1552,7 @@
                 data-testid="create-audio-tts-price"
               />
             </div>
-            <div>
+            <div class="console-field">
               <label class="input-label">{{ t("admin.groups.voicePricing.audioSttPerHour") }}</label>
               <input
                 v-model.number="createForm.audio_stt_price_per_hour"
@@ -1565,12 +1569,12 @@
         <!-- OpenAI Fast 开关（OpenAI 与 Composite 平台） -->
         <div
           v-if="supportsGroupOpenAIFast(createForm.platform)"
-          class="border-t border-gray-200 dark:border-dark-400 pt-4 mt-4"
+          class="border-t border-gray-200 dark:border-dark-400 pt-4 mt-4 console-form-block"
         >
           <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
             {{ t("admin.groups.openaiFast.title") }}
           </h4>
-          <div class="flex items-center justify-between gap-4">
+          <div class="flex items-center justify-between gap-4 console-switch-row">
             <label class="text-sm text-gray-600 dark:text-gray-400">
               {{ t("admin.groups.openaiFast.force") }}
             </label>
@@ -1583,7 +1587,7 @@
           <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
             {{ t("admin.groups.openaiFast.hint") }}
           </p>
-          <div class="flex items-center justify-between gap-4 mt-4">
+          <div class="flex items-center justify-between gap-4 mt-4 console-switch-row">
             <label class="text-sm text-gray-600 dark:text-gray-400">
               {{ t("admin.groups.openaiFast.free") }}
             </label>
@@ -1601,12 +1605,12 @@
         <!-- Codex Live 开关（OpenAI 与 Composite 平台） -->
         <div
           v-if="supportsLivePlatform(createForm.platform)"
-          class="border-t border-gray-200 dark:border-dark-400 pt-4 mt-4"
+          class="border-t border-gray-200 dark:border-dark-400 pt-4 mt-4 console-form-block"
         >
           <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
             {{ t("admin.groups.openaiLive.title") }}
           </h4>
-          <div class="flex items-center justify-between">
+          <div class="flex items-center justify-between console-switch-row">
             <label class="text-sm text-gray-600 dark:text-gray-400">{{
               t("admin.groups.openaiLive.allow")
             }}</label>
@@ -1623,14 +1627,14 @@
         <!-- OpenAI Messages 调度配置（OpenAI 与 Composite 平台） -->
         <div
           v-if="supportsMessagesDispatchPlatform(createForm.platform)"
-          class="border-t border-gray-200 dark:border-dark-400 pt-4 mt-4"
+          class="border-t border-gray-200 dark:border-dark-400 pt-4 mt-4 console-form-block"
         >
           <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
             {{ t("admin.groups.openaiMessages.title") }}
           </h4>
 
           <!-- 允许 Messages 调度开关 -->
-          <div class="flex items-center justify-between">
+          <div class="flex items-center justify-between console-switch-row">
             <label class="text-sm text-gray-600 dark:text-gray-400">{{
               t("admin.groups.openaiMessages.allowDispatch")
             }}</label>
@@ -1648,13 +1652,13 @@
             class="mt-3"
           >
             <div
-              class="relative overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm dark:border-dark-600 dark:bg-dark-800"
+              class="relative overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-dark-600 dark:bg-dark-800"
             >
               <div
                 class="border-b border-gray-100 bg-gray-50/80 px-4 py-3 dark:border-dark-700 dark:bg-dark-700/50"
               >
                 <div class="flex items-center gap-2">
-                  <div class="h-2 w-2 rounded-full bg-blue-500"></div>
+                  <div class="h-2 w-2 rounded-full bg-blue-500 console-note"></div>
                   <label
                     class="text-sm font-medium text-gray-900 dark:text-white"
                     >{{
@@ -1668,7 +1672,7 @@
               </div>
               <div class="p-4">
                 <div class="grid gap-4 md:grid-cols-3">
-                  <div>
+                  <div class="console-field">
                     <label class="input-label">{{
                       t("admin.groups.openaiMessages.opusModel")
                     }}</label>
@@ -1681,7 +1685,7 @@
                       class="input"
                     />
                   </div>
-                  <div>
+                  <div class="console-field">
                     <label class="input-label">{{
                       t("admin.groups.openaiMessages.sonnetModel")
                     }}</label>
@@ -1694,7 +1698,7 @@
                       class="input"
                     />
                   </div>
-                  <div>
+                  <div class="console-field">
                     <label class="input-label">{{
                       t("admin.groups.openaiMessages.haikuModel")
                     }}</label>
@@ -1712,7 +1716,7 @@
             </div>
 
             <div
-              class="mt-5 relative overflow-hidden rounded-xl border border-primary-200 bg-white shadow-sm dark:border-primary-900/50 dark:bg-dark-800"
+              class="mt-5 relative overflow-hidden rounded-lg border border-primary-200 bg-white dark:border-primary-900/50 dark:bg-dark-800"
             >
               <div
                 class="border-b border-primary-100 bg-primary-50/80 px-4 py-3 dark:border-primary-900/40 dark:bg-primary-900/20"
@@ -1720,7 +1724,7 @@
                 <div class="flex items-start justify-between gap-3">
                   <div>
                     <div class="flex items-center gap-2">
-                      <div class="h-2 w-2 rounded-full bg-primary-500"></div>
+                      <div class="h-2 w-2 rounded-full bg-primary-500 console-note"></div>
                       <label
                         class="text-sm font-medium text-primary-900 dark:text-primary-100"
                         >{{
@@ -1740,7 +1744,7 @@
               <div class="p-4 bg-gray-50/30 dark:bg-dark-800/30">
                 <div
                   v-if="createForm.exact_model_mappings.length === 0"
-                  class="flex items-center justify-between gap-3 rounded-xl border-2 border-dashed border-primary-200 bg-white px-5 py-4 text-sm text-primary-700 transition-colors hover:border-primary-300 dark:border-primary-900/40 dark:bg-dark-800 dark:text-primary-300 dark:hover:border-primary-800"
+                  class="flex items-center justify-between gap-3 rounded-lg border border-dashed border-primary-200 bg-white px-5 py-4 text-sm text-primary-700 transition-colors hover:border-primary-300 dark:border-primary-900/40 dark:bg-dark-800 dark:text-primary-300 dark:hover:border-primary-800"
                 >
                   <span>{{
                     t("admin.groups.openaiMessages.noExactMappings")
@@ -1759,13 +1763,13 @@
                   <div
                     v-for="row in createForm.exact_model_mappings"
                     :key="getCreateMessagesDispatchRowKey(row)"
-                    class="group relative rounded-xl border border-gray-200 bg-white p-4 shadow-sm transition-all hover:border-primary-300 hover:shadow-md dark:border-dark-600 dark:bg-dark-700 dark:hover:border-primary-700"
+                    class="group relative rounded-lg border border-gray-200 bg-white p-4 transition-all hover:border-primary-300 dark:border-dark-600 dark:bg-dark-700 dark:hover:border-primary-700"
                   >
                     <div class="flex items-center gap-4">
                       <div
                         class="grid flex-1 gap-4 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] md:items-start"
                       >
-                        <div>
+                        <div class="console-field">
                           <label class="input-label">{{
                             t("admin.groups.openaiMessages.claudeModel")
                           }}</label>
@@ -1789,7 +1793,7 @@
                             class="transition-transform group-hover:translate-x-1"
                           />
                         </div>
-                        <div>
+                        <div class="console-field">
                           <label class="input-label">{{
                             t("admin.groups.openaiMessages.targetModel")
                           }}</label>
@@ -1821,7 +1825,7 @@
                   <button
                     type="button"
                     @click="addCreateMessagesDispatchMapping"
-                    class="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-gray-300 bg-white py-3 text-sm font-medium text-gray-500 transition-all hover:border-primary-300 hover:bg-primary-50/50 hover:text-primary-600 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-400 dark:hover:border-primary-800 dark:hover:bg-primary-900/20 dark:hover:text-primary-400"
+                    class="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-gray-300 bg-white py-3 text-sm font-medium text-gray-500 transition-all hover:border-primary-300 hover:bg-primary-50/50 hover:text-primary-600 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-400 dark:hover:border-primary-800 dark:hover:bg-primary-900/20 dark:hover:text-primary-400"
                   >
                     <Icon name="plus" size="sm" />
                     {{ t("admin.groups.openaiMessages.addExactMapping") }}
@@ -1839,14 +1843,14 @@
               createForm.platform,
             )
           "
-          class="border-t border-gray-200 dark:border-dark-400 pt-4 mt-4 space-y-4"
+          class="border-t border-gray-200 dark:border-dark-400 pt-4 mt-4 space-y-4 console-form-block"
         >
           <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
             {{ t("admin.groups.accountFilters.title") }}
           </h4>
 
           <!-- require_oauth_only toggle -->
-          <div class="flex items-center justify-between">
+          <div class="flex items-center justify-between console-switch-row">
             <div>
               <label class="text-sm text-gray-600 dark:text-gray-400"
                 >{{ t("admin.groups.accountFilters.oauthOnly") }}</label
@@ -1863,7 +1867,7 @@
           </div>
 
           <!-- require_privacy_set toggle -->
-          <div class="flex items-center justify-between">
+          <div class="flex items-center justify-between console-switch-row">
             <div>
               <label class="text-sm text-gray-600 dark:text-gray-400"
                 >{{ t("admin.groups.accountFilters.privacySetOnly") }}</label
@@ -1886,7 +1890,7 @@
             ['anthropic', 'antigravity'].includes(createForm.platform) &&
             createForm.subscription_type !== 'subscription'
           "
-          class="border-t pt-4"
+          class="border-t pt-4 console-field"
         >
           <label class="input-label">{{
             t("admin.groups.invalidRequestFallback.title")
@@ -1919,7 +1923,7 @@
                 class="pointer-events-none absolute bottom-full left-0 z-50 mb-2 w-80 opacity-0 transition-all duration-200 group-hover:pointer-events-auto group-hover:opacity-100"
               >
                 <div
-                  class="rounded-lg bg-gray-900 p-3 text-white shadow-lg dark:bg-gray-800"
+                  class="rounded-lg bg-gray-900 p-3 text-white dark:bg-gray-800"
                 >
                   <p class="text-xs leading-relaxed text-gray-300">
                     {{ t("admin.groups.modelRouting.tooltip") }}
@@ -1960,7 +1964,7 @@
             >
               <div class="flex items-start gap-3">
                 <div class="flex-1 space-y-2">
-                  <div>
+                  <div class="console-field">
                     <label class="input-label text-xs">{{
                       t("admin.groups.modelRouting.modelPattern")
                     }}</label>
@@ -2020,7 +2024,7 @@
                           accountSearchResults[getCreateRuleSearchKey(rule)]
                             ?.length > 0
                         "
-                        class="absolute z-50 mt-1 max-h-48 w-full overflow-auto rounded-lg border bg-white shadow-lg dark:border-dark-600 dark:bg-dark-800"
+                        class="absolute z-50 mt-1 max-h-48 w-full overflow-auto rounded-lg border bg-white dark:border-dark-600 dark:bg-dark-800"
                       >
                         <button
                           v-for="account in accountSearchResults[
@@ -2074,6 +2078,7 @@
           </button>
         </div>
         </template>
+</DialogSection>
       </form>
 
       <template #footer>
@@ -2125,13 +2130,15 @@
       width="wide"
       @close="closeEditModal"
     >
+      <template #navigation><DialogSectionLinks :sections="['console.formIdentity', 'console.formPricing']" /></template>
       <form
         v-if="editingGroup"
         id="edit-group-form"
         @submit.prevent="handleUpdateGroup"
-        class="workbench-editor-form space-y-5"
+        class="workbench-editor-form space-y-5 console-form"
       >
-        <div class="workbench-field-row ">
+        <DialogSection :title="t('console.formIdentity')">
+<div class="workbench-field-row ">
           <GroupI18nField
             v-model="editForm.name"
             v-model:i18n="editForm.i18n"
@@ -2151,7 +2158,7 @@
             rows="3"
           />
         </div>
-        <div>
+        <div class="console-field">
           <label class="input-label">{{
             t("admin.groups.form.platform")
           }}</label>
@@ -2163,7 +2170,9 @@
           />
           <p class="input-hint">{{ t("admin.groups.platformNotEditable") }}</p>
         </div>
-        <template v-if="!authStore.isSimpleMode">
+</DialogSection>
+        <DialogSection :title="t('console.formPricing')">
+<template v-if="!authStore.isSimpleMode">
         <!-- 从分组复制账号（编辑时） -->
         <div v-if="copyAccountsGroupOptionsForEdit.length > 0">
           <div class="mb-1.5 flex items-center gap-1">
@@ -2181,7 +2190,7 @@
                 class="pointer-events-none absolute bottom-full left-0 z-50 mb-2 w-72 opacity-0 transition-all duration-200 group-hover:pointer-events-auto group-hover:opacity-100"
               >
                 <div
-                  class="rounded-lg bg-gray-900 p-3 text-white shadow-lg dark:bg-gray-800"
+                  class="rounded-lg bg-gray-900 p-3 text-white dark:bg-gray-800"
                 >
                   <p class="text-xs leading-relaxed text-gray-300">
                     {{ t("admin.groups.copyAccounts.tooltipEdit") }}
@@ -2255,7 +2264,7 @@
             {{ t("admin.groups.copyAccounts.hintEdit") }}
           </p>
         </div>
-        <div>
+        <div class="console-field">
           <label class="input-label">{{
             t("admin.groups.form.rateMultiplier")
           }}</label>
@@ -2269,7 +2278,7 @@
             data-tour="group-form-multiplier"
           />
         </div>
-        <div>
+        <div class="console-field">
           <label class="input-label">{{ t("admin.groups.form.rpmLimit") }}</label>
           <input
             v-model.number="editForm.rpm_limit"
@@ -2308,7 +2317,7 @@
                 class="pointer-events-none absolute bottom-full left-0 z-50 mb-2 w-72 opacity-0 transition-all duration-200 group-hover:pointer-events-auto group-hover:opacity-100"
               >
                 <div
-                  class="rounded-lg bg-gray-900 p-3 text-white shadow-lg dark:bg-gray-800"
+                  class="rounded-lg bg-gray-900 p-3 text-white dark:bg-gray-800"
                 >
                   <p class="mb-2 text-xs font-medium">
                     {{ t("admin.groups.exclusiveTooltip.title") }}
@@ -2345,14 +2354,14 @@
             </span>
           </div>
         </div>
-        <div>
+        <div class="console-field">
           <label class="input-label">{{ t("admin.groups.form.status") }}</label>
           <Select v-model="editForm.status" :options="editStatusOptions" />
         </div>
 
         <!-- Subscription Configuration -->
         <div class="mt-4 border-t pt-4">
-          <div>
+          <div class="console-field">
             <label class="input-label">{{
               t("admin.groups.subscription.type")
             }}</label>
@@ -2371,7 +2380,7 @@
             v-if="editForm.subscription_type === 'subscription'"
             class="space-y-4 border-l-2 border-primary-200 pl-4 dark:border-primary-800"
           >
-            <div>
+            <div class="console-field">
               <label class="input-label">{{
                 t("admin.groups.subscription.dailyLimit")
               }}</label>
@@ -2384,7 +2393,7 @@
                 :placeholder="t('admin.groups.subscription.noLimit')"
               />
             </div>
-            <div>
+            <div class="console-field">
               <label class="input-label">{{
                 t("admin.groups.subscription.weeklyLimit")
               }}</label>
@@ -2397,7 +2406,7 @@
                 :placeholder="t('admin.groups.subscription.noLimit')"
               />
             </div>
-            <div>
+            <div class="console-field">
               <label class="input-label">{{
                 t("admin.groups.subscription.monthlyLimit")
               }}</label>
@@ -2414,7 +2423,7 @@
         </div>
 
         <div class="border-t pt-4">
-          <div class="mb-3 flex items-center justify-between gap-3">
+          <div class="mb-3 flex items-center justify-between gap-3 console-switch-row">
             <div>
               <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
                 {{ t("admin.groups.modelAllowlist.title") }}
@@ -2427,7 +2436,7 @@
           </div>
           <div
             v-if="editModelAllowlistState.enabled"
-            class="overflow-hidden rounded-lg border border-gray-200 bg-gray-50/50 dark:border-dark-600 dark:bg-dark-800/40"
+            class="overflow-hidden rounded-lg border border-gray-200 bg-gray-50/50 dark:border-dark-600 dark:bg-dark-800/40 console-note"
           >
             <div
               v-if="!editModelAllowlistLoading && editModelAllowlistState.items.length > 0"
@@ -2444,14 +2453,14 @@
               <div class="flex items-center gap-1.5">
                 <button
                   type="button"
-                  class="rounded px-2 py-1 font-medium text-primary-600 transition-colors hover:bg-primary-50 dark:text-primary-400 dark:hover:bg-primary-900/20"
+                  class="rounded px-2 py-1 font-medium text-primary-600 transition-colors hover:bg-primary-50 dark:text-primary-400 dark:hover:bg-primary-900/20 btn"
                   @click="selectAllModelAllowlistItems(editModelAllowlistState)"
                 >
                   {{ t("admin.groups.modelAllowlist.selectAll") }}
                 </button>
                 <button
                   type="button"
-                  class="rounded px-2 py-1 font-medium text-gray-600 transition-colors hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
+                  class="rounded px-2 py-1 font-medium text-gray-600 transition-colors hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700 btn"
                   @click="invertModelAllowlistSelection(editModelAllowlistState)"
                 >
                   {{ t("admin.groups.modelAllowlist.invertSelection") }}
@@ -2518,7 +2527,7 @@
                 />
                 <button
                   type="button"
-                  class="rounded bg-primary-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-primary-700"
+                  class="rounded bg-primary-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-primary-700 btn btn-primary"
                   @click="submitEditAllowlistCustomEntry"
                 >
                   {{ t("admin.groups.modelAllowlist.addCustom") }}
@@ -2567,7 +2576,7 @@
           </div>
           <div
             v-if="editForm.image_rate_independent"
-            class="mb-4"
+            class="mb-4 console-field"
           >
             <label class="input-label">{{
               t(imagePricingI18nKey(editForm.platform, "imageMultiplier"))
@@ -2582,7 +2591,7 @@
             />
           </div>
           <div class="grid grid-cols-3 gap-3">
-            <div>
+            <div class="console-field">
               <label class="input-label">1K ($)</label>
               <input
                 v-model.number="editForm.image_price_1k"
@@ -2593,7 +2602,7 @@
                 :placeholder="getImagePricePlaceholder(editForm.platform, 'image_price_1k')"
               />
             </div>
-            <div>
+            <div class="console-field">
               <label class="input-label">2K ($)</label>
               <input
                 v-model.number="editForm.image_price_2k"
@@ -2604,7 +2613,7 @@
                 :placeholder="getImagePricePlaceholder(editForm.platform, 'image_price_2k')"
               />
             </div>
-            <div>
+            <div class="console-field">
               <label class="input-label">4K ($)</label>
               <input
                 v-model.number="editForm.image_price_4k"
@@ -2619,7 +2628,7 @@
           <p class="mt-3 text-xs text-gray-500 dark:text-gray-400">
             {{ t(imagePricingI18nKey(editForm.platform, "modeHint")) }}
           </p>
-          <div class="mt-2 rounded-lg bg-gray-50 p-3 text-xs text-gray-700 dark:bg-gray-800 dark:text-gray-300">
+          <div class="mt-2 rounded-lg bg-gray-50 p-3 text-xs text-gray-700 dark:bg-gray-800 dark:text-gray-300 console-note">
             <div class="mb-1 font-medium">
               {{ t(imagePricingI18nKey(editForm.platform, "finalPricePreview")) }}
             </div>
@@ -2650,7 +2659,7 @@
               v-if="editForm.allow_batch_image_generation"
               class="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2"
             >
-              <div>
+              <div class="console-field">
                 <label class="input-label">{{
                   t("admin.groups.imagePricing.batchDiscountMultiplier")
                 }}</label>
@@ -2663,7 +2672,7 @@
                   placeholder="0.5"
                 />
               </div>
-              <div>
+              <div class="console-field">
                 <label class="input-label">{{
                   t("admin.groups.imagePricing.batchHoldMultiplier")
                 }}</label>
@@ -2711,7 +2720,7 @@
           </div>
           <div
             v-if="editForm.video_rate_independent"
-            class="mb-4"
+            class="mb-4 console-field"
           >
             <label class="input-label">{{
               t(videoPricingI18nKey("videoMultiplier"))
@@ -2726,7 +2735,7 @@
             />
           </div>
           <div class="grid grid-cols-3 gap-3">
-            <div>
+            <div class="console-field">
               <label class="input-label">480p ($/s)</label>
               <input
                 v-model.number="editForm.video_price_480p"
@@ -2737,7 +2746,7 @@
                 :placeholder="getVideoPricePlaceholder(editForm.platform, 'video_price_480p')"
               />
             </div>
-            <div>
+            <div class="console-field">
               <label class="input-label">720p ($/s)</label>
               <input
                 v-model.number="editForm.video_price_720p"
@@ -2748,7 +2757,7 @@
                 :placeholder="getVideoPricePlaceholder(editForm.platform, 'video_price_720p')"
               />
             </div>
-            <div>
+            <div class="console-field">
               <label class="input-label">1080p ($/s)</label>
               <input
                 v-model.number="editForm.video_price_1080p"
@@ -2802,7 +2811,7 @@
           <p class="mt-3 text-xs text-gray-500 dark:text-gray-400">
             {{ t(videoPricingI18nKey("modeHint")) }}
           </p>
-          <div class="mt-2 rounded-lg bg-gray-50 p-3 text-xs text-gray-700 dark:bg-gray-800 dark:text-gray-300">
+          <div class="mt-2 rounded-lg bg-gray-50 p-3 text-xs text-gray-700 dark:bg-gray-800 dark:text-gray-300 console-note">
             <div class="mb-1 font-medium">
               {{ t(videoPricingI18nKey("finalPricePreview")) }}
             </div>
@@ -2833,7 +2842,7 @@
             v-if="editForm.peak_rate_enabled"
             class="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3"
           >
-            <div>
+            <div class="console-field">
               <label class="input-label">{{ t("admin.groups.peakRate.peakStart") }}</label>
               <input
                 v-model="editForm.peak_start"
@@ -2841,7 +2850,7 @@
                 class="input"
               />
             </div>
-            <div>
+            <div class="console-field">
               <label class="input-label">{{ t("admin.groups.peakRate.peakEnd") }}</label>
               <input
                 v-model="editForm.peak_end"
@@ -2849,7 +2858,7 @@
                 class="input"
               />
             </div>
-            <div>
+            <div class="console-field">
               <label class="input-label">{{ t("admin.groups.peakRate.peakMultiplier") }}</label>
               <input
                 v-model.number="editForm.peak_rate_multiplier"
@@ -2885,7 +2894,7 @@
             v-if="editForm.profit_control_enabled"
             class="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-2"
           >
-            <div>
+            <div class="console-field">
               <label class="input-label">{{ t("admin.groups.profitControl.minMargin") }}</label>
               <input
                 v-model.number="editForm.profit_min_margin_percent"
@@ -2898,7 +2907,7 @@
                 :title="t('admin.groups.profitControl.minMarginHint')"
               />
             </div>
-            <div>
+            <div class="console-field">
               <label class="input-label">{{ t("admin.groups.profitControl.safetyBuffer") }}</label>
               <input
                 v-model.number="editForm.profit_safety_buffer_percent"
@@ -2932,7 +2941,7 @@
                 class="pointer-events-none absolute bottom-full left-0 z-50 mb-2 w-72 opacity-0 transition-all duration-200 group-hover:pointer-events-auto group-hover:opacity-100"
               >
                 <div
-                  class="rounded-lg bg-gray-900 p-3 text-white shadow-lg dark:bg-gray-800"
+                  class="rounded-lg bg-gray-900 p-3 text-white dark:bg-gray-800"
                 >
                   <p class="text-xs leading-relaxed text-gray-300">
                     {{ t("admin.groups.supportedScopes.tooltip") }}
@@ -3005,7 +3014,7 @@
                 class="pointer-events-none absolute bottom-full left-0 z-50 mb-2 w-72 opacity-0 transition-all duration-200 group-hover:pointer-events-auto group-hover:opacity-100"
               >
                 <div
-                  class="rounded-lg bg-gray-900 p-3 text-white shadow-lg dark:bg-gray-800"
+                  class="rounded-lg bg-gray-900 p-3 text-white dark:bg-gray-800"
                 >
                   <p class="text-xs leading-relaxed text-gray-300">
                     {{ t("admin.groups.mcpXml.tooltip") }}
@@ -3047,7 +3056,7 @@
                 class="pointer-events-none absolute bottom-full left-0 z-50 mb-2 w-72 opacity-0 transition-all duration-200 group-hover:pointer-events-auto group-hover:opacity-100"
               >
                 <div
-                  class="rounded-lg bg-gray-900 p-3 text-white shadow-lg dark:bg-gray-800"
+                  class="rounded-lg bg-gray-900 p-3 text-white dark:bg-gray-800"
                 >
                   <p class="text-xs leading-relaxed text-gray-300">
                     {{ t("admin.groups.claudeCode.tooltip") }}
@@ -3070,7 +3079,7 @@
             </span>
           </div>
           <!-- 降级分组选择（仅当启用 claude_code_only 时显示） -->
-          <div v-if="editForm.claude_code_only" class="mt-3">
+          <div v-if="editForm.claude_code_only" class="mt-3 console-field">
             <label class="input-label">{{
               t("admin.groups.claudeCode.fallbackGroup")
             }}</label>
@@ -3088,12 +3097,12 @@
         <!-- Codex 网页搜索按次计费（仅 openai 平台） -->
         <div
           v-if="editForm.platform === 'openai'"
-          class="border-t border-gray-200 dark:border-dark-400 pt-4 mt-4"
+          class="border-t border-gray-200 dark:border-dark-400 pt-4 mt-4 console-form-block"
         >
           <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
             {{ t("admin.groups.webSearchPricing.title") }}
           </h4>
-          <div>
+          <div class="console-field">
             <label class="input-label">{{
               t("admin.groups.webSearchPricing.pricePerCall")
             }}</label>
@@ -3109,7 +3118,7 @@
               {{ t("admin.groups.webSearchPricing.pricePerCallHint") }}
             </p>
             <div
-              class="mt-2 rounded-lg bg-gray-50 p-3 text-xs text-gray-600 dark:bg-dark-700 dark:text-gray-300"
+              class="mt-2 rounded-lg bg-gray-50 p-3 text-xs text-gray-600 dark:bg-dark-700 dark:text-gray-300 console-note"
             >
               {{
                 t("admin.groups.webSearchPricing.finalPricePreview", {
@@ -3133,7 +3142,7 @@
 
         <div class="border-t border-gray-200 pt-4 mt-4 dark:border-dark-400">
           <div class="flex flex-wrap items-start justify-between gap-3">
-            <div class="min-w-0 flex-1">
+            <div class="min-w-0 flex-1 console-form-block">
               <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t("admin.groups.modelPricing.title") }}</h4>
               <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t("admin.groups.modelPricing.description") }}</p>
             </div>
@@ -3153,7 +3162,7 @@
         <!-- Grok Voice 显式定价（仅 grok 平台） -->
         <div
           v-if="editForm.platform === 'grok'"
-          class="border-t border-gray-200 dark:border-dark-400 pt-4 mt-4"
+          class="border-t border-gray-200 dark:border-dark-400 pt-4 mt-4 console-form-block"
         >
           <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
             {{ t("admin.groups.explicitPricing.title") }}
@@ -3162,7 +3171,7 @@
             {{ t("admin.groups.explicitPricing.description") }}
           </p>
           <div class="grid grid-cols-1 gap-3 md:grid-cols-3">
-            <div>
+            <div class="console-field">
               <label class="input-label">{{ t("admin.groups.explicitPricing.searchPricePer1k") }}</label>
               <input
                 v-model.number="editForm.search_price_per_1k"
@@ -3174,7 +3183,7 @@
                 data-testid="edit-search-price"
               />
             </div>
-            <div>
+            <div class="console-field">
               <label class="input-label">{{ t("admin.groups.voicePricing.audioRealtimePerMin") }}</label>
               <input
                 v-model.number="editForm.audio_realtime_price_per_min"
@@ -3186,7 +3195,7 @@
                 data-testid="edit-audio-realtime-price"
               />
             </div>
-            <div>
+            <div class="console-field">
               <label class="input-label">{{ t("admin.groups.voicePricing.audioTtsPerMillionChars") }}</label>
               <input
                 v-model.number="editForm.audio_tts_price_per_million_chars"
@@ -3198,7 +3207,7 @@
                 data-testid="edit-audio-tts-price"
               />
             </div>
-            <div>
+            <div class="console-field">
               <label class="input-label">{{ t("admin.groups.voicePricing.audioSttPerHour") }}</label>
               <input
                 v-model.number="editForm.audio_stt_price_per_hour"
@@ -3215,12 +3224,12 @@
         <!-- OpenAI Fast 开关（OpenAI 与 Composite 平台） -->
         <div
           v-if="supportsGroupOpenAIFast(editForm.platform)"
-          class="border-t border-gray-200 dark:border-dark-400 pt-4 mt-4"
+          class="border-t border-gray-200 dark:border-dark-400 pt-4 mt-4 console-form-block"
         >
           <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
             {{ t("admin.groups.openaiFast.title") }}
           </h4>
-          <div class="flex items-center justify-between gap-4">
+          <div class="flex items-center justify-between gap-4 console-switch-row">
             <label class="text-sm text-gray-600 dark:text-gray-400">
               {{ t("admin.groups.openaiFast.force") }}
             </label>
@@ -3233,7 +3242,7 @@
           <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
             {{ t("admin.groups.openaiFast.hint") }}
           </p>
-          <div class="flex items-center justify-between gap-4 mt-4">
+          <div class="flex items-center justify-between gap-4 mt-4 console-switch-row">
             <label class="text-sm text-gray-600 dark:text-gray-400">
               {{ t("admin.groups.openaiFast.free") }}
             </label>
@@ -3251,12 +3260,12 @@
         <!-- Codex Live 开关（OpenAI 与 Composite 平台） -->
         <div
           v-if="supportsLivePlatform(editForm.platform)"
-          class="border-t border-gray-200 dark:border-dark-400 pt-4 mt-4"
+          class="border-t border-gray-200 dark:border-dark-400 pt-4 mt-4 console-form-block"
         >
           <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
             {{ t("admin.groups.openaiLive.title") }}
           </h4>
-          <div class="flex items-center justify-between">
+          <div class="flex items-center justify-between console-switch-row">
             <label class="text-sm text-gray-600 dark:text-gray-400">{{
               t("admin.groups.openaiLive.allow")
             }}</label>
@@ -3273,14 +3282,14 @@
         <!-- OpenAI Messages 调度配置（OpenAI 与 Composite 平台） -->
         <div
           v-if="supportsMessagesDispatchPlatform(editForm.platform)"
-          class="border-t border-gray-200 dark:border-dark-400 pt-4 mt-4"
+          class="border-t border-gray-200 dark:border-dark-400 pt-4 mt-4 console-form-block"
         >
           <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
             {{ t("admin.groups.openaiMessages.title") }}
           </h4>
 
           <!-- 允许 Messages 调度开关 -->
-          <div class="flex items-center justify-between">
+          <div class="flex items-center justify-between console-switch-row">
             <label class="text-sm text-gray-600 dark:text-gray-400">{{
               t("admin.groups.openaiMessages.allowDispatch")
             }}</label>
@@ -3297,13 +3306,13 @@
             class="mt-3"
           >
             <div
-              class="relative overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm dark:border-dark-600 dark:bg-dark-800"
+              class="relative overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-dark-600 dark:bg-dark-800"
             >
               <div
                 class="border-b border-gray-100 bg-gray-50/80 px-4 py-3 dark:border-dark-700 dark:bg-dark-700/50"
               >
                 <div class="flex items-center gap-2">
-                  <div class="h-2 w-2 rounded-full bg-blue-500"></div>
+                  <div class="h-2 w-2 rounded-full bg-blue-500 console-note"></div>
                   <label
                     class="text-sm font-medium text-gray-900 dark:text-white"
                     >{{
@@ -3317,7 +3326,7 @@
               </div>
               <div class="p-4">
                 <div class="grid gap-4 md:grid-cols-3">
-                  <div>
+                  <div class="console-field">
                     <label class="input-label">{{
                       t("admin.groups.openaiMessages.opusModel")
                     }}</label>
@@ -3330,7 +3339,7 @@
                       class="input"
                     />
                   </div>
-                  <div>
+                  <div class="console-field">
                     <label class="input-label">{{
                       t("admin.groups.openaiMessages.sonnetModel")
                     }}</label>
@@ -3343,7 +3352,7 @@
                       class="input"
                     />
                   </div>
-                  <div>
+                  <div class="console-field">
                     <label class="input-label">{{
                       t("admin.groups.openaiMessages.haikuModel")
                     }}</label>
@@ -3361,7 +3370,7 @@
             </div>
 
             <div
-              class="mt-5 relative overflow-hidden rounded-xl border border-primary-200 bg-white shadow-sm dark:border-primary-900/50 dark:bg-dark-800"
+              class="mt-5 relative overflow-hidden rounded-lg border border-primary-200 bg-white dark:border-primary-900/50 dark:bg-dark-800"
             >
               <div
                 class="border-b border-primary-100 bg-primary-50/80 px-4 py-3 dark:border-primary-900/40 dark:bg-primary-900/20"
@@ -3369,7 +3378,7 @@
                 <div class="flex items-start justify-between gap-3">
                   <div>
                     <div class="flex items-center gap-2">
-                      <div class="h-2 w-2 rounded-full bg-primary-500"></div>
+                      <div class="h-2 w-2 rounded-full bg-primary-500 console-note"></div>
                       <label
                         class="text-sm font-medium text-primary-900 dark:text-primary-100"
                         >{{
@@ -3389,7 +3398,7 @@
               <div class="p-4 bg-gray-50/30 dark:bg-dark-800/30">
                 <div
                   v-if="editForm.exact_model_mappings.length === 0"
-                  class="flex items-center justify-between gap-3 rounded-xl border-2 border-dashed border-primary-200 bg-white px-5 py-4 text-sm text-primary-700 transition-colors hover:border-primary-300 dark:border-primary-900/40 dark:bg-dark-800 dark:text-primary-300 dark:hover:border-primary-800"
+                  class="flex items-center justify-between gap-3 rounded-lg border border-dashed border-primary-200 bg-white px-5 py-4 text-sm text-primary-700 transition-colors hover:border-primary-300 dark:border-primary-900/40 dark:bg-dark-800 dark:text-primary-300 dark:hover:border-primary-800"
                 >
                   <span>{{
                     t("admin.groups.openaiMessages.noExactMappings")
@@ -3408,13 +3417,13 @@
                   <div
                     v-for="row in editForm.exact_model_mappings"
                     :key="getEditMessagesDispatchRowKey(row)"
-                    class="group relative rounded-xl border border-gray-200 bg-white p-4 shadow-sm transition-all hover:border-primary-300 hover:shadow-md dark:border-dark-600 dark:bg-dark-700 dark:hover:border-primary-700"
+                    class="group relative rounded-lg border border-gray-200 bg-white p-4 transition-all hover:border-primary-300 dark:border-dark-600 dark:bg-dark-700 dark:hover:border-primary-700"
                   >
                     <div class="flex items-center gap-4">
                       <div
                         class="grid flex-1 gap-4 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] md:items-start"
                       >
-                        <div>
+                        <div class="console-field">
                           <label class="input-label">{{
                             t("admin.groups.openaiMessages.claudeModel")
                           }}</label>
@@ -3438,7 +3447,7 @@
                             class="transition-transform group-hover:translate-x-1"
                           />
                         </div>
-                        <div>
+                        <div class="console-field">
                           <label class="input-label">{{
                             t("admin.groups.openaiMessages.targetModel")
                           }}</label>
@@ -3470,7 +3479,7 @@
                   <button
                     type="button"
                     @click="addEditMessagesDispatchMapping"
-                    class="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-gray-300 bg-white py-3 text-sm font-medium text-gray-500 transition-all hover:border-primary-300 hover:bg-primary-50/50 hover:text-primary-600 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-400 dark:hover:border-primary-800 dark:hover:bg-primary-900/20 dark:hover:text-primary-400"
+                    class="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-gray-300 bg-white py-3 text-sm font-medium text-gray-500 transition-all hover:border-primary-300 hover:bg-primary-50/50 hover:text-primary-600 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-400 dark:hover:border-primary-800 dark:hover:bg-primary-900/20 dark:hover:text-primary-400"
                   >
                     <Icon name="plus" size="sm" />
                     {{ t("admin.groups.openaiMessages.addExactMapping") }}
@@ -3488,14 +3497,14 @@
               editForm.platform,
             )
           "
-          class="border-t border-gray-200 dark:border-dark-400 pt-4 mt-4 space-y-4"
+          class="border-t border-gray-200 dark:border-dark-400 pt-4 mt-4 space-y-4 console-form-block"
         >
           <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
             {{ t("admin.groups.accountFilters.title") }}
           </h4>
 
           <!-- require_oauth_only toggle -->
-          <div class="flex items-center justify-between">
+          <div class="flex items-center justify-between console-switch-row">
             <div>
               <label class="text-sm text-gray-600 dark:text-gray-400"
                 >{{ t("admin.groups.accountFilters.oauthOnly") }}</label
@@ -3512,7 +3521,7 @@
           </div>
 
           <!-- require_privacy_set toggle -->
-          <div class="flex items-center justify-between">
+          <div class="flex items-center justify-between console-switch-row">
             <div>
               <label class="text-sm text-gray-600 dark:text-gray-400"
                 >{{ t("admin.groups.accountFilters.privacySetOnly") }}</label
@@ -3535,7 +3544,7 @@
             ['anthropic', 'antigravity'].includes(editForm.platform) &&
             editForm.subscription_type !== 'subscription'
           "
-          class="border-t pt-4"
+          class="border-t pt-4 console-field"
         >
           <label class="input-label">{{
             t("admin.groups.invalidRequestFallback.title")
@@ -3568,7 +3577,7 @@
                 class="pointer-events-none absolute bottom-full left-0 z-50 mb-2 w-80 opacity-0 transition-all duration-200 group-hover:pointer-events-auto group-hover:opacity-100"
               >
                 <div
-                  class="rounded-lg bg-gray-900 p-3 text-white shadow-lg dark:bg-gray-800"
+                  class="rounded-lg bg-gray-900 p-3 text-white dark:bg-gray-800"
                 >
                   <p class="text-xs leading-relaxed text-gray-300">
                     {{ t("admin.groups.modelRouting.tooltip") }}
@@ -3609,7 +3618,7 @@
             >
               <div class="flex items-start gap-3">
                 <div class="flex-1 space-y-2">
-                  <div>
+                  <div class="console-field">
                     <label class="input-label text-xs">{{
                       t("admin.groups.modelRouting.modelPattern")
                     }}</label>
@@ -3669,7 +3678,7 @@
                           accountSearchResults[getEditRuleSearchKey(rule)]
                             ?.length > 0
                         "
-                        class="absolute z-50 mt-1 max-h-48 w-full overflow-auto rounded-lg border bg-white shadow-lg dark:border-dark-600 dark:bg-dark-800"
+                        class="absolute z-50 mt-1 max-h-48 w-full overflow-auto rounded-lg border bg-white dark:border-dark-600 dark:bg-dark-800"
                       >
                         <button
                           v-for="account in accountSearchResults[
@@ -3723,6 +3732,7 @@
           </button>
         </div>
         </template>
+</DialogSection>
       </form>
 
       <template #footer>
@@ -3809,7 +3819,7 @@
           <div
             v-for="group in sortableGroups"
             :key="group.id"
-            class="flex cursor-grab items-center gap-3 rounded-lg border border-gray-200 bg-white p-3 transition-shadow hover:shadow-md active:cursor-grabbing dark:border-dark-600 dark:bg-dark-700"
+            class="flex cursor-grab items-center gap-3 rounded-lg border border-gray-200 bg-white p-3 transition- active:cursor-grabbing dark:border-dark-600 dark:bg-dark-700"
           >
             <div class="text-gray-400">
               <Icon name="menu" size="md" />
@@ -3907,7 +3917,7 @@
     >
       <div class="grid gap-5 lg:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)]">
         <section class="min-w-0">
-          <div class="mb-3 flex items-center justify-between gap-3">
+          <div class="mb-3 flex items-center justify-between gap-3 console-form-block">
             <h3 class="text-sm font-semibold text-gray-900 dark:text-white">
               {{ t("admin.groups.compositeRoutes.routes") }}
             </h3>
@@ -4026,8 +4036,8 @@
         </section>
 
         <section class="space-y-5">
-          <form class="workbench-editor-form space-y-3" @submit.prevent="saveCompositeRoute">
-            <div class="flex items-center justify-between gap-3">
+          <form class="workbench-editor-form space-y-3 console-form" @submit.prevent="saveCompositeRoute">
+            <div class="flex items-center justify-between gap-3 console-form-block">
               <h3 class="text-sm font-semibold text-gray-900 dark:text-white">
                 {{
                   compositeRouteEditingId
@@ -4045,7 +4055,7 @@
               </button>
             </div>
 
-            <div class="workbench-field-row ">
+            <div class="workbench-field-row console-field">
               <label class="input-label">{{
                 t("admin.groups.compositeRoutes.publicModel")
               }}</label>
@@ -4059,7 +4069,7 @@
             </div>
 
             <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <div>
+              <div class="console-field">
                 <label class="input-label">{{
                   t("admin.groups.compositeRoutes.matchType")
                 }}</label>
@@ -4068,7 +4078,7 @@
                   :options="compositeRouteMatchOptions"
                 />
               </div>
-              <div>
+              <div class="console-field">
                 <label class="input-label">{{
                   t("admin.groups.compositeRoutes.endpoint")
                 }}</label>
@@ -4080,7 +4090,7 @@
             </div>
 
             <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <div>
+              <div class="console-field">
                 <label class="input-label">{{
                   t("admin.groups.compositeRoutes.targetPlatform")
                 }}</label>
@@ -4089,7 +4099,7 @@
                   :options="compositeRoutePlatformOptions"
                 />
               </div>
-              <div>
+              <div class="console-field">
                 <label class="input-label">{{
                   t("admin.groups.compositeRoutes.priority")
                 }}</label>
@@ -4103,7 +4113,7 @@
               </div>
             </div>
 
-            <div class="workbench-field-row ">
+            <div class="workbench-field-row console-field">
               <label class="input-label">{{
                 t("admin.groups.compositeRoutes.upstreamModel")
               }}</label>
@@ -4118,7 +4128,7 @@
               </p>
             </div>
 
-            <div class="workbench-field-row ">
+            <div class="workbench-field-row console-field">
               <label class="input-label">{{
                 t("admin.groups.compositeRoutes.notes")
               }}</label>
@@ -4154,7 +4164,7 @@
             </div>
           </form>
 
-          <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
+          <div class="border-t border-gray-200 pt-4 dark:border-dark-600 console-form-block">
             <h3 class="mb-3 text-sm font-semibold text-gray-900 dark:text-white">
               {{ t("admin.groups.compositeRoutes.preview") }}
             </h3>
@@ -4184,7 +4194,7 @@
 
               <div
                 v-if="compositePreviewDecision"
-                class="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm dark:border-dark-600 dark:bg-dark-800"
+                class="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm dark:border-dark-600 dark:bg-dark-800 console-note"
               >
                 <div class="mb-2 flex items-center gap-2">
                   <span
@@ -4270,6 +4280,8 @@
 </template>
 
 <script setup lang="ts">
+import DialogSectionLinks from '@/components/common/DialogSectionLinks.vue'
+import DialogSection from '@/components/common/DialogSection.vue'
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useAppStore } from "@/stores/app";

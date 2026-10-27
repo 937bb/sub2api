@@ -263,7 +263,7 @@ onMounted(() => {
           <li v-for="msg in editorValidation.errors" :key="msg">{{ msg }}</li>
         </ul>
       </div>
-      <div class="rounded-2xl bg-gray-50 p-4 dark:bg-dark-700/50">
+      <div class="rounded-lg bg-gray-50 p-4 dark:bg-dark-700/50 console-note console-form-block">
         <h4 class="mb-3 text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.ops.email.alertTitle') }}</h4>
         <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
           <div>
@@ -333,7 +333,7 @@ onMounted(() => {
         </div>
       </div>
 
-      <div class="rounded-2xl bg-gray-50 p-4 dark:bg-dark-700/50">
+      <div class="rounded-lg bg-gray-50 p-4 dark:bg-dark-700/50 console-note console-form-block">
         <h4 class="mb-3 text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.ops.email.reportTitle') }}</h4>
         <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
           <div>
@@ -381,7 +381,7 @@ onMounted(() => {
             <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
               <div>
                 <div class="mb-1 text-xs font-medium text-gray-600 dark:text-gray-300">{{ t('admin.ops.email.dailySummary') }}</div>
-                <div class="flex items-center gap-2">
+                <div class="flex items-center gap-2 console-field">
                   <label class="inline-flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
                     <input v-model="draft.report.daily_summary_enabled" type="checkbox" class="h-4 w-4 rounded border-gray-300" />
                   </label>
@@ -390,7 +390,7 @@ onMounted(() => {
               </div>
               <div>
                 <div class="mb-1 text-xs font-medium text-gray-600 dark:text-gray-300">{{ t('admin.ops.email.weeklySummary') }}</div>
-                <div class="flex items-center gap-2">
+                <div class="flex items-center gap-2 console-field">
                   <label class="inline-flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
                     <input v-model="draft.report.weekly_summary_enabled" type="checkbox" class="h-4 w-4 rounded border-gray-300" />
                   </label>
@@ -399,7 +399,7 @@ onMounted(() => {
               </div>
               <div>
                 <div class="mb-1 text-xs font-medium text-gray-600 dark:text-gray-300">{{ t('admin.ops.email.errorDigest') }}</div>
-                <div class="flex items-center gap-2">
+                <div class="flex items-center gap-2 console-field">
                   <label class="inline-flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
                     <input v-model="draft.report.error_digest_enabled" type="checkbox" class="h-4 w-4 rounded border-gray-300" />
                   </label>
@@ -412,7 +412,7 @@ onMounted(() => {
               </div>
               <div>
                 <div class="mb-1 text-xs font-medium text-gray-600 dark:text-gray-300">{{ t('admin.ops.email.accountHealth') }}</div>
-                <div class="flex items-center gap-2">
+                <div class="flex items-center gap-2 console-field">
                   <label class="inline-flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
                     <input v-model="draft.report.account_health_enabled" type="checkbox" class="h-4 w-4 rounded border-gray-300" />
                   </label>

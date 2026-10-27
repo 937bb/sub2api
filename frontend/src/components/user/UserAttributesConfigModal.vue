@@ -103,9 +103,9 @@
     width="normal"
     @close="closeEditModal"
   >
-    <form id="attribute-form" @submit.prevent="handleSave" class="workbench-editor-form space-y-4">
+    <form id="attribute-form" @submit.prevent="handleSave" class="workbench-editor-form space-y-4 console-form">
       <!-- Key -->
-      <div class="workbench-field-row ">
+      <div class="workbench-field-row console-field">
         <label class="input-label">{{ t('admin.users.attributes.key') }}</label>
         <input
           v-model="form.key"
@@ -120,7 +120,7 @@
       </div>
 
       <!-- Name -->
-      <div class="workbench-field-row ">
+      <div class="workbench-field-row console-field">
         <label class="input-label">{{ t('admin.users.attributes.name') }}</label>
         <input
           v-model="form.name"
@@ -132,7 +132,7 @@
       </div>
 
       <!-- Type -->
-      <div class="workbench-field-row ">
+      <div class="workbench-field-row console-field">
         <label class="input-label">{{ t('admin.users.attributes.type') }}</label>
         <Select
           v-model="form.type"
@@ -173,7 +173,7 @@
       </div>
 
       <!-- Description -->
-      <div class="workbench-field-row ">
+      <div class="workbench-field-row console-field">
         <label class="input-label">{{ t('admin.users.attributes.fieldDescription') }}</label>
         <input
           v-model="form.description"
@@ -184,7 +184,7 @@
       </div>
 
       <!-- Placeholder -->
-      <div class="workbench-field-row ">
+      <div class="workbench-field-row console-field">
         <label class="input-label">{{ t('admin.users.attributes.placeholder') }}</label>
         <input
           v-model="form.placeholder"

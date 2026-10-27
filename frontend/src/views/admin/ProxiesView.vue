@@ -428,9 +428,10 @@
         v-if="createMode === 'standard'"
         id="create-proxy-form"
         @submit.prevent="handleCreateProxy"
-        class="workbench-editor-form space-y-5"
+        class="workbench-editor-form space-y-5 console-form"
       >
-        <div class="workbench-field-row ">
+        <DialogSection :title="t('console.formConnection')">
+<div class="workbench-field-row console-field">
           <label class="input-label">{{ t('admin.proxies.name') }}</label>
           <input
             v-model="createForm.name"
@@ -440,12 +441,12 @@
             :placeholder="t('admin.proxies.enterProxyName')"
           />
         </div>
-        <div class="workbench-field-row ">
+        <div class="workbench-field-row console-field">
           <label class="input-label">{{ t('admin.proxies.protocol') }}</label>
           <Select v-model="createForm.protocol" :options="protocolSelectOptions" />
         </div>
         <div class="grid grid-cols-2 gap-4">
-          <div>
+          <div class="console-field">
             <label class="input-label">{{ t('admin.proxies.host') }}</label>
             <input
               v-model="createForm.host"
@@ -455,7 +456,7 @@
               class="input"
             />
           </div>
-          <div>
+          <div class="console-field">
             <label class="input-label">{{ t('admin.proxies.port') }}</label>
             <input
               v-model.number="createForm.port"
@@ -468,7 +469,7 @@
             />
           </div>
         </div>
-        <div class="workbench-field-row ">
+        <div class="workbench-field-row console-field">
           <label class="input-label">{{ t('admin.proxies.username') }}</label>
           <input
             v-model="createForm.username"
@@ -495,7 +496,9 @@
             </button>
           </div>
         </div>
-        <div class="workbench-field-row ">
+</DialogSection>
+        <DialogSection :title="t('console.formScheduling')">
+<div class="workbench-field-row console-field">
           <label class="input-label">{{ t('admin.proxies.expiresAt') }}</label>
           <div class="mb-2 flex flex-wrap gap-2">
             <button
@@ -518,7 +521,7 @@
           />
           <input v-model="createForm.expires_at" type="date" max="9999-12-31" class="input" />
         </div>
-        <div class="workbench-field-row ">
+        <div class="workbench-field-row console-field">
           <label class="input-label">{{ t('admin.proxies.fallbackMode') }}</label>
           <Select v-model="createForm.fallback_mode" :options="[
             { label: t('admin.proxies.fallbackNone'), value: 'none' },
@@ -526,16 +529,17 @@
             { label: t('admin.proxies.fallbackDirect'), value: 'direct' },
           ]" />
         </div>
-        <div class="workbench-field-row " v-if="createForm.fallback_mode === 'proxy'">
+        <div class="workbench-field-row console-field" v-if="createForm.fallback_mode === 'proxy'">
           <label class="input-label">{{ t('admin.proxies.backupProxy') }}</label>
           <Select v-model="createForm.backup_proxy_id" :options="backupProxyOptions()" />
         </div>
+</DialogSection>
 
       </form>
 
       <!-- Batch Add Form -->
       <div v-else class="space-y-5">
-        <div>
+        <div class="console-field">
           <label class="input-label">{{ t('admin.proxies.batchInput') }}</label>
           <textarea
             v-model="batchInput"
@@ -550,7 +554,7 @@
         </div>
 
         <!-- Parse Result -->
-        <div v-if="batchParseResult.total > 0" class="rounded-lg bg-gray-50 p-4 dark:bg-dark-700">
+        <div v-if="batchParseResult.total > 0" class="rounded-lg bg-gray-50 p-4 dark:bg-dark-700 console-note">
             <div class="flex items-center gap-4 text-sm">
               <div class="flex items-center gap-1.5">
               <Icon name="checkCircle" size="sm" :stroke-width="2" class="text-primary-500" />
@@ -674,22 +678,23 @@
         v-if="editingProxy"
         id="edit-proxy-form"
         @submit.prevent="handleUpdateProxy"
-        class="workbench-editor-form space-y-5"
+        class="workbench-editor-form space-y-5 console-form"
       >
-        <div class="workbench-field-row ">
+        <DialogSection :title="t('console.formConnection')">
+<div class="workbench-field-row console-field">
           <label class="input-label">{{ t('admin.proxies.name') }}</label>
           <input v-model="editForm.name" type="text" required class="input" />
         </div>
-        <div class="workbench-field-row ">
+        <div class="workbench-field-row console-field">
           <label class="input-label">{{ t('admin.proxies.protocol') }}</label>
           <Select v-model="editForm.protocol" :options="protocolSelectOptions" />
         </div>
         <div class="grid grid-cols-2 gap-4">
-          <div>
+          <div class="console-field">
             <label class="input-label">{{ t('admin.proxies.host') }}</label>
             <input v-model="editForm.host" type="text" required class="input" />
           </div>
-          <div>
+          <div class="console-field">
             <label class="input-label">{{ t('admin.proxies.port') }}</label>
             <input
               v-model.number="editForm.port"
@@ -701,7 +706,7 @@
             />
           </div>
         </div>
-        <div class="workbench-field-row ">
+        <div class="workbench-field-row console-field">
           <label class="input-label">{{ t('admin.proxies.username') }}</label>
           <input v-model="editForm.username" type="text" class="input" />
         </div>
@@ -724,11 +729,13 @@
             </button>
           </div>
         </div>
-        <div class="workbench-field-row ">
+</DialogSection>
+        <DialogSection :title="t('console.formScheduling')">
+<div class="workbench-field-row console-field">
           <label class="input-label">{{ t('admin.proxies.status') }}</label>
           <Select v-model="editForm.status" :options="editStatusOptions" />
         </div>
-        <div class="workbench-field-row ">
+        <div class="workbench-field-row console-field">
           <label class="input-label">{{ t('admin.proxies.expiresAt') }}</label>
           <div class="mb-2 flex flex-wrap gap-2">
             <button
@@ -751,7 +758,7 @@
           />
           <input v-model="editForm.expires_at" type="date" max="9999-12-31" class="input" />
         </div>
-        <div class="workbench-field-row ">
+        <div class="workbench-field-row console-field">
           <label class="input-label">{{ t('admin.proxies.fallbackMode') }}</label>
           <Select v-model="editForm.fallback_mode" :options="[
             { label: t('admin.proxies.fallbackNone'), value: 'none' },
@@ -759,10 +766,11 @@
             { label: t('admin.proxies.fallbackDirect'), value: 'direct' },
           ]" />
         </div>
-        <div class="workbench-field-row " v-if="editForm.fallback_mode === 'proxy'">
+        <div class="workbench-field-row console-field" v-if="editForm.fallback_mode === 'proxy'">
           <label class="input-label">{{ t('admin.proxies.backupProxy') }}</label>
           <Select v-model="editForm.backup_proxy_id" :options="backupProxyOptions(editingProxy?.id)" />
         </div>
+</DialogSection>
 
       </form>
 
@@ -850,7 +858,7 @@
       @close="closeQualityReportDialog"
     >
       <div v-if="qualityReport" class="space-y-4">
-        <div class="rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-dark-600 dark:bg-dark-700">
+        <div class="rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-dark-600 dark:bg-dark-700 console-note">
           <div class="flex items-center justify-between gap-4">
             <div>
               <div class="text-sm text-gray-500 dark:text-gray-400">
@@ -967,6 +975,7 @@
 </template>
 
 <script setup lang="ts">
+import DialogSection from '@/components/common/DialogSection.vue'
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'

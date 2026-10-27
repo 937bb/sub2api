@@ -5,47 +5,50 @@
     width="normal"
     @close="$emit('close')"
   >
-    <form id="create-user-form" @submit.prevent="submit" class="workbench-editor-form space-y-5">
-      <div class="workbench-field-row ">
-        <label class="input-label">{{ t('admin.users.email') }}</label>
-        <input v-model="form.email" type="email" required class="input" :placeholder="t('admin.users.enterEmail')" />
+    <form id="create-user-form" @submit.prevent="submit" class="workbench-editor-form space-y-5 console-form">
+      <DialogSection :title="t('console.formIdentity')">
+<div class="workbench-field-row console-field">
+        <label :for="`${fieldId}-email`" class="input-label">{{ t('admin.users.email') }}</label>
+        <input :id="`${fieldId}-email`" v-model="form.email" type="email" required class="input" :placeholder="t('admin.users.enterEmail')" />
       </div>
       <div class="workbench-field-row ">
-        <label class="input-label">{{ t('admin.users.password') }}</label>
+        <label :for="`${fieldId}-password`" class="input-label">{{ t('admin.users.password') }}</label>
         <div class="flex gap-2">
           <div class="relative flex-1">
-            <input v-model="form.password" type="text" required class="input pr-10" :placeholder="t('admin.users.enterPassword')" />
+            <input :id="`${fieldId}-password`" v-model="form.password" type="text" required class="input pr-10" :placeholder="t('admin.users.enterPassword')" />
           </div>
-          <button type="button" @click="generateRandomPassword" class="btn btn-secondary px-3">
+          <button type="button" @click="generateRandomPassword" :aria-label="t('admin.users.generatePassword')" class="btn btn-secondary px-3">
             <Icon name="refresh" size="md" />
           </button>
         </div>
       </div>
-      <div class="workbench-field-row ">
-        <label class="input-label">{{ t('admin.users.username') }}</label>
-        <input v-model="form.username" type="text" class="input" :placeholder="t('admin.users.enterUsername')" />
+      <div class="workbench-field-row console-field">
+        <label :for="`${fieldId}-username`" class="input-label">{{ t('admin.users.username') }}</label>
+        <input :id="`${fieldId}-username`" v-model="form.username" type="text" class="input" :placeholder="t('admin.users.enterUsername')" />
       </div>
-      <div class="workbench-field-row ">
-        <label class="input-label">{{ t('admin.users.form.roleLabel') }}</label>
-        <select v-model="form.role" class="input">
+</DialogSection>
+      <DialogSection :title="t('console.formAccess')">
+<div class="workbench-field-row console-field">
+        <label :for="`${fieldId}-role`" class="input-label">{{ t('admin.users.form.roleLabel') }}</label>
+        <select :id="`${fieldId}-role`" v-model="form.role" class="input">
           <option value="user">{{ t('admin.users.roles.user') }}</option>
           <option value="admin">{{ t('admin.users.roles.admin') }}</option>
         </select>
       </div>
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div>
-          <label class="input-label">{{ t('admin.users.columns.balance') }}</label>
-          <input v-model="form.balance" type="number" step="any" class="input" />
+        <div class="console-field">
+          <label :for="`${fieldId}-balance`" class="input-label">{{ t('admin.users.columns.balance') }}</label>
+          <input :id="`${fieldId}-balance`" v-model="form.balance" type="number" step="any" class="input" />
         </div>
-        <div>
-          <label class="input-label">{{ t('admin.users.columns.concurrency') }}</label>
-          <input v-model.number="form.concurrency" type="number" class="input" />
+        <div class="console-field">
+          <label :for="`${fieldId}-concurrency`" class="input-label">{{ t('admin.users.columns.concurrency') }}</label>
+          <input :id="`${fieldId}-concurrency`" v-model.number="form.concurrency" type="number" class="input" />
         </div>
       </div>
-      <div class="workbench-field-row ">
-        <label class="input-label">{{ t('admin.users.form.rpmLimit') }}</label>
+      <div class="workbench-field-row console-field">
+        <label :for="`${fieldId}-rpm_limit`" class="input-label">{{ t('admin.users.form.rpmLimit') }}</label>
         <input
-          v-model.number="form.rpm_limit"
+          :id="`${fieldId}-rpm_limit`" v-model.number="form.rpm_limit"
           type="number"
           min="0"
           step="1"
@@ -54,6 +57,7 @@
         />
         <p class="input-hint">{{ t('admin.users.form.rpmLimitHint') }}</p>
       </div>
+</DialogSection>
     </form>
     <template #footer>
       <div class="flex justify-end gap-3">
@@ -65,12 +69,13 @@
     </template>
   </BaseDialog>
 
-  <!-- 创建管理员账号时后端要求 step-up 2FA，弹出 TOTP 验证后自动重试 -->
+  <!-- Verify elevated access with TOTP before retrying administrator creation. -->
   <TotpStepUpDialog :controller="stepUp" />
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, watch } from 'vue'
+import DialogSection from '@/components/common/DialogSection.vue'
+import { reactive, ref, watch, useId } from 'vue'
 import { useI18n } from 'vue-i18n'; import { adminAPI } from '@/api/admin'
 import { useAppStore } from '@/stores/app'
 import BaseDialog from '@/components/common/BaseDialog.vue'
@@ -78,6 +83,7 @@ import Icon from '@/components/icons/Icon.vue'
 import { useStepUp, isStepUpBlocked, isStepUpCancelled, stepUpBlockReason } from '@/composables/useStepUp'
 import TotpStepUpDialog from '@/components/auth/TotpStepUpDialog.vue'
 
+const fieldId = useId()
 const props = defineProps<{ show: boolean }>()
 const emit = defineEmits(['close', 'success']); const { t } = useI18n()
 const appStore = useAppStore()
@@ -97,13 +103,13 @@ const submit = async () => {
     if (balance !== '') {
       payload.balance = Number(balance)
     }
-    // 创建管理员属敏感操作：后端返回 STEP_UP_REQUIRED 时弹 TOTP 验证并重试
+    // Complete step-up verification before retrying administrator creation.
     await stepUp.run(() => adminAPI.users.create(payload))
     appStore.showSuccess(t('admin.users.userCreated'))
     emit('success'); emit('close')
   } catch (e: any) {
     if (isStepUpCancelled(e)) {
-      // 用户主动取消二次验证：静默返回，表单保持打开。
+      // Keep entered values when the user cancels step-up verification.
     } else if (isStepUpBlocked(e)) {
       appStore.showError(
         stepUpBlockReason(e) === 'STEP_UP_ADMIN_API_KEY_FORBIDDEN'

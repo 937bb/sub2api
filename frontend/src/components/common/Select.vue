@@ -51,7 +51,7 @@
         <div
           v-if="isOpen"
           ref="dropdownRef"
-          class="select-dropdown-portal"
+          class="select-dropdown-portal console-popover"
           :class="[instanceId]"
           :style="dropdownStyle"
           role="listbox"
@@ -520,26 +520,39 @@ onUnmounted(() => {
 <style scoped>
 .select-trigger {
   @apply flex w-full items-center justify-between gap-2;
-  @apply min-h-9 rounded-lg px-3 py-2 text-sm;
-  @apply bg-white dark:bg-dark-800;
-  @apply border border-gray-200 dark:border-dark-600;
-  @apply text-gray-900 dark:text-gray-100;
-  @apply transition-all duration-200;
-  @apply focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/30;
-  @apply hover:border-gray-300 dark:hover:border-dark-500;
-  @apply cursor-pointer;
+  min-height: 36px;
+  padding: 7px 11px;
+  border: 1px solid var(--console-line);
+  border-radius: var(--control-radius);
+  background: var(--console-nav);
+  color: var(--console-ink);
+  font-size: 13px;
+  line-height: 20px;
+  box-shadow: none;
+  cursor: pointer;
+  transition: border-color 150ms ease, background-color 150ms ease;
 }
 
-.select-trigger-open {
-  @apply border-primary-500 ring-2 ring-primary-500/30;
+.select-trigger:hover:not(:disabled) { border-color: #b3bdc9; }
+.select-trigger:focus-visible,
+.select-trigger.select-trigger-open {
+  background: var(--console-surface);
+  border-color: var(--console-accent);
+  outline: 2px solid var(--console-selected);
+  outline-offset: 0;
 }
 
-.select-trigger-error {
-  @apply border-red-500 focus:border-red-500 focus:ring-red-500/30;
+.select-trigger.select-trigger-error {
+  border-color: #dc2626;
 }
 
 .select-trigger-disabled {
-  @apply cursor-not-allowed bg-gray-100 opacity-60 dark:bg-dark-900;
+  cursor: not-allowed;
+  opacity: .6;
+}
+
+@media (max-width: 640px) {
+  .select-trigger { font-size: 16px; }
 }
 
 .select-value {

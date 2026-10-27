@@ -3,8 +3,8 @@
     <Transition name="modal">
       <div
         v-if="show"
-        class="modal-overlay"
-        :class="{ 'workbench-sheet-overlay': presentation === 'sheet' }"
+        class="modal-overlay console-overlay"
+        :class="{ 'console-sheet-overlay': presentation === 'sheet' }"
         :style="zIndexStyle"
         :aria-labelledby="dialogId"
         role="dialog"
@@ -12,24 +12,27 @@
         @click.self="handleClose"
       >
         <!-- Modal panel -->
-        <div ref="dialogRef" :class="['modal-content', widthClasses]" @click.stop>
+        <div ref="dialogRef" :class="['modal-content console-dialog', widthClasses]" :data-width="width" tabindex="-1" @click.stop>
           <!-- Header -->
           <div class="modal-header">
-            <h3 :id="dialogId" class="modal-title">
-              {{ title }}
-            </h3>
+            <div class="console-dialog-heading">
+              <h3 :id="dialogId" class="modal-title">{{ title }}</h3>
+              <p v-if="description" class="console-dialog-description">{{ description }}</p>
+            </div>
             <button
               v-if="showCloseButton"
               @click="emit('close')"
-              class="-mr-2 rounded-xl p-2 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/30 focus-visible:ring-offset-2 dark:text-dark-500 dark:hover:bg-dark-700 dark:hover:text-dark-300 dark:focus-visible:ring-offset-dark-900"
-              aria-label="Close modal"
+              type="button"
+              class="console-dialog-close"
+              :aria-label="closeLabel"
             >
               <Icon name="x" size="md" />
             </button>
           </div>
 
           <!-- Body -->
-          <div ref="modalBodyRef" class="modal-body">
+          <div v-if="$slots.navigation" class="console-dialog-navigation"><slot name="navigation"></slot></div>
+          <div ref="modalBodyRef" class="modal-body" :class="bodyClass">
             <slot></slot>
           </div>
 
@@ -49,13 +52,17 @@ const openDialogs = new Set<string>()
 </script>
 
 <script setup lang="ts">
-import { computed, watch, onMounted, onUnmounted, ref, nextTick } from 'vue'
+import { computed, watch, onMounted, onUnmounted, ref, nextTick, getCurrentInstance } from 'vue'
 import Icon from '@/components/icons/Icon.vue'
 
-// 生成唯一ID以避免多个对话框时ID冲突
+// Keep the primitive usable without an i18n plugin in isolated consumers.
+const translate = getCurrentInstance()?.appContext.config.globalProperties.$t
+const closeLabel = computed(() => translate?.('common.close') ?? 'Close modal')
+
+// Each mounted dialog keeps its own label and place in the modal stack.
 const dialogId = `modal-title-${++dialogIdCounter}`
 
-// 焦点管理
+// Restore the trigger when a dialog closes.
 const dialogRef = ref<HTMLElement | null>(null)
 const modalBodyRef = ref<HTMLElement | null>(null)
 let previousActiveElement: HTMLElement | null = null
@@ -65,6 +72,8 @@ type DialogWidth = 'narrow' | 'normal' | 'wide' | 'extra-wide' | 'full'
 interface Props {
   show: boolean
   title: string
+  description?: string
+  bodyClass?: string
   width?: DialogWidth
   closeOnEscape?: boolean
   closeOnClickOutside?: boolean
@@ -114,8 +123,22 @@ const handleClose = () => {
 }
 
 const handleEscape = (event: KeyboardEvent) => {
-  if (props.show && props.closeOnEscape && event.key === 'Escape' && [...openDialogs].pop() === dialogId) {
+  if (!props.show || [...openDialogs].pop() !== dialogId || event.defaultPrevented) return
+  if (props.closeOnEscape && event.key === 'Escape') {
     emit('close')
+  }
+  if (event.key !== 'Tab' || !dialogRef.value) return
+  // Select menus are portalled siblings and manage their own keyboard focus.
+  if (document.activeElement?.closest('[role="listbox"]')) return
+  const items = Array.from(dialogRef.value.querySelectorAll<HTMLElement>(
+    'button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])'
+  )).filter((element) => element.getClientRects().length > 0 && !element.closest('[inert], [aria-hidden="true"]'))
+  const target = event.shiftKey ? items.at(-1) : items[0]
+  if (!items.length || !dialogRef.value.contains(document.activeElement) ||
+    (event.shiftKey && document.activeElement === items[0]) ||
+    (!event.shiftKey && document.activeElement === items.at(-1))) {
+    event.preventDefault()
+    ;(target || dialogRef.value).focus()
   }
 }
 
@@ -130,17 +153,16 @@ watch(
   () => props.show,
   async (isOpen) => {
     if (isOpen) {
-      // 保存当前焦点元素
+      // Save the trigger before locking document scroll.
       previousActiveElement = document.activeElement as HTMLElement
-      // 使用CSS类而不是直接操作style,更易于管理多个对话框
       updateScrollLock(true)
 
-      // 等待DOM更新后设置焦点到对话框
+      // Wait for the panel to mount before moving focus.
       await nextTick()
       if (modalBodyRef.value) {
         modalBodyRef.value.scrollTop = 0
       }
-      if (dialogRef.value) {
+      if (dialogRef.value && !dialogRef.value.contains(document.activeElement)) {
         const firstFocusable = dialogRef.value.querySelector<HTMLElement>(
           'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
         )
@@ -148,7 +170,7 @@ watch(
       }
     } else {
       updateScrollLock(false)
-      // 恢复之前的焦点
+      // Nested dialogs restore focus to their parent.
       if (previousActiveElement && typeof previousActiveElement.focus === 'function') {
         previousActiveElement.focus()
       }
@@ -164,7 +186,9 @@ onMounted(() => {
 
 onUnmounted(() => {
   document.removeEventListener('keydown', handleEscape)
-  // 确保组件卸载时移除滚动锁定
+  // Release only this dialog's scroll lock.
   updateScrollLock(false)
+  // Conditional dialogs unmount without first receiving show=false.
+  if (previousActiveElement?.isConnected) previousActiveElement.focus()
 })
 </script>

@@ -7,7 +7,7 @@
     :show-close-button="!submitting"
     @close="close"
   >
-    <form id="bulk-edit-keys-form" class="workbench-editor-form space-y-5" @submit.prevent="submit">
+    <form id="bulk-edit-keys-form" class="workbench-editor-form space-y-5 console-form" @submit.prevent="submit">
       <div class="space-y-1 text-sm">
         <p class="font-medium text-gray-900 dark:text-white">
           {{ t('keys.bulkEdit.selectedCount', { count: pendingKeys.length }) }}
@@ -16,7 +16,7 @@
       </div>
 
       <fieldset :disabled="submitting" class="space-y-5">
-        <div class="space-y-2">
+        <div class="space-y-2 console-field">
           <label class="flex items-center gap-2 text-sm font-medium">
             <input v-model="enabled.group_id" type="checkbox" class="checkbox" data-test="enable-group" />
             {{ t('keys.groupLabel') }}
@@ -33,7 +33,7 @@
           />
         </div>
 
-        <div class="space-y-2">
+        <div class="space-y-2 console-field">
           <label class="flex items-center gap-2 text-sm font-medium">
             <input v-model="enabled.status" type="checkbox" class="checkbox" data-test="enable-status" />
             {{ t('keys.statusLabel') }}
@@ -78,7 +78,7 @@
             <input v-model="enabled.expires_at" type="checkbox" class="checkbox" data-test="enable-expiration" />
             {{ t('keys.expiration') }}
           </label>
-          <div v-if="enabled.expires_at" class="space-y-2">
+          <div v-if="enabled.expires_at" class="space-y-2 console-field">
             <label class="flex items-center gap-2 text-sm">
               <input v-model="neverExpires" type="checkbox" class="checkbox" data-test="never-expires" />
               {{ t('keys.noExpiration') }}

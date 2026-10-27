@@ -5,17 +5,17 @@
     width="wide"
     @close="emit('close')"
   >
-    <form id="provider-form" @submit.prevent="handleSave" class="space-y-4">
+    <form id="provider-form" @submit.prevent="handleSave" class="space-y-4 console-form">
       <!-- Name + Key -->
       <div class="grid grid-cols-2 gap-4">
-        <div>
+        <div class="console-field">
           <label class="input-label">
             {{ t('admin.settings.payment.providerName') }}
             <span class="text-red-500">*</span>
           </label>
           <input v-model="form.name" type="text" class="input" required />
         </div>
-        <div>
+        <div class="console-field">
           <label class="input-label">
             {{ t('admin.settings.payment.providerKey') }}
             <span class="text-red-500">*</span>
@@ -90,21 +90,21 @@
             :key="index"
             class="grid grid-cols-[1fr_1fr_1fr_auto] items-end gap-2"
           >
-            <div>
+            <div class="console-field">
               <label class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.payment.customMethodType') }}</label>
               <input v-model="method.type" type="text" class="input mt-0.5" placeholder="credit_card" />
             </div>
-            <div>
+            <div class="console-field">
               <label class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.payment.customMethodUpstreamType') }}</label>
               <input v-model="method.upstreamType" type="text" class="input mt-0.5" placeholder="credit_card" />
             </div>
-            <div>
+            <div class="console-field">
               <label class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.payment.customMethodDisplayName') }}</label>
               <input v-model="method.displayName" type="text" class="input mt-0.5" :placeholder="t('admin.settings.payment.customMethodDisplayNamePlaceholder')" />
             </div>
             <button
               type="button"
-              class="rounded-lg border border-red-200 px-2.5 py-2 text-xs font-medium text-red-600 transition-colors hover:bg-red-50 dark:border-red-800/60 dark:text-red-300 dark:hover:bg-red-900/20"
+              class="rounded-lg border border-red-200 px-2.5 py-2 text-xs font-medium text-red-600 transition-colors hover:bg-red-50 dark:border-red-800/60 dark:text-red-300 dark:hover:bg-red-900/20 btn"
               @click="removeEasyPayCustomMethod(index)"
             >
               {{ t('common.delete') }}
@@ -116,7 +116,7 @@
 
       <!-- Config fields -->
       <div class="border-t border-gray-200 pt-4 dark:border-dark-700">
-        <div class="mb-3 flex items-center gap-2">
+        <div class="mb-3 flex items-center gap-2 console-form-block">
           <h4 class="text-sm font-semibold text-gray-900 dark:text-white">
             {{ t('admin.settings.payment.providerConfig') }}
           </h4>
@@ -153,7 +153,7 @@
           {{ paymentGuide.summary }}
         </p>
         <div class="space-y-3">
-          <div v-for="field in resolvedFields" :key="field.key">
+          <div class="console-field" v-for="field in resolvedFields" :key="field.key">
             <label class="input-label">
               {{ field.label }}
               <span v-if="field.optional" class="text-xs text-gray-400">({{ t('common.optional') }})</span>
@@ -230,7 +230,7 @@
         </div>
 
         <!-- 服务商 Webhook 提示 -->
-        <div v-if="providerWebhookUrl" class="mt-3 rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-800/50 dark:bg-blue-900/20">
+        <div v-if="providerWebhookUrl" class="mt-3 rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-800/50 dark:bg-blue-900/20 console-note">
           <p class="text-xs text-blue-700 dark:text-blue-300">
             {{ t(providerWebhookHint) }}
           </p>
@@ -259,7 +259,7 @@
           >
             <p class="mb-2 text-xs font-medium text-gray-700 dark:text-gray-300">{{ lt.label }}</p>
             <div class="grid grid-cols-3 gap-3">
-              <div>
+              <div class="console-field">
                 <label class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.payment.limitSingleMin') }}</label>
                 <input
                   type="number"
@@ -268,7 +268,7 @@
                   class="input mt-0.5" min="1" step="0.01" :placeholder="limitPlaceholder(lt.value)"
                 />
               </div>
-              <div>
+              <div class="console-field">
                 <label class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.payment.limitSingleMax') }}</label>
                 <input
                   type="number"
@@ -277,7 +277,7 @@
                   class="input mt-0.5" min="1" step="0.01" :placeholder="limitPlaceholder(lt.value)"
                 />
               </div>
-              <div>
+              <div class="console-field">
                 <label class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.payment.limitDaily') }}</label>
                 <input
                   type="number"

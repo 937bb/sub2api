@@ -22,7 +22,7 @@
         <Icon name="refresh" size="lg" class="animate-spin text-gray-400" />
       </div>
 
-      <div v-else-if="profiles.length === 0" class="py-8 text-center">
+      <div v-else-if="profiles.length === 0" class="py-8 text-center console-form-block">
         <div class="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-gray-100 dark:bg-dark-700">
           <Icon name="shield" size="lg" class="text-gray-400" />
         </div>
@@ -128,9 +128,9 @@
       :z-index="60"
       @close="closeFormModal"
     >
-      <form @submit.prevent="handleSubmit" class="workbench-editor-form space-y-4">
+      <form @submit.prevent="handleSubmit" class="workbench-editor-form space-y-4 console-form">
         <!-- Paste YAML -->
-        <div class="workbench-field-row">
+        <div class="workbench-field-row console-field">
           <label class="input-label">{{ t('admin.tlsFingerprintProfiles.form.pasteYaml') }}</label>
           <textarea
             v-model="yamlInput"
@@ -154,7 +154,7 @@
 
         <!-- Basic Info -->
         <div class="grid grid-cols-2 gap-4">
-          <div>
+          <div class="console-field">
             <label class="input-label">{{ t('admin.tlsFingerprintProfiles.form.name') }}</label>
             <input
               v-model="form.name"
@@ -164,7 +164,7 @@
               :placeholder="t('admin.tlsFingerprintProfiles.form.namePlaceholder')"
             />
           </div>
-          <div>
+          <div class="console-field">
             <label class="input-label">{{ t('admin.tlsFingerprintProfiles.form.description') }}</label>
             <input
               v-model="form.description"
@@ -204,7 +204,7 @@
 
         <!-- TLS Array Fields - 2 column grid -->
         <div class="grid grid-cols-2 gap-4">
-          <div>
+          <div class="console-field">
             <label class="input-label text-xs">{{ t('admin.tlsFingerprintProfiles.form.cipherSuites') }}</label>
             <textarea
               v-model="fieldInputs.cipher_suites"
@@ -215,7 +215,7 @@
             <p class="input-hint text-xs">{{ t('admin.tlsFingerprintProfiles.form.cipherSuitesHint') }}</p>
           </div>
 
-          <div>
+          <div class="console-field">
             <label class="input-label text-xs">{{ t('admin.tlsFingerprintProfiles.form.curves') }}</label>
             <textarea
               v-model="fieldInputs.curves"
@@ -226,7 +226,7 @@
             <p class="input-hint text-xs">{{ t('admin.tlsFingerprintProfiles.form.curvesHint') }}</p>
           </div>
 
-          <div>
+          <div class="console-field">
             <label class="input-label text-xs">{{ t('admin.tlsFingerprintProfiles.form.signatureAlgorithms') }}</label>
             <textarea
               v-model="fieldInputs.signature_algorithms"
@@ -236,7 +236,7 @@
             />
           </div>
 
-          <div>
+          <div class="console-field">
             <label class="input-label text-xs">{{ t('admin.tlsFingerprintProfiles.form.supportedVersions') }}</label>
             <textarea
               v-model="fieldInputs.supported_versions"
@@ -246,7 +246,7 @@
             />
           </div>
 
-          <div>
+          <div class="console-field">
             <label class="input-label text-xs">{{ t('admin.tlsFingerprintProfiles.form.keyShareGroups') }}</label>
             <textarea
               v-model="fieldInputs.key_share_groups"
@@ -256,7 +256,7 @@
             />
           </div>
 
-          <div>
+          <div class="console-field">
             <label class="input-label text-xs">{{ t('admin.tlsFingerprintProfiles.form.extensions') }}</label>
             <textarea
               v-model="fieldInputs.extensions"
@@ -266,7 +266,7 @@
             />
           </div>
 
-          <div>
+          <div class="console-field">
             <label class="input-label text-xs">{{ t('admin.tlsFingerprintProfiles.form.pointFormats') }}</label>
             <textarea
               v-model="fieldInputs.point_formats"
@@ -276,7 +276,7 @@
             />
           </div>
 
-          <div>
+          <div class="console-field">
             <label class="input-label text-xs">{{ t('admin.tlsFingerprintProfiles.form.pskModes') }}</label>
             <textarea
               v-model="fieldInputs.psk_modes"
@@ -288,7 +288,7 @@
         </div>
 
         <!-- ALPN Protocols - full width -->
-        <div class="workbench-field-row">
+        <div class="workbench-field-row console-field">
           <label class="input-label text-xs">{{ t('admin.tlsFingerprintProfiles.form.alpnProtocols') }}</label>
           <textarea
             v-model="fieldInputs.alpn_protocols"

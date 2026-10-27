@@ -288,18 +288,16 @@
     <!-- Cloudflare R2 Setup Guide Modal -->
     <teleport to="body">
       <transition name="modal">
-        <div v-if="showR2Guide" class="fixed inset-0 z-50 flex items-center justify-center p-4" @mousedown.self="showR2Guide = false">
-          <div class="fixed inset-0 bg-black/50" @click="showR2Guide = false"></div>
-          <div class="relative max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-xl bg-white p-6 shadow-2xl dark:bg-dark-800">
+        <BaseDialog v-if="showR2Guide" :show="true" :title="t('admin.backup.r2Guide.title')" width="wide" @close="showR2Guide = false">
             <button type="button" class="absolute right-4 top-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200" @click="showR2Guide = false">
               <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
             </button>
 
-            <h2 class="mb-4 text-lg font-bold text-gray-900 dark:text-white">{{ t('admin.backup.r2Guide.title') }}</h2>
+
             <p class="mb-4 text-sm text-gray-500 dark:text-gray-400">{{ t('admin.backup.r2Guide.intro') }}</p>
 
             <!-- Step 1 -->
-            <div class="mb-5">
+            <div class="mb-5 console-form-block">
               <h3 class="mb-2 flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-white">
                 <span class="flex h-6 w-6 items-center justify-center rounded-full bg-primary-100 text-xs font-bold text-primary-700 dark:bg-primary-900/40 dark:text-primary-300">1</span>
                 {{ t('admin.backup.r2Guide.step1.title') }}
@@ -312,7 +310,7 @@
             </div>
 
             <!-- Step 2 -->
-            <div class="mb-5">
+            <div class="mb-5 console-form-block">
               <h3 class="mb-2 flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-white">
                 <span class="flex h-6 w-6 items-center justify-center rounded-full bg-primary-100 text-xs font-bold text-primary-700 dark:bg-primary-900/40 dark:text-primary-300">2</span>
                 {{ t('admin.backup.r2Guide.step2.title') }}
@@ -329,7 +327,7 @@
             </div>
 
             <!-- Step 3 -->
-            <div class="mb-5">
+            <div class="mb-5 console-form-block">
               <h3 class="mb-2 flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-white">
                 <span class="flex h-6 w-6 items-center justify-center rounded-full bg-primary-100 text-xs font-bold text-primary-700 dark:bg-primary-900/40 dark:text-primary-300">3</span>
                 {{ t('admin.backup.r2Guide.step3.title') }}
@@ -339,7 +337,7 @@
             </div>
 
             <!-- Step 4: Fill form -->
-            <div class="mb-5">
+            <div class="mb-5 console-form-block">
               <h3 class="mb-2 flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-white">
                 <span class="flex h-6 w-6 items-center justify-center rounded-full bg-primary-100 text-xs font-bold text-primary-700 dark:bg-primary-900/40 dark:text-primary-300">4</span>
                 {{ t('admin.backup.r2Guide.step4.title') }}
@@ -364,20 +362,14 @@
             <div class="mt-4 text-right">
               <button type="button" class="btn btn-primary btn-sm" @click="showR2Guide = false">{{ t('common.close') }}</button>
             </div>
-          </div>
-        </div>
+
+</BaseDialog>
       </transition>
     </teleport>
     <!-- 分卷下载链接 -->
     <teleport to="body">
       <transition name="modal">
-        <div
-          v-if="downloadPartsModalOpen"
-          class="fixed inset-0 z-50 flex items-center justify-center p-4"
-          @mousedown.self="closeDownloadParts"
-        >
-          <div class="fixed inset-0 bg-black/50" @click="closeDownloadParts"></div>
-          <div class="relative max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-xl bg-white p-6 shadow-2xl dark:bg-dark-800">
+        <BaseDialog v-if="downloadPartsModalOpen" :show="true" :title="t('admin.backup.actions.downloadParts')" width="normal" @close="closeDownloadParts">
             <button
               type="button"
               class="absolute right-4 top-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
@@ -386,7 +378,7 @@
             >
               <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
             </button>
-            <h2 class="mb-1 text-lg font-bold text-gray-900 dark:text-white">{{ t('admin.backup.actions.downloadParts') }}</h2>
+
             <p class="mb-4 text-sm text-gray-500 dark:text-gray-400">{{ t('admin.backup.actions.downloadPartsHint') }}</p>
             <div class="space-y-2">
               <div
@@ -406,14 +398,15 @@
             <div class="mt-4 text-right">
               <button type="button" class="btn btn-primary btn-sm" @click="closeDownloadParts">{{ t('common.close') }}</button>
             </div>
-          </div>
-        </div>
+
+</BaseDialog>
       </transition>
     </teleport>
     <TotpStepUpDialog :controller="backupStepUp" />
 </template>
 
 <script setup lang="ts">
+import BaseDialog from '@/components/common/BaseDialog.vue'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api'
