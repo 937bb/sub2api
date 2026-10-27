@@ -14,6 +14,10 @@
       </router-link>
     </div>
     <div class="console-secondary-nav">
+    <div v-if="isAdmin && !authStore.isSimpleMode && !sidebarCollapsed" class="console-workspace-switch" :aria-label="t('console.workspace')">
+      <router-link to="/admin/dashboard" :class="{ 'is-selected': adminArea }">{{ t('console.adminWorkspace') }}</router-link>
+      <router-link to="/dashboard" :class="{ 'is-selected': !adminArea }">{{ t('nav.myAccount') }}</router-link>
+    </div>
 
     <div v-if="!sidebarCollapsed" class="console-nav-search">
       <Icon name="search" size="sm" aria-hidden="true" />
@@ -26,9 +30,13 @@
       <!-- Admin View: Admin menu first, then personal menu -->
       <template v-if="isAdmin">
         <!-- Admin Section -->
-        <div class="sidebar-section">
-          <template v-for="(item, index) in filteredAdminNav" :key="item.path">
-            <div v-if="!sidebarCollapsed && (index === 0 || sectionForPath(item.path) !== sectionForPath(filteredAdminNav[index - 1].path))" class="console-nav-group-title">{{ t('console.' + sectionForPath(item.path)) }}</div>
+        <div v-if="adminArea || navigationQuery || sidebarCollapsed" class="sidebar-section console-module-navigation">
+          <div v-for="section in visibleSections" :key="section.id" class="console-nav-module">
+            <button v-if="!sidebarCollapsed" type="button" class="console-module-heading" :class="{ 'is-current': section.id === activeSection }" :aria-expanded="isSectionExpanded(section.id) || !!navigationQuery" @click="toggleSection(section.id)">
+              <Icon :name="section.icon" size="sm" /><span>{{ t('console.' + section.id) }}</span><Icon :name="isSectionExpanded(section.id) || navigationQuery ? 'chevronDown' : 'chevronRight'" size="xs" />
+            </button>
+            <div v-show="sidebarCollapsed || navigationQuery || isSectionExpanded(section.id)" class="console-module-links">
+          <template v-for="item in filteredAdminNav.filter(item => sectionForPath(item.path) === section.id)" :key="item.path">
             <!-- Collapsible group (has children) -->
             <template v-if="item.children?.length">
               <button
@@ -95,10 +103,12 @@
               <span class="sidebar-label" :class="{ 'sidebar-label-collapsed': sidebarCollapsed }" :aria-hidden="sidebarCollapsed ? 'true' : 'false'">{{ item.label }}</span>
             </router-link>
           </template>
+            </div>
+          </div>
         </div>
 
         <!-- Personal Section for Admin (hidden in simple mode) -->
-        <div v-if="!authStore.isSimpleMode && filteredPersonalNav.length" class="sidebar-section">
+        <div v-if="!authStore.isSimpleMode && filteredPersonalNav.length && (!adminArea || navigationQuery || sidebarCollapsed)" class="sidebar-section">
           <div class="sidebar-section-title" :class="{ 'sidebar-section-title-collapsed': sidebarCollapsed }" :aria-hidden="sidebarCollapsed ? 'true' : 'false'">
             <span class="sidebar-section-title-text" :class="{ 'sidebar-section-title-text-collapsed': sidebarCollapsed }">
               {{ t('nav.myAccount') }}
@@ -182,6 +192,7 @@
 import { computed, h, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import { useDark } from '@vueuse/core'
 import { useAdminSettingsStore, useAppStore, useAuthStore, useOnboardingStore } from '@/stores'
 import Icon from '@/components/icons/Icon.vue'
 import VersionBadge from '@/components/common/VersionBadge.vue'
@@ -257,7 +268,7 @@ const hasNavigationResults = computed(() => isAdmin.value
 const mobileOpen = computed(() => appStore.mobileOpen)
 const isAdmin = computed(() => authStore.isAdmin)
 const sidebarNavRef = ref<HTMLElement | null>(null)
-const isDark = ref(document.documentElement.classList.contains('dark'))
+const isDark = useDark({ storageKey: 'theme' })
 
 const homePath = computed(() => (isAdmin.value ? '/admin/dashboard' : '/dashboard'))
 
@@ -268,7 +279,7 @@ const homePath = computed(() => (isAdmin.value ? '/admin/dashboard' : '/dashboar
 const groupExpandOverrides = ref<Map<string, boolean>>(new Map())
 
 // Site settings from appStore (cached, no flicker)
-const siteName = computed(() => appStore.siteName)
+const siteName = computed(() => appStore.siteName === 'Sub2API' ? '937 Console' : appStore.siteName)
 const siteLogo = computed(() => sanitizeUrl(appStore.siteLogo || '', { allowRelative: true, allowDataUrl: true }))
 const siteVersion = computed(() => appStore.siteVersion)
 type SectionId = 'overview' | 'gateway' | 'customers' | 'billing' | 'security' | 'workspace'
@@ -285,6 +296,13 @@ const sectionDefinitions = [
   { id: 'customers', icon: 'users' }, { id: 'billing', icon: 'creditCard' },
   { id: 'security', icon: 'shield' }, { id: 'workspace', icon: 'cog' }
 ] as const
+const adminArea = computed(() => authStore.isSimpleMode || route.path.startsWith('/admin/') || adminNavItems.value.some(item => item.path === route.path))
+const activeSection = computed(() => sectionForPath(route.path))
+const sectionOverrides = ref<Partial<Record<SectionId, boolean>>>({})
+const visibleSections = computed(() => sectionDefinitions.filter(section => filteredAdminNav.value.some(item => sectionForPath(item.path) === section.id)))
+function isSectionExpanded(id: SectionId) { return sectionOverrides.value[id] ?? activeSection.value === id }
+function toggleSection(id: SectionId) { sectionOverrides.value[id] = !isSectionExpanded(id) }
+watch(() => route.path, () => { sectionOverrides.value = {} })
 
 // SVG Icon Components
 const DashboardIcon = {
@@ -884,8 +902,6 @@ function toggleSidebar() {
 
 function toggleTheme() {
   isDark.value = !isDark.value
-  document.documentElement.classList.toggle('dark', isDark.value)
-  localStorage.setItem('theme', isDark.value ? 'dark' : 'light')
 }
 
 function closeMobile() {
@@ -954,16 +970,6 @@ function handleGroupClick(item: NavItem) {
     router.push(item.path)
   }
   groupExpandOverrides.value.set(item.path, true)
-}
-
-// Initialize theme
-const savedTheme = localStorage.getItem('theme')
-if (
-  savedTheme === 'dark' ||
-  (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches)
-) {
-  isDark.value = true
-  document.documentElement.classList.add('dark')
 }
 
 // Fetch admin settings (for feature-gated nav items like Ops).

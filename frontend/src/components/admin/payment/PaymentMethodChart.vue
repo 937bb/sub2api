@@ -1,5 +1,5 @@
 <template>
-  <div class="card p-4">
+  <section class="finance-methods">
     <h3 class="mb-4 text-sm font-semibold text-gray-900 dark:text-white">
       {{ t('payment.admin.paymentDistribution') }}
     </h3>
@@ -38,7 +38,7 @@
         </div>
       </div>
     </div>
-  </div>
+  </section>
 </template>
 
 <script setup lang="ts">

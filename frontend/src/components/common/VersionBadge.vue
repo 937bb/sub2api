@@ -3,6 +3,11 @@
     <!-- Admin: Full version badge with dropdown -->
     <template v-if="isAdmin">
       <button
+        ref="triggerRef"
+        type="button"
+        :aria-expanded="dropdownOpen"
+        :aria-controls="panelId"
+        aria-haspopup="dialog"
         @click="toggleDropdown"
         class="flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs transition-colors"
         :class="[
@@ -12,7 +17,7 @@
         ]"
         :title="hasUpdate ? t('version.updateAvailable') : t('version.upToDate')"
       >
-        <span v-if="currentVersion" class="font-medium">v{{ currentVersion }}</span>
+        <span v-if="currentVersion" class="font-medium">{{ displayVersion(currentVersion) }}</span>
         <span
           v-else
           class="h-3 w-12 animate-pulse rounded bg-gray-200 font-medium dark:bg-dark-600"
@@ -27,12 +32,17 @@
       </button>
 
       <!-- Dropdown -->
+      <Teleport to="body">
       <transition name="dropdown">
         <div
           v-if="dropdownOpen"
           ref="dropdownRef"
-          class="absolute left-0 z-50 mt-2 overflow-hidden whitespace-normal rounded-xl border border-gray-200 bg-white shadow-lg transition-all duration-200 dark:border-dark-700 dark:bg-dark-800"
-          :class="rollbackPanelOpen && isReleaseBuild ? 'w-80' : 'w-64'"
+          :id="panelId"
+          role="dialog"
+          :aria-label="t('version.currentVersion')"
+          tabindex="-1"
+          class="version-popover"
+          :style="popoverStyle"
         >
           <!-- Header with refresh button -->
           <div
@@ -41,7 +51,7 @@
             <span class="text-sm font-medium text-gray-700 dark:text-dark-300">{{
               t('version.currentVersion')
             }}</span>
-            <button
+            <div class="flex items-center gap-2"><button
               @click="refreshVersion(true)"
               class="rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-dark-700 dark:hover:text-dark-200"
               :disabled="loading"
@@ -53,7 +63,7 @@
                 :stroke-width="2"
                 :class="{ 'animate-spin': loading }"
               />
-            </button>
+            </button><button type="button" class="btn-ghost btn-icon" :aria-label="t('common.close')" @click="closeDropdown(true)"><Icon name="x" size="sm" /></button></div>
           </div>
 
           <div class="p-4">
@@ -84,7 +94,7 @@
                   <span
                     v-if="currentVersion"
                     class="text-2xl font-bold text-gray-900 dark:text-white"
-                    >v{{ currentVersion }}</span
+                    >{{ displayVersion(currentVersion) }}</span
                   >
                   <span v-else class="text-2xl font-bold text-gray-400 dark:text-dark-500">--</span>
                   <!-- Show check mark when up to date -->
@@ -108,7 +118,7 @@
                 <p class="mt-1 text-xs text-gray-500 dark:text-dark-400">
                   {{
                     hasUpdate
-                      ? t('version.latestVersion') + ': v' + latestVersion
+                      ? t('version.latestVersion') + ': ' + displayVersion(latestVersion)
                       : t('version.upToDate')
                   }}
                 </p>
@@ -255,7 +265,7 @@
                       {{ t('version.updateAvailable') }}
                     </p>
                     <p class="text-xs text-amber-600/70 dark:text-amber-400/70">
-                      v{{ latestVersion }}
+                      {{ displayVersion(latestVersion) }}
                     </p>
                   </div>
                   <svg
@@ -312,7 +322,7 @@
                       {{ t('version.updateAvailable') }}
                     </p>
                     <p class="text-xs text-amber-600/70 dark:text-amber-400/70">
-                      v{{ latestVersion }}
+                      {{ displayVersion(latestVersion) }}
                     </p>
                   </div>
                 </div>
@@ -506,7 +516,7 @@
                                   ? 'text-amber-700 dark:text-amber-300'
                                   : 'text-gray-700 dark:text-dark-200'
                               "
-                              >v{{ item.version }}</span
+                              >{{ displayVersion(item.version) }}</span
                             >
                           </span>
                           <span class="text-[11px] tabular-nums text-gray-400 dark:text-dark-500">
@@ -628,17 +638,18 @@
           </div>
         </div>
       </transition>
+      </Teleport>
     </template>
 
     <!-- Non-admin: Simple static version text -->
     <span v-else-if="version" class="text-xs text-gray-500 dark:text-dark-400">
-      v{{ version }}
+      {{ displayVersion(version) }}
     </span>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore, useAppStore } from '@/stores'
 import {
@@ -668,6 +679,45 @@ const isAdmin = computed(() => authStore.isAdmin)
 
 const dropdownOpen = ref(false)
 const dropdownRef = ref<HTMLElement | null>(null)
+const triggerRef = ref<HTMLButtonElement | null>(null)
+const panelId = useId()
+const popoverStyle = ref<Record<string, string>>({ visibility: 'hidden' })
+let resizeObserver: ResizeObserver | undefined
+
+function displayVersion(value?: string) {
+  return value ? `v${value.replace(/^v+/i, '')}` : '—'
+}
+
+function positionPopover() {
+  if (!dropdownOpen.value || !triggerRef.value || !dropdownRef.value) return
+  const anchor = triggerRef.value.getBoundingClientRect()
+  const width = Math.min(400, window.innerWidth - 24)
+  const height = Math.min(dropdownRef.value.scrollHeight, window.innerHeight - 32, 720)
+  const below = window.innerHeight - anchor.bottom - 12
+  const above = anchor.top - 12
+  const top = below >= height || below >= above ? anchor.bottom + 8 : anchor.top - height - 8
+  popoverStyle.value = {
+    width: `${width}px`, maxHeight: `${Math.min(window.innerHeight - 32, 720)}px`,
+    left: `${Math.max(12, Math.min(anchor.left, window.innerWidth - width - 12))}px`,
+    top: `${Math.max(16, Math.min(top, window.innerHeight - height - 16))}px`
+  }
+}
+
+watch(dropdownOpen, async (open) => {
+  resizeObserver?.disconnect()
+  if (!open) return
+  await nextTick()
+  positionPopover()
+  dropdownRef.value?.focus()
+  if (typeof ResizeObserver !== 'undefined' && dropdownRef.value) {
+    resizeObserver = new ResizeObserver(positionPopover)
+    resizeObserver.observe(dropdownRef.value)
+  }
+})
+
+function handleEscape(event: KeyboardEvent) {
+  if (event.key === 'Escape' && dropdownOpen.value) { event.preventDefault(); closeDropdown(true) }
+}
 
 // Use store's cached version state
 const loading = computed(() => appStore.versionLoading)
@@ -735,8 +785,9 @@ function toggleDropdown() {
   dropdownOpen.value = !dropdownOpen.value
 }
 
-function closeDropdown() {
+function closeDropdown(restoreFocus = false) {
   dropdownOpen.value = false
+  if (restoreFocus) triggerRef.value?.focus()
 }
 
 async function refreshVersion(force = true) {
@@ -903,8 +954,7 @@ async function checkServiceAndReload() {
 
 function handleClickOutside(event: MouseEvent) {
   const target = event.target as Node
-  const button = (event.target as Element).closest('button')
-  if (dropdownRef.value && !dropdownRef.value.contains(target) && !button?.contains(target)) {
+  if (dropdownOpen.value && !dropdownRef.value?.contains(target) && !triggerRef.value?.contains(target)) {
     closeDropdown()
   }
 }
@@ -915,14 +965,34 @@ onMounted(() => {
     appStore.fetchVersion(false)
   }
   document.addEventListener('click', handleClickOutside)
+  document.addEventListener('keydown', handleEscape)
+  window.addEventListener('resize', positionPopover)
+  window.addEventListener('scroll', positionPopover, true)
 })
 
 onBeforeUnmount(() => {
   document.removeEventListener('click', handleClickOutside)
+  document.removeEventListener('keydown', handleEscape)
+  window.removeEventListener('resize', positionPopover)
+  window.removeEventListener('scroll', positionPopover, true)
+  resizeObserver?.disconnect()
 })
 </script>
 
 <style scoped>
+.version-popover {
+  position: fixed;
+  z-index: 100;
+  overflow: auto;
+  overscroll-behavior: contain;
+  border-radius: 12px;
+  background: var(--console-surface, #fff);
+  color: var(--console-ink, #263449);
+  box-shadow: 0 12px 48px rgb(15 23 42 / 20%);
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.version-popover:focus { outline: 2px solid var(--console-accent, #635bce); outline-offset: 2px; }
 .dropdown-enter-active,
 .dropdown-leave-active {
   transition: all 0.2s ease;

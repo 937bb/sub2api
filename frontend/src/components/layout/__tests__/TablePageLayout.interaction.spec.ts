@@ -21,7 +21,7 @@ describe('TablePageLayout query dock', () => {
     expect(wrapper.get('aside').isVisible()).toBe(true)
     expect((wrapper.get('input').element as HTMLInputElement).value).toBe('OpenAI')
     expect(wrapper.get('.workbench-collection-summary').text()).toContain('20')
-    expect(wrapper.get('.workbench-status-counts').text()).toContain('console.currentPageOnly')
+    expect(wrapper.get('.workbench-status-counts').attributes('title')).toBe('console.currentPageOnly')
     wrapper.unmount()
   })
 })

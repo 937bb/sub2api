@@ -5,27 +5,31 @@
       <div class="console-data-actions"><slot name="actions" /></div>
     </div>
 
-    <div v-if="total !== undefined || rows !== undefined" class="workbench-collection-summary" :aria-busy="loading">
-      <span v-if="total !== undefined">{{ t('console.matchingRecords') }} <strong>{{ loading ? '—' : total.toLocaleString() }}</strong></span>
-      <span v-if="rows !== undefined">{{ t('console.visibleRecords') }} <strong>{{ loading ? '—' : rows.length.toLocaleString() }}</strong></span>
-      <span v-if="statusCounts.length" class="workbench-status-counts">
-        <span v-for="entry in statusCounts" :key="entry.status">{{ entry.label }} <strong>{{ entry.count }}</strong></span>
-        <small>{{ t('console.currentPageOnly') }}</small>
-      </span>
-    </div>
     <div class="workbench-collection-body" :class="{ 'query-open': filtersOpen && $slots.filters }">
-      <aside v-if="$slots.filters" v-show="filtersOpen" class="workbench-query-dock" :aria-label="t('console.resetFilters')">
-        <div class="workbench-query-title"><h3>{{ t('console.resetFilters') }}</h3><button type="button" :aria-label="t('console.hideFilters')" @click="filtersOpen = false"><Icon name="x" size="sm" /></button></div>
+      <div class="console-table-controls layout-section-fixed">
+        <div class="collection-toolbar-primary">
+          <button v-if="$slots.filters" type="button" class="workbench-filter-toggle" :class="{ 'is-active': filtersOpen }" :aria-expanded="filtersOpen" :aria-controls="filterId" @click="filtersOpen = !filtersOpen">
+            <Icon name="filter" size="sm" />{{ t('console.resetFilters') }}<Icon :name="filtersOpen ? 'chevronUp' : 'chevronDown'" size="xs" />
+          </button>
+          <div class="workbench-collection-summary" :aria-busy="loading">
+            <span v-if="total !== undefined">{{ t('console.matchingRecords') }} <strong>{{ loading ? '—' : total.toLocaleString() }}</strong></span>
+            <span v-if="rows !== undefined" class="collection-page-count">{{ t('console.visibleRecords') }} <strong>{{ loading ? '—' : rows.length.toLocaleString() }}</strong></span>
+          </div>
+        </div>
+        <div class="collection-toolbar-secondary">
+          <span v-if="statusCounts.length" class="workbench-status-counts" :title="t('console.currentPageOnly')">
+            <span v-for="entry in statusCounts" :key="entry.status">{{ entry.label }} <strong>{{ entry.count }}</strong></span>
+          </span>
+          <div class="console-density-switch" role="group" :aria-label="t('console.tableDensity')">
+            <button type="button" :aria-pressed="compact" @click="compact = true">{{ t('console.compact') }}</button>
+            <button type="button" :aria-pressed="!compact" @click="compact = false">{{ t('console.comfortable') }}</button>
+          </div>
+        </div>
+      </div>
+      <aside v-if="$slots.filters" v-show="filtersOpen" :id="filterId" class="workbench-query-dock" :aria-label="t('console.resetFilters')">
         <div class="console-filter-bar"><slot name="filters" /></div>
       </aside>
       <div class="workbench-collection-results">
-    <div class="console-table-controls layout-section-fixed">
-      <div class="flex items-center gap-3"><button v-if="$slots.filters" type="button" class="workbench-filter-toggle" :aria-expanded="filtersOpen" @click="filtersOpen = !filtersOpen"><Icon name="filter" size="sm" />{{ t('console.resetFilters') }}</button><span>{{ t('console.details') }}</span></div>
-      <div class="console-density-switch" role="group" :aria-label="t('console.tableDensity')">
-        <button type="button" :aria-pressed="compact" @click="compact = true">{{ t('console.compact') }}</button>
-        <button type="button" :aria-pressed="!compact" @click="compact = false">{{ t('console.comfortable') }}</button>
-      </div>
-    </div>
     <!-- Scrollable table -->
     <div class="layout-section-scrollable">
       <div class="card table-scroll-container">
@@ -43,7 +47,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, useId } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { resolveRouteMetaKeys } from '@/router/title'
@@ -54,6 +58,7 @@ const { t } = useI18n()
 const route = useRoute()
 const compact = useLocalStorage('b-console-table-compact', true)
 const filtersOpen = ref(false)
+const filterId = useId()
 const statusCounts = computed(() => {
   const labels: Record<string, string> = { active: t('common.active'), inactive: t('common.inactive'), error: t('common.error'), disabled: t('common.disabled') }
   return Object.entries(labels).map(([status, label]) => ({ status, label, count: props.rows?.filter(row => row.status === status).length || 0 })).filter(entry => entry.count > 0)
@@ -81,7 +86,7 @@ onUnmounted(() => {
 /* Desktop table workspace. */
 .table-page-layout {
   @apply flex flex-col gap-0;
-  min-height: calc(100dvh - 64px - 4rem);
+  min-width: 0;
 }
 
 .layout-section-fixed {
@@ -90,7 +95,7 @@ onUnmounted(() => {
 
 .layout-section-scrollable {
   @apply flex-1 min-h-0 flex flex-col;
-  min-height: 320px;
+  min-height: 0;
 }
 
 /* Preserve both scrolling axes. */

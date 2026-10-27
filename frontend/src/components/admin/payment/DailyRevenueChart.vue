@@ -1,5 +1,5 @@
 <template>
-  <div class="card p-4">
+  <section class="finance-trend">
     <h3 class="mb-4 text-sm font-semibold text-gray-900 dark:text-white">
       {{ t('payment.admin.dailyRevenue') }}
     </h3>
@@ -16,7 +16,7 @@
         {{ t('payment.admin.noData') }}
       </div>
     </div>
-  </div>
+  </section>
 </template>
 
 <script setup lang="ts">
@@ -84,11 +84,11 @@ const chartData = computed(() => {
       {
         label: t('payment.admin.orderCount'),
         data: props.data.map(d => d.count),
-        borderColor: 'rgb(16, 185, 129)',
-        backgroundColor: 'rgba(16, 185, 129, 0.1)',
+        borderColor: 'rgb(99, 91, 206)',
+        backgroundColor: 'rgba(99, 91, 206, 0.1)',
         fill: false,
-        tension: 0.3,
-        pointRadius: 3,
+        tension: 0.1,
+        pointRadius: 0,
         pointHoverRadius: 5,
         yAxisID: 'y1',
         hidden: metric.value !== 'orders',
@@ -98,6 +98,7 @@ const chartData = computed(() => {
 })
 
 const chartOptions = computed(() => ({
+  animation: false as const,
   responsive: true,
   maintainAspectRatio: false,
   interaction: { mode: 'index' as const, intersect: false },

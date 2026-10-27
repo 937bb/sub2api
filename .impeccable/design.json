@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-10-27T05:34:29.638Z",
+  "generatedAt": "2026-10-27T07:07:43.741Z",
   "title": "Design System: 937Sub B Console",
   "extensions": {
     "colorMeta": {
@@ -20,7 +20,7 @@
       },
       "console-bg": {
         "role": "neutral",
-        "displayName": "Cool Canvas",
+        "displayName": "Working White",
         "tonalRamp": [
           "#0f172a",
           "#1e293b",
@@ -34,7 +34,7 @@
       },
       "console-nav": {
         "role": "neutral",
-        "displayName": "Navigation White"
+        "displayName": "Navigation Gray"
       },
       "console-muted": {
         "role": "neutral",
@@ -64,6 +64,11 @@
         "name": "dialog",
         "value": "0 18px 60px rgb(10 24 45 / 16%)",
         "purpose": "Ordinary dialogs and right-side editor sheets."
+      },
+      {
+        "name": "version-popover",
+        "value": "0 12px 48px rgb(15 23 42 / 20%)",
+        "purpose": "Viewport-constrained version portal."
       }
     ],
     "motion": [
@@ -119,16 +124,25 @@
       "sidebarExpanded": "232px",
       "sidebarCollapsed": "68px",
       "utilityHeader": "60px",
-      "mainMaxWidth": "1680px",
-      "mainPadding": "28px 32px",
+      "mainMaxWidth": "1760px",
+      "mainPadding": "32px 40px 48px",
       "mainPaddingBelow1280": "24px",
       "mainPaddingBelow1024": "20px 16px",
       "settingsDirectory": "164px",
       "settingsGap": "24px",
       "stickyReviewTop": "84px",
       "checkoutColumns": "minmax(0,1fr) 320px",
-      "queryPanelMaxHeight": "360px",
-      "filtersInitiallyOpen": false
+      "filtersInitiallyOpen": false,
+      "collectionHeight": "content",
+      "queryPanelHeight": "content",
+      "dashboardColumns": "minmax(0,1.8fr) minmax(300px,1fr)",
+      "financeColumns": "minmax(0,1.8fr) minmax(320px,1fr)",
+      "analysisGap": "32px",
+      "settingsSectionPadding": "0 0 28px",
+      "settingsSectionMargin": "0 0 28px",
+      "versionWidth": "min(400px, viewport width - 24px)",
+      "versionMaxHeight": "min(720px, viewport height - 32px)",
+      "versionViewportMargins": "12px horizontal / 16px vertical"
     },
     "controlMinimums": {
       "button": "36px",
@@ -139,7 +153,7 @@
       "paymentMethod": "64px"
     },
     "sourceEvidence": {
-      "revision": 4,
+      "revision": 5,
       "files": [
         "frontend/tailwind.config.js",
         "frontend/src/style.css",
@@ -153,10 +167,15 @@
         "frontend/src/components/payment/PaymentMethodSelector.vue",
         "frontend/src/components/charts/TokenUsageTrend.vue",
         "frontend/src/components/charts/ModelDistributionChart.vue",
-        "frontend/src/views/user/SubscriptionsView.vue"
+        "frontend/src/views/user/SubscriptionsView.vue",
+        "frontend/src/components/common/VersionBadge.vue",
+        "frontend/src/views/admin/orders/AdminPaymentDashboardView.vue",
+        "frontend/src/components/admin/payment/PaymentMethodChart.vue"
       ],
-      "screenshots": ".impeccable/screenshots/revision4/confirm-*",
-      "note": "Synthetic visual evidence. Source captures final placeholder, plan-label, standard-cost, and renewal-action corrections. No deployment or payment success claim."
+      "screenshots": ".impeccable/screenshots/revision5/",
+      "note": "Synthetic local evidence; revision 4 was rejected and superseded. Use final-groups-1750.png, not the invalid inspect-groups-1750.png, for wide-layout evidence. Selected source/capture review and route-width checks do not certify all visual states, deployment, or payment completion.",
+      "verification": ".impeccable/verification-revision5.md",
+      "review": ".impeccable/review/revision5-finish.md"
     }
   },
   "components": [
@@ -196,9 +215,9 @@
       "name": "Sidebar Navigation",
       "kind": "nav",
       "refersTo": "navigation",
-      "description": "Single pale sidebar; this excerpt shows normal and active task links, not a second navigation bar.",
-      "html": "<nav class=\"ds-nav\" aria-label=\"Console navigation\"><a href=\"#overview\" aria-current=\"page\">Overview</a><a href=\"#usage\">Usage records</a><a href=\"#settings\">Settings</a></nav>",
-      "css": ".ds-nav{display:flex;flex-direction:column;gap:4px;width:208px;padding:12px;background:var(--console-nav,#fbfcfe);font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif}.ds-nav a{display:flex;align-items:center;gap:10px;min-height:36px;padding:8px 10px;border-radius:7px;color:var(--console-muted,#64748b);text-decoration:none;font-size:13px}.ds-nav a:hover{background:var(--console-line,#e3e8ef);color:var(--console-ink,#263449)}.ds-nav a[aria-current=page]{background:var(--console-selected,#f5f3ff);color:var(--console-accent,#635bce);font-weight:600}.ds-nav a:focus-visible{outline:2px solid var(--console-accent,#635bce);outline-offset:3px}"
+      "description": "Expandable authorized modules within one sidebar; workspace switching and cross-workspace search preserve task context.",
+      "html": "<nav class=\"ds-nav\" aria-label=\"Console navigation\"><div class=\"ds-workspace\"><a href=\"#admin\" aria-current=\"page\">Administration</a><a href=\"#personal\">My account</a></div><details class=\"ds-module\" open><summary>Gateway</summary><div class=\"ds-links\"><a href=\"#accounts\" aria-current=\"page\">Accounts</a><a href=\"#groups\">Groups</a><a href=\"#keys\">API keys</a></div></details><details class=\"ds-module\"><summary>Customers</summary><div class=\"ds-links\"><a href=\"#users\">Users</a></div></details></nav>",
+      "css": ".ds-nav{width:208px;padding:12px;background:var(--console-nav,#f6f7fa);color:var(--console-ink,#263449);font-family:system-ui,sans-serif}.ds-workspace{display:flex;gap:2px;padding:3px;border:1px solid var(--console-line,#e3e8ef);border-radius:8px;margin-bottom:16px}.ds-workspace a{flex:1;text-align:center;padding:6px 4px;font-size:12px;border-radius:5px}.ds-workspace a[aria-current=page]{background:var(--console-surface,#fff);font-weight:600}.ds-nav a{text-decoration:none;color:var(--console-muted,#64748b)}.ds-module+.ds-module{margin-top:8px}.ds-module summary{cursor:pointer;padding:10px;border-radius:7px;font-size:13px;font-weight:600}.ds-module summary:hover{background:var(--console-line,#e3e8ef)}.ds-links{margin:2px 0 14px 17px;padding-left:12px;border-left:1px solid var(--console-line,#e3e8ef)}.ds-links a{display:block;min-height:18px;padding:8px 10px;border-radius:7px;font-size:12px}.ds-links a:hover{background:var(--console-line,#e3e8ef);color:var(--console-ink,#263449)}.ds-links a[aria-current=page]{background:var(--console-selected,#f5f3ff);color:var(--console-accent,#635bce);font-weight:600}.ds-nav :is(a,summary):focus-visible{outline:2px solid var(--console-accent,#635bce);outline-offset:3px}"
     },
     {
       "name": "Neutral Badge",
@@ -212,8 +231,8 @@
       "name": "Content Panel",
       "kind": "card",
       "refersTo": "card",
-      "description": "Flat bordered panel, illustrated with the 24px settings/checkout inset; table containers own their padding.",
-      "html": "<section class=\"ds-panel\"><h3>Configuration</h3><p>Section headings precede their fields.</p></section>",
+      "description": "Standalone identity or checkout container; collection/report/configuration sections use flat dividers instead.",
+      "html": "<section class=\"ds-panel\"><h3>Account identity</h3><p>Metadata and account details share a divided document.</p></section>",
       "css": ".ds-panel{padding:24px;border:1px solid var(--console-line,#e3e8ef);border-radius:12px;background:var(--console-surface,#fff);color:var(--console-ink,#263449);font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;transition:border-color 150ms}.ds-panel h3{margin:0 0 20px;font-size:15px;font-weight:600}.ds-panel p{margin:0;font-size:13px;color:var(--console-muted,#64748b)}"
     },
     {
@@ -231,17 +250,25 @@
       "description": "Sticky desktop review; becomes static below 1024px. Values are synthetic and no payment is submitted.",
       "html": "<aside class=\"ds-review\"><h3>Order review</h3><div class=\"ds-review-row\"><span>Payment amount</span><span>$20.00</span></div><div class=\"ds-review-row\"><span>Fee</span><span>$0.00</span></div></aside>",
       "css": ".ds-review{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;position:sticky;top:84px;min-width:0;padding:24px;border:1px solid var(--console-line,#e3e8ef);border-radius:12px;background:var(--console-surface,#fff);color:var(--console-ink,#263449)}.ds-review h3{margin:0 0 18px;font-size:15px;font-weight:600}.ds-review-row{display:flex;justify-content:space-between;gap:16px;font-size:14px;line-height:20px;font-variant-numeric:tabular-nums}.ds-review-row+.ds-review-row{margin-top:8px}.ds-review-row>span:first-child{color:#6b7280}@media(max-width:1023px){.ds-review{position:static}}"
+    },
+    {
+      "name": "Configuration Section",
+      "kind": "custom",
+      "refersTo": "configuration-section",
+      "description": "Flat document section with heading above fields, bottom divider, and 28px rhythm.",
+      "html": "<section class=\"ds-config\"><h3>General settings</h3><label for=\"ds-config-name\">Display name</label><input id=\"ds-config-name\" value=\"937 Console\" /></section>",
+      "css": ".ds-config{padding:0 0 28px;margin:0 0 28px;border-bottom:1px solid var(--console-line,#e3e8ef);color:var(--console-ink,#263449);font-family:system-ui,sans-serif}.ds-config h3{margin:0;padding:0 0 20px;font-size:15px;font-weight:600}.ds-config label{display:block;font-size:14px;margin-bottom:6px}.ds-config input{width:calc(100% - 26px);padding:8px 12px;border:1px solid var(--console-line,#e3e8ef);border-radius:8px;font:14px/20px system-ui,sans-serif;background:var(--console-surface,#fff);color:var(--console-ink,#263449)}.ds-config input:hover{border-color:var(--console-muted,#64748b)}.ds-config input:focus-visible{outline:2px solid var(--console-accent,#635bce);outline-offset:3px}"
     }
   ],
   "narrative": {
     "northStar": "The Operations Workbench",
-    "overview": "The B console is a light, professional workspace for API traffic, charges, resources, and account settings. The approved reference is Stripe: light surfaces, clear hierarchy, and restrained blue-violet accents. One pale sidebar establishes navigation, a quiet utility header holds account tools, and white content panels organize the work.\n\nCollections use on-demand horizontal filters above records. Settings place section headings above their fields. Identity uses flat metadata and divided sections; purchasing separates editable selection from order review. Stored dark theme, configured branding, permissions, feature flags, and existing financial meaning remain authoritative.",
+    "overview": "The B console is a light, professional workspace for API traffic, charges, resources, and account settings. The chosen reference is Stripe: light surfaces, clear hierarchy, and restrained blue-violet accents. A pale module sidebar and quiet breadcrumb header frame a white working surface. Collections read as ledgers, analytics as reports, and configuration as a document.\n\nCollections use on-demand horizontal filters above records. Reports separate primary analysis from content-sized rankings. Settings use a directory and flat divided sections with headings above fields. Identity uses flat metadata; purchasing separates editable selection from order review. Stored dark theme, configured branding, permissions, feature flags, and existing financial meaning remain authoritative.",
     "keyCharacteristics": [
-      "One light sidebar with permission-aware search and collapse.",
-      "White panels on a cool canvas with restrained violet actions and selections.",
-      "On-demand horizontal filters, compact ledgers, and explicit record counts.",
-      "Settings headings above fields, flat identity metadata, and responsive checkout columns.",
-      "Metric-switching plots, ranked distribution bars, and explicit numerical values."
+      "One light module sidebar with workspace switching, permission-aware search, and collapse.",
+      "A white working surface, quiet dividers, and restrained violet actions and selections.",
+      "On-demand horizontal filters, unboxed collection ledgers, and explicit record counts.",
+      "Flat configuration sections, identity metadata, and responsive checkout columns.",
+      "Metric-switching reports, content-sized rankings, and explicit numerical values."
     ],
     "rules": [
       {

@@ -12,8 +12,8 @@
         </button>
 
         <div class="min-w-0">
-          <div class="console-breadcrumb"><span>{{ appStore.siteName }}</span><Icon name="chevronRight" size="xs" /><span>{{ t(user?.role === 'admin' ? 'console.adminWorkspace' : 'console.userWorkspace') }}</span></div>
-          <h1 class="truncate text-base font-semibold text-gray-900 dark:text-white">
+          <div class="console-breadcrumb"><span>{{ appStore.siteName === 'Sub2API' ? '937 Console' : appStore.siteName }}</span><Icon name="chevronRight" size="xs" /><span>{{ pageTitle }}</span></div>
+          <h1 class="sr-only">
             {{ t(user?.role === 'admin' ? 'console.adminWorkspace' : 'console.userWorkspace') }}
           </h1>
           <p v-if="pageDescription" class="sr-only">

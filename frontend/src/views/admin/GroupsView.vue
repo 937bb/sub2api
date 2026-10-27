@@ -69,12 +69,10 @@
           </div>
 </template>
 <template #filters>
-        <div
-          class="flex flex-col justify-between gap-4 lg:flex-row lg:items-start"
-        >
+        <div class="collection-query-row">
           <!-- Left: fuzzy search + filters (can wrap to multiple lines) -->
-          <div class="flex flex-1 flex-wrap items-center gap-3">
-            <div class="relative w-full sm:w-64">
+          <div class="collection-query-fields">
+            <div class="relative collection-query-search">
               <Icon
                 name="search"
                 size="md"
@@ -92,14 +90,14 @@
               v-model="filters.platform"
               :options="platformFilterOptions"
               :placeholder="t('admin.groups.allPlatforms')"
-              class="w-44"
+              class="collection-query-field"
               @change="loadGroups"
             />
             <Select
               v-model="filters.status"
               :options="statusOptions"
               :placeholder="t('admin.groups.allStatus')"
-              class="w-40"
+              class="collection-query-field"
               @change="loadGroups"
             />
             <Select
@@ -107,7 +105,7 @@
               v-model="filters.is_exclusive"
               :options="exclusiveOptions"
               :placeholder="t('admin.groups.allGroups')"
-              class="w-44"
+              class="collection-query-field"
               @change="loadGroups"
             />
           </div>

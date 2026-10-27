@@ -1,10 +1,10 @@
 ---
 name: "937Sub B Console"
-description: "A light console with one sidebar, clear hierarchy, and restrained blue-violet actions."
+description: "A light console organized as collection ledgers, analytical reports, and configuration documents."
 colors:
-  console-bg: "#f6f8fb"
+  console-bg: "#fff"
   console-surface: "#fff"
-  console-nav: "#fbfcfe"
+  console-nav: "#f6f7fa"
   console-line: "#e3e8ef"
   console-ink: "#263449"
   console-muted: "#64748b"
@@ -99,8 +99,11 @@ spacing:
   regular: "16px"
   section: "20px"
   panel: "24px"
-  workspace-block: "28px"
-  workspace-inline: "32px"
+  document-section: "28px"
+  report-gap: "32px"
+  workspace-block: "32px"
+  workspace-inline: "40px"
+  workspace-bottom: "48px"
 components:
   button-primary:
     backgroundColor: "{colors.console-accent}"
@@ -149,8 +152,16 @@ components:
     backgroundColor: "{colors.console-surface}"
     rounded: "{rounded.panel}"
   query-panel:
-    backgroundColor: "{colors.console-nav}"
-    padding: "16px"
+    backgroundColor: "{colors.console-surface}"
+    padding: "16px 0"
+  collection-ledger:
+    backgroundColor: "{colors.console-surface}"
+  module-heading:
+    textColor: "{colors.console-ink}"
+    rounded: "{rounded.navigation}"
+    padding: "10px"
+  configuration-section:
+    padding: "0 0 28px"
   settings-category:
     rounded: "{rounded.compact}"
     padding: "8px 12px"
@@ -167,19 +178,19 @@ components:
 
 **Creative North Star: "The Operations Workbench"**
 
-The B console is a light, professional workspace for API traffic, charges, resources, and account settings. The approved reference is Stripe: light surfaces, clear hierarchy, and restrained blue-violet accents. One pale sidebar establishes navigation, a quiet utility header holds account tools, and white content panels organize the work.
+The B console is a light, professional workspace for API traffic, charges, resources, and account settings. The chosen reference is Stripe: light surfaces, clear hierarchy, and restrained blue-violet accents. A pale module sidebar and quiet breadcrumb header frame a white working surface. Collections read as ledgers, analytics as reports, and configuration as a document.
 
-Collections use on-demand horizontal filters above records. Settings place section headings above their fields. Identity uses flat metadata and divided sections; purchasing separates editable selection from order review. Stored dark theme, configured branding, permissions, feature flags, and existing financial meaning remain authoritative.
+Collections use on-demand horizontal filters above records. Reports separate primary analysis from content-sized rankings. Settings use a directory and flat divided sections with headings above fields. Identity uses flat metadata; purchasing separates editable selection from order review. Stored dark theme, configured branding, permissions, feature flags, and existing financial meaning remain authoritative.
 
 **Key Characteristics:**
 
-- One light sidebar with permission-aware search and collapse.
-- White panels on a cool canvas with restrained violet actions and selections.
-- On-demand horizontal filters, compact ledgers, and explicit record counts.
-- Settings headings above fields, flat identity metadata, and responsive checkout columns.
-- Metric-switching plots, ranked distribution bars, and explicit numerical values.
+- One light module sidebar with workspace switching, permission-aware search, and collapse.
+- A white working surface, quiet dividers, and restrained violet actions and selections.
+- On-demand horizontal filters, unboxed collection ledgers, and explicit record counts.
+- Flat configuration sections, identity metadata, and responsive checkout columns.
+- Metric-switching reports, content-sized rankings, and explicit numerical values.
 
-This document supersedes revision 3 and records revision-4 source. Evidence: `frontend/tailwind.config.js`, `frontend/src/style.css`, `frontend/src/styles/console.css`, the later `workbench.css` composition layer, and layout/table/select/payment/chart/settings/subscription components. Direction is recorded in `PRODUCT.md` and `.impeccable/b-console.md`. Visual evidence is `.impeccable/screenshots/revision4/confirm-*`; preview data is synthetic. Current source includes the final placeholder, plan-label, standard-cost-text, and renewal-action corrections. This is documentation, not a deployment or payment-completion claim.
+This document records revision-5 source and supersedes the rejected revision-4 documentation. Evidence: `frontend/tailwind.config.js`, `frontend/src/style.css`, `frontend/src/styles/console.css`, the later `workbench.css` composition layer, and layout/table/version/select/payment/chart/settings/subscription components. Direction is recorded in `.impeccable/b-console.md`; `PRODUCT.md` retains the confirmed Stripe reference. Local visual evidence is `.impeccable/screenshots/revision5/`, with scope and exclusions recorded in `.impeccable/verification-revision5.md`. Preview data is synthetic. This specification establishes neither all-page visual certification nor deployment or payment completion.
 
 ## Colors
 
@@ -194,7 +205,7 @@ Cool white and gray surfaces carry the interface; violet identifies actions and 
 
 ### Neutral
 
-- **Cool Canvas**, **Panel White**, and **Navigation White** separate workspace, content, and navigation/filter surfaces.
+- **Working White** and **Panel White** share the light canvas; **Navigation Gray** distinguishes the sidebar and quiet table headings. Dividers, spacing, and task structure establish hierarchy without enclosing every section in a card.
 - **Fine Divider**, **Slate Ink**, and **Muted Slate** establish boundaries and information hierarchy. Placeholders use the theme's muted text at full opacity.
 - Dark-console tokens preserve these roles under the stored theme.
 - Shared inputs and secondary buttons retain their Tailwind gray text/borders and slate dark backgrounds, represented by the separate control tokens.
@@ -219,17 +230,17 @@ Shared controls and comfortable table cells use 14px/20px. Compact table rows us
 
 ## Layout
 
-At 1024px and above, the sidebar is 232px wide or 68px collapsed and spans `100dvh`. Content offsets by that width. The sticky utility header is 60px high at top zero. Main content has a 1680px maximum width, centered within its workspace, with 28px vertical/32px horizontal padding. Padding becomes 24px below 1280px and 20px/16px below 1024px. Below 1024px the sidebar is a dismissible drawer and the content offset disappears. There is no separate horizontal business bar.
+At 1024px and above, the sidebar is 232px wide or 68px collapsed and spans `100dvh`. Content offsets by that width. The sticky breadcrumb header is 60px high at top zero. Main content has a 1760px maximum width, centered within its workspace, with 32px top, 40px horizontal, and 48px bottom padding. Padding becomes 24px below 1280px and 20px/16px below 1024px. Below 1024px the sidebar is a dismissible drawer and the content offset disappears. There is no separate horizontal business bar. Breadcrumbs are hidden below 768px.
 
-Collections start with title/actions and matching/current-page counts, including a labeled current-page status breakdown where supplied. Filters start closed. Opening them inserts a full-width horizontal panel above results; `v-show` preserves query state. Fields wrap with 12px gaps; account filters have a 160px minimum. The panel has a 360px maximum height and vertical overflow. Tables retain both scrolling axes and native sticky columns. The layout minimum height is `calc(100dvh - 64px - 4rem)`, with a desktop scroll-region minimum of 320px; the old fixed viewport-height layout is gone. Mobile uses document flow. Compact density persists in `b-console-table-compact`, defaults on, and uses 12px vertical cell padding with 13px type; comfortable rows use 14px type. Density controls hide below 768px.
+Collections start with title/actions, then a compact toolbar combining the filter toggle, matching/current-page counts, supplied current-page status counts, and density. Filters start closed. Opening them inserts full-width horizontal fields above the unboxed ledger; `v-show` preserves query state. Fields wrap with 12px gaps; shared search/field widths are 260px/170px, and account filters have a 160px minimum. The filter dock has 16px vertical padding and no fixed height cap. Tables preserve overflow containers and native sticky columns without imposing a viewport-derived minimum height on the collection. Mobile uses document flow and full-width query fields. Compact density persists in `b-console-table-compact`, defaults on, and uses 12px vertical cell padding with 13px type; comfortable rows use 14px type. Density, current-page count, and status counts hide below 768px; matching records remain available.
 
-Settings use a 164px category directory and flexible document with a 24px gap. The directory sticks at 84px. Each bordered section has its heading above fields and 24px padding. Below 1024px the directory is 160px with a 20px gap and 80px sticky offset. Below 768px it becomes horizontal scrolling categories. The save bar sticks to the bottom with a top border.
+Settings use a 164px category directory and flexible document with a 24px gap. The directory sticks at 84px. Sections are transparent and square, separated by a bottom divider, 28px bottom padding, and 28px bottom margin. Headings sit above fields with 20px bottom spacing. Below 1024px the directory is 160px with a 20px gap and 80px sticky offset. Below 768px it becomes horizontal scrolling categories. The save bar sticks to the bottom with a top border and 14px vertical padding.
 
 Identity uses a bordered document, three-column flat metadata, divided sections, and two-column editors. An optional support panel occupies a secondary column; absent that panel, identity fills the width. Profile columns stack below 1024px; metadata/editors stack below 768px, with 20px mobile section padding.
 
 Checkout uses a flexible main column, a 320px review column, and a 24px gap. Below 1280px review becomes `minmax(280px,.8fr)`; below 1024px both stack and review stops sticking. Desktop review sticks at 84px. Plan rows contain identity/price, quota, and action regions followed by features; they become two columns below 1024px and vertical below 768px. Subscription quota columns stack below 1280px and the entire entitlement row stacks below 768px.
 
-Dashboard summaries group volume, finance, and resources; simple mode omits finance. Analysis uses a 1.35:1 plot/distribution split, stacking below 1280px. At intermediate widths distribution bars and their table share two columns, then stack below 768px. Primary plots are 280px tall, reducing to 250px on mobile. Summary columns stack on mobile. Operations monitoring retains separate diagnosis/vitals, traffic/capacity, and latency/error regions with responsive stacking.
+Dashboard summaries group volume, finance, and resources in a divided strip; simple mode omits finance. Analysis uses a 1.8:1 plot/distribution split with a 300px minimum ranking column and 32px gap. Payment analysis uses the same ratio with a 320px minimum ranking column: revenue trend and content-sized payment distribution share the left column, while per-currency user rankings occupy the right. Both stack below 1280px, replacing the vertical divider with a horizontal one. At intermediate widths model bars and their table share two columns, then stack below 768px. Primary plots are 280px tall, reducing to 250px on mobile. Summary columns stack on mobile. Operations monitoring retains separate diagnosis/vitals, traffic/capacity, and latency/error regions with responsive stacking.
 
 Authentication uses a 0.85:1.15 split, minimum 320px identity column, and maximum 400px form. Its identity surface is navigation white. Below 768px it becomes a compact top band followed by the form. Public pages, setup, callbacks, and provider-owned payment fields retain specialized flows.
 
@@ -239,6 +250,8 @@ Shared primary/secondary buttons and cards are flat, using tones and fine border
 
 Dialogs use an unblurred overlay (`rgb(19 30 48 / 32%)`) and shadow (`0 18px 60px rgb(10 24 45 / 16%)`). Opt-in editor sheets align right, fill viewport height, and use `min(880px, 100vw)` width with square edges; BaseDialog retains focus and scroll-lock behavior.
 
+The version popover uses `0 12px 48px rgb(15 23 42 / 20%)` depth and a fixed body portal. Its own 200ms transition is separate from the reduced-motion rules scoped to descendants of the console shell.
+
 Buttons/cards transition colors over 150ms; inputs/selects over 200ms; sidebar drawer transform uses 300ms. Reduced-motion shell transitions/animations use 0.01ms and one iteration. Trend-chart animation is disabled. There is no decorative workspace-margin motion contract.
 
 **The Surface Rule.** Use tone and fine borders for work panels; reserve pronounced depth for overlays.
@@ -247,7 +260,7 @@ Buttons/cards transition colors over 150ms; inputs/selects over 200ms; sidebar d
 
 Shared buttons/text inputs use 8px corners; console select triggers, settings categories, badges, and compact chart controls use 6px. Navigation links/search use 7px. Panels/dialogs use 12px. Density choices use 4px within a 6px group. The fallback brand mark uses 9px; configured logos retain their form.
 
-Collection boundaries round the outside; tables and document dividers stay square. Expanded filters round the top corners only. Editor sheets have square viewport edges. Borders are one CSS pixel. Component-specific provider/status pills do not define the shared badge geometry.
+Collection ledgers, analytical reports, and configuration sections use square dividers rather than enclosing rounded cards. Standalone identity, checkout, subscription, and dialog containers retain 12px corners. Editor sheets have square viewport edges. Borders are one CSS pixel. Component-specific provider/status pills do not define the shared badge geometry.
 
 ## Components
 
@@ -263,7 +276,13 @@ Console select triggers use a 36px minimum and 6px corners. Menus teleport to th
 
 ### Navigation
 
-The single sidebar contains configured branding, search, grouped destinations, and footer utilities. Search runs after permission/feature/simple-mode visibility, matches labels and nested destinations, and clears on Escape. Collapsed navigation hides search and text but retains accessible labels/tooltips. Mobile opening expands the sidebar even when desktop collapse was stored. Selected links use wash and 600 weight; hover uses divider tone. A skip link appears on keyboard focus. The header labels the workspace and contains account utilities without repeating the page title.
+The single sidebar contains configured branding, workspace switching, search, expandable modules, and footer utilities. The stock Sub2API name falls back to 937 Console; configured names/logos remain authoritative. Administrator modules cover overview, gateway, customers, billing, security, and workspace, omitting empty modules. The active module opens by default, manual overrides last until route change, and search exposes matching authorized destinations across workspaces. The administrator/personal switch appears only for expanded, non-simple-mode administrators. Administrator context includes simple mode and exact configured administrator destinations as well as `/admin/` routes, so `/keys` and administrator custom pages retain their modules.
+
+Search runs after permission/feature/simple-mode visibility, matches labels and nested destinations, and clears on Escape. Collapsed navigation hides search and text but retains accessible labels/tooltips. Mobile opening expands the sidebar even when desktop collapse was stored. Selected links use wash and 600 weight; hover uses divider tone. Nested module links use 12px text and a 34px minimum height. A skip link appears on keyboard focus. The header provides quiet breadcrumbs and account utilities. Theme switching uses the shared VueUse `useDark({ storageKey: 'theme' })` behavior, with root theme variables reaching portals.
+
+### Version Popover
+
+The administrator version control opens a nonmodal dialog in a body portal. Fixed positioning chooses the available side of the trigger and clamps to 12px horizontal/16px vertical viewport margins. Width is at most 400px; height is at most 720px or viewport height minus 32px, with internal scrolling. Resize, scroll, and content resize reposition it. Opening focuses the panel; Escape or the explicit close button restores trigger focus. Long content wraps, and displayed versions normalize repeated leading `v` characters to one. Existing update/rollback actions retain their semantics; ordinary users receive static version text.
 
 ### Chips and Status
 
@@ -271,7 +290,7 @@ Shared badges use 6px corners, 2px/8px padding, and 12px medium type. Success, w
 
 ### Cards / Containers
 
-Solid theme surfaces, fine borders, and 12px corners recur across summaries, collections, identity, and checkout. Padding remains task-specific: settings/checkout/identity primarily use 24px, analytical headings 20px/22px, and mobile common insets reduce. Table wrappers and divided sections do not inherit blanket card padding.
+Solid theme surfaces, fine borders, and 12px corners remain appropriate for standalone identity, checkout, subscription, and overlay containers. Collection ledgers, report sections, and configuration documents remove the enclosing card treatment. Checkout/identity primarily use 24px insets; report headings in the analytical grid align directly with their content. Table wrappers and divided sections do not inherit blanket card padding.
 
 ### Settings and Editor Sheets
 
@@ -283,7 +302,7 @@ Editable fields occupy the main panel; review retains totals, fees, and the fina
 
 ### Charts
 
-Trend tabs switch token composition, requests, cost, and cache rate. Tokens use stacked bars; other metrics use focused lines, including a dashed standard-cost comparison. Axes/tooltips preserve token, currency, and percentage units. Model/group/endpoint distributions use horizontal bars plus explicit tables; ranking and source controls retain their behavior. Actual, account, and standard cost stay separate; standard cost text uses gray 600/400 rather than light gray 400. Empty/loading/error states remain visible.
+Trend tabs switch token composition, requests, cost, and cache rate. Tokens use stacked bars; other metrics use focused lines, including a dashed standard-cost comparison. Axes/tooltips preserve token, currency, and percentage units. Model/group/endpoint distributions use horizontal bars plus explicit tables; ranking and source controls retain their behavior. Payment method bars are content-sized and normalized separately within each currency; rankings keep currencies separate rather than aggregating unlike monetary units. Actual, account, and standard cost stay separate; standard cost text uses gray 600/400 rather than light gray 400. Empty/loading/error states remain visible.
 
 ## Do's and Don'ts
 
