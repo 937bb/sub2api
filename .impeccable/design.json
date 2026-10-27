@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-10-27T08:15:26Z",
+  "generatedAt": "2026-10-27T10:00:15Z",
   "title": "Design System: 937Sub B Console",
   "extensions": {
     "colorMeta": {
@@ -8,14 +8,14 @@
         "role": "neutral",
         "displayName": "Canvas Gray",
         "tonalRamp": [
-          "oklch(15% 0.0045 258.32)",
-          "oklch(26% 0.0045 258.32)",
-          "oklch(38% 0.0045 258.32)",
-          "oklch(49% 0.0045 258.32)",
-          "oklch(61% 0.0045 258.32)",
-          "oklch(72% 0.0045 258.32)",
-          "oklch(84% 0.0045 258.32)",
-          "oklch(95% 0.0045 258.32)"
+          "oklch(15% 0.0029 264.54)",
+          "oklch(26% 0.0029 264.54)",
+          "oklch(38% 0.0029 264.54)",
+          "oklch(49% 0.0029 264.54)",
+          "oklch(61% 0.0029 264.54)",
+          "oklch(72% 0.0029 264.54)",
+          "oklch(84% 0.0029 264.54)",
+          "oklch(95% 0.0029 264.54)"
         ]
       },
       "console-surface": {
@@ -36,98 +36,98 @@
         "role": "neutral",
         "displayName": "Quiet Neutral",
         "tonalRamp": [
-          "oklch(15% 0.0034 247.86)",
-          "oklch(26% 0.0034 247.86)",
-          "oklch(38% 0.0034 247.86)",
-          "oklch(49% 0.0034 247.86)",
-          "oklch(61% 0.0034 247.86)",
-          "oklch(72% 0.0034 247.86)",
-          "oklch(84% 0.0034 247.86)",
-          "oklch(95% 0.0034 247.86)"
+          "oklch(15% 0.0029 264.54)",
+          "oklch(26% 0.0029 264.54)",
+          "oklch(38% 0.0029 264.54)",
+          "oklch(49% 0.0029 264.54)",
+          "oklch(61% 0.0029 264.54)",
+          "oklch(72% 0.0029 264.54)",
+          "oklch(84% 0.0029 264.54)",
+          "oklch(95% 0.0029 264.54)"
         ]
       },
       "console-line": {
         "role": "neutral",
         "displayName": "Fine Divider",
         "tonalRamp": [
-          "oklch(15% 0.0092 258.34)",
-          "oklch(26% 0.0092 258.34)",
-          "oklch(38% 0.0092 258.34)",
-          "oklch(49% 0.0092 258.34)",
-          "oklch(61% 0.0092 258.34)",
-          "oklch(72% 0.0092 258.34)",
-          "oklch(84% 0.0092 258.34)",
-          "oklch(95% 0.0092 258.34)"
+          "oklch(15% 0.0058 264.53)",
+          "oklch(26% 0.0058 264.53)",
+          "oklch(38% 0.0058 264.53)",
+          "oklch(49% 0.0058 264.53)",
+          "oklch(61% 0.0058 264.53)",
+          "oklch(72% 0.0058 264.53)",
+          "oklch(84% 0.0058 264.53)",
+          "oklch(95% 0.0058 264.53)"
         ]
       },
       "console-ink": {
         "role": "neutral",
-        "displayName": "Slate Ink",
+        "displayName": "Graphite Ink",
         "tonalRamp": [
-          "oklch(15% 0.0345 260.81)",
-          "oklch(26% 0.0345 260.81)",
-          "oklch(38% 0.0345 260.81)",
-          "oklch(49% 0.0345 260.81)",
-          "oklch(61% 0.0345 260.81)",
-          "oklch(72% 0.0345 260.81)",
-          "oklch(84% 0.0345 260.81)",
-          "oklch(95% 0.0345 260.81)"
+          "oklch(15% 0.0164 259.78)",
+          "oklch(26% 0.0164 259.78)",
+          "oklch(38% 0.0164 259.78)",
+          "oklch(49% 0.0164 259.78)",
+          "oklch(61% 0.0164 259.78)",
+          "oklch(72% 0.0164 259.78)",
+          "oklch(84% 0.0164 259.78)",
+          "oklch(95% 0.0164 259.78)"
         ]
       },
       "console-muted": {
         "role": "neutral",
-        "displayName": "Muted Slate",
+        "displayName": "Muted Graphite",
         "tonalRamp": [
-          "oklch(15% 0.0390 257.87)",
-          "oklch(26% 0.0390 257.87)",
-          "oklch(38% 0.0390 257.87)",
-          "oklch(49% 0.0390 257.87)",
-          "oklch(61% 0.0390 257.87)",
-          "oklch(72% 0.0390 257.87)",
-          "oklch(84% 0.0390 257.87)",
-          "oklch(95% 0.0390 257.87)"
+          "oklch(15% 0.0233 257.51)",
+          "oklch(26% 0.0233 257.51)",
+          "oklch(38% 0.0233 257.51)",
+          "oklch(49% 0.0233 257.51)",
+          "oklch(61% 0.0233 257.51)",
+          "oklch(72% 0.0233 257.51)",
+          "oklch(84% 0.0233 257.51)",
+          "oklch(95% 0.0233 257.51)"
         ]
       },
       "console-accent": {
         "role": "primary",
-        "displayName": "Action Blue",
+        "displayName": "Muted Action Blue",
         "tonalRamp": [
-          "#172554",
-          "#1e3a8a",
-          "#1e40af",
-          "#1d4ed8",
-          "#2563eb",
-          "#60a5fa",
-          "#bfdbfe",
-          "#eff6ff"
+          "#172834",
+          "#273e50",
+          "#29495f",
+          "#2b5673",
+          "#32688b",
+          "#6f9fbe",
+          "#c5dcea",
+          "#f0f6fa"
         ]
       },
       "console-accent-hover": {
         "role": "primary",
         "displayName": "Deep Action Blue",
         "tonalRamp": [
-          "#172554",
-          "#1e3a8a",
-          "#1e40af",
-          "#1d4ed8",
-          "#2563eb",
-          "#60a5fa",
-          "#bfdbfe",
-          "#eff6ff"
+          "#172834",
+          "#273e50",
+          "#29495f",
+          "#2b5673",
+          "#32688b",
+          "#6f9fbe",
+          "#c5dcea",
+          "#f0f6fa"
         ]
       },
       "console-selected": {
         "role": "primary",
         "displayName": "Selection Wash",
         "tonalRamp": [
-          "oklch(15% 0.0165 259.42)",
-          "oklch(26% 0.0165 259.42)",
-          "oklch(38% 0.0165 259.42)",
-          "oklch(49% 0.0165 259.42)",
-          "oklch(61% 0.0165 259.42)",
-          "oklch(72% 0.0165 259.42)",
-          "oklch(84% 0.0165 259.42)",
-          "oklch(95% 0.0165 259.42)"
+          "oklch(15% 0.0093 242.84)",
+          "oklch(26% 0.0093 242.84)",
+          "oklch(38% 0.0093 242.84)",
+          "oklch(49% 0.0093 242.84)",
+          "oklch(61% 0.0093 242.84)",
+          "oklch(72% 0.0093 242.84)",
+          "oklch(84% 0.0093 242.84)",
+          "oklch(95% 0.0093 242.84)"
         ]
       },
       "dark-console-bg": {
@@ -218,14 +218,14 @@
         "role": "primary",
         "displayName": "Night Blue",
         "tonalRamp": [
-          "#172554",
-          "#1e3a8a",
-          "#1e40af",
-          "#1d4ed8",
-          "#2563eb",
-          "#60a5fa",
-          "#bfdbfe",
-          "#eff6ff"
+          "#172834",
+          "#273e50",
+          "#29495f",
+          "#2b5673",
+          "#32688b",
+          "#6f9fbe",
+          "#c5dcea",
+          "#f0f6fa"
         ]
       },
       "dark-console-selected": {
@@ -426,30 +426,30 @@
       },
       "chart-input": {
         "role": "neutral",
-        "displayName": "Chart Input",
+        "displayName": "Input Blue",
         "tonalRamp": [
-          "oklch(15% 0.1807 266.40)",
-          "oklch(26% 0.1807 266.40)",
-          "oklch(38% 0.1807 266.40)",
-          "oklch(49% 0.1807 266.40)",
-          "oklch(61% 0.1807 266.40)",
-          "oklch(72% 0.1807 266.40)",
-          "oklch(84% 0.1807 266.40)",
-          "oklch(95% 0.1807 266.40)"
+          "oklch(15% 0.0789 237.64)",
+          "oklch(26% 0.0789 237.64)",
+          "oklch(38% 0.0789 237.64)",
+          "oklch(49% 0.0789 237.64)",
+          "oklch(61% 0.0789 237.64)",
+          "oklch(72% 0.0789 237.64)",
+          "oklch(84% 0.0789 237.64)",
+          "oklch(95% 0.0789 237.64)"
         ]
       },
       "chart-output": {
         "role": "neutral",
-        "displayName": "Chart Output",
+        "displayName": "Output Blue-Gray",
         "tonalRamp": [
-          "oklch(15% 0.1675 294.27)",
-          "oklch(26% 0.1675 294.27)",
-          "oklch(38% 0.1675 294.27)",
-          "oklch(49% 0.1675 294.27)",
-          "oklch(61% 0.1675 294.27)",
-          "oklch(72% 0.1675 294.27)",
-          "oklch(84% 0.1675 294.27)",
-          "oklch(95% 0.1675 294.27)"
+          "oklch(15% 0.0430 234.64)",
+          "oklch(26% 0.0430 234.64)",
+          "oklch(38% 0.0430 234.64)",
+          "oklch(49% 0.0430 234.64)",
+          "oklch(61% 0.0430 234.64)",
+          "oklch(72% 0.0430 234.64)",
+          "oklch(84% 0.0430 234.64)",
+          "oklch(95% 0.0430 234.64)"
         ]
       },
       "chart-cache-read": {
@@ -568,19 +568,31 @@
     "typographyMeta": {
       "body": {
         "displayName": "Compact System Sans",
-        "purpose": "13px shared console controls and records with Chinese fallbacks; tabular figures on the shell."
+        "purpose": "13px controls and records with Chinese fallbacks; tabular figures on the console shell."
       },
       "headline": {
         "displayName": "Page Headline",
-        "purpose": "20px task heading, 650 weight, 1.4 line height."
+        "purpose": "20px task heading; 650 weight generally and 600 in the operations toolbar."
       },
       "metric": {
-        "displayName": "Summary Metric",
-        "purpose": "27px dashboard values; 24px below 1280px."
+        "displayName": "Dashboard Metric",
+        "purpose": "25px dashboard values; 24px below 1280px."
+      },
+      "ops-metric": {
+        "displayName": "Operations Metric",
+        "purpose": "23px headline values; 21px from 1000px through 1199px. Realtime current QPS/TPS uses 20px."
+      },
+      "usage-metric": {
+        "displayName": "Usage Aggregate",
+        "purpose": "17px compact values in the records aggregate strip."
+      },
+      "label": {
+        "displayName": "Primary Metadata",
+        "purpose": "12px labels and primary metadata retain readable contrast."
       },
       "supporting": {
         "displayName": "Supporting Metadata",
-        "purpose": "11px supporting units and category/chart labels; retain meaningful contrast."
+        "purpose": "11px supporting units, category labels, and chart ticks where implemented."
       }
     },
     "shadows": [
@@ -619,13 +631,17 @@
       {
         "name": "trend-chart",
         "value": "animation: false",
-        "purpose": "Chart.js trend rendering."
+        "purpose": "Token, operations throughput, and operations switching trends render complete plots during refresh and fullscreen resizing."
       }
     ],
     "breakpoints": [
       {
-        "name": "brand-compact",
+        "name": "mobile-record-pairs-and-summary",
         "value": "480px"
+      },
+      {
+        "name": "ops-single-column-to-two",
+        "value": "600px"
       },
       {
         "name": "sm",
@@ -636,8 +652,16 @@
         "value": "768px"
       },
       {
-        "name": "lg",
+        "name": "ops-four-column-matrix",
+        "value": "1000px"
+      },
+      {
+        "name": "desktop-shell-and-ops-traffic",
         "value": "1024px"
+      },
+      {
+        "name": "ops-regular-density",
+        "value": "1200px"
       },
       {
         "name": "xl",
@@ -650,9 +674,9 @@
       "name": "Primary Button",
       "kind": "button",
       "refersTo": "button-primary",
-      "description": "Shared blue console action; filled blue remains constant in dark mode.",
+      "description": "Shared muted blue console action; the filled action stays primary-600 in both themes.",
       "html": "<button class=\"ds-primary\">Save changes</button>",
-      "css": ".ds-primary{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:34px;border-radius:9px;padding:7px 12px;font:500 13px/20px system-ui,sans-serif;cursor:pointer;box-shadow:none;transition:background-color 150ms ease-out,color 150ms ease-out;border:0;background:#2563eb;color:#fff}.ds-primary:hover{background:#1d4ed8}.ds-primary:focus-visible{outline:2px solid var(--console-accent,#2563eb);outline-offset:3px;}.ds-primary:disabled{opacity:.5;cursor:not-allowed}"
+      "css": ".ds-primary{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:34px;border-radius:9px;padding:7px 12px;font:500 13px/20px system-ui,sans-serif;cursor:pointer;box-shadow:none;transition:background-color 150ms ease-out,color 150ms ease-out;border:0;background:#32688b;color:#fff}.ds-primary:hover{background:#2b5673}.ds-primary:focus-visible{outline:2px solid var(--console-accent,#32688b);outline-offset:3px;}.ds-primary:disabled{opacity:.5;cursor:not-allowed}"
     },
     {
       "name": "Secondary Button",
@@ -660,7 +684,7 @@
       "refersTo": "button-secondary",
       "description": "Bordered neutral action for refresh and secondary work.",
       "html": "<button class=\"ds-secondary\">Refresh</button>",
-      "css": ".ds-secondary{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:34px;border-radius:9px;padding:7px 12px;font:500 13px/20px system-ui,sans-serif;cursor:pointer;box-shadow:none;transition:background-color 150ms ease-out,color 150ms ease-out;border:1px solid var(--console-line,#e7ebf1);background:#fff;color:#374151}.ds-secondary:hover{background:#f9fafb;border-color:#d1d5db}.ds-secondary:focus-visible{outline:2px solid var(--console-accent,#2563eb);outline-offset:3px;}.ds-secondary:disabled{opacity:.5;cursor:not-allowed}:host-context(.dark) .ds-secondary{background:#1e293b;color:#e5e7eb}:host-context(.dark) .ds-secondary:hover{background:#334155;border-color:#64748b}"
+      "css": ".ds-secondary{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:34px;border-radius:9px;padding:7px 12px;font:500 13px/20px system-ui,sans-serif;cursor:pointer;box-shadow:none;transition:background-color 150ms ease-out,color 150ms ease-out;border:1px solid var(--console-line,#e7e9ed);background:#fff;color:#374151}.ds-secondary:hover{background:#f9fafb;border-color:#d1d5db}.ds-secondary:focus-visible{outline:2px solid var(--console-accent,#32688b);outline-offset:3px;}.ds-secondary:disabled{opacity:.5;cursor:not-allowed}:host-context(.dark) .ds-secondary{background:#1e293b;color:#e5e7eb}:host-context(.dark) .ds-secondary:hover{background:#334155;border-color:#64748b}"
     },
     {
       "name": "Ghost Button",
@@ -668,7 +692,7 @@
       "refersTo": "button-ghost",
       "description": "Unfilled utility action with neutral hover.",
       "html": "<button class=\"ds-ghost\">Cancel</button>",
-      "css": ".ds-ghost{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:34px;border-radius:9px;padding:7px 12px;font:500 13px/20px system-ui,sans-serif;cursor:pointer;box-shadow:none;transition:background-color 150ms ease-out,color 150ms ease-out;border:0;background:transparent;color:#4b5563}.ds-ghost:hover{background:#f3f4f6}.ds-ghost:focus-visible{outline:2px solid var(--console-accent,#2563eb);outline-offset:3px;}.ds-ghost:disabled{opacity:.5;cursor:not-allowed}:host-context(.dark) .ds-ghost{color:#d1d5db}:host-context(.dark) .ds-ghost:hover{background:#1e293b}"
+      "css": ".ds-ghost{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:34px;border-radius:9px;padding:7px 12px;font:500 13px/20px system-ui,sans-serif;cursor:pointer;box-shadow:none;transition:background-color 150ms ease-out,color 150ms ease-out;border:0;background:transparent;color:#4b5563}.ds-ghost:hover{background:#f3f4f6}.ds-ghost:focus-visible{outline:2px solid var(--console-accent,#32688b);outline-offset:3px;}.ds-ghost:disabled{opacity:.5;cursor:not-allowed}:host-context(.dark) .ds-ghost{color:#d1d5db}:host-context(.dark) .ds-ghost:hover{background:#1e293b}"
     },
     {
       "name": "Danger Button",
@@ -676,7 +700,7 @@
       "refersTo": "button-danger",
       "description": "Existing destructive action semantics.",
       "html": "<button class=\"ds-danger\">Delete</button>",
-      "css": ".ds-danger{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:34px;border-radius:9px;padding:7px 12px;font:500 13px/20px system-ui,sans-serif;cursor:pointer;box-shadow:none;transition:background-color 150ms ease-out,color 150ms ease-out;border:0;background:#dc2626;color:#fff}.ds-danger:hover{background:#b91c1c}.ds-danger:focus-visible{outline:2px solid var(--console-accent,#2563eb);outline-offset:3px;}.ds-danger:disabled{opacity:.5;cursor:not-allowed}"
+      "css": ".ds-danger{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:34px;border-radius:9px;padding:7px 12px;font:500 13px/20px system-ui,sans-serif;cursor:pointer;box-shadow:none;transition:background-color 150ms ease-out,color 150ms ease-out;border:0;background:#dc2626;color:#fff}.ds-danger:hover{background:#b91c1c}.ds-danger:focus-visible{outline:2px solid var(--console-accent,#32688b);outline-offset:3px;}.ds-danger:disabled{opacity:.5;cursor:not-allowed}"
     },
     {
       "name": "Query Field",
@@ -684,7 +708,7 @@
       "refersTo": "input",
       "description": "Compact labeled query field with themed placeholder and visible focus.",
       "html": "<label class=\"ds-field-label\" for=\"ds-query\">Search records</label><input id=\"ds-query\" class=\"ds-field\" placeholder=\"Search groups…\" />",
-      "css": ".ds-field-label{display:block;margin-bottom:6px;font:500 12px/16px system-ui,sans-serif;color:var(--console-muted,#617086)}.ds-field{width:100%;max-width:300px;min-height:36px;padding:8px 12px;border:1px solid var(--console-line,#e7ebf1);border-radius:9px;background:#fff;color:#111827;font:400 12px/20px system-ui,sans-serif;transition:all 200ms}.ds-field::placeholder{color:var(--console-muted,#617086);opacity:1}.ds-field:focus{border-color:#3b82f6;box-shadow:0 0 0 2px rgb(59 130 246 / 30%)}.ds-field:focus-visible{outline:2px solid var(--console-accent,#2563eb);outline-offset:3px;}.ds-field:disabled{background:#f3f4f6;cursor:not-allowed}:host-context(.dark) .ds-field{background:#1e293b;color:#f3f4f6}"
+      "css": ".ds-field-label{display:block;margin-bottom:6px;font:500 12px/16px system-ui,sans-serif;color:var(--console-muted,#626b78)}.ds-field{width:100%;max-width:300px;min-height:36px;padding:8px 12px;border:1px solid var(--console-line,#e7e9ed);border-radius:9px;background:#fff;color:#111827;font:400 12px/20px system-ui,sans-serif;transition:all 200ms}.ds-field::placeholder{color:var(--console-muted,#626b78);opacity:1}.ds-field:focus{border-color:#477fa3;box-shadow:0 0 0 2px rgb(71 127 163 / 30%)}.ds-field:focus-visible{outline:2px solid var(--console-accent,#32688b);outline-offset:3px;}.ds-field:disabled{background:#f3f4f6;cursor:not-allowed}:host-context(.dark) .ds-field{background:#1e293b;color:#f3f4f6}"
     },
     {
       "name": "Sidebar Navigation",
@@ -692,7 +716,7 @@
       "refersTo": "navigation-active",
       "description": "Direct category label and selected destination; nested feature disclosure remains separate.",
       "html": "<nav class=\"ds-nav\" aria-label=\"Console\"><p class=\"ds-nav-category\">Overview</p><a class=\"ds-nav-item ds-nav-active\" href=\"#dashboard\" aria-current=\"page\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" aria-hidden=\"true\"><path d=\"M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z\"/></svg>Dashboard</a><a class=\"ds-nav-item\" href=\"#usage\">Usage records</a></nav>",
-      "css": ".ds-nav{width:184px;padding:8px 12px 16px;background:var(--console-surface,#fff);font-family:system-ui,sans-serif}.ds-nav-category{padding:10px 12px 6px;margin:0;color:var(--console-muted,#617086);font-size:11px;font-weight:500}.ds-nav-item{display:flex;align-items:center;gap:10px;min-height:36px;padding:8px 12px;margin-bottom:4px;border-radius:20px;text-decoration:none;font-size:13px;color:var(--console-ink,#202a3b)}.ds-nav-item:hover{background:var(--console-nav,#f8fafc)}.ds-nav-active,.ds-nav-active:hover{background:var(--console-selected,#edf4ff);color:var(--console-accent,#2563eb);font-weight:600}.ds-nav-item:focus-visible{outline:2px solid var(--console-accent,#2563eb);outline-offset:3px;}"
+      "css": ".ds-nav{width:184px;padding:8px 12px 16px;background:var(--console-surface,#fff);font-family:system-ui,sans-serif}.ds-nav-category{padding:10px 12px 6px;margin:0;color:var(--console-muted,#626b78);font-size:11px;font-weight:500}.ds-nav-item{display:flex;align-items:center;gap:10px;min-height:36px;padding:8px 12px;margin-bottom:4px;border-radius:20px;text-decoration:none;font-size:13px;color:var(--console-ink,#242931)}.ds-nav-item:hover{background:var(--console-nav,#f6f7f9)}.ds-nav-active,.ds-nav-active:hover{background:var(--console-selected,#edf3f8);color:var(--console-accent,#32688b);font-weight:600}.ds-nav-item:focus-visible{outline:2px solid var(--console-accent,#32688b);outline-offset:3px;}"
     },
     {
       "name": "Neutral Badge",
@@ -706,9 +730,9 @@
       "name": "Content Panel",
       "kind": "card",
       "refersTo": "content-panel",
-      "description": "White bordered inner working area with compact title and supporting text.",
+      "description": "One framed working region on a transparent page root, with compact title and supporting text.",
       "html": "<section class=\"ds-panel\"><h3 class=\"ds-panel-title\">General settings</h3><p class=\"ds-panel-copy\">Configure the existing workspace options.</p></section>",
-      "css": ".ds-panel{padding:20px;border:1px solid var(--console-line,#e7ebf1);border-radius:12px;background:var(--console-surface,#fff);color:var(--console-ink,#202a3b);box-shadow:none;font-family:system-ui,sans-serif}.ds-panel-title{margin:0;font-size:15px;font-weight:600}.ds-panel-copy{margin:5px 0 0;font-size:12px;color:var(--console-muted,#617086)}"
+      "css": ".ds-panel{padding:20px;border:1px solid var(--console-line,#e7e9ed);border-radius:12px;background:var(--console-surface,#fff);color:var(--console-ink,#242931);box-shadow:none;font-family:system-ui,sans-serif}.ds-panel-title{margin:0;font-size:15px;font-weight:600}.ds-panel-copy{margin:5px 0 0;font-size:12px;color:var(--console-muted,#626b78)}"
     },
     {
       "name": "Chart Form Choices",
@@ -716,31 +740,31 @@
       "refersTo": "chart-choice",
       "description": "Pill track for bar/area choices with explicit pressed state.",
       "html": "<div class=\"ds-choices\" role=\"group\" aria-label=\"Chart type\"><button class=\"ds-choice\" aria-pressed=\"true\">Bar chart</button><button class=\"ds-choice\" aria-pressed=\"false\">Area chart</button></div>",
-      "css": ".ds-choices{display:inline-flex;align-items:center;gap:2px;padding:3px;border-radius:20px;background:var(--console-nav,#f8fafc)}.ds-choice{padding:5px 11px;border:1px solid transparent;border-radius:20px;background:transparent;color:var(--console-muted,#617086);font:400 12px/18px system-ui,sans-serif;white-space:nowrap;cursor:pointer}.ds-choice:hover{color:var(--console-ink,#202a3b)}.ds-choice[aria-pressed=\"true\"]{border-color:var(--console-line,#e7ebf1);background:var(--console-surface,#fff);color:var(--console-ink,#202a3b);font-weight:600}.ds-choice:focus-visible{outline:2px solid var(--console-accent,#2563eb);outline-offset:3px;}"
+      "css": ".ds-choices{display:inline-flex;align-items:center;gap:2px;padding:3px;border-radius:20px;background:var(--console-nav,#f6f7f9)}.ds-choice{padding:5px 11px;border:1px solid transparent;border-radius:20px;background:transparent;color:var(--console-muted,#626b78);font:400 12px/18px system-ui,sans-serif;white-space:nowrap;cursor:pointer}.ds-choice:hover{color:var(--console-ink,#242931)}.ds-choice[aria-pressed=\"true\"]{border-color:var(--console-line,#e7e9ed);background:var(--console-surface,#fff);color:var(--console-ink,#242931);font-weight:600}.ds-choice:focus-visible{outline:2px solid var(--console-accent,#32688b);outline-offset:3px;}"
     },
     {
       "name": "Collection Table",
       "kind": "custom",
       "refersTo": "collection-header",
-      "description": "Framed compact table with neutral header, tabular numbers, and selected row wash.",
+      "description": "Compact records in a single frame, with neutral headers, tabular numbers, and integrated pagination.",
       "html": "<section class=\"ds-table-panel\"><table class=\"ds-table\"><thead><tr><th>Model</th><th>Requests</th></tr></thead><tbody><tr><td>Local sample</td><td>120</td></tr><tr><td>Local sample 2</td><td>84</td></tr></tbody></table><footer class=\"ds-table-footer\">Synthetic preview · 2 records</footer></section>",
-      "css": ".ds-table-panel{min-width:0;overflow:auto;border:1px solid var(--console-line,#e7ebf1);border-radius:12px;background:var(--console-surface,#fff);font-family:system-ui,sans-serif}.ds-table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}.ds-table th{height:42px;padding:0 16px;background:var(--console-nav,#f8fafc);color:var(--console-muted,#617086);font-size:12px;font-weight:600;text-align:left;border-bottom:1px solid var(--console-line,#e7ebf1)}.ds-table td{padding:10px 16px;font-size:13px;color:var(--console-ink,#202a3b);border-bottom:1px solid var(--console-line,#e7ebf1)}.ds-table td:first-child{font-weight:500}.ds-table th:last-child,.ds-table td:last-child{text-align:right}.ds-table tbody tr:hover td{background:var(--console-selected,#edf4ff)}.ds-table-footer{padding:12px 16px;color:var(--console-muted,#617086);font-size:12px}"
+      "css": ".ds-table-panel{min-width:0;overflow:auto;border:1px solid var(--console-line,#e7e9ed);border-radius:12px;background:var(--console-surface,#fff);font-family:system-ui,sans-serif}.ds-table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}.ds-table th{height:42px;padding:0 16px;background:var(--console-nav,#f6f7f9);color:var(--console-muted,#626b78);font-size:12px;font-weight:600;text-align:left;border-bottom:1px solid var(--console-line,#e7e9ed)}.ds-table td{padding:10px 16px;font-size:13px;color:var(--console-ink,#242931);border-bottom:1px solid var(--console-line,#e7e9ed)}.ds-table td:first-child{font-weight:500}.ds-table th:last-child,.ds-table td:last-child{text-align:right}.ds-table tbody tr:hover td{background:var(--console-selected,#edf3f8)}.ds-table-footer{padding:12px 16px;color:var(--console-muted,#626b78);font-size:12px}"
     }
   ],
   "narrative": {
     "northStar": "The Direct-Access Console",
-    "overview": "The B console is a compact API operations workspace. Its confirmed reference is New API: a white global header and sidebar, a light gray canvas, rounded white working areas, restrained blue selection, and readable records. The interface uses direct destination categories, visible collection filters, and full-width analytical panels to make operational work easy to find and scan.\n\nConfigured branding, Chinese and English labels, stored dark theme, permissions, and existing billing distinctions remain product truth. This is an interface grammar for the B console and shared authentication layout; it does not prescribe a new backend, replace provider-owned flows, or extend to deployment C.",
+    "overview": "The B console is a compact API operations workspace. Its user-pinned visual reference is New API: a white global header and sidebar, a neutral gray canvas, restrained blue actions, and readable records. Revision 7 uses flat page roots with individually framed working regions, compact query controls, and aligned metric groups. The task and its data lead the screen.\n\nConfigured branding, Chinese and English labels, stored dark theme, permissions, and existing billing distinctions remain product truth. This is the implemented visual system for the B console and shared authentication layout; deployment C and provider-owned payment flows retain their separate boundaries.",
     "keyCharacteristics": [
       "Global workspace header with directly visible navigation categories.",
-      "Blue actions and selected states on white surfaces and a light gray canvas.",
-      "Framed collections with filters open by default, compact records, and integrated pagination.",
-      "Five headline measures, a resource band, and full-width metric/form-switching analysis.",
-      "Responsive stacking, local table overflow, and a mobile navigation drawer."
+      "Muted blue actions and selection on neutral surfaces; no decorative violet category system.",
+      "Flat page roots, compact collections, preserved advanced filters, and integrated pagination.",
+      "Operations metric matrix, compact resources, and deliberately placed traffic analysis.",
+      "Responsive records with paired fields, optional detail, and preserved column choices."
     ],
     "rules": [
       {
         "name": "The Action Rule",
-        "body": "Use the shared blue action scale for console actions; reserve semantic colors for their existing status and data meanings.",
+        "body": "Use the shared muted blue scale for console actions; preserve semantic data colors and genuine provider branding.",
         "section": "colors"
       },
       {
@@ -750,25 +774,25 @@
       },
       {
         "name": "The Surface Rule",
-        "body": "Use tone and fine borders for work areas; reserve pronounced depth for overlays.",
+        "body": "Frame the working region once; use tone and fine borders for internal grouping and pronounced depth for overlays.",
         "section": "elevation"
       }
     ],
     "dos": [
       "Do use the global header, directly visible destination categories, and one clear page heading.",
-      "Do keep collection filters open initially and preserve their query state when collapsed.",
-      "Do use blue for shared primary actions and selection while retaining existing semantic status colors.",
-      "Do keep trends full width and expose both metric and chart-form choices where implemented.",
-      "Do preserve labels, units, currency distinctions, permissions, feature flags, validation, and stored theme.",
+      "Do use the shared muted blue ramp for console actions and retain meaningful semantic and provider colors.",
+      "Do keep primary queries visible, preserve collapsed advanced criteria, and show their active count.",
+      "Do preserve selected columns on mobile through primary fields and the More disclosure.",
+      "Do preserve labels, units, charge distinctions, permissions, feature flags, validation, and stored theme.",
       "Do treat local preview values and screenshots as synthetic visual evidence."
     ],
     "donts": [
-      "Don't restore revision 5's expandable top-level modules, closed-by-default filters, unboxed collections, or split primary analysis.",
-      "Don't hide meaningful billing-period metadata with low-contrast decorative text.",
-      "Don't treat nested feature groups as evidence that top-level categories should collapse.",
+      "Don't add an outer white card around every page or duplicate frames around the same working region.",
+      "Don't reintroduce decorative violet as the console action or category palette.",
+      "Don't turn the operations realtime metrics into a tall separate column with an empty space beneath it.",
+      "Don't hide meaningful metadata through low contrast or remove advanced query dimensions to simplify the screen.",
       "Don't remove errors, input adornments, disabled behavior, or provider-owned controls for visual uniformity.",
-      "Don't apply B-console visual rules to C, backend contracts, or unrelated public surfaces.",
-      "Don't interpret this document or local captures as universal accessibility, all-route, deployment, or live-payment certification."
+      "Don't interpret this document as user acceptance, deployment evidence, or universal route and accessibility certification."
     ]
   }
 }

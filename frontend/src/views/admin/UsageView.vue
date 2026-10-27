@@ -8,9 +8,9 @@
           <button type="button" :aria-pressed="usageView === 'analysis'" @click="usageView = 'analysis'">{{ t('console.analysis') }}</button>
         </div>
       </div>
-      <UsageStatsCards :stats="usageStats" />
+      <UsageStatsCards v-if="usageView === 'analysis'" :stats="usageStats" />
       <!-- Charts Section -->
-      <div class="space-y-4">
+      <div v-if="usageView === 'analysis'" class="space-y-4">
         <div class="console-analysis-toolbar">
           <div class="flex flex-wrap items-center gap-4">
             <div class="flex items-center gap-2">
@@ -94,6 +94,7 @@
         </div>
 
         <UsageFilters v-model="filters" ref="usageFiltersRef" flat :mode="activeTab" class="border-b border-gray-100 dark:border-dark-700/50" :start-date="startDate" :end-date="endDate" :exporting="exporting" :model-options="modelNameOptions" @change="applyFilters" @refresh="refreshData" @reset="resetFilters" @cleanup="openCleanupDialog" @export="exportToExcel">
+          <template #date><DateRangePicker v-model:start-date="startDate" v-model:end-date="endDate" @change="onDateRangeChange" /></template>
           <template #after-reset>
             <div v-if="activeTab !== 'ranking'" class="relative" ref="columnDropdownRef">
               <button
@@ -131,6 +132,7 @@
             </div>
           </template>
         </UsageFilters>
+        <UsageStatsCards :stats="usageStats" compact-mobile />
 
         <div v-show="activeTab === 'usage'" class="overflow-hidden rounded-b-2xl">
           <UsageTable
@@ -655,24 +657,24 @@ const HIDDEN_COLUMNS_PREV_VERSION = 'upstream-request-id-hidden-by-default'
 const HIDDEN_COLUMNS_CURRENT_VERSION = 'response-trace-hidden-by-default'
 
 const allColumns = computed(() => [
+  { key: 'created_at', label: t('usage.time'), sortable: true },
   { key: 'user', label: t('admin.usage.user'), sortable: false },
-  { key: 'api_key', label: t('usage.apiKeyFilter'), sortable: false },
-  { key: 'account', label: t('admin.usage.account'), sortable: false },
   { key: 'model', label: t('usage.model'), sortable: true },
-  { key: 'reasoning_effort', label: t('usage.reasoningEffort'), sortable: false },
-  { key: 'endpoint', label: t('usage.endpoint'), sortable: false },
-  { key: 'group', label: t('admin.usage.group'), sortable: false },
-  { key: 'stream', label: t('usage.type'), sortable: false },
-  { key: 'billing_mode', label: t('admin.usage.billingMode'), sortable: false },
   { key: 'tokens', label: t('usage.tokens'), sortable: false },
   { key: 'cost', label: t('usage.cost'), sortable: false },
   { key: 'latency', label: t('usage.latency'), sortable: false },
-  { key: 'created_at', label: t('usage.time'), sortable: true },
+  { key: 'group', label: t('admin.usage.group'), sortable: false },
+  { key: 'stream', label: t('usage.type'), sortable: false },
+  { key: 'api_key', label: t('usage.apiKeyFilter'), sortable: false },
+  { key: 'account', label: t('admin.usage.account'), sortable: false },
+  { key: 'endpoint', label: t('usage.endpoint'), sortable: false },
+  { key: 'reasoning_effort', label: t('usage.reasoningEffort'), sortable: false },
+  { key: 'billing_mode', label: t('admin.usage.billingMode'), sortable: false },
+  { key: 'ip_address', label: t('admin.usage.ipAddress'), sortable: false },
   { key: 'request_id', label: t('admin.usage.requestId'), sortable: false },
   { key: 'upstream_request_id', label: t('admin.usage.upstreamRequestId'), sortable: false },
   { key: 'response_trace', label: t('admin.usage.responseTrace'), sortable: false },
   { key: 'user_agent', label: t('usage.userAgent'), sortable: false },
-  { key: 'ip_address', label: t('admin.usage.ipAddress'), sortable: false },
   { key: 'actions', label: t('common.actions'), sortable: false }
 ])
 

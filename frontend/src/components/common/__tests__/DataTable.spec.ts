@@ -42,6 +42,23 @@ const stubMobileMatchMedia = () => {
 }
 
 describe('DataTable', () => {
+  it('keeps secondary mobile fields and actions accessible beside the compact summary', () => {
+    stubMobileMatchMedia()
+    const wrapper = mount(DataTable, {
+      props: {
+        columns: [{ key: 'model', label: 'Model' }, { key: 'request_id', label: 'Request ID' }, { key: 'actions', label: 'Actions' }],
+        data: [{ id: 1, model: 'sample-model', request_id: 'request-123' }],
+        mobileSummaryColumns: ['model']
+      },
+      slots: { 'cell-actions': '<button>Details</button>' }
+    })
+    expect(wrapper.get('.console-mobile-details [data-field="request_id"]').text()).toContain('request-123')
+    expect(wrapper.get('[data-field="model"]').element.closest('details')).toBeNull()
+    expect(wrapper.get('.console-mobile-details').element.hasAttribute('open')).toBe(false)
+    expect(wrapper.get('button').text()).toBe('Details')
+    wrapper.unmount()
+  })
+
   beforeEach(() => {
     stubDesktopMatchMedia()
     localStorage.clear()

@@ -57,7 +57,7 @@ const colorMap: Record<string, string> = {
   wxpay: 'bg-green-500',
   alipay_direct: 'bg-blue-400',
   wxpay_direct: 'bg-green-400',
-  stripe: 'bg-purple-500',
+  stripe: 'bg-primary-500',
 }
 
 const barColorMap: Record<string, string> = {
@@ -65,7 +65,7 @@ const barColorMap: Record<string, string> = {
   wxpay: 'bg-green-500',
   alipay_direct: 'bg-blue-400',
   wxpay_direct: 'bg-green-400',
-  stripe: 'bg-purple-500',
+  stripe: 'bg-primary-500',
 }
 
 const maxAmounts = computed<CurrencyAmounts>(() => {

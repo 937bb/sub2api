@@ -343,7 +343,7 @@ const showAccountCost = computed(() => props.showAccountCost && props.showCosts)
 const distributionColspan = computed(() => !props.showCosts ? 3 : showAccountCost.value ? 6 : 5)
 const activeView = ref<'model_distribution' | 'spending_ranking'>('model_distribution')
 
-const chartColors = ['#3562ce', '#4b7ca9', '#27857a', '#6f7a9d', '#9b7e54', '#8c667a', '#718c70', '#707c8c', '#496397', '#6c9995', '#8c8e69', '#937c84']
+const chartColors = ['#32688b', '#4b7ca9', '#27857a', '#6f7a9d', '#9b7e54', '#8c8171', '#718c70', '#707c8c', '#496397', '#6c9995', '#8c8e69', '#937c84']
 
 const displayModelStats = computed(() => {
   const sourceStats = props.source === 'upstream'

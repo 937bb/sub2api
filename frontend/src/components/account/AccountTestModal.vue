@@ -526,7 +526,7 @@ const handleEvent = (event: {
           url: event.image_url,
           mimeType: event.mime_type
         })
-        addLine(t('admin.accounts.imageReceived', { count: generatedImages.value.length }), 'text-purple-300')
+        addLine(t('admin.accounts.imageReceived', { count: generatedImages.value.length }), 'text-primary-300')
       }
       break
 

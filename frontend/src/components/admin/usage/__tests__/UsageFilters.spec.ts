@@ -120,6 +120,23 @@ function deferred<T>() {
 }
 
 describe('UsageFilters — user search dropdown', () => {
+  it('keeps zero and false filters active when advanced controls are collapsed', async () => {
+    const filters = { ...defaultFilters(), billing_type: 0, upstream_model_mismatch: false }
+    const wrapper = mountFilters(filters as ReturnType<typeof defaultFilters>)
+    const toggle = wrapper.get('[data-testid="usage-advanced-toggle"]')
+    expect(toggle.attributes('aria-expanded')).toBe('false')
+    expect(toggle.get('.console-filter-count').text()).toBe('2')
+    expect(wrapper.get('#admin-usage-advanced').isVisible()).toBe(false)
+    await toggle.trigger('click')
+    expect(toggle.attributes('aria-expanded')).toBe('true')
+    expect(wrapper.get('#admin-usage-advanced').attributes('style')).not.toContain('display: none')
+    await toggle.trigger('click')
+    expect(filters.billing_type).toBe(0)
+    expect(filters.upstream_model_mismatch).toBe(false)
+    expect(wrapper.emitted('change')).toBeUndefined()
+    wrapper.unmount()
+  })
+
   beforeEach(() => {
     vi.useFakeTimers()
     mockSearchUsers.mockReset()

@@ -24,7 +24,7 @@
           <span class="text-sm font-semibold text-gray-900 dark:text-white">
             {{ item.isOther ? t('dashboard.platformOther') : platformLabel(item.platform) }}
           </span>
-          <span class="font-mono text-sm text-purple-600 dark:text-purple-400" :title="t('dashboard.actual')">
+          <span class="font-mono text-sm text-primary-600 dark:text-primary-400" :title="t('dashboard.actual')">
             ${{ formatCost(item.total_actual_cost) }}
           </span>
         </div>

@@ -46,8 +46,8 @@ describe('PlatformTypeBadge Grok plans', () => {
     expect(wrapper.text()).toContain('SuperGrok Heavy')
     expect(wrapper.find('[data-testid="grok-plan-icon"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="grok-free-plan-icon"]').exists()).toBe(false)
-    // Heavy uses purple plan chip
-    expect(wrapper.html()).toContain('bg-purple-100')
+    // Heavy uses muted blue plan chip
+    expect(wrapper.html()).toContain('bg-primary-100')
 
     await wrapper.setProps({ platform: 'openai', planType: 'free' })
     expect(wrapper.text()).toContain('Free')
@@ -55,12 +55,12 @@ describe('PlatformTypeBadge Grok plans', () => {
     expect(wrapper.find('[data-testid="grok-plan-icon"]').exists()).toBe(false)
   })
 
-  it('colors free gray, SuperGrok cyan, and Heavy purple', async () => {
+  it('colors free gray, SuperGrok cyan, and Heavy muted blue', async () => {
     const free = mount(PlatformTypeBadge, {
       props: { platform: 'grok', type: 'oauth', planType: 'free' },
     })
     expect(free.html()).toContain('bg-gray-100')
-    expect(free.html()).not.toContain('bg-purple-100')
+    expect(free.html()).not.toContain('bg-primary-100')
     expect(free.html()).not.toContain('bg-cyan-100')
 
     const superGrok = mount(PlatformTypeBadge, {
@@ -74,7 +74,7 @@ describe('PlatformTypeBadge Grok plans', () => {
       props: { platform: 'grok', type: 'oauth', planType: 'Heavy' },
     })
     expect(heavy.text()).toContain('Heavy')
-    expect(heavy.html()).toContain('bg-purple-100')
+    expect(heavy.html()).toContain('bg-primary-100')
     expect(heavy.find('[data-testid="grok-plan-icon"]').exists()).toBe(true)
 
     const lite = mount(PlatformTypeBadge, {

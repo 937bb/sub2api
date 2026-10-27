@@ -136,15 +136,15 @@
 
           <!-- Daily Average Requests -->
           <div
-            class="card border-purple-200 bg-gradient-to-br from-purple-50 to-white p-4 dark:border-purple-800/30 dark:from-purple-900/10 dark:to-dark-700"
+            class="card border-primary-200 bg-gradient-to-br from-primary-50 to-white p-4 dark:border-primary-800/30 dark:from-primary-900/10 dark:to-dark-700"
           >
             <div class="mb-2 flex items-center justify-between">
               <span class="text-xs font-medium text-gray-500 dark:text-gray-400">{{
                 t('admin.accounts.stats.avgDailyRequests')
               }}</span>
-              <div class="rounded-lg bg-purple-100 p-1.5 dark:bg-purple-900/30">
+              <div class="rounded-lg bg-primary-100 p-1.5 dark:bg-primary-900/30">
                 <svg
-                  class="h-4 w-4 text-purple-600 dark:text-purple-400"
+                  class="h-4 w-4 text-primary-600 dark:text-primary-400"
                   fill="none"
                   viewBox="0 0 24 24"
                   stroke="currentColor"
@@ -273,11 +273,11 @@
           <!-- Highest Request Day -->
           <div class="card p-4">
             <div class="mb-3 flex items-center gap-2">
-              <div class="rounded-lg bg-indigo-100 p-1.5 dark:bg-indigo-900/30">
+              <div class="rounded-lg bg-slate-100 p-1.5 dark:bg-slate-900/30">
                 <Icon
                   name="trendingUp"
                   size="sm"
-                  class="text-indigo-600 dark:text-indigo-400"
+                  class="text-slate-600 dark:text-slate-400"
                   :stroke-width="2"
                 />
               </div>
@@ -298,7 +298,7 @@
                 <span class="text-xs text-gray-500 dark:text-gray-400">{{
                   t('admin.accounts.stats.requests')
                 }}</span>
-                <span class="text-sm font-semibold text-indigo-600 dark:text-indigo-400">{{
+                <span class="text-sm font-semibold text-slate-600 dark:text-slate-400">{{
                   formatNumber(stats.summary.highest_request_day?.requests || 0)
                 }}</span>
               </div>

@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
+import { nextTick } from 'vue'
+import { useDark } from '@vueuse/core'
 
 import OpsThroughputTrendChart from '../OpsThroughputTrendChart.vue'
 
@@ -21,6 +23,27 @@ vi.mock('vue-chartjs', () => ({
 }))
 
 describe('OpsThroughputTrendChart', () => {
+  it('updates readable chart labels when the theme changes while mounted', async () => {
+    localStorage.setItem('theme', 'light')
+    const dark = useDark({ storageKey: 'theme' })
+    dark.value = false
+    await nextTick()
+    const wrapper = mount(OpsThroughputTrendChart, {
+      props: { points: [{ bucket_start: '2026-10-27T08:00:00Z', request_count: 1, token_consumed: 10, qps: 1, tps: 10 }], loading: false, timeRange: '1h' },
+      global: { stubs: { EmptyState: true, HelpTooltip: true } },
+    })
+    const chart = wrapper.getComponent('.line-chart')
+    expect(chart.props('options').animation).toBe(false)
+    expect(chart.props('options').scales.x.ticks.color).toBe('#626b78')
+    dark.value = true
+    await nextTick()
+    await nextTick()
+    expect(chart.props('options').scales.x.ticks.color).toBe('#aebed2')
+    expect(chart.props('options').plugins.legend.labels.color).toBe('#aebed2')
+    wrapper.unmount()
+    dark.value = false
+  })
+
   it('allows the header controls to wrap on narrow screens', () => {
     const wrapper = mount(OpsThroughputTrendChart, {
       props: {

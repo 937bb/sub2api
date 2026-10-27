@@ -55,7 +55,7 @@
         }"
         @click="clickableRows && emit('rowClick', row)"
       >
-        <div class="space-y-3">
+        <div :class="mobileSummaryColumns?.length ? 'console-mobile-summary' : 'space-y-3'">
           <div v-if="selectable" class="flex justify-end">
             <input
               type="checkbox"
@@ -68,7 +68,7 @@
             />
           </div>
           <div
-            v-for="column in dataColumns"
+            v-for="column in mobilePrimaryColumns"
             :key="column.key"
             :data-field="column.key"
             class="console-mobile-field flex min-w-0 items-start justify-between gap-4"
@@ -82,6 +82,17 @@
               </slot>
             </div>
           </div>
+          <details v-if="mobileSecondaryColumns.length" class="console-mobile-details" @click.stop>
+            <summary>{{ t('common.more') }}</summary>
+            <div v-for="column in mobileSecondaryColumns" :key="column.key" :data-field="column.key" class="console-mobile-field flex min-w-0 items-start justify-between gap-4">
+              <span class="text-xs text-gray-500 dark:text-dark-400">{{ column.label }}</span>
+              <div class="min-w-0 max-w-full text-right text-sm text-gray-900 dark:text-gray-100">
+                <slot :name="`cell-${column.key}`" :row="row" :value="row[column.key]" :expanded="actionsExpanded">
+                  {{ column.formatter ? column.formatter(row[column.key], row) : row[column.key] }}
+                </slot>
+              </div>
+            </div>
+          </details>
           <div v-if="hasActionsColumn" class="border-t border-gray-200 pt-3 dark:border-dark-700">
             <slot name="cell-actions" :row="row" :value="row['actions']" :expanded="actionsExpanded"></slot>
           </div>
@@ -431,6 +442,8 @@ onUnmounted(() => {
 
 interface Props {
   columns: Column[]
+  /** Optional compact mobile summary; remaining visible columns stay in a disclosure. */
+  mobileSummaryColumns?: string[]
   data: any[]
   loading?: boolean
   stickyFirstColumn?: boolean
@@ -635,6 +648,12 @@ const resolveStableRowKey = (row: any): string | number | undefined => {
 const resolveRowKey = (row: any, index: number) => resolveStableRowKey(row) ?? index
 
 const dataColumns = computed(() => props.columns.filter((column) => column.key !== 'actions'))
+const mobilePrimaryColumns = computed(() => props.mobileSummaryColumns?.length
+  ? dataColumns.value.filter(column => props.mobileSummaryColumns!.includes(column.key))
+  : dataColumns.value)
+const mobileSecondaryColumns = computed(() => props.mobileSummaryColumns?.length
+  ? dataColumns.value.filter(column => !props.mobileSummaryColumns!.includes(column.key))
+  : [])
 const columnsSignature = computed(() =>
   props.columns.map((column) => `${column.key}:${column.sortable ? '1' : '0'}`).join('|')
 )
@@ -1049,9 +1068,9 @@ tbody tr:hover .sticky-col {
   top: 0;
   right: 0;
   bottom: 0;
-  width: 10px;
+  width: 1px;
   transform: translateX(100%);
-  background: linear-gradient(to right, rgba(0, 0, 0, 0.08), transparent);
+  background: var(--console-line, #e7e9ed);
   pointer-events: none;
 }
 
@@ -1062,9 +1081,9 @@ tbody tr:hover .sticky-col {
   top: 0;
   right: 0;
   bottom: 0;
-  width: 10px;
+  width: 1px;
   transform: translateX(100%);
-  background: linear-gradient(to right, rgba(0, 0, 0, 0.08), transparent);
+  background: var(--console-line, #e7e9ed);
   pointer-events: none;
 }
 
@@ -1075,20 +1094,20 @@ tbody tr:hover .sticky-col {
   top: 0;
   left: 0;
   bottom: 0;
-  width: 10px;
+  width: 1px;
   transform: translateX(-100%);
-  background: linear-gradient(to left, rgba(0, 0, 0, 0.08), transparent);
+  background: var(--console-line, #e7e9ed);
   pointer-events: none;
 }
 
 /* 暗色模式阴影 */
 .dark .is-scrollable .sticky-col-left::after,
 .dark .is-scrollable .sticky-col-left-second::after {
-  background: linear-gradient(to right, rgba(0, 0, 0, 0.2), transparent);
+  background: var(--console-line, #344154);
 }
 
 .dark .is-scrollable .sticky-col-right::before {
-  background: linear-gradient(to left, rgba(0, 0, 0, 0.2), transparent);
+  background: var(--console-line, #344154);
 }
 </style>
 

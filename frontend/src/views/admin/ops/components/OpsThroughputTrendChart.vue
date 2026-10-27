@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useDark } from '@vueuse/core'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Chart as ChartJS, CategoryScale, Filler, Legend, LineElement, LinearScale, PointElement, Title, Tooltip } from 'chart.js'
@@ -43,14 +44,14 @@ watch(
   }
 )
 
-const isDarkMode = computed(() => document.documentElement.classList.contains('dark'))
+const isDarkMode = useDark({ storageKey: 'theme' })
 const colors = computed(() => ({
   blue: '#3b82f6',
   blueAlpha: '#3b82f620',
   green: '#10b981',
   greenAlpha: '#10b98120',
-  grid: isDarkMode.value ? '#374151' : '#f3f4f6',
-  text: isDarkMode.value ? '#9ca3af' : '#6b7280'
+  grid: isDarkMode.value ? '#344154' : '#e7e9ed',
+  text: isDarkMode.value ? '#aebed2' : '#626b78'
 }))
 
 const totalRequests = computed(() => sumNumbers(props.points.map((p) => p.request_count)))
@@ -95,6 +96,7 @@ const options = computed(() => {
   const c = colors.value
   return {
     responsive: true,
+    animation: false as const,
     maintainAspectRatio: false,
     interaction: { intersect: false, mode: 'index' as const },
     plugins: {
@@ -173,7 +175,7 @@ function downloadChart() {
 </script>
 
 <template>
-  <div class="flex h-full min-w-0 flex-col rounded-3xl bg-white p-6 shadow-sm ring-1 ring-gray-900/5 dark:bg-dark-800 dark:ring-dark-700">
+  <div class="console-ops-panel flex h-full min-w-0 flex-col">
     <div
       data-testid="throughput-chart-header"
       class="mb-4 flex shrink-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"

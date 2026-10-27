@@ -56,7 +56,7 @@
         <template #cell-group="{ row }">
           <span
             v-if="row.group_id"
-            class="inline-flex items-center rounded px-2 py-0.5 text-xs font-medium bg-indigo-100 text-indigo-800 dark:bg-indigo-900 dark:text-indigo-200"
+            class="inline-flex items-center rounded px-2 py-0.5 text-xs font-medium bg-slate-100 text-slate-800 dark:bg-slate-900 dark:text-slate-200"
             :title="t('admin.ops.errorLog.id') + ' ' + row.group_id"
           >
             {{ row.group_name || '#' + row.group_id }}
@@ -275,7 +275,7 @@ function getTypeBadge(log: OpsErrorLog): { label: string; className: string } {
     return { label: t('admin.ops.errorLog.typeAccountAuth'), className: 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200' }
   }
   if (phase === 'routing' && owner === 'platform') {
-    return { label: t('admin.ops.errorLog.typeRouting'), className: 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200' }
+    return { label: t('admin.ops.errorLog.typeRouting'), className: 'bg-primary-100 text-primary-800 dark:bg-primary-900 dark:text-primary-200' }
   }
   if (phase === 'internal' && owner === 'platform') {
     return { label: t('admin.ops.errorLog.typeInternal'), className: 'bg-gray-100 text-gray-800 dark:bg-dark-700 dark:text-gray-200' }

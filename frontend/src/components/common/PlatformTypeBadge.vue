@@ -189,7 +189,7 @@ const platformClass = computed(() => {
     return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
   }
   if (props.platform === 'antigravity') {
-    return 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400'
+    return 'bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400'
   }
   if (props.platform === 'grok') {
     return 'bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300'
@@ -198,7 +198,7 @@ const platformClass = computed(() => {
     return 'bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-400'
   }
   if (props.platform === 'zhipu') {
-    return 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400'
+    return 'bg-slate-100 text-slate-700 dark:bg-slate-900/30 dark:text-slate-400'
   }
   if (props.platform === 'deepseek') {
     return 'bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400'
@@ -217,7 +217,7 @@ const typeClass = computed(() => {
     return 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400'
   }
   if (props.platform === 'antigravity') {
-    return 'bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400'
+    return 'bg-primary-100 text-primary-600 dark:bg-primary-900/30 dark:text-primary-400'
   }
   if (props.platform === 'grok') {
     return 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300'
@@ -226,7 +226,7 @@ const typeClass = computed(() => {
     return 'bg-pink-100 text-pink-600 dark:bg-pink-900/30 dark:text-pink-400'
   }
   if (props.platform === 'zhipu') {
-    return 'bg-indigo-100 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-400'
+    return 'bg-slate-100 text-slate-600 dark:bg-slate-900/30 dark:text-slate-400'
   }
   if (props.platform === 'deepseek') {
     return 'bg-teal-100 text-teal-600 dark:bg-teal-900/30 dark:text-teal-400'
@@ -252,7 +252,7 @@ const planBadgeClass = computed(() => {
   if (props.platform === 'grok' && normalizedPlanType.value) {
     // Heavy / SuperGrok Heavy → purple
     if (normalizedPlanType.value.includes('heavy')) {
-      return 'bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-300'
+      return 'bg-primary-100 text-primary-600 dark:bg-primary-900/30 dark:text-primary-300'
     }
     // SuperGrok → cyan
     if (normalizedPlanType.value.includes('supergrok')) {
@@ -267,7 +267,7 @@ const planBadgeClass = computed(() => {
   }
   if (normalizedPlanType.value === 'team' || normalizedPlanType.value === 'selfservebusinessprolite' ||
     (props.platform === 'openai' && ['selfservebusinessusagebased', 'business', 'enterprise', 'ent26', 'enterprisecbpautomation', 'enterprisecbpusagebased', 'edu', 'eduplus', 'edupro'].includes(normalizedPlanType.value))) {
-    return 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300'
+    return 'bg-slate-100 text-slate-700 dark:bg-slate-900/30 dark:text-slate-300'
   }
   if (
     normalizedPlanType.value === 'pro' ||
@@ -275,7 +275,7 @@ const planBadgeClass = computed(() => {
     normalizedPlanType.value === 'prolite' ||
     (props.platform === 'openai' && normalizedPlanType.value === 'promax')
   ) {
-    return 'bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300'
+    return 'bg-slate-100 text-slate-700 dark:bg-slate-900/30 dark:text-slate-300'
   }
   return typeClass.value
 })

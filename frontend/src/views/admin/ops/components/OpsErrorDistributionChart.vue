@@ -28,7 +28,7 @@ const colors = computed(() => ({
   red: '#ef4444',
   orange: '#f59e0b',
   gray: '#9ca3af',
-  text: isDarkMode.value ? '#9ca3af' : '#6b7280'
+  text: isDarkMode.value ? '#aebed2' : '#626b78'
 }))
 
 const totalSlaErrors = computed(() =>
@@ -116,7 +116,7 @@ const options = computed(() => ({
 </script>
 
 <template>
-  <div class="card flex h-full flex-col p-6">
+  <div class="console-ops-panel flex h-full min-w-0 flex-col">
     <div class="mb-4 flex items-center justify-between">
       <h3 class="flex items-center gap-2 text-sm font-bold text-gray-900 dark:text-white">
         <svg class="h-4 w-4 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">

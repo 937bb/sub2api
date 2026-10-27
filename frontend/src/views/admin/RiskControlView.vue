@@ -632,7 +632,7 @@
                               <span class="truncate font-mono text-sm font-semibold text-gray-900 dark:text-white">{{ row.masked || '-' }}</span>
                               <span
                                 class="inline-flex rounded-md px-1.5 py-0.5 text-[11px] font-medium"
-                                :class="row.configured ? 'bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-300' : 'bg-purple-50 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300'"
+                                :class="row.configured ? 'bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-300' : 'bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-300'"
                               >
                                 {{ isStoredApiKeyPendingDelete(row) ? t('admin.riskControl.apiKeyPendingDelete') : row.configured ? t('admin.riskControl.apiKeyConfigured') : t('admin.riskControl.apiKeyTemporary') }}
                               </span>
@@ -1630,7 +1630,7 @@ const overviewItems = computed<OverviewItem[]>(() => [
     value: configForm.all_groups ? t('admin.riskControl.allGroups') : selectedGroupCount.value,
     meta: modelFilterSummary.value,
     icon: 'users',
-    iconClass: 'bg-violet-50 text-violet-600 dark:bg-violet-900/20 dark:text-violet-300',
+    iconClass: 'bg-slate-50 text-slate-600 dark:bg-slate-900/20 dark:text-slate-300',
   },
   {
     key: 'logs',
@@ -1729,8 +1729,8 @@ const preBlockMetricItems = computed(() => [
     label: t('admin.riskControl.preBlockAvgLatency'),
     value: `${formatNumber(status.value?.pre_block_avg_latency_ms ?? 0)} ms`,
     meta: t('admin.riskControl.preBlockAvgLatencyHint'),
-    class: 'bg-violet-50 dark:bg-violet-900/10',
-    valueClass: 'text-violet-700 dark:text-violet-300',
+    class: 'bg-slate-50 dark:bg-slate-900/10',
+    valueClass: 'text-slate-700 dark:text-slate-300',
   },
 ])
 

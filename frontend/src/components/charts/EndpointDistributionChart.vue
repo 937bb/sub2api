@@ -213,7 +213,7 @@ const toggleBreakdown = async (endpoint: string) => {
   }
 }
 
-const chartColors = ['#3562ce', '#4e7ca7', '#27857a', '#8f9fb5', '#b28040', '#6b5c95']
+const chartColors = ['#32688b', '#4e7ca7', '#27857a', '#8f9fb5', '#b28040', '#788b97']
 
 const displayEndpointStats = computed(() => {
   const sourceStats = props.source === 'upstream'

@@ -63,8 +63,8 @@ const labels = computed(() => props.trendData.map(row => row.date))
 const tokenData = computed(() => ({
   labels: labels.value,
   datasets: [
-    { label: t('console.input'), key: 'input_tokens', color: '#4f78ec' },
-    { label: t('console.output'), key: 'output_tokens', color: '#8c6bdd' },
+    { label: t('console.input'), key: 'input_tokens', color: '#42799b' },
+    { label: t('console.output'), key: 'output_tokens', color: '#7896a8' },
     { label: t('console.cacheRead'), key: 'cache_read_tokens', color: '#58bca5' },
     { label: t('console.cacheWrite'), key: 'cache_creation_tokens', color: '#eab64d' }
   ].map(item => ({ label: item.label, data: props.trendData.map(row => safe(row[item.key as keyof TrendDataPoint])), backgroundColor: item.color, borderWidth: 0, borderRadius: 3, maxBarThickness: 52 }))
@@ -78,10 +78,10 @@ const lineData = computed(() => ({
   datasets: metric.value === 'cache' ? [
     { label: t('console.cacheRate'), data: props.trendData.map(hitRate), borderColor: '#27857a', backgroundColor: '#27857a18', fill: true }
   ] : metric.value === 'cost' ? [
-    { label: t('dashboard.actual'), data: props.trendData.map(row => safe(row.actual_cost)), borderColor: '#4f78ec', backgroundColor: '#4f78ec18', fill: true },
+    { label: t('dashboard.actual'), data: props.trendData.map(row => safe(row.actual_cost)), borderColor: '#42799b', backgroundColor: '#42799b18', fill: true },
     { label: t('dashboard.standard'), data: props.trendData.map(row => safe(row.cost)), borderColor: '#8b97ac', borderDash: [4, 4], fill: false }
   ] : [
-    { label: t('console.requests'), data: props.trendData.map(row => safe(row.requests)), borderColor: '#4f78ec', backgroundColor: '#4f78ec18', fill: true }
+    { label: t('console.requests'), data: props.trendData.map(row => safe(row.requests)), borderColor: '#42799b', backgroundColor: '#42799b18', fill: true }
   ]
 }))
 const commonOptions = computed(() => ({

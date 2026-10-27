@@ -1,5 +1,7 @@
 export default {
   console: {
+    usageSummary: 'Usage summary',
+    advancedFilters: 'Advanced filters',
     requestsPerMinute: 'Requests per minute',
     tokensPerMinute: 'Tokens per minute',
     chartType: 'Chart type',

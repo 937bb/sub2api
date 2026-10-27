@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useDark } from '@vueuse/core'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
@@ -31,12 +32,12 @@ interface Props {
 const props = defineProps<Props>()
 const { t } = useI18n()
 
-const isDarkMode = computed(() => document.documentElement.classList.contains('dark'))
+const isDarkMode = useDark({ storageKey: 'theme' })
 const colors = computed(() => ({
   teal: '#14b8a6',
   tealAlpha: '#14b8a620',
-  grid: isDarkMode.value ? '#374151' : '#f3f4f6',
-  text: isDarkMode.value ? '#9ca3af' : '#6b7280'
+  grid: isDarkMode.value ? '#344154' : '#e7e9ed',
+  text: isDarkMode.value ? '#aebed2' : '#626b78'
 }))
 
 const totalRequests = computed(() => sumNumbers(props.points.map((p) => p.request_count)))
@@ -75,6 +76,7 @@ const options = computed(() => {
   const c = colors.value
   return {
     responsive: true,
+    animation: false as const,
     maintainAspectRatio: false,
     interaction: { intersect: false, mode: 'index' as const },
     plugins: {
@@ -128,7 +130,7 @@ const options = computed(() => {
 </script>
 
 <template>
-  <div class="flex h-full flex-col rounded-3xl bg-white p-6 shadow-sm ring-1 ring-gray-900/5 dark:bg-dark-800 dark:ring-dark-700">
+  <div class="console-ops-panel flex h-full min-w-0 flex-col">
     <div class="mb-4 flex shrink-0 items-center justify-between">
       <h3 class="flex items-center gap-2 text-sm font-bold text-gray-900 dark:text-white">
         <svg class="h-4 w-4 text-teal-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">

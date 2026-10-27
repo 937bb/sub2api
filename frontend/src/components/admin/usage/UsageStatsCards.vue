@@ -1,5 +1,11 @@
 <template>
-  <div class="console-usage-summary">
+  <div class="console-usage-totals" :class="{ 'compact-mobile': compactMobile }">
+  <button v-if="compactMobile" type="button" class="console-usage-summary-toggle" :aria-expanded="expanded" @click="expanded = !expanded">
+    <span>{{ t('console.usageSummary') }}</span>
+    <span>{{ stats?.total_requests?.toLocaleString() || '0' }} · ${{ (stats?.total_actual_cost || 0).toFixed(4) }}</span>
+    <Icon name="chevronDown" size="sm" :class="{ 'rotate-180': expanded }" />
+  </button>
+  <div class="console-usage-summary" :class="{ 'is-expanded': expanded }">
     <div class="console-usage-stat">
       <div>
         <p class="text-xs font-medium text-gray-500">{{ t('usage.totalRequests') }}</p>
@@ -76,10 +82,12 @@
       <div><p class="text-xs font-medium text-gray-500">{{ t('usage.avgDuration') }}</p><p class="text-xl font-bold">{{ formatDuration(stats?.average_duration_ms || 0) }}</p></div>
     </div>
   </div>
+  </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
+import Icon from '@/components/icons/Icon.vue'
 import { useI18n } from 'vue-i18n'
 import type { AdminUsageStatsResponse } from '@/api/admin/usage'
 import type { UsageStatsResponse } from '@/types'
@@ -88,12 +96,15 @@ const props = withDefaults(defineProps<{
   stats: (AdminUsageStatsResponse | UsageStatsResponse) | null
   showAccountCost?: boolean
   strikeStandardCost?: boolean
+  compactMobile?: boolean
 }>(), {
   showAccountCost: true,
   strikeStandardCost: false,
+  compactMobile: false,
 })
 
 const { t } = useI18n()
+const expanded = ref(false)
 
 const totalAccountCost = computed(() => {
   const stats = props.stats as (AdminUsageStatsResponse & { total_account_cost?: number }) | null

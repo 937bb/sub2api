@@ -8,9 +8,9 @@
           <button type="button" :aria-pressed="usageView === 'analysis'" @click="usageView = 'analysis'">{{ t('console.analysis') }}</button>
         </div>
       </div>
-      <UsageStatsCards :stats="usageStats" :show-account-cost="false" :strike-standard-cost="true" />
+      <UsageStatsCards v-if="usageView === 'analysis'" :stats="usageStats" :show-account-cost="false" :strike-standard-cost="true" />
 
-      <div class="space-y-4">
+      <div v-if="usageView === 'analysis'" class="space-y-4">
         <div class="console-analysis-toolbar">
           <div class="flex flex-wrap items-center gap-4">
             <div class="flex items-center gap-2">
@@ -76,66 +76,22 @@
       </div>
 
       <section v-show="usageView === 'records'" class="console-usage-records">
+      <div v-if="errorViewEnabled" class="flex gap-2 border-b border-gray-200 dark:border-dark-700">
+        <button class="tab" :class="{ 'tab-active': activeTab === 'usage' }" @click="activeTab = 'usage'">
+          {{ t('usage.tabs.usage') }}
+        </button>
+        <button class="tab" :class="{ 'tab-active': activeTab === 'errors' }" @click="switchToErrors">
+          {{ t('usage.tabs.errors') }}
+        </button>
+      </div>
       <div class="console-usage-filters">
-        <div class="console-usage-filter-layout">
-          <div v-if="activeTab === 'errors'" class="console-usage-filter-grid">
-            <div class="w-full sm:w-auto sm:min-w-[220px]">
-              <label class="input-label">{{ t('usage.errors.keyName') }}</label>
-              <Select v-model="errorFilter.api_key_id" :options="errorKeyOptions" @change="applyErrorFilters" />
-            </div>
-            <div class="w-full sm:w-auto sm:min-w-[220px]">
-              <label class="input-label">{{ t('usage.errors.model') }}</label>
-              <Select
-                v-model="errorFilter.model"
-                :options="errorModelOptions"
-                searchable
-                creatable
-                clearable
-                :placeholder="t('usage.errors.modelPlaceholder')"
-                @change="applyErrorFilters"
-              />
-            </div>
-            <div class="w-full sm:w-auto sm:min-w-[200px]">
-              <label class="input-label">{{ t('usage.errors.category') }}</label>
-              <Select v-model="errorFilter.category" :options="errorCategoryOptions" @change="applyErrorFilters" />
-            </div>
-            <div class="w-full sm:w-auto sm:min-w-[180px]">
-              <label class="input-label">{{ t('usage.errors.status') }}</label>
-              <Select v-model="errorFilter.status_code" :options="errorStatusOptions" @change="applyErrorFilters" />
-            </div>
-          </div>
-          <div v-else class="console-usage-filter-grid">
-            <div class="w-full sm:w-auto sm:min-w-[220px]">
-              <label class="input-label">{{ t('usage.apiKeyFilter') }}</label>
-              <Select v-model="filters.api_key_id" :options="apiKeyOptions" @change="applyFilters" />
-            </div>
-            <div class="w-full sm:w-auto sm:min-w-[220px]">
-              <label class="input-label">{{ t('usage.model') }}</label>
-              <Select v-model="filters.model" :options="modelOptions" searchable @change="applyFilters" />
-            </div>
-            <div class="w-full sm:w-auto sm:min-w-[200px]">
-              <label class="input-label">{{ t('admin.usage.group') }}</label>
-              <Select v-model="filters.group_id" :options="groupOptions" searchable @change="applyFilters" />
-            </div>
-            <div class="w-full sm:w-auto sm:min-w-[180px]">
-              <label class="input-label">{{ t('usage.type') }}</label>
-              <Select v-model="filters.request_type" :options="requestTypeOptions" @change="applyFilters" />
-            </div>
-            <div class="w-full sm:w-auto sm:min-w-[180px]">
-              <label class="input-label">{{ t('usage.compactionFilter') }}</label>
-              <Select v-model="filters.native_compaction_v2" :options="compactionOptions" @change="applyFilters" />
-            </div>
-            <div v-if="subscriptionFeatureEnabled" class="w-full sm:w-auto sm:min-w-[200px]">
-              <label class="input-label">{{ t('admin.usage.billingType') }}</label>
-              <Select v-model="filters.billing_type" :options="billingTypeOptions" @change="applyFilters" />
-            </div>
-            <div class="w-full sm:w-auto sm:min-w-[200px]">
-              <label class="input-label">{{ t('admin.usage.billingMode') }}</label>
-              <Select v-model="filters.billing_mode" :options="billingModeOptions" @change="applyFilters" />
-            </div>
-          </div>
-
-          <div class="flex w-full flex-wrap items-center justify-end gap-3 sm:w-auto">
+        <div class="console-query-toolbar">
+          <DateRangePicker v-model:start-date="startDate" v-model:end-date="endDate" @change="onDateRangeChange" />
+          <button v-if="activeTab !== 'errors'" type="button" class="btn btn-secondary" data-testid="usage-advanced-toggle" :aria-expanded="advancedOpen" aria-controls="user-usage-advanced" @click="advancedOpen = !advancedOpen">
+            <Icon name="filter" size="sm" />{{ t('console.advancedFilters') }}<span v-if="activeAdvancedCount" class="console-filter-count">{{ activeAdvancedCount }}</span>
+            <Icon name="chevronDown" size="sm" :class="{ 'rotate-180': advancedOpen }" />
+          </button>
+          <div class="console-query-actions">
             <button type="button" @click="refreshData" :disabled="activeTab === 'errors' ? errorLoading : loading" class="btn btn-secondary">
               {{ t('common.refresh') }}
             </button>
@@ -175,17 +131,73 @@
             </button>
           </div>
         </div>
+        <div class="console-usage-filter-layout">
+          <div v-if="activeTab === 'errors'" class="console-usage-filter-grid">
+            <div class="w-full sm:w-auto sm:min-w-[220px]">
+              <label class="input-label">{{ t('usage.errors.keyName') }}</label>
+              <Select v-model="errorFilter.api_key_id" :options="errorKeyOptions" @change="applyErrorFilters" />
+            </div>
+            <div class="w-full sm:w-auto sm:min-w-[220px]">
+              <label class="input-label">{{ t('usage.errors.model') }}</label>
+              <Select
+                v-model="errorFilter.model"
+                :options="errorModelOptions"
+                searchable
+                creatable
+                clearable
+                :placeholder="t('usage.errors.modelPlaceholder')"
+                @change="applyErrorFilters"
+              />
+            </div>
+            <div class="w-full sm:w-auto sm:min-w-[200px]">
+              <label class="input-label">{{ t('usage.errors.category') }}</label>
+              <Select v-model="errorFilter.category" :options="errorCategoryOptions" @change="applyErrorFilters" />
+            </div>
+            <div class="w-full sm:w-auto sm:min-w-[180px]">
+              <label class="input-label">{{ t('usage.errors.status') }}</label>
+              <Select v-model="errorFilter.status_code" :options="errorStatusOptions" @change="applyErrorFilters" />
+            </div>
+          </div>
+          <div v-else class="console-usage-filter-grid console-usage-user-filters">
+            <div class="w-full sm:w-auto sm:min-w-[220px]">
+              <label class="input-label">{{ t('usage.apiKeyFilter') }}</label>
+              <Select v-model="filters.api_key_id" :options="apiKeyOptions" @change="applyFilters" />
+            </div>
+            <div class="w-full sm:w-auto sm:min-w-[220px]">
+              <label class="input-label">{{ t('usage.model') }}</label>
+              <Select v-model="filters.model" :options="modelOptions" searchable @change="applyFilters" />
+            </div>
+            <div class="w-full sm:w-auto sm:min-w-[200px]">
+              <label class="input-label">{{ t('admin.usage.group') }}</label>
+              <Select v-model="filters.group_id" :options="groupOptions" searchable @change="applyFilters" />
+            </div>
+            <div v-show="advancedOpen" id="user-usage-advanced" class="console-usage-advanced console-usage-filter-grid">
+            <div class="w-full sm:w-auto sm:min-w-[180px]">
+              <label class="input-label">{{ t('usage.type') }}</label>
+              <Select v-model="filters.request_type" :options="requestTypeOptions" @change="applyFilters" />
+            </div>
+            <div class="w-full sm:w-auto sm:min-w-[180px]">
+              <label class="input-label">{{ t('usage.compactionFilter') }}</label>
+              <Select v-model="filters.native_compaction_v2" :options="compactionOptions" @change="applyFilters" />
+            </div>
+            <div v-if="subscriptionFeatureEnabled" class="w-full sm:w-auto sm:min-w-[200px]">
+              <label class="input-label">{{ t('admin.usage.billingType') }}</label>
+              <Select v-model="filters.billing_type" :options="billingTypeOptions" @change="applyFilters" />
+            </div>
+            <div class="w-full sm:w-auto sm:min-w-[200px]">
+              <label class="input-label">{{ t('admin.usage.billingMode') }}</label>
+              <Select v-model="filters.billing_mode" :options="billingModeOptions" @change="applyFilters" />
+            </div>
+            </div>
+          </div>
+
+
+        </div>
       </div>
 
-      <div v-if="errorViewEnabled" class="flex gap-2 border-b border-gray-200 dark:border-dark-700">
-        <button class="tab" :class="{ 'tab-active': activeTab === 'usage' }" @click="activeTab = 'usage'">
-          {{ t('usage.tabs.usage') }}
-        </button>
-        <button class="tab" :class="{ 'tab-active': activeTab === 'errors' }" @click="switchToErrors">
-          {{ t('usage.tabs.errors') }}
-        </button>
-      </div>
 
+
+      <UsageStatsCards :stats="usageStats" :show-account-cost="false" :strike-standard-cost="true" compact-mobile />
       <template v-if="activeTab === 'usage'">
         <UsageTable
           flat
@@ -269,6 +281,8 @@ import { COMMON_ERROR_STATUS_CODES } from '@/utils/errorBadges'
 
 const { t } = useI18n()
 const usageView = ref<'records' | 'analysis'>('records')
+const advancedOpen = ref(false)
+const activeAdvancedCount = computed(() => [filters.value.request_type, filters.value.native_compaction_v2, subscriptionFeatureEnabled.value ? filters.value.billing_type : null, filters.value.billing_mode].filter(value => value !== null && value !== undefined && value !== '').length)
 const distributionView = ref('model')
 const distributionViews = [
   { id: 'model', label: 'admin.dashboard.modelDistribution' },
@@ -734,18 +748,18 @@ const DEFAULT_HIDDEN_COLUMNS = ['user_agent']
 const HIDDEN_COLUMNS_KEY = 'user-usage-hidden-columns'
 
 const allColumns = computed<Column[]>(() => [
-  { key: 'api_key', label: t('usage.apiKeyFilter'), sortable: false },
+  { key: 'created_at', label: t('usage.time'), sortable: true },
   { key: 'model', label: t('usage.model'), sortable: true },
-  { key: 'reasoning_effort', label: t('usage.reasoningEffort'), sortable: false },
-  { key: 'endpoint', label: t('usage.endpoint'), sortable: false },
-  { key: 'ip_address', label: 'IP', sortable: false },
-  { key: 'group', label: t('admin.usage.group'), sortable: false },
-  { key: 'stream', label: t('usage.type'), sortable: false },
-  { key: 'billing_mode', label: t('admin.usage.billingMode'), sortable: false },
   { key: 'tokens', label: t('usage.tokens'), sortable: false },
   { key: 'cost', label: t('usage.cost'), sortable: false },
   { key: 'latency', label: t('usage.latency'), sortable: false },
-  { key: 'created_at', label: t('usage.time'), sortable: true },
+  { key: 'group', label: t('admin.usage.group'), sortable: false },
+  { key: 'stream', label: t('usage.type'), sortable: false },
+  { key: 'api_key', label: t('usage.apiKeyFilter'), sortable: false },
+  { key: 'endpoint', label: t('usage.endpoint'), sortable: false },
+  { key: 'reasoning_effort', label: t('usage.reasoningEffort'), sortable: false },
+  { key: 'billing_mode', label: t('admin.usage.billingMode'), sortable: false },
+  { key: 'ip_address', label: 'IP', sortable: false },
   { key: 'user_agent', label: t('usage.userAgent'), sortable: false },
 ])
 

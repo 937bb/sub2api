@@ -1,6 +1,31 @@
 <template>
   <div class="console-usage-filters" :class="{ card: !flat }">
-    <!-- Toolbar: left filters (multi-line) + right actions -->
+    <div class="console-query-toolbar">
+      <slot name="date" />
+      <button type="button" class="btn btn-secondary" data-testid="usage-advanced-toggle" :aria-expanded="advancedOpen" aria-controls="admin-usage-advanced" @click="advancedOpen = !advancedOpen">
+        <Icon name="filter" size="sm" />
+        {{ t('console.advancedFilters') }}<span v-if="activeAdvancedCount" class="console-filter-count">{{ activeAdvancedCount }}</span>
+        <Icon name="chevronDown" size="sm" :class="{ 'rotate-180': advancedOpen }" />
+      </button>
+      <!-- Query actions -->
+      <div v-if="showActions" class="console-query-actions">
+        <button type="button" @click="$emit('refresh')" class="btn btn-secondary">
+          {{ t('common.refresh') }}
+        </button>
+        <button type="button" @click="$emit('reset')" class="btn btn-secondary">
+          {{ t('common.reset') }}
+        </button>
+        <slot name="after-reset" />
+        <template v-if="mode === 'usage'">
+          <button type="button" @click="$emit('cleanup')" class="btn btn-danger">
+            {{ t('admin.usage.cleanup.button') }}
+          </button>
+          <button type="button" @click="$emit('export')" :disabled="exporting" class="btn btn-primary">
+            {{ t('usage.exportExcel') }}
+          </button>
+        </template>
+      </div>
+    </div>
     <div class="console-usage-filter-layout">
       <!-- Left: filters (allowed to wrap to multiple rows) -->
       <div class="console-usage-filter-grid">
@@ -22,7 +47,7 @@
             class="absolute right-2 top-9 text-gray-400"
             aria-label="Clear user filter"
           >
-            ✕
+            <Icon name="x" size="sm" />
           </button>
           <div
             v-if="showUserDropdown && (userResults.length > 0 || userKeyword)"
@@ -59,7 +84,7 @@
             class="absolute right-2 top-9 text-gray-400"
             aria-label="Clear API key filter"
           >
-            ✕
+            <Icon name="x" size="sm" />
           </button>
           <div
             v-if="showApiKeyDropdown && apiKeyResults.length > 0"
@@ -84,6 +109,13 @@
           <Select v-model="filters.model" :options="modelOptions" searchable @change="emitChange" />
         </div>
 
+        <!-- Group Filter -->
+        <div class="w-full sm:w-auto sm:min-w-[200px]">
+          <label class="input-label">{{ t('admin.usage.group') }}</label>
+          <Select v-model="filters.group_id" :options="groupOptions" searchable @change="emitChange" />
+        </div>
+      </div>
+      <div v-show="advancedOpen" id="admin-usage-advanced" class="console-usage-filter-grid console-usage-advanced">
         <!-- Account Filter -->
         <div ref="accountSearchRef" class="usage-filter-dropdown relative w-full sm:w-auto sm:min-w-[220px]">
           <label class="input-label">{{ t('admin.usage.account') }}</label>
@@ -102,7 +134,7 @@
             class="absolute right-2 top-9 text-gray-400"
             aria-label="Clear account filter"
           >
-            ✕
+            <Icon name="x" size="sm" />
           </button>
           <div
             v-if="showAccountDropdown && (accountResults.length > 0 || accountKeyword)"
@@ -168,32 +200,11 @@
           <Select v-model="filters.status_code" :options="statusCodeOptions" @change="emitChange" />
         </div>
 
-        <!-- Group Filter -->
-        <div class="w-full sm:w-auto sm:min-w-[200px]">
-          <label class="input-label">{{ t('admin.usage.group') }}</label>
-          <Select v-model="filters.group_id" :options="groupOptions" searchable @change="emitChange" />
-        </div>
+
 
       </div>
 
-      <!-- Right: actions -->
-      <div v-if="showActions" class="flex w-full flex-wrap items-center justify-end gap-3 sm:w-auto">
-        <button type="button" @click="$emit('refresh')" class="btn btn-secondary">
-          {{ t('common.refresh') }}
-        </button>
-        <button type="button" @click="$emit('reset')" class="btn btn-secondary">
-          {{ t('common.reset') }}
-        </button>
-        <slot name="after-reset" />
-        <template v-if="mode === 'usage'">
-          <button type="button" @click="$emit('cleanup')" class="btn btn-danger">
-            {{ t('admin.usage.cleanup.button') }}
-          </button>
-          <button type="button" @click="$emit('export')" :disabled="exporting" class="btn btn-primary">
-            {{ t('usage.exportExcel') }}
-          </button>
-        </template>
-      </div>
+
     </div>
   </div>
 </template>
@@ -202,6 +213,7 @@
 import { ref, onMounted, onUnmounted, toRef, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
+import Icon from '@/components/icons/Icon.vue'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
 import { COMMON_ERROR_STATUS_CODES } from '@/utils/errorBadges'
 import type { SimpleApiKey, SimpleUser } from '@/api/admin/usage'
@@ -240,6 +252,13 @@ const emit = defineEmits([
 
 const { t } = useI18n()
 const filters = toRef(props, 'modelValue')
+const advancedOpen = ref(false)
+const activeAdvancedCount = computed(() => {
+  const keys = props.mode === 'errors'
+    ? ['account_id', 'error_phase', 'error_category', 'status_code']
+    : ['account_id', 'request_type', 'native_compaction_v2', 'billing_type', ...(props.mode === 'usage' ? ['billing_mode', 'upstream_model_mismatch'] : [])]
+  return keys.filter(key => filters.value[key] !== null && filters.value[key] !== undefined && filters.value[key] !== '').length
+})
 
 const userSearchRef = ref<HTMLElement | null>(null)
 const apiKeySearchRef = ref<HTMLElement | null>(null)

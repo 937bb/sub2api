@@ -3,7 +3,7 @@
     <button
       type="button"
       data-testid="referral-count"
-      class="rounded px-1.5 py-0.5 text-[10px] font-medium text-violet-600 hover:bg-violet-50 disabled:opacity-50 dark:text-violet-400 dark:hover:bg-violet-900/30"
+      class="rounded px-1.5 py-0.5 text-[10px] font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50 dark:text-slate-400 dark:hover:bg-slate-900/30"
       :disabled="loading || sending"
       :title="countTitle"
       @click="refresh()"
@@ -34,9 +34,9 @@
         <p class="text-sm text-gray-600 dark:text-gray-300">
           {{ t('admin.accounts.openaiReferral.fromAccount') }} <strong>{{ account.name }}</strong>
         </p>
-        <div class="flex items-center justify-between rounded-lg bg-violet-50 p-3 text-sm dark:bg-violet-900/20">
+        <div class="flex items-center justify-between rounded-lg bg-slate-50 p-3 text-sm dark:bg-slate-900/20">
           <div>
-            <p class="font-medium text-violet-800 dark:text-violet-300">{{ programLabel }}</p>
+            <p class="font-medium text-slate-800 dark:text-slate-300">{{ programLabel }}</p>
             <p class="mt-1 text-gray-600 dark:text-gray-300">{{ t('admin.accounts.openaiReferral.available') }} {{ countDisplay }}</p>
           </div>
           <button type="button" class="btn btn-secondary btn-sm" :disabled="loading || sending" @click="refresh()">

@@ -160,7 +160,7 @@ const labelClass = computed(() => {
     return `${base} bg-blue-200/60 text-blue-800 dark:bg-blue-800/40 dark:text-blue-300`
   }
   if (props.platform === 'antigravity') {
-    return `${base} bg-purple-200/60 text-purple-800 dark:bg-purple-800/40 dark:text-purple-300`
+    return `${base} bg-primary-200/60 text-primary-800 dark:bg-primary-800/40 dark:text-primary-300`
   }
   if (props.platform === 'grok') {
     return `${base} bg-zinc-300/70 text-zinc-800 dark:bg-zinc-700/60 dark:text-zinc-200`
@@ -169,7 +169,7 @@ const labelClass = computed(() => {
     return `${base} bg-pink-200/60 text-pink-800 dark:bg-pink-800/40 dark:text-pink-300`
   }
   if (props.platform === 'zhipu') {
-    return `${base} bg-indigo-200/60 text-indigo-800 dark:bg-indigo-800/40 dark:text-indigo-300`
+    return `${base} bg-slate-200/60 text-slate-800 dark:bg-slate-800/40 dark:text-slate-300`
   }
   if (props.platform === 'deepseek') {
     return `${base} bg-teal-200/60 text-teal-800 dark:bg-teal-800/40 dark:text-teal-300`
@@ -180,7 +180,7 @@ const labelClass = computed(() => {
   if (props.platform === 'composite') {
     return `${base} bg-cyan-200/70 text-cyan-900 dark:bg-cyan-900/50 dark:text-cyan-300`
   }
-  return `${base} bg-violet-200/60 text-violet-800 dark:bg-violet-800/40 dark:text-violet-300`
+  return `${base} bg-slate-200/60 text-slate-800 dark:bg-slate-800/40 dark:text-slate-300`
 })
 
 const peakRateClass = computed(() => {
@@ -207,8 +207,8 @@ const badgeClass = computed(() => {
   }
   if (props.platform === 'antigravity') {
     return isSubscription.value
-      ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400'
-      : 'bg-fuchsia-50 text-fuchsia-700 dark:bg-fuchsia-900/20 dark:text-fuchsia-400'
+      ? 'bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400'
+      : 'bg-teal-50 text-teal-700 dark:bg-teal-900/20 dark:text-teal-400'
   }
   if (props.platform === 'grok') {
     return isSubscription.value
@@ -222,8 +222,8 @@ const badgeClass = computed(() => {
   }
   if (props.platform === 'zhipu') {
     return isSubscription.value
-      ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400'
-      : 'bg-indigo-50 text-indigo-700 dark:bg-indigo-900/20 dark:text-indigo-400'
+      ? 'bg-slate-100 text-slate-700 dark:bg-slate-900/30 dark:text-slate-400'
+      : 'bg-slate-50 text-slate-700 dark:bg-slate-900/20 dark:text-slate-400'
   }
   if (props.platform === 'deepseek') {
     return isSubscription.value
@@ -242,7 +242,7 @@ const badgeClass = computed(() => {
   }
   // Fallback: original colors
   return isSubscription.value
-    ? 'bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400'
+    ? 'bg-slate-100 text-slate-700 dark:bg-slate-900/30 dark:text-slate-400'
     : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
 })
 </script>

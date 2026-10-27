@@ -7,10 +7,10 @@ export default {
       colors: {
         // One blue action scale shared by utilities and console components.
         primary: {
-          50: '#eff6ff', 100: '#dbeafe', 200: '#bfdbfe',
-          300: '#93c5fd', 400: '#60a5fa', 500: '#3b82f6',
-          600: '#2563eb', 700: '#1d4ed8', 800: '#1e40af',
-          900: '#1e3a8a', 950: '#172554'
+          50: '#f0f6fa', 100: '#e2edf5', 200: '#c5dcea',
+          300: '#9ec0d8', 400: '#6f9fbe', 500: '#477fa3',
+          600: '#32688b', 700: '#2b5673', 800: '#29495f',
+          900: '#273e50', 950: '#172834'
         },
         // Supporting neutrals.
         accent: {
@@ -60,20 +60,20 @@ export default {
       boxShadow: {
         glass: '0 8px 32px rgba(0, 0, 0, 0.08)',
         'glass-sm': '0 4px 16px rgba(0, 0, 0, 0.06)',
-        glow: '0 0 20px rgba(99, 91, 206, 0.25)',
-        'glow-lg': '0 0 40px rgba(99, 91, 206, 0.35)',
+        glow: '0 0 20px rgba(50, 104, 139, 0.25)',
+        'glow-lg': '0 0 40px rgba(50, 104, 139, 0.35)',
         card: '0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.06)',
         'card-hover': '0 10px 40px rgba(0, 0, 0, 0.08)',
         'inner-glow': 'inset 0 1px 0 rgba(255, 255, 255, 0.1)'
       },
       backgroundImage: {
         'gradient-radial': 'radial-gradient(var(--tw-gradient-stops))',
-        'gradient-primary': 'linear-gradient(135deg, #635bce 0%, #5146b5 100%)',
+        'gradient-primary': 'linear-gradient(135deg, #477fa3 0%, #32688b 100%)',
         'gradient-dark': 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)',
         'gradient-glass':
           'linear-gradient(135deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.05) 100%)',
         'mesh-gradient':
-          'radial-gradient(at 40% 20%, rgba(99, 91, 206, 0.12) 0px, transparent 50%), radial-gradient(at 80% 0%, rgba(129, 113, 235, 0.08) 0px, transparent 50%), radial-gradient(at 0% 50%, rgba(99, 91, 206, 0.08) 0px, transparent 50%)'
+          'radial-gradient(at 40% 20%, rgba(50, 104, 139, 0.12) 0px, transparent 50%), radial-gradient(at 80% 0%, rgba(111, 159, 190, 0.08) 0px, transparent 50%), radial-gradient(at 0% 50%, rgba(50, 104, 139, 0.08) 0px, transparent 50%)'
       },
       animation: {
         'fade-in': 'fadeIn 0.3s ease-out',
@@ -111,8 +111,8 @@ export default {
           '100%': { backgroundPosition: '200% 0' }
         },
         glow: {
-          '0%': { boxShadow: '0 0 20px rgba(99, 91, 206, 0.25)' },
-          '100%': { boxShadow: '0 0 30px rgba(99, 91, 206, 0.4)' }
+          '0%': { boxShadow: '0 0 20px rgba(50, 104, 139, 0.25)' },
+          '100%': { boxShadow: '0 0 30px rgba(50, 104, 139, 0.4)' }
         }
       },
       backdropBlur: {

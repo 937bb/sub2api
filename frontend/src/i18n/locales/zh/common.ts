@@ -1,5 +1,7 @@
 export default {
   console: {
+    usageSummary: '用量汇总',
+    advancedFilters: '高级筛选',
     requestsPerMinute: '每分钟请求数',
     tokensPerMinute: '每分钟 Token 数',
     chartType: '图表类型',

@@ -24,7 +24,7 @@ describe('PlatformTypeBadge ChatGPT plan tiers', () => {
       const wrapper = mountPlan('openai', planType)
 
       expect(wrapper.text()).toContain('Pro 200')
-      expect(wrapper.html()).toContain('bg-violet-100')
+      expect(wrapper.html()).toContain('bg-slate-100')
     }
   })
 
@@ -33,7 +33,7 @@ describe('PlatformTypeBadge ChatGPT plan tiers', () => {
       const wrapper = mountPlan('openai', planType)
 
       expect(wrapper.text()).toContain('Pro 100')
-      expect(wrapper.html()).toContain('bg-violet-100')
+      expect(wrapper.html()).toContain('bg-slate-100')
       expect(wrapper.text()).not.toContain('Pro 200')
     }
   })
@@ -42,7 +42,7 @@ describe('PlatformTypeBadge ChatGPT plan tiers', () => {
     const wrapper = mountPlan('openai', 'team')
 
     expect(wrapper.text()).toContain('Business')
-    expect(wrapper.html()).toContain('bg-indigo-100')
+    expect(wrapper.html()).toContain('bg-slate-100')
   })
 
   it('labels self_serve_business_prolite as Business Premium sharing the Team color', () => {
@@ -50,7 +50,7 @@ describe('PlatformTypeBadge ChatGPT plan tiers', () => {
       const wrapper = mountPlan('openai', planType)
 
       expect(wrapper.text()).toContain('Business Premium')
-      expect(wrapper.html()).toContain('bg-indigo-100')
+      expect(wrapper.html()).toContain('bg-slate-100')
       expect(wrapper.text()).not.toContain('self_serve_business_prolite')
     }
   })
@@ -73,8 +73,8 @@ describe('PlatformTypeBadge ChatGPT plan tiers', () => {
     const wrapper = mountPlan('openai', 'future_sku')
 
     expect(wrapper.text()).toContain('future_sku')
-    expect(wrapper.html()).not.toContain('bg-violet-100')
-    expect(wrapper.html()).not.toContain('bg-indigo-100')
+    expect(wrapper.html()).not.toContain('bg-slate-100')
+    expect(wrapper.html()).not.toContain('bg-slate-100')
   })
 
   it('does not apply the ChatGPT tier naming to other platforms', () => {
@@ -94,14 +94,14 @@ describe('PlatformTypeBadge ChatGPT plan tiers', () => {
 
 describe('new Codex subscription labels', () => {
   it.each([
-    ['promax', 'Pro 500', 'bg-violet-100'],
+    ['promax', 'Pro 500', 'bg-slate-100'],
     ['go', 'Go', ''],
-    ['ent26', 'Enterprise', 'bg-indigo-100'],
-    ['enterprise_cbp_automation', 'Enterprise (Automation)', 'bg-indigo-100'],
-    ['self_serve_business_usage_based', 'Business', 'bg-indigo-100'],
-    ['business', 'Enterprise', 'bg-indigo-100'],
-    ['edu_plus', 'Edu Plus', 'bg-indigo-100'],
-    ['edu_pro', 'Edu Pro', 'bg-indigo-100']
+    ['ent26', 'Enterprise', 'bg-slate-100'],
+    ['enterprise_cbp_automation', 'Enterprise (Automation)', 'bg-slate-100'],
+    ['self_serve_business_usage_based', 'Business', 'bg-slate-100'],
+    ['business', 'Enterprise', 'bg-slate-100'],
+    ['edu_plus', 'Edu Plus', 'bg-slate-100'],
+    ['edu_pro', 'Edu Pro', 'bg-slate-100']
   ])('displays %s', (sku, label, color) => {
     const wrapper = mountPlan('openai', sku)
     expect(wrapper.text()).toContain(label)

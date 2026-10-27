@@ -992,7 +992,7 @@ const handleEvent = (event: {
           url: event.image_url,
           mimeType: event.mime_type
         })
-        addLine(t('admin.accounts.imageReceived', { count: generatedImages.value.length }), 'text-purple-300')
+        addLine(t('admin.accounts.imageReceived', { count: generatedImages.value.length }), 'text-primary-300')
       }
       break
 
@@ -1002,7 +1002,7 @@ const handleEvent = (event: {
           url: event.audio_url,
           mimeType: event.mime_type
         })
-        addLine(t('admin.accounts.audioReceived', { count: generatedAudios.value.length }), 'text-purple-300')
+        addLine(t('admin.accounts.audioReceived', { count: generatedAudios.value.length }), 'text-primary-300')
       }
       break
 
@@ -1012,7 +1012,7 @@ const handleEvent = (event: {
           url: event.video_url,
           mimeType: event.mime_type
         })
-        addLine(t('admin.accounts.videoReceived', { count: generatedVideos.value.length }), 'text-purple-300')
+        addLine(t('admin.accounts.videoReceived', { count: generatedVideos.value.length }), 'text-primary-300')
       }
       break
 

@@ -92,7 +92,7 @@
                         <span class="flex-1 text-left">{{ t('admin.accounts.dataImport') }}</span>
                       </button>
                       <button class="account-tools-menu-item" @click="openExportDataDialogFromMenu">
-                        <span class="account-tools-menu-icon bg-violet-50 text-violet-600 dark:bg-violet-900/30 dark:text-violet-300">
+                        <span class="account-tools-menu-icon bg-slate-50 text-slate-600 dark:bg-slate-900/30 dark:text-slate-300">
                           <Icon name="download" size="sm" />
                         </span>
                         <span class="flex-1 text-left">
@@ -1793,7 +1793,7 @@ function getAntigravityTierClass(row: any): string {
   switch (tier) {
     case 'free-tier': return 'bg-gray-100 text-gray-600 dark:bg-dark-700 dark:text-gray-300'
     case 'g1-pro-tier': return 'bg-blue-100 text-blue-600 dark:bg-blue-900/40 dark:text-blue-300'
-    case 'g1-ultra-tier': return 'bg-purple-100 text-purple-600 dark:bg-purple-900/40 dark:text-purple-300'
+    case 'g1-ultra-tier': return 'bg-primary-100 text-primary-600 dark:bg-primary-900/40 dark:text-primary-300'
     default: return ''
   }
 }
