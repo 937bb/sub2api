@@ -1,8 +1,7 @@
 <template>
   <AppLayout>
-    <div class="space-y-4">
-      <!-- Filters -->
-      <div class="card p-4">
+    <TablePageLayout :rows="orders" :loading="loading" :total="pagination.total">
+<template #filters><div class="card p-4">
         <div class="flex flex-wrap items-center gap-3">
           <Select v-model="currentFilter" :options="statusFilters" class="w-36" @change="handlePageChange(1)" />
           <div class="flex flex-1 items-center justify-end gap-2">
@@ -12,10 +11,8 @@
             <button class="btn btn-primary" @click="router.push('/purchase')">{{ t('payment.result.backToRecharge') }}</button>
           </div>
         </div>
-      </div>
-
-      <!-- Table -->
-      <OrderTable :orders="orders" :loading="loading">
+      </div></template>
+<template #table><OrderTable :orders="orders" :loading="loading">
         <template #actions="{ row }">
           <div class="flex items-center gap-2">
             <button v-if="row.status === 'PENDING'" @click="handleCancel(row.id)" class="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-yellow-600 hover:bg-yellow-50 dark:text-yellow-400 dark:hover:bg-yellow-900/20">
@@ -28,18 +25,16 @@
             </button>
           </div>
         </template>
-      </OrderTable>
-
-      <!-- Pagination -->
-      <Pagination
+      </OrderTable></template>
+<template #pagination><Pagination
         v-if="pagination.total > 0"
         :page="pagination.page"
         :total="pagination.total"
         :page-size="pagination.page_size"
         @update:page="handlePageChange"
         @update:pageSize="handlePageSizeChange"
-      />
-    </div>
+      /></template>
+</TablePageLayout>
 
     <!-- Cancel Confirm Dialog -->
     <BaseDialog :show="!!cancelTargetId" :title="t('payment.orders.cancel')" width="narrow" @close="cancelTargetId = null">
@@ -81,6 +76,8 @@
 </template>
 
 <script setup lang="ts">
+import TablePageLayout from '@/components/layout/TablePageLayout.vue'
+
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'

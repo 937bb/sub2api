@@ -13,10 +13,11 @@ function read(rel: string) {
 }
 
 describe('channel-monitor-v2 design system structure', () => {
-  it('user ChannelStatus V2 shell uses page-header, card, btn, tabs utilities', () => {
+  it('user ChannelStatus V2 shell uses the shared workspace, card, button and tab utilities', () => {
     // Route wrapper may switch V1/V2; design chrome lives on the V2 implementation.
     const src = read('views/user/ChannelStatusV2View.vue')
-    expect(src).toContain('page-header')
+    expect(src).toContain('<WorkspacePage variant="monitor"')
+    expect(src).toContain('workbench-heading')
     expect(src).toContain('page-title')
     expect(src).toContain('class="card')
     expect(src).toContain('btn btn-secondary')
@@ -84,9 +85,9 @@ describe('channel-monitor-v2 design system structure', () => {
     expect(src).toContain('dropdown-item')
   })
 
-  it('MonitorSettingsPanel uses page-header, card, btn-primary, tabs', () => {
+  it('MonitorSettingsPanel uses the shared heading, card, primary button and tabs', () => {
     const src = read('features/channel-monitor-v2/MonitorSettingsPanel.vue')
-    expect(src).toContain('page-header')
+    expect(src).toContain('workbench-heading')
     expect(src).toContain('btn btn-primary')
     expect(src).toContain('class="card')
     expect(src).toContain('tab-active')
@@ -95,7 +96,8 @@ describe('channel-monitor-v2 design system structure', () => {
 
   it('admin ChannelMonitorView V2 tab chrome uses project tabs', () => {
     const src = read('views/admin/ChannelMonitorView.vue')
-    expect(src).toContain('page-header')
+    expect(src).toContain('<WorkspacePage variant="monitor"')
+    expect(src).toContain('workbench-heading')
     expect(src).toContain('page-title')
     expect(src).toContain('class="tabs')
     expect(src).toContain('tab-active')

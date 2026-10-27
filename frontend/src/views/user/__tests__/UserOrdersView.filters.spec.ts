@@ -23,6 +23,7 @@ beforeEach(() => {
 async function openOrders() {
   const wrapper = mount(UserOrdersView, {
     global: { stubs: {
+          TablePageLayout: { template: '<section><slot name="actions" /><slot name="filters" /><slot name="table" /><slot name="pagination" /></section>' },
       AppLayout: { template: '<div><slot /></div>' },
       OrderTable: true, BaseDialog: true, Icon: true, Pagination: true, teleport: true
     } }

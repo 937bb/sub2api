@@ -1,14 +1,15 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Chart as ChartJS, ArcElement, Legend, Tooltip } from 'chart.js'
-import { Doughnut } from 'vue-chartjs'
+import { Chart as ChartJS, BarElement, CategoryScale, LinearScale, Legend, Tooltip } from 'chart.js'
+import { Bar } from 'vue-chartjs'
+import { useDark } from '@vueuse/core'
 import type { OpsErrorDistributionResponse } from '@/api/admin/ops'
 import type { ChartState } from '../types'
 import HelpTooltip from '@/components/common/HelpTooltip.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 
-ChartJS.register(ArcElement, Tooltip, Legend)
+ChartJS.register(BarElement, CategoryScale, LinearScale, Tooltip, Legend)
 
 interface Props {
   data: OpsErrorDistributionResponse | null
@@ -21,7 +22,7 @@ const emit = defineEmits<{
 }>()
 const { t } = useI18n()
 
-const isDarkMode = computed(() => document.documentElement.classList.contains('dark'))
+const isDarkMode = useDark({ storageKey: 'theme' })
 const colors = computed(() => ({
   blue: '#3b82f6',
   red: '#ef4444',
@@ -95,8 +96,14 @@ const chartData = computed(() => {
 })
 
 const options = computed(() => ({
+  indexAxis: 'y' as const,
+  animation: false as const,
   responsive: true,
   maintainAspectRatio: false,
+  scales: {
+    x: { beginAtZero: true, ticks: { color: colors.value.text, precision: 0 }, grid: { color: isDarkMode.value ? '#334255' : '#e8edf3' } },
+    y: { ticks: { color: colors.value.text }, grid: { display: false } }
+  },
   plugins: {
     legend: { display: false },
     tooltip: {
@@ -109,7 +116,7 @@ const options = computed(() => ({
 </script>
 
 <template>
-  <div class="flex h-full flex-col rounded-3xl bg-white p-6 shadow-sm ring-1 ring-gray-900/5 dark:bg-dark-800 dark:ring-dark-700">
+  <div class="card flex h-full flex-col p-6">
     <div class="mb-4 flex items-center justify-between">
       <h3 class="flex items-center gap-2 text-sm font-bold text-gray-900 dark:text-white">
         <svg class="h-4 w-4 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -136,8 +143,8 @@ const options = computed(() => ({
 
     <div class="relative min-h-0 flex-1">
       <div v-if="state === 'ready' && chartData" class="flex h-full flex-col">
-        <div class="flex-1">
-          <Doughnut :data="chartData" :options="{ ...options, cutout: '65%' }" />
+        <div class="min-h-[220px] flex-1">
+          <Bar :data="chartData" :options="options" />
         </div>
         <div class="mt-4 flex flex-col items-center gap-2">
           <div v-if="topReason" class="text-xs font-bold text-gray-900 dark:text-white">

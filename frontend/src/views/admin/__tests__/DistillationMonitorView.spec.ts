@@ -140,6 +140,7 @@ describe('admin DistillationMonitorView', () => {
     const wrapper = mount(DistillationMonitorView, {
       global: {
         stubs: {
+          WorkspacePage: { template: '<section><slot name="actions" /><slot /></section>' },
           AppLayout: { template: '<div><slot /></div>' },
           Icon: true,
           Pagination: true,

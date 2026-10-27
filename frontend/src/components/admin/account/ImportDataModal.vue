@@ -1,12 +1,12 @@
 <template>
-  <BaseDialog
+  <BaseDialog presentation="sheet"
     :show="show"
     :title="t('admin.accounts.dataImportTitle')"
     width="normal"
     close-on-click-outside
     @close="handleClose"
   >
-    <form id="import-data-form" class="space-y-4" @submit.prevent="handleImport">
+    <form id="import-data-form" class="workbench-editor-form space-y-4" @submit.prevent="handleImport">
       <div class="text-sm text-gray-600 dark:text-dark-300">
         {{ t('admin.accounts.dataImportHint') }}
       </div>
@@ -16,7 +16,7 @@
         {{ t('admin.accounts.dataImportWarning') }}
       </div>
 
-      <div>
+      <div class="workbench-field-row ">
         <label class="input-label">{{ t('admin.accounts.dataImportFile') }}</label>
         <div
           class="flex items-center justify-between gap-3 rounded-lg border border-dashed px-4 py-3 transition-colors"

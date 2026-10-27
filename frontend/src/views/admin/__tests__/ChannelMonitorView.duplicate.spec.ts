@@ -58,7 +58,7 @@ const AppLayoutStub = defineComponent({
 })
 
 const TablePageLayoutStub = defineComponent({
-  template: '<section><slot name="filters" /><slot name="table" /><slot name="pagination" /></section>',
+  template: '<section><slot name="actions" /><slot name="filters" /><slot name="table" /><slot name="pagination" /></section>',
 })
 
 const DataTableStub = defineComponent({
@@ -108,6 +108,7 @@ function mountView() {
   return mount(ChannelMonitorView, {
     global: {
       stubs: {
+          WorkspacePage: { template: '<section><slot name="actions" /><slot /></section>' },
         AppLayout: AppLayoutStub,
         TablePageLayout: TablePageLayoutStub,
         DataTable: DataTableStub,

@@ -1,6 +1,6 @@
 <template>
   <AppLayout>
-    <TablePageLayout>
+    <TablePageLayout :rows="apiKeys" :total="pagination.total" :loading="loading">
       <template #filters>
         <div class="flex flex-col gap-3">
           <div class="flex flex-wrap items-center gap-3">
@@ -466,14 +466,14 @@
     </TablePageLayout>
 
     <!-- Create/Edit Modal -->
-    <BaseDialog
+    <BaseDialog presentation="sheet"
       :show="showCreateModal || showEditModal"
       :title="showEditModal ? t('keys.editKey') : t('keys.createKey')"
       width="normal"
       @close="closeModals"
     >
-      <form id="key-form" @submit.prevent="handleSubmit" class="space-y-5">
-        <div>
+      <form id="key-form" @submit.prevent="handleSubmit" class="workbench-editor-form space-y-5">
+        <div class="workbench-field-row ">
           <label class="input-label">{{ t('keys.nameLabel') }}</label>
           <input
             v-model="formData.name"
@@ -533,7 +533,7 @@
           </p>
         </fieldset>
 
-        <div>
+        <div class="workbench-field-row ">
           <label class="input-label" for="key-form-group">{{ t('keys.groupLabel') }}</label>
           <Select
             :key="showEditModal ? 'edit' : createProvider"
@@ -613,7 +613,7 @@
           </div>
         </div>
 
-        <div v-if="showEditModal">
+        <div class="workbench-field-row " v-if="showEditModal">
           <label class="input-label">{{ t('keys.statusLabel') }}</label>
           <Select
             v-model="formData.status"
@@ -623,7 +623,7 @@
         </div>
 
         <!-- IP Restriction Section -->
-        <div class="space-y-3">
+        <div class="workbench-field-row space-y-3">
           <div class="flex items-center justify-between">
             <label class="input-label mb-0">{{ t('keys.ipRestriction') }}</label>
             <button

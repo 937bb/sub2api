@@ -1,0 +1,280 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-27T05:34:29.638Z",
+  "title": "Design System: 937Sub B Console",
+  "extensions": {
+    "colorMeta": {
+      "console-accent": {
+        "role": "primary",
+        "displayName": "Action Violet",
+        "tonalRamp": [
+          "#231c4e",
+          "#372f78",
+          "#433994",
+          "#5146b5",
+          "#635bce",
+          "#8171eb",
+          "#c4b5fd",
+          "#f5f3ff"
+        ]
+      },
+      "console-bg": {
+        "role": "neutral",
+        "displayName": "Cool Canvas",
+        "tonalRamp": [
+          "#0f172a",
+          "#1e293b",
+          "#334155",
+          "#475569",
+          "#64748b",
+          "#94a3b8",
+          "#cbd5e1",
+          "#f8fafc"
+        ]
+      },
+      "console-nav": {
+        "role": "neutral",
+        "displayName": "Navigation White"
+      },
+      "console-muted": {
+        "role": "neutral",
+        "displayName": "Muted Slate"
+      },
+      "dark-console-accent": {
+        "role": "primary",
+        "displayName": "Night Violet"
+      }
+    },
+    "typographyMeta": {
+      "headline": {
+        "displayName": "Page Headline",
+        "purpose": "24px task introduction; 22px below 768px."
+      },
+      "body": {
+        "displayName": "System Sans",
+        "purpose": "Shared controls and comfortable records; system Chinese fallbacks."
+      },
+      "metric": {
+        "displayName": "Summary Metric",
+        "purpose": "Tabular dashboard values; 26px on mobile."
+      }
+    },
+    "shadows": [
+      {
+        "name": "dialog",
+        "value": "0 18px 60px rgb(10 24 45 / 16%)",
+        "purpose": "Ordinary dialogs and right-side editor sheets."
+      }
+    ],
+    "motion": [
+      {
+        "name": "control-colors",
+        "value": "150ms ease-out",
+        "purpose": "Shared button colors."
+      },
+      {
+        "name": "field-state",
+        "value": "200ms",
+        "purpose": "Input and select state transitions."
+      },
+      {
+        "name": "drawer-transform",
+        "value": "300ms",
+        "purpose": "Sidebar transform."
+      },
+      {
+        "name": "reduced-motion",
+        "value": "0.01ms",
+        "purpose": "Shell transitions/animations, one animation iteration under prefers-reduced-motion."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "sm",
+        "value": "640px"
+      },
+      {
+        "name": "md",
+        "value": "768px"
+      },
+      {
+        "name": "lg",
+        "value": "1024px"
+      },
+      {
+        "name": "xl",
+        "value": "1280px"
+      }
+    ],
+    "focus": {
+      "value": "2px solid var(--console-accent)",
+      "offset": "3px",
+      "purpose": "Keyboard focus in the console shell."
+    },
+    "overlay": {
+      "value": "rgb(19 30 48 / 32%)",
+      "backdropFilter": "none"
+    },
+    "layout": {
+      "sidebarExpanded": "232px",
+      "sidebarCollapsed": "68px",
+      "utilityHeader": "60px",
+      "mainMaxWidth": "1680px",
+      "mainPadding": "28px 32px",
+      "mainPaddingBelow1280": "24px",
+      "mainPaddingBelow1024": "20px 16px",
+      "settingsDirectory": "164px",
+      "settingsGap": "24px",
+      "stickyReviewTop": "84px",
+      "checkoutColumns": "minmax(0,1fr) 320px",
+      "queryPanelMaxHeight": "360px",
+      "filtersInitiallyOpen": false
+    },
+    "controlMinimums": {
+      "button": "36px",
+      "input": "36px",
+      "consoleSelect": "36px",
+      "queryInputAndSelect": "38px",
+      "settingsCategory": "40px",
+      "paymentMethod": "64px"
+    },
+    "sourceEvidence": {
+      "revision": 4,
+      "files": [
+        "frontend/tailwind.config.js",
+        "frontend/src/style.css",
+        "frontend/src/styles/console.css",
+        "frontend/src/styles/workbench.css",
+        "frontend/src/components/layout/AppSidebar.vue",
+        "frontend/src/components/layout/AppHeader.vue",
+        "frontend/src/components/layout/TablePageLayout.vue",
+        "frontend/src/components/common/Select.vue",
+        "frontend/src/components/payment/SubscriptionPlanCard.vue",
+        "frontend/src/components/payment/PaymentMethodSelector.vue",
+        "frontend/src/components/charts/TokenUsageTrend.vue",
+        "frontend/src/components/charts/ModelDistributionChart.vue",
+        "frontend/src/views/user/SubscriptionsView.vue"
+      ],
+      "screenshots": ".impeccable/screenshots/revision4/confirm-*",
+      "note": "Synthetic visual evidence. Source captures final placeholder, plan-label, standard-cost, and renewal-action corrections. No deployment or payment success claim."
+    }
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Shared violet action, including console purchase and renewal. Fill stays primary 600 in both themes.",
+      "html": "<button type=\"button\" class=\"ds-primary\">Renew subscription</button>",
+      "css": ".ds-primary{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:36px;border:0;border-radius:8px;padding:8px 12px;font-size:14px;line-height:20px;font-weight:500;transition:background-color 150ms ease-out,border-color 150ms ease-out;background:#635bce;color:#fff}.ds-primary:hover{background:#5146b5}.ds-primary:focus-visible{outline:2px solid var(--console-accent,#635bce);outline-offset:3px}.ds-primary:disabled{opacity:.5;cursor:not-allowed}"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Neutral bordered action. Host dark class selects the shared slate control variant.",
+      "html": "<button type=\"button\" class=\"ds-secondary\">Refresh</button>",
+      "css": ".ds-secondary{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:36px;border:0;border-radius:8px;padding:8px 12px;font-size:14px;line-height:20px;font-weight:500;transition:background-color 150ms ease-out,border-color 150ms ease-out;border:1px solid #e5e7eb;background:#fff;color:#374151}.ds-secondary:hover{background:#f9fafb;border-color:#d1d5db}.ds-secondary:focus-visible{outline:2px solid var(--console-accent,#635bce);outline-offset:3px}.ds-secondary:disabled{opacity:.5;cursor:not-allowed}:host-context(.dark) .ds-secondary{background:#1e293b;color:#e5e7eb;border-color:#475569}:host-context(.dark) .ds-secondary:hover{background:#334155;border-color:#64748b}"
+    },
+    {
+      "name": "Danger Button",
+      "kind": "button",
+      "refersTo": "button-danger",
+      "description": "Destructive action preserves its red semantic treatment.",
+      "html": "<button type=\"button\" class=\"ds-danger\">Delete</button>",
+      "css": ".ds-danger{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:36px;border:0;border-radius:8px;padding:8px 12px;font-size:14px;line-height:20px;font-weight:500;transition:background-color 150ms ease-out,border-color 150ms ease-out;background:#dc2626;color:#fff}.ds-danger:hover{background:#b91c1c}.ds-danger:focus-visible{outline:2px solid var(--console-accent,#635bce);outline-offset:3px}.ds-danger:disabled{opacity:.5;cursor:not-allowed}"
+    },
+    {
+      "name": "Text Field",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Shared 36px minimum text input with readable placeholder, focus, and disabled states.",
+      "html": "<label class=\"ds-label\" for=\"ds-query\">Search records</label><input id=\"ds-query\" class=\"ds-input\" placeholder=\"Name or identifier\" />",
+      "css": ".ds-label{display:block;margin-bottom:6px;font:500 14px/20px system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;color:#374151}.ds-input{font:14px/20px system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;width:100%;min-height:36px;border:1px solid #e5e7eb;border-radius:8px;padding:8px 12px;background:#fff;color:#111827;transition:all 200ms}.ds-input::placeholder{color:var(--console-muted,#64748b);opacity:1}.ds-input:focus{border-color:#8171eb;box-shadow:0 0 0 2px rgb(129 113 235 / 30%)}.ds-input:focus-visible{outline:2px solid var(--console-accent,#635bce);outline-offset:3px}.ds-input:disabled{cursor:not-allowed;background:#f3f4f6}:host-context(.dark) .ds-label{color:#d1d5db}:host-context(.dark) .ds-input{background:#1e293b;border-color:#475569;color:#f3f4f6}:host-context(.dark) .ds-input:disabled{background:#0f172a}"
+    },
+    {
+      "name": "Sidebar Navigation",
+      "kind": "nav",
+      "refersTo": "navigation",
+      "description": "Single pale sidebar; this excerpt shows normal and active task links, not a second navigation bar.",
+      "html": "<nav class=\"ds-nav\" aria-label=\"Console navigation\"><a href=\"#overview\" aria-current=\"page\">Overview</a><a href=\"#usage\">Usage records</a><a href=\"#settings\">Settings</a></nav>",
+      "css": ".ds-nav{display:flex;flex-direction:column;gap:4px;width:208px;padding:12px;background:var(--console-nav,#fbfcfe);font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif}.ds-nav a{display:flex;align-items:center;gap:10px;min-height:36px;padding:8px 10px;border-radius:7px;color:var(--console-muted,#64748b);text-decoration:none;font-size:13px}.ds-nav a:hover{background:var(--console-line,#e3e8ef);color:var(--console-ink,#263449)}.ds-nav a[aria-current=page]{background:var(--console-selected,#f5f3ff);color:var(--console-accent,#635bce);font-weight:600}.ds-nav a:focus-visible{outline:2px solid var(--console-accent,#635bce);outline-offset:3px}"
+    },
+    {
+      "name": "Neutral Badge",
+      "kind": "chip",
+      "refersTo": "badge-neutral",
+      "description": "Shared rounded-rectangle badge; provider pills and status dots are distinct components.",
+      "html": "<span class=\"ds-badge\">Standard</span>",
+      "css": ".ds-badge{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:6px;background:#f3f4f6;color:#374151;font:500 12px/16px system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif}:host-context(.dark) .ds-badge{background:#334155;color:#cbd5e1}"
+    },
+    {
+      "name": "Content Panel",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "Flat bordered panel, illustrated with the 24px settings/checkout inset; table containers own their padding.",
+      "html": "<section class=\"ds-panel\"><h3>Configuration</h3><p>Section headings precede their fields.</p></section>",
+      "css": ".ds-panel{padding:24px;border:1px solid var(--console-line,#e3e8ef);border-radius:12px;background:var(--console-surface,#fff);color:var(--console-ink,#263449);font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;transition:border-color 150ms}.ds-panel h3{margin:0 0 20px;font-size:15px;font-weight:600}.ds-panel p{margin:0;font-size:13px;color:var(--console-muted,#64748b)}"
+    },
+    {
+      "name": "Settings Categories",
+      "kind": "nav",
+      "refersTo": "settings-category",
+      "description": "164px vertical directory, becoming a horizontal scrolling row below 768px. Preview shows visual states.",
+      "html": "<nav class=\"ds-settings\" aria-label=\"Settings categories\"><button type=\"button\" aria-pressed=\"true\">General</button><button type=\"button\" aria-pressed=\"false\">Security</button><button type=\"button\" aria-pressed=\"false\">Payment</button></nav>",
+      "css": ".ds-settings{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;display:flex;flex-direction:column;gap:4px;width:164px}.ds-settings button{font-family:inherit;width:100%;min-height:40px;padding:8px 12px;border:0;border-radius:6px;text-align:left;background:transparent;color:var(--console-muted,#64748b);font-size:13px}.ds-settings button[aria-pressed=true]{background:var(--console-selected,#f5f3ff);color:var(--console-accent,#635bce)}.ds-settings button:focus-visible{outline:2px solid var(--console-accent,#635bce);outline-offset:3px}@media(max-width:1023px){.ds-settings{width:160px}}@media(max-width:767px){.ds-settings{width:auto;flex-direction:row;overflow-x:auto}.ds-settings button{width:auto;min-width:max-content}}"
+    },
+    {
+      "name": "Order Review",
+      "kind": "card",
+      "refersTo": "order-review",
+      "description": "Sticky desktop review; becomes static below 1024px. Values are synthetic and no payment is submitted.",
+      "html": "<aside class=\"ds-review\"><h3>Order review</h3><div class=\"ds-review-row\"><span>Payment amount</span><span>$20.00</span></div><div class=\"ds-review-row\"><span>Fee</span><span>$0.00</span></div></aside>",
+      "css": ".ds-review{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;position:sticky;top:84px;min-width:0;padding:24px;border:1px solid var(--console-line,#e3e8ef);border-radius:12px;background:var(--console-surface,#fff);color:var(--console-ink,#263449)}.ds-review h3{margin:0 0 18px;font-size:15px;font-weight:600}.ds-review-row{display:flex;justify-content:space-between;gap:16px;font-size:14px;line-height:20px;font-variant-numeric:tabular-nums}.ds-review-row+.ds-review-row{margin-top:8px}.ds-review-row>span:first-child{color:#6b7280}@media(max-width:1023px){.ds-review{position:static}}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Operations Workbench",
+    "overview": "The B console is a light, professional workspace for API traffic, charges, resources, and account settings. The approved reference is Stripe: light surfaces, clear hierarchy, and restrained blue-violet accents. One pale sidebar establishes navigation, a quiet utility header holds account tools, and white content panels organize the work.\n\nCollections use on-demand horizontal filters above records. Settings place section headings above their fields. Identity uses flat metadata and divided sections; purchasing separates editable selection from order review. Stored dark theme, configured branding, permissions, feature flags, and existing financial meaning remain authoritative.",
+    "keyCharacteristics": [
+      "One light sidebar with permission-aware search and collapse.",
+      "White panels on a cool canvas with restrained violet actions and selections.",
+      "On-demand horizontal filters, compact ledgers, and explicit record counts.",
+      "Settings headings above fields, flat identity metadata, and responsive checkout columns.",
+      "Metric-switching plots, ranked distribution bars, and explicit numerical values."
+    ],
+    "rules": [
+      {
+        "name": "The Action Rule",
+        "body": "Use the shared violet primary action for console purchase and renewal; retain semantic colors for their existing data and status meanings.",
+        "section": "colors"
+      },
+      {
+        "name": "The Data Rule",
+        "body": "Preserve existing precision, units, currency distinctions, and labels when changing presentation.",
+        "section": "typography"
+      },
+      {
+        "name": "The Surface Rule",
+        "body": "Use tone and fine borders for work panels; reserve pronounced depth for overlays.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do use one sidebar, a quiet utility header, and a clear content heading.",
+      "Do use the shared violet action language for purchase and renewal.",
+      "Do reveal horizontal filters on demand and preserve query state when hidden.",
+      "Do place settings section headings above fields and keep identity metadata flat.",
+      "Do preserve semantic colors, units, currency distinctions, permissions, feature flags, validation, and stored theme.",
+      "Do treat preview values and screenshots as synthetic visual evidence only."
+    ],
+    "donts": [
+      "Don't restore the rejected dark horizontal business bar, teal action styling, or permanent collection filter column.",
+      "Don't duplicate page titles in the utility header or use competing provider-colored console CTAs.",
+      "Don't replace labeled analytical comparisons with overlapping multi-metric fills or doughnut distributions in this workspace.",
+      "Don't erase errors, adornments, disabled behavior, or provider-owned controls for visual uniformity.",
+      "Don't apply this B-console specification to C, backend behavior, or unrelated public surfaces.",
+      "Don't interpret local screenshots or documentation as proof of deployment or live payment success."
+    ]
+  }
+}

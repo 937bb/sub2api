@@ -1,6 +1,6 @@
 <template>
-  <div class="card p-4">
-    <div class="mb-4 flex items-center justify-between gap-3">
+  <div class="card console-model-panel">
+    <div class="console-panel-heading flex-wrap">
       <h3 class="text-sm font-semibold text-gray-900 dark:text-white">
         {{ !enableRankingView || activeView === 'model_distribution'
           ? t('admin.dashboard.modelDistribution')
@@ -101,12 +101,12 @@
     </div>
     <div
       v-else-if="activeView === 'model_distribution' && displayModelStats.length > 0 && chartData"
-      class="flex flex-col items-center gap-4 sm:flex-row sm:gap-6"
+      class="console-model-content"
     >
-      <div class="h-48 w-48 shrink-0">
-        <Doughnut :data="chartData" :options="doughnutOptions" />
+      <div class="console-model-bars">
+        <div :style="{ height: `${Math.max(120, displayModelStats.length * 34)}px` }"><Bar :data="chartData" :options="barOptions" :aria-label="t('console.modelShare')" role="img" /></div>
       </div>
-      <div class="max-h-48 w-full min-w-0 flex-1 overflow-auto">
+      <div class="console-model-table">
         <table class="w-full text-xs">
           <thead>
             <tr class="text-gray-500 dark:text-gray-400">
@@ -148,7 +148,7 @@
                 <td v-if="showAccountCost" class="py-1.5 text-right text-orange-500 dark:text-orange-400">
                   ${{ formatCost(model.account_cost) }}
                 </td>
-                <td class="py-1.5 text-right text-gray-400 dark:text-gray-500">
+                <td class="py-1.5 text-right text-gray-600 dark:text-gray-400">
                   ${{ formatCost(model.cost) }}
                 </td>
               </tr>
@@ -182,11 +182,11 @@
     >
       {{ t('admin.dashboard.failedToLoad') }}
     </div>
-    <div v-else-if="rankingDisplayItems.length > 0 && rankingChartData" class="flex flex-col items-center gap-4 sm:flex-row sm:gap-6">
-      <div class="h-48 w-48 shrink-0">
-        <Doughnut :data="rankingChartData" :options="rankingDoughnutOptions" />
+    <div v-else-if="rankingDisplayItems.length > 0 && rankingChartData" class="console-model-content">
+      <div class="console-model-bars">
+        <div :style="{ height: `${Math.max(120, rankingDisplayItems.length * 34)}px` }"><Bar :data="rankingChartData" :options="rankingBarOptions" :aria-label="t('admin.dashboard.spendingRankingTitle')" role="img" /></div>
       </div>
-      <div class="max-h-48 w-full min-w-0 flex-1 overflow-auto">
+      <div class="console-model-table">
         <table class="w-full text-xs">
           <thead>
             <tr class="text-gray-500 dark:text-gray-400">
@@ -245,14 +245,16 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js'
-import { Doughnut } from 'vue-chartjs'
+import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, Tooltip, Legend } from 'chart.js'
+import { useDark } from '@vueuse/core'
+import { Bar } from 'vue-chartjs'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import UserBreakdownSubTable from './UserBreakdownSubTable.vue'
 import type { ModelStat, UserSpendingRankingItem, UserBreakdownItem } from '@/types'
 import { getUserBreakdown } from '@/api/admin/dashboard'
 
-ChartJS.register(ArcElement, Tooltip, Legend)
+ChartJS.register(CategoryScale, LinearScale, BarElement, Tooltip, Legend)
+const dark = useDark({ storageKey: 'theme' })
 
 const { t } = useI18n()
 
@@ -339,20 +341,7 @@ const showAccountCost = computed(() => props.showAccountCost)
 const distributionColspan = computed(() => showAccountCost.value ? 6 : 5)
 const activeView = ref<'model_distribution' | 'spending_ranking'>('model_distribution')
 
-const chartColors = [
-  '#3b82f6',
-  '#10b981',
-  '#f59e0b',
-  '#ef4444',
-  '#8b5cf6',
-  '#ec4899',
-  '#14b8a6',
-  '#f97316',
-  '#6366f1',
-  '#84cc16',
-  '#06b6d4',
-  '#a855f7'
-]
+const chartColors = ['#3562ce', '#4b7ca9', '#27857a', '#6f7a9d', '#9b7e54', '#8c667a', '#718c70', '#707c8c', '#496397', '#6c9995', '#8c8e69', '#937c84']
 
 const displayModelStats = computed(() => {
   const sourceStats = props.source === 'upstream'
@@ -374,7 +363,9 @@ const chartData = computed(() => {
     datasets: [
       {
         data: displayModelStats.value.map((m) => toFiniteNumber(props.metric === 'actual_cost' ? m.actual_cost : m.total_tokens)),
-        backgroundColor: chartColors.slice(0, displayModelStats.value.length),
+        backgroundColor: displayModelStats.value.map((_, i) => chartColors[i % chartColors.length]),
+        borderRadius: 4,
+        barThickness: 14,
         borderWidth: 0
       }
     ]
@@ -386,7 +377,7 @@ const rankingChartData = computed(() => {
 
   const labels = props.rankingItems.map((item, index) => `#${index + 1} ${getRankingUserLabel(item)}`)
   const data = props.rankingItems.map((item) => toFiniteNumber(item.actual_cost))
-  const backgroundColor = chartColors.slice(0, props.rankingItems.length)
+  const backgroundColor = props.rankingItems.map((_, i) => chartColors[i % chartColors.length])
 
   if (otherRankingItem.value) {
     labels.push(t('admin.dashboard.spendingRankingOther'))
@@ -400,6 +391,8 @@ const rankingChartData = computed(() => {
       {
         data,
         backgroundColor,
+        borderRadius: 4,
+        barThickness: 14,
         borderWidth: 0
       }
     ]
@@ -437,7 +430,17 @@ const rankingDisplayItems = computed<RankingDisplayItem[]>(() => {
     : [...props.rankingItems]
 })
 
-const doughnutOptions = computed(() => ({
+const horizontalOptions = computed(() => ({
+  indexAxis: 'y' as const,
+  animation: false as const,
+  scales: {
+    x: { beginAtZero: true, border: { display: false }, grid: { color: dark.value ? '#303e50' : '#edf0f4' }, ticks: { color: dark.value ? '#bec9d9' : '#536175', maxTicksLimit: 4, callback: (value: string | number) => props.metric === 'actual_cost' || activeView.value === 'spending_ranking' ? '$' + formatCost(Number(value)) : formatTokens(Number(value)), font: { size: 10 } } },
+    y: { border: { display: false }, grid: { display: false }, ticks: { color: dark.value ? '#bec9d9' : '#536175', font: { size: 11 }, callback: function(this: {getLabelForValue: (value: number) => string}, value: string | number) { const name = this.getLabelForValue(Number(value)); return name.length > 23 ? name.slice(0, 22) + '…' : name } } }
+  }
+}))
+
+const barOptions = computed(() => ({
+  ...horizontalOptions.value,
   responsive: true,
   maintainAspectRatio: false,
   plugins: {
@@ -460,7 +463,8 @@ const doughnutOptions = computed(() => ({
   }
 }))
 
-const rankingDoughnutOptions = computed(() => ({
+const rankingBarOptions = computed(() => ({
+  ...horizontalOptions.value,
   responsive: true,
   maintainAspectRatio: false,
   plugins: {

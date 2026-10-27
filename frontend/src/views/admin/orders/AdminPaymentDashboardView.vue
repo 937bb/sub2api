@@ -1,6 +1,6 @@
 <template>
   <AppLayout>
-    <div class="space-y-6">
+    <WorkspacePage variant="finance">
       <!-- Header with Day Switcher -->
       <div class="flex items-center justify-end">
         <div class="flex items-center gap-2">
@@ -66,11 +66,13 @@
           </div>
         </div>
       </template>
-    </div>
+    </WorkspacePage>
   </AppLayout>
 </template>
 
 <script setup lang="ts">
+import WorkspacePage from '@/components/layout/WorkspacePage.vue'
+
 import { ref, watch, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'

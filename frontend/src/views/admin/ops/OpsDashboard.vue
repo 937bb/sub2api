@@ -1,6 +1,6 @@
 <template>
   <component :is="isFullscreen ? 'div' : AppLayout" :class="isFullscreen ? 'flex min-h-screen flex-col justify-center bg-gray-50 dark:bg-dark-950' : ''">
-    <div :class="[isFullscreen ? 'p-4 md:p-6' : '', 'space-y-6 pb-12']">
+    <div :class="[isFullscreen ? 'p-4 md:p-6' : '', 'workbench-operations space-y-6 pb-12']">
       <div
         v-if="errorMessage"
         class="rounded-2xl bg-red-50 p-4 text-sm text-red-600 dark:bg-red-900/20 dark:text-red-400"
@@ -39,12 +39,12 @@
         @exit-fullscreen="exitFullscreen"
       />
 
-      <!-- Row: Concurrency + Throughput -->
-      <div v-if="opsEnabled && !(loading && !hasLoadedOnce)" class="grid grid-cols-1 gap-6 lg:grid-cols-4">
-        <div class="lg:col-span-1 min-h-[360px]">
+      <WorkspaceTabs v-if="opsEnabled && hasLoadedOnce" v-model="analysisTab" :label="t('console.analysis')" :tabs="analysisTabs" />
+      <div v-if="opsEnabled && !(loading && !hasLoadedOnce)" v-show="analysisTab === 'traffic'" class="workbench-ops-traffic">
+        <div class="workbench-ops-capacity">
           <OpsConcurrencyCard :platform-filter="platform" :group-id-filter="groupId" :refresh-token="dashboardRefreshToken" />
         </div>
-        <div class="lg:col-span-1 h-[360px]">
+        <div class="workbench-ops-switch">
           <OpsSwitchRateTrendChart
             :points="switchTrend?.points ?? []"
             :loading="loadingSwitchTrend"
@@ -52,7 +52,7 @@
             :fullscreen="isFullscreen"
           />
         </div>
-        <div class="lg:col-span-2 h-[360px]">
+        <div class="workbench-ops-throughput">
           <OpsThroughputTrendChart
             :points="throughputTrend?.points ?? []"
             :by-platform="throughputTrend?.by_platform ?? []"
@@ -68,7 +68,7 @@
       </div>
 
       <!-- Row: Visual Analysis (baseline 3-up grid) -->
-      <div v-if="opsEnabled && !(loading && !hasLoadedOnce)" class="grid grid-cols-1 gap-6 md:grid-cols-3">
+      <div v-if="opsEnabled && !(loading && !hasLoadedOnce)" v-show="analysisTab === 'quality'" class="workbench-ops-quality">
         <OpsLatencyChart :latency-data="latencyHistogram" :loading="loadingLatency" />
         <OpsErrorDistributionChart
           :data="errorDistribution"
@@ -85,7 +85,7 @@
       </div>
 
       <!-- Row: Token Stats -->
-      <div v-if="opsEnabled && showOpenAITokenStats && !(loading && !hasLoadedOnce)" class="grid grid-cols-1 gap-6">
+      <div v-if="opsEnabled && showOpenAITokenStats && !(loading && !hasLoadedOnce)" v-show="analysisTab === 'traffic'" class="grid grid-cols-1 gap-6">
         <OpsOpenAITokenStatsCard
           :platform-filter="platform"
           :group-id-filter="groupId"
@@ -94,11 +94,12 @@
       </div>
 
       <!-- Alert Events -->
-      <OpsAlertEventsCard v-if="opsEnabled && showAlertEvents && !(loading && !hasLoadedOnce)" />
+      <OpsAlertEventsCard v-if="opsEnabled && showAlertEvents && !(loading && !hasLoadedOnce)" v-show="analysisTab === 'activity'" />
 
       <!-- System Logs -->
       <OpsSystemLogTable
         v-if="opsEnabled && !(loading && !hasLoadedOnce)"
+        v-show="analysisTab === 'activity'"
         :platform-filter="platform"
         :refresh-token="dashboardRefreshToken"
       />
@@ -146,6 +147,7 @@ import { useDebounceFn, useIntervalFn } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import AppLayout from '@/components/layout/AppLayout.vue'
+import WorkspaceTabs from '@/components/common/WorkspaceTabs.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import {
   opsAPI,
@@ -179,6 +181,12 @@ const router = useRouter()
 const appStore = useAppStore()
 const adminSettingsStore = useAdminSettingsStore()
 const { t } = useI18n()
+const analysisTab = ref('traffic')
+const analysisTabs = computed(() => [
+  { value: 'traffic', label: t('console.trafficCapacity') },
+  { value: 'quality', label: t('console.responseQuality') },
+  { value: 'activity', label: t('console.activity') }
+])
 
 const opsEnabled = computed(() => adminSettingsStore.opsMonitoringEnabled)
 

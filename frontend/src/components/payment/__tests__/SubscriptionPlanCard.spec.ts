@@ -91,7 +91,7 @@ describe("SubscriptionPlanCard", () => {
     ["long Chinese", "企业全球加速专业订阅套餐（含高级模型与优先支持）"],
     ["long English", "Enterprise Global Acceleration Subscription with Priority Support"],
     ["unbroken token", "EnterpriseGlobalAccelerationSubscriptionWithPrioritySupport1234567890"],
-  ])("keeps the full %s plan title accessible in a bounded two-line area", (_label, name) => {
+  ])("keeps the full %s plan title readable in the comparison row", (_label, name) => {
     const wrapper = mountPlanCard("openai", { name });
     const title = wrapper.get("h3");
 
@@ -99,9 +99,7 @@ describe("SubscriptionPlanCard", () => {
     expect(title.attributes("title")).toBe(name);
     expect(title.classes()).toEqual(expect.arrayContaining([
       "min-w-0",
-      "h-12",
       "break-words",
-      "line-clamp-2",
       "[overflow-wrap:anywhere]",
     ]));
     expect(title.classes()).not.toContain("truncate");
@@ -140,7 +138,7 @@ describe("SubscriptionPlanCard", () => {
 
     expect(title.text()).toBe("Pro");
     expect(title.attributes("title")).toBe("Pro");
-    expect(title.classes()).toEqual(expect.arrayContaining(["text-base", "font-bold", "h-12"]));
+    expect(title.classes()).toEqual(expect.arrayContaining(["text-base", "font-semibold"]));
     expect([...(badge?.element.parentElement?.classList ?? [])]).toEqual(expect.arrayContaining([
       "flex",
       "items-center",

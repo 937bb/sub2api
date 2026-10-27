@@ -1,7 +1,18 @@
 <template>
   <AppLayout>
-    <TablePageLayout>
-      <template #filters>
+    <TablePageLayout :rows="records" :total="pagination.total" :loading="loading">
+      <template #actions>
+<button
+            v-if="props.type === 'transfers'"
+            type="button"
+            class="btn btn-primary ml-auto"
+            data-test="affiliate-withdraw-open"
+            @click="withdrawDialog = true"
+          >
+            {{ t('admin.affiliates.withdraw.button') }}
+          </button>
+</template>
+<template #filters>
         <div class="flex flex-wrap items-center gap-3">
           <div class="relative w-full md:w-80">
             <Icon name="search" size="md" class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
@@ -12,15 +23,7 @@
           <button class="btn btn-secondary px-2 md:px-3" :disabled="loading" :title="t('common.refresh')" @click="loadRecords">
             <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
           </button>
-          <button
-            v-if="props.type === 'transfers'"
-            type="button"
-            class="btn btn-primary ml-auto"
-            data-test="affiliate-withdraw-open"
-            @click="withdrawDialog = true"
-          >
-            {{ t('admin.affiliates.withdraw.button') }}
-          </button>
+
         </div>
       </template>
 

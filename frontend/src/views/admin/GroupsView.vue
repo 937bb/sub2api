@@ -1,52 +1,8 @@
 <template>
   <AppLayout>
-    <TablePageLayout>
-      <template #filters>
-        <div
-          class="flex flex-col justify-between gap-4 lg:flex-row lg:items-start"
-        >
-          <!-- Left: fuzzy search + filters (can wrap to multiple lines) -->
-          <div class="flex flex-1 flex-wrap items-center gap-3">
-            <div class="relative w-full sm:w-64">
-              <Icon
-                name="search"
-                size="md"
-                class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500"
-              />
-              <input
-                v-model="searchQuery"
-                type="text"
-                :placeholder="t('admin.groups.searchGroups')"
-                class="input pl-10"
-                @input="handleSearch"
-              />
-            </div>
-            <Select
-              v-model="filters.platform"
-              :options="platformFilterOptions"
-              :placeholder="t('admin.groups.allPlatforms')"
-              class="w-44"
-              @change="loadGroups"
-            />
-            <Select
-              v-model="filters.status"
-              :options="statusOptions"
-              :placeholder="t('admin.groups.allStatus')"
-              class="w-40"
-              @change="loadGroups"
-            />
-            <Select
-              v-if="!authStore.isSimpleMode"
-              v-model="filters.is_exclusive"
-              :options="exclusiveOptions"
-              :placeholder="t('admin.groups.allGroups')"
-              class="w-44"
-              @change="loadGroups"
-            />
-          </div>
-
-          <!-- Right: actions -->
-          <div
+    <TablePageLayout :rows="groups" :total="pagination.total" :loading="loading">
+      <template #actions>
+<div
             class="flex w-full flex-shrink-0 flex-wrap items-center justify-end gap-3 lg:w-auto"
           >
             <button
@@ -111,6 +67,53 @@
               {{ t("admin.groups.createGroup") }}
             </button>
           </div>
+</template>
+<template #filters>
+        <div
+          class="flex flex-col justify-between gap-4 lg:flex-row lg:items-start"
+        >
+          <!-- Left: fuzzy search + filters (can wrap to multiple lines) -->
+          <div class="flex flex-1 flex-wrap items-center gap-3">
+            <div class="relative w-full sm:w-64">
+              <Icon
+                name="search"
+                size="md"
+                class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500"
+              />
+              <input
+                v-model="searchQuery"
+                type="text"
+                :placeholder="t('admin.groups.searchGroups')"
+                class="input pl-10"
+                @input="handleSearch"
+              />
+            </div>
+            <Select
+              v-model="filters.platform"
+              :options="platformFilterOptions"
+              :placeholder="t('admin.groups.allPlatforms')"
+              class="w-44"
+              @change="loadGroups"
+            />
+            <Select
+              v-model="filters.status"
+              :options="statusOptions"
+              :placeholder="t('admin.groups.allStatus')"
+              class="w-40"
+              @change="loadGroups"
+            />
+            <Select
+              v-if="!authStore.isSimpleMode"
+              v-model="filters.is_exclusive"
+              :options="exclusiveOptions"
+              :placeholder="t('admin.groups.allGroups')"
+              class="w-44"
+              @change="loadGroups"
+            />
+          </div>
+
+          <!-- Right: actions -->
+
         </div>
       </template>
 
@@ -476,7 +479,7 @@
     </TablePageLayout>
 
     <!-- Create Group Modal -->
-    <BaseDialog
+    <BaseDialog presentation="sheet"
       :show="showCreateModal"
       :title="t('admin.groups.createGroup')"
       width="wide"
@@ -485,9 +488,9 @@
       <form
         id="create-group-form"
         @submit.prevent="handleCreateGroup"
-        class="space-y-5"
+        class="workbench-editor-form space-y-5"
       >
-        <div>
+        <div class="workbench-field-row ">
           <GroupI18nField
             v-model="createForm.name"
             v-model:i18n="createForm.i18n"
@@ -2114,7 +2117,7 @@
     </BaseDialog>
 
     <!-- Edit Group Modal -->
-    <BaseDialog
+    <BaseDialog presentation="sheet"
       :show="showEditModal"
       :title="t('admin.groups.editGroup')"
       width="wide"
@@ -2124,9 +2127,9 @@
         v-if="editingGroup"
         id="edit-group-form"
         @submit.prevent="handleUpdateGroup"
-        class="space-y-5"
+        class="workbench-editor-form space-y-5"
       >
-        <div>
+        <div class="workbench-field-row ">
           <GroupI18nField
             v-model="editForm.name"
             v-model:i18n="editForm.i18n"
@@ -3786,7 +3789,7 @@
     />
 
     <!-- Sort Order Modal -->
-    <BaseDialog
+    <BaseDialog presentation="sheet"
       :show="showSortModal"
       :title="t('admin.groups.sortOrder')"
       width="normal"
@@ -4021,7 +4024,7 @@
         </section>
 
         <section class="space-y-5">
-          <form class="space-y-3" @submit.prevent="saveCompositeRoute">
+          <form class="workbench-editor-form space-y-3" @submit.prevent="saveCompositeRoute">
             <div class="flex items-center justify-between gap-3">
               <h3 class="text-sm font-semibold text-gray-900 dark:text-white">
                 {{
@@ -4040,7 +4043,7 @@
               </button>
             </div>
 
-            <div>
+            <div class="workbench-field-row ">
               <label class="input-label">{{
                 t("admin.groups.compositeRoutes.publicModel")
               }}</label>
@@ -4098,7 +4101,7 @@
               </div>
             </div>
 
-            <div>
+            <div class="workbench-field-row ">
               <label class="input-label">{{
                 t("admin.groups.compositeRoutes.upstreamModel")
               }}</label>
@@ -4113,7 +4116,7 @@
               </p>
             </div>
 
-            <div>
+            <div class="workbench-field-row ">
               <label class="input-label">{{
                 t("admin.groups.compositeRoutes.notes")
               }}</label>
@@ -4124,7 +4127,7 @@
               ></textarea>
             </div>
 
-            <div class="flex items-center justify-between gap-3">
+            <div class="workbench-field-row flex items-center justify-between gap-3">
               <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
                 <input
                   v-model="compositeRouteForm.enabled"

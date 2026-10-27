@@ -551,6 +551,7 @@ function mountView() {
   return mount(SettingsView, {
     global: {
       stubs: {
+          WorkspacePage: { template: '<section><slot name="actions" /><slot /></section>' },
         AppLayout: AppLayoutStub,
         Select: SelectStub,
         Toggle: ToggleStub,
@@ -1353,6 +1354,7 @@ describe("admin SettingsView payment visible method controls", () => {
     const wrapper = mount(SettingsView, {
       global: {
         stubs: {
+          WorkspacePage: { template: '<section><slot name="actions" /><slot /></section>' },
           AppLayout: AppLayoutStub,
           Select: SelectStub,
           Toggle: ToggleStub,
@@ -1699,6 +1701,7 @@ describe("admin SettingsView payment visible method controls", () => {
     const wrapper = mount(SettingsView, {
       global: {
         stubs: {
+          WorkspacePage: { template: '<section><slot name="actions" /><slot /></section>' },
           AppLayout: AppLayoutStub,
           Select: SelectStub,
           Toggle: ToggleStub,

@@ -2,40 +2,33 @@
   <aside
     class="sidebar"
     :class="[
-      sidebarCollapsed ? 'w-[72px]' : 'w-64',
+      sidebarCollapsed ? 'console-sidebar-collapsed' : 'console-sidebar-expanded',
       { '-translate-x-full lg:translate-x-0': !mobileOpen }
     ]"
   >
-    <!-- Logo/Brand -->
-    <div class="sidebar-header" :class="{ 'sidebar-header-collapsed': sidebarCollapsed }">
-      <!-- Custom Logo or Default Logo -->
-      <router-link
-        :to="homePath"
-        class="sidebar-logo flex h-9 w-9 items-center justify-center overflow-hidden rounded-xl shadow-glow transition-opacity hover:opacity-80"
-        @click="handleMenuItemClick(homePath)"
-      >
-        <img v-if="settingsLoaded" :src="siteLogo || '/logo.svg'" alt="Logo" class="h-full w-full object-contain" />
+    <div class="console-sidebar-brand">
+      <router-link :to="homePath" class="console-rail-brand" :aria-label="siteName" @click="handleMenuItemClick(homePath)">
+        <img v-if="siteLogo" :src="siteLogo" alt="" />
+        <span v-else class="console-brand-mark" aria-hidden="true">9<span>37</span></span>
+        <span class="workbench-global-brand">{{ siteName }}</span>
       </router-link>
-      <div class="sidebar-brand" :class="{ 'sidebar-brand-collapsed': sidebarCollapsed }" :aria-hidden="sidebarCollapsed ? 'true' : 'false'">
-        <router-link
-          :to="homePath"
-          class="sidebar-brand-title text-lg font-bold text-gray-900 transition-colors hover:text-primary-600 dark:text-white dark:hover:text-primary-400"
-          @click="handleMenuItemClick(homePath)"
-        >
-          {{ siteName }}
-        </router-link>
-        <!-- Version Badge -->
-        <VersionBadge :version="siteVersion" />
-      </div>
+    </div>
+    <div class="console-secondary-nav">
+
+    <div v-if="!sidebarCollapsed" class="console-nav-search">
+      <Icon name="search" size="sm" aria-hidden="true" />
+      <input v-model="navigationQuery" type="search" :placeholder="t('console.searchNavigation')" :aria-label="t('console.searchNavigation')" @keydown.esc="navigationQuery = ''" />
     </div>
 
     <!-- Navigation -->
-    <nav ref="sidebarNavRef" class="sidebar-nav scrollbar-hide">
+    <nav ref="sidebarNavRef" class="sidebar-nav scrollbar-hide" :aria-label="t('console.navigation')">
+      <p v-if="navigationQuery && !hasNavigationResults" class="px-3 py-4 text-sm text-gray-600 dark:text-dark-300" role="status">{{ t('console.noNavigationResults') }}</p>
       <!-- Admin View: Admin menu first, then personal menu -->
       <template v-if="isAdmin">
         <!-- Admin Section -->
         <div class="sidebar-section">
-          <template v-for="item in adminNavItems" :key="item.path">
+          <template v-for="(item, index) in filteredAdminNav" :key="item.path">
+            <div v-if="!sidebarCollapsed && (index === 0 || sectionForPath(item.path) !== sectionForPath(filteredAdminNav[index - 1].path))" class="console-nav-group-title">{{ t('console.' + sectionForPath(item.path)) }}</div>
             <!-- Collapsible group (has children) -->
             <template v-if="item.children?.length">
               <button
@@ -46,6 +39,8 @@
                   'sidebar-link-collapsed': sidebarCollapsed
                 }"
                 :title="sidebarCollapsed ? item.label : undefined"
+                :aria-label="item.label"
+                :aria-expanded="!sidebarCollapsed && isGroupExpanded(item)"
                 @click="handleGroupClick(item)"
               >
                 <component :is="item.icon" class="h-5 w-5 flex-shrink-0" />
@@ -83,6 +78,7 @@
               class="sidebar-link mb-1"
               :class="{ 'sidebar-link-active': isActive(item.path), 'sidebar-link-collapsed': sidebarCollapsed }"
               :title="sidebarCollapsed ? item.label : undefined"
+              :aria-label="item.label"
               :id="
                 item.path === '/admin/accounts'
                   ? 'sidebar-channel-manage'
@@ -102,7 +98,7 @@
         </div>
 
         <!-- Personal Section for Admin (hidden in simple mode) -->
-        <div v-if="!authStore.isSimpleMode" class="sidebar-section">
+        <div v-if="!authStore.isSimpleMode && filteredPersonalNav.length" class="sidebar-section">
           <div class="sidebar-section-title" :class="{ 'sidebar-section-title-collapsed': sidebarCollapsed }" :aria-hidden="sidebarCollapsed ? 'true' : 'false'">
             <span class="sidebar-section-title-text" :class="{ 'sidebar-section-title-text-collapsed': sidebarCollapsed }">
               {{ t('nav.myAccount') }}
@@ -110,12 +106,13 @@
           </div>
 
           <router-link
-            v-for="item in personalNavItems"
+            v-for="item in filteredPersonalNav"
             :key="item.path"
             :to="item.path"
             class="sidebar-link mb-1"
             :class="{ 'sidebar-link-active': isActive(item.path), 'sidebar-link-collapsed': sidebarCollapsed }"
             :title="sidebarCollapsed ? item.label : undefined"
+            :aria-label="item.label"
             :data-tour="item.path === '/keys' ? 'sidebar-my-keys' : undefined"
             @click="handleMenuItemClick(item.path)"
           >
@@ -130,12 +127,13 @@
       <template v-else-if="!appStore.backendModeEnabled">
         <div class="sidebar-section">
           <router-link
-            v-for="item in userNavItems"
+            v-for="item in filteredUserNav"
             :key="item.path"
             :to="item.path"
             class="sidebar-link mb-1"
             :class="{ 'sidebar-link-active': isActive(item.path), 'sidebar-link-collapsed': sidebarCollapsed }"
             :title="sidebarCollapsed ? item.label : undefined"
+            :aria-label="item.label"
             :data-tour="item.path === '/keys' ? 'sidebar-my-keys' : undefined"
             @click="handleMenuItemClick(item.path)"
           >
@@ -149,31 +147,24 @@
 
     <!-- Bottom Section -->
     <div class="mt-auto border-t border-gray-100 p-3 dark:border-dark-800">
-      <!-- Theme Toggle -->
-      <button
-        @click="toggleTheme"
-        class="sidebar-link mb-2 w-full"
-        :class="{ 'sidebar-link-collapsed': sidebarCollapsed }"
-        :title="sidebarCollapsed ? (isDark ? t('nav.lightMode') : t('nav.darkMode')) : undefined"
-      >
-        <SunIcon v-if="isDark" class="h-5 w-5 flex-shrink-0 text-amber-500" />
-        <MoonIcon v-else class="h-5 w-5 flex-shrink-0" />
-        <span class="sidebar-label" :class="{ 'sidebar-label-collapsed': sidebarCollapsed }" :aria-hidden="sidebarCollapsed ? 'true' : 'false'">{{
-          isDark ? t('nav.lightMode') : t('nav.darkMode')
-        }}</span>
+      <div v-if="!sidebarCollapsed" class="px-2 pb-2"><VersionBadge :version="siteVersion" /></div>
+      <button class="sidebar-link w-full" type="button" :aria-label="isDark ? t('nav.lightMode') : t('nav.darkMode')" @click="toggleTheme">
+        <SunIcon v-if="isDark" class="h-4 w-4 shrink-0" /><MoonIcon v-else class="h-4 w-4 shrink-0" />
+        <span v-if="!sidebarCollapsed">{{ isDark ? t('nav.lightMode') : t('nav.darkMode') }}</span>
       </button>
-
       <!-- Collapse Button -->
       <button
         @click="toggleSidebar"
         class="sidebar-link w-full"
         :class="{ 'sidebar-link-collapsed': sidebarCollapsed }"
         :title="sidebarCollapsed ? t('nav.expand') : t('nav.collapse')"
+        :aria-label="sidebarCollapsed ? t('nav.expand') : t('nav.collapse')"
       >
         <ChevronDoubleLeftIcon v-if="!sidebarCollapsed" class="h-5 w-5 flex-shrink-0" />
         <ChevronDoubleRightIcon v-else class="h-5 w-5 flex-shrink-0" />
         <span class="sidebar-label" :class="{ 'sidebar-label-collapsed': sidebarCollapsed }" :aria-hidden="sidebarCollapsed ? 'true' : 'false'">{{ t('nav.collapse') }}</span>
       </button>
+    </div>
     </div>
   </aside>
 
@@ -192,8 +183,8 @@ import { computed, h, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'v
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAdminSettingsStore, useAppStore, useAuthStore, useOnboardingStore } from '@/stores'
-import VersionBadge from '@/components/common/VersionBadge.vue'
 import Icon from '@/components/icons/Icon.vue'
+import VersionBadge from '@/components/common/VersionBadge.vue'
 import { sanitizeSvg } from '@/utils/sanitize'
 import { sanitizeUrl } from '@/utils/url'
 import { FeatureFlags, makeSidebarFlag } from '@/utils/featureFlags'
@@ -213,16 +204,14 @@ interface NavItem {
    */
   expandOnly?: boolean
   /**
-   * 可选的功能开关 getter。返回 false 时菜单项被隐藏；返回 undefined/true 时显示。
-   * 宽容策略（undefined → 显示）避免 public settings 未加载完成时菜单闪烁消失。
-   * Getter 里访问的 reactive 来源（store / composable）会被 computed 自动追踪，
-   * 开关切换时菜单自动更新。
+   * Hide an item only when its feature getter returns false.
+   * Undefined remains visible while settings load, avoiding navigation flicker.
+   * Computed navigation tracks reactive getters and updates when flags change.
    */
   featureFlag?: () => boolean | undefined
 }
 
-// applyFeatureFlags 递归过滤掉 featureFlag() === false 的节点（含子节点）。
-// 使用 `!== false` 宽容语义：undefined（设置未加载）或 true 都视为显示。
+// Recursively remove explicitly disabled items, retaining unloaded flags.
 function applyFeatureFlags(items: NavItem[]): NavItem[] {
   const out: NavItem[] = []
   for (const item of items) {
@@ -246,7 +235,25 @@ const onboardingStore = useOnboardingStore()
 const adminSettingsStore = useAdminSettingsStore()
 const { canUseBatchImage, refreshBatchImageAccess } = useBatchImageAccess()
 
-const sidebarCollapsed = computed(() => appStore.sidebarCollapsed)
+const sidebarCollapsed = computed(() => appStore.sidebarCollapsed && !appStore.mobileOpen)
+const navigationQuery = ref('')
+
+function filterNavigation(items: NavItem[]): NavItem[] {
+  const query = navigationQuery.value.trim().toLocaleLowerCase()
+  if (!query) return items
+  return items.flatMap(item => {
+    if (item.label.toLocaleLowerCase().includes(query)) return [item]
+    const children = item.children?.filter(child => child.label.toLocaleLowerCase().includes(query))
+    return children?.length ? [{ ...item, children }] : []
+  })
+}
+
+const filteredAdminNav = computed(() => sectionDefinitions.flatMap(section => filterNavigation(adminNavItems.value).filter(item => sectionForPath(item.path) === section.id)))
+const filteredPersonalNav = computed(() => filterNavigation(personalNavItems.value))
+const filteredUserNav = computed(() => filterNavigation(userNavItems.value))
+const hasNavigationResults = computed(() => isAdmin.value
+  ? filteredAdminNav.value.length + (!authStore.isSimpleMode ? filteredPersonalNav.value.length : 0) > 0
+  : filteredUserNav.value.length > 0)
 const mobileOpen = computed(() => appStore.mobileOpen)
 const isAdmin = computed(() => authStore.isAdmin)
 const sidebarNavRef = ref<HTMLElement | null>(null)
@@ -264,7 +271,20 @@ const groupExpandOverrides = ref<Map<string, boolean>>(new Map())
 const siteName = computed(() => appStore.siteName)
 const siteLogo = computed(() => sanitizeUrl(appStore.siteLogo || '', { allowRelative: true, allowDataUrl: true }))
 const siteVersion = computed(() => appStore.siteVersion)
-const settingsLoaded = computed(() => appStore.publicSettingsLoaded)
+type SectionId = 'overview' | 'gateway' | 'customers' | 'billing' | 'security' | 'workspace'
+function sectionForPath(path: string): SectionId {
+  if (/^\/(admin\/)?(dashboard|ops|usage|monitor)(\/|$)/.test(path)) return 'overview'
+  if (/^\/admin\/(users|announcements|affiliates)(\/|$)/.test(path)) return 'customers'
+  if (/^\/(admin\/)?(orders|subscriptions|purchase|redeem|promo-codes)(\/|$)/.test(path)) return 'billing'
+  if (/^\/admin\/(distillation-monitor|security-audit|risk-control|prompt-audit|audit-logs)(\/|$)/.test(path)) return 'security'
+  if (/^\/(admin\/)?(accounts|groups|channels|proxies|keys|batch-image|available-channels)(\/|$)/.test(path)) return 'gateway'
+  return 'workspace'
+}
+const sectionDefinitions = [
+  { id: 'overview', icon: 'chart' }, { id: 'gateway', icon: 'server' },
+  { id: 'customers', icon: 'users' }, { id: 'billing', icon: 'creditCard' },
+  { id: 'security', icon: 'shield' }, { id: 'workspace', icon: 'cog' }
+] as const
 
 // SVG Icon Components
 const DashboardIcon = {
@@ -694,7 +714,7 @@ const flagPayment = makeSidebarFlag(FeatureFlags.payment)
 const flagAvailableChannels = makeSidebarFlag(FeatureFlags.availableChannels)
 const flagSubscription = makeSidebarFlag(FeatureFlags.subscription)
 
-// 购买入口文案随站点计费模式切换：仅充值 → 「充值」，仅订阅 → 「订阅」，否则「充值/订阅」。
+// Match the purchase label to the site's recharge/subscription billing mode.
 const purchaseNavLabel = computed(() => {
   switch (resolveSiteBillingMode(appStore.cachedPublicSettings)) {
     case 'recharge_only':
@@ -712,11 +732,9 @@ const flagOpsMonitoring = () => adminSettingsStore.opsMonitoringEnabled
 const flagAdminPayment = () => adminSettingsStore.paymentEnabled
 const flagBatchImageAccess = () => canUseBatchImage.value
 
-// buildSelfNavItems 构造用户自己的导航项（用户端主菜单和管理员的"我的账户"子菜单共享这组声明）。
-// withDashboard=true 时包含仪表盘（用户端），false 时不含（管理员的个人区已经有独立仪表盘入口）。
-//
-// 条目顺序：密钥 → 用量 → 可用渠道 → 渠道状态 → 订阅/支付 → 兑换/资料。
-// 可用渠道紧挨渠道状态之上，让用户"先看自己能用什么、再看对应状态"。
+// Share personal navigation between customers and administrators.
+// Administrators already have a dashboard entry in their management section.
+// Keep available channels immediately before channel status for discovery.
 function buildSelfNavItems(withDashboard: boolean): NavItem[] {
   const items: NavItem[] = []
   if (withDashboard) {
@@ -744,7 +762,7 @@ function buildSelfNavItems(withDashboard: boolean): NavItem[] {
   return items
 }
 
-// finalizeNav 合并三重过滤：featureFlag 过滤 + simple 模式过滤。
+// Apply feature flags and simple-mode visibility before navigation search.
 function finalizeNav(items: NavItem[]): NavItem[] {
   const visible = applyFeatureFlags(items)
   return authStore.isSimpleMode ? visible.filter(item => !item.hideInSimpleMode) : visible
@@ -754,7 +772,7 @@ function finalizeNav(items: NavItem[]): NavItem[] {
 const userNavItems = computed((): NavItem[] => finalizeNav(buildSelfNavItems(true)))
 
 // Personal navigation items (for admin's "My Account" section, without Dashboard).
-// Admins access 可用渠道 from this section just like regular users — there is no
+// Admins access available channels from this section just like regular users; there is no
 // separate admin entry, since the page is purely a user-facing view.
 const personalNavItems = computed((): NavItem[] => finalizeNav(buildSelfNavItems(false)))
 
@@ -790,7 +808,7 @@ const adminNavItems = computed((): NavItem[] => {
         { path: '/admin/channels/monitor', label: t('nav.channelMonitor'), icon: SignalIcon, featureFlag: flagChannelMonitor },
       ],
     },
-    // 「仅充值」站点连管理端的「订阅管理」入口也一并收起（路由本身不拦截）。
+    // Hide subscription management on recharge-only sites without blocking the route.
     { path: '/admin/subscriptions', label: t('nav.subscriptions'), icon: CreditCardIcon, hideInSimpleMode: true, featureFlag: flagSubscription },
     { path: '/admin/accounts', label: t('nav.accounts'), icon: GlobeIcon },
     { path: '/admin/plugins', label: t('nav.plugins'), icon: PluginIcon, featureFlag: flagPluginManagement },
@@ -842,7 +860,7 @@ const adminNavItems = computed((): NavItem[] => {
 
   const visible = applyFeatureFlags(baseItems)
 
-  // 简单模式下，在系统设置前插入 API密钥
+  // In simple mode, insert API keys before settings.
   if (authStore.isSimpleMode) {
     const filtered = visible.filter(item => !item.hideInSimpleMode)
     filtered.push({ path: '/keys', label: t('nav.apiKeys'), icon: KeyIcon })
@@ -904,6 +922,7 @@ function isGroupActive(item: NavItem): boolean {
 }
 
 function isGroupExpanded(item: NavItem): boolean {
+  if (navigationQuery.value.trim()) return true
   const override = groupExpandOverrides.value.get(item.path)
   if (override !== undefined) return override
   return isGroupActive(item)
@@ -921,7 +940,11 @@ function toggleGroup(item: NavItem) {
  *   (router-link semantics) and ensure the group is expanded.
  */
 function handleGroupClick(item: NavItem) {
-  if (sidebarCollapsed.value) return
+  if (sidebarCollapsed.value) {
+    appStore.toggleSidebar()
+    groupExpandOverrides.value.set(item.path, true)
+    return
+  }
   if (item.expandOnly) {
     toggleGroup(item)
     return

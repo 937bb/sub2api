@@ -97,8 +97,9 @@ describe('admin subscription users', () => {
   const mountView = () => mount(SubscriptionsView, {
     global: {
       stubs: {
+          WorkspacePage: { template: '<section><slot name="actions" /><slot /></section>' },
         AppLayout: { template: '<div><slot /></div>' },
-        TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' },
+        TablePageLayout: { template: '<div><slot name="actions" /><slot name="filters" /><slot name="table" /></div>' },
         DataTable: DataTableStub,
         RouterLink: RouterLinkStub,
         Pagination: true,

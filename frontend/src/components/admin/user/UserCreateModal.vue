@@ -1,16 +1,16 @@
 <template>
-  <BaseDialog
+  <BaseDialog presentation="sheet"
     :show="show"
     :title="t('admin.users.createUser')"
     width="normal"
     @close="$emit('close')"
   >
-    <form id="create-user-form" @submit.prevent="submit" class="space-y-5">
-      <div>
+    <form id="create-user-form" @submit.prevent="submit" class="workbench-editor-form space-y-5">
+      <div class="workbench-field-row ">
         <label class="input-label">{{ t('admin.users.email') }}</label>
         <input v-model="form.email" type="email" required class="input" :placeholder="t('admin.users.enterEmail')" />
       </div>
-      <div>
+      <div class="workbench-field-row ">
         <label class="input-label">{{ t('admin.users.password') }}</label>
         <div class="flex gap-2">
           <div class="relative flex-1">
@@ -21,11 +21,11 @@
           </button>
         </div>
       </div>
-      <div>
+      <div class="workbench-field-row ">
         <label class="input-label">{{ t('admin.users.username') }}</label>
         <input v-model="form.username" type="text" class="input" :placeholder="t('admin.users.enterUsername')" />
       </div>
-      <div>
+      <div class="workbench-field-row ">
         <label class="input-label">{{ t('admin.users.form.roleLabel') }}</label>
         <select v-model="form.role" class="input">
           <option value="user">{{ t('admin.users.roles.user') }}</option>
@@ -42,7 +42,7 @@
           <input v-model.number="form.concurrency" type="number" class="input" />
         </div>
       </div>
-      <div>
+      <div class="workbench-field-row ">
         <label class="input-label">{{ t('admin.users.form.rpmLimit') }}</label>
         <input
           v-model.number="form.rpm_limit"

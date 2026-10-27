@@ -1,16 +1,16 @@
 <template>
-  <BaseDialog
+  <BaseDialog presentation="sheet"
     :show="show"
     :title="t('admin.users.editUser')"
     width="normal"
     @close="$emit('close')"
   >
-    <form v-if="user" id="edit-user-form" @submit.prevent="handleUpdateUser" class="space-y-5">
-      <div>
+    <form v-if="user" id="edit-user-form" @submit.prevent="handleUpdateUser" class="workbench-editor-form space-y-5">
+      <div class="workbench-field-row ">
         <label class="input-label">{{ t('admin.users.email') }}</label>
         <input v-model="form.email" type="email" class="input" />
       </div>
-      <div>
+      <div class="workbench-field-row ">
         <label class="input-label">{{ t('admin.users.password') }}</label>
         <div class="flex gap-2">
           <div class="relative flex-1">
@@ -25,11 +25,11 @@
           </button>
         </div>
       </div>
-      <div>
+      <div class="workbench-field-row ">
         <label class="input-label">{{ t('admin.users.username') }}</label>
         <input v-model="form.username" type="text" class="input" />
       </div>
-      <div>
+      <div class="workbench-field-row ">
         <label class="input-label">{{ t('admin.users.form.roleLabel') }}</label>
         <Select
           v-model="form.role"
@@ -37,11 +37,11 @@
           :searchable="false"
         />
       </div>
-      <div>
+      <div class="workbench-field-row ">
         <label class="input-label">{{ t('admin.users.notes') }}</label>
         <textarea v-model="form.notes" rows="3" class="input"></textarea>
       </div>
-      <div>
+      <div class="workbench-field-row ">
         <label class="input-label">{{ t('admin.users.columns.concurrency') }}</label>
         <input
           v-model.number="form.concurrency"
@@ -54,7 +54,7 @@
         />
         <p class="input-hint">{{ t('admin.users.form.concurrencyHint') }}</p>
       </div>
-      <div>
+      <div class="workbench-field-row ">
         <label class="input-label">{{ t('admin.users.form.rpmLimit') }}</label>
         <input
           v-model.number="form.rpm_limit"

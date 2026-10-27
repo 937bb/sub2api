@@ -4,6 +4,7 @@
       <div
         v-if="show"
         class="modal-overlay"
+        :class="{ 'workbench-sheet-overlay': presentation === 'sheet' }"
         :style="zIndexStyle"
         :aria-labelledby="dialogId"
         role="dialog"
@@ -69,6 +70,7 @@ interface Props {
   closeOnClickOutside?: boolean
   showCloseButton?: boolean
   zIndex?: number
+  presentation?: 'dialog' | 'sheet'
 }
 
 interface Emits {
@@ -80,7 +82,8 @@ const props = withDefaults(defineProps<Props>(), {
   closeOnEscape: true,
   closeOnClickOutside: false,
   showCloseButton: true,
-  zIndex: 50
+  zIndex: 50,
+  presentation: 'dialog'
 })
 
 const emit = defineEmits<Emits>()

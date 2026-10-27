@@ -1,6 +1,6 @@
 <template>
   <AppLayout>
-    <div class="space-y-6">
+    <WorkspacePage variant="distillation" hide-heading>
       <div v-if="loading" class="flex items-center justify-center py-16">
         <div class="h-8 w-8 animate-spin rounded-full border-b-2 border-primary-600"></div>
       </div>
@@ -23,14 +23,14 @@
           </div>
         </div>
 
-        <div class="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-8">
+        <div class="workbench-monitor-metrics">
           <div v-for="metric in runtimeMetrics" :key="metric.key" class="rounded-lg border border-gray-100 bg-white px-4 py-3 shadow-sm dark:border-dark-700 dark:bg-dark-800">
             <p class="truncate text-xs font-medium text-gray-500 dark:text-gray-400">{{ metric.label }}</p>
             <p class="mt-1 truncate text-xl font-semibold" :class="metric.valueClass">{{ metric.value }}</p>
           </div>
         </div>
 
-        <div class="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1.1fr)_minmax(360px,0.9fr)]">
+        <div class="workbench-monitor-workspace">
           <section class="card">
             <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
               <div class="flex items-center justify-between gap-4">
@@ -182,11 +182,13 @@
           />
         </section>
       </template>
-    </div>
+    </WorkspacePage>
   </AppLayout>
 </template>
 
 <script setup lang="ts">
+import WorkspacePage from '@/components/layout/WorkspacePage.vue'
+
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'

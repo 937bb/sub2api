@@ -41,7 +41,7 @@ vi.mock('vue-i18n', async () => {
 })
 
 vi.mock('vue-chartjs', () => ({
-  Doughnut: {
+  Bar: {
     props: ['data'],
     template: '<div class="chart-data">{{ JSON.stringify(data) }}</div>',
   },
@@ -93,7 +93,7 @@ describe('ModelDistributionChart', () => {
     expect(rows[0].text()).toContain('model-a')
     expect(rows[1].text()).toContain('model-b')
 
-    const options = (wrapper.vm as any).$?.setupState.doughnutOptions
+    const options = (wrapper.vm as any).$?.setupState.barOptions
     const label = options.plugins.tooltip.callbacks.label({
       label: 'model-a',
       raw: 1000,
@@ -123,7 +123,7 @@ describe('ModelDistributionChart', () => {
     expect(rows[0].text()).toContain('model-b')
     expect(rows[1].text()).toContain('model-a')
 
-    const options = (wrapper.vm as any).$?.setupState.doughnutOptions
+    const options = (wrapper.vm as any).$?.setupState.barOptions
     const label = options.plugins.tooltip.callbacks.label({
       label: 'model-b',
       raw: 1.4,
@@ -183,7 +183,7 @@ describe('ModelDistributionChart', () => {
       'Others',
     ])
     expect(chartData.datasets[0].data).toEqual([12, 8, 0, 10])
-    expect(chartData.datasets[0].backgroundColor[0]).toBe('#3b82f6')
+    expect(chartData.datasets[0].backgroundColor[0]).toBe('#3562ce')
     expect(chartData.datasets[0].backgroundColor[3]).toBe('#94a3b8')
     expect(chartData.datasets[0].backgroundColor[3]).not.toBe(chartData.datasets[0].backgroundColor[0])
 

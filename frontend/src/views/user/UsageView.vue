@@ -1,10 +1,10 @@
 <template>
   <AppLayout>
-    <div class="space-y-6">
+    <div class="console-usage space-y-6">
       <UsageStatsCards :stats="usageStats" :show-account-cost="false" :strike-standard-cost="true" />
 
       <div class="space-y-4">
-        <div class="card p-4">
+        <div class="console-analysis-toolbar">
           <div class="flex flex-wrap items-center gap-4">
             <div class="flex items-center gap-2">
               <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.dashboard.timeRange') }}:</span>
@@ -23,8 +23,13 @@
           </div>
         </div>
 
-        <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <ModelDistributionChart
+        <div class="console-charts-grid">
+          <TokenUsageTrend :trend-data="trendData" :loading="chartsLoading" />
+          <div class="console-distribution-workspace">
+            <div class="console-distribution-tabs" role="group" :aria-label="t('console.analysis')">
+              <button v-for="view in distributionViews" :key="view.id" type="button" :aria-pressed="distributionView === view.id" @click="distributionView = view.id">{{ t(view.label) }}</button>
+            </div>
+          <ModelDistributionChart v-if="distributionView === 'model'"
             v-model:metric="modelDistributionMetric"
             :model-stats="requestedModelStats"
             :loading="modelStatsLoading"
@@ -35,7 +40,7 @@
             :start-date="startDate"
             :end-date="endDate"
           />
-          <GroupDistributionChart
+          <GroupDistributionChart v-else-if="distributionView === 'group'"
             v-model:metric="groupDistributionMetric"
             :group-stats="groupStats"
             :loading="chartsLoading"
@@ -45,10 +50,7 @@
             :start-date="startDate"
             :end-date="endDate"
           />
-        </div>
-
-        <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <EndpointDistributionChart
+          <EndpointDistributionChart v-else
             v-model:source="endpointDistributionSource"
             v-model:metric="endpointDistributionMetric"
             :endpoint-stats="inboundEndpointStats"
@@ -62,7 +64,7 @@
             :start-date="startDate"
             :end-date="endDate"
           />
-          <TokenUsageTrend :trend-data="trendData" :loading="chartsLoading" />
+          </div>
         </div>
       </div>
 
@@ -256,6 +258,12 @@ import type { Column } from '@/components/common/types'
 import { COMMON_ERROR_STATUS_CODES } from '@/utils/errorBadges'
 
 const { t } = useI18n()
+const distributionView = ref('model')
+const distributionViews = [
+  { id: 'model', label: 'admin.dashboard.modelDistribution' },
+  { id: 'group', label: 'admin.dashboard.groupDistribution' },
+  { id: 'endpoint', label: 'usage.endpointDistribution' }
+]
 const appStore = useAppStore()
 
 type DistributionMetric = 'tokens' | 'actual_cost'

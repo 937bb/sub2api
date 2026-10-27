@@ -19,6 +19,7 @@ vi.mock('vue-i18n', async () => {
 })
 
 vi.mock('vue-chartjs', () => ({
+  Bar: { props: ['data', 'options'], template: '<div class="chart-data">{{ JSON.stringify(data) }}</div>' },
   Line: {
     props: ['data', 'options'],
     template: '<div class="chart-data">{{ JSON.stringify(data) }}</div>',
@@ -26,7 +27,26 @@ vi.mock('vue-chartjs', () => ({
 }))
 
 describe('TokenUsageTrend', () => {
-  it('calculates cache hit rate against all prompt tokens', () => {
+  it('switches metric units without mixing billed charges with standard cost', async () => {
+    const wrapper = mount(TokenUsageTrend, { props: { trendData: [
+      { date: '2026-10-26', requests: 8, input_tokens: 200, output_tokens: 100, cache_creation_tokens: 300, cache_read_tokens: 500, cost: 5, actual_cost: 1.5 },
+      { date: '2026-10-27', requests: 12, input_tokens: 0, output_tokens: 100, cache_creation_tokens: 0, cache_read_tokens: 100, cost: 3, actual_cost: 0.9 }
+    ] } })
+    const data = () => JSON.parse(wrapper.find('.chart-data').text())
+    expect(data().datasets.map((item: { data: number[] }) => item.data)).toEqual([[200, 0], [100, 100], [500, 100], [300, 0]])
+    await wrapper.findAll('button')[1].trigger('click')
+    expect(wrapper.find('.console-chart-summary strong').text()).toBe('20')
+    expect(data().datasets[0].data).toEqual([8, 12])
+    await wrapper.findAll('button')[2].trigger('click')
+    expect(wrapper.find('.console-chart-summary strong').text()).toBe('$2.40')
+    expect(data().datasets.map((item: { data: number[] }) => item.data)).toEqual([[1.5, 0.9], [5, 3]])
+    await wrapper.findAll('button')[3].trigger('click')
+    // Use the weighted prompt total, not the arithmetic mean of daily rates.
+    expect(wrapper.find('.console-chart-summary strong').text()).toBe('54.5%')
+    expect(data().datasets[0].data).toEqual([50, 100])
+  })
+
+  it('calculates cache hit rate against all prompt tokens', async () => {
     const wrapper = mount(TokenUsageTrend, {
       props: {
         trendData: [
@@ -49,15 +69,16 @@ describe('TokenUsageTrend', () => {
       },
     })
 
+    await wrapper.findAll('button').find(button => button.text() === 'console.cacheRate')!.trigger('click')
     const chartData = JSON.parse(wrapper.find('.chart-data').text())
     const hitRateDataset = chartData.datasets.find(
-      (ds: any) => ds.label === 'Cache Hit Rate'
+      (ds: any) => ds.label === 'console.cacheRate'
     )
     // Hit rate = 1500 / (500 + 1500 + 0) * 100 = 75%
     expect(hitRateDataset.data[0]).toBe(75)
   })
 
-  it('returns 0 hit rate when all prompt tokens are zero', () => {
+  it('returns 0 hit rate when all prompt tokens are zero', async () => {
     const wrapper = mount(TokenUsageTrend, {
       props: {
         trendData: [
@@ -80,14 +101,15 @@ describe('TokenUsageTrend', () => {
       },
     })
 
+    await wrapper.findAll('button').find(button => button.text() === 'console.cacheRate')!.trigger('click')
     const chartData = JSON.parse(wrapper.find('.chart-data').text())
     const hitRateDataset = chartData.datasets.find(
-      (ds: any) => ds.label === 'Cache Hit Rate'
+      (ds: any) => ds.label === 'console.cacheRate'
     )
     expect(hitRateDataset.data[0]).toBe(0)
   })
 
-  it('includes cache_creation_tokens in denominator for Anthropic models', () => {
+  it('includes cache_creation_tokens in denominator for Anthropic models', async () => {
     const wrapper = mount(TokenUsageTrend, {
       props: {
         trendData: [
@@ -110,9 +132,10 @@ describe('TokenUsageTrend', () => {
       },
     })
 
+    await wrapper.findAll('button').find(button => button.text() === 'console.cacheRate')!.trigger('click')
     const chartData = JSON.parse(wrapper.find('.chart-data').text())
     const hitRateDataset = chartData.datasets.find(
-      (ds: any) => ds.label === 'Cache Hit Rate'
+      (ds: any) => ds.label === 'console.cacheRate'
     )
     // Hit rate = 500 / (200 + 500 + 300) * 100 = 50%
     expect(hitRateDataset.data[0]).toBe(50)

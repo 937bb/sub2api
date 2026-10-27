@@ -1,6 +1,6 @@
 <template>
   <AppLayout>
-    <div class="mx-auto max-w-6xl space-y-6">
+    <WorkspacePage variant="settings">
       <!-- Loading State -->
       <div v-if="loading" class="flex items-center justify-center py-12">
         <div
@@ -9,7 +9,7 @@
       </div>
 
       <!-- Settings Form -->
-      <form v-else @submit.prevent="saveSettings" class="space-y-6" novalidate>
+      <form v-else @submit.prevent="saveSettings" class="workbench-settings-form" novalidate>
         <!-- Tab Navigation -->
         <div class="settings-tabs-shell">
           <nav
@@ -8004,7 +8004,7 @@
                   </div>
                 </div>
                 <!-- Row 2: Balance toggle + amounts -->
-                <div class="grid grid-cols-2 gap-3 sm:grid-cols-5">
+                <div class="grid grid-cols-1 gap-5 sm:grid-cols-2">
                   <div>
                     <label class="input-label">{{
                       t("admin.settings.payment.minAmount")
@@ -8191,9 +8191,9 @@
                     </p>
                   </div>
                 </div>
-                <!-- Row 3: Pending orders + load balance + cancel rate limit (all in one row) -->
-                <div class="flex flex-wrap items-end gap-4">
-                  <div class="w-28">
+                <!-- Order constraints remain readable inside the settings column. -->
+                <div class="grid min-w-0 grid-cols-1 items-start gap-5 sm:grid-cols-2">
+                  <div class="min-w-0">
                     <label class="input-label">{{
                       t("admin.settings.payment.maxPendingOrders")
                     }}</label
@@ -8211,14 +8211,14 @@
                     <Select
                       v-model="form.payment_load_balance_strategy"
                       :options="loadBalanceOptions"
-                      class="w-40"
+                      class="w-full"
                     />
                   </div>
-                  <div>
+                  <div class="min-w-0 sm:col-span-2">
                     <label class="input-label">{{
                       t("admin.settings.payment.cancelRateLimit")
                     }}</label>
-                    <div class="flex items-center gap-2">
+                    <div class="flex flex-wrap items-center gap-2">
                       <button
                         type="button"
                         :class="[
@@ -8902,7 +8902,7 @@
         </div>
 
         <!-- Save Button -->
-        <div v-show="activeTab !== 'backup'" class="flex justify-end">
+        <div v-show="activeTab !== 'backup'" class="workbench-savebar flex justify-end">
           <button
             type="submit"
             :disabled="saving || loadFailed"
@@ -8970,7 +8970,7 @@
       />
       <!-- 关闭 step-up 开关等敏感保存操作触发的 TOTP 二次验证 -->
       <TotpStepUpDialog :controller="settingsStepUp" />
-    </div>
+    </WorkspacePage>
   </AppLayout>
 </template>
 
@@ -9013,6 +9013,7 @@ import type {
 } from "@/types";
 import type { ProviderInstance } from "@/types/payment";
 import AppLayout from "@/components/layout/AppLayout.vue";
+import WorkspacePage from "@/components/layout/WorkspacePage.vue";
 import Icon from "@/components/icons/Icon.vue";
 import Select, { type SelectOption } from "@/components/common/Select.vue";
 import {

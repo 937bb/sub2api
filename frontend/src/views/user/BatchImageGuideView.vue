@@ -1,41 +1,16 @@
 <template>
   <AppLayout>
-    <TablePageLayout>
-      <template #filters>
-        <div class="flex flex-col gap-3">
-          <div class="flex flex-col gap-3 2xl:flex-row 2xl:items-center 2xl:justify-between">
-            <div class="grid w-full grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[260px_160px_144px_152px] 2xl:w-auto">
-              <div class="min-w-0">
-                <SearchInput
-                  v-model="filters.taskName"
-                  :placeholder="t('batchImage.filters.searchTaskName')"
-                  class="w-full"
-                  @search="applyFilters"
-                />
-              </div>
-              <Select v-model="filters.apiKeyId" :options="apiKeyFilterOptions" class="w-full" @change="applyFilters" />
-              <Select v-model="filters.status" :options="statusFilterOptions" class="w-full" @change="applyFilters" />
-              <Select v-model="filters.downloaded" :options="downloadFilterOptions" class="w-full" @change="applyFilters" />
-            </div>
-            <div class="flex flex-wrap items-center justify-start gap-2 sm:justify-end 2xl:flex-shrink-0">
-              <button type="button" class="btn btn-secondary" :disabled="loadingJobs" @click="resetFilters">
-                {{ t('common.reset') }}
-              </button>
-              <button type="button" class="btn btn-secondary" :disabled="loadingKeys || loadingJobs" :title="t('common.refresh')" @click="refreshPage">
-                <Icon name="refresh" size="md" :class="loadingKeys || loadingJobs ? 'animate-spin' : ''" />
-              </button>
-              <button type="button" class="btn btn-secondary" @click="showGuideModal = true">
-                <Icon name="book" size="md" class="mr-2" />
-                {{ t('batchImage.actions.usageGuide') }}
-              </button>
-              <button type="button" class="btn btn-primary" @click="openCreateModal">
-                <Icon name="plus" size="md" class="mr-2" />
-                {{ t('batchImage.actions.createJob') }}
-              </button>
-            </div>
-          </div>
-
-          <div
+    <TablePageLayout :rows="visibleBatchJobs" :loading="loadingKeys || loadingJobs">
+      <template #actions>
+        <button type="button" class="btn btn-secondary" @click="showGuideModal = true">
+          <Icon name="book" size="md" class="mr-2" />
+          {{ t('batchImage.actions.usageGuide') }}
+        </button>
+        <button type="button" class="btn btn-primary" @click="openCreateModal">
+          <Icon name="plus" size="md" class="mr-2" />
+          {{ t('batchImage.actions.createJob') }}
+        </button>
+<div
             v-if="selectedJobIds.size"
             class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2 shadow-sm dark:border-dark-700 dark:bg-dark-800"
           >
@@ -71,6 +46,34 @@
               </button>
             </div>
           </div>
+</template>
+<template #filters>
+        <div class="flex flex-col gap-3">
+          <div class="flex flex-col gap-3 2xl:flex-row 2xl:items-center 2xl:justify-between">
+            <div class="grid w-full min-w-0 grid-cols-1 gap-3">
+              <div class="min-w-0">
+                <SearchInput
+                  v-model="filters.taskName"
+                  :placeholder="t('batchImage.filters.searchTaskName')"
+                  class="w-full"
+                  @search="applyFilters"
+                />
+              </div>
+              <Select v-model="filters.apiKeyId" :options="apiKeyFilterOptions" class="w-full" @change="applyFilters" />
+              <Select v-model="filters.status" :options="statusFilterOptions" class="w-full" @change="applyFilters" />
+              <Select v-model="filters.downloaded" :options="downloadFilterOptions" class="w-full" @change="applyFilters" />
+            </div>
+            <div class="flex flex-wrap items-center justify-start gap-2 sm:justify-end 2xl:flex-shrink-0">
+              <button type="button" class="btn btn-secondary" :disabled="loadingJobs" @click="resetFilters">
+                {{ t('common.reset') }}
+              </button>
+              <button type="button" class="btn btn-secondary" :disabled="loadingKeys || loadingJobs" :title="t('common.refresh')" @click="refreshPage">
+                <Icon name="refresh" size="md" :class="loadingKeys || loadingJobs ? 'animate-spin' : ''" />
+              </button>
+            </div>
+          </div>
+
+
         </div>
       </template>
 
@@ -537,8 +540,8 @@
       </div>
     </BaseDialog>
 
-    <BaseDialog :show="showCreateModal" :title="t('batchImage.create.title')" width="wide" @close="closeCreateModal">
-      <form class="space-y-5" @submit.prevent="submitJob">
+    <BaseDialog presentation="sheet" :show="showCreateModal" :title="t('batchImage.create.title')" width="wide" @close="closeCreateModal">
+      <form class="workbench-editor-form space-y-5" @submit.prevent="submitJob">
         <div class="grid gap-4 md:grid-cols-2">
           <div class="md:col-span-2">
             <label class="input-label">{{ t('batchImage.create.taskName') }}</label>

@@ -87,6 +87,7 @@ describe('AdminPaymentPlansView', () => {
       global: {
         plugins: [createPinia()],
         stubs: {
+          TablePageLayout: { template: '<section><slot name="actions" /><slot name="filters" /><slot name="table" /><slot name="pagination" /></section>' },
           AppLayout: { template: '<div><slot /></div>' },
           DataTable: DataTableStub,
           ConfirmDialog: true,

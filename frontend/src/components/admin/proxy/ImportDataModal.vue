@@ -1,12 +1,12 @@
 <template>
-  <BaseDialog
+  <BaseDialog presentation="sheet"
     :show="show"
     :title="t('admin.proxies.dataImportTitle')"
     width="normal"
     close-on-click-outside
     @close="handleClose"
   >
-    <form id="import-proxy-data-form" class="space-y-4" @submit.prevent="handleImport">
+    <form id="import-proxy-data-form" class="workbench-editor-form space-y-4" @submit.prevent="handleImport">
       <div class="text-sm text-gray-600 dark:text-dark-300">
         {{ t('admin.proxies.dataImportHint') }}
       </div>
@@ -16,7 +16,7 @@
         {{ t('admin.proxies.dataImportWarning') }}
       </div>
 
-      <div>
+      <div class="workbench-field-row ">
         <label class="input-label">{{ t('admin.proxies.dataImportFile') }}</label>
         <div
           class="flex items-center justify-between gap-3 rounded-lg border border-dashed border-gray-300 bg-gray-50 px-4 py-3 dark:border-dark-600 dark:bg-dark-800"

@@ -72,7 +72,7 @@ const mountView = () =>
       stubs: {
         AppLayout: { template: '<div><slot /></div>' },
         TablePageLayout: {
-          template: '<div><slot name="filters" /><slot name="table" /><slot name="pagination" /></div>'
+          template: '<div><slot name="actions" /><slot name="filters" /><slot name="table" /><slot name="pagination" /></div>'
         },
         DataTable: true,
         Pagination: true,
@@ -215,7 +215,7 @@ const mountViewWithRow = () =>
       stubs: {
         AppLayout: { template: '<div><slot /></div>' },
         TablePageLayout: {
-          template: '<div><slot name="filters" /><slot name="table" /><slot name="pagination" /></div>'
+          template: '<div><slot name="actions" /><slot name="filters" /><slot name="table" /><slot name="pagination" /></div>'
         },
         // 使用能透传 row 数据的自定义 DataTable stub，以便渲染 cell 插槽
         DataTable: {

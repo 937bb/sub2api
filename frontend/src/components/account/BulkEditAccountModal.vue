@@ -1,11 +1,11 @@
 <template>
-  <BaseDialog
+  <BaseDialog presentation="sheet"
     :show="show"
     :title="t('admin.accounts.bulkEdit.title')"
     width="wide"
     @close="handleClose"
   >
-    <form id="bulk-edit-account-form" class="space-y-5" @submit.prevent="() => handleSubmit()">
+    <form id="bulk-edit-account-form" class="workbench-editor-form space-y-5" @submit.prevent="() => handleSubmit()">
       <!-- Info -->
       <div class="rounded-lg bg-blue-50 p-4 dark:bg-blue-900/20">
         <p class="text-sm text-blue-700 dark:text-blue-400">

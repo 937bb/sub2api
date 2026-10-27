@@ -1,5 +1,5 @@
 <template>
-  <BaseDialog
+  <BaseDialog presentation="sheet"
     :show="show"
     :title="t(`admin.subscriptions.bulk.${currentAction}`)"
     width="normal"
@@ -7,7 +7,7 @@
     :show-close-button="canClose"
     @close="handleClose"
   >
-    <form id="bulk-subscription-action-form" class="space-y-4" novalidate @submit.prevent="submit">
+    <form id="bulk-subscription-action-form" class="workbench-editor-form space-y-4" novalidate @submit.prevent="submit">
       <div>
         <p class="mb-2 text-sm font-medium text-gray-900 dark:text-gray-100">
           {{ t('admin.subscriptions.bulk.confirmTargets', { count: targets.length }) }}

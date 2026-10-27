@@ -1,5 +1,6 @@
 <template>
   <AppLayout>
+    <WorkspacePage variant="monitor">
     <MonitorHero
       :overall-status="overallStatus"
       :interval-seconds="DEFAULT_INTERVAL_SECONDS"
@@ -25,6 +26,7 @@
       :title="detailTitle"
       @close="closeDetail"
     />
+    </WorkspacePage>
   </AppLayout>
 </template>
 
@@ -40,6 +42,7 @@ import {
   type UserMonitorDetail,
 } from '@/api/channelMonitor'
 import AppLayout from '@/components/layout/AppLayout.vue'
+import WorkspacePage from '@/components/layout/WorkspacePage.vue'
 import MonitorHero, {
   type MonitorWindow,
   type OverallStatus,

@@ -1,6 +1,6 @@
 <template>
   <AppLayout>
-    <div class="mx-auto max-w-lg space-y-6 py-8">
+    <WorkspacePage variant="payment-status">
       <div v-if="loading" class="flex items-center justify-center py-20">
         <div class="h-8 w-8 animate-spin rounded-full border-4 border-emerald-500 border-t-transparent"></div>
       </div>
@@ -20,11 +20,13 @@
           <p class="text-sm text-gray-500 dark:text-gray-400">{{ t('payment.qr.payInNewWindowHint') }}</p>
         </div>
       </div>
-    </div>
+    </WorkspacePage>
   </AppLayout>
 </template>
 
 <script setup lang="ts">
+import WorkspacePage from '@/components/layout/WorkspacePage.vue'
+
 import { onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'

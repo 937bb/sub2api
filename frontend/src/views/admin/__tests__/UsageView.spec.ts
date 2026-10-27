@@ -443,23 +443,23 @@ describe('admin UsageView distribution metric toggles', () => {
     }))
 
     const modelChart = wrapper.find('[data-test="model-chart"]')
-    const groupChart = wrapper.find('[data-test="group-chart"]')
-
     expect(modelChart.find('.metric').text()).toBe('tokens')
-    expect(groupChart.find('.metric').text()).toBe('tokens')
 
     await modelChart.find('.switch-metric').trigger('click')
     await flushPromises()
 
     expect(modelChart.find('.metric').text()).toBe('actual_cost')
+    await wrapper.findAll('.console-distribution-tabs button')[1].trigger('click')
+    const groupChart = wrapper.find('[data-test="group-chart"]')
     expect(groupChart.find('.metric').text()).toBe('tokens')
     expect(getSnapshotV2).toHaveBeenCalledTimes(1)
 
     await groupChart.find('.switch-metric').trigger('click')
     await flushPromises()
 
-    expect(modelChart.find('.metric').text()).toBe('actual_cost')
     expect(groupChart.find('.metric').text()).toBe('actual_cost')
+    await wrapper.findAll('.console-distribution-tabs button')[0].trigger('click')
+    expect(wrapper.find('[data-test="model-chart"] .metric').text()).toBe('actual_cost')
     expect(getSnapshotV2).toHaveBeenCalledTimes(1)
   })
 })

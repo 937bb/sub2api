@@ -1,7 +1,19 @@
 <template>
   <AppLayout>
-    <TablePageLayout>
-      <template #filters>
+    <TablePageLayout :rows="filteredChannels" :loading="loading">
+      <template #actions>
+<div class="flex w-full flex-shrink-0 flex-wrap items-center justify-end gap-3 lg:w-auto">
+            <button
+              @click="loadChannels"
+              :disabled="loading"
+              class="btn btn-secondary"
+              :title="t('common.refresh', 'Refresh')"
+            >
+              <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
+            </button>
+          </div>
+</template>
+<template #filters>
         <div class="flex flex-col justify-between gap-4 lg:flex-row lg:items-start">
           <div class="flex flex-1 flex-wrap items-center gap-3">
             <div class="relative w-full sm:w-80">
@@ -19,16 +31,7 @@
             </div>
           </div>
 
-          <div class="flex w-full flex-shrink-0 flex-wrap items-center justify-end gap-3 lg:w-auto">
-            <button
-              @click="loadChannels"
-              :disabled="loading"
-              class="btn btn-secondary"
-              :title="t('common.refresh', 'Refresh')"
-            >
-              <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
-            </button>
-          </div>
+
         </div>
       </template>
 

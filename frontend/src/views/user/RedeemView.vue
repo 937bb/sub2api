@@ -1,9 +1,10 @@
 <template>
   <AppLayout>
-    <div class="mx-auto max-w-2xl space-y-6">
+    <WorkspacePage variant="redeem">
       <!-- Current Balance Card -->
-      <div class="card overflow-hidden">
-        <div class="bg-gradient-to-br from-primary-500 to-primary-600 px-6 py-8 text-center">
+      <div class="workbench-redeem-grid"><div class="workbench-redeem-entry">
+<div class="card overflow-hidden">
+        <div class="workbench-balance">
           <div
             class="mb-4 inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-white/20 backdrop-blur-sm"
           >
@@ -20,7 +21,7 @@
       </div>
 
       <!-- Redeem Form -->
-      <div class="card">
+<div class="card">
         <div class="p-6">
           <form @submit.prevent="handleRedeem" class="space-y-5">
             <div>
@@ -76,7 +77,7 @@
             </button>
           </form>
         </div>
-      </div>
+      </div></div>
 
       <!-- Success Message -->
       <transition name="fade">
@@ -199,6 +200,7 @@
       </div>
 
       <!-- Recent Activity -->
+      </div>
       <div class="card">
         <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
           <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
@@ -361,11 +363,13 @@
           </div>
         </div>
       </div>
-    </div>
+    </WorkspacePage>
   </AppLayout>
 </template>
 
 <script setup lang="ts">
+import WorkspacePage from '@/components/layout/WorkspacePage.vue'
+
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'

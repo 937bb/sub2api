@@ -117,6 +117,7 @@ function mountView() {
   return mount(PluginsView, {
     global: {
       stubs: {
+          WorkspacePage: { template: '<section><slot name="actions" /><slot /></section>' },
         AppLayout: { template: '<div><slot /></div>' },
         BaseDialog: { template: '<div><slot /></div>' },
         Icon: true,

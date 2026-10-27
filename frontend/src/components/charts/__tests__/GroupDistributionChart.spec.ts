@@ -28,7 +28,7 @@ vi.mock('vue-i18n', async () => {
 })
 
 vi.mock('vue-chartjs', () => ({
-  Doughnut: {
+  Bar: {
     props: ['data'],
     template: '<div class="chart-data">{{ JSON.stringify(data) }}</div>',
   },
@@ -74,7 +74,7 @@ describe('GroupDistributionChart', () => {
     expect(rows[0].text()).toContain('group-a')
     expect(rows[1].text()).toContain('group-b')
 
-    const options = (wrapper.vm as any).$?.setupState.doughnutOptions
+    const options = (wrapper.vm as any).$?.setupState.barOptions
     const label = options.plugins.tooltip.callbacks.label({
       label: 'group-a',
       raw: 1200,
@@ -104,7 +104,7 @@ describe('GroupDistributionChart', () => {
     expect(rows[0].text()).toContain('group-b')
     expect(rows[1].text()).toContain('group-a')
 
-    const options = (wrapper.vm as any).$?.setupState.doughnutOptions
+    const options = (wrapper.vm as any).$?.setupState.barOptions
     const label = options.plugins.tooltip.callbacks.label({
       label: 'group-b',
       raw: 0.9,

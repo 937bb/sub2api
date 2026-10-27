@@ -1,5 +1,5 @@
 <template>
-  <BaseDialog
+  <BaseDialog presentation="sheet"
     :show="show"
     :title="t('admin.accounts.syncFromCrsTitle')"
     width="normal"
@@ -10,7 +10,7 @@
     <form
       v-if="currentStep === 'input'"
       id="sync-from-crs-form"
-      class="space-y-4"
+      class="workbench-editor-form space-y-4"
       @submit.prevent="handlePreview"
     >
       <div class="text-sm text-gray-600 dark:text-dark-300">

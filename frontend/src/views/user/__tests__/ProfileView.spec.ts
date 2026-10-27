@@ -73,10 +73,12 @@ describe('ProfileView', () => {
     })
   })
 
-  it('renders the simplified single-column profile shell without separate stat cards', async () => {
+  it('switches between identity and security without unmounting account controls', async () => {
     const wrapper = mount(ProfileView, {
+      attachTo: document.body,
       global: {
         stubs: {
+          WorkspacePage: { template: '<section><slot name="actions" /><slot /></section>' },
           AppLayout: { template: '<div><slot /></div>' },
           StatCard: { template: '<div class="stat-card" />' },
           ProfileInfoCard: { template: '<div data-testid="profile-info-card" />' },
@@ -95,5 +97,12 @@ describe('ProfileView', () => {
     expect(wrapper.get('[data-testid="profile-shell"]').html()).toContain('profile-info-card')
     expect(wrapper.get('[data-testid="profile-shell"]').html()).toContain('profile-password-form')
     expect(wrapper.get('[data-testid="profile-shell"]').html()).toContain('profile-totp-card')
+    expect(wrapper.get('[data-testid="profile-info-card"]').isVisible()).toBe(true)
+    expect(wrapper.get('[data-testid="profile-password-form"]').isVisible()).toBe(false)
+    await wrapper.findAll('[role="tab"]')[1].trigger('click')
+    expect(wrapper.get('[data-testid="profile-info-card"]').isVisible()).toBe(false)
+    expect(wrapper.get('[data-testid="profile-password-form"]').isVisible()).toBe(true)
+    expect(wrapper.get('[data-testid="profile-totp-card"]').isVisible()).toBe(true)
+    wrapper.unmount()
   })
 })

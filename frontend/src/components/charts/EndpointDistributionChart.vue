@@ -1,6 +1,6 @@
 <template>
-  <div class="card p-4">
-    <div class="mb-4 flex items-center justify-between gap-3">
+  <div class="card console-model-panel">
+    <div class="console-panel-heading flex-wrap">
       <h3 class="text-sm font-semibold text-gray-900 dark:text-white">
         {{ title || t('usage.endpointDistribution') }}
       </h3>
@@ -71,11 +71,11 @@
     <div v-if="loading" class="flex h-48 items-center justify-center">
       <LoadingSpinner />
     </div>
-    <div v-else-if="displayEndpointStats.length > 0 && chartData" class="flex flex-col items-center gap-4 sm:flex-row sm:gap-6">
-      <div class="h-48 w-48 shrink-0">
-        <Doughnut :data="chartData" :options="doughnutOptions" />
+    <div v-else-if="displayEndpointStats.length > 0 && chartData" class="console-model-content">
+      <div class="console-model-bars"><div :style="{ height: Math.max(120, displayEndpointStats.length * 34) + 'px' }">
+        <Bar :data="chartData" :options="barOptions" role="img" :aria-label="t('console.analysis')" /></div>
       </div>
-      <div class="max-h-48 w-full min-w-0 flex-1 overflow-auto">
+      <div class="console-model-table">
         <table class="w-full text-xs">
           <thead>
             <tr class="text-gray-500 dark:text-gray-400">
@@ -109,7 +109,7 @@
                 <td class="py-1.5 text-right text-green-600 dark:text-green-400">
                   ${{ formatCost(item.actual_cost) }}
                 </td>
-                <td class="py-1.5 text-right text-gray-400 dark:text-gray-500">
+                <td class="py-1.5 text-right text-gray-600 dark:text-gray-400">
                   ${{ formatCost(item.cost) }}
                 </td>
               </tr>
@@ -135,16 +135,18 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js'
-import { Doughnut } from 'vue-chartjs'
+import { useDark } from '@vueuse/core'
+import { Chart as ChartJS, BarElement, CategoryScale, LinearScale, Tooltip, Legend } from 'chart.js'
+import { Bar } from 'vue-chartjs'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import UserBreakdownSubTable from './UserBreakdownSubTable.vue'
 import type { EndpointStat, UserBreakdownItem } from '@/types'
 import { getUserBreakdown } from '@/api/admin/dashboard'
 
-ChartJS.register(ArcElement, Tooltip, Legend)
+ChartJS.register(BarElement, CategoryScale, LinearScale, Tooltip, Legend)
 
 const { t } = useI18n()
+const dark = useDark({ storageKey: 'theme' })
 
 type DistributionMetric = 'tokens' | 'actual_cost'
 type EndpointSource = 'inbound' | 'upstream' | 'path'
@@ -211,20 +213,7 @@ const toggleBreakdown = async (endpoint: string) => {
   }
 }
 
-const chartColors = [
-  '#3b82f6',
-  '#10b981',
-  '#f59e0b',
-  '#ef4444',
-  '#8b5cf6',
-  '#ec4899',
-  '#14b8a6',
-  '#f97316',
-  '#6366f1',
-  '#84cc16',
-  '#06b6d4',
-  '#a855f7'
-]
+const chartColors = ['#3562ce', '#4e7ca7', '#27857a', '#8f9fb5', '#b28040', '#6b5c95']
 
 const displayEndpointStats = computed(() => {
   const sourceStats = props.source === 'upstream'
@@ -248,14 +237,22 @@ const chartData = computed(() => {
         data: displayEndpointStats.value.map((item) =>
           props.metric === 'actual_cost' ? item.actual_cost : item.total_tokens
         ),
-        backgroundColor: chartColors.slice(0, displayEndpointStats.value.length),
+        backgroundColor: displayEndpointStats.value.map((_, index) => chartColors[index % chartColors.length]),
+        borderRadius: 4,
+        maxBarThickness: 14,
         borderWidth: 0
       }
     ]
   }
 })
 
-const doughnutOptions = computed(() => ({
+const barOptions = computed(() => ({
+  indexAxis: 'y' as const,
+  animation: false as const,
+  scales: {
+    x: { beginAtZero: true, grid: { color: dark.value ? '#334255' : '#edf0f4' }, border: { display: false }, ticks: { color: dark.value ? '#afbdd0' : '#58677c', maxTicksLimit: 4, callback: (value: string | number) => props.metric === 'actual_cost' ? '$' + formatCost(Number(value)) : formatTokens(Number(value)), font: { size: 10 } } },
+    y: { grid: { display: false }, border: { display: false }, ticks: { color: dark.value ? '#afbdd0' : '#58677c', font: { size: 11 } } }
+  },
   responsive: true,
   maintainAspectRatio: false,
   plugins: {

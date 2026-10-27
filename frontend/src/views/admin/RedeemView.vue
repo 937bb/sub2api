@@ -1,7 +1,34 @@
 <template>
   <AppLayout>
-    <TablePageLayout>
-      <template #filters>
+    <TablePageLayout :rows="codes" :total="pagination.total" :loading="loading">
+      <template #actions>
+<div class="flex flex-1 flex-wrap items-center justify-end gap-2">
+            <button
+              @click="loadCodes"
+              :disabled="loading"
+              class="btn btn-secondary"
+              :title="t('common.refresh')"
+            >
+              <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
+            </button>
+            <button @click="handleExportCodes" class="btn btn-secondary">
+              {{ t('admin.redeem.exportCsv') }}
+            </button>
+            <button
+              data-test="batch-update-open"
+              @click="openBatchUpdateDialog"
+              :disabled="selectedCount === 0 || batchUpdating"
+              class="btn btn-secondary"
+            >
+              <Icon name="edit" size="md" class="mr-2" />
+              {{ t('admin.redeem.batchUpdate') }}
+            </button>
+            <button @click="showGenerateDialog = true" class="btn btn-primary">
+              {{ t('admin.redeem.generateCodes') }}
+            </button>
+          </div>
+</template>
+<template #filters>
         <div class="flex flex-wrap items-center gap-3">
           <!-- Left: Search + Filters -->
           <div class="flex-1 sm:max-w-64">
@@ -27,31 +54,7 @@
           />
 
           <!-- Right: Action buttons -->
-          <div class="flex flex-1 flex-wrap items-center justify-end gap-2">
-            <button
-              @click="loadCodes"
-              :disabled="loading"
-              class="btn btn-secondary"
-              :title="t('common.refresh')"
-            >
-              <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
-            </button>
-            <button @click="handleExportCodes" class="btn btn-secondary">
-              {{ t('admin.redeem.exportCsv') }}
-            </button>
-            <button
-              data-test="batch-update-open"
-              @click="openBatchUpdateDialog"
-              :disabled="selectedCount === 0 || batchUpdating"
-              class="btn btn-secondary"
-            >
-              <Icon name="edit" size="md" class="mr-2" />
-              {{ t('admin.redeem.batchUpdate') }}
-            </button>
-            <button @click="showGenerateDialog = true" class="btn btn-primary">
-              {{ t('admin.redeem.generateCodes') }}
-            </button>
-          </div>
+
         </div>
       </template>
 

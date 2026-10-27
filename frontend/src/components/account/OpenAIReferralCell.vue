@@ -22,7 +22,7 @@
     </button>
     <span v-if="error && !show" class="max-w-48 truncate text-[10px] text-red-600" :title="error">{{ error }}</span>
     <span v-if="warning && !show" class="max-w-48 truncate text-[10px] text-amber-700 dark:text-amber-400" :title="warning">{{ warning }}</span>
-    <BaseDialog
+    <BaseDialog presentation="sheet"
       v-if="show"
       :show="show"
       :title="t('admin.accounts.openaiReferral.invite')"
@@ -30,7 +30,7 @@
       :close-on-escape="!sending"
       @close="closeDialog"
     >
-      <form :id="formID" class="space-y-4" @submit.prevent="sendInvite">
+      <form :id="formID" class="workbench-editor-form space-y-4" @submit.prevent="sendInvite">
         <p class="text-sm text-gray-600 dark:text-gray-300">
           {{ t('admin.accounts.openaiReferral.fromAccount') }} <strong>{{ account.name }}</strong>
         </p>
@@ -53,7 +53,7 @@
         <p v-if="fresh && (!eligibility?.should_show || count === null || count <= 0)" class="text-sm text-amber-700 dark:text-amber-400">
           {{ t('admin.accounts.openaiReferral.unavailable') }}
         </p>
-        <div>
+        <div class="workbench-field-row ">
           <label :for="emailID" class="input-label">{{ t('admin.accounts.openaiReferral.email') }}</label>
           <input
             :id="emailID"

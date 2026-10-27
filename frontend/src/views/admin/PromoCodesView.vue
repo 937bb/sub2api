@@ -1,7 +1,23 @@
 <template>
   <AppLayout>
-    <TablePageLayout>
-      <template #filters>
+    <TablePageLayout :rows="codes" :total="pagination.total" :loading="loading">
+      <template #actions>
+<div class="flex flex-1 flex-wrap items-center justify-end gap-2">
+            <button
+              @click="loadCodes"
+              :disabled="loading"
+              class="btn btn-secondary"
+              :title="t('common.refresh')"
+            >
+              <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
+            </button>
+            <button @click="showCreateDialog = true" class="btn btn-primary">
+              <Icon name="plus" size="md" class="mr-1" />
+              {{ t('admin.promo.createCode') }}
+            </button>
+          </div>
+</template>
+<template #filters>
         <div class="flex flex-wrap items-center gap-3">
           <!-- Left: Search + Filters -->
           <div class="flex-1 sm:max-w-64">
@@ -21,20 +37,7 @@
           />
 
           <!-- Right: Action buttons -->
-          <div class="flex flex-1 flex-wrap items-center justify-end gap-2">
-            <button
-              @click="loadCodes"
-              :disabled="loading"
-              class="btn btn-secondary"
-              :title="t('common.refresh')"
-            >
-              <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
-            </button>
-            <button @click="showCreateDialog = true" class="btn btn-primary">
-              <Icon name="plus" size="md" class="mr-1" />
-              {{ t('admin.promo.createCode') }}
-            </button>
-          </div>
+
         </div>
       </template>
 
@@ -157,14 +160,14 @@
     </TablePageLayout>
 
     <!-- Create Dialog -->
-    <BaseDialog
+    <BaseDialog presentation="sheet"
       :show="showCreateDialog"
       :title="t('admin.promo.createCode')"
       width="normal"
       @close="showCreateDialog = false"
     >
-      <form id="create-promo-form" @submit.prevent="handleCreate" class="space-y-4">
-        <div>
+      <form id="create-promo-form" @submit.prevent="handleCreate" class="workbench-editor-form space-y-4">
+        <div class="workbench-field-row ">
           <label class="input-label">
             {{ t('admin.promo.code') }}
             <span class="ml-1 text-xs font-normal text-gray-400">({{ t('admin.promo.autoGenerate') }})</span>
@@ -176,7 +179,7 @@
             :placeholder="t('admin.promo.codePlaceholder')"
           />
         </div>
-        <div>
+        <div class="workbench-field-row ">
           <label class="input-label">{{ t('admin.promo.bonusAmount') }}</label>
           <input
             v-model.number="createForm.bonus_amount"
@@ -187,7 +190,7 @@
             class="input"
           />
         </div>
-        <div>
+        <div class="workbench-field-row ">
           <label class="input-label">
             {{ t('admin.promo.maxUses') }}
             <span class="ml-1 text-xs font-normal text-gray-400">({{ t('admin.promo.zeroUnlimited') }})</span>
@@ -199,7 +202,7 @@
             class="input"
           />
         </div>
-        <div>
+        <div class="workbench-field-row ">
           <label class="input-label">
             {{ t('admin.promo.expiresAt') }}
             <span class="ml-1 text-xs font-normal text-gray-400">({{ t('common.optional') }})</span>
@@ -210,7 +213,7 @@
             class="input"
           />
         </div>
-        <div>
+        <div class="workbench-field-row ">
           <label class="input-label">
             {{ t('admin.promo.notes') }}
             <span class="ml-1 text-xs font-normal text-gray-400">({{ t('common.optional') }})</span>
@@ -236,14 +239,14 @@
     </BaseDialog>
 
     <!-- Edit Dialog -->
-    <BaseDialog
+    <BaseDialog presentation="sheet"
       :show="showEditDialog"
       :title="t('admin.promo.editCode')"
       width="normal"
       @close="closeEditDialog"
     >
-      <form id="edit-promo-form" @submit.prevent="handleUpdate" class="space-y-4">
-        <div>
+      <form id="edit-promo-form" @submit.prevent="handleUpdate" class="workbench-editor-form space-y-4">
+        <div class="workbench-field-row ">
           <label class="input-label">{{ t('admin.promo.code') }}</label>
           <input
             v-model="editForm.code"
@@ -251,7 +254,7 @@
             class="input font-mono uppercase"
           />
         </div>
-        <div>
+        <div class="workbench-field-row ">
           <label class="input-label">{{ t('admin.promo.bonusAmount') }}</label>
           <input
             v-model.number="editForm.bonus_amount"
@@ -262,7 +265,7 @@
             class="input"
           />
         </div>
-        <div>
+        <div class="workbench-field-row ">
           <label class="input-label">
             {{ t('admin.promo.maxUses') }}
             <span class="ml-1 text-xs font-normal text-gray-400">({{ t('admin.promo.zeroUnlimited') }})</span>
@@ -274,11 +277,11 @@
             class="input"
           />
         </div>
-        <div>
+        <div class="workbench-field-row ">
           <label class="input-label">{{ t('admin.promo.status') }}</label>
           <Select v-model="editForm.status" :options="statusOptions" />
         </div>
-        <div>
+        <div class="workbench-field-row ">
           <label class="input-label">
             {{ t('admin.promo.expiresAt') }}
             <span class="ml-1 text-xs font-normal text-gray-400">({{ t('common.optional') }})</span>
@@ -289,7 +292,7 @@
             class="input"
           />
         </div>
-        <div>
+        <div class="workbench-field-row ">
           <label class="input-label">
             {{ t('admin.promo.notes') }}
             <span class="ml-1 text-xs font-normal text-gray-400">({{ t('common.optional') }})</span>

@@ -6,7 +6,7 @@ import OpsErrorTrendChart from '../OpsErrorTrendChart.vue'
 
 vi.mock('chart.js', () => ({
   Chart: { register: vi.fn() },
-  ArcElement: {},
+  BarElement: {},
   CategoryScale: {},
   Filler: {},
   Legend: {},
@@ -21,13 +21,13 @@ vi.mock('vue-chartjs', async () => {
   const { defineComponent } = await import('vue')
 
   return {
-    Doughnut: defineComponent({
-      name: 'Doughnut',
+    Bar: defineComponent({
+      name: 'Bar',
       props: {
         data: { type: Object, required: true },
         options: { type: Object, default: () => ({}) },
       },
-      template: '<div class="doughnut-stub" />',
+      template: '<div class="bar-stub" />',
     }),
     Line: defineComponent({
       name: 'LineChartStub',
@@ -97,9 +97,9 @@ describe('Ops SLA-scoped error charts', () => {
       global: globalStubs,
     })
 
-    const doughnut = wrapper.findComponent({ name: 'Doughnut' })
-    expect(doughnut.exists()).toBe(true)
-    expect(doughnut.props('data')).toMatchObject({
+    const bar = wrapper.findComponent({ name: 'Bar' })
+    expect(bar.exists()).toBe(true)
+    expect(bar.props('data')).toMatchObject({
       labels: ['admin.ops.client'],
       datasets: [{ data: [2] }],
     })
@@ -117,7 +117,7 @@ describe('Ops SLA-scoped error charts', () => {
       global: globalStubs,
     })
 
-    expect(wrapper.findComponent({ name: 'Doughnut' }).exists()).toBe(false)
+    expect(wrapper.findComponent({ name: 'Bar' }).exists()).toBe(false)
     expect(wrapper.find('.empty-state-stub').exists()).toBe(true)
   })
 

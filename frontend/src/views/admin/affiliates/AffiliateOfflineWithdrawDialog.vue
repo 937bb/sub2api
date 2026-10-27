@@ -1,12 +1,12 @@
 <template>
-  <BaseDialog
+  <BaseDialog presentation="sheet"
     :show="show"
     :title="t('admin.affiliates.withdraw.title')"
     width="normal"
     @close="handleClose"
   >
-    <form class="space-y-4" @submit.prevent="submit">
-      <div>
+    <form class="workbench-editor-form space-y-4" @submit.prevent="submit">
+      <div class="workbench-field-row ">
         <label class="input-label">{{ t('admin.affiliates.withdraw.user') }}</label>
         <div
           v-if="selectedUser"
@@ -74,7 +74,7 @@
         <p class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ t('admin.affiliates.withdraw.frozenHint') }}</p>
       </div>
 
-      <div>
+      <div class="workbench-field-row ">
         <label class="input-label">{{ t('admin.affiliates.withdraw.amount') }}</label>
         <div class="flex gap-2">
           <input

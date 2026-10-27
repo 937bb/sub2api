@@ -1,228 +1,105 @@
 <template>
-  <div class="card p-4">
-    <h3 class="mb-4 text-sm font-semibold text-gray-900 dark:text-white">
-      {{ t('admin.dashboard.tokenUsageTrend') }}
-    </h3>
-    <div v-if="loading" class="flex h-48 items-center justify-center">
-      <LoadingSpinner />
+  <section class="card console-activity">
+    <div class="console-panel-heading">
+      <div><h3>{{ t('console.analysis') }}</h3><p>{{ t('console.analysisHint') }}</p></div>
     </div>
-    <div v-else-if="trendData.length > 0 && chartData" class="h-48">
-      <Line :data="chartData" :options="lineOptions" />
+    <div class="console-chart-tabs" role="group" :aria-label="t('console.analysis')">
+      <button v-for="tab in tabs" :key="tab.id" type="button" :aria-pressed="metric === tab.id" :class="{ selected: metric === tab.id }" @click="metric = tab.id">{{ t(tab.label) }}</button>
     </div>
-    <div
-      v-else
-      class="flex h-48 items-center justify-center text-sm text-gray-500 dark:text-gray-400"
-    >
-      {{ t('admin.dashboard.noDataAvailable') }}
+    <div class="console-chart-summary">
+      <strong>{{ summary }}</strong><span>{{ t(metric === 'cache' ? 'console.cacheRate' : 'console.rangeTotal') }}</span>
     </div>
-  </div>
+    <div v-if="loading" class="console-plot skeleton" role="status" :aria-label="t('common.loading')" />
+    <div v-else-if="trendData.length" class="console-plot">
+      <Bar v-if="metric === 'tokens'" :data="tokenData" :options="barOptions" :aria-label="t('console.tokenComposition')" role="img" />
+      <Line v-else :data="lineData" :options="lineOptions" :aria-label="t(tabs.find(tab => tab.id === metric)!.label)" role="img" />
+    </div>
+    <div v-else class="console-plot console-chart-empty">{{ t('admin.dashboard.noDataAvailable') }}</div>
+    <div class="console-chart-footnote">{{ t('console.rangeData') }}<span v-if="trendData.length">{{ trendData[0].date }} — {{ trendData[trendData.length - 1].date }}</span></div>
+  </section>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  Title,
-  Tooltip,
-  Legend,
-  Filler
-} from 'chart.js'
-import { Line } from 'vue-chartjs'
-import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
+import { useDark } from '@vueuse/core'
+import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, BarElement, Tooltip, Legend, Filler } from 'chart.js'
+import { Bar, Line } from 'vue-chartjs'
 import type { TrendDataPoint } from '@/types'
-
-ChartJS.register(
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  Title,
-  Tooltip,
-  Legend,
-  Filler
-)
-
+ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, Tooltip, Legend, Filler)
+const props = defineProps<{ trendData: TrendDataPoint[]; loading?: boolean }>()
 const { t } = useI18n()
-
-const props = defineProps<{
-  trendData: TrendDataPoint[]
-  loading?: boolean
-}>()
-
-const isDarkMode = computed(() => {
-  return document.documentElement.classList.contains('dark')
-})
-
-const chartColors = computed(() => ({
-  text: isDarkMode.value ? '#e5e7eb' : '#374151',
-  grid: isDarkMode.value ? '#374151' : '#e5e7eb',
-  input: '#3b82f6',
-  output: '#10b981',
-  cacheCreation: '#f59e0b',
-  cacheRead: '#06b6d4',
-  cacheHitRate: '#8b5cf6'
-}))
-
-const chartData = computed(() => {
-  if (!props.trendData?.length) return null
-
-  return {
-    labels: props.trendData.map((d) => d.date),
-    datasets: [
-      {
-        label: 'Input',
-        data: props.trendData.map((d) => d.input_tokens),
-        borderColor: chartColors.value.input,
-        backgroundColor: `${chartColors.value.input}20`,
-        fill: true,
-        tension: 0.3
-      },
-      {
-        label: 'Output',
-        data: props.trendData.map((d) => d.output_tokens),
-        borderColor: chartColors.value.output,
-        backgroundColor: `${chartColors.value.output}20`,
-        fill: true,
-        tension: 0.3
-      },
-      {
-        label: 'Cache Creation',
-        data: props.trendData.map((d) => d.cache_creation_tokens),
-        borderColor: chartColors.value.cacheCreation,
-        backgroundColor: `${chartColors.value.cacheCreation}20`,
-        fill: true,
-        tension: 0.3
-      },
-      {
-        label: 'Cache Read',
-        data: props.trendData.map((d) => d.cache_read_tokens),
-        borderColor: chartColors.value.cacheRead,
-        backgroundColor: `${chartColors.value.cacheRead}20`,
-        fill: true,
-        tension: 0.3
-      },
-      {
-        label: 'Cache Hit Rate',
-        data: props.trendData.map((d) => {
-          const totalPromptTokens = d.input_tokens + d.cache_read_tokens + d.cache_creation_tokens
-          return totalPromptTokens > 0 ? (d.cache_read_tokens / totalPromptTokens) * 100 : 0
-        }),
-        borderColor: chartColors.value.cacheHitRate,
-        backgroundColor: `${chartColors.value.cacheHitRate}20`,
-        borderDash: [5, 5],
-        fill: false,
-        tension: 0.3,
-        yAxisID: 'yPercent'
-      }
-    ]
+const dark = useDark({ storageKey: 'theme' })
+const metric = ref<'tokens' | 'requests' | 'cost' | 'cache'>('tokens')
+const tabs = [
+  { id: 'tokens', label: 'console.tokenComposition' },
+  { id: 'requests', label: 'console.requests' },
+  { id: 'cost', label: 'console.spending' },
+  { id: 'cache', label: 'console.cacheRate' }
+] as const
+const safe = (n: unknown) => typeof n === 'number' && Number.isFinite(n) ? n : 0
+const compact = (n: number) => n >= 1e9 ? `${(n / 1e9).toFixed(2)}B` : n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}K` : n.toLocaleString()
+const sum = (key: keyof TrendDataPoint) => props.trendData.reduce((n, row) => n + safe(row[key]), 0)
+const hitRate = (row: TrendDataPoint) => {
+  const prompt = safe(row.input_tokens) + safe(row.cache_creation_tokens) + safe(row.cache_read_tokens)
+  return prompt > 0 ? safe(row.cache_read_tokens) / prompt * 100 : 0
+}
+const summary = computed(() => {
+  if (metric.value === 'cost') return `$${sum('actual_cost').toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`
+  if (metric.value === 'requests') return sum('requests').toLocaleString()
+  if (metric.value === 'cache') {
+    const prompt = sum('input_tokens') + sum('cache_creation_tokens') + sum('cache_read_tokens')
+    return `${(prompt ? sum('cache_read_tokens') / prompt * 100 : 0).toFixed(1)}%`
   }
+  return compact(sum('input_tokens') + sum('output_tokens') + sum('cache_creation_tokens') + sum('cache_read_tokens'))
 })
-
-const lineOptions = computed(() => ({
+const labels = computed(() => props.trendData.map(row => row.date))
+const tokenData = computed(() => ({
+  labels: labels.value,
+  datasets: [
+    { label: t('console.input'), key: 'input_tokens', color: '#3562ce' },
+    { label: t('console.output'), key: 'output_tokens', color: '#183d8b' },
+    { label: t('console.cacheRead'), key: 'cache_read_tokens', color: '#62b7ad' },
+    { label: t('console.cacheWrite'), key: 'cache_creation_tokens', color: '#c28a42' }
+  ].map(item => ({ label: item.label, data: props.trendData.map(row => safe(row[item.key as keyof TrendDataPoint])), backgroundColor: item.color, borderWidth: 0, borderRadius: 3, maxBarThickness: 36 }))
+}))
+const lineData = computed(() => ({
+  labels: labels.value,
+  datasets: metric.value === 'cache' ? [
+    { label: t('console.cacheRate'), data: props.trendData.map(hitRate), borderColor: '#27857a', backgroundColor: '#27857a18', fill: true }
+  ] : metric.value === 'cost' ? [
+    { label: t('dashboard.actual'), data: props.trendData.map(row => safe(row.actual_cost)), borderColor: '#3562ce', backgroundColor: '#3562ce18', fill: true },
+    { label: t('dashboard.standard'), data: props.trendData.map(row => safe(row.cost)), borderColor: '#8b97ac', borderDash: [4, 4], fill: false }
+  ] : [
+    { label: t('console.requests'), data: props.trendData.map(row => safe(row.requests)), borderColor: '#3562ce', backgroundColor: '#3562ce18', fill: true }
+  ]
+}))
+const commonOptions = computed(() => ({
   responsive: true,
   maintainAspectRatio: false,
-  interaction: {
-    intersect: false,
-    mode: 'index' as const
-  },
+  animation: false as const,
+  interaction: { intersect: false, mode: 'index' as const },
   plugins: {
-    legend: {
-      position: 'top' as const,
-      labels: {
-        color: chartColors.value.text,
-        usePointStyle: true,
-        pointStyle: 'circle',
-        padding: 15,
-        font: {
-          size: 11
-        }
+    legend: { position: 'bottom' as const, align: 'start' as const, labels: { color: dark.value ? '#bec9d9' : '#536175', usePointStyle: true, pointStyle: 'rectRounded', boxWidth: 8, boxHeight: 8, padding: 20, font: { size: 11 } } },
+    tooltip: { padding: 12, cornerRadius: 6, backgroundColor: '#172538', callbacks: {
+      label: (context: { dataset: { label?: string }; parsed: { y: number | null } }) => {
+        const value = context.parsed.y || 0
+        return `${context.dataset.label}: ${metric.value === 'cost' ? '$' + value.toFixed(4) : metric.value === 'cache' ? value.toFixed(1) + '%' : compact(value)}`
       }
-    },
-    tooltip: {
-      callbacks: {
-        label: (context: any) => {
-          if (context.dataset.yAxisID === 'yPercent') {
-            return `${context.dataset.label}: ${context.raw.toFixed(1)}%`
-          }
-          return `${context.dataset.label}: ${formatTokens(context.raw)}`
-        },
-        footer: (tooltipItems: any) => {
-          const dataIndex = tooltipItems[0]?.dataIndex
-          if (dataIndex !== undefined && props.trendData[dataIndex]) {
-            const data = props.trendData[dataIndex]
-            return `Actual: $${formatCost(data.actual_cost)} | Standard: $${formatCost(data.cost)}`
-          }
-          return ''
-        }
-      }
-    }
+    } }
   },
   scales: {
-    x: {
-      grid: {
-        color: chartColors.value.grid
-      },
-      ticks: {
-        color: chartColors.value.text,
-        font: {
-          size: 10
-        }
-      }
-    },
-    y: {
-      grid: {
-        color: chartColors.value.grid
-      },
-      ticks: {
-        color: chartColors.value.text,
-        font: {
-          size: 10
-        },
-        callback: (value: string | number) => formatTokens(Number(value))
-      }
-    },
-    yPercent: {
-      position: 'right' as const,
-      min: 0,
-      max: 100,
-      grid: {
-        drawOnChartArea: false
-      },
-      ticks: {
-        color: chartColors.value.cacheHitRate,
-        font: {
-          size: 10
-        },
-        callback: (value: string | number) => `${value}%`
-      }
-    }
+    x: { grid: { display: false }, border: { display: false }, ticks: { color: dark.value ? '#bec9d9' : '#536175', maxRotation: 0, autoSkip: true, maxTicksLimit: 7, font: { size: 11 } } },
+    y: { beginAtZero: true, border: { display: false }, grid: { color: dark.value ? '#303e50' : '#edf0f4' }, ticks: { color: dark.value ? '#bec9d9' : '#536175', maxTicksLimit: 5, padding: 10, font: { size: 11 }, callback: (n: string | number) => metric.value === 'cache' ? `${n}%` : metric.value === 'cost' ? `$${compact(Number(n))}` : compact(Number(n)) } }
   }
 }))
-
-const formatTokens = (value: number): string => {
-  if (value >= 1_000_000_000) {
-    return `${(value / 1_000_000_000).toFixed(2)}B`
-  } else if (value >= 1_000_000) {
-    return `${(value / 1_000_000).toFixed(2)}M`
-  } else if (value >= 1_000) {
-    return `${(value / 1_000).toFixed(2)}K`
-  }
-  return value.toLocaleString()
-}
-
-const formatCost = (value: number): string => {
-  if (value >= 1000) {
-    return (value / 1000).toFixed(2) + 'K'
-  } else if (value >= 1) {
-    return value.toFixed(2)
-  } else if (value >= 0.01) {
-    return value.toFixed(3)
-  }
-  return value.toFixed(4)
-}
+const barOptions = computed(() => ({
+  ...commonOptions.value,
+  scales: { x: { ...commonOptions.value.scales.x, stacked: true }, y: { ...commonOptions.value.scales.y, stacked: true } }
+}))
+const lineOptions = computed(() => ({
+  ...commonOptions.value,
+  elements: { point: { radius: 0, hitRadius: 12, hoverRadius: 4 }, line: { borderWidth: 2, tension: 0.25 } },
+  scales: { ...commonOptions.value.scales, y: { ...commonOptions.value.scales.y, ...(metric.value === 'cache' ? { min: 0, max: 100 } : {}) } }
+}))
 </script>

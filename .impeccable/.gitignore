@@ -1,0 +1,7 @@
+screenshots/
+revision*.json
+release*.json
+release-ui.py
+*.cjs
+PREVIEW.zh-CN.md
+review-v3.md

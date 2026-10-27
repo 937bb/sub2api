@@ -1,9 +1,9 @@
 <template>
   <AppLayout>
-    <div
-      data-testid="profile-shell"
-      class="mx-auto max-w-[950px] space-y-6"
-    >
+    <WorkspacePage variant="profile" data-testid="profile-shell">
+      <WorkspaceTabs v-model="profileTab" :label="t('console.identity')" :tabs="profileTabs" />
+      <div v-show="profileTab === 'identity'" class="workbench-profile-grid">
+      <div class="workbench-profile-panel">
       <ProfileInfoCard
         :user="user"
         :linuxdo-enabled="linuxdoOAuthEnabled"
@@ -14,6 +14,7 @@
         :wechat-open-enabled="wechatOAuthOpenEnabled"
         :wechat-mp-enabled="wechatOAuthMPEnabled"
       />
+      </div>
 
       <div
         v-if="contactInfo"
@@ -32,8 +33,13 @@
         </div>
       </div>
 
+      </div>
+      <div v-show="profileTab === 'security'" class="workbench-profile-panel">
       <ProfilePasswordForm />
-
+      <ProfileTotpCard />
+      <ProfilePasskeyCard :enabled="passkeyEnabled" />
+      </div>
+      <div v-show="profileTab === 'notifications'" class="workbench-profile-panel">
       <ProfileBalanceNotifyCard
         v-if="user && balanceLowNotifyEnabled"
         :enabled="user.balance_notify_enabled ?? true"
@@ -43,9 +49,8 @@
         :user-email="user.email"
       />
 
-      <ProfileTotpCard />
-      <ProfilePasskeyCard :enabled="passkeyEnabled" />
-    </div>
+      </div>
+    </WorkspacePage>
   </AppLayout>
 </template>
 
@@ -54,6 +59,8 @@ import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Icon } from '@/components/icons'
 import AppLayout from '@/components/layout/AppLayout.vue'
+import WorkspacePage from '@/components/layout/WorkspacePage.vue'
+import WorkspaceTabs from '@/components/common/WorkspaceTabs.vue'
 import ProfileBalanceNotifyCard from '@/components/user/profile/ProfileBalanceNotifyCard.vue'
 import ProfileInfoCard from '@/components/user/profile/ProfileInfoCard.vue'
 import ProfilePasswordForm from '@/components/user/profile/ProfilePasswordForm.vue'
@@ -79,6 +86,12 @@ const wechatOAuthMPEnabled = ref<boolean | undefined>(undefined)
 const oidcOAuthEnabled = ref(false)
 const oidcOAuthProviderName = ref('OIDC')
 const passkeyEnabled = ref(false)
+const profileTab = ref('identity')
+const profileTabs = computed(() => [
+  { value: 'identity', label: t('console.identity') },
+  { value: 'security', label: t('console.accessSecurity') },
+  ...(balanceLowNotifyEnabled.value ? [{ value: 'notifications', label: t('console.notifications') }] : [])
+])
 
 onMounted(async () => {
   const profileRefresh = authStore.refreshUser().catch((error) => {

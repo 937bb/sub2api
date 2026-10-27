@@ -97,15 +97,15 @@
   </BaseDialog>
 
   <!-- Create/Edit Attribute Modal -->
-  <BaseDialog
+  <BaseDialog presentation="sheet"
     :show="showEditModal"
     :title="editingAttribute ? t('admin.users.attributes.editAttribute') : t('admin.users.attributes.addAttribute')"
     width="normal"
     @close="closeEditModal"
   >
-    <form id="attribute-form" @submit.prevent="handleSave" class="space-y-4">
+    <form id="attribute-form" @submit.prevent="handleSave" class="workbench-editor-form space-y-4">
       <!-- Key -->
-      <div>
+      <div class="workbench-field-row ">
         <label class="input-label">{{ t('admin.users.attributes.key') }}</label>
         <input
           v-model="form.key"
@@ -120,7 +120,7 @@
       </div>
 
       <!-- Name -->
-      <div>
+      <div class="workbench-field-row ">
         <label class="input-label">{{ t('admin.users.attributes.name') }}</label>
         <input
           v-model="form.name"
@@ -132,7 +132,7 @@
       </div>
 
       <!-- Type -->
-      <div>
+      <div class="workbench-field-row ">
         <label class="input-label">{{ t('admin.users.attributes.type') }}</label>
         <Select
           v-model="form.type"
@@ -141,7 +141,7 @@
       </div>
 
       <!-- Options (for select/multi_select) -->
-      <div v-if="form.type === 'select' || form.type === 'multi_select'" class="space-y-2">
+      <div v-if="form.type === 'select' || form.type === 'multi_select'" class="workbench-field-row space-y-2">
         <label class="input-label">{{ t('admin.users.attributes.options') }}</label>
         <div v-for="(option, index) in form.options" :key="getOptionKey(option)" class="flex items-center gap-2">
           <input
@@ -173,7 +173,7 @@
       </div>
 
       <!-- Description -->
-      <div>
+      <div class="workbench-field-row ">
         <label class="input-label">{{ t('admin.users.attributes.fieldDescription') }}</label>
         <input
           v-model="form.description"
@@ -184,7 +184,7 @@
       </div>
 
       <!-- Placeholder -->
-      <div>
+      <div class="workbench-field-row ">
         <label class="input-label">{{ t('admin.users.attributes.placeholder') }}</label>
         <input
           v-model="form.placeholder"
@@ -195,7 +195,7 @@
       </div>
 
       <!-- Required & Enabled -->
-      <div class="flex items-center gap-6">
+      <div class="workbench-field-row flex items-center gap-6">
         <label class="flex items-center gap-2">
           <input v-model="form.required" type="checkbox" class="h-4 w-4 rounded border-gray-300 text-primary-600" />
           <span class="text-sm text-gray-700 dark:text-gray-300">{{ t('admin.users.attributes.required') }}</span>

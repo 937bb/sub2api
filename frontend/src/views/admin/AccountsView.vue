@@ -1,17 +1,8 @@
 <template>
   <AppLayout>
-    <TablePageLayout>
-      <template #filters>
-        <div class="flex flex-wrap-reverse items-start justify-between gap-3">
-          <AccountTableFilters
-            v-model:searchQuery="params.search"
-            :filters="params"
-            :groups="groups"
-            @update:filters="(newFilters) => Object.assign(params, newFilters)"
-            @change="debouncedReload"
-            @update:searchQuery="debouncedReload"
-          />
-          <AccountTableActions
+    <TablePageLayout :rows="accounts" :total="pagination.total" :loading="loading">
+      <template #actions>
+<AccountTableActions
             :loading="loading"
             @refresh="handleManualRefresh"
             @create="showCreate = true"
@@ -160,6 +151,18 @@
               </div>
             </template>
           </AccountTableActions>
+</template>
+<template #filters>
+        <div class="flex flex-wrap-reverse items-start justify-between gap-3">
+          <AccountTableFilters
+            v-model:searchQuery="params.search"
+            :filters="params"
+            :groups="groups"
+            @update:filters="(newFilters) => Object.assign(params, newFilters)"
+            @change="debouncedReload"
+            @update:searchQuery="debouncedReload"
+          />
+
         </div>
         <div
           v-if="hasPendingListSync"

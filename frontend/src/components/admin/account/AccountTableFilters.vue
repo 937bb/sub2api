@@ -1,6 +1,6 @@
 <template>
   <!-- 窄屏两列网格铺满宽度，sm 起恢复单行流式排布 -->
-  <div class="grid w-full grid-cols-2 gap-3 sm:flex sm:w-auto sm:flex-wrap sm:items-center">
+  <div class="workbench-account-filters grid w-full grid-cols-2 gap-3 sm:flex sm:w-auto sm:flex-wrap sm:items-center">
     <SearchInput
       :model-value="searchQuery"
       :placeholder="t('admin.accounts.searchAccounts')"

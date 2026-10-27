@@ -30,7 +30,7 @@ vi.mock('vue-i18n', async (importOriginal) => {
 })
 
 const TablePageLayoutStub = {
-  template: '<div><slot name="filters" /><slot name="table" /><slot name="pagination" /></div>',
+  template: '<div><slot name="actions" /><slot name="filters" /><slot name="table" /><slot name="pagination" /></div>',
 }
 
 const DataTableStub = {

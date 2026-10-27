@@ -1,130 +1,9 @@
 <template>
   <AppLayout>
-    <TablePageLayout>
+    <TablePageLayout :rows="sortedUsers" :total="pagination.total" :loading="loading">
       <!-- Single Row: Search, Filters, and Actions -->
-      <template #filters>
-        <div class="flex flex-wrap items-center gap-3">
-          <!-- Left: Search + Active Filters -->
-          <div class="flex flex-1 flex-wrap items-center gap-3">
-            <!-- Search Box -->
-            <div class="relative w-full md:w-64">
-              <Icon
-                name="search"
-                size="md"
-                class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
-              />
-              <input
-                v-model="searchQuery"
-                type="text"
-                :placeholder="t('admin.users.searchUsers')"
-                class="input pl-10"
-                @input="handleSearch"
-              />
-            </div>
-
-            <!-- Role Filter (visible when enabled) -->
-            <div v-if="visibleFilters.has('role')" class="w-full sm:w-32">
-              <Select
-                v-model="filters.role"
-                :options="[
-                  { value: '', label: t('admin.users.allRoles') },
-                  { value: 'admin', label: t('admin.users.admin') },
-                  { value: 'user', label: t('admin.users.user') }
-                ]"
-                @change="applyFilter"
-              />
-            </div>
-
-            <!-- Status Filter (visible when enabled) -->
-            <div v-if="visibleFilters.has('status')" class="w-full sm:w-32">
-              <Select
-                v-model="filters.status"
-                :options="[
-                  { value: '', label: t('admin.users.allStatus') },
-                  { value: 'active', label: t('common.active') },
-                  { value: 'disabled', label: t('admin.users.disabled') }
-                ]"
-                @change="applyFilter"
-              />
-            </div>
-
-            <!-- Group Filter (visible when enabled) -->
-            <div v-if="visibleFilters.has('group')" class="w-full sm:w-44">
-              <Select
-                v-model="filters.group"
-                :options="groupFilterOptions"
-                searchable
-                creatable
-                :creatable-prefix="t('admin.users.fuzzySearch')"
-                :search-placeholder="t('admin.users.searchAuthorizedGroups')"
-                @change="applyFilter"
-              />
-            </div>
-
-            <!-- API Key Group Filter (visible when enabled) -->
-            <div v-if="visibleFilters.has('apiKeyGroup')" class="w-full sm:w-44">
-              <Select
-                v-model="filters.apiKeyGroup"
-                :options="apiKeyGroupFilterOptions"
-                searchable
-                :search-placeholder="t('admin.users.searchApiKeyGroups')"
-                @change="applyFilter"
-              />
-            </div>
-
-            <!-- Dynamic Attribute Filters -->
-            <template v-for="(value, attrId) in activeAttributeFilters" :key="attrId">
-              <div
-                v-if="visibleFilters.has(`attr_${attrId}`)"
-                class="relative w-full sm:w-36"
-              >
-                <!-- Text/Email/URL/Textarea/Date type: styled input -->
-                <input
-                  v-if="['text', 'textarea', 'email', 'url', 'date'].includes(getAttributeDefinition(Number(attrId))?.type || 'text')"
-                  :value="value"
-                  @input="(e) => updateAttributeFilter(Number(attrId), (e.target as HTMLInputElement).value)"
-                  @keyup.enter="applyFilter"
-                  :placeholder="getAttributeDefinitionName(Number(attrId))"
-                  class="input w-full"
-                />
-                <!-- Number type: number input -->
-                <input
-                  v-else-if="getAttributeDefinition(Number(attrId))?.type === 'number'"
-                  :value="value"
-                  type="number"
-                  @input="(e) => updateAttributeFilter(Number(attrId), (e.target as HTMLInputElement).value)"
-                  @keyup.enter="applyFilter"
-                  :placeholder="getAttributeDefinitionName(Number(attrId))"
-                  class="input w-full"
-                />
-                <!-- Select/Multi-select type -->
-                <template v-else-if="['select', 'multi_select'].includes(getAttributeDefinition(Number(attrId))?.type || '')">
-                  <div class="w-full">
-                    <Select
-                      :model-value="value"
-                      :options="[
-                        { value: '', label: getAttributeDefinitionName(Number(attrId)) },
-                        ...(getAttributeDefinition(Number(attrId))?.options || [])
-                      ]"
-                      @update:model-value="(val) => { updateAttributeFilter(Number(attrId), String(val ?? '')); applyFilter() }"
-                    />
-                  </div>
-                </template>
-                <!-- Fallback -->
-                <input
-                  v-else
-                  :value="value"
-                  @input="(e) => updateAttributeFilter(Number(attrId), (e.target as HTMLInputElement).value)"
-                  @keyup.enter="applyFilter"
-                  :placeholder="getAttributeDefinitionName(Number(attrId))"
-                  class="input w-full"
-                />
-              </div>
-            </template>
-          </div>
-
-          <!-- Right: Actions and Settings -->
-          <div class="flex flex-wrap items-center justify-end gap-2">
+      <template #actions>
+<div class="flex flex-wrap items-center justify-end gap-2">
             <!-- Mobile: Secondary buttons (icon only) -->
             <div class="flex items-center gap-2 md:contents">
               <!-- Refresh Button -->
@@ -269,6 +148,130 @@
               {{ t('admin.users.createUser') }}
             </button>
           </div>
+</template>
+<template #filters>
+        <div class="flex flex-wrap items-center gap-3">
+          <!-- Left: Search + Active Filters -->
+          <div class="flex flex-1 flex-wrap items-center gap-3">
+            <!-- Search Box -->
+            <div class="relative w-full md:w-64">
+              <Icon
+                name="search"
+                size="md"
+                class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+              />
+              <input
+                v-model="searchQuery"
+                type="text"
+                :placeholder="t('admin.users.searchUsers')"
+                class="input pl-10"
+                @input="handleSearch"
+              />
+            </div>
+
+            <!-- Role Filter (visible when enabled) -->
+            <div v-if="visibleFilters.has('role')" class="w-full sm:w-32">
+              <Select
+                v-model="filters.role"
+                :options="[
+                  { value: '', label: t('admin.users.allRoles') },
+                  { value: 'admin', label: t('admin.users.admin') },
+                  { value: 'user', label: t('admin.users.user') }
+                ]"
+                @change="applyFilter"
+              />
+            </div>
+
+            <!-- Status Filter (visible when enabled) -->
+            <div v-if="visibleFilters.has('status')" class="w-full sm:w-32">
+              <Select
+                v-model="filters.status"
+                :options="[
+                  { value: '', label: t('admin.users.allStatus') },
+                  { value: 'active', label: t('common.active') },
+                  { value: 'disabled', label: t('admin.users.disabled') }
+                ]"
+                @change="applyFilter"
+              />
+            </div>
+
+            <!-- Group Filter (visible when enabled) -->
+            <div v-if="visibleFilters.has('group')" class="w-full sm:w-44">
+              <Select
+                v-model="filters.group"
+                :options="groupFilterOptions"
+                searchable
+                creatable
+                :creatable-prefix="t('admin.users.fuzzySearch')"
+                :search-placeholder="t('admin.users.searchAuthorizedGroups')"
+                @change="applyFilter"
+              />
+            </div>
+
+            <!-- API Key Group Filter (visible when enabled) -->
+            <div v-if="visibleFilters.has('apiKeyGroup')" class="w-full sm:w-44">
+              <Select
+                v-model="filters.apiKeyGroup"
+                :options="apiKeyGroupFilterOptions"
+                searchable
+                :search-placeholder="t('admin.users.searchApiKeyGroups')"
+                @change="applyFilter"
+              />
+            </div>
+
+            <!-- Dynamic Attribute Filters -->
+            <template v-for="(value, attrId) in activeAttributeFilters" :key="attrId">
+              <div
+                v-if="visibleFilters.has(`attr_${attrId}`)"
+                class="relative w-full sm:w-36"
+              >
+                <!-- Text/Email/URL/Textarea/Date type: styled input -->
+                <input
+                  v-if="['text', 'textarea', 'email', 'url', 'date'].includes(getAttributeDefinition(Number(attrId))?.type || 'text')"
+                  :value="value"
+                  @input="(e) => updateAttributeFilter(Number(attrId), (e.target as HTMLInputElement).value)"
+                  @keyup.enter="applyFilter"
+                  :placeholder="getAttributeDefinitionName(Number(attrId))"
+                  class="input w-full"
+                />
+                <!-- Number type: number input -->
+                <input
+                  v-else-if="getAttributeDefinition(Number(attrId))?.type === 'number'"
+                  :value="value"
+                  type="number"
+                  @input="(e) => updateAttributeFilter(Number(attrId), (e.target as HTMLInputElement).value)"
+                  @keyup.enter="applyFilter"
+                  :placeholder="getAttributeDefinitionName(Number(attrId))"
+                  class="input w-full"
+                />
+                <!-- Select/Multi-select type -->
+                <template v-else-if="['select', 'multi_select'].includes(getAttributeDefinition(Number(attrId))?.type || '')">
+                  <div class="w-full">
+                    <Select
+                      :model-value="value"
+                      :options="[
+                        { value: '', label: getAttributeDefinitionName(Number(attrId)) },
+                        ...(getAttributeDefinition(Number(attrId))?.options || [])
+                      ]"
+                      @update:model-value="(val) => { updateAttributeFilter(Number(attrId), String(val ?? '')); applyFilter() }"
+                    />
+                  </div>
+                </template>
+                <!-- Fallback -->
+                <input
+                  v-else
+                  :value="value"
+                  @input="(e) => updateAttributeFilter(Number(attrId), (e.target as HTMLInputElement).value)"
+                  @keyup.enter="applyFilter"
+                  :placeholder="getAttributeDefinitionName(Number(attrId))"
+                  class="input w-full"
+                />
+              </div>
+            </template>
+          </div>
+
+          <!-- Right: Actions and Settings -->
+
         </div>
       </template>
 

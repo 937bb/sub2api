@@ -3,7 +3,8 @@
     <h3 class="mb-4 text-sm font-semibold text-gray-900 dark:text-white">
       {{ t('payment.admin.dailyRevenue') }}
     </h3>
-    <div class="h-64">
+    <WorkspaceTabs v-model="metric" :label="t('payment.admin.dailyRevenue')" :tabs="metrics" />
+    <div class="h-80">
       <div v-if="loading" class="flex h-full items-center justify-center">
         <LoadingSpinner size="md" />
       </div>
@@ -19,7 +20,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
+import { useDark } from '@vueuse/core'
+import WorkspaceTabs from '@/components/common/WorkspaceTabs.vue'
 import { useI18n } from 'vue-i18n'
 import {
   Chart as ChartJS,
@@ -44,6 +47,13 @@ const props = defineProps<{
   loading?: boolean
 }>()
 
+const dark = useDark({ storageKey: 'theme' })
+const metric = ref('orders')
+const metrics = computed(() => [
+  { value: 'orders', label: t('payment.admin.orderCount') },
+  ...[...new Set(props.data.flatMap(day => Object.keys(day.amount)))].sort().map(currency => ({ value: currency, label: `${currency} ${t('payment.admin.revenue')}` }))
+])
+
 const colors = [
   ['rgb(59, 130, 246)', 'rgba(59, 130, 246, 0.1)'],
   ['rgb(168, 85, 247)', 'rgba(168, 85, 247, 0.1)'],
@@ -64,10 +74,11 @@ const chartData = computed(() => {
           data: props.data.map(day => day.amount[currency] || 0),
           borderColor,
           backgroundColor,
-          fill: true,
-          tension: 0.3,
-          pointRadius: 3,
+          fill: false,
+          tension: 0.1,
+          pointRadius: 0,
           pointHoverRadius: 5,
+          hidden: metric.value !== currency,
         }
       }),
       {
@@ -80,32 +91,39 @@ const chartData = computed(() => {
         pointRadius: 3,
         pointHoverRadius: 5,
         yAxisID: 'y1',
+        hidden: metric.value !== 'orders',
       }
     ]
   }
 })
 
-const chartOptions = {
+const chartOptions = computed(() => ({
   responsive: true,
   maintainAspectRatio: false,
   interaction: { mode: 'index' as const, intersect: false },
   scales: {
     y: {
       type: 'linear' as const,
-      display: true,
+      display: metric.value !== 'orders',
       position: 'left' as const,
-      title: { display: true, text: t('payment.admin.revenue') },
+      title: { display: true, text: metric.value },
+      beginAtZero: true,
+      ticks: { color: dark.value ? '#bec9d9' : '#536175' },
+      grid: { color: dark.value ? '#303e50' : '#edf0f4' },
     },
     y1: {
       type: 'linear' as const,
-      display: true,
-      position: 'right' as const,
+      display: metric.value === 'orders',
+      position: 'left' as const,
+      beginAtZero: true,
+      ticks: { precision: 0, color: dark.value ? '#bec9d9' : '#536175' },
       title: { display: true, text: t('payment.admin.orderCount') },
-      grid: { drawOnChartArea: false },
-    }
+      grid: { color: dark.value ? '#303e50' : '#edf0f4' },
+    },
+    x: { grid: { display: false }, ticks: { color: dark.value ? '#bec9d9' : '#536175', maxTicksLimit: 10, maxRotation: 0 } }
   },
   plugins: {
-    legend: { position: 'top' as const },
+    legend: { display: false },
   }
-}
+}))
 </script>

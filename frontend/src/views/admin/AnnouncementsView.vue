@@ -1,7 +1,23 @@
 <template>
   <AppLayout>
-    <TablePageLayout>
-      <template #filters>
+    <TablePageLayout :rows="announcements" :total="pagination.total" :loading="loading">
+      <template #actions>
+<div class="flex flex-1 flex-wrap items-center justify-end gap-2">
+            <button
+              @click="loadAnnouncements"
+              :disabled="loading"
+              class="btn btn-secondary"
+              :title="t('common.refresh')"
+            >
+              <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
+            </button>
+            <button @click="openCreateDialog" class="btn btn-primary">
+              <Icon name="plus" size="md" class="mr-1" />
+              {{ t('admin.announcements.createAnnouncement') }}
+            </button>
+          </div>
+</template>
+<template #filters>
         <div class="flex flex-wrap items-center gap-3">
           <!-- Left: Search + Filters -->
           <div class="flex-1 sm:max-w-64">
@@ -21,20 +37,7 @@
           />
 
           <!-- Right: Action buttons -->
-          <div class="flex flex-1 flex-wrap items-center justify-end gap-2">
-            <button
-              @click="loadAnnouncements"
-              :disabled="loading"
-              class="btn btn-secondary"
-              :title="t('common.refresh')"
-            >
-              <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
-            </button>
-            <button @click="openCreateDialog" class="btn btn-primary">
-              <Icon name="plus" size="md" class="mr-1" />
-              {{ t('admin.announcements.createAnnouncement') }}
-            </button>
-          </div>
+
         </div>
       </template>
 
@@ -169,19 +172,19 @@
     </TablePageLayout>
 
     <!-- Create/Edit Dialog -->
-    <BaseDialog
+    <BaseDialog presentation="sheet"
       :show="showEditDialog"
       :title="isEditing ? t('admin.announcements.editAnnouncement') : t('admin.announcements.createAnnouncement')"
       width="wide"
       @close="closeEdit"
     >
-      <form id="announcement-form" @submit.prevent="handleSave" class="space-y-4">
-        <div>
+      <form id="announcement-form" @submit.prevent="handleSave" class="workbench-editor-form space-y-4">
+        <div class="workbench-field-row ">
           <label class="input-label">{{ t('admin.announcements.form.title') }}</label>
           <input v-model="form.title" type="text" class="input" required />
         </div>
 
-        <div>
+        <div class="workbench-field-row ">
           <label class="input-label">{{ t('admin.announcements.form.content') }}</label>
           <textarea v-model="form.content" rows="6" class="input" required></textarea>
         </div>

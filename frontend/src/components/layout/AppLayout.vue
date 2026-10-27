@@ -1,21 +1,20 @@
 <template>
-  <div class="min-h-screen bg-gray-50 dark:bg-dark-950">
-    <!-- Background Decoration -->
-    <div class="pointer-events-none fixed inset-0 bg-mesh-gradient"></div>
+  <div class="console-shell min-h-screen">
+    <a href="#console-main" class="console-skip-link">{{ t('console.skipToContent') }}</a>
 
     <!-- Sidebar -->
     <AppSidebar />
 
     <!-- Main Content Area -->
     <div
-      class="relative min-h-screen transition-all duration-300"
-      :class="[sidebarCollapsed ? 'lg:ml-[72px]' : 'lg:ml-64']"
+      class="console-workspace relative min-h-screen"
+      :class="[sidebarCollapsed ? 'console-workspace-wide' : 'console-workspace-context']"
     >
       <!-- Header -->
       <AppHeader />
 
       <!-- Main Content -->
-      <main class="p-4 md:p-6 lg:p-8">
+      <main id="console-main" tabindex="-1" class="console-main">
         <slot />
       </main>
     </div>
@@ -24,6 +23,9 @@
 
 <script setup lang="ts">
 import '@/styles/onboarding.css'
+import '@/styles/console.css'
+import '@/styles/workbench.css'
+import { useI18n } from 'vue-i18n'
 import { computed, onMounted } from 'vue'
 import { useAppStore } from '@/stores'
 import { useAuthStore } from '@/stores/auth'
@@ -33,6 +35,7 @@ import AppSidebar from './AppSidebar.vue'
 import AppHeader from './AppHeader.vue'
 
 const appStore = useAppStore()
+const { t } = useI18n()
 const authStore = useAuthStore()
 const sidebarCollapsed = computed(() => appStore.sidebarCollapsed)
 const isAdmin = computed(() => authStore.user?.role === 'admin')

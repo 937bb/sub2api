@@ -1,7 +1,7 @@
 <template>
-  <div class="space-y-5">
+  <div class="space-y-5" :class="{ 'workbench-model-catalog': embedded }">
     <!-- 页头(独立形态下展示标题;后台形态 AppHeader 已有页面标题) -->
-    <div v-if="!embedded">
+    <div :class="{ 'workbench-heading': embedded }">
       <h1 class="text-2xl font-bold tracking-tight text-gray-900 dark:text-white sm:text-3xl">{{ t('modelPlaza.title') }}</h1>
       <p class="mt-1.5 text-sm text-gray-500 dark:text-dark-400">{{ t('modelPlaza.description') }}</p>
     </div>
@@ -34,6 +34,8 @@
     </div>
     <template v-else>
       <!-- 筛选区:平台 → 分组 → 倍率 -->
+      <div :class="{ 'workbench-catalog-grid': embedded }">
+      <aside :class="{ 'workbench-catalog-filters': embedded }">
       <PlazaFilterBar
         :platforms="platforms"
         :groups="groupOptions"
@@ -47,6 +49,7 @@
         @update:rate="selectedRate = $event"
         @update:search="searchQuery = $event"
       />
+      </aside>
 
       <!-- 分组分节的模型清单(默认按生效倍率升序) -->
       <div v-if="filteredGroups.length > 0" class="space-y-5">
@@ -57,6 +60,7 @@
         class="rounded-2xl border border-dashed border-gray-300 px-5 py-12 text-center text-sm text-gray-500 dark:border-dark-600 dark:text-dark-400"
       >
         {{ searchActive ? t('modelPlaza.noSearchResult') : t('modelPlaza.empty') }}
+      </div>
       </div>
     </template>
   </div>

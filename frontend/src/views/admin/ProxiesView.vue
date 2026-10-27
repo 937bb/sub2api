@@ -1,43 +1,8 @@
 <template>
   <AppLayout>
-    <TablePageLayout>
-      <template #filters>
-        <div class="flex flex-wrap items-center gap-3">
-          <!-- Left: Search + Filters -->
-          <div class="relative w-full sm:w-64">
-            <Icon
-              name="search"
-              size="md"
-              class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500"
-            />
-            <input
-              v-model="searchQuery"
-              type="text"
-              :placeholder="t('admin.proxies.searchProxies')"
-              class="input pl-10"
-              @input="handleSearch"
-            />
-          </div>
-
-          <div class="w-full sm:w-40">
-            <Select
-              v-model="filters.protocol"
-              :options="protocolOptions"
-              :placeholder="t('admin.proxies.allProtocols')"
-              @change="handleFilterChange"
-            />
-          </div>
-          <div class="w-full sm:w-36">
-            <Select
-              v-model="filters.status"
-              :options="statusOptions"
-              :placeholder="t('admin.proxies.allStatus')"
-              @change="handleFilterChange"
-            />
-          </div>
-
-          <!-- Right: All action buttons -->
-          <div class="flex flex-1 flex-wrap items-center justify-end gap-2">
+    <TablePageLayout :rows="proxies" :total="pagination.total" :loading="loading">
+      <template #actions>
+<div class="flex flex-1 flex-wrap items-center justify-end gap-2">
             <button
               @click="loadProxies"
               :disabled="loading"
@@ -84,6 +49,44 @@
               {{ t('admin.proxies.createProxy') }}
             </button>
           </div>
+</template>
+<template #filters>
+        <div class="flex flex-wrap items-center gap-3">
+          <!-- Left: Search + Filters -->
+          <div class="relative w-full sm:w-64">
+            <Icon
+              name="search"
+              size="md"
+              class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500"
+            />
+            <input
+              v-model="searchQuery"
+              type="text"
+              :placeholder="t('admin.proxies.searchProxies')"
+              class="input pl-10"
+              @input="handleSearch"
+            />
+          </div>
+
+          <div class="w-full sm:w-40">
+            <Select
+              v-model="filters.protocol"
+              :options="protocolOptions"
+              :placeholder="t('admin.proxies.allProtocols')"
+              @change="handleFilterChange"
+            />
+          </div>
+          <div class="w-full sm:w-36">
+            <Select
+              v-model="filters.status"
+              :options="statusOptions"
+              :placeholder="t('admin.proxies.allStatus')"
+              @change="handleFilterChange"
+            />
+          </div>
+
+          <!-- Right: All action buttons -->
+
         </div>
       </template>
 
@@ -367,7 +370,7 @@
     </TablePageLayout>
 
     <!-- Create Proxy Modal -->
-    <BaseDialog
+    <BaseDialog presentation="sheet"
       :show="showCreateModal"
       :title="t('admin.proxies.createProxy')"
       width="normal"
@@ -425,9 +428,9 @@
         v-if="createMode === 'standard'"
         id="create-proxy-form"
         @submit.prevent="handleCreateProxy"
-        class="space-y-5"
+        class="workbench-editor-form space-y-5"
       >
-        <div>
+        <div class="workbench-field-row ">
           <label class="input-label">{{ t('admin.proxies.name') }}</label>
           <input
             v-model="createForm.name"
@@ -437,7 +440,7 @@
             :placeholder="t('admin.proxies.enterProxyName')"
           />
         </div>
-        <div>
+        <div class="workbench-field-row ">
           <label class="input-label">{{ t('admin.proxies.protocol') }}</label>
           <Select v-model="createForm.protocol" :options="protocolSelectOptions" />
         </div>
@@ -465,7 +468,7 @@
             />
           </div>
         </div>
-        <div>
+        <div class="workbench-field-row ">
           <label class="input-label">{{ t('admin.proxies.username') }}</label>
           <input
             v-model="createForm.username"
@@ -474,7 +477,7 @@
             :placeholder="t('admin.proxies.optionalAuth')"
           />
         </div>
-        <div>
+        <div class="workbench-field-row ">
           <label class="input-label">{{ t('admin.proxies.password') }}</label>
           <div class="relative">
             <input
@@ -492,7 +495,7 @@
             </button>
           </div>
         </div>
-        <div>
+        <div class="workbench-field-row ">
           <label class="input-label">{{ t('admin.proxies.expiresAt') }}</label>
           <div class="mb-2 flex flex-wrap gap-2">
             <button
@@ -515,7 +518,7 @@
           />
           <input v-model="createForm.expires_at" type="date" max="9999-12-31" class="input" />
         </div>
-        <div>
+        <div class="workbench-field-row ">
           <label class="input-label">{{ t('admin.proxies.fallbackMode') }}</label>
           <Select v-model="createForm.fallback_mode" :options="[
             { label: t('admin.proxies.fallbackNone'), value: 'none' },
@@ -523,7 +526,7 @@
             { label: t('admin.proxies.fallbackDirect'), value: 'direct' },
           ]" />
         </div>
-        <div v-if="createForm.fallback_mode === 'proxy'">
+        <div class="workbench-field-row " v-if="createForm.fallback_mode === 'proxy'">
           <label class="input-label">{{ t('admin.proxies.backupProxy') }}</label>
           <Select v-model="createForm.backup_proxy_id" :options="backupProxyOptions()" />
         </div>
@@ -661,7 +664,7 @@
     </BaseDialog>
 
     <!-- Edit Proxy Modal -->
-    <BaseDialog
+    <BaseDialog presentation="sheet"
       :show="showEditModal"
       :title="t('admin.proxies.editProxy')"
       width="normal"
@@ -671,13 +674,13 @@
         v-if="editingProxy"
         id="edit-proxy-form"
         @submit.prevent="handleUpdateProxy"
-        class="space-y-5"
+        class="workbench-editor-form space-y-5"
       >
-        <div>
+        <div class="workbench-field-row ">
           <label class="input-label">{{ t('admin.proxies.name') }}</label>
           <input v-model="editForm.name" type="text" required class="input" />
         </div>
-        <div>
+        <div class="workbench-field-row ">
           <label class="input-label">{{ t('admin.proxies.protocol') }}</label>
           <Select v-model="editForm.protocol" :options="protocolSelectOptions" />
         </div>
@@ -698,11 +701,11 @@
             />
           </div>
         </div>
-        <div>
+        <div class="workbench-field-row ">
           <label class="input-label">{{ t('admin.proxies.username') }}</label>
           <input v-model="editForm.username" type="text" class="input" />
         </div>
-        <div>
+        <div class="workbench-field-row ">
           <label class="input-label">{{ t('admin.proxies.password') }}</label>
           <div class="relative">
             <input
@@ -721,11 +724,11 @@
             </button>
           </div>
         </div>
-        <div>
+        <div class="workbench-field-row ">
           <label class="input-label">{{ t('admin.proxies.status') }}</label>
           <Select v-model="editForm.status" :options="editStatusOptions" />
         </div>
-        <div>
+        <div class="workbench-field-row ">
           <label class="input-label">{{ t('admin.proxies.expiresAt') }}</label>
           <div class="mb-2 flex flex-wrap gap-2">
             <button
@@ -748,7 +751,7 @@
           />
           <input v-model="editForm.expires_at" type="date" max="9999-12-31" class="input" />
         </div>
-        <div>
+        <div class="workbench-field-row ">
           <label class="input-label">{{ t('admin.proxies.fallbackMode') }}</label>
           <Select v-model="editForm.fallback_mode" :options="[
             { label: t('admin.proxies.fallbackNone'), value: 'none' },
@@ -756,7 +759,7 @@
             { label: t('admin.proxies.fallbackDirect'), value: 'direct' },
           ]" />
         </div>
-        <div v-if="editForm.fallback_mode === 'proxy'">
+        <div class="workbench-field-row " v-if="editForm.fallback_mode === 'proxy'">
           <label class="input-label">{{ t('admin.proxies.backupProxy') }}</label>
           <Select v-model="editForm.backup_proxy_id" :options="backupProxyOptions(editingProxy?.id)" />
         </div>

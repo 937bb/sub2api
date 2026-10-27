@@ -1,5 +1,5 @@
 <template>
-  <BaseDialog
+  <BaseDialog presentation="sheet"
     :show="show"
     :title="t('keys.bulkEdit.title')"
     width="normal"
@@ -7,7 +7,7 @@
     :show-close-button="!submitting"
     @close="close"
   >
-    <form id="bulk-edit-keys-form" class="space-y-5" @submit.prevent="submit">
+    <form id="bulk-edit-keys-form" class="workbench-editor-form space-y-5" @submit.prevent="submit">
       <div class="space-y-1 text-sm">
         <p class="font-medium text-gray-900 dark:text-white">
           {{ t('keys.bulkEdit.selectedCount', { count: pendingKeys.length }) }}

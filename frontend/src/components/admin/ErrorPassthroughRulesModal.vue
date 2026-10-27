@@ -1,5 +1,5 @@
 <template>
-  <BaseDialog
+  <BaseDialog presentation="sheet"
     :show="show"
     :title="t('admin.errorPassthrough.title')"
     width="extra-wide"
@@ -209,13 +209,13 @@
     </template>
 
     <!-- Create/Edit Modal -->
-    <BaseDialog
+    <BaseDialog presentation="sheet"
       :show="showCreateModal || showEditModal"
       :title="showEditModal ? t('admin.errorPassthrough.editRule') : t('admin.errorPassthrough.createRule')"
       width="wide"
       @close="closeFormModal"
     >
-      <form @submit.prevent="handleSubmit" class="space-y-4">
+      <form @submit.prevent="handleSubmit" class="workbench-editor-form space-y-4">
         <!-- Basic Info -->
         <div class="grid grid-cols-2 gap-4">
           <div>
@@ -240,7 +240,7 @@
           </div>
         </div>
 
-        <div>
+        <div class="workbench-field-row">
           <label class="input-label">{{ t('admin.errorPassthrough.form.description') }}</label>
           <input
             v-model="form.description"

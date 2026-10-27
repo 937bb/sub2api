@@ -27,7 +27,8 @@ function deferred<T>() {
   return { promise, resolve, reject }
 }
 const response = (markdown: string) => ({ ok: true, text: async () => markdown }) as Response
-const mountPage = () => mount(CustomPageView, { global: { stubs: { Icon: true } } })
+const mountPage = () => mount(CustomPageView, { global: { stubs: {
+          WorkspacePage: { template: '<section><slot name="actions" /><slot /></section>' }, Icon: true } } })
 
 beforeEach(() => {
   route.params.id = 'old'

@@ -1,5 +1,5 @@
 <template>
-  <BaseDialog
+  <BaseDialog presentation="sheet"
     :show="show"
     :title="t('admin.tlsFingerprintProfiles.title')"
     width="wide"
@@ -121,16 +121,16 @@
     </template>
 
     <!-- Create/Edit Modal -->
-    <BaseDialog
+    <BaseDialog presentation="sheet"
       :show="showCreateModal || showEditModal"
       :title="showEditModal ? t('admin.tlsFingerprintProfiles.editProfile') : t('admin.tlsFingerprintProfiles.createProfile')"
       width="wide"
       :z-index="60"
       @close="closeFormModal"
     >
-      <form @submit.prevent="handleSubmit" class="space-y-4">
+      <form @submit.prevent="handleSubmit" class="workbench-editor-form space-y-4">
         <!-- Paste YAML -->
-        <div>
+        <div class="workbench-field-row">
           <label class="input-label">{{ t('admin.tlsFingerprintProfiles.form.pasteYaml') }}</label>
           <textarea
             v-model="yamlInput"
@@ -288,7 +288,7 @@
         </div>
 
         <!-- ALPN Protocols - full width -->
-        <div>
+        <div class="workbench-field-row">
           <label class="input-label text-xs">{{ t('admin.tlsFingerprintProfiles.form.alpnProtocols') }}</label>
           <textarea
             v-model="fieldInputs.alpn_protocols"

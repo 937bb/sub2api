@@ -23,7 +23,8 @@ const wrappers: ReturnType<typeof mount>[] = []
 
 function mountPage() {
   const wrapper = mount(CustomPageView, {
-    global: { stubs: { AppLayout: { template: '<div><slot /></div>' }, Icon: true } },
+    global: { stubs: {
+          WorkspacePage: { template: '<section><slot name="actions" /><slot /></section>' }, AppLayout: { template: '<div><slot /></div>' }, Icon: true } },
   })
   wrappers.push(wrapper)
   return wrapper
