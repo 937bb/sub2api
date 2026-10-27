@@ -1,6 +1,13 @@
 <template>
   <AppLayout>
-    <div class="console-usage space-y-6">
+    <div class="console-usage space-y-5">
+      <div class="console-overview">
+        <h2>{{ t('nav.usage') }}</h2>
+        <div class="console-analysis-navigation" role="group" :aria-label="t('nav.usage')">
+          <button type="button" :aria-pressed="usageView === 'records'" @click="usageView = 'records'">{{ t('console.details') }}</button>
+          <button type="button" :aria-pressed="usageView === 'analysis'" @click="usageView = 'analysis'">{{ t('console.analysis') }}</button>
+        </div>
+      </div>
       <UsageStatsCards :stats="usageStats" :show-account-cost="false" :strike-standard-cost="true" />
 
       <div class="space-y-4">
@@ -14,7 +21,7 @@
                 @change="onDateRangeChange"
               />
             </div>
-            <div class="ml-auto flex items-center gap-2">
+            <div v-show="usageView === 'analysis'" class="ml-auto flex items-center gap-2">
               <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.dashboard.granularity') }}:</span>
               <div class="w-28">
                 <Select v-model="granularity" :options="granularityOptions" @change="loadChartData" />
@@ -23,7 +30,7 @@
           </div>
         </div>
 
-        <div class="console-charts-grid">
+        <div v-if="usageView === 'analysis'" class="console-charts-grid">
           <TokenUsageTrend :trend-data="trendData" :loading="chartsLoading" />
           <div class="console-distribution-workspace">
             <div class="console-distribution-tabs" role="group" :aria-label="t('console.analysis')">
@@ -68,9 +75,10 @@
         </div>
       </div>
 
-      <div class="card p-6">
-        <div class="flex flex-wrap items-end justify-between gap-4">
-          <div v-if="activeTab === 'errors'" class="flex flex-1 flex-wrap items-end gap-4">
+      <section v-show="usageView === 'records'" class="console-usage-records">
+      <div class="console-usage-filters">
+        <div class="console-usage-filter-layout">
+          <div v-if="activeTab === 'errors'" class="console-usage-filter-grid">
             <div class="w-full sm:w-auto sm:min-w-[220px]">
               <label class="input-label">{{ t('usage.errors.keyName') }}</label>
               <Select v-model="errorFilter.api_key_id" :options="errorKeyOptions" @change="applyErrorFilters" />
@@ -96,7 +104,7 @@
               <Select v-model="errorFilter.status_code" :options="errorStatusOptions" @change="applyErrorFilters" />
             </div>
           </div>
-          <div v-else class="flex flex-1 flex-wrap items-end gap-4">
+          <div v-else class="console-usage-filter-grid">
             <div class="w-full sm:w-auto sm:min-w-[220px]">
               <label class="input-label">{{ t('usage.apiKeyFilter') }}</label>
               <Select v-model="filters.api_key_id" :options="apiKeyOptions" @change="applyFilters" />
@@ -180,6 +188,7 @@
 
       <template v-if="activeTab === 'usage'">
         <UsageTable
+          flat
           :data="usageLogs"
           :loading="loading"
           :columns="visibleColumns"
@@ -215,6 +224,7 @@
         @update:pageSize="onErrorPageSize"
         @ipGeoBatchFailed="handleIpGeoBatchFailed"
       />
+      </section>
     </div>
   </AppLayout>
 
@@ -258,6 +268,7 @@ import type { Column } from '@/components/common/types'
 import { COMMON_ERROR_STATUS_CODES } from '@/utils/errorBadges'
 
 const { t } = useI18n()
+const usageView = ref<'records' | 'analysis'>('records')
 const distributionView = ref('model')
 const distributionViews = [
   { id: 'model', label: 'admin.dashboard.modelDistribution' },

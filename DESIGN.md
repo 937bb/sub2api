@@ -1,34 +1,30 @@
 ---
 name: "937Sub B Console"
-description: "A light console organized as collection ledgers, analytical reports, and configuration documents."
+description: "A direct-access API console with framed data workspaces and full-width analysis."
 colors:
-  console-bg: "#fff"
+  console-bg: "#f6f8fb"
   console-surface: "#fff"
-  console-nav: "#f6f7fa"
-  console-line: "#e3e8ef"
-  console-ink: "#263449"
-  console-muted: "#64748b"
-  console-accent: "#635bce"
-  console-accent-hover: "#5146b5"
-  console-selected: "#f5f3ff"
-  dark-console-bg: "#111720"
-  dark-console-surface: "#1a2330"
-  dark-console-nav: "#151d28"
+  console-nav: "#f8fafc"
+  console-line: "#e7ebf1"
+  console-ink: "#202a3b"
+  console-muted: "#617086"
+  console-accent: "#2563eb"
+  console-accent-hover: "#1d4ed8"
+  console-selected: "#edf4ff"
+  dark-console-bg: "#10151e"
+  dark-console-surface: "#19212e"
+  dark-console-nav: "#1e2837"
   dark-console-line: "#344154"
   dark-console-ink: "#edf2f8"
-  dark-console-muted: "#b0bfd2"
-  dark-console-accent: "#c4b5fd"
-  dark-console-selected: "#302a4c"
-  control-border: "#e5e7eb"
+  dark-console-muted: "#aebed2"
+  dark-console-accent: "#93c5fd"
+  dark-console-selected: "#233654"
   control-ink: "#374151"
   control-hover: "#f9fafb"
   field-ink: "#111827"
   dark-control-bg: "#1e293b"
-  dark-control-border: "#475569"
   dark-control-ink: "#e5e7eb"
-  dark-field-ink: "#f3f4f6"
   badge-neutral-bg: "#f3f4f6"
-  badge-neutral-ink: "#374151"
   success-bg: "#ecfdf5"
   success-ink: "#047857"
   warning-bg: "#fffbeb"
@@ -36,16 +32,10 @@ colors:
   danger-bg: "#fef2f2"
   danger-ink: "#b91c1c"
   danger-action: "#dc2626"
-  dark-success-bg: "rgb(6 78 59 / 30%)"
-  dark-success-ink: "#34d399"
-  dark-warning-bg: "rgb(120 53 15 / 30%)"
-  dark-warning-ink: "#fbbf24"
-  dark-danger-bg: "rgb(127 29 29 / 30%)"
-  dark-danger-ink: "#f87171"
-  chart-input: "#3562ce"
-  chart-output: "#183d8b"
-  chart-cache-read: "#62b7ad"
-  chart-cache-write: "#c28a42"
+  chart-input: "#4f78ec"
+  chart-output: "#8c6bdd"
+  chart-cache-read: "#58bca5"
+  chart-cache-write: "#eab64d"
   chart-cache-rate: "#27857a"
   chart-standard: "#8b97ac"
   chart-label: "#536175"
@@ -55,26 +45,26 @@ colors:
 typography:
   body:
     fontFamily: "system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica Neue, Arial, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif"
-    fontSize: "14px"
+    fontSize: "13px"
     lineHeight: "20px"
   mono:
     fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace"
   headline:
-    fontSize: "24px"
+    fontSize: "20px"
+    fontWeight: 650
+    lineHeight: 1.4
+    letterSpacing: "-0.02em"
+  brand:
+    fontSize: "15px"
+    fontWeight: 650
+  section-title:
+    fontSize: "14px"
+    fontWeight: 600
+  metric:
+    fontSize: "27px"
     fontWeight: 650
     lineHeight: 1.3
     letterSpacing: "-0.025em"
-  utility-title:
-    fontSize: "13px"
-    fontWeight: 500
-  section-title:
-    fontSize: "15px"
-    fontWeight: 600
-  metric:
-    fontSize: "30px"
-    fontWeight: 650
-    lineHeight: 1.2
-    letterSpacing: "-0.03em"
   navigation:
     fontSize: "13px"
   label:
@@ -87,239 +77,230 @@ typography:
     lineHeight: 1.35
     letterSpacing: "-0.03em"
 rounded:
-  density-choice: "4px"
   compact: "6px"
-  navigation: "7px"
-  control: "8px"
-  brand-mark: "9px"
+  pagination: "8px"
+  control: "9px"
+  brand-mark: "10px"
   panel: "12px"
+  workspace: "16px"
+  selection: "20px"
 spacing:
   small: "8px"
+  compact: "10px"
   control: "12px"
   regular: "16px"
   section: "20px"
   panel: "24px"
-  document-section: "28px"
-  report-gap: "32px"
-  workspace-block: "32px"
-  workspace-inline: "40px"
-  workspace-bottom: "48px"
+  document-gap: "28px"
+  editor-gap: "32px"
 components:
   button-primary:
     backgroundColor: "{colors.console-accent}"
     textColor: "{colors.console-surface}"
     rounded: "{rounded.control}"
-    padding: "8px 12px"
-    typography: "{typography.body}"
+    padding: "7px 12px"
   button-primary-hover:
     backgroundColor: "{colors.console-accent-hover}"
   button-secondary:
     backgroundColor: "{colors.console-surface}"
     textColor: "{colors.control-ink}"
     rounded: "{rounded.control}"
-    padding: "8px 12px"
+    padding: "7px 12px"
+  button-ghost:
+    backgroundColor: "transparent"
+    textColor: "#4b5563"
+    rounded: "{rounded.control}"
+    padding: "7px 12px"
   button-danger:
     backgroundColor: "{colors.danger-action}"
     textColor: "{colors.console-surface}"
     rounded: "{rounded.control}"
-    padding: "8px 12px"
+    padding: "7px 12px"
   input:
     backgroundColor: "{colors.console-surface}"
     textColor: "{colors.field-ink}"
     rounded: "{rounded.control}"
     padding: "8px 12px"
-    typography: "{typography.body}"
-  navigation:
-    textColor: "{colors.console-muted}"
-    rounded: "{rounded.navigation}"
-    padding: "8px 10px"
-    typography: "{typography.navigation}"
   navigation-active:
     backgroundColor: "{colors.console-selected}"
     textColor: "{colors.console-accent}"
-  navigation-search:
-    backgroundColor: "{colors.console-surface}"
-    textColor: "{colors.console-ink}"
-    rounded: "{rounded.navigation}"
-    padding: "8px 10px"
+    rounded: "{rounded.selection}"
+    padding: "8px 12px"
   badge-neutral:
     backgroundColor: "{colors.badge-neutral-bg}"
-    textColor: "{colors.badge-neutral-ink}"
+    textColor: "{colors.control-ink}"
     rounded: "{rounded.compact}"
     padding: "2px 8px"
-    typography: "{typography.label}"
-  card:
+  content-panel:
     backgroundColor: "{colors.console-surface}"
     rounded: "{rounded.panel}"
-  query-panel:
+    padding: "20px"
+  workspace:
     backgroundColor: "{colors.console-surface}"
-    padding: "16px 0"
-  collection-ledger:
-    backgroundColor: "{colors.console-surface}"
-  module-heading:
-    textColor: "{colors.console-ink}"
-    rounded: "{rounded.navigation}"
-    padding: "10px"
-  configuration-section:
-    padding: "0 0 28px"
-  settings-category:
-    rounded: "{rounded.compact}"
-    padding: "8px 12px"
-    textColor: "{colors.console-muted}"
-  order-review:
-    backgroundColor: "{colors.console-surface}"
-    rounded: "{rounded.panel}"
+    rounded: "{rounded.workspace}"
     padding: "24px"
+  chart-choice:
+    backgroundColor: "{colors.console-surface}"
+    textColor: "{colors.console-ink}"
+    rounded: "{rounded.selection}"
+    padding: "5px 11px"
+  collection-header:
+    backgroundColor: "{colors.console-nav}"
+    textColor: "{colors.console-muted}"
+    height: "42px"
 ---
 
 # Design System: 937Sub B Console
 
 ## Overview
 
-**Creative North Star: "The Operations Workbench"**
+**Creative North Star: "The Direct-Access Console"**
 
-The B console is a light, professional workspace for API traffic, charges, resources, and account settings. The chosen reference is Stripe: light surfaces, clear hierarchy, and restrained blue-violet accents. A pale module sidebar and quiet breadcrumb header frame a white working surface. Collections read as ledgers, analytics as reports, and configuration as a document.
+The B console is a compact API operations workspace. Its confirmed reference is New API: a white global header and sidebar, a light gray canvas, rounded white working areas, restrained blue selection, and readable records. The interface uses direct destination categories, visible collection filters, and full-width analytical panels to make operational work easy to find and scan.
 
-Collections use on-demand horizontal filters above records. Reports separate primary analysis from content-sized rankings. Settings use a directory and flat divided sections with headings above fields. Identity uses flat metadata; purchasing separates editable selection from order review. Stored dark theme, configured branding, permissions, feature flags, and existing financial meaning remain authoritative.
+Configured branding, Chinese and English labels, stored dark theme, permissions, and existing billing distinctions remain product truth. This is an interface grammar for the B console and shared authentication layout; it does not prescribe a new backend, replace provider-owned flows, or extend to deployment C.
 
 **Key Characteristics:**
 
-- One light module sidebar with workspace switching, permission-aware search, and collapse.
-- A white working surface, quiet dividers, and restrained violet actions and selections.
-- On-demand horizontal filters, unboxed collection ledgers, and explicit record counts.
-- Flat configuration sections, identity metadata, and responsive checkout columns.
-- Metric-switching reports, content-sized rankings, and explicit numerical values.
+- Global workspace header with directly visible navigation categories.
+- Blue actions and selected states on white surfaces and a light gray canvas.
+- Framed collections with filters open by default, compact records, and integrated pagination.
+- Five headline measures, a resource band, and full-width metric/form-switching analysis.
+- Responsive stacking, local table overflow, and a mobile navigation drawer.
 
-This document records revision-5 source and supersedes the rejected revision-4 documentation. Evidence: `frontend/tailwind.config.js`, `frontend/src/style.css`, `frontend/src/styles/console.css`, the later `workbench.css` composition layer, and layout/table/version/select/payment/chart/settings/subscription components. Direction is recorded in `.impeccable/b-console.md`; `PRODUCT.md` retains the confirmed Stripe reference. Local visual evidence is `.impeccable/screenshots/revision5/`, with scope and exclusions recorded in `.impeccable/verification-revision5.md`. Preview data is synthetic. This specification establishes neither all-page visual certification nor deployment or payment completion.
+This document records revision 6 and replaces the rejected revision-5 Stripe system. Authority: PRODUCT.md and .impeccable/b-console-revision6.md. Source evidence: frontend/tailwind.config.js; frontend/src/style.css; frontend/src/styles/console.css and its later workbench.css composition layer; AppLayout, AppHeader, AppSidebar, TablePageLayout, ConsoleSummary, TokenUsageTrend, ModelDistributionChart, administrator/user usage, settings, payment, and version components. The documenter sampled final dashboard and groups captures; the separate finish review records broader evidence. Local screenshots under .impeccable/screenshots/revision6/ are labeled synthetic previews, not authenticated production sessions.
+
+Reference provenance is visual only: QuantumNous/new-api's official dashboard.en.jpg and usage-logs.en.jpg screenshots, viewed on 2026-10-27. No New API source was copied, and this revision adds no raster illustration or photography. Existing configured logos/provider marks retain their origins. This describes current source; it does not certify every route, focus state, error branch, or accessibility requirement.
 
 ## Colors
 
-Cool white and gray surfaces carry the interface; violet identifies actions and selections. Frontmatter records the exact shared light/dark values. `console-accent` resolves Tailwind primary 600 in light mode and primary 300 in dark mode; filled primary buttons continue to use primary 600 and white text in both themes.
+Cool neutral surfaces carry a single blue action scale. Frontmatter contains the normative source values.
+
+Sidecar tonal ramps are preview metadata, not additional CSS tokens. The primary ramp uses existing Tailwind values; other ramps are synthesized in OKLCH for the token panel.
 
 ### Primary
 
-- **Action Violet** is the primary action fill, light-theme active navigation text, and focus.
-- **Deep Action Violet** is the filled primary-button hover.
-- **Selection Wash** marks selected destinations and controls.
-- **Night Violet** carries dark-theme focus/selection, not the filled primary-button background.
+- **Action Blue** supplies light-theme selection text, keyboard focus, and filled primary actions.
+- **Deep Action Blue** supplies filled primary-action hover.
+- **Selection Wash** marks active destinations, selected controls, and hovered collection rows.
+- **Night Blue** supplies dark-theme focus and selection. Filled primary buttons retain primary-600 blue and white text in both themes.
 
 ### Neutral
 
-- **Working White** and **Panel White** share the light canvas; **Navigation Gray** distinguishes the sidebar and quiet table headings. Dividers, spacing, and task structure establish hierarchy without enclosing every section in a card.
-- **Fine Divider**, **Slate Ink**, and **Muted Slate** establish boundaries and information hierarchy. Placeholders use the theme's muted text at full opacity.
-- Dark-console tokens preserve these roles under the stored theme.
-- Shared inputs and secondary buttons retain their Tailwind gray text/borders and slate dark backgrounds, represented by the separate control tokens.
+- **Canvas Gray** separates the working surface from the shell.
+- **Working White** fills the header, sidebar, and workspaces.
+- **Quiet Neutral** fills table headers, control tracks, and secondary surfaces.
+- **Fine Divider**, **Slate Ink**, and **Muted Slate** establish boundaries and information hierarchy. Meaningful group usage-period and billing metadata now use the themed muted token.
+- Dark-console tokens retain these roles. Shared fields and secondary buttons keep their existing Tailwind gray/slate foregrounds and dark-control backgrounds.
 
 ### Semantic and Analytical Colors
 
-Badges use quiet emerald success, amber warning, and red danger pairs, with translucent dark fills. Destructive buttons use red 600, hovering to red 700. Neutral badges use gray 100/700 in light mode and slate 700/300 in dark mode. Provider marks and entitlement/status indicators retain their meanings.
+Success, warning, danger, and neutral badges retain their meanings. Dark badges use existing translucent emerald/amber/red fills and lighter text; status-count chips have opaque dark pairs. Provider marks remain distinct.
 
-Trend charts use blue input/requests/actual-cost, navy output, teal cache reads/rate, amber cache writes, and a gray dashed standard-cost line. Distribution charts retain muted component-specific categorical palettes. Chart-table actual cost remains green 600 (dark green 400), account cost orange 500 (dark orange 400), and standard cost gray 600 (dark gray 400). Labels distinguish these measures as well as color. Analytical colors do not define additional action palettes.
+Trend input, output, cache read, and cache write map to blue, violet, teal, and amber. Requests and actual cost share input blue; standard cost is a gray comparison with a dashed line in area mode; cache rate is teal. Model/group/endpoint rankings retain component-local categorical palettes. Labels, legends, units, and numeric tables distinguish measures as well as color. Analytical colors are not alternate action palettes.
 
-**The Action Rule.** Use the shared violet primary action for console purchase and renewal; retain semantic colors for their existing data and status meanings.
+**The Action Rule.** Use the shared blue action scale for console actions; reserve semantic colors for their existing status and data meanings.
 
 ## Typography
 
-Use the system sans stack with Chinese fallbacks and the existing monospace stack for code fields. No custom font is required. Console numbers use tabular figures.
+Use the system sans stack with Chinese fallbacks and the existing monospace stack where code or identifiers need it. No custom display font is introduced. Shell numbers use tabular figures.
 
-Page headings use 24px/650 and reduce to 22px below 768px; dashboard overview line-height is 1.35, while document/collection headings use 1.3. The 13px/500 utility title names the workspace without duplicating the page title. Section headings use 15px/600; analytical headings use 650. Dashboard metrics use 30px/650, reducing to 26px on mobile; finance strips use 26px and chart summaries 25px.
+Page headings use the compact headline role. Analytical headings use the section-title role; settings and order-review headings use 15px/600. Controls and table cells use 13px; labels/metadata use 12px; supporting units, chart ticks, and category headings use 11px. Small type is not a substitute for readable contrast.
 
-Shared controls and comfortable table cells use 14px/20px. Compact table rows use 13px; navigation and descriptions also use 13px. Labels are 12px and supporting units, table headings, and group labels 11px. Authentication headings use 40px, reducing to 26px on mobile. Document descriptions have a 70ch maximum; this is not a table/form width rule.
+Headline metrics become 24px below 1280px. Usage-summary values use 24px; finance-summary values use 26px. Authentication headings reduce from their recorded size to 26px below 768px. Workbench descriptions cap at 70ch; records and forms do not inherit that measure.
 
-**The Data Rule.** Preserve existing precision, units, currency distinctions, and labels when changing presentation.
+**The Data Rule.** Keep numerical precision, units, and actual, account, and standard charge labels intact when changing presentation.
 
 ## Layout
 
-At 1024px and above, the sidebar is 232px wide or 68px collapsed and spans `100dvh`. Content offsets by that width. The sticky breadcrumb header is 60px high at top zero. Main content has a 1760px maximum width, centered within its workspace, with 32px top, 40px horizontal, and 48px bottom padding. Padding becomes 24px below 1280px and 20px/16px below 1024px. Below 1024px the sidebar is a dismissible drawer and the content offset disappears. There is no separate horizontal business bar. Breadcrumbs are hidden below 768px.
+The full-width global header sticks at top zero with a 60px height. At 1024px and above, the sidebar begins below it, is 208px wide or 64px collapsed, and occupies the remaining viewport height. Content offsets by that width. Main content is centered within a 1920px maximum width with a 20px outer inset. Supported page roots have a white workspace, a fine border, a 16px radius, and 24px internal padding.
 
-Collections start with title/actions, then a compact toolbar combining the filter toggle, matching/current-page counts, supplied current-page status counts, and density. Filters start closed. Opening them inserts full-width horizontal fields above the unboxed ledger; `v-show` preserves query state. Fields wrap with 12px gaps; shared search/field widths are 260px/170px, and account filters have a 160px minimum. The filter dock has 16px vertical padding and no fixed height cap. Tables preserve overflow containers and native sticky columns without imposing a viewport-derived minimum height on the collection. Mobile uses document flow and full-width query fields. Compact density persists in `b-console-table-compact`, defaults on, and uses 12px vertical cell padding with 13px type; comfortable rows use 14px type. Density, current-page count, and status counts hide below 768px; matching records remain available.
+Below 1280px, outer/internal insets become 16px/20px. Below 1024px, the sidebar becomes a drawer, content offsets disappear, and workspace switching moves into the drawer. Below 768px, insets become 10px/16px and workspace radius becomes 12px. The brand label is capped at narrow widths and hidden below 480px while the mark remains.
 
-Settings use a 164px category directory and flexible document with a 24px gap. The directory sticks at 84px. Sections are transparent and square, separated by a bottom divider, 28px bottom padding, and 28px bottom margin. Headings sit above fields with 20px bottom spacing. Below 1024px the directory is 160px with a 20px gap and 80px sticky offset. Below 768px it becomes horizontal scrolling categories. The save bar sticks to the bottom with a top border and 14px vertical padding.
+Collections form one framed task: title/count and actions, optional status tabs, visible query strip, current-page details and density, bordered records, and attached pagination. Filters start open and use v-show when collapsed to preserve values. Search has a 200px minimum and 1.5 flex share; other fields use a 150px minimum and one share, with 10px gaps. Mobile collection fields become full width. The query region has no fixed-height cap.
 
-Identity uses a bordered document, three-column flat metadata, divided sections, and two-column editors. An optional support panel occupies a secondary column; absent that panel, identity fills the width. Profile columns stack below 1024px; metadata/editors stack below 768px, with 20px mobile section padding.
+Tables keep native table layout, local horizontal/vertical overflow, and sticky columns. Headers are 42px high with neutral fill and 12px type; cells use 13px. Compact rows use 10px vertical padding; the layout's comfortable base uses 12px. Density persists under b-console-table-compact and defaults to compact; its control hides below 768px. Existing mobile record views and locally scrollable numeric tables remain content-specific. Mobile pages use document scrolling.
 
-Checkout uses a flexible main column, a 320px review column, and a 24px gap. Below 1280px review becomes `minmax(280px,.8fr)`; below 1024px both stack and review stops sticking. Desktop review sticks at 84px. Plan rows contain identity/price, quota, and action regions followed by features; they become two columns below 1024px and vertical below 768px. Subscription quota columns stack below 1280px and the entire entitlement row stacks below 768px.
+Dashboard summaries show five measures, or four when the simple-mode prop removes finance, followed by a wrapping resource/usage band and optional lifetime details. The summary grid becomes three columns below 1024px and two below 768px. The full-width trend plot is 310px high, or 260px below 768px. Model/user analysis share the following workspace through a selector. Within model analysis, bars and the numeric table use a 0.85:1.5 split, stack below 1024px, and each cap their scroll area at 330px. This internal split does not divide the primary trend.
 
-Dashboard summaries group volume, finance, and resources in a divided strip; simple mode omits finance. Analysis uses a 1.8:1 plot/distribution split with a 300px minimum ranking column and 32px gap. Payment analysis uses the same ratio with a 320px minimum ranking column: revenue trend and content-sized payment distribution share the left column, while per-currency user rankings occupy the right. Both stack below 1280px, replacing the vertical divider with a horizontal one. At intermediate widths model bars and their table share two columns, then stack below 768px. Primary plots are 280px tall, reducing to 250px on mobile. Summary columns stack on mobile. Operations monitoring retains separate diagnosis/vitals, traffic/capacity, and latency/error regions with responsive stacking.
+Administrator/customer usage pages default to records, with an explicit analysis switch, summary strip, and shared time controls. Record filters sit above the bordered collection. Analysis reveals the trend and selectable model/group/endpoint distributions. Usage-summary columns become two below 768px.
 
-Authentication uses a 0.85:1.15 split, minimum 320px identity column, and maximum 400px form. Its identity surface is navigation white. Below 768px it becomes a compact top band followed by the form. Public pages, setup, callbacks, and provider-owned payment fields retain specialized flows.
+Settings use horizontal scrolling pill categories, sticky at 60px on desktop, above bordered sections with 20px padding. The bottom save bar sticks; mobile categories become static. Identity retains flat metadata within a framed panel; its three metadata columns and two editor columns become one below 768px.
+
+Checkout retains a flexible main panel and a 320px sticky review column, both padded 24px; they stack below 1024px. Plan/subscription sections retain responsive quota and action regions. Payment analysis has trend and method columns inside a full-width area followed by rankings; inner columns stack below 1280px. Operations monitoring keeps specialized traffic, capacity, quality, and diagnosis compositions.
+
+Authentication retains a 0.85:1.15 identity/form split with a 320px minimum identity column and 400px maximum form; below 768px it becomes an identity band followed by the form. Setup, callbacks, unrelated public pages, and provider-owned payment fields keep specialized flows.
 
 ## Elevation & Depth
 
-Shared primary/secondary buttons and cards are flat, using tones and fine borders. Chart toggles and dropdowns can retain small local shadows. Specialized legacy button variants are not the shared console action standard.
+Workspaces, panels, and shared console buttons are flat, separated by fill and fine borders. Some source/ranking switches retain a small selected-state shadow. Unused legacy Tailwind definitions do not establish a glass or gradient system.
 
-Dialogs use an unblurred overlay (`rgb(19 30 48 / 32%)`) and shadow (`0 18px 60px rgb(10 24 45 / 16%)`). Opt-in editor sheets align right, fill viewport height, and use `min(880px, 100vw)` width with square edges; BaseDialog retains focus and scroll-lock behavior.
+Dialogs use an unblurred scrim and soft depth. The version popover has its own shadow/body portal. Opt-in editor sheets align right, fill viewport height, and use min(880px, 100vw) width with square edges. BaseDialog focus and scroll locking remain intact. Exact shadow values live in the sidecar.
 
-The version popover uses `0 12px 48px rgb(15 23 42 / 20%)` depth and a fixed body portal. Its own 200ms transition is separate from the reduced-motion rules scoped to descendants of the console shell.
+Shared button color transitions use 150ms; fields use 200ms; the sidebar drawer uses 300ms. Trend animation is disabled. Reduced-motion rules reduce shell-descendant animation/transition durations to 0.01ms and one iteration. Body-mounted portals retain their own behavior and are outside that blanket scope.
 
-Buttons/cards transition colors over 150ms; inputs/selects over 200ms; sidebar drawer transform uses 300ms. Reduced-motion shell transitions/animations use 0.01ms and one iteration. Trend-chart animation is disabled. There is no decorative workspace-margin motion contract.
-
-**The Surface Rule.** Use tone and fine borders for work panels; reserve pronounced depth for overlays.
+**The Surface Rule.** Use tone and fine borders for work areas; reserve pronounced depth for overlays.
 
 ## Shapes
 
-Shared buttons/text inputs use 8px corners; console select triggers, settings categories, badges, and compact chart controls use 6px. Navigation links/search use 7px. Panels/dialogs use 12px. Density choices use 4px within a 6px group. The fallback brand mark uses 9px; configured logos retain their form.
-
-Collection ledgers, analytical reports, and configuration sections use square dividers rather than enclosing rounded cards. Standalone identity, checkout, subscription, and dialog containers retain 12px corners. Editor sheets have square viewport edges. Borders are one CSS pixel. Component-specific provider/status pills do not define the shared badge geometry.
+Controls use 9px corners, badges 6px, pagination choices 8px, and the fallback brand mark 10px. Inner work panels use 12px; desktop workspaces/dialogs use 16px. Main navigation and segmented choices use 20px pill corners. Borders are one CSS pixel. Configured logos, provider marks, circular avatars, nested feature groups, and square editor-sheet edges keep their purposeful geometry.
 
 ## Components
 
 ### Buttons
 
-Shared actions have a minimum 36px height, 8px/12px padding, 14px medium text, and 8px corners. Size modifiers can change padding/radius/type; 36px is a minimum, not a fixed height. Primary is violet/white, secondary neutral bordered, ghost transparent, and danger red. Disabled actions use 50% opacity and a not-allowed cursor. Shell keyboard focus uses a 2px accent outline with 3px offset, alongside component-owned focus styling. Purchase, plan purchase, and subscription renewal share the primary action.
+Shared console actions use 13px medium text, 7px/12px padding, a 34px minimum height, and 9px corners; inherited line-height or borders can make the rendered height larger. Primary is blue/white; secondary is bordered neutral; ghost is transparent; danger is red. Disabled actions retain 50% opacity and a not-allowed cursor. The shell adds a 2px accent focus outline with 3px offset. Icon/size variants retain their content spacing.
 
 ### Inputs / Fields
 
-Text inputs match shared action density. Focus uses primary 500 border/ring, errors remain red, and disabled fields preserve their own treatment. Placeholders use theme muted text at opacity 1. Query-panel input/select controls have a 38px minimum and 12px type. Preserve labels, help, validation, and icon/adornment spacing.
-
-Console select triggers use a 36px minimum and 6px corners. Menus teleport to the body and preserve search, selected/focused states, disabled choices, and keyboard behavior; root theme variables also reach portals.
+Inputs/select triggers use a 36px minimum height, 13px text, 9px corners, and themed borders. Collection-query controls use 12px text. Inputs retain primary-500 focus rings, error/disabled states, labels, adornments, and help. Placeholders use full-opacity themed muted ink. Selects retain body portals and keyboard/search behavior; root theme variables reach overlays.
 
 ### Navigation
 
-The single sidebar contains configured branding, workspace switching, search, expandable modules, and footer utilities. The stock Sub2API name falls back to 937 Console; configured names/logos remain authoritative. Administrator modules cover overview, gateway, customers, billing, security, and workspace, omitting empty modules. The active module opens by default, manual overrides last until route change, and search exposes matching authorized destinations across workspaces. The administrator/personal switch appears only for expanded, non-simple-mode administrators. Administrator context includes simple mode and exact configured administrator destinations as well as `/admin/` routes, so `/keys` and administrator custom pages retain their modules.
+The global header owns configured branding, administrator/personal switching for non-simple administrators, and account utilities. Stock Sub2API naming falls back to 937 Console. Sidebar categories are directly visible; existing feature groups with children still expand, navigate, and preserve route-aware state.
 
-Search runs after permission/feature/simple-mode visibility, matches labels and nested destinations, and clears on Escape. Collapsed navigation hides search and text but retains accessible labels/tooltips. Mobile opening expands the sidebar even when desktop collapse was stored. Selected links use wash and 600 weight; hover uses divider tone. Nested module links use 12px text and a 34px minimum height. A skip link appears on keyboard focus. The header provides quiet breadcrumbs and account utilities. Theme switching uses the shared VueUse `useDark({ storageKey: 'theme' })` behavior, with root theme variables reaching portals.
-
-### Version Popover
-
-The administrator version control opens a nonmodal dialog in a body portal. Fixed positioning chooses the available side of the trigger and clamps to 12px horizontal/16px vertical viewport margins. Width is at most 400px; height is at most 720px or viewport height minus 32px, with internal scrolling. Resize, scroll, and content resize reposition it. Opening focuses the panel; Escape or the explicit close button restores trigger focus. Long content wraps, and displayed versions normalize repeated leading `v` characters to one. Existing update/rollback actions retain their semantics; ordinary users receive static version text.
+Search runs after permission and feature filtering, may expose authorized destinations across workspaces, and clears on Escape. Simple-mode and exact configured administrator destinations keep administrator context. Collapsed navigation retains labels/tooltips and expands when its mobile drawer opens. Selection uses blue wash and 600 weight; hover uses a quiet surface. A keyboard skip link targets main content. Theme state uses the shared theme storage key.
 
 ### Chips and Status
 
-Shared badges use 6px corners, 2px/8px padding, and 12px medium type. Success, warning, danger, primary, purple, and neutral variants preserve their meanings. Separate provider pills and status dots retain their own geometry.
+Neutral/semantic badges use 12px medium labels, 2px/8px padding, and 6px corners. Collection total counts use selection wash; current-page status counts keep semantic fills. Provider pills do not redefine button styling.
 
 ### Cards / Containers
 
-Solid theme surfaces, fine borders, and 12px corners remain appropriate for standalone identity, checkout, subscription, and overlay containers. Collection ledgers, report sections, and configuration documents remove the enclosing card treatment. Checkout/identity primarily use 24px insets; report headings in the analytical grid align directly with their content. Table wrappers and divided sections do not inherit blanket card padding.
+Outer workspaces frame the task. Inner collection/chart/settings/identity/checkout/subscription panels use fine borders and the panel radius. Panel headings divide controls from content. Table panels integrate pagination without blanket inner padding.
 
-### Settings and Editor Sheets
+### Charts and Financial Visibility
 
-Category controls use a 40px minimum, 8px/12px padding, and selected wash. Section headings precede fields. Workspace tabs use underlines and preserve ARIA selection state. Sheets keep long forms scrollable and actions in a footer; field-label columns stack on mobile.
+TokenUsageTrend starts with stacked token bars. Its bar/area switch is independent of metric selection. Token areas stack; requests, costs, and cache rate preserve units, legends, and tooltip formatting. Loading/empty states remain inside the plot. Model/group/endpoint views pair horizontal bars with explicit tables and retain enabled source, ranking, metric, and breakdown controls.
 
-### Checkout and Plans
+Administrator dashboard simple mode now reaches summary/chart display flags: it omits monetary summaries, pricing shortcut, spending tab, monetary rankings and cost columns, account-cost breakdown, and the spending choice for user trends. When costs are hidden, a selected cost trend resets to tokens. This records the corrected administrator-dashboard path, not a universal audit of every usage/customer route. Standard-mode finance remains available. Customer analytics suppress account-cost columns where configured.
 
-Editable fields occupy the main panel; review retains totals, fees, and the final action. Payment method choices have a 64px minimum, neutral borders, provider logos, and a consistent violet selected border/wash. Unavailable methods stay disabled. Plan labels use gray 600 in light mode and dark 400 in dark mode; prices and quantities remain prominent. Currency, quota periods, rate multipliers, enabled methods, and validation remain content truth. Provider logos do not recolor the shared confirmation or renewal CTA.
+### Settings, Checkout, and Sheets
 
-### Charts
+Settings categories are horizontal pills with section headings above fields. Checkout separates editable selection from review and preserves currencies, methods, fees, quotas, and validation. Plan and renewal actions use the shared primary action. Editor sheets preserve long-form scrolling and footer actions; field-label columns stack on mobile.
 
-Trend tabs switch token composition, requests, cost, and cache rate. Tokens use stacked bars; other metrics use focused lines, including a dashed standard-cost comparison. Axes/tooltips preserve token, currency, and percentage units. Model/group/endpoint distributions use horizontal bars plus explicit tables; ranking and source controls retain their behavior. Payment method bars are content-sized and normalized separately within each currency; rankings keep currencies separate rather than aggregating unlike monetary units. Actual, account, and standard cost stay separate; standard cost text uses gray 600/400 rather than light gray 400. Empty/loading/error states remain visible.
+### Version Popover
+
+The administrator version control opens a nonmodal body-portal dialog. It clamps to 12px horizontal/16px vertical viewport margins, at most 400px wide and min(720px, viewport height minus 32px) tall, with internal scrolling. Resize, scroll, and content-size changes reposition it. Escape/close restores trigger focus. Long text wraps; repeated leading version-prefix letters normalize to one. Existing update/rollback behavior remains intact. Ordinary users receive static version text.
 
 ## Do's and Don'ts
 
 ### Do:
 
-- **Do** use one sidebar, a quiet utility header, and a clear content heading.
-- **Do** use the shared violet action language for purchase and renewal.
-- **Do** reveal horizontal filters on demand and preserve query state when hidden.
-- **Do** place settings section headings above fields and keep identity metadata flat.
-- **Do** preserve semantic colors, units, currency distinctions, permissions, feature flags, validation, and stored theme.
-- **Do** treat preview values and screenshots as synthetic visual evidence only.
+- **Do** use the global header, directly visible destination categories, and one clear page heading.
+- **Do** keep collection filters open initially and preserve their query state when collapsed.
+- **Do** use blue for shared primary actions and selection while retaining existing semantic status colors.
+- **Do** keep trends full width and expose both metric and chart-form choices where implemented.
+- **Do** preserve labels, units, currency distinctions, permissions, feature flags, validation, and stored theme.
+- **Do** treat local preview values and screenshots as synthetic visual evidence.
 
 ### Don't:
 
-- **Don't** restore the rejected dark horizontal business bar, teal action styling, or permanent collection filter column.
-- **Don't** duplicate page titles in the utility header or use competing provider-colored console CTAs.
-- **Don't** replace labeled analytical comparisons with overlapping multi-metric fills or doughnut distributions in this workspace.
-- **Don't** erase errors, adornments, disabled behavior, or provider-owned controls for visual uniformity.
-- **Don't** apply this B-console specification to C, backend behavior, or unrelated public surfaces.
-- **Don't** interpret local screenshots or documentation as proof of deployment or live payment success.
+- **Don't** restore revision 5's expandable top-level modules, closed-by-default filters, unboxed collections, or split primary analysis.
+- **Don't** hide meaningful billing-period metadata with low-contrast decorative text.
+- **Don't** treat nested feature groups as evidence that top-level categories should collapse.
+- **Don't** remove errors, input adornments, disabled behavior, or provider-owned controls for visual uniformity.
+- **Don't** apply B-console visual rules to C, backend contracts, or unrelated public surfaces.
+- **Don't** interpret this document or local captures as universal accessibility, all-route, deployment, or live-payment certification.
+
+Not canonized: legacy violet gradient/glow definitions and isolated component-specific styles remain outside the shared revision-6 rules. Meaningful low-contrast text is a defect, not a house style. This documentation pass does not repair unrelated source or expand the bounded review into an accessibility certification.

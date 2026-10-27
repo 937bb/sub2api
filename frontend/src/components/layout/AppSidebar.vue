@@ -6,19 +6,11 @@
       { '-translate-x-full lg:translate-x-0': !mobileOpen }
     ]"
   >
-    <div class="console-sidebar-brand">
-      <router-link :to="homePath" class="console-rail-brand" :aria-label="siteName" @click="handleMenuItemClick(homePath)">
-        <img v-if="siteLogo" :src="siteLogo" alt="" />
-        <span v-else class="console-brand-mark" aria-hidden="true">9<span>37</span></span>
-        <span class="workbench-global-brand">{{ siteName }}</span>
-      </router-link>
-    </div>
     <div class="console-secondary-nav">
-    <div v-if="isAdmin && !authStore.isSimpleMode && !sidebarCollapsed" class="console-workspace-switch" :aria-label="t('console.workspace')">
-      <router-link to="/admin/dashboard" :class="{ 'is-selected': adminArea }">{{ t('console.adminWorkspace') }}</router-link>
-      <router-link to="/dashboard" :class="{ 'is-selected': !adminArea }">{{ t('nav.myAccount') }}</router-link>
-    </div>
-
+    <nav v-if="isAdmin && !authStore.isSimpleMode && !sidebarCollapsed" class="console-mobile-workspaces lg:hidden" :aria-label="t('console.workspace')">
+      <router-link to="/admin/dashboard" :class="{ 'is-selected': adminArea }" @click="closeMobile">{{ t('console.adminWorkspace') }}</router-link>
+      <router-link to="/dashboard" :class="{ 'is-selected': !adminArea }" @click="closeMobile">{{ t('nav.myAccount') }}</router-link>
+    </nav>
     <div v-if="!sidebarCollapsed" class="console-nav-search">
       <Icon name="search" size="sm" aria-hidden="true" />
       <input v-model="navigationQuery" type="search" :placeholder="t('console.searchNavigation')" :aria-label="t('console.searchNavigation')" @keydown.esc="navigationQuery = ''" />
@@ -32,10 +24,8 @@
         <!-- Admin Section -->
         <div v-if="adminArea || navigationQuery || sidebarCollapsed" class="sidebar-section console-module-navigation">
           <div v-for="section in visibleSections" :key="section.id" class="console-nav-module">
-            <button v-if="!sidebarCollapsed" type="button" class="console-module-heading" :class="{ 'is-current': section.id === activeSection }" :aria-expanded="isSectionExpanded(section.id) || !!navigationQuery" @click="toggleSection(section.id)">
-              <Icon :name="section.icon" size="sm" /><span>{{ t('console.' + section.id) }}</span><Icon :name="isSectionExpanded(section.id) || navigationQuery ? 'chevronDown' : 'chevronRight'" size="xs" />
-            </button>
-            <div v-show="sidebarCollapsed || navigationQuery || isSectionExpanded(section.id)" class="console-module-links">
+            <p v-if="!sidebarCollapsed" class="console-module-heading">{{ t('console.' + section.id) }}</p>
+            <div class="console-module-links">
           <template v-for="item in filteredAdminNav.filter(item => sectionForPath(item.path) === section.id)" :key="item.path">
             <!-- Collapsible group (has children) -->
             <template v-if="item.children?.length">
@@ -197,7 +187,6 @@ import { useAdminSettingsStore, useAppStore, useAuthStore, useOnboardingStore } 
 import Icon from '@/components/icons/Icon.vue'
 import VersionBadge from '@/components/common/VersionBadge.vue'
 import { sanitizeSvg } from '@/utils/sanitize'
-import { sanitizeUrl } from '@/utils/url'
 import { FeatureFlags, makeSidebarFlag } from '@/utils/featureFlags'
 import { resolveSiteBillingMode } from '@/utils/siteBillingMode'
 import { useBatchImageAccess } from '@/composables/useBatchImageAccess'
@@ -270,7 +259,6 @@ const isAdmin = computed(() => authStore.isAdmin)
 const sidebarNavRef = ref<HTMLElement | null>(null)
 const isDark = useDark({ storageKey: 'theme' })
 
-const homePath = computed(() => (isAdmin.value ? '/admin/dashboard' : '/dashboard'))
 
 // Per-group expand/collapse overrides. A group with no entry follows the
 // automatic behavior (expanded while the active route is one of its children);
@@ -279,8 +267,6 @@ const homePath = computed(() => (isAdmin.value ? '/admin/dashboard' : '/dashboar
 const groupExpandOverrides = ref<Map<string, boolean>>(new Map())
 
 // Site settings from appStore (cached, no flicker)
-const siteName = computed(() => appStore.siteName === 'Sub2API' ? '937 Console' : appStore.siteName)
-const siteLogo = computed(() => sanitizeUrl(appStore.siteLogo || '', { allowRelative: true, allowDataUrl: true }))
 const siteVersion = computed(() => appStore.siteVersion)
 type SectionId = 'overview' | 'gateway' | 'customers' | 'billing' | 'security' | 'workspace'
 function sectionForPath(path: string): SectionId {
@@ -297,12 +283,7 @@ const sectionDefinitions = [
   { id: 'security', icon: 'shield' }, { id: 'workspace', icon: 'cog' }
 ] as const
 const adminArea = computed(() => authStore.isSimpleMode || route.path.startsWith('/admin/') || adminNavItems.value.some(item => item.path === route.path))
-const activeSection = computed(() => sectionForPath(route.path))
-const sectionOverrides = ref<Partial<Record<SectionId, boolean>>>({})
 const visibleSections = computed(() => sectionDefinitions.filter(section => filteredAdminNav.value.some(item => sectionForPath(item.path) === section.id)))
-function isSectionExpanded(id: SectionId) { return sectionOverrides.value[id] ?? activeSection.value === id }
-function toggleSection(id: SectionId) { sectionOverrides.value[id] = !isSectionExpanded(id) }
-watch(() => route.path, () => { sectionOverrides.value = {} })
 
 // SVG Icon Components
 const DashboardIcon = {

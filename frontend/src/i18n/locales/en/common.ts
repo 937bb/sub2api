@@ -1,5 +1,12 @@
 export default {
   console: {
+    requestsPerMinute: 'Requests per minute',
+    tokensPerMinute: 'Tokens per minute',
+    chartType: 'Chart type',
+    barChart: 'Bar chart',
+    areaChart: 'Area chart',
+    modelAnalysis: 'Model analysis',
+    userAnalysis: 'User analysis',
     trafficCapacity: 'Traffic & capacity',
     responseQuality: 'Latency & errors',
     matchingRecords: 'Matching records',

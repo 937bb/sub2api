@@ -35,15 +35,24 @@ describe('TokenUsageTrend', () => {
     const data = () => JSON.parse(wrapper.find('.chart-data').text())
     expect(data().datasets.map((item: { data: number[] }) => item.data)).toEqual([[200, 0], [100, 100], [500, 100], [300, 0]])
     await wrapper.findAll('button')[1].trigger('click')
-    expect(wrapper.find('.console-chart-summary strong').text()).toBe('20')
+    expect(wrapper.find('.console-chart-total strong').text()).toBe('20')
     expect(data().datasets[0].data).toEqual([8, 12])
     await wrapper.findAll('button')[2].trigger('click')
-    expect(wrapper.find('.console-chart-summary strong').text()).toBe('$2.40')
+    expect(wrapper.find('.console-chart-total strong').text()).toBe('$2.40')
     expect(data().datasets.map((item: { data: number[] }) => item.data)).toEqual([[1.5, 0.9], [5, 3]])
     await wrapper.findAll('button')[3].trigger('click')
     // Use the weighted prompt total, not the arithmetic mean of daily rates.
-    expect(wrapper.find('.console-chart-summary strong').text()).toBe('54.5%')
+    expect(wrapper.find('.console-chart-total strong').text()).toBe('54.5%')
     expect(data().datasets[0].data).toEqual([50, 100])
+  })
+
+  it('returns to tokens when financial display is disabled', async () => {
+    const wrapper = mount(TokenUsageTrend, { props: { trendData: [] } })
+    await wrapper.findAll('button').find(button => button.text() === 'console.spending')!.trigger('click')
+    await wrapper.setProps({ showCosts: false })
+    expect(wrapper.text()).not.toContain('console.spending')
+    expect(wrapper.find('.console-chart-total').text()).not.toContain('$')
+    expect(wrapper.findAll('button').find(button => button.text() === 'console.tokenComposition')!.attributes('aria-pressed')).toBe('true')
   })
 
   it('calculates cache hit rate against all prompt tokens', async () => {

@@ -1,10 +1,10 @@
 <template>
   <AppLayout>
     <div class="console-dashboard space-y-5">
-      <ConsoleOverview admin>
+      <ConsoleOverview admin :simple="authStore.isSimpleMode">
         <template #actions>
           <button v-if="canUseBatchImage" class="btn btn-secondary" @click="router.push('/batch-image')"><Icon name="sparkles" size="sm" />{{ t('admin.dashboard.batchImage') }}</button>
-          <button class="btn btn-secondary" @click="router.push('/admin/groups')"><Icon name="grid" size="sm" />{{ t('admin.dashboard.groupPricing') }}</button>
+          <button v-if="!authStore.isSimpleMode" class="btn btn-secondary" @click="router.push('/admin/groups')"><Icon name="grid" size="sm" />{{ t('admin.dashboard.groupPricing') }}</button>
         </template>
       </ConsoleOverview>
       <!-- Loading State -->
@@ -13,7 +13,7 @@
       </div>
 
       <template v-else-if="stats">
-        <ConsoleSummary :stats="stats" admin />
+        <ConsoleSummary :stats="stats" admin :simple="authStore.isSimpleMode" />
 
 
         <!-- Charts Section -->
@@ -51,10 +51,16 @@
 
           <!-- Charts Grid -->
           <div class="console-charts-grid">
-            <TokenUsageTrend :trend-data="trendData" :loading="chartsLoading" />
-            <ModelDistributionChart
+            <TokenUsageTrend :trend-data="trendData" :loading="chartsLoading" :show-costs="!authStore.isSimpleMode" />
+            <div class="console-analysis-navigation" role="group" :aria-label="t('console.analysis')">
+              <button type="button" :aria-pressed="analysisView === 'models'" @click="analysisView = 'models'">{{ t('console.modelAnalysis') }}</button>
+              <button type="button" :aria-pressed="analysisView === 'users'" @click="analysisView = 'users'">{{ t('console.userAnalysis') }}</button>
+            </div>
+            <ModelDistributionChart v-show="analysisView === 'models'"
               :model-stats="modelStats"
-              :enable-ranking-view="true"
+              :enable-ranking-view="!authStore.isSimpleMode"
+              :show-costs="!authStore.isSimpleMode"
+              :enable-breakdown="!authStore.isSimpleMode"
               :ranking-items="rankingItems"
               :ranking-total-actual-cost="rankingTotalActualCost"
               :ranking-total-requests="rankingTotalRequests"
@@ -69,11 +75,11 @@
           </div>
 
           <!-- User Usage Trend (Full Width) -->
-          <div class="card console-user-trends">
+          <div v-if="analysisView === 'users'" class="card console-user-trends">
             <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
               <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.dashboard.recentUsage') }} (Top 12)</h3>
               <div class="flex gap-1" role="group" :aria-label="t('admin.dashboard.recentUsage')">
-                <button v-for="metric in (['tokens', 'actual_cost'] as const)" :key="metric" type="button"
+                <button v-for="metric in (authStore.isSimpleMode ? ['tokens'] as const : ['tokens', 'actual_cost'] as const)" :key="metric" type="button"
                   class="rounded px-2 py-1 text-xs" :class="userTrendMetric === metric ? 'bg-primary-600 text-white' : 'text-gray-600 dark:text-gray-300'"
                   :aria-pressed="userTrendMetric === metric" @click="setUserTrendMetric(metric)">
                   {{ t(metric === 'tokens' ? 'admin.dashboard.tokens' : 'admin.dashboard.actualSpending') }}
@@ -106,6 +112,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { useAppStore } from '@/stores/app'
+import { useAuthStore } from '@/stores/auth'
 
 const { t } = useI18n()
 import { adminAPI } from '@/api/admin'
@@ -150,8 +157,10 @@ ChartJS.register(
 )
 
 const appStore = useAppStore()
+const authStore = useAuthStore()
 const router = useRouter()
 const { canUseBatchImage, refreshBatchImageAccess } = useBatchImageAccess()
+const analysisView = ref<'models' | 'users'>('models')
 const stats = ref<DashboardStats | null>(null)
 const loading = ref(false)
 const chartsLoading = ref(false)

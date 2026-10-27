@@ -1,99 +1,632 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-10-27T07:07:43.741Z",
+  "generatedAt": "2026-10-27T08:15:26Z",
   "title": "Design System: 937Sub B Console",
   "extensions": {
     "colorMeta": {
-      "console-accent": {
-        "role": "primary",
-        "displayName": "Action Violet",
+      "console-bg": {
+        "role": "neutral",
+        "displayName": "Canvas Gray",
         "tonalRamp": [
-          "#231c4e",
-          "#372f78",
-          "#433994",
-          "#5146b5",
-          "#635bce",
-          "#8171eb",
-          "#c4b5fd",
-          "#f5f3ff"
+          "oklch(15% 0.0045 258.32)",
+          "oklch(26% 0.0045 258.32)",
+          "oklch(38% 0.0045 258.32)",
+          "oklch(49% 0.0045 258.32)",
+          "oklch(61% 0.0045 258.32)",
+          "oklch(72% 0.0045 258.32)",
+          "oklch(84% 0.0045 258.32)",
+          "oklch(95% 0.0045 258.32)"
         ]
       },
-      "console-bg": {
+      "console-surface": {
         "role": "neutral",
         "displayName": "Working White",
         "tonalRamp": [
-          "#0f172a",
-          "#1e293b",
-          "#334155",
-          "#475569",
-          "#64748b",
-          "#94a3b8",
-          "#cbd5e1",
-          "#f8fafc"
+          "oklch(15% 0.0000 89.88)",
+          "oklch(26% 0.0000 89.88)",
+          "oklch(38% 0.0000 89.88)",
+          "oklch(49% 0.0000 89.88)",
+          "oklch(61% 0.0000 89.88)",
+          "oklch(72% 0.0000 89.88)",
+          "oklch(84% 0.0000 89.88)",
+          "oklch(95% 0.0000 89.88)"
         ]
       },
       "console-nav": {
         "role": "neutral",
-        "displayName": "Navigation Gray"
+        "displayName": "Quiet Neutral",
+        "tonalRamp": [
+          "oklch(15% 0.0034 247.86)",
+          "oklch(26% 0.0034 247.86)",
+          "oklch(38% 0.0034 247.86)",
+          "oklch(49% 0.0034 247.86)",
+          "oklch(61% 0.0034 247.86)",
+          "oklch(72% 0.0034 247.86)",
+          "oklch(84% 0.0034 247.86)",
+          "oklch(95% 0.0034 247.86)"
+        ]
+      },
+      "console-line": {
+        "role": "neutral",
+        "displayName": "Fine Divider",
+        "tonalRamp": [
+          "oklch(15% 0.0092 258.34)",
+          "oklch(26% 0.0092 258.34)",
+          "oklch(38% 0.0092 258.34)",
+          "oklch(49% 0.0092 258.34)",
+          "oklch(61% 0.0092 258.34)",
+          "oklch(72% 0.0092 258.34)",
+          "oklch(84% 0.0092 258.34)",
+          "oklch(95% 0.0092 258.34)"
+        ]
+      },
+      "console-ink": {
+        "role": "neutral",
+        "displayName": "Slate Ink",
+        "tonalRamp": [
+          "oklch(15% 0.0345 260.81)",
+          "oklch(26% 0.0345 260.81)",
+          "oklch(38% 0.0345 260.81)",
+          "oklch(49% 0.0345 260.81)",
+          "oklch(61% 0.0345 260.81)",
+          "oklch(72% 0.0345 260.81)",
+          "oklch(84% 0.0345 260.81)",
+          "oklch(95% 0.0345 260.81)"
+        ]
       },
       "console-muted": {
         "role": "neutral",
-        "displayName": "Muted Slate"
+        "displayName": "Muted Slate",
+        "tonalRamp": [
+          "oklch(15% 0.0390 257.87)",
+          "oklch(26% 0.0390 257.87)",
+          "oklch(38% 0.0390 257.87)",
+          "oklch(49% 0.0390 257.87)",
+          "oklch(61% 0.0390 257.87)",
+          "oklch(72% 0.0390 257.87)",
+          "oklch(84% 0.0390 257.87)",
+          "oklch(95% 0.0390 257.87)"
+        ]
+      },
+      "console-accent": {
+        "role": "primary",
+        "displayName": "Action Blue",
+        "tonalRamp": [
+          "#172554",
+          "#1e3a8a",
+          "#1e40af",
+          "#1d4ed8",
+          "#2563eb",
+          "#60a5fa",
+          "#bfdbfe",
+          "#eff6ff"
+        ]
+      },
+      "console-accent-hover": {
+        "role": "primary",
+        "displayName": "Deep Action Blue",
+        "tonalRamp": [
+          "#172554",
+          "#1e3a8a",
+          "#1e40af",
+          "#1d4ed8",
+          "#2563eb",
+          "#60a5fa",
+          "#bfdbfe",
+          "#eff6ff"
+        ]
+      },
+      "console-selected": {
+        "role": "primary",
+        "displayName": "Selection Wash",
+        "tonalRamp": [
+          "oklch(15% 0.0165 259.42)",
+          "oklch(26% 0.0165 259.42)",
+          "oklch(38% 0.0165 259.42)",
+          "oklch(49% 0.0165 259.42)",
+          "oklch(61% 0.0165 259.42)",
+          "oklch(72% 0.0165 259.42)",
+          "oklch(84% 0.0165 259.42)",
+          "oklch(95% 0.0165 259.42)"
+        ]
+      },
+      "dark-console-bg": {
+        "role": "neutral",
+        "displayName": "Dark Console Bg",
+        "tonalRamp": [
+          "oklch(15% 0.0199 262.01)",
+          "oklch(26% 0.0199 262.01)",
+          "oklch(38% 0.0199 262.01)",
+          "oklch(49% 0.0199 262.01)",
+          "oklch(61% 0.0199 262.01)",
+          "oklch(72% 0.0199 262.01)",
+          "oklch(84% 0.0199 262.01)",
+          "oklch(95% 0.0199 262.01)"
+        ]
+      },
+      "dark-console-surface": {
+        "role": "neutral",
+        "displayName": "Dark Console Surface",
+        "tonalRamp": [
+          "oklch(15% 0.0275 259.96)",
+          "oklch(26% 0.0275 259.96)",
+          "oklch(38% 0.0275 259.96)",
+          "oklch(49% 0.0275 259.96)",
+          "oklch(61% 0.0275 259.96)",
+          "oklch(72% 0.0275 259.96)",
+          "oklch(84% 0.0275 259.96)",
+          "oklch(95% 0.0275 259.96)"
+        ]
+      },
+      "dark-console-nav": {
+        "role": "neutral",
+        "displayName": "Dark Console Nav",
+        "tonalRamp": [
+          "oklch(15% 0.0314 258.32)",
+          "oklch(26% 0.0314 258.32)",
+          "oklch(38% 0.0314 258.32)",
+          "oklch(49% 0.0314 258.32)",
+          "oklch(61% 0.0314 258.32)",
+          "oklch(72% 0.0314 258.32)",
+          "oklch(84% 0.0314 258.32)",
+          "oklch(95% 0.0314 258.32)"
+        ]
+      },
+      "dark-console-line": {
+        "role": "neutral",
+        "displayName": "Dark Console Line",
+        "tonalRamp": [
+          "oklch(15% 0.0370 257.78)",
+          "oklch(26% 0.0370 257.78)",
+          "oklch(38% 0.0370 257.78)",
+          "oklch(49% 0.0370 257.78)",
+          "oklch(61% 0.0370 257.78)",
+          "oklch(72% 0.0370 257.78)",
+          "oklch(84% 0.0370 257.78)",
+          "oklch(95% 0.0370 257.78)"
+        ]
+      },
+      "dark-console-ink": {
+        "role": "neutral",
+        "displayName": "Dark Console Ink",
+        "tonalRamp": [
+          "oklch(15% 0.0097 252.81)",
+          "oklch(26% 0.0097 252.81)",
+          "oklch(38% 0.0097 252.81)",
+          "oklch(49% 0.0097 252.81)",
+          "oklch(61% 0.0097 252.81)",
+          "oklch(72% 0.0097 252.81)",
+          "oklch(84% 0.0097 252.81)",
+          "oklch(95% 0.0097 252.81)"
+        ]
+      },
+      "dark-console-muted": {
+        "role": "neutral",
+        "displayName": "Dark Console Muted",
+        "tonalRamp": [
+          "oklch(15% 0.0335 254.03)",
+          "oklch(26% 0.0335 254.03)",
+          "oklch(38% 0.0335 254.03)",
+          "oklch(49% 0.0335 254.03)",
+          "oklch(61% 0.0335 254.03)",
+          "oklch(72% 0.0335 254.03)",
+          "oklch(84% 0.0335 254.03)",
+          "oklch(95% 0.0335 254.03)"
+        ]
       },
       "dark-console-accent": {
         "role": "primary",
-        "displayName": "Night Violet"
+        "displayName": "Night Blue",
+        "tonalRamp": [
+          "#172554",
+          "#1e3a8a",
+          "#1e40af",
+          "#1d4ed8",
+          "#2563eb",
+          "#60a5fa",
+          "#bfdbfe",
+          "#eff6ff"
+        ]
+      },
+      "dark-console-selected": {
+        "role": "primary",
+        "displayName": "Dark Console Selected",
+        "tonalRamp": [
+          "oklch(15% 0.0589 259.23)",
+          "oklch(26% 0.0589 259.23)",
+          "oklch(38% 0.0589 259.23)",
+          "oklch(49% 0.0589 259.23)",
+          "oklch(61% 0.0589 259.23)",
+          "oklch(72% 0.0589 259.23)",
+          "oklch(84% 0.0589 259.23)",
+          "oklch(95% 0.0589 259.23)"
+        ]
+      },
+      "control-ink": {
+        "role": "neutral",
+        "displayName": "Control Ink",
+        "tonalRamp": [
+          "oklch(15% 0.0306 259.73)",
+          "oklch(26% 0.0306 259.73)",
+          "oklch(38% 0.0306 259.73)",
+          "oklch(49% 0.0306 259.73)",
+          "oklch(61% 0.0306 259.73)",
+          "oklch(72% 0.0306 259.73)",
+          "oklch(84% 0.0306 259.73)",
+          "oklch(95% 0.0306 259.73)"
+        ]
+      },
+      "control-hover": {
+        "role": "neutral",
+        "displayName": "Control Hover",
+        "tonalRamp": [
+          "oklch(15% 0.0017 247.84)",
+          "oklch(26% 0.0017 247.84)",
+          "oklch(38% 0.0017 247.84)",
+          "oklch(49% 0.0017 247.84)",
+          "oklch(61% 0.0017 247.84)",
+          "oklch(72% 0.0017 247.84)",
+          "oklch(84% 0.0017 247.84)",
+          "oklch(95% 0.0017 247.84)"
+        ]
+      },
+      "field-ink": {
+        "role": "neutral",
+        "displayName": "Field Ink",
+        "tonalRamp": [
+          "oklch(15% 0.0318 264.66)",
+          "oklch(26% 0.0318 264.66)",
+          "oklch(38% 0.0318 264.66)",
+          "oklch(49% 0.0318 264.66)",
+          "oklch(61% 0.0318 264.66)",
+          "oklch(72% 0.0318 264.66)",
+          "oklch(84% 0.0318 264.66)",
+          "oklch(95% 0.0318 264.66)"
+        ]
+      },
+      "dark-control-bg": {
+        "role": "neutral",
+        "displayName": "Dark Control Bg",
+        "tonalRamp": [
+          "oklch(15% 0.0368 260.03)",
+          "oklch(26% 0.0368 260.03)",
+          "oklch(38% 0.0368 260.03)",
+          "oklch(49% 0.0368 260.03)",
+          "oklch(61% 0.0368 260.03)",
+          "oklch(72% 0.0368 260.03)",
+          "oklch(84% 0.0368 260.03)",
+          "oklch(95% 0.0368 260.03)"
+        ]
+      },
+      "dark-control-ink": {
+        "role": "neutral",
+        "displayName": "Dark Control Ink",
+        "tonalRamp": [
+          "oklch(15% 0.0058 264.53)",
+          "oklch(26% 0.0058 264.53)",
+          "oklch(38% 0.0058 264.53)",
+          "oklch(49% 0.0058 264.53)",
+          "oklch(61% 0.0058 264.53)",
+          "oklch(72% 0.0058 264.53)",
+          "oklch(84% 0.0058 264.53)",
+          "oklch(95% 0.0058 264.53)"
+        ]
+      },
+      "badge-neutral-bg": {
+        "role": "neutral",
+        "displayName": "Badge Neutral Bg",
+        "tonalRamp": [
+          "oklch(15% 0.0029 264.54)",
+          "oklch(26% 0.0029 264.54)",
+          "oklch(38% 0.0029 264.54)",
+          "oklch(49% 0.0029 264.54)",
+          "oklch(61% 0.0029 264.54)",
+          "oklch(72% 0.0029 264.54)",
+          "oklch(84% 0.0029 264.54)",
+          "oklch(95% 0.0029 264.54)"
+        ]
+      },
+      "success-bg": {
+        "role": "neutral",
+        "displayName": "Success Bg",
+        "tonalRamp": [
+          "oklch(15% 0.0207 166.11)",
+          "oklch(26% 0.0207 166.11)",
+          "oklch(38% 0.0207 166.11)",
+          "oklch(49% 0.0207 166.11)",
+          "oklch(61% 0.0207 166.11)",
+          "oklch(72% 0.0207 166.11)",
+          "oklch(84% 0.0207 166.11)",
+          "oklch(95% 0.0207 166.11)"
+        ]
+      },
+      "success-ink": {
+        "role": "neutral",
+        "displayName": "Success Ink",
+        "tonalRamp": [
+          "oklch(15% 0.1049 165.61)",
+          "oklch(26% 0.1049 165.61)",
+          "oklch(38% 0.1049 165.61)",
+          "oklch(49% 0.1049 165.61)",
+          "oklch(61% 0.1049 165.61)",
+          "oklch(72% 0.1049 165.61)",
+          "oklch(84% 0.1049 165.61)",
+          "oklch(95% 0.1049 165.61)"
+        ]
+      },
+      "warning-bg": {
+        "role": "neutral",
+        "displayName": "Warning Bg",
+        "tonalRamp": [
+          "oklch(15% 0.0214 95.28)",
+          "oklch(26% 0.0214 95.28)",
+          "oklch(38% 0.0214 95.28)",
+          "oklch(49% 0.0214 95.28)",
+          "oklch(61% 0.0214 95.28)",
+          "oklch(72% 0.0214 95.28)",
+          "oklch(84% 0.0214 95.28)",
+          "oklch(95% 0.0214 95.28)"
+        ]
+      },
+      "warning-ink": {
+        "role": "neutral",
+        "displayName": "Warning Ink",
+        "tonalRamp": [
+          "oklch(15% 0.1455 49.00)",
+          "oklch(26% 0.1455 49.00)",
+          "oklch(38% 0.1455 49.00)",
+          "oklch(49% 0.1455 49.00)",
+          "oklch(61% 0.1455 49.00)",
+          "oklch(72% 0.1455 49.00)",
+          "oklch(84% 0.1455 49.00)",
+          "oklch(95% 0.1455 49.00)"
+        ]
+      },
+      "danger-bg": {
+        "role": "neutral",
+        "displayName": "Danger Bg",
+        "tonalRamp": [
+          "oklch(15% 0.0129 17.38)",
+          "oklch(26% 0.0129 17.38)",
+          "oklch(38% 0.0129 17.38)",
+          "oklch(49% 0.0129 17.38)",
+          "oklch(61% 0.0129 17.38)",
+          "oklch(72% 0.0129 17.38)",
+          "oklch(84% 0.0129 17.38)",
+          "oklch(95% 0.0129 17.38)"
+        ]
+      },
+      "danger-ink": {
+        "role": "neutral",
+        "displayName": "Danger Ink",
+        "tonalRamp": [
+          "oklch(15% 0.1905 27.52)",
+          "oklch(26% 0.1905 27.52)",
+          "oklch(38% 0.1905 27.52)",
+          "oklch(49% 0.1905 27.52)",
+          "oklch(61% 0.1905 27.52)",
+          "oklch(72% 0.1905 27.52)",
+          "oklch(84% 0.1905 27.52)",
+          "oklch(95% 0.1905 27.52)"
+        ]
+      },
+      "danger-action": {
+        "role": "neutral",
+        "displayName": "Danger Action",
+        "tonalRamp": [
+          "oklch(15% 0.2152 27.33)",
+          "oklch(26% 0.2152 27.33)",
+          "oklch(38% 0.2152 27.33)",
+          "oklch(49% 0.2152 27.33)",
+          "oklch(61% 0.2152 27.33)",
+          "oklch(72% 0.2152 27.33)",
+          "oklch(84% 0.2152 27.33)",
+          "oklch(95% 0.2152 27.33)"
+        ]
+      },
+      "chart-input": {
+        "role": "neutral",
+        "displayName": "Chart Input",
+        "tonalRamp": [
+          "oklch(15% 0.1807 266.40)",
+          "oklch(26% 0.1807 266.40)",
+          "oklch(38% 0.1807 266.40)",
+          "oklch(49% 0.1807 266.40)",
+          "oklch(61% 0.1807 266.40)",
+          "oklch(72% 0.1807 266.40)",
+          "oklch(84% 0.1807 266.40)",
+          "oklch(95% 0.1807 266.40)"
+        ]
+      },
+      "chart-output": {
+        "role": "neutral",
+        "displayName": "Chart Output",
+        "tonalRamp": [
+          "oklch(15% 0.1675 294.27)",
+          "oklch(26% 0.1675 294.27)",
+          "oklch(38% 0.1675 294.27)",
+          "oklch(49% 0.1675 294.27)",
+          "oklch(61% 0.1675 294.27)",
+          "oklch(72% 0.1675 294.27)",
+          "oklch(84% 0.1675 294.27)",
+          "oklch(95% 0.1675 294.27)"
+        ]
+      },
+      "chart-cache-read": {
+        "role": "neutral",
+        "displayName": "Chart Cache Read",
+        "tonalRamp": [
+          "oklch(15% 0.1003 176.12)",
+          "oklch(26% 0.1003 176.12)",
+          "oklch(38% 0.1003 176.12)",
+          "oklch(49% 0.1003 176.12)",
+          "oklch(61% 0.1003 176.12)",
+          "oklch(72% 0.1003 176.12)",
+          "oklch(84% 0.1003 176.12)",
+          "oklch(95% 0.1003 176.12)"
+        ]
+      },
+      "chart-cache-write": {
+        "role": "neutral",
+        "displayName": "Chart Cache Write",
+        "tonalRamp": [
+          "oklch(15% 0.1344 82.13)",
+          "oklch(26% 0.1344 82.13)",
+          "oklch(38% 0.1344 82.13)",
+          "oklch(49% 0.1344 82.13)",
+          "oklch(61% 0.1344 82.13)",
+          "oklch(72% 0.1344 82.13)",
+          "oklch(84% 0.1344 82.13)",
+          "oklch(95% 0.1344 82.13)"
+        ]
+      },
+      "chart-cache-rate": {
+        "role": "neutral",
+        "displayName": "Chart Cache Rate",
+        "tonalRamp": [
+          "oklch(15% 0.0872 183.81)",
+          "oklch(26% 0.0872 183.81)",
+          "oklch(38% 0.0872 183.81)",
+          "oklch(49% 0.0872 183.81)",
+          "oklch(61% 0.0872 183.81)",
+          "oklch(72% 0.0872 183.81)",
+          "oklch(84% 0.0872 183.81)",
+          "oklch(95% 0.0872 183.81)"
+        ]
+      },
+      "chart-standard": {
+        "role": "neutral",
+        "displayName": "Chart Standard",
+        "tonalRamp": [
+          "oklch(15% 0.0340 261.69)",
+          "oklch(26% 0.0340 261.69)",
+          "oklch(38% 0.0340 261.69)",
+          "oklch(49% 0.0340 261.69)",
+          "oklch(61% 0.0340 261.69)",
+          "oklch(72% 0.0340 261.69)",
+          "oklch(84% 0.0340 261.69)",
+          "oklch(95% 0.0340 261.69)"
+        ]
+      },
+      "chart-label": {
+        "role": "neutral",
+        "displayName": "Chart Label",
+        "tonalRamp": [
+          "oklch(15% 0.0366 257.28)",
+          "oklch(26% 0.0366 257.28)",
+          "oklch(38% 0.0366 257.28)",
+          "oklch(49% 0.0366 257.28)",
+          "oklch(61% 0.0366 257.28)",
+          "oklch(72% 0.0366 257.28)",
+          "oklch(84% 0.0366 257.28)",
+          "oklch(95% 0.0366 257.28)"
+        ]
+      },
+      "chart-grid": {
+        "role": "neutral",
+        "displayName": "Chart Grid",
+        "tonalRamp": [
+          "oklch(15% 0.0063 255.48)",
+          "oklch(26% 0.0063 255.48)",
+          "oklch(38% 0.0063 255.48)",
+          "oklch(49% 0.0063 255.48)",
+          "oklch(61% 0.0063 255.48)",
+          "oklch(72% 0.0063 255.48)",
+          "oklch(84% 0.0063 255.48)",
+          "oklch(95% 0.0063 255.48)"
+        ]
+      },
+      "dark-chart-label": {
+        "role": "neutral",
+        "displayName": "Dark Chart Label",
+        "tonalRamp": [
+          "oklch(15% 0.0254 257.65)",
+          "oklch(26% 0.0254 257.65)",
+          "oklch(38% 0.0254 257.65)",
+          "oklch(49% 0.0254 257.65)",
+          "oklch(61% 0.0254 257.65)",
+          "oklch(72% 0.0254 257.65)",
+          "oklch(84% 0.0254 257.65)",
+          "oklch(95% 0.0254 257.65)"
+        ]
+      },
+      "dark-chart-grid": {
+        "role": "neutral",
+        "displayName": "Dark Chart Grid",
+        "tonalRamp": [
+          "oklch(15% 0.0364 254.93)",
+          "oklch(26% 0.0364 254.93)",
+          "oklch(38% 0.0364 254.93)",
+          "oklch(49% 0.0364 254.93)",
+          "oklch(61% 0.0364 254.93)",
+          "oklch(72% 0.0364 254.93)",
+          "oklch(84% 0.0364 254.93)",
+          "oklch(95% 0.0364 254.93)"
+        ]
       }
     },
     "typographyMeta": {
+      "body": {
+        "displayName": "Compact System Sans",
+        "purpose": "13px shared console controls and records with Chinese fallbacks; tabular figures on the shell."
+      },
       "headline": {
         "displayName": "Page Headline",
-        "purpose": "24px task introduction; 22px below 768px."
-      },
-      "body": {
-        "displayName": "System Sans",
-        "purpose": "Shared controls and comfortable records; system Chinese fallbacks."
+        "purpose": "20px task heading, 650 weight, 1.4 line height."
       },
       "metric": {
         "displayName": "Summary Metric",
-        "purpose": "Tabular dashboard values; 26px on mobile."
+        "purpose": "27px dashboard values; 24px below 1280px."
+      },
+      "supporting": {
+        "displayName": "Supporting Metadata",
+        "purpose": "11px supporting units and category/chart labels; retain meaningful contrast."
       }
     },
     "shadows": [
       {
         "name": "dialog",
         "value": "0 18px 60px rgb(10 24 45 / 16%)",
-        "purpose": "Ordinary dialogs and right-side editor sheets."
+        "purpose": "Dialogs and opt-in editor sheets."
       },
       {
         "name": "version-popover",
         "value": "0 12px 48px rgb(15 23 42 / 20%)",
-        "purpose": "Viewport-constrained version portal."
+        "purpose": "Viewport-constrained nonmodal version portal."
       }
     ],
     "motion": [
       {
         "name": "control-colors",
         "value": "150ms ease-out",
-        "purpose": "Shared button colors."
+        "purpose": "Shared action color transitions."
       },
       {
         "name": "field-state",
         "value": "200ms",
-        "purpose": "Input and select state transitions."
+        "purpose": "Input and select state changes."
       },
       {
         "name": "drawer-transform",
         "value": "300ms",
-        "purpose": "Sidebar transform."
+        "purpose": "Sidebar drawer transition."
       },
       {
         "name": "reduced-motion",
-        "value": "0.01ms",
-        "purpose": "Shell transitions/animations, one animation iteration under prefers-reduced-motion."
+        "value": "0.01ms; animation-iteration-count: 1",
+        "purpose": "Reduced motion on console-shell descendants; not a universal portal guarantee."
+      },
+      {
+        "name": "trend-chart",
+        "value": "animation: false",
+        "purpose": "Chart.js trend rendering."
       }
     ],
     "breakpoints": [
+      {
+        "name": "brand-compact",
+        "value": "480px"
+      },
       {
         "name": "sm",
         "value": "640px"
@@ -110,198 +643,132 @@
         "name": "xl",
         "value": "1280px"
       }
-    ],
-    "focus": {
-      "value": "2px solid var(--console-accent)",
-      "offset": "3px",
-      "purpose": "Keyboard focus in the console shell."
-    },
-    "overlay": {
-      "value": "rgb(19 30 48 / 32%)",
-      "backdropFilter": "none"
-    },
-    "layout": {
-      "sidebarExpanded": "232px",
-      "sidebarCollapsed": "68px",
-      "utilityHeader": "60px",
-      "mainMaxWidth": "1760px",
-      "mainPadding": "32px 40px 48px",
-      "mainPaddingBelow1280": "24px",
-      "mainPaddingBelow1024": "20px 16px",
-      "settingsDirectory": "164px",
-      "settingsGap": "24px",
-      "stickyReviewTop": "84px",
-      "checkoutColumns": "minmax(0,1fr) 320px",
-      "filtersInitiallyOpen": false,
-      "collectionHeight": "content",
-      "queryPanelHeight": "content",
-      "dashboardColumns": "minmax(0,1.8fr) minmax(300px,1fr)",
-      "financeColumns": "minmax(0,1.8fr) minmax(320px,1fr)",
-      "analysisGap": "32px",
-      "settingsSectionPadding": "0 0 28px",
-      "settingsSectionMargin": "0 0 28px",
-      "versionWidth": "min(400px, viewport width - 24px)",
-      "versionMaxHeight": "min(720px, viewport height - 32px)",
-      "versionViewportMargins": "12px horizontal / 16px vertical"
-    },
-    "controlMinimums": {
-      "button": "36px",
-      "input": "36px",
-      "consoleSelect": "36px",
-      "queryInputAndSelect": "38px",
-      "settingsCategory": "40px",
-      "paymentMethod": "64px"
-    },
-    "sourceEvidence": {
-      "revision": 5,
-      "files": [
-        "frontend/tailwind.config.js",
-        "frontend/src/style.css",
-        "frontend/src/styles/console.css",
-        "frontend/src/styles/workbench.css",
-        "frontend/src/components/layout/AppSidebar.vue",
-        "frontend/src/components/layout/AppHeader.vue",
-        "frontend/src/components/layout/TablePageLayout.vue",
-        "frontend/src/components/common/Select.vue",
-        "frontend/src/components/payment/SubscriptionPlanCard.vue",
-        "frontend/src/components/payment/PaymentMethodSelector.vue",
-        "frontend/src/components/charts/TokenUsageTrend.vue",
-        "frontend/src/components/charts/ModelDistributionChart.vue",
-        "frontend/src/views/user/SubscriptionsView.vue",
-        "frontend/src/components/common/VersionBadge.vue",
-        "frontend/src/views/admin/orders/AdminPaymentDashboardView.vue",
-        "frontend/src/components/admin/payment/PaymentMethodChart.vue"
-      ],
-      "screenshots": ".impeccable/screenshots/revision5/",
-      "note": "Synthetic local evidence; revision 4 was rejected and superseded. Use final-groups-1750.png, not the invalid inspect-groups-1750.png, for wide-layout evidence. Selected source/capture review and route-width checks do not certify all visual states, deployment, or payment completion.",
-      "verification": ".impeccable/verification-revision5.md",
-      "review": ".impeccable/review/revision5-finish.md"
-    }
+    ]
   },
   "components": [
     {
       "name": "Primary Button",
       "kind": "button",
       "refersTo": "button-primary",
-      "description": "Shared violet action, including console purchase and renewal. Fill stays primary 600 in both themes.",
-      "html": "<button type=\"button\" class=\"ds-primary\">Renew subscription</button>",
-      "css": ".ds-primary{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:36px;border:0;border-radius:8px;padding:8px 12px;font-size:14px;line-height:20px;font-weight:500;transition:background-color 150ms ease-out,border-color 150ms ease-out;background:#635bce;color:#fff}.ds-primary:hover{background:#5146b5}.ds-primary:focus-visible{outline:2px solid var(--console-accent,#635bce);outline-offset:3px}.ds-primary:disabled{opacity:.5;cursor:not-allowed}"
+      "description": "Shared blue console action; filled blue remains constant in dark mode.",
+      "html": "<button class=\"ds-primary\">Save changes</button>",
+      "css": ".ds-primary{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:34px;border-radius:9px;padding:7px 12px;font:500 13px/20px system-ui,sans-serif;cursor:pointer;box-shadow:none;transition:background-color 150ms ease-out,color 150ms ease-out;border:0;background:#2563eb;color:#fff}.ds-primary:hover{background:#1d4ed8}.ds-primary:focus-visible{outline:2px solid var(--console-accent,#2563eb);outline-offset:3px;}.ds-primary:disabled{opacity:.5;cursor:not-allowed}"
     },
     {
       "name": "Secondary Button",
       "kind": "button",
       "refersTo": "button-secondary",
-      "description": "Neutral bordered action. Host dark class selects the shared slate control variant.",
-      "html": "<button type=\"button\" class=\"ds-secondary\">Refresh</button>",
-      "css": ".ds-secondary{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:36px;border:0;border-radius:8px;padding:8px 12px;font-size:14px;line-height:20px;font-weight:500;transition:background-color 150ms ease-out,border-color 150ms ease-out;border:1px solid #e5e7eb;background:#fff;color:#374151}.ds-secondary:hover{background:#f9fafb;border-color:#d1d5db}.ds-secondary:focus-visible{outline:2px solid var(--console-accent,#635bce);outline-offset:3px}.ds-secondary:disabled{opacity:.5;cursor:not-allowed}:host-context(.dark) .ds-secondary{background:#1e293b;color:#e5e7eb;border-color:#475569}:host-context(.dark) .ds-secondary:hover{background:#334155;border-color:#64748b}"
+      "description": "Bordered neutral action for refresh and secondary work.",
+      "html": "<button class=\"ds-secondary\">Refresh</button>",
+      "css": ".ds-secondary{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:34px;border-radius:9px;padding:7px 12px;font:500 13px/20px system-ui,sans-serif;cursor:pointer;box-shadow:none;transition:background-color 150ms ease-out,color 150ms ease-out;border:1px solid var(--console-line,#e7ebf1);background:#fff;color:#374151}.ds-secondary:hover{background:#f9fafb;border-color:#d1d5db}.ds-secondary:focus-visible{outline:2px solid var(--console-accent,#2563eb);outline-offset:3px;}.ds-secondary:disabled{opacity:.5;cursor:not-allowed}:host-context(.dark) .ds-secondary{background:#1e293b;color:#e5e7eb}:host-context(.dark) .ds-secondary:hover{background:#334155;border-color:#64748b}"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "Unfilled utility action with neutral hover.",
+      "html": "<button class=\"ds-ghost\">Cancel</button>",
+      "css": ".ds-ghost{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:34px;border-radius:9px;padding:7px 12px;font:500 13px/20px system-ui,sans-serif;cursor:pointer;box-shadow:none;transition:background-color 150ms ease-out,color 150ms ease-out;border:0;background:transparent;color:#4b5563}.ds-ghost:hover{background:#f3f4f6}.ds-ghost:focus-visible{outline:2px solid var(--console-accent,#2563eb);outline-offset:3px;}.ds-ghost:disabled{opacity:.5;cursor:not-allowed}:host-context(.dark) .ds-ghost{color:#d1d5db}:host-context(.dark) .ds-ghost:hover{background:#1e293b}"
     },
     {
       "name": "Danger Button",
       "kind": "button",
       "refersTo": "button-danger",
-      "description": "Destructive action preserves its red semantic treatment.",
-      "html": "<button type=\"button\" class=\"ds-danger\">Delete</button>",
-      "css": ".ds-danger{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:36px;border:0;border-radius:8px;padding:8px 12px;font-size:14px;line-height:20px;font-weight:500;transition:background-color 150ms ease-out,border-color 150ms ease-out;background:#dc2626;color:#fff}.ds-danger:hover{background:#b91c1c}.ds-danger:focus-visible{outline:2px solid var(--console-accent,#635bce);outline-offset:3px}.ds-danger:disabled{opacity:.5;cursor:not-allowed}"
+      "description": "Existing destructive action semantics.",
+      "html": "<button class=\"ds-danger\">Delete</button>",
+      "css": ".ds-danger{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:34px;border-radius:9px;padding:7px 12px;font:500 13px/20px system-ui,sans-serif;cursor:pointer;box-shadow:none;transition:background-color 150ms ease-out,color 150ms ease-out;border:0;background:#dc2626;color:#fff}.ds-danger:hover{background:#b91c1c}.ds-danger:focus-visible{outline:2px solid var(--console-accent,#2563eb);outline-offset:3px;}.ds-danger:disabled{opacity:.5;cursor:not-allowed}"
     },
     {
-      "name": "Text Field",
+      "name": "Query Field",
       "kind": "input",
       "refersTo": "input",
-      "description": "Shared 36px minimum text input with readable placeholder, focus, and disabled states.",
-      "html": "<label class=\"ds-label\" for=\"ds-query\">Search records</label><input id=\"ds-query\" class=\"ds-input\" placeholder=\"Name or identifier\" />",
-      "css": ".ds-label{display:block;margin-bottom:6px;font:500 14px/20px system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;color:#374151}.ds-input{font:14px/20px system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;width:100%;min-height:36px;border:1px solid #e5e7eb;border-radius:8px;padding:8px 12px;background:#fff;color:#111827;transition:all 200ms}.ds-input::placeholder{color:var(--console-muted,#64748b);opacity:1}.ds-input:focus{border-color:#8171eb;box-shadow:0 0 0 2px rgb(129 113 235 / 30%)}.ds-input:focus-visible{outline:2px solid var(--console-accent,#635bce);outline-offset:3px}.ds-input:disabled{cursor:not-allowed;background:#f3f4f6}:host-context(.dark) .ds-label{color:#d1d5db}:host-context(.dark) .ds-input{background:#1e293b;border-color:#475569;color:#f3f4f6}:host-context(.dark) .ds-input:disabled{background:#0f172a}"
+      "description": "Compact labeled query field with themed placeholder and visible focus.",
+      "html": "<label class=\"ds-field-label\" for=\"ds-query\">Search records</label><input id=\"ds-query\" class=\"ds-field\" placeholder=\"Search groups…\" />",
+      "css": ".ds-field-label{display:block;margin-bottom:6px;font:500 12px/16px system-ui,sans-serif;color:var(--console-muted,#617086)}.ds-field{width:100%;max-width:300px;min-height:36px;padding:8px 12px;border:1px solid var(--console-line,#e7ebf1);border-radius:9px;background:#fff;color:#111827;font:400 12px/20px system-ui,sans-serif;transition:all 200ms}.ds-field::placeholder{color:var(--console-muted,#617086);opacity:1}.ds-field:focus{border-color:#3b82f6;box-shadow:0 0 0 2px rgb(59 130 246 / 30%)}.ds-field:focus-visible{outline:2px solid var(--console-accent,#2563eb);outline-offset:3px;}.ds-field:disabled{background:#f3f4f6;cursor:not-allowed}:host-context(.dark) .ds-field{background:#1e293b;color:#f3f4f6}"
     },
     {
       "name": "Sidebar Navigation",
       "kind": "nav",
-      "refersTo": "navigation",
-      "description": "Expandable authorized modules within one sidebar; workspace switching and cross-workspace search preserve task context.",
-      "html": "<nav class=\"ds-nav\" aria-label=\"Console navigation\"><div class=\"ds-workspace\"><a href=\"#admin\" aria-current=\"page\">Administration</a><a href=\"#personal\">My account</a></div><details class=\"ds-module\" open><summary>Gateway</summary><div class=\"ds-links\"><a href=\"#accounts\" aria-current=\"page\">Accounts</a><a href=\"#groups\">Groups</a><a href=\"#keys\">API keys</a></div></details><details class=\"ds-module\"><summary>Customers</summary><div class=\"ds-links\"><a href=\"#users\">Users</a></div></details></nav>",
-      "css": ".ds-nav{width:208px;padding:12px;background:var(--console-nav,#f6f7fa);color:var(--console-ink,#263449);font-family:system-ui,sans-serif}.ds-workspace{display:flex;gap:2px;padding:3px;border:1px solid var(--console-line,#e3e8ef);border-radius:8px;margin-bottom:16px}.ds-workspace a{flex:1;text-align:center;padding:6px 4px;font-size:12px;border-radius:5px}.ds-workspace a[aria-current=page]{background:var(--console-surface,#fff);font-weight:600}.ds-nav a{text-decoration:none;color:var(--console-muted,#64748b)}.ds-module+.ds-module{margin-top:8px}.ds-module summary{cursor:pointer;padding:10px;border-radius:7px;font-size:13px;font-weight:600}.ds-module summary:hover{background:var(--console-line,#e3e8ef)}.ds-links{margin:2px 0 14px 17px;padding-left:12px;border-left:1px solid var(--console-line,#e3e8ef)}.ds-links a{display:block;min-height:18px;padding:8px 10px;border-radius:7px;font-size:12px}.ds-links a:hover{background:var(--console-line,#e3e8ef);color:var(--console-ink,#263449)}.ds-links a[aria-current=page]{background:var(--console-selected,#f5f3ff);color:var(--console-accent,#635bce);font-weight:600}.ds-nav :is(a,summary):focus-visible{outline:2px solid var(--console-accent,#635bce);outline-offset:3px}"
+      "refersTo": "navigation-active",
+      "description": "Direct category label and selected destination; nested feature disclosure remains separate.",
+      "html": "<nav class=\"ds-nav\" aria-label=\"Console\"><p class=\"ds-nav-category\">Overview</p><a class=\"ds-nav-item ds-nav-active\" href=\"#dashboard\" aria-current=\"page\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" aria-hidden=\"true\"><path d=\"M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z\"/></svg>Dashboard</a><a class=\"ds-nav-item\" href=\"#usage\">Usage records</a></nav>",
+      "css": ".ds-nav{width:184px;padding:8px 12px 16px;background:var(--console-surface,#fff);font-family:system-ui,sans-serif}.ds-nav-category{padding:10px 12px 6px;margin:0;color:var(--console-muted,#617086);font-size:11px;font-weight:500}.ds-nav-item{display:flex;align-items:center;gap:10px;min-height:36px;padding:8px 12px;margin-bottom:4px;border-radius:20px;text-decoration:none;font-size:13px;color:var(--console-ink,#202a3b)}.ds-nav-item:hover{background:var(--console-nav,#f8fafc)}.ds-nav-active,.ds-nav-active:hover{background:var(--console-selected,#edf4ff);color:var(--console-accent,#2563eb);font-weight:600}.ds-nav-item:focus-visible{outline:2px solid var(--console-accent,#2563eb);outline-offset:3px;}"
     },
     {
       "name": "Neutral Badge",
       "kind": "chip",
       "refersTo": "badge-neutral",
-      "description": "Shared rounded-rectangle badge; provider pills and status dots are distinct components.",
-      "html": "<span class=\"ds-badge\">Standard</span>",
-      "css": ".ds-badge{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:6px;background:#f3f4f6;color:#374151;font:500 12px/16px system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif}:host-context(.dark) .ds-badge{background:#334155;color:#cbd5e1}"
+      "description": "Compact noninteractive status label.",
+      "html": "<span class=\"ds-badge\">Public</span>",
+      "css": ".ds-badge{display:inline-flex;align-items:center;gap:4px;border-radius:6px;padding:2px 8px;background:#f3f4f6;color:#374151;font:500 12px/16px system-ui,sans-serif}:host-context(.dark) .ds-badge{background:#334155;color:#cbd5e1}"
     },
     {
       "name": "Content Panel",
       "kind": "card",
-      "refersTo": "card",
-      "description": "Standalone identity or checkout container; collection/report/configuration sections use flat dividers instead.",
-      "html": "<section class=\"ds-panel\"><h3>Account identity</h3><p>Metadata and account details share a divided document.</p></section>",
-      "css": ".ds-panel{padding:24px;border:1px solid var(--console-line,#e3e8ef);border-radius:12px;background:var(--console-surface,#fff);color:var(--console-ink,#263449);font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;transition:border-color 150ms}.ds-panel h3{margin:0 0 20px;font-size:15px;font-weight:600}.ds-panel p{margin:0;font-size:13px;color:var(--console-muted,#64748b)}"
+      "refersTo": "content-panel",
+      "description": "White bordered inner working area with compact title and supporting text.",
+      "html": "<section class=\"ds-panel\"><h3 class=\"ds-panel-title\">General settings</h3><p class=\"ds-panel-copy\">Configure the existing workspace options.</p></section>",
+      "css": ".ds-panel{padding:20px;border:1px solid var(--console-line,#e7ebf1);border-radius:12px;background:var(--console-surface,#fff);color:var(--console-ink,#202a3b);box-shadow:none;font-family:system-ui,sans-serif}.ds-panel-title{margin:0;font-size:15px;font-weight:600}.ds-panel-copy{margin:5px 0 0;font-size:12px;color:var(--console-muted,#617086)}"
     },
     {
-      "name": "Settings Categories",
-      "kind": "nav",
-      "refersTo": "settings-category",
-      "description": "164px vertical directory, becoming a horizontal scrolling row below 768px. Preview shows visual states.",
-      "html": "<nav class=\"ds-settings\" aria-label=\"Settings categories\"><button type=\"button\" aria-pressed=\"true\">General</button><button type=\"button\" aria-pressed=\"false\">Security</button><button type=\"button\" aria-pressed=\"false\">Payment</button></nav>",
-      "css": ".ds-settings{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;display:flex;flex-direction:column;gap:4px;width:164px}.ds-settings button{font-family:inherit;width:100%;min-height:40px;padding:8px 12px;border:0;border-radius:6px;text-align:left;background:transparent;color:var(--console-muted,#64748b);font-size:13px}.ds-settings button[aria-pressed=true]{background:var(--console-selected,#f5f3ff);color:var(--console-accent,#635bce)}.ds-settings button:focus-visible{outline:2px solid var(--console-accent,#635bce);outline-offset:3px}@media(max-width:1023px){.ds-settings{width:160px}}@media(max-width:767px){.ds-settings{width:auto;flex-direction:row;overflow-x:auto}.ds-settings button{width:auto;min-width:max-content}}"
-    },
-    {
-      "name": "Order Review",
-      "kind": "card",
-      "refersTo": "order-review",
-      "description": "Sticky desktop review; becomes static below 1024px. Values are synthetic and no payment is submitted.",
-      "html": "<aside class=\"ds-review\"><h3>Order review</h3><div class=\"ds-review-row\"><span>Payment amount</span><span>$20.00</span></div><div class=\"ds-review-row\"><span>Fee</span><span>$0.00</span></div></aside>",
-      "css": ".ds-review{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;position:sticky;top:84px;min-width:0;padding:24px;border:1px solid var(--console-line,#e3e8ef);border-radius:12px;background:var(--console-surface,#fff);color:var(--console-ink,#263449)}.ds-review h3{margin:0 0 18px;font-size:15px;font-weight:600}.ds-review-row{display:flex;justify-content:space-between;gap:16px;font-size:14px;line-height:20px;font-variant-numeric:tabular-nums}.ds-review-row+.ds-review-row{margin-top:8px}.ds-review-row>span:first-child{color:#6b7280}@media(max-width:1023px){.ds-review{position:static}}"
-    },
-    {
-      "name": "Configuration Section",
+      "name": "Chart Form Choices",
       "kind": "custom",
-      "refersTo": "configuration-section",
-      "description": "Flat document section with heading above fields, bottom divider, and 28px rhythm.",
-      "html": "<section class=\"ds-config\"><h3>General settings</h3><label for=\"ds-config-name\">Display name</label><input id=\"ds-config-name\" value=\"937 Console\" /></section>",
-      "css": ".ds-config{padding:0 0 28px;margin:0 0 28px;border-bottom:1px solid var(--console-line,#e3e8ef);color:var(--console-ink,#263449);font-family:system-ui,sans-serif}.ds-config h3{margin:0;padding:0 0 20px;font-size:15px;font-weight:600}.ds-config label{display:block;font-size:14px;margin-bottom:6px}.ds-config input{width:calc(100% - 26px);padding:8px 12px;border:1px solid var(--console-line,#e3e8ef);border-radius:8px;font:14px/20px system-ui,sans-serif;background:var(--console-surface,#fff);color:var(--console-ink,#263449)}.ds-config input:hover{border-color:var(--console-muted,#64748b)}.ds-config input:focus-visible{outline:2px solid var(--console-accent,#635bce);outline-offset:3px}"
+      "refersTo": "chart-choice",
+      "description": "Pill track for bar/area choices with explicit pressed state.",
+      "html": "<div class=\"ds-choices\" role=\"group\" aria-label=\"Chart type\"><button class=\"ds-choice\" aria-pressed=\"true\">Bar chart</button><button class=\"ds-choice\" aria-pressed=\"false\">Area chart</button></div>",
+      "css": ".ds-choices{display:inline-flex;align-items:center;gap:2px;padding:3px;border-radius:20px;background:var(--console-nav,#f8fafc)}.ds-choice{padding:5px 11px;border:1px solid transparent;border-radius:20px;background:transparent;color:var(--console-muted,#617086);font:400 12px/18px system-ui,sans-serif;white-space:nowrap;cursor:pointer}.ds-choice:hover{color:var(--console-ink,#202a3b)}.ds-choice[aria-pressed=\"true\"]{border-color:var(--console-line,#e7ebf1);background:var(--console-surface,#fff);color:var(--console-ink,#202a3b);font-weight:600}.ds-choice:focus-visible{outline:2px solid var(--console-accent,#2563eb);outline-offset:3px;}"
+    },
+    {
+      "name": "Collection Table",
+      "kind": "custom",
+      "refersTo": "collection-header",
+      "description": "Framed compact table with neutral header, tabular numbers, and selected row wash.",
+      "html": "<section class=\"ds-table-panel\"><table class=\"ds-table\"><thead><tr><th>Model</th><th>Requests</th></tr></thead><tbody><tr><td>Local sample</td><td>120</td></tr><tr><td>Local sample 2</td><td>84</td></tr></tbody></table><footer class=\"ds-table-footer\">Synthetic preview · 2 records</footer></section>",
+      "css": ".ds-table-panel{min-width:0;overflow:auto;border:1px solid var(--console-line,#e7ebf1);border-radius:12px;background:var(--console-surface,#fff);font-family:system-ui,sans-serif}.ds-table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}.ds-table th{height:42px;padding:0 16px;background:var(--console-nav,#f8fafc);color:var(--console-muted,#617086);font-size:12px;font-weight:600;text-align:left;border-bottom:1px solid var(--console-line,#e7ebf1)}.ds-table td{padding:10px 16px;font-size:13px;color:var(--console-ink,#202a3b);border-bottom:1px solid var(--console-line,#e7ebf1)}.ds-table td:first-child{font-weight:500}.ds-table th:last-child,.ds-table td:last-child{text-align:right}.ds-table tbody tr:hover td{background:var(--console-selected,#edf4ff)}.ds-table-footer{padding:12px 16px;color:var(--console-muted,#617086);font-size:12px}"
     }
   ],
   "narrative": {
-    "northStar": "The Operations Workbench",
-    "overview": "The B console is a light, professional workspace for API traffic, charges, resources, and account settings. The chosen reference is Stripe: light surfaces, clear hierarchy, and restrained blue-violet accents. A pale module sidebar and quiet breadcrumb header frame a white working surface. Collections read as ledgers, analytics as reports, and configuration as a document.\n\nCollections use on-demand horizontal filters above records. Reports separate primary analysis from content-sized rankings. Settings use a directory and flat divided sections with headings above fields. Identity uses flat metadata; purchasing separates editable selection from order review. Stored dark theme, configured branding, permissions, feature flags, and existing financial meaning remain authoritative.",
+    "northStar": "The Direct-Access Console",
+    "overview": "The B console is a compact API operations workspace. Its confirmed reference is New API: a white global header and sidebar, a light gray canvas, rounded white working areas, restrained blue selection, and readable records. The interface uses direct destination categories, visible collection filters, and full-width analytical panels to make operational work easy to find and scan.\n\nConfigured branding, Chinese and English labels, stored dark theme, permissions, and existing billing distinctions remain product truth. This is an interface grammar for the B console and shared authentication layout; it does not prescribe a new backend, replace provider-owned flows, or extend to deployment C.",
     "keyCharacteristics": [
-      "One light module sidebar with workspace switching, permission-aware search, and collapse.",
-      "A white working surface, quiet dividers, and restrained violet actions and selections.",
-      "On-demand horizontal filters, unboxed collection ledgers, and explicit record counts.",
-      "Flat configuration sections, identity metadata, and responsive checkout columns.",
-      "Metric-switching reports, content-sized rankings, and explicit numerical values."
+      "Global workspace header with directly visible navigation categories.",
+      "Blue actions and selected states on white surfaces and a light gray canvas.",
+      "Framed collections with filters open by default, compact records, and integrated pagination.",
+      "Five headline measures, a resource band, and full-width metric/form-switching analysis.",
+      "Responsive stacking, local table overflow, and a mobile navigation drawer."
     ],
     "rules": [
       {
         "name": "The Action Rule",
-        "body": "Use the shared violet primary action for console purchase and renewal; retain semantic colors for their existing data and status meanings.",
+        "body": "Use the shared blue action scale for console actions; reserve semantic colors for their existing status and data meanings.",
         "section": "colors"
       },
       {
         "name": "The Data Rule",
-        "body": "Preserve existing precision, units, currency distinctions, and labels when changing presentation.",
+        "body": "Keep numerical precision, units, and actual, account, and standard charge labels intact when changing presentation.",
         "section": "typography"
       },
       {
         "name": "The Surface Rule",
-        "body": "Use tone and fine borders for work panels; reserve pronounced depth for overlays.",
+        "body": "Use tone and fine borders for work areas; reserve pronounced depth for overlays.",
         "section": "elevation"
       }
     ],
     "dos": [
-      "Do use one sidebar, a quiet utility header, and a clear content heading.",
-      "Do use the shared violet action language for purchase and renewal.",
-      "Do reveal horizontal filters on demand and preserve query state when hidden.",
-      "Do place settings section headings above fields and keep identity metadata flat.",
-      "Do preserve semantic colors, units, currency distinctions, permissions, feature flags, validation, and stored theme.",
-      "Do treat preview values and screenshots as synthetic visual evidence only."
+      "Do use the global header, directly visible destination categories, and one clear page heading.",
+      "Do keep collection filters open initially and preserve their query state when collapsed.",
+      "Do use blue for shared primary actions and selection while retaining existing semantic status colors.",
+      "Do keep trends full width and expose both metric and chart-form choices where implemented.",
+      "Do preserve labels, units, currency distinctions, permissions, feature flags, validation, and stored theme.",
+      "Do treat local preview values and screenshots as synthetic visual evidence."
     ],
     "donts": [
-      "Don't restore the rejected dark horizontal business bar, teal action styling, or permanent collection filter column.",
-      "Don't duplicate page titles in the utility header or use competing provider-colored console CTAs.",
-      "Don't replace labeled analytical comparisons with overlapping multi-metric fills or doughnut distributions in this workspace.",
-      "Don't erase errors, adornments, disabled behavior, or provider-owned controls for visual uniformity.",
-      "Don't apply this B-console specification to C, backend behavior, or unrelated public surfaces.",
-      "Don't interpret local screenshots or documentation as proof of deployment or live payment success."
+      "Don't restore revision 5's expandable top-level modules, closed-by-default filters, unboxed collections, or split primary analysis.",
+      "Don't hide meaningful billing-period metadata with low-contrast decorative text.",
+      "Don't treat nested feature groups as evidence that top-level categories should collapse.",
+      "Don't remove errors, input adornments, disabled behavior, or provider-owned controls for visual uniformity.",
+      "Don't apply B-console visual rules to C, backend contracts, or unrelated public surfaces.",
+      "Don't interpret this document or local captures as universal accessibility, all-route, deployment, or live-payment certification."
     ]
   }
 }

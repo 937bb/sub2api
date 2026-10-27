@@ -1,8 +1,8 @@
 <template>
-  <header class="console-header sticky top-0 z-30" :aria-label="pageTitle">
+  <header class="console-header sticky top-0 z-40" :aria-label="pageTitle">
     <div class="flex h-16 items-center justify-between gap-2 px-3 md:px-6">
       <!-- Left: Mobile Menu Toggle + Page Title -->
-      <div class="flex min-w-0 items-center gap-2 sm:gap-4">
+      <div class="flex min-w-0 flex-1 items-center gap-2 sm:gap-4">
         <button
           @click="toggleMobileSidebar"
           class="btn-ghost btn-icon lg:hidden"
@@ -11,8 +11,16 @@
           <Icon name="menu" size="md" />
         </button>
 
+        <router-link :to="authStore.isAdmin ? '/admin/dashboard' : '/dashboard'" class="console-global-brand">
+          <img v-if="siteLogo" :src="siteLogo" alt="" />
+          <span v-else class="console-brand-mark" aria-hidden="true">9<span>37</span></span>
+          <span>{{ appStore.siteName === 'Sub2API' ? '937 Console' : appStore.siteName }}</span>
+        </router-link>
+        <nav v-if="authStore.isAdmin && !authStore.isSimpleMode" class="console-global-nav" :aria-label="t('console.workspace')">
+          <router-link to="/admin/dashboard" :class="{ 'is-selected': adminArea }">{{ t('console.adminWorkspace') }}</router-link>
+          <router-link to="/dashboard" :class="{ 'is-selected': !adminArea }">{{ t('nav.myAccount') }}</router-link>
+        </nav>
         <div class="min-w-0">
-          <div class="console-breadcrumb"><span>{{ appStore.siteName === 'Sub2API' ? '937 Console' : appStore.siteName }}</span><Icon name="chevronRight" size="xs" /><span>{{ pageTitle }}</span></div>
           <h1 class="sr-only">
             {{ t(user?.role === 'admin' ? 'console.adminWorkspace' : 'console.userWorkspace') }}
           </h1>
@@ -23,7 +31,7 @@
       </div>
 
       <!-- Right: Announcements + Docs + Language + Subscriptions + Balance + User Dropdown -->
-      <div class="flex min-w-0 items-center gap-1 sm:gap-3">
+      <div class="flex shrink-0 items-center gap-1 sm:gap-3">
         <!-- Announcement Bell -->
         <AnnouncementBell v-if="user" />
 
@@ -59,7 +67,7 @@
 
         <!-- Balance Display -->
         <div
-          v-if="user"
+          v-if="user && !authStore.isSimpleMode"
           class="group relative hidden items-center gap-2 rounded-xl bg-primary-50 px-3 py-1.5 dark:bg-primary-900/20 sm:flex"
         >
           <svg
@@ -145,7 +153,7 @@
               </div>
 
               <!-- Balance (mobile only) -->
-              <div class="border-b border-gray-100 px-4 py-2 dark:border-dark-700 sm:hidden">
+              <div v-if="!authStore.isSimpleMode" class="border-b border-gray-100 px-4 py-2 dark:border-dark-700 sm:hidden">
                 <div class="text-xs text-gray-500 dark:text-dark-400">
                   {{ t('common.balance') }}
                 </div>
@@ -282,6 +290,9 @@ const dropdownOpen = ref(false)
 const dropdownRef = ref<HTMLElement | null>(null)
 const contactInfo = computed(() => appStore.contactInfo)
 const docUrl = computed(() => sanitizeUrl(appStore.docUrl))
+const siteLogo = computed(() => sanitizeUrl(appStore.siteLogo || '', { allowRelative: true, allowDataUrl: true }))
+const adminArea = computed(() => authStore.isSimpleMode || route.path.startsWith('/admin/')
+  || (authStore.isAdmin && adminSettingsStore.customMenuItems.some(item => item.visibility === 'admin' && route.path === `/custom/${item.id}`)))
 const modelPlazaEnabled = computed(() => isFeatureFlagEnabled(FeatureFlags.modelPlaza))
 const avatarUrl = computed(() => user.value?.avatar_url?.trim() || '')
 const availableBalance = computed(() => Number(user.value?.balance || 0))

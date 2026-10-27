@@ -1,5 +1,12 @@
 export default {
   console: {
+    requestsPerMinute: '每分钟请求数',
+    tokensPerMinute: '每分钟 Token 数',
+    chartType: '图表类型',
+    barChart: '柱状图',
+    areaChart: '面积图',
+    modelAnalysis: '模型分析',
+    userAnalysis: '用户分析',
     trafficCapacity: '流量与容量',
     responseQuality: '延迟与错误',
     matchingRecords: '匹配记录',

@@ -1,6 +1,11 @@
 <template>
   <AppLayout>
     <TablePageLayout :rows="groups" :total="pagination.total" :loading="loading">
+      <template #tabs>
+        <div class="console-collection-tabs" role="group" :aria-label="t('common.status')">
+          <button v-for="option in statusOptions" :key="option.value" type="button" :aria-pressed="filters.status === option.value" @click="filters.status = option.value; loadGroups()">{{ option.label }}</button>
+        </div>
+      </template>
       <template #actions>
 <div
             class="flex w-full flex-shrink-0 flex-wrap items-center justify-end gap-3 lg:w-auto"
@@ -94,13 +99,6 @@
               @change="loadGroups"
             />
             <Select
-              v-model="filters.status"
-              :options="statusOptions"
-              :placeholder="t('admin.groups.allStatus')"
-              class="collection-query-field"
-              @change="loadGroups"
-            />
-            <Select
               v-if="!authStore.isSimpleMode"
               v-model="filters.is_exclusive"
               :options="exclusiveOptions"
@@ -125,10 +123,11 @@
           default-sort-order="asc"
           @sort="handleSort"
         >
-          <template #cell-name="{ value }">
-            <span class="font-medium text-gray-900 dark:text-white">{{
-              value
-            }}</span>
+          <template #cell-name="{ value, row }">
+            <div class="console-record-identity">
+              <span class="console-record-provider"><PlatformIcon :platform="row.platform" size="sm" /></span>
+              <span class="font-medium text-gray-900 dark:text-white">{{ value }}</span>
+            </div>
           </template>
 
           <template #cell-id="{ value }">
@@ -200,7 +199,7 @@
                   <span v-if="row.daily_limit_usd" class="whitespace-nowrap">
                     <span
                       v-if="usageLoading"
-                      class="font-medium text-gray-400 dark:text-gray-500"
+                      class="font-medium text-[var(--console-muted)]"
                       >—</span
                     >
                     <span
@@ -215,7 +214,7 @@
                         formatUsd(usageMap.get(row.id)?.today_cost ?? 0)
                       }}</span
                     >
-                    <span class="text-gray-400 dark:text-gray-500">
+                    <span class="text-[var(--console-muted)]">
                       / {{ formatUsd(row.daily_limit_usd) }}/{{
                         t("admin.groups.limitDay")
                       }}</span
@@ -245,10 +244,10 @@
                     }}</span
                   >
                 </div>
-                <span v-else class="text-gray-400 dark:text-gray-500">{{
+                <span v-else class="text-[var(--console-muted)]">{{
                   t("admin.groups.subscription.noLimit")
                 }}</span>
-                <div class="text-gray-400 dark:text-gray-500">
+                <div class="text-[var(--console-muted)]">
                   {{ t("admin.groups.usageTotal") }}
                   <span class="ml-1 font-medium text-gray-600 dark:text-gray-300"
                     >{{
@@ -337,7 +336,7 @@
             <div v-if="usageLoading" class="text-xs text-gray-400">—</div>
             <div v-else class="space-y-0.5 text-xs">
               <div class="text-gray-500 dark:text-gray-400">
-                <span class="text-gray-400 dark:text-gray-500">{{
+                <span class="text-[var(--console-muted)]">{{
                   t("admin.groups.usageToday")
                 }}</span>
                 <span class="ml-1 font-medium text-gray-700 dark:text-gray-300"
@@ -347,7 +346,7 @@
                 >
               </div>
               <div class="text-gray-500 dark:text-gray-400">
-                <span class="text-gray-400 dark:text-gray-500">{{
+                <span class="text-[var(--console-muted)]">{{
                   t("admin.groups.usageYesterday")
                 }}</span>
                 <span class="ml-1 font-medium text-gray-700 dark:text-gray-300"
@@ -357,7 +356,7 @@
                 >
               </div>
               <div class="text-gray-500 dark:text-gray-400">
-                <span class="text-gray-400 dark:text-gray-500">{{
+                <span class="text-[var(--console-muted)]">{{
                   t("admin.groups.usageTotal")
                 }}</span>
                 <span class="ml-1 font-medium text-gray-700 dark:text-gray-300"
@@ -381,13 +380,14 @@
           </template>
 
           <template #cell-actions="{ row }">
-            <div class="flex items-center gap-1">
+            <div class="console-row-actions">
               <button
                 @click="handleEdit(row)"
+                :title="t('common.edit')"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
               >
                 <Icon name="edit" size="sm" />
-                <span class="text-xs">{{ t("common.edit") }}</span>
+                <span class="sr-only">{{ t("common.edit") }}</span>
               </button>
               <button
                 v-if="!authStore.isSimpleMode"
@@ -402,7 +402,7 @@
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-dark-700 dark:hover:text-primary-400"
               >
                 <Icon name="copy" size="sm" />
-                <span class="text-xs">
+                <span class="sr-only">
                   {{
                     duplicatingGroupIds.has(row.id)
                       ? t("admin.groups.duplicating")
@@ -414,10 +414,11 @@
                 v-if="!authStore.isSimpleMode && row.platform === 'composite'"
                 data-testid="group-composite-routes"
                 @click="handleCompositeRoutes(row)"
+                :title="t('admin.groups.compositeRoutes.action')"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-cyan-600 dark:hover:bg-dark-700 dark:hover:text-cyan-400"
               >
                 <Icon name="swap" size="sm" />
-                <span class="text-xs">{{
+                <span class="sr-only">{{
                   t("admin.groups.compositeRoutes.action")
                 }}</span>
               </button>
@@ -425,10 +426,11 @@
                 v-if="!authStore.isSimpleMode"
                 data-testid="group-rate-multipliers"
                 @click="handleRateMultipliers(row)"
+                :title="t('admin.groups.rateMultipliers')"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-purple-600 dark:hover:bg-dark-700 dark:hover:text-purple-400"
               >
                 <Icon name="dollar" size="sm" />
-                <span class="text-xs">{{
+                <span class="sr-only">{{
                   t("admin.groups.rateMultipliers")
                 }}</span>
               </button>
@@ -436,19 +438,21 @@
                 v-if="!authStore.isSimpleMode"
                 data-testid="group-rpm-overrides"
                 @click="handleRPMOverrides(row)"
+                :title="t('admin.groups.rpmOverrides')"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-orange-600 dark:hover:bg-dark-700 dark:hover:text-orange-400"
               >
                 <Icon name="bolt" size="sm" />
-                <span class="text-xs">{{
+                <span class="sr-only">{{
                   t("admin.groups.rpmOverrides")
                 }}</span>
               </button>
               <button
                 @click="handleDelete(row)"
+                :title="t('common.delete')"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
               >
                 <Icon name="trash" size="sm" />
-                <span class="text-xs">{{ t("common.delete") }}</span>
+                <span class="sr-only">{{ t("common.delete") }}</span>
               </button>
             </div>
           </template>

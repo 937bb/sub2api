@@ -1,18 +1,22 @@
 <template>
   <section class="card console-activity">
-    <div class="console-panel-heading">
-      <div><h3>{{ t('console.analysis') }}</h3><p>{{ t('console.analysisHint') }}</p></div>
+    <div class="console-panel-heading console-analysis-heading">
+      <div><h3>{{ t('console.analysis') }}</h3><span class="console-chart-total"><strong>{{ summary }}</strong> <small>{{ t(metric === 'cache' ? 'console.cacheRate' : 'console.rangeTotal') }}</small></span></div>
+      <div class="console-chart-tabs" role="group" :aria-label="t('console.analysis')">
+        <button v-for="tab in tabs" :key="tab.id" type="button" :aria-pressed="metric === tab.id" :class="{ selected: metric === tab.id }" @click="metric = tab.id">{{ t(tab.label) }}</button>
+      </div>
     </div>
-    <div class="console-chart-tabs" role="group" :aria-label="t('console.analysis')">
-      <button v-for="tab in tabs" :key="tab.id" type="button" :aria-pressed="metric === tab.id" :class="{ selected: metric === tab.id }" @click="metric = tab.id">{{ t(tab.label) }}</button>
-    </div>
-    <div class="console-chart-summary">
-      <strong>{{ summary }}</strong><span>{{ t(metric === 'cache' ? 'console.cacheRate' : 'console.rangeTotal') }}</span>
+    <div class="console-plot-toolbar">
+      <p>{{ t('console.analysisHint') }}</p>
+      <div class="console-density-switch" role="group" :aria-label="t('console.chartType')">
+        <button type="button" :aria-pressed="chartForm === 'bar'" @click="chartForm = 'bar'">{{ t('console.barChart') }}</button>
+        <button type="button" :aria-pressed="chartForm === 'area'" @click="chartForm = 'area'">{{ t('console.areaChart') }}</button>
+      </div>
     </div>
     <div v-if="loading" class="console-plot skeleton" role="status" :aria-label="t('common.loading')" />
     <div v-else-if="trendData.length" class="console-plot">
-      <Bar v-if="metric === 'tokens'" :data="tokenData" :options="barOptions" :aria-label="t('console.tokenComposition')" role="img" />
-      <Line v-else :data="lineData" :options="lineOptions" :aria-label="t(tabs.find(tab => tab.id === metric)!.label)" role="img" />
+      <Bar v-if="chartForm === 'bar'" :data="metric === 'tokens' ? tokenData : lineData" :options="barOptions" :aria-label="t(tabs.find(tab => tab.id === metric)!.label)" role="img" />
+      <Line v-else :data="metric === 'tokens' ? tokenAreaData : lineData" :options="lineOptions" :aria-label="t(tabs.find(tab => tab.id === metric)!.label)" role="img" />
     </div>
     <div v-else class="console-plot console-chart-empty">{{ t('admin.dashboard.noDataAvailable') }}</div>
     <div class="console-chart-footnote">{{ t('console.rangeData') }}<span v-if="trendData.length">{{ trendData[0].date }} — {{ trendData[trendData.length - 1].date }}</span></div>
@@ -20,23 +24,25 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useDark } from '@vueuse/core'
 import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, BarElement, Tooltip, Legend, Filler } from 'chart.js'
 import { Bar, Line } from 'vue-chartjs'
 import type { TrendDataPoint } from '@/types'
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, Tooltip, Legend, Filler)
-const props = defineProps<{ trendData: TrendDataPoint[]; loading?: boolean }>()
+const props = withDefaults(defineProps<{ trendData: TrendDataPoint[]; loading?: boolean; showCosts?: boolean }>(), { showCosts: true })
 const { t } = useI18n()
 const dark = useDark({ storageKey: 'theme' })
+const chartForm = ref<'bar' | 'area'>('bar')
 const metric = ref<'tokens' | 'requests' | 'cost' | 'cache'>('tokens')
-const tabs = [
+const tabs = computed(() => ([
   { id: 'tokens', label: 'console.tokenComposition' },
   { id: 'requests', label: 'console.requests' },
   { id: 'cost', label: 'console.spending' },
   { id: 'cache', label: 'console.cacheRate' }
-] as const
+] as const).filter(tab => props.showCosts || tab.id !== 'cost'))
+watch(() => props.showCosts, show => { if (!show && metric.value === 'cost') metric.value = 'tokens' })
 const safe = (n: unknown) => typeof n === 'number' && Number.isFinite(n) ? n : 0
 const compact = (n: number) => n >= 1e9 ? `${(n / 1e9).toFixed(2)}B` : n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}K` : n.toLocaleString()
 const sum = (key: keyof TrendDataPoint) => props.trendData.reduce((n, row) => n + safe(row[key]), 0)
@@ -57,21 +63,25 @@ const labels = computed(() => props.trendData.map(row => row.date))
 const tokenData = computed(() => ({
   labels: labels.value,
   datasets: [
-    { label: t('console.input'), key: 'input_tokens', color: '#3562ce' },
-    { label: t('console.output'), key: 'output_tokens', color: '#183d8b' },
-    { label: t('console.cacheRead'), key: 'cache_read_tokens', color: '#62b7ad' },
-    { label: t('console.cacheWrite'), key: 'cache_creation_tokens', color: '#c28a42' }
-  ].map(item => ({ label: item.label, data: props.trendData.map(row => safe(row[item.key as keyof TrendDataPoint])), backgroundColor: item.color, borderWidth: 0, borderRadius: 3, maxBarThickness: 36 }))
+    { label: t('console.input'), key: 'input_tokens', color: '#4f78ec' },
+    { label: t('console.output'), key: 'output_tokens', color: '#8c6bdd' },
+    { label: t('console.cacheRead'), key: 'cache_read_tokens', color: '#58bca5' },
+    { label: t('console.cacheWrite'), key: 'cache_creation_tokens', color: '#eab64d' }
+  ].map(item => ({ label: item.label, data: props.trendData.map(row => safe(row[item.key as keyof TrendDataPoint])), backgroundColor: item.color, borderWidth: 0, borderRadius: 3, maxBarThickness: 52 }))
+}))
+const tokenAreaData = computed(() => ({
+  labels: tokenData.value.labels,
+  datasets: tokenData.value.datasets.map(dataset => ({ ...dataset, borderColor: dataset.backgroundColor, backgroundColor: dataset.backgroundColor + '65', fill: true }))
 }))
 const lineData = computed(() => ({
   labels: labels.value,
   datasets: metric.value === 'cache' ? [
     { label: t('console.cacheRate'), data: props.trendData.map(hitRate), borderColor: '#27857a', backgroundColor: '#27857a18', fill: true }
   ] : metric.value === 'cost' ? [
-    { label: t('dashboard.actual'), data: props.trendData.map(row => safe(row.actual_cost)), borderColor: '#3562ce', backgroundColor: '#3562ce18', fill: true },
+    { label: t('dashboard.actual'), data: props.trendData.map(row => safe(row.actual_cost)), borderColor: '#4f78ec', backgroundColor: '#4f78ec18', fill: true },
     { label: t('dashboard.standard'), data: props.trendData.map(row => safe(row.cost)), borderColor: '#8b97ac', borderDash: [4, 4], fill: false }
   ] : [
-    { label: t('console.requests'), data: props.trendData.map(row => safe(row.requests)), borderColor: '#3562ce', backgroundColor: '#3562ce18', fill: true }
+    { label: t('console.requests'), data: props.trendData.map(row => safe(row.requests)), borderColor: '#4f78ec', backgroundColor: '#4f78ec18', fill: true }
   ]
 }))
 const commonOptions = computed(() => ({
@@ -80,7 +90,7 @@ const commonOptions = computed(() => ({
   animation: false as const,
   interaction: { intersect: false, mode: 'index' as const },
   plugins: {
-    legend: { position: 'bottom' as const, align: 'start' as const, labels: { color: dark.value ? '#bec9d9' : '#536175', usePointStyle: true, pointStyle: 'rectRounded', boxWidth: 8, boxHeight: 8, padding: 20, font: { size: 11 } } },
+    legend: { position: 'bottom' as const, align: 'center' as const, labels: { color: dark.value ? '#bec9d9' : '#536175', usePointStyle: true, pointStyle: 'rectRounded', boxWidth: 8, boxHeight: 8, padding: 20, font: { size: 11 } } },
     tooltip: { padding: 12, cornerRadius: 6, backgroundColor: '#172538', callbacks: {
       label: (context: { dataset: { label?: string }; parsed: { y: number | null } }) => {
         const value = context.parsed.y || 0
@@ -95,11 +105,11 @@ const commonOptions = computed(() => ({
 }))
 const barOptions = computed(() => ({
   ...commonOptions.value,
-  scales: { x: { ...commonOptions.value.scales.x, stacked: true }, y: { ...commonOptions.value.scales.y, stacked: true } }
+  scales: { x: { ...commonOptions.value.scales.x, stacked: metric.value === 'tokens' }, y: { ...commonOptions.value.scales.y, stacked: metric.value === 'tokens' } }
 }))
 const lineOptions = computed(() => ({
   ...commonOptions.value,
   elements: { point: { radius: 0, hitRadius: 12, hoverRadius: 4 }, line: { borderWidth: 2, tension: 0.25 } },
-  scales: { ...commonOptions.value.scales, y: { ...commonOptions.value.scales.y, ...(metric.value === 'cache' ? { min: 0, max: 100 } : {}) } }
+  scales: { x: { ...commonOptions.value.scales.x, stacked: metric.value === 'tokens' }, y: { ...commonOptions.value.scales.y, stacked: metric.value === 'tokens', ...(metric.value === 'cache' ? { min: 0, max: 100 } : {}) } }
 }))
 </script>

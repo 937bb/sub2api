@@ -1,6 +1,13 @@
 <template>
   <AppLayout>
-    <div class="console-usage space-y-6">
+    <div class="console-usage space-y-5">
+      <div class="console-overview">
+        <h2>{{ t('nav.usage') }}</h2>
+        <div class="console-analysis-navigation" role="group" :aria-label="t('nav.usage')">
+          <button type="button" :aria-pressed="usageView === 'records'" @click="usageView = 'records'">{{ t('console.details') }}</button>
+          <button type="button" :aria-pressed="usageView === 'analysis'" @click="usageView = 'analysis'">{{ t('console.analysis') }}</button>
+        </div>
+      </div>
       <UsageStatsCards :stats="usageStats" />
       <!-- Charts Section -->
       <div class="space-y-4">
@@ -14,7 +21,7 @@
                 @change="onDateRangeChange"
               />
             </div>
-            <div class="ml-auto flex items-center gap-2">
+            <div v-show="usageView === 'analysis'" class="ml-auto flex items-center gap-2">
               <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.dashboard.granularity') }}:</span>
               <div class="w-28">
                 <Select v-model="granularity" :options="granularityOptions" @change="loadChartData" />
@@ -22,7 +29,7 @@
             </div>
           </div>
         </div>
-        <div class="console-charts-grid">
+        <div v-if="usageView === 'analysis'" class="console-charts-grid">
           <TokenUsageTrend :trend-data="trendData" :loading="chartsLoading" />
           <div class="console-distribution-workspace">
             <div class="console-distribution-tabs" role="group" :aria-label="t('console.analysis')">
@@ -68,7 +75,7 @@
         </div>
       </div>
       <!-- 明细区：tab 栏 + 筛选 + 内容收进同一张卡片，消除割裂感 -->
-      <div class="card">
+      <div v-show="usageView === 'records'" class="console-usage-records">
         <div class="flex flex-wrap items-center border-b border-gray-200 px-2 dark:border-dark-700 sm:px-4">
           <button
             v-for="tab in detailTabs"
@@ -211,6 +218,7 @@ import Icon from '@/components/icons/Icon.vue'
 import type { AdminUsageLog, TrendDataPoint, ModelStat, GroupStat, EndpointStat, AdminUser } from '@/types'; import type { AdminUsageStatsResponse, AdminUsageQueryParams } from '@/api/admin/usage'
 
 const { t } = useI18n()
+const usageView = ref<'records' | 'analysis'>('records')
 const distributionView = ref('model')
 const distributionViews = [
   { id: 'model', label: 'admin.dashboard.modelDistribution' },

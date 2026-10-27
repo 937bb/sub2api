@@ -2,6 +2,8 @@
   <div class="console-shell min-h-screen">
     <a href="#console-main" class="console-skip-link">{{ t('console.skipToContent') }}</a>
 
+    <AppHeader />
+
     <!-- Sidebar -->
     <AppSidebar />
 
@@ -10,9 +12,6 @@
       class="console-workspace relative min-h-screen"
       :class="[sidebarCollapsed ? 'console-workspace-wide' : 'console-workspace-context']"
     >
-      <!-- Header -->
-      <AppHeader />
-
       <!-- Main Content -->
       <main id="console-main" tabindex="-1" class="console-main">
         <slot />

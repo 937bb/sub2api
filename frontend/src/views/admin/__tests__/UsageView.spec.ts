@@ -442,6 +442,7 @@ describe('admin UsageView distribution metric toggles', () => {
       granularity: 'hour'
     }))
 
+    await wrapper.findAll('.console-analysis-navigation button')[1].trigger('click')
     const modelChart = wrapper.find('[data-test="model-chart"]')
     expect(modelChart.find('.metric').text()).toBe('tokens')
 

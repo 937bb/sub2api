@@ -5,12 +5,12 @@ export default {
   theme: {
     extend: {
       colors: {
-        // One violet action scale shared by utilities and console components.
+        // One blue action scale shared by utilities and console components.
         primary: {
-          50: '#f5f3ff', 100: '#ede9fe', 200: '#ddd6fe',
-          300: '#c4b5fd', 400: '#a78bfa', 500: '#8171eb',
-          600: '#635bce', 700: '#5146b5', 800: '#433994',
-          900: '#372f78', 950: '#231c4e'
+          50: '#eff6ff', 100: '#dbeafe', 200: '#bfdbfe',
+          300: '#93c5fd', 400: '#60a5fa', 500: '#3b82f6',
+          600: '#2563eb', 700: '#1d4ed8', 800: '#1e40af',
+          900: '#1e3a8a', 950: '#172554'
         },
         // Supporting neutrals.
         accent: {

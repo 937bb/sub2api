@@ -43,7 +43,7 @@
           </button>
         </div>
         <div
-          v-if="showMetricToggle"
+          v-if="showMetricToggle && showCosts"
           class="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-0.5 dark:border-dark-700 dark:bg-dark-800"
         >
           <button
@@ -113,9 +113,9 @@
               <th class="pb-2 text-left">{{ t('admin.dashboard.model') }}</th>
               <th class="pb-2 text-right">{{ t('admin.dashboard.requests') }}</th>
               <th class="pb-2 text-right">{{ t('admin.dashboard.tokens') }}</th>
-              <th class="pb-2 text-right">{{ t('admin.dashboard.actual') }}</th>
+              <th v-if="showCosts" class="pb-2 text-right">{{ t('admin.dashboard.actual') }}</th>
               <th v-if="showAccountCost" class="pb-2 text-right">{{ t('admin.dashboard.accountCost') }}</th>
-              <th class="pb-2 text-right">{{ t('admin.dashboard.standard') }}</th>
+              <th v-if="showCosts" class="pb-2 text-right">{{ t('admin.dashboard.standard') }}</th>
             </tr>
           </thead>
           <tbody>
@@ -142,13 +142,13 @@
                 <td class="py-1.5 text-right text-gray-600 dark:text-gray-400">
                   {{ formatTokens(model.total_tokens) }}
                 </td>
-                <td class="py-1.5 text-right text-green-600 dark:text-green-400">
+                <td v-if="showCosts" class="py-1.5 text-right text-green-600 dark:text-green-400">
                   ${{ formatCost(model.actual_cost) }}
                 </td>
                 <td v-if="showAccountCost" class="py-1.5 text-right text-orange-500 dark:text-orange-400">
                   ${{ formatCost(model.account_cost) }}
                 </td>
-                <td class="py-1.5 text-right text-gray-600 dark:text-gray-400">
+                <td v-if="showCosts" class="py-1.5 text-right text-gray-600 dark:text-gray-400">
                   ${{ formatCost(model.cost) }}
                 </td>
               </tr>
@@ -277,6 +277,7 @@ const props = withDefaults(defineProps<{
   showMetricToggle?: boolean
   enableBreakdown?: boolean
   showAccountCost?: boolean
+  showCosts?: boolean
   rankingLoading?: boolean
   rankingError?: boolean
   startDate?: string
@@ -297,6 +298,7 @@ const props = withDefaults(defineProps<{
   showMetricToggle: false,
   enableBreakdown: true,
   showAccountCost: true,
+  showCosts: true,
   rankingLoading: false,
   rankingError: false
 })
@@ -336,9 +338,9 @@ const emit = defineEmits<{
   'ranking-click': [item: UserSpendingRankingItem]
 }>()
 
-const enableRankingView = computed(() => props.enableRankingView)
-const showAccountCost = computed(() => props.showAccountCost)
-const distributionColspan = computed(() => showAccountCost.value ? 6 : 5)
+const enableRankingView = computed(() => props.enableRankingView && props.showCosts)
+const showAccountCost = computed(() => props.showAccountCost && props.showCosts)
+const distributionColspan = computed(() => !props.showCosts ? 3 : showAccountCost.value ? 6 : 5)
 const activeView = ref<'model_distribution' | 'spending_ranking'>('model_distribution')
 
 const chartColors = ['#3562ce', '#4b7ca9', '#27857a', '#6f7a9d', '#9b7e54', '#8c667a', '#718c70', '#707c8c', '#496397', '#6c9995', '#8c8e69', '#937c84']

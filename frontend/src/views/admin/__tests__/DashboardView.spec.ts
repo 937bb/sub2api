@@ -5,11 +5,14 @@ import { createPinia, setActivePinia } from 'pinia'
 import type { DashboardStats } from '@/types'
 import DashboardView from '../DashboardView.vue'
 
-const { getSnapshotV2, getUserUsageTrend, getUserSpendingRanking } = vi.hoisted(() => ({
+const { getSnapshotV2, getUserUsageTrend, getUserSpendingRanking, authState } = vi.hoisted(() => ({
+  authState: { isSimpleMode: false },
   getSnapshotV2: vi.fn(),
   getUserUsageTrend: vi.fn(),
   getUserSpendingRanking: vi.fn()
 }))
+
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => authState }))
 
 vi.mock('vue-chartjs', () => ({
   Line: { name: 'Line', props: ['data', 'options'], template: '<div class="line-chart" />' }
@@ -93,6 +96,7 @@ const createDashboardStats = (): DashboardStats => ({
 describe('admin DashboardView', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
+    authState.isSimpleMode = false
 
     getSnapshotV2.mockReset()
     getUserUsageTrend.mockReset()
@@ -132,6 +136,7 @@ describe('admin DashboardView', () => {
     })
     await flushPromises()
     expect(getUserUsageTrend).toHaveBeenCalledWith(expect.objectContaining({ metric: 'tokens', limit: 12 }))
+    await wrapper.findAll('button').find(button => button.text() === 'console.userAnalysis')!.trigger('click')
     await wrapper.findAll('button').find(button => button.text() === 'admin.dashboard.actualSpending')!.trigger('click')
     expect(getUserUsageTrend).toHaveBeenCalledWith(expect.objectContaining({ metric: 'actual_cost', limit: 12 }))
     await flushPromises()
@@ -141,6 +146,22 @@ describe('admin DashboardView', () => {
     resolveTokens({ trend: [{ date: '2026-01-01', user_id: 1, username: 'tokens', email: '', requests: 1, tokens: 100, cost: 1, actual_cost: 1 }] })
     await flushPromises()
     expect(chart.props('data').datasets[0].data).toEqual([5])
+  })
+
+  it('keeps simple mode free of financial summary and analysis controls', async () => {
+    authState.isSimpleMode = true
+    const wrapper = mount(DashboardView, { global: { stubs: {
+      AppLayout: { template: '<div><slot /></div>' }, Icon: true, DateRangePicker: true,
+      Select: true, ModelDistributionChart: true, TokenUsageTrend: true
+    } } })
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('dashboard.todayCost')
+    expect(wrapper.text()).not.toContain('admin.dashboard.groupPricing')
+    expect(wrapper.findComponent({ name: 'TokenUsageTrend' }).props('showCosts')).toBe(false)
+    expect(wrapper.findComponent({ name: 'ModelDistributionChart' }).props('showCosts')).toBe(false)
+    expect(wrapper.findComponent({ name: 'ModelDistributionChart' }).props('enableRankingView')).toBe(false)
+    await wrapper.findAll('button').find(button => button.text() === 'console.userAnalysis')!.trigger('click')
+    expect(wrapper.text()).not.toContain('admin.dashboard.actualSpending')
   })
 
   it('uses last 24 hours as default dashboard range', async () => {

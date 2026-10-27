@@ -1,49 +1,41 @@
 <template>
-  <div class="table-page-layout" :class="{ 'mobile-mode': isMobile, 'console-density-compact': compact }">
-    <div class="console-data-heading layout-section-fixed">
-      <div><h2>{{ pageTitle }}</h2><p v-if="pageDescription">{{ pageDescription }}</p></div>
+  <section class="table-page-layout" :class="{ 'mobile-mode': isMobile, 'console-density-compact': compact }">
+    <header class="console-data-heading layout-section-fixed">
+      <div class="console-collection-title">
+        <div class="console-title-line"><h2>{{ pageTitle }}</h2><span v-if="total !== undefined" class="console-record-count" :aria-busy="loading">{{ loading ? '—' : total.toLocaleString() }}</span></div>
+        <p v-if="pageDescription">{{ pageDescription }}</p>
+      </div>
       <div class="console-data-actions"><slot name="actions" /></div>
-    </div>
-
-    <div class="workbench-collection-body" :class="{ 'query-open': filtersOpen && $slots.filters }">
+    </header>
+    <slot name="tabs" />
+    <div class="workbench-collection-body">
+      <section v-if="$slots.filters" class="workbench-query-dock" :aria-label="t('console.resetFilters')">
+        <div class="console-query-heading">
+          <span><Icon name="filter" size="sm" />{{ t('console.resetFilters') }}</span>
+          <button type="button" class="console-text-button" :aria-expanded="filtersOpen" :aria-controls="filterId" @click="filtersOpen = !filtersOpen">{{ t(filtersOpen ? 'console.hideFilters' : 'common.expand') }}<Icon :name="filtersOpen ? 'chevronUp' : 'chevronDown'" size="xs" /></button>
+        </div>
+        <div v-show="filtersOpen" :id="filterId" class="console-filter-bar"><slot name="filters" /></div>
+      </section>
       <div class="console-table-controls layout-section-fixed">
-        <div class="collection-toolbar-primary">
-          <button v-if="$slots.filters" type="button" class="workbench-filter-toggle" :class="{ 'is-active': filtersOpen }" :aria-expanded="filtersOpen" :aria-controls="filterId" @click="filtersOpen = !filtersOpen">
-            <Icon name="filter" size="sm" />{{ t('console.resetFilters') }}<Icon :name="filtersOpen ? 'chevronUp' : 'chevronDown'" size="xs" />
-          </button>
-          <div class="workbench-collection-summary" :aria-busy="loading">
-            <span v-if="total !== undefined">{{ t('console.matchingRecords') }} <strong>{{ loading ? '—' : total.toLocaleString() }}</strong></span>
-            <span v-if="rows !== undefined" class="collection-page-count">{{ t('console.visibleRecords') }} <strong>{{ loading ? '—' : rows.length.toLocaleString() }}</strong></span>
-          </div>
-        </div>
-        <div class="collection-toolbar-secondary">
+        <div class="workbench-collection-summary" :aria-busy="loading">
+          <span>{{ t('console.details') }}<strong v-if="rows !== undefined">{{ loading ? '—' : rows.length.toLocaleString() }}</strong></span>
           <span v-if="statusCounts.length" class="workbench-status-counts" :title="t('console.currentPageOnly')">
-            <span v-for="entry in statusCounts" :key="entry.status">{{ entry.label }} <strong>{{ entry.count }}</strong></span>
+            <span v-for="entry in statusCounts" :key="entry.status" class="console-status-count" :data-status="entry.status">{{ entry.label }} <strong>{{ entry.count }}</strong></span>
           </span>
-          <div class="console-density-switch" role="group" :aria-label="t('console.tableDensity')">
-            <button type="button" :aria-pressed="compact" @click="compact = true">{{ t('console.compact') }}</button>
-            <button type="button" :aria-pressed="!compact" @click="compact = false">{{ t('console.comfortable') }}</button>
-          </div>
+        </div>
+        <div class="console-density-switch" role="group" :aria-label="t('console.tableDensity')">
+          <button type="button" :aria-pressed="compact" @click="compact = true">{{ t('console.compact') }}</button>
+          <button type="button" :aria-pressed="!compact" @click="compact = false">{{ t('console.comfortable') }}</button>
         </div>
       </div>
-      <aside v-if="$slots.filters" v-show="filtersOpen" :id="filterId" class="workbench-query-dock" :aria-label="t('console.resetFilters')">
-        <div class="console-filter-bar"><slot name="filters" /></div>
-      </aside>
       <div class="workbench-collection-results">
-    <!-- Scrollable table -->
-    <div class="layout-section-scrollable">
-      <div class="card table-scroll-container">
-        <slot name="table" />
+        <div class="layout-section-scrollable">
+          <div class="table-scroll-container"><slot name="table" /></div>
+        </div>
+        <footer v-if="$slots.pagination" class="layout-section-fixed console-table-pagination"><slot name="pagination" /></footer>
       </div>
     </div>
-
-    <!-- Fixed pagination -->
-    <div v-if="$slots.pagination" class="layout-section-fixed">
-      <slot name="pagination" />
-    </div>
-      </div>
-    </div>
-  </div>
+  </section>
 </template>
 
 <script setup lang="ts">
@@ -57,7 +49,7 @@ const props = defineProps<{ total?: number; rows?: Record<string, any>[]; loadin
 const { t } = useI18n()
 const route = useRoute()
 const compact = useLocalStorage('b-console-table-compact', true)
-const filtersOpen = ref(false)
+const filtersOpen = ref(true)
 const filterId = useId()
 const statusCounts = computed(() => {
   const labels: Record<string, string> = { active: t('common.active'), inactive: t('common.inactive'), error: t('common.error'), disabled: t('common.disabled') }
