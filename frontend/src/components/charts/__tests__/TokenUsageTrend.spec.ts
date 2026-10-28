@@ -27,6 +27,21 @@ vi.mock('vue-chartjs', () => ({
 }))
 
 describe('TokenUsageTrend', () => {
+  it('keeps bars opaque when switching metrics and reserves transparency for area fills', async () => {
+    const wrapper = mount(TokenUsageTrend, { props: { trendData: [
+      { date: '2026-10-28', requests: 8, input_tokens: 200, output_tokens: 100, cache_creation_tokens: 300, cache_read_tokens: 500, cost: 5, actual_cost: 1.5 }
+    ] } })
+    const data = () => JSON.parse(wrapper.find('.chart-data').text())
+    for (const metric of ['console.requests', 'console.spending', 'console.cacheRate']) {
+      await wrapper.findAll('button').find(button => button.text() === metric)!.trigger('click')
+      expect(data().datasets.every((dataset: { backgroundColor: string }) => /^#[0-9a-f]{6}$/i.test(dataset.backgroundColor))).toBe(true)
+    }
+    await wrapper.findAll('button').find(button => button.text() === 'console.areaChart')!.trigger('click')
+    expect(data().datasets[0].backgroundColor).toMatch(/^#[0-9a-f]{8}$/i)
+    expect(data().datasets[0].borderColor).toMatch(/^#[0-9a-f]{6}$/i)
+    wrapper.unmount()
+  })
+
   it('switches metric units without mixing billed charges with standard cost', async () => {
     const wrapper = mount(TokenUsageTrend, { props: { trendData: [
       { date: '2026-10-26', requests: 8, input_tokens: 200, output_tokens: 100, cache_creation_tokens: 300, cache_read_tokens: 500, cost: 5, actual_cost: 1.5 },

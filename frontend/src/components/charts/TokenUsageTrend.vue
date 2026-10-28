@@ -15,7 +15,7 @@
     </div>
     <div v-if="loading" class="console-plot skeleton" role="status" :aria-label="t('common.loading')" />
     <div v-else-if="trendData.length" class="console-plot">
-      <Bar v-if="chartForm === 'bar'" :data="metric === 'tokens' ? tokenData : lineData" :options="barOptions" :aria-label="t(tabs.find(tab => tab.id === metric)!.label)" role="img" />
+      <Bar v-if="chartForm === 'bar'" :data="metric === 'tokens' ? tokenData : metricBarData" :options="barOptions" :aria-label="t(tabs.find(tab => tab.id === metric)!.label)" role="img" />
       <Line v-else :data="metric === 'tokens' ? tokenAreaData : lineData" :options="lineOptions" :aria-label="t(tabs.find(tab => tab.id === metric)!.label)" role="img" />
     </div>
     <div v-else class="console-plot console-chart-empty">{{ t('admin.dashboard.noDataAvailable') }}</div>
@@ -60,13 +60,16 @@ const summary = computed(() => {
   return compact(sum('input_tokens') + sum('output_tokens') + sum('cache_creation_tokens') + sum('cache_read_tokens'))
 })
 const labels = computed(() => props.trendData.map(row => row.date))
+const colors = computed(() => dark.value
+  ? { input: '#80b5d6', output: '#b3c4d5', read: '#58bca5', write: '#eab64d', rate: '#58bca5', standard: '#aab6c9' }
+  : { input: '#42799b', output: '#627b8d', read: '#27857a', write: '#b7791f', rate: '#27857a', standard: '#737f94' })
 const tokenData = computed(() => ({
   labels: labels.value,
   datasets: [
-    { label: t('console.input'), key: 'input_tokens', color: '#42799b' },
-    { label: t('console.output'), key: 'output_tokens', color: '#7896a8' },
-    { label: t('console.cacheRead'), key: 'cache_read_tokens', color: '#58bca5' },
-    { label: t('console.cacheWrite'), key: 'cache_creation_tokens', color: '#eab64d' }
+    { label: t('console.input'), key: 'input_tokens', color: colors.value.input },
+    { label: t('console.output'), key: 'output_tokens', color: colors.value.output },
+    { label: t('console.cacheRead'), key: 'cache_read_tokens', color: colors.value.read },
+    { label: t('console.cacheWrite'), key: 'cache_creation_tokens', color: colors.value.write }
   ].map(item => ({ label: item.label, data: props.trendData.map(row => safe(row[item.key as keyof TrendDataPoint])), backgroundColor: item.color, borderWidth: 0, borderRadius: 3, maxBarThickness: 52 }))
 }))
 const tokenAreaData = computed(() => ({
@@ -76,13 +79,18 @@ const tokenAreaData = computed(() => ({
 const lineData = computed(() => ({
   labels: labels.value,
   datasets: metric.value === 'cache' ? [
-    { label: t('console.cacheRate'), data: props.trendData.map(hitRate), borderColor: '#27857a', backgroundColor: '#27857a18', fill: true }
+    { label: t('console.cacheRate'), data: props.trendData.map(hitRate), borderColor: colors.value.rate, backgroundColor: colors.value.rate + '26', fill: true }
   ] : metric.value === 'cost' ? [
-    { label: t('dashboard.actual'), data: props.trendData.map(row => safe(row.actual_cost)), borderColor: '#42799b', backgroundColor: '#42799b18', fill: true },
-    { label: t('dashboard.standard'), data: props.trendData.map(row => safe(row.cost)), borderColor: '#8b97ac', borderDash: [4, 4], fill: false }
+    { label: t('dashboard.actual'), data: props.trendData.map(row => safe(row.actual_cost)), borderColor: colors.value.input, backgroundColor: colors.value.input + '26', fill: true },
+    { label: t('dashboard.standard'), data: props.trendData.map(row => safe(row.cost)), borderColor: colors.value.standard, backgroundColor: colors.value.standard, borderDash: [4, 4], fill: false }
   ] : [
-    { label: t('console.requests'), data: props.trendData.map(row => safe(row.requests)), borderColor: '#42799b', backgroundColor: '#42799b18', fill: true }
+    { label: t('console.requests'), data: props.trendData.map(row => safe(row.requests)), borderColor: colors.value.input, backgroundColor: colors.value.input + '26', fill: true }
   ]
+}))
+// Bars and legend markers need solid colors; transparency is only for area fills.
+const metricBarData = computed(() => ({
+  labels: lineData.value.labels,
+  datasets: lineData.value.datasets.map(dataset => ({ ...dataset, backgroundColor: dataset.borderColor, borderWidth: 0, borderRadius: 3, maxBarThickness: 52 }))
 }))
 const commonOptions = computed(() => ({
   responsive: true,
@@ -90,7 +98,14 @@ const commonOptions = computed(() => ({
   animation: false as const,
   interaction: { intersect: false, mode: 'index' as const },
   plugins: {
-    legend: { position: 'bottom' as const, align: 'center' as const, labels: { color: dark.value ? '#bec9d9' : '#536175', usePointStyle: true, pointStyle: 'rectRounded', boxWidth: 8, boxHeight: 8, padding: 20, font: { size: 11 } } },
+    legend: { position: 'bottom' as const, align: 'center' as const, labels: {
+      color: dark.value ? '#bec9d9' : '#536175', usePointStyle: true, pointStyle: 'rectRounded', boxWidth: 10, boxHeight: 10, padding: 20, font: { size: 12 },
+      generateLabels: (chart: ChartJS) => ChartJS.defaults.plugins.legend.labels.generateLabels(chart).map(item => {
+        const dataset = chart.data.datasets[item.datasetIndex ?? 0]
+        const color = dataset?.borderColor ?? dataset?.backgroundColor
+        return typeof color === 'string' ? { ...item, fillStyle: color, strokeStyle: color } : item
+      })
+    } },
     tooltip: { padding: 12, cornerRadius: 6, backgroundColor: '#172538', callbacks: {
       label: (context: { dataset: { label?: string }; parsed: { y: number | null } }) => {
         const value = context.parsed.y || 0
@@ -105,7 +120,7 @@ const commonOptions = computed(() => ({
 }))
 const barOptions = computed(() => ({
   ...commonOptions.value,
-  scales: { x: { ...commonOptions.value.scales.x, stacked: metric.value === 'tokens' }, y: { ...commonOptions.value.scales.y, stacked: metric.value === 'tokens' } }
+  scales: { x: { ...commonOptions.value.scales.x, stacked: metric.value === 'tokens' }, y: { ...commonOptions.value.scales.y, stacked: metric.value === 'tokens', ...(metric.value === 'cache' ? { min: 0, max: 100 } : {}) } }
 }))
 const lineOptions = computed(() => ({
   ...commonOptions.value,

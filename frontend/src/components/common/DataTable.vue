@@ -324,6 +324,11 @@ const observeElementRectNonZero = (
 const checkScrollable = () => {
   if (tableWrapperRef.value) {
     isScrollable.value = tableWrapperRef.value.scrollWidth > tableWrapperRef.value.clientWidth
+    // Match the actual checkbox column after density, padding or column changes.
+    const selectionCell = tableWrapperRef.value.querySelector<HTMLElement>('th.sticky-col-left-first')
+    if (selectionCell) {
+      tableWrapperRef.value.style.setProperty('--select-col-width', `${selectionCell.getBoundingClientRect().width}px`)
+    }
   }
 }
 
@@ -402,6 +407,10 @@ const attachDesktopTableTracking = () => {
       checkActionsColumnWidth()
     })
     resizeObserver.observe(tableWrapperRef.value)
+    const table = tableWrapperRef.value.querySelector('table')
+    if (table) resizeObserver.observe(table)
+    const selectionCell = tableWrapperRef.value.querySelector('th.sticky-col-left-first')
+    if (selectionCell) resizeObserver.observe(selectionCell)
   } else {
     // 降级方案：不支持 ResizeObserver 时使用 window resize
     resizeHandler = () => {
@@ -970,9 +979,9 @@ defineExpose({
 </script>
 
 <style scoped>
-/* 表格横向滚动 */
+/* Scrollable table; the sticky selection offset is measured from its header. */
 .table-wrapper {
-  --select-col-width: 52px; /* 勾选列宽度：px-6 (24px*2) + checkbox (16px) */
+  --select-col-width: 0px;
   position: relative;
   overflow-x: auto;
   overflow-y: auto;

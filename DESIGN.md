@@ -33,11 +33,16 @@ colors:
   danger-ink: "#b91c1c"
   danger-action: "#dc2626"
   chart-input: "#42799b"
-  chart-output: "#7896a8"
-  chart-cache-read: "#58bca5"
-  chart-cache-write: "#eab64d"
+  chart-output: "#627b8d"
+  chart-cache-read: "#27857a"
+  chart-cache-write: "#b7791f"
   chart-cache-rate: "#27857a"
-  chart-standard: "#8b97ac"
+  chart-standard: "#737f94"
+  dark-chart-input: "#80b5d6"
+  dark-chart-output: "#b3c4d5"
+  dark-chart-cache-read: "#58bca5"
+  dark-chart-cache-write: "#eab64d"
+  dark-chart-standard: "#aab6c9"
   chart-label: "#536175"
   chart-grid: "#edf0f4"
   dark-chart-label: "#bec9d9"
@@ -324,6 +329,8 @@ Neutral and semantic badges use compact corners with 12px medium labels and 2px/
 TokenUsageTrend starts with stacked token bars. Chart form and metric selection remain independent; token areas stack, and requests/cost/cache rate preserve their units and tooltip precision. Loading and empty states remain in the plot. Model/group/endpoint distributions retain explicit numeric tables and their enabled source, ranking, metric, and breakdown controls.
 
 Operations throughput and switching chart palettes and options depend reactively on the stored theme, including labels, grids, and tooltip colors. Switching theme updates the current chart. The muted action ramp does not replace the established QPS/TPS data series.
+
+Usage bars and legend markers use opaque series colors. Transparency belongs only to area fills. Sticky checkbox/name boundaries follow the measured checkbox header width at each density, so row backgrounds remain continuous during horizontal scrolling.
 
 Usage records separate date/time and identity metadata, align token/charge fields, and group TTFT, duration, and output speed under latency. Native More disclosures preserve secondary columns on mobile; expanding query controls retains filter state. Error, pending, export, cleanup, column settings, detail, and pagination behavior remain attached to the existing workflow.
 
