@@ -34,7 +34,8 @@ multiplier applies to explicit channel prices.
 
 The catalog supplies matching OpenAI and native DeepSeek/Zhipu/Kimi/MiniMax
 cards. B's domestic channel additionally covers its previously unbound expensive
-domestic group and native DeepSeek group. C retains all existing channel links.
+domestic group and native DeepSeek group. C retains all existing channel links
+and adds its native DeepSeek group (149), preserving that group's 0.35 multiplier.
 No historical usage, balances, account routing, or group multipliers are changed.
 
 ## Limits requiring separate evidence or implementation
