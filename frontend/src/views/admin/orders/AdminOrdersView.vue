@@ -1,21 +1,31 @@
 <template>
   <AppLayout>
     <TablePageLayout :rows="orders" :loading="ordersLoading" :total="orderPagination.total">
-<template #filters><div class="card p-4">
-        <div class="flex flex-wrap items-center gap-3">
-          <div class="flex-1 sm:max-w-64">
-            <input v-model="orderSearch" type="text" :placeholder="t('payment.admin.searchOrders')" class="input" @input="debounceLoadOrders" />
+      <template #actions>
+        <button @click="loadOrders" :disabled="ordersLoading" class="btn btn-secondary">
+          <Icon name="refresh" size="sm" />{{ t('common.refresh') }}
+        </button>
+      </template>
+      <template #filters>
+        <div class="payment-order-filters">
+          <label>
+            <span>{{ t('common.search') }}</span>
+            <input v-model="orderSearch" type="search" :placeholder="t('payment.admin.searchOrders')" class="input" @input="debounceLoadOrders" />
+          </label>
+          <div>
+            <label for="payment-order-status">{{ t('payment.orders.status') }}</label>
+            <Select id="payment-order-status" v-model="orderFilters.status" :aria-label="t('payment.orders.status')" :options="statusFilterOptions" @change="applyOrderFilters" />
           </div>
-          <Select v-model="orderFilters.status" :options="statusFilterOptions" class="w-36" @change="loadOrders" />
-          <Select v-model="orderFilters.payment_type" :options="paymentTypeFilterOptions" class="w-40" @change="loadOrders" />
-          <Select v-model="orderFilters.order_type" :options="orderTypeFilterOptions" class="w-36" @change="loadOrders" />
-          <div class="flex flex-1 flex-wrap items-center justify-end gap-2">
-            <button @click="loadOrders" :disabled="ordersLoading" class="btn btn-secondary" :title="t('common.refresh')">
-              <Icon name="refresh" size="md" :class="ordersLoading ? 'animate-spin' : ''" />
-            </button>
+          <div>
+            <label for="payment-order-method">{{ t('payment.orders.paymentMethod') }}</label>
+            <Select id="payment-order-method" v-model="orderFilters.payment_type" :aria-label="t('payment.orders.paymentMethod')" :options="paymentTypeFilterOptions" @change="applyOrderFilters" />
+          </div>
+          <div>
+            <label for="payment-order-type">{{ t('payment.orders.orderType') }}</label>
+            <Select id="payment-order-type" v-model="orderFilters.order_type" :aria-label="t('payment.orders.orderType')" :options="orderTypeFilterOptions" @change="applyOrderFilters" />
           </div>
         </div>
-      </div></template>
+      </template>
 <template #table><OrderTable :orders="orders" :loading="ordersLoading" show-user>
         <template #actions="{ row }">
           <div class="flex items-center gap-1">
@@ -115,7 +125,7 @@
 <script setup lang="ts">
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { adminPaymentAPI } from '@/api/admin/payment'
@@ -165,8 +175,11 @@ function paymentAmountSymbol(order: PaymentOrder | null | undefined): string {
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
 function debounceLoadOrders() {
   if (debounceTimer) clearTimeout(debounceTimer)
-  debounceTimer = setTimeout(() => loadOrders(), 300)
+  debounceTimer = setTimeout(applyOrderFilters, 300)
 }
+
+function applyOrderFilters() { orderPagination.page = 1; loadOrders() }
+onUnmounted(() => { if (debounceTimer) clearTimeout(debounceTimer) })
 
 async function loadOrders() {
   ordersLoading.value = true
@@ -206,6 +219,8 @@ const paymentTypeFilterOptions = computed(() => [
   { value: 'wxpay', label: t('payment.methods.wxpay') },
   { value: 'stripe', label: t('payment.methods.stripe') },
   { value: 'airwallex', label: t('payment.methods.airwallex') },
+  { value: 'usdt_tron', label: t('payment.methods.usdt_tron') },
+  { value: 'usdt_bep20', label: t('payment.methods.usdt_bep20') },
 ])
 
 const orderTypeFilterOptions = computed(() => [
@@ -308,3 +323,25 @@ function formatDateTime(dateStr: string): string { return formatOrderDateTime(da
 
 onMounted(() => loadOrders())
 </script>
+
+<style scoped>
+.payment-order-filters {
+  display: grid;
+  grid-template-columns: minmax(200px, 1.5fr) repeat(3, minmax(140px, 1fr));
+  gap: 12px;
+}
+.payment-order-filters > * { min-width: 0; }
+.payment-order-filters > label > span,
+.payment-order-filters > div > label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--console-muted);
+  font-size: 12px;
+}
+@media (max-width: 1279px) {
+  .payment-order-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 479px) {
+  .payment-order-filters { grid-template-columns: minmax(0, 1fr); }
+}
+</style>

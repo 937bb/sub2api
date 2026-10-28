@@ -278,6 +278,17 @@ Dashboard summaries retain five measures, or four when their simple-mode prop re
 
 ### Shared Page Families
 
+The payment overview uses a four-column, white-surface metric strip, a full-width
+trend panel, then payment methods and customer rankings in a 1:1.4 grid. The trend
+plot is 264px high (220px below 768px). Its metric tabs share the panel heading;
+one muted blue series represents the selected count or currency, with full dates
+retained in tooltips and shorter month/day axis labels. Breakdown lists scroll
+locally at 280px, preserving every currency and customer. Below 768px the breakdown
+stacks and summary metrics form two columns. Refresh retains the previous layout.
+Order filters use visible labels and four columns, two below 1280px and one below
+480px. TRON and BEP20 remain separate filter options. Financial values, refund
+actions, and backend pricing remain unchanged.
+
 Settings use horizontally scrollable pill categories, sticky at 60px on desktop and static on mobile, above individually framed sections. The save bar stays sticky. Identity places flat metadata inside a single panel; its three metadata columns and two editor columns become one below 768px. Repeated families share neutral, compact panels without restoring a page-wide outer card.
 
 Checkout retains a flexible main panel and a 320px sticky review column; they stack below 1024px. Subscription, plan, monitor, catalog, and finance layouts preserve their dedicated quotas, actions, and query paths. Authentication retains a 0.85:1.15 identity/form split with a 320px minimum identity column and a 400px maximum form; below 768px it becomes an identity band followed by the form. Setup, callbacks, unrelated public pages, and provider-owned payment fields retain specialized flows.

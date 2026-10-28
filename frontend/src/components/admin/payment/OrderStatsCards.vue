@@ -3,17 +3,20 @@
     <div>
       <dt>{{ t('payment.admin.todayRevenue') }}</dt>
       <dd v-for="[currency, amount] in sortedAmounts(stats.today_amount)" :key="currency">{{ formatMoney(currency, amount) }}</dd>
+      <dd v-if="!Object.keys(stats.today_amount).length">—</dd>
       <small>{{ stats.today_count }} {{ t('payment.admin.orders') }}</small>
     </div>
     <div>
       <dt>{{ t('payment.admin.totalRevenue') }}</dt>
       <dd v-for="[currency, amount] in sortedAmounts(stats.total_amount)" :key="currency">{{ formatMoney(currency, amount) }}</dd>
+      <dd v-if="!Object.keys(stats.total_amount).length">—</dd>
       <small>{{ stats.total_count }} {{ t('payment.admin.orders') }}</small>
     </div>
     <div><dt>{{ t('payment.admin.todayOrders') }}</dt><dd>{{ stats.today_count }}</dd></div>
     <div>
       <dt>{{ t('payment.admin.avgAmount') }}</dt>
       <dd v-for="[currency, amount] in sortedAmounts(stats.avg_amount)" :key="currency">{{ formatMoney(currency, amount) }}</dd>
+      <dd v-if="!Object.keys(stats.avg_amount).length">—</dd>
     </div>
   </dl>
 </template>

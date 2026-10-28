@@ -3,42 +3,41 @@
     <WorkspacePage variant="finance">
       <!-- Header with Day Switcher -->
       <template #actions>
-        <div class="flex items-center gap-2">
-          <div class="flex rounded-lg border border-gray-200 dark:border-dark-600">
+        <div class="flex flex-wrap items-center gap-2">
+          <div class="finance-period" role="group" :aria-label="t('payment.admin.dailyRevenue')">
             <button
               v-for="d in DAYS_OPTIONS"
               :key="d"
               type="button"
-              class="px-3 py-1.5 text-xs font-medium transition-colors first:rounded-l-lg last:rounded-r-lg"
-              :class="days === d
-                ? 'bg-primary-600 text-white'
-                : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700'"
+              :aria-pressed="days === d"
+              :disabled="loading"
               @click="days = d"
             >
               {{ d }}{{ t('payment.admin.daySuffix') }}
             </button>
           </div>
-          <button @click="loadDashboard" :disabled="loading" class="btn btn-secondary" :title="t('common.refresh')">
-            <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
+          <button @click="loadDashboard" :disabled="loading" class="btn btn-secondary" :aria-label="t('common.refresh')" :title="t('common.refresh')">
+            <Icon name="refresh" size="md" />
           </button>
         </div>
       </template>
 
       <!-- Dashboard Content -->
-      <div v-if="loading" class="flex items-center justify-center py-12">
+      <div v-if="loading && !stats" class="finance-loading" role="status" :aria-label="t('common.loading')">
         <LoadingSpinner />
       </div>
       <template v-else-if="stats">
         <OrderStatsCards :stats="stats" />
-        <div class="finance-analysis">
-          <div class="finance-analysis-main">
-            <DailyRevenueChart :data="stats.daily_series || []" :loading="loading" />
+        <div class="finance-analysis" :aria-busy="loading">
+          <DailyRevenueChart :data="stats.daily_series || []" />
+          <div class="finance-breakdown">
             <PaymentMethodChart :methods="stats.payment_methods || []" />
-          </div>
           <section class="finance-ranking">
-            <h3 class="mb-4 text-sm font-semibold text-gray-900 dark:text-white">{{ t('payment.admin.topUsers') }}</h3>
+            <header class="finance-panel-heading">
+              <h3>{{ t('payment.admin.topUsers') }}</h3>
+            </header>
             <div v-if="!hasTopUsers(stats.top_users)" class="flex h-32 items-center justify-center text-sm text-gray-500 dark:text-gray-400">{{ t('payment.admin.noData') }}</div>
-            <div v-else class="space-y-2">
+            <div v-else class="finance-ranking-list">
               <div v-for="[currency, users] in sortedTopUsers(stats.top_users)" :key="currency" class="space-y-2">
                 <p class="text-xs font-semibold text-gray-500 dark:text-gray-400">{{ currency }}</p>
                 <div v-for="(user, idx) in users" :key="user.user_id" class="finance-ranking-row">
@@ -46,11 +45,12 @@
                     <span class="finance-ranking-position">{{ idx + 1 }}</span>
                     <span class="finance-ranking-email" :title="user.email">{{ user.email }}</span>
                   </div>
-                  <span class="text-sm font-medium text-gray-900 dark:text-white">{{ formatMoney(currency, user.amount) }}</span>
+                  <span class="font-medium">{{ formatMoney(currency, user.amount) }}</span>
                 </div>
               </div>
             </div>
           </section>
+          </div>
         </div>
       </template>
     </WorkspacePage>
