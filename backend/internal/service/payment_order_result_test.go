@@ -250,8 +250,8 @@ func TestCalculateCreateOrderPayAmountForSubscriptionKeepsNonCNYPrice(t *testing
 	}
 }
 
-// 换算是 opt-in：未配置汇率（rate=0）时，CNY 订阅保持 price 直付的存量行为。
-// 该测试锁住存量部署升级后行为不变的兼容承诺。
+// Conversion is opt-in. A zero rate preserves direct-price CNY subscriptions
+// so existing deployments keep their behavior after an upgrade.
 func TestCalculateCreateOrderPayAmountForSubscriptionKeepsDirectPriceWhenRateDisabled(t *testing.T) {
 	t.Parallel()
 
@@ -264,7 +264,7 @@ func TestCalculateCreateOrderPayAmountForSubscriptionKeepsDirectPriceWhenRateDis
 	}
 }
 
-// 汇率只作用于订阅订单，余额充值订单不受影响。
+// The subscription rate must not affect balance recharge orders.
 func TestCalculateCreateOrderPayAmountForBalanceIgnoresSubscriptionRate(t *testing.T) {
 	t.Parallel()
 
@@ -288,6 +288,24 @@ func TestCalculateCreditedBalanceStillUsesRechargeMultiplier(t *testing.T) {
 	got = calculateCreditedBalance(5, 10)
 	if got != 50 {
 		t.Fatalf("credited balance = %v, want 50", got)
+	}
+}
+
+func TestCalculateOrderCreditedBalanceKeepsUSDTRechargeOneToOne(t *testing.T) {
+	t.Parallel()
+
+	for _, paymentType := range []string{payment.TypeUSDTTron, payment.TypeUSDTBEP20} {
+		t.Run(paymentType, func(t *testing.T) {
+			t.Parallel()
+			got := calculateOrderCreditedBalance(500, 0.14, paymentType)
+			if got != 500 {
+				t.Fatalf("credited balance = %v, want 500", got)
+			}
+		})
+	}
+
+	if got := calculateOrderCreditedBalance(500, 0.14, payment.TypeAlipay); got != 70 {
+		t.Fatalf("non-USDT credited balance = %v, want 70", got)
 	}
 }
 

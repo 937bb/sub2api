@@ -11,7 +11,8 @@ import type {
   CheckoutInfoResponse,
   CreateOrderRequest,
   CreateOrderResult,
-  PaymentOrder
+  PaymentOrder,
+  USDTQuote,
 } from '@/types/payment'
 import type { BasePaginationResponse } from '@/types'
 
@@ -42,6 +43,13 @@ export const paymentAPI = {
   /** Get payment method limits and fee rates */
   getLimits() {
     return apiClient.get<MethodLimitsResponse>('/payment/limits')
+  },
+
+  /** Get a live CNY-to-USDT estimate without creating an order. */
+  getUSDTQuote(amount: number, paymentType: 'usdt_tron' | 'usdt_bep20') {
+    return apiClient.get<USDTQuote>('/payment/usdt-quote', {
+      params: { amount, payment_type: paymentType },
+    })
   },
 
   /** Create a new payment order */

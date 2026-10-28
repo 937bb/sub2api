@@ -53,7 +53,7 @@ func (s *PaymentService) CreateOrder(ctx context.Context, req CreateOrderRequest
 	if s.notificationEmailService != nil {
 		s.notificationEmailService.RememberRecipientLocale(ctx, req.UserID, user.Email, req.Locale)
 	}
-	feeRate := cfg.RechargeFeeRate
+	feeRate := EffectiveRechargeFeeRate(req.PaymentType, cfg.RechargeFeeRate)
 	methodCurrency := payment.DefaultPaymentCurrency
 	if s.configService != nil {
 		methodCurrency, err = s.configService.ValidateMethodCurrencyConsistency(ctx, req.PaymentType)
@@ -69,7 +69,7 @@ func (s *PaymentService) CreateOrder(ctx context.Context, req CreateOrderRequest
 		limitAmount = plan.Price
 	} else if req.OrderType == payment.OrderTypeBalance {
 		// 阈值按支付金额命中。赠金模式：到账 = 基数 + 赠送；折扣模式：到账 = 基数，实付基数按折扣减少。
-		quote := quoteRechargeBonus(cfg, req.Amount, methodCurrency)
+		quote := quoteRechargeBonusForPaymentType(cfg, req.Amount, methodCurrency, req.PaymentType)
 		limitAmount = quote.PayBase
 		bonusAmount = quote.Bonus
 		orderAmount = quote.Credited
@@ -315,6 +315,19 @@ func buildPaymentOrderProviderSnapshot(sel *payment.InstanceSelection, req Creat
 			snapshot["merchant_id"] = accountID
 		}
 		snapshot["currency"] = paymentProviderConfigCurrency(providerKey, sel.Config)
+	}
+	if providerKey == payment.TypeEpusdt {
+		if merchantID := strings.TrimSpace(sel.Config["pid"]); merchantID != "" {
+			snapshot["merchant_id"] = merchantID
+		}
+		snapshot["currency"] = payment.DefaultPaymentCurrency
+		snapshot["token"] = "USDT"
+		switch req.PaymentType {
+		case payment.TypeUSDTTron:
+			snapshot["network"] = "tron"
+		case payment.TypeUSDTBEP20:
+			snapshot["network"] = "binance"
+		}
 	}
 
 	if len(snapshot) == 1 {
@@ -663,9 +676,10 @@ func calculateCreateOrderPayAmountForOrderType(limitAmount, feeRate float64, cur
 	return calculateCreateOrderPayAmount(paymentAmount, feeRate, currency)
 }
 
-// calculateSubscriptionGatewayBaseAmount 计算订阅订单的网关扣款基数。
-// 换算是显式 opt-in：仅当管理员配置了订阅汇率（rate > 0，1 USD = rate CNY）
-// 且网关币种为 CNY 时，按 price × rate 换算；未配置时保持 price 直付的存量行为。
+// calculateSubscriptionGatewayBaseAmount returns the gateway charge base for a subscription.
+// Conversion is opt-in: when the gateway currency is CNY and an administrator configures
+// rate > 0 (1 USD = rate CNY), the gateway charges price multiplied by rate. Otherwise it
+// preserves the existing direct-price behavior.
 func calculateSubscriptionGatewayBaseAmount(amount, usdToCnyRate float64, currency string) float64 {
 	rate := normalizeSubscriptionUSDToCNYRate(usdToCnyRate)
 	if rate <= 0 || currency != payment.DefaultPaymentCurrency {
@@ -743,27 +757,31 @@ func classifyCreatePaymentError(req CreateOrderRequest, providerKey string, err 
 
 func buildCreateOrderResponse(order *dbent.PaymentOrder, req CreateOrderRequest, payAmount float64, sel *payment.InstanceSelection, pr *payment.CreatePaymentResponse, resultType payment.CreatePaymentResultType) *CreateOrderResponse {
 	return &CreateOrderResponse{
-		OrderID:      order.ID,
-		Amount:       order.Amount,
-		PayAmount:    payAmount,
-		FeeRate:      order.FeeRate,
-		BonusAmount:  order.BonusAmount,
-		Status:       OrderStatusPending,
-		ResultType:   resultType,
-		PaymentType:  req.PaymentType,
-		OutTradeNo:   order.OutTradeNo,
-		PayURL:       pr.PayURL,
-		QRCode:       pr.QRCode,
-		ClientSecret: pr.ClientSecret,
-		IntentID:     pr.IntentID,
-		Currency:     pr.Currency,
-		CountryCode:  pr.CountryCode,
-		PaymentEnv:   pr.PaymentEnv,
-		OAuth:        pr.OAuth,
-		JSAPI:        pr.JSAPI,
-		JSAPIPayload: pr.JSAPI,
-		ExpiresAt:    order.ExpiresAt,
-		PaymentMode:  sel.PaymentMode,
+		OrderID:            order.ID,
+		Amount:             order.Amount,
+		PayAmount:          payAmount,
+		FeeRate:            order.FeeRate,
+		BonusAmount:        order.BonusAmount,
+		Status:             OrderStatusPending,
+		ResultType:         resultType,
+		PaymentType:        req.PaymentType,
+		OutTradeNo:         order.OutTradeNo,
+		PayURL:             pr.PayURL,
+		QRCode:             pr.QRCode,
+		PaymentAddress:     pr.PaymentAddress,
+		PaymentTokenAmount: pr.PaymentTokenAmount,
+		PaymentToken:       pr.PaymentToken,
+		PaymentNetwork:     pr.PaymentNetwork,
+		ClientSecret:       pr.ClientSecret,
+		IntentID:           pr.IntentID,
+		Currency:           pr.Currency,
+		CountryCode:        pr.CountryCode,
+		PaymentEnv:         pr.PaymentEnv,
+		OAuth:              pr.OAuth,
+		JSAPI:              pr.JSAPI,
+		JSAPIPayload:       pr.JSAPI,
+		ExpiresAt:          order.ExpiresAt,
+		PaymentMode:        sel.PaymentMode,
 	}
 }
 

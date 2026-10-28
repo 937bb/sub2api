@@ -335,3 +335,14 @@ func paymentOrderAmountWithoutBonus(o *dbent.PaymentOrder) float64 {
 	}
 	return base
 }
+
+// quoteRechargeBonusForPaymentType preserves the one-CNY-to-one-balance rule
+// for USDT while retaining explicitly configured promotion tiers.
+func quoteRechargeBonusForPaymentType(cfg *PaymentConfig, amount float64, currency, paymentType string) rechargeBonusQuote {
+	if cfg == nil || (paymentType != payment.TypeUSDTTron && paymentType != payment.TypeUSDTBEP20) {
+		return quoteRechargeBonus(cfg, amount, currency)
+	}
+	usdtConfig := *cfg
+	usdtConfig.BalanceRechargeMultiplier = 1
+	return quoteRechargeBonus(&usdtConfig, amount, currency)
+}

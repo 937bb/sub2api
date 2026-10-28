@@ -48,7 +48,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
-import { METHOD_ORDER, isBuiltInAlipayMethod, isBuiltInWxpayMethod } from './providerConfig'
+import { METHOD_ORDER, isBuiltInAlipayMethod, isBuiltInWxpayMethod, isUSDTMethod } from './providerConfig'
 import alipayIcon from '@/assets/icons/alipay.svg'
 import wxpayIcon from '@/assets/icons/wxpay.svg'
 import stripeIcon from '@/assets/icons/stripe.svg'
@@ -98,6 +98,7 @@ function methodIcon(type: string): string {
 }
 
 function methodLabel(method: PaymentMethodOption): string {
+  if (isUSDTMethod(method.type)) return t(`payment.methods.${method.type}`)
   return method.display_name || t(`payment.methods.${method.type}`, method.type)
 }
 

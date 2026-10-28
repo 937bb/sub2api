@@ -18,6 +18,10 @@
             :amount="paymentState.amount"
             :pay-amount="paymentState.payAmount"
             :qr-code="paymentState.qrCode"
+            :payment-address="paymentState.paymentAddress"
+            :payment-token-amount="paymentState.paymentTokenAmount"
+            :payment-token="paymentState.paymentToken"
+            :payment-network="paymentState.paymentNetwork"
             :expires-at="paymentState.expiresAt"
             :payment-type="paymentState.paymentType"
             :pay-url="paymentState.payUrl"
@@ -64,7 +68,7 @@
                 :max="globalMaxAmount"
                 :bonus-tiers="rechargeBonusTiers"
                 :bonus-mode="rechargeBonusMode"
-                :multiplier="balanceRechargeMultiplier"
+                :multiplier="effectiveRechargeMultiplier"
                 :currency="selectedCurrency"
               />
               <p v-if="amountError" class="mt-2 text-xs text-amber-600 dark:text-amber-300">{{ amountError }}</p>
@@ -82,13 +86,33 @@
             <div v-if="validAmount > 0" class="card p-6">
               <div class="space-y-2 text-sm">
                 <div class="flex justify-between">
-                  <span class="text-gray-500 dark:text-gray-400">{{ t('payment.paymentAmount') }}</span>
+                  <span class="text-gray-500 dark:text-gray-400">{{ t(isUSDTMethod(selectedMethod) ? 'payment.amountLabel' : 'payment.paymentAmount') }}</span>
                   <span :class="discountAmount > 0 ? 'text-gray-400 line-through dark:text-gray-500' : 'text-gray-900 dark:text-white'">{{ formatSelectedPaymentAmount(validAmount) }}</span>
                 </div>
                 <div v-if="discountAmount > 0" class="flex justify-between" data-testid="recharge-discount-row">
                   <span class="text-gray-500 dark:text-gray-400">{{ t('payment.rechargeBonus.discountLabelWithPercent', { percent: formatRechargeBonusNumber(bonusQuote.percent) }) }}</span>
                   <span class="font-medium text-red-600 dark:text-red-400">-{{ formatSelectedPaymentAmount(discountAmount) }}</span>
                 </div>
+                <template v-if="isUSDTMethod(selectedMethod)">
+                  <div class="flex justify-between">
+                    <span class="text-gray-500 dark:text-gray-400">{{ t('payment.usdtEstimatedAmount') }}</span>
+                    <span v-if="usdtQuoteLoading" class="text-gray-500 dark:text-gray-400">{{ t('common.loading') }}</span>
+                    <span v-else-if="usdtQuoteReady" class="font-semibold tabular-nums text-gray-900 dark:text-white">≈ {{ formattedUSDTQuoteAmount }} USDT</span>
+                    <button v-else type="button" class="inline-flex items-center gap-1 text-xs font-medium text-primary-600 hover:text-primary-700 dark:text-primary-400" @click="requestUSDTQuote">
+                      <Icon name="refresh" size="xs" />
+                      {{ t('common.retry') }}
+                    </button>
+                  </div>
+                  <div v-if="usdtQuoteReady" class="flex justify-between">
+                    <span class="text-gray-500 dark:text-gray-400">{{ t('payment.usdtLiveRate') }}</span>
+                    <span class="tabular-nums text-gray-900 dark:text-white">1 CNY ≈ {{ formattedUSDTRate }} USDT</span>
+                  </div>
+                  <div class="flex justify-between">
+                    <span class="text-gray-500 dark:text-gray-400">{{ t('payment.usdtNetwork') }}</span>
+                    <span class="font-medium text-gray-900 dark:text-white">{{ selectedUSDTNetworkLabel }}</span>
+                  </div>
+                  <p v-if="usdtQuoteError" class="text-xs text-red-600 dark:text-red-400">{{ t('payment.usdtQuoteFailed') }}</p>
+                </template>
                 <div v-if="feeRate > 0" class="flex justify-between">
                   <span class="text-gray-500 dark:text-gray-400">{{ t('payment.fee') }} ({{ feeRate }}%)</span>
                   <span class="text-gray-900 dark:text-white">{{ formatSelectedPaymentAmount(feeAmount) }}</span>
@@ -105,9 +129,10 @@
                   <span class="text-gray-500 dark:text-gray-400">{{ t('payment.creditedBalance') }}</span>
                   <span :class="bonusQuote.percent > 0 ? 'font-semibold text-gray-900 dark:text-white' : 'text-gray-900 dark:text-white'">${{ creditedAmount.toFixed(2) }}</span>
                 </div>
-                <p v-if="balanceRechargeMultiplier !== 1" class="border-t border-gray-200 pt-2 text-xs text-gray-500 dark:border-dark-600 dark:text-gray-400">
+                <p v-if="!isUSDTMethod(selectedMethod) && balanceRechargeMultiplier !== 1" class="border-t border-gray-200 pt-2 text-xs text-gray-500 dark:border-dark-600 dark:text-gray-400">
                   {{ t('payment.rechargeRatePreview', { currency: selectedCurrency, usd: balanceRechargeMultiplier.toFixed(2) }) }}
                 </p>
+                <p v-if="isUSDTMethod(selectedMethod)" class="border-t border-gray-200 pt-2 text-xs text-gray-500 dark:border-dark-600 dark:text-gray-400">{{ t('payment.usdtLiveRateHint') }}</p>
               </div>
             </div>
             <button :class="['btn w-full py-3 text-base font-medium', paymentButtonClass]" :disabled="!canSubmit || submitting" @click="handleSubmitRecharge">
@@ -115,7 +140,7 @@
                 <span class="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent"></span>
                 {{ t('common.processing') }}
               </span>
-              <span v-else>{{ t('payment.createOrder') }} {{ formatSelectedPaymentAmount(totalAmount) }}</span>
+              <span v-else>{{ isUSDTMethod(selectedMethod) ? t('payment.createOrder') : `${t('payment.createOrder')} ${formatSelectedPaymentAmount(totalAmount)}` }}</span>
             </button>
             </aside>
             </div>
@@ -183,17 +208,38 @@
                   @select="selectedMethod = $event"
                 />
               </div>
-              <div v-if="feeRate > 0 && selectedPlan.price > 0" class="card p-6">
+              <div v-if="(isUSDTMethod(selectedMethod) || feeRate > 0) && selectedPlan.price > 0" class="card p-6">
                 <div class="space-y-2 text-sm">
                   <div class="flex justify-between">
                     <span class="text-gray-500 dark:text-gray-400">{{ t('payment.amountLabel') }}</span>
                     <span class="text-gray-900 dark:text-white">{{ formatSelectedPaymentAmount(subPaymentAmount) }}</span>
                   </div>
-                  <div class="flex justify-between">
+                  <template v-if="isUSDTMethod(selectedMethod)">
+                    <div class="flex justify-between">
+                      <span class="text-gray-500 dark:text-gray-400">{{ t('payment.usdtEstimatedAmount') }}</span>
+                      <span v-if="usdtQuoteLoading" class="text-gray-500 dark:text-gray-400">{{ t('common.loading') }}</span>
+                      <span v-else-if="usdtQuoteReady" class="font-semibold tabular-nums text-gray-900 dark:text-white">≈ {{ formattedUSDTQuoteAmount }} USDT</span>
+                      <button v-else type="button" class="inline-flex items-center gap-1 text-xs font-medium text-primary-600 hover:text-primary-700 dark:text-primary-400" @click="requestUSDTQuote">
+                        <Icon name="refresh" size="xs" />
+                        {{ t('common.retry') }}
+                      </button>
+                    </div>
+                    <div v-if="usdtQuoteReady" class="flex justify-between">
+                      <span class="text-gray-500 dark:text-gray-400">{{ t('payment.usdtLiveRate') }}</span>
+                      <span class="tabular-nums text-gray-900 dark:text-white">1 CNY ≈ {{ formattedUSDTRate }} USDT</span>
+                    </div>
+                    <div class="flex justify-between">
+                      <span class="text-gray-500 dark:text-gray-400">{{ t('payment.usdtNetwork') }}</span>
+                      <span class="font-medium text-gray-900 dark:text-white">{{ selectedUSDTNetworkLabel }}</span>
+                    </div>
+                    <p v-if="usdtQuoteError" class="text-xs text-red-600 dark:text-red-400">{{ t('payment.usdtQuoteFailed') }}</p>
+                    <p class="border-t border-gray-200 pt-2 text-xs text-gray-500 dark:border-dark-600 dark:text-gray-400">{{ t('payment.usdtLiveRateHint') }}</p>
+                  </template>
+                  <div v-if="!isUSDTMethod(selectedMethod)" class="flex justify-between">
                     <span class="text-gray-500 dark:text-gray-400">{{ t('payment.fee') }} ({{ feeRate }}%)</span>
                     <span class="text-gray-900 dark:text-white">{{ formatSelectedPaymentAmount(subFeeAmount) }}</span>
                   </div>
-                  <div class="flex justify-between border-t border-gray-200 pt-2 dark:border-dark-600">
+                  <div v-if="!isUSDTMethod(selectedMethod)" class="flex justify-between border-t border-gray-200 pt-2 dark:border-dark-600">
                     <span class="font-medium text-gray-700 dark:text-gray-300">{{ t('payment.actualPay') }}</span>
                     <span class="text-lg font-bold text-primary-600 dark:text-primary-400">{{ formatSelectedPaymentAmount(subTotalAmount) }}</span>
                   </div>
@@ -204,7 +250,7 @@
                   <span class="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent"></span>
                   {{ t('common.processing') }}
                 </span>
-                <span v-else>{{ t('payment.createOrder') }} {{ formatSelectedPaymentAmount(subTotalAmount) }}</span>
+                <span v-else>{{ isUSDTMethod(selectedMethod) ? t('payment.createOrder') : `${t('payment.createOrder')} ${formatSelectedPaymentAmount(subTotalAmount)}` }}</span>
               </button>
               <button class="btn btn-secondary w-full" @click="selectedPlan = null">{{ t('common.cancel') }}</button>
             </template>
@@ -280,7 +326,7 @@
 <script setup lang="ts">
 import ImagePreview from '@/components/common/ImagePreview.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
@@ -295,13 +341,13 @@ import { paymentAPI } from '@/api/payment'
 import { extractApiErrorMessage, extractI18nErrorMessage } from '@/utils/apiError'
 import { isMobileDevice } from '@/utils/device'
 import { hasPeakRate, formatPeakRateWindow, serverTimezoneLabel, type PeakRateFields } from '@/utils/peak-rate'
-import type { SubscriptionPlan, CheckoutInfoResponse, CreateOrderResult, OrderType } from '@/types/payment'
+import type { SubscriptionPlan, CheckoutInfoResponse, CreateOrderResult, OrderType, USDTQuote } from '@/types/payment'
 import { formatRechargeBonusNumber, normalizeRechargeBonusMode, normalizeRechargeBonusTiers, quoteRechargeBonus } from '@/utils/rechargeBonus'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import WorkspacePage from '@/components/layout/WorkspacePage.vue'
 import AmountInput from '@/components/payment/AmountInput.vue'
 import PaymentMethodSelector from '@/components/payment/PaymentMethodSelector.vue'
-import { METHOD_ORDER, getPaymentPopupFeatures } from '@/components/payment/providerConfig'
+import { METHOD_ORDER, getPaymentPopupFeatures, isUSDTMethod } from '@/components/payment/providerConfig'
 import {
   PAYMENT_RECOVERY_STORAGE_KEY,
   buildCreateOrderPayload,
@@ -357,6 +403,11 @@ const amount = ref<number | null>(null)
 const selectedMethod = ref('')
 const selectedPlan = ref<SubscriptionPlan | null>(null)
 const previewImage = ref('')
+const usdtQuote = ref<USDTQuote | null>(null)
+const usdtQuoteLoading = ref(false)
+const usdtQuoteError = ref(false)
+let usdtQuoteTimer: ReturnType<typeof setTimeout> | null = null
+let usdtQuoteRequestID = 0
 
 const paymentPhase = ref<'select' | 'paying'>('select')
 
@@ -381,6 +432,10 @@ function emptyPaymentState(): PaymentRecoverySnapshot {
     orderId: 0,
     amount: 0,
     qrCode: '',
+    paymentAddress: '',
+    paymentTokenAmount: '',
+    paymentToken: '',
+    paymentNetwork: '',
     expiresAt: '',
     paymentType: '',
     payUrl: '',
@@ -558,8 +613,8 @@ const tabs = computed(() => {
   return result
 })
 
-// tab 列表随 checkout（balance_disabled）与订阅开关变化。当前 tab 不在列表里时收敛到第一个可用 tab，
-// 两个方向都覆盖：关闭订阅 → 回到充值；仅订阅站点重新打开订阅 → 进入订阅。列表为空时模板展示不可用提示。
+// Keep the active tab aligned with checkout availability. This handles both
+// disabling subscriptions and reopening subscriptions on subscription-only sites.
 watch(tabs, (available) => {
   if (available.some((tab) => tab.key === activeTab.value)) return
   const leavingSubscription = activeTab.value === 'subscription'
@@ -665,7 +720,7 @@ function formatSelectedSubscriptionPaymentAmount(value: number): string {
 // 充值优惠：阈值按输入金额命中；赠金模式按到账基数（输入 × 倍率）加赠送，折扣模式按百分比减实付。
 // 与后端 quoteRechargeBonus 一致；渠道限额、手续费、实付都按折后基数（payBaseAmount）计算，提交仍发送输入金额。
 const bonusQuote = computed(() => quoteRechargeBonus(rechargeBonusTiers.value, validAmount.value, {
-  multiplier: balanceRechargeMultiplier.value,
+  multiplier: effectiveRechargeMultiplier.value,
   mode: rechargeBonusMode.value,
   currencyDigits: currencyFractionDigits(selectedCurrency.value),
 }))
@@ -673,7 +728,13 @@ const payBaseAmount = computed(() => bonusQuote.value.payBase)
 const discountAmount = computed(() => roundPaymentAmount(validAmount.value - payBaseAmount.value, selectedCurrency.value))
 const creditedAmount = computed(() => bonusQuote.value.credited)
 const showBonusRow = computed(() => bonusQuote.value.mode !== 'discount' && bonusQuote.value.bonus > 0)
-const showCreditedBalance = computed(() => balanceRechargeMultiplier.value !== 1 || bonusQuote.value.percent > 0)
+const effectiveRechargeMultiplier = computed(() => isUSDTMethod(selectedMethod.value) ? 1 : balanceRechargeMultiplier.value)
+const showCreditedBalance = computed(() => isUSDTMethod(selectedMethod.value) || balanceRechargeMultiplier.value !== 1 || bonusQuote.value.percent > 0)
+
+function methodFeeRate(type: string): number {
+  if (isUSDTMethod(type)) return 0
+  return checkout.value?.recharge_fee_rate ?? 0
+}
 
 const methodOptions = computed<PaymentMethodOption[]>(() =>
   enabledMethods.value.map((type) => {
@@ -681,13 +742,13 @@ const methodOptions = computed<PaymentMethodOption[]>(() =>
     return {
       type,
       display_name: ml?.display_name,
-      fee_rate: ml?.fee_rate ?? 0,
+      fee_rate: methodFeeRate(type),
       available: ml?.available !== false && amountFitsMethod(payBaseAmount.value, type),
     }
   })
 )
 
-const feeRate = computed(() => checkout.value?.recharge_fee_rate ?? 0)
+const feeRate = computed(() => methodFeeRate(selectedMethod.value))
 const feeAmount = computed(() =>
   feeRate.value > 0 && payBaseAmount.value > 0
     ? Math.ceil(((payBaseAmount.value * feeRate.value) / 100) * 100) / 100
@@ -698,7 +759,7 @@ const totalAmount = computed(() =>
     ? Math.round((payBaseAmount.value + feeAmount.value) * 100) / 100
     : payBaseAmount.value
 )
-const showActualPay = computed(() => feeRate.value > 0 || discountAmount.value > 0)
+const showActualPay = computed(() => !isUSDTMethod(selectedMethod.value) && (feeRate.value > 0 || discountAmount.value > 0))
 
 const amountError = computed(() => {
   if (validAmount.value <= 0) return ''
@@ -715,12 +776,6 @@ const amountError = computed(() => {
   return ''
 })
 
-const canSubmit = computed(() =>
-  validAmount.value > 0
-    && amountFitsMethod(payBaseAmount.value, selectedMethod.value)
-    && selectedLimit.value?.available !== false
-)
-
 const subPaymentAmount = computed(() => {
   const price = selectedPlan.value?.price ?? 0
   return subscriptionPaymentAmountForCurrency(price, selectedCurrency.value)
@@ -735,6 +790,112 @@ const subTotalAmount = computed(() => {
   if (feeRate.value <= 0 || subPaymentAmount.value <= 0) return subPaymentAmount.value
   return roundPaymentAmount(subPaymentAmount.value + subFeeAmount.value, selectedCurrency.value)
 })
+
+const selectedUSDTNetworkLabel = computed(() =>
+  selectedMethod.value === 'usdt_tron' ? 'TRON' : selectedMethod.value === 'usdt_bep20' ? 'BEP20' : '',
+)
+const selectedUSDTNetwork = computed(() =>
+  selectedMethod.value === 'usdt_tron' ? 'tron' : selectedMethod.value === 'usdt_bep20' ? 'binance' : '',
+)
+const currentUSDTQuoteAmount = computed(() => {
+  const value = activeTab.value === 'subscription' && selectedPlan.value
+    ? subPaymentAmount.value
+    : totalAmount.value
+  return Math.round(value * 100) / 100
+})
+const usdtQuoteReady = computed(() => {
+  const quote = usdtQuote.value
+  return isUSDTMethod(selectedMethod.value)
+    && !!quote
+    && quote.currency === 'CNY'
+    && quote.token === 'USDT'
+    && quote.network === selectedUSDTNetwork.value
+    && Math.abs(quote.amount - currentUSDTQuoteAmount.value) < 0.005
+    && quote.rate > 0
+    && quote.quoted_amount > 0
+})
+const formattedUSDTQuoteAmount = computed(() => {
+  if (!usdtQuoteReady.value || !usdtQuote.value) return ''
+  const precision = Math.min(8, Math.max(0, usdtQuote.value.amount_precision || 6))
+  return usdtQuote.value.quoted_amount.toFixed(precision)
+})
+const formattedUSDTRate = computed(() =>
+  usdtQuoteReady.value && usdtQuote.value ? usdtQuote.value.rate.toFixed(8) : '',
+)
+
+async function requestUSDTQuote() {
+  const paymentType = selectedMethod.value
+  const quoteAmount = currentUSDTQuoteAmount.value
+  if (!isUSDTMethod(paymentType) || quoteAmount <= 0 || paymentPhase.value !== 'select') {
+    usdtQuote.value = null
+    usdtQuoteLoading.value = false
+    usdtQuoteError.value = false
+    return
+  }
+
+  const requestID = ++usdtQuoteRequestID
+  usdtQuoteLoading.value = true
+  usdtQuoteError.value = false
+  try {
+    const response = await paymentAPI.getUSDTQuote(
+      quoteAmount,
+      paymentType as 'usdt_tron' | 'usdt_bep20',
+    )
+    if (requestID !== usdtQuoteRequestID) return
+    usdtQuote.value = response.data
+    if (!usdtQuoteReady.value) {
+      usdtQuote.value = null
+      usdtQuoteError.value = true
+    }
+  } catch {
+    if (requestID !== usdtQuoteRequestID) return
+    usdtQuote.value = null
+    usdtQuoteError.value = true
+  } finally {
+    if (requestID === usdtQuoteRequestID) {
+      usdtQuoteLoading.value = false
+      if (usdtQuoteReady.value) {
+        if (usdtQuoteTimer) clearTimeout(usdtQuoteTimer)
+        usdtQuoteTimer = setTimeout(() => { void requestUSDTQuote() }, 60_000)
+      }
+    }
+  }
+}
+
+function scheduleUSDTQuote() {
+  if (usdtQuoteTimer) {
+    clearTimeout(usdtQuoteTimer)
+    usdtQuoteTimer = null
+  }
+  usdtQuoteRequestID++
+  usdtQuote.value = null
+  usdtQuoteError.value = false
+  usdtQuoteLoading.value = false
+  if (
+    !isUSDTMethod(selectedMethod.value)
+    || currentUSDTQuoteAmount.value <= 0
+    || paymentPhase.value !== 'select'
+  ) return
+
+  usdtQuoteLoading.value = true
+  usdtQuoteTimer = setTimeout(() => {
+    usdtQuoteTimer = null
+    void requestUSDTQuote()
+  }, 350)
+}
+
+watch(
+  () => [selectedMethod.value, currentUSDTQuoteAmount.value, paymentPhase.value] as const,
+  scheduleUSDTQuote,
+  { immediate: true },
+)
+
+const canSubmit = computed(() =>
+  validAmount.value > 0
+    && amountFitsMethod(payBaseAmount.value, selectedMethod.value)
+    && selectedLimit.value?.available !== false
+    && (!isUSDTMethod(selectedMethod.value) || usdtQuoteReady.value)
+)
 
 function subscriptionTotalAmountForCurrency(value: number, currency: string): number {
   const paymentAmount = subscriptionPaymentAmountForCurrency(value, currency)
@@ -752,7 +913,7 @@ const subMethodOptions = computed<PaymentMethodOption[]>(() => {
     return {
       type,
       display_name: ml?.display_name,
-      fee_rate: ml?.fee_rate ?? 0,
+      fee_rate: methodFeeRate(type),
       available: ml?.available !== false && amountFitsMethod(subscriptionTotalAmountForCurrency(price, currency), type),
     }
   })
@@ -762,6 +923,7 @@ const canSubmitSubscription = computed(() =>
   selectedPlan.value !== null
     && amountFitsMethod(subTotalAmount.value, selectedMethod.value)
     && selectedLimit.value?.available !== false
+    && (!isUSDTMethod(selectedMethod.value) || usdtQuoteReady.value)
 )
 
 // Auto-switch to first available method when current selection can't handle the amount
@@ -1216,5 +1378,10 @@ onMounted(async () => {
   if (subscriptionEnabled.value) {
     subscriptionStore.fetchActiveSubscriptions().catch(() => {})
   }
+})
+
+onUnmounted(() => {
+  if (usdtQuoteTimer) clearTimeout(usdtQuoteTimer)
+  usdtQuoteRequestID++
 })
 </script>

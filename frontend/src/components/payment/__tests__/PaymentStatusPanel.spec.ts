@@ -5,6 +5,7 @@ const pollOrderStatus = vi.hoisted(() => vi.fn())
 const cancelOrder = vi.hoisted(() => vi.fn())
 const verifyOrder = vi.hoisted(() => vi.fn())
 const showError = vi.hoisted(() => vi.fn())
+const showSuccess = vi.hoisted(() => vi.fn())
 const toCanvas = vi.hoisted(() => vi.fn())
 
 vi.mock('vue-i18n', async () => {
@@ -26,6 +27,7 @@ vi.mock('@/stores/payment', () => ({
 vi.mock('@/stores', () => ({
   useAppStore: () => ({
     showError,
+    showSuccess,
   }),
 }))
 
@@ -66,6 +68,7 @@ describe('PaymentStatusPanel', () => {
     cancelOrder.mockReset()
     verifyOrder.mockReset()
     showError.mockReset()
+    showSuccess.mockReset()
     toCanvas.mockReset().mockResolvedValue(undefined)
   })
 
@@ -152,6 +155,37 @@ describe('PaymentStatusPanel', () => {
 
     expect(wrapper.text()).toContain('payment.qr.scanToPay')
     expect(wrapper.text()).not.toContain('payment.qr.scanAlipay')
+  })
+
+  it('encodes only the BEP20 address and shows exact on-chain payment details', async () => {
+    const address = '0x1dafac91abe2ee53b2d2023b8225b4c293a4f884'
+    const wrapper = mount(PaymentStatusPanel, {
+      props: {
+        orderId: 42,
+        qrCode: 'https://epusdt.example.test/pay/checkout-counter/trade-42',
+        paymentAddress: address,
+        paymentTokenAmount: '74.492930',
+        paymentToken: 'USDT',
+        paymentNetwork: 'binance',
+        payUrl: 'https://epusdt.example.test/pay/checkout-counter/trade-42',
+        expiresAt: '2099-01-01T12:30:00Z',
+        paymentType: 'usdt_bep20',
+        orderType: 'balance',
+      },
+      global: { stubs: { Icon: true } },
+    })
+
+    await flushPromises()
+
+    expect(toCanvas).toHaveBeenCalledWith(
+      expect.any(HTMLCanvasElement),
+      address,
+      expect.objectContaining({ errorCorrectionLevel: 'M' }),
+    )
+    expect(wrapper.get('[data-test="usdt-payment-address"]').text()).toBe(address)
+    expect(wrapper.get('[data-test="usdt-payment-details"]').text()).toContain('74.492930 USDT')
+    expect(wrapper.get('[data-test="usdt-payment-details"]').text()).toContain('BEP20')
+    expect(wrapper.find('.pointer-events-none.absolute.inset-0').exists()).toBe(false)
   })
 
   it('actively verifies a stuck pending order and settles it when upstream confirms payment', async () => {

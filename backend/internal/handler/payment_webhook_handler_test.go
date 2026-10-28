@@ -69,6 +69,13 @@ func TestWriteSuccessResponse(t *testing.T) {
 			wantBody:        "success",
 		},
 		{
+			name:            "epusdt returns plain text success",
+			providerKey:     payment.TypeEpusdt,
+			wantCode:        http.StatusOK,
+			wantContentType: "text/plain",
+			wantBody:        "success",
+		},
+		{
 			name:            "unknown provider returns plain text success",
 			providerKey:     "unknown_provider",
 			wantCode:        http.StatusOK,
@@ -177,6 +184,12 @@ func TestExtractOutTradeNo(t *testing.T) {
 			providerKey: payment.TypeAirwallex,
 			rawBody:     `{"name":"payment_intent.succeeded","data":{"object":{"merchant_order_id":"sub2_awx_123"}}}`,
 			want:        "sub2_awx_123",
+		},
+		{
+			name:        "epusdt GMPay payload",
+			providerKey: payment.TypeEpusdt,
+			rawBody:     `{"trade_id":"trade-1","order_id":"sub2_usdt_123","status":2}`,
+			want:        "sub2_usdt_123",
 		},
 	}
 

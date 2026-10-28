@@ -661,6 +661,32 @@ func TestValidateProviderNotificationMetadataRejectsAirwallexSnapshotMismatch(t 
 	assert.ErrorContains(t, err, "airwallex currency mismatch")
 }
 
+func TestValidateProviderNotificationMetadataValidatesEpusdtIdentityAndNetwork(t *testing.T) {
+	t.Parallel()
+
+	order := &dbent.PaymentOrder{
+		PaymentType: payment.TypeUSDTTron,
+		ProviderSnapshot: map[string]any{
+			"schema_version": 2,
+			"merchant_id":    "1000",
+			"currency":       "CNY",
+			"token":          "USDT",
+			"network":        "tron",
+		},
+	}
+	metadata := map[string]string{
+		"pid":      "1000",
+		"currency": "CNY",
+		"token":    "USDT",
+		"network":  "tron",
+		"status":   "2",
+	}
+	require.NoError(t, validateProviderNotificationMetadata(order, payment.TypeEpusdt, metadata))
+
+	metadata["network"] = "binance"
+	require.ErrorContains(t, validateProviderNotificationMetadata(order, payment.TypeEpusdt, metadata), "network mismatch")
+}
+
 func TestValidateProviderNotificationMetadataRejectsStripeCurrencyMismatch(t *testing.T) {
 	t.Parallel()
 

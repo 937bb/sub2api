@@ -32,8 +32,8 @@
       <!-- Toggles + Payment mode + Supported types (single row) -->
       <div class="flex flex-wrap items-center gap-x-5 gap-y-2">
         <ToggleSwitch :label="t('common.enabled')" :checked="form.enabled" @toggle="form.enabled = !form.enabled" />
-        <ToggleSwitch :label="t('admin.settings.payment.refundEnabled')" :checked="form.refund_enabled" @toggle="form.refund_enabled = !form.refund_enabled; if (!form.refund_enabled) form.allow_user_refund = false" />
-        <ToggleSwitch v-if="form.refund_enabled" :label="t('admin.settings.payment.allowUserRefund')" :checked="form.allow_user_refund" @toggle="form.allow_user_refund = !form.allow_user_refund" />
+        <ToggleSwitch v-if="supportsRefund" :label="t('admin.settings.payment.refundEnabled')" :checked="form.refund_enabled" @toggle="form.refund_enabled = !form.refund_enabled; if (!form.refund_enabled) form.allow_user_refund = false" />
+        <ToggleSwitch v-if="supportsRefund && form.refund_enabled" :label="t('admin.settings.payment.allowUserRefund')" :checked="form.allow_user_refund" @toggle="form.allow_user_refund = !form.allow_user_refund" />
         <div v-if="supportsPaymentMode" class="flex items-center gap-2">
           <span class="text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.settings.payment.paymentMode') }}</span>
           <div class="flex gap-1.5">
@@ -211,6 +211,21 @@
           </div>
         </div>
 
+        <div v-if="form.provider_key === 'epusdt'" class="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm dark:border-emerald-900/60 dark:bg-emerald-950/20">
+          <p class="font-medium text-emerald-900 dark:text-emerald-200">{{ t('admin.settings.payment.epusdtWalletManagement') }}</p>
+          <p class="mt-1 text-xs leading-relaxed text-emerald-800/80 dark:text-emerald-300/80">{{ t('admin.settings.payment.epusdtWalletManagementHint') }}</p>
+          <a
+            v-if="epusdtManagementUrl"
+            :href="epusdtManagementUrl"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="mt-2 inline-flex items-center gap-1 font-medium text-emerald-700 hover:underline dark:text-emerald-300"
+          >
+            {{ t('admin.settings.payment.epusdtOpenAddressManagement') }}
+            <Icon name="externalLink" size="xs" />
+          </a>
+        </div>
+
         <!-- Callback URLs (each = editable URL + fixed path) -->
         <div v-if="callbackPaths" class="mt-4 space-y-3">
           <div v-if="callbackPaths.notifyUrl">
@@ -309,6 +324,7 @@ import { reactive, computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import HelpTooltip from '@/components/common/HelpTooltip.vue'
+import Icon from '@/components/icons/Icon.vue'
 import Select from '@/components/common/Select.vue'
 import type { SelectOption } from '@/components/common/Select.vue'
 import ToggleSwitch from './ToggleSwitch.vue'
@@ -432,6 +448,7 @@ const providerWebhookHint = computed(() =>
 const callbackPaths = computed(() => PROVIDER_CALLBACK_PATHS[form.provider_key] || null)
 
 const supportsPaymentMode = computed(() => providerSupportsPaymentMode(form.provider_key))
+const supportsRefund = computed(() => form.provider_key !== 'epusdt')
 
 const paymentModeOptions = computed(() => {
   if (form.provider_key === 'alipay') {
@@ -474,6 +491,17 @@ const resolvedFields = computed(() => {
     ...f,
     label: f.label || t(`admin.settings.payment.field_${f.key}`),
   }))
+})
+
+const epusdtManagementUrl = computed(() => {
+  const raw = String(config.managementUrl || '').trim()
+  if (!raw) return ''
+  try {
+    const parsed = new URL(raw)
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? parsed.toString() : ''
+  } catch {
+    return ''
+  }
 })
 
 const paymentGuide = computed<PaymentGuide | null>(() => {
@@ -660,6 +688,10 @@ function handleSave() {
     emitValidationError(t('admin.settings.payment.validationNameRequired'))
     return
   }
+  if (!supportsRefund.value) {
+    form.refund_enabled = false
+    form.allow_user_refund = false
+  }
   if (form.provider_key === 'easypay') {
     const validationError = validateEasyPayCustomMethods()
     if (validationError) {
@@ -719,8 +751,8 @@ function handleSave() {
     supported_types: form.supported_types,
     enabled: form.enabled,
     payment_mode: supportsPaymentMode.value ? form.payment_mode : '',
-    refund_enabled: form.refund_enabled,
-    allow_user_refund: form.refund_enabled ? form.allow_user_refund : false,
+    refund_enabled: supportsRefund.value ? form.refund_enabled : false,
+    allow_user_refund: supportsRefund.value && form.refund_enabled ? form.allow_user_refund : false,
     config: filteredConfig,
     limits: serializeLimits(),
   })

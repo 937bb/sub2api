@@ -137,6 +137,9 @@ function onDragEnd() {
 }
 
 function isEnabled(providerKey: string): boolean {
+  if (providerKey === 'epusdt') {
+    return props.enabledPaymentTypes.includes('usdt_tron') || props.enabledPaymentTypes.includes('usdt_bep20')
+  }
   return props.enabledPaymentTypes.includes(providerKey)
 }
 
