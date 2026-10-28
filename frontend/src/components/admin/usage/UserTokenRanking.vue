@@ -1,9 +1,9 @@
 <template>
-  <!-- 用量页"用户排行"tab 内容：无卡片外观，依赖父级统一卡片；筛选/时间范围复用页面级筛选栏 -->
-  <div>
+  <!-- Reuse the records surface and page-level filters. -->
+  <div class="console-usage-table console-usage-ranking">
     <!-- Toolbar -->
-    <div class="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 px-4 py-3 dark:border-dark-700/50 sm:px-6">
-      <p class="text-xs text-gray-400 dark:text-gray-500">{{ t('admin.usage.tokenRanking.subtitle') }}</p>
+    <div class="console-record-toolbar">
+      <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.usage.tokenRanking.subtitle') }}</p>
       <div class="flex items-center gap-3">
         <span v-if="!loading && items.length > 0" class="text-xs text-gray-400 dark:text-gray-500">
           {{ t('admin.usage.tokenRanking.userCount', { count: items.length }) }}
@@ -15,23 +15,26 @@
     </div>
 
     <!-- Table -->
-    <div class="overflow-x-auto">
+    <div class="table-wrapper overflow-x-auto">
       <table class="w-full min-w-max divide-y divide-gray-200 dark:divide-dark-700">
         <thead class="bg-gray-50 dark:bg-dark-800">
           <tr>
-            <th class="w-16 px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-dark-400 sm:px-6">#</th>
-            <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-dark-400">
+            <th scope="col" class="w-16 text-left text-xs font-medium text-gray-500 dark:text-dark-400">#</th>
+            <th scope="col" class="text-left text-xs font-medium text-gray-500 dark:text-dark-400">
               {{ t('admin.usage.tokenRanking.columns.user') }}
             </th>
             <th
               v-for="col in sortableColumns"
               :key="col.key"
-              class="cursor-pointer select-none whitespace-nowrap px-4 py-3 text-right text-xs font-medium uppercase tracking-wider transition-colors hover:bg-gray-100 dark:hover:bg-dark-700"
+              scope="col"
+              :aria-sort="sortBy === col.key ? 'descending' : 'none'"
+              class="select-none whitespace-nowrap text-right text-xs font-medium"
               :class="sortBy === col.key ? 'text-primary-600 dark:text-primary-400' : 'text-gray-500 dark:text-dark-400'"
-              @click="setSort(col.key)"
             >
-              {{ t(col.label) }}
-              <span v-if="sortBy === col.key" aria-hidden="true">↓</span>
+              <button type="button" class="inline-flex min-h-8 items-center gap-1 rounded px-1 hover:bg-gray-100 dark:hover:bg-dark-700" @click="setSort(col.key)">
+                {{ t(col.label) }}
+                <span class="inline-block w-3" aria-hidden="true">{{ sortBy === col.key ? '↓' : '↕' }}</span>
+              </button>
             </th>
           </tr>
         </thead>
@@ -42,8 +45,8 @@
             </td>
           </tr>
           <tr v-else-if="items.length === 0">
-            <td :colspan="sortableColumns.length + 2" class="py-12 text-center text-sm text-gray-400">
-              {{ t('admin.dashboard.noDataAvailable') }}
+            <td :colspan="sortableColumns.length + 2" class="text-center">
+              <EmptyState :message="t('admin.dashboard.noDataAvailable')" />
             </td>
           </tr>
           <tr
@@ -54,24 +57,27 @@
             :title="t('admin.usage.tokenRanking.rowHint')"
             @click="$emit('select-user', item.user_id, item.email)"
           >
-            <td class="px-4 py-3 sm:px-6">
+            <td>
               <span
                 v-if="index < 3"
-                class="inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold"
-                :class="RANK_BADGE_CLASSES[index]"
+                class="inline-flex size-6 items-center justify-center rounded-md bg-primary-50 text-xs font-semibold tabular-nums text-primary-700 dark:bg-primary-500/15 dark:text-primary-300"
               >{{ index + 1 }}</span>
               <span v-else class="inline-block w-6 text-center text-sm tabular-nums text-gray-400">{{ index + 1 }}</span>
             </td>
-            <td class="max-w-[260px] truncate px-4 py-3 text-sm font-medium text-gray-700 dark:text-gray-200" :title="item.email">
-              {{ item.email || `User #${item.user_id}` }}
-              <span class="ml-1 font-normal text-gray-400 dark:text-gray-500">#{{ item.user_id }}</span>
+            <td class="text-sm" :title="item.email">
+              <div class="console-usage-identity">
+                <button type="button" class="max-w-[260px] truncate font-medium text-gray-900 hover:text-primary-700 dark:text-gray-100 dark:hover:text-primary-300" @click.stop="$emit('select-user', item.user_id, item.email)">
+                  {{ item.email || `User #${item.user_id}` }}
+                </button>
+                <span class="text-gray-500 dark:text-gray-400">#{{ item.user_id }}</span>
+              </div>
             </td>
             <td class="whitespace-nowrap px-4 py-3 text-right text-sm tabular-nums text-gray-500 dark:text-gray-400">{{ item.requests.toLocaleString() }}</td>
             <td class="whitespace-nowrap px-4 py-3 text-right text-sm tabular-nums text-gray-500 dark:text-gray-400">{{ fmtTokens(item.input_tokens) }}</td>
             <td class="whitespace-nowrap px-4 py-3 text-right text-sm tabular-nums text-gray-500 dark:text-gray-400">{{ fmtTokens(item.output_tokens) }}</td>
             <td class="whitespace-nowrap px-4 py-3 text-right text-sm tabular-nums text-gray-500 dark:text-gray-400">{{ fmtTokens(item.cache_tokens) }}</td>
             <td class="whitespace-nowrap px-4 py-3 text-right text-sm font-medium tabular-nums text-gray-900 dark:text-gray-100">{{ fmtTokens(item.total_tokens) }}</td>
-            <td class="whitespace-nowrap px-4 py-3 text-right text-sm font-medium tabular-nums text-green-600 dark:text-green-400">${{ fmtCost(item.actual_cost) }}</td>
+            <td class="whitespace-nowrap px-4 py-3 text-right text-sm font-medium tabular-nums text-gray-900 dark:text-gray-100">${{ fmtCost(item.actual_cost) }}</td>
           </tr>
         </tbody>
       </table>
@@ -87,6 +93,7 @@ import { formatCompactNumber, formatCostFixed } from '@/utils/format'
 import type { UserBreakdownItem } from '@/types'
 import Select from '@/components/common/Select.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
+import EmptyState from '@/components/common/EmptyState.vue'
 
 const props = defineProps<{
   startDate: string
@@ -114,13 +121,6 @@ const limitOptions = [
   { value: 50, label: 'Top 50' },
   { value: 100, label: 'Top 100' },
   { value: 200, label: 'Top 200' },
-]
-
-// 前三名金/银/铜徽章
-const RANK_BADGE_CLASSES = [
-  'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400',
-  'bg-gray-200 text-gray-600 dark:bg-gray-500/20 dark:text-gray-300',
-  'bg-orange-100 text-orange-700 dark:bg-orange-500/20 dark:text-orange-400',
 ]
 
 const items = ref<UserBreakdownItem[]>([])

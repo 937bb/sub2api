@@ -1,6 +1,12 @@
 ---
 name: "937Sub B Console"
 description: "A compact API console with muted blue actions, aligned records, and one component language across dialogs, sheets, and portals."
+record-surfaces:
+  tabs: "Shared 46px tab strip with a muted blue active underline, for administrators and users."
+  toolbar: "A 56px minimum toolbar keeps records, errors, and ranking headers aligned."
+  table: "42px headers, 13px body text, 10px by 12px cell padding, two-line timestamps and identities."
+  mobile: "Error records show time, identity, model, status, and message; secondary fields remain available under More."
+  filters: "Audit and batch-image filters use four desktop columns, two tablet columns, and one narrow-screen column."
 colors:
   console-bg: "#f7f8fa"
   console-surface: "#fff"

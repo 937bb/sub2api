@@ -9,10 +9,10 @@
       </template>
       <!-- Filters -->
       <template #filters>
-        <div class="card p-4 sm:p-6">
-          <div class="flex flex-wrap items-end justify-between gap-4">
+        <div class="card p-4">
+          <div class="space-y-4">
             <!-- Left: filter fields -->
-            <div class="flex min-w-0 flex-col gap-4">
+            <div class="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
               <div class="w-full min-w-0">
                 <label class="input-label">{{ t('admin.audit.filters.q') }}</label>
                 <div class="relative">

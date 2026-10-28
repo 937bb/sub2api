@@ -76,11 +76,11 @@
       </div>
 
       <section v-show="usageView === 'records'" class="console-usage-records">
-      <div v-if="errorViewEnabled" class="flex gap-2 border-b border-gray-200 dark:border-dark-700">
-        <button class="tab" :class="{ 'tab-active': activeTab === 'usage' }" @click="activeTab = 'usage'">
+      <div v-if="errorViewEnabled" class="console-record-tabs" role="group" :aria-label="t('nav.usage')">
+        <button type="button" :aria-pressed="activeTab === 'usage'" @click="activeTab = 'usage'">
           {{ t('usage.tabs.usage') }}
         </button>
-        <button class="tab" :class="{ 'tab-active': activeTab === 'errors' }" @click="switchToErrors">
+        <button type="button" :aria-pressed="activeTab === 'errors'" @click="switchToErrors">
           {{ t('usage.tabs.errors') }}
         </button>
       </div>

@@ -45,8 +45,7 @@ function mountTable(row: Partial<OpsErrorLog>) {
 }
 
 describe('OpsErrorLogTable user/api-key/account columns', () => {
-  // 回归:上游错误行(phase=upstream, owner=provider)以前在单一「用户」列里只显示账号、
-  // 丢失用户;现在用户/API Key/账号各占独立列,三者同时可见。
+  // Upstream rows must retain user, API key, and account identities separately.
   it('renders user, api key and account in separate columns for an upstream row', () => {
     const wrapper = mountTable({
       user_id: 2,
@@ -58,9 +57,9 @@ describe('OpsErrorLogTable user/api-key/account columns', () => {
     })
 
     const text = wrapper.text()
-    expect(text).toContain('alice@test.com') // 用户列(上游行也显示用户)
-    expect(text).toContain('my-key') // API Key 列
-    expect(text).toContain('acct-A') // 账号列
+    expect(text).toContain('alice@test.com')
+    expect(text).toContain('my-key')
+    expect(text).toContain('acct-A')
   })
 
   it('shows the deleted badge for a soft-deleted api key', () => {
@@ -93,7 +92,7 @@ describe('OpsErrorLogTable column order', () => {
     wrapper.unmount()
   })
 
-  it('preserves the usage column order and visibility by default', async () => {
+  it('preserves the standalone column order and visibility by default', async () => {
     const wrapper = mountTable({})
     await wrapper.setProps({ visibleColumnKeys: ['created_at', 'user', 'message'] })
 
@@ -104,14 +103,25 @@ describe('OpsErrorLogTable column order', () => {
     ])
     wrapper.unmount()
   })
+
+  it('aligns embedded records while preserving hidden columns, sorting and details', async () => {
+    const wrapper = mountTable({ user_id: 2, user_email: 'alice@test.com' })
+    await wrapper.setProps({ flat: true, visibleColumnKeys: ['user', 'message', 'created_at', 'actions'] })
+
+    const headers = wrapper.findAll('thead th')
+    expect(headers.map((header) => header.text())).toEqual([
+      'admin.ops.errorLog.time', 'admin.ops.errorLog.user', 'admin.ops.errorLog.message', 'admin.ops.errorLog.action',
+    ])
+    expect(wrapper.findAll('tbody td')[1].text()).toContain('alice@test.com')
+    await headers[0].trigger('click')
+    expect(wrapper.emitted('sort')).toEqual([['created_at', 'asc']])
+    await wrapper.get('button[aria-label="admin.ops.errorLog.details"]').trigger('click')
+    expect(wrapper.emitted('openErrorDetail')).toEqual([[1]])
+    wrapper.unmount()
+  })
 })
 
-// 防回归:组件用 admin.ops.errorLog.* 命名空间。若 i18n 键写错命名空间(如误放到
-// errorDetail),真实 vue-i18n 会回退返回 key 本身 → 界面显示原始路径字符串。
-// 这里用真实 locale 校验键确实可解析(返回译文而非 key)。
-// 防回归:组件用 admin.ops.errorLog.* 命名空间。若键写错命名空间(如误放到
-// errorDetail),界面会显示原始路径字符串而非译文。vitest 的 vue-i18n 为 runtime-only
-// (无消息编译器,t() 对任何键都回退返回 key),故直接校验 locale 对象的命名空间含这些键。
+// Check actual locale keys because the runtime-only test translator returns the key.
 describe('OpsErrorLogTable i18n keys exist in the errorLog namespace', () => {
   const locales: Record<string, any> = { zh: zhLocale, en: enLocale }
   for (const [name, msgs] of Object.entries(locales)) {

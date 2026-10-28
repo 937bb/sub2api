@@ -1,12 +1,16 @@
 <template>
-  <div class="flex min-h-0 flex-1 flex-col">
-    <div class="card flex min-h-0 flex-1 flex-col overflow-hidden">
-      <IpGeoBatchToolbar :ips="rows.map((r) => r.client_ip)" @failed="emit('ipGeoBatchFailed')" />
+  <div class="console-usage-table flex min-h-0 flex-1 flex-col">
+    <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <div class="console-record-toolbar" :aria-busy="loading">
+        <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('console.visibleRecords') }} <strong class="ml-1 font-medium tabular-nums text-gray-900 dark:text-gray-100">{{ loading ? '—' : rows.length.toLocaleString() }}</strong></span>
+        <IpGeoBatchToolbar v-if="columns.some((column) => column.key === 'client_ip')" inline :ips="rows.map((r) => r.client_ip)" @failed="emit('ipGeoBatchFailed')" />
+      </div>
 
       <DataTable
         :columns="columns"
         :data="rows"
         :loading="loading"
+        :mobile-summary-columns="['created_at', 'model', 'status', 'message']"
         clickable-rows
         server-side-sort
         default-sort-key="created_at"
@@ -15,7 +19,7 @@
         @rowClick="(row) => openDetail(row.id)"
       >
         <template #cell-model="{ row }">
-          <span v-if="row.model" class="text-sm font-medium text-gray-900 dark:text-white">{{ row.model }}</span>
+          <span v-if="row.model" class="text-xs font-medium text-gray-900 dark:text-white">{{ row.model }}</span>
           <span v-else class="text-sm text-gray-400 dark:text-gray-500">-</span>
         </template>
 
@@ -89,7 +93,10 @@
         </template>
 
         <template #cell-created_at="{ row }">
-          <span class="text-sm text-gray-600 dark:text-gray-400">{{ formatDateTime(row.created_at) }}</span>
+          <time class="console-usage-time tabular-nums text-gray-600 dark:text-gray-400" :title="formatDateTime(row.created_at)">
+            <span>{{ formatDateTime(row.created_at).split(' ')[0] }}</span>
+            <span>{{ formatDateTime(row.created_at).split(' ')[1] }}</span>
+          </time>
         </template>
 
         <template #cell-user_agent="{ row }">
@@ -146,7 +153,7 @@ const props = defineProps<{
   loading: boolean
   page: number
   pageSize: number
-  /** 列设置:仅显示这些 key 的列;不传则全显(key 须与 allColumns 一致) */
+  /** Show only these columns; omitted means all columns. */
   visibleColumnKeys?: string[]
 }>()
 
@@ -163,20 +170,19 @@ function onSort(key: string, order: 'asc' | 'desc') {
 
 const { t } = useI18n()
 
-// 列序对齐用户端用量明细:Key → 模型 → 端点 → IP → 分组 → 类型 → 平台 → 分类
-// → 结果(状态→消息)→ 时间 → UA(用量明细 UA 同在时间之后的尾部)
+// Start with time and model, matching the user's usage records.
 const allColumns = computed<Column[]>(() => [
-  { key: 'key_name', label: t('usage.errors.keyName') },
+  { key: 'created_at', label: t('usage.errors.time'), sortable: true },
   { key: 'model', label: t('usage.errors.model'), sortable: true },
+  { key: 'status', label: t('usage.errors.status'), sortable: true },
+  { key: 'message', label: t('usage.errors.message') },
+  { key: 'key_name', label: t('usage.errors.keyName') },
   { key: 'endpoint', label: t('usage.errors.endpoint') },
   { key: 'client_ip', label: 'IP' },
   { key: 'group', label: t('admin.usage.group') },
   { key: 'type', label: t('usage.type') },
   { key: 'platform', label: t('usage.errors.platform') },
   { key: 'category', label: t('usage.errors.category') },
-  { key: 'status', label: t('usage.errors.status'), sortable: true },
-  { key: 'message', label: t('usage.errors.message') },
-  { key: 'created_at', label: t('usage.errors.time'), sortable: true },
   { key: 'user_agent', label: t('usage.userAgent') },
 ])
 

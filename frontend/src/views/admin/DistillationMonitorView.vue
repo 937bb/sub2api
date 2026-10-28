@@ -8,7 +8,7 @@
       <template v-else>
         <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <h1 class="text-2xl font-semibold text-gray-900 dark:text-white">{{ t('admin.distillationMonitor.title') }}</h1>
+            <h1 class="text-balance text-xl font-semibold text-gray-900 dark:text-white">{{ t('admin.distillationMonitor.title') }}</h1>
             <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ t('admin.distillationMonitor.description') }}</p>
           </div>
           <div class="flex flex-wrap items-center gap-2">

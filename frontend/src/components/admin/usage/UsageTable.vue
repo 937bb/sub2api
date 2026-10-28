@@ -1,9 +1,12 @@
 <template>
   <div class="console-usage-table" :class="flat ? '' : 'card overflow-hidden'">
     <div
-      v-if="showIpGeoToolbar && (pendingIpCount > 0 || ipGeoBatchLoading)"
-      class="flex items-center justify-end gap-2 border-b border-gray-200 px-4 py-2 dark:border-dark-700"
+      v-if="flat || (showIpGeoToolbar && (pendingIpCount > 0 || ipGeoBatchLoading))"
+      class="console-record-toolbar"
+      :aria-busy="loading"
     >
+      <span v-if="flat" class="text-xs text-gray-500 dark:text-gray-400">{{ t('console.visibleRecords') }} <strong class="ml-1 font-medium tabular-nums text-gray-900 dark:text-gray-100">{{ loading ? '—' : data.length.toLocaleString() }}</strong></span>
+      <div v-if="showIpGeoToolbar && (pendingIpCount > 0 || ipGeoBatchLoading)" class="ml-auto flex flex-wrap items-center justify-end gap-2">
       <span v-if="pendingIpCount > 0" class="text-xs text-gray-500 dark:text-gray-400">
         {{ t('usage.ipGeo.pending', { count: pendingIpCount }) }}
       </span>
@@ -15,6 +18,7 @@
       >
         {{ ipGeoBatchLoading ? t('usage.ipGeo.batchFetching') : t('usage.ipGeo.batchFetch') }}
       </button>
+      </div>
     </div>
     <div class="overflow-auto">
       <DataTable

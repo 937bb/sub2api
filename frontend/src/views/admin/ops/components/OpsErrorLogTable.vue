@@ -1,12 +1,16 @@
 <template>
-  <div class="flex h-full min-h-0 flex-col">
+  <div class="flex h-full min-h-0 flex-col" :class="{ 'console-usage-table': flat }">
     <div class="flex min-h-0 flex-1 flex-col overflow-hidden" :class="flat ? '' : 'card'">
-      <IpGeoBatchToolbar :ips="rows.map((r) => r.client_ip)" @failed="emit('ipGeoBatchFailed')" />
+      <div :class="{ 'console-record-toolbar': flat }" :aria-busy="loading">
+        <span v-if="flat" class="text-xs text-gray-500 dark:text-gray-400">{{ t('console.visibleRecords') }} <strong class="ml-1 font-medium tabular-nums text-gray-900 dark:text-gray-100">{{ loading ? '—' : rows.length.toLocaleString() }}</strong></span>
+        <IpGeoBatchToolbar v-if="columns.some((column) => column.key === 'client_ip')" :inline="flat" :ips="rows.map((r) => r.client_ip)" @failed="emit('ipGeoBatchFailed')" />
+      </div>
 
       <DataTable
         :columns="columns"
         :data="rows"
         :loading="loading"
+        :mobile-summary-columns="flat ? ['created_at', 'user', 'model', 'status', 'message'] : undefined"
         clickable-rows
         server-side-sort
         default-sort-key="created_at"
@@ -15,7 +19,12 @@
         @rowClick="(row) => emit('openErrorDetail', row.id)"
       >
         <template #cell-created_at="{ row }">
+          <div v-if="flat" class="console-usage-time tabular-nums text-gray-600 dark:text-gray-400" :title="row.request_id || row.client_request_id">
+            <span>{{ formatUsageDateTime(row.created_at).split(' ')[0] }}</span>
+            <span>{{ formatUsageDateTime(row.created_at).split(' ')[1] }}</span>
+          </div>
           <span
+            v-else
             class="text-sm text-gray-600 dark:text-gray-400"
             :title="row.request_id || row.client_request_id"
           >{{ formatDateTime(row.created_at) }}</span>
@@ -49,7 +58,7 @@
             <div class="break-all font-medium text-gray-900 dark:text-white">{{ row.requested_model }}</div>
             <div class="break-all text-gray-500 dark:text-gray-400"><span class="mr-0.5">↳</span>{{ row.upstream_model }}</div>
           </div>
-          <span v-else-if="displayModel(row)" class="text-sm font-medium text-gray-900 dark:text-white">{{ displayModel(row) }}</span>
+          <span v-else-if="displayModel(row)" class="font-medium text-gray-900 dark:text-white" :class="flat ? 'text-xs' : 'text-sm'">{{ displayModel(row) }}</span>
           <span v-else class="text-sm text-gray-400 dark:text-gray-500">-</span>
         </template>
 
@@ -65,17 +74,19 @@
         </template>
 
         <template #cell-user="{ row }">
-          <div v-if="row.user_id" class="text-sm">
+          <div v-if="row.user_id" class="text-sm" :class="{ 'console-usage-identity': flat }">
             <button
               v-if="userClickable && row.user_email"
-              class="font-medium text-primary-600 underline decoration-dashed underline-offset-2 transition-colors hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300"
+              type="button"
+              class="font-medium transition-colors hover:text-primary-700 dark:hover:text-primary-300"
+              :class="flat ? 'text-gray-900 dark:text-gray-100' : 'text-primary-600 underline decoration-dashed underline-offset-2 dark:text-primary-400'"
               :title="t('admin.usage.clickToViewBalance')"
               @click.stop="emit('userClick', row.user_id, row.user_email)"
             >
               {{ row.user_email }}
             </button>
             <span v-else class="font-medium text-gray-900 dark:text-white">{{ row.user_email || '-' }}</span>
-            <span class="ml-1 text-gray-500 dark:text-gray-400">#{{ row.user_id }}</span>
+            <span class="text-gray-500 dark:text-gray-400" :class="{ 'ml-1': !flat }">#{{ row.user_id }}</span>
           </div>
           <span v-else class="text-sm text-gray-400 dark:text-gray-500">-</span>
         </template>
@@ -155,6 +166,7 @@
             type="button"
             class="rounded p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-600 dark:hover:text-primary-400"
             :title="t('admin.ops.errorLog.details')"
+            :aria-label="t('admin.ops.errorLog.details')"
             @click.stop="emit('openErrorDetail', row.id)"
           >
             <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
@@ -189,13 +201,13 @@ import IpGeoBatchToolbar from '@/components/common/IpGeoBatchToolbar.vue'
 import type { OpsErrorLog } from '@/api/admin/ops'
 import type { Column } from '@/components/common/types'
 import { getSeverityClass, formatDateTime } from '../utils/opsFormatters'
+import { formatDateTime as formatUsageDateTime } from '@/utils/format'
 import { mapErrorCategory } from '@/utils/errorCategory'
 import { mapErrorSortKey, statusCodeBadgeClass } from '@/utils/errorBadges'
 
 const { t } = useI18n()
 
-// 列序对齐管理端用量明细:身份(用户→Key→账号)→ 请求形态(平台→模型→端点→分组→类型)
-// → 结果(状态→消息)→ 时间→UA→IP→操作
+// Keep the standalone operations table order; embedded records use a shared leading section.
 const allColumns = computed<Column[]>(() => [
   { key: 'user', label: t('admin.ops.errorLog.user') },
   { key: 'api_key', label: t('admin.ops.errorLog.apiKey') },
@@ -214,12 +226,19 @@ const allColumns = computed<Column[]>(() => [
   { key: 'actions', label: t('admin.ops.errorLog.action') },
 ])
 
-// 传入 visibleColumnKeys 时按其过滤(列设置);未传则全量(Ops 弹窗等使用方)
+// Column visibility remains independent from the presentation used by each caller.
 const columns = computed<Column[]>(() => {
   const visibleColumns = props.visibleColumnKeys
     ? allColumns.value.filter((c) => props.visibleColumnKeys!.includes(c.key))
     : allColumns.value
-  if (!props.summaryFirst) return visibleColumns
+  if (!props.summaryFirst) {
+    if (!props.flat) return visibleColumns
+    const leadingKeys = ['created_at', 'user', 'model', 'status', 'message']
+    return [
+      ...leadingKeys.flatMap((key) => visibleColumns.filter((column) => column.key === key)),
+      ...visibleColumns.filter((column) => !leadingKeys.includes(column.key)),
+    ]
+  }
 
   return [
     ...visibleColumns.filter((c) => c.key === 'created_at'),
@@ -257,7 +276,7 @@ function formatRequestType(type: number | null | undefined): string {
   }
 }
 
-// 徽章配色对齐用量明细(UsageTable)的 bg-X-100/text-X-800 体系
+// Match the semantic badge palette used by UsageTable.
 function getTypeBadge(log: OpsErrorLog): { label: string; className: string } {
   const phase = String(log.phase || '').toLowerCase()
   const owner = String(log.error_owner || '').toLowerCase()
@@ -291,13 +310,13 @@ interface Props {
   loading: boolean
   page: number
   pageSize: number
-  /** 用户邮箱可点击(emit userClick),仅在有弹窗承接的使用方开启 */
+  /** Enable user links only when the caller handles userClick. */
   userClickable?: boolean
-  /** 列设置:仅显示这些 key 的列;不传则全量 */
+  /** Show only these columns; omitted means all columns. */
   visibleColumnKeys?: string[]
-  /** 运维弹窗优先展示时间和响应内容 */
+  /** Prioritize time and response content in operations dialogs. */
   summaryFirst?: boolean
-  /** 嵌入统一卡片内使用：去掉自身卡片外观 */
+  /** Embed in the usage records surface with its shared presentation. */
   flat?: boolean
 }
 

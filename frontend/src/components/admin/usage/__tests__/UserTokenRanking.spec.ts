@@ -78,4 +78,15 @@ describe('UserTokenRanking', () => {
     expect(getUserBreakdown).toHaveBeenCalledTimes(2)
     expect(getUserBreakdown).toHaveBeenLastCalledWith(expect.objectContaining({ user_id: 9 }))
   })
+
+  it('sorts through a focusable header control without dropping shared filters', async () => {
+    const wrapper = mountRanking({ filters: { group_id: 3 } })
+    await flushPromises()
+    await wrapper.findAll('thead button')[0].trigger('click')
+    await flushPromises()
+    expect(getUserBreakdown).toHaveBeenLastCalledWith(expect.objectContaining({ group_id: 3, sort_by: 'requests' }))
+    expect(wrapper.find('th[aria-sort="descending"]').text()).toContain('columns.requests')
+    await wrapper.find('tbody button').trigger('click')
+    expect(wrapper.emitted('select-user')).toEqual([[1, 'u1@test.com']])
+  })
 })

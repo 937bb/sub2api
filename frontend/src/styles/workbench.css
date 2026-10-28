@@ -209,9 +209,9 @@
 }
 .workbench-monitor-metrics { display: flex; flex-wrap: wrap; border-block: 1px solid var(--console-line); padding-block: 20px; gap: 20px; }
 .workbench-monitor-metrics > div { flex: 1; min-width: 100px; background: none; border: 0; padding: 0 12px; box-shadow: none; }
-.workbench-monitor-workspace { display: grid; grid-template-columns: minmax(0,1fr); gap: 24px; }
-.workbench-monitor-workspace .card { border-radius: 0; border-width: 0 0 1px; background: transparent; }
-.workbench-monitor-workspace .card > div:first-child { padding-left: 0; padding-right: 0; }
+.workbench-monitor-workspace { display: grid; grid-template-columns: minmax(0,1fr); gap: 16px; }
+.workbench-monitor-workspace .card > div:first-child { padding: 16px; }
+.workbench-monitor-workspace .card > .p-6 { padding: 16px; }
 .workbench-catalog { display: flex; flex-direction: column; gap: 16px; }
 .workbench-catalog > article, .workbench-catalog > div { border-radius: 12px; }
 .workbench-finance-summary dt, .workbench-finance-summary small { color: var(--console-muted); font-size: 12px; }
