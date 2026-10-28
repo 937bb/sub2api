@@ -89,6 +89,7 @@ export default {
         }
       },
       timePricingValidation: {
+        excludedDates: '排除日期须为有效的 YYYY-MM-DD 格式，最多 3660 天',
         timezone: '请选择有效的 IANA 时区',
         format: '开始时间和结束时间必须使用 HH:mm:ss 格式',
         range: '开始时间必须早于结束时间；跨午夜请拆分为两个时间段',
@@ -161,6 +162,8 @@ export default {
         timePricingDayScope: '生效日',
         timePricingEveryDay: '每日生效（周一至周日，含周末）',
         timePricingWeekdaysOnly: '仅工作日生效（周一至周五）',
+        timePricingExcludedDates: '不加价日期',
+        timePricingExcludedDatesHint: '按所选时区，这些日期全天使用基础价。每行一个 YYYY-MM-DD，也可用逗号分隔；日期包含年份，不会每年重复。',
         addTimePeriod: '添加时间段',
         startTime: '开始时间',
         endTime: '结束时间',

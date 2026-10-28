@@ -46,6 +46,24 @@
       </button>
     </div>
 
+    <div v-if="modelValue.periods.length > 0" class="mt-3">
+      <label :for="`${inputIdPrefix}-excluded-dates`" class="block text-xs text-gray-500 dark:text-gray-400">
+        {{ t('admin.channels.form.timePricingExcludedDates') }}
+      </label>
+      <textarea
+        :id="`${inputIdPrefix}-excluded-dates`"
+        :value="modelValue.excluded_dates || ''"
+        :aria-describedby="`${inputIdPrefix}-excluded-hint`"
+        rows="3"
+        placeholder="2026-10-01"
+        class="input mt-1 w-full text-sm"
+        data-testid="time-pricing-excluded-dates"
+        @input="emit('update:modelValue', { ...modelValue, excluded_dates: ($event.target as HTMLTextAreaElement).value })"
+      />
+      <p :id="`${inputIdPrefix}-excluded-hint`" class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+        {{ t('admin.channels.form.timePricingExcludedDatesHint') }}
+      </p>
+    </div>
     <div v-if="modelValue.periods.length > 0" class="mt-3 space-y-3">
       <div
         v-for="(period, index) in modelValue.periods"

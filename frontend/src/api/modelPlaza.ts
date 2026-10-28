@@ -36,6 +36,7 @@ export interface PlazaTimePricingPeriod {
 
 /** 计费会生效的分时倍率（仅倍率 ≠ 1 的时段，已按开始时间升序）。 */
 export interface PlazaTimePricing {
+  excluded_dates?: string[]
   /** IANA 时区名，如 Asia/Shanghai。 */
   timezone: string
   /** true 时时段仅周一至周五生效，周末整天按标准价计费。 */

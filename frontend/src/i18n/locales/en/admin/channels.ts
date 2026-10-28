@@ -89,6 +89,7 @@ export default {
         }
       },
       timePricingValidation: {
+        excludedDates: 'Excluded dates must be valid YYYY-MM-DD dates, up to 3660 days',
         timezone: 'Select a valid IANA time zone',
         format: 'Start and end times must use HH:mm:ss format',
         range: 'Start time must be earlier than end time; split ranges across midnight',
@@ -161,6 +162,8 @@ export default {
         timePricingDayScope: 'Effective days',
         timePricingEveryDay: 'Every day (Monday-Sunday, including weekends)',
         timePricingWeekdaysOnly: 'Weekdays only (Monday-Friday)',
+        timePricingExcludedDates: 'Dates using base prices',
+        timePricingExcludedDatesHint: 'These dates use base prices all day in the selected time zone. Enter YYYY-MM-DD dates, separated by lines or commas. Dates include the year and do not repeat annually.',
         addTimePeriod: 'Add period',
         startTime: 'Start time',
         endTime: 'End time',

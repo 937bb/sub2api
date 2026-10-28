@@ -172,6 +172,21 @@ describe('validateIntervals', () => {
 })
 
 describe('time pricing', () => {
+  it('preserves year-specific date exceptions across edit and save', () => {
+    const form = apiTimePricingToForm({
+      timezone: 'Asia/Shanghai', weekdays_only: true,
+      excluded_dates: ['2026-10-01', '2026-10-02'],
+      periods: [{ start_time: '09:00:00', end_time: '12:00:00', multiplier: 2 }],
+    })
+    expect(form.excluded_dates).toBe('2026-10-01\n2026-10-02')
+    form.excluded_dates += ',2026-10-01，2026-10-07'
+    expect(validateTimePricing(form, t)).toBeNull()
+    expect(formTimePricingToAPI(form)?.excluded_dates).toEqual(['2026-10-01', '2026-10-02', '2026-10-07'])
+    form.excluded_dates = '2026-02-29'
+    expect(validateTimePricing(form, t)).toContain('excludedDates')
+    form.excluded_dates = '2028-02-29'
+    expect(validateTimePricing(form, t)).toBeNull()
+  })
   it('uses a disabled Shanghai default', () => {
     const form = createDefaultTimePricingForm()
     expect(form).toEqual({ timezone: 'Asia/Shanghai', periods: [], weekdays_only: false })

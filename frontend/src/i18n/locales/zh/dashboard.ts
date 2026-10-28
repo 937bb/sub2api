@@ -699,6 +699,8 @@ export default {
         '按 {timezone} 时间，仅工作日（周一至周五）在该时段内发起的请求按本行价格计费，周末全天按标准价',
       timePricingRowHintPeak: '；本行价格未含高峰倍率，与高峰时段 {window} 重叠的部分实付再乘 ×{multiplier}',
       timePricingWeekdays: '工作日',
+      timePricingDateExceptions: '排除指定日期',
+      timePricingExcludedDates: '以下日期全天按标准价：{dates}。',
       timePricingRateHint: '生效倍率 {rate} × 时段倍率 {multiplier}',
       paidPrice: '实付价格(折后)',
       officialPrice: '官方价格',

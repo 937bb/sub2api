@@ -77,9 +77,10 @@ type channelModelPricingRequest struct {
 }
 
 type channelTimePricingRequest struct {
-	Timezone     string                            `json:"timezone"`
-	WeekdaysOnly bool                              `json:"weekdays_only"`
-	Periods      []channelTimePricingPeriodRequest `json:"periods"`
+	Timezone      string                            `json:"timezone"`
+	WeekdaysOnly  bool                              `json:"weekdays_only"`
+	ExcludedDates []string                          `json:"excluded_dates"`
+	Periods       []channelTimePricingPeriodRequest `json:"periods"`
 }
 
 type channelTimePricingPeriodRequest struct {
@@ -151,9 +152,10 @@ type channelModelPricingResponse struct {
 }
 
 type channelTimePricingResponse struct {
-	Timezone     string                             `json:"timezone"`
-	WeekdaysOnly bool                               `json:"weekdays_only"`
-	Periods      []channelTimePricingPeriodResponse `json:"periods"`
+	Timezone      string                             `json:"timezone"`
+	WeekdaysOnly  bool                               `json:"weekdays_only"`
+	ExcludedDates []string                           `json:"excluded_dates,omitempty"`
+	Periods       []channelTimePricingPeriodResponse `json:"periods"`
 }
 
 type channelTimePricingPeriodResponse struct {
@@ -294,9 +296,10 @@ func timePricingToResponse(value *service.ChannelTimePricing) *channelTimePricin
 		})
 	}
 	return &channelTimePricingResponse{
-		Timezone:     value.Timezone,
-		WeekdaysOnly: value.WeekdaysOnly,
-		Periods:      periods,
+		Timezone:      value.Timezone,
+		WeekdaysOnly:  value.WeekdaysOnly,
+		ExcludedDates: append([]string(nil), value.ExcludedDates...),
+		Periods:       periods,
 	}
 }
 
@@ -394,9 +397,10 @@ func timePricingRequestToService(value *channelTimePricingRequest) *service.Chan
 		})
 	}
 	return &service.ChannelTimePricing{
-		Timezone:     value.Timezone,
-		WeekdaysOnly: value.WeekdaysOnly,
-		Periods:      periods,
+		Timezone:      value.Timezone,
+		WeekdaysOnly:  value.WeekdaysOnly,
+		ExcludedDates: append([]string(nil), value.ExcludedDates...),
+		Periods:       periods,
 	}
 }
 

@@ -695,6 +695,8 @@ export default {
       timePricingRowHintPeak:
         '; prices in this row exclude the peak-hour rate — where this period overlaps the peak hours {window}, the overlapping portion is additionally multiplied by ×{multiplier}',
       timePricingWeekdays: 'Weekdays',
+      timePricingDateExceptions: 'Date exceptions apply',
+      timePricingExcludedDates: 'These dates use standard prices all day: {dates}.',
       timePricingRateHint: 'Effective rate {rate} × period multiplier {multiplier}',
       paidPrice: 'Your Price (Discounted)',
       officialPrice: 'Official Price',
