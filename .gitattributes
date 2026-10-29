@@ -20,3 +20,6 @@ backend/migrations/*.sql text eol=lf
 
 # Dockerfile
 Dockerfile text eol=lf
+
+# Preserve unified-diff context whitespace in deployment source patches.
+deploy/patches/*.patch text eol=lf -whitespace
