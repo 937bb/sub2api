@@ -452,8 +452,8 @@ describe('PaymentView USDT checkout summary', () => {
         network: paymentType === 'usdt_tron' ? 'tron' : 'binance',
         amount: quoteAmount,
         rate: 0.14898586,
-        quoted_amount: 74.492930,
-        amount_precision: 6,
+        quoted_amount: 74.49,
+        amount_precision: 2,
         rate_source: 'https://api.coingecko.com/api/v3/simple/price',
         rate_quote_at: Math.floor(Date.now() / 1000),
       },
@@ -487,7 +487,7 @@ describe('PaymentView USDT checkout summary', () => {
     expect(getUSDTQuote).toHaveBeenCalledWith(500, 'usdt_tron')
     expect(text).toContain('payment.amountLabel')
     expect(text).toContain('payment.usdtEstimatedAmount')
-    expect(text).toContain('74.492930 USDT')
+    expect(text).toContain('74.49 USDT')
     expect(text).toContain('1 CNY ≈ 0.14898586 USDT')
     expect(text).toContain('TRON')
     expect(text).toContain('payment.usdtLiveRateHint')
@@ -507,7 +507,7 @@ describe('PaymentView USDT checkout summary', () => {
     text = wrapper.text()
     expect(getUSDTQuote).toHaveBeenLastCalledWith(500, 'usdt_bep20')
     expect(text).toContain('BEP20')
-    expect(text).toContain('74.492930 USDT')
+    expect(text).toContain('74.49 USDT')
 
     const callsBeforeRefresh = getUSDTQuote.mock.calls.length
     await vi.advanceTimersByTimeAsync(60_000)

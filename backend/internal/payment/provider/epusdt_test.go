@@ -48,10 +48,11 @@ func TestEpusdtCreatePaymentUsesRequestedNetworkAndLocksUSDT(t *testing.T) {
 				require.Equal(t, "cny", body["currency"])
 				require.Equal(t, "usdt", body["token"])
 				require.Equal(t, epusdtRatePolicyLive, body["rate_policy"])
+				require.Equal(t, json.Number("2"), body["amount_precision"])
 				signature := body["signature"]
 				delete(body, "signature")
 				require.Equal(t, epusdtSignature(body, secret), signature)
-				_, _ = fmt.Fprintf(w, `{"status_code":200,"message":"success","data":{"trade_id":"trade-1","order_id":"sub2_order","amount":100.00,"actual_amount":13.827451,"receive_address":%q,"token":"usdt","network":%q,"status":1,"payment_url":"https://pay.example.test/cashier/trade-1","rate_policy":"live","locked_rate":0.13827451,"quoted_amount":13.827451,"amount_precision":6,"rate_source":"https://api.coingecko.com/api/v3/simple/price?ids=tether","rate_quote_at":%d}}`, testCase.address, testCase.network, quoteAt)
+				_, _ = fmt.Fprintf(w, `{"status_code":200,"message":"success","data":{"trade_id":"trade-1","order_id":"sub2_order","amount":100.00,"actual_amount":13.83,"receive_address":%q,"token":"usdt","network":%q,"status":1,"payment_url":"https://pay.example.test/cashier/trade-1","rate_policy":"live","locked_rate":0.13827451,"quoted_amount":13.83,"amount_precision":2,"rate_source":"https://api.coingecko.com/api/v3/simple/price?ids=tether","rate_quote_at":%d}}`, testCase.address, testCase.network, quoteAt)
 			}))
 			defer server.Close()
 
@@ -68,7 +69,7 @@ func TestEpusdtCreatePaymentUsesRequestedNetworkAndLocksUSDT(t *testing.T) {
 			require.Equal(t, "https://pay.example.test/cashier/trade-1", result.PayURL)
 			require.Equal(t, testCase.address, result.QRCode)
 			require.Equal(t, testCase.address, result.PaymentAddress)
-			require.Equal(t, "13.827451", result.PaymentTokenAmount)
+			require.Equal(t, "13.83", result.PaymentTokenAmount)
 			require.Equal(t, "USDT", result.PaymentToken)
 			require.Equal(t, testCase.network, result.PaymentNetwork)
 		})
@@ -86,10 +87,11 @@ func TestEpusdtQuoteUSDTUsesSignedLiveQuoteEndpoint(t *testing.T) {
 		require.NoError(t, decoder.Decode(&body))
 		require.Equal(t, "binance", body["network"])
 		require.Equal(t, json.Number("500.00"), body["amount"])
+		require.Equal(t, json.Number("2"), body["amount_precision"])
 		signature := body["signature"]
 		delete(body, "signature")
 		require.Equal(t, epusdtSignature(body, secret), signature)
-		_, _ = fmt.Fprintf(w, `{"status_code":200,"message":"success","data":{"currency":"CNY","token":"USDT","network":"binance","amount":500.00,"rate_policy":"live","rate":0.14898586,"quoted_amount":74.492930,"amount_precision":6,"rate_source":"https://api.coingecko.com/api/v3/simple/price?ids=tether","rate_quote_at":%d}}`, quoteAt)
+		_, _ = fmt.Fprintf(w, `{"status_code":200,"message":"success","data":{"currency":"CNY","token":"USDT","network":"binance","amount":500.00,"rate_policy":"live","rate":0.14898586,"quoted_amount":74.49,"amount_precision":2,"rate_source":"https://api.coingecko.com/api/v3/simple/price?ids=tether","rate_quote_at":%d}}`, quoteAt)
 	}))
 	defer server.Close()
 
@@ -101,14 +103,14 @@ func TestEpusdtQuoteUSDTUsesSignedLiveQuoteEndpoint(t *testing.T) {
 	require.Equal(t, "binance", result.Network)
 	require.Equal(t, 500.0, result.Amount)
 	require.InDelta(t, 0.14898586, result.Rate, 1e-12)
-	require.Equal(t, 74.49293, result.QuotedAmount)
-	require.Equal(t, 6, result.AmountPrecision)
+	require.Equal(t, 74.49, result.QuotedAmount)
+	require.Equal(t, 2, result.AmountPrecision)
 }
 
 func TestEpusdtQuoteRejectsStaleOrInconsistentRates(t *testing.T) {
 	valid := epusdtQuote{
 		Currency: "CNY", Token: "USDT", Network: "tron", Amount: "100",
-		RatePolicy: "live", Rate: "0.15", QuotedAmount: "15", AmountPrecision: 6,
+		RatePolicy: "live", Rate: "0.15", QuotedAmount: "15", AmountPrecision: 2,
 		RateSource: "https://api.coingecko.com/api/v3/simple/price", RateQuoteAt: time.Now().Unix(),
 	}
 	_, _, err := validateEpusdtQuote(valid, decimal.NewFromInt(100), "tron")
@@ -121,7 +123,7 @@ func TestEpusdtQuoteRejectsStaleOrInconsistentRates(t *testing.T) {
 		"wrong amount":     func(q *epusdtQuote) { q.Amount = "99" },
 		"wrong conversion": func(q *epusdtQuote) { q.QuotedAmount = "14" },
 		"fixed rate":       func(q *epusdtQuote) { q.RatePolicy = "fixed" },
-		"wrong precision":  func(q *epusdtQuote) { q.AmountPrecision = 2 },
+		"wrong precision":  func(q *epusdtQuote) { q.AmountPrecision = 6 },
 		"insecure source":  func(q *epusdtQuote) { q.RateSource = "http://example.com" },
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -129,6 +131,26 @@ func TestEpusdtQuoteRejectsStaleOrInconsistentRates(t *testing.T) {
 			change(&quote)
 			_, _, err := validateEpusdtQuote(quote, decimal.NewFromInt(100), "tron")
 			require.Error(t, err)
+		})
+	}
+}
+
+func TestEpusdtLiveOrderAmountPrecisionAndReservation(t *testing.T) {
+	order := epusdtOrder{RatePolicy: "live", AmountPrecision: 2, LockedRate: "0.15023834", QuotedAmount: "75.12", RateSource: "https://example.com/rates", RateQuoteAt: time.Now().Unix()}
+	for _, tc := range []struct {
+		amount string
+		valid  bool
+	}{
+		{"75.12", true}, {"75.13", true}, {"75.11917", false}, {"75.121", false}, {"75.11", false}, {"76.13", false},
+	} {
+		t.Run(tc.amount, func(t *testing.T) {
+			order.ActualAmount = json.Number(tc.amount)
+			err := validateEpusdtLiveQuote(order, decimal.NewFromInt(500))
+			if tc.valid {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+			}
 		})
 	}
 }

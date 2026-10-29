@@ -8,9 +8,7 @@
         </template>
       </ConsoleOverview>
       <!-- Loading State -->
-      <div v-if="loading" class="console-loading" role="status" :aria-label="t('common.loading')">
-        <div v-for="item in 4" :key="item" class="skeleton h-24" />
-      </div>
+      <ConsoleDashboardSkeleton v-if="loading" />
 
       <template v-else-if="stats">
         <ConsoleSummary :stats="stats" admin :simple="authStore.isSimpleMode" />
@@ -108,6 +106,7 @@
 <script setup lang="ts">
 import ConsoleOverview from '@/components/common/ConsoleOverview.vue'
 import ConsoleSummary from '@/components/common/ConsoleSummary.vue'
+import ConsoleDashboardSkeleton from '@/components/common/ConsoleDashboardSkeleton.vue'
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'

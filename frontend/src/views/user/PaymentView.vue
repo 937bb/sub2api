@@ -2,7 +2,7 @@
   <AppLayout>
     <WorkspacePage variant="payment">
       <div v-if="loading" class="flex items-center justify-center py-20">
-        <div class="h-8 w-8 animate-spin rounded-full border-4 border-primary-500 border-t-transparent"></div>
+        <LoadingSpinner size="lg" color="current" class="text-primary-500" />
       </div>
       <template v-else>
         <!-- Tab Switcher (hide during payment and subscription confirm) -->
@@ -97,7 +97,7 @@
                   <div class="flex justify-between">
                     <span class="text-gray-500 dark:text-gray-400">{{ t('payment.usdtEstimatedAmount') }}</span>
                     <span v-if="usdtQuoteLoading" class="text-gray-500 dark:text-gray-400">{{ t('common.loading') }}</span>
-                    <span v-else-if="usdtQuoteReady" class="font-semibold tabular-nums text-gray-900 dark:text-white">≈ {{ formattedUSDTQuoteAmount }} USDT</span>
+                    <span v-else-if="usdtQuoteReady" class="font-semibold tabular-nums text-gray-900 dark:text-white">{{ formattedUSDTQuoteAmount }} USDT</span>
                     <button v-else type="button" class="inline-flex items-center gap-1 text-xs font-medium text-primary-600 hover:text-primary-700 dark:text-primary-400" @click="requestUSDTQuote">
                       <Icon name="refresh" size="xs" />
                       {{ t('common.retry') }}
@@ -137,7 +137,7 @@
             </div>
             <button :class="['btn w-full py-3 text-base font-medium', paymentButtonClass]" :disabled="!canSubmit || submitting" @click="handleSubmitRecharge">
               <span v-if="submitting" class="flex items-center justify-center gap-2">
-                <span class="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent"></span>
+                <LoadingSpinner size="sm" color="current" class="text-white" />
                 {{ t('common.processing') }}
               </span>
               <span v-else>{{ isUSDTMethod(selectedMethod) ? t('payment.createOrder') : `${t('payment.createOrder')} ${formatSelectedPaymentAmount(totalAmount)}` }}</span>
@@ -218,7 +218,7 @@
                     <div class="flex justify-between">
                       <span class="text-gray-500 dark:text-gray-400">{{ t('payment.usdtEstimatedAmount') }}</span>
                       <span v-if="usdtQuoteLoading" class="text-gray-500 dark:text-gray-400">{{ t('common.loading') }}</span>
-                      <span v-else-if="usdtQuoteReady" class="font-semibold tabular-nums text-gray-900 dark:text-white">≈ {{ formattedUSDTQuoteAmount }} USDT</span>
+                      <span v-else-if="usdtQuoteReady" class="font-semibold tabular-nums text-gray-900 dark:text-white">{{ formattedUSDTQuoteAmount }} USDT</span>
                       <button v-else type="button" class="inline-flex items-center gap-1 text-xs font-medium text-primary-600 hover:text-primary-700 dark:text-primary-400" @click="requestUSDTQuote">
                         <Icon name="refresh" size="xs" />
                         {{ t('common.retry') }}
@@ -247,7 +247,7 @@
               </div>
               <button :class="['btn w-full py-3 text-base font-medium', paymentButtonClass]" :disabled="!canSubmitSubscription || submitting" @click="confirmSubscribe">
                 <span v-if="submitting" class="flex items-center justify-center gap-2">
-                  <span class="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent"></span>
+                  <LoadingSpinner size="sm" color="current" class="text-white" />
                   {{ t('common.processing') }}
                 </span>
                 <span v-else>{{ isUSDTMethod(selectedMethod) ? t('payment.createOrder') : `${t('payment.createOrder')} ${formatSelectedPaymentAmount(subTotalAmount)}` }}</span>
@@ -324,6 +324,8 @@
 </template>
 
 <script setup lang="ts">
+import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
+
 import ImagePreview from '@/components/common/ImagePreview.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
@@ -810,14 +812,14 @@ const usdtQuoteReady = computed(() => {
     && quote.currency === 'CNY'
     && quote.token === 'USDT'
     && quote.network === selectedUSDTNetwork.value
+    && quote.amount_precision === 2
     && Math.abs(quote.amount - currentUSDTQuoteAmount.value) < 0.005
     && quote.rate > 0
     && quote.quoted_amount > 0
 })
 const formattedUSDTQuoteAmount = computed(() => {
   if (!usdtQuoteReady.value || !usdtQuote.value) return ''
-  const precision = Math.min(8, Math.max(0, usdtQuote.value.amount_precision || 6))
-  return usdtQuote.value.quoted_amount.toFixed(precision)
+  return usdtQuote.value.quoted_amount.toFixed(2)
 })
 const formattedUSDTRate = computed(() =>
   usdtQuoteReady.value && usdtQuote.value ? usdtQuote.value.rate.toFixed(8) : '',

@@ -2,7 +2,7 @@
   <AppLayout>
     <WorkspacePage variant="payment-status">
       <div v-if="loading" class="flex items-center justify-center py-20">
-        <div class="h-8 w-8 animate-spin rounded-full border-4 border-emerald-500 border-t-transparent"></div>
+        <LoadingSpinner size="lg" color="current" class="text-emerald-500" />
       </div>
 
       <div v-else-if="errorMessage" class="card p-8 text-center">
@@ -16,7 +16,7 @@
 
       <div v-else class="card p-6">
         <div class="flex flex-col items-center space-y-4 py-4">
-          <div class="h-10 w-10 animate-spin rounded-full border-4 border-emerald-500 border-t-transparent"></div>
+          <LoadingSpinner size="xl" color="current" class="text-emerald-500" />
           <p class="text-sm text-gray-500 dark:text-gray-400">{{ t('payment.qr.payInNewWindowHint') }}</p>
         </div>
       </div>
@@ -25,6 +25,8 @@
 </template>
 
 <script setup lang="ts">
+import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
+
 import WorkspacePage from '@/components/layout/WorkspacePage.vue'
 
 import { onMounted, onUnmounted, ref } from 'vue'

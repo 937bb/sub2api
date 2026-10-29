@@ -1,0 +1,593 @@
+From a2aebce2a7fd8f6095c3a10b32916b361a95fd14 Mon Sep 17 00:00:00 2001
+From: Codex <codex@openai.com>
+Date: Thu, 29 Oct 2026 22:58:00 +0800
+Subject: [PATCH] Support signed per-order USDT precision and staged worker
+ takeover
+
+---
+ src/bootstrap/bootstrap.go              |  20 ++++-
+ src/bootstrap/worker_activation.go      |  28 +++++++
+ src/bootstrap/worker_activation_test.go |  32 +++++++
+ src/command/http_server.go              |   4 +-
+ src/model/data/order_data.go            |  12 ++-
+ src/model/data/order_data_test.go       |  21 +++++
+ src/model/request/order_request.go      |  34 ++++----
+ src/model/service/order_service.go      |  45 ++++++++--
+ src/model/service/order_service_test.go |  17 ++--
+ src/model/service/task_service.go       |  11 ++-
+ src/model/service/two_decimal_test.go   | 107 ++++++++++++++++++++++++
+ 11 files changed, 287 insertions(+), 44 deletions(-)
+ create mode 100644 src/bootstrap/worker_activation.go
+ create mode 100644 src/bootstrap/worker_activation_test.go
+ create mode 100644 src/model/service/two_decimal_test.go
+
+diff --git a/src/bootstrap/bootstrap.go b/src/bootstrap/bootstrap.go
+index 0ad7287..2007ea7 100644
+--- a/src/bootstrap/bootstrap.go
++++ b/src/bootstrap/bootstrap.go
+@@ -1,6 +1,9 @@
+ package bootstrap
+ 
+ import (
++	"context"
++	"os"
++	"strings"
+ 	"sync"
+ 
+ 	"github.com/GMWalletApp/epusdt/config"
+@@ -72,8 +75,19 @@ func InitApp() {
+ 		if err != nil {
+ 			color.Red.Printf("[bootstrap] ensure default api key err=%s\n", err)
+ 		}
+-		mq.Start()
+-		go telegram.BotStart()
+-		go task.Start()
++		go func() {
++			gate := strings.TrimSpace(os.Getenv("EPUSDT_WORKERS_GATE_FILE"))
++			if gate != "" {
++				log.Sugar.Info("[bootstrap] background workers awaiting deployment activation")
++			}
++			if err := waitForWorkerActivation(context.Background(), gate); err != nil {
++				log.Sugar.Errorf("[bootstrap] worker activation failed: %v", err)
++				return
++			}
++			mq.Start()
++			go telegram.BotStart()
++			go task.Start()
++			log.Sugar.Info("[bootstrap] background workers activated")
++		}()
+ 	})
+ }
+diff --git a/src/bootstrap/worker_activation.go b/src/bootstrap/worker_activation.go
+new file mode 100644
+index 0000000..c89eab0
+--- /dev/null
++++ b/src/bootstrap/worker_activation.go
+@@ -0,0 +1,28 @@
++package bootstrap
++
++import (
++	"context"
++	"os"
++	"time"
++)
++
++// A deployment may start HTTP before taking over the single background worker
++// role. The operator creates this persistent file ONLY after the previous
++// process has exited. It is a deployment gate, not a distributed leader lock.
++func waitForWorkerActivation(ctx context.Context, path string) error {
++	if path == "" {
++		return nil
++	}
++	ticker := time.NewTicker(250 * time.Millisecond)
++	defer ticker.Stop()
++	for {
++		if info, err := os.Stat(path); err == nil && info.Mode().IsRegular() {
++			return nil
++		}
++		select {
++		case <-ctx.Done():
++			return ctx.Err()
++		case <-ticker.C:
++		}
++	}
++}
+diff --git a/src/bootstrap/worker_activation_test.go b/src/bootstrap/worker_activation_test.go
+new file mode 100644
+index 0000000..a418f94
+--- /dev/null
++++ b/src/bootstrap/worker_activation_test.go
+@@ -0,0 +1,32 @@
++package bootstrap
++
++import (
++	"context"
++	"os"
++	"path/filepath"
++	"testing"
++	"time"
++)
++
++func TestWorkerActivationWaitsForPersistentGate(t *testing.T) {
++	path := filepath.Join(t.TempDir(), "activate")
++	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
++	defer cancel()
++	done := make(chan error, 1)
++	go func() { done <- waitForWorkerActivation(ctx, path) }()
++	select {
++	case err := <-done:
++		t.Fatalf("workers activated before takeover: %v", err)
++	case <-time.After(300 * time.Millisecond):
++	}
++	if err := os.WriteFile(path, nil, 0600); err != nil {
++		t.Fatal(err)
++	}
++	if err := <-done; err != nil {
++		t.Fatal(err)
++	}
++	// A container restart must not silently disable payment listeners again.
++	if err := waitForWorkerActivation(ctx, path); err != nil {
++		t.Fatal(err)
++	}
++}
+diff --git a/src/command/http_server.go b/src/command/http_server.go
+index 7e3bf02..9d9b8bd 100644
+--- a/src/command/http_server.go
++++ b/src/command/http_server.go
+@@ -7,6 +7,7 @@ import (
+ 	"os/signal"
+ 	"path/filepath"
+ 	"strings"
++	"syscall"
+ 	"time"
+ 
+ 	"github.com/GMWalletApp/epusdt/bootstrap"
+@@ -95,7 +96,8 @@ func HttpServerStart() {
+ 	}()
+ 
+ 	quit := make(chan os.Signal, 1)
+-	signal.Notify(quit, os.Interrupt, os.Kill)
++	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
++	defer signal.Stop(quit)
+ 	<-quit
+ 
+ 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+diff --git a/src/model/data/order_data.go b/src/model/data/order_data.go
+index 9a68d31..42eba5a 100644
+--- a/src/model/data/order_data.go
++++ b/src/model/data/order_data.go
+@@ -88,9 +88,7 @@ func activeLocksForAddress(tx *gorm.DB, network, address, token string, now time
+ }
+ 
+ func lockMatchesAmount(lock mdb.TransactionLock, amount float64) bool {
+-	precision := NormalizeAmountPrecision(lock.AmountPrecision)
+-	scaledAmount, _ := normalizeAmount(amount, precision)
+-	return lock.AmountScaled == scaledAmount
++	return lockAmountDecimal(lock).Equal(decimal.NewFromFloat(amount))
+ }
+ 
+ func lockAmountDecimal(lock mdb.TransactionLock) decimal.Decimal {
+@@ -499,9 +497,15 @@ func GetOnChainOrderByWalletAddressAndAmountAndTokenBeforeTime(network string, a
+ 
+ // LockTransaction reserves a network+address+token+amount pair in sqlite until expiration.
+ func LockTransaction(network, address, token, tradeID string, amount float64, expirationTime time.Duration) error {
++	return LockTransactionWithPrecision(network, address, token, tradeID, amount, expirationTime, GetAmountPrecision())
++}
++
++func LockTransactionWithPrecision(network, address, token, tradeID string, amount float64, expirationTime time.Duration, precision int) error {
+ 	network = normalizeLockNetwork(network)
+ 	address = normalizeLockAddress(network, address)
+-	precision := GetAmountPrecision()
++	if precision < MinAmountPrecision || precision > MaxAmountPrecision {
++		return errors.New("invalid reservation precision")
++	}
+ 	scaledAmount, amountText := normalizeAmount(amount, precision)
+ 	normalizedToken := normalizeLockToken(token)
+ 	now := time.Now()
+diff --git a/src/model/data/order_data_test.go b/src/model/data/order_data_test.go
+index 9f48536..f6a40fa 100644
+--- a/src/model/data/order_data_test.go
++++ b/src/model/data/order_data_test.go
+@@ -138,6 +138,27 @@ func TestTransactionLockLookupUsesStoredPrecision(t *testing.T) {
+ 	}
+ }
+ 
++func TestTwoDecimalLockDoesNotRoundShortPayments(t *testing.T) {
++	cleanup := testutil.SetupTestDatabases(t)
++	defer cleanup()
++	if err := SetSetting(mdb.SettingGroupSystem, mdb.SettingKeyAmountPrecision, "2", mdb.SettingTypeInt); err != nil {
++		t.Fatal(err)
++	}
++	if err := LockTransaction(mdb.NetworkTron, "TExactAmount", "USDT", "two-decimal", 75.12, time.Hour); err != nil {
++		t.Fatal(err)
++	}
++	for _, amount := range []float64{75.10917, 75.11917, 75.121} {
++		id, err := GetTradeIdByWalletAddressAndAmountAndToken(mdb.NetworkTron, "TExactAmount", "USDT", amount)
++		if err != nil || id != "" {
++			t.Fatalf("amount %v matched %q: %v", amount, id, err)
++		}
++	}
++	id, err := GetTradeIdByWalletAddressAndAmountAndToken(mdb.NetworkTron, "TExactAmount", "USDT", 75.12)
++	if err != nil || id != "two-decimal" {
++		t.Fatalf("exact payment matched %q: %v", id, err)
++	}
++}
++
+ func TestNonEvmTransactionLockAddressRemainsCaseSensitive(t *testing.T) {
+ 	cleanup := testutil.SetupTestDatabases(t)
+ 	defer cleanup()
+diff --git a/src/model/request/order_request.go b/src/model/request/order_request.go
+index d326d40..385c8c3 100644
+--- a/src/model/request/order_request.go
++++ b/src/model/request/order_request.go
+@@ -6,26 +6,28 @@ const RatePolicyLive = "live"
+ 
+ // QuoteTransactionRequest requests a live token quote without creating an order.
+ type QuoteTransactionRequest struct {
+-	Currency   string  `json:"currency" validate:"required" example:"cny"`
+-	Token      string  `json:"token" validate:"required" example:"usdt"`
+-	Network    string  `json:"network" validate:"required" example:"tron"`
+-	Amount     float64 `json:"amount" validate:"required|isFloat|gt:0.01" example:"500.00"`
+-	RatePolicy string  `json:"rate_policy" validate:"required" example:"live"`
+-	Signature  string  `json:"signature" validate:"required" example:"6f874b1919d95081835e2809b620e354a5866f5a6dbb2e432d1627f1eb10059d"`
++	AmountPrecision int     `json:"amount_precision"`
++	Currency        string  `json:"currency" validate:"required" example:"cny"`
++	Token           string  `json:"token" validate:"required" example:"usdt"`
++	Network         string  `json:"network" validate:"required" example:"tron"`
++	Amount          float64 `json:"amount" validate:"required|isFloat|gt:0.01" example:"500.00"`
++	RatePolicy      string  `json:"rate_policy" validate:"required" example:"live"`
++	Signature       string  `json:"signature" validate:"required" example:"6f874b1919d95081835e2809b620e354a5866f5a6dbb2e432d1627f1eb10059d"`
+ }
+ 
+ // CreateTransactionRequest 创建交易请求
+ type CreateTransactionRequest struct {
+-	OrderId     string  `json:"order_id" form:"order_id" validate:"required|maxLen:32" example:"ORD20260416001"`
+-	Currency    string  `json:"currency" form:"currency" validate:"required" example:"cny"` // 法币 如：cny
+-	Token       string  `json:"token" form:"token" example:"usdt"`                          // 币种 如：usdt、ton；可与 network 同时缺省创建占位订单
+-	Network     string  `json:"network" form:"network" example:"tron"`                      // 网络 如：ton、tron、aptos；可与 token 同时缺省创建占位订单
+-	Amount      float64 `json:"amount" form:"amount" validate:"required|isFloat|gt:0.01" example:"100.00"`
+-	NotifyUrl   string  `json:"notify_url" form:"notify_url" validate:"required" example:"https://example.com/notify"`
+-	Signature   string  `json:"signature" form:"signature" validate:"required" example:"6f874b1919d95081835e2809b620e354a5866f5a6dbb2e432d1627f1eb10059d"`
+-	RedirectUrl string  `json:"redirect_url" form:"redirect_url" example:"https://example.com/success"`
+-	Name        string  `json:"name" form:"name" example:"VIP月卡"`
+-	RatePolicy  string  `json:"rate_policy" form:"rate_policy" example:"live"`
++	AmountPrecision int     `json:"amount_precision" form:"amount_precision"`
++	OrderId         string  `json:"order_id" form:"order_id" validate:"required|maxLen:32" example:"ORD20260416001"`
++	Currency        string  `json:"currency" form:"currency" validate:"required" example:"cny"` // 法币 如：cny
++	Token           string  `json:"token" form:"token" example:"usdt"`                          // 币种 如：usdt、ton；可与 network 同时缺省创建占位订单
++	Network         string  `json:"network" form:"network" example:"tron"`                      // 网络 如：ton、tron、aptos；可与 token 同时缺省创建占位订单
++	Amount          float64 `json:"amount" form:"amount" validate:"required|isFloat|gt:0.01" example:"100.00"`
++	NotifyUrl       string  `json:"notify_url" form:"notify_url" validate:"required" example:"https://example.com/notify"`
++	Signature       string  `json:"signature" form:"signature" validate:"required" example:"6f874b1919d95081835e2809b620e354a5866f5a6dbb2e432d1627f1eb10059d"`
++	RedirectUrl     string  `json:"redirect_url" form:"redirect_url" example:"https://example.com/success"`
++	Name            string  `json:"name" form:"name" example:"VIP月卡"`
++	RatePolicy      string  `json:"rate_policy" form:"rate_policy" example:"live"`
+ 	// PaymentType is a compatibility flag, not a gateway selector. Only
+ 	// "Epay" (case-insensitive) switches callback format to legacy EPay;
+ 	// empty or any other value is stored as "Gmpay" and uses GMPay JSON.
+diff --git a/src/model/service/order_service.go b/src/model/service/order_service.go
+index 205c0e8..9dfcbd7 100644
+--- a/src/model/service/order_service.go
++++ b/src/model/service/order_service.go
+@@ -139,7 +139,10 @@ func QuoteTransaction(req *request.QuoteTransactionRequest) (*response.QuoteTran
+ 	}
+ 
+ 	amountPrecision := data.GetAmountPrecision()
+-	if amountPrecision != 6 {
++	if req.AmountPrecision != 0 {
++		amountPrecision = req.AmountPrecision
++	}
++	if amountPrecision != 2 && amountPrecision != 6 {
+ 		return nil, constant.RateAmountErr
+ 	}
+ 	amount := math.MustParsePrecFloat64(req.Amount, amountPrecision)
+@@ -155,7 +158,7 @@ func QuoteTransaction(req *request.QuoteTransactionRequest) (*response.QuoteTran
+ 	if quoted.LessThan(decimal.NewFromFloat(UsdtMinimumPaymentAmount)) {
+ 		return nil, constant.PayAmountErr
+ 	}
+-	quotedAmount := math.MustParsePrecFloat64(quoted.InexactFloat64(), amountPrecision)
++	quotedAmount := quoted.Round(int32(amountPrecision)).InexactFloat64()
+ 
+ 	return &response.QuoteTransactionResponse{
+ 		Currency:        currency,
+@@ -200,7 +203,10 @@ func CreateTransaction(req *request.CreateTransactionRequest, apiKey *mdb.ApiKey
+ 	defer gCreateTransactionLock.Unlock()
+ 
+ 	amountPrecision := data.GetAmountPrecision()
+-	if ratePolicy == request.RatePolicyLive && amountPrecision != 6 {
++	if req.AmountPrecision != 0 {
++		amountPrecision = req.AmountPrecision
++	}
++	if amountPrecision < 2 || amountPrecision > 6 || (ratePolicy == request.RatePolicyLive && amountPrecision != 2 && amountPrecision != 6) {
+ 		return nil, constant.RateAmountErr
+ 	}
+ 	payAmount := math.MustParsePrecFloat64(req.Amount, amountPrecision)
+@@ -278,8 +284,8 @@ func CreateTransaction(req *request.CreateTransactionRequest, apiKey *mdb.ApiKey
+ 	}
+ 
+ 	tradeID := GenerateCode()
+-	amount := math.MustParsePrecFloat64(decimalTokenAmount.InexactFloat64(), amountPrecision)
+-	availableAddress, availableAmount, err := ReserveAvailableWalletAndAmount(tradeID, network, token, amount, walletAddress)
++	amount := decimalTokenAmount.Round(int32(amountPrecision)).InexactFloat64()
++	availableAddress, availableAmount, err := reserveAvailableWalletAndAmount(tradeID, network, token, amount, walletAddress, amountPrecision)
+ 	if err != nil {
+ 		return nil, err
+ 	}
+@@ -483,14 +489,17 @@ func orderProcessing(req *request.OrderProcessingRequest, opts orderProcessingOp
+ 
+ // ReserveAvailableWalletAndAmount finds and locks a network+address+token+amount pair.
+ func ReserveAvailableWalletAndAmount(tradeID string, network string, token string, amount float64, walletAddress []mdb.WalletAddress) (string, float64, error) {
++	return reserveAvailableWalletAndAmount(tradeID, network, token, amount, walletAddress, data.GetAmountPrecision())
++}
++
++func reserveAvailableWalletAndAmount(tradeID string, network string, token string, amount float64, walletAddress []mdb.WalletAddress, amountPrecision int) (string, float64, error) {
+ 	availableAddress := ""
+ 	availableAmount := amount
+-	amountPrecision := data.GetAmountPrecision()
+ 
+ 	tryLockWalletFunc := func(targetAmount float64) (string, error) {
+ 		for _, address := range walletAddress {
+ 			normalizedAddress := normalizeOrderAddressByNetwork(network, address.Address)
+-			err := data.LockTransaction(network, normalizedAddress, token, tradeID, targetAmount, config.GetOrderExpirationTimeDuration())
++			err := data.LockTransactionWithPrecision(network, normalizedAddress, token, tradeID, targetAmount, config.GetOrderExpirationTimeDuration(), amountPrecision)
+ 			if err == nil {
+ 				return normalizedAddress, nil
+ 			}
+@@ -725,6 +734,16 @@ func SwitchNetwork(req *request.SwitchNetworkRequest) (*response.CheckoutCounter
+ 
+ 	// 6. Calculate amount for the new network
+ 	rate := config.GetRateForCoin(strings.ToLower(token), strings.ToLower(parent.Currency))
++	amountPrecision := data.GetAmountPrecision()
++	var liveQuote config.LiveRateQuote
++	if parent.RatePolicy == request.RatePolicyLive {
++		amountPrecision = parent.AmountPrecision
++		liveQuote, err = config.GetLiveRateForCoin(strings.ToLower(token), strings.ToLower(parent.Currency))
++		if err != nil {
++			return nil, constant.RateAmountErr
++		}
++		rate = liveQuote.Rate
++	}
+ 	if rate <= 0 {
+ 		return nil, constant.RateAmountErr
+ 	}
+@@ -744,8 +763,8 @@ func SwitchNetwork(req *request.SwitchNetworkRequest) (*response.CheckoutCounter
+ 	}
+ 
+ 	subTradeID := GenerateCode()
+-	amount := math.MustParsePrecFloat64(decimalTokenAmount.InexactFloat64(), data.GetAmountPrecision())
+-	availableAddress, availableAmount, err := ReserveAvailableWalletAndAmount(subTradeID, network, token, amount, walletAddress)
++	amount := decimalTokenAmount.Round(int32(amountPrecision)).InexactFloat64()
++	availableAddress, availableAmount, err := reserveAvailableWalletAndAmount(subTradeID, network, token, amount, walletAddress, amountPrecision)
+ 	if err != nil {
+ 		return nil, err
+ 	}
+@@ -776,6 +795,14 @@ func SwitchNetwork(req *request.SwitchNetworkRequest) (*response.CheckoutCounter
+ 		PayProvider:     mdb.PaymentProviderOnChain,
+ 		ApiKeyID:        parent.ApiKeyID, // inherit from parent so resolveOrderApiKey never fails
+ 	}
++	if parent.RatePolicy == request.RatePolicyLive {
++		subOrder.RatePolicy = request.RatePolicyLive
++		subOrder.AmountPrecision = amountPrecision
++		subOrder.LockedRate = liveQuote.Rate
++		subOrder.QuotedAmount = amount
++		subOrder.RateSource = liveQuote.SourceURL
++		subOrder.RateQuoteAt = liveQuote.QuoteAt.Unix()
++	}
+ 	if err = data.CreateOrderWithTransaction(tx, subOrder); err != nil {
+ 		tx.Rollback()
+ 		_ = data.UnLockTransactionByTradeId(subTradeID)
+diff --git a/src/model/service/order_service_test.go b/src/model/service/order_service_test.go
+index f050c3e..65c9edc 100644
+--- a/src/model/service/order_service_test.go
++++ b/src/model/service/order_service_test.go
+@@ -332,7 +332,7 @@ func TestCreateTransactionLiveRateLocksFreshCoinGeckoQuote(t *testing.T) {
+ 	if err := data.SetSetting("rate", "rate.mode", config.RateModeAuto, "string"); err != nil {
+ 		t.Fatalf("set rate.mode: %v", err)
+ 	}
+-	if err := data.SetSetting("system", "system.amount_precision", "6", "int"); err != nil {
++	if err := data.SetSetting("system", "system.amount_precision", "2", "int"); err != nil {
+ 		t.Fatalf("set system.amount_precision: %v", err)
+ 	}
+ 	if _, err := data.AddWalletAddress("wallet_live_rate_1"); err != nil {
+@@ -349,7 +349,7 @@ func TestCreateTransactionLiveRateLocksFreshCoinGeckoQuote(t *testing.T) {
+ 	if resp.RatePolicy != request.RatePolicyLive || math.Abs(resp.LockedRate-wantRate) > 1e-15 {
+ 		t.Fatalf("live quote metadata = %#v, want rate %.18f", resp, wantRate)
+ 	}
+-	if resp.AmountPrecision != 6 || math.Abs(resp.QuotedAmount-14.898679) > 1e-9 {
++	if resp.AmountPrecision != 2 || resp.ActualAmount != 14.90 || math.Abs(resp.QuotedAmount-14.90) > 1e-9 {
+ 		t.Fatalf("quoted amount metadata = %#v", resp)
+ 	}
+ 	if resp.RateQuoteAt != now.Add(-time.Minute).Unix() || !strings.Contains(resp.RateSource, "api.coingecko.com") {
+@@ -385,7 +385,7 @@ func TestQuoteTransactionReturnsLiveRateWithoutCreatingOrderOrLock(t *testing.T)
+ 	if err := data.SetSetting("rate", "rate.mode", config.RateModeAuto, "string"); err != nil {
+ 		t.Fatalf("set rate.mode: %v", err)
+ 	}
+-	if err := data.SetSetting("system", "system.amount_precision", "6", "int"); err != nil {
++	if err := data.SetSetting("system", "system.amount_precision", "2", "int"); err != nil {
+ 		t.Fatalf("set system.amount_precision: %v", err)
+ 	}
+ 	if _, err := data.AddWalletAddress("wallet_quote_1"); err != nil {
+@@ -403,13 +403,13 @@ func TestQuoteTransactionReturnsLiveRateWithoutCreatingOrderOrLock(t *testing.T)
+ 		t.Fatalf("quote transaction: %v", err)
+ 	}
+ 	wantRate := 1 / 6.712004691081546
+-	if math.Abs(resp.Rate-wantRate) > 1e-15 || math.Abs(resp.QuotedAmount-74.493393) > 1e-9 {
+-		t.Fatalf("quote = %#v, want rate %.18f and amount 74.493393", resp, wantRate)
++	if math.Abs(resp.Rate-wantRate) > 1e-15 || math.Abs(resp.QuotedAmount-74.49) > 1e-9 {
++		t.Fatalf("quote = %#v, want rate %.18f and amount 74.49", resp, wantRate)
+ 	}
+ 	if resp.Amount != 500 || resp.Currency != "CNY" || resp.Token != "USDT" || resp.Network != "tron" {
+ 		t.Fatalf("quote identity = %#v", resp)
+ 	}
+-	if resp.AmountPrecision != 6 || resp.RateQuoteAt != now.Add(-time.Minute).Unix() {
++	if resp.AmountPrecision != 2 || resp.RateQuoteAt != now.Add(-time.Minute).Unix() {
+ 		t.Fatalf("quote metadata = %#v", resp)
+ 	}
+ 
+@@ -429,17 +429,18 @@ func TestQuoteTransactionReturnsLiveRateWithoutCreatingOrderOrLock(t *testing.T)
+ 	}
+ }
+ 
+-func TestCreateTransactionLiveRateRejectsInsufficientAmountPrecision(t *testing.T) {
++func TestCreateTransactionLiveRateRejectsUnsupportedAmountPrecision(t *testing.T) {
+ 	cleanup := testutil.SetupTestDatabases(t)
+ 	defer cleanup()
+ 
+ 	if err := data.SetSetting("rate", "rate.mode", config.RateModeAuto, "string"); err != nil {
+ 		t.Fatalf("set rate.mode: %v", err)
+ 	}
+-	if err := data.SetSetting("system", "system.amount_precision", "2", "int"); err != nil {
++	if err := data.SetSetting("system", "system.amount_precision", "6", "int"); err != nil {
+ 		t.Fatalf("set system.amount_precision: %v", err)
+ 	}
+ 	req := newCreateTransactionRequest("order_live_rate_precision_1", 100)
++	req.AmountPrecision = 3
+ 	req.RatePolicy = request.RatePolicyLive
+ 	if _, err := CreateTransaction(req, nil); err != constant.RateAmountErr {
+ 		t.Fatalf("live order precision error = %v, want %v", err, constant.RateAmountErr)
+diff --git a/src/model/service/task_service.go b/src/model/service/task_service.go
+index bf4f42b..450ad5d 100644
+--- a/src/model/service/task_service.go
++++ b/src/model/service/task_service.go
+@@ -231,10 +231,9 @@ func TryProcessEvmERC20Transfer(chainNetwork string, contract common.Address, to
+ 	if decimals < 0 {
+ 		decimals = 0
+ 	}
+-	pow := decimal.New(1, int32(decimals))
+-
+ 	decimalQuant := decimal.NewFromBigInt(rawValue, 0)
+-	amount := math.MustParsePrecFloat64(decimalQuant.Div(pow).InexactFloat64(), data.MaxAmountPrecision)
++	transferAmount := decimalQuant.Shift(int32(-decimals))
++	amount := transferAmount.InexactFloat64()
+ 	if amount <= 0 {
+ 		log.Sugar.Warnf("[%s-%s][%s] skip non-positive amount %.2f", net, tokenSym, walletAddr, amount)
+ 		return
+@@ -255,6 +254,12 @@ func TryProcessEvmERC20Transfer(chainNetwork string, contract common.Address, to
+ 		log.Sugar.Warnf("[%s-%s][%s] skip unmatched tx hash=%s amount=%.2f", net, tokenSym, walletAddr, txHash, amount)
+ 		return
+ 	}
++	// Compare chain units without rounding. BEP20 tokens have 18 decimals;
++	// even a one-unit short payment must not be rounded into a paid order.
++	if !transferAmount.Equal(decimal.NewFromFloat(order.ActualAmount)) {
++		log.Sugar.Warnf("[%s-%s] skip amount mismatch trade_id=%s", net, tokenSym, order.TradeId)
++		return
++	}
+ 	if strings.ToLower(strings.TrimSpace(order.Network)) != chainNetwork {
+ 		log.Sugar.Warnf("[%s-%s][%s] skip trade_id=%s network=%q", net, tokenSym, walletAddr, order.TradeId, order.Network)
+ 		return
+diff --git a/src/model/service/two_decimal_test.go b/src/model/service/two_decimal_test.go
+new file mode 100644
+index 0000000..12c3698
+--- /dev/null
++++ b/src/model/service/two_decimal_test.go
+@@ -0,0 +1,107 @@
++package service
++
++import (
++	"fmt"
++	"io"
++	"math/big"
++	"net/http"
++	"strings"
++	"testing"
++	"time"
++
++	"github.com/GMWalletApp/epusdt/internal/testutil"
++	"github.com/GMWalletApp/epusdt/model/dao"
++	"github.com/GMWalletApp/epusdt/model/data"
++	"github.com/GMWalletApp/epusdt/model/mdb"
++	"github.com/GMWalletApp/epusdt/model/request"
++	"github.com/ethereum/go-ethereum/common"
++)
++
++func TestLiveOrdersMixedPrecisionDuringRollingUpdate(t *testing.T) {
++	cleanup := testutil.SetupTestDatabases(t)
++	defer cleanup()
++	installMockHTTPClient(t, func(r *http.Request) (*http.Response, error) {
++		body := fmt.Sprintf(`{"tether":{"cny":6.656090507522036,"last_updated_at":%d}}`, time.Now().Add(-time.Minute).Unix())
++		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
++	})
++	for key, value := range map[string]string{
++		"rate.mode": "auto", "rate.api_url": "https://api.coingecko.com/api/v3/simple/price",
++		"system.amount_precision": "6",
++	} {
++		group := strings.Split(key, ".")[0]
++		if err := data.SetSetting(group, key, value, "string"); err != nil {
++			t.Fatal(err)
++		}
++	}
++	if _, err := data.AddWalletAddress("mixed_precision_wallet"); err != nil {
++		t.Fatal(err)
++	}
++	for i, tc := range []struct {
++		precision int
++		want      float64
++	}{{0, 75.119171}, {2, 75.12}, {2, 75.13}, {0, 75.119172}} {
++		req := newCreateTransactionRequest(fmt.Sprintf("mixed_%d", i), 500)
++		req.RatePolicy = request.RatePolicyLive
++		req.AmountPrecision = tc.precision
++		resp, err := CreateTransaction(req, nil)
++		if err != nil {
++			t.Fatal(err)
++		}
++		if resp.ActualAmount != tc.want {
++			t.Fatalf("order %d amount=%v want=%v", i, resp.ActualAmount, tc.want)
++		}
++		precision := tc.precision
++		if precision == 0 {
++			precision = 6
++		}
++		if resp.AmountPrecision != precision {
++			t.Fatalf("precision=%d want=%d", resp.AmountPrecision, precision)
++		}
++		trade, err := data.GetTradeIdByWalletAddressAndAmountAndToken("tron", resp.ReceiveAddress, "USDT", tc.want)
++		if err != nil || trade != resp.TradeId {
++			t.Fatalf("amount reservation resolves to %q: %v", trade, err)
++		}
++	}
++	quote, err := QuoteTransaction(&request.QuoteTransactionRequest{Currency: "CNY", Token: "USDT", Network: "tron", Amount: 500, RatePolicy: request.RatePolicyLive, AmountPrecision: 2})
++	if err != nil {
++		t.Fatal(err)
++	}
++	if quote.AmountPrecision != 2 || quote.QuotedAmount != 75.12 {
++		t.Fatalf("quote=%+v", quote)
++	}
++	if data.GetAmountPrecision() != 6 {
++		t.Fatal("per-request precision changed the global setting")
++	}
++}
++
++func TestBEP20DoesNotRoundChainUnitsOrCreditTwice(t *testing.T) {
++	cleanup := testutil.SetupTestDatabases(t)
++	defer cleanup()
++	contract := common.HexToAddress("0x1111111111111111111111111111111111111111")
++	wallet := common.HexToAddress("0x2222222222222222222222222222222222222222")
++	if err := dao.Mdb.Create(&mdb.ChainToken{Network: mdb.NetworkBsc, Symbol: "TEST", ContractAddress: contract.Hex(), Decimals: 18, Enabled: true}).Error; err != nil {
++		t.Fatal(err)
++	}
++	order := &mdb.Orders{TradeId: "two-decimal-chain", OrderId: "two-decimal-chain", Amount: 500, Currency: "CNY", ActualAmount: 75.12, AmountPrecision: 2, Token: "TEST", Network: mdb.NetworkBsc, ReceiveAddress: strings.ToLower(wallet.Hex()), Status: mdb.StatusWaitPay}
++	if err := dao.Mdb.Create(order).Error; err != nil {
++		t.Fatal(err)
++	}
++	if err := data.LockTransactionWithPrecision(mdb.NetworkBsc, order.ReceiveAddress, order.Token, order.TradeId, order.ActualAmount, time.Hour, 2); err != nil {
++		t.Fatal(err)
++	}
++	for _, amount := range []string{"75110000000000000000", "75119999999999999999", "75120000000000000001"} {
++		raw, _ := new(big.Int).SetString(amount, 10)
++		TryProcessEvmERC20Transfer(mdb.NetworkBsc, contract, wallet, raw, "mismatch-"+amount, time.Now().UnixMilli())
++		stored, err := data.GetOrderInfoByTradeId(order.TradeId)
++		if err != nil || stored.Status != mdb.StatusWaitPay {
++			t.Fatalf("mismatch credited: %+v %v", stored, err)
++		}
++	}
++	raw, _ := new(big.Int).SetString("75120000000000000000", 10)
++	TryProcessEvmERC20Transfer(mdb.NetworkBsc, contract, wallet, raw, "correct-chain-tx", time.Now().UnixMilli())
++	TryProcessEvmERC20Transfer(mdb.NetworkBsc, contract, wallet, raw, "replayed-chain-tx", time.Now().UnixMilli())
++	stored, err := data.GetOrderInfoByTradeId(order.TradeId)
++	if err != nil || stored.Status != mdb.StatusPaySuccess || stored.BlockTransactionId != "correct-chain-tx" {
++		t.Fatalf("paid order=%+v %v", stored, err)
++	}
++}
+-- 
+2.53.0.windows.3
+

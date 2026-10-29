@@ -63,10 +63,7 @@
       >
         <div class="flex items-center justify-between text-sm">
           <span class="text-gray-500 dark:text-dark-400">{{ t('admin.affiliates.withdraw.availableQuota') }}</span>
-          <span
-            v-if="overviewLoading"
-            class="h-4 w-4 animate-spin rounded-full border border-primary-500 border-t-transparent"
-          ></span>
+          <LoadingSpinner v-if="overviewLoading" size="sm" color="current" class="text-primary-500" />
           <span v-else class="font-semibold text-gray-900 dark:text-white" data-test="withdraw-available-quota">
             ${{ formatPreciseAmount(availableQuota) }}
           </span>
@@ -134,6 +131,8 @@
 </template>
 
 <script setup lang="ts">
+import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
+
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'

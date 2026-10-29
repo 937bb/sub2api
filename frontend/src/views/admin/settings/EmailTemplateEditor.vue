@@ -44,9 +44,7 @@
         v-if="loadingList"
         class="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400"
       >
-        <span
-          class="h-4 w-4 animate-spin rounded-full border-b-2 border-primary-600"
-        ></span>
+        <LoadingSpinner size="sm" color="current" class="text-primary-600" />
         {{ t("common.loading") }}
       </div>
 
@@ -230,6 +228,8 @@
 </template>
 
 <script setup lang="ts">
+import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
+
 import { computed, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { adminAPI } from "@/api";

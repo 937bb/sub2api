@@ -63,10 +63,10 @@ describe('user API key loading', () => {
     const wrapper = await open()
     await switchUser(wrapper)
     old.reject(new Error('obsolete')); await flushPromises()
-    expect(wrapper.find('.animate-spin').exists()).toBe(true)
+    expect(wrapper.find('[role="status"]').exists()).toBe(true)
     current.resolve(keys(2, 'current-user-key')); await flushPromises()
     expect(wrapper.text()).toContain('current-user-key')
-    expect(wrapper.find('.animate-spin').exists()).toBe(false)
+    expect(wrapper.find('[role="status"]').exists()).toBe(false)
   })
 
   it('loads keys when the selected user changes while the dialog is open', async () => {

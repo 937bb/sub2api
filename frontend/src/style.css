@@ -767,3 +767,89 @@
     padding-bottom: env(safe-area-inset-bottom);
   }
 }
+
+/* Unified loading surface. It upgrades legacy gray pulse blocks without changing
+   semantic pulse indicators such as health and connection status dots. */
+:where(
+  .skeleton,
+  .skeleton-block,
+  [class*="animate-pulse"][class*="bg-gray"],
+  [class*="animate-pulse"][class*="bg-dark"]
+) {
+  position: relative;
+  overflow: hidden;
+  background: #e6ebe7 !important;
+  animation: skeleton-breathe 1.8s ease-in-out infinite !important;
+}
+
+:where(
+  .skeleton,
+  .skeleton-block,
+  [class*="animate-pulse"][class*="bg-gray"],
+  [class*="animate-pulse"][class*="bg-dark"]
+):not(.rounded-full) {
+  border-radius: 6px !important;
+}
+
+:where(
+  .skeleton,
+  .skeleton-block,
+  [class*="animate-pulse"][class*="bg-gray"],
+  [class*="animate-pulse"][class*="bg-dark"]
+)::after {
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  width: 2px;
+  background: rgb(8 127 104 / 48%);
+  content: '';
+  animation: skeleton-scan 1.8s cubic-bezier(.65, 0, .35, 1) infinite;
+}
+
+.dark :where(
+  .skeleton,
+  .skeleton-block,
+  [class*="animate-pulse"][class*="bg-gray"],
+  [class*="animate-pulse"][class*="bg-dark"]
+) {
+  background: #29312c !important;
+}
+
+.dark :where(
+  .skeleton,
+  .skeleton-block,
+  [class*="animate-pulse"][class*="bg-gray"],
+  [class*="animate-pulse"][class*="bg-dark"]
+)::after {
+  background: rgb(55 200 164 / 55%);
+}
+
+@keyframes skeleton-scan {
+  from { transform: translateX(-4px); }
+  to { transform: translateX(720px); }
+}
+
+@keyframes skeleton-breathe {
+  0%, 100% { opacity: .72; }
+  50% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :where(
+    .skeleton,
+    .skeleton-block,
+    [class*="animate-pulse"][class*="bg-gray"],
+    [class*="animate-pulse"][class*="bg-dark"]
+  ) {
+    animation: none !important;
+  }
+
+  :where(
+    .skeleton,
+    .skeleton-block,
+    [class*="animate-pulse"][class*="bg-gray"],
+    [class*="animate-pulse"][class*="bg-dark"]
+  )::after {
+    display: none;
+  }
+}

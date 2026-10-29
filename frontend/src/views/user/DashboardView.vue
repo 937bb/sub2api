@@ -2,9 +2,7 @@
   <AppLayout>
     <div class="console-dashboard space-y-5">
       <ConsoleOverview :simple="authStore.isSimpleMode" />
-      <div v-if="loading && !stats" class="console-loading" role="status" :aria-label="t('common.loading')">
-        <div v-for="item in 4" :key="item" class="skeleton h-24" />
-      </div>
+      <ConsoleDashboardSkeleton v-if="loading && !stats" />
       <template v-else-if="stats">
         <ConsoleSummary :stats="stats" :balance="user?.balance || 0" :simple="authStore.isSimpleMode" />
         <UserDashboardCharts v-model:startDate="startDate" v-model:endDate="endDate" v-model:granularity="granularity" :loading="loadingCharts" :trend="trendData" :models="modelStats" @dateRangeChange="loadRange" @granularityChange="loadCharts" @refresh="refreshAll" />
@@ -26,6 +24,7 @@
 import { useI18n } from 'vue-i18n'
 import ConsoleOverview from '@/components/common/ConsoleOverview.vue'
 import ConsoleSummary from '@/components/common/ConsoleSummary.vue'
+import ConsoleDashboardSkeleton from '@/components/common/ConsoleDashboardSkeleton.vue'
 const { t } = useI18n()
 import { ref, computed, onMounted } from 'vue'; import { useAuthStore } from '@/stores/auth'; import { usageAPI, type UserDashboardStats as UserStatsType } from '@/api/usage'
 import AppLayout from '@/components/layout/AppLayout.vue'

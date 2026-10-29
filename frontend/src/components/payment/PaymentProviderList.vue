@@ -39,7 +39,7 @@
     <div class="p-4">
       <!-- Loading -->
       <div v-if="loading && !providers.length" class="flex items-center justify-center py-6">
-        <div class="h-5 w-5 animate-spin rounded-full border-2 border-primary-500 border-t-transparent" />
+        <LoadingSpinner size="sm" color="current" class="text-primary-500" />
       </div>
 
       <!-- Provider cards (draggable) -->
@@ -92,6 +92,8 @@
 </template>
 
 <script setup lang="ts">
+import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
+
 import { ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { VueDraggable } from 'vue-draggable-plus'

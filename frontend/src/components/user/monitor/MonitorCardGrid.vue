@@ -7,21 +7,21 @@
       <div
         v-for="i in 6"
         :key="i"
-        class="p-5 rounded-xl bg-white dark:bg-dark-800 border border-gray-200 dark:border-dark-700 animate-pulse"
+        class="p-5 rounded-xl bg-white dark:bg-dark-800 border border-gray-200 dark:border-dark-700"
       >
         <div class="flex items-start gap-3">
-          <div class="w-9 h-9 rounded-xl bg-gray-200 dark:bg-dark-700"></div>
+          <div class="skeleton-block w-9 h-9 rounded-xl"></div>
           <div class="flex-1 space-y-2">
-            <div class="h-4 w-2/3 rounded bg-gray-200 dark:bg-dark-700"></div>
-            <div class="h-3 w-1/2 rounded bg-gray-200 dark:bg-dark-700"></div>
+            <div class="skeleton-block h-4 w-2/3 rounded"></div>
+            <div class="skeleton-block h-3 w-1/2 rounded"></div>
           </div>
-          <div class="h-6 w-16 rounded-full bg-gray-200 dark:bg-dark-700"></div>
+          <div class="skeleton-block h-6 w-16 rounded-full"></div>
         </div>
         <div class="mt-5 grid grid-cols-2 gap-2">
-          <div class="h-16 rounded-xl bg-gray-100 dark:bg-dark-900/40"></div>
-          <div class="h-16 rounded-xl bg-gray-100 dark:bg-dark-900/40"></div>
+          <div class="skeleton-block h-16 rounded-xl"></div>
+          <div class="skeleton-block h-16 rounded-xl"></div>
         </div>
-        <div class="mt-6 h-5 w-full rounded bg-gray-100 dark:bg-dark-900/40"></div>
+        <div class="skeleton-block mt-6 h-5 w-full rounded"></div>
       </div>
     </div>
 

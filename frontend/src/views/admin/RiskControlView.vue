@@ -2,7 +2,7 @@
   <AppLayout>
     <WorkspacePage variant="risk" hide-heading>
       <div v-if="loading" class="flex items-center justify-center py-16">
-        <div class="h-8 w-8 animate-spin rounded-full border-b-2 border-primary-600"></div>
+        <LoadingSpinner size="lg" color="current" class="text-primary-600" />
       </div>
 
       <template v-else>
@@ -1147,6 +1147,8 @@
 </template>
 
 <script setup lang="ts">
+import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
+
 import WorkspacePage from '@/components/layout/WorkspacePage.vue'
 
 import { computed, onMounted, onUnmounted, reactive, ref, toRaw } from 'vue'

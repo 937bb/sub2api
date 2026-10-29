@@ -7,7 +7,7 @@
 
         <!-- Loading verification method -->
         <div v-if="methodLoading" class="flex items-center justify-center py-8">
-          <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500"></div>
+          <LoadingSpinner size="lg" color="current" class="text-primary-500" />
         </div>
 
         <form id="dialog-form-1119" v-else @submit.prevent="handleDisable" class="space-y-4 console-form">
@@ -69,6 +69,8 @@
 </template>
 
 <script setup lang="ts">
+import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
+
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useI18n } from 'vue-i18n'

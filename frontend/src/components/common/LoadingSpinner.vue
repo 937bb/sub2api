@@ -1,9 +1,12 @@
 <template>
   <div
-    :class="['spinner', sizeClasses, colorClass]"
+    :class="['loading-mark', sizeClasses, colorClass]"
     role="status"
     :aria-label="t('common.loading')"
   >
+    <span></span>
+    <span></span>
+    <span></span>
     <span class="sr-only">{{ t('common.loading') }}</span>
   </div>
 </template>
@@ -15,7 +18,7 @@ import { useI18n } from 'vue-i18n'
 const { t } = useI18n()
 
 type SpinnerSize = 'sm' | 'md' | 'lg' | 'xl'
-type SpinnerColor = 'primary' | 'secondary' | 'white' | 'gray'
+type SpinnerColor = 'primary' | 'secondary' | 'white' | 'gray' | 'current'
 
 interface Props {
   size?: SpinnerSize
@@ -29,16 +32,17 @@ const props = withDefaults(defineProps<Props>(), {
 
 const sizeClasses = computed(() => {
   const sizes: Record<SpinnerSize, string> = {
-    sm: 'w-4 h-4 border-2',
-    md: 'w-8 h-8 border-2',
-    lg: 'w-12 h-12 border-[3px]',
-    xl: 'w-16 h-16 border-4'
+    sm: 'loading-mark-sm',
+    md: 'loading-mark-md',
+    lg: 'loading-mark-lg',
+    xl: 'loading-mark-xl'
   }
   return sizes[props.size]
 })
 
 const colorClass = computed(() => {
   const colors: Record<SpinnerColor, string> = {
+	current: '',
     primary: 'text-primary-500',
     secondary: 'text-gray-500 dark:text-dark-400',
     white: 'text-white',
@@ -49,17 +53,26 @@ const colorClass = computed(() => {
 </script>
 
 <style scoped>
-.spinner {
-  @apply inline-block rounded-full border-solid border-current border-r-transparent;
-  animation: spin 0.75s linear infinite;
+.loading-mark {
+  display: inline-grid;
+  grid-template-columns: repeat(3, 1fr);
+  align-items: end;
+  gap: 2px;
+  flex: none;
 }
-
-@keyframes spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
+.loading-mark-sm { width: 14px; height: 14px; }
+.loading-mark-md { width: 24px; height: 24px; gap: 3px; }
+.loading-mark-lg { width: 34px; height: 34px; gap: 4px; }
+.loading-mark-xl { width: 46px; height: 46px; gap: 5px; }
+.loading-mark > span:not(.sr-only) {
+  width: 100%;
+  height: 38%;
+  border-radius: 1px;
+  background: currentColor;
+  animation: loading-level 1.05s ease-in-out infinite;
 }
+.loading-mark > span:nth-child(2) { animation-delay: -0.72s; }
+.loading-mark > span:nth-child(3) { animation-delay: -0.36s; }
+@keyframes loading-level { 0%, 100% { height: 28%; opacity: .42; } 50% { height: 100%; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .loading-mark > span:not(.sr-only) { animation: none; height: 62%; } }
 </style>

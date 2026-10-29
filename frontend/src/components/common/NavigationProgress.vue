@@ -19,7 +19,6 @@ const isVisible = computed(() => isLoading.value)
       class="navigation-progress"
       role="progressbar"
       aria-label="Loading"
-      aria-valuenow="0"
       aria-valuemin="0"
       aria-valuemax="100"
     >
@@ -34,45 +33,32 @@ const isVisible = computed(() => isLoading.value)
   top: 0;
   left: 0;
   right: 0;
-  height: 3px;
+  height: 2px;
   z-index: 9999;
   overflow: hidden;
-  background: transparent;
+  background: color-mix(in srgb, theme('colors.primary.500') 14%, transparent);
 }
 
 .navigation-progress-bar {
   height: 100%;
-  width: 100%;
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    theme('colors.primary.400') 20%,
-    theme('colors.primary.500') 50%,
-    theme('colors.primary.400') 80%,
-    transparent 100%
-  );
-  animation: progress-slide 1.5s ease-in-out infinite;
+  width: 38%;
+  background: theme('colors.primary.600');
+  box-shadow: 0 0 0 1px color-mix(in srgb, theme('colors.primary.400') 24%, transparent);
+  animation: progress-slide 1.15s cubic-bezier(.65, 0, .35, 1) infinite;
 }
 
 /* 暗色模式下的进度条颜色 */
 :root.dark .navigation-progress-bar {
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    theme('colors.primary.500') 20%,
-    theme('colors.primary.400') 50%,
-    theme('colors.primary.500') 80%,
-    transparent 100%
-  );
+  background: theme('colors.primary.400');
 }
 
 /* 进度条滑动动画 */
 @keyframes progress-slide {
   0% {
-    transform: translateX(-100%);
+    transform: translateX(-110%);
   }
   100% {
-    transform: translateX(100%);
+    transform: translateX(365%);
   }
 }
 
@@ -93,7 +79,7 @@ const isVisible = computed(() => isLoading.value)
 /* 减少动画模式 */
 @media (prefers-reduced-motion: reduce) {
   .navigation-progress-bar {
-    animation: progress-pulse 2s ease-in-out infinite;
+    animation: none;
   }
 
   @keyframes progress-pulse {

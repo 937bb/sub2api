@@ -70,7 +70,7 @@
         </form>
 
         <div v-if="loading" class="flex justify-center py-6">
-          <div class="h-8 w-8 animate-spin rounded-full border-b-2 border-primary-500"></div>
+          <LoadingSpinner size="lg" color="current" class="text-primary-500" />
         </div>
 
         <div
@@ -169,6 +169,8 @@
 </template>
 
 <script setup lang="ts">
+import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
+
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import { ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'

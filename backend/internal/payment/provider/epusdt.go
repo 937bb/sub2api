@@ -26,6 +26,7 @@ const (
 	epusdtMaxLiveQuoteAge = 3 * time.Minute
 	epusdtMaxFutureSkew   = 30 * time.Second
 	epusdtRatePolicyLive  = "live"
+	epusdtUSDTPrecision   = 2
 	epusdtStatusPaid      = 2
 	epusdtStatusExpired   = 3
 	gmPayQuotePath        = "/payments/gmpay/v1/order/quote"
@@ -145,12 +146,13 @@ func (e *Epusdt) QuoteUSDT(ctx context.Context, req payment.USDTQuoteRequest) (*
 		return nil, err
 	}
 	params := map[string]any{
-		"pid":         strings.TrimSpace(e.config["pid"]),
-		"currency":    "cny",
-		"token":       "usdt",
-		"network":     network,
-		"amount":      json.Number(amount.StringFixed(2)),
-		"rate_policy": epusdtRatePolicyLive,
+		"pid":              strings.TrimSpace(e.config["pid"]),
+		"currency":         "cny",
+		"token":            "usdt",
+		"network":          network,
+		"amount":           json.Number(amount.StringFixed(2)),
+		"rate_policy":      epusdtRatePolicyLive,
+		"amount_precision": epusdtUSDTPrecision,
 	}
 	params["signature"] = epusdtSignature(params, e.config["secret"])
 	body, err := json.Marshal(params)
@@ -192,16 +194,17 @@ func (e *Epusdt) CreatePayment(ctx context.Context, req payment.CreatePaymentReq
 		notifyURL = strings.TrimSpace(e.config["notifyUrl"])
 	}
 	params := map[string]any{
-		"pid":          strings.TrimSpace(e.config["pid"]),
-		"order_id":     strings.TrimSpace(req.OrderID),
-		"currency":     "cny",
-		"token":        "usdt",
-		"network":      network,
-		"amount":       json.Number(amount.StringFixed(2)),
-		"notify_url":   notifyURL,
-		"redirect_url": strings.TrimSpace(req.ReturnURL),
-		"name":         strings.TrimSpace(req.Subject),
-		"rate_policy":  epusdtRatePolicyLive,
+		"pid":              strings.TrimSpace(e.config["pid"]),
+		"order_id":         strings.TrimSpace(req.OrderID),
+		"currency":         "cny",
+		"token":            "usdt",
+		"network":          network,
+		"amount":           json.Number(amount.StringFixed(2)),
+		"notify_url":       notifyURL,
+		"redirect_url":     strings.TrimSpace(req.ReturnURL),
+		"name":             strings.TrimSpace(req.Subject),
+		"rate_policy":      epusdtRatePolicyLive,
+		"amount_precision": epusdtUSDTPrecision,
 	}
 	params["signature"] = epusdtSignature(params, e.config["secret"])
 
@@ -237,12 +240,13 @@ func (e *Epusdt) CreatePayment(ctx context.Context, req payment.CreatePaymentReq
 	if order.Network != "" && !strings.EqualFold(order.Network, network) {
 		return nil, fmt.Errorf("epusdt create payment: unexpected network %s", order.Network)
 	}
+	actualAmount, _ := decimal.NewFromString(order.ActualAmount.String()) // Validated above.
 	return &payment.CreatePaymentResponse{
 		TradeNo:            order.TradeID,
 		PayURL:             order.PaymentURL,
 		QRCode:             strings.TrimSpace(order.ReceiveAddress),
 		PaymentAddress:     strings.TrimSpace(order.ReceiveAddress),
-		PaymentTokenAmount: order.ActualAmount.String(),
+		PaymentTokenAmount: actualAmount.StringFixed(epusdtUSDTPrecision),
 		PaymentToken:       "USDT",
 		PaymentNetwork:     network,
 		Currency:           payment.DefaultPaymentCurrency,
@@ -315,8 +319,8 @@ func validateEpusdtLiveQuote(order epusdtOrder, cnyAmount decimal.Decimal) error
 	if strings.TrimSpace(order.RatePolicy) != epusdtRatePolicyLive {
 		return fmt.Errorf("epusdt create payment: live rate policy was not honored")
 	}
-	if order.AmountPrecision != 6 {
-		return fmt.Errorf("epusdt create payment: live USDT amount precision must be 6")
+	if order.AmountPrecision != epusdtUSDTPrecision {
+		return fmt.Errorf("epusdt create payment: live USDT amount precision must be %d", epusdtUSDTPrecision)
 	}
 	lockedRate, err := decimal.NewFromString(order.LockedRate.String())
 	if err != nil || !lockedRate.IsPositive() {
@@ -331,6 +335,9 @@ func validateEpusdtLiveQuote(order epusdtOrder, cnyAmount decimal.Decimal) error
 		return fmt.Errorf("epusdt create payment: quoted USDT amount mismatch")
 	}
 	actualAmount, err := decimal.NewFromString(order.ActualAmount.String())
+	if err == nil && !actualAmount.Equal(actualAmount.Round(epusdtUSDTPrecision)) {
+		return fmt.Errorf("epusdt create payment: actual USDT amount must have at most 2 decimal places")
+	}
 	if err != nil || actualAmount.LessThan(quotedAmount) {
 		return fmt.Errorf("epusdt create payment: actual USDT amount is below quote")
 	}
@@ -358,7 +365,7 @@ func validateEpusdtQuote(quote epusdtQuote, expectedAmount decimal.Decimal, expe
 		!strings.EqualFold(strings.TrimSpace(quote.Network), expectedNetwork) {
 		return decimal.Zero, decimal.Zero, fmt.Errorf("epusdt quote USDT: quote identity mismatch")
 	}
-	if strings.TrimSpace(quote.RatePolicy) != epusdtRatePolicyLive || quote.AmountPrecision != 6 {
+	if strings.TrimSpace(quote.RatePolicy) != epusdtRatePolicyLive || quote.AmountPrecision != epusdtUSDTPrecision {
 		return decimal.Zero, decimal.Zero, fmt.Errorf("epusdt quote USDT: live rate policy was not honored")
 	}
 	amount, err := decimal.NewFromString(quote.Amount.String())

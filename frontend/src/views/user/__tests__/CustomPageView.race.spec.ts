@@ -75,7 +75,7 @@ describe('custom Markdown page request ordering', () => {
     await nextTick()
     old.resolve(response('# Old page'))
     await flushPromises()
-    expect(wrapper.find('.animate-spin').exists()).toBe(true)
+    expect(wrapper.find('[role="status"]').exists()).toBe(true)
     expect(wrapper.find('.markdown-page-content').exists()).toBe(false)
     current.resolve(response('# New page'))
     await flushPromises()

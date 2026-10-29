@@ -61,7 +61,7 @@ describe('group RPM override request ownership', () => {
     old.reject(new Error('old request failed'))
     await flushPromises()
     expect(mocks.showError).not.toHaveBeenCalled()
-    expect(wrapper.find('svg.animate-spin').exists()).toBe(true)
+    expect(wrapper.find('[role="status"]').exists()).toBe(true)
     current.resolve(entries(2))
     await flushPromises()
     expect(wrapper.get('tbody').text()).toContain('user2@example.com')

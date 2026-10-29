@@ -36,7 +36,7 @@
             />
           </div>
           <div v-if="verifying" class="mt-3 flex items-center justify-center gap-2 text-sm text-gray-500">
-            <div class="animate-spin rounded-full h-4 w-4 border-b-2 border-primary-500"></div>
+            <LoadingSpinner size="sm" color="current" class="text-primary-500" />
             {{ t('common.verifying') }}
           </div>
         </div>
@@ -54,6 +54,8 @@
 </template>
 
 <script setup lang="ts">
+import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
+
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import { ref, watch, nextTick, useId } from 'vue'
 import { useI18n } from 'vue-i18n'

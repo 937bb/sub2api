@@ -3,9 +3,7 @@
     <WorkspacePage variant="custom">
       <div class="card flex-1 min-h-0 overflow-hidden">
         <div v-if="loading" class="flex h-full items-center justify-center py-12">
-          <div
-            class="h-8 w-8 animate-spin rounded-full border-2 border-primary-500 border-t-transparent"
-          ></div>
+          <LoadingSpinner size="lg" color="current" class="text-primary-500" />
         </div>
 
         <div
@@ -126,6 +124,8 @@
 </template>
 
 <script setup lang="ts">
+import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
+
 import WorkspacePage from '@/components/layout/WorkspacePage.vue'
 
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'

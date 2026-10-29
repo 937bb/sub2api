@@ -3,9 +3,7 @@
     <WorkspacePage variant="settings">
       <!-- Loading State -->
       <div v-if="loading" class="flex items-center justify-center py-12">
-        <div
-          class="h-8 w-8 animate-spin rounded-full border-b-2 border-primary-600"
-        ></div>
+        <LoadingSpinner size="lg" color="current" class="text-primary-600" />
       </div>
 
       <!-- Settings Form -->
@@ -80,9 +78,7 @@
                 v-if="adminApiKeyLoading"
                 class="flex items-center gap-2 text-gray-500"
               >
-                <div
-                  class="h-4 w-4 animate-spin rounded-full border-b-2 border-primary-600"
-                ></div>
+                <LoadingSpinner size="sm" color="current" class="text-primary-600" />
                 {{ t("common.loading") }}
               </div>
 
@@ -100,26 +96,7 @@
                   :disabled="adminApiKeyOperating"
                   class="btn btn-primary btn-sm"
                 >
-                  <svg
-                    v-if="adminApiKeyOperating"
-                    class="mr-1 h-4 w-4 animate-spin"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                  >
-                    <circle
-                      class="opacity-25"
-                      cx="12"
-                      cy="12"
-                      r="10"
-                      stroke="currentColor"
-                      stroke-width="4"
-                    ></circle>
-                    <path
-                      class="opacity-75"
-                      fill="currentColor"
-                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                    ></path>
-                  </svg>
+                  <LoadingSpinner v-if="adminApiKeyOperating" size="sm" color="current" class="mr-1" />
                   {{
                     adminApiKeyOperating
                       ? t("admin.settings.adminApiKey.creating")
@@ -220,9 +197,7 @@
                 v-if="overloadCooldownLoading"
                 class="flex items-center gap-2 text-gray-500"
               >
-                <div
-                  class="h-4 w-4 animate-spin rounded-full border-b-2 border-primary-600"
-                ></div>
+                <LoadingSpinner size="sm" color="current" class="text-primary-600" />
                 {{ t("common.loading") }}
               </div>
 
@@ -273,26 +248,7 @@
                     :disabled="overloadCooldownSaving"
                     class="btn btn-primary btn-sm"
                   >
-                    <svg
-                      v-if="overloadCooldownSaving"
-                      class="mr-1 h-4 w-4 animate-spin"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                    >
-                      <circle
-                        class="opacity-25"
-                        cx="12"
-                        cy="12"
-                        r="10"
-                        stroke="currentColor"
-                        stroke-width="4"
-                      ></circle>
-                      <path
-                        class="opacity-75"
-                        fill="currentColor"
-                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                      ></path>
-                    </svg>
+                    <LoadingSpinner v-if="overloadCooldownSaving" size="sm" color="current" class="mr-1" />
                     {{
                       overloadCooldownSaving
                         ? t("common.saving")
@@ -321,9 +277,7 @@
                 v-if="rateLimit429CooldownLoading"
                 class="flex items-center gap-2 text-gray-500"
               >
-                <div
-                  class="h-4 w-4 animate-spin rounded-full border-b-2 border-primary-600"
-                ></div>
+                <LoadingSpinner size="sm" color="current" class="text-primary-600" />
                 {{ t("common.loading") }}
               </div>
 
@@ -380,26 +334,7 @@
                     :disabled="rateLimit429CooldownSaving"
                     class="btn btn-primary btn-sm"
                   >
-                    <svg
-                      v-if="rateLimit429CooldownSaving"
-                      class="mr-1 h-4 w-4 animate-spin"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                    >
-                      <circle
-                        class="opacity-25"
-                        cx="12"
-                        cy="12"
-                        r="10"
-                        stroke="currentColor"
-                        stroke-width="4"
-                      ></circle>
-                      <path
-                        class="opacity-75"
-                        fill="currentColor"
-                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                      ></path>
-                    </svg>
+                    <LoadingSpinner v-if="rateLimit429CooldownSaving" size="sm" color="current" class="mr-1" />
                     {{
                       rateLimit429CooldownSaving
                         ? t("common.saving")
@@ -429,9 +364,7 @@
                 v-if="streamTimeoutLoading"
                 class="flex items-center gap-2 text-gray-500"
               >
-                <div
-                  class="h-4 w-4 animate-spin rounded-full border-b-2 border-primary-600"
-                ></div>
+                <LoadingSpinner size="sm" color="current" class="text-primary-600" />
                 {{ t("common.loading") }}
               </div>
 
@@ -560,26 +493,7 @@
                     :disabled="streamTimeoutSaving"
                     class="btn btn-primary btn-sm"
                   >
-                    <svg
-                      v-if="streamTimeoutSaving"
-                      class="mr-1 h-4 w-4 animate-spin"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                    >
-                      <circle
-                        class="opacity-25"
-                        cx="12"
-                        cy="12"
-                        r="10"
-                        stroke="currentColor"
-                        stroke-width="4"
-                      ></circle>
-                      <path
-                        class="opacity-75"
-                        fill="currentColor"
-                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                      ></path>
-                    </svg>
+                    <LoadingSpinner v-if="streamTimeoutSaving" size="sm" color="current" class="mr-1" />
                     {{
                       streamTimeoutSaving
                         ? t("common.saving")
@@ -609,9 +523,7 @@
                 v-if="rectifierLoading"
                 class="flex items-center gap-2 text-gray-500"
               >
-                <div
-                  class="h-4 w-4 animate-spin rounded-full border-b-2 border-primary-600"
-                ></div>
+                <LoadingSpinner size="sm" color="current" class="text-primary-600" />
                 {{ t("common.loading") }}
               </div>
 
@@ -762,26 +674,7 @@
                     :disabled="rectifierSaving"
                     class="btn btn-primary btn-sm"
                   >
-                    <svg
-                      v-if="rectifierSaving"
-                      class="mr-1 h-4 w-4 animate-spin"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                    >
-                      <circle
-                        class="opacity-25"
-                        cx="12"
-                        cy="12"
-                        r="10"
-                        stroke="currentColor"
-                        stroke-width="4"
-                      ></circle>
-                      <path
-                        class="opacity-75"
-                        fill="currentColor"
-                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                      ></path>
-                    </svg>
+                    <LoadingSpinner v-if="rectifierSaving" size="sm" color="current" class="mr-1" />
                     {{
                       rectifierSaving ? t("common.saving") : t("common.save")
                     }}
@@ -808,9 +701,7 @@
                 v-if="betaPolicyLoading"
                 class="flex items-center gap-2 text-gray-500"
               >
-                <div
-                  class="h-4 w-4 animate-spin rounded-full border-b-2 border-primary-600"
-                ></div>
+                <LoadingSpinner size="sm" color="current" class="text-primary-600" />
                 {{ t("common.loading") }}
               </div>
 
@@ -1041,26 +932,7 @@
                     :disabled="betaPolicySaving"
                     class="btn btn-primary btn-sm"
                   >
-                    <svg
-                      v-if="betaPolicySaving"
-                      class="mr-1 h-4 w-4 animate-spin"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                    >
-                      <circle
-                        class="opacity-25"
-                        cx="12"
-                        cy="12"
-                        r="10"
-                        stroke="currentColor"
-                        stroke-width="4"
-                      ></circle>
-                      <path
-                        class="opacity-75"
-                        fill="currentColor"
-                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                      ></path>
-                    </svg>
+                    <LoadingSpinner v-if="betaPolicySaving" size="sm" color="current" class="mr-1" />
                     {{
                       betaPolicySaving ? t("common.saving") : t("common.save")
                     }}
@@ -1866,9 +1738,7 @@
                 v-if="panelRateLimitLoading"
                 class="flex items-center gap-2 text-gray-500"
               >
-                <div
-                  class="h-4 w-4 animate-spin rounded-full border-b-2 border-primary-600"
-                ></div>
+                <LoadingSpinner size="sm" color="current" class="text-primary-600" />
                 {{ t("common.loading") }}
               </div>
 
@@ -2002,26 +1872,7 @@
                     :disabled="panelRateLimitSaving"
                     class="btn btn-primary btn-sm"
                   >
-                    <svg
-                      v-if="panelRateLimitSaving"
-                      class="mr-1 h-4 w-4 animate-spin"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                    >
-                      <circle
-                        class="opacity-25"
-                        cx="12"
-                        cy="12"
-                        r="10"
-                        stroke="currentColor"
-                        stroke-width="4"
-                      ></circle>
-                      <path
-                        class="opacity-75"
-                        fill="currentColor"
-                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                      ></path>
-                    </svg>
+                    <LoadingSpinner v-if="panelRateLimitSaving" size="sm" color="current" class="mr-1" />
                     {{
                       panelRateLimitSaving
                         ? t("common.saving")
@@ -4757,9 +4608,7 @@
                 v-if="upstreamBillingProbeLoading"
                 class="flex items-center gap-2 text-gray-500"
               >
-                <div
-                  class="h-4 w-4 animate-spin rounded-full border-b-2 border-primary-600"
-                ></div>
+                <LoadingSpinner size="sm" color="current" class="text-primary-600" />
                 {{ t("common.loading") }}
               </div>
 
@@ -4838,7 +4687,7 @@
             </div>
             <div class="space-y-5 p-6">
               <div v-if="ollamaCloudUsageLoading" class="flex items-center gap-2 text-gray-500">
-                <div class="h-4 w-4 animate-spin rounded-full border-b-2 border-primary-600"></div>
+                <LoadingSpinner size="sm" color="current" class="text-primary-600" />
                 {{ t("common.loading") }}
               </div>
               <template v-else>
@@ -4922,7 +4771,7 @@
             </div>
             <div class="space-y-5 p-6">
               <div v-if="opencodeGoUsageLoading" class="flex items-center gap-2 text-gray-500">
-                <div class="h-4 w-4 animate-spin rounded-full border-b-2 border-primary-600"></div>
+                <LoadingSpinner size="sm" color="current" class="text-primary-600" />
                 {{ t("common.loading") }}
               </div>
               <template v-else>
@@ -8491,26 +8340,7 @@
                 :disabled="testingSmtp || loadFailed"
                 class="btn btn-secondary btn-sm"
               >
-                <svg
-                  v-if="testingSmtp"
-                  class="h-4 w-4 animate-spin"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                >
-                  <circle
-                    class="opacity-25"
-                    cx="12"
-                    cy="12"
-                    r="10"
-                    stroke="currentColor"
-                    stroke-width="4"
-                  ></circle>
-                  <path
-                    class="opacity-75"
-                    fill="currentColor"
-                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                  ></path>
-                </svg>
+                <LoadingSpinner v-if="testingSmtp" size="sm" color="current" />
                 {{
                   testingSmtp
                     ? t("admin.settings.smtp.testing")
@@ -8672,26 +8502,7 @@
                   "
                   class="btn btn-secondary"
                 >
-                  <svg
-                    v-if="sendingTestEmail"
-                    class="h-4 w-4 animate-spin"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                  >
-                    <circle
-                      class="opacity-25"
-                      cx="12"
-                      cy="12"
-                      r="10"
-                      stroke="currentColor"
-                      stroke-width="4"
-                    ></circle>
-                    <path
-                      class="opacity-75"
-                      fill="currentColor"
-                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                    ></path>
-                  </svg>
+                  <LoadingSpinner v-if="sendingTestEmail" size="sm" color="current" />
                   {{
                     sendingTestEmail
                       ? t("admin.settings.testEmail.sending")
@@ -8883,26 +8694,7 @@
             :disabled="saving || loadFailed"
             class="btn btn-primary"
           >
-            <svg
-              v-if="saving"
-              class="h-4 w-4 animate-spin"
-              fill="none"
-              viewBox="0 0 24 24"
-            >
-              <circle
-                class="opacity-25"
-                cx="12"
-                cy="12"
-                r="10"
-                stroke="currentColor"
-                stroke-width="4"
-              ></circle>
-              <path
-                class="opacity-75"
-                fill="currentColor"
-                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-              ></path>
-            </svg>
+            <LoadingSpinner v-if="saving" size="sm" color="current" />
             {{
               saving
                 ? t("admin.settings.saving")
@@ -8950,6 +8742,8 @@
 </template>
 
 <script setup lang="ts">
+import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
+
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import { ref, reactive, computed, onMounted, watch } from "vue";
 import { listPlatformIds } from "@/constants/platformCatalog";

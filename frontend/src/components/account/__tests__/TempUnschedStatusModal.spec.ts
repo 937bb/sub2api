@@ -43,7 +43,7 @@ describe('temporary unschedulable status requests', () => {
     mocks.getTempUnschedulableStatus.mockReturnValueOnce(old.promise).mockReturnValueOnce(current.promise)
     const w = await open(); await w.setProps({ show: false }); await w.setProps({ show: true })
     old.reject(new Error('obsolete')); await flushPromises()
-    expect(mocks.showError).not.toHaveBeenCalled(); expect(w.find('.animate-spin').exists()).toBe(true)
+    expect(mocks.showError).not.toHaveBeenCalled(); expect(w.find('[role="status"]').exists()).toBe(true)
     current.resolve({ active: false }); await flushPromises()
     expect(w.text()).toContain('admin.accounts.tempUnschedulable.notActive')
   })
