@@ -17,7 +17,7 @@ type parsedChannelTimePeriod struct {
 	multiplier float64
 }
 
-// validateChannelTimePricing accepts nil or empty periods as disabled.
+// validateChannelTimePricing 校验分时倍率配置。nil 或空 periods 表示未启用。
 func validateChannelTimePricing(config *ChannelTimePricing) error {
 	if config == nil || len(config.Periods) == 0 {
 		return nil
@@ -25,20 +25,11 @@ func validateChannelTimePricing(config *ChannelTimePricing) error {
 	if _, err := loadChannelTimePricingLocation(config.Timezone); err != nil {
 		return fmt.Errorf("timezone: %w", err)
 	}
-	if len(config.ExcludedDates) > 3660 {
-		return fmt.Errorf("excluded_dates must contain at most 3660 dates")
-	}
-	for _, date := range config.ExcludedDates {
-		parsed, err := time.Parse(time.DateOnly, date)
-		if err != nil || parsed.Year() < 1 || parsed.Format(time.DateOnly) != date {
-			return fmt.Errorf("excluded_dates: %q must be a valid YYYY-MM-DD date", date)
-		}
-	}
 	_, err := parseChannelTimePeriods(config.Periods)
 	return err
 }
 
-// MultiplierAt returns 1 for disabled or invalid configurations.
+// MultiplierAt 返回 at 对应的分时倍率。无配置或脏配置均安全降级为 1。
 func (config *ChannelTimePricing) MultiplierAt(at time.Time) float64 {
 	if config == nil || len(config.Periods) == 0 || at.IsZero() {
 		return 1.0
@@ -56,9 +47,6 @@ func (config *ChannelTimePricing) MultiplierAt(at time.Time) float64 {
 	}
 
 	local := at.In(location)
-	if config.excludesDate(local) {
-		return 1.0
-	}
 	if config.WeekdaysOnly && (local.Weekday() == time.Saturday || local.Weekday() == time.Sunday) {
 		return 1.0
 	}
@@ -69,17 +57,6 @@ func (config *ChannelTimePricing) MultiplierAt(at time.Time) float64 {
 		}
 	}
 	return 1.0
-}
-
-// Exclusions are full local calendar dates, never annually recurring dates.
-func (config *ChannelTimePricing) excludesDate(local time.Time) bool {
-	date := local.Format(time.DateOnly)
-	for _, excluded := range config.ExcludedDates {
-		if excluded == date {
-			return true
-		}
-	}
-	return false
 }
 
 func loadChannelTimePricingLocation(name string) (*time.Location, error) {

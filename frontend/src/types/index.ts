@@ -1441,12 +1441,6 @@ export interface UsageProgress {
   limit_requests?: number
 }
 
-export interface LocalUsageWindow {
-  start_at: string
-  rolling: boolean
-  stats: WindowStats
-}
-
 // Antigravity 单个模型的配额信息
 export interface AntigravityModelQuota {
   utilization: number // 使用率 0-100
@@ -1497,9 +1491,6 @@ export interface GrokBillingSummary {
 }
 
 export interface AccountUsageInfo {
-  local_five_hour?: LocalUsageWindow | null
-  local_seven_day?: LocalUsageWindow | null
-  local_usage_error?: string
   source?: 'passive' | 'active'
   updated_at: string | null
   five_hour: UsageProgress | null
@@ -1893,8 +1884,6 @@ export interface AdminUsageLog extends UsageLog {
   upstream_model_mismatch?: boolean | null
   model_mapping_chain?: string | null
   upstream_request_id?: string | null
-  upstream_response_id?: string | null
-  previous_response_id?: string | null
 
   // 账号计费倍率（仅管理员可见）
   account_rate_multiplier?: number | null

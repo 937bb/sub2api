@@ -12,12 +12,10 @@ import (
 	"github.com/google/uuid"
 )
 
-// responsesFailedError matches the OpenAI Responses error object.
+// responsesFailedError 对齐 OpenAI Responses 协议 error 子对象。
 type responsesFailedError struct {
-	Type    string          `json:"type,omitempty"`
-	Code    string          `json:"code"`
-	Message string          `json:"message"`
-	Param   json.RawMessage `json:"param,omitempty"`
+	Code    string `json:"code"`
+	Message string `json:"message"`
 }
 
 // responsesFailedBody 对齐 apicompat.makeResponsesCompletedEvent 输出的 response 子对象字段集。
@@ -25,13 +23,13 @@ type responsesFailedError struct {
 // CreatedAt 不带 omitempty：严格客户端把它当必填字段，缺失会以
 // `missing field 'created_at'` 反序列化失败——那正是本文件要避免的"客户端读不懂终止事件"。
 type responsesFailedBody struct {
-	ID        string `json:"id"`
-	Object    string `json:"object"`
-	CreatedAt int64  `json:"created_at"`
-	Model     string `json:"model,omitempty"`
-	Status    string `json:"status"`
-	Output    []any  `json:"output"`
-	Error     any    `json:"error"`
+	ID        string               `json:"id"`
+	Object    string               `json:"object"`
+	CreatedAt int64                `json:"created_at"`
+	Model     string               `json:"model,omitempty"`
+	Status    string               `json:"status"`
+	Output    []any                `json:"output"`
+	Error     responsesFailedError `json:"error"`
 }
 
 // responsesFailedEvent 是写入 SSE data 行的顶层结构。
@@ -61,27 +59,6 @@ type responsesFailedEvent struct {
 // 此时 caller 也无法回退到 JSON（HTTP 200 已固化），通常意味着连接已经损坏，
 // 应当让请求处理函数 return，由上层关闭连接。
 func writeResponsesFailedSSE(c *gin.Context, errType, code, message string) bool {
-	return writeResponsesFailedSSEWithError(c, responsesFailedError{
-		Code: mapResponsesErrorCode(errType, code), Message: message,
-	})
-}
-
-// writeResponsesFailedSSEWithError preserves structured upstream error fields
-// while supplying the complete terminal envelope required by strict clients.
-func writeResponsesFailedSSEWithError(c *gin.Context, upstreamError responsesFailedError) bool {
-	return writeResponsesFailedSSEWithErrorValue(c, upstreamError)
-}
-
-// writeResponsesFailedSSEWithRawError keeps provider-specific fields such as
-// Azure innererror and headers while retaining the Responses terminal envelope.
-func writeResponsesFailedSSEWithRawError(c *gin.Context, upstreamError json.RawMessage) bool {
-	if !json.Valid(upstreamError) {
-		return false
-	}
-	return writeResponsesFailedSSEWithErrorValue(c, upstreamError)
-}
-
-func writeResponsesFailedSSEWithErrorValue(c *gin.Context, upstreamError any) bool {
 	flusher, ok := c.Writer.(http.Flusher)
 	if !ok {
 		return false
@@ -96,7 +73,10 @@ func writeResponsesFailedSSEWithErrorValue(c *gin.Context, upstreamError any) bo
 			Model:     requestModel(c),
 			Status:    "failed",
 			Output:    []any{},
-			Error:     upstreamError,
+			Error: responsesFailedError{
+				Code:    mapResponsesErrorCode(errType, code),
+				Message: message,
+			},
 		},
 	})
 	if err != nil {

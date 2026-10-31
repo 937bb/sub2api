@@ -62,11 +62,7 @@ func (s *OpenAIGatewayService) ForwardResponsesInputTokens(
 	}
 
 	if shouldEstimateOpenAIInputTokensLocally(account) {
-		reason := "custom_relay"
-		if account.IsOpenAISiwc() {
-			reason = "siwc_unsupported"
-		}
-		writeOpenAIResponsesInputTokensFallback(c, account, prepared, 0, reason)
+		writeOpenAIResponsesInputTokensFallback(c, account, prepared, 0, "custom_relay")
 		return nil
 	}
 
@@ -154,7 +150,7 @@ func prepareNativeOpenAIInputTokensCountRequest(body []byte, account *Account) (
 }
 
 func shouldEstimateOpenAIInputTokensLocally(account *Account) bool {
-	if account == nil || account.IsOpenAISiwc() || account.IsGrok() || account.RoutesProtocolByInbound() || account.Type == AccountTypeUpstream {
+	if account == nil || account.IsGrok() || account.RoutesProtocolByInbound() || account.Type == AccountTypeUpstream {
 		return true
 	}
 	if account.Type != AccountTypeAPIKey {
@@ -275,13 +271,13 @@ func (s *OpenAIGatewayService) ForwardCountTokensAsAnthropic(
 	// count_tokens 为 "Anthropic only"，Kimi/智谱亦无任何文档承诺。转发上游
 	// 只会常态 404，且错误还会流入账号处置逻辑误伤整账号调度；Claude Code
 	// 高频调用此端点，本地 tiktoken 估算是与 Grok 一致的既有方案。
-	if account.IsMultiProtocolAPIKey() || account.IsOpenAISiwc() {
+	if account.IsMultiProtocolAPIKey() {
 		estimated, err := estimateAnthropicCountTokensLocally(body)
 		if err != nil {
 			writeAnthropicCountTokensError(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
-			return fmt.Errorf("count_tokens: estimate local input tokens: %w", err)
+			return fmt.Errorf("count_tokens: estimate cn provider input tokens: %w", err)
 		}
-		logger.L().Debug("openai count_tokens: unsupported provider local estimate",
+		logger.L().Debug("openai count_tokens: cn provider local estimate",
 			zap.Int64("account_id", account.ID),
 			zap.Int("estimated_input_tokens", estimated),
 		)
@@ -437,9 +433,6 @@ func (s *OpenAIGatewayService) buildInputTokensUpstreamRequest(
 	body []byte,
 	token string,
 ) (*http.Request, error) {
-	if account.IsOpenAISiwc() {
-		return nil, fmt.Errorf("SIWC token counting uses local estimation")
-	}
 	targetURL := openaiPlatformAPIInputTokensURL
 	if account.Type == AccountTypeAPIKey {
 		if baseURL := account.GetOpenAIBaseURL(); strings.TrimSpace(baseURL) != "" {

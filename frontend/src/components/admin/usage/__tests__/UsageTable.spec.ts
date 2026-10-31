@@ -732,54 +732,6 @@ describe('admin UsageTable request ID column', () => {
   })
 })
 
-describe('admin UsageTable request detail', () => {
-  it('opens the row detail dialog with response trace identifiers', async () => {
-    const row = {
-      ...baseImageRow,
-      id: 987,
-      user_id: 42,
-      api_key_id: 73,
-      account_id: 91,
-      request_id: 'req-detail-1',
-      upstream_request_id: 'upstream-request-1',
-      upstream_response_id: 'resp-detail-1',
-      previous_response_id: 'resp-previous-1',
-      model: 'gpt-6.1-sol',
-      input_tokens: 120,
-      output_tokens: 30,
-      duration_ms: 2500,
-      first_token_ms: 500,
-      created_at: '2026-10-24T10:00:00Z',
-    }
-    const wrapper = mount(UsageTable, {
-      props: {
-        data: [row],
-        loading: false,
-        columns: [{ key: 'actions', label: 'Actions' }],
-      },
-      global: {
-        stubs: {
-          DataTable: DataTableStub,
-          EmptyState: true,
-          Icon: true,
-          Teleport: true,
-        },
-      },
-    })
-
-    const button = wrapper.get('[data-testid="usage-view-detail"]')
-    expect(button.text()).toContain('View details')
-    await button.trigger('click')
-    await nextTick()
-
-    const detail = wrapper.get('[data-testid="usage-detail-dialog"]')
-    expect(detail.text()).toContain('req-detail-1')
-    expect(detail.text()).toContain('upstream-request-1')
-    expect(detail.text()).toContain('resp-detail-1')
-    expect(detail.text()).toContain('resp-previous-1')
-  })
-})
-
 describe('admin UsageTable IP geolocation batch toolbar', () => {
   const DataTableStubWithIp = {
     props: ['data'],

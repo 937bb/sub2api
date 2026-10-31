@@ -78,10 +78,7 @@ var openaiAllowedHeaders = map[string]bool{
 	"openai-beta":             true,
 	"user-agent":              true,
 	"originator":              true,
-	"session-id":              true,
 	"session_id":              true,
-	"thread-id":               true,
-	"x-client-request-id":     true,
 	"x-codex-beta-features":   true,
 	"x-codex-installation-id": true,
 	"x-codex-turn-state":      true,
@@ -100,10 +97,7 @@ var openaiPassthroughAllowedHeaders = map[string]bool{
 	"openai-beta":             true,
 	"user-agent":              true,
 	"originator":              true,
-	"session-id":              true,
 	"session_id":              true,
-	"thread-id":               true,
-	"x-client-request-id":     true,
 	"x-codex-beta-features":   true,
 	"x-codex-installation-id": true,
 	"x-codex-turn-state":      true,
@@ -120,9 +114,7 @@ var codexCLIOnlyDebugHeaderWhitelist = []string{
 	"Accept-Language",
 	"OpenAI-Beta",
 	"Originator",
-	"Session-Id",
 	"Session_ID",
-	"Thread-Id",
 	"Conversation_ID",
 	"X-Request-ID",
 	"X-Client-Request-ID",
@@ -453,7 +445,6 @@ var ErrNoAvailableCompactAccounts = errors.New("no available accounts support /r
 
 // OpenAIGatewayService handles OpenAI API gateway operations
 type OpenAIGatewayService struct {
-	siwcTransport         http.RoundTripper
 	accountRepo           AccountRepository
 	usageLogRepo          UsageLogRepository
 	usageBillingRepo      UsageBillingRepository
@@ -1250,9 +1241,6 @@ func (s *OpenAIGatewayService) GetAccessToken(ctx context.Context, account *Acco
 		if s.openAITokenProvider != nil {
 			accessToken, err := s.openAITokenProvider.GetAccessToken(ctx, account)
 			if err != nil {
-				if account.IsOpenAISiwc() && ctx.Err() == nil {
-					return "", "", siwcCredentialFailover()
-				}
 				return "", "", err
 			}
 			return accessToken, "oauth", nil

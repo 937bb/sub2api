@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
@@ -19,9 +18,6 @@ type OpenAIOAuthService struct {
 	proxyRepo            ProxyRepository
 	oauthClient          OpenAIOAuthClient
 	privacyClientFactory PrivacyClientFactory // 用于调用 chatgpt.com/backend-api（ImpersonateChrome）
-	siwcMu               sync.Mutex
-	siwcSessions         map[string]*openAISiwcSession
-	siwcStateDir         string
 }
 
 // NewOpenAIOAuthService creates a new OpenAI OAuth service
@@ -43,7 +39,6 @@ func (s *OpenAIOAuthService) SetPrivacyClientFactory(factory PrivacyClientFactor
 type OpenAIAuthURLResult struct {
 	AuthURL   string `json:"auth_url"`
 	SessionID string `json:"session_id"`
-	HostID    string `json:"host_id,omitempty"`
 }
 
 // GenerateAuthURL generates an OpenAI OAuth authorization URL
@@ -117,22 +112,21 @@ type OpenAIExchangeCodeInput struct {
 
 // OpenAITokenInfo represents the token information for OpenAI
 type OpenAITokenInfo struct {
-	SIWC                  *OpenAISiwcCredential `json:"-"`
-	AccessToken           string                `json:"access_token"`
-	RefreshToken          string                `json:"refresh_token"`
-	IDToken               string                `json:"id_token,omitempty"`
-	ExpiresIn             int64                 `json:"expires_in"`
-	ExpiresAt             int64                 `json:"expires_at"`
-	ClientID              string                `json:"client_id,omitempty"`
-	AuthMode              string                `json:"auth_mode,omitempty"`
-	Email                 string                `json:"email,omitempty"`
-	ChatGPTAccountID      string                `json:"chatgpt_account_id,omitempty"`
-	ChatGPTUserID         string                `json:"chatgpt_user_id,omitempty"`
-	ChatGPTAccountFedRAMP bool                  `json:"chatgpt_account_is_fedramp,omitempty"`
-	OrganizationID        string                `json:"organization_id,omitempty"`
-	PlanType              string                `json:"plan_type,omitempty"`
-	SubscriptionExpiresAt string                `json:"subscription_expires_at,omitempty"`
-	PrivacyMode           string                `json:"privacy_mode,omitempty"`
+	AccessToken           string `json:"access_token"`
+	RefreshToken          string `json:"refresh_token"`
+	IDToken               string `json:"id_token,omitempty"`
+	ExpiresIn             int64  `json:"expires_in"`
+	ExpiresAt             int64  `json:"expires_at"`
+	ClientID              string `json:"client_id,omitempty"`
+	AuthMode              string `json:"auth_mode,omitempty"`
+	Email                 string `json:"email,omitempty"`
+	ChatGPTAccountID      string `json:"chatgpt_account_id,omitempty"`
+	ChatGPTUserID         string `json:"chatgpt_user_id,omitempty"`
+	ChatGPTAccountFedRAMP bool   `json:"chatgpt_account_is_fedramp,omitempty"`
+	OrganizationID        string `json:"organization_id,omitempty"`
+	PlanType              string `json:"plan_type,omitempty"`
+	SubscriptionExpiresAt string `json:"subscription_expires_at,omitempty"`
+	PrivacyMode           string `json:"privacy_mode,omitempty"`
 }
 
 // ExchangeCode exchanges authorization code for tokens
@@ -343,9 +337,6 @@ func resolveChatGPTSubscriptionAccountID(tokenInfo *OpenAITokenInfo, orgID strin
 
 // RefreshAccountToken refreshes token for an OpenAI OAuth account
 func (s *OpenAIOAuthService) RefreshAccountToken(ctx context.Context, account *Account) (*OpenAITokenInfo, error) {
-	if account.IsOpenAISiwc() {
-		return s.refreshSIWC(ctx, account)
-	}
 	if account.Platform != PlatformOpenAI {
 		return nil, infraerrors.New(http.StatusBadRequest, "OPENAI_OAUTH_INVALID_ACCOUNT", "account is not an OpenAI account")
 	}
@@ -400,9 +391,6 @@ func (s *OpenAIOAuthService) RefreshAccountToken(ctx context.Context, account *A
 
 // BuildAccountCredentials builds credentials map from token info
 func (s *OpenAIOAuthService) BuildAccountCredentials(tokenInfo *OpenAITokenInfo) map[string]any {
-	if tokenInfo.SIWC != nil {
-		return openAISiwcCredentials(*tokenInfo.SIWC)
-	}
 	creds := map[string]any{
 		"access_token": tokenInfo.AccessToken,
 	}
@@ -452,17 +440,7 @@ func (s *OpenAIOAuthService) BuildAccountCredentials(tokenInfo *OpenAITokenInfo)
 
 // Stop stops the session store cleanup goroutine
 func (s *OpenAIOAuthService) Stop() {
-	if s.sessionStore != nil {
-		s.sessionStore.Stop()
-	}
-	s.siwcMu.Lock()
-	defer s.siwcMu.Unlock()
-	for _, flow := range s.siwcSessions {
-		if flow.timer != nil {
-			flow.timer.Stop()
-		}
-	}
-	s.siwcSessions = nil
+	s.sessionStore.Stop()
 }
 
 func normalizeOpenAIOAuthPlatform(platform string) string {

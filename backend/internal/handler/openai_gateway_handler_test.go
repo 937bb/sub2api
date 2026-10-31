@@ -972,7 +972,7 @@ func TestOpenAIResponses_RejectsHTTPContinuationOwnedByAnotherUser(t *testing.T)
 	require.Contains(t, w.Body.String(), "previous_response_id is not available for this user")
 }
 
-func TestOpenAIResponses_AllowsHTTPContinuationWithExpiredOwnerBinding(t *testing.T) {
+func TestOpenAIResponses_RejectsUnownedHTTPContinuation(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	w := httptest.NewRecorder()
@@ -989,7 +989,8 @@ func TestOpenAIResponses_AllowsHTTPContinuationWithExpiredOwnerBinding(t *testin
 	h := newOpenAIHandlerForPreviousResponseIDValidation(t, nil)
 	h.Responses(c)
 
-	require.NotContains(t, w.Body.String(), "previous_response_id is not available for this user")
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	require.Contains(t, w.Body.String(), "previous_response_id is not available for this user")
 }
 
 func TestOpenAIResponses_FunctionCallOutputHTTPGuidanceDoesNotSuggestPreviousResponseReuse(t *testing.T) {
@@ -2281,31 +2282,9 @@ func TestOpenAIResponses_APIKeyPassthroughPool5xxRetriesThenExhaustsMaxSwitches(
 	h.Responses(c)
 
 	require.Equal(t, []int64{9910, 9910, 9911}, upstream.calls())
-	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
+	require.Equal(t, http.StatusBadGateway, rec.Code)
 	require.Equal(t, "upstream_error", gjson.GetBytes(rec.Body.Bytes(), "error.type").String())
-	require.Equal(t, "Upstream service temporarily unavailable, please retry later", gjson.GetBytes(rec.Body.Bytes(), "error.message").String())
-}
-
-func TestOpenAIMapUpstreamTransientFailuresToServiceUnavailable(t *testing.T) {
-	h := &OpenAIGatewayHandler{}
-	for _, statusCode := range []int{
-		http.StatusInternalServerError,
-		http.StatusBadGateway,
-		http.StatusServiceUnavailable,
-		http.StatusGatewayTimeout,
-		520,
-		521,
-		522,
-		523,
-		524,
-	} {
-		t.Run(fmt.Sprintf("status_%d", statusCode), func(t *testing.T) {
-			status, errType, message := h.mapUpstreamError(statusCode)
-			require.Equal(t, http.StatusServiceUnavailable, status)
-			require.Equal(t, "upstream_error", errType)
-			require.Contains(t, message, "retry later")
-		})
-	}
+	require.Equal(t, "Upstream service temporarily unavailable", gjson.GetBytes(rec.Body.Bytes(), "error.message").String())
 }
 
 func TestOpenAIResponses_APIKeyPassthroughPoolAuthFailureRetriesThenSwitchesToHealthyAccount(t *testing.T) {
@@ -2489,8 +2468,7 @@ func TestOpenAIResponses_APIKeyPassthroughSSERateLimitUsesConfiguredPoolRetry(t 
 	require.Equal(t, http.StatusTooManyRequests, rec.Code)
 	require.Equal(t, "1", rec.Header().Get("Retry-After"))
 	require.Equal(t, "rate_limit_error", gjson.GetBytes(rec.Body.Bytes(), "error.type").String())
-	require.Equal(t, "rate_limit_exceeded", gjson.GetBytes(rec.Body.Bytes(), "error.code").String())
-	require.Equal(t, "Concurrency limit exceeded for account, please retry later", gjson.GetBytes(rec.Body.Bytes(), "error.message").String())
+	require.Equal(t, "Upstream rate limit exceeded, please retry later", gjson.GetBytes(rec.Body.Bytes(), "error.message").String())
 }
 
 func TestOpenAIResponsesWebSocket_FailoverOnUpstreamUsageLimitEvent(t *testing.T) {

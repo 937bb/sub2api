@@ -26,16 +26,6 @@
                 t('admin.accounts.oauth.manualAuth')
               }}</span>
             </label>
-            <label v-if="showSiwcOption && platform === 'openai'" class="flex cursor-pointer items-center gap-2">
-              <input
-                v-model="inputMethod"
-                type="radio"
-                value="siwc"
-                data-testid="openai-siwc-auth"
-                class="text-blue-600 focus:ring-blue-500"
-              />
-              <span class="text-sm text-blue-900 dark:text-blue-200">SIWC</span>
-            </label>
             <label v-if="showCookieOption" class="flex cursor-pointer items-center gap-2">
               <input
                 v-model="inputMethod"
@@ -148,8 +138,6 @@
             </label>
           </fieldset>
         </div>
-
-        <slot v-if="inputMethod === 'siwc'" name="siwc" />
 
         <!-- Refresh Token Input (OpenAI / Antigravity / Mobile RT) -->
         <div v-if="inputMethod === 'refresh_token' || inputMethod === 'mobile_refresh_token'" class="space-y-4">
@@ -805,7 +793,6 @@ interface Props {
   /** Grok email----password login (admin; password never persisted). */
   showEmailPasswordOption?: boolean
   showManualOption?: boolean
-  showSiwcOption?: boolean
   initialInputMethod?: AuthInputMethod
   /**
    * Prefill for Grok email----password reauth. Password is never stored;
@@ -836,7 +823,6 @@ const props = withDefaults(defineProps<Props>(), {
   showSsoOption: false,
   showEmailPasswordOption: false,
   showManualOption: true,
-  showSiwcOption: false,
   initialInputMethod: 'manual',
   initialEmailPassword: '',
   platform: 'anthropic',
@@ -931,7 +917,6 @@ watch(emailPasswordOptionEnabled, (enabled) => {
 // Computed: show method selection only when there is something to choose.
 const methodOptionCount = computed(() => [
   props.showManualOption,
-  props.showSiwcOption && props.platform === 'openai',
   props.showCookieOption,
   props.showRefreshTokenOption,
   props.showMobileRefreshTokenOption,

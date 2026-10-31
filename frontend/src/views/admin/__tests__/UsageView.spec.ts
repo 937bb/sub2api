@@ -558,7 +558,7 @@ describe('admin UsageView request ID column visibility', () => {
     )
     expect(localStorage.setItem).toHaveBeenCalledWith(
       'usage-hidden-columns-version',
-      'response-trace-hidden-by-default',
+      'upstream-request-id-hidden-by-default',
     )
   })
 
@@ -600,47 +600,6 @@ describe('admin UsageView request ID column visibility', () => {
 
     expect(usageTable.props('columns')).toEqual(
       expect.arrayContaining([expect.objectContaining({ key: 'upstream_request_id', label: 'Upstream ID' })]),
-    )
-  })
-
-  it('keeps response trace hidden by default and allows enabling it from column settings', async () => {
-    const wrapper = mount(UsageView, {
-      global: {
-        stubs: {
-          AppLayout: AppLayoutStub,
-          UsageStatsCards: true,
-          UsageFilters: UsageFiltersStub,
-          UsageTable: UsageTableStub,
-          UsageExportProgress: true,
-          UsageCleanupDialog: true,
-          UserBalanceHistoryModal: true,
-          AuditLogModal: true,
-          Pagination: true,
-          Select: true,
-          DateRangePicker: true,
-          Icon: true,
-          TokenUsageTrend: true,
-          ModelDistributionChart: true,
-          GroupDistributionChart: true,
-          EndpointDistributionChart: true,
-          UserTokenRanking: true,
-        },
-      },
-    })
-    await wrapper.vm.$nextTick()
-
-    const usageTable = wrapper.findComponent(UsageTableStub)
-    expect(usageTable.props('columns')).not.toEqual(
-      expect.arrayContaining([expect.objectContaining({ key: 'response_trace' })]),
-    )
-
-    await wrapper.get('button[title="admin.users.columnSettings"]').trigger('click')
-    const responseTraceToggle = wrapper.findAll('button').find((button) => button.text() === 'Response Trace')
-    expect(responseTraceToggle).toBeDefined()
-    await responseTraceToggle!.trigger('click')
-
-    expect(usageTable.props('columns')).toEqual(
-      expect.arrayContaining([expect.objectContaining({ key: 'response_trace', label: 'Response Trace' })]),
     )
   })
 })
@@ -827,8 +786,6 @@ describe('admin UsageView model audit export', () => {
 				upstream_model: 'gpt-5.5',
 				upstream_response_model: 'gpt-5.4',
 				upstream_model_mismatch: true,
-				upstream_response_id: 'resp_current',
-				previous_response_id: 'resp_previous',
 				request_type: 'sync',
 				input_tokens: 1,
 				output_tokens: 1,
@@ -855,7 +812,7 @@ describe('admin UsageView model audit export', () => {
 		vi.useRealTimers()
 	})
 
-	it('exports model audit and response trace as separate admin columns', async () => {
+	it('exports model audit and request IDs as separate admin columns', async () => {
 		const wrapper = mountRouteFilteredUsageView()
 		vi.advanceTimersByTime(120)
 		await flushPromises()
@@ -878,15 +835,13 @@ describe('admin UsageView model audit export', () => {
 		])
 		const row = sheetAddAoa.mock.calls[0][1][0]
 		expect(row.slice(4, 8)).toEqual(['gpt-5.6-sol', 'gpt-5.5', 'gpt-5.4', 'Yes'])
-		expect(headers.slice(-6)).toEqual([
+		expect(headers.slice(-4)).toEqual([
 			'Request ID',
 			'Upstream ID',
-			'Upstream Response ID',
-			'Previous Response ID',
 			'usage.userAgent',
 			'admin.usage.ipAddress',
 		])
-		expect(row.slice(-6)).toEqual(['', '', 'resp_current', 'resp_previous', '', ''])
+		expect(row.slice(-4)).toEqual(['', '', '', ''])
 		expect(saveAs).toHaveBeenCalledTimes(1)
 	})
 })

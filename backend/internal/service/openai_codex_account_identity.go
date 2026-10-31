@@ -3,24 +3,17 @@ package service
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
 
 const codexAccountIdentityNamespaceVersion = "v1"
-
-const (
-	codexIdentityFallbackEpochMilli int64 = 1_735_689_600_000
-	codexIdentitySpreadMilli        int64 = 30 * 24 * 60 * 60 * 1000
-)
 
 const codexAccountIdentitySourceContextKey = "openai_codex_account_identity_source"
 
@@ -90,39 +83,11 @@ func isolateOpenAIUpstreamSessionID(apiKeyID int64, account *Account, raw string
 		return ""
 	}
 	namespace := codexAccountIdentityNamespace(account)
-	if namespace != "" {
-		return scopeCodexAccountIdentityValue(account, apiKeyID, "session", raw)
+	if namespace == "" {
+		return isolateOpenAISessionID(apiKeyID, raw)
 	}
-	return isolateOpenAISessionID(apiKeyID, raw)
-}
-
-// deriveStableCodexUUIDv7 produces a deterministic RFC 9562 UUIDv7. The
-// timestamp stays near the credential creation time while the random portion
-// remains stable across process restarts.
-func deriveStableCodexUUIDv7(seed string, unixMilli int64) string {
-	sum := sha256.Sum256([]byte(seed))
-	var id uuid.UUID
-	copy(id[:], sum[:16])
-	ms := uint64(unixMilli)
-	id[0] = byte(ms >> 40)
-	id[1] = byte(ms >> 32)
-	id[2] = byte(ms >> 24)
-	id[3] = byte(ms >> 16)
-	id[4] = byte(ms >> 8)
-	id[5] = byte(ms)
-	id[6] = (id[6] & 0x0f) | 0x70
-	id[8] = (id[8] & 0x3f) | 0x80
-	return id.String()
-}
-
-func codexIdentityUnixMilli(account *Account, seed string) int64 {
-	base := codexIdentityFallbackEpochMilli
-	if account != nil && !account.CreatedAt.IsZero() {
-		base = account.CreatedAt.UnixMilli()
-	}
-	sum := sha256.Sum256([]byte("sub2api:codex-identity-ts:v1:" + seed))
-	offset := int64(binary.BigEndian.Uint64(sum[:8]) % uint64(codexIdentitySpreadMilli))
-	return base + offset
+	sum := sha256.Sum256([]byte(fmt.Sprintf("u%d:a%s:%s", apiKeyID, namespace, raw)))
+	return fmt.Sprintf("%x", sum[:8])
 }
 
 func scopeCodexAccountIdentityValue(account *Account, apiKeyID int64, kind, raw string) string {
@@ -131,20 +96,14 @@ func scopeCodexAccountIdentityValue(account *Account, apiKeyID int64, kind, raw 
 	if raw == "" || namespace == "" {
 		return raw
 	}
-	seed := fmt.Sprintf(
+	return deriveStableUUIDv4(fmt.Sprintf(
 		"sub2api:codex-account-identity:%s:user:%d:account:%s:kind:%s:value:%s",
 		codexAccountIdentityNamespaceVersion,
 		apiKeyID,
 		namespace,
 		kind,
 		raw,
-	)
-	switch kind {
-	case "session", "thread", "request", "turn":
-		return deriveStableCodexUUIDv7(seed, codexIdentityUnixMilli(account, seed))
-	default:
-		return deriveStableUUIDv4(seed)
-	}
+	))
 }
 
 var codexAccountIdentityFields = []struct {
@@ -209,7 +168,9 @@ func applyCodexAccountIdentityClientMetadataMap(requestBody map[string]any, acco
 	}
 	changed := false
 	clientMetadata, _ := requestBody["client_metadata"].(map[string]any)
+	originalBodySessionID := ""
 	if clientMetadata != nil {
+		originalBodySessionID, _ = clientMetadata["session_id"].(string)
 		if applyCodexAccountIdentityFields(clientMetadata, account, apiKeyID) {
 			changed = true
 		}
@@ -218,7 +179,11 @@ func applyCodexAccountIdentityClientMetadataMap(requestBody map[string]any, acco
 		}
 	}
 	if raw, ok := requestBody["prompt_cache_key"].(string); ok && strings.TrimSpace(raw) != "" {
-		next := scopeCodexAccountIdentityValue(account, apiKeyID, "session", raw)
+		kind := "prompt-cache"
+		if strings.TrimSpace(originalBodySessionID) != "" && raw == originalBodySessionID {
+			kind = "session"
+		}
+		next := scopeCodexAccountIdentityValue(account, apiKeyID, kind, raw)
 		if next != raw {
 			requestBody["prompt_cache_key"] = next
 			changed = true
@@ -241,11 +206,13 @@ func applyCodexAccountIdentityClientMetadataRaw(body []byte, account *Account, a
 
 	next := body
 	changed := false
+	originalBodySessionID := ""
 	if cm := gjson.GetBytes(body, "client_metadata"); cm.IsObject() {
 		clientMetadata := map[string]any{}
 		if err := json.Unmarshal([]byte(cm.Raw), &clientMetadata); err != nil {
 			return body, false, fmt.Errorf("decode client_metadata for account identity: %w", err)
 		}
+		originalBodySessionID, _ = clientMetadata["session_id"].(string)
 		metadataChanged := applyCodexAccountIdentityFields(clientMetadata, account, apiKeyID)
 		if applyCodexAccountIdentityEmbeddedMetadata(clientMetadata, account, apiKeyID) {
 			metadataChanged = true
@@ -265,7 +232,11 @@ func applyCodexAccountIdentityClientMetadataRaw(body []byte, account *Account, a
 	}
 	if promptCacheKey := gjson.GetBytes(body, "prompt_cache_key"); promptCacheKey.Type == gjson.String && strings.TrimSpace(promptCacheKey.String()) != "" {
 		raw := promptCacheKey.String()
-		scoped := scopeCodexAccountIdentityValue(account, apiKeyID, "session", raw)
+		kind := "prompt-cache"
+		if strings.TrimSpace(originalBodySessionID) != "" && raw == originalBodySessionID {
+			kind = "session"
+		}
+		scoped := scopeCodexAccountIdentityValue(account, apiKeyID, kind, raw)
 		if scoped != raw {
 			rewritten, err := sjson.SetBytes(next, "prompt_cache_key", scoped)
 			if err != nil {

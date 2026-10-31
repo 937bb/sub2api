@@ -12,7 +12,6 @@ import (
 	"unsafe"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/servertiming"
-	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/imroc/req/v3"
 	"github.com/stretchr/testify/require"
 )
@@ -86,7 +85,7 @@ func TestGetSharedReqClient_ImpersonateAndProxy(t *testing.T) {
 	require.NoError(t, err)
 
 	require.NotNil(t, client)
-	require.Equal(t, "http://proxy.local:8080|4s|true|false|false", buildReqClientKey(opts))
+	require.Equal(t, "http://proxy.local:8080|4s|true|false", buildReqClientKey(opts))
 }
 
 func TestGetSharedReqClient_InvalidProxyURL(t *testing.T) {
@@ -116,24 +115,6 @@ func TestCreateOpenAIReqClient_Timeout120Seconds(t *testing.T) {
 	client, err := createOpenAIReqClient("http://proxy.local:8080")
 	require.NoError(t, err)
 	require.Equal(t, 120*time.Second, client.GetClient().Timeout)
-}
-
-func TestCreateOpenAIReqClient_CodexMacOSSeparatesTransportCache(t *testing.T) {
-	sharedReqClients = sync.Map{}
-	service.SetCodexMacOSFingerprintConfig(false, "", "")
-	legacy, err := createOpenAIReqClient("")
-	require.NoError(t, err)
-
-	service.SetCodexMacOSFingerprintConfig(true, "26.6.2", "26.1013.40934")
-	t.Cleanup(func() { service.SetCodexMacOSFingerprintConfig(false, "", "") })
-	macOS, err := createOpenAIReqClient("")
-	require.NoError(t, err)
-
-	require.NotSame(t, legacy, macOS)
-	require.NotEqual(t,
-		buildReqClientKey(reqClientOptions{Timeout: 120 * time.Second}),
-		buildReqClientKey(reqClientOptions{Timeout: 120 * time.Second, CodexMacOS: true}),
-	)
 }
 
 func TestCreateGeminiReqClient_ForceHTTP2Disabled(t *testing.T) {

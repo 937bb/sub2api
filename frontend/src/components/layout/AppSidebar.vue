@@ -273,7 +273,7 @@ function sectionForPath(path: string): SectionId {
   if (/^\/(admin\/)?(dashboard|ops|usage|monitor)(\/|$)/.test(path)) return 'overview'
   if (/^\/admin\/(users|announcements|affiliates)(\/|$)/.test(path)) return 'customers'
   if (/^\/(admin\/)?(orders|subscriptions|purchase|redeem|promo-codes)(\/|$)/.test(path)) return 'billing'
-  if (/^\/admin\/(distillation-monitor|security-audit|risk-control|prompt-audit|audit-logs)(\/|$)/.test(path)) return 'security'
+  if (/^\/admin\/(security-audit|risk-control|prompt-audit|audit-logs)(\/|$)/.test(path)) return 'security'
   if (/^\/(admin\/)?(accounts|groups|channels|proxies|keys|batch-image|available-channels)(\/|$)/.test(path)) return 'gateway'
   return 'workspace'
 }
@@ -819,7 +819,6 @@ const adminNavItems = computed((): NavItem[] => {
     { path: '/admin/plugins', label: t('nav.plugins'), icon: PluginIcon, featureFlag: flagPluginManagement },
     { path: '/admin/announcements', label: t('nav.announcements'), icon: BellIcon },
     { path: '/admin/proxies', label: t('nav.proxies'), icon: ServerIcon },
-    { path: '/admin/distillation-monitor', label: t('nav.distillationMonitor'), icon: ShieldIcon },
     {
       path: '/admin/security-audit',
       label: t('nav.securityAudit'),

@@ -76,9 +76,6 @@
                   t('modelPlaza.table.timePricingWeekdays')
                 }}</span>
                 {{ formatTimeWindow(period) }}
-                <span v-if="m.time_pricing?.excluded_dates?.length" class="ml-1 font-sans">
-                  {{ t('modelPlaza.table.timePricingDateExceptions') }}
-                </span>
               </span>
               <span
                 v-if="platform && m.platform !== platform"
@@ -489,9 +486,6 @@ function timePricingRowHint(m: PlazaModel): string {
     ? 'modelPlaza.table.timePricingRowHintWeekdays'
     : 'modelPlaza.table.timePricingRowHint'
   let hint = t(key, { timezone: m.time_pricing?.timezone })
-  if (m.time_pricing?.excluded_dates?.length) {
-    hint += ' ' + t('modelPlaza.table.timePricingExcludedDates', { dates: m.time_pricing.excluded_dates.join(', ') })
-  }
   if (props.peakWindow) {
     hint += t('modelPlaza.table.timePricingRowHintPeak', {
       window: props.peakWindow,

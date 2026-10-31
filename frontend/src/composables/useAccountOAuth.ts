@@ -5,7 +5,6 @@ import { adminAPI } from '@/api/admin'
 export type AddMethod = 'oauth' | 'setup-token'
 export type AuthInputMethod =
   | 'manual'
-  | 'siwc'
   | 'cookie'
   | 'refresh_token'
   | 'mobile_refresh_token'

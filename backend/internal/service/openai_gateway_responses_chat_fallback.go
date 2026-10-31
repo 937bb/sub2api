@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -477,9 +478,13 @@ func requiresDeepSeekChatReasoning(account *Account, body []byte) bool {
 	return isDeepSeekCatalogModel(gjson.GetBytes(body, "model").String())
 }
 
-// ensureDeepSeekChatReasoningPlaceholders fills empty assistant reasoning with
-// the single space required by DeepSeek thinking mode. Real reasoning restored
-// from summaries or the cache is preserved, as are unrelated upstream requests.
+// ensureDeepSeekChatReasoningPlaceholders 给缺 reasoning_content 的 assistant
+// 消息补单个空格占位。DeepSeek thinking mode 要求历史里每条产生过思维的
+// assistant 消息都回传该字段，否则 400
+// "The `reasoning_content` in the thinking mode must be passed back to the API"。
+//
+// 桥接会从 summary / 缓存回注真实明文；这里只填仍为空的缺口，不覆盖已有内容。
+// 判定见 requiresDeepSeekChatReasoning，不命中的上游原样返回（字节不变）。
 func ensureDeepSeekChatReasoningPlaceholders(account *Account, body []byte) []byte {
 	if !requiresDeepSeekChatReasoning(account, body) {
 		return body
@@ -488,34 +493,24 @@ func ensureDeepSeekChatReasoningPlaceholders(account *Account, body []byte) []by
 	if !messages.IsArray() {
 		return body
 	}
-	var updated []byte
-	offset := 0
-	failed := false
-	messages.ForEach(func(_, msg gjson.Result) bool {
+	updated := body
+	changed := false
+	for i, msg := range messages.Array() {
 		if strings.TrimSpace(msg.Get("role").String()) != "assistant" {
-			return true
+			continue
 		}
 		if msg.Get("reasoning_content").String() != "" {
-			return true
+			continue
 		}
-		// Patch only this message. Rewriting messages.N against the full body for
-		// every assistant repeatedly scans and copies long conversation histories.
-		next, err := sjson.Set(msg.Raw, "reasoning_content", deepSeekChatReasoningPlaceholderText)
-		end := msg.Index + len(msg.Raw)
-		if err != nil || msg.Index < offset || end > len(body) {
-			failed = true
-			return false
+		next, err := sjson.SetBytes(updated, "messages."+strconv.Itoa(i)+".reasoning_content", deepSeekChatReasoningPlaceholderText)
+		if err != nil {
+			return body
 		}
-		if updated == nil {
-			updated = make([]byte, 0, len(body)+256)
-		}
-		updated = append(updated, body[offset:msg.Index]...)
-		updated = append(updated, next...)
-		offset = end
-		return true
-	})
-	if failed || updated == nil {
+		updated = next
+		changed = true
+	}
+	if !changed {
 		return body
 	}
-	return append(updated, body[offset:]...)
+	return updated
 }

@@ -47,7 +47,6 @@ export interface TimePricingPeriodFormEntry {
 export interface TimePricingFormEntry {
   timezone: string
   weekdays_only: boolean
-  excluded_dates?: string
   periods: TimePricingPeriodFormEntry[]
 }
 
@@ -80,7 +79,6 @@ export function apiTimePricingToForm(value: ChannelTimePricing | null | undefine
   return {
     timezone: value.timezone || DEFAULT_TIME_PRICING_TIMEZONE,
     weekdays_only: value.weekdays_only === true,
-    ...(value.excluded_dates?.length ? { excluded_dates: value.excluded_dates.join('\n') } : {}),
     periods: (value.periods || []).map(period => ({
       start_time: LEGACY_CLOCK_TIME.test(period.start_time) ? `${period.start_time}:00` : period.start_time,
       end_time: LEGACY_CLOCK_TIME.test(period.end_time) ? `${period.end_time}:00` : period.end_time,
@@ -95,7 +93,6 @@ export function formTimePricingToAPI(value: TimePricingFormEntry | null | undefi
   return {
     timezone,
     weekdays_only: value.weekdays_only === true,
-    ...(value.excluded_dates?.trim() ? { excluded_dates: parseExcludedDates(value.excluded_dates) } : {}),
     periods: value.periods.map(period => ({
       start_time: period.start_time,
       end_time: period.end_time,
@@ -104,9 +101,6 @@ export function formTimePricingToAPI(value: TimePricingFormEntry | null | undefi
   }
 }
 
-function parseExcludedDates(value: string): string[] {
-  return [...new Set(value.split(/[\s,，]+/).filter(Boolean))].sort()
-}
 
 function timeToSeconds(time: string, isEnd: boolean): number {
   if (isEnd && time === '00:00:00') return 24 * 60 * 60
@@ -120,12 +114,6 @@ function timePricingValidationMessage(t: TranslateFn, key: string): string {
 
 export function validateTimePricing(value: TimePricingFormEntry, t: TranslateFn): string | null {
   if (!value?.periods?.length) return null
-  const dates = parseExcludedDates(value.excluded_dates || '')
-  if (dates.length > 3660 || dates.some(date => {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date.startsWith('0000-')) return true
-    const parsed = new Date(`${date}T00:00:00Z`)
-    return Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date
-  })) return timePricingValidationMessage(t, 'excludedDates')
 
   if (typeof value.timezone !== 'string' || value.timezone.trim() === '') {
     return timePricingValidationMessage(t, 'timezone')

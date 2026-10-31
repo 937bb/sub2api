@@ -9,7 +9,6 @@ import (
 	"time"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
@@ -68,66 +67,6 @@ func TestBuildContentModerationLogWhere_BlockedIncludesAllBlockActions(t *testin
 	require.NotContains(t, sql, "l.action = 'block'")
 }
 
-func TestBuildContentModerationLogWhere_FiltersProvider(t *testing.T) {
-	where, args := buildContentModerationLogWhere(service.ContentModerationLogFilter{Provider: "distillation_monitor"})
-
-	require.Contains(t, strings.Join(where, " AND "), "l.provider = $1")
-	require.Equal(t, []any{"distillation_monitor"}, args)
-}
-
-func TestContentModerationRepositoryListDistillationCandidatesNormalizesRouteSuffix(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	require.NoError(t, err)
-	defer func() { _ = db.Close() }()
-	start := time.Now().Add(-15 * time.Minute)
-	end := time.Now()
-	mock.ExpectQuery(`REGEXP_REPLACE\([\s\S]*s2a-route`).
-		WithArgs(sqlmock.AnyArg(), start, end, 100, int64(300_000)).
-		WillReturnRows(sqlmock.NewRows([]string{
-			"user_id", "email", "group_id", "group_name", "dominant_model", "request_count",
-			"input_tokens", "output_tokens", "cache_read_tokens", "non_stream_count", "missing_sessions",
-			"distinct_sessions", "distinct_api_keys", "distinct_ips", "distinct_user_agents", "explicit_signals",
-			"first_request_at", "last_request_at",
-		}))
-	repo := NewContentModerationRepository(db).(service.DistillationMonitorRepository)
-
-	items, err := repo.ListDistillationCandidates(context.Background(), []int64{56}, start, end, 100, 300_000)
-
-	require.NoError(t, err)
-	require.Empty(t, items)
-	require.NoError(t, mock.ExpectationsWereMet())
-}
-
-func TestContentModerationRepositoryListDistillationAssessmentsIncludesLowScores(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	require.NoError(t, err)
-	defer func() { _ = db.Close() }()
-	now := time.Now()
-	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM distillation_assessments`).
-		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
-	mock.ExpectQuery(`FROM distillation_assessments da`).
-		WithArgs(20, 0).
-		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "user_id", "email", "status", "group_id", "group_name", "dominant_model",
-			"window_start", "window_end", "score", "evidence_classes", "mode", "metrics", "auto_disabled", "created_at",
-		}).AddRow(
-			9, 1156, "user@example.com", "active", 56, "G", "gpt-test",
-			now.Add(-15*time.Minute), now, 53, 2, "observe", `{"requests":5605}`, false, now,
-		))
-	repo := NewContentModerationRepository(db).(service.DistillationMonitorRepository)
-
-	items, page, err := repo.ListDistillationAssessments(context.Background(), service.DistillationAssessmentFilter{
-		Pagination: pagination.PaginationParams{Page: 1, PageSize: 20},
-	})
-
-	require.NoError(t, err)
-	require.Len(t, items, 1)
-	require.Equal(t, 53, items[0].Score)
-	require.Equal(t, float64(5605), items[0].Metrics["requests"])
-	require.Equal(t, int64(1), page.Total)
-	require.NoError(t, mock.ExpectationsWereMet())
-}
-
 func TestContentModerationRepositoryCountFlaggedByUserSince_ExcludesHashBlock(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
@@ -176,43 +115,5 @@ func TestContentModerationRepositoryCountFlaggedByUserSince_ExcludesCyberLogOnly
 	count, err := repo.CountFlaggedByUserSince(context.Background(), 12, since, false)
 	require.NoError(t, err)
 	require.Zero(t, count)
-	require.NoError(t, mock.ExpectationsWereMet())
-}
-
-func TestContentModerationRepositoryCountFlaggedByUserSince_ExcludesDistillationLogs(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	require.NoError(t, err)
-	defer func() { _ = db.Close() }()
-	repo := NewContentModerationRepository(db)
-	since := time.Now().Add(-time.Hour)
-	mock.ExpectQuery(regexp.QuoteMeta("AND mode <> 'distillation_observe'\n  AND mode <> 'distillation_enforce'")).
-		WithArgs(int64(12), since, false).
-		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
-
-	count, err := repo.CountFlaggedByUserSince(context.Background(), 12, since, false)
-
-	require.NoError(t, err)
-	require.Zero(t, count)
-	require.NoError(t, mock.ExpectationsWereMet())
-}
-
-func TestContentModerationRepositoryCountsOnlyAdjacentEnforceAssessments(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	require.NoError(t, err)
-	defer func() { _ = db.Close() }()
-	repo := NewContentModerationRepository(db).(service.DistillationMonitorRepository)
-	window := 15 * time.Minute
-	windowEnd := time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)
-	mock.ExpectQuery("SELECT window_end[\\s\\S]*mode = 'enforce'").
-		WithArgs(int64(7), int64(8), windowEnd, 85, 3, 3).
-		WillReturnRows(sqlmock.NewRows([]string{"window_end"}).
-			AddRow(windowEnd).
-			AddRow(windowEnd.Add(-window)).
-			AddRow(windowEnd.Add(-3 * window)))
-
-	count, err := repo.CountConsecutiveDistillationAssessments(context.Background(), 7, 8, windowEnd, window, 85, 3, 3)
-
-	require.NoError(t, err)
-	require.Equal(t, 2, count)
 	require.NoError(t, mock.ExpectationsWereMet())
 }

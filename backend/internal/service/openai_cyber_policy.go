@@ -2,7 +2,6 @@ package service
 
 import (
 	"errors"
-	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -86,26 +85,6 @@ func detectOpenAICyberPolicy(payload []byte) (bool, string, string) {
 		msg = gjson.GetBytes(payload, "response.error.message").String()
 	}
 	return true, "cyber_policy", strings.TrimSpace(msg)
-}
-
-// detectOpenAIHTTPCyberPolicy also recognizes the provider's structured 403
-// response that predates the cyber_policy error code. Restrict the fallback to
-// HTTP 403 and structured message fields so echoed request text cannot trigger
-// the classification.
-func detectOpenAIHTTPCyberPolicy(statusCode int, payload []byte) (bool, string, string) {
-	if hit, code, message := detectOpenAICyberPolicy(payload); hit {
-		return true, code, message
-	}
-	if statusCode != http.StatusForbidden || !gjson.ValidBytes(payload) {
-		return false, "", ""
-	}
-	for _, path := range []string{"error.message", "response.error.message"} {
-		message := strings.TrimSpace(gjson.GetBytes(payload, path).String())
-		if strings.Contains(strings.ToLower(message), "flagged for possible cybersecurity risk") {
-			return true, "cyber_policy", message
-		}
-	}
-	return false, "", ""
 }
 
 func markOpenAICyberPolicyEvent(c *gin.Context, payload []byte, upstreamStatus int, usage *OpenAIUsage) bool {

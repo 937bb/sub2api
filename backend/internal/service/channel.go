@@ -110,12 +110,11 @@ type ChannelModelPricing struct {
 	UpdatedAt                  time.Time           `json:"updated_at,omitempty"`
 }
 
-// ChannelTimePricing configures time-based channel price multipliers.
+// ChannelTimePricing 渠道模型定价的分时倍率配置。
 type ChannelTimePricing struct {
-	Timezone      string                     `json:"timezone"`
-	WeekdaysOnly  bool                       `json:"weekdays_only,omitempty"`
-	ExcludedDates []string                   `json:"excluded_dates,omitempty"`
-	Periods       []ChannelTimePricingPeriod `json:"periods"`
+	Timezone     string                     `json:"timezone"`
+	WeekdaysOnly bool                       `json:"weekdays_only,omitempty"`
+	Periods      []ChannelTimePricingPeriod `json:"periods"`
 }
 
 // ChannelTimePricingPeriod 是秒级的左闭右开分时倍率区间，并兼容历史 HH:mm 数据。
@@ -224,9 +223,8 @@ func (p ChannelModelPricing) Clone() ChannelModelPricing {
 	}
 	if p.TimePricing != nil {
 		cp.TimePricing = &ChannelTimePricing{
-			Timezone:      p.TimePricing.Timezone,
-			WeekdaysOnly:  p.TimePricing.WeekdaysOnly,
-			ExcludedDates: append([]string(nil), p.TimePricing.ExcludedDates...),
+			Timezone:     p.TimePricing.Timezone,
+			WeekdaysOnly: p.TimePricing.WeekdaysOnly,
 		}
 		if p.TimePricing.Periods != nil {
 			cp.TimePricing.Periods = append([]ChannelTimePricingPeriod(nil), p.TimePricing.Periods...)

@@ -57,7 +57,6 @@ type contentModerationConfigRequest struct {
 	BlockedKeywords                *[]string                             `json:"blocked_keywords"`
 	KeywordBlockingMode            *string                               `json:"keyword_blocking_mode"`
 	ModelFilter                    *service.ContentModerationModelFilter `json:"model_filter"`
-	DistillationMonitor            *service.DistillationMonitorConfig    `json:"distillation_monitor"`
 }
 
 type contentModerationAPIKeyTestRequest struct {
@@ -125,7 +124,6 @@ func (h *ContentModerationHandler) UpdateConfig(c *gin.Context) {
 		BlockedKeywords:                req.BlockedKeywords,
 		KeywordBlockingMode:            req.KeywordBlockingMode,
 		ModelFilter:                    req.ModelFilter,
-		DistillationMonitor:            req.DistillationMonitor,
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -176,7 +174,6 @@ func (h *ContentModerationHandler) ListLogs(c *gin.Context) {
 		},
 		Result:   c.Query("result"),
 		Endpoint: c.Query("endpoint"),
-		Provider: c.Query("provider"),
 		Search:   c.Query("search"),
 	}
 	if raw := strings.TrimSpace(c.Query("group_id")); raw != "" {
@@ -207,22 +204,6 @@ func (h *ContentModerationHandler) ListLogs(c *gin.Context) {
 		filter.To = &t
 	}
 	items, pageResult, err := h.service.ListLogs(c.Request.Context(), filter)
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-	response.Paginated(c, items, pageResult.Total, pageResult.Page, pageResult.PageSize)
-}
-
-func (h *ContentModerationHandler) ListDistillationAssessments(c *gin.Context) {
-	page, pageSize := response.ParsePagination(c)
-	items, pageResult, err := h.service.ListDistillationAssessments(c.Request.Context(), service.DistillationAssessmentFilter{
-		Pagination: pagination.PaginationParams{
-			Page:      page,
-			PageSize:  pageSize,
-			SortOrder: pagination.SortOrderDesc,
-		},
-	})
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return

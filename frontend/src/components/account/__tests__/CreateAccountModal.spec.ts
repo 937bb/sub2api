@@ -42,8 +42,6 @@ vi.mock('@/stores/auth', () => ({
   }),
 }))
 
-vi.mock('@/api/admin/siwc', () => ({ startSIWCAuthorization: vi.fn(), createSIWCAccount: vi.fn() }))
-
 vi.mock('@/api/admin', () => ({
   adminAPI: {
     accounts: {
@@ -77,9 +75,6 @@ vi.mock('vue-i18n', async () => {
 })
 
 import CreateAccountModal from '../CreateAccountModal.vue'
-import OAuthAuthorizationFlow from '../OAuthAuthorizationFlow.vue'
-import SIWCAccountModal from '../SIWCAccountModal.vue'
-import { startSIWCAuthorization, createSIWCAccount } from '@/api/admin/siwc'
 
 const BaseDialogStub = defineComponent({
   name: 'BaseDialog',
@@ -224,57 +219,6 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
   })
 
   afterEach(() => vi.useRealTimers())
-
-  it('authorizes SIWC inside the OpenAI OAuth step using the dedicated account endpoint', async () => {
-    localStorage.clear()
-    vi.mocked(startSIWCAuthorization).mockResolvedValue({ auth_url: 'https://auth.openai.com/api/accounts/authorize?state=siwc', session_id: 'siwc-session', host_id: 'urn:uuid:test-host' })
-    vi.mocked(createSIWCAccount).mockReset().mockResolvedValue({ id: 77 } as never)
-    const wrapper = mountModal([], true)
-    await selectButtonByText(wrapper, 'OpenAI')
-    expect(wrapper.find('[data-testid="openai-siwc"]').exists()).toBe(false)
-    await wrapper.get('[data-tour="account-form-name"]').setValue('SIWC account')
-    await wrapper.get('form#create-account-form').trigger('submit.prevent')
-    await wrapper.get('[data-testid="openai-siwc-auth"]').setValue(true)
-    const authorization = wrapper.getComponent(SIWCAccountModal)
-    expect(authorization.props('embedded')).toBe(true)
-    expect(authorization.findComponent(BaseDialogStub).exists()).toBe(false)
-    expect(authorization.find('select').exists()).toBe(false)
-    expect(wrapper.text()).not.toContain('admin.accounts.oauth.completeAuth')
-    await authorization.get('button').trigger('click')
-    await flushPromises()
-    const callback = 'http://127.0.0.1:1455/auth/callback?code=test&state=siwc&client_id=oaiapp_test'
-    await authorization.get('textarea').setValue(callback)
-    expect(authorization.get<HTMLTextAreaElement>('textarea').element.value).toBe(callback)
-    await authorization.get('form').trigger('submit')
-    await flushPromises()
-    expect(createSIWCAccount).toHaveBeenCalledWith(expect.objectContaining({ session_id: 'siwc-session', callback_url: callback, name: 'SIWC account', concurrency: 10, group_ids: [] }))
-    expect(createAccountMock).not.toHaveBeenCalled()
-    expect(wrapper.emitted('created')).toHaveLength(1)
-    expect(wrapper.emitted('close')).toHaveLength(1)
-  })
-
-  it('locks navigation while SIWC starts and discards its form when switching authorization methods', async () => {
-    let resolveStart!: (value: { auth_url: string; session_id: string; host_id: string }) => void
-    vi.mocked(startSIWCAuthorization).mockImplementationOnce(() => new Promise(resolve => { resolveStart = resolve }))
-    const wrapper = mountModal([], true)
-    await selectButtonByText(wrapper, 'OpenAI')
-    await wrapper.get('[data-tour="account-form-name"]').setValue('SIWC account')
-    await wrapper.get('form#create-account-form').trigger('submit.prevent')
-    await wrapper.get('[data-testid="openai-siwc-auth"]').setValue(true)
-    await wrapper.getComponent(SIWCAccountModal).get('button').trigger('click')
-    expect(wrapper.getComponent(OAuthAuthorizationFlow).get('fieldset').attributes('disabled')).toBeDefined()
-    const back = wrapper.findAll('button').find(button => button.text() === 'common.back')!
-    expect(back.attributes('disabled')).toBeDefined()
-    wrapper.getComponent(BaseDialogStub).vm.$emit('close')
-    expect(wrapper.emitted('close')).toBeUndefined()
-    resolveStart({ auth_url: 'https://auth.openai.com/api/accounts/authorize', session_id: 'pending-session', host_id: 'urn:uuid:test-host' })
-    await flushPromises()
-    await wrapper.get('input[value="manual"]').setValue(true)
-    expect(wrapper.findComponent(SIWCAccountModal).exists()).toBe(false)
-    expect(wrapper.text()).toContain('admin.accounts.oauth.completeAuth')
-    await wrapper.get('[data-testid="openai-siwc-auth"]').setValue(true)
-    expect(wrapper.getComponent(SIWCAccountModal).find('textarea').exists()).toBe(false)
-  })
 
   it('sets month and year expiry presets without submitting the account form', async () => {
     vi.useFakeTimers({ toFake: ['Date'] })

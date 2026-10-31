@@ -17,17 +17,7 @@ const (
 	maxUpstreamRequestIDHeaderNameLen = 64
 	// maxUsageUpstreamRequestIDLen 与 usage_logs.upstream_request_id VARCHAR(128) 对齐。
 	maxUsageUpstreamRequestIDLen = 128
-	maxUsageTraceIDLen           = 128
 )
-
-var defaultUpstreamRequestIDHeaders = [...]string{
-	"X-Request-Id",
-	"Request-Id",
-	"X-Oneapi-Request-Id",
-	"X-Goog-Request-Id",
-	"X-Ms-Request-Id",
-	"X-Amzn-Requestid",
-}
 
 // UpstreamRequestIDHeaderName 返回账户指定的上游请求标识头名，未指定时为空串。
 func UpstreamRequestIDHeaderName(account *Account) string {
@@ -37,24 +27,17 @@ func UpstreamRequestIDHeaderName(account *Account) string {
 	return strings.TrimSpace(account.GetExtraString(AccountExtraUpstreamRequestIDHeader))
 }
 
-// UpstreamRequestIDFromHeaders reads only direct upstream response headers.
-// An explicitly configured account header wins; otherwise common provider and
-// proxy request-id headers are checked in a deterministic order.
+// UpstreamRequestIDFromHeaders 从直接上游的响应头解析请求标识。
+// 只读账户指定的头；账户未指定头名时恒为空串。
 func UpstreamRequestIDFromHeaders(account *Account, h http.Header) string {
 	if len(h) == 0 {
 		return ""
 	}
-	if name := UpstreamRequestIDHeaderName(account); name != "" {
-		if id := strings.TrimSpace(h.Get(name)); id != "" {
-			return id
-		}
+	name := UpstreamRequestIDHeaderName(account)
+	if name == "" {
+		return ""
 	}
-	for _, name := range defaultUpstreamRequestIDHeaders {
-		if id := strings.TrimSpace(h.Get(name)); id != "" {
-			return id
-		}
-	}
-	return ""
+	return strings.TrimSpace(h.Get(name))
 }
 
 // usageUpstreamRequestIDPtr 生成落库到 usage_logs.upstream_request_id 的值。
@@ -67,28 +50,16 @@ func usageUpstreamRequestIDPtr(account *Account, h http.Header, wsMode bool) *st
 	if id == "" {
 		return nil
 	}
-	return usageTraceIDPtrWithLimit(id, maxUsageUpstreamRequestIDLen)
-}
-
-func usageTraceIDPtr(value string) *string {
-	return usageTraceIDPtrWithLimit(value, maxUsageTraceIDLen)
-}
-
-func usageTraceIDPtrWithLimit(value string, limit int) *string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return nil
-	}
-	if len(value) > limit {
-		value = value[:limit]
-		for len(value) > 0 && !utf8.ValidString(value) {
-			value = value[:len(value)-1]
+	if len(id) > maxUsageUpstreamRequestIDLen {
+		id = id[:maxUsageUpstreamRequestIDLen]
+		for len(id) > 0 && !utf8.ValidString(id) {
+			id = id[:len(id)-1]
 		}
 	}
-	if value == "" {
+	if id == "" {
 		return nil
 	}
-	return &value
+	return &id
 }
 
 // ValidateUpstreamRequestIDHeaderExtra 校验并规范化 extra 中的上游请求标识头名：

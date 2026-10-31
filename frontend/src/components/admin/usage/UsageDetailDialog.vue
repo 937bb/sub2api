@@ -231,8 +231,6 @@ const traceItems = computed(() => {
   return [
     { label: t('admin.usage.requestId'), value: log.request_id },
     { label: t('admin.usage.upstreamRequestId'), value: log.upstream_request_id || '' },
-    { label: t('admin.usage.upstreamResponseId'), value: log.upstream_response_id || '' },
-    { label: t('admin.usage.previousResponseId'), value: log.previous_response_id || '' },
     { label: t('admin.usage.detail.channelId'), value: log.channel_id?.toString() || '' },
     { label: t('admin.usage.detail.accountId'), value: log.account_id?.toString() || '' },
     { label: t('admin.usage.detail.apiKeyId'), value: log.api_key_id?.toString() || '' },

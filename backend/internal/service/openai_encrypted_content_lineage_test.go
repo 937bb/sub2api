@@ -15,9 +15,6 @@ func TestCollectOpenAIEncryptedContentDigestsRaw(t *testing.T) {
 	digests := collectOpenAIEncryptedContentDigestsRaw([]byte(`{"input":[
 		{"type":"reasoning","encrypted_content":"cipher-a"},
 		{"type":"compaction","encrypted_content":"cipher-b"},
-		{"type":"function_call_output","call_id":"call_1","output":[{"type":"input_text","text":"keep"},{"type":"encrypted_content","encrypted_content":"cipher-c"}]},
-		{"type":"custom_tool_call_output","call_id":"call_2","output":{"encrypted_content":"cipher-d"}},
-		{"type":"agent_message","id":"amsg_stale","content":[{"type":"input_text","text":"header"},{"type":"encrypted_content","encrypted_content":"cipher-e"}]},
 		{"type":"input_text","text":"hello"},
 		{"type":"reasoning"},
 		{"type":"message","encrypted_content":"cipher-alien"}
@@ -26,8 +23,6 @@ func TestCollectOpenAIEncryptedContentDigestsRaw(t *testing.T) {
 	require.Equal(t, []string{
 		openAIEncryptedContentDigest("cipher-a"),
 		openAIEncryptedContentDigest("cipher-b"),
-		openAIEncryptedContentDigest("cipher-c"),
-		openAIEncryptedContentDigest("cipher-d"),
 	}, digests)
 
 	require.Nil(t, collectOpenAIEncryptedContentDigestsRaw([]byte(`{"model":"gpt-5"}`)))
@@ -91,87 +86,6 @@ func TestStripOpenAIInvalidEncryptedContentItems(t *testing.T) {
 		}
 		require.Zero(t, stripOpenAIInvalidEncryptedContentItems(reqBody, invalid))
 	})
-
-	t.Run("tool_outputs_replace_only_matching_ciphertext", func(t *testing.T) {
-		t.Parallel()
-		reqBody := map[string]any{
-			"input": []any{
-				map[string]any{
-					"type": "function_call_output", "call_id": "call_1",
-					"output": []any{
-						map[string]any{"type": "input_text", "text": "keep", "nonce": json.Number("9007199254740993")},
-						map[string]any{"type": "encrypted_content", "encrypted_content": "stale-cipher"},
-						map[string]any{"type": "input_image", "image_url": "data:image/png;base64,AA=="},
-						map[string]any{"type": "encrypted_content", "encrypted_content": "fresh-cipher"},
-					},
-				},
-				map[string]any{
-					"type": "custom_tool_call_output", "call_id": "call_2",
-					"output": map[string]any{"encrypted_content": "stale-cipher"},
-				},
-			},
-		}
-		stripped := stripOpenAIInvalidEncryptedContentItems(reqBody, invalid)
-		require.Equal(t, 2, stripped)
-		input := reqBody["input"].([]any)
-		functionOutput := input[0].(map[string]any)
-		require.Equal(t, "call_1", functionOutput["call_id"])
-		parts := functionOutput["output"].([]any)
-		require.Equal(t, "keep", parts[0].(map[string]any)["text"])
-		require.Equal(t, json.Number("9007199254740993"), parts[0].(map[string]any)["nonce"])
-		require.Equal(t, openAIEncryptedToolOutputOmitted, parts[1].(map[string]any)["text"])
-		require.Equal(t, "data:image/png;base64,AA==", parts[2].(map[string]any)["image_url"])
-		require.Equal(t, "fresh-cipher", parts[3].(map[string]any)["encrypted_content"])
-		customOutput := input[1].(map[string]any)
-		require.Equal(t, "call_2", customOutput["call_id"])
-		require.Equal(t, openAIEncryptedToolOutputOmitted, customOutput["output"].(map[string]any)["text"])
-	})
-
-	t.Run("agent_message_with_matching_ciphertext_is_removed", func(t *testing.T) {
-		t.Parallel()
-		reqBody := map[string]any{
-			"input": []any{
-				map[string]any{"type": "agent_message", "id": "amsg_stale", "content": []any{
-					map[string]any{"type": "input_text", "text": "header"},
-					map[string]any{"type": "encrypted_content", "encrypted_content": "stale-cipher"},
-				}},
-				map[string]any{"type": "agent_message", "id": "amsg_fresh", "content": []any{
-					map[string]any{"type": "encrypted_content", "encrypted_content": "fresh-cipher"},
-				}},
-				map[string]any{"type": "message", "role": "user", "content": "continue"},
-			},
-		}
-		stripped := stripOpenAIInvalidEncryptedContentItems(reqBody, invalid)
-		require.Equal(t, 1, stripped)
-		input := reqBody["input"].([]any)
-		require.Len(t, input, 2)
-		require.Equal(t, "amsg_fresh", input[0].(map[string]any)["id"])
-	})
-
-	t.Run("named_agent_reference_digest_is_removed", func(t *testing.T) {
-		t.Parallel()
-		reqBody := map[string]any{"input": []any{
-			map[string]any{"type": "item_reference", "id": "amsg_stale"},
-			map[string]any{"type": "message", "role": "user", "content": "continue"},
-		}}
-		referenceInvalid := map[string]struct{}{openAIEncryptedAgentItemDigest("amsg_stale"): {}}
-		require.Equal(t, 1, stripOpenAIInvalidEncryptedContentItems(reqBody, referenceInvalid))
-		input := reqBody["input"].([]any)
-		require.Len(t, input, 1)
-		require.Equal(t, "message", input[0].(map[string]any)["type"])
-	})
-}
-
-func TestCollectOpenAIRejectedAgentItemDigestsRaw(t *testing.T) {
-	t.Parallel()
-	payload := []byte(`{"input":[{"type":"agent_message","id":"amsg_stale","content":[{"type":"encrypted_content","encrypted_content":"stale-cipher"}]},{"type":"agent_message","id":"amsg_keep","content":[{"type":"encrypted_content","encrypted_content":"valid-cipher"}]},{"type":"item_reference","id":"msg_other"}]}`)
-	errorBody := []byte(`{"error":{"code":"invalid_encrypted_content","message":"The encrypted content for item amsg_stale could not be verified"}}`)
-	require.Equal(t, []string{
-		openAIEncryptedAgentItemDigest("amsg_stale"),
-		openAIEncryptedContentDigest("stale-cipher"),
-		openAIEncryptedAgentItemDigest("amsg_keep"),
-		openAIEncryptedContentDigest("valid-cipher"),
-	}, collectOpenAIRejectedAgentItemDigestsRaw(payload, errorBody))
 }
 
 func TestStripOpenAIInvalidEncryptedContentFromReplayItems(t *testing.T) {
@@ -207,20 +121,6 @@ func TestStripOpenAIInvalidEncryptedContentFromReplayItems(t *testing.T) {
 		next, stripped := stripOpenAIInvalidEncryptedContentFromReplayItems(items, invalid)
 		require.Zero(t, stripped)
 		require.Same(t, &items[0][0], &next[0][0])
-	})
-
-	t.Run("rewrites_nested_tool_output_ciphertext", func(t *testing.T) {
-		t.Parallel()
-		items := []json.RawMessage{
-			json.RawMessage(`{"type":"function_call_output","call_id":"call_1","output":[{"type":"input_text","text":"keep"},{"type":"encrypted_content","encrypted_content":"stale-cipher"}]}`),
-		}
-		next, stripped := stripOpenAIInvalidEncryptedContentFromReplayItems(items, invalid)
-		require.Equal(t, 1, stripped)
-		require.Len(t, next, 1)
-		require.Contains(t, string(next[0]), openAIEncryptedToolOutputOmitted)
-		require.Contains(t, string(next[0]), `"call_id":"call_1"`)
-		require.Contains(t, string(next[0]), `"text":"keep"`)
-		require.NotContains(t, string(next[0]), "stale-cipher")
 	})
 }
 

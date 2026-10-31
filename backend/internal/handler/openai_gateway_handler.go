@@ -30,7 +30,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/tidwall/gjson"
-	"github.com/tidwall/sjson"
 	"go.uber.org/zap"
 )
 
@@ -663,7 +662,6 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	// 生图意图只影响能力路由与图片计费，不关门：混合 /v1/responses 请求的
 	// token 计费部分仍受利润门保护，独立图片/视频端点才在门外。
 	pricingCtx, pricingAt := h.gatewayService.WithOpenAIRequestPricingContext(c.Request.Context(), apiKey.GroupID)
-	pricingCtx = service.WithSIWCRequestCompatibility(pricingCtx, forwardBody)
 	c.Request = c.Request.WithContext(pricingCtx)
 
 	for {
@@ -844,7 +842,6 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 					APIKeyService:      h.apiKeyService,
 					QuotaPlatform:      quotaPlatform,
 					SessionID:          sessionID,
-					PreviousResponseID: previousResponseID,
 					ChannelUsageFields: clientRequestedUsageFields(c, channelMapping, reqModel, res.UpstreamModel),
 					PricingAt:          pricingAt,
 					CyberBlocked:       cyberBlocked,
@@ -2938,7 +2935,6 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		var requestPayloadHash string
 		var turnStartsMu sync.Mutex
 		turnStarts := make(map[int]time.Time, 4)
-		turnPreviousResponseIDs := map[int]string{1: previousResponseID}
 		recordTurnStart := func(turn int, startedAt time.Time) {
 			if turn <= 0 || startedAt.IsZero() {
 				return
@@ -2953,24 +2949,6 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			delete(turnStarts, turn)
 			turnStartsMu.Unlock()
 			return startedAt
-		}
-		recordTurnPreviousResponseID := func(turn int, payload []byte) {
-			if turn <= 0 {
-				return
-			}
-			value := strings.TrimSpace(gjson.GetBytes(payload, "previous_response_id").String())
-			turnStartsMu.Lock()
-			if _, recorded := turnPreviousResponseIDs[turn]; !recorded || value != "" {
-				turnPreviousResponseIDs[turn] = value
-			}
-			turnStartsMu.Unlock()
-		}
-		getTurnPreviousResponseID := func(turn int) string {
-			turnStartsMu.Lock()
-			value := turnPreviousResponseIDs[turn]
-			delete(turnPreviousResponseIDs, turn)
-			turnStartsMu.Unlock()
-			return value
 		}
 		// Passthrough rejects overlapping response.create frames, so one immutable
 		// turn-tagged slot preserves the exact mapping used for the in-flight request.
@@ -2996,7 +2974,6 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			ReasoningEffortMappings:     reasoningEffortMappings,
 			TurnStarted:                 recordTurnStart,
 			BeforeRequest: func(turn int, payload []byte, originalModel string) error {
-				recordTurnPreviousResponseID(turn, payload)
 				c.Set(securityAuditWSTurnContextKey, turn)
 				service.BeginOpsStreamTurn(c, turn)
 				setCyberTurnBody(turn, payload)
@@ -3112,7 +3089,6 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			},
 			AfterTurn: func(turn int, result *service.OpenAIForwardResult, turnErr error) {
 				turnStart := getTurnStart(turn)
-				turnPreviousResponseID := getTurnPreviousResponseID(turn)
 				cyberBlockBody := takeCyberTurnBody(turn)
 				// 每次 attempt 都清 cyber mark；failover 链结束前保留 recorded guard，
 				// 避免同一逻辑 turn 换号后重复落风控。CyberBlocked 必须在 submit 前
@@ -3205,7 +3181,6 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 						APIKeyService:      h.apiKeyService,
 						QuotaPlatform:      quotaPlatform,
 						SessionID:          sessionID,
-						PreviousResponseID: turnPreviousResponseID,
 						ChannelUsageFields: turnUsageFields,
 						PricingAt:          turnRecordPricingAt,
 						CyberBlocked:       cyberBlocked,
@@ -3609,43 +3584,6 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 	}
 	statusCode := failoverErr.StatusCode
 	responseBody := failoverErr.ResponseBody
-	if failoverErr.StrictOpenAIAPIKeyPassthrough && len(responseBody) > 0 {
-		upstreamMsg := service.SanitizeUpstreamErrorMessage(service.ExtractUpstreamErrorMessage(responseBody))
-		service.SetOpsUpstreamError(c, statusCode, upstreamMsg, "")
-		errType := strings.TrimSpace(gjson.GetBytes(responseBody, "error.type").String())
-		if service.StopOpenAICompactSSEKeepaliveCommitted(c) {
-			streamStarted = true
-		}
-		responseBody, errorObject, errType := normalizeStrictOpenAIErrorResponse(responseBody, statusCode, errType, upstreamMsg)
-		if !streamStarted {
-			contentType := strings.TrimSpace(failoverErr.ResponseHeaders.Get("Content-Type"))
-			if !strings.Contains(strings.ToLower(contentType), "json") {
-				contentType = "application/json; charset=utf-8"
-			}
-			c.Header("Content-Type", contentType)
-			c.Data(statusCode, contentType, responseBody)
-			return
-		}
-		service.MarkOpsStreamError(c, errType, upstreamMsg, statusCode)
-		if inboundIsResponses(c) {
-			if !gjson.GetBytes(errorObject, "code").Exists() {
-				errorObject, _ = sjson.SetBytes(errorObject, "code", mapResponsesErrorCode(errType, ""))
-			}
-			writeResponsesFailedSSEWithRawError(c, json.RawMessage(errorObject))
-			return
-		}
-		payload, err := json.Marshal(gin.H{"error": json.RawMessage(errorObject)})
-		if err != nil {
-			_ = c.Error(err)
-			return
-		}
-		if _, err := fmt.Fprintf(c.Writer, "event: error\ndata: %s\n\n", payload); err != nil {
-			_ = c.Error(err)
-			return
-		}
-		c.Writer.Flush()
-		return
-	}
 	if statusCode == http.StatusBadRequest && service.IsOpenAICompatibleModelNotFound400(responseBody) && !streamStarted {
 		upstreamMsg := service.SanitizeUpstreamErrorMessage(service.ExtractUpstreamErrorMessage(responseBody))
 		service.SetOpsUpstreamError(c, statusCode, upstreamMsg, "")
@@ -3689,34 +3627,6 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 	// 使用默认的错误映射
 	status, errType, errMsg := h.mapUpstreamError(statusCode)
 	h.handleStreamingAwareError(c, status, errType, errMsg, streamStarted)
-}
-
-func normalizeStrictOpenAIErrorResponse(responseBody []byte, statusCode int, errType, message string) ([]byte, []byte, string) {
-	errType = strings.TrimSpace(errType)
-	if errType == "" {
-		errType = "upstream_error"
-		if statusCode == http.StatusBadRequest {
-			errType = "invalid_request_error"
-		} else if statusCode == http.StatusTooManyRequests {
-			errType = "rate_limit_error"
-		} else if statusCode == http.StatusUnauthorized {
-			errType = "authentication_error"
-		} else if statusCode == http.StatusForbidden {
-			errType = "permission_error"
-		}
-	}
-	normalized := responseBody
-	if strings.TrimSpace(gjson.GetBytes(normalized, "error.type").String()) == "" {
-		if updated, err := sjson.SetBytes(normalized, "error.type", errType); err == nil {
-			normalized = updated
-		}
-	}
-	if !gjson.GetBytes(normalized, "error.message").Exists() && strings.TrimSpace(message) != "" {
-		if updated, err := sjson.SetBytes(normalized, "error.message", message); err == nil {
-			normalized = updated
-		}
-	}
-	return normalized, []byte(gjson.GetBytes(normalized, "error").Raw), errType
 }
 
 func credentialFailoverClientResponse(failoverErr *service.UpstreamFailoverError) (int, string) {
@@ -3780,12 +3690,9 @@ func (h *OpenAIGatewayHandler) mapUpstreamError(statusCode int) (int, string, st
 		return http.StatusTooManyRequests, "rate_limit_error", "Upstream rate limit exceeded, please retry later"
 	case 529:
 		return http.StatusServiceUnavailable, "upstream_error", "Upstream service overloaded, please retry later"
-	case http.StatusRequestTimeout, http.StatusGatewayTimeout:
-		return http.StatusServiceUnavailable, "upstream_error", "Upstream request timed out, please retry later"
+	case 500, 502, 503, 504:
+		return http.StatusBadGateway, "upstream_error", "Upstream service temporarily unavailable"
 	default:
-		if statusCode >= http.StatusInternalServerError && statusCode <= 599 {
-			return http.StatusServiceUnavailable, "upstream_error", "Upstream service temporarily unavailable, please retry later"
-		}
 		return http.StatusBadGateway, "upstream_error", "Upstream request failed"
 	}
 }

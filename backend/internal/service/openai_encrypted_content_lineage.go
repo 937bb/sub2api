@@ -20,8 +20,6 @@ import (
 
 const openAIWSFallbackReasonInvalidEncryptedContent = "invalid_encrypted_content"
 
-const openAIEncryptedToolOutputOmitted = "[Encrypted tool output omitted because it belongs to a different upstream account.]"
-
 // openAIWSIngressSessionHashContextKey 在 gin context 中携带 ingress 会话哈希，
 // 供 HTTP bridge turn 内的 lineage 记录复用同一会话键。
 const openAIWSIngressSessionHashContextKey = "openai_ws_ingress_session_hash"
@@ -43,255 +41,6 @@ func openAIEncryptedLineageItemType(itemType string) bool {
 	}
 }
 
-func openAIEncryptedContentValue(part map[string]any) string {
-	if part == nil {
-		return ""
-	}
-	encrypted, _ := part["encrypted_content"].(string)
-	if strings.TrimSpace(encrypted) == "" {
-		return ""
-	}
-	return encrypted
-}
-
-func openAIEncryptedToolOutputItemType(itemType string) bool {
-	switch strings.TrimSpace(itemType) {
-	case "function_call_output", "custom_tool_call_output":
-		return true
-	default:
-		return false
-	}
-}
-
-func openAIEncryptedAgentItemType(itemType string) bool {
-	switch strings.TrimSpace(itemType) {
-	case "item_reference", "agent_message":
-		return true
-	default:
-		return false
-	}
-}
-
-func openAIEncryptedAgentItemDigest(id string) string {
-	return openAIEncryptedContentDigest("agent_item:" + strings.TrimSpace(id))
-}
-
-func openAIEncryptedAgentMessageMatches(
-	item map[string]any,
-	shouldMatch func(string) bool,
-) bool {
-	if item == nil || strings.TrimSpace(stringValue(item["type"])) != "agent_message" {
-		return false
-	}
-	matchPart := func(raw any) bool {
-		part, ok := raw.(map[string]any)
-		if !ok || strings.TrimSpace(stringValue(part["type"])) != "encrypted_content" {
-			return false
-		}
-		encrypted := openAIEncryptedContentValue(part)
-		return encrypted != "" && shouldMatch != nil && shouldMatch(encrypted)
-	}
-	switch content := item["content"].(type) {
-	case []any:
-		for _, raw := range content {
-			if matchPart(raw) {
-				return true
-			}
-		}
-	case map[string]any:
-		return matchPart(content)
-	}
-	return false
-}
-
-func replaceOpenAIEncryptedToolOutputParts(
-	item map[string]any,
-	shouldReplace func(string) bool,
-) int {
-	if item == nil || !openAIEncryptedToolOutputItemType(stringValue(item["type"])) {
-		return 0
-	}
-	replacement := func() map[string]any {
-		return map[string]any{
-			"type": "input_text",
-			"text": openAIEncryptedToolOutputOmitted,
-		}
-	}
-	replacePart := func(raw any) (any, bool) {
-		part, ok := raw.(map[string]any)
-		if !ok {
-			return raw, false
-		}
-		encrypted := openAIEncryptedContentValue(part)
-		if encrypted == "" || (shouldReplace != nil && !shouldReplace(encrypted)) {
-			return raw, false
-		}
-		return replacement(), true
-	}
-
-	output, exists := item["output"]
-	if !exists {
-		return 0
-	}
-	switch parts := output.(type) {
-	case []any:
-		replaced := 0
-		for index, raw := range parts {
-			next, changed := replacePart(raw)
-			if !changed {
-				continue
-			}
-			parts[index] = next
-			replaced++
-		}
-		return replaced
-	case map[string]any:
-		next, changed := replacePart(parts)
-		if !changed {
-			return 0
-		}
-		item["output"] = next
-		return 1
-	default:
-		return 0
-	}
-}
-
-func trimOpenAIEncryptedToolOutputParts(reqBody map[string]any) int {
-	if len(reqBody) == 0 {
-		return 0
-	}
-	input, exists := reqBody["input"]
-	if !exists {
-		return 0
-	}
-	replaced := 0
-	visit := func(raw any) {
-		item, ok := raw.(map[string]any)
-		if !ok {
-			return
-		}
-		replaced += replaceOpenAIEncryptedToolOutputParts(item, nil)
-	}
-	switch items := input.(type) {
-	case []any:
-		for _, item := range items {
-			visit(item)
-		}
-	case map[string]any:
-		visit(items)
-	}
-	return replaced
-}
-
-func appendOpenAIEncryptedContentDigestsFromItem(item gjson.Result, digests *[]string) {
-	if digests == nil || !item.IsObject() {
-		return
-	}
-	itemType := strings.TrimSpace(item.Get("type").String())
-	if openAIEncryptedLineageItemType(itemType) {
-		encrypted := item.Get("encrypted_content")
-		if encrypted.Type == gjson.String && encrypted.String() != "" {
-			*digests = append(*digests, openAIEncryptedContentDigest(encrypted.String()))
-		}
-	}
-	if !openAIEncryptedToolOutputItemType(itemType) {
-		return
-	}
-	output := item.Get("output")
-	appendPart := func(part gjson.Result) {
-		encrypted := part.Get("encrypted_content")
-		if encrypted.Type == gjson.String && encrypted.String() != "" {
-			*digests = append(*digests, openAIEncryptedContentDigest(encrypted.String()))
-		}
-	}
-	if output.IsArray() {
-		output.ForEach(func(_, part gjson.Result) bool {
-			appendPart(part)
-			return true
-		})
-	} else if output.IsObject() {
-		appendPart(output)
-	}
-}
-
-func appendOpenAIEncryptedAgentItemDigestsFromItem(item gjson.Result, digests *[]string) {
-	if digests == nil || !item.IsObject() || !openAIEncryptedAgentItemType(item.Get("type").String()) {
-		return
-	}
-	id := strings.TrimSpace(item.Get("id").String())
-	if strings.HasPrefix(id, "amsg_") {
-		*digests = append(*digests, openAIEncryptedAgentItemDigest(id))
-	}
-	if strings.TrimSpace(item.Get("type").String()) != "agent_message" {
-		return
-	}
-	appendPart := func(part gjson.Result) {
-		if strings.TrimSpace(part.Get("type").String()) != "encrypted_content" {
-			return
-		}
-		encrypted := part.Get("encrypted_content")
-		if encrypted.Type == gjson.String && encrypted.String() != "" {
-			*digests = append(*digests, openAIEncryptedContentDigest(encrypted.String()))
-		}
-	}
-	content := item.Get("content")
-	if content.IsArray() {
-		content.ForEach(func(_, part gjson.Result) bool {
-			appendPart(part)
-			return true
-		})
-	} else if content.IsObject() {
-		appendPart(content)
-	}
-}
-
-// collectOpenAIRejectedAgentItemDigestsRaw records all account-bound amsg_*
-// items after the upstream explicitly rejects one ID from the same request.
-// The upstream reports only the first invalid item, so retaining sibling IDs
-// would otherwise cause another terminal failure after the bounded retry.
-func collectOpenAIRejectedAgentItemDigestsRaw(payload, errorBody []byte) []string {
-	if len(payload) == 0 || len(errorBody) == 0 {
-		return nil
-	}
-	input := gjson.Get(openAIWSPayloadStringView(payload), "input")
-	if !input.Exists() {
-		return nil
-	}
-	rejected := false
-	checkRejected := func(item gjson.Result) {
-		if !openAIEncryptedAgentItemType(item.Get("type").String()) {
-			return
-		}
-		id := strings.TrimSpace(item.Get("id").String())
-		if strings.HasPrefix(id, "amsg_") && strings.Contains(string(errorBody), id) {
-			rejected = true
-		}
-	}
-	if input.IsArray() {
-		input.ForEach(func(_, item gjson.Result) bool {
-			checkRejected(item)
-			return true
-		})
-	} else if input.IsObject() {
-		checkRejected(input)
-	}
-	if !rejected {
-		return nil
-	}
-
-	var digests []string
-	if input.IsArray() {
-		input.ForEach(func(_, item gjson.Result) bool {
-			appendOpenAIEncryptedAgentItemDigestsFromItem(item, &digests)
-			return true
-		})
-	} else if input.IsObject() {
-		appendOpenAIEncryptedAgentItemDigestsFromItem(input, &digests)
-	}
-	return digests
-}
-
 // collectOpenAIEncryptedContentDigestsRaw 收集 input 中 lineage 覆盖类型所携
 // 密文的摘要。payload 须遵守 replay 所有权不变式（零拷贝视图解析）。
 func collectOpenAIEncryptedContentDigestsRaw(payload []byte) []string {
@@ -304,7 +53,13 @@ func collectOpenAIEncryptedContentDigestsRaw(payload []byte) []string {
 	}
 	var digests []string
 	appendItem := func(item gjson.Result) {
-		appendOpenAIEncryptedContentDigestsFromItem(item, &digests)
+		if !openAIEncryptedLineageItemType(item.Get("type").String()) {
+			return
+		}
+		encrypted := item.Get("encrypted_content")
+		if encrypted.Type == gjson.String && encrypted.String() != "" {
+			digests = append(digests, openAIEncryptedContentDigest(encrypted.String()))
+		}
 	}
 	if input.IsArray() {
 		input.ForEach(func(_, item gjson.Result) bool {
@@ -332,52 +87,28 @@ func stripOpenAIInvalidEncryptedContentItems(reqBody map[string]any, invalid map
 		return 0
 	}
 	stripped := 0
-	stripItem := func(item any) (next any, changedCount int, keep bool) {
+	stripItem := func(item any) (next any, changed bool, keep bool) {
 		inputItem, ok := item.(map[string]any)
 		if !ok {
-			return item, 0, true
-		}
-		itemType := strings.TrimSpace(stringValue(inputItem["type"]))
-		if openAIEncryptedAgentItemType(itemType) {
-			id := strings.TrimSpace(stringValue(inputItem["id"]))
-			if strings.HasPrefix(id, "amsg_") {
-				if _, hit := invalid[openAIEncryptedAgentItemDigest(id)]; hit {
-					return nil, 1, false
-				}
-			}
-			if itemType == "agent_message" && openAIEncryptedAgentMessageMatches(inputItem, func(encrypted string) bool {
-				_, hit := invalid[openAIEncryptedContentDigest(encrypted)]
-				return hit
-			}) {
-				return nil, 1, false
-			}
-		}
-		if openAIEncryptedToolOutputItemType(itemType) {
-			replaced := replaceOpenAIEncryptedToolOutputParts(inputItem, func(encrypted string) bool {
-				_, hit := invalid[openAIEncryptedContentDigest(encrypted)]
-				return hit
-			})
-			return inputItem, replaced, true
+			return item, false, true
 		}
 		encrypted, ok := inputItem["encrypted_content"].(string)
 		if !ok || encrypted == "" {
-			return item, 0, true
+			return item, false, true
 		}
 		if _, hit := invalid[openAIEncryptedContentDigest(encrypted)]; !hit {
-			return item, 0, true
+			return item, false, true
 		}
-		nextItem, changed, keep := sanitizeEncryptedReasoningInputItem(item)
-		if !changed {
-			return item, 0, true
-		}
-		return nextItem, 1, keep
+		return sanitizeEncryptedReasoningInputItem(item)
 	}
 	switch input := inputValue.(type) {
 	case []any:
 		filtered := input[:0]
 		for _, item := range input {
-			nextItem, changedCount, keep := stripItem(item)
-			stripped += changedCount
+			nextItem, changed, keep := stripItem(item)
+			if changed {
+				stripped++
+			}
 			if !keep {
 				continue
 			}
@@ -393,20 +124,20 @@ func stripOpenAIInvalidEncryptedContentItems(reqBody map[string]any, invalid map
 		reqBody["input"] = filtered
 		return stripped
 	case map[string]any:
-		nextItem, changedCount, keep := stripItem(input)
-		if changedCount == 0 {
+		nextItem, changed, keep := stripItem(input)
+		if !changed {
 			return 0
 		}
 		if !keep {
 			delete(reqBody, "input")
-			return changedCount
+			return 1
 		}
 		nextMap, ok := nextItem.(map[string]any)
 		if !ok {
 			return 0
 		}
 		reqBody["input"] = nextMap
-		return changedCount
+		return 1
 	default:
 		return 0
 	}
@@ -425,15 +156,12 @@ func openAIRawPayloadHasInvalidEncryptedContent(payload []byte, invalid map[stri
 	}
 	hit := false
 	checkItem := func(item gjson.Result) bool {
-		var digests []string
-		appendOpenAIEncryptedContentDigestsFromItem(item, &digests)
-		appendOpenAIEncryptedAgentItemDigestsFromItem(item, &digests)
-		for _, digest := range digests {
-			if _, matched := invalid[digest]; matched {
-				return true
-			}
+		encrypted := item.Get("encrypted_content")
+		if encrypted.Type != gjson.String || encrypted.String() == "" {
+			return false
 		}
-		return false
+		_, matched := invalid[openAIEncryptedContentDigest(encrypted.String())]
+		return matched
 	}
 	if input.IsArray() {
 		input.ForEach(func(_, item gjson.Result) bool {
@@ -460,17 +188,12 @@ func stripOpenAIInvalidEncryptedContentFromReplayItems(items []json.RawMessage, 
 	}
 	hit := false
 	for _, item := range items {
-		var digests []string
-		parsed := gjson.Parse(openAIWSPayloadStringView(item))
-		appendOpenAIEncryptedContentDigestsFromItem(parsed, &digests)
-		appendOpenAIEncryptedAgentItemDigestsFromItem(parsed, &digests)
-		for _, digest := range digests {
-			if _, matched := invalid[digest]; matched {
-				hit = true
-				break
-			}
+		encrypted := gjson.Get(openAIWSPayloadStringView(item), "encrypted_content")
+		if encrypted.Type != gjson.String || encrypted.String() == "" {
+			continue
 		}
-		if hit {
+		if _, matched := invalid[openAIEncryptedContentDigest(encrypted.String())]; matched {
+			hit = true
 			break
 		}
 	}
@@ -485,21 +208,28 @@ func stripOpenAIInvalidEncryptedContentFromReplayItems(items []json.RawMessage, 
 			next = append(next, item)
 			continue
 		}
-		wrapper := map[string]any{"input": decoded}
-		changedCount := stripOpenAIInvalidEncryptedContentItems(wrapper, invalid)
-		if changedCount == 0 {
+		encrypted, ok := decoded["encrypted_content"].(string)
+		if !ok || encrypted == "" {
 			next = append(next, item)
 			continue
 		}
-		stripped += changedCount
-		nextItem, keep := wrapper["input"]
+		if _, matched := invalid[openAIEncryptedContentDigest(encrypted)]; !matched {
+			next = append(next, item)
+			continue
+		}
+		nextItem, changed, keep := sanitizeEncryptedReasoningInputItem(decoded)
+		if !changed {
+			next = append(next, item)
+			continue
+		}
+		stripped++
 		if !keep {
 			continue
 		}
 		rebuilt, err := marshalOpenAIUpstreamJSON(nextItem)
 		if err != nil {
 			next = append(next, item)
-			stripped -= changedCount
+			stripped--
 			continue
 		}
 		next = append(next, json.RawMessage(rebuilt))

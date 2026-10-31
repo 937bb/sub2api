@@ -27,23 +27,6 @@
         ></textarea>
         <p class="input-hint">{{ t('admin.accounts.notesHint') }}</p>
       </div>
-</DialogSection>
-
-      <DialogSection :title="t('console.formConnection')">
-<div v-if="isSIWCAccount(account)" class="workbench-field-row rounded-lg border border-gray-200 p-3 dark:border-dark-600 console-field">
-        <label for="siwc-quota-web-token" class="input-label">{{ t('siwc.quota.webToken') }}</label>
-        <input
-          id="siwc-quota-web-token" v-model="siwcQuotaWebToken" type="password"
-          class="input font-mono" autocomplete="new-password" :spellcheck="false"
-          :disabled="clearSIWCQuotaWebToken" data-testid="siwc-quota-web-token"
-          :placeholder="t(account.credentials_status?.has_siwc_quota_access_token ? 'siwc.quota.keepToken' : 'siwc.quota.enterToken')"
-        />
-        <p class="input-hint">{{ t('siwc.quota.webTokenHelp') }}</p>
-        <label v-if="account.credentials_status?.has_siwc_quota_access_token" class="mt-2 flex items-center gap-2 text-sm">
-          <input v-model="clearSIWCQuotaWebToken" type="checkbox" data-testid="siwc-quota-clear-token" />
-          {{ t('siwc.quota.removeToken') }}
-        </label>
-      </div>
 
       <!-- API Key fields (only for apikey type) -->
       <div v-if="account.type === 'apikey'" class="space-y-4">
@@ -3493,7 +3476,6 @@ import {
   type OpenAIWSMode,
   resolveOpenAIWSModeFromExtra
 } from '@/utils/openaiWsMode'
-import { isSIWCAccount } from '@/utils/siwc'
 import {
   getPresetMappingsByPlatform,
   commonErrorCodes,
@@ -3518,8 +3500,6 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const appStore = useAppStore()
 const browserTimeZone = getBrowserTimeZone()
-const siwcQuotaWebToken = ref('')
-const clearSIWCQuotaWebToken = ref(false)
 
 const selectableGroups = computed(() => {
   const groups = new Map<number, Group>(props.groups.map(group => [group.id, group]))
@@ -4593,8 +4573,6 @@ const applyOpenAIModelMappingCredentials = (credentials: Record<string, unknown>
 }
 
 const syncFormFromAccount = (newAccount: Account | null) => {
-  siwcQuotaWebToken.value = ''
-  clearSIWCQuotaWebToken.value = false
   if (!newAccount) {
     return
   }
@@ -5571,8 +5549,6 @@ const parseDateTimeLocal = parseDateTimeLocalInput
 
 // Methods
 const handleClose = () => {
-  siwcQuotaWebToken.value = ''
-  clearSIWCQuotaWebToken.value = false
   antigravityMixedChannelConfirmed.value = false
   clearMixedChannelDialog()
   emit('close')
@@ -6404,13 +6380,6 @@ const handleSubmit = async () => {
         delete newExtra.upstream_request_id_header
       }
       updatePayload.extra = newExtra
-    }
-
-    if (isSIWCAccount(props.account) && (siwcQuotaWebToken.value.trim() || clearSIWCQuotaWebToken.value)) {
-      updatePayload.credentials = {
-        ...(updatePayload.credentials as Record<string, unknown> ?? props.account.credentials ?? {}),
-        siwc_quota_access_token: clearSIWCQuotaWebToken.value ? null : siwcQuotaWebToken.value.trim()
-      }
     }
 
     const canContinue = await ensureAntigravityMixedChannelConfirmed(async () => {

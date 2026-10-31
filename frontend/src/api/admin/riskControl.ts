@@ -10,84 +10,6 @@ export interface ModerationEngineMeta {
 }
 export type KeywordBlockingMode = 'keyword_only' | 'keyword_and_api' | 'api_only'
 export type ContentModerationModelFilterType = 'all' | 'include' | 'exclude'
-export type DistillationMonitorMode = 'off' | 'observe' | 'enforce'
-
-export interface DistillationMonitorConfig {
-  enabled: boolean
-  mode: DistillationMonitorMode
-  group_ids: number[]
-  window_minutes: number
-  min_requests: number
-  min_output_tokens: number
-  observe_threshold: number
-  risk_threshold: number
-  consecutive_windows: number
-  min_evidence_classes: number
-  feature_retention_days: number
-  assessment_retention_days: number
-}
-
-export interface DistillationMonitorRuntimeStatus {
-  enabled: boolean
-  mode: DistillationMonitorMode
-  queue_length: number
-  queue_size: number
-  enqueued: number
-  dropped: number
-  processed: number
-  errors: number
-  last_run_at?: string
-  last_flagged: number
-  last_disabled: number
-}
-
-export interface DistillationAssessmentMetrics {
-  dominant_model?: string
-  requests?: number
-  input_tokens?: number
-  output_tokens?: number
-  cache_read_tokens?: number
-  non_stream_ratio?: number
-  missing_session_ratio?: number
-  distinct_sessions?: number
-  distinct_api_keys?: number
-  distinct_ips?: number
-  distinct_user_agents?: number
-  explicit_signals?: number
-  template_similarity?: number
-  score_volume?: number
-  score_automation?: number
-  score_session?: number
-  score_template?: number
-  score_fanout?: number
-  score_batch?: number
-}
-
-export interface DistillationAssessment {
-  id: number
-  user_id: number
-  user_email: string
-  user_status: string
-  group_id: number
-  group_name: string
-  dominant_model: string
-  window_start: string
-  window_end: string
-  score: number
-  evidence_classes: number
-  mode: DistillationMonitorMode
-  metrics: DistillationAssessmentMetrics
-  auto_disabled: boolean
-  created_at: string
-}
-
-export interface DistillationAssessmentsResponse {
-  items: DistillationAssessment[]
-  total: number
-  page: number
-  page_size: number
-  pages: number
-}
 
 export interface ContentModerationModelFilter {
   type: ContentModerationModelFilterType
@@ -129,7 +51,6 @@ export interface ContentModerationConfig {
   keyword_blocking_mode: KeywordBlockingMode
   model_filter: ContentModerationModelFilter
   cyber_policy_exclude_from_ban_count: boolean
-  distillation_monitor: DistillationMonitorConfig
 }
 
 export type ContentModerationAPIKeyStatusValue = 'unknown' | 'ok' | 'error' | 'frozen'
@@ -215,7 +136,6 @@ export interface UpdateContentModerationConfig {
   keyword_blocking_mode?: KeywordBlockingMode
   model_filter?: ContentModerationModelFilter
   cyber_policy_exclude_from_ban_count?: boolean
-  distillation_monitor?: DistillationMonitorConfig
 }
 
 export interface ContentModerationRuntimeStatus {
@@ -249,7 +169,6 @@ export interface ContentModerationRuntimeStatus {
   last_cleanup_at?: string
   last_cleanup_deleted_hit: number
   last_cleanup_deleted_non_hit: number
-  distillation: DistillationMonitorRuntimeStatus
 }
 
 export interface ContentModerationAPIKeyLoad {
@@ -308,7 +227,6 @@ export interface ListContentModerationLogsParams {
   result?: string
   group_id?: number
   endpoint?: string
-  provider?: string
   search?: string
   from?: string
   to?: string
@@ -369,16 +287,6 @@ export async function listLogs(
   return data
 }
 
-export async function listDistillationAssessments(
-  params: Pick<ListContentModerationLogsParams, 'page' | 'page_size'> = {}
-): Promise<DistillationAssessmentsResponse> {
-  const { data } = await apiClient.get<DistillationAssessmentsResponse>(
-    '/admin/risk-control/distillation/assessments',
-    { params }
-  )
-  return data
-}
-
 export async function unbanUser(userID: number): Promise<ContentModerationUnbanUserResponse> {
   const { data } = await apiClient.post<ContentModerationUnbanUserResponse>(
     `/admin/risk-control/users/${userID}/unban`
@@ -404,7 +312,6 @@ export const riskControlAPI = {
   getStatus,
   testAPIKeys,
   listLogs,
-  listDistillationAssessments,
   unbanUser,
   deleteFlaggedHash,
   clearFlaggedHashes,

@@ -1,12 +1,6 @@
 package service
 
-import (
-	"errors"
-	"fmt"
-	"net/http"
-
-	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
-)
+import "net/http"
 
 func (s *OpenAIGatewayService) SetPluginManager(manager *PluginManager) {
 	s.pluginManager = manager
@@ -15,31 +9,11 @@ func (s *OpenAIGatewayService) SetPluginManager(manager *PluginManager) {
 // doOpenAIUpstream 只在 OpenAI OAuth 能力绑定已启用时把真实请求交给插件。
 // 插件返回标准 http.Response，响应解析、错误映射、SSE 和计费仍由现有核心链处理。
 func (s *OpenAIGatewayService) doOpenAIUpstream(request *http.Request, proxyURL string, account *Account) (*http.Response, error) {
-	if account.IsOpenAISiwc() {
-		if account.ProxyID != nil && proxyURL == "" {
-			return nil, errors.New("SIWC configured proxy unavailable")
-		}
-		return s.doSIWCHTTP(request, proxyURL)
-	}
 	if s.pluginManager != nil {
-		if s.pluginManager.ShouldRouteOpenAIOAuth(account) {
-			if err := CompressOpenAICodexHTTPRequest(request); err != nil {
-				return nil, fmt.Errorf("compress codex HTTP request: %w", err)
-			}
-		}
 		response, handled, err := s.pluginManager.RoundTripOpenAIOAuth(request.Context(), request, proxyURL, account)
 		if handled {
 			return response, err
 		}
-	}
-	if CodexMacOSFingerprintEnabled() && account != nil && account.IsOpenAIOAuthLike() {
-		return s.httpUpstream.DoWithTLS(
-			request,
-			proxyURL,
-			account.ID,
-			account.Concurrency,
-			tlsfingerprint.CodexDesktopMacOSProfile(),
-		)
 	}
 	return s.httpUpstream.Do(request, proxyURL, account.ID, account.Concurrency)
 }
@@ -57,15 +31,6 @@ func (s *AccountTestService) doOpenAIAccountTestUpstream(
 		if handled {
 			return response, err
 		}
-	}
-	if CodexMacOSFingerprintEnabled() && account != nil && account.IsOpenAIOAuthLike() {
-		return s.httpUpstream.DoWithTLS(
-			request,
-			proxyURL,
-			account.ID,
-			account.Concurrency,
-			tlsfingerprint.CodexDesktopMacOSProfile(),
-		)
 	}
 	if useTLSFallback {
 		return s.httpUpstream.DoWithTLS(

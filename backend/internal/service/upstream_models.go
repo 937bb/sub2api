@@ -17,7 +17,6 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/geminicli"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 )
 
 const (
@@ -262,10 +261,6 @@ func (s *AccountTestService) SyncUpstreamModelCatalog(ctx context.Context, accou
 		return nil, newUpstreamModelSyncInternalError("Failed to save upstream model catalog", saveErr)
 	}
 	catalog := &UpstreamModelCatalog{Models: models, Metadata: make(map[string]UpstreamModelMetadata)}
-	if account.IsOpenAISiwc() {
-		// SIWC discovery supplies entitlement IDs, not Codex capabilities.
-		return catalog, nil
-	}
 	if account != nil && account.IsGrok() {
 		if grokObservation != nil && grokObservation.Attempt.Status == grokCatalogStatusConfiguredFallback {
 			catalog.DiscoverySource = "configured_fallback"
@@ -806,17 +801,6 @@ func (s *AccountTestService) fetchUpstreamModelListRequest(ctx context.Context, 
 	if account == nil {
 		return nil, nil, nil, newUpstreamModelSyncConfigError("Account is required", nil)
 	}
-	if account.IsOpenAISiwc() {
-		if s.openaiGatewayService == nil {
-			return nil, nil, nil, newUpstreamModelSyncConfigError("SIWC gateway service is not configured", nil)
-		}
-		models, err := s.openaiGatewayService.fetchSIWCModels(ctx, account)
-		if err != nil {
-			return nil, nil, nil, newUpstreamModelSyncUpstreamError("Failed to request SIWC model list", err)
-		}
-		body, err := siwcModelsBody(models)
-		return models, body, nil, err
-	}
 
 	if account.Platform == PlatformAntigravity && account.Type != AccountTypeAPIKey {
 		models, body, err := s.fetchAntigravityOAuthUpstreamModels(ctx, account)
@@ -1218,9 +1202,6 @@ func (s *AccountTestService) buildAntigravityAPIKeyModelsRequest(ctx context.Con
 }
 
 func (s *AccountTestService) buildOpenAIUpstreamModelsRequest(ctx context.Context, account *Account) (*http.Request, error) {
-	if account.IsOpenAISiwc() {
-		return nil, newUpstreamModelSyncUnsupportedError("SIWC model discovery requires its dedicated public API client", nil)
-	}
 	if account.IsOpenAIOAuth() {
 		return s.buildOpenAIOAuthUpstreamModelsRequest(ctx, account)
 	}
@@ -1270,7 +1251,7 @@ func (s *AccountTestService) buildOpenAIOAuthUpstreamModelsRequest(ctx context.C
 	if err != nil {
 		return nil, newUpstreamModelSyncConfigError("Failed to resolve OpenAI account credentials", err)
 	}
-	if !credentialAccount.IsOpenAIOAuth() || credentialAccount.IsOpenAISiwc() {
+	if !credentialAccount.IsOpenAIOAuth() {
 		return nil, newUpstreamModelSyncUnsupportedError(
 			fmt.Sprintf("Unsupported OpenAI account type for upstream model sync: %s", credentialAccount.Type), nil,
 		)
@@ -1416,9 +1397,6 @@ func (s *AccountTestService) fetchAntigravityOAuthUpstreamModels(ctx context.Con
 }
 
 func (s *AccountTestService) doUpstreamModelsRequest(req *http.Request, proxyURL string, account *Account) (*http.Response, error) {
-	if CodexMacOSFingerprintEnabled() && account != nil && account.IsOpenAIOAuthLike() {
-		return s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, tlsfingerprint.CodexDesktopMacOSProfile())
-	}
 	if s.tlsFPProfileService == nil {
 		return s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, nil)
 	}

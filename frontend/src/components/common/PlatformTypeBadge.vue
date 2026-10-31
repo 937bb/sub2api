@@ -94,13 +94,9 @@ const normalizedAuthMode = computed(() =>
   (props.authMode || '').trim().toLowerCase().replace(/[\s_-]+/g, '')
 )
 
-const normalizedAuthProtocol = computed(() =>
-  (props.authProtocol || '').trim().toLowerCase().replace(/[\s_-]+/g, '')
-)
 
 const typeLabel = computed(() => {
   if (props.platform === 'openai' && props.type === 'oauth') {
-    if (normalizedAuthProtocol.value === 'siwc' || normalizedAuthMode.value === 'siwc') return 'SIWC'
     if (normalizedAuthMode.value === 'agentidentity') return 'Agent Identity'
     if (normalizedAuthMode.value === 'personalaccesstoken') return 'PAT'
   }
