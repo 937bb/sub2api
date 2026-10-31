@@ -109,6 +109,8 @@ func accountReadableSnapshotJSON(account *Account) []byte {
 	}
 	clone := *account
 	clone.Credentials = nil
+	// A plugin receives the selected primary route, not credentials for the pool.
+	clone.FallbackProxies = nil
 	clone.Groups = nil
 	clone.AccountGroups = nil
 	data, err := json.Marshal(&clone)

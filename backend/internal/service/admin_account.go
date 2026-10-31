@@ -495,6 +495,7 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 		return nil, err
 	}
 
+	delete(accountExtra, AccountProxyFallbackIDsKey)
 	// 绑定分组
 	groupIDs := input.GroupIDs
 	// 如果没有指定分组,自动绑定对应平台的默认分组
@@ -530,6 +531,9 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 
 	account, err := buildAccountForCreate(input, accountExtra)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.configureAccountFallbackProxies(ctx, account, input.ProxyFallbackIDs); err != nil {
 		return nil, err
 	}
 	if err := s.ValidateAccountGroupBindings(ctx, groupIDs); err != nil {
@@ -679,6 +683,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 			}
 			requestedProbeEnabledUpdate = &enabled
 		}
+		delete(normalizedExtra, AccountProxyFallbackIDsKey)
 		delete(normalizedExtra, UpstreamBillingProbeEnabledExtraKey)
 		delete(normalizedExtra, UpstreamBillingRateSyncEnabledExtraKey)
 		delete(normalizedExtra, UpstreamBillingProbeExtraKey)
@@ -692,6 +697,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		delete(normalizedExtra, UpstreamModelMetadataExtraKey)
 		// 保留配额用量和专用服务受管字段，防止普通账号编辑意外覆盖。
 		for _, key := range []string{
+			AccountProxyFallbackIDsKey,
 			"quota_used",
 			"quota_daily_used",
 			"quota_daily_start",
@@ -776,6 +782,24 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 			account.ProxyID = input.ProxyID
 		}
 		account.Proxy = nil // 清除关联对象，防止 GORM Save 时根据 Proxy.ID 覆盖 ProxyID
+	}
+	if input.ProxyID != nil && input.ProxyFallbackIDs == nil && !account.IsCredentialShadow() {
+		// Legacy editors can clear/change the primary; retain only distinct backups.
+		ids := []int64{}
+		if account.ProxyID != nil {
+			for _, id := range AccountProxyFallbackIDs(account.Extra) {
+				if id != *account.ProxyID {
+					ids = append(ids, id)
+				}
+			}
+		}
+		delete(account.Extra, AccountProxyFallbackIDsKey)
+		if len(ids) > 0 {
+			account.Extra[AccountProxyFallbackIDsKey] = ids
+		}
+	}
+	if err := s.configureAccountFallbackProxies(ctx, account, input.ProxyFallbackIDs); err != nil {
+		return nil, err
 	}
 	if !reflect.DeepEqual(previousProbeIdentity, upstreamBillingProbeIdentity(account)) && account.Extra != nil {
 		delete(account.Extra, UpstreamBillingProbeExtraKey)
@@ -909,8 +933,9 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 
 	// 将 proxy 变更传播到 spark 影子账号（同步；Update 内部已触发调度快照）。
 	// 影子自身 proxy 不可独立编辑(见上),故对影子的更新不触发传播。
-	if input.ProxyID != nil && !account.IsCredentialShadow() {
-		if err := s.propagateProxyToShadows(ctx, id, account.ProxyID); err != nil {
+	if (input.ProxyID != nil || input.ProxyFallbackIDs != nil) && !account.IsCredentialShadow() {
+		ids := AccountProxyFallbackIDs(account.Extra)
+		if err := propagateAccountProxyToShadows(ctx, s.accountRepo, id, account.ProxyID, &ids); err != nil {
 			return nil, err
 		}
 	}
@@ -934,6 +959,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 // （如 model_rate_limits / passive_usage_* 等）。
 func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, updates map[string]any) error {
 	updates = sanitizedCodexFingerprintExtraUpdates(updates)
+	delete(updates, AccountProxyFallbackIDsKey)
 	updates = stripOpenAIAutoResetCreditManagedExtra(updates, true)
 	delete(updates, UpstreamBillingProbeEnabledExtraKey)
 	delete(updates, UpstreamBillingRateSyncEnabledExtraKey)
@@ -963,6 +989,7 @@ func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, upd
 func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUpdateAccountsInput) (*BulkUpdateAccountsResult, error) {
 	// Managed probe/session state may only enter through dedicated typed endpoints.
 	input.Extra = sanitizedCodexFingerprintExtraUpdates(input.Extra)
+	delete(input.Extra, AccountProxyFallbackIDsKey)
 	input.Extra = stripOpenAIAutoResetCreditManagedExtra(input.Extra, true)
 	delete(input.Extra, UpstreamBillingProbeEnabledExtraKey)
 	delete(input.Extra, UpstreamBillingRateSyncEnabledExtraKey)
@@ -1467,6 +1494,9 @@ func (s *adminServiceImpl) CreateShadow(ctx context.Context, parentID int64, opt
 		},
 	}
 
+	if ids := AccountProxyFallbackIDs(parent.Extra); len(ids) > 0 {
+		shadow.Extra[AccountProxyFallbackIDsKey] = ids
+	}
 	// 5. 持久化（Create 填充 shadow.ID）。并发竞态:预查(步骤2)放行后另一请求抢先建成,本次会撞
 	// 一母一影唯一索引。复查确认确为"已存在"竞态时返回结构化 409 而非裸 500——外审 A/P1。
 	if err := s.accountRepo.Create(ctx, shadow); err != nil {
@@ -1506,13 +1536,24 @@ func (s *adminServiceImpl) propagateProxyToShadows(ctx context.Context, parentID
 // propagateAccountProxyToShadows 把母账号的 proxy 同步到其所有 spark 影子(影子 proxy 恒继承母账号)。
 // 供 AdminService 编辑路径与 CRS 同步路径共用——后者改动母账号 proxy 后必须同样传播,否则影子保留
 // 旧 proxy 出现出站漂移(外审第8轮)。
-func propagateAccountProxyToShadows(ctx context.Context, repo AccountRepository, parentID int64, proxyID *int64) error {
+func propagateAccountProxyToShadows(ctx context.Context, repo AccountRepository, parentID int64, proxyID *int64, fallback ...*[]int64) error {
 	shadows, err := repo.ListShadowsByParent(ctx, parentID)
 	if err != nil {
 		return fmt.Errorf("list spark shadows for proxy propagation: %w", err)
 	}
 	for _, shadow := range shadows {
 		shadow.ProxyID = proxyID
+		if len(fallback) > 0 && fallback[0] != nil {
+			delete(shadow.Extra, AccountProxyFallbackIDsKey)
+			if len(*fallback[0]) > 0 {
+				if shadow.Extra == nil {
+					shadow.Extra = map[string]any{}
+				}
+				shadow.Extra[AccountProxyFallbackIDsKey] = append([]int64{}, (*fallback[0])...)
+			}
+		} else if proxyID == nil {
+			delete(shadow.Extra, AccountProxyFallbackIDsKey)
+		}
 		if err := repo.Update(ctx, shadow); err != nil {
 			return fmt.Errorf("update spark shadow %d proxy: %w", shadow.ID, err)
 		}

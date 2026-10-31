@@ -15,7 +15,9 @@ func (s *OpenAIGatewayService) doOpenAIUpstream(request *http.Request, proxyURL 
 			return response, err
 		}
 	}
-	return s.httpUpstream.Do(request, proxyURL, account.ID, account.Concurrency)
+	return doWithAccountProxyFallback(request, proxyURL, account, func(req *http.Request, route string) (*http.Response, error) {
+		return s.httpUpstream.Do(req, route, account.ID, account.Concurrency)
+	})
 }
 
 // doOpenAIAccountTestUpstream 让 OpenAI OAuth 账号测试与真实转发使用同一插件路径。
@@ -33,13 +35,17 @@ func (s *AccountTestService) doOpenAIAccountTestUpstream(
 		}
 	}
 	if useTLSFallback {
-		return s.httpUpstream.DoWithTLS(
-			request,
-			proxyURL,
-			account.ID,
-			account.Concurrency,
-			s.tlsFPProfileService.ResolveTLSProfile(account),
-		)
+		return doWithAccountProxyFallback(request, proxyURL, account, func(req *http.Request, route string) (*http.Response, error) {
+			return s.httpUpstream.DoWithTLS(
+				req,
+				route,
+				account.ID,
+				account.Concurrency,
+				s.tlsFPProfileService.ResolveTLSProfile(account),
+			)
+		})
 	}
-	return s.httpUpstream.Do(request, proxyURL, account.ID, account.Concurrency)
+	return doWithAccountProxyFallback(request, proxyURL, account, func(req *http.Request, route string) (*http.Response, error) {
+		return s.httpUpstream.Do(req, route, account.ID, account.Concurrency)
+	})
 }

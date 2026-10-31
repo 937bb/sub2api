@@ -184,6 +184,11 @@ func updateProxyAndInvalidateProbeSnapshots(ctx context.Context, client *dbent.C
 	if err != nil {
 		return nil, err
 	}
+	if _, err := client.ExecContext(ctx, `INSERT INTO scheduler_outbox(event_type,account_id)
+	 SELECT 'account_changed',id FROM accounts WHERE deleted_at IS NULL AND
+	 (proxy_id=$1 OR extra->'proxy_fallback_ids' @> jsonb_build_array($1::bigint))`, proxyIn.ID); err != nil {
+		return nil, err
+	}
 	if currentIdentity == proxyProbeIdentityFromService(proxyIn) {
 		return updated, nil
 	}
@@ -229,7 +234,7 @@ func invalidateProxyProbeSnapshots(ctx context.Context, exec sqlExecutor, proxyI
 				- 'ollama_cloud_usage_snapshot'
 				- 'opencode_go_usage_snapshot',
 			updated_at = NOW()
-		WHERE proxy_id = $1
+		WHERE (proxy_id = $1 OR extra->'proxy_fallback_ids' @> jsonb_build_array($1::bigint))
 			AND type = 'apikey'
 			AND (
 				(extra ? 'upstream_billing_probe'
@@ -477,7 +482,7 @@ func (r *proxyRepository) ExistsByHostPortAuth(ctx context.Context, host string,
 // CountAccountsByProxyID returns the number of accounts using a specific proxy
 func (r *proxyRepository) CountAccountsByProxyID(ctx context.Context, proxyID int64) (int64, error) {
 	var count int64
-	if err := scanSingleRow(ctx, r.sql, "SELECT COUNT(*) FROM accounts WHERE proxy_id = $1 AND deleted_at IS NULL", []any{proxyID}, &count); err != nil {
+	if err := scanSingleRow(ctx, r.sql, "SELECT COUNT(*) FROM accounts WHERE (proxy_id = $1 OR extra->'proxy_fallback_ids' @> jsonb_build_array($1::bigint)) AND deleted_at IS NULL", []any{proxyID}, &count); err != nil {
 		return 0, err
 	}
 	return count, nil
@@ -487,7 +492,7 @@ func (r *proxyRepository) ListAccountSummariesByProxyID(ctx context.Context, pro
 	rows, err := r.sql.QueryContext(ctx, `
 		SELECT id, name, platform, type, notes
 		FROM accounts
-		WHERE proxy_id = $1 AND deleted_at IS NULL
+		WHERE (proxy_id = $1 OR extra->'proxy_fallback_ids' @> jsonb_build_array($1::bigint)) AND deleted_at IS NULL
 		ORDER BY id DESC
 	`, proxyID)
 	if err != nil {
@@ -527,7 +532,15 @@ func (r *proxyRepository) ListAccountSummariesByProxyID(ctx context.Context, pro
 
 // GetAccountCountsForProxies returns a map of proxy ID to account count for all proxies
 func (r *proxyRepository) GetAccountCountsForProxies(ctx context.Context) (counts map[int64]int64, err error) {
-	rows, err := r.sql.QueryContext(ctx, "SELECT proxy_id, COUNT(*) AS count FROM accounts WHERE proxy_id IS NOT NULL AND deleted_at IS NULL GROUP BY proxy_id")
+	rows, err := r.sql.QueryContext(ctx, `
+		WITH bindings AS (
+			SELECT id, proxy_id FROM accounts WHERE proxy_id IS NOT NULL AND deleted_at IS NULL
+			UNION
+			SELECT a.id, p.id FROM accounts a JOIN proxies p
+			ON a.extra->'proxy_fallback_ids' @> jsonb_build_array(p.id)
+			WHERE a.deleted_at IS NULL AND p.deleted_at IS NULL
+		)
+		SELECT proxy_id, COUNT(*) FROM bindings GROUP BY proxy_id`)
 	if err != nil {
 		return nil, err
 	}

@@ -398,6 +398,7 @@ type UpdateGroupInput struct {
 }
 
 type CreateAccountInput struct {
+	ProxyFallbackIDs   *[]int64
 	ProxyMode          string // 受限写入在验权后选择代理。
 	Name               string
 	Notes              *string
@@ -431,6 +432,7 @@ type ShadowOptions struct {
 }
 
 type UpdateAccountInput struct {
+	ProxyFallbackIDs      *[]int64
 	ProxyMode             string // 受限写入在验权后选择代理。
 	Name                  string
 	Notes                 *string

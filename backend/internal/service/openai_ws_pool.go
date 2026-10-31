@@ -84,6 +84,7 @@ type openAIWSAcquireRequest struct {
 }
 
 type openAIWSHandshakeCompatibilityKey struct {
+	proxyPool           string
 	betaFeatures        string
 	codexInstallationID string
 	sessionIDHyphen     string
@@ -2126,7 +2127,7 @@ func (p *openAIWSConnPool) dialConn(ctx context.Context, req openAIWSAcquireRequ
 			return nil, err
 		}
 	}
-	conn, status, handshakeHeaders, err := p.clientDialer.Dial(ctx, req.WSURL, headers, req.ProxyURL)
+	conn, status, handshakeHeaders, err := dialWithAccountProxyFallback(ctx, p.clientDialer, req.WSURL, headers, req.ProxyURL, req.Account)
 	if err != nil {
 		var handshakeErr *openAIWSHandshakeError
 		var responseBody []byte
@@ -2364,6 +2365,14 @@ func normalizeOpenAIWSBetaFeatures(headers http.Header) string {
 func normalizeOpenAIWSHandshakeCompatibility(account *Account, headers http.Header) openAIWSHandshakeCompatibilityKey {
 	key := openAIWSHandshakeCompatibilityKey{
 		betaFeatures: normalizeOpenAIWSBetaFeatures(headers),
+	}
+	if account != nil && len(AccountProxyFallbackIDs(account.Extra)) > 0 {
+		routes, err := accountProxyRoutes(account, "")
+		if err != nil {
+			key.proxyPool = "unavailable"
+		} else {
+			key.proxyPool = strings.Join(routes, "\n")
+		}
 	}
 	mode := activeCodexFingerprintMode(account)
 	if mode == codexFingerprintOff {

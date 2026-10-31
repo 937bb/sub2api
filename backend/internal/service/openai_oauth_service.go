@@ -343,12 +343,31 @@ func (s *OpenAIOAuthService) RefreshAccountToken(ctx context.Context, account *A
 	if account.Type != AccountTypeOAuth {
 		return nil, infraerrors.New(http.StatusBadRequest, "OPENAI_OAUTH_INVALID_ACCOUNT_TYPE", "account is not an OAuth account")
 	}
+	// Work on a private copy: refresh may run concurrently with gateway requests.
+	copyAccount := *account
+	account = &copyAccount
 
 	var proxyURL string
 	if account.ProxyID != nil && s.proxyRepo != nil {
 		proxy, err := s.proxyRepo.GetByID(ctx, *account.ProxyID)
 		if err == nil && proxy != nil {
 			proxyURL = proxy.URL()
+			account.Proxy = proxy
+		}
+	}
+	if ids := AccountProxyFallbackIDs(account.Extra); len(ids) > 0 && s.proxyRepo != nil {
+		proxies, err := s.proxyRepo.ListByIDs(ctx, ids)
+		if err != nil {
+			return nil, err
+		}
+		account.FallbackProxies = nil
+		for _, id := range ids {
+			for i := range proxies {
+				if proxies[i].ID == id {
+					account.FallbackProxies = append(account.FallbackProxies, &proxies[i])
+					break
+				}
+			}
 		}
 	}
 
@@ -386,7 +405,9 @@ func (s *OpenAIOAuthService) RefreshAccountToken(ctx context.Context, account *A
 	}
 
 	clientID := account.GetCredential("client_id")
-	return s.RefreshTokenWithClientID(ctx, refreshToken, proxyURL, clientID)
+	return refreshWithAccountProxyFallback(ctx, account, proxyURL, func(attempt context.Context, route string) (*OpenAITokenInfo, error) {
+		return s.RefreshTokenWithClientID(attempt, refreshToken, route, clientID)
+	})
 }
 
 // BuildAccountCredentials builds credentials map from token info

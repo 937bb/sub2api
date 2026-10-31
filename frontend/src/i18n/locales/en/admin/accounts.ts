@@ -1,5 +1,6 @@
 export default {
     accounts: {
+    fallbackProxies: {"title": "Fallback egress proxies", "hint": "Try these proxies in order if the primary cannot connect. Up to 7. In-flight requests and upstream rate limits do not trigger a switch.", "add": "Add fallback proxy", "moveUp": "Move up"},
       title: 'Account Management',
       description: 'Manage AI platform accounts and credentials',
       createAccount: 'Create Account',

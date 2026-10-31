@@ -330,6 +330,17 @@ function mountModal(account = buildAccount(), renderGroupSelector = false) {
 }
 
 describe('EditAccountModal', () => {
+  it('preserves a legacy primary proxy and existing ordered fallback proxies on save', async () => {
+    for (const backups of [undefined, [12, 13]]) {
+      const account = { ...buildOpenAIOAuthParentAccount(), proxy_id: 11, proxy_fallback_ids: backups }
+      updateAccountMock.mockReset().mockResolvedValue(account)
+      checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+      const wrapper = mountModal(account)
+      await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+      expect(updateAccountMock.mock.calls[0]?.[1]).toMatchObject({ proxy_id: 11, proxy_fallback_ids: backups || [] })
+      wrapper.unmount()
+    }
+  })
   beforeEach(() => {
     authIsSimpleMode.value = true
   })

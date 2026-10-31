@@ -1304,6 +1304,7 @@ export interface Account {
       error_code?: string
     }
   } & Record<string, unknown>)
+  proxy_fallback_ids?: number[] | null
   proxy_id: number | null
   proxy_fallback_origin_id?: number | null
   proxy_fallback_origin_name?: string | null

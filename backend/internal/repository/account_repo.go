@@ -331,6 +331,14 @@ func (r *accountRepository) GetByIDs(ctx context.Context, ids []int64) ([]*servi
 		return nil, err
 	}
 
+	fallbackIDs := []int64{}
+	for _, a := range entAccounts {
+		fallbackIDs = append(fallbackIDs, service.AccountProxyFallbackIDs(a.Extra)...)
+	}
+	fallbackMap, err := r.loadProxies(ctx, fallbackIDs)
+	if err != nil {
+		return nil, err
+	}
 	outByID := make(map[int64]*service.Account, len(entAccounts))
 	for _, entAcc := range entAccounts {
 		out := accountEntityToService(entAcc)
@@ -351,6 +359,11 @@ func (r *accountRepository) GetByIDs(ctx context.Context, ids []int64) ([]*servi
 		}
 		if ags, ok := accountGroupsByAccount[entAcc.ID]; ok {
 			out.AccountGroups = ags
+		}
+		for _, id := range service.AccountProxyFallbackIDs(entAcc.Extra) {
+			if p := fallbackMap[id]; p != nil {
+				out.FallbackProxies = append(out.FallbackProxies, p)
+			}
 		}
 		outByID[entAcc.ID] = out
 	}
@@ -3070,6 +3083,12 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 		return 0, nil
 	}
 	updates.Extra = stripCodexFingerprintSeedFromExtraUpdate(updates.Extra)
+	if updates.ProxyID != nil {
+		if updates.Extra == nil {
+			updates.Extra = map[string]any{}
+		}
+		updates.Extra[service.AccountProxyFallbackIDsKey] = nil
+	}
 
 	setClauses := make([]string, 0, 8)
 	args := make([]any, 0, 8)
@@ -3437,6 +3456,7 @@ func (r *accountRepository) accountsToService(ctx context.Context, accounts []*d
 	proxyIDs := make([]int64, 0, len(accounts))
 	for _, acc := range accounts {
 		accountIDs = append(accountIDs, acc.ID)
+		proxyIDs = append(proxyIDs, service.AccountProxyFallbackIDs(acc.Extra)...)
 		if acc.ProxyID != nil {
 			proxyIDs = append(proxyIDs, *acc.ProxyID)
 		}
@@ -3463,6 +3483,11 @@ func (r *accountRepository) accountsToService(ctx context.Context, accounts []*d
 		if acc.ProxyID != nil {
 			if proxy, ok := proxyMap[*acc.ProxyID]; ok {
 				out.Proxy = proxy
+			}
+		}
+		for _, id := range service.AccountProxyFallbackIDs(acc.Extra) {
+			if p := proxyMap[id]; p != nil {
+				out.FallbackProxies = append(out.FallbackProxies, p)
 			}
 		}
 		out.ProxyFallbackOriginID = acc.ProxyFallbackOriginID
