@@ -360,6 +360,9 @@ func (r *accountRepository) GetByIDs(ctx context.Context, ids []int64) ([]*servi
 		if ags, ok := accountGroupsByAccount[entAcc.ID]; ok {
 			out.AccountGroups = ags
 		}
+		if len(service.AccountProxyFallbackIDs(entAcc.Extra)) > 0 {
+			out.FallbackProxies = []*service.Proxy{}
+		}
 		for _, id := range service.AccountProxyFallbackIDs(entAcc.Extra) {
 			if p := fallbackMap[id]; p != nil {
 				out.FallbackProxies = append(out.FallbackProxies, p)
@@ -3484,6 +3487,9 @@ func (r *accountRepository) accountsToService(ctx context.Context, accounts []*d
 			if proxy, ok := proxyMap[*acc.ProxyID]; ok {
 				out.Proxy = proxy
 			}
+		}
+		if len(service.AccountProxyFallbackIDs(acc.Extra)) > 0 {
+			out.FallbackProxies = []*service.Proxy{}
 		}
 		for _, id := range service.AccountProxyFallbackIDs(acc.Extra) {
 			if p := proxyMap[id]; p != nil {

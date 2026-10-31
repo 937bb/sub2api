@@ -279,6 +279,7 @@ func (s *SchedulerSnapshotService) GetAccount(ctx context.Context, accountID int
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	legacyProxyPool := false
 	if s.cache != nil {
 		account, err := s.cache.GetAccount(ctx, accountID)
 		if ctxErr := ctx.Err(); ctxErr != nil {
@@ -287,7 +288,12 @@ func (s *SchedulerSnapshotService) GetAccount(ctx context.Context, accountID int
 		if err != nil {
 			logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] account cache read failed: id=%d err=%v", accountID, err)
 		} else if account != nil {
-			return account, nil
+			// Draining older instances can still publish snapshots without the
+			// hydrated fallback field. Re-read only these additive pool records.
+			legacyProxyPool = account.FallbackProxies == nil && len(AccountProxyFallbackIDs(account.Extra)) > 0
+			if !legacyProxyPool {
+				return account, nil
+			}
 		}
 	}
 
@@ -296,7 +302,12 @@ func (s *SchedulerSnapshotService) GetAccount(ctx context.Context, accountID int
 	}
 	fallbackCtx, cancel := s.withFallbackTimeout(ctx)
 	defer cancel()
-	return s.accountRepo.GetByID(fallbackCtx, accountID)
+	account, err := s.accountRepo.GetByID(fallbackCtx, accountID)
+	if err == nil && account != nil && legacyProxyPool && s.cache != nil {
+		// The current request uses the fresh row even if a cache write fails.
+		_ = s.cache.SetAccount(fallbackCtx, account)
+	}
+	return account, err
 }
 
 // GetGroupByID 获取分组信息（供调度器使用）

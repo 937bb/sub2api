@@ -196,6 +196,26 @@ func TestAccountProxyPoolOAuthRefresh(t *testing.T) {
 	require.Len(t, client.routes, 1)
 }
 
+func TestAccountProxyPoolHydratesLegacySchedulerCache(t *testing.T) {
+	fresh := poolTestAccount()
+	legacy := *fresh
+	legacy.FallbackProxies = nil
+	cache := &snapshotHydrationCache{accounts: map[int64]*Account{fresh.ID: &legacy}}
+	repo := &updateAccountCredsRepoStub{account: fresh}
+	snapshot := NewSchedulerSnapshotService(cache, nil, repo, nil, nil)
+	account, err := snapshot.GetAccount(context.Background(), fresh.ID)
+	require.NoError(t, err)
+	require.Len(t, account.FallbackProxies, 1)
+	require.Nil(t, legacy.FallbackProxies, "do not mutate the shared legacy snapshot")
+	// An explicitly empty list means the new repository has already hydrated
+	// a pool whose members were deleted. It must not force repeated DB reads.
+	legacy.FallbackProxies = []*Proxy{}
+	snapshot = NewSchedulerSnapshotService(cache, nil, nil, nil, nil)
+	account, err = snapshot.GetAccount(context.Background(), fresh.ID)
+	require.NoError(t, err)
+	require.Same(t, &legacy, account)
+}
+
 func (r *poolTestProxyRepo) GetByID(_ context.Context, id int64) (*Proxy, error) {
 	return r.proxies[id], nil
 }
