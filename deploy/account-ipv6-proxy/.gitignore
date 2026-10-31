@@ -1,4 +1,7 @@
 config.json
+config.legacy.json
+automatic-before.jsonl
+proxies-before.jsonl
 bindings-before.json
 applied-ids.json
 release.json

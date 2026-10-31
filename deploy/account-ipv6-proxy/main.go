@@ -3,8 +3,11 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
+	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,6 +16,7 @@ import (
 	"net/http"
 	"net/netip"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -24,10 +28,12 @@ type binding struct {
 	IPv6     string `json:"ipv6"`
 }
 type configuration struct {
-	Listen   string             `json:"listen"`
-	Relay    string             `json:"relay"`
-	Prefix   string             `json:"prefix"`
-	Accounts map[string]binding `json:"accounts"`
+	Listen     string             `json:"listen"`
+	Relay      string             `json:"relay"`
+	Prefix     string             `json:"prefix"`
+	Accounts   map[string]binding `json:"accounts"`
+	AutoSecret string             `json:"auto_secret,omitempty"`
+	AutoBase   string             `json:"auto_base,omitempty"`
 }
 type proxy struct {
 	cfg    configuration
@@ -55,6 +61,18 @@ func main() {
 		log.Fatal("listen must use IPv4 loopback")
 	}
 	seen := map[string]bool{}
+	if cfg.AutoSecret != "" {
+		base, e := netip.ParseAddr(cfg.AutoBase)
+		if len(cfg.AutoSecret) != 64 || e != nil || !prefix.Contains(base) || !base.Is6() {
+			log.Fatal("invalid automatic binding configuration")
+		}
+		v := base.As16()
+		for _, b := range v[10:] {
+			if b != 0 {
+				log.Fatal("automatic base must reserve 48 bits for account IDs")
+			}
+		}
+	}
 	for user, b := range cfg.Accounts {
 		a, e := netip.ParseAddr(b.IPv6)
 		if e != nil || !prefix.Contains(a) || a == prefix.Addr() || len(b.Password) < 32 || user == "" || seen[a.String()] {
@@ -77,7 +95,31 @@ func (p *proxy) authenticate(h string) (binding, bool) {
 	}
 	user, password, ok := strings.Cut(string(raw), ":")
 	b, exists := p.cfg.Accounts[user]
+	if !exists {
+		b, exists = p.automaticBinding(user)
+	}
 	return b, ok && exists && subtle.ConstantTimeCompare([]byte(password), []byte(b.Password)) == 1
+}
+
+// Signed canonical IDs allow new accounts immediately, without changing the
+// running process or its immutable legacy credential map.
+func (p *proxy) automaticBinding(user string) (binding, bool) {
+	if p.cfg.AutoSecret == "" || !strings.HasPrefix(user, "b-account-") {
+		return binding{}, false
+	}
+	raw := strings.TrimPrefix(user, "b-account-")
+	id, err := strconv.ParseUint(raw, 10, 48)
+	if err != nil || id == 0 || strconv.FormatUint(id, 10) != raw {
+		return binding{}, false
+	}
+	base, err := netip.ParseAddr(p.cfg.AutoBase)
+	if err != nil || !base.Is6() {
+		return binding{}, false
+	}
+	a := base.As16()
+	binary.BigEndian.PutUint64(a[8:], binary.BigEndian.Uint64(a[8:])|id)
+	sum := sha256.Sum256([]byte("b-ipv6-v1:" + raw + ":" + p.cfg.AutoSecret))
+	return binding{Password: hex.EncodeToString(sum[:]), IPv6: netip.AddrFrom16(a).String()}, true
 }
 
 func allowedTarget(address string) (string, bool) {
