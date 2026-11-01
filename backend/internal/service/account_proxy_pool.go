@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptrace"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -97,6 +98,20 @@ func accountProxyRoutes(account *Account, legacyURL string) ([]string, error) {
 	return urls, nil
 }
 
+// Counters are process-local and keyed by account, not cached Account pointers.
+// A process restart resets the starting position, without changing bindings.
+var accountProxyRotationCounters sync.Map // account ID -> *atomic.Uint64
+
+func rotatingAccountProxyRoutes(account *Account, legacyURL string) ([]string, error) {
+	routes, err := accountProxyRoutes(account, legacyURL)
+	if err != nil || len(routes) < 2 {
+		return routes, err
+	}
+	value, _ := accountProxyRotationCounters.LoadOrStore(account.ID, &atomic.Uint64{})
+	start := int((value.(*atomic.Uint64).Add(1) - 1) % uint64(len(routes)))
+	return append(append(make([]string, 0, len(routes)), routes[start:]...), routes[:start]...), nil
+}
+
 // Only failures before the upstream request can have been written are retryable.
 // An upstream HTTP error (including 429) and an interrupted stream are not retried.
 func proxyConnectFailure(err error, gotConnection bool) bool {
@@ -108,7 +123,7 @@ func proxyConnectFailure(err error, gotConnection bool) bool {
 }
 
 func doWithAccountProxyFallback(request *http.Request, legacyURL string, account *Account, send func(*http.Request, string) (*http.Response, error)) (*http.Response, error) {
-	routes, err := accountProxyRoutes(account, legacyURL)
+	routes, err := rotatingAccountProxyRoutes(account, legacyURL)
 	if err != nil {
 		return nil, err
 	}
@@ -145,13 +160,18 @@ func doWithAccountProxyFallback(request *http.Request, legacyURL string, account
 }
 
 func dialWithAccountProxyFallback(ctx context.Context, dialer openAIWSClientDialer, target string, headers http.Header, legacyURL string, account *Account) (openAIWSClientConn, int, http.Header, error) {
-	routes, err := accountProxyRoutes(account, legacyURL)
+	routes, err := rotatingAccountProxyRoutes(account, legacyURL)
 	if err != nil {
 		return nil, 0, nil, err
 	}
+	return dialWithAccountProxyRoutes(ctx, dialer, target, headers, routes, account)
+}
+
+func dialWithAccountProxyRoutes(ctx context.Context, dialer openAIWSClientDialer, target string, headers http.Header, routes []string, account *Account) (openAIWSClientConn, int, http.Header, error) {
 	var conn openAIWSClientConn
 	var status int
 	var responseHeaders http.Header
+	var err error
 	for _, route := range routes {
 		if ctx.Err() != nil {
 			return nil, 0, nil, ctx.Err()
@@ -171,12 +191,12 @@ func dialWithAccountProxyFallback(ctx context.Context, dialer openAIWSClientDial
 }
 
 func logAccountFallbackRoute(account *Account, route, transport string) {
-	if account == nil || (account.Proxy != nil && account.Proxy.URL() == route) {
+	if account == nil || len(AccountProxyFallbackIDs(account.Extra)) == 0 {
 		return
 	}
-	for _, p := range account.FallbackProxies {
+	for _, p := range append([]*Proxy{account.Proxy}, account.FallbackProxies...) {
 		if p != nil && p.URL() == route {
-			slog.Info("account_proxy_fallback", "account_id", account.ID, "proxy_id", p.ID, "transport", transport)
+			slog.Info("account_proxy_selected", "account_id", account.ID, "proxy_id", p.ID, "transport", transport)
 			return
 		}
 	}

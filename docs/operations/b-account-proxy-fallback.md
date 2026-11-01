@@ -1,7 +1,7 @@
-# Account proxy failover
+# Account proxy rotation
 
-OpenAI accounts can configure a primary proxy and up to seven ordered fallback
-proxies in **Accounts → Edit → Fallback egress proxies**. The existing primary
+OpenAI accounts can configure an original proxy and up to seven additional
+proxies in **Accounts → Edit → Rotating egress IPs**. The existing primary
 selector and `proxy_id` API field remain unchanged. No existing account is
 automatically assigned additional proxies.
 
@@ -14,15 +14,20 @@ backfill is required. Ordinary extra edits cannot overwrite this managed key.
 Clearing the primary clears its backups. Bulk primary replacement resets the
 backup list. Spark shadow accounts inherit their parent's list.
 
-Core OpenAI HTTP forwarding, connection tests, WebSocket connection setup and
-OAuth refresh try another eligible proxy only after a connection failure
+Core OpenAI HTTP forwarding, connection tests and new WebSocket requests rotate
+through all eligible proxies in order. Counters are per account and per process;
+process restarts reset them. HTTP and WS instances have independent counters.
+WebSocket pools only reuse a connection on the selected route. Established
+WebSocket sessions and continuations requiring a specific connection retain that
+connection's route. OAuth refresh retains primary-first behavior.
+
+These transports and OAuth refresh try another eligible proxy after a connection failure
 before sending the upstream request. They do not replay requests on upstream
 HTTP errors (including 429), stream interruption or cancellation. Established
-WebSockets remain on their existing connection. Each new connection tries the
-primary first. Missing, disabled and expired pool members are skipped; an
+WebSockets remain on their existing connection. Missing, disabled and expired pool members are skipped; an
 unusable configured pool fails without silently connecting directly.
 
-Fallback use is logged as `account_proxy_fallback` with account ID, proxy ID
+Multi-proxy route use is logged as `account_proxy_selected` with account ID, proxy ID
 and transport, without proxy credentials. Custom transport plugins retain
 control of their own routing. Auxiliary metadata/privacy probes and initial
 OAuth authorization retain their existing explicit proxy behavior.

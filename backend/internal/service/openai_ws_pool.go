@@ -76,6 +76,7 @@ type openAIWSAcquireRequest struct {
 	// lastAcquire or delayed prewarm state.
 	HeadersFactory  func(context.Context, http.Header) (http.Header, error)
 	ProxyURL        string
+	proxyRoutes     []string // Selected once per Acquire; preserved across queue waits/retries.
 	PreferredConnID string
 	// ForceNewConn: 强制本次获取新连接（避免复用导致连接内续链状态互相污染）。
 	ForceNewConn bool
@@ -85,6 +86,7 @@ type openAIWSAcquireRequest struct {
 
 type openAIWSHandshakeCompatibilityKey struct {
 	proxyPool           string
+	selectedProxy       string
 	betaFeatures        string
 	codexInstallationID string
 	sessionIDHyphen     string
@@ -1108,6 +1110,13 @@ type openAIWSAcquireQueueWait struct {
 }
 
 func (p *openAIWSConnPool) Acquire(ctx context.Context, req openAIWSAcquireRequest) (*openAIWSConnLease, error) {
+	if req.Account != nil && len(AccountProxyFallbackIDs(req.Account.Extra)) > 0 && !req.ForcePreferredConn {
+		var err error
+		req.proxyRoutes, err = rotatingAccountProxyRoutes(req.Account, req.ProxyURL)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if p != nil {
 		p.metrics.acquireTotal.Add(1)
 	}
@@ -1146,7 +1155,7 @@ func (p *openAIWSConnPool) acquire(ctx context.Context, req openAIWSAcquireReque
 
 retryAcquire:
 	accountID := req.Account.ID
-	compatibility := normalizeOpenAIWSHandshakeCompatibility(req.Account, req.Headers)
+	compatibility := req.handshakeCompatibility()
 	routingAffinity := normalizeOpenAIWSRoutingAffinity(req.Headers)
 	effectiveMaxConns := p.effectiveMaxConnsByAccount(req.Account)
 	if effectiveMaxConns <= 0 {
@@ -1175,6 +1184,10 @@ retryAcquire:
 				return nil, errOpenAIWSPreferredConnUnavailable
 			}
 			preferredConn, ok := ap.conns[preferredConnID]
+			// A continuation pinned to an existing socket cannot change its IP.
+			if ok {
+				compatibility.selectedProxy = preferredConn.handshakeCompatibility.selectedProxy
+			}
 			if !ok || !preferredConn.matchesHandshakeCompatibility(compatibility) {
 				p.recordConnPickDuration(time.Since(pickStartedAt))
 				ap.mu.Unlock()
@@ -2127,7 +2140,15 @@ func (p *openAIWSConnPool) dialConn(ctx context.Context, req openAIWSAcquireRequ
 			return nil, err
 		}
 	}
-	conn, status, handshakeHeaders, err := dialWithAccountProxyFallback(ctx, p.clientDialer, req.WSURL, headers, req.ProxyURL, req.Account)
+	routes := req.proxyRoutes
+	if len(routes) == 0 {
+		routes, err = rotatingAccountProxyRoutes(req.Account, req.ProxyURL)
+		if err != nil {
+			return nil, err
+		}
+	}
+	dialer := &openAIWSProxyRecordingDialer{dialer: p.clientDialer}
+	conn, status, handshakeHeaders, err := dialWithAccountProxyRoutes(ctx, dialer, req.WSURL, headers, routes, req.Account)
 	if err != nil {
 		var handshakeErr *openAIWSHandshakeError
 		var responseBody []byte
@@ -2153,7 +2174,10 @@ func (p *openAIWSConnPool) dialConn(ctx context.Context, req openAIWSAcquireRequ
 	accountID := req.Account.ID
 	evict := func() { p.evictConn(accountID, id) }
 	pooledConn.onPeerClosed.Store(&evict)
-	pooledConn.handshakeCompatibility = normalizeOpenAIWSHandshakeCompatibility(req.Account, req.Headers)
+	pooledConn.handshakeCompatibility = req.handshakeCompatibility()
+	if len(AccountProxyFallbackIDs(req.Account.Extra)) > 0 {
+		pooledConn.handshakeCompatibility.selectedProxy = dialer.route
+	}
 	pooledConn.routingAffinity = normalizeOpenAIWSRoutingAffinity(req.Headers)
 	return pooledConn, nil
 }
@@ -2319,6 +2343,7 @@ func cloneOpenAIWSAcquireRequest(req openAIWSAcquireRequest) openAIWSAcquireRequ
 	copied.Headers = cloneHeader(req.Headers)
 	copied.WSURL = stringsTrim(req.WSURL)
 	copied.ProxyURL = stringsTrim(req.ProxyURL)
+	copied.proxyRoutes = append([]string(nil), req.proxyRoutes...)
 	copied.PreferredConnID = stringsTrim(req.PreferredConnID)
 	return copied
 }
@@ -2334,7 +2359,30 @@ func cloneOpenAIWSAcquireRequestPtr(req *openAIWSAcquireRequest) *openAIWSAcquir
 func sameOpenAIWSPrewarmTarget(a, b openAIWSAcquireRequest) bool {
 	return stringsTrim(a.WSURL) == stringsTrim(b.WSURL) &&
 		stringsTrim(a.ProxyURL) == stringsTrim(b.ProxyURL) &&
-		normalizeOpenAIWSHandshakeCompatibility(a.Account, a.Headers) == normalizeOpenAIWSHandshakeCompatibility(b.Account, b.Headers)
+		a.handshakeCompatibility() == b.handshakeCompatibility()
+}
+
+func (r openAIWSAcquireRequest) handshakeCompatibility() openAIWSHandshakeCompatibilityKey {
+	key := normalizeOpenAIWSHandshakeCompatibility(r.Account, r.Headers)
+	if len(r.proxyRoutes) > 0 {
+		key.selectedProxy = r.proxyRoutes[0]
+	}
+	return key
+}
+
+// Record the actual successful route, including a connection-only failover.
+// It becomes part of connection compatibility, so reuse respects rotation.
+type openAIWSProxyRecordingDialer struct {
+	dialer openAIWSClientDialer
+	route  string
+}
+
+func (d *openAIWSProxyRecordingDialer) Dial(ctx context.Context, target string, headers http.Header, route string) (openAIWSClientConn, int, http.Header, error) {
+	conn, status, responseHeaders, err := d.dialer.Dial(ctx, target, headers, route)
+	if err == nil {
+		d.route = route
+	}
+	return conn, status, responseHeaders, err
 }
 
 func normalizeOpenAIWSBetaFeatures(headers http.Header) string {

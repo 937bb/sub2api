@@ -1,6 +1,6 @@
 export default {
     accounts: {
-    fallbackProxies: {"title": "Fallback egress proxies", "hint": "Try these proxies in order if the primary cannot connect. Up to 7. In-flight requests and upstream rate limits do not trigger a switch.", "add": "Add fallback proxy", "moveUp": "Move up"},
+    fallbackProxies: {"title": "Rotating egress IPs", "hint": "New requests rotate through the original proxy and these IPs in order. Add up to 7. Established WebSocket sessions keep their route; upstream rate limits do not trigger retries.", "add": "Add rotating IP", "moveUp": "Move earlier in rotation"},
       title: 'Account Management',
       description: 'Manage AI platform accounts and credentials',
       createAccount: 'Create Account',

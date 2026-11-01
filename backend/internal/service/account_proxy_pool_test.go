@@ -14,9 +14,11 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/stretchr/testify/require"
 )
@@ -30,6 +32,7 @@ func poolTestAccount() *Account {
 }
 
 func TestAccountProxyPoolHTTPRealConnectionFailure(t *testing.T) {
+	accountProxyRotationCounters.Delete(int64(50))
 	// Closed local listener forces an actual dial refusal without an upstream request.
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
@@ -63,6 +66,152 @@ func TestAccountProxyPoolHTTPRealConnectionFailure(t *testing.T) {
 	defer resp.Body.Close()
 	require.Equal(t, 200, resp.StatusCode)
 	require.Equal(t, 1, calls)
+}
+
+func TestAccountProxyPoolHTTPRotation(t *testing.T) {
+	a := poolTestAccount()
+	a.ID = 9501
+	accountProxyRotationCounters.Delete(a.ID)
+	var got []string
+	for i := 0; i < 6; i++ {
+		// Simulate different snapshots of the same account on successive requests.
+		copy := *a
+		req, _ := http.NewRequest("POST", "https://example.com", strings.NewReader("test"))
+		resp, err := doWithAccountProxyFallback(req, a.Proxy.URL(), &copy, func(_ *http.Request, route string) (*http.Response, error) {
+			got = append(got, route)
+			return &http.Response{StatusCode: 200, Body: http.NoBody}, nil
+		})
+		require.NoError(t, err)
+		require.NoError(t, resp.Body.Close())
+	}
+	p, b := a.Proxy.URL(), a.FallbackProxies[0].URL()
+	require.Equal(t, []string{p, b, p, b, p, b}, got)
+	other := *a
+	other.ID = 9502
+	accountProxyRotationCounters.Delete(other.ID)
+	routes, err := rotatingAccountProxyRoutes(&other, "")
+	require.NoError(t, err)
+	require.Equal(t, p, routes[0], "accounts have independent rotation")
+	a.FallbackProxies[0].Status = "inactive"
+	for i := 0; i < 3; i++ {
+		routes, err = rotatingAccountProxyRoutes(a, "")
+		require.NoError(t, err)
+		require.Equal(t, []string{p}, routes)
+	}
+}
+
+func TestAccountProxyPoolConcurrentRotation(t *testing.T) {
+	a := poolTestAccount()
+	a.ID = 9503
+	accountProxyRotationCounters.Delete(a.ID)
+	results := make(chan string, 100)
+	var wg sync.WaitGroup
+	for i := 0; i < 100; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			routes, err := rotatingAccountProxyRoutes(a, "")
+			if err == nil {
+				results <- routes[0]
+			}
+		}()
+	}
+	wg.Wait()
+	close(results)
+	counts := map[string]int{}
+	for r := range results {
+		counts[r]++
+	}
+	require.Equal(t, map[string]int{a.Proxy.URL(): 50, a.FallbackProxies[0].URL(): 50}, counts)
+}
+
+func TestAccountProxyPoolWebSocketRotationAndPinnedContinuation(t *testing.T) {
+	for _, capacity := range []int{1, 2} {
+		t.Run(strconv.Itoa(capacity), func(t *testing.T) {
+			a := poolTestAccount()
+			a.ID = int64(9600 + capacity)
+			accountProxyRotationCounters.Delete(a.ID)
+			cfg := &config.Config{}
+			cfg.Gateway.OpenAIWS.MaxConnsPerAccount = capacity
+			cfg.Gateway.OpenAIWS.MaxIdlePerAccount = capacity
+			pool := newOpenAIWSConnPool(cfg)
+			defer pool.Close()
+			dialer := &rotationTestDialer{}
+			pool.setClientDialerForTest(dialer)
+			req := openAIWSAcquireRequest{Account: a, WSURL: "wss://example.com/v1/responses"}
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			var ids []string
+			for i := 0; i < 4; i++ {
+				lease, err := pool.Acquire(ctx, req)
+				require.NoError(t, err)
+				want := a.Proxy.URL()
+				if i%2 == 1 {
+					want = a.FallbackProxies[0].URL()
+				}
+				require.Equal(t, want, lease.conn.handshakeCompatibility.selectedProxy)
+				ids = append(ids, lease.ConnID())
+				lease.Release()
+			}
+			if capacity == 2 {
+				require.Equal(t, ids[0], ids[2])
+				require.Equal(t, ids[1], ids[3])
+				require.Equal(t, []string{a.Proxy.URL(), a.FallbackProxies[0].URL()}, dialer.routes)
+			} else {
+				require.Equal(t, []string{a.Proxy.URL(), a.FallbackProxies[0].URL(), a.Proxy.URL(), a.FallbackProxies[0].URL()}, dialer.routes)
+			}
+			req.ForcePreferredConn = true
+			req.PreferredConnID = ids[3]
+			lease, err := pool.Acquire(ctx, req)
+			require.NoError(t, err)
+			require.Equal(t, ids[3], lease.ConnID())
+			lease.Release()
+			// Pinned continuation must not consume another rotation slot.
+			req.ForcePreferredConn = false
+			req.PreferredConnID = ""
+			lease, err = pool.Acquire(ctx, req)
+			require.NoError(t, err)
+			require.Equal(t, a.Proxy.URL(), lease.conn.handshakeCompatibility.selectedProxy)
+			lease.Release()
+		})
+	}
+}
+
+type rotationTestDialer struct {
+	routes    []string
+	failFirst bool
+}
+
+func (d *rotationTestDialer) Dial(_ context.Context, _ string, _ http.Header, route string) (openAIWSClientConn, int, http.Header, error) {
+	d.routes = append(d.routes, route)
+	if d.failFirst && len(d.routes) == 1 {
+		return nil, 0, nil, &net.OpError{Op: "dial", Err: errors.New("refused")}
+	}
+	return &openAIWSFakeConn{}, 0, nil, nil
+}
+
+func TestAccountProxyPoolWebSocketReusesActualFailoverRoute(t *testing.T) {
+	a := poolTestAccount()
+	a.ID = 9701
+	accountProxyRotationCounters.Delete(a.ID)
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIWS.MaxConnsPerAccount = 2
+	cfg.Gateway.OpenAIWS.MaxIdlePerAccount = 2
+	pool := newOpenAIWSConnPool(cfg)
+	defer pool.Close()
+	dialer := &rotationTestDialer{failFirst: true}
+	pool.setClientDialerForTest(dialer)
+	req := openAIWSAcquireRequest{Account: a, WSURL: "wss://example.com/v1/responses"}
+	lease, err := pool.Acquire(context.Background(), req)
+	require.NoError(t, err)
+	require.Equal(t, a.FallbackProxies[0].URL(), lease.conn.handshakeCompatibility.selectedProxy)
+	id := lease.ConnID()
+	lease.Release()
+	lease, err = pool.Acquire(context.Background(), req)
+	require.NoError(t, err)
+	require.Equal(t, id, lease.ConnID())
+	require.Equal(t, []string{a.Proxy.URL(), a.FallbackProxies[0].URL()}, dialer.routes)
+	lease.Release()
 }
 
 func TestAccountProxyPoolHTTPNeverReplaysUpstreamResponses(t *testing.T) {

@@ -1,6 +1,6 @@
 export default {
     accounts: {
-    fallbackProxies: {"title": "备用出口 IP", "hint": "主代理连接失败时，按列表顺序尝试备用代理。最多 7 个；已开始的请求和上游限流不会触发切换。", "add": "添加备用代理", "moveUp": "上移优先级"},
+    fallbackProxies: {"title": "轮换出口 IP", "hint": "每次新请求在原代理与以下 IP 间依次轮换，最多添加 7 个。已建立的 WebSocket 会话保持出口；上游限流不会触发重试。", "add": "添加轮换 IP", "moveUp": "上移轮换顺序"},
       title: '账号管理',
       description: '管理 AI 平台账号和 Cookie',
       createAccount: '添加账号',
