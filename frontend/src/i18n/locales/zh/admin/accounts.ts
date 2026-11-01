@@ -1,6 +1,6 @@
 export default {
     accounts: {
-    fallbackProxies: {"title": "轮换出口 IP", "hint": "每次新请求在原代理与以下 IP 间依次轮换，最多添加 7 个。已建立的 WebSocket 会话保持出口；上游限流不会触发重试。", "add": "添加轮换 IP", "moveUp": "上移轮换顺序"},
+    fallbackProxies: {"title": "轮换出口 IP", "hint": "每次新请求在原代理与以下 IP 间依次轮换，最多添加 7 个。已建立的 WebSocket 会话保持出口；上游限流不会触发重试。", "add": "添加轮换 IP", "moveUp": "上移轮换顺序", "selectPrimary": "请先在上方选择原代理，再勾选其他轮换出口。", "unavailable": "不可用", "empty": "没有匹配的代理"},
       title: '账号管理',
       description: '管理 AI 平台账号和 Cookie',
       createAccount: '添加账号',

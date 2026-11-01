@@ -2,33 +2,50 @@
   <div class="mt-3 space-y-2">
     <label class="input-label">{{ t('admin.accounts.fallbackProxies.title') }}</label>
     <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.fallbackProxies.hint') }}</p>
-    <div v-for="(id, index) in modelValue" :key="index" class="flex items-center gap-2">
-      <span class="text-xs text-gray-500">{{ index + 1 }}</span>
-      <div class="min-w-0 flex-1">
-        <ProxySelector :model-value="id" :proxies="availableFor(id)" @update:model-value="replace(index, $event)" />
-      </div>
-      <button type="button" class="btn btn-secondary px-2" :aria-label="t('admin.accounts.fallbackProxies.moveUp')" :disabled="index === 0" @click="moveUp(index)">↑</button>
-      <button type="button" class="btn btn-secondary px-2" :aria-label="t('common.delete')" @click="remove(index)">×</button>
+    <p v-if="!primaryId" class="text-sm text-amber-600">{{ t('admin.accounts.fallbackProxies.selectPrimary') }}</p>
+    <div v-if="primaryId" class="flex flex-wrap gap-2" aria-live="polite">
+      <span class="rounded-lg bg-primary-50 px-2 py-1 text-xs text-primary-700">1 · {{ label(primaryId) }}</span>
+      <span v-for="(id, index) in modelValue" :key="id" class="inline-flex items-center gap-1 rounded-lg bg-gray-100 px-2 py-1 text-xs dark:bg-dark-700">
+        {{ index + 2 }} · {{ label(id) }}
+        <button type="button" :disabled="index === 0" :aria-label="t('admin.accounts.fallbackProxies.moveUp')" class="px-1 disabled:opacity-30" @click="moveUp(index)">↑</button>
+        <button type="button" :aria-label="`${t('common.delete')} ${label(id)}`" class="px-1" @click="remove(index)">×</button>
+      </span>
     </div>
-    <button type="button" class="btn btn-secondary text-sm" :disabled="!primaryId || modelValue.length >= 7 || availableFor(null).length === 0" @click="add">
-      {{ t('admin.accounts.fallbackProxies.add') }}
-    </button>
+    <div class="flex items-center gap-2">
+      <input v-model="search" type="search" class="input min-w-0 flex-1" :placeholder="t('admin.proxies.searchProxies')" :aria-label="t('admin.proxies.searchProxies')" />
+      <span class="shrink-0 text-xs text-gray-500">{{ modelValue.length + (primaryId ? 1 : 0) }} / 8</span>
+    </div>
+    <div class="max-h-52 overflow-y-auto rounded-lg border border-gray-200 dark:border-dark-600">
+      <label v-for="proxy in filtered" :key="proxy.id" class="flex cursor-pointer items-center gap-3 border-b border-gray-100 px-3 py-2 last:border-0 hover:bg-gray-50 dark:border-dark-700 dark:hover:bg-dark-700">
+        <input type="checkbox" :checked="proxy.id === primaryId || modelValue.includes(proxy.id)" :disabled="disabled(proxy)" :aria-label="proxy.name" @change="toggle(proxy.id)" />
+        <span class="min-w-0 flex-1"><span class="block truncate text-sm">{{ proxy.name }}</span><span class="block truncate text-xs text-gray-500">{{ proxy.protocol }}://{{ proxy.host }}:{{ proxy.port }}</span></span>
+        <span v-if="!active(proxy)" class="text-xs text-amber-600">{{ t('admin.accounts.fallbackProxies.unavailable') }}</span>
+      </label>
+      <p v-if="!filtered.length" class="p-3 text-sm text-gray-500">{{ t('admin.accounts.fallbackProxies.empty') }}</p>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import ProxySelector from '@/components/common/ProxySelector.vue'
 import type { Proxy } from '@/types'
 
 const props = defineProps<{ modelValue: number[]; primaryId: number | null; proxies: Proxy[] }>()
 const emit = defineEmits<{ 'update:modelValue': [value: number[]] }>()
 const { t } = useI18n()
-const availableFor = (id: number | null) => props.proxies.filter(p => p.id === id || (
-  p.id !== props.primaryId && !props.modelValue.includes(p.id) && p.status === 'active' &&
-  (!p.expires_at || new Date(p.expires_at).getTime() > Date.now())
-))
+const search = ref('')
+const filtered = computed(() => props.proxies.filter(p => `${p.name} ${p.host} ${p.port}`.toLowerCase().includes(search.value.trim().toLowerCase())))
+const label = (id: number) => props.proxies.find(p => p.id === id)?.name || `#${id}`
+const active = (p: Proxy) => p.status === 'active' && (!p.expires_at || new Date(p.expires_at).getTime() > Date.now())
+const disabled = (p: Proxy) => p.id === props.primaryId || !props.primaryId || (!props.modelValue.includes(p.id) && (!active(p) || props.modelValue.length >= 7))
+function toggle(id: number) {
+  if (props.modelValue.includes(id)) emit('update:modelValue', props.modelValue.filter(value => value !== id))
+  else {
+    const proxy = props.proxies.find(p => p.id === id)
+    if (proxy && !disabled(proxy)) emit('update:modelValue', [...props.modelValue, id])
+  }
+}
 function replace(index: number, id: number | null) {
   const ids = [...props.modelValue]
   if (id === null) ids.splice(index, 1)
@@ -40,10 +57,6 @@ function moveUp(index: number) {
   const ids = [...props.modelValue]
   ;[ids[index - 1], ids[index]] = [ids[index], ids[index - 1]]
   emit('update:modelValue', ids)
-}
-function add() {
-  const first = availableFor(null)[0]
-  if (first && props.primaryId && props.modelValue.length < 7) emit('update:modelValue', [...props.modelValue, first.id])
 }
 watch(() => props.primaryId, id => {
   const ids = id ? props.modelValue.filter(value => value !== id) : []

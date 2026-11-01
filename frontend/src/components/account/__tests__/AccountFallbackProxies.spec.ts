@@ -15,9 +15,26 @@ const mountEditor = (ids: number[] = []) => mount(AccountFallbackProxies, {
 })
 
 describe('account fallback proxy selection', () => {
+  it('searches without losing selections and keeps the original proxy checked', async () => {
+    const wrapper = mountEditor([2])
+    const primary = wrapper.find('input[aria-label="proxy-1"]')
+    expect((primary.element as HTMLInputElement).checked).toBe(true)
+    expect((primary.element as HTMLInputElement).disabled).toBe(true)
+    await wrapper.find('input[type="search"]').setValue('proxy-3')
+    expect(wrapper.findAll('input[type="checkbox"]')).toHaveLength(1)
+    await wrapper.find('input[aria-label="proxy-3"]').setValue(true)
+    expect(wrapper.emitted('update:modelValue')?.[0]).toEqual([[2, 3]])
+  })
+  it('allows deselecting an unavailable selected proxy but blocks new unavailable selections', async () => {
+    const wrapper = mountEditor([2])
+    await wrapper.setProps({ proxies: proxies.map(p => ({ ...p, status: 'inactive' })) })
+    expect((wrapper.find('input[aria-label="proxy-3"]').element as HTMLInputElement).disabled).toBe(true)
+    await wrapper.find('input[aria-label="proxy-2"]').setValue(false)
+    expect(wrapper.emitted('update:modelValue')?.[0]).toEqual([[]])
+  })
   it('excludes the primary and already selected proxies when adding', async () => {
     const wrapper = mountEditor([2])
-    await wrapper.findAll('button').at(-1)!.trigger('click')
+    await wrapper.find('input[aria-label="proxy-3"]').setValue(true)
     expect(wrapper.emitted('update:modelValue')?.[0]).toEqual([[2, 3]])
   })
   it('preserves priority order and allows removing a binding', async () => {

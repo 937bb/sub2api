@@ -1,6 +1,6 @@
 export default {
     accounts: {
-    fallbackProxies: {"title": "Rotating egress IPs", "hint": "New requests rotate through the original proxy and these IPs in order. Add up to 7. Established WebSocket sessions keep their route; upstream rate limits do not trigger retries.", "add": "Add rotating IP", "moveUp": "Move earlier in rotation"},
+    fallbackProxies: {"title": "Rotating egress IPs", "hint": "New requests rotate through the original proxy and these IPs in order. Add up to 7. Established WebSocket sessions keep their route; upstream rate limits do not trigger retries.", "add": "Add rotating IP", "moveUp": "Move earlier in rotation", "selectPrimary": "Select the original proxy above, then check additional rotating IPs.", "unavailable": "Unavailable", "empty": "No matching proxies"},
       title: 'Account Management',
       description: 'Manage AI platform accounts and credentials',
       createAccount: 'Create Account',
