@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, RouterLinkStub } from '@vue/test-utils'
+import { nextTick } from 'vue'
 
 import HomeView from '../HomeView.vue'
 
@@ -180,5 +181,63 @@ describe('HomeView compact mode', () => {
     })
 
     expect(modelPlazaDestination(wrapper)).toBeUndefined()
+  })
+
+  it('switches examples without sending a request and uses the configured API base', async () => {
+    const wrapper = mountHome({ api_base_url: 'https://api.example.com/v1/' })
+    const code = () => wrapper.get('.home-code').text()
+    expect(code()).toContain('https://api.example.com/v1/responses')
+    expect(code()).toContain('Authorization: Bearer YOUR_API_KEY')
+
+    await wrapper.get('.home-protocols button:nth-child(3)').trigger('click')
+    expect(code()).toContain('https://api.example.com/v1/messages')
+    expect(code()).toContain('anthropic-version: 2023-06-01')
+    expect(code()).toContain('"max_tokens": 1024')
+    expect(code()).not.toContain('Authorization: Bearer')
+
+    await wrapper.get('.home-protocols button:nth-child(2)').trigger('click')
+    expect(code()).toContain('https://api.example.com/v1/chat/completions')
+    expect(code()).toContain('"messages"')
+    expect(code()).not.toContain('anthropic-version')
+  })
+
+  it('preserves configured branding and subtitle in the default home', () => {
+    const wrapper = mountHome({ site_name: 'Custom brand', site_subtitle: 'Custom introduction' })
+    expect(wrapper.get('.home-brand').text()).toBe('Custom brand')
+    expect(wrapper.get('.home-hero-content').text()).toContain('Custom introduction')
+  })
+
+  it('retains visibility tracking after pausing and resumes without losing content', async () => {
+    let notify: IntersectionObserverCallback | undefined
+    const disconnect = vi.fn()
+    vi.stubGlobal('IntersectionObserver', class {
+      constructor(callback: IntersectionObserverCallback) { notify = callback }
+      observe = vi.fn()
+      disconnect = disconnect
+    })
+    const wrapper = mountHome()
+    try {
+      await nextTick()
+      await nextTick()
+      const root = wrapper.get('[data-testid="default-home"]')
+      expect(root.classes()).toContain('motion-ready')
+      const item = wrapper.get('.home-example').element
+      notify?.([{ target: item, isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver)
+      expect(item.classList.contains('is-revealed')).toBe(true)
+      await wrapper.get('.home-motion-toggle').trigger('click')
+      expect(root.classes()).toContain('motion-paused')
+      expect(root.classes()).toContain('motion-ready')
+      await wrapper.get('.home-motion-toggle').trigger('click')
+      expect(root.classes()).not.toContain('motion-paused')
+      expect(root.classes()).toContain('motion-ready')
+      notify?.([{ target: item, isIntersecting: false } as IntersectionObserverEntry], {} as IntersectionObserver)
+      expect(item.classList.contains('is-in-view')).toBe(false)
+      expect(item.classList.contains('is-revealed')).toBe(true)
+      wrapper.unmount()
+      expect(disconnect).toHaveBeenCalledOnce()
+    } finally {
+      wrapper.unmount()
+      vi.unstubAllGlobals()
+    }
   })
 })

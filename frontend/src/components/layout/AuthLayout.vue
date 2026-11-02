@@ -1,13 +1,13 @@
 <template>
   <div class="console-shell console-auth">
     <section class="console-auth-identity">
-      <div v-if="settingsLoaded" class="console-auth-brand">
-        <img v-if="siteLogo" :src="siteLogo" alt="" />
+      <router-link v-if="settingsLoaded" to="/home" class="console-auth-brand">
+        <img :src="siteLogo || '/logo.svg'" alt="" />
         <span>{{ siteName }}</span>
-      </div>
+      </router-link>
       <div class="console-auth-copy">
         <h1>{{ t('console.authTitle') }}</h1>
-        <p>{{ siteSubtitle || t('console.authDescription') }}</p>
+        <p>{{ displaySubtitle }}</p>
       </div>
       <footer>&copy; {{ currentYear }} {{ siteName }}. All rights reserved.</footer>
     </section>
@@ -25,13 +25,20 @@ import { computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores'
 import { sanitizeUrl } from '@/utils/url'
+import { resolveSiteName } from '@/utils/branding'
 
 const { t } = useI18n()
 const appStore = useAppStore()
 
-const siteName = computed(() => appStore.siteName || 'Sub2API')
+const siteName = computed(() => resolveSiteName(appStore.siteName))
 const siteLogo = computed(() => sanitizeUrl(appStore.siteLogo || '', { allowRelative: true, allowDataUrl: true }))
 const siteSubtitle = computed(() => appStore.cachedPublicSettings?.site_subtitle)
+const displaySubtitle = computed(() => {
+  const subtitle = siteSubtitle.value?.trim()
+  return !subtitle || ['Subscription to API Conversion Platform', 'AI API Gateway Platform'].includes(subtitle)
+    ? t('console.authDescription')
+    : subtitle
+})
 const settingsLoaded = computed(() => appStore.publicSettingsLoaded)
 
 const currentYear = computed(() => new Date().getFullYear())

@@ -12,9 +12,8 @@
         </button>
 
         <router-link :to="authStore.isAdmin ? '/admin/dashboard' : '/dashboard'" class="console-global-brand">
-          <img v-if="siteLogo" :src="siteLogo" alt="" />
-          <span v-else class="console-brand-mark" aria-hidden="true">9<span>37</span></span>
-          <span>{{ appStore.siteName === 'Sub2API' ? '937 Console' : appStore.siteName }}</span>
+          <img :src="siteLogo || '/logo.svg'" alt="" />
+          <span>{{ appStore.siteName }}</span>
         </router-link>
         <nav v-if="authStore.isAdmin && !authStore.isSimpleMode" class="console-global-nav" :aria-label="t('console.workspace')">
           <router-link to="/admin/dashboard" :class="{ 'is-selected': adminArea }">{{ t('console.adminWorkspace') }}</router-link>

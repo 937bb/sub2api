@@ -1,5 +1,15 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { updateFavicon } from '@/utils/branding'
+import { resolveSiteName, updateFavicon } from '@/utils/branding'
+
+describe('resolveSiteName', () => {
+  it.each([undefined, null, '', '  ', 'Sub2API', ' sub2api '])('uses APIHelm for the upstream default %s', (value) => {
+    expect(resolveSiteName(value)).toBe('APIHelm')
+  })
+
+  it('preserves a configured custom brand', () => {
+    expect(resolveSiteName(' Customer Brand ')).toBe('Customer Brand')
+  })
+})
 
 describe('updateFavicon', () => {
   beforeEach(() => {

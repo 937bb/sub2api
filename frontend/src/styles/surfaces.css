@@ -71,15 +71,19 @@
 :is(.console-shell,.console-dialog,.console-popover,.console-auth) .input.pl-7 { padding-left: 1.75rem; }
 :is(.console-shell,.console-dialog,.console-popover,.console-auth) .input.pl-9 { padding-left: 2.25rem; }
 :is(.console-shell,.console-dialog,.console-popover,.console-auth) .input.pl-10 { padding-left: 2.5rem; }
+:is(.console-shell,.console-dialog,.console-popover,.console-auth) .input.pl-11 { padding-left: 2.75rem; }
 :is(.console-shell,.console-dialog,.console-popover,.console-auth) .input.pl-12 { padding-left: 3rem; }
 :is(.console-shell,.console-dialog,.console-popover,.console-auth) .input.pr-8 { padding-right: 2rem; }
 :is(.console-shell,.console-dialog,.console-popover,.console-auth) .input.pr-10 { padding-right: 2.5rem; }
+:is(.console-shell,.console-dialog,.console-popover,.console-auth) .input.pr-11 { padding-right: 2.75rem; }
 :is(.console-shell,.console-dialog,.console-popover,.console-auth) .input.pr-12 { padding-right: 3rem; }
 :is(.console-shell,.console-dialog,.console-popover,.console-auth) :is(.input:focus,.select-trigger-open) { background: var(--console-surface); border-color: var(--console-accent); outline: 2px solid var(--console-selected); outline-offset: 0; }
 :is(.console-shell,.console-dialog,.console-popover,.console-auth) :is(.input-error,.select-trigger-error) { border-color: #dc2626; }
 :is(.console-shell,.console-dialog,.console-popover,.console-auth) :is(input,textarea):disabled { opacity: .6; cursor: not-allowed; }
 :is(.console-shell,.console-dialog,.console-popover,.console-auth) .input-label { margin-bottom: 7px; color: var(--console-ink); font-size: 13px; line-height: 20px; font-weight: 500; }
 :is(.console-shell,.console-dialog,.console-popover,.console-auth) .input-hint { margin-top: 6px; color: var(--console-muted); line-height: 1.65; font-size: 12px; }
+.console-auth .input { min-height: 44px; padding-top: 11px; padding-bottom: 11px; font-size: 14px; }
+.console-auth .btn { min-height: 44px; font-size: 14px; }
 :is(.console-dialog,.console-popover) :is(input,textarea)::placeholder { color: var(--console-muted); opacity: 1; }
 :is(.console-dialog,.console-popover) :is(input,textarea) { caret-color: var(--console-accent); }
 :is(.console-dialog,.console-popover) :is(button,a,input,select,textarea,summary):focus-visible { outline: 2px solid var(--console-accent); outline-offset: 2px; }
