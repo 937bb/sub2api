@@ -8,21 +8,23 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestUpstreamRequestIDFromHeaders_UnconfiguredAccountRecordsNothing(t *testing.T) {
+func TestUpstreamRequestIDFromHeaders_AutomaticDetection(t *testing.T) {
 	h := http.Header{}
-	h.Set("X-Client-Request-ID", "sub2api-client")
-	h.Set("X-Request-ID", "sub2api-local")
-	h.Set("X-Oneapi-Request-Id", "oneapi-1")
-	h.Set("Request-Id", "req_official")
-	h.Set("xai-request-id", "xai-1")
-	h.Set("x-goog-request-id", "goog-1")
-
-	require.Equal(t, "", UpstreamRequestIDFromHeaders(nil, h))
-	for _, platform := range []string{PlatformAnthropic, PlatformOpenAI, PlatformGemini, PlatformAntigravity, PlatformGrok} {
-		require.Equal(t, "", UpstreamRequestIDFromHeaders(&Account{Platform: platform}, h), platform)
+	h.Set("X-Request-ID", "provider-id")
+	h.Set("X-Oneapi-Request-Id", "relay-id")
+	for _, account := range []*Account{nil, {}, {Extra: map[string]any{AccountExtraUpstreamRequestIDHeader: "  "}}} {
+		header, id := ResolveUpstreamRequestID(account, h)
+		require.Equal(t, "X-Oneapi-Request-Id", header)
+		require.Equal(t, "relay-id", id)
 	}
-	blank := &Account{Platform: PlatformOpenAI, Extra: map[string]any{AccountExtraUpstreamRequestIDHeader: "   "}}
-	require.Equal(t, "", UpstreamRequestIDFromHeaders(blank, h))
+	for _, name := range upstreamRequestIDHeaders {
+		t.Run(name, func(t *testing.T) {
+			h := http.Header{}
+			h.Set(name, " test-id ")
+			require.Equal(t, "test-id", UpstreamRequestIDFromHeaders(nil, h))
+		})
+	}
+	require.Empty(t, UpstreamRequestIDFromHeaders(nil, http.Header{"X-Request-Id": {"invalid\nvalue"}}))
 }
 
 func TestUpstreamRequestIDFromHeaders_ReadsOnlyConfiguredHeader(t *testing.T) {
@@ -50,8 +52,8 @@ func TestUsageUpstreamRequestIDPtr(t *testing.T) {
 	h.Set("X-Request-ID", strings.Repeat("a", 200))
 	require.Nil(t, usageUpstreamRequestIDPtr(account, h, true))
 	require.Nil(t, usageUpstreamRequestIDPtr(account, http.Header{}, false))
-	require.Nil(t, usageUpstreamRequestIDPtr(nil, h, false))
-	require.Nil(t, usageUpstreamRequestIDPtr(&Account{}, h, false))
+	require.NotNil(t, usageUpstreamRequestIDPtr(nil, h, false))
+	require.NotNil(t, usageUpstreamRequestIDPtr(&Account{}, h, false))
 
 	got := usageUpstreamRequestIDPtr(account, h, false)
 	require.NotNil(t, got)

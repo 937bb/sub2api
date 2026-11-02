@@ -117,7 +117,7 @@ func (r *usageLogRepository) ListWithFilters(ctx context.Context, params paginat
 		args = append(args, filters.GroupID)
 	}
 	if requestID := strings.TrimSpace(filters.RequestID); requestID != "" {
-		conditions = append(conditions, fmt.Sprintf("request_id = $%d", len(args)+1))
+		conditions = append(conditions, fmt.Sprintf("(request_id = $%d OR request_id = 'client:' || $%d OR upstream_request_id = $%d)", len(args)+1, len(args)+1, len(args)+1))
 		args = append(args, requestID)
 	}
 	conditions, args = appendUsageLogModelWhereCondition(conditions, args, filters.Model, filters.ModelFilterSource)

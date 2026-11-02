@@ -521,6 +521,8 @@ export default {
       account: 'Account',
       group: 'Group',
       requestId: 'Request ID',
+      traceRequestId: 'Request ID / upstream ID',
+      traceRequestIdPlaceholder: 'Paste a complete ID and press Enter',
       upstreamRequestId: 'Upstream ID',
       responseTrace: 'Response Trace',
       upstreamResponseId: 'Upstream Response ID',

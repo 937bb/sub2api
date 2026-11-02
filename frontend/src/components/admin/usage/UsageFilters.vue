@@ -116,6 +116,10 @@
         </div>
       </div>
       <div v-show="advancedOpen" id="admin-usage-advanced" class="console-usage-filter-grid console-usage-advanced">
+        <div v-if="mode === 'usage'" class="w-full sm:w-auto sm:min-w-[260px]">
+          <label class="input-label">{{ t('admin.usage.traceRequestId') }}</label>
+          <input v-model.trim="filters.request_id" type="text" class="input font-mono" data-testid="usage-request-id-filter" :placeholder="t('admin.usage.traceRequestIdPlaceholder')" @change="emitChange" @keyup.enter="emitChange" />
+        </div>
         <!-- Account Filter -->
         <div ref="accountSearchRef" class="usage-filter-dropdown relative w-full sm:w-auto sm:min-w-[220px]">
           <label class="input-label">{{ t('admin.usage.account') }}</label>
@@ -256,7 +260,7 @@ const advancedOpen = ref(false)
 const activeAdvancedCount = computed(() => {
   const keys = props.mode === 'errors'
     ? ['account_id', 'error_phase', 'error_category', 'status_code']
-    : ['account_id', 'request_type', 'native_compaction_v2', 'billing_type', ...(props.mode === 'usage' ? ['billing_mode', 'upstream_model_mismatch'] : [])]
+    : ['account_id', 'request_type', 'native_compaction_v2', 'billing_type', ...(props.mode === 'usage' ? ['billing_mode', 'upstream_model_mismatch', 'request_id'] : [])]
   return keys.filter(key => filters.value[key] !== null && filters.value[key] !== undefined && filters.value[key] !== '').length
 })
 

@@ -9,17 +9,17 @@ import (
 	"golang.org/x/net/http/httpguts"
 )
 
-// AccountExtraUpstreamRequestIDHeader 是账户 extra 中的键，值为直接上游声明请求标识的响应头名。
-// 未指定时不记录上游请求标识。
+// AccountExtraUpstreamRequestIDHeader selects an explicit response header.
+// Unconfigured accounts automatically recognize supported upstream headers.
 const AccountExtraUpstreamRequestIDHeader = "upstream_request_id_header"
 
 const (
 	maxUpstreamRequestIDHeaderNameLen = 64
-	// maxUsageUpstreamRequestIDLen 与 usage_logs.upstream_request_id VARCHAR(128) 对齐。
+	// Keep IDs within the usage_logs.upstream_request_id column width.
 	maxUsageUpstreamRequestIDLen = 128
 )
 
-// UpstreamRequestIDHeaderName 返回账户指定的上游请求标识头名，未指定时为空串。
+// UpstreamRequestIDHeaderName returns an explicit account override, if any.
 func UpstreamRequestIDHeaderName(account *Account) string {
 	if account == nil {
 		return ""
@@ -27,21 +27,37 @@ func UpstreamRequestIDHeaderName(account *Account) string {
 	return strings.TrimSpace(account.GetExtraString(AccountExtraUpstreamRequestIDHeader))
 }
 
-// UpstreamRequestIDFromHeaders 从直接上游的响应头解析请求标识。
-// 只读账户指定的头；账户未指定头名时恒为空串。
-func UpstreamRequestIDFromHeaders(account *Account, h http.Header) string {
-	if len(h) == 0 {
-		return ""
-	}
-	name := UpstreamRequestIDHeaderName(account)
-	if name == "" {
-		return ""
-	}
-	return strings.TrimSpace(h.Get(name))
+// Recognize relay IDs before provider IDs, which a relay may also forward.
+var upstreamRequestIDHeaders = []string{
+	"X-Oneapi-Request-Id", "X-Client-Request-ID", "Request-Id", "X-Request-ID",
+	"Xai-Request-Id", "X-Goog-Request-Id", "X-Amzn-Requestid",
 }
 
-// usageUpstreamRequestIDPtr 生成落库到 usage_logs.upstream_request_id 的值。
-// WS 轮次没有 HTTP 响应头，保持 nil；超长时截断到列宽而不是让整条用量行失败。
+// ResolveUpstreamRequestID returns the response header name and its ID.
+// An explicit override is authoritative, including when that header is absent.
+func ResolveUpstreamRequestID(account *Account, h http.Header) (string, string) {
+	names := upstreamRequestIDHeaders
+	if name := UpstreamRequestIDHeaderName(account); name != "" {
+		names = []string{name}
+	}
+	for _, name := range names {
+		id := strings.TrimSpace(h.Get(name))
+		if id == "" || !httpguts.ValidHeaderFieldValue(id) {
+			continue
+		}
+		return name, id
+	}
+	return "", ""
+}
+
+// UpstreamRequestIDFromHeaders reads an explicit or automatically detected ID.
+func UpstreamRequestIDFromHeaders(account *Account, h http.Header) string {
+	_, id := ResolveUpstreamRequestID(account, h)
+	return id
+}
+
+// usageUpstreamRequestIDPtr keeps HTTP request IDs separate from WS response IDs.
+// Overlong IDs are truncated without splitting a UTF-8 character.
 func usageUpstreamRequestIDPtr(account *Account, h http.Header, wsMode bool) *string {
 	if wsMode {
 		return nil
@@ -62,8 +78,8 @@ func usageUpstreamRequestIDPtr(account *Account, h http.Header, wsMode bool) *st
 	return &id
 }
 
-// ValidateUpstreamRequestIDHeaderExtra 校验并规范化 extra 中的上游请求标识头名：
-// 必须是合法的 HTTP 头字段名且不超过 64 字节；空白值视为未指定并从 extra 中移除。
+// ValidateUpstreamRequestIDHeaderExtra validates an explicit header override.
+// Empty values remove the override and restore automatic detection.
 func ValidateUpstreamRequestIDHeaderExtra(extra map[string]any) error {
 	if extra == nil {
 		return nil

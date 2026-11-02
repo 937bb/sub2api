@@ -518,6 +518,8 @@ export default {
       account: '账户',
       group: '分组',
       requestId: '请求ID',
+      traceRequestId: '请求 ID / 上游 ID',
+      traceRequestIdPlaceholder: '粘贴完整 ID，回车查询',
       upstreamRequestId: '上游ID',
       responseTrace: '响应链路',
       upstreamResponseId: '上游响应ID',
