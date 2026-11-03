@@ -15,6 +15,32 @@ import (
 	entsql "entgo.io/ent/dialect/sql"
 )
 
+func TestCreateAccountRecordPersistsAutomaticDeviceSeedBeforeInsert(t *testing.T) {
+	client := dbent.NewClient()
+	stop := errors.New("stop before database insert")
+	var persisted map[string]any
+	client.Account.Use(func(next dbent.Mutator) dbent.Mutator {
+		return dbent.MutateFunc(func(ctx context.Context, mutation dbent.Mutation) (dbent.Value, error) {
+			var exists bool
+			persisted, exists = mutation.(*dbent.AccountMutation).Extra()
+			require.True(t, exists)
+			return nil, stop
+		})
+	})
+	account := &service.Account{
+		Name: "direct-api-import", Platform: service.PlatformOpenAI,
+		Type: service.AccountTypeOAuth, Status: service.StatusActive,
+	}
+	require.ErrorIs(t, createAccountRecord(context.Background(), client, account), stop)
+	seed, ok := persisted["codex_fingerprint_seed"].(string)
+	require.True(t, ok)
+	require.Regexp(t, codexFingerprintSeedCanonicalPattern, seed)
+	require.Equal(t, seed, account.Extra["codex_fingerprint_seed"])
+	// Retrying persistence of the same prepared account retains its identity.
+	require.ErrorIs(t, createAccountRecord(context.Background(), client, account), stop)
+	require.Equal(t, seed, persisted["codex_fingerprint_seed"])
+}
+
 func TestBulkUpdateEnsuresCodexFingerprintSeedWithPerRowSQL(t *testing.T) {
 	exec := &recordingSQLExecutor{result: rowsAffectedResult(0)}
 	repo := newAccountRepositoryWithSQL(nil, exec, nil)

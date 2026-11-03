@@ -287,3 +287,20 @@ device/seed/account ownership deliberately changes the device. Accounts missing
 all stable identity inputs must be repaired rather than sharing a fabricated
 constant. Auth endpoints keep their own header contract instead of receiving
 inference-only installation metadata.
+
+### Automatic provisioning on every creation path (2026-11-04)
+
+New OpenAI OAuth and setup-token accounts now receive a persisted, random device
+seed even when the caller omits `extra`, leaves convergence off, or imports only
+an access token without ChatGPT account metadata. Manual OAuth creation, single
+admin API writes, batch creation and Codex imports share the same initializer;
+the legacy account service and common repository insert also enforce it.
+Client-supplied seeds are stripped at the service boundary, so repeated imports
+cannot accidentally clone a supplied seed across new accounts. Persistence
+retries and subsequent full edits preserve the already generated seed.
+
+This initializes device identity only; it does not silently enable session or
+thread convergence. Existing explicit device IDs remain authoritative. Credential
+shadows continue to inherit their parent's device, and ordinary API-key accounts
+retain their own protocol contract. Existing accounts keep the installation
+identity policy described above without a bulk reseed or database migration.

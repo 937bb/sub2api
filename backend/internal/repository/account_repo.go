@@ -142,6 +142,7 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 	if account == nil {
 		return service.ErrAccountNilInput
 	}
+	service.InitializeOpenAIAccountFingerprint(account)
 
 	builder := client.Account.Create().
 		SetName(account.Name).

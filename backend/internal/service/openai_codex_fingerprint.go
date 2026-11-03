@@ -140,15 +140,29 @@ func codexFingerprintSeed(extra map[string]any) (string, bool) {
 }
 
 func prepareCodexFingerprintExtraForCreate(platform, accountType string, extra map[string]any) map[string]any {
-	prepared := stripCodexFingerprintSeed(extra)
-	if platform != PlatformOpenAI || (accountType != AccountTypeOAuth && accountType != AccountTypeSetupToken) || !codexFingerprintModeRequiresSeed(codexFingerprintModeFromExtra(prepared)) {
-		return prepared
+	account := &Account{Platform: platform, Type: accountType, Extra: stripCodexFingerprintSeed(extra)}
+	InitializeOpenAIAccountFingerprint(account)
+	return account.Extra
+}
+
+// InitializeOpenAIAccountFingerprint gives every new OAuth credential its own
+// durable device seed, including API imports without identity metadata. The
+// persistence boundary calls this as well so alternative creation paths cannot
+// omit initialization. Shadows inherit the credential owner's identity instead.
+// Session/thread convergence remains a separate, explicitly selected policy.
+func InitializeOpenAIAccountFingerprint(account *Account) {
+	if account == nil || !account.IsOpenAIOAuthLike() || account.IsShadow() {
+		return
 	}
-	if prepared == nil {
-		prepared = make(map[string]any, 1)
+	if _, ok := codexFingerprintSeed(account.Extra); ok {
+		return
 	}
-	prepared[codexFingerprintSeedExtraKey] = newCodexFingerprintSeed()
-	return prepared
+	extra := maps.Clone(account.Extra)
+	if extra == nil {
+		extra = make(map[string]any, 1)
+	}
+	extra[codexFingerprintSeedExtraKey] = newCodexFingerprintSeed()
+	account.Extra = extra
 }
 
 func prepareCodexFingerprintExtraForUpdate(account *Account, extra map[string]any) map[string]any {

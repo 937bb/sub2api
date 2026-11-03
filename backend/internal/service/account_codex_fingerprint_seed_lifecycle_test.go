@@ -9,6 +9,83 @@ import (
 
 const userSuppliedCodexFingerprintSeed = "22222222-2222-4222-8222-222222222222"
 
+func TestAccountCreationAutomaticallyInitializesDeviceForEveryEntryPoint(t *testing.T) {
+	for _, accountType := range []string{AccountTypeOAuth, AccountTypeSetupToken} {
+		for _, mode := range []string{"", "off", "device", "session", "full"} {
+			t.Run(accountType+"/"+mode, func(t *testing.T) {
+				repo := &upstreamBillingProbeAccountRepo{accounts: make(map[int64]*Account)}
+				admin := &adminServiceImpl{accountRepo: repo}
+				legacy := NewAccountService(repo, nil)
+				var extra map[string]any
+				if mode != "" {
+					extra = map[string]any{
+						codexFingerprintSeedExtraKey: userSuppliedCodexFingerprintSeed,
+						codexFingerprintModeExtraKey: mode,
+					}
+				}
+				seen := make(map[string]bool)
+				// Manual OAuth, single API creation and batch/import handlers share
+				// CreateAccount. The legacy service and persistence layer also guard it.
+				for i := 0; i < 3; i++ {
+					account, err := admin.CreateAccount(context.Background(), &CreateAccountInput{
+						Name: "api-import", Platform: PlatformOpenAI, Type: accountType,
+						Credentials: map[string]any{"access_token": "token-without-account-metadata"},
+						Extra:       extra, SkipDefaultGroupBind: true,
+					})
+					require.NoError(t, err)
+					seed := requireValidCodexFingerprintSeed(t, account.Extra)
+					require.NotEqual(t, userSuppliedCodexFingerprintSeed, seed)
+					require.False(t, seen[seed])
+					seen[seed] = true
+					device := codexAccountInstallationID(account)
+					require.NotEmpty(t, device)
+					InitializeOpenAIAccountFingerprint(account)
+					require.Equal(t, seed, requireValidCodexFingerprintSeed(t, account.Extra))
+					account.Credentials["access_token"] = "refreshed-token"
+					require.Equal(t, device, codexAccountInstallationID(account))
+				}
+				created, err := legacy.Create(context.Background(), CreateAccountRequest{
+					Name: "legacy-import", Platform: PlatformOpenAI, Type: accountType,
+				})
+				require.NoError(t, err)
+				seed := requireValidCodexFingerprintSeed(t, created.Extra)
+				require.False(t, seen[seed])
+				device := codexAccountInstallationID(created)
+				updated, err := legacy.Update(context.Background(), created.ID, UpdateAccountRequest{
+					Extra: &map[string]any{"custom": "replacement-extra"},
+				})
+				require.NoError(t, err)
+				require.Equal(t, seed, requireValidCodexFingerprintSeed(t, updated.Extra))
+				require.Equal(t, device, codexAccountInstallationID(updated))
+				if extra != nil {
+					require.Equal(t, userSuppliedCodexFingerprintSeed, extra[codexFingerprintSeedExtraKey])
+				}
+			})
+		}
+	}
+}
+
+func TestAutomaticAccountFingerprintLeavesShadowsAndOtherPlatformsAlone(t *testing.T) {
+	parentID := int64(11)
+	for _, account := range []*Account{
+		nil,
+		{Platform: PlatformOpenAI, Type: AccountTypeAPIKey},
+		{Platform: PlatformAnthropic, Type: AccountTypeOAuth},
+		{Platform: PlatformOpenAI, Type: AccountTypeOAuth, ParentAccountID: &parentID},
+	} {
+		InitializeOpenAIAccountFingerprint(account)
+		if account != nil {
+			require.Nil(t, account.Extra)
+		}
+	}
+	shared := map[string]any{"openai_device_id": "configured-device", codexFingerprintSeedExtraKey: "invalid"}
+	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth, Extra: shared}
+	InitializeOpenAIAccountFingerprint(account)
+	requireValidCodexFingerprintSeed(t, account.Extra)
+	require.Equal(t, "configured-device", codexAccountInstallationID(account))
+	require.Equal(t, "invalid", shared[codexFingerprintSeedExtraKey])
+}
+
 func requireValidCodexFingerprintSeed(t *testing.T, extra map[string]any) string {
 	t.Helper()
 	seed, ok := codexFingerprintSeed(extra)
