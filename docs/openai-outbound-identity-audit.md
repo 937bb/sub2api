@@ -46,9 +46,8 @@ a deliberate opt-out for compatibility bridges.
 
 `X-Client-Request-ID`, `Session-Id`, and `Thread-Id` now pass through both HTTP allowlists and existing account
 scoping, as it already did for WS. Installation, window, session, thread and turn
-identifiers retain their existing account isolation and explicit convergence
-modes. Convergence remains opt-in; this change does not make all requests share
-one device or session.
+identifiers retain account isolation. The account installation policy below fixes
+one device per credential; additional session/thread convergence remains opt-in.
 
 Ordinary API-key/custom-provider forwarding retains explicit header overrides.
 The existing synthetic capability probes and Codex manifest adapter continue to
@@ -255,3 +254,36 @@ files / 3099 tests, typecheck and production build. The first frontend run
 reported animation callbacks after environment teardown; KeyUsageView's fixture
 now owns and clears fake timers before restoring globals. Its assertions and
 production UI code are unchanged. Production rollout is recorded separately.
+
+
+## Account installation identity (2026-11-04)
+
+Each usable OpenAI OAuth credential now resolves a single installation identity
+independent of downstream API keys, client installation headers, conversation
+IDs and refreshable access tokens. An explicit account device ID takes priority;
+existing persistent fingerprint seeds retain the previous installation UUID.
+Otherwise the durable ChatGPT account/user namespace deterministically derives
+one installation UUID across processes and restarts. No identity is fabricated
+from a deployment-local row ID when stable account information is absent.
+
+Both installation aliases in existing client metadata and embedded turn metadata
+use this identity. HTTP and WS builders add the installation header even for SDK
+requests without one, collapsing header case aliases. Payloads without client
+metadata keep their existing shape, including compact requests. The credential
+owner supplies the device for shadow accounts even when their local row opts into
+session convergence. Existing explicit session/full convergence remains opt-in;
+ordinary sessions, threads, turns and request IDs retain separate scopes.
+
+The shared scheduler projection preserves device, account/user and UA inputs.
+OpenAI HTTP/TLS pools enforce account isolation even when the global pool setting
+is proxy-only. WS pool compatibility includes the resolved account installation
+when session convergence is off, so an edited device cannot reuse an old
+handshake. The TLS/HTTP client protocol profile stays coherent with the selected
+client family; TLS randoms, cryptographic keys and request IDs are not frozen.
+
+This requires no schema migration or bulk account update. The derived fallback
+is stable while its upstream account namespace is unchanged; changing explicit
+device/seed/account ownership deliberately changes the device. Accounts missing
+all stable identity inputs must be repaired rather than sharing a fabricated
+constant. Auth endpoints keep their own header contract instead of receiving
+inference-only installation metadata.

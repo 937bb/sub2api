@@ -2438,6 +2438,11 @@ func normalizeOpenAIWSHandshakeCompatibility(account *Account, headers http.Head
 		}
 	}
 	mode := activeCodexFingerprintMode(account)
+	// A changed account device must not reuse a handshake with the old identity,
+	// including accounts that do not opt into session/thread convergence.
+	if codexAccountInstallationID(account) != "" {
+		key.codexInstallationID = normalizeOpenAIWSStableIdentityHeader(headers, "x-codex-installation-id")
+	}
 	if mode == codexFingerprintOff {
 		return key
 	}

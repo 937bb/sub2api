@@ -74,6 +74,38 @@ func codexAccountIdentityNamespace(account *Account) string {
 	return ""
 }
 
+// codexAccountInstallationID belongs to the credential, never to a downstream
+// API key, client installation, session or access-token refresh. Existing explicit
+// devices and persisted convergence seeds retain their identities. Otherwise the
+// durable upstream account namespace makes all replicas derive the same device.
+func codexAccountInstallationID(account *Account) string {
+	if account == nil || !account.IsOpenAIOAuthLike() {
+		return ""
+	}
+	if deviceID := account.GetOpenAIDeviceID(); deviceID != "" {
+		return deviceID
+	}
+	if seed, ok := codexFingerprintSeed(account.Extra); ok {
+		return resolveConvergedInstallationID(account, seed)
+	}
+	if namespace := codexAccountIdentityNamespace(account); namespace != "" {
+		return deriveStableUUIDv4("sub2api:codex-account-installation:v1:" + namespace)
+	}
+	return ""
+}
+
+// Convergence remains a per-row policy, but a shadow must use its credential
+// owner's device just like the HTTP headers and native WS payloads do.
+func resolveCodexFingerprintIDsForAttempt(c *gin.Context, account *Account, headers http.Header) *codexFingerprintIDs {
+	ids := resolveCodexFingerprintIDsFromRequest(account, headers)
+	if ids != nil {
+		if installationID := codexAccountInstallationID(codexAccountIdentitySource(c, account)); installationID != "" {
+			ids.installationID = installationID
+		}
+	}
+	return ids
+}
+
 // isolateOpenAIUpstreamSessionID preserves the existing API-key isolation while
 // adding the selected OAuth credential namespace. A scheduler failover therefore
 // cannot send the same session/conversation identity through two upstream accounts.
@@ -91,6 +123,11 @@ func isolateOpenAIUpstreamSessionID(apiKeyID int64, account *Account, raw string
 }
 
 func scopeCodexAccountIdentityValue(account *Account, apiKeyID int64, kind, raw string) string {
+	if kind == "installation" {
+		if installationID := codexAccountInstallationID(account); installationID != "" {
+			return installationID
+		}
+	}
 	raw = strings.TrimSpace(raw)
 	namespace := codexAccountIdentityNamespace(account)
 	if raw == "" || namespace == "" {
@@ -124,13 +161,13 @@ var codexAccountIdentityFields = []struct {
 }
 
 func applyCodexAccountIdentityFields(values map[string]any, account *Account, apiKeyID int64) bool {
-	if values == nil || codexAccountIdentityNamespace(account) == "" {
+	if values == nil || (codexAccountIdentityNamespace(account) == "" && codexAccountInstallationID(account) == "") {
 		return false
 	}
 	changed := false
 	for _, field := range codexAccountIdentityFields {
 		raw, ok := values[field.name].(string)
-		if !ok || strings.TrimSpace(raw) == "" {
+		if (!ok || strings.TrimSpace(raw) == "") && field.kind != "installation" {
 			continue
 		}
 		next := scopeCodexAccountIdentityValue(account, apiKeyID, field.kind, raw)
@@ -163,7 +200,7 @@ func applyCodexAccountIdentityEmbeddedMetadata(values map[string]any, account *A
 }
 
 func applyCodexAccountIdentityClientMetadataMap(requestBody map[string]any, account *Account, apiKeyID int64) bool {
-	if requestBody == nil || codexAccountIdentityNamespace(account) == "" {
+	if requestBody == nil || (codexAccountIdentityNamespace(account) == "" && codexAccountInstallationID(account) == "") {
 		return false
 	}
 	changed := false
@@ -196,7 +233,7 @@ func applyCodexAccountIdentityClientMetadataMap(requestBody map[string]any, acco
 // subobjects with gjson/sjson. The passthrough hot path never unmarshals the
 // potentially multi-megabyte request body.
 func applyCodexAccountIdentityClientMetadataRaw(body []byte, account *Account, apiKeyID int64) ([]byte, bool, error) {
-	if len(body) == 0 || codexAccountIdentityNamespace(account) == "" {
+	if len(body) == 0 || (codexAccountIdentityNamespace(account) == "" && codexAccountInstallationID(account) == "") {
 		return body, false, nil
 	}
 	root := gjson.ParseBytes(body)
@@ -250,7 +287,7 @@ func applyCodexAccountIdentityClientMetadataRaw(body []byte, account *Account, a
 }
 
 func applyCodexAccountIdentityHeaders(headers http.Header, account *Account, apiKeyID int64) {
-	if headers == nil || codexAccountIdentityNamespace(account) == "" {
+	if headers == nil || (codexAccountIdentityNamespace(account) == "" && codexAccountInstallationID(account) == "") {
 		return
 	}
 	for _, field := range codexAccountIdentityFields {
@@ -262,6 +299,17 @@ func applyCodexAccountIdentityHeaders(headers http.Header, account *Account, api
 		raw := strings.TrimSpace(headers.Get(field.name))
 		if raw != "" {
 			headers.Set(field.name, scopeCodexAccountIdentityValue(account, apiKeyID, field.kind, raw))
+		}
+	}
+	// Include the account device even when SDKs omit client installation headers;
+	// collapse case aliases so a downstream header cannot survive beside it.
+	if installationID := codexAccountInstallationID(account); installationID != "" {
+		setCodexIdentityHeader(headers, "x-codex-installation-id", installationID)
+		for key := range headers {
+			if strings.EqualFold(key, "installation_id") {
+				setCodexIdentityHeader(headers, "installation_id", installationID)
+				break
+			}
 		}
 	}
 	if raw := strings.TrimSpace(headers.Get(openAIWSTurnMetadataHeader)); raw != "" {
