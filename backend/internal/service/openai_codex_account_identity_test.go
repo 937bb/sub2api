@@ -165,6 +165,7 @@ func TestBuildOpenAIWSHeadersNamespacesCodexIdentityByOAuthAccount(t *testing.T)
 		"token", true, "client-session", true,
 	)
 	require.NoError(t, err)
+	require.Equal(t, first.Get("thread-id"), httpRequest.Header.Get("thread-id"), "HTTP and WS must preserve the same scoped thread")
 	require.Equal(t, httpRequest.Header.Get("session_id"), first.Get("session_id"), "HTTP and WS must derive the same identity from the raw client key")
 }
 

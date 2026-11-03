@@ -3,15 +3,16 @@ package service
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyurl"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	openaiwsv2 "github.com/Wei-Shaw/sub2api/internal/service/openai_ws_v2"
 	coderws "github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
@@ -32,7 +33,7 @@ type OpenAIWSTransportMetricsSnapshot struct {
 	TransportReuseRatio    float64 `json:"transport_reuse_ratio"`
 }
 
-// openAIWSClientConn 抽象 WS 客户端连接，便于替换底层实现。
+// openAIWSClientConn abstracts the upstream WebSocket implementation.
 type openAIWSClientConn interface {
 	WriteJSON(ctx context.Context, value any) error
 	ReadMessage(ctx context.Context) ([]byte, error)
@@ -47,23 +48,23 @@ type openAIWSIdlePingCapable interface {
 	SupportsIdlePingWithoutReader() bool
 }
 
-// openAIWSReaderLoopCapable 声明该实现的控制帧只在阻塞读期间被消费，
-// 连接池需为其常驻一个读循环，否则空闲连接无法应答上游 ping。
+// openAIWSReaderLoopCapable identifies implementations that require a resident
+// reader to consume control frames and answer upstream pings while idle.
 type openAIWSReaderLoopCapable interface {
 	RequiresReaderLoop() bool
 }
 
-// openAIWSUpstreamPingCounter 报告连接收到过多少个上游 ping 帧，用于核对读循环是否在应答保活。
+// openAIWSUpstreamPingCounter exposes received pings for liveness diagnostics.
 type openAIWSUpstreamPingCounter interface {
 	UpstreamPingCount() int64
 }
 
-// openAIWSForceCloser 不做关闭握手直接切断连接，用于对端已不响应的场景。
+// openAIWSForceCloser terminates unresponsive connections without a close handshake.
 type openAIWSForceCloser interface {
 	CloseNow() error
 }
 
-// openAIWSClientDialer 抽象 WS 建连器。
+// openAIWSClientDialer abstracts upstream connection establishment.
 type openAIWSClientDialer interface {
 	Dial(ctx context.Context, wsURL string, headers http.Header, proxyURL string) (openAIWSClientConn, int, http.Header, error)
 }
@@ -125,15 +126,17 @@ func (d *coderOpenAIWSClientDialer) Dial(
 
 	wrapped := &coderOpenAIWSClientConn{}
 	opts := &coderws.DialOptions{
-		HTTPHeader:      cloneHeader(headers),
-		CompressionMode: coderws.CompressionContextTakeover,
+		HTTPHeader:               cloneHeader(headers),
+		OfferClientMaxWindowBits: openai.IsLocalCLIUserAgent(headers.Get("User-Agent")),
+		CompressionMode:          coderws.CompressionContextTakeover,
 		OnPingReceived: func(context.Context, []byte) bool {
 			wrapped.upstreamPings.Add(1)
 			return true
 		},
 	}
-	if proxy := strings.TrimSpace(proxyURL); proxy != "" {
-		proxyClient, err := d.proxyHTTPClient(proxy)
+	localTLS := openai.IsLocalCLIUserAgent(headers.Get("User-Agent"))
+	if proxy := strings.TrimSpace(proxyURL); proxy != "" || localTLS {
+		proxyClient, err := d.transportHTTPClient(proxy, localTLS)
 		if err != nil {
 			return nil, 0, nil, err
 		}
@@ -155,8 +158,7 @@ func (d *coderOpenAIWSClientDialer) Dial(
 		}
 		return nil, status, respHeaders, &openAIWSHandshakeError{Body: body, Err: err}
 	}
-	// coder/websocket 默认单消息读取上限为 32KB，Codex WS 事件（如 rate_limits/大 delta）
-	// 可能超过该阈值，需显式提高上限，避免本地 read_fail(message too big)。
+	// Codex events can exceed the library default of 32 KB per message.
 	conn.SetReadLimit(openAIWSMessageReadLimitBytes)
 	respHeaders := http.Header(nil)
 	if resp != nil {
@@ -167,22 +169,30 @@ func (d *coderOpenAIWSClientDialer) Dial(
 }
 
 func (d *coderOpenAIWSClientDialer) proxyHTTPClient(proxy string) (*http.Client, error) {
+	return d.transportHTTPClient(proxy, false)
+}
+
+func (d *coderOpenAIWSClientDialer) transportHTTPClient(proxy string, localTLS bool) (*http.Client, error) {
 	if d == nil {
 		return nil, errors.New("openai ws dialer is nil")
 	}
 	normalizedProxy := strings.TrimSpace(proxy)
-	if normalizedProxy == "" {
+	if normalizedProxy == "" && !localTLS {
 		return nil, errors.New("proxy url is empty")
 	}
-	parsedProxyURL, err := url.Parse(normalizedProxy)
+	normalizedProxy, parsedProxyURL, err := proxyurl.Parse(normalizedProxy)
 	if err != nil {
-		return nil, fmt.Errorf("invalid proxy url: %w", err)
+		return nil, err
+	}
+	cacheKey := normalizedProxy
+	if localTLS {
+		cacheKey = "codex-rustls:" + normalizedProxy
 	}
 	now := time.Now().UnixNano()
 
 	d.proxyMu.Lock()
 	defer d.proxyMu.Unlock()
-	if entry, ok := d.proxyClients[normalizedProxy]; ok && entry != nil && entry.client != nil {
+	if entry, ok := d.proxyClients[cacheKey]; ok && entry != nil && entry.client != nil {
 		entry.lastUsedUnixNano = now
 		d.proxyHits.Add(1)
 		return entry.client, nil
@@ -196,8 +206,19 @@ func (d *coderOpenAIWSClientDialer) proxyHTTPClient(proxy string) (*http.Client,
 		TLSHandshakeTimeout: 10 * time.Second,
 		ForceAttemptHTTP2:   true,
 	}
+	if localTLS {
+		if err := tlsfingerprint.ConfigureTLS(transport, tlsfingerprint.CodexLocalWSProfile(), parsedProxyURL); err != nil {
+			return nil, err
+		}
+		transport.DisableCompression = true
+	}
 	client := &http.Client{Transport: transport}
-	d.proxyClients[normalizedProxy] = &openAIWSProxyClientEntry{
+	if localTLS {
+		client.Transport = newCodexWSHTTPTransport(transport, parsedProxyURL)
+		// A redirect must not send a plaintext request through the TLS-only dialer.
+		client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	}
+	d.proxyClients[cacheKey] = &openAIWSProxyClientEntry{
 		client:           client,
 		lastUsedUnixNano: now,
 	}
@@ -374,7 +395,7 @@ func (*coderOpenAIWSClientConn) SupportsIdlePingWithoutReader() bool {
 	return false
 }
 
-// RequiresReaderLoop 让池为 coder/websocket 连接常驻读循环，空闲期也能应答 ping。
+// RequiresReaderLoop keeps control frames flowing while a pooled connection is idle.
 func (*coderOpenAIWSClientConn) RequiresReaderLoop() bool {
 	return true
 }
@@ -383,7 +404,7 @@ func (c *coderOpenAIWSClientConn) Close() error {
 	if c == nil || c.conn == nil {
 		return nil
 	}
-	// Close 为幂等，忽略重复关闭错误。
+	// Close is idempotent; ignore errors from repeated closes.
 	_ = c.conn.Close(coderws.StatusNormalClosure, "")
 	_ = c.conn.CloseNow()
 	return nil

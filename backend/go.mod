@@ -217,3 +217,6 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )
+
+// Local opt-in RFC 7692 client window negotiation for the bundled Codex CLI.
+replace github.com/coder/websocket => ./third_party/coder-websocket

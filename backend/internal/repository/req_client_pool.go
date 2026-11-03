@@ -7,8 +7,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyurl"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/servertiming"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 
 	"github.com/imroc/req/v3"
 )
@@ -57,13 +59,28 @@ func getSharedReqClient(opts reqClientOptions) (*req.Client, error) {
 		// 在同一出口 IP 下稳定通过，故改用 Firefox 指纹。
 		client = client.ImpersonateFirefox()
 	}
-	trimmed, _, err := proxyurl.Parse(opts.ProxyURL)
+	trimmed, parsedProxy, err := proxyurl.Parse(opts.ProxyURL)
 	if err != nil {
 		return nil, err
 	}
 	if trimmed != "" {
 		client.SetProxyURL(trimmed)
 	}
+	// Auth and quota requests carrying the measured CLI identity use the same
+	// HTTPS profile as inference. Browser-oriented privacy calls keep their transport.
+	localTransport := &http.Transport{DisableCompression: true, MaxIdleConns: 32, MaxIdleConnsPerHost: 8}
+	if err := tlsfingerprint.ConfigureTLS(localTransport, tlsfingerprint.CodexHTTPProfile(), parsedProxy); err != nil {
+		return nil, err
+	}
+	orderedLocalTransport := tlsfingerprint.NewCodexHTTPTransport(localTransport, tlsfingerprint.CodexHTTPProfile())
+	client.GetTransport().WrapRoundTripFunc(func(rt http.RoundTripper) req.HttpRoundTripFunc {
+		return func(r *http.Request) (*http.Response, error) {
+			if r.URL.Scheme == "https" && openai.IsLocalCLIUserAgent(r.UserAgent()) {
+				return orderedLocalTransport.RoundTrip(localCLIReqWithoutBrowserDefaults(r))
+			}
+			return rt.RoundTrip(r)
+		}
+	})
 	client = instrumentReqClient(client)
 
 	actual, _ := sharedReqClients.LoadOrStore(key, client)
@@ -102,4 +119,17 @@ func CreatePrivacyReqClient(proxyURL string) (*req.Client, error) {
 		Timeout:     30 * time.Second,
 		Impersonate: true, // Enable browser TLS fingerprint impersonation (Firefox, see getSharedReqClient)
 	})
+}
+
+// req browser impersonation installs common navigation headers. Never carry
+// those defaults into a request explicitly using the local CLI identity.
+func localCLIReqWithoutBrowserDefaults(r *http.Request) *http.Request {
+	cloned := r.Clone(r.Context())
+	for key := range cloned.Header {
+		lower := strings.ToLower(key)
+		if strings.HasPrefix(lower, "sec-fetch-") || lower == "upgrade-insecure-requests" || key == req.HeaderOderKey || key == req.PseudoHeaderOderKey {
+			delete(cloned.Header, key)
+		}
+	}
+	return cloned
 }

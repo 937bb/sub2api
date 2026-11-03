@@ -386,6 +386,10 @@ func (s *defaultOpenAIAccountScheduler) Select(
 	if s != nil && s.service != nil && s.service.openAIGroupRequiresPrivacySet(ctx, req.GroupID) {
 		req.RequirePrivacySet = true
 	}
+	if req.DisableStickyEscape || openAIEncryptedContentStickyProtected(ctx) {
+		req.DisableStickyEscape = true
+		req.StickyWeighted = false
+	}
 	start := time.Now()
 	// 命名返回值保证 defer 写入的耗时同时返回给调用方。
 	defer func() {
@@ -2350,6 +2354,7 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 				Platform:                platform,
 				SessionHash:             sessionHash,
 				StickyAccountID:         guardianParentAccountID,
+				DisableStickyEscape:     openAIEncryptedContentStickyProtected(ctx),
 				PreserveStickyBinding:   true,
 				RequestedModel:          requestedModel,
 				RequiredTransport:       requiredTransport,
@@ -2453,6 +2458,7 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 		Platform:                platform,
 		SessionHash:             sessionHash,
 		StickyAccountID:         stickyAccountID,
+		DisableStickyEscape:     openAIEncryptedContentStickyProtected(ctx),
 		GuardianParentAccountID: guardianParentAccountID,
 		StickyPreviousAccountID: stickyPreviousAccountID,
 		StickyWeighted:          stickyWeighted,
@@ -2516,6 +2522,9 @@ func (s *OpenAIGatewayService) ReportOpenAIAccountScheduleResult(account *Accoun
 	if account == nil {
 		return false
 	}
+	if !success && len(observedErr) > 0 && isOpenAIInvalidEncryptedContentError(observedErr[0]) {
+		return false
+	}
 	accountID := account.ID
 	healthTripped := false
 	if s != nil && s.rateLimitService != nil {
@@ -2540,7 +2549,7 @@ func (s *OpenAIGatewayService) ReportOpenAIAccountScheduleResult(account *Accoun
 // ObserveOpenAIAccountHealthFailure records failures that cannot reach the
 // scheduler-result path, for example after semantic response bytes were sent.
 func (s *OpenAIGatewayService) ObserveOpenAIAccountHealthFailure(ctx context.Context, account *Account, observedErr error) bool {
-	if s == nil || s.rateLimitService == nil || account == nil || observedErr == nil {
+	if s == nil || s.rateLimitService == nil || account == nil || observedErr == nil || isOpenAIInvalidEncryptedContentError(observedErr) {
 		return false
 	}
 	return s.rateLimitService.ObserveOpenAIAPIKeyHealthFailure(ctx, account, observedErr)

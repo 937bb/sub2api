@@ -360,6 +360,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		c.Set("openai_passthrough", true)
 	}
 
+	invalidEncryptedRecoveryTried := false
 	agentTaskRecoveryTried := false
 	compactModelFallbackRetried := false
 	rejectedFieldRetryState := openAIResponsesRejectedFieldRetryStateForRequest(c, body)
@@ -396,6 +397,19 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			probeBody := s.readUpstreamErrorBody(resp)
 			_ = resp.Body.Close()
 			resp.Body = io.NopCloser(bytes.NewReader(probeBody))
+			if !invalidEncryptedRecoveryTried && isOpenAIInvalidEncryptedContentResponse(resp.StatusCode, probeBody) {
+				cleaned, changed, cleanErr := SanitizeOpenAIEncryptedContent(body)
+				if cleanErr != nil {
+					return nil, cleanErr
+				}
+				if changed {
+					s.markOpenAIWSInvalidEncryptedContentLineageFromPayload(c, body, "passthrough_invalid_encrypted_lineage_mark", account.ID, 0)
+					body = cleaned
+					invalidEncryptedRecoveryTried = true
+					rejectedFieldRetryState.remember(body)
+					continue
+				}
+			}
 			if retryBody, reason, changed, retryErr := normalizeOpenAIResponsesRejectedFieldRetryBody(resp.StatusCode, body, probeBody); retryErr != nil {
 				return nil, fmt.Errorf("normalize passthrough rejected Responses field retry body: %w", retryErr)
 			} else if changed && rejectedFieldRetryState.Allow(retryBody) {
@@ -779,6 +793,9 @@ func stripOpenAILegacyResponsesBeta(headers http.Header) {
 }
 
 func shouldFailoverOpenAIPassthroughResponse(account *Account, statusCode int, responseBody []byte) bool {
+	if isOpenAIInvalidEncryptedContentResponse(statusCode, responseBody) {
+		return false
+	}
 	if hit, _, _ := detectOpenAICyberPolicy(responseBody); hit {
 		return false
 	}
@@ -946,6 +963,14 @@ func (s *OpenAIGatewayService) handleErrorResponsePassthrough(
 ) error {
 	MarkResponseCommitted(c)
 	body := s.redactAgentIdentitySensitiveBody(ctx, account, responseBody)
+
+	if isOpenAIInvalidEncryptedContentResponse(resp.StatusCode, body) {
+		message := sanitizeUpstreamErrorMessage(extractUpstreamErrorMessage(body))
+		setOpsUpstreamError(c, resp.StatusCode, message, "")
+		MarkResponseCommitted(c)
+		writeOpenAIUpstreamClientError(c, resp.StatusCode, body, message)
+		return errOpenAIInvalidEncryptedContent
+	}
 
 	// cyber_policy 仍按原始 body 打内部标记，供 handler 事后写风控/邮件；面向客户端的
 	// 错误体在下方统一重建。cyber 是上游网络安全策略拦截，不冷却账号，
@@ -1447,6 +1472,9 @@ func openAIStreamFailedEventSemanticStatus(payload []byte, message string) int {
 }
 
 func openAIStreamFailureStatus(payload []byte, message string) int {
+	if openAIEncryptedContentEventError(payload) != nil {
+		return http.StatusBadRequest
+	}
 	if len(bytes.TrimSpace(payload)) == 0 || !gjson.ValidBytes(payload) {
 		return http.StatusBadGateway
 	}
@@ -1569,6 +1597,9 @@ func applyOpenAIStreamFailedErrorPassthroughRule(
 }
 
 func openAIStreamFailedEventShouldFailover(payload []byte, message string) bool {
+	if openAIEncryptedContentEventError(payload) != nil {
+		return false
+	}
 	if hit, _, _ := detectOpenAICyberPolicy(payload); hit {
 		return false
 	}
@@ -1621,6 +1652,9 @@ func openAIStreamFailedEventShouldFailover(payload []byte, message string) bool 
 }
 
 func openAIStreamErrorEventShouldFailover(payload []byte, message string) bool {
+	if openAIEncryptedContentEventError(payload) != nil {
+		return false
+	}
 	if hit, _, _ := detectOpenAICyberPolicy(payload); hit {
 		return false
 	}

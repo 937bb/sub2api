@@ -336,6 +336,9 @@ func (s *OpenAIGatewayService) handleOpenAIWSErrorEventTransientFailure(ctx cont
 // failures and transient failures. Its return value lets stream callers avoid
 // applying the same transition twice for an error/response.failed pair.
 func (s *OpenAIGatewayService) handleOpenAIWSFailureAccountSideEffects(ctx context.Context, account *Account, canonicalModel string, headers http.Header, payload []byte) bool {
+	if openAIEncryptedContentEventError(payload) != nil {
+		return false
+	}
 	message := extractOpenAISSEErrorMessage(payload)
 	status := openAIStreamFailureStatus(payload, message)
 	switch status {
@@ -758,8 +761,7 @@ func classifyOpenAIWSErrorEventFromRaw(codeRaw, errTypeRaw, msgRaw string) (stri
 	if strings.Contains(msg, "connection limit") && strings.Contains(msg, "websocket") {
 		return "ws_connection_limit_reached", true
 	}
-	if strings.Contains(msg, "invalid_encrypted_content") ||
-		(strings.Contains(msg, "encrypted content") && strings.Contains(msg, "could not be verified")) {
+	if isOpenAIInvalidEncryptedContentMessage(msg) {
 		return "invalid_encrypted_content", true
 	}
 	if strings.Contains(msg, "previous_response_not_found") ||

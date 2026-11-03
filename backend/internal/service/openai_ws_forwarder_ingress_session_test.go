@@ -4602,6 +4602,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_InvalidEncrypted
 
 	upstreamConn := &openAIWSCaptureConn{
 		events: [][]byte{
+			[]byte(`{"type":"response.output_text.delta","delta":"already visible"}`),
 			[]byte(`{"type":"error","error":{"type":"invalid_request_error","code":"invalid_encrypted_content","message":"The encrypted content could not be verified"}}`),
 			[]byte(`{"type":"response.failed","response":{"id":"resp_enc_lineage_1","model":"gpt-5.1","error":{"code":"invalid_encrypted_content","message":"The encrypted content could not be verified"}}}`),
 			[]byte(`{"type":"response.completed","response":{"id":"resp_enc_lineage_2","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`),
@@ -4696,15 +4697,16 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_InvalidEncrypted
 		return message
 	}
 
-	// turn1：携带失效密文，上游以 invalid_encrypted_content 拒绝（error + response.failed 透传给客户端）。
+	// Turn 1 already emitted visible output; forward the rejection without replaying it.
 	writeMessage(`{"type":"response.create","model":"gpt-5.1","stream":false,"input":[{"type":"reasoning","id":"rs_1","encrypted_content":"stale-cipher","summary":[]},{"type":"input_text","text":"hi"}]}`)
+	require.Equal(t, "response.output_text.delta", gjson.GetBytes(readMessage(), "type").String())
 	firstEvent := readMessage()
 	require.Equal(t, "error", gjson.GetBytes(firstEvent, "type").String())
 	require.Equal(t, "invalid_encrypted_content", gjson.GetBytes(firstEvent, "error.code").String())
 	secondEvent := readMessage()
 	require.Equal(t, "response.failed", gjson.GetBytes(secondEvent, "type").String())
 
-	// turn2：客户端历史仍带同一失效密文，进场应被 lineage 预剥离后再发上游。
+	// Turn 2 replays stale ciphertext; lineage must remove it before forwarding.
 	writeMessage(`{"type":"response.create","model":"gpt-5.1","stream":false,"input":[{"type":"reasoning","id":"rs_1","encrypted_content":"stale-cipher","summary":[]},{"type":"input_text","text":"hi"},{"type":"input_text","text":"again"}]}`)
 	thirdEvent := readMessage()
 	require.Equal(t, "response.completed", gjson.GetBytes(thirdEvent, "type").String())

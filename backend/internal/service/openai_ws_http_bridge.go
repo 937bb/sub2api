@@ -552,6 +552,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	}
 
 	turnStart := time.Now()
+	invalidEncryptedRecoveryTried := false
 	rejectedFieldRetryState := newOpenAIResponsesRejectedFieldRetryState(body)
 	var resp *http.Response
 	for {
@@ -578,11 +579,23 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, openAIWSHTTPBridgeErrorBodyLimitBytes))
 		_ = resp.Body.Close()
 		markOpenAICyberPolicyEvent(c, respBody, resp.StatusCode, nil)
-		if resp.StatusCode == http.StatusBadRequest &&
-			extractUpstreamErrorCode(respBody) == openAIWSFallbackReasonInvalidEncryptedContent {
+		if isOpenAIInvalidEncryptedContentResponse(resp.StatusCode, respBody) {
 			s.markOpenAIWSInvalidEncryptedContentLineageFromPayload(
 				c, body, "ingress_ws_http_bridge_invalid_encrypted_lineage_mark", account.ID, turn,
 			)
+			if !invalidEncryptedRecoveryTried {
+				cleaned, changed, cleanErr := SanitizeOpenAIEncryptedContent(body)
+				if cleanErr != nil {
+					return nil, cleanErr
+				}
+				if changed {
+					body = cleaned
+					payloadBytes = len(body)
+					invalidEncryptedRecoveryTried = true
+					rejectedFieldRetryState.remember(body)
+					continue
+				}
+			}
 		}
 		retryBody, retryReason, changed, retryErr := normalizeOpenAIResponsesRejectedFieldRetryBody(resp.StatusCode, body, respBody)
 		if retryErr != nil {
@@ -603,6 +616,13 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		upstreamMsg := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(respBody)))
 		if upstreamMsg == "" {
 			upstreamMsg = http.StatusText(resp.StatusCode)
+		}
+		if isOpenAIInvalidEncryptedContentResponse(resp.StatusCode, respBody) {
+			clientError := buildOpenAIWSHTTPBridgeErrorEvent(resp.StatusCode, upstreamMsg)
+			if writeErr := writeClientMessage(clientError); writeErr == nil {
+				markOpenAIWSClientVisibleFailure(c, "error", clientError)
+			}
+			return nil, errOpenAIInvalidEncryptedContent
 		}
 		shouldFailover := s.shouldFailoverOpenAIUpstreamResponse(account, resp.StatusCode, upstreamMsg, respBody)
 		if account.Platform == PlatformGrok {
@@ -642,6 +662,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	firstEventType := ""
 	lastEventType := ""
 	upstreamTerminalEvent := ""
+	var schedulingError error
 	sawDone := false
 	wroteDownstream := false
 	pendingClientMessages := make([][]byte, 0, 4)
@@ -667,6 +688,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	resultWithUsage := func() *OpenAIForwardResult {
 		imageCount := imageCounter.Count()
 		result := &OpenAIForwardResult{
+			schedulingError:               schedulingError,
 			RequestID:                     responseID,
 			Usage:                         usage,
 			Model:                         originalModel,
@@ -955,6 +977,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			return resultWithUsage(), upstreamEventErr
 		}
 		if isOpenAIWSTerminalEvent(eventType) && !bareErrorPending {
+			schedulingError = openAIEncryptedContentEventError(upstreamMessage)
 			if eventType == "response.failed" {
 				upstreamTerminalEvent = "response.failed"
 			} else {

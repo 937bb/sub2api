@@ -1,8 +1,13 @@
 package service
 
 import (
+	"context"
+	"crypto/tls"
 	"fmt"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -113,4 +118,52 @@ func TestCoderOpenAIWSClientDialer_ProxyTransportTLSHandshakeTimeout(t *testing.
 
 func TestCoderOpenAIWSClientConn_DoesNotSupportIdlePingWithoutReader(t *testing.T) {
 	require.False(t, (&coderOpenAIWSClientConn{}).SupportsIdlePingWithoutReader())
+}
+
+func TestCoderOpenAIWSClientDialer_LocalTLSCacheIsolation(t *testing.T) {
+	impl := newDefaultOpenAIWSClientDialer().(*coderOpenAIWSClientDialer)
+	generic, err := impl.transportHTTPClient("http://127.0.0.1:8080", false)
+	require.NoError(t, err)
+	measured, err := impl.transportHTTPClient("http://127.0.0.1:8080", true)
+	require.NoError(t, err)
+	require.NotSame(t, generic, measured)
+	repeated, err := impl.transportHTTPClient("http://127.0.0.1:8080", true)
+	require.NoError(t, err)
+	require.Same(t, measured, repeated)
+	direct, err := impl.transportHTTPClient("", true)
+	require.NoError(t, err)
+	for _, client := range []*http.Client{measured, direct} {
+		transport := client.Transport.(*codexWSHTTPTransport).transport
+		require.NotNil(t, transport.DialTLSContext)
+		proxy, err := transport.Proxy(httptest.NewRequest(http.MethodGet, "https://example.com", nil))
+		require.NoError(t, err)
+		require.Nil(t, proxy)
+		require.True(t, transport.DisableCompression)
+		require.ErrorIs(t, client.CheckRedirect(nil, nil), http.ErrUseLastResponse)
+		client.CloseIdleConnections()
+	}
+	generic.CloseIdleConnections()
+}
+
+func TestCoderOpenAIWSClientDialerActualLocalTLSSelection(t *testing.T) {
+	hellos := make(chan []uint16, 1)
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusBadRequest) }))
+	server.TLS = &tls.Config{GetConfigForClient: func(h *tls.ClientHelloInfo) (*tls.Config, error) {
+		hellos <- append([]uint16(nil), h.CipherSuites...)
+		return nil, nil
+	}}
+	server.StartTLS()
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	headers := make(http.Header)
+	headers.Set("User-Agent", codexCLIUserAgent)
+	_, _, _, err := newDefaultOpenAIWSClientDialer().Dial(ctx, "wss"+strings.TrimPrefix(server.URL, "https"), headers, "")
+	require.Error(t, err, "untrusted local certificate must be rejected")
+	select {
+	case hello := <-hellos:
+		require.Equal(t, tlsfingerprint.CodexLocalWSProfile().CipherSuites, hello)
+	case <-ctx.Done():
+		t.Fatal("measured WS TLS profile was not sent")
+	}
 }

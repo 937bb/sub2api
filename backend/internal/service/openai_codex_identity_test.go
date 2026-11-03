@@ -14,7 +14,7 @@ func requireOpenAICodexProbeHeaders(t *testing.T, h http.Header) {
 	require.Equal(t, codexCLIUserAgent, h.Get("User-Agent"))
 	require.Equal(t, openai.CodexDefaultOriginator, h.Get("Originator"))
 	require.Equal(t, codexCLIVersion, h.Get("Version"))
-	require.Equal(t, "responses=experimental", h.Get("OpenAI-Beta"))
+	require.Empty(t, h.Get("OpenAI-Beta"))
 	require.NotEmpty(t, h.Get("X-Codex-Window-ID"))
 }
 
@@ -31,7 +31,7 @@ func TestEnsureCodexIdentityHeaders(t *testing.T) {
 		require.Equal(t, openai.CodexDefaultOriginator, h.Get("originator"))
 		require.Equal(t, codexCLIUserAgent, h.Get("user-agent"))
 		require.Equal(t, codexCLIVersion, h.Get("version"))
-		require.Equal(t, "responses=experimental", h.Get("OpenAI-Beta"))
+		require.Empty(t, h.Get("OpenAI-Beta"))
 	})
 
 	t.Run("官方非 CLI 客户端身份同样被统一", func(t *testing.T) {
@@ -46,7 +46,7 @@ func TestEnsureCodexIdentityHeaders(t *testing.T) {
 		require.Equal(t, openai.CodexDefaultOriginator, h.Get("originator"))
 		require.Equal(t, codexCLIUserAgent, h.Get("user-agent"))
 		require.Equal(t, codexCLIVersion, h.Get("version"))
-		require.Equal(t, "responses=experimental", h.Get("OpenAI-Beta"))
+		require.Equal(t, "assistants=v2", h.Get("OpenAI-Beta"))
 	})
 }
 
@@ -317,7 +317,7 @@ func TestNormalizeCodexClientVersion(t *testing.T) {
 }
 
 func TestBuildCodexCLIUserAgent(t *testing.T) {
-	require.Equal(t, openai.CodexDefaultOriginator+"/0.200.1"+codexCLIUserAgentSuffix, buildCodexCLIUserAgent("0.200.1"))
+	require.Equal(t, openai.CodexDefaultOriginator+"/0.200.1"+codexCLIUserAgentSuffix+" (codex_exec; 0.200.1)", buildCodexCLIUserAgent("0.200.1"))
 	// 非法版本号必须回退到内置 UA，不能拼出畸形身份。
 	require.Equal(t, codexCLIUserAgent, buildCodexCLIUserAgent("bogus version"))
 	require.Equal(t, codexCLIUserAgent, buildCodexCLIUserAgent(""))

@@ -47,19 +47,13 @@ func collectOpenAIEncryptedContentDigestsRaw(payload []byte) []string {
 	if len(payload) == 0 {
 		return nil
 	}
-	input := gjson.Get(openAIWSPayloadStringView(payload), "input")
+	input := openAIRequestPayloadView(payload).Get("input")
 	if !input.Exists() {
 		return nil
 	}
 	var digests []string
 	appendItem := func(item gjson.Result) {
-		if !openAIEncryptedLineageItemType(item.Get("type").String()) {
-			return
-		}
-		encrypted := item.Get("encrypted_content")
-		if encrypted.Type == gjson.String && encrypted.String() != "" {
-			digests = append(digests, openAIEncryptedContentDigest(encrypted.String()))
-		}
+		visitOpenAIEncryptedParts(item, func(encrypted string) { digests = append(digests, openAIEncryptedContentDigest(encrypted)) })
 	}
 	if input.IsArray() {
 		input.ForEach(func(_, item gjson.Result) bool {
@@ -88,18 +82,7 @@ func stripOpenAIInvalidEncryptedContentItems(reqBody map[string]any, invalid map
 	}
 	stripped := 0
 	stripItem := func(item any) (next any, changed bool, keep bool) {
-		inputItem, ok := item.(map[string]any)
-		if !ok {
-			return item, false, true
-		}
-		encrypted, ok := inputItem["encrypted_content"].(string)
-		if !ok || encrypted == "" {
-			return item, false, true
-		}
-		if _, hit := invalid[openAIEncryptedContentDigest(encrypted)]; !hit {
-			return item, false, true
-		}
-		return sanitizeEncryptedReasoningInputItem(item)
+		return sanitizeOpenAIEncryptedInputItem(item, invalid)
 	}
 	switch input := inputValue.(type) {
 	case []any:
@@ -147,34 +130,13 @@ func stripOpenAIInvalidEncryptedContentItems(reqBody map[string]any, invalid map
 // invalid 摘要的密文项；零命中的常态路径不做任何改写。payload 须遵守 replay
 // 所有权不变式（零拷贝视图解析）。
 func openAIRawPayloadHasInvalidEncryptedContent(payload []byte, invalid map[string]struct{}) bool {
-	if len(payload) == 0 || len(invalid) == 0 {
+	if len(invalid) == 0 {
 		return false
 	}
-	input := gjson.Get(openAIWSPayloadStringView(payload), "input")
-	if !input.Exists() {
-		return false
-	}
-	hit := false
-	checkItem := func(item gjson.Result) bool {
-		encrypted := item.Get("encrypted_content")
-		if encrypted.Type != gjson.String || encrypted.String() == "" {
-			return false
-		}
-		_, matched := invalid[openAIEncryptedContentDigest(encrypted.String())]
-		return matched
-	}
-	if input.IsArray() {
-		input.ForEach(func(_, item gjson.Result) bool {
-			if checkItem(item) {
-				hit = true
-				return false
-			}
+	for _, digest := range collectOpenAIEncryptedContentDigestsRaw(payload) {
+		if _, hit := invalid[digest]; hit {
 			return true
-		})
-		return hit
-	}
-	if input.IsObject() {
-		return checkItem(input)
+		}
 	}
 	return false
 }
@@ -186,38 +148,25 @@ func stripOpenAIInvalidEncryptedContentFromReplayItems(items []json.RawMessage, 
 	if len(items) == 0 || len(invalid) == 0 {
 		return items, 0
 	}
-	hit := false
-	for _, item := range items {
-		encrypted := gjson.Get(openAIWSPayloadStringView(item), "encrypted_content")
-		if encrypted.Type != gjson.String || encrypted.String() == "" {
-			continue
-		}
-		if _, matched := invalid[openAIEncryptedContentDigest(encrypted.String())]; matched {
-			hit = true
-			break
-		}
-	}
-	if !hit {
-		return items, 0
-	}
 	stripped := 0
 	next := make([]json.RawMessage, 0, len(items))
 	for _, item := range items {
+		hit := false
+		visitOpenAIEncryptedParts(gjson.ParseBytes(item), func(key string) {
+			if _, found := invalid[openAIEncryptedContentDigest(key)]; found {
+				hit = true
+			}
+		})
+		if !hit {
+			next = append(next, item)
+			continue
+		}
 		var decoded map[string]any
 		if err := decodeOpenAIJSONUseNumber(item, &decoded); err != nil {
 			next = append(next, item)
 			continue
 		}
-		encrypted, ok := decoded["encrypted_content"].(string)
-		if !ok || encrypted == "" {
-			next = append(next, item)
-			continue
-		}
-		if _, matched := invalid[openAIEncryptedContentDigest(encrypted)]; !matched {
-			next = append(next, item)
-			continue
-		}
-		nextItem, changed, keep := sanitizeEncryptedReasoningInputItem(decoded)
+		nextItem, changed, keep := sanitizeOpenAIEncryptedInputItem(decoded, invalid)
 		if !changed {
 			next = append(next, item)
 			continue
@@ -250,7 +199,11 @@ func stripOpenAIInvalidEncryptedContentRaw(payload []byte, invalid map[string]st
 	if err := decodeOpenAIJSONUseNumber(payload, &decoded); err != nil {
 		return payload, 0, err
 	}
-	stripped := stripOpenAIInvalidEncryptedContentItems(decoded, invalid)
+	target := decoded
+	if response, ok := decoded["response"].(map[string]any); ok && strings.HasPrefix(gjson.GetBytes(payload, "type").String(), "response.") {
+		target = response
+	}
+	stripped := stripOpenAIInvalidEncryptedContentItems(target, invalid)
 	if stripped == 0 {
 		return payload, 0, nil
 	}

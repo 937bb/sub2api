@@ -1082,6 +1082,18 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 							len(digests),
 						)
 					}
+					// A self-contained turn can be retried before any output.
+					// Connection-bound continuations keep their existing recovery
+					// contract rather than losing history on a fresh socket.
+					if !wroteDownstream && turnPreviousResponseID == "" && rejectedFieldRetryState != nil {
+						retryBody, changed, retryErr := SanitizeOpenAIEncryptedContent(payload)
+						if retryErr != nil {
+							return nil, retryErr
+						}
+						if changed && rejectedFieldRetryState.Allow(retryBody) {
+							return nil, &openAIWSRejectedFieldRetryError{body: retryBody, reason: openAIWSFallbackReasonInvalidEncryptedContent}
+						}
+					}
 				}
 				errCode, errType, errMessage := summarizeOpenAIWSErrorEventFieldsFromRaw(errCodeRaw, errTypeRaw, errMsgRaw)
 				recoverablePrevNotFound := fallbackReason == openAIWSIngressStagePreviousResponseNotFound &&
@@ -1238,6 +1250,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				}
 				imageCount := imageCounter.Count()
 				result := &OpenAIForwardResult{
+					schedulingError:               openAIEncryptedContentEventError(upstreamMessage),
 					RequestID:                     responseID,
 					Usage:                         usage,
 					Model:                         originalModel,
@@ -1817,6 +1830,10 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			}
 			var rejectedFieldErr *openAIWSRejectedFieldRetryError
 			if errors.As(relayErr, &rejectedFieldErr) && rejectedFieldErr != nil && len(rejectedFieldErr.body) > 0 {
+				if rejectedFieldErr.reason == openAIWSFallbackReasonInvalidEncryptedContent {
+					// Discard queued terminal events belonging to the rejected attempt.
+					resetSessionLease(true)
+				}
 				currentPayload = append([]byte(nil), rejectedFieldErr.body...)
 				currentPayloadBytes = len(currentPayload)
 				skipBeforeTurn = true

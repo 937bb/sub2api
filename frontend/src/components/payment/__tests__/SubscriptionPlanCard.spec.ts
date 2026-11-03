@@ -5,6 +5,7 @@ import { createI18n } from "vue-i18n";
 import type { SubscriptionPlan } from "@/types/payment";
 import SubscriptionPlanCard from "../SubscriptionPlanCard.vue";
 
+// The runtime-only i18n build consumes compiled message functions.
 const i18n = createI18n({
   legacy: false,
   locale: "en",
@@ -13,17 +14,17 @@ const i18n = createI18n({
   messages: {
     en: {
       payment: {
-        days: "days",
-        weeks: "weeks",
-        months: "months",
-        perMonth: "month",
-        models: "Models",
+        days: () => "days",
+        weeks: () => "weeks",
+        months: () => "months",
+        perMonth: () => "month",
+        models: () => "Models",
         planCard: {
-          quota: "Quota",
-          rate: "Rate",
-          unlimited: "Unlimited",
+          quota: () => "Quota",
+          rate: () => "Rate",
+          unlimited: () => "Unlimited",
         },
-        subscribeNow: "Subscribe now",
+        subscribeNow: () => "Subscribe now",
       },
     },
   },
@@ -68,9 +69,7 @@ describe("SubscriptionPlanCard", () => {
     expect(text).toContain("Imagen");
   });
 
-  // #4607：管理端保存的单位是复数（months/weeks），此前用户侧只匹配单数
-  // 'month'，「1 个月」的套餐卡片被显示成「1天」。按上方测试消息渲染出的
-  // 单位文案断言各分支。
+  // #4607: admin forms persist plural units; verify every displayed period.
   it("renders plural admin-form validity units instead of mislabeled days (#4607)", () => {
     expect(mountPlanCard("openai", { validity_days: 1, validity_unit: "months" }).text()).toContain("/ month");
     expect(mountPlanCard("openai", { validity_days: 3, validity_unit: "months" }).text()).toContain("/ 3months");

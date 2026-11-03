@@ -96,17 +96,14 @@ func TestHTTPUpstreamDoWithTLSPlainHTTPUsesConfiguredSOCKSProxy(t *testing.T) {
 	require.Equal(t, int64(1), upstreamCalls.Load())
 }
 
-func TestTLSFingerprintHTTPSProxyFallsBackWithoutBypassingProxy(t *testing.T) {
+func TestTLSFingerprintHTTPSProxyUsesTunnelDialer(t *testing.T) {
 	proxyURL, err := url.Parse("https://user:pass@proxy.example:8443")
 	require.NoError(t, err)
 	transport, err := buildUpstreamTransportWithTLSFingerprint(poolSettings{}, proxyURL, &tlsfingerprint.Profile{Name: "test"})
 	require.NoError(t, err)
-	require.NotNil(t, transport.Proxy)
-	require.Nil(t, transport.DialTLSContext)
-	req := &http.Request{URL: &url.URL{Scheme: "https", Host: "upstream.example"}}
-	resolved, err := transport.Proxy(req)
-	require.NoError(t, err)
-	require.Equal(t, "https://user:pass@proxy.example:8443", resolved.String())
+	require.Nil(t, transport.Proxy)
+	require.NotNil(t, transport.DialTLSContext)
+	require.False(t, transport.ForceAttemptHTTP2)
 }
 
 func startTestSOCKS5Proxy(t *testing.T) (string, *atomic.Int64) {
@@ -1044,4 +1041,22 @@ func TestHTTPUpstreamPublicHostsOnlyValidatesEveryRedirectHop(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, client.CheckRedirect(publicHop, via))
 	require.Error(t, client.CheckRedirect(publicHop, make([]*http.Request, 10)), "redirect chain stays capped")
+}
+
+func TestCodexTLSClientCacheSeparatesProfilesAndRejectsDowngrade(t *testing.T) {
+	svc := NewHTTPUpstream(nil).(*httpUpstreamService)
+	first, err := svc.getClientEntryWithTLS("", 1, 1, tlsfingerprint.CodexLocalHTTPProfile(), service.HTTPUpstreamProfileOpenAI, false, false)
+	require.NoError(t, err)
+	again, err := svc.getClientEntryWithTLS("", 1, 1, tlsfingerprint.CodexLocalHTTPProfile(), service.HTTPUpstreamProfileOpenAI, false, false)
+	require.NoError(t, err)
+	require.Same(t, first, again)
+	changed := tlsfingerprint.CodexLocalHTTPProfile()
+	changed.Curves = []uint16{23, 24}
+	second, err := svc.getClientEntryWithTLS("", 1, 1, changed, service.HTTPUpstreamProfileOpenAI, false, false)
+	require.NoError(t, err)
+	require.NotSame(t, first, second)
+	downgrade, _ := http.NewRequest(http.MethodGet, "http://example.com", nil)
+	require.Error(t, first.client.CheckRedirect(downgrade, nil))
+	first.client.CloseIdleConnections()
+	second.client.CloseIdleConnections()
 }

@@ -424,7 +424,7 @@ func trimOpenAIEncryptedReasoningItems(reqBody map[string]any) bool {
 	}
 }
 
-func sanitizeEncryptedReasoningInputItem(item any) (next any, changed bool, keep bool) {
+func sanitizeOpenAIReasoningFields(item any) (next any, changed bool, keep bool) {
 	inputItem, ok := item.(map[string]any)
 	if !ok {
 		return item, false, true

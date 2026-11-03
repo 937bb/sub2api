@@ -149,3 +149,21 @@ func TestGetSharedReqClient_ImpersonateUsesFirefoxFingerprint(t *testing.T) {
 	require.Contains(t, client.Headers.Get("User-Agent"), "Firefox/")
 	require.NotContains(t, client.Headers.Get("User-Agent"), "Chrome/")
 }
+
+func TestLocalCLIReqRemovesInheritedBrowserHeaders(t *testing.T) {
+	request, _ := http.NewRequest(http.MethodGet, "https://localhost/usage", nil)
+	request.Header.Set("Sec-Fetch-Site", "same-origin")
+	request.Header.Set("Upgrade-Insecure-Requests", "1")
+	request.Header.Set("Authorization", "Bearer fixture")
+	request.Header.Set("OpenAI-Beta", "codex-1")
+	request.Header[req.HeaderOderKey] = []string{"user-agent"}
+	request.Header[req.PseudoHeaderOderKey] = []string{":method"}
+	cleaned := localCLIReqWithoutBrowserDefaults(request)
+	require.Empty(t, cleaned.Header.Get("Sec-Fetch-Site"))
+	require.Empty(t, cleaned.Header.Get("Upgrade-Insecure-Requests"))
+	require.NotContains(t, cleaned.Header, req.HeaderOderKey)
+	require.NotContains(t, cleaned.Header, req.PseudoHeaderOderKey)
+	require.Equal(t, "Bearer fixture", cleaned.Header.Get("Authorization"))
+	require.Equal(t, "codex-1", cleaned.Header.Get("OpenAI-Beta"))
+	require.Equal(t, "same-origin", request.Header.Get("Sec-Fetch-Site"))
+}

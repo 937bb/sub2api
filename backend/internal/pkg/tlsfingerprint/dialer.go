@@ -5,12 +5,17 @@ package tlsfingerprint
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/base64"
 	"fmt"
 	"log/slog"
+	"math/rand/v2"
 	"net"
 	"net/http"
 	"net/url"
+	"os"
+	"strings"
 
 	utls "github.com/refraction-networking/utls"
 	"golang.org/x/net/proxy"
@@ -20,6 +25,9 @@ import (
 // All slice fields use built-in defaults when empty.
 type Profile struct {
 	Name                string // Profile name for identification
+	MinVersion          uint16
+	MaxVersion          uint16
+	ShuffleExtensions   bool
 	CipherSuites        []uint16
 	Curves              []uint16
 	PointFormats        []uint16
@@ -168,7 +176,11 @@ func (d *SOCKS5ProxyDialer) DialTLSContext(ctx context.Context, network, addr st
 
 	// Step 2: Establish SOCKS5 tunnel to target
 	slog.Debug("tls_fingerprint_socks5_establishing_tunnel", "target", addr)
-	conn, err := socksDialer.Dial("tcp", addr)
+	contextDialer, ok := socksDialer.(proxy.ContextDialer)
+	if !ok {
+		return nil, fmt.Errorf("SOCKS5 dialer does not support cancellation")
+	}
+	conn, err := contextDialer.DialContext(ctx, network, addr)
 	if err != nil {
 		slog.Debug("tls_fingerprint_socks5_connect_failed", "error", err)
 		return nil, fmt.Errorf("SOCKS5 connect: %w", err)
@@ -204,6 +216,19 @@ func (d *HTTPProxyDialer) DialTLSContext(ctx context.Context, network, addr stri
 		return nil, fmt.Errorf("connect to proxy: %w", err)
 	}
 	slog.Debug("tls_fingerprint_http_proxy_connected", "proxy_addr", proxyAddr)
+
+	// Cancellation must also interrupt CONNECT reads and writes.
+	rawConn := conn
+	stopCancel := context.AfterFunc(ctx, func() { _ = rawConn.Close() })
+	defer stopCancel()
+	if d.proxyURL.Scheme == "https" {
+		proxyTLS := tls.Client(conn, &tls.Config{ServerName: d.proxyURL.Hostname(), MinVersion: tls.VersionTLS12})
+		if err := proxyTLS.HandshakeContext(ctx); err != nil {
+			_ = conn.Close()
+			return nil, fmt.Errorf("TLS to HTTPS proxy: %w", err)
+		}
+		conn = proxyTLS
+	}
 
 	// Step 2: Send CONNECT request to establish tunnel
 	req := &http.Request{
@@ -270,13 +295,45 @@ func (d *Dialer) DialTLSContext(ctx context.Context, network, addr string) (net.
 // It builds a ClientHello spec from the profile, applies it, and completes the handshake.
 // On failure, conn is closed and an error is returned.
 func performTLSHandshake(ctx context.Context, conn net.Conn, profile *Profile, addr string) (net.Conn, error) {
+	config := &utls.Config{}
+	if profile != nil && (profile.Name == CodexCustomCAHTTPProfile().Name || profile.Name == CodexLocalWSProfile().Name) {
+		var roots *x509.CertPool
+		for _, name := range []string{"CODEX_CA_CERTIFICATE", "SSL_CERT_FILE"} {
+			path := strings.TrimSpace(os.Getenv(name))
+			if path == "" {
+				continue
+			}
+			pem, err := os.ReadFile(path)
+			if err != nil {
+				_ = conn.Close()
+				return nil, fmt.Errorf("load %s: %w", name, err)
+			}
+			if roots == nil {
+				roots, _ = x509.SystemCertPool()
+				if roots == nil {
+					roots = x509.NewCertPool()
+				}
+			}
+			if !roots.AppendCertsFromPEM(pem) {
+				_ = conn.Close()
+				return nil, fmt.Errorf("%s contains no CA certificates", name)
+			}
+		}
+		config.RootCAs = roots
+	}
+	return performTLSHandshakeWithConfig(ctx, conn, profile, addr, config)
+}
+
+func performTLSHandshakeWithConfig(ctx context.Context, conn net.Conn, profile *Profile, addr string, config *utls.Config) (net.Conn, error) {
 	host, _, err := net.SplitHostPort(addr)
 	if err != nil {
 		host = addr
 	}
 
 	spec := buildClientHelloSpecFromProfile(profile)
-	tlsConn := utls.UClient(conn, &utls.Config{ServerName: host}, utls.HelloCustom)
+	config = config.Clone()
+	config.ServerName = host
+	tlsConn := utls.UClient(conn, config, utls.HelloCustom)
 
 	if err := tlsConn.ApplyPreset(spec); err != nil {
 		_ = conn.Close()
@@ -447,12 +504,24 @@ func buildClientHelloSpecFromProfile(profile *Profile) *utls.ClientHelloSpec {
 		extensions = append(extensions, &utls.UtlsGREASEExtension{})
 	}
 
+	minVersion, maxVersion := uint16(utls.VersionTLS10), uint16(utls.VersionTLS13)
+	if profile != nil {
+		if profile.MinVersion != 0 {
+			minVersion = profile.MinVersion
+		}
+		if profile.MaxVersion != 0 {
+			maxVersion = profile.MaxVersion
+		}
+		if profile.ShuffleExtensions {
+			rand.Shuffle(len(extensions), func(i, j int) { extensions[i], extensions[j] = extensions[j], extensions[i] })
+		}
+	}
 	return &utls.ClientHelloSpec{
 		CipherSuites:       cipherSuites,
 		CompressionMethods: []uint8{0}, // null compression only (standard)
 		Extensions:         extensions,
-		TLSVersMax:         utls.VersionTLS13,
-		TLSVersMin:         utls.VersionTLS10,
+		TLSVersMax:         maxVersion,
+		TLSVersMin:         minVersion,
 	}
 }
 

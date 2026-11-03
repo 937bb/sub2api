@@ -87,6 +87,13 @@ type openAIWSAcquireRequest struct {
 type openAIWSHandshakeCompatibilityKey struct {
 	proxyPool           string
 	selectedProxy       string
+	userAgent           string
+	originator          string
+	clientVersion       string
+	protocolBeta        string
+	chatGPTAccountID    string
+	fedRAMP             string
+	wsURL               string
 	betaFeatures        string
 	codexInstallationID string
 	sessionIDHyphen     string
@@ -2364,6 +2371,8 @@ func sameOpenAIWSPrewarmTarget(a, b openAIWSAcquireRequest) bool {
 
 func (r openAIWSAcquireRequest) handshakeCompatibility() openAIWSHandshakeCompatibilityKey {
 	key := normalizeOpenAIWSHandshakeCompatibility(r.Account, r.Headers)
+	key.wsURL = stringsTrim(r.WSURL)
+	key.selectedProxy = stringsTrim(r.ProxyURL)
 	if len(r.proxyRoutes) > 0 {
 		key.selectedProxy = r.proxyRoutes[0]
 	}
@@ -2412,7 +2421,13 @@ func normalizeOpenAIWSBetaFeatures(headers http.Header) string {
 
 func normalizeOpenAIWSHandshakeCompatibility(account *Account, headers http.Header) openAIWSHandshakeCompatibilityKey {
 	key := openAIWSHandshakeCompatibilityKey{
-		betaFeatures: normalizeOpenAIWSBetaFeatures(headers),
+		betaFeatures:     normalizeOpenAIWSBetaFeatures(headers),
+		userAgent:        codexIdentityHeaderValue(headers, "User-Agent"),
+		originator:       codexIdentityHeaderValue(headers, "Originator"),
+		clientVersion:    codexIdentityHeaderValue(headers, "Version"),
+		protocolBeta:     strings.Join(headers.Values("OpenAI-Beta"), ","),
+		chatGPTAccountID: codexIdentityHeaderValue(headers, "ChatGPT-Account-ID"),
+		fedRAMP:          codexIdentityHeaderValue(headers, "X-OpenAI-Fedramp"),
 	}
 	if account != nil && len(AccountProxyFallbackIDs(account.Extra)) > 0 {
 		routes, err := accountProxyRoutes(account, "")
