@@ -220,3 +220,6 @@ require (
 
 // Local opt-in RFC 7692 client window negotiation for the bundled Codex CLI.
 replace github.com/coder/websocket => ./third_party/coder-websocket
+
+// Opt-in HTTP/1 field casing and accurate custom HTTP/2 receive windows.
+replace github.com/imroc/req/v3 => ./third_party/req

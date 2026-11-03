@@ -7,7 +7,6 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
-	utls "github.com/refraction-networking/utls"
 	"io"
 	"net"
 	"net/http"
@@ -18,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	utls "github.com/refraction-networking/utls"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/hpack"
 )
@@ -90,6 +90,9 @@ func TestCodexH2WireSettings(t *testing.T) {
 	}
 	defer listener.Close()
 	done := make(chan error, 1)
+	headerNames := codexCustomCAHeaderNames(t)
+	wantNames := append([]string{":method", ":scheme", ":authority", ":path"}, headerNames[:len(headerNames)-2]...)
+	wantNames = append(wantNames, "content-length")
 	go func() {
 		conn, err := listener.Accept()
 		if err != nil {
@@ -137,8 +140,8 @@ func TestCodexH2WireSettings(t *testing.T) {
 					done <- err
 					return
 				}
-				if len(names) < 4 || !reflect.DeepEqual(names[:4], []string{":method", ":scheme", ":authority", ":path"}) {
-					done <- fmt.Errorf("pseudo header order %v", names)
+				if !reflect.DeepEqual(names, wantNames) {
+					done <- fmt.Errorf("H2 header order %v", names)
 					return
 				}
 			}
@@ -164,7 +167,9 @@ func TestCodexH2WireSettings(t *testing.T) {
 	}
 	transport := NewCodexHTTPTransport(base, CodexCustomCAHTTPProfile())
 	defer transport.(interface{ CloseIdleConnections() }).CloseIdleConnections()
-	resp, err := (&http.Client{Transport: transport, Timeout: 5 * time.Second}).Get("https://" + listener.Addr().String())
+	request, _ := http.NewRequest("POST", "https://"+listener.Addr().String(), bytes.NewBufferString("{}"))
+	request.Header = codexCustomCAFixtureHeaders()
+	resp, err := (&http.Client{Transport: transport, Timeout: 5 * time.Second}).Do(request)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -22,6 +22,7 @@ func NewCodexHTTPTransport(base *http.Transport, profile *Profile) http.RoundTri
 	}
 	t := NewOrderedHTTPTransport(base).Transport.DisableForceHttpVersion()
 	t.DisableCompression = true
+	t.LowercaseHTTP1Headers = true
 	t.SetHTTP2SettingsFrame(
 		http2.Setting{ID: http2.SettingEnablePush, Val: 0},
 		http2.Setting{ID: http2.SettingInitialWindowSize, Val: 2097152},

@@ -1,0 +1,6 @@
+# Preserve upstream fixture bytes and existing documentation whitespace.
+README.md -whitespace
+internal/charsets/.testdata/*.html -whitespace
+internal/http2/frame_test.go -whitespace
+internal/http3/transport.go -whitespace
+internal/testdata/generate_key.sh -whitespace

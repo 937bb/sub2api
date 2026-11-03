@@ -227,3 +227,31 @@ CA files or environment requires restarting the affected runtime connections.
 - Local websocket fork full suite and window-negotiation race tests passed.
 - No database migration files changed relative to production `2fa2b14b8`.
 - Production build, rollout and live smoke results are recorded in the deployment report.
+
+## Follow-up: custom-CA wire casing and receive windows
+
+The local req v3.59.0 patch makes HTTP/1 field-name lowercasing opt-in for the
+Codex custom-CA backend, including serializer-owned host and content-length.
+Native HTTP and WS retain their independently measured casing. A sanitized
+header-name fixture from the local CLI now verifies the entire HTTP/1 order,
+framing, values, caller immutability and two requests on one verified TLS
+connection. The H2 test checks application headers as well as pseudo-headers.
+
+The req HTTP/2 receive counter previously initialized streams at 4 MiB even
+when its custom SETTINGS advertised 2 MiB. It now uses the advertised window
+(and the RFC default when a custom SETTINGS frame omits the window). A 1 KiB
+window streaming test reproduces the old stall after exactly 1024 response
+bytes; with the patch, both complete responses pass. Removing either patch
+makes its corresponding wire regression fail.
+
+`backend/third_party/req/SUB2API_PATCH.md` documents the two changes. The
+verified upstream module and license are retained; dependency versions remain
+unchanged. Full TLS record/session resumption and WS compression-byte equality
+remain unverified, so this is not a claim of complete client equivalence.
+
+Follow-up release checks passed: full backend tests and vet, the local req full
+suite and targeted race checks, the websocket full suite, and frontend 384 test
+files / 3099 tests, typecheck and production build. The first frontend run
+reported animation callbacks after environment teardown; KeyUsageView's fixture
+now owns and clears fake timers before restoring globals. Its assertions and
+production UI code are unchanged. Production rollout is recorded separately.
