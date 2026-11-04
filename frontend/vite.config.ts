@@ -84,6 +84,11 @@ export default defineConfig(({ mode }) => {
   const devPort = Number(env.VITE_DEV_PORT || 3000)
 
   return {
+    // Keep raw locale strings compatible with strict CSP on every build host.
+    define: {
+      __INTLIFY_JIT_COMPILATION__: 'true',
+      __INTLIFY_DROP_MESSAGE_COMPILER__: 'false'
+    },
     plugins: [
       vue(),
       checker({
@@ -94,9 +99,9 @@ export default defineConfig(({ mode }) => {
   resolve: {
     alias: {
       '@': resolve(__dirname, 'src'),
-      // 使用 vue-i18n 运行时版本，避免 CSP unsafe-eval 问题；
-      // v10 起 JIT 编译恒开启，消息编译为 AST 对象而非 JS 代码，无需 unsafe-eval
-      'vue-i18n': 'vue-i18n/dist/vue-i18n.runtime.esm-bundler.js'
+      // Locale modules contain raw strings, so include the message compiler.
+      // Explicit AST JIT above also supports older installed Vue I18n builds.
+      'vue-i18n': 'vue-i18n/dist/vue-i18n.esm-bundler.js'
     }
   },
   build: {
