@@ -114,7 +114,8 @@
 .console-shell .table-wrapper :is(th,td)[class*='sticky'] { z-index: 2; }
 .console-shell .table-wrapper thead th { z-index: 3; }
 .console-shell .console-density-compact .table-wrapper tbody td { padding-block: 10px; }
-.console-table-pagination { border-top: 1px solid var(--console-line); padding: 4px 16px; border-radius: 0 0 12px 12px; }
+.console-table-pagination { padding: 0; border-radius: 0 0 12px 12px; }
+.console-table-pagination > .console-pagination { border-radius: inherit; }
 .console-collection-tabs { display: flex; flex-wrap: wrap; gap: 6px; padding-bottom: 16px; }
 .console-collection-tabs button { display: flex; align-items: center; gap: 7px; font-size: 12px; padding: 7px 12px; border-radius: 20px; color: var(--console-muted); border: 1px solid var(--console-line); }
 .console-collection-tabs button[aria-pressed='true'] { background: var(--console-selected); border-color: var(--console-selected); color: var(--console-accent); font-weight: 600; }
@@ -253,7 +254,6 @@
 @media (max-width: 767px) {
   .collection-query-fields, .collection-query-search, .collection-query-field { width: 100%; flex-basis: 100%; min-width: 0; }
   .workbench-query-dock { padding: 12px; }
-  .console-table-pagination { padding-inline: 10px; }
   .console-table-controls > .console-density-switch { display: none; }
   .collection-page-count, .collection-toolbar-secondary .workbench-status-counts { display: none; }
   .workbench-plan-body { display: flex; flex-direction: column; align-items: stretch; gap: 20px; padding: 20px; }

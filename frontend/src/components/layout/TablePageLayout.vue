@@ -92,13 +92,14 @@ onUnmounted(() => {
 
 /* Preserve both scrolling axes. */
 .table-scroll-container {
-  @apply flex flex-col overflow-hidden h-full bg-white dark:bg-dark-800 rounded-xl border border-gray-200 dark:border-dark-700;
+  @apply flex flex-col overflow-hidden h-full bg-white dark:bg-dark-800;
 }
 
 .table-scroll-container :deep(.table-wrapper) {
   @apply flex-1 overflow-x-auto overflow-y-auto;
-  /* Reserve scrollbar space to avoid column movement. */
-  scrollbar-gutter: stable;
+  /* Let short lists use the full width; overflow still gets a scrollbar. */
+  scrollbar-gutter: auto;
+  border-radius: 0;
 }
 
 .table-scroll-container :deep(table) {
