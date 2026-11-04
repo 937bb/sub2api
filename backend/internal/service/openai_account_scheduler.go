@@ -2178,30 +2178,8 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	platform string,
 	previousResponseCanMove bool,
 	useUpstreamTokenCost bool,
-) (selection *AccountSelectionResult, decision OpenAIAccountScheduleDecision, err error) {
-	defer func() {
-		if err == nil {
-			if bindErr := s.claimSelectedOpenAIConversation(ctx, selection); bindErr != nil {
-				if selection != nil && selection.ReleaseFunc != nil {
-					selection.ReleaseFunc()
-				}
-				selection, err = nil, bindErr
-			}
-		}
-	}()
-	if openAIConversationStateFromContext(ctx) != nil {
-		strictCtx := s.withOpenAIGroupPrivacyRequirement(s.withOpenAIQuotaAutoPauseContext(ctx), groupID)
-		strictCtx = s.withOpenAIProfitControlGate(strictCtx, groupID)
-		if bound, d, handled, bindErr := s.selectBoundOpenAIConversation(strictCtx, OpenAIAccountScheduleRequest{
-			GroupID: groupID, Platform: platform, SessionHash: sessionHash, PreviousResponseID: previousResponseID,
-			RequestedModel: requestedModel, ExcludedIDs: excludedIDs, RequiredTransport: requiredTransport,
-			RequiredCapability: requiredCapability, RequiredImageCapability: requiredImageCapability, RequireCompact: requireCompact,
-		}); handled {
-			return bound, d, bindErr
-		}
-	}
-
-	selection, decision, err = s.selectAccountWithSchedulerOnce(ctx, groupID, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport, requiredCapability, requiredImageCapability, requireCompact, platform, previousResponseCanMove, useUpstreamTokenCost)
+) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
+	selection, decision, err := s.selectAccountWithSchedulerOnce(ctx, groupID, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport, requiredCapability, requiredImageCapability, requireCompact, platform, previousResponseCanMove, useUpstreamTokenCost)
 	if err == nil || openAIProxyStreamQuarantineBypassed(ctx) {
 		return selection, decision, err
 	}

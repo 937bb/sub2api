@@ -1,22 +1,6 @@
 export default {
     accounts: {
       fingerprint: {
-        "runtimeTitle": "当前管理实例解析结果",
-        "runtimeScope": "以下数值来自处理本次查询的实例。独立 WS 实例可能有不同配置；关闭身份强制时，实际请求还受客户端 Header 影响。",
-        "binding": "对话账号绑定",
-        "strict": "严格绑定 · 原账号不可用时停止换号",
-        "soft": "普通粘性 · 允许故障换号",
-        "httpProfile": "当前实例的 CLI HTTPS 配置",
-        "otherTransport": "当前 UA 不使用 CLI 专用传输",
-        "enforcement": "强制统一身份",
-        "dynamicHeaders": "按请求生成或注入的 Header（不展示凭据值）",
-        "transportTitle": "TLS / HTTP / WebSocket 协议配置",
-        "evidenceNote": "以下为代码配置模板，基线样本日期为 2026-11-03。当前请求没有执行生产抓包，不能据此认定全链路与本机完全一致。WS 配置是否生效需在承载 WS 的实例核验。",
-        "selected": "当前 HTTP 配置选中",
-        "none": "未声明",
-        "headerOrder": "Header 序列化顺序",
-        "configHash": "配置 SHA256（不是 JA3 / JA4）",
-
         "view": "查看指纹",
         "description": "由后端解析当前账号身份。点击刷新可重新读取最新配置。",
         "device": "设备 ID",
@@ -32,7 +16,7 @@ export default {
         "notReady": "当前收敛配置缺少种子，尚未生效；上方设备 ID 仍为当前身份解析结果。",
         "transportNote": "HTTP 与 WebSocket 共用上述设备 ID。会话、线程和请求 ID 随具体请求生成。这里的 User-Agent 和 WS 模式为账号配置，实际发送还受运行实例策略影响；TLS/HTTP 握手细节需要在承载请求的实例抓包核验，本页面未进行抓包测量。",
         "sources": {
-          "explicit_device": "已配置设备 ID",
+          "explicit_device": "手动指定设备 ID",
           "persisted_seed": "系统持久化种子",
           "account_metadata": "上游账号身份派生",
           "setup_token": "Setup Token 身份派生",

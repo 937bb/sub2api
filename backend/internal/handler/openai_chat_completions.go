@@ -160,7 +160,6 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 	defer inflightRelease()
 
 	sessionHash := h.gatewayService.GenerateSessionHash(c, body)
-	c.Request = c.Request.WithContext(h.gatewayService.WithOpenAIConversationBinding(c.Request.Context(), c, apiKey.GroupID, sessionHash, "", body))
 	promptCacheKey := h.gatewayService.ExtractSessionID(c, body)
 
 	maxAccountSwitches := h.maxAccountSwitches
@@ -197,9 +196,6 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		if err != nil {
 			if failoverClientGone(c) {
 				reqLog.Info("openai_chat_completions.account_select_aborted_client_disconnected", zap.Error(err))
-				return
-			}
-			if h.handleConversationBindingError(c, err, streamStarted, false) {
 				return
 			}
 			reqLog.Warn("openai_chat_completions.account_select_failed",
@@ -326,9 +322,6 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 			})
 		}
 		if err != nil {
-			if h.handleConversationBindingError(c, err, streamStarted, false) {
-				return
-			}
 			if result != nil && result.ImageCount > 0 {
 				reqLog.Warn("openai_chat_completions.forward_partial_error_with_image_result",
 					zap.Int64("account_id", account.ID),

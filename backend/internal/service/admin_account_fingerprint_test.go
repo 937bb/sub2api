@@ -90,27 +90,3 @@ func TestAccountFingerprintRejectsUnsupportedAndMissingAccounts(t *testing.T) {
 	_, err = s.GetAccountFingerprint(context.Background(), 2)
 	require.ErrorIs(t, err, ErrAccountNotFound)
 }
-
-func TestAccountFingerprintReportsProfilesWithoutClaimingProductionCapture(t *testing.T) {
-	a := &Account{ID: 9, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Extra: map[string]any{"openai_device_id": "fixed"}}
-	svc := &adminServiceImpl{accountRepo: &fingerprintViewRepo{accounts: map[int64]*Account{9: a}}}
-	t.Setenv("CODEX_CA_CERTIFICATE", "")
-	t.Setenv("SSL_CERT_FILE", "")
-	native, err := svc.GetAccountFingerprint(context.Background(), 9)
-	require.NoError(t, err)
-	require.Len(t, native.Transports, 3)
-	require.Equal(t, "not_captured", native.Runtime.CaptureStatus)
-	require.Equal(t, "serving_admin_process", native.Runtime.Scope)
-	require.True(t, native.Transports[0].SelectedByCurrentHTTP)
-	require.False(t, native.Transports[2].SelectedByCurrentHTTP)
-	require.Nil(t, native.Transports[0].Profile.ALPNProtocols)
-	require.Equal(t, uint32(5177345), native.Transports[1].HTTP2.ConnectionWindowUpdate)
-	t.Setenv("SSL_CERT_FILE", "/private/ca.pem")
-	custom, err := svc.GetAccountFingerprint(context.Background(), 9)
-	require.NoError(t, err)
-	require.True(t, custom.Transports[1].SelectedByCurrentHTTP)
-	raw, err := json.Marshal(custom)
-	require.NoError(t, err)
-	require.NotContains(t, string(raw), "/private/ca.pem")
-	require.NotEqual(t, custom.Transports[0].ConfigurationHash, custom.Transports[1].ConfigurationHash)
-}

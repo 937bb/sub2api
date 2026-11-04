@@ -45,7 +45,7 @@ func (t *codexWSHTTPTransport) CloseIdleConnections() { t.transport.CloseIdleCon
 func (t *codexWSHTTPTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	clone := r.Clone(r.Context())
 	clone.Header = make(http.Header, len(r.Header)+2)
-	order := codexWSHeaderOrder()
+	order := []string{"Host", "Connection", "Upgrade", "Sec-WebSocket-Version", "Sec-WebSocket-Key", "authorization", "user-agent", "originator", "openai-beta", "x-codex-turn-metadata", "x-codex-beta-features", "x-client-request-id", "session-id", "thread-id", "x-codex-window-id"}
 	known := make(map[string]bool, len(order))
 	for _, key := range order {
 		known[strings.ToLower(key)] = true
@@ -88,8 +88,4 @@ func (t *codexWSHTTPTransport) RoundTrip(r *http.Request) (*http.Response, error
 	clone.Header["User-Agent"] = []string{""}
 	clone.Header[req.HeaderOderKey] = order
 	return t.transport.RoundTrip(clone)
-}
-
-func codexWSHeaderOrder() []string {
-	return []string{"Host", "Connection", "Upgrade", "Sec-WebSocket-Version", "Sec-WebSocket-Key", "authorization", "user-agent", "originator", "openai-beta", "x-codex-turn-metadata", "x-codex-beta-features", "x-client-request-id", "session-id", "thread-id", "x-codex-window-id"}
 }
