@@ -105,7 +105,7 @@ func (u *httpBridgeIsolationUpstream) Do(req *http.Request, _ string, _ int64, _
 
 	id := texts[0]
 	turn := 1
-	if input.IsArray() {
+	if len(texts) > 1 {
 		turn = 2
 	}
 	responseID := fmt.Sprintf("resp_%s_%d", id, turn)

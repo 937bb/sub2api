@@ -963,7 +963,11 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}
 		turnStart := time.Now()
 		wroteDownstream := false
-		if err := lease.WriteJSONWithContextTimeout(ctx, json.RawMessage(payload), s.openAIWSWriteTimeout()); err != nil {
+		outboundPayload, _, roleErr := normalizeCodexDeveloperMessages(payload, account)
+		if roleErr != nil {
+			return nil, wrapOpenAIWSIngressTurnError("write_upstream", roleErr, false)
+		}
+		if err := lease.WriteJSONWithContextTimeout(ctx, json.RawMessage(outboundPayload), s.openAIWSWriteTimeout()); err != nil {
 			return nil, wrapOpenAIWSIngressTurnError(
 				"write_upstream",
 				fmt.Errorf("write upstream websocket request: %w", err),

@@ -167,7 +167,7 @@ func TestOpenAIGatewayService_OAuthResponsesPromotesSystemMessageWithoutDuplicat
 	require.NotEmpty(t, upstream.lastBody)
 	require.Equal(t, systemPrompt+"\n\n"+existingInstructions, gjson.GetBytes(upstream.lastBody, "instructions").String())
 	require.Equal(t, int64(1), gjson.GetBytes(upstream.lastBody, "input.#").Int())
-	require.Equal(t, "user", gjson.GetBytes(upstream.lastBody, "input.0.role").String())
+	require.Equal(t, "developer", gjson.GetBytes(upstream.lastBody, "input.0.role").String())
 	require.Equal(t, 1, strings.Count(string(upstream.lastBody), systemPrompt))
 }
 

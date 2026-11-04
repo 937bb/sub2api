@@ -600,7 +600,7 @@ func TestOpenAIWSHTTPBridgeFullCustomToolHistoryWithoutPreviousResponseIDDoesNot
 	orphanInput := gjson.GetBytes(upstream.bodies[1], "input").Array()
 	require.Len(t, orphanInput, 2)
 	require.Equal(t, "run pwd", orphanInput[0].String())
-	require.Equal(t, "user", orphanInput[1].Get("role").String())
+	require.Equal(t, "developer", orphanInput[1].Get("role").String())
 	for _, body := range upstream.bodies[2:] {
 		input := gjson.GetBytes(body, "input").Array()
 		require.Len(t, input, 3)

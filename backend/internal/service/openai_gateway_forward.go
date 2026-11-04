@@ -1405,7 +1405,13 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 	// previous_response_id，避免携带状态字段被上游拒绝。
 	body = normalizeDeepSeekResponsesRequestBody(account, body)
 
-	req, err := http.NewRequestWithContext(ctx, "POST", targetURL, bytes.NewReader(body))
+	// Apply the selected Codex role policy only to the outbound copy.
+	outboundBody, _, roleErr := normalizeCodexDeveloperMessages(body, account)
+	if roleErr != nil {
+		return nil, roleErr
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", targetURL, bytes.NewReader(outboundBody))
 	if err != nil {
 		return nil, err
 	}

@@ -210,6 +210,7 @@ func (s *OpenAIGatewayService) buildOpenAIWSCreatePayload(reqBody map[string]any
 		payload["stream"] = true
 	}
 	payload["type"] = "response.create"
+	normalizeCodexDeveloperMessageMap(payload, account)
 
 	// OAuth 默认保持 store=false，避免误依赖服务端历史。
 	if account != nil && account.UsesOpenAICodexProtocol() && !s.isOpenAIWSStoreRecoveryAllowed(account) {
