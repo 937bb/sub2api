@@ -52,4 +52,23 @@ describe('AccountFingerprintModal', () => {
     expect(wrapper.text()).toContain('device-1')
     wrapper.unmount()
   })
+  it('shows resolved runtime values and explicitly unmeasured transport details', async () => {
+    vi.mocked(getFingerprint).mockResolvedValue({ ...result(1), runtime: {
+      scope: 'serving_admin_process', user_agent: 'codex_cli_rs/1.2.3', originator: 'codex_cli_rs', version: '1.2.3',
+      identity_enforced: true, local_cli_transport: true, http_profile: 'native-http', custom_ca: false,
+      force_http: true, ws_router_enabled: false, strict_conversation_binding: true, capture_status: 'not_captured', dynamic_headers: ['session-id']
+    }, transports: [{
+      tls: { Name: 'native-http', MinVersion: 771, MaxVersion: 771, ShuffleExtensions: false, CipherSuites: [49196], Curves: [23], PointFormats: [0], EnableGREASE: false, SignatureAlgorithms: [1025], ALPNProtocols: null, SupportedVersions: null, KeyShareGroups: null, PSKModes: null, Extensions: [0, 10] },
+      configuration_hash: 'config-hash', evidence: 'reference_capture_2026-11-03', protocol: 'HTTP/1.1', selected_by_current_http: true, header_order: ['Host', 'User-Agent']
+    }] })
+    const wrapper = render()
+    await flushPromises()
+    expect(wrapper.text()).toContain('codex_cli_rs/1.2.3')
+    expect(wrapper.text()).toContain('admin.accounts.fingerprint.strict')
+    expect(wrapper.text()).toContain('admin.accounts.fingerprint.evidenceNote')
+    expect(wrapper.text()).toContain('TLS 1.2')
+    expect(wrapper.find('details').attributes()).toHaveProperty('open')
+    wrapper.unmount()
+  })
+
 })

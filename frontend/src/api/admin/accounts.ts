@@ -1134,6 +1134,16 @@ export async function refreshOpenCodeGoUsage(id: number): Promise<OpenCodeGoUsag
   return data
 }
 
+export interface AccountFingerprintTransport {
+  tls: { Name: string; MinVersion: number; MaxVersion: number; ShuffleExtensions: boolean; CipherSuites: number[]; Curves: number[]; PointFormats: number[]; EnableGREASE: boolean; SignatureAlgorithms: number[]; ALPNProtocols: string[] | null; SupportedVersions: number[] | null; KeyShareGroups: number[] | null; PSKModes: number[] | null; Extensions: number[] }
+  configuration_hash: string
+  evidence: string
+  protocol: string
+  selected_by_current_http: boolean
+  header_order: string[]
+  http2?: { settings: number[][]; connection_window_update: number; pseudo_header_order: string[] }
+  compression?: string
+}
 export interface AccountFingerprint {
   account_id: number
   credential_account_id: number
@@ -1144,6 +1154,13 @@ export interface AccountFingerprint {
   convergence_ready: boolean
   user_agent_override: string
   ws_account_mode: string
+  runtime?: {
+    scope: string; user_agent: string; originator: string; version: string
+    identity_enforced: boolean; local_cli_transport: boolean; http_profile: string
+    custom_ca: boolean; force_http: boolean; ws_router_enabled: boolean
+    strict_conversation_binding: boolean; capture_status: string; dynamic_headers: string[]
+  }
+  transports?: AccountFingerprintTransport[]
 }
 
 export async function getFingerprint(id: number, signal?: AbortSignal): Promise<AccountFingerprint> {

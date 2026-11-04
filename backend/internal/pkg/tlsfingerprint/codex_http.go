@@ -23,13 +23,12 @@ func NewCodexHTTPTransport(base *http.Transport, profile *Profile) http.RoundTri
 	t := NewOrderedHTTPTransport(base).Transport.DisableForceHttpVersion()
 	t.DisableCompression = true
 	t.LowercaseHTTP1Headers = true
-	t.SetHTTP2SettingsFrame(
-		http2.Setting{ID: http2.SettingEnablePush, Val: 0},
-		http2.Setting{ID: http2.SettingInitialWindowSize, Val: 2097152},
-		http2.Setting{ID: http2.SettingMaxFrameSize, Val: 16384},
-		http2.Setting{ID: http2.SettingMaxHeaderListSize, Val: 16384},
-	)
-	t.SetHTTP2ConnectionFlow(5177345)
+	var settings []http2.Setting
+	for _, setting := range CodexHTTP2Settings() {
+		settings = append(settings, http2.Setting{ID: http2.SettingID(setting[0]), Val: setting[1]})
+	}
+	t.SetHTTP2SettingsFrame(settings...)
+	t.SetHTTP2ConnectionFlow(CodexHTTP2ConnectionWindowUpdate)
 	t.DialTLSContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
 		if base.DialTLSContext == nil {
 			return nil, fmt.Errorf("Codex custom-CA transport requires a TLS dialer")
@@ -65,7 +64,7 @@ func (t *codexRustlsHTTPTransport) CloseIdleConnections() { t.transport.CloseIdl
 func (t *codexRustlsHTTPTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	clone := r.Clone(r.Context())
 	clone.Header = make(http.Header, len(r.Header)+3)
-	order := []string{"x-codex-beta-features", "x-codex-window-id", "x-codex-turn-metadata", "x-client-request-id", "session-id", "thread-id", "accept", "content-type", "authorization", "originator", "user-agent"}
+	order := CodexRustlsHTTPHeaderOrder()
 	known := make(map[string]bool, len(order))
 	for _, key := range order {
 		known[key] = true
@@ -95,6 +94,19 @@ func (t *codexRustlsHTTPTransport) RoundTrip(r *http.Request) (*http.Response, e
 	order = append(order, "host", "content-length", "transfer-encoding", "trailer", "connection", "accept-encoding")
 	clone.Header["User-Agent"] = []string{""}
 	clone.Header[req.HeaderOderKey] = order
-	clone.Header[req.PseudoHeaderOderKey] = []string{":method", ":scheme", ":authority", ":path"}
+	clone.Header[req.PseudoHeaderOderKey] = CodexHTTP2PseudoHeaderOrder()
 	return t.transport.RoundTrip(clone)
+}
+
+// These functions are shared by the serializer and administrator diagnostics.
+const CodexHTTP2ConnectionWindowUpdate = 5177345
+
+func CodexHTTP2Settings() [][2]uint32 {
+	return [][2]uint32{{2, 0}, {4, 2097152}, {5, 16384}, {6, 16384}}
+}
+func CodexHTTP2PseudoHeaderOrder() []string {
+	return []string{":method", ":scheme", ":authority", ":path"}
+}
+func CodexRustlsHTTPHeaderOrder() []string {
+	return []string{"x-codex-beta-features", "x-codex-window-id", "x-codex-turn-metadata", "x-client-request-id", "session-id", "thread-id", "accept", "content-type", "authorization", "originator", "user-agent"}
 }

@@ -1,6 +1,22 @@
 export default {
     accounts: {
       fingerprint: {
+        "runtimeTitle": "Serving instance resolution",
+        "runtimeScope": "Values come from the instance serving this query. A separate WS runtime may differ. With identity enforcement disabled, actual requests also depend on incoming headers.",
+        "binding": "Conversation account binding",
+        "strict": "Strict binding · no account failover",
+        "soft": "Soft affinity · failover allowed",
+        "httpProfile": "CLI HTTPS profile in this instance",
+        "otherTransport": "This UA does not select the CLI transport",
+        "enforcement": "Identity enforcement",
+        "dynamicHeaders": "Request-dependent headers (credential values omitted)",
+        "transportTitle": "TLS / HTTP / WebSocket configuration",
+        "evidenceNote": "These are code templates based on samples from 2026-11-03. This request does not capture production traffic or prove complete native equivalence. Verify WS selection on the instance serving WS.",
+        "selected": "Selected for current HTTP configuration",
+        "none": "Not advertised",
+        "headerOrder": "Header serialization order",
+        "configHash": "Configuration SHA256 (not JA3 / JA4)",
+
         "view": "View fingerprint",
         "description": "Current account identity resolved by the server. Refresh to load the latest saved configuration.",
         "device": "Device ID",
