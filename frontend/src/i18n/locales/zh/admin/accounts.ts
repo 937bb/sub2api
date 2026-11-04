@@ -1,5 +1,34 @@
 export default {
     accounts: {
+      fingerprint: {
+        "view": "查看指纹",
+        "description": "由后端解析当前账号身份。点击刷新可重新读取最新配置。",
+        "device": "设备 ID",
+        "source": "身份来源",
+        "owner": "凭据所属账号",
+        "own": "当前账号",
+        "inherited": "继承母账号",
+        "convergence": "会话策略",
+        "ws": "账号 WebSocket 模式",
+        "userAgent": "账号 User-Agent 覆盖配置",
+        "runtimeDefault": "跟随运行实例默认配置",
+        "loadFailed": "账号指纹加载失败，请重试。",
+        "notReady": "当前收敛配置缺少种子，尚未生效；上方设备 ID 仍为当前身份解析结果。",
+        "transportNote": "HTTP 与 WebSocket 共用上述设备 ID。会话、线程和请求 ID 随具体请求生成。这里的 User-Agent 和 WS 模式为账号配置，实际发送还受运行实例策略影响；TLS/HTTP 握手细节需要在承载请求的实例抓包核验，本页面未进行抓包测量。",
+        "sources": {
+          "explicit_device": "手动指定设备 ID",
+          "persisted_seed": "系统持久化种子",
+          "account_metadata": "上游账号身份派生",
+          "setup_token": "Setup Token 身份派生",
+          "unavailable": "暂无可用的稳定设备身份"
+        },
+        "modes": {
+          "off": "固定账号设备、独立会话（默认）",
+          "device": "仅设备收敛",
+          "session": "设备与会话收敛",
+          "full": "完整收敛"
+        }
+      },
     fallbackProxies: {"title": "轮换出口 IP", "hint": "每次新请求在原代理与以下 IP 间依次轮换，最多添加 7 个。已建立的 WebSocket 会话保持出口；上游限流不会触发重试。", "add": "添加轮换 IP", "moveUp": "上移轮换顺序", "selectPrimary": "请先在上方选择原代理，再勾选其他轮换出口。", "unavailable": "不可用", "empty": "没有匹配的代理"},
       title: '账号管理',
       description: '管理 AI 平台账号和 Cookie',

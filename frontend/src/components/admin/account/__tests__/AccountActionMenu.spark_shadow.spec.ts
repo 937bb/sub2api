@@ -174,3 +174,26 @@ describe('AccountActionMenu — spark shadow 按钮可见性', () => {
     wrapper.unmount()
   })
 })
+
+
+describe('AccountActionMenu fingerprint visibility', () => {
+  it.each([
+    { platform: 'openai', type: 'oauth', parent_account_id: null, visible: true },
+    { platform: 'openai', type: 'setup-token', parent_account_id: null, visible: true },
+    { platform: 'openai', type: 'oauth', parent_account_id: 42, visible: true },
+    { platform: 'openai', type: 'apikey', parent_account_id: null, visible: false },
+    { platform: 'anthropic', type: 'oauth', parent_account_id: null, visible: false }
+  ] as const)('shows only supported accounts: $platform $type $parent_account_id', async (row) => {
+    const account = makeAccount(row)
+    const wrapper = mount(AccountActionMenu, { props: { show: true, account, anchorRect }, attachTo: document.body })
+    const button = getBodyButtons().find(b => b.textContent?.includes('admin.accounts.fingerprint.view'))
+    expect(!!button).toBe(row.visible)
+    if (button) {
+      button.click()
+      await wrapper.vm.$nextTick()
+      expect(wrapper.emitted('fingerprint')?.[0][0]).toEqual(account)
+      expect(wrapper.emitted('close')).toHaveLength(1)
+    }
+    wrapper.unmount()
+  })
+})

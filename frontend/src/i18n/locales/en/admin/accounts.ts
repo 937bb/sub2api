@@ -1,5 +1,34 @@
 export default {
     accounts: {
+      fingerprint: {
+        "view": "View fingerprint",
+        "description": "Current account identity resolved by the server. Refresh to load the latest saved configuration.",
+        "device": "Device ID",
+        "source": "Identity source",
+        "owner": "Credential owner",
+        "own": "This account",
+        "inherited": "Inherited from parent",
+        "convergence": "Session policy",
+        "ws": "Account WebSocket mode",
+        "userAgent": "Account User-Agent override",
+        "runtimeDefault": "Runtime default",
+        "loadFailed": "Unable to load this account’s fingerprint. Please retry.",
+        "notReady": "The configured convergence policy is missing its seed and is not active. The device ID above still reflects the current identity resolver.",
+        "transportNote": "HTTP and WebSocket share the resolved device ID. Session, thread and request IDs depend on each request. User-Agent and WS values here are account settings; runtime policy may override them. TLS/HTTP handshake details require capture on the serving instance and are not measured by this view.",
+        "sources": {
+          "explicit_device": "Explicit device ID",
+          "persisted_seed": "System-managed persistent seed",
+          "account_metadata": "Upstream account identity",
+          "setup_token": "Setup-token identity",
+          "unavailable": "No stable device identity available"
+        },
+        "modes": {
+          "off": "Account device, separate sessions (default)",
+          "device": "Device only",
+          "session": "Device + session",
+          "full": "Full convergence"
+        }
+      },
     fallbackProxies: {"title": "Rotating egress IPs", "hint": "New requests rotate through the original proxy and these IPs in order. Add up to 7. Established WebSocket sessions keep their route; upstream rate limits do not trigger retries.", "add": "Add rotating IP", "moveUp": "Move earlier in rotation", "selectPrimary": "Select the original proxy above, then check additional rotating IPs.", "unavailable": "Unavailable", "empty": "No matching proxies"},
       title: 'Account Management',
       description: 'Manage AI platform accounts and credentials',

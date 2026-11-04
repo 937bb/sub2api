@@ -1134,11 +1134,29 @@ export async function refreshOpenCodeGoUsage(id: number): Promise<OpenCodeGoUsag
   return data
 }
 
+export interface AccountFingerprint {
+  account_id: number
+  credential_account_id: number
+  inherited: boolean
+  installation_id: string
+  source: 'explicit_device' | 'persisted_seed' | 'account_metadata' | 'setup_token' | 'unavailable'
+  convergence_mode: 'off' | 'device' | 'session' | 'full'
+  convergence_ready: boolean
+  user_agent_override: string
+  ws_account_mode: string
+}
+
+export async function getFingerprint(id: number, signal?: AbortSignal): Promise<AccountFingerprint> {
+  const { data } = await apiClient.get<AccountFingerprint>(`/admin/accounts/${id}/fingerprint`, { signal })
+  return data
+}
+
 export const accountsAPI = {
   list,
   listWithEtag,
   getUpstreamBillingRatesWithEtag,
   getById,
+  getFingerprint,
   create,
   duplicate,
   update,
