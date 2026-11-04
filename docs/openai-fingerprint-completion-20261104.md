@@ -92,3 +92,10 @@ trusted CA. All captures use a custom provider, not real OAuth inference.
 TLS session resumption/record bytes, H2 HPACK decisions, WS compression byte
 streams and runtime service-issued assertions remain unverified. Network egress
 and endpoint-specific browser surfaces retain their configured behavior.
+
+## Subsequent work
+
+See `openai-fingerprint-followup-20261104.md` for auxiliary endpoint transport
+coverage and successful local WS framing captures completed after this baseline.
+The successful WS fixture narrows the earlier capture gap to native HTTPS and
+real OAuth inference; compressor byte equality is still unverified.

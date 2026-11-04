@@ -20,3 +20,18 @@ compressed messages with and without context takeover. Invalid, repeated and
 unoffered window parameters are rejected.
 
 When upgrading coder/websocket, rebase these small changes and rerun both suites.
+
+## Opt-in single-frame messages
+
+`DialOptions.SingleFrameMessages` buffers a message until its final frame,
+including compressed messages. The gateway enables this only for the measured
+local CLI identity. The default remains streaming/fragmented. `Writer` also
+buffers until `Close` when opted in; this requires memory proportional to the
+encoded message size. Buffers are released after each completed message.
+
+The encoder keeps negotiated compression windows and context takeover; a small
+first write does not switch to compression midway through a message. The new
+`single_frame_test.go` reads actual frame headers and replays the wire payload
+through the regular decoder, covering empty/small/large messages, repeated
+compression contexts, 9/15-bit windows, and multiple `Writer.Write` calls.
+Patch files also include conn.go and single_frame_test.go.

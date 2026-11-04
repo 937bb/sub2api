@@ -54,6 +54,11 @@ type DialOptions struct {
 	// Default false retains the upstream handshake and compression behavior.
 	OfferClientMaxWindowBits bool
 
+	// SingleFrameMessages buffers each message until it can be sent in one frame,
+	// including compressed messages. Writer also buffers until Close in this mode.
+	// This opt-in behavior uses additional memory proportional to message size.
+	SingleFrameMessages bool
+
 	// OnPingReceived is an optional callback invoked synchronously when a ping frame is received.
 	//
 	// The payload contains the application data of the ping frame.
@@ -180,15 +185,16 @@ func dial(ctx context.Context, urls string, opts *DialOptions, rand io.Reader) (
 	}
 
 	return newConn(connConfig{
-		subprotocol:    resp.Header.Get("Sec-WebSocket-Protocol"),
-		rwc:            rwc,
-		client:         true,
-		copts:          copts,
-		flateThreshold: opts.CompressionThreshold,
-		onPingReceived: opts.OnPingReceived,
-		onPongReceived: opts.OnPongReceived,
-		br:             getBufioReader(rwc),
-		bw:             getBufioWriter(rwc),
+		subprotocol:         resp.Header.Get("Sec-WebSocket-Protocol"),
+		rwc:                 rwc,
+		client:              true,
+		copts:               copts,
+		flateThreshold:      opts.CompressionThreshold,
+		singleFrameMessages: opts.SingleFrameMessages,
+		onPingReceived:      opts.OnPingReceived,
+		onPongReceived:      opts.OnPongReceived,
+		br:                  getBufioReader(rwc),
+		bw:                  getBufioWriter(rwc),
 	}), resp, nil
 }
 

@@ -170,6 +170,12 @@ func newValidatedTransport(base http.RoundTripper) *validatedTransport {
 	}
 }
 
+func (t *validatedTransport) CloseIdleConnections() {
+	if closer, ok := t.base.(interface{ CloseIdleConnections() }); ok {
+		closer.CloseIdleConnections()
+	}
+}
+
 func (t *validatedTransport) isValidatedHost(host string, now time.Time) bool {
 	if t == nil {
 		return false

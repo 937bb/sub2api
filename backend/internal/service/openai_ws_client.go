@@ -124,17 +124,18 @@ func (d *coderOpenAIWSClientDialer) Dial(
 		return nil, 0, nil, errors.New("ws url is empty")
 	}
 
-	wrapped := &coderOpenAIWSClientConn{}
+	localTLS := openai.IsLocalCLIUserAgent(headers.Get("User-Agent"))
+	wrapped := &coderOpenAIWSClientConn{measuredCLI: localTLS}
 	opts := &coderws.DialOptions{
 		HTTPHeader:               cloneHeader(headers),
-		OfferClientMaxWindowBits: openai.IsLocalCLIUserAgent(headers.Get("User-Agent")),
+		OfferClientMaxWindowBits: localTLS,
+		SingleFrameMessages:      localTLS,
 		CompressionMode:          coderws.CompressionContextTakeover,
 		OnPingReceived: func(context.Context, []byte) bool {
 			wrapped.upstreamPings.Add(1)
 			return true
 		},
 	}
-	localTLS := openai.IsLocalCLIUserAgent(headers.Get("User-Agent"))
 	if proxy := strings.TrimSpace(proxyURL); proxy != "" || localTLS {
 		proxyClient, err := d.transportHTTPClient(proxy, localTLS, openai.TransportIdentityKey(ctx, headers))
 		if err != nil {
@@ -313,6 +314,7 @@ func (d *coderOpenAIWSClientDialer) SnapshotTransportMetrics() OpenAIWSTransport
 }
 
 type coderOpenAIWSClientConn struct {
+	measuredCLI   bool
 	conn          *coderws.Conn
 	upstreamPings atomic.Int64
 }
@@ -332,6 +334,13 @@ func (c *coderOpenAIWSClientConn) WriteJSON(ctx context.Context, value any) erro
 	}
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	if c.measuredCLI {
+		payload, err := marshalCodexWSJSON(value)
+		if err != nil {
+			return err
+		}
+		return c.conn.Write(ctx, coderws.MessageText, payload)
 	}
 	return wsjson.Write(ctx, c.conn, value)
 }

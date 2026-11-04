@@ -13,6 +13,13 @@ type timingRoundTripper struct {
 	base http.RoundTripper
 }
 
+// Keep connection lifecycle operations visible through the metrics wrapper.
+func (t *timingRoundTripper) CloseIdleConnections() {
+	if closer, ok := t.base.(interface{ CloseIdleConnections() }); ok {
+		closer.CloseIdleConnections()
+	}
+}
+
 // WithDependencyModule overrides the safe module name used for an outbound call.
 func WithDependencyModule(ctx context.Context, module string) context.Context {
 	if ctx == nil {

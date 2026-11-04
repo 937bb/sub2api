@@ -43,13 +43,14 @@ const (
 type Conn struct {
 	noCopy noCopy
 
-	subprotocol    string
-	rwc            io.ReadWriteCloser
-	client         bool
-	copts          *compressionOptions
-	flateThreshold int
-	br             *bufio.Reader
-	bw             *bufio.Writer
+	subprotocol         string
+	rwc                 io.ReadWriteCloser
+	client              bool
+	copts               *compressionOptions
+	flateThreshold      int
+	singleFrameMessages bool
+	br                  *bufio.Reader
+	bw                  *bufio.Writer
 
 	readTimeoutStop  atomic.Pointer[func() bool]
 	writeTimeoutStop atomic.Pointer[func() bool]
@@ -89,13 +90,14 @@ type Conn struct {
 }
 
 type connConfig struct {
-	subprotocol    string
-	rwc            io.ReadWriteCloser
-	client         bool
-	copts          *compressionOptions
-	flateThreshold int
-	onPingReceived func(context.Context, []byte) bool
-	onPongReceived func(context.Context, []byte)
+	subprotocol         string
+	rwc                 io.ReadWriteCloser
+	client              bool
+	copts               *compressionOptions
+	flateThreshold      int
+	singleFrameMessages bool
+	onPingReceived      func(context.Context, []byte) bool
+	onPongReceived      func(context.Context, []byte)
 
 	br *bufio.Reader
 	bw *bufio.Writer
@@ -103,11 +105,12 @@ type connConfig struct {
 
 func newConn(cfg connConfig) *Conn {
 	c := &Conn{
-		subprotocol:    cfg.subprotocol,
-		rwc:            cfg.rwc,
-		client:         cfg.client,
-		copts:          cfg.copts,
-		flateThreshold: cfg.flateThreshold,
+		subprotocol:         cfg.subprotocol,
+		rwc:                 cfg.rwc,
+		client:              cfg.client,
+		copts:               cfg.copts,
+		flateThreshold:      cfg.flateThreshold,
+		singleFrameMessages: cfg.singleFrameMessages,
 
 		br: cfg.br,
 		bw: cfg.bw,

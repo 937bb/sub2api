@@ -57,9 +57,11 @@ type msgWriter struct {
 	opcode opcode
 	flate  bool
 
-	trimWriter  *trimLastFourBytesWriter
-	flateWriter flateMessageWriter
-	windowBits  int
+	trimWriter           *trimLastFourBytesWriter
+	flateWriter          flateMessageWriter
+	windowBits           int
+	frameBuffer          []byte
+	bufferedWriteStarted bool
 }
 
 func newMsgWriter(c *Conn) *msgWriter {
@@ -134,6 +136,8 @@ func (mw *msgWriter) reset(ctx context.Context, typ MessageType) error {
 	mw.opcode = opcode(typ)
 	mw.flate = false
 	mw.closed = false
+	mw.frameBuffer = nil
+	mw.bufferedWriteStarted = false
 
 	mw.trimWriter.reset()
 
@@ -168,11 +172,12 @@ func (mw *msgWriter) Write(p []byte) (_ int, err error) {
 	if mw.c.flate() {
 		// Only enables flate if the length crosses the
 		// threshold on the first frame
-		if mw.opcode != opContinuation && len(p) >= mw.c.flateThreshold {
+		if mw.opcode != opContinuation && (!mw.c.singleFrameMessages || !mw.bufferedWriteStarted) && len(p) >= mw.c.flateThreshold {
 			mw.ensureFlate()
 		}
 	}
 
+	mw.bufferedWriteStarted = true
 	if mw.flate {
 		return mw.flateWriter.Write(p)
 	}
@@ -181,6 +186,10 @@ func (mw *msgWriter) Write(p []byte) (_ int, err error) {
 }
 
 func (mw *msgWriter) write(p []byte) (int, error) {
+	if mw.c.singleFrameMessages {
+		mw.frameBuffer = append(mw.frameBuffer, p...)
+		return len(p), nil
+	}
 	n, err := mw.c.writeFrame(mw.ctx, false, mw.flate, mw.opcode, p)
 	if err != nil {
 		return n, fmt.Errorf("failed to write data frame: %w", err)
@@ -211,7 +220,8 @@ func (mw *msgWriter) Close() (err error) {
 		}
 	}
 
-	_, err = mw.c.writeFrame(mw.ctx, true, mw.flate, mw.opcode, nil)
+	_, err = mw.c.writeFrame(mw.ctx, true, mw.flate, mw.opcode, mw.frameBuffer)
+	mw.frameBuffer = nil
 	if err != nil {
 		return fmt.Errorf("failed to write fin frame: %w", err)
 	}

@@ -1,0 +1,145 @@
+{
+  "source_sha256": "508388df35319042107560d095b271a98a512f59a542848c908b23ed1bad4b44",
+  "runs": [
+    {
+      "accepted": "",
+      "exit_code": 0,
+      "frames": [
+        {
+          "offer": "permessage-deflate; client_max_window_bits",
+          "accepted": "",
+          "opcode": 1,
+          "fin": true,
+          "compressed": false,
+          "masked": true,
+          "wire_bytes": 36022,
+          "decoded_bytes": 36022,
+          "trailing_newline": false,
+          "literal_html": true,
+          "escaped_html": false,
+          "type": "response.create",
+          "generate": false,
+          "keys": [
+            "client_metadata",
+            "generate",
+            "include",
+            "input",
+            "model",
+            "parallel_tool_calls",
+            "prompt_cache_key",
+            "reasoning",
+            "store",
+            "stream",
+            "tool_choice",
+            "tools",
+            "type"
+          ]
+        },
+        {
+          "offer": "permessage-deflate; client_max_window_bits",
+          "accepted": "",
+          "opcode": 1,
+          "fin": true,
+          "compressed": false,
+          "masked": true,
+          "wire_bytes": 22177,
+          "decoded_bytes": 22177,
+          "trailing_newline": false,
+          "literal_html": true,
+          "escaped_html": false,
+          "type": "response.create",
+          "generate": null,
+          "keys": [
+            "client_metadata",
+            "include",
+            "input",
+            "model",
+            "parallel_tool_calls",
+            "previous_response_id",
+            "prompt_cache_key",
+            "reasoning",
+            "store",
+            "stream",
+            "tool_choice",
+            "tools",
+            "type"
+          ]
+        },
+        {
+          "fixture_end": "EOFError"
+        }
+      ]
+    },
+    {
+      "accepted": "permessage-deflate",
+      "exit_code": 0,
+      "frames": [
+        {
+          "offer": "permessage-deflate; client_max_window_bits",
+          "accepted": "permessage-deflate",
+          "opcode": 1,
+          "fin": true,
+          "compressed": true,
+          "masked": true,
+          "wire_bytes": 12491,
+          "requires_previous_deflate_context": false,
+          "decoded_bytes": 36022,
+          "trailing_newline": false,
+          "literal_html": true,
+          "escaped_html": false,
+          "type": "response.create",
+          "generate": false,
+          "keys": [
+            "client_metadata",
+            "generate",
+            "include",
+            "input",
+            "model",
+            "parallel_tool_calls",
+            "prompt_cache_key",
+            "reasoning",
+            "store",
+            "stream",
+            "tool_choice",
+            "tools",
+            "type"
+          ]
+        },
+        {
+          "offer": "permessage-deflate; client_max_window_bits",
+          "accepted": "permessage-deflate",
+          "opcode": 1,
+          "fin": true,
+          "compressed": true,
+          "masked": true,
+          "wire_bytes": 1669,
+          "requires_previous_deflate_context": true,
+          "decoded_bytes": 22177,
+          "trailing_newline": false,
+          "literal_html": true,
+          "escaped_html": false,
+          "type": "response.create",
+          "generate": null,
+          "keys": [
+            "client_metadata",
+            "include",
+            "input",
+            "model",
+            "parallel_tool_calls",
+            "previous_response_id",
+            "prompt_cache_key",
+            "reasoning",
+            "store",
+            "stream",
+            "tool_choice",
+            "tools",
+            "type"
+          ]
+        },
+        {
+          "fixture_end": "EOFError"
+        }
+      ]
+    }
+  ]
+}
