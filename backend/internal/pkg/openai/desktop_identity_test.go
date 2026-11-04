@@ -7,14 +7,14 @@ import (
 )
 
 func TestDesktopIdentityPreservesApplicationVersion(t *testing.T) {
-	observed := "Codex Desktop/0.166.0-alpha.5.1 (Mac OS 26.6.2; arm64) unknown (Codex Desktop; 26.1027.51404)"
+	observed := "Codex Desktop/0.166.0-alpha.6 (Mac OS 26.6.2; arm64) unknown (Codex Desktop; 26.1029.61003)"
 	require.Equal(t, observed, CodexDesktopOriginator+"/"+CodexDesktopEngineVersion+CodexDesktopUserAgentSuffix)
 	originator, paired, ok := PairCodexClientIdentity(observed)
 	require.True(t, ok)
 	require.Equal(t, "Codex Desktop", originator)
 	require.Equal(t, observed, paired)
-	require.Equal(t, "0.166.0-alpha.5.1", CodexUserAgentVersion(observed))
-	require.Equal(t, "Codex Desktop/0.200.1 (Mac OS 26.6.2; arm64) unknown (Codex Desktop; 26.1027.51404)", SetCodexUserAgentVersion(observed, "0.200.1"))
+	require.Equal(t, "0.166.0-alpha.6", CodexUserAgentVersion(observed))
+	require.Equal(t, "Codex Desktop/0.200.1 (Mac OS 26.6.2; arm64) unknown (Codex Desktop; 26.1029.61003)", SetCodexUserAgentVersion(observed, "0.200.1"))
 }
 
 func TestEngineRewriteDoesNotChangeIndependentClientVersions(t *testing.T) {

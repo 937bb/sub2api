@@ -110,3 +110,12 @@ Custom-CA HTTP/2 negotiation, SETTINGS, connection window and pseudo-header
 order are now implemented and covered by actual wire tests. This is not a claim
 of 100% equivalence: TLS records/resumption, dynamic identities and compression
 bytes still differ or remain unverified.
+
+## November 4 local refresh
+
+The installed bundle is now `26.1029.61003` (build `24614`), with engine
+`0.166.0-alpha.6`. The initial observations above remain historical evidence.
+The shared fallback constants now use the newly observed engine/app versions;
+explicit runtime settings still win. Fresh loopback HTTP/WS and TLS captures,
+transport isolation changes and limitations are documented in
+`openai-fingerprint-completion-20261104.md`.

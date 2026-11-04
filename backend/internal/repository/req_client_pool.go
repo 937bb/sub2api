@@ -127,7 +127,7 @@ func localCLIReqWithoutBrowserDefaults(r *http.Request) *http.Request {
 	cloned := r.Clone(r.Context())
 	for key := range cloned.Header {
 		lower := strings.ToLower(key)
-		if strings.HasPrefix(lower, "sec-fetch-") || lower == "upgrade-insecure-requests" || key == req.HeaderOderKey || key == req.PseudoHeaderOderKey {
+		if strings.HasPrefix(lower, "sec-fetch-") || strings.HasPrefix(lower, "sec-ch-ua") || lower == "upgrade-insecure-requests" || key == req.HeaderOderKey || key == req.PseudoHeaderOderKey {
 			delete(cloned.Header, key)
 		}
 	}

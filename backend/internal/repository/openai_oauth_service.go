@@ -48,7 +48,7 @@ func (s *openaiOAuthService) ExchangeCode(ctx context.Context, code, codeVerifie
 
 	authUA, authOriginator := service.CodexCanonicalAuthIdentity()
 	resp, err := client.R().
-		SetContext(ctx).
+		SetContext(openai.WithTransportCredential(ctx, "authorization_code", code)).
 		SetHeader("User-Agent", authUA).
 		SetHeader("originator", authOriginator).
 		SetFormDataFromValues(formData).
@@ -74,7 +74,7 @@ func (s *openaiOAuthService) RefreshToken(ctx context.Context, refreshToken, pro
 }
 
 func (s *openaiOAuthService) RefreshTokenWithClientID(ctx context.Context, refreshToken, proxyURL string, clientID string) (*openai.TokenResponse, error) {
-	// 调用方应始终传入正确的 client_id；为兼容旧数据，未指定时默认使用 OpenAI ClientID
+	// Preserve the default client ID for callers with legacy account data.
 	clientID = strings.TrimSpace(clientID)
 	if clientID == "" {
 		clientID = openai.ClientID
@@ -98,7 +98,7 @@ func (s *openaiOAuthService) refreshTokenWithClientID(ctx context.Context, refre
 
 	authUA, authOriginator := service.CodexCanonicalAuthIdentity()
 	resp, err := client.R().
-		SetContext(ctx).
+		SetContext(openai.WithTransportCredential(ctx, "refresh_token", refreshToken)).
 		SetHeader("User-Agent", authUA).
 		SetHeader("originator", authOriginator).
 		SetFormDataFromValues(formData).

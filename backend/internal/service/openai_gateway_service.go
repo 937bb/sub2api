@@ -51,7 +51,7 @@ const (
 	openAICompactSessionSeedKey        = "openai_compact_session_seed"
 	openAIUpstreamEndpointContextKey   = "openai_actual_upstream_endpoint"
 	// Version of the engine bundled in the inspected ChatGPT desktop application.
-	codexCLIVersion = "0.166.0-alpha.5.1"
+	codexCLIVersion = openai.CodexDesktopEngineVersion
 	// Throttle quota snapshot persistence used by diagnostics.
 	openAICodexSnapshotPersistMinInterval = 30 * time.Second
 	// Allow a quota-paused account to refresh a stale snapshot through a request.

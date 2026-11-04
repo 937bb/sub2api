@@ -17,6 +17,10 @@ import (
 // NewCodexHTTPTransport keeps native HTTP/1 and custom-CA Rustls negotiation
 // separate. The supplied dialer retains direct, CONNECT and SOCKS routing.
 func NewCodexHTTPTransport(base *http.Transport, profile *Profile) http.RoundTripper {
+	return newCodexIdentityTransport(func() http.RoundTripper { return newCodexHTTPTransport(base, profile) })
+}
+
+func newCodexHTTPTransport(base *http.Transport, profile *Profile) http.RoundTripper {
 	if profile.Name != CodexCustomCAHTTPProfile().Name {
 		return NewOrderedHTTPTransport(base)
 	}

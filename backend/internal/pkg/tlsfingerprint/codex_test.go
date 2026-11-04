@@ -78,7 +78,7 @@ func decodeU16(data []byte) []uint16 {
 func TestCodexClientHelloMatchesLocalCapture(t *testing.T) {
 	for _, kind := range []string{"http", "ws", "custom_ca"} {
 		t.Run(kind, func(t *testing.T) {
-			raw, err := os.ReadFile("testdata/codex_" + kind + "_20261103.json")
+			raw, err := os.ReadFile("testdata/codex_" + kind + "_20261104.json")
 			if err != nil {
 				t.Fatal(err)
 			}

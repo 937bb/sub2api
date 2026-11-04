@@ -136,7 +136,7 @@ func (d *coderOpenAIWSClientDialer) Dial(
 	}
 	localTLS := openai.IsLocalCLIUserAgent(headers.Get("User-Agent"))
 	if proxy := strings.TrimSpace(proxyURL); proxy != "" || localTLS {
-		proxyClient, err := d.transportHTTPClient(proxy, localTLS)
+		proxyClient, err := d.transportHTTPClient(proxy, localTLS, openai.TransportIdentityKey(ctx, headers))
 		if err != nil {
 			return nil, 0, nil, err
 		}
@@ -172,7 +172,7 @@ func (d *coderOpenAIWSClientDialer) proxyHTTPClient(proxy string) (*http.Client,
 	return d.transportHTTPClient(proxy, false)
 }
 
-func (d *coderOpenAIWSClientDialer) transportHTTPClient(proxy string, localTLS bool) (*http.Client, error) {
+func (d *coderOpenAIWSClientDialer) transportHTTPClient(proxy string, localTLS bool, identityKeys ...string) (*http.Client, error) {
 	if d == nil {
 		return nil, errors.New("openai ws dialer is nil")
 	}
@@ -187,6 +187,9 @@ func (d *coderOpenAIWSClientDialer) transportHTTPClient(proxy string, localTLS b
 	cacheKey := normalizedProxy
 	if localTLS {
 		cacheKey = "codex-rustls:" + normalizedProxy
+	}
+	if len(identityKeys) > 0 {
+		cacheKey += ":identity:" + identityKeys[0]
 	}
 	now := time.Now().UnixNano()
 

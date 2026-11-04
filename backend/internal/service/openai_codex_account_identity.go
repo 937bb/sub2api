@@ -155,6 +155,8 @@ var codexAccountIdentityFields = []struct {
 	{name: "thread-id", kind: "thread"},
 	{name: "turn_id", kind: "turn"},
 	{name: "turn-id", kind: "turn"},
+	{name: "root_turn_id", kind: "turn"},
+	{name: "context_window_id", kind: "context-window"},
 	{name: "window_id", kind: "window"},
 	{name: "x-codex-window-id", kind: "window"},
 	{name: "x-client-request-id", kind: "request"},
@@ -185,7 +187,7 @@ func applyCodexAccountIdentityEmbeddedMetadata(values map[string]any, account *A
 		return false
 	}
 	metadata := map[string]any{}
-	if err := json.Unmarshal([]byte(raw), &metadata); err != nil || metadata == nil {
+	if err := decodeCodexIdentityMetadata(raw, &metadata); err != nil || metadata == nil {
 		return false
 	}
 	if !applyCodexAccountIdentityFields(metadata, account, apiKeyID) {
@@ -246,7 +248,7 @@ func applyCodexAccountIdentityClientMetadataRaw(body []byte, account *Account, a
 	originalBodySessionID := ""
 	if cm := gjson.GetBytes(body, "client_metadata"); cm.IsObject() {
 		clientMetadata := map[string]any{}
-		if err := json.Unmarshal([]byte(cm.Raw), &clientMetadata); err != nil {
+		if err := decodeCodexIdentityMetadata(cm.Raw, &clientMetadata); err != nil {
 			return body, false, fmt.Errorf("decode client_metadata for account identity: %w", err)
 		}
 		originalBodySessionID, _ = clientMetadata["session_id"].(string)
@@ -296,9 +298,9 @@ func applyCodexAccountIdentityHeaders(headers http.Header, account *Account, api
 		if field.name == "session_id" {
 			continue
 		}
-		raw := strings.TrimSpace(headers.Get(field.name))
+		raw := strings.TrimSpace(codexIdentityHeaderValue(headers, field.name))
 		if raw != "" {
-			headers.Set(field.name, scopeCodexAccountIdentityValue(account, apiKeyID, field.kind, raw))
+			setCodexIdentityHeader(headers, field.name, scopeCodexAccountIdentityValue(account, apiKeyID, field.kind, raw))
 		}
 	}
 	// Include the account device even when SDKs omit client installation headers;
@@ -312,12 +314,22 @@ func applyCodexAccountIdentityHeaders(headers http.Header, account *Account, api
 			}
 		}
 	}
-	if raw := strings.TrimSpace(headers.Get(openAIWSTurnMetadataHeader)); raw != "" {
+	if raw := strings.TrimSpace(codexIdentityHeaderValue(headers, openAIWSTurnMetadataHeader)); raw != "" {
 		metadata := map[string]any{}
-		if err := json.Unmarshal([]byte(raw), &metadata); err == nil && metadata != nil && applyCodexAccountIdentityFields(metadata, account, apiKeyID) {
+		if err := decodeCodexIdentityMetadata(raw, &metadata); err == nil && metadata != nil && applyCodexAccountIdentityFields(metadata, account, apiKeyID) {
 			if rebuilt, err := marshalCodexTurnMetadata(metadata); err == nil {
-				headers.Set(openAIWSTurnMetadataHeader, string(rebuilt))
+				setCodexIdentityHeader(headers, openAIWSTurnMetadataHeader, string(rebuilt))
 			}
 		}
 	}
+}
+
+// Preserve opaque numeric metadata while rewriting only known identity fields.
+func decodeCodexIdentityMetadata(raw string, out *map[string]any) error {
+	if !json.Valid([]byte(raw)) {
+		return fmt.Errorf("invalid Codex identity metadata JSON")
+	}
+	decoder := json.NewDecoder(strings.NewReader(raw))
+	decoder.UseNumber()
+	return decoder.Decode(out)
 }

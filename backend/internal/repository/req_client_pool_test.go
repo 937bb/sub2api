@@ -153,6 +153,8 @@ func TestGetSharedReqClient_ImpersonateUsesFirefoxFingerprint(t *testing.T) {
 func TestLocalCLIReqRemovesInheritedBrowserHeaders(t *testing.T) {
 	request, _ := http.NewRequest(http.MethodGet, "https://localhost/usage", nil)
 	request.Header.Set("Sec-Fetch-Site", "same-origin")
+	request.Header.Set("Sec-CH-UA-Platform", "Windows")
+	request.Header.Set("Sec-CH-UA", "Chromium")
 	request.Header.Set("Upgrade-Insecure-Requests", "1")
 	request.Header.Set("Authorization", "Bearer fixture")
 	request.Header.Set("OpenAI-Beta", "codex-1")
@@ -160,6 +162,8 @@ func TestLocalCLIReqRemovesInheritedBrowserHeaders(t *testing.T) {
 	request.Header[req.PseudoHeaderOderKey] = []string{":method"}
 	cleaned := localCLIReqWithoutBrowserDefaults(request)
 	require.Empty(t, cleaned.Header.Get("Sec-Fetch-Site"))
+	require.Empty(t, cleaned.Header.Get("Sec-CH-UA"))
+	require.Empty(t, cleaned.Header.Get("Sec-CH-UA-Platform"))
 	require.Empty(t, cleaned.Header.Get("Upgrade-Insecure-Requests"))
 	require.NotContains(t, cleaned.Header, req.HeaderOderKey)
 	require.NotContains(t, cleaned.Header, req.PseudoHeaderOderKey)

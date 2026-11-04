@@ -23,7 +23,7 @@ import (
 
 func codexCustomCAHeaderNames(t *testing.T) []string {
 	t.Helper()
-	data, err := os.ReadFile("testdata/codex_custom_ca_http1_headers_20261103.json")
+	data, err := os.ReadFile("testdata/codex_custom_ca_http1_headers_20261104.json")
 	if err != nil {
 		t.Fatal(err)
 	}

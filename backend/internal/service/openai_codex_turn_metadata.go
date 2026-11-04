@@ -37,3 +37,16 @@ func marshalCodexTurnMetadata(metadata map[string]any) ([]byte, error) {
 	}
 	return raw, nil
 }
+
+// The root turn equals the current turn only on a root invocation. Preserve that
+// relation during convergence without overwriting a subagent's distinct parent.
+func replaceCodexTurnMetadataFields(metadata, fields map[string]any) {
+	oldTurn, _ := metadata["turn_id"].(string)
+	rootTurn, _ := metadata["root_turn_id"].(string)
+	if replacement, ok := fields["turn_id"]; ok && oldTurn != "" && rootTurn == oldTurn {
+		metadata["root_turn_id"] = replacement
+	}
+	for key, value := range fields {
+		metadata[key] = value
+	}
+}

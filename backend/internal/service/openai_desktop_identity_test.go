@@ -71,7 +71,7 @@ func TestCLIIdentityAcrossOutboundTransports(t *testing.T) {
 					require.Equal(t, wantOriginator, h.Get("Originator"))
 					require.Equal(t, wantUA, h.Get("User-Agent"))
 					require.Equal(t, wantBeta, h.Get("OpenAI-Beta"))
-					require.Equal(t, "0.166.0-alpha.5.1", h.Get("Version"))
+					require.Equal(t, "0.166.0-alpha.6", h.Get("Version"))
 					require.Equal(t, "fixture-account", h.Get("ChatGPT-Account-ID"))
 					for _, field := range []struct{ header, kind, value string }{
 						{"X-Codex-Installation-ID", "installation", "client-installation"},

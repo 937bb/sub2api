@@ -1,0 +1,18 @@
+{
+  "source": "Local bundled codex exec 0.166.0-alpha.6",
+  "headers": [
+    "x-codex-beta-features",
+    "x-codex-window-id",
+    "x-codex-turn-metadata",
+    "x-client-request-id",
+    "session-id",
+    "thread-id",
+    "accept",
+    "content-type",
+    "authorization",
+    "originator",
+    "user-agent",
+    "host",
+    "content-length"
+  ]
+}
