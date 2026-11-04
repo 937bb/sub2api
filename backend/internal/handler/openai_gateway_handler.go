@@ -631,6 +631,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 
 	// Generate session hash (header first; fallback to prompt_cache_key)
 	sessionHash := h.gatewayService.GenerateSessionHash(c, sessionHashBody)
+	c.Request = c.Request.WithContext(h.gatewayService.WithOpenAIConversationBinding(c.Request.Context(), c, apiKey.GroupID, sessionHash, previousResponseID, sessionHashBody))
 	c.Request = c.Request.WithContext(h.gatewayService.WithOpenAIEncryptedContentAffinity(c.Request.Context(), apiKey.GroupID, sessionHash, previousResponseID, forwardBody))
 	if h.rejectIfCyberSessionBlocked(c, apiKey, sessionHashBody, reqModel, cyberBlockFormatResponses) {
 		return
@@ -691,6 +692,9 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		if err != nil {
 			if failoverClientGone(c) {
 				reqLog.Info("openai.account_select_aborted_client_disconnected", zap.Error(err))
+				return
+			}
+			if h.handleConversationBindingError(c, err, streamStarted, false) {
 				return
 			}
 			reqLog.Warn("openai.account_select_failed",
@@ -860,6 +864,9 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			})
 		}
 		if err != nil {
+			if h.handleConversationBindingError(c, err, streamStarted, false) {
+				return
+			}
 			if result != nil && result.ClientDisconnect {
 				reqLog.Info("openai.client_disconnected",
 					zap.Int64("account_id", account.ID),
@@ -1281,6 +1288,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 	sessionHash := h.gatewayService.GenerateSessionHash(c, body)
 	promptCacheKey := h.gatewayService.ExtractSessionID(c, body)
 	sessionHash, promptCacheKey = resolveOpenAIMessagesMetadataSession(c, sessionHash, promptCacheKey, reqModel, body)
+	c.Request = c.Request.WithContext(h.gatewayService.WithOpenAIConversationBinding(c.Request.Context(), c, apiKey.GroupID, sessionHash, "", body))
 	if h.rejectIfCyberSessionBlocked(c, apiKey, body, reqModel, cyberBlockFormatAnthropic) {
 		return
 	}
@@ -1324,6 +1332,9 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		if err != nil {
 			if failoverClientGone(c) {
 				reqLog.Info("openai_messages.account_select_aborted_client_disconnected", zap.Error(err))
+				return
+			}
+			if h.handleConversationBindingError(c, err, streamStarted, true) {
 				return
 			}
 			reqLog.Warn("openai_messages.account_select_failed",
@@ -1453,6 +1464,9 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 			})
 		}
 		if err != nil {
+			if h.handleConversationBindingError(c, err, streamStarted, true) {
+				return
+			}
 			if result != nil && result.ImageCount > 0 {
 				reqLog.Warn("openai_messages.forward_partial_error_with_image_result",
 					zap.Int64("account_id", account.ID),
@@ -2706,6 +2720,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		firstMessage,
 		openAIWSIngressFallbackSessionSeed(subject.UserID, apiKey.ID, apiKey.GroupID),
 	)
+	ctx = h.gatewayService.WithOpenAIConversationBinding(ctx, c, apiKey.GroupID, sessionHash, previousResponseID, firstMessage)
 	ctx = h.gatewayService.WithOpenAIEncryptedContentAffinity(ctx, apiKey.GroupID, sessionHash, previousResponseID, firstMessage)
 	ctx = service.WithOpenAIGuardianParentAffinity(ctx, c, firstMessage, reqModel)
 	maxAccountSwitches := h.maxAccountSwitches
@@ -2814,6 +2829,11 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			requestPlatform,
 		)
 		if err != nil {
+			var conversationErr *service.OpenAIConversationError
+			if errors.As(err, &conversationErr) {
+				closeOpenAIClientWS(wsConn, coderws.StatusTryAgainLater, conversationErr.Code)
+				return
+			}
 			reqLog.Warn("openai.websocket_account_select_failed",
 				zap.Error(openAICompatibleSelectionErrorForLog(err, requestPlatform)),
 				zap.Int("excluded_account_count", len(failedAccountIDs)),
@@ -3232,6 +3252,11 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			if service.IsOpenAIWSSessionPreemptedError(err) {
 				// 关闭帧已由抢占登记在取消前发给本连接，这里只记录并释放。
 				reqLog.Info("openai.websocket_ingress_preempted", zap.Int64("account_id", account.ID))
+				return
+			}
+			var conversationErr *service.OpenAIConversationError
+			if errors.As(err, &conversationErr) {
+				closeOpenAIClientWS(wsConn, coderws.StatusTryAgainLater, conversationErr.Code)
 				return
 			}
 			var failoverErr *service.UpstreamFailoverError

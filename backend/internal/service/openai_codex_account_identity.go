@@ -29,6 +29,9 @@ func (s *OpenAIGatewayService) prepareCodexAccountIdentitySource(ctx context.Con
 		}
 		source = resolved
 	}
+	if err := s.validateOpenAIConversationIdentity(ctx, account, source); err != nil {
+		return nil, err
+	}
 	if c != nil {
 		c.Set(codexAccountIdentitySourceContextKey, source)
 	}

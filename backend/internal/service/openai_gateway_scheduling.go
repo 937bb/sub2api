@@ -36,6 +36,8 @@ var explicitOpenAIHeaderSessionNames = []string{
 	openCodeSessionIDHeader,
 	openCodeNativeSessionHeader,
 	codeBuddyConversationHeader,
+	"thread-id",
+	"thread_id",
 }
 
 // explicitOpenAIHeaderSessionID resolves stable conversation identifiers sent
@@ -68,7 +70,14 @@ func explicitOpenAISessionID(c *gin.Context, body []byte) string {
 
 	sessionID := explicitOpenAIHeaderSessionID(c)
 	if sessionID == "" && len(body) > 0 {
-		sessionID = strings.TrimSpace(openAIRequestPayloadView(body).Get("prompt_cache_key").String())
+		payload := openAIRequestPayloadView(body)
+		sessionID = strings.TrimSpace(payload.Get("prompt_cache_key").String())
+		if sessionID == "" {
+			sessionID = strings.TrimSpace(payload.Get("client_metadata.session_id").String())
+		}
+		if sessionID == "" {
+			sessionID = strings.TrimSpace(payload.Get("client_metadata.thread_id").String())
+		}
 	}
 	return sessionID
 }
@@ -107,7 +116,14 @@ func explicitOpenAIRequestSessionID(c *gin.Context, body []byte) string {
 		sessionID = strings.TrimSpace(c.GetHeader(grokConversationIDHeader))
 	}
 	if sessionID == "" && len(body) > 0 {
-		sessionID = strings.TrimSpace(openAIRequestPayloadView(body).Get("prompt_cache_key").String())
+		payload := openAIRequestPayloadView(body)
+		sessionID = strings.TrimSpace(payload.Get("prompt_cache_key").String())
+		if sessionID == "" {
+			sessionID = strings.TrimSpace(payload.Get("client_metadata.session_id").String())
+		}
+		if sessionID == "" {
+			sessionID = strings.TrimSpace(payload.Get("client_metadata.thread_id").String())
+		}
 	}
 	if sessionID == "" && isGrokRequestContext(c) && len(body) > 0 {
 		sessionID = grokPreviousResponseSessionSeed(body)
