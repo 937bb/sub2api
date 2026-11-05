@@ -22,7 +22,7 @@ export const GROUP_PLATFORM_OPTIONS: PlatformOption<GroupPlatform>[] = reactive(
 watchSyncEffect(() => {
   const concrete = listPlatforms().map(spec => ({ value: spec.id, label: spec.display_name }))
   CONCRETE_PLATFORM_OPTIONS.splice(0, CONCRETE_PLATFORM_OPTIONS.length, ...concrete)
-  GROUP_PLATFORM_OPTIONS.splice(0, GROUP_PLATFORM_OPTIONS.length, ...concrete, {
+  GROUP_PLATFORM_OPTIONS.splice(0, GROUP_PLATFORM_OPTIONS.length, ...concrete.filter(option => option.value !== 'kiro'), {
     value: 'composite',
     label: 'Composite'
   })

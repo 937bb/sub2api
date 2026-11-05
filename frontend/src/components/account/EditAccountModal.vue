@@ -12,7 +12,7 @@
       @submit.prevent="handleSubmit"
       class="workbench-editor-form space-y-5 console-form"
     >
-      <KiroAccountFields v-if="account?.platform === 'kiro'" v-model:json="kiroJson" v-model:policy="kiroCachePolicy" editing />
+      <KiroAccountFields v-if="account?.platform === 'kiro'" v-model:json="kiroJson" editing />
       <DialogSection :title="t('console.formIdentity')">
 <div class="workbench-field-row console-field">
         <label class="input-label">{{ t('common.name') }}</label>
@@ -879,7 +879,7 @@
 
       <!-- OpenAI/Grok OAuth Model Mapping (OAuth 类型没有 apikey 容器，需要独立的模型映射区域) -->
       <div
-        v-if="(account.platform === 'openai' || account.platform === 'grok') && account.type === 'oauth'"
+        v-if="(account.platform === 'openai' || account.platform === 'grok' || account.platform === 'kiro') && account.type === 'oauth'"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
         :data-testid="account.platform === 'grok' ? 'grok-model-settings' : undefined"
       >
@@ -3370,7 +3370,7 @@
 
 <script setup lang="ts">
 import KiroAccountFields from './KiroAccountFields.vue'
-import { defaultKiroCachePolicy, parseKiroCredentials } from './kiroCredentials'
+import { parseKiroCredentials } from './kiroCredentials'
 
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 
@@ -3499,11 +3499,9 @@ interface Props {
 
 const props = defineProps<Props>()
 const kiroJson = ref('')
-const kiroCachePolicy = ref(defaultKiroCachePolicy())
 watch(() => [props.show, props.account] as const, ([show, account]) => {
   if (show && account) {
     kiroJson.value = ''
-    kiroCachePolicy.value = { ...defaultKiroCachePolicy(), ...((account.extra?.kiro_response_cache as object) || {}) }
   }
 }, { immediate: true })
 
@@ -5973,7 +5971,7 @@ const handleSubmit = async () => {
     }
 
     // OpenAI/Grok OAuth: persist model mapping to credentials
-    if ((props.account.platform === 'openai' || props.account.platform === 'grok') && props.account.type === 'oauth') {
+    if ((props.account.platform === 'openai' || props.account.platform === 'grok' || props.account.platform === 'kiro') && props.account.type === 'oauth') {
       const currentCredentials = isSparkShadow.value
         ? {}
         : (updatePayload.credentials as Record<string, unknown>) ||
@@ -6404,11 +6402,10 @@ const handleSubmit = async () => {
 
     if (props.account.platform === 'kiro') {
       if (!form.proxy_id) throw new Error(t('admin.accounts.kiro.proxyRequired'))
-      updatePayload.extra = { ...(props.account.extra || {}), ...((updatePayload.extra as object) || {}), kiro_response_cache: { ...kiroCachePolicy.value } }
       if (kiroJson.value.trim()) {
         const items = parseKiroCredentials(kiroJson.value)
         if (items.length !== 1) throw new Error(t('admin.accounts.kiro.singleAccount'))
-        updatePayload.credentials = { ...props.account.credentials, ...items[0]!.credentials }
+        updatePayload.credentials = { ...props.account.credentials, ...((updatePayload.credentials as Record<string, unknown>) || {}), ...items[0]!.credentials }
       }
     }
     const canContinue = await ensureAntigravityMixedChannelConfirmed(async () => {

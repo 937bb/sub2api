@@ -121,6 +121,7 @@ type APIKeyAuthGroupSnapshot struct {
 	// MaxReasoningEffortOverLimit 超过上限时的访问控制：downgrade（默认）或 deny。
 	MaxReasoningEffortOverLimit string `json:"max_reasoning_effort_over_limit,omitempty"`
 	// ReasoningEffortMappings rewrites explicit effort values before the ceiling.
+	KiroResponseCache       KiroCachePolicy          `json:"kiro_response_cache"`
 	ReasoningEffortMappings []ReasoningEffortMapping `json:"reasoning_effort_mappings"`
 
 	// 高峰时段倍率：PeakRateEnabled 为 true 且请求时刻处于 [PeakStart, PeakEnd) 时，

@@ -878,6 +878,20 @@ func (_c *GroupCreate) SetNillableMaxReasoningEffortOverLimit(v *string) *GroupC
 	return _c
 }
 
+// SetKiroResponseCache sets the "kiro_response_cache" field.
+func (_c *GroupCreate) SetKiroResponseCache(v domain.KiroResponseCachePolicy) *GroupCreate {
+	_c.mutation.SetKiroResponseCache(v)
+	return _c
+}
+
+// SetNillableKiroResponseCache sets the "kiro_response_cache" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableKiroResponseCache(v *domain.KiroResponseCachePolicy) *GroupCreate {
+	if v != nil {
+		_c.SetKiroResponseCache(*v)
+	}
+	return _c
+}
+
 // SetReasoningEffortMappings sets the "reasoning_effort_mappings" field.
 func (_c *GroupCreate) SetReasoningEffortMappings(v []domain.ReasoningEffortMapping) *GroupCreate {
 	_c.mutation.SetReasoningEffortMappings(v)
@@ -1223,6 +1237,13 @@ func (_c *GroupCreate) defaults() error {
 		v := group.DefaultMaxReasoningEffortOverLimit
 		_c.mutation.SetMaxReasoningEffortOverLimit(v)
 	}
+	if _, ok := _c.mutation.KiroResponseCache(); !ok {
+		if group.DefaultKiroResponseCache == nil {
+			return fmt.Errorf("ent: uninitialized group.DefaultKiroResponseCache (forgotten import ent/runtime?)")
+		}
+		v := group.DefaultKiroResponseCache()
+		_c.mutation.SetKiroResponseCache(v)
+	}
 	if _, ok := _c.mutation.ReasoningEffortMappings(); !ok {
 		v := group.DefaultReasoningEffortMappings
 		_c.mutation.SetReasoningEffortMappings(v)
@@ -1438,6 +1459,14 @@ func (_c *GroupCreate) check() error {
 	if v, ok := _c.mutation.MaxReasoningEffortOverLimit(); ok {
 		if err := group.MaxReasoningEffortOverLimitValidator(v); err != nil {
 			return &ValidationError{Name: "max_reasoning_effort_over_limit", err: fmt.Errorf(`ent: validator failed for field "Group.max_reasoning_effort_over_limit": %w`, err)}
+		}
+	}
+	if _, ok := _c.mutation.KiroResponseCache(); !ok {
+		return &ValidationError{Name: "kiro_response_cache", err: errors.New(`ent: missing required field "Group.kiro_response_cache"`)}
+	}
+	if v, ok := _c.mutation.KiroResponseCache(); ok {
+		if err := v.Validate(); err != nil {
+			return &ValidationError{Name: "kiro_response_cache", err: fmt.Errorf(`ent: validator failed for field "Group.kiro_response_cache": %w`, err)}
 		}
 	}
 	if _, ok := _c.mutation.ReasoningEffortMappings(); !ok {
@@ -1734,6 +1763,10 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.MaxReasoningEffortOverLimit(); ok {
 		_spec.SetField(group.FieldMaxReasoningEffortOverLimit, field.TypeString, value)
 		_node.MaxReasoningEffortOverLimit = value
+	}
+	if value, ok := _c.mutation.KiroResponseCache(); ok {
+		_spec.SetField(group.FieldKiroResponseCache, field.TypeJSON, value)
+		_node.KiroResponseCache = value
 	}
 	if value, ok := _c.mutation.ReasoningEffortMappings(); ok {
 		_spec.SetField(group.FieldReasoningEffortMappings, field.TypeJSON, value)
@@ -2924,6 +2957,18 @@ func (u *GroupUpsert) SetMaxReasoningEffortOverLimit(v string) *GroupUpsert {
 // UpdateMaxReasoningEffortOverLimit sets the "max_reasoning_effort_over_limit" field to the value that was provided on create.
 func (u *GroupUpsert) UpdateMaxReasoningEffortOverLimit() *GroupUpsert {
 	u.SetExcluded(group.FieldMaxReasoningEffortOverLimit)
+	return u
+}
+
+// SetKiroResponseCache sets the "kiro_response_cache" field.
+func (u *GroupUpsert) SetKiroResponseCache(v domain.KiroResponseCachePolicy) *GroupUpsert {
+	u.Set(group.FieldKiroResponseCache, v)
+	return u
+}
+
+// UpdateKiroResponseCache sets the "kiro_response_cache" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateKiroResponseCache() *GroupUpsert {
+	u.SetExcluded(group.FieldKiroResponseCache)
 	return u
 }
 
@@ -4222,6 +4267,20 @@ func (u *GroupUpsertOne) SetMaxReasoningEffortOverLimit(v string) *GroupUpsertOn
 func (u *GroupUpsertOne) UpdateMaxReasoningEffortOverLimit() *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateMaxReasoningEffortOverLimit()
+	})
+}
+
+// SetKiroResponseCache sets the "kiro_response_cache" field.
+func (u *GroupUpsertOne) SetKiroResponseCache(v domain.KiroResponseCachePolicy) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetKiroResponseCache(v)
+	})
+}
+
+// UpdateKiroResponseCache sets the "kiro_response_cache" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateKiroResponseCache() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateKiroResponseCache()
 	})
 }
 
@@ -5696,6 +5755,20 @@ func (u *GroupUpsertBulk) SetMaxReasoningEffortOverLimit(v string) *GroupUpsertB
 func (u *GroupUpsertBulk) UpdateMaxReasoningEffortOverLimit() *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateMaxReasoningEffortOverLimit()
+	})
+}
+
+// SetKiroResponseCache sets the "kiro_response_cache" field.
+func (u *GroupUpsertBulk) SetKiroResponseCache(v domain.KiroResponseCachePolicy) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetKiroResponseCache(v)
+	})
+}
+
+// UpdateKiroResponseCache sets the "kiro_response_cache" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateKiroResponseCache() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateKiroResponseCache()
 	})
 }
 

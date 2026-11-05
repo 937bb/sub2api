@@ -1170,6 +1170,20 @@ func (_u *GroupUpdate) SetNillableMaxReasoningEffortOverLimit(v *string) *GroupU
 	return _u
 }
 
+// SetKiroResponseCache sets the "kiro_response_cache" field.
+func (_u *GroupUpdate) SetKiroResponseCache(v domain.KiroResponseCachePolicy) *GroupUpdate {
+	_u.mutation.SetKiroResponseCache(v)
+	return _u
+}
+
+// SetNillableKiroResponseCache sets the "kiro_response_cache" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableKiroResponseCache(v *domain.KiroResponseCachePolicy) *GroupUpdate {
+	if v != nil {
+		_u.SetKiroResponseCache(*v)
+	}
+	return _u
+}
+
 // SetReasoningEffortMappings sets the "reasoning_effort_mappings" field.
 func (_u *GroupUpdate) SetReasoningEffortMappings(v []domain.ReasoningEffortMapping) *GroupUpdate {
 	_u.mutation.SetReasoningEffortMappings(v)
@@ -1568,6 +1582,11 @@ func (_u *GroupUpdate) check() error {
 			return &ValidationError{Name: "max_reasoning_effort_over_limit", err: fmt.Errorf(`ent: validator failed for field "Group.max_reasoning_effort_over_limit": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.KiroResponseCache(); ok {
+		if err := v.Validate(); err != nil {
+			return &ValidationError{Name: "kiro_response_cache", err: fmt.Errorf(`ent: validator failed for field "Group.kiro_response_cache": %w`, err)}
+		}
+	}
 	return nil
 }
 
@@ -1919,6 +1938,9 @@ func (_u *GroupUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.MaxReasoningEffortOverLimit(); ok {
 		_spec.SetField(group.FieldMaxReasoningEffortOverLimit, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.KiroResponseCache(); ok {
+		_spec.SetField(group.FieldKiroResponseCache, field.TypeJSON, value)
 	}
 	if value, ok := _u.mutation.ReasoningEffortMappings(); ok {
 		_spec.SetField(group.FieldReasoningEffortMappings, field.TypeJSON, value)
@@ -3390,6 +3412,20 @@ func (_u *GroupUpdateOne) SetNillableMaxReasoningEffortOverLimit(v *string) *Gro
 	return _u
 }
 
+// SetKiroResponseCache sets the "kiro_response_cache" field.
+func (_u *GroupUpdateOne) SetKiroResponseCache(v domain.KiroResponseCachePolicy) *GroupUpdateOne {
+	_u.mutation.SetKiroResponseCache(v)
+	return _u
+}
+
+// SetNillableKiroResponseCache sets the "kiro_response_cache" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableKiroResponseCache(v *domain.KiroResponseCachePolicy) *GroupUpdateOne {
+	if v != nil {
+		_u.SetKiroResponseCache(*v)
+	}
+	return _u
+}
+
 // SetReasoningEffortMappings sets the "reasoning_effort_mappings" field.
 func (_u *GroupUpdateOne) SetReasoningEffortMappings(v []domain.ReasoningEffortMapping) *GroupUpdateOne {
 	_u.mutation.SetReasoningEffortMappings(v)
@@ -3801,6 +3837,11 @@ func (_u *GroupUpdateOne) check() error {
 			return &ValidationError{Name: "max_reasoning_effort_over_limit", err: fmt.Errorf(`ent: validator failed for field "Group.max_reasoning_effort_over_limit": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.KiroResponseCache(); ok {
+		if err := v.Validate(); err != nil {
+			return &ValidationError{Name: "kiro_response_cache", err: fmt.Errorf(`ent: validator failed for field "Group.kiro_response_cache": %w`, err)}
+		}
+	}
 	return nil
 }
 
@@ -4169,6 +4210,9 @@ func (_u *GroupUpdateOne) sqlSave(ctx context.Context) (_node *Group, err error)
 	}
 	if value, ok := _u.mutation.MaxReasoningEffortOverLimit(); ok {
 		_spec.SetField(group.FieldMaxReasoningEffortOverLimit, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.KiroResponseCache(); ok {
+		_spec.SetField(group.FieldKiroResponseCache, field.TypeJSON, value)
 	}
 	if value, ok := _u.mutation.ReasoningEffortMappings(); ok {
 		_spec.SetField(group.FieldReasoningEffortMappings, field.TypeJSON, value)

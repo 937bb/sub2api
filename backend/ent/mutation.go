@@ -22172,6 +22172,7 @@ type GroupMutation struct {
 	addrpm_limit                            *int
 	max_reasoning_effort                    *string
 	max_reasoning_effort_over_limit         *string
+	kiro_response_cache                     *domain.KiroResponseCachePolicy
 	reasoning_effort_mappings               *[]domain.ReasoningEffortMapping
 	appendreasoning_effort_mappings         []domain.ReasoningEffortMapping
 	profit_control_enabled                  *bool
@@ -25438,6 +25439,42 @@ func (m *GroupMutation) ResetMaxReasoningEffortOverLimit() {
 	m.max_reasoning_effort_over_limit = nil
 }
 
+// SetKiroResponseCache sets the "kiro_response_cache" field.
+func (m *GroupMutation) SetKiroResponseCache(drcp domain.KiroResponseCachePolicy) {
+	m.kiro_response_cache = &drcp
+}
+
+// KiroResponseCache returns the value of the "kiro_response_cache" field in the mutation.
+func (m *GroupMutation) KiroResponseCache() (r domain.KiroResponseCachePolicy, exists bool) {
+	v := m.kiro_response_cache
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldKiroResponseCache returns the old "kiro_response_cache" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldKiroResponseCache(ctx context.Context) (v domain.KiroResponseCachePolicy, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldKiroResponseCache is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldKiroResponseCache requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldKiroResponseCache: %w", err)
+	}
+	return oldValue.KiroResponseCache, nil
+}
+
+// ResetKiroResponseCache resets all changes to the "kiro_response_cache" field.
+func (m *GroupMutation) ResetKiroResponseCache() {
+	m.kiro_response_cache = nil
+}
+
 // SetReasoningEffortMappings sets the "reasoning_effort_mappings" field.
 func (m *GroupMutation) SetReasoningEffortMappings(dem []domain.ReasoningEffortMapping) {
 	m.reasoning_effort_mappings = &dem
@@ -25995,7 +26032,7 @@ func (m *GroupMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *GroupMutation) Fields() []string {
-	fields := make([]string, 0, 68)
+	fields := make([]string, 0, 69)
 	if m.created_at != nil {
 		fields = append(fields, group.FieldCreatedAt)
 	}
@@ -26188,6 +26225,9 @@ func (m *GroupMutation) Fields() []string {
 	if m.max_reasoning_effort_over_limit != nil {
 		fields = append(fields, group.FieldMaxReasoningEffortOverLimit)
 	}
+	if m.kiro_response_cache != nil {
+		fields = append(fields, group.FieldKiroResponseCache)
+	}
 	if m.reasoning_effort_mappings != nil {
 		fields = append(fields, group.FieldReasoningEffortMappings)
 	}
@@ -26336,6 +26376,8 @@ func (m *GroupMutation) Field(name string) (ent.Value, bool) {
 		return m.MaxReasoningEffort()
 	case group.FieldMaxReasoningEffortOverLimit:
 		return m.MaxReasoningEffortOverLimit()
+	case group.FieldKiroResponseCache:
+		return m.KiroResponseCache()
 	case group.FieldReasoningEffortMappings:
 		return m.ReasoningEffortMappings()
 	case group.FieldProfitControlEnabled:
@@ -26481,6 +26523,8 @@ func (m *GroupMutation) OldField(ctx context.Context, name string) (ent.Value, e
 		return m.OldMaxReasoningEffort(ctx)
 	case group.FieldMaxReasoningEffortOverLimit:
 		return m.OldMaxReasoningEffortOverLimit(ctx)
+	case group.FieldKiroResponseCache:
+		return m.OldKiroResponseCache(ctx)
 	case group.FieldReasoningEffortMappings:
 		return m.OldReasoningEffortMappings(ctx)
 	case group.FieldProfitControlEnabled:
@@ -26945,6 +26989,13 @@ func (m *GroupMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetMaxReasoningEffortOverLimit(v)
+		return nil
+	case group.FieldKiroResponseCache:
+		v, ok := value.(domain.KiroResponseCachePolicy)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetKiroResponseCache(v)
 		return nil
 	case group.FieldReasoningEffortMappings:
 		v, ok := value.([]domain.ReasoningEffortMapping)
@@ -27676,6 +27727,9 @@ func (m *GroupMutation) ResetField(name string) error {
 		return nil
 	case group.FieldMaxReasoningEffortOverLimit:
 		m.ResetMaxReasoningEffortOverLimit()
+		return nil
+	case group.FieldKiroResponseCache:
+		m.ResetKiroResponseCache()
 		return nil
 	case group.FieldReasoningEffortMappings:
 		m.ResetReasoningEffortMappings()

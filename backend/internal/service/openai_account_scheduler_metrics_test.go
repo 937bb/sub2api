@@ -71,3 +71,39 @@ func TestOpenAISchedulerStickyHitRatioCountsSelectionOnce(t *testing.T) {
 	require.Equal(t, int64(2), snapshot.StickySessionHitTotal)
 	require.Equal(t, 0.75, snapshot.StickyHitRatio)
 }
+
+func (r schedulerLatencyAccountRepo) ListSchedulableByPlatforms(ctx context.Context, platforms []string) ([]Account, error) {
+	var out []Account
+	seen := map[int64]bool{}
+	for _, platform := range platforms {
+		accounts, err := r.ListSchedulableByPlatform(ctx, platform)
+		if err != nil {
+			return nil, err
+		}
+		for _, a := range accounts {
+			if !seen[a.ID] {
+				out = append(out, a)
+				seen[a.ID] = true
+			}
+		}
+	}
+	return out, nil
+}
+
+func (r schedulerLatencyAccountRepo) ListSchedulableUngroupedByPlatforms(ctx context.Context, platforms []string) ([]Account, error) {
+	var out []Account
+	seen := map[int64]bool{}
+	for _, platform := range platforms {
+		accounts, err := r.ListSchedulableUngroupedByPlatform(ctx, platform)
+		if err != nil {
+			return nil, err
+		}
+		for _, a := range accounts {
+			if !seen[a.ID] {
+				out = append(out, a)
+				seen[a.ID] = true
+			}
+		}
+	}
+	return out, nil
+}

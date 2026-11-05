@@ -306,6 +306,7 @@ type CreateGroupInput struct {
 	// MaxReasoningEffortOverLimit 超过上限时的访问控制：downgrade（默认）或 deny。
 	MaxReasoningEffortOverLimit string
 	// ReasoningEffortMappings Anthropic/OpenAI 推理强度映射，可按模型精确名、前缀或后缀限定。
+	KiroResponseCache       *KiroCachePolicy
 	ReasoningEffortMappings []ReasoningEffortMapping
 	// 分组利润控制（五个 token 平台分组可启用；margin/buffer 为小数，nil 按 0 处理）
 	ProfitControlEnabled bool
@@ -389,6 +390,7 @@ type UpdateGroupInput struct {
 	// MaxReasoningEffortOverLimit 空字符串视为 downgrade；nil 表示未提供不改动。
 	MaxReasoningEffortOverLimit *string
 	// ReasoningEffortMappings nil 表示不修改，空数组表示清空，非空数组表示替换。
+	KiroResponseCache       *KiroCachePolicy
 	ReasoningEffortMappings *[]ReasoningEffortMapping
 	// 分组利润控制（nil 表示不修改；margin/buffer 为小数）
 	ProfitControlEnabled *bool

@@ -1030,3 +1030,25 @@ func TestCodexModelsDiscoveryProjectsWildcardMappingWithoutAllowlist(t *testing.
 		})
 	}
 }
+
+func (r codexModelsFailoverAccountRepo) ListSchedulableByPlatforms(ctx context.Context, platforms []string) ([]service.Account, error) {
+	var out []service.Account
+	seen := map[int64]bool{}
+	for _, platform := range platforms {
+		accounts, err := r.ListSchedulableByPlatform(ctx, platform)
+		if err != nil {
+			return nil, err
+		}
+		for _, a := range accounts {
+			if !seen[a.ID] {
+				out = append(out, a)
+				seen[a.ID] = true
+			}
+		}
+	}
+	return out, nil
+}
+
+func (r codexModelsFailoverAccountRepo) ListSchedulableByGroupIDAndPlatforms(ctx context.Context, groupID int64, platforms []string) ([]service.Account, error) {
+	return r.ListSchedulableByPlatforms(ctx, platforms)
+}

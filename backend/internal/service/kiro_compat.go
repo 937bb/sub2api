@@ -87,14 +87,14 @@ func (s *GatewayService) kiroAsAnthropic(ctx context.Context, c *gin.Context, a 
 		session = uuid.NewString()
 	}
 	groupID := derefGroupID(key.GroupID)
-	if parsed != nil {
+	if parsed != nil && parsed.GroupID != nil {
 		groupID = derefGroupID(parsed.GroupID)
 	}
 	scope := fmt.Sprintf("%d:%d:%d:%d", key.UserID, key.ID, groupID, a.ID)
 	if _, err := kiroProxy(a); err != nil {
 		return nil, err
 	}
-	policy, err := ReadKiroCachePolicy(a.Extra)
+	policy, err := s.kiroGroupCachePolicy(ctx, groupID)
 	if err != nil {
 		return nil, err
 	}
@@ -105,7 +105,7 @@ func (s *GatewayService) kiroAsAnthropic(ctx context.Context, c *gin.Context, a 
 	c.Header("X-Sub2api-Cache", "bypass")
 	if useCache {
 		c.Header("X-Sub2api-Cache", "miss")
-		cached, cacheErr := cache.GetKiroResponse(ctx, a.ID, cacheKey, policy)
+		cached, cacheErr := cache.GetKiroResponse(ctx, groupID, cacheKey, policy)
 		var out kiro.Response
 		if cacheErr == nil && len(cached) > 0 && json.Unmarshal(cached, &out) == nil && len(out.Content) > 0 {
 			out.ID = "msg_" + uuid.NewString()
@@ -181,7 +181,7 @@ func (s *GatewayService) kiroAsAnthropic(ctx context.Context, c *gin.Context, a 
 			if textOnly {
 				data, _ := json.Marshal(out)
 				if len(data) <= 1<<20 {
-					_ = cache.PutKiroResponse(upstreamCtx, a.ID, cacheKey, data, policy)
+					_ = cache.PutKiroResponse(upstreamCtx, groupID, cacheKey, data, policy)
 				}
 			}
 		}

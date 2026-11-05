@@ -102,3 +102,32 @@ func (s *AccountTestService) FetchKiroAccountModels(ctx context.Context, a *Acco
 	}
 	return out, nil
 }
+
+func (s *OpenAIGatewayService) kiroModelsResponse(ctx context.Context, a *Account, codex bool) (*OpenAIModelsResponse, error) {
+	if s.kiroGateway == nil {
+		return nil, errors.New("Kiro gateway unavailable")
+	}
+	a, token, err := s.kiroGateway.kiroAccessToken(ctx, a)
+	if err != nil {
+		return nil, err
+	}
+	catalog, err := s.kiroGateway.kiroModels(ctx, a, token)
+	if err != nil {
+		return nil, err
+	}
+	entries := make([]map[string]any, 0, len(catalog))
+	for _, m := range catalog {
+		if codex {
+			entries = append(entries, map[string]any{"slug": m.ID, "display_name": m.Name, "description": m.Name})
+		} else {
+			entries = append(entries, map[string]any{"id": m.ID, "object": "model", "owned_by": "kiro"})
+		}
+	}
+	var body []byte
+	if codex {
+		body, err = json.Marshal(map[string]any{"models": entries})
+	} else {
+		body, err = json.Marshal(map[string]any{"object": "list", "data": entries})
+	}
+	return &OpenAIModelsResponse{Body: body, ETag: codexModelsManifestBodyETag(body)}, err
+}

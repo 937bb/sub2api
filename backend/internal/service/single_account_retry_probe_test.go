@@ -189,3 +189,21 @@ func TestAntigravityRetryLoop_PreCheck_ProbeMultiAccount_SwitchesOnRateLimit(t *
 	require.Equal(t, "claude-sonnet-4-5", switchErr.RateLimitedModel)
 	require.Zero(t, upstream.calls)
 }
+
+func (r *groupRecordingAccountRepo) ListSchedulableByGroupIDAndPlatforms(ctx context.Context, groupID int64, platforms []string) ([]Account, error) {
+	var out []Account
+	seen := map[int64]bool{}
+	for _, platform := range platforms {
+		accounts, err := r.ListSchedulableByGroupIDAndPlatform(ctx, groupID, platform)
+		if err != nil {
+			return nil, err
+		}
+		for _, a := range accounts {
+			if !seen[a.ID] {
+				out = append(out, a)
+				seen[a.ID] = true
+			}
+		}
+	}
+	return out, nil
+}

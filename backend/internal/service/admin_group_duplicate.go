@@ -161,6 +161,7 @@ func cloneGroupForDuplicate(source *Group, operationID string) *Group {
 		RPMLimit:                    source.RPMLimit,
 		MaxReasoningEffort:          source.MaxReasoningEffort,
 		MaxReasoningEffortOverLimit: source.MaxReasoningEffortOverLimit,
+		KiroResponseCache:           source.KiroResponseCache,
 		ReasoningEffortMappings:     append([]ReasoningEffortMapping(nil), source.ReasoningEffortMappings...),
 	}
 }

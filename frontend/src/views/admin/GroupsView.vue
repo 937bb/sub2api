@@ -647,6 +647,7 @@
           />
           <p class="input-hint">{{ t("admin.groups.form.rpmLimitHint") }}</p>
         </div>
+        <KiroCacheFields v-if="['anthropic', 'openai', 'gemini', 'composite'].includes(createForm.platform)" v-model="createForm.kiro_response_cache" />
         <ReasoningEffortPolicyFields
           v-if="supportsReasoningEffortPolicyPlatform(createForm.platform)"
           ref="createReasoningEffortPolicyRef"
@@ -2285,6 +2286,7 @@
           />
           <p class="input-hint">{{ t("admin.groups.form.rpmLimitHint") }}</p>
         </div>
+        <KiroCacheFields v-if="['anthropic', 'openai', 'gemini', 'composite'].includes(editForm.platform)" v-model="editForm.kiro_response_cache" />
         <ReasoningEffortPolicyFields
           v-if="supportsReasoningEffortPolicyPlatform(editForm.platform)"
           ref="editReasoningEffortPolicyRef"
@@ -4251,6 +4253,8 @@
 </template>
 
 <script setup lang="ts">
+import KiroCacheFields from '@/components/group/KiroCacheFields.vue';
+import { defaultKiroCachePolicy } from '@/components/account/kiroCredentials';
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 
 import DialogSectionLinks from '@/components/common/DialogSectionLinks.vue'
@@ -5005,6 +5009,7 @@ const createForm = reactive({
   rpm_limit: 0 as number,
   max_reasoning_effort: "",
   max_reasoning_effort_over_limit: reasoningEffortOverLimitDowngrade,
+  kiro_response_cache: defaultKiroCachePolicy(),
   reasoning_effort_mappings: [] as ReasoningEffortMappingRow[],
 });
 
@@ -5373,6 +5378,7 @@ const editForm = reactive({
   rpm_limit: 0 as number,
   max_reasoning_effort: "",
   max_reasoning_effort_over_limit: reasoningEffortOverLimitDowngrade,
+  kiro_response_cache: defaultKiroCachePolicy(),
   reasoning_effort_mappings: [] as ReasoningEffortMappingRow[],
 });
 
@@ -5830,6 +5836,7 @@ const closeCreateModal = () => {
   createForm.rpm_limit = 0;
   createForm.max_reasoning_effort = "";
   createForm.max_reasoning_effort_over_limit = reasoningEffortOverLimitDowngrade;
+  createForm.kiro_response_cache = defaultKiroCachePolicy();
   createForm.reasoning_effort_mappings = [];
   createReasoningEffortPolicyRef.value?.resetValidation();
   resetModelAllowlistState(createModelAllowlistState);
@@ -5969,6 +5976,7 @@ const handleCreateGroup = async () => {
               exact_model_mappings: createForm.exact_model_mappings,
             })
           : undefined,
+      kiro_response_cache: { ...createForm.kiro_response_cache },
       reasoning_effort_mappings: reasoningEffortMappingsToAPI(
         createForm.reasoning_effort_mappings,
       ),
@@ -6150,6 +6158,7 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.max_reasoning_effort_over_limit = normalizeReasoningEffortOverLimit(
     group.max_reasoning_effort_over_limit,
   );
+  editForm.kiro_response_cache = { ...defaultKiroCachePolicy(), ...group.kiro_response_cache };
   editForm.reasoning_effort_mappings = reasoningEffortMappingsToRows(
     group.reasoning_effort_mappings,
     group.platform,
@@ -6194,6 +6203,7 @@ const closeEditModal = () => {
   editingGroup.value = null;
   editForm.max_reasoning_effort = "";
   editForm.max_reasoning_effort_over_limit = reasoningEffortOverLimitDowngrade;
+  editForm.kiro_response_cache = defaultKiroCachePolicy();
   editForm.reasoning_effort_mappings = [];
   editReasoningEffortPolicyRef.value?.resetValidation();
   editModelRoutingRules.value = [];
@@ -6326,6 +6336,7 @@ const handleUpdateGroup = async () => {
               exact_model_mappings: editForm.exact_model_mappings,
             })
           : undefined,
+      kiro_response_cache: { ...editForm.kiro_response_cache },
       reasoning_effort_mappings: reasoningEffortMappingsToAPI(
         editForm.reasoning_effort_mappings,
       ),

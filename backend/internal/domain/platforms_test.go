@@ -52,7 +52,7 @@ func TestPlatformListMatchesLegacyLists(t *testing.T) {
 func TestPlatformListPredicates(t *testing.T) {
 	for _, platform := range legacyDisplayOrder {
 		require.True(t, IsConcretePlatform(platform), platform)
-		require.True(t, IsGroupPlatform(platform), platform)
+		require.Equal(t, platform != PlatformKiro, IsGroupPlatform(platform), platform)
 		spec, ok := LookupPlatform(platform)
 		require.True(t, ok, platform)
 		require.NotEmpty(t, spec.DisplayName, platform)

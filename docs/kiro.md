@@ -1,6 +1,7 @@
 # Kiro accounts
 
-Kiro is an independent account and group platform. The native Go adapter uses
+Kiro is an account provider, not a group type. Its accounts can join existing
+Anthropic, OpenAI, Gemini and composite groups. The native Go adapter uses
 hank9999/kiro.rs as its MIT-licensed protocol reference; it is not a Rust sidecar.
 
 ## Import and static proxies
@@ -26,10 +27,15 @@ A proxy's static egress must also be guaranteed by the proxy provider.
 ## Protocols and models
 
 The gateway supports Anthropic Messages, OpenAI Chat Completions and Responses,
+and Gemini generateContent/streamGenerateContent,
 with buffered and streaming responses. Text, base64 images, function calls and
 text tool results are translated to Kiro conversation history. Account-qualified
 session IDs prevent reusing an upstream conversation across accounts or tenants.
 The existing scheduler supplies account balancing and sticky selection.
+
+GPT/Gemini aliases require explicit account model mappings to actual Kiro models;
+joining a group does not grant access to its native provider models. OpenAI WS,
+compact, image generation, embeddings and live endpoints exclude Kiro accounts.
 
 The account model list is fetched through its proxy from Kiro's management API.
 Unsupported models and unsupported request controls are rejected. Legacy models
@@ -41,7 +47,9 @@ signature contract when sent to Kiro.
 
 ## Response caching and accounting
 
-Caching is off by default. When explicitly enabled, it reuses completed identical
+Caching is configured in the group editor and is off by default. Account-level
+cache metadata is ignored. All Kiro accounts in a group share its hit target,
+TTL and aggregate capacity. When explicitly enabled, it reuses completed identical
 text responses within the configured TTL. Keys include the authenticated user,
 API key, group, account, model, account identity and full request. Tools, images,
 thinking and nonzero-temperature requests bypass reuse. This is full-response
@@ -49,7 +57,7 @@ reuse, not simulated upstream prompt-cache tokens or prefix KV caching.
 
 The target percentage bounds actual hits over eligible requests within a UTC
 hour. Availability of repeated requests limits achievable hit rate. Zero disables
-reuse; TTL and entry capacity are bounded per account and policy. Policy changes
+reuse; TTL and entry capacity are bounded per group and policy. Policy changes
 start a new namespace, with old entries expiring naturally. Redis failure falls
 back to inference rather than claiming a cache hit. Response headers expose
 `X-Sub2api-Cache` and `X-Sub2api-Usage-Source`.
@@ -67,4 +75,4 @@ and PostgreSQL/Redis integration tests for proxy exclusivity, expiry behavior,
 cache isolation and real hit targeting. Use an authorized account for two turns
 and a tool-result round trip through its bound proxy. Verify existing OpenAI
 HTTP/WS and C-side routing before switching production. Migration
-`250_kiro_static_proxy.sql` requires a verified production backup before startup.
+`250_kiro_static_proxy.sql` and `251_kiro_group_cache.sql` require a verified production backup before startup.

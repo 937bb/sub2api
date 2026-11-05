@@ -58,7 +58,7 @@ func TestSchedulerSnapshotListStopsAfterRequestCancellation(t *testing.T) {
 
 	require.ErrorIs(t, err, context.Canceled)
 	require.Nil(t, accounts)
-	require.False(t, useMixed)
+	require.True(t, useMixed)
 	require.Zero(t, cache.tokenCaptures, "canceled requests must not capture a cache publish token")
 	require.Zero(t, repo.listCalls, "canceled requests must not fall back to the database")
 }
@@ -76,4 +76,22 @@ func TestSchedulerSnapshotGetAccountStopsAfterRequestCancellation(t *testing.T) 
 	require.ErrorIs(t, err, context.Canceled)
 	require.Nil(t, account)
 	require.Zero(t, repo.getByIDCalls, "canceled requests must not fall back to the database")
+}
+
+func (r *schedulerCancellationAccountRepo) ListSchedulableUngroupedByPlatforms(ctx context.Context, platforms []string) ([]Account, error) {
+	var out []Account
+	seen := map[int64]bool{}
+	for _, platform := range platforms {
+		accounts, err := r.ListSchedulableUngroupedByPlatform(ctx, platform)
+		if err != nil {
+			return nil, err
+		}
+		for _, a := range accounts {
+			if !seen[a.ID] {
+				out = append(out, a)
+				seen[a.ID] = true
+			}
+		}
+	}
+	return out, nil
 }

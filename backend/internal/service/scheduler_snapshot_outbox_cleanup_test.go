@@ -892,3 +892,21 @@ func int64Range(start, end int64) []int64 {
 	}
 	return values
 }
+
+func (r *outboxCleanupAccountRepo) ListSchedulableUngroupedByPlatforms(ctx context.Context, platforms []string) ([]Account, error) {
+	var out []Account
+	seen := map[int64]bool{}
+	for _, platform := range platforms {
+		accounts, err := r.ListSchedulableUngroupedByPlatform(ctx, platform)
+		if err != nil {
+			return nil, err
+		}
+		for _, a := range accounts {
+			if !seen[a.ID] {
+				out = append(out, a)
+				seen[a.ID] = true
+			}
+		}
+	}
+	return out, nil
+}

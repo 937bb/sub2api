@@ -12,12 +12,12 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// Response values are partitioned by tenant/key/account in the digest; capacity is per account.
+// Response values are partitioned by tenant/key/account in the digest; capacity and hit targets are per group.
 // Policy changes create a fresh namespace. Statistics expire hourly, never pretending a miss is a hit.
 func kiroCacheKeys(id int64, digest string, p service.KiroCachePolicy) (string, string, string) {
 	data, _ := json.Marshal(p)
 	hash := sha256.Sum256(data)
-	base := fmt.Sprintf("kiro:response:{%d}:%s", id, hex.EncodeToString(hash[:8]))
+	base := fmt.Sprintf("kiro:group-response:{%d}:%s", id, hex.EncodeToString(hash[:8]))
 	return base + ":body:" + digest, base + ":entries", base + ":stats:" + time.Now().UTC().Format("2006010215")
 }
 

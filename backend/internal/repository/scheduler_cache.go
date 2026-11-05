@@ -19,25 +19,27 @@ import (
 	"github.com/tidwall/gjson"
 )
 
+// Version the complete snapshot namespace so rolling old/new runtimes cannot
+// overwrite each other's provider membership or outbox watermark.
 const (
-	schedulerBucketSetKey          = "sched:buckets"
-	schedulerOutboxWatermarkKey    = "sched:outbox:watermark"
-	schedulerAccountPrefix         = "sched:acc:"
-	schedulerAccountMetaPrefix     = "sched:meta:"
-	schedulerAccountLastUsedPrefix = "sched:acc:last_used:"
-	schedulerActivePrefix          = "sched:active:"
-	schedulerReadyPrefix           = "sched:ready:"
-	schedulerVersionPrefix         = "sched:ver:"
-	schedulerEpochPrefix           = "sched:epoch:"
-	schedulerRetiredPrefix         = "sched:retired:"
-	schedulerSnapshotPrefix        = "sched:"
-	schedulerLockPrefix            = "sched:lock:"
+	schedulerBucketSetKey          = "sched:kiro-v2:buckets"
+	schedulerOutboxWatermarkKey    = "sched:kiro-v2:outbox:watermark"
+	schedulerAccountPrefix         = "sched:kiro-v2:acc:"
+	schedulerAccountMetaPrefix     = "sched:kiro-v2:meta:"
+	schedulerAccountLastUsedPrefix = "sched:kiro-v2:acc:last_used:"
+	schedulerActivePrefix          = "sched:kiro-v2:active:"
+	schedulerReadyPrefix           = "sched:kiro-v2:ready:"
+	schedulerVersionPrefix         = "sched:kiro-v2:ver:"
+	schedulerEpochPrefix           = "sched:kiro-v2:epoch:"
+	schedulerRetiredPrefix         = "sched:kiro-v2:retired:"
+	schedulerSnapshotPrefix        = "sched:kiro-v2:"
+	schedulerLockPrefix            = "sched:kiro-v2:lock:"
 	// 账号精简记录（sched:meta:<id>）的修订号：全局修订号与按平台划分的修订号（前缀后接平台名）。
 	// 改写精简记录后写入所涉平台的修订号；删除记录、改写平台为空或平台发生变化的记录、写入出错时写入全局修订号。
 	// 取值都是新的随机串，读侧只比较是否相等，键丢失后重建也不会与旧取值相同；
 	// Redis 回滚恢复出缓存记录过的旧取值时，由最长复用时长兜底。
-	schedulerAccountMetaRevisionKey            = "sched:meta:rev"
-	schedulerAccountMetaPlatformRevisionPrefix = "sched:meta:rev:"
+	schedulerAccountMetaRevisionKey            = "sched:kiro-v2:meta:rev"
+	schedulerAccountMetaPlatformRevisionPrefix = "sched:kiro-v2:meta:rev:"
 
 	defaultSchedulerSnapshotMGetChunkSize  = 128
 	defaultSchedulerSnapshotWriteChunkSize = 256
@@ -59,7 +61,7 @@ const (
 )
 
 const (
-	schedulerGroupLifecycleLockPrefix      = "sched:group:lifecycle-lock:"
+	schedulerGroupLifecycleLockPrefix      = "sched:kiro-v2:group:lifecycle-lock:"
 	schedulerGroupLifecycleOwnerTokenBytes = 16
 )
 

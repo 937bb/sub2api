@@ -57,6 +57,7 @@ const (
 const geminiDummyThoughtSignature = "skip_thought_signature_validator"
 
 type GeminiMessagesCompatService struct {
+	kiroGateway               *GatewayService
 	accountRepo               AccountRepository
 	groupRepo                 GroupRepository
 	cache                     GatewayCache
@@ -303,7 +304,7 @@ func (s *GeminiMessagesCompatService) isAccountValidForPlatform(account *Account
 	if account.Platform == platform {
 		return true
 	}
-	if useMixedScheduling && account.Platform == PlatformAntigravity && account.IsMixedSchedulingEnabled() {
+	if useMixedScheduling && isMixedAccountForPlatform(account, platform) {
 		return true
 	}
 	return false
@@ -464,7 +465,7 @@ func (s *GeminiMessagesCompatService) listSchedulableAccountsOnce(ctx context.Co
 	useMixedScheduling := platform == PlatformGemini && !hasForcePlatform
 	queryPlatforms := []string{platform}
 	if useMixedScheduling {
-		queryPlatforms = []string{platform, PlatformAntigravity}
+		queryPlatforms = mixedAccountPlatforms(platform)
 	}
 
 	if groupID != nil {
@@ -531,6 +532,16 @@ func (s *GeminiMessagesCompatService) HasAntigravityAccounts(ctx context.Context
 }
 
 func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (*ForwardResult, error) {
+	if account.Platform == PlatformKiro {
+		if s.kiroGateway == nil {
+			return nil, errors.New("Kiro gateway unavailable")
+		}
+		parsed, err := kiroParsedRequest(c, body)
+		if err != nil {
+			return nil, err
+		}
+		return s.kiroGateway.forwardKiro(ctx, c, account, parsed)
+	}
 	beginUpstreamResponseModelObservation(c)
 	beginGeminiImageOutputObservation(c)
 	startTime := time.Now()
@@ -1093,6 +1104,12 @@ func isGeminiSignatureRelatedError(respBody []byte) bool {
 }
 
 func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.Context, account *Account, originalModel string, action string, stream bool, body []byte) (*ForwardResult, error) {
+	if account.Platform == PlatformKiro {
+		if s.kiroGateway == nil {
+			return nil, errors.New("Kiro gateway unavailable")
+		}
+		return s.kiroGateway.ForwardKiroGemini(ctx, c, account, originalModel, action, stream, body)
+	}
 	beginUpstreamResponseModelObservation(c)
 	beginGeminiImageOutputObservation(c)
 	startTime := time.Now()

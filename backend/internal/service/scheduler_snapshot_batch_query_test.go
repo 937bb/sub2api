@@ -782,3 +782,21 @@ func BenchmarkSchedulerRebuildBatchQueryReuse(b *testing.B) {
 		})
 	}
 }
+
+func (r *batchQueryBenchmarkRepo) ListSchedulableByGroupIDAndPlatforms(ctx context.Context, groupID int64, platforms []string) ([]Account, error) {
+	var out []Account
+	seen := map[int64]bool{}
+	for _, platform := range platforms {
+		accounts, err := r.ListSchedulableByGroupIDAndPlatform(ctx, groupID, platform)
+		if err != nil {
+			return nil, err
+		}
+		for _, a := range accounts {
+			if !seen[a.ID] {
+				out = append(out, a)
+				seen[a.ID] = true
+			}
+		}
+	}
+	return out, nil
+}

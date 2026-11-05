@@ -28,6 +28,16 @@ func (s *GeminiMessagesCompatService) ForwardAsChatCompletions(
 	account *Account,
 	body []byte,
 ) (*ForwardResult, error) {
+	if account.Platform == PlatformKiro {
+		if s.kiroGateway == nil {
+			return nil, fmt.Errorf("Kiro gateway unavailable")
+		}
+		parsed, err := kiroParsedRequest(c, body)
+		if err != nil {
+			return nil, err
+		}
+		return s.kiroGateway.ForwardAsChatCompletions(ctx, c, account, body, parsed)
+	}
 	startTime := time.Now()
 
 	var ccReq apicompat.ChatCompletionsRequest

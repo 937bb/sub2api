@@ -293,6 +293,9 @@ func (Group) Fields() []ent.Field {
 			MaxLen(20).
 			Default("downgrade").
 			Comment("超过推理强度上限时的访问控制：downgrade 自动降档，deny 拒绝访问"),
+		field.JSON("kiro_response_cache", domain.KiroResponseCachePolicy{}).
+			Default(domain.DefaultKiroResponseCachePolicy).
+			SchemaType(map[string]string{dialect.Postgres: "jsonb"}),
 		field.JSON("reasoning_effort_mappings", []domain.ReasoningEffortMapping{}).
 			Default([]domain.ReasoningEffortMapping{}).
 			SchemaType(map[string]string{dialect.Postgres: "jsonb"}).

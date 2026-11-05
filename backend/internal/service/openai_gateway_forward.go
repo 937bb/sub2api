@@ -19,6 +19,9 @@ import (
 
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
+	if account.Platform == PlatformKiro {
+		return s.forwardKiroCompatible(ctx, c, account, body, "responses")
+	}
 	sanitizedBody, sanitizeErr := SanitizeOpenAIEncryptedContentForAccount(ctx, account, body)
 	if sanitizeErr != nil {
 		return nil, sanitizeErr

@@ -17,6 +17,9 @@ import (
 // API keys use the standard endpoint; OAuth reuses the authenticated, cached
 // Codex source. Account mappings and group policy are applied after this cache.
 func (s *OpenAIGatewayService) FetchOpenAIModelsList(ctx context.Context, account *Account) (*OpenAIModelsResponse, error) {
+	if account != nil && account.Platform == PlatformKiro {
+		return s.kiroModelsResponse(ctx, account, false)
+	}
 	if s == nil || account == nil {
 		return nil, infraerrors.New(http.StatusInternalServerError, "OPENAI_MODELS_ACCOUNT_REQUIRED", "OpenAI account is required")
 	}

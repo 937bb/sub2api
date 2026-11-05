@@ -532,7 +532,7 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 		clearBinding()
 		return nil, false, nil
 	}
-	if shouldClearStickySession(account, req.RequestedModel) || account.Platform != NormalizeOpenAICompatiblePlatform(req.Platform) || !account.IsOpenAICompatible() || !account.IsSchedulable() {
+	if shouldClearStickySession(account, req.RequestedModel) || !(account.Platform == PlatformKiro && NormalizeOpenAICompatiblePlatform(req.Platform) == PlatformOpenAI) && (account.Platform != NormalizeOpenAICompatiblePlatform(req.Platform) || !account.IsOpenAICompatible()) || !account.IsSchedulable() {
 		clearBinding()
 		return nil, false, nil
 	}
@@ -1457,7 +1457,7 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 			filterStats.exclude("not_schedulable")
 			continue
 		}
-		if account.Platform != NormalizeOpenAICompatiblePlatform(req.Platform) || !account.IsOpenAICompatible() {
+		if !(account.Platform == PlatformKiro && NormalizeOpenAICompatiblePlatform(req.Platform) == PlatformOpenAI) && (account.Platform != NormalizeOpenAICompatiblePlatform(req.Platform) || !account.IsOpenAICompatible()) {
 			filterStats.exclude("platform_mismatch")
 			continue
 		}
@@ -2500,7 +2500,7 @@ func (s *OpenAIGatewayService) isOpenAIAccountTransportCompatible(account *Accou
 	if requiredTransport == OpenAIUpstreamTransportAny || requiredTransport == OpenAIUpstreamTransportHTTPSSE {
 		return true
 	}
-	if s == nil || account == nil {
+	if s == nil || account == nil || account.Platform == PlatformKiro {
 		return false
 	}
 	if requiredTransport == OpenAIUpstreamTransportResponsesWebsocketV2Ingress {

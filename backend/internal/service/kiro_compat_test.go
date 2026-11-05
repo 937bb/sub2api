@@ -121,7 +121,9 @@ func (c *kiroMemoryCache) PutKiroResponse(_ context.Context, _ int64, key string
 func TestKiroCompatibilityCacheDoesNotCallOrChargeUpstreamTwice(t *testing.T) {
 	upstream := &kiroCompatUpstream{t: t}
 	cache := &kiroMemoryCache{values: map[string][]byte{}}
-	svc := &GatewayService{httpUpstream: upstream, cfg: &config.Config{}, cache: cache}
+	groupID := int64(7)
+	group := &Group{ID: groupID, KiroResponseCache: KiroCachePolicy{Enabled: true, TargetPercent: 100, TTLSeconds: 300, MaxEntries: 128}}
+	svc := &GatewayService{httpUpstream: upstream, cfg: &config.Config{}, cache: cache, groupRepo: &kiroGroupRepo{group: group}}
 	a := fixedKiroAccount()
 	a.Credentials["access_token"] = t.Name()
 	a.Credentials["expires_at"] = time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
@@ -131,7 +133,7 @@ func TestKiroCompatibilityCacheDoesNotCallOrChargeUpstreamTwice(t *testing.T) {
 		recorder := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(recorder)
 		c.Request = httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewReader(raw))
-		c.Set("api_key", &APIKey{ID: 1, UserID: 2})
+		c.Set("api_key", &APIKey{ID: 1, UserID: 2, GroupID: &groupID})
 		result, err := svc.ForwardAsChatCompletions(context.Background(), c, a, raw, nil)
 		require.NoError(t, err)
 		require.Contains(t, recorder.Body.String(), "OK")
@@ -143,3 +145,11 @@ func TestKiroCompatibilityCacheDoesNotCallOrChargeUpstreamTwice(t *testing.T) {
 	}
 	require.Equal(t, 2, upstream.requests, "one model query and one generation only")
 }
+
+// This fixture is available with and without the unit build tag.
+type kiroGroupRepo struct {
+	GroupRepository
+	group *Group
+}
+
+func (r *kiroGroupRepo) GetByID(_ context.Context, _ int64) (*Group, error) { return r.group, nil }

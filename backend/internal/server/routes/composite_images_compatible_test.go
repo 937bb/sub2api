@@ -51,6 +51,25 @@ func (r compatibleImagesAccounts) ListModelAvailabilityCandidates(context.Contex
 	return r.accounts, nil
 }
 
+func (r compatibleImagesAccounts) ListSchedulableByPlatforms(_ context.Context, platforms []string) ([]service.Account, error) {
+	var out []service.Account
+	for _, a := range r.accounts {
+		for _, platform := range platforms {
+			if a.Platform == platform {
+				out = append(out, a)
+				break
+			}
+		}
+	}
+	return out, nil
+}
+func (r compatibleImagesAccounts) ListSchedulableByGroupIDAndPlatforms(ctx context.Context, _ int64, platforms []string) ([]service.Account, error) {
+	return r.ListSchedulableByPlatforms(ctx, platforms)
+}
+func (r compatibleImagesAccounts) ListSchedulableUngroupedByPlatforms(ctx context.Context, platforms []string) ([]service.Account, error) {
+	return r.ListSchedulableByPlatforms(ctx, platforms)
+}
+
 type compatibleImagesUpstream struct {
 	service.HTTPUpstream
 	accountIDs []int64

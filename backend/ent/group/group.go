@@ -144,6 +144,8 @@ const (
 	FieldMaxReasoningEffort = "max_reasoning_effort"
 	// FieldMaxReasoningEffortOverLimit holds the string denoting the max_reasoning_effort_over_limit field in the database.
 	FieldMaxReasoningEffortOverLimit = "max_reasoning_effort_over_limit"
+	// FieldKiroResponseCache holds the string denoting the kiro_response_cache field in the database.
+	FieldKiroResponseCache = "kiro_response_cache"
 	// FieldReasoningEffortMappings holds the string denoting the reasoning_effort_mappings field in the database.
 	FieldReasoningEffortMappings = "reasoning_effort_mappings"
 	// FieldProfitControlEnabled holds the string denoting the profit_control_enabled field in the database.
@@ -291,6 +293,7 @@ var Columns = []string{
 	FieldRpmLimit,
 	FieldMaxReasoningEffort,
 	FieldMaxReasoningEffortOverLimit,
+	FieldKiroResponseCache,
 	FieldReasoningEffortMappings,
 	FieldProfitControlEnabled,
 	FieldProfitMinMargin,
@@ -436,6 +439,8 @@ var (
 	DefaultMaxReasoningEffortOverLimit string
 	// MaxReasoningEffortOverLimitValidator is a validator for the "max_reasoning_effort_over_limit" field. It is called by the builders before save.
 	MaxReasoningEffortOverLimitValidator func(string) error
+	// DefaultKiroResponseCache holds the default value on creation for the "kiro_response_cache" field.
+	DefaultKiroResponseCache func() domain.KiroResponseCachePolicy
 	// DefaultReasoningEffortMappings holds the default value on creation for the "reasoning_effort_mappings" field.
 	DefaultReasoningEffortMappings []domain.ReasoningEffortMapping
 	// DefaultProfitControlEnabled holds the default value on creation for the "profit_control_enabled" field.

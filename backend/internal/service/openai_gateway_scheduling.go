@@ -401,7 +401,7 @@ func openAICompatibleAccountEligibilityFailureReasonBeforeProfit(ctx context.Con
 			return "account_model_not_owned"
 		}
 	}
-	if account.Platform != platform || !account.IsOpenAICompatible() {
+	if !(account.Platform == PlatformKiro && platform == PlatformOpenAI) && (account.Platform != platform || !account.IsOpenAICompatible()) {
 		return "platform_mismatch"
 	}
 	if !account.IsSchedulableForModelWithContext(ctx, requestedModel) {
@@ -1512,6 +1512,19 @@ func (s *OpenAIGatewayService) listSchedulableAccounts(ctx context.Context, grou
 	}
 	var accounts []Account
 	var err error
+	if platform == PlatformOpenAI {
+		if groupID != nil {
+			accounts, err = s.accountRepo.ListSchedulableByGroupIDAndPlatforms(ctx, *groupID, mixedAccountPlatforms(platform))
+		} else if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
+			accounts, err = s.accountRepo.ListSchedulableByPlatforms(ctx, mixedAccountPlatforms(platform))
+		} else {
+			accounts, err = s.accountRepo.ListSchedulableUngroupedByPlatforms(ctx, mixedAccountPlatforms(platform))
+		}
+		if err != nil {
+			return nil, err
+		}
+		return s.filterOpenAIAccountsBySchedulingThreshold(ctx, accounts), nil
+	}
 	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
 		accounts, err = s.accountRepo.ListSchedulableByPlatform(ctx, platform)
 	} else if groupID != nil {

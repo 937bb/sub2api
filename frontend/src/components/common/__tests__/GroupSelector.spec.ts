@@ -41,3 +41,20 @@ describe('GroupSelector simple-mode binding policy', () => {
     expect(wrapper.emitted('update:modelValue')).toEqual([[[1]]])
   })
 })
+
+
+describe('Kiro mixed group selection', () => {
+  beforeEach(() => { authState.isSimpleMode = false })
+  it('offers Claude, OpenAI, Gemini and composite groups without a mixing switch', () => {
+    const wrapper = mount(GroupSelector, {
+      props: { modelValue: [], platform: 'kiro', groups: [
+        ...groups, { id: 3, name: 'GPT', platform: 'openai' },
+        { id: 4, name: 'Gemini', platform: 'gemini' },
+        { id: 5, name: 'Grok', platform: 'grok' }
+      ] as any },
+      global: { stubs: { GroupBadge: { props: ['name'], template: '<span>{{ name }}</span>' }, Icon: true } }
+    })
+    for (const name of ['Basic', 'Composite', 'GPT', 'Gemini']) expect(wrapper.text()).toContain(name)
+    expect(wrapper.text()).not.toContain('Grok')
+  })
+})

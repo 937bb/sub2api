@@ -332,7 +332,7 @@ func schedulerCanonicalAccountQueryCount() int {
 	count := 0
 	for _, platform := range schedulerSnapshotPlatforms() {
 		count++
-		if platform == PlatformAnthropic || platform == PlatformGemini {
+		if supportsMixedKiroPlatform(platform) {
 			count++
 		}
 	}
@@ -455,7 +455,7 @@ func TestSchedulerGroupLifecycleActiveReopensAndRebuildsAllCurrentBuckets(t *tes
 	require.Contains(t, bucketStrings(registered), historical.String())
 	require.Len(t, cache.tokens(), len(current))
 	require.Equal(t, schedulerCanonicalAccountQueryCount(), accounts.callCount())
-	require.Equal(t, 1, accounts.platformCallCount(PlatformOpenAI))
+	require.Equal(t, 2, accounts.platformCallCount(PlatformOpenAI))
 	for _, bucket := range current {
 		_, published := cache.counts(bucket)
 		require.Equal(t, 1, published, bucket.String())

@@ -409,6 +409,9 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 	}
 
 	platform := NormalizeGroupPlatform(input.Platform)
+	if !domain.IsGroupPlatform(platform) {
+		return nil, infraerrors.BadRequest("INVALID_GROUP_PLATFORM", "unsupported group platform")
+	}
 	// 固定账号 manifest 配置：账号绑定发生在创建之后，创建时无法校验成员关系，
 	// 拒绝开启并在创建后的编辑里配置。
 	if normalizeCodexModelsManifestConfig(platform, input.CodexModelsManifestConfig).Enabled {
@@ -417,6 +420,13 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 	modelPricing, err := normalizeGroupModelPricing(platform, input.ModelPricing)
 	if err != nil {
 		return nil, err
+	}
+	kiroPolicy := domain.DefaultKiroResponseCachePolicy()
+	if input.KiroResponseCache != nil {
+		kiroPolicy = *input.KiroResponseCache
+	}
+	if err := kiroPolicy.Validate(); err != nil {
+		return nil, infraerrors.BadRequest("INVALID_KIRO_CACHE_POLICY", err.Error())
 	}
 	maxReasoningEffort, err := normalizeMaxReasoningEffortForPlatform(platform, input.MaxReasoningEffort)
 	if err != nil {
@@ -640,6 +650,7 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		RPMLimit:                    input.RPMLimit,
 		MaxReasoningEffort:          maxReasoningEffort,
 		MaxReasoningEffortOverLimit: maxReasoningEffortOverLimit,
+		KiroResponseCache:           kiroPolicy,
 		ReasoningEffortMappings:     reasoningEffortMappings,
 	}
 	sanitizeGroupMessagesDispatchFields(group)
@@ -801,6 +812,9 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 		group.I18n = i18n
 	}
 	if input.Platform != "" {
+		if !domain.IsGroupPlatform(input.Platform) {
+			return nil, infraerrors.BadRequest("INVALID_GROUP_PLATFORM", "unsupported group platform")
+		}
 		group.Platform = input.Platform
 	}
 	if input.RateMultiplier != nil {
@@ -1062,6 +1076,12 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 			return nil, infraerrors.Newf(http.StatusBadRequest, "INVALID_MAX_REASONING_EFFORT_OVER_LIMIT", "%v", err)
 		}
 		group.MaxReasoningEffortOverLimit = maxReasoningEffortOverLimit
+	}
+	if input.KiroResponseCache != nil {
+		if err := input.KiroResponseCache.Validate(); err != nil {
+			return nil, infraerrors.BadRequest("INVALID_KIRO_CACHE_POLICY", err.Error())
+		}
+		group.KiroResponseCache = *input.KiroResponseCache
 	}
 	if input.ReasoningEffortMappings != nil {
 		reasoningEffortMappings, err := NormalizeReasoningEffortMappings(group.Platform, *input.ReasoningEffortMappings)

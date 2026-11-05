@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/domain"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/kiro"
 	"github.com/gin-gonic/gin"
@@ -19,28 +20,30 @@ import (
 )
 
 // KiroCachePolicy controls real response reuse; token accounting is never synthesized.
-type KiroCachePolicy struct {
-	Enabled       bool `json:"enabled"`
-	TargetPercent int  `json:"target_percent"`
-	TTLSeconds    int  `json:"ttl_seconds"`
-	MaxEntries    int  `json:"max_entries"`
-}
+type KiroCachePolicy = domain.KiroResponseCachePolicy
 
-func ReadKiroCachePolicy(extra map[string]any) (KiroCachePolicy, error) {
-	p := KiroCachePolicy{TargetPercent: 100, TTLSeconds: 300, MaxEntries: 128}
-	if raw, ok := extra["kiro_response_cache"]; ok {
-		data, err := json.Marshal(raw)
-		if err != nil {
-			return p, err
-		}
-		if err = json.Unmarshal(data, &p); err != nil {
-			return p, errors.New("invalid Kiro response cache policy")
-		}
+// Cache policy is loaded by effective request group, never from account metadata.
+func (s *GatewayService) kiroGroupCachePolicy(ctx context.Context, groupID int64) (KiroCachePolicy, error) {
+	p := domain.DefaultKiroResponseCachePolicy()
+	if groupID <= 0 {
+		return p, nil
 	}
-	if p.TargetPercent < 0 || p.TargetPercent > 100 || p.TTLSeconds < 1 || p.TTLSeconds > 3600 || p.MaxEntries < 1 || p.MaxEntries > 1024 {
-		return p, errors.New("Kiro cache requires target 0..100, TTL 1..3600s and capacity 1..1024")
+	if s.groupRepo == nil {
+		return p, errors.New("Kiro group repository unavailable")
 	}
-	return p, nil
+	group, err := s.groupRepo.GetByID(ctx, groupID)
+	if err != nil {
+		return p, err
+	}
+	if group == nil {
+		return p, errors.New("Kiro request group unavailable")
+	}
+	p = group.KiroResponseCache
+	// Zero values occur in old cached snapshots and in-memory group fixtures.
+	if p == (KiroCachePolicy{}) {
+		p = domain.DefaultKiroResponseCachePolicy()
+	}
+	return p, p.Validate()
 }
 
 type KiroResponseCache interface {
@@ -71,9 +74,6 @@ func normalizeKiroAccount(account *Account) error {
 	creds, err := kiro.Normalize(account.Credentials)
 	if err != nil {
 		return infraerrors.BadRequest("KIRO_INVALID_CREDENTIALS", err.Error())
-	}
-	if _, err = ReadKiroCachePolicy(account.Extra); err != nil {
-		return err
 	}
 	account.Credentials = creds
 	return nil
@@ -251,12 +251,16 @@ func (s *GatewayService) forwardKiro(ctx context.Context, c *gin.Context, accoun
 	if apiKey == nil {
 		return nil, errors.New("Kiro requires an authenticated API key scope")
 	}
-	scope := fmt.Sprintf("%d:%d:%d:%d", apiKey.UserID, apiKey.ID, derefGroupID(parsed.GroupID), account.ID)
+	groupID := derefGroupID(apiKey.GroupID)
+	if parsed.GroupID != nil {
+		groupID = *parsed.GroupID
+	}
+	scope := fmt.Sprintf("%d:%d:%d:%d", apiKey.UserID, apiKey.ID, groupID, account.ID)
 	session := s.GenerateSessionHash(parsed)
 	if session == "" {
 		session = uuid.NewString()
 	}
-	policy, err := ReadKiroCachePolicy(account.Extra)
+	policy, err := s.kiroGroupCachePolicy(ctx, groupID)
 	if err != nil {
 		return nil, err
 	}
@@ -283,7 +287,7 @@ func (s *GatewayService) forwardKiro(ctx context.Context, c *gin.Context, accoun
 	}
 	if useCache {
 		c.Header("X-Sub2api-Cache", "miss")
-		cached, cacheErr := cache.GetKiroResponse(ctx, account.ID, cacheKey, policy)
+		cached, cacheErr := cache.GetKiroResponse(ctx, groupID, cacheKey, policy)
 		if cacheErr == nil && len(cached) > 0 {
 			var out kiro.Response
 			if json.Unmarshal(cached, &out) == nil && len(out.Content) > 0 {
@@ -351,7 +355,7 @@ func (s *GatewayService) forwardKiro(ctx context.Context, c *gin.Context, accoun
 		if textOnly {
 			data, _ := json.Marshal(out)
 			if len(data) <= 1<<20 {
-				_ = cache.PutKiroResponse(ctx, account.ID, cacheKey, data, policy)
+				_ = cache.PutKiroResponse(ctx, groupID, cacheKey, data, policy)
 			}
 		}
 	}

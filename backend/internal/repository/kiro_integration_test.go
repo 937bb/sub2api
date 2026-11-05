@@ -89,3 +89,39 @@ func (s *KiroCacheSuite) TestRealResponseHitTargetAndIsolation() {
 	require.EqualValues(s.T(), 2, s.rdb.ZCard(s.ctx, index).Val())
 }
 func TestKiroCacheIntegration(t *testing.T) { suite.Run(t, new(KiroCacheSuite)) }
+
+func (s *KiroCacheSuite) TestGroupCapacityAndTargetAreSharedAcrossAccounts() {
+	cache := NewGatewayCache(s.rdb).(service.KiroResponseCache)
+	policy := service.KiroCachePolicy{Enabled: true, TargetPercent: 50, TTLSeconds: 60, MaxEntries: 2}
+	require.NoError(s.T(), cache.PutKiroResponse(s.ctx, 71, "account-a", []byte("A"), policy))
+	require.NoError(s.T(), cache.PutKiroResponse(s.ctx, 71, "account-b", []byte("B"), policy))
+	first, err := cache.GetKiroResponse(s.ctx, 71, "account-a", policy)
+	require.NoError(s.T(), err)
+	require.Empty(s.T(), first)
+	second, err := cache.GetKiroResponse(s.ctx, 71, "account-b", policy)
+	require.NoError(s.T(), err)
+	require.Equal(s.T(), "B", string(second), "second account shares the group's target counter")
+	otherGroup, err := cache.GetKiroResponse(s.ctx, 72, "account-b", policy)
+	require.NoError(s.T(), err)
+	require.Empty(s.T(), otherGroup)
+	require.NoError(s.T(), cache.PutKiroResponse(s.ctx, 71, "account-c", []byte("C"), policy))
+	_, index, _ := kiroCacheKeys(71, "", policy)
+	require.EqualValues(s.T(), 2, s.rdb.ZCard(s.ctx, index).Val(), "capacity applies to the whole group")
+}
+
+func TestKiroGroupPolicyRepositoryRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	tx := testEntTx(t)
+	repo := newGroupRepositoryWithSQL(tx.Client(), tx)
+	policy := service.KiroCachePolicy{Enabled: true, TargetPercent: 37, TTLSeconds: 120, MaxEntries: 19}
+	group := &service.Group{Name: "kiro-group-cache", Platform: service.PlatformAnthropic, RateMultiplier: 1, Status: service.StatusActive, SubscriptionType: service.SubscriptionTypeStandard, KiroResponseCache: policy}
+	require.NoError(t, repo.Create(ctx, group))
+	got, err := repo.GetByID(ctx, group.ID)
+	require.NoError(t, err)
+	require.Equal(t, policy, got.KiroResponseCache)
+	group.KiroResponseCache.TargetPercent = 63
+	require.NoError(t, repo.Update(ctx, group))
+	got, err = repo.GetByID(ctx, group.ID)
+	require.NoError(t, err)
+	require.Equal(t, 63, got.KiroResponseCache.TargetPercent)
+}

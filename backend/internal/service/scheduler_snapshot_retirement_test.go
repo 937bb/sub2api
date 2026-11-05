@@ -239,7 +239,7 @@ func TestSchedulerRebuildRetireAfterDBLoadFencesPublish(t *testing.T) {
 }
 
 func TestSchedulerFallbackReturnsDBAccountsWhenBucketRetired(t *testing.T) {
-	bucket := SchedulerBucket{GroupID: 63, Platform: PlatformOpenAI, Mode: SchedulerModeSingle}
+	bucket := SchedulerBucket{GroupID: 63, Platform: PlatformOpenAI, Mode: SchedulerModeMixed}
 	cache := newRetirementRaceCache()
 	require.NoError(t, cache.RetireBucket(context.Background(), bucket))
 	repo := &mockAccountRepoForPlatform{
@@ -255,7 +255,7 @@ func TestSchedulerFallbackReturnsDBAccountsWhenBucketRetired(t *testing.T) {
 
 	accounts, useMixed, err := svc.ListSchedulableAccounts(context.Background(), &groupID, bucket.Platform, false)
 	require.NoError(t, err)
-	require.False(t, useMixed)
+	require.True(t, useMixed)
 	require.Len(t, accounts, 1)
 	setAttempts, published := cache.counts(bucket)
 	require.Zero(t, setAttempts)

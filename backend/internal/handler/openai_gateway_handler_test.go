@@ -3321,3 +3321,93 @@ func TestOpenAIResponsesWebSocketSimpleModeRechecksKeyWindows(t *testing.T) {
 		})
 	}
 }
+
+func (s *openAIWSUsageHandlerAccountRepoStub) ListSchedulableByPlatforms(ctx context.Context, platforms []string) ([]service.Account, error) {
+	var out []service.Account
+	seen := map[int64]bool{}
+	for _, platform := range platforms {
+		accounts, err := s.ListSchedulableByPlatform(ctx, platform)
+		if err != nil {
+			return nil, err
+		}
+		for _, a := range accounts {
+			if !seen[a.ID] {
+				out = append(out, a)
+				seen[a.ID] = true
+			}
+		}
+	}
+	return out, nil
+}
+
+func (s *openAIWSUsageHandlerAccountRepoStub) ListSchedulableByGroupIDAndPlatforms(ctx context.Context, groupID int64, platforms []string) ([]service.Account, error) {
+	var out []service.Account
+	seen := map[int64]bool{}
+	for _, platform := range platforms {
+		accounts, err := s.ListSchedulableByGroupIDAndPlatform(ctx, groupID, platform)
+		if err != nil {
+			return nil, err
+		}
+		for _, a := range accounts {
+			if !seen[a.ID] {
+				out = append(out, a)
+				seen[a.ID] = true
+			}
+		}
+	}
+	return out, nil
+}
+
+func (s *openAIWSFailoverHandlerAccountRepoStub) ListSchedulableByPlatforms(ctx context.Context, platforms []string) ([]service.Account, error) {
+	var out []service.Account
+	seen := map[int64]bool{}
+	for _, platform := range platforms {
+		accounts, err := s.ListSchedulableByPlatform(ctx, platform)
+		if err != nil {
+			return nil, err
+		}
+		for _, a := range accounts {
+			if !seen[a.ID] {
+				out = append(out, a)
+				seen[a.ID] = true
+			}
+		}
+	}
+	return out, nil
+}
+
+func (s *openAIWSFailoverHandlerAccountRepoStub) ListSchedulableByGroupIDAndPlatforms(ctx context.Context, groupID int64, platforms []string) ([]service.Account, error) {
+	var out []service.Account
+	seen := map[int64]bool{}
+	for _, platform := range platforms {
+		accounts, err := s.ListSchedulableByGroupIDAndPlatform(ctx, groupID, platform)
+		if err != nil {
+			return nil, err
+		}
+		for _, a := range accounts {
+			if !seen[a.ID] {
+				out = append(out, a)
+				seen[a.ID] = true
+			}
+		}
+	}
+	return out, nil
+}
+
+func (s *openAIWSFailoverHandlerAccountRepoStub) ListSchedulableUngroupedByPlatforms(ctx context.Context, platforms []string) ([]service.Account, error) {
+	var out []service.Account
+	seen := map[int64]bool{}
+	for _, platform := range platforms {
+		accounts, err := s.ListSchedulableUngroupedByPlatform(ctx, platform)
+		if err != nil {
+			return nil, err
+		}
+		for _, a := range accounts {
+			if !seen[a.ID] {
+				out = append(out, a)
+				seen[a.ID] = true
+			}
+		}
+	}
+	return out, nil
+}

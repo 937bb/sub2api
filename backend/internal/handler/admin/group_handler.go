@@ -254,6 +254,7 @@ type CreateGroupRequest struct {
 	// 超过上限时的访问控制：downgrade（默认）或 deny。
 	MaxReasoningEffortOverLimit string `json:"max_reasoning_effort_over_limit"`
 	// Anthropic/OpenAI 推理强度映射，可按模型精确名、前缀或后缀限定。
+	KiroResponseCache       *service.KiroCachePolicy         `json:"kiro_response_cache"`
 	ReasoningEffortMappings []service.ReasoningEffortMapping `json:"reasoning_effort_mappings"`
 	// 从指定分组复制账号（创建后自动绑定）
 	CopyAccountsFromGroupIDs []int64 `json:"copy_accounts_from_group_ids"`
@@ -331,6 +332,7 @@ type UpdateGroupRequest struct {
 	// 超过上限时的访问控制；空字符串视为 downgrade，nil 不修改。
 	MaxReasoningEffortOverLimit *string `json:"max_reasoning_effort_over_limit"`
 	// nil 不修改，空数组清空，非空数组替换。
+	KiroResponseCache       *service.KiroCachePolicy          `json:"kiro_response_cache"`
 	ReasoningEffortMappings *[]service.ReasoningEffortMapping `json:"reasoning_effort_mappings"`
 	// 从指定分组复制账号（同步操作：先清空当前分组的账号绑定，再绑定源分组的账号）
 	CopyAccountsFromGroupIDs []int64 `json:"copy_accounts_from_group_ids"`
@@ -729,6 +731,7 @@ func (h *GroupHandler) Create(c *gin.Context) {
 		RPMLimit:                        req.RPMLimit,
 		MaxReasoningEffort:              req.MaxReasoningEffort,
 		MaxReasoningEffortOverLimit:     req.MaxReasoningEffortOverLimit,
+		KiroResponseCache:               req.KiroResponseCache,
 		ReasoningEffortMappings:         req.ReasoningEffortMappings,
 		CopyAccountsFromGroupIDs:        req.CopyAccountsFromGroupIDs,
 	})
@@ -877,6 +880,7 @@ func (h *GroupHandler) Update(c *gin.Context) {
 		RPMLimit:                        req.RPMLimit,
 		MaxReasoningEffort:              req.MaxReasoningEffort,
 		MaxReasoningEffortOverLimit:     req.MaxReasoningEffortOverLimit,
+		KiroResponseCache:               req.KiroResponseCache,
 		ReasoningEffortMappings:         req.ReasoningEffortMappings,
 		CopyAccountsFromGroupIDs:        req.CopyAccountsFromGroupIDs,
 	})

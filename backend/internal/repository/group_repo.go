@@ -148,6 +148,7 @@ func createGroupRecord(ctx context.Context, client *dbent.Client, groupIn *servi
 		SetRpmLimit(groupIn.RPMLimit).
 		SetMaxReasoningEffort(groupIn.MaxReasoningEffort).
 		SetMaxReasoningEffortOverLimit(groupIn.MaxReasoningEffortOverLimit).
+		SetKiroResponseCache(defaultGroupKiroCachePolicy(groupIn.KiroResponseCache)).
 		SetReasoningEffortMappings(groupIn.ReasoningEffortMappings).
 		SetPeakRateEnabled(groupIn.PeakRateEnabled).
 		SetPeakStart(groupIn.PeakStart).
@@ -333,6 +334,7 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 		SetRpmLimit(groupIn.RPMLimit).
 		SetMaxReasoningEffort(groupIn.MaxReasoningEffort).
 		SetMaxReasoningEffortOverLimit(groupIn.MaxReasoningEffortOverLimit).
+		SetKiroResponseCache(defaultGroupKiroCachePolicy(groupIn.KiroResponseCache)).
 		SetReasoningEffortMappings(groupIn.ReasoningEffortMappings).
 		SetPeakRateEnabled(groupIn.PeakRateEnabled).
 		SetPeakStart(groupIn.PeakStart).
@@ -1226,4 +1228,12 @@ func (r *groupRepository) UpdateSortOrders(ctx context.Context, updates []servic
 		}
 	}
 	return nil
+}
+
+// Internal callers predating group cache settings use the zero value.
+func defaultGroupKiroCachePolicy(p service.KiroCachePolicy) service.KiroCachePolicy {
+	if p == (service.KiroCachePolicy{}) {
+		return service.KiroCachePolicy{TargetPercent: 100, TTLSeconds: 300, MaxEntries: 128}
+	}
+	return p
 }

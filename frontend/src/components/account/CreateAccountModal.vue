@@ -272,7 +272,7 @@
         </div>
       </div>
 
-      <KiroAccountFields v-if="form.platform === 'kiro'" v-model:json="kiroJson" v-model:policy="kiroCachePolicy" />
+      <KiroAccountFields v-if="form.platform === 'kiro'" v-model:json="kiroJson" />
       <!-- Account Type Selection (Anthropic) -->
       <div class="workbench-field-row " v-if="form.platform === 'anthropic'">
         <label class="input-label">{{ t('admin.accounts.accountType') }}</label>
@@ -4087,7 +4087,7 @@
 
 <script setup lang="ts">
 import KiroAccountFields from './KiroAccountFields.vue'
-import { defaultKiroCachePolicy, parseKiroCredentials, assignKiroProxies } from './kiroCredentials'
+import { parseKiroCredentials, assignKiroProxies } from './kiroCredentials'
 
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 
@@ -5008,7 +5008,6 @@ const tempUnschedPresets = computed(() => [
 ])
 
 const kiroJson = ref('')
-const kiroCachePolicy = ref(defaultKiroCachePolicy())
 const form = reactive({
   name: '',
   notes: '',
@@ -5602,7 +5601,6 @@ const submitCreateAccount = async (payload: CreateAccountRequest) => {
 // Methods
 const resetForm = () => {
   kiroJson.value = ''
-  kiroCachePolicy.value = defaultKiroCachePolicy()
   step.value = 1
   form.name = ''
   form.notes = ''
@@ -5943,7 +5941,7 @@ const handleSubmit = async () => {
         try {
           await adminAPI.accounts.create({ ...form, name: form.name.trim() ? (items.length > 1 ? `${form.name.trim()} ${index + 1}` : form.name.trim()) : item.name,
             type: 'oauth', credentials: { ...item.credentials, disabled: item.disabled }, proxy_id: item.proxy_id,
-            extra: { kiro_response_cache: { ...kiroCachePolicy.value } }, auto_pause_on_expired: autoPauseOnExpired.value })
+            auto_pause_on_expired: autoPauseOnExpired.value })
         } catch (error) {
           kiroJson.value = JSON.stringify(items.slice(index).map(item => ({ ...item.credentials, name: item.name, disabled: item.disabled, proxy_id: item.proxy_id })), null, 2)
           if (index > 0) emit('created')

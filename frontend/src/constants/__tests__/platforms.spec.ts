@@ -37,7 +37,7 @@ describe('platform option catalogs', () => {
 
   it('adds composite for group-backed filters', () => {
     expect(GROUP_PLATFORM_OPTIONS.map((option) => option.value)).toEqual([
-      ...concretePlatforms,
+      ...concretePlatforms.filter(platform => platform !== 'kiro'),
       'composite'
     ])
   })
@@ -79,7 +79,7 @@ describe('platform catalog with a newly registered platform', () => {
 
     expect(optionValues.value).toEqual([...concretePlatforms, 'acme_router'])
     expect(GROUP_PLATFORM_OPTIONS.map((option) => option.value)).toEqual([
-      ...concretePlatforms,
+      ...concretePlatforms.filter(platform => platform !== 'kiro'),
       'acme_router',
       'composite'
     ])

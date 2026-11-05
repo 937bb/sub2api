@@ -1392,7 +1392,7 @@ func (s *GatewayService) DoGrokNativeResponsesJSON(ctx context.Context, account 
 // GeminiMessagesCompatService.listSchedulableAccountsOnce: a gemini group may be
 // served by antigravity accounts, so model listing must consider them too.
 func mixedListingAccountAllowed(groupPlatform string, account *Account) bool {
-	return groupPlatform == PlatformGemini && account.IsMixedSchedulingEnabled()
+	return (account.Platform == PlatformKiro && supportsMixedKiroPlatform(groupPlatform)) || (groupPlatform == PlatformGemini && account.IsMixedSchedulingEnabled())
 }
 
 // mixedListingModelAllowed limits what a mixed-scheduling account may advertise
@@ -1439,49 +1439,39 @@ func (s *GatewayService) GetAvailableModels(ctx context.Context, groupID *int64,
 		accounts = filtered
 	}
 
-	if platform == PlatformKiro {
-		unique := map[string]struct{}{}
-		for i := range accounts {
-			a, token, err := s.kiroAccessToken(ctx, &accounts[i])
-			if err != nil {
-				continue
-			}
-			catalog, err := s.kiroModels(ctx, a, token)
-			if err != nil {
-				continue
-			}
-			available := map[string]bool{}
-			for _, m := range catalog {
-				available[m.ID] = true
-			}
-			mapping := a.GetModelMapping()
-			if len(mapping) == 0 {
-				for model := range available {
-					unique[model] = struct{}{}
-				}
-			} else {
-				for public, upstream := range mapping {
-					if available[kiro.ModelID(upstream)] && !strings.Contains(public, "*") {
-						unique[public] = struct{}{}
-					}
-				}
-			}
-		}
-		models := make([]string, 0, len(unique))
-		for model := range unique {
-			models = append(models, model)
-		}
-		sort.Strings(models)
-		if s.modelsListCache != nil {
-			s.modelsListCache.Set(cacheKey, models, s.modelsListCacheTTL)
-		}
-		return models
-	}
 	// Collect unique models from all accounts
 	modelSet := make(map[string]struct{})
 	hasAnyMapping := false
 
 	for _, acc := range accounts {
+		if acc.Platform == PlatformKiro {
+			hasAnyMapping = true
+			a, token, fetchErr := s.kiroAccessToken(ctx, &acc)
+			if fetchErr != nil {
+				continue
+			}
+			catalog, fetchErr := s.kiroModels(ctx, a, token)
+			if fetchErr != nil {
+				continue
+			}
+			available := map[string]bool{}
+			for _, model := range catalog {
+				available[model.ID] = true
+			}
+			mapping := a.GetModelMapping()
+			if len(mapping) == 0 {
+				for model := range available {
+					modelSet[model] = struct{}{}
+				}
+			} else {
+				for public, target := range mapping {
+					if available[kiro.ModelID(target)] && !strings.Contains(public, "*") {
+						modelSet[public] = struct{}{}
+					}
+				}
+			}
+			continue
+		}
 		// Passthrough routing accepts models independently of model_mapping, so a
 		// stale mapping on a passthrough account must not narrow the public list.
 		// Treat it like an unmapped account: skip its mapping here and let
