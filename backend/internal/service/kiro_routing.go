@@ -81,7 +81,15 @@ func (s *OpenAIGatewayService) forwardKiroCompatible(ctx context.Context, c *gin
 		RequestID: result.RequestID, UpstreamHeaders: result.UpstreamHeaders,
 		Model: result.Model, UpstreamModel: result.UpstreamModel,
 		UpstreamResponseModel: result.UpstreamResponseModel, UpstreamResponseModelConflict: result.UpstreamResponseModelConflict,
-		Usage:  OpenAIUsage{InputTokens: result.Usage.InputTokens, OutputTokens: result.Usage.OutputTokens, CacheReadInputTokens: result.Usage.CacheReadInputTokens},
+		Usage: OpenAIUsage{
+			// OpenAI billing expects total input, including both cache buckets.
+			InputTokens:              result.Usage.InputTokens + result.Usage.CacheCreationInputTokens + result.Usage.CacheReadInputTokens,
+			OutputTokens:             result.Usage.OutputTokens,
+			CacheCreationInputTokens: result.Usage.CacheCreationInputTokens,
+			CacheReadInputTokens:     result.Usage.CacheReadInputTokens,
+			CacheCreation5mTokens:    result.Usage.CacheCreation5mTokens,
+			CacheCreation1hTokens:    result.Usage.CacheCreation1hTokens,
+		},
 		Stream: result.Stream, Duration: result.Duration, FirstTokenMs: result.FirstTokenMs, ClientDisconnect: result.ClientDisconnect,
 		ReasoningEffort: result.ReasoningEffort, RequestedReasoningEffort: result.RequestedReasoningEffort,
 	}, err
