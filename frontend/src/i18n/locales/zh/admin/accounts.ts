@@ -777,8 +777,10 @@ export default {
       apiKeyRequired: 'API Key *',
       apiKeyPlaceholder: 'sk-ant-api03-...',
       apiKeyHint: '您的 Claude Console API Key',
-      upstreamRequestIdHeader: '上游ID',
+      upstreamRequestIdHeader: '上游请求 ID 响应头（可选）',
       upstreamRequestIdHeaderPlaceholder: '留空自动识别上游请求 ID',
+      upstreamRequestIdHeaderHint: '通常留空即可。指定时填写响应头名称，例如 X-Request-ID，不是网址、账号 ID 或具体请求 ID。',
+      upstreamRequestIdHeaderInvalid: '请留空，或填写有效的 HTTP 响应头名称（最多 64 个字符），例如 X-Request-ID；不能填写网址。',
       upstreamRequestIdHeaderHelp: {
         intro: '留空时自动识别常见上游请求 ID 响应头，并保存到用量明细的“上游ID”列。填写后仅使用指定响应头；该响应头不存在时不会改用其他 ID。',
         examplesTitle: '常见取值',

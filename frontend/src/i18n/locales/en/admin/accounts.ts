@@ -659,8 +659,10 @@ export default {
       apiKeyRequired: 'API Key *',
       apiKeyPlaceholder: 'sk-ant-api03-...',
       apiKeyHint: 'Your Claude Console API Key',
-      upstreamRequestIdHeader: 'Upstream ID',
+      upstreamRequestIdHeader: 'Upstream request ID header (optional)',
       upstreamRequestIdHeaderPlaceholder: 'Leave empty to detect the upstream request ID',
+      upstreamRequestIdHeaderHint: 'Usually leave empty. To override detection, enter a response header name such as X-Request-ID, not a URL, account ID, or request ID value.',
+      upstreamRequestIdHeaderInvalid: 'Leave empty or enter a valid HTTP response header name of at most 64 characters, such as X-Request-ID. URLs are not allowed.',
       upstreamRequestIdHeaderHelp: {
         intro: 'Leave empty to recognize common upstream request ID headers and save the value in usage logs. An explicit header takes precedence; if it is absent, no other ID is substituted.',
         examplesTitle: 'Common values',

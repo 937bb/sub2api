@@ -63,4 +63,15 @@ describe('UpstreamRequestIdHeaderField', () => {
     await input.setValue('X-Oneapi-Request-Id')
     expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual(['X-Oneapi-Request-Id'])
   })
+  it('shows an actionable error for URLs and clears it after correction', async () => {
+    const wrapper = mountField({ platform: 'gemini', type: 'oauth', modelValue: 'https://api.qch1.com' })
+    expect(wrapper.get('[role="alert"]').text()).toBe('admin.accounts.upstreamRequestIdHeaderInvalid')
+    expect(wrapper.get('input').attributes('aria-invalid')).toBe('true')
+
+    await wrapper.setProps({ modelValue: '' })
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('admin.accounts.upstreamRequestIdHeaderHint')
+    expect(wrapper.get('input').attributes('aria-invalid')).toBe('false')
+  })
+
 })

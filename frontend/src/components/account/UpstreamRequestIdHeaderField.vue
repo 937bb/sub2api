@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import HelpTooltip from '@/components/common/HelpTooltip.vue'
+import { isValidUpstreamRequestIdHeader } from '@/utils/upstreamRequestIdHeader'
 
 const props = defineProps<{
   platform?: string
@@ -9,6 +10,7 @@ const props = defineProps<{
 }>()
 const model = defineModel<string>({ default: '' })
 const { t } = useI18n()
+const invalid = computed(() => !isValidUpstreamRequestIdHeader(model.value))
 
 interface HeaderExample {
   label: string
@@ -16,7 +18,7 @@ interface HeaderExample {
   note?: string
 }
 
-// 各平台官方 API 在响应头中声明请求标识的头名。
+// Examples of response headers used for upstream request identifiers.
 const OFFICIAL_REQUEST_ID_HEADERS: Record<string, { platform: string; header: string }> = {
   openai: { platform: 'OpenAI', header: 'x-request-id' },
   anthropic: { platform: 'Anthropic', header: 'request-id' },
@@ -25,7 +27,7 @@ const OFFICIAL_REQUEST_ID_HEADERS: Record<string, { platform: string; header: st
   grok: { platform: 'Grok', header: 'xai-request-id' }
 }
 
-// 只有 API Key 接入可能指向第三方中继；OAuth / Bedrock / Service Account 都直连官方。
+// API key accounts can also use relay-specific response headers.
 const examples = computed<HeaderExample[]>(() => {
   const items: HeaderExample[] = []
   if (props.type === 'apikey') {
@@ -72,7 +74,15 @@ const examples = computed<HeaderExample[]>(() => {
       data-testid="upstream-request-id-header"
       type="text"
       class="input"
+      :aria-label="t('admin.accounts.upstreamRequestIdHeader')"
+      :aria-invalid="invalid"
       :placeholder="t('admin.accounts.upstreamRequestIdHeaderPlaceholder')"
     />
+    <p v-if="invalid" role="alert" class="mt-1 text-xs text-red-600 dark:text-red-400">
+      {{ t('admin.accounts.upstreamRequestIdHeaderInvalid') }}
+    </p>
+    <p v-else class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+      {{ t('admin.accounts.upstreamRequestIdHeaderHint') }}
+    </p>
   </div>
 </template>
