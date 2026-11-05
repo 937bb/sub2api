@@ -52,7 +52,7 @@
         <input
           v-model="form.name"
           type="text"
-          :required="!isGrokSSOInputMethod"
+          :required="!isGrokSSOInputMethod && form.platform !== 'kiro'"
           class="input"
           :placeholder="t('admin.accounts.enterAccountName')"
           data-tour="account-form-name"
@@ -113,6 +113,8 @@
             </svg>
             OpenAI
           </button>
+          <button type="button" @click="form.platform = 'kiro'; form.type = 'oauth'; accountCategory = 'oauth-based'"
+            :class="['flex flex-1 items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm font-medium transition-all', form.platform === 'kiro' ? 'bg-white text-purple-600 shadow-sm dark:bg-dark-600' : 'text-gray-600 dark:text-gray-400']">Kiro</button>
           <button
             type="button"
             @click="form.platform = 'gemini'"
@@ -270,6 +272,7 @@
         </div>
       </div>
 
+      <KiroAccountFields v-if="form.platform === 'kiro'" v-model:json="kiroJson" v-model:policy="kiroCachePolicy" />
       <!-- Account Type Selection (Anthropic) -->
       <div class="workbench-field-row " v-if="form.platform === 'anthropic'">
         <label class="input-label">{{ t('admin.accounts.accountType') }}</label>
@@ -4083,6 +4086,9 @@
 </template>
 
 <script setup lang="ts">
+import KiroAccountFields from './KiroAccountFields.vue'
+import { defaultKiroCachePolicy, parseKiroCredentials, assignKiroProxies } from './kiroCredentials'
+
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 
 import DialogSectionLinks from '@/components/common/DialogSectionLinks.vue'
@@ -5001,6 +5007,8 @@ const tempUnschedPresets = computed(() => [
   }
 ])
 
+const kiroJson = ref('')
+const kiroCachePolicy = ref(defaultKiroCachePolicy())
 const form = reactive({
   name: '',
   notes: '',
@@ -5018,6 +5026,7 @@ const form = reactive({
 
 // Helper to check if current type needs OAuth flow
 const isOAuthFlow = computed(() => {
+  if (form.platform === 'kiro') return false
   // Antigravity upstream 类型不需要 OAuth 流程
   if (form.platform === 'antigravity' && antigravityAccountType.value === 'upstream') {
     return false
@@ -5592,6 +5601,8 @@ const submitCreateAccount = async (payload: CreateAccountRequest) => {
 
 // Methods
 const resetForm = () => {
+  kiroJson.value = ''
+  kiroCachePolicy.value = defaultKiroCachePolicy()
   step.value = 1
   form.name = ''
   form.notes = ''
@@ -5923,6 +5934,32 @@ const handleVertexServiceAccountDrop = async (event: DragEvent) => {
 
 const handleSubmit = async () => {
   if (!validateUpstreamRequestIdHeader()) return
+  if (form.platform === 'kiro') {
+    submitting.value = true
+    try {
+      const items = assignKiroProxies(parseKiroCredentials(kiroJson.value), form.proxy_id)
+      for (let index = 0; index < items.length; index++) {
+        const item = items[index]!
+        try {
+          await adminAPI.accounts.create({ ...form, name: form.name.trim() ? (items.length > 1 ? `${form.name.trim()} ${index + 1}` : form.name.trim()) : item.name,
+            type: 'oauth', credentials: { ...item.credentials, disabled: item.disabled }, proxy_id: item.proxy_id,
+            extra: { kiro_response_cache: { ...kiroCachePolicy.value } }, auto_pause_on_expired: autoPauseOnExpired.value })
+        } catch (error) {
+          kiroJson.value = JSON.stringify(items.slice(index).map(item => ({ ...item.credentials, name: item.name, disabled: item.disabled, proxy_id: item.proxy_id })), null, 2)
+          if (index > 0) emit('created')
+          throw error
+        }
+      }
+      kiroJson.value = ''
+      appStore.showSuccess(t('admin.accounts.accountCreated'))
+      emit('created')
+      handleClose()
+    } catch (error: any) {
+      appStore.showError(error.response?.data?.message || error.message || t('admin.accounts.failedToCreate'))
+    } finally { submitting.value = false }
+    return
+  }
+
   // For OAuth-based type, handle OAuth flow (goes to step 2)
   if (isOAuthFlow.value) {
     if (!isGrokSSOInputMethod.value && !form.name.trim()) {

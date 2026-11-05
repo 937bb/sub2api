@@ -99,6 +99,8 @@ func DetectModelPlatform(model string) (string, bool) {
 		provider := strings.TrimSpace(normalized[:slash])
 		rest := strings.TrimSpace(normalized[slash+1:])
 		switch provider {
+		case "kiro":
+			return PlatformKiro, true
 		case "anthropic", "claude":
 			return PlatformAnthropic, true
 		case "openai", "chatgpt":

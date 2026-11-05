@@ -32,13 +32,13 @@ func TestPlatformSchedulingThresholds_RoundTrip_DefaultsAndStoredValues(t *testi
 	}, got.AccountSchedulingThresholds)
 
 	got = svc.parseSettings(map[string]string{
-		SettingKeyAccountSchedulingThresholds: `{"openai":91,"grok":77,"gemini":85,"kiro":99}`,
+		SettingKeyAccountSchedulingThresholds: `{"openai":91,"grok":77,"gemini":85,"unknown_provider":99}`,
 	})
 	require.Equal(t, 91, got.AccountSchedulingThresholds[PlatformOpenAI])
 	require.Equal(t, 100, got.AccountSchedulingThresholds[PlatformAnthropic])
 	require.Equal(t, 77, got.AccountSchedulingThresholds[PlatformGrok])
 	require.NotContains(t, got.AccountSchedulingThresholds, PlatformGemini)
-	require.NotContains(t, got.AccountSchedulingThresholds, "kiro")
+	require.NotContains(t, got.AccountSchedulingThresholds, "unknown_provider")
 }
 
 func TestBuildSystemSettingsUpdates_PersistsAccountSchedulingThresholds(t *testing.T) {
@@ -64,7 +64,7 @@ func TestValidateAndNormalizeAccountSchedulingThresholds_FillsMissingPlatforms(t
 	require.Equal(t, 100, normalized[PlatformAnthropic])
 	require.Equal(t, 100, normalized[PlatformGrok])
 	require.NotContains(t, normalized, PlatformGemini)
-	require.NotContains(t, normalized, "kiro")
+	require.NotContains(t, normalized, "unknown_provider")
 	require.NotContains(t, normalized, PlatformAntigravity)
 }
 
@@ -93,12 +93,12 @@ func TestUpdateSettings_StoresAccountSchedulingThresholds(t *testing.T) {
 	require.Equal(t, 92, got.AccountSchedulingThresholds[PlatformOpenAI])
 	require.Equal(t, 89, got.AccountSchedulingThresholds[PlatformAnthropic])
 	require.Equal(t, 76, got.AccountSchedulingThresholds[PlatformGrok])
-	require.NotContains(t, got.AccountSchedulingThresholds, "kiro")
+	require.NotContains(t, got.AccountSchedulingThresholds, "unknown_provider")
 }
 
 func TestGetAccountSchedulingThresholds_ReadsStoredValue(t *testing.T) {
 	svc := newSettingServiceForPlatformThresholdTest(map[string]string{
-		SettingKeyAccountSchedulingThresholds: `{"openai":93,"grok":88,"kiro":87}`,
+		SettingKeyAccountSchedulingThresholds: `{"openai":93,"grok":88,"unknown_provider":87}`,
 	})
 
 	got := svc.GetAccountSchedulingThresholds(context.Background())
@@ -106,7 +106,7 @@ func TestGetAccountSchedulingThresholds_ReadsStoredValue(t *testing.T) {
 	require.Equal(t, 93, got[PlatformOpenAI])
 	require.Equal(t, 100, got[PlatformAnthropic])
 	require.Equal(t, 88, got[PlatformGrok])
-	require.NotContains(t, got, "kiro")
+	require.NotContains(t, got, "unknown_provider")
 }
 
 func TestGetAccountSchedulingThresholds_MissingSettingUsesDefaultsAndNormalCacheTTL(t *testing.T) {
@@ -130,7 +130,7 @@ func TestGetAccountSchedulingThresholds_MissingSettingUsesDefaultsAndNormalCache
 
 func TestUpdateSettings_OmittedAccountSchedulingThresholdsDoesNotCacheDefaults(t *testing.T) {
 	svc := newSettingServiceForPlatformThresholdTest(map[string]string{
-		SettingKeyAccountSchedulingThresholds: `{"openai":85,"grok":88,"kiro":87}`,
+		SettingKeyAccountSchedulingThresholds: `{"openai":85,"grok":88,"unknown_provider":87}`,
 	})
 
 	err := svc.UpdateSettings(context.Background(), &SystemSettings{
@@ -141,23 +141,23 @@ func TestUpdateSettings_OmittedAccountSchedulingThresholdsDoesNotCacheDefaults(t
 	got := svc.GetAccountSchedulingThresholds(context.Background())
 	require.Equal(t, 85, got[PlatformOpenAI])
 	require.Equal(t, 88, got[PlatformGrok])
-	require.NotContains(t, got, "kiro")
+	require.NotContains(t, got, "unknown_provider")
 }
 
 func TestAccountSchedulingThresholds_InvalidStoredValueUsesSameDefaultsInSettingsAndCache(t *testing.T) {
 	svc := newSettingServiceForPlatformThresholdTest(map[string]string{
-		SettingKeyAccountSchedulingThresholds: `{"openai":0,"grok":88,"kiro":87}`,
+		SettingKeyAccountSchedulingThresholds: `{"openai":0,"grok":88,"unknown_provider":87}`,
 	})
 
 	settings := svc.parseSettings(map[string]string{
-		SettingKeyAccountSchedulingThresholds: `{"openai":0,"grok":88,"kiro":87}`,
+		SettingKeyAccountSchedulingThresholds: `{"openai":0,"grok":88,"unknown_provider":87}`,
 	})
 	cached := svc.GetAccountSchedulingThresholds(context.Background())
 
 	require.Equal(t, settings.AccountSchedulingThresholds, cached)
 	require.Equal(t, 100, cached[PlatformOpenAI])
 	require.Equal(t, 88, cached[PlatformGrok])
-	require.NotContains(t, cached, "kiro")
+	require.NotContains(t, cached, "unknown_provider")
 }
 
 func TestGetAccountSchedulingThresholds_NilRepoReturnsDefaults(t *testing.T) {

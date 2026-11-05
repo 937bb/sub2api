@@ -190,10 +190,16 @@ func (api *OAuthRefreshAPI) RefreshIfNeeded(
 	}
 	defer localMu.Unlock()
 
+	if account.Platform == PlatformKiro && api.tokenCache == nil {
+		return nil, errors.New("Kiro refresh requires a distributed lock")
+	}
 	// 1. 获取分布式锁
 	if api.tokenCache != nil {
 		acquired, lockErr := api.tokenCache.AcquireRefreshLock(ctx, cacheKey, api.lockTTL)
 		if lockErr != nil {
+			if account.Platform == PlatformKiro {
+				return nil, errors.New("Kiro refresh lock unavailable")
+			}
 			// Redis 错误，降级为无锁刷新（进程内互斥锁仍生效）
 			slog.Warn("oauth_refresh_lock_failed_degraded",
 				"account_id", account.ID,
@@ -293,7 +299,24 @@ func (api *OAuthRefreshAPI) RefreshIfNeeded(
 	// 5. 设置版本号 + 更新 DB
 	if newCredentials != nil {
 		newCredentials["_token_version"] = time.Now().UnixMilli()
-		if freshAccount.IsGrokOAuth() {
+		if freshAccount.Platform == PlatformKiro {
+			repo, ok := api.accountRepo.(KiroOAuthRefreshRepository)
+			if !ok {
+				return nil, errors.New("Kiro conditional credential persistence unavailable")
+			}
+			applied, err := repo.UpdateKiroOAuthCredentialsIfUnchanged(ctx, freshAccount.ID, attemptedAccount.Credentials, attemptedAccount.ProxyID, newCredentials)
+			if err != nil {
+				return nil, fmt.Errorf("Kiro credential persistence failed: %w", err)
+			}
+			current, err := api.accountRepo.GetByID(ctx, freshAccount.ID)
+			if err != nil || current == nil {
+				return nil, errors.New("Kiro durable account state unavailable")
+			}
+			if !applied {
+				return &OAuthRefreshResult{Account: current}, nil
+			}
+			freshAccount = current
+		} else if freshAccount.IsGrokOAuth() {
 			conditionalRepo, ok := api.accountRepo.(GrokOAuthRefreshSuccessRepository)
 			if !ok {
 				return nil, &providerConfigurationRefreshError{

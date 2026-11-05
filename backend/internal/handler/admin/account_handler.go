@@ -2823,6 +2823,16 @@ func (h *AccountHandler) GetAvailableModels(c *gin.Context) {
 }
 
 func (h *AccountHandler) respondAvailableModels(c *gin.Context, account *service.Account) {
+	if account.Platform == service.PlatformKiro {
+		models, err := h.accountTestService.FetchKiroAccountModels(c.Request.Context(), account)
+		if err != nil {
+			response.Error(c, http.StatusBadGateway, "Kiro model discovery failed")
+			return
+		}
+		response.Success(c, models)
+		return
+	}
+
 	// Handle OpenAI accounts
 	if account.IsOpenAI() {
 		// Prefer the shared, account-keyed upstream catalog. If discovery fails,

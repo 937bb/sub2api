@@ -21,6 +21,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/domain"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/kiro"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
@@ -1438,6 +1439,44 @@ func (s *GatewayService) GetAvailableModels(ctx context.Context, groupID *int64,
 		accounts = filtered
 	}
 
+	if platform == PlatformKiro {
+		unique := map[string]struct{}{}
+		for i := range accounts {
+			a, token, err := s.kiroAccessToken(ctx, &accounts[i])
+			if err != nil {
+				continue
+			}
+			catalog, err := s.kiroModels(ctx, a, token)
+			if err != nil {
+				continue
+			}
+			available := map[string]bool{}
+			for _, m := range catalog {
+				available[m.ID] = true
+			}
+			mapping := a.GetModelMapping()
+			if len(mapping) == 0 {
+				for model := range available {
+					unique[model] = struct{}{}
+				}
+			} else {
+				for public, upstream := range mapping {
+					if available[kiro.ModelID(upstream)] && !strings.Contains(public, "*") {
+						unique[public] = struct{}{}
+					}
+				}
+			}
+		}
+		models := make([]string, 0, len(unique))
+		for model := range unique {
+			models = append(models, model)
+		}
+		sort.Strings(models)
+		if s.modelsListCache != nil {
+			s.modelsListCache.Set(cacheKey, models, s.modelsListCacheTTL)
+		}
+		return models
+	}
 	// Collect unique models from all accounts
 	modelSet := make(map[string]struct{})
 	hasAnyMapping := false

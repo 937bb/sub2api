@@ -12,6 +12,7 @@
       @submit.prevent="handleSubmit"
       class="workbench-editor-form space-y-5 console-form"
     >
+      <KiroAccountFields v-if="account?.platform === 'kiro'" v-model:json="kiroJson" v-model:policy="kiroCachePolicy" editing />
       <DialogSection :title="t('console.formIdentity')">
 <div class="workbench-field-row console-field">
         <label class="input-label">{{ t('common.name') }}</label>
@@ -3368,6 +3369,9 @@
 </template>
 
 <script setup lang="ts">
+import KiroAccountFields from './KiroAccountFields.vue'
+import { defaultKiroCachePolicy, parseKiroCredentials } from './kiroCredentials'
+
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 
 import DialogSectionLinks from '@/components/common/DialogSectionLinks.vue'
@@ -3494,6 +3498,15 @@ interface Props {
 }
 
 const props = defineProps<Props>()
+const kiroJson = ref('')
+const kiroCachePolicy = ref(defaultKiroCachePolicy())
+watch(() => [props.show, props.account] as const, ([show, account]) => {
+  if (show && account) {
+    kiroJson.value = ''
+    kiroCachePolicy.value = { ...defaultKiroCachePolicy(), ...((account.extra?.kiro_response_cache as object) || {}) }
+  }
+}, { immediate: true })
+
 const emit = defineEmits<{
   close: []
   updated: [account: Account]
@@ -6389,6 +6402,15 @@ const handleSubmit = async () => {
       updatePayload.extra = newExtra
     }
 
+    if (props.account.platform === 'kiro') {
+      if (!form.proxy_id) throw new Error(t('admin.accounts.kiro.proxyRequired'))
+      updatePayload.extra = { ...(props.account.extra || {}), ...((updatePayload.extra as object) || {}), kiro_response_cache: { ...kiroCachePolicy.value } }
+      if (kiroJson.value.trim()) {
+        const items = parseKiroCredentials(kiroJson.value)
+        if (items.length !== 1) throw new Error(t('admin.accounts.kiro.singleAccount'))
+        updatePayload.credentials = { ...props.account.credentials, ...items[0]!.credentials }
+      }
+    }
     const canContinue = await ensureAntigravityMixedChannelConfirmed(async () => {
       await submitUpdateAccount(accountID, updatePayload)
     })

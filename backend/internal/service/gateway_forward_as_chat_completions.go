@@ -51,7 +51,7 @@ func (s *GatewayService) ForwardAsChatCompletions(
 
 	// Resolve the final upstream model before model-specific conversion.
 	mappedModel := originalModel
-	if account.Type == AccountTypeAPIKey || account.Type == AccountTypeServiceAccount {
+	if account.Type == AccountTypeAPIKey || account.Type == AccountTypeServiceAccount || account.Platform == PlatformKiro {
 		mappedModel = account.GetMappedModel(originalModel)
 	}
 	if mappedModel == originalModel && account.Platform == PlatformAnthropic && account.Type == AccountTypeServiceAccount {
@@ -93,6 +93,17 @@ func (s *GatewayService) ForwardAsChatCompletions(
 	anthropicBody, err := json.Marshal(anthropicReq)
 	if err != nil {
 		return nil, fmt.Errorf("marshal anthropic request: %w", err)
+	}
+	if account.Platform == PlatformKiro {
+		resp, err := s.kiroAsAnthropic(ctx, c, account, anthropicBody, parsed, mappedModel)
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = resp.Body.Close() }()
+		if clientStream {
+			return s.handleCCStreamingFromAnthropic(resp, c, originalModel, mappedModel, extractCCReasoningEffortFromBody(body, mappedModel), startTime)
+		}
+		return s.handleCCBufferedFromAnthropic(resp, c, originalModel, mappedModel, extractCCReasoningEffortFromBody(body, mappedModel), startTime)
 	}
 
 	// 6. Apply Claude Code mimicry for OAuth accounts.

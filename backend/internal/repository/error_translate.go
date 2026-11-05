@@ -52,6 +52,16 @@ func translatePersistenceError(err error, notFound, conflict *infraerrors.Applic
 		return nil
 	}
 
+	var kiroConstraint *pq.Error
+	if errors.As(err, &kiroConstraint) {
+		switch kiroConstraint.Constraint {
+		case "accounts_kiro_unique_proxy":
+			return infraerrors.Conflict("KIRO_PROXY_IN_USE", "Kiro proxy is already assigned to another account")
+		case "accounts_kiro_proxy_required", "accounts_kiro_no_proxy_fallback":
+			return infraerrors.BadRequest("KIRO_STATIC_PROXY_REQUIRED", "Kiro requires one dedicated static proxy without fallback")
+		}
+	}
+
 	// 兼容 Ent ORM 和标准 database/sql 的 NotFound 行为。
 	// Ent 使用自定义的 NotFoundError，而标准库使用 sql.ErrNoRows。
 	// 这里同时处理两种情况，保持业务错误映射一致。
