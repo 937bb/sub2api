@@ -106,3 +106,30 @@ func TestKiroOpenAIAndGeminiBridgesPreserveResponseAndUsage(t *testing.T) {
 		}
 	}
 }
+
+func TestKiroGeminiTextRequestsUseGroupCache(t *testing.T) {
+	upstream := &kiroCompatUpstream{t: t}
+	cache := &kiroMemoryCache{values: map[string][]byte{}}
+	groupID := int64(7)
+	group := &Group{ID: groupID, KiroResponseCache: KiroCachePolicy{Enabled: true, TargetPercent: 100, TTLSeconds: 300, MaxEntries: 128}}
+	gateway := &GatewayService{httpUpstream: upstream, cfg: &config.Config{}, cache: cache, groupRepo: &kiroGroupRepo{group: group}}
+	a := fixedKiroAccount()
+	a.Credentials["access_token"] = t.Name()
+	a.Credentials["expires_at"] = time.Now().Add(time.Hour).Format(time.RFC3339)
+	raw := []byte(`{"contents":[{"role":"user","parts":[{"text":"hi"}]}]}`)
+	for _, expected := range []string{"miss", "hit"} {
+		rec := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(rec)
+		c.Request = httptest.NewRequest("POST", "/v1beta/models/claude-haiku-4.5:generateContent", bytes.NewReader(raw))
+		c.Set("api_key", &APIKey{ID: 1, UserID: 2, GroupID: &groupID})
+		result, err := gateway.ForwardKiroGemini(context.Background(), c, a, "claude-haiku-4.5", "generateContent", false, raw)
+		require.NoError(t, err)
+		require.Equal(t, expected, rec.Header().Get("X-Sub2api-Cache"))
+		require.Contains(t, rec.Body.String(), "OK")
+		if expected == "hit" {
+			require.Zero(t, result.Usage.InputTokens)
+			require.Zero(t, result.Usage.OutputTokens)
+		}
+	}
+	require.Equal(t, 2, upstream.requests, "only discovery and one generation should reach upstream")
+}

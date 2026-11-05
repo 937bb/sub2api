@@ -260,7 +260,7 @@ func Convert(raw []byte, model, session string, credentials map[string]any) ([]b
 // CacheKey permits explicitly opted-in full-response reuse for text-only requests; tools, thinking and multimodal requests bypass.
 func CacheKey(raw []byte, scope string) (string, bool) {
 	var req Request
-	if json.Unmarshal(raw, &req) != nil || len(req.Tools) > 0 || len(req.Thinking) > 0 || (req.Temperature != nil && *req.Temperature != 0) {
+	if json.Unmarshal(raw, &req) != nil || len(req.Tools) > 0 || (len(req.Thinking) > 0 && strings.TrimSpace(string(req.Thinking)) != "null") || (req.Temperature != nil && *req.Temperature != 0) {
 		return "", false
 	}
 	if _, err := textContent(req.System); err != nil {
