@@ -1,6 +1,8 @@
 export default {
     accounts: {
       kiro: {
+        quota: '额度',
+        quotaUnknown: '额度未知',
     proxyRequired: 'Kiro 必须绑定独立静态代理',
     proxyHint: '请在下方选择固定代理。批量 JSON 中每个账号必须提供不同的 proxy_id；代理故障时停止请求，不切换直连或备用代理。', "credentials": "Kiro 账号 JSON", "keepCredentials": "留空保留当前凭据", "importHint": "支持 kiro.rs 单账号、数组，以及 Kiro Account Manager 的 accounts 导出文件。", "cacheEnabled": "复用已完成的文本响应", "target": "目标命中率（%）", "ttl": "缓存有效期（秒）", "capacity": "每个分组最多缓存条数", "cacheHint": "本分组所有 Kiro 账号共用缓存策略、容量和目标命中率。内容按用户、密钥和账号隔离。开启后完整相同的纯文本请求可复用；工具、图片和思考请求跳过。实际命中取决于重复请求；命中不消耗上游 token，也不重复收费。", "singleAccount": "编辑时只能导入一个账号。"},
       fingerprint: {

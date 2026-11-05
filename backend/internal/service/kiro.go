@@ -102,9 +102,8 @@ func (e *kiroRefreshExecutor) Refresh(ctx context.Context, a *Account) (map[stri
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "KiroIDE-"+kiro.Version+"-"+a.GetCredential("machine_id"))
+	kiro.RefreshHeaders(req.Header, a.Credentials)
+	req.Close = true
 	proxy, err := kiroProxy(a)
 	if err != nil {
 		return nil, err

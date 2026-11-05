@@ -14,6 +14,7 @@ import (
 	"time"
 
 	httppool "github.com/Wei-Shaw/sub2api/internal/pkg/httpclient"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/kiro"
 	openaipkg "github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
@@ -181,6 +182,7 @@ type AICredit struct {
 
 // UsageInfo 账号使用量信息
 type UsageInfo struct {
+	KiroQuota          *kiro.Quota    `json:"kiro_quota,omitempty"`
 	Source             string         `json:"source,omitempty"`               // "passive" or "active"
 	UpdatedAt          *time.Time     `json:"updated_at,omitempty"`           // 更新时间
 	FiveHour           *UsageProgress `json:"five_hour"`                      // 5小时窗口
@@ -290,6 +292,8 @@ type ClaudeUsageFetcher interface {
 
 // AccountUsageService 账号使用量查询服务
 type AccountUsageService struct {
+	kiroGateway             *GatewayService
+	kiroUsage               kiroUsageCache
 	accountRepo             AccountRepository
 	usageLogRepo            UsageLogRepository
 	usageFetcher            ClaudeUsageFetcher
@@ -348,6 +352,9 @@ func batchUsageErrorMessage(err error) string {
 func (s *AccountUsageService) getUsageForAccount(ctx context.Context, account *Account, forceProbe bool) (*UsageInfo, error) {
 	if account == nil {
 		return nil, fmt.Errorf("account is required")
+	}
+	if account.Platform == PlatformKiro {
+		return s.getKiroUsage(ctx, account, forceProbe)
 	}
 	accountID := account.ID
 

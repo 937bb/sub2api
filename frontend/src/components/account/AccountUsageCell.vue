@@ -199,6 +199,8 @@
       </div>
     </template>
 
+    <KiroUsageCell v-else-if="account.platform === 'kiro'" :usage="usageInfo" :loading="loading || activeQueryLoading" :error="error" @refresh="loadActiveUsage" />
+
     <!-- Antigravity OAuth accounts: fetch usage from API -->
     <template v-else-if="account.platform === 'antigravity' && account.type === 'oauth'">
       <!-- 账户类型徽章 -->
@@ -709,6 +711,7 @@ import { formatCompactNumber } from '@/utils/format'
 import { isOfficialGeminiBaseUrl } from '@/utils/geminiExplicitCache'
 import { supportsAccountQuota } from '@/utils/accountQuota'
 import UsageProgressBar from './UsageProgressBar.vue'
+import KiroUsageCell from './KiroUsageCell.vue'
 import AccountQuotaInfo from './AccountQuotaInfo.vue'
 import ClaudeResetCreditsCell from './ClaudeResetCreditsCell.vue'
 import OpenAIQuotaResetCell from './OpenAIQuotaResetCell.vue'
@@ -810,7 +813,7 @@ const shouldFetchUsage = computed(() => {
   if (props.account.platform === 'gemini') {
     return !isGeminiThirdPartyApiKey.value && !isGeminiVertex.value
   }
-  if (props.account.platform === 'antigravity') {
+  if (props.account.platform === 'antigravity' || props.account.platform === 'kiro') {
     return props.account.type === 'oauth'
   }
   if (props.account.platform === 'grok') {

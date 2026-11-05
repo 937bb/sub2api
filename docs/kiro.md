@@ -76,3 +76,30 @@ cache isolation and real hit targeting. Use an authorized account for two turns
 and a tool-result round trip through its bound proxy. Verify existing OpenAI
 HTTP/WS and C-side routing before switching production. Migration
 `250_kiro_static_proxy.sql` and `251_kiro_group_cache.sql` require a verified production backup before startup.
+
+
+## Account environment and quota
+
+Request identity follows `hank9999/kiro.rs` revision
+`8fb3dd691d1cedf437bd6a4e9ef9f60b3f217fdd` (2026-11-05 inspection).
+Imports accept `machineId`, `kiroVersion`, `systemVersion`, and `nodeVersion`
+(or snake_case). New imports persist defaults 0.11.107, darwin#24.6.0,
+and Node 22.22.0. Existing records use these stable defaults until saved.
+Machine IDs remain account-specific and survive refresh. Generation, catalog,
+and quota requests share the account environment; operation-specific SDK tokens
+and fresh invocation UUIDs are used. Social and IdC refresh use their respective
+header formats. The configured static proxy applies to all these paths.
+
+This is application-level compatibility, not a verified clone of the official
+client's TLS/HTTP2 fingerprint. Go handles Host/SNI and supported compression.
+The reference's advertised retry maxima and unsupported compression codecs are
+not copied: the gateway advertises the actual single SDK attempt.
+
+The account list queries the upstream `getUsageLimits` endpoint through the
+existing bounded batch loader. Successful snapshots cache for one minute;
+errors cache for 15 seconds and concurrent requests coalesce. Cache identity
+includes credentials and proxy. An explicit refresh bypasses the TTL.
+Quota sums the primary credit/request allowance, active unexpired trials and
+active unexpired bonuses. Precision fields take precedence even when zero.
+Unknown/zero limits show no percentage. These are upstream credits, separate
+from gateway token billing and the group's response-cache policy.

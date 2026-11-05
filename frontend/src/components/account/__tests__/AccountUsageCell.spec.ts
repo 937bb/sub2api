@@ -130,6 +130,23 @@ describe('AccountUsageCell', () => {
     })
   })
 
+  it('requests Kiro quota through the parent batch loader and renders its result', async () => {
+    const requestBatchedUsage = vi.fn()
+    const wrapper = mount(AccountUsageCell, {
+      props: {
+        account: makeAccount({ id: 96501, platform: 'kiro', type: 'oauth' }),
+        requestBatchedUsage,
+        batchedUsage: { five_hour: null, kiro_quota: { plan: 'KIRO PRO', used: 25, limit: 500, utilization: 5 } }
+      }
+    })
+    await flushPromises()
+    expect(requestBatchedUsage).toHaveBeenCalled()
+    expect(getUsage).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('KIRO PRO')
+    expect(wrapper.text()).toContain('25 / 500')
+    wrapper.unmount()
+  })
+
   it('renders eligible Ollama Cloud state and forwards query updates', async () => {
     const wrapper = mount(AccountUsageCell, {
       props: {

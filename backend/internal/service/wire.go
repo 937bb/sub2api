@@ -252,6 +252,9 @@ func ProvideAccountUsageService(
 		identityCache,
 		tlsFPProfileService,
 	)
+	if openAIGatewayService != nil {
+		service.kiroGateway = openAIGatewayService.kiroGateway
+	}
 	service.agentIdentityWS = openAIGatewayService
 	return service
 }

@@ -1,6 +1,8 @@
 export default {
     accounts: {
       kiro: {
+        quota: 'Quota',
+        quotaUnknown: 'Quota unavailable',
     proxyRequired: 'Kiro requires a dedicated static proxy',
     proxyHint: 'Select a fixed proxy below. Batch JSON requires a distinct proxy_id on each account. Failed proxies never fall back to a direct connection.', "credentials": "Kiro account JSON", "keepCredentials": "Leave empty to keep existing credentials", "importHint": "Import a kiro.rs object/array or a Kiro Account Manager accounts export.", "cacheEnabled": "Reuse completed text responses", "target": "Target hit rate (%)", "ttl": "Cache TTL (seconds)", "capacity": "Maximum entries per group", "cacheHint": "All Kiro accounts in this group share the policy, capacity and target hit rate. Content remains isolated by user, key and account. When enabled, identical text requests are eligible for response reuse. Tools, images and thinking bypass this cache. Actual hits depend on repetition; cached responses consume no upstream tokens and are not charged again.", "singleAccount": "Import exactly one account when editing."},
       fingerprint: {

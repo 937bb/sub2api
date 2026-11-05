@@ -18,7 +18,7 @@ export function parseKiroCredentials(text: string): KiroImportAccount[] {
     delete credentials.csrfToken
     delete credentials.proxy_id
     delete credentials.proxyId
-    const aliases: Record<string, string> = { accessToken: 'access_token', refreshToken: 'refresh_token', expiresAt: 'expires_at', clientId: 'client_id', clientSecret: 'client_secret', authMethod: 'auth_method', authRegion: 'auth_region', apiRegion: 'api_region', machineId: 'machine_id', profileArn: 'profile_arn', kiroApiKey: 'api_key' }
+    const aliases: Record<string, string> = { accessToken: 'access_token', refreshToken: 'refresh_token', expiresAt: 'expires_at', clientId: 'client_id', clientSecret: 'client_secret', authMethod: 'auth_method', authRegion: 'auth_region', apiRegion: 'api_region', machineId: 'machine_id', profileArn: 'profile_arn', kiroApiKey: 'api_key', kiroVersion: 'kiro_version', systemVersion: 'system_version', nodeVersion: 'node_version' }
     for (const [from, to] of Object.entries(aliases)) {
       if (from in credentials) { credentials[to] = credentials[from]; delete credentials[from] }
     }

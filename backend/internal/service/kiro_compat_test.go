@@ -47,6 +47,9 @@ func (u *kiroCompatUpstream) Do(req *http.Request, proxy string, id int64, _ int
 	require.Equal(u.t, "http://test:secret@192.0.2.17:8000", proxy)
 	require.EqualValues(u.t, 19, id)
 	u.requests++
+	require.Contains(u.t, req.Header.Get("User-Agent"), "os/darwin#24.6.0 lang/js md/nodejs#22.22.0")
+	require.Contains(u.t, req.Header.Get("User-Agent"), strings.Repeat("a", 64))
+	require.NotEmpty(u.t, req.Header.Get("amz-sdk-invocation-id"))
 	response := `{"models":[{"modelId":"claude-haiku-4.5","modelName":"Haiku"}]}`
 	if req.URL.Host == "q.us-east-1.amazonaws.com" {
 		body, _ := io.ReadAll(req.Body)

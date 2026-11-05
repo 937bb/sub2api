@@ -1495,6 +1495,7 @@ export interface GrokBillingSummary {
 }
 
 export interface AccountUsageInfo {
+  kiro_quota?: { plan: string; used: number; limit: number; utilization: number | null; resets_at?: string }
   source?: 'passive' | 'active'
   updated_at: string | null
   five_hour: UsageProgress | null

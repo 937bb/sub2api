@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-const Version = "0.11.0"
+const Version = "0.11.107"
 
 var regionPattern = regexp.MustCompile(`^[a-z]{2}(?:-[a-z]+)+-[0-9]+$`)
 var machinePattern = regexp.MustCompile(`^[a-zA-Z0-9_-]{16,128}$`)
@@ -51,7 +51,7 @@ func Normalize(input map[string]any) (map[string]any, error) {
 	for _, key := range []string{"csrfToken", "proxy_id", "proxyId", "proxy", "traffic", "subscription", "usage", "tags", "status", "createdAt", "lastUsedAt", "id", "disabled", "password"} {
 		delete(out, key)
 	}
-	aliases := map[string]string{"accessToken": "access_token", "refreshToken": "refresh_token", "expiresAt": "expires_at", "clientId": "client_id", "clientSecret": "client_secret", "profileArn": "profile_arn", "authMethod": "auth_method", "authRegion": "auth_region", "apiRegion": "api_region", "machineId": "machine_id", "kiroApiKey": "api_key", "idToken": "id_token"}
+	aliases := map[string]string{"accessToken": "access_token", "refreshToken": "refresh_token", "expiresAt": "expires_at", "clientId": "client_id", "clientSecret": "client_secret", "profileArn": "profile_arn", "authMethod": "auth_method", "authRegion": "auth_region", "apiRegion": "api_region", "machineId": "machine_id", "kiroApiKey": "api_key", "kiroVersion": "kiro_version", "systemVersion": "system_version", "nodeVersion": "node_version", "idToken": "id_token"}
 	for from, to := range aliases {
 		if v, ok := out[from]; ok {
 			if old, exists := out[to]; exists && !reflect.DeepEqual(old, v) {
@@ -129,6 +129,9 @@ func Normalize(input map[string]any) (map[string]any, error) {
 	if ep := String(out, "endpoint"); ep != "" && ep != "ide" {
 		return nil, errors.New("only Kiro IDE endpoint is supported")
 	}
+	if err := normalizeEnvironment(out); err != nil {
+		return nil, err
+	}
 	return out, nil
 }
 func String(c map[string]any, k string) string { s, _ := c[k].(string); return s }
@@ -156,9 +159,7 @@ func Headers(h http.Header, c map[string]any, token string) {
 	h.Set("Authorization", "Bearer "+token)
 	h.Set("x-amzn-codewhisperer-optout", "true")
 	h.Set("x-amzn-kiro-agent-mode", "vibe")
-	h.Set("x-amz-user-agent", "aws-sdk-js/1.0.34 KiroIDE-"+Version+"-"+String(c, "machine_id"))
-	h.Set("User-Agent", "aws-sdk-js/1.0.34 KiroIDE-"+Version+"-"+String(c, "machine_id"))
-	h.Set("amz-sdk-request", "attempt=1; max=1")
+	EnvironmentHeaders(h, c, "streaming")
 	if String(c, "auth_method") == "api_key" {
 		h.Set("tokentype", "API_KEY")
 	}

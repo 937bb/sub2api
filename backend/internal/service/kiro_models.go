@@ -53,7 +53,12 @@ func (s *GatewayService) kiroModels(ctx context.Context, a *Account, token strin
 	if err != nil {
 		return nil, err
 	}
+	kiro.EnvironmentHeaders(req.Header, a.Credentials, "runtime")
+	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Authorization", "Bearer "+token)
+	if a.GetCredential("auth_method") == "api_key" {
+		req.Header.Set("tokentype", "API_KEY")
+	}
 	req.Header.Set("Content-Type", "application/x-amz-json-1.0")
 	req.Header.Set("X-Amz-Target", "AmazonCodeWhispererService.ListAvailableModels")
 	resp, err := s.httpUpstream.Do(req, proxy, a.ID, a.Concurrency)
