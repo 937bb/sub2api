@@ -13,8 +13,9 @@ import (
 )
 
 type Message struct {
-	Role    string          `json:"role"`
-	Content json.RawMessage `json:"content"`
+	Role         string          `json:"role"`
+	Content      json.RawMessage `json:"content"`
+	OutputConfig json.RawMessage `json:"output_config,omitempty"`
 }
 type Tool struct {
 	Name        string          `json:"name"`
@@ -23,17 +24,18 @@ type Tool struct {
 	Type        string          `json:"type"`
 }
 type Request struct {
-	Model         string          `json:"model"`
-	MaxTokens     int             `json:"max_tokens"`
-	Stream        bool            `json:"stream"`
-	System        json.RawMessage `json:"system"`
-	Messages      []Message       `json:"messages"`
-	Tools         []Tool          `json:"tools"`
-	ToolChoice    json.RawMessage `json:"tool_choice"`
-	Thinking      json.RawMessage `json:"thinking"`
-	Temperature   *float64        `json:"temperature"`
-	StopSequences []string        `json:"stop_sequences"`
-	OutputConfig  json.RawMessage `json:"output_config"`
+	ToolNames     map[string]string `json:"-"`
+	Model         string            `json:"model"`
+	MaxTokens     int               `json:"max_tokens"`
+	Stream        bool              `json:"stream"`
+	System        json.RawMessage   `json:"system"`
+	Messages      []Message         `json:"messages"`
+	Tools         []Tool            `json:"tools"`
+	ToolChoice    json.RawMessage   `json:"tool_choice"`
+	Thinking      json.RawMessage   `json:"thinking"`
+	Temperature   *float64          `json:"temperature"`
+	StopSequences []string          `json:"stop_sequences"`
+	OutputConfig  json.RawMessage   `json:"output_config"`
 }
 type Block struct {
 	Type      string          `json:"type"`
@@ -109,34 +111,21 @@ func Convert(raw []byte, model, session string, credentials map[string]any) ([]b
 	if len(req.StopSequences) > 0 {
 		return nil, nil, errors.New("Kiro does not support stop_sequences")
 	}
-	if len(req.ToolChoice) > 0 && string(req.ToolChoice) != "null" {
-		var tc struct {
-			Type string `json:"type"`
-		}
-		if json.Unmarshal(req.ToolChoice, &tc) != nil || tc.Type != "auto" {
-			return nil, nil, errors.New("Kiro supports only automatic tool choice")
-		}
+	if err := normalizeControlMessages(&req); err != nil {
+		return nil, nil, err
+	}
+	if err := prepareTools(&req); err != nil {
+		return nil, nil, err
 	}
 	system, err := textContent(req.System)
 	if err != nil {
 		return nil, nil, fmt.Errorf("system: %w", err)
 	}
 	tools := make([]any, 0, len(req.Tools))
-	names := map[string]bool{}
 	for _, t := range req.Tools {
-		if t.Type != "" && t.Type != "custom" {
-			return nil, nil, fmt.Errorf("unsupported Kiro server tool %s", t.Type)
-		}
-		if t.Name == "" || len(t.Name) > 64 || names[t.Name] {
-			return nil, nil, errors.New("tool names must be unique and at most 64 bytes")
-		}
-		names[t.Name] = true
-		schema := t.InputSchema
-		if len(schema) == 0 {
-			schema = json.RawMessage(`{"type":"object","properties":{}}`)
-		}
-		tools = append(tools, map[string]any{"toolSpecification": map[string]any{"name": t.Name, "description": t.Description, "inputSchema": map[string]any{"json": schema}}})
+		tools = append(tools, map[string]any{"toolSpecification": map[string]any{"name": upstreamToolName(t.Name), "description": t.Description, "inputSchema": map[string]any{"json": t.InputSchema}}})
 	}
+
 	history := make([]any, 0, len(req.Messages))
 	var current map[string]any
 	for i, m := range req.Messages {
@@ -153,27 +142,28 @@ func Convert(raw []byte, model, session string, credentials map[string]any) ([]b
 			case "text":
 				texts = append(texts, b.Text)
 			case "image":
-				if m.Role != "user" || b.Source == nil || b.Source.Type != "base64" {
-					return nil, nil, errors.New("Kiro requires base64 user images")
+				if m.Role != "user" {
+					return nil, nil, errors.New("Kiro images require a user message")
 				}
-				format := strings.TrimPrefix(b.Source.MediaType, "image/")
-				if format != "png" && format != "jpeg" && format != "gif" && format != "webp" {
-					return nil, nil, errors.New("unsupported Kiro image format")
+				image, err := convertImage(b)
+				if err != nil {
+					return nil, nil, err
 				}
-				images = append(images, map[string]any{"format": format, "source": map[string]any{"bytes": b.Source.Data}})
+				images = append(images, image)
 			case "tool_use":
 				if m.Role != "assistant" || b.ID == "" || b.Name == "" || !json.Valid(b.Input) {
 					return nil, nil, errors.New("invalid tool_use block")
 				}
-				uses = append(uses, map[string]any{"toolUseId": b.ID, "name": b.Name, "input": b.Input})
+				uses = append(uses, map[string]any{"toolUseId": b.ID, "name": upstreamToolName(b.Name), "input": b.Input})
 			case "tool_result":
 				if m.Role != "user" || b.ToolUseID == "" {
 					return nil, nil, errors.New("invalid tool_result block")
 				}
-				text, err := textContent(b.Content)
+				text, resultImages, err := toolResultContent(b.Content)
 				if err != nil {
 					return nil, nil, fmt.Errorf("tool_result: %w", err)
 				}
+				images = append(images, resultImages...)
 				status := "success"
 				if b.IsError {
 					status = "error"
@@ -229,8 +219,8 @@ func Convert(raw []byte, model, session string, credentials map[string]any) ([]b
 	// Haiku and legacy Kiro models reject the entire additional-fields object.
 	// Forward the token limit only when the account catalog advertises support.
 	schema, _ := credentials["kiro_request_fields"].(map[string]any)
-	if _, ok := schema["max_tokens"]; ok {
-		fields["max_tokens"] = req.MaxTokens
+	if limit, ok := schema["max_tokens"]; ok {
+		fields["max_tokens"] = catalogTokenLimit(req.MaxTokens, limit)
 	}
 	if len(req.Thinking) > 0 && string(req.Thinking) != "null" {
 		if _, ok := schema["thinking"]; !ok {

@@ -88,10 +88,16 @@ func ReadFrame(r io.Reader) (*Frame, error) {
 }
 
 type Usage struct {
-	InputTokens              int `json:"input_tokens"`
-	OutputTokens             int `json:"output_tokens"`
-	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
-	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+	InputTokens              int                 `json:"input_tokens"`
+	OutputTokens             int                 `json:"output_tokens"`
+	CacheReadInputTokens     int                 `json:"cache_read_input_tokens"`
+	CacheCreationInputTokens int                 `json:"cache_creation_input_tokens"`
+	CacheCreation            *CacheCreationUsage `json:"cache_creation,omitempty"`
+	CacheSource              string              `json:"cache_source,omitempty"`
+}
+type CacheCreationUsage struct {
+	Ephemeral5mInputTokens int `json:"ephemeral_5m_input_tokens"`
+	Ephemeral1hInputTokens int `json:"ephemeral_1h_input_tokens"`
 }
 type Response struct {
 	ID           string   `json:"id"`
@@ -117,7 +123,17 @@ func emitEvent(emit Emit, name string, data map[string]any) error {
 
 // EstimateTokens is explicitly approximate; no synthetic prompt-cache tokens are reported.
 func EstimateTokens(s string) int { return (utf8.RuneCountInString(s) + 2) / 3 }
-func Decode(r io.Reader, model string, inputTokens int, emit Emit) (*Response, error) {
+func Decode(r io.Reader, model string, inputTokens int, emit Emit, toolNames ...map[string]string) (*Response, error) {
+	return decode(r, model, inputTokens, emit, nil, toolNames...)
+}
+
+// Finalize usage after a successful stream, before publishing terminal billing.
+func DecodeWithUsageFinalizer(r io.Reader, model string, inputTokens int, emit Emit, finalize func(*Response), toolNames map[string]string) (*Response, error) {
+	return decode(r, model, inputTokens, emit, finalize, toolNames)
+}
+
+func decode(r io.Reader, model string, inputTokens int, emit Emit, finalize func(*Response), toolNames ...map[string]string) (*Response, error) {
+	emit = serialToolEmitter(emit)
 	out := &Response{ID: "msg_" + strings.ReplaceAll(uuid.NewString(), "-", ""), Type: "message", Role: "assistant", Model: model, Content: []Block{}, StopReason: "end_turn", Usage: Usage{InputTokens: inputTokens}, UsageSource: "estimated"}
 	defer func() {
 		if out.UsageSource == "estimated" {
@@ -127,31 +143,46 @@ func Decode(r io.Reader, model string, inputTokens int, emit Emit) (*Response, e
 			}
 		}
 	}()
-	if err := emitEvent(emit, "message_start", map[string]any{"message": map[string]any{"id": out.ID, "type": "message", "role": "assistant", "model": model, "content": []any{}, "stop_reason": nil, "stop_sequence": nil, "usage": out.Usage}}); err != nil {
+	initialUsage := out.Usage
+	if finalize != nil {
+		initialUsage = Usage{}
+	}
+	if err := emitEvent(emit, "message_start", map[string]any{"message": map[string]any{"id": out.ID, "type": "message", "role": "assistant", "model": model, "content": []any{}, "stop_reason": nil, "stop_sequence": nil, "usage": initialUsage}}); err != nil {
 		return out, err
 	}
 	active := -1
-	var input strings.Builder
+	type toolState struct {
+		index  int
+		name   string
+		input  strings.Builder
+		closed bool
+	}
+	tools := map[string]*toolState{}
+	toolOrder := []*toolState{}
 	total := 0
 	metered := false
 	closeBlock := func() error {
 		if active < 0 {
 			return nil
 		}
-		if out.Content[active].Type == "tool_use" {
-			raw := input.String()
-			if raw == "" {
-				raw = "{}"
-			}
-			if !json.Valid([]byte(raw)) {
-				return errors.New("incomplete Kiro tool arguments")
-			}
-			out.Content[active].Input = json.RawMessage(raw)
-		}
 		err := emitEvent(emit, "content_block_stop", map[string]any{"index": active})
 		active = -1
-		input.Reset()
 		return err
+	}
+	closeTool := func(tool *toolState) error {
+		if tool.closed {
+			return nil
+		}
+		raw := tool.input.String()
+		if raw == "" {
+			raw = "{}"
+		}
+		if !objectJSON([]byte(raw)) {
+			return errors.New("incomplete or non-object Kiro tool arguments")
+		}
+		out.Content[tool.index].Input = json.RawMessage(raw)
+		tool.closed = true
+		return emitEvent(emit, "content_block_stop", map[string]any{"index": tool.index})
 	}
 	for {
 		f, err := ReadFrame(r)
@@ -179,9 +210,6 @@ func Decode(r io.Reader, model string, inputTokens int, emit Emit) (*Response, e
 			if e.Content == "" {
 				continue
 			}
-			if active >= 0 && out.Content[active].Type == "tool_use" {
-				return out, errors.New("Kiro text interrupted an unfinished tool")
-			}
 			if active < 0 {
 				active = len(out.Content)
 				out.Content = append(out.Content, Block{Type: "text"})
@@ -194,6 +222,7 @@ func Decode(r io.Reader, model string, inputTokens int, emit Emit) (*Response, e
 				return out, err
 			}
 		case "toolUseEvent":
+			metered = false
 			var e struct {
 				Name  string `json:"name"`
 				ID    string `json:"toolUseId"`
@@ -203,36 +232,44 @@ func Decode(r io.Reader, model string, inputTokens int, emit Emit) (*Response, e
 			if json.Unmarshal(f.Payload, &e) != nil || e.ID == "" {
 				return out, errors.New("invalid Kiro tool event")
 			}
-			if active >= 0 && out.Content[active].Type == "text" {
-				if err := closeBlock(); err != nil {
-					return out, err
-				}
+			if err := closeBlock(); err != nil {
+				return out, err
 			}
-			if active >= 0 && out.Content[active].ID != e.ID {
-				return out, errors.New("Kiro tool changed before completion")
-			}
-			if active < 0 {
+			tool := tools[e.ID]
+			if tool == nil {
 				if e.Name == "" {
 					return out, errors.New("Kiro tool name is missing")
 				}
-				active = len(out.Content)
-				out.Content = append(out.Content, Block{Type: "tool_use", ID: e.ID, Name: e.Name, Input: json.RawMessage(`{}`)})
-				if err := emitEvent(emit, "content_block_start", map[string]any{"index": active, "content_block": out.Content[active]}); err != nil {
+				name := e.Name
+				if len(toolNames) > 0 && toolNames[0] != nil {
+					original, ok := toolNames[0][name]
+					if !ok {
+						return out, errors.New("Kiro returned an undeclared or disabled tool")
+					}
+					name = original
+				}
+				tool = &toolState{index: len(out.Content), name: e.Name}
+				tools[e.ID] = tool
+				toolOrder = append(toolOrder, tool)
+				out.Content = append(out.Content, Block{Type: "tool_use", ID: e.ID, Name: name, Input: json.RawMessage(`{}`)})
+				if err := emitEvent(emit, "content_block_start", map[string]any{"index": tool.index, "content_block": out.Content[tool.index]}); err != nil {
 					return out, err
 				}
+			} else if tool.closed || (e.Name != "" && e.Name != tool.name) {
+				return out, errors.New("Kiro tool changed name or continued after completion")
 			}
-			input.WriteString(e.Input)
+			tool.input.WriteString(e.Input)
 			if e.Input != "" {
-				if err := emitEvent(emit, "content_block_delta", map[string]any{"index": active, "delta": map[string]any{"type": "input_json_delta", "partial_json": e.Input}}); err != nil {
+				if err := emitEvent(emit, "content_block_delta", map[string]any{"index": tool.index, "delta": map[string]any{"type": "input_json_delta", "partial_json": e.Input}}); err != nil {
 					return out, err
 				}
 			}
 			if e.Stop {
-				if err := closeBlock(); err != nil {
+				if err := closeTool(tool); err != nil {
 					return out, err
 				}
-				out.StopReason = "tool_use"
 			}
+			out.StopReason = "tool_use"
 		case "meteringEvent":
 			metered = true
 			var e struct {
@@ -262,13 +299,16 @@ func Decode(r io.Reader, model string, inputTokens int, emit Emit) (*Response, e
 			}
 		}
 	}
-	if active >= 0 && out.Content[active].Type == "tool_use" {
-		// Some IDE responses omit stop=true and terminate with a metering event.
-		// Require that terminal evidence and valid arguments before completing a tool.
-		if !metered {
-			return out, errors.New("Kiro stream ended before tool completion")
+	for _, tool := range toolOrder {
+		if !tool.closed {
+			// Some IDE streams use metering as terminal evidence instead of stop=true.
+			if !metered {
+				return out, errors.New("Kiro stream ended before tool completion")
+			}
+			if err := closeTool(tool); err != nil {
+				return out, err
+			}
 		}
-		out.StopReason = "tool_use"
 	}
 	if err := closeBlock(); err != nil {
 		return out, err
@@ -280,6 +320,9 @@ func Decode(r io.Reader, model string, inputTokens int, emit Emit) (*Response, e
 		for _, b := range out.Content {
 			out.Usage.OutputTokens += EstimateTokens(b.Text + string(b.Input))
 		}
+	}
+	if finalize != nil {
+		finalize(out)
 	}
 	if err := emitEvent(emit, "message_delta", map[string]any{"delta": map[string]any{"stop_reason": out.StopReason, "stop_sequence": nil}, "usage": out.Usage}); err != nil {
 		return out, err

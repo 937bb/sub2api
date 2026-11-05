@@ -19,7 +19,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// KiroCachePolicy controls real response reuse; token accounting is never synthesized.
+// KiroCachePolicy controls real response reuse and local cache billing.
 type KiroCachePolicy = domain.KiroResponseCachePolicy
 
 // Cache policy is loaded by effective request group, never from account metadata.
@@ -237,7 +237,12 @@ func (s *GatewayService) kiroAccessToken(ctx context.Context, a *Account) (*Acco
 	return a, token, nil
 }
 func kiroResult(out *kiro.Response, requested, mapped string, start time.Time, stream bool) *ForwardResult {
-	return &ForwardResult{RequestID: out.ID, Model: requested, UpstreamModel: mapped, UpstreamResponseModel: mapped, Stream: stream, Duration: time.Since(start), Usage: ClaudeUsage{InputTokens: out.Usage.InputTokens, OutputTokens: out.Usage.OutputTokens, CacheReadInputTokens: out.Usage.CacheReadInputTokens, CacheCreationInputTokens: out.Usage.CacheCreationInputTokens}}
+	result := &ForwardResult{RequestID: out.ID, Model: requested, UpstreamModel: mapped, UpstreamResponseModel: mapped, Stream: stream, Duration: time.Since(start), Usage: ClaudeUsage{InputTokens: out.Usage.InputTokens, OutputTokens: out.Usage.OutputTokens, CacheReadInputTokens: out.Usage.CacheReadInputTokens, CacheCreationInputTokens: out.Usage.CacheCreationInputTokens}}
+	if out.Usage.CacheCreation != nil {
+		result.Usage.CacheCreation5mTokens = out.Usage.CacheCreation.Ephemeral5mInputTokens
+		result.Usage.CacheCreation1hTokens = out.Usage.CacheCreation.Ephemeral1hInputTokens
+	}
+	return result
 }
 func (s *GatewayService) forwardKiro(ctx context.Context, c *gin.Context, account *Account, parsed *ParsedRequest) (*ForwardResult, error) {
 	start := time.Now()
@@ -291,8 +296,7 @@ func (s *GatewayService) forwardKiro(ctx context.Context, c *gin.Context, accoun
 			var out kiro.Response
 			if json.Unmarshal(cached, &out) == nil && len(out.Content) > 0 {
 				out.ID = "msg_" + uuid.NewString()
-				out.Usage = kiro.Usage{}
-				out.UsageSource = "local_cache"
+				kiroCacheRead(&out)
 				c.Header("X-Sub2api-Cache", "hit")
 				c.Header("X-Sub2api-Usage-Source", "local_cache")
 				if parsed.OnUpstreamAccepted != nil {
@@ -307,7 +311,7 @@ func (s *GatewayService) forwardKiro(ctx context.Context, c *gin.Context, accoun
 			}
 		}
 	}
-	resp, inputTokens, err := s.requestKiro(ctx, account, parsed.Body.Bytes(), mapped, kiro.StableID(scope, session))
+	resp, inputTokens, toolNames, err := s.requestKiro(ctx, account, parsed.Body.Bytes(), mapped, kiro.StableID(scope, session))
 	if err != nil {
 		if infraerrors.IsBadRequest(err) {
 			c.JSON(400, gin.H{"type": "error", "error": gin.H{"type": "invalid_request_error", "message": err.Error()}})
@@ -334,7 +338,7 @@ func (s *GatewayService) forwardKiro(ctx context.Context, c *gin.Context, accoun
 	if parsed.Stream {
 		emitter = emit
 	}
-	out, err := kiro.Decode(resp.Body, parsed.Model, inputTokens, emitter)
+	out, err := kiro.DecodeWithUsageFinalizer(resp.Body, parsed.Model, inputTokens, emitter, kiroCacheFinalizer(ctx, cache, groupID, cacheKey, policy, useCache), toolNames)
 	if err != nil {
 		if parsed.Stream && c.Writer.Written() {
 			_ = emit("error", gin.H{"type": "error", "error": gin.H{"type": "api_error", "message": "Kiro stream interrupted"}})
@@ -343,20 +347,6 @@ func (s *GatewayService) forwardKiro(ctx context.Context, c *gin.Context, accoun
 			return kiroResult(out, parsed.Model, mapped, start, parsed.Stream), err
 		}
 		return nil, err
-	}
-	if useCache && out.StopReason == "end_turn" {
-		textOnly := true
-		for _, block := range out.Content {
-			if block.Type != "text" {
-				textOnly = false
-			}
-		}
-		if textOnly {
-			data, _ := json.Marshal(out)
-			if len(data) <= 1<<20 {
-				_ = cache.PutKiroResponse(ctx, groupID, cacheKey, data, policy)
-			}
-		}
 	}
 	if !parsed.Stream {
 		c.Header("X-Sub2api-Usage-Source", out.UsageSource)

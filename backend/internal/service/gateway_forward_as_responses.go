@@ -36,6 +36,12 @@ func (s *GatewayService) ForwardAsResponses(
 	parsed *ParsedRequest,
 ) (*ForwardResult, error) {
 	startTime := time.Now()
+	if account.Platform == PlatformKiro {
+		if err := validateKiroOpenAIToolControls(body); err != nil {
+			writeResponsesError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+			return nil, err
+		}
+	}
 
 	normalizedBody, normalized, err := normalizeOpenAIResponsesLegacyIngressWithConfig(s.cfg, body)
 	if err != nil {
@@ -303,6 +309,10 @@ func ExtractResponsesReasoningEffortFromBody(body []byte, modelCandidates ...str
 func mergeAnthropicUsage(dst *ClaudeUsage, src apicompat.AnthropicUsage) {
 	if dst == nil {
 		return
+	}
+	if src.CacheCreation != nil {
+		dst.CacheCreation5mTokens = src.CacheCreation.Ephemeral5mInputTokens
+		dst.CacheCreation1hTokens = src.CacheCreation.Ephemeral1hInputTokens
 	}
 
 	cacheReadTokens := src.CacheReadInputTokens

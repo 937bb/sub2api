@@ -47,7 +47,8 @@ func (s *GatewayService) ForwardKiroGemini(ctx context.Context, c *gin.Context, 
 		message := gin.H{"candidates": []any{candidate}, "modelVersion": model, "responseId": result.RequestID}
 		if terminal {
 			candidate["finishReason"] = finish
-			message["usageMetadata"] = gin.H{"promptTokenCount": result.Usage.InputTokens, "candidatesTokenCount": result.Usage.OutputTokens, "totalTokenCount": result.Usage.InputTokens + result.Usage.OutputTokens}
+			prompt := result.Usage.InputTokens + result.Usage.CacheReadInputTokens + result.Usage.CacheCreationInputTokens
+			message["usageMetadata"] = gin.H{"promptTokenCount": prompt, "candidatesTokenCount": result.Usage.OutputTokens, "totalTokenCount": prompt + result.Usage.OutputTokens, "cachedContentTokenCount": result.Usage.CacheReadInputTokens, "cacheCreationInputTokens": result.Usage.CacheCreationInputTokens}
 		}
 		if stream {
 			c.Header("Content-Type", "text/event-stream")
@@ -85,7 +86,7 @@ func (s *GatewayService) ForwardKiroGemini(ctx context.Context, c *gin.Context, 
 		case "message_start":
 			if event.Message != nil {
 				result.RequestID = event.Message.ID
-				result.Usage.InputTokens = event.Message.Usage.InputTokens
+				mergeAnthropicUsage(&result.Usage, event.Message.Usage)
 			}
 		case "content_block_start":
 			if event.ContentBlock != nil {
@@ -145,10 +146,7 @@ func (s *GatewayService) ForwardKiroGemini(ctx context.Context, c *gin.Context, 
 			}
 		case "message_delta":
 			if event.Usage != nil {
-				result.Usage.OutputTokens = event.Usage.OutputTokens
-				if event.Usage.InputTokens > 0 {
-					result.Usage.InputTokens = event.Usage.InputTokens
-				}
+				mergeAnthropicUsage(&result.Usage, *event.Usage)
 			}
 			if event.Delta != nil && event.Delta.StopReason == "max_tokens" {
 				finish = "MAX_TOKENS"

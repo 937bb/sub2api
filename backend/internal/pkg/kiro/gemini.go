@@ -228,7 +228,7 @@ func GeminiRequest(raw []byte, model string) ([]byte, error) {
 		case "AUTO":
 			out.ToolChoice = json.RawMessage(`{"type":"auto"}`)
 		case "NONE":
-			out.Tools = nil
+			out.ToolChoice = json.RawMessage(`{"type":"none"}`)
 		default:
 			return nil, fmt.Errorf("Kiro supports AUTO or NONE tool modes")
 		}

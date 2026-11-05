@@ -17,21 +17,21 @@ import (
 )
 
 // requestKiro uses the same pinned route for token refresh and inference.
-func (s *GatewayService) requestKiro(ctx context.Context, account *Account, raw []byte, model, session string) (*http.Response, int, error) {
+func (s *GatewayService) requestKiro(ctx context.Context, account *Account, raw []byte, model, session string) (*http.Response, int, map[string]string, error) {
 	if _, err := kiroProxy(account); err != nil {
-		return nil, 0, err
+		return nil, 0, nil, err
 	}
 	account, token, err := s.kiroAccessToken(ctx, account)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, nil, err
 	}
 	proxy, err := kiroProxy(account)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, nil, err
 	}
 	catalog, err := s.kiroModels(ctx, account, token)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, nil, err
 	}
 	credentials := shallowCopyMap(account.Credentials)
 	found := false
@@ -43,20 +43,20 @@ func (s *GatewayService) requestKiro(ctx context.Context, account *Account, raw 
 		}
 	}
 	if !found {
-		return nil, 0, infraerrors.BadRequest("KIRO_MODEL_UNAVAILABLE", "selected model is unavailable for this Kiro account")
+		return nil, 0, nil, infraerrors.BadRequest("KIRO_MODEL_UNAVAILABLE", "selected model is unavailable for this Kiro account")
 	}
-	body, _, err := kiro.Convert(raw, model, session, credentials)
+	body, converted, err := kiro.Convert(raw, model, session, credentials)
 	if err != nil {
-		return nil, 0, infraerrors.BadRequest("KIRO_INVALID_REQUEST", err.Error())
+		return nil, 0, nil, infraerrors.BadRequest("KIRO_INVALID_REQUEST", err.Error())
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, kiro.Endpoint(account.Credentials), bytes.NewReader(body))
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, nil, err
 	}
 	kiro.Headers(req.Header, account.Credentials, token)
 	req.Header.Set("amz-sdk-invocation-id", uuid.NewString())
 	resp, err := s.httpUpstream.Do(req, proxy, account.ID, account.Concurrency)
-	return resp, kiro.EstimateTokens(string(body)), err
+	return resp, kiro.EstimateTokens(string(body)), converted.ToolNames, err
 }
 
 type kiroStreamBody struct {
@@ -109,7 +109,7 @@ func (s *GatewayService) kiroAsAnthropic(ctx context.Context, c *gin.Context, a 
 		var out kiro.Response
 		if cacheErr == nil && len(cached) > 0 && json.Unmarshal(cached, &out) == nil && len(out.Content) > 0 {
 			out.ID = "msg_" + uuid.NewString()
-			out.Usage = kiro.Usage{}
+			kiroCacheRead(&out)
 			var buffer bytes.Buffer
 			err := kiro.Replay(&out, func(kind string, event any) error {
 				data, err := json.Marshal(event)
@@ -130,7 +130,7 @@ func (s *GatewayService) kiroAsAnthropic(ctx context.Context, c *gin.Context, a 
 		}
 	}
 	upstreamCtx, cancel := context.WithCancel(ctx)
-	resp, input, err := s.requestKiro(upstreamCtx, a, raw, model, kiro.StableID(scope, session))
+	resp, input, toolNames, err := s.requestKiro(upstreamCtx, a, raw, model, kiro.StableID(scope, session))
 	if err != nil {
 		cancel()
 		if infraerrors.IsBadRequest(err) {
@@ -170,21 +170,7 @@ func (s *GatewayService) kiroAsAnthropic(ctx context.Context, c *gin.Context, a 
 			_, e = fmt.Fprintf(writer, "event: %s\ndata: %s\n\n", name, b)
 			return e
 		}
-		out, decodeErr := kiro.Decode(resp.Body, model, input, emit)
-		if decodeErr == nil && useCache && out.StopReason == "end_turn" {
-			textOnly := true
-			for _, block := range out.Content {
-				if block.Type != "text" {
-					textOnly = false
-				}
-			}
-			if textOnly {
-				data, _ := json.Marshal(out)
-				if len(data) <= 1<<20 {
-					_ = cache.PutKiroResponse(upstreamCtx, groupID, cacheKey, data, policy)
-				}
-			}
-		}
+		_, decodeErr := kiro.DecodeWithUsageFinalizer(resp.Body, model, input, emit, kiroCacheFinalizer(upstreamCtx, cache, groupID, cacheKey, policy, useCache), toolNames)
 		if decodeErr == nil {
 			_, decodeErr = fmt.Fprint(writer, "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
 		}
@@ -212,7 +198,7 @@ func (s *AccountTestService) testKiroAccountConnection(c *gin.Context, a *Accoun
 	s.sendEvent(c, TestEvent{Type: "test_start", Model: model})
 	gateway := &GatewayService{httpUpstream: s.httpUpstream, claudeTokenProvider: s.claudeTokenProvider}
 	raw, _ := json.Marshal(map[string]any{"model": model, "max_tokens": 1024, "messages": []any{map[string]any{"role": "user", "content": prompt}}, "stream": true})
-	resp, input, err := gateway.requestKiro(c.Request.Context(), a, raw, model, kiro.StableID(fmt.Sprint(a.ID), uuid.NewString()))
+	resp, input, toolNames, err := gateway.requestKiro(c.Request.Context(), a, raw, model, kiro.StableID(fmt.Sprint(a.ID), uuid.NewString()))
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Kiro test transport or credential refresh failed")
 	}
@@ -230,10 +216,31 @@ func (s *AccountTestService) testKiroAccountConnection(c *gin.Context, a *Accoun
 			}
 		}
 		return c.Request.Context().Err()
-	})
+	}, toolNames)
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Kiro test stream failed")
 	}
 	s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
+	return nil
+}
+
+// Check controls before generic adapters can drop unsupported OpenAI fields.
+func validateKiroOpenAIToolControls(raw []byte) error {
+	var req struct {
+		Choice   json.RawMessage `json:"tool_choice"`
+		Parallel *bool           `json:"parallel_tool_calls"`
+	}
+	if err := json.Unmarshal(raw, &req); err != nil {
+		return errors.New("invalid Kiro OpenAI request")
+	}
+	if req.Parallel != nil && !*req.Parallel {
+		return errors.New("Kiro cannot enforce parallel_tool_calls=false")
+	}
+	if len(req.Choice) != 0 && string(req.Choice) != "null" {
+		var choice string
+		if json.Unmarshal(req.Choice, &choice) != nil || (choice != "auto" && choice != "none") {
+			return errors.New("Kiro supports only auto or none tool_choice")
+		}
+	}
 	return nil
 }

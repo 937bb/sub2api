@@ -29,7 +29,7 @@ A proxy's static egress must also be guaranteed by the proxy provider.
 The gateway supports Anthropic Messages, OpenAI Chat Completions and Responses,
 and Gemini generateContent/streamGenerateContent,
 with buffered and streaming responses. Text, base64 images, function calls and
-text tool results are translated to Kiro conversation history. Account-qualified
+text/image tool results are translated to Kiro conversation history. Account-qualified
 session IDs prevent reusing an upstream conversation across accounts or tenants.
 The existing scheduler supplies account balancing and sticky selection.
 
@@ -41,8 +41,8 @@ The account model list is fetched through its proxy from Kiro's management API.
 Unsupported models and unsupported request controls are rejected. Legacy models
 without an additional-fields schema use upstream generation defaults; their
 `max_tokens` cannot be enforced by this endpoint. Stop sequences, forced tool
-selection, assistant prefill, server tools and non-text tool results are currently
-unsupported. Signed Anthropic thinking blocks cannot retain an Anthropic
+selection, disabling parallel tool use, assistant prefill, server tools and
+non-text/non-image tool results are currently unsupported. Signed Anthropic thinking blocks cannot retain an Anthropic
 signature contract when sent to Kiro.
 
 ## Response caching and accounting
@@ -62,11 +62,24 @@ start a new namespace, with old entries expiring naturally. Redis failure falls
 back to inference rather than claiming a cache hit. Response headers expose
 `X-Sub2api-Cache` and `X-Sub2api-Usage-Source`.
 
-Cached responses report zero new input/output usage. Kiro normally reports
-credits rather than exact token counts; token usage is explicitly estimated
-unless exact upstream counts are present. No fictitious cache token split is
-created. Credits are currently exposed on buffered native responses, not stored
-as a separate durable billing unit.
+Local response-cache writes and reads now use Sub's existing cache-creation and
+cache-read billing buckets and configured model/group/channel prices. A successful
+write classifies the prompt footprint as cache creation (5-minute bucket for TTL
+up to 300 seconds, 1-hour bucket for longer TTLs), retaining generated output usage.
+A hit classifies the stored prompt footprint as cache reads, with zero new ordinary
+input and zero generated output. Buckets are mutually exclusive; writes that fail,
+interrupted responses and bypassed requests do not incur local creation fees.
+`usage.cache_source=local` identifies these gateway operations; they are not
+upstream prefix-cache claims. Kiro token counts remain estimates unless the
+upstream provides exact counts. Credits are currently exposed on buffered native
+responses, not stored as a separate durable billing unit.
+
+Claude Code's empty system `output_config` control messages are folded into the
+current request's effective output configuration. Nonempty system messages are
+rejected; instructions belong in the top-level `system`. Requested output limits
+are clamped to the selected account's advertised minimum and maximum; for current
+Opus 5.5 this is 1,024–64,000. A smaller requested cap cannot be enforced by that
+upstream API and is raised to its minimum. No model is silently substituted.
 
 ## Release validation
 
@@ -103,3 +116,43 @@ Quota sums the primary credit/request allowance, active unexpired trials and
 active unexpired bonuses. Precision fields take precedence even when zero.
 Unknown/zero limits show no percentage. These are upstream credits, separate
 from gateway token billing and the group's response-cache policy.
+
+## Tool chain compatibility
+
+The adapter follows kiro.rs's tool structures with additional validation:
+
+- MCP tool names exceeding 63 bytes use a stable, UTF-8-safe hash alias. Tool
+  definitions and historical calls use the same alias. Native, Chat Completions,
+  Responses and Gemini outputs restore the original name, including SSE starts.
+  Colliding aliases and duplicate names are rejected.
+- Nullable MCP schema fields are normalized. Nested schemas, required fields,
+  references and `additionalProperties: false` retain their meaning. Invalid
+  schemas are rejected instead of being replaced with unconstrained objects.
+- Consecutive same-role messages merge, including separately returned parallel
+  results. Tool IDs are paired across each turn. Duplicate, missing or orphaned
+  results produce an explicit request error; no history is silently deleted.
+- Removed historical tools receive historical-only definitions. The response
+  allowlist excludes these tools, so the adapter cannot expose an unavailable
+  function as a new executable call.
+- Tool-result base64 images are moved to the containing Kiro user message while
+  text, IDs and error status remain in tool results. Unsupported files and URL
+  images are rejected rather than dropped or fetched by the gateway.
+- Interleaved upstream tool argument fragments accumulate independently by ID.
+  Outbound content blocks remain sequential for existing OpenAI bridges. Partial
+  JSON, changed names and continuation after completion produce stream errors.
+  EOF alone cannot complete an unfinished tool; terminal metering and valid
+  object arguments are required when Kiro omits `stop: true`.
+- `tool_choice: auto` and `none` are supported. `none` disables all new tool calls,
+  including historical definitions. Forced tool selection and
+  `disable_parallel_tool_use: true` are explicitly rejected; the reference's
+  converter does not implement these controls either.
+
+The reference also has a separate, narrow Web Search shortcut, triggered by a
+single tool named `web_search`, taking its query from the first user message.
+It is not a general server-tool execution loop. This adapter does not claim
+Anthropic hosted-tool compatibility or copy that shortcut's synthetic search
+response/usage behavior. Custom client-side search tools work through the same
+function-call path as other tools. Tool execution, retry decisions and side
+effects remain owned by the client; this gateway only transports calls/results.
+Tools continue to bypass full-response caching. These changes do not introduce
+prefix/KV caching or synthetic cache token counts.

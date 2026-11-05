@@ -28,3 +28,13 @@ func TestGeminiRequestRejectsUnsupportedControls(t *testing.T) {
 		require.Error(t, err)
 	}
 }
+
+func TestGeminiNoneRetainsHistoryButDisablesNewCalls(t *testing.T) {
+	raw := []byte(`{"contents":[{"role":"model","parts":[{"functionCall":{"name":"read","args":{}}}]},{"role":"user","parts":[{"functionResponse":{"name":"read","response":{"ok":true}}}]}],"tools":[{"functionDeclarations":[{"name":"read"}]}],"toolConfig":{"functionCallingConfig":{"mode":"NONE"}}}`)
+	converted, err := GeminiRequest(raw, "claude-sonnet-4.6")
+	require.NoError(t, err)
+	_, req, err := Convert(converted, "claude-sonnet-4.6", "session", nil)
+	require.NoError(t, err)
+	require.Empty(t, req.ToolNames)
+	require.Len(t, req.Tools, 1)
+}
