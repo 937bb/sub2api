@@ -3,27 +3,65 @@ package kiro
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 )
 
-// Claude Code sends empty system messages to change effort mid-conversation.
-// Kiro accepts the effective setting at the request level, never as history.
+// Claude Code can include system instructions and effort updates in history.
+// Preserve their contents at the request level before building Kiro history.
 func normalizeControlMessages(req *Request) error {
 	messages := make([]Message, 0, len(req.Messages))
+	instructions := []string{}
 	for _, message := range req.Messages {
 		if message.Role != "system" {
 			messages = append(messages, message)
 			continue
 		}
 		text, err := textContent(message.Content)
-		var config map[string]json.RawMessage
-		if err != nil || strings.TrimSpace(text) != "" || json.Unmarshal(message.OutputConfig, &config) != nil || len(config) == 0 {
-			return errors.New("Kiro only supports empty system messages carrying output_config; put system instructions in the top-level system field")
+		if err != nil {
+			return fmt.Errorf("system message: %w", err)
 		}
-		req.OutputConfig = message.OutputConfig
+		if text != "" {
+			instructions = append(instructions, text)
+		}
+		if len(message.OutputConfig) != 0 && strings.TrimSpace(string(message.OutputConfig)) != "null" {
+			var update map[string]json.RawMessage
+			if json.Unmarshal(message.OutputConfig, &update) != nil {
+				return errors.New("system message output_config must be an object")
+			}
+			if len(update) == 0 {
+				continue
+			}
+			config := map[string]json.RawMessage{}
+			if len(req.OutputConfig) != 0 && strings.TrimSpace(string(req.OutputConfig)) != "null" {
+				if json.Unmarshal(req.OutputConfig, &config) != nil {
+					return errors.New("output_config must be an object")
+				}
+			}
+			for key, value := range update {
+				config[key] = value
+			}
+			req.OutputConfig, err = json.Marshal(config)
+			if err != nil {
+				return fmt.Errorf("system message output_config: %w", err)
+			}
+		}
 	}
 	if len(messages) == 0 {
 		return errors.New("messages must contain a user message")
+	}
+	if len(instructions) > 0 {
+		system, err := textContent(req.System)
+		if err != nil {
+			return fmt.Errorf("system: %w", err)
+		}
+		if system != "" {
+			instructions = append([]string{system}, instructions...)
+		}
+		req.System, err = json.Marshal(strings.Join(instructions, "\n\n"))
+		if err != nil {
+			return fmt.Errorf("system instructions: %w", err)
+		}
 	}
 	req.Messages = messages
 	return nil
