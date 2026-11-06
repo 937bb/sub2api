@@ -35,10 +35,23 @@ func finishGroupSmartWSAttempt(attempt *groupSmartWSAttempt, err error) error {
 	if err == nil || attempt == nil || !attempt.sent.Load() {
 		return err
 	}
+	var dispatched *PluginTransportError
+	if errors.As(err, &dispatched) && dispatched.RequestSent {
+		return err
+	}
 	// Core's normal early-stream failover policy must not replay a WS generation.
 	sentErr := &PluginTransportError{Code: "SMART_WS_REQUEST_SENT",
-		Message: "WS upstream attempt ended after dispatch; automatic replay is disabled", RequestSent: true}
+		Message: smartWSDispatchedMessage("WS upstream attempt ended after dispatch; automatic replay is disabled", err), RequestSent: true}
 	return sentErr
+}
+
+func smartWSDispatchedMessage(message string, cause error) string {
+	// Preserve diagnostic text without exposing a retryable error through Unwrap.
+	// Redact before truncation so a cut-off credential cannot evade redaction.
+	if cause != nil {
+		message += ": " + truncateString(redactContentModerationSecrets(cause.Error()), 1024)
+	}
+	return message
 }
 
 var groupSmartWSUpstreamPool, groupSmartWSTuningError = newGroupSmartWSUpstreamPool()
@@ -129,7 +142,7 @@ func (s *OpenAIGatewayService) tryGroupSmartWS(request *http.Request, proxyURL s
 	if errors.As(err, &sent) {
 		return resp, true, &PluginTransportError{
 			Code:        "SMART_WS_DISPATCH_UNCERTAIN",
-			Message:     "WS upstream request may have been sent; automatic replay is disabled",
+			Message:     smartWSDispatchedMessage("WS upstream request may have been sent; automatic replay is disabled", err),
 			RequestSent: true,
 		}
 	}

@@ -123,6 +123,29 @@ func TestGroupSmartWSAssignedProxyFailureCannotReachEitherTransport(t *testing.T
 	require.ErrorContains(t, err, "unavailable")
 }
 
+func TestGroupSmartWSDispatchedFailureKeepsDiagnosticsWithoutAllowingReplay(t *testing.T) {
+	attempt := &groupSmartWSAttempt{}
+	cause := &UpstreamFailoverError{StatusCode: http.StatusTooManyRequests}
+	require.Same(t, cause, finishGroupSmartWSAttempt(attempt, cause))
+	attempt.sent.Store(true)
+	err := finishGroupSmartWSAttempt(attempt, cause)
+	var dispatched *PluginTransportError
+	require.ErrorAs(t, err, &dispatched)
+	require.True(t, dispatched.RequestSent)
+	require.ErrorContains(t, err, "upstream error: 429")
+	var failover *UpstreamFailoverError
+	require.False(t, errors.As(err, &failover), "preserving the cause must not restore automatic failover")
+	require.Same(t, err, finishGroupSmartWSAttempt(attempt, err), "nested forwards must preserve the original diagnostic")
+
+	unsafe := errors.New("upstream connection reset: https://proxy-user:proxy-password@example.test/endpoint?access_token=private-access-token Bearer private-bearer-token-123456 password=private-password")
+	message := smartWSDispatchedMessage("already dispatched", unsafe)
+	require.Contains(t, message, "upstream connection reset")
+	for _, secret := range []string{"proxy-user", "proxy-password", "private-access-token", "private-bearer-token-123456", "private-password"} {
+		require.NotContains(t, message, secret)
+	}
+	require.Less(t, len(smartWSDispatchedMessage("already dispatched", errors.New(strings.Repeat("failure ", 1000)))), 1100)
+}
+
 func TestGroupSmartWSGlobalOAuthDisabledPreservesOriginalTransport(t *testing.T) {
 	s := &OpenAIGatewayService{settingService: &SettingService{}, cfg: &config.Config{}}
 	s.cfg.Gateway.OpenAIWS.Enabled = true
