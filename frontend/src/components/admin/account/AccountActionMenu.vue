@@ -19,7 +19,7 @@
               <Icon name="chart" size="sm" class="text-slate-500" />
               {{ t('admin.accounts.viewStats') }}
             </button>
-            <button v-if="account.platform === 'openai' && (account.type === 'oauth' || account.type === 'setup-token')" @click="$emit('fingerprint', account); $emit('close')" class="flex w-full items-center gap-2 px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-dark-700">
+            <button v-if="(account.platform === 'openai' && (account.type === 'oauth' || account.type === 'setup-token')) || (account.platform === 'kiro' && account.type === 'oauth')" @click="$emit('fingerprint', account); $emit('close')" class="flex w-full items-center gap-2 px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-dark-700">
               <Icon name="shield" size="sm" class="text-sky-500" />
               {{ t('admin.accounts.fingerprint.view') }}
             </button>

@@ -2,13 +2,14 @@ package service
 
 import (
 	"context"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
-	"github.com/stretchr/testify/require"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
+	"github.com/stretchr/testify/require"
 )
 
 type kiroUsageUpstream struct {
@@ -19,6 +20,7 @@ type kiroUsageUpstream struct {
 
 func (u *kiroUsageUpstream) Do(r *http.Request, p string, id int64, _ int) (*http.Response, error) {
 	u.calls++
+	assertKiroTransportContext(u.t, r)
 	require.Equal(u.t, "http://test:secret@192.0.2.17:8000", p)
 	require.EqualValues(u.t, 19, id)
 	require.Equal(u.t, "/getUsageLimits", r.URL.Path)

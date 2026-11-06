@@ -47,11 +47,15 @@ func (u *kiroCompatUpstream) Do(req *http.Request, proxy string, id int64, _ int
 	require.Equal(u.t, "http://test:secret@192.0.2.17:8000", proxy)
 	require.EqualValues(u.t, 19, id)
 	u.requests++
+	assertKiroTransportContext(u.t, req)
 	require.Contains(u.t, req.Header.Get("User-Agent"), "os/darwin#24.6.0 lang/js md/nodejs#22.22.0")
 	require.Contains(u.t, req.Header.Get("User-Agent"), strings.Repeat("a", 64))
 	require.NotEmpty(u.t, req.Header.Get("amz-sdk-invocation-id"))
 	response := `{"models":[{"modelId":"claude-haiku-4.5","modelName":"Haiku"}]}`
-	if req.URL.Host == "q.us-east-1.amazonaws.com" {
+	if req.URL.Host == "runtime.us-east-1.kiro.dev" {
+		require.Equal(u.t, "/", req.URL.Path)
+		require.Equal(u.t, "KiroRuntimeService.GenerateAssistantResponse", req.Header.Get("X-Amz-Target"))
+		require.Equal(u.t, "application/x-amz-json-1.0", req.Header.Get("Content-Type"))
 		body, _ := io.ReadAll(req.Body)
 		require.Contains(u.t, string(body), `"conversationState"`)
 		require.NotContains(u.t, string(body), "additionalModelRequestFields")

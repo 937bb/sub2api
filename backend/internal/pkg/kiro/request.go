@@ -73,6 +73,7 @@ var modelVersion = regexp.MustCompile(`-(\d+)-(\d+)$`)
 
 func ModelID(model string) string {
 	model = strings.TrimPrefix(model, "kiro/")
+	model = strings.TrimSuffix(model, "[1m]")
 	model = datedModel.ReplaceAllString(model, "")
 	return modelVersion.ReplaceAllString(model, "-$1.$2")
 }

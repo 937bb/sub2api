@@ -53,8 +53,7 @@ func (s *GatewayService) requestKiro(ctx context.Context, account *Account, raw 
 	if err != nil {
 		return nil, 0, nil, err
 	}
-	kiro.Headers(req.Header, account.Credentials, token)
-	req.Header.Set("amz-sdk-invocation-id", uuid.NewString())
+	req = prepareKiroHTTPRequest(req, account.Credentials, token, kiro.OperationGeneration)
 	resp, err := s.httpUpstream.Do(req, proxy, account.ID, account.Concurrency)
 	return resp, kiro.EstimateTokens(string(body)), converted.ToolNames, err
 }
@@ -100,7 +99,7 @@ func (s *GatewayService) kiroAsAnthropic(ctx context.Context, c *gin.Context, a 
 	}
 	cache, cacheOK := s.cache.(KiroResponseCache)
 	identity := sha256.Sum256([]byte(a.GetCredential("refresh_token") + a.GetCredential("api_key")))
-	cacheKey, eligible := kiro.CacheKey(raw, fmt.Sprintf("%s:%s:%s:%s:%x", scope, model, a.GetCredential("machine_id"), a.GetCredential("profile_arn"), identity))
+	cacheKey, eligible := kiro.CacheKey(raw, fmt.Sprintf("%s:%s:%s:%s:%x", scope, model, kiro.EnvironmentKey(a.Credentials), a.GetCredential("profile_arn"), identity))
 	useCache := cacheOK && eligible && policy.Enabled && policy.TargetPercent > 0
 	c.Header("X-Sub2api-Cache", "bypass")
 	if useCache {

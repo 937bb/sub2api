@@ -28,6 +28,12 @@ type StreamSummary struct {
 	Other     int
 }
 
+// ContentFilteredError is emitted only for an explicit upstream stop reason.
+// An empty stream alone is never evidence of content filtering.
+type ContentFilteredError struct{}
+
+func (*ContentFilteredError) Error() string { return "Kiro stopped generation: CONTENT_FILTERED" }
+
 type NoContentError struct {
 	Summary StreamSummary
 }
@@ -183,6 +189,7 @@ func decode(r io.Reader, model string, inputTokens int, emit Emit, finalize func
 	total := 0
 	summary := StreamSummary{}
 	metered := false
+	contentFiltered := false
 	closeBlock := func() error {
 		if active < 0 {
 			return nil
@@ -249,10 +256,11 @@ func decode(r io.Reader, model string, inputTokens int, emit Emit, finalize func
 			summary.Tools++
 			metered = false
 			var e struct {
-				Name  string `json:"name"`
-				ID    string `json:"toolUseId"`
-				Input string `json:"input"`
-				Stop  bool   `json:"stop"`
+				Name     string `json:"name"`
+				ID       string `json:"toolUseId"`
+				Input    string `json:"input"`
+				Stop     bool   `json:"stop"`
+				Complete bool   `json:"isComplete"`
 			}
 			if json.Unmarshal(f.Payload, &e) != nil || e.ID == "" {
 				return out, errors.New("invalid Kiro tool event")
@@ -289,7 +297,7 @@ func decode(r io.Reader, model string, inputTokens int, emit Emit, finalize func
 					return out, err
 				}
 			}
-			if e.Stop {
+			if e.Stop || e.Complete {
 				if err := closeTool(tool); err != nil {
 					return out, err
 				}
@@ -323,6 +331,19 @@ func decode(r io.Reader, model string, inputTokens int, emit Emit, finalize func
 			if e.Write != nil && *e.Write >= 0 {
 				out.Usage.CacheCreationInputTokens = *e.Write
 			}
+		case "metadataEvent":
+			var e struct {
+				StopReason string `json:"stopReason"`
+			}
+			if json.Unmarshal(f.Payload, &e) != nil {
+				return out, errors.New("invalid Kiro metadata event")
+			}
+			switch e.StopReason {
+			case "CONTENT_FILTERED":
+				contentFiltered = true
+			case "MAX_TOKENS":
+				out.StopReason = "max_tokens"
+			}
 		case "reasoningContentEvent":
 			summary.Reasoning++
 		case "contextUsageEvent":
@@ -330,6 +351,9 @@ func decode(r io.Reader, model string, inputTokens int, emit Emit, finalize func
 		default:
 			summary.Other++
 		}
+	}
+	if contentFiltered {
+		return out, &ContentFilteredError{}
 	}
 	for _, tool := range toolOrder {
 		if !tool.closed {

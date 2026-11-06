@@ -336,7 +336,11 @@ func (s *AccountService) Update(ctx context.Context, id int64, req UpdateAccount
 	}
 
 	if req.Credentials != nil {
-		account.Credentials = SanitizeStoredCredentials(account.Platform, *req.Credentials)
+		credentials := *req.Credentials
+		if account.Platform == PlatformKiro {
+			credentials = mergeAccountCredentials(account, credentials)
+		}
+		account.Credentials = SanitizeStoredCredentials(account.Platform, credentials)
 	}
 
 	if req.Extra != nil {

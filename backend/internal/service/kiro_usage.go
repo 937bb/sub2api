@@ -106,13 +106,7 @@ func (s *AccountUsageService) fetchKiroUsage(ctx context.Context, a *Account) (*
 	if err != nil {
 		return nil, err
 	}
-	kiro.EnvironmentHeaders(req.Header, a.Credentials, "runtime")
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Accept", "application/json")
-	if a.GetCredential("auth_method") == "api_key" {
-		req.Header.Set("tokentype", "API_KEY")
-	}
-	req.Close = true
+	req = prepareKiroHTTPRequest(req, a.Credentials, token, kiro.OperationUsage)
 	resp, err := s.kiroGateway.httpUpstream.Do(req, proxy, a.ID, a.Concurrency)
 	if err != nil {
 		return nil, errors.New("Kiro quota transport failed")

@@ -26,7 +26,7 @@ type kiroToolUpstream struct {
 func (u *kiroToolUpstream) Do(req *http.Request, proxy string, id int64, _ int) (*http.Response, error) {
 	require.Equal(u.t, "http://test:secret@192.0.2.17:8000", proxy)
 	require.EqualValues(u.t, 19, id)
-	if req.URL.Host != "q.us-east-1.amazonaws.com" {
+	if req.URL.Host != "runtime.us-east-1.kiro.dev" {
 		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"models":[{"modelId":"claude-haiku-4.5","modelName":"Haiku"}]}`))}, nil
 	}
 	u.requests++

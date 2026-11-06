@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/kiro"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/stretchr/testify/require"
 )
@@ -55,13 +56,15 @@ func TestKiroProxyFailsClosed(t *testing.T) {
 }
 
 type kiroProxyUpstream struct {
-	calls int
-	proxy string
-	id    int64
+	calls   int
+	request *http.Request
+	proxy   string
+	id      int64
 }
 
-func (u *kiroProxyUpstream) Do(_ *http.Request, p string, id int64, _ int) (*http.Response, error) {
+func (u *kiroProxyUpstream) Do(req *http.Request, p string, id int64, _ int) (*http.Response, error) {
 	u.calls++
+	u.request = req
 	u.proxy = p
 	u.id = id
 	return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"accessToken":"new-access","refreshToken":"new-refresh","expiresIn":3600}`))}, nil
@@ -76,6 +79,8 @@ func TestKiroRefreshAlwaysUsesBoundProxy(t *testing.T) {
 	credentials, err := executor.Refresh(context.Background(), a)
 	require.NoError(t, err)
 	require.Equal(t, "new-access", credentials["access_token"])
+	require.Equal(t, kiro.EnvironmentKey(a.Credentials), kiro.EnvironmentKey(credentials))
+	assertKiroTransportContext(t, upstream.request)
 	require.Equal(t, a.ID, upstream.id)
 	require.Equal(t, "http://test:secret@192.0.2.17:8000", upstream.proxy)
 	a.Proxy = nil

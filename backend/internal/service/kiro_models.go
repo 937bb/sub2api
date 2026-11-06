@@ -39,7 +39,7 @@ func (s *GatewayService) kiroModels(ctx context.Context, a *Account, token strin
 	if err != nil {
 		return nil, err
 	}
-	identity := sha256.Sum256([]byte(token + "\x00" + proxy + "\x00" + a.GetCredential("profile_arn")))
+	identity := sha256.Sum256([]byte(token + "\x00" + proxy + "\x00" + a.GetCredential("profile_arn") + "\x00" + kiro.EnvironmentKey(a.Credentials)))
 	key := fmt.Sprintf("%d:%x", a.ID, identity)
 	now := time.Now()
 	kiroCatalog.Lock()
@@ -49,18 +49,11 @@ func (s *GatewayService) kiroModels(ctx context.Context, a *Account, token strin
 		return entry.Models, nil
 	}
 	body, _ := json.Marshal(map[string]any{"origin": "KIRO_CLI", "profileArn": a.GetCredential("profile_arn")})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://management."+kiro.Region(a.Credentials, "api")+".kiro.dev/", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, kiro.ModelsURL(a.Credentials), bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
-	kiro.EnvironmentHeaders(req.Header, a.Credentials, "runtime")
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Authorization", "Bearer "+token)
-	if a.GetCredential("auth_method") == "api_key" {
-		req.Header.Set("tokentype", "API_KEY")
-	}
-	req.Header.Set("Content-Type", "application/x-amz-json-1.0")
-	req.Header.Set("X-Amz-Target", "AmazonCodeWhispererService.ListAvailableModels")
+	req = prepareKiroHTTPRequest(req, a.Credentials, token, kiro.OperationModels)
 	resp, err := s.httpUpstream.Do(req, proxy, a.ID, a.Concurrency)
 	if err != nil {
 		return nil, errors.New("Kiro model discovery transport failed")

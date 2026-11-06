@@ -25,7 +25,7 @@ type kiroEmptyUpstream struct {
 
 func (u *kiroEmptyUpstream) Do(req *http.Request, proxy string, id int64, concurrency int) (*http.Response, error) {
 	resp, err := u.kiroCompatUpstream.Do(req, proxy, id, concurrency)
-	if err == nil && req.URL.Host == "q.us-east-1.amazonaws.com" {
+	if err == nil && req.URL.Host == "runtime.us-east-1.kiro.dev" {
 		_ = resp.Body.Close()
 		resp.Body = io.NopCloser(bytes.NewReader(kiroTestFrame("contextUsageEvent", `{"contextUsagePercentage":0.68}`)))
 		if u.body != nil {
@@ -39,69 +39,83 @@ func (u *kiroEmptyUpstream) DoWithTLS(req *http.Request, proxy string, id int64,
 	return u.Do(req, proxy, id, concurrency)
 }
 
-func TestKiroContextOnlyStreamNeverSucceedsAcrossIngress(t *testing.T) {
-	for _, protocol := range []string{"messages", "chat", "responses", "gemini"} {
-		for _, stream := range []bool{false, true} {
-			for _, flushed := range []bool{false, true} {
-				if flushed && !stream {
-					continue
-				}
-				t.Run(fmt.Sprintf("%s/stream=%t/flushed=%t", protocol, stream, flushed), func(t *testing.T) {
-					upstream := &kiroEmptyUpstream{kiroCompatUpstream: kiroCompatUpstream{t: t}}
-					cache := &kiroMemoryCache{values: map[string][]byte{}}
-					groupID := int64(7)
-					group := &Group{ID: groupID, KiroResponseCache: KiroCachePolicy{Enabled: true, TargetPercent: 100, TTLSeconds: 300, MaxEntries: 128}}
-					svc := &GatewayService{httpUpstream: upstream, cfg: &config.Config{}, cache: cache, groupRepo: &kiroGroupRepo{group: group}}
-					a := fixedKiroAccount()
-					a.Credentials["access_token"] = t.Name()
-					a.Credentials["expires_at"] = time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
-					raw := []byte(fmt.Sprintf(`{"model":"claude-haiku-4.5","max_tokens":1024,"stream":%t,"messages":[{"role":"user","content":"hi"}]}`, stream))
-					if protocol == "responses" {
-						raw = []byte(fmt.Sprintf(`{"model":"claude-haiku-4.5","stream":%t,"input":"hi"}`, stream))
+func TestKiroRejectedStreamNeverSucceedsAcrossIngress(t *testing.T) {
+	for _, filtered := range []bool{false, true} {
+		status, code, message := http.StatusBadGateway, kiroEmptyResponseCode, kiroEmptyResponseMessage
+		if filtered {
+			status, code, message = http.StatusBadRequest, kiroContentFilteredCode, kiroContentFilteredMessage
+		}
+		for _, protocol := range []string{"messages", "chat", "responses", "gemini"} {
+			for _, stream := range []bool{false, true} {
+				for _, flushed := range []bool{false, true} {
+					if flushed && !stream {
+						continue
 					}
-					rec := httptest.NewRecorder()
-					c, _ := gin.CreateTestContext(rec)
-					c.Request = httptest.NewRequest("POST", "/test", bytes.NewReader(raw))
-					c.Set("api_key", &APIKey{ID: 1, UserID: 2, GroupID: &groupID})
-					if flushed {
-						c.Header("Content-Type", "text/event-stream")
-						_, _ = c.Writer.WriteString(": ping\n\n")
-						c.Writer.Flush()
-					}
-					var result *ForwardResult
-					var err error
-					switch protocol {
-					case "messages":
-						parsed, parseErr := ParseGatewayRequest(NewRequestBodyRef(raw), PlatformAnthropic)
-						require.NoError(t, parseErr)
-						result, err = svc.Forward(context.Background(), c, a, parsed)
-					case "chat":
-						result, err = svc.ForwardAsChatCompletions(context.Background(), c, a, raw, nil)
-					case "responses":
-						result, err = svc.ForwardAsResponses(context.Background(), c, a, raw, nil)
-					case "gemini":
-						result, err = svc.ForwardKiroGemini(context.Background(), c, a, "claude-haiku-4.5", "generateContent", stream, []byte(`{"contents":[{"role":"user","parts":[{"text":"hi"}]}]}`))
-					}
-					var empty *kiro.NoContentError
-					require.ErrorAs(t, err, &empty)
-					require.Nil(t, result, "empty responses must never be billed")
-					require.True(t, IsResponseCommitted(c), "handler must not replace the diagnosis with a generic error")
-					require.Contains(t, rec.Body.String(), kiroEmptyResponseCode)
-					require.Contains(t, rec.Body.String(), kiroEmptyResponseMessage)
-					for _, terminal := range []string{"message_stop", "response.completed", "[DONE]", "finishReason"} {
-						require.NotContains(t, rec.Body.String(), terminal)
-					}
-					if flushed {
-						require.Equal(t, http.StatusOK, rec.Code)
-						if protocol == "responses" {
-							require.Contains(t, rec.Body.String(), "event:response.failed")
+					t.Run(fmt.Sprintf("%s/stream=%t/flushed=%t/filtered=%t", protocol, stream, flushed, filtered), func(t *testing.T) {
+						upstream := &kiroEmptyUpstream{kiroCompatUpstream: kiroCompatUpstream{t: t}}
+						if filtered {
+							upstream.body = io.NopCloser(bytes.NewReader(kiroTestFrame("metadataEvent", `{"stopReason":"CONTENT_FILTERED"}`)))
 						}
-					} else {
-						require.Equal(t, http.StatusBadGateway, rec.Code)
-					}
-					require.Empty(t, cache.values, "empty responses must never enter the response cache")
-					require.Equal(t, 2, upstream.requests, "discovery plus one generation, without account failover")
-				})
+						cache := &kiroMemoryCache{values: map[string][]byte{}}
+						groupID := int64(7)
+						group := &Group{ID: groupID, KiroResponseCache: KiroCachePolicy{Enabled: true, TargetPercent: 100, TTLSeconds: 300, MaxEntries: 128}}
+						svc := &GatewayService{httpUpstream: upstream, cfg: &config.Config{}, cache: cache, groupRepo: &kiroGroupRepo{group: group}}
+						a := fixedKiroAccount()
+						a.Credentials["access_token"] = t.Name()
+						a.Credentials["expires_at"] = time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
+						raw := []byte(fmt.Sprintf(`{"model":"claude-haiku-4.5","max_tokens":1024,"stream":%t,"messages":[{"role":"user","content":"hi"}]}`, stream))
+						if protocol == "responses" {
+							raw = []byte(fmt.Sprintf(`{"model":"claude-haiku-4.5","stream":%t,"input":"hi"}`, stream))
+						}
+						rec := httptest.NewRecorder()
+						c, _ := gin.CreateTestContext(rec)
+						c.Request = httptest.NewRequest("POST", "/test", bytes.NewReader(raw))
+						c.Set("api_key", &APIKey{ID: 1, UserID: 2, GroupID: &groupID})
+						if flushed {
+							c.Header("Content-Type", "text/event-stream")
+							_, _ = c.Writer.WriteString(": ping\n\n")
+							c.Writer.Flush()
+						}
+						var result *ForwardResult
+						var err error
+						switch protocol {
+						case "messages":
+							parsed, parseErr := ParseGatewayRequest(NewRequestBodyRef(raw), PlatformAnthropic)
+							require.NoError(t, parseErr)
+							result, err = svc.Forward(context.Background(), c, a, parsed)
+						case "chat":
+							result, err = svc.ForwardAsChatCompletions(context.Background(), c, a, raw, nil)
+						case "responses":
+							result, err = svc.ForwardAsResponses(context.Background(), c, a, raw, nil)
+						case "gemini":
+							result, err = svc.ForwardKiroGemini(context.Background(), c, a, "claude-haiku-4.5", "generateContent", stream, []byte(`{"contents":[{"role":"user","parts":[{"text":"hi"}]}]}`))
+						}
+						if filtered {
+							var rejection *kiro.ContentFilteredError
+							require.ErrorAs(t, err, &rejection)
+						} else {
+							var empty *kiro.NoContentError
+							require.ErrorAs(t, err, &empty)
+						}
+						require.Nil(t, result, "empty responses must never be billed")
+						require.True(t, IsResponseCommitted(c), "handler must not replace the diagnosis with a generic error")
+						require.Contains(t, rec.Body.String(), code)
+						require.Contains(t, rec.Body.String(), message)
+						for _, terminal := range []string{"message_stop", "response.completed", "[DONE]", "finishReason"} {
+							require.NotContains(t, rec.Body.String(), terminal)
+						}
+						if flushed {
+							require.Equal(t, http.StatusOK, rec.Code)
+							if protocol == "responses" {
+								require.Contains(t, rec.Body.String(), "event:response.failed")
+							}
+						} else {
+							require.Equal(t, status, rec.Code)
+						}
+						require.Empty(t, cache.values, "empty responses must never enter the response cache")
+						require.Equal(t, 2, upstream.requests, "discovery plus one generation, without account failover")
+					})
+				}
 			}
 		}
 	}

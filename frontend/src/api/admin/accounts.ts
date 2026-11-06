@@ -1135,6 +1135,7 @@ export async function refreshOpenCodeGoUsage(id: number): Promise<OpenCodeGoUsag
 }
 
 export interface AccountFingerprint {
+	kiro?: KiroFingerprint
   account_id: number
   credential_account_id: number
   inherited: boolean
@@ -1144,6 +1145,31 @@ export interface AccountFingerprint {
   convergence_ready: boolean
   user_agent_override: string
   ws_account_mode: string
+}
+
+export interface KiroFingerprint {
+  environment: {
+    machine_id: string
+    kiro_version: string
+    node_version: string
+    system_version: string
+    auth_region: string
+    api_region: string
+    auth_method: string
+    endpoint: string
+    streaming_sdk: string
+    runtime_sdk: string
+    sso_sdk: string
+  }
+  environment_key: string
+  operations: Array<{ operation: 'generation' | 'models' | 'usage' | 'refresh'; method: string; url: string; headers: Record<string, string> }>
+  proxy_id: number | null
+  proxy_ready: boolean
+  http_protocol: string
+  tls_backend: string
+  go_version: string
+  tls_capture_verified: boolean
+  websocket_supported: boolean
 }
 
 export async function getFingerprint(id: number, signal?: AbortSignal): Promise<AccountFingerprint> {
