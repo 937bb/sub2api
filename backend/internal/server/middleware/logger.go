@@ -10,19 +10,20 @@ import (
 	"go.uber.org/zap"
 )
 
-// Logger 请求日志中间件
+// Logger records request completion and ingress body read latency.
 func Logger() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// 开始时间
+		// Measure the full middleware chain, including request upload.
 		startTime := time.Now()
+		bodyTiming := observeRequestBody(c.Request)
 
-		// 请求路径
+		// Preserve the original path before routing.
 		path := c.Request.URL.Path
 
-		// 处理请求
+		// Run the remaining middleware and handler.
 		c.Next()
 
-		// 跳过健康检查等高频探针路径的日志
+		// Skip frequent health probes.
 		if path == "/health" || path == "/setup/status" {
 			return
 		}
@@ -61,6 +62,12 @@ func Logger() gin.HandlerFunc {
 			zap.String("protocol", protocol),
 			zap.String("method", method),
 			zap.String("path", path),
+		}
+		if bodyTiming != nil {
+			fields = append(fields,
+				zap.Int64("request_body_read_ms", bodyTiming.readNanos.Load()/int64(time.Millisecond)),
+				zap.Int64("request_body_bytes_read", bodyTiming.bytesRead.Load()),
+			)
 		}
 		if rejected {
 			fields = append(fields,

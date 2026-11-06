@@ -52,3 +52,17 @@ for an empty rejected response. Context-only responses without a reason remain
 No prompt rewriting, model substitution or account failover is performed to
 work around an upstream refusal. Account identity consistency does not disable
 provider content rules.
+
+Explicit `CONTENT_FILTERED` metadata terminates decoding immediately: a trailing
+event, socket EOF, or usage record is not needed to establish refusal. Only the
+verified `CYBER` category is exposed; arbitrary upstream explanations and unknown
+category strings are excluded from client errors and logs.
+
+Access logs include `request_body_read_ms` and `request_body_bytes_read`. The
+duration measures time inside incoming body reads, including upload waits, not
+JSON parsing or upstream inference. It records byte counts only and preserves
+body errors and close semantics. Compare it with `latency_ms` and correlated
+`upstream_attempt_finished.elapsed_ms` before diagnosing slow model responses.
+Large CLI auto-context can make upload dominate latency. Existing gzip request
+support preserves the decoded request, but compression must happen on the client
+before upload; server-side response compression cannot fix that delay.

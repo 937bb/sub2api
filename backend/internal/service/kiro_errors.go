@@ -27,6 +27,9 @@ func writeKiroEmptyResponse(c *gin.Context, err error, protocol string) bool {
 	switch {
 	case errors.As(err, &filtered):
 		status, code, message, errorType, geminiStatus = http.StatusBadRequest, kiroContentFilteredCode, kiroContentFilteredMessage, "invalid_request_error", "INVALID_ARGUMENT"
+		if category := filtered.SafeCategory(); category != "" {
+			message += " Upstream refusal category: " + category + "."
+		}
 	case errors.As(err, &empty):
 	default:
 		return false

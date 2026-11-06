@@ -54,7 +54,7 @@ func TestKiroRejectedStreamNeverSucceedsAcrossIngress(t *testing.T) {
 					t.Run(fmt.Sprintf("%s/stream=%t/flushed=%t/filtered=%t", protocol, stream, flushed, filtered), func(t *testing.T) {
 						upstream := &kiroEmptyUpstream{kiroCompatUpstream: kiroCompatUpstream{t: t}}
 						if filtered {
-							upstream.body = io.NopCloser(bytes.NewReader(kiroTestFrame("metadataEvent", `{"stopReason":"CONTENT_FILTERED"}`)))
+							upstream.body = io.NopCloser(bytes.NewReader(kiroTestFrame("metadataEvent", `{"stopReason":"CONTENT_FILTERED","stopDetails":{"refusal":{"category":"CYBER","explanation":"private explanation"}}}`)))
 						}
 						cache := &kiroMemoryCache{values: map[string][]byte{}}
 						groupID := int64(7)
@@ -93,6 +93,8 @@ func TestKiroRejectedStreamNeverSucceedsAcrossIngress(t *testing.T) {
 						if filtered {
 							var rejection *kiro.ContentFilteredError
 							require.ErrorAs(t, err, &rejection)
+							require.Contains(t, rec.Body.String(), "Upstream refusal category: CYBER.")
+							require.NotContains(t, rec.Body.String(), "private explanation")
 						} else {
 							var empty *kiro.NoContentError
 							require.ErrorAs(t, err, &empty)

@@ -2,10 +2,38 @@ package kiro
 
 import (
 	"bytes"
+	"errors"
+	"io"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
+
+type refusalTailReader struct{ reads int }
+
+func (r *refusalTailReader) Read([]byte) (int, error) {
+	r.reads++
+	return 0, errors.New("upstream tail must not be read after refusal")
+}
+
+func TestRuntimeRefusalReturnsWithoutReadingTail(t *testing.T) {
+	for _, category := range []string{"CYBER", "PRIVATE_METADATA"} {
+		tail := &refusalTailReader{}
+		frame := frameForTest("metadataEvent", `{"stopReason":"CONTENT_FILTERED","stopDetails":{"refusal":{"category":"`+category+`","explanation":"private explanation"}}}`)
+		_, err := Decode(io.MultiReader(bytes.NewReader(frame), tail), "model", 1, nil)
+		var filtered *ContentFilteredError
+		require.ErrorAs(t, err, &filtered)
+		require.Zero(t, tail.reads)
+		require.NotContains(t, err.Error(), "private explanation")
+		if category == "CYBER" {
+			require.Equal(t, "CYBER", filtered.Category)
+			require.Contains(t, err.Error(), "CYBER")
+		} else {
+			require.Empty(t, filtered.Category)
+			require.NotContains(t, err.Error(), category)
+		}
+	}
+}
 
 func TestRuntimeContentFilteredNeverCompletes(t *testing.T) {
 	for _, partial := range []bool{false, true} {
