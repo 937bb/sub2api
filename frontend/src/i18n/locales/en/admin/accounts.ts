@@ -1205,6 +1205,7 @@ export default {
       expired: 'Expired',
       proxy: 'Proxy',
       noProxy: 'No Proxy',
+      boundProxyUnavailable: 'Bound proxy #{id} (details unavailable)',
       concurrency: 'Concurrency',
       loadFactor: 'Load Factor',
       loadFactorHint: 'Higher load factor increases scheduling frequency',

@@ -1896,6 +1896,15 @@ const loadAccountDetails = async (account: Pick<AccountListItem, 'id'>): Promise
 const handleEdit = async (a: AccountListItem) => {
   const account = await loadAccountDetails(a)
   if (!account) return
+  try {
+    proxies.value = await adminAPI.proxies.getAll()
+  } catch {
+    // Keep the existing catalog available if refreshing fails.
+  }
+  // Account details also include bound proxies omitted from the active catalog.
+  if (account.proxy && account.proxy.id === account.proxy_id) {
+    proxies.value = [...proxies.value.filter(proxy => proxy.id !== account.proxy_id), account.proxy]
+  }
   edAcc.value = account
   showEdit.value = true
 }

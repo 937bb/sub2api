@@ -5,7 +5,7 @@ import type { Proxy } from '@/types'
 
 const testProxy = vi.hoisted(() => vi.fn())
 vi.mock('@/api/admin', () => ({ adminAPI: { proxies: { testProxy } } }))
-vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
+vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string, params?: { id: number }) => params ? `${key} #${params.id}` : key }) }))
 enableAutoUnmount(afterEach)
 beforeEach(() => { vi.clearAllMocks() })
 
@@ -23,6 +23,18 @@ async function openSelector() {
 }
 
 describe('proxy usage categories', () => {
+  it('keeps an uncatalogued binding visible until its details arrive', async () => {
+    const wrapper = await openSelector()
+    await wrapper.setProps({ modelValue: 2438 })
+    expect(wrapper.get('.select-trigger').text()).toContain('boundProxyUnavailable #2438')
+    expect(wrapper.get('.select-trigger').text()).not.toContain('noProxy')
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+    await wrapper.setProps({ proxies: [{ id: 2438, name: 'B fixed IPv6 65391', usage_type: 'pro', host: '127.0.0.1', port: 26445, protocol: 'http' } as Proxy] })
+    expect(wrapper.get('.select-trigger').text()).toContain('B fixed IPv6 65391')
+    await wrapper.setProps({ modelValue: null })
+    expect(wrapper.get('.select-trigger').text()).toContain('noProxy')
+  })
+
   it('filters by category and search without replacing the selected proxy', async () => {
     const wrapper = await openSelector()
     await wrapper.get('select').setValue('kiro')

@@ -79,7 +79,7 @@ const AccountGroupsCellStub = defineComponent({
 })
 
 const EditAccountModalStub = defineComponent({
-  props: { show: Boolean, account: { type: Object, default: null } },
+  props: { show: Boolean, account: { type: Object, default: null }, proxies: { type: Array, default: () => [] } },
   template: '<div data-test="edit-account">{{ show ? account?.name : "" }}</div>'
 })
 
@@ -174,6 +174,34 @@ describe('admin AccountsView lite account list', () => {
   afterEach(() => {
     vi.useRealTimers()
     vi.restoreAllMocks()
+  })
+
+  it('refreshes the proxy catalog when editing an account added after page load', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    const proxy = { id: 2438, name: 'B fixed IPv6 65391', usage_type: 'pro' }
+    getById.mockResolvedValueOnce({ ...fullAccount, proxy_id: proxy.id })
+    getAllProxies.mockResolvedValueOnce([proxy])
+    await wrapper.findAll('button').find(button => button.text().includes('common.edit'))!.trigger('click')
+    await flushPromises()
+    expect(getAllProxies).toHaveBeenCalledTimes(2)
+    expect(wrapper.getComponent(EditAccountModalStub).props('proxies')).toEqual([proxy])
+    expect(wrapper.getComponent(EditAccountModalStub).props('account').proxy_id).toBe(2438)
+    wrapper.unmount()
+  })
+
+  it('retains bound proxy details if refreshing the active catalog fails', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    const proxy = { id: 2438, name: 'B fixed IPv6 65391', status: 'inactive', usage_type: 'pro' }
+    getById.mockResolvedValueOnce({ ...fullAccount, proxy_id: proxy.id, proxy })
+    getAllProxies.mockRejectedValueOnce(new Error('network error'))
+    await wrapper.findAll('button').find(button => button.text().includes('common.edit'))!.trigger('click')
+    await flushPromises()
+    expect(wrapper.getComponent(EditAccountModalStub).props('show')).toBe(true)
+    expect(wrapper.getComponent(EditAccountModalStub).props('proxies')).toEqual([proxy])
+    expect(wrapper.getComponent(EditAccountModalStub).props('account').proxy_id).toBe(2438)
+    wrapper.unmount()
   })
 
   it('keeps lite=1 on the initial list request', async () => {

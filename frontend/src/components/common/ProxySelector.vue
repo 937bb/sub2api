@@ -198,6 +198,9 @@ const selectedProxy = computed(() => {
 })
 
 const selectedLabel = computed(() => {
+  if (props.modelValue != null && props.modelValue !== 0 && !selectedProxy.value) {
+    return t('admin.accounts.boundProxyUnavailable', { id: props.modelValue })
+  }
   if (!selectedProxy.value) {
     return t('admin.accounts.noProxy')
   }
