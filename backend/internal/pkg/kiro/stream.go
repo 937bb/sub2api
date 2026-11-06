@@ -30,9 +30,24 @@ type StreamSummary struct {
 
 // ContentFilteredError is emitted only for an explicit upstream stop reason.
 // An empty stream alone is never evidence of content filtering.
-type ContentFilteredError struct{}
+type ContentFilteredError struct {
+	Category string
+}
 
-func (*ContentFilteredError) Error() string { return "Kiro stopped generation: CONTENT_FILTERED" }
+func (e *ContentFilteredError) Error() string {
+	if e.SafeCategory() != "" {
+		return "Kiro stopped generation: CONTENT_FILTERED (" + e.SafeCategory() + ")"
+	}
+	return "Kiro stopped generation: CONTENT_FILTERED"
+}
+
+// SafeCategory exposes only a verified provider category, never arbitrary metadata.
+func (e *ContentFilteredError) SafeCategory() string {
+	if e.Category == "CYBER" {
+		return e.Category
+	}
+	return ""
+}
 
 type NoContentError struct {
 	Summary StreamSummary
@@ -189,7 +204,6 @@ func decode(r io.Reader, model string, inputTokens int, emit Emit, finalize func
 	total := 0
 	summary := StreamSummary{}
 	metered := false
-	contentFiltered := false
 	closeBlock := func() error {
 		if active < 0 {
 			return nil
@@ -333,14 +347,22 @@ func decode(r io.Reader, model string, inputTokens int, emit Emit, finalize func
 			}
 		case "metadataEvent":
 			var e struct {
-				StopReason string `json:"stopReason"`
+				StopReason  string `json:"stopReason"`
+				StopDetails struct {
+					Refusal struct {
+						Category string `json:"category"`
+					} `json:"refusal"`
+				} `json:"stopDetails"`
 			}
 			if json.Unmarshal(f.Payload, &e) != nil {
 				return out, errors.New("invalid Kiro metadata event")
 			}
 			switch e.StopReason {
 			case "CONTENT_FILTERED":
-				contentFiltered = true
+				// Refusal is terminal. Do not wait for EOF or bill trailing usage.
+				filtered := &ContentFilteredError{Category: e.StopDetails.Refusal.Category}
+				filtered.Category = filtered.SafeCategory()
+				return out, filtered
 			case "MAX_TOKENS":
 				out.StopReason = "max_tokens"
 			}
@@ -351,9 +373,6 @@ func decode(r io.Reader, model string, inputTokens int, emit Emit, finalize func
 		default:
 			summary.Other++
 		}
-	}
-	if contentFiltered {
-		return out, &ContentFilteredError{}
 	}
 	for _, tool := range toolOrder {
 		if !tool.closed {
