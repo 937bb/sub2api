@@ -7,6 +7,40 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestInteractiveClaudeThinkingDisplay(t *testing.T) {
+	for _, display := range []string{"updates", "summarized", "omitted"} {
+		t.Run(display, func(t *testing.T) {
+			raw := `{"max_tokens":4096,"thinking":{"type":"adaptive","display":"` + display + `"},"messages":[{"role":"user","content":"hi"}]}`
+			body, parsed, err := Convert([]byte(raw), "claude-opus-5-5", "session", map[string]any{"kiro_request_fields": map[string]any{"thinking": map[string]any{}}})
+			require.NoError(t, err)
+			var out struct {
+				Fields struct {
+					Thinking json.RawMessage `json:"thinking"`
+				} `json:"additionalModelRequestFields"`
+			}
+			require.NoError(t, json.Unmarshal(body, &out))
+			want := display
+			if want == "updates" {
+				want = "summarized"
+			}
+			require.JSONEq(t, `{"type":"adaptive","display":"`+want+`"}`, string(out.Fields.Thinking))
+			require.JSONEq(t, `{"type":"adaptive","display":"`+display+`"}`, string(parsed.Thinking))
+		})
+	}
+}
+
+func TestThinkingDisplayPreservesOtherControls(t *testing.T) {
+	for _, raw := range []string{`{"type":"adaptive"}`, `{"type":"enabled","budget_tokens":1024}`, `{"type":"disabled"}`, `{"type":"adaptive","display":"unknown"}`} {
+		out, err := normalizeThinkingDisplay(json.RawMessage(raw))
+		require.NoError(t, err)
+		require.JSONEq(t, raw, string(out))
+	}
+	for _, raw := range []string{`[]`, `"adaptive"`, `null`, `true`} {
+		_, err := normalizeThinkingDisplay(json.RawMessage(raw))
+		require.Error(t, err)
+	}
+}
+
 func TestClaudeCodeControlsAndCatalogLimits(t *testing.T) {
 	for _, limit := range []struct{ requested, want int }{{1, 1024}, {1024, 1024}, {64000, 64000}, {128000, 64000}} {
 		raw, _ := json.Marshal(map[string]any{"max_tokens": limit.requested, "output_config": map[string]any{"effort": "high"}, "messages": []any{

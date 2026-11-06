@@ -226,7 +226,11 @@ func Convert(raw []byte, model, session string, credentials map[string]any) ([]b
 		if _, ok := schema["thinking"]; !ok {
 			return nil, nil, errors.New("selected Kiro model does not support thinking configuration")
 		}
-		fields["thinking"] = req.Thinking
+		thinking, err := normalizeThinkingDisplay(req.Thinking)
+		if err != nil {
+			return nil, nil, err
+		}
+		fields["thinking"] = thinking
 	}
 	if len(req.OutputConfig) > 0 && string(req.OutputConfig) != "null" {
 		if _, ok := schema["output_config"]; !ok {

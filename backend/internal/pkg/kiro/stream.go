@@ -16,6 +16,27 @@ import (
 const maxFrameSize = 8 << 20
 const maxResponseSize = 32 << 20
 
+// StreamSummary contains counts only; upstream payloads and opaque signatures
+// must never be included in errors that can reach logs or clients.
+type StreamSummary struct {
+	Frames    int
+	Assistant int
+	Tools     int
+	Reasoning int
+	Context   int
+	Metering  int
+	Other     int
+}
+
+type NoContentError struct {
+	Summary StreamSummary
+}
+
+func (e *NoContentError) Error() string {
+	s := e.Summary
+	return fmt.Sprintf("Kiro returned no content (frames=%d assistant=%d tools=%d reasoning=%d context=%d metering=%d other=%d)", s.Frames, s.Assistant, s.Tools, s.Reasoning, s.Context, s.Metering, s.Other)
+}
+
 type Frame struct {
 	Headers map[string]string
 	Payload []byte
@@ -160,6 +181,7 @@ func decode(r io.Reader, model string, inputTokens int, emit Emit, finalize func
 	tools := map[string]*toolState{}
 	toolOrder := []*toolState{}
 	total := 0
+	summary := StreamSummary{}
 	metered := false
 	closeBlock := func() error {
 		if active < 0 {
@@ -193,6 +215,7 @@ func decode(r io.Reader, model string, inputTokens int, emit Emit, finalize func
 			return out, fmt.Errorf("read Kiro stream: %w", err)
 		}
 		total += len(f.Payload)
+		summary.Frames++
 		if total > maxResponseSize {
 			return out, errors.New("Kiro response exceeds size limit")
 		}
@@ -201,6 +224,7 @@ func decode(r io.Reader, model string, inputTokens int, emit Emit, finalize func
 		}
 		switch f.Headers[":event-type"] {
 		case "assistantResponseEvent":
+			summary.Assistant++
 			var e struct {
 				Content string `json:"content"`
 			}
@@ -222,6 +246,7 @@ func decode(r io.Reader, model string, inputTokens int, emit Emit, finalize func
 				return out, err
 			}
 		case "toolUseEvent":
+			summary.Tools++
 			metered = false
 			var e struct {
 				Name  string `json:"name"`
@@ -271,6 +296,7 @@ func decode(r io.Reader, model string, inputTokens int, emit Emit, finalize func
 			}
 			out.StopReason = "tool_use"
 		case "meteringEvent":
+			summary.Metering++
 			metered = true
 			var e struct {
 				Unit   string   `json:"unit"`
@@ -297,6 +323,12 @@ func decode(r io.Reader, model string, inputTokens int, emit Emit, finalize func
 			if e.Write != nil && *e.Write >= 0 {
 				out.Usage.CacheCreationInputTokens = *e.Write
 			}
+		case "reasoningContentEvent":
+			summary.Reasoning++
+		case "contextUsageEvent":
+			summary.Context++
+		default:
+			summary.Other++
 		}
 	}
 	for _, tool := range toolOrder {
@@ -314,7 +346,7 @@ func decode(r io.Reader, model string, inputTokens int, emit Emit, finalize func
 		return out, err
 	}
 	if len(out.Content) == 0 {
-		return out, errors.New("Kiro returned no content")
+		return out, &NoContentError{Summary: summary}
 	}
 	if out.UsageSource == "estimated" {
 		for _, b := range out.Content {

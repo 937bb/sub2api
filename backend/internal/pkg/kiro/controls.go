@@ -7,6 +7,21 @@ import (
 	"strings"
 )
 
+// Claude Code requests live reasoning updates, while Kiro accepts only
+// summarized or omitted reasoning display. Preserve all other thinking fields.
+func normalizeThinkingDisplay(raw json.RawMessage) (json.RawMessage, error) {
+	var thinking map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &thinking); err != nil || thinking == nil {
+		return nil, errors.New("thinking must be an object")
+	}
+	var display string
+	if json.Unmarshal(thinking["display"], &display) == nil && display == "updates" {
+		thinking["display"] = json.RawMessage(`"summarized"`)
+		return json.Marshal(thinking)
+	}
+	return raw, nil
+}
+
 // Claude Code can include system instructions and effort updates in history.
 // Preserve their contents at the request level before building Kiro history.
 func normalizeControlMessages(req *Request) error {
