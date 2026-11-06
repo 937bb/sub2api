@@ -528,6 +528,7 @@ func ProxyFromService(p *service.Proxy) *Proxy {
 	}
 	return &Proxy{
 		ID:             p.ID,
+		UsageType:      service.NormalizeProxyUsageType(p.UsageType),
 		Name:           p.Name,
 		Protocol:       p.Protocol,
 		Host:           p.Host,

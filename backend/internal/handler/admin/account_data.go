@@ -36,6 +36,7 @@ type DataPayload struct {
 }
 
 type DataProxy struct {
+	UsageType       string `json:"usage_type"`
 	ProxyKey        string `json:"proxy_key"`
 	Name            string `json:"name"`
 	Protocol        string `json:"protocol"`
@@ -173,6 +174,7 @@ func (h *AccountHandler) ExportData(c *gin.Context) {
 			ProxyKey:        key,
 			Name:            p.Name,
 			Protocol:        p.Protocol,
+			UsageType:       p.UsageType,
 			Host:            p.Host,
 			Port:            p.Port,
 			Username:        p.Username,
@@ -288,6 +290,11 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 		if existingID, ok := proxyKeyToID[key]; ok {
 			proxyKeyToID[key] = existingID
 			result.ProxyReused++
+			if item.UsageType != "" {
+				if _, err := h.adminService.UpdateProxy(ctx, existingID, &service.UpdateProxyInput{UsageType: item.UsageType}); err != nil {
+					result.Errors = append(result.Errors, DataImportError{Kind: "proxy", Name: item.Name, ProxyKey: key, Message: "update usage type failed: " + err.Error()})
+				}
+			}
 			if normalizedStatus != "" {
 				if proxy, getErr := h.adminService.GetProxy(ctx, existingID); getErr == nil && proxy != nil && proxy.Status != normalizedStatus {
 					// 同步 status 时传入完整字段，避免零值覆盖已存在代理的有效期/fallback 配置。
@@ -354,6 +361,7 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 		created, createErr := h.adminService.CreateProxy(ctx, &service.CreateProxyInput{
 			Name:           defaultProxyName(item.Name),
 			Protocol:       item.Protocol,
+			UsageType:      item.UsageType,
 			Host:           item.Host,
 			Port:           item.Port,
 			Username:       item.Username,
@@ -656,6 +664,9 @@ func validateDataHeader(payload DataPayload) error {
 }
 
 func validateDataProxy(item DataProxy) error {
+	if item.UsageType != "" && !service.ValidProxyUsageType(item.UsageType) {
+		return fmt.Errorf("invalid proxy usage type")
+	}
 	if strings.TrimSpace(item.Protocol) == "" {
 		return errors.New("proxy protocol is required")
 	}

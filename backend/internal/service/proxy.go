@@ -16,6 +16,7 @@ const (
 type Proxy struct {
 	ID             int64
 	Name           string
+	UsageType      string
 	Protocol       string
 	Host           string
 	Port           int

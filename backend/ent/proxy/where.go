@@ -75,6 +75,11 @@ func Name(v string) predicate.Proxy {
 	return predicate.Proxy(sql.FieldEQ(FieldName, v))
 }
 
+// UsageType applies equality check predicate on the "usage_type" field. It's identical to UsageTypeEQ.
+func UsageType(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldEQ(FieldUsageType, v))
+}
+
 // Protocol applies equality check predicate on the "protocol" field. It's identical to ProtocolEQ.
 func Protocol(v string) predicate.Proxy {
 	return predicate.Proxy(sql.FieldEQ(FieldProtocol, v))
@@ -318,6 +323,71 @@ func NameEqualFold(v string) predicate.Proxy {
 // NameContainsFold applies the ContainsFold predicate on the "name" field.
 func NameContainsFold(v string) predicate.Proxy {
 	return predicate.Proxy(sql.FieldContainsFold(FieldName, v))
+}
+
+// UsageTypeEQ applies the EQ predicate on the "usage_type" field.
+func UsageTypeEQ(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldEQ(FieldUsageType, v))
+}
+
+// UsageTypeNEQ applies the NEQ predicate on the "usage_type" field.
+func UsageTypeNEQ(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldNEQ(FieldUsageType, v))
+}
+
+// UsageTypeIn applies the In predicate on the "usage_type" field.
+func UsageTypeIn(vs ...string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldIn(FieldUsageType, vs...))
+}
+
+// UsageTypeNotIn applies the NotIn predicate on the "usage_type" field.
+func UsageTypeNotIn(vs ...string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldNotIn(FieldUsageType, vs...))
+}
+
+// UsageTypeGT applies the GT predicate on the "usage_type" field.
+func UsageTypeGT(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldGT(FieldUsageType, v))
+}
+
+// UsageTypeGTE applies the GTE predicate on the "usage_type" field.
+func UsageTypeGTE(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldGTE(FieldUsageType, v))
+}
+
+// UsageTypeLT applies the LT predicate on the "usage_type" field.
+func UsageTypeLT(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldLT(FieldUsageType, v))
+}
+
+// UsageTypeLTE applies the LTE predicate on the "usage_type" field.
+func UsageTypeLTE(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldLTE(FieldUsageType, v))
+}
+
+// UsageTypeContains applies the Contains predicate on the "usage_type" field.
+func UsageTypeContains(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldContains(FieldUsageType, v))
+}
+
+// UsageTypeHasPrefix applies the HasPrefix predicate on the "usage_type" field.
+func UsageTypeHasPrefix(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldHasPrefix(FieldUsageType, v))
+}
+
+// UsageTypeHasSuffix applies the HasSuffix predicate on the "usage_type" field.
+func UsageTypeHasSuffix(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldHasSuffix(FieldUsageType, v))
+}
+
+// UsageTypeEqualFold applies the EqualFold predicate on the "usage_type" field.
+func UsageTypeEqualFold(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldEqualFold(FieldUsageType, v))
+}
+
+// UsageTypeContainsFold applies the ContainsFold predicate on the "usage_type" field.
+func UsageTypeContainsFold(v string) predicate.Proxy {
+	return predicate.Proxy(sql.FieldContainsFold(FieldUsageType, v))
 }
 
 // ProtocolEQ applies the EQ predicate on the "protocol" field.

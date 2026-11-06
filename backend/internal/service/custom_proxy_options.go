@@ -9,14 +9,14 @@ import (
 )
 
 // ListProxyOptions 为受限管理密钥提供有界的代理候选。
-func (s *adminServiceImpl) ListProxyOptions(ctx context.Context, page, pageSize int, search string) ([]Proxy, int64, error) {
+func (s *adminServiceImpl) ListProxyOptions(ctx context.Context, page, pageSize int, search string, usageType ...string) ([]Proxy, int64, error) {
 	repo, ok := s.proxyRepo.(interface {
-		ListOptions(context.Context, pagination.PaginationParams, string) ([]Proxy, *pagination.PaginationResult, error)
+		ListOptions(context.Context, pagination.PaginationParams, string, ...string) ([]Proxy, *pagination.PaginationResult, error)
 	})
 	if !ok {
 		return nil, 0, fmt.Errorf("代理分页查询不可用")
 	}
-	proxies, result, err := repo.ListOptions(ctx, pagination.PaginationParams{Page: page, PageSize: pageSize}, strings.TrimSpace(search))
+	proxies, result, err := repo.ListOptions(ctx, pagination.PaginationParams{Page: page, PageSize: pageSize}, strings.TrimSpace(search), usageType...)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -24,12 +24,12 @@ func (s *adminServiceImpl) ListProxyOptions(ctx context.Context, page, pageSize 
 }
 
 // SampleProxyOptions 为不支持分页的受限客户端提供全池随机候选。
-func (s *adminServiceImpl) SampleProxyOptions(ctx context.Context, search string) ([]Proxy, int64, error) {
+func (s *adminServiceImpl) SampleProxyOptions(ctx context.Context, search string, usageType ...string) ([]Proxy, int64, error) {
 	repo, ok := s.proxyRepo.(interface {
-		SampleOptions(context.Context, string) ([]Proxy, int64, error)
+		SampleOptions(context.Context, string, ...string) ([]Proxy, int64, error)
 	})
 	if !ok {
 		return nil, 0, fmt.Errorf("随机代理候选查询不可用")
 	}
-	return repo.SampleOptions(ctx, strings.TrimSpace(search))
+	return repo.SampleOptions(ctx, strings.TrimSpace(search), usageType...)
 }

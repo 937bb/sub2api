@@ -37622,6 +37622,7 @@ type ProxyMutation struct {
 	updated_at             *time.Time
 	deleted_at             *time.Time
 	name                   *string
+	usage_type             *string
 	protocol               *string
 	host                   *string
 	port                   *int
@@ -37900,6 +37901,42 @@ func (m *ProxyMutation) OldName(ctx context.Context) (v string, err error) {
 // ResetName resets all changes to the "name" field.
 func (m *ProxyMutation) ResetName() {
 	m.name = nil
+}
+
+// SetUsageType sets the "usage_type" field.
+func (m *ProxyMutation) SetUsageType(s string) {
+	m.usage_type = &s
+}
+
+// UsageType returns the value of the "usage_type" field in the mutation.
+func (m *ProxyMutation) UsageType() (r string, exists bool) {
+	v := m.usage_type
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldUsageType returns the old "usage_type" field's value of the Proxy entity.
+// If the Proxy object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ProxyMutation) OldUsageType(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldUsageType is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldUsageType requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldUsageType: %w", err)
+	}
+	return oldValue.UsageType, nil
+}
+
+// ResetUsageType resets all changes to the "usage_type" field.
+func (m *ProxyMutation) ResetUsageType() {
+	m.usage_type = nil
 }
 
 // SetProtocol sets the "protocol" field.
@@ -38523,7 +38560,7 @@ func (m *ProxyMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *ProxyMutation) Fields() []string {
-	fields := make([]string, 0, 14)
+	fields := make([]string, 0, 15)
 	if m.created_at != nil {
 		fields = append(fields, proxy.FieldCreatedAt)
 	}
@@ -38535,6 +38572,9 @@ func (m *ProxyMutation) Fields() []string {
 	}
 	if m.name != nil {
 		fields = append(fields, proxy.FieldName)
+	}
+	if m.usage_type != nil {
+		fields = append(fields, proxy.FieldUsageType)
 	}
 	if m.protocol != nil {
 		fields = append(fields, proxy.FieldProtocol)
@@ -38582,6 +38622,8 @@ func (m *ProxyMutation) Field(name string) (ent.Value, bool) {
 		return m.DeletedAt()
 	case proxy.FieldName:
 		return m.Name()
+	case proxy.FieldUsageType:
+		return m.UsageType()
 	case proxy.FieldProtocol:
 		return m.Protocol()
 	case proxy.FieldHost:
@@ -38619,6 +38661,8 @@ func (m *ProxyMutation) OldField(ctx context.Context, name string) (ent.Value, e
 		return m.OldDeletedAt(ctx)
 	case proxy.FieldName:
 		return m.OldName(ctx)
+	case proxy.FieldUsageType:
+		return m.OldUsageType(ctx)
 	case proxy.FieldProtocol:
 		return m.OldProtocol(ctx)
 	case proxy.FieldHost:
@@ -38675,6 +38719,13 @@ func (m *ProxyMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetName(v)
+		return nil
+	case proxy.FieldUsageType:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetUsageType(v)
 		return nil
 	case proxy.FieldProtocol:
 		v, ok := value.(string)
@@ -38866,6 +38917,9 @@ func (m *ProxyMutation) ResetField(name string) error {
 		return nil
 	case proxy.FieldName:
 		m.ResetName()
+		return nil
+	case proxy.FieldUsageType:
+		m.ResetUsageType()
 		return nil
 	case proxy.FieldProtocol:
 		m.ResetProtocol()

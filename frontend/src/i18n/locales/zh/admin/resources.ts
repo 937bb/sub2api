@@ -42,6 +42,9 @@ export default {
 
     // Proxies Management
     proxies: {
+      usageType: '用途类型',
+      allUsageTypes: '全部类型',
+      usageTypes: { general: '通用', kiro: 'Kiro', pro: 'Pro' },
       title: 'IP管理',
       description: '管理代理服务器配置',
       createProxy: '添加代理',

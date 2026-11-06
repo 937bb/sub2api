@@ -6,6 +6,7 @@
 import { apiClient } from '../client'
 import type {
   Proxy,
+  ProxyUsageType,
   ProxyAccountSummary,
   ProxyQualityCheckResult,
   CreateProxyRequest,
@@ -32,6 +33,7 @@ export async function list(
   page: number = 1,
   pageSize: number = 20,
   filters?: {
+    usage_type?: ProxyUsageType
     protocol?: string
     status?: 'active' | 'inactive' | 'expired'
     search?: string
@@ -204,6 +206,7 @@ export async function getProxyAccounts(id: number): Promise<ProxyAccountSummary[
  */
 export async function batchCreate(
   proxies: Array<{
+    usage_type?: ProxyUsageType
     protocol: string
     host: string
     port: number
@@ -235,6 +238,7 @@ export async function batchDelete(ids: number[]): Promise<{
 export async function exportData(options?: {
   ids?: number[]
   filters?: {
+    usage_type?: ProxyUsageType
     protocol?: string
     status?: 'active' | 'inactive' | 'expired'
     search?: string
@@ -246,7 +250,8 @@ export async function exportData(options?: {
   if (options?.ids && options.ids.length > 0) {
     params.ids = options.ids.join(',')
   } else if (options?.filters) {
-    const { protocol, status, search, sort_by, sort_order } = options.filters
+    const { usage_type, protocol, status, search, sort_by, sort_order } = options.filters
+    if (usage_type) params.usage_type = usage_type
     if (protocol) params.protocol = protocol
     if (status) params.status = status
     if (search) params.search = search

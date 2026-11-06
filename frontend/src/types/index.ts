@@ -953,6 +953,8 @@ export type KnownAccountPlatform = 'kiro' | 'anthropic' | 'openai' | 'gemini' | 
 export type AccountPlatform = KnownAccountPlatform | (string & {})
 export type AccountType = 'oauth' | 'setup-token' | 'apikey' | 'upstream' | 'bedrock' | 'service_account'
 export type OAuthAddMethod = 'oauth' | 'setup-token'
+export type ProxyUsageType = 'general' | 'kiro' | 'pro'
+
 export type ProxyProtocol = 'http' | 'https' | 'socks5' | 'socks5h'
 
 // Claude Model type (returned by /v1/models and account models API)
@@ -964,6 +966,7 @@ export interface ClaudeModel {
 }
 
 export interface Proxy {
+  usage_type?: ProxyUsageType
   id: number
   name: string
   protocol: ProxyProtocol
@@ -1660,6 +1663,7 @@ export interface CheckMixedChannelResponse {
 }
 
 export interface CreateProxyRequest {
+  usage_type?: ProxyUsageType
   name: string
   protocol: ProxyProtocol
   host: string
@@ -1673,6 +1677,7 @@ export interface CreateProxyRequest {
 }
 
 export interface UpdateProxyRequest {
+  usage_type?: ProxyUsageType
   name?: string
   protocol?: ProxyProtocol
   host?: string
@@ -1697,6 +1702,7 @@ export interface AdminDataPayload {
 }
 
 export interface AdminDataProxy {
+  usage_type?: ProxyUsageType
   proxy_key: string
   name: string
   protocol: ProxyProtocol

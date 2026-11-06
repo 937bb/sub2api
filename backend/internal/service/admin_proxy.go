@@ -15,18 +15,24 @@ import (
 )
 
 // Proxy management implementations
-func (s *adminServiceImpl) ListProxies(ctx context.Context, page, pageSize int, protocol, status, search string, sortBy, sortOrder string) ([]Proxy, int64, error) {
+func (s *adminServiceImpl) ListProxies(ctx context.Context, page, pageSize int, protocol, status, search string, sortBy, sortOrder string, usageType ...string) ([]Proxy, int64, error) {
+	if len(usageType) > 0 && usageType[0] != "" && !ValidProxyUsageType(usageType[0]) {
+		return nil, 0, ErrProxyUsageTypeInvalid
+	}
 	params := pagination.PaginationParams{Page: page, PageSize: pageSize, SortBy: sortBy, SortOrder: sortOrder}
-	proxies, result, err := s.proxyRepo.ListWithFilters(ctx, params, protocol, status, search)
+	proxies, result, err := s.proxyRepo.ListWithFilters(ctx, params, protocol, status, search, usageType...)
 	if err != nil {
 		return nil, 0, err
 	}
 	return proxies, result.Total, nil
 }
 
-func (s *adminServiceImpl) ListProxiesWithAccountCount(ctx context.Context, page, pageSize int, protocol, status, search string, sortBy, sortOrder string) ([]ProxyWithAccountCount, int64, error) {
+func (s *adminServiceImpl) ListProxiesWithAccountCount(ctx context.Context, page, pageSize int, protocol, status, search string, sortBy, sortOrder string, usageType ...string) ([]ProxyWithAccountCount, int64, error) {
+	if len(usageType) > 0 && usageType[0] != "" && !ValidProxyUsageType(usageType[0]) {
+		return nil, 0, ErrProxyUsageTypeInvalid
+	}
 	params := pagination.PaginationParams{Page: page, PageSize: pageSize, SortBy: sortBy, SortOrder: sortOrder}
-	proxies, result, err := s.proxyRepo.ListWithFiltersAndAccountCount(ctx, params, protocol, status, search)
+	proxies, result, err := s.proxyRepo.ListWithFiltersAndAccountCount(ctx, params, protocol, status, search, usageType...)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -56,6 +62,9 @@ func (s *adminServiceImpl) GetProxiesByIDs(ctx context.Context, ids []int64) ([]
 }
 
 func (s *adminServiceImpl) CreateProxy(ctx context.Context, input *CreateProxyInput) (*Proxy, error) {
+	if !ValidProxyUsageType(NormalizeProxyUsageType(input.UsageType)) {
+		return nil, ErrProxyUsageTypeInvalid
+	}
 	if !isJSONTimeInRange(input.ExpiresAt) {
 		return nil, infraerrors.BadRequest("PROXY_EXPIRY_INVALID", "proxy expiry year must be between 0 and 9999")
 	}
@@ -74,6 +83,7 @@ func (s *adminServiceImpl) CreateProxy(ctx context.Context, input *CreateProxyIn
 
 	proxy := &Proxy{
 		Name:           input.Name,
+		UsageType:      NormalizeProxyUsageType(input.UsageType),
 		Protocol:       input.Protocol,
 		Host:           input.Host,
 		Port:           input.Port,
@@ -122,6 +132,12 @@ func (s *adminServiceImpl) UpdateProxy(ctx context.Context, id int64, input *Upd
 		return nil, infraerrors.BadRequest("PROXY_WARN_DAYS_INVALID", "expiry_warn_days must be >= 0")
 	}
 
+	if input.UsageType != "" {
+		if !ValidProxyUsageType(input.UsageType) {
+			return nil, ErrProxyUsageTypeInvalid
+		}
+		proxy.UsageType = input.UsageType
+	}
 	if input.Name != "" {
 		proxy.Name = input.Name
 	}

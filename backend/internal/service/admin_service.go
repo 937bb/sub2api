@@ -116,8 +116,8 @@ type AdminService interface {
 	CreateShadow(ctx context.Context, parentID int64, opts ShadowOptions) (*Account, error)
 
 	// Proxy management
-	ListProxies(ctx context.Context, page, pageSize int, protocol, status, search string, sortBy, sortOrder string) ([]Proxy, int64, error)
-	ListProxiesWithAccountCount(ctx context.Context, page, pageSize int, protocol, status, search string, sortBy, sortOrder string) ([]ProxyWithAccountCount, int64, error)
+	ListProxies(ctx context.Context, page, pageSize int, protocol, status, search string, sortBy, sortOrder string, usageType ...string) ([]Proxy, int64, error)
+	ListProxiesWithAccountCount(ctx context.Context, page, pageSize int, protocol, status, search string, sortBy, sortOrder string, usageType ...string) ([]ProxyWithAccountCount, int64, error)
 	GetAllProxies(ctx context.Context) ([]Proxy, error)
 	GetAllProxiesWithAccountCount(ctx context.Context) ([]ProxyWithAccountCount, error)
 	GetProxy(ctx context.Context, id int64) (*Proxy, error)
@@ -533,6 +533,7 @@ type BulkUpdateAccountsResult struct {
 }
 
 type CreateProxyInput struct {
+	UsageType      string
 	Name           string
 	Protocol       string
 	Host           string
@@ -548,6 +549,7 @@ type CreateProxyInput struct {
 // UpdateProxyInput preserves omitted expiry/backup values; Clear flags explicitly
 // remove them. A nil ExpiryWarnDays preserves the current warning period.
 type UpdateProxyInput struct {
+	UsageType      string
 	Name           string
 	Protocol       string
 	Host           string

@@ -59,7 +59,9 @@ describe('proxy list filter pagination', () => {
     ['protocol', 'admin.proxies.allProtocols', 'socks5', ''],
     ['protocol', 'admin.proxies.allProtocols', '', 'http'],
     ['status', 'admin.proxies.allStatus', 'expired', ''],
-    ['status', 'admin.proxies.allStatus', '', 'active']
+    ['status', 'admin.proxies.allStatus', '', 'active'],
+    ['usage_type', 'admin.proxies.allUsageTypes', 'kiro', ''],
+    ['usage_type', 'admin.proxies.allUsageTypes', '', 'pro']
   ])('starts at page one when changing %s through %s to "%s"', async (field, placeholder, value, initial) => {
     wrapper = mountView()
     await flushPromises()

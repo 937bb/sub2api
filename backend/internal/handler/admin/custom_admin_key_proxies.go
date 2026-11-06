@@ -16,6 +16,7 @@ import (
 
 // scopedProxyOption 显式列出可公开字段，不能复用含用户名、密码的管理 DTO。
 type scopedProxyOption struct {
+	UsageType string     `json:"usage_type"`
 	ID        int64      `json:"id"`
 	Name      string     `json:"name"`
 	Protocol  string     `json:"protocol"`
@@ -26,7 +27,7 @@ type scopedProxyOption struct {
 }
 
 func scopedProxyDTO(p service.Proxy) scopedProxyOption {
-	return scopedProxyOption{ID: p.ID, Name: p.Name, Protocol: p.Protocol, Host: p.Host, Port: p.Port, Status: p.Status, ExpiresAt: p.ExpiresAt}
+	return scopedProxyOption{UsageType: service.NormalizeProxyUsageType(p.UsageType), ID: p.ID, Name: p.Name, Protocol: p.Protocol, Host: p.Host, Port: p.Port, Status: p.Status, ExpiresAt: p.ExpiresAt}
 }
 
 // scopedAdminProxyRead 对代理读取限定数量；无分页的 /all 从全池抽样。
@@ -119,17 +120,17 @@ func (h *ProxyHandler) scopedAdminProxyRead(c *gin.Context) bool {
 		query := c.Request.URL.Query()
 		if strings.HasSuffix(c.FullPath(), "/proxies/all") && !query.Has("page") && !query.Has("page_size") {
 			sampler, ok := h.adminService.(interface {
-				SampleProxyOptions(context.Context, string) ([]service.Proxy, int64, error)
+				SampleProxyOptions(context.Context, string, ...string) ([]service.Proxy, int64, error)
 			})
 			if !ok {
 				response.Error(c, 503, "代理查询暂不可用")
 				return true
 			}
-			proxies, total, err = sampler.SampleProxyOptions(c.Request.Context(), search)
+			proxies, total, err = sampler.SampleProxyOptions(c.Request.Context(), search, c.Query("usage_type"))
 			// 旧客户端重复加载时必须重新抽样，不能复用上一次缓存的候选。
 			c.Header("Cache-Control", "no-store")
 		} else {
-			proxies, total, err = scopedProxyOptions(c.Request.Context(), h.adminService, page, size, search)
+			proxies, total, err = scopedProxyOptions(c.Request.Context(), h.adminService, page, size, search, c.Query("usage_type"))
 		}
 	}
 	if err != nil {
@@ -152,12 +153,12 @@ func (h *ProxyHandler) scopedAdminProxyRead(c *gin.Context) bool {
 	return true
 }
 
-func scopedProxyOptions(ctx context.Context, admin service.AdminService, page, size int, search string) ([]service.Proxy, int64, error) {
+func scopedProxyOptions(ctx context.Context, admin service.AdminService, page, size int, search string, usageType ...string) ([]service.Proxy, int64, error) {
 	api, ok := admin.(interface {
-		ListProxyOptions(context.Context, int, int, string) ([]service.Proxy, int64, error)
+		ListProxyOptions(context.Context, int, int, string, ...string) ([]service.Proxy, int64, error)
 	})
 	if !ok {
 		return nil, 0, fmt.Errorf("代理查询不可用")
 	}
-	return api.ListProxyOptions(ctx, page, size, search)
+	return api.ListProxyOptions(ctx, page, size, search, usageType...)
 }

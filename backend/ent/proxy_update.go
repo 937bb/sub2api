@@ -69,6 +69,20 @@ func (_u *ProxyUpdate) SetNillableName(v *string) *ProxyUpdate {
 	return _u
 }
 
+// SetUsageType sets the "usage_type" field.
+func (_u *ProxyUpdate) SetUsageType(v string) *ProxyUpdate {
+	_u.mutation.SetUsageType(v)
+	return _u
+}
+
+// SetNillableUsageType sets the "usage_type" field if the given value is not nil.
+func (_u *ProxyUpdate) SetNillableUsageType(v *string) *ProxyUpdate {
+	if v != nil {
+		_u.SetUsageType(*v)
+	}
+	return _u
+}
+
 // SetProtocol sets the "protocol" field.
 func (_u *ProxyUpdate) SetProtocol(v string) *ProxyUpdate {
 	_u.mutation.SetProtocol(v)
@@ -384,6 +398,11 @@ func (_u *ProxyUpdate) check() error {
 			return &ValidationError{Name: "name", err: fmt.Errorf(`ent: validator failed for field "Proxy.name": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.UsageType(); ok {
+		if err := proxy.UsageTypeValidator(v); err != nil {
+			return &ValidationError{Name: "usage_type", err: fmt.Errorf(`ent: validator failed for field "Proxy.usage_type": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.Protocol(); ok {
 		if err := proxy.ProtocolValidator(v); err != nil {
 			return &ValidationError{Name: "protocol", err: fmt.Errorf(`ent: validator failed for field "Proxy.protocol": %w`, err)}
@@ -440,6 +459,9 @@ func (_u *ProxyUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.Name(); ok {
 		_spec.SetField(proxy.FieldName, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.UsageType(); ok {
+		_spec.SetField(proxy.FieldUsageType, field.TypeString, value)
 	}
 	if value, ok := _u.mutation.Protocol(); ok {
 		_spec.SetField(proxy.FieldProtocol, field.TypeString, value)
@@ -658,6 +680,20 @@ func (_u *ProxyUpdateOne) SetName(v string) *ProxyUpdateOne {
 func (_u *ProxyUpdateOne) SetNillableName(v *string) *ProxyUpdateOne {
 	if v != nil {
 		_u.SetName(*v)
+	}
+	return _u
+}
+
+// SetUsageType sets the "usage_type" field.
+func (_u *ProxyUpdateOne) SetUsageType(v string) *ProxyUpdateOne {
+	_u.mutation.SetUsageType(v)
+	return _u
+}
+
+// SetNillableUsageType sets the "usage_type" field if the given value is not nil.
+func (_u *ProxyUpdateOne) SetNillableUsageType(v *string) *ProxyUpdateOne {
+	if v != nil {
+		_u.SetUsageType(*v)
 	}
 	return _u
 }
@@ -990,6 +1026,11 @@ func (_u *ProxyUpdateOne) check() error {
 			return &ValidationError{Name: "name", err: fmt.Errorf(`ent: validator failed for field "Proxy.name": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.UsageType(); ok {
+		if err := proxy.UsageTypeValidator(v); err != nil {
+			return &ValidationError{Name: "usage_type", err: fmt.Errorf(`ent: validator failed for field "Proxy.usage_type": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.Protocol(); ok {
 		if err := proxy.ProtocolValidator(v); err != nil {
 			return &ValidationError{Name: "protocol", err: fmt.Errorf(`ent: validator failed for field "Proxy.protocol": %w`, err)}
@@ -1063,6 +1104,9 @@ func (_u *ProxyUpdateOne) sqlSave(ctx context.Context) (_node *Proxy, err error)
 	}
 	if value, ok := _u.mutation.Name(); ok {
 		_spec.SetField(proxy.FieldName, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.UsageType(); ok {
+		_spec.SetField(proxy.FieldUsageType, field.TypeString, value)
 	}
 	if value, ok := _u.mutation.Protocol(); ok {
 		_spec.SetField(proxy.FieldProtocol, field.TypeString, value)

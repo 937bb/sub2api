@@ -23,6 +23,8 @@ const (
 	FieldDeletedAt = "deleted_at"
 	// FieldName holds the string denoting the name field in the database.
 	FieldName = "name"
+	// FieldUsageType holds the string denoting the usage_type field in the database.
+	FieldUsageType = "usage_type"
 	// FieldProtocol holds the string denoting the protocol field in the database.
 	FieldProtocol = "protocol"
 	// FieldHost holds the string denoting the host field in the database.
@@ -75,6 +77,7 @@ var Columns = []string{
 	FieldUpdatedAt,
 	FieldDeletedAt,
 	FieldName,
+	FieldUsageType,
 	FieldProtocol,
 	FieldHost,
 	FieldPort,
@@ -113,6 +116,10 @@ var (
 	UpdateDefaultUpdatedAt func() time.Time
 	// NameValidator is a validator for the "name" field. It is called by the builders before save.
 	NameValidator func(string) error
+	// DefaultUsageType holds the default value on creation for the "usage_type" field.
+	DefaultUsageType string
+	// UsageTypeValidator is a validator for the "usage_type" field. It is called by the builders before save.
+	UsageTypeValidator func(string) error
 	// ProtocolValidator is a validator for the "protocol" field. It is called by the builders before save.
 	ProtocolValidator func(string) error
 	// HostValidator is a validator for the "host" field. It is called by the builders before save.
@@ -159,6 +166,11 @@ func ByDeletedAt(opts ...sql.OrderTermOption) OrderOption {
 // ByName orders the results by the name field.
 func ByName(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldName, opts...).ToFunc()
+}
+
+// ByUsageType orders the results by the usage_type field.
+func ByUsageType(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldUsageType, opts...).ToFunc()
 }
 
 // ByProtocol orders the results by the protocol field.

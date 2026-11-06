@@ -34,6 +34,7 @@ func (Proxy) Fields() []ent.Field {
 		field.String("name").
 			MaxLen(100).
 			NotEmpty(),
+		field.String("usage_type").MaxLen(20).Default("general"),
 		field.String("protocol").
 			MaxLen(20).
 			NotEmpty(),
@@ -85,6 +86,7 @@ func (Proxy) Edges() []ent.Edge {
 
 func (Proxy) Indexes() []ent.Index {
 	return []ent.Index{
+		index.Fields("usage_type"),
 		index.Fields("status"),
 		index.Fields("deleted_at"),
 		index.Fields("expires_at"),

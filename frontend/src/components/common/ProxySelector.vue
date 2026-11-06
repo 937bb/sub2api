@@ -41,13 +41,23 @@
             v-if="proxies.length > 0"
             type="button"
             @click.stop="handleBatchTest"
-            :disabled="batchTesting"
+            :disabled="batchTesting || filteredProxies.length === 0"
             class="batch-test-btn"
             :title="t('admin.proxies.batchTest')"
           >
             <LoadingSpinner v-if="batchTesting" size="sm" color="current" />
             <Icon v-else name="play" size="sm" />
           </button>
+        </div>
+
+        <div class="border-b border-gray-100 px-3 py-2 dark:border-dark-700">
+          <label class="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
+            {{ t('admin.proxies.usageType') }}
+            <select v-model="usageType" class="input min-w-0 flex-1 py-1" :aria-label="t('admin.proxies.usageType')" @click.stop>
+              <option value="">{{ t('admin.proxies.allUsageTypes') }}</option>
+              <option v-for="kind in PROXY_USAGE_TYPES" :key="kind" :value="kind">{{ t(`admin.proxies.usageTypes.${kind}`) }}</option>
+            </select>
+          </label>
         </div>
 
         <!-- Options list -->
@@ -71,6 +81,7 @@
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-2">
                 <span class="truncate font-medium">{{ proxy.name }}</span>
+                <span class="badge badge-gray shrink-0">{{ t(`admin.proxies.usageTypes.${proxyUsageType(proxy)}`) }}</span>
                 <!-- Account count badge -->
                 <span
                   v-if="proxy.account_count !== undefined"
@@ -125,7 +136,7 @@
           </div>
 
           <!-- Empty state -->
-          <div v-if="filteredProxies.length === 0 && searchQuery" class="select-empty">
+          <div v-if="filteredProxies.length === 0" class="select-empty">
             {{ t('common.noOptionsFound') }}
           </div>
         </div>
@@ -141,7 +152,8 @@ import { ref, reactive, computed, onMounted, onUnmounted, nextTick, watch } from
 import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
 import Icon from '@/components/icons/Icon.vue'
-import type { Proxy } from '@/types'
+import type { Proxy, ProxyUsageType } from '@/types'
+import { PROXY_USAGE_TYPES, proxyUsageType, filterProxiesByUsage } from '@/utils/proxyUsageType'
 
 const { t } = useI18n()
 
@@ -171,6 +183,7 @@ const emit = defineEmits<{
 
 const isOpen = ref(false)
 const searchQuery = ref('')
+const usageType = ref<ProxyUsageType | ''>('')
 const containerRef = ref<HTMLElement | null>(null)
 const searchInputRef = ref<HTMLInputElement | null>(null)
 
@@ -189,20 +202,10 @@ const selectedLabel = computed(() => {
     return t('admin.accounts.noProxy')
   }
   const proxy = selectedProxy.value
-  return `${proxy.name} (${proxy.protocol}://${proxy.host}:${proxy.port})`
+  return `[${t(`admin.proxies.usageTypes.${proxyUsageType(proxy)}`)}] ${proxy.name} (${proxy.protocol}://${proxy.host}:${proxy.port})`
 })
 
-const filteredProxies = computed(() => {
-  if (!searchQuery.value) {
-    return props.proxies
-  }
-  const query = searchQuery.value.toLowerCase()
-  return props.proxies.filter((proxy) => {
-    const name = proxy.name.toLowerCase()
-    const host = proxy.host.toLowerCase()
-    return name.includes(query) || host.includes(query)
-  })
-})
+const filteredProxies = computed(() => filterProxiesByUsage(props.proxies, usageType.value, searchQuery.value))
 
 const toggle = () => {
   if (props.disabled) return
@@ -245,12 +248,12 @@ const handleTestProxy = async (proxy: Proxy) => {
 }
 
 const handleBatchTest = async () => {
-  if (batchTesting.value || props.proxies.length === 0) return
+  if (batchTesting.value || filteredProxies.value.length === 0) return
 
   batchTesting.value = true
 
-  // Test all proxies in parallel
-  const testPromises = props.proxies.map(handleTestProxy)
+  // Test only the visible category/search results.
+  const testPromises = [...filteredProxies.value].map(handleTestProxy)
 
   await Promise.all(testPromises)
   batchTesting.value = false

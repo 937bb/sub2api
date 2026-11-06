@@ -70,3 +70,23 @@ func TestBothProxyUpdateServicesUseRepositoryUpdateBoundary(t *testing.T) {
 		require.Equal(t, "new.example", repo.proxy.Host)
 	})
 }
+
+func TestProxyUsageUpdatePreservesRouteAndFallback(t *testing.T) {
+	repo := &updatingProxyRepoStub{proxyRepoStub: &proxyRepoStub{}, proxy: &Proxy{
+		ID: 9, Protocol: "http", Host: "proxy.example", Port: 8080,
+		Username: "user", Password: "secret", Status: StatusActive,
+		UsageType: ProxyUsageKiro, FallbackMode: FallbackModeNone, ExpiryWarnDays: 7,
+	}}
+	svc := &adminServiceImpl{proxyRepo: repo}
+	original := *repo.proxy
+	_, err := svc.UpdateProxy(context.Background(), 9, &UpdateProxyInput{UsageType: ProxyUsagePro})
+	require.NoError(t, err)
+	original.UsageType = ProxyUsagePro
+	require.Equal(t, original, *repo.proxy)
+	_, err = svc.UpdateProxy(context.Background(), 9, &UpdateProxyInput{Name: "renamed"})
+	require.NoError(t, err)
+	require.Equal(t, ProxyUsagePro, repo.proxy.UsageType)
+	_, err = svc.UpdateProxy(context.Background(), 9, &UpdateProxyInput{UsageType: "invalid"})
+	require.ErrorIs(t, err, ErrProxyUsageTypeInvalid)
+	require.Equal(t, 2, repo.updateCalls)
+}

@@ -69,6 +69,9 @@
           </div>
 
           <div class="w-full sm:w-40">
+            <Select v-model="filters.usage_type" :options="usageFilterOptions" :placeholder="t('admin.proxies.allUsageTypes')" @change="handleFilterChange" />
+          </div>
+          <div class="w-full sm:w-40">
             <Select
               v-model="filters.protocol"
               :options="protocolOptions"
@@ -123,6 +126,10 @@
 
           <template #cell-name="{ value }">
             <span class="font-medium text-gray-900 dark:text-white">{{ value }}</span>
+          </template>
+
+          <template #cell-usage_type="{ row }">
+            <span class="badge badge-gray">{{ t(`admin.proxies.usageTypes.${proxyUsageType(row)}`) }}</span>
           </template>
 
           <template #cell-protocol="{ value }">
@@ -407,6 +414,10 @@
           <label class="input-label">{{ t('admin.proxies.protocol') }}</label>
           <Select v-model="createForm.protocol" :options="protocolSelectOptions" />
         </div>
+        <div class="workbench-field-row console-field">
+          <label class="input-label">{{ t('admin.proxies.usageType') }}</label>
+          <Select v-model="createForm.usage_type" :options="usageTypeOptions" />
+        </div>
         <div class="grid grid-cols-2 gap-4">
           <div class="console-field">
             <label class="input-label">{{ t('admin.proxies.host') }}</label>
@@ -501,6 +512,10 @@
 
       <!-- Batch Add Form -->
       <div v-else class="space-y-5">
+        <div class="console-field">
+          <label class="input-label">{{ t('admin.proxies.usageType') }}</label>
+          <Select v-model="createForm.usage_type" :options="usageTypeOptions" />
+        </div>
         <div class="console-field">
           <label class="input-label">{{ t('admin.proxies.batchInput') }}</label>
           <textarea
@@ -612,6 +627,10 @@
         <div class="workbench-field-row console-field">
           <label class="input-label">{{ t('admin.proxies.protocol') }}</label>
           <Select v-model="editForm.protocol" :options="protocolSelectOptions" />
+        </div>
+        <div class="workbench-field-row console-field">
+          <label class="input-label">{{ t('admin.proxies.usageType') }}</label>
+          <Select v-model="editForm.usage_type" :options="usageTypeOptions" />
         </div>
         <div class="grid grid-cols-2 gap-4">
           <div class="console-field">
@@ -906,6 +925,8 @@ import { useSwipeSelect } from '@/composables/useSwipeSelect'
 import { useTableSelection } from '@/composables/useTableSelection'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { formatDateTime } from '@/utils/format'
+import type { ProxyUsageType } from '@/types'
+import { PROXY_USAGE_TYPES, proxyUsageType } from '@/utils/proxyUsageType'
 import { proxyExpiryBadgeClass, proxyExpiryLabelKey } from '@/utils/proxyExpiry'
 
 const { t } = useI18n()
@@ -915,6 +936,7 @@ const { copyToClipboard } = useClipboard()
 const columns = computed<Column[]>(() => [
   { key: 'select', label: '', sortable: false },
   { key: 'name', label: t('admin.proxies.columns.name'), sortable: true },
+  { key: 'usage_type', label: t('admin.proxies.usageType'), sortable: false },
   { key: 'protocol', label: t('admin.proxies.columns.protocol'), sortable: true },
   { key: 'address', label: t('admin.proxies.columns.address'), sortable: false },
   { key: 'auth', label: t('admin.proxies.columns.auth'), sortable: false },
@@ -928,6 +950,9 @@ const columns = computed<Column[]>(() => [
 ])
 
 // Filter options
+const usageTypeOptions = computed(() => PROXY_USAGE_TYPES.map(value => ({ value, label: t(`admin.proxies.usageTypes.${value}`) })))
+const usageFilterOptions = computed(() => [{ value: '', label: t('admin.proxies.allUsageTypes') }, ...usageTypeOptions.value])
+
 const protocolOptions = computed(() => [
   { value: '', label: t('admin.proxies.allProtocols') },
   { value: 'http', label: 'HTTP' },
@@ -962,6 +987,7 @@ const copyMenuProxyId = ref<number | null>(null)
 const loading = ref(false)
 const searchQuery = ref('')
 const filters = reactive({
+  usage_type: '' as ProxyUsageType | '',
   protocol: '',
   status: ''
 })
@@ -1041,6 +1067,7 @@ const batchParseResult = reactive({
 })
 
 const createForm = reactive({
+  usage_type: 'general' as ProxyUsageType,
   name: '',
   protocol: 'http' as ProxyProtocol,
   host: '',
@@ -1054,6 +1081,7 @@ const createForm = reactive({
 })
 
 const editForm = reactive({
+  usage_type: 'general' as ProxyUsageType,
   name: '',
   protocol: 'http' as ProxyProtocol,
   host: '',
@@ -1099,6 +1127,7 @@ const toggleSelectAllVisible = (event: Event) => {
 }
 
 const buildProxyQueryFilters = () => ({
+  usage_type: filters.usage_type || undefined,
   protocol: filters.protocol || undefined,
   status: (filters.status || undefined) as 'active' | 'inactive' | 'expired' | undefined,
   search: searchQuery.value || undefined,
@@ -1181,6 +1210,7 @@ const closeCreateModal = () => {
   createForm.port = 8080
   createForm.username = ''
   createForm.password = ''
+  createForm.usage_type = 'general'
   createForm.expires_at = ''
   createForm.fallback_mode = 'none'
   createForm.backup_proxy_id = null
@@ -1275,7 +1305,7 @@ const handleBatchCreate = async () => {
 
   submitting.value = true
   try {
-    const result = await adminAPI.proxies.batchCreate(batchParseResult.proxies)
+    const result = await adminAPI.proxies.batchCreate(batchParseResult.proxies.map(proxy => ({ ...proxy, usage_type: createForm.usage_type })))
     const created = result.created || 0
     const skipped = result.skipped || 0
 
@@ -1312,6 +1342,7 @@ const handleCreateProxy = async () => {
   try {
     await adminAPI.proxies.create({
       name: createForm.name.trim(),
+      usage_type: createForm.usage_type,
       protocol: createForm.protocol,
       host: createForm.host.trim(),
       port: createForm.port,
@@ -1342,6 +1373,7 @@ const handleEdit = (proxy: Proxy) => {
   editForm.username = proxy.username || ''
   editForm.password = proxy.password || ''
   editForm.status = proxy.status === 'expired' ? 'inactive' : proxy.status
+  editForm.usage_type = proxyUsageType(proxy)
   editForm.expires_at = proxy.expires_at ? proxy.expires_at.slice(0, 10) : ''
   editForm.fallback_mode = proxy.fallback_mode || 'none'
   editForm.backup_proxy_id = proxy.backup_proxy_id ?? null
@@ -1377,6 +1409,7 @@ const handleUpdateProxy = async () => {
   try {
     const updateData: any = {
       name: editForm.name.trim(),
+      usage_type: editForm.usage_type,
       protocol: editForm.protocol,
       host: editForm.host.trim(),
       port: editForm.port,
@@ -1734,6 +1767,7 @@ const fetchAllProxiesForBatch = async (): Promise<Proxy[]> => {
       page,
       pageSize,
       {
+        usage_type: filters.usage_type || undefined,
         protocol: filters.protocol || undefined,
         status: filters.status as any,
         search: searchQuery.value || undefined,

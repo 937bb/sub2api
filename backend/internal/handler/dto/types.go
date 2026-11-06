@@ -443,6 +443,7 @@ type AccountGroup struct {
 }
 
 type Proxy struct {
+	UsageType string    `json:"usage_type"`
 	ID        int64     `json:"id"`
 	Name      string    `json:"name"`
 	Protocol  string    `json:"protocol"`

@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -36,6 +37,7 @@ func newProxyRepositoryWithSQL(client *dbent.Client, sqlq sqlExecutor) *proxyRep
 func (r *proxyRepository) Create(ctx context.Context, proxyIn *service.Proxy) error {
 	builder := r.client.Proxy.Create().
 		SetName(proxyIn.Name).
+		SetUsageType(service.NormalizeProxyUsageType(proxyIn.UsageType)).
 		SetProtocol(proxyIn.Protocol).
 		SetHost(proxyIn.Host).
 		SetPort(proxyIn.Port).
@@ -56,10 +58,21 @@ func (r *proxyRepository) Create(ctx context.Context, proxyIn *service.Proxy) er
 	}
 
 	created, err := builder.Save(ctx)
-	if err == nil {
-		applyProxyEntityToService(proxyIn, created)
+	if err != nil {
+		return err
 	}
-	return err
+	// Ent returns the supplied fields on insert. Reload the category assigned
+	// by database triggers so the create response matches subsequent reads.
+	if created.UsageType == service.ProxyUsageGeneral && created.Host == "127.0.0.1" &&
+		(created.Port == 26443 || created.Port == 26445) && strings.HasPrefix(proxyIn.Username, "b-account-") {
+		stored, readErr := r.client.Proxy.Query().Where(proxy.IDEQ(created.ID)).Select(proxy.FieldUsageType).Only(ctx)
+		if readErr != nil {
+			return fmt.Errorf("read created proxy usage type: %w", readErr)
+		}
+		created.UsageType = stored.UsageType
+	}
+	applyProxyEntityToService(proxyIn, created)
+	return nil
 }
 
 func (r *proxyRepository) GetByID(ctx context.Context, id int64) (*service.Proxy, error) {
@@ -150,6 +163,7 @@ func updateProxyAndInvalidateProbeSnapshots(ctx context.Context, client *dbent.C
 	}
 	builder := client.Proxy.UpdateOneID(proxyIn.ID).
 		SetName(proxyIn.Name).
+		SetUsageType(service.NormalizeProxyUsageType(proxyIn.UsageType)).
 		SetProtocol(proxyIn.Protocol).
 		SetHost(proxyIn.Host).
 		SetPort(proxyIn.Port).
@@ -293,8 +307,11 @@ func (r *proxyRepository) List(ctx context.Context, params pagination.Pagination
 }
 
 // ListWithFilters lists proxies with optional filtering by protocol, status, and search query
-func (r *proxyRepository) ListWithFilters(ctx context.Context, params pagination.PaginationParams, protocol, status, search string) ([]service.Proxy, *pagination.PaginationResult, error) {
+func (r *proxyRepository) ListWithFilters(ctx context.Context, params pagination.PaginationParams, protocol, status, search string, usageType ...string) ([]service.Proxy, *pagination.PaginationResult, error) {
 	q := r.client.Proxy.Query()
+	if len(usageType) > 0 && usageType[0] != "" {
+		q = q.Where(proxy.UsageTypeEQ(usageType[0]))
+	}
 	if protocol != "" {
 		q = q.Where(proxy.ProtocolEQ(protocol))
 	}
@@ -331,8 +348,11 @@ func (r *proxyRepository) ListWithFilters(ctx context.Context, params pagination
 }
 
 // ListWithFiltersAndAccountCount lists proxies with filters and includes account count per proxy
-func (r *proxyRepository) ListWithFiltersAndAccountCount(ctx context.Context, params pagination.PaginationParams, protocol, status, search string) ([]service.ProxyWithAccountCount, *pagination.PaginationResult, error) {
+func (r *proxyRepository) ListWithFiltersAndAccountCount(ctx context.Context, params pagination.PaginationParams, protocol, status, search string, usageType ...string) ([]service.ProxyWithAccountCount, *pagination.PaginationResult, error) {
 	q := r.client.Proxy.Query()
+	if len(usageType) > 0 && usageType[0] != "" {
+		q = q.Where(proxy.UsageTypeEQ(usageType[0]))
+	}
 	if protocol != "" {
 		q = q.Where(proxy.ProtocolEQ(protocol))
 	}
@@ -604,6 +624,7 @@ func proxyEntityToService(m *dbent.Proxy) *service.Proxy {
 	out := &service.Proxy{
 		ID:             m.ID,
 		Name:           m.Name,
+		UsageType:      m.UsageType,
 		Protocol:       m.Protocol,
 		Host:           m.Host,
 		Port:           m.Port,
@@ -629,6 +650,7 @@ func applyProxyEntityToService(dst *service.Proxy, src *dbent.Proxy) {
 		return
 	}
 	dst.ID = src.ID
+	dst.UsageType = src.UsageType
 	dst.CreatedAt = src.CreatedAt
 	dst.UpdatedAt = src.UpdatedAt
 }

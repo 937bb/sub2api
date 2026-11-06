@@ -71,6 +71,20 @@ func (_c *ProxyCreate) SetName(v string) *ProxyCreate {
 	return _c
 }
 
+// SetUsageType sets the "usage_type" field.
+func (_c *ProxyCreate) SetUsageType(v string) *ProxyCreate {
+	_c.mutation.SetUsageType(v)
+	return _c
+}
+
+// SetNillableUsageType sets the "usage_type" field if the given value is not nil.
+func (_c *ProxyCreate) SetNillableUsageType(v *string) *ProxyCreate {
+	if v != nil {
+		_c.SetUsageType(*v)
+	}
+	return _c
+}
+
 // SetProtocol sets the "protocol" field.
 func (_c *ProxyCreate) SetProtocol(v string) *ProxyCreate {
 	_c.mutation.SetProtocol(v)
@@ -273,6 +287,10 @@ func (_c *ProxyCreate) defaults() error {
 		v := proxy.DefaultUpdatedAt()
 		_c.mutation.SetUpdatedAt(v)
 	}
+	if _, ok := _c.mutation.UsageType(); !ok {
+		v := proxy.DefaultUsageType
+		_c.mutation.SetUsageType(v)
+	}
 	if _, ok := _c.mutation.Status(); !ok {
 		v := proxy.DefaultStatus
 		_c.mutation.SetStatus(v)
@@ -302,6 +320,14 @@ func (_c *ProxyCreate) check() error {
 	if v, ok := _c.mutation.Name(); ok {
 		if err := proxy.NameValidator(v); err != nil {
 			return &ValidationError{Name: "name", err: fmt.Errorf(`ent: validator failed for field "Proxy.name": %w`, err)}
+		}
+	}
+	if _, ok := _c.mutation.UsageType(); !ok {
+		return &ValidationError{Name: "usage_type", err: errors.New(`ent: missing required field "Proxy.usage_type"`)}
+	}
+	if v, ok := _c.mutation.UsageType(); ok {
+		if err := proxy.UsageTypeValidator(v); err != nil {
+			return &ValidationError{Name: "usage_type", err: fmt.Errorf(`ent: validator failed for field "Proxy.usage_type": %w`, err)}
 		}
 	}
 	if _, ok := _c.mutation.Protocol(); !ok {
@@ -394,6 +420,10 @@ func (_c *ProxyCreate) createSpec() (*Proxy, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.Name(); ok {
 		_spec.SetField(proxy.FieldName, field.TypeString, value)
 		_node.Name = value
+	}
+	if value, ok := _c.mutation.UsageType(); ok {
+		_spec.SetField(proxy.FieldUsageType, field.TypeString, value)
+		_node.UsageType = value
 	}
 	if value, ok := _c.mutation.Protocol(); ok {
 		_spec.SetField(proxy.FieldProtocol, field.TypeString, value)
@@ -571,6 +601,18 @@ func (u *ProxyUpsert) SetName(v string) *ProxyUpsert {
 // UpdateName sets the "name" field to the value that was provided on create.
 func (u *ProxyUpsert) UpdateName() *ProxyUpsert {
 	u.SetExcluded(proxy.FieldName)
+	return u
+}
+
+// SetUsageType sets the "usage_type" field.
+func (u *ProxyUpsert) SetUsageType(v string) *ProxyUpsert {
+	u.Set(proxy.FieldUsageType, v)
+	return u
+}
+
+// UpdateUsageType sets the "usage_type" field to the value that was provided on create.
+func (u *ProxyUpsert) UpdateUsageType() *ProxyUpsert {
+	u.SetExcluded(proxy.FieldUsageType)
 	return u
 }
 
@@ -821,6 +863,20 @@ func (u *ProxyUpsertOne) SetName(v string) *ProxyUpsertOne {
 func (u *ProxyUpsertOne) UpdateName() *ProxyUpsertOne {
 	return u.Update(func(s *ProxyUpsert) {
 		s.UpdateName()
+	})
+}
+
+// SetUsageType sets the "usage_type" field.
+func (u *ProxyUpsertOne) SetUsageType(v string) *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.SetUsageType(v)
+	})
+}
+
+// UpdateUsageType sets the "usage_type" field to the value that was provided on create.
+func (u *ProxyUpsertOne) UpdateUsageType() *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.UpdateUsageType()
 	})
 }
 
@@ -1263,6 +1319,20 @@ func (u *ProxyUpsertBulk) SetName(v string) *ProxyUpsertBulk {
 func (u *ProxyUpsertBulk) UpdateName() *ProxyUpsertBulk {
 	return u.Update(func(s *ProxyUpsert) {
 		s.UpdateName()
+	})
+}
+
+// SetUsageType sets the "usage_type" field.
+func (u *ProxyUpsertBulk) SetUsageType(v string) *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.SetUsageType(v)
+	})
+}
+
+// UpdateUsageType sets the "usage_type" field to the value that was provided on create.
+func (u *ProxyUpsertBulk) UpdateUsageType() *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.UpdateUsageType()
 	})
 }
 

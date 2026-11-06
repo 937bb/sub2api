@@ -27,6 +27,7 @@ func NewProxyHandler(adminService service.AdminService) *ProxyHandler {
 
 // CreateProxyRequest represents create proxy request
 type CreateProxyRequest struct {
+	UsageType      string `json:"usage_type" binding:"omitempty,oneof=general kiro pro"`
 	Name           string `json:"name" binding:"required"`
 	Protocol       string `json:"protocol" binding:"required,oneof=http https socks5 socks5h"`
 	Host           string `json:"host" binding:"required"`
@@ -41,6 +42,7 @@ type CreateProxyRequest struct {
 
 // UpdateProxyRequest represents update proxy request
 type UpdateProxyRequest struct {
+	UsageType      string                 `json:"usage_type" binding:"omitempty,oneof=general kiro pro"`
 	Name           string                 `json:"name"`
 	Protocol       string                 `json:"protocol" binding:"omitempty,oneof=http https socks5 socks5h"`
 	Host           string                 `json:"host"`
@@ -57,6 +59,10 @@ type UpdateProxyRequest struct {
 // List handles listing all proxies with pagination
 // GET /api/v1/admin/proxies
 func (h *ProxyHandler) List(c *gin.Context) {
+	if usageType := c.Query("usage_type"); usageType != "" && !service.ValidProxyUsageType(usageType) {
+		response.BadRequest(c, "Invalid proxy usage type")
+		return
+	}
 	if h.scopedAdminProxyRead(c) {
 		return
 	}
@@ -72,7 +78,7 @@ func (h *ProxyHandler) List(c *gin.Context) {
 		search = search[:100]
 	}
 
-	proxies, total, err := h.adminService.ListProxiesWithAccountCount(c.Request.Context(), page, pageSize, protocol, status, search, sortBy, sortOrder)
+	proxies, total, err := h.adminService.ListProxiesWithAccountCount(c.Request.Context(), page, pageSize, protocol, status, search, sortBy, sortOrder, c.Query("usage_type"))
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -89,6 +95,10 @@ func (h *ProxyHandler) List(c *gin.Context) {
 // GET /api/v1/admin/proxies/all
 // Optional query param: with_count=true to include account count per proxy
 func (h *ProxyHandler) GetAll(c *gin.Context) {
+	if usageType := c.Query("usage_type"); usageType != "" && !service.ValidProxyUsageType(usageType) {
+		response.BadRequest(c, "Invalid proxy usage type")
+		return
+	}
 	if h.scopedAdminProxyRead(c) {
 		return
 	}
@@ -102,6 +112,9 @@ func (h *ProxyHandler) GetAll(c *gin.Context) {
 		}
 		out := make([]dto.AdminProxyWithAccountCount, 0, len(proxies))
 		for i := range proxies {
+			if kind := c.Query("usage_type"); kind != "" && service.NormalizeProxyUsageType(proxies[i].UsageType) != kind {
+				continue
+			}
 			out = append(out, *dto.ProxyWithAccountCountFromServiceAdmin(&proxies[i]))
 		}
 		response.Success(c, out)
@@ -116,6 +129,9 @@ func (h *ProxyHandler) GetAll(c *gin.Context) {
 
 	out := make([]dto.AdminProxy, 0, len(proxies))
 	for i := range proxies {
+		if kind := c.Query("usage_type"); kind != "" && service.NormalizeProxyUsageType(proxies[i].UsageType) != kind {
+			continue
+		}
 		out = append(out, *dto.ProxyFromServiceAdmin(&proxies[i]))
 	}
 	response.Success(c, out)
@@ -159,6 +175,7 @@ func (h *ProxyHandler) Create(c *gin.Context) {
 		}
 		proxy, err := h.adminService.CreateProxy(ctx, &service.CreateProxyInput{
 			Name:           strings.TrimSpace(req.Name),
+			UsageType:      req.UsageType,
 			Protocol:       strings.TrimSpace(req.Protocol),
 			Host:           strings.TrimSpace(req.Host),
 			Port:           req.Port,
@@ -204,6 +221,7 @@ func (h *ProxyHandler) Update(c *gin.Context) {
 	}
 	proxy, err := h.adminService.UpdateProxy(c.Request.Context(), proxyID, &service.UpdateProxyInput{
 		Name:           strings.TrimSpace(req.Name),
+		UsageType:      req.UsageType,
 		Protocol:       strings.TrimSpace(req.Protocol),
 		Host:           strings.TrimSpace(req.Host),
 		Port:           req.Port,
@@ -345,16 +363,17 @@ func (h *ProxyHandler) GetProxyAccounts(c *gin.Context) {
 
 // BatchCreateProxyItem represents a single proxy in batch create request
 type BatchCreateProxyItem struct {
-	Protocol string `json:"protocol" binding:"required,oneof=http https socks5 socks5h"`
-	Host     string `json:"host" binding:"required"`
-	Port     int    `json:"port" binding:"required,min=1,max=65535"`
-	Username string `json:"username"`
-	Password string `json:"password"`
+	UsageType string `json:"usage_type" binding:"omitempty,oneof=general kiro pro"`
+	Protocol  string `json:"protocol" binding:"required,oneof=http https socks5 socks5h"`
+	Host      string `json:"host" binding:"required"`
+	Port      int    `json:"port" binding:"required,min=1,max=65535"`
+	Username  string `json:"username"`
+	Password  string `json:"password"`
 }
 
 // BatchCreateRequest represents batch create proxies request
 type BatchCreateRequest struct {
-	Proxies []BatchCreateProxyItem `json:"proxies" binding:"required,min=1"`
+	Proxies []BatchCreateProxyItem `json:"proxies" binding:"required,min=1,dive"`
 }
 
 // BatchCreate handles batch creating proxies
@@ -390,12 +409,13 @@ func (h *ProxyHandler) BatchCreate(c *gin.Context) {
 
 		// Create proxy with default name
 		_, err = h.adminService.CreateProxy(c.Request.Context(), &service.CreateProxyInput{
-			Name:     "default",
-			Protocol: protocol,
-			Host:     host,
-			Port:     item.Port,
-			Username: username,
-			Password: password,
+			UsageType: item.UsageType,
+			Name:      "default",
+			Protocol:  protocol,
+			Host:      host,
+			Port:      item.Port,
+			Username:  username,
+			Password:  password,
 		})
 		if err != nil {
 			// If creation fails due to duplicate, count as skipped

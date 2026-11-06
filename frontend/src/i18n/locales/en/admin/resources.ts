@@ -42,6 +42,9 @@ export default {
 
     // Proxies
     proxies: {
+      usageType: 'Usage type',
+      allUsageTypes: 'All usage types',
+      usageTypes: { general: 'General', kiro: 'Kiro', pro: 'Pro' },
       title: 'Proxy Management',
       description: 'Manage proxy servers for accounts',
       createProxy: 'Create Proxy',

@@ -327,12 +327,12 @@ type scopedRouteProxyOptions struct {
 	page, size int
 }
 
-func (s *scopedRouteProxyOptions) ListProxyOptions(_ context.Context, page, size int, _ string) ([]service.Proxy, int64, error) {
+func (s *scopedRouteProxyOptions) ListProxyOptions(_ context.Context, page, size int, _ string, _ ...string) ([]service.Proxy, int64, error) {
 	s.page = page
 	s.size = size
 	return []service.Proxy{{ID: 10, Name: "代理候选", Host: "192.0.2.1", Port: 8080, Username: "秘密用户", Password: "秘密密码", Status: service.StatusActive}}, 20001, nil
 }
-func (s *scopedRouteProxyOptions) SampleProxyOptions(_ context.Context, _ string) ([]service.Proxy, int64, error) {
+func (s *scopedRouteProxyOptions) SampleProxyOptions(_ context.Context, _ string, _ ...string) ([]service.Proxy, int64, error) {
 	s.page = 0
 	s.size = 50
 	return []service.Proxy{{ID: 12345, Name: "全池候选", Username: "秘密用户", Password: "秘密密码"}}, 20001, nil

@@ -58,3 +58,28 @@ func TestProxyHandlerUpdatePreservesFieldPresence(t *testing.T) {
 		})
 	}
 }
+
+func TestProxyUsageTypeUpdateValidation(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, kind := range []string{"general", "kiro", "pro", "", "unknown"} {
+		t.Run(kind, func(t *testing.T) {
+			svc := &proxyPartialUpdateService{}
+			router := gin.New()
+			router.PUT("/proxies/:id", NewProxyHandler(svc).Update)
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPut, "/proxies/9", strings.NewReader(`{"usage_type":"`+kind+`"}`))
+			req.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(w, req)
+			if kind == "unknown" {
+				require.Equal(t, http.StatusBadRequest, w.Code)
+				require.Nil(t, svc.input)
+				return
+			}
+			require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+			require.Equal(t, kind, svc.input.UsageType)
+			require.Nil(t, svc.input.Password)
+			require.Nil(t, svc.input.ExpiresAt)
+			require.False(t, svc.input.ClearExpiresAt)
+		})
+	}
+}

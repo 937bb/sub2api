@@ -76,7 +76,7 @@ type proxyRepoStubForAdminList struct {
 	listWithFiltersAndAccountCountErr      error
 }
 
-func (s *proxyRepoStubForAdminList) ListWithFilters(_ context.Context, params pagination.PaginationParams, protocol, status, search string) ([]Proxy, *pagination.PaginationResult, error) {
+func (s *proxyRepoStubForAdminList) ListWithFilters(_ context.Context, params pagination.PaginationParams, protocol, status, search string, usageType ...string) ([]Proxy, *pagination.PaginationResult, error) {
 	s.listWithFiltersCalls++
 	s.listWithFiltersParams = params
 	s.listWithFiltersProtocol = protocol
@@ -99,7 +99,7 @@ func (s *proxyRepoStubForAdminList) ListWithFilters(_ context.Context, params pa
 	return s.listWithFiltersProxies, result, nil
 }
 
-func (s *proxyRepoStubForAdminList) ListWithFiltersAndAccountCount(_ context.Context, params pagination.PaginationParams, protocol, status, search string) ([]ProxyWithAccountCount, *pagination.PaginationResult, error) {
+func (s *proxyRepoStubForAdminList) ListWithFiltersAndAccountCount(_ context.Context, params pagination.PaginationParams, protocol, status, search string, usageType ...string) ([]ProxyWithAccountCount, *pagination.PaginationResult, error) {
 	s.listWithFiltersAndAccountCountCalls++
 	s.listWithFiltersAndAccountCountParams = params
 	s.listWithFiltersAndAccountCountProtocol = protocol

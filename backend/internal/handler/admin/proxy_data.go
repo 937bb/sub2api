@@ -14,6 +14,10 @@ import (
 
 // ExportData exports proxy-only data for migration.
 func (h *ProxyHandler) ExportData(c *gin.Context) {
+	if kind := c.Query("usage_type"); kind != "" && !service.ValidProxyUsageType(kind) {
+		response.BadRequest(c, "Invalid proxy usage type")
+		return
+	}
 	ctx := c.Request.Context()
 
 	selectedIDs, err := parseProxyIDs(c)
@@ -39,7 +43,7 @@ func (h *ProxyHandler) ExportData(c *gin.Context) {
 			search = search[:100]
 		}
 
-		proxies, err = h.listProxiesFiltered(ctx, protocol, status, search, sortBy, sortOrder)
+		proxies, err = h.listProxiesFiltered(ctx, protocol, status, search, sortBy, sortOrder, c.Query("usage_type"))
 		if err != nil {
 			response.ErrorFrom(c, err)
 			return
@@ -70,6 +74,7 @@ func (h *ProxyHandler) ExportData(c *gin.Context) {
 			ProxyKey:        key,
 			Name:            p.Name,
 			Protocol:        p.Protocol,
+			UsageType:       p.UsageType,
 			Host:            p.Host,
 			Port:            p.Port,
 			Username:        p.Username,
@@ -151,6 +156,11 @@ func (h *ProxyHandler) ImportData(c *gin.Context) {
 		normalizedStatus := normalizeProxyStatus(item.Status)
 		if existing, ok := proxyByKey[key]; ok {
 			result.ProxyReused++
+			if item.UsageType != "" {
+				if _, err := h.adminService.UpdateProxy(ctx, existing.ID, &service.UpdateProxyInput{UsageType: item.UsageType}); err != nil {
+					result.Errors = append(result.Errors, DataImportError{Kind: "proxy", Name: item.Name, ProxyKey: key, Message: "update usage type failed: " + err.Error()})
+				}
+			}
 			if normalizedStatus != "" && normalizedStatus != existing.Status {
 				// 已存在代理同步 status 时，同时保留/覆盖导入 item 的完整字段，
 				// 避免 UpdateProxy 零值覆盖有效期/fallback 配置。
@@ -226,6 +236,7 @@ func (h *ProxyHandler) ImportData(c *gin.Context) {
 		created, err := h.adminService.CreateProxy(ctx, &service.CreateProxyInput{
 			Name:           defaultProxyName(item.Name),
 			Protocol:       item.Protocol,
+			UsageType:      item.UsageType,
 			Host:           item.Host,
 			Port:           item.Port,
 			Username:       item.Username,
@@ -328,7 +339,7 @@ func parseProxyIDs(c *gin.Context) ([]int64, error) {
 	return ids, nil
 }
 
-func (h *ProxyHandler) listProxiesFiltered(ctx context.Context, protocol, status, search, sortBy, sortOrder string) ([]service.Proxy, error) {
+func (h *ProxyHandler) listProxiesFiltered(ctx context.Context, protocol, status, search, sortBy, sortOrder string, usageType ...string) ([]service.Proxy, error) {
 	page := 1
 	pageSize := dataPageCap
 	var out []service.Proxy
@@ -336,7 +347,7 @@ func (h *ProxyHandler) listProxiesFiltered(ctx context.Context, protocol, status
 	useAccountCountSort := strings.EqualFold(sortBy, "account_count")
 	for {
 		if useAccountCountSort {
-			items, total, err := h.adminService.ListProxiesWithAccountCount(ctx, page, pageSize, protocol, status, search, sortBy, sortOrder)
+			items, total, err := h.adminService.ListProxiesWithAccountCount(ctx, page, pageSize, protocol, status, search, sortBy, sortOrder, usageType...)
 			if err != nil {
 				return nil, err
 			}
@@ -347,7 +358,7 @@ func (h *ProxyHandler) listProxiesFiltered(ctx context.Context, protocol, status
 				break
 			}
 		} else {
-			items, total, err := h.adminService.ListProxies(ctx, page, pageSize, protocol, status, search, sortBy, sortOrder)
+			items, total, err := h.adminService.ListProxies(ctx, page, pageSize, protocol, status, search, sortBy, sortOrder, usageType...)
 			if err != nil {
 				return nil, err
 			}

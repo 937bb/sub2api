@@ -52,7 +52,7 @@ func TestProxySamplePostgresLargePoolAndEligibility(t *testing.T) {
 	db := scopedAdminKeyTestDB(t)
 	_, err := db.Exec(`CREATE TABLE proxies(
  id BIGINT PRIMARY KEY,name TEXT DEFAULT 'pool',protocol TEXT DEFAULT 'http',host TEXT DEFAULT '192.0.2.1',port INT DEFAULT 8080,
- username TEXT DEFAULT 'SECRET_USER',password TEXT DEFAULT 'SECRET_PASSWORD',status TEXT DEFAULT 'active',
+ usage_type TEXT NOT NULL DEFAULT 'general',username TEXT DEFAULT 'SECRET_USER',password TEXT DEFAULT 'SECRET_PASSWORD',status TEXT DEFAULT 'active',
  expires_at TIMESTAMPTZ,deleted_at TIMESTAMPTZ,created_at TIMESTAMPTZ DEFAULT NOW(),updated_at TIMESTAMPTZ DEFAULT NOW(),
  fallback_mode TEXT DEFAULT 'none',backup_proxy_id BIGINT,expiry_warn_days INT DEFAULT 7);
  INSERT INTO proxies(id) SELECT generate_series(1,20005);

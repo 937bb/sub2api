@@ -280,3 +280,41 @@ func TestProxyImportDataReusesAndTriggersLatencyProbe(t *testing.T) {
 		return len(adminSvc.testedProxyIDs) == 1
 	}, time.Second, 10*time.Millisecond)
 }
+
+func TestProxyUsageExportAndImport(t *testing.T) {
+	router, svc := setupProxyDataRouter()
+	svc.proxies = []service.Proxy{
+		{ID: 1, Name: "kiro", Protocol: "http", Host: "kiro.example", Port: 8080, UsageType: "kiro"},
+		{ID: 2, Name: "pro", Protocol: "http", Host: "pro.example", Port: 8080, UsageType: "pro"},
+	}
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/admin/proxies/data?usage_type=kiro", nil))
+	require.Equal(t, http.StatusOK, rec.Code)
+	var exported proxyDataResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &exported))
+	require.Len(t, exported.Data.Proxies, 1)
+	require.Equal(t, "kiro", exported.Data.Proxies[0].UsageType)
+	for _, reused := range []bool{true, false} {
+		t.Run(map[bool]string{true: "reuse", false: "create"}[reused], func(t *testing.T) {
+			target, targetSvc := setupProxyDataRouter()
+			if reused {
+				targetSvc.proxies = svc.proxies
+			}
+			body, err := json.Marshal(DataImportRequest{Data: exported.Data})
+			require.NoError(t, err)
+			result := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/proxies/data", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			target.ServeHTTP(result, req)
+			require.Equal(t, http.StatusOK, result.Code, result.Body.String())
+			if reused {
+				require.Len(t, targetSvc.updatedProxies, 1)
+				require.Equal(t, "kiro", targetSvc.updatedProxies[0].UsageType)
+				require.Nil(t, targetSvc.updatedProxies[0].Password)
+			} else {
+				require.Len(t, targetSvc.createdProxies, 1)
+				require.Equal(t, "kiro", targetSvc.createdProxies[0].UsageType)
+			}
+		})
+	}
+}

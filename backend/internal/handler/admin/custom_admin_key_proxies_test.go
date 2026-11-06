@@ -22,7 +22,7 @@ type scopedProxyReadTestService struct {
 	ids               []int64
 }
 
-func (s *scopedProxyReadTestService) ListProxyOptions(_ context.Context, page, size int, _ string) ([]service.Proxy, int64, error) {
+func (s *scopedProxyReadTestService) ListProxyOptions(_ context.Context, page, size int, _ string, _ ...string) ([]service.Proxy, int64, error) {
 	s.page = page
 	s.size = size
 	s.calls++
@@ -145,7 +145,7 @@ type scopedProxySampleTestService struct {
 	search  string
 }
 
-func (s *scopedProxySampleTestService) SampleProxyOptions(_ context.Context, search string) ([]service.Proxy, int64, error) {
+func (s *scopedProxySampleTestService) SampleProxyOptions(_ context.Context, search string, usageType ...string) ([]service.Proxy, int64, error) {
 	s.samples++
 	s.search = search
 	return []service.Proxy{{ID: 12345, Host: "192.0.2.1", Username: "secret-user", Password: "secret-password"}}, 20000, nil
