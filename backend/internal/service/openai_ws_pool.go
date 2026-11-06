@@ -1122,7 +1122,7 @@ func (p *openAIWSConnPool) Acquire(ctx context.Context, req openAIWSAcquireReque
 		if req.ForcePreferredConn {
 			req.proxyRoutes, err = accountProxyRoutes(req.Account, req.ProxyURL)
 		} else {
-			req.proxyRoutes, err = rotatingAccountProxyRoutes(req.Account, req.ProxyURL)
+			req.proxyRoutes, err = accountProxyRoutesForContext(ctx, req.Account, req.ProxyURL)
 		}
 		if err != nil {
 			return nil, err
@@ -2156,7 +2156,7 @@ func (p *openAIWSConnPool) dialConn(ctx context.Context, req openAIWSAcquireRequ
 	}
 	routes := req.proxyRoutes
 	if len(routes) == 0 {
-		routes, err = rotatingAccountProxyRoutes(req.Account, req.ProxyURL)
+		routes, err = accountProxyRoutesForContext(ctx, req.Account, req.ProxyURL)
 		if err != nil {
 			return nil, err
 		}

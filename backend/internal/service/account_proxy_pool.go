@@ -142,12 +142,16 @@ func proxyConnectFailure(err error, gotConnection bool) bool {
 }
 
 func doWithAccountProxyFallback(request *http.Request, legacyURL string, account *Account, send func(*http.Request, string) (*http.Response, error)) (*http.Response, error) {
-	routes, err := rotatingAccountProxyRoutes(account, legacyURL)
+	routes, err := accountProxyRoutesForContext(request.Context(), account, legacyURL)
 	if err != nil {
 		return nil, err
 	}
 	if len(routes) == 1 {
-		return send(request, routes[0])
+		response, err := send(request, routes[0])
+		if response != nil {
+			logAccountFallbackRoute(account, routes[0], "http")
+		}
+		return response, err
 	}
 	var response *http.Response
 	for i, route := range routes {
@@ -179,7 +183,7 @@ func doWithAccountProxyFallback(request *http.Request, legacyURL string, account
 }
 
 func dialWithAccountProxyFallback(ctx context.Context, dialer openAIWSClientDialer, target string, headers http.Header, legacyURL string, account *Account) (openAIWSClientConn, int, http.Header, error) {
-	routes, err := rotatingAccountProxyRoutes(account, legacyURL)
+	routes, err := accountProxyRoutesForContext(ctx, account, legacyURL)
 	if err != nil {
 		return nil, 0, nil, err
 	}

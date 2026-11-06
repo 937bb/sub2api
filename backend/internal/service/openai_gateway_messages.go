@@ -33,6 +33,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	promptCacheKey string,
 	defaultMappedModel string,
 ) (smartWSResult *OpenAIForwardResult, smartWSError error) {
+	ctx = withAccountProxyAffinity(ctx, c, body)
 	ctx, smartWSAttempt := beginGroupSmartWSAttempt(ctx, c)
 	defer func() { smartWSError = finishGroupSmartWSAttempt(smartWSAttempt, smartWSError) }()
 	if account.Platform == PlatformKiro {
