@@ -102,8 +102,7 @@ func (e *kiroRefreshExecutor) Refresh(ctx context.Context, a *Account) (map[stri
 	if err != nil {
 		return nil, err
 	}
-	kiro.RefreshHeaders(req.Header, a.Credentials)
-	req.Close = true
+	req = prepareKiroHTTPRequest(req, a.Credentials, "", kiro.OperationRefresh)
 	proxy, err := kiroProxy(a)
 	if err != nil {
 		return nil, err
@@ -270,7 +269,7 @@ func (s *GatewayService) forwardKiro(ctx context.Context, c *gin.Context, accoun
 	}
 	cache, cacheOK := s.cache.(KiroResponseCache)
 	identity := sha256.Sum256([]byte(account.GetCredential("refresh_token") + account.GetCredential("api_key")))
-	cacheScope := fmt.Sprintf("%s:%s:%s:%s:%x", scope, mapped, account.GetCredential("machine_id"), account.GetCredential("profile_arn"), identity)
+	cacheScope := fmt.Sprintf("%s:%s:%s:%s:%x", scope, mapped, kiro.EnvironmentKey(account.Credentials), account.GetCredential("profile_arn"), identity)
 	cacheKey, eligible := kiro.CacheKey(parsed.Body.Bytes(), cacheScope)
 	useCache := cacheOK && eligible && policy.Enabled && policy.TargetPercent > 0
 	c.Header("X-Sub2api-Cache", "bypass")

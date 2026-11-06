@@ -10,15 +10,16 @@ import (
 // AccountFingerprint is an allowlist of identity diagnostics. It never includes
 // bearer credentials, fingerprint seeds, or request-dependent session IDs.
 type AccountFingerprint struct {
-	AccountID           int64  `json:"account_id"`
-	CredentialAccountID int64  `json:"credential_account_id"`
-	Inherited           bool   `json:"inherited"`
-	InstallationID      string `json:"installation_id"`
-	Source              string `json:"source"`
-	ConvergenceMode     string `json:"convergence_mode"`
-	ConvergenceReady    bool   `json:"convergence_ready"`
-	UserAgentOverride   string `json:"user_agent_override"`
-	WSAccountMode       string `json:"ws_account_mode"`
+	Kiro                *KiroFingerprint `json:"kiro,omitempty"`
+	AccountID           int64            `json:"account_id"`
+	CredentialAccountID int64            `json:"credential_account_id"`
+	Inherited           bool             `json:"inherited"`
+	InstallationID      string           `json:"installation_id"`
+	Source              string           `json:"source"`
+	ConvergenceMode     string           `json:"convergence_mode"`
+	ConvergenceReady    bool             `json:"convergence_ready"`
+	UserAgentOverride   string           `json:"user_agent_override"`
+	WSAccountMode       string           `json:"ws_account_mode"`
 }
 
 func (s *adminServiceImpl) GetAccountFingerprint(ctx context.Context, id int64) (*AccountFingerprint, error) {
@@ -29,8 +30,11 @@ func (s *adminServiceImpl) GetAccountFingerprint(ctx context.Context, id int64) 
 	if account == nil {
 		return nil, ErrAccountNotFound
 	}
+	if account.Platform == PlatformKiro && account.Type == AccountTypeOAuth {
+		return kiroAccountFingerprintSummary(account), nil
+	}
 	if !account.IsOpenAIOAuthLike() {
-		return nil, infraerrors.BadRequest("FINGERPRINT_UNSUPPORTED", "Fingerprint diagnostics require an OpenAI OAuth or setup-token account")
+		return nil, infraerrors.BadRequest("FINGERPRINT_UNSUPPORTED", "Fingerprint diagnostics require an OpenAI OAuth/setup-token or Kiro OAuth account")
 	}
 	owner, err := resolveCredentialAccount(ctx, s.accountRepo, account)
 	if err != nil {

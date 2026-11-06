@@ -18,7 +18,7 @@ func TestEnvironmentStableAndOperationSpecific(t *testing.T) {
 	h, h2 := http.Header{}, http.Header{}
 	Headers(h, c, "secret")
 	EnvironmentHeaders(h2, c, "runtime")
-	require.Contains(t, h.Get("User-Agent"), "os/win32#10.0.22631 lang/js md/nodejs#22.22.0 api/codewhispererstreaming#1.0.34")
+	require.Contains(t, h.Get("User-Agent"), "os/win32#10.0.22631 lang/js md/nodejs#22.22.0 api/kiroruntime#1.0.0")
 	require.Contains(t, h2.Get("User-Agent"), "api/codewhispererruntime#1.0.0")
 	require.Contains(t, h2.Get("User-Agent"), c["machine_id"])
 	_, err = uuid.Parse(h.Get("amz-sdk-invocation-id"))

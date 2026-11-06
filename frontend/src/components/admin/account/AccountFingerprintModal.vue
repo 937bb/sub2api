@@ -5,6 +5,7 @@
       <p>{{ t('admin.accounts.fingerprint.loadFailed') }}</p>
       <button class="btn btn-secondary" @click="load">{{ t('common.retry') }}</button>
     </div>
+    <KiroFingerprintDetails v-else-if="data?.kiro" :data="data.kiro" />
     <div v-else-if="data" class="space-y-5">
       <p class="text-sm text-gray-500 dark:text-gray-400">{{ t('admin.accounts.fingerprint.description') }}</p>
       <div class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
@@ -37,6 +38,7 @@ import { onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
+import KiroFingerprintDetails from './KiroFingerprintDetails.vue'
 import { getFingerprint, type AccountFingerprint } from '@/api/admin/accounts'
 import { useClipboard } from '@/composables/useClipboard'
 

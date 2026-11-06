@@ -52,4 +52,22 @@ describe('AccountFingerprintModal', () => {
     expect(wrapper.text()).toContain('device-1')
     wrapper.unmount()
   })
+  it('shows Kiro identity and actual transport without Codex fields', async () => {
+    vi.mocked(getFingerprint).mockResolvedValue({ ...result(1), kiro: {
+      environment: { machine_id: 'kiro-device', kiro_version: '0.11.107', node_version: '22.22.0', system_version: 'darwin#24.6.0', auth_region: 'us-east-1', api_region: 'us-east-1', auth_method: 'social', endpoint: 'ide', streaming_sdk: '1.0.34', runtime_sdk: '1.0.0', sso_sdk: '3.980.0' },
+      environment_key: 'environment-digest', proxy_id: 17, proxy_ready: true,
+      http_protocol: 'HTTP/1.1', tls_backend: 'Go crypto/tls', go_version: 'go1.26', tls_capture_verified: false, websocket_supported: false,
+      operations: [{ operation: 'generation', method: 'POST', url: 'https://q.us-east-1.amazonaws.com/generateAssistantResponse', headers: { 'User-Agent': 'KiroIDE-test', Connection: 'close' } }]
+    } })
+    const wrapper = render()
+    await flushPromises()
+    expect(wrapper.text()).toContain('kiro-device')
+    expect(wrapper.text()).toContain('HTTP/1.1')
+    expect(wrapper.text()).toContain('Go crypto/tls')
+    expect(wrapper.text()).toContain('KiroIDE-test')
+    expect(wrapper.text()).toContain('admin.accounts.fingerprint.kiro.transportNote')
+    expect(wrapper.text()).not.toContain('admin.accounts.fingerprint.convergence')
+    wrapper.unmount()
+  })
+
 })

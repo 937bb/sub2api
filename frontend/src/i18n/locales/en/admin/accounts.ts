@@ -6,6 +6,23 @@ export default {
     proxyRequired: 'Kiro requires a dedicated static proxy',
     proxyHint: 'Select a fixed proxy below. Batch JSON requires a distinct proxy_id on each account. Failed proxies never fall back to a direct connection.', "credentials": "Kiro account JSON", "keepCredentials": "Leave empty to keep existing credentials", "importHint": "Import a kiro.rs object/array or a Kiro Account Manager accounts export.", "cacheEnabled": "Reuse completed text responses", "target": "Target hit rate (%)", "ttl": "Cache TTL (seconds)", "capacity": "Maximum entries per group", "cacheHint": "All Kiro accounts in this group share the policy, capacity and target hit rate. Content remains isolated by user, key and account. When enabled, identical text requests are eligible for response reuse. Tools, images and thinking bypass this cache. Actual hits depend on repetition; cached responses consume no upstream tokens and are not charged again.", "singleAccount": "Import exactly one account when editing."},
       fingerprint: {
+        kiro: {
+          "description": "Fixed Kiro account environment. Headers use the same builder as outbound requests and exclude tokens and proxy passwords.",
+          "environment": "Client environment",
+          "regions": "Auth and API regions",
+          "proxy": "Dedicated static proxy",
+          "ready": "Available",
+          "unavailable": "Unavailable",
+          "transport": "HTTP / TLS implementation",
+          "digest": "Environment digest",
+          "transportNote": "All operations use the same account environment and fixed proxy, with account-isolated connections and no redirects. Request IDs are generated per request. The transport uses Go TLS. ClientHello, extension order, and JA4 have not been verified against a client capture; this is not a complete Kiro TLS replica. The Kiro upstream uses HTTP event streams, not WebSocket.",
+          "operations": {
+            "generation": "Generation",
+            "models": "Model catalog",
+            "usage": "Usage",
+            "refresh": "Credential refresh"
+          }
+        },
         "view": "View fingerprint",
         "description": "Current account identity resolved by the server. Refresh to load the latest saved configuration.",
         "device": "Device ID",

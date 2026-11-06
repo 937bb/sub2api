@@ -182,7 +182,9 @@ describe('AccountActionMenu fingerprint visibility', () => {
     { platform: 'openai', type: 'setup-token', parent_account_id: null, visible: true },
     { platform: 'openai', type: 'oauth', parent_account_id: 42, visible: true },
     { platform: 'openai', type: 'apikey', parent_account_id: null, visible: false },
-    { platform: 'anthropic', type: 'oauth', parent_account_id: null, visible: false }
+    { platform: 'anthropic', type: 'oauth', parent_account_id: null, visible: false },
+    { platform: 'kiro', type: 'oauth', parent_account_id: null, visible: true },
+    { platform: 'kiro', type: 'apikey', parent_account_id: null, visible: false }
   ] as const)('shows only supported accounts: $platform $type $parent_account_id', async (row) => {
     const account = makeAccount(row)
     const wrapper = mount(AccountActionMenu, { props: { show: true, account, anchorRect }, attachTo: document.body })

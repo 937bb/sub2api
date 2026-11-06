@@ -32,15 +32,20 @@ func isMixedAccountForPlatform(a *Account, platform string) bool {
 	return a.Platform == PlatformAntigravity && (platform == PlatformAnthropic || platform == PlatformGemini) && a.IsMixedSchedulingEnabled()
 }
 
-// Explicit aliases may target any discovered Kiro model. Unmapped requests must
-// belong to Kiro's Claude family; GPT/Gemini names never silently change vendors.
-// The live account catalog is checked again before every inference request.
+// Explicit aliases may target any discovered Kiro model. Default routing accepts
+// the native model families verified in Kiro's catalog, without vendor remapping.
+// The selected account's live catalog remains authoritative before inference.
 func (a *Account) supportsKiroModel(model string) bool {
 	mapping := a.GetModelMapping()
 	if len(mapping) > 0 {
 		return mappingSupportsRequestedModel(mapping, model)
 	}
 	model = kiro.ModelID(model)
+	switch model {
+	case "auto", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "kimi-k3",
+		"deepseek-3.2", "minimax-m2.5", "minimax-m2.1", "glm-5", "qwen3-coder-next":
+		return true
+	}
 	return strings.HasPrefix(model, "claude-haiku-") || strings.HasPrefix(model, "claude-sonnet-") || strings.HasPrefix(model, "claude-opus-")
 }
 

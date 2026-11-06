@@ -145,7 +145,7 @@ func Region(c map[string]any, kind string) string {
 	return "us-east-1"
 }
 func Endpoint(c map[string]any) string {
-	return "https://q." + Region(c, "api") + ".amazonaws.com/generateAssistantResponse"
+	return "https://runtime." + Region(c, "api") + ".kiro.dev/"
 }
 func RefreshPayload(c map[string]any) (string, map[string]any) {
 	if String(c, "auth_method") == "idc" {
@@ -154,7 +154,8 @@ func RefreshPayload(c map[string]any) (string, map[string]any) {
 	return "https://prod." + Region(c, "auth") + ".auth.desktop.kiro.dev/refreshToken", map[string]any{"refreshToken": String(c, "refresh_token")}
 }
 func Headers(h http.Header, c map[string]any, token string) {
-	h.Set("Content-Type", "application/json")
+	h.Set("Content-Type", "application/x-amz-json-1.0")
+	h.Set("X-Amz-Target", "KiroRuntimeService.GenerateAssistantResponse")
 	h.Set("Accept", "application/vnd.amazon.eventstream")
 	h.Set("Authorization", "Bearer "+token)
 	h.Set("x-amzn-codewhisperer-optout", "true")

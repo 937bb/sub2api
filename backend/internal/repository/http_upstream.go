@@ -100,6 +100,7 @@ const (
 
 const (
 	upstreamProtocolModeDefault          = "default"
+	upstreamProtocolModeKiro             = "kiro_http1"
 	upstreamProtocolModeLongStreamH2     = "long_stream_h2"
 	upstreamProtocolModeOpenAIH1         = "openai_h1"
 	upstreamProtocolModeOpenAIH2         = "openai_h2"
@@ -992,6 +993,8 @@ func (s *httpUpstreamService) resolvePoolSettings(isolation string, accountConcu
 
 func (s *httpUpstreamService) applyProfilePoolSettings(settings poolSettings, profile service.HTTPUpstreamProfile) poolSettings {
 	switch profile {
+	case service.HTTPUpstreamProfileKiro:
+		settings.responseHeaderTimeout = 0
 	case service.HTTPUpstreamProfileOpenAI:
 		settings.responseHeaderTimeout = 0
 		if s != nil && s.cfg != nil && s.cfg.Gateway.OpenAIResponseHeaderTimeout > 0 {
@@ -1083,6 +1086,9 @@ func (s *httpUpstreamService) resolveOpenAIHTTP2Settings() openAIHTTP2Settings {
 }
 
 func (s *httpUpstreamService) resolveProtocolMode(profile service.HTTPUpstreamProfile, proxyKey string, parsedProxy *url.URL) string {
+	if profile == service.HTTPUpstreamProfileKiro {
+		return upstreamProtocolModeKiro
+	}
 	if profile == service.HTTPUpstreamProfileLongStream {
 		return upstreamProtocolModeLongStreamH2
 	}
@@ -1418,7 +1424,7 @@ func buildUpstreamTransport(settings poolSettings, proxyURL *url.URL, protocolMo
 		if _, err := enableHTTP2KeepAlive(transport, protocolMode); err != nil {
 			return nil, err
 		}
-	case upstreamProtocolModeOpenAIH1:
+	case upstreamProtocolModeKiro, upstreamProtocolModeOpenAIH1:
 		transport.ForceAttemptHTTP2 = false
 		transport.TLSNextProto = make(map[string]func(string, *tls.Conn) http.RoundTripper)
 	case upstreamProtocolModeOpenAIH1Fallback:

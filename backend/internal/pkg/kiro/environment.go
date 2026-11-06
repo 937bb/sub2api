@@ -40,9 +40,9 @@ func environment(c map[string]any, key string) string {
 // EnvironmentHeaders shares stable account identity across AWS data-plane calls.
 // The invocation ID identifies an individual request, never an account.
 func EnvironmentHeaders(h http.Header, c map[string]any, operation string) {
-	sdk, api, metrics := "1.0.34", "codewhispererstreaming", "E"
+	sdk, api, metrics := StreamingSDKVersion, "kiroruntime", "N"
 	if operation == "runtime" {
-		sdk, api, metrics = "1.0.0", "codewhispererruntime", "N,E"
+		sdk, api, metrics = RuntimeSDKVersion, "codewhispererruntime", "N,E"
 	}
 	identity := "KiroIDE-" + environment(c, "kiro_version") + "-" + String(c, "machine_id")
 	h.Set("x-amz-user-agent", "aws-sdk-js/"+sdk+" "+identity)
@@ -56,8 +56,8 @@ func RefreshHeaders(h http.Header, c map[string]any) {
 	h.Set("Content-Type", "application/json")
 	h.Set("Accept", "application/json, text/plain, */*")
 	if String(c, "auth_method") == "idc" {
-		h.Set("x-amz-user-agent", "aws-sdk-js/3.980.0 KiroIDE")
-		h.Set("User-Agent", fmt.Sprintf("aws-sdk-js/3.980.0 ua/2.1 os/%s lang/js md/nodejs#%s api/sso-oidc#3.980.0 m/E KiroIDE", environment(c, "system_version"), environment(c, "node_version")))
+		h.Set("x-amz-user-agent", "aws-sdk-js/"+SSOSDKVersion+" KiroIDE")
+		h.Set("User-Agent", fmt.Sprintf("aws-sdk-js/%s ua/2.1 os/%s lang/js md/nodejs#%s api/sso-oidc#%s m/E KiroIDE", SSOSDKVersion, environment(c, "system_version"), environment(c, "node_version"), SSOSDKVersion))
 		h.Set("amz-sdk-invocation-id", uuid.NewString())
 		h.Set("amz-sdk-request", "attempt=1; max=1")
 	} else {

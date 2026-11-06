@@ -133,3 +133,16 @@ func TestKiroGeminiTextRequestsUseGroupCache(t *testing.T) {
 	}
 	require.Equal(t, 2, upstream.requests, "only discovery and one generation should reach upstream")
 }
+
+func TestKiroNativeCatalogModelsKeepTheirIdentity(t *testing.T) {
+	a := fixedKiroAccount()
+	for _, model := range []string{"auto", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "kimi-k3", "deepseek-3.2", "minimax-m2.5", "minimax-m2.1", "glm-5", "qwen3-coder-next", "claude-opus-5-5[1m]"} {
+		require.True(t, a.IsModelSupported(model), model)
+		require.Equal(t, model, a.GetMappedModel(model), "native models must not silently substitute another model")
+	}
+	for _, model := range []string{"gpt-unknown", "gemini-3-pro", "unknown"} {
+		require.False(t, a.IsModelSupported(model), model)
+	}
+	a.Credentials["model_mapping"] = map[string]any{"claude-haiku-4.5": "claude-haiku-4.5"}
+	require.False(t, a.IsModelSupported("gpt-5.6-sol"), "an explicit account allowlist must still restrict native models")
+}
