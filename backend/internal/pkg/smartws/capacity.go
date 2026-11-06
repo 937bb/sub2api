@@ -16,6 +16,8 @@ const (
 
 type accountState struct {
 	used             time.Time
+	counters         map[string]uint64
+	accountIDs       map[int64]struct{}
 	sockets, opening int
 	waiters          []*capacityWaiter
 }
@@ -101,6 +103,7 @@ func (p *Pool) expiredIdleLocked(now time.Time) []*connection {
 			p.detachLocked(c)
 			stale = append(stale, c)
 			p.counters["idle_expired"]++
+			p.accountCountLocked(c.accountKey, "idle_expired")
 			if now.Sub(c.created) >= p.config.lifetime {
 				p.counters["idle_expired_lifetime"]++
 			} else {
@@ -193,7 +196,9 @@ func (p *Pool) dialDelayLocked(key, reason string, now time.Time) time.Duration 
 func (p *Pool) acquire(ctx context.Context, key, capability, account string, reusable bool, l *lease) (*connection, *dialPermit, error) {
 	var waiter *capacityWaiter
 	var state *accountState
-	deadline := time.Now().Add(p.config.wait)
+	started := time.Now()
+	deadline := started.Add(p.config.wait)
+	defer p.observeAdmission(account, started)
 	for {
 		p.mu.Lock()
 		if err := ctx.Err(); err != nil {
@@ -219,6 +224,12 @@ func (p *Pool) acquire(ctx context.Context, key, capability, account string, reu
 			closeDetached(stale)
 			return nil, nil, nil
 		}
+		if id, ok := ctx.Value(localAccountIDKey{}).(int64); ok && id > 0 && len(state.accountIDs) < 16 {
+			if state.accountIDs == nil {
+				state.accountIDs = make(map[int64]struct{})
+			}
+			state.accountIDs[id] = struct{}{}
+		}
 		var found *connection
 		keyCount := p.openingKeys[key]
 		for item := range p.connections {
@@ -235,6 +246,7 @@ func (p *Pool) acquire(ctx context.Context, key, capability, account string, reu
 			found.active = l
 			p.active++
 			p.counters["reused"]++
+			p.accountCountLocked(account, "reused")
 			if now.Sub(found.used) >= 60*time.Second {
 				p.counters["reused_after_60s_idle"]++
 			}
@@ -290,6 +302,7 @@ func (p *Pool) acquire(ctx context.Context, key, capability, account string, reu
 					stale = append(stale, victim)
 					p.counters["idle_reclaimed"]++
 					p.counters[victimReason]++
+					p.accountCountLocked(victim.accountKey, victimReason)
 					if now.Sub(victim.used) < 30*time.Second {
 						p.counters["idle_reclaimed_under_30s"]++
 					}
@@ -320,8 +333,16 @@ func (p *Pool) acquire(ctx context.Context, key, capability, account string, reu
 		// were considered above; neither identity nor account budgets change.
 		recentHTTPError := p.dials[account] != nil && p.dials[account].httpErrorUntil.After(now)
 		if !immediate && !recentHTTPError && (!reusable || keyCount == 0) {
-			p.counters["cold_identity_fast_fallback"]++
-			immediate = true
+			if reusable && p.config.coldWait > 0 {
+				coldDeadline := started.Add(p.config.coldWait)
+				if coldDeadline.Before(deadline) {
+					deadline = coldDeadline
+				}
+			} else {
+				p.counters["cold_identity_fast_fallback"]++
+				p.accountCountLocked(account, "cold_identity_fast_fallback")
+				immediate = true
+			}
 		}
 		if immediate || !now.Before(deadline) {
 			if waiter != nil && !now.Before(deadline) {
@@ -329,6 +350,7 @@ func (p *Pool) acquire(ctx context.Context, key, capability, account string, reu
 			}
 			p.removeWaiterLocked(state, waiter)
 			p.fallbackCountLocked(reason)
+			p.accountCountLocked(account, "fallback_"+reason)
 			p.mu.Unlock()
 			closeDetached(stale)
 			return nil, nil, nil
@@ -337,6 +359,7 @@ func (p *Pool) acquire(ctx context.Context, key, capability, account string, reu
 			if p.waiting >= p.config.maxWaiters || len(state.waiters) >= p.config.accountWaiters {
 				p.counters["wait_queue_full"]++
 				p.fallbackCountLocked(reason)
+				p.accountCountLocked(account, "fallback_"+reason)
 				p.mu.Unlock()
 				closeDetached(stale)
 				return nil, nil, nil
@@ -344,6 +367,7 @@ func (p *Pool) acquire(ctx context.Context, key, capability, account string, reu
 			if l.requestBytes > p.config.maxWaitingBytes-p.waitingBytes {
 				p.counters["wait_bytes_full"]++
 				p.fallbackCountLocked(reason)
+				p.accountCountLocked(account, "fallback_"+reason)
 				p.mu.Unlock()
 				closeDetached(stale)
 				return nil, nil, nil
@@ -353,6 +377,7 @@ func (p *Pool) acquire(ctx context.Context, key, capability, account string, reu
 			p.waiting++
 			p.waitingBytes += l.requestBytes
 			p.counters["wait_started"]++
+			p.accountCountLocked(account, "wait_started")
 		}
 		if delay > deadline.Sub(now) {
 			delay = deadline.Sub(now)

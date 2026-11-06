@@ -21,9 +21,27 @@ export interface LiveCapability {
   reason?: string
 }
 
+export interface SmartWSAccountRuntime {
+  account_hash: string
+  account_ids: number[]
+  connections: number
+  active: number
+  idle: number
+  connecting: number
+  waiting: number
+  waiting_bytes: number
+  counters: Record<string, number>
+}
+export interface SmartWSRuntime {
+  scope?: 'process'
+  tuning_error?: string
+  accounts?: SmartWSAccountRuntime[]
+}
+
 export interface SmartWSPolicy {
   enabled: boolean
   revision: number
+  runtime?: SmartWSRuntime
 }
 
 export async function getSmartWS(id: number): Promise<SmartWSPolicy> {

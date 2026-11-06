@@ -56,6 +56,7 @@ func (b *eventBody) failure(reason string) (int, error) {
 	b.successful = false
 	b.mu.Unlock()
 	b.pool.count("stream_failed")
+	b.pool.accountCount(b.connection.accountKey, "stream_failed")
 	switch size := b.lease.requestBytes; {
 	case size <= 64<<10:
 		b.pool.count("stream_failure_request_le_64k")
@@ -229,8 +230,10 @@ func (b *eventBody) Read(destination []byte) (int, error) {
 		if terminal {
 			if success {
 				b.pool.count("completed")
+				b.pool.accountCount(b.connection.accountKey, "completed")
 			} else {
 				b.pool.count("terminal_error")
+				b.pool.accountCount(b.connection.accountKey, "terminal_error")
 			}
 		}
 	}

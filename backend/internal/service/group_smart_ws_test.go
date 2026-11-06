@@ -186,6 +186,7 @@ func TestGroupSmartWSAccountOffAndHTTPBridgeOverrideLegacyEnabled(t *testing.T) 
 	ctx := context.WithValue(context.Background(), ctxkey.Group, &Group{ID: 7, Platform: PlatformOpenAI, Hydrated: true, Status: StatusActive})
 	ctx = context.WithValue(ctx, ctxkey.UserID, int64(11))
 	ctx, _ = beginGroupSmartWSAttempt(ctx, c)
+	before := groupSmartWSEligibilitySnapshot()["skip_account_mode"]
 	for _, mode := range []string{OpenAIWSIngressModeOff, OpenAIWSIngressModeHTTPBridge} {
 		a := &Account{Concurrency: 100, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Extra: map[string]any{
 			"openai_oauth_responses_websockets_v2_enabled": true,
@@ -197,4 +198,5 @@ func TestGroupSmartWSAccountOffAndHTTPBridgeOverrideLegacyEnabled(t *testing.T) 
 		require.False(t, handled)
 		require.Zero(t, repo.reads, "disabled account must not reach group policy or upstream pool")
 	}
+	require.Equal(t, before+2, groupSmartWSEligibilitySnapshot()["skip_account_mode"])
 }

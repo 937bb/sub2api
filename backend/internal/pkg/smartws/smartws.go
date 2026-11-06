@@ -42,6 +42,7 @@ type poolConfig struct {
 	adaptive                                    bool
 	perAccount, hardCapacity                    int
 	wait                                        time.Duration
+	coldWait                                    time.Duration
 	maxWaiters, accountWaiters, maxWaitingBytes int
 	idle, lifetime, handshake                   time.Duration
 	allowed                                     func(*url.URL) bool
@@ -95,12 +96,16 @@ type frame struct {
 
 // NewPool only permits the existing ChatGPT Codex HTTPS Responses endpoint.
 func NewPool() *Pool {
-	return newPool(poolConfig{capacity: 128, perKey: 64, adaptive: true, perAccount: 256, hardCapacity: 4096,
+	return newPool(defaultPoolConfig())
+}
+
+func defaultPoolConfig() poolConfig {
+	return poolConfig{capacity: 128, perKey: 64, adaptive: true, perAccount: 256, hardCapacity: 4096,
 		wait: 2500 * time.Millisecond, maxWaiters: 256, accountWaiters: 32, maxWaitingBytes: 64 << 20, idle: 300 * time.Second,
 		lifetime: 20 * time.Minute, handshake: 5 * time.Second, allowed: productionTarget,
 		dialer: &websocket.Dialer{HandshakeTimeout: 5 * time.Second, EnableCompression: false,
 			ReadBufferSize: 16 << 10, WriteBufferSize: 16 << 10,
-			NetDialContext: (&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}).DialContext}})
+			NetDialContext: (&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}).DialContext}}
 }
 
 // Conn is the socket contract required by the resident reader and exclusive lease.
@@ -153,6 +158,10 @@ func (p *Pool) Stats() map[string]any {
 		"wait_account_limit": p.config.accountWaiters, "wait_bytes_limit": p.config.maxWaitingBytes,
 		"request_limit_bytes": maxRequestBytes, "idle_timeout_seconds": p.config.idle.Seconds(),
 		"connection_lifetime_seconds": p.config.lifetime.Seconds()}
+	result["scope"] = "process"
+	result["cold_wait_limit_ms"] = p.config.coldWait.Milliseconds()
+	result["accounts"] = p.accountSnapshotsLocked()
+	result["dial_concurrency_per_account"] = p.config.dialConcurrent
 	result["dial_concurrency_per_capability"] = p.config.dialConcurrent
 	result["dial_rate_per_second"] = p.config.dialRate
 	result["dial_burst"] = p.config.dialBurst
@@ -243,6 +252,15 @@ func (c *connection) readLoop() {
 		// unavailable under the same lock used by acquisition. Closing later
 		// must never race a fresh lease onto a known-dead connection.
 		if err != nil || current == nil {
+			if _, present := c.pool.connections[c]; present {
+				reason := "reader_idle_closed"
+				if current != nil {
+					reason = "reader_active_error"
+				} else if err == nil {
+					reason = "reader_unsolicited_frame"
+				}
+				c.pool.accountCountLocked(c.accountKey, reason)
+			}
 			c.pool.detachLocked(c)
 			c.pool.signalLocked()
 		}
@@ -283,6 +301,18 @@ func (p *Pool) release(c *connection, l *lease, reuse bool, responseID string) {
 	_, present := p.connections[c]
 	keep := reuse && c.reusable && present && !p.closed && !p.expired(c, c.used)
 	if !keep {
+		reason := "closed_incomplete"
+		switch {
+		case p.closed:
+			reason = "closed_shutdown"
+		case !present:
+			reason = "closed_detached"
+		case !c.reusable:
+			reason = "closed_unscoped"
+		case p.expired(c, c.used):
+			reason = "closed_lifetime"
+		}
+		p.accountCountLocked(c.accountKey, reason)
 		p.detachLocked(c)
 	}
 	p.signalLocked()
@@ -492,6 +522,10 @@ func (p *Pool) Try(req *http.Request, proxyURL, scope string) (*http.Response, b
 			p.recordHandshake(key, capabilityKey, headers, resp, sample, complete, outcome)
 			p.mu.Lock()
 			p.finishDialLocked(permit, outcome, time.Now())
+			p.accountCountLocked(accountKey, "handshake_"+outcome)
+			if resp != nil && resp.StatusCode == http.StatusTooManyRequests {
+				p.accountCountLocked(accountKey, "handshake_429")
+			}
 			p.finishOpeningLocked(key, accountKey)
 			p.mu.Unlock()
 			if ws != nil {
@@ -549,6 +583,7 @@ func (p *Pool) Try(req *http.Request, proxyURL, scope string) (*http.Response, b
 		p.accounts[accountKey].sockets++
 		p.active++
 		p.counters["opened"]++
+		p.accountCountLocked(accountKey, "opened")
 		p.mu.Unlock()
 		go c.readLoop()
 	}

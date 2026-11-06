@@ -10,6 +10,29 @@
         {{ t('admin.groups.smartWS.enable') }}
       </label>
       <p class="text-sm text-gray-500">{{ t('admin.groups.smartWS.hint') }}</p>
+      <section v-if="policy?.runtime?.accounts" class="space-y-2" data-testid="smartws-runtime">
+        <h3 class="text-sm font-medium">{{ t('admin.groups.smartWS.runtimeTitle') }}</h3>
+        <p class="text-xs text-gray-500">{{ t('admin.groups.smartWS.runtimeHint') }}</p>
+        <p v-if="policy.runtime.tuning_error" role="alert" class="text-sm text-amber-600">{{ t('admin.groups.smartWS.tuningError') }} {{ policy.runtime.tuning_error }}</p>
+        <div class="max-h-64 overflow-auto">
+          <table class="w-full whitespace-nowrap text-left text-xs">
+            <thead><tr>
+              <th v-for="key in runtimeColumns" :key="key" class="px-2 py-2 font-medium">{{ t(`admin.groups.smartWS.${key}`) }}</th>
+            </tr></thead>
+            <tbody><tr v-for="row in policy.runtime.accounts" :key="row.account_hash" class="border-t border-gray-200 dark:border-dark-600">
+              <td class="px-2 py-2">{{ row.account_ids.length ? row.account_ids.map(id => `#${id}`).join(', ') : row.account_hash.slice(0, 12) }}</td>
+              <td class="px-2 py-2">{{ row.active }}</td>
+              <td class="px-2 py-2">{{ row.idle }}</td>
+              <td class="px-2 py-2">{{ row.connecting }}</td>
+              <td class="px-2 py-2">{{ row.waiting }}</td>
+              <td class="px-2 py-2">{{ reuseRate(row.counters) }}</td>
+              <td class="px-2 py-2">{{ row.counters.completed || 0 }}</td>
+              <td class="px-2 py-2">{{ row.counters.handshake_429 || 0 }}</td>
+            </tr></tbody>
+          </table>
+          <p v-if="!policy.runtime.accounts.length" class="py-2 text-xs text-gray-500">{{ t('admin.groups.smartWS.runtimeEmpty') }}</p>
+        </div>
+      </section>
     </div>
     <template #footer>
       <button class="btn btn-secondary" :disabled="saving" @click="close">{{ t('common.cancel') }}</button>
@@ -34,6 +57,12 @@ const loading = ref(false)
 const saving = ref(false)
 const error = ref('')
 let generation = 0
+const runtimeColumns = ['runtimeAccount', 'runtimeActive', 'runtimeIdle', 'runtimeConnecting', 'runtimeWaiting', 'runtimeReuse', 'runtimeCompleted', 'runtime429']
+function reuseRate(counters: Record<string, number>): string {
+  const reused = counters.reused || 0
+  const total = reused + (counters.opened || 0)
+  return total ? `${(reused / total * 100).toFixed(1)}%` : '—'
+}
 
 watch(() => [props.show, props.group?.id] as const, async ([show, id]) => {
   const current = ++generation
