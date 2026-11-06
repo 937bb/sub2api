@@ -258,6 +258,9 @@ func TestAccountProxyPoolCompatibilityAndFailClosed(t *testing.T) {
 	_, err = accountProxyRoutes(a, "")
 	require.Error(t, err)
 	a.Extra = nil
+	_, err = accountProxyRoutes(a, "legacy")
+	require.ErrorContains(t, err, "unavailable")
+	a.ProxyID = nil
 	routes, err = accountProxyRoutes(a, "legacy")
 	require.NoError(t, err)
 	require.Equal(t, []string{"legacy"}, routes)
@@ -387,4 +390,46 @@ func TestAccountProxyPoolValidationAndLegacyEdit(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, updated.ProxyID)
 	require.Empty(t, AccountProxyFallbackIDs(updated.Extra))
+}
+
+func TestAccountFixedProxyRebindingRejectsPinnedOldSocket(t *testing.T) {
+	a := poolTestAccount()
+	a.Extra = nil
+	a.FallbackProxies = nil
+	a.Proxy.Username = "fixed-account"
+	a.Proxy.Password = "old-ipv6-lease"
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIWS.MaxConnsPerAccount = 2
+	pool := newOpenAIWSConnPool(cfg)
+	defer pool.Close()
+	dialer := &rotationTestDialer{}
+	pool.setClientDialerForTest(dialer)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	req := openAIWSAcquireRequest{Account: a, WSURL: "wss://example.com/v1/responses"}
+	lease, err := pool.Acquire(ctx, req)
+	require.NoError(t, err)
+	oldID := lease.ConnID()
+	lease.Release()
+	next := *a
+	proxy := *a.Proxy
+	proxy.Password = "new-ipv6-lease"
+	require.NotEqual(t, a.Proxy.URL(), proxy.URL())
+	next.Proxy = &proxy
+	req.Account = &next
+	req.ForcePreferredConn = true
+	req.PreferredConnID = oldID
+	_, err = pool.Acquire(ctx, req)
+	require.ErrorIs(t, err, errOpenAIWSPreferredConnUnavailable)
+	req.ForcePreferredConn = false
+	req.PreferredConnID = ""
+	lease, err = pool.Acquire(ctx, req)
+	require.NoError(t, err)
+	require.NotEqual(t, oldID, lease.ConnID())
+	require.Equal(t, proxy.URL(), lease.conn.handshakeCompatibility.selectedProxy)
+	lease.Release()
+	next.Proxy = nil
+	_, err = pool.Acquire(ctx, req)
+	require.ErrorContains(t, err, "unavailable")
+	require.Equal(t, []string{a.Proxy.URL(), proxy.URL()}, dialer.routes)
 }

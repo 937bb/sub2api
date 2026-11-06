@@ -381,6 +381,10 @@
 
           <template #cell-actions="{ row }">
             <div class="console-row-actions">
+              <button v-if="row.platform === 'openai'" data-testid="group-smart-ws" @click="smartWSGroup = row; showSmartWSModal = true" class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700">
+                <Icon name="bolt" size="sm" />
+                <span class="text-xs">{{ t('admin.groups.smartWS.action') }}</span>
+              </button>
               <button
                 @click="handleEdit(row)"
                 :title="t('common.edit')"
@@ -4243,6 +4247,8 @@
     />
 
     <!-- Group RPM Overrides Modal -->
+    <GroupSmartWSModal :show="showSmartWSModal" :group="smartWSGroup" @close="showSmartWSModal = false" />
+
     <GroupRPMOverridesModal
       :show="showRPMOverridesModal"
       :group="rpmOverridesGroup"
@@ -4296,6 +4302,7 @@ import { platformLabel } from "@/utils/platformColors";
 import Icon from "@/components/icons/Icon.vue";
 import GroupI18nField from "@/components/admin/group/GroupI18nField.vue";
 import GroupRateMultipliersModal from "@/components/admin/group/GroupRateMultipliersModal.vue";
+import GroupSmartWSModal from "@/components/admin/group/GroupSmartWSModal.vue";
 import GroupRPMOverridesModal from "@/components/admin/group/GroupRPMOverridesModal.vue";
 import GroupCapacityBadge from "@/components/common/GroupCapacityBadge.vue";
 import ReasoningEffortPolicyFields from "@/components/admin/group/ReasoningEffortPolicyFields.vue";
@@ -4838,6 +4845,8 @@ const deletingGroup = ref<AdminGroup | null>(null);
 const duplicatingGroupIds = reactive(new Set<number>());
 const showRateMultipliersModal = ref(false);
 const rateMultipliersGroup = ref<AdminGroup | null>(null);
+const showSmartWSModal = ref(false);
+const smartWSGroup = ref<AdminGroup | null>(null);
 const showRPMOverridesModal = ref(false);
 const rpmOverridesGroup = ref<AdminGroup | null>(null);
 const sortableGroups = ref<AdminGroup[]>([]);

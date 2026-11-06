@@ -32,7 +32,9 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	body []byte,
 	promptCacheKey string,
 	defaultMappedModel string,
-) (*OpenAIForwardResult, error) {
+) (smartWSResult *OpenAIForwardResult, smartWSError error) {
+	ctx, smartWSAttempt := beginGroupSmartWSAttempt(ctx, c)
+	defer func() { smartWSError = finishGroupSmartWSAttempt(smartWSAttempt, smartWSError) }()
 	if account.Platform == PlatformKiro {
 		return s.forwardKiroCompatible(ctx, c, account, body, "messages")
 	}

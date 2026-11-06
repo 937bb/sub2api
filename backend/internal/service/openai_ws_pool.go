@@ -1117,15 +1117,22 @@ type openAIWSAcquireQueueWait struct {
 }
 
 func (p *openAIWSConnPool) Acquire(ctx context.Context, req openAIWSAcquireRequest) (*openAIWSConnLease, error) {
-	if req.Account != nil && len(AccountProxyFallbackIDs(req.Account.Extra)) > 0 && !req.ForcePreferredConn {
+	if req.Account != nil && req.Account.Platform == PlatformOpenAI {
 		var err error
-		req.proxyRoutes, err = rotatingAccountProxyRoutes(req.Account, req.ProxyURL)
+		if req.ForcePreferredConn {
+			req.proxyRoutes, err = accountProxyRoutes(req.Account, req.ProxyURL)
+		} else {
+			req.proxyRoutes, err = rotatingAccountProxyRoutes(req.Account, req.ProxyURL)
+		}
 		if err != nil {
 			return nil, err
 		}
 	}
 	if p != nil {
 		p.metrics.acquireTotal.Add(1)
+	}
+	if len(req.proxyRoutes) == 1 {
+		req.ProxyURL = req.proxyRoutes[0]
 	}
 	queueWait := &openAIWSAcquireQueueWait{}
 	lease, err := p.acquire(ctx, cloneOpenAIWSAcquireRequest(req), 0, queueWait)
@@ -2429,7 +2436,7 @@ func normalizeOpenAIWSHandshakeCompatibility(account *Account, headers http.Head
 		chatGPTAccountID: codexIdentityHeaderValue(headers, "ChatGPT-Account-ID"),
 		fedRAMP:          codexIdentityHeaderValue(headers, "X-OpenAI-Fedramp"),
 	}
-	if account != nil && len(AccountProxyFallbackIDs(account.Extra)) > 0 {
+	if account != nil && (account.ProxyID != nil || len(AccountProxyFallbackIDs(account.Extra)) > 0) {
 		routes, err := accountProxyRoutes(account, "")
 		if err != nil {
 			key.proxyPool = "unavailable"

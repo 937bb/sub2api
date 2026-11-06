@@ -72,7 +72,9 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	promptCacheKey string,
 	defaultMappedModel string,
 	compatPromptCacheTenantIsolated bool,
-) (*OpenAIForwardResult, error) {
+) (smartWSResult *OpenAIForwardResult, smartWSError error) {
+	ctx, smartWSAttempt := beginGroupSmartWSAttempt(ctx, c)
+	defer func() { smartWSError = finishGroupSmartWSAttempt(smartWSAttempt, smartWSError) }()
 	if account.Platform == PlatformKiro {
 		return s.forwardKiroCompatible(ctx, c, account, body, "chat")
 	}

@@ -6,13 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 	"golang.org/x/sync/singleflight"
-	"sync"
 )
 
 const (
@@ -117,6 +117,10 @@ type WebSearchManagerBuilder func(cfg *WebSearchEmulationConfig, proxyURLs map[i
 
 // SettingService 系统设置服务
 type SettingService struct {
+	groupSmartWSMu              sync.Mutex
+	groupSmartWSCache           map[int64]groupSmartWSCacheEntry
+	groupSmartWSEpoch           uint64
+	groupSmartWSLoads           singleflight.Group
 	scopedAdminKeyRepo          ScopedAdminKeyRepository
 	settingRepo                 SettingRepository
 	defaultSubGroupReader       DefaultSubscriptionGroupReader

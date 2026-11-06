@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptrace"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -76,21 +77,39 @@ func (s *adminServiceImpl) configureAccountFallbackProxies(ctx context.Context, 
 // accountProxyRoutes never falls back to a direct connection for a configured pool.
 // Missing/deleted/inactive proxies are omitted; no usable route is a hard error.
 func accountProxyRoutes(account *Account, legacyURL string) ([]string, error) {
-	if account == nil || account.Platform != PlatformOpenAI || len(AccountProxyFallbackIDs(account.Extra)) == 0 {
+	if account == nil || account.Platform != PlatformOpenAI {
 		return []string{legacyURL}, nil
+	}
+	if len(AccountProxyFallbackIDs(account.Extra)) == 0 {
+		if account.ProxyID == nil {
+			return []string{legacyURL}, nil
+		}
+		p := account.Proxy
+		if p == nil || p.ID != *account.ProxyID || !usableAccountProxy(p) {
+			return nil, errors.New("bound account proxy unavailable")
+		}
+		return []string{p.URL()}, nil
 	}
 	urls := []string{}
 	seen := map[int64]bool{}
 	add := func(p *Proxy) {
-		if p == nil || seen[p.ID] || !p.IsActive() || p.IsExpired(time.Now()) {
+		if !usableAccountProxy(p) || seen[p.ID] {
 			return
 		}
 		seen[p.ID] = true
 		urls = append(urls, p.URL())
 	}
-	add(account.Proxy)
+	if account.ProxyID != nil && account.Proxy != nil && account.Proxy.ID == *account.ProxyID {
+		add(account.Proxy)
+	}
+	allowed := make(map[int64]bool)
+	for _, id := range AccountProxyFallbackIDs(account.Extra) {
+		allowed[id] = true
+	}
 	for _, p := range account.FallbackProxies {
-		add(p)
+		if p != nil && allowed[p.ID] {
+			add(p)
+		}
 	}
 	if len(urls) == 0 {
 		return nil, errors.New("no available proxy in account proxy pool")
@@ -224,4 +243,8 @@ func refreshWithAccountProxyFallback(ctx context.Context, account *Account, lega
 		}
 	}
 	return info, err
+}
+
+func usableAccountProxy(p *Proxy) bool {
+	return p != nil && p.IsActive() && !p.IsExpired(time.Now()) && strings.TrimSpace(p.Host) != "" && p.Port > 0 && p.Port <= 65535
 }

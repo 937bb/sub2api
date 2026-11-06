@@ -18,7 +18,9 @@ import (
 )
 
 // Forward forwards request to OpenAI API
-func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
+func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (smartWSResult *OpenAIForwardResult, smartWSError error) {
+	ctx, smartWSAttempt := beginGroupSmartWSAttempt(ctx, c)
+	defer func() { smartWSError = finishGroupSmartWSAttempt(smartWSAttempt, smartWSError) }()
 	if account.Platform == PlatformKiro {
 		return s.forwardKiroCompatible(ctx, c, account, body, "responses")
 	}
