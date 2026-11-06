@@ -340,6 +340,9 @@ func (s *GatewayService) forwardKiro(ctx context.Context, c *gin.Context, accoun
 	}
 	out, err := kiro.DecodeWithUsageFinalizer(resp.Body, parsed.Model, inputTokens, emitter, kiroCacheFinalizer(ctx, cache, groupID, cacheKey, policy, useCache), toolNames)
 	if err != nil {
+		if writeKiroEmptyResponse(c, err, "messages") {
+			return nil, err
+		}
 		if parsed.Stream && c.Writer.Written() {
 			_ = emit("error", gin.H{"type": "error", "error": gin.H{"type": "api_error", "message": "Kiro stream interrupted"}})
 		}

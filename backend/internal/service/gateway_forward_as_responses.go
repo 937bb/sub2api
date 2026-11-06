@@ -114,6 +114,7 @@ func (s *GatewayService) ForwardAsResponses(
 	if account.Platform == PlatformKiro {
 		resp, err := s.kiroAsAnthropic(ctx, c, account, anthropicBody, parsed, mappedModel)
 		if err != nil {
+			writeKiroEmptyResponse(c, err, "responses")
 			return nil, err
 		}
 		defer func() { _ = resp.Body.Close() }()

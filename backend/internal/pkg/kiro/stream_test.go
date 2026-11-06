@@ -16,6 +16,7 @@ func TestNoContentDiagnosticsNeverCompleteOrBill(t *testing.T) {
 		want   StreamSummary
 	}{
 		{name: "empty"},
+		{name: "context only", frames: frameForTest("contextUsageEvent", `{"contextUsagePercentage":0.68}`), want: StreamSummary{Frames: 1, Context: 1}},
 		{name: "reasoning only", frames: frameForTest("reasoningContentEvent", `{"signature":"private-signature","text":"private-reasoning"}`), want: StreamSummary{Frames: 1, Reasoning: 1}},
 		{name: "empty assistant", frames: frameForTest("assistantResponseEvent", `{"content":""}`), want: StreamSummary{Frames: 1, Assistant: 1}},
 		{name: "unrecognized", frames: frameForTest("private-event-name", `{"content":"private-content"}`), want: StreamSummary{Frames: 1, Other: 1}},
@@ -34,6 +35,7 @@ func TestNoContentDiagnosticsNeverCompleteOrBill(t *testing.T) {
 			require.NotContains(t, err.Error(), "private")
 			require.Empty(t, out.Content)
 			require.False(t, finalized)
+			require.NotContains(t, emitted, "message_start")
 			require.NotContains(t, emitted, "message_stop")
 			require.NotContains(t, emitted, "message_delta")
 		})

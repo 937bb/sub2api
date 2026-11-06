@@ -33,6 +33,7 @@ func (s *GatewayService) ForwardKiroGemini(ctx context.Context, c *gin.Context, 
 	mapped := a.GetMappedModel(model)
 	resp, err := s.kiroAsAnthropic(ctx, c, a, raw, parsed, mapped)
 	if err != nil {
+		writeKiroEmptyResponse(c, err, "gemini")
 		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()

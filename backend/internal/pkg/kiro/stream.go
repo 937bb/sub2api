@@ -154,7 +154,7 @@ func DecodeWithUsageFinalizer(r io.Reader, model string, inputTokens int, emit E
 }
 
 func decode(r io.Reader, model string, inputTokens int, emit Emit, finalize func(*Response), toolNames ...map[string]string) (*Response, error) {
-	emit = serialToolEmitter(emit)
+	emit = startOnContent(serialToolEmitter(emit))
 	out := &Response{ID: "msg_" + strings.ReplaceAll(uuid.NewString(), "-", ""), Type: "message", Role: "assistant", Model: model, Content: []Block{}, StopReason: "end_turn", Usage: Usage{InputTokens: inputTokens}, UsageSource: "estimated"}
 	defer func() {
 		if out.UsageSource == "estimated" {
@@ -363,6 +363,28 @@ func decode(r io.Reader, model string, inputTokens int, emit Emit, finalize func
 		return out, err
 	}
 	return out, nil
+}
+
+// Do not publish a successful response envelope before receiving content.
+// Context, metering and reasoning-only streams may end without an answer.
+func startOnContent(emit Emit) Emit {
+	if emit == nil {
+		return nil
+	}
+	var start any
+	return func(name string, data any) error {
+		if name == "message_start" {
+			start = data
+			return nil
+		}
+		if start != nil {
+			if err := emit("message_start", start); err != nil {
+				return err
+			}
+			start = nil
+		}
+		return emit(name, data)
+	}
 }
 
 // Replay emits only previously completed, text-only responses. No upstream tokens are charged.

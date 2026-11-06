@@ -156,9 +156,11 @@ func (s *GatewayService) kiroAsAnthropic(ctx context.Context, c *gin.Context, a 
 	}
 	c.Header("X-Sub2api-Usage-Source", "estimated")
 	reader, writer := io.Pipe()
+	ready := make(chan error, 1)
 	go func() {
 		defer cancel()
 		defer func() { _ = resp.Body.Close() }()
+		started := false
 		emit := func(name string, event any) error {
 			if name == "message_stop" {
 				return nil
@@ -167,10 +169,20 @@ func (s *GatewayService) kiroAsAnthropic(ctx context.Context, c *gin.Context, a 
 			if e != nil {
 				return e
 			}
+			if !started {
+				// Decode delays message_start until actual text or a tool call.
+				started = true
+				ready <- nil
+			}
 			_, e = fmt.Fprintf(writer, "event: %s\ndata: %s\n\n", name, b)
 			return e
 		}
 		_, decodeErr := kiro.DecodeWithUsageFinalizer(resp.Body, model, input, emit, kiroCacheFinalizer(upstreamCtx, cache, groupID, cacheKey, policy, useCache), toolNames)
+		if !started {
+			ready <- decodeErr
+			_ = writer.CloseWithError(decodeErr)
+			return
+		}
 		if decodeErr == nil {
 			_, decodeErr = fmt.Fprint(writer, "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
 		}
@@ -179,6 +191,18 @@ func (s *GatewayService) kiroAsAnthropic(ctx context.Context, c *gin.Context, a 
 		}
 		_ = writer.CloseWithError(decodeErr)
 	}()
+	select {
+	case err := <-ready:
+		if err != nil {
+			_ = reader.Close()
+			return nil, err
+		}
+	case <-ctx.Done():
+		cancel()
+		_ = resp.Body.Close()
+		_ = reader.Close()
+		return nil, ctx.Err()
+	}
 	headers := resp.Header.Clone()
 	headers.Set("X-Request-Id", "kiro_"+uuid.NewString())
 	headers.Set("Content-Type", "text/event-stream")
