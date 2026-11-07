@@ -604,6 +604,8 @@ gateway:
     # Slot cleanup interval (duration)
     # 并发槽位清理周期（时间段）
     slot_cleanup_interval: 30s
+    # Enable when multiple runtimes share Redis; expiry cleanup still runs.
+    skip_startup_slot_cleanup: false
     # 是否允许受控回源到 DB（默认 true，保持现有行为）
     db_fallback_enabled: true
     # 受控回源超时（秒），0 表示不额外收紧超时
