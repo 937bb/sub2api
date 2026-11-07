@@ -3,11 +3,14 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -105,7 +108,7 @@ func TestToModelPlazaGroupDTO_UserRateAndFieldWhitelist(t *testing.T) {
 	}
 
 	// 有专属倍率:user_rate_multiplier 序列化输出
-	dto := toModelPlazaGroupDTO(&g, map[int64]float64{2: 0.5}, nil)
+	dto := toModelPlazaGroupDTO(&g, map[int64]float64{2: 0.5})
 	raw, err := json.Marshal(dto)
 	require.NoError(t, err)
 	var decoded map[string]any
@@ -144,7 +147,7 @@ func TestToModelPlazaGroupDTO_UserRateAndFieldWhitelist(t *testing.T) {
 	require.False(t, hasTimePricing, "无分时时不输出 time_pricing")
 
 	// 无专属倍率:user_rate_multiplier 整个字段省略
-	dtoNoRate := toModelPlazaGroupDTO(&g, nil, nil)
+	dtoNoRate := toModelPlazaGroupDTO(&g, nil)
 	rawNoRate, err := json.Marshal(dtoNoRate)
 	require.NoError(t, err)
 	var decodedNoRate map[string]any
@@ -184,7 +187,7 @@ func TestToModelPlazaGroupDTO_LongContextTiersAndBasis(t *testing.T) {
 		}},
 	}
 
-	raw, err := json.Marshal(toModelPlazaGroupDTO(&g, nil, nil))
+	raw, err := json.Marshal(toModelPlazaGroupDTO(&g, nil))
 	require.NoError(t, err)
 	var decoded map[string]any
 	require.NoError(t, json.Unmarshal(raw, &decoded))
@@ -228,7 +231,7 @@ func TestToModelPlazaGroupDTO_TimePricing(t *testing.T) {
 			}},
 		}},
 	}
-	raw, err := json.Marshal(toModelPlazaGroupDTO(&g, nil, nil))
+	raw, err := json.Marshal(toModelPlazaGroupDTO(&g, nil))
 	require.NoError(t, err)
 	var decoded map[string]any
 	require.NoError(t, json.Unmarshal(raw, &decoded))
@@ -260,5 +263,45 @@ func TestFilterPlazaVisibleGroups_SubscribedExclusiveGroup(t *testing.T) {
 		visible := filterPlazaVisibleGroups(groups, map[int64]struct{}{42: {}}, restricted)
 		require.Len(t, visible, 1)
 		require.Equal(t, int64(42), visible[0].ID)
+	}
+}
+
+type plazaVarySettingRepo struct{ service.SettingRepository }
+
+func (plazaVarySettingRepo) GetMultiple(context.Context, []string) (map[string]string, error) {
+	return map[string]string{service.SettingKeyModelPlazaEnabled: "true"}, nil
+}
+
+type plazaVaryChannelRepo struct{ service.ChannelRepository }
+
+func (plazaVaryChannelRepo) ListAll(context.Context) ([]service.Channel, error) { return nil, nil }
+
+type plazaVaryGroupRepo struct{ service.GroupRepository }
+
+func (plazaVaryGroupRepo) ListActive(context.Context) ([]service.Group, error) { return nil, nil }
+
+func TestModelPlazaHandler_VaryKeepsCORSOrigin(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := NewModelPlazaHandler(
+		service.NewModelPlazaService(plazaVaryChannelRepo{}, plazaVaryGroupRepo{}, nil, nil, nil),
+		nil,
+		service.NewSettingService(plazaVarySettingRepo{}, &config.Config{}),
+	)
+	r := gin.New()
+	r.Use(middleware.CORS(config.CORSConfig{AllowedOrigins: []string{"https://a.example", "https://b.example"}}))
+	r.GET("/api/v1/model-plaza", h.Get)
+
+	for _, origin := range []string{"https://a.example", "https://b.example"} {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/model-plaza", nil)
+		req.Header.Set("Origin", origin)
+		req.Header.Set("Accept-Language", "en")
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		require.Equal(t, origin, w.Header().Get("Access-Control-Allow-Origin"))
+		// 共享缓存需同时按来源与语言区分，否则 A 来源的响应可能被复用给 B。
+		require.Equal(t, []string{"Origin", "Accept-Language"}, w.Header().Values("Vary"))
 	}
 }

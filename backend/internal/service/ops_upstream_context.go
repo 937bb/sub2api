@@ -23,7 +23,6 @@ const (
 	OpsUpstreamModelKey        = "ops_upstream_model"
 
 	// Optional stage latencies (milliseconds) for troubleshooting and alerting.
-	OpsRequestDurationMsKey  = "ops_request_duration_ms"
 	OpsAuthLatencyMsKey      = "ops_auth_latency_ms"
 	OpsRoutingLatencyMsKey   = "ops_routing_latency_ms"
 	OpsUpstreamLatencyMsKey  = "ops_upstream_latency_ms"
@@ -52,6 +51,14 @@ const (
 	// ResponseCommittedKey 由 handleErrorResponse 系列函数在写完 HTTP 错误响应后设置。
 	// ensureForwardErrorResponse 检查此 key，为 true 时跳过兜底写入，避免在已完成的 JSON 后追加 SSE。
 	ResponseCommittedKey = "response_committed"
+
+	// OpsLocalErrorTypeKey / OpsLocalErrorCodeKey 记录网关以 Google 错误格式回写的错误类型与错误码：
+	// Google 错误体没有 type 字段，ops_error_logger 据此按与 Claude / OpenAI 格式错误相同的口径分类。
+	OpsLocalErrorTypeKey = "ops_local_error_type"
+	OpsLocalErrorCodeKey = "ops_local_error_code"
+	// OpsRequestScopedErrorKey 标记失败由请求内容决定（如引用的显式缓存不存在）：只按错误类型分类，
+	// 上游错误上下文保留为明细但不参与归因。
+	OpsRequestScopedErrorKey = "ops_request_scoped_error"
 
 	OpsClientBusinessLimitedKey                           = "ops_client_business_limited"
 	OpsClientBusinessLimitedReasonKey                     = "ops_client_business_limited_reason"
@@ -135,6 +142,42 @@ func OpsClientBusinessLimitedReason(c *gin.Context) string {
 	return strings.TrimSpace(reason)
 }
 
+// SetOpsLocalErrorType 登记响应错误体缺少的错误类型与错误码，并清除请求级失败标记；errType 为空表示不登记。
+func SetOpsLocalErrorType(c *gin.Context, errType, code string) {
+	if c == nil {
+		return
+	}
+	c.Set(OpsLocalErrorTypeKey, strings.TrimSpace(errType))
+	c.Set(OpsLocalErrorCodeKey, strings.TrimSpace(code))
+	c.Set(OpsRequestScopedErrorKey, false)
+}
+
+// OpsLocalErrorType 返回 SetOpsLocalErrorType 登记的错误类型与错误码；未登记时返回空串。
+func OpsLocalErrorType(c *gin.Context) (errType, code string) {
+	if c == nil {
+		return "", ""
+	}
+	errType = c.GetString(OpsLocalErrorTypeKey)
+	if errType == "" {
+		return "", ""
+	}
+	return errType, c.GetString(OpsLocalErrorCodeKey)
+}
+
+// MarkOpsRequestScopedError 登记错误类型，并标记失败由请求内容决定：上游错误上下文不参与 ops 归因。
+func MarkOpsRequestScopedError(c *gin.Context, errType string) {
+	if c == nil {
+		return
+	}
+	SetOpsLocalErrorType(c, errType, "")
+	c.Set(OpsRequestScopedErrorKey, true)
+}
+
+// IsOpsRequestScopedError 判断 MarkOpsRequestScopedError 是否标记了本次请求的失败。
+func IsOpsRequestScopedError(c *gin.Context) bool {
+	return c != nil && c.GetBool(OpsRequestScopedErrorKey)
+}
+
 // OpsStreamError 描述承载在 2xx 响应上的带内错误：网关在响应状态已固化为 200 之后
 // 就地以 SSE error 帧返回的错误（并发限流回退、Wait 后二次计费校验失败、流开始后才无
 // 可用账号等），以及上游 2xx 正文或事件里携带的错误结果（NonStream 标记非流式正文）。
@@ -166,30 +209,13 @@ type OpsStreamError struct {
 	UpstreamErrors  []*OpsUpstreamErrorEvent
 	// RequestScoped 表示该带内失败是请求级结果（如上游内容策略截停），与本请求此前的
 	// 上游尝试无关：分类不受上游错误上下文影响、不快照也不落库上游归因、不继承透传规则的
-	// skip_monitoring，按业务限制计（客户端取消除外），落库状态取 IntendedStatus 以便进入错误列表。
+	// skip_monitoring，按业务限制计，落库状态取 IntendedStatus 以便进入错误列表。
 	RequestScoped bool
 	// NonStream 表示带内信号来自非流式 2xx 响应体，落库 stream=false。
 	NonStream bool
 }
 
 const maxOpsStreamErrorsPerRequest = 64
-
-// OpsClientCanceledCode is a request outcome, not an upstream rejection.
-const OpsClientCanceledCode = "client_canceled"
-
-// MarkOpsClientCancellation records a logical 499 without writing to a closed
-// connection. Existing ignore-context-canceled settings still apply. Keeping it
-// request-scoped prevents earlier upstream attempts from changing its owner.
-func MarkOpsClientCancellation(c *gin.Context, stream bool) {
-	MarkOpsStreamErrorValue(c, OpsStreamError{
-		ErrType:        OpsClientCanceledCode,
-		Code:           OpsClientCanceledCode,
-		Message:        "Client disconnected: context canceled",
-		IntendedStatus: 499,
-		RequestScoped:  true,
-		NonStream:      !stream,
-	})
-}
 
 // BeginOpsStreamTurn scopes first-wins deduplication to one WebSocket turn.
 func BeginOpsStreamTurn(c *gin.Context, turn int) {

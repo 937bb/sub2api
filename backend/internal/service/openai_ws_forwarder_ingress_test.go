@@ -27,9 +27,6 @@ func TestIsOpenAIWSClientDisconnectError(t *testing.T) {
 		{name: "io_eof", err: io.EOF, want: true},
 		{name: "net_closed", err: net.ErrClosed, want: true},
 		{name: "context_canceled", err: context.Canceled, want: true},
-		{name: "local_cancel", err: NewOpenAIWSClientCloseError(coderws.StatusGoingAway, "websocket request canceled", context.Canceled), want: false},
-		{name: "local_deadline", err: NewOpenAIWSClientCloseError(coderws.StatusGoingAway, "websocket request canceled", context.DeadlineExceeded), want: false},
-		{name: "local_policy_wrapping_eof", err: NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "policy", io.EOF), want: false},
 		{name: "ws_normal_closure", err: coderws.CloseError{Code: coderws.StatusNormalClosure}, want: true},
 		{name: "ws_going_away", err: coderws.CloseError{Code: coderws.StatusGoingAway}, want: true},
 		{name: "ws_no_status", err: coderws.CloseError{Code: coderws.StatusNoStatusRcvd}, want: true},
@@ -152,7 +149,7 @@ func TestNormalizeOpenAIWSContextWindowBoundary(t *testing.T) {
 
 	t.Run("same_window_keeps_previous_response_id", func(t *testing.T) {
 		payload := []byte("{\"type\":\"response.create\",\"previous_response_id\":\"resp_old\",\"client_metadata\":{\"x-codex-window-id\":\"window-a\"}}")
-		updated, boundary, err := normalizeOpenAIWSContextWindowBoundary(payload, "window-a", openAIWSPayloadCodexWindowID(payload))
+		updated, boundary, err := normalizeOpenAIWSContextWindowBoundary(payload, "window-a")
 		require.NoError(t, err)
 		require.False(t, boundary.Changed)
 		require.False(t, boundary.PreviousResponseIDRemoved)
@@ -162,7 +159,7 @@ func TestNormalizeOpenAIWSContextWindowBoundary(t *testing.T) {
 
 	t.Run("new_window_drops_previous_response_id", func(t *testing.T) {
 		payload := []byte("{\"type\":\"response.create\",\"previous_response_id\":\"resp_old\",\"client_metadata\":{\"x-codex-window-id\":\"window-b\"}}")
-		updated, boundary, err := normalizeOpenAIWSContextWindowBoundary(payload, "window-a", openAIWSPayloadCodexWindowID(payload))
+		updated, boundary, err := normalizeOpenAIWSContextWindowBoundary(payload, "window-a")
 		require.NoError(t, err)
 		require.True(t, boundary.Changed)
 		require.True(t, boundary.PreviousResponseIDRemoved)
@@ -172,7 +169,7 @@ func TestNormalizeOpenAIWSContextWindowBoundary(t *testing.T) {
 
 	t.Run("new_window_without_previous_response_id_still_marks_boundary", func(t *testing.T) {
 		payload := []byte("{\"type\":\"response.create\",\"client_metadata\":{\"x-codex-window-id\":\"window-b\"}}")
-		updated, boundary, err := normalizeOpenAIWSContextWindowBoundary(payload, "window-a", openAIWSPayloadCodexWindowID(payload))
+		updated, boundary, err := normalizeOpenAIWSContextWindowBoundary(payload, "window-a")
 		require.NoError(t, err)
 		require.True(t, boundary.Changed)
 		require.False(t, boundary.PreviousResponseIDRemoved)
@@ -181,7 +178,7 @@ func TestNormalizeOpenAIWSContextWindowBoundary(t *testing.T) {
 
 	t.Run("embedded_turn_metadata_is_fallback", func(t *testing.T) {
 		payload := []byte("{\"type\":\"response.create\",\"previous_response_id\":\"resp_old\",\"client_metadata\":{\"x-codex-turn-metadata\":\"{\\\"window_id\\\":\\\"window-b\\\"}\"}}")
-		updated, boundary, err := normalizeOpenAIWSContextWindowBoundary(payload, "window-a", openAIWSPayloadCodexWindowID(payload))
+		updated, boundary, err := normalizeOpenAIWSContextWindowBoundary(payload, "window-a")
 		require.NoError(t, err)
 		require.True(t, boundary.Changed)
 		require.True(t, boundary.PreviousResponseIDRemoved)

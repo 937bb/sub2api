@@ -49,6 +49,7 @@ func TestUpstreamResponseModelObservationAttemptReset(t *testing.T) {
 
 func TestUpstreamModelMismatchThreeStateAndCaseInsensitiveComparison(t *testing.T) {
 	require.Nil(t, upstreamModelMismatch("gpt-5.5", ""))
+	require.Nil(t, upstreamModelMismatch("grok-4.7", ""))
 
 	matched := upstreamModelMismatch("gpt-5.5", "GPT-5.5")
 	require.NotNil(t, matched)
@@ -85,6 +86,11 @@ func TestUpstreamModelMismatchTreatsGrokBuildRuntimeIDsAsAliases(t *testing.T) {
 			sentModel:     "grok-4.5",
 			responseModel: "GROK-4.5-BUILD",
 		},
+		{
+			name:          "grok 4.7 build alias",
+			sentModel:     "grok-4.7",
+			responseModel: "grok-4.7-build",
+		},
 	}
 
 	for _, tt := range tests {
@@ -117,6 +123,16 @@ func TestUpstreamModelMismatchDoesNotCollapseDifferentModels(t *testing.T) {
 			name:          "different grok runtime",
 			sentModel:     "grok-build-0.1",
 			responseModel: "grok-4.5-build",
+		},
+		{
+			name:          "composer fast is not a 4.5 build alias",
+			sentModel:     "grok-composer-2.5-fast",
+			responseModel: "grok-4.5-build",
+		},
+		{
+			name:          "fast build is not the plain build alias",
+			sentModel:     "grok-4.7-build-fast",
+			responseModel: "grok-4.7-build",
 		},
 	}
 
@@ -269,11 +285,4 @@ func TestObservedUpstreamResponseServiceTierFromContext(t *testing.T) {
 	observer := beginUpstreamResponseModelObservation(c)
 	observer.ObserveOpenAI([]byte(`{"type":"response.completed","response":{"id":"resp_1","model":"gpt-5.6-sol","service_tier":"default"}}`), "response.completed")
 	require.Equal(t, "default", observedUpstreamResponseServiceTier(c))
-}
-
-func TestAstraGatewayCompletionUsesTextDelta(t *testing.T) {
-	o := &upstreamResponseModelObserver{}
-	o.ObserveOpenAI([]byte(`{"type":"response.output_text.delta","delta":"323"}`), "response.output_text.delta")
-	o.ObserveOpenAI([]byte(`{"type":"response.completed","response":{"model":"gpt-6-astra","status":"completed","output":[]}}`), "response.completed")
-	require.True(t, o.astraCompleted)
 }

@@ -520,7 +520,7 @@ func TestApplyGrokCLIProxyHeaders(t *testing.T) {
 		"1.0.047",
 		"1.0.47-alpha..1",
 		"1.1",
-		"1",
+		"2",
 		"1.0.47+build.1",
 	} {
 		t.Run("rejects invalid semver "+version, func(t *testing.T) {
@@ -536,7 +536,7 @@ func TestApplyGrokCLIProxyHeaders(t *testing.T) {
 	}
 
 	t.Run("leaves direct xAI API requests unchanged", func(t *testing.T) {
-		t.Setenv("XAI_GROK_CLI_VERSION", "1.0.46")
+		t.Setenv("XAI_GROK_CLI_VERSION", "1.0.47")
 		req, err := http.NewRequest(http.MethodPost, "https://api.x.ai/v1/responses", nil)
 		require.NoError(t, err)
 		req.Header.Set("User-Agent", "direct-api-client/1.0")
@@ -696,18 +696,6 @@ func (s *HTTPUpstreamSuite) TestOpenAIProfileHTTP2DisabledUsesHTTP1Transport() {
 	require.False(s.T(), transport.ForceAttemptHTTP2, "OpenAI HTTP/2 disabled should not force H2")
 	require.NotNil(s.T(), transport.TLSNextProto, "HTTP/1 mode should disable automatic H2 negotiation")
 	require.Equal(s.T(), upstreamProtocolModeOpenAIH1, entry.protocolMode)
-}
-
-func (s *HTTPUpstreamSuite) TestOpenAIHarvestProfileDisablesKeepAlives() {
-	svc := s.newService()
-	entry, err := svc.getClientEntry("socks5h://user:pass@harvest.example:31", 41, 5, service.HTTPUpstreamProfileOpenAIHarvest, false, false)
-	require.NoError(s.T(), err)
-	require.Equal(s.T(), upstreamProtocolModeOpenAIH1NoReuse, entry.protocolMode)
-	transport, ok := entry.client.Transport.(*http.Transport)
-	require.True(s.T(), ok, "expected *http.Transport")
-	require.True(s.T(), transport.DisableKeepAlives)
-	require.False(s.T(), transport.ForceAttemptHTTP2)
-	require.Equal(s.T(), 0, transport.MaxIdleConns)
 }
 
 func (s *HTTPUpstreamSuite) TestOpenAIHeaderTimeoutChangeRebuildsClient() {

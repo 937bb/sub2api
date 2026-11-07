@@ -47,6 +47,7 @@ func TestEveryGatewayPOSTRouteIsClassifiedForPromptAuditCoverage(t *testing.T) {
 		"/videos/edits":             {"grok_media.go"},
 		"/videos/extensions":        {"grok_media.go"},
 		"/models/*modelAction":      {"gemini_v1beta_handler.go"},
+		"/cachedContents":           {"gemini_cached_contents_handler.go"},
 		"/tts":                      {"grok_audio.go"},
 		"/web_search":               {"gateway_web_search.go"},
 		"/x_search":                 {"gateway_web_search.go"},
@@ -100,17 +101,9 @@ func TestResponsesWebSocketHasFirstAndSubsequentTurnPromptGates(t *testing.T) {
 	wsStart := strings.Index(string(handlerSource), `func (h *OpenAIGatewayHandler) ResponsesWebSocket`)
 	require.NotEqual(t, -1, wsStart)
 	wsSource := string(handlerSource)[wsStart:]
-	firstGate := strings.Index(wsSource, `"first_turn"`)
-	// Per-turn admission runs through admitOpenAIWSTurn, which performs the Key
-	// wait (WaitOpenAIWSKeyAdmission) before any user slot.
-	firstSlot := strings.Index(wsSource, `admitOpenAIWSTurn(`)
-	require.NotEqual(t, -1, firstGate, "first-turn prompt gate must exist")
-	require.NotEqual(t, -1, firstSlot, "WS user/key slot acquisition must exist")
-	require.Contains(t, string(handlerSource), `WaitOpenAIWSKeyAdmission`)
-	require.Contains(t, string(handlerSource), `TryAcquireUserSlot`)
 	require.Less(t,
-		firstGate,
-		firstSlot,
+		strings.Index(wsSource, `"first_turn"`),
+		strings.Index(wsSource, `TryAcquireUserSlotForAPIKey`),
 		"the first response.create gate must precede per-request user/account slots",
 	)
 }

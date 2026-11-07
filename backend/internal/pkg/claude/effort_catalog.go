@@ -27,6 +27,7 @@ var effortFamilies = []struct {
 	{family: "claude-opus-4-5", levels: effortLowMediumHigh},
 	{family: "claude-opus-5-5", levels: effortLowMediumHighXHighMax},
 	{family: "claude-opus-5", levels: effortLowMediumHighXHighMax},
+	{family: "claude-haiku-5-5", levels: effortLowMediumHighXHighMax},
 }
 
 // EffortLevelsForModel returns the output_config.effort values accepted by a
@@ -41,17 +42,6 @@ func EffortLevelsForModel(model string) []string {
 	return nil
 }
 
-// SupportsAdaptiveThinking reports whether a model accepts thinking.type=adaptive.
-// Every model in the effort catalog does except Claude Opus 4.5, which takes
-// output_config.effort but still enables thinking with a token budget.
-func SupportsAdaptiveThinking(model string) bool {
-	id := normalizeEffortModelID(model)
-	if id == "claude-opus-4-5" || strings.HasPrefix(id, "claude-opus-4-5-") {
-		return false
-	}
-	return EffortLevelsForModel(model) != nil
-}
-
 // IsOpus55 identifies the fixed Opus 5.5 ID after provider/local suffix normalization.
 func IsOpus55(model string) bool {
 	return normalizeEffortModelID(model) == "claude-opus-5-5"
@@ -60,6 +50,11 @@ func IsOpus55(model string) bool {
 // IsSonnet55 identifies the fixed Sonnet 5.5 ID after provider/local suffix normalization.
 func IsSonnet55(model string) bool {
 	return normalizeEffortModelID(model) == "claude-sonnet-5-5"
+}
+
+// IsHaiku55 identifies the fixed Haiku 5.5 ID after provider/local suffix normalization.
+func IsHaiku55(model string) bool {
+	return normalizeEffortModelID(model) == "claude-haiku-5-5"
 }
 
 func normalizeEffortModelID(model string) string {
@@ -80,6 +75,9 @@ func normalizeEffortModelID(model string) string {
 	}
 	if id == "claude-sonnet-5.5" {
 		id = "claude-sonnet-5-5"
+	}
+	if id == "claude-haiku-5.5" {
+		id = "claude-haiku-5-5"
 	}
 	if mapped, ok := ModelIDReverseOverrides[id]; ok {
 		id = mapped

@@ -213,11 +213,7 @@ func (h *UsageHandler) List(c *gin.Context) {
 		return
 	}
 
-	out := make([]dto.AdminUsageLog, 0, len(records))
-	for i := range records {
-		out = append(out, *dto.UsageLogFromServiceAdmin(&records[i]))
-	}
-	response.Paginated(c, out, result.Total, page, pageSize)
+	response.Paginated(c, adminUsageLogResponses(c, records), result.Total, page, pageSize)
 }
 
 // Stats handles getting usage statistics with filters
@@ -647,19 +643,4 @@ func (h *UsageHandler) CancelCleanupTask(c *gin.Context) {
 	}
 	logger.LegacyPrintf("handler.admin.usage", "[UsageCleanup] 清理任务已取消: task=%d operator=%d", taskID, subject.UserID)
 	response.Success(c, gin.H{"id": taskID, "status": service.UsageCleanupStatusCanceled})
-}
-
-// Timing returns bounded diagnostic traces only after the usage record lookup.
-func (h *UsageHandler) Timing(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil || id <= 0 {
-		response.BadRequest(c, "Invalid usage ID")
-		return
-	}
-	traces, err := h.usageService.RequestTimings(c.Request.Context(), id)
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-	response.Success(c, gin.H{"traces": traces, "retention_days": 30})
 }

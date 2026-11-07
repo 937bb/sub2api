@@ -42,32 +42,7 @@ type OpenAIAuthURLResult struct {
 }
 
 // GenerateAuthURL generates an OpenAI OAuth authorization URL
-func (s *OpenAIOAuthService) GenerateAuthURL(ctx context.Context, proxyID *int64, redirectURI, platform string, oauthClient ...string) (*OpenAIAuthURLResult, error) {
-	var proxyURL string
-	if proxyID != nil {
-		proxy, err := s.proxyRepo.GetByID(ctx, *proxyID)
-		if err != nil {
-			return nil, infraerrors.Newf(http.StatusBadRequest, "OPENAI_OAUTH_PROXY_NOT_FOUND", "proxy not found: %v", err)
-		}
-		if proxy != nil {
-			proxyURL = proxy.URL()
-		}
-	}
-	return s.GenerateAuthURLWithProxyURL(ctx, proxyURL, redirectURI, platform, oauthClient...)
-}
-
-// GenerateAuthURLWithProxyURL creates a session with an already resolved egress URL.
-func (s *OpenAIOAuthService) GenerateAuthURLWithProxyURL(ctx context.Context, proxyURL, redirectURI, platform string, oauthClient ...string) (*OpenAIAuthURLResult, error) {
-	profile := "codex"
-	if len(oauthClient) > 0 && strings.TrimSpace(oauthClient[0]) != "" {
-		profile = strings.TrimSpace(oauthClient[0])
-	}
-	if profile != "codex" && profile != "excel" {
-		return nil, infraerrors.New(http.StatusBadRequest, "OPENAI_OAUTH_INVALID_CLIENT", "unsupported OAuth client")
-	}
-	if profile == "excel" && redirectURI != "" && redirectURI != openai.ExcelRedirectURI {
-		return nil, infraerrors.New(http.StatusBadRequest, "OPENAI_OAUTH_INVALID_REDIRECT", "Excel OAuth requires the official callback URI")
-	}
+func (s *OpenAIOAuthService) GenerateAuthURL(ctx context.Context, proxyID *int64, redirectURI, platform string) (*OpenAIAuthURLResult, error) {
 	// Generate PKCE values
 	state, err := openai.GenerateState()
 	if err != nil {
@@ -87,17 +62,24 @@ func (s *OpenAIOAuthService) GenerateAuthURLWithProxyURL(ctx context.Context, pr
 		return nil, infraerrors.Newf(http.StatusInternalServerError, "OPENAI_OAUTH_SESSION_FAILED", "failed to generate session ID: %v", err)
 	}
 
+	// Get proxy URL if specified
+	var proxyURL string
+	if proxyID != nil {
+		proxy, err := s.proxyRepo.GetByID(ctx, *proxyID)
+		if err != nil {
+			return nil, infraerrors.Newf(http.StatusBadRequest, "OPENAI_OAUTH_PROXY_NOT_FOUND", "proxy not found: %v", err)
+		}
+		if proxy != nil {
+			proxyURL = proxy.URL()
+		}
+	}
+
 	// Use default redirect URI if not specified
 	if redirectURI == "" {
 		redirectURI = openai.DefaultRedirectURI
 	}
 	normalizedPlatform := normalizeOpenAIOAuthPlatform(platform)
 	clientID, _ := openai.OAuthClientConfigByPlatform(normalizedPlatform)
-	if profile == "excel" {
-		clientID = openai.ExcelClientID
-		redirectURI = openai.ExcelRedirectURI
-		state = "bps." + state + ".PC"
-	}
 
 	// Store session
 	session := &openai.OAuthSession{
@@ -105,16 +87,13 @@ func (s *OpenAIOAuthService) GenerateAuthURLWithProxyURL(ctx context.Context, pr
 		CodeVerifier: codeVerifier,
 		ClientID:     clientID,
 		RedirectURI:  redirectURI,
-		ProxyURL:     strings.TrimSpace(proxyURL),
+		ProxyURL:     proxyURL,
 		CreatedAt:    time.Now(),
 	}
 	s.sessionStore.Set(sessionID, session)
 
 	// Build authorization URL
 	authURL := openai.BuildAuthorizationURLForPlatform(state, codeChallenge, redirectURI, normalizedPlatform)
-	if profile == "excel" {
-		authURL = openai.BuildExcelAuthorizationURL(state, codeChallenge)
-	}
 
 	return &OpenAIAuthURLResult{
 		AuthURL:   authURL,
@@ -179,9 +158,6 @@ func (s *OpenAIOAuthService) ExchangeCode(ctx context.Context, input *OpenAIExch
 	// Use redirect URI from session or input
 	redirectURI := session.RedirectURI
 	if input.RedirectURI != "" {
-		if session.ClientID == openai.ExcelClientID && input.RedirectURI != session.RedirectURI {
-			return nil, infraerrors.New(http.StatusBadRequest, "OPENAI_OAUTH_INVALID_REDIRECT", "callback URI does not match the OAuth session")
-		}
 		redirectURI = input.RedirectURI
 	}
 	clientID := strings.TrimSpace(session.ClientID)

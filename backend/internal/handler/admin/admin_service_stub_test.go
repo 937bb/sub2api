@@ -30,10 +30,6 @@ type stubAdminService struct {
 	guardedDeletedGroupIDs              []int64
 	deleteGroupIfEmptyErr               error
 	advancedGroupOperationCalls         int
-	userDeniedModelsGroupID             int64
-	userDeniedModelsEntries             []service.GroupUserDeniedModelsInput
-	clearUserDeniedModelsCalls          int
-	batchSetUserDeniedModelsErr         error
 	lastListGroupsIsExclusive           *bool
 	createdProxies                      []*service.CreateProxyInput
 	updatedProxyIDs                     []int64
@@ -209,6 +205,14 @@ func (s *stubAdminService) BatchUpdateConcurrency(ctx context.Context, userIDs [
 }
 
 func (s *stubAdminService) BatchUpdateLimits(ctx context.Context, userIDs []int64, concurrency, rpmLimit *int) (int, error) {
+	return len(userIDs), nil
+}
+
+func (s *stubAdminService) FindActiveUsersByBlacklistedEmails(ctx context.Context, emails []string) ([]service.User, error) {
+	return []service.User{}, nil
+}
+
+func (s *stubAdminService) BatchDisableUsers(ctx context.Context, userIDs []int64) (int, error) {
 	return len(userIDs), nil
 }
 
@@ -426,19 +430,6 @@ func (s *stubAdminService) ClearGroupRPMOverrides(_ context.Context, _ int64) er
 func (s *stubAdminService) BatchSetGroupRPMOverrides(_ context.Context, _ int64, _ []service.GroupRPMOverrideInput) error {
 	s.advancedGroupOperationCalls++
 	return nil
-}
-
-func (s *stubAdminService) ClearGroupUserDeniedModels(_ context.Context, groupID int64) error {
-	s.clearUserDeniedModelsCalls++
-	s.userDeniedModelsGroupID = groupID
-	return nil
-}
-
-func (s *stubAdminService) BatchSetGroupUserDeniedModels(_ context.Context, groupID int64, entries []service.GroupUserDeniedModelsInput) error {
-	s.advancedGroupOperationCalls++
-	s.userDeniedModelsGroupID = groupID
-	s.userDeniedModelsEntries = entries
-	return s.batchSetUserDeniedModelsErr
 }
 
 func (s *stubAdminService) ListAccounts(ctx context.Context, page, pageSize int, platform, accountType, status, search string, groupID int64, privacyMode string, sortBy, sortOrder string) ([]service.Account, int64, error) {
@@ -724,14 +715,6 @@ func (s *stubAdminService) CheckProxyQuality(ctx context.Context, id int64) (*se
 			{Target: "gemini", Status: "pass", HTTPStatus: 200},
 		},
 	}, nil
-}
-
-func (s *stubAdminService) TestMihomoNode(ctx context.Context, kernel service.MihomoNodeProber, name string) (*service.ProxyTestResult, error) {
-	return &service.ProxyTestResult{Success: true, Message: "ok"}, nil
-}
-
-func (s *stubAdminService) CheckMihomoNodeQuality(ctx context.Context, kernel service.MihomoNodeProber, name string) (*service.ProxyQualityCheckResult, error) {
-	return &service.ProxyQualityCheckResult{Score: 100, Grade: "A", CheckedAt: time.Now().Unix()}, nil
 }
 
 func (s *stubAdminService) ListRedeemCodes(ctx context.Context, page, pageSize int, codeType, status, search string, sortBy, sortOrder string) ([]service.RedeemCode, int64, error) {

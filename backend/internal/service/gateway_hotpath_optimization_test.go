@@ -180,6 +180,10 @@ func (s *modelsListAccountRepoStub) ListSchedulableByGroupID(ctx context.Context
 	return out, nil
 }
 
+func (s *modelsListAccountRepoStub) ListModelAvailabilityCandidates(ctx context.Context, groupID *int64, _ []string, _ bool) ([]Account, error) {
+	return s.ListSchedulableByGroupID(ctx, *groupID)
+}
+
 func (s *modelsListAccountRepoStub) ListSchedulable(ctx context.Context) ([]Account, error) {
 	s.listAllCalls.Add(1)
 	if s.err != nil {
@@ -688,24 +692,6 @@ func TestGetAvailableModels_OpenAIPassthroughUsesDefaultFallback(t *testing.T) {
 				},
 			},
 			want: dedupeAndSortModelIDs(append([]string{"configured-model"}, openai.DefaultModelIDs()...)),
-		},
-		{
-			name: "restricted passthrough preserves group allowlist without defaults",
-			accounts: []Account{
-				{
-					ID:            5,
-					Platform:      PlatformOpenAI,
-					Credentials:   map[string]any{"model_mapping": map[string]any{"stale-model": "upstream-model"}},
-					Extra:         map[string]any{"openai_passthrough": true},
-					AccountGroups: []AccountGroup{{GroupID: groupID, AllowedModels: []string{"allowed-model"}}},
-				},
-				{
-					ID:          6,
-					Platform:    PlatformOpenAI,
-					Credentials: map[string]any{"model_mapping": map[string]any{"configured-model": "configured-upstream"}},
-				},
-			},
-			want: []string{"allowed-model", "configured-model"},
 		},
 		{
 			name: "ordinary accounts preserve mapped whitelist",

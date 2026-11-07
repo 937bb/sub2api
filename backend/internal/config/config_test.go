@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/util/urlvalidator"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/require"
 )
@@ -28,6 +29,42 @@ func TestLoadDefaultModelsListReadMaxBytes(t *testing.T) {
 	cfg, err := Load()
 	require.NoError(t, err)
 	require.Equal(t, DefaultModelsListReadMaxBytes, cfg.Gateway.ModelsListReadMaxBytes)
+}
+
+func TestLoadDefaultMinOutputTokens(t *testing.T) {
+	resetViperWithJWTSecret(t)
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.Equal(t, 128, cfg.Gateway.MinOutputTokens)
+}
+
+func TestLoadMinOutputTokensFromEnv(t *testing.T) {
+	resetViperWithJWTSecret(t)
+	t.Setenv("GATEWAY_MIN_OUTPUT_TOKENS", "16")
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.Equal(t, 16, cfg.Gateway.MinOutputTokens)
+}
+
+func TestLoadGeminiSameAccountRetries(t *testing.T) {
+	resetViperWithJWTSecret(t)
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.Equal(t, 4, cfg.Gateway.MaxSameAccountRetriesGemini)
+
+	resetViperWithJWTSecret(t)
+	t.Setenv("GATEWAY_MAX_SAME_ACCOUNT_RETRIES_GEMINI", "0")
+	cfg, err = Load()
+	require.NoError(t, err)
+	require.Zero(t, cfg.Gateway.MaxSameAccountRetriesGemini)
+}
+
+func TestValidateMinOutputTokensMinimum(t *testing.T) {
+	resetViperWithJWTSecret(t)
+	cfg, err := Load()
+	require.NoError(t, err)
+	cfg.Gateway.MinOutputTokens = 15
+	require.EqualError(t, cfg.Validate(), "gateway.min_output_tokens must be at least 16")
 }
 
 func TestLoadTimezonePrecedence(t *testing.T) {
@@ -107,6 +144,12 @@ func TestLoadHTTPIngressSafetyDefaults(t *testing.T) {
 	require.False(t, cfg.Server.TrustedProxiesConfigured)
 	require.True(t, cfg.TrustForwardedIPForAPIKeyACL())
 	require.Equal(t, int64(32*1024*1024), cfg.Gateway.TextMaxBodySize)
+	require.Equal(t, int64(1<<30), cfg.Gateway.RequestBodyMemoryBudgetBytes)
+	require.Equal(t, 120, cfg.Gateway.RequestBodyReadTimeoutSeconds)
+	require.Equal(t, 120, cfg.Gateway.DownstreamWriteTimeoutSeconds)
+	require.Equal(t, 500<<20, cfg.Gateway.MaxLineSize)
+	require.Equal(t, int64(8<<20), cfg.Gateway.SSEQueueMaxBytes)
+	require.Equal(t, 4096, cfg.Gateway.SSEEventMaxLines)
 	require.True(t, cfg.APIKeyAuth.InvalidAbuse.Enabled)
 	require.Equal(t, 120, cfg.APIKeyAuth.InvalidAbuse.Threshold)
 	require.Equal(t, 16384, cfg.APIKeyAuth.InvalidAbuse.Capacity)
@@ -508,9 +551,6 @@ func TestLoadDefaultOpenAIWSConfig(t *testing.T) {
 	if cfg.Gateway.OpenAIWS.ClientReadLimitBytes != 64*1024*1024 {
 		t.Fatalf("Gateway.OpenAIWS.ClientReadLimitBytes = %d, want %d", cfg.Gateway.OpenAIWS.ClientReadLimitBytes, 64*1024*1024)
 	}
-	if cfg.Gateway.OpenAIWS.SSEAccelerationMaxPayloadBytes != 15*1024*1024 {
-		t.Fatalf("SSEAccelerationMaxPayloadBytes = %d, want 15 MiB", cfg.Gateway.OpenAIWS.SSEAccelerationMaxPayloadBytes)
-	}
 	if !cfg.Gateway.OpenAIWS.HTTPBridgeEnabled {
 		t.Fatalf("Gateway.OpenAIWS.HTTPBridgeEnabled = false, want true")
 	}
@@ -836,6 +876,7 @@ func TestLoadDefaultSecurityToggles(t *testing.T) {
 
 	wantHosts := []string{
 		"api.kimi.com",
+		"api.kimi.ai",
 		"api.moonshot.ai",
 		"api.moonshot.cn",
 	}
@@ -847,6 +888,19 @@ func TestLoadDefaultSecurityToggles(t *testing.T) {
 		if _, ok := hostSet[want]; !ok {
 			t.Fatalf("URLAllowlist.UpstreamHosts missing %q; got %v", want, cfg.Security.URLAllowlist.UpstreamHosts)
 		}
+	}
+	opts := urlvalidator.ValidationOptions{
+		AllowedHosts:     cfg.Security.URLAllowlist.UpstreamHosts,
+		RequireAllowlist: true,
+		AllowPrivate:     cfg.Security.URLAllowlist.AllowPrivateHosts,
+	}
+	for _, host := range []string{"api.kimi.com", "api.kimi.ai"} {
+		target := "https://" + host + "/coding/v1/usages"
+		normalized, err := urlvalidator.ValidateHTTPSURL(target, opts)
+		require.NoError(t, err)
+		require.Equal(t, target, normalized)
+		_, err = urlvalidator.ValidateHTTPSURL("https://"+host+".attacker.example/coding/v1/usages", opts)
+		require.Error(t, err)
 	}
 }
 
@@ -1595,6 +1649,16 @@ func TestValidateConfigErrors(t *testing.T) {
 		wantErr string
 	}{
 		{
+			name:    "negative ingress memory budget",
+			mutate:  func(c *Config) { c.Gateway.RequestBodyMemoryBudgetBytes = -1 },
+			wantErr: "gateway.request_body_memory_budget_bytes",
+		},
+		{
+			name:    "negative upload timeout",
+			mutate:  func(c *Config) { c.Gateway.RequestBodyReadTimeoutSeconds = -1 },
+			wantErr: "gateway.request_body_read_timeout_seconds",
+		},
+		{
 			name:    "server read header timeout",
 			mutate:  func(c *Config) { c.Server.ReadHeaderTimeout = 0 },
 			wantErr: "server.read_header_timeout",
@@ -1861,6 +1925,16 @@ func TestValidateConfigErrors(t *testing.T) {
 			wantErr: "gateway.openai_response_header_timeout",
 		},
 		{
+			name:    "gateway gemini same account retries negative",
+			mutate:  func(c *Config) { c.Gateway.MaxSameAccountRetriesGemini = -1 },
+			wantErr: "gateway.max_same_account_retries_gemini",
+		},
+		{
+			name:    "gateway gemini same account retries too large",
+			mutate:  func(c *Config) { c.Gateway.MaxSameAccountRetriesGemini = 11 },
+			wantErr: "gateway.max_same_account_retries_gemini",
+		},
+		{
 			name:    "gateway openai first output timeout below minimum",
 			mutate:  func(c *Config) { c.Gateway.OpenAIFirstOutputTimeoutSeconds = 29 },
 			wantErr: "gateway.openai_first_output_timeout_seconds",
@@ -1959,12 +2033,6 @@ func TestValidateConfigErrors(t *testing.T) {
 			name:    "gateway stream data interval range",
 			mutate:  func(c *Config) { c.Gateway.StreamDataIntervalTimeout = 5 },
 			wantErr: "gateway.stream_data_interval_timeout",
-		},
-		{
-			name: "gateway BPS progress interval range", mutate: func(c *Config) { c.Gateway.ExcelBPSStreamDataIntervalTimeout = 5 }, wantErr: "gateway.excel_bps_stream_data_interval_timeout",
-		},
-		{
-			name: "gateway BPS progress interval negative", mutate: func(c *Config) { c.Gateway.ExcelBPSStreamDataIntervalTimeout = -1 }, wantErr: "gateway.excel_bps_stream_data_interval_timeout",
 		},
 		{
 			name:    "gateway stream data interval negative",
@@ -2625,9 +2693,6 @@ func TestLoad_DefaultGatewayImageStreamConfig(t *testing.T) {
 	if cfg.Gateway.StreamDataIntervalTimeout != 180 {
 		t.Fatalf("stream_data_interval_timeout = %d, want 180", cfg.Gateway.StreamDataIntervalTimeout)
 	}
-	if cfg.Gateway.ExcelBPSStreamDataIntervalTimeout != 120 {
-		t.Fatalf("excel_bps_stream_data_interval_timeout = %d, want 120", cfg.Gateway.ExcelBPSStreamDataIntervalTimeout)
-	}
 	if cfg.Gateway.StreamKeepaliveInterval != 10 {
 		t.Fatalf("stream_keepalive_interval = %d, want 10", cfg.Gateway.StreamKeepaliveInterval)
 	}
@@ -2696,17 +2761,5 @@ func TestLoadSimpleModeAutoCreateDefaultGroups(t *testing.T) {
 				})
 			}
 		})
-	}
-}
-
-func TestOpenAIWSSSEPayloadLimitConfig(t *testing.T) {
-	resetViperWithJWTSecret(t)
-	t.Setenv("GATEWAY_OPENAI_WS_SSE_ACCELERATION_MAX_PAYLOAD_BYTES", "1048576")
-	cfg, err := Load()
-	require.NoError(t, err)
-	require.EqualValues(t, 1048576, cfg.Gateway.OpenAIWS.SSEAccelerationMaxPayloadBytes)
-	for _, limit := range []int64{0, -1} {
-		cfg.Gateway.OpenAIWS.SSEAccelerationMaxPayloadBytes = limit
-		require.ErrorContains(t, cfg.Validate(), "sse_acceleration_max_payload_bytes must be positive")
 	}
 }

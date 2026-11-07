@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
+	pkghttputil "github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
@@ -49,19 +49,22 @@ func (h *OpenAIGatewayHandler) GrokRealtime(c *gin.Context) {
 	if strings.TrimSpace(model) == "" {
 		model = "grok-voice-latest"
 	}
-	// Keep the HTTP response uncommitted while selecting and probing an account.
-	keyRelease, keyErr := h.concurrencyHelper.AcquireAPIKeySlot(c.Request.Context(), apiKey.ID, apiKey.ConcurrencyLimit)
-	if keyErr != nil {
-		h.handleConcurrencyError(c, keyErr, "API key", false)
+	// 余额模式在途预留（与计费同口径估算；计费任务扣减余额缓存后才释放）。
+	inflightDone, inflightErr := reserveInflightBalance(c, h.billingCacheService, h.gatewayService, apiKey, subscription, service.InflightEstimateRequest{Model: model, Kind: service.InflightEstimateAudio, AudioMode: "realtime", AudioUnits: 1})
+	if inflightErr != nil {
+		status, code, message, retryAfter := billingErrorDetails(inflightErr)
+		if retryAfter > 0 {
+			c.Header("Retry-After", strconv.Itoa(retryAfter))
+		}
+		h.errorResponse(c, status, code, message)
 		return
 	}
-	defer keyRelease()
+	defer inflightDone()
 
+	// Keep the HTTP response uncommitted while selecting and probing an account.
 	// Realtime is not an HTTP streaming response; using reqStream=true here would
 	// let the wait queue flush an SSE ping before the WebSocket handshake succeeds.
 	failed := map[int64]struct{}{}
-	var forbiddenBudget grokForbiddenFailoverBudget
-	upstreamSwitchCount := 0
 	var selection *service.AccountSelectionResult
 	var release func()
 	var token string
@@ -99,9 +102,6 @@ func (h *OpenAIGatewayHandler) GrokRealtime(c *gin.Context) {
 		if credErr != nil {
 			release()
 			release = nil
-			if forbiddenBudget.active {
-				break
-			}
 			failed[account.ID] = struct{}{}
 			continue
 		}
@@ -111,22 +111,13 @@ func (h *OpenAIGatewayHandler) GrokRealtime(c *gin.Context) {
 		if openErr != nil {
 			reqLog.Warn("grok_realtime.pre_accept_failed", zap.Int64("account_id", account.ID), zap.Error(openErr))
 			statusCode := http.StatusBadGateway
-			var responseBody []byte
-			var responseHeaders http.Header
 			var dialErr *service.GrokRealtimeDialError
 			if errors.As(openErr, &dialErr) && dialErr.StatusCode > 0 {
 				statusCode = dialErr.StatusCode
-				responseBody = dialErr.ResponseBody
-				responseHeaders = dialErr.ResponseHeaders
 			}
-			h.gatewayService.HandleGrokRealtimeUpstreamError(c.Request.Context(), account, statusCode, responseBody)
+			h.gatewayService.HandleGrokRealtimeUpstreamError(c.Request.Context(), account, statusCode, []byte(openErr.Error()))
 			release()
 			release = nil
-			failoverErr := service.GrokRealtimeFailoverError(account, statusCode, responseHeaders, responseBody)
-			if !forbiddenBudget.canRetry(failoverErr, upstreamSwitchCount) {
-				break
-			}
-			upstreamSwitchCount++
 			failed[account.ID] = struct{}{}
 			continue
 		}
@@ -212,7 +203,16 @@ func (h *OpenAIGatewayHandler) GrokVoice(c *gin.Context, endpoint string) {
 
 	body, err := readGrokVoiceGatewayBody(c)
 	if err != nil {
-		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+		if errors.Is(err, errGrokVoiceBodyRequired) {
+			h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+			return
+		}
+		bodyLog := requestLogger(c, "handler.openai_gateway.grok_voice", zap.String("endpoint", endpoint))
+		if handleRequestBodyReadError(c, bodyLog, err) {
+			return
+		}
+		status, message := requestBodyReadFailure(bodyLog, c.Request, err)
+		h.errorResponse(c, status, "invalid_request_error", message)
 		return
 	}
 	if endpoint == "tts" {
@@ -233,23 +233,27 @@ func (h *OpenAIGatewayHandler) GrokVoice(c *gin.Context, endpoint string) {
 			return
 		}
 	}
+	// 余额模式在途预留（与计费同口径估算；计费任务扣减余额缓存后才释放）。
+	inflightDone, inflightErr := reserveInflightBalance(c, h.billingCacheService, h.gatewayService, apiKey, subscription, grokVoiceInflightEstimate(endpoint, body))
+	if inflightErr != nil {
+		status, code, message, retryAfter := billingErrorDetails(inflightErr)
+		if retryAfter > 0 {
+			c.Header("Retry-After", strconv.Itoa(retryAfter))
+		}
+		h.errorResponse(c, status, code, message)
+		return
+	}
+	defer inflightDone()
+
 	contentType := c.GetHeader("Content-Type")
 	if strings.TrimSpace(contentType) == "" {
 		contentType = "application/json"
 	}
 
 	failed := map[int64]struct{}{}
-	var forbiddenBudget grokForbiddenFailoverBudget
-	upstreamSwitchCount := 0
 	var last *service.UpstreamFailoverError
 	reqLog := requestLogger(c, "handler.openai_gateway.grok_voice", zap.String("endpoint", endpoint))
 	selectionModel := "grok-4.5"
-	keyRelease, keyErr := h.concurrencyHelper.AcquireAPIKeySlot(c.Request.Context(), apiKey.ID, apiKey.ConcurrencyLimit)
-	if keyErr != nil {
-		h.handleConcurrencyError(c, keyErr, "API key", false)
-		return
-	}
-	defer keyRelease()
 
 	for attempts := 0; attempts < 4; attempts++ {
 		selection, _, selectErr := h.gatewayService.SelectAccountWithSchedulerForCapability(
@@ -299,12 +303,7 @@ func (h *OpenAIGatewayHandler) GrokVoice(c *gin.Context, endpoint string) {
 			return
 		}
 		var failoverErr *service.UpstreamFailoverError
-		if errors.As(forwardErr, &failoverErr) {
-			if c.Writer.Written() || !forbiddenBudget.canRetry(failoverErr, upstreamSwitchCount) {
-				h.handleFailoverExhausted(c, failoverErr, c.Writer.Written())
-				return
-			}
-			upstreamSwitchCount++
+		if errors.As(forwardErr, &failoverErr) && failoverErr.ShouldRetryNextAccount() {
 			failed[account.ID] = struct{}{}
 			last = failoverErr
 			continue
@@ -354,6 +353,7 @@ func (h *OpenAIGatewayHandler) recordGrokVoiceUsage(
 		model = endpoint
 	}
 
+	channelUsageFields := clientRequestedUsageFields(c, service.ChannelMappingResult{}, model, result.UpstreamModel)
 	h.submitMandatoryUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
 		if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
 			Result:             result,
@@ -369,7 +369,7 @@ func (h *OpenAIGatewayHandler) recordGrokVoiceUsage(
 			APIKeyService:      h.apiKeyService,
 			QuotaPlatform:      quotaPlatform,
 			SessionID:          sessionID,
-			ChannelUsageFields: clientRequestedUsageFields(c, service.ChannelMappingResult{}, model, result.UpstreamModel),
+			ChannelUsageFields: channelUsageFields,
 		}); err != nil {
 			logger.L().With(
 				zap.String("component", "handler.openai_gateway.grok_voice"),
@@ -383,17 +383,22 @@ func (h *OpenAIGatewayHandler) recordGrokVoiceUsage(
 	})
 }
 
+var errGrokVoiceBodyRequired = errors.New("request body is required")
+
+// readGrokVoiceGatewayBody returns errGrokVoiceBodyRequired for a missing body;
+// any other error comes from reading the body and goes through the shared
+// read-failure classification.
 func readGrokVoiceGatewayBody(c *gin.Context) ([]byte, error) {
 	if c == nil || c.Request == nil {
-		return nil, errors.New("request body is required")
+		return nil, errGrokVoiceBodyRequired
 	}
 	if c.Request.Body == nil {
 		if c.Request.Method == http.MethodGet || c.Request.Method == http.MethodDelete {
 			return nil, nil
 		}
-		return nil, errors.New("request body is required")
+		return nil, errGrokVoiceBodyRequired
 	}
-	return io.ReadAll(c.Request.Body)
+	return pkghttputil.ReadRequestBodyWithPrealloc(c.Request)
 }
 
 // extractGrokTTSInputText pulls the primary spoken text from a TTS JSON body.

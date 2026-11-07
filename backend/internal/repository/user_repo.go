@@ -154,7 +154,6 @@ func (r *userRepository) create(ctx context.Context, userIn *service.User, guard
 		SetNillableLastActiveAt(userIn.LastActiveAt).
 		SetRpmLimit(userIn.RPMLimit).
 		SetRestrictPublicGroups(userIn.RestrictPublicGroups).
-		SetObserverGroupIds(userIn.ObserverGroupIDs).
 		Save(txCtx)
 	if err != nil {
 		return translatePersistenceError(err, nil, service.ErrEmailExists)
@@ -178,7 +177,7 @@ func (r *userRepository) create(ctx context.Context, userIn *service.User, guard
 }
 
 func (r *userRepository) GetByID(ctx context.Context, id int64) (*service.User, error) {
-	m, err := clientFromContext(ctx, r.client).User.Query().Where(dbuser.IDEQ(id)).Only(ctx)
+	m, err := r.client.User.Query().Where(dbuser.IDEQ(id)).Only(ctx)
 	if err != nil {
 		return nil, translatePersistenceError(err, service.ErrUserNotFound, nil)
 	}
@@ -248,23 +247,23 @@ func (r *userRepository) Update(ctx context.Context, userIn *service.User, field
 	}
 
 	// 使用 ent 事务包裹用户更新与 allowed_groups 同步，避免跨层事务不一致。
-	var tx *dbent.Tx
+	tx, err := r.client.Tx(ctx)
+	if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
+		return err
+	}
+
 	var txClient *dbent.Client
 	txCtx := ctx
-	if existingTx := dbent.TxFromContext(ctx); existingTx != nil {
-		txClient = existingTx.Client()
+	if err == nil {
+		defer func() { _ = tx.Rollback() }()
+		txClient = tx.Client()
+		txCtx = dbent.NewTxContext(ctx, tx)
 	} else {
-		var err error
-		tx, err = r.client.Tx(ctx)
-		switch {
-		case errors.Is(err, dbent.ErrTxStarted):
+		// 已处于外部事务中（ErrTxStarted），复用当前事务 client 并由调用方负责提交/回滚。
+		if existingTx := dbent.TxFromContext(ctx); existingTx != nil {
+			txClient = existingTx.Client()
+		} else {
 			txClient = r.client
-		case err != nil:
-			return err
-		default:
-			defer func() { _ = tx.Rollback() }()
-			txClient = tx.Client()
-			txCtx = dbent.NewTxContext(ctx, tx)
 		}
 	}
 
@@ -318,9 +317,6 @@ func (r *userRepository) Update(ctx context.Context, userIn *service.User, field
 	if fields.Status {
 		updateOp = updateOp.SetStatus(userIn.Status)
 	}
-	if fields.ObserverGroupIDs {
-		updateOp = updateOp.SetObserverGroupIds(userIn.ObserverGroupIDs)
-	}
 	if fields.RestrictPublicGroups {
 		updateOp = updateOp.SetRestrictPublicGroups(userIn.RestrictPublicGroups)
 	}
@@ -352,6 +348,18 @@ func (r *userRepository) Update(ctx context.Context, userIn *service.User, field
 
 	if fields.AllowedGroups {
 		if err := r.syncUserAllowedGroupsWithClient(txCtx, txClient, updated.ID, userIn.AllowedGroups); err != nil {
+			return err
+		}
+	}
+	// 停用或降级时在同一事务内吊销 MCP 授权，恢复账号或角色后旧授权不会复活。
+	disabled := fields.Status && updated.Status != existing.Status && updated.Status != service.StatusActive
+	demoted := fields.Role && updated.Role != existing.Role && updated.Role != service.RoleAdmin
+	if disabled || demoted {
+		exec := txAwareSQLExecutor(txCtx, r.sql, r.client)
+		if exec == nil {
+			return fmt.Errorf("sql executor is not configured")
+		}
+		if err := revokeMCPGrants(txCtx, exec, updated.ID, !disabled, time.Now().UTC()); err != nil {
 			return err
 		}
 	}
@@ -568,10 +576,6 @@ func (r *userRepository) ListWithFilters(ctx context.Context, params pagination.
 			apikey.GroupIDEQ(filters.APIKeyGroupID),
 			apikey.DeletedAtIsNil(),
 		))
-	}
-
-	if len(filters.UserIDs) > 0 {
-		q = q.Where(dbuser.IDIn(filters.UserIDs...))
 	}
 
 	// If attribute filters are specified, we need to filter by user IDs first
@@ -1457,7 +1461,7 @@ func (r *userRepository) loadAllowedGroups(ctx context.Context, userIDs []int64)
 		return out, nil
 	}
 
-	rows, err := clientFromContext(ctx, r.client).UserAllowedGroup.Query().
+	rows, err := r.client.UserAllowedGroup.Query().
 		Where(userallowedgroup.UserIDIn(userIDs...)).
 		All(ctx)
 	if err != nil {

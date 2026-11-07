@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/Wei-Shaw/sub2api/internal/config"
 	"io"
 	"maps"
 	"math/rand/v2"
@@ -387,12 +386,11 @@ func ProvideOpenCodeGoUsageService(
 	settingService *SettingService,
 	lockCache LeaderLockCache,
 	db *sql.DB,
-	cfg *config.Config,
 ) *OpenCodeGoUsageService {
 	svc := NewOpenCodeGoUsageService(accountRepo, httpUpstream, settingService)
 	svc.lockCache = lockCache
 	svc.db = db
-	startBackgroundService(cfg, svc)
+	svc.Start()
 	return svc
 }
 

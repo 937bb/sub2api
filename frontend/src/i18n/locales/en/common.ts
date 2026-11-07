@@ -22,13 +22,6 @@ export default {
     confirm: 'Confirm',
     reset: 'Reset',
     search: 'Search',
-    featureSearch: {
-      title: 'Find a feature',
-      placeholder: 'Search features or keywords…',
-      resultCount: '{count} available features',
-      noResults: 'No matching features. Try another name or keyword.',
-      hint: '↑ ↓ Select · Enter Open · Esc Close'
-    },
     filter: 'Filter',
     export: 'Export',
     import: 'Import',
@@ -45,9 +38,6 @@ export default {
     all: 'All',
     none: 'None',
     selectAll: 'Select all',
-    sort: 'Sort',
-    sortAscending: 'Sort ascending',
-    sortDescending: 'Sort descending',
     noData: 'No data',
     expand: 'Expand',
     collapse: 'Collapse',
@@ -192,7 +182,6 @@ export default {
     modelPlaza: 'Model Plaza',
     subscriptions: 'Subscriptions',
     accounts: 'Accounts',
-    harvestFlow: 'Ticket Flow',
     plugins: 'Plugins',
     proxies: 'Proxies',
     redeemCodes: 'Redeem Codes',
@@ -220,8 +209,6 @@ export default {
     channelPricing: 'Channel Pricing',
     channelMonitor: 'Channel Monitor',
     channelStatus: 'Channel Status',
-    pelicanShowcase: 'Pelican Showcase',
-    supportTickets: 'Support Tickets',
     riskControl: 'Risk Control',
     securityAudit: 'Security Audit',
     contentModeration: 'Content Moderation',
@@ -440,6 +427,7 @@ export default {
     loginFailed: 'Login failed. Please check your credentials and try again.',
     errors: {
       USER_NOT_ACTIVE: 'Account has been disabled.',
+      EMAIL_BLOCKED: 'This email address is not allowed. Please use a different one.',
     },
     registrationFailed: 'Registration failed. Please try again.',
     emailDomainRegistrationLimit:

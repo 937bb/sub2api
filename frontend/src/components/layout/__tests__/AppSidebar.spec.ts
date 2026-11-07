@@ -81,36 +81,12 @@ describe('AppSidebar subscription feature flag', () => {
   })
 })
 
-describe('AppSidebar smart operations group', () => {
-  const smartOpsBlock = componentSource.match(/path: '\/admin\/smart-ops'[\s\S]*?\n {4}\] \},/)?.[0] ?? ''
-  const pathsIn = (source: string) => [...source.matchAll(/path: '([^']+)'/g)].map(match => match[1])
-
-  it('nests request capture and the ticket harvest flow under 智能运维', () => {
-    expect(smartOpsBlock).not.toBe('')
-    expect(smartOpsBlock).toMatch(/path: '\/admin\/request-captures'[^\n]*featureFlag: \(\) => adminSettingsStore\.requestCaptureEnabled/)
-    expect(smartOpsBlock).toContain("path: '/admin/harvest-flow'")
-    // Each entry is declared once, so neither is still a top-level item.
-    expect(componentSource.match(/path: '\/admin\/request-captures'/g)).toHaveLength(1)
-    expect(componentSource.match(/path: '\/admin\/harvest-flow'/g)).toHaveLength(1)
-  })
-
-  it('keeps the group in the same order as the 智能运维 tab bar', () => {
-    const navSource = readFileSync(resolve(dirname(componentPath), '../admin/operations/SmartOpsNav.vue'), 'utf8')
-    expect(pathsIn(smartOpsBlock).slice(1)).toEqual(pathsIn(navSource))
-  })
-})
-
-describe('AppSidebar support tickets', () => {
-  it('gates both entries behind the opt-in switch and keeps admins on their own page', () => {
-    expect(componentSource).toContain('const flagSupportTickets = makeSidebarFlag(FeatureFlags.supportTickets)')
-    expect(componentSource).toContain('const flagUserSupportTickets = () => flagSupportTickets() && !authStore.isAdmin')
-    expect(componentSource).toMatch(/path: '\/support-tickets'[^\n]*featureFlag: flagUserSupportTickets[^\n]*badge: \(\) => supportTicketStore\.userUnread/)
-    expect(componentSource).toMatch(/path: '\/admin\/support-tickets'[^\n]*featureFlag: flagSupportTickets[^\n]*badge: \(\) => supportTicketStore\.adminPending/)
-  })
-
-  it('renders badges for every item list and caps the number', () => {
-    expect(componentSource.match(/data-testid="sidebar-nav-badge"/g)).toHaveLength(3)
-    expect(componentSource).toContain("return count > 99 ? '99+' : String(count)")
-    expect(componentSource).toContain('.sidebar-nav-badge-collapsed {')
+describe('AppSidebar MCP entry', () => {
+  it('uses the MCP logo and shows the entry only when the deployment enables MCP', () => {
+    expect(componentSource).toContain("render: () => h(Icon, { name: 'mcp' })")
+    expect(componentSource).toContain('const flagMCP = makeSidebarFlag(FeatureFlags.mcp)')
+    expect(componentSource).toMatch(/path: '\/settings\/mcp'[^\n]*icon: MCPIcon, featureFlag: flagMCP/)
+    expect(componentSource).toMatch(/if \(flagMCP\(\)\) filtered\.push\(\{ path: '\/settings\/mcp'[^\n]*icon: MCPIcon/)
+    expect(componentSource).not.toMatch(/path: '\/settings\/mcp'[^\n]*PluginIcon/)
   })
 })

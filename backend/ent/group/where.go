@@ -160,6 +160,11 @@ func AllowBatchImageGeneration(v bool) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldAllowBatchImageGeneration, v))
 }
 
+// ImageCountBilling applies equality check predicate on the "image_count_billing" field. It's identical to ImageCountBillingEQ.
+func ImageCountBilling(v bool) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldImageCountBilling, v))
+}
+
 // ImageRateIndependent applies equality check predicate on the "image_rate_independent" field. It's identical to ImageRateIndependentEQ.
 func ImageRateIndependent(v bool) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldImageRateIndependent, v))
@@ -263,11 +268,6 @@ func FallbackGroupID(v int64) predicate.Group {
 // FallbackGroupIDOnInvalidRequest applies equality check predicate on the "fallback_group_id_on_invalid_request" field. It's identical to FallbackGroupIDOnInvalidRequestEQ.
 func FallbackGroupIDOnInvalidRequest(v int64) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldFallbackGroupIDOnInvalidRequest, v))
-}
-
-// StreamOnly applies equality check predicate on the "stream_only" field. It's identical to StreamOnlyEQ.
-func StreamOnly(v bool) predicate.Group {
-	return predicate.Group(sql.FieldEQ(FieldStreamOnly, v))
 }
 
 // ModelRoutingEnabled applies equality check predicate on the "model_routing_enabled" field. It's identical to ModelRoutingEnabledEQ.
@@ -1330,6 +1330,16 @@ func AllowBatchImageGenerationNEQ(v bool) predicate.Group {
 	return predicate.Group(sql.FieldNEQ(FieldAllowBatchImageGeneration, v))
 }
 
+// ImageCountBillingEQ applies the EQ predicate on the "image_count_billing" field.
+func ImageCountBillingEQ(v bool) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldImageCountBilling, v))
+}
+
+// ImageCountBillingNEQ applies the NEQ predicate on the "image_count_billing" field.
+func ImageCountBillingNEQ(v bool) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldImageCountBilling, v))
+}
+
 // ImageRateIndependentEQ applies the EQ predicate on the "image_rate_independent" field.
 func ImageRateIndependentEQ(v bool) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldImageRateIndependent, v))
@@ -2198,16 +2208,6 @@ func FallbackGroupIDOnInvalidRequestIsNil() predicate.Group {
 // FallbackGroupIDOnInvalidRequestNotNil applies the NotNil predicate on the "fallback_group_id_on_invalid_request" field.
 func FallbackGroupIDOnInvalidRequestNotNil() predicate.Group {
 	return predicate.Group(sql.FieldNotNull(FieldFallbackGroupIDOnInvalidRequest))
-}
-
-// StreamOnlyEQ applies the EQ predicate on the "stream_only" field.
-func StreamOnlyEQ(v bool) predicate.Group {
-	return predicate.Group(sql.FieldEQ(FieldStreamOnly, v))
-}
-
-// StreamOnlyNEQ applies the NEQ predicate on the "stream_only" field.
-func StreamOnlyNEQ(v bool) predicate.Group {
-	return predicate.Group(sql.FieldNEQ(FieldStreamOnly, v))
 }
 
 // ModelRoutingIsNil applies the IsNil predicate on the "model_routing" field.

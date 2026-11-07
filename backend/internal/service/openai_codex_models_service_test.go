@@ -334,6 +334,14 @@ func TestNewConfiguredCodexModelDescriptorUsesProviderMetadataAndSafeFallback(t 
 	require.Equal(t, "none", *claudeHaiku.DefaultReasoningLevel)
 	require.Equal(t, []string{"none"}, effortsFromConfiguredCodexLevels(claudeHaiku.SupportedReasoningLevels))
 
+	claudeHaiku55 := newConfiguredCodexModelDescriptor("claude-haiku-5-5")
+	require.Equal(t, "Claude Haiku 5.5", claudeHaiku55.DisplayName)
+	require.Equal(t, int64(1_000_000), claudeHaiku55.ContextWindow)
+	require.Equal(t, int64(1_000_000), claudeHaiku55.MaxContextWindow)
+	require.NotNil(t, claudeHaiku55.DefaultReasoningLevel)
+	require.Equal(t, "medium", *claudeHaiku55.DefaultReasoningLevel)
+	require.Equal(t, []string{"low", "medium", "high", "xhigh", "max"}, effortsFromConfiguredCodexLevels(claudeHaiku55.SupportedReasoningLevels))
+
 	gpt56 := newConfiguredCodexModelDescriptor("gpt-5.6-sol")
 	require.Equal(t, "GPT-5.6 Sol", gpt56.DisplayName)
 	require.Equal(t, "OpenAI GPT coding model routed through Sub2API.", gpt56.Description)
@@ -1141,38 +1149,6 @@ func TestBuildCodexModelsManifestForGroupUsesFallbackWhenTextOnlyPlatformHasNoSn
 	models := decodeCodexManifestModels(t, body)
 	require.Len(t, models, 1)
 	require.Equal(t, []any{"text"}, models[0]["input_modalities"])
-}
-
-func TestBuildCodexModelsManifestForGroupMappedDeepSeekAliasUsesDeepSeekCapabilities(t *testing.T) {
-	t.Parallel()
-
-	const groupID int64 = 736
-	svc := &GatewayService{accountRepo: codexModelsVisibilityAccountRepo{byGroup: map[int64][]Account{
-		groupID: {{
-			ID:       1,
-			Platform: PlatformOpenAI,
-			Type:     AccountTypeAPIKey,
-			Credentials: map[string]any{
-				"model_mapping": map[string]any{"gpt-6-astra": "deepseek-v4-pro"},
-			},
-		}},
-	}}}
-
-	body, err := svc.BuildCodexModelsManifestForGroup(
-		context.Background(),
-		&Group{ID: groupID, Platform: PlatformOpenAI},
-		"",
-		[]string{"gpt-6-astra"},
-	)
-	require.NoError(t, err)
-	models := decodeCodexManifestModels(t, body)
-	require.Len(t, models, 1)
-	model := models[0]
-	require.Equal(t, "gpt-6-astra", model["slug"])
-	require.Equal(t, false, model["use_responses_lite"], "mapped DeepSeek aliases must opt out of GPT Responses Lite")
-	require.Equal(t, "unified_exec", model["shell_type"])
-	require.Equal(t, "high", model["default_reasoning_level"])
-	require.Equal(t, []string{"low", "high", "max"}, effortsFromManifestModel(t, model))
 }
 
 func TestBuildCodexModelsManifestForGroupFallsBackWhenCapabilityLookupFails(t *testing.T) {
@@ -2435,7 +2411,7 @@ func TestFetchCodexModelsManifestAPIKeyDisablesResponsesLiteForAffectedModels(t 
 }
 
 func TestFetchCodexModelsManifestOAuthPreservesResponsesLite(t *testing.T) {
-	const manifestBody = ` {"models":[{"slug":"gpt-5.6-sol","use_responses_lite":true}]} `
+	const manifestBody = ` {"models":[{"slug":"gpt-5.6-sol","use_responses_lite":true},{"slug":"gpt-6.1-sol","context_window":500000,"max_context_window":1000000,"use_responses_lite":true}]} `
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(manifestBody))
 	}))
@@ -3743,26 +3719,6 @@ func TestFetchCodexModelsManifestOAuthSharedAcrossGroupsWithIndependentFiltering
 	require.EqualValues(t, 1, calls.Load(), "同一账号两个分组同时请求时只发一次上游请求")
 }
 
-func TestGPT6SolLunaCatalogKeepsAuthoritativeCapabilities(t *testing.T) {
-	for _, id := range []string{"gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna"} {
-		svc := &OpenAIGatewayService{}
-		manifest := &OpenAIModelsResponse{Body: []byte(`{"models":[{"slug":"` + id + `","supported_reasoning_levels":[{"effort":"ultra"}],"default_reasoning_level":"ultra","multi_agent_reasoning_effort":"xhigh","service_tiers":[{"id":"ultrafast"}],"context_window":300000,"max_context_window":900000,"supports_search_tool":false,"apply_patch_tool_type":null}]}`)}
-		account := newCodexModelsAPIKeyTestAccount("https://api.openai.com/v1")
-		require.NoError(t, svc.CompleteAPIKeyCodexModelsManifestForClient(manifest, account))
-		models := decodeCodexManifestModels(t, manifest.Body)
-		require.Len(t, models, 1)
-		require.Equal(t, []string{"ultra"}, effortsFromManifestModel(t, models[0]))
-		require.Equal(t, "ultra", models[0]["default_reasoning_level"])
-		require.Equal(t, "xhigh", models[0]["multi_agent_reasoning_effort"])
-		require.Equal(t, float64(300000), models[0]["context_window"])
-		require.Equal(t, float64(900000), models[0]["max_context_window"])
-		require.Equal(t, []any{map[string]any{"id": "ultrafast"}}, models[0]["service_tiers"])
-		require.Equal(t, false, models[0]["supports_search_tool"])
-		require.Contains(t, models[0], "apply_patch_tool_type")
-		require.Nil(t, models[0]["apply_patch_tool_type"])
-	}
-}
-
 // Scenario: 非 OpenAI GPT 模型的 Codex 提示词不声称自己是 GPT。
 // Antigravity(Google) 对「Codex 提示词 + GPT-5 身份」直接回 429 RESOURCE_EXHAUSTED。
 func TestBuildCodexModelsManifestStripsGPTIdentityForNonGPTModels(t *testing.T) {
@@ -3819,6 +3775,26 @@ func TestCodexGPTIdentityPatternsCoverBundledPrompts(t *testing.T) {
 	}
 }
 
+func TestGPT6SolLunaCatalogKeepsAuthoritativeCapabilities(t *testing.T) {
+	for _, id := range []string{"gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna"} {
+		svc := &OpenAIGatewayService{}
+		manifest := &OpenAIModelsResponse{Body: []byte(`{"models":[{"slug":"` + id + `","supported_reasoning_levels":[{"effort":"ultra"}],"default_reasoning_level":"ultra","multi_agent_reasoning_effort":"xhigh","service_tiers":[{"id":"ultrafast"}],"context_window":300000,"max_context_window":900000,"supports_search_tool":false,"apply_patch_tool_type":null}]}`)}
+		account := newCodexModelsAPIKeyTestAccount("https://api.openai.com/v1")
+		require.NoError(t, svc.CompleteAPIKeyCodexModelsManifestForClient(manifest, account))
+		models := decodeCodexManifestModels(t, manifest.Body)
+		require.Len(t, models, 1)
+		require.Equal(t, []string{"ultra"}, effortsFromManifestModel(t, models[0]))
+		require.Equal(t, "ultra", models[0]["default_reasoning_level"])
+		require.Equal(t, "xhigh", models[0]["multi_agent_reasoning_effort"])
+		require.Equal(t, float64(300000), models[0]["context_window"])
+		require.Equal(t, float64(900000), models[0]["max_context_window"])
+		require.Equal(t, []any{map[string]any{"id": "ultrafast"}}, models[0]["service_tiers"])
+		require.Equal(t, false, models[0]["supports_search_tool"])
+		require.Contains(t, models[0], "apply_patch_tool_type")
+		require.Nil(t, models[0]["apply_patch_tool_type"])
+	}
+}
+
 func TestGPT61SolOfflineCodexCatalog(t *testing.T) {
 	body, err := BuildCodexModelsManifest([]string{"gpt-6.1-sol"})
 	require.NoError(t, err)
@@ -3830,7 +3806,7 @@ func TestGPT61SolOfflineCodexCatalog(t *testing.T) {
 	m := catalog.Models[0]
 	require.Equal(t, "gpt-6.1-sol", m["slug"])
 	require.Equal(t, "low", m["default_reasoning_level"])
-	require.EqualValues(t, 272000, m["context_window"])
+	require.EqualValues(t, 500000, m["context_window"])
 	require.EqualValues(t, 872000, m["max_context_window"])
 	require.Equal(t, "xhigh", m["multi_agent_reasoning_effort"])
 	require.Equal(t, "v2", m["multi_agent_version"])
@@ -3882,4 +3858,26 @@ func TestGPT61SolAPIKeyCatalogUsesFullResponses(t *testing.T) {
 	require.NoError(t, json.Unmarshal(body, &catalog))
 	require.Equal(t, false, catalog.Models[0]["use_responses_lite"])
 	require.Equal(t, "low", catalog.Models[0]["default_reasoning_level"])
+}
+
+func TestGPT61SolAPIKeyCatalogContextWindow(t *testing.T) {
+	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"base_url": "https://api.openai.com"}}
+	for _, tc := range []struct {
+		name string
+		body string
+		want int64
+	}{
+		{"missing uses updated default", `{"models":[{"slug":"gpt-6.1-sol"}]}`, 500_000},
+		{"null uses updated default", `{"models":[{"slug":"gpt-6.1-sol","context_window":null}]}`, 500_000},
+		{"lower upstream window is preserved", `{"models":[{"slug":"gpt-6.1-sol","context_window":272000}]}`, 272_000},
+		{"higher upstream window is preserved", `{"models":[{"slug":"gpt-6.1-sol","context_window":1000000,"max_context_window":1000000}]}`, 1_000_000},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body, err := completeAPIKeyCodexModelsManifestMetadata([]byte(tc.body), true, account)
+			require.NoError(t, err)
+			models := decodeCodexManifestModels(t, body)
+			require.Len(t, models, 1)
+			require.EqualValues(t, tc.want, models[0]["context_window"])
+		})
+	}
 }

@@ -66,22 +66,15 @@ func ProvideSchedulerCache(rdb *redis.Client, cfg *config.Config) service.Schedu
 // ProviderSet is the Wire provider set for all repositories
 var ProviderSet = wire.NewSet(
 	NewUserRepository,
+	NewMCPOAuthRepository,
 	NewAPIKeyRepository,
 	NewGroupRepository,
 	NewAdminGroupRepository,
 	NewCompositeModelRouteRepository,
 	NewAccountRepository,
 	NewAdminAccountRepository,
-	NewAccountOpsRepository,
-	NewAccountTokenGuardRepository,
-	NewOpenAIOAuthReauthRepository,
-	NewAccountTokenGuardV2Repository,
 	NewScheduledTestPlanRepository,   // 定时测试计划仓储
 	NewScheduledTestResultRepository, // 定时测试结果仓储
-	NewQualityRuleTemplateRepository, // 质量运维分组规则仓储
-	NewPelicanShowcaseRepository,     // 鹈鹕测智用户展示快照仓储
-	NewPelicanGroupTestRepository,    // 鹈鹕测智分组测试计划与结果仓储
-	NewControlledExperimentRepository,
 	NewProxyRepository,
 	NewRedeemCodeRepository,
 	NewPromoCodeRepository,
@@ -90,12 +83,12 @@ var ProviderSet = wire.NewSet(
 	NewUsageLogRepository,
 	NewUsageBillingRepository,
 	NewBatchImageRepository,
+	NewGeminiCachedContentRepository,
 	NewIdempotencyRepository,
 	NewUsageCleanupRepository,
 	NewDashboardAggregationRepository,
 	NewSettingRepository,
-	NewCodexHarvestNodeRepository,
-	NewCodexHarvestFlowRepository,
+	NewScopedAdminKeyRepository,
 	NewOpsRepository,
 	NewAuditLogRepository,
 	NewPasskeyRepository,
@@ -111,8 +104,6 @@ var ProviderSet = wire.NewSet(
 	NewChannelRepository,
 	NewChannelMonitorRepository,
 	NewChannelMonitorV2Repository,
-	NewChannelMonitorV3Repository,
-	NewSupportTicketRepository,
 	NewChannelMonitorRequestTemplateRepository,
 	NewContentModerationRepository,
 	NewAffiliateRepository,
@@ -156,8 +147,6 @@ var ProviderSet = wire.NewSet(
 
 	// Encryptors
 	NewAESEncryptor,
-	NewNewAPIAuthorizationRepository,
-	NewOpenAICredentialEncryptor,
 
 	// Backup infrastructure
 	NewPgDumper,

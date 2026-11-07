@@ -5,7 +5,7 @@
       <!-- Left: filters (allowed to wrap to multiple rows) -->
       <div class="flex flex-1 flex-wrap items-end gap-4">
         <!-- User Search -->
-        <div v-if="!observerMode" ref="userSearchRef" class="usage-filter-dropdown relative w-full sm:w-auto sm:min-w-[240px]">
+        <div ref="userSearchRef" class="usage-filter-dropdown relative w-full sm:w-auto sm:min-w-[240px]">
           <label class="input-label">{{ t('admin.usage.userFilter') }}</label>
           <input
             v-model="userKeyword"
@@ -186,7 +186,7 @@
         </button>
         <slot name="after-reset" />
         <template v-if="mode === 'usage'">
-          <button v-if="!observerMode" type="button" @click="$emit('cleanup')" class="btn btn-danger">
+          <button type="button" @click="$emit('cleanup')" class="btn btn-danger">
             {{ t('admin.usage.cleanup.button') }}
           </button>
           <button type="button" @click="$emit('export')" :disabled="exporting" class="btn btn-primary">
@@ -199,14 +199,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, toRef, watch, computed, inject } from 'vue'
+import { ref, onMounted, onUnmounted, toRef, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { observerUsageAPI, type UsageFilterOption } from '@/api/observerUsage'
-import { observerUsageContext } from './observerUsageContext'
 import { adminAPI } from '@/api/admin'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
 import { COMMON_ERROR_STATUS_CODES } from '@/utils/errorBadges'
-import type { SimpleUser } from '@/api/admin/usage'
+import type { SimpleApiKey, SimpleUser } from '@/api/admin/usage'
 
 type ModelValue = Record<string, any>
 
@@ -241,7 +239,6 @@ const emit = defineEmits([
 ])
 
 const { t } = useI18n()
-const observerMode = inject(observerUsageContext, false)
 const filters = toRef(props, 'modelValue')
 
 const userSearchRef = ref<HTMLElement | null>(null)
@@ -255,7 +252,7 @@ let userSearchTimeout: ReturnType<typeof setTimeout> | null = null
 let userSearchSequence = 0
 
 const apiKeyKeyword = ref('')
-const apiKeyResults = ref<UsageFilterOption[]>([])
+const apiKeyResults = ref<SimpleApiKey[]>([])
 const showApiKeyDropdown = ref(false)
 let apiKeySearchTimeout: ReturnType<typeof setTimeout> | null = null
 
@@ -343,7 +340,6 @@ const clearPendingUserSearch = () => {
 }
 
 const debounceUserSearch = () => {
-  if (observerMode) return
   clearPendingUserSearch()
   const query = userKeyword.value.trim()
   if (!query) {
@@ -371,9 +367,10 @@ const debounceApiKeySearch = () => {
   if (apiKeySearchTimeout) clearTimeout(apiKeySearchTimeout)
   apiKeySearchTimeout = setTimeout(async () => {
     try {
-      apiKeyResults.value = observerMode
-        ? await observerUsageAPI.filterOptions('api_key', apiKeyKeyword.value || '')
-        : await adminAPI.usage.searchApiKeys(filters.value.user_id, apiKeyKeyword.value || '')
+      apiKeyResults.value = await adminAPI.usage.searchApiKeys(
+        filters.value.user_id,
+        apiKeyKeyword.value || ''
+      )
     } catch {
       apiKeyResults.value = []
     }
@@ -381,7 +378,6 @@ const debounceApiKeySearch = () => {
 }
 
 const selectUser = async (u: SimpleUser) => {
-  if (observerMode) return
   clearPendingUserSearch()
   userKeyword.value = u.email
   showUserDropdown.value = false
@@ -408,7 +404,7 @@ const clearUser = () => {
   emitChange()
 }
 
-const selectApiKey = (k: UsageFilterOption) => {
+const selectApiKey = (k: SimpleApiKey) => {
   apiKeyKeyword.value = k.name || String(k.id)
   showApiKeyDropdown.value = false
   filters.value.api_key_id = k.id
@@ -435,9 +431,7 @@ const debounceAccountSearch = () => {
       return
     }
     try {
-      const res = observerMode
-        ? { items: await observerUsageAPI.filterOptions('account', accountKeyword.value) }
-        : await adminAPI.accounts.list(1, 20, { search: accountKeyword.value })
+      const res = await adminAPI.accounts.list(1, 20, { search: accountKeyword.value })
       accountResults.value = res.items.map((a) => ({ id: a.id, name: a.name }))
     } catch {
       accountResults.value = []
@@ -531,9 +525,7 @@ watch(
 onMounted(async () => {
   document.addEventListener('click', onDocumentClick)
   try {
-    const gs = observerMode
-      ? { items: await observerUsageAPI.filterOptions('group') }
-      : await adminAPI.groups.list(1, 1000)
+    const gs = await adminAPI.groups.list(1, 1000)
     groupOptions.value.push(...gs.items.map((g: any) => ({ value: g.id, label: g.name })))
   } catch {
     // Ignore filter option loading errors (page still usable)

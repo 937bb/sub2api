@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"errors"
-	"github.com/Wei-Shaw/sub2api/internal/requestcapture"
 	"time"
 
 	coderws "github.com/coder/websocket"
@@ -98,11 +97,6 @@ func readOpenAIWSClientMessageWithTimeoutStart(
 	for {
 		select {
 		case result := <-readDone:
-			if result.err == nil {
-				capture := requestcapture.FromContext(controlCtx)
-				capture.SetProtocol("websocket")
-				capture.ClientFrame(result.payload)
-			}
 			return result.messageType, result.payload, result.err
 		case <-timeoutStart:
 			startTimeout()
@@ -110,7 +104,7 @@ func readOpenAIWSClientMessageWithTimeoutStart(
 			return closeAndJoin(timeoutStatus, timeoutReason, context.DeadlineExceeded)
 		case <-controlCtx.Done():
 			cause := context.Cause(controlCtx)
-			if errors.Is(cause, ErrOpenAIWSIngressLeaseLost) || errors.Is(cause, ErrAPIKeySlotLeaseLost) {
+			if errors.Is(cause, ErrOpenAIWSIngressLeaseLost) {
 				return closeAndJoin(
 					coderws.StatusTryAgainLater,
 					"websocket ingress capacity lease lost; please reconnect",

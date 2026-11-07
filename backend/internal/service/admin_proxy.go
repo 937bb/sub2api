@@ -218,23 +218,32 @@ func (s *adminServiceImpl) TestProxy(ctx context.Context, id int64) (*ProxyTestR
 		return nil, err
 	}
 
-	result := s.testProxyURL(ctx, proxy.URL())
-	s.saveProxyLatency(ctx, id, proxyTestLatencyInfo(result))
-	return result, nil
-}
-
-// testProxyURL probes connectivity and exit information through proxyURL.
-func (s *adminServiceImpl) testProxyURL(ctx context.Context, proxyURL string) *ProxyTestResult {
-	if s.proxyProber == nil {
-		return &ProxyTestResult{Success: false, Message: "代理探测服务未配置"}
-	}
+	proxyURL := proxy.URL()
 	exitInfo, latencyMs, err := s.proxyProber.ProbeProxy(ctx, proxyURL)
 	if err != nil {
+		s.saveProxyLatency(ctx, id, &ProxyLatencyInfo{
+			Success:   false,
+			Message:   err.Error(),
+			UpdatedAt: time.Now(),
+		})
 		return &ProxyTestResult{
 			Success: false,
 			Message: err.Error(),
-		}
+		}, nil
 	}
+
+	latency := latencyMs
+	s.saveProxyLatency(ctx, id, &ProxyLatencyInfo{
+		Success:     true,
+		LatencyMs:   &latency,
+		Message:     "Proxy is accessible",
+		IPAddress:   exitInfo.IP,
+		Country:     exitInfo.Country,
+		CountryCode: exitInfo.CountryCode,
+		Region:      exitInfo.Region,
+		City:        exitInfo.City,
+		UpdatedAt:   time.Now(),
+	})
 	return &ProxyTestResult{
 		Success:     true,
 		Message:     "Proxy is accessible",
@@ -244,26 +253,7 @@ func (s *adminServiceImpl) testProxyURL(ctx context.Context, proxyURL string) *P
 		Region:      exitInfo.Region,
 		Country:     exitInfo.Country,
 		CountryCode: exitInfo.CountryCode,
-	}
-}
-
-// proxyTestLatencyInfo is the latency snapshot a connection test leaves behind.
-func proxyTestLatencyInfo(result *ProxyTestResult) *ProxyLatencyInfo {
-	info := &ProxyLatencyInfo{
-		Success:   result.Success,
-		Message:   result.Message,
-		UpdatedAt: time.Now(),
-	}
-	if result.Success {
-		latency := result.LatencyMs
-		info.LatencyMs = &latency
-		info.IPAddress = result.IPAddress
-		info.Country = result.Country
-		info.CountryCode = result.CountryCode
-		info.Region = result.Region
-		info.City = result.City
-	}
-	return info
+	}, nil
 }
 
 func (s *adminServiceImpl) CheckProxyQuality(ctx context.Context, id int64) (*ProxyQualityCheckResult, error) {
@@ -272,22 +262,15 @@ func (s *adminServiceImpl) CheckProxyQuality(ctx context.Context, id int64) (*Pr
 		return nil, err
 	}
 
-	result, exitInfo := s.checkProxyURLQuality(ctx, proxy.URL())
-	result.ProxyID = id
-	s.saveProxyQualitySnapshot(ctx, id, result, exitInfo)
-	return result, nil
-}
-
-// checkProxyURLQuality runs the base connectivity probe and the AI target
-// checks through proxyURL. The exit is nil when base connectivity failed.
-func (s *adminServiceImpl) checkProxyURLQuality(ctx context.Context, proxyURL string) (*ProxyQualityCheckResult, *ProxyExitInfo) {
 	result := &ProxyQualityCheckResult{
+		ProxyID:   id,
 		Score:     100,
 		Grade:     "A",
 		CheckedAt: time.Now().Unix(),
 		Items:     make([]ProxyQualityCheckItem, 0, len(proxyQualityTargets)+1),
 	}
 
+	proxyURL := proxy.URL()
 	if s.proxyProber == nil {
 		result.Items = append(result.Items, ProxyQualityCheckItem{
 			Target:  "base_connectivity",
@@ -296,6 +279,7 @@ func (s *adminServiceImpl) checkProxyURLQuality(ctx context.Context, proxyURL st
 		})
 		result.FailedCount++
 		finalizeProxyQualityResult(result)
+		s.saveProxyQualitySnapshot(ctx, id, result, nil)
 		return result, nil
 	}
 
@@ -309,6 +293,7 @@ func (s *adminServiceImpl) checkProxyURLQuality(ctx context.Context, proxyURL st
 		})
 		result.FailedCount++
 		finalizeProxyQualityResult(result)
+		s.saveProxyQualitySnapshot(ctx, id, result, nil)
 		return result, nil
 	}
 
@@ -337,7 +322,8 @@ func (s *adminServiceImpl) checkProxyURLQuality(ctx context.Context, proxyURL st
 		})
 		result.FailedCount++
 		finalizeProxyQualityResult(result)
-		return result, exitInfo
+		s.saveProxyQualitySnapshot(ctx, id, result, exitInfo)
+		return result, nil
 	}
 
 	for _, target := range proxyQualityTargets {
@@ -356,7 +342,8 @@ func (s *adminServiceImpl) checkProxyURLQuality(ctx context.Context, proxyURL st
 	}
 
 	finalizeProxyQualityResult(result)
-	return result, exitInfo
+	s.saveProxyQualitySnapshot(ctx, id, result, exitInfo)
+	return result, nil
 }
 
 func runProxyQualityTarget(ctx context.Context, client *http.Client, target proxyQualityTarget) ProxyQualityCheckItem {
@@ -507,11 +494,6 @@ func (s *adminServiceImpl) saveProxyQualitySnapshot(ctx context.Context, proxyID
 	if result == nil {
 		return
 	}
-	s.saveProxyLatency(ctx, proxyID, proxyQualityLatencyInfo(result, exitInfo))
-}
-
-// proxyQualityLatencyInfo is the latency snapshot a quality check leaves behind.
-func proxyQualityLatencyInfo(result *ProxyQualityCheckResult, exitInfo *ProxyExitInfo) *ProxyLatencyInfo {
 	score := result.Score
 	checkedAt := result.CheckedAt
 	info := &ProxyLatencyInfo{
@@ -536,7 +518,7 @@ func proxyQualityLatencyInfo(result *ProxyQualityCheckResult, exitInfo *ProxyExi
 		info.Region = exitInfo.Region
 		info.City = exitInfo.City
 	}
-	return info
+	s.saveProxyLatency(ctx, proxyID, info)
 }
 
 func (s *adminServiceImpl) probeProxyLatency(ctx context.Context, proxy *Proxy) {

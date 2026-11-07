@@ -111,8 +111,8 @@ func normalizeUserRole(role, fallback string) (string, error) {
 	if role == "" {
 		return fallback, nil
 	}
-	if role != RoleAdmin && role != RoleUser && role != RoleObserver {
-		return "", fmt.Errorf("invalid role: %q (must be %s, %s or %s)", role, RoleAdmin, RoleUser, RoleObserver)
+	if role != RoleAdmin && role != RoleUser {
+		return "", fmt.Errorf("invalid role: %q (must be %s or %s)", role, RoleAdmin, RoleUser)
 	}
 	return role, nil
 }
@@ -131,23 +131,16 @@ func (s *adminServiceImpl) CreateUser(ctx context.Context, input *CreateUserInpu
 		return nil, err
 	}
 
-	if err := s.validateGroupIDsExist(ctx, input.ObserverGroupIDs); err != nil {
-		return nil, err
-	}
-	if role != RoleObserver {
-		input.ObserverGroupIDs = []int64{}
-	}
 	user := &User{
-		Email:            input.Email,
-		Username:         input.Username,
-		Notes:            input.Notes,
-		Role:             role,
-		Balance:          balance,
-		Concurrency:      input.Concurrency,
-		RPMLimit:         input.RPMLimit,
-		Status:           StatusActive,
-		AllowedGroups:    input.AllowedGroups,
-		ObserverGroupIDs: input.ObserverGroupIDs,
+		Email:         input.Email,
+		Username:      input.Username,
+		Notes:         input.Notes,
+		Role:          role,
+		Balance:       balance,
+		Concurrency:   input.Concurrency,
+		RPMLimit:      input.RPMLimit,
+		Status:        StatusActive,
+		AllowedGroups: input.AllowedGroups,
 
 		RestrictPublicGroups: input.RestrictPublicGroups,
 	}
@@ -179,7 +172,7 @@ func (s *adminServiceImpl) ensureNotLastAdmin(ctx context.Context) error {
 		return fmt.Errorf("count admin users: %w", err)
 	}
 	if result == nil || result.Total <= 1 {
-		return errors.New("cannot demote the last admin user")
+		return infraerrors.BadRequest("LAST_ADMIN_DEMOTE_FORBIDDEN", "cannot demote the last admin user")
 	}
 	return nil
 }
@@ -211,25 +204,14 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 		}
 	}
 
-	originalCtx := ctx
-	ctx, setupTx, err := s.beginObserverSetup(ctx, id, input)
-	if err != nil {
-		return nil, err
-	}
-	if setupTx != nil {
-		defer func() { _ = setupTx.Rollback() }()
-	}
 	user, err := s.userRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	if setupTx != nil && user.Role == RoleObserver {
-		return nil, infraerrors.Conflict("OBSERVER_SETUP_ALREADY_APPLIED", "Observer setup can only run when changing a non-observer user to observer")
-	}
 
 	// Protect admin users: cannot disable admin accounts
 	if user.Role == "admin" && input.Status == "disabled" {
-		return nil, errors.New("cannot disable admin user")
+		return nil, infraerrors.BadRequest("ADMIN_DISABLE_FORBIDDEN", "cannot disable admin user; change the role to user first")
 	}
 
 	oldConcurrency := user.Concurrency
@@ -275,7 +257,7 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 		}
 		// 防锁死保护：不允许降级系统中最后一个管理员（自我降级已在 handler 层拦截，
 		// 此处兜底覆盖跨管理员互降导致零 admin 的场景）。
-		if user.Role == RoleAdmin && role != RoleAdmin {
+		if user.Role == RoleAdmin && role == RoleUser {
 			if err := s.ensureNotLastAdmin(ctx); err != nil {
 				return nil, err
 			}
@@ -299,64 +281,14 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 		fields.AllowedGroups = true
 	}
 
-	if input.ObserverGroupIDs != nil {
-		if err := s.validateGroupIDsExist(ctx, *input.ObserverGroupIDs); err != nil {
-			return nil, err
-		}
-		user.ObserverGroupIDs = *input.ObserverGroupIDs
-		fields.ObserverGroupIDs = true
-	}
-	if user.Role != RoleObserver && (fields.Role || fields.ObserverGroupIDs) {
-		user.ObserverGroupIDs = []int64{}
-		fields.ObserverGroupIDs = true
-	}
-
 	oldRestrictPublicGroups := user.RestrictPublicGroups
 	if input.RestrictPublicGroups != nil {
 		user.RestrictPublicGroups = *input.RestrictPublicGroups
 		fields.RestrictPublicGroups = true
 	}
-	var dedicatedGroupID int64
-	if setupTx != nil {
-		dedicatedGroupID, err = s.applyObserverSetup(ctx, user, &fields, input.ObserverSetup)
-		if err != nil {
-			return nil, err
-		}
-	}
 
 	if err := s.userRepo.Update(ctx, user, fields); err != nil {
 		return nil, err
-	}
-	concurrencyDiff := user.Concurrency - oldConcurrency
-	if setupTx != nil {
-		if input.ObserverSetup.GrantResources {
-			change, err := s.userRepo.AdjustBalance(ctx, user.ID, observerSetupBalanceGrant)
-			if err != nil {
-				return nil, err
-			}
-			user.Balance = change.New
-			if err := s.recordObserverAdjustment(ctx, user.ID, input.ActorAdminID, AdjustmentTypeAdminBalance, observerSetupBalanceGrant); err != nil {
-				return nil, err
-			}
-		}
-		if concurrencyDiff != 0 {
-			if err := s.recordObserverAdjustment(ctx, user.ID, input.ActorAdminID, AdjustmentTypeAdminConcurrency, float64(concurrencyDiff)); err != nil {
-				return nil, err
-			}
-		}
-		if err := setupTx.Commit(); err != nil {
-			return nil, err
-		}
-		ctx = originalCtx
-		logger.LegacyPrintf("service.admin", "audit: observer setup actor_admin_id=%d target_user_id=%d dedicated_group_id=%d revoke_public_groups=%t grant_resources=%t",
-			input.ActorAdminID, user.ID, dedicatedGroupID, input.ObserverSetup.RevokePublicGroups, input.ObserverSetup.GrantResources)
-		if input.ObserverSetup.GrantResources && s.billingCacheService != nil {
-			cacheCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-			defer cancel()
-			if err := s.billingCacheService.InvalidateUserBalance(cacheCtx, user.ID); err != nil {
-				logger.LegacyPrintf("service.admin", "invalidate observer balance cache failed: user_id=%d err=%v", user.ID, err)
-			}
-		}
 	}
 
 	// 角色变更属权限敏感操作，落审计日志（含操作者），便于事后追溯。
@@ -380,7 +312,8 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 		}
 	}
 
-	if concurrencyDiff != 0 && setupTx == nil {
+	concurrencyDiff := user.Concurrency - oldConcurrency
+	if concurrencyDiff != 0 {
 		code, err := GenerateRedeemCode()
 		if err != nil {
 			logger.LegacyPrintf("service.admin", "failed to generate adjustment redeem code: %v", err)
@@ -430,7 +363,7 @@ func (s *adminServiceImpl) DeleteUser(ctx context.Context, id int64) error {
 		return err
 	}
 	if user.Role == "admin" {
-		return errors.New("cannot delete admin user")
+		return infraerrors.BadRequest("ADMIN_DELETE_FORBIDDEN", "cannot delete admin user; change the role to user first")
 	}
 
 	apiKeys, err := s.listUserAPIKeysForDeletion(ctx, id)

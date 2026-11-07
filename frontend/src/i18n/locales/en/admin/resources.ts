@@ -42,12 +42,6 @@ export default {
 
     // Proxies
     proxies: {
-      managementSections: 'Proxy management sections',
-      proxyList: 'Static proxies / IP pool',
-      subscriptions: 'Subscriptions',
-      dynamicProxies: 'Dynamic proxies',
-      nodes: 'Nodes',
-      kernelRules: 'Kernel and rules',
       title: 'Proxy Management',
       description: 'Manage proxy servers for accounts',
       createProxy: 'Create Proxy',
@@ -237,8 +231,7 @@ export default {
       nDays: '{days}d',
       expiryDaysPlaceholder: 'Custom days, empty = never',
       expiryWarnDays: 'Expiry warning (days)',
-      fallbackMode: 'Failure / expiry fallback',
-      fallbackModeHint: 'Applies the selected policy on expiry. For eligible OpenAI HTTP connection failures, runtime fallback requires confirmation that the request has not been sent; streams with output are not replayed by this fallback. Direct connections use the network of the environment running Sub2API.',
+      fallbackMode: 'Expiry fallback',
       fallbackNone: 'No fallback',
       fallbackProxy: 'Backup proxy',
       fallbackDirect: 'Direct connection',
@@ -427,18 +420,9 @@ export default {
         conditionType: 'Condition type',
         conditionSubscription: 'Subscription',
         conditionBalance: 'Balance',
-        conditionUser: 'Specific users',
         operator: 'Operator',
         balanceValue: 'Balance threshold',
-        selectPackages: 'Select packages',
-        targetingUsers: 'Specific users',
-        targetingUsersHint: 'Only the selected users can see this announcement, e.g. to remind or warn one user. With the Popup notify mode it pops up after they sign in or reload the page, until they mark it as read.',
-        selectUsers: 'Select users',
-        selectUsersRequired: 'Select at least one user',
-        searchUsersPlaceholder: 'Search by email or username',
-        noUsersFound: 'No matching users',
-        noUsersSelected: 'No users selected yet',
-        userUnavailable: 'User not found'
+        selectPackages: 'Select packages'
       },
       operators: {
         gt: '>',
@@ -449,7 +433,6 @@ export default {
       },
       targetingSummaryAll: 'All users',
       targetingSummaryCustom: 'Custom ({groups} groups)',
-      targetingSummaryUsers: 'Specific users ({count})',
       timeImmediate: 'Immediate',
       timeNever: 'Never',
       readStatus: 'Read Status',

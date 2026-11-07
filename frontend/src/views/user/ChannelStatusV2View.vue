@@ -43,8 +43,6 @@
               </span>
             </div>
           </div>
-          <div class="flex items-center gap-2">
-          <button type="button" class="btn btn-secondary btn-sm" data-testid="monitor-layout-toggle" @click="analytics = !analytics">{{ t(analytics ? 'channelMonitorV2.cards.showCards' : 'channelMonitorV2.cards.showAnalytics') }}</button>
           <button
             class="btn btn-secondary btn-icon flex h-8 w-8 items-center justify-center rounded-lg bg-gray-100 text-gray-500 hover:bg-gray-200 dark:bg-dark-700 dark:text-gray-400 dark:hover:bg-dark-600"
             type="button"
@@ -54,7 +52,6 @@
           >
             <Icon name="refresh" size="sm" :class="loading ? 'animate-spin' : ''" />
           </button>
-          </div>
         </header>
 
         <!-- First-upgrade silent backfill: show until 30d product window is covered -->
@@ -111,7 +108,6 @@
             </button>
           </div>
 
-          <template v-if="analytics">
           <span class="mx-0.5 hidden h-5 w-px shrink-0 bg-gray-200 dark:bg-dark-700 sm:block" aria-hidden="true"></span>
 
           <FilterMultiSelect
@@ -194,17 +190,9 @@
               {{ option.label }}
             </button>
           </div>
-          </template>
-          <template v-else>
-            <span class="ml-3 text-xs text-gray-500 dark:text-gray-400">{{ t('channelMonitorV2.cards.passive') }}</span>
-            <button v-if="hasDimensionFilter" class="btn btn-ghost btn-sm" @click="clearDimensions">{{ t('channelMonitorV2.clearFilters') }}</button>
-            <span v-if="snapshot && hasMonitorSamples(snapshot.metrics)" class="ml-auto hidden text-xs text-gray-500 dark:text-gray-400 md:inline">{{ t('channelMonitorV2.cards.availability') }} {{ formatPercent(1 - snapshot.metrics.error_rate) }} · {{ t('channelMonitorV2.cards.cache') }} {{ formatPercent(snapshot.metrics.cache_rate) }}</span>
-          </template>
         </div>
       </section>
 
-      <MonitorStatusCards v-if="!analytics" :items="matrix?.items || []" :coverage="matrix?.coverage" :loading="loading" :countdown="countdown" :now="clockNow" />
-      <template v-else>
       <!-- Overview KPI: success · TTFT · tokens/s(optional) · cache · (+ RPM when throughput visible) -->
       <section
         v-if="snapshot"
@@ -465,7 +453,6 @@
           </div>
         </div>
       </section>
-      </template>
     </div>
   </AppLayout>
 </template>
@@ -479,8 +466,6 @@ import Icon from '@/components/icons/Icon.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import Select from '@/components/common/Select.vue'
 import FilterMultiSelect from '@/features/channel-monitor-v2/FilterMultiSelect.vue'
-import MonitorStatusCards from '@/features/channel-monitor-v2/MonitorStatusCards.vue'
-import { hasMonitorSamples, monitorRefreshSeconds } from '@/features/channel-monitor-v2/monitorCards'
 import MetricCell from '@/features/channel-monitor-v2/MetricCell.vue'
 import MonitorRankBadge from '@/features/channel-monitor-v2/MonitorRankBadge.vue'
 import MonitorTrendChart from '@/features/channel-monitor-v2/MonitorTrendChart.vue'
@@ -525,11 +510,6 @@ const router = useRouter()
 const authStore = useAuthStore()
 const appStore = useAppStore()
 const { t, te, locale } = useI18n()
-const analytics = ref(false)
-const clockNow = ref(Date.now())
-const nextRefreshAt = ref(0)
-const countdown = computed(() => Math.max(0, Math.ceil((nextRefreshAt.value - clockNow.value) / 1000)))
-let clockTimer: ReturnType<typeof setInterval> | undefined
 const isAdmin = computed(() => authStore.isAdmin)
 /** Admins always see RPM/TPM; users honor the hide-throughput system setting. */
 const showThroughput = computed(() => isAdmin.value || !isChannelMonitorThroughputHidden())
@@ -725,7 +705,6 @@ function syncQuery() {
 }
 /** Dimensions catalog: range only — never re-filtered by platform/group/model selection. */
 async function loadDimensions(signal?: AbortSignal, id = sequence) {
-  if (!analytics.value) return
   const rangeOnly: MonitorFilter = {
     range: filter.value.range,
     platforms: [],
@@ -740,7 +719,7 @@ async function loadDimensions(signal?: AbortSignal, id = sequence) {
 async function loadMetrics(signal?: AbortSignal, id = sequence) {
   const [nextSnapshot, nextMatrix] = await Promise.all([
     api.getSnapshot(filter.value, isAdmin.value, signal),
-    api.getMatrix(filter.value, analytics.value ? matrixGroupBy.value : 'platform_group', isAdmin.value, signal),
+    api.getMatrix(filter.value, matrixGroupBy.value, isAdmin.value, signal),
   ])
   if (id !== sequence) return
   snapshot.value = nextSnapshot
@@ -798,7 +777,6 @@ async function reloadMetricsOnly(silent = true) {
   }
 }
 async function loadTab(signal?: AbortSignal, id = sequence) {
-  if (!analytics.value) return
   tabLoading.value = true
   try {
     if (activeTab.value === 'models') {
@@ -835,18 +813,15 @@ function scheduleAutoRefresh() {
     window.clearInterval(autoRefreshTimer)
     autoRefreshTimer = null
   }
-  const seconds = monitorRefreshSeconds(
-    snapshot.value?.config?.refresh_interval_seconds,
-    matrixRows.value,
-    bootstrapActive.value,
-  )
-  clockNow.value = Date.now()
-  nextRefreshAt.value = clockNow.value + seconds * 1000
+  // Poll faster while first-upgrade bootstrap is filling 90m→30d so the progress bar moves.
+  const seconds = bootstrapActive.value
+    ? 10
+    : snapshot.value?.config?.refresh_interval_seconds || 300
   autoRefreshTimer = window.setInterval(() => {
-    if (!document.hidden && !loading.value && !refreshing.value) {
+    if (!loading.value && !refreshing.value) {
       void reload(true)
     }
-  }, seconds * 1000)
+  }, Math.max(bootstrapActive.value ? 10 : 60, seconds) * 1000)
 }
 function drillModel(row: MonitorModelRow) {
   filter.value.platforms = [row.platform]
@@ -949,13 +924,8 @@ watch(showUserRanking, (allowed) => {
     activeTab.value = 'models'
   }
 })
-watch(analytics, () => { void reload(false) })
-onMounted(() => {
-  clockTimer = setInterval(() => { clockNow.value = Date.now() }, 1000)
-  void reload(false)
-})
+onMounted(() => void reload(false))
 onBeforeUnmount(() => {
-  if (clockTimer) clearInterval(clockTimer)
   controller?.abort()
   if (autoRefreshTimer) window.clearInterval(autoRefreshTimer)
 })

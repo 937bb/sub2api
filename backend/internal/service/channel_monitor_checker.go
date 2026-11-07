@@ -27,11 +27,7 @@ var monitorPingHTTPClient = newSSRFSafeHTTPClient(monitorPingTimeout)
 // newSSRFSafeHTTPClient 返回一个使用 safeDialContext 的 http.Client。
 // 仅供监控模块对外发起请求使用——所有目标都应是公网 endpoint。
 func newSSRFSafeHTTPClient(timeout time.Duration) *http.Client {
-	return &http.Client{Timeout: timeout, Transport: servertiming.WrapRoundTripper(newSSRFSafeHTTPTransport())}
-}
-
-func newSSRFSafeHTTPTransport() *http.Transport {
-	return &http.Transport{
+	tr := &http.Transport{
 		DialContext:           safeDialContext,
 		ForceAttemptHTTP2:     true,
 		MaxIdleConns:          16,
@@ -39,6 +35,7 @@ func newSSRFSafeHTTPTransport() *http.Transport {
 		TLSHandshakeTimeout:   monitorTLSHandshakeTimeout,
 		ResponseHeaderTimeout: monitorResponseHeaderTimeout,
 	}
+	return &http.Client{Timeout: timeout, Transport: servertiming.WrapRoundTripper(tr)}
 }
 
 // CheckOptions 承载一次检测的自定义入参。
@@ -639,6 +636,8 @@ var monitorAPIKeyPatterns = []struct {
 	{regexp.MustCompile(`xai-[A-Za-z0-9_-]{6,}`), "xai-***REDACTED***"},
 	// Gemini / Google API Key：固定前缀 + 35 位
 	{regexp.MustCompile(`AIza[A-Za-z0-9_-]{35}`), "AIza***REDACTED***"},
+	// Gemini auth key：AQ.Ab 前缀 + 48 位，长度放宽以覆盖格式变体
+	{regexp.MustCompile(`AQ\.Ab[A-Za-z0-9_-]{40,}`), "AQ.***REDACTED***"},
 	// JWT 三段式（Bearer 后常出现）：eyJxxx.eyJxxx.signature
 	{regexp.MustCompile(`eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}`), "eyJ***REDACTED.JWT***"},
 }
@@ -646,7 +645,7 @@ var monitorAPIKeyPatterns = []struct {
 // sanitizeErrorMessage 擦除错误/响应文本中可能泄露的 API key。
 // 处理两类来源：
 //  1. URL query 中的 ?key= / ?api_key= 等（Go *url.Error 会回填完整 URL）
-//  2. 上游 HTTP body 文本里直接出现的 sk-* / xai-* / AIza* / JWT 等密钥碎片
+//  2. 上游 HTTP body 文本里直接出现的 sk-* / xai-* / AIza* / AQ.* / JWT 等密钥碎片
 //
 // 注意：与 gemini_messages_compat_service.go 的 sanitizeUpstreamErrorMessage 关注点类似但参数集更广，
 // 监控模块独立维护，避免互相耦合。

@@ -3,10 +3,9 @@ package service
 import (
 	"bytes"
 	"encoding/json"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"net/url"
 	"strings"
-
-	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 )
 
 var codexToolCapabilityFields = []string{
@@ -22,11 +21,10 @@ func applyCodexToolCapabilities(dst, src map[string]json.RawMessage, overwrite b
 		if len(value) == 0 {
 			continue
 		}
-		// Unlike the scalar capability fields, Codex service_tiers is a
-		// non-nullable array. An explicit null declares no available tiers.
 		if field == "service_tiers" && bytes.Equal(value, []byte("null")) {
-			value = json.RawMessage("[]")
+			value = []byte("[]")
 		}
+		// These Codex fields are nullable booleans or strings, never arbitrary objects.
 		if !bytes.Equal(value, []byte("null")) {
 			if field == "service_tiers" {
 				var tiers []configuredCodexServiceTier
@@ -75,7 +73,7 @@ func accountCodexToolCapabilities(account *Account, modelID string) map[string]j
 	parsed, err := url.Parse(baseURL)
 	official := err == nil && (strings.EqualFold(parsed.Hostname(), "api.openai.com") ||
 		(account.IsOpenAIOAuth() && strings.EqualFold(parsed.Hostname(), "chatgpt.com")))
-	if account.IsOpenAI() && (isOpenAIGPT6AstraModel(modelID) || openai.IsGPT61SolModelSpelling(modelID)) && official {
+	if account.IsOpenAI() && (isOpenAIGPT6AstraModel(modelID) || openai.IsGPT61SolModelSpelling(modelID) || openai.IsGPT61TerraModelSpelling(modelID)) && official {
 		defaults := map[string]json.RawMessage{
 			"supports_search_tool":  json.RawMessage("true"),
 			"apply_patch_tool_type": json.RawMessage(`"freeform"`),
@@ -93,12 +91,9 @@ func accountCodexToolCapabilities(account *Account, modelID string) map[string]j
 		target := modelID
 		if isOpenAIGPT6AstraModel(target) {
 			target = "gpt-6-astra"
-		} else if openai.IsGPT61SolModelSpelling(target) {
-			target = "gpt-6.1-sol"
 		}
 		_, disabled := apiKeyCodexModelsWithoutResponsesLite[target]
-		if disabled {
-			// Override bundled defaults even when this account has no snapshot.
+		if disabled && bytes.Equal(capabilities["use_responses_lite"], []byte("true")) {
 			capabilities["use_responses_lite"] = json.RawMessage("false")
 		}
 	}
@@ -113,14 +108,6 @@ func accountCodexToolCapabilities(account *Account, modelID string) map[string]j
 		}
 		applyCodexToolCapabilities(capabilities, map[string]json.RawMessage{"service_tiers": encoded}, false)
 	}
-	// This function receives the mapped upstream model. A BPS relay does not
-	// implement Codex's native encrypted multi-agent message contract, even
-	// when the underlying ChatGPT model advertises it. Explicit nulls override
-	// synced/bundled declarations without disabling ordinary plaintext tools.
-	if account.isExcelBPSUpstreamModelEnabled(modelID) {
-		capabilities["multi_agent_version"] = json.RawMessage("null")
-		capabilities["multi_agent_reasoning_effort"] = json.RawMessage("null")
-	}
 	return capabilities
 }
 
@@ -134,6 +121,12 @@ func codexModelRoutingAccountIDs(group *Group, modelID string) []int64 {
 		return nil
 	}
 	return group.GetRoutingAccountIDs(strings.TrimSpace(modelID))
+}
+
+func codexAccountServesPlatformModel(account *Account, platform, modelID string) bool {
+	return account.Platform == platform ||
+		(account.Platform == PlatformAntigravity && mixedListingAccountAllowed(platform, account) &&
+			mixedListingModelAllowed(platform, modelID))
 }
 
 func groupCodexModelMetadata(
@@ -181,7 +174,7 @@ func groupCodexModelMetadata(
 			if routed && !containsInt64(routedAccountIDs, account.ID) {
 				continue
 			}
-			if account.Platform == platform && codexExplicitModelMappingClaims(*account, modelID) {
+			if codexAccountServesPlatformModel(account, platform, modelID) && codexExplicitModelMappingClaims(*account, modelID) {
 				explicitClaims = true
 				break
 			}
@@ -196,7 +189,7 @@ func groupCodexModelMetadata(
 	missingMetadata := false
 	for i := range accounts {
 		account := &accounts[i]
-		if account.Platform != platform {
+		if !codexAccountServesPlatformModel(account, platform, modelID) {
 			continue
 		}
 		if routed && !containsInt64(routedAccountIDs, account.ID) {
@@ -264,7 +257,7 @@ func codexExplicitModelTargetsConflictForPlatform(accounts []Account, platform, 
 	targets := make(map[string]struct{})
 	for i := range accounts {
 		account := &accounts[i]
-		if account.Platform != platform {
+		if !codexAccountServesPlatformModel(account, platform, modelID) {
 			continue
 		}
 		mappedModel, matched := account.ResolveMappedModel(modelID)

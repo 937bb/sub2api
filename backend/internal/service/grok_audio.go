@@ -4,12 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -96,7 +94,6 @@ func (s *OpenAIGatewayService) ForwardGrokVoice(ctx context.Context, c *gin.Cont
 	}
 	started := time.Now()
 	resp, err := s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
-	s.rateLimitService.observeQualityResponse(req.Context(), account, resp, err)
 	SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(started).Milliseconds())
 	if err != nil {
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
@@ -141,38 +138,23 @@ func (s *OpenAIGatewayService) ProxyGrokRealtime(ctx context.Context, c *gin.Con
 	return s.ProxyGrokRealtimeConn(ctx, c, client, upstream)
 }
 
-type GrokRealtimeUpstream struct {
-	conn      openAIWSClientConn
-	closeOnce sync.Once
-	closeErr  error
-}
+type GrokRealtimeUpstream struct{ conn openAIWSClientConn }
 
 // GrokRealtimeDialError preserves an HTTP status returned before WebSocket
 // upgrade so handlers can apply the normal Grok account policy.
 type GrokRealtimeDialError struct {
-	StatusCode      int
-	ResponseBody    []byte
-	ResponseHeaders http.Header
-	Err             error
+	StatusCode int
+	Err        error
 }
 
 func (e *GrokRealtimeDialError) Error() string { return e.Err.Error() }
 func (e *GrokRealtimeDialError) Unwrap() error { return e.Err }
 
-func grokRealtimeHandshakeEvidence(err error, headers http.Header) ([]byte, http.Header) {
-	var handshakeErr *openAIWSHandshakeError
-	if !errors.As(err, &handshakeErr) || handshakeErr == nil {
-		return nil, cloneHeader(headers)
-	}
-	return append([]byte(nil), handshakeErr.Body...), cloneHeader(headers)
-}
-
 func (u *GrokRealtimeUpstream) Close() error {
 	if u == nil || u.conn == nil {
 		return nil
 	}
-	u.closeOnce.Do(func() { u.closeErr = u.conn.Close() })
-	return u.closeErr
+	return u.conn.Close()
 }
 
 func (s *OpenAIGatewayService) OpenGrokRealtime(ctx context.Context, account *Account, token, model string) (*GrokRealtimeUpstream, error) {
@@ -200,10 +182,9 @@ func (s *OpenAIGatewayService) OpenGrokRealtime(ctx context.Context, account *Ac
 	if account.ProxyID != nil && account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
 	}
-	conn, status, respHeaders, err := s.getOpenAIWSPassthroughDialer().Dial(ctx, u.String(), headers, proxyURL)
+	conn, status, _, err := s.getOpenAIWSPassthroughDialer().Dial(ctx, u.String(), headers, proxyURL)
 	if err != nil {
-		body, handshakeHeaders := grokRealtimeHandshakeEvidence(err, respHeaders)
-		return nil, &GrokRealtimeDialError{StatusCode: status, ResponseBody: body, ResponseHeaders: handshakeHeaders, Err: err}
+		return nil, &GrokRealtimeDialError{StatusCode: status, Err: err}
 	}
 	return &GrokRealtimeUpstream{conn: conn}, nil
 }
@@ -226,13 +207,10 @@ func (s *OpenAIGatewayService) ProxyGrokRealtimeConn(ctx context.Context, c *gin
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	errCh := make(chan error, 2)
-	var readers sync.WaitGroup
-	readers.Add(2)
 	var audioObserved atomic.Bool
 
 	// Upstream → client
 	go func() {
-		defer readers.Done()
 		for {
 			msg, readErr := conn.ReadMessage(ctx)
 			if readErr != nil {
@@ -251,7 +229,6 @@ func (s *OpenAIGatewayService) ProxyGrokRealtimeConn(ctx context.Context, c *gin
 
 	// Client → upstream (JSON events only)
 	go func() {
-		defer readers.Done()
 		for {
 			kind, msg, readErr := client.Read(ctx)
 			if readErr != nil {
@@ -276,12 +253,7 @@ func (s *OpenAIGatewayService) ProxyGrokRealtimeConn(ctx context.Context, c *gin
 		}
 	}()
 
-	observed, err := awaitGrokRealtimeAudioObserved(errCh, &audioObserved)
-	cancel()
-	_ = upstream.Close()
-	// Join both directions before the handler releases its API key reservation.
-	readers.Wait()
-	return observed, err
+	return awaitGrokRealtimeAudioObserved(errCh, &audioObserved)
 }
 
 // ProbeGrokRealtime performs the upstream WebSocket handshake without sending

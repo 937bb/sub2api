@@ -108,53 +108,51 @@ const (
 // APIKeyMutation represents an operation that mutates the APIKey nodes in the graph.
 type APIKeyMutation struct {
 	config
-	op                   Op
-	typ                  string
-	id                   *int64
-	created_at           *time.Time
-	updated_at           *time.Time
-	deleted_at           *time.Time
-	concurrency_limit    *int
-	addconcurrency_limit *int
-	key                  *string
-	name                 *string
-	status               *string
-	last_used_at         *time.Time
-	ip_whitelist         *[]string
-	appendip_whitelist   []string
-	ip_blacklist         *[]string
-	appendip_blacklist   []string
-	quota                *float64
-	addquota             *float64
-	quota_used           *float64
-	addquota_used        *float64
-	expires_at           *time.Time
-	rate_limit_5h        *float64
-	addrate_limit_5h     *float64
-	rate_limit_1d        *float64
-	addrate_limit_1d     *float64
-	rate_limit_7d        *float64
-	addrate_limit_7d     *float64
-	usage_5h             *float64
-	addusage_5h          *float64
-	usage_1d             *float64
-	addusage_1d          *float64
-	usage_7d             *float64
-	addusage_7d          *float64
-	window_5h_start      *time.Time
-	window_1d_start      *time.Time
-	window_7d_start      *time.Time
-	clearedFields        map[string]struct{}
-	user                 *int64
-	cleareduser          bool
-	group                *int64
-	clearedgroup         bool
-	usage_logs           map[int64]struct{}
-	removedusage_logs    map[int64]struct{}
-	clearedusage_logs    bool
-	done                 bool
-	oldValue             func(context.Context) (*APIKey, error)
-	predicates           []predicate.APIKey
+	op                 Op
+	typ                string
+	id                 *int64
+	created_at         *time.Time
+	updated_at         *time.Time
+	deleted_at         *time.Time
+	key                *string
+	name               *string
+	status             *string
+	last_used_at       *time.Time
+	ip_whitelist       *[]string
+	appendip_whitelist []string
+	ip_blacklist       *[]string
+	appendip_blacklist []string
+	quota              *float64
+	addquota           *float64
+	quota_used         *float64
+	addquota_used      *float64
+	expires_at         *time.Time
+	rate_limit_5h      *float64
+	addrate_limit_5h   *float64
+	rate_limit_1d      *float64
+	addrate_limit_1d   *float64
+	rate_limit_7d      *float64
+	addrate_limit_7d   *float64
+	usage_5h           *float64
+	addusage_5h        *float64
+	usage_1d           *float64
+	addusage_1d        *float64
+	usage_7d           *float64
+	addusage_7d        *float64
+	window_5h_start    *time.Time
+	window_1d_start    *time.Time
+	window_7d_start    *time.Time
+	clearedFields      map[string]struct{}
+	user               *int64
+	cleareduser        bool
+	group              *int64
+	clearedgroup       bool
+	usage_logs         map[int64]struct{}
+	removedusage_logs  map[int64]struct{}
+	clearedusage_logs  bool
+	done               bool
+	oldValue           func(context.Context) (*APIKey, error)
+	predicates         []predicate.APIKey
 }
 
 var _ ent.Mutation = (*APIKeyMutation)(nil)
@@ -410,62 +408,6 @@ func (m *APIKeyMutation) OldUserID(ctx context.Context) (v int64, err error) {
 // ResetUserID resets all changes to the "user_id" field.
 func (m *APIKeyMutation) ResetUserID() {
 	m.user = nil
-}
-
-// SetConcurrencyLimit sets the "concurrency_limit" field.
-func (m *APIKeyMutation) SetConcurrencyLimit(i int) {
-	m.concurrency_limit = &i
-	m.addconcurrency_limit = nil
-}
-
-// ConcurrencyLimit returns the value of the "concurrency_limit" field in the mutation.
-func (m *APIKeyMutation) ConcurrencyLimit() (r int, exists bool) {
-	v := m.concurrency_limit
-	if v == nil {
-		return
-	}
-	return *v, true
-}
-
-// OldConcurrencyLimit returns the old "concurrency_limit" field's value of the APIKey entity.
-// If the APIKey object wasn't provided to the builder, the object is fetched from the database.
-// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
-func (m *APIKeyMutation) OldConcurrencyLimit(ctx context.Context) (v int, err error) {
-	if !m.op.Is(OpUpdateOne) {
-		return v, errors.New("OldConcurrencyLimit is only allowed on UpdateOne operations")
-	}
-	if m.id == nil || m.oldValue == nil {
-		return v, errors.New("OldConcurrencyLimit requires an ID field in the mutation")
-	}
-	oldValue, err := m.oldValue(ctx)
-	if err != nil {
-		return v, fmt.Errorf("querying old value for OldConcurrencyLimit: %w", err)
-	}
-	return oldValue.ConcurrencyLimit, nil
-}
-
-// AddConcurrencyLimit adds i to the "concurrency_limit" field.
-func (m *APIKeyMutation) AddConcurrencyLimit(i int) {
-	if m.addconcurrency_limit != nil {
-		*m.addconcurrency_limit += i
-	} else {
-		m.addconcurrency_limit = &i
-	}
-}
-
-// AddedConcurrencyLimit returns the value that was added to the "concurrency_limit" field in this mutation.
-func (m *APIKeyMutation) AddedConcurrencyLimit() (r int, exists bool) {
-	v := m.addconcurrency_limit
-	if v == nil {
-		return
-	}
-	return *v, true
-}
-
-// ResetConcurrencyLimit resets all changes to the "concurrency_limit" field.
-func (m *APIKeyMutation) ResetConcurrencyLimit() {
-	m.concurrency_limit = nil
-	m.addconcurrency_limit = nil
 }
 
 // SetKey sets the "key" field.
@@ -1590,7 +1532,7 @@ func (m *APIKeyMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *APIKeyMutation) Fields() []string {
-	fields := make([]string, 0, 24)
+	fields := make([]string, 0, 23)
 	if m.created_at != nil {
 		fields = append(fields, apikey.FieldCreatedAt)
 	}
@@ -1602,9 +1544,6 @@ func (m *APIKeyMutation) Fields() []string {
 	}
 	if m.user != nil {
 		fields = append(fields, apikey.FieldUserID)
-	}
-	if m.concurrency_limit != nil {
-		fields = append(fields, apikey.FieldConcurrencyLimit)
 	}
 	if m.key != nil {
 		fields = append(fields, apikey.FieldKey)
@@ -1679,8 +1618,6 @@ func (m *APIKeyMutation) Field(name string) (ent.Value, bool) {
 		return m.DeletedAt()
 	case apikey.FieldUserID:
 		return m.UserID()
-	case apikey.FieldConcurrencyLimit:
-		return m.ConcurrencyLimit()
 	case apikey.FieldKey:
 		return m.Key()
 	case apikey.FieldName:
@@ -1736,8 +1673,6 @@ func (m *APIKeyMutation) OldField(ctx context.Context, name string) (ent.Value, 
 		return m.OldDeletedAt(ctx)
 	case apikey.FieldUserID:
 		return m.OldUserID(ctx)
-	case apikey.FieldConcurrencyLimit:
-		return m.OldConcurrencyLimit(ctx)
 	case apikey.FieldKey:
 		return m.OldKey(ctx)
 	case apikey.FieldName:
@@ -1812,13 +1747,6 @@ func (m *APIKeyMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetUserID(v)
-		return nil
-	case apikey.FieldConcurrencyLimit:
-		v, ok := value.(int)
-		if !ok {
-			return fmt.Errorf("unexpected type %T for field %s", value, name)
-		}
-		m.SetConcurrencyLimit(v)
 		return nil
 	case apikey.FieldKey:
 		v, ok := value.(string)
@@ -1961,9 +1889,6 @@ func (m *APIKeyMutation) SetField(name string, value ent.Value) error {
 // this mutation.
 func (m *APIKeyMutation) AddedFields() []string {
 	var fields []string
-	if m.addconcurrency_limit != nil {
-		fields = append(fields, apikey.FieldConcurrencyLimit)
-	}
 	if m.addquota != nil {
 		fields = append(fields, apikey.FieldQuota)
 	}
@@ -1996,8 +1921,6 @@ func (m *APIKeyMutation) AddedFields() []string {
 // was not set, or was not defined in the schema.
 func (m *APIKeyMutation) AddedField(name string) (ent.Value, bool) {
 	switch name {
-	case apikey.FieldConcurrencyLimit:
-		return m.AddedConcurrencyLimit()
 	case apikey.FieldQuota:
 		return m.AddedQuota()
 	case apikey.FieldQuotaUsed:
@@ -2023,13 +1946,6 @@ func (m *APIKeyMutation) AddedField(name string) (ent.Value, bool) {
 // type.
 func (m *APIKeyMutation) AddField(name string, value ent.Value) error {
 	switch name {
-	case apikey.FieldConcurrencyLimit:
-		v, ok := value.(int)
-		if !ok {
-			return fmt.Errorf("unexpected type %T for field %s", value, name)
-		}
-		m.AddConcurrencyLimit(v)
-		return nil
 	case apikey.FieldQuota:
 		v, ok := value.(float64)
 		if !ok {
@@ -2181,9 +2097,6 @@ func (m *APIKeyMutation) ResetField(name string) error {
 		return nil
 	case apikey.FieldUserID:
 		m.ResetUserID()
-		return nil
-	case apikey.FieldConcurrencyLimit:
-		m.ResetConcurrencyLimit()
 		return nil
 	case apikey.FieldKey:
 		m.ResetKey()
@@ -2391,8 +2304,6 @@ type AccountMutation struct {
 	addpriority                 *int
 	rate_multiplier             *float64
 	addrate_multiplier          *float64
-	group_rate_multiplier       *float64
-	addgroup_rate_multiplier    *float64
 	status                      *string
 	error_message               *string
 	last_used_at                *time.Time
@@ -3230,62 +3141,6 @@ func (m *AccountMutation) AddedRateMultiplier() (r float64, exists bool) {
 func (m *AccountMutation) ResetRateMultiplier() {
 	m.rate_multiplier = nil
 	m.addrate_multiplier = nil
-}
-
-// SetGroupRateMultiplier sets the "group_rate_multiplier" field.
-func (m *AccountMutation) SetGroupRateMultiplier(f float64) {
-	m.group_rate_multiplier = &f
-	m.addgroup_rate_multiplier = nil
-}
-
-// GroupRateMultiplier returns the value of the "group_rate_multiplier" field in the mutation.
-func (m *AccountMutation) GroupRateMultiplier() (r float64, exists bool) {
-	v := m.group_rate_multiplier
-	if v == nil {
-		return
-	}
-	return *v, true
-}
-
-// OldGroupRateMultiplier returns the old "group_rate_multiplier" field's value of the Account entity.
-// If the Account object wasn't provided to the builder, the object is fetched from the database.
-// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
-func (m *AccountMutation) OldGroupRateMultiplier(ctx context.Context) (v float64, err error) {
-	if !m.op.Is(OpUpdateOne) {
-		return v, errors.New("OldGroupRateMultiplier is only allowed on UpdateOne operations")
-	}
-	if m.id == nil || m.oldValue == nil {
-		return v, errors.New("OldGroupRateMultiplier requires an ID field in the mutation")
-	}
-	oldValue, err := m.oldValue(ctx)
-	if err != nil {
-		return v, fmt.Errorf("querying old value for OldGroupRateMultiplier: %w", err)
-	}
-	return oldValue.GroupRateMultiplier, nil
-}
-
-// AddGroupRateMultiplier adds f to the "group_rate_multiplier" field.
-func (m *AccountMutation) AddGroupRateMultiplier(f float64) {
-	if m.addgroup_rate_multiplier != nil {
-		*m.addgroup_rate_multiplier += f
-	} else {
-		m.addgroup_rate_multiplier = &f
-	}
-}
-
-// AddedGroupRateMultiplier returns the value that was added to the "group_rate_multiplier" field in this mutation.
-func (m *AccountMutation) AddedGroupRateMultiplier() (r float64, exists bool) {
-	v := m.addgroup_rate_multiplier
-	if v == nil {
-		return
-	}
-	return *v, true
-}
-
-// ResetGroupRateMultiplier resets all changes to the "group_rate_multiplier" field.
-func (m *AccountMutation) ResetGroupRateMultiplier() {
-	m.group_rate_multiplier = nil
-	m.addgroup_rate_multiplier = nil
 }
 
 // SetStatus sets the "status" field.
@@ -4283,7 +4138,7 @@ func (m *AccountMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *AccountMutation) Fields() []string {
-	fields := make([]string, 0, 32)
+	fields := make([]string, 0, 31)
 	if m.created_at != nil {
 		fields = append(fields, account.FieldCreatedAt)
 	}
@@ -4328,9 +4183,6 @@ func (m *AccountMutation) Fields() []string {
 	}
 	if m.rate_multiplier != nil {
 		fields = append(fields, account.FieldRateMultiplier)
-	}
-	if m.group_rate_multiplier != nil {
-		fields = append(fields, account.FieldGroupRateMultiplier)
 	}
 	if m.status != nil {
 		fields = append(fields, account.FieldStatus)
@@ -4418,8 +4270,6 @@ func (m *AccountMutation) Field(name string) (ent.Value, bool) {
 		return m.Priority()
 	case account.FieldRateMultiplier:
 		return m.RateMultiplier()
-	case account.FieldGroupRateMultiplier:
-		return m.GroupRateMultiplier()
 	case account.FieldStatus:
 		return m.Status()
 	case account.FieldErrorMessage:
@@ -4491,8 +4341,6 @@ func (m *AccountMutation) OldField(ctx context.Context, name string) (ent.Value,
 		return m.OldPriority(ctx)
 	case account.FieldRateMultiplier:
 		return m.OldRateMultiplier(ctx)
-	case account.FieldGroupRateMultiplier:
-		return m.OldGroupRateMultiplier(ctx)
 	case account.FieldStatus:
 		return m.OldStatus(ctx)
 	case account.FieldErrorMessage:
@@ -4639,13 +4487,6 @@ func (m *AccountMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetRateMultiplier(v)
 		return nil
-	case account.FieldGroupRateMultiplier:
-		v, ok := value.(float64)
-		if !ok {
-			return fmt.Errorf("unexpected type %T for field %s", value, name)
-		}
-		m.SetGroupRateMultiplier(v)
-		return nil
 	case account.FieldStatus:
 		v, ok := value.(string)
 		if !ok {
@@ -4781,9 +4622,6 @@ func (m *AccountMutation) AddedFields() []string {
 	if m.addrate_multiplier != nil {
 		fields = append(fields, account.FieldRateMultiplier)
 	}
-	if m.addgroup_rate_multiplier != nil {
-		fields = append(fields, account.FieldGroupRateMultiplier)
-	}
 	return fields
 }
 
@@ -4802,8 +4640,6 @@ func (m *AccountMutation) AddedField(name string) (ent.Value, bool) {
 		return m.AddedPriority()
 	case account.FieldRateMultiplier:
 		return m.AddedRateMultiplier()
-	case account.FieldGroupRateMultiplier:
-		return m.AddedGroupRateMultiplier()
 	}
 	return nil, false
 }
@@ -4847,13 +4683,6 @@ func (m *AccountMutation) AddField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.AddRateMultiplier(v)
-		return nil
-	case account.FieldGroupRateMultiplier:
-		v, ok := value.(float64)
-		if !ok {
-			return fmt.Errorf("unexpected type %T for field %s", value, name)
-		}
-		m.AddGroupRateMultiplier(v)
 		return nil
 	}
 	return fmt.Errorf("unknown Account numeric field %s", name)
@@ -5031,9 +4860,6 @@ func (m *AccountMutation) ResetField(name string) error {
 		return nil
 	case account.FieldRateMultiplier:
 		m.ResetRateMultiplier()
-		return nil
-	case account.FieldGroupRateMultiplier:
-		m.ResetGroupRateMultiplier()
 		return nil
 	case account.FieldStatus:
 		m.ResetStatus()
@@ -5262,21 +5088,19 @@ func (m *AccountMutation) ResetEdge(name string) error {
 // AccountGroupMutation represents an operation that mutates the AccountGroup nodes in the graph.
 type AccountGroupMutation struct {
 	config
-	op                   Op
-	typ                  string
-	priority             *int
-	addpriority          *int
-	allowed_models       *[]string
-	appendallowed_models []string
-	created_at           *time.Time
-	clearedFields        map[string]struct{}
-	account              *int64
-	clearedaccount       bool
-	group                *int64
-	clearedgroup         bool
-	done                 bool
-	oldValue             func(context.Context) (*AccountGroup, error)
-	predicates           []predicate.AccountGroup
+	op             Op
+	typ            string
+	priority       *int
+	addpriority    *int
+	created_at     *time.Time
+	clearedFields  map[string]struct{}
+	account        *int64
+	clearedaccount bool
+	group          *int64
+	clearedgroup   bool
+	done           bool
+	oldValue       func(context.Context) (*AccountGroup, error)
+	predicates     []predicate.AccountGroup
 }
 
 var _ ent.Mutation = (*AccountGroupMutation)(nil)
@@ -5394,54 +5218,6 @@ func (m *AccountGroupMutation) ResetPriority() {
 	m.addpriority = nil
 }
 
-// SetAllowedModels sets the "allowed_models" field.
-func (m *AccountGroupMutation) SetAllowedModels(s []string) {
-	m.allowed_models = &s
-	m.appendallowed_models = nil
-}
-
-// AllowedModels returns the value of the "allowed_models" field in the mutation.
-func (m *AccountGroupMutation) AllowedModels() (r []string, exists bool) {
-	v := m.allowed_models
-	if v == nil {
-		return
-	}
-	return *v, true
-}
-
-// AppendAllowedModels adds s to the "allowed_models" field.
-func (m *AccountGroupMutation) AppendAllowedModels(s []string) {
-	m.appendallowed_models = append(m.appendallowed_models, s...)
-}
-
-// AppendedAllowedModels returns the list of values that were appended to the "allowed_models" field in this mutation.
-func (m *AccountGroupMutation) AppendedAllowedModels() ([]string, bool) {
-	if len(m.appendallowed_models) == 0 {
-		return nil, false
-	}
-	return m.appendallowed_models, true
-}
-
-// ClearAllowedModels clears the value of the "allowed_models" field.
-func (m *AccountGroupMutation) ClearAllowedModels() {
-	m.allowed_models = nil
-	m.appendallowed_models = nil
-	m.clearedFields[accountgroup.FieldAllowedModels] = struct{}{}
-}
-
-// AllowedModelsCleared returns if the "allowed_models" field was cleared in this mutation.
-func (m *AccountGroupMutation) AllowedModelsCleared() bool {
-	_, ok := m.clearedFields[accountgroup.FieldAllowedModels]
-	return ok
-}
-
-// ResetAllowedModels resets all changes to the "allowed_models" field.
-func (m *AccountGroupMutation) ResetAllowedModels() {
-	m.allowed_models = nil
-	m.appendallowed_models = nil
-	delete(m.clearedFields, accountgroup.FieldAllowedModels)
-}
-
 // SetCreatedAt sets the "created_at" field.
 func (m *AccountGroupMutation) SetCreatedAt(t time.Time) {
 	m.created_at = &t
@@ -5549,7 +5325,7 @@ func (m *AccountGroupMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *AccountGroupMutation) Fields() []string {
-	fields := make([]string, 0, 5)
+	fields := make([]string, 0, 4)
 	if m.account != nil {
 		fields = append(fields, accountgroup.FieldAccountID)
 	}
@@ -5558,9 +5334,6 @@ func (m *AccountGroupMutation) Fields() []string {
 	}
 	if m.priority != nil {
 		fields = append(fields, accountgroup.FieldPriority)
-	}
-	if m.allowed_models != nil {
-		fields = append(fields, accountgroup.FieldAllowedModels)
 	}
 	if m.created_at != nil {
 		fields = append(fields, accountgroup.FieldCreatedAt)
@@ -5579,8 +5352,6 @@ func (m *AccountGroupMutation) Field(name string) (ent.Value, bool) {
 		return m.GroupID()
 	case accountgroup.FieldPriority:
 		return m.Priority()
-	case accountgroup.FieldAllowedModels:
-		return m.AllowedModels()
 	case accountgroup.FieldCreatedAt:
 		return m.CreatedAt()
 	}
@@ -5619,13 +5390,6 @@ func (m *AccountGroupMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetPriority(v)
-		return nil
-	case accountgroup.FieldAllowedModels:
-		v, ok := value.([]string)
-		if !ok {
-			return fmt.Errorf("unexpected type %T for field %s", value, name)
-		}
-		m.SetAllowedModels(v)
 		return nil
 	case accountgroup.FieldCreatedAt:
 		v, ok := value.(time.Time)
@@ -5678,11 +5442,7 @@ func (m *AccountGroupMutation) AddField(name string, value ent.Value) error {
 // ClearedFields returns all nullable fields that were cleared during this
 // mutation.
 func (m *AccountGroupMutation) ClearedFields() []string {
-	var fields []string
-	if m.FieldCleared(accountgroup.FieldAllowedModels) {
-		fields = append(fields, accountgroup.FieldAllowedModels)
-	}
-	return fields
+	return nil
 }
 
 // FieldCleared returns a boolean indicating if a field with the given name was
@@ -5695,11 +5455,6 @@ func (m *AccountGroupMutation) FieldCleared(name string) bool {
 // ClearField clears the value of the field with the given name. It returns an
 // error if the field is not defined in the schema.
 func (m *AccountGroupMutation) ClearField(name string) error {
-	switch name {
-	case accountgroup.FieldAllowedModels:
-		m.ClearAllowedModels()
-		return nil
-	}
 	return fmt.Errorf("unknown AccountGroup nullable field %s", name)
 }
 
@@ -5715,9 +5470,6 @@ func (m *AccountGroupMutation) ResetField(name string) error {
 		return nil
 	case accountgroup.FieldPriority:
 		m.ResetPriority()
-		return nil
-	case accountgroup.FieldAllowedModels:
-		m.ResetAllowedModels()
 		return nil
 	case accountgroup.FieldCreatedAt:
 		m.ResetCreatedAt()
@@ -22334,6 +22086,7 @@ type GroupMutation struct {
 	deleted_at                              *time.Time
 	name                                    *string
 	description                             *string
+	i18n                                    *domain.GroupI18n
 	rate_multiplier                         *float64
 	addrate_multiplier                      *float64
 	peak_rate_enabled                       *bool
@@ -22358,6 +22111,7 @@ type GroupMutation struct {
 	adddefault_validity_days                *int
 	allow_image_generation                  *bool
 	allow_batch_image_generation            *bool
+	image_count_billing                     *bool
 	image_rate_independent                  *bool
 	image_rate_multiplier                   *float64
 	addimage_rate_multiplier                *float64
@@ -22399,7 +22153,6 @@ type GroupMutation struct {
 	addfallback_group_id                    *int64
 	fallback_group_id_on_invalid_request    *int64
 	addfallback_group_id_on_invalid_request *int64
-	stream_only                             *bool
 	model_routing                           *map[string][]int64
 	model_routing_enabled                   *bool
 	mcp_xml_inject                          *bool
@@ -22754,6 +22507,42 @@ func (m *GroupMutation) DescriptionCleared() bool {
 func (m *GroupMutation) ResetDescription() {
 	m.description = nil
 	delete(m.clearedFields, group.FieldDescription)
+}
+
+// SetI18n sets the "i18n" field.
+func (m *GroupMutation) SetI18n(di domain.GroupI18n) {
+	m.i18n = &di
+}
+
+// I18n returns the value of the "i18n" field in the mutation.
+func (m *GroupMutation) I18n() (r domain.GroupI18n, exists bool) {
+	v := m.i18n
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldI18n returns the old "i18n" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldI18n(ctx context.Context) (v domain.GroupI18n, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldI18n is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldI18n requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldI18n: %w", err)
+	}
+	return oldValue.I18n, nil
+}
+
+// ResetI18n resets all changes to the "i18n" field.
+func (m *GroupMutation) ResetI18n() {
+	m.i18n = nil
 }
 
 // SetRateMultiplier sets the "rate_multiplier" field.
@@ -23556,6 +23345,42 @@ func (m *GroupMutation) OldAllowBatchImageGeneration(ctx context.Context) (v boo
 // ResetAllowBatchImageGeneration resets all changes to the "allow_batch_image_generation" field.
 func (m *GroupMutation) ResetAllowBatchImageGeneration() {
 	m.allow_batch_image_generation = nil
+}
+
+// SetImageCountBilling sets the "image_count_billing" field.
+func (m *GroupMutation) SetImageCountBilling(b bool) {
+	m.image_count_billing = &b
+}
+
+// ImageCountBilling returns the value of the "image_count_billing" field in the mutation.
+func (m *GroupMutation) ImageCountBilling() (r bool, exists bool) {
+	v := m.image_count_billing
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldImageCountBilling returns the old "image_count_billing" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldImageCountBilling(ctx context.Context) (v bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldImageCountBilling is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldImageCountBilling requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldImageCountBilling: %w", err)
+	}
+	return oldValue.ImageCountBilling, nil
+}
+
+// ResetImageCountBilling resets all changes to the "image_count_billing" field.
+func (m *GroupMutation) ResetImageCountBilling() {
+	m.image_count_billing = nil
 }
 
 // SetImageRateIndependent sets the "image_rate_independent" field.
@@ -24950,42 +24775,6 @@ func (m *GroupMutation) ResetFallbackGroupIDOnInvalidRequest() {
 	delete(m.clearedFields, group.FieldFallbackGroupIDOnInvalidRequest)
 }
 
-// SetStreamOnly sets the "stream_only" field.
-func (m *GroupMutation) SetStreamOnly(b bool) {
-	m.stream_only = &b
-}
-
-// StreamOnly returns the value of the "stream_only" field in the mutation.
-func (m *GroupMutation) StreamOnly() (r bool, exists bool) {
-	v := m.stream_only
-	if v == nil {
-		return
-	}
-	return *v, true
-}
-
-// OldStreamOnly returns the old "stream_only" field's value of the Group entity.
-// If the Group object wasn't provided to the builder, the object is fetched from the database.
-// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
-func (m *GroupMutation) OldStreamOnly(ctx context.Context) (v bool, err error) {
-	if !m.op.Is(OpUpdateOne) {
-		return v, errors.New("OldStreamOnly is only allowed on UpdateOne operations")
-	}
-	if m.id == nil || m.oldValue == nil {
-		return v, errors.New("OldStreamOnly requires an ID field in the mutation")
-	}
-	oldValue, err := m.oldValue(ctx)
-	if err != nil {
-		return v, fmt.Errorf("querying old value for OldStreamOnly: %w", err)
-	}
-	return oldValue.StreamOnly, nil
-}
-
-// ResetStreamOnly resets all changes to the "stream_only" field.
-func (m *GroupMutation) ResetStreamOnly() {
-	m.stream_only = nil
-}
-
 // SetModelRouting sets the "model_routing" field.
 func (m *GroupMutation) SetModelRouting(value map[string][]int64) {
 	m.model_routing = &value
@@ -26259,7 +26048,7 @@ func (m *GroupMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *GroupMutation) Fields() []string {
-	fields := make([]string, 0, 68)
+	fields := make([]string, 0, 69)
 	if m.created_at != nil {
 		fields = append(fields, group.FieldCreatedAt)
 	}
@@ -26274,6 +26063,9 @@ func (m *GroupMutation) Fields() []string {
 	}
 	if m.description != nil {
 		fields = append(fields, group.FieldDescription)
+	}
+	if m.i18n != nil {
+		fields = append(fields, group.FieldI18n)
 	}
 	if m.rate_multiplier != nil {
 		fields = append(fields, group.FieldRateMultiplier)
@@ -26325,6 +26117,9 @@ func (m *GroupMutation) Fields() []string {
 	}
 	if m.allow_batch_image_generation != nil {
 		fields = append(fields, group.FieldAllowBatchImageGeneration)
+	}
+	if m.image_count_billing != nil {
+		fields = append(fields, group.FieldImageCountBilling)
 	}
 	if m.image_rate_independent != nil {
 		fields = append(fields, group.FieldImageRateIndependent)
@@ -26394,9 +26189,6 @@ func (m *GroupMutation) Fields() []string {
 	}
 	if m.fallback_group_id_on_invalid_request != nil {
 		fields = append(fields, group.FieldFallbackGroupIDOnInvalidRequest)
-	}
-	if m.stream_only != nil {
-		fields = append(fields, group.FieldStreamOnly)
 	}
 	if m.model_routing != nil {
 		fields = append(fields, group.FieldModelRouting)
@@ -26482,6 +26274,8 @@ func (m *GroupMutation) Field(name string) (ent.Value, bool) {
 		return m.Name()
 	case group.FieldDescription:
 		return m.Description()
+	case group.FieldI18n:
+		return m.I18n()
 	case group.FieldRateMultiplier:
 		return m.RateMultiplier()
 	case group.FieldPeakRateEnabled:
@@ -26516,6 +26310,8 @@ func (m *GroupMutation) Field(name string) (ent.Value, bool) {
 		return m.AllowImageGeneration()
 	case group.FieldAllowBatchImageGeneration:
 		return m.AllowBatchImageGeneration()
+	case group.FieldImageCountBilling:
+		return m.ImageCountBilling()
 	case group.FieldImageRateIndependent:
 		return m.ImageRateIndependent()
 	case group.FieldImageRateMultiplier:
@@ -26562,8 +26358,6 @@ func (m *GroupMutation) Field(name string) (ent.Value, bool) {
 		return m.FallbackGroupID()
 	case group.FieldFallbackGroupIDOnInvalidRequest:
 		return m.FallbackGroupIDOnInvalidRequest()
-	case group.FieldStreamOnly:
-		return m.StreamOnly()
 	case group.FieldModelRouting:
 		return m.ModelRouting()
 	case group.FieldModelRoutingEnabled:
@@ -26627,6 +26421,8 @@ func (m *GroupMutation) OldField(ctx context.Context, name string) (ent.Value, e
 		return m.OldName(ctx)
 	case group.FieldDescription:
 		return m.OldDescription(ctx)
+	case group.FieldI18n:
+		return m.OldI18n(ctx)
 	case group.FieldRateMultiplier:
 		return m.OldRateMultiplier(ctx)
 	case group.FieldPeakRateEnabled:
@@ -26661,6 +26457,8 @@ func (m *GroupMutation) OldField(ctx context.Context, name string) (ent.Value, e
 		return m.OldAllowImageGeneration(ctx)
 	case group.FieldAllowBatchImageGeneration:
 		return m.OldAllowBatchImageGeneration(ctx)
+	case group.FieldImageCountBilling:
+		return m.OldImageCountBilling(ctx)
 	case group.FieldImageRateIndependent:
 		return m.OldImageRateIndependent(ctx)
 	case group.FieldImageRateMultiplier:
@@ -26707,8 +26505,6 @@ func (m *GroupMutation) OldField(ctx context.Context, name string) (ent.Value, e
 		return m.OldFallbackGroupID(ctx)
 	case group.FieldFallbackGroupIDOnInvalidRequest:
 		return m.OldFallbackGroupIDOnInvalidRequest(ctx)
-	case group.FieldStreamOnly:
-		return m.OldStreamOnly(ctx)
 	case group.FieldModelRouting:
 		return m.OldModelRouting(ctx)
 	case group.FieldModelRoutingEnabled:
@@ -26796,6 +26592,13 @@ func (m *GroupMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetDescription(v)
+		return nil
+	case group.FieldI18n:
+		v, ok := value.(domain.GroupI18n)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetI18n(v)
 		return nil
 	case group.FieldRateMultiplier:
 		v, ok := value.(float64)
@@ -26915,6 +26718,13 @@ func (m *GroupMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetAllowBatchImageGeneration(v)
+		return nil
+	case group.FieldImageCountBilling:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetImageCountBilling(v)
 		return nil
 	case group.FieldImageRateIndependent:
 		v, ok := value.(bool)
@@ -27076,13 +26886,6 @@ func (m *GroupMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetFallbackGroupIDOnInvalidRequest(v)
-		return nil
-	case group.FieldStreamOnly:
-		v, ok := value.(bool)
-		if !ok {
-			return fmt.Errorf("unexpected type %T for field %s", value, name)
-		}
-		m.SetStreamOnly(v)
 		return nil
 	case group.FieldModelRouting:
 		v, ok := value.(map[string][]int64)
@@ -27764,6 +27567,9 @@ func (m *GroupMutation) ResetField(name string) error {
 	case group.FieldDescription:
 		m.ResetDescription()
 		return nil
+	case group.FieldI18n:
+		m.ResetI18n()
+		return nil
 	case group.FieldRateMultiplier:
 		m.ResetRateMultiplier()
 		return nil
@@ -27814,6 +27620,9 @@ func (m *GroupMutation) ResetField(name string) error {
 		return nil
 	case group.FieldAllowBatchImageGeneration:
 		m.ResetAllowBatchImageGeneration()
+		return nil
+	case group.FieldImageCountBilling:
+		m.ResetImageCountBilling()
 		return nil
 	case group.FieldImageRateIndependent:
 		m.ResetImageRateIndependent()
@@ -27883,9 +27692,6 @@ func (m *GroupMutation) ResetField(name string) error {
 		return nil
 	case group.FieldFallbackGroupIDOnInvalidRequest:
 		m.ResetFallbackGroupIDOnInvalidRequest()
-		return nil
-	case group.FieldStreamOnly:
-		m.ResetStreamOnly()
 		return nil
 	case group.FieldModelRouting:
 		m.ResetModelRouting()
@@ -49164,8 +48970,6 @@ type UserMutation struct {
 	deleted_at                    *time.Time
 	email                         *string
 	password_hash                 *string
-	observer_group_ids            *[]int64
-	appendobserver_group_ids      []int64
 	role                          *string
 	balance                       *float64
 	addbalance                    *float64
@@ -49526,57 +49330,6 @@ func (m *UserMutation) OldPasswordHash(ctx context.Context) (v string, err error
 // ResetPasswordHash resets all changes to the "password_hash" field.
 func (m *UserMutation) ResetPasswordHash() {
 	m.password_hash = nil
-}
-
-// SetObserverGroupIds sets the "observer_group_ids" field.
-func (m *UserMutation) SetObserverGroupIds(i []int64) {
-	m.observer_group_ids = &i
-	m.appendobserver_group_ids = nil
-}
-
-// ObserverGroupIds returns the value of the "observer_group_ids" field in the mutation.
-func (m *UserMutation) ObserverGroupIds() (r []int64, exists bool) {
-	v := m.observer_group_ids
-	if v == nil {
-		return
-	}
-	return *v, true
-}
-
-// OldObserverGroupIds returns the old "observer_group_ids" field's value of the User entity.
-// If the User object wasn't provided to the builder, the object is fetched from the database.
-// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
-func (m *UserMutation) OldObserverGroupIds(ctx context.Context) (v []int64, err error) {
-	if !m.op.Is(OpUpdateOne) {
-		return v, errors.New("OldObserverGroupIds is only allowed on UpdateOne operations")
-	}
-	if m.id == nil || m.oldValue == nil {
-		return v, errors.New("OldObserverGroupIds requires an ID field in the mutation")
-	}
-	oldValue, err := m.oldValue(ctx)
-	if err != nil {
-		return v, fmt.Errorf("querying old value for OldObserverGroupIds: %w", err)
-	}
-	return oldValue.ObserverGroupIds, nil
-}
-
-// AppendObserverGroupIds adds i to the "observer_group_ids" field.
-func (m *UserMutation) AppendObserverGroupIds(i []int64) {
-	m.appendobserver_group_ids = append(m.appendobserver_group_ids, i...)
-}
-
-// AppendedObserverGroupIds returns the list of values that were appended to the "observer_group_ids" field in this mutation.
-func (m *UserMutation) AppendedObserverGroupIds() ([]int64, bool) {
-	if len(m.appendobserver_group_ids) == 0 {
-		return nil, false
-	}
-	return m.appendobserver_group_ids, true
-}
-
-// ResetObserverGroupIds resets all changes to the "observer_group_ids" field.
-func (m *UserMutation) ResetObserverGroupIds() {
-	m.observer_group_ids = nil
-	m.appendobserver_group_ids = nil
 }
 
 // SetRole sets the "role" field.
@@ -51221,7 +50974,7 @@ func (m *UserMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *UserMutation) Fields() []string {
-	fields := make([]string, 0, 26)
+	fields := make([]string, 0, 25)
 	if m.created_at != nil {
 		fields = append(fields, user.FieldCreatedAt)
 	}
@@ -51236,9 +50989,6 @@ func (m *UserMutation) Fields() []string {
 	}
 	if m.password_hash != nil {
 		fields = append(fields, user.FieldPasswordHash)
-	}
-	if m.observer_group_ids != nil {
-		fields = append(fields, user.FieldObserverGroupIds)
 	}
 	if m.role != nil {
 		fields = append(fields, user.FieldRole)
@@ -51318,8 +51068,6 @@ func (m *UserMutation) Field(name string) (ent.Value, bool) {
 		return m.Email()
 	case user.FieldPasswordHash:
 		return m.PasswordHash()
-	case user.FieldObserverGroupIds:
-		return m.ObserverGroupIds()
 	case user.FieldRole:
 		return m.Role()
 	case user.FieldBalance:
@@ -51379,8 +51127,6 @@ func (m *UserMutation) OldField(ctx context.Context, name string) (ent.Value, er
 		return m.OldEmail(ctx)
 	case user.FieldPasswordHash:
 		return m.OldPasswordHash(ctx)
-	case user.FieldObserverGroupIds:
-		return m.OldObserverGroupIds(ctx)
 	case user.FieldRole:
 		return m.OldRole(ctx)
 	case user.FieldBalance:
@@ -51464,13 +51210,6 @@ func (m *UserMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetPasswordHash(v)
-		return nil
-	case user.FieldObserverGroupIds:
-		v, ok := value.([]int64)
-		if !ok {
-			return fmt.Errorf("unexpected type %T for field %s", value, name)
-		}
-		m.SetObserverGroupIds(v)
 		return nil
 	case user.FieldRole:
 		v, ok := value.(string)
@@ -51789,9 +51528,6 @@ func (m *UserMutation) ResetField(name string) error {
 		return nil
 	case user.FieldPasswordHash:
 		m.ResetPasswordHash()
-		return nil
-	case user.FieldObserverGroupIds:
-		m.ResetObserverGroupIds()
 		return nil
 	case user.FieldRole:
 		m.ResetRole()

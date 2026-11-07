@@ -43,10 +43,9 @@ type OpsRuntimeSettingsRefreshHealth struct {
 
 // OpsService provides ingestion and query APIs for the Ops monitoring module.
 type OpsService struct {
-	autoConfigObserver func(AccountConcurrencyResult)
-	opsRepo            OpsRepository
-	settingRepo        SettingRepository
-	cfg                *config.Config
+	opsRepo     OpsRepository
+	settingRepo SettingRepository
+	cfg         *config.Config
 
 	accountRepo AccountRepository
 	userRepo    UserRepository
@@ -512,10 +511,6 @@ func (s *OpsService) prepareErrorLogInput(ctx context.Context, entry *OpsInsertE
 		break
 	}
 
-	// Normalize responsibility after final upstream/credential attribution is
-	// known, for both middleware and direct/batched producers.
-	NormalizeOpsClientRejection(entry)
-
 	// Sanitize + truncate error_body to avoid storing sensitive data.
 	if strings.TrimSpace(entry.ErrorBody) != "" {
 		sanitized, _ := sanitizeErrorBodyForStorage(entry.ErrorBody, opsMaxStoredErrorBodyBytes)
@@ -773,14 +768,6 @@ func (s *OpsService) GetErrorLogByID(ctx context.Context, id int64) (*OpsErrorLo
 // GetUserErrorRequestDetail 返回某用户自己某条错误请求的脱敏详情(含 error_body)。
 // 安全:强制按用户归属校验;非本人记录一律返回 NotFound(不泄露存在性)。
 func (s *OpsService) GetUserErrorRequestDetail(ctx context.Context, userID, id int64) (*UserErrorRequestDetail, error) {
-	detail, err := s.getOwnedErrorRequestDetail(ctx, userID, id)
-	if err != nil {
-		return nil, err
-	}
-	return ToUserErrorRequestDetail(detail), nil
-}
-
-func (s *OpsService) getOwnedErrorRequestDetail(ctx context.Context, userID, id int64) (*OpsErrorLogDetail, error) {
 	if s.opsRepo == nil {
 		return nil, infraerrors.NotFound("OPS_ERROR_NOT_FOUND", "ops error log not found")
 	}
@@ -795,11 +782,11 @@ func (s *OpsService) getOwnedErrorRequestDetail(ctx context.Context, userID, id 
 		return nil, infraerrors.InternalServer("OPS_ERROR_LOAD_FAILED", "Failed to load ops error log").WithCause(err)
 	}
 	// 归属只能由通过鉴权时写入的 user_id 确定。
-	ownedDirectly := detail != nil && detail.UserID != nil && *detail.UserID == userID
+	ownedDirectly := detail.UserID != nil && *detail.UserID == userID
 	if !ownedDirectly {
 		return nil, infraerrors.NotFound("OPS_ERROR_NOT_FOUND", "ops error log not found")
 	}
-	return detail, nil
+	return ToUserErrorRequestDetail(detail), nil
 }
 
 func (s *OpsService) UpdateErrorResolution(ctx context.Context, errorID int64, resolved bool, resolvedByUserID *int64) error {

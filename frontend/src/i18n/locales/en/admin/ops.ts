@@ -1,13 +1,5 @@
 export default {
     ops: {
-      balanceError: {
-        user: 'Insufficient user balance',
-        userHint: 'The local user balance does not meet the request requirement. Top up this user’s balance before retrying.',
-        upstream: 'Insufficient upstream account balance',
-        upstreamHint: 'The upstream service reports insufficient account balance. Ask an administrator to top up or replace the upstream account.',
-        unknown: 'Insufficient balance (source unconfirmed)',
-        unknownHint: 'This log has insufficient source information. Check the original error and upstream response to identify whose balance is insufficient.',
-      },
       title: 'Ops Monitoring',
       description: 'Operational monitoring and troubleshooting',
       // Dashboard
@@ -436,6 +428,7 @@ export default {
           kind: 'Kind',
           platform: 'Platform',
           model: 'Model',
+          account: 'Account',
           duration: 'Duration',
           status: 'Status',
           requestId: 'Request ID',

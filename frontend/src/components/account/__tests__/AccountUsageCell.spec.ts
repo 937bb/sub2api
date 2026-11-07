@@ -130,41 +130,6 @@ describe('AccountUsageCell', () => {
     })
   })
 
-  it.each(['oauth', 'setup-token'] as const)('renders Codex ticket status for OpenAI %s accounts', async (type) => {
-    getUsage.mockResolvedValue({})
-    const wrapper = mount(AccountUsageCell, {
-      props: {
-        account: makeAccount({
-          id: type === 'oauth' ? 9701 : 9702,
-          platform: 'openai',
-          type,
-          codex_turn_tickets: [
-            { model: 'gpt-6-astra', ready: true, remaining_seconds: 2520, blocked: false },
-            { model: 'gpt-5.6-sol', ready: false, remaining_seconds: 0, blocked: true },
-            { model: 'custom-model', ready: false, remaining_seconds: 0, blocked: false },
-          ],
-        }),
-      },
-      global: { stubs: {
-        OpenAIQuotaResetCell: { template: '<div data-test="quota-reset" />' },
-        UsageProgressBar: true,
-        AccountQuotaInfo: true,
-      } },
-    })
-    await flushPromises()
-    expect(wrapper.text()).toContain('42m00s')
-    expect(wrapper.text()).toContain('admin.accounts.openai.codexTurnTicketPaused')
-    expect(wrapper.text()).toContain('admin.accounts.openai.codexTurnTicketMissing')
-    if (type === 'setup-token') {
-      expect(getUsage).not.toHaveBeenCalled()
-      expect(wrapper.find('[data-test="quota-reset"]').exists()).toBe(false)
-    }
-    await wrapper.setProps({ account: { ...wrapper.props('account'), codex_turn_tickets: [] } })
-    expect(wrapper.text()).not.toContain('codexTurnTicket')
-    expect(wrapper.text()).not.toContain('42m00s')
-    wrapper.unmount()
-  })
-
   it('renders eligible Ollama Cloud state and forwards query updates', async () => {
     const wrapper = mount(AccountUsageCell, {
       props: {
@@ -483,6 +448,66 @@ describe('AccountUsageCell', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('admin.accounts.usageWindow.gemini3Image|70|2026-03-01T09:00:00Z')
+  })
+
+  it('Antigravity shows the 5-hour and weekly window of each quota group when the summary is present', async () => {
+    getUsage.mockResolvedValue({
+      antigravity_quota: {
+        'gemini-3-flash': { utilization: 99, reset_time: '2026-11-11T15:52:48Z' }
+      },
+      antigravity_quota_groups: [
+        {
+          key: 'gemini',
+          name: 'Gemini Models',
+          windows: [
+            { window: '5h', utilization: 60, resets_at: '2026-11-04T20:52:48Z' },
+            { window: 'weekly', utilization: 25, resets_at: '2026-11-11T15:52:48Z' }
+          ]
+        },
+        {
+          key: '3p',
+          name: 'Claude and GPT models',
+          windows: [
+            { window: '5h', utilization: 0, resets_at: null },
+            { window: 'weekly', utilization: 10, resets_at: '2026-11-11T15:52:48Z' }
+          ]
+        },
+        {
+          key: 'gemini-argon-wtu',
+          name: 'Gemini 4 Argon',
+          windows: [{ window: 'weekly', utilization: 20, resets_at: '2026-11-11T17:11:15Z' }]
+        }
+      ]
+    })
+
+    const wrapper = mount(AccountUsageCell, {
+      props: {
+        account: makeAccount({ id: 1003, platform: 'antigravity', type: 'oauth', extra: {} })
+      },
+      global: {
+        stubs: {
+          UsageProgressBar: {
+            props: ['label', 'utilization', 'resetsAt', 'color'],
+            template: '<div class="usage-bar">{{ label }}|{{ utilization }}|{{ resetsAt }}</div>'
+          },
+          AccountQuotaInfo: true
+        }
+      }
+    })
+
+    await flushPromises()
+
+    const bars = wrapper.findAll('.usage-bar').map((bar) => bar.text())
+    expect(bars).toEqual([
+      'admin.accounts.usageWindow.antigravityGemini5h|60|2026-11-04T20:52:48Z',
+      'admin.accounts.usageWindow.antigravityGeminiWeekly|25|2026-11-11T15:52:48Z',
+      'admin.accounts.usageWindow.antigravityOther5h|0|',
+      'admin.accounts.usageWindow.antigravityOtherWeekly|10|2026-11-11T15:52:48Z',
+      // Pro plans' separate Argon quota is its own row, not a second Claude/GPT week.
+      'admin.accounts.usageWindow.antigravityArgonWeekly|20|2026-11-11T17:11:15Z'
+    ])
+    // The per-model figure (one tighter window per model) is not shown next to the real windows.
+    expect(wrapper.text()).not.toContain('gemini3Flash')
   })
 
   it('Antigravity 会显示 AI Credits 余额信息', async () => {
@@ -1744,6 +1769,166 @@ describe('AccountUsageCell', () => {
 		expect(wrapper.text()).toContain('0')
 		expect(wrapper.text()).toContain('A $0.00')
 		expect(wrapper.text()).toContain('U $0.00')
+		expect(wrapper.text()).toContain('vertex')
+		expect(wrapper.text()).not.toContain('admin.accounts.gemini.quotaPolicy.title')
+		expect(wrapper.text()).not.toContain('admin.accounts.gemini.rateLimit.unlimited')
+		expect(getUsage).not.toHaveBeenCalled()
+  })
+
+  it('Vertex 账号不设上限时不显示配额进度条', async () => {
+    const wrapper = mount(AccountUsageCell, {
+      props: {
+        account: makeAccount({
+          id: 4011,
+          platform: 'gemini',
+          type: 'service_account',
+          credentials: { tier_id: 'vertex', project_id: 'vertex-proj', location: 'global' },
+          extra: {}
+        }),
+        todayStats: {
+          requests: 3,
+          tokens: 1200,
+          cost: 0.42,
+          standard_cost: 0.42,
+          user_cost: 0.5
+        }
+      },
+      global: {
+        stubs: {
+          UsageProgressBar: true,
+          AccountQuotaInfo: true
+        }
+      }
+    })
+
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('A $0.42')
+    expect(wrapper.findAll('usage-progress-bar-stub')).toHaveLength(0)
+    expect(getUsage).not.toHaveBeenCalled()
+  })
+
+  it('Vertex 账号设置了配额上限时显示配额进度条', async () => {
+    const wrapper = mount(AccountUsageCell, {
+      props: {
+        account: makeAccount({
+          id: 4012,
+          platform: 'gemini',
+          type: 'service_account',
+          credentials: { tier_id: 'vertex', project_id: 'vertex-proj', location: 'global' },
+          extra: { quota_daily_start: new Date().toISOString() },
+          quota_used: 123.456,
+          quota_limit: 500,
+          quota_daily_limit: 50,
+          quota_daily_used: 12.5
+        }),
+        todayStats: null,
+        todayStatsLoading: false
+      },
+      global: {
+        stubs: {
+          UsageProgressBar: true,
+          AccountQuotaInfo: true
+        }
+      }
+    })
+
+    await flushPromises()
+
+    const bars = wrapper.findAll('usage-progress-bar-stub')
+    expect(bars.map((bar) => bar.attributes('label'))).toEqual(['1d', 'total'])
+    expect(getUsage).not.toHaveBeenCalled()
+  })
+
+  it('Gemini 第三方上游 API Key 按普通 Key 账号展示今日统计与额度，不显示 Gemini 徽章', async () => {
+    const wrapper = mount(AccountUsageCell, {
+      props: {
+        account: makeAccount({
+          id: 4002,
+          platform: 'gemini',
+          type: 'apikey',
+          credentials: {
+            base_url: 'https://relay.example.com/gemini',
+            api_key: 'sk-relay',
+            tier_id: 'aistudio_free'
+          },
+          extra: {},
+          quota_daily_limit: 10,
+          quota_daily_used: 2.5
+        }),
+        todayStats: {
+          requests: 123,
+          tokens: 2300000,
+          cost: 1.79,
+          standard_cost: 1.79,
+          user_cost: 0
+        }
+      },
+      global: {
+        stubs: {
+          UsageProgressBar: true,
+          AccountQuotaInfo: true
+        }
+      }
+    })
+
+    await flushPromises()
+
+    const text = wrapper.text()
+    expect(text).not.toContain('api key')
+    expect(text).not.toContain('ai studio')
+    expect(text).not.toContain('free')
+    expect(text).not.toContain('relay.example.com')
+    expect(wrapper.find('account-quota-info-stub').exists()).toBe(false)
+    expect(text).toContain('123 req')
+    expect(text).toContain('A $1.79')
+    expect(text).toContain('U $0.00')
+    const bars = wrapper.findAll('usage-progress-bar-stub')
+    expect(bars.map((bar) => bar.attributes('label'))).toEqual(['1d'])
+    expect(text).not.toContain('admin.accounts.gemini.quotaPolicy.title')
+    expect(text).not.toContain('admin.accounts.gemini.quotaPolicy.simulatedNote')
+    expect(text).not.toContain('admin.accounts.gemini.rateLimit.unlimited')
+    expect(getUsage).not.toHaveBeenCalled()
+  })
+
+  it('Gemini 官方 API Key 保留 AI Studio 等级与模拟配额', async () => {
+    getUsage.mockResolvedValue({
+      gemini_pro_daily: {
+        utilization: 20,
+        resets_at: '2026-10-11T07:00:00Z',
+        remaining_seconds: 3600
+      }
+    })
+
+    const wrapper = mount(AccountUsageCell, {
+      props: {
+        account: makeAccount({
+          id: 4003,
+          platform: 'gemini',
+          type: 'apikey',
+          credentials: {
+            base_url: 'https://generativelanguage.googleapis.com',
+            api_key: 'AIza-official',
+            tier_id: 'aistudio_paid'
+          },
+          extra: {}
+        })
+      },
+      global: {
+        stubs: {
+          UsageProgressBar: true,
+          AccountQuotaInfo: true
+        }
+      }
+    })
+
+    await flushPromises()
+
+    const text = wrapper.text()
+    expect(text).toContain('ai studio paid')
+    expect(text).toContain('admin.accounts.gemini.quotaPolicy.title')
+    expect(text).toContain('admin.accounts.gemini.quotaPolicy.simulatedNote')
+    expect(getUsage).toHaveBeenCalledWith(4003)
   })
 
   it('Anthropic OAuth 会渲染 7d F (Fable) 进度条，且 7d S 逻辑保留', async () => {

@@ -3,7 +3,6 @@ package middleware
 import (
 	"log"
 	"net/http"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -54,6 +53,7 @@ func CORS(cfg config.CORSConfig) gin.HandlerFunc {
 	allowHeaders := []string{
 		"Content-Type", "Content-Length", "Accept-Encoding", "X-CSRF-Token", "Authorization",
 		"accept", "origin", "Cache-Control", "X-Requested-With", "X-API-Key", "X-Admin-UI-Request", "X-User-UI-Request",
+		"MCP-Protocol-Version", "MCP-Session-Id",
 		"X-Sub2API-Device-ID",
 	}
 	// OpenAI Node SDK 会发送 x-stainless-* 请求头，需在 CORS 中显式放行。
@@ -67,26 +67,27 @@ func CORS(cfg config.CORSConfig) gin.HandlerFunc {
 	allowHeadersValue := strings.Join(allowHeaders, ", ")
 
 	return func(c *gin.Context) {
-		// Published Pelican results use explicit API key headers, never cookies. Handle
-		// its preflight here because this global middleware precedes routes.
-		if isPublicPelicanShowcasePath(c.Request.URL.Path) {
-			method := c.Request.Method
-			if method == http.MethodOptions {
-				method = c.GetHeader("Access-Control-Request-Method")
-			}
-			if method == http.MethodGet || method == http.MethodHead {
-				c.Header("Access-Control-Allow-Origin", "*")
-				c.Header("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
-				c.Header("Access-Control-Allow-Headers", "Accept, Authorization, X-API-Key, X-Goog-API-Key, If-None-Match, Cache-Control")
-				c.Header("Access-Control-Expose-Headers", "ETag, Cache-Control, Retry-After")
-				c.Header("Access-Control-Max-Age", "86400")
-				if c.Request.Method == http.MethodOptions {
-					c.AbortWithStatus(http.StatusNoContent)
-					return
-				}
-				c.Next()
+		// OAuth discovery and public-client protocol endpoints use no browser
+		// session credentials. Keep this exception exact so consent and account
+		// management APIs retain the configured origin policy.
+		if method := publicMCPOAuthMethod(c.Request.URL.EscapedPath()); method != "" &&
+			(c.Request.Method == method || c.Request.Method == http.MethodOptions) {
+			if requested := c.GetHeader("Access-Control-Request-Method"); c.Request.Method == http.MethodOptions && requested != "" && requested != method {
+				c.AbortWithStatus(http.StatusForbidden)
 				return
 			}
+			c.Header("Access-Control-Allow-Origin", "*")
+			c.Writer.Header().Del("Access-Control-Allow-Credentials")
+			c.Header("Access-Control-Allow-Headers", "Content-Type")
+			c.Header("Access-Control-Allow-Methods", method+", OPTIONS")
+			c.Header("Access-Control-Expose-Headers", "WWW-Authenticate")
+			c.Header("Access-Control-Max-Age", "86400")
+			if c.Request.Method == http.MethodOptions {
+				c.AbortWithStatus(http.StatusNoContent)
+				return
+			}
+			c.Next()
+			return
 		}
 		origin := strings.TrimSpace(c.GetHeader("Origin"))
 		originAllowed := allowAll
@@ -106,7 +107,7 @@ func CORS(cfg config.CORSConfig) gin.HandlerFunc {
 			}
 			c.Writer.Header().Set("Access-Control-Allow-Headers", allowHeadersValue)
 			c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, DELETE, PATCH")
-			c.Writer.Header().Set("Access-Control-Expose-Headers", "ETag, Server-Timing")
+			c.Writer.Header().Set("Access-Control-Expose-Headers", "ETag, Server-Timing, WWW-Authenticate")
 			c.Writer.Header().Set("Access-Control-Max-Age", "86400")
 		}
 		// 处理预检请求
@@ -123,17 +124,15 @@ func CORS(cfg config.CORSConfig) gin.HandlerFunc {
 	}
 }
 
-func isPublicPelicanShowcasePath(path string) bool {
-	const root = "/api/v1/public/pelican-showcase"
-	if path == root {
-		return true
+func publicMCPOAuthMethod(path string) string {
+	switch path {
+	case "/.well-known/oauth-protected-resource/api/v1/mcp", "/.well-known/oauth-protected-resource", "/.well-known/oauth-authorization-server":
+		return http.MethodGet
+	case "/api/v1/mcp/oauth/register", "/api/v1/mcp/oauth/token", "/api/v1/mcp/oauth/revoke":
+		return http.MethodPost
+	default:
+		return ""
 	}
-	id, ok := strings.CutPrefix(path, root+"/items/")
-	if !ok {
-		return false
-	}
-	value, err := strconv.ParseInt(id, 10, 64)
-	return err == nil && value > 0
 }
 
 func normalizeOrigins(values []string) []string {

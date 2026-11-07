@@ -22,13 +22,6 @@ export default {
     confirm: '确认',
     reset: '重置',
     search: '搜索',
-    featureSearch: {
-      title: '功能搜索',
-      placeholder: '搜索功能名称或关键词…',
-      resultCount: '{count} 个可用功能',
-      noResults: '未找到匹配功能，请尝试其他名称或关键词',
-      hint: '↑ ↓ 选择 · Enter 打开 · Esc 关闭'
-    },
     filter: '筛选',
     export: '导出',
     import: '导入',
@@ -45,9 +38,6 @@ export default {
     all: '全部',
     none: '无',
     selectAll: '全选',
-    sort: '排序',
-    sortAscending: '切换为升序',
-    sortDescending: '切换为降序',
     noData: '暂无数据',
     expand: '展开',
     collapse: '收起',
@@ -192,7 +182,6 @@ export default {
     modelPlaza: '模型广场',
     subscriptions: '订阅管理',
     accounts: '账号管理',
-    harvestFlow: '打票流程',
     plugins: '插件管理',
     proxies: 'IP管理',
     redeemCodes: '兑换码',
@@ -220,8 +209,6 @@ export default {
     channelPricing: '渠道定价',
     channelMonitor: '渠道监控',
     channelStatus: '渠道状态',
-    pelicanShowcase: '鹈鹕测智',
-    supportTickets: '网站工单',
     riskControl: '风控中心',
     securityAudit: '安全审计',
     contentModeration: '内容审计',
@@ -440,6 +427,7 @@ export default {
     loginFailed: '登录失败，请检查您的凭据后重试。',
     errors: {
       USER_NOT_ACTIVE: '账号已被禁用',
+      EMAIL_BLOCKED: '该邮箱不允许注册，请更换其他邮箱。',
     },
     registrationFailed: '注册失败，请重试。',
     emailDomainRegistrationLimit:

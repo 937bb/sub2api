@@ -23,20 +23,6 @@ func swapMonitorHTTPClient(t *testing.T) {
 	t.Cleanup(func() { monitorHTTPClient = orig })
 }
 
-func TestNewSSRFSafeHTTPClientUsesMonitorTimeoutBudget(t *testing.T) {
-	client := newSSRFSafeHTTPClient(monitorRequestTimeout)
-	transport := newSSRFSafeHTTPTransport()
-	if client.Timeout != monitorRequestTimeout {
-		t.Fatalf("client timeout = %s, want %s", client.Timeout, monitorRequestTimeout)
-	}
-	if transport.ResponseHeaderTimeout != monitorResponseHeaderTimeout {
-		t.Fatalf("response header timeout = %s, want %s", transport.ResponseHeaderTimeout, monitorResponseHeaderTimeout)
-	}
-	if transport.ResponseHeaderTimeout >= client.Timeout {
-		t.Fatalf("response header timeout %s must be below client timeout %s", transport.ResponseHeaderTimeout, client.Timeout)
-	}
-}
-
 // captureHandler 把每次收到的请求 body 和 headers 存起来，测试断言用。
 type captureHandler struct {
 	lastBody    map[string]any
@@ -290,6 +276,17 @@ func TestRunCheckForModel_Grok_RedactsXAIKeyFromUpstreamBody(t *testing.T) {
 	}
 	if !strings.Contains(res.Message, "xai-***REDACTED***") {
 		t.Fatalf("Grok error message should contain redaction marker, got %q", res.Message)
+	}
+}
+
+func TestSanitizeErrorMessage_RedactsGeminiAuthKey(t *testing.T) {
+	authKey := "AQ." + "Ab" + strings.Repeat("Xy9_-z", 8)
+	got := sanitizeErrorMessage(`{"error":{"message":"API key not valid: ` + authKey + `"}}`)
+	if strings.Contains(got, authKey) {
+		t.Fatalf("Gemini auth key leaked: %q", got)
+	}
+	if !strings.Contains(got, "AQ.***REDACTED***") {
+		t.Fatalf("expected redaction marker, got %q", got)
 	}
 }
 
