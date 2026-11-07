@@ -48,7 +48,11 @@ func (s *GatewayService) kiroModels(ctx context.Context, a *Account, token strin
 	if ok && entry.Expires.After(now) {
 		return entry.Models, nil
 	}
-	body, _ := json.Marshal(map[string]any{"origin": "KIRO_CLI", "profileArn": a.GetCredential("profile_arn")})
+	payload := map[string]any{"origin": "KIRO_CLI"}
+	if arn := a.GetCredential("profile_arn"); arn != "" && a.GetCredential("auth_method") != "api_key" {
+		payload["profileArn"] = arn
+	}
+	body, _ := json.Marshal(payload)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, kiro.ModelsURL(a.Credentials), bytes.NewReader(body))
 	if err != nil {
 		return nil, err
@@ -56,17 +60,17 @@ func (s *GatewayService) kiroModels(ctx context.Context, a *Account, token strin
 	req = prepareKiroHTTPRequest(req, a.Credentials, token, kiro.OperationModels)
 	resp, err := s.httpUpstream.Do(req, proxy, a.ID, a.Concurrency)
 	if err != nil {
-		return nil, errors.New("Kiro model discovery transport failed")
+		return nil, kiro.TransportError(kiro.OperationModels, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("Kiro model discovery HTTP %d", resp.StatusCode)
+		return nil, kiro.ResponseError(kiro.OperationModels, resp)
 	}
 	var catalog struct {
 		Models []kiroModelCapabilities `json:"models"`
 	}
 	if json.NewDecoder(io.LimitReader(resp.Body, 2<<20)).Decode(&catalog) != nil || len(catalog.Models) == 0 {
-		return nil, errors.New("invalid Kiro model catalog")
+		return nil, &kiro.UpstreamError{Operation: kiro.OperationModels, Reason: "invalid_response"}
 	}
 	kiroCatalog.Lock()
 	for k, v := range kiroCatalog.Entries {

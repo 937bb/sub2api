@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"reflect"
 	"strconv"
 	"time"
 
@@ -83,12 +84,20 @@ type KiroOAuthRefreshRepository interface {
 	UpdateKiroOAuthCredentialsIfUnchanged(context.Context, int64, map[string]any, *int64, map[string]any) (bool, error)
 }
 
-type kiroRefreshExecutor struct{ upstream HTTPUpstream }
+type kiroRefreshExecutor struct {
+	upstream HTTPUpstream
+	// Manual refresh only forces the credential snapshot selected by the admin.
+	// A concurrently rotated token must not be consumed a second time.
+	forceCredentials map[string]any
+}
 
 func (e *kiroRefreshExecutor) CanRefresh(a *Account) bool {
 	return a != nil && a.Platform == PlatformKiro && a.Type == AccountTypeOAuth && a.GetCredential("auth_method") != "api_key"
 }
 func (e *kiroRefreshExecutor) NeedsRefresh(a *Account, window time.Duration) bool {
+	if e.forceCredentials != nil && reflect.DeepEqual(e.forceCredentials, a.Credentials) {
+		return true
+	}
 	exp := a.GetCredentialAsTime("expires_at")
 	return a.GetCredential("access_token") == "" || exp == nil || time.Until(*exp) <= window
 }
@@ -109,11 +118,11 @@ func (e *kiroRefreshExecutor) Refresh(ctx context.Context, a *Account) (map[stri
 	}
 	resp, err := e.upstream.Do(req, proxy, a.ID, a.Concurrency)
 	if err != nil {
-		return nil, errors.New("Kiro credential refresh transport failed")
+		return nil, kiro.TransportError(kiro.OperationRefresh, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("Kiro credential refresh returned HTTP %d", resp.StatusCode)
+		return nil, kiro.ResponseError(kiro.OperationRefresh, resp)
 	}
 	var result struct {
 		AccessToken  string `json:"accessToken"`
@@ -123,7 +132,7 @@ func (e *kiroRefreshExecutor) Refresh(ctx context.Context, a *Account) (map[stri
 		ExpiresIn    int    `json:"expiresIn"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&result); err != nil || result.AccessToken == "" {
-		return nil, errors.New("invalid Kiro refresh response")
+		return nil, &kiro.UpstreamError{Operation: kiro.OperationRefresh, Reason: "invalid_response"}
 	}
 	if result.ExpiresIn <= 0 {
 		result.ExpiresIn = 3600
@@ -201,28 +210,10 @@ func (s *GatewayService) kiroAccessToken(ctx context.Context, a *Account) (*Acco
 	}
 	executor := &kiroRefreshExecutor{upstream: s.httpUpstream}
 	if executor.NeedsRefresh(a, 3*time.Minute) {
-		if s.claudeTokenProvider == nil || s.claudeTokenProvider.refreshAPI == nil {
-			return a, "", errors.New("Kiro refresh service is unavailable")
-		}
-		refreshCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
-		defer cancel()
-		for {
-			result, err := s.claudeTokenProvider.refreshAPI.RefreshIfNeeded(withOAuthRefreshRequestPath(refreshCtx), a, executor, 3*time.Minute)
-			if err != nil {
-				return a, "", err
-			}
-			if result == nil {
-				return a, "", errors.New("Kiro refresh returned no account")
-			}
-			if !result.LockHeld {
-				if result.Account != nil {
-					a = result.Account
-				}
-				break
-			}
-			if err := sleepWithContext(refreshCtx, 100*time.Millisecond); err != nil {
-				return a, "", err
-			}
+		var err error
+		a, err = s.refreshKiroAccount(ctx, a, executor)
+		if err != nil {
+			return a, "", err
 		}
 	}
 	token := a.GetCredential("access_token")
@@ -360,4 +351,60 @@ func (s *GatewayService) forwardKiro(ctx context.Context, c *gin.Context, accoun
 	result := kiroResult(out, parsed.Model, mapped, start, parsed.Stream)
 	result.UpstreamHeaders = resp.Header.Clone()
 	return result, nil
+}
+
+// refreshKiroAccount shares locking, durable token rotation and fixed egress
+// between inference and the admin refresh action.
+func (s *GatewayService) refreshKiroAccount(ctx context.Context, a *Account, executor *kiroRefreshExecutor) (*Account, error) {
+	if s.claudeTokenProvider == nil || s.claudeTokenProvider.refreshAPI == nil {
+		return a, errors.New("Kiro refresh service is unavailable")
+	}
+	refreshCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	for {
+		result, err := s.claudeTokenProvider.refreshAPI.RefreshIfNeeded(withOAuthRefreshRequestPath(refreshCtx), a, executor, 3*time.Minute)
+		if err != nil {
+			return a, err
+		}
+		if result == nil {
+			return a, errors.New("Kiro refresh returned no account")
+		}
+		if !result.LockHeld {
+			if result.Account != nil {
+				a = result.Account
+			}
+			break
+		}
+		if err := sleepWithContext(refreshCtx, 100*time.Millisecond); err != nil {
+			return a, err
+		}
+	}
+	return a, nil
+}
+
+func (s *AccountTestService) RefreshKiroAccount(ctx context.Context, a *Account) (*Account, error) {
+	if s == nil || a == nil || a.Platform != PlatformKiro || a.Type != AccountTypeOAuth {
+		return nil, infraerrors.BadRequest("KIRO_REFRESH_UNAVAILABLE", "Kiro refresh service is unavailable")
+	}
+	if a.GetCredential("auth_method") == "api_key" {
+		return nil, infraerrors.BadRequest("KIRO_REFRESH_UNAVAILABLE", "Kiro API keys do not support OAuth refresh")
+	}
+	gateway := &GatewayService{httpUpstream: s.httpUpstream, claudeTokenProvider: s.claudeTokenProvider}
+	executor := &kiroRefreshExecutor{upstream: s.httpUpstream, forceCredentials: shallowCopyMap(a.Credentials)}
+	return gateway.refreshKiroAccount(ctx, a, executor)
+}
+
+// KiroAdminErrorMessage exposes only structured, credential-free diagnostics.
+func KiroAdminErrorMessage(err error) string {
+	var upstream *kiro.UpstreamError
+	if errors.As(err, &upstream) {
+		return upstream.Error()
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "Kiro credential refresh timed out"
+	}
+	if errors.Is(err, context.Canceled) {
+		return "Kiro operation canceled"
+	}
+	return "Kiro operation failed; check account credentials and its assigned static proxy"
 }

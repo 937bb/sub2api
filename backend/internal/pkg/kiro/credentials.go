@@ -23,10 +23,7 @@ var machinePattern = regexp.MustCompile(`^[a-zA-Z0-9_-]{16,128}$`)
 // Normalize imports kiro.rs JSON names into the gateway's credential convention.
 // Unknown non-authentication fields are retained for model mapping compatibility.
 func Normalize(input map[string]any) (map[string]any, error) {
-	out := make(map[string]any, len(input)+4)
-	for k, v := range input {
-		out[k] = v
-	}
+	out := WithoutNullCredentialFields(input)
 	if raw, exists := out["credentials"]; exists {
 		nested, ok := raw.(map[string]any)
 		if !ok {
@@ -61,7 +58,7 @@ func Normalize(input map[string]any) (map[string]any, error) {
 			delete(out, from)
 		}
 	}
-	for _, key := range []string{"access_token", "id_token", "refresh_token", "client_id", "client_secret", "profile_arn", "auth_method", "auth_region", "api_region", "region", "machine_id", "expires_at", "api_key"} {
+	for _, key := range []string{"access_token", "id_token", "refresh_token", "client_id", "client_secret", "profile_arn", "auth_method", "auth_region", "api_region", "region", "machine_id", "expires_at", "api_key", "endpoint"} {
 		if v, ok := out[key]; ok {
 			s, valid := v.(string)
 			if !valid {
@@ -126,8 +123,8 @@ func Normalize(input map[string]any) (map[string]any, error) {
 	if !machinePattern.MatchString(String(out, "machine_id")) {
 		return nil, errors.New("invalid Kiro machineId")
 	}
-	if ep := String(out, "endpoint"); ep != "" && ep != "ide" {
-		return nil, errors.New("only Kiro IDE endpoint is supported")
+	if ep := String(out, "endpoint"); ep != "" && ep != "ide" && ep != "runtime_v3" && ep != "cli" {
+		return nil, errors.New("Kiro endpoint must be runtime_v3, ide or cli")
 	}
 	if err := normalizeEnvironment(out); err != nil {
 		return nil, err
@@ -135,9 +132,49 @@ func Normalize(input map[string]any) (map[string]any, error) {
 	return out, nil
 }
 func String(c map[string]any, k string) string { s, _ := c[k].(string); return s }
+
+// WithoutNullCredentialFields treats nullable export fields as absent, including
+// during credential updates. Explicit non-null values still undergo validation.
+// Both maps are copied so caller-owned account snapshots remain immutable.
+func WithoutNullCredentialFields(input map[string]any) map[string]any {
+	out := make(map[string]any, len(input))
+	for k, v := range input {
+		if v == nil {
+			switch k {
+			case "credentials", "access_token", "accessToken", "refresh_token", "refreshToken",
+				"id_token", "idToken", "client_id", "clientId", "client_secret", "clientSecret",
+				"expires_at", "expiresAt", "profile_arn", "profileArn", "auth_method", "authMethod",
+				"auth_region", "authRegion", "api_region", "apiRegion", "region",
+				"machine_id", "machineId", "api_key", "kiroApiKey", "endpoint",
+				"kiro_version", "kiroVersion", "system_version", "systemVersion", "node_version", "nodeVersion":
+				continue
+			}
+		}
+		if k == "credentials" {
+			if nested, ok := v.(map[string]any); ok {
+				v = WithoutNullCredentialFields(nested)
+			}
+		}
+		out[k] = v
+	}
+	return out
+}
+
 func Region(c map[string]any, kind string) string {
 	if s := String(c, kind+"_region"); s != "" {
 		return s
+	}
+	// A real profile belongs to a data-plane region; it does not change the
+	// authentication region. Explicit api_region remains authoritative.
+	if kind == "api" {
+		parts := strings.Split(String(c, "profile_arn"), ":")
+		if len(parts) == 6 && parts[0] == "arn" && parts[1] == "aws" &&
+			parts[2] == "codewhisperer" && regionPattern.MatchString(parts[3]) &&
+			len(parts[4]) == 12 && strings.Trim(parts[4], "0123456789") == "" &&
+			strings.HasPrefix(parts[5], "profile/") && len(parts[5]) > len("profile/") &&
+			String(c, "profile_arn") != "arn:aws:codewhisperer:us-east-1:638616132270:profile/AAAACCCCXXXX" {
+			return parts[3]
+		}
 	}
 	if s := String(c, "region"); s != "" {
 		return s
@@ -145,6 +182,9 @@ func Region(c map[string]any, kind string) string {
 	return "us-east-1"
 }
 func Endpoint(c map[string]any) string {
+	if EndpointMode(c) == "cli" {
+		return "https://q." + Region(c, "api") + ".amazonaws.com/"
+	}
 	return "https://runtime." + Region(c, "api") + ".kiro.dev/"
 }
 func RefreshPayload(c map[string]any) (string, map[string]any) {
@@ -156,11 +196,18 @@ func RefreshPayload(c map[string]any) (string, map[string]any) {
 func Headers(h http.Header, c map[string]any, token string) {
 	h.Set("Content-Type", "application/x-amz-json-1.0")
 	h.Set("X-Amz-Target", "KiroRuntimeService.GenerateAssistantResponse")
+	if EndpointMode(c) == "cli" {
+		h.Set("X-Amz-Target", "AmazonCodeWhispererStreamingService.GenerateAssistantResponse")
+	}
 	h.Set("Accept", "application/vnd.amazon.eventstream")
 	h.Set("Authorization", "Bearer "+token)
 	h.Set("x-amzn-codewhisperer-optout", "true")
 	h.Set("x-amzn-kiro-agent-mode", "vibe")
-	EnvironmentHeaders(h, c, "streaming")
+	if EndpointMode(c) == "cli" {
+		CLIHeaders(h, c)
+	} else {
+		EnvironmentHeaders(h, c, "streaming")
+	}
 	if String(c, "auth_method") == "api_key" {
 		h.Set("tokentype", "API_KEY")
 	}

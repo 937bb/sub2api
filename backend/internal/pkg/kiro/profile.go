@@ -47,7 +47,7 @@ func AccountEnvironment(c map[string]any) Environment {
 		MachineID: String(c, "machine_id"), KiroVersion: environment(c, "kiro_version"),
 		NodeVersion: environment(c, "node_version"), SystemVersion: environment(c, "system_version"),
 		AuthRegion: Region(c, "auth"), APIRegion: Region(c, "api"), AuthMethod: method,
-		Endpoint: "runtime_v3", StreamingSDK: StreamingSDKVersion, RuntimeSDK: RuntimeSDKVersion, SSOSDK: SSOSDKVersion,
+		Endpoint: EndpointMode(c), StreamingSDK: GenerationSDKVersion(c), RuntimeSDK: RuntimeSDKVersion, SSOSDK: SSOSDKVersion,
 	}
 }
 
@@ -94,6 +94,7 @@ func OperationHeaders(h http.Header, c map[string]any, token string, operation O
 // PreserveEnvironment keeps one account identity when a token-only JSON import
 // replaces credentials. Explicit snake/camel/nested values always take priority.
 func PreserveEnvironment(existing, incoming map[string]any) map[string]any {
+	incoming = WithoutNullCredentialFields(incoming)
 	out := make(map[string]any, len(incoming)+8)
 	for k, v := range incoming {
 		out[k] = v

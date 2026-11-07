@@ -213,7 +213,7 @@ func Convert(raw []byte, model, session string, credentials map[string]any) ([]b
 		}
 	}
 	body := map[string]any{"conversationState": map[string]any{"conversationId": session, "agentContinuationId": session, "agentTaskType": "vibe", "chatTriggerType": "MANUAL", "currentMessage": current, "history": history}}
-	if arn := String(credentials, "profile_arn"); arn != "" {
+	if arn := String(credentials, "profile_arn"); arn != "" && String(credentials, "auth_method") != "api_key" {
 		body["profileArn"] = arn
 	}
 	fields := map[string]any{}
@@ -248,6 +248,7 @@ func Convert(raw []byte, model, session string, credentials map[string]any) ([]b
 	if len(fields) > 0 {
 		body["additionalModelRequestFields"] = fields
 	}
+	applyEndpointBody(body, credentials)
 	encoded, err := json.Marshal(body)
 	return encoded, &req, err
 }

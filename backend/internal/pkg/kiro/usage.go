@@ -38,7 +38,7 @@ func (a usageAmounts) values() (float64, float64, error) {
 
 func UsageURL(c map[string]any) string {
 	q := url.Values{"origin": {"AI_EDITOR"}, "resourceType": {"AGENTIC_REQUEST"}}
-	if arn := String(c, "profile_arn"); arn != "" {
+	if arn := String(c, "profile_arn"); arn != "" && String(c, "auth_method") != "api_key" {
 		q.Set("profileArn", arn)
 	}
 	return "https://q." + Region(c, "api") + ".amazonaws.com/getUsageLimits?" + q.Encode()

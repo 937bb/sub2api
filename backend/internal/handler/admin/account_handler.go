@@ -1421,6 +1421,14 @@ func (h *AccountHandler) refreshSingleAccount(ctx context.Context, account *serv
 			"cannot refresh spark shadow account; its credentials are managed by the parent account")
 	}
 
+	// Kiro must use its own refresh endpoint and shared rotation lock.
+	if account.Platform == service.PlatformKiro {
+		updated, err := h.accountTestService.RefreshKiroAccount(ctx, account)
+		if err != nil {
+			return nil, "", infraerrors.New(http.StatusBadGateway, "KIRO_REFRESH_FAILED", service.KiroAdminErrorMessage(err))
+		}
+		return updated, "", nil
+	}
 	var newCredentials map[string]any
 
 	if account.IsOpenAI() {
@@ -2826,7 +2834,7 @@ func (h *AccountHandler) respondAvailableModels(c *gin.Context, account *service
 	if account.Platform == service.PlatformKiro {
 		models, err := h.accountTestService.FetchKiroAccountModels(c.Request.Context(), account)
 		if err != nil {
-			response.Error(c, http.StatusBadGateway, "Kiro model discovery failed")
+			response.Error(c, http.StatusBadGateway, service.KiroAdminErrorMessage(err))
 			return
 		}
 		response.Success(c, models)
