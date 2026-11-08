@@ -127,8 +127,15 @@ proxy fixtures; they do not establish that arbitrary live prompts will pass the
 provider's filters.
 
 The earlier API-key release was rolled back after a real 6064-to-candidate
-connection reset. This runtime integration does not resolve or waive that
-release blocker and must not be reported as deployed on that evidence.
+connection reset. The release follow-up correlated that reset with an immediate
+application 403 while Nginx was still uploading the body. An isolated Nginx
+reproduction converted 80 of 100 synthetic 4 MiB authentication failures into
+502s. Request buffering alone still failed once in a larger upload matrix.
+The server now discards bounded HTTP/1 request bodies before early error
+responses, preserving existing upload size and read timeout limits. A subsequent
+160-request matrix (1/4/16/32 MiB, Content-Length and chunked uploads, three
+concurrent writers, unbuffered Nginx) returned the original 403 in every case.
+SSE success and WebSocket upgrades do not trigger this rejection drain.
 Hosted MCP web search, external IdP login, profile discovery, native reasoning
 signatures and measured TLS fingerprint parity remain outside this integration.
 
@@ -147,6 +154,12 @@ with stripped test binaries; results are recorded in the local evidence report. 
 go vet and the server build passed (the final build used -s -w after a disk-space
 failure). The expanded unit-tag service suite failed twice at the unchanged
 TestInflightEstimate_AccountMappingNoDBAndBoundedMemory assertion: retained heap
-deltas 8,397,656 and 8,511,840 bytes exceeded its 8,388,608-byte limit. Its isolated
-three-run retest passed. This is an unresolved full-suite gate, not a claimed
-clean release. No production cutover was attempted for this follow-up.
+deltas 8,397,656 and 8,511,840 bytes exceeded its 8,388,608-byte limit. The release
+follow-up traced retained allocations to go-cache janitors: fallback-only rate
+resolvers created a cache and goroutine on every call despite having no
+repository to populate it. They now omit that cache; supplied cache-only
+overrides remain supported. The original 8 MiB assertion is unchanged.
+The orphan-parser zero-allocation test now runs in a fresh test subprocess,
+because AllocsPerRun also counts unrelated background service allocations.
+Its zero-allocation assertion is unchanged. Production status and the final
+release gates are recorded separately in the release evidence.

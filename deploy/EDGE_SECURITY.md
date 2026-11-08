@@ -210,13 +210,21 @@ server {
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection $connection_upgrade;
         proxy_buffering off;
-        proxy_request_buffering off;
+        proxy_request_buffering on;
         proxy_read_timeout 1800s;
         proxy_send_timeout 1800s;
         proxy_pass http://127.0.0.1:8080;
     }
 }
 ```
+
+Keep request buffering enabled on every Nginx hop, including a loopback
+compatibility proxy. With unbuffered uploads, an early authentication rejection
+can close the Go HTTP connection while Nginx is still sending the body; the
+client then receives a proxy 502 instead of the original 401/403. Request
+buffering does not buffer SSE responses: keep `proxy_buffering off` as above.
+Retain a finite `client_max_body_size` and enough space for temporary request
+files. WebSocket upgrades have no request body and keep their existing routing.
 
 If Nginx gzip is enabled in the `http` block, keep `text/event-stream` out of
 `gzip_types` and do not use `gzip_types *` for Sub2API. The

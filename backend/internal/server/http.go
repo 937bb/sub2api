@@ -21,13 +21,13 @@ import (
 	"golang.org/x/net/http2"
 )
 
-// ProviderSet 提供服务器层的依赖
+// ProviderSet provides server dependencies.
 var ProviderSet = wire.NewSet(
 	ProvideRouter,
 	ProvideHTTPServer,
 )
 
-// ProvideRouter 提供路由器
+// ProvideRouter constructs the router.
 func ProvideRouter(
 	cfg *config.Config,
 	handlers *handler.Handlers,
@@ -110,19 +110,19 @@ func configureTrustedProxies(r *gin.Engine, cfg config.ServerConfig) {
 	}
 }
 
-// ProvideHTTPServer 提供 HTTP 服务器
+// ProvideHTTPServer constructs the HTTP server.
 func ProvideHTTPServer(cfg *config.Config, router *gin.Engine) *http.Server {
 	httpHandler := http.Handler(router)
 	server := &http.Server{
 		Addr:           cfg.Server.Address(),
 		Handler:        httpHandler,
 		MaxHeaderBytes: cfg.Server.MaxHeaderBytes,
-		// ReadHeaderTimeout: 读取请求头的超时时间，防止慢速请求头攻击
+		// Bound header reads to protect against stalled header uploads.
 		ReadHeaderTimeout: time.Duration(cfg.Server.ReadHeaderTimeout) * time.Second,
-		// IdleTimeout: 空闲连接超时时间，释放不活跃的连接资源
+		// Release inactive keep-alive connections.
 		IdleTimeout: time.Duration(cfg.Server.IdleTimeout) * time.Second,
-		// 注意：不设置 WriteTimeout，因为流式响应可能持续十几分钟
-		// 请求体使用逐次读取的 idle deadline，不设置覆盖整个大请求上传的 ReadTimeout。
+		// Long-lived streaming responses must not have a whole-response deadline.
+		// Bound individual body reads rather than the total upload duration.
 	}
 
 	globalMaxSize := cfg.Server.MaxRequestBodySize
@@ -130,11 +130,12 @@ func ProvideHTTPServer(cfg *config.Config, router *gin.Engine) *http.Server {
 		globalMaxSize = cfg.Gateway.MaxBodySize
 	}
 	if globalMaxSize > 0 {
+		httpHandler = pkghttputil.WithRejectedBodyDrain(httpHandler, globalMaxSize)
 		httpHandler = http.MaxBytesHandler(httpHandler, globalMaxSize)
 		log.Printf("Global max request body size: %d bytes (%.2f MB)", globalMaxSize, float64(globalMaxSize)/(1<<20))
 	}
 
-	// 根据配置决定是否启用 H2C
+	// Enable H2C when configured.
 	if cfg.Server.H2C.Enabled {
 		h2cConfig := cfg.Server.H2C
 		if err := http2.ConfigureServer(server, &http2.Server{

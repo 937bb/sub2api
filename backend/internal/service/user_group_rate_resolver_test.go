@@ -26,13 +26,24 @@ func (s *userGroupRateResolverRepoStub) GetByUserAndGroup(ctx context.Context, u
 }
 
 func TestNewUserGroupRateResolver_Defaults(t *testing.T) {
-	resolver := newUserGroupRateResolver(nil, nil, 0, nil, "")
+	resolver := newUserGroupRateResolver(&userGroupRateResolverRepoStub{}, nil, 0, nil, "")
 
 	require.NotNil(t, resolver)
 	require.NotNil(t, resolver.cache)
 	require.Equal(t, defaultUserGroupRateCacheTTL, resolver.cacheTTL)
 	require.NotNil(t, resolver.sf)
 	require.Equal(t, "service.gateway", resolver.logComponent)
+}
+
+func TestUserGroupRateResolverWithoutRepository(t *testing.T) {
+	resolver := newUserGroupRateResolver(nil, nil, 0, nil, "")
+	require.Nil(t, resolver.cache, "fallback-only resolvers must not start cache janitors")
+	require.Equal(t, 1.4, resolver.Resolve(context.Background(), 101, 202, 1.4))
+
+	cache := gocache.New(time.Minute, 0)
+	cache.Set("101:202", 1.7, time.Minute)
+	resolver = newUserGroupRateResolver(nil, cache, 0, nil, "")
+	require.Equal(t, 1.7, resolver.Resolve(context.Background(), 101, 202, 1.4))
 }
 
 func TestUserGroupRateResolverResolve_FallbackForNilResolverAndInvalidIDs(t *testing.T) {
