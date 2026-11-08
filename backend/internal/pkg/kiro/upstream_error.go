@@ -22,6 +22,8 @@ type UpstreamError struct {
 func (e *UpstreamError) Error() string {
 	stage := "operation"
 	switch e.Operation {
+	case OperationGeneration:
+		stage = "generation"
 	case OperationRefresh:
 		stage = "credential refresh"
 	case OperationModels:
@@ -31,6 +33,10 @@ func (e *UpstreamError) Error() string {
 	}
 	reason := "upstream request failed"
 	switch e.Reason {
+	case "invalid_model_fields":
+		reason = "model control parameters were rejected; check thinking, output_config and max_tokens for the selected model"
+	case "invalid_request_body":
+		reason = "request body failed upstream validation"
 	case "invalid_grant":
 		reason = "invalid_grant; sign in to Kiro again and import fresh credentials"
 	case "unauthorized":
@@ -56,6 +62,27 @@ func (e *UpstreamError) Error() string {
 		return fmt.Sprintf("Kiro %s HTTP %d: %s", stage, e.Status, reason)
 	}
 	return fmt.Sprintf("Kiro %s: %s", stage, reason)
+}
+
+// GenerationResponseError exposes only fixed diagnostics. Upstream messages can
+// contain request data, so never return their raw text to clients or logs.
+func GenerationResponseError(status int, raw []byte) *UpstreamError {
+	out := &UpstreamError{Operation: OperationGeneration, Status: status}
+	if status != http.StatusBadRequest {
+		return out
+	}
+	var body struct {
+		Reason  string `json:"reason"`
+		Message string `json:"message"`
+	}
+	if json.Unmarshal(raw, &body) != nil || body.Reason != "REQUEST_BODY_INVALID" {
+		return out
+	}
+	out.Reason = "invalid_request_body"
+	if strings.HasPrefix(body.Message, "Invalid additionalModelRequestFields:") {
+		out.Reason = "invalid_model_fields"
+	}
+	return out
 }
 
 func ResponseError(operation Operation, response *http.Response) *UpstreamError {

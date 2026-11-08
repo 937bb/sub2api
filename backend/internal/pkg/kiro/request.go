@@ -237,7 +237,11 @@ func Convert(raw []byte, model, session string, credentials map[string]any) ([]b
 		if _, ok := schema["output_config"]; !ok {
 			return nil, nil, errors.New("selected Kiro model does not support output_config")
 		}
-		fields["output_config"] = req.OutputConfig
+		outputConfig, err := normalizeOutputEffort(req.OutputConfig, schema["output_config"])
+		if err != nil {
+			return nil, nil, err
+		}
+		fields["output_config"] = outputConfig
 	}
 	if req.Temperature != nil {
 		if _, ok := schema["temperature"]; !ok {

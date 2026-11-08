@@ -149,8 +149,9 @@ func (s *GatewayService) kiroAsAnthropic(ctx context.Context, c *gin.Context, a 
 		if s.shouldFailoverUpstreamError(resp.StatusCode) || resp.StatusCode == 402 {
 			return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: []byte(`{"error":{"message":"Kiro upstream rejected the request"}}`), ResponseHeaders: resp.Header.Clone()}
 		}
-		c.JSON(resp.StatusCode, gin.H{"error": gin.H{"message": "Kiro upstream rejected the request"}})
-		return nil, fmt.Errorf("Kiro upstream HTTP %d", resp.StatusCode)
+		upstreamErr := kiro.GenerationResponseError(resp.StatusCode, data)
+		c.JSON(resp.StatusCode, gin.H{"error": gin.H{"message": upstreamErr.Error()}})
+		return nil, upstreamErr
 	}
 	if parsed != nil && parsed.OnUpstreamAccepted != nil {
 		parsed.OnUpstreamAccepted()

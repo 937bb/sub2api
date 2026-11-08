@@ -318,8 +318,9 @@ func (s *GatewayService) forwardKiro(ctx context.Context, c *gin.Context, accoun
 		if s.shouldFailoverUpstreamError(resp.StatusCode) || resp.StatusCode == 402 {
 			return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: []byte(`{"error":{"message":"Kiro upstream rejected the request"}}`), ResponseHeaders: resp.Header.Clone()}
 		}
-		c.JSON(resp.StatusCode, gin.H{"type": "error", "error": gin.H{"type": "api_error", "message": "Kiro upstream rejected the request"}})
-		return nil, fmt.Errorf("Kiro upstream HTTP %d", resp.StatusCode)
+		upstreamErr := kiro.GenerationResponseError(resp.StatusCode, raw)
+		c.JSON(resp.StatusCode, gin.H{"type": "error", "error": gin.H{"type": "api_error", "message": upstreamErr.Error()}})
+		return nil, upstreamErr
 	}
 	if parsed.OnUpstreamAccepted != nil {
 		parsed.OnUpstreamAccepted()

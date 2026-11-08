@@ -22,6 +22,50 @@ func normalizeThinkingDisplay(raw json.RawMessage) (json.RawMessage, error) {
 	return raw, nil
 }
 
+// A CLI can retain xhigh when switching models. Match kiro.rs's compatibility
+// mapping, but use the selected account's catalog instead of a model deny-list.
+func normalizeOutputEffort(raw json.RawMessage, schema any) (json.RawMessage, error) {
+	var config map[string]json.RawMessage
+	if json.Unmarshal(raw, &config) != nil || config == nil {
+		return nil, errors.New("output_config must be an object")
+	}
+	value, present := config["effort"]
+	if !present {
+		return raw, nil
+	}
+	var effort string
+	if json.Unmarshal(value, &effort) != nil {
+		return nil, errors.New("output_config.effort must be a string")
+	}
+	data, err := json.Marshal(schema)
+	if err != nil {
+		return raw, nil
+	}
+	var capabilities struct {
+		Properties map[string]struct {
+			Enum []string `json:"enum"`
+		} `json:"properties"`
+	}
+	if json.Unmarshal(data, &capabilities) != nil || len(capabilities.Properties["effort"].Enum) == 0 {
+		return raw, nil
+	}
+	allowed := capabilities.Properties["effort"].Enum
+	for _, candidate := range allowed {
+		if candidate == effort {
+			return raw, nil
+		}
+	}
+	if effort == "xhigh" {
+		for _, candidate := range allowed {
+			if candidate == "high" {
+				config["effort"] = json.RawMessage(`"high"`)
+				return json.Marshal(config)
+			}
+		}
+	}
+	return nil, errors.New("output_config.effort is unsupported by the selected Kiro model; choose a supported effort level")
+}
+
 // Claude Code can include system instructions and effort updates in history.
 // Preserve their contents at the request level before building Kiro history.
 func normalizeControlMessages(req *Request) error {
