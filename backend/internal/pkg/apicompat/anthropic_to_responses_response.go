@@ -121,10 +121,7 @@ func AnthropicToResponsesResponse(resp *AnthropicResponse) *ResponsesResponse {
 	out.Output = outputs
 
 	// Map stop_reason → status
-	out.Status = anthropicStopReasonToResponsesStatus(AnthropicStopReasonString(resp.StopReason), resp.Content)
-	if out.Status == "incomplete" {
-		out.IncompleteDetails = &ResponsesIncompleteDetails{Reason: "max_output_tokens"}
-	}
+	out.Status, out.IncompleteDetails = anthropicResponsesStreamTerminalState(AnthropicStopReasonString(resp.StopReason))
 
 	// Usage
 	// Anthropic's input_tokens excludes cache_read/cache_creation, while OpenAI
@@ -146,18 +143,6 @@ func AnthropicToResponsesResponse(resp *AnthropicResponse) *ResponsesResponse {
 	}
 
 	return out
-}
-
-// anthropicStopReasonToResponsesStatus maps Anthropic stop_reason to Responses status.
-func anthropicStopReasonToResponsesStatus(stopReason string, blocks []AnthropicContentBlock) string {
-	switch stopReason {
-	case "max_tokens":
-		return "incomplete"
-	case "end_turn", "tool_use", "stop_sequence":
-		return "completed"
-	default:
-		return "completed"
-	}
 }
 
 // ---------------------------------------------------------------------------
@@ -595,8 +580,11 @@ func anthToResHandleMessageStop(state *AnthropicEventToResponsesState) []Respons
 // --- helper functions ---
 
 func anthropicResponsesStreamTerminalState(stopReason string) (string, *ResponsesIncompleteDetails) {
-	if stopReason == "max_tokens" {
+	switch stopReason {
+	case "max_tokens", "model_context_window_exceeded":
 		return "incomplete", &ResponsesIncompleteDetails{Reason: "max_output_tokens"}
+	case "refusal":
+		return "incomplete", &ResponsesIncompleteDetails{Reason: "content_filter"}
 	}
 	return "completed", nil
 }

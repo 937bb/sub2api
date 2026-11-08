@@ -149,12 +149,29 @@ func (s *GatewayService) ForwardKiroGemini(ctx context.Context, c *gin.Context, 
 			if event.Usage != nil {
 				mergeAnthropicUsage(&result.Usage, *event.Usage)
 			}
-			if event.Delta != nil && event.Delta.StopReason == "max_tokens" {
-				finish = "MAX_TOKENS"
+			if event.Delta != nil {
+				switch event.Delta.StopReason {
+				case "max_tokens", "model_context_window_exceeded":
+					finish = "MAX_TOKENS"
+				case "refusal":
+					finish = "SAFETY"
+					result.KiroRefused = true
+				}
 			}
 		case "message_stop":
 			done = true
 		case "error":
+			var failure struct {
+				Error struct {
+					Type string `json:"type"`
+				} `json:"error"`
+			}
+			_ = json.Unmarshal([]byte(strings.TrimSpace(strings.TrimPrefix(line, "data:"))), &failure)
+			if failure.Error.Type == "permission_error" {
+				err := &kiro.ContentFilteredError{IncompleteTool: true}
+				writeKiroEmptyResponse(c, err, "gemini")
+				return nil, err
+			}
 			return result, fmt.Errorf("Kiro stream interrupted")
 		}
 	}

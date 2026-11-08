@@ -119,9 +119,11 @@ func (s *GatewayService) ForwardAsResponses(
 		}
 		defer func() { _ = resp.Body.Close() }()
 		if clientStream {
-			return s.handleResponsesStreamingResponse(resp, c, originalModel, mappedModel, nil, startTime, clientToolMapping)
+			result, err := s.handleResponsesStreamingResponse(resp, c, originalModel, mappedModel, nil, startTime, clientToolMapping)
+			return markKiroRefusal(result, resp.Body), err
 		}
-		return s.handleResponsesBufferedStreamingResponse(resp, c, originalModel, mappedModel, nil, startTime, clientToolMapping)
+		result, err := s.handleResponsesBufferedStreamingResponse(resp, c, originalModel, mappedModel, nil, startTime, clientToolMapping)
+		return markKiroRefusal(result, resp.Body), err
 	}
 
 	// 6. Apply Claude Code mimicry for OAuth accounts (non-Claude-Code endpoints).

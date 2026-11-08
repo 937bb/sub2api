@@ -771,6 +771,9 @@ func logResponseModelBillingApplied(component string, account *Account, requestI
 
 // recordUsageCore 是 RecordUsage 的核心实现。
 func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsageCoreInput) error {
+	if input.Result != nil && input.Result.KiroRefused {
+		return nil
+	}
 	result := input.Result
 	apiKey := input.APIKey
 	user := input.User
@@ -988,6 +991,9 @@ func (s *GatewayService) CacheStoragePriced(ctx context.Context, input *RecordUs
 
 // QuoteUsageCost 按与 RecordUsage 相同的倍率、计费模型与定价计算 input.Result 的应付金额（倍率后 USD），不记录也不扣费。
 func (s *GatewayService) QuoteUsageCost(ctx context.Context, input *RecordUsageInput) float64 {
+	if input.Result != nil && input.Result.KiroRefused {
+		return 0
+	}
 	user := input.User
 	if user == nil {
 		user = input.APIKey.User

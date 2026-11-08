@@ -108,9 +108,11 @@ func (s *GatewayService) ForwardAsChatCompletions(
 		}
 		defer func() { _ = resp.Body.Close() }()
 		if clientStream {
-			return s.handleCCStreamingFromAnthropic(resp, c, originalModel, mappedModel, extractCCReasoningEffortFromBody(body, mappedModel), startTime)
+			result, err := s.handleCCStreamingFromAnthropic(resp, c, originalModel, mappedModel, extractCCReasoningEffortFromBody(body, mappedModel), startTime)
+			return markKiroRefusal(result, resp.Body), err
 		}
-		return s.handleCCBufferedFromAnthropic(resp, c, originalModel, mappedModel, extractCCReasoningEffortFromBody(body, mappedModel), startTime)
+		result, err := s.handleCCBufferedFromAnthropic(resp, c, originalModel, mappedModel, extractCCReasoningEffortFromBody(body, mappedModel), startTime)
+		return markKiroRefusal(result, resp.Body), err
 	}
 
 	// 6. Apply Claude Code mimicry for OAuth accounts.

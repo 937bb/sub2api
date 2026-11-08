@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sync/atomic"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/kiro"
@@ -62,6 +63,7 @@ type kiroStreamBody struct {
 	*io.PipeReader
 	cancel   context.CancelFunc
 	upstream io.ReadCloser
+	refused  *atomic.Bool
 }
 
 func (b *kiroStreamBody) Close() error {
@@ -156,11 +158,19 @@ func (s *GatewayService) kiroAsAnthropic(ctx context.Context, c *gin.Context, a 
 	c.Header("X-Sub2api-Usage-Source", "estimated")
 	reader, writer := io.Pipe()
 	ready := make(chan error, 1)
+	refused := &atomic.Bool{}
 	go func() {
 		defer cancel()
 		defer func() { _ = resp.Body.Close() }()
 		started := false
 		emit := func(name string, event any) error {
+			if name == "message_delta" {
+				if fields, ok := event.(map[string]any); ok {
+					if delta, ok := fields["delta"].(map[string]any); ok && delta["stop_reason"] == "refusal" {
+						refused.Store(true)
+					}
+				}
+			}
 			if name == "message_stop" {
 				return nil
 			}
@@ -169,14 +179,17 @@ func (s *GatewayService) kiroAsAnthropic(ctx context.Context, c *gin.Context, a 
 				return e
 			}
 			if !started {
-				// Decode delays message_start until actual text or a tool call.
+				// Decode starts on content or an explicit refusal terminal.
 				started = true
 				ready <- nil
 			}
 			_, e = fmt.Fprintf(writer, "event: %s\ndata: %s\n\n", name, b)
 			return e
 		}
-		_, decodeErr := kiro.DecodeWithUsageFinalizer(resp.Body, model, input, emit, kiroCacheFinalizer(upstreamCtx, cache, groupID, cacheKey, policy, useCache), toolNames)
+		out, decodeErr := kiro.DecodeWithUsageFinalizer(resp.Body, model, input, emit, kiroCacheFinalizer(upstreamCtx, cache, groupID, cacheKey, policy, useCache), toolNames)
+		if out != nil && out.StopReason == "refusal" {
+			refused.Store(true)
+		}
 		if !started {
 			ready <- decodeErr
 			_ = writer.CloseWithError(decodeErr)
@@ -186,7 +199,8 @@ func (s *GatewayService) kiroAsAnthropic(ctx context.Context, c *gin.Context, a 
 			_, decodeErr = fmt.Fprint(writer, "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
 		}
 		if decodeErr != nil {
-			_ = emit("error", gin.H{"type": "error", "error": gin.H{"type": "api_error", "message": "Kiro stream interrupted"}})
+			errorType, message := kiroStreamError(decodeErr)
+			_ = emit("error", gin.H{"type": "error", "error": gin.H{"type": errorType, "message": message}})
 		}
 		_ = writer.CloseWithError(decodeErr)
 	}()
@@ -205,7 +219,7 @@ func (s *GatewayService) kiroAsAnthropic(ctx context.Context, c *gin.Context, a 
 	headers := resp.Header.Clone()
 	headers.Set("X-Request-Id", "kiro_"+uuid.NewString())
 	headers.Set("Content-Type", "text/event-stream")
-	return &http.Response{StatusCode: http.StatusOK, Header: headers, Body: &kiroStreamBody{reader, cancel, resp.Body}}, nil
+	return &http.Response{StatusCode: http.StatusOK, Header: headers, Body: &kiroStreamBody{PipeReader: reader, cancel: cancel, upstream: resp.Body, refused: refused}}, nil
 }
 
 func (s *AccountTestService) testKiroAccountConnection(c *gin.Context, a *Account, model, prompt string) error {
@@ -229,7 +243,7 @@ func (s *AccountTestService) testKiroAccountConnection(c *gin.Context, a *Accoun
 	if resp.StatusCode != 200 {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Kiro returned HTTP %d", resp.StatusCode))
 	}
-	_, err = kiro.Decode(resp.Body, model, input, func(kind string, event any) error {
+	out, err := kiro.Decode(resp.Body, model, input, func(kind string, event any) error {
 		if kind == "content_block_delta" {
 			m, _ := event.(map[string]any)
 			delta, _ := m["delta"].(map[string]any)
@@ -242,6 +256,9 @@ func (s *AccountTestService) testKiroAccountConnection(c *gin.Context, a *Accoun
 	}, toolNames)
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Kiro test stream failed")
+	}
+	if out.StopReason == "refusal" {
+		return s.sendErrorAndEnd(c, "Kiro refused the test request (CONTENT_FILTERED)")
 	}
 	s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
 	return nil
@@ -266,4 +283,16 @@ func validateKiroOpenAIToolControls(raw []byte) error {
 		}
 	}
 	return nil
+}
+
+// The pipe carries a request-local refusal flag; no mutable gin state crosses
+// the decoder goroutine. Suppression applies to token and per-request pricing.
+func markKiroRefusal(result *ForwardResult, body io.ReadCloser) *ForwardResult {
+	if result != nil {
+		if stream, ok := body.(*kiroStreamBody); ok && stream.refused != nil && stream.refused.Load() {
+			result.KiroRefused = true
+			result.Usage = ClaudeUsage{}
+		}
+	}
+	return result
 }

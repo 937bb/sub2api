@@ -28,10 +28,11 @@ type StreamSummary struct {
 	Other     int
 }
 
-// ContentFilteredError is emitted only for an explicit upstream stop reason.
-// An empty stream alone is never evidence of content filtering.
+// ContentFilteredError marks an explicit refusal that interrupted a tool.
+// Safe refusals use a refusal terminal; empty streams are not evidence of filtering.
 type ContentFilteredError struct {
-	Category string
+	Category       string
+	IncompleteTool bool
 }
 
 func (e *ContentFilteredError) Error() string {
@@ -185,10 +186,9 @@ func decode(r io.Reader, model string, inputTokens int, emit Emit, finalize func
 			}
 		}
 	}()
-	initialUsage := out.Usage
-	if finalize != nil {
-		initialUsage = Usage{}
-	}
+	// Publish usage only in the final snapshot. An early estimate cannot be
+	// corrected to zero by consumers that merge nonzero counters.
+	initialUsage := Usage{}
 	if err := emitEvent(emit, "message_start", map[string]any{"message": map[string]any{"id": out.ID, "type": "message", "role": "assistant", "model": model, "content": []any{}, "stop_reason": nil, "stop_sequence": nil, "usage": initialUsage}}); err != nil {
 		return out, err
 	}
@@ -204,6 +204,8 @@ func decode(r io.Reader, model string, inputTokens int, emit Emit, finalize func
 	total := 0
 	summary := StreamSummary{}
 	metered := false
+	metadataUsage := false
+	nativeStop := ""
 	closeBlock := func() error {
 		if active < 0 {
 			return nil
@@ -227,6 +229,7 @@ func decode(r io.Reader, model string, inputTokens int, emit Emit, finalize func
 		tool.closed = true
 		return emitEvent(emit, "content_block_stop", map[string]any{"index": tool.index})
 	}
+frames:
 	for {
 		f, err := ReadFrame(r)
 		if errors.Is(err, io.EOF) {
@@ -334,20 +337,21 @@ func decode(r io.Reader, model string, inputTokens int, emit Emit, finalize func
 			if strings.Contains(strings.ToLower(e.Unit), "credit") {
 				out.Credits = e.Usage
 			}
-			if e.Input != nil && e.Output != nil && *e.Input >= 0 && *e.Output >= 0 {
+			if !metadataUsage && e.Input != nil && e.Output != nil && *e.Input >= 0 && *e.Output >= 0 {
 				out.Usage.InputTokens = *e.Input
 				out.Usage.OutputTokens = *e.Output
 				out.UsageSource = "upstream"
 			}
-			if e.Read != nil && *e.Read >= 0 {
+			if !metadataUsage && e.Read != nil && *e.Read >= 0 {
 				out.Usage.CacheReadInputTokens = *e.Read
 			}
-			if e.Write != nil && *e.Write >= 0 {
+			if !metadataUsage && e.Write != nil && *e.Write >= 0 {
 				out.Usage.CacheCreationInputTokens = *e.Write
 			}
 		case "metadataEvent":
 			var e struct {
-				StopReason  string `json:"stopReason"`
+				StopReason  string              `json:"stopReason"`
+				TokenUsage  *providerTokenUsage `json:"tokenUsage"`
 				StopDetails struct {
 					Refusal struct {
 						Category string `json:"category"`
@@ -357,14 +361,27 @@ func decode(r io.Reader, model string, inputTokens int, emit Emit, finalize func
 			if json.Unmarshal(f.Payload, &e) != nil {
 				return out, errors.New("invalid Kiro metadata event")
 			}
-			switch e.StopReason {
+			if usage, ok := e.TokenUsage.snapshot(); ok {
+				out.Usage = usage
+				out.UsageSource = "upstream"
+				metadataUsage = true
+			}
+			switch strings.ToUpper(e.StopReason) {
 			case "CONTENT_FILTERED":
-				// Refusal is terminal. Do not wait for EOF or bill trailing usage.
-				filtered := &ContentFilteredError{Category: e.StopDetails.Refusal.Category}
-				filtered.Category = filtered.SafeCategory()
-				return out, filtered
-			case "MAX_TOKENS":
-				out.StopReason = "max_tokens"
+				// Refusal is a protocol terminal, not a transient transport failure.
+				// Preserve the existing no-charge policy and never consume its tail.
+				out.StopReason = "refusal"
+				out.Usage, out.UsageSource, out.Credits = Usage{}, "refusal", nil
+				for _, tool := range toolOrder {
+					if !tool.closed {
+						filtered := &ContentFilteredError{Category: e.StopDetails.Refusal.Category, IncompleteTool: true}
+						filtered.Category = filtered.SafeCategory()
+						return out, filtered
+					}
+				}
+				break frames
+			case "MAX_TOKENS", "STOP_SEQUENCE", "MODEL_CONTEXT_WINDOW_EXCEEDED":
+				nativeStop = strings.ToLower(e.StopReason)
 			}
 		case "reasoningContentEvent":
 			summary.Reasoning++
@@ -388,7 +405,10 @@ func decode(r io.Reader, model string, inputTokens int, emit Emit, finalize func
 	if err := closeBlock(); err != nil {
 		return out, err
 	}
-	if len(out.Content) == 0 {
+	if out.StopReason != "refusal" && nativeStop != "" {
+		out.StopReason = nativeStop
+	}
+	if len(out.Content) == 0 && out.StopReason != "refusal" {
 		return out, &NoContentError{Summary: summary}
 	}
 	if out.UsageSource == "estimated" {
@@ -396,7 +416,7 @@ func decode(r io.Reader, model string, inputTokens int, emit Emit, finalize func
 			out.Usage.OutputTokens += EstimateTokens(b.Text + string(b.Input))
 		}
 	}
-	if finalize != nil {
+	if finalize != nil && out.StopReason != "refusal" {
 		finalize(out)
 	}
 	if err := emitEvent(emit, "message_delta", map[string]any{"delta": map[string]any{"stop_reason": out.StopReason, "stop_sequence": nil}, "usage": out.Usage}); err != nil {
@@ -408,7 +428,7 @@ func decode(r io.Reader, model string, inputTokens int, emit Emit, finalize func
 	return out, nil
 }
 
-// Do not publish a successful response envelope before receiving content.
+// Delay the response envelope until content or an explicit refusal terminal.
 // Context, metering and reasoning-only streams may end without an answer.
 func startOnContent(emit Emit) Emit {
 	if emit == nil {

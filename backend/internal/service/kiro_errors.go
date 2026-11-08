@@ -27,6 +27,10 @@ func writeKiroEmptyResponse(c *gin.Context, err error, protocol string) bool {
 	switch {
 	case errors.As(err, &filtered):
 		status, code, message, errorType, geminiStatus = http.StatusBadRequest, kiroContentFilteredCode, kiroContentFilteredMessage, "invalid_request_error", "INVALID_ARGUMENT"
+		if filtered.IncompleteTool {
+			status, errorType, geminiStatus = http.StatusForbidden, "permission_error", "PERMISSION_DENIED"
+			message = kiroInterruptedToolMessage
+		}
 		if category := filtered.SafeCategory(); category != "" {
 			message += " Upstream refusal category: " + category + "."
 		}
@@ -64,4 +68,14 @@ func writeKiroEmptyResponse(c *gin.Context, err error, protocol string) bool {
 	}
 	c.JSON(status, gin.H{"type": "error", "error": errorBody})
 	return true
+}
+
+const kiroInterruptedToolMessage = "Upstream refusal interrupted an incomplete tool call; discard its streamed arguments."
+
+func kiroStreamError(err error) (string, string) {
+	var filtered *kiro.ContentFilteredError
+	if errors.As(err, &filtered) && filtered.IncompleteTool {
+		return "permission_error", kiroInterruptedToolMessage
+	}
+	return "api_error", "Kiro stream interrupted"
 }

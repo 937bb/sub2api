@@ -39,12 +39,9 @@ func (u *kiroEmptyUpstream) DoWithTLS(req *http.Request, proxy string, id int64,
 	return u.Do(req, proxy, id, concurrency)
 }
 
-func TestKiroRejectedStreamNeverSucceedsAcrossIngress(t *testing.T) {
+func TestKiroEmptyAndRefusalAcrossIngress(t *testing.T) {
 	for _, filtered := range []bool{false, true} {
 		status, code, message := http.StatusBadGateway, kiroEmptyResponseCode, kiroEmptyResponseMessage
-		if filtered {
-			status, code, message = http.StatusBadRequest, kiroContentFilteredCode, kiroContentFilteredMessage
-		}
 		for _, protocol := range []string{"messages", "chat", "responses", "gemini"} {
 			for _, stream := range []bool{false, true} {
 				for _, flushed := range []bool{false, true} {
@@ -91,14 +88,30 @@ func TestKiroRejectedStreamNeverSucceedsAcrossIngress(t *testing.T) {
 							result, err = svc.ForwardKiroGemini(context.Background(), c, a, "claude-haiku-4.5", "generateContent", stream, []byte(`{"contents":[{"role":"user","parts":[{"text":"hi"}]}]}`))
 						}
 						if filtered {
-							var rejection *kiro.ContentFilteredError
-							require.ErrorAs(t, err, &rejection)
-							require.Contains(t, rec.Body.String(), "Upstream refusal category: CYBER.")
+							require.NoError(t, err)
+							require.NotNil(t, result)
+							require.Equal(t, ClaudeUsage{}, result.Usage, "refusals must not introduce charges")
+							require.Equal(t, http.StatusOK, rec.Code)
 							require.NotContains(t, rec.Body.String(), "private explanation")
-						} else {
-							var empty *kiro.NoContentError
-							require.ErrorAs(t, err, &empty)
+							require.NotContains(t, rec.Body.String(), `"error":`)
+							switch protocol {
+							case "messages":
+								require.Contains(t, rec.Body.String(), `"stop_reason":"refusal"`)
+							case "chat":
+								require.Contains(t, rec.Body.String(), `"finish_reason":"content_filter"`)
+							case "responses":
+								require.Contains(t, rec.Body.String(), `"status":"incomplete"`)
+								require.Contains(t, rec.Body.String(), `"reason":"content_filter"`)
+								require.NotContains(t, rec.Body.String(), "response.completed")
+							case "gemini":
+								require.Contains(t, rec.Body.String(), `"finishReason":"SAFETY"`)
+							}
+							require.Empty(t, cache.values)
+							require.Equal(t, 2, upstream.requests)
+							return
 						}
+						var empty *kiro.NoContentError
+						require.ErrorAs(t, err, &empty)
 						require.Nil(t, result, "empty responses must never be billed")
 						require.True(t, IsResponseCommitted(c), "handler must not replace the diagnosis with a generic error")
 						require.Contains(t, rec.Body.String(), code)

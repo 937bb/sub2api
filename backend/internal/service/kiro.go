@@ -227,7 +227,7 @@ func (s *GatewayService) kiroAccessToken(ctx context.Context, a *Account) (*Acco
 	return a, token, nil
 }
 func kiroResult(out *kiro.Response, requested, mapped string, start time.Time, stream bool) *ForwardResult {
-	result := &ForwardResult{RequestID: out.ID, Model: requested, UpstreamModel: mapped, UpstreamResponseModel: mapped, Stream: stream, Duration: time.Since(start), Usage: ClaudeUsage{InputTokens: out.Usage.InputTokens, OutputTokens: out.Usage.OutputTokens, CacheReadInputTokens: out.Usage.CacheReadInputTokens, CacheCreationInputTokens: out.Usage.CacheCreationInputTokens}}
+	result := &ForwardResult{KiroRefused: out.StopReason == "refusal", RequestID: out.ID, Model: requested, UpstreamModel: mapped, UpstreamResponseModel: mapped, Stream: stream, Duration: time.Since(start), Usage: ClaudeUsage{InputTokens: out.Usage.InputTokens, OutputTokens: out.Usage.OutputTokens, CacheReadInputTokens: out.Usage.CacheReadInputTokens, CacheCreationInputTokens: out.Usage.CacheCreationInputTokens}}
 	if out.Usage.CacheCreation != nil {
 		result.Usage.CacheCreation5mTokens = out.Usage.CacheCreation.Ephemeral5mInputTokens
 		result.Usage.CacheCreation1hTokens = out.Usage.CacheCreation.Ephemeral1hInputTokens
