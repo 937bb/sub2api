@@ -40,6 +40,9 @@ type Request struct {
 type Block struct {
 	Type      string          `json:"type"`
 	Text      string          `json:"text,omitempty"`
+	Thinking  string          `json:"thinking,omitempty"`
+	Signature string          `json:"signature,omitempty"`
+	Data      string          `json:"data,omitempty"`
 	ID        string          `json:"id,omitempty"`
 	Name      string          `json:"name,omitempty"`
 	Input     json.RawMessage `json:"input,omitempty"`
@@ -223,21 +226,23 @@ func Convert(raw []byte, model, session string, credentials map[string]any) ([]b
 	if limit, ok := schema["max_tokens"]; ok {
 		fields["max_tokens"] = catalogTokenLimit(req.MaxTokens, limit)
 	}
+	outputConfig := req.OutputConfig
 	if len(req.Thinking) > 0 && string(req.Thinking) != "null" {
 		if _, ok := schema["thinking"]; !ok {
 			return nil, nil, errors.New("selected Kiro model does not support thinking configuration")
 		}
-		thinking, err := normalizeThinkingDisplay(req.Thinking)
+		thinking, normalizedOutput, err := normalizeThinkingControls(req.Thinking, outputConfig, schema)
 		if err != nil {
 			return nil, nil, err
 		}
 		fields["thinking"] = thinking
+		outputConfig = normalizedOutput
 	}
-	if len(req.OutputConfig) > 0 && string(req.OutputConfig) != "null" {
+	if len(outputConfig) > 0 && string(outputConfig) != "null" {
 		if _, ok := schema["output_config"]; !ok {
 			return nil, nil, errors.New("selected Kiro model does not support output_config")
 		}
-		outputConfig, err := normalizeOutputEffort(req.OutputConfig, schema["output_config"])
+		outputConfig, err := normalizeOutputEffort(outputConfig, schema["output_config"])
 		if err != nil {
 			return nil, nil, err
 		}

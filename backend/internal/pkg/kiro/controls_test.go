@@ -2,10 +2,63 @@ package kiro
 
 import (
 	"encoding/json"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
+
+func TestManualThinkingAgainstLiveCatalog(t *testing.T) {
+	data, err := os.ReadFile("testdata/thinking-catalog-20261109.json")
+	require.NoError(t, err)
+	var catalog map[string]map[string]any
+	require.NoError(t, json.Unmarshal(data, &catalog))
+	for model, schema := range catalog {
+		for _, tc := range []struct {
+			budget int
+			effort string
+		}{{2048, "low"}, {4000, "low"}, {4001, "medium"}, {16000, "medium"}, {16001, "high"}, {64000, "high"}, {64001, "xhigh"}} {
+			raw, err := json.Marshal(map[string]any{
+				"max_tokens": 100000, "thinking": map[string]any{"type": "enabled", "budget_tokens": tc.budget, "display": "updates"},
+				"messages": []any{map[string]any{"role": "user", "content": "Solve 2+2"}},
+			})
+			require.NoError(t, err)
+			body, parsed, err := Convert(raw, model, "session", map[string]any{"kiro_request_fields": schema})
+			require.NoError(t, err)
+			var out struct {
+				Fields map[string]json.RawMessage `json:"additionalModelRequestFields"`
+			}
+			require.NoError(t, json.Unmarshal(body, &out))
+			require.JSONEq(t, `{"type":"adaptive","display":"summarized"}`, string(out.Fields["thinking"]))
+			want := tc.effort
+			if model == "claude-opus-4.6" && want == "xhigh" {
+				want = "high"
+			}
+			require.JSONEq(t, `{"effort":"`+want+`"}`, string(out.Fields["output_config"]))
+			require.Equal(t, "64000", string(out.Fields["max_tokens"]))
+			require.Contains(t, string(parsed.Thinking), `"enabled"`, "client controls remain intact for decoding and metering")
+		}
+	}
+	schema := catalog["claude-opus-4.6"]
+	for _, output := range []string{`{"effort":"max"}`, `{"effort":"high","format":{"type":"json_schema"}}`} {
+		_, got, err := normalizeThinkingControls(json.RawMessage(`{"type":"enabled","budget_tokens":2048}`), json.RawMessage(output), schema)
+		require.NoError(t, err)
+		require.JSONEq(t, output, string(got), "explicit output controls take precedence")
+	}
+	for _, thinking := range []string{`{"type":"enabled"}`, `{"type":"enabled","budget_tokens":0}`, `{"type":"enabled","budget_tokens":-1}`, `{"type":"enabled","budget_tokens":1.5}`, `{"type":"enabled","budget_tokens":"2048"}`, `{"type":"unexpected"}`} {
+		_, _, err := normalizeThinkingControls(json.RawMessage(thinking), nil, schema)
+		require.Error(t, err)
+	}
+	_, _, err = normalizeThinkingControls(json.RawMessage(`{"type":"disabled"}`), nil, catalog["claude-opus-5.5"])
+	require.ErrorContains(t, err, "unsupported")
+	manual := json.RawMessage(`{"type":"enabled","budget_tokens":2048}`)
+	for _, supported := range []any{map[string]any{}, map[string]any{"properties": map[string]any{"type": map[string]any{"enum": []string{"enabled", "adaptive"}}}}} {
+		got, output, err := normalizeThinkingControls(manual, nil, map[string]any{"thinking": supported})
+		require.NoError(t, err)
+		require.JSONEq(t, string(manual), string(got), "manual support or unknown schema must not be overridden")
+		require.Empty(t, output)
+	}
+}
 
 func TestInteractiveClaudeThinkingDisplay(t *testing.T) {
 	for _, display := range []string{"updates", "summarized", "omitted"} {

@@ -341,7 +341,7 @@ func (s *GatewayService) forwardKiro(ctx context.Context, c *gin.Context, accoun
 	if parsed.Stream {
 		emitter = emit
 	}
-	out, err := kiro.DecodeWithUsageFinalizer(resp.Body, parsed.Model, inputTokens, emitter, finalize, toolNames)
+	out, err := kiro.DecodeWithOptions(resp.Body, parsed.Model, inputTokens, emitter, finalize, kiro.DecodeOptionsForRequest(parsed.Body.Bytes()), toolNames)
 	if err != nil {
 		if writeKiroEmptyResponse(c, err, "messages") {
 			return nil, err

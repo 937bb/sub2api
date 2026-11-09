@@ -164,26 +164,32 @@ func emitEvent(emit Emit, name string, data map[string]any) error {
 	return emit(name, data)
 }
 
-// EstimateTokens is explicitly approximate; no synthetic prompt-cache tokens are reported.
+// EstimateTokens is explicitly approximate; provider usage takes precedence.
 func EstimateTokens(s string) int { return (utf8.RuneCountInString(s) + 2) / 3 }
 func Decode(r io.Reader, model string, inputTokens int, emit Emit, toolNames ...map[string]string) (*Response, error) {
-	return decode(r, model, inputTokens, emit, nil, toolNames...)
+	return decode(r, model, inputTokens, emit, nil, DecodeOptions{}, toolNames...)
 }
 
 // Finalize usage after a successful stream, before publishing terminal billing.
 func DecodeWithUsageFinalizer(r io.Reader, model string, inputTokens int, emit Emit, finalize func(*Response), toolNames map[string]string) (*Response, error) {
-	return decode(r, model, inputTokens, emit, finalize, toolNames)
+	return decode(r, model, inputTokens, emit, finalize, DecodeOptions{}, toolNames)
 }
 
-func decode(r io.Reader, model string, inputTokens int, emit Emit, finalize func(*Response), toolNames ...map[string]string) (*Response, error) {
+func DecodeWithOptions(r io.Reader, model string, inputTokens int, emit Emit, finalize func(*Response), options DecodeOptions, toolNames map[string]string) (*Response, error) {
+	return decode(r, model, inputTokens, emit, finalize, options, toolNames)
+}
+
+func decode(r io.Reader, model string, inputTokens int, emit Emit, finalize func(*Response), options DecodeOptions, toolNames ...map[string]string) (*Response, error) {
 	emit = startOnContent(serialToolEmitter(emit))
 	out := &Response{ID: "msg_" + strings.ReplaceAll(uuid.NewString(), "-", ""), Type: "message", Role: "assistant", Model: model, Content: []Block{}, StopReason: "end_turn", Usage: Usage{InputTokens: inputTokens}, UsageSource: "estimated"}
+	var hiddenReasoning strings.Builder
+	hiddenRedacted := 0
+	estimateOutput := func() int {
+		return estimatedOutputTokens(out.Content) + EstimateTokens(hiddenReasoning.String()) + hiddenRedacted
+	}
 	defer func() {
 		if out.UsageSource == "estimated" {
-			out.Usage.OutputTokens = 0
-			for _, b := range out.Content {
-				out.Usage.OutputTokens += EstimateTokens(b.Text + string(b.Input))
-			}
+			out.Usage.OutputTokens = estimateOutput()
 		}
 	}()
 	// Publish usage only in the final snapshot. An early estimate cannot be
@@ -206,9 +212,21 @@ func decode(r io.Reader, model string, inputTokens int, emit Emit, finalize func
 	metered := false
 	metadataUsage := false
 	nativeStop := ""
+	pendingSignature := ""
 	closeBlock := func() error {
 		if active < 0 {
 			return nil
+		}
+		if out.Content[active].Type == "thinking" {
+			signature := pendingSignature
+			if signature == "" {
+				signature = thinkingSignaturePlaceholder
+			}
+			out.Content[active].Signature = signature
+			pendingSignature = ""
+			if err := emitEvent(emit, "content_block_delta", map[string]any{"index": active, "delta": map[string]any{"type": "signature_delta", "signature": signature}}); err != nil {
+				return err
+			}
 		}
 		err := emitEvent(emit, "content_block_stop", map[string]any{"index": active})
 		active = -1
@@ -257,6 +275,11 @@ frames:
 			}
 			if e.Content == "" {
 				continue
+			}
+			if active >= 0 && out.Content[active].Type != "text" {
+				if err := closeBlock(); err != nil {
+					return out, err
+				}
 			}
 			if active < 0 {
 				active = len(out.Content)
@@ -308,7 +331,7 @@ frames:
 			} else if tool.closed || (e.Name != "" && e.Name != tool.name) {
 				return out, errors.New("Kiro tool changed name or continued after completion")
 			}
-			tool.input.WriteString(e.Input)
+			_, _ = tool.input.WriteString(e.Input)
 			if e.Input != "" {
 				if err := emitEvent(emit, "content_block_delta", map[string]any{"index": tool.index, "delta": map[string]any{"type": "input_json_delta", "partial_json": e.Input}}); err != nil {
 					return out, err
@@ -385,6 +408,55 @@ frames:
 			}
 		case "reasoningContentEvent":
 			summary.Reasoning++
+			var e struct {
+				Text      string `json:"text"`
+				Signature string `json:"signature"`
+				Redacted  string `json:"redactedContent"`
+			}
+			if json.Unmarshal(f.Payload, &e) != nil {
+				return out, errors.New("invalid Kiro reasoning event")
+			}
+			if !options.ThinkingEnabled || options.OmitThinking {
+				_, _ = hiddenReasoning.WriteString(e.Text)
+				if e.Redacted != "" {
+					hiddenRedacted += 8
+				}
+				continue
+			}
+			if e.Signature != "" {
+				pendingSignature = e.Signature
+			}
+			if e.Text != "" {
+				if active >= 0 && out.Content[active].Type != "thinking" {
+					if err := closeBlock(); err != nil {
+						return out, err
+					}
+				}
+				if active < 0 {
+					active = len(out.Content)
+					out.Content = append(out.Content, Block{Type: "thinking"})
+					if err := emitEvent(emit, "content_block_start", map[string]any{"index": active, "content_block": map[string]any{"type": "thinking", "thinking": ""}}); err != nil {
+						return out, err
+					}
+				}
+				out.Content[active].Thinking += e.Text
+				if err := emitEvent(emit, "content_block_delta", map[string]any{"index": active, "delta": map[string]any{"type": "thinking_delta", "thinking": e.Text}}); err != nil {
+					return out, err
+				}
+			}
+			if e.Redacted != "" {
+				if err := closeBlock(); err != nil {
+					return out, err
+				}
+				index := len(out.Content)
+				out.Content = append(out.Content, Block{Type: "redacted_thinking", Data: e.Redacted})
+				if err := emitEvent(emit, "content_block_start", map[string]any{"index": index, "content_block": out.Content[index]}); err != nil {
+					return out, err
+				}
+				if err := emitEvent(emit, "content_block_stop", map[string]any{"index": index}); err != nil {
+					return out, err
+				}
+			}
 		case "contextUsageEvent":
 			summary.Context++
 		default:
@@ -412,9 +484,7 @@ frames:
 		return out, &NoContentError{Summary: summary}
 	}
 	if out.UsageSource == "estimated" {
-		for _, b := range out.Content {
-			out.Usage.OutputTokens += EstimateTokens(b.Text + string(b.Input))
-		}
+		out.Usage.OutputTokens = estimateOutput()
 	}
 	if finalize != nil && out.StopReason != "refusal" {
 		finalize(out)

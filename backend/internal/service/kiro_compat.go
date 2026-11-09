@@ -195,7 +195,7 @@ func (s *GatewayService) kiroAsAnthropic(ctx context.Context, c *gin.Context, a 
 			_, e = fmt.Fprintf(writer, "event: %s\ndata: %s\n\n", name, b)
 			return e
 		}
-		out, decodeErr := kiro.DecodeWithUsageFinalizer(resp.Body, model, input, emit, finalize, toolNames)
+		out, decodeErr := kiro.DecodeWithOptions(resp.Body, model, input, emit, finalize, kiro.DecodeOptionsForRequest(raw), toolNames)
 		if out != nil && out.StopReason == "refusal" {
 			refused.Store(true)
 		}

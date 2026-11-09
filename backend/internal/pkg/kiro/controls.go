@@ -4,8 +4,82 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 )
+
+// Adapt manual budgets only when the selected account advertises adaptive-only
+// thinking. The budget-to-effort thresholds follow kiro.rs; they are not a
+// provider guarantee of an exact reasoning token budget.
+func normalizeThinkingControls(raw, output json.RawMessage, schema map[string]any) (json.RawMessage, json.RawMessage, error) {
+	thinking, err := normalizeThinkingDisplay(raw)
+	if err != nil {
+		return nil, nil, err
+	}
+	data, err := json.Marshal(schema["thinking"])
+	if err != nil {
+		return thinking, output, nil
+	}
+	var capability struct {
+		Properties map[string]struct {
+			Enum []string `json:"enum"`
+		} `json:"properties"`
+	}
+	if json.Unmarshal(data, &capability) != nil || len(capability.Properties["type"].Enum) == 0 {
+		return thinking, output, nil
+	}
+	var config map[string]json.RawMessage
+	if err := json.Unmarshal(thinking, &config); err != nil {
+		return nil, nil, err
+	}
+	var mode string
+	if json.Unmarshal(config["type"], &mode) != nil {
+		return nil, nil, errors.New("thinking.type must be a string")
+	}
+	allowed := capability.Properties["type"].Enum
+	if slices.Contains(allowed, mode) {
+		return thinking, output, nil
+	}
+	if mode != "enabled" || !slices.Contains(allowed, "adaptive") {
+		return nil, nil, errors.New("thinking.type is unsupported by the selected Kiro model")
+	}
+	if _, ok := schema["output_config"]; !ok {
+		return nil, nil, errors.New("selected Kiro model cannot translate a thinking budget to output_config.effort")
+	}
+	var budget int
+	if json.Unmarshal(config["budget_tokens"], &budget) != nil || budget <= 0 {
+		return nil, nil, errors.New("thinking.budget_tokens must be a positive integer for enabled thinking")
+	}
+	controls := map[string]json.RawMessage{}
+	if len(output) > 0 && string(output) != "null" {
+		if json.Unmarshal(output, &controls) != nil || controls == nil {
+			return nil, nil, errors.New("output_config must be an object")
+		}
+	}
+	if _, present := controls["effort"]; !present {
+		effort := "xhigh"
+		switch {
+		case budget <= 4000:
+			effort = "low"
+		case budget <= 16000:
+			effort = "medium"
+		case budget <= 64000:
+			effort = "high"
+		}
+		controls["effort"], err = json.Marshal(effort)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	config["type"] = json.RawMessage(`"adaptive"`)
+	delete(config, "budget_tokens")
+	thinking, err = json.Marshal(config)
+	if err != nil {
+		return nil, nil, err
+	}
+	output, err = json.Marshal(controls)
+	return thinking, output, err
+}
 
 // Claude Code requests live reasoning updates, while Kiro accepts only
 // summarized or omitted reasoning display. Preserve all other thinking fields.
