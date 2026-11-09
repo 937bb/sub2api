@@ -20,6 +20,7 @@ import (
 
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (smartWSResult *OpenAIForwardResult, smartWSError error) {
+	ctx = beginOpenAIRequestAudit(ctx, c, account, body)
 	ctx = withAccountProxyAffinity(ctx, c, body)
 	ctx, smartWSAttempt := beginGroupSmartWSAttempt(ctx, c)
 	defer func() { smartWSError = finishGroupSmartWSAttempt(smartWSAttempt, smartWSError) }()

@@ -34,7 +34,14 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	attempt int,
 	lastFailureReason string,
 	agentTaskRecoveryTried *bool,
-) (*OpenAIForwardResult, error) {
+) (auditResult *OpenAIForwardResult, auditErr error) {
+	defer func() {
+		id := ""
+		if auditResult != nil {
+			id = auditResult.RequestID
+		}
+		auditOpenAIWSResult(ctx, account, id, auditErr != nil)
+	}()
 	if s == nil || account == nil {
 		return nil, wrapOpenAIWSFallback("invalid_state", errors.New("service or account is nil"))
 	}
@@ -342,6 +349,9 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		return nil, err
 	}
 
+	if openAIRequestAuditStore() != nil {
+		auditOpenAIRequest(ctx, c, account, "outbound_ws", payloadAsJSONBytes(payload))
+	}
 	if err := lease.WriteJSONWithContextTimeout(ctx, payload, s.openAIWSWriteTimeout()); err != nil {
 		lease.MarkBroken()
 		logOpenAIWSModeInfo(

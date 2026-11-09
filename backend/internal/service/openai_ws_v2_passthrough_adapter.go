@@ -673,6 +673,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	hooks *OpenAIWSIngressHooks,
 	wsDecision OpenAIWSProtocolDecision,
 ) error {
+	ctx = beginOpenAIRequestAudit(ctx, c, account, firstClientMessage)
 	ctx = withAccountProxyAffinity(ctx, c, firstClientMessage)
 	// The same request context survives scheduler failover attempts. Clear any
 	// reverse mapping installed by the prior account before processing frames.
@@ -922,7 +923,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	if !ok {
 		return errors.New("openai ws passthrough upstream connection does not support frame relay")
 	}
-	upstreamFrameConn = &codexDeveloperFrameConn{FrameConn: upstreamFrameConn, account: account}
+	upstreamFrameConn = &codexDeveloperFrameConn{FrameConn: upstreamFrameConn, account: account, auditContext: ctx}
 	relayUpstreamFrameConn := &openAIWSPassthroughFirstOutputFrameConn{
 		inner:             upstreamFrameConn,
 		activeReadTimeout: s.openAIWSPassthroughIdleTimeout(),
@@ -1200,6 +1201,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				)
 			},
 			OnTurnComplete: func(turn openaiwsv2.RelayTurnResult) {
+				auditOpenAIWSResult(ctx, account, turn.RequestID, false)
 				turnNo := int(completedTurns.Add(1))
 				if hooks != nil && hooks.TurnStarted != nil && !turn.StartedAt.IsZero() {
 					hooks.TurnStarted(turnNo, turn.StartedAt)

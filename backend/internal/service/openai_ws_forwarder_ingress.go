@@ -71,6 +71,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	firstClientMessage []byte,
 	hooks *OpenAIWSIngressHooks,
 ) (returnErr error) {
+	ctx = beginOpenAIRequestAudit(ctx, c, account, firstClientMessage)
 	ctx = withAccountProxyAffinity(ctx, c, firstClientMessage)
 	if s == nil {
 		return errors.New("service is nil")
@@ -957,17 +958,26 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	}
 
 	var rejectedFieldRetryState *openAIResponsesRejectedFieldRetryState
-	sendAndRelay := func(turn int, lease *openAIWSConnLease, payload []byte, payloadBytes int, originalModel string, imageBillingModel string, imageSizeTier string, imageInputSize string, requestedReasoningEffort *string) (*OpenAIForwardResult, error) {
+	sendAndRelay := func(turn int, lease *openAIWSConnLease, payload []byte, payloadBytes int, originalModel string, imageBillingModel string, imageSizeTier string, imageInputSize string, requestedReasoningEffort *string) (auditResult *OpenAIForwardResult, auditErr error) {
+		defer func() {
+			id := ""
+			if auditResult != nil {
+				id = auditResult.RequestID
+			}
+			auditOpenAIWSResult(ctx, account, id, auditErr != nil)
+		}()
 		responseModelObserver := &upstreamResponseModelObserver{}
 		if lease == nil {
 			return nil, errors.New("upstream websocket lease is nil")
 		}
 		turnStart := time.Now()
 		wroteDownstream := false
+		auditOpenAIRequest(ctx, c, account, "ws_pre_role", payload)
 		outboundPayload, _, roleErr := normalizeCodexDeveloperMessages(payload, account)
 		if roleErr != nil {
 			return nil, wrapOpenAIWSIngressTurnError("write_upstream", roleErr, false)
 		}
+		auditOpenAIRequest(ctx, c, account, "outbound_ws", outboundPayload)
 		if err := lease.WriteJSONWithContextTimeout(ctx, json.RawMessage(outboundPayload), s.openAIWSWriteTimeout()); err != nil {
 			return nil, wrapOpenAIWSIngressTurnError(
 				"write_upstream",

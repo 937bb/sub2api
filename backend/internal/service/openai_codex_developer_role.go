@@ -133,15 +133,22 @@ func normalizeCodexDeveloperMessageMap(body map[string]any, account *Account) {
 // identity, and replay history continue to see the client's original roles.
 type codexDeveloperFrameConn struct {
 	openaiwsv2.FrameConn
-	account *Account
+	account      *Account
+	auditContext context.Context
 }
 
 func (c *codexDeveloperFrameConn) WriteFrame(ctx context.Context, msgType coderws.MessageType, payload []byte) error {
 	if msgType == coderws.MessageText || msgType == coderws.MessageBinary {
+		auditCtx := ctx
+		if c.auditContext != nil {
+			auditCtx = c.auditContext
+		}
+		auditOpenAIRequest(auditCtx, nil, c.account, "ws_pre_role", payload)
 		outbound, _, err := normalizeCodexDeveloperMessages(payload, c.account)
 		if err != nil {
 			return err
 		}
+		auditOpenAIRequest(auditCtx, nil, c.account, "outbound_ws", outbound)
 		payload = outbound
 	}
 	return c.FrameConn.WriteFrame(ctx, msgType, payload)

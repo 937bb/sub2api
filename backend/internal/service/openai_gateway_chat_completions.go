@@ -73,6 +73,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	defaultMappedModel string,
 	compatPromptCacheTenantIsolated bool,
 ) (smartWSResult *OpenAIForwardResult, smartWSError error) {
+	ctx = beginOpenAIRequestAudit(ctx, c, account, body)
 	ctx = withAccountProxyAffinity(ctx, c, body)
 	ctx, smartWSAttempt := beginGroupSmartWSAttempt(ctx, c)
 	defer func() { smartWSError = finishGroupSmartWSAttempt(smartWSAttempt, smartWSError) }()
