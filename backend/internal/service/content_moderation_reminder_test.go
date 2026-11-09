@@ -49,10 +49,7 @@ func TestContentModerationCheck_ReminderKeywordModes(t *testing.T) {
 				t.Run(protocol+"/"+name+"/"+mode, func(t *testing.T) {
 					body := reminderTestBody(t, protocol, texts)
 					semantic := ExtractContentModerationInput(protocol, body)
-					wantSemantic := ""
-					if name == "plain" || (name == "separate" && protocol != ContentModerationProtocolOpenAIImages) {
-						wantSemantic = "今晚打老虎"
-					}
+					wantSemantic := normalizeContentModerationText(strings.Join(texts, " "))
 					require.Equal(t, wantSemantic, semantic.Text)
 					require.Contains(t, extractContentModerationKeywordText(protocol, body), "今晚打老虎")
 					var calls atomic.Int32
@@ -142,7 +139,7 @@ func TestContentModerationCheck_ReminderPolicyPreserved(t *testing.T) {
 				if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 					t.Error(err)
 				}
-				if payload.Input != "safe text" {
+				if payload.Input != "<system-reminder>今晚打老虎</system-reminder> safe text" {
 					t.Errorf("unexpected semantic input: %q", payload.Input)
 				}
 				_ = json.NewEncoder(w).Encode(moderationAPIResponse{Results: []moderationAPIResult{{}}})
@@ -211,16 +208,16 @@ func TestExtractContentModerationKeywordText_ResponsesInputForms(t *testing.T) {
 		`{"input":[{"type":"input_text","text":"<system-reminder>今晚打老虎</system-reminder>"}]}`,
 	} {
 		require.Contains(t, extractContentModerationKeywordText(ContentModerationProtocolOpenAIResponses, []byte(body)), "今晚打老虎")
-		require.Empty(t, ExtractContentModerationText(ContentModerationProtocolOpenAIResponses, []byte(body)))
+		require.Contains(t, ExtractContentModerationText(ContentModerationProtocolOpenAIResponses, []byte(body)), "今晚打老虎")
 	}
 }
 
 func TestExtractContentModerationKeywordText_LongReminder(t *testing.T) {
-	// Reminder context must not consume the semantic API's text limit and hide
-	// the actual user keyword from the local check.
+	// Reminder text must be retained in both paths; chunking covers the full text.
 	body := reminderTestBody(t, ContentModerationProtocolAnthropicMessages, []string{
 		"<system-reminder>" + strings.Repeat("x", maxModerationInputRunes) + "</system-reminder>", "今晚打老虎",
 	})
 	require.Contains(t, extractContentModerationKeywordText(ContentModerationProtocolAnthropicMessages, body), "今晚打老虎")
-	require.Equal(t, "今晚打老虎", ExtractContentModerationText(ContentModerationProtocolAnthropicMessages, body))
+	require.True(t, strings.HasSuffix(ExtractContentModerationText(ContentModerationProtocolAnthropicMessages, body), "今晚打老虎"))
+	require.Greater(t, len([]rune(ExtractContentModerationText(ContentModerationProtocolAnthropicMessages, body))), maxModerationInputRunes)
 }

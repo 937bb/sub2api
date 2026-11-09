@@ -341,7 +341,7 @@ func (in *ContentModerationInput) Normalize() {
 	if in == nil {
 		return
 	}
-	in.Text = trimRunes(normalizeContentModerationText(in.Text), maxModerationInputRunes)
+	in.Text = normalizeContentModerationText(in.Text)
 	in.Images = normalizeModerationImages(in.Images)
 }
 
@@ -1045,18 +1045,6 @@ func (s *ContentModerationService) Check(ctx context.Context, input ContentModer
 			"sample_rate", cfg.SampleRate)
 		return allow, nil
 	}
-	if len(cfg.apiKeys()) == 0 {
-		if cfg.Mode == ContentModerationModePreBlock {
-			s.recordPreBlockSyncMetric(0, ContentModerationActionError)
-		}
-		slog.Warn("content_moderation.skip_no_audit_api_keys",
-			"user_id", input.UserID,
-			"api_key_id", input.APIKeyID,
-			"group_id", contentModerationLogGroupID(input.GroupID),
-			"endpoint", input.Endpoint,
-			"protocol", input.Protocol)
-		return allow, nil
-	}
 	if cfg.Mode == ContentModerationModeObserve {
 		slog.Info("content_moderation.enqueue_observe",
 			"user_id", input.UserID,
@@ -1080,7 +1068,7 @@ func (s *ContentModerationService) checkSync(ctx context.Context, input ContentM
 		defer s.preBlockActive.Add(-1)
 	}
 	start := time.Now()
-	result, err := s.callModeration(ctx, cfg, content.ModerationInput(), trackPreBlock)
+	result, evidence, err := s.callModerationChunks(ctx, cfg, content, trackPreBlock)
 	latency := int(time.Since(start).Milliseconds())
 	if err != nil {
 		if trackPreBlock {
@@ -1088,6 +1076,7 @@ func (s *ContentModerationService) checkSync(ctx context.Context, input ContentM
 		}
 		slog.Warn("content_moderation.audit_api_failed",
 			"audit_engine", cfg.Engine,
+			"request_id", input.RequestID,
 			"user_id", input.UserID,
 			"api_key_id", input.APIKeyID,
 			"group_id", contentModerationLogGroupID(input.GroupID),
@@ -1101,10 +1090,17 @@ func (s *ContentModerationService) checkSync(ctx context.Context, input ContentM
 		if queueDelay != nil {
 			s.asyncErrors.Add(1)
 		}
-		if cfg.RecordNonHits {
-			log := s.buildLog(input, cfg, ContentModerationActionError, false, "", 0, nil, content.ExcerptText(), &latency, queueDelay, err.Error())
+		if cfg.RecordNonHits || trackPreBlock {
+			log := s.buildLog(input, cfg, ContentModerationActionError, false, "", 0, nil, evidence, &latency, queueDelay, redactContentModerationSecrets(err.Error()))
 			log.EngineMeta = moderationAttemptMeta(cfg, content)
-			_ = s.repo.CreateLog(ctx, log)
+			if queueDelay == nil && s.asyncQueue != nil {
+				s.enqueueRecord(input, cfg, log, hashText, false, false)
+			} else {
+				s.persistContentModerationLog(ctx, cfg, log, hashText, false, false)
+			}
+		}
+		if allowBlock && cfg.Mode == ContentModerationModePreBlock && !input.riskControlLogOnly {
+			return &ContentModerationDecision{Blocked: true, Action: ContentModerationActionError, StatusCode: http.StatusServiceUnavailable, Message: "内容审核服务暂不可用，请稍后重试"}
 		}
 		return allow
 	}
@@ -1136,7 +1132,7 @@ func (s *ContentModerationService) checkSync(ctx context.Context, input ContentM
 		"latency_ms", latency,
 		"queue_delay_ms", queueDelay)
 	if flagged || cfg.RecordNonHits {
-		log := s.buildLog(input, cfg, action, flagged, highestCategory, highestScore, result.CategoryScores, content.ExcerptText(), &latency, queueDelay, "")
+		log := s.buildLog(input, cfg, action, flagged, highestCategory, highestScore, result.CategoryScores, evidence, &latency, queueDelay, "")
 		log.EngineMeta = result.EngineMeta
 		if queueDelay == nil && cfg.Mode == ContentModerationModePreBlock {
 			s.enqueueRecord(input, cfg, log, hashText, flagged, flagged)
@@ -1741,6 +1737,9 @@ func (s *ContentModerationService) callModeration(ctx context.Context, cfg *Cont
 	trackLoad := len(trackKeyLoad) > 0 && trackKeyLoad[0]
 	var lastErr error
 	for attempt := 0; attempt < attempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		key, ok := s.nextUsableAPIKey(cfg)
 		if !ok {
 			lastErr = errors.New("no moderation api key available")

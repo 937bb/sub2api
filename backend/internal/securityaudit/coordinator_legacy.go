@@ -27,9 +27,13 @@ func (a *LegacyModerationAdapter) Check(ctx context.Context, req Request) (*Lega
 	if err != nil || decision == nil {
 		return nil, err
 	}
+	code := "content_policy_violation"
+	if decision.Action == service.ContentModerationActionError {
+		code = "content_moderation_unavailable"
+	}
 	return &LegacyDecision{
 		Allowed: decision.Allowed, Blocked: decision.Blocked, Flagged: decision.Flagged,
 		Message: decision.Message, StatusCode: decision.StatusCode,
-		ErrorCode: "content_policy_violation", Action: decision.Action,
+		ErrorCode: code, Action: decision.Action,
 	}, nil
 }

@@ -104,7 +104,7 @@ func TestContentModerationTypeSafeAllCategoriesAndImages(t *testing.T) {
 	require.Equal(t, int32(1), calls.Load())
 }
 
-func TestContentModerationTypeSafeFailureOpenAndKeyIsolation(t *testing.T) {
+func TestContentModerationTypeSafeFailureClosedAndKeyIsolation(t *testing.T) {
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls.Add(1); w.WriteHeader(429) }))
 	defer server.Close()
@@ -116,7 +116,9 @@ func TestContentModerationTypeSafeFailureOpenAndKeyIsolation(t *testing.T) {
 	cfg.APIKeys = []string{"shared-key"}
 	cfg.RecordNonHits = true
 	decision := s.checkSync(context.Background(), ContentModerationCheckInput{UserID: 123, Model: "business-model", Provider: "business-provider"}, cfg, ContentModerationInput{Text: "normal text"}, "hash", nil, true)
-	require.True(t, decision.Allowed)
+	require.False(t, decision.Allowed)
+	require.True(t, decision.Blocked)
+	require.Equal(t, http.StatusServiceUnavailable, decision.StatusCode)
 	require.False(t, decision.Flagged)
 	require.Equal(t, int32(1), calls.Load())
 	require.Equal(t, "error", repo.logs[0].Action)

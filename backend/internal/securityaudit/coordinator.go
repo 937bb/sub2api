@@ -101,8 +101,12 @@ func prioritize(legacy *LegacyDecision, prompt *PromptDecision) Decision {
 		if code == "" {
 			code = "content_policy_violation"
 		}
+		kind := DecisionBlock
+		if legacy.Action == "error" && status == http.StatusServiceUnavailable {
+			kind = DecisionUnavailable
+		}
 		return Decision{
-			Kind: DecisionBlock, HTTPStatus: status, ErrorCode: code, ClientMessage: legacy.Message,
+			Kind: kind, HTTPStatus: status, ErrorCode: code, ClientMessage: legacy.Message,
 			Legacy: legacy, Prompt: prompt, AllowNextStage: false,
 		}
 	}

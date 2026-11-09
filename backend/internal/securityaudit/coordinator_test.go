@@ -174,3 +174,21 @@ func TestCoordinatorAsyncEnqueueFailuresNeverChangeResponseOrDownstreamDispatch(
 		require.Zero(t, prompt.evaluates.Load())
 	}
 }
+
+func TestCoordinatorLegacyUnavailableStopsNextStage(t *testing.T) {
+	for _, mode := range []Mode{ModeOff, ModeAsync, ModeBlocking} {
+		t.Run(string(mode), func(t *testing.T) {
+			legacy := &fakeLegacyEngine{decision: &LegacyDecision{
+				Blocked: true, Flagged: false, StatusCode: http.StatusServiceUnavailable,
+				Action: "error", ErrorCode: "content_moderation_unavailable", Message: "内容审核服务暂不可用，请稍后重试",
+			}}
+			prompt := &fakePromptEngine{mode: mode, decision: &PromptDecision{Kind: DecisionAllow, AllowNextStage: true}}
+			decision := NewCoordinator(legacy, prompt).Check(context.Background(), Request{})
+			require.Equal(t, DecisionUnavailable, decision.Kind)
+			require.Equal(t, http.StatusServiceUnavailable, decision.HTTPStatus)
+			require.Equal(t, "content_moderation_unavailable", decision.ErrorCode)
+			require.False(t, decision.AllowNextStage)
+			require.False(t, decision.Legacy.Flagged)
+		})
+	}
+}

@@ -157,3 +157,34 @@ func TestLegacyModerationErrorKeepsExistingClientPriority(t *testing.T) {
 	require.Contains(t, recorder.Body.String(), "content_policy_violation")
 	require.NotContains(t, recorder.Body.String(), securityaudit.ErrorCodeBlocked)
 }
+
+func TestSecurityAuditLegacyUnavailableIsRetryableAcrossProtocols(t *testing.T) {
+	decision := &securityaudit.Decision{
+		Kind: securityaudit.DecisionUnavailable, HTTPStatus: http.StatusServiceUnavailable,
+		ErrorCode: "content_moderation_unavailable", ClientMessage: "内容审核服务暂不可用，请稍后重试",
+		Legacy: &securityaudit.LegacyDecision{Blocked: true, Action: "error", StatusCode: http.StatusServiceUnavailable},
+	}
+	writers := map[string]func(*gin.Context, *securityaudit.Decision){
+		"openai":        (&OpenAIGatewayHandler{}).openAISecurityAuditError,
+		"chat":          (&GatewayHandler{}).openAISecurityAuditError,
+		"responses":     (&GatewayHandler{}).responsesSecurityAuditError,
+		"claude":        (&GatewayHandler{}).anthropicSecurityAuditError,
+		"openai_claude": (&OpenAIGatewayHandler{}).anthropicSecurityAuditError,
+		"gemini":        googleSecurityAuditError,
+	}
+	for name, write := range writers {
+		t.Run(name, func(t *testing.T) {
+			c, recorder := securityAuditErrorTestContext(t)
+			write(c, decision)
+			require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+			require.Contains(t, recorder.Body.String(), "content_moderation_unavailable")
+			require.NotContains(t, recorder.Body.String(), "content_policy_violation")
+			if name != "gemini" {
+				errorObject := requireObject(t, decodeErrorJSON(t, recorder)["error"])
+				require.Equal(t, "api_error", errorObject["type"])
+			}
+		})
+	}
+	require.Equal(t, int64(1013), int64(securityAuditWSCloseStatus(decision)))
+	require.Equal(t, "content_moderation_unavailable", securityAuditWSCloseReason(decision))
+}
