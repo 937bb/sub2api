@@ -1,4 +1,6 @@
 export interface KiroCachePolicy {
+  mode?: 'response' | 'prefix'
+  auto_prefix?: boolean
   enabled: boolean
   target_percent: number
   ttl_seconds: number

@@ -585,7 +585,7 @@ export interface Group {
   rpm_limit?: number // Group-level RPM cap (0 = unlimited); overrides user-level rpm_limit when set
   max_reasoning_effort?: string // Anthropic/OpenAI reasoning ceiling; empty means unlimited
   max_reasoning_effort_over_limit?: string // downgrade (default) or deny when over the ceiling
-  kiro_response_cache?: { enabled: boolean; target_percent: number; ttl_seconds: number; max_entries: number }
+  kiro_response_cache?: { mode?: 'response' | 'prefix'; auto_prefix?: boolean; enabled: boolean; target_percent: number; ttl_seconds: number; max_entries: number }
   reasoning_effort_mappings?: ReasoningEffortMapping[]
   is_exclusive: boolean
   status: 'active' | 'inactive'
@@ -866,7 +866,7 @@ export interface CreateGroupRequest {
   rpm_limit?: number
   max_reasoning_effort?: string
   max_reasoning_effort_over_limit?: string
-  kiro_response_cache?: { enabled: boolean; target_percent: number; ttl_seconds: number; max_entries: number }
+  kiro_response_cache?: { mode?: 'response' | 'prefix'; auto_prefix?: boolean; enabled: boolean; target_percent: number; ttl_seconds: number; max_entries: number }
   reasoning_effort_mappings?: ReasoningEffortMapping[]
   require_oauth_only?: boolean
   require_privacy_set?: boolean
@@ -935,7 +935,7 @@ export interface UpdateGroupRequest {
   rpm_limit?: number
   max_reasoning_effort?: string
   max_reasoning_effort_over_limit?: string
-  kiro_response_cache?: { enabled: boolean; target_percent: number; ttl_seconds: number; max_entries: number }
+  kiro_response_cache?: { mode?: 'response' | 'prefix'; auto_prefix?: boolean; enabled: boolean; target_percent: number; ttl_seconds: number; max_entries: number }
   reasoning_effort_mappings?: ReasoningEffortMapping[]
   require_oauth_only?: boolean
   require_privacy_set?: boolean

@@ -20,7 +20,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// KiroCachePolicy controls real response reuse and local cache billing.
+// KiroCachePolicy selects group-scoped response reuse or local prefix billing.
 type KiroCachePolicy = domain.KiroResponseCachePolicy
 
 // Cache policy is loaded by effective request group, never from account metadata.
@@ -50,6 +50,11 @@ func (s *GatewayService) kiroGroupCachePolicy(ctx context.Context, groupID int64
 type KiroResponseCache interface {
 	GetKiroResponse(context.Context, int64, string, KiroCachePolicy) ([]byte, error)
 	PutKiroResponse(context.Context, int64, string, []byte, KiroCachePolicy) error
+}
+
+type KiroPrefixCache interface {
+	LookupKiroPrefix(context.Context, int64, string, *kiro.PrefixPlan, KiroCachePolicy) (*kiro.PrefixPoint, error)
+	CommitKiroPrefix(context.Context, int64, string, *kiro.PrefixPlan, *kiro.PrefixPoint, KiroCachePolicy) error
 }
 
 func normalizeKiroAccount(account *Account) error {
@@ -262,9 +267,16 @@ func (s *GatewayService) forwardKiro(ctx context.Context, c *gin.Context, accoun
 	identity := sha256.Sum256([]byte(account.GetCredential("refresh_token") + account.GetCredential("api_key")))
 	cacheScope := fmt.Sprintf("%s:%s:%s:%s:%x", scope, mapped, kiro.EnvironmentKey(account.Credentials), account.GetCredential("profile_arn"), identity)
 	cacheKey, eligible := kiro.CacheKey(parsed.Body.Bytes(), cacheScope)
-	useCache := cacheOK && eligible && policy.Enabled && policy.TargetPercent > 0
+	useCache := cacheOK && eligible && policy.Enabled && policy.Mode != "prefix" && policy.TargetPercent > 0
 	c.Header("X-Sub2api-Cache", "bypass")
 	c.Header("X-Sub2api-Usage-Source", "estimated")
+	finalize := kiroCacheFinalizer(ctx, cache, groupID, cacheKey, policy, useCache)
+	if policy.PrefixEnabled() {
+		prefixScope := fmt.Sprintf("%s:%s:%s:%s:%x", scope, kiro.ModelID(mapped), kiro.EnvironmentKey(account.Credentials), account.GetCredential("profile_arn"), identity)
+		finalize = s.kiroPrefixFinalizer(ctx, groupID, prefixScope, parsed.Body.Bytes(), mapped, policy)
+		c.Header("X-Sub2api-Cache", "local-prefix-metering")
+		c.Header("X-Sub2api-Cache-Mode", "local_prefix")
+	}
 	emit := func(name string, event any) error {
 		encoded, err := json.Marshal(event)
 		if err != nil {
@@ -329,7 +341,7 @@ func (s *GatewayService) forwardKiro(ctx context.Context, c *gin.Context, accoun
 	if parsed.Stream {
 		emitter = emit
 	}
-	out, err := kiro.DecodeWithUsageFinalizer(resp.Body, parsed.Model, inputTokens, emitter, kiroCacheFinalizer(ctx, cache, groupID, cacheKey, policy, useCache), toolNames)
+	out, err := kiro.DecodeWithUsageFinalizer(resp.Body, parsed.Model, inputTokens, emitter, finalize, toolNames)
 	if err != nil {
 		if writeKiroEmptyResponse(c, err, "messages") {
 			return nil, err

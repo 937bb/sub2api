@@ -4,7 +4,7 @@ export default {
         quota: '额度',
         quotaUnknown: '额度未知',
     proxyRequired: 'Kiro 必须绑定独立静态代理',
-    proxyHint: '请在下方选择固定代理。批量 JSON 中每个账号必须提供不同的 proxy_id；代理故障时停止请求，不切换直连或备用代理。', "credentials": "Kiro 账号 JSON", "keepCredentials": "留空保留当前凭据", "importHint": "支持直接粘贴 ksk_ API Key、kiro.rs 单账号或数组，以及 Kiro Account Manager 导出。API Key 无需刷新令牌；JSON 可指定 endpoint 为 cli，默认使用 runtime_v3。", "cacheEnabled": "复用已完成的文本响应", "target": "目标命中率（%）", "ttl": "缓存有效期（秒）", "capacity": "每个分组最多缓存条数", "cacheHint": "本分组所有 Kiro 账号共用缓存策略、容量和目标命中率。内容按用户、密钥和账号隔离。开启后完整相同的纯文本请求可复用；工具、图片和思考请求跳过。实际命中取决于重复请求；命中不消耗上游 token，也不重复收费。", "singleAccount": "编辑时只能导入一个账号。"},
+    proxyHint: '请在下方选择固定代理。批量 JSON 中每个账号必须提供不同的 proxy_id；代理故障时停止请求，不切换直连或备用代理。', "credentials": "Kiro 账号 JSON", "keepCredentials": "留空保留当前凭据", "importHint": "支持直接粘贴 ksk_ API Key、kiro.rs 单账号或数组，以及 Kiro Account Manager 导出。API Key 无需刷新令牌；JSON 可指定 endpoint 为 cli，默认使用 runtime_v3。", "cacheEnabled": "启用 Kiro 本地缓存计费", "target": "目标命中率（%）", "ttl": "缓存有效期（秒）", "capacity": "每个分组最多缓存条数", "cacheHint": "本分组共用策略与容量，内容按用户、密钥和账号隔离。完整相同的纯文本请求可复用；工具、图片和 thinking 跳过。写入与读取按 Sub 的缓存价格计费，命中时不重复计输出费用。", "mode": "缓存模式","responseMode": "完整回答复用","prefixMode": "前缀缓存计费（rs 模式）","autoPrefix": "客户端未声明缓存断点时，自动缓存历史前缀","prefixTarget": "缓存读取占输入的上限（%）","prefixHint": "按本分组策略，在 Redis 中记录前缀指纹；连续对话、工具及 thinking 请求均可计量。创建、读取与普通输入分别使用 Sub 已配置的价格。百分比限制实际匹配前缀的读取 token 占比，不保证每轮命中。客户端断点支持 5m/1h；自动断点使用下方有效期。属于本地估算计费，每轮仍调用 Kiro，不减少上游推理成本；上游返回完整用量时优先使用上游用量。", "singleAccount": "编辑时只能导入一个账号。"},
       fingerprint: {
         kiro: {
           "description": "Kiro 固定账号环境。以下 headers 由实际请求的同一生成器解析，不包含令牌或代理密码。",

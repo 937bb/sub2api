@@ -101,9 +101,17 @@ func (s *GatewayService) kiroAsAnthropic(ctx context.Context, c *gin.Context, a 
 	}
 	cache, cacheOK := s.cache.(KiroResponseCache)
 	identity := sha256.Sum256([]byte(a.GetCredential("refresh_token") + a.GetCredential("api_key")))
-	cacheKey, eligible := kiro.CacheKey(raw, fmt.Sprintf("%s:%s:%s:%s:%x", scope, model, kiro.EnvironmentKey(a.Credentials), a.GetCredential("profile_arn"), identity))
-	useCache := cacheOK && eligible && policy.Enabled && policy.TargetPercent > 0
+	cacheScope := fmt.Sprintf("%s:%s:%s:%s:%x", scope, model, kiro.EnvironmentKey(a.Credentials), a.GetCredential("profile_arn"), identity)
+	cacheKey, eligible := kiro.CacheKey(raw, cacheScope)
+	useCache := cacheOK && eligible && policy.Enabled && policy.Mode != "prefix" && policy.TargetPercent > 0
 	c.Header("X-Sub2api-Cache", "bypass")
+	finalize := kiroCacheFinalizer(ctx, cache, groupID, cacheKey, policy, useCache)
+	if policy.PrefixEnabled() {
+		prefixScope := fmt.Sprintf("%s:%s:%s:%s:%x", scope, kiro.ModelID(model), kiro.EnvironmentKey(a.Credentials), a.GetCredential("profile_arn"), identity)
+		finalize = s.kiroPrefixFinalizer(ctx, groupID, prefixScope, raw, model, policy)
+		c.Header("X-Sub2api-Cache", "local-prefix-metering")
+		c.Header("X-Sub2api-Cache-Mode", "local_prefix")
+	}
 	if useCache {
 		c.Header("X-Sub2api-Cache", "miss")
 		cached, cacheErr := cache.GetKiroResponse(ctx, groupID, cacheKey, policy)
@@ -187,7 +195,7 @@ func (s *GatewayService) kiroAsAnthropic(ctx context.Context, c *gin.Context, a 
 			_, e = fmt.Fprintf(writer, "event: %s\ndata: %s\n\n", name, b)
 			return e
 		}
-		out, decodeErr := kiro.DecodeWithUsageFinalizer(resp.Body, model, input, emit, kiroCacheFinalizer(upstreamCtx, cache, groupID, cacheKey, policy, useCache), toolNames)
+		out, decodeErr := kiro.DecodeWithUsageFinalizer(resp.Body, model, input, emit, finalize, toolNames)
 		if out != nil && out.StopReason == "refusal" {
 			refused.Store(true)
 		}
