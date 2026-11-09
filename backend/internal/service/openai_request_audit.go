@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"github.com/google/uuid"
 	"io"
 	"log/slog"
 	"mime"
@@ -21,11 +20,13 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/requestaudit"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/tidwall/gjson"
 )
 
 type openAIAuditContextKey struct{}
 
+var openAIAuditInstanceID = uuid.NewString()
 var openAIAuditOnce sync.Once
 var openAIAuditStore *requestaudit.Store
 var openAIAuditInitError string
@@ -55,8 +56,7 @@ func openAIRequestAuditStore() *requestaudit.Store {
 					reportOpenAIAuditError(err)
 				}
 				b, _ := json.Marshal(openAIRequestAuditStats())
-				host, _ := os.Hostname()
-				p := filepath.Join(dir, fmt.Sprintf("status-%s-%d.json", host, os.Getpid()))
+				p := filepath.Join(dir, "status-"+openAIAuditInstanceID+".json")
 				if err := os.WriteFile(p+".tmp", b, 0600); err == nil {
 					_ = os.Rename(p+".tmp", p)
 				}
@@ -67,7 +67,7 @@ func openAIRequestAuditStore() *requestaudit.Store {
 }
 
 func openAIRequestAuditStats() map[string]any {
-	return map[string]any{"enabled": openAIAuditStore != nil, "init_error": openAIAuditInitError, "written": openAIAuditWritten.Load(), "write_errors": openAIAuditErrors.Load(), "retention_hours": 72, "quota_bytes": int64(5 << 30), "at": time.Now().UTC()}
+	return map[string]any{"instance_id": openAIAuditInstanceID, "server_port": os.Getenv("SERVER_PORT"), "pid": os.Getpid(), "enabled": openAIAuditStore != nil, "init_error": openAIAuditInitError, "written": openAIAuditWritten.Load(), "write_errors": openAIAuditErrors.Load(), "retention_hours": 72, "quota_bytes": int64(5 << 30), "at": time.Now().UTC()}
 }
 
 func reportOpenAIAuditError(err error) {

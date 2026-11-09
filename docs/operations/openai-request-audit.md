@@ -46,8 +46,10 @@ an explicit reason. No silent content-length truncation is performed. Recording
 errors are counted and logged; requests continue if auditing fails. Writes are
 synchronous but are not fsynced per record and can be lost in a host crash.
 
-`status-<host>-<pid>.json` provides timestamped write/error counters for each
-process. Check both current instances, not stale status files from past runs.
+`status-<process-uuid>.json` provides timestamped write/error counters for each
+process, including its server port. A random process UUID avoids collisions
+when host-network containers share a hostname and PID 1. Check both current
+instances, not stale status files from past runs.
 Audit records alone do not establish whether a request violated policy or
 caused an account ban. Combine original instructions, conversation context,
 upstream errors, and account events. Do not equate `token_revoked` with a content
