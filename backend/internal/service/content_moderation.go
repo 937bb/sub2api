@@ -1089,18 +1089,8 @@ func (s *ContentModerationService) checkSync(ctx context.Context, input ContentM
 		if queueDelay != nil {
 			s.asyncErrors.Add(1)
 		}
-		if cfg.RecordNonHits || trackPreBlock {
-			log := s.buildLog(input, cfg, ContentModerationActionError, false, "", 0, nil, evidence, &latency, queueDelay, redactContentModerationSecrets(err.Error()))
-			log.EngineMeta = moderationAttemptMeta(cfg, content)
-			log.EngineMeta.ErrorDisposition = "allowed"
-			if queueDelay == nil && s.asyncQueue != nil {
-				s.enqueueRecord(input, cfg, log, hashText, false, false)
-			} else {
-				s.persistContentModerationLog(ctx, cfg, log, hashText, false, false)
-			}
-		}
-		// A failed audit is not a policy verdict. Keep the error evidence, but
-		// allow inference to continue without penalizing the user.
+		// Audit availability is operational telemetry, not a content verdict.
+		// Allow inference without writing a moderation record or penalizing the user.
 		return &ContentModerationDecision{Allowed: true, Action: ContentModerationActionError}
 	}
 

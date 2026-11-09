@@ -266,7 +266,9 @@ func nullableIntPtr(value *int) any {
 }
 
 func buildContentModerationLogWhere(filter service.ContentModerationLogFilter) ([]string, []any) {
-	where := []string{"l.id IS NOT NULL"}
+	// Historical availability errors are not content audit results. Apply the
+	// same exclusion to the list and its count so pagination stays consistent.
+	where := []string{"l.id IS NOT NULL", "l.action <> 'error'"}
 	args := make([]any, 0)
 	add := func(expr string, value any) {
 		args = append(args, value)

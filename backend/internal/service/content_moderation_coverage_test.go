@@ -93,7 +93,7 @@ func TestContentModerationChunksSafeInputChecksEveryChunk(t *testing.T) {
 	require.Equal(t, text, string(rebuilt))
 }
 
-func TestContentModerationFailureAllowsAndRecordsWithoutViolation(t *testing.T) {
+func TestContentModerationFailureAllowsWithoutRecordingOrViolation(t *testing.T) {
 	for _, failure := range []string{"500", "429", "malformed", "timeout", "no_key", "cancelled", "partial"} {
 		t.Run(failure, func(t *testing.T) {
 			var calls atomic.Int32
@@ -147,11 +147,7 @@ func TestContentModerationFailureAllowsAndRecordsWithoutViolation(t *testing.T) 
 			require.False(t, decision.Flagged)
 			require.Zero(t, decision.StatusCode)
 			require.Equal(t, ContentModerationActionError, decision.Action)
-			logs := requireContentModerationLogCount(t, repo, 1)
-			require.Equal(t, "allowed", logs[0].EngineMeta.ErrorDisposition)
-			require.False(t, logs[0].Flagged)
-			require.Zero(t, logs[0].ViolationCount)
-			require.Equal(t, ContentModerationActionError, logs[0].Action)
+			require.Empty(t, repo.snapshotLogs())
 			found, err := svc.hashCache.HasFlaggedInputHash(context.Background(), (ContentModerationInput{Text: text}).Hash())
 			require.NoError(t, err)
 			require.False(t, found)
@@ -168,11 +164,13 @@ func TestContentModerationFailureAllowsAndRecordsWithoutViolation(t *testing.T) 
 func TestContentModerationObserveFailureRemainsNonBlocking(t *testing.T) {
 	cfg := defaultContentModerationConfig()
 	cfg.Mode, cfg.RecordNonHits = ContentModerationModeObserve, true
-	svc := &ContentModerationService{repo: &contentModerationTestRepo{}}
+	repo := &contentModerationTestRepo{}
+	svc := &ContentModerationService{repo: repo}
 	decision := svc.checkSync(context.Background(), ContentModerationCheckInput{}, cfg, ContentModerationInput{Text: "normal code review"}, "hash", nil, false)
 	require.True(t, decision.Allowed)
 	require.False(t, decision.Blocked)
 	require.False(t, decision.Flagged)
+	require.Empty(t, repo.snapshotLogs())
 }
 
 func TestContentModerationToolBatchIncludesAllNewOutputs(t *testing.T) {
@@ -283,5 +281,36 @@ func TestContentModerationNestedWSInputCoverage(t *testing.T) {
 		require.Contains(t, input.Text, "request")
 		input = ExtractContentModerationInput(protocol, []byte(`{"type":"response.create","input":"root input","response":{"input":"ignored"}}`))
 		require.Equal(t, "root input", input.Text)
+	}
+}
+
+func TestContentModerationKeywordGateStillBlocksWhenAPIUnavailable(t *testing.T) {
+	for _, hit := range []bool{false, true} {
+		t.Run(strconv.FormatBool(hit), func(t *testing.T) {
+			cfg := defaultContentModerationConfig()
+			cfg.Enabled, cfg.RecordNonHits = true, true
+			cfg.APIKeys = nil
+			cfg.KeywordBlockingMode = ContentModerationKeywordModeKeywordAndAPI
+			cfg.BlockedKeywords = []string{"TEST_BLOCKED_KEYWORD"}
+			svc, repo := newContentModerationModelFilterTestService(t, cfg)
+			text := "normal code review"
+			if hit {
+				text = "TEST_BLOCKED_KEYWORD"
+			}
+			body, err := json.Marshal(map[string]any{"input": text})
+			require.NoError(t, err)
+			decision, err := svc.Check(context.Background(), ContentModerationCheckInput{UserID: 123, Protocol: ContentModerationProtocolOpenAIResponses, Body: body})
+			require.NoError(t, err)
+			require.Equal(t, hit, decision.Blocked)
+			require.Equal(t, !hit, decision.Allowed)
+			if hit {
+				require.Equal(t, ContentModerationActionKeywordBlock, decision.Action)
+				logs := requireContentModerationLogCount(t, repo, 1)
+				require.Equal(t, "TEST_BLOCKED_KEYWORD", logs[0].MatchedKeyword)
+			} else {
+				require.Equal(t, ContentModerationActionError, decision.Action)
+				require.Empty(t, repo.snapshotLogs())
+			}
+		})
 	}
 }

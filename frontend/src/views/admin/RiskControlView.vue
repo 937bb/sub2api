@@ -1473,7 +1473,6 @@ const resultOptions = computed<SelectOption[]>(() => [
   { value: 'hit', label: t('admin.riskControl.result.hit') },
   { value: 'blocked', label: t('admin.riskControl.result.blocked') },
   { value: 'pass', label: t('admin.riskControl.result.pass') },
-  { value: 'error', label: t('admin.riskControl.result.error') },
 ])
 
 const endpointOptions = computed<SelectOption[]>(() => [

@@ -117,3 +117,10 @@ func TestContentModerationRepositoryCountFlaggedByUserSince_ExcludesCyberLogOnly
 	require.Zero(t, count)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
+
+func TestBuildContentModerationLogWhere_ExcludesHistoricalAuditErrors(t *testing.T) {
+	for _, result := range []string{"", "hit", "blocked", "pass", "error"} {
+		where, _ := buildContentModerationLogWhere(service.ContentModerationLogFilter{Result: result})
+		require.Contains(t, where, "l.action <> 'error'", result)
+	}
+}
