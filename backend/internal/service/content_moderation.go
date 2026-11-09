@@ -1061,7 +1061,6 @@ func (s *ContentModerationService) Check(ctx context.Context, input ContentModer
 }
 
 func (s *ContentModerationService) checkSync(ctx context.Context, input ContentModerationCheckInput, cfg *ContentModerationConfig, content ContentModerationInput, hashText string, queueDelay *int, allowBlock bool) *ContentModerationDecision {
-	allow := &ContentModerationDecision{Allowed: true, Action: ContentModerationActionAllow}
 	trackPreBlock := queueDelay == nil && allowBlock && cfg != nil && cfg.Mode == ContentModerationModePreBlock
 	if trackPreBlock {
 		s.preBlockActive.Add(1)
@@ -1093,16 +1092,16 @@ func (s *ContentModerationService) checkSync(ctx context.Context, input ContentM
 		if cfg.RecordNonHits || trackPreBlock {
 			log := s.buildLog(input, cfg, ContentModerationActionError, false, "", 0, nil, evidence, &latency, queueDelay, redactContentModerationSecrets(err.Error()))
 			log.EngineMeta = moderationAttemptMeta(cfg, content)
+			log.EngineMeta.ErrorDisposition = "allowed"
 			if queueDelay == nil && s.asyncQueue != nil {
 				s.enqueueRecord(input, cfg, log, hashText, false, false)
 			} else {
 				s.persistContentModerationLog(ctx, cfg, log, hashText, false, false)
 			}
 		}
-		if allowBlock && cfg.Mode == ContentModerationModePreBlock && !input.riskControlLogOnly {
-			return &ContentModerationDecision{Blocked: true, Action: ContentModerationActionError, StatusCode: http.StatusServiceUnavailable, Message: "内容审核服务暂不可用，请稍后重试"}
-		}
-		return allow
+		// A failed audit is not a policy verdict. Keep the error evidence, but
+		// allow inference to continue without penalizing the user.
+		return &ContentModerationDecision{Allowed: true, Action: ContentModerationActionError}
 	}
 
 	flagged, highestCategory, highestScore := evaluateModerationScores(result.CategoryScores, cfg.Thresholds)

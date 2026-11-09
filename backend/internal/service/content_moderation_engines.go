@@ -37,10 +37,12 @@ type UpdateContentModerationEngineInput struct {
 }
 
 type ContentModerationEngineMeta struct {
-	Engine        string `json:"engine"`
-	Model         string `json:"model"`
-	RulesVersion  string `json:"rules_version"`
-	SkippedImages int    `json:"skipped_images"`
+	// Only new error records carry this field; historical outcomes remain unknown.
+	ErrorDisposition string `json:"error_disposition,omitempty"`
+	Engine           string `json:"engine"`
+	Model            string `json:"model"`
+	RulesVersion     string `json:"rules_version"`
+	SkippedImages    int    `json:"skipped_images"`
 }
 
 func moderationEngine(engine string) string {

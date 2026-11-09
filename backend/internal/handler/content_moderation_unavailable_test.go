@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -16,8 +17,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Exercise the real service and both adapters, so an error cannot silently
-// become an allow decision or a policy violation between layers.
+// Exercise the real service and both adapters: audit outages must allow
+// the next stage without becoming content violations.
 func newUnavailableModerationService(t *testing.T) *service.ContentModerationService {
 	t.Helper()
 	cfg, err := json.Marshal(&service.ContentModerationConfig{
@@ -32,7 +33,7 @@ func newUnavailableModerationService(t *testing.T) *service.ContentModerationSer
 	return service.NewContentModerationService(settings, &contentModerationHandlerTestRepo{}, nil, nil, nil, nil, nil, nil)
 }
 
-func TestContentModerationUnavailableAdaptersStopToolContinuation(t *testing.T) {
+func TestContentModerationUnavailableAdaptersAllowToolContinuation(t *testing.T) {
 	for _, coordinated := range []bool{false, true} {
 		svc := newUnavailableModerationService(t)
 		var coordinator *securityaudit.Coordinator
@@ -43,46 +44,66 @@ func TestContentModerationUnavailableAdaptersStopToolContinuation(t *testing.T) 
 		decision := runSecurityAudit(c, nil, coordinator, svc, nil, middleware.AuthSubject{UserID: 1}, service.ContentModerationProtocolOpenAIResponses, "gpt-test",
 			[]byte(`{"input":[{"type":"function_call_output","call_id":"call_1","output":"code review results"}]}`), "subsequent_turn")
 		require.NotNil(t, decision)
-		require.Equal(t, securityaudit.DecisionUnavailable, decision.Kind)
-		require.Equal(t, http.StatusServiceUnavailable, decision.HTTPStatus)
-		require.Equal(t, "content_moderation_unavailable", decision.ErrorCode)
-		require.False(t, decision.AllowNextStage)
+		require.Equal(t, securityaudit.DecisionAllow, decision.Kind)
+		require.Equal(t, http.StatusOK, decision.HTTPStatus)
+		require.Empty(t, decision.ErrorCode)
+		require.True(t, decision.AllowNextStage)
 		require.False(t, decision.Legacy.Flagged)
 		_, cached := c.Get(securityAuditCompletedContextKey)
 		require.False(t, cached)
 	}
 }
 
-func TestContentModerationUnavailableWebSocketReturnsRetryableError(t *testing.T) {
+func TestContentModerationUnavailableWebSocketKeepsTurnsOpen(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	for _, coordinated := range []bool{false, true} {
 		svc := newUnavailableModerationService(t)
-		h := &OpenAIGatewayHandler{
-			gatewayService:           &service.OpenAIGatewayService{},
-			billingCacheService:      &service.BillingCacheService{},
-			apiKeyService:            &service.APIKeyService{},
-			contentModerationService: svc,
-			concurrencyHelper:        NewConcurrencyHelper(service.NewConcurrencyService(&concurrencyCacheMock{}), SSEPingFormatNone, time.Second),
-		}
+		var coordinator *securityaudit.Coordinator
 		if coordinated {
-			h.securityAuditCoordinator = securityaudit.NewCoordinator(securityaudit.NewLegacyModerationAdapter(svc), nil)
+			coordinator = securityaudit.NewCoordinator(securityaudit.NewLegacyModerationAdapter(svc), nil)
 		}
-		server := newOpenAIWSHandlerTestServer(t, h, middleware.AuthSubject{UserID: 1, Concurrency: 1})
+		router := gin.New()
+		router.GET("/responses", func(c *gin.Context) {
+			conn, err := coderws.Accept(c.Writer, c.Request, nil)
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			defer conn.CloseNow()
+			for _, stage := range []string{"first_turn", "subsequent_turn"} {
+				_, body, err := conn.Read(c.Request.Context())
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				decision := runSecurityAudit(c, nil, coordinator, svc, nil, middleware.AuthSubject{UserID: 1}, service.ContentModerationProtocolOpenAIResponses, "gpt-test", body, stage)
+				if decision == nil || !decision.AllowNextStage {
+					t.Error("audit outage stopped WS turn")
+					return
+				}
+				if err := conn.Write(c.Request.Context(), coderws.MessageText, []byte(`{"continued":true}`)); err != nil {
+					t.Error(err)
+					return
+				}
+			}
+			_ = conn.Close(coderws.StatusNormalClosure, "done")
+		})
+		server := httptest.NewServer(router)
 		func() {
 			defer server.Close()
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
-			conn, _, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http")+"/openai/v1/responses", nil)
+			conn, _, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http")+"/responses", nil)
 			require.NoError(t, err)
 			defer conn.CloseNow()
-			require.NoError(t, conn.Write(ctx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-test","input":"hello"}`)))
-			_, payload, err := conn.Read(ctx)
-			require.NoError(t, err)
-			require.Contains(t, string(payload), "content_moderation_unavailable")
-			require.Contains(t, string(payload), "server_error")
-			require.NotContains(t, string(payload), "content_policy_violation")
+			for _, body := range []string{`{"input":"hello"}`, `{"input":[{"type":"function_call_output","output":"normal tool result"}]}`} {
+				require.NoError(t, conn.Write(ctx, coderws.MessageText, []byte(body)))
+				_, payload, err := conn.Read(ctx)
+				require.NoError(t, err)
+				require.JSONEq(t, `{"continued":true}`, string(payload))
+			}
 			_, _, err = conn.Read(ctx)
-			require.Equal(t, coderws.StatusTryAgainLater, coderws.CloseStatus(err))
+			require.Equal(t, coderws.StatusNormalClosure, coderws.CloseStatus(err))
 		}()
 	}
 }

@@ -517,6 +517,7 @@ export default {
         error: 'Error',
       },
       action: {
+        errorAllowed: 'Audit unavailable, allowed',
         block: 'Blocked',
         keywordBlock: 'Keyword Blocked',
         cyberPolicy: 'Cyber policy',

@@ -93,7 +93,7 @@ func TestContentModerationChunksSafeInputChecksEveryChunk(t *testing.T) {
 	require.Equal(t, text, string(rebuilt))
 }
 
-func TestContentModerationFailureStopsWithoutViolation(t *testing.T) {
+func TestContentModerationFailureAllowsAndRecordsWithoutViolation(t *testing.T) {
 	for _, failure := range []string{"500", "429", "malformed", "timeout", "no_key", "cancelled", "partial"} {
 		t.Run(failure, func(t *testing.T) {
 			var calls atomic.Int32
@@ -142,12 +142,13 @@ func TestContentModerationFailureStopsWithoutViolation(t *testing.T) {
 			}
 			decision, err := svc.Check(ctx, ContentModerationCheckInput{UserID: 123, Protocol: ContentModerationProtocolOpenAIResponses, Body: body})
 			require.NoError(t, err)
-			require.False(t, decision.Allowed)
-			require.True(t, decision.Blocked)
+			require.True(t, decision.Allowed)
+			require.False(t, decision.Blocked)
 			require.False(t, decision.Flagged)
-			require.Equal(t, http.StatusServiceUnavailable, decision.StatusCode)
+			require.Zero(t, decision.StatusCode)
 			require.Equal(t, ContentModerationActionError, decision.Action)
 			logs := requireContentModerationLogCount(t, repo, 1)
+			require.Equal(t, "allowed", logs[0].EngineMeta.ErrorDisposition)
 			require.False(t, logs[0].Flagged)
 			require.Zero(t, logs[0].ViolationCount)
 			require.Equal(t, ContentModerationActionError, logs[0].Action)

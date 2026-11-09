@@ -517,6 +517,7 @@ export default {
         error: '异常',
       },
       action: {
+        errorAllowed: '审核异常，已放行',
         block: '拦截',
         keywordBlock: '关键词拦截',
         cyberPolicy: '网络安全策略',

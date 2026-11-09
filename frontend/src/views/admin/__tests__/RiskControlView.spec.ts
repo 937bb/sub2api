@@ -220,6 +220,25 @@ describe('admin RiskControlView', () => {
     }))
   })
 
+  it('distinguishes allowed audit errors from historical errors and hides missing scores', async () => {
+    const base = { action: 'error', flagged: false, error: 'no moderation api key available', highest_score: 0, highest_category: '', created_at: '2026-11-09T06:05:54Z', violation_count: 0, input_excerpt: 'normal output', threshold_snapshot: {}, category_scores: {} }
+    listLogs.mockResolvedValue({ items: [
+      { ...base, id: 1, engine_meta: { engine: 'openai', error_disposition: 'allowed' } },
+      { ...base, id: 2 },
+    ], total: 2, page: 1, page_size: 20, pages: 1 })
+    const wrapper = mount(RiskControlView, { global: { stubs: {
+      WorkspacePage: { template: '<section><slot name="actions" /><slot /></section>' }, AppLayout: AppLayoutStub, BaseDialog: BaseDialogStub, Icon: true, Select: true, Toggle: true, Pagination: true, ModelWhitelistSelector: ModelWhitelistSelectorStub, ProxySelector: true } } })
+    await flushPromises()
+    const rows = wrapper.findAll('tbody tr')
+    expect(rows).toHaveLength(2)
+    expect(rows[0].text()).toContain('admin.riskControl.action.errorAllowed')
+    expect(rows[1].text()).not.toContain('admin.riskControl.action.errorAllowed')
+    expect(rows[1].text()).toContain('admin.riskControl.action.error')
+    expect(rows[0].text()).not.toContain('0.0%')
+    expect(rows[1].text()).not.toContain('0.0%')
+    wrapper.unmount()
+  })
+
   it.each(['openai', 'typesafe'] as const)('shows the selected draft engine keys while %s remains active', async (activeEngine) => {
     const openaiKey: ContentModerationAPIKeyStatus = {
       index: 1, key_hash: 'openai-hash', masked: '********oa01', status: 'frozen',
