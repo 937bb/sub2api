@@ -75,6 +75,11 @@ func (b *kiroStreamBody) Close() error {
 // Bridge native events into the existing OpenAI compatibility translators.
 // Only the request goroutine accesses gin; the decoder owns the pipe and upstream body.
 func (s *GatewayService) kiroAsAnthropic(ctx context.Context, c *gin.Context, a *Account, raw []byte, parsed *ParsedRequest, model string) (*http.Response, error) {
+	var err error
+	raw, err = kiro.ApplyThinkingAlias(raw, model)
+	if err != nil {
+		return nil, infraerrors.BadRequest("KIRO_INVALID_REQUEST", err.Error())
+	}
 	value, _ := c.Get("api_key")
 	key, _ := value.(*APIKey)
 	if key == nil {
@@ -195,7 +200,7 @@ func (s *GatewayService) kiroAsAnthropic(ctx context.Context, c *gin.Context, a 
 			_, e = fmt.Fprintf(writer, "event: %s\ndata: %s\n\n", name, b)
 			return e
 		}
-		out, decodeErr := kiro.DecodeWithOptions(resp.Body, model, input, emit, finalize, kiro.DecodeOptionsForRequest(raw), toolNames)
+		out, decodeErr := kiro.DecodeWithOptions(resp.Body, kiro.ModelID(model), input, emit, finalize, kiro.DecodeOptionsForRequest(raw), toolNames)
 		if out != nil && out.StopReason == "refusal" {
 			refused.Store(true)
 		}
@@ -298,6 +303,8 @@ func validateKiroOpenAIToolControls(raw []byte) error {
 // the decoder goroutine. Suppression applies to token and per-request pricing.
 func markKiroRefusal(result *ForwardResult, body io.ReadCloser) *ForwardResult {
 	if result != nil {
+		result.UpstreamModel = kiro.ModelID(result.UpstreamModel)
+		result.UpstreamResponseModel = kiro.ModelID(result.UpstreamResponseModel)
 		if stream, ok := body.(*kiroStreamBody); ok && stream.refused != nil && stream.refused.Load() {
 			result.KiroRefused = true
 			result.Usage = ClaudeUsage{}

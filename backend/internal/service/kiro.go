@@ -232,6 +232,7 @@ func (s *GatewayService) kiroAccessToken(ctx context.Context, a *Account) (*Acco
 	return a, token, nil
 }
 func kiroResult(out *kiro.Response, requested, mapped string, start time.Time, stream bool) *ForwardResult {
+	mapped = kiro.ModelID(mapped)
 	result := &ForwardResult{KiroRefused: out.StopReason == "refusal", RequestID: out.ID, Model: requested, UpstreamModel: mapped, UpstreamResponseModel: mapped, Stream: stream, Duration: time.Since(start), Usage: ClaudeUsage{InputTokens: out.Usage.InputTokens, OutputTokens: out.Usage.OutputTokens, CacheReadInputTokens: out.Usage.CacheReadInputTokens, CacheCreationInputTokens: out.Usage.CacheCreationInputTokens}}
 	if out.Usage.CacheCreation != nil {
 		result.Usage.CacheCreation5mTokens = out.Usage.CacheCreation.Ephemeral5mInputTokens
@@ -245,6 +246,10 @@ func (s *GatewayService) forwardKiro(ctx context.Context, c *gin.Context, accoun
 		return nil, err
 	}
 	mapped := account.GetMappedModel(parsed.Model)
+	raw, err := kiro.ApplyThinkingAlias(parsed.Body.Bytes(), mapped)
+	if err != nil {
+		return nil, infraerrors.BadRequest("KIRO_INVALID_REQUEST", err.Error())
+	}
 	keyValue, _ := c.Get("api_key")
 	apiKey, _ := keyValue.(*APIKey)
 	if apiKey == nil {
@@ -266,14 +271,14 @@ func (s *GatewayService) forwardKiro(ctx context.Context, c *gin.Context, accoun
 	cache, cacheOK := s.cache.(KiroResponseCache)
 	identity := sha256.Sum256([]byte(account.GetCredential("refresh_token") + account.GetCredential("api_key")))
 	cacheScope := fmt.Sprintf("%s:%s:%s:%s:%x", scope, mapped, kiro.EnvironmentKey(account.Credentials), account.GetCredential("profile_arn"), identity)
-	cacheKey, eligible := kiro.CacheKey(parsed.Body.Bytes(), cacheScope)
+	cacheKey, eligible := kiro.CacheKey(raw, cacheScope)
 	useCache := cacheOK && eligible && policy.Enabled && policy.Mode != "prefix" && policy.TargetPercent > 0
 	c.Header("X-Sub2api-Cache", "bypass")
 	c.Header("X-Sub2api-Usage-Source", "estimated")
 	finalize := kiroCacheFinalizer(ctx, cache, groupID, cacheKey, policy, useCache)
 	if policy.PrefixEnabled() {
 		prefixScope := fmt.Sprintf("%s:%s:%s:%s:%x", scope, kiro.ModelID(mapped), kiro.EnvironmentKey(account.Credentials), account.GetCredential("profile_arn"), identity)
-		finalize = s.kiroPrefixFinalizer(ctx, groupID, prefixScope, parsed.Body.Bytes(), mapped, policy)
+		finalize = s.kiroPrefixFinalizer(ctx, groupID, prefixScope, raw, mapped, policy)
 		c.Header("X-Sub2api-Cache", "local-prefix-metering")
 		c.Header("X-Sub2api-Cache-Mode", "local_prefix")
 	}
@@ -313,7 +318,7 @@ func (s *GatewayService) forwardKiro(ctx context.Context, c *gin.Context, accoun
 			}
 		}
 	}
-	resp, inputTokens, toolNames, err := s.requestKiro(ctx, account, parsed.Body.Bytes(), mapped, kiro.StableID(scope, session))
+	resp, inputTokens, toolNames, err := s.requestKiro(ctx, account, raw, mapped, kiro.StableID(scope, session))
 	if err != nil {
 		if infraerrors.IsBadRequest(err) {
 			c.JSON(400, gin.H{"type": "error", "error": gin.H{"type": "invalid_request_error", "message": err.Error()}})
@@ -341,7 +346,7 @@ func (s *GatewayService) forwardKiro(ctx context.Context, c *gin.Context, accoun
 	if parsed.Stream {
 		emitter = emit
 	}
-	out, err := kiro.DecodeWithOptions(resp.Body, parsed.Model, inputTokens, emitter, finalize, kiro.DecodeOptionsForRequest(parsed.Body.Bytes()), toolNames)
+	out, err := kiro.DecodeWithOptions(resp.Body, parsed.Model, inputTokens, emitter, finalize, kiro.DecodeOptionsForRequest(raw), toolNames)
 	if err != nil {
 		if writeKiroEmptyResponse(c, err, "messages") {
 			return nil, err

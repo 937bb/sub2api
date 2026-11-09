@@ -75,8 +75,15 @@ var datedModel = regexp.MustCompile(`-\d{8}$`)
 var modelVersion = regexp.MustCompile(`-(\d+)-(\d+)$`)
 
 func ModelID(model string) string {
+	if IsThinkingAlias(model) {
+		model = strings.ToLower(model)
+	}
 	model = strings.TrimPrefix(model, "kiro/")
 	model = strings.TrimSuffix(model, "[1m]")
+	if IsThinkingAlias(model) {
+		model = strings.TrimSuffix(strings.ToLower(model), "-thinking")
+		model = strings.TrimSuffix(model, "[1m]")
+	}
 	model = datedModel.ReplaceAllString(model, "")
 	return modelVersion.ReplaceAllString(model, "-$1.$2")
 }
@@ -102,6 +109,10 @@ func textContent(raw json.RawMessage) (string, error) {
 
 // Convert preserves full message history. Account changes get a new upstream session.
 func Convert(raw []byte, model, session string, credentials map[string]any) ([]byte, *Request, error) {
+	raw, err := ApplyThinkingAlias(raw, model)
+	if err != nil {
+		return nil, nil, err
+	}
 	var req Request
 	if err := json.Unmarshal(raw, &req); err != nil {
 		return nil, nil, errors.New("invalid Kiro request JSON")
@@ -131,6 +142,7 @@ func Convert(raw []byte, model, session string, credentials map[string]any) ([]b
 	}
 
 	history := make([]any, 0, len(req.Messages))
+	thinkingBoundary := thinkingHistoryBoundary(req.Messages, model)
 	var current map[string]any
 	for i, m := range req.Messages {
 		blocks, err := Blocks(m.Content)
@@ -174,7 +186,9 @@ func Convert(raw []byte, model, session string, credentials map[string]any) ([]b
 				}
 				results = append(results, map[string]any{"toolUseId": b.ToolUseID, "status": status, "content": []any{map[string]any{"text": text}}})
 			case "thinking", "redacted_thinking":
-				// Kiro has no Anthropic signature continuation contract; preserve visible history only.
+				if m.Role != "assistant" {
+					return nil, nil, errors.New("thinking history requires an assistant message")
+				}
 			default:
 				return nil, nil, fmt.Errorf("unsupported Kiro content block %s", b.Type)
 			}
@@ -206,7 +220,7 @@ func Convert(raw []byte, model, session string, credentials map[string]any) ([]b
 			if i == len(req.Messages)-1 {
 				return nil, nil, errors.New("Kiro requires a final user message; assistant prefill is unsupported")
 			}
-			msg := map[string]any{"content": content}
+			msg := map[string]any{"content": assistantHistoryText(blocks, i >= thinkingBoundary)}
 			if len(uses) > 0 {
 				msg["toolUses"] = uses
 			}
@@ -265,7 +279,7 @@ func Convert(raw []byte, model, session string, credentials map[string]any) ([]b
 // CacheKey permits explicitly opted-in full-response reuse for text-only requests; tools, thinking and multimodal requests bypass.
 func CacheKey(raw []byte, scope string) (string, bool) {
 	var req Request
-	if json.Unmarshal(raw, &req) != nil || len(req.Tools) > 0 || (len(req.Thinking) > 0 && strings.TrimSpace(string(req.Thinking)) != "null") || (req.Temperature != nil && *req.Temperature != 0) {
+	if json.Unmarshal(raw, &req) != nil || IsThinkingAlias(req.Model) || len(req.Tools) > 0 || (len(req.Thinking) > 0 && strings.TrimSpace(string(req.Thinking)) != "null") || (req.Temperature != nil && *req.Temperature != 0) {
 		return "", false
 	}
 	if _, err := textContent(req.System); err != nil {

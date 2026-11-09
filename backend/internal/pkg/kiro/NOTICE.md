@@ -40,3 +40,10 @@ src/anthropic/converter.rs. Translation is gated by the selected account's live
 model schema rather than a static model-name table, and preserves explicit
 client effort. These tiers are approximate compatibility mappings, not exact
 provider reasoning budgets.
+
+Visible thinking history retention and assistant text segmentation follow that
+reference's model_keeps_prior_thinking, finished_assistant_turns and
+convert_assistant_message. Prefix digests and estimates use retained visible
+history only; opaque signatures and redacted payloads are excluded. Claude
+thinking aliases use the reference's 20,000-token default budget, but preserve
+explicit client thinking controls and use the selected account's live schema.

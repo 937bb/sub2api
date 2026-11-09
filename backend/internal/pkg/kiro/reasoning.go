@@ -13,6 +13,11 @@ type DecodeOptions struct {
 }
 
 func DecodeOptionsForRequest(raw []byte) DecodeOptions {
+	normalized, err := ApplyThinkingAlias(raw, "")
+	if err != nil {
+		return DecodeOptions{}
+	}
+	raw = normalized
 	var request struct {
 		Thinking struct {
 			Type    string `json:"type"`

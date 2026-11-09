@@ -42,7 +42,7 @@ func (u *kiroReasoningUpstream) DoWithTLS(req *http.Request, proxy string, id in
 }
 
 func TestKiroReasoningAcrossProtocolsWithPrefixBilling(t *testing.T) {
-	for _, protocol := range []string{"messages", "messages_manual", "chat", "responses"} {
+	for _, protocol := range []string{"messages", "messages_manual", "chat", "responses", "messages_alias", "chat_alias", "responses_alias"} {
 		for _, stream := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/%v", protocol, stream), func(t *testing.T) {
 				cache := &kiroPrefixTestCache{}
@@ -54,11 +54,17 @@ func TestKiroReasoningAcrossProtocolsWithPrefixBilling(t *testing.T) {
 				account.Credentials["expires_at"] = time.Now().Add(time.Hour).Format(time.RFC3339)
 				for turn := 0; turn < 2; turn++ {
 					raw := fmt.Sprintf(`{"model":"claude-opus-4.6","max_tokens":2048,"stream":%t,"thinking":{"type":"adaptive"},"reasoning_effort":"high","messages":[{"role":"user","content":"check"}]}`, stream)
-					if protocol == "responses" {
+					if strings.HasPrefix(protocol, "responses") {
 						raw = fmt.Sprintf(`{"model":"claude-opus-4.6","stream":%t,"reasoning":{"effort":"high"},"input":"check"}`, stream)
 					}
 					if protocol == "messages_manual" {
 						raw = strings.Replace(raw, `"thinking":{"type":"adaptive"}`, `"thinking":{"type":"enabled","budget_tokens":2048}`, 1)
+					}
+					if strings.HasSuffix(protocol, "_alias") {
+						raw = strings.ReplaceAll(raw, "claude-opus-4.6", "claude-opus-4-6-thinking")
+						raw = strings.ReplaceAll(raw, `"thinking":{"type":"adaptive"},`, "")
+						raw = strings.ReplaceAll(raw, `"reasoning_effort":"high",`, "")
+						raw = strings.ReplaceAll(raw, `"reasoning":{"effort":"high"},`, "")
 					}
 					rec := httptest.NewRecorder()
 					c, _ := gin.CreateTestContext(rec)
@@ -66,7 +72,7 @@ func TestKiroReasoningAcrossProtocolsWithPrefixBilling(t *testing.T) {
 					c.Set("api_key", &APIKey{ID: 1, UserID: 2, GroupID: &groupID})
 					var result *ForwardResult
 					var err error
-					switch protocol {
+					switch strings.TrimSuffix(protocol, "_alias") {
 					case "messages", "messages_manual":
 						parsed, e := ParseGatewayRequest(NewRequestBodyRef([]byte(raw)), PlatformAnthropic)
 						require.NoError(t, e)
@@ -79,6 +85,10 @@ func TestKiroReasoningAcrossProtocolsWithPrefixBilling(t *testing.T) {
 					require.NoError(t, err)
 					require.Contains(t, rec.Body.String(), "CHECK_REASONING")
 					require.Contains(t, rec.Body.String(), "CHECK_ANSWER")
+					require.Equal(t, "claude-opus-4.6", result.UpstreamModel)
+					if strings.HasSuffix(protocol, "_alias") {
+						require.Equal(t, "claude-opus-4-6-thinking", result.Model)
+					}
 					require.Equal(t, 9, result.Usage.OutputTokens, "thinking and answer both contribute to estimated output")
 					if turn == 0 {
 						require.Positive(t, result.Usage.CacheCreationInputTokens)

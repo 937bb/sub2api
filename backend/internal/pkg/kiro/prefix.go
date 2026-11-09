@@ -62,6 +62,17 @@ func prefixTTL(value any) (int, bool) {
 // AutoPrefix is a group opt-in when a client does not declare cache_control.
 // Malformed cache declarations disable local metering, never the inference.
 func PlanPrefix(raw []byte, model string, auto bool, ttl int) *PrefixPlan {
+	var err error
+	raw, err = ApplyThinkingAlias(raw, model)
+	if err != nil {
+		return nil
+	}
+	var typed Request
+	if json.Unmarshal(raw, &typed) != nil {
+		return nil
+	}
+	thinkingBoundary := thinkingHistoryBoundary(typed.Messages, model)
+	keepThinking := false
 	var request map[string]any
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.UseNumber()
@@ -84,6 +95,22 @@ func PlanPrefix(raw []byte, model string, auto bool, ttl int) *PrefixPlan {
 		}
 		kind, _ := clean["type"].(string)
 		text, _ := clean["text"].(string)
+		if kind == "thinking" || kind == "redacted_thinking" {
+			// These blocks cannot declare checkpoints. Only retained visible
+			// text contributes to prefix identity; signatures never do.
+			if _, present := content["cache_control"]; present {
+				valid = false
+			}
+			if section != "message" || role != "assistant" {
+				valid = false
+				return
+			}
+			thought, _ := clean["thinking"].(string)
+			if kind == "redacted_thinking" || !keepThinking || thought == "" {
+				return
+			}
+			clean = map[string]any{"type": "thinking", "thinking": thought}
+		}
 		encoded, err := json.Marshal(clean)
 		if err != nil {
 			valid = false
@@ -93,9 +120,9 @@ func PlanPrefix(raw []byte, model string, auto bool, ttl int) *PrefixPlan {
 		if kind == "text" {
 			tokens = EstimateTokens(text)
 		}
-		// The converter does not send signed Anthropic thinking history to Kiro.
-		if kind == "thinking" || kind == "redacted_thinking" {
-			tokens = 0
+		if kind == "thinking" {
+			thought, _ := clean["thinking"].(string)
+			tokens = EstimateTokens(thinkingHistoryText(thought))
 		}
 		b := prefixBlock{tokens: tokens, current: current, cacheable: section == "tool" || (kind != "" && kind != "thinking" && kind != "redacted_thinking" && (kind != "text" || strings.TrimSpace(text) != ""))}
 		if kind == "tool_use" || kind == "tool_result" {
@@ -158,6 +185,7 @@ func PlanPrefix(raw []byte, model string, auto bool, ttl int) *PrefixPlan {
 		if role == "system" {
 			continue
 		}
+		keepThinking = role == "assistant" && i >= thinkingBoundary
 		current := i == last && role == "user"
 		if content, ok := m["content"].([]any); ok {
 			for _, v := range content {
@@ -232,7 +260,7 @@ func PlanPrefix(raw []byte, model string, auto bool, ttl int) *PrefixPlan {
 	}
 	encoded, _ := json.Marshal(global)
 	hasher := sha256.New()
-	prefixFrame(hasher, []byte("kiro-prefix-v1"))
+	prefixFrame(hasher, []byte("kiro-prefix-v2-thinking-history"))
 	prefixFrame(hasher, encoded)
 	plan := &PrefixPlan{}
 	all := make([]PrefixPoint, len(blocks))

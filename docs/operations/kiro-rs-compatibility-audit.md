@@ -43,8 +43,8 @@ fields are omitted upstream. This does not claim cryptographic continuation.
 | Native thinking response | stream.rs process_reasoning_content | Implemented, including stream/nonstream and accounting tests |
 | Omitted/disabled thinking | rs can expose reasoning as fallback text if no answer | Intentionally not adopted; client visibility settings are preserved |
 | Plain-text thinking tags | stream.rs has a buffered tag state machine and boundary handling | Not implemented; literal assistant text is preserved |
-| Thinking history retention | converter.rs keeps selected visible thinking with model/turn-aware rules | Still drops thinking history; tool results and visible answers are preserved |
-| `-thinking` model aliases | converter.rs normalizes suffixes and handlers derive defaults | Not implemented; explicit thinking fields are required |
+| Thinking history retention | converter.rs keeps selected visible thinking with model/turn-aware rules | Implemented below for visible assistant thinking; opaque signatures/redacted blocks are omitted |
+| `-thinking` model aliases | converter.rs normalizes suffixes and handlers derive defaults | Claude terminal suffix supported across Messages/Chat/Responses; explicit thinking controls take precedence; GPT aliases remain unsupported |
 | Native reasoning controls | converter.rs selects effort fields with provider/model-specific rules | Catalog-driven manual-to-adaptive budget/effort conversion verified on Opus 4.6 and 5.5; GPT-style upstream reasoning mapping still needs validation |
 | Raw tools | converters and stream support naming/schema and partial JSON | Existing Sub support retained; strict pairing rejects malformed history instead of rs repair/filtering |
 | Textual invoke fallback | stream.rs can recover known tool invocations from assistant text | Not implemented; text is not promoted to executable tool calls |
@@ -114,12 +114,63 @@ use the baseline until the separate release checks and traffic switch occur.
 
 1. Verify GPT-style upstream reasoning controls and the remaining account models;
    do not extrapolate the verified Opus behavior to every model.
-2. Add opt-in, model-aware visible thinking history retention with matching
-   prefix accounting; never replay opaque signatures as provider credentials.
-3. Add the guarded tag parser and thinking model aliases with explicit
-   precedence rules; test chunk boundaries, ordinary code/text and native-event
-   precedence before enabling them.
+2. Extend real multi-model history and alias validation beyond the verified
+   Opus paths, including explicit reasoning controls in OpenAI clients.
+3. Add the guarded text-tag parser; test chunk boundaries, ordinary code/text
+   and native-event precedence before enabling it.
 4. Implement bounded MCP web search with the assigned account proxy, cancellation,
    correct profile headers, per-round accounting and mixed-tool preservation.
 5. Implement structured-output validation and image processing as separate,
    testable features with explicit supported surfaces.
+
+## Follow-up: visible history, aliases and prefix identity
+
+This follow-up builds on `ede13f4e191c0eed9d62eac27fb5433178aa68d6`.
+The reference remains rs commit `5c8c3481e3f8d65f670262e4ef65029ffcd4bdbc`:
+`model_keeps_prior_thinking`, `finished_assistant_turns`,
+`convert_assistant_message` and `override_thinking_from_model_name`.
+
+- Opus 4.5+, Sonnet 4.6+ and generation-5+ families retain visible assistant
+  thinking. Older models retain it only after the latest nonempty user
+  instruction/image, including the current tool-result loop. Thinking text is
+  represented as `<thinking>...</thinking>` in assistant history, preserving
+  segment order. This is contextual text, not signed native continuation.
+- Adjacent assistant text fragments concatenate without extra newlines. Thinking
+  and redacted blocks separate text segments as in rs. Opaque signatures and
+  redacted payloads are never sent in history or used in prefix digests.
+- Prefix estimates include retained visible thinking only. Changing retained
+  text changes the digest; changing discarded old thinking, signatures or
+  ciphertext does not. Thinking blocks cannot declare their own checkpoints.
+- Prefix hashing uses `kiro-prefix-v2-thinking-history`. Old checkpoint hashes
+  cannot be reused under the new accounting rules; prefixes warm again after
+  deployment. Database and cache policy schemas are unchanged.
+- A terminal Claude `-thinking` suffix resolves to the same base model, including
+  dotted/hyphenated versions, date suffixes and `[1m]`. Absent explicit thinking,
+  it supplies rs's 20,000-token default budget; the account catalog determines
+  whether this is translated to adaptive/high. Explicit thinking and output
+  effort are preserved, unlike rs's unconditional thinking override. Unknown
+  capabilities are not inferred from the suffix. Full-response cache stays
+  disabled for thinking aliases. GPT suffixes and arbitrary names merely
+  containing `thinking` are not reinterpreted.
+- The response retains the requested alias. Kiro accounting records the canonical
+  upstream model so alias spelling does not create a separate upstream identity.
+
+Deterministic coverage includes older/newer model boundaries, mixed tool-result
+and user content, current tool loops, segment ordering, opaque-value isolation,
+prefix estimate/digest changes, alias precedence and stream/nonstream
+Messages/Chat/Responses with cold/warm prefix metering.
+
+The isolated live candidate completed three requests using only
+`claude-opus-5-5-thinking` (no explicit thinking field): tool invocation,
+nonstreaming tool-result continuation with visible thinking, and streamed
+follow-up. Responses matched the synthetic tool result and arithmetic; all
+three bills matched output usage. Cache reads were 0, 140 and 432 tokens.
+Durations were 3.612, 20.571 and 3.332 seconds; this does not establish a latency
+improvement. Evidence: `live-history-alias.json` in the same server candidate
+directory. Production routing was not changed for these probes.
+
+The follow-up passed default and unit-tagged full backend suites, `go vet`,
+targeted Kiro/history/prefix race tests, static server build and changed-code
+golangci-lint. The three matching billing records retained the requested alias
+and recorded `claude-opus-5.5` as upstream_model. No frontend files or database
+migrations are part of this change.
