@@ -25,11 +25,13 @@ import (
 )
 
 const (
-	pluginConfigMaxBytes  = 4 * 1024 * 1024
-	pluginUIAssetMaxBytes = 32 * 1024 * 1024
-	pluginReconcilePeriod = time.Second
-	pluginHealthTimeout   = 5 * time.Second
-	pluginUITokenPrefix   = "sub2api:plugin-ui:v1:"
+	pluginConfigMaxBytes   = 4 * 1024 * 1024
+	pluginUIAssetMaxBytes  = 32 * 1024 * 1024
+	pluginReconcilePeriod  = time.Second
+	pluginStateReadTimeout = 3 * time.Second
+	pluginStateGracePeriod = 30 * time.Second
+	pluginHealthTimeout    = 5 * time.Second
+	pluginUITokenPrefix    = "sub2api:plugin-ui:v1:"
 )
 
 type pluginRoute struct {
@@ -52,14 +54,16 @@ type PluginManager struct {
 	// 通过 SetAccountDirectory 在启动装配阶段注入，为 nil 时插件拿不到该能力。
 	accountDirectory PluginAccountDirectory
 
-	operationMu        sync.Mutex
-	mu                 sync.Mutex
-	runtimes           map[int64]*pluginRuntime
-	localInstallations map[int64]*PluginInstallation
-	started            bool
-	reconcileCancel    context.CancelFunc
-	reconcileDone      chan struct{}
-	route              atomic.Pointer[pluginRoute]
+	operationMu sync.Mutex
+	// Guarded by operationMu. Failed reads must never renew the grace period.
+	lastDesiredStateRead time.Time
+	mu                   sync.Mutex
+	runtimes             map[int64]*pluginRuntime
+	localInstallations   map[int64]*PluginInstallation
+	started              bool
+	reconcileCancel      context.CancelFunc
+	reconcileDone        chan struct{}
+	route                atomic.Pointer[pluginRoute]
 }
 
 func NewPluginManager(repo PluginRepository, encryptor SecretEncryptor, cfg *config.Config, hostInfo PluginHostInfo, kvStore PluginKVStore) *PluginManager {
@@ -268,12 +272,22 @@ func (m *PluginManager) reconcileOnce(ctx context.Context) error {
 	m.operationMu.Lock()
 	defer m.operationMu.Unlock()
 
-	installations, err := m.repo.List(ctx)
+	readCtx, cancelRead := context.WithTimeout(ctx, pluginStateReadTimeout)
+	installations, err := m.repo.List(readCtx)
+	cancelRead()
 	if err != nil {
-		// 无法读取权威绑定状态时不能假设插件未启用，否则会把 OAuth 请求静默回落到旧直连路径。
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		// A brief control-plane outage must not tear down a verified, healthy
+		// transport and its active streams. Never infer that the plugin is disabled.
+		if m.retainVerifiedRoute(ctx) {
+			return fmt.Errorf("读取插件启用状态（暂时保留已验证的健康插件）: %w", err)
+		}
 		m.publishUnavailableRoute(0, 100, "插件启用状态暂时无法读取")
 		return fmt.Errorf("读取插件启用状态: %w", err)
 	}
+	m.lastDesiredStateRead = time.Now()
 	m.cleanupStaleLocalInstallations(installations)
 	var enabled *PluginInstallation
 	for _, installation := range installations {
@@ -385,6 +399,23 @@ func (m *PluginManager) reconcileOnce(ctx context.Context) error {
 		candidate.drain(10 * time.Second)
 	}
 	return nil
+}
+
+// Called under operationMu. Only a recently verified enabled route is eligible;
+// startup failures, unhealthy/draining processes and expired state fail closed.
+func (m *PluginManager) retainVerifiedRoute(ctx context.Context) bool {
+	if m.lastDesiredStateRead.IsZero() || time.Since(m.lastDesiredStateRead) >= pluginStateGracePeriod {
+		return false
+	}
+	route := m.route.Load()
+	if route == nil || route.runtime == nil || route.runtime.draining.Load() {
+		return false
+	}
+	healthCtx, cancel := context.WithTimeout(ctx, pluginHealthTimeout)
+	err := route.runtime.checkHealth(healthCtx)
+	cancel()
+	return err == nil && ctx.Err() == nil && m.route.Load() == route &&
+		!route.runtime.draining.Load() && time.Since(m.lastDesiredStateRead) < pluginStateGracePeriod
 }
 
 func (m *PluginManager) startingStateExpired(installation *PluginInstallation) bool {

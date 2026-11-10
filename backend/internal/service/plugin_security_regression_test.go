@@ -13,6 +13,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	pluginv1 "github.com/Wei-Shaw/sub2api/pkg/pluginapi/v1"
 	"github.com/gin-gonic/gin"
+	hcplugin "github.com/hashicorp/go-plugin"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 )
@@ -107,6 +108,73 @@ func TestPluginReconcileFailsClosedWhenDesiredStateCannotBeRead(t *testing.T) {
 	})
 	require.True(t, handled)
 	require.ErrorContains(t, routeErr, "插件不可用")
+}
+
+type reconcileHealthClient struct {
+	pluginv1.TransportPluginClient
+	err error
+}
+
+func (c *reconcileHealthClient) Health(context.Context, *pluginv1.HealthRequest, ...grpc.CallOption) (*pluginv1.HealthResponse, error) {
+	return &pluginv1.HealthResponse{Healthy: c.err == nil}, c.err
+}
+
+func TestPluginReconcileRetainsHealthyRouteDuringBriefDatabaseOutage(t *testing.T) {
+	repo := &pluginTokenRepository{listErr: errors.New("connection slots exhausted")}
+	runtime := &pluginRuntime{client: &hcplugin.Client{}, api: &reconcileHealthClient{}}
+	runtime.inFlight.Store(3)
+	route := &pluginRoute{pluginID: 7, runtime: runtime, rolloutPercent: 50}
+	verified := time.Now().Add(-time.Second)
+	manager := &PluginManager{repo: repo, lastDesiredStateRead: verified}
+	manager.route.Store(route)
+	for i := 0; i < 3; i++ {
+		require.ErrorContains(t, manager.reconcileOnce(context.Background()), "暂时保留")
+		require.Same(t, route, manager.route.Load())
+		require.False(t, runtime.draining.Load())
+		require.Equal(t, int64(3), runtime.inFlight.Load())
+		require.Equal(t, verified, manager.lastDesiredStateRead)
+	}
+	// An authoritative disable takes effect immediately, even within the grace.
+	repo.listErr = nil
+	require.NoError(t, manager.reconcileOnce(context.Background()))
+	require.Nil(t, manager.route.Load())
+}
+
+func TestPluginReconcileGraceCannotKeepInvalidRoutesAlive(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		age       time.Duration
+		draining  bool
+		healthErr error
+	}{
+		{name: "expired", age: pluginStateGracePeriod + time.Second},
+		{name: "unhealthy", age: time.Second, healthErr: errors.New("unhealthy")},
+		{name: "draining", age: time.Second, draining: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			runtime := &pluginRuntime{client: &hcplugin.Client{}, api: &reconcileHealthClient{err: tc.healthErr}}
+			runtime.draining.Store(tc.draining)
+			manager := &PluginManager{repo: &pluginTokenRepository{listErr: errors.New("database unavailable")}, lastDesiredStateRead: time.Now().Add(-tc.age)}
+			manager.route.Store(&pluginRoute{pluginID: 7, runtime: runtime, rolloutPercent: 50})
+			require.Error(t, manager.reconcileOnce(context.Background()))
+			require.Nil(t, manager.route.Load().runtime)
+			require.Equal(t, 100, manager.route.Load().rolloutPercent, "unknown binding must not fall back to direct transport")
+		})
+	}
+}
+
+func TestPluginReconcileSuccessfulReadRenewsGrace(t *testing.T) {
+	installation := &PluginInstallation{ID: 7, State: PluginStateEnabled, Bindings: []PluginBinding{{Capability: PluginCapabilityOpenAIOAuthOutbound, Platform: PlatformOpenAI, AccountType: AccountTypeOAuth, Enabled: true, RolloutPercent: 100}}}
+	repo := &pluginTokenRepository{installation: installation}
+	runtime := &pluginRuntime{client: &hcplugin.Client{}, api: &reconcileHealthClient{}, installation: installation}
+	manager := &PluginManager{repo: repo, lastDesiredStateRead: time.Now().Add(-time.Hour)}
+	route := &pluginRoute{pluginID: 7, runtime: runtime, rolloutPercent: 100}
+	manager.route.Store(route)
+	require.NoError(t, manager.reconcileOnce(context.Background()))
+	require.WithinDuration(t, time.Now(), manager.lastDesiredStateRead, time.Second)
+	repo.listErr = errors.New("temporary database outage")
+	require.ErrorContains(t, manager.reconcileOnce(context.Background()), "暂时保留")
+	require.Same(t, route, manager.route.Load())
 }
 
 type normalizingPluginClient struct {
