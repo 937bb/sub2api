@@ -120,6 +120,9 @@ func asciiLower(s string) string {
 }
 
 func redactAssignments(s string, count *int) string {
+	if !strings.ContainsAny(s, ":=") {
+		return s
+	}
 	// Go also folds long S and Kelvin sign into ASCII. Keep the full expression
 	// for those uncommon inputs; byte-preserving ASCII folding handles all others.
 	if strings.Contains(s, "ſ") || strings.Contains(s, "K") {
