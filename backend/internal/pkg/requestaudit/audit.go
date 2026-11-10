@@ -89,13 +89,90 @@ func New(dir string, key []byte, maxBytes int64, retention time.Duration) (*Stor
 var bearer = regexp.MustCompile(`(?i)\bBearer\s+[A-Za-z0-9._~+/=-]{12,}`)
 var apiSecret = regexp.MustCompile(`\b(?:sk-(?:proj-|ant-)?|sess-)[A-Za-z0-9_-]{16,}`)
 var jwt = regexp.MustCompile(`\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b`)
+var secretKeyNormalizer = strings.NewReplacer("-", "", "_", "")
+
 var assignedSecret = regexp.MustCompile(`(?i)\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|password|passwd|authorization)\s*[:=]\s*["']?[^\s,"';]{6,}`)
+
+// The original expression remains the authority for matches. Literal searches
+// only locate possible starts, so ordinary code mentioning keys/tokens does not
+// run an unanchored case-folding regexp across the entire conversation.
+var assignedSecretAtStart = regexp.MustCompile(`^` + assignedSecret.String())
+var assignedSecretPrefixes = [...]string{
+	"apikey", "api_key", "api-key", "accesstoken", "access_token", "access-token",
+	"refreshtoken", "refresh_token", "refresh-token", "clientsecret", "client_secret", "client-secret",
+	"password", "passwd", "authorization",
+}
+
+// ASCII folding preserves byte offsets even when the text contains Unicode.
+func asciiLower(s string) string {
+	for i := 0; i < len(s); i++ {
+		if s[i] >= 'A' && s[i] <= 'Z' {
+			b := []byte(s)
+			for j := i; j < len(b); j++ {
+				if b[j] >= 'A' && b[j] <= 'Z' {
+					b[j] += 'a' - 'A'
+				}
+			}
+			return string(b)
+		}
+	}
+	return s
+}
+
+func redactAssignments(s string, count *int) string {
+	// Go also folds long S and Kelvin sign into ASCII. Keep the full expression
+	// for those uncommon inputs; byte-preserving ASCII folding handles all others.
+	if strings.Contains(s, "ſ") || strings.Contains(s, "K") {
+		return assignedSecret.ReplaceAllStringFunc(s, func(string) string { *count++; return "[REDACTED]" })
+	}
+	lower := asciiLower(s)
+	var out strings.Builder
+	copied := 0
+	for start := 0; start < len(lower); start++ {
+		c := lower[start]
+		if c != 'a' && c != 'c' && c != 'p' && c != 'r' {
+			continue
+		}
+		// regexp's \b uses ASCII word characters, including underscore.
+		if start > 0 && isASCIIWord(s[start-1]) {
+			continue
+		}
+		possible := false
+		for _, prefix := range assignedSecretPrefixes {
+			if prefix[0] == c && strings.HasPrefix(lower[start:], prefix) {
+				possible = true
+				break
+			}
+		}
+		if !possible {
+			continue
+		}
+		match := assignedSecretAtStart.FindStringIndex(s[start:])
+		if match == nil {
+			continue
+		}
+		out.WriteString(s[copied:start])
+		out.WriteString("[REDACTED]")
+		copied = start + match[1]
+		start = copied - 1
+		*count++
+	}
+	if copied == 0 {
+		return s
+	}
+	out.WriteString(s[copied:])
+	return out.String()
+}
+
+func isASCIIWord(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_'
+}
 
 func redact(v any, count *int) any {
 	switch x := v.(type) {
 	case map[string]any:
 		for k, val := range x {
-			n := strings.ToLower(strings.NewReplacer("-", "", "_", "").Replace(k))
+			n := strings.ToLower(secretKeyNormalizer.Replace(k))
 			switch n {
 			case "authorization", "proxyauthorization", "cookie", "setcookie", "apikey", "accesstoken", "refreshtoken", "idtoken", "clientsecret", "password", "passwd", "privatekey":
 				x[k] = "[REDACTED]"
@@ -109,7 +186,7 @@ func redact(v any, count *int) any {
 			x[i] = redact(x[i], count)
 		}
 	case string:
-		lower := strings.ToLower(x)
+		lower := asciiLower(x)
 		checks := []struct {
 			pattern  *regexp.Regexp
 			possible bool
@@ -117,17 +194,26 @@ func redact(v any, count *int) any {
 			{bearer, strings.Contains(lower, "bearer")},
 			{apiSecret, strings.Contains(x, "sk-") || strings.Contains(x, "sess-")},
 			{jwt, strings.Contains(x, "eyJ")},
-			{assignedSecret, strings.Contains(lower, "key") || strings.Contains(lower, "token") || strings.Contains(lower, "secret") || strings.Contains(lower, "password") || strings.Contains(lower, "passwd") || strings.Contains(lower, "authorization")},
 		}
 		for _, check := range checks {
 			if check.possible {
 				x = check.pattern.ReplaceAllStringFunc(x, func(string) string { *count++; return "[REDACTED]" })
 			}
 		}
-		return x
+		return redactAssignments(x, count)
 	}
 	return v
 }
+
+// Reuse compression state, but detach each record's buffer before returning it.
+// Reset starts an independent gzip stream; records never share a dictionary.
+var auditGzipWriters = sync.Pool{New: func() any {
+	z, err := gzip.NewWriterLevel(io.Discard, gzip.BestSpeed)
+	if err != nil {
+		panic(err)
+	} // BestSpeed is a compile-time valid level.
+	return z
+}}
 
 // Write records every invocation synchronously, without a lossy in-memory queue.
 // Errors must be counted and reported by the caller; forwarding remains fail-open.
@@ -141,10 +227,10 @@ func (s *Store) Write(record Record, body []byte) error {
 	decoder.UseNumber()
 	if body == nil {
 		record.Omitted = "no_body"
-	} else if !json.Valid(body) {
-		record.Omitted = "non_json_body"
 	} else if err := decoder.Decode(&parsed); err != nil {
-		return err
+		record.Omitted = "non_json_body"
+	} else if err := decoder.Decode(new(any)); err != io.EOF {
+		record.Omitted = "non_json_body"
 	} else {
 		clean := redact(parsed, &record.Redactions)
 		var err error
@@ -158,10 +244,12 @@ func (s *Store) Write(record Record, body []byte) error {
 		return err
 	}
 	var compressed bytes.Buffer
-	z, err := gzip.NewWriterLevel(&compressed, gzip.BestSpeed)
-	if err != nil {
-		return err
-	}
+	z := auditGzipWriters.Get().(*gzip.Writer)
+	z.Reset(&compressed)
+	defer func() {
+		z.Reset(io.Discard)
+		auditGzipWriters.Put(z)
+	}()
 	if _, err = z.Write(plain); err != nil {
 		return err
 	}
