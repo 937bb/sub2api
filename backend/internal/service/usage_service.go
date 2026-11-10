@@ -56,6 +56,7 @@ type UsageStats struct {
 
 // UsageService 使用统计服务
 type UsageService struct {
+	dashboardCache       apiKeyDashboardCache
 	usageRepo            UsageLogRepository
 	userRepo             UserRepository
 	entClient            *dbent.Client
@@ -300,11 +301,7 @@ func (s *UsageService) GetUserDashboardStats(ctx context.Context, userID int64) 
 
 // GetAPIKeyDashboardStats returns dashboard summary stats filtered by API Key.
 func (s *UsageService) GetAPIKeyDashboardStats(ctx context.Context, apiKeyID int64) (*usagestats.UserDashboardStats, error) {
-	stats, err := s.usageRepo.GetAPIKeyDashboardStats(ctx, apiKeyID)
-	if err != nil {
-		return nil, fmt.Errorf("get api key dashboard stats: %w", err)
-	}
-	return stats, nil
+	return s.dashboardCache.get(ctx, apiKeyID, s.usageRepo.GetAPIKeyDashboardStats)
 }
 
 // GetUserUsageTrendByUserID returns per-user usage trend.
